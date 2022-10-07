@@ -96,13 +96,17 @@ variable to be enabled (i.e., `OMNITRACE_USE_ROCPROFILER=ON`).
 Example configuration for hardware counters:
 
 ```console
+# using papi identifiers
+OMNITRACE_PAPI_EVENTS   = PAPI_TOT_CYC PAPI_TOT_INS
 
+# using perf identifiers
+OMNITRACE_PAPI_EVENTS   = perf::INSTRUCTIONS perf::CACHE-REFERENCES perf::CACHE-MISSES
 ```
 
 #### OMNITRACE_PAPI_EVENTS
 
 In order to collect the majority of hardware counters via PAPI, you need to make sure the `/proc/sys/kernel/perf_event_paranoid`
-has a value of less than 2. If you have sudo access, you can use the following command to modify the value:
+has a value <= 2. If you have sudo access, you can use the following command to modify the value:
 
 ```shell
 echo 0 | sudo tee /proc/sys/kernel/perf_event_paranoid

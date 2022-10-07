@@ -71,6 +71,8 @@ pthread_mutex_gotcha::get_hashes()
             for(size_t i = 9; i < 12; ++i)
                 _skip.emplace(i);
         }
+        if(!config::get_trace_thread_barriers()) _skip.emplace(8);
+        if(!config::get_trace_thread_join()) _skip.emplace(12);
         for(size_t i = 0; i < gotcha_capacity; ++i)
         {
             auto&& _id = _data.at(i).tool_id;
@@ -132,8 +134,12 @@ pthread_mutex_gotcha::configure()
                     "pthread_rwlock_unlock" });
         }
 
-        pthread_mutex_gotcha_t::configure(
-            comp::gotcha_config<8, int, pthread_barrier_t*>{ "pthread_barrier_wait" });
+        if(config::get_trace_thread_barriers())
+        {
+            pthread_mutex_gotcha_t::configure(
+                comp::gotcha_config<8, int, pthread_barrier_t*>{
+                    "pthread_barrier_wait" });
+        }
 
         if(config::get_trace_thread_spin_locks())
         {
@@ -149,8 +155,11 @@ pthread_mutex_gotcha::configure()
                     "pthread_spin_unlock" });
         }
 
-        pthread_mutex_gotcha_t::configure(
-            comp::gotcha_config<12, int, pthread_t, void**>{ "pthread_join" });
+        if(config::get_trace_thread_join())
+        {
+            pthread_mutex_gotcha_t::configure(
+                comp::gotcha_config<12, int, pthread_t, void**>{ "pthread_join" });
+        }
     };
 }
 

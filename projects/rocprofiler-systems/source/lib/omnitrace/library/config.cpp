@@ -459,6 +459,14 @@ configure_settings(bool _init)
                              "cause deadlocks with MPI distributions.",
                              false, "backend", "parallelism", "gotcha", "advanced");
 
+    OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_TRACE_THREAD_BARRIERS",
+                             "Enable tracing calls to pthread_barrier functions.", true,
+                             "backend", "parallelism", "gotcha", "advanced");
+
+    OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_TRACE_THREAD_JOIN",
+                             "Enable tracing calls to pthread_join functions.", true,
+                             "backend", "parallelism", "gotcha", "advanced");
+
     OMNITRACE_CONFIG_SETTING(
         bool, "OMNITRACE_SAMPLING_KEEP_INTERNAL",
         "Configure whether the statistical samples should include call-stack entries "
@@ -601,7 +609,6 @@ configure_settings(bool _init)
     _config->get_max_thread_bookmarks()  = 1;
     _config->get_timing_units()          = "sec";
     _config->get_memory_units()          = "MB";
-    _config->get_papi_events()           = "PAPI_TOT_CYC";
 
     // settings native to timemory but critically and/or extensively used by omnitrace
     auto _add_omnitrace_category = [&_config](auto itr) {
@@ -685,21 +692,22 @@ configure_settings(bool _init)
         if(_fparanoid) _fparanoid >> _paranoid;
     }
 
-    if(_paranoid > 1)
+    if(_paranoid > 2)
     {
         OMNITRACE_BASIC_VERBOSE(0,
                                 "/proc/sys/kernel/perf_event_paranoid has a value of %i. "
-                                "Disabling PAPI (requires a value <= 1)...\n",
+                                "Disabling PAPI (requires a value <= 2)...\n",
                                 _paranoid);
-        OMNITRACE_BASIC_VERBOSE(0,
-                                "In order to enable PAPI support, run 'echo N | sudo tee "
-                                "/proc/sys/kernel/perf_event_paranoid' where N is < 2\n");
-        tim::trait::runtime_enabled<comp::papi_common<void>>::set(false);
-        tim::trait::runtime_enabled<comp::papi_array_t>::set(false);
-        tim::trait::runtime_enabled<comp::papi_vector>::set(false);
-        tim::trait::runtime_enabled<comp::cpu_roofline_flops>::set(false);
-        tim::trait::runtime_enabled<comp::cpu_roofline_dp_flops>::set(false);
-        tim::trait::runtime_enabled<comp::cpu_roofline_sp_flops>::set(false);
+        OMNITRACE_BASIC_VERBOSE(
+            0, "In order to enable PAPI support, run 'echo N | sudo tee "
+               "/proc/sys/kernel/perf_event_paranoid' where N is <= 2\n");
+        trait::runtime_enabled<comp::papi_config>::set(false);
+        trait::runtime_enabled<comp::papi_common<void>>::set(false);
+        trait::runtime_enabled<comp::papi_array_t>::set(false);
+        trait::runtime_enabled<comp::papi_vector>::set(false);
+        trait::runtime_enabled<comp::cpu_roofline_flops>::set(false);
+        trait::runtime_enabled<comp::cpu_roofline_dp_flops>::set(false);
+        trait::runtime_enabled<comp::cpu_roofline_sp_flops>::set(false);
         _config->get_papi_events() = std::string{};
     }
     else
@@ -811,6 +819,14 @@ configure_settings(bool _init)
     if(_dl_verbose->second->get_config_updated())
         tim::set_env(std::string{ _dl_verbose->first }, _dl_verbose->second->as_string(),
                      0);
+
+    if(_config->get_papi_events().empty())
+    {
+        trait::runtime_enabled<comp::papi_config>::set(false);
+        trait::runtime_enabled<comp::papi_common<void>>::set(false);
+        trait::runtime_enabled<comp::papi_array_t>::set(false);
+        trait::runtime_enabled<comp::papi_vector>::set(false);
+    }
 
     configure_mode_settings();
     configure_signal_handler();
@@ -1883,6 +1899,20 @@ bool
 get_trace_thread_spin_locks()
 {
     static auto _v = get_config()->find("OMNITRACE_TRACE_THREAD_SPIN_LOCKS");
+    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
+}
+
+bool
+get_trace_thread_barriers()
+{
+    static auto _v = get_config()->find("OMNITRACE_TRACE_THREAD_BARRIERS");
+    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
+}
+
+bool
+get_trace_thread_join()
+{
+    static auto _v = get_config()->find("OMNITRACE_TRACE_THREAD_JOIN");
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
 }
 

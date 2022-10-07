@@ -322,6 +322,12 @@ get_trace_thread_rwlocks();
 bool
 get_trace_thread_spin_locks();
 
+bool
+get_trace_thread_barriers();
+
+bool
+get_trace_thread_join();
+
 std::string
 get_rocm_events();
 }  // namespace config

@@ -98,9 +98,32 @@ get_omnitrace_dl_env()
 inline bool
 get_omnitrace_preload()
 {
-    auto&& _preload      = get_env("OMNITRACE_PRELOAD", true);
+    static bool _v = []() {
+        auto&& _preload      = get_env("OMNITRACE_PRELOAD", true);
+        auto&& _preload_libs = get_env("LD_PRELOAD", std::string{});
+        return (_preload &&
+                _preload_libs.find("libomnitrace-dl.so") != std::string::npos);
+    }();
+    return _v;
+}
+
+inline void
+reset_omnitrace_preload()
+{
     auto&& _preload_libs = get_env("LD_PRELOAD", std::string{});
-    return (_preload && _preload_libs.find("libomnitrace-dl.so") != std::string::npos);
+    if(_preload_libs.find("libomnitrace-dl.so") != std::string::npos)
+    {
+        auto _modified_preload = std::string{};
+        for(const auto& itr : delimit(_preload_libs, ":"))
+        {
+            if(itr.find("libomnitrace") != std::string::npos) continue;
+            _modified_preload += common::join("", ":", itr);
+        }
+        if(!_modified_preload.empty() && _modified_preload.find(':') == 0)
+            _modified_preload = _modified_preload.substr(1);
+
+        setenv("LD_PRELOAD", _modified_preload.c_str(), 1);
+    }
 }
 
 // environment priority:
@@ -940,6 +963,7 @@ omnitrace_preload()
 
     if(_preload)
     {
+        reset_omnitrace_preload();
         omnitrace_preinit_library();
         OMNITRACE_DL_LOG(1, "[%s] invoking %s(%s)\n", __FUNCTION__, "omnitrace_init",
                          ::omnitrace::join(::omnitrace::QuoteStrings{}, ", ", "sampling",
