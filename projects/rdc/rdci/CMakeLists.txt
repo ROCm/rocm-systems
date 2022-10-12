@@ -18,11 +18,6 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-#
-# Minimum version of cmake required
-#
-cmake_minimum_required(VERSION 3.5.0)
-
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
 message("                             Cmake rdci                                 ")
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
@@ -44,45 +39,37 @@ message("--------RSMI Inc Dir: " ${RSMI_INC_DIR})
 message("-------GRPC ROOT Dir: " ${GRPC_ROOT})
 message("")
 
-set(SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}
-                   CACHE STRING "Location of RDC example library source code.")
-# set(CMAKE_INSTALL_PREFIX "/"
-#                                CACHE STRING "Default installation directory.")
-# set(CPACK_PACKAGING_INSTALL_PREFIX "/"
-#                                      CACHE STRING "Default packaging prefix.")
-#
-
 ## Compiler flags
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -m64")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -msse -msse2 -std=c++11 -pthread ")
 # Use this instead of above for 32 bit
 # set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -m32")
 
-if ("${CMAKE_BUILD_TYPE}" STREQUAL Release)
+if("${CMAKE_BUILD_TYPE}" STREQUAL Release)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O2 -s")
-else ()
+else()
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -ggdb -O0 -DDEBUG")
-endif ()
+endif()
 
-set(SRC_DIR "${PROJECT_SOURCE_DIR}/rdci/src")
-set(INC_DIR "${PROJECT_SOURCE_DIR}/rdci/include")
+set(SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src")
+set(INC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
 set(LIB_BOOSTRAP_DIR "${PROJECT_BINARY_DIR}/rdc_libs")
 
 include_directories(${INC_DIR} ${PROJECT_SOURCE_DIR}/include
-        "${GRPC_ROOT}/include"
-        ${PROJECT_SOURCE_DIR})
+    "${GRPC_ROOT}/include"
+    ${PROJECT_SOURCE_DIR})
 
-set(RDCI_SRC_LIST "${SRC_DIR}/rdci.cc")
-set(RDCI_SRC_LIST ${RDCI_SRC_LIST}  "${SRC_DIR}/RdciDiscoverySubSystem.cc")
-set(RDCI_SRC_LIST ${RDCI_SRC_LIST}  "${SRC_DIR}/RdciSubSystem.cc")
-set(RDCI_SRC_LIST ${RDCI_SRC_LIST}  "${SRC_DIR}/RdciGroupSubSystem.cc")
-set(RDCI_SRC_LIST ${RDCI_SRC_LIST}  "${SRC_DIR}/RdciFieldGroupSubSystem.cc")
-set(RDCI_SRC_LIST ${RDCI_SRC_LIST}  "${SRC_DIR}/RdciDmonSubSystem.cc")
-set(RDCI_SRC_LIST ${RDCI_SRC_LIST}  "${SRC_DIR}/RdciDiagSubSystem.cc")
-set(RDCI_SRC_LIST ${RDCI_SRC_LIST}  "${SRC_DIR}/RdciStatsSubSystem.cc")
-set(RDCI_SRC_LIST ${RDCI_SRC_LIST}  "${PROJECT_SOURCE_DIR}/common/rdc_utils.cc")
-set(RDCI_SRC_LIST ${RDCI_SRC_LIST}
-                         "${PROJECT_SOURCE_DIR}/common/rdc_fields_supported.cc")
+set(RDCI_SRC_LIST
+    "${COMMON_DIR}/rdc_fields_supported.cc"
+    "${COMMON_DIR}/rdc_utils.cc"
+    "${SRC_DIR}/RdciDiagSubSystem.cc"
+    "${SRC_DIR}/RdciDiscoverySubSystem.cc"
+    "${SRC_DIR}/RdciDmonSubSystem.cc"
+    "${SRC_DIR}/RdciFieldGroupSubSystem.cc"
+    "${SRC_DIR}/RdciGroupSubSystem.cc"
+    "${SRC_DIR}/RdciStatsSubSystem.cc"
+    "${SRC_DIR}/RdciSubSystem.cc"
+    "${SRC_DIR}/rdci.cc")
 message("RDCI_SRC_LIST=${RDCI_SRC_LIST}")
 set(RDCI_EXE "rdci")
 
@@ -91,27 +78,15 @@ link_directories(${LIB_BOOSTRAP_DIR} "${GRPC_ROOT}/lib" "${GRPC_ROOT}/lib64")
 add_executable(${RDCI_EXE} "${RDCI_SRC_LIST}")
 
 ## RUNPATH should help to run "rdci" without the usage of ldconfig
-if (DEFINED ENV{ROCM_RPATH})
-   set(RDC_RUNPATH "\$ORIGIN:\$ORIGIN/../lib:\$ORIGIN/../lib64:\$ORIGIN/../lib/rdc:\$ORIGIN/../lib64/rdc")
-   set(GRPC_RUNPATH "\$ORIGIN/../grpc/lib:\$ORIGIN/../grpc/lib64:\$ORIGIN/../lib/rdc/grpc/lib:\$ORIGIN/../lib/rdc/grpc/lib64")
-   set(CMAKE_EXE_LINKER_FLAGS "-Wl,--enable-new-dtags -Wl,--rpath,${RDC_RUNPATH}:${GRPC_RUNPATH} -Wl,--no-as-needed -Wl,-z,origin")
-   set(CMAKE_SKIP_BUILD_RPATH TRUE)
-   set(CMAKE_BUILD_WITH_INSTALL_RPATH TRUE)
-   set(CMAKE_SKIP_RPATH TRUE)
+if(DEFINED ENV{ROCM_RPATH})
+    set(CMAKE_EXE_LINKER_FLAGS "-Wl,--enable-new-dtags -Wl,--rpath,${LIB_RUNPATH} -Wl,--no-as-needed -Wl,-z,origin")
+    set(CMAKE_SKIP_BUILD_RPATH TRUE)
+    set(CMAKE_BUILD_WITH_INSTALL_RPATH TRUE)
+    set(CMAKE_SKIP_RPATH TRUE)
 
- # Run path can only include direct refer library, include the indirect libs
- # required by gRPC
- # Get all absl library and re2
- file(GLOB grpc_libs "${GRPC_ROOT}/lib*/lib*.so")
- foreach(src_file ${grpc_libs})
-    get_filename_component(lib_name "${src_file}" NAME_WLE)
-    STRING(REGEX REPLACE "^lib" "" lib_name ${lib_name})  # strip out lib
-    if(lib_name MATCHES "absl.*" OR lib_name STREQUAL "re2")
-      set(RDCD_EXTRA_LIB ${RDCD_EXTRA_LIB} ${lib_name})
-    endif()
- endforeach()
- # Set other library
- set(RDCD_EXTRA_LIB ${RDCD_EXTRA_LIB} address_sorting gpr upb ssl crypto)
+    # Set other library
+    set(RDCD_EXTRA_LIB ${RDCD_EXTRA_LIB} address_sorting gpr upb ssl crypto
+        gRPC::grpc++)
 endif()
 
 target_link_libraries(${RDCI_EXE} ${RDCD_EXTRA_LIB} pthread dl rdc_bootstrap)
@@ -119,10 +94,10 @@ target_link_libraries(${RDCI_EXE} ${RDCD_EXTRA_LIB} pthread dl rdc_bootstrap)
 
 ## Add the install directives for the rdci executable
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/${RDCI_EXE}
-        PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE
-                                                    WORLD_READ WORLD_EXECUTE
-        COMPONENT ${CLIENT_COMPONENT}
-        DESTINATION  ${RDC_CLIENT_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR})
+    PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE
+    WORLD_READ WORLD_EXECUTE
+    COMPONENT ${CLIENT_COMPONENT}
+    DESTINATION ${RDC_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR})
 
 
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")

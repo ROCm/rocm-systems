@@ -18,11 +18,6 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-#
-# Minimum version of cmake required
-#
-cmake_minimum_required(VERSION 3.5.0)
-
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
 message("                       Cmake Client Lib                            ")
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
@@ -33,11 +28,11 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -msse -msse2 -std=c++11 ")
 # Use this instead of above for 32 bit
 # set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -m32")
 
-if ("${CMAKE_BUILD_TYPE}" STREQUAL Release)
+if("${CMAKE_BUILD_TYPE}" STREQUAL Release)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O2")
-else ()
+else()
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -ggdb -O0 -DDEBUG")
-endif ()
+endif()
 
 
 # Required Defines first:
@@ -54,28 +49,22 @@ message("----------Proj Exe Dir: " ${PROJECT_BINARY_DIR}/bin)
 message("----------RSMI Lib Dir: " ${RSMI_LIB_DIR})
 message("----------RSMI Inc Dir: " ${RSMI_INC_DIR})
 message("---------GRPC Root Dir: " ${GRPC_ROOT})
-message("-Client Install Prefix: " ${RDC_CLIENT_INSTALL_PREFIX})
+message("-Client Install Prefix: " ${RDC_INSTALL_PREFIX})
 message("")
 
-## Set default module path if not already set
-if(NOT DEFINED CMAKE_MODULE_PATH)
-    set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules/")
-endif()
 ## Include common cmake modules
-# TODO see if we really need this in the end
 include(utils)
 
 set(CLIENT_LIB "rdc_client_smi")
-set(RDC "rdc")
-set(SRC_DIR "${PROJECT_SOURCE_DIR}/client/src")
-set(RDC_CLIENT_INC_DIR "${PROJECT_SOURCE_DIR}/client/include/rdc")
+set(SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src")
+set(INC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include/rdc")
 
 ################# Determine the library version #########################
 ## Setup the SO version based on git tags.
 set(SO_VERSION_GIT_TAG_PREFIX "rdc_so_ver")
 
 # provide git to utilities
-find_program (GIT NAMES git)
+find_program(GIT NAMES git)
 
 # Debian package specific variables
 # Set a default value for the package version
@@ -85,118 +74,86 @@ get_version_from_tag("1.0.0.0" ${SO_VERSION_GIT_TAG_PREFIX} GIT)
 set(SO_VERSION_STRING "${VERSION_MAJOR}.${VERSION_MINOR}")
 message("SOVERSION: ${SO_VERSION_STRING}")
 
-## Define default variable and variables for the optional build target
-##  RDC_lib-dev
-set(SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}
-                   CACHE STRING "Location of RDC client library source code.")
-set(CPACK_GENERATOR "DEB;RPM"  CACHE STRING "Default packaging generators.")
-
-if (NOT DEFINED CPACK_PACKAGE_VENDOR)
-    set(CPACK_PACKAGE_VENDOR "Advanced Micro Devices, Inc.")
-endif()
-
-if (NOT DEFINED CPACK_PACKAGE_CONTACT)
-    set(CPACK_PACKAGE_CONTACT "Advanced Micro Devices, Inc.")
-endif()
-
-if (NOT DEFINED CPACK_PACKAGE_DESCRIPTION_SUMMARY)
-set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
-                 "Radeon Data Center Tools")
-endif()
-
-if (NOT RDC_PACKAGE)
-   set(RDC_PACKAGE RDC_lib64)
-endif()
-
-set(CPACK_PACKAGE_FILE_NAME "${RDC_PACKAGE}-${PKG_VERSION_STR}")
-## Verbose output.
-set(CMAKE_VERBOSE_MAKEFILE on)
+set(CPACK_PACKAGE_FILE_NAME "${RDC_PACKAGE}-${VERSION_STRING}")
 
 # TODO delete these if not used
 file(GLOB PROTOBUF_GENERATED_INCLUDES "${PROTOB_OUT_DIR}/*.h")
 file(GLOB PROTOBUF_GENERATED_SRCS "${PROTOB_OUT_DIR}/*.cc")
 
-set(CLIENT_LIB_SRC_LIST "${SRC_DIR}/rdc_client.cc")
-set(CLIENT_LIB_SRC_LIST ${CLIENT_LIB_SRC_LIST}  "${SRC_DIR}/rdc_client_main.cc")
-set(CLIENT_LIB_SRC_LIST ${CLIENT_LIB_SRC_LIST}  "${SRC_DIR}/rdc_client_utils.cc")
-set(CLIENT_LIB_SRC_LIST ${CLIENT_LIB_SRC_LIST} "${PROTOBUF_GENERATED_SRCS}")
-set(CLIENT_LIB_SRC_LIST ${CLIENT_LIB_SRC_LIST}
-                           "${PROJECT_SOURCE_DIR}/common/rdc_utils.cc")
+set(CLIENT_LIB_SRC_LIST "${SRC_DIR}/rdc_client.cc"
+    "${SRC_DIR}/rdc_client_main.cc"
+    "${SRC_DIR}/rdc_client_utils.cc"
+    "${PROTOBUF_GENERATED_SRCS}"
+    "${COMMON_DIR}/rdc_utils.cc")
 message("CLIENT_LIB_SRC_LIST=${CLIENT_LIB_SRC_LIST}")
 
-set(CLIENT_LIB_INC_LIST "${RDC_CLIENT_INC_DIR}/rdc_client.h")
-set(CLIENT_LIB_INC_LIST ${CLIENT_LIB_INC_LIST}
-                                      "${RDC_CLIENT_INC_DIR}/rdc_exception.h")
-set(CLIENT_LIB_INC_LIST ${CLIENT_LIB_INC_LIST}
-                                    "${RDC_CLIENT_INC_DIR}/rdc_client_main.h")
-set(CLIENT_LIB_INC_LIST ${CLIENT_LIB_INC_LIST}
-                                   "${PROJECT_SOURCE_DIR}/common/rdc_utils.h")
+set(CLIENT_LIB_INC_LIST "${INC_DIR}/rdc_client.h"
+    "${INC_DIR}/rdc_exception.h"
+    "${INC_DIR}/rdc_client_main.h"
+    "${COMMON_DIR}/rdc_utils.h")
 
-link_directories("${GRPC_ROOT}/lib" "${GRPC_ROOT}/lib64")
 add_library(${CLIENT_LIB} SHARED ${CLIENT_LIB_SRC_LIST} ${CLIENT_LIB_INC_LIST})
-target_link_libraries(${CLIENT_LIB} pthread rt grpc grpc++ grpc++_reflection
-                                                                  dl protobuf)
+target_link_libraries(${CLIENT_LIB} pthread rt gRPC::grpc++ dl)
 target_include_directories(${CLIENT_LIB} PRIVATE
-                                         "${PROJECT_SOURCE_DIR}"
-                                         "${PROJECT_SOURCE_DIR}/include"
-                                         "${CMAKE_CURRENT_SOURCE_DIR}/include"
-                                         "${PROTOB_OUT_DIR}"
-                                         "${GRPC_ROOT}/include"
-                                         "${RSMI_INC_DIR}")
+    "${PROJECT_SOURCE_DIR}"
+    "${PROJECT_SOURCE_DIR}/include"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include"
+    "${PROTOB_OUT_DIR}"
+    "${RSMI_INC_DIR}")
 # TODO: set the properties for the library once we have one
 ## Set the VERSION and SOVERSION values
 set_property(TARGET ${CLIENT_LIB} PROPERTY
-             SOVERSION "${VERSION_MAJOR}")
+    SOVERSION "${VERSION_MAJOR}")
 set_property(TARGET ${CLIENT_LIB} PROPERTY
-             VERSION "${SO_VERSION_STRING}")
+    VERSION "${SO_VERSION_STRING}")
 
 ## If the library is a release, strip the target library
-if ("${CMAKE_BUILD_TYPE}" STREQUAL Release)
+if("${CMAKE_BUILD_TYPE}" STREQUAL Release)
     add_custom_command(
-          TARGET ${CLIENT_LIB}
-          POST_BUILD COMMAND ${CMAKE_STRIP} lib${CLIENT_LIB}.so)
-endif ()
+        TARGET ${CLIENT_LIB}
+        POST_BUILD COMMAND ${CMAKE_STRIP} lib${CLIENT_LIB}.so)
+endif()
 
 ## Add the install directives for the runtime library.
 install(TARGETS ${CLIENT_LIB}
-        LIBRARY DESTINATION  ${RDC_CLIENT_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/${RDC}
-               COMPONENT ${CLIENT_COMPONENT})
-install(DIRECTORY ${SOURCE_DIR}/authentication
-             DESTINATION  ${RDC_CLIENT_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBEXECDIR}/${RDC}
-                                         COMPONENT ${CLIENT_COMPONENT})
+    LIBRARY DESTINATION ${RDC_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/${RDC}
+    COMPONENT ${CLIENT_COMPONENT})
+install(DIRECTORY ${PROJECT_SOURCE_DIR}/authentication
+    DESTINATION ${RDC_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBEXECDIR}/${RDC}
+    COMPONENT ${CLIENT_COMPONENT})
 
 # Generate Doxygen documentation for client api manual
 find_package(Doxygen)
 find_package(LATEX COMPONENTS PDFLATEX)
-if (DOXYGEN_FOUND AND LATEX_FOUND)
-  set (RDC_MANUAL_NAME "RDC_API_Manual")
-  message("Building ${RDC_MANUAL_NAME}.pdf")
-  configure_file(${PROJECT_SOURCE_DIR}/docs/rdc_doxygen.cfg
-                                   ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile @ONLY)
+if(DOXYGEN_FOUND AND LATEX_FOUND)
+    set(RDC_MANUAL_NAME "RDC_API_Manual")
+    message("Building ${RDC_MANUAL_NAME}.pdf")
+    configure_file(${PROJECT_SOURCE_DIR}/docs/rdc_doxygen.cfg
+        ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile @ONLY)
 
-  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/latex/refman.tex
+    add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/latex/refman.tex
         COMMAND ${DOXYGEN_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile
         DEPENDS ${PROJECT_SOURCE_DIR}/docs/rdc_doxygen.cfg
-                "${PROJECT_SOURCE_DIR}/include/rdc/rdc.h"
-         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
-  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/latex/refman.pdf
-         COMMAND make  > /dev/null
-         COMMAND cp  ${CMAKE_CURRENT_BINARY_DIR}/latex/refman.pdf
-                      ${PROJECT_SOURCE_DIR}/docs/${RDC_MANUAL_NAME}_new.pdf
-         DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/latex/refman.tex
-         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/latex)
+        "${PROJECT_SOURCE_DIR}/include/rdc/rdc.h"
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+    add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/latex/refman.pdf
+        COMMAND make > /dev/null
+        COMMAND cp ${CMAKE_CURRENT_BINARY_DIR}/latex/refman.pdf
+        ${PROJECT_SOURCE_DIR}/docs/${RDC_MANUAL_NAME}_new.pdf
+        DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/latex/refman.tex
+        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/latex)
 
-  add_custom_target(docs DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/latex/refman.pdf)
+    add_custom_target(docs DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/latex/refman.pdf)
 
-  add_dependencies(${CLIENT_LIB} docs)
-  install(FILES ${CMAKE_CURRENT_BINARY_DIR}/latex/refman.pdf
-   DESTINATION ${RDC_CLIENT_INSTALL_PREFIX}/${CMAKE_INSTALL_DOCDIR}
-                COMPONENT ${CLIENT_COMPONENT} RENAME ${RDC_MANUAL_NAME}.pdf)
-  install(FILES ${PROJECT_SOURCE_DIR}/README.md
-                       DESTINATION  ${RDC_CLIENT_INSTALL_PREFIX}/${CMAKE_INSTALL_DOCDIR}
-                          COMPONENT ${CLIENT_COMPONENT})
+    add_dependencies(${CLIENT_LIB} docs)
+    install(FILES ${CMAKE_CURRENT_BINARY_DIR}/latex/refman.pdf
+        DESTINATION ${RDC_INSTALL_PREFIX}/${CMAKE_INSTALL_DOCDIR}
+        COMPONENT ${CLIENT_COMPONENT} RENAME ${RDC_MANUAL_NAME}.pdf)
+    install(FILES ${PROJECT_SOURCE_DIR}/README.md
+        DESTINATION ${RDC_INSTALL_PREFIX}/${CMAKE_INSTALL_DOCDIR}
+        COMPONENT ${CLIENT_COMPONENT})
 else()
-  message("Doxygen or Latex is not found. Will not generate documents.")
+    message("Doxygen or Latex is not found. Will not generate documents.")
 endif(DOXYGEN_FOUND AND LATEX_FOUND)
 
 

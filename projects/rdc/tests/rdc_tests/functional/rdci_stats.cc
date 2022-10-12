@@ -25,7 +25,8 @@ THE SOFTWARE.
 
 #include <iostream>
 
-#include "gtest/gtest.h"
+#include <gtest/gtest.h>
+
 #include "rdc_tests/functional/rdci_stats.h"
 #include "rdc_tests/test_common.h"
 #include "rdc/rdc.h"
