@@ -457,12 +457,18 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
         rec_vals.append(corr_id)
         # extracting/converting stream id
         (stream_id, stream_found) = get_field(record_args, 'stream')
-        if stream_found == 0:
-          stream_id = 0
+        if stream_found:
+              stream_id = get_stream_index(stream_id)
+              (rec_vals[5], found) = set_field(record_args, 'stream', stream_id)
+              if found == 0: fatal('set_field() failed for "stream", args: "' + record_args + '"')
         else:
-          stream_id = get_stream_index(stream_id)
-          (rec_vals[5], found) = set_field(record_args, 'stream', stream_id)
-          if found == 0: fatal('set_field() failed for "stream", args: "' + record_args + '"')
+              (stream_id, stream_found) = get_field(record_args, 'hStream')
+              if stream_found:
+                stream_id = get_stream_index(stream_id)
+                (rec_vals[5], found) = set_field(record_args, 'hStream', stream_id)
+                if found == 0: fatal('set_field() failed for "stream", args: "' + record_args + '"')
+              else :
+                stream_id = 0
 
         if hip_strm_cr_event_ptrn.match(record_name):
           hip_streams.append(stream_id)
