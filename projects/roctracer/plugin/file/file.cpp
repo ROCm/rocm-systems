@@ -243,8 +243,8 @@ class file_plugin_t {
                      << ((record->op == HSA_API_ID_hsa_shut_down) ? record->begin_ns
                                                                   : record->end_ns)
                      << " " << record->process_id << ":" << record->thread_id << " "
-                     << hsa_api_data_pair_t(record->op, *data) << " :" << data->correlation_id
-                     << std::endl;
+                     << hsa_api_data_pair_t(record->op, *data) << " :" << std::dec
+                     << data->correlation_id << std::endl;
         break;
       }
       case ACTIVITY_DOMAIN_HIP_API: {
@@ -265,7 +265,7 @@ class file_plugin_t {
         *output_file << std::dec << record->begin_ns << ":" << record->end_ns << " "
                      << record->process_id << ":" << record->thread_id << " "
                      << hipApiString((hip_api_id_t)record->op, data) << kernel_name << " :"
-                     << data->correlation_id << std::endl;
+                     << std::dec << data->correlation_id << std::endl;
         break;
       }
       default:

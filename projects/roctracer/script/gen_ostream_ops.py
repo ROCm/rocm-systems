@@ -53,7 +53,20 @@ LICENSE = \
 
 header_basic = \
 'namespace detail {\n' + \
-'template <typename T>\n' + \
+'  inline static void print_escaped_string(std::ostream& out, const char *v, size_t len) {\n' + \
+'    out << \'"\'; \n' + \
+'    for (size_t i = 0; i < len && v[i]; ++i) {\n' + \
+'      if (std::isprint((unsigned char)v[i])) std::operator<<(out, v[i]);\n' + \
+'      else {\n' + \
+'        std::ios_base::fmtflags flags(out.flags());\n' + \
+'        out << "\\\\x" << std::setfill(\'0\') << std::setw(2) << std::hex << (unsigned int)(unsigned char)v[i];\n' + \
+'        out.flags(flags);\n' + \
+'      }\n' + \
+'    }\n' + \
+'    out << \'"\'; \n' + \
+'  }\n' + \
+'\n' + \
+'  template <typename T>\n' + \
 '  inline static std::ostream& operator<<(std::ostream& out, const T& v) {\n' + \
 '     using std::operator<<;\n' + \
 '     static bool recursion = false;\n' + \
@@ -66,6 +79,15 @@ header_basic = \
 '\n' + \
 '  inline static std::ostream &operator<<(std::ostream &out, const char &v) {\n' + \
 '    out << (unsigned char)v;\n' + \
+'    return out;\n  }\n' + \
+'\n' + \
+'  template <size_t N>\n' + \
+'  inline static std::ostream &operator<<(std::ostream &out, const char (&v)[N]) {\n' + \
+'    print_escaped_string(out, v, N);\n' + \
+'    return out;\n  }\n' + \
+'\n' + \
+'  inline static std::ostream &operator<<(std::ostream &out, const char *v) {\n' + \
+'    print_escaped_string(out, v, strlen(v));\n' + \
 '    return out;\n  }\n'
 
 structs_analyzed = {}
@@ -120,9 +142,9 @@ def process_struct(file_handle, cppHeader_struct, cppHeader, parent_hier_name, a
             indent = ""
             str += "    if (std::string(\"" + cppHeader_struct + "::" + name + "\").find(" + apiname.upper() + "_structs_regex" + ") != std::string::npos)   {\n"
             indent = "    "
-            str += indent + "  roctracer::" + apiname.lower() + "_support::detail::operator<<(out, \"" + name + "=\");\n"
+            str += indent + "  std::operator<<(out, \"" + name + "=\");\n"
             str += indent + "  roctracer::" + apiname.lower() + "_support::detail::operator<<(out, v." + name + ");\n"
-            str += indent + "  roctracer::" + apiname.lower() + "_support::detail::operator<<(out, \", \");\n"
+            str += indent + "  std::operator<<(out, \", \");\n"
             str += "    }\n"
             if "void" not in mtype:
                 global_str += str
@@ -166,7 +188,9 @@ def gen_cppheader(infilepath, outfilepath, rank):
         '\n' + \
         '#ifdef __cplusplus\n' + \
         '#include <iostream>\n' + \
-        '#include <string>\n'
+        '#include <iomanip>\n' + \
+        '#include <string>\n' + \
+        '#include <cstring>\n'
 
       output_filename_h.write(header_s)
       output_filename_h.write('\n')
