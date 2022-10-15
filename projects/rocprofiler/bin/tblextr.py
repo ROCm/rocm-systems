@@ -431,7 +431,8 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
 
       mfixformat = ptrn_fixformat.match(record)
       if mfixformat: #replace '=' in args with parentheses
-        reformated_args = kernel_arg + mfixformat.group(2).replace('=','(').replace(',',')')+')'
+        reformated_args = kernel_arg + mfixformat.group(2).replace('=','(').replace(',',')') \
+                                         .replace('\\', "\\\\").replace('\"', "\\\"")+')'
         record = mfixformat.group(1) + '( ' + reformated_args + ')'
 
       m = ptrn_val.match(record)
