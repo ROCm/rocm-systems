@@ -2181,7 +2181,7 @@ main(int argc, char** argv)
             TIMEMORY_PIPE* ldd = tim::popen::popen(cmdv0.c_str());
             tim::set_env("LD_TRACE_LOADED_OBJECTS", "0", 1);
 
-            strvec_t linked_libraries = tim::popen::read_fork(ldd);
+            strvec_t linked_libraries = tim::popen::read_ldd_fork(ldd);
 
             auto perr = tim::popen::pclose(ldd);
             if(perr != 0) perror("Error in omnitrace_fork");
@@ -2271,10 +2271,10 @@ main(int argc, char** argv)
 
     // cleanup
     for(int i = 0; i < argc; ++i)
-        delete[] _argv[i];
+        free(_argv[i]);
     delete[] _argv;
     for(int i = 0; i < _cmdc; ++i)
-        delete[] _cmdv[i];
+        free(_cmdv[i]);
     delete[] _cmdv;
 
     verbprintf(0, "End of omnitrace\n");

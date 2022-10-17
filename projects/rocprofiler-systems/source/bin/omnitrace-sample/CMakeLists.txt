@@ -7,6 +7,7 @@
 add_executable(omnitrace-sample ${CMAKE_CURRENT_LIST_DIR}/omnitrace-sample.cpp
                                 ${CMAKE_CURRENT_LIST_DIR}/impl.cpp)
 
+target_compile_definitions(omnitrace-sample PRIVATE TIMEMORY_CMAKE=1)
 target_include_directories(omnitrace-sample PRIVATE ${CMAKE_CURRENT_LIST_DIR})
 target_link_libraries(
     omnitrace-sample

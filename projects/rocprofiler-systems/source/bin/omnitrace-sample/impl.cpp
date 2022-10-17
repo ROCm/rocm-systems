@@ -43,6 +43,14 @@
 #include <unistd.h>
 #include <vector>
 
+#if !defined(OMNITRACE_USE_ROCTRACER)
+#    define OMNITRACE_USE_ROCTRACER 0
+#endif
+
+#if !defined(OMNITRACE_USE_ROCPROFILER)
+#    define OMNITRACE_USE_ROCPROFILER 0
+#endif
+
 namespace color = tim::log::color;
 using tim::log::stream;
 using namespace timemory::join;
@@ -231,8 +239,12 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
 %{INDENT}%    1     do not modify how ROCm is notified about kernel completion)";
 
     auto _realtime_reqs = (get_env("HSA_ENABLE_INTERRUPT", std::string{}, false).empty())
-                              ? std::initializer_list<std::string>{ "hsa-interrupt" }
-                              : std::initializer_list<std::string>{};
+                              ? std::vector<std::string>{ "hsa-interrupt" }
+                              : std::vector<std::string>{};
+
+#if OMNITRACE_USE_ROCTRACER == 0 && OMNITRACE_USE_ROCPROFILER == 0
+    _realtime_reqs.clear();
+#endif
 
     const auto* _trace_policy_desc =
         R"(Policy for new data when the buffer size limit is reached:
@@ -516,7 +528,7 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
 
     parser.add_argument({ "--realtime" }, _realtime_desc)
         .min_count(0)
-        .requires(_realtime_reqs)
+        .requires(std::move(_realtime_reqs))
         .action([&](parser_t& p) {
             auto _v = p.get<std::deque<std::string>>("realtime");
             update_env(_env, "OMNITRACE_SAMPLING_REALTIME", true);
@@ -652,10 +664,30 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
             update_env(_env, "HSA_ENABLE_INTERRUPT", p.get<int>("hsa-interrupt"));
         });
 
-    auto  _args = parser.parse_known_args(argc, argv);
-    auto  _cerr = std::get<0>(_args);
-    auto  _cmdc = std::get<1>(_args);
-    auto* _cmdv = std::get<2>(_args);
+    auto _inpv = std::vector<char*>{};
+    auto _outv = std::vector<char*>{};
+    bool _hash = false;
+    for(int i = 0; i < argc; ++i)
+    {
+        if(_hash)
+        {
+            _outv.emplace_back(argv[i]);
+        }
+        else if(std::string_view{ argv[i] } == "--")
+        {
+            _hash = true;
+        }
+        else
+        {
+            _inpv.emplace_back(argv[i]);
+        }
+    }
+
+    auto _cerr = parser.parse_args(_inpv.size(), _inpv.data());
+    if(help_check(parser, argc, argv))
+        help_action(parser);
+    else if(_cerr)
+        throw std::runtime_error(_cerr.what());
 
     if(parser.exists("realtime") && !parser.exists("cputime"))
         update_env(_env, "OMNITRACE_SAMPLING_CPUTIME", false);
@@ -663,14 +695,5 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
         throw std::runtime_error(
             "Error! '--profile' argument conflicts with '--flat-profile' argument");
 
-    if(help_check(parser, _cmdc, _cmdv)) help_action(parser);
-
-    if(_cerr) throw std::runtime_error(_cerr.what());
-
-    std::vector<char*> _argv = {};
-    _argv.reserve(_cmdc);
-    for(int i = 1; i < _cmdc; ++i)
-        _argv.emplace_back(_cmdv[i]);
-
-    return _argv;
+    return _outv;
 }

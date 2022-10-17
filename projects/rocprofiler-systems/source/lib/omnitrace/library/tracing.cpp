@@ -21,6 +21,8 @@
 // SOFTWARE.
 
 #include "library/tracing.hpp"
+#include "library/config.hpp"
+#include "library/state.hpp"
 #include "library/thread_info.hpp"
 
 namespace omnitrace
@@ -67,8 +69,9 @@ void
 record_thread_start_time()
 {
     static thread_local std::once_flag _once{};
-    std::call_once(_once,
-                   []() { thread_info::set_start(comp::wall_clock::record(), true); });
+    std::call_once(_once, []() {
+        thread_info::set_start(comp::wall_clock::record(), get_mode() != Mode::Sampling);
+    });
 }
 }  // namespace tracing
 }  // namespace omnitrace

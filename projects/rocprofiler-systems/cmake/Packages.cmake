@@ -264,7 +264,7 @@ if(OMNITRACE_BUILD_DYNINST)
         RELATIVE_PATH external/dyninst
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
         REPO_URL https://github.com/jrmadsen/dyninst.git
-        REPO_BRANCH formatting)
+        REPO_BRANCH omnitrace)
 
     set(DYNINST_OPTION_PREFIX ON)
     set(DYNINST_BUILD_DOCS OFF)

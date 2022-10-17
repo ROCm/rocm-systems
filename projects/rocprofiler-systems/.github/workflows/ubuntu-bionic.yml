@@ -138,7 +138,7 @@ jobs:
 
     - name: CTest Artifacts
       if: success() || failure()
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v3
       with:
         name: ctest-${{ github.job }}-log
         path: |
@@ -146,7 +146,7 @@ jobs:
 
     - name: Data Artifacts
       if: success() || failure()
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v3
       with:
         name: data-${{ github.job }}-files
         path: |

@@ -56,7 +56,7 @@ jobs:
             static-libstdcxx: 'OFF'
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
 
     - name: Install Packages
       timeout-minutes: 10
@@ -66,19 +66,25 @@ jobs:
         add-apt-repository -y ppa:ubuntu-toolchain-r/test &&
         apt-get update &&
         apt-get upgrade -y &&
-        apt-get install -y build-essential m4 autoconf libtool python3-pip libiberty-dev clang libomp-dev libmpich-dev mpich ${{ matrix.compiler }} &&
+        apt-get install -y build-essential m4 autoconf libtool python3-pip libiberty-dev clang libomp-dev libmpich-dev mpich environment-modules ${{ matrix.compiler }} &&
         python3 -m pip install --upgrade pip &&
         python3 -m pip install numpy &&
         python3 -m pip install perfetto &&
         python3 -m pip install 'cmake==3.16.3' &&
         for i in 6 7 8 9 10; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy perfetto dataclasses; done
 
+    - name: Test Environment Modules
+      timeout-minutes: 15
+      shell: bash
+      run: |
+        set -v
+        source /usr/share/modules/init/$(basename ${SHELL})
+        module avail
+
     - name: Configure Env
       run:
         echo "CC=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')" >> $GITHUB_ENV &&
-        echo "CXX=${{ matrix.compiler }}" >> $GITHUB_ENV &&
-        echo "/opt/omnitrace/bin:${HOME}/.local/bin" >> $GITHUB_PATH &&
-        echo "LD_LIBRARY_PATH=/opt/omnitrace/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
+        echo "CXX=${{ matrix.compiler }}" >> $GITHUB_ENV
 
     - name: Configure CMake
       timeout-minutes: 10
@@ -117,34 +123,28 @@ jobs:
 
     - name: Test
       timeout-minutes: 45
-      run:
-        cd build &&
-        ldd ./bin/omnitrace &&
-        ./bin/omnitrace --help &&
-        ctest -V -N -O omnitrace-ctest-${{ github.job }}-commands.log &&
+      shell: bash
+      run: |
+        cd build
+        source /usr/share/modules/init/$(basename ${SHELL})
+        module use ./share/modulefiles
+        module avail
+        module load omnitrace
+        echo $(which omnitrace)
+        ldd $(which omnitrace)
+        omnitrace --help
+        ctest -V -N -O omnitrace-ctest-${{ github.job }}-commands.log
         ctest -V --output-log omnitrace-ctest-${{ github.job }}.log --stop-on-failure
 
     - name: Test Install
-      timeout-minutes: 10
+      timeout-minutes: 15
+      shell: bash
       run: |
-        set -v
-        export OMNITRACE_DEBUG=ON
-        which omnitrace-avail
-        ldd $(which omnitrace-avail)
-        omnitrace-avail --help
-        omnitrace-avail -a
-        which omnitrace-critical-trace
-        ldd $(which omnitrace-critical-trace)
-        which omnitrace
-        ldd $(which omnitrace)
-        omnitrace --help
-        omnitrace -e -v 1 -o ls.inst --simulate -- ls
-        for i in $(find omnitrace-ls.inst-output -type f); do echo -e "\n\n --> ${i} \n\n"; cat ${i}; done
-        omnitrace -e -v 1 -o ls.inst -- ls
-        ./ls.inst
-        omnitrace -e -v 1 --simulate -- ls
-        for i in $(find omnitrace-ls-output -type f); do echo -e "\n\n --> ${i} \n\n"; cat ${i}; done
-        omnitrace -e -v 1 -- ls
+        source /usr/share/modules/init/$(basename ${SHELL})
+        module use /opt/omnitrace/share/modulefiles
+        module avail
+        module load omnitrace
+        ./scripts/test-install.sh --test-omnitrace{,-avail,-sample,-rewrite,-runtime,-critical-trace}=1 --test-omnitrace-python=${{ matrix.python }}
 
     - name: Test User API
       timeout-minutes: 10
@@ -154,7 +154,7 @@ jobs:
 
     - name: CTest Artifacts
       if: success() || failure()
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v3
       with:
         name: ctest-${{ github.job }}-log
         path: |
@@ -162,7 +162,7 @@ jobs:
 
     - name: Data Artifacts
       if: success() || failure()
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v3
       with:
         name: data-${{ github.job }}-files
         path: |
@@ -204,7 +204,7 @@ jobs:
       OMPI_ALLOW_RUN_AS_ROOT_CONFIRM: 1
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
 
     - name: Install Packages
       timeout-minutes: 10
@@ -296,63 +296,12 @@ jobs:
         ctest -V ${{ matrix.ctest_exclude }} -N -O omnitrace-ctest-${{ github.job }}-commands.log &&
         ctest -V ${{ matrix.ctest_exclude }} --output-log omnitrace-ctest-${{ github.job }}.log --stop-on-failure
 
-    - name: Configure Install Env
-      run: |
-        echo "/opt/omnitrace/bin" >> $GITHUB_PATH
-        echo "LD_LIBRARY_PATH=/opt/omnitrace/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
-        echo "OMNITRACE_CONFIG_FILE=test-install.cfg" >> $GITHUB_ENV
-
     - name: Test Install
-      timeout-minutes: 10
-      if: ${{ matrix.perfetto-tools == 'ON' }}
+      timeout-minutes: 15
+      shell: bash
       run: |
-        set -v
-        cat ${OMNITRACE_CONFIG_FILE}
-        omnitrace-perfetto-traced --background
-        which omnitrace-avail
-        ldd $(which omnitrace-avail)
-        omnitrace-avail --help
-        omnitrace-avail -a
-        which omnitrace-python
-        omnitrace-python --help
-        which omnitrace-critical-trace
-        ldd $(which omnitrace-critical-trace)
-        which omnitrace
-        ldd $(which omnitrace)
-        omnitrace --help
-        omnitrace -e -v 1 -o ls.inst --simulate -- ls
-        omnitrace -e -v 1 --simulate -- ls
-        omnitrace -e -v 1 -o ls.inst -- ls
-        omnitrace-perfetto --out ls-perfetto-trace.proto --txt -c omnitrace.cfg
-        ./ls.inst
-        omnitrace -e -v 1 -- ls
-        du -m ls-perfetto-trace.proto
-        /opt/conda/envs/py3.8/bin/python ./tests/validate-perfetto-proto.py -p -i ./ls-perfetto-trace.proto
-
-    - name: Test Install
-      timeout-minutes: 10
-      if: ${{ matrix.perfetto-tools == 'OFF' }}
-      run: |
-        set -v
-        cat ${OMNITRACE_CONFIG_FILE}
-        which omnitrace-avail
-        ldd $(which omnitrace-avail)
-        omnitrace-avail --help
-        omnitrace-avail -a
-        which omnitrace-python
-        omnitrace-python --help
-        which omnitrace-critical-trace
-        ldd $(which omnitrace-critical-trace)
-        which omnitrace
-        ldd $(which omnitrace)
-        omnitrace --help
-        omnitrace -e -v 1 -o sleep.inst --simulate -- sleep
-        omnitrace -e -v 1 --simulate -- sleep
-        omnitrace -e -v 1 -o sleep.inst -- sleep
-        ./sleep.inst 5
-        omnitrace -e -v 1 -- sleep 5
-        cat omnitrace-tests-output/sleep.inst/wall_clock.txt
-        cat omnitrace-tests-output/sleep/wall_clock.txt
+        source /opt/omnitrace/share/omnitrace/setup-env.sh
+        ./scripts/test-install.sh --test-omnitrace{,-avail,-sample,-python,-rewrite,-runtime,-critical-trace}=1
 
     - name: Test User API
       timeout-minutes: 10
@@ -362,7 +311,7 @@ jobs:
 
     - name: CTest Artifacts
       if: success() || failure()
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v3
       with:
         name: ctest-${{ github.job }}-log
         path: |
@@ -370,7 +319,7 @@ jobs:
 
     - name: Data Artifacts
       if: success() || failure()
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v3
       with:
         name: data-${{ github.job }}-files
         path: |
@@ -417,7 +366,7 @@ jobs:
       OMNITRACE_CI: ON
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
 
     - name: Install Packages
       timeout-minutes: 10
@@ -507,7 +456,7 @@ jobs:
       run: |
         set -v
         source /opt/omnitrace/share/omnitrace/setup-env.sh
-        ${{ github.workspace }}/scripts/test-install.sh --test-omnitrace{,-avail,-python,-rewrite,-runtime,-critical-trace}=1
+        ${{ github.workspace }}/scripts/test-install.sh --test-omnitrace{,-avail,-sample,-python,-rewrite,-runtime,-critical-trace}=1
 
     - name: Test Install with Modulefile
       timeout-minutes: 15
@@ -516,7 +465,7 @@ jobs:
         source /usr/share/modules/init/$(basename ${SHELL})
         module use /opt/omnitrace/share/modulefiles
         module load omnitrace
-        ${{ github.workspace }}/scripts/test-install.sh --test-omnitrace{,-avail,-python,-rewrite,-runtime,-critical-trace}=1
+        ${{ github.workspace }}/scripts/test-install.sh --test-omnitrace{,-avail,-sample,-python,-rewrite,-runtime,-critical-trace}=1
 
     - name: Test User API
       timeout-minutes: 10
@@ -526,7 +475,7 @@ jobs:
 
     - name: CTest Artifacts
       if: success() || failure()
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v3
       with:
         name: ctest-${{ github.job }}-log
         path: |
@@ -534,7 +483,7 @@ jobs:
 
     - name: Data Artifacts
       if: success() || failure()
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v3
       with:
         name: data-${{ github.job }}-files
         path: |

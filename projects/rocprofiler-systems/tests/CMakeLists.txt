@@ -194,7 +194,7 @@ endif()
 
 function(OMNITRACE_WRITE_TEST_CONFIG _FILE _ENV)
     set(_ENV_ONLY
-        "OMNITRACE_(USE_MPIP|DEBUG_SETTINGS|FORCE_ROCPROFILER_INIT|DEFAULT_MIN_INSTRUCTIONS)="
+        "OMNITRACE_(USE_MPIP|DEBUG_SETTINGS|FORCE_ROCPROFILER_INIT|DEFAULT_MIN_INSTRUCTIONS|COLORIZED_LOG)="
         )
     set(_FILE_CONTENTS)
     set(_ENV_CONTENTS)
@@ -993,6 +993,7 @@ omnitrace_add_test(
 
 set(_ompt_preload_environ
     "${_ompt_environment}"
+    "OMNITRACE_VERBOSE=2"
     "OMNITRACE_USE_OMPT=OFF"
     "OMNITRACE_USE_SAMPLING=ON"
     "OMNITRACE_USE_PROCESS_SAMPLING=OFF"
@@ -1002,7 +1003,8 @@ set(_ompt_preload_environ
     "OMNITRACE_SAMPLING_CPUTIME=ON"
     "OMNITRACE_SAMPLING_REALTIME=ON"
     "OMNITRACE_SAMPLING_CPUTIME_FREQ=1000"
-    "OMNITRACE_SAMPLING_REALTIME_FREQ=500")
+    "OMNITRACE_SAMPLING_REALTIME_FREQ=500"
+    "OMNITRACE_COLORIZED_LOG=OFF")
 
 set(_ompt_preload_samp_regex
     "Sampler for thread 0 will be triggered 1000.0x per second of CPU-time(.*)Sampler for thread 0 will be triggered 500.0x per second of wall-time(.*)Sampling will be disabled after 0.250000 seconds(.*)Sampling duration of 0.250000 seconds has elapsed. Shutting down sampling"

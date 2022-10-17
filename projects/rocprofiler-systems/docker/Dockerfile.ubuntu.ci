@@ -14,10 +14,11 @@ SHELL [ "/bin/bash", "-c" ]
 
 ARG EXTRA_PACKAGES=""
 ARG ELFUTILS_DOWNLOAD_VERSION="0.186"
+ARG BOOST_DOWNLOAD_VERSION="1.79.0"
 ARG NJOBS="12"
 ARG PYTHON_VERSIONS="6 7 8 9 10"
 
-ENV PATH ${HOME}/.local/bin:${PATH}
+ENV PATH /usr/local/bin:${PATH}
 ENV LIBRARY_PATH /usr/local/lib:/usr/local/lib64:${LIBRARY_PATH}
 ENV LD_LIBRARY_PATH /usr/local/lib:/usr/local/lib64:${LD_LIBRARY_PATH}
 ENV CMAKE_PREFIX_PATH /usr/local:${CMAKE_PREFIX_PATH}
@@ -31,7 +32,7 @@ RUN apt-get update && \
     apt-get autoclean && \
     locale -a && \
     cd /tmp/dyninst && \
-    cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_BOOST=ON -DBUILD_TBB=ON -DBUILD_ELFUTILS=ON -DBUILD_LIBIBERTY=ON -DELFUTILS_DOWNLOAD_VERSION=${ELFUTILS_DOWNLOAD_VERSION} && \
+    cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_BOOST=ON -DBUILD_TBB=ON -DBUILD_ELFUTILS=ON -DBUILD_LIBIBERTY=ON -DELFUTILS_DOWNLOAD_VERSION=${ELFUTILS_DOWNLOAD_VERSION} -DBOOST_DOWNLOAD_VERSION=${BOOST_DOWNLOAD_VERSION} && \
     cmake --build build --target all --parallel ${NJOBS} && \
     cmake --build build --target install --parallel ${NJOBS} && \
     wget https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh && \

@@ -43,8 +43,7 @@ main(int argc, char** argv)
     std::vector<char*> _argv = {};
     if(_has_double_hyphen)
     {
-        auto _size = _env.size();
-        _argv      = parse_args(argc, argv, _env);
+        _argv = parse_args(argc, argv, _env);
     }
     else
     {

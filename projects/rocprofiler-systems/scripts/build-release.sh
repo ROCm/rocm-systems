@@ -4,7 +4,7 @@
 : ${BUILD_DIR:=build-release}
 : ${VERSION:=0.0.4}
 : ${ROCM_VERSION:=4.5.0}
-: ${BOOST_VERSION:=1.69.0}
+: ${BOOST_VERSION:=1.79.0}
 : ${NJOBS:=12}
 : ${DISTRO:=""}
 : ${LTO:="OFF"}

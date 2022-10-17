@@ -26,6 +26,8 @@ jobs:
             version: "18.04"
           - distro: "ubuntu"
             version: "20.04"
+          - distro: "ubuntu"
+            version: "22.04"
           - distro: "opensuse"
             version: "15.2"
           - distro: "opensuse"
@@ -55,7 +57,7 @@ jobs:
         timeout-minutes: 45
         run: |
           pushd docker
-          ./build-docker-ci.sh --distro ${{ matrix.distro }} --versions ${{ matrix.version }} --user ${{ secrets.DOCKERHUB_USERNAME }} --push --jobs 2 --elfutils-version 0.186
+          ./build-docker-ci.sh --distro ${{ matrix.distro }} --versions ${{ matrix.version }} --user ${{ secrets.DOCKERHUB_USERNAME }} --push --jobs 2 --elfutils-version 0.186 --boost-version 1.79.0
           popd
 
   omnitrace-release-ubuntu:
@@ -103,7 +105,7 @@ jobs:
 
   omnitrace-release-opensuse:
     if: github.repository == 'AMDResearch/omnitrace'
-    
+
     runs-on: ubuntu-20.04
 
     strategy:

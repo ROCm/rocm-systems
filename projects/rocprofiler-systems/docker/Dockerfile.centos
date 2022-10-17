@@ -12,21 +12,38 @@ SHELL [ "/bin/bash", "-c" ]
 
 ENV PATH /usr/local/bin:${PATH}
 
+RUN if [ -n "$(cat /etc/os-release | grep 'VERSION="8"')" ]; then \
+        dnf -y --disablerepo '*' --enablerepo=extras swap centos-linux-repos centos-stream-repos && \
+        dnf -y distro-sync; \
+    fi
+
 RUN yum update -y && \
-    yum groupinstall -y "Development Tools" && \
-    yum install -y centos-release-scl && \
-    yum install -y epel-release && \
-    yum install -y devtoolset-9 python3-pip openmpi3-devel zlib-devel numactl-devel papi-devel dpkg-devel dpkg-dev wget curl && \
+    yum groupinstall -y "Development Tools"
+
+ARG TOOLSET_VERSION=9
+
+RUN yum install -y epel-release && \
+    if [ -n "$(cat /etc/os-release | grep 'VERSION="8"')" ]; then \
+        yum install -y centos-release-stream && \
+        yum install -y gcc-toolset-${TOOLSET_VERSION} openmpi-devel; \
+    else \
+        yum install -y centos-release-scl && \
+        yum install -y devtoolset-${TOOLSET_VERSION} openmpi3-devel dpkg-dev; \
+    fi; \
+    yum install -y python3-pip zlib-devel numactl-devel papi-devel dpkg-devel wget curl && \
     python3 -m pip install 'cmake==3.21.4'
 
+ARG ROCM_VERSION=0.0
 ARG AMDGPU_RPM=21.40.2/rhel/7.9/amdgpu-install-21.40.2.40502-1.el7.noarch.rpm
 # ARG AMDGPU_RPM=latest/rhel/7.9/amdgpu-install-21.50.50000-1.el7.noarch.rpm
 
-RUN yum install -y https://repo.radeon.com/amdgpu-install/${AMDGPU_RPM} && \
-    amdgpu-install --usecase=rocm,hip,hiplibsdk --no-dkms --skip-broken -y && \
-    yum install -y rocm-hip-sdk rocm-smi-lib roctracer-dev rocprofiler-dev rccl-dev && \
-    yum update -y && \
-    yum clean all
+RUN if [ "${ROCM_VERSION}" != "0.0" ]; then \
+        yum install -y https://repo.radeon.com/amdgpu-install/${AMDGPU_RPM} && \
+        amdgpu-install --usecase=rocm,hip,hiplibsdk --no-dkms --skip-broken -y && \
+        yum install -y rocm-hip-sdk rocm-smi-lib roctracer-dev rocprofiler-dev rccl-dev && \
+        yum update -y && \
+        yum clean all; \
+    fi
 
 ARG PYTHON_VERSIONS="6 7 8 9 10"
 
@@ -39,7 +56,7 @@ RUN wget https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh -
     conda clean -a -y && \
     conda init
 
-RUN ln -s /opt/rocm-* /opt/rocm
+RUN if [ "${ROCM_VERSION}" != "0.0" ]; then ln -sf /opt/rocm-${ROCM_VERSION}* /opt/rocm; fi
 
 WORKDIR /home
 SHELL [ "/bin/bash", "--login", "-c" ]

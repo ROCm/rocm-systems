@@ -1,0 +1,154 @@
+name: Ubuntu 22.04 (GCC, Python)
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  OMNITRACE_VERBOSE: 1
+  OMNITRACE_CI: ON
+
+jobs:
+  ubuntu-jammy-external:
+    runs-on: ubuntu-20.04
+    container:
+      image: jrmadsen/omnitrace:ci-base-ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: ['g++-11', 'g++-12']
+        hip: ['OFF']
+        mpi: ['OFF']
+        ompt: ['OFF']
+        papi: ['OFF']
+        python: ['ON']
+        lto: ['OFF']
+        strip: ['OFF']
+        hidden: ['ON', 'OFF']
+        build-type: ['Release']
+        mpi-headers: ['ON', 'OFF']
+        static-libgcc: ['OFF']
+        static-libstdcxx: ['OFF']
+
+    env:
+      OMPI_ALLOW_RUN_AS_ROOT: 1
+      OMPI_ALLOW_RUN_AS_ROOT_CONFIRM: 1
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Install Packages
+      timeout-minutes: 10
+      run:
+        apt-get update &&
+        apt-get install -y software-properties-common &&
+        apt-get upgrade -y &&
+        apt-get install -y build-essential m4 autoconf libtool python3-pip libiberty-dev clang libomp-dev libopenmpi-dev libfabric-dev openmpi-bin environment-modules ${{ matrix.compiler }} &&
+        python3 -m pip install --upgrade pip &&
+        python3 -m pip install numpy &&
+        python3 -m pip install 'cmake==3.21.4' &&
+        for i in 6 7 8 9 10; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy perfetto dataclasses; done
+
+    - name: Test Environment Modules
+      timeout-minutes: 15
+      shell: bash
+      run: |
+        set -v
+        source /usr/share/modules/init/$(basename ${SHELL})
+        module avail
+
+    - name: Configure Env
+      run: |
+        echo "CC=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')" >> $GITHUB_ENV
+        echo "CXX=${{ matrix.compiler }}" >> $GITHUB_ENV
+
+    - name: Configure CMake
+      timeout-minutes: 10
+      run:
+        git config --global --add safe.directory ${PWD} &&
+        cmake --version &&
+        cmake -B build
+          -DCMAKE_C_COMPILER=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')
+          -DCMAKE_CXX_COMPILER=${{ matrix.compiler }}
+          -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
+          -DCMAKE_INSTALL_PREFIX=/opt/omnitrace-dev
+          -DOMNITRACE_BUILD_TESTING=ON
+          -DOMNITRACE_USE_MPI=${{ matrix.mpi }}
+          -DOMNITRACE_USE_HIP=${{ matrix.hip }}
+          -DOMNITRACE_USE_OMPT=${{ matrix.ompt }}
+          -DOMNITRACE_USE_PAPI=${{ matrix.papi }}
+          -DOMNITRACE_USE_PYTHON=${{ matrix.python }}
+          -DOMNITRACE_USE_MPI_HEADERS=${{ matrix.mpi-headers }}
+          -DOMNITRACE_STRIP_LIBRARIES=${{ matrix.strip }}
+          -DOMNITRACE_BUILD_LTO=${{ matrix.lto }}
+          -DOMNITRACE_BUILD_HIDDEN_VISIBILITY=${{ matrix.hidden }}
+          -DOMNITRACE_BUILD_STATIC_LIBGCC=${{ matrix.static-libgcc }}
+          -DOMNITRACE_BUILD_STATIC_LIBSTDCXX=${{ matrix.static-libstdcxx }}
+          -DOMNITRACE_PYTHON_PREFIX=/opt/conda/envs
+          -DOMNITRACE_PYTHON_ENVS="py3.6;py3.7;py3.8;py3.9;py3.10"
+          -DUSE_CLANG_OMP=OFF
+
+    - name: Build
+      timeout-minutes: 60
+      run:
+        cmake --build build --target all --parallel 2 -- VERBOSE=1
+
+    - name: Install
+      timeout-minutes: 10
+      run:
+        cmake --build build --target install --parallel 2
+
+    - name: Test
+      timeout-minutes: 45
+      run:
+        cd build &&
+        ctest -V -N -O omnitrace-ctest-${{ github.job }}-commands.log &&
+        ctest -V --output-log omnitrace-ctest-${{ github.job }}.log
+
+    - name: CPack and Install
+      run: |
+        cd build
+        cpack -G STGZ
+        mkdir -p /opt/omnitrace
+        ./omnitrace-*.sh --prefix=/opt/omnitrace --exclude-subdir --skip-license
+
+    - name: Test Install with Modulefile
+      timeout-minutes: 15
+      shell: bash
+      run: |
+        set -v
+        source /usr/share/modules/init/$(basename ${SHELL})
+        module use /opt/omnitrace/share/modulefiles
+        module avail
+        module load omnitrace
+        ./scripts/test-install.sh --test-omnitrace=1 --test-omnitrace-avail=1 --test-omnitrace-sample=1 --test-omnitrace-python=1 --test-omnitrace-rewrite=1 --test-omnitrace-runtime=1 --test-omnitrace-critical-trace=1
+
+    - name: Test User API
+      timeout-minutes: 10
+      run: |
+        set -v
+        ./scripts/test-find-package.sh --install-dir /opt/omnitrace
+
+    - name: CTest Artifacts
+      if: success() || failure()
+      uses: actions/upload-artifact@v3
+      with:
+        name: ctest-${{ github.job }}-log
+        path: |
+          build/*.log
+
+    - name: Data Artifacts
+      if: success() || failure()
+      uses: actions/upload-artifact@v3
+      with:
+        name: data-${{ github.job }}-files
+        path: |
+          build/omnitrace-tests-config/*.cfg
+          build/omnitrace-tests-output/**/*.txt
+          build/omnitrace-tests-output/**/*-instr*.json

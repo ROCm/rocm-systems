@@ -19,6 +19,16 @@ verbose-run()
     eval $@
 }
 
+toupper()
+{
+    echo "$@" | awk -F '\|~\|' '{print toupper($1)}';
+}
+
+get-bool()
+{
+    echo "${1}" | egrep -i '^(y|on|yes|true|[1-9])$' &> /dev/null && echo 1 || echo 0
+}
+
 if [ -d "$(realpath /tmp)" ]; then
     : ${TMPDIR:=/tmp}
     export TMPDIR
@@ -28,6 +38,7 @@ fi
 : ${SOURCE_DIR:=$(dirname ${SCRIPT_DIR})}
 : ${ENABLE_OMNITRACE:=1}
 : ${ENABLE_OMNITRACE_AVAIL:=1}
+: ${ENABLE_OMNITRACE_SAMPLE:=1}
 : ${ENABLE_OMNITRACE_PYTHON:=0}
 : ${ENABLE_OMNITRACE_REWRITE:=1}
 : ${ENABLE_OMNITRACE_RUNTIME:=1}
@@ -40,6 +51,7 @@ usage()
     print_option source-dir "<PATH>" "Location of source directory" "${SOURCE_DIR}"
     print_option test-omnitrace "0|1" "Enable testing omnitrace exe" "${ENABLE_OMNITRACE}"
     print_option test-omnitrace-avail "0|1" "Enable testing omnitrace-avail" "${ENABLE_OMNITRACE_AVAIL}"
+    print_option test-omnitrace-sample "0|1" "Enable testing omnitrace-sample" "${ENABLE_OMNITRACE_SAMPLE}"
     print_option test-omnitrace-python "0|1" "Enable testing omnitrace-python" "${ENABLE_OMNITRACE_PYTHON}"
     print_option test-omnitrace-rewrite "0|1" "Enable testing omnitrace binary rewrite" "${ENABLE_OMNITRACE_REWRITE}"
     print_option test-omnitrace-runtime "0|1" "Enable testing omnitrace runtime instrumentation" "${ENABLE_OMNITRACE_RUNTIME}"
@@ -74,11 +86,12 @@ do
     if [ -z "${VAL}" ]; then
         while [[ $# -gt 0 ]]
         do
-            VAL=${1}
+            VAL=$(get-bool ${1})
             shift
             break
         done
     else
+        VAL=$(get-bool ${VAL})
         ARG="$(echo ${ARG} | sed 's/=/ /1' | awk '{print $1}')"
     fi
 
@@ -95,6 +108,10 @@ do
             ;;
         --test-omnitrace-avail)
             ENABLE_OMNITRACE_AVAIL=${VAL}
+            continue
+            ;;
+        --test-omnitrace-sample)
+            ENABLE_OMNITRACE_SAMPLE=${VAL}
             continue
             ;;
         --test-omnitrace-python)
@@ -140,6 +157,14 @@ test-omnitrace-avail()
     verbose-run omnitrace-avail -a
 }
 
+test-omnitrace-sample()
+{
+    verbose-run which omnitrace-sample
+    verbose-run ldd $(which omnitrace-sample)
+    verbose-run omnitrace-sample --help
+    verbose-run omnitrace-sample --cputime 100 --realtime 50 --hsa-interrupt 0 -TPH -- python3 ${SOURCE_DIR}/examples/python/external.py -n 5 -v 20
+}
+
 test-omnitrace-python()
 {
     verbose-run which omnitrace-python
@@ -173,6 +198,7 @@ test-omnitrace-critical-trace()
 
 if [ "${ENABLE_OMNITRACE}" -ne 0 ]; then verbose-run test-omnitrace; fi
 if [ "${ENABLE_OMNITRACE_AVAIL}" -ne 0 ]; then verbose-run test-omnitrace-avail; fi
+if [ "${ENABLE_OMNITRACE_SAMPLE}" -ne 0 ]; then verbose-run test-omnitrace-sample; fi
 if [ "${ENABLE_OMNITRACE_PYTHON}" -ne 0 ]; then verbose-run test-omnitrace-python; fi
 if [ "${ENABLE_OMNITRACE_REWRITE}" -ne 0 ]; then verbose-run test-omnitrace-rewrite; fi
 if [ "${ENABLE_OMNITRACE_RUNTIME}" -ne 0 ]; then verbose-run test-omnitrace-runtime; fi

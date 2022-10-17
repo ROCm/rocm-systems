@@ -99,6 +99,7 @@ void
 pthread_mutex_gotcha::configure()
 {
     pthread_mutex_gotcha_t::get_initializer() = []() {
+        if(!tim::settings::enabled()) return;
         if(config::get_trace_thread_locks())
         {
             pthread_mutex_gotcha_t::configure(

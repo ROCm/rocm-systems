@@ -754,19 +754,23 @@ configure_settings(bool _init)
         if(_config->get_suppress_config()) continue;
 
         OMNITRACE_BASIC_VERBOSE(1, "Reading config file %s\n", itr.c_str());
-        _config->read(itr);
-
-        if(_main_proc &&
+        if(_config->read(itr) && _main_proc &&
            ((_config->get<bool>("OMNITRACE_CI") && settings::verbose() >= 0) ||
             settings::verbose() >= 1 || settings::debug()))
         {
-            std::ifstream     _in{ itr };
+            auto              fitr = settings::format(itr, _config->get_tag());
+            std::ifstream     _in{ fitr };
             std::stringstream _iss{};
             while(_in)
             {
-                std::string _s{};
-                getline(_in, _s);
-                _iss << _s << "\n";
+                std::string _line{};
+                getline(_in, _line);
+                _iss << _line << "\n";
+            }
+            if(!_iss.str().empty())
+            {
+                OMNITRACE_BASIC_PRINT("config file '%s':\n%s\n", fitr.c_str(),
+                                      _iss.str().c_str());
             }
             if(!_iss.str().empty())
             {

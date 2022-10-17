@@ -144,7 +144,7 @@ if(OMNITRACE_USE_PAPI AND NOT OMNITRACE_BUILD_PAPI)
 endif()
 if(NOT OMNITRACE_BUILD_DYNINST)
     if(NOT DYNINST_BUILD_BOOST)
-        foreach(_BOOST_COMPONENT atomic system thread date-time filesystem)
+        foreach(_BOOST_COMPONENT atomic system thread date-time filesystem timer)
             list(APPEND _DEBIAN_PACKAGE_DEPENDS
                  "libboost-${_BOOST_COMPONENT}-dev (>= 1.67.0)")
         endforeach()

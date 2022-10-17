@@ -7,6 +7,7 @@ set -e
 : ${VERSIONS:=20.04}
 : ${NJOBS=$(nproc)}
 : ${ELFUTILS_VERSION:=0.186}
+: ${BOOST_VERSION:=1.79.0}
 : ${PUSH:=0}
 
 verbose-run()
@@ -38,6 +39,7 @@ usage()
     print_default_option versions "[VERSION] [VERSION...]" "Ubuntu or OpenSUSE release" "${VERSIONS}"
     print_default_option "jobs -j" "[N]" "parallel build jobs" "${NJOBS}"
     print_default_option elfutils-version "[0.183..0.186]" "ElfUtils version" "${ELFUTILS_VERSION}"
+    print_default_option boost-version "[1.67.0..1.79.0]" "Boost version" "${BOOST_VERSION}"
     print_default_option user "[USERNAME]" "DockerHub username" "${USER}"
 }
 
@@ -81,6 +83,11 @@ do
         "--elfutils-version")
             shift
             ELFUTILS_VERSION=${1}
+            reset-last
+            ;;
+        "--boost-version")
+            shift
+            BOOST_VERSION=${1}
             reset-last
             ;;
         --user|-u)
@@ -131,7 +138,8 @@ do
         --build-arg DISTRO=${DISTRO_IMAGE} \
         --build-arg VERSION=${VERSION} \
         --build-arg NJOBS=${NJOBS} \
-        --build-arg ELFUTILS_DOWNLOAD_VERSION=${ELFUTILS_VERSION}
+        --build-arg ELFUTILS_DOWNLOAD_VERSION=${ELFUTILS_VERSION} \
+        --build-arg BOOST_DOWNLOAD_VERSION=${BOOST_VERSION}
 done
 
 if [ "${PUSH}" -gt 0 ]; then

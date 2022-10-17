@@ -11,6 +11,7 @@ add_executable(openmp-cg ${CMAKE_CURRENT_SOURCE_DIR}/CG/cg.cpp
 add_executable(openmp-lu ${CMAKE_CURRENT_SOURCE_DIR}/LU/lu.cpp
                          $<TARGET_OBJECTS:openmp-common>)
 
+option(USE_CLANG_OMP "Use the clang OpenMP if available" ON)
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     find_package(OpenMP REQUIRED)
     target_link_libraries(openmp-common PUBLIC OpenMP::OpenMP_CXX)
@@ -24,7 +25,8 @@ else()
         NAMES omp omp5 ${CMAKE_SHARED_LIBRARY_PREFIX}omp${CMAKE_SHARED_LIBRARY_SUFFIX}.5)
     if(CLANGXX_EXECUTABLE
        AND LIBOMP_LIBRARY
-       AND COMMAND omnitrace_custom_compilation)
+       AND COMMAND omnitrace_custom_compilation
+       AND USE_CLANG_OMP)
         target_compile_options(openmp-common PUBLIC -W -Wall -fopenmp=libomp)
         target_link_libraries(openmp-common PUBLIC ${LIBOMP_LIBRARY})
         omnitrace_custom_compilation(COMPILER ${CLANGXX_EXECUTABLE} TARGET openmp-common)
