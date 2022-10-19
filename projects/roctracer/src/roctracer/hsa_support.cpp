@@ -61,7 +61,7 @@ AmdExtTable saved_amd_ext_api{};
 hsa_ven_amd_loader_1_01_pfn_t hsa_loader_api{};
 
 struct AgentInfo {
-  int index;
+  uint32_t id;
   hsa_device_type_t type;
 };
 std::unordered_map<decltype(hsa_agent_t::handle), AgentInfo> agent_info_map;
@@ -275,7 +275,7 @@ hsa_status_t MemoryPoolAllocateIntercept(hsa_amd_memory_pool_t pool, size_t size
 
       hsa_evt_data_t data{};
       data.device.type = it->second.type;
-      data.device.id = it->second.index;
+      data.device.id = it->second.id;
       data.device.agent = agent;
       data.device.ptr = ptr;
 
@@ -314,7 +314,7 @@ hsa_status_t AgentsAllowAccessIntercept(uint32_t num_agents, const hsa_agent_t* 
 
       hsa_evt_data_t data{};
       data.device.type = it->second.type;
-      data.device.id = it->second.index;
+      data.device.id = it->second.id;
       data.device.agent = agent;
       data.device.ptr = ptr;
 
@@ -540,15 +540,20 @@ void Initialize(HsaApiTable* table) {
             switch (agent_info.type) {
               case HSA_DEVICE_TYPE_CPU:
                 static int cpu_agent_count = 0;
-                agent_info.index = cpu_agent_count++;
+                agent_info.id = cpu_agent_count++;
                 break;
-              case HSA_DEVICE_TYPE_GPU:
-                static int gpu_agent_count = 0;
-                agent_info.index = gpu_agent_count++;
-                break;
+              case HSA_DEVICE_TYPE_GPU: {
+                uint32_t driver_node_id;
+                if (hsa_support::saved_core_api.hsa_agent_get_info_fn(
+                        agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_DRIVER_NODE_ID),
+                        &driver_node_id) != HSA_STATUS_SUCCESS)
+                  fatal("hsa_agent_get_info failed");
+
+                agent_info.id = driver_node_id;
+              } break;
               default:
                 static int other_agent_count = 0;
-                agent_info.index = other_agent_count++;
+                agent_info.id = other_agent_count++;
                 break;
             }
             hsa_support::agent_info_map.emplace(agent.handle, agent_info);
