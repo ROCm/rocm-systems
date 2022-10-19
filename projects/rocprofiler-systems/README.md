@@ -85,8 +85,42 @@ such as the memory usage, page-faults, and context-switches, and thread-level me
 ## Documentation
 
 The full documentation for [omnitrace](https://github.com/AMDResearch/omnitrace) is available at [amdresearch.github.io/omnitrace](https://amdresearch.github.io/omnitrace/).
+See the [Getting Started documentation](https://amdresearch.github.io/omnitrace/getting_started) for general tips and a detailed discussion about sampling vs. binary instrumentation.
 
 ## Quick Start
+
+### Installation
+
+- Visit [Releases](https://github.com/AMDResearch/omnitrace/releases) page
+- Select appropriate installer (recommendation: `.sh` scripts do not require super-user priviledges unlike the DEB/RPM installers)
+  - If targeting a ROCm application, find the installer script with the matching ROCm version
+  - If you are unsure about your Linux distro, check `/etc/os-release`
+  - If no installer script matches your target OS, try one of the Ubuntu 18.04 `*.sh` installers
+    - This installation may be built against older library versions supported on your distro via backwards compatibility
+
+### Setup
+
+> NOTE: Replace `/opt/omnitrace` below with installation prefix as necessary.
+
+- Option 1: Source `setup-env.sh` script
+
+```bash
+source /opt/omnitrace/share/omnitrace/setup-env.sh
+```
+
+- Option 2: Load modulefile
+
+```bash
+module use /opt/omnitrace/share/modulefiles
+module load omnitrace
+```
+
+- Option 3: Manual
+
+```bash
+export PATH=/opt/omnitrace/bin:${PATH}
+export LD_LIBRARY_PATH=/opt/omnitrace/lib:${LD_LIBRARY_PATH}
+```
 
 ### Omnitrace Settings
 
@@ -111,9 +145,23 @@ Once the configuration file is adjusted to your preferences, either export the p
 or place this file in `${HOME}/.omnitrace.cfg` to ensure these values are always read as the default. If you wish to change any of these settings,
 you can override them via environment variables or by specifying an alternative `OMNITRACE_CONFIG_FILE`.
 
-### Omnitrace Executable
+### Call-Stack Sampling
 
-The `omnitrace` executable is used to instrument an existing binary.
+The `omnitrace-sample` executable is used to execute call-stack sampling on a target application without binary instrumentation.
+Use a double-hypen (`--`) to separate the command-line arguments for `omnitrace-sample` from the target application and it's arguments.
+
+```shell
+omnitrace-sample --help
+omnitrace-sample <omnitrace-options> -- <exe> <exe-options>
+omnitrace-sample -f 1000 -- ls -la
+```
+
+### Binary Instrumentation
+
+The `omnitrace` executable is used to instrument an existing binary. Call-stack sampling can be enabled alongside
+the execution an instrumented binary, to help "fill in the gaps" between the instrumentation via setting the `OMNITRACE_USE_SAMPLING`
+configuration variable to `ON`.
+Similar to `omnitrace-sample`, use a double-hypen (`--`) to separate the command-line arguments for `omnitrace` from the target application and it's arguments.
 
 ```shell
 omnitrace --help
@@ -183,9 +231,57 @@ omnitrace -ME '^(libhsa-runtime64|libz\\.so)' -- /path/to/app
 omnitrace -E 'rocr::atomic|rocr::core|rocr::HSA' --  /path/to/app
 ```
 
-### Visualizing Perfetto Results
+### Python Profiling and Tracing
 
-Visit [ui.perfetto.dev](https://ui.perfetto.dev) in your browser and open up the `.proto` file(s) created by omnitrace.
+Use the `omnitrace-python` script to profile/trace Python interpreter function calls.
+Use a double-hypen (`--`) to separate the command-line arguments for `omnitrace-python` from the target script and it's arguments.
+
+```shell
+omnitrace-python --help
+omnitrace-python <omnitrace-options> -- <python-script> <script-args>
+omnitrace-python -- ./script.py
+```
+
+Please note, the first argument after the double-hyphen *must be a Python script*, e.g. `omnitrace-python -- ./script.py`.
+
+If you need to specify a specific python interpreter version, use `omnitrace-python-X.Y` where `X.Y` is the Python
+major and minor version:
+
+```shell
+omnitrace-python-3.8 -- ./script.py
+```
+
+If you need to specify the full path to a Python interpreter, set the `PYTHON_EXECUTABLE` environment variable:
+
+```shell
+PYTHON_EXECUTABLE=/opt/conda/bin/python omnitrace-python -- ./script.py
+```
+
+If you want to restrict the data collection to specific function(s) and its callees, pass the `-b` / `--builtin` option after decorating the
+function(s) with `@profile`. Use the `@noprofile` decorator for excluding/ignoring function(s) and its callees:
+
+```python
+def foo():
+    pass
+
+@noprofile
+def bar():
+    foo()
+
+@profile
+def spam():
+    foo()
+    bar()
+```
+
+Each time `spam` is called during profiling, the profiling results will include 1 entry for `spam` and 1 entry
+for `foo` via the direct call within `spam`. There will be no entries for `bar` or the `foo` invocation within it.
+
+### Trace Visualization
+
+- Visit [ui.perfetto.dev](https://ui.perfetto.dev) in the web-browser
+- Select "Open trace file" from panel on the left
+- Locate the omnitrace perfetto output (extension: `.proto`)
 
 ![omnitrace-perfetto](source/docs/images/omnitrace-perfetto.png)
 

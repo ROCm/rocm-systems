@@ -52,14 +52,17 @@
 #endif
 
 namespace color = tim::log::color;
-using tim::log::stream;
 using namespace timemory::join;
 using tim::get_env;
+using tim::log::colorized;
+using tim::log::stream;
 
 namespace
 {
-int verbose = 0;
-}
+int  verbose       = 0;
+auto updated_envs  = std::set<std::string_view>{};
+auto original_envs = std::set<std::string>{};
+}  // namespace
 
 std::string
 get_command(const char* _argv0)
@@ -92,7 +95,11 @@ get_initial_environment()
     {
         int idx = 0;
         while(environ[idx] != nullptr)
-            _env.emplace_back(strdup(environ[idx++]));
+        {
+            auto* _v = environ[idx++];
+            original_envs.emplace(_v);
+            _env.emplace_back(strdup(_v));
+        }
     }
 
     update_env(_env, "LD_PRELOAD",
@@ -106,22 +113,25 @@ get_initial_environment()
     update_env(_env, "OMNITRACE_USE_SAMPLING", true);
     update_env(_env, "OMNITRACE_CRITICAL_TRACE", false);
     update_env(_env, "OMNITRACE_USE_PROCESS_SAMPLING", false);
+
     // update_env(_env, "OMNITRACE_USE_PID", false);
     // update_env(_env, "OMNITRACE_TIME_OUTPUT", false);
     // update_env(_env, "OMNITRACE_OUTPUT_PATH", "omnitrace-output/%tag%/%launch_time%");
 
 #if defined(OMNITRACE_USE_ROCTRACER) || defined(OMNITRACE_USE_ROCPROFILER)
     update_env(_env, "HSA_TOOLS_LIB", _dl_libpath);
-    update_env(_env, "HSA_TOOLS_REPORT_LOAD_FAILURE", "1");
+    if(!getenv("HSA_TOOLS_REPORT_LOAD_FAILURE"))
+        update_env(_env, "HSA_TOOLS_REPORT_LOAD_FAILURE", "1");
 #endif
 
 #if defined(OMNITRACE_USE_ROCPROFILER)
     update_env(_env, "ROCP_TOOL_LIB", _omni_libpath);
-    update_env(_env, "ROCP_HSA_INTERCEPT", "1");
+    if(!getenv("ROCP_HSA_INTERCEPT")) update_env(_env, "ROCP_HSA_INTERCEPT", "1");
 #endif
 
 #if defined(OMNITRACE_USE_OMPT)
-    update_env(_env, "OMP_TOOL_LIBRARIES", _dl_libpath);
+    if(!getenv("OMP_TOOL_LIBRARIES"))
+        update_env(_env, "OMP_TOOL_LIBRARIES", _dl_libpath, true);
 #endif
 
     free(_dl_libpath);
@@ -140,11 +150,58 @@ get_internal_libpath(const std::string& _lib)
     return omnitrace::common::join("/", _dir, "..", "lib", _lib);
 }
 
+void
+print_updated_environment(std::vector<char*> _env)
+{
+    std::sort(_env.begin(), _env.end(), [](auto* _lhs, auto* _rhs) {
+        if(!_lhs) return false;
+        if(!_rhs) return true;
+        return std::string_view{ _lhs } < std::string_view{ _rhs };
+    });
+
+    std::vector<char*> _updates = {};
+    std::vector<char*> _general = {};
+
+    for(auto* itr : _env)
+    {
+        if(itr == nullptr) continue;
+
+        auto _is_omni = (std::string_view{ itr }.find("OMNITRACE") == 0);
+        auto _updated = false;
+        for(const auto& vitr : updated_envs)
+        {
+            if(std::string_view{ itr }.find(vitr) == 0)
+            {
+                _updated = true;
+                break;
+            }
+        }
+
+        if(_updated)
+            _updates.emplace_back(itr);
+        else if(verbose >= 1 && _is_omni)
+            _general.emplace_back(itr);
+    }
+
+    if(_general.size() + _updates.size() == 0 || verbose < 0) return;
+
+    std::cerr << std::endl;
+
+    for(auto& itr : _general)
+        stream(std::cerr, color::source()) << itr << "\n";
+    for(auto& itr : _updates)
+        stream(std::cerr, color::source()) << itr << "\n";
+
+    std::cerr << std::endl;
+}
+
 template <typename Tp>
 void
 update_env(std::vector<char*>& _environ, std::string_view _env_var, Tp&& _env_val,
            bool _append)
 {
+    updated_envs.emplace(_env_var);
+
     auto _key = join("", _env_var, "=");
     for(auto& itr : _environ)
     {
@@ -153,11 +210,13 @@ update_env(std::vector<char*>& _environ, std::string_view _env_var, Tp&& _env_va
         {
             if(_append)
             {
-                auto _val = std::string{ itr }.substr(_key.length());
-                free(itr);
-                itr = strdup(
-                    omnitrace::common::join('=', _env_var, join(":", _env_val, _val))
-                        .c_str());
+                if(std::string_view{ itr }.find(join("", _env_val)) ==
+                   std::string_view::npos)
+                {
+                    auto _val = std::string{ itr }.substr(_key.length());
+                    free(itr);
+                    itr = strdup(join('=', _env_var, join(":", _env_val, _val)).c_str());
+                }
             }
             else
             {
@@ -169,6 +228,22 @@ update_env(std::vector<char*>& _environ, std::string_view _env_var, Tp&& _env_va
     }
     _environ.emplace_back(
         strdup(omnitrace::common::join('=', _env_var, _env_val).c_str()));
+}
+
+void
+remove_env(std::vector<char*>& _environ, std::string_view _env_var)
+{
+    auto _key   = join("", _env_var, "=");
+    auto _match = [&_key](auto itr) { return std::string_view{ itr }.find(_key) == 0; };
+
+    _environ.erase(std::remove_if(_environ.begin(), _environ.end(), _match),
+                   _environ.end());
+
+    for(const auto& itr : original_envs)
+    {
+        if(std::string_view{ itr }.find(_key) == 0)
+            _environ.emplace_back(strdup(itr.c_str()));
+    }
 }
 
 std::vector<char*>
@@ -199,6 +274,11 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
         p.print_help();
         exit(_pec);
     };
+
+    auto* _dl_libpath =
+        realpath(get_internal_libpath("libomnitrace-dl.so").c_str(), nullptr);
+    auto* _omni_libpath =
+        realpath(get_internal_libpath("libomnitrace.so").c_str(), nullptr);
 
     auto parser = parser_t(argv[0]);
 
@@ -273,6 +353,7 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
         .dtype("bool")
         .action([&](parser_t& p) {
             auto _colorized = !p.get<bool>("monochrome");
+            colorized()     = _colorized;
             p.set_use_color(_colorized);
             update_env(_env, "OMNITRACE_COLORIZED_LOG", (_colorized) ? "1" : "0");
             update_env(_env, "COLORIZED_LOG", (_colorized) ? "1" : "0");
@@ -599,6 +680,12 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
             _update("OMNITRACE_TRACE_THREAD_LOCKS", _v.count("mutex-locks") > 0);
             _update("OMNITRACE_TRACE_THREAD_RW_LOCKS", _v.count("rw-locks") > 0);
             _update("OMNITRACE_TRACE_THREAD_SPIN_LOCKS", _v.count("spin-locks") > 0);
+
+            if(_v.count("all") > 0 || _v.count("ompt") > 0)
+                update_env(_env, "OMP_TOOL_LIBRARIES", _dl_libpath, true);
+
+            if(_v.count("all") > 0 || _v.count("kokkosp") > 0)
+                update_env(_env, "KOKKOS_PROFILE_LIBRARY", _omni_libpath, true);
         });
 
     parser.add_argument({ "-E", "--exclude" }, "Exclude data from these backends")
@@ -619,6 +706,25 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
             _update("OMNITRACE_TRACE_THREAD_LOCKS", _v.count("mutex-locks") > 0);
             _update("OMNITRACE_TRACE_THREAD_RW_LOCKS", _v.count("rw-locks") > 0);
             _update("OMNITRACE_TRACE_THREAD_SPIN_LOCKS", _v.count("spin-locks") > 0);
+
+            if(_v.count("all") > 0 ||
+               (_v.count("roctracer") > 0 && _v.count("rocprofiler") > 0))
+            {
+                remove_env(_env, "HSA_TOOLS_LIB");
+                remove_env(_env, "HSA_TOOLS_REPORT_LOAD_FAILURE");
+            }
+
+            if(_v.count("all") > 0 || _v.count("rocprofiler") > 0)
+            {
+                remove_env(_env, "ROCP_TOOL_LIB");
+                remove_env(_env, "ROCP_HSA_INTERCEPT");
+            }
+
+            if(_v.count("all") > 0 || _v.count("ompt") > 0)
+                remove_env(_env, "OMP_TOOL_LIBRARIES");
+
+            if(_v.count("all") > 0 || _v.count("kokkosp") > 0)
+                remove_env(_env, "KOKKOS_PROFILE_LIBRARY");
         });
 
     _add_separator("HARDWARE COUNTER OPTIONS", "");
@@ -626,7 +732,6 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
         .add_argument({ "-C", "--cpu-events" },
                       "Set the CPU hardware counter events to record (ref: "
                       "`omnitrace-avail -H -c CPU`)")
-        .set_default(std::set<std::string>{})
         .action([&](parser_t& p) {
             auto _events =
                 join(array_config{ "," }, p.get<std::vector<std::string>>("cpu-events"));
@@ -638,7 +743,6 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
         .add_argument({ "-G", "--gpu-events" },
                       "Set the GPU hardware counter events to record (ref: "
                       "`omnitrace-avail -H -c GPU`)")
-        .set_default(std::set<std::string>{})
         .action([&](parser_t& p) {
             auto _events =
                 join(array_config{ "," }, p.get<std::vector<std::string>>("gpu-events"));
@@ -694,6 +798,9 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
     if(parser.exists("profile") && parser.exists("flat-profile"))
         throw std::runtime_error(
             "Error! '--profile' argument conflicts with '--flat-profile' argument");
+
+    free(_dl_libpath);
+    free(_omni_libpath);
 
     return _outv;
 }

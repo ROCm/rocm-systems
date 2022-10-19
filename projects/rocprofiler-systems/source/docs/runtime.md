@@ -1,4 +1,4 @@
-# Customizing Omnitrace Runtime
+# Configuring Omnitrace Runtime
 
 ```eval_rst
 .. toctree::

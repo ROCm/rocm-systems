@@ -9,7 +9,12 @@
    about
    features
    installation
+   setup
    getting_started
+   runtime
+   sampling
+   instrumenting
+   critical_trace
    output
    user_api
    python

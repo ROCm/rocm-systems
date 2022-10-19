@@ -1,4 +1,4 @@
-# Instrumenting with Omnitrace
+# Binary Instrumentation
 
 ```eval_rst
 .. toctree::
@@ -8,9 +8,13 @@
 
 ## omnitrace Executable
 
+> ***NOTE: With the introduction of `omnitrace-sample`, in future versions of omnitrace, the current `omnitrace` executable***
+> ***noted below will likely be renamed to `omnitrace-instrument` and a new `omnitrace` executable will serve as a common***
+> ***executable for multiple executables, e.g. `omnitrace sample ...`, `omnitrace run ...`, `omnitrace rewrite ...`, etc.***
+
 Instrumentation is performed with the `omnitrace` executable. View the help menu with the `-h` / `--help` option:
 
-```shell
+```console
 $ omnitrace --help
 [omnitrace] Usage: omnitrace   [ --help (count: 0, dtype: bool)
                                  --debug (max: 1, dtype: bool)

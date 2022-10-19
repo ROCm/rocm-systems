@@ -35,6 +35,8 @@ get_realpath(const std::string&);
 void
 print_command(const std::vector<char*>& _argv);
 
+void print_updated_environment(std::vector<char*>);
+
 std::vector<char*>
 get_initial_environment();
 
@@ -44,6 +46,9 @@ get_internal_libpath(const std::string& _lib);
 template <typename Tp>
 void
 update_env(std::vector<char*>&, std::string_view, Tp&&, bool _append = false);
+
+void
+remove_env(std::vector<char*>&, std::string_view);
 
 std::vector<char*>
 parse_args(int argc, char** argv, std::vector<char*>&);

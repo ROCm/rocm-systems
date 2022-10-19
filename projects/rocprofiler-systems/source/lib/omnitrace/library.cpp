@@ -580,7 +580,7 @@ omnitrace_finalize_hidden(void)
         return;
     }
 
-    OMNITRACE_VERBOSE_F(0, "\n");
+    if(get_verbose() >= 0 || get_debug()) fprintf(stderr, "\n");
     OMNITRACE_VERBOSE_F(0, "finalizing...\n");
 
     sampling::block_samples();

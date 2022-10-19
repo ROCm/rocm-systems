@@ -1,4 +1,4 @@
-# Setup
+# Setup and Validation
 
 ```eval_rst
 .. toctree::
@@ -8,13 +8,13 @@
 
 ## Configuring Environment
 
-Source the `setup-env.sh` script to prefix the `PATH`, `LD_LIBRARY_PATH`, etc. environment variables:
+Once omnitrace is installed, source the `setup-env.sh` script to prefix the `PATH`, `LD_LIBRARY_PATH`, etc. environment variables:
 
 ```bash
 source /opt/omnitrace/share/omnitrace/setup-env.sh
 ```
 
-Alternatively, if environment modules are supported, add the `<prefix>/share/modulefiles` directory to `MODULEPATH` via:
+Alternatively, if environment modules are supported, add the `<prefix>/share/modulefiles` directory to `MODULEPATH`:
 
 ```bash
 module use /opt/omnitrace/share/modulefiles
@@ -38,6 +38,12 @@ If all the following commands execute successfully with output, then you are rea
 ```bash
 which omnitrace
 which omnitrace-avail
+which omnitrace-sample
 omnitrace --help
 omnitrace-avail --all
+omnitrace-sample --help
+
+# if built with python support
+which omnitrace-python
+omnitrace-python --help
 ```

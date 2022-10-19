@@ -52,15 +52,7 @@ main(int argc, char** argv)
             _argv.emplace_back(argv[i]);
     }
 
-    std::sort(_env.begin(), _env.end(), [](auto* _lhs, auto* _rhs) {
-        if(!_lhs) return false;
-        if(!_rhs) return true;
-        return std::string_view{ _lhs } < std::string_view{ _rhs };
-    });
-
-    for(auto* itr : _env)
-        if(itr != nullptr && std::string_view{ itr }.find("OMNITRACE") == 0)
-            std::cout << itr << "\n";
+    print_updated_environment(_env);
 
     if(!_argv.empty())
     {
