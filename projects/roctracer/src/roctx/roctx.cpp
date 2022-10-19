@@ -87,7 +87,8 @@ ROCTX_API void roctxRangeStop(roctx_range_id_t range_id) {
   ReportActivity(ROCTX_API_ID_roctxRangeStop, nullptr, range_id);
 }
 
-extern "C" ROCTX_EXPORT void roctxRegisterTracerCallback(const void* function) {
-  report_activity.store(reinterpret_cast<decltype(report_activity.load())>(function),
-                        std::memory_order_relaxed);
+extern "C" ROCTX_EXPORT void roctxRegisterTracerCallback(int (*function)(activity_domain_t domain,
+                                                                         uint32_t operation_id,
+                                                                         void* data)) {
+  report_activity.store(function, std::memory_order_relaxed);
 }
