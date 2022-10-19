@@ -1,4 +1,5 @@
 name: Ubuntu 18.04 (GCC, MPICH, Python)
+run-name: ubuntu-bionic
 
 on:
   push:

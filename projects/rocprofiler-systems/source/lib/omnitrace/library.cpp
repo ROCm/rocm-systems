@@ -51,6 +51,8 @@
 #include "library/timemory.hpp"
 #include "library/tracing.hpp"
 
+#include <timemory/signals/signal_handlers.hpp>
+#include <timemory/signals/types.hpp>
 #include <timemory/hash/types.hpp>
 #include <timemory/manager/manager.hpp>
 #include <timemory/operations/types/file_output_message.hpp>
@@ -629,6 +631,9 @@ omnitrace_finalize_hidden(void)
 
     OMNITRACE_VERBOSE_F(1, "omnitrace_push_trace :: called %zux\n", _push_count);
     OMNITRACE_VERBOSE_F(1, "omnitrace_pop_trace  :: called %zux\n", _pop_count);
+
+    tim::signals::enable_signal_detection({ tim::signals::sys_signal::Interrupt },
+                                          [](int) {});
 
     OMNITRACE_DEBUG_F("Copying over all timemory hash information to main thread...\n");
     // copy these over so that all hashes are known

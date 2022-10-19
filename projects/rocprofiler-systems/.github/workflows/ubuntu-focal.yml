@@ -1,4 +1,5 @@
 name: Ubuntu 20.04 (GCC, Python, ROCm, MPICH, OpenMPI)
+run-name: ubuntu-focal
 
 on:
   push:

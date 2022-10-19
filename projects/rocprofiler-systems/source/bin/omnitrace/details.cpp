@@ -61,7 +61,7 @@ get_whole_function_names()
         "ncclCommUserRank", "ncclReduce", "ncclBcast", "ncclBroadcast", "ncclAllReduce",
         "ncclReduceScatter", "ncclAllGather", "ncclGroupStart", "ncclGroupEnd",
         "ncclSend", "ncclRecv", "ncclGather", "ncclScatter", "ncclAllToAll",
-        "ncclAllToAllv"
+        "ncclAllToAllv", "ncclSocketAccept"
     };
 }
 

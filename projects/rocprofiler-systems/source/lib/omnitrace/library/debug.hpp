@@ -30,6 +30,7 @@
 #include <timemory/backends/threading.hpp>
 #include <timemory/log/logger.hpp>
 #include <timemory/mpl/concepts.hpp>
+#include <timemory/signals/signal_handlers.hpp>
 #include <timemory/utility/backtrace.hpp>
 #include <timemory/utility/locking.hpp>
 #include <timemory/utility/utility.hpp>

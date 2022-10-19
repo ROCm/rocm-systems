@@ -1,5 +1,6 @@
 
 name: Formatting
+run-name: formatting
 
 on:
   push:

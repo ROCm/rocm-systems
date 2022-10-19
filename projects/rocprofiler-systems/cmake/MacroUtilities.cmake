@@ -782,7 +782,7 @@ function(OMNITRACE_BUILDTREE_TPL _TPL_TARGET _NEW_NAME _BUILD_TREE_DIR)
     # build tree symbolic links
     add_custom_target(
         ${_NEW_NAME}-build-tree-library${_TAIL} ALL
-        ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:${_TPL_TARGET}>
+        ${CMAKE_COMMAND} -E create_symlink $<TARGET_FILE:${_TPL_TARGET}>
         ${_TPL_PREFIX}${_NEW_NAME}${_TPL_SUFFIX}.${_TPL_VERSION}
         COMMAND
             ${CMAKE_COMMAND} -E create_symlink

@@ -1,4 +1,5 @@
-name: ci-containers
+name: Continuous Integration Containers
+run-name: ci-containers
 
 # nightly build
 on:

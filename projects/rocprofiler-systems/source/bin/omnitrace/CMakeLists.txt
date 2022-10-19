@@ -30,7 +30,8 @@ target_link_libraries(
             omnitrace::omnitrace-compile-definitions
             omnitrace::omnitrace-sanitizer
             timemory::timemory-headers
-            timemory::timemory-extensions)
+            timemory::timemory-extensions
+            timemory::timemory-core)
 
 set_target_properties(
     omnitrace-exe

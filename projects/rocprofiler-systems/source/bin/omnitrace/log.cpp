@@ -91,7 +91,8 @@ log_entry::add_log_entry(log_entry&& _v)
 
 void
 print_log_entries(std::ostream& _os, int64_t _count,
-                  std::function<bool(const log_entry&)> _condition, const char* _color,
+                  const std::function<bool(const log_entry&)>& _condition,
+                  const std::function<void()>& _prelude, const char* _color,
                   bool _color_entries)
 {
     size_t i0 = (_count < 0) ? 0 : std::max<int64_t>(log_entries.size() - _count, 0);
@@ -106,6 +107,18 @@ print_log_entries(std::ostream& _os, int64_t _count,
 
     const char* _end =
         (strlen(_color) > 0 || _color_entries) ? tim::log::color::end() : "";
+
+    if(_prelude)
+    {
+        for(size_t i = i0; i < log_entries.size(); ++i)
+        {
+            if(!_condition || _condition(log_entries.at(i)))
+            {
+                _prelude();
+                break;
+            }
+        }
+    }
 
     // the requested number of log entries
     for(size_t i = i0; i < log_entries.size(); ++i)

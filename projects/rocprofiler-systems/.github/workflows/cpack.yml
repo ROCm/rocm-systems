@@ -1,4 +1,5 @@
-name: cpack
+name: Installer Packaging (CPack)
+run-name: cpack
 
 on:
   push:

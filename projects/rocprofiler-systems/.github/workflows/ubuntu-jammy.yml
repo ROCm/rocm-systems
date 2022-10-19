@@ -1,4 +1,5 @@
-name: Ubuntu 22.04 (GCC, Python)
+name: Ubuntu 22.04 (GCC, Python, ROCm)
+run-name: ubuntu-jammy
 
 on:
   push:
@@ -35,10 +36,29 @@ jobs:
         mpi-headers: ['ON', 'OFF']
         static-libgcc: ['OFF']
         static-libstdcxx: ['OFF']
+        build-dyninst: ['OFF']
+        rocm-version: ['0.0']
+        include:
+          - compiler: 'g++'
+            hip: 'ON'
+            mpi: 'OFF'
+            ompt: 'OFF'
+            papi: 'OFF'
+            python: 'ON'
+            lto: 'OFF'
+            strip: 'OFF'
+            hidden: 'ON'
+            build-type: 'Release'
+            mpi-headers: 'OFF'
+            static-libgcc: 'OFF'
+            static-libstdcxx: 'OFF'
+            build-dyninst: 'OFF'
+            rocm-version: '5.3'
 
     env:
       OMPI_ALLOW_RUN_AS_ROOT: 1
       OMPI_ALLOW_RUN_AS_ROOT_CONFIRM: 1
+      OMNITRACE_CI: 'ON'
 
     steps:
     - uses: actions/checkout@v3
@@ -54,6 +74,20 @@ jobs:
         python3 -m pip install numpy &&
         python3 -m pip install 'cmake==3.21.4' &&
         for i in 6 7 8 9 10; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy perfetto dataclasses; done
+
+    - name: Install ROCm Packages
+      timeout-minutes: 10
+      if: ${{ matrix.rocm-version != '0.0' }}
+      shell: bash
+      run: |
+        wget -q -O - https://repo.radeon.com/rocm/rocm.gpg.key | apt-key add -
+        echo "deb [arch=amd64] https://repo.radeon.com/rocm/apt/${{ matrix.rocm-version }}/ jammy main" | tee /etc/apt/sources.list.d/rocm.list
+        apt-get update
+        apt-get install -y {rocm-hip-sdk,roctracer-dev,rocprofiler-dev,rocm-smi-lib,rocminfo}${{ matrix.rocm-version }}.0
+        echo "/opt/rocm/bin" >> $GITHUB_PATH
+        echo "ROCM_PATH=/opt/rocm" >> $GITHUB_ENV
+        echo "LD_LIBRARY_PATH=/opt/rocm/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
+        /opt/rocm/bin/hipcc -O3 -c ./examples/transpose/transpose.cpp -o /tmp/transpose.o
 
     - name: Test Environment Modules
       timeout-minutes: 15
@@ -85,13 +119,14 @@ jobs:
           -DOMNITRACE_USE_PAPI=${{ matrix.papi }}
           -DOMNITRACE_USE_PYTHON=${{ matrix.python }}
           -DOMNITRACE_USE_MPI_HEADERS=${{ matrix.mpi-headers }}
-          -DOMNITRACE_STRIP_LIBRARIES=${{ matrix.strip }}
           -DOMNITRACE_BUILD_LTO=${{ matrix.lto }}
+          -DOMNITRACE_BUILD_DYNINST=${{ matrix.build-dyninst }}
           -DOMNITRACE_BUILD_HIDDEN_VISIBILITY=${{ matrix.hidden }}
           -DOMNITRACE_BUILD_STATIC_LIBGCC=${{ matrix.static-libgcc }}
           -DOMNITRACE_BUILD_STATIC_LIBSTDCXX=${{ matrix.static-libstdcxx }}
           -DOMNITRACE_PYTHON_PREFIX=/opt/conda/envs
           -DOMNITRACE_PYTHON_ENVS="py3.6;py3.7;py3.8;py3.9;py3.10"
+          -DOMNITRACE_STRIP_LIBRARIES=${{ matrix.strip }}
           -DUSE_CLANG_OMP=OFF
 
     - name: Build

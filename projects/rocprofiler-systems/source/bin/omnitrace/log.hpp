@@ -39,7 +39,8 @@ struct log_entry;
 
 void
 print_log_entries(std::ostream& = std::cerr, int64_t _count = 10,
-                  std::function<bool(const log_entry&)> _cond = {},
+                  const std::function<bool(const log_entry&)>& _cond    = {},
+                  const std::function<void()>&                 _prelude = {},
                   const char* _color         = tim::log::color::warning(),
                   bool        _color_entries = true);
 

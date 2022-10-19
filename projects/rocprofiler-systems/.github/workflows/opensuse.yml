@@ -1,4 +1,5 @@
 name: OpenSUSE 15 (GCC, Python)
+run-name: opensuse-15
 
 on:
   push:

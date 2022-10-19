@@ -220,8 +220,10 @@ endif()
 # developer build flags
 #
 if(OMNITRACE_BUILD_DEVELOPER)
-    add_target_flag_if_avail(omnitrace-compile-options "-Werror" "-Wdouble-promotion"
-                             "-Wshadow" "-Wextra" "-Wpedantic" "/showIncludes")
+    add_target_flag_if_avail(
+        omnitrace-compile-options "-Werror" "-Wdouble-promotion" "-Wshadow" "-Wextra"
+        "-Wpedantic" "-Wstack-usage=524288" # 512 KB
+        "/showIncludes")
 endif()
 
 # ----------------------------------------------------------------------------------------#

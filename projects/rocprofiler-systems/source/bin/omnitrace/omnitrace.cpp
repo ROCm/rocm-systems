@@ -212,16 +212,24 @@ main(int argc, char** argv)
               sys_signal::SegFault, sys_signal::FileSize, sys_signal::CPUtime })
             signal_settings::enable(itr);
 
-        auto _exit_action = [](int nsig) {
+        static bool _protect     = false;
+        auto        _exit_action = [](int nsig) {
+            if(_protect) return;
+            _protect = true;
             TIMEMORY_PRINTF_FATAL(
                 stderr, "omnitrace exited with signal %i :: %s\n", nsig,
                 signal_settings::str(static_cast<sys_signal>(nsig)).c_str());
 
+            // print the last log entries
             print_log_entries(std::cerr, num_log_entries);
 
-            std::cerr << "\n[omnitrace][exe] Potentially important log entries\n\n";
-
-            print_log_entries(std::cerr, -1, [](const auto& _v) { return _v.forced(); });
+            // print any forced entries
+            print_log_entries(
+                std::cerr, -1, [](const auto& _v) { return _v.forced(); },
+                []() {
+                    tim::log::stream(std::cerr, tim::log::color::info())
+                        << "\n[omnitrace][exe] Potentially important log entries:\n\n";
+                });
 
             TIMEMORY_PRINTF_FATAL(stderr, "\n");
             TIMEMORY_PRINTF_FATAL(
@@ -235,6 +243,7 @@ main(int argc, char** argv)
             log_ofs.reset();
 
             kill(process::get_id(), nsig);
+            _protect = false;
         };
 
         signal_settings::set_exit_action(_exit_action);
@@ -1064,7 +1073,7 @@ main(int argc, char** argv)
         if(!tim::filepath::open(*log_ofs, logfile))
             throw std::runtime_error(JOIN(" ", "Error opening log output file", logfile));
         verbprintf_bare(0, "Done\n%s", ::tim::log::color::end());
-        print_log_entries(*log_ofs, -1, {}, "", false);
+        print_log_entries(*log_ofs, -1, {}, {}, "", false);
     }
 
     //----------------------------------------------------------------------------------//
