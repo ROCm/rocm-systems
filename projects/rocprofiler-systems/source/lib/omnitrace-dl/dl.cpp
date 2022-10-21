@@ -963,7 +963,7 @@ omnitrace_preload()
 
     if(_preload)
     {
-        reset_omnitrace_preload();
+        // reset_omnitrace_preload();
         omnitrace_preinit_library();
         OMNITRACE_DL_LOG(1, "[%s] invoking %s(%s)\n", __FUNCTION__, "omnitrace_init",
                          ::omnitrace::join(::omnitrace::QuoteStrings{}, ", ", "sampling",

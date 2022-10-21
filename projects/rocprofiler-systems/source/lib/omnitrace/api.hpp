@@ -43,6 +43,9 @@ extern "C"
     /// shuts down all tooling and generates output
     void omnitrace_finalize(void) OMNITRACE_PUBLIC_API;
 
+    /// remove libomnitrace from LD_PRELOAD
+    void omnitrace_reset_preload(void) OMNITRACE_PUBLIC_API;
+
     /// sets an environment variable
     void omnitrace_set_env(const char* env_name,
                            const char* env_val) OMNITRACE_PUBLIC_API;
@@ -76,6 +79,7 @@ extern "C"
     bool omnitrace_init_tooling_hidden(void) OMNITRACE_HIDDEN_API;
     void omnitrace_init_hidden(const char*, bool, const char*) OMNITRACE_HIDDEN_API;
     void omnitrace_finalize_hidden(void) OMNITRACE_HIDDEN_API;
+    void omnitrace_reset_preload_hidden(void) OMNITRACE_HIDDEN_API;
     void omnitrace_set_env_hidden(const char* env_name,
                                   const char* env_val) OMNITRACE_HIDDEN_API;
     void omnitrace_set_mpi_hidden(bool use, bool attached) OMNITRACE_HIDDEN_API;

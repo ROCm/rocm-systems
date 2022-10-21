@@ -91,6 +91,12 @@ omnitrace_finalize(void)
 }
 
 extern "C" void
+omnitrace_reset_preload(void)
+{
+    omnitrace_reset_preload_hidden();
+}
+
+extern "C" void
 omnitrace_set_env(const char* env_name, const char* env_val)
 {
     omnitrace_set_env_hidden(env_name, env_val);

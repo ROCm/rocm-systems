@@ -424,7 +424,7 @@ omnitrace_init_tooling_hidden()
     omnitrace_preinit_hidden();
 
     // start these gotchas once settings have been initialized
-    get_init_bundle()->start();
+    if(get_init_bundle()) get_init_bundle()->start();
 
     if(get_use_sampling()) sampling::block_signals();
 
@@ -565,6 +565,28 @@ omnitrace_init_hidden(const char* _mode, bool _is_binary_rewrite, const char* _a
 //======================================================================================//
 
 extern "C" void
+omnitrace_reset_preload_hidden(void)
+{
+    tim::set_env("OMNITRACE_PRELOAD", "0", 1);
+    auto&& _preload_libs = get_env("LD_PRELOAD", std::string{});
+    if(_preload_libs.find("libomnitrace") != std::string::npos)
+    {
+        auto _modified_preload = std::string{};
+        for(const auto& itr : delimit(_preload_libs, ":"))
+        {
+            if(itr.find("libomnitrace") != std::string::npos) continue;
+            _modified_preload += common::join("", ":", itr);
+        }
+        if(!_modified_preload.empty() && _modified_preload.find(':') == 0)
+            _modified_preload = _modified_preload.substr(1);
+
+        tim::set_env("LD_PRELOAD", _modified_preload, 1);
+    }
+}
+
+//======================================================================================//
+
+extern "C" void
 omnitrace_finalize_hidden(void)
 {
     // disable thread id recycling during finalization
@@ -589,6 +611,8 @@ omnitrace_finalize_hidden(void)
 
     tim::signals::block_signals(get_sampling_signals(),
                                 tim::signals::sigmask_scope::process);
+
+    omnitrace_reset_preload_hidden();
 
     // some functions called during finalization may alter the push/pop count so we need
     // to save them here
@@ -634,6 +658,13 @@ omnitrace_finalize_hidden(void)
 
     tim::signals::enable_signal_detection({ tim::signals::sys_signal::Interrupt },
                                           [](int) {});
+
+    std::string              _bundle_name = OMNITRACE_FUNCTION;
+    comp::user_global_bundle _bundle{ _bundle_name.c_str() };
+    _bundle.clear();
+    _bundle.insert<comp::wall_clock, comp::cpu_clock, comp::peak_rss, comp::page_rss,
+                   comp::cpu_util>();
+    _bundle.start();
 
     OMNITRACE_DEBUG_F("Copying over all timemory hash information to main thread...\n");
     // copy these over so that all hashes are known
@@ -928,6 +959,18 @@ omnitrace_finalize_hidden(void)
                                 get_perfetto_output_filename().c_str());
         }
     }
+
+    _bundle.stop();
+    auto _get_metric = [](auto* _v, std::string_view _tail) -> std::string {
+        return (_v) ? JOIN("", *_v, _tail) : std::string{};
+    };
+
+    OMNITRACE_VERBOSE_F(0, "Finalization metrics: %s%s%s%s%s\n",
+                        _get_metric(_bundle.get<comp::wall_clock>(), ", ").c_str(),
+                        _get_metric(_bundle.get<comp::peak_rss>(), ", ").c_str(),
+                        _get_metric(_bundle.get<comp::page_rss>(), ", ").c_str(),
+                        _get_metric(_bundle.get<comp::cpu_clock>(), ", ").c_str(),
+                        _get_metric(_bundle.get<comp::cpu_util>(), "").c_str());
 
     if(_timemory_manager && _timemory_manager != nullptr)
     {

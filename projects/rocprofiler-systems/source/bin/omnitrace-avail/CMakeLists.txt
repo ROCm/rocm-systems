@@ -31,6 +31,8 @@ set_target_properties(
     omnitrace-avail PROPERTIES BUILD_RPATH "\$ORIGIN:\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}"
                                INSTALL_RPATH "${OMNITRACE_EXE_INSTALL_RPATH}")
 
+omnitrace_strip_target(omnitrace-avail)
+
 install(
     TARGETS omnitrace-avail
     DESTINATION ${CMAKE_INSTALL_BINDIR}

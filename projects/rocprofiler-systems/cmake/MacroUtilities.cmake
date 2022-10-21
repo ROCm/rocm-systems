@@ -122,11 +122,11 @@ function(OMNITRACE_STRIP_TARGET _TARGET)
                 --keep-symbol="omnitrace_finalize" --keep-symbol="omnitrace_push_trace"
                 --keep-symbol="omnitrace_pop_trace" --keep-symbol="omnitrace_push_region"
                 --keep-symbol="omnitrace_pop_region" --keep-symbol="omnitrace_set_env"
-                --keep-symbol="omnitrace_set_mpi" --keep-symbol="omnitrace_user_*"
-                --keep-symbol="ompt_start_tool" --keep-symbol="kokkosp_*"
-                --keep-symbol="OnLoad" --keep-symbol="OnUnload"
-                --keep-symbol="OnLoadToolProp" --keep-symbol="OnUnloadTool" ${ARGN}
-                $<TARGET_FILE:${_TARGET}>
+                --keep-symbol="omnitrace_set_mpi" --keep-symbol="omnitrace_reset_preload"
+                --keep-symbol="omnitrace_user_*" --keep-symbol="ompt_start_tool"
+                --keep-symbol="kokkosp_*" --keep-symbol="OnLoad" --keep-symbol="OnUnload"
+                --keep-symbol="OnLoadToolProp" --keep-symbol="OnUnloadTool"
+                --keep-symbol="__libc_start_main" ${ARGN} $<TARGET_FILE:${_TARGET}>
             WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
             COMMENT "Stripping ${_TARGET}...")
     endif()

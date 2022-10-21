@@ -17,6 +17,8 @@ set_target_properties(
     omnitrace-sample PROPERTIES BUILD_RPATH "\$ORIGIN:\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}"
                                 INSTALL_RPATH "${OMNITRACE_EXE_INSTALL_RPATH}")
 
+omnitrace_strip_target(omnitrace-sample)
+
 install(
     TARGETS omnitrace-sample
     DESTINATION ${CMAKE_INSTALL_BINDIR}
