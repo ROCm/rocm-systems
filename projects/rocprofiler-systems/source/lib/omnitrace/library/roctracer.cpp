@@ -168,7 +168,8 @@ int64_t
 get_clock_skew()
 {
     static auto _use = tim::get_env("OMNITRACE_USE_ROCTRACER_CLOCK_SKEW", true);
-    static auto _v   = []() {
+    if(!_use) return 0;
+    static auto _v = []() {
         namespace cpu = tim::cpu;
         // synchronize timestamps
         // We'll take a CPU timestamp before and after taking a GPU timestmp, then
@@ -220,7 +221,7 @@ get_clock_skew()
         _diff /= _n;
         return _diff;
     }();
-    return (_use) ? _v : 0;
+    return _v;
 }
 
 // HSA API callback function
@@ -877,17 +878,33 @@ hip_activity_callback(const char* begin, const char* end, void*)
         static auto _op_id_names =
             std::array<const char*, 3>{ "DISPATCH", "COPY", "BARRIER" };
 
+        if(_end_ns < _beg_ns)
         {
-            static size_t _n = 0;
+            auto          _verbose = []() { return get_verbose() >= 0 || get_debug(); };
+            static size_t _n       = 0;
+            static size_t _nmax =
+                get_env<size_t>("OMNITRACE_ROCTRACER_DISCARD_INVALID", 10);
+            if(_nmax == 0) std::swap(_end_ns, _beg_ns);
             OMNITRACE_WARNING_IF_F(
-                _end_ns <= _beg_ns,
+                _n < _nmax && _verbose(),
                 "%4zu :: Discarding kernel roctracer activity record which ended before "
                 "it started :: %-20s :: %-20s :: cid=%lu, time_ns=(%12lu:%12lu) "
                 "delta=%li, device=%d, queue=%lu, pid=%u, tid=%lu, op=%s\n",
-                _n++, op_name, _name, record->correlation_id, _beg_ns, _end_ns,
+                _n, op_name, _name, record->correlation_id, _beg_ns, _end_ns,
                 (static_cast<int64_t>(_end_ns) - static_cast<int64_t>(_beg_ns)), _devid,
                 _queid, record->process_id, _tid, _op_id_names.at(record->op));
-            if(_end_ns <= _beg_ns) continue;
+            OMNITRACE_WARNING_IF_F(
+                _nmax > 0 && _n == _nmax && _verbose(),
+                "Suppressing future messages about discarding kernel roctracer activity "
+                "record which ended before it started. Set "
+                "OMNITRACE_ROCTRACER_DISCARD_INVALID=N to increase/decrease the number "
+                "of messages. If N is set to 0, data will be included after swapping the "
+                "begin and end values\n");
+            if(_end_ns < _beg_ns)
+            {
+                ++_n;
+                continue;
+            }
         }
 
         // execute this on this thread bc of how perfetto visualization works
