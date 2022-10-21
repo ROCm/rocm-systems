@@ -314,6 +314,10 @@ configure_settings(bool _init)
                              "Enable support for Kokkos Tools", false, "kokkos",
                              "backend");
 
+    OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_USE_MPIP",
+                             "Enable support for MPI functions", true, "mpi", "backend",
+                             "parallelism");
+
     OMNITRACE_CONFIG_SETTING(
         bool, "OMNITRACE_USE_RCCLP",
         "Enable support for ROCm Communication Collectives Library (RCCL) Performance",
@@ -504,11 +508,11 @@ configure_settings(bool _init)
         0, "sampling", "advanced");
 
     OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_ROCTRACER_HSA_ACTIVITY",
-                             "Enable HSA activity tracing support", true, "roctracer",
+                             "Enable HSA activity tracing support", false, "roctracer",
                              "rocm", "advanced");
 
     OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_ROCTRACER_HSA_API",
-                             "Enable HSA API tracing support", true, "roctracer", "rocm",
+                             "Enable HSA API tracing support", false, "roctracer", "rocm",
                              "advanced");
 
     OMNITRACE_CONFIG_SETTING(std::string, "OMNITRACE_ROCTRACER_HSA_API_TYPES",
@@ -772,11 +776,6 @@ configure_settings(bool _init)
                 OMNITRACE_BASIC_PRINT("config file '%s':\n%s\n", fitr.c_str(),
                                       _iss.str().c_str());
             }
-            if(!_iss.str().empty())
-            {
-                OMNITRACE_BASIC_PRINT("config file '%s':\n%s", itr.c_str(),
-                                      _iss.str().c_str());
-            }
         }
     }
 
@@ -792,6 +791,10 @@ configure_settings(bool _init)
         tim::timemory_init(_cmd, _parser, "omnitrace-");
         _settings_are_configured() = true;
     }
+
+#if !defined(OMNITRACE_USE_MPI) && !defined(OMNITRACE_USE_MPI_HEADERS)
+    set_setting_value("OMNITRACE_USE_MPIP", false);
+#endif
 
     _config->get_global_components() =
         _config->get<std::string>("OMNITRACE_TIMEMORY_COMPONENTS");
@@ -1524,8 +1527,8 @@ get_use_pid()
 bool&
 get_use_mpip()
 {
-    static bool _v = tim::get_env("OMNITRACE_USE_MPIP", true, false);
-    return _v;
+    static auto _v = get_config()->find("OMNITRACE_USE_MPIP");
+    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
 }
 
 bool&
