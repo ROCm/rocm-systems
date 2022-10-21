@@ -112,10 +112,23 @@ get_combined_hash(Arg0&& _zero, Arg1&& _one, Args&&... _args)
 bool
 entry::operator==(const entry& rhs) const
 {
+    if(device != rhs.device) return false;
+    if(cpu_cid != rhs.cpu_cid) return false;
+    if(gpu_cid != rhs.gpu_cid) return false;
+    if(hash != rhs.hash) return false;
+    if(tid != rhs.tid) return false;
+    if(devid != rhs.devid) return false;
+    if(queue_id != rhs.queue_id) return false;
+    if(depth != rhs.depth) return false;
+    if(priority != rhs.priority) return false;
+    if(pid != rhs.pid) return false;
+    return true;
+    /*
     return std::tie(device, depth, priority, devid, pid, tid, cpu_cid, gpu_cid, queue_id,
                     hash) == std::tie(rhs.device, rhs.depth, rhs.priority, rhs.devid,
                                       rhs.pid, rhs.tid, rhs.cpu_cid, rhs.gpu_cid,
                                       rhs.queue_id, rhs.hash);
+    */
 }
 
 bool
@@ -621,7 +634,8 @@ save_call_chain_json(const std::string& _fname, const std::string& _label,
                      const call_chain& _call_chain, bool _msg = false,
                      std::string _func = {})
 {
-    OMNITRACE_CT_DEBUG("[%s]\n", __FUNCTION__);
+    OMNITRACE_CT_DEBUG("[%s][%s] saving %zu call chain entries to '%s'\n", __FUNCTION__,
+                       _label.c_str(), _call_chain.size(), _fname.c_str());
 
     using perfstats_t =
         tim::lightweight_tuple<comp::wall_clock, comp::peak_rss, comp::page_rss>;
@@ -673,20 +687,25 @@ save_call_chain_json(const std::string& _fname, const std::string& _label,
 
 template <typename Tp, template <typename...> class ContainerT, typename... Args,
           typename FuncT = bool (*)(const Tp&, const Tp&)>
-inline Tp*
+inline auto
 find(
     const Tp& _v, ContainerT<Tp, Args...>& _vec,
     FuncT&& _func = [](const Tp& _lhs, const Tp& _rhs) { return (_lhs == _rhs); })
 {
-    for(auto& itr : _vec)
+    for(auto itr = _vec.begin(); itr != _vec.end(); ++itr)
     {
-        if(std::forward<FuncT>(_func)(_v, itr)) return &itr;
+        if(std::forward<FuncT>(_func)(_v, *itr))
+        {
+            return itr;
+        }
     }
-    return nullptr;
+    OMNITRACE_CT_DEBUG("[%s] no match found in %zu entries...\n", __FUNCTION__,
+                       _vec.size());
+    return _vec.end();
 }
 
 template <typename FuncT = bool (*)(const entry&, const entry&)>
-inline entry*
+inline auto
 find(
     const entry& _v, call_chain& _vec,
     FuncT&& _func = [](const entry& _lhs, const entry& _rhs) { return (_lhs == _rhs); })
@@ -717,13 +736,14 @@ squash_critical_path(call_chain& _targ)
         }
         else if(itr.phase == Phase::BEGIN)
         {
-            if(!find(itr, _squashed, _strict_equal)) _squashed.emplace_back(itr);
+            if(find(itr, _squashed, _strict_equal) == _squashed.end())
+                _squashed.emplace_back(itr);
         }
         else
         {
-            entry* _match = nullptr;
-            if((_match = find(itr, _squashed)) != nullptr)
-                *_match += itr;
+            auto mitr = find(itr, _squashed);
+            if(mitr != _squashed.end())
+                *mitr += itr;
             else
                 _squashed.emplace_back(itr);
         }
@@ -737,9 +757,18 @@ void
 combine_critical_path(call_chain& _targ, call_chain _chain)
 {
     OMNITRACE_CT_DEBUG("[%s]\n", __FUNCTION__);
+    OMNITRACE_CT_DEBUG("[%s] adding %zu entries to existing call-chain of %zu...\n",
+                       __FUNCTION__, _chain.size(), _targ.size());
+
+    // use a deque here because when combining _begin and _end, you end
+    // up erasing entries from the front of _begin. When _begin is large, it
+    // takes a lot of time to move all the elements each iteration
+    std::deque<entry> _begin{};
+    std::deque<entry> _end{};
+
     call_chain _delta{};
-    call_chain _begin{};
-    call_chain _end{};
+    _delta.reserve(_chain.size() / 2);  // estimated total deltas
+
     for(auto& itr : _chain)
     {
         if(itr.phase == Phase::DELTA)
@@ -747,14 +776,34 @@ combine_critical_path(call_chain& _targ, call_chain _chain)
         else if(itr.phase == Phase::BEGIN)
             _begin.emplace_back(itr);
         else if(itr.phase == Phase::END)
+            _end.emplace_back(itr);
+    }
+
+    OMNITRACE_CT_DEBUG("[%s] sorting %zu begin and %zu end call-chain entries...\n",
+                       __FUNCTION__, _begin.size(), _end.size());
+
+    std::sort(_begin.begin(), _begin.end());
+    std::sort(_end.begin(), _end.end());
+
+    std::deque<entry> _tmp{};
+    std::swap(_end, _tmp);
+    for(auto& eitr : _tmp)
+    {
+        auto mitr = find(eitr, _begin);
+        if(mitr == _begin.end())
+            _end.emplace_back(eitr);
+        else
         {
-            entry* _match = nullptr;
-            if((_match = find(itr, _begin)) != nullptr)
-                *_match += itr;
-            else
-                _end.emplace_back(itr);
+            *mitr += eitr;
+            _delta.emplace_back(*mitr);
+            _begin.erase(mitr);
         }
     }
+    _tmp.clear();
+
+    OMNITRACE_CT_DEBUG(
+        "[%s] %zu begin and %zu end call-chain entries were not matched...\n",
+        __FUNCTION__, _begin.size(), _end.size());
 
     call_chain _combined{};
     _combined.reserve(_delta.size() + _begin.size() + _end.size());
@@ -764,6 +813,10 @@ combine_critical_path(call_chain& _targ, call_chain _chain)
         _combined.emplace_back(itr);
     for(auto& itr : _end)
         _combined.emplace_back(itr);
+
+    OMNITRACE_CT_DEBUG("[%s] sorting %zu combined call-chain entries...\n", __FUNCTION__,
+                       _combined.size());
+
     std::sort(_combined.begin(), _combined.end());
 
     OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
@@ -777,7 +830,8 @@ combine_critical_path(call_chain& _targ, call_chain _chain)
 void
 update_critical_path(call_chain _chain, int64_t)
 {
-    OMNITRACE_CT_DEBUG("[%s]\n", __FUNCTION__);
+    OMNITRACE_CT_DEBUG("[%s] updating critical path with %zu entries...\n", __FUNCTION__,
+                       _chain.size());
     try
     {
         // remove any data not
@@ -847,35 +901,19 @@ compute_critical_trace()
 }  // namespace
 
 std::vector<std::pair<std::string, entry>>
-get_entries(int64_t _ts, const std::function<bool(const entry&)>& _eval)
+get_entries(const std::function<bool(const entry&)>& _eval)
 {
-    copy_hash_ids();
-    auto _func = [_eval, _ts](std::vector<std::pair<std::string, entry>>* _targ,
-                              size_t*                                     _avail) {
-        copy_hash_ids();
-        squash_critical_path(complete_call_chain);
-        *_avail = complete_call_chain.size();
-        std::vector<std::pair<std::string, entry>> _v{};
-        std::sort(complete_call_chain.begin(), complete_call_chain.end());
-        for(const auto& itr : complete_call_chain)
-        {
-            if(itr.phase != Phase::DELTA) continue;
-            if(itr.begin_ns <= _ts && itr.end_ns >= _ts)
-            {
-                if(_eval(itr)) _v.emplace_back(tim::get_hash_identifier(itr.hash), itr);
-            }
-        }
-        *_targ = _v;
-    };
     OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
-    size_t                                     _n = 0;
-    std::vector<std::pair<std::string, entry>> _v{};
-    if(!tasking::critical_trace::get_task_group().pool()) return _v;
-    std::unique_lock<std::mutex> _lk{ tasking_mutex };
-    tasking::critical_trace::get_task_group().exec(_func, &_v, &_n);
-    tasking::critical_trace::get_task_group().join();
-    OMNITRACE_DEBUG("critical_trace::%s :: found %zu out of %zu entries at %li...\n",
-                    __FUNCTION__, _v.size(), _n, _ts);
+    copy_hash_ids();
+    squash_critical_path(complete_call_chain);
+    std::sort(complete_call_chain.begin(), complete_call_chain.end());
+
+    auto _v = std::vector<std::pair<std::string, entry>>{};
+    for(const auto& itr : complete_call_chain)
+    {
+        if(itr.phase != Phase::DELTA) continue;
+        if(_eval(itr)) _v.emplace_back(tim::get_hash_identifier(itr.hash), itr);
+    }
     return _v;
 }
 

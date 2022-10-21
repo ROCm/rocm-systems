@@ -283,9 +283,9 @@ void
 compute(int64_t _tid = threading::get_id());
 
 std::vector<std::pair<std::string, entry>>
-get_entries(
-    int64_t                                  _ts,
-    const std::function<bool(const entry&)>& _eval = [](const entry&) { return true; });
+get_entries(const std::function<bool(const entry&)>& _eval = [](const entry&) {
+    return true;
+});
 
 struct id
 {};

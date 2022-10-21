@@ -287,15 +287,21 @@ data::post_process(uint32_t _dev_id)
     using samp_bundle_t = tim::lightweight_tuple<sampling_gpu_busy, sampling_gpu_temp,
                                                  sampling_gpu_power, sampling_gpu_memory>;
 
+    using entry_t     = critical_trace::entry;
+    auto _gpu_entries = critical_trace::get_entries(
+        [](const entry_t& _e) { return (_e.device == critical_trace::Device::GPU); });
+
     for(auto& itr : _rocm_smi)
     {
-        using entry_t = critical_trace::entry;
-        auto _ts      = itr.m_ts;
+        auto _ts = itr.m_ts;
         if(!_thread_info->is_valid_time(_ts)) continue;
 
-        auto _entries = critical_trace::get_entries(_ts, [](const entry_t& _e) {
-            return _e.device == critical_trace::Device::GPU;
-        });
+        auto _entries = std::vector<std::pair<std::string_view, const entry_t*>>{};
+        for(const auto& eitr : _gpu_entries)
+        {
+            if(_ts >= eitr.second.begin_ns && _ts <= eitr.second.end_ns)
+                _entries.emplace_back(std::string_view{ eitr.first }, &eitr.second);
+        }
 
         std::vector<samp_bundle_t> _tc{};
         _tc.reserve(_entries.size());
