@@ -249,8 +249,9 @@ category_region<CategoryT>::audit(const gotcha_data_t& _data, audit::incoming,
                                   Args&&... _args)
 {
     start<OptsT...>(_data.tool_id.c_str(), [&](perfetto::EventContext ctx) {
+        int64_t _n = 0;
         OMNITRACE_FOLD_EXPRESSION(tracing::add_perfetto_annotation(
-            ctx, tim::try_demangle<std::remove_reference_t<Args>>(), _args));
+            ctx, tim::try_demangle<std::remove_reference_t<Args>>(), _args, _n++));
     });
 }
 
@@ -270,8 +271,9 @@ category_region<CategoryT>::audit(std::string_view _name, audit::incoming,
                                   Args&&... _args)
 {
     start<OptsT...>(_name.data(), [&](perfetto::EventContext ctx) {
+        int64_t _n = 0;
         OMNITRACE_FOLD_EXPRESSION(tracing::add_perfetto_annotation(
-            ctx, tim::try_demangle<std::remove_reference_t<Args>>(), _args));
+            ctx, tim::try_demangle<std::remove_reference_t<Args>>(), _args, _n++));
     });
 }
 

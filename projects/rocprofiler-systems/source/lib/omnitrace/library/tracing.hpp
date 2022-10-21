@@ -202,7 +202,8 @@ pop_timemory(CategoryT, const char* name, Args&&... args)
 
 template <typename Np, typename Tp>
 auto
-add_perfetto_annotation(perfetto::EventContext& ctx, Np&& _name, Tp&& _val)
+add_perfetto_annotation(perfetto::EventContext& ctx, Np&& _name, Tp&& _val,
+                        int64_t _idx = -1)
 {
     using named_type = std::remove_reference_t<std::remove_cv_t<std::decay_t<Np>>>;
     using value_type = std::remove_reference_t<std::remove_cv_t<std::decay_t<Tp>>>;
@@ -212,7 +213,15 @@ add_perfetto_annotation(perfetto::EventContext& ctx, Np&& _name, Tp&& _val)
 
     auto _get_dbg = [&]() {
         auto* _dbg = ctx.event()->add_debug_annotations();
-        _dbg->set_name(std::string_view{ std::forward<Np>(_name) }.data());
+        if(_idx >= 0)
+        {
+            auto _arg_name = JOIN("", "arg", _idx, "-", std::forward<Np>(_name));
+            _dbg->set_name(_arg_name);
+        }
+        else
+        {
+            _dbg->set_name(std::string_view{ std::forward<Np>(_name) }.data());
+        }
         return _dbg;
     };
 
