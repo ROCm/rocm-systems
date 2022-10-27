@@ -154,6 +154,15 @@ if(OMNITRACE_CI_MPI_RUN_AS_ROOT)
     endif()
 endif()
 
+execute_process(
+    COMMAND ${MPIEXEC_EXECUTABLE} --oversubscribe -n 1 ls
+    RESULT_VARIABLE _mpiexec_oversubscribe
+    OUTPUT_QUIET ERROR_QUIET)
+
+if(_mpiexec_oversubscribe EQUAL 0)
+    list(APPEND MPIEXEC_EXECUTABLE_ARGS --oversubscribe)
+endif()
+
 # -------------------------------------------------------------------------------------- #
 
 set(_VALID_GPU OFF)

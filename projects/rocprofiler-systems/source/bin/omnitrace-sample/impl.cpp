@@ -65,12 +65,6 @@ auto original_envs = std::set<std::string>{};
 }  // namespace
 
 std::string
-get_command(const char* _argv0)
-{
-    return omnitrace::path::find_path(_argv0, 0, omnitrace::common::get_env("PATH", ""));
-}
-
-std::string
 get_realpath(const std::string& _v)
 {
     auto* _tmp = realpath(_v.c_str(), nullptr);

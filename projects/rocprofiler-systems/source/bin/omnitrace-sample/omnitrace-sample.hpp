@@ -27,9 +27,6 @@
 #include <vector>
 
 std::string
-get_command(const char*);
-
-std::string
 get_realpath(const std::string&);
 
 void

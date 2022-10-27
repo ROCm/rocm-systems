@@ -56,11 +56,10 @@ main(int argc, char** argv)
 
     if(!_argv.empty())
     {
-        std::string _argv0 = get_command(_argv[0]);
         print_command(_argv);
         _argv.emplace_back(nullptr);
         _env.emplace_back(nullptr);
 
-        return execve(_argv0.c_str(), _argv.data(), _env.data());
+        return execvpe(_argv.front(), _argv.data(), _env.data());
     }
 }
