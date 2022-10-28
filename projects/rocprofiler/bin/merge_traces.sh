@@ -24,8 +24,7 @@
 
 #A script to merge rocprof traces and then provide a results.json for the aggregate numbers.
 
-ROCPROF=`which rocprof`
-BIN_DIR=$(dirname $(realpath ${ROCPROF:-/opt/rocm/bin/rocprof}))
+BIN_DIR=$(dirname $(realpath ${BASH_SOURCE[0]}))
 
 bin_name=`basename $0`
 
