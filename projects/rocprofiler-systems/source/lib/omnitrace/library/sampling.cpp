@@ -421,7 +421,7 @@ configure(bool _setup, int64_t _tid)
             auto _freq =
                 std::max<double>(get_sampling_cpu_freq(), get_sampling_real_freq());
             auto _period = (1.0 / _freq) * units::sec;
-            _period      = std::max<double>(_period, 1.0e9);  // max of 1 second
+            _period      = std::min<double>(_period, 1.0e9);  // max of 1 second
             std::this_thread::sleep_for(
                 std::chrono::nanoseconds{ static_cast<int64_t>(_period) });
 

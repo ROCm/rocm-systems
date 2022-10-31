@@ -24,6 +24,7 @@
 
 #include "api.hpp"
 #include "library/config.hpp"
+#include "library/debug.hpp"
 #include "library/perfetto.hpp"
 
 #include <timemory/hash/types.hpp>
@@ -57,6 +58,8 @@ main(int argc, char** argv)
     config::set_setting_value<int64_t>("OMNITRACE_THREAD_POOL_SIZE",
                                        std::thread::hardware_concurrency());
     config::set_setting_value("OMNITRACE_CRITICAL_TRACE_SERIALIZE_NAMES", true);
+    config::set_setting_value("OMNITRACE_USE_PID", false);
+    config::set_setting_value("OMNITRACE_TIME_OUTPUT", false);
 
     if(config::get_verbose() >= 0)
     {
@@ -70,8 +73,12 @@ main(int argc, char** argv)
     {
         critical_trace::complete_call_chain = {};
         OMNITRACE_BASIC_PRINT_F("Loading call-chain %s...\n", argv[i]);
-        critical_trace::load_call_chain(argv[i], "call_chain",
-                                        critical_trace::complete_call_chain);
+        if(!critical_trace::load_call_chain(argv[i], "call_chain",
+                                            critical_trace::complete_call_chain))
+        {
+            OMNITRACE_THROW("Error loading '%s'. Data size: %zu\n", argv[i],
+                            critical_trace::complete_call_chain.size());
+        }
         for(const auto& itr : *tim::get_hash_ids())
             critical_trace::complete_hash_ids.emplace(itr.second);
         OMNITRACE_BASIC_PRINT_F("Computing critical trace for %s...\n", argv[i]);
@@ -369,22 +376,28 @@ save_call_chain_json(const std::string& _fname, const std::string& _label,
     }
 }
 
-void
+bool
 load_call_chain(const std::string& _fname, const std::string& _label,
                 call_chain& _call_chain)
 {
+    namespace cereal = tim::cereal;
+
     std::ifstream ifs{};
     ifs.open(_fname);
-    if(ifs && ifs.is_open())
-    {
-        namespace cereal = tim::cereal;
-        auto ar          = tim::policy::input_archive<cereal::JSONInputArchive>::get(ifs);
 
-        ar->setNextName("omnitrace");
-        ar->startNode();
-        (*ar)(cereal::make_nvp(_label.c_str(), _call_chain));
-        ar->finishNode();
-    }
+    OMNITRACE_CONDITIONAL_THROW(!ifs || !ifs.is_open(),
+                                "Error! call-chain file '%s' could not be opened",
+                                _fname.c_str());
+
+    auto ar   = tim::policy::input_archive<cereal::JSONInputArchive>::get(ifs);
+    auto _val = call_chain{};
+    ar->setNextName("omnitrace");
+    ar->startNode();
+    (*ar)(cereal::make_nvp(_label.c_str(), _val));
+    ar->finishNode();
+    auto _success = (_val.empty() == false);
+    if(_success) std::swap(_call_chain, _val);
+    return _success;
 }
 
 auto
@@ -484,6 +497,7 @@ find_children(PTL::ThreadPool& _tp, call_graph_t& _graph, const call_chain& _cha
         return !_data.empty();
     };
 
+    OMNITRACE_CT_DEBUG_F("Checking index at -1...\n");
     if(!_indexed.at(-1).empty())
     {
         OMNITRACE_CT_DEBUG_F("Setting root (line %i)...\n", __LINE__);
@@ -856,7 +870,7 @@ compute_critical_trace()
 
     OMNITRACE_BASIC_PRINT("\n");
 
-    try
+    // try
     {
         PTL::ThreadPool _tp{ get_thread_pool_size(), []() { copy_hash_ids(); }, []() {} };
         _tp.set_verbose(-1);
@@ -970,11 +984,11 @@ compute_critical_trace()
 
         _tg.join();
         _tp.destroy_threadpool();
-    } catch(std::exception& e)
+    }  // catch(std::exception& e)
     {
-        OMNITRACE_BASIC_PRINT("Thread exited '%s' with exception: %s\n", __FUNCTION__,
-                              e.what());
-        TIMEMORY_CONDITIONAL_DEMANGLED_BACKTRACE(true, 32);
+        // OMNITRACE_BASIC_PRINT("Thread exited '%s' with exception: %s\n", __FUNCTION__,
+        //                      e.what());
+        // TIMEMORY_CONDITIONAL_DEMANGLED_BACKTRACE(true, 32);
     }
 
     _report_perf(_ct_perf, __FUNCTION__, "critical trace computation");

@@ -16,3 +16,23 @@ if(OMNITRACE_INSTALL_EXAMPLES)
         DESTINATION bin
         COMPONENT omnitrace-examples)
 endif()
+
+set(PYTHON_FILES code-coverage.py)
+
+find_package(Python3 COMPONENTS Interpreter)
+
+if(Python3_FOUND)
+    set(PYTHON_EXECUTABLE "${Python3_EXECUTABLE}")
+
+    foreach(_FILE ${PYTHON_FILES})
+        configure_file(${PROJECT_SOURCE_DIR}/${_FILE} ${PROJECT_BINARY_DIR}/${_FILE}
+                       @ONLY)
+
+        if(OMNITRACE_INSTALL_EXAMPLES)
+            install(
+                PROGRAMS ${PROJECT_BINARY_DIR}/${_FILE}
+                DESTINATION bin
+                COMPONENT omnitrace-examples)
+        endif()
+    endforeach()
+endif()

@@ -137,26 +137,6 @@ PYBIND11_MODULE(libpyomnitrace, omni)
         "Initialize omnitrace");
 
     omni.def(
-        "initialize",
-        [](const std::string& _v) {
-            if(_is_initialized)
-                throw std::runtime_error("Error! omnitrace is already initialized");
-            _is_initialized = true;
-            bool _use_mpi   = false;
-            try
-            {
-                py::module::import("mpi4py");
-                _use_mpi = true;
-            } catch(py::error_already_set& _exc)
-            {
-                if(!_exc.matches(PyExc_ImportError)) throw;
-            }
-            omnitrace_set_mpi(_use_mpi, false);
-            omnitrace_init("trace", false, _v.c_str());
-        },
-        "Initialize omnitrace");
-
-    omni.def(
         "finalize",
         []() {
             if(_is_finalized)

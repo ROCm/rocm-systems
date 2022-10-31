@@ -66,6 +66,20 @@ set(_lock_environment
     "OMNITRACE_TIMELINE_PROFILE=OFF"
     "${_test_library_path}")
 
+set(_critical_trace_environment
+    "OMNITRACE_VERBOSE=2"
+    "OMNITRACE_USE_SAMPLING=OFF"
+    "OMNITRACE_USE_PROCESS_SAMPLING=OFF"
+    "OMNITRACE_CRITICAL_TRACE=ON"
+    "OMNITRACE_CRITICAL_TRACE_DEBUG=ON"
+    "OMNITRACE_TRACE_THREAD_LOCKS=ON"
+    "OMNITRACE_TRACE_THREAD_SPIN_LOCKS=ON"
+    "OMNITRACE_TRACE_THREAD_RW_LOCKS=ON"
+    "OMNITRACE_COUT_OUTPUT=ON"
+    "OMNITRACE_TIME_OUTPUT=OFF"
+    "OMNITRACE_TIMELINE_PROFILE=OFF"
+    "${_test_library_path}")
+
 set(_ompt_environment
     "OMNITRACE_USE_PERFETTO=ON"
     "OMNITRACE_USE_TIMEMORY=ON"
@@ -396,11 +410,14 @@ function(OMNITRACE_ADD_TEST)
             baseline preload binary-rewrite binary-rewrite-run binary-rewrite-sampling
             binary-rewrite-sampling-run runtime-instrument runtime-instrument-sampling)
             string(REGEX REPLACE "-run(-|/)" "\\1" _prefix "${TEST_NAME}-${_TEST}/")
-            set(_labels "${TEST_LABELS}" "${_TEST}")
+            set(_labels "${_TEST}")
             string(REPLACE "-run" "" _labels "${_TEST}")
             string(REPLACE "-sampling" ";sampling" _labels "${_labels}")
             if(TEST_TARGET)
                 list(APPEND _labels "${TEST_TARGET}")
+            endif()
+            if(TEST_LABELS)
+                list(APPEND _labels "${TEST_LABELS}")
             endif()
 
             set(_environ
@@ -840,6 +857,35 @@ if(OMNITRACE_USE_MPI OR OMNITRACE_USE_MPI_HEADERS)
         REWRITE_RUN_PASS_REGEX
             ">>> main(.*\n.*)>>> MPI_Init_thread(.*\n.*)>>> pthread_create(.*\n.*)>>> MPI_Comm_size(.*\n.*)>>> MPI_Comm_rank(.*\n.*)>>> MPI_Barrier(.*\n.*)>>> MPI_Alltoall"
         )
+
+    set(_mpip_environment
+        "OMNITRACE_USE_PERFETTO=ON"
+        "OMNITRACE_USE_TIMEMORY=ON"
+        "OMNITRACE_USE_SAMPLING=OFF"
+        "OMNITRACE_USE_PROCESS_SAMPLING=OFF"
+        "OMNITRACE_TIME_OUTPUT=OFF"
+        "OMNITRACE_FILE_OUTPUT=ON"
+        "OMNITRACE_USE_MPIP=ON"
+        "OMNITRACE_DEBUG=ON"
+        "OMNITRACE_VERBOSE=3"
+        "OMNITRACE_DL_VERBOSE=3"
+        "OMNITRACE_SAMPLING_DELAY=1"
+        "OMNITRACE_SAMPLING_FREQ=0.001"
+        "${_test_openmp_env}"
+        "${_test_library_path}")
+
+    foreach(_EXAMPLE all2all allgather allreduce bcast reduce scatter-gather send-recv)
+        omnitrace_add_test(
+            SKIP_RUNTIME SKIP_SAMPLING
+            NAME "mpi-${_EXAMPLE}"
+            TARGET mpi-${_EXAMPLE}
+            MPI ON
+            NUM_PROCS 2
+            LABELS "mpip"
+            REWRITE_ARGS -e -v 2 --label file line --min-instructions 0
+            RUN_ARGS 30
+            ENVIRONMENT "${_mpip_environment}")
+    endforeach()
 endif()
 
 omnitrace_add_test(
@@ -1039,7 +1085,7 @@ omnitrace_add_test(
     PRELOAD_PASS_REGEX "${_ompt_preload_samp_regex}(.*)${_ompt_preload_file_regex}")
 
 omnitrace_add_test(
-    SKIP_BASELINE SKIP_SAMPLING
+    SKIP_BASELINE SKIP_SAMPLING SKIP_PRELOAD
     NAME code-coverage
     TARGET code-coverage
     REWRITE_ARGS
@@ -1078,7 +1124,7 @@ omnitrace_add_test(
     REWRITE_RUN_PASS_REGEX "(\\\[[0-9]+\\\]) code coverage     ::  66.67%")
 
 omnitrace_add_test(
-    SKIP_BASELINE SKIP_SAMPLING
+    SKIP_BASELINE SKIP_SAMPLING SKIP_PRELOAD
     NAME code-coverage-hybrid
     TARGET code-coverage
     REWRITE_ARGS -e -v 2 --min-instructions=4 -E ^std:: --coverage function
@@ -1105,7 +1151,7 @@ omnitrace_add_test(
     REWRITE_RUN_PASS_REGEX "(\\\[[0-9]+\\\]) code coverage     ::  66.67%")
 
 omnitrace_add_test(
-    SKIP_BASELINE SKIP_SAMPLING
+    SKIP_BASELINE SKIP_SAMPLING SKIP_PRELOAD
     NAME code-coverage-basic-blocks
     TARGET code-coverage
     REWRITE_ARGS
@@ -1144,7 +1190,7 @@ omnitrace_add_test(
     REWRITE_RUN_PASS_REGEX "(\\\[[0-9]+\\\]) function coverage ::  66.67%")
 
 omnitrace_add_test(
-    SKIP_BASELINE SKIP_SAMPLING
+    SKIP_BASELINE SKIP_SAMPLING SKIP_PRELOAD
     NAME code-coverage-basic-blocks-hybrid
     TARGET code-coverage
     REWRITE_ARGS -e -v 2 --min-instructions=4 -E ^std:: --coverage basic_block
@@ -1169,6 +1215,60 @@ omnitrace_add_test(
     ENVIRONMENT "${_base_environment}"
     RUNTIME_PASS_REGEX "(\\\[[0-9]+\\\]) function coverage ::  66.67%"
     REWRITE_RUN_PASS_REGEX "(\\\[[0-9]+\\\]) function coverage ::  66.67%")
+
+# -------------------------------------------------------------------------------------- #
+#
+# critical-trace tests
+#
+# -------------------------------------------------------------------------------------- #
+
+omnitrace_add_test(
+    SKIP_BASELINE SKIP_RUNTIME SKIP_SAMPLING SKIP_PRELOAD
+    NAME parallel-overhead-critical-trace
+    TARGET parallel-overhead
+    LABELS "critical-trace"
+    REWRITE_ARGS
+        -e
+        -i
+        8
+        -E
+        "^fib"
+        -v
+        2
+        --print-instrumented
+        functions
+    RUN_ARGS 10 4 100
+    ENVIRONMENT "${_critical_trace_environment}")
+
+add_test(
+    NAME parallel-overhead-process-critical-trace
+    COMMAND
+        $<TARGET_FILE:omnitrace-critical-trace>
+        ${PROJECT_BINARY_DIR}/omnitrace-tests-output/parallel-overhead-critical-trace-binary-rewrite/call-chain.json
+    WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
+
+set(_parallel_overhead_critical_trace_environ
+    "OMNITRACE_OUTPUT_PATH=omnitrace-tests-output"
+    "OMNITRACE_OUTPUT_PREFIX=parallel-overhead-critical-trace/"
+    "OMNITRACE_CRITICAL_TRACE_DEBUG=ON"
+    "OMNITRACE_VERBOSE=4"
+    "OMNITRACE_DEBUG=ON"
+    "OMNITRACE_USE_PID=OFF"
+    "OMNITRACE_TIME_OUTPUT=OFF")
+
+set_tests_properties(
+    parallel-overhead-process-critical-trace
+    PROPERTIES
+        ENVIRONMENT
+        "${_parallel_overhead_critical_trace_environ}"
+        TIMEOUT
+        300
+        LABELS
+        "parallel-overhead;critical-trace"
+        PASS_REGULAR_EXPRESSION
+        "Outputting.*(critical-trace-cpu.json).*Outputting.*(critical-trace-any.json)"
+        DEPENDS
+        parallel-overhead-critical-trace-binary-rewrite-run)
 
 # -------------------------------------------------------------------------------------- #
 #
@@ -1339,6 +1439,24 @@ foreach(_VERSION ${OMNITRACE_PYTHON_VERSIONS})
         PYTHON_VERSION ${_VERSION}
         FILE ${CMAKE_SOURCE_DIR}/examples/python/source.py
         RUN_ARGS -v 5 -n 5 -s 3
+        ENVIRONMENT "${_python_environment}")
+
+    omnitrace_add_python_test(
+        STANDALONE
+        NAME python-code-coverage
+        PYTHON_EXECUTABLE ${_PYTHON_EXECUTABLE}
+        PYTHON_VERSION ${_VERSION}
+        FILE ${CMAKE_SOURCE_DIR}/examples/code-coverage/code-coverage.py
+        RUN_ARGS
+            -i
+            ${PROJECT_BINARY_DIR}/omnitrace-tests-output/code-coverage-basic-blocks-binary-rewrite/coverage.json
+            ${PROJECT_BINARY_DIR}/omnitrace-tests-output/code-coverage-basic-blocks-hybrid-runtime-instrument/coverage.json
+            -o
+            ${PROJECT_BINARY_DIR}/omnitrace-tests-output/code-coverage-basic-blocks-summary/coverage.json
+        DEPENDS code-coverage-basic-blocks-binary-rewrite
+                code-coverage-basic-blocks-binary-rewrite-run
+                code-coverage-basic-blocks-hybrid-runtime-instrument
+        LABELS "code-coverage"
         ENVIRONMENT "${_python_environment}")
 
     # ---------------------------------------------------------------------------------- #

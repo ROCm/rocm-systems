@@ -161,7 +161,9 @@ extern "C"
                 for(auto& itr : _maps)
                 {
                     auto&& _path = itr.pathname;
-                    if(!_path.empty() && _path.at(0) != '[') _libs.emplace(_path);
+                    if(!_path.empty() && _path.at(0) != '[' &&
+                       omnitrace::filepath::exists(_path))
+                        _libs.emplace(_path);
                 }
                 for(const auto& itr : _libs)
                 {

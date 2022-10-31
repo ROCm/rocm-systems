@@ -751,7 +751,7 @@ CalcHourglassControlForElems(Domain& domain, Real_t determ[], Real_t hgcoef)
 
     int error = 0;
     Kokkos::parallel_reduce(
-        numElem,
+        "CalcHourglassControlForElems", numElem,
         KOKKOS_LAMBDA(const int i, int& err) {
             Real_t x1[8], y1[8], z1[8];
 
@@ -813,7 +813,7 @@ CalcVolumeForceForElems(Domain& domain)
         // check for negative element volume
         int error = 0;
         Kokkos::parallel_reduce(
-            numElem,
+            "CalcVolumeForceForElems", numElem,
             KOKKOS_LAMBDA(const int k, int& err) {
                 if(determ[k] <= Real_t(0.0))
                 {
@@ -1221,7 +1221,7 @@ CalcLagrangeElements(Domain& domain)
 
         int error = 0;
         Kokkos::parallel_reduce(
-            numElem,
+            "CalcLagrangeElements", numElem,
             KOKKOS_LAMBDA(const int k, int& err) {
                 Real_t vdov      = domain.dxx(k) + domain.dyy(k) + domain.dzz(k);
                 Real_t vdovthird = vdov / Real_t(3.0);
@@ -1607,7 +1607,7 @@ CalcQForElems(Domain& domain)
 
         Index_t idx = 0;
         Kokkos::parallel_reduce(
-            numElem,
+            "CalcQForElems", numElem,
             KOKKOS_LAMBDA(const Index_t& i, Index_t& count) {
                 if(domain.q(i) > domain.qstop())
                 {
@@ -1931,7 +1931,7 @@ ApplyMaterialPropertiesForElems(Domain& domain)
 
         int error = 0;
         Kokkos::parallel_reduce(
-            numElem,
+            "ApplyMaterialPropertiesForElems", numElem,
             KOKKOS_LAMBDA(const int i, int& err) {
                 Real_t vc = domain.v(i);
                 if(eosvmin != Real_t(0.))
@@ -1949,7 +1949,7 @@ ApplyMaterialPropertiesForElems(Domain& domain)
             },
             error);
 
-        if(error)
+        if(error != 0)
 #if USE_MPI
             MPI_Abort(MPI_COMM_WORLD, VolumeError);
 #else
@@ -2015,7 +2015,7 @@ CalcCourantConstraintForElems(Domain& domain, Index_t length, Index_t r, Real_t 
     MinFinder result;
 
     Kokkos::parallel_reduce(
-        length,
+        "CalcCourantConstraintForElems", length,
         KOKKOS_LAMBDA(const int i, MinFinder& minf) {
             Index_t indx = domain.regElemlist(r, i);
             Real_t  dtf  = domain.ss(indx) * domain.ss(indx);
@@ -2065,7 +2065,7 @@ CalcHydroConstraintForElems(Domain& domain, Index_t length, Index_t r, Real_t dv
     MinFinder result;
 
     Kokkos::parallel_reduce(
-        length,
+        "CalcHydroConstraintForElems", length,
         KOKKOS_LAMBDA(const int i, MinFinder& minf) {
             Index_t indx = domain.regElemlist(r, i);
 
@@ -2167,8 +2167,9 @@ main(int argc, char* argv[])
     myRank = 0;
 #endif
 
-    Kokkos::initialize();
+    Kokkos::initialize(argc, argv);
     {
+        Kokkos::Tools::pushRegion("initialization");
         opts.its       = 9999999;
         opts.nx        = 30;
         opts.numReg    = 11;
@@ -2223,23 +2224,40 @@ main(int argc, char* argv[])
         MPI_Barrier(MPI_COMM_WORLD);
 #endif
 
+        Kokkos::Tools::popRegion();
+
 #if USE_MPI
         double start = MPI_Wtime();
 #else
         timeval start;
-        gettimeofday(&start, NULL);
+        gettimeofday(&start, nullptr);
 #endif
+
+        uint32_t _time_incrp = 0;
+        uint32_t _leap_frogp = 0;
+        Kokkos::Tools::createProfileSection("TimeIncr", &_time_incrp);
+        Kokkos::Tools::createProfileSection("LeapFrog", &_leap_frogp);
+
         while((locDom.time() < locDom.stoptime()) && (locDom.cycle() < opts.its))
         {
+            Kokkos::Tools::startSection(_time_incrp);
             TimeIncrement(locDom);
+            Kokkos::Tools::stopSection(_time_incrp);
+
+            Kokkos::Tools::startSection(_leap_frogp);
             LagrangeLeapFrog(locDom);
+            Kokkos::Tools::stopSection(_leap_frogp);
 
             if((opts.showProg != 0) && (opts.quiet == 0) && (myRank == 0))
             {
                 printf("cycle = %d, time = %e, dt=%e\n", locDom.cycle(),
                        double(locDom.time()), double(locDom.deltatime()));
             }
+            Kokkos::Tools::markEvent("completed_timestep");
         }
+
+        Kokkos::Tools::destroyProfileSection(_time_incrp);
+        Kokkos::Tools::destroyProfileSection(_leap_frogp);
 
         double elapsed_time;
 #if USE_MPI
@@ -2258,6 +2276,7 @@ main(int argc, char* argv[])
         elapsed_timeG = elapsed_time;
 #endif
 
+        Kokkos::Tools::pushRegion("finalization");
         if(opts.viz)
         {
             DumpToVisit(locDom, opts.numFiles, myRank, numRanks);
@@ -2267,6 +2286,7 @@ main(int argc, char* argv[])
         {
             VerifyAndWriteFinalOutput(elapsed_timeG, locDom, opts.nx, numRanks);
         }
+        Kokkos::Tools::popRegion();
 
         buffer = Kokkos::View<Real_t*>();
     }

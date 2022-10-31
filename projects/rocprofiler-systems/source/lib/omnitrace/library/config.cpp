@@ -941,6 +941,38 @@ configure_mode_settings()
     }
 }
 
+namespace
+{
+using signal_settings = tim::signals::signal_settings;
+using sys_signal      = tim::signals::sys_signal;
+
+void
+omnitrace_exit_action(int nsig)
+{
+    tim::signals::block_signals(get_sampling_signals(),
+                                tim::signals::sigmask_scope::process);
+    OMNITRACE_BASIC_PRINT("Finalizing afer signal %i :: %s\n", nsig,
+                          signal_settings::str(static_cast<sys_signal>(nsig)).c_str());
+    if(get_state() == State::Active) omnitrace_finalize();
+    kill(process::get_id(), nsig);
+}
+
+void
+omnitrace_trampoline_handler(int _v)
+{
+    if(get_verbose_env() >= 1)
+    {
+        ::omnitrace::debug::flush();
+        ::omnitrace::debug::lock _debug_lk{};
+        OMNITRACE_FPRINTF_STDERR_COLOR(warning);
+        fprintf(::omnitrace::debug::get_file(),
+                "signal %i ignored (OMNITRACE_IGNORE_DYNINST_TRAMPOLINE=ON)\n", _v);
+        ::omnitrace::debug::flush();
+        timemory_print_demangled_backtrace<64>();
+    }
+}
+}  // namespace
+
 void
 configure_signal_handler()
 {
@@ -953,19 +985,8 @@ configure_signal_handler()
 
     if(_config->get_enable_signal_handler())
     {
-        using signal_settings = tim::signals::signal_settings;
-        using sys_signal      = tim::signals::sys_signal;
         tim::signals::disable_signal_detection();
-        auto _exit_action = [](int nsig) {
-            tim::signals::block_signals(get_sampling_signals(),
-                                        tim::signals::sigmask_scope::process);
-            OMNITRACE_BASIC_PRINT(
-                "Finalizing afer signal %i :: %s\n", nsig,
-                signal_settings::str(static_cast<sys_signal>(nsig)).c_str());
-            if(get_state() == State::Active) omnitrace_finalize();
-            kill(process::get_id(), nsig);
-        };
-        signal_settings::set_exit_action(_exit_action);
+        signal_settings::set_exit_action(omnitrace_exit_action);
         signal_settings::check_environment();
         auto default_signals = signal_settings::get_default();
         for(const auto& itr : default_signals)
@@ -978,22 +999,11 @@ configure_signal_handler()
 
     if(_ignore_dyninst_trampoline)
     {
-        using signal_handler_t          = void (*)(int);
-        static auto _trampoline_handler = [](int _v) {
-            if(get_verbose_env() >= 2)
-            {
-                ::omnitrace::debug::flush();
-                ::omnitrace::debug::lock _debug_lk{};
-                OMNITRACE_FPRINTF_STDERR_COLOR(warning);
-                fprintf(::omnitrace::debug::get_file(),
-                        "signal %i ignored (OMNITRACE_IGNORE_DYNINST_TRAMPOLINE=ON)\n",
-                        _v);
-                ::omnitrace::debug::flush();
-                timemory_print_demangled_backtrace<64>();
-            }
-        };
-        ::signal(_dyninst_trampoline_signal,
-                 static_cast<signal_handler_t>(_trampoline_handler));
+        struct sigaction _action;
+        sigemptyset(&_action.sa_mask);
+        _action.sa_flags   = {};
+        _action.sa_handler = omnitrace_trampoline_handler;
+        sigaction(_dyninst_trampoline_signal, &_action, nullptr);
     }
 }
 

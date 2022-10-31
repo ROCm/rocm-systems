@@ -102,12 +102,31 @@ jobs:
         echo "CC=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')" >> $GITHUB_ENV
         echo "CXX=${{ matrix.compiler }}" >> $GITHUB_ENV
 
-    - name: Configure CMake
-      timeout-minutes: 10
+    - name: Configure, Build, and Test
+      timeout-minutes: 115
+      shell: bash
       run:
         git config --global --add safe.directory ${PWD} &&
         cmake --version &&
-        cmake -B build
+        TAG="" &&
+        append-tagname() { if [ "${1}" == "ON" ]; then TAG="${TAG}-${2}"; fi; } &&
+        append-tagname ${{ matrix.hip }} rocm-${{ matrix.rocm-version }} &&
+        append-tagname ${{ matrix.mpi }} mpi &&
+        append-tagname ${{ matrix.ompt }} ompt &&
+        append-tagname ${{ matrix.papi }} papi &&
+        append-tagname ${{ matrix.python }} python &&
+        append-tagname ${{ matrix.mpi-headers }} mpip &&
+        append-tagname ${{ matrix.build-dyninst }} internal-dyninst &&
+        append-tagname ${{ matrix.lto }} lto &&
+        append-tagname ${{ matrix.strip }} strip &&
+        append-tagname ${{ matrix.hidden }} hidden-viz &&
+        append-tagname ${{ matrix.static-libgcc }} libgcc &&
+        append-tagname ${{ matrix.static-libstdcxx }} libstdcxx &&
+        ./scripts/run-ci.sh -B build
+          --name ubuntu-jammy-${{ matrix.compiler }}${TAG}
+          --build-jobs 2
+          --site GitHub
+          --cmake-args
           -DCMAKE_C_COMPILER=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')
           -DCMAKE_CXX_COMPILER=${{ matrix.compiler }}
           -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
@@ -125,26 +144,15 @@ jobs:
           -DOMNITRACE_BUILD_STATIC_LIBGCC=${{ matrix.static-libgcc }}
           -DOMNITRACE_BUILD_STATIC_LIBSTDCXX=${{ matrix.static-libstdcxx }}
           -DOMNITRACE_PYTHON_PREFIX=/opt/conda/envs
-          -DOMNITRACE_PYTHON_ENVS="py3.6;py3.7;py3.8;py3.9;py3.10"
+          -DOMNITRACE_PYTHON_ENVS="py3.7;py3.8;py3.9;py3.10"
           -DOMNITRACE_STRIP_LIBRARIES=${{ matrix.strip }}
+          -DOMNITRACE_MAX_THREADS=32
           -DUSE_CLANG_OMP=OFF
-
-    - name: Build
-      timeout-minutes: 60
-      run:
-        cmake --build build --target all --parallel 2 -- VERBOSE=1
 
     - name: Install
       timeout-minutes: 10
       run:
         cmake --build build --target install --parallel 2
-
-    - name: Test
-      timeout-minutes: 45
-      run:
-        cd build &&
-        ctest -V -N -O omnitrace-ctest-${{ github.job }}-commands.log &&
-        ctest -V --output-log omnitrace-ctest-${{ github.job }}.log
 
     - name: CPack and Install
       run: |

@@ -26,7 +26,7 @@ RUN zypper update -y && \
 COPY ./dyninst-source /tmp/dyninst
 
 RUN cd /tmp/dyninst && \
-    cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_BOOST=ON -DBUILD_TBB=ON -DBUILD_ELFUTILS=ON -DBUILD_LIBIBERTY=ON && \
+    cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_BOOST=ON -DBUILD_TBB=ON -DBUILD_ELFUTILS=ON -DBUILD_LIBIBERTY=ON && \
     cmake --build build --target all --parallel ${NJOBS} && \
     cmake --build build --target install --parallel ${NJOBS} && \
     cd /tmp && \

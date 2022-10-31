@@ -26,6 +26,7 @@
 #include "library/components/category_region.hpp"
 #include "library/components/fwd.hpp"
 #include "library/defines.hpp"
+#include "library/dynamic_library.hpp"
 #include "library/timemory.hpp"
 
 #include <timemory/timemory.hpp>
@@ -42,8 +43,10 @@
 #include <set>
 #include <unordered_map>
 
-static uint64_t global_id      = std::numeric_limits<uint64_t>::max();
-static void*    librccl_handle = nullptr;
+namespace
+{
+uint64_t global_id = std::numeric_limits<uint64_t>::max();
+}
 
 namespace omnitrace
 {
@@ -59,10 +62,9 @@ setup()
     configure();
 
     // make sure the symbols are loaded to be wrapped
-    auto libpath   = tim::get_env<std::string>("OMNITRACE_RCCL_LIBRARY", "librccl.so");
-    librccl_handle = dlopen(libpath.c_str(), RTLD_NOW | RTLD_GLOBAL);
-    if(!librccl_handle) fprintf(stderr, "%s\n", dlerror());
-    dlerror();  // Clear any existing error
+    dynamic_library _librccl{
+        "OMNITRACE_RCCL_LIBRARY", "librccl.so", RTLD_NOW | RTLD_GLOBAL, true, true, true
+    };
 
     auto _use_data = tim::get_env("OMNITRACE_RCCLP_COMM_DATA", get_use_timemory());
     if(!get_use_timemory())
@@ -78,7 +80,6 @@ setup()
 
     component::configure_rcclp();
     global_id = component::activate_rcclp();
-    if(librccl_handle) dlclose(librccl_handle);
 }
 
 void

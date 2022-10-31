@@ -137,12 +137,20 @@ join()
         for(size_t i = 0; i < max_supported_threads; ++i)
             roctracer::get_task_group(i).join();
     }
+    else
+    {
+        OMNITRACE_DEBUG_F("roctracer thread-pool is not active...\n");
+    }
 
     if(critical_trace::get_thread_pool_state() == State::Active)
     {
         OMNITRACE_DEBUG_F("waiting for all critical tasks to complete...\n");
         for(size_t i = 0; i < max_supported_threads; ++i)
             critical_trace::get_task_group(i).join();
+    }
+    else
+    {
+        OMNITRACE_DEBUG_F("critical-trace thread-pool is not active...\n");
     }
 }
 
@@ -160,6 +168,10 @@ shutdown()
         }
         roctracer::get_thread_pool_state() = State::Finalized;
     }
+    else
+    {
+        OMNITRACE_DEBUG_F("roctracer thread-pool is not active...\n");
+    }
 
     if(critical_trace::get_thread_pool_state() == State::Active)
     {
@@ -172,12 +184,20 @@ shutdown()
         }
         critical_trace::get_thread_pool_state() = State::Finalized;
     }
+    else
+    {
+        OMNITRACE_DEBUG_F("critical-trace thread-pool is not active...\n");
+    }
 
     if(get_thread_pool_state() == State::Active)
     {
         OMNITRACE_DEBUG_F("Destroying the omnitrace thread pool...\n");
         get_thread_pool().destroy_threadpool();
         get_thread_pool_state() = State::Finalized;
+    }
+    else
+    {
+        OMNITRACE_DEBUG_F("thread-pool is not active...\n");
     }
 }
 
@@ -194,7 +214,8 @@ roctracer::get_task_group(int64_t _tid)
     {};
     using thread_data_t = thread_data<PTL::TaskGroup<void>, local>;
     static auto& _v =
-        thread_data_t::instances(construct_on_init{}, &tasking::get_thread_pool());
+        (roctracer::get_thread_pool_state() = State::Active,
+         thread_data_t::instances(construct_on_init{}, &tasking::get_thread_pool()));
     return *_v.at(_tid);
 }
 
@@ -205,7 +226,8 @@ critical_trace::get_task_group(int64_t _tid)
     {};
     using thread_data_t = thread_data<PTL::TaskGroup<void>, local>;
     static auto& _v =
-        thread_data_t::instances(construct_on_init{}, &tasking::get_thread_pool());
+        (critical_trace::get_thread_pool_state() = State::Active,
+         thread_data_t::instances(construct_on_init{}, &tasking::get_thread_pool()));
     return *_v.at(_tid);
 }
 }  // namespace tasking

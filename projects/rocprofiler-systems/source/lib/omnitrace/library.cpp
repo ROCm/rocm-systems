@@ -818,7 +818,6 @@ omnitrace_finalize_hidden(void)
     if(get_use_critical_trace() || (get_use_rocm_smi() && get_use_roctracer()))
     {
         OMNITRACE_VERBOSE_F(1, "Generating the critical trace...\n");
-
         for(size_t i = 0; i < max_supported_threads; ++i)
         {
             using critical_trace_hash_data =
@@ -856,10 +855,10 @@ omnitrace_finalize_hidden(void)
     if(get_use_critical_trace())
     {
         // launch compute task
-        OMNITRACE_VERBOSE_F(1, "launching critical trace compute task...\n");
+        OMNITRACE_VERBOSE_F(1, "Launching critical trace compute task...\n");
         critical_trace::compute();
 
-        OMNITRACE_VERBOSE_F(1, "Waiting on critical trace tasks...\n");
+        OMNITRACE_VERBOSE_F(1, "Waiting on critical trace computation...\n");
         tasking::join();
     }
 
@@ -980,7 +979,8 @@ omnitrace_finalize_hidden(void)
             for(auto& itr : _maps)
             {
                 auto&& _path = itr.pathname;
-                if(!_path.empty() && _path.at(0) != '[') _libs.emplace(_path);
+                if(!_path.empty() && _path.at(0) != '[' && filepath::exists(_path))
+                    _libs.emplace(_path);
             }
             ar(tim::cereal::make_nvp("memory_maps_files", _libs),
                tim::cereal::make_nvp("memory_maps", _maps));

@@ -28,18 +28,28 @@
 #include <timemory/environment.hpp>
 #include <timemory/utility/delimit.hpp>
 #include <timemory/utility/filepath.hpp>
+#include <timemory/utility/procfs/maps.hpp>
 
 #include <string>
 #include <utility>
 
 namespace omnitrace
 {
+namespace procfs = ::tim::procfs;
+
 std::string
 find_library_path(const std::string& _name, const std::vector<std::string>& _env_vars,
                   const std::vector<std::string>& _hints,
                   const std::vector<std::string>& _path_suffixes)
 {
     if(_name.find('/') == 0) return _name;
+
+    for(const auto& itr : procfs::get_maps(process::get_id(), true))
+    {
+        auto&& _path = itr.pathname;
+        if(_path.find(_name) != std::string::npos && filepath::exists(_path))
+            return _path;
+    }
 
     auto _paths = std::vector<std::string>{};
     for(const std::string& itr : _env_vars)
@@ -74,6 +84,9 @@ dynamic_library::dynamic_library(std::string _env, std::string _fname, int _flag
 , filename{ std::move(_fname) }
 , flags{ _flags }
 {
+    // check the memory maps
+    filename = find_library_path(filename, {}, {});
+
     if(_query_env)
     {
         auto _env_val = get_env(envname, std::string{}, _store);

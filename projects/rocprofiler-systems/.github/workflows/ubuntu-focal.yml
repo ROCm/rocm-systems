@@ -21,6 +21,7 @@ jobs:
     container:
       image: jrmadsen/omnitrace:ci-base-ubuntu-20.04
     strategy:
+      fail-fast: false
       matrix:
         compiler: ['g++-7', 'g++-8']
         lto: ['OFF']
@@ -87,12 +88,25 @@ jobs:
         echo "CC=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')" >> $GITHUB_ENV &&
         echo "CXX=${{ matrix.compiler }}" >> $GITHUB_ENV
 
-    - name: Configure CMake
-      timeout-minutes: 10
+    - name: Configure, Build, and Test
+      timeout-minutes: 115
+      shell: bash
       run:
         git config --global --add safe.directory ${PWD} &&
+        TAG="" &&
+        append-tagname() { if [ "${1}" == "ON" ]; then TAG="${TAG}-${2}"; fi; } &&
+        append-tagname ${{ matrix.lto }} lto &&
+        append-tagname ${{ matrix.strip }} strip &&
+        append-tagname ${{ matrix.python }} python &&
+        append-tagname ${{ matrix.mpi-headers }} mpip &&
+        append-tagname ${{ matrix.static-libgcc }} libgcc &&
+        append-tagname ${{ matrix.static-libstdcxx }} libstdcxx &&
         cmake --version &&
-        cmake -B build
+        ./scripts/run-ci.sh -B build
+          --name ubuntu-focal-${{ matrix.compiler }}${TAG}
+          --build-jobs 2
+          --site GitHub
+          --cmake-args
           -DCMAKE_C_COMPILER=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')
           -DCMAKE_CXX_COMPILER=${{ matrix.compiler }}
           -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
@@ -112,17 +126,7 @@ jobs:
           -DOMNITRACE_PYTHON_ENVS="py3.6;py3.7;py3.8;py3.9;py3.10"
           -DOMNITRACE_MAX_THREADS=32
 
-    - name: Build
-      timeout-minutes: 60
-      run:
-        cmake --build build --target all --parallel 2 -- VERBOSE=1
-
-    - name: Install
-      timeout-minutes: 10
-      run:
-        cmake --build build --target install --parallel 2
-
-    - name: Test
+    - name: Test Build-Tree Module
       timeout-minutes: 45
       shell: bash
       run: |
@@ -134,8 +138,25 @@ jobs:
         echo $(which omnitrace)
         ldd $(which omnitrace)
         omnitrace --help
-        ctest -V -N -O omnitrace-ctest-${{ github.job }}-commands.log
-        ctest -V --output-log omnitrace-ctest-${{ github.job }}.log --stop-on-failure
+        omnitrace-avail --help
+        omnitrace-sample --help
+
+    - name: Test Build-Tree Source Script
+      timeout-minutes: 45
+      shell: bash
+      run: |
+        cd build
+        source ./share/omnitrace/setup-env.sh
+        echo $(which omnitrace)
+        ldd $(which omnitrace)
+        omnitrace --help
+        omnitrace-avail --help
+        omnitrace-sample --help
+
+    - name: Install
+      timeout-minutes: 10
+      run:
+        cmake --build build --target install --parallel 2
 
     - name: Test Install
       timeout-minutes: 15
@@ -184,19 +205,20 @@ jobs:
     container:
       image: jrmadsen/omnitrace:ci-base-ubuntu-20.04
     strategy:
+      fail-fast: false
       matrix:
         compiler: ['g++']
-        rocm_version: ['4.3', '4.5', '5.0']
-        mpi_headers: ['OFF']
-        build_jobs: ['4']
-        ctest_exclude: ['-LE "mpi-example|transpose"']
+        rocm-version: ['4.3', '4.5', '5.0']
+        mpi-headers: ['OFF']
+        build-jobs: ['4']
+        ctest-exclude: ['-LE "mpi-example|transpose"']
         perfetto-tools: ['ON']
         include:
           - compiler: 'g++'
-            rocm_version: 'debian'
-            mpi_headers: 'ON'
-            build_jobs: '2'
-            ctest_exclude: '-LE transpose'
+            rocm-version: 'debian'
+            mpi-headers: 'ON'
+            build-jobs: '2'
+            ctest-exclude: '-LE transpose'
             perfetto-tools: 'OFF'
 
     env:
@@ -213,7 +235,7 @@ jobs:
         apt-get update &&
         apt-get install -y software-properties-common wget gnupg2 &&
         wget -q -O - https://repo.radeon.com/rocm/rocm.gpg.key | apt-key add - &&
-        echo "deb [arch=amd64] https://repo.radeon.com/rocm/apt/${{ matrix.rocm_version }}/ ubuntu main" | tee /etc/apt/sources.list.d/rocm.list &&
+        echo "deb [arch=amd64] https://repo.radeon.com/rocm/apt/${{ matrix.rocm-version }}/ ubuntu main" | tee /etc/apt/sources.list.d/rocm.list &&
         apt-get update &&
         apt-get install -y build-essential m4 autoconf libtool python3-pip clang libomp-dev ${{ matrix.compiler }} libudev1 libnuma1 rocm-dev rocm-utils rocm-smi-lib roctracer-dev rocprofiler-dev hip-base hsa-amd-aqlprofile hsa-rocr-dev hsakmt-roct-dev libpapi-dev curl libopenmpi-dev openmpi-bin libfabric-dev &&
         python3 -m pip install --upgrade pip &&
@@ -221,7 +243,7 @@ jobs:
         for i in 6 7 8 9 10; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy perfetto dataclasses; done
 
     - name: Install RCCL
-      if: ${{ matrix.rocm_version != '4.3' }}
+      if: ${{ matrix.rocm-version != '4.3' }}
       timeout-minutes: 10
       run:
         apt-get install -y rccl-dev
@@ -251,12 +273,19 @@ jobs:
         realpath test-install.cfg
         cat test-install.cfg
 
-    - name: Configure CMake
-      timeout-minutes: 10
+    - name: Configure, Build, and Test
+      timeout-minutes: 115
+      shell: bash
       run:
         git config --global --add safe.directory ${PWD} &&
         cmake --version &&
-        cmake -B build
+        TAG="-rocm-${{ matrix.rocm-version }}" &&
+        TAG="$(echo ${TAG} | sed 's/debian/latest/g')" &&
+        ./scripts/run-ci.sh -B build
+          --name ubuntu-focal-rocm-${{ matrix.compiler }}${TAG}
+          --build-jobs 2
+          --site GitHub
+          --cmake-args
           -DCMAKE_C_COMPILER=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')
           -DCMAKE_CXX_COMPILER=${{ matrix.compiler }}
           -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
@@ -271,31 +300,19 @@ jobs:
           -DOMNITRACE_USE_PAPI=OFF
           -DOMNITRACE_USE_OMPT=OFF
           -DOMNITRACE_USE_PYTHON=ON
-          -DOMNITRACE_USE_MPI_HEADERS=${{ matrix.mpi_headers }}
+          -DOMNITRACE_USE_MPI_HEADERS=${{ matrix.mpi-headers }}
           -DOMNITRACE_USE_SANITIZER=OFF
           -DOMNITRACE_INSTALL_PERFETTO_TOOLS=${{ matrix.perfetto-tools }}
           -DOMNITRACE_PYTHON_PREFIX=/opt/conda/envs
           -DOMNITRACE_PYTHON_ENVS="py3.6;py3.7;py3.8;py3.9;py3.10"
-          -DOMNITRACE_CI_MPI_RUN_AS_ROOT=${{ matrix.mpi_headers }}
+          -DOMNITRACE_CI_MPI_RUN_AS_ROOT=${{ matrix.mpi-headers }}
           -DCMAKE_INSTALL_RPATH_USE_LINK_PATH=OFF
-
-    - name: Build
-      timeout-minutes: 60
-      run:
-        cmake --build build --target all --parallel ${{ matrix.build_jobs }} -- VERBOSE=1
+          --ctest-args
+          ${{ matrix.ctest-exclude }}
 
     - name: Install
       run:
         cmake --build build --target install --parallel 2
-
-    - name: Test
-      timeout-minutes: 45
-      run:
-        cd build &&
-        ldd ./bin/omnitrace &&
-        ./bin/omnitrace --help &&
-        ctest -V ${{ matrix.ctest_exclude }} -N -O omnitrace-ctest-${{ github.job }}-commands.log &&
-        ctest -V ${{ matrix.ctest_exclude }} --output-log omnitrace-ctest-${{ github.job }}.log --stop-on-failure
 
     - name: Test Install
       timeout-minutes: 15
@@ -340,9 +357,10 @@ jobs:
   ubuntu-focal:
     runs-on: ubuntu-20.04
     strategy:
+      fail-fast: false
       matrix:
         compiler: ['g++']
-        mpi: [ '', 'libmpich-dev mpich', 'libopenmpi-dev openmpi-bin libfabric-dev' ]
+        mpi: [ 'nompi', 'mpich', 'openmpi' ]
         boost: ['OFF']
         tbb: ['OFF']
         build-type: ['Release']
@@ -352,7 +370,7 @@ jobs:
         deps: ['libtbb-dev libboost-{atomic,system,thread,date-time,filesystem,timer}-dev']
         include:
         - compiler: 'g++'
-          mpi: ''
+          mpi: 'nompi'
           boost: 'ON'
           tbb: 'ON'
           build-type: 'Release'
@@ -373,7 +391,9 @@ jobs:
       timeout-minutes: 10
       run:
         sudo apt-get update &&
-        sudo apt-get install -y build-essential m4 autoconf libtool python3-pip clang libomp-dev environment-modules ${{ matrix.deps }} ${{ matrix.compiler }} ${{ matrix.mpi }} &&
+        sudo apt-get install -y build-essential m4 autoconf libtool python3-pip clang libomp-dev environment-modules ${{ matrix.deps }} ${{ matrix.compiler }} &&
+        if [ "${{ matrix.mpi }}" = "mpich" ]; then sudo apt-get install -y libmpich-dev mpich; fi &&
+        if [ "${{ matrix.mpi }}" = "openmpi" ]; then sudo apt-get install -y libopenmpi-dev openmpi-bin libfabric-dev; fi &&
         python3 -m pip install --upgrade pip &&
         python3 -m pip install numpy &&
         python3 -m pip install perfetto &&
@@ -392,12 +412,18 @@ jobs:
         echo "CXX=${{ matrix.compiler }}" >> $GITHUB_ENV &&
         echo "${HOME}/.local/bin" >> $GITHUB_PATH
 
-    - name: Configure CMake
-      timeout-minutes: 10
+    - name: Configure, Build, and Test
+      timeout-minutes: 115
+      shell: bash
       run:
         cmake --version &&
-        if [ -z "${{ matrix.mpi }}" ]; then USE_MPI=OFF; else USE_MPI=ON; fi &&
-        cmake -B ${{ github.workspace }}/build
+        if [ "${{ matrix.mpi }}" = "nompi" ]; then USE_MPI=OFF; else USE_MPI=ON; fi &&
+        if [ -z "${{ matrix.deps }}" ]; then TAG=""; else TAG="-external-deps"; fi &&
+        ./scripts/run-ci.sh -B ${{ github.workspace }}/build
+          --name ubuntu-focal-${{ matrix.compiler }}-${{ matrix.mpi }}${TAG}
+          --build-jobs 2
+          --site GitHub
+          --cmake-args
           -DCMAKE_C_COMPILER=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')
           -DCMAKE_CXX_COMPILER=${{ matrix.compiler }}
           -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
@@ -432,18 +458,6 @@ jobs:
         env
         source ${{ github.workspace }}/build/share/omnitrace/setup-env.sh
         env
-
-    - name: Build
-      timeout-minutes: 60
-      run:
-        cmake --build ${{ github.workspace }}/build --target all --parallel 2 -- VERBOSE=1
-
-    - name: Test
-      timeout-minutes: 45
-      working-directory: ${{ github.workspace }}/build
-      run:
-        ctest -V -N -O ${{ github.workspace }}/build/omnitrace-ctest-${{ github.job }}-commands.log &&
-        ctest -V --output-log ${{ github.workspace }}/build/omnitrace-ctest-${{ github.job }}.log --stop-on-failure
 
     - name: Install
       working-directory: ${{ github.workspace }}/build
@@ -499,3 +513,56 @@ jobs:
         set +e
         RUNNING_PROCS=$(pgrep trace_processor_shell)
         if [ -n "${RUNNING_PROCS}" ]; then kill -s 9 ${RUNNING_PROCS}; fi
+
+  ubuntu-focal-codecov:
+    runs-on: ubuntu-20.04
+
+    container:
+      image: jrmadsen/omnitrace:ci-base-ubuntu-20.04
+
+    env:
+      OMNITRACE_VERBOSE: 2
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Install Packages
+      timeout-minutes: 10
+      run:
+        apt-get update &&
+        apt-get install -y build-essential m4 autoconf libtool python3-pip clang libomp-dev environment-modules gcc g++ mpich libmpich-dev &&
+        python3 -m pip install --upgrade pip &&
+        python3 -m pip install numpy &&
+        python3 -m pip install perfetto &&
+        python3 -m pip install 'cmake==3.24.1' &&
+        for i in 6 7 8 9 10; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy perfetto dataclasses; done
+
+    - name: Configure Env
+      run:
+        echo "CC=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')" >> $GITHUB_ENV &&
+        echo "CXX=${{ matrix.compiler }}" >> $GITHUB_ENV &&
+        echo "${HOME}/.local/bin" >> $GITHUB_PATH
+
+    - name: Configure, Build, and Test
+      timeout-minutes: 115
+      shell: bash
+      run:
+        git config --global --add safe.directory ${PWD} &&
+        cmake --version &&
+        ./scripts/run-ci.sh -B build
+          --name ubuntu-focal-codecov-mpi-python-ompt-papi
+          --build-jobs 2
+          --site GitHub
+          --coverage
+          --cmake-args
+          -DCMAKE_INSTALL_PREFIX=/opt/omnitrace
+          -DOMNITRACE_BUILD_CI=OFF
+          -DOMNITRACE_BUILD_TESTING=ON
+          -DOMNITRACE_BUILD_DYNINST=OFF
+          -DOMNITRACE_USE_MPI=ON
+          -DOMNITRACE_USE_PYTHON=ON
+          -DOMNITRACE_USE_OMPT=ON
+          -DOMNITRACE_USE_PAPI=ON
+          -DOMNITRACE_USE_HIP=OFF
+          -DOMNITRACE_USE_RCCL=ON
+          -DOMNITRACE_MAX_THREADS=32

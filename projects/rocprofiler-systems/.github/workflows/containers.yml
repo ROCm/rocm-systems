@@ -4,7 +4,7 @@ run-name: ci-containers
 # nightly build
 on:
   schedule:
-    - cron: 0 1 * * *
+    - cron: 0 5 * * *
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

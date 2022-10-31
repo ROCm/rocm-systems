@@ -61,7 +61,7 @@ if(OMNITRACE_CLANG_FORMAT_EXE
          ${PROJECT_SOURCE_DIR}/source/*.hpp.in ${PROJECT_SOURCE_DIR}/source/*.h
          ${PROJECT_SOURCE_DIR}/source/*.h.in)
     file(GLOB_RECURSE examples ${PROJECT_SOURCE_DIR}/examples/*.cpp
-         ${PROJECT_SOURCE_DIR}/examples/*.hpp)
+         ${PROJECT_SOURCE_DIR}/examples/*.c ${PROJECT_SOURCE_DIR}/examples/*.hpp)
     file(GLOB_RECURSE external ${PROJECT_SOURCE_DIR}/examples/lulesh/external/kokkos/*)
     file(
         GLOB_RECURSE

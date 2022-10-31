@@ -65,7 +65,7 @@ std::mutex complete_call_mutex{};
 void
 update_critical_path(call_chain _chain, int64_t _tid);
 
-void
+bool
 load_call_chain(const std::string& _fname, const std::string& _label,
                 call_chain& _call_chain);
 

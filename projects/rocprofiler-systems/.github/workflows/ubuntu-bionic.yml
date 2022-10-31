@@ -24,9 +24,10 @@ jobs:
     container:
       image: jrmadsen/omnitrace:ci-base-ubuntu-18.04
     strategy:
+      fail-fast: false
       matrix:
         compiler: ['g++-7', 'g++-8']
-        mpi: [ '', 'libmpich-dev mpich' ]
+        mpi: [ 'nompi', 'mpich' ]
 
     steps:
     - name: Patch Git
@@ -48,7 +49,9 @@ jobs:
       run:
         apt-get update &&
         apt-get upgrade -y &&
-        apt-get install -y build-essential m4 autoconf libtool python3-pip ${{ matrix.compiler }} ${{ matrix.mpi }} &&
+        apt-get install -y build-essential m4 autoconf libtool python3-pip ${{ matrix.compiler }} &&
+        if [ "${{ matrix.mpi }}" = "mpich" ]; then apt-get install -y libmpich-dev mpich; fi &&
+        if [ "${{ matrix.mpi }}" = "openmpi" ]; then apt-get install -y libopenmpi-dev openmpi-bin libfabric-dev; fi &&
         python3 -m pip install --upgrade pip &&
         python3 -m pip install numpy &&
         python3 -m pip install perfetto &&
@@ -71,12 +74,18 @@ jobs:
         echo "/opt/omnitrace/bin:${HOME}/.local/bin" >> $GITHUB_PATH &&
         echo "LD_LIBRARY_PATH=/opt/omnitrace/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
 
-    - name: Configure CMake
-      timeout-minutes: 10
+    - name: Configure, Build, and Test
+      timeout-minutes: 115
+      shell: bash
       run:
         cmake --version &&
-        if [ -z "${{ matrix.mpi }}" ]; then USE_MPI=OFF; else USE_MPI=ON; fi &&
-        cmake -B build
+        if [ "${{ matrix.mpi }}" = "nompi" ]; then USE_MPI=OFF; else USE_MPI=ON; fi &&
+        append-tagname() { if [ "${1}" == "ON" ]; then TAG="${TAG}-${2}"; fi; } &&
+        ./scripts/run-ci.sh -B build
+          --name ubuntu-bionic-${{ matrix.compiler }}-${{ matrix.mpi }}-python
+          --build-jobs 2
+          --site GitHub
+          --cmake-args
           -DCMAKE_C_COMPILER=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')
           -DCMAKE_CXX_COMPILER=${{ matrix.compiler }}
           -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
@@ -91,23 +100,9 @@ jobs:
           -DLULESH_BUILD_KOKKOS=OFF
           -DOMNITRACE_MAX_THREADS=32
 
-    - name: Build
-      timeout-minutes: 60
-      run:
-        cmake --build build --target all --parallel 2 -- VERBOSE=1
-
     - name: Install
       run:
         cmake --build build --target install --parallel 2
-
-    - name: Test
-      timeout-minutes: 45
-      run:
-        cd build &&
-        ldd ./bin/omnitrace &&
-        ./bin/omnitrace --help &&
-        ctest -V -N -O omnitrace-ctest-${{ github.job }}-commands.log &&
-        ctest -V --output-log omnitrace-ctest-${{ github.job }}.log --stop-on-failure
 
     - name: Test Install
       timeout-minutes: 10

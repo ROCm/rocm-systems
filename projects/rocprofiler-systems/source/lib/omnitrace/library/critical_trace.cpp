@@ -904,6 +904,7 @@ std::vector<std::pair<std::string, entry>>
 get_entries(const std::function<bool(const entry&)>& _eval)
 {
     OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
+    tasking::join();
     copy_hash_ids();
     squash_critical_path(complete_call_chain);
     std::sort(complete_call_chain.begin(), complete_call_chain.end());

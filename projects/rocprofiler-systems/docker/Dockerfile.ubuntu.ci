@@ -32,7 +32,7 @@ RUN apt-get update && \
     apt-get autoclean && \
     locale -a && \
     cd /tmp/dyninst && \
-    cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_BOOST=ON -DBUILD_TBB=ON -DBUILD_ELFUTILS=ON -DBUILD_LIBIBERTY=ON -DELFUTILS_DOWNLOAD_VERSION=${ELFUTILS_DOWNLOAD_VERSION} -DBOOST_DOWNLOAD_VERSION=${BOOST_DOWNLOAD_VERSION} && \
+    cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_BOOST=ON -DBUILD_TBB=ON -DBUILD_ELFUTILS=ON -DBUILD_LIBIBERTY=ON -DELFUTILS_DOWNLOAD_VERSION=${ELFUTILS_DOWNLOAD_VERSION} -DBOOST_DOWNLOAD_VERSION=${BOOST_DOWNLOAD_VERSION} && \
     cmake --build build --target all --parallel ${NJOBS} && \
     cmake --build build --target install --parallel ${NJOBS} && \
     wget https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh && \

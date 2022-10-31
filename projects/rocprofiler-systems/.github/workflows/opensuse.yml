@@ -11,20 +11,21 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  BUILD_TYPE: Release
-  OMNITRACE_VERBOSE: 1
-  OMNITRACE_CI: ON
-
 jobs:
   opensuse:
     runs-on: ubuntu-20.04
     container:
       image: jrmadsen/omnitrace:ci-base-opensuse-${{ matrix.os-release }}
     strategy:
+      fail-fast: false
       matrix:
         compiler: ['g++']
         os-release: [ '15.2', '15.3' ]
+        build-type: ['Release']
+
+    env:
+      OMNITRACE_VERBOSE: 1
+      OMNITRACE_CI: ON
 
     steps:
     - uses: actions/checkout@v3
@@ -42,11 +43,16 @@ jobs:
         echo "LD_LIBRARY_PATH=/opt/omnitrace/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
 
     - name: Configure CMake
-      timeout-minutes: 10
+      timeout-minutes: 115
+      shell: bash
       run:
         git config --global --add safe.directory ${PWD} &&
         cmake --version &&
-        cmake -B build
+        ./scripts/run-ci.sh -B build
+          --name opensuse-${{ matrix.os-release }}-${{ matrix.compiler }}-nompi-python
+          --build-jobs 2
+          --site GitHub
+          --cmake-args
           -DCMAKE_C_COMPILER=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')
           -DCMAKE_CXX_COMPILER=${{ matrix.compiler }}
           -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
@@ -61,24 +67,10 @@ jobs:
           -DOMNITRACE_CI_MPI_RUN_AS_ROOT=ON
           -DOMNITRACE_MAX_THREADS=32
 
-    - name: Build
-      timeout-minutes: 60
-      run:
-        cmake --build build --target all --parallel 2 -- VERBOSE=1
-
     - name: Install
       timeout-minutes: 10
       run:
         cmake --build build --target install --parallel 2
-
-    - name: Test
-      timeout-minutes: 45
-      run:
-        cd build &&
-        ldd ./bin/omnitrace &&
-        ./bin/omnitrace --help &&
-        ctest -V -N -O omnitrace-ctest-${{ github.job }}-commands.log &&
-        ctest -V --output-log omnitrace-ctest-${{ github.job }}.log --stop-on-failure
 
     - name: Test Install
       timeout-minutes: 10
