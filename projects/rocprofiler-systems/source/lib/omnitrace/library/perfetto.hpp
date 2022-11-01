@@ -151,8 +151,9 @@ struct perfetto_counter_track
                         _css << " " << std::hex << std::setw(12) << std::left << eitr;
                     OMNITRACE_THROW("perfetto_counter_track emplace method for '%s' (%p) "
                                     "invalidated C-string '%s' (%p).\n%8s: %s\n%8s: %s\n",
-                                    _v.c_str(), _name->c_str(), std::get<0>(itr).c_str(),
-                                    std::get<0>(itr).c_str(), "previous",
+                                    _v.c_str(), (void*) _name->c_str(),
+                                    std::get<0>(itr).c_str(),
+                                    (void*) std::get<0>(itr).c_str(), "previous",
                                     _pss.str().c_str(), "current", _css.str().c_str());
                 }
             }

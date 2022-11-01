@@ -56,6 +56,7 @@
 #include <sstream>
 #include <string>
 #include <unistd.h>
+#include <utility>
 
 namespace omnitrace
 {
@@ -597,6 +598,16 @@ configure_settings(bool _init)
                              std::string{ "perfetto-trace.proto" }, "perfetto", "io",
                              "filename", "advanced");
 
+    OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_USE_TEMPORARY_FILES",
+                             "Write data to temporary files to minimize the memory usage "
+                             "of omnitrace, e.g. call-stack samples will be periodically "
+                             "written to a file and re-loaded during finalization",
+                             true, "io", "data", "advanced");
+
+    OMNITRACE_CONFIG_SETTING(
+        std::string, "OMNITRACE_TMPDIR", "Base directory for temporary files",
+        get_env<std::string>("TMPDIR", "/tmp"), "io", "data", "advanced");
+
     // set the defaults
     _config->get_flamegraph_output()     = false;
     _config->get_ctest_notes()           = false;
@@ -986,6 +997,7 @@ configure_signal_handler()
     if(_config->get_enable_signal_handler())
     {
         tim::signals::disable_signal_detection();
+        signal_settings::enable(sys_signal::Interrupt);
         signal_settings::set_exit_action(omnitrace_exit_action);
         signal_settings::check_environment();
         auto default_signals = signal_settings::get_default();
@@ -1963,6 +1975,80 @@ get_debug_pid()
     static bool _v = _vlist.empty() || _vlist.count(tim::process::get_id()) > 0 ||
                      _vlist.count(dmp::rank()) > 0;
     return _v;
+}
+
+bool
+get_use_tmp_files()
+{
+    static auto _v = get_config()->find("OMNITRACE_USE_TEMPORARY_FILES");
+    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
+}
+
+std::string
+get_tmpdir()
+{
+    static auto _v = get_config()->find("OMNITRACE_TMPDIR");
+    return static_cast<tim::tsettings<std::string>&>(*_v->second).get();
+}
+
+tmp_file::tmp_file(std::string _v)
+: filename{ std::move(_v) }
+{}
+
+tmp_file::~tmp_file() { close(); }
+
+void
+tmp_file::open(std::ios::openmode _mode)
+{
+    OMNITRACE_VERBOSE_F(2, "Opening temporary file '%s'...\n", filename.c_str());
+
+    if(!filepath::exists(filename))
+    {
+        // if the filepath does not exist, open in out mode to create it
+        std::ofstream _ofs{};
+        filepath::open(_ofs, filename);
+    }
+
+    stream.open(filename, _mode);
+}
+
+void
+tmp_file::close()
+{
+    if(stream.is_open()) stream.close();
+}
+
+std::shared_ptr<tmp_file>
+get_tmp_file(std::string _basename, std::string _ext)
+{
+    if(!get_use_tmp_files()) return std::shared_ptr<tmp_file>{};
+
+    static auto _existing_files =
+        std::unordered_map<std::string, std::shared_ptr<tmp_file>>{};
+    static std::mutex            _mutex{};
+    std::unique_lock<std::mutex> _lk{ _mutex };
+
+    auto _cfg          = settings::compose_filename_config{};
+    _cfg.use_suffix    = true;
+    _cfg.suffix        = "%pid%";
+    _cfg.explicit_path = get_tmpdir();
+    _cfg.subdirectory  = JOIN('/', settings::output_path(), "%ppid%", "");
+    auto _fname =
+        settings::compose_output_filename(std::move(_basename), std::move(_ext), _cfg);
+
+    if(_fname.empty() || _fname.front() != '/')
+    {
+        OMNITRACE_THROW("Error! temporary file '%s' (based on '%s.%s') is either empty "
+                        "or is not an absolute path",
+                        _fname.c_str(), _basename.c_str(), _ext.c_str());
+    }
+    auto itr = _existing_files.find(_fname);
+    if(itr != _existing_files.end()) return itr->second;
+
+    auto _v = std::make_shared<tmp_file>(_fname);
+    _v->open();
+    _existing_files.emplace(_fname, std::move(_v));
+    return _existing_files.at(_fname);
 }
 }  // namespace config
 

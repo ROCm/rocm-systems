@@ -811,7 +811,9 @@ if(OMNITRACE_USE_MPI OR OMNITRACE_USE_MPI_HEADERS)
         ENVIRONMENT "${_base_environment}"
         REWRITE_RUN_PASS_REGEX
             "(/[A-Za-z-]+/perfetto-trace-0.proto).*(/[A-Za-z-]+/wall_clock-0.txt')"
-        REWRITE_RUN_FAIL_REGEX "-[0-9][0-9]+.(json|txt|proto)")
+        REWRITE_RUN_FAIL_REGEX
+            "(perfetto-trace|trip_count|sampling_percent|sampling_cpu_clock|sampling_wall_clock|wall_clock)-[0-9][0-9]+.(json|txt|proto)"
+        )
 
     omnitrace_add_test(
         SKIP_RUNTIME SKIP_SAMPLING

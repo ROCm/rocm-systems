@@ -272,25 +272,65 @@ main(int argc, char** argv)
             {
                 auto _keys = tim::settings::output_keys(
                     tim::settings::shared_instance()->get_tag());
-                std::pair<size_t, size_t> _w = { 0, 0 };
+                std::tuple<size_t, size_t, size_t> _w = { 0, 0, 0 };
                 for(const auto& itr : _keys)
                 {
-                    if(!is_selected(itr.first)) continue;
-                    if(_show && !is_selected(itr.second)) continue;
-                    _w.first  = std::max(_w.first, itr.first.length());
-                    _w.second = std::max(_w.second, itr.second.length());
+                    if(!is_selected(itr.key)) continue;
+                    if(_show && !is_selected(itr.value)) continue;
+                    std::get<0>(_w) = std::max(std::get<0>(_w), itr.key.length());
+                    std::get<1>(_w) = std::max(std::get<1>(_w), itr.value.length());
+                    std::get<2>(_w) = std::max(std::get<2>(_w), itr.description.length());
                 }
                 std::stringstream _msg{};
-                _msg << "Output Keys:\n" << std::left;
-                for(const auto& itr : _keys)
+                _msg << std::left;
+
+                if(markdown)
                 {
-                    if(!is_selected(itr.first)) continue;
-                    if(_show && !is_selected(itr.second)) continue;
-                    if(_show)
-                        _msg << "    " << std::setw(_w.first) << itr.first
-                             << "  ::  " << std::setw(_w.second) << itr.second << "\n";
-                    else
-                        _msg << "    " << std::setw(_w.first) << itr.first << "\n";
+                    _msg << "| " << std::setw(std::get<0>(_w) + 2) << "String";
+                    if(_show) _msg << " | " << std::setw(std::get<1>(_w)) << "Value";
+                    _msg << " | " << std::setw(std::get<2>(_w)) << "Encoding"
+                         << " |\n";
+
+                    auto _dashes = [](int64_t _n) {
+                        std::stringstream _dss{};
+                        _dss.fill('-');
+                        _dss << std::setw(_n + 2) << "";
+                        return _dss.str();
+                    };
+
+                    _msg << "|" << _dashes(std::get<0>(_w) + 2);
+                    if(_show) _msg << "|" << _dashes(std::get<1>(_w));
+                    _msg << "|" << _dashes(std::get<2>(_w)) << "|\n";
+
+                    for(const auto& itr : _keys)
+                    {
+                        if(!is_selected(itr.key)) continue;
+                        if(_show && !is_selected(itr.value)) continue;
+                        _msg << "| " << std::setw(std::get<0>(_w) + 2)
+                             << TIMEMORY_JOIN("", "`", itr.key, "`");
+                        if(_show)
+                            _msg << " | " << std::setw(std::get<1>(_w)) << itr.value;
+                        _msg << " | " << std::setw(std::get<2>(_w)) << itr.description
+                             << " |\n";
+                    }
+                }
+                else
+                {
+                    _msg << "Output Keys:\n" << std::left;
+                    for(const auto& itr : _keys)
+                    {
+                        if(!is_selected(itr.key)) continue;
+                        if(_show && !is_selected(itr.value)) continue;
+                        if(_show)
+                            _msg << "    " << std::setw(std::get<0>(_w)) << itr.key
+                                 << "  ::  " << std::setw(std::get<1>(_w)) << itr.value
+                                 << "  ::  " << std::setw(std::get<2>(_w))
+                                 << itr.description << "\n";
+                        else
+                            _msg << "    " << std::setw(std::get<0>(_w)) << itr.key
+                                 << "  ::  " << std::setw(std::get<2>(_w))
+                                 << itr.description << "\n";
+                    }
                 }
                 std::cout << _msg.str();
             }

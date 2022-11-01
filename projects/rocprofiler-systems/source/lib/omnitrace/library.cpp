@@ -991,9 +991,10 @@ omnitrace_finalize_hidden(void)
         OMNITRACE_VERBOSE_F(1, "Finalizing timemory...\n");
         tim::timemory_finalize(_timemory_manager.get());
 
+        auto _cfg       = settings::compose_filename_config{};
+        _cfg.use_suffix = true;
         _timemory_manager->write_metadata(settings::get_global_output_prefix(),
-                                          "omnitrace",
-                                          settings::default_process_suffix());
+                                          "omnitrace", _cfg);
     }
 
     if(_perfetto_output_error)

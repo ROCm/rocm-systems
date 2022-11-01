@@ -31,6 +31,7 @@
 #include <timemory/backends/threading.hpp>
 #include <timemory/macros/language.hpp>
 
+#include <fstream>
 #include <string>
 #include <string_view>
 #include <unordered_set>
@@ -330,6 +331,29 @@ get_trace_thread_join();
 
 std::string
 get_rocm_events();
+
+bool
+get_use_tmp_files();
+
+std::string
+get_tmpdir();
+
+struct tmp_file
+{
+    tmp_file(std::string);
+    ~tmp_file();
+
+    void open(std::ios::openmode = std::ios::binary | std::ios::in | std::ios::out);
+    void close();
+
+    operator bool() const { return stream.is_open() && stream.good(); }
+
+    std::string  filename = {};
+    std::fstream stream   = {};
+};
+
+std::shared_ptr<tmp_file>
+get_tmp_file(std::string _basename, std::string _ext = "dat");
 }  // namespace config
 
 //

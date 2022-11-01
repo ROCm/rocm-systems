@@ -286,6 +286,69 @@ start_duration_thread()
     }
 }
 
+auto&
+get_offload_file()
+{
+    static auto _v = config::get_tmp_file("sampling");
+    return _v;
+}
+
+std::mutex&
+get_offload_mutex()
+{
+    static auto _v = std::mutex{};
+    return _v;
+}
+
+using sampler_bundle_t = typename sampler_t::bundle_type;
+using sampler_buffer_t = tim::data_storage::ring_buffer<sampler_bundle_t>;
+
+void
+offload_buffer(int64_t _seq, sampler_buffer_t&& _buf)
+{
+    auto  _lk   = std::unique_lock<std::mutex>{ get_offload_mutex() };
+    auto& _file = get_offload_file();
+    if(!_file) return;
+
+    OMNITRACE_VERBOSE_F(3, "Saving sampling buffer for thread %li...\n", _seq);
+    auto& _fs = _file->stream;
+    _fs.write(reinterpret_cast<char*>(&_seq), sizeof(_seq));
+    auto _data = std::move(_buf);
+    _data.save(_fs);
+    _data.destroy();
+    _buf.destroy();
+}
+
+auto
+load_offload_buffer()
+{
+    auto _data = std::map<int64_t, std::vector<sampler_buffer_t>>{};
+    if(!get_use_tmp_files()) return _data;
+
+    auto  _lk   = std::unique_lock<std::mutex>{ get_offload_mutex() };
+    auto& _file = get_offload_file();
+    if(!_file) return _data;
+
+    auto& _fs = _file->stream;
+
+    _fs.close();
+    _file->open(std::ios::binary | std::ios::in);
+    while(!_fs.eof())
+    {
+        int64_t _seq = 0;
+        _fs.read(reinterpret_cast<char*>(&_seq), sizeof(_seq));
+        if(_fs.eof()) break;
+        sampler_buffer_t _buffer{};
+        _buffer.load(_fs);
+        OMNITRACE_VERBOSE_F(2, "Loading %zu samples for thread %li...\n", _buffer.count(),
+                            _seq);
+        _data[_seq].emplace_back(std::move(_buffer));
+    }
+    _file.reset();
+
+    return _data;
+}
+
 std::set<int>
 configure(bool _setup, int64_t _tid)
 {
@@ -360,6 +423,12 @@ configure(bool _setup, int64_t _tid)
                                        SIGEV_THREAD_ID, get_sampling_cpu_freq(),
                                        get_sampling_cpu_delay(), _tid,
                                        threading::get_sys_tid() });
+        }
+
+        if(get_use_tmp_files())
+        {
+            auto _file = get_offload_file();
+            if(_file && *_file) _sampler->set_offload(&offload_buffer);
         }
 
         static_assert(tim::trait::buffer_size<sampling::sampler_t>::value > 0,
@@ -542,6 +611,14 @@ post_process()
 
     size_t _total_data    = 0;
     size_t _total_threads = 0;
+
+    for(size_t i = 0; i < max_supported_threads; ++i)
+    {
+        auto& _sampler = get_sampler(i);
+        if(_sampler) _sampler->set_offload(nullptr);
+    }
+
+    auto _loaded_data = load_offload_buffer();
     for(size_t i = 0; i < max_supported_threads; ++i)
     {
         auto& _sampler = get_sampler(i);
@@ -574,6 +651,16 @@ post_process()
 
         _sampler->stop();
         auto& _raw_data = _sampler->get_data();
+        for(auto litr : _loaded_data[i])
+        {
+            while(!litr.is_empty())
+            {
+                auto _v = sampler_bundle_t{};
+                litr.read(&_v);
+                _raw_data.emplace_back(std::move(_v));
+            }
+            litr.destroy();
+        }
 
         OMNITRACE_VERBOSE(2 || get_debug_sampling(),
                           "Sampler data for thread %lu has %zu initial entries...\n", i,

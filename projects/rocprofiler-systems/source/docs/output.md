@@ -261,21 +261,25 @@ set `OMNITRACE_OUTPUT_PREFIX="%argt%-"` and let omnitrace cleanly organize the o
 
 | String          | Encoding                                                                                                           |
 |-----------------|--------------------------------------------------------------------------------------------------------------------|
-| `%arg<N>%`      | Command line argument at position `<N>` (zero indexed), e.g. `%arg0%` for first argument.                          |
-| `%arg<N>_hash%` | MD5 sum of `%arg<N>%`                                                                                              |
 | `%argv%`        | Entire command-line condensed into a single string                                                                 |
-| `%argv_hash%`   | MD5 sum of `%argv%`                                                                                                |
 | `%argt%`        | Similar to `%argv%` except basename of first command line argument                                                 |
-| `%argt_hash%`   | MD5 sum if `%argt%`                                                                                                |
 | `%args%`        | All command line arguments condensed into a single string                                                          |
-| `%args_hash%`   | MD5 sum of `%args%`                                                                                                |
 | `%tag%`         | Basename of first command line argument                                                                            |
+| `%arg<N>%`      | Command line argument at position `<N>` (zero indexed), e.g. `%arg0%` for first argument.                          |
+| `%argv_hash%`   | MD5 sum of `%argv%`                                                                                                |
+| `%argt_hash%`   | MD5 sum if `%argt%`                                                                                                |
+| `%args_hash%`   | MD5 sum of `%args%`                                                                                                |
 | `%tag_hash%`    | MD5 sum of `%tag%`                                                                                                 |
+| `%arg<N>_hash%` | MD5 sum of `%arg<N>%`                                                                                              |
 | `%pid%`         | Process identifier (i.e. `getpid()`)                                                                               |
 | `%ppid%`        | Parent process identifier (i.e. `getppid()`)                                                                       |
+| `%pgid%`        | Process group identifier (i.e. `getpgid(getpid())`)                                                                |
+| `%psid%`        | Process session identifier  (i.e. `getsid(getpid())`)                                                              |
+| `%psize%`       | Number of sibling process (from reading `/proc/<PPID>/tasks/<PPID>/children`)                                      |
 | `%job%`         | Value of `SLURM_JOB_ID` environment variable if exists, else `0`                                                   |
 | `%rank%`        | Value of `SLURM_PROCID` environment variable if exists, else `MPI_Comm_rank` (or `0` non-mpi)                      |
 | `%size%`        | `MPI_Comm_size` or `1` if non-mpi                                                                                  |
+| `%nid%`         | `%rank%` if possible, otherwise `%pid%`                                                                            |
 | `%launch_time%` | Launch date and time (uses `OMNITRACE_TIME_FORMAT`)                                                                |
 | `%env{NAME}%`   | Value of environment variable `NAME` (i.e. `getenv(NAME)`)                                                         |
 | `%cfg{NAME}%`   | Value of configuration variable `NAME` (e.g. `%cfg{OMNITRACE_SAMPLING_FREQ}%` would resolve to sampling frequency) |
