@@ -11,6 +11,10 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  OMNITRACE_VERBOSE: 1
+  OMNITRACE_CI: ON
+
 jobs:
   opensuse:
     runs-on: ubuntu-20.04
@@ -22,10 +26,6 @@ jobs:
         compiler: ['g++']
         os-release: [ '15.2', '15.3' ]
         build-type: ['Release']
-
-    env:
-      OMNITRACE_VERBOSE: 1
-      OMNITRACE_CI: ON
 
     steps:
     - uses: actions/checkout@v3
@@ -49,7 +49,7 @@ jobs:
         git config --global --add safe.directory ${PWD} &&
         cmake --version &&
         ./scripts/run-ci.sh -B build
-          --name opensuse-${{ matrix.os-release }}-${{ matrix.compiler }}-nompi-python
+          --name ${{ github.repository_owner }}-${{ github.ref_name }}-opensuse-${{ matrix.os-release }}-${{ matrix.compiler }}-nompi-python
           --build-jobs 2
           --site GitHub
           --cmake-args
@@ -62,10 +62,13 @@ jobs:
           -DOMNITRACE_USE_HIP=OFF
           -DOMNITRACE_USE_OMPT=OFF
           -DOMNITRACE_USE_PYTHON=ON
+          -DOMNITRACE_USE_MPI_HEADERS=ON
           -DOMNITRACE_PYTHON_PREFIX=/opt/conda/envs
           -DOMNITRACE_PYTHON_ENVS="py3.6;py3.7;py3.8;py3.9;py3.10"
           -DOMNITRACE_CI_MPI_RUN_AS_ROOT=ON
           -DOMNITRACE_MAX_THREADS=32
+          -DOMNITRACE_DISABLE_EXAMPLES="transpose;rccl"
+          -DOMNITRACE_BUILD_NUMBER=${{ github.run_attempt }}
 
     - name: Install
       timeout-minutes: 10

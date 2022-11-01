@@ -80,9 +80,9 @@ backtrace::get() const
     if(size() == 0) return _v;
 
     {
-        static auto _cache = cache_type{};
+        static auto _cache = cache_type{ get_sampling_include_inlines() };
         auto_lock_t _lk{ type_mutex<backtrace>() };
-        _v = m_data.get(&_cache, true);
+        _v = m_data.get(&_cache, false);
     }
 
     // put the bottom of the call-stack on top
@@ -144,6 +144,7 @@ backtrace::filter_and_patch(const std::vector<entry_type>& _data)
     };
 
     auto _ret = std::vector<entry_type>{};
+    _ret.reserve(_data.size());
     for(const auto& itr : _data)
     {
         auto _name = tim::demangle(_patch_label(itr.name));
@@ -183,7 +184,7 @@ backtrace::sample(int)
 {
     using namespace tim::backtrace;
     constexpr bool   with_signal_frame = false;
-    constexpr size_t ignore_depth      = 3;
+    constexpr size_t ignore_depth      = 4;
     // ignore depth based on:
     // 1. this frame
     // 2. tim::sampling::sampler<...>::sample(...) [always inline]

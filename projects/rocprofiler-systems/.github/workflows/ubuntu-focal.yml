@@ -103,7 +103,7 @@ jobs:
         append-tagname ${{ matrix.static-libstdcxx }} libstdcxx &&
         cmake --version &&
         ./scripts/run-ci.sh -B build
-          --name ubuntu-focal-${{ matrix.compiler }}${TAG}
+          --name ${{ github.repository_owner }}-${{ github.ref_name }}-ubuntu-focal-${{ matrix.compiler }}${TAG}
           --build-jobs 2
           --site GitHub
           --cmake-args
@@ -125,6 +125,8 @@ jobs:
           -DOMNITRACE_PYTHON_PREFIX=/opt/conda/envs
           -DOMNITRACE_PYTHON_ENVS="py3.6;py3.7;py3.8;py3.9;py3.10"
           -DOMNITRACE_MAX_THREADS=32
+          -DOMNITRACE_DISABLE_EXAMPLES="transpose;rccl"
+          -DOMNITRACE_BUILD_NUMBER=${{ github.run_attempt }}
 
     - name: Test Build-Tree Module
       timeout-minutes: 45
@@ -282,7 +284,7 @@ jobs:
         TAG="-rocm-${{ matrix.rocm-version }}" &&
         TAG="$(echo ${TAG} | sed 's/debian/latest/g')" &&
         ./scripts/run-ci.sh -B build
-          --name ubuntu-focal-rocm-${{ matrix.compiler }}${TAG}
+          --name ${{ github.repository_owner }}-${{ github.ref_name }}-ubuntu-focal-rocm-${{ matrix.compiler }}${TAG}
           --build-jobs 2
           --site GitHub
           --cmake-args
@@ -306,7 +308,9 @@ jobs:
           -DOMNITRACE_PYTHON_PREFIX=/opt/conda/envs
           -DOMNITRACE_PYTHON_ENVS="py3.6;py3.7;py3.8;py3.9;py3.10"
           -DOMNITRACE_CI_MPI_RUN_AS_ROOT=${{ matrix.mpi-headers }}
+          -DOMNITRACE_CI_GPU=OFF
           -DCMAKE_INSTALL_RPATH_USE_LINK_PATH=OFF
+          -DOMNITRACE_BUILD_NUMBER=${{ github.run_attempt }}
           --ctest-args
           ${{ matrix.ctest-exclude }}
 
@@ -382,7 +386,6 @@ jobs:
     env:
       ELFUTILS_DOWNLOAD_VERSION: 0.186
       OMNITRACE_VERBOSE: 1
-      OMNITRACE_CI: ON
 
     steps:
     - uses: actions/checkout@v3
@@ -420,7 +423,7 @@ jobs:
         if [ "${{ matrix.mpi }}" = "nompi" ]; then USE_MPI=OFF; else USE_MPI=ON; fi &&
         if [ -z "${{ matrix.deps }}" ]; then TAG=""; else TAG="-external-deps"; fi &&
         ./scripts/run-ci.sh -B ${{ github.workspace }}/build
-          --name ubuntu-focal-${{ matrix.compiler }}-${{ matrix.mpi }}${TAG}
+          --name ${{ github.repository_owner }}-${{ github.ref_name }}-ubuntu-focal-${{ matrix.compiler }}-${{ matrix.mpi }}${TAG}
           --build-jobs 2
           --site GitHub
           --cmake-args
@@ -443,6 +446,8 @@ jobs:
           -DDYNINST_BUILD_STATIC_LIBS=OFF
           -DDYNINST_ELFUTILS_DOWNLOAD_VERSION=${{ env.ELFUTILS_DOWNLOAD_VERSION }}
           -DOMNITRACE_MAX_THREADS=32
+          -DOMNITRACE_DISABLE_EXAMPLES="transpose;rccl"
+          -DOMNITRACE_BUILD_NUMBER=${{ github.run_attempt }}
 
     - name: Test Build-Tree Env
       timeout-minutes: 60
@@ -550,7 +555,7 @@ jobs:
         git config --global --add safe.directory ${PWD} &&
         cmake --version &&
         ./scripts/run-ci.sh -B build
-          --name ubuntu-focal-codecov-mpi-python-ompt-papi
+          --name ${{ github.repository_owner }}-${{ github.ref_name }}-ubuntu-focal-codecov-mpi-python-ompt-papi
           --build-jobs 2
           --site GitHub
           --coverage
@@ -564,5 +569,7 @@ jobs:
           -DOMNITRACE_USE_OMPT=ON
           -DOMNITRACE_USE_PAPI=ON
           -DOMNITRACE_USE_HIP=OFF
-          -DOMNITRACE_USE_RCCL=ON
+          -DOMNITRACE_USE_RCCL=OFF
           -DOMNITRACE_MAX_THREADS=32
+          -DOMNITRACE_DISABLE_EXAMPLES="transpose;rccl"
+          -DOMNITRACE_BUILD_NUMBER=${{ github.run_attempt }}

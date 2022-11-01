@@ -123,7 +123,7 @@ jobs:
         append-tagname ${{ matrix.static-libgcc }} libgcc &&
         append-tagname ${{ matrix.static-libstdcxx }} libstdcxx &&
         ./scripts/run-ci.sh -B build
-          --name ubuntu-jammy-${{ matrix.compiler }}${TAG}
+          --name ${{ github.repository_owner }}-${{ github.ref_name }}-ubuntu-jammy-${{ matrix.compiler }}${TAG}
           --build-jobs 2
           --site GitHub
           --cmake-args
@@ -147,6 +147,8 @@ jobs:
           -DOMNITRACE_PYTHON_ENVS="py3.7;py3.8;py3.9;py3.10"
           -DOMNITRACE_STRIP_LIBRARIES=${{ matrix.strip }}
           -DOMNITRACE_MAX_THREADS=32
+          -DOMNITRACE_DISABLE_EXAMPLES="transpose;rccl"
+          -DOMNITRACE_BUILD_NUMBER=${{ github.run_attempt }}
           -DUSE_CLANG_OMP=OFF
 
     - name: Install

@@ -180,7 +180,7 @@ endif()
 # -------------------------------------------------------------------------------------- #
 
 set(_VALID_GPU OFF)
-if(OMNITRACE_USE_HIP)
+if(OMNITRACE_USE_HIP AND (NOT DEFINED OMNITRACE_CI_GPU OR OMNITRACE_CI_GPU))
     set(_VALID_GPU ON)
     find_program(
         OMNITRACE_ROCM_SMI_EXE

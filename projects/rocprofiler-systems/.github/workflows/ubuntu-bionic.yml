@@ -78,11 +78,12 @@ jobs:
       timeout-minutes: 115
       shell: bash
       run:
+        git config --global --add safe.directory ${PWD} &&
         cmake --version &&
         if [ "${{ matrix.mpi }}" = "nompi" ]; then USE_MPI=OFF; else USE_MPI=ON; fi &&
         append-tagname() { if [ "${1}" == "ON" ]; then TAG="${TAG}-${2}"; fi; } &&
         ./scripts/run-ci.sh -B build
-          --name ubuntu-bionic-${{ matrix.compiler }}-${{ matrix.mpi }}-python
+          --name ${{ github.repository_owner }}-${{ github.ref_name }}-ubuntu-bionic-${{ matrix.compiler }}-${{ matrix.mpi }}-python
           --build-jobs 2
           --site GitHub
           --cmake-args
@@ -99,6 +100,8 @@ jobs:
           -DOMNITRACE_PYTHON_ENVS="py3.6;py3.7;py3.8;py3.9;py3.10"
           -DLULESH_BUILD_KOKKOS=OFF
           -DOMNITRACE_MAX_THREADS=32
+          -DOMNITRACE_DISABLE_EXAMPLES="transpose;rccl"
+          -DOMNITRACE_BUILD_NUMBER=${{ github.run_attempt }}
 
     - name: Install
       run:

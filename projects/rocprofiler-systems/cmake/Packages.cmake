@@ -536,8 +536,11 @@ endif()
 #
 # ----------------------------------------------------------------------------------------#
 
-target_compile_definitions(omnitrace-timemory-config INTERFACE TIMEMORY_PAPI_ARRAY_SIZE=12
-                                                               TIMEMORY_USE_ROOFLINE=0)
+target_compile_definitions(
+    omnitrace-timemory-config
+    INTERFACE TIMEMORY_PAPI_ARRAY_SIZE=12 TIMEMORY_USE_ROOFLINE=0 TIMEMORY_USE_ERT=0
+              TIMEMORY_USE_CONTAINERS=0 TIMEMORY_USE_ERT_EXTERN=0
+              TIMEMORY_USE_CONTAINERS_EXTERN=0)
 
 if(OMNITRACE_BUILD_STACK_PROTECTOR)
     add_target_flag_if_avail(omnitrace-timemory-config "-fstack-protector-strong"
@@ -628,6 +631,9 @@ set(TIMEMORY_BUILD_EXTRA_OPTIMIZATIONS
 set(TIMEMORY_BUILD_ERT
     OFF
     CACHE BOOL "Disable building ERT support" FORCE)
+set(TIMEMORY_BUILD_CONTAINERS
+    OFF
+    CACHE BOOL "Disable building container extern templates (unused)" FORCE)
 
 # timemory build settings
 set(TIMEMORY_TLS_MODEL

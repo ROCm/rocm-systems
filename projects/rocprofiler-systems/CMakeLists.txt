@@ -33,11 +33,21 @@ if(Git_FOUND AND EXISTS "${PROJECT_SOURCE_DIR}/.git")
     execute_process(
         COMMAND ${GIT_EXECUTABLE} describe --tags
         OUTPUT_VARIABLE OMNITRACE_GIT_DESCRIBE
-        OUTPUT_STRIP_TRAILING_WHITESPACE)
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        RESULT_VARIABLE _GIT_DESCRIBE_RESULT
+        ERROR_QUIET)
+    if(NOT _GIT_DESCRIBE_RESULT EQUAL 0)
+        execute_process(
+            COMMAND ${GIT_EXECUTABLE} describe
+            OUTPUT_VARIABLE OMNITRACE_GIT_DESCRIBE
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            RESULT_VARIABLE _GIT_DESCRIBE_RESULT
+            ERROR_QUIET)
+    endif()
     execute_process(
         COMMAND ${GIT_EXECUTABLE} rev-parse HEAD
         OUTPUT_VARIABLE OMNITRACE_GIT_REVISION
-        OUTPUT_STRIP_TRAILING_WHITESPACE)
+        OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
 else()
     set(OMNITRACE_GIT_DESCRIBE "v${OMNITRACE_VERSION}")
     set(OMNITRACE_GIT_REVISION "")
@@ -184,6 +194,13 @@ endif()
 if(OMNITRACE_USE_PYTHON)
     omnitrace_add_option(OMNITRACE_BUILD_PYTHON
                          "Build python bindings with internal pybind11" ON)
+elseif("$ENV{OMNITRACE_CI}")
+    # quiet warnings in dashboard
+    if(OMNITRACE_PYTHON_ENVS OR OMNITRACE_PYTHON_PREFIX)
+        omnitrace_message(
+            STATUS
+            "Ignoring values of OMNITRACE_PYTHON_ENVS and/or OMNITRACE_PYTHON_PREFIX")
+    endif()
 endif()
 
 if(NOT OMNITRACE_USE_HIP)

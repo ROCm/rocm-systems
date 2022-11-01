@@ -80,7 +80,7 @@ do
             ;;
         -n|--name)
             shift
-            NAME=$(echo ${1} | sed 's/g++/gcc/g')
+            NAME=$(echo ${1} | sed 's/g++/gcc/g' | sed 's/\/merge//1')
             reset-last
             ;;
         -s|--site)
@@ -249,4 +249,4 @@ EOF
 
 verbose-run cat CTestCustom.cmake
 verbose-run cat dashboard.cmake
-verbose-run ctest ${CDASH_ARGS} -S dashboard.cmake --output-on-failure ${CTEST_ARGS}
+verbose-run ctest ${CDASH_ARGS} -S dashboard.cmake --output-on-failure -V ${CTEST_ARGS}

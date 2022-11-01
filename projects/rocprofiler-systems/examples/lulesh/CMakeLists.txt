@@ -1,6 +1,15 @@
 cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
 
-project(lulesh LANGUAGES C CXX)
+project(omnitrace-lulesh-example LANGUAGES C CXX)
+
+if(OMNITRACE_DISABLE_EXAMPLES)
+    get_filename_component(_DIR ${CMAKE_CURRENT_LIST_DIR} NAME)
+
+    if(${PROJECT_NAME} IN_LIST OMNITRACE_DISABLE_EXAMPLES OR ${_DIR} IN_LIST
+                                                             OMNITRACE_DISABLE_EXAMPLES)
+        return()
+    endif()
+endif()
 
 set(CMAKE_BUILD_TYPE "RelWithDebInfo")
 
@@ -54,9 +63,9 @@ endif()
 file(GLOB headers ${PROJECT_SOURCE_DIR}/*.h ${PROJECT_SOURCE_DIR}/*.hxx)
 file(GLOB sources ${PROJECT_SOURCE_DIR}/*.cc)
 
-add_executable(${PROJECT_NAME} ${sources} ${headers})
-target_include_directories(${PROJECT_NAME} PRIVATE ${PROJECT_SOURCE_DIR}/includes)
-target_link_libraries(${PROJECT_NAME} PRIVATE Kokkos::kokkos lulesh-mpi)
+add_executable(lulesh ${sources} ${headers})
+target_include_directories(lulesh PRIVATE ${PROJECT_SOURCE_DIR}/includes)
+target_link_libraries(lulesh PRIVATE Kokkos::kokkos lulesh-mpi)
 
 if(OMNITRACE_INSTALL_EXAMPLES)
     if(LULESH_BUILD_KOKKOS)
@@ -64,12 +73,11 @@ if(OMNITRACE_INSTALL_EXAMPLES)
             TARGETS kokkoscore kokkoscontainers
             DESTINATION ${CMAKE_INSTALL_LIBDIR}
             COMPONENT omnitrace-examples)
-        set_target_properties(
-            ${PROJECT_NAME} PROPERTIES INSTALL_RPATH
-                                       "\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}")
+        set_target_properties(lulesh PROPERTIES INSTALL_RPATH
+                                                "\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}")
     endif()
     install(
-        TARGETS ${PROJECT_NAME}
+        TARGETS lulesh
         DESTINATION bin
         COMPONENT omnitrace-examples)
 endif()

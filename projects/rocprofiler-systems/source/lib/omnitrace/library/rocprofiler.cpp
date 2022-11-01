@@ -513,6 +513,7 @@ post_process_perfetto()
         for(const auto& itr : _inp)
         {
             if(_ts >= itr->entry && _ts <= itr->exit) _v.emplace_back(itr);
+            if(_ts > itr->exit) break;
         }
         return _v;
     };
@@ -551,11 +552,14 @@ post_process_perfetto()
 
     for(auto& ditr : _device_range)
     {
-        auto _dev_id = ditr.first;
-        auto _values = std::vector<rocm_feature_value>{};
+        auto _dev_id         = ditr.first;
+        auto _values         = std::vector<rocm_feature_value>{};
+        auto _ts_sorted_data = _device_data[_dev_id];
+        std::sort(_ts_sorted_data.begin(), _ts_sorted_data.end(),
+                  [](auto* _l, auto* _r) { return _l->exit < _r->exit; });
         for(const auto& itr : ditr.second)
         {
-            auto     _v  = _get_events(_device_data[_dev_id], itr);
+            auto     _v  = _get_events(_ts_sorted_data, itr);
             uint64_t _ts = itr;
             for(auto* vitr : _v)
             {
@@ -629,6 +633,13 @@ post_process_timemory()
         _device_data[itr.device_id].emplace_back(&itr);
     }
 
+    for(auto& itr : _device_data)
+    {
+        // sort according to when it exited
+        std::sort(itr.second.begin(), itr.second.end(),
+                  [](auto* _lhs, auto* _rhs) { return _lhs->exit < _rhs->exit; });
+    }
+
     using storage_type = typename rocm_data_tracker::storage_type;
     using bundle_type  = tim::lightweight_tuple<rocm_data_tracker>;
 
@@ -646,8 +657,8 @@ post_process_timemory()
 
     struct local_event
     {
-        rocm_event*              parent   = nullptr;
-        std::vector<local_event> children = {};
+        rocm_event*                      parent   = nullptr;
+        mutable std::vector<local_event> children = {};
 
         TIMEMORY_DEFAULT_OBJECT(local_event)
 
@@ -657,17 +668,11 @@ post_process_timemory()
 
         bool operator()(rocm_event* _v)
         {
-            OMNITRACE_CI_THROW(!parent, "Error! '%s' has nullptr", __PRETTY_FUNCTION__);
-
+            if(!parent) return false;
             if(_v->device_id != parent->device_id) return false;
             if(_v->entry > parent->entry && _v->exit <= parent->exit)
             {
-                for(auto& itr : children)
-                {
-                    if(itr(_v)) return true;
-                }
                 children.emplace_back(_v);
-                std::sort(children.begin(), children.end());
                 return true;
             }
             return false;
@@ -675,22 +680,20 @@ post_process_timemory()
 
         bool operator<(const local_event& _v) const
         {
-            OMNITRACE_CI_THROW(!parent, "Error! '%s' has nullptr", __PRETTY_FUNCTION__);
-            OMNITRACE_CI_THROW(!_v.parent, "Error! '%s' passed nullptr",
-                               __PRETTY_FUNCTION__);
-
+            if(!parent && _v.parent) return true;
+            if(parent && !_v.parent) return false;
             return *parent < *_v.parent;
         }
 
         void operator()(int64_t _index, scope::config _scope) const
         {
-            OMNITRACE_CI_THROW(!parent, "Error! '%s' has nullptr", __PRETTY_FUNCTION__);
-
+            if(!parent) return;
             bundle_type _bundle{ parent->name, _scope };
             _bundle.push(parent->queue_id)
                 .start()
                 .store(parent->feature_values.at(_index));
 
+            std::sort(children.begin(), children.end());
             for(const auto& itr : children)
                 itr(_index, _scope);
 
@@ -737,6 +740,8 @@ post_process_timemory()
 
     for(auto& ditr : _device_data)
     {
+        OMNITRACE_VERBOSE_F(1, "Post-processing %zu entries for device %u...\n",
+                            ditr.second.size(), ditr.first);
         auto _storage = std::vector<local_storage>{};
         for(auto& itr : ditr.second)
         {
@@ -752,22 +757,38 @@ post_process_timemory()
         }
 
         auto& _local = _local_data[ditr.first];
+        _local.reserve(ditr.second.size());
+        double _avg = 0.0;
         for(auto& itr : ditr.second)
         {
-            for(auto& litr : _local)
+            if(_local.empty() || itr->entry >= _local.back().parent->exit)
             {
-                if(litr(itr))
-                {
-                    goto _bypass_insert;
-                }
+                _local.emplace_back(itr);
             }
-            _local.emplace_back(itr);
-        _bypass_insert:;
+            else
+            {
+                size_t _n     = 0;
+                bool   _found = false;
+                for(auto litr = _local.rbegin(); litr != _local.rend(); ++litr)
+                {
+                    ++_n;
+                    if((*litr)(itr))
+                    {
+                        _found = true;
+                        break;
+                    }
+                }
+                if(!_found) _local.emplace_back(itr);
+                _avg += _n;
+            }
         }
+
+        OMNITRACE_VERBOSE_F(3, "Average # of iterations before match: %.1f\n",
+                            _avg / ditr.second.size() * 100.0);
 
         for(auto& sitr : _storage)
         {
-            for(auto& itr : _local_data[ditr.first])
+            for(auto& itr : _local)
                 sitr(itr, _scope);
         }
 

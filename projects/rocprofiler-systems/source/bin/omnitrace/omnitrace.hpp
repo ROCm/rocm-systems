@@ -32,6 +32,7 @@
 
 #include <string>
 #include <sys/stat.h>
+#include <unistd.h>
 
 //======================================================================================//
 
@@ -229,9 +230,11 @@ omnitrace_get_address_space(patch_pointer_t& _bpatch, int _cmdc, char** _cmdv,
         auto _cmd_msg = ss.str();
         if(_cmd_msg.length() > 1) _cmd_msg = _cmd_msg.substr(1);
 
+        char** _environ = environ;
         verbprintf(1, "Creating process '%s'... ", _cmd_msg.c_str());
         fflush(stderr);
-        mutatee = _bpatch->processCreate(_cmdv[0], (const char**) _cmdv, nullptr);
+        mutatee = _bpatch->processCreate(_cmdv[0], (const char**) _cmdv,
+                                         (const char**) _environ);
         if(!mutatee)
         {
             verbprintf(-1, "Failed to create process: '%s'\n", _cmd_msg.c_str());

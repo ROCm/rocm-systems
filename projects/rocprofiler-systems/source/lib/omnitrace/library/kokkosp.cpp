@@ -321,7 +321,6 @@ extern "C"
 
     void kokkosp_push_profile_region(const char* name)
     {
-        if(omnitrace::get_use_perfetto()) return;  // perfetto doesn't support regions
         OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
         kokkosp::logger_t{}.mark(1, __FUNCTION__, name);
         kokkosp::get_profiler_stack<kokkosp_region>().push_back(
@@ -331,7 +330,6 @@ extern "C"
 
     void kokkosp_pop_profile_region()
     {
-        if(omnitrace::get_use_perfetto()) return;  // perfetto doesn't support regions
         OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
         kokkosp::logger_t{}.mark(-1, __FUNCTION__);
         if(kokkosp::get_profiler_stack<kokkosp_region>().empty()) return;
@@ -343,7 +341,6 @@ extern "C"
 
     void kokkosp_create_profile_section(const char* name, uint32_t* secid)
     {
-        if(omnitrace::get_use_perfetto()) return;  // perfetto doesn't support regions
         OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
         *secid     = kokkosp::get_unique_id();
         auto pname = TIMEMORY_JOIN(" ", "[kokkos]", name);
@@ -352,7 +349,6 @@ extern "C"
 
     void kokkosp_destroy_profile_section(uint32_t secid)
     {
-        if(omnitrace::get_use_perfetto()) return;  // perfetto doesn't support regions
         OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
         kokkosp::destroy_profiler<kokkosp_region>(secid);
     }
@@ -361,7 +357,6 @@ extern "C"
 
     void kokkosp_start_profile_section(uint32_t secid)
     {
-        if(omnitrace::get_use_perfetto()) return;  // perfetto doesn't support regions
         OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
         kokkosp::logger_t{}.mark(1, __FUNCTION__, secid);
         kokkosp::start_profiler<kokkosp_region>(secid);
@@ -369,7 +364,6 @@ extern "C"
 
     void kokkosp_stop_profile_section(uint32_t secid)
     {
-        if(omnitrace::get_use_perfetto()) return;  // perfetto doesn't support regions
         OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
         kokkosp::logger_t{}.mark(-1, __FUNCTION__, secid);
         kokkosp::start_profiler<kokkosp_region>(secid);

@@ -130,6 +130,12 @@ std::unique_ptr<std::ofstream> log_ofs = {};
 
 namespace
 {
+namespace process = tim::process;
+namespace signals = tim::signals;
+
+using signal_settings = tim::signals::signal_settings;
+using sys_signal      = tim::signals::sys_signal;
+
 bool                                       binary_rewrite       = false;
 bool                                       is_attached          = false;
 bool                                       use_mpi              = false;
@@ -188,9 +194,60 @@ get_cwd();
 
 void
 find_dyn_api_rt();
-}  // namespace
 
-namespace process = tim::process;
+void
+activate_signal_handlers(const std::vector<sys_signal>& _signals)
+{
+    for(const auto& itr : _signals)
+        signal_settings::enable(itr);
+
+    static bool _protect     = false;
+    auto        _exit_action = [](int nsig) {
+        if(_protect) return;
+        _protect = true;
+        TIMEMORY_PRINTF_FATAL(
+            stderr, "omnitrace exited with signal %i :: %s\n", nsig,
+            signal_settings::str(static_cast<sys_signal>(nsig)).c_str());
+
+        // print the last log entries
+        print_log_entries(std::cerr, num_log_entries);
+
+        // print any forced entries
+        print_log_entries(
+            std::cerr, -1, [](const auto& _v) { return _v.forced(); },
+            []() {
+                tim::log::stream(std::cerr, tim::log::color::info())
+                    << "\n[omnitrace][exe] Potentially important log entries:\n\n";
+            });
+
+        TIMEMORY_PRINTF_FATAL(stderr, "\n");
+        TIMEMORY_PRINTF_FATAL(
+            stderr,
+            "These were the last %i log entries from omnitrace. You can control the "
+            "number of log entries via the '--log <N>' option or OMNITRACE_LOG_COUNT "
+            "env variable.\n",
+            num_log_entries);
+
+        if(log_ofs) log_ofs->close();
+        log_ofs.reset();
+
+        _protect = false;
+    };
+
+    signal_settings::set_exit_action(_exit_action);
+    signal_settings::check_environment();
+    signals::enable_signal_detection(signal_settings::get_enabled());
+}
+
+// default signals to catch
+auto _activate =
+    (activate_signal_handlers({ sys_signal::Interrupt, sys_signal::FPE, sys_signal::Stop,
+                                sys_signal::Quit, sys_signal::Illegal, sys_signal::Abort,
+                                sys_signal::Bus, sys_signal::SegFault,
+                                sys_signal::FileSize, sys_signal::CPUtime }),
+     true);
+
+}  // namespace
 
 //======================================================================================//
 //
@@ -201,56 +258,6 @@ namespace process = tim::process;
 int
 main(int argc, char** argv)
 {
-    {
-        using signal_settings = tim::signals::signal_settings;
-        using sys_signal      = tim::signals::sys_signal;
-
-        // default signals to catch
-        for(const auto& itr :
-            { sys_signal::Interrupt, sys_signal::FPE, sys_signal::Stop, sys_signal::Quit,
-              sys_signal::Illegal, sys_signal::Abort, sys_signal::Bus,
-              sys_signal::SegFault, sys_signal::FileSize, sys_signal::CPUtime })
-            signal_settings::enable(itr);
-
-        static bool _protect     = false;
-        auto        _exit_action = [](int nsig) {
-            if(_protect) return;
-            _protect = true;
-            TIMEMORY_PRINTF_FATAL(
-                stderr, "omnitrace exited with signal %i :: %s\n", nsig,
-                signal_settings::str(static_cast<sys_signal>(nsig)).c_str());
-
-            // print the last log entries
-            print_log_entries(std::cerr, num_log_entries);
-
-            // print any forced entries
-            print_log_entries(
-                std::cerr, -1, [](const auto& _v) { return _v.forced(); },
-                []() {
-                    tim::log::stream(std::cerr, tim::log::color::info())
-                        << "\n[omnitrace][exe] Potentially important log entries:\n\n";
-                });
-
-            TIMEMORY_PRINTF_FATAL(stderr, "\n");
-            TIMEMORY_PRINTF_FATAL(
-                stderr,
-                "These were the last %i log entries from omnitrace. You can control the "
-                "number of log entries via the '--log <N>' option or OMNITRACE_LOG_COUNT "
-                "env variable.\n",
-                num_log_entries);
-
-            if(log_ofs) log_ofs->close();
-            log_ofs.reset();
-
-            kill(process::get_id(), nsig);
-            _protect = false;
-        };
-
-        signal_settings::set_exit_action(_exit_action);
-        signal_settings::check_environment();
-        tim::signals::enable_signal_detection(signal_settings::get_enabled());
-    }
-
     argv0 = argv[0];
 
     OMNITRACE_ADD_LOG_ENTRY(argv[0]);
@@ -263,7 +270,7 @@ main(int argc, char** argv)
     std::vector<string_t> libname       = {};
     std::vector<string_t> sharedlibname = {};
     std::vector<string_t> staticlibname = {};
-    tim::process::id_t    _pid          = -1;
+    process::id_t         _pid          = -1;
 
     fixed_module_functions = {
         { &available_module_functions, false },
@@ -881,8 +888,7 @@ main(int argc, char** argv)
             auto _settings = tim::settings::push<omnitrace_env_config_s>();
             for(auto&& iitr : *_settings)
             {
-                iitr.second->set_config_updated(false);
-                iitr.second->set_environ_updated(false);
+                if(iitr.second->get_updated()) iitr.second->set_user_updated();
             }
             _settings->read(itr);
             for(auto&& iitr : *_settings)
@@ -2554,9 +2560,12 @@ find_dyn_api_rt()
                 (_file_exists(tim::get_env<string_t>("DYNINSTAPI_RT_LIB", ""))) ? 0 : 1;
             tim::set_env<string_t>("DYNINSTAPI_RT_LIB", _fname, _overwrite);
             _fname = tim::get_env<string_t>("DYNINSTAPI_RT_LIB", _fname);
-            tim::set_env<string_t>("DYNINST_REWRITER_PATHS",
-                                   TIMEMORY_JOIN(':', dirname(_fname), _rewriter_paths),
-                                   1);
+            tim::set_env<string_t>(
+                "DYNINST_REWRITER_PATHS",
+                _rewriter_paths.empty()
+                    ? dirname(_fname)
+                    : TIMEMORY_JOIN(':', dirname(_fname), _rewriter_paths),
+                1);
         };
 
         auto _resolved = [&](std::string _fname) {

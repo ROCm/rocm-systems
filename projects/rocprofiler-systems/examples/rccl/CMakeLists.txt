@@ -2,16 +2,45 @@ cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
 
 project(omnitrace-rccl-example LANGUAGES CXX)
 
-find_package(rccl)
-find_package(hip HINTS ${ROCmVersion_DIR} PATHS ${ROCmVersion_DIR})
+if(OMNITRACE_DISABLE_EXAMPLES)
+    get_filename_component(_DIR ${CMAKE_CURRENT_LIST_DIR} NAME)
 
-function(rccl_message)
+    if(${PROJECT_NAME} IN_LIST OMNITRACE_DISABLE_EXAMPLES OR ${_DIR} IN_LIST
+                                                             OMNITRACE_DISABLE_EXAMPLES)
+        return()
+    endif()
+endif()
+
+function(rccl_message _MSG_TYPE)
+    if("${CMAKE_PROJECT_NAME}" STREQUAL "omnitrace"
+       AND "$ENV{OMNITRACE_CI}"
+       AND "${_MSG_TYPE}" MATCHES "WARNING")
+        set(_MSG_TYPE STATUS) # don't generate warnings during CI
+    endif()
     if("${CMAKE_PROJECT_NAME}" STREQUAL "omnitrace")
-        omnitrace_message(${ARGN})
+        omnitrace_message(${_MSG_TYPE} ${ARGN})
     else()
-        message(${ARGN})
+        message(${_MSG_TYPE} ${ARGN})
     endif()
 endfunction()
+
+find_package(hip HINTS ${ROCmVersion_DIR} PATHS ${ROCmVersion_DIR})
+
+if(NOT hip_FOUND)
+    rccl_message(AUTHOR_WARNING "${PROJECT_NAME} skipped. Missing HIP...")
+    return()
+endif()
+
+if("${CMAKE_PROJECT_NAME}" STREQUAL "omnitrace" AND "$ENV{OMNITRACE_CI}")
+    find_package(rccl QUIET) # avoid generating warning in CI
+else()
+    find_package(rccl)
+endif()
+
+if(NOT rccl_FOUND)
+    rccl_message(AUTHOR_WARNING "${PROJECT_NAME} skipped. Missing RCCL...")
+    return()
+endif()
 
 if(hip_FOUND AND rccl_FOUND)
     include(FetchContent)
@@ -56,6 +85,4 @@ if(hip_FOUND AND rccl_FOUND)
             "${_RCCL_TEST_TARGETS}"
             CACHE INTERNAL "rccl-test targets")
     endif()
-else()
-    rccl_message(AUTHOR_WARNING "${PROJECT_NAME} skipped. Missing RCCL and/or HIP...")
 endif()

@@ -376,6 +376,40 @@ function(OMNITRACE_ADD_OPTION _NAME _MESSAGE _DEFAULT)
 endfunction()
 
 # ----------------------------------------------------------------------------------------#
+# function omnitrace_add_cache_option(<OPTION_NAME> <DOCSRING> <TYPE> <DEFAULT_VALUE>
+# [NO_FEATURE] [ADVANCED] [CMAKE_DEFINE])
+#
+function(OMNITRACE_ADD_CACHE_OPTION _NAME _MESSAGE _TYPE _DEFAULT)
+    set(_FORCE)
+    if("FORCE" IN_LIST ARGN)
+        set(_FORCE FORCE)
+    endif()
+
+    set(${_NAME}
+        "${_DEFAULT}"
+        CACHE ${_TYPE} "${_MESSAGE}" ${_FORCE})
+
+    if("NO_FEATURE" IN_LIST ARGN)
+        mark_as_advanced(${_NAME})
+    else()
+        omnitrace_add_feature(${_NAME} "${_MESSAGE}")
+
+        if(OMNITRACE_BUILD_DOCS)
+            set_property(GLOBAL APPEND PROPERTY ${PROJECT_NAME}_CMAKE_OPTIONS_DOC
+                                                "${_NAME}` | ${_MESSAGE} |")
+        endif()
+    endif()
+
+    if("ADVANCED" IN_LIST ARGN)
+        mark_as_advanced(${_NAME})
+    endif()
+
+    if("CMAKE_DEFINE" IN_LIST ARGN)
+        set_property(GLOBAL APPEND PROPERTY ${PROJECT_NAME}_CMAKE_DEFINES ${_NAME})
+    endif()
+endfunction()
+
+# ----------------------------------------------------------------------------------------#
 # function omnitrace_report_feature_changes() :: print changes in features
 #
 function(OMNITRACE_REPORT_FEATURE_CHANGES)

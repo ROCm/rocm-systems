@@ -1,6 +1,15 @@
 cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
 
-project(omnitrace-transpose LANGUAGES CXX)
+project(omnitrace-transpose-example LANGUAGES CXX)
+
+if(OMNITRACE_DISABLE_EXAMPLES)
+    get_filename_component(_DIR ${CMAKE_CURRENT_LIST_DIR} NAME)
+
+    if(${PROJECT_NAME} IN_LIST OMNITRACE_DISABLE_EXAMPLES OR ${_DIR} IN_LIST
+                                                             OMNITRACE_DISABLE_EXAMPLES)
+        return()
+    endif()
+endif()
 
 find_package(hip QUIET HINTS ${ROCmVersion_DIR} PATHS ${ROCmVersion_DIR})
 

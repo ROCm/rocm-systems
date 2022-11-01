@@ -27,6 +27,11 @@ omnitrace_add_option(OMNITRACE_BUILD_STATIC_LIBGCC
 omnitrace_add_option(OMNITRACE_BUILD_STATIC_LIBSTDCXX
                      "Build with -static-libstdc++ if possible" OFF)
 omnitrace_add_option(OMNITRACE_BUILD_STACK_PROTECTOR "Build with -fstack-protector" ON)
+omnitrace_add_cache_option(
+    OMNITRACE_BUILD_LINKER
+    "If set to a non-empty value, pass -fuse-ld=\${OMNITRACE_BUILD_LINKER}" STRING "bfd")
+omnitrace_add_cache_option(OMNITRACE_BUILD_NUMBER "Internal CI use" STRING "0" ADVANCED
+                           NO_FEATURE)
 
 omnitrace_add_interface_library(omnitrace-static-libgcc
                                 "Link to static version of libgcc")
@@ -224,6 +229,16 @@ if(OMNITRACE_BUILD_DEVELOPER)
         omnitrace-compile-options "-Werror" "-Wdouble-promotion" "-Wshadow" "-Wextra"
         "-Wpedantic" "-Wstack-usage=524288" # 512 KB
         "/showIncludes")
+    if(OMNITRACE_BUILD_NUMBER LESS 2)
+        add_target_flag_if_avail(omnitrace-compile-options "-gsplit-dwarf")
+    endif()
+endif()
+
+if(OMNITRACE_BUILD_LINKER)
+    target_link_options(
+        omnitrace-compile-options INTERFACE
+        $<$<C_COMPILER_ID:GNU>:-fuse-ld=${OMNITRACE_BUILD_LINKER}>
+        $<$<CXX_COMPILER_ID:GNU>:-fuse-ld=${OMNITRACE_BUILD_LINKER}>)
 endif()
 
 # ----------------------------------------------------------------------------------------#

@@ -109,7 +109,7 @@ elseif("${MPI_HEADERS_VENDOR}" STREQUAL "MPICH")
     option(
         MPI_HEADERS_ALLOW_MPICH
         "Permit the use of MPI headers from MPICH instead of using internal OpenMPI header"
-        )
+        OFF)
     mark_as_advanced(MPI_HEADERS_ALLOW_MPICH)
     if(NOT MPI_HEADERS_ALLOW_MPICH)
         set(_MESSAGE "\nFound MPI headers belonging to a MPICH distribution. ")

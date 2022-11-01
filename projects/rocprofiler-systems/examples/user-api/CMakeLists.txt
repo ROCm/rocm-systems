@@ -1,6 +1,15 @@
 cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
 
-project(omnitrace-user-api LANGUAGES CXX)
+project(omnitrace-user-api-example LANGUAGES CXX)
+
+if(OMNITRACE_DISABLE_EXAMPLES)
+    get_filename_component(_DIR ${CMAKE_CURRENT_LIST_DIR} NAME)
+
+    if(${PROJECT_NAME} IN_LIST OMNITRACE_DISABLE_EXAMPLES OR ${_DIR} IN_LIST
+                                                             OMNITRACE_DISABLE_EXAMPLES)
+        return()
+    endif()
+endif()
 
 set(CMAKE_BUILD_TYPE "Debug")
 find_package(Threads REQUIRED)
