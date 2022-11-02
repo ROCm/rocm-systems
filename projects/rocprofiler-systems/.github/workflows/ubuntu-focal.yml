@@ -535,7 +535,7 @@ jobs:
       timeout-minutes: 10
       run:
         apt-get update &&
-        apt-get install -y build-essential m4 autoconf libtool python3-pip clang libomp-dev environment-modules gcc g++ mpich libmpich-dev &&
+        apt-get install -y build-essential m4 autoconf libtool python3-pip clang libomp-dev environment-modules gcc g++ mpich libmpich-dev texinfo &&
         python3 -m pip install --upgrade pip &&
         python3 -m pip install numpy &&
         python3 -m pip install perfetto &&
@@ -573,3 +573,4 @@ jobs:
           -DOMNITRACE_MAX_THREADS=32
           -DOMNITRACE_DISABLE_EXAMPLES="transpose;rccl"
           -DOMNITRACE_BUILD_NUMBER=${{ github.run_attempt }}
+          -DMPI_HEADERS_ALLOW_MPICH=ON
