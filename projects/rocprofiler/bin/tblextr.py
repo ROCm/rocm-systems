@@ -382,6 +382,7 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
   hip_wait_event_ptrn =  re.compile(r'WaitEvent')
   hip_sync_event_ptrn = re.compile(r'hipStreamSynchronize')
   hip_sync_dev_event_ptrn = re.compile(r'hipDeviceSynchronize')
+  hip_graph_ptrn = re.compile(r'hipGraphLaunch')
   wait_event_ptrn = re.compile(r'WaitEvent|hipStreamSynchronize|hipDeviceSynchronize')
   hip_stream_wait_write_ptrn = re.compile(r'hipStreamWaitValue64|hipStreamWriteValue64|hipStreamWaitValue32|hipStreamWriteValue32')
   prop_pattern = re.compile("([\w-]+)\((\w+)\)");
@@ -518,6 +519,10 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
 
         if hip_mcopy_ptrn.match(record_name):
           mcopy_found = 1
+          op_found = 1
+
+        # HIP Graph API
+        if hip_graph_ptrn.search(record_name):
           op_found = 1
 
         # HIP WaitEvent API
