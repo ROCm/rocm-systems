@@ -56,11 +56,22 @@ header_basic = \
 '  inline static void print_escaped_string(std::ostream& out, const char *v, size_t len) {\n' + \
 '    out << \'"\'; \n' + \
 '    for (size_t i = 0; i < len && v[i]; ++i) {\n' + \
-'      if (std::isprint((unsigned char)v[i])) std::operator<<(out, v[i]);\n' + \
-'      else {\n' + \
-'        std::ios_base::fmtflags flags(out.flags());\n' + \
-'        out << "\\\\x" << std::setfill(\'0\') << std::setw(2) << std::hex << (unsigned int)(unsigned char)v[i];\n' + \
-'        out.flags(flags);\n' + \
+'      switch (v[i]) {\n' + \
+'      case \'\\"\': out << "\\\\\\""; break;\n' + \
+'      case \'\\\\\': out << "\\\\\\\\"; break;\n' + \
+'      case \'\\b\': out << "\\\\\\b"; break;\n' + \
+'      case \'\\f\': out << "\\\\\\f"; break;\n' + \
+'      case \'\\n\': out << "\\\\\\n"; break;\n' + \
+'      case \'\\r\': out << "\\\\\\r"; break;\n' + \
+'      case \'\\t\': out << "\\\\\\t"; break;\n' + \
+'      default:\n' + \
+'        if (std::isprint((unsigned char)v[i])) std::operator<<(out, v[i]);\n' + \
+'        else {\n' + \
+'          std::ios_base::fmtflags flags(out.flags());\n' + \
+'          out << "\\\\x" << std::setfill(\'0\') << std::setw(2) << std::hex << (unsigned int)(unsigned char)v[i];\n' + \
+'          out.flags(flags);\n' + \
+'        }\n' + \
+'        break;\n' + \
 '      }\n' + \
 '    }\n' + \
 '    out << \'"\'; \n' + \
