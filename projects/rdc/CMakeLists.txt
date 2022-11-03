@@ -87,12 +87,9 @@ set(RSMI_LIB_DIR "${ROCM_DIR}/${CMAKE_INSTALL_LIBDIR}" CACHE INTERNAL "ROCm SMI 
 set(GRPC_ROOT_DEFAULT "/usr")
 set(GRPC_ROOT ${GRPC_ROOT_DEFAULT} CACHE STRING "GRPC installation directory.")
 set(GRPC_DESIRED_VERSION 1.44.0 CACHE STRING "GRPC desired package version.")
-set(RDC_ROOT_PATH "/" CACHE STRING "")
-set(RDC_CLIENT_INSTALL_PREFIX "opt/rocm" CACHE STRING "Old variable name. Used by RDC_INSTALL_PREFIX")
-mark_as_advanced(RDC_CLIENT_INSTALL_PREFIX)
-set(RDC_INSTALL_PREFIX "${RDC_CLIENT_INSTALL_PREFIX}" CACHE STRING "")
+set(RDC_SHARE_INSTALL_PREFIX "share/${RDC}" CACHE INTERNAL "Tests and Example install directory")
 
-set(CMAKE_INSTALL_PREFIX ${RDC_ROOT_PATH} CACHE STRING "Default installation directory.")
+set(CMAKE_INSTALL_PREFIX ${ROCM_DIR} CACHE STRING "Default installation directory.")
 
 # add package search paths
 set(CMAKE_PREFIX_PATH
@@ -113,7 +110,7 @@ set(CPACK_PACKAGE_VENDOR "Advanced Micro Devices, Inc." CACHE STRING "")
 set(CPACK_PACKAGE_CONTACT "RDC Support <rdc.support@amd.com>" CACHE STRING "")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Radeon Data Center Tools" CACHE STRING "")
 set(CPACK_PACKAGE_DESCRIPTION "This package contains the AMD ${CPACK_PACKAGE_DESCRIPTION_SUMMARY}." CACHE STRING "")
-set(CPACK_PACKAGING_INSTALL_PREFIX ${RDC_ROOT_PATH} CACHE INTERNAL "Default packaging prefix.")
+set(CPACK_PACKAGING_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}" CACHE STRING "Default packaging prefix.")
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE" CACHE INTERNAL "")
 set(CPACK_RPM_PACKAGE_LICENSE "MIT" CACHE INTERNAL "")
 set(CPACK_GENERATOR "DEB;RPM" CACHE STRING "Default packaging generators.")
@@ -255,24 +252,24 @@ if(BUILD_STANDALONE)
     if(NOT GRPC_ROOT STREQUAL GRPC_ROOT_DEFAULT)
         install(DIRECTORY ${GRPC_ROOT}/lib
             USE_SOURCE_PERMISSIONS
-            DESTINATION ${RDC_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/${RDC}/grpc
+            DESTINATION ${CMAKE_INSTALL_LIBDIR}/${RDC}/grpc
             COMPONENT ${SERVER_COMPONENT})
         # In SLES, The libprotobuf is created under lib64 folder, install it as well
         if(EXISTS ${GRPC_ROOT}/lib64)
             install(DIRECTORY ${GRPC_ROOT}/lib64/
                 USE_SOURCE_PERMISSIONS
-                DESTINATION ${RDC_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/${RDC}/grpc/lib
+                DESTINATION ${CMAKE_INSTALL_LIBDIR}/${RDC}/grpc/lib
                 COMPONENT ${SERVER_COMPONENT})
         endif()
         # Also include dev setup for people do not want to build grpc
         install(DIRECTORY ${GRPC_ROOT}/bin
             USE_SOURCE_PERMISSIONS
-            DESTINATION ${RDC_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/${RDC}/grpc
+            DESTINATION ${CMAKE_INSTALL_LIBDIR}/${RDC}/grpc
             COMPONENT ${SERVER_COMPONENT})
 
         install(DIRECTORY ${GRPC_ROOT}/include
             USE_SOURCE_PERMISSIONS
-            DESTINATION ${RDC_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/${RDC}/grpc
+            DESTINATION ${CMAKE_INSTALL_LIBDIR}/${RDC}/grpc
             COMPONENT ${SERVER_COMPONENT})
     endif()
 
@@ -296,7 +293,6 @@ endif()
 
 # Folders for both standalone and embedded
 add_subdirectory("rdc_libs")
-add_subdirectory("example")
 
 # Export the package for use from the build-tree
 # (this registers the build-tree with a global CMake-registry)
@@ -309,8 +305,8 @@ set(CONF_LIBS "librdc_bootstrap.so")
 configure_file(cmake_modules/rdc-config.cmake.in
     "${PROJECT_BINARY_DIR}/rdc-config.cmake" @ONLY)
 # ... for the install tree
-set(CONF_INCLUDE_DIRS "${CMAKE_INSTALL_PREFIX}${RDC_INSTALL_PREFIX}/${CMAKE_INSTALL_INCLUDEDIR}")
-set(CONF_LIB_DIR "${CMAKE_INSTALL_PREFIX}${RDC_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}")
+set(CONF_INCLUDE_DIRS "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_INCLUDEDIR}")
+set(CONF_LIB_DIR "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}")
 
 configure_file(cmake_modules/rdc-config.cmake.in
     "${PROJECT_BINARY_DIR}${CMAKE_FILES_DIRECTORY}/rdc-config.cmake" @ONLY)
@@ -321,29 +317,32 @@ configure_file(cmake_modules/rdc-config-version.cmake.in
 install(FILES
     "${PROJECT_BINARY_DIR}${CMAKE_FILES_DIRECTORY}/rdc-config.cmake"
     "${PROJECT_BINARY_DIR}/rdc-config-version.cmake"
-    DESTINATION "${RDC_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/cmake/${RDC}" COMPONENT dev)
+    DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${RDC}" COMPONENT dev)
 # Install the export set for use with the install-tree
 install(EXPORT rdcTargets DESTINATION
-    "${RDC_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/cmake/${RDC}" COMPONENT dev)
+    "${CMAKE_INSTALL_LIBDIR}/cmake/${RDC}" COMPONENT dev)
 
 
 # License file
-install(FILES ${CPACK_RESOURCE_FILE_LICENSE} DESTINATION ${RDC_INSTALL_PREFIX}/${CMAKE_INSTALL_DOCDIR} RENAME LICENSE.txt COMPONENT dev)
+install(FILES ${CPACK_RESOURCE_FILE_LICENSE} DESTINATION ${CMAKE_INSTALL_DOCDIR} RENAME LICENSE.txt COMPONENT dev)
 
 # Python binding
 install(DIRECTORY ${PROJECT_SOURCE_DIR}/python_binding
-    DESTINATION ${RDC_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBEXECDIR}/${RDC}
+    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${RDC}
     COMPONENT ${CLIENT_COMPONENT})
+install(DIRECTORY ${PROJECT_SOURCE_DIR}/example
+    DESTINATION ${RDC_SHARE_INSTALL_PREFIX}
+    COMPONENT dev)
 
 # Prebuild packages to install
 install(FILES ${PROJECT_SOURCE_DIR}/ras_prebuild/librdc_ras.so
-    DESTINATION ${RDC_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/${RDC}
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/${RDC}
     COMPONENT ${CLIENT_COMPONENT})
 install(DIRECTORY ${PROJECT_SOURCE_DIR}/ras_prebuild/config
-    DESTINATION ${RDC_INSTALL_PREFIX}/${CMAKE_INSTALL_DATADIR}/${RDC}
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/${RDC}
     COMPONENT ${CLIENT_COMPONENT})
 install(DIRECTORY ${PROJECT_SOURCE_DIR}/ras_prebuild/sp3
-    DESTINATION ${RDC_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/${RDC}
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/${RDC}
     COMPONENT ${CLIENT_COMPONENT})
 
 
