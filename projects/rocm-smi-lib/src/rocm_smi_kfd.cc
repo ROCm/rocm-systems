@@ -484,6 +484,7 @@ int GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t *proc,
     cu_occupancy_path += "/stats_";
     cu_occupancy_path += std::to_string(gpu_id);
     cu_occupancy_path += "/cu_occupancy";
+
     err = ReadSysfsStr(cu_occupancy_path, &tmp);
     if (err == 0) {
       if (!is_number(tmp)) {
@@ -494,6 +495,8 @@ int GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t *proc,
 
       // Collect count of compute units
       cu_count += kfd_node_map[gpu_id]->cu_count();
+    } else {
+      return err;
     }
   }
 
