@@ -6,9 +6,16 @@
    :maxdepth: 4
 ```
 
-The [Omniperf](https://github.com/AMDResearch/omniperf) repository comes with a sample GPU compute workload, *vcopy*. This workload is used throughout the following sections to demonstrate the use of Omniperf in MI GPU performance analysis. 
+The [Omniperf](https://github.com/AMDResearch/omniperf) repository
+includes source code for a sample GPU compute workload,
+__vcopy.cpp__. A copy of this file is available in the `share/sample`
+subdirectory after a normal Omniperf installation, or via the
+`$OMNIPERF_SHARE/sample` directory when using the supplied modulefile.
 
-Unless otherwise noted, the performance analysis is done on the MI200 platform.
+A compiled version of this workload is used throughout the following
+sections to demonstrate the use of Omniperf in MI GPU performance
+analysis. Unless otherwise noted, the performance analysis is done on
+the MI200 platform.
 
 ## Workload Compilation
 **vcopy compilation:**
