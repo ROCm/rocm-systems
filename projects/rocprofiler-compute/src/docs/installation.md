@@ -41,11 +41,25 @@ defined as follows:
 | CMAKE_INSTALL_PREFIX | controls install path for Omniperf files                             |
 | PYTHON_DEPS          | provides optional path to resolve Python package dependencies        |
 | MOD_INSTALL_PATH     | provides optional path for separate Omniperf modulefile installation |
+
 ```
+
+A typical install will begin by downloading the latest release tarball
+available from the
+[Releases](https://github.com/AMDResearch/omniperf/releases) section
+of the Omniperf development site. From there, untar and descend into
+the top-level directory as follows:
+
+```shell
+$ tar xfz omniperf-v{__VERSION__}.tar.gz
+$ cd omniperf-v{__VERSION__}
+```
+
+Next, install Python dependencies and complete the Omniperf configuration/install process as follows:
 
 ```shell
 # define top-level install path
-$ export INSTALL_DIR=/opt/apps/omniperf
+$ export INSTALL_DIR=<your-top-level-desired-install-path>
 
 # install python deps
 $ python3 -m pip install -t ${INSTALL_DIR}/python-libs -r requirements.txt
@@ -61,6 +75,10 @@ $ cmake -DCMAKE_INSTALL_PREFIX=${INSTALL_DIR}/{__VERSION__} \
 $ make install
 ```
 
+```{tip}
+You may require `sudo` during the final install step if you
+do not have write access to the chose install path.
+```
 
 
 After completing these steps, a successful top-level installation directory looks as follows:
@@ -68,6 +86,8 @@ After completing these steps, a successful top-level installation directory look
 $ ls $INSTALL_DIR
 modulefiles  {__VERSION__}  python-libs
 ```
+
+### Execution using modulefiles
 
 The installation process includes creation of an environment
 modulefile for use with [Lmod](https://lmod.readthedocs.io). On
@@ -94,9 +114,24 @@ customize the resulting Omniperf modulefile post-installation to
 include additional module dependencies.
 ```
 
-NOTE: The optional `ROCPROF` environment variable can be used to define a
-custom rocprof release. If not set, the default rocprof tool detected will be
-used to do profiling.
+### Execution without modulefiles
+
+To use Omniperf without the companion modulefile, update your `PATH`
+settings to enable access to the command-line binary. If you installed Python
+dependencies in a shared location, update your `PYTHONPATH` config as well:
+
+```shell
+export PATH=$INSTALL_DIR/{__VERSION__}/bin:$PATH
+export PYTHONPATH=$INSTALL_DIR/python-libs
+```
+
+### rocProf
+
+Omniperf relies on a rocprof binary during the profiling
+process. Normally the path to this binary will be detected
+automatically, but it can also be overridden via the use of an
+optional `ROCPROF` environment variable.
+
 
 
 

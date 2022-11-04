@@ -32,7 +32,7 @@ Detailed Feature List:
 - System Speed-of-Light Panel
 - Kernel Statistic Panel
 - Memory Chart Analysis Panel
-- Roofline Analysis Panel (*MI200 only*)
+- Roofline Analysis Panel (*Supported on MI200 only, SLES 15 SP3 or RHEL8*)
 - Command Processor (CP) Panel
 - Shader Processing Input (SPI) Panel
 - Wavefront Launch Panel
