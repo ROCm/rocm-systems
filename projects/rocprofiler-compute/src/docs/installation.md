@@ -127,7 +127,7 @@ export PYTHONPATH=$INSTALL_DIR/python-libs
 
 ### rocProf
 
-Omniperf uses the rocprof binary during the profiling
+Omniperf relies on a rocprof binary during the profiling
 process. Normally the path to this binary will be detected
 automatically, but it can also be overridden via the use of an
 optional `ROCPROF` environment variable.
