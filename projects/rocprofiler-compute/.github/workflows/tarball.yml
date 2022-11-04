@@ -1,4 +1,4 @@
-name: Tarball
+name: tarball
 
 on:
   push:
