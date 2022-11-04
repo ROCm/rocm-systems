@@ -1,0 +1,128 @@
+[
+    {"$match": {
+      "Index": { "$in": [${DispatchIDFilter:raw}] },
+      "gpu-id": { "$in": [${gpuFilter:raw}] },
+      "KernelName": { "$in": ${KernelNameFilter:json}}
+    }},
+    {"$addFields": {
+        "denom": {
+                "$switch" : {
+                "branches": [
+                    {
+                        "case":  { "$eq": [ $normUnit, "per Wave"]} ,
+                        "then":  "&SQ_WAVES"
+                    },
+                    {
+                        "case":  { "$eq": [ $normUnit, "per Cycle"]} ,
+                        "then":  "&GRBM_GUI_ACTIVE"
+                    },
+                    {
+                        "case":  { "$eq": [ $normUnit, "per Sec"]} ,
+                        "then":  {"$divide":[{"$subtract": ["&EndNs", "&BeginNs" ]}, 1000000000]}
+                    }
+                ],
+                "default": 1
+                }         
+        } 
+    }},
+    {"$group": {
+        "_id": null,
+        "avg_req": {
+            "$avg": { "$divide": ["&SQC_ICACHE_REQ", "&denom"] }
+        },
+        "min_req": {
+            "$min": { "$divide": ["&SQC_ICACHE_REQ", "&denom"] }
+        },
+        "max_req": {
+            "$max": { "$divide": ["&SQC_ICACHE_REQ", "&denom"] }
+        },
+
+        "avg_hits": {
+            "$avg": { "$divide": ["&SQC_ICACHE_HITS", "&denom"] }
+        },
+        "min_hits": {
+            "$min": { "$divide": ["&SQC_ICACHE_HITS", "&denom"] }
+        },
+        "max_hits": {
+            "$max": { "$divide": ["&SQC_ICACHE_HITS", "&denom"] }
+        },
+
+        "avg_misses": {
+            "$avg": { "$divide": ["&SQC_ICACHE_MISSES", "&denom"] }
+        },
+        "min_misses": {
+            "$min": { "$divide": ["&SQC_ICACHE_MISSES", "&denom"] }
+        },
+        "max_misses": {
+            "$max": { "$divide": ["&SQC_ICACHE_MISSES", "&denom"] }
+        },
+
+        "avg_misses_dup": {
+            "$avg": { "$divide": ["&SQC_ICACHE_MISSES_DUPLICATE", "&denom"] }
+        },
+        "min_misses_dup": {
+            "$min": { "$divide": ["&SQC_ICACHE_MISSES_DUPLICATE", "&denom"] }
+        },
+        "max_misses_dup": {
+            "$max": { "$divide": ["&SQC_ICACHE_MISSES_DUPLICATE", "&denom"] }
+        },
+
+
+        "avg_cacheHit": {
+            "$avg": { "$divide": [{ "$multiply": [100, "&SQC_ICACHE_HITS"] }, { "$add": ["&SQC_ICACHE_HITS", "&SQC_ICACHE_MISSES", "&SQC_ICACHE_MISSES_DUPLICATE"] }] }
+        },
+        "min_cacheHit": {
+            "$min": { "$divide": [{ "$multiply": [100, "&SQC_ICACHE_HITS"] }, { "$add": ["&SQC_ICACHE_HITS", "&SQC_ICACHE_MISSES", "&SQC_ICACHE_MISSES_DUPLICATE"] }] }
+        },
+        "max_cacheHit": {
+            "$max": { "$divide": [{ "$multiply": [100, "&SQC_ICACHE_HITS"] }, { "$add": ["&SQC_ICACHE_HITS", "&SQC_ICACHE_MISSES", "&SQC_ICACHE_MISSES_DUPLICATE"] }] }
+        }
+
+    }},
+    {"$set": {
+    "array": [
+        {
+          "Metric": "Req",
+          "Mean": "&avg_req",
+          "Min": "&min_req",
+          "Max": "&max_req",
+          "Unit": {"$concat": ["Req ", $normUnit]}
+        },
+        {
+          "Metric": "Hits",
+          "Mean": "&avg_hits",
+          "Min": "&min_hits",
+          "Max": "&max_hits",
+          "Unit": {"$concat": ["Hits ", $normUnit]}
+        },
+        {
+          "Metric": "Misses - Non Duplicated",
+          "Mean": "&avg_misses",
+          "Min": "&min_misses",
+          "Max": "&max_misses",
+          "Unit": {"$concat": ["Misses ", $normUnit]}
+        },
+        {
+            "Metric": "Misses - Duplicated",
+            "Mean": "&avg_misses_dup",
+            "Min": "&min_misses_dup",
+            "Max": "&max_misses_dup",
+            "Unit": {"$concat": ["Misses ", $normUnit]}
+        },
+  
+        {
+          "Metric": "Cache Hit",
+          "Mean": "&avg_cacheHit",
+          "Min": "&min_cacheHit",
+          "Max": "&max_cacheHit",
+          "Unit": "pct"
+        }
+      ]
+  }},
+  {"$unwind": {
+    "path": "&array"
+  }},
+  {"$replaceRoot": {
+    "newRoot": "&array"
+  }}
+]

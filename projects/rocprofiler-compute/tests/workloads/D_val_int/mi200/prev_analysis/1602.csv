@@ -1,0 +1,6 @@
+Metric,Mean,Min,Max,unit
+Stalled on L2 Data,48.97105670442361,48.97105670442361,48.97105670442361,Pct
+Stalled on L2 Req,10.6546831088067,10.6546831088067,10.6546831088067,Pct
+Tag RAM Stall (Read),0.0,0.0,0.0,Pct
+Tag RAM Stall (Write),0.0,0.0,0.0,Pct
+Tag RAM Stall (Atomic),0.0,0.0,0.0,Pct

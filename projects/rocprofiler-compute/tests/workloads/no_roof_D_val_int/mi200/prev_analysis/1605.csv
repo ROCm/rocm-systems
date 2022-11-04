@@ -1,0 +1,6 @@
+Metric,Mean,Min,Max,Units
+Req,16.0,16.0,16.0, per wave
+Hit Ratio,98.25439453125,98.25439453125,98.25439453125,Pct
+Hits,15.720703125,15.720703125,15.720703125, per wave
+Misses (Translation),0.025390625,0.025390625,0.025390625, per wave
+Misses (Permission),0.0,0.0,0.0, per wave

@@ -1,0 +1,16 @@
+Metric,Count,Unit
+INT32,11.0,Instr per wave
+INT64,2.0,Instr per wave
+F16-ADD,0.0,Instr per wave
+F16-MUL,0.0,Instr per wave
+F16-FMA,0.0,Instr per wave
+F16-Trans,0.0,Instr per wave
+F32-ADD,0.0,Instr per wave
+F32-MUL,0.0,Instr per wave
+F32-FMA,0.0,Instr per wave
+F32-Trans,0.0,Instr per wave
+F64-ADD,0.0,Instr per wave
+F64-MUL,0.0,Instr per wave
+F64-FMA,0.0,Instr per wave
+F64-Trans,0.0,Instr per wave
+Conversion,0.0,Instr per wave

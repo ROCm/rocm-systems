@@ -1,0 +1,7 @@
+Metric,Avg,Min,Max,Unit
+FLOPs (Total),,,,Ops per wave
+INT8 OPs,,,,Ops per wave
+F16 OPs,,,,Ops per wave
+BF16 OPs,,,,Ops per wave
+F32 OPs,,,,Ops per wave
+F64 OPs,,,,Ops per wave

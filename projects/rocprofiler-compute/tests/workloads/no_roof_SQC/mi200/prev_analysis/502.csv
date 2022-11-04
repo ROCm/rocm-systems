@@ -1,0 +1,13 @@
+Metric,Avg,Min,Max,Unit
+GPU Busy Cycles,415864.46706586826,24308,5251766,Cycles
+CPC Busy Cycles,,,,Cycles
+CPC Util,,,,Pct
+CPC Stall Cycles,,,,Cycles
+CPC Stall Rate,,,,Pct
+CPC Packet Decoding,,,,Cycles
+SPI Intf Busy Cycles,,,,Cycles
+SPI Intf Util,,,,Pct
+L2Cache Intf Util,,,,Pct
+UTCL1 Stall Cycles,,,,Cycles
+UTCL2 Intf Busy Cycles,,,,Cycles
+UTCL2 Intf Util,,,,Pct

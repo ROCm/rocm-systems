@@ -1,0 +1,11 @@
+KernelName,Count,Sum(ns),Mean(ns),Median(ns),Pct
+"void benchmark_func<HIP_vector_type<float, 2u>, 256, 8u, 512u>(HIP_vector_type<float, 2u>, HIP_vector_type<float, 2u>*) [clone .kd]",1,6058989.0,6058989.0,6058989.0,9.18914860131471
+"void benchmark_func<int, 256, 8u, 512u>(int, int*) [clone .kd]",1,4527802.0,4527802.0,4527802.0,6.866928693108693
+"void benchmark_func<HIP_vector_type<float, 2u>, 256, 8u, 256u>(HIP_vector_type<float, 2u>, HIP_vector_type<float, 2u>*) [clone .kd]",1,3055814.0,3055814.0,3055814.0,4.634490827426474
+"void benchmark_func<double, 256, 8u, 512u>(double, double*) [clone .kd]",1,3044294.0,3044294.0,3044294.0,4.617019432134761
+"void benchmark_func<int, 256, 8u, 256u>(int, int*) [clone .kd]",1,2281741.0,2281741.0,2281741.0,3.460520743429709
+"void benchmark_func<HIP_vector_type<float, 2u>, 256, 8u, 128u>(HIP_vector_type<float, 2u>, HIP_vector_type<float, 2u>*) [clone .kd]",1,1550385.0,1550385.0,1550385.0,2.351335867130524
+"void benchmark_func<double, 256, 8u, 256u>(double, double*) [clone .kd]",1,1543507.0,1543507.0,1543507.0,2.340904594837433
+"void benchmark_func<__half2, 256, 8u, 512u>(__half2, __half2*) [clone .kd]",1,1539187.0,1539187.0,1539187.0,2.3343528216030403
+"void benchmark_func<float, 256, 8u, 512u>(float, float*) [clone .kd]",1,1535507.0,1535507.0,1535507.0,2.3287716814404096
+"void benchmark_func<HIP_vector_type<float, 2u>, 256, 8u, 96u>(HIP_vector_type<float, 2u>, HIP_vector_type<float, 2u>*) [clone .kd]",1,1172468.0,1172468.0,1172468.0,1.7781815880976604

@@ -1,0 +1,2 @@
+Index,KernelName,gpu-id,queue-id,queue-index,pid,tid,grd,wgr,lds,scr,vgpr,sgpr,fbar,sig,obj,SQ_INSTS_SMEM,SQ_INST_LEVEL_SMEM,SQ_ACCUM_PREV_HIRES,DispatchNs,BeginNs,EndNs,CompleteNs
+0,"__amd_rocclr_fillBuffer.kd",0,0,0,815034,815039,33554432,256,0,0,8,32,6464,0x0,0x7f9ede404180,4194304,3123364,399821408,12074238889117919,12074239132357451,12074239132681290,12074239132792812

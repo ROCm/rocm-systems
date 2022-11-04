@@ -1,0 +1,164 @@
+---
+# Add description/tips for each metric in this section.
+# So it could be shown in hover.
+Metric Description:
+  SALU: &SALU_anchor Scalar Arithmetic Logic Unit
+
+# Define the panel properties and properties of each metric in the panel.
+Panel Config:
+  id: 100
+  title: System Speed-of-Light
+  data source:
+    - metric_table:
+        id: 101
+        header:
+          metric: Metric
+          value: Value
+          unit: Unit
+          peak: Peak
+          pop: PoP
+          tips: Tips
+        metric:
+          # SALU Util:
+          #   value: AVG(100 * SQ_ACTIVE_INST_SCA / ( GRBM_GUI_ACTIVE * $numCU ))
+          #   unit: pct
+          #   peak: 100
+          #   pop: AVG(100* SQ_ACTIVE_INST_SCA/(GRBM_GUI_ACTIVE*$numCU))
+          #   tips: *SALU_anchor
+          # VALU Util:
+          #   value: AVG(100 * SQ_ACTIVE_INST_VALU / ( GRBM_GUI_ACTIVE * $numCU))
+          #   unit: pct
+          #   peak: 100
+          #   pop: AVG(100* SQ_ACTIVE_INST_VALU/(GRBM_GUI_ACTIVE*$numCU))
+          #   tips:
+          # # Will add it back for MI200 only
+          # # MFMA Util:
+          # #   value: AVG(100 * SQ_VALU_MFMA_BUSY_CYCLES / ( GRBM_GUI_ACTIVE * $numCU * 4 ))
+          # #   unit: pct
+          # #   peak: 100
+          # #   pop: AVG(100* SQ_VALU_MFMA_BUSY_CYCLES/(GRBM_GUI_ACTIVE*$numCU*4))
+          # #   tips:
+          # Thread Divergence:
+          #   value: AVG(100*(1-SQ_THREAD_CYCLES_VALU / SQ_ACTIVE_INST_VALU/64))
+          #   unit: pct
+          #   peak: 100
+          #   pop: AVG(100*(1-SQ_THREAD_CYCLES_VALU / SQ_ACTIVE_INST_VALU/64))
+          #   tips:
+          # Active CUs:
+          #   #
+          #   #  SIMD Time:  4*SQ_BUSY_CU_CYCLES
+          #   #  Active SIMDs: round(AVG( 4*SQ_BUSY_CU_CYCLES  / ((EndNs - BeginNs)*$freq/1000) ) + 0.5)
+          #   #            N = round(AVG( 4 * SQ_BUSY_CU_CYCLES  / ((EndNs - BeginNs)*$freq/1000) ))
+          #   #
+          #   value: $numCU
+          #   unit: CUs
+          #   peak: $numCU
+          #   pop: 100* $numCU / $numCU
+          #   tips:
+          # Wavefront Occupancy:
+          #   value: $numWavesPerCU*$numCU
+          #   unit: Wavefronts
+          #   peak: 100
+          #   pop: 100* AVG ( SQ_ACCUM_PREV_HIRES/ GRBM_GUI_ACTIVE  / ($numWavesPerCU*$numCU) )
+          #   tips:
+          # Wavefront Occu/ActiveCU:
+          #   value: AVG(SQ_ACCUM_PREV_HIRES/ GRBM_GUI_ACTIVE/$numCU)
+          #   unit: Wavefronts
+          #   peak: 100
+          #   pop: 100* AVG(SQ_ACCUM_PREV_HIRES/ GRBM_GUI_ACTIVE/$numCU)  / $numWavesPerCU
+          #   tips:
+          # IPC (Issue):
+          #   value: AVG((SQ_INSTS_VALU + SQ_INSTS_VMEM + SQ_INSTS_SALU + SQ_INSTS_SMEM + SQ_INSTS_GDS + SQ_INSTS_EXP + SQ_INSTS_BRANCH +SQ_INSTS_SENDMSG + SQ_INSTS_VSKIPPED) / SQ_ACTIVE_INST_ANY)
+          #   unit: Instr/cycle
+          #   peak: 1
+          #   pop: 100*AVG((SQ_INSTS_VALU + SQ_INSTS_VMEM + SQ_INSTS_SALU + SQ_INSTS_SMEM + SQ_INSTS_GDS + SQ_INSTS_EXP + SQ_INSTS_BRANCH +SQ_INSTS_SENDMSG + SQ_INSTS_VSKIPPED) / SQ_ACTIVE_INST_ANY)/1
+          #   tips:
+          # Instr Fetch BW:
+          #   # Instruction fetch size: 32 bytes
+          #   value: AVG( SQ_IFETCH/(EndNs - BeginNs) * 32 )
+          #   unit: GB/s
+          #   peak: $freq/1000*32* $numSQC
+          #   pop: 100*AVG( SQ_IFETCH/(EndNs - BeginNs) * 32 ) / ($freq/1000*32* $numSQC)
+          #   tips:
+          # TD Busy:
+          #   value: AVG(100*TD_TD_BUSY_sum/(GRBM_GUI_ACTIVE*$numCU))
+          #   unit: pct
+          #   peak: 100
+          #   pop: AVG(100*TD_TD_BUSY_sum/(GRBM_GUI_ACTIVE*$numCU))
+          #   tips:
+          # TC2TD Stall:
+          #   value: AVG(100*TD_TC_STALL_sum/(GRBM_GUI_ACTIVE*$numCU))
+          #   unit: pct
+          #   peak: 100
+          #   pop: AVG(100*TD_TC_STALL_sum/(GRBM_GUI_ACTIVE*$numCU))
+          #   tips:
+          # # L1I and L1K Caches
+          # L1I BW:
+          #   value: AVG(SQC_ICACHE_REQ / (EndNs - BeginNs) * 64)
+          #   unit: GB/s
+          #   peak: $freq/1000*64 * $numSQC
+          #   pop: 100*AVG(SQC_ICACHE_REQ / (EndNs - BeginNs) * 64) /  ($freq/1000*64 * $numSQC)
+          #   tips:
+          # L1K BW:
+          #   value: AVG(SQC_DCACHE_REQ / (EndNs - BeginNs)) * 64
+          #   unit: GB/s
+          #   peak: $freq/1000*64 * $numSQC
+          #   pop: 100 * AVG((SQC_DCACHE_REQ / (EndNs - BeginNs) * 64)) / ($freq/1000*64 * $numSQC)
+          #   tips:
+          # L1K Cache Hits:
+          #   value: AVG(100*SQC_DCACHE_HITS/(SQC_DCACHE_HITS + SQC_DCACHE_MISSES))
+          #   unit: pct
+          #   peak: 100
+          #   pop: AVG(100*SQC_DCACHE_HITS/(SQC_DCACHE_HITS + SQC_DCACHE_MISSES))
+          #   tips:
+          # # TCP
+          # Vector L1 BW:
+          #   value: AVG(TCP_TOTAL_CACHE_ACCESSES_sum*64/(EndNs - BeginNs))
+          #   unit: GB/s
+          #   peak: $freq/1000*64*$numCU
+          #   pop: 100 * AVG(TCP_TOTAL_CACHE_ACCESSES_sum*64/(EndNs - BeginNs)) / ($freq/1000*64*$numCU)
+          #   tips:
+          # Vector L1 Cache Hits:
+          #   value: AVG(100*TCP_TOTAL_HIT_LRU_READ_sum/TCP_TOTAL_ACCESSES_sum)
+          #   unit: pct
+          #   peak: 100
+          #   pop: AVG(100*TCP_TOTAL_HIT_LRU_READ_sum/TCP_TOTAL_ACCESSES_sum)
+          #   tips:
+          # # L2
+          # L2 Cache Hits:
+          #   value: AVG(100*TCC_HIT_sum/(TCC_HIT_sum + TCC_MISS_sum))
+          #   unit: pct
+          #   peak: 100
+          #   pop: AVG(100*TCC_HIT_sum/(TCC_HIT_sum + TCC_MISS_sum))
+          #   tips:
+          # # L2 - EA
+          # EA Read BW:
+          #   value: AVG( (TCC_EA_RDREQ_32B_sum * 32 + (TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum)*64) / (EndNs - BeginNs) )
+          #   unit: GB/s
+          #   peak: $hbmBW
+          #   pop: 100*AVG( (TCC_EA_RDREQ_32B_sum * 32 + (TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum)*64) / (EndNs - BeginNs) ) / $hbmBW
+          #   tips:
+          # EA Write BW:
+          #   value: AVG( (TCC_EA_WRREQ_64B_sum * 64 + (TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum)*32) / (EndNs - BeginNs) )
+          #   unit: GB/s
+          #   peak: $hbmBW
+          #   pop: 100*AVG( (TCC_EA_WRREQ_64B_sum * 64 + (TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum)*32) / (EndNs - BeginNs) ) / $hbmBW
+          #   tips:
+          # EA Read Latency:
+          #   value: AVG(TCC_EA_RDREQ_LEVEL_sum/TCC_EA_RDREQ_sum*1000/$freq)
+          #   unit: ns
+          #   peak:
+          #   pop:
+          #   tips:
+          # EA Write Latency:
+          #   value: AVG(TCC_EA_WRREQ_LEVEL_sum/TCC_EA_WRREQ_sum*1000/$freq)
+          #   unit: ns
+          #   peak:
+          #   pop:
+          #   tips:
+          IF test:
+            value: AVG((SQC_DCACHE_REQ / 2) if (SQC_DCACHE_REQ != 0) else 0)
+            unit: ns
+            peak:
+            pop:
+            tips:

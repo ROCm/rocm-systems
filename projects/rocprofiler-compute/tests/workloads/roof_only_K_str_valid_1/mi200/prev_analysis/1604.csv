@@ -1,0 +1,13 @@
+Xfer,Mean,Min,Max,Unit
+NC - Read,,,,Req per wave
+UC - Read,,,,Req per wave
+CC - Read,,,,Req per wave
+RW - Read,,,,Req per wave
+RW - Write,,,,Req per wave
+NC - Write,,,,Req per wave
+UC - Write,,,,Req per wave
+CC - Write,,,,Req per wave
+NC - Atomic,,,,Req per wave
+UC - Atomic,,,,Req per wave
+CC - Atomic,,,,Req per wave
+RW - Atomic,,,,Req per wave

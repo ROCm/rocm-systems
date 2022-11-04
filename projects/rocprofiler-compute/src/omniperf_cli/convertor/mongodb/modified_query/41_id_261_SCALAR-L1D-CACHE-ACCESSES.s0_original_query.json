@@ -1,0 +1,265 @@
+[
+    {"$match": {
+        "Index": { "$in": [${DispatchIDFilter:raw}] },
+        "gpu-id": { "$in": [${gpuFilter:raw}] },
+        "KernelName": { "$in": ${KernelNameFilter:json}}
+      }},
+      {"$addFields": {
+          "denom": {
+                 "$switch" : {
+                    "branches": [
+                       {
+                            "case":  { "$eq": [ $normUnit, "per Wave"]} ,
+                            "then":  "&SQ_WAVES"
+                       },
+                       {
+                            "case":  { "$eq": [ $normUnit, "per Cycle"]} ,
+                            "then":  "&GRBM_GUI_ACTIVE"
+                       },
+                       {
+                            "case":  { "$eq": [ $normUnit, "per Sec"]} ,
+                            "then":  {"$divide":[{"$subtract": ["&EndNs", "&BeginNs" ]}, 1000000000]}
+                       }
+                    ],
+                   "default": 1
+                 }         
+          } 
+      }},
+      {"$group": {
+            "_id": null,
+            "req_avg": {
+                "$avg": { "$divide": ["&SQC_DCACHE_REQ", "&denom"] }
+            },
+            "req_min": {
+                "$min": { "$divide": ["&SQC_DCACHE_REQ", "&denom"] }
+            },
+            "req_max": {
+                "$max": { "$divide": ["&SQC_DCACHE_REQ", "&denom"] }
+            },
+
+            "hits_avg": {
+                "$avg": { "$divide": ["&SQC_DCACHE_HITS", "&denom"] }
+            },
+            "hits_min": {
+                "$min": { "$divide": ["&SQC_DCACHE_HITS", "&denom"] }
+            },
+            "hits_max": {
+                "$max": { "$divide": ["&SQC_DCACHE_HITS", "&denom"] }
+            },
+
+            "misses_avg": {
+                "$avg": { "$divide": ["&SQC_DCACHE_MISSES", "&denom"] }
+            },
+            "misses_min": {
+                "$min": { "$divide": ["&SQC_DCACHE_MISSES", "&denom"] }
+            },
+            "misses_max": {
+                "$max": { "$divide": ["&SQC_DCACHE_MISSES", "&denom"] }
+            },
+
+            "dup_misses_avg": {
+                "$avg": { "$divide": ["&SQC_DCACHE_MISSES_DUPLICATE", "&denom"] }
+            },
+            "dup_misses_min": {
+                "$min": { "$divide": ["&SQC_DCACHE_MISSES_DUPLICATE", "&denom"] }
+            },
+            "dup_misses_max": {
+                "$max": { "$divide": ["&SQC_DCACHE_MISSES_DUPLICATE", "&denom"] }
+            },
+
+
+            "cacheHit_avg": {
+                "$avg": { 
+                    "$cond": [
+                        {"$ne": [{ "$add": ["&SQC_DCACHE_HITS", "&SQC_DCACHE_MISSES", "&SQC_DCACHE_MISSES_DUPLICATE"] } , 0]},
+                        { "$divide": [{ "$multiply": [100, "&SQC_DCACHE_HITS"] }, { "$add": ["&SQC_DCACHE_HITS", "&SQC_DCACHE_MISSES", "&SQC_DCACHE_MISSES_DUPLICATE"] }] },
+                        ""
+                    ]
+                }
+            },
+            "cacheHit_min": {
+                "$min": { 
+                    "$cond": [
+                        {"$ne": [{ "$add": ["&SQC_DCACHE_HITS", "&SQC_DCACHE_MISSES", "&SQC_DCACHE_MISSES_DUPLICATE"] } , 0]},
+                        { "$divide": [{ "$multiply": [100, "&SQC_DCACHE_HITS"] }, { "$add": ["&SQC_DCACHE_HITS", "&SQC_DCACHE_MISSES", "&SQC_DCACHE_MISSES_DUPLICATE"] }] },
+                        ""
+                    ]
+                }
+            },
+            "cacheHit_max": {
+                "$max": { 
+                    "$cond": [
+                        {"$ne": [{ "$add": ["&SQC_DCACHE_HITS", "&SQC_DCACHE_MISSES", "&SQC_DCACHE_MISSES_DUPLICATE"] } , 0]},
+                        { "$divide": [{ "$multiply": [100, "&SQC_DCACHE_HITS"] }, { "$add": ["&SQC_DCACHE_HITS", "&SQC_DCACHE_MISSES", "&SQC_DCACHE_MISSES_DUPLICATE"] }] },
+                        ""
+                    ]
+                }
+            },
+
+            "readReq_avg": {
+                "$avg": { "$divide": [{ "$add": ["&SQC_DCACHE_REQ_READ_1", "&SQC_DCACHE_REQ_READ_2", "&SQC_DCACHE_REQ_READ_4", "&SQC_DCACHE_REQ_READ_8", "&SQC_DCACHE_REQ_READ_16"] }, "&denom"] }
+            },
+            "readReq_min": {
+                "$min": { "$divide": [{ "$add": ["&SQC_DCACHE_REQ_READ_1", "&SQC_DCACHE_REQ_READ_2", "&SQC_DCACHE_REQ_READ_4", "&SQC_DCACHE_REQ_READ_8", "&SQC_DCACHE_REQ_READ_16"] }, "&denom"] }
+            },
+            "readReq_max": {
+                "$max": { "$divide": [{ "$add": ["&SQC_DCACHE_REQ_READ_1", "&SQC_DCACHE_REQ_READ_2", "&SQC_DCACHE_REQ_READ_4", "&SQC_DCACHE_REQ_READ_8", "&SQC_DCACHE_REQ_READ_16"] }, "&denom"] }
+            },
+
+
+            "atomicReq_avg": {
+                "$avg": { "$divide": ["&SQC_DCACHE_ATOMIC", "&denom"] }
+            },
+            "atomicReq_min": {
+                "$min": { "$divide": ["&SQC_DCACHE_ATOMIC", "&denom"] }
+            },
+            "atomicReq_max": {
+                "$max": { "$divide": ["&SQC_DCACHE_ATOMIC", "&denom"] }
+            },
+
+            "read1d_avg": {
+                "$avg": { "$divide": ["&SQC_DCACHE_REQ_READ_1", "&denom"] }
+            },
+            "read1d_min": {
+                "$min": { "$divide": ["&SQC_DCACHE_REQ_READ_1", "&denom"] }
+            },
+            "read1d_max": {
+                "$max": { "$divide": ["&SQC_DCACHE_REQ_READ_1", "&denom"] }
+            },
+
+            "read2d_avg": {
+                "$avg": { "$divide": ["&SQC_DCACHE_REQ_READ_2", "&denom"] }
+            },
+            "read2d_min": {
+                "$min": { "$divide": ["&SQC_DCACHE_REQ_READ_2", "&denom"] }
+            },
+            "read2d_max": {
+                "$max": { "$divide": ["&SQC_DCACHE_REQ_READ_2", "&denom"] }
+            },
+
+            "read4d_avg": {
+                "$avg": { "$divide": ["&SQC_DCACHE_REQ_READ_4", "&denom"] }
+            },
+            "read4d_min": {
+                "$min": { "$divide": ["&SQC_DCACHE_REQ_READ_4", "&denom"] }
+            },
+            "read4d_max": {
+                "$max": { "$divide": ["&SQC_DCACHE_REQ_READ_4", "&denom"] }
+            },
+
+            "read8d_avg": {
+                "$avg": { "$divide": ["&SQC_DCACHE_REQ_READ_8", "&denom"] }
+            },
+            "read8d_min": {
+                "$min": { "$divide": ["&SQC_DCACHE_REQ_READ_8", "&denom"] }
+            },
+            "read8d_max": {
+                "$max": { "$divide": ["&SQC_DCACHE_REQ_READ_8", "&denom"] }
+            },
+
+            "read16d_avg": {
+                "$avg": { "$divide": ["&SQC_DCACHE_REQ_READ_16", "&denom"] }
+            },
+            "read16d_min": {
+                "$min": { "$divide": ["&SQC_DCACHE_REQ_READ_16", "&denom"] }
+            },
+            "read16d_max": {
+                "$max": { "$divide": ["&SQC_DCACHE_REQ_READ_16", "&denom"] }
+            }
+
+      }},
+      {"$set": {
+        "array": [
+            {
+              "Metric": "Req",
+              "Mean": "&req_avg",
+              "Min": "&req_min",
+              "Max": "&req_max",
+              "Unit": {"$concat": ["Req ", $normUnit]}
+            },
+            {
+              "Metric": "Hits",
+              "Mean": "&hits_avg",
+              "Min": "&hits_min",
+              "Max": "&hits_max",
+              "Unit": {"$concat": ["Req ", $normUnit]}
+            },
+            {
+              "Metric": "Misses - Non Duplicated",
+              "Mean": "&misses_avg",
+              "Min": "&misses_min",
+              "Max": "&misses_max",
+              "Unit": {"$concat": ["Req ", $normUnit]}
+            },
+            {
+                "Metric": "Misses- Duplicated",
+                "Mean": "&dup_misses_avg",
+                "Min": "&dup_misses_min",
+                "Max": "&dup_misses_max",
+                "Unit": {"$concat": ["Req ", $normUnit]}
+            },
+            {
+              "Metric": "Cache Hit",
+              "Mean": "&cacheHit_avg",
+              "Min": "&cacheHit_min",
+              "Max": "&cacheHit_max",
+              "Unit": "pct"
+            },
+            {
+              "Metric": "Read Req (Total)",
+              "Mean": "&readReq_avg",
+              "Min": "&readReq_min",
+              "Max": "&readReq_max",
+              "Unit": {"$concat": ["Req ", $normUnit]}
+            },
+            {
+              "Metric": "Atomic Req",
+              "Mean": "&atomicReq_avg",
+              "Min": "&atomicReq_min",
+              "Max": "&atomicReq_max",
+              "Unit": {"$concat": ["Req ", $normUnit]}
+            },
+            {
+              "Metric": "Read Req (1 DWord)",
+              "Mean": "&read1d_avg",
+              "Min": "&read1d_min",
+              "Max": "&read1d_max",
+              "Unit": {"$concat": ["Req ", $normUnit]}
+            },
+            {
+              "Metric": "Read Req (2 DWord)",
+              "Mean": "&read2d_avg",
+              "Min": "&read2d_min",
+              "Max": "&read2d_max",
+              "Unit": {"$concat": ["Req ", $normUnit]}
+            },
+            {
+              "Metric": "Read Req (4 DWord)",
+              "Mean": "&read4d_avg",
+              "Min": "&read4d_min",
+              "Max": "&read4d_max",
+              "Unit": {"$concat": ["Req ", $normUnit]}
+            },
+            {
+              "Metric": "Read Req (8 DWord)",
+              "Mean": "&read8d_avg",
+              "Min": "&read8d_min",
+              "Max": "&read8d_max",
+              "Unit": {"$concat": ["Req ", $normUnit]}
+            },
+            {
+              "Metric": "Read Req (16 DWord)",
+              "Mean": "&read16d_avg",
+              "Min": "&read16d_min",
+              "Max": "&read16d_max",
+              "Unit": {"$concat": ["Req ", $normUnit]}
+            }
+        ]
+      }},
+      {"$unwind": {
+        "path": "&array"
+      }},
+      {"$replaceRoot": {
+        "newRoot": "&array"
+      }}
+]

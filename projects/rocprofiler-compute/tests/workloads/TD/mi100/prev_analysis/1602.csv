@@ -1,0 +1,6 @@
+Metric,Mean,Min,Max,Unit
+Stalled on L2 Data,,,,Pct
+Stalled on L2 Req,,,,Pct
+Tag RAM Stall (Read),,,,Pct
+Tag RAM Stall (Write),,,,Pct
+Tag RAM Stall (Atomic),,,,Pct

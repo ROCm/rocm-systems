@@ -1,0 +1,42 @@
+[
+    {"$match": {
+        "Index": { "$in": [${DispatchIDFilter:raw}] },
+        "gpu-id": { "$in": [${gpuFilter:raw}] },
+        "KernelName": { "$in": ${KernelNameFilter:json}}
+    }},
+      {"$group": {
+          "_id": null,
+          "reqBW_pop": {
+              "$avg": {
+                  "$divide": [
+                      {"$multiply": ["&SQC_DCACHE_REQ", 100000]}, 
+                      {"$multiply": [ {"$multiply": [$sclk, $numSQC]},    {"$subtract":["&EndNs", "&BeginNs"]}    ]}
+                  ]
+              }
+          },
+          "cacheHit": {
+            "$avg": { 
+                "$cond":[
+                    {"$ne": [{ "$add": [ "&SQC_DCACHE_HITS",  "&SQC_DCACHE_MISSES", "&SQC_DCACHE_MISSES_DUPLICATE"] } , 0 ]},
+                    {"$divide": [{ "$multiply": ["&SQC_DCACHE_HITS", 100] }, { "$add": [ "&SQC_DCACHE_HITS",  "&SQC_DCACHE_MISSES", "&SQC_DCACHE_MISSES_DUPLICATE"] } ]},
+                    null
+                ]
+              }
+          }
+    
+      }},
+      {"$set": {
+        "array": [
+            {
+              "Bandwidth": "&reqBW_pop",
+              "Cache Hit": "&cacheHit"
+            }
+          ]
+      }},
+      {"$unwind": {
+        "path": "&array"
+      }},
+      {"$replaceRoot": {
+        "newRoot": "&array"
+      }}
+    ]

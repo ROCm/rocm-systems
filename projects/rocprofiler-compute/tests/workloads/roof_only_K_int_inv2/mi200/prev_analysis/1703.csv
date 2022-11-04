@@ -1,0 +1,19 @@
+Metric,Avg,Min,Max,Unit
+Req,,,,Req per wave
+Streaming Req,,,,Req per wave
+Read Req,,,,Req per wave
+Write Req,,,,Req per wave
+Atomic Req,,,,Req per wave
+Probe Req,,,,Req per wave
+Hits,,,,Hits per wave
+Misses,,,,Misses per wave
+Cache Hit,,,,Pct
+Writeback,,,, per wave
+NC Req,,,,Req per wave
+UC Req,,,,Req per wave
+CC Req,,,,Req per wave
+RW Req,,,,Req per wave
+Writeback (Normal),,,, per wave
+Writeback (TC Req),,,, per wave
+Evict (Normal),,,, per wave
+Evict (TC Req),,,, per wave

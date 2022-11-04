@@ -1,0 +1,253 @@
+[
+    {"$match": {
+        "Index": { "$in": [${DispatchIDFilter:raw}] },
+        "gpu-id": { "$in": [${gpuFilter:raw}] },
+        "KernelName": { "$in": ${KernelNameFilter:json}}
+    }},
+    {"$group": {
+        "_id": null,
+        
+        "gpuBusy_avg": {"$avg":  "&GRBM_GUI_ACTIVE"},
+        "gpuBusy_min": {"$min":  "&GRBM_GUI_ACTIVE"},
+        "gpuBusy_max": {"$max":  "&GRBM_GUI_ACTIVE"},
+
+
+        "cpcBusy_avg": {"$avg": "&CPC_CPC_STAT_BUSY"},
+        "cpcBusy_min": {"$min": "&CPC_CPC_STAT_BUSY"},
+        "cpcBusy_max": {"$max": "&CPC_CPC_STAT_BUSY"},
+
+        "cpcUtil_avg": {"$avg":{
+            "$cond": [
+                {"$ne": [{ "$add": ["&CPC_CPC_STAT_BUSY", "&CPC_CPC_STAT_IDLE"] }, 0]},
+                {"$divide": [{ "$multiply": [100, "&CPC_CPC_STAT_BUSY"] }, { "$add": ["&CPC_CPC_STAT_BUSY", "&CPC_CPC_STAT_IDLE"] }]} ,
+                null
+            ]
+        }},
+        "cpcUtil_min": {"$min":{
+            "$cond": [
+                {"$ne": [{ "$add": ["&CPC_CPC_STAT_BUSY", "&CPC_CPC_STAT_IDLE"] }, 0]},
+                {"$divide": [{ "$multiply": [100, "&CPC_CPC_STAT_BUSY"] }, { "$add": ["&CPC_CPC_STAT_BUSY", "&CPC_CPC_STAT_IDLE"] }]} ,
+                null
+            ]
+        }},
+        "cpcUtil_max": {"$max":{
+            "$cond": [
+                {"$ne": [{ "$add": ["&CPC_CPC_STAT_BUSY", "&CPC_CPC_STAT_IDLE"] }, 0]},
+                {"$divide": [{ "$multiply": [100, "&CPC_CPC_STAT_BUSY"] }, { "$add": ["&CPC_CPC_STAT_BUSY", "&CPC_CPC_STAT_IDLE"] }]} ,
+                null
+            ]
+        }},
+
+        "cpcStall_avg": {"$avg": "&CPC_CPC_STAT_STALL"},
+        "cpcStall_min": {"$min": "&CPC_CPC_STAT_STALL"},
+        "cpcStall_max": {"$max": "&CPC_CPC_STAT_STALL"},
+
+        "cpcStallCycles_avg": {"$avg": "&CPC_CPC_STAT_STALL"},
+        "cpcStallCycles_min": {"$min": "&CPC_CPC_STAT_STALL"},
+        "cpcStallCycles_max": {"$max": "&CPC_CPC_STAT_STALL"},
+
+        "cpcStallRate_avg": {"$avg":{
+            "$cond": [
+                {"$ne": ["&CPC_CPC_STAT_BUSY", 0]},
+                {"$divide": [{ "$multiply": [100, "&CPC_CPC_STAT_STALL"] }, "&CPC_CPC_STAT_BUSY"]} ,
+                null
+            ]
+        }},
+        "cpcStallRate_min": {"$min":{
+            "$cond": [
+                {"$ne": ["&CPC_CPC_STAT_BUSY", 0]},
+                {"$divide": [{ "$multiply": [100, "&CPC_CPC_STAT_STALL"] }, "&CPC_CPC_STAT_BUSY"]} ,
+                null
+            ]
+        }},
+        "cpcStallRate_max": {"$max":{
+            "$cond": [
+                {"$ne": ["&CPC_CPC_STAT_BUSY", 0]},
+                {"$divide": [{ "$multiply": [100, "&CPC_CPC_STAT_STALL"] }, "&CPC_CPC_STAT_BUSY"]} ,
+                null
+            ]
+        }},
+
+        "cpcPacketDecoding_avg":{"$avg": "&CPC_ME1_BUSY_FOR_PACKET_DECODE"},
+        "cpcPacketDecoding_min":{"$min": "&CPC_ME1_BUSY_FOR_PACKET_DECODE"},
+        "cpcPacketDecoding_max":{"$max": "&CPC_ME1_BUSY_FOR_PACKET_DECODE"},
+
+        "spiBusy_avg":{"$avg": "&CPC_ME1_DC0_SPI_BUSY"},
+        "spiBusy_min":{"$min": "&CPC_ME1_DC0_SPI_BUSY"},
+        "spiBusy_max":{"$max": "&CPC_ME1_DC0_SPI_BUSY"},
+
+        "spiUtil_avg": {"$avg":{
+            "$cond": [
+                {"$ne": ["&CPC_CPC_STAT_BUSY", 0]},
+                {"$divide": [{ "$multiply": [100, "&CPC_ME1_DC0_SPI_BUSY"] }, "&CPC_CPC_STAT_BUSY"]} ,
+                null
+            ]
+        }},
+        "spiUtil_min": {"$min":{
+            "$cond": [
+                {"$ne": ["&CPC_CPC_STAT_BUSY", 0]},
+                {"$divide": [{ "$multiply": [100, "&CPC_ME1_DC0_SPI_BUSY"] }, "&CPC_CPC_STAT_BUSY"]} ,
+                null
+            ]
+        }},
+        "spiUtil_max": {"$max":{
+            "$cond": [
+                {"$ne": ["&CPC_CPC_STAT_BUSY", 0]},
+                {"$divide": [{ "$multiply": [100, "&CPC_ME1_DC0_SPI_BUSY"] }, "&CPC_CPC_STAT_BUSY"]} ,
+                null
+            ]
+        }},
+
+        "l2CacheBusy_avg":{"$avg": "&CPC_CPC_TCIU_BUSY"},
+        "l2CacheBusy_min":{"$min": "&CPC_CPC_TCIU_BUSY"},
+        "l2CacheBusy_max":{"$max": "&CPC_CPC_TCIU_BUSY"},
+
+        "l2CacheUtil_avg": {"$avg":{
+            "$cond": [
+                {"$ne": [{ "$add": ["&CPC_CPC_TCIU_BUSY", "&CPC_CPC_TCIU_IDLE"] }, 0]},
+                {"$divide": [{ "$multiply": [100, "&CPC_CPC_TCIU_BUSY"] }, { "$add": ["&CPC_CPC_TCIU_BUSY", "&CPC_CPC_TCIU_IDLE"] }]} ,
+                null
+            ]
+        }},
+        "l2CacheUtil_min": {"$min":{
+            "$cond": [
+                {"$ne": [{ "$add": ["&CPC_CPC_TCIU_BUSY", "&CPC_CPC_TCIU_IDLE"] }, 0]},
+                {"$divide": [{ "$multiply": [100, "&CPC_CPC_TCIU_BUSY"] }, { "$add": ["&CPC_CPC_TCIU_BUSY", "&CPC_CPC_TCIU_IDLE"] }]} ,
+                null
+            ]
+        }},
+        "l2CacheUtil_max": {"$max":{
+            "$cond": [
+                {"$ne": [{ "$add": ["&CPC_CPC_TCIU_BUSY", "&CPC_CPC_TCIU_IDLE"] }, 0]},
+                {"$divide": [{ "$multiply": [100, "&CPC_CPC_TCIU_BUSY"] }, { "$add": ["&CPC_CPC_TCIU_BUSY", "&CPC_CPC_TCIU_IDLE"] }]} ,
+                null
+            ]
+        }},
+
+        "utcL1Stall_avg":{"$avg": "&CPC_UTCL1_STALL_ON_TRANSLATION"},
+        "utcL1Stall_min":{"$min": "&CPC_UTCL1_STALL_ON_TRANSLATION"},
+        "utcL1Stall_max":{"$max": "&CPC_UTCL1_STALL_ON_TRANSLATION"},
+
+        "utcL2Busy_avg":{"$avg": "&CPC_CPC_UTCL2IU_BUSY"},
+        "utcL2Busy_min":{"$min": "&CPC_CPC_UTCL2IU_BUSY"},
+        "utcL2Busy_max":{"$max": "&CPC_CPC_UTCL2IU_BUSY"},
+
+        "utcL2Util_avg": {"$avg":{
+            "$cond": [
+                {"$ne": [{ "$add": ["&CPC_CPC_UTCL2IU_BUSY", "&CPC_CPC_UTCL2IU_IDLE"] }, 0]},
+                {"$divide": [{ "$multiply": [100, "&CPC_CPC_UTCL2IU_BUSY"] }, { "$add": ["&CPC_CPC_UTCL2IU_BUSY", "&CPC_CPC_UTCL2IU_IDLE"] }]} ,
+                null
+            ]
+        }},
+        "utcL2Util_min": {"$min":{
+            "$cond": [
+                {"$ne": [{ "$add": ["&CPC_CPC_UTCL2IU_BUSY", "&CPC_CPC_UTCL2IU_IDLE"] }, 0]},
+                {"$divide": [{ "$multiply": [100, "&CPC_CPC_UTCL2IU_BUSY"] }, { "$add": ["&CPC_CPC_UTCL2IU_BUSY", "&CPC_CPC_UTCL2IU_IDLE"] }]} ,
+                null
+            ]
+        }},
+        "utcL2Util_max": {"$max":{
+            "$cond": [
+                {"$ne": [{ "$add": ["&CPC_CPC_UTCL2IU_BUSY", "&CPC_CPC_UTCL2IU_IDLE"] }, 0]},
+                {"$divide": [{ "$multiply": [100, "&CPC_CPC_UTCL2IU_BUSY"] }, { "$add": ["&CPC_CPC_UTCL2IU_BUSY", "&CPC_CPC_UTCL2IU_IDLE"] }]} ,
+                null
+            ]
+        }}
+
+    }},
+
+    {"$set": {
+        "array": [
+            {
+            "Metric": "GPU Busy Cycles",
+            "Avg": "&gpuBusy_avg",
+            "Min": "&gpuBusy_min",
+            "Max": "&gpuBusy_max", 
+            "Unit": "Cycles"
+            },
+            {
+            "Metric": "CPC Busy Cycles",
+            "Avg": "&cpcBusy_avg",
+            "Min": "&cpcBusy_min",
+            "Max": "&cpcBusy_max", 
+            "Unit": "Cycles"
+            },
+            {
+            "Metric": "CPC Util",
+            "Avg": "&cpcUtil_avg",
+            "Min": "&cpcUtil_min",
+            "Max": "&cpcUtil_max", 
+            "Unit": "pct"
+            },
+            {
+            "Metric": "CPC Stall Cycles",
+            "Avg": "&cpcStallCycles_avg",
+            "Min": "&cpcStallCycles_min",
+            "Max": "&cpcStallCycles_max", 
+            "Unit": "Cycles"
+            },
+            {
+            "Metric": "CPC Stall Rate",
+            "Avg": "&cpcStallRate_avg",
+            "Min": "&cpcStallRate_min",
+            "Max": "&cpcStallRate_max", 
+            "Unit": "pct"
+            },
+            {
+            "Metric": "CPC Packet Decoding",
+            "Avg": "&cpcPacketDecoding_avg",
+            "Min": "&cpcPacketDecoding_min",
+            "Max": "&cpcPacketDecoding_max", 
+            "Unit": "Cycles"
+            },
+            {
+            "Metric": "SPI Intf Busy Cycles",
+            "Avg": "&spiBusy_avg",
+            "Min": "&spiBusy_min",
+            "Max": "&spiBusy_max", 
+            "Unit": "Cycles"
+            },
+            {
+            "Metric": "SPI Intf Util",
+            "Avg": "&spiUtil_avg",
+            "Min": "&spiUtil_min",
+            "Max": "&spiUtil_max", 
+            "Unit": "pct"
+            },
+            {
+            "Metric": "L2Cache Intf Util",
+            "Avg": "&l2CacheUtil_avg",
+            "Min": "&l2CacheUtil_min",
+            "Max": "&l2CacheUtil_max", 
+            "Unit": "pct"
+            },
+            {
+            "Metric": "UTCL1 Stall Cycles",
+            "Avg": "&utcL1Stall_avg",
+            "Min": "&utcL1Stall_min",
+            "Max": "&utcL1Stall_max", 
+            "Unit": "Cycles"
+            },
+            {
+            "Metric": "UTCL2 Intf Busy Cycles",
+            "Avg": "&utcL2Busy_avg",
+            "Min": "&utcL2Busy_min",
+            "Max": "&utcL2Busy_max", 
+            "Unit": "Cycles"
+            },
+            {
+            "Metric": "UTCL2 Intf Util",
+            "Avg": "&utcL2Util_avg",
+            "Min": "&utcL2Util_min",
+            "Max": "&utcL2Util_max", 
+            "Unit": "pct"
+            }
+        ]
+    }},
+    {"$unwind": {
+        "path": "&array"
+    }},
+    {"$replaceRoot": {
+        "newRoot": "&array"
+    }}
+]

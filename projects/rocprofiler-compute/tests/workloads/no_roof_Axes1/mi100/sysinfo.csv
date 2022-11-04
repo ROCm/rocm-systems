@@ -1,0 +1,2 @@
+workload_name,host_name,host_cpu,host_distro,host_kernel,host_rocmver,date,gpu_soc,numSE,numCU,numSIMD,waveSize,maxWavesPerCU,maxWorkgroupSize,L1,L2,sclk,mclk,cur_sclk,cur_mclk,L2Banks,name,numSQC,hbmBW,ip_blocks
+no_roof_Axes1,vesuvius,AMD EPYC 7542 32-Core Processor,,4.18.0-240.15.1.el8_3.x86_64,4.2.0-21,Thu Sep 22 11:25:36 2022 (CDT),gfx908,8,120,4,64,40,1024,16,,1502,1200,300,1200,32,mi100,48,1228.8,SQ|LDS|SQC|TA|TD|TCP|TCC|SPI|CPC|CPF

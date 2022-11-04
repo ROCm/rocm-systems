@@ -1,0 +1,13 @@
+Xfer,Mean,Min,Max,Unit
+NC - Read,0.0,0.0,0.0,Req per wave
+UC - Read,0.0,0.0,0.0,Req per wave
+CC - Read,0.0,0.0,0.0,Req per wave
+RW - Read,44.35928143712575,0.0,64.0,Req per wave
+RW - Write,0.09580838323353294,0.0,16.0,Req per wave
+NC - Write,0.0,0.0,0.0,Req per wave
+UC - Write,0.0,0.0,0.0,Req per wave
+CC - Write,0.0,0.0,0.0,Req per wave
+NC - Atomic,0.0,0.0,0.0,Req per wave
+UC - Atomic,0.0,0.0,0.0,Req per wave
+CC - Atomic,0.0,0.0,0.0,Req per wave
+RW - Atomic,0.0,0.0,0.0,Req per wave

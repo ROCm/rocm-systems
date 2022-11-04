@@ -1,0 +1,8 @@
+Metric,Avg,Min,Max,Unit
+Read - Remote Socket Stall,0.0,0.0,0.0,Req per wave
+Read - Peer GCD Stall,0.0,0.0,0.0,Req per wave
+Read - HBM Stall,6.890162302348428,0.0,26.75201416015625,Req per wave
+Write - Remote Socket Stall,0.0,0.0,0.0,Req per wave
+Write - Peer GCD Stall,0.0,0.0,0.0,Req per wave
+Write - HBM Stall,0.002462044447481989,0.0,0.4111614227294922,Req per wave
+Write - Credit Starvation,0.0,0.0,0.0,Req per wave

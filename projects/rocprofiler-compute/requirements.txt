@@ -1,0 +1,12 @@
+astunparse==1.6.2
+colorlover
+dash
+matplotlib
+numpy
+pandas
+pymongo
+pyyaml
+tabulate
+tqdm
+dash-svg
+dash-bootstrap-components

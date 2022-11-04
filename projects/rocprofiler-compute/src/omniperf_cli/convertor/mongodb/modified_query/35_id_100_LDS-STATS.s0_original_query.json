@@ -1,0 +1,299 @@
+[
+    {"$match": {
+      "Index": { "$in": [${DispatchIDFilter:raw}] },
+      "gpu-id": { "$in": [${gpuFilter:raw}] },
+      "KernelName": { "$in": ${KernelNameFilter:json}}
+    }},
+    {"$addFields": {
+        "denom": {
+               "$switch" : {
+                  "branches": [
+                     {
+                          "case":  { "$eq": [ $normUnit, "per Wave"]} ,
+                          "then":  "&SQ_WAVES"
+                     },
+                     {
+                          "case":  { "$eq": [ $normUnit, "per Cycle"]} ,
+                          "then":  "&GRBM_GUI_ACTIVE"
+                     },
+                     {
+                          "case":  { "$eq": [ $normUnit, "per Sec"]} ,
+                          "then":  {"$divide":[{"$subtract": ["&EndNs", "&BeginNs" ]}, 1000000000]}
+                     }
+                  ],
+                 "default": 1
+               }         
+        } 
+    }},
+    {"$group": {
+        "_id": null,
+            "avg_waveCycles": {
+              "$avg": { "$divide": [ { "$multiply": [4, "&SQ_WAVE_CYCLES"] }, "&SQ_WAVES" ] }
+            },
+            "min_waveCycles": {
+              "$min": { "$divide": [ { "$multiply": [4, "&SQ_WAVE_CYCLES"] }, "&SQ_WAVES" ] }
+            },
+            "max_waveCycles": {
+              "$max": { "$divide": [ { "$multiply": [4, "&SQ_WAVE_CYCLES"] }, "&SQ_WAVES" ] }
+            },
+  
+            "avg_ldsInstrs": {
+              "$avg": { "$divide": ["&SQ_INSTS_LDS" ,  "&denom"] }
+            },
+            "min_ldsInstrs": {
+              "$min": { "$divide": ["&SQ_INSTS_LDS" ,  "&denom"] }
+            },
+            "max_ldsInstrs": {
+              "$max": { "$divide": ["&SQ_INSTS_LDS" ,  "&denom"] }
+            },
+  
+            "avg_indexAccesses": {
+              "$avg": { "$divide": ["&SQ_LDS_IDX_ACTIVE" ,  "&denom"] }
+            },
+            "min_indexAccesses": {
+              "$min": { "$divide": ["&SQ_LDS_IDX_ACTIVE" ,  "&denom"] }
+            },
+            "max_indexAccesses": {
+              "$max": { "$divide": ["&SQ_LDS_IDX_ACTIVE" ,  "&denom"] }
+            },
+  
+            "avg_atomicCycles": {
+              "$avg": { "$divide": ["&SQ_LDS_ATOMIC_RETURN" , "&denom" ] }
+            },
+            "min_atomicCycles": {
+              "$min": { "$divide": ["&SQ_LDS_ATOMIC_RETURN" , "&denom" ] }
+            },
+            "max_atomicCycles": {
+              "$max": { "$divide": ["&SQ_LDS_ATOMIC_RETURN" , "&denom" ] }
+            },
+  
+            "avg_bankConflicts": {
+              "$avg": { "$divide": ["&SQ_LDS_BANK_CONFLICT" , "&denom" ] }
+            },
+            "min_bankConflicts": {
+              "$min": { "$divide": ["&SQ_LDS_BANK_CONFLICT" , "&denom" ] }
+            },
+            "max_bankConflicts": {
+              "$max": { "$divide": ["&SQ_LDS_BANK_CONFLICT" , "&denom" ] }
+            },
+  
+            "avg_addrConflicts": {
+              "$avg": { "$divide": ["&SQ_LDS_ADDR_CONFLICT" , "&denom" ] }
+            },
+            "min_addrConflicts": {
+              "$min": { "$divide": ["&SQ_LDS_ADDR_CONFLICT" , "&denom" ] }
+            },
+            "max_addrConflicts": {
+              "$max": { "$divide": ["&SQ_LDS_ADDR_CONFLICT" , "&denom" ] }
+            },
+  
+  
+            "avg_unalignedStall": {
+              "$avg": { "$divide": ["&SQ_LDS_UNALIGNED_STALL" , "&denom" ] }
+            },
+            "min_unalignedStall": {
+              "$min": { "$divide": ["&SQ_LDS_UNALIGNED_STALL" , "&denom" ] }
+            },
+            "max_unalignedStall": {
+              "$max": { "$divide": ["&SQ_LDS_UNALIGNED_STALL" , "&denom" ] }
+            },
+  
+            "avg_memViolations": {
+              "$avg": { "$divide": ["&SQ_LDS_MEM_VIOLATIONS" , "&denom" ] }
+            },
+            "min_memViolations": {
+              "$min": { "$divide": ["&SQ_LDS_MEM_VIOLATIONS" , "&denom" ] }
+            },
+            "max_memViolations": {
+              "$max": { "$divide": ["&SQ_LDS_MEM_VIOLATIONS" , "&denom" ] }
+            },
+  
+            "avg_bconf_per_op": {
+              "$avg": {
+                "$cond": [ {"$ne": [{"$subtract": ["&SQ_LDS_IDX_ACTIVE", "&SQ_LDS_BANK_CONFLICT"]}, 0]},
+                                    {"$divide": [
+                                        "&SQ_LDS_BANK_CONFLICT",
+                                        {"$subtract": ["&SQ_LDS_IDX_ACTIVE", "&SQ_LDS_BANK_CONFLICT"]}
+                                    ]},
+                                    null
+                          ]
+              }
+            },
+            "min_bconf_per_op": {
+              "$min": {
+                "$cond": [ {"$ne": [{"$subtract": ["&SQ_LDS_IDX_ACTIVE", "&SQ_LDS_BANK_CONFLICT"]}, 0]},
+                                    {"$divide": [
+                                        "&SQ_LDS_BANK_CONFLICT",
+                                        {"$subtract": ["&SQ_LDS_IDX_ACTIVE", "&SQ_LDS_BANK_CONFLICT"]}
+                                    ]},
+                                    null
+                          ]
+              }
+            },
+            "max_bconf_per_op": {
+              "$max": {
+                "$cond": [ {"$ne": [{"$subtract": ["&SQ_LDS_IDX_ACTIVE", "&SQ_LDS_BANK_CONFLICT"]}, 0]},
+                                    {"$divide": [
+                                        "&SQ_LDS_BANK_CONFLICT",
+                                        {"$subtract": ["&SQ_LDS_IDX_ACTIVE", "&SQ_LDS_BANK_CONFLICT"]}
+                                    ]},
+                                    null
+                          ]
+              }
+            },
+  
+            "avg_bw":  {
+              "$avg": {
+                "$divide":
+                  [ { "$multiply": [{ "$multiply":  [ { "$subtract": ["&SQ_LDS_IDX_ACTIVE", "&SQ_LDS_BANK_CONFLICT"]} ,  4]},  {"$toInt": "$L2Banks"}]}, 
+                    "&denom"
+                  ]
+              }
+            },
+            "min_bw":  {
+              "$min": {
+                "$divide":
+                  [ { "$multiply": [{ "$multiply":  [ { "$subtract": ["&SQ_LDS_IDX_ACTIVE", "&SQ_LDS_BANK_CONFLICT"]} ,  4]},  {"$toInt": "$L2Banks"}]}, 
+                    "&denom"
+                  ]
+              }
+            },
+            "max_bw":  {
+              "$max": {
+                "$divide":
+                  [ { "$multiply": [{ "$multiply":  [ { "$subtract": ["&SQ_LDS_IDX_ACTIVE", "&SQ_LDS_BANK_CONFLICT"]} ,  4]},  {"$toInt": "$L2Banks"}]}, 
+                    "&denom"
+                  ]
+              }
+            }
+    }},
+    {"$set": {
+      "array": [
+          {
+            "metric": "Wave Cycles",
+            "avg": "&avg_waveCycles",
+            "min": "&min_waveCycles",
+            "max": "&max_waveCycles",
+            "Unit": "Cycles/Wave"
+          },
+          {
+            "metric": "LDS Instrs",
+            "avg": "&avg_ldsInstrs",
+            "min": "&min_ldsInstrs",
+            "max": "&max_ldsInstrs",
+            "Unit":{"$concat": ["Instr ", $normUnit]}  
+          },
+          {
+            "metric": "Bandwidth",
+            "avg": "&avg_bw",
+            "min": "&min_bw",
+            "max": "&max_bw",
+            "Unit": {"$concat": ["Bytes ", $normUnit]}
+          },
+          {
+            "metric": "Bank Conficts/Access",
+            "avg": "&avg_bconf_per_op",
+            "min": "&min_bconf_per_op",
+            "max": "&max_bconf_per_op",
+            "Unit": "Conflicts/Access"
+          },
+          {
+            "metric": "Index Accesses",
+            "avg": "&avg_indexAccesses",
+            "min": "&min_indexAccesses",
+            "max": "&max_indexAccesses",
+            "Unit": {"$concat": ["Cycles ", $normUnit]}
+          },
+          {
+            "metric": "Atomic Cycles",
+            "avg": "&avg_atomicCycles",
+            "min": "&min_atomicCycles",
+            "max": "&max_atomicCycles",
+            "Unit": {"$concat": ["Cycles ", $normUnit]}
+          },
+          {
+            "metric": "Bank Conflict",
+            "avg": "&avg_bankConflicts",
+            "min": "&min_bankConflicts",
+            "max": "&max_bankConflicts",
+            "Unit": {"$concat": ["Cycles ", $normUnit]}
+          },
+          {
+            "metric": "Addr Conflict",
+            "avg": "&avg_addrConflicts",
+            "min": "&min_addrConflicts",
+            "max": "&max_addrConflicts",
+            "Unit": {"$concat": ["Cycles ", $normUnit]}
+          },
+          {
+            "metric": "Unaligned Stall",
+            "avg": "&avg_unalignedStall",
+            "min": "&min_unalignedStall",
+            "max": "&max_unalignedStall",
+            "Unit": {"$concat": ["Cycles ", $normUnit]}
+          },
+          {
+            "metric": "Mem Violations",
+            "avg": "&avg_memViolations",
+            "min": "&min_memViolations",
+            "max": "&max_memViolations",
+            "Unit": {"$concat": ["", $normUnit]}
+          }
+        ]
+    }},
+    {"$unwind": {
+      "path": "&array"
+    }},
+    {"$replaceRoot": {
+      "newRoot": "&array"
+    }},
+    {"$unionWith": {
+          "coll": "SQ_INST_LEVEL_LDS",
+          "pipeline": [
+              {"$match": {
+                  "Index": { "$in": [${DispatchIDFilter:raw}] },
+                  "gpu-id": { "$in": [${gpuFilter:raw}] },
+                  "KernelName": { "$in": ${KernelNameFilter:json}}
+              }},
+  
+            {"$group": {
+                "_id": null,
+                "avg_ldsLatency": {
+                  "$avg": { 
+                    "$cond": [
+                    {"$ne": ["&SQ_INSTS_LDS", 0]},
+                    {"$divide": [ "&SQ_ACCUM_PREV_HIRES", "&SQ_INSTS_LDS" ]},
+                     null
+                    ] 
+                  }
+                },
+                "min_ldsLatency": {
+                  "$min": { 
+                    "$cond": [
+                    {"$ne": ["&SQ_INSTS_LDS", 0]},
+                    {"$divide": [ "&SQ_ACCUM_PREV_HIRES", "&SQ_INSTS_LDS" ]},
+                     null
+                    ] 
+                  }
+                },
+                "max_ldsLatency": {
+                  "$max": { 
+                    "$cond": [
+                    {"$ne": ["&SQ_INSTS_LDS", 0]},
+                    {"$divide": [ "&SQ_ACCUM_PREV_HIRES", "&SQ_INSTS_LDS" ]},
+                     null
+                    ] 
+                  }
+                }
+            }},
+            {"$project": {
+                "_id": 0,
+                "metric": "LDS Latency",
+                "avg": "&avg_ldsLatency",
+                "min": "&min_ldsLatency",
+                "max": "&max_ldsLatency",
+                "Unit": "Cycles"
+            }}
+          ]
+      }}
+  ]

@@ -1,0 +1,7 @@
+Metric,Value
+valu_flops_pop,6.413784797710305
+mfma_flops_bf16_pop,0.0
+mfma_flops_f16_pop,0.0
+mfma_flops_f32_pop,0.0
+mfma_flops_f64_pop,0.0
+mfma_flops_i8_pop,

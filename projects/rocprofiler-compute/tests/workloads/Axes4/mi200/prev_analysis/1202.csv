@@ -1,0 +1,12 @@
+Metric,Avg,Min,Max,Unit
+Wave Cycles,18333.538023486108,1861.8886795043945,258448.04522705078,Cycles/wave
+LDS Instrs,0.0,0.0,0.0,Instr per wave
+Bandwidth,0.0,0.0,0.0,Bytes per wave
+Bank Conficts/Access,,,,Conflicts/access
+Index Accesses,0.0,0.0,0.0,Cycles per wave
+Atomic Cycles,0.0,0.0,0.0,Cycles per wave
+Bank Conflict,0.0,0.0,0.0,Cycles per wave
+Addr Conflict,0.0,0.0,0.0,Cycles per wave
+Unaligned Stall,0.0,0.0,0.0,Cycles per wave
+Mem Violations,0.0,0.0,0.0, per wave
+LDS Latency,,,,Cycles

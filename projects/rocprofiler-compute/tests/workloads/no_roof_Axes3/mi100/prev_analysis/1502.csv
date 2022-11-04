@@ -1,0 +1,8 @@
+Metric,Avg,Min,Max,Unit
+TD Busy,74.52965074737268,16.606658678711852,93.64144211079648,Pct
+TC2TD Stall,64.61508962418583,14.453838667093851,89.5725399397401,Pct
+SPI2TD Stall,,,,Pct
+Coalescable Instr,4.802395209580839,0.0,8.0,Instr per wave
+Load Instr,7.952095808383233,0.0,8.0,Instr per wave
+Store Instr,0.011976047904191617,0.0,2.0,Instr per wave
+Atomic Instr,0.0,0.0,0.0,Instr per wave

@@ -1,0 +1,9 @@
+Metric,Avg,Min,Max,Unit
+Kernel Time (Nanosec),394849.26347305387,6720,6054520,Ns
+Kernel Time (Cycles),616856.4670658683,27818,9086417,Cycle
+Instr/wavefront,,,,Instr/wavefront
+Wave Cycles,33356.74017005052,2812.2943115234375,547945.6834716797,Cycles/wave
+Dependency Wait Cycles,,,,Cycles/wave
+Issue Wait Cycles,,,,Cycles/wave
+Active Cycles,,,,Cycles/wave
+Wavefront Occupancy,,,,Wavefronts

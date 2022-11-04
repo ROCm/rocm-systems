@@ -1,0 +1,5 @@
+Metric,Mean,Min,Max,Unit
+Read Req,0.000274658203125,0.000274658203125,0.000274658203125,Req per wave
+Write Req,0.0,0.0,0.0,Req per wave
+Atomic Req,0.0,0.0,0.0,Req per wave
+Stall,0.0,0.0,0.0,Cycles per wave

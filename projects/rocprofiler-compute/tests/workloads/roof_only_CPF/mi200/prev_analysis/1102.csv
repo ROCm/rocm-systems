@@ -1,0 +1,8 @@
+Metric,Avg,Min,Max,Unit
+IPC (Avg),,,,Instr/cycle
+IPC (Issue),,,,Instr/cycle
+SALU Util,,,,Pct
+VALU Util,,,,Pct
+VALU Active Threads,,,,Threads
+MFMA Util,,,,Pct
+MFMA Instr Cycles,,,,Cycles/instr

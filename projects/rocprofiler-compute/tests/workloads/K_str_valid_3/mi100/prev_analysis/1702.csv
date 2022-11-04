@@ -1,0 +1,16 @@
+Metric,Avg,Min,Max,Unit
+Read BW,2857.8593220538405,1046.625,4099.2666015625,Bytes per wave
+Write BW,0.0,0.0,0.0,Bytes per wave
+Read (32B),0.0,0.0,0.0,Req per wave
+Read (Uncached 32B),0.05381885206842997,0.01007080078125,0.66796875,Req per wave
+Read (64B),44.65405190709126,16.353515625,64.05104064941406,Req per wave
+HBM Read,44.65840259230281,16.353515625,64.06036376953125,Req per wave
+Write (32B),0.0,0.0,0.0,Req per wave
+Write (Uncached 32B),0.0,0.0,0.0,Req per wave
+Write (64B),0.0,0.0,0.0,Req per wave
+HBM Write,0.0,0.0,0.0,Req per wave
+Read Latency,421.86226399019637,239.77362766667278,620.957827507377,Cycles
+Write Latency,,,,Cycles
+Atomic Latency,,,,Cycles
+Read Stall,5.064468051034274,0.0,17.75470516161093,Pct
+Write Stall,0.0,0.0,0.0,Pct

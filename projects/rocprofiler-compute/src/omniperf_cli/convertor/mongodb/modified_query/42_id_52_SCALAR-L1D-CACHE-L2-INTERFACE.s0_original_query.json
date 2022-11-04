@@ -1,0 +1,110 @@
+[
+    {"$match": {
+        "Index": { "$in": [${DispatchIDFilter:raw}] },
+        "gpu-id": { "$in": [${gpuFilter:raw}] },
+        "KernelName": { "$in": ${KernelNameFilter:json}}
+      }},
+      {"$addFields": {
+          
+          "denom": {
+                 "$switch" : {
+                    "branches": [
+                       {
+                            "case":  { "$eq": [ $normUnit, "per Wave"]} ,
+                            "then":  "&SQ_WAVES"
+                       },
+                       {
+                            "case":  { "$eq": [ $normUnit, "per Cycle"]} ,
+                            "then":  "&GRBM_GUI_ACTIVE"
+                       },
+                       {
+                            "case":  { "$eq": [ $normUnit, "per Sec"]} ,
+                            "then":  {"$divide":[{"$subtract": ["&EndNs", "&BeginNs" ]}, 1000000000]}
+                       }
+                    ],
+                   "default": 1
+                 }         
+          } 
+      }},
+      {"$group": {
+          "_id": null,
+          "readReq_avg": {
+            "$avg": { "$divide": ["&SQC_TC_DATA_READ_REQ", "&denom"] }
+          },
+          "readReq_min": {
+            "$min": { "$divide": ["&SQC_TC_DATA_READ_REQ", "&denom"] }
+          },
+          "readReq_max": {
+            "$max": { "$divide": ["&SQC_TC_DATA_READ_REQ", "&denom"] }
+          },
+
+          "writeReq_avg": {
+            "$avg": { "$divide": ["&SQC_TC_DATA_WRITE_REQ", "&denom"] }
+          },
+          "writeReq_min": {
+            "$min": { "$divide": ["&SQC_TC_DATA_WRITE_REQ", "&denom"] }
+          },
+          "writeReq_max": {
+            "$max": { "$divide": ["&SQC_TC_DATA_WRITE_REQ", "&denom"] }
+          },
+
+          "atomicReq_avg": {
+            "$avg": { "$divide": ["&SQC_TC_DATA_ATOMIC_REQ", "&denom"] }
+          },
+          "atomicReq_min": {
+            "$min": { "$divide": ["&SQC_TC_DATA_ATOMIC_REQ", "&denom"] }
+          },
+          "atomicReq_max": {
+            "$max": { "$divide": ["&SQC_TC_DATA_ATOMIC_REQ", "&denom"] }
+          },
+
+          "tc2l1k_stall_avg": {
+            "$avg": { "$divide": ["&SQC_TC_STALL", "&denom" ] }
+          },
+          "tc2l1k_stall_min": {
+            "$min": { "$divide": ["&SQC_TC_STALL", "&denom" ] }
+          },
+          "tc2l1k_stall_max": {
+            "$max": { "$divide": ["&SQC_TC_STALL", "&denom" ] }
+          }
+
+      }},
+      {"$set": {
+        "array": [
+            {
+              "Metric": "Read Req",
+              "Mean": "&readReq_avg",
+              "Min": "&readReq_min",
+              "Max": "&readReq_max",
+              "Unit": {"$concat": ["Req ", $normUnit]}
+            },
+            {
+              "Metric": "Write Req",
+              "Mean": "&writeReq_avg",
+              "Min": "&writeReq_min",
+              "Max": "&writeReq_max",
+              "Unit": {"$concat": ["Req ", $normUnit]}
+            },
+            {
+              "Metric": "Atomic Req",
+              "Mean": "&atomicReq_avg",
+              "Min": "&atomicReq_min",
+              "Max": "&atomicReq_max",
+              "Unit": {"$concat": ["Req ", $normUnit]}
+            },
+            {
+              "Metric": "Stall",
+              "Mean": "&tc2l1k_stall_avg",
+              "Min": "&tc2l1k_stall_min",
+              "Max": "&tc2l1k_stall_max",
+              "Unit": {"$concat": ["Cycles ", $normUnit]}
+            }
+          ]
+      }},
+      {"$unwind": {
+        "path": "&array"
+      }},
+      {"$replaceRoot": {
+        "newRoot": "&array"
+      }}
+]

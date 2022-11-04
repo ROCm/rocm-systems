@@ -1,0 +1,15 @@
+Metric,Avg,Min,Max,Unit
+Wave request Failed (CS),415860.22754491016,516,2805857,Cycles
+CS Stall,278793.8862275449,0,7384279,Cycles
+CS Stall Rate,47.67982194144659,0.0,140.7807085859833,Pct
+Scratch Stall,0.0,0,0,Cycles
+Insufficient SIMD Waveslots,12537381.628742514,0,378193491,Simd
+Insufficient SIMD VGPRs,0.0,0,0,Simd
+Insufficient SIMD SGPRs,0.0,0,0,Simd
+Insufficient CU LDS,0.0,0,0,Cu
+Insufficient CU Barries,0.0,0,0,Cu
+Insufficient Bulky Resource,0.0,0,0,Cu
+Reach CU Threadgroups Limit,0.0,0,0,Cycles
+Reach CU Wave Limit,0.0,0,0,Cycles
+VGPR Writes,4.0,4.0,4.0,Cycles/wave
+SGPR Writes,2.0059880239520957,2.0,3.0,Cycles/wave

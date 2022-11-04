@@ -1,0 +1,19 @@
+{
+    "salu_val": {
+        "$avg": {
+            "$divide": [
+                {
+                    "$multiply": [
+                        100,
+                        "&SQ_ACTIVE_INST_SCA"
+                    ]
+                },
+                {
+                    "$multiply": [
+                        "&GRBM_GUI_ACTIVE", numCU
+                    ]
+                }
+            ]
+        }
+    }
+}

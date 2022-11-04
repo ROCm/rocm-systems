@@ -1,0 +1,42 @@
+name: Packaging
+
+on:
+  push:
+    tags:
+      - "v[1-9].[0-9]+.[0-9]+*"
+  
+jobs:
+  distbuild:
+    runs-on: ubuntu-latest
+    name: Create release distribution
+    env:
+      INSTALL_DIR: /tmp
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      - name: Cancel Previous Runs
+        uses: styfle/cancel-workflow-action@0.11.0
+      - name: Verify VERSION file consistent with tag
+        run: utils/ver_check.py --tag ${{github.ref_name}}
+      - name: Install Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.8'
+      - name: Python dependency installs
+        run: python3 -m pip install -t${INSTALL_DIR}/python-libs -r requirements.txt
+      - name: Configure
+        run: |
+          mkdir build
+          cd build
+          cmake -DPYTHON_DEPS=${INSTALL_DIR}/python-libs ..
+      - name: Release tarball
+        run: |
+          cd build
+          make package_source
+      - name: Rename tarball
+        run: mv build/omniperf-*.tar.gz build/omniperf-${{github.ref_name}}.tar.gz
+      - name: Archive tarball
+        uses: actions/upload-artifact@v3
+        with:
+          name: omniperf-${{github.ref_name}}.tar.gz
+          path: build/omniperf-${{github.ref_name}}.tar.gz

@@ -1,0 +1,39 @@
+# -----------------------------------------------------------------------
+# NOTE:
+# Dependencies are not included as part of Omniperf.
+# It's the user's responsibility to accept any licensing implications 
+# before building the project
+# -----------------------------------------------------------------------
+
+version: "3.3"
+
+services:
+  web:
+    image: omniperf-grafana-v1.0
+    container_name: omniperf-grafana-v1.0
+    restart: always
+    build: .
+    ports:
+      - "14000:4000"
+    volumes:
+      - grafana-storage:/var/lib/grafana
+    stdin_open: true
+    tty: true
+  db_mongo:
+    container_name: mongo
+    image: mongo
+    restart: always
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: amd
+      MONGO_INITDB_ROOT_PASSWORD: amd123
+    volumes:
+      - grafana-mongo-db:/data/db
+    ports:
+      - "27018:27017"
+    command: mongod --bind_ip 0.0.0.0
+
+volumes:
+  grafana-mongo-db:
+      external: true
+  grafana-storage:
+      external: true

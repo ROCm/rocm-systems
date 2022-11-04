@@ -1,0 +1,17 @@
+Metric,Avg,Min,Max,Unit
+TA Busy,60.375703153373,1.3477947369163958,91.47588905053281,Pct
+TC2TA Addr Stall,39.20714380319468,0.014345901722024702,71.3108618290324,Pct
+TC2TA Data Stall,0.31352826372761694,0.0,52.35922004251203,Pct
+TD2TA Addr Stall,0.0,0.0,0.0,Pct
+Total Instructions,7.958083832335329,1.0,8.0,Instr per wave
+Flat Instr,7.958083832335329,1.0,8.0,Instr per wave
+Flat Read Instr,7.952095808383233,0.0,8.0,Instr per wave
+Flat Write Instr,0.005988023952095809,0.0,1.0,Instr per wave
+Flat Atomic Instr,0.0,0.0,0.0,Instr per wave
+Buffer Instr,0.0,0.0,0.0,Instr per wave
+Buffer Read Instr,0.0,0.0,0.0,Instr per wave
+Buffer Write Instr,0.0,0.0,0.0,Instr per wave
+Buffer Atomic Instr,0.0,0.0,0.0,Instr per wave
+Buffer Total Cylces,0.0,0.0,0.0,Cycles per wave
+Buffer Coalesced Read,0.0,0.0,0.0,Cycles per wave
+Buffer Coalesced Write,0.0,0.0,0.0,Cycles per wave

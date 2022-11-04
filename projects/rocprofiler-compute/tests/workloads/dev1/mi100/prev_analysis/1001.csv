@@ -1,0 +1,9 @@
+Metric,Count,Unit
+VALU - Vector,,Instr per wave
+VMEM,,Instr per wave
+LDS,0.0,Instr per wave
+VALU - MFMA,,Instr per wave
+SALU,46.862275449101794,Instr per wave
+SMEM,1.8083832335329342,Instr per wave
+Branch,21.97005988023952,Instr per wave
+GDS,0.0,Instr per wave

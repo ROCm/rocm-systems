@@ -1,0 +1,13 @@
+Metric,Mean,Min,Max,Unit
+Req,8.0,8.0,8.0,Req per wave
+Hits,7.991535186767578,7.991535186767578,7.991535186767578,Req per wave
+Misses - Non Duplicated,0.000274658203125,0.000274658203125,0.000274658203125,Req per wave
+Misses- Duplicated,0.008190155029296875,0.008190155029296875,0.008190155029296875,Req per wave
+Cache Hit,99.89418983459473,99.89418983459473,99.89418983459473,Pct
+Read Req (Total),8.0,8.0,8.0,Req per wave
+Atomic Req,0.0,0.0,0.0,Req per wave
+Read Req (1 DWord),4.0,4.0,4.0,Req per wave
+Read Req (2 DWord),1.0,1.0,1.0,Req per wave
+Read Req (4 DWord),3.0,3.0,3.0,Req per wave
+Read Req (8 DWord),0.0,0.0,0.0,Req per wave
+Read Req (16 DWord),0.0,0.0,0.0,Req per wave

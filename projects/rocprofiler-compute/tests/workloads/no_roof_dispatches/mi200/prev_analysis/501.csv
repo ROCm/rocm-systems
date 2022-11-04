@@ -1,0 +1,9 @@
+Metric,Avg,Min,Max,Unit
+GPU Busy Cycles,416421.1736526946,32048,5257410,Cycles/kernel
+CPF Busy,416421.1736526946,32048,5257410,Cycles/kernel
+CPF Util,100.0,100.0,100.0,Pct
+CPF Stall,0.0,0.0,0.0,Cycles/kernel
+L2Cache Intf Busy,2294.125748502994,2217,2647,Cycles/kernel
+L2Cache Intf Util,0.9501099634470936,0.04314172169709033,6.882748319641523,Pct
+L2Cache Intf Stall,0.0,0.0,0.0,Pct
+UTCL1 Stall,0.0,0,0,Cycles/kernel

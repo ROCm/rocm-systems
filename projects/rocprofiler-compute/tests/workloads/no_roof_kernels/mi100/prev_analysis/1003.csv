@@ -1,0 +1,9 @@
+Type,Count
+Buffer Instr,0.0
+Buffer Read,0.0
+Buffer Write,0.0
+Buffer Atomic,0.0
+Flat Instr,7.9640718562874255
+Flat Read,7.952095808383233
+Flat Write,0.011976047904191617
+Flat Atomic,0.0

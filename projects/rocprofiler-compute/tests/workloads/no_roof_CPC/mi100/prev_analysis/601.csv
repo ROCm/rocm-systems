@@ -1,0 +1,9 @@
+Metric,Avg,Min,Max,Unit
+GPU Busy,615241.8203592814,28004,9085217,Cycles
+CS Busy,,,,Cycles
+SPI Busy,,,,Cycles
+SQ Busy,4750901.191616766,75644,72533786,Cycles
+Dispatched Workgroups,,,,Workgroups
+Dispatched Wavefronts,,,,Wavefronts
+Wave Alloc Failed,,,,Cycles
+Wave Alloc Failed - CS,,,,Cycles

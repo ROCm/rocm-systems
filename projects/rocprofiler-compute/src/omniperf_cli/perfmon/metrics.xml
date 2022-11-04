@@ -1,0 +1,13 @@
+#include "gfx90a_metrics.xml"
+
+<gfx9_expr>
+    <metric name="TCP_TOTAL_CACHE_ACCESSES_sum"                           expr=sum(TCP_TOTAL_CACHE_ACCESSES,16) descr="."></metric>
+    <metric name="TCP_TCC_WRITE_REQ_sum"                                  expr=sum(TCP_TCC_WRITE_REQ,16) descr="."></metric>
+    <metric name="TCP_TCC_ATOMIC_WITH_RET_REQ_sum"                        expr=sum(TCP_TCC_ATOMIC_WITH_RET_REQ,16) descr="."></metric>
+    <metric name="TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum"                     expr=sum(TCP_TCC_ATOMIC_WITHOUT_RET_REQ,16) descr="."></metric>
+    <metric name="TCP_TCC_READ_REQ_sum"                                   expr=sum(TCP_TCC_READ_REQ,16) descr="."></metric>
+    <metric name="TCC_EA_RDREQ_32B_sum"                                   expr=sum(TCC_EA_RDREQ_32B,16) descr="Number of 32-byte TCC/EA read requests. Sum over TCC instances."></metric>
+    <metric name="TCC_EA_RDREQ_sum"                                       expr=sum(TCC_EA_RDREQ,16) descr="Number of TCC/EA read requests (either 32-byte or 64-byte). Sum over TCC instances."></metric>
+    <metric name="TCC_EA_WRREQ_64B_sum"                                   expr=sum(TCC_EA_WRREQ_64B,16) descr="Number of 64-byte transactions going (64-byte write or CMPSWAP) over the TC_EA_wrreq interface. Sum over TCC instances."></metric>
+    <metric name="TCC_EA_WRREQ_sum"                                       expr=sum(TCC_EA_WRREQ,16) descr="Number of transactions (either 32-byte or 64-byte) going over the TC_EA_wrreq interface. Sum over TCC instances."></metric>
+</gfx9_expr>

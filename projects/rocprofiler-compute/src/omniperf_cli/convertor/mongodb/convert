@@ -1,0 +1,1144 @@
+#!/usr/bin/env python3
+
+################################################################################
+# Copyright (C) 2021 - 2022 Advanced Micro Devices, Inc. All rights reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+################################################################################
+
+import ast
+import astunparse
+import json
+import unicodedata
+import re
+import pandas as pd
+import yaml
+import shutil
+import os
+import argparse
+from pathlib import Path
+
+input_file_path = '../../../../dashboards/Omniperf_v1.0.3_pub.json'
+#df = pd.read_json(file_path)
+
+staging_path = "./staging/"
+converted_tables_path = "./converted/"
+
+# for 2 stages convertor only
+original_query_only_path = "./original_query/"
+modified_query_path = "./modified_query/"
+
+
+def slugify(value, allow_unicode=False):
+    """
+    Taken from https://github.com/django/django/blob/master/django/utils/text.py
+    Convert to ASCII if 'allow_unicode' is False. Convert spaces or repeated
+    dashes to single dashes. Remove characters that aren't alphanumerics,
+    underscores, or hyphens. Convert to lowercase. Also strip leading and
+    trailing whitespace, dashes, and underscores.
+    """
+    value = str(value)
+    if allow_unicode:
+        value = unicodedata.normalize('NFKC', value)
+    else:
+        value = unicodedata.normalize('NFKD',
+                                      value).encode('ascii',
+                                                    'ignore').decode('ascii')
+    value = re.sub(r'[^\w\s-]', '', value.lower())
+    return re.sub(r'[-\s]+', '-', value).strip('-_')
+
+
+#------------------------------------------------------------------------------
+# The code for single metric expression parsing
+
+supported_bin_ops = {
+    "$add": ast.Add(),
+    "$subtract": ast.Sub(),
+    "$multiply": ast.Mult(),
+    "$divide": ast.Div(),
+    # $concat is not a bin_ops, we overide opertor "+" for strcat later,
+    # which typically only used for "Unit" string.
+    "$concat": ast.Add()
+}
+
+# NB:
+#   Don't support "$eq": ast.Eq() on purpose!
+#   Not figure out how to handle const leading number in if-else in pandas df yet.
+#   Still, user still can use "$eq" in any part of the code we don't parse, i.e. $demon.
+supported_cmop = {"$ne": ast.NotEq()}
+
+# The opposite of it in paser.py
+supported_call = {
+    # simple aggr
+    "$avg": "AVG",
+    "$median": "MEDIAN",
+
+    # If the below has single arg, like(expr), it is a aggr.
+    # If it has args like list [], support scalar only for now.
+    "$min": "MIN",
+    "$max": "MAX",
+
+    # Support the below with 2 inputs
+    "$round": "ROUND",
+    "$mod": "MOD",
+
+    # functions apply to whole column or a single value
+    "$toInt": "TO_INT",
+}
+
+
+class CodeTransformer(ast.NodeTransformer):
+
+    def visit_Dict(self, node):
+        self.generic_visit(node)
+        #print("visit_Dict", len(node.keys), len(node.values))
+        for k in node.keys:
+            # print("Dict key", k.s)
+
+            if k.s in supported_bin_ops.keys():
+                for v in node.values:
+                    if (isinstance(v, ast.List)):
+                        #for e in v.elts:
+                        #    print(type(e))
+
+                        if (len(v.elts) < 2):
+                            raise Exception("No enough elements for ", k.s)
+
+                        # can be merged into "else", just easy to debug
+                        elif (len(v.elts) == 2):
+                            new_node = ast.BinOp(left=v.elts[0],
+                                                 op=supported_bin_ops[k.s],
+                                                 right=v.elts[1],
+                                                 ctx=ast.Load())
+                            node = new_node
+                        else:
+                            new_node = ast.BinOp(left=v.elts[0],
+                                                 op=supported_bin_ops[k.s],
+                                                 right=v.elts[1],
+                                                 ctx=ast.Load())
+
+                            #print("len(v.elts) ", len(v.elts))
+                            for i in range(2, len(v.elts), 1):
+                                new_node = ast.BinOp(left=new_node,
+                                                     op=supported_bin_ops[k.s],
+                                                     right=v.elts[i],
+                                                     ctx=ast.Load())
+
+                            #print(astunparse.dump(new_node))
+                            node = new_node
+
+            elif k.s in supported_call.keys():
+                # Call(expr func, expr* args, keyword* keywords)
+                #print(k.s, type(node.values), "---", node.values[0])
+                new_node = ast.Call(func=ast.Name(id=supported_call[k.s],
+                                                  ctx=ast.Load()),
+                                    args=node.values
+                                    if not isinstance(node.values[0], ast.List)
+                                    else node.values[0].elts,
+                                    keywords=[])
+
+                node = new_node
+
+            elif k.s in supported_cmop.keys():
+                for v in node.values:
+                    if (isinstance(v, ast.List)):
+                        #print(dir(ast.Compare))
+                        new_node = ast.Compare(left=v.elts[0],
+                                               ops=[supported_cmop[k.s]],
+                                               comparators=[v.elts[1]])
+                        node = new_node
+            elif k.s == "$cond":
+                for v in node.values:
+                    if (isinstance(v, ast.List)):
+                        # if (isinstance(v.elts[2], ast.Str)):
+                        #     print("--------", v.elts[2].s)
+                        new_node = ast.IfExp(
+                            test=v.elts[0],
+                            body=v.elts[1],
+                            orelse=ast.Str("None")
+                            if isinstance(v.elts[2], ast.Str)
+                            and v.elts[2].s == "" else v.elts[2])
+                        node = new_node
+            elif k.s == "$ifNull":
+                for v in node.values:
+                    if (isinstance(v, ast.List)):
+                        new_node = ast.IfExp(test=ast.Expr(value=ast.UnaryOp(
+                            op=ast.Not(), operand=v.elts[0])),
+                                             body=v.elts[1],
+                                             orelse=v.elts[0])
+                        node = new_node
+            elif k.s == "$sum":
+                # assert len(node.values) == 1 ???
+                for v in node.values:
+                    new_node = ast.Call(func=ast.Name(id='sum',
+                                                      ctx=ast.Load()),
+                                        args=[v],
+                                        keywords=[])
+                    node = new_node
+
+    # Call(
+    #     func=Name(id='func', ctx=Load()),
+    #     args=[
+    #         Name(id='a', ctx=Load()),
+    #         Starred(
+    #             value=Name(id='d', ctx=Load()),
+    #             ctx=Load())],
+
+        return node
+
+    # def visit_List(self, node):
+    #     self.generic_visit(node)
+    #     print(dir(node))
+
+    # def visit_Name(self, node):
+    #     self.generic_visit(node)
+    #     print("-------------", node.id)
+    #     if node.id == "Null":
+    #         print("-------------", node.id)
+    #         node.id = "None"
+
+    #     return node
+
+
+def convert_single_metric_expr(text):
+
+    #print("input", text)
+    node = ast.parse(text)
+    #print(astunparse.dump(node))
+
+    transformer = CodeTransformer()
+
+    new_node = transformer.visit(node)
+    #print(astunparse.dump(new_node))
+
+    s = astunparse.unparse(new_node)
+
+    # special added field &denom not handled at filter_groups stage
+    s = re.sub(r'&denom', '$denom', s)
+
+    # remove quote for all string and & for HW counters
+    s = re.sub(r'[\"|\'|&\|#]', '', s)
+
+    # translate Null to python "None"
+    s = re.sub(r'Null', r'None', s)
+
+    # it seems yaml.safe_load can not handle "{ value: A[0]}"
+    # but we need to keep this kind of expr to format the string.
+    # just replace symbol [] temporarily and locally
+    s = re.sub(r"\[(\d+)\]", r"aaaaaa__tmp_expr_\g<1>bbbbbb__tmp_expr", s)
+
+    if ',' in s:
+        # NB:key
+        # Using list [] as parameters for functions like min(), round() is
+        # not common case. Still, we support them with " ". Should have a
+        # better way to load here.
+        s = re.sub(r'[{|}]', '', s)
+        l = s.split(":")
+        key = re.sub(r'\n', '', l[0])
+        value = re.sub(r'\n', '', l[1])
+        value = re.sub(r'aaaaaa__tmp_expr_', r'[', value)
+        value = re.sub(r'bbbbbb__tmp_expr', r']', value)
+        return key.strip(), value.strip()
+    else:
+        s = yaml.safe_dump(yaml.safe_load(s))
+
+        d = yaml.safe_load(s)
+        key, value = next(iter(d.items()))
+        if isinstance(value, str):
+            value = re.sub(r'aaaaaa__tmp_expr_', r'[', value)
+            value = re.sub(r'bbbbbb__tmp_expr', r']', value)
+
+        return key, value
+
+
+# Unit test for convert_single_metric_expr()
+# with open("sample.json") as f:
+#     t = f.read()
+#     print(convert_single_metric_expr(t))
+
+#------------------------------------------------------------------------------
+# The code for parsing mongodb qurey in a few stages
+
+
+def filter_explicit_targets(dict_obj, valid_targets):
+    ''' Find all targets with explicit title
+    '''
+    # Iterate over all key-value pairs of dict argument
+    for key, value in dict_obj.items():
+        if key == "title":
+            id = 0
+            targets = []
+            for k, v in dict_obj.items():
+                if k == 'id':
+                    id = v
+                if k == "targets":
+                    targets = v
+            if id != 0 and targets:
+                valid_targets[id] = {value: targets}
+
+        # Check if value is of dict type
+        if isinstance(value, dict):
+            # If value is dict then iterate over all its values
+            filter_explicit_targets(value, valid_targets)
+
+        elif isinstance(value, list):
+            for elem in value:
+                if isinstance(elem, dict):
+                    filter_explicit_targets(elem, valid_targets)
+        else:
+            pass
+
+
+# def filter_grouped_metric(dict_obj, valid_metrics):
+#     ''' Find all valid metrics
+#     '''
+#     # Iterate over all key-value pairs of dict argument
+#     for key, value in dict_obj.items():
+
+#         if key == "$group":
+#             for k, v in value.items():
+
+#                 if k != '_id':
+#                     print("detected metric", k)
+#                     valid_metrics[k] = v
+
+#         # Check if value is of dict type
+#         if isinstance(value, dict):
+#             # If value is dict then iterate over all its values
+#             filter_grouped_metric(value, valid_metrics)
+
+#         elif isinstance(value, list):
+#             for elem in value:
+#                 if isinstance(elem, dict):
+#                     filter_grouped_metric(elem, valid_metrics)
+#         else:
+#             pass
+
+
+def save_aggregate_query_content(input, file_name):
+
+    content = re.sub(r'.+(aggregate\()(.+)', r'\g<2>', input)
+    # todo: better regex
+    content = re.sub(r'\);', '', content)
+
+    with open(file_name, "w") as f:
+        f.write(content)
+
+    return content
+
+
+def filter_groups(input, file_name):
+    '''
+    For now, it seems we only need the stage of "$group", "$set" and "$unionWith".
+    '''
+
+    #print(input)
+
+    # Fake symbols to remove expr yaml/json can not parse, and symbols we don't need
+    # i.e., special case for 50_id_165 Speed-of-Light: L1 Cache
+    s = re.sub(r'\$\$ROOT', r'__fake_filter__ROOT', input)
+
+    # reserve internal global var with prefix and recovery later
+    s = re.sub('((?<![\"|\'])\$)(\w+)',
+               lambda m: "\"ammolite__" + m.group(2) + "\"", s)
+
+    # Fake symbols to remove expr yaml/json can not parse, and symbols we don't need
+    s = re.sub(r'\$\{(\w+:\w+)\}', r'"__fake_filter__\g<1>"', s)
+    s = re.sub(r'.+(\"_id\").+', '', s)
+    #s = re.sub(r'null', r'NONE', s)
+    #print(s)
+
+    stages = yaml.safe_load(s)
+
+    new_content = ''
+
+    for stage in stages:
+        if isinstance(stage, dict):
+            for key, value in stage.items():
+                if key in [
+                        "$group", "$set", "$unionWith", "$addFields",
+                        "$project"
+                ]:
+                    new_content += json.dumps(stage) + ",\n"
+
+    new_content = "[" + new_content[:-2] + "]"
+
+    with open(file_name, "w") as f:
+        #f.write(new_content)
+        formatted = yaml.safe_load(new_content)
+        if not formatted:
+            raise Exception("Empty groups!")
+        json.dump(formatted, f, ensure_ascii=False, indent=4)
+
+    return new_content
+
+
+def is_replaceable(v_str):
+    if v_str.startswith("&") and \
+        v_str[1].islower() and (not v_str in supported_bin_ops.keys()) and \
+        (not v_str in supported_call.keys()):
+        # print("replace_internal_variables key", v_str)
+        return True
+    else:
+        return False
+
+
+def replace_internal_variables(cur, ref):
+    ''' Replace all "&variable" in target from source
+    '''
+    # Iterate over all key-value pairs of dict argument
+    for key, value in cur.items():
+        if isinstance(value, str) and is_replaceable(value):
+            print("replace_internal_variables key", key, "value", value)
+
+        # Check if value is of dict type
+        if isinstance(value, dict):
+            # If value is dict then iterate over all its values
+            replace_internal_variables(value, ref)
+
+        elif isinstance(value, list):
+            for i in range(len(value)):
+                if isinstance(value[i], dict):
+                    replace_internal_variables(value[i], ref)
+                elif isinstance(value[i], str):
+                    if is_replaceable(value[i]):
+                        value[i] = ref[value[i][1:]]
+
+        else:
+            pass
+
+
+def flatten_unionWith_metrics(stage):
+    '''
+    Assume no reference out of current stage for now.
+    '''
+
+    # For debug only
+    groups_count = 0
+    project_count = 0
+    set_count = 0
+
+    coll_level = stage["coll"] if "coll" in stage.keys() else None
+
+    groups = []
+
+    for k, v in stage.items():
+        if k == "pipeline":
+            if isinstance(v, list):
+                for sd in v:
+                    for key, value in sd.items():
+                        if key == "$group":
+                            groups_count += 1
+                            d = {}
+                            for gk, gv in value.items():
+                                # print("-----------", gk)
+
+                                # assume one aggr for each
+                                #print(next(iter(v.items())))
+                                k, v = next(iter(gv.items()))
+
+                                if isinstance(v,
+                                              str) and v.startswith("&res."):
+                                    d[gk] = {k: groups[-1][v[1:]]}
+                                else:
+                                    d[gk] = {k: v}
+                            groups.append(d)
+
+                        elif key == "$project":
+                            project_count += 1
+                            if isinstance(value, dict):
+                                for mk, mv in value.items():
+                                    #print("---", mk, "***", mv)
+                                    # TODO: fix id == 20 for all the left cases
+                                    if isinstance(mv, str) and mv.startswith(
+                                            "&") and mv[1].islower():
+                                        value[mk] = groups[-1][mv[1:]]
+                                    elif isinstance(mv, dict):
+                                        replace_internal_variables(
+                                            mv, groups[-1])
+                                if coll_level:
+                                    value["coll_level"] = coll_level
+                                groups.append(value)
+
+                            elif isinstance(v, list):
+                                raise Exception(
+                                    "Filter \"$unionWith\": list in stage $project"
+                                )
+                        elif key == "$set":
+                            set_count += 1
+                            if isinstance(value, dict):
+                                for k, v in value.items():
+                                    if k == "array" and isinstance(v, list):
+                                        for m in v:
+                                            for mk, mv in m.items():
+                                                # print("---", mk, "***", mv)
+                                                if isinstance(
+                                                        mv,
+                                                        str) and mv.startswith(
+                                                            "&"
+                                                        ) and mv[1].islower():
+                                                    m[mk] = groups[-1][mv[1:]]
+                                                elif isinstance(mv, dict):
+                                                    replace_internal_variables(
+                                                        mv, groups[-1])
+                                            if coll_level:
+                                                m["coll_level"] = coll_level
+                                        groups.extend(v)
+                                    else:
+                                        raise Exception(
+                                            "Warning: detected field in $set is not array",
+                                            type(v))
+
+    if groups_count > 1 or project_count > 1 or set_count > 1:
+        print("groups_count", groups_count, "project_count", project_count,
+              "set_count", set_count)
+        raise Exception(
+            "Filter \"$unionWith\": groups_count > 1 or project_count > 1 or set_count > 1"
+        )
+
+    if not groups[-1]:
+        raise Exception("Empty groups!")
+
+    # print("***** unionWith return", groups[1:])
+    return groups[1:]
+
+
+def flatten_set_metrics(array_list, ref):
+    #print("main- ", type(array_list))
+    if isinstance(array_list, list):
+        #print("dddddddddd", len(list))
+        for i in range(len(array_list)):
+            #print("-----type ", type(array_list[i]), array_list[i])
+            if isinstance(array_list[i], dict):
+                for mk, mv in array_list[i].items():
+                    #print("-----mv", mv)
+                    if isinstance(
+                            mv,
+                            str) and mv.startswith("&") and mv[1].islower():
+                        array_list[i][mk] = ref[mv[1:]]
+                        #groups.append(v)
+                    elif isinstance(mv, list):
+                        flatten_set_metrics(mv, ref)
+                    elif isinstance(mv, dict):
+                        for k, v in mv.items():
+                            #print("-----type v", type(v))
+                            if isinstance(v, list):
+                                flatten_set_metrics(v, ref)
+                            elif isinstance(v, dict):
+                                for mk, mv in v.items():
+                                    #print("-----mmv", mv)
+                                    if isinstance(mv, str) and mv.startswith(
+                                            "&") and mv[1].islower():
+                                        v[mk] = ref[mv[1:]]
+                                    elif isinstance(mv, list):
+                                        flatten_set_metrics(mv, ref)
+
+            elif isinstance(array_list[i], str) and array_list[i].startswith(
+                    "&") and array_list[i][1].islower():
+                #print("-----array_list[i]", array_list[i],
+                #      ref[array_list[i][1:]])
+                array_list[i] = ref[array_list[i][1:]]
+            elif isinstance(array_list[i], list):
+                flatten_set_metrics(array_list[i], ref)
+
+
+# def flatten_set_metrics_with_dict(cur_dict, ref):
+
+#     if isinstance(cur_dict, dict):
+#         for mk, mv in cur_dict.items():
+#             #print("-----mv", mv)
+#             if isinstance(mv, str) and mv.startswith("&") and mv[1].islower():
+#                 cur_dict[mk] = ref[mv[1:]]
+#             elif isinstance(mv, dict):
+#                 flatten_set_metrics(mv, ref)
+#             elif isinstance(mv, list):
+#                 for i in range(len(mv)):
+#                     if isinstance(mv[i], str) and mv[i].startswith(
+#                             "&") and mv[i][1].islower():
+#                         mv[i] = ref[mv[i][1:]]
+#                     elif isinstance(mv[i], dict):
+#                         flatten_set_metrics(mv[i], ref)
+
+
+def flatten_metrics(input, file_name):
+    '''
+    Flatten metrics in a non-nested list.
+    The last item in the list holds the final non-reference flatten metrics.
+    '''
+
+    stages = yaml.safe_load(input)
+    groups = []
+
+    for stage in stages:
+        if isinstance(stage, dict):
+            for key, value in stage.items():
+                # print(key)
+                if key == "$group":
+                    if "res" in value and "$push" in value["res"]:
+                        #print(value["res"])
+                        pushed_items = pd.melt(
+                            pd.json_normalize([stage], max_level=3))
+                        pushed_items.set_index('variable', inplace=True)
+                        #print(type(pushed_items))
+                        #print(pushed_items.to_dict()['value'])
+                        vd = pushed_items.to_dict()['value']
+                        d = {}
+                        for k, v in vd.items():
+                            d[re.sub(r"(\$group.)|(\$push.)", '', k)] = v
+                        groups.append(d)
+                    else:
+                        # todo: check dict nested level
+                        d = {}
+                        for gk, gv in value.items():
+
+                            # assume one aggr for each
+                            #print(next(iter(v.items())))
+                            k, v = next(iter(gv.items()))
+
+                            if isinstance(v, str) and v.startswith("&res."):
+                                d[gk] = {k: groups[-1][v[1:]]}
+                            else:
+                                d[gk] = {k: v}
+                        groups.append(d)
+
+                elif key == "$set":
+                    #print("aaaaaaaaaaaaaa", type(value))
+                    # new_g = []
+                    # if isinstance(value, dict):
+                    #     for k, v in value.items():
+                    #         if k == "array" and isinstance(v, list):
+                    #             for item in v:
+                    #                 flatten_set_metrics(v, groups[-1])
+                    #                 new_g.append(v)
+                    #         else:
+                    #             raise Exception(
+                    #                 "Warning: detected field in $set is not array",
+                    #                 type(v))
+                    # groups.append(new_g)
+
+                    if isinstance(value, dict):
+                        for k, v in value.items():
+                            if k == "array" and isinstance(v, list):
+                                flatten_set_metrics(v, groups[-1])
+                                groups.append(v)
+                            else:
+                                raise Exception(
+                                    "Warning: detected field in $set is not array",
+                                    type(v))
+
+                elif key == "$unionWith":
+                    #print("$unionWith", groups)
+                    groups[-1] = groups[-1] + flatten_unionWith_metrics(value)
+
+                elif key == "$addFields":
+                    if isinstance(value, dict):
+                        if not value:
+                            raise Exception("No items in dict in $addFields!")
+                        elif len(value) == 1 and next(iter(value)) == "denom":
+                            pass  # ignore "$addFields" for normalization, as it is unique.
+                        elif next(iter(value)) == "denom":
+                            raise Exception(
+                                "Mixed denom and other items, not implemented yet!"
+                            )
+                        else:
+                            groups.append(value)
+
+                    else:
+                        raise Exception("Items in $addFields are not dict!")
+
+                elif key == "$project":
+                    #print("$project", value)
+                    if isinstance(value, dict):
+                        if not value:
+                            raise Exception("No items in dict in $project!")
+                        else:
+                            d = {}
+                            for gk, gv in value.items():
+                                if gv == 1 or gv == True:
+                                    # assume one aggr for each
+                                    #print(next(iter(v.items())))
+                                    #print("---gv", gv)
+                                    d[gk] = groups[-1][gk]
+                                else:
+                                    # print(gk, type(gv))
+                                    if isinstance(gv, dict):
+                                        replace_internal_variables(
+                                            gv, groups[-1])
+                                        d[gk] = gv
+                                    elif (isinstance(gv, str)
+                                          and is_replaceable(gv)):
+                                        d[gk] = groups[-1][gv[1:]]
+                                    elif isinstance(gv, str):
+                                        d[gk] = gv
+                                    else:
+                                        # special case for 50_id_165 Speed-of-Light: L1 Cache
+                                        if isinstance(gk,
+                                                      str) and gk == "ta_data":
+                                            pass
+                                        else:
+                                            raise Exception(
+                                                "Unkown type in $project!")
+                            groups.append([d])
+
+                    else:
+                        raise Exception("Items in $project are not dict!")
+
+    with open(file_name, "w") as f:
+        #f.write(input)
+        json.dump(groups, f, ensure_ascii=False, indent=4)
+
+    if not groups or not groups[-1]:
+        raise Exception("Empty groups!")
+
+    return groups[-1]
+
+
+def convert_metrics(metrics,
+                    file_name,
+                    key_metric_prefix_field=None,
+                    ignored_metrics=[]):
+    '''
+    - Convert each metric expr from MongoDB bson format to yaml.
+    - Collect metric_header_items and replace the key with the lower case tag.
+
+    metrics: input metric list
+    '''
+    results = {}
+    metric_header_items_list = []
+
+    if len(metrics) == 1:
+        #print("fffffffffff", len(metrics[0]))
+        for k, v in metrics[0].items():
+            lower_k = k.lower()
+            # print("---------------", type(v))
+            yk, yv = convert_single_metric_expr(json.dumps({"value": v}))
+            metric_dict = {yk: yv}
+            metric_header_items = {}
+            metric_header_items["metric"] = "Metric"
+            metric_header_items["value"] = "Value"
+            metric_header_items["tips"] = "Tips"
+            metric_header_items_list.append(metric_header_items)
+            #debug metric_header_items = {lower_k: k}
+
+            metric_dict["tips"] = None
+            results[k] = metric_dict
+
+    else:
+
+        for mg in metrics:
+            metric_dict_name = ''
+            metric_dict = {}
+            metric_header_items = {}
+
+            keys = []
+
+            first_key = next(iter(mg)).lower()
+            for k, v in mg.items():
+                if not k in ignored_metrics:
+                    lower_k = k.lower(
+                    ) if k != "Percent of Peak - PoP" else "pop"
+                    # TODO: double check the special cases and generalization.
+                    # Typically, the 1st item is the metric title...
+                    if lower_k == first_key:  # debug code: if lower_k == "metric":
+                        metric_dict_name = v
+                        if key_metric_prefix_field in mg and mg[
+                                key_metric_prefix_field]:
+                            metric_dict_name = mg[
+                                key_metric_prefix_field] + " - " + metric_dict_name
+                    else:
+                        #print(convert_single_metric_expr(json.dumps({lower_k: v})))
+                        yk, yv = convert_single_metric_expr(
+                            json.dumps({lower_k: v}))
+                        metric_dict[yk] = yv
+
+                    metric_header_items[lower_k] = k
+
+            metric_header_items["tips"] = "Tips"
+            metric_header_items_list.append(metric_header_items)
+
+            metric_dict["tips"] = None
+            results[metric_dict_name] = metric_dict
+
+    # todo: verify metric_header_items_list consistency for all metrics
+
+    with open(file_name, "w") as f:
+        yaml_file = yaml.safe_dump(results, f, sort_keys=False)
+
+    return metric_header_items_list[0], results
+
+
+def build_metric_table(metric_header_items, metrics, file_name):
+    '''
+    Build a metric_table and do final var/string cleaning.
+
+    Example:
+
+    metric_table:
+        id: 1001
+        title: TA # optional
+        header:
+          metric: Metric
+          avg: Avg
+          min: Min
+          max: Max
+          unit: Unit
+          tips: Tips
+        metric:
+    '''
+
+    results = {
+        "metric_table": {
+            "id": -1,
+            "title": None,
+            "header": metric_header_items,
+            "metric": metrics
+        }
+    }
+
+    # Todo: count total metrics numbers
+
+    yaml_string = yaml.safe_dump(results, sort_keys=False)
+    yaml_string = re.sub(r'ammolite__', r'$', yaml_string)
+
+    # Todo: double check: don't touch Null in the metrics
+    yaml_string = re.sub(r'null', r'', yaml_string)
+
+    # Add intents
+    yaml_string = re.sub('^(.*)',
+                         r'      \g<1>',
+                         yaml_string,
+                         flags=re.MULTILINE)
+
+    with open(file_name, "w") as f:
+        f.write(yaml_string)
+        #yaml_file = yaml.safe_dump(yaml.safe_load(yaml_string),
+        #                           f, sort_keys=False)
+
+
+#------------------------------------------------------------------------------
+#
+def gen_all_in_one_step():
+    '''
+    Scan the MI_Performance_Mongo.json, generate all intermediate files in "staging" dir,
+    then the final files in "converted" dir.
+    All in once.
+    '''
+    unsupported_dashboard = {
+        159: "System Info",
+        175: "Dispatch IDs - Current",
+        215: "Dispatch IDs - Baseline",
+        157: "Kernel Time Histogram",
+        213: "To-10 Kernels",
+        171: "Memory Chart (Normalization: $normUnit)",
+        237: "$soc Roofline",
+        20: "Per-SE Wave Occupancy (SE0 - SE3)",
+        22: "Per-SE Wave Occupancy (SE4 - SE7)",
+        169: "Per-CU Wave Occupancy (SE0 - SE3)",
+        163: "Per-CU Occupancy (SE4 - SE7) (Waves/CU)",
+
+        # 2nd to fix
+        18: "Pipeline Stats",  # can be fixed by supporting $replaceWith
+        96: "Arithmetic Operations",
+        14: "Memory Latencies",
+        100: "LDS Stats",
+        128: "L1 Cache Accesses",
+        124: "L1 - UTCL1 Accesses",
+        62: "L2 - EA Transactions",
+        311: "NUMA-LATENCYSIZED-READ-CYCLES",
+
+        # 3rd to fix
+        165:
+        "Speed-of-Light: L1 Cache",  # can be fixed by supporting $replaceWith and $lookup
+        116:
+        "L1 Cache Stalls"  # can be fixed with both: (1)bug fix "l2Pending_max", (2)in min() not use list[]
+    }
+
+    with open(input_file_path) as f:
+        config = json.load(f)
+        valid_targets = {}
+
+        # clear up staging before working in it
+        p1 = Path(staging_path)
+        if p1.exists():
+            shutil.rmtree(staging_path, ignore_errors=True)
+        p1.mkdir()
+
+        #print(json.dumps(config, indent = 4, sort_keys=True))
+        filter_explicit_targets(config, valid_targets)
+        print("Detected targets ", len(valid_targets))
+        print("-" * 80)
+        for k, v in valid_targets.items():
+            print(k, next(iter(v)))
+        print("-" * 80)
+        detected_order = 0
+
+        # FIXME!!!
+        #   bring back all the changes from gen_from_modified_query()
+
+        for board_id, v in valid_targets.items():
+            #if board_id == 110:  # Speed of Light
+            #if board_id == 132 or board_id == 134:  # TA
+            if board_id not in unsupported_dashboard.keys():
+                #if board_id == 12: # debug "add" for "sum"
+                #if board_id == 81:
+                #if board_id == 110: # debug $l1i_BW_val
+                #if board_id == 104: # have special case unit: #SIMD
+                #if board_id == 219:
+                print(detected_order, board_id, next(iter(v)))
+                for title, targets in v.items():
+                    #print("title:", title)
+                    #print("total target num:", len(targets))
+
+                    # take the 1st baseline target only
+                    for target_key, target_content in targets[0].items():
+                        #print("target", target_key, target_content)
+                        if target_key == "target":
+
+                            # In the below, fn stands for file_name
+                            fn_prefix = staging_path + str(
+                                detected_order).zfill(2) + "_id_" + str(
+                                    board_id) + "_" + slugify(next(
+                                        iter(v))).upper()
+
+                            original_query_fn = fn_prefix + ".s0_original_query" + ".json"
+                            content = save_aggregate_query_content(
+                                target_content, original_query_fn)
+
+                            filter_groups_fn = fn_prefix + ".s1_filter_groups" + ".json"
+                            content = filter_groups(content, filter_groups_fn)
+
+                            flattened_metrics_fn = fn_prefix + ".s2_flattened_metrics" + ".json"
+                            metrics = flatten_metrics(content,
+                                                      flattened_metrics_fn)
+                            #print(metrics)
+
+                            converted_metrics_fn = fn_prefix + ".s3_converted_metrics" + ".yaml"
+                            converted_metrics_header_items, converted_metrics = convert_metrics(
+                                metrics, converted_metrics_fn)
+
+                            converted_table_fn = fn_prefix + ".s4_converted_table" + ".yaml"
+                            build_metric_table(converted_metrics_header_items,
+                                               converted_metrics,
+                                               converted_table_fn)
+
+            detected_order += 1
+
+        p2 = Path(converted_tables_path)
+        if not p2.exists():
+            p2.mkdir()
+
+        for root, dirs, files in os.walk(staging_path):
+            for file in files:
+                if file.endswith("s4_converted_table.yaml"):
+                    shutil.copy(os.path.join(root, file),
+                                converted_tables_path)
+
+
+def gen_original_query_only():
+    '''
+
+    '''
+    with open(input_file_path) as f:
+        config = json.load(f)
+        valid_targets = {}
+
+        # clear up original_query_only_path before working in it
+        p1 = Path(original_query_only_path)
+        if p1.exists():
+            shutil.rmtree(original_query_only_path, ignore_errors=True)
+        p1.mkdir()
+
+        #print(json.dumps(config, indent = 4, sort_keys=True))
+        filter_explicit_targets(config, valid_targets)
+        print("Detected targets ", len(valid_targets))
+        print("-" * 80)
+        for k, v in valid_targets.items():
+            print(k, next(iter(v)))
+        print("-" * 80)
+        detected_order = 0
+        for board_id, v in valid_targets.items():
+            print(detected_order, board_id, next(iter(v)))
+            for title, targets in v.items():
+                #print("title:", title)
+                #print("total target num:", len(targets))
+
+                # take the 1st baseline target only
+                for target_key, target_content in targets[0].items():
+                    #print("target", target_key, target_content)
+                    if target_key == "target":
+
+                        # In the below, fn stands for file_name
+                        fn_prefix = original_query_only_path + str(
+                            detected_order).zfill(
+                                2) + "_id_" + str(board_id) + "_" + slugify(
+                                    next(iter(v))).upper()
+
+                        original_query_fn = fn_prefix + ".s0_original_query" + ".json"
+                        content = save_aggregate_query_content(
+                            target_content, original_query_fn)
+
+            detected_order += 1
+
+
+def gen_from_modified_query():
+    '''
+    '''
+    unsupported_dashboard = {
+        175: "Dispatch IDs - Current",  # Unnecessary
+        215: "Dispatch IDs - Baseline",  # Unnecessary
+        157: "Kernel Time Histogram",  # Not supported yet
+        171: "Memory Chart (Normalization: $normUnit)",  # Not supported yet
+        237: "$soc Roofline",  # Not supported yet
+        253: "EMPIRICAL-ROOFLINE-MI200",
+        251: "TOP-DISPATCHES",
+
+        # manual
+        159: "System Info",  # raw_csv_table with redifined name for each item
+        213: "To-10 Kernels",  # Need to think about more supported patterns
+        20:
+        "Per-SE Wave Occupancy (SE0 - SE3)",  # can be fixed by supporting sum and data source "coll"
+        22:
+        "Per-SE Wave Occupancy (SE4 - SE7)",  # can be fixed by supporting sum and data source "coll"
+        169: "Per-CU Wave Occupancy (SE0 - SE3)",  # raw_csv_table
+        163: "Per-CU Occupancy (SE4 - SE7) (Waves/CU)",  # raw_csv_table
+
+        # Fixme
+        269: "IPC",  # raw_csv_table ???
+        273: "PIPELINES",  # raw_csv_table ???
+        267: "MEMORY-ACCESSES",  # raw_csv_table ???
+        54: "SPEED-OF-LIGHT-CONSTANT-CACHE",  # "&util" "&stall" ???
+
+        # 00: "build in",
+
+        # can be fixed by supporting min [,,]
+        #18: "Pipeline Stats",
+        #116: "L1-CACHE-STALLS",
+
+        # 2nd to fix
+        #96: "Arithmetic Operations", # can be fixed by supporting $replaceWith
+        #14: "Memory Latencies",
+        #100: "LDS Stats",
+        #128: "L1 Cache Accesses", # Check with Xiaomin!! lots of changes!
+        #124: "L1 - UTCL1 Accesses",
+        #62: "L2 - EA Transactions",
+
+        # 3rd to fix
+        #165:"Speed-of-Light: L1 Cache",  # fixed by replacing $eq, need to check with Xiaomin for $replaceRoot and $lookup
+        #116: "L1 Cache Stalls"  # can be fixed with not using min() in "L2-to-L1 Data Stall" list[]
+    }
+
+    # NB:
+    #    fix "coll": "SQ_INST_LEVEL_VMEM" for 41_id_14_MEMORY-LATENCIES when support "coll" within "group"
+
+    # clear up staging before working in it
+    p1 = Path(staging_path)
+    if p1.exists():
+        shutil.rmtree(staging_path, ignore_errors=True)
+    p1.mkdir()
+
+    for root, dirs, files in os.walk(modified_query_path):
+        for file in files:
+            if file.endswith(".json"):
+                with open(os.path.join(root, file)) as f:
+                    # print(file)
+                    m = re.match(r"(\d+)_id_(\d+)_(.*(?=\.s0))", file)
+
+                    detected_order = m.group(1)
+                    board_id = m.group(2)
+                    title = m.group(3)
+
+                    if int(board_id) not in unsupported_dashboard.keys():
+                        #if int(board_id) == 18:
+                        #if int(board_id) == 120:
+                        #if int(board_id) == 48:
+                        #if int(board_id) == 00:
+                        #if int(board_id) == 165:
+                        #if int(board_id) == 110:
+                        #if board_id == 12: # debug "add" for "sum"
+                        #if board_id == 81:
+                        #if board_id == 110: # debug $l1i_BW_val
+                        #if board_id == 104: # have special case unit: #SIMD
+                        #if board_id == 219:
+                        print(detected_order, board_id, title)
+
+                        # In the below, fn stands for file_name
+                        fn_prefix = staging_path + str(detected_order).zfill(
+                            2) + "_id_" + str(board_id) + "_" + title
+
+                        #original_query_fn = fn_prefix + ".s0_original_query" + ".json"
+                        content = f.read()
+
+                        filter_groups_fn = fn_prefix + ".s1_filter_groups" + ".json"
+                        content = filter_groups(content, filter_groups_fn)
+
+                        flattened_metrics_fn = fn_prefix + ".s2_flattened_metrics" + ".json"
+                        metrics = flatten_metrics(content,
+                                                  flattened_metrics_fn)
+                        #print(metrics)
+
+                        converted_metrics_fn = fn_prefix + ".s3_converted_metrics" + ".yaml"
+                        converted_metrics_header_items = []
+                        converted_metrics = {}
+
+                        # 2 special cases with subclassification
+                        # NB: double check the board_id if the it is changed in Grafana GUI
+                        if int(board_id) == 60:
+                            converted_metrics_header_items, converted_metrics = convert_metrics(
+                                metrics, converted_metrics_fn, "Transaction",
+                                ["Transaction", "Target"])
+                        elif int(board_id) == 120:
+                            converted_metrics_header_items, converted_metrics = convert_metrics(
+                                metrics, converted_metrics_fn, "Coherency",
+                                ["Coherency"])
+                        else:
+                            converted_metrics_header_items, converted_metrics = convert_metrics(
+                                metrics, converted_metrics_fn)
+
+                        converted_table_fn = fn_prefix + ".s4_converted_table" + ".yaml"
+                        build_metric_table(converted_metrics_header_items,
+                                           converted_metrics,
+                                           converted_table_fn)
+
+    p2 = Path(converted_tables_path)
+    if not p2.exists():
+        p2.mkdir()
+
+    for root, dirs, files in os.walk(staging_path):
+        for file in files:
+            if file.endswith("s4_converted_table.yaml"):
+                shutil.copy(os.path.join(root, file), converted_tables_path)
+
+
+#------------------------------------------------------------------------------
+# Main
+if __name__ == '__main__':
+    arg_parser = argparse.ArgumentParser()
+    arg_parser.add_argument('-s',
+                            '--step',
+                            type=int,
+                            help='Specify steps to generate yaml configs.')
+
+    args = arg_parser.parse_args()
+
+    if args.step == 0:
+        gen_all_in_one_step()
+    elif args.step == 1:
+        gen_original_query_only()
+    elif args.step == 2:
+        gen_from_modified_query()

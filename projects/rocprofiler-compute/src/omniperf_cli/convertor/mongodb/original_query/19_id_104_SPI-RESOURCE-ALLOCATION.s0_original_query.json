@@ -1,0 +1,252 @@
+[
+    {"$match": {
+        "Index": { "$in": [${DispatchIDFilter:raw}] },
+        "gpu-id": { "$in": [${gpuFilter:raw}] },
+        "KernelName": { "$in": ${KernelNameFilter:json}}
+    }},
+    {"$group": {
+        "_id": null,
+
+        "waveReqFailCS_avg":{"$avg": "&SPI_RA_REQ_NO_ALLOC_CSN"},
+        "waveReqFailCS_min":{"$min": "&SPI_RA_REQ_NO_ALLOC_CSN"},
+        "waveReqFailCS_max":{"$max": "&SPI_RA_REQ_NO_ALLOC_CSN"},
+
+        "csStall_avg":{"$avg": "&SPI_RA_RES_STALL_CSN"},
+        "csStall_min":{"$min": "&SPI_RA_RES_STALL_CSN"},
+        "csStall_max":{"$max": "&SPI_RA_RES_STALL_CSN"},
+
+        "csStallRate_avg": {"$avg":{
+            "$cond":[
+                {"$ne": ["&GRBM_SPI_BUSY", 0]}, 
+                {"$divide": [{ "$multiply": [100, "&SPI_RA_RES_STALL_CSN"]}, "&GRBM_SPI_BUSY"]},
+                null
+            ]
+        }},
+        "csStallRate_min": {"$min":{
+            "$cond":[
+                {"$ne": ["&GRBM_SPI_BUSY", 0]}, 
+                {"$divide": [{ "$multiply": [100, "&SPI_RA_RES_STALL_CSN"]}, "&GRBM_SPI_BUSY"]},
+                null
+            ]
+        }},
+        "csStallRate_max": {"$max":{
+            "$cond":[
+                {"$ne": ["&GRBM_SPI_BUSY", 0]}, 
+                {"$divide": [{ "$multiply": [100, "&SPI_RA_RES_STALL_CSN"]}, "&GRBM_SPI_BUSY"]},
+                null
+            ]
+        }},
+
+        "scratchStall_avg":{"$avg": "&SPI_RA_TMP_STALL_CSN"},
+        "scratchStall_min":{"$min": "&SPI_RA_TMP_STALL_CSN"},
+        "scratchStall_max":{"$max": "&SPI_RA_TMP_STALL_CSN"},
+
+        "simdWaveslots_avg":{"$avg": "&SPI_RA_WAVE_SIMD_FULL_CSN"},
+        "simdWaveslots_min":{"$min": "&SPI_RA_WAVE_SIMD_FULL_CSN"},
+        "simdWaveslots_max":{"$max": "&SPI_RA_WAVE_SIMD_FULL_CSN"},
+
+        "simdVGPRs_avg":{"$avg": "&SPI_RA_VGPR_SIMD_FULL_CSN"},
+        "simdVGPRs_min":{"$min": "&SPI_RA_VGPR_SIMD_FULL_CSN"},
+        "simdVGPRs_max":{"$max": "&SPI_RA_VGPR_SIMD_FULL_CSN"},
+
+        "simdSGPRs_avg":{"$avg": "&SPI_RA_SGPR_SIMD_FULL_CSN"},
+        "simdSGPRs_min":{"$min": "&SPI_RA_SGPR_SIMD_FULL_CSN"},
+        "simdSGPRs_max":{"$max": "&SPI_RA_SGPR_SIMD_FULL_CSN"},
+
+        "cuLDS_avg":{"$avg": "&SPI_RA_LDS_CU_FULL_CSN"},
+        "cuLDS_min":{"$min": "&SPI_RA_LDS_CU_FULL_CSN"},
+        "cuLDS_max":{"$max": "&SPI_RA_LDS_CU_FULL_CSN"},
+
+        "cuBarries_avg":{"$avg": "&SPI_RA_BAR_CU_FULL_CSN"},
+        "cuBarries_min":{"$min": "&SPI_RA_BAR_CU_FULL_CSN"},
+        "cuBarries_max":{"$max": "&SPI_RA_BAR_CU_FULL_CSN"},
+
+        "bulkyResource_avg":{"$avg": "&SPI_RA_BULKY_CU_FULL_CSN"},
+        "bulkyResource_min":{"$min": "&SPI_RA_BULKY_CU_FULL_CSN"},
+        "bulkyResource_max":{"$max": "&SPI_RA_BULKY_CU_FULL_CSN"},
+
+        "threadgroupLimit_avg":{"$avg": "&SPI_RA_TGLIM_CU_FULL_CSN"},
+        "threadgroupLimit_min":{"$min": "&SPI_RA_TGLIM_CU_FULL_CSN"},
+        "threadgroupLimit_max":{"$max": "&SPI_RA_TGLIM_CU_FULL_CSN"},
+
+        "waveLimit_avg":{"$avg": "&SPI_RA_WVLIM_STALL_CSN"},
+        "waveLimit_min":{"$min": "&SPI_RA_WVLIM_STALL_CSN"},
+        "waveLimit_max":{"$max": "&SPI_RA_WVLIM_STALL_CSN"},
+
+        "vgprsWrites_avg": {"$avg":{
+            "$cond":[
+                {"$ne": ["&SPI_CSN_WAVE", 0]}, 
+                {"$divide": [{ "$multiply": [4, "&SPI_VWC_CSC_WR"] }, "&SPI_CSN_WAVE"]},
+                null
+            ]
+        }},
+        "vgprsWrites_min": {"$min":{
+            "$cond":[
+                {"$ne": ["&SPI_CSN_WAVE", 0]}, 
+                {"$divide": [{ "$multiply": [4, "&SPI_VWC_CSC_WR"] }, "&SPI_CSN_WAVE"]},
+                null
+            ]
+        }},
+        "vgprsWrites_max": {"$max":{
+            "$cond":[
+                {"$ne": ["&SPI_CSN_WAVE", 0]}, 
+                {"$divide": [{ "$multiply": [4, "&SPI_VWC_CSC_WR"] }, "&SPI_CSN_WAVE"]},
+                null
+            ]
+        }},
+
+        "sgprsWrites_avg": {"$avg":{
+            "$cond":[
+                {"$ne": ["&SPI_CSN_WAVE", 0]}, 
+                { "$divide": [{ "$multiply": [1, "&SPI_SWC_CSC_WR"] }, "&SPI_CSN_WAVE"] },
+                null
+            ]
+        }},
+        "sgprsWrites_min": {"$min":{
+            "$cond":[
+                {"$ne": ["&SPI_CSN_WAVE", 0]}, 
+                { "$divide": [{ "$multiply": [1, "&SPI_SWC_CSC_WR"] }, "&SPI_CSN_WAVE"] },
+                null
+            ]
+        }},
+        "sgprsWrites_max": {"$max":{
+            "$cond":[
+                {"$ne": ["&SPI_CSN_WAVE", 0]}, 
+                { "$divide": [{ "$multiply": [1, "&SPI_SWC_CSC_WR"] }, "&SPI_CSN_WAVE"] },
+                null
+            ]
+        }},
+        
+        
+        "sgprsWritesUti_avg":{"$avg":{
+            "$cond":[
+                {"$ne": ["&GRBM_SPI_BUSY", 0]}, 
+                {"$divide": [{ "$divide": [{ "$multiply": [1, "&SPI_SWC_CSC_WR"] }, "&GRBM_SPI_BUSY"] }, 8] },
+                null
+            ]
+        }},
+        "sgprsWritesUti_min":{"$min":{
+            "$cond":[
+                {"$ne": ["&GRBM_SPI_BUSY", 0]}, 
+                {"$divide": [{ "$divide": [{ "$multiply": [1, "&SPI_SWC_CSC_WR"] }, "&GRBM_SPI_BUSY"] }, 8] },
+                null
+            ]
+        }},
+        "sgprsWritesUti_max":{"$max":{
+            "$cond":[
+                {"$ne": ["&GRBM_SPI_BUSY", 0]}, 
+                {"$divide": [{ "$divide": [{ "$multiply": [1, "&SPI_SWC_CSC_WR"] }, "&GRBM_SPI_BUSY"] }, 8] },
+                null
+            ]
+        }}
+    }},
+
+    {"$set": {
+        "array": [
+            {
+            "Metric": "Wave request Failed (CS)",
+            "Avg": "&waveReqFailCS_avg",
+            "Min": "&waveReqFailCS_min",
+            "Max": "&waveReqFailCS_max", 
+            "Unit": "Cycles"
+            },
+            {
+            "Metric": "CS Stall",
+            "Avg": "&csStall_avg",
+            "Min": "&csStall_min",
+            "Max": "&csStall_max", 
+            "Unit": "Cycles"
+            },
+            {
+            "Metric": "CS Stall Rate",
+            "Avg": "&csStallRate_avg",
+            "Min": "&csStallRate_min",
+            "Max": "&csStallRate_max", 
+            "Unit": "pct"
+            },
+            {
+            "Metric": "Scratch Stall",
+            "Avg": "&scratchStall_avg",
+            "Min": "&scratchStall_min",
+            "Max": "&scratchStall_max", 
+            "Unit": "Cycles"
+            },
+            {
+            "Metric": "Insufficient SIMD Waveslots",
+            "Avg": "&simdWaveslots_avg",
+            "Min": "&simdWaveslots_min",
+            "Max": "&simdWaveslots_max", 
+            "Unit": "#SIMD"
+            },
+            {
+            "Metric": "Insufficient SIMD VGPRs",
+            "Avg": "&simdVGPRs_avg",
+            "Min": "&simdVGPRs_min",
+            "Max": "&simdVGPRs_max", 
+            "Unit": "#SIMD"
+            },
+            {
+            "Metric": "Insufficient SIMD SGPRs",
+            "Avg": "&simdSGPRs_avg",
+            "Min": "&simdSGPRs_min",
+            "Max": "&simdSGPRs_max", 
+            "Unit": "#SIMD"
+            },
+            {
+            "Metric": "Insufficient CU LDS",
+            "Avg": "&cuLDS_avg",
+            "Min": "&cuLDS_min",
+            "Max": "&cuLDS_max", 
+            "Unit": "#CU"
+            },
+            {
+            "Metric": "Insufficient CU Barries",
+            "Avg": "&cuBarries_avg",
+            "Min": "&cuBarries_min",
+            "Max": "&cuBarries_max", 
+            "Unit": "#CU"
+            },
+            {
+            "Metric": "Insufficient Bulky Resource",
+            "Avg": "&bulkyResource_avg",
+            "Min": "&bulkyResource_min",
+            "Max": "&bulkyResource_max", 
+            "Unit": "#CU"
+            },
+            {
+            "Metric": "Reach CU Threadgroups Limit",
+            "Avg": "&threadgroupLimit_avg",
+            "Min": "&threadgroupLimit_min",
+            "Max": "&threadgroupLimit_max", 
+            "Unit": "Cycles"
+            },
+            {
+            "Metric": "Reach CU Wave Limit",
+            "Avg": "&waveLimit_avg",
+            "Min": "&waveLimit_min",
+            "Max": "&waveLimit_max", 
+            "Unit": "Cycles"
+            },
+            {
+            "Metric": "VGPR Writes",
+            "Avg": "&vgprsWrites_avg",
+            "Min": "&vgprsWrites_min",
+            "Max": "&vgprsWrites_max", 
+            "Unit": "Cycles/wave"
+            },
+            {
+            "Metric": "SGPR Writes",
+            "Avg": "&sgprsWrites_avg",
+            "Min": "&sgprsWrites_min",
+            "Max": "&sgprsWrites_max", 
+            "Unit": "Cycles/wave"
+            }
+        ]
+    }},
+    {"$unwind": {
+        "path": "&array"
+    }},
+    {"$replaceRoot": {
+        "newRoot": "&array"
+    }}
+]

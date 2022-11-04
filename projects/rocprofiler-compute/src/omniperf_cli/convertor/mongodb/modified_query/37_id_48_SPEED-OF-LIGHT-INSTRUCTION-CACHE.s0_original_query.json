@@ -1,0 +1,37 @@
+[
+  {"$match": {
+      "Index": { "$in": [${DispatchIDFilter:raw}] },
+      "gpu-id": { "$in": [${gpuFilter:raw}] },
+      "KernelName": { "$in": ${KernelNameFilter:json}}
+  }},
+    {"$group": {
+        "_id": null,
+        "reqBW_pop": {
+            "$avg": {
+                "$divide": [
+                    {"$multiply": ["&SQC_ICACHE_REQ", 100000]}, 
+                    {"$multiply": [ {"$multiply": [$sclk, $numSQC]},    {"$subtract":["&EndNs", "&BeginNs"]}    ]}
+                ]
+            }
+        },
+
+        "cacheHit": {
+          "$avg": { "$divide": [{ "$multiply": ["&SQC_ICACHE_HITS", 100] }, { "$add": [ "&SQC_ICACHE_HITS",  "&SQC_ICACHE_MISSES", "&SQC_ICACHE_MISSES_DUPLICATE" ] } ] }
+        }
+      }
+    },
+    {"$set": {
+      "array": [
+          {
+            "Bandwidth": "&reqBW_pop",
+            "Cache Hit": "&cacheHit"
+          }
+        ]
+    }},
+    {"$unwind": {
+      "path": "&array"
+    }},
+    {"$replaceRoot": {
+      "newRoot": "&array"
+    }}
+  ]

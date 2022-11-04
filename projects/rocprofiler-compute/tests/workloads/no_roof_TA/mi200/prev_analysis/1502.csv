@@ -1,0 +1,8 @@
+Metric,Avg,Min,Max,Unit
+TD Busy,,,,Pct
+TC2TD Stall,,,,Pct
+SPI2TD Stall,,,,Pct
+Coalescable Instr,,,,Instr per wave
+Load Instr,,,,Instr per wave
+Store Instr,,,,Instr per wave
+Atomic Instr,,,,Instr per wave

@@ -1,0 +1,30 @@
+---
+# Define the panel properties and properties of each metric in the panel.
+Panel Config:
+  id: 10
+  title: build-in test
+  data source:
+    - metric_table:
+        id: 12
+        header:
+          metric: Metric
+          value: Value
+          tips: Tips
+        metric:
+          numActiveCUs:
+            value:
+              TO_INT(MIN((((ROUND(AVG(((4 * SQ_BUSY_CU_CYCLES) / GRBM_GUI_ACTIVE)),
+              0) / 32) * 8) + MIN(MOD(ROUND(AVG(((4 * SQ_BUSY_CU_CYCLES) / GRBM_GUI_ACTIVE)),
+              0), 32), 8)), $numCU))
+
+              # TO_INT(MIN(((ROUND(AVG(((4 * SQ_BUSY_CU_CYCLES) / GRBM_GUI_ACTIVE)), 0) / 32) * 8) + MIN(
+              # MOD(ROUND(AVG(((4 * SQ_BUSY_CU_CYCLES) / GRBM_GUI_ACTIVE)), 0), 32), 8), $numCU))
+
+              # MIN(MOD(ROUND(AVG(((4 * SQ_BUSY_CU_CYCLES) / GRBM_GUI_ACTIVE)),
+              # 0), 32), 8)
+
+              #MIN(AVG(SQ_BUSY_CU_CYCLES / 10000), $numCU)
+            tips:
+          kernelBusyCycles:
+            value: ROUND(AVG((((EndNs - BeginNs) / 1000) * $sclk)), 0)
+            tips:

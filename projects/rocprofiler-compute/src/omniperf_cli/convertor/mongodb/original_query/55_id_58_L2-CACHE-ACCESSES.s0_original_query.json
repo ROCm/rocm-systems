@@ -1,0 +1,266 @@
+[
+    {"$match": {
+        "Index": { "$in": [${DispatchIDFilter:raw}] },
+        "gpu-id": { "$in": [${gpuFilter:raw}] },
+        "KernelName": { "$in": ${KernelNameFilter:json}}
+    }},
+    {"$addFields": {
+        "denom": {
+                "$switch" : {
+                "branches": [
+                    {
+                        "case":  { "$eq": [ $normUnit, "per Wave"]} ,
+                        "then":  "&SQ_WAVES"
+                    },
+                    {
+                        "case":  { "$eq": [ $normUnit, "per Cycle"]} ,
+                        "then":  "&GRBM_GUI_ACTIVE"
+                    },
+                    {
+                        "case":  { "$eq": [ $normUnit, "per Sec"]} ,
+                        "then":  {"$divide":[{"$subtract": ["&EndNs", "&BeginNs" ]}, 1000000000]}
+                    }
+                ],
+                "default": 1
+                }         
+        } 
+    }},
+    {"$group": {
+        "_id": null,
+            "req_avg":{"$avg": { "$divide": [ "&TCC_REQ_sum",  "&denom"] }},
+            "req_min":{"$min": { "$divide": [ "&TCC_REQ_sum",  "&denom"] }},
+            "req_max":{"$max": { "$divide": [ "&TCC_REQ_sum",  "&denom"] }},
+
+            "streamingReq_avg":{"$avg": {"$divide": [ "&TCC_STREAMING_REQ_sum", "&denom" ] }},
+            "streamingReq_min":{"$min": {"$divide": [ "&TCC_STREAMING_REQ_sum", "&denom" ] }},
+            "streamingReq_max":{"$max": {"$divide": [ "&TCC_STREAMING_REQ_sum", "&denom" ] }},
+
+            "readReq_avg":{"$avg": {"$divide": [ "&TCC_READ_sum", "&denom" ] }},
+            "readReq_min":{"$min": {"$divide": [ "&TCC_READ_sum", "&denom" ] }},
+            "readReq_max":{"$max": {"$divide": [ "&TCC_READ_sum", "&denom" ] }},
+
+            "writeReq_avg":{"$avg": {"$divide": [ "&TCC_WRITE_sum", "&denom" ]}},
+            "writeReq_min":{"$min": {"$divide": [ "&TCC_WRITE_sum", "&denom" ]}},
+            "writeReq_max":{"$max": {"$divide": [ "&TCC_WRITE_sum", "&denom" ]}},
+
+            "atomicReq_avg":{"$avg": {"$divide": [ "&TCC_ATOMIC_sum", "&denom" ]}},
+            "atomicReq_min":{"$min": {"$divide": [ "&TCC_ATOMIC_sum", "&denom" ]}},
+            "atomicReq_max":{"$max": {"$divide": [ "&TCC_ATOMIC_sum", "&denom" ]}},
+
+            "probeReq_avg":{"$avg": {"$divide": [ "&TCC_PROBE_sum", "&denom" ]}},
+            "probeReq_min":{"$min": {"$divide": [ "&TCC_PROBE_sum", "&denom" ]}},
+            "probeReq_max":{"$max": {"$divide": [ "&TCC_PROBE_sum", "&denom" ]}},
+
+            "hits_avg":{"$avg": {"$divide": [ "&TCC_HIT_sum", "&denom"] }},
+            "hits_min":{"$min": {"$divide": [ "&TCC_HIT_sum", "&denom"] }},
+            "hits_max":{"$max": {"$divide": [ "&TCC_HIT_sum", "&denom"] }},
+
+            "misses_avg":{"$avg": { "$divide": [ "&TCC_MISS_sum", "&denom"] }},
+            "misses_min":{"$min": { "$divide": [ "&TCC_MISS_sum", "&denom"] }},
+            "misses_max":{"$max": { "$divide": [ "&TCC_MISS_sum", "&denom"] }},
+
+            "cacheHit_avg":{"$avg": {
+                "$cond": [
+                        {"$ne": [{ "$add": [ "&TCC_HIT_sum", "&TCC_MISS_sum" ] }, 0]},
+                        { "$divide": [ { "$multiply": [100, "&TCC_HIT_sum"] }, { "$add": [ "&TCC_HIT_sum", "&TCC_MISS_sum" ] } ] },
+                        null
+                ] 
+            }},
+            "cacheHit_min":{"$min": {
+                "$cond": [
+                        {"$ne": [{ "$add": [ "&TCC_HIT_sum", "&TCC_MISS_sum" ] }, 0]},
+                        { "$divide": [ { "$multiply": [100, "&TCC_HIT_sum"] }, { "$add": [ "&TCC_HIT_sum", "&TCC_MISS_sum" ] } ] },
+                        null
+                ] 
+            }},
+            "cacheHit_max":{"$max": {
+                "$cond": [
+                        {"$ne": [{ "$add": [ "&TCC_HIT_sum", "&TCC_MISS_sum" ] }, 0]},
+                        { "$divide": [ { "$multiply": [100, "&TCC_HIT_sum"] }, { "$add": [ "&TCC_HIT_sum", "&TCC_MISS_sum" ] } ] },
+                        null
+                ] 
+            }},
+
+
+            "writeback_avg":{"$avg": {"$divide": [ "&TCC_WRITEBACK_sum", "&denom"] }},
+            "writeback_min":{"$min": {"$divide": [ "&TCC_WRITEBACK_sum", "&denom"] }},
+            "writeback_max":{"$max": {"$divide": [ "&TCC_WRITEBACK_sum", "&denom"] }},
+
+            "nc_avg":{"$avg": {"$divide": [ "&TCC_NC_REQ_sum", "&denom" ] }},
+            "nc_min":{"$min": {"$divide": [ "&TCC_NC_REQ_sum", "&denom" ] }},
+            "nc_max":{"$max": {"$divide": [ "&TCC_NC_REQ_sum", "&denom" ] }},
+
+            "uc_avg":{"$avg": {"$divide": [ "&TCC_UC_REQ_sum", "&denom" ] }},
+            "uc_min":{"$min": {"$divide": [ "&TCC_UC_REQ_sum", "&denom" ] }},
+            "uc_max":{"$max": {"$divide": [ "&TCC_UC_REQ_sum", "&denom" ] }},
+
+            "cc_avg":{"$avg": {"$divide": [ "&TCC_CC_REQ_sum", "&denom" ] }},
+            "cc_min":{"$min": {"$divide": [ "&TCC_CC_REQ_sum", "&denom" ] }},
+            "cc_max":{"$max": {"$divide": [ "&TCC_CC_REQ_sum", "&denom" ] }},
+
+            "rw_avg":{"$avg": {"$divide": [ "&TCC_RW_REQ_sum", "&denom" ] }},
+            "rw_min":{"$min": {"$divide": [ "&TCC_RW_REQ_sum", "&denom" ] }},
+            "rw_max":{"$max": {"$divide": [ "&TCC_RW_REQ_sum", "&denom" ] }},
+
+            "writebackNorm_avg":{"$avg": {"$divide": [ "&TCC_NORMAL_WRITEBACK_sum", "&denom" ]}},
+            "writebackNorm_min":{"$min": {"$divide": [ "&TCC_NORMAL_WRITEBACK_sum", "&denom" ]}},
+            "writebackNorm_max":{"$max": {"$divide": [ "&TCC_NORMAL_WRITEBACK_sum", "&denom" ]}},
+
+            "writebackTC_avg":{"$avg": {"$divide": [ "&TCC_ALL_TC_OP_WB_WRITEBACK_sum", "&denom" ] }},
+            "writebackTC_min":{"$min": {"$divide": [ "&TCC_ALL_TC_OP_WB_WRITEBACK_sum", "&denom" ] }},
+            "writebackTC_max":{"$max": {"$divide": [ "&TCC_ALL_TC_OP_WB_WRITEBACK_sum", "&denom" ] }},
+
+            "evictNorm_avg":{"$avg": { "$divide": [ "&TCC_NORMAL_EVICT_sum", "&denom" ] }},
+            "evictNorm_min":{"$min": { "$divide": [ "&TCC_NORMAL_EVICT_sum", "&denom" ] }},
+            "evictNorm_max":{"$max": { "$divide": [ "&TCC_NORMAL_EVICT_sum", "&denom" ] }},
+
+            "evictTC_avg":{"$avg": { "$divide": [ "&TCC_ALL_TC_OP_INV_EVICT_sum", "&denom" ] }},
+            "evictTC_min":{"$min": { "$divide": [ "&TCC_ALL_TC_OP_INV_EVICT_sum", "&denom" ] }},
+            "evictTC_max":{"$max": { "$divide": [ "&TCC_ALL_TC_OP_INV_EVICT_sum", "&denom" ] }},
+
+
+            "readReq128_avg":{"$avg": {"$divide": [ "&TCP_TCR_REQ_XFER128B_COMBINING_sum", "&denom" ]  }},
+            "readReq128_min":{"$min": {"$divide": [ "&TCP_TCR_REQ_XFER128B_COMBINING_sum", "&denom" ]  }},
+            "readReq128_max":{"$max": {"$divide": [ "&TCP_TCR_REQ_XFER128B_COMBINING_sum", "&denom" ]  }}
+
+    }},
+    {"$set": {
+        "array": [
+            {
+            "metric": "Req",
+            "avg": "&req_avg",
+            "min": "&req_min",
+            "max": "&req_max",
+            "Unit":  {"$concat": ["Req ", $normUnit]}
+            },
+            {
+            "metric": "Streaming Req",
+            "avg": "&streamingReq_avg",
+            "min": "&streamingReq_min",
+            "max": "&streamingReq_max",
+            "Unit": {"$concat": ["Req ", $normUnit]}
+            },
+            {
+            "metric": "Read Req",
+            "avg": "&readReq_avg",
+            "min": "&readReq_min",
+            "max": "&readReq_max",
+            "Unit": {"$concat": ["Req ", $normUnit]}
+            },
+            
+            {
+            "metric": "Write Req",
+            "avg": "&writeReq_avg",
+            "min": "&writeReq_min",
+            "max": "&writeReq_max",
+            "Unit": {"$concat": ["Req ", $normUnit]}
+            },
+            {
+            "metric": "Atomic Req",
+            "avg": "&atomicReq_avg",
+            "min": "&atomicReq_min",
+            "max": "&atomicReq_max",
+            "Unit": {"$concat": ["Req ", $normUnit]}
+            },
+            {
+            "metric": "Probe Req",
+            "avg": "&probeReq_avg",
+            "min": "&probeReq_min",
+            "max": "&probeReq_max",
+            "Unit": {"$concat": ["Req ", $normUnit]}
+            },
+            {
+            "metric": "Hits",
+            "avg": "&hits_avg",
+            "min": "&hits_min",
+            "max": "&hits_max",
+            "Unit": {"$concat": ["Hits ", $normUnit]}
+            },    
+            {
+            "metric": "Misses",
+            "avg": "&misses_avg",
+            "min": "&misses_min",
+            "max": "&misses_max",
+            "Unit": {"$concat": ["Misses ", $normUnit]}
+            },
+            {
+            "metric": "Cache Hit",
+            "avg": "&cacheHit_avg",
+            "min": "&cacheHit_min",
+            "max": "&cacheHit_max",
+            "Unit": "pct"
+            },
+            {
+            "metric": "Writeback",
+            "avg": "&writeback_avg",
+            "min": "&writeback_min",
+            "max": "&writeback_max",
+            "Unit": {"$concat": ["", $normUnit]}
+            },
+            {
+            "metric": "NC Req",
+            "avg": "&nc_avg",
+            "min": "&nc_min",
+            "max": "&nc_max",
+            "Unit": {"$concat": ["Req ", $normUnit]}
+            },
+            {
+            "metric": "UC Req",
+            "avg": "&uc_avg",
+            "min": "&uc_min",
+            "max": "&uc_max",
+            "Unit": {"$concat": ["Req ", $normUnit]}
+            },
+            {
+            "metric": "CC Req",
+            "avg": "&cc_avg",
+            "min": "&cc_min",
+            "max": "&cc_max",
+            "Unit": {"$concat": ["Req ", $normUnit]}
+            },
+            {
+            "metric": "RW Req",
+            "avg": "&rw_avg",
+            "min": "&rw_min",
+            "max": "&rw_max",
+            "Unit": {"$concat": ["Req ", $normUnit]}
+            },
+            {
+            "metric": "Writeback (Normal)",
+            "avg": "&writebackNorm_avg",
+            "min": "&writebackNorm_min",
+            "max": "&writebackNorm_max",
+            "Unit": {"$concat": ["", $normUnit]}
+            },
+            {
+            "metric": "Writeback (TC Req)",
+            "avg": "&writebackTC_avg",
+            "min": "&writebackTC_min",
+            "max": "&writebackTC_max",
+            "Unit": {"$concat": ["", $normUnit]}
+            },
+            {
+            "metric": "Evict (Normal)",
+            "avg": "&evictNorm_avg",
+            "min": "&evictNorm_min",
+            "max": "&evictNorm_max",
+            "Unit": {"$concat": ["", $normUnit]}
+            },
+            {
+            "metric": "Evict (TC Req)",
+            "avg": "&evictTC_avg",
+            "min": "&evictTC_min",
+            "max": "&evictTC_max",
+            "Unit": {"$concat": ["", $normUnit]}
+            }
+
+        ]
+    }},
+    {"$unwind": {
+        "path": "&array"
+    }},
+    {"$replaceRoot": {
+        "newRoot": "&array"
+    }}
+
+]

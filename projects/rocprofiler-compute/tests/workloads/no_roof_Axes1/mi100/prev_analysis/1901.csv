@@ -1,0 +1,55 @@
+Metric,Value,Alias
+Wave Life,33383.0,wave_life_
+Active CUs,89/120,active_cu_
+SALU,47.0,salu_
+SMEM,2.0,smem_
+VALU,735.0,valu_
+MFMA,,mfma_
+VMEM,8.0,vmem_
+LDS,0.0,lds_
+GWS,0.0,gws_
+BR,22.0,br_
+VGPR,24.0,vgpr_
+SGPR,24.0,sgpr_
+LDS Allocation,0.0,lds_alloc_
+Scratch Allocation,0.0,scratch_alloc_
+Wavefronts,67894.0,wavefronts_
+Workgroups,16973.0,workgroups_
+LDS Req,0.0,lds_req_
+IL1 Fetch,163.0,il1_fetch_
+IL1 Hit,100.0,il1_hit_
+IL1_L2 Rd,0.0,il1_l2_req_
+vL1D Rd,2.0,sl1_rd_
+vL1D Hit,98.0,sl1_hit_
+vL1D_L2 Rd,0.0,sl1_l2_rd_
+vL1D_L2 Wr,0.0,sl1_l2_wr_
+vL1D_L2 Atomic,0.0,sl1_l2_atom_
+VL1 Rd,279.0,vl1_rd_
+VL1 Wr,1.0,vl1_wr_
+VL1 Atomic,0.0,vl1_atom_
+VL1 Hit,21.0,vl1_hit_
+VL1 Lat,1510.0,vl1_lat_
+VL1_L2 Rd,44.0,vl1_l2_rd_
+VL1_L2 Wr,0.0,vl1_l2_wr_
+vL1_L2 Atomic,0.0,vl1_l2_atom_
+L2 Rd,44.0,l2_rd_
+L2 Wr,0.0,l2_wr_
+L2 Atomic,0.0,l2_atom_
+L2 Hit,0.0,l2_hit_
+L2 Rd Lat,745.0,l2_rd_lat_
+L2 Wr Lat,330.0,l2_wr_lat_
+Fabric Rd Lat,425.0,fabric_rd_lat_
+Fabric Wr Lat,145.0,fabric_wr_lat_
+Fabric Atomic Lat,,fabric_atom_lat_
+Fabric_L2 Rd,44.0,l2_fabric_rd_
+Fabric_L2 Wr,0.0,l2_fabric_wr_
+Fabric_l2 Atomic,0.0,l2_fabric_atom_
+HBM Rd,44.0,hbm_rd_
+HBM Wr,0.0,hbm_wr_
+LDS Util,0.0,lds_util_
+VL1 Coalesce,70.0,vl1_coales_
+VL1 Stall,29.0,vl1_stall_
+LDS Lat,,lds_lat_
+vL1D Lat,,sl1_lat_
+IL1 Lat,,il1_lat_
+Wave Occupancy,36.0,wave_occ_

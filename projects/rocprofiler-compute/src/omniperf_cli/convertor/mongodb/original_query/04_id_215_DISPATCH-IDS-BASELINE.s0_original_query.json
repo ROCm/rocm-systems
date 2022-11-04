@@ -1,0 +1,13 @@
+[
+    {"$match": {
+        "Index": { "$in": [${DispatchIDFilter2:raw}] }
+    }},
+   {"$project": {
+      "_id":  0,
+      "Dispatch ID": "&Index",
+      "Kernel Name": "&KernelName"
+    }},
+    {"$sort": {
+      "Dispatch ID": 1
+    }}
+]

@@ -1,0 +1,15 @@
+Metric,Avg,Min,Max,Unit
+Total Req,,,,Req per wave
+Read Req,,,,Req per wave
+Write Req,,,,Req per wave
+Atomic Req,,,,Req per wave
+Cache Accesses,,,,Req per wave
+Cache Hits,,,,Req per wave
+Cache Hit Rate,,,,Pct
+Invalidate,,,, per wave
+L1-TCR Read,,,,Req per wave
+L1-L2 Write,,,,Req per wave
+L1-L2 Atomic,,,,Req per wave
+L1 Access Latency,,,,Cycles
+L1-L2 Read Latency,,,,Cycles
+L1-L2 Write Latency,,,,Cycles

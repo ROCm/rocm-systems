@@ -1,0 +1,8 @@
+Metric,Avg,Min,Max,Unit
+Read - Remote Socket Stall,,,,Req per wave
+Read - Peer GCD Stall,,,,Req per wave
+Read - HBM Stall,,,,Req per wave
+Write - Remote Socket Stall,,,,Req per wave
+Write - Peer GCD Stall,,,,Req per wave
+Write - HBM Stall,,,,Req per wave
+Write - Credit Starvation,,,,Req per wave

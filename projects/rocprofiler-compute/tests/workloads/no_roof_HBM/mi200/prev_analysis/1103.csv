@@ -1,0 +1,7 @@
+Metric,Avg,Min,Max,Unit
+FLOPs (Total),38039.760479041914,0.0,524800.0,Ops per wave
+INT8 OPs,0.0,0.0,0.0,Ops per wave
+F16 OPs,9770.922155688622,0.0,524800.0,Ops per wave
+BF16 OPs,0.0,0.0,0.0,Ops per wave
+F32 OPs,18497.91616766467,0.0,524800.0,Ops per wave
+F64 OPs,9770.922155688622,0.0,524800.0,Ops per wave

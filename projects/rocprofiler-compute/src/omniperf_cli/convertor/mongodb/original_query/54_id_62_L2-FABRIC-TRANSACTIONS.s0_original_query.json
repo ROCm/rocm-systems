@@ -1,0 +1,376 @@
+[
+    {"$match": {
+        "Index": { "$in": [${DispatchIDFilter:raw}] },
+        "gpu-id": { "$in": [${gpuFilter:raw}] },
+        "KernelName": { "$in": ${KernelNameFilter:json}}
+    }},
+    {"$addFields": {
+        "denom": {
+                "$switch" : {
+                "branches": [
+                    {
+                        "case":  { "$eq": [ $normUnit, "per Wave"]} ,
+                        "then":  "&SQ_WAVES"
+                    },
+                    {
+                        "case":  { "$eq": [ $normUnit, "per Cycle"]} ,
+                        "then":  "&GRBM_GUI_ACTIVE"
+                    },
+                    {
+                        "case":  { "$eq": [ $normUnit, "per Sec"]} ,
+                        "then":  {"$divide":[{"$subtract": ["&EndNs", "&BeginNs" ]}, 1000000000]}
+                    }
+                ],
+                "default": 1
+                }         
+        } 
+    }},
+
+    {"$group": {
+        "_id": "null",
+            "readStall_avg":{"$avg": {
+                "$cond": [
+                    {"$ne": ["&TCC_BUSY_sum", 0]},
+                    { "$divide": [ 
+                        {"$multiply": [100, {"$add":["&TCC_EA_RDREQ_IO_CREDIT_STALL_sum", "&TCC_EA_RDREQ_GMI_CREDIT_STALL_sum", "&TCC_EA_RDREQ_DRAM_CREDIT_STALL_sum"]}]},
+                         "&TCC_BUSY_sum" 
+                    ]},
+                    null
+                ]
+            }},
+            "readStall_min":{"$min": {
+                "$cond": [
+                    {"$ne": ["&TCC_BUSY_sum", 0]},
+                    { "$divide": [ 
+                        {"$multiply": [100, {"$add":["&TCC_EA_RDREQ_IO_CREDIT_STALL_sum", "&TCC_EA_RDREQ_GMI_CREDIT_STALL_sum", "&TCC_EA_RDREQ_DRAM_CREDIT_STALL_sum"]}]},
+                         "&TCC_BUSY_sum" 
+                    ]},
+                    null
+                ]
+            }},
+            "readStall_max":{"$max": {
+                "$cond": [
+                    {"$ne": ["&TCC_BUSY_sum", 0]},
+                    { "$divide": [ 
+                        {"$multiply": [100, {"$add":["&TCC_EA_RDREQ_IO_CREDIT_STALL_sum", "&TCC_EA_RDREQ_GMI_CREDIT_STALL_sum", "&TCC_EA_RDREQ_DRAM_CREDIT_STALL_sum"]}]},
+                         "&TCC_BUSY_sum" 
+                    ]},
+                    null
+                ]
+            }},
+
+            "writeStall_avg":{"$avg": {
+                "$cond": [
+                    {"$ne": ["&TCC_BUSY_sum", 0]},
+                    { "$divide": [ 
+                        {"$multiply": [100, {"$add":["&TCC_EA_WRREQ_IO_CREDIT_STALL_sum", "&TCC_EA_WRREQ_GMI_CREDIT_STALL_sum", "&TCC_EA_WRREQ_DRAM_CREDIT_STALL_sum"]}]},
+                         "&TCC_BUSY_sum" 
+                    ]},
+                    null
+                ]
+            }},
+            "writeStall_min":{"$min": {
+                "$cond": [
+                    {"$ne": ["&TCC_BUSY_sum", 0]},
+                    { "$divide": [ 
+                        {"$multiply": [100, {"$add":["&TCC_EA_WRREQ_IO_CREDIT_STALL_sum", "&TCC_EA_WRREQ_GMI_CREDIT_STALL_sum", "&TCC_EA_WRREQ_DRAM_CREDIT_STALL_sum"]}]},
+                         "&TCC_BUSY_sum" 
+                    ]},
+                    null
+                ]
+            }},
+            "writeStall_max":{"$max": {
+                "$cond": [
+                    {"$ne": ["&TCC_BUSY_sum", 0]},
+                    { "$divide": [ 
+                        {"$multiply": [100, {"$add":["&TCC_EA_WRREQ_IO_CREDIT_STALL_sum", "&TCC_EA_WRREQ_GMI_CREDIT_STALL_sum", "&TCC_EA_WRREQ_DRAM_CREDIT_STALL_sum"]}]},
+                         "&TCC_BUSY_sum" 
+                    ]},
+                    null
+                ]
+            }},
+
+          
+            "readBW_avg":{"$avg": {
+                "$divide": [ { "$add" : [{ "$multiply": ["&TCC_EA_RDREQ_32B_sum", 32]}, { "$multiply": [{ "$subtract": ["&TCC_EA_RDREQ_sum", "&TCC_EA_RDREQ_32B_sum"] }, 64] } ] }, "&denom" ]
+            }},
+            "readBW_min":{"$min": {
+                "$divide": [ { "$add" : [{ "$multiply": ["&TCC_EA_RDREQ_32B_sum", 32]}, { "$multiply": [{ "$subtract": ["&TCC_EA_RDREQ_sum", "&TCC_EA_RDREQ_32B_sum"] }, 64] } ] }, "&denom" ]
+            }},
+            "readBW_max":{"$max": {
+                "$divide": [ { "$add" : [{ "$multiply": ["&TCC_EA_RDREQ_32B_sum", 32]}, { "$multiply": [{ "$subtract": ["&TCC_EA_RDREQ_sum", "&TCC_EA_RDREQ_32B_sum"] }, 64] } ] }, "&denom" ]
+            }},
+
+            "writeBW_avg":{"$avg": {
+                "$divide": [ { "$add" : [{ "$multiply": ["&TCC_EA_WRREQ_64B_sum", 64]}, { "$multiply": [{ "$subtract": ["&TCC_EA_WRREQ_sum", "&TCC_EA_WRREQ_64B_sum"] }, 32] } ] }, "&denom" ]
+            }},
+            "writeBW_min":{"$min": {
+                "$divide": [ { "$add" : [{ "$multiply": ["&TCC_EA_WRREQ_64B_sum", 64]}, { "$multiply": [{ "$subtract": ["&TCC_EA_WRREQ_sum", "&TCC_EA_WRREQ_64B_sum"] }, 32] } ] }, "&denom" ]
+            }},
+            "writeBW_max":{"$max": {
+                "$divide": [ { "$add" : [{ "$multiply": ["&TCC_EA_WRREQ_64B_sum", 64]}, { "$multiply": [{ "$subtract": ["&TCC_EA_WRREQ_sum", "&TCC_EA_WRREQ_64B_sum"] }, 32] } ] }, "&denom" ]
+            }},
+
+            "read32_avg":{"$avg": {
+                "$divide": [ "&TCC_EA_RDREQ_32B_sum", "&denom" ]
+            }},
+            "read32_min":{"$min": {
+                "$divide": [ "&TCC_EA_RDREQ_32B_sum", "&denom" ]
+            }},
+            "read32_max":{"$max": {
+                "$divide": [ "&TCC_EA_RDREQ_32B_sum", "&denom" ]
+            }},
+
+            "read32Uncached_avg":{"$avg": {
+                "$divide": [ "&TCC_EA_RD_UNCACHED_32B_sum", "&denom" ]
+            }},
+            "read32Uncached_min":{"$min": {
+                "$divide": [ "&TCC_EA_RD_UNCACHED_32B_sum", "&denom" ]
+            }},
+            "read32Uncached_max":{"$max": {
+                "$divide": [ "&TCC_EA_RD_UNCACHED_32B_sum", "&denom" ]
+            }},
+
+            "read64_avg":{"$avg": {
+                "$divide": [ { "$subtract": ["&TCC_EA_RDREQ_sum", "&TCC_EA_RDREQ_32B_sum"] }, "&denom" ]
+            }},
+            "read64_min":{"$min": {
+                "$divide": [ { "$subtract": ["&TCC_EA_RDREQ_sum", "&TCC_EA_RDREQ_32B_sum"] }, "&denom" ]
+            }},
+            "read64_max":{"$max": {
+                "$divide": [ { "$subtract": ["&TCC_EA_RDREQ_sum", "&TCC_EA_RDREQ_32B_sum"] }, "&denom" ]
+            }},
+
+            "hbmRead_avg":{"$avg": {
+                "$divide": [ "&TCC_EA_RDREQ_DRAM_sum", "&denom" ]
+            }},
+            "hbmRead_min":{"$min": {
+                "$divide": [ "&TCC_EA_RDREQ_DRAM_sum", "&denom" ]
+            }},
+            "hbmRead_max":{"$max": {
+                "$divide": [ "&TCC_EA_RDREQ_DRAM_sum", "&denom" ]
+            }},
+
+            "write32_avg":{"$avg": {
+                "$divide": [ { "$subtract": ["&TCC_EA_WRREQ_sum", "&TCC_EA_WRREQ_64B_sum"] }, "&denom" ]
+            }},
+            "write32_min":{"$min": {
+                "$divide": [ { "$subtract": ["&TCC_EA_WRREQ_sum", "&TCC_EA_WRREQ_64B_sum"] }, "&denom" ]
+            }},
+            "write32_max":{"$max": {
+                "$divide": [ { "$subtract": ["&TCC_EA_WRREQ_sum", "&TCC_EA_WRREQ_64B_sum"] }, "&denom" ]
+            }},
+
+            "write32Uncached_avg": {"$avg":{
+                "$divide": [ "&TCC_EA_WR_UNCACHED_32B_sum", "&denom" ]
+            }},
+            "write32Uncached_min":{"$min": {
+                "$divide": [ "&TCC_EA_WR_UNCACHED_32B_sum", "&denom" ]
+            }},
+            "write32Uncached_max":{"$max": {
+                "$divide": [ "&TCC_EA_WR_UNCACHED_32B_sum", "&denom" ]
+            }},
+
+            "write64_avg":{"$avg": {
+                "$divide": [ "&TCC_EA_WRREQ_64B_sum", "&denom" ]
+            }},
+            "write64_min":{"$min": {
+                "$divide": [ "&TCC_EA_WRREQ_64B_sum", "&denom" ]
+            }},
+            "write64_max":{"$max": {
+                "$divide": [ "&TCC_EA_WRREQ_64B_sum", "&denom" ]
+            }},
+
+            "hbmWrite_avg":{"$avg": {
+                "$divide": [ "&TCC_EA_WRREQ_DRAM_sum", "&denom" ]
+            }},
+            "hbmWrite_min":{"$min": {
+                "$divide": [ "&TCC_EA_WRREQ_DRAM_sum", "&denom" ]
+            }},
+            "hbmWrite_max":{"$max": {
+                "$divide": [ "&TCC_EA_WRREQ_DRAM_sum", "&denom" ]
+            }},
+
+            "readLatency_avg":{"$avg": {
+                "$cond": [
+                    {"$ne": ["&TCC_EA_RDREQ_sum", 0]},
+                    { "$divide": [ "&TCC_EA_RDREQ_LEVEL_sum", "&TCC_EA_RDREQ_sum" ] },
+                    null
+                ]
+            }},
+            "readLatency_min":{"$min": {
+                "$cond": [
+                    {"$ne": ["&TCC_EA_RDREQ_sum", 0]},
+                    { "$divide": [ "&TCC_EA_RDREQ_LEVEL_sum", "&TCC_EA_RDREQ_sum" ] },
+                    null
+                ]
+            }},
+            "readLatency_max":{"$max": {
+                "$cond": [
+                    {"$ne": ["&TCC_EA_RDREQ_sum", 0]},
+                    { "$divide": [ "&TCC_EA_RDREQ_LEVEL_sum", "&TCC_EA_RDREQ_sum" ] },
+                    null
+                ]
+            }},
+
+            "writeLatency_avg":{"$avg": {
+                "$cond": [
+                    {"$ne": ["&TCC_EA_WRREQ_sum", 0]},
+                    { "$divide": [ "&TCC_EA_WRREQ_LEVEL_sum", "&TCC_EA_WRREQ_sum" ] },
+                    null
+                ]
+            }},
+            "writeLatency_min":{"$min": {
+                "$cond": [
+                    {"$ne": ["&TCC_EA_WRREQ_sum", 0]},
+                    { "$divide": [ "&TCC_EA_WRREQ_LEVEL_sum", "&TCC_EA_WRREQ_sum" ] },
+                    null
+                ]
+            }},
+            "writeLatency_max":{"$max": {
+                "$cond": [
+                    {"$ne": ["&TCC_EA_WRREQ_sum", 0]},
+                    { "$divide": [ "&TCC_EA_WRREQ_LEVEL_sum", "&TCC_EA_WRREQ_sum" ] },
+                    null
+                ]
+            }},
+
+            "atomicOpLatency_avg":{"$avg": {
+                "$cond": [
+                    {"$ne": ["&TCC_EA_ATOMIC_sum", 0]},
+                    { "$divide": [ "&TCC_EA_ATOMIC_LEVEL_sum", "&TCC_EA_ATOMIC_sum" ] },
+                    null
+                    ]
+            }},
+            "atomicOpLatency_min":{"$min": {
+                "$cond": [
+                    {"$ne": ["&TCC_EA_ATOMIC_sum", 0]},
+                    { "$divide": [ "&TCC_EA_ATOMIC_LEVEL_sum", "&TCC_EA_ATOMIC_sum" ] },
+                    null
+                    ]
+            }},
+            "atomicOpLatency_max":{"$max": {
+                "$cond": [
+                    {"$ne": ["&TCC_EA_ATOMIC_sum", 0]},
+                    { "$divide": [ "&TCC_EA_ATOMIC_LEVEL_sum", "&TCC_EA_ATOMIC_sum" ] },
+                    null
+                    ]
+            }}
+    }},
+    {"$set": {
+        "array": [
+            {
+            "Metric": "Read BW",
+            "Avg": "&readBW_avg",
+            "Min":"&readBW_min",
+            "Max":"&readBW_max",
+            "Unit":{"$concat": ["Bytes ", $normUnit]  }
+            },
+            {
+            "Metric": "Write BW",
+            "Avg": "&writeBW_avg",
+            "Min":"&writeBW_min",
+            "Max":"&writeBW_max",
+            "Unit":{"$concat": ["Bytes ", $normUnit]  }
+            },
+            {
+            "Metric": "Read (32B)",
+            "Avg": "&read32_avg",
+            "Min":"&read32_min",
+            "Max":"&read32_max",
+            "Unit":{"$concat": ["Req ", $normUnit]  }
+            },
+            {
+            "Metric": "Read (Uncached 32B)",
+            "Avg": "&read32Uncached_avg",
+            "Min":"&read32Uncached_min",
+            "Max":"&read32Uncached_max",
+            "Unit":{"$concat": ["Req ", $normUnit]  }
+            },
+            {
+            "Metric": "Read (64B)",
+            "Avg": "&read64_avg",
+            "Min":"&read64_min",
+            "Max":"&read64_max",
+            "Unit":{"$concat": ["Req ", $normUnit]  }
+            },
+            {
+            "Metric": "HBM Read",
+            "Avg": "&hbmRead_avg",
+            "Min":"&hbmRead_min",
+            "Max":"&hbmRead_max",
+            "Unit":{"$concat": ["Req ", $normUnit]  }
+            },
+            {
+            "Metric": "Write (32B)",
+            "Avg": "&write32_avg",
+            "Min":"&write32_min",
+            "Max":"&write32_max",
+            "Unit":{"$concat": ["Req ", $normUnit]  }
+            },
+            {
+            "Metric": "Write (Uncached 32B)",
+            "Avg": "&write32Uncached_avg",
+            "Min":"&write32Uncached_min",
+            "Max":"&write32Uncached_max",
+            "Unit":{"$concat": ["Req ", $normUnit]  }
+            },
+            {
+            "Metric": "Write (64B)",
+            "Avg": "&write64_avg",
+            "Min":"&write64_min",
+            "Max":"&write64_max",
+            "Unit":{"$concat": ["Req ", $normUnit]  }
+            },
+            {
+            "Metric": "HBM Write",
+            "Avg": "&hbmWrite_avg",
+            "Min":"&hbmWrite_min",
+            "Max":"&hbmWrite_max",
+            "Unit":{"$concat": ["Req ", $normUnit]  }
+            },
+            {
+            "Metric": "Read Latency",
+            "Avg": "&readLatency_avg",
+            "Min":"&readLatency_min",
+            "Max":"&readLatency_max",
+            "Unit":"Cycles"
+            },
+            {
+            "Metric": "Write Latency",
+            "Avg": "&writeLatency_avg",
+            "Min":"&writeLatency_min",
+            "Max":"&writeLatency_max",
+            "Unit":"Cycles"
+            },
+            {
+            "Metric": "Atomic Latency",
+            "Avg": "&atomicOpLatency_avg",
+            "Min":"&atomicOpLatency_min",
+            "Max":"&atomicOpLatency_max",
+            "Unit":"Cycles"
+            },
+            {
+            "Metric": "Read Stall",
+            "Avg": "&readStall_avg",
+            "Min":"&readStall_min",
+            "Max":"&readStall_max",
+            "Unit":"pct"
+            },
+            {
+            "Metric": "Write Stall",
+            "Avg": "&writeStall_avg",
+            "Min":"&writeStall_min",
+            "Max":"&writeStall_max",
+            "Unit":"pct"
+            }
+
+        ]
+    }},
+    {"$unwind": {
+        "path": "&array"
+    }},
+    {"$replaceRoot": {
+        "newRoot": "&array"
+    }}
+]

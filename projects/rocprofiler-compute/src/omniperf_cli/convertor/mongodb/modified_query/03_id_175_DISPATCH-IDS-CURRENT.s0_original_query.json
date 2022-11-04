@@ -1,0 +1,14 @@
+[
+    {"$match": {
+        "Index": { "$in": [${DispatchIDFilter:raw}] }
+    }},
+    {"$project": {
+      "_id":  0,
+      "Dispatch ID": "&Index",
+      "Kernel Name": "&KernelName"
+    }},
+    {"$sort": {
+      "Dispatch ID": 1
+    }}
+],
+{ allowDiskUse: true }

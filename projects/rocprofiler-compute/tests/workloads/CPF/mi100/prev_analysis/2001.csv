@@ -1,0 +1,168 @@
+Index,KernelName,gpu-id
+0,__amd_rocclr_fillBuffer.kd,0
+1,"void benchmark_func<short, 256, 8u, 0u>(short, short*) [clone .kd]",0
+2,"void benchmark_func<float, 256, 8u, 0u>(float, float*) [clone .kd]",0
+3,"void benchmark_func<HIP_vector_type<float, 2u>, 256, 8u, 0u>(HIP_vector_type<float, 2u>, HIP_vector_type<float, 2u>*) [clone .kd]",0
+4,"void benchmark_func<double, 256, 8u, 0u>(double, double*) [clone .kd]",0
+5,"void benchmark_func<__half2, 256, 8u, 0u>(__half2, __half2*) [clone .kd]",0
+6,"void benchmark_func<int, 256, 8u, 0u>(int, int*) [clone .kd]",0
+7,"void benchmark_func<float, 256, 8u, 1u>(float, float*) [clone .kd]",0
+8,"void benchmark_func<HIP_vector_type<float, 2u>, 256, 8u, 1u>(HIP_vector_type<float, 2u>, HIP_vector_type<float, 2u>*) [clone .kd]",0
+9,"void benchmark_func<double, 256, 8u, 1u>(double, double*) [clone .kd]",0
+10,"void benchmark_func<__half2, 256, 8u, 1u>(__half2, __half2*) [clone .kd]",0
+11,"void benchmark_func<int, 256, 8u, 1u>(int, int*) [clone .kd]",0
+12,"void benchmark_func<float, 256, 8u, 2u>(float, float*) [clone .kd]",0
+13,"void benchmark_func<HIP_vector_type<float, 2u>, 256, 8u, 2u>(HIP_vector_type<float, 2u>, HIP_vector_type<float, 2u>*) [clone .kd]",0
+14,"void benchmark_func<double, 256, 8u, 2u>(double, double*) [clone .kd]",0
+15,"void benchmark_func<__half2, 256, 8u, 2u>(__half2, __half2*) [clone .kd]",0
+16,"void benchmark_func<int, 256, 8u, 2u>(int, int*) [clone .kd]",0
+17,"void benchmark_func<float, 256, 8u, 3u>(float, float*) [clone .kd]",0
+18,"void benchmark_func<HIP_vector_type<float, 2u>, 256, 8u, 3u>(HIP_vector_type<float, 2u>, HIP_vector_type<float, 2u>*) [clone .kd]",0
+19,"void benchmark_func<double, 256, 8u, 3u>(double, double*) [clone .kd]",0
+20,"void benchmark_func<__half2, 256, 8u, 3u>(__half2, __half2*) [clone .kd]",0
+21,"void benchmark_func<int, 256, 8u, 3u>(int, int*) [clone .kd]",0
+22,"void benchmark_func<float, 256, 8u, 4u>(float, float*) [clone .kd]",0
+23,"void benchmark_func<HIP_vector_type<float, 2u>, 256, 8u, 4u>(HIP_vector_type<float, 2u>, HIP_vector_type<float, 2u>*) [clone .kd]",0
+24,"void benchmark_func<double, 256, 8u, 4u>(double, double*) [clone .kd]",0
+25,"void benchmark_func<__half2, 256, 8u, 4u>(__half2, __half2*) [clone .kd]",0
+26,"void benchmark_func<int, 256, 8u, 4u>(int, int*) [clone .kd]",0
+27,"void benchmark_func<float, 256, 8u, 5u>(float, float*) [clone .kd]",0
+28,"void benchmark_func<HIP_vector_type<float, 2u>, 256, 8u, 5u>(HIP_vector_type<float, 2u>, HIP_vector_type<float, 2u>*) [clone .kd]",0
+29,"void benchmark_func<double, 256, 8u, 5u>(double, double*) [clone .kd]",0
+30,"void benchmark_func<__half2, 256, 8u, 5u>(__half2, __half2*) [clone .kd]",0
+31,"void benchmark_func<int, 256, 8u, 5u>(int, int*) [clone .kd]",0
+32,"void benchmark_func<float, 256, 8u, 6u>(float, float*) [clone .kd]",0
+33,"void benchmark_func<HIP_vector_type<float, 2u>, 256, 8u, 6u>(HIP_vector_type<float, 2u>, HIP_vector_type<float, 2u>*) [clone .kd]",0
+34,"void benchmark_func<double, 256, 8u, 6u>(double, double*) [clone .kd]",0
+35,"void benchmark_func<__half2, 256, 8u, 6u>(__half2, __half2*) [clone .kd]",0
+36,"void benchmark_func<int, 256, 8u, 6u>(int, int*) [clone .kd]",0
+37,"void benchmark_func<float, 256, 8u, 7u>(float, float*) [clone .kd]",0
+38,"void benchmark_func<HIP_vector_type<float, 2u>, 256, 8u, 7u>(HIP_vector_type<float, 2u>, HIP_vector_type<float, 2u>*) [clone .kd]",0
+39,"void benchmark_func<double, 256, 8u, 7u>(double, double*) [clone .kd]",0
+40,"void benchmark_func<__half2, 256, 8u, 7u>(__half2, __half2*) [clone .kd]",0
+41,"void benchmark_func<int, 256, 8u, 7u>(int, int*) [clone .kd]",0
+42,"void benchmark_func<float, 256, 8u, 8u>(float, float*) [clone .kd]",0
+43,"void benchmark_func<HIP_vector_type<float, 2u>, 256, 8u, 8u>(HIP_vector_type<float, 2u>, HIP_vector_type<float, 2u>*) [clone .kd]",0
+44,"void benchmark_func<double, 256, 8u, 8u>(double, double*) [clone .kd]",0
+45,"void benchmark_func<__half2, 256, 8u, 8u>(__half2, __half2*) [clone .kd]",0
+46,"void benchmark_func<int, 256, 8u, 8u>(int, int*) [clone .kd]",0
+47,"void benchmark_func<float, 256, 8u, 9u>(float, float*) [clone .kd]",0
+48,"void benchmark_func<HIP_vector_type<float, 2u>, 256, 8u, 9u>(HIP_vector_type<float, 2u>, HIP_vector_type<float, 2u>*) [clone .kd]",0
+49,"void benchmark_func<double, 256, 8u, 9u>(double, double*) [clone .kd]",0
+50,"void benchmark_func<__half2, 256, 8u, 9u>(__half2, __half2*) [clone .kd]",0
+51,"void benchmark_func<int, 256, 8u, 9u>(int, int*) [clone .kd]",0
+52,"void benchmark_func<float, 256, 8u, 10u>(float, float*) [clone .kd]",0
+53,"void benchmark_func<HIP_vector_type<float, 2u>, 256, 8u, 10u>(HIP_vector_type<float, 2u>, HIP_vector_type<float, 2u>*) [clone .kd]",0
+54,"void benchmark_func<double, 256, 8u, 10u>(double, double*) [clone .kd]",0
+55,"void benchmark_func<__half2, 256, 8u, 10u>(__half2, __half2*) [clone .kd]",0
+56,"void benchmark_func<int, 256, 8u, 10u>(int, int*) [clone .kd]",0
+57,"void benchmark_func<float, 256, 8u, 11u>(float, float*) [clone .kd]",0
+58,"void benchmark_func<HIP_vector_type<float, 2u>, 256, 8u, 11u>(HIP_vector_type<float, 2u>, HIP_vector_type<float, 2u>*) [clone .kd]",0
+59,"void benchmark_func<double, 256, 8u, 11u>(double, double*) [clone .kd]",0
+60,"void benchmark_func<__half2, 256, 8u, 11u>(__half2, __half2*) [clone .kd]",0
+61,"void benchmark_func<int, 256, 8u, 11u>(int, int*) [clone .kd]",0
+62,"void benchmark_func<float, 256, 8u, 12u>(float, float*) [clone .kd]",0
+63,"void benchmark_func<HIP_vector_type<float, 2u>, 256, 8u, 12u>(HIP_vector_type<float, 2u>, HIP_vector_type<float, 2u>*) [clone .kd]",0
+64,"void benchmark_func<double, 256, 8u, 12u>(double, double*) [clone .kd]",0
+65,"void benchmark_func<__half2, 256, 8u, 12u>(__half2, __half2*) [clone .kd]",0
+66,"void benchmark_func<int, 256, 8u, 12u>(int, int*) [clone .kd]",0
+67,"void benchmark_func<float, 256, 8u, 13u>(float, float*) [clone .kd]",0
+68,"void benchmark_func<HIP_vector_type<float, 2u>, 256, 8u, 13u>(HIP_vector_type<float, 2u>, HIP_vector_type<float, 2u>*) [clone .kd]",0
+69,"void benchmark_func<double, 256, 8u, 13u>(double, double*) [clone .kd]",0
+70,"void benchmark_func<__half2, 256, 8u, 13u>(__half2, __half2*) [clone .kd]",0
+71,"void benchmark_func<int, 256, 8u, 13u>(int, int*) [clone .kd]",0
+72,"void benchmark_func<float, 256, 8u, 14u>(float, float*) [clone .kd]",0
+73,"void benchmark_func<HIP_vector_type<float, 2u>, 256, 8u, 14u>(HIP_vector_type<float, 2u>, HIP_vector_type<float, 2u>*) [clone .kd]",0
+74,"void benchmark_func<double, 256, 8u, 14u>(double, double*) [clone .kd]",0
+75,"void benchmark_func<__half2, 256, 8u, 14u>(__half2, __half2*) [clone .kd]",0
+76,"void benchmark_func<int, 256, 8u, 14u>(int, int*) [clone .kd]",0
+77,"void benchmark_func<float, 256, 8u, 15u>(float, float*) [clone .kd]",0
+78,"void benchmark_func<HIP_vector_type<float, 2u>, 256, 8u, 15u>(HIP_vector_type<float, 2u>, HIP_vector_type<float, 2u>*) [clone .kd]",0
+79,"void benchmark_func<double, 256, 8u, 15u>(double, double*) [clone .kd]",0
+80,"void benchmark_func<__half2, 256, 8u, 15u>(__half2, __half2*) [clone .kd]",0
+81,"void benchmark_func<int, 256, 8u, 15u>(int, int*) [clone .kd]",0
+82,"void benchmark_func<float, 256, 8u, 16u>(float, float*) [clone .kd]",0
+83,"void benchmark_func<HIP_vector_type<float, 2u>, 256, 8u, 16u>(HIP_vector_type<float, 2u>, HIP_vector_type<float, 2u>*) [clone .kd]",0
+84,"void benchmark_func<double, 256, 8u, 16u>(double, double*) [clone .kd]",0
+85,"void benchmark_func<__half2, 256, 8u, 16u>(__half2, __half2*) [clone .kd]",0
+86,"void benchmark_func<int, 256, 8u, 16u>(int, int*) [clone .kd]",0
+87,"void benchmark_func<float, 256, 8u, 17u>(float, float*) [clone .kd]",0
+88,"void benchmark_func<HIP_vector_type<float, 2u>, 256, 8u, 17u>(HIP_vector_type<float, 2u>, HIP_vector_type<float, 2u>*) [clone .kd]",0
+89,"void benchmark_func<double, 256, 8u, 17u>(double, double*) [clone .kd]",0
+90,"void benchmark_func<__half2, 256, 8u, 17u>(__half2, __half2*) [clone .kd]",0
+91,"void benchmark_func<int, 256, 8u, 17u>(int, int*) [clone .kd]",0
+92,"void benchmark_func<float, 256, 8u, 18u>(float, float*) [clone .kd]",0
+93,"void benchmark_func<HIP_vector_type<float, 2u>, 256, 8u, 18u>(HIP_vector_type<float, 2u>, HIP_vector_type<float, 2u>*) [clone .kd]",0
+94,"void benchmark_func<double, 256, 8u, 18u>(double, double*) [clone .kd]",0
+95,"void benchmark_func<__half2, 256, 8u, 18u>(__half2, __half2*) [clone .kd]",0
+96,"void benchmark_func<int, 256, 8u, 18u>(int, int*) [clone .kd]",0
+97,"void benchmark_func<float, 256, 8u, 20u>(float, float*) [clone .kd]",0
+98,"void benchmark_func<HIP_vector_type<float, 2u>, 256, 8u, 20u>(HIP_vector_type<float, 2u>, HIP_vector_type<float, 2u>*) [clone .kd]",0
+99,"void benchmark_func<double, 256, 8u, 20u>(double, double*) [clone .kd]",0
+100,"void benchmark_func<__half2, 256, 8u, 20u>(__half2, __half2*) [clone .kd]",0
+101,"void benchmark_func<int, 256, 8u, 20u>(int, int*) [clone .kd]",0
+102,"void benchmark_func<float, 256, 8u, 22u>(float, float*) [clone .kd]",0
+103,"void benchmark_func<HIP_vector_type<float, 2u>, 256, 8u, 22u>(HIP_vector_type<float, 2u>, HIP_vector_type<float, 2u>*) [clone .kd]",0
+104,"void benchmark_func<double, 256, 8u, 22u>(double, double*) [clone .kd]",0
+105,"void benchmark_func<__half2, 256, 8u, 22u>(__half2, __half2*) [clone .kd]",0
+106,"void benchmark_func<int, 256, 8u, 22u>(int, int*) [clone .kd]",0
+107,"void benchmark_func<float, 256, 8u, 24u>(float, float*) [clone .kd]",0
+108,"void benchmark_func<HIP_vector_type<float, 2u>, 256, 8u, 24u>(HIP_vector_type<float, 2u>, HIP_vector_type<float, 2u>*) [clone .kd]",0
+109,"void benchmark_func<double, 256, 8u, 24u>(double, double*) [clone .kd]",0
+110,"void benchmark_func<__half2, 256, 8u, 24u>(__half2, __half2*) [clone .kd]",0
+111,"void benchmark_func<int, 256, 8u, 24u>(int, int*) [clone .kd]",0
+112,"void benchmark_func<float, 256, 8u, 28u>(float, float*) [clone .kd]",0
+113,"void benchmark_func<HIP_vector_type<float, 2u>, 256, 8u, 28u>(HIP_vector_type<float, 2u>, HIP_vector_type<float, 2u>*) [clone .kd]",0
+114,"void benchmark_func<double, 256, 8u, 28u>(double, double*) [clone .kd]",0
+115,"void benchmark_func<__half2, 256, 8u, 28u>(__half2, __half2*) [clone .kd]",0
+116,"void benchmark_func<int, 256, 8u, 28u>(int, int*) [clone .kd]",0
+117,"void benchmark_func<float, 256, 8u, 32u>(float, float*) [clone .kd]",0
+118,"void benchmark_func<HIP_vector_type<float, 2u>, 256, 8u, 32u>(HIP_vector_type<float, 2u>, HIP_vector_type<float, 2u>*) [clone .kd]",0
+119,"void benchmark_func<double, 256, 8u, 32u>(double, double*) [clone .kd]",0
+120,"void benchmark_func<__half2, 256, 8u, 32u>(__half2, __half2*) [clone .kd]",0
+121,"void benchmark_func<int, 256, 8u, 32u>(int, int*) [clone .kd]",0
+122,"void benchmark_func<float, 256, 8u, 40u>(float, float*) [clone .kd]",0
+123,"void benchmark_func<HIP_vector_type<float, 2u>, 256, 8u, 40u>(HIP_vector_type<float, 2u>, HIP_vector_type<float, 2u>*) [clone .kd]",0
+124,"void benchmark_func<double, 256, 8u, 40u>(double, double*) [clone .kd]",0
+125,"void benchmark_func<__half2, 256, 8u, 40u>(__half2, __half2*) [clone .kd]",0
+126,"void benchmark_func<int, 256, 8u, 40u>(int, int*) [clone .kd]",0
+127,"void benchmark_func<float, 256, 8u, 48u>(float, float*) [clone .kd]",0
+128,"void benchmark_func<HIP_vector_type<float, 2u>, 256, 8u, 48u>(HIP_vector_type<float, 2u>, HIP_vector_type<float, 2u>*) [clone .kd]",0
+129,"void benchmark_func<double, 256, 8u, 48u>(double, double*) [clone .kd]",0
+130,"void benchmark_func<__half2, 256, 8u, 48u>(__half2, __half2*) [clone .kd]",0
+131,"void benchmark_func<int, 256, 8u, 48u>(int, int*) [clone .kd]",0
+132,"void benchmark_func<float, 256, 8u, 56u>(float, float*) [clone .kd]",0
+133,"void benchmark_func<HIP_vector_type<float, 2u>, 256, 8u, 56u>(HIP_vector_type<float, 2u>, HIP_vector_type<float, 2u>*) [clone .kd]",0
+134,"void benchmark_func<double, 256, 8u, 56u>(double, double*) [clone .kd]",0
+135,"void benchmark_func<__half2, 256, 8u, 56u>(__half2, __half2*) [clone .kd]",0
+136,"void benchmark_func<int, 256, 8u, 56u>(int, int*) [clone .kd]",0
+137,"void benchmark_func<float, 256, 8u, 64u>(float, float*) [clone .kd]",0
+138,"void benchmark_func<HIP_vector_type<float, 2u>, 256, 8u, 64u>(HIP_vector_type<float, 2u>, HIP_vector_type<float, 2u>*) [clone .kd]",0
+139,"void benchmark_func<double, 256, 8u, 64u>(double, double*) [clone .kd]",0
+140,"void benchmark_func<__half2, 256, 8u, 64u>(__half2, __half2*) [clone .kd]",0
+141,"void benchmark_func<int, 256, 8u, 64u>(int, int*) [clone .kd]",0
+142,"void benchmark_func<float, 256, 8u, 80u>(float, float*) [clone .kd]",0
+143,"void benchmark_func<HIP_vector_type<float, 2u>, 256, 8u, 80u>(HIP_vector_type<float, 2u>, HIP_vector_type<float, 2u>*) [clone .kd]",0
+144,"void benchmark_func<double, 256, 8u, 80u>(double, double*) [clone .kd]",0
+145,"void benchmark_func<__half2, 256, 8u, 80u>(__half2, __half2*) [clone .kd]",0
+146,"void benchmark_func<int, 256, 8u, 80u>(int, int*) [clone .kd]",0
+147,"void benchmark_func<float, 256, 8u, 96u>(float, float*) [clone .kd]",0
+148,"void benchmark_func<HIP_vector_type<float, 2u>, 256, 8u, 96u>(HIP_vector_type<float, 2u>, HIP_vector_type<float, 2u>*) [clone .kd]",0
+149,"void benchmark_func<double, 256, 8u, 96u>(double, double*) [clone .kd]",0
+150,"void benchmark_func<__half2, 256, 8u, 96u>(__half2, __half2*) [clone .kd]",0
+151,"void benchmark_func<int, 256, 8u, 96u>(int, int*) [clone .kd]",0
+152,"void benchmark_func<float, 256, 8u, 128u>(float, float*) [clone .kd]",0
+153,"void benchmark_func<HIP_vector_type<float, 2u>, 256, 8u, 128u>(HIP_vector_type<float, 2u>, HIP_vector_type<float, 2u>*) [clone .kd]",0
+154,"void benchmark_func<double, 256, 8u, 128u>(double, double*) [clone .kd]",0
+155,"void benchmark_func<__half2, 256, 8u, 128u>(__half2, __half2*) [clone .kd]",0
+156,"void benchmark_func<int, 256, 8u, 128u>(int, int*) [clone .kd]",0
+157,"void benchmark_func<float, 256, 8u, 256u>(float, float*) [clone .kd]",0
+158,"void benchmark_func<HIP_vector_type<float, 2u>, 256, 8u, 256u>(HIP_vector_type<float, 2u>, HIP_vector_type<float, 2u>*) [clone .kd]",0
+159,"void benchmark_func<double, 256, 8u, 256u>(double, double*) [clone .kd]",0
+160,"void benchmark_func<__half2, 256, 8u, 256u>(__half2, __half2*) [clone .kd]",0
+161,"void benchmark_func<int, 256, 8u, 256u>(int, int*) [clone .kd]",0
+162,"void benchmark_func<float, 256, 8u, 512u>(float, float*) [clone .kd]",0
+163,"void benchmark_func<HIP_vector_type<float, 2u>, 256, 8u, 512u>(HIP_vector_type<float, 2u>, HIP_vector_type<float, 2u>*) [clone .kd]",0
+164,"void benchmark_func<double, 256, 8u, 512u>(double, double*) [clone .kd]",0
+165,"void benchmark_func<__half2, 256, 8u, 512u>(__half2, __half2*) [clone .kd]",0
+166,"void benchmark_func<int, 256, 8u, 512u>(int, int*) [clone .kd]",0

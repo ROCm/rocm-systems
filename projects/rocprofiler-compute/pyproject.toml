@@ -1,0 +1,35 @@
+[tool.black]
+line-length = 90
+target-version = ['py38', 'py39']
+include = '\.py$'
+exclude = '''
+(
+  /(
+      \.eggs
+    | \.git
+    | \.github
+    | \.tox
+    | \.venv
+    | \.misc
+    | \.vscode
+    | \.pyc
+    | dist
+    | external
+    | .pytest_cache
+    | build
+    | build-omniperf
+  )/
+)
+'''
+[tool.pytest.ini_options]
+addopts = [
+    "--import-mode=importlib",
+    "--cov=src",
+
+]
+pythonpath = [
+      ".",
+      "src",
+      "src/utils",
+      "src/omniperf_cli/utils"
+    ]

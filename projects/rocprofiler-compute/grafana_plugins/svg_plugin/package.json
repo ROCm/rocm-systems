@@ -1,0 +1,31 @@
+{
+  "name": "amd-custom-svg",
+  "version": "1.0.0",
+  "description": "",
+  "scripts": {
+    "build": "grafana-toolkit plugin:build",
+    "test": "grafana-toolkit plugin:test",
+    "dev": "grafana-toolkit plugin:dev",
+    "watch": "grafana-toolkit plugin:dev --watch",
+    "sign": "grafana-toolkit plugin:sign",
+    "start": "yarn watch"
+  },
+  "author": "Audacious Software Group",
+  "license": "MIT",
+  "devDependencies": {
+    "@grafana/data": "latest",
+    "@grafana/toolkit": "latest",
+    "@grafana/ui": "latest",
+    "emotion": "10.0.27"
+  },
+  "engines": {
+    "node": ">=14"
+  },
+  "dependencies": {
+    "@grafana/runtime": "^8.1.1",
+    "@svgdotjs/svg.js": "^3.1.1",
+    "react-monaco-editor": "^0.44.0",
+    "tslib": "^2.3.1"
+  },
+  "_comments": "Dependencies are not included as part of Omniperf. It's the user's responsibility to accept any licensing implications before building the project."
+}

@@ -1,0 +1,5 @@
+Metric,Mean,Min,Max,Unit
+Read Req,,,,Req per wave
+Write Req,,,,Req per wave
+Atomic Req,,,,Req per wave
+Stall,,,,Cycles per wave

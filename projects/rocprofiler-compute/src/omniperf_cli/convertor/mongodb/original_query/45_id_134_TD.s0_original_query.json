@@ -1,0 +1,119 @@
+[
+    {"$match": {
+        "Index": { "$in": [${DispatchIDFilter:raw}] },
+        "gpu-id": { "$in": [${gpuFilter:raw}] },
+        "KernelName": { "$in": ${KernelNameFilter:json}}
+    }},
+    {"$addFields": {
+            
+        "denom": {
+                "$switch" : {
+                "branches": [
+                    {
+                        "case":  { "$eq": [ $normUnit, "per Wave"]} ,
+                        "then":  "&SQ_WAVES"
+                    },
+                    {
+                        "case":  { "$eq": [ $normUnit, "per Cycle"]} ,
+                        "then":  "&GRBM_GUI_ACTIVE"
+                    },
+                    {
+                        "case":  { "$eq": [ $normUnit, "per Sec"]} ,
+                        "then":  {"$divide":[{"$subtract": ["&EndNs", "&BeginNs" ]}, 1000000000]}
+                    }
+                ],
+                "default": 1
+                }         
+        } 
+    }},
+    {"$group": {
+        "_id": null,
+        "tdBusy_avg":{"$avg": { "$divide": [ { "$multiply": [100, "&TD_TD_BUSY_sum"] }, { "$multiply": ["&GRBM_GUI_ACTIVE",  $numCU]}]  }},
+        "tdBusy_min":{"$min": { "$divide": [ { "$multiply": [100, "&TD_TD_BUSY_sum"] }, { "$multiply": ["&GRBM_GUI_ACTIVE",  $numCU]}]  }},
+        "tdBusy_max":{"$max": { "$divide": [ { "$multiply": [100, "&TD_TD_BUSY_sum"] }, { "$multiply": ["&GRBM_GUI_ACTIVE",  $numCU]}]  }},
+
+        "tc2tdStall_avg":{"$avg": { "$divide": [ { "$multiply": [100, "&TD_TC_STALL_sum"] }, { "$multiply": ["&GRBM_GUI_ACTIVE",  $numCU]}]}},
+        "tc2tdStall_min":{"$min": { "$divide": [ { "$multiply": [100, "&TD_TC_STALL_sum"] }, { "$multiply": ["&GRBM_GUI_ACTIVE",  $numCU]}]}},
+        "tc2tdStall_max":{"$max": { "$divide": [ { "$multiply": [100, "&TD_TC_STALL_sum"] }, { "$multiply": ["&GRBM_GUI_ACTIVE",  $numCU]}]}},
+
+        "spi2td_stall_avg":{"$avg": {"$divide": [ { "$multiply": [100, "&TD_SPI_STALL_sum"] }, { "$multiply": ["&GRBM_GUI_ACTIVE",  $numCU]}]}},
+        "spi2td_stall_min":{"$min": {"$divide": [ { "$multiply": [100, "&TD_SPI_STALL_sum"] }, { "$multiply": ["&GRBM_GUI_ACTIVE",  $numCU]}]}},
+        "spi2td_stall_max":{"$max": {"$divide": [ { "$multiply": [100, "&TD_SPI_STALL_sum"] }, { "$multiply": ["&GRBM_GUI_ACTIVE",  $numCU]}]}},
+
+        "coscaleInstr_avg":{"$avg": {"$divide": ["&TD_COALESCABLE_WAVEFRONT_sum", "&denom"] }},
+        "coscaleInstr_min":{"$min": {"$divide": ["&TD_COALESCABLE_WAVEFRONT_sum", "&denom"] }},
+        "coscaleInstr_max":{"$max": {"$divide": ["&TD_COALESCABLE_WAVEFRONT_sum", "&denom"] }},
+
+        "loadInstr_avg":{"$avg": {"$divide": [{ "$subtract": [{ "$subtract": ["&TD_LOAD_WAVEFRONT_sum", "&TD_STORE_WAVEFRONT_sum"]}, "&TD_ATOMIC_WAVEFRONT_sum"] }, "&denom" ] }},
+        "loadInstr_min":{"$min": {"$divide": [{ "$subtract": [{ "$subtract": ["&TD_LOAD_WAVEFRONT_sum", "&TD_STORE_WAVEFRONT_sum"]}, "&TD_ATOMIC_WAVEFRONT_sum"] }, "&denom" ] }},
+        "loadInstr_max":{"$max": {"$divide": [{ "$subtract": [{ "$subtract": ["&TD_LOAD_WAVEFRONT_sum", "&TD_STORE_WAVEFRONT_sum"]}, "&TD_ATOMIC_WAVEFRONT_sum"] }, "&denom" ] }},
+
+        "storeInstr_avg":{"$avg": {"$divide": ["&TD_STORE_WAVEFRONT_sum", "&denom" ] }},
+        "storeInstr_min":{"$min": {"$divide": ["&TD_STORE_WAVEFRONT_sum", "&denom" ] }},
+        "storeInstr_max":{"$max": {"$divide": ["&TD_STORE_WAVEFRONT_sum", "&denom" ] }},
+
+        "atomicInstr_avg":{"$avg": {"$divide": ["&TD_ATOMIC_WAVEFRONT_sum", "&denom" ]}},
+        "atomicInstr_min":{"$min": {"$divide": ["&TD_ATOMIC_WAVEFRONT_sum", "&denom" ]}},
+        "atomicInstr_max":{"$max": {"$divide": ["&TD_ATOMIC_WAVEFRONT_sum", "&denom" ]}}
+
+    }},
+    {"$set": {
+      "array": [
+          {
+            "metric": "TD Busy",
+            "avg": "&tdBusy_avg",
+            "min": "&tdBusy_min",
+            "max": "&tdBusy_max",
+            "Unit": "pct"
+          },
+          {
+            "metric": "TC2TD Stall",
+            "avg": "&tc2tdStall_avg",
+            "min": "&tc2tdStall_min",
+            "max": "&tc2tdStall_max",
+            "Unit": "pct"
+          },
+          {
+            "metric": "SPI2TD Stall",
+            "avg": "&spi2td_stall_avg",
+            "min": "&spi2td_stall_min",
+            "max": "&spi2td_stall_max",
+            "Unit": "pct"
+          },
+          {
+            "metric": "Coalescable Instr",
+            "avg": "&coscaleInstr_avg",
+            "min": "&coscaleInstr_min",
+            "max": "&coscaleInstr_max",
+            "Unit": {"$concat": ["Instr ", $normUnit]}
+          },
+          {
+            "metric": "Load Instr",
+            "avg": "&loadInstr_avg",
+            "min": "&loadInstr_min",
+            "max": "&loadInstr_max",
+            "Unit": {"$concat": ["Instr ", $normUnit]}
+          },
+          {
+            "metric": "Store Instr",
+            "avg": "&storeInstr_avg",
+            "min": "&storeInstr_min",
+            "max": "&storeInstr_max",
+            "Unit": {"$concat": ["Instr ", $normUnit]}
+          },
+          {
+            "metric": "Atomic Instr",
+            "avg": "&atomicInstr_avg",
+            "min": "&atomicInstr_min",
+            "max": "&atomicInstr_max",
+            "Unit": {"$concat": ["Instr ", $normUnit]}
+          }
+        ]
+    }},
+    {"$unwind": {
+      "path": "&array"
+    }},
+    {"$replaceRoot": {
+      "newRoot": "&array"
+    }}
+  ]

@@ -1,0 +1,617 @@
+#!/usr/bin/env python3
+
+################################################################################
+# Copyright (c) 2021 - 2022 Advanced Micro Devices, Inc. All rights reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+################################################################################
+
+import sys
+import os
+import argparse
+import subprocess
+import glob
+import pandas as pd
+from datetime import datetime
+from pathlib import Path as path
+
+from parser import parse
+from utils import specs
+from utils.perfagg import perfmon_filter, pmc_filter
+from utils import remove_workload
+from utils import csv_converter  # Import workload
+from utils import plot_roofline  # standalone roofline
+from omniperf_cli.omniperf_cli import omniperf_cli  # CLI analysis
+
+from common import (
+    OMNIPERF_HOME,
+    PROG,
+    SOC_LIST,
+    VER,
+    DISTRO_MAP,
+)  # Import global variables
+
+################################################
+# Helper Functions
+################################################
+def resolve_rocprof():
+    # ROCPROF INFO
+    global rocprof_cmd
+    if not "ROCPROF" in os.environ.keys():
+        rocprof_cmd = "rocprof"
+    else:
+        rocprof_cmd = os.environ["ROCPROF"]
+
+    rocprof_path = subprocess.run(
+        ["which", rocprof_cmd], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
+    )
+    if rocprof_path.returncode != 0:
+        print("\nError: Unable to resolve path to %s binary" % rocprof_cmd)
+        print(
+            "Please verify installation or set ROCPROF environment variable with full path."
+        )
+        sys.exit(1)
+
+    print("ROC Profiler: ", rocprof_path.stdout.decode("utf-8"))
+
+def get_soc():
+    mspec = specs.get_machine_specs(0)
+
+    target = ""
+    if mspec.GPU == "gfx906":
+        target = "mi50"
+    elif mspec.GPU == "gfx908":
+        target = "mi100"
+    elif mspec.GPU == "gfx90a":
+        target = "mi200"
+    else:
+        print("\nInvalid SoC")
+        sys.exit(0)
+    return target
+
+
+def throw_parse_error(my_parser, message):
+    my_parser.print_help(sys.stderr)
+    print("\n\n")
+    my_parser.error(message)
+
+
+def isWorkloadEmpty(my_parser, path):
+    if os.path.isfile(path + "/pmc_perf.csv"):
+        temp_df = pd.read_csv(path + "/pmc_perf.csv")
+        if temp_df.dropna().empty:
+            print("Profiling Error: Found empty cells. Profiling data could be corrupt.")
+            sys.exit(0)
+
+    else:
+        throw_parse_error(
+            my_parser, "Profling Error: Cannot find pmc_perf.csv in {}".format(path)
+        )
+
+
+def replace_timestamps(workload_dir):
+    df_stamps = pd.read_csv(workload_dir + "/timestamps.csv")
+    df_pmc_perf = pd.read_csv(workload_dir + "/pmc_perf.csv")
+
+    df_pmc_perf["BeginNs"] = df_stamps["BeginNs"]
+    df_pmc_perf["EndNs"] = df_stamps["EndNs"]
+    df_pmc_perf.to_csv(workload_dir + "/pmc_perf.csv", index=False)
+
+
+def gen_sysinfo(workload_name, workload_dir, ip_blocks, skip_roof):
+    # Record system information
+    mspec = specs.get_machine_specs(0)
+    sysinfo = open(workload_dir + "/" + "sysinfo.csv", "w")
+
+    # write header
+    header = "workload_name,"
+    header += "host_name,host_cpu,host_distro,host_kernel,host_rocmver,date,"
+    header += "gpu_soc,numSE,numCU,numSIMD,waveSize,maxWavesPerCU,maxWorkgroupSize,"
+    header += "L1,L2,sclk,mclk,cur_sclk,cur_mclk,L2Banks,name,numSQC,hbmBW,"
+    header += "ip_blocks\n"
+    sysinfo.write(header)
+
+    # timestamp
+    now = datetime.now()
+    local_now = now.astimezone()
+    local_tz = local_now.tzinfo
+    local_tzname = local_tz.tzname(local_now)
+    timestamp = now.strftime("%c") + " (" + local_tzname + ")"
+    # host info
+    param = [workload_name]
+    param += [
+        mspec.hostname,
+        mspec.cpu,
+        mspec.distro,
+        mspec.kernel,
+        mspec.rocmversion,
+        timestamp,
+    ]
+
+    # GPU info
+    param += [
+        mspec.GPU,
+        mspec.SE,
+        mspec.CU,
+        mspec.SIMD,
+        mspec.wave_size,
+        mspec.wave_occu,
+        mspec.workgroup_size,
+    ]
+    param += [
+        mspec.L1,
+        mspec.L2,
+        mspec.SCLK,
+        mspec.cur_MCLK,
+        mspec.cur_SCLK,
+        mspec.cur_MCLK,
+    ]
+
+    blocks = []
+    hbmBW = int(mspec.cur_MCLK) / 1000 * 4096 / 8 * 2
+    if mspec.GPU == "gfx906":
+        param += ["16", "mi50", str(int(mspec.CU) // 4), str(hbmBW)]
+    elif mspec.GPU == "gfx908":
+        param += ["32", "mi100", "48", str(hbmBW)]
+    elif mspec.GPU == "gfx90a":
+        param += ["32", "mi200", "56", str(hbmBW)]
+        if not skip_roof:
+            blocks.append("roofline")
+
+    # ip block info
+    if ip_blocks == None:
+        t = ["SQ", "LDS", "SQC", "TA", "TD", "TCP", "TCC", "SPI", "CPC", "CPF"]
+        blocks += t
+    else:
+        blocks += ip_blocks
+    param.append("|".join(blocks))
+
+    sysinfo.write(",".join(param))
+    sysinfo.close()
+
+
+def mongo_import(args, profileAndImport):
+    # Validate target directory
+    connectionInfo, Extractionlvl = csv_converter.parse(args, profileAndImport)
+    # Convert and upload data
+    print("-- Conversion & Upload in Progress --")
+    csv_converter.convert_folder(connectionInfo, Extractionlvl)
+    print("-- Complete! --")
+
+################################################
+# Roofline Helpers
+################################################
+
+def detect_roofline():
+    mspec = specs.get_machine_specs(0)
+    rocm_ver = mspec.rocmversion[:1]
+
+    os_release = path("/etc/os-release").read_text()
+    rhel_distro = specs.search(r'PLATFORM_ID="(.*?)"', os_release)
+    sles_distro = specs.search(r'VERSION_ID="(.*?)"', os_release)
+
+    if "ROOFLINE_BIN" in os.environ.keys():
+        rooflineBinary = os.environ["ROOFLINE_BIN"]
+        if os.path.exists(rooflineBinary):
+            print("Detected user-supplied binary")
+            return {"rocm_ver":"override", "distro":"override", "path":rooflineBinary}
+        else:
+            print("ROOFLINE ERROR: user-supplied path to binary not accessible")
+            print("--> ROOFLINE_BIN = %s\n" % target_binary)
+            sys.exit(1)
+    elif rhel_distro == "platform:el8":
+        # Must be a valid RHEL machine
+        distro = rhel_distro
+    elif sles_distro == "15.3":
+        # Must be a valid SLES machine
+        distro = sles_distro
+    else:
+        print("ROOFLINE ERROR: Cannot find a valid binary for your operating system")
+        sys.exit(1)
+
+    target_binary = { "rocm_ver":rocm_ver, "distro":distro }
+    return target_binary
+
+def mibench(args):
+    print("No roofline data found. Generating...")
+    
+    target_binary = detect_roofline()
+    if target_binary["rocm_ver"] == "override":
+        path_to_binary = target_binary["path"]
+    else:
+        path_to_binary = str(OMNIPERF_HOME) + "/utils/rooflines/roofline" + "-" + DISTRO_MAP[target_binary["distro"]] + "-" + args.target.lower() + "-rocm" + target_binary["rocm_ver"]
+
+    # Distro is valid but cant find rocm ver
+    if not os.path.exists(path_to_binary):
+        print(
+            "ROOFLINE ERROR: ROCm version not supported."
+        )
+        sys.exit(1)
+
+    subprocess.run(
+        [
+            path_to_binary,
+            "-o",
+            args.path + "/" + "roofline.csv",
+            "-d",
+            str(args.device),
+        ]
+    )
+
+
+def characterize_app(path, cmd, verbose):
+    target = get_soc()
+    workload_dir = path
+    print("workload dir is ", workload_dir)
+    perfmon_dir = str(OMNIPERF_HOME) + "/perfmon_pub"
+    print("permon dir is ", os.path.abspath(perfmon_dir))
+    app_cmd = cmd
+
+    # Perfmon filtering
+    pmc_filter(workload_dir, perfmon_dir, target)
+
+    # Workload profiling
+    for fname in glob.glob(workload_dir + "/perfmon/*.txt"):
+        print(fname)
+        run_prof(fname, workload_dir, perfmon_dir, app_cmd, verbose)
+
+################################################
+# Profiling Helpers
+################################################
+
+
+def run_prof(fname, workload_dir, perfmon_dir, cmd, verbose):
+    global rocprof_cmd
+
+    fbase = os.path.splitext(os.path.basename(fname))[0]
+
+    if verbose:
+        print("pmc file:", os.path.basename(fname))
+
+    # profile the app
+    subprocess.run(
+        [
+            rocprof_cmd,
+            "-i",
+            fname,
+            "-m",
+            perfmon_dir + "/" + "metrics.xml",
+            "--timestamp",
+            "on",
+            "-o",
+            workload_dir + "/" + fbase + ".csv",
+            '"' + cmd + '"',
+        ]
+    )
+
+
+def omniperf_profile(args):
+    # Verify valid target
+    if args.target not in SOC_LIST:
+        parse.print_help(sys.stderr)
+        sys.exit(1)
+
+    # Basic Info
+    print(PROG, "ver: ", VER)
+    print("Path: ", args.path)
+    print("Target: ", args.target)
+    print("Command: ", args.remaining)
+    print("Kernel Selection: ", args.kernel)
+    print("Dispatch Selection: ", args.dispatch)
+    if args.ipblocks == None:
+        print("IP Blocks: All")
+    else:
+        print("IP Blocks: ", args.ipblocks)
+
+    # Set up directories
+    workload_dir = args.path + "/" + args.name + "/" + args.target
+    perfmon_dir = str(OMNIPERF_HOME) + "/perfmon_pub"
+
+    # Perfmon filtering
+    perfmon_filter(workload_dir, perfmon_dir, args)
+
+    # Workload profiling
+    for fname in glob.glob(workload_dir + "/perfmon/*.txt"):
+        # Kernel filtering (in-place replacement)
+        if not args.kernel == None:
+            subprocess.run(
+                [
+                    "sed",
+                    "-i",
+                    "-r",
+                    "s%^(kernel:).*%" + "kernel: " + ",".join(args.kernel) + "%g",
+                    fname,
+                ]
+            )
+
+        # Dispatch filtering (inplace replacement)
+        if not args.dispatch == None:
+            subprocess.run(
+                [
+                    "sed",
+                    "-i",
+                    "-r",
+                    "s%^(range:).*%" + "range: " + ",".join(args.dispatch) + "%g",
+                    fname,
+                ]
+            )
+        run_prof(fname, workload_dir, perfmon_dir, args.remaining, args.verbose)
+
+    # run again with timestamps
+    subprocess.run(
+        [
+            rocprof_cmd,
+            # "-i", fname,
+            # "-m", perfmon_dir + "/" + "metrics.xml",
+            "--timestamp",
+            "on",
+            "-o",
+            workload_dir + "/" + "timestamps.csv",
+            '"' + args.remaining + '"',
+        ]
+    )
+
+    # Update pmc_perf.csv timestamps
+    replace_timestamps(workload_dir)
+
+    # Generate sysinfo
+    gen_sysinfo(args.name, workload_dir, args.ipblocks, args.no_roof)
+
+    # Add tracing & roofline metrics (mi200 only)
+    if args.target.lower() == "mi200":
+        # Skip roofline if --no-roof is set.
+        if not args.no_roof:
+            target_binary = detect_roofline()
+            path_to_binary = str(OMNIPERF_HOME) + "/utils/rooflines/roofline" + "-" + DISTRO_MAP[target_binary["distro"]] + "-" + args.target.lower() + "-rocm" + target_binary["rocm_ver"]
+            # Distro is valid but cant find rocm ver
+            if not os.path.exists(path_to_binary):
+                print(
+                    "ROOFLINE ERROR: ROCm version not supported."
+                )
+                sys.exit(1)
+
+            subprocess.run(
+                [
+                    path_to_binary,
+                    "-o",
+                    workload_dir + "/" + "roofline.csv",
+                ]
+            )
+
+################################################
+# MAIN
+################################################
+
+
+def main():
+    my_parser = argparse.ArgumentParser(
+        description="Command line interface for AMD's GPU profiler, Omniperf",
+        prog="tool",
+        formatter_class=lambda prog: argparse.RawTextHelpFormatter(
+            prog, max_help_position=30
+        ),
+        usage="omniperf [mode] [options]",
+    )
+    parse(my_parser)
+    args = my_parser.parse_args()
+
+    if args.mode == None:
+        throw_parse_error(
+            my_parser,
+            "Omniperf requires you pass a valid mode. Please see documentation.",
+        )
+    ##############
+    # PROFILE MODE
+    ##############
+    if args.mode == "profile":
+        resolve_rocprof()
+        if ".." in str(args.path):
+            throw_parse_error(
+                my_parser, "Access denied. Cannot access parent directories in path ../"
+            )
+        args.target = get_soc()  # Must have a valid soc in profile mode
+
+        # Verify correct command formatting
+        args.remaining = args.remaining[1:]
+        if args.remaining:
+            if not os.path.isfile(args.remaining[0]):
+                throw_parse_error(
+                    my_parser,
+                    'Your command "{}" doesn\'t point to a file. Try again.'.format(
+                        args.remaining[0]
+                    ),
+                )
+            args.remaining = " ".join(args.remaining)
+        else:
+            throw_parse_error(
+                my_parser,
+                "Profiling command required. Pass this after -- at the end of your options.\n\ti.e. omniperf profile -n vcopy -- ./vcopy 1048576 256",
+            )
+        # Name cannot exceed MongoDB max len
+        if len(args.name) > 35:
+            throw_parse_error(my_parser, "--name exceeds 35 character limit. Try again.")
+
+        elif args.roof_only:
+            print("\n--------\nRoofline only\n--------\n")
+            if args.path == os.getcwd() + "/workloads":
+                args.path += "/" + args.name + "/" + str(get_soc())
+            # Verify valid axes parameters
+            if args.axes:
+                if len(args.axes) != 4:
+                    throw_parse_error(
+                        my_parser,
+                        "Invalid argument for --axes.\nMust contain four values formatted as: --axes xmin xmax ymin ymax",
+                    )
+
+                if args.axes[0] > args.axes[1] or args.axes[2] > args.axes[3]:
+                    throw_parse_error(
+                        my_parser,
+                        "Invalid argument for --axes.\nBreaks required conditions: (xmax > xmin && ymax > ymin)",
+                    )
+
+            # We need to make a directory for a new roofline
+            if not os.path.isdir(args.path):
+                os.makedirs(args.path)
+            # does roof data exist?
+            print("Checking for roofline.csv in ", args.path)
+            roof_path = args.path + "/roofline.csv"
+            roofline_exists = os.path.isfile(roof_path)
+            if not roofline_exists:
+                if get_soc() != "mi200":
+                    throw_parse_error(
+                        my_parser, "Invalid SoC.\nRoofline only availible on MI200."
+                    )
+                mibench(args)
+
+            # does sysinfo exist?
+            print("Checking for sysinfo.csv in ", args.path)
+            sysinfo_path = args.path + "/sysinfo.csv"
+            sysinfo_exists = os.path.isfile(sysinfo_path)
+            if not sysinfo_exists:
+                print("sysinfo not found")
+                gen_sysinfo(args.name, args.path, [], False)
+
+            # does app data exist?
+            print("Checking for pmc_perf.csv in ", args.path)
+            app_path = args.path + "/pmc_perf.csv"
+            app_exists = os.path.isfile(app_path)
+            if not app_exists:
+                if get_soc() != "mi200":
+                    throw_parse_error(
+                        my_parser, "Invalid SoC.\nRoofline only availible on MI200."
+                    )
+                if not args.remaining:
+                    throw_parse_error(
+                        my_parser,
+                        "Cannot find existing application data.\nAttempting to generate application data from -c.\n--cmd option is required to generate application data.",
+                    )
+                else:
+                    characterize_app(args.path, args.remaining, args.verbose)
+            # Generate roofline
+            plot_roofline.empirical_roof(args)
+
+        # Profile only
+        else:
+            print("\n--------\nProfile only\n--------\n")
+            omniperf_profile(args)
+
+    ##############
+    # DATABASE MODE
+    ##############
+    if args.mode == "database":
+        # Remove a workload
+        if args.remove and not args.upload:
+            print("\n--------\nRemove workload\n--------\n")
+            fullWorkloadName = args.workload.count("_") >= 3
+            if not fullWorkloadName:
+                throw_parse_error(
+                    my_parser,
+                    "--workload is not valid. Please use full workload name as seen in GUI when removing (i.e. omniperf_asw_vcopy_mi200)",
+                )
+            if args.host == None or args.username == None:
+                throw_parse_error(
+                    my_parser, "--host and --username are required when --remove is set."
+                )
+            remove_workload.remove_workload(args)
+        # Import a workload
+        elif args.upload and not args.remove:
+            print("\n--------\nImport Profiling Results\n--------\n")
+            if (
+                args.host == None
+                or args.team == None
+                or args.username == None
+                or args.workload == None
+            ):
+                throw_parse_error(
+                    my_parser,
+                    "--host, --workload, --username, and --team are all required when --import is set.",
+                )
+
+            if os.path.isdir(os.path.abspath(args.workload)):
+                isWorkloadEmpty(
+                    my_parser, args.workload
+                )  # Throw warning if workload is empty
+            else:
+                throw_parse_error(
+                    my_parser,
+                    "--workload is invalid. Please pass path to a valid directory.",
+                )
+
+            if len(args.team) > 13:
+                throw_parse_error(
+                    my_parser, "--team exceeds 13 character limit. Try again."
+                )
+
+            args.workload = os.path.abspath(args.workload)  # Format path properly
+
+            mongo_import(args, False)
+        else:
+            throw_parse_error(
+                my_parser, "Pass either -i/--import or -r/--remove when import mode"
+            )
+    ##############
+    # ANALYZE MODE
+    ##############
+    if args.mode == "analyze":
+        if args.list_metrics:
+            omniperf_cli(args)
+        else:
+            if args.path:
+                if ".." in str(args.path):
+                    throw_parse_error(
+                        my_parser,
+                        "Access denied. Cannot access parent directories in path ../",
+                    )
+                print("\n--------\nAnalyze\n--------\n")
+                # Ensure absolute path
+                for dir in args.path:
+                    full_path = os.path.abspath(dir[0])
+                    dir[0] = full_path
+                    if not os.path.isdir(dir[0]):
+                        throw_parse_error(
+                            my_parser,
+                            "Error: invalid directory {}\nPlease try again.".format(
+                                dir[0]
+                            ),
+                        )
+                    isWorkloadEmpty(
+                        my_parser, dir[0]
+                    )  # Verify workload is valid before analyzing
+
+                omniperf_cli(args)
+            else:
+                throw_parse_error(
+                    my_parser,
+                    """
+                                        omniperf analyze --path <workload_path> [analyze options]
+                                        \n\n-------------------------------------------------------------------------------
+                                        \nExamples:
+                                        \n\tomniperf analyze -p workloads/vcopy/mi200/ --list-metrics gfx90a
+                                        \n\tomniperf analyze -p workloads/mixbench/mi200/ --filter-dispatch-ids 12 34 --decimal 3
+                                        \n\tomniperf analyze -p workloads/mixbench/mi200/ --gui
+                                        \n-------------------------------------------------------------------------------\n
+                                        \ntool: error: the following arguments are required: -p/--path
+                                        """,
+                )
+
+    sys.exit(0)  # Indicate successful on exit
+
+
+if __name__ == "__main__":
+    main()

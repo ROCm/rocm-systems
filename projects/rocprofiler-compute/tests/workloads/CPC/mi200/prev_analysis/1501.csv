@@ -1,0 +1,17 @@
+Metric,Avg,Min,Max,Unit
+TA Busy,,,,Pct
+TC2TA Addr Stall,,,,Pct
+TC2TA Data Stall,,,,Pct
+TD2TA Addr Stall,,,,Pct
+Total Instructions,,,,Instr per wave
+Flat Instr,,,,Instr per wave
+Flat Read Instr,,,,Instr per wave
+Flat Write Instr,,,,Instr per wave
+Flat Atomic Instr,,,,Instr per wave
+Buffer Instr,,,,Instr per wave
+Buffer Read Instr,,,,Instr per wave
+Buffer Write Instr,,,,Instr per wave
+Buffer Atomic Instr,,,,Instr per wave
+Buffer Total Cylces,,,,Cycles per wave
+Buffer Coalesced Read,,,,Cycles per wave
+Buffer Coalesced Write,,,,Cycles per wave

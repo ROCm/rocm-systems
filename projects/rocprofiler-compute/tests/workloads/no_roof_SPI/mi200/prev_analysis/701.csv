@@ -1,0 +1,10 @@
+Metric,Avg,Min,Max,Unit
+Grid Size,4345193.77245509,32768,33554432,Work items
+Workgroup Size,256.0,256,256,Work items
+Total Wavefronts,67893.65269461078,512,524288,Wavefronts
+Saved Wavefronts,,,,Wavefronts
+Restored Wavefronts,,,,Wavefronts
+VGPRs,11.784431137724551,4,16,Registers
+SGPRs,24.047904191616766,24,32,Registers
+LDS Allocation,0.0,0,0,Bytes
+Scratch Allocation,0.0,0,0,Bytes

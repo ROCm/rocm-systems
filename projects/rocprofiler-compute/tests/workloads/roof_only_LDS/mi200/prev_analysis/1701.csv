@@ -1,0 +1,5 @@
+Metric,Value,Unit
+L2 Util,,Pct
+Cache Hit,,Pct
+L2-EA Rd BW,144.20898573158362,Gb/s
+L2-EA Wr BW,5.355718622397971e-05,Gb/s

@@ -1,0 +1,188 @@
+[
+    {"$match": {
+        "Index": { "$in": [${DispatchIDFilter:raw}] },
+        "gpu-id": { "$in": [${gpuFilter:raw}] },
+        "KernelName": { "$in": ${KernelNameFilter:json}}
+    }},
+    {"$group": {
+        "_id": null,
+        "avg_ipcAvg": {
+          "$avg": { "$divide": [ "&SQ_INSTS", "&SQ_BUSY_CU_CYCLES" ] }
+        },
+        "min_ipcAvg": {
+          "$min": { "$divide": [ "&SQ_INSTS", "&SQ_BUSY_CU_CYCLES" ] } 
+        },
+        "max_ipcAvg": {
+          "$max": { "$divide": [ "&SQ_INSTS", "&SQ_BUSY_CU_CYCLES" ] }
+        },
+        
+        "avg_ipcIssue": {
+          "$avg": { "$divide": [ { "$add": [ "&SQ_INSTS_VALU", "&SQ_INSTS_VMEM","&SQ_INSTS_SALU", "&SQ_INSTS_SMEM", "&SQ_INSTS_GDS", "&SQ_INSTS_BRANCH", "&SQ_INSTS_SENDMSG", "&SQ_INSTS_VSKIPPED"] }, "&SQ_ACTIVE_INST_ANY"] }
+        },
+        "min_ipcIssue": {
+          "$min": { "$divide": [ { "$add": [ "&SQ_INSTS_VALU", "&SQ_INSTS_VMEM","&SQ_INSTS_SALU", "&SQ_INSTS_SMEM", "&SQ_INSTS_GDS", "&SQ_INSTS_BRANCH", "&SQ_INSTS_SENDMSG", "&SQ_INSTS_VSKIPPED"] }, "&SQ_ACTIVE_INST_ANY"] }
+        },
+        "max_ipcIssue": {
+          "$max": { "$divide": [ { "$add": [ "&SQ_INSTS_VALU", "&SQ_INSTS_VMEM","&SQ_INSTS_SALU", "&SQ_INSTS_SMEM", "&SQ_INSTS_GDS", "&SQ_INSTS_BRANCH", "&SQ_INSTS_SENDMSG", "&SQ_INSTS_VSKIPPED"] }, "&SQ_ACTIVE_INST_ANY"] }
+        },
+
+        "avg_saluUtil": {
+          "$avg": { "$divide": [{ "$divide": [ { "$multiply": [100, "&SQ_ACTIVE_INST_SCA"] }, "&GRBM_GUI_ACTIVE"] },$numCU ] }
+        },
+        "min_saluUtil": {
+          "$min": { "$divide": [{ "$divide": [ { "$multiply": [100, "&SQ_ACTIVE_INST_SCA"] }, "&GRBM_GUI_ACTIVE"] },$numCU ] }
+        },
+        "max_saluUtil": {
+          "$max": { "$divide": [{ "$divide": [ { "$multiply": [100, "&SQ_ACTIVE_INST_SCA"] }, "&GRBM_GUI_ACTIVE"] },$numCU ] }
+        },
+
+        "avg_valuUtil": {
+          "$avg": { "$divide": [{ "$divide": [ { "$multiply": [100, "&SQ_ACTIVE_INST_VALU"] }, "&GRBM_GUI_ACTIVE"] },$numCU ] }
+        },
+        "min_valuUtil": {
+          "$min": { "$divide": [{ "$divide": [ { "$multiply": [100, "&SQ_ACTIVE_INST_VALU"] }, "&GRBM_GUI_ACTIVE"] },$numCU ] }
+        },
+        "max_valuUtil": {
+          "$max": { "$divide": [{ "$divide": [ { "$multiply": [100, "&SQ_ACTIVE_INST_VALU"] }, "&GRBM_GUI_ACTIVE"] },$numCU ] }
+        },
+
+        "avg_mfmaUtil": {
+          "$avg": { "$divide": [{ "$multiply": [100, "&SQ_VALU_MFMA_BUSY_CYCLES"] }, { "$multiply": [4, $numCU, "&GRBM_GUI_ACTIVE"] }] }
+        },
+        "min_mfmaUtil": {
+          "$min": { "$divide": [{ "$multiply": [100, "&SQ_VALU_MFMA_BUSY_CYCLES"] }, { "$multiply": [4, $numCU, "&GRBM_GUI_ACTIVE"] }] }
+        },
+        "max_mfmaUtil": {
+          "$max": { "$divide": [{ "$multiply": [100, "&SQ_VALU_MFMA_BUSY_CYCLES"] }, { "$multiply": [4, $numCU, "&GRBM_GUI_ACTIVE"] }] }
+        },
+
+        "avg_mfmaInstrCycles": {
+          "$avg": {
+            "$cond": [
+              {"$ne": ["&SQ_INSTS_MFMA", 0]},
+              {"$divide": [ "&SQ_VALU_MFMA_BUSY_CYCLES", "&SQ_INSTS_MFMA" ]},
+                null
+            ]
+          }
+        },
+        "min_mfmaInstrCycles": {
+          "$min": {
+            "$cond": [
+              {"$ne": ["&SQ_INSTS_MFMA", 0]},
+              {"$divide": [ "&SQ_VALU_MFMA_BUSY_CYCLES", "&SQ_INSTS_MFMA" ]},
+                null
+            ]
+          }
+        },
+        "max_mfmaInstrCycles": {
+          "$max": {
+            "$cond": [
+              {"$ne": ["&SQ_INSTS_MFMA", 0]},
+              {"$divide": [ "&SQ_VALU_MFMA_BUSY_CYCLES", "&SQ_INSTS_MFMA" ]},
+                null
+            ]
+          }
+        },
+
+
+        "avg_unpredthreads_val": {
+            "$avg": {
+              "$cond": [
+                  {"$ne":["&SQ_ACTIVE_INST_VALU" , 0]},
+                  { "$divide": ["&SQ_THREAD_CYCLES_VALU", "&SQ_ACTIVE_INST_VALU"] },
+                  null
+              ]
+            }
+        },
+        "min_unpredthreads_val": {
+            "$min": {
+              "$cond": [
+                  {"$ne":["&SQ_ACTIVE_INST_VALU" , 0]},
+                  { "$divide": ["&SQ_THREAD_CYCLES_VALU", "&SQ_ACTIVE_INST_VALU"] },
+                  null
+              ]
+            }
+        },
+        "max_unpredthreads_val": {
+            "$max": {
+              "$cond": [
+                  {"$ne":["&SQ_ACTIVE_INST_VALU" , 0]},
+                  { "$divide": ["&SQ_THREAD_CYCLES_VALU", "&SQ_ACTIVE_INST_VALU"] },
+                  null
+              ]
+            }
+        },
+
+        "avg_instrFetchBand": {
+          "$avg": { "$divide": [ { "$multiply": ["&SQ_IFETCH", 32] }, { "$subtract": ["&EndNs", "&BeginNs"] } ] }
+        },
+        "min_instrFetchBand": {
+          "$min": { "$divide": [ { "$multiply": ["&SQ_IFETCH", 32] }, { "$subtract": ["&EndNs", "&BeginNs"] } ] }
+        },
+        "max_instrFetchBand": {
+          "$max": { "$divide": [ { "$multiply": ["&SQ_IFETCH", 32] }, { "$subtract": ["&EndNs", "&BeginNs"] } ] }
+        }
+
+
+    }},
+    {"$set": {
+      "array": [
+          {
+            "Metric": "IPC (Avg)",
+            "Avg": "&avg_ipcAvg",
+            "Min": "&min_ipcAvg",
+            "Max": "&max_ipcAvg",
+            "Unit": "Instr/cycle"
+          },
+          {
+            "Metric": "IPC (Issue)",
+            "Avg": "&avg_ipcIssue",
+            "Min": "&min_ipcIssue",
+            "Max": "&max_ipcIssue",
+            "Unit": "Instr/cycle"
+          },
+          {
+            "Metric": "SALU Util",
+            "Avg": "&avg_saluUtil",
+            "Min": "&min_saluUtil",
+            "Max": "&max_saluUtil",
+            "Unit": "pct"
+          },
+          {
+            "Metric": "VALU Util",
+            "Avg": "&avg_valuUtil",
+            "Min": "&min_valuUtil",
+            "Max": "&max_valuUtil",
+            "Unit": "pct"
+          },
+          {
+            "Metric": "VALU Active Threads",
+            "Avg": "&avg_unpredthreads_val",
+            "Min": "&min_unpredthreads_val",
+            "Max": "&max_unpredthreads_val",
+            "Unit": "Threads"
+          },
+          {
+            "Metric": "MFMA Util",
+            "Avg": "&avg_mfmaUtil",
+            "Min": "&min_mfmaUtil",
+            "Max": "&max_mfmaUtil",
+            "Unit": "pct"
+          },
+          {
+            "Metric": "MFMA Instr Cycles",
+            "Avg": "&avg_mfmaInstrCycles",
+            "Min": "&min_mfmaInstrCycles",
+            "Max": "&max_mfmaInstrCycles",
+            "Unit": "cycles/instr"
+          }
+
+        ]
+    }},
+    {"$unwind": {
+      "path": "&array"
+    }},
+    {"$replaceRoot": {
+      "newRoot": "&array"
+    }}
+]

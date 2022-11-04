@@ -1,0 +1,120 @@
+[
+    {"$match": {
+        "Index": { "$in": [${DispatchIDFilter:raw}] },
+        "gpu-id": { "$in": [${gpuFilter:raw}] },
+        "KernelName": { "$in": ${KernelNameFilter:json}}
+    }},
+    {"$group": {
+        "_id": null,
+        "gridSize_avg":{"$avg": "&grd"},
+        "gridSize_min":{"$min": "&grd"},
+        "gridSize_max":{"$max": "&grd"},
+
+        "workSize_avg":{"$avg": "&wgr"},
+        "workSize_min":{"$min": "&wgr"},
+        "workSize_max":{"$max": "&wgr"},
+
+        "totWavefront_avg":{"$avg": "&SPI_CSN_WAVE"},
+        "totWavefront_min":{"$min": "&SPI_CSN_WAVE"},
+        "totWavefront_max":{"$max": "&SPI_CSN_WAVE"},
+
+        "savedWavefront_avg":{"$avg": "&SQ_WAVES_SAVED"},
+        "savedWavefront_min":{"$min": "&SQ_WAVES_SAVED"},
+        "savedWavefront_max":{"$max": "&SQ_WAVES_SAVED"},
+
+        "restoredWavefront_avg":{"$avg": "&SQ_WAVES_RESTORED"},
+        "restoredWavefront_min":{"$min": "&SQ_WAVES_RESTORED"},
+        "restoredWavefront_max":{"$max": "&SQ_WAVES_RESTORED"},
+
+        "vgprs_avg":{"$avg": "&vgpr"},
+        "vgprs_min":{"$min": "&vgpr"},
+        "vgprs_max":{"$max": "&vgpr"},
+
+        "sgprs_avg":{"$avg": "&sgpr"},
+        "sgprs_min":{"$min": "&sgpr"},
+        "sgprs_max":{"$max": "&sgpr"},
+
+        "ldsAlloc_avg":{"$avg": "&lds"},
+        "ldsAlloc_min":{"$min": "&lds"},
+        "ldsAlloc_max":{"$max": "&lds"},
+
+        "scratchAlloc_avg":{"$avg": "&scr"},
+        "scratchAlloc_min":{"$min": "&scr"},
+        "scratchAlloc_max":{"$max": "&scr"}
+
+    }},
+    {"$set": {
+        "array": [
+            {
+            "Metric": "Grid Size",
+            "Avg": "&gridSize_avg",
+            "Min": "&gridSize_min",
+            "Max": "&gridSize_max",
+            "Unit": "Work Items"
+            },
+            {
+            "Metric": "Workgroup Size",
+            "Avg": "&workSize_avg",
+            "Min": "&workSize_min",
+            "Max": "&workSize_max",
+            "Unit": "Work Items"
+            },
+            {
+            "Metric": "Total Wavefronts",
+            "Avg": "&totWavefront_avg",
+            "Min": "&totWavefront_min",
+            "Max": "&totWavefront_max",
+            "Unit": "Wavefronts"
+            },
+            {
+            "Metric": "Saved Wavefronts",
+            "Avg": "&savedWavefront_avg",
+            "Min": "&savedWavefront_min",
+            "Max": "&savedWavefront_max",
+            "Unit": "Wavefronts"
+            },
+            {
+            "Metric": "Restored Wavefronts",
+            "Avg": "&restoredWavefront_avg",
+            "Min": "&restoredWavefront_min",
+            "Max": "&restoredWavefront_max",
+            "Unit": "Wavefronts"
+            },
+            {
+            "Metric": "VGPRs",
+            "Avg": "&vgprs_avg",
+            "Min": "&vgprs_min",
+            "Max": "&vgprs_max",
+            "Unit": "Registers"
+            },
+            {
+            "Metric": "SGPRs",
+            "Avg": "&sgprs_avg",
+            "Min": "&sgprs_min",
+            "Max": "&sgprs_max",
+            "Unit":"Registers"
+            },
+            {
+            "Metric": "LDS Allocation",
+            "Avg": "&ldsAlloc_avg",
+            "Min": "&ldsAlloc_min",
+            "Max": "&ldsAlloc_max",
+            "Unit": "Bytes"
+            },
+            {
+            "Metric": "Scratch Allocation",
+            "Avg": "&scratchAlloc_avg",
+            "Min": "&scratchAlloc_min",
+            "Max": "&scratchAlloc_max",
+            "Unit": "Bytes"
+            }
+   
+        ]
+    }},
+    {"$unwind": {
+        "path": "&array"
+    }},
+    {"$replaceRoot": {
+        "newRoot": "&array"
+    }}
+]

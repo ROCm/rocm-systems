@@ -1,0 +1,510 @@
+[
+  {"$match": {
+      "Index": { "$in": [${DispatchIDFilter:raw}] },
+      "gpu-id": { "$in": [${gpuFilter:raw}] },
+      "KernelName": { "$in": ${KernelNameFilter:json}}
+    }},
+    {"$addFields": {
+      "denom": {
+              "$switch" : {
+              "branches": [
+                  {
+                      "case":  { "$eq": [ $normUnit, "per Wave"]} ,
+                      "then":  "&SQ_WAVES"
+                  },
+                  {
+                      "case":  { "$eq": [ $normUnit, "per Cycle"]} ,
+                      "then":  "&GRBM_GUI_ACTIVE"
+                  },
+                  {
+                      "case":  { "$eq": [ $normUnit, "per Sec"]} ,
+                      "then":  {"$divide":[{"$subtract": ["&EndNs", "&BeginNs" ]}, 1]}
+                  }
+              ],
+              "default": 1
+              }         
+      } 
+  }},
+  {"$group": {
+      "_id": null,
+      "wave_life": {
+        "$avg": {
+          "$cond": [
+            { "$ne": ["&SQ_WAVES", 0] },
+            { "$multiply": [4, { "$divide": ["&SQ_WAVE_CYCLES", "&SQ_WAVES"] }] },
+            null
+          ]
+        }
+      },
+      "salu": {
+          "$avg": { "$divide": [ "&SQ_INSTS_SALU", "&denom" ] }
+      },
+      "smem": {
+          "$avg": { "$divide": [ "&SQ_INSTS_SMEM", "&denom" ] }
+      },
+      "valu": {
+          "$avg": { "$divide": ["&SQ_INSTS_VALU", "&denom"] }
+      },
+      "mfma": {
+          "$avg": { "$divide": ["&SQ_INSTS_MFMA", "&denom"] }
+      },
+      "vmem": {
+          "$avg": { "$divide": ["&SQ_INSTS_VMEM", "&denom"] }
+      },
+      "lds_instr": {
+          "$avg": { "$divide": ["&SQ_INSTS_LDS", "&denom"] }
+      },
+      "gws": {
+          "$avg": { "$divide": ["&SQ_INSTS_GDS", "&denom"] }
+      },
+      "br": {
+          "$avg": { "$divide": ["&SQ_INSTS_BRANCH", "&denom"] }
+      },
+      "vgpr": {
+          "$avg": "&vgpr"
+      },
+      "sgpr": {
+          "$avg": "&sgpr"
+      },
+      "lds_alloc": {
+          "$avg": "&lds"
+      },
+      "scratch_alloc": {
+          "$avg": "&scr"
+      },
+      "wavefronts": {
+          "$avg": "&SPI_CSN_WAVE"
+      },
+      "workgroups": {
+          "$avg": "&SPI_CSN_NUM_THREADGROUPS"
+      },
+      "lds_req": {
+          "$avg": { "$divide": ["&SQ_INSTS_LDS", "&denom"] }
+      },  
+      "lds_util":   {
+            "$avg":    {"$divide":[ 
+                            { "$multiply": [ 100,  "&SQ_LDS_IDX_ACTIVE" ]}, 
+                            {"$multiply": ["&GRBM_GUI_ACTIVE", $numCU]}
+                       ]}
+      },
+      "vl1_rd": {
+          "$avg": { "$divide": ["&TCP_TOTAL_READ_sum", "&denom"] }
+      },
+      "vl1_wr": {
+          "$avg": { "$divide": ["&TCP_TOTAL_WRITE_sum", "&denom"] }
+      },
+      "vl1_atom": {
+          "$avg": { "$divide": [{ "$add": ["&TCP_TOTAL_ATOMIC_WITH_RET_sum", "&TCP_TOTAL_ATOMIC_WITHOUT_RET_sum"] }, "&denom"] }
+      },
+      "il1_fetch": {
+          "$avg": { "$divide": ["&SQC_ICACHE_REQ", "&denom"] }
+      },
+      "il1_hit": {
+          "$avg": { "$divide": ["&SQC_ICACHE_HITS", "&SQC_ICACHE_REQ"] }
+      },
+      "il1_l2_req": {
+          "$avg": { "$divide": ["&SQC_TC_INST_REQ", "&denom"] }
+      },
+      "sl1_rd": {
+          "$avg": { "$divide": ["&SQC_DCACHE_REQ", "&denom"] }
+      },
+      "sl1_hit": {
+    "$avg": { 
+        "$cond": [
+            {"$ne": ["&SQC_DCACHE_REQ", 0]},
+            { "$divide": ["&SQC_DCACHE_HITS", "&SQC_DCACHE_REQ"] },
+            ""
+        ]
+    }
+},
+      "sl1_l2_rd": {
+          "$avg": { "$divide": ["&SQC_TC_DATA_READ_REQ", "&denom"] }
+      },
+      "sl1_l2_wr": {
+          "$avg": { "$divide": ["&SQC_TC_DATA_WRITE_REQ", "&denom"] }
+      },
+      "sl1_l2_atom": {
+          "$avg": { "$divide": ["&SQC_TC_DATA_ATOMIC_REQ", "&denom"] }
+      },
+      "vl1_hit": {
+          "$avg":  {
+            "$cond": [
+                { "$ne": ["&TCP_TOTAL_CACHE_ACCESSES_sum", 0] },
+                { "$subtract": [100, { "$divide": [{ "$multiply": [100, { "$add": ["&TCP_TCC_READ_REQ_sum", "&TCP_TCC_WRITE_REQ_sum", "&TCP_TCC_ATOMIC_WITH_RET_REQ_sum", "&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum"] }]  }, "&TCP_TOTAL_CACHE_ACCESSES_sum"] }] },
+                null
+            ]
+          }
+      },
+      "vl1_lat": {
+          "$avg": { 
+            "$cond": [
+              { "$ne": ["&TCP_TA_TCP_STATE_READ_sum", 0] },
+              { "$divide": ["&TCP_TCP_LATENCY_sum", "&TCP_TA_TCP_STATE_READ_sum"] },
+              null
+            ]
+          }
+      },
+      "vl1_coales": {
+            "$avg": {
+                "$cond": [  {"$ne": ["&TCP_TOTAL_ACCESSES_sum", 0] },
+                            { "$divide": [{"$multiply": ["&TA_TOTAL_WAVEFRONTS_sum", 64, 100]}, {"$multiply": ["&TCP_TOTAL_ACCESSES_sum", 4]}] },
+                            0
+                ]
+            }
+      },
+      "vl1_stall": {"$avg":{
+                "$cond":[
+                    {"$ne": ["&TCP_GATE_EN1_sum", 0]}, 
+                    {"$divide": [ { "$multiply": [100, "&TCP_TCR_TCP_STALL_CYCLES_sum"] }, "&TCP_GATE_EN1_sum"] },
+                    ""
+                ]
+      }},
+      "vl1_l2_rd": {
+          "$avg": { "$divide": ["&TCP_TCC_READ_REQ_sum", "&denom"] }
+      },
+      "vl1_l2_wr": {
+          "$avg": { "$divide": ["&TCP_TCC_WRITE_REQ_sum", "&denom"] }
+      },
+      "vl1_l2_atom": {
+          "$avg": { "$divide": [{ "$add": ["&TCP_TCC_ATOMIC_WITH_RET_REQ_sum", "&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum"] }, "&denom"] }
+      },
+      "l2_rd": {
+          "$avg": { "$divide": ["&TCC_READ_sum", "&denom"] }
+      },
+      "l2_wr": {
+          "$avg": { "$divide": ["&TCC_WRITE_sum", "&denom"] }
+      },
+      "l2_atom": {
+          "$avg": { "$divide": ["&TCC_ATOMIC_sum", "&denom"] }
+      },
+      "l2_hit": {
+          "$avg": {
+            "$cond": [
+              { "$ne": [{ "$add": ["&TCC_HIT_sum", "&TCC_MISS_sum"] }, 0] },
+              { "$divide": [{ "$multiply": [100, "&TCC_HIT_sum"] }, { "$add": ["&TCC_HIT_sum", "&TCC_MISS_sum"] }] },
+              null
+            ]
+          }
+      },
+      "l2_rd_lat": {
+          "$avg": {
+            "$cond": [
+              { "$ne": [{ "$add": ["&TCP_TCC_READ_REQ_sum", "&TCP_TCC_ATOMIC_WITH_RET_REQ_sum"] }, 0] },
+              { "$divide": ["&TCP_TCC_READ_REQ_LATENCY_sum", { "$add": ["&TCP_TCC_READ_REQ_sum", "&TCP_TCC_ATOMIC_WITH_RET_REQ_sum"] }] },
+              null
+            ]
+          }
+      },
+      "l2_wr_lat": {
+          "$avg": {
+            "$cond": [
+              { "$ne": [{ "$add": ["&TCP_TCC_WRITE_REQ_sum", "&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum"] }, 0] },
+              { "$divide": ["&TCP_TCC_WRITE_REQ_LATENCY_sum", { "$add": ["&TCP_TCC_WRITE_REQ_sum", "&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum"] }] },
+              null
+            ]
+          }
+      },
+      "fabric_rd_lat": {
+          "$avg": {
+              "$cond": [
+                { "$ne": ["&TCC_EA_RDREQ_sum", 0] },
+                { "$divide": ["&TCC_EA_RDREQ_LEVEL_sum", "&TCC_EA_RDREQ_sum"] },
+                null
+              ]
+          }
+      },
+      "fabric_wr_lat": {          
+          "$avg": {
+            "$cond": [
+              { "$ne": ["&TCC_EA_WRREQ_sum", 0] },
+              { "$divide": ["&TCC_EA_WRREQ_LEVEL_sum", "&TCC_EA_WRREQ_sum"] },
+              null
+            ]
+          }
+      },
+      "fabric_atom_lat": {
+          "$avg": {
+            "$cond": [
+              { "$ne": ["&TCC_EA_ATOMIC_sum", 0] },
+              { "$divide": ["&TCC_EA_ATOMIC_LEVEL_sum", "&TCC_EA_ATOMIC_sum"] },
+              null
+            ]
+          }
+      },
+      "l2_fabric_rd": {
+          "$avg": { "$divide": ["&TCC_EA_RDREQ_sum", "&denom"] }
+      },
+      "l2_fabric_wr": {
+          "$avg": { "$divide": ["&TCC_EA_WRREQ_sum", "&denom"] }
+      },
+      "l2_fabric_atom": {
+          "$avg": { "$divide": ["&TCC_EA_ATOMIC_sum", "&denom"] }
+      },
+      "hbm_rd": {
+          "$avg": { "$divide": ["&TCC_EA_RDREQ_DRAM_sum", "&denom"] }
+      },
+      "hbm_wr": {
+          "$avg": { "$divide": ["&TCC_EA_WRREQ_DRAM_sum", "&denom"] }
+      }
+    }},
+    {"$set": {
+      "array": [
+          {
+            "Metric": "Wave Life",
+            "Alias": "wave_life_",
+            "Value": { "$round": ["&wave_life", 0] }
+          },
+          {
+            "Metric": "Active CUs",
+            "Alias": "active_cu_",
+            "Value": {"$concat": ["$numActiveCUs", "/", "$numCU"]}
+          },
+          {
+            "Metric": "SALU",
+            "Alias": "salu_",
+            "Value": { "$round": ["&salu", 0] }
+          },
+          {
+            "Metric": "SMEM",
+            "Alias": "smem_",
+            "Value": { "$round": ["&smem", 0] }
+          },
+          {
+            "Metric": "VALU",
+            "Alias": "valu_",
+            "Value": { "$round": ["&valu", 0] }
+          },
+          {
+            "Metric": "MFMA",
+            "Alias": "mfma_",
+            "Value": { "$round": ["&mfma", 0] }
+          },
+          {
+            "Metric": "VMEM",
+            "Alias": "vmem_",
+            "Value": { "$round": ["&vmem", 0] }
+          },
+          {
+            "Metric": "LDS",
+            "Alias": "lds_",
+            "Value": { "$round": ["&lds_instr", 0] }
+          },
+          {
+            "Metric": "GWS",
+            "Alias": "gws_",
+            "Value": { "$round": ["&gws", 0] }
+          },
+          {
+            "Metric": "BR",
+            "Alias": "br_",
+            "Value": { "$round": ["&br", 0] }
+          },
+          {
+            "Metric": "VGPR",
+            "Alias": "vgpr_",
+            "Value": { "$round": ["&vgpr", 0] }
+          },
+          {
+            "Metric": "SGPR",
+            "Alias": "sgpr_",
+            "Value": { "$round": ["&sgpr", 0] }
+          },
+          {
+            "Metric": "LDS Allocation",
+            "Alias": "lds_alloc_",
+            "Value": { "$round": ["&lds_alloc", 0] }
+          },
+          {
+            "Metric": "Scratch Allocation",
+            "Alias": "scratch_alloc_",
+            "Value": { "$round": ["&scratch_alloc", 0] }
+          },
+          {
+            "Metric": "Wavefronts",
+            "Alias": "wavefronts_",
+            "Value": { "$round": ["&wavefronts", 0] }
+          },
+          {
+            "Metric": "Workgroups",
+            "Alias": "workgroups_",
+            "Value": { "$round": ["&workgroups", 0] }
+          },
+          {
+            "Metric": "LDS Req",
+            "Alias": "lds_req_",
+            "Value": { "$round": ["&lds_req", 0] }
+          },
+          {
+            "Metric": "IL1 Fetch",
+            "Alias": "il1_fetch_",
+            "Value": { "$round": ["&il1_fetch", 0] }
+          },
+          {
+            "Metric": "IL1 Hit",
+            "Alias": "il1_hit_",
+            "Value": { "$round": [{ "$multiply": ["&il1_hit", 100] }, 0] }
+          },
+          {
+            "Metric": "IL1_L2 Rd",
+            "Alias": "il1_l2_req_",
+            "Value": { "$round": ["&il1_l2_req", 0] }
+          },
+          {
+            "Metric": "vL1D Rd",
+            "Alias": "sl1_rd_",
+            "Value": { "$round": ["&sl1_rd", 0] }
+          },
+          {
+            "Metric": "vL1D Hit",
+            "Alias": "sl1_hit_",
+            "Value": { "$round": [{ "$multiply": ["&sl1_hit", 100] }, 0] }
+          },
+          {
+            "Metric": "vL1D_L2 Rd",
+            "Alias": "sl1_l2_rd_",
+            "Value": { "$round": ["&sl1_l2_rd", 0] }
+          },
+          {
+            "Metric": "vL1D_L2 Wr",
+            "Alias": "sl1_l2_wr_",
+            "Value": { "$round": ["&sl1_l2_wr", 0] }
+          },
+          {
+            "Metric": "vL1D_L2 Atomic",
+            "Alias": "sl1_l2_atom_",
+            "Value": { "$round": ["&sl1_l2_atom", 0] }
+          },
+          {
+            "Metric": "VL1 Rd",
+            "Alias": "vl1_rd_",
+            "Value": { "$round": ["&vl1_rd", 0] }
+          },
+          {
+            "Metric": "VL1 Wr",
+            "Alias": "vl1_wr_",
+            "Value": { "$round": ["&vl1_wr", 0] }
+          },
+          {
+            "Metric": "VL1 Atomic",
+            "Alias": "vl1_atom_",
+            "Value": { "$round": ["&vl1_atom", 0] }
+          },
+          {
+            "Metric": "VL1 Hit",
+            "Alias": "vl1_hit_",
+            "Value": { "$round": ["&vl1_hit", 0] }
+          },
+          {
+            "Metric": "VL1 Lat",
+            "Alias": "vl1_lat_",
+            "Value": { "$round": ["&vl1_lat", 0] }
+          },
+          {
+            "Metric": "VL1_L2 Rd",
+            "Alias": "vl1_l2_rd_",
+            "Value": { "$round": ["&vl1_l2_rd", 0] }
+          },
+          {
+            "Metric": "VL1_L2 Wr",
+            "Alias": "vl1_l2_wr_",
+            "Value": { "$round": ["&vl1_l2_wr", 0] }
+          },
+          {
+            "Metric": "vL1_L2 Atomic",
+            "Alias": "vl1_l2_atom_",
+            "Value": { "$round": ["&vl1_l2_atom", 0] }
+          },
+          {
+            "Metric": "L2 Rd",
+            "Alias": "l2_rd_",
+            "Value": { "$round": ["&l2_rd", 0] }
+          },
+          {
+            "Metric": "L2 Wr",
+            "Alias": "l2_wr_",
+            "Value": { "$round": ["&l2_wr", 0] }
+          },
+          {
+            "Metric": "L2 Atomic",
+            "Alias": "l2_atom_",
+            "Value": { "$round": ["&l2_atom", 0] }
+          },
+          {
+            "Metric": "L2 Hit",
+            "Alias": "l2_hit_",
+            "Value": { "$round": ["&l2_hit", 0] }
+          },
+          {
+            "Metric": "L2 Rd Lat",
+            "Alias": "l2_rd_lat_",
+            "Value": { "$round": ["&l2_rd_lat", 0] }
+          },
+          {
+            "Metric": "L2 Wr Lat",
+            "Alias": "l2_wr_lat_",
+            "Value": { "$round": ["&l2_wr_lat", 0] }
+          },
+          {
+            "Metric": "Fabric Rd Lat",
+            "Alias": "fabric_rd_lat_",
+            "Value": { "$round": ["&fabric_rd_lat", 0] }
+          },
+          {
+            "Metric": "Fabric Wr Lat",
+            "Alias": "fabric_wr_lat_",
+            "Value": { "$round": ["&fabric_wr_lat", 0] }
+          },
+          {
+            "Metric": "Fabric Atomic Lat",
+            "Alias": "fabric_atom_lat_",
+            "Value": { "$round": ["&fabric_atom_lat", 0] }
+          },
+          {
+            "Metric": "Fabric_L2 Rd",
+            "Alias": "l2_fabric_rd_",
+            "Value": { "$round": ["&l2_fabric_rd", 0] }
+          },
+          {
+            "Metric": "Fabric_L2 Wr",
+            "Alias": "l2_fabric_wr_",
+            "Value": { "$round": ["&l2_fabric_wr", 0] }
+          },
+          {
+            "Metric": "Fabric_l2 Atomic",
+            "Alias": "l2_fabric_atom_",
+            "Value": { "$round": ["&l2_fabric_atom", 0] }
+          },
+          {
+            "Metric": "HBM Rd",
+            "Alias": "hbm_rd_",
+            "Value": { "$round": ["&hbm_rd", 0] }
+          },
+          {
+            "Metric": "HBM Wr",
+            "Alias": "hbm_wr_",
+            "Value": { "$round": ["&hbm_wr", 0] }
+          },
+          {
+            "Metric": "LDS Util",
+            "Alias": "lds_util_",
+            "Value": { "$round": ["&lds_util", 0] }
+          },
+          {
+            "Metric": "VL1 Coalesce",
+            "Alias": "vl1_coales_",
+            "Value": { "$round": ["&vl1_coales", 0]}
+          },
+          {
+            "Metric": "VL1 Stall",
+            "Alias": "vl1_stall_",
+            "Value": { "$round": ["&vl1_stall", 0]}
+          }
+        ]
+    }},
+    {"$unwind": {
+      "path": "$array"
+    }},
+    {"$replaceRoot": {
+      "newRoot": "$array"
+    }}
+]

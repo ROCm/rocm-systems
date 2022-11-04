@@ -1,0 +1,16 @@
+Metric,Avg,Min,Max,Unit
+Read BW,,,,Bytes per wave
+Write BW,,,,Bytes per wave
+Read (32B),,,,Req per wave
+Read (Uncached 32B),,,,Req per wave
+Read (64B),,,,Req per wave
+HBM Read,,,,Req per wave
+Write (32B),,,,Req per wave
+Write (Uncached 32B),,,,Req per wave
+Write (64B),,,,Req per wave
+HBM Write,,,,Req per wave
+Read Latency,,,,Cycles
+Write Latency,,,,Cycles
+Atomic Latency,,,,Cycles
+Read Stall,,,,Pct
+Write Stall,,,,Pct
