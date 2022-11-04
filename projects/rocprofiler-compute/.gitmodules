@@ -1,10 +1,10 @@
 [submodule "src/mibench"]
 	path = src/mibench
 	url = git@github.com:AARInternal/mibench.git
-	branch = main
+    branch = main
 [submodule "src/waveparser"]
 	path = src/waveparser
 	url = git@github.com:AARInternal/waveparser.git
 [submodule "src/multevent"]
 	path = src/multevent
-	url = git@github.com:AARInternal/multevent.git
+	url = https://github.com/AARInternal/multevent
