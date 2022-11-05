@@ -77,7 +77,7 @@ $ make install
 
 ```{tip}
 You may require `sudo` during the final install step if you
-do not have write access to the chose install path.
+do not have write access to the chosen install path.
 ```
 
 
