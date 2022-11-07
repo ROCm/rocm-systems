@@ -203,6 +203,7 @@ def detect_roofline():
     rocm_ver = mspec.rocmversion[:1]
 
     os_release = path("/etc/os-release").read_text()
+    ubuntu_distro = specs.search(r'VERSION_ID="(.*?)"', os_release)
     rhel_distro = specs.search(r'PLATFORM_ID="(.*?)"', os_release)
     sles_distro = specs.search(r'VERSION_ID="(.*?)"', os_release)
 
@@ -221,6 +222,9 @@ def detect_roofline():
     elif sles_distro == "15.3":
         # Must be a valid SLES machine
         distro = sles_distro
+    elif ubuntu_distro == "20.04":
+        # Must be a valid Ubuntu machine
+        distro = ubuntu_distro
     else:
         print("ROOFLINE ERROR: Cannot find a valid binary for your operating system")
         sys.exit(1)
