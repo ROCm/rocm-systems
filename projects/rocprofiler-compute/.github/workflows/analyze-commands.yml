@@ -35,8 +35,6 @@ jobs:
         with:
           submodules: recursive
           token: ${{ secrets.GH_PAT }}
-      - name: List ROCm
-        run: ls /opt/rocm
       - name: Install Python prereqs
         run: |
           python3 -m pip install -r requirements.txt
