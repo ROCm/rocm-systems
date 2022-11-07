@@ -62,7 +62,7 @@ Next, install Python dependencies and complete the Omniperf configuration/instal
 $ export INSTALL_DIR=<your-top-level-desired-install-path>
 
 # install python deps
-$ python3 -m pip install -t ${INSTALL_DIR}/python-libs -r requirements.txt
+$ python3 -m pip install --system -t ${INSTALL_DIR}/python-libs -r requirements.txt
 
 # configure Omniperf for shared install
 $ mkdir build
@@ -150,21 +150,30 @@ optional `ROCPROF` environment variable.
 
 Note: Server-side setup is not required to profile or analyze
 performance data from the CLI. It is provided as an additional mechanism to import performance
-data for examination within a detailed [Grafana GUI](https://github.com/grafana/grafana).
+data for examination within a detailed [Grafana](https://github.com/grafana/grafana) GUI.
 
 The recommended process for enabling the server-side of Omniperf is to
 use the provided Docker file to build the Grafana and MongoDB
 instance.
 
+### Install MongoDB Utils
+Omniperf uses [mongoimport](https://www.mongodb.com/docs/database-tools/mongoimport/) to upload data to Grafana's backend database
+```bash 
+$ wget mongodb-database-tools-ubuntu2004-x86_64-100.6.1.deb
+$ sudo apt intall ./mongodb-database-tools-ubuntu2004-x86_64-100.6.1.deb
+```
+> Find install for alternative distros [here](https://www.mongodb.com/download-center/database-tools/releases/archive)
+
 ### Persist Storage
 ```bash
 $ sudo mkdir -p /usr/local/persist && cd /usr/local/persist/
 $ sudo mkdir -p grafana-storage mongodb
-$ sudo mkdir -p grafana-storage mongodb
+$ sudo docker volume create --driver local --opt type=none --opt device=/usr/local/persist/grafana-storage --opt o=bind grafana-storage
+$ sudo docker volume create --driver local --opt type=none --opt device=/usr/local/persist/mongodb --opt o=bind grafana-mongo-db
 ```
 
 ### Build and Launch
 ```bash
 $ sudo docker-compose build
-$ sudo docker-compose up
+$ sudo docker-compose up -d
 ```

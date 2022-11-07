@@ -34,8 +34,7 @@
 
 import sys
 
-if sys.hexversion < 0x03070000:
-    sys.exit("Python 3.7 or newer is required.")
+
 
 import copy
 import sys
