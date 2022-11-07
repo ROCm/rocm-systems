@@ -43,18 +43,13 @@ jobs:
         run: |
           python3 -m pip install -r requirements.txt
           python3 -m pip install pyinstaller pytest pytest-cov mock
-          
-      - name: build and install 
+      - name: Configure and install
         run: |
-          ls
-          ls src
-          ls src/mibench
-          ls src/mibench/roofline
-          cmake -B build-omniperf -DCMAKE_INSTALL_PREFIX=/opt/omniperf -DROCM_VERSIONS="4.3.1" "4.5.2" "5.0.2" "5.1.3" "5.2.3"
-          cmake --build build-omniperf --target all
-          cmake --build build-omniperf --target install
+          mkdir build
+          cd build
+          cmake -DCMAKE_INSTALL_PREFIX=/opt/omniperf ..
+          make install
       - name: run ctest
         run: |
-          cd build-omniperf
+          cd build
           ctest --verbose -R test_analyze_commands
-      
