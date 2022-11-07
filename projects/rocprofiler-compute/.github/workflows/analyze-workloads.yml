@@ -1,12 +1,12 @@
 # This is a basic workflow to help you get started with Actions
 
-name: analyze workloads
+name: analyze-workloads
 
 
 # Controls when the workflow will run
 on:
   push:
-    branches: [ main, dev ]
+    branches: [ main, dev, ci ]
   pull_request:
     branches: [ main, dev ]
 
