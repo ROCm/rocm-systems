@@ -62,7 +62,7 @@ Next, install Python dependencies and complete the Omniperf configuration/instal
 $ export INSTALL_DIR=<your-top-level-desired-install-path>
 
 # install python deps
-$ python3 -m pip install --system -t ${INSTALL_DIR}/python-libs -r requirements.txt
+$ python3 -m pip install -t ${INSTALL_DIR}/python-libs -r requirements.txt
 
 # configure Omniperf for shared install
 $ mkdir build
@@ -159,7 +159,7 @@ instance.
 ### Install MongoDB Utils
 Omniperf uses [mongoimport](https://www.mongodb.com/docs/database-tools/mongoimport/) to upload data to Grafana's backend database
 ```bash 
-$ wget mongodb-database-tools-ubuntu2004-x86_64-100.6.1.deb
+$ wget https://fastdl.mongodb.org/tools/db/mongodb-database-tools-ubuntu2004-x86_64-100.6.1.deb
 $ sudo apt intall ./mongodb-database-tools-ubuntu2004-x86_64-100.6.1.deb
 ```
 > Find install for alternative distros [here](https://www.mongodb.com/download-center/database-tools/releases/archive)
