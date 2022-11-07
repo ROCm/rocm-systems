@@ -52,7 +52,7 @@ For example, if one wants to inspect Dispatch Range from 17 to 48, inclusive, th
 ### Incremental Profiling
 Omniperf supports incremental profiling to significantly speed up performance analysis.
 
-> Refer to [*IP Block profiling*](performance_analysis.md#ip-block-profiling) section for this command. 
+> Refer to [*IP Block profiling*](https://amdresearch.github.io/omniperf/performance_analysis.html#ip-block-profiling) section for this command. 
 
 By default, the entire application is profiled to collect perfmon counter for all IP blocks, giving a system level view of where the workload stands in terms of performance optimization opportunities and bottlenecks. 
 
