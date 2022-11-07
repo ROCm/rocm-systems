@@ -382,7 +382,10 @@ def omniperf_profile(args):
         # Skip roofline if --no-roof is set.
         if not args.no_roof:
             target_binary = detect_roofline()
-            path_to_binary = str(OMNIPERF_HOME) + "/utils/rooflines/roofline" + "-" + DISTRO_MAP[target_binary["distro"]] + "-" + args.target.lower() + "-rocm" + target_binary["rocm_ver"]
+            if target_binary["rocm_ver"] == "override":
+                path_to_binary = target_binary["path"]
+            else:
+                path_to_binary = str(OMNIPERF_HOME) + "/utils/rooflines/roofline" + "-" + DISTRO_MAP[target_binary["distro"]] + "-" + args.target.lower() + "-rocm" + target_binary["rocm_ver"]
             # Distro is valid but cant find rocm ver
             if not os.path.exists(path_to_binary):
                 print(
