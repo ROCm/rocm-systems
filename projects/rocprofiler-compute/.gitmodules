@@ -7,4 +7,4 @@
 	url = git@github.com:AARInternal/waveparser.git
 [submodule "src/multevent"]
 	path = src/multevent
-	url = https://github.com/AARInternal/multevent
+	url = git@github.com:AARInternal/multevent.git
