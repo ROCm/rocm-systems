@@ -29,6 +29,7 @@ from dash.dash_table import FormatTemplate
 from dash.dash_table.Format import Format, Scheme, Symbol
 from dash import html, dash_table
 from dash.dependencies import Input, Output, State
+import dash_bootstrap_components as dbc
 
 from dash import dcc
 import plotly.express as px
@@ -319,8 +320,10 @@ def build_layout(
 
     app.layout.children = html.Div(
         children=[
-            get_header(runs[path_to_dir].raw_pmc, input_filters, filt_kernel_names),
-            html.Div(id="container", children=[]),
+            dbc.Spinner(children=[
+                get_header(runs[path_to_dir].raw_pmc, input_filters, filt_kernel_names),
+                html.Div(id="container", children=[]),
+            ], fullscreen=True, color="primary", spinner_style={"width": "6rem", "height": "6rem"})
         ]
     )
 
