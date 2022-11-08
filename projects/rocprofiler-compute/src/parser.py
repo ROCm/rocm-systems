@@ -80,7 +80,7 @@ def parse(my_parser):
         "-v", "--version", action="version", version="%(PROG)s (" + VER + ")"
     )
     general_group.add_argument(
-        "-V", "--verbose", help="Increase output verbosity", action="store_true"
+        "-V", "--verbose", help="Increase output verbosity", action="count", default=0
     )
 
     profile_group.add_argument(
@@ -231,7 +231,7 @@ def parse(my_parser):
         "-v", "--version", action="version", version="%(PROG)s (" + VER + ")"
     )
     general_group.add_argument(
-        "-V", "--verbose", help="Increase output verbosity", action="store_true"
+        "-V", "--verbose", help="Increase output verbosity", action="count", default=0
     )
 
     interaction_group.add_argument(
@@ -331,7 +331,7 @@ def parse(my_parser):
         "-v", "--version", action="version", version="%(PROG)s (" + VER + ")"
     )
     general_group.add_argument(
-        "-V", "--verbose", help="Increase output verbosity", action="store_true"
+        "-V", "--verbose", help="Increase output verbosity", action="count", default=0
     )
 
     analyze_group.add_argument(

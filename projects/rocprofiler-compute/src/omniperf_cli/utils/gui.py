@@ -320,10 +320,17 @@ def build_layout(
 
     app.layout.children = html.Div(
         children=[
-            dbc.Spinner(children=[
-                get_header(runs[path_to_dir].raw_pmc, input_filters, filt_kernel_names),
-                html.Div(id="container", children=[]),
-            ], fullscreen=True, color="primary", spinner_style={"width": "6rem", "height": "6rem"})
+            dbc.Spinner(
+                children=[
+                    get_header(
+                        runs[path_to_dir].raw_pmc, input_filters, filt_kernel_names
+                    ),
+                    html.Div(id="container", children=[]),
+                ],
+                fullscreen=True,
+                color="primary",
+                spinner_style={"width": "6rem", "height": "6rem"},
+            )
         ]
     )
 
@@ -338,10 +345,10 @@ def build_layout(
         runs[path_to_dir].dfs = copy.deepcopy(archConfigs.dfs)  # reset the equations
         # Generate original raw df
         runs[path_to_dir].raw_pmc = file_io.create_df_pmc(path_to_dir)
-        if verbose:
+        if verbose >= 1:
             print("disp-filter is ", disp_filt)
             print("kernel-filter is ", kernel_filter)
-            print("gpu-filter is ", gcd_filter)
+            print("gpu-filter is ", gcd_filter, "\n")
         runs[path_to_dir].filter_kernel_ids = kernel_filter
         runs[path_to_dir].filter_gpu_ids = gcd_filter
         runs[path_to_dir].filter_dispatch_ids = disp_filt
