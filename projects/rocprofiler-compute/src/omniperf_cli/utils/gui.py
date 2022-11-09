@@ -308,9 +308,7 @@ def build_layout(
     Build gui layout
     """
     comparable_columns = parser.build_comparable_columns(time_unit)
-
     base_run, base_data = next(iter(runs.items()))
-
     app.layout = html.Div(style={"backgroundColor": "rgb(50, 50, 50)" if IS_DARK else ""})
 
     filt_kernel_names = []
@@ -343,6 +341,7 @@ def build_layout(
     )
     def generate_from_filter(disp_filt, kernel_filter, gcd_filter, div_children):
         runs[path_to_dir].dfs = copy.deepcopy(archConfigs.dfs)  # reset the equations
+        panel_configs = copy.deepcopy(archConfigs.panel_configs)
         # Generate original raw df
         runs[path_to_dir].raw_pmc = file_io.create_df_pmc(path_to_dir)
         if verbose >= 1:
@@ -361,11 +360,27 @@ def build_layout(
             time_unit,
             num_results,
         )
-        # Evaluate metrics and table data from the raw df
         is_gui = True
+        # Only display basic metrics if no filters are applied
+        if not (disp_filt or kernel_filter or gcd_filter):
+            temp = {}
+            keep = [1, 201, 101, 1901]
+            for key in runs[path_to_dir].dfs:
+                if keep.count(key) != 0:
+                    temp[key] = runs[path_to_dir].dfs[key]
+
+            runs[path_to_dir].dfs = temp
+            temp = {}
+            keep = [0, 100, 200, 1900]
+            for key in panel_configs:
+                if keep.count(key) != 0:
+                    temp[key] = panel_configs[key]
+            panel_configs = temp
+
         parser.load_table_data(
             runs[path_to_dir], path_to_dir, True, debug
         )  # Note: All the filtering happens in this function
+
         div_children = []
         div_children.append(
             get_memchart(archConfigs.panel_configs[1900]["data source"], base_data)
@@ -379,7 +394,7 @@ def build_layout(
             )
         )
         # Iterate over each section as defined in panel configs
-        for panel_id, panel in archConfigs.panel_configs.items():
+        for panel_id, panel in panel_configs.items():
             title = str(panel_id // 100) + ". " + panel["title"]
             section_title = (
                 panel["title"]
