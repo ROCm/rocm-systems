@@ -650,7 +650,6 @@ def apply_filters(workload, is_gui, debug):
         # NB: support ignoring the 1st n dispatched execution by '> n'
         #     The better way may be parsing python slice string
         for d in workload.filter_dispatch_ids:
-            print("len of ret_df is ", len(ret_df))
             if int(d) > len(ret_df) - 2:  # subtract 2 bc of the two header rows
                 print("{} is an invalid dispatch id.".format(d))
                 sys.exit(1)
@@ -674,12 +673,7 @@ def apply_filters(workload, is_gui, debug):
     return ret_df
 
 
-def load_table_data(workload, dir, is_gui, debug):
-    """
-    Load data for all "raw_csv_table".
-    Calculate mertric value for all "metric_table".
-    """
-
+def load_kernel_top(workload, dir):
     # NB:
     #   - Do pmc_kernel_top.csv loading before eval_metric because we need the kernel names.
     #   - There might be a better way/timing to load raw_csv_table.
@@ -698,8 +692,15 @@ def load_table_data(workload, dir, is_gui, debug):
             #   All transposed columns should be marked with a general header,
             #   so tty could detect them and show them correctly in comparison.
             tmp[id].columns = ["Info"]
-
     workload.dfs.update(tmp)
+
+
+def load_table_data(workload, dir, is_gui, debug):
+    """
+    Load data for all "raw_csv_table".
+    Calculate mertric value for all "metric_table".
+    """
+    load_kernel_top(workload, dir)
 
     eval_metric(
         workload.dfs,

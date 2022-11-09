@@ -175,9 +175,7 @@ def omniperf_cli(args):
                 args.path[0][0]
             )  # create mega df
             is_gui = False
-            # parser.load_table_data(
-            #     runs[args.path[0][0]], args.path[0][0], is_gui, args.g
-            # )  # create the loaded table
+            parser.load_kernel_top(runs[args.path[0][0]], args.path[0][0])
 
             input_filters = {
                 "kernel": runs[args.path[0][0]].filter_kernel_ids,
