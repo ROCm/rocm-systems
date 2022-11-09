@@ -1,6 +1,4 @@
-[![Docs](https://github.com/AMDResearch/omniperf/actions/workflows/pages/pages-build-deployment/badge.svg?branch=gh-pages)](https://amdresearch.github.io/omniperf/)
-
-[![GitHub commits since last release](https://img.shields.io/github/commits-since/AMDResearch/omniperf/latest/dev.svg)](https://github.com/AMDResearch/omniperf/compare/main...dev)
+[![Docs](https://github.com/AMDResearch/omniperf/actions/workflows/pages/pages-build-deployment/badge.svg?branch=gh-pages)](https://amdresearch.github.io/omniperf/) [![GitHub commits since last release](https://img.shields.io/github/commits-since/AMDResearch/omniperf/latest/dev.svg)](https://github.com/AMDResearch/omniperf/compare/main...dev)
 
 # Omniperf
 
