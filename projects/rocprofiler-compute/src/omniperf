@@ -318,6 +318,7 @@ def omniperf_profile(args):
     print("Command: ", args.remaining)
     print("Kernel Selection: ", args.kernel)
     print("Dispatch Selection: ", args.dispatch)
+
     if args.ipblocks == None:
         print("IP Blocks: All")
     else:
@@ -326,9 +327,47 @@ def omniperf_profile(args):
     # Set up directories
     workload_dir = args.path + "/" + args.name + "/" + args.target
     perfmon_dir = str(OMNIPERF_HOME) + "/perfmon_pub"
+    
+    if not args.lucky == None and args.lucky == True:
+        print("You're feeling lucky - only profiling top N kernels")
+        #look for whether workload_dir exists  - create if not
+        try:
+            os.makedirs(workload_dir, exist_ok = True)
+        except Exception as e:
+            print("Unable to create workload directory: ", workload_dir)
+            print(e)
+            sys.exit(1)
+        subprocess.run(
+            [
+                rocprof_cmd,
+                # "-i", fname,
+                # "-m", perfmon_dir + "/" + "metrics.xml",
+                "--timestamp",
+                "on",
+                "-o",
+                workload_dir + "/" + "timestamps.csv",
+                '"' + args.remaining + '"',
+            ]
+        )
+        df_stamps = pd.read_csv(workload_dir + "/timestamps.csv")
+        df_elapsed = df_stamps['EndNs'] - df_stamps['BeginNs']
+        df_stamps['Duration'] = df_elapsed
+        if args.dispatch == None:
+            args.dispatch = list(map(lambda x: str(x) + ':' + str(x), df_stamps.sort_values(by=['Duration'], ascending=False)['Index'].iloc[0:5].tolist()))
+        else:
+            ids = df_stamps.sort_values(by=['Duration'], ascending=False)['Index'].iloc[0:5].tolist()
+            dispatch = {}
+            for d in ids:
+                dispatch[d] = d
+            for d in args.dispatch:
+                dispatch[d] = d
+            args.dispatch = list(map(lambda x: str(x) + ':' + str(x),dispatch.values()))
+
+
 
     # Perfmon filtering
     perfmon_filter(workload_dir, perfmon_dir, args)
+
 
     # Workload profiling
     for fname in glob.glob(workload_dir + "/perfmon/*.txt"):
@@ -351,7 +390,7 @@ def omniperf_profile(args):
                     "sed",
                     "-i",
                     "-r",
-                    "s%^(range:).*%" + "range: " + ",".join(args.dispatch) + "%g",
+                    "s%^(range:).*%" + "range: " + " ".join(args.dispatch) + "%g",
                     fname,
                 ]
             )

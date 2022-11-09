@@ -117,6 +117,15 @@ def parse(my_parser):
         help="\t\t\tKernel filtering.",
     )
     profile_group.add_argument(
+        "-l",
+        "--i-feel-lucky",
+        required=False,
+        default=False,
+        action="store_true",
+        dest="lucky",
+        help="\t\t\tProfile only the most time consuming kernels.",
+    )
+    profile_group.add_argument(
         "-b",
         "--ipblocks",
         type=str,
