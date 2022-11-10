@@ -695,7 +695,7 @@ def load_kernel_top(workload, dir):
     workload.dfs.update(tmp)
 
 
-def load_table_data(workload, dir, is_gui, debug):
+def load_table_data(workload, dir, is_gui, debug, verbose):
     """
     Load data for all "raw_csv_table".
     Calculate mertric value for all "metric_table".
@@ -716,9 +716,11 @@ def load_table_data(workload, dir, is_gui, debug):
     out_path = os.path.join(dir, name)
     try:
         os.mkdir(out_path)
-        print("Created a Saved Analysis folder")
+        if verbose >= 1:
+            print("Created a Saved Analysis folder")
     except OSError as error:
-        print("Saved Analysis folder exists")
+        if verbose >= 1:
+            print("Saved Analysis folder exists")
     for id, df in workload.dfs.items():
         if "coll_level" in list(df.columns):
             df = df.drop(["coll_level", "Tips"], axis=1)

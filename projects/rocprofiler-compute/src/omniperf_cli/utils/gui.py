@@ -378,7 +378,7 @@ def build_layout(
             panel_configs = temp
 
         parser.load_table_data(
-            runs[path_to_dir], path_to_dir, True, debug
+            runs[path_to_dir], path_to_dir, True, debug, verbose
         )  # Note: All the filtering happens in this function
 
         div_children = []
