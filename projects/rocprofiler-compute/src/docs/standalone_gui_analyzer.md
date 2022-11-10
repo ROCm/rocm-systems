@@ -1,4 +1,4 @@
-# Standalone GUI Analyzer
+# Web-based GUI Analysis
 
 ```eval_rst
 .. toctree::

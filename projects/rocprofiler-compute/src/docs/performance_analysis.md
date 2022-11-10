@@ -1,4 +1,4 @@
-# Omniperf Performance Analysis
+# Performance Analysis
 
 ```eval_rst
 .. toctree::

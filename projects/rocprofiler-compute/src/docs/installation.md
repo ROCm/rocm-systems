@@ -1,4 +1,4 @@
-# Omniperf Deployment
+# Deployment
 
 ```eval_rst
 .. toctree::
@@ -146,7 +146,7 @@ optional `ROCPROF` environment variable.
 
 ---
 
-## Omniperf Server Setup
+## Server-side Setup
 
 Note: Server-side setup is not required to profile or analyze
 performance data from the CLI. It is provided as an additional mechanism to import performance

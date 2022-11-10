@@ -1,4 +1,4 @@
-# Omniperf Grafana GUI Analyzer
+# Grafana-based Analysis
 
 ```eval_rst
 .. toctree::
