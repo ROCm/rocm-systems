@@ -273,5 +273,5 @@ install(
 # Source tarball
 set(CPACK_SOURCE_GENERATOR "TGZ")
 set(CPACK_SOURCE_PACKAGE_FILE_NAME ${CMAKE_PROJECT_NAME}-${PROJECT_VERSION})
-set(CPACK_SOURCE_IGNORE_FILES ".*~$" \.git/ \.github /tests /build)
+set(CPACK_SOURCE_IGNORE_FILES ".*~$" \.git/ \.github \.gitmodules \.gitignore /tests /build)
 include(CPack)
