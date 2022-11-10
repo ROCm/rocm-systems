@@ -398,6 +398,8 @@ def omniperf_profile(args):
                     path_to_binary,
                     "-o",
                     workload_dir + "/" + "roofline.csv",
+                    "-d",
+                    str(args.device),
                 ]
             )
 
