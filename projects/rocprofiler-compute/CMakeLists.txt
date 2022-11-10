@@ -140,7 +140,7 @@ if(LOCALHOST MATCHES ".*\.crusher\.olcf\.ornl\.gov")
 endif()
 
 # Thera mods
-if(LOCALHOST MATCHES ".*\.thera\.amd\.com")
+if(LOCALHOST MATCHES "TheraS01|.*\.thera\.amd\.com|thera-hn")
     list(APPEND CMAKE_MESSAGE_INDENT "  ")
     message(STATUS "Using thera-specific modulefile modification")
     file(READ ${PROJECT_SOURCE_DIR}/cmake/modfile.thera.mod mod_additions)
