@@ -374,9 +374,9 @@ omniperf database <interaction type> [connection options]
                                         
 Examples:
                                         
-        omniperf database --import -H pavii1 -u amd -t asw -w workloads/vcopy/mi200/
+        omniperf database --import -H pavii1 -u temp -t asw -w workloads/vcopy/mi200/
                                         
-        omniperf database --remove -H pavii1 -u amd -w omniperf_asw_sample_mi200
+        omniperf database --remove -H pavii1 -u temp -w omniperf_asw_sample_mi200
                                         
 -------------------------------------------------------------------------------
 
@@ -406,7 +406,7 @@ Connection Options:
 
 **omniperf import for vcopy:**
 ```shell
-$ omniperf database --import -H pavii1 -u amd -t asw -w workloads/vcopy/mi200/
+$ omniperf database --import -H pavii1 -u temp -t asw -w workloads/vcopy/mi200/
 ROC Profiler:  /usr/bin/rocprof
  
 --------

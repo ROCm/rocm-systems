@@ -24,8 +24,8 @@ services:
     image: mongo
     restart: always
     environment:
-      MONGO_INITDB_ROOT_USERNAME: amd
-      MONGO_INITDB_ROOT_PASSWORD: amd123
+      MONGO_INITDB_ROOT_USERNAME: temp
+      MONGO_INITDB_ROOT_PASSWORD: temp123
     volumes:
       - grafana-mongo-db:/data/db
     ports:

@@ -211,8 +211,8 @@ def parse(my_parser):
 
                                         \n\n-------------------------------------------------------------------------------
                                         \nExamples:
-                                        \n\tomniperf database --import -H pavii1 -u amd -t asw -w workloads/vcopy/mi200/
-                                        \n\tomniperf database --remove -H pavii1 -u amd -w omniperf_asw_sample_mi200
+                                        \n\tomniperf database --import -H pavii1 -u temp -t asw -w workloads/vcopy/mi200/
+                                        \n\tomniperf database --remove -H pavii1 -u temp -w omniperf_asw_sample_mi200
                                         \n-------------------------------------------------------------------------------\n
                                         """,
         prog="tool",
