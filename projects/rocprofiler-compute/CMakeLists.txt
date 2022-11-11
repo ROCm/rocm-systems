@@ -40,9 +40,9 @@ if(Git_FOUND AND EXISTS "${PROJECT_SOURCE_DIR}/.git")
     execute_process(
         COMMAND git log --pretty=format:%h -n 1
         OUTPUT_VARIABLE OMNIPERF_GIT_REV
-        OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+        OUTPUT_STRIP_TRAILING_WHITESPACE)
+    message(STATUS "Git revision: ${OMNIPERF_GIT_REV}")
 endif()
-message(STATUS "Git revision: ${GIT_REV}")
 
 set(CMAKE_BUILD_TYPE "Release")
 if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
@@ -211,7 +211,7 @@ add_test(
 install(PROGRAMS src/omniperf TYPE BIN)
 install(FILES src/parser.py TYPE BIN)
 install(FILES src/common.py TYPE BIN)
-install(FILES VERSION DESTINATION ${CMAKE_INSTALL_PREFIX})
+install(FILES VERSION VERSION.sha DESTINATION ${CMAKE_INSTALL_PREFIX})
 # src/omniperf_cli
 install(
     DIRECTORY src/omniperf_cli

@@ -26,11 +26,16 @@ from common import (
     OMNIPERF_HOME,
     PROG,
     SOC_LIST,
-    VER,
 )  # Import global variables
+from common import getVersion, getVersionDisplay
 
 
 def parse(my_parser):
+
+    # versioning info
+    vData = getVersion()
+    versionString = getVersionDisplay(vData["version"], vData["sha"], vData["mode"])
+
     # -----------------------------------------
     # Parse arguments (dependent on mode)
     # -----------------------------------------
@@ -40,9 +45,7 @@ def parse(my_parser):
     general_group = my_parser.add_argument_group("General Options")
     my_parser._positionals.title = "Modes"
     my_parser._optionals.title = "Help"
-    general_group.add_argument(
-        "-v", "--version", action="version", version=PROG + " (" + VER + ")"
-    )
+    general_group.add_argument("-v", "--version", action="version", version=versionString)
 
     subparsers = my_parser.add_subparsers(
         dest="mode", help="Select mode of interaction with the target application:"
@@ -76,13 +79,10 @@ def parse(my_parser):
     profile_group = profile_parser.add_argument_group("Profile Options")
     roofline_group = profile_parser.add_argument_group("Standalone Roofline Options")
 
-    general_group.add_argument(
-        "-v", "--version", action="version", version=PROG + " (" + VER + ")"
-    )
+    general_group.add_argument("-v", "--version", action="version", version=versionString)
     general_group.add_argument(
         "-V", "--verbose", help="Increase output verbosity", action="count", default=0
     )
-
     profile_group.add_argument(
         "-n",
         "--name",
@@ -227,9 +227,7 @@ def parse(my_parser):
     interaction_group = db_parser.add_argument_group("Interaction Type")
     connection_group = db_parser.add_argument_group("Connection Options")
 
-    general_group.add_argument(
-        "-v", "--version", action="version", version=PROG + " (" + VER + ")"
-    )
+    general_group.add_argument("-v", "--version", action="version", version=versionString)
     general_group.add_argument(
         "-V", "--verbose", help="Increase output verbosity", action="count", default=0
     )
@@ -327,9 +325,7 @@ def parse(my_parser):
     general_group = analyze_parser.add_argument_group("General Options")
     analyze_group = analyze_parser.add_argument_group("Analyze Options")
 
-    general_group.add_argument(
-        "-v", "--version", action="version", version=PROG + " (" + VER + ")"
-    )
+    general_group.add_argument("-v", "--version", action="version", version=versionString)
     general_group.add_argument(
         "-V", "--verbose", help="Increase output verbosity", action="count", default=0
     )

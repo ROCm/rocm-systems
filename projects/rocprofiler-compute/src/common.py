@@ -22,8 +22,10 @@
 
 import os
 import sys
+import io
 from pathlib import Path
 import subprocess
+import shutil
 
 OMNIPERF_HOME = Path(__file__).resolve().parent
 
@@ -31,10 +33,51 @@ OMNIPERF_HOME = Path(__file__).resolve().parent
 PROG = "omniperf"
 SOC_LIST = ["mi50", "mi100", "mi200"]
 DISTRO_MAP = {"platform:el8": "rhel8", "15.3": "sle15sp3", "20.04": "ubuntu20_04"}
-version = os.path.join(OMNIPERF_HOME.parent, "VERSION")
-try:
-    with open(version, "r") as file:
-        VER = file.read().replace("\n", "")
-except EnvironmentError:
-    print("ERROR: Cannot find VERSION file at {}".format(version))
-    sys.exit(1)
+
+
+def getVersion():
+    # symantic version info
+    version = os.path.join(OMNIPERF_HOME.parent, "VERSION")
+    try:
+        with open(version, "r") as file:
+            VER = file.read().replace("\n", "")
+    except EnvironmentError:
+        print("ERROR: Cannot find VERSION file at {}".format(version))
+        sys.exit(1)
+
+    # git version info
+    gitDir = os.path.join(OMNIPERF_HOME.parent, ".git")
+    if (shutil.which("git") is not None) and os.path.exists(gitDir):
+        gitQuery = subprocess.run(
+            ["git", "log", "--pretty=format:%h", "-n", "1"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+        )
+        if gitQuery.returncode != 0:
+            SHA = "unknown"
+            MODE = "unknown"
+        else:
+            SHA = gitQuery.stdout.decode("utf-8")
+            MODE = "dev"
+    else:
+        shaFile = os.path.join(OMNIPERF_HOME.parent, "VERSION.sha")
+        try:
+            with open(shaFile, "r") as file:
+                SHA = file.read().replace("\n", "")
+        except EnvironmentError:
+            print("ERROR: Cannot find VERSION.sha file at {}".format(shaFile))
+            sys.exit(1)
+
+        MODE = "release"
+
+    versionData = {"version": VER, "sha": SHA, "mode": MODE}
+    return versionData
+
+
+def getVersionDisplay(version, sha, mode):
+    buf = io.StringIO()
+    print("-" * 40, file=buf)
+    print("Omniperf version: %s (%s)" % (version, mode), file=buf)
+    print("Git revision:     %s" % sha, file=buf)
+    print("-" * 40, file=buf)
+    return buf.getvalue()
