@@ -183,7 +183,7 @@ def get_roofline(path_to_dir, ret_df, verbose):
     # Generate roofline plots
     print("Path: ", path_to_dir)
     ai_data = roofline_calc.plot_application("kernels", ret_df, verbose)
-    if verbose:
+    if verbose >= 1:
         # print AI data for each mem level
         for i in ai_data:
             print(i, "->", ai_data[i])

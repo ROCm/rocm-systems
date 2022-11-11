@@ -2,8 +2,8 @@ astunparse==1.6.2
 colorlover
 dash
 matplotlib
-numpy
-pandas
+numpy>=1.17.5
+pandas>=1.4.3
 pymongo
 pyyaml
 tabulate

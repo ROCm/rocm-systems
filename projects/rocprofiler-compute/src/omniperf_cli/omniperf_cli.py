@@ -175,9 +175,7 @@ def omniperf_cli(args):
                 args.path[0][0]
             )  # create mega df
             is_gui = False
-            # parser.load_table_data(
-            #     runs[args.path[0][0]], args.path[0][0], is_gui, args.g
-            # )  # create the loaded table
+            parser.load_kernel_top(runs[args.path[0][0]], args.path[0][0])
 
             input_filters = {
                 "kernel": runs[args.path[0][0]].filter_kernel_ids,
@@ -217,7 +215,7 @@ def omniperf_cli(args):
             runs[d[0]].raw_pmc = file_io.create_df_pmc(d[0])  # creates mega dataframe
             is_gui = False
             parser.load_table_data(
-                runs[d[0]], d[0], is_gui, args.g
+                runs[d[0]], d[0], is_gui, args.g, args.verbose
             )  # create the loaded table
         if args.list_kernels:
             tty.show_kernels(runs, archConfigs["gfx90a"], output, args.decimal)

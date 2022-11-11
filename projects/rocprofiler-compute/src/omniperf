@@ -43,9 +43,10 @@ from common import (
     OMNIPERF_HOME,
     PROG,
     SOC_LIST,
-    VER,
     DISTRO_MAP,
 )  # Import global variables
+
+from common import getVersion
 
 ################################################
 # Helper Functions
@@ -305,7 +306,7 @@ def run_prof(fname, workload_dir, perfmon_dir, cmd, verbose):
     )
 
 
-def omniperf_profile(args):
+def omniperf_profile(args,VER):
     # Verify valid target
     if args.target not in SOC_LIST:
         parse.print_help(sys.stderr)
@@ -398,6 +399,8 @@ def omniperf_profile(args):
                     path_to_binary,
                     "-o",
                     workload_dir + "/" + "roofline.csv",
+                    "-d",
+                    str(args.device),
                 ]
             )
 
@@ -417,6 +420,9 @@ def main():
     )
     parse(my_parser)
     args = my_parser.parse_args()
+
+    vData = getVersion()
+    VER   = vData['version']
 
     if args.mode == None:
         throw_parse_error(
@@ -515,8 +521,8 @@ def main():
 
         # Profile only
         else:
-            print("\n--------\nProfile only\n--------\n")
-            omniperf_profile(args)
+            print("\n-------------\nProfile only\n-------------\n")
+            omniperf_profile(args,VER)
 
     ##############
     # DATABASE MODE

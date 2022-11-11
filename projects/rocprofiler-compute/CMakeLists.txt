@@ -33,6 +33,17 @@ project(
 include(ExternalProject)
 include(GNUInstallDirs)
 
+# version control info
+find_package(Git)
+
+if(Git_FOUND AND EXISTS "${PROJECT_SOURCE_DIR}/.git")
+    execute_process(
+        COMMAND git log --pretty=format:%h -n 1
+        OUTPUT_VARIABLE OMNIPERF_GIT_REV
+        OUTPUT_STRIP_TRAILING_WHITESPACE)
+    message(STATUS "Git revision: ${OMNIPERF_GIT_REV}")
+endif()
+
 set(CMAKE_BUILD_TYPE "Release")
 if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
     set(CMAKE_INSTALL_PREFIX
@@ -140,7 +151,7 @@ if(LOCALHOST MATCHES ".*\.crusher\.olcf\.ornl\.gov")
 endif()
 
 # Thera mods
-if(LOCALHOST MATCHES ".*\.thera\.amd\.com")
+if(LOCALHOST MATCHES "TheraS01|.*\.thera\.amd\.com|thera-hn")
     list(APPEND CMAKE_MESSAGE_INDENT "  ")
     message(STATUS "Using thera-specific modulefile modification")
     file(READ ${PROJECT_SOURCE_DIR}/cmake/modfile.thera.mod mod_additions)
@@ -150,6 +161,10 @@ if(LOCALHOST MATCHES ".*\.thera\.amd\.com")
         ${mod_additions})
     list(POP_BACK CMAKE_MESSAGE_INDENT)
 endif()
+
+# git versioning file
+configure_file(${PROJECT_SOURCE_DIR}/cmake/VERSION.sha.in
+               ${PROJECT_SOURCE_DIR}/VERSION.sha @ONLY)
 
 enable_testing()
 
@@ -196,7 +211,7 @@ add_test(
 install(PROGRAMS src/omniperf TYPE BIN)
 install(FILES src/parser.py TYPE BIN)
 install(FILES src/common.py TYPE BIN)
-install(FILES VERSION DESTINATION ${CMAKE_INSTALL_PREFIX})
+install(FILES VERSION VERSION.sha DESTINATION ${CMAKE_INSTALL_PREFIX})
 # src/omniperf_cli
 install(
     DIRECTORY src/omniperf_cli
@@ -272,6 +287,13 @@ install(
 
 # Source tarball
 set(CPACK_SOURCE_GENERATOR "TGZ")
-set(CPACK_SOURCE_PACKAGE_FILE_NAME ${CMAKE_PROJECT_NAME}-${PROJECT_VERSION})
-set(CPACK_SOURCE_IGNORE_FILES ".*~$" \.git/ \.github /tests /build)
+set(CPACK_SOURCE_PACKAGE_FILE_NAME ${CMAKE_PROJECT_NAME}-${FULL_VERSION_STRING})
+set(CPACK_SOURCE_IGNORE_FILES
+    ".*~$"
+    \.git/
+    \.github
+    \.gitmodules
+    \.gitignore
+    /tests
+    /build)
 include(CPack)

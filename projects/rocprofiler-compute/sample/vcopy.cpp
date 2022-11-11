@@ -2,6 +2,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
+#include <iostream>
+using namespace std;
 
 
 #define HIP_ASSERT(x) (assert((x)==hipSuccess))
@@ -19,7 +21,7 @@ __global__ void vecCopy(double *a, double *b, double *c, int n,int stride)
 
 void usage()
 {
-  printf("\nUsage: vcopy [n] [blocksize]\n\n");
+  printf("\nUsage: vcopy [n] [blocksize] {dev}\n\n");
   exit(1);
   return;
 }
@@ -45,12 +47,23 @@ int main( int argc, char* argv[] )
     double *d_c;
 
     int stride = 1;
+    int devId = 0;
 
     if(argc < 3)
       usage();
+    if(argc > 3)
+      devId = atoi(argv[3]);
 
     n = atoi(argv[1]);
     blockSize = atoi(argv[2]);
+
+    int numGpuDevices;
+    HIP_ASSERT(hipGetDeviceCount(&numGpuDevices));
+    if(devId >= numGpuDevices)
+      devId = 0;
+    HIP_ASSERT(hipSetDevice(devId));
+
+    printf("vcopy testing on GCD %d\n", devId);
 
     assert(n > 0);
     assert(blockSize > 0);

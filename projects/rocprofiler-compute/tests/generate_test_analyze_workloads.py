@@ -35,7 +35,7 @@ if __name__ == "__main__":
                         test = (
                             "\n\ndef test_import_"
                             + workload_name
-                            + "_mi100():\n    with patch('sys.argv',['omniperf', 'database', '--import', '-H', 'localhost', '-u', 'amd', '-p', 'amd123', '-t', 'asw', '-w', '"
+                            + "_mi100():\n    with patch('sys.argv',['omniperf', 'database', '--import', '-H', 'localhost', '-u', 'temp', '-p', 'temp123', '-t', 'asw', '-w', '"
                             + workload
                             + "/mi100']): omniperf.main()"
                         )
@@ -65,7 +65,7 @@ if __name__ == "__main__":
                         test = (
                             "\n\ndef test_"
                             + workload_name
-                            + "_mi100():\n    with patch('sys.argv',['omniperf', 'database', '--import', '-H', 'localhost', '-u', '-p', 'amd123', 'amd', '-t', 'asw', '-w', '"
+                            + "_mi100():\n    with patch('sys.argv',['omniperf', 'database', '--import', '-H', 'localhost', '-u', 'temp', '-p', 'temp123', '-t', 'asw', '-w', '"
                             + workload
                             + "/mi100']): omniperf.main()"
                         )

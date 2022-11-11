@@ -13,8 +13,18 @@ jobs:
     env:
       INSTALL_DIR: /tmp/foo1
     steps:
+      - name: Set git sha mode
+        id: sha-mode
+        run: |
+          if [ "$EVENT" == 'pull_request' ]; then
+            echo "sha=${{github.event.pull_request.head.sha}}" >> $GITHUB_OUTPUT
+          else
+            echo "sha=$GITHUB_SHA" >> $GITHUB_OUTPUT
+          fi      
       - name: Checkout code
         uses: actions/checkout@v3
+        with:
+          ref: ${{ steps.sha-mode.sha }}
       - name: Cancel Previous Runs
         uses: styfle/cancel-workflow-action@0.11.0
       - name: Install Python
@@ -73,6 +83,8 @@ jobs:
       - name: Verify expected paths
         run: |
           test -d $INSTALL_DIR/omniperf
+          test -s $INSTALL_DIR/omniperf/VERSION
+          test -s $INSTALL_DIR/omniperf/VERSION.sha
           test -d $INSTALL_DIR/omniperf/bin
           test -x $INSTALL_DIR/omniperf/bin/omniperf
           test -d $INSTALL_DIR/modulefiles/omniperf

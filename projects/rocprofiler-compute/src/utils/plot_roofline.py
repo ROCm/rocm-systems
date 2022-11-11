@@ -294,7 +294,7 @@ def plot_application(inputs, verbose):
                     avgDuration / calls,
                 )
             )
-            if verbose:
+            if verbose >= 2:
                 print(
                     "Just added {} to AI_Data at index {}. # of calls: {}".format(
                         kernelName, index, calls
@@ -354,7 +354,7 @@ def plot_application(inputs, verbose):
                 + (row["SQ_INSTS_VALU_MFMA_MOPS_F64"] * 512)
             )
         except KeyError:
-            if verbose:
+            if verbose >= 2:
                 print("Skipped total_flops at index {}".format(index))
             pass
         try:
@@ -382,7 +382,7 @@ def plot_application(inputs, verbose):
                 )
             )
         except KeyError:
-            if verbose:
+            if verbose >= 2:
                 print("Skipped valu_flops at index {}".format(index))
             pass
 
@@ -393,7 +393,7 @@ def plot_application(inputs, verbose):
             mfma_flops_f64 += row["SQ_INSTS_VALU_MFMA_MOPS_F64"] * 512
             mfma_iops_i8 += row["SQ_INSTS_VALU_MFMA_MOPS_I8"] * 512
         except KeyError:
-            if verbose:
+            if verbose >= 2:
                 print("Skipped mfma ops at index {}".format(index))
             pass
 
@@ -402,14 +402,14 @@ def plot_application(inputs, verbose):
                 (row["SQ_LDS_IDX_ACTIVE"] - row["SQ_LDS_BANK_CONFLICT"]) * 4 * L2_BANKS
             )  # L2_BANKS = 32 (since assuming mi200)
         except KeyError:
-            if verbose:
+            if verbose >= 2:
                 print("Skipped lds_data at index {}".format(index))
             pass
 
         try:
             L1cache_data += row["TCP_TOTAL_CACHE_ACCESSES_sum"] * 64
         except KeyError:
-            if verbose:
+            if verbose >= 2:
                 print("Skipped L1cache_data at index {}".format(index))
             pass
 
@@ -421,7 +421,7 @@ def plot_application(inputs, verbose):
                 + row["TCP_TCC_READ_REQ_sum"] * 64
             )
         except KeyError:
-            if verbose:
+            if verbose >= 2:
                 print("Skipped L2cache_data at index {}".format(index))
             pass
         try:
@@ -432,7 +432,7 @@ def plot_application(inputs, verbose):
                 + ((row["TCC_EA_WRREQ_sum"] - row["TCC_EA_WRREQ_64B_sum"]) * 32)
             )
         except KeyError:
-            if verbose:
+            if verbose >= 2:
                 print("Skipped hbm_data at index {}".format(index))
             pass
 

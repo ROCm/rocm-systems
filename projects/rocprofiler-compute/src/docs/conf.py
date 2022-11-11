@@ -111,8 +111,8 @@ html_static_path = ["_static"]
 htmlhelp_basename = "Omniperfdoc"
 
 html_theme_options = {
-    # "analytics_id": "G-1HLBBRSTT9",  #  Provided by Google in your dashboard
-    # "analytics_anonymize_ip": False,
+    "analytics_id": "G-C5DYLCE9ED",  #  Provided by Google in your dashboard
+    "analytics_anonymize_ip": False,
     "logo_only": False,
     "display_version": True,
     "prev_next_buttons_location": "bottom",
