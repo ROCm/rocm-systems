@@ -65,6 +65,93 @@ The uniform color coding is applied to most visualizations (bars, table, diagram
 
 ![Grafana GUI Global Variables](images/global_variables.png)
 
+## Grafana GUI Import
+The omniperf database `--import` option imports the raw profiling data to Grafana's backend MongoDB database. This step is only required for Grafana GUI based performance analysis. 
+
+Each workload is imported to a separate database with the following naming convention:
+
+    omniperf_<team>_<database>_<soc>
+
+e.g., omniperf_asw_vcopy_mi200.
+
+Below is the sample command to import the *vcopy* profiling data.
+
+```shell
+$ omniperf database --help
+ROC Profiler:  /usr/bin/rocprof
+
+usage: 
+                                        
+omniperf database <interaction type> [connection options]
+
+                                        
+
+-------------------------------------------------------------------------------
+                                        
+Examples:
+                                        
+        omniperf database --import -H pavii1 -u temp -t asw -w workloads/vcopy/mi200/
+                                        
+        omniperf database --remove -H pavii1 -u temp -w omniperf_asw_sample_mi200
+                                        
+-------------------------------------------------------------------------------
+
+                                        
+
+Help:
+  -h, --help             show this help message and exit
+
+General Options:
+  -v, --version          show program's version number and exit
+  -V, --verbose          Increase output verbosity
+
+Interaction Type:
+  -i, --import                                          Import workload to Omniperf DB
+  -r, --remove                                          Remove a workload from Omniperf DB
+
+Connection Options:
+  -H , --host                                           Name or IP address of the server host.
+  -P , --port                                           TCP/IP Port. (DEFAULT: 27018)
+  -u , --username                                       Username for authentication.
+  -p , --password                                       The user's password. (will be requested later if it's not set)
+  -t , --team                                           Specify Team prefix.
+  -w , --workload                                       Specify name of workload (to remove) or path to workload (to import)
+  -k , --kernelVerbose                                  Specify Kernel Name verbose level 1-5. 
+                                                        Lower the level, shorter the kernel name. (DEFAULT: 2) (DISABLE: 5)
+```
+
+**omniperf import for vcopy:**
+```shell
+$ omniperf database --import -H pavii1 -u temp -t asw -w workloads/vcopy/mi200/
+ROC Profiler:  /usr/bin/rocprof
+ 
+--------
+Import Profiling Results
+--------
+ 
+Pulling data from  /home/amd/xlu/test/workloads/vcopy/mi200
+The directory exists
+Found sysinfo file
+KernelName shortening enabled
+Kernel name verbose level: 2
+Password:
+Password recieved
+-- Conversion & Upload in Progress --
+  0%|                                                                                                                                                                                                             | 0/11 [00:00<?, ?it/s]/home/amd/xlu/test/workloads/vcopy/mi200/SQ_IFETCH_LEVEL.csv
+  9%|█████████████████▉                                                                                                                                                                                   | 1/11 [00:00<00:01,  8.53it/s]/home/amd/xlu/test/workloads/vcopy/mi200/pmc_perf.csv
+ 18%|███████████████████████████████████▊                                                                                                                                                                 | 2/11 [00:00<00:01,  6.99it/s]/home/amd/xlu/test/workloads/vcopy/mi200/SQ_INST_LEVEL_SMEM.csv
+ 27%|█████████████████████████████████████████████████████▋                                                                                                                                               | 3/11 [00:00<00:01,  7.90it/s]/home/amd/xlu/test/workloads/vcopy/mi200/SQ_LEVEL_WAVES.csv
+ 36%|███████████████████████████████████████████████████████████████████████▋                                                                                                                             | 4/11 [00:00<00:00,  8.56it/s]/home/amd/xlu/test/workloads/vcopy/mi200/SQ_INST_LEVEL_LDS.csv
+ 45%|█████████████████████████████████████████████████████████████████████████████████████████▌                                                                                                           | 5/11 [00:00<00:00,  9.00it/s]/home/amd/xlu/test/workloads/vcopy/mi200/SQ_INST_LEVEL_VMEM.csv
+ 55%|███████████████████████████████████████████████████████████████████████████████████████████████████████████▍                                                                                         | 6/11 [00:00<00:00,  9.24it/s]/home/amd/xlu/test/workloads/vcopy/mi200/sysinfo.csv
+ 64%|█████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████▎                                                                       | 7/11 [00:00<00:00,  9.37it/s]/home/amd/xlu/test/workloads/vcopy/mi200/roofline.csv
+ 82%|█████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████▏                                   | 9/11 [00:00<00:00, 12.60it/s]/home/amd/xlu/test/workloads/vcopy/mi200/timestamps.csv
+100%|████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 11/11 [00:00<00:00, 11.05it/s]
+9 collections added.
+Workload name uploaded
+-- Complete! --
+```
+
 ## Omniperf Panels
 
 ### Overview
