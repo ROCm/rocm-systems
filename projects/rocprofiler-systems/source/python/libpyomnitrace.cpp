@@ -23,7 +23,8 @@
 #include "libpyomnitrace.hpp"
 #include "dl.hpp"
 #include "library/coverage.hpp"
-#include "library/impl/coverage.hpp"
+#include "library/coverage/impl.hpp"
+#include "omnitrace/categories.h"
 #include "omnitrace/user.h"
 
 #include <timemory/backends/process.hpp>
@@ -179,6 +180,8 @@ using profiler_vec_t       = std::vector<profiler_t>;
 using profiler_label_map_t = std::unordered_map<std::string, profiler_vec_t>;
 using profiler_index_map_t = std::unordered_map<uint32_t, profiler_label_map_t>;
 using strset_t             = std::unordered_set<std::string>;
+using note_t               = omnitrace_annotation_t;
+using annotations_t        = std::array<note_t, 6>;
 //
 namespace
 {
@@ -202,6 +205,7 @@ struct config
     bool                    include_line       = false;
     bool                    include_filename   = false;
     bool                    full_filepath      = false;
+    bool                    annotate_trace     = false;
     int32_t                 ignore_stack_depth = 0;
     int32_t                 base_stack_depth   = -1;
     int32_t                 verbose            = 0;
@@ -214,6 +218,12 @@ struct config
     strset_t                exclude_functions  = default_exclude_functions;
     strset_t                exclude_filenames  = default_exclude_filenames;
     std::vector<profiler_t> records            = {};
+    annotations_t           annotations = { note_t{ "file", OMNITRACE_STRING, nullptr },
+                                  note_t{ "line", OMNITRACE_INT32, nullptr },
+                                  note_t{ "lasti", OMNITRACE_INT32, nullptr },
+                                  note_t{ "argcount", OMNITRACE_INT32, nullptr },
+                                  note_t{ "nlocals", OMNITRACE_INT32, nullptr },
+                                  note_t{ "stacksize", OMNITRACE_INT32, nullptr } };
 };
 //
 inline config&
@@ -233,6 +243,7 @@ get_config()
         _tmp->include_line       = _instance->include_line;
         _tmp->include_filename   = _instance->include_filename;
         _tmp->full_filepath      = _instance->full_filepath;
+        _tmp->annotate_trace     = _instance->annotate_trace;
         _tmp->base_module_path   = _instance->base_module_path;
         _tmp->restrict_functions = _instance->restrict_functions;
         _tmp->restrict_filenames = _instance->restrict_filenames;
@@ -241,6 +252,7 @@ get_config()
         _tmp->exclude_functions  = _instance->exclude_functions;
         _tmp->exclude_filenames  = _instance->exclude_filenames;
         _tmp->verbose            = _instance->verbose;
+        _tmp->annotations        = _instance->annotations;
         // if full filepath is specified, include filename is implied
         if(_tmp->full_filepath && !_tmp->include_filename) _tmp->include_filename = true;
         return _tmp;
@@ -454,12 +466,29 @@ profiler_function(py::object pframe, const char* swhat, py::object arg)
 
     static thread_local strset_t _labels{};
     const auto&                  _label_ref = *_labels.emplace(_label).first;
+    auto                         _annotate  = _config.annotate_trace;
 
     // start function
     auto _profiler_call = [&]() {
-        _config.records.emplace_back(
-            [&_label_ref]() { omnitrace_pop_region(_label_ref.c_str()); });
-        omnitrace_push_region(_label_ref.c_str());
+        if(_annotate)
+        {
+            _config.annotations.at(0).value = const_cast<char*>(_full.c_str());
+            _config.annotations.at(1).value = &frame->f_lineno;
+            _config.annotations.at(2).value = &frame->f_lasti;
+            _config.annotations.at(3).value = &frame->f_code->co_argcount;
+            _config.annotations.at(4).value = &frame->f_code->co_nlocals;
+            _config.annotations.at(5).value = &frame->f_code->co_stacksize;
+        }
+
+        _config.records.emplace_back([&_label_ref, _annotate]() {
+            omnitrace_pop_category_region(OMNITRACE_CATEGORY_PYTHON, _label_ref.c_str(),
+                                          (_annotate) ? _config.annotations.data()
+                                                      : nullptr,
+                                          _config.annotations.size());
+        });
+        omnitrace_push_category_region(OMNITRACE_CATEGORY_PYTHON, _label_ref.c_str(),
+                                       (_annotate) ? _config.annotations.data() : nullptr,
+                                       _config.annotations.size());
     };
 
     // stop function
@@ -554,6 +583,10 @@ generate(py::module& _pymod)
     CONFIGURATION_PROPERTY("full_filepath", bool,
                            "Display the full filepath (instead of file basename)",
                            get_config().full_filepath)
+    CONFIGURATION_PROPERTY(
+        "annotate_trace", bool,
+        "Add detailed annotations to the trace about the executing function",
+        get_config().annotate_trace)
     CONFIGURATION_PROPERTY("verbosity", int32_t, "Verbosity of the logging",
                            get_config().verbose)
 

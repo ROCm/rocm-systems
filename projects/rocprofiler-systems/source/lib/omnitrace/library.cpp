@@ -50,6 +50,8 @@
 #include "library/thread_info.hpp"
 #include "library/timemory.hpp"
 #include "library/tracing.hpp"
+#include "library/utility.hpp"
+#include "omnitrace/categories.h"  // in omnitrace-user
 
 #include <timemory/signals/signal_handlers.hpp>
 #include <timemory/signals/types.hpp>
@@ -65,6 +67,7 @@
 #include <cstdio>
 #include <mutex>
 #include <string_view>
+#include <utility>
 
 using namespace omnitrace;
 
@@ -179,6 +182,100 @@ extern "C" void
 omnitrace_pop_region_hidden(const char* name)
 {
     component::category_region<category::user>::stop(name);
+}
+
+//======================================================================================//
+///
+///
+///
+//======================================================================================//
+
+namespace omnitrace
+{
+namespace
+{
+template <size_t Idx, size_t... Tail>
+void
+invoke_category_region_start(omnitrace_category_t _category, const char* name,
+                             omnitrace_annotation_t* _annotations,
+                             size_t _annotation_count, std::index_sequence<Idx, Tail...>)
+{
+    static_assert(Idx > OMNITRACE_CATEGORY_NONE && Idx < OMNITRACE_CATEGORY_LAST,
+                  "Error! index sequence should only contain values which are greater "
+                  "than OMNITRACE_CATEGORY_NONE and less than OMNITRACE_CATEGORY_LAST");
+
+    if(_category == Idx)
+    {
+        using category_type = category_type_id_t<Idx>;
+        component::category_region<category_type>::start(
+            name, [&](::perfetto::EventContext ctx) {
+                if(_annotations)
+                {
+                    for(size_t i = 0; i < _annotation_count; ++i)
+                        tracing::add_perfetto_annotation(ctx, _annotations[i]);
+                }
+            });
+    }
+    else
+    {
+        constexpr size_t remaining = sizeof...(Tail);
+        if constexpr(remaining > 0)
+            invoke_category_region_start(_category, name, _annotations, _annotation_count,
+                                         std::index_sequence<Tail...>{});
+    }
+}
+}  // namespace
+
+template <size_t Idx, size_t... Tail>
+void
+invoke_category_region_stop(omnitrace_category_t _category, const char* name,
+                            omnitrace_annotation_t* _annotations,
+                            size_t _annotation_count, std::index_sequence<Idx, Tail...>)
+{
+    static_assert(Idx > OMNITRACE_CATEGORY_NONE && Idx < OMNITRACE_CATEGORY_LAST,
+                  "Error! index sequence should only contain values which are greater "
+                  "than OMNITRACE_CATEGORY_NONE and less than OMNITRACE_CATEGORY_LAST");
+
+    if(_category == Idx)
+    {
+        using category_type = category_type_id_t<Idx>;
+        component::category_region<category_type>::stop(
+            name, [&](::perfetto::EventContext ctx) {
+                if(_annotations)
+                {
+                    for(size_t i = 0; i < _annotation_count; ++i)
+                        tracing::add_perfetto_annotation(ctx, _annotations[i]);
+                }
+            });
+    }
+    else
+    {
+        constexpr size_t remaining = sizeof...(Tail);
+        if constexpr(remaining > 0)
+            invoke_category_region_stop(_category, name, _annotations, _annotation_count,
+                                        std::index_sequence<Tail...>{});
+    }
+}
+}  // namespace omnitrace
+
+extern "C" void
+omnitrace_push_category_region_hidden(omnitrace_category_t _category, const char* name,
+                                      omnitrace_annotation_t* _annotations,
+                                      size_t                  _annotation_count)
+{
+    invoke_category_region_start(
+        _category, name, _annotations, _annotation_count,
+        utility::make_index_sequence_range<1, OMNITRACE_CATEGORY_LAST>{});
+}
+
+extern "C" void
+omnitrace_pop_category_region_hidden(omnitrace_category_t _category, const char* name,
+                                     omnitrace_annotation_t* _annotations,
+                                     size_t                  _annotation_count)
+{
+    invoke_category_region_stop(
+        _category, name, _annotations, _annotation_count,
+        utility::make_index_sequence_range<1, OMNITRACE_CATEGORY_LAST>{});
 }
 
 //======================================================================================//

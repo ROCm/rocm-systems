@@ -107,23 +107,6 @@ get_cpu_cid_entry(uint64_t _cid, int64_t _tid = threading::get_id()) TIMEMORY_HO
 tim::mutex_t&
 get_cpu_cid_stack_lock(int64_t _tid = threading::get_id()) TIMEMORY_HOT;
 
-ThreadState&
-get_thread_state() TIMEMORY_HOT;
-
-/// returns old state
-ThreadState set_thread_state(ThreadState) TIMEMORY_HOT;
-
-ThreadState push_thread_state(ThreadState) TIMEMORY_HOT;
-
-ThreadState
-pop_thread_state() TIMEMORY_HOT;
-
-struct scoped_thread_state
-{
-    scoped_thread_state(ThreadState _v) { push_thread_state(_v); }
-    ~scoped_thread_state() { pop_thread_state(); }
-};
-
 // query current value
 bool
 sampling_enabled_on_child_threads();
@@ -146,12 +129,6 @@ struct scoped_child_sampling
     ~scoped_child_sampling() { pop_enable_sampling_on_child_threads(); }
 };
 }  // namespace omnitrace
-
-#define OMNITRACE_SCOPED_THREAD_STATE(STATE)                                             \
-    ::omnitrace::scoped_thread_state OMNITRACE_VARIABLE(_scoped_thread_state_, __LINE__) \
-    {                                                                                    \
-        ::omnitrace::STATE                                                               \
-    }
 
 #define OMNITRACE_SCOPED_SAMPLING_ON_CHILD_THREADS(VALUE)                                \
     ::omnitrace::scoped_child_sampling OMNITRACE_VARIABLE(_scoped_child_sampling_,       \

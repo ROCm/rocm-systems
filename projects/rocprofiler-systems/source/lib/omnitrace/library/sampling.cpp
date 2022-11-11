@@ -33,6 +33,7 @@
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
 #include "library/tracing.hpp"
+#include "library/tracing/annotation.hpp"
 #include "library/utility.hpp"
 
 #include <timemory/backends/papi.hpp>

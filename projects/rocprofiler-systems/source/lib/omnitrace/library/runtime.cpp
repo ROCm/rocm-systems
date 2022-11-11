@@ -244,55 +244,6 @@ get_preinit_bundle()
     return _v;
 }
 
-namespace
-{
-auto&
-get_thread_state_history(int64_t _idx = utility::get_thread_index())
-{
-    static auto _v = utility::get_filled_array<OMNITRACE_MAX_THREADS>(
-        []() { return utility::get_reserved_vector<ThreadState>(32); });
-
-    return _v.at(_idx);
-}
-}  // namespace
-
-ThreadState&
-get_thread_state()
-{
-    static thread_local ThreadState _v{ ThreadState::Enabled };
-    return _v;
-}
-
-ThreadState
-set_thread_state(ThreadState _n)
-{
-    auto _o            = get_thread_state();
-    get_thread_state() = _n;
-    return _o;
-}
-
-ThreadState
-push_thread_state(ThreadState _v)
-{
-    if(get_thread_state() >= ThreadState::Completed) return get_thread_state();
-
-    return get_thread_state_history().emplace_back(set_thread_state(_v));
-}
-
-ThreadState
-pop_thread_state()
-{
-    if(get_thread_state() >= ThreadState::Completed) return get_thread_state();
-
-    auto& _hist = get_thread_state_history();
-    if(!_hist.empty())
-    {
-        set_thread_state(_hist.back());
-        _hist.pop_back();
-    }
-    return get_thread_state();
-}
-
 bool
 sampling_enabled_on_child_threads()
 {

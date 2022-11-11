@@ -220,6 +220,16 @@ def parse_args(args=None):
         default=_profiler_config.trace_c,
         help="Enable profiling C functions",
     )
+    parser.add_argument(
+        "-a",
+        "--annotate-trace",
+        type=str2bool,
+        nargs="?",
+        metavar="BOOL",
+        const=True,
+        default=_profiler_config.annotate_trace,
+        help="Enable perfetto debug annotations",
+    )
 
     return parser.parse_args(args)
 
@@ -322,6 +332,7 @@ def main():
     _profiler_config.exclude_modules = opts.module_exclude
     _profiler_config.restrict_functions = opts.function_restrict
     _profiler_config.restrict_modules = opts.module_restrict
+    _profiler_config.annotate_trace = opts.annotate_trace
     _profiler_config.verbosity = opts.verbosity
 
     print("[omnitrace]> profiling: {}".format(argv))

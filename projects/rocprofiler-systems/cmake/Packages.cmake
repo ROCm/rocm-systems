@@ -49,8 +49,10 @@ set(OMNITRACE_EXTENSION_LIBRARIES
     omnitrace::omnitrace-perfetto)
 
 target_include_directories(
-    omnitrace-headers INTERFACE ${PROJECT_SOURCE_DIR}/source/lib/omnitrace
-                                ${PROJECT_BINARY_DIR}/source/lib/omnitrace)
+    omnitrace-headers
+    INTERFACE ${PROJECT_BINARY_DIR}/source/lib ${PROJECT_BINARY_DIR}/source/lib/omnitrace
+              ${PROJECT_SOURCE_DIR}/source/lib ${PROJECT_SOURCE_DIR}/source/lib/omnitrace
+              ${PROJECT_SOURCE_DIR}/source/lib/omnitrace-user)
 
 # include threading because of rooflines
 target_link_libraries(omnitrace-headers INTERFACE omnitrace::omnitrace-threading)
@@ -372,7 +374,7 @@ else()
             OMNITRACE_DYNINST_API_RT dyninstAPI_RT
             HINTS ${Dyninst_ROOT_DIR} ${Dyninst_DIR}
             PATHS ${Dyninst_ROOT_DIR} ${Dyninst_DIR}
-            PATH_SUFFIXES lib)
+            PATH_SUFFIXES lib NO_CACHE)
 
         if(OMNITRACE_DYNINST_API_RT)
             omnitrace_target_compile_definitions(

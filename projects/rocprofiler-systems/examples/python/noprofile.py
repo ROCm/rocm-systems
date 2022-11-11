@@ -20,7 +20,7 @@ def inefficient(n):
         a += i
         for j in range(n):
             a += j
-    _len = a * n * n * n
+    _len = a * n * n
     _arr = [random.random() for _ in range(_len)]
     _sum = sum(_arr)
     print(f"[{_prefix}] ... sum of {_len} random elements: {_sum}")

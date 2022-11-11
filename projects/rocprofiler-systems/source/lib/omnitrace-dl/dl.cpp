@@ -39,6 +39,8 @@
 #include "common/join.hpp"
 #include "common/setup.hpp"
 #include "dl.hpp"
+#include "omnitrace/categories.h"
+#include "omnitrace/types.h"
 
 #include <cassert>
 #include <gnu/libc-version.h>
@@ -256,6 +258,10 @@ struct OMNITRACE_HIDDEN_API indirect
         OMNITRACE_DLSYM(omnitrace_pop_trace_f, m_omnihandle, "omnitrace_pop_trace");
         OMNITRACE_DLSYM(omnitrace_push_region_f, m_omnihandle, "omnitrace_push_region");
         OMNITRACE_DLSYM(omnitrace_pop_region_f, m_omnihandle, "omnitrace_pop_region");
+        OMNITRACE_DLSYM(omnitrace_push_category_region_f, m_omnihandle,
+                        "omnitrace_push_category_region");
+        OMNITRACE_DLSYM(omnitrace_pop_category_region_f, m_omnihandle,
+                        "omnitrace_pop_category_region");
         OMNITRACE_DLSYM(omnitrace_register_source_f, m_omnihandle,
                         "omnitrace_register_source");
         OMNITRACE_DLSYM(omnitrace_register_coverage_f, m_omnihandle,
@@ -330,37 +336,43 @@ struct OMNITRACE_HIDDEN_API indirect
 
         if(omnitrace_user_configure_f)
         {
-            (*omnitrace_user_configure_f)(
-                OMNITRACE_USER_START_STOP,
-                reinterpret_cast<void*>(&omnitrace_user_start_trace_dl),
-                reinterpret_cast<void*>(&omnitrace_user_stop_trace_dl));
-            (*omnitrace_user_configure_f)(
-                OMNITRACE_USER_START_STOP_THREAD,
-                reinterpret_cast<void*>(&omnitrace_user_start_thread_trace_dl),
-                reinterpret_cast<void*>(&omnitrace_user_stop_thread_trace_dl));
-            (*omnitrace_user_configure_f)(
-                OMNITRACE_USER_REGION,
-                reinterpret_cast<void*>(&omnitrace_user_push_region_dl),
-                reinterpret_cast<void*>(&omnitrace_user_pop_region_dl));
+            omnitrace_user_callbacks_t _cb = {};
+            _cb.start_trace                = &omnitrace_user_start_trace_dl;
+            _cb.stop_trace                 = &omnitrace_user_stop_trace_dl;
+            _cb.start_thread_trace         = &omnitrace_user_start_thread_trace_dl;
+            _cb.stop_thread_trace          = &omnitrace_user_stop_thread_trace_dl;
+            _cb.push_region                = &omnitrace_user_push_region_dl;
+            _cb.pop_region                 = &omnitrace_user_pop_region_dl;
+            _cb.push_annotated_region      = &omnitrace_user_push_annotated_region_dl;
+            _cb.pop_annotated_region       = &omnitrace_user_pop_annotated_region_dl;
+            (*omnitrace_user_configure_f)(OMNITRACE_USER_REPLACE_CONFIG, _cb, nullptr);
         }
     }
 
 public:
-    // omnitrace functions
-    void (*omnitrace_init_library_f)(void)                                  = nullptr;
-    void (*omnitrace_init_tooling_f)(void)                                  = nullptr;
-    void (*omnitrace_init_f)(const char*, bool, const char*)                = nullptr;
-    void (*omnitrace_finalize_f)(void)                                      = nullptr;
-    void (*omnitrace_set_env_f)(const char*, const char*)                   = nullptr;
-    void (*omnitrace_set_mpi_f)(bool, bool)                                 = nullptr;
+    using user_cb_t = omnitrace_user_callbacks_t;
+
+    // libomnitrace functions
+    void (*omnitrace_init_library_f)(void)                                   = nullptr;
+    void (*omnitrace_init_tooling_f)(void)                                   = nullptr;
+    void (*omnitrace_init_f)(const char*, bool, const char*)                 = nullptr;
+    void (*omnitrace_finalize_f)(void)                                       = nullptr;
+    void (*omnitrace_set_env_f)(const char*, const char*)                    = nullptr;
+    void (*omnitrace_set_mpi_f)(bool, bool)                                  = nullptr;
     void (*omnitrace_register_source_f)(const char*, const char*, size_t, size_t,
-                                        const char*)                        = nullptr;
-    void (*omnitrace_register_coverage_f)(const char*, const char*, size_t) = nullptr;
-    void (*omnitrace_push_trace_f)(const char*)                             = nullptr;
-    void (*omnitrace_pop_trace_f)(const char*)                              = nullptr;
-    int (*omnitrace_push_region_f)(const char*)                             = nullptr;
-    int (*omnitrace_pop_region_f)(const char*)                              = nullptr;
-    int (*omnitrace_user_configure_f)(int, void*, void*)                    = nullptr;
+                                        const char*)                         = nullptr;
+    void (*omnitrace_register_coverage_f)(const char*, const char*, size_t)  = nullptr;
+    void (*omnitrace_push_trace_f)(const char*)                              = nullptr;
+    void (*omnitrace_pop_trace_f)(const char*)                               = nullptr;
+    int (*omnitrace_push_region_f)(const char*)                              = nullptr;
+    int (*omnitrace_pop_region_f)(const char*)                               = nullptr;
+    int (*omnitrace_push_category_region_f)(omnitrace_category_t, const char*,
+                                            omnitrace_annotation_t*, size_t) = nullptr;
+    int (*omnitrace_pop_category_region_f)(omnitrace_category_t, const char*,
+                                           omnitrace_annotation_t*, size_t)  = nullptr;
+
+    // libomnitrace-user functions
+    int (*omnitrace_user_configure_f)(int, user_cb_t, user_cb_t*) = nullptr;
 
     // KokkosP functions
     void (*kokkosp_print_help_f)(char*)                                       = nullptr;
@@ -626,30 +638,66 @@ extern "C"
         }
     }
 
-    void omnitrace_push_region(const char* name)
+    int omnitrace_push_region(const char* name)
     {
-        if(!dl::get_active()) return;
+        if(!dl::get_active()) return 0;
         if(dl::get_thread_enabled())
         {
-            OMNITRACE_DL_INVOKE(get_indirect().omnitrace_push_region_f, name);
+            return OMNITRACE_DL_INVOKE(get_indirect().omnitrace_push_region_f, name);
         }
         else
         {
             ++dl::get_thread_count();
         }
+        return 0;
     }
 
-    void omnitrace_pop_region(const char* name)
+    int omnitrace_pop_region(const char* name)
     {
-        if(!dl::get_active()) return;
+        if(!dl::get_active()) return 0;
         if(dl::get_thread_enabled())
         {
-            OMNITRACE_DL_INVOKE(get_indirect().omnitrace_pop_region_f, name);
+            return OMNITRACE_DL_INVOKE(get_indirect().omnitrace_pop_region_f, name);
         }
         else
         {
             if(dl::get_thread_count()-- == 0) omnitrace_user_start_thread_trace_dl();
         }
+        return 0;
+    }
+
+    int omnitrace_push_category_region(omnitrace_category_t _category, const char* name,
+                                       omnitrace_annotation_t* _annotations,
+                                       size_t                  _annotation_count)
+    {
+        if(!dl::get_active()) return 0;
+        if(dl::get_thread_enabled())
+        {
+            return OMNITRACE_DL_INVOKE(get_indirect().omnitrace_push_category_region_f,
+                                       _category, name, _annotations, _annotation_count);
+        }
+        else
+        {
+            ++dl::get_thread_count();
+        }
+        return 0;
+    }
+
+    int omnitrace_pop_category_region(omnitrace_category_t _category, const char* name,
+                                      omnitrace_annotation_t* _annotations,
+                                      size_t                  _annotation_count)
+    {
+        if(!dl::get_active()) return 0;
+        if(dl::get_thread_enabled())
+        {
+            return OMNITRACE_DL_INVOKE(get_indirect().omnitrace_pop_category_region_f,
+                                       _category, name, _annotations, _annotation_count);
+        }
+        else
+        {
+            ++dl::get_thread_count();
+        }
+        return 0;
     }
 
     void omnitrace_set_env(const char* a, const char* b)
@@ -722,6 +770,26 @@ extern "C"
     {
         if(!dl::get_active()) return 0;
         return OMNITRACE_DL_INVOKE(get_indirect().omnitrace_pop_region_f, name);
+    }
+
+    int omnitrace_user_push_annotated_region_dl(const char*             name,
+                                                omnitrace_annotation_t* _annotations,
+                                                size_t                  _annotation_count)
+    {
+        if(!dl::get_active()) return 0;
+        return OMNITRACE_DL_INVOKE(get_indirect().omnitrace_push_category_region_f,
+                                   OMNITRACE_CATEGORY_USER, name, _annotations,
+                                   _annotation_count);
+    }
+
+    int omnitrace_user_pop_annotated_region_dl(const char*             name,
+                                               omnitrace_annotation_t* _annotations,
+                                               size_t                  _annotation_count)
+    {
+        if(!dl::get_active()) return 0;
+        return OMNITRACE_DL_INVOKE(get_indirect().omnitrace_pop_category_region_f,
+                                   OMNITRACE_CATEGORY_USER, name, _annotations,
+                                   _annotation_count);
     }
 
     //----------------------------------------------------------------------------------//

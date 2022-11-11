@@ -21,8 +21,9 @@
 // SOFTWARE.
 
 #ifndef OMNITRACE_TYPES_H_
-#define OMNITRACE_TYPES_H_ 1
+#define OMNITRACE_TYPES_H_
 
+#include <stddef.h>
 #include <stdint.h>
 
 #if defined(__cplusplus)
@@ -30,7 +31,77 @@ extern "C"
 {
 #endif
 
-    /// @enum OMNITRACE_USER_ERROR
+    struct omnitrace_annotation;
+    typedef int (*omnitrace_trace_func_t)(void);
+    typedef int (*omnitrace_region_func_t)(const char*);
+    typedef int (*omnitrace_annotated_region_func_t)(const char*, omnitrace_annotation*,
+                                                     size_t);
+
+    /// @typedef omnitrace_user_callbacks_t
+    /// @brief Struct containing the callbacks for the user API
+    /// @code{.cpp}
+    ///
+    /// #include <cerrno>
+    /// #include <cstring>
+    ///
+    /// omnitrace_user_callbacks_t custom_callbacks   = OMNITRACE_USER_CALLBACKS_INIT;
+    /// omnitrace_user_callbacks_t original_callbacks = OMNITRACE_USER_CALLBACKS_INIT;
+    ///
+    /// // in our custom push region, we are going to redirect the unannotated user push
+    /// // region to annotate the trace entries with the global errno and if errno is
+    /// // non-zero, store the message
+    /// int
+    /// custom_push_region(const char* name)
+    /// {
+    ///     if(!original_callbacks.push_annotated_region)
+    ///         return OMNITRACE_USER_ERROR_NO_BINDING;
+    ///
+    ///     int32_t     _err = errno;
+    ///     const char* _msg = nullptr;
+    ///     char        _buff[1024];
+    ///     if(_err != 0) _msg = strerror_r(_err, _buff, sizeof(_buff));
+    ///
+    ///     omnitrace_annotation_t _annotates[] = { { "errno", OMNITRACE_INT32, &_err },
+    ///                                             { "msg", OMNITRACE_STRING, _msg } };
+    ///     return (*original_callbacks.push_annotated_region)(name, &_annotations, 2);
+    /// }
+    ///
+    /// int
+    /// main(int argc, char** argv)
+    /// {
+    ///     custom_callbacks.push_region = &custom_push_region;
+    ///     omnitrace_user_configure(OMNITRACE_USER_UNION_CONFIG, custom_callbacks,
+    ///                              &original_callbacks);
+    ///     // ...
+    /// }
+    ///
+    /// @endcode
+    typedef struct omnitrace_user_callbacks
+    {
+        omnitrace_trace_func_t            start_trace;
+        omnitrace_trace_func_t            stop_trace;
+        omnitrace_trace_func_t            start_thread_trace;
+        omnitrace_trace_func_t            stop_thread_trace;
+        omnitrace_region_func_t           push_region;
+        omnitrace_region_func_t           pop_region;
+        omnitrace_annotated_region_func_t push_annotated_region;
+        omnitrace_annotated_region_func_t pop_annotated_region;
+    } omnitrace_user_callbacks_t;
+
+    /// @typedef omnitrace_user_configure_mode_t
+    /// @brief Identifier for errors
+    ///
+    typedef enum OMNITRACE_USER_CONFIGURE_MODE
+    {
+        // clang-format off
+        OMNITRACE_USER_UNION_CONFIG = 0,    ///< Replace the callbacks in the current config with the non-null callbacks in the provided config
+        OMNITRACE_USER_REPLACE_CONFIG,      ///< Replace the entire config even if the provided config has null callbacks
+        OMNITRACE_USER_INTERSECT_CONFIG,    ///< Produce a config which is the intersection of the current config and the provided config
+        OMNITRACE_USER_CONFIGURE_MODE_LAST
+        // clang-format on
+    } omnitrace_user_configure_mode_t;
+
+    /// @typedef omnitrace_user_error_t
     /// @brief Identifier for errors
     ///
     typedef enum OMNITRACE_USER_ERROR
@@ -43,46 +114,15 @@ extern "C"
         OMNITRACE_USER_ERROR_LAST
     } omnitrace_user_error_t;
 
-    /// @enum OMNITRACE_USER_BINDINGS
-    /// @brief Identifier for function pointer categories
-    /// @code{.cpp}
-    /// int (*omnitrace_push_region_f)(const char*) = nullptr;
-    ///
-    /// int custom_push_region(const char* name)
-    /// {
-    ///     // custom push region prints message before calling internal callback
-    ///     printf("Pushing region %s\n", name);
-    ///     return (*omnitrace_push_region_f)(name);
-    /// }
-    ///
-    /// int main(int argc, char** argv)
-    /// {
-    ///     // get the internal callback to start a user-defined region
-    ///     omnitrace_user_get_callbacks(OMNITRACE_USER_REGION,
-    ///                                  (void**) &omnitrace_push_region_f,
-    ///                                  nullptr);
-    ///     // assign the custom callback to start a user-defined region
-    ///     if(omnitrace_push_region_f)
-    ///         omnitrace_user_configure(OMNITRACE_USER_REGION,
-    ///                                  (void*) &custom_push_region,
-    ///                                  nullptr);
-    ///     // ...
-    /// }
-    ///
-    /// @endcode
-    typedef enum OMNITRACE_USER_BINDINGS
-    {
-        OMNITRACE_USER_START_STOP =
-            0,  ///< Function pointers which control global start/stop
-        OMNITRACE_USER_START_STOP_THREAD,  ///< Function pointers which control per-thread
-                                           ///< start/stop
-        OMNITRACE_USER_REGION,  ///< Function pointers which generate user-defined regions
-        OMNITRACE_USER_SAMPLE,  ///< Function pointer which generate samples
-        OMNITRACE_USER_BINDINGS_LAST
-    } omnitrace_user_bindings_t;
-
 #if defined(__cplusplus)
 }
+#endif
+
+#ifndef OMNITRACE_USER_CALLBACKS_INIT
+#    define OMNITRACE_USER_CALLBACKS_INIT                                                \
+        {                                                                                \
+            NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL                               \
+        }
 #endif
 
 #endif  // OMNITRACE_TYPES_H_

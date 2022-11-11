@@ -355,13 +355,4 @@ struct tmp_file
 std::shared_ptr<tmp_file>
 get_tmp_file(std::string _basename, std::string _ext = "dat");
 }  // namespace config
-
-//
-//      Runtime configuration data
-//
-State&
-get_state() TIMEMORY_HOT;
-
-/// returns old state
-State set_state(State);
 }  // namespace omnitrace

@@ -74,6 +74,7 @@
 #define OMNITRACE_INLINE            OMNITRACE_ATTRIBUTE(always_inline) inline
 #define OMNITRACE_NOINLINE          OMNITRACE_ATTRIBUTE(noinline)
 #define OMNITRACE_HOT               OMNITRACE_ATTRIBUTE(hot)
+#define OMNITRACE_COLD              OMNITRACE_ATTRIBUTE(cold)
 #define OMNITRACE_CONST             OMNITRACE_ATTRIBUTE(const)
 #define OMNITRACE_PURE              OMNITRACE_ATTRIBUTE(pure)
 #define OMNITRACE_WEAK              OMNITRACE_ATTRIBUTE(weak)

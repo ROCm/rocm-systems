@@ -2051,25 +2051,4 @@ get_tmp_file(std::string _basename, std::string _ext)
     return _existing_files.at(_fname);
 }
 }  // namespace config
-
-State&
-get_state()
-{
-    static State _v{ State::PreInit };
-    return _v;
-}
-
-State
-set_state(State _n)
-{
-    auto _o = get_state();
-    OMNITRACE_CONDITIONAL_PRINT_F(get_debug_init(), "Setting state :: %s -> %s\n",
-                                  std::to_string(_o).c_str(), std::to_string(_n).c_str());
-    // state should always be increased, not decreased
-    OMNITRACE_CI_BASIC_THROW(_n < _o,
-                             "State is being assigned to a lesser value :: %s -> %s",
-                             std::to_string(_o).c_str(), std::to_string(_n).c_str());
-    get_state() = _n;
-    return _o;
-}
 }  // namespace omnitrace

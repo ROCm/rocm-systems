@@ -25,41 +25,24 @@
 #endif
 
 #include "omnitrace/user.h"
+#include "omnitrace/categories.h"
 #include "omnitrace/types.h"
 
+#include <atomic>
 #include <cstdio>
 #include <cstdlib>
+#include <optional>
+
+using annotation_t = omnitrace_annotation_t;
 
 namespace
 {
-using trace_func_t  = int (*)(void);
-using region_func_t = int (*)(const char*);
+using trace_func_t            = omnitrace_trace_func_t;
+using region_func_t           = omnitrace_region_func_t;
+using annotated_region_func_t = omnitrace_annotated_region_func_t;
+using user_callbacks_t        = omnitrace_user_callbacks_t;
 
-trace_func_t  _start_trace        = nullptr;
-trace_func_t  _stop_trace         = nullptr;
-trace_func_t  _start_thread_trace = nullptr;
-trace_func_t  _stop_thread_trace  = nullptr;
-region_func_t _push_region        = nullptr;
-region_func_t _pop_region         = nullptr;
-
-const char*
-as_string(OMNITRACE_USER_BINDINGS _category)
-{
-    switch(_category)
-    {
-        case OMNITRACE_USER_START_STOP: return "OMNITRACE_USER_START_STOP";
-        case OMNITRACE_USER_START_STOP_THREAD: return "OMNITRACE_USER_START_STOP_THREAD";
-        case OMNITRACE_USER_REGION: return "OMNITRACE_USER_REGION";
-        default:
-        {
-            fprintf(stderr, "[omnitrace][user] Unknown user binding category: %i\n",
-                    static_cast<int>(_category));
-            fflush(stderr);
-            break;
-        }
-    }
-    return "OMNITRACE_USER_BINDINGS_unknown";
-}
+user_callbacks_t _callbacks = OMNITRACE_USER_CALLBACKS_INIT;
 
 template <typename... Args>
 inline auto
@@ -73,73 +56,105 @@ invoke(int (*_func)(Args...), Args... args)
 
 extern "C"
 {
-    int omnitrace_user_start_trace(void) { return invoke(_start_trace); }
-    int omnitrace_user_stop_trace(void) { return invoke(_stop_trace); }
-    int omnitrace_user_start_thread_trace(void) { return invoke(_start_thread_trace); }
-    int omnitrace_user_stop_thread_trace(void) { return invoke(_stop_thread_trace); }
-    int omnitrace_user_push_region(const char* id) { return invoke(_push_region, id); }
-    int omnitrace_user_pop_region(const char* id) { return invoke(_pop_region, id); }
+    int omnitrace_user_start_trace(void) { return invoke(_callbacks.start_trace); }
 
-    int omnitrace_user_configure(int category, void* begin_func, void* end_func)
+    int omnitrace_user_stop_trace(void) { return invoke(_callbacks.stop_trace); }
+
+    int omnitrace_user_start_thread_trace(void)
     {
-        switch(category)
-        {
-            case OMNITRACE_USER_START_STOP:
-            {
-                if(begin_func) _start_trace = reinterpret_cast<trace_func_t>(begin_func);
-                if(end_func) _stop_trace = reinterpret_cast<trace_func_t>(end_func);
-                break;
-            }
-            case OMNITRACE_USER_START_STOP_THREAD:
-            {
-                if(begin_func)
-                    _start_thread_trace = reinterpret_cast<trace_func_t>(begin_func);
-                if(end_func)
-                    _stop_thread_trace = reinterpret_cast<trace_func_t>(end_func);
-                break;
-            }
-            case OMNITRACE_USER_REGION:
-            {
-                if(begin_func) _push_region = reinterpret_cast<region_func_t>(begin_func);
-                if(end_func) _pop_region = reinterpret_cast<region_func_t>(end_func);
-                break;
-            }
-            default:
-            {
-                return OMNITRACE_USER_ERROR_INVALID_CATEGORY;
-            }
-        }
-
-        return OMNITRACE_USER_SUCCESS;
+        return invoke(_callbacks.start_thread_trace);
     }
 
-    int omnitrace_user_get_callbacks(int category, void** begin_func, void** end_func)
+    int omnitrace_user_stop_thread_trace(void)
     {
-        switch(category)
+        return invoke(_callbacks.stop_thread_trace);
+    }
+
+    int omnitrace_user_push_region(const char* id)
+    {
+        return invoke(_callbacks.push_region, id);
+    }
+
+    int omnitrace_user_pop_region(const char* id)
+    {
+        return invoke(_callbacks.pop_region, id);
+    }
+
+    int omnitrace_user_push_annotated_region(const char* id, annotation_t* _annotations,
+                                             size_t _annotation_count)
+    {
+        return invoke(_callbacks.push_annotated_region, id, _annotations,
+                      _annotation_count);
+    }
+
+    int omnitrace_user_pop_annotated_region(const char* id, annotation_t* _annotations,
+                                            size_t _annotation_count)
+    {
+        return invoke(_callbacks.pop_annotated_region, id, _annotations,
+                      _annotation_count);
+    }
+
+    int omnitrace_user_configure(omnitrace_user_configure_mode_t _mode,
+                                 omnitrace_user_callbacks_t      _inp,
+                                 omnitrace_user_callbacks_t*     _out)
+    {
+        auto _former = _callbacks;
+
+        switch(_mode)
         {
-            case OMNITRACE_USER_START_STOP:
+            case OMNITRACE_USER_REPLACE_CONFIG:
             {
-                if(begin_func) *begin_func = reinterpret_cast<void*>(_start_trace);
-                if(end_func) *end_func = reinterpret_cast<void*>(_stop_trace);
+                _callbacks = _inp;
                 break;
             }
-            case OMNITRACE_USER_START_STOP_THREAD:
+            case OMNITRACE_USER_UNION_CONFIG:
             {
-                if(begin_func) *begin_func = reinterpret_cast<void*>(_start_thread_trace);
-                if(end_func) *end_func = reinterpret_cast<void*>(_stop_thread_trace);
+                auto _update = [](auto& _lhs, auto _rhs) {
+                    if(_rhs) _lhs = _rhs;
+                };
+
+                user_callbacks_t _v = _callbacks;
+
+                _update(_v.start_trace, _inp.start_trace);
+                _update(_v.stop_trace, _inp.stop_trace);
+                _update(_v.start_thread_trace, _inp.start_thread_trace);
+                _update(_v.stop_thread_trace, _inp.stop_thread_trace);
+                _update(_v.push_region, _inp.push_region);
+                _update(_v.pop_region, _inp.pop_region);
+                _update(_v.push_annotated_region, _inp.push_annotated_region);
+                _update(_v.pop_annotated_region, _inp.pop_annotated_region);
+
+                _callbacks = _v;
                 break;
             }
-            case OMNITRACE_USER_REGION:
+            case OMNITRACE_USER_INTERSECT_CONFIG:
             {
-                if(begin_func) *begin_func = reinterpret_cast<void*>(_push_region);
-                if(end_func) *end_func = reinterpret_cast<void*>(_pop_region);
+                auto _update = [](auto& _lhs, auto _rhs) {
+                    if(_lhs != _rhs) _lhs = nullptr;
+                };
+
+                user_callbacks_t _v = _callbacks;
+
+                _update(_v.start_trace, _inp.start_trace);
+                _update(_v.stop_trace, _inp.stop_trace);
+                _update(_v.start_thread_trace, _inp.start_thread_trace);
+                _update(_v.stop_thread_trace, _inp.stop_thread_trace);
+                _update(_v.push_region, _inp.push_region);
+                _update(_v.pop_region, _inp.pop_region);
+                _update(_v.push_annotated_region, _inp.push_annotated_region);
+                _update(_v.pop_annotated_region, _inp.pop_annotated_region);
+
+                _callbacks = _v;
                 break;
             }
             default:
             {
+                if(_out) *_out = _former;
                 return OMNITRACE_USER_ERROR_INVALID_CATEGORY;
             }
         }
+
+        if(_out) *_out = _former;
 
         return OMNITRACE_USER_SUCCESS;
     }

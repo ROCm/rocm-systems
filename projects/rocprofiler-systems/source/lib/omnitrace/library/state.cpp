@@ -21,8 +21,95 @@
 // SOFTWARE.
 
 #include "library/state.hpp"
+#include "library/config.hpp"
+#include "library/debug.hpp"
+#include "library/utility.hpp"
 
 #include <string>
+
+namespace omnitrace
+{
+namespace
+{
+auto&
+get_state_value()
+{
+    static State _v{ State::PreInit };
+    return _v;
+}
+
+ThreadState&
+get_thread_state_value()
+{
+    static thread_local ThreadState _v{ ThreadState::Enabled };
+    return _v;
+}
+
+auto&
+get_thread_state_history(int64_t _idx = utility::get_thread_index())
+{
+    static auto _v = utility::get_filled_array<OMNITRACE_MAX_THREADS>(
+        []() { return utility::get_reserved_vector<ThreadState>(32); });
+
+    return _v.at(_idx);
+}
+}  // namespace
+
+State
+get_state()
+{
+    return get_state_value();
+}
+
+ThreadState
+get_thread_state()
+{
+    return get_thread_state_value();
+}
+
+State
+set_state(State _n)
+{
+    OMNITRACE_CONDITIONAL_PRINT_F(get_debug_init(), "Setting state :: %s -> %s\n",
+                                  std::to_string(get_state()).c_str(),
+                                  std::to_string(_n).c_str());
+    // state should always be increased, not decreased
+    OMNITRACE_CI_BASIC_THROW(
+        _n < get_state(), "State is being assigned to a lesser value :: %s -> %s",
+        std::to_string(get_state()).c_str(), std::to_string(_n).c_str());
+    std::swap(get_state_value(), _n);
+    return _n;
+}
+
+ThreadState
+set_thread_state(ThreadState _n)
+{
+    std::swap(get_thread_state_value(), _n);
+    return _n;
+}
+
+ThreadState
+push_thread_state(ThreadState _v)
+{
+    if(get_thread_state() >= ThreadState::Completed) return get_thread_state();
+
+    return get_thread_state_history().emplace_back(set_thread_state(_v));
+}
+
+ThreadState
+pop_thread_state()
+{
+    if(get_thread_state() >= ThreadState::Completed) return get_thread_state();
+
+    auto& _hist = get_thread_state_history();
+    if(!_hist.empty())
+    {
+        set_thread_state(_hist.back());
+        _hist.pop_back();
+    }
+    return get_thread_state();
+}
+}  // namespace omnitrace
 
 namespace std
 {

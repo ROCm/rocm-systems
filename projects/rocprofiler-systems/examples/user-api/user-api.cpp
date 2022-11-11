@@ -1,10 +1,14 @@
 
+#include "omnitrace/categories.h"
+#include "omnitrace/types.h"
 #include <omnitrace/user.h>
 
 #include <atomic>
 #include <cassert>
+#include <cerrno>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <sstream>
 #include <thread>
 #include <vector>
@@ -22,19 +26,16 @@ custom_push_region(const char* name);
 
 namespace
 {
-int (*omnitrace_push_region_f)(const char*) = nullptr;
-}
+omnitrace_user_callbacks_t custom_callbacks   = OMNITRACE_USER_CALLBACKS_INIT;
+omnitrace_user_callbacks_t original_callbacks = OMNITRACE_USER_CALLBACKS_INIT;
+}  // namespace
 
 int
 main(int argc, char** argv)
 {
-    // get the internal callback to start a user-defined region
-    omnitrace_user_get_callbacks(OMNITRACE_USER_REGION, (void**) &omnitrace_push_region_f,
-                                 nullptr);
-    // assign the custom callback to start a user-defined region
-    if(omnitrace_push_region_f)
-        omnitrace_user_configure(OMNITRACE_USER_REGION, (void*) &custom_push_region,
-                                 nullptr);
+    custom_callbacks.push_region = &custom_push_region;
+    omnitrace_user_configure(OMNITRACE_USER_UNION_CONFIG, custom_callbacks,
+                             &original_callbacks);
 
     omnitrace_user_push_region(argv[0]);
     omnitrace_user_push_region("initialization");
@@ -100,6 +101,26 @@ run(size_t nitr, long n)
 int
 custom_push_region(const char* name)
 {
+    if(!original_callbacks.push_region || !original_callbacks.push_annotated_region)
+        return OMNITRACE_USER_ERROR_NO_BINDING;
+
     printf("Pushing custom region :: %s\n", name);
-    return (*omnitrace_push_region_f)(name);
+
+    if(original_callbacks.push_annotated_region)
+    {
+        int32_t _err = errno;
+        char*   _msg = nullptr;
+        char    _buff[1024];
+        if(_err != 0) _msg = strerror_r(_err, _buff, sizeof(_buff));
+
+        omnitrace_annotation_t _annotations[] = {
+            { "errno", OMNITRACE_INT32, &_err }, { "strerror", OMNITRACE_STRING, _msg }
+        };
+
+        errno = 0;  // reset errno
+        return (*original_callbacks.push_annotated_region)(
+            name, _annotations, sizeof(_annotations) / sizeof(omnitrace_annotation_t));
+    }
+
+    return (*original_callbacks.push_region)(name);
 }

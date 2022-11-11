@@ -23,8 +23,8 @@
 #include "library/coverage.hpp"
 #include "api.hpp"
 #include "library/config.hpp"
+#include "library/coverage/impl.hpp"
 #include "library/debug.hpp"
-#include "library/impl/coverage.hpp"
 #include "library/thread_data.hpp"
 
 #include <timemory/backends/threading.hpp>

@@ -23,7 +23,7 @@ try:
             a += i
             for j in range(n):
                 a += j
-        _len = a * n * n * n
+        _len = a * n * n
         _ret = np.random.rand(_len).sum()
         print(f"[{_prefix}] ... sum of {_len} random elements: {_ret}")
         return _ret
@@ -41,7 +41,7 @@ except ImportError:
             a += i
             for j in range(n):
                 a += j
-        _len = a * n * n * n
+        _len = a * n * n
         _arr = [random.random() for _ in range(_len)]
         _ret = _sum(_arr)
         print(f"[{_prefix}] ... sum of {_len} random elements: {_ret}")

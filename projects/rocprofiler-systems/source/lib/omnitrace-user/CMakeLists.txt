@@ -35,9 +35,11 @@ set_target_properties(
 
 omnitrace_strip_target(omnitrace-user-library)
 
-install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/omnitrace/user.h
-              ${CMAKE_CURRENT_SOURCE_DIR}/omnitrace/types.h
-        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/omnitrace)
+install(
+    FILES ${CMAKE_CURRENT_SOURCE_DIR}/omnitrace/user.h
+          ${CMAKE_CURRENT_SOURCE_DIR}/omnitrace/types.h
+          ${CMAKE_CURRENT_SOURCE_DIR}/omnitrace/categories.h
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/omnitrace)
 
 install(
     TARGETS omnitrace-user-library

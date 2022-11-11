@@ -28,6 +28,7 @@
 #include "library/runtime.hpp"
 #include "library/timemory.hpp"
 #include "library/tracing.hpp"
+#include "library/tracing/annotation.hpp"
 
 #include <timemory/components/gotcha/backends.hpp>
 #include <timemory/mpl/concepts.hpp>

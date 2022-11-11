@@ -82,4 +82,6 @@ if(OMNITRACE_USE_ROCM_SMI)
 endif()
 
 add_subdirectory(components)
+add_subdirectory(coverage)
 add_subdirectory(rocm)
+add_subdirectory(tracing)

@@ -63,5 +63,29 @@ get_reserved_vector(size_t _n)
     _v.reserve(_n);
     return _v;
 }
+
+template <typename Tp, size_t Offset>
+struct offset_index_sequence;
+
+template <size_t Idx, size_t Offset>
+struct offset_index_value
+{
+    static constexpr size_t value = Idx + Offset;
+};
+
+template <size_t Offset, size_t... Idx>
+struct offset_index_sequence<std::index_sequence<Idx...>, Offset>
+{
+    using type = std::integer_sequence<size_t, offset_index_value<Idx, Offset>::value...>;
+};
+
+template <size_t N, size_t OffsetN>
+using make_offset_index_sequence =
+    offset_index_sequence<std::make_index_sequence<N>, OffsetN>;
+
+template <size_t StartN, size_t EndN>
+using make_index_sequence_range =
+    typename offset_index_sequence<std::make_index_sequence<(EndN - StartN)>,
+                                   StartN>::type;
 }  // namespace utility
 }  // namespace omnitrace

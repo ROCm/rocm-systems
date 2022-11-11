@@ -21,7 +21,7 @@
 // SOFTWARE.
 
 #ifndef OMNITRACE_DL_HPP_
-#define OMNITRACE_DL_HPP_ 1
+#define OMNITRACE_DL_HPP_
 
 #if defined(OMNITRACE_DL_SOURCE) && (OMNITRACE_DL_SOURCE > 0)
 #    include "common/defines.h"
@@ -78,8 +78,15 @@ extern "C"
     void omnitrace_set_mpi(bool use, bool attached) OMNITRACE_PUBLIC_API;
     void omnitrace_push_trace(const char* name) OMNITRACE_PUBLIC_API;
     void omnitrace_pop_trace(const char* name) OMNITRACE_PUBLIC_API;
-    void omnitrace_push_region(const char*) OMNITRACE_PUBLIC_API;
-    void omnitrace_pop_region(const char*) OMNITRACE_PUBLIC_API;
+    int  omnitrace_push_region(const char*) OMNITRACE_PUBLIC_API;
+    int  omnitrace_pop_region(const char*) OMNITRACE_PUBLIC_API;
+    int  omnitrace_push_category_region(omnitrace_category_t, const char*,
+                                        omnitrace_annotation_t*,
+                                        size_t) OMNITRACE_PUBLIC_API;
+    int  omnitrace_pop_category_region(omnitrace_category_t, const char*,
+                                       omnitrace_annotation_t*,
+                                       size_t) OMNITRACE_PUBLIC_API;
+
     void omnitrace_register_source(const char* file, const char* func, size_t line,
                                    size_t      address,
                                    const char* source) OMNITRACE_PUBLIC_API;
@@ -98,6 +105,11 @@ extern "C"
 
     int omnitrace_user_push_region_dl(const char*) OMNITRACE_HIDDEN_API;
     int omnitrace_user_pop_region_dl(const char*) OMNITRACE_HIDDEN_API;
+
+    int omnitrace_user_push_annotated_region_dl(const char*, omnitrace_annotation_t*,
+                                                size_t) OMNITRACE_HIDDEN_API;
+    int omnitrace_user_pop_annotated_region_dl(const char*, omnitrace_annotation_t*,
+                                               size_t) OMNITRACE_HIDDEN_API;
 
     // KokkosP
     struct OMNITRACE_HIDDEN_API SpaceHandle

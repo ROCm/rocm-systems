@@ -23,6 +23,7 @@
 #pragma once
 
 #include "library/defines.hpp"
+#include "omnitrace/categories.h"  // in omnitrace-user
 
 #include <timemory/compat/macros.h>
 
@@ -47,23 +48,34 @@ extern "C"
     void omnitrace_reset_preload(void) OMNITRACE_PUBLIC_API;
 
     /// sets an environment variable
-    void omnitrace_set_env(const char* env_name,
-                           const char* env_val) OMNITRACE_PUBLIC_API;
+    void omnitrace_set_env(const char*, const char*) OMNITRACE_PUBLIC_API;
 
     /// sets whether MPI should be used
-    void omnitrace_set_mpi(bool use, bool attached) OMNITRACE_PUBLIC_API;
+    void omnitrace_set_mpi(bool, bool) OMNITRACE_PUBLIC_API;
 
     /// starts an instrumentation region
-    void omnitrace_push_trace(const char* name) OMNITRACE_PUBLIC_API;
+    void omnitrace_push_trace(const char*) OMNITRACE_PUBLIC_API;
 
     /// stops an instrumentation region
-    void omnitrace_pop_trace(const char* name) OMNITRACE_PUBLIC_API;
+    void omnitrace_pop_trace(const char*) OMNITRACE_PUBLIC_API;
 
     /// starts an instrumentation region (user-defined)
-    int omnitrace_push_region(const char* name) OMNITRACE_PUBLIC_API;
+    int omnitrace_push_region(const char*) OMNITRACE_PUBLIC_API;
 
     /// stops an instrumentation region (user-defined)
-    int omnitrace_pop_region(const char* name) OMNITRACE_PUBLIC_API;
+    int omnitrace_pop_region(const char*) OMNITRACE_PUBLIC_API;
+
+    /// starts an instrumentation region in a user-defined category and (optionally)
+    /// adds annotations to the perfetto trace.
+    int omnitrace_push_category_region(omnitrace_category_t, const char*,
+                                       omnitrace_annotation_t*,
+                                       size_t) OMNITRACE_PUBLIC_API;
+
+    /// stops an instrumentation region in a user-defined category and (optionally)
+    /// adds annotations to the perfetto trace.
+    int omnitrace_pop_category_region(omnitrace_category_t, const char*,
+                                      omnitrace_annotation_t*,
+                                      size_t) OMNITRACE_PUBLIC_API;
 
     /// stores source code information
     void omnitrace_register_source(const char* file, const char* func, size_t line,
@@ -80,16 +92,20 @@ extern "C"
     void omnitrace_init_hidden(const char*, bool, const char*) OMNITRACE_HIDDEN_API;
     void omnitrace_finalize_hidden(void) OMNITRACE_HIDDEN_API;
     void omnitrace_reset_preload_hidden(void) OMNITRACE_HIDDEN_API;
-    void omnitrace_set_env_hidden(const char* env_name,
-                                  const char* env_val) OMNITRACE_HIDDEN_API;
-    void omnitrace_set_mpi_hidden(bool use, bool attached) OMNITRACE_HIDDEN_API;
-    void omnitrace_push_trace_hidden(const char* name) OMNITRACE_HIDDEN_API;
-    void omnitrace_pop_trace_hidden(const char* name) OMNITRACE_HIDDEN_API;
-    void omnitrace_push_region_hidden(const char* name) OMNITRACE_HIDDEN_API;
-    void omnitrace_pop_region_hidden(const char* name) OMNITRACE_HIDDEN_API;
-    void omnitrace_register_source_hidden(const char* file, const char* func, size_t line,
-                                          size_t      address,
-                                          const char* source) OMNITRACE_HIDDEN_API;
-    void omnitrace_register_coverage_hidden(const char* file, const char* func,
-                                            size_t address) OMNITRACE_HIDDEN_API;
+    void omnitrace_set_env_hidden(const char*, const char*) OMNITRACE_HIDDEN_API;
+    void omnitrace_set_mpi_hidden(bool, bool) OMNITRACE_HIDDEN_API;
+    void omnitrace_push_trace_hidden(const char*) OMNITRACE_HIDDEN_API;
+    void omnitrace_pop_trace_hidden(const char*) OMNITRACE_HIDDEN_API;
+    void omnitrace_push_region_hidden(const char*) OMNITRACE_HIDDEN_API;
+    void omnitrace_pop_region_hidden(const char*) OMNITRACE_HIDDEN_API;
+    void omnitrace_push_category_region_hidden(omnitrace_category_t, const char*,
+                                               omnitrace_annotation_t*,
+                                               size_t) OMNITRACE_HIDDEN_API;
+    void omnitrace_pop_category_region_hidden(omnitrace_category_t, const char*,
+                                              omnitrace_annotation_t*,
+                                              size_t) OMNITRACE_HIDDEN_API;
+    void omnitrace_register_source_hidden(const char*, const char*, size_t, size_t,
+                                          const char*) OMNITRACE_HIDDEN_API;
+    void omnitrace_register_coverage_hidden(const char*, const char*,
+                                            size_t) OMNITRACE_HIDDEN_API;
 }

@@ -66,6 +66,40 @@ omnitrace_pop_region(const char* _name)
     return 0;
 }
 
+extern "C" int
+omnitrace_push_category_region(omnitrace_category_t _category, const char* _name,
+                               omnitrace_annotation_t* _annotations,
+                               size_t                  _annotation_count)
+{
+    try
+    {
+        omnitrace_push_category_region_hidden(_category, _name, _annotations,
+                                              _annotation_count);
+    } catch(std::exception& _e)
+    {
+        OMNITRACE_VERBOSE_F(1, "Exception caught: %s\n", _e.what());
+        return -1;
+    }
+    return 0;
+}
+
+extern "C" int
+omnitrace_pop_category_region(omnitrace_category_t _category, const char* _name,
+                              omnitrace_annotation_t* _annotations,
+                              size_t                  _annotation_count)
+{
+    try
+    {
+        omnitrace_pop_category_region_hidden(_category, _name, _annotations,
+                                             _annotation_count);
+    } catch(std::exception& _e)
+    {
+        OMNITRACE_VERBOSE_F(1, "Exception caught: %s\n", _e.what());
+        return -1;
+    }
+    return 0;
+}
+
 extern "C" void
 omnitrace_init_library(void)
 {

@@ -513,8 +513,7 @@ function(OMNITRACE_ADD_PYTHON_TEST)
 
     if(NOT TEST_COMMAND)
         list(APPEND TEST_ENVIRONMENT "OMNITRACE_CI=ON"
-             "OMNITRACE_OUTPUT_PATH=${PROJECT_BINARY_DIR}/omnitrace-tests-output"
-             "OMNITRACE_OUTPUT_PREFIX=${TEST_NAME}/${TEST_PYTHON_VERSION}/")
+             "OMNITRACE_OUTPUT_PATH=${PROJECT_BINARY_DIR}/omnitrace-tests-output")
         get_filename_component(_TEST_FILE "${TEST_FILE}" NAME)
         set(_TEST_FILE
             ${PROJECT_BINARY_DIR}/python/tests/${TEST_PYTHON_VERSION}/${_TEST_FILE})
@@ -530,6 +529,11 @@ function(OMNITRACE_ADD_PYTHON_TEST)
                 COMMAND ${TEST_PYTHON_EXECUTABLE} -m omnitrace ${TEST_PROFILE_ARGS} --
                         ${_TEST_FILE} ${TEST_RUN_ARGS}
                 WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
+            add_test(
+                NAME ${TEST_NAME}-${TEST_PYTHON_VERSION}-annotated
+                COMMAND ${TEST_PYTHON_EXECUTABLE} -m omnitrace ${TEST_PROFILE_ARGS}
+                        --annotate-trace -- ${_TEST_FILE} ${TEST_RUN_ARGS}
+                WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
         endif()
     else()
         list(APPEND TEST_LABELS "python-check" "python-${TEST_PYTHON_VERSION}-check")
@@ -543,12 +547,19 @@ function(OMNITRACE_ADD_PYTHON_TEST)
             WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
     endif()
 
-    foreach(_TEST ${TEST_NAME}-${TEST_PYTHON_VERSION}
-                  ${TEST_NAME}-${TEST_PYTHON_VERSION}-inverse)
+    foreach(
+        _TEST
+        ${TEST_NAME}-${TEST_PYTHON_VERSION} ${TEST_NAME}-${TEST_PYTHON_VERSION}-inverse
+        ${TEST_NAME}-${TEST_PYTHON_VERSION}-annotated)
 
         if(NOT TEST "${_TEST}")
             continue()
         endif()
+
+        string(REPLACE "${TEST_NAME}-${TEST_PYTHON_VERSION}" "${TEST_NAME}" _TEST_DIR
+                       "${_TEST}")
+        set(_TEST_ENV "${TEST_ENVIRONMENT}"
+                      "OMNITRACE_OUTPUT_PREFIX=${_TEST_DIR}/${TEST_PYTHON_VERSION}/")
 
         set(_TEST_PROPERTIES "${TEST_PROPERTIES}")
         if(NOT "${_TEST}" MATCHES "inverse")
@@ -568,7 +579,7 @@ function(OMNITRACE_ADD_PYTHON_TEST)
         set_tests_properties(
             ${_TEST}
             PROPERTIES ENVIRONMENT
-                       "${TEST_ENVIRONMENT}"
+                       "${_TEST_ENV}"
                        TIMEOUT
                        ${TEST_TIMEOUT}
                        LABELS
@@ -809,6 +820,10 @@ omnitrace_add_test(
         args
     RUN_ARGS 10 ${NUM_THREADS} 1000
     ENVIRONMENT "${_base_environment};OMNITRACE_CRITICAL_TRACE=OFF"
+    REWRITE_RUN_PASS_REGEX "Pushing custom region :: run.10. x 1000"
+    RUNTIME_PASS_REGEX "Pushing custom region :: run.10. x 1000"
+    PRELOAD_PASS_REGEX "Pushing custom region :: run.10. x 1000"
+    BASELINE_FAIL_REGEX "Pushing custom region"
     REWRITE_FAIL_REGEX "0 instrumented loops in procedure")
 
 if(OMNITRACE_USE_MPI OR OMNITRACE_USE_MPI_HEADERS)
