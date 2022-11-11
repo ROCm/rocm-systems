@@ -77,7 +77,7 @@ def parse(my_parser):
     roofline_group = profile_parser.add_argument_group("Standalone Roofline Options")
 
     general_group.add_argument(
-        "-v", "--version", action="version", version="%(PROG)s (" + VER + ")"
+        "-v", "--version", action="version", version=PROG + " (" + VER + ")"
     )
     general_group.add_argument(
         "-V", "--verbose", help="Increase output verbosity", action="count", default=0
@@ -228,7 +228,7 @@ def parse(my_parser):
     connection_group = db_parser.add_argument_group("Connection Options")
 
     general_group.add_argument(
-        "-v", "--version", action="version", version="%(PROG)s (" + VER + ")"
+        "-v", "--version", action="version", version=PROG + " (" + VER + ")"
     )
     general_group.add_argument(
         "-V", "--verbose", help="Increase output verbosity", action="count", default=0
@@ -328,7 +328,7 @@ def parse(my_parser):
     analyze_group = analyze_parser.add_argument_group("Analyze Options")
 
     general_group.add_argument(
-        "-v", "--version", action="version", version="%(PROG)s (" + VER + ")"
+        "-v", "--version", action="version", version=PROG + " (" + VER + ")"
     )
     general_group.add_argument(
         "-V", "--verbose", help="Increase output verbosity", action="count", default=0
