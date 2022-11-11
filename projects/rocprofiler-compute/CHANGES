@@ -4,7 +4,7 @@ Version 1.0.4 (11 Nov 2022)
   * addition of progress bar indicator in web-based GUI (#8)
   * reduced default content for web-based GUI to reduce load times (#9)
   * minor packaging and CI updates 
-  * variety of documentatinon updates
+  * variety of documentation updates  
   * added an optional argument to vcopy to specify device id
 
 Version 1.0.3 (07 Nov 2022)
