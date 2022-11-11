@@ -678,6 +678,27 @@ omnitrace_add_test(
     ENVIRONMENT "${_base_environment};OMNITRACE_CRITICAL_TRACE=OFF"
     REWRITE_FAIL_REGEX "0 instrumented loops in procedure transpose")
 
+omnitrace_add_test(
+    SKIP_PRELOAD SKIP_RUNTIME SKIP_SAMPLING
+    NAME rewrite-caller
+    TARGET rewrite-caller
+    LABELS "caller-include"
+    REWRITE_ARGS
+        -e
+        -i
+        256
+        --caller-include
+        "^inner"
+        -v
+        2
+        --print-instrumented
+        functions
+    RUN_ARGS 17
+    ENVIRONMENT "${_base_environment};OMNITRACE_COUT_OUTPUT=ON"
+    BASELINE_PASS_REGEX "number of calls made = 17"
+    REWRITE_PASS_REGEX "\\[function\\]\\[Forcing\\] caller-include-regex :: 'outer'"
+    REWRITE_RUN_PASS_REGEX ">>> ._outer ([ \\|]+) 17")
+
 set(OMNITRACE_ROCM_EVENTS_TEST
     "GRBM_COUNT,GPUBusy,SQ_WAVES,SQ_INSTS_VALU,VALUInsts,TCC_HIT_sum,TA_TA_BUSY[0]:device=0,TA_TA_BUSY[11]:device=0"
     )

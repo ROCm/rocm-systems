@@ -124,6 +124,7 @@ regexvec_t       file_include                  = {};
 regexvec_t       file_exclude                  = {};
 regexvec_t       file_restrict                 = {};
 regexvec_t       func_restrict                 = {};
+regexvec_t       caller_include                = {};
 CodeCoverageMode coverage_mode                 = CODECOV_NONE;
 
 std::unique_ptr<std::ofstream> log_ofs = {};
@@ -633,6 +634,9 @@ main(int argc, char** argv)
     parser.add_argument({ "-R", "--function-restrict" },
                         "Regex(es) for restricting functions only to those "
                         "that match the provided regular-expressions");
+    parser.add_argument({ "--caller-include" },
+                        "Regex(es) for including functions that call the "
+                        "listed functions (despite heuristics)");
     parser.add_argument({ "-MI", "--module-include" },
                         "Regex(es) for selecting modules/files/libraries "
                         "(despite heuristics)");
@@ -1101,6 +1105,8 @@ main(int argc, char** argv)
         add_regex(func_include, tim::get_env<string_t>("OMNITRACE_REGEX_INCLUDE", ""));
         add_regex(func_exclude, tim::get_env<string_t>("OMNITRACE_REGEX_EXCLUDE", ""));
         add_regex(func_restrict, tim::get_env<string_t>("OMNITRACE_REGEX_RESTRICT", ""));
+        add_regex(caller_include,
+                  tim::get_env<string_t>("OMNITRACE_REGEX_CALLER_INCLUDE"));
 
         add_regex(file_include,
                   tim::get_env<string_t>("OMNITRACE_REGEX_MODULE_INCLUDE", ""));
@@ -1123,6 +1129,7 @@ main(int argc, char** argv)
         _parse_regex_option("function-include", func_include);
         _parse_regex_option("function-exclude", func_exclude);
         _parse_regex_option("function-restrict", func_restrict);
+        _parse_regex_option("caller-include", caller_include);
         _parse_regex_option("module-include", file_include);
         _parse_regex_option("module-exclude", file_exclude);
         _parse_regex_option("module-restrict", file_restrict);

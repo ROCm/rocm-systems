@@ -208,6 +208,7 @@ extern regexvec_t       file_include;
 extern regexvec_t       file_exclude;
 extern regexvec_t       file_restrict;
 extern regexvec_t       func_restrict;
+extern regexvec_t       caller_include;
 extern CodeCoverageMode coverage_mode;
 
 // logging

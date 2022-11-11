@@ -112,6 +112,7 @@ private:
     bool is_loop_address_range_constrained() const;  // checks loop addr range constraint
     bool contains_dynamic_callsites() const;
     bool should_instrument(bool _coverage) const;
+    bool contains_user_callsite() const;  // checks user caller regexes
 
 public:
     template <typename ArchiveT>
@@ -198,6 +199,7 @@ module_function::serialize(ArchiveT& ar, const unsigned)
            cereal::make_nvp("is_routine_constrained", is_routine_constrained()),
            cereal::make_nvp("is_user_restricted", is_user_restricted()),
            cereal::make_nvp("is_user_included", is_user_included()),
+           cereal::make_nvp("contains_user_callsite", contains_user_callsite()),
            cereal::make_nvp("is_user_excluded", is_user_excluded()),
            cereal::make_nvp("is_overlapping_constrained", is_overlapping_constrained()),
            cereal::make_nvp("is_entry_trap_constrained", is_entry_trap_constrained()),

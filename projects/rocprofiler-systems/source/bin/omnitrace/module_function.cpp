@@ -333,7 +333,7 @@ module_function::is_user_included() const
         }
     }
 
-    return false;
+    return contains_user_callsite();
 }
 
 bool
@@ -530,6 +530,27 @@ bool
 module_function::contains_dynamic_callsites() const
 {
     if(flow_graph) return flow_graph->containsDynamicCallsites();
+
+    return false;
+}
+
+bool
+module_function::contains_user_callsite() const
+{
+    if(caller_include.empty()) return false;
+
+    bpvector_t<BPatch_point*> call_points;
+    function->getCallPoints(call_points);
+    for(const auto& call_point : call_points)
+    {
+        if(check_regex_restrictions(
+               std::string(get_name(call_point->getCalledFunction())), caller_include))
+        {
+            messages.emplace_back(2, "Forcing", "function", "caller-include-regex",
+                                  function_name);
+            return true;
+        }
+    }
 
     return false;
 }
