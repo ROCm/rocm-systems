@@ -33,6 +33,17 @@ project(
 include(ExternalProject)
 include(GNUInstallDirs)
 
+# version control info
+find_package(Git)
+
+if(Git_FOUND AND EXISTS "${PROJECT_SOURCE_DIR}/.git")
+    execute_process(
+        COMMAND git log --pretty=format:%h -n 1
+        OUTPUT_VARIABLE OMNIPERF_GIT_REV
+        OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+endif()
+message(STATUS "Git revision: ${GIT_REV}")
+
 set(CMAKE_BUILD_TYPE "Release")
 if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
     set(CMAKE_INSTALL_PREFIX
@@ -150,6 +161,10 @@ if(LOCALHOST MATCHES "TheraS01|.*\.thera\.amd\.com|thera-hn")
         ${mod_additions})
     list(POP_BACK CMAKE_MESSAGE_INDENT)
 endif()
+
+# git versioning file
+configure_file(${PROJECT_SOURCE_DIR}/cmake/VERSION.sha.in
+               ${PROJECT_SOURCE_DIR}/VERSION.sha @ONLY)
 
 enable_testing()
 
