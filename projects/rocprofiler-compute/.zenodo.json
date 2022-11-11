@@ -1,0 +1,38 @@
+{
+    "description": "Updates\n<ul>\n<li>update python requirements.txt with minimum versions for numpy and pandas</li>\n<li>addition of progress bar indicator in web-based GUI (#8)</li>\n<li>reduced default content for web-based GUI to reduce load times (#9)</li>\n<li>minor packaging and CI updates </li>\n<li>variety of documentation updates</li>\n<li>added an optional argument to vcopy.cpp workload example to specify device id</li>\n</ul>\n<p>Documentation available at <a href=\"https://amdresearch.github.io/omniperf\">https://amdresearch.github.io/omniperf</a>\nAssociated release tarball: <a href=\"https://github.com/AMDResearch/omniperf/releases/download/v1.0.4/omniperf-v1.0.4.tar.gz\">omniperf-v1.0.4.tar.gz</a></p>", 
+    "license": "other-open", 
+    "title": "AMDResearch/omniperf: v1.0.4 (11 November 2022)", 
+    "version": "v1.0.4", 
+    "upload_type": "software", 
+    "publication_date": "2022-11-11", 
+    "creators": [
+        {
+            "name": "Xiaomin Lu"
+        },
+        {
+            "name": "Cole Ramos"
+        }, 
+        {
+            "name": "Fei Zheng"
+        },
+        {
+            "name": "Karl W. Schulz"
+        },
+        {
+            "name": "Jose Santos"
+        }
+    ], 
+    "access_right": "open", 
+    "related_identifiers": [
+        {
+            "scheme": "url", 
+            "identifier": "https://github.com/AMDResearch/omniperf/tree/v1.0.4", 
+            "relation": "isSupplementTo"
+        }, 
+        {
+            "scheme": "doi", 
+            "identifier": "10.5281/zenodo.7314631", 
+            "relation": "isVersionOf"
+        }
+    ]
+}
