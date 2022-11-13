@@ -302,6 +302,12 @@ get_sampling_real_tids();
 bool
 get_sampling_include_inlines();
 
+size_t
+get_num_threads_hint();
+
+size_t
+get_sampling_allocator_size();
+
 double
 get_process_sampling_freq();
 

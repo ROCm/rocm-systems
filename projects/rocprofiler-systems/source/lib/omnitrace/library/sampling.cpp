@@ -30,6 +30,7 @@
 #include "library/debug.hpp"
 #include "library/ptl.hpp"
 #include "library/runtime.hpp"
+#include "library/state.hpp"
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
 #include "library/tracing.hpp"
@@ -105,8 +106,69 @@ namespace sampling
 {
 namespace
 {
+using sampler_allocator_t = typename sampler_t::allocator_t;
+
+auto&
+get_sampler_allocators()
+{
+    static auto _v = std::vector<std::shared_ptr<sampler_allocator_t>>{};
+    return _v;
+}
+
 std::set<int>
 configure(bool _setup, int64_t _tid = threading::get_id());
+
+void
+configure_sampler_allocator(std::shared_ptr<sampler_allocator_t>& _v)
+{
+    if(_v) return;
+
+    OMNITRACE_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
+    OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
+
+    _v = std::make_shared<sampler_allocator_t>();
+    _v->reserve(config::get_sampling_allocator_size());
+}
+
+void
+configure_sampler_allocators()
+{
+    auto& _allocators = get_sampler_allocators();
+    if(_allocators.empty())
+    {
+        // avoid lock until necessary
+        auto_lock_t _alloc_lk{ type_mutex<decltype(_allocators)>() };
+        if(_allocators.empty())
+        {
+            _allocators.resize(std::ceil(config::get_num_threads_hint() /
+                                         config::get_sampling_allocator_size()));
+            for(auto& itr : _allocators)
+                configure_sampler_allocator(itr);
+        }
+    }
+}
+
+std::shared_ptr<sampler_allocator_t>
+get_sampler_allocator()
+{
+    configure_sampler_allocators();
+
+    auto& _allocators = get_sampler_allocators();
+
+    OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
+
+    auto_lock_t _lk{ type_mutex<sampler_allocator_t>() };
+
+    for(auto& itr : _allocators)
+    {
+        if(!itr) configure_sampler_allocator(itr);
+        if(itr->size() < config::get_sampling_allocator_size()) return itr;
+    }
+
+    auto& _v = _allocators.emplace_back();
+    configure_sampler_allocator(_v);
+    return _v;
+}
 
 template <typename... Args>
 void
@@ -403,9 +465,12 @@ configure(bool _setup, int64_t _tid)
         auto _verbose = std::min<int>(get_verbose() - 2, 2);
         if(get_debug_sampling()) _verbose = 2;
 
+        OMNITRACE_DEBUG("Requesting allocator for sampler on thread %lu...\n", _tid);
+        auto _alloc = get_sampler_allocator();
+
         OMNITRACE_DEBUG("Configuring sampler for thread %lu...\n", _tid);
-        sampling::sampler_instances::construct(construct_on_thread{ _tid }, "omnitrace",
-                                               _tid, _verbose);
+        sampling::sampler_instances::construct(construct_on_thread{ _tid }, _alloc,
+                                               "omnitrace", _tid, _verbose);
 
         _sampler->set_flags(SA_RESTART);
         _sampler->set_verbose(_verbose);
@@ -651,7 +716,7 @@ post_process()
                           "Getting sampler data for thread %lu...\n", i);
 
         _sampler->stop();
-        auto& _raw_data = _sampler->get_data();
+        auto _raw_data = _sampler->get_data();
         for(auto litr : _loaded_data[i])
         {
             while(!litr.is_empty())

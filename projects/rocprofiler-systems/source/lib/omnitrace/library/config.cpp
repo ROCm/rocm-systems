@@ -266,6 +266,20 @@ configure_settings(bool _init)
                                  "Verbosity within the omnitrace-dl library", 0,
                                  "debugging", "libomnitrace-dl", "advanced");
 
+    OMNITRACE_CONFIG_SETTING(
+        size_t, "OMNITRACE_NUM_THREADS_HINT",
+        "This is hint for how many threads are expected to be created in the "
+        "application. Setting this value allows omnitrace to preallocate resources "
+        "during initialization and warn about any potential issues. For example, when "
+        "call-stack sampling, each thread has a unique sampler instance which "
+        "communicates with an allocator instance running in a background thread. Each "
+        "allocator only handles N sampling instances (where N is the value of "
+        "OMNITRACE_SAMPLING_ALLOCATOR_SIZE). When this hint is set to >= the number of "
+        "threads that get sampled, omnitrace can start all the background threads during "
+        "initialization",
+        get_env<size_t>("OMNITRACE_NUM_THREADS", 1), "threading", "performance",
+        "sampling", "debugging", "advanced");
+
     OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_USE_PERFETTO", "Enable perfetto backend",
                              _default_perfetto_v, "backend", "perfetto");
 
@@ -483,6 +497,18 @@ configure_settings(bool _init)
     OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_SAMPLING_INCLUDE_INLINES",
                              "Create entries for inlined functions when available", false,
                              "sampling", "data", "advanced");
+
+    OMNITRACE_CONFIG_SETTING(
+        size_t, "OMNITRACE_SAMPLING_ALLOCATOR_SIZE",
+        "The number of sampled threads handled by an allocator running in a background "
+        "thread. Each thread that is sampled communicates with an allocator running in a "
+        "background thread which handles storing/caching the data when it's buffer is "
+        "full. Setting this value too high (i.e. equal to the number of threads when the "
+        "thread count is high) may cause loss of data -- the sampler may fill a new "
+        "buffer and overwrite old buffer data before the allocator can process it. "
+        "Setting this value to 1 will result in a background allocator thread for every "
+        "thread started by the application.",
+        8, "sampling", "debugging", "advanced");
 
     OMNITRACE_CONFIG_SETTING(
         bool, "OMNITRACE_SAMPLING_REALTIME",
@@ -1599,6 +1625,13 @@ get_use_rcclp()
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
 }
 
+size_t
+get_num_threads_hint()
+{
+    static auto _v = get_config()->find("OMNITRACE_NUM_THREADS_HINT");
+    return static_cast<tim::tsettings<size_t>&>(*_v->second).get();
+}
+
 bool
 get_critical_trace_debug()
 {
@@ -1866,6 +1899,13 @@ get_sampling_include_inlines()
 {
     static auto _v = get_config()->find("OMNITRACE_SAMPLING_INCLUDE_INLINES");
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
+}
+
+size_t
+get_sampling_allocator_size()
+{
+    static auto _v = get_config()->find("OMNITRACE_SAMPLING_ALLOCATOR_SIZE");
+    return std::max<size_t>(static_cast<tim::tsettings<size_t>&>(*_v->second).get(), 1);
 }
 
 int64_t

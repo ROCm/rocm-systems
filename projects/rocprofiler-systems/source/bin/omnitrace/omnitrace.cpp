@@ -2197,18 +2197,18 @@ main(int argc, char** argv)
             verbprintf(0, "Consider instrumenting the relevant libraries...\n");
             verbprintf(0, "\n");
 
-            using TIMEMORY_PIPE = tim::popen::TIMEMORY_PIPE;
+            auto cmdv_envp = std::array<char*, 2>{};
+            cmdv_envp.fill(nullptr);
+            cmdv_envp.at(0) = strdup("LD_TRACE_LOADED_OBJECTS=1");
+            auto ldd        = tim::popen::popen(cmdv0.c_str(), nullptr, cmdv_envp.data());
+            auto linked_libs = tim::popen::read_ldd_fork(ldd);
+            auto perr        = tim::popen::pclose(ldd);
+            for(auto& itr : cmdv_envp)
+                ::free(itr);
 
-            tim::set_env("LD_TRACE_LOADED_OBJECTS", "1", 1);
-            TIMEMORY_PIPE* ldd = tim::popen::popen(cmdv0.c_str());
-            tim::set_env("LD_TRACE_LOADED_OBJECTS", "0", 1);
-
-            strvec_t linked_libraries = tim::popen::read_ldd_fork(ldd);
-
-            auto perr = tim::popen::pclose(ldd);
             if(perr != 0) perror("Error in omnitrace_fork");
 
-            for(const auto& itr : linked_libraries)
+            for(const auto& itr : linked_libs)
                 verbprintf(0, "\t%s\n", itr.c_str());
 
             verbprintf(0, "\n");
