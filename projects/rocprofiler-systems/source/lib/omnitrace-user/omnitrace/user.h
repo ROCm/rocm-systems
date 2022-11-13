@@ -105,7 +105,8 @@ extern "C"
     /// @fn int omnitrace_user_configure(omnitrace_user_configure_mode_t cfg,
     ///                                  omnitrace_user_callbacks_t new_callbacks,
     ///                                  omnitrace_user_callbacks_t* old_callbacks)
-    /// @param[in] config Specifies how the new callbacks are merged with the old callbacks
+    /// @param[in] config Specifies how the new callbacks are merged with the old
+    /// callbacks
     /// @param[in] new_callbacks An @ref omnitrace_user_callbacks_t instance specifying
     ///            the callbacks which should be invoked by the user API.
     /// @param[out] old_callbacks Pointer to @ref omnitrace_user_callbacks_t which,

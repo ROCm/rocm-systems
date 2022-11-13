@@ -4,8 +4,14 @@ run-name: ubuntu-bionic
 on:
   push:
     branches: [ main, develop ]
+    paths-ignore:
+      - '*.md'
+      - 'source/docs/**'
   pull_request:
     branches: [ main, develop ]
+    paths-ignore:
+      - '*.md'
+      - 'source/docs/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -46,17 +52,22 @@ jobs:
 
     - name: Install Packages
       timeout-minutes: 10
-      run:
-        apt-get update &&
-        apt-get upgrade -y &&
-        apt-get install -y build-essential m4 autoconf libtool python3-pip ${{ matrix.compiler }} &&
-        if [ "${{ matrix.mpi }}" = "mpich" ]; then apt-get install -y libmpich-dev mpich; fi &&
-        if [ "${{ matrix.mpi }}" = "openmpi" ]; then apt-get install -y libopenmpi-dev openmpi-bin libfabric-dev; fi &&
-        python3 -m pip install --upgrade pip &&
-        python3 -m pip install numpy &&
-        python3 -m pip install perfetto &&
-        python3 -m pip install 'cmake==3.16.3' &&
-        for i in 6 7 8 9 10; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy perfetto dataclasses; done
+      uses: nick-fields/retry@v2
+      with:
+        retry_wait_seconds: 30
+        timeout_minutes: 10
+        max_attempts: 5
+        command: |
+          apt-get update &&
+          apt-get upgrade -y &&
+          apt-get install -y build-essential m4 autoconf libtool python3-pip ${{ matrix.compiler }} &&
+          if [ "${{ matrix.mpi }}" = "mpich" ]; then apt-get install -y libmpich-dev mpich; fi &&
+          if [ "${{ matrix.mpi }}" = "openmpi" ]; then apt-get install -y libopenmpi-dev openmpi-bin libfabric-dev; fi &&
+          python3 -m pip install --upgrade pip &&
+          python3 -m pip install numpy &&
+          python3 -m pip install perfetto &&
+          python3 -m pip install 'cmake==3.16.3' &&
+          for i in 6 7 8 9 10; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy perfetto dataclasses; done
 
     - name: Install Kokkos
       timeout-minutes: 10
@@ -82,11 +93,11 @@ jobs:
         cmake --version &&
         if [ "${{ matrix.mpi }}" = "nompi" ]; then USE_MPI=OFF; else USE_MPI=ON; fi &&
         append-tagname() { if [ "${1}" == "ON" ]; then TAG="${TAG}-${2}"; fi; } &&
-        ./scripts/run-ci.sh -B build
+        python3 ./scripts/run-ci.py -B build
           --name ${{ github.repository_owner }}-${{ github.ref_name }}-ubuntu-bionic-${{ matrix.compiler }}-${{ matrix.mpi }}-python
           --build-jobs 2
           --site GitHub
-          --cmake-args
+          --
           -DCMAKE_C_COMPILER=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')
           -DCMAKE_CXX_COMPILER=${{ matrix.compiler }}
           -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}

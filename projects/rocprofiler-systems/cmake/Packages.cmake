@@ -234,6 +234,9 @@ endif()
 #
 # ----------------------------------------------------------------------------------------#
 
+# suppress warning during CI that MPI_HEADERS_ALLOW_MPICH was unused
+set(_OMNITRACE_MPI_HEADERS_ALLOW_MPICH ${MPI_HEADERS_ALLOW_MPICH})
+
 if(OMNITRACE_USE_MPI)
     find_package(MPI ${omnitrace_FIND_QUIETLY} REQUIRED)
     target_link_libraries(omnitrace-mpi INTERFACE MPI::MPI_C MPI::MPI_CXX)

@@ -26,11 +26,11 @@
 #define OMNITRACE_HIDDEN_API __attribute__((visibility("hidden")));
 
 #include <dlfcn.h>
+#include <stdbool.h>
 #include <stdio.h>
-#include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdbool.h>
+#include <unistd.h>
 
 //
 // local type definitions
@@ -52,8 +52,8 @@ omnitrace_main(int, char**, char**) OMNITRACE_HIDDEN_API;
 
 int
 omnitrace_libc_start_main(int (*)(int, char**, char**), int, char**,
-                     int (*)(int, char**, char**), void (*)(void), void (*)(void),
-                     void*) OMNITRACE_HIDDEN_API;
+                          int (*)(int, char**, char**), void (*)(void), void (*)(void),
+                          void*) OMNITRACE_HIDDEN_API;
 
 int
 __libc_start_main(int (*)(int, char**, char**), int, char**, int (*)(int, char**, char**),
@@ -109,8 +109,8 @@ omnitrace_main(int argc, char** argv, char** envp)
 
 int
 omnitrace_libc_start_main(int (*_main)(int, char**, char**), int _argc, char** _argv,
-                  int (*_init)(int, char**, char**), void (*_fini)(void),
-                  void (*_rtld_fini)(void), void* _stack_end)
+                          int (*_init)(int, char**, char**), void (*_fini)(void),
+                          void (*_rtld_fini)(void), void* _stack_end)
 {
     int _preload = omnitrace_preload_library();
 
@@ -159,5 +159,5 @@ __libc_start_main(int (*_main)(int, char**, char**), int _argc, char** _argv,
                   void (*_rtld_fini)(void), void* _stack_end)
 {
     return omnitrace_libc_start_main(_main, _argc, _argv, _init, _fini, _rtld_fini,
-                                _stack_end);
+                                     _stack_end);
 }

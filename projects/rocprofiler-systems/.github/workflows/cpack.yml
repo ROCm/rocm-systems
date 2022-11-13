@@ -2,9 +2,14 @@ name: Installer Packaging (CPack)
 run-name: cpack
 
 on:
+  workflow_dispatch:
   push:
     branches: [main, releases/**]
-    tags: []
+    tags:
+      - v*
+    paths-ignore:
+      - '*.md'
+      - 'source/docs/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -15,7 +20,7 @@ env:
 
 jobs:
   release:
-    if: github.repository == 'AMDResearch/omnitrace'
+    if: github.repository == 'AMDResearch/omnitrace' && startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-20.04
     permissions:
       contents: write
@@ -25,10 +30,35 @@ jobs:
         uses: actions/checkout@v3
       - name: Generate Release
         uses: softprops/action-gh-release@v1
-        if: startsWith(github.ref, 'refs/tags/')
         with:
           draft: True
           generate_release_notes: True
+
+  release-docs:
+    if: github.repository == 'AMDResearch/omnitrace' && startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-20.04
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          ref: gh-pages
+      - name: Update Docs
+        uses: s-weigand/setup-conda@v1
+        working-directory: source/docs
+        run: |
+          conda env create -n omnitrace-docs -f environment.yml
+          conda activate omnitrace-docs
+          git config --global user.name 'Jonathan R. Madsen'
+          git config --global user.email 'jrmadsen@users.noreply.github.com'
+          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}
+          git pull --rebase=true origin ${{ github.ref }}
+          ./update-docs.sh
+          git add ../../docs
+          git commit -m "Update HTML (automated)"
+          git push -f
 
   ubuntu:
     runs-on: ubuntu-20.04
@@ -131,10 +161,15 @@ jobs:
 
       - name: Build Base Container
         timeout-minutes: 20
-        run: |
-          pushd docker
-          ./build-docker.sh --distro ${{ matrix.os-distro }} --versions ${{ matrix.os-version }} --rocm-versions ${{ matrix.rocm-version }}
-          popd
+        uses: nick-fields/retry@v2
+        with:
+          retry_wait_seconds: 120
+          timeout_minutes: 20
+          max_attempts: 5
+          command: |
+            pushd docker
+            ./build-docker.sh --distro ${{ matrix.os-distro }} --versions ${{ matrix.os-version }} --rocm-versions ${{ matrix.rocm-version }}
+            popd
 
       - name: Build Release
         timeout-minutes: 150

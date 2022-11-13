@@ -4,8 +4,14 @@ run-name: opensuse-15
 on:
   push:
     branches: [ main, develop ]
+    paths-ignore:
+      - '*.md'
+      - 'source/docs/**'
   pull_request:
     branches: [ main, develop ]
+    paths-ignore:
+      - '*.md'
+      - 'source/docs/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -32,8 +38,13 @@ jobs:
 
     - name: Install Packages
       timeout-minutes: 10
-      run:
-        for i in 6 7 8 9 10; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy perfetto dataclasses; done
+      uses: nick-fields/retry@v2
+      with:
+        retry_wait_seconds: 30
+        timeout_minutes: 10
+        max_attempts: 5
+        command: |
+          for i in 6 7 8 9 10; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy perfetto dataclasses; done
 
     - name: Configure Env
       run:
@@ -42,20 +53,20 @@ jobs:
         echo "/opt/omnitrace/bin:${HOME}/.local/bin" >> $GITHUB_PATH &&
         echo "LD_LIBRARY_PATH=/opt/omnitrace/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
 
-    - name: Configure CMake
+    - name: Configure, Build, and Test
       timeout-minutes: 115
       shell: bash
       run:
         git config --global --add safe.directory ${PWD} &&
         cmake --version &&
-        ./scripts/run-ci.sh -B build
+        python3 ./scripts/run-ci.py -B build
           --name ${{ github.repository_owner }}-${{ github.ref_name }}-opensuse-${{ matrix.os-release }}-${{ matrix.compiler }}-nompi-python
           --build-jobs 2
           --site GitHub
-          --cmake-args
+          --
           -DCMAKE_C_COMPILER=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')
           -DCMAKE_CXX_COMPILER=${{ matrix.compiler }}
-          -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+          -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
           -DCMAKE_INSTALL_PREFIX=/opt/omnitrace
           -DOMNITRACE_BUILD_TESTING=ON
           -DOMNITRACE_USE_MPI=OFF

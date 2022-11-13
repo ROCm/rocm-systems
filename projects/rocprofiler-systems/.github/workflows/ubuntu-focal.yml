@@ -4,8 +4,14 @@ run-name: ubuntu-focal
 on:
   push:
     branches: [ main, develop ]
+    paths-ignore:
+      - '*.md'
+      - 'source/docs/**'
   pull_request:
     branches: [ main, develop ]
+    paths-ignore:
+      - '*.md'
+      - 'source/docs/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -62,18 +68,23 @@ jobs:
 
     - name: Install Packages
       timeout-minutes: 10
-      run:
-        apt-get update &&
-        apt-get install -y software-properties-common &&
-        add-apt-repository -y ppa:ubuntu-toolchain-r/test &&
-        apt-get update &&
-        apt-get upgrade -y &&
-        apt-get install -y build-essential m4 autoconf libtool python3-pip libiberty-dev clang libomp-dev libmpich-dev mpich environment-modules ${{ matrix.compiler }} &&
-        python3 -m pip install --upgrade pip &&
-        python3 -m pip install numpy &&
-        python3 -m pip install perfetto &&
-        python3 -m pip install 'cmake==3.16.3' &&
-        for i in 6 7 8 9 10; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy perfetto dataclasses; done
+      uses: nick-fields/retry@v2
+      with:
+        retry_wait_seconds: 30
+        timeout_minutes: 10
+        max_attempts: 5
+        command: |
+          apt-get update &&
+          apt-get install -y software-properties-common &&
+          add-apt-repository -y ppa:ubuntu-toolchain-r/test &&
+          apt-get update &&
+          apt-get upgrade -y &&
+          apt-get install -y build-essential m4 autoconf libtool python3-pip libiberty-dev clang libomp-dev libmpich-dev mpich environment-modules ${{ matrix.compiler }} &&
+          python3 -m pip install --upgrade pip &&
+          python3 -m pip install numpy &&
+          python3 -m pip install perfetto &&
+          python3 -m pip install 'cmake==3.16.3' &&
+          for i in 6 7 8 9 10; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy perfetto dataclasses; done
 
     - name: Test Environment Modules
       timeout-minutes: 15
@@ -102,11 +113,11 @@ jobs:
         append-tagname ${{ matrix.static-libgcc }} libgcc &&
         append-tagname ${{ matrix.static-libstdcxx }} libstdcxx &&
         cmake --version &&
-        ./scripts/run-ci.sh -B build
+        python3 ./scripts/run-ci.py -B build
           --name ${{ github.repository_owner }}-${{ github.ref_name }}-ubuntu-focal-${{ matrix.compiler }}${TAG}
           --build-jobs 2
           --site GitHub
-          --cmake-args
+          --
           -DCMAKE_C_COMPILER=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')
           -DCMAKE_CXX_COMPILER=${{ matrix.compiler }}
           -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
@@ -127,6 +138,7 @@ jobs:
           -DOMNITRACE_MAX_THREADS=32
           -DOMNITRACE_DISABLE_EXAMPLES="transpose;rccl"
           -DOMNITRACE_BUILD_NUMBER=${{ github.run_attempt }}
+          -DMPI_HEADERS_ALLOW_MPICH=OFF
 
     - name: Test Build-Tree Module
       timeout-minutes: 45
@@ -233,16 +245,21 @@ jobs:
 
     - name: Install Packages
       timeout-minutes: 10
-      run:
-        apt-get update &&
-        apt-get install -y software-properties-common wget gnupg2 &&
-        wget -q -O - https://repo.radeon.com/rocm/rocm.gpg.key | apt-key add - &&
-        echo "deb [arch=amd64] https://repo.radeon.com/rocm/apt/${{ matrix.rocm-version }}/ ubuntu main" | tee /etc/apt/sources.list.d/rocm.list &&
-        apt-get update &&
-        apt-get install -y build-essential m4 autoconf libtool python3-pip clang libomp-dev ${{ matrix.compiler }} libudev1 libnuma1 rocm-dev rocm-utils rocm-smi-lib roctracer-dev rocprofiler-dev hip-base hsa-amd-aqlprofile hsa-rocr-dev hsakmt-roct-dev libpapi-dev curl libopenmpi-dev openmpi-bin libfabric-dev &&
-        python3 -m pip install --upgrade pip &&
-        python3 -m pip install 'cmake==3.21.4' &&
-        for i in 6 7 8 9 10; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy perfetto dataclasses; done
+      uses: nick-fields/retry@v2
+      with:
+        retry_wait_seconds: 30
+        timeout_minutes: 10
+        max_attempts: 5
+        command: |
+          apt-get update &&
+          apt-get install -y software-properties-common wget gnupg2 &&
+          wget -q -O - https://repo.radeon.com/rocm/rocm.gpg.key | apt-key add - &&
+          echo "deb [arch=amd64] https://repo.radeon.com/rocm/apt/${{ matrix.rocm-version }}/ ubuntu main" | tee /etc/apt/sources.list.d/rocm.list &&
+          apt-get update &&
+          apt-get install -y build-essential m4 autoconf libtool python3-pip clang libomp-dev ${{ matrix.compiler }} libudev1 libnuma1 rocm-dev rocm-utils rocm-smi-lib roctracer-dev rocprofiler-dev hip-base hsa-amd-aqlprofile hsa-rocr-dev hsakmt-roct-dev libpapi-dev curl libopenmpi-dev openmpi-bin libfabric-dev &&
+          python3 -m pip install --upgrade pip &&
+          python3 -m pip install 'cmake==3.21.4' &&
+          for i in 6 7 8 9 10; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy perfetto dataclasses; done
 
     - name: Install RCCL
       if: ${{ matrix.rocm-version != '4.3' }}
@@ -283,11 +300,11 @@ jobs:
         cmake --version &&
         TAG="-rocm-${{ matrix.rocm-version }}" &&
         TAG="$(echo ${TAG} | sed 's/debian/latest/g')" &&
-        ./scripts/run-ci.sh -B build
+        python3 ./scripts/run-ci.py -B build
           --name ${{ github.repository_owner }}-${{ github.ref_name }}-ubuntu-focal-rocm-${{ matrix.compiler }}${TAG}
           --build-jobs 2
           --site GitHub
-          --cmake-args
+          --
           -DCMAKE_C_COMPILER=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')
           -DCMAKE_CXX_COMPILER=${{ matrix.compiler }}
           -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
@@ -311,7 +328,7 @@ jobs:
           -DOMNITRACE_CI_GPU=OFF
           -DCMAKE_INSTALL_RPATH_USE_LINK_PATH=OFF
           -DOMNITRACE_BUILD_NUMBER=${{ github.run_attempt }}
-          --ctest-args
+          --
           ${{ matrix.ctest-exclude }}
 
     - name: Install
@@ -392,15 +409,20 @@ jobs:
 
     - name: Install Packages
       timeout-minutes: 10
-      run:
-        sudo apt-get update &&
-        sudo apt-get install -y build-essential m4 autoconf libtool python3-pip clang libomp-dev environment-modules ${{ matrix.deps }} ${{ matrix.compiler }} &&
-        if [ "${{ matrix.mpi }}" = "mpich" ]; then sudo apt-get install -y libmpich-dev mpich; fi &&
-        if [ "${{ matrix.mpi }}" = "openmpi" ]; then sudo apt-get install -y libopenmpi-dev openmpi-bin libfabric-dev; fi &&
-        python3 -m pip install --upgrade pip &&
-        python3 -m pip install numpy &&
-        python3 -m pip install perfetto &&
-        python3 -m pip install 'cmake==3.16.3'
+      uses: nick-fields/retry@v2
+      with:
+        retry_wait_seconds: 30
+        timeout_minutes: 10
+        max_attempts: 5
+        command: |
+          sudo apt-get update &&
+          sudo apt-get install -y build-essential m4 autoconf libtool python3-pip clang libomp-dev environment-modules ${{ matrix.deps }} ${{ matrix.compiler }} &&
+          if [ "${{ matrix.mpi }}" = "mpich" ]; then sudo apt-get install -y libmpich-dev mpich; fi &&
+          if [ "${{ matrix.mpi }}" = "openmpi" ]; then sudo apt-get install -y libopenmpi-dev openmpi-bin libfabric-dev; fi &&
+          python3 -m pip install --upgrade pip &&
+          python3 -m pip install numpy &&
+          python3 -m pip install perfetto &&
+          python3 -m pip install 'cmake==3.16.3'
 
     - name: Test Environment Modules
       timeout-minutes: 15
@@ -422,11 +444,11 @@ jobs:
         cmake --version &&
         if [ "${{ matrix.mpi }}" = "nompi" ]; then USE_MPI=OFF; else USE_MPI=ON; fi &&
         if [ -z "${{ matrix.deps }}" ]; then TAG=""; else TAG="-external-deps"; fi &&
-        ./scripts/run-ci.sh -B ${{ github.workspace }}/build
+        python3 ./scripts/run-ci.py -B ${{ github.workspace }}/build
           --name ${{ github.repository_owner }}-${{ github.ref_name }}-ubuntu-focal-${{ matrix.compiler }}-${{ matrix.mpi }}${TAG}
           --build-jobs 2
           --site GitHub
-          --cmake-args
+          --
           -DCMAKE_C_COMPILER=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')
           -DCMAKE_CXX_COMPILER=${{ matrix.compiler }}
           -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
@@ -448,6 +470,7 @@ jobs:
           -DOMNITRACE_MAX_THREADS=32
           -DOMNITRACE_DISABLE_EXAMPLES="transpose;rccl"
           -DOMNITRACE_BUILD_NUMBER=${{ github.run_attempt }}
+          -DMPI_HEADERS_ALLOW_MPICH=ON
 
     - name: Test Build-Tree Env
       timeout-minutes: 60
@@ -533,19 +556,22 @@ jobs:
 
     - name: Install Packages
       timeout-minutes: 10
-      run:
-        apt-get update &&
-        apt-get install -y build-essential m4 autoconf libtool python3-pip clang libomp-dev environment-modules gcc g++ mpich libmpich-dev texinfo &&
-        python3 -m pip install --upgrade pip &&
-        python3 -m pip install numpy &&
-        python3 -m pip install perfetto &&
-        python3 -m pip install 'cmake==3.24.1' &&
-        for i in 6 7 8 9 10; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy perfetto dataclasses; done
+      uses: nick-fields/retry@v2
+      with:
+        retry_wait_seconds: 30
+        timeout_minutes: 10
+        max_attempts: 5
+        command: |
+          apt-get update &&
+          apt-get install -y build-essential m4 autoconf libtool python3-pip clang libomp-dev environment-modules gcc g++ mpich libmpich-dev texinfo &&
+          python3 -m pip install --upgrade pip &&
+          python3 -m pip install numpy &&
+          python3 -m pip install perfetto &&
+          python3 -m pip install 'cmake==3.24.1' &&
+          for i in 6 7 8 9 10; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy perfetto dataclasses; done
 
     - name: Configure Env
       run:
-        echo "CC=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')" >> $GITHUB_ENV &&
-        echo "CXX=${{ matrix.compiler }}" >> $GITHUB_ENV &&
         echo "${HOME}/.local/bin" >> $GITHUB_PATH
 
     - name: Configure, Build, and Test
@@ -554,12 +580,12 @@ jobs:
       run:
         git config --global --add safe.directory ${PWD} &&
         cmake --version &&
-        ./scripts/run-ci.sh -B build
+        python3 ./scripts/run-ci.py -B build
           --name ${{ github.repository_owner }}-${{ github.ref_name }}-ubuntu-focal-codecov-mpi-python-ompt-papi
           --build-jobs 2
           --site GitHub
           --coverage
-          --cmake-args
+          --
           -DCMAKE_INSTALL_PREFIX=/opt/omnitrace
           -DOMNITRACE_BUILD_CI=OFF
           -DOMNITRACE_BUILD_TESTING=ON

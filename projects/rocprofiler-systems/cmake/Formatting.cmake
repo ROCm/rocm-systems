@@ -56,12 +56,14 @@ endforeach()
 if(OMNITRACE_CLANG_FORMAT_EXE
    OR OMNITRACE_BLACK_FORMAT_EXE
    OR OMNITRACE_CMAKE_FORMAT_EXE)
-    file(GLOB_RECURSE sources ${PROJECT_SOURCE_DIR}/source/*.cpp)
+    file(GLOB_RECURSE sources ${PROJECT_SOURCE_DIR}/source/*.cpp
+         ${PROJECT_SOURCE_DIR}/source/*.c)
     file(GLOB_RECURSE headers ${PROJECT_SOURCE_DIR}/source/*.hpp
          ${PROJECT_SOURCE_DIR}/source/*.hpp.in ${PROJECT_SOURCE_DIR}/source/*.h
          ${PROJECT_SOURCE_DIR}/source/*.h.in)
     file(GLOB_RECURSE examples ${PROJECT_SOURCE_DIR}/examples/*.cpp
-         ${PROJECT_SOURCE_DIR}/examples/*.c ${PROJECT_SOURCE_DIR}/examples/*.hpp)
+         ${PROJECT_SOURCE_DIR}/examples/*.c ${PROJECT_SOURCE_DIR}/examples/*.hpp
+         ${PROJECT_SOURCE_DIR}/examples/*.h)
     file(GLOB_RECURSE external ${PROJECT_SOURCE_DIR}/examples/lulesh/external/kokkos/*)
     file(
         GLOB_RECURSE

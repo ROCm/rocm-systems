@@ -5,8 +5,14 @@ run-name: formatting
 on:
   push:
     branches: [ main, develop ]
+    paths-ignore:
+      - '*.md'
+      - 'source/docs/**'
   pull_request:
     branches: [ main, develop ]
+    paths-ignore:
+      - '*.md'
+      - 'source/docs/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -75,7 +81,7 @@ jobs:
     - name: clang-format
       run: |
         set +e
-        FILES=$(find source examples -type f | egrep '\.hpp$|\.cpp$|\.cpp\.in$')
+        FILES=$(find source examples tests -type f | egrep '\.(h|hpp|c|cpp)(|\.in)$')
         FORMAT_OUT=$(clang-format-11 -output-replacements-xml ${FILES})
         RET=$(echo ${FORMAT_OUT} | grep -c '<replacement ')
         if [ "${RET}" -ne 0 ]; then
