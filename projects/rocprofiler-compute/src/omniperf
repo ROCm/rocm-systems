@@ -115,13 +115,14 @@ def replace_timestamps(workload_dir):
     df_pmc_perf.to_csv(workload_dir + "/pmc_perf.csv", index=False)
 
 
-def gen_sysinfo(workload_name, workload_dir, ip_blocks, skip_roof):
+def gen_sysinfo(workload_name, workload_dir, ip_blocks, app_cmd, skip_roof):
     # Record system information
     mspec = specs.get_machine_specs(0)
     sysinfo = open(workload_dir + "/" + "sysinfo.csv", "w")
 
     # write header
     header = "workload_name,"
+    header += "command,"
     header += "host_name,host_cpu,host_distro,host_kernel,host_rocmver,date,"
     header += "gpu_soc,numSE,numCU,numSIMD,waveSize,maxWavesPerCU,maxWorkgroupSize,"
     header += "L1,L2,sclk,mclk,cur_sclk,cur_mclk,L2Banks,name,numSQC,hbmBW,"
@@ -136,6 +137,7 @@ def gen_sysinfo(workload_name, workload_dir, ip_blocks, skip_roof):
     timestamp = now.strftime("%c") + " (" + local_tzname + ")"
     # host info
     param = [workload_name]
+    param += [app_cmd]
     param += [
         mspec.hostname,
         mspec.cpu,
@@ -174,6 +176,8 @@ def gen_sysinfo(workload_name, workload_dir, ip_blocks, skip_roof):
         param += ["32", "mi200", "56", str(hbmBW)]
         if not skip_roof:
             blocks.append("roofline")
+
+
 
     # ip block info
     if ip_blocks == None:
@@ -376,7 +380,7 @@ def omniperf_profile(args,VER):
     replace_timestamps(workload_dir)
 
     # Generate sysinfo
-    gen_sysinfo(args.name, workload_dir, args.ipblocks, args.no_roof)
+    gen_sysinfo(args.name, workload_dir, args.ipblocks, args.remaining, args.no_roof)
 
     # Add tracing & roofline metrics (mi200 only)
     if args.target.lower() == "mi200":
@@ -498,7 +502,7 @@ def main():
             sysinfo_exists = os.path.isfile(sysinfo_path)
             if not sysinfo_exists:
                 print("sysinfo not found")
-                gen_sysinfo(args.name, args.path, [], False)
+                gen_sysinfo(args.name, args.path, [], args.remaining, False)
 
             # does app data exist?
             print("Checking for pmc_perf.csv in ", args.path)
@@ -512,7 +516,7 @@ def main():
                 if not args.remaining:
                     throw_parse_error(
                         my_parser,
-                        "Cannot find existing application data.\nAttempting to generate application data from -c.\n--cmd option is required to generate application data.",
+                        "Cannot find existing application data.\nAttempting to generate application data from -- <app_cmd>.\n-- <app_cmd> option is required to generate application data.",
                     )
                 else:
                     characterize_app(args.path, args.remaining, args.verbose)
