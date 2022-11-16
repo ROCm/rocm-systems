@@ -43,6 +43,13 @@ get_perfetto_session()
     return _v;
 }
 
+std::unordered_map<hash_value_t, std::string>&
+get_perfetto_track_uuids()
+{
+    static thread_local auto _v = std::unordered_map<hash_value_t, std::string>{};
+    return _v;
+}
+
 std::vector<std::function<void()>>&
 get_finalization_functions()
 {

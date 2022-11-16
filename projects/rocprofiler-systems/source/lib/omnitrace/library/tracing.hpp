@@ -38,19 +38,76 @@
 #include <timemory/hash/types.hpp>
 #include <timemory/mpl/type_traits.hpp>
 
+#include <atomic>
+#include <functional>
+#include <memory>
+#include <ratio>
+#include <string>
 #include <type_traits>
+#include <unordered_map>
+#include <utility>
+#include <vector>
 
 namespace omnitrace
 {
 namespace tracing
 {
 using interval_data_instances = thread_data<std::vector<bool>>;
+using hash_value_t            = tim::hash_value_t;
 
 perfetto::TraceConfig&
 get_perfetto_config();
 
 std::unique_ptr<perfetto::TracingSession>&
 get_perfetto_session();
+
+template <typename CategoryT, typename... Args>
+auto
+get_perfetto_category_uuid(Args&&... _args)
+{
+    return tim::hash::get_combined_hash_id(
+        tim::hash::get_hash_id(JOIN('_', "omnitrace", trait::name<CategoryT>::value)),
+        std::forward<Args>(_args)...);
+}
+
+std::unordered_map<hash_value_t, std::string>&
+get_perfetto_track_uuids();
+
+template <typename CategoryT, typename TrackT = ::perfetto::Track, typename FuncT,
+          typename... Args>
+auto
+get_perfetto_track(CategoryT, FuncT&& _desc_generator, Args&&... _args)
+{
+    auto  _uuid = get_perfetto_category_uuid<CategoryT>(std::forward<Args>(_args)...);
+    auto& _track_uuids = get_perfetto_track_uuids();
+    if(_track_uuids.find(_uuid) == _track_uuids.end())
+    {
+        const auto _track = TrackT(_uuid);
+        auto       _desc  = _track.Serialize();
+
+        auto _name = std::forward<FuncT>(_desc_generator)(std::forward<Args>(_args)...);
+        _desc.set_name(_name);
+        ::perfetto::TrackEvent::SetTrackDescriptor(_track, _desc);
+
+        OMNITRACE_VERBOSE_F(4, "[%s] Created %s(%zu) with description: \"%s\"\n",
+                            trait::name<CategoryT>::value, demangle<TrackT>().c_str(),
+                            _uuid, _name.c_str());
+
+        _track_uuids.emplace(_uuid, _name);
+    }
+
+    // guard this with ppdefs in addition to runtime check to avoid
+    // overhead of generating string during releases
+#if defined(OMNITRACE_CI) && OMNITRACE_CI > 0
+    auto _name = std::forward<FuncT>(_desc_generator)(std::forward<Args>(_args)...);
+    OMNITRACE_CI_THROW(_track_uuids.at(_uuid) != _name,
+                       "Error! Multiple invocations of UUID %zu produced different "
+                       "descriptions: \"%s\" and \"%s\"\n",
+                       _uuid, _track_uuids.at(_uuid).c_str(), _name.c_str());
+#endif
+
+    return TrackT(_uuid);
+}
 
 std::vector<std::function<void()>>&
 get_finalization_functions();
@@ -292,5 +349,24 @@ pop_perfetto_ts(CategoryT, const char*, uint64_t _ts, Args&&... args)
 
     TRACE_EVENT_END(trait::name<CategoryT>::value, _ts, std::forward<Args>(args)...);
 }
+
+template <typename CategoryT, typename... Args>
+inline void
+push_perfetto_track(CategoryT, const char* name, perfetto::Track _track, uint64_t _ts,
+                    Args&&... args)
+{
+    TRACE_EVENT_BEGIN(trait::name<CategoryT>::value, perfetto::StaticString(name), _track,
+                      _ts, std::forward<Args>(args)...);
+}
+
+template <typename CategoryT, typename... Args>
+inline void
+pop_perfetto_track(CategoryT, const char*, perfetto::Track _track, uint64_t _ts,
+                   Args&&... args)
+{
+    TRACE_EVENT_END(trait::name<CategoryT>::value, _track, _ts,
+                    std::forward<Args>(args)...);
+}
+
 }  // namespace tracing
 }  // namespace omnitrace

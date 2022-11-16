@@ -577,6 +577,12 @@ configure_settings(bool _init)
                              "advanced");
 
     OMNITRACE_CONFIG_SETTING(
+        bool, "OMNITRACE_PERFETTO_ROCTRACER_PER_STREAM",
+        "Separate roctracer GPU side traces (copies, kernels) into separate "
+        "tracks based on the stream they're enqueued into",
+        true, "perfetto", "roctracer", "rocm", "advanced");
+
+    OMNITRACE_CONFIG_SETTING(
         std::string, "OMNITRACE_PERFETTO_FILL_POLICY",
         "Behavior when perfetto buffer is full. 'discard' will ignore new entries, "
         "'ring_buffer' will overwrite old entries",
@@ -1512,6 +1518,17 @@ get_use_roctracer()
 {
 #if defined(OMNITRACE_USE_ROCTRACER) && OMNITRACE_USE_ROCTRACER > 0
     static auto _v = get_config()->find("OMNITRACE_USE_ROCTRACER");
+    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
+#else
+    return false;
+#endif
+}
+
+bool
+get_perfetto_roctracer_per_stream()
+{
+#if defined(OMNITRACE_USE_ROCTRACER) && OMNITRACE_USE_ROCTRACER > 0
+    static auto _v = get_config()->find("OMNITRACE_PERFETTO_ROCTRACER_PER_STREAM");
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
 #else
     return false;

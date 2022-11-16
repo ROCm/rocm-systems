@@ -266,6 +266,9 @@ get_backend();
 std::string
 get_perfetto_output_filename();
 
+bool
+get_perfetto_roctracer_per_stream() OMNITRACE_HOT;
+
 int64_t
 get_critical_trace_count();
 

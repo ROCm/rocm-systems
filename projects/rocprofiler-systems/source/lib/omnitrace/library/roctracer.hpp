@@ -57,7 +57,7 @@ void
 hsa_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void* arg);
 
 void
-hsa_activity_callback(uint32_t op, activity_record_t* record, void* arg);
+hsa_activity_callback(uint32_t op, const activity_record_t* record, void* arg);
 
 void
 hip_exec_activity_callbacks(int64_t _tid);

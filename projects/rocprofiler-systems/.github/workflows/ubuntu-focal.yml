@@ -20,6 +20,7 @@ concurrency:
 env:
   OMNITRACE_VERBOSE: 1
   OMNITRACE_CI: ON
+  OMNITRACE_TMPDIR: "%env{PWD}%/testing-tmp"
 
 jobs:
   ubuntu-focal-external:
@@ -67,11 +68,11 @@ jobs:
     - uses: actions/checkout@v3
 
     - name: Install Packages
-      timeout-minutes: 10
+      timeout-minutes: 25
       uses: nick-fields/retry@v2
       with:
         retry_wait_seconds: 30
-        timeout_minutes: 10
+        timeout_minutes: 25
         max_attempts: 5
         command: |
           apt-get update &&
@@ -244,11 +245,11 @@ jobs:
     - uses: actions/checkout@v3
 
     - name: Install Packages
-      timeout-minutes: 10
+      timeout-minutes: 25
       uses: nick-fields/retry@v2
       with:
         retry_wait_seconds: 30
-        timeout_minutes: 10
+        timeout_minutes: 25
         max_attempts: 5
         command: |
           apt-get update &&
@@ -408,11 +409,11 @@ jobs:
     - uses: actions/checkout@v3
 
     - name: Install Packages
-      timeout-minutes: 10
+      timeout-minutes: 25
       uses: nick-fields/retry@v2
       with:
         retry_wait_seconds: 30
-        timeout_minutes: 10
+        timeout_minutes: 25
         max_attempts: 5
         command: |
           sudo apt-get update &&
@@ -555,11 +556,11 @@ jobs:
     - uses: actions/checkout@v3
 
     - name: Install Packages
-      timeout-minutes: 10
+      timeout-minutes: 25
       uses: nick-fields/retry@v2
       with:
         retry_wait_seconds: 30
-        timeout_minutes: 10
+        timeout_minutes: 25
         max_attempts: 5
         command: |
           apt-get update &&
