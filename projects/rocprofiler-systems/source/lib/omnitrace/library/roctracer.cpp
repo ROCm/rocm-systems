@@ -305,9 +305,21 @@ hsa_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
                     uint64_t _beg_ts = begin_timestamp;
                     uint64_t _end_ts = end_timestamp;
                     tracing::push_perfetto_ts(category::rocm_hsa{}, _name, _beg_ts,
-                                              "begin_ns", _beg_ts);
+                                              [&](perfetto::EventContext ctx) {
+                                                  if(config::get_perfetto_annotations())
+                                                  {
+                                                      tracing::add_perfetto_annotation(
+                                                          ctx, "begin_ns", _beg_ts);
+                                                  }
+                                              });
                     tracing::pop_perfetto_ts(category::rocm_hsa{}, _name, _end_ts,
-                                             "end_ns", _end_ts);
+                                             [&](perfetto::EventContext ctx) {
+                                                 if(config::get_perfetto_annotations())
+                                                 {
+                                                     tracing::add_perfetto_annotation(
+                                                         ctx, "end_ns", _end_ts);
+                                                 }
+                                             });
                 }
 
                 if(get_use_timemory())
@@ -378,8 +390,20 @@ hsa_activity_callback(uint32_t op, activity_record_t* record, void* arg)
     {
         uint64_t _beg = _beg_ns;
         uint64_t _end = _end_ns;
-        tracing::push_perfetto_ts(category::device_hsa{}, *_name, _beg, "begin_ns", _beg);
-        tracing::pop_perfetto_ts(category::device_hsa{}, *_name, _end, "end_ns", _end);
+        tracing::push_perfetto_ts(
+            category::device_hsa{}, *_name, _beg, [&](perfetto::EventContext ctx) {
+                if(config::get_perfetto_annotations())
+                {
+                    tracing::add_perfetto_annotation(ctx, "begin_ns", _beg);
+                }
+            });
+        tracing::pop_perfetto_ts(
+            category::device_hsa{}, *_name, _end, [&](perfetto::EventContext ctx) {
+                if(config::get_perfetto_annotations())
+                {
+                    tracing::add_perfetto_annotation(ctx, "end_ns", _end);
+                }
+            });
     }
 
     auto _func = [_beg_ns, _end_ns, _name]() {
@@ -701,9 +725,19 @@ hip_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
             auto _api_id = static_cast<hip_api_id_t>(cid);
             tracing::push_perfetto_ts(
                 category::rocm_hip{}, op_name, _ts, perfetto::Flow::ProcessScoped(_cid),
-                "begin_ns", static_cast<uint64_t>(_ts), "pcid", _parent_cid, "cid", _cid,
-                "device", _device_id, "tid", _tid, "depth", _depth, "corr_id", _corr_id,
-                "args", hip_api_string(_api_id, data));
+                [&](perfetto::EventContext ctx) {
+                    if(config::get_perfetto_annotations())
+                    {
+                        tracing::add_perfetto_annotation(ctx, "begin_ns", _ts);
+                        tracing::add_perfetto_annotation(ctx, "pcid", _parent_cid);
+                        tracing::add_perfetto_annotation(ctx, "device", _device_id);
+                        tracing::add_perfetto_annotation(ctx, "tid", _tid);
+                        tracing::add_perfetto_annotation(ctx, "depth", _depth);
+                        tracing::add_perfetto_annotation(ctx, "corr_id", _corr_id);
+                        tracing::add_perfetto_annotation(ctx, "args",
+                                                         hip_api_string(_api_id, data));
+                    }
+                });
         }
         if(get_use_timemory())
         {
@@ -739,8 +773,13 @@ hip_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
 
         if(get_use_perfetto())
         {
-            tracing::pop_perfetto_ts(category::rocm_hip{}, op_name, _ts, "end_ns",
-                                     static_cast<uint64_t>(_ts));
+            tracing::pop_perfetto_ts(
+                category::rocm_hip{}, op_name, _ts, [&](perfetto::EventContext ctx) {
+                    if(config::get_perfetto_annotations())
+                    {
+                        tracing::add_perfetto_annotation(ctx, "end_ns", _ts);
+                    }
+                });
         }
         if(get_use_timemory())
         {
@@ -916,14 +955,33 @@ hip_activity_callback(const char* begin, const char* end, void*)
             assert(_end_ns >= _beg_ns);
             tracing::push_perfetto_ts(
                 category::device_hip{}, _kernel_names.at(_name).c_str(), _beg_ns,
-                perfetto::Flow::ProcessScoped(_cid), "begin_ns", _beg_ns, "corr_id",
-                record->correlation_id, "device", _devid, "queue", _queid, "pid",
-                record->process_id, "tid", _tid, "op", _op_id_names.at(record->op));
-            tracing::pop_perfetto_ts(category::device_hip{}, "", _end_ns, "end_ns",
-                                     _end_ns);
+                perfetto::Flow::ProcessScoped(_cid), [&](perfetto::EventContext ctx) {
+                    if(config::get_perfetto_annotations())
+                    {
+                        tracing::add_perfetto_annotation(ctx, "begin_ns", _beg_ns);
+                        tracing::add_perfetto_annotation(ctx, "corr_id", _corr_id);
+                        tracing::add_perfetto_annotation(ctx, "device", _devid);
+                        tracing::add_perfetto_annotation(ctx, "queue", _queid);
+                        tracing::add_perfetto_annotation(ctx, "tid", _tid);
+                        tracing::add_perfetto_annotation(ctx, "op",
+                                                         _op_id_names.at(record->op));
+                    }
+                });
+            tracing::pop_perfetto_ts(
+                category::device_hip{}, "", _end_ns, [&](perfetto::EventContext ctx) {
+                    if(config::get_perfetto_annotations())
+                    {
+                        tracing::add_perfetto_annotation(ctx, "end_ns", _end_ns);
+                    }
+                });
             // for some reason, this is necessary to make sure very last one ends
-            tracing::pop_perfetto_ts(category::device_hip{}, "", _end_ns, "end_ns",
-                                     _end_ns);
+            tracing::pop_perfetto_ts(
+                category::device_hip{}, "", _end_ns, [&](perfetto::EventContext ctx) {
+                    if(config::get_perfetto_annotations())
+                    {
+                        tracing::add_perfetto_annotation(ctx, "end_ns", _end_ns);
+                    }
+                });
         }
 
         if(_critical_trace)

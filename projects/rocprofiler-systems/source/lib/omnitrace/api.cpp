@@ -46,7 +46,7 @@ omnitrace_push_region(const char* _name)
         omnitrace_push_region_hidden(_name);
     } catch(std::exception& _e)
     {
-        OMNITRACE_VERBOSE_F(1, "Exception caught: %s\n", _e.what());
+        OMNITRACE_WARNING_F(1, "Exception caught: %s\n", _e.what());
         return -1;
     }
     return 0;
@@ -60,7 +60,7 @@ omnitrace_pop_region(const char* _name)
         omnitrace_pop_region_hidden(_name);
     } catch(std::exception& _e)
     {
-        OMNITRACE_VERBOSE_F(1, "Exception caught: %s\n", _e.what());
+        OMNITRACE_WARNING_F(1, "Exception caught: %s\n", _e.what());
         return -1;
     }
     return 0;
@@ -77,7 +77,7 @@ omnitrace_push_category_region(omnitrace_category_t _category, const char* _name
                                               _annotation_count);
     } catch(std::exception& _e)
     {
-        OMNITRACE_VERBOSE_F(1, "Exception caught: %s\n", _e.what());
+        OMNITRACE_WARNING_F(1, "Exception caught: %s\n", _e.what());
         return -1;
     }
     return 0;
@@ -94,7 +94,7 @@ omnitrace_pop_category_region(omnitrace_category_t _category, const char* _name,
                                              _annotation_count);
     } catch(std::exception& _e)
     {
-        OMNITRACE_VERBOSE_F(1, "Exception caught: %s\n", _e.what());
+        OMNITRACE_WARNING_F(1, "Exception caught: %s\n", _e.what());
         return -1;
     }
     return 0;

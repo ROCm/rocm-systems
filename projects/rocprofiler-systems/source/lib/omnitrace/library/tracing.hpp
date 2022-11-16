@@ -31,9 +31,12 @@
 #include "library/runtime.hpp"
 #include "library/sampling.hpp"
 #include "library/timemory.hpp"
+#include "library/tracing/annotation.hpp"
 #include "library/utility.hpp"
 
 #include <timemory/components/timing/backends.hpp>
+#include <timemory/hash/types.hpp>
+#include <timemory/mpl/type_traits.hpp>
 
 #include <type_traits>
 
@@ -159,43 +162,43 @@ template <typename CategoryT, typename... Args>
 inline void
 push_timemory(CategoryT, const char* name, Args&&... args)
 {
-    if(trait::runtime_enabled<CategoryT>::get())
-    {
-        auto& _data = tracing::get_instrumentation_bundles();
-        // this generates a hash for the raw string array
-        auto  _hash   = tim::add_hash_id(tim::string_view_t{ name });
-        auto* _bundle = _data.allocator.allocate(1);
-        _data.bundles.emplace_back(_bundle);
-        _data.allocator.construct(_bundle, _hash);
-        _bundle->start(std::forward<Args>(args)...);
-    }
+    // skip if category is disabled
+    if(!trait::runtime_enabled<CategoryT>::get()) return;
+
+    auto& _data = tracing::get_instrumentation_bundles();
+    // this generates a hash for the raw string array
+    auto  _hash   = tim::add_hash_id(tim::string_view_t{ name });
+    auto* _bundle = _data.allocator.allocate(1);
+    _data.bundles.emplace_back(_bundle);
+    _data.allocator.construct(_bundle, _hash);
+    _bundle->start(std::forward<Args>(args)...);
 }
 
 template <typename CategoryT, typename... Args>
 inline void
 pop_timemory(CategoryT, const char* name, Args&&... args)
 {
-    if(trait::runtime_enabled<CategoryT>::get())
+    // skip if category is disabled
+    if(!trait::runtime_enabled<CategoryT>::get()) return;
+
+    auto  _hash = tim::hash::get_hash_id(tim::string_view_t{ name });
+    auto& _data = tracing::get_instrumentation_bundles();
+    if(_data.bundles.empty())
     {
-        auto  _hash = tim::hash::get_hash_id(tim::string_view_t{ name });
-        auto& _data = tracing::get_instrumentation_bundles();
-        if(_data.bundles.empty())
+        OMNITRACE_DEBUG("[%s] skipped %s :: empty bundle stack\n", "omnitrace_pop_trace",
+                        name);
+        return;
+    }
+    for(size_t i = _data.bundles.size(); i > 0; --i)
+    {
+        auto*& _v = _data.bundles.at(i - 1);
+        if(_v->get_hash() == _hash)
         {
-            OMNITRACE_DEBUG("[%s] skipped %s :: empty bundle stack\n",
-                            "omnitrace_pop_trace", name);
-            return;
-        }
-        for(size_t i = _data.bundles.size(); i > 0; --i)
-        {
-            auto*& _v = _data.bundles.at(i - 1);
-            if(_v->get_hash() == _hash)
-            {
-                _v->stop(std::forward<Args>(args)...);
-                _data.allocator.destroy(_v);
-                _data.allocator.deallocate(_v, 1);
-                _data.bundles.erase(_data.bundles.begin() + (i - 1));
-                break;
-            }
+            _v->stop(std::forward<Args>(args)...);
+            _data.allocator.destroy(_v);
+            _data.allocator.deallocate(_v, 1);
+            _data.bundles.erase(_data.bundles.begin() + (i - 1));
+            break;
         }
     }
 }
@@ -204,24 +207,78 @@ template <typename CategoryT, typename... Args>
 inline void
 push_perfetto(CategoryT, const char* name, Args&&... args)
 {
+    // skip if category is disabled
+    if(!trait::runtime_enabled<CategoryT>::get()) return;
+
     uint64_t _ts = comp::wall_clock::record();
-    TRACE_EVENT_BEGIN(trait::name<CategoryT>::value, perfetto::StaticString(name), _ts,
-                      "begin_ns", _ts, std::forward<Args>(args)...);
+    if constexpr(sizeof...(Args) == 1 &&
+                 std::is_invocable<Args..., perfetto::EventContext>::value)
+    {
+        if(config::get_perfetto_annotations())
+        {
+            TRACE_EVENT_BEGIN(trait::name<CategoryT>::value, perfetto::StaticString(name),
+                              _ts, "begin_ns", _ts, std::forward<Args>(args)...);
+        }
+        else
+        {
+            TRACE_EVENT_BEGIN(trait::name<CategoryT>::value, perfetto::StaticString(name),
+                              _ts, std::forward<Args>(args)...);
+        }
+    }
+    else
+    {
+        TRACE_EVENT_BEGIN(trait::name<CategoryT>::value, perfetto::StaticString(name),
+                          _ts, std::forward<Args>(args)...,
+                          [&](perfetto::EventContext ctx) {
+                              if(config::get_perfetto_annotations())
+                              {
+                                  tracing::add_perfetto_annotation(ctx, "begin_ns", _ts);
+                              }
+                          });
+    }
 }
 
 template <typename CategoryT, typename... Args>
 inline void
 pop_perfetto(CategoryT, const char*, Args&&... args)
 {
+    // skip if category is disabled
+    if(!trait::runtime_enabled<CategoryT>::get()) return;
+
     uint64_t _ts = comp::wall_clock::record();
-    TRACE_EVENT_END(trait::name<CategoryT>::value, _ts, "end_ns", _ts,
-                    std::forward<Args>(args)...);
+    if constexpr(sizeof...(Args) == 1 &&
+                 std::is_invocable<Args..., perfetto::EventContext>::value)
+    {
+        if(config::get_perfetto_annotations())
+        {
+            TRACE_EVENT_END(trait::name<CategoryT>::value, _ts, "end_ns", _ts,
+                            std::forward<Args>(args)...);
+        }
+        else
+        {
+            TRACE_EVENT_END(trait::name<CategoryT>::value, _ts,
+                            std::forward<Args>(args)...);
+        }
+    }
+    else
+    {
+        TRACE_EVENT_END(trait::name<CategoryT>::value, _ts, std::forward<Args>(args)...,
+                        [&](perfetto::EventContext ctx) {
+                            if(config::get_perfetto_annotations())
+                            {
+                                tracing::add_perfetto_annotation(ctx, "end_ns", _ts);
+                            }
+                        });
+    }
 }
 
 template <typename CategoryT, typename... Args>
 inline void
 push_perfetto_ts(CategoryT, const char* name, uint64_t _ts, Args&&... args)
 {
+    // skip if category is disabled
+    if(!trait::runtime_enabled<CategoryT>::get()) return;
+
     TRACE_EVENT_BEGIN(trait::name<CategoryT>::value, perfetto::StaticString(name), _ts,
                       std::forward<Args>(args)...);
 }
@@ -230,6 +287,9 @@ template <typename CategoryT, typename... Args>
 inline void
 pop_perfetto_ts(CategoryT, const char*, uint64_t _ts, Args&&... args)
 {
+    // skip if category is disabled
+    if(!trait::runtime_enabled<CategoryT>::get()) return;
+
     TRACE_EVENT_END(trait::name<CategoryT>::value, _ts, std::forward<Args>(args)...);
 }
 }  // namespace tracing

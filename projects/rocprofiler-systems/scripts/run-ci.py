@@ -247,7 +247,7 @@ if __name__ == "__main__":
             "-S",
             os.path.join(args.binary_dir, "dashboard.cmake"),
             "--output-on-failure",
-            "-V",
+            "-VV",
         ]
         + ctest_args,
         check=True,

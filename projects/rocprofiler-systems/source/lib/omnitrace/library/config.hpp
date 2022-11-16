@@ -247,6 +247,9 @@ get_perfetto_fill_policy();
 std::set<std::string>
 get_perfetto_categories();
 
+bool
+get_perfetto_annotations() OMNITRACE_HOT;
+
 uint64_t
 get_critical_trace_update_freq();
 

@@ -91,6 +91,9 @@ template <typename... OptsT, typename... Args>
 void
 category_region<CategoryT>::start(std::string_view name, Args&&... args)
 {
+    // skip if category is disabled
+    if(!trait::runtime_enabled<CategoryT>::get()) return;
+
     // unconditionally return if thread is disabled or finalized
     if(get_thread_state() == ThreadState::Disabled) return;
     if(get_state() == State::Finalized) return;
@@ -167,6 +170,9 @@ template <typename... OptsT, typename... Args>
 void
 category_region<CategoryT>::stop(std::string_view name, Args&&... args)
 {
+    // skip if category is disabled
+    if(!trait::runtime_enabled<CategoryT>::get()) return;
+
     if(get_thread_state() == ThreadState::Disabled) return;
 
     OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
@@ -249,10 +255,16 @@ void
 category_region<CategoryT>::audit(const gotcha_data_t& _data, audit::incoming,
                                   Args&&... _args)
 {
+    // skip if category is disabled
+    if(!trait::runtime_enabled<CategoryT>::get()) return;
+
     start<OptsT...>(_data.tool_id.c_str(), [&](perfetto::EventContext ctx) {
-        int64_t _n = 0;
-        OMNITRACE_FOLD_EXPRESSION(tracing::add_perfetto_annotation(
-            ctx, tim::try_demangle<std::remove_reference_t<Args>>(), _args, _n++));
+        if(config::get_perfetto_annotations())
+        {
+            int64_t _n = 0;
+            OMNITRACE_FOLD_EXPRESSION(tracing::add_perfetto_annotation(
+                ctx, tim::try_demangle<std::remove_reference_t<Args>>(), _args, _n++));
+        }
     });
 }
 
@@ -262,7 +274,13 @@ void
 category_region<CategoryT>::audit(const gotcha_data_t& _data, audit::outgoing,
                                   Args&&... _args)
 {
-    stop<OptsT...>(_data.tool_id.c_str(), "return", JOIN(", ", _args...));
+    // skip if category is disabled
+    if(!trait::runtime_enabled<CategoryT>::get()) return;
+
+    stop<OptsT...>(_data.tool_id.c_str(), [&](perfetto::EventContext ctx) {
+        if(config::get_perfetto_annotations())
+            tracing::add_perfetto_annotation(ctx, "return", JOIN(", ", _args...));
+    });
 }
 
 template <typename CategoryT>
@@ -271,10 +289,16 @@ void
 category_region<CategoryT>::audit(std::string_view _name, audit::incoming,
                                   Args&&... _args)
 {
+    // skip if category is disabled
+    if(!trait::runtime_enabled<CategoryT>::get()) return;
+
     start<OptsT...>(_name.data(), [&](perfetto::EventContext ctx) {
-        int64_t _n = 0;
-        OMNITRACE_FOLD_EXPRESSION(tracing::add_perfetto_annotation(
-            ctx, tim::try_demangle<std::remove_reference_t<Args>>(), _args, _n++));
+        if(config::get_perfetto_annotations())
+        {
+            int64_t _n = 0;
+            OMNITRACE_FOLD_EXPRESSION(tracing::add_perfetto_annotation(
+                ctx, tim::try_demangle<std::remove_reference_t<Args>>(), _args, _n++));
+        }
     });
 }
 
@@ -284,7 +308,13 @@ void
 category_region<CategoryT>::audit(std::string_view _name, audit::outgoing,
                                   Args&&... _args)
 {
-    stop<OptsT...>(_name.data(), "return", JOIN(", ", _args...));
+    // skip if category is disabled
+    if(!trait::runtime_enabled<CategoryT>::get()) return;
+
+    stop<OptsT...>(_name.data(), [&](perfetto::EventContext ctx) {
+        if(config::get_perfetto_annotations())
+            tracing::add_perfetto_annotation(ctx, "return", JOIN(", ", _args...));
+    });
 }
 
 template <typename CategoryT>

@@ -588,6 +588,13 @@ configure_settings(bool _init)
                              "data", "advanced")
         ->set_choices(get_available_perfetto_categories<std::vector<std::string>>());
 
+    OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_PERFETTO_ANNOTATIONS",
+                             "Include debug annotations in perfetto trace. When enabled, "
+                             "this feature will encode information such as the values of "
+                             "the function arguments (when available). Disabling this "
+                             "feature may dramatically reduce the size of the trace",
+                             true, "perfetto", "data", "debugging", "advanced");
+
     OMNITRACE_CONFIG_SETTING(
         uint64_t, "OMNITRACE_THREAD_POOL_SIZE",
         "Max number of threads for processing background tasks",
@@ -1739,6 +1746,13 @@ get_perfetto_categories()
         if(_avail.count(itr) > 0) _ret.emplace(itr);
     }
     return _ret;
+}
+
+bool
+get_perfetto_annotations()
+{
+    static auto _v = get_config()->find("OMNITRACE_PERFETTO_ANNOTATIONS");
+    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
 }
 
 uint64_t

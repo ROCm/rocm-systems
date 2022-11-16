@@ -56,8 +56,8 @@ add_library(omnitrace::omnitrace-object-library ALIAS omnitrace-object-library)
 
 target_sources(
     omnitrace-object-library
-    PRIVATE ${CMAKE_CURRENT_LIST_DIR}/library.cpp ${CMAKE_CURRENT_LIST_DIR}/api.cpp
-            ${CMAKE_CURRENT_LIST_DIR}/api.hpp)
+    PRIVATE ${CMAKE_CURRENT_LIST_DIR}/library.cpp ${CMAKE_CURRENT_LIST_DIR}/regions.cpp
+            ${CMAKE_CURRENT_LIST_DIR}/api.cpp ${CMAKE_CURRENT_LIST_DIR}/api.hpp)
 
 add_subdirectory(library)
 

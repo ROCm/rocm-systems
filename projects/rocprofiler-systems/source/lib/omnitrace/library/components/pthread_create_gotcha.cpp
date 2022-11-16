@@ -419,7 +419,8 @@ pthread_create_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
         _promise->get_future().wait_for(std::chrono::milliseconds{ 500 });
     }
 
-    if(_use_bundle) stop_bundle(*_bundle, threading::get_id(), audit::outgoing{}, _ret);
+    if(_use_bundle)
+        stop_bundle(*_bundle, _info->index_data->sequent_value, audit::outgoing{}, _ret);
 
     // unblock the signals in the entire process
     if(_enable_sampling && !_blocked.empty())
