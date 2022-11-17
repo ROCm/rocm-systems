@@ -71,9 +71,10 @@ struct backtrace_metrics
     backtrace_metrics& operator=(const backtrace_metrics&) = default;
     backtrace_metrics& operator=(backtrace_metrics&&) noexcept = default;
 
-    static void configure(bool, int64_t _tid = threading::get_id());
-    static void init_perfetto(int64_t _tid);
-    static void fini_perfetto(int64_t _tid);
+    static void                     configure(bool, int64_t _tid = threading::get_id());
+    static void                     init_perfetto(int64_t _tid);
+    static void                     fini_perfetto(int64_t _tid);
+    static std::vector<std::string> get_hw_counter_labels(int64_t);
 
     static void start();
     static void stop();

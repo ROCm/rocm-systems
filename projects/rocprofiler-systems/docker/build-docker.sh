@@ -34,7 +34,7 @@ usage()
     print_default_option rocm-versions "[VERSION] [VERSION...]" "ROCm versions" "${ROCM_VERSIONS}"
     print_default_option python-versions "[VERSION] [VERSION...]" "Python 3 minor releases" "${PYTHON_VERSIONS}"
     print_default_option "user -u" "[USERNAME]" "DockerHub username" "${USER}"
-    print_default_option "retry -r" "[N]" "Number of attempts to build (to account for network errors" "${RETRY}"
+    print_default_option "retry -r" "[N]" "Number of attempts to build (to account for network errors)" "${RETRY}"
     print_default_option push "" "Push the image to Dockerhub" ""
     #print_default_option lto "[on|off]" "Enable LTO" "${LTO}"
 }

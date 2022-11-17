@@ -28,6 +28,8 @@
 #include "library/ptl.hpp"
 #include "library/runtime.hpp"
 #include "library/thread_data.hpp"
+#include "library/tracing.hpp"
+#include "library/tracing/annotation.hpp"
 
 #include <PTL/ThreadPool.hh>
 #include <timemory/backends/dmp.hpp>
@@ -438,99 +440,82 @@ call_chain::get_top_chains()
     return _v;
 }
 
-template <>
+template <Device DevT>
 void
-call_chain::generate_perfetto<Device::NONE>(std::set<entry>& _used) const
+call_chain::generate_perfetto(::perfetto::Track _track, std::set<entry>& _used) const
 {
+    OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
+
+    static std::set<std::string> _static_strings{};
+    static std::mutex            _static_mutex{};
+
     for(const auto& itr : *this)
     {
         if(!_used.emplace(itr).second) continue;
-        if(itr.device == Device::CPU)
+
+        auto&& _annotater = [&](::perfetto::EventContext ctx) {
+            if(config::get_perfetto_annotations())
+            {
+                tracing::add_perfetto_annotation(ctx, "begin_ns", itr.begin_ns);
+                tracing::add_perfetto_annotation(ctx, "end_ns", itr.end_ns);
+            }
+        };
+
+        if constexpr(DevT == Device::NONE)
         {
-            TRACE_EVENT_BEGIN("device-critical-trace", "CPU",
-                              static_cast<uint64_t>(itr.begin_ns), "begin_ns",
-                              itr.begin_ns);
+            if(itr.device == Device::CPU)
+            {
+                tracing::push_perfetto_track(category::host_critical_trace{}, "CPU",
+                                             _track, itr.begin_ns, std::move(_annotater));
+                tracing::pop_perfetto_track(category::host_critical_trace{}, "CPU",
+                                            _track, itr.end_ns);
+            }
+            else if(itr.device == Device::GPU)
+            {
+                tracing::push_perfetto_track(category::device_critical_trace{}, "GPU",
+                                             _track, itr.begin_ns, std::move(_annotater));
+                tracing::pop_perfetto_track(category::device_critical_trace{}, "GPU",
+                                            _track, itr.end_ns);
+            }
         }
-        else if(itr.device == Device::GPU)
+        else
         {
-            TRACE_EVENT_BEGIN("device-critical-trace", "GPU",
-                              static_cast<uint64_t>(itr.begin_ns), "begin_ns",
-                              itr.begin_ns);
+            using category_t = std::conditional_t<
+                DevT == Device::ANY, omnitrace::category::critical_trace,
+                std::conditional_t<DevT == Device::CPU,
+                                   omnitrace::category::host_critical_trace,
+                                   omnitrace::category::device_critical_trace>>;
+
+            if constexpr(DevT != Device::ANY)
+            {
+                if(itr.device != DevT) continue;
+            }
+
+            std::string _name = tim::demangle(tim::get_hash_identifier(itr.hash));
+            _static_mutex.lock();
+            auto sitr = _static_strings.emplace(_name);
+            _static_mutex.unlock();
+
+            tracing::push_perfetto_track(category_t{}, sitr.first->c_str(), _track,
+                                         itr.begin_ns, std::move(_annotater));
+            tracing::pop_perfetto_track(category_t{}, sitr.first->c_str(), _track,
+                                        itr.end_ns);
         }
-        TRACE_EVENT_END("device-critical-trace", static_cast<uint64_t>(itr.end_ns),
-                        "end_ns", itr.end_ns);
     }
 }
 
-template <>
-void
-call_chain::generate_perfetto<Device::CPU>(std::set<entry>& _used) const
-{
-    OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
-    static std::set<std::string> _static_strings{};
-    static std::mutex            _static_mutex{};
-    for(const auto& itr : *this)
-    {
-        if(!_used.emplace(itr).second) continue;
-        if(itr.device != Device::CPU) continue;
-        std::string _name = tim::demangle(tim::get_hash_identifier(itr.hash));
-        _static_mutex.lock();
-        auto sitr = _static_strings.emplace(_name);
-        _static_mutex.unlock();
-        TRACE_EVENT_BEGIN("host-critical-trace",
-                          perfetto::StaticString{ sitr.first->c_str() },
-                          static_cast<uint64_t>(itr.begin_ns), "begin_ns",
-                          static_cast<uint64_t>(itr.begin_ns));
-        TRACE_EVENT_END("host-critical-trace", static_cast<uint64_t>(itr.end_ns),
-                        "end_ns", static_cast<uint64_t>(itr.end_ns));
-    }
-}
+// explicit instantiations
+template void
+call_chain::generate_perfetto<Device::NONE>(::perfetto::Track, std::set<entry>&) const;
 
-template <>
-void
-call_chain::generate_perfetto<Device::GPU>(std::set<entry>& _used) const
-{
-    OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
-    static std::set<std::string> _static_strings{};
-    static std::mutex            _static_mutex{};
-    for(const auto& itr : *this)
-    {
-        if(!_used.emplace(itr).second) continue;
-        if(itr.device != Device::GPU) continue;
-        std::string _name = tim::demangle(tim::get_hash_identifier(itr.hash));
-        _static_mutex.lock();
-        auto sitr = _static_strings.emplace(_name);
-        _static_mutex.unlock();
-        TRACE_EVENT_BEGIN("device-critical-trace",
-                          perfetto::StaticString{ sitr.first->c_str() },
-                          static_cast<uint64_t>(itr.begin_ns), "begin_ns",
-                          static_cast<uint64_t>(itr.begin_ns));
-        TRACE_EVENT_END("device-critical-trace", static_cast<uint64_t>(itr.end_ns),
-                        "end_ns", static_cast<uint64_t>(itr.end_ns));
-    }
-}
+template void
+call_chain::generate_perfetto<Device::CPU>(::perfetto::Track, std::set<entry>&) const;
 
-template <>
-void
-call_chain::generate_perfetto<Device::ANY>(std::set<entry>& _used) const
-{
-    OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
-    static std::set<std::string> _static_strings{};
-    static std::mutex            _static_mutex{};
-    for(const auto& itr : *this)
-    {
-        if(!_used.emplace(itr).second) continue;
-        std::string _name = tim::demangle(tim::get_hash_identifier(itr.hash));
-        _static_mutex.lock();
-        auto sitr = _static_strings.emplace(_name);
-        _static_mutex.unlock();
-        TRACE_EVENT_BEGIN("critical-trace", perfetto::StaticString{ sitr.first->c_str() },
-                          static_cast<uint64_t>(itr.begin_ns), "begin_ns",
-                          static_cast<uint64_t>(itr.begin_ns));
-        TRACE_EVENT_END("critical-trace", static_cast<uint64_t>(itr.end_ns), "end_ns",
-                        static_cast<uint64_t>(itr.end_ns));
-    }
-}
+template void
+call_chain::generate_perfetto<Device::GPU>(::perfetto::Track, std::set<entry>&) const;
+
+template void
+call_chain::generate_perfetto<Device::ANY>(::perfetto::Track, std::set<entry>&) const;
 
 //--------------------------------------------------------------------------------------//
 //

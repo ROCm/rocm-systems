@@ -33,8 +33,8 @@ usage()
     print_default_option versions "[VERSION] [VERSION...]" "Ubuntu or OpenSUSE release" "${VERSIONS}"
     print_default_option rocm-versions "[VERSION] [VERSION...]" "ROCm versions" "${ROCM_VERSIONS}"
     print_default_option python-versions "[VERSION] [VERSION...]" "Python 3 minor releases" "${PYTHON_VERSIONS}"
-    print_default_option user "[USERNAME]" "DockerHub username" "${USER}"
-    #print_default_option lto "[on|off]" "Enable LTO" "${LTO}"
+    print_default_option "user -u" "[USERNAME]" "DockerHub username" "${USER}"
+    print_default_option "retry -r" "[N]" "Number of attempts to build (to account for network errors)" "${RETRY}"
 
     echo ""
     echo "Usage: ${BASH_SOURCE[0]} <OPTIONS> -- <build-release.sh OPTIONS>"
@@ -52,8 +52,26 @@ send-error()
 
 verbose-run()
 {
-    echo -e "\n### Executing \"${@}\"... ###\n"
-    exec "${@}"
+    echo -e "\n### Executing \"${@}\" a maximum of ${RETRY} times... ###\n"
+    for i in $(seq 1 1 ${RETRY})
+    do
+        set +e
+        eval "${@}"
+        local RETC=$?
+        set -e
+        if [ "${RETC}" -eq 0 ]; then
+            break
+        else
+            echo -en "\n### Command failed with error code ${RETC}... "
+            if [ "${i}" -ne "${RETRY}" ]; then
+                echo -e "Retrying... ###\n"
+                sleep 3
+            else
+                echo -e "Exiting... ###\n"
+                exit ${RETC}
+            fi
+        fi
+    done
 }
 
 build-release()
@@ -68,7 +86,7 @@ build-release()
     shift
     local DOCKER_ARGS=""
     tty -s && DOCKER_ARGS="-it" || DOCKER_ARGS=""
-    verbose-run docker run ${DOCKER_ARGS} --rm -v ${PWD}:/home/omnitrace --stop-signal "SIGINT" --env DISTRO=${OS} --env ROCM_VERSION=${ROCM_VERSION} --env VERSION=${CODE_VERSION} --env PYTHON_VERSIONS="${PYTHON_VERSIONS}" --env IS_DOCKER=1 ${CONTAINER} /home/omnitrace/scripts/build-release.sh ${@}
+    verbose-run docker run ${DOCKER_ARGS} --rm -v ${PWD}:/home/omnitrace --stop-signal "SIGINT" --env DISTRO=${OS} --env ROCM_VERSION=${ROCM_VERSION} --env VERSION=${CODE_VERSION} --env PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\" --env IS_DOCKER=1 ${CONTAINER} /home/omnitrace/scripts/build-release.sh ${@}
 }
 
 reset-last()
@@ -84,6 +102,7 @@ reset-last
 : ${ROCM_VERSIONS:=5.0 4.5 4.3}
 : ${MPI:=0}
 : ${PYTHON_VERSIONS:="6 7 8 9 10"}
+: ${RETRY:=3}
 
 n=0
 while [[ $# -gt 0 ]]
@@ -116,6 +135,11 @@ do
         --user|-u)
             shift
             USER=${1}
+            reset-last
+            ;;
+        --retry|-r)
+            shift
+            RETRY=${1}
             reset-last
             ;;
         "--")

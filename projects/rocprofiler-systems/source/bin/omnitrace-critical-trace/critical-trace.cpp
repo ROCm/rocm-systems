@@ -26,10 +26,12 @@
 #include "library/config.hpp"
 #include "library/debug.hpp"
 #include "library/perfetto.hpp"
+#include "library/tracing.hpp"
 
 #include <timemory/hash/types.hpp>
 
 #include <cstdlib>
+#include <type_traits>
 
 namespace config         = omnitrace::config;
 namespace critical_trace = omnitrace::critical_trace;
@@ -750,36 +752,42 @@ generate_perfetto(const std::vector<call_chain>& _data)
     // run in separate thread(s) so that it ends up in unique row
     if(_nrows < 1) _nrows = _data.size();
 
-    std::string _dev    = (DevT == Device::NONE)  ? ""
-                          : (DevT == Device::ANY) ? "CPU + GPU "
-                          : (DevT == Device::CPU) ? "CPU "
-                                                  : "GPU ";
-    std::string _cpname = _dev + "CritPath";
-    auto        _func   = [&](size_t _idx, size_t _beg, size_t _end) {
-        if(DevT != Device::NONE)
-        {
-            if(_nrows != 1)
-                threading::set_thread_name(TIMEMORY_JOIN(" ", _cpname, _idx).c_str());
-            else
-                threading::set_thread_name(_cpname.c_str());
-        }
-        // ensure all hash ids exist
-        copy_hash_ids();
-        std::set<entry> _used{};
+    std::string _dev = (DevT == Device::NONE)  ? ""
+                       : (DevT == Device::ANY) ? "CPU + GPU "
+                       : (DevT == Device::CPU) ? "CPU "
+                                               : "GPU ";
+
+    using category_t = std::conditional_t<
+        DevT == Device::ANY, omnitrace::category::critical_trace,
+        std::conditional_t<DevT == Device::CPU, omnitrace::category::host_critical_trace,
+                           omnitrace::category::device_critical_trace>>;
+
+    // ensure all hash ids exist
+    copy_hash_ids();
+    std::set<entry> _used{};
+
+    auto _func = [&](size_t _idx, size_t _beg, size_t _end) {
+        auto&& _name_generator = [](auto _dev_type, auto _rows, auto _idx_v) {
+            return (_rows < 2)
+                       ? TIMEMORY_JOIN(" ", std::to_string(_dev_type), "Critical Path")
+                       : TIMEMORY_JOIN(" ", std::to_string(_dev_type), "Critical Path",
+                                       _idx_v);
+        };
+        auto _track =
+            (DevT == Device::NONE)
+                ? ::perfetto::ProcessTrack::Current()
+                : omnitrace::tracing::get_perfetto_track(
+                      category_t{}, std::move(_name_generator), DevT, _nrows, _idx);
+
         for(size_t i = _beg; i < _end; ++i)
         {
             if(i >= _data.size()) break;
-            _data.at(i).generate_perfetto<DevT>(_used);
+            _data.at(i).generate_perfetto<DevT>(_track, _used);
         }
     };
 
     for(size_t i = 0; i < _data.size(); i += _nrows)
-    {
-        if(DevT == Device::NONE)
-            _func(i, i, i + _nrows);
-        else
-            std::thread{ _func, i, i, i + _nrows }.join();
-    }
+        _func(i, i, i + _nrows);
 }
 
 template <typename Tp, template <typename...> class ContainerT, typename... Args,

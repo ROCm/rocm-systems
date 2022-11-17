@@ -137,6 +137,13 @@ backtrace_metrics::description()
     return "Records sampling data";
 }
 
+std::vector<std::string>
+backtrace_metrics::get_hw_counter_labels(int64_t _tid)
+{
+    auto& _v = get_papi_labels(_tid);
+    return (_v) ? *_v : std::vector<std::string>{};
+}
+
 void
 backtrace_metrics::start()
 {}
@@ -192,10 +199,8 @@ backtrace_metrics::configure(bool _setup, int64_t _tid)
             OMNITRACE_DEBUG("HW COUNTER: starting...\n");
             if(get_papi_vector(_tid))
             {
-                using common_type_t = typename hw_counters::common_type;
                 get_papi_vector(_tid)->start();
-                *get_papi_labels(_tid) =
-                    comp::papi_common<common_type_t>::get_config()->labels;
+                *get_papi_labels(_tid) = get_papi_vector(_tid)->get_config()->labels;
             }
         }
     }

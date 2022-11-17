@@ -25,6 +25,7 @@
 #include "library/common.hpp"
 #include "library/config.hpp"
 #include "library/defines.hpp"
+#include "library/perfetto.hpp"
 #include "library/runtime.hpp"
 #include "library/thread_data.hpp"
 
@@ -245,7 +246,7 @@ struct call_chain : private std::vector<entry>
     }
 
     template <Device DevT>
-    void generate_perfetto(std::set<entry>& _used) const;
+    void generate_perfetto(::perfetto::Track, std::set<entry>& _used) const;
 
     template <bool BoolV = true, typename FuncT>
     bool query(FuncT&&) const;
@@ -366,3 +367,20 @@ add_critical_trace(int32_t _targ_tid, size_t _cpu_cid, size_t _gpu_cid,
                             _ts_val, _devid, _queue, _hash, _depth, _prio, num_mutexes);
 }
 }  // namespace omnitrace
+
+namespace std
+{
+inline std::string
+to_string(::omnitrace::critical_trace::Device _v)
+{
+    using Device = ::omnitrace::critical_trace::Device;
+    switch(_v)
+    {
+        case Device::NONE: return std::string{};
+        case Device::CPU: return std::string{ "CPU" };
+        case Device::GPU: return std::string{ "GPU" };
+        case Device::ANY: return std::string{ "CPU + GPU" };
+    }
+    return std::string{ "Unknown Device" };
+}
+}  // namespace std

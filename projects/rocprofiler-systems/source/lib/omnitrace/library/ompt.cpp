@@ -60,6 +60,7 @@ namespace
 std::unique_ptr<ompt_bundle_t> f_bundle = {};
 bool _init_toolset_off = (trait::runtime_enabled<ompt_toolset_t>::set(false),
                           trait::runtime_enabled<ompt_context_t>::set(false), true);
+tim::ompt::finalize_tool_func_t f_finalize = nullptr;
 }  // namespace
 
 void
@@ -79,6 +80,9 @@ setup()
 void
 shutdown()
 {
+    static bool _protect = false;
+    if(_protect) return;
+    _protect = true;
     if(f_bundle)
     {
         f_bundle->stop();
@@ -86,21 +90,26 @@ shutdown()
         trait::runtime_enabled<ompt_toolset_t>::set(false);
         trait::runtime_enabled<ompt_context_t>::set(false);
         comp::user_ompt_bundle::reset();
+        // call the OMPT finalize callback
+        if(f_finalize) (*f_finalize)();
     }
     f_bundle.reset();
+    _protect = false;
 }
-}  // namespace ompt
-}  // namespace omnitrace
 
-extern "C" ompt_start_tool_result_t*
-ompt_start_tool(unsigned int omp_version, const char* runtime_version)
+namespace
 {
-    TIMEMORY_PRINTF(stderr, "OpenMP version: %u, runtime version: %s\n", omp_version,
-                    runtime_version);
+bool&
+use_tool()
+{
+    static bool _v = false;
+    return _v;
+}
 
-    OMNITRACE_METADATA("OMP_VERSION", omp_version);
-    OMNITRACE_METADATA("OMP_RUNTIME_VERSION", runtime_version);
-
+int
+tool_initialize(ompt_function_lookup_t lookup, int initial_device_num,
+                ompt_data_t* tool_data)
+{
     if(!omnitrace::settings_are_configured())
     {
         OMNITRACE_BASIC_WARNING(
@@ -111,25 +120,38 @@ ompt_start_tool(unsigned int omp_version, const char* runtime_version)
         omnitrace::configure_settings();
     }
 
-    static bool _use_ompt       = omnitrace::config::get_use_ompt();
-    static auto ompt_initialize = [](ompt_function_lookup_t lookup,
-                                     int                    initial_device_num,
-                                     ompt_data_t*           tool_data) -> int {
-        _use_ompt = omnitrace::config::get_use_ompt();
-        if(_use_ompt)
-        {
-            TIMEMORY_PRINTF(stderr, "OpenMP-tools configuring for initial device %i\n\n",
-                            initial_device_num);
-            tim::ompt::configure<TIMEMORY_OMPT_API_TAG>(lookup, initial_device_num,
-                                                        tool_data);
-        }
-        return 1;  // success
-    };
+    use_tool() = omnitrace::config::get_use_ompt();
+    if(use_tool())
+    {
+        TIMEMORY_PRINTF(stderr, "OpenMP-tools configuring for initial device %i\n\n",
+                        initial_device_num);
+        f_finalize = tim::ompt::configure<TIMEMORY_OMPT_API_TAG>(
+            lookup, initial_device_num, tool_data);
+    }
+    return 1;  // success
+}
 
-    static auto ompt_finalize = [](ompt_data_t*) {};
+void
+tool_finalize(ompt_data_t*)
+{
+    shutdown();
+}
+}  // namespace
+}  // namespace ompt
+}  // namespace omnitrace
 
-    static auto data = ompt_start_tool_result_t{ ompt_initialize, ompt_finalize, { 0 } };
-    return (ompt_start_tool_result_t*) &data;
+extern "C" ompt_start_tool_result_t*
+ompt_start_tool(unsigned int omp_version, const char* runtime_version)
+{
+    OMNITRACE_BASIC_VERBOSE_F(0, "OpenMP version: %u, runtime version: %s\n", omp_version,
+                              runtime_version);
+    OMNITRACE_METADATA("OMP_VERSION", omp_version);
+    OMNITRACE_METADATA("OMP_RUNTIME_VERSION", runtime_version);
+
+    static auto* data = new ompt_start_tool_result_t{ &omnitrace::ompt::tool_initialize,
+                                                      &omnitrace::ompt::tool_finalize,
+                                                      { 0 } };
+    return data;
 }
 
 #else

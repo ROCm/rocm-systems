@@ -806,155 +806,166 @@ post_process_perfetto(int64_t _tid, const bundle_t* _init,
         backtrace_metrics::fini_perfetto(_tid);
     }
 
-    auto _process_perfetto = [_tid,
-                              _init](const std::vector<sampling::bundle_t*>& _data_v) {
-        thread_info::init(true);
-        OMNITRACE_VERBOSE(3 || get_debug_sampling(),
-                          "[%li] Post-processing backtraces for perfetto...\n", _tid);
+    OMNITRACE_VERBOSE(3 || get_debug_sampling(),
+                      "[%li] Post-processing backtraces for perfetto...\n", _tid);
 
-        const auto& _thread_info = thread_info::get(_tid, SequentTID);
-        OMNITRACE_CI_THROW(!_thread_info, "No valid thread info for tid=%li\n", _tid);
+    const auto& _thread_info = thread_info::get(_tid, SequentTID);
+    OMNITRACE_CI_THROW(!_thread_info, "No valid thread info for tid=%li\n", _tid);
 
-        if(!_thread_info) return;
+    if(!_thread_info) return;
 
-        uint64_t _beg_ns  = _thread_info->get_start();
-        uint64_t _end_ns  = _thread_info->get_stop();
-        uint64_t _last_ts = std::max<uint64_t>(
-            _init->get<backtrace_timestamp>()->get_timestamp(), _beg_ns);
+    uint64_t _beg_ns = _thread_info->get_start();
+    uint64_t _end_ns = _thread_info->get_stop();
+    uint64_t _last_ts =
+        std::max<uint64_t>(_init->get<backtrace_timestamp>()->get_timestamp(), _beg_ns);
 
-        tracing::push_perfetto_ts(category::sampling{}, "samples [omnitrace]", _beg_ns,
-                                  [&](perfetto::EventContext ctx) {
-                                      if(config::get_perfetto_annotations())
-                                      {
-                                          tracing::add_perfetto_annotation(
-                                              ctx, "begin_ns", _beg_ns);
-                                      }
-                                  });
+    auto _track = tracing::get_perfetto_track(
+        category::sampling{},
+        [](auto _seq_id, auto _sys_id) {
+            return TIMEMORY_JOIN(" ", "Thread", _seq_id, "(S)", _sys_id);
+        },
+        _thread_info->index_data->sequent_value, _thread_info->index_data->system_value);
 
-        auto _as_hex = [](auto _v) { return JOIN("", "0x", std::hex, _v); };
+    tracing::push_perfetto_track(category::sampling{}, "samples [omnitrace]", _track,
+                                 _beg_ns, [&](perfetto::EventContext ctx) {
+                                     if(config::get_perfetto_annotations())
+                                     {
+                                         tracing::add_perfetto_annotation(ctx, "begin_ns",
+                                                                          _beg_ns);
+                                     }
+                                 });
 
-        for(const auto& itr : _data_v)
+    auto _as_hex = [](auto _v) { return JOIN("", "0x", std::hex, _v); };
+
+    auto _labels = backtrace_metrics::get_hw_counter_labels(_tid);
+    for(const auto& itr : _data)
+    {
+        const auto* _bt_ts = itr->get<backtrace_timestamp>();
+        const auto* _bt_cs = itr->get<backtrace>();
+        const auto* _bt_mt = itr->get<backtrace_metrics>();
+
+        if(!_bt_ts || !_bt_cs || !_bt_mt) continue;
+        if(_bt_ts->get_tid() != _tid) continue;
+
+        static std::set<std::string> _static_strings{};
+        const auto*                  _last = _init;
+        auto   _patched_data               = backtrace::filter_and_patch(_bt_cs->get());
+        size_t _ncount                     = 0;
+        for(const auto& iitr : _patched_data)
         {
-            const auto* _bt_ts = itr->get<backtrace_timestamp>();
-            const auto* _bt_cs = itr->get<backtrace>();
+            uint64_t _beg = _last_ts;
+            uint64_t _end = _bt_ts->get_timestamp();
+            if(!_thread_info->is_valid_lifetime({ _beg, _end })) continue;
 
-            if(!_bt_ts || !_bt_cs) continue;
-            if(_bt_ts->get_tid() != _tid) continue;
+            auto _ncur = _ncount++;
+            // the begin/end + HW counters will be same for entire call-stack so only
+            // annotate
+            //  the top and the bottom functons to keep the data consumption low
+            bool _include_common = (_ncur == 0 || _ncur + 1 == _patched_data.size());
 
-            static std::set<std::string> _static_strings{};
-            for(const auto& iitr : backtrace::filter_and_patch(_bt_cs->get()))
-            {
-                uint64_t _beg = _last_ts;
-                uint64_t _end = _bt_ts->get_timestamp();
-                if(!_thread_info->is_valid_lifetime({ _beg, _end })) continue;
+            // Only annotate HW counters when:
+            //  1. when we can compute a difference from the last sample
+            //  2. when the number of HW counters b/t this sample and last are the same
+            bool _include_hw =
+                _include_common && (_last != nullptr) &&
+                _bt_mt->get_hw_counters().size() ==
+                    _last->get<backtrace_metrics>()->get_hw_counters().size();
 
-                if(get_sampling_include_inlines() && iitr.lineinfo)
+            // annotations common to both modes
+            auto _common_annotate = [&](::perfetto::EventContext& ctx, bool _is_last) {
+                if(_include_common && _is_last)
                 {
-                    auto _lines = iitr.lineinfo.lines;
-                    std::reverse(_lines.begin(), _lines.end());
-                    size_t _n = 0;
-                    for(const auto& litr : _lines)
-                    {
-                        const auto* _name =
-                            _static_strings.emplace(demangle(litr.name)).first->c_str();
-                        auto _info = JOIN(':', litr.location, litr.line);
-                        tracing::push_perfetto_ts(
-                            category::sampling{}, _name, _beg,
-                            [&](perfetto::EventContext ctx) {
-                                if(config::get_perfetto_annotations())
-                                {
-                                    tracing::add_perfetto_annotation(ctx, "begin_ns",
-                                                                     _beg);
-                                    tracing::add_perfetto_annotation(ctx, "lineinfo",
-                                                                     _info);
-                                    tracing::add_perfetto_annotation(ctx, "inlined",
-                                                                     (_n++ > 0));
-                                }
-                            });
-                        tracing::pop_perfetto_ts(
-                            category::sampling{}, _name, _end,
-                            [&](perfetto::EventContext ctx) {
-                                if(config::get_perfetto_annotations())
-                                {
-                                    tracing::add_perfetto_annotation(ctx, "end_ns", _end);
-                                }
-                            });
-                    }
+                    tracing::add_perfetto_annotation(ctx, "begin_ns", _beg);
+                    tracing::add_perfetto_annotation(ctx, "end_ns", _end);
                 }
-                else
+                if(_include_hw && _is_last)
                 {
-                    const auto* _name = _static_strings.emplace(iitr.name).first->c_str();
-                    tracing::push_perfetto_ts(
-                        category::sampling{}, _name, _beg,
+                    // current values when read
+                    auto _hw_cnt_vals = _bt_mt->get_hw_counters();
+                    // compute difference from last sample to provide the HW counters for
+                    // this sample
+                    tim::math::minus(_hw_cnt_vals,
+                                     _last->get<backtrace_metrics>()->get_hw_counters());
+                    for(size_t i = 0; i < _labels.size(); ++i)
+                        tracing::add_perfetto_annotation(ctx, _labels.at(i),
+                                                         _hw_cnt_vals.at(i));
+                }
+            };
+
+            if(get_sampling_include_inlines() && iitr.lineinfo)
+            {
+                auto _lines = iitr.lineinfo.lines;
+                std::reverse(_lines.begin(), _lines.end());
+                size_t _n = 0;
+                for(const auto& litr : _lines)
+                {
+                    const auto* _name =
+                        _static_strings.emplace(demangle(litr.name)).first->c_str();
+                    auto _info = JOIN(':', litr.location, litr.line);
+                    tracing::push_perfetto_track(
+                        category::sampling{}, _name, _track, _beg,
                         [&](perfetto::EventContext ctx) {
                             if(config::get_perfetto_annotations())
                             {
-                                tracing::add_perfetto_annotation(ctx, "begin_ns", _beg);
+                                _common_annotate(ctx, (_n == 0 && _ncur == 0) ||
+                                                          (_n + 1 == _lines.size()));
                                 tracing::add_perfetto_annotation(ctx, "file",
                                                                  iitr.location);
-                                tracing::add_perfetto_annotation(ctx, "pc",
-                                                                 _as_hex(iitr.address));
-                                tracing::add_perfetto_annotation(
-                                    ctx, "line_address", _as_hex(iitr.line_address));
-                                if(iitr.lineinfo)
-                                {
-                                    auto _lines = iitr.lineinfo.lines;
-                                    std::reverse(_lines.begin(), _lines.end());
-                                    size_t _n = 0;
-                                    for(const auto& litr : _lines)
-                                    {
-                                        auto _label = JOIN('-', "lineinfo", _n++);
-                                        tracing::add_perfetto_annotation(
-                                            ctx, _label.c_str(),
-                                            JOIN('@', demangle(litr.name),
-                                                 JOIN(':', litr.location, litr.line)));
-                                    }
-                                }
+                                tracing::add_perfetto_annotation(ctx, "lineinfo", _info);
+                                tracing::add_perfetto_annotation(ctx, "inlined",
+                                                                 (_n++ > 0));
                             }
                         });
-
-                    tracing::pop_perfetto_ts(category::sampling{}, _name, _end,
-                                             [&](perfetto::EventContext ctx) {
-                                                 if(config::get_perfetto_annotations())
-                                                 {
-                                                     tracing::add_perfetto_annotation(
-                                                         ctx, "end_ns", _end);
-                                                 }
-                                             });
+                    tracing::pop_perfetto_track(category::sampling{}, _name, _track,
+                                                _end);
                 }
             }
-            _last_ts = _bt_ts->get_timestamp();
+            else
+            {
+                const auto* _name = _static_strings.emplace(iitr.name).first->c_str();
+                tracing::push_perfetto_track(
+                    category::sampling{}, _name, _track, _beg,
+                    [&](perfetto::EventContext ctx) {
+                        if(config::get_perfetto_annotations())
+                        {
+                            _common_annotate(ctx, true);
+                            tracing::add_perfetto_annotation(ctx, "file", iitr.location);
+                            tracing::add_perfetto_annotation(ctx, "pc",
+                                                             _as_hex(iitr.address));
+                            tracing::add_perfetto_annotation(ctx, "line_address",
+                                                             _as_hex(iitr.line_address));
+                            if(iitr.lineinfo)
+                            {
+                                auto _lines = iitr.lineinfo.lines;
+                                std::reverse(_lines.begin(), _lines.end());
+                                size_t _n = 0;
+                                for(const auto& litr : _lines)
+                                {
+                                    auto _label = JOIN('-', "lineinfo", _n++);
+                                    tracing::add_perfetto_annotation(
+                                        ctx, _label.c_str(),
+                                        JOIN('@', demangle(litr.name),
+                                             JOIN(':', litr.location, litr.line)));
+                                }
+                            }
+                        }
+                    });
+
+                tracing::pop_perfetto_track(category::sampling{}, _name, _track, _end);
+            }
         }
+        _last_ts = _bt_ts->get_timestamp();
+        _last    = itr;
+    }
 
-        tracing::pop_perfetto_ts(category::sampling{}, "samples [omnitrace]", _end_ns,
-                                 [&](perfetto::EventContext ctx) {
-                                     if(config::get_perfetto_annotations())
-                                     {
-                                         tracing::add_perfetto_annotation(ctx, "end_ns",
-                                                                          _end_ns);
-                                     }
-                                 });
-    };
-
-    auto _processing_thread        = threading::get_tid();
-    auto _process_perfetto_wrapper = [&]() {
-        if(threading::get_tid() != _processing_thread)
-            threading::set_thread_name(TIMEMORY_JOIN(" ", "Thread", _tid, "(S)").c_str());
-
-        try
-        {
-            _process_perfetto(_data);
-        } catch(std::runtime_error& _e)
-        {
-            OMNITRACE_PRINT("[sampling][post_process_perfetto] Exception: %s\n",
-                            _e.what());
-            OMNITRACE_CI_ABORT(true, "[sampling][post_process_perfetto] Exception: %s\n",
-                               _e.what());
-        }
-    };
-
-    OMNITRACE_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
-    std::thread{ _process_perfetto_wrapper }.join();
+    tracing::pop_perfetto_track(category::sampling{}, "samples [omnitrace]", _track,
+                                _end_ns, [&](perfetto::EventContext ctx) {
+                                    if(config::get_perfetto_annotations())
+                                    {
+                                        tracing::add_perfetto_annotation(ctx, "end_ns",
+                                                                         _end_ns);
+                                    }
+                                });
 }
 
 void

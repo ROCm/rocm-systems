@@ -60,6 +60,14 @@ struct exit_gotcha : tim::component::base<exit_gotcha, void>
     void operator()(const gotcha_data&, exit_func_t, int) const;
     // abort
     void operator()(const gotcha_data&, abort_func_t) const;
+
+    struct exit_info
+    {
+        bool is_known  = false;
+        bool is_quick  = false;
+        int  exit_code = EXIT_SUCCESS;
+    };
+    static exit_info get_exit_info();
 };
 }  // namespace component
 
