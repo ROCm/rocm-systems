@@ -237,13 +237,18 @@ extern "C"
                             hsa_activity_callback),
                         nullptr, output_prefix
                     };
-#else
+#elif OMNITRACE_HIP_VERSION < 50301
                     hsa_ops_properties_t ops_properties;
                     ops_properties.table = table;
                     ops_properties.reserved1[0] =
                         reinterpret_cast<void*>(&hsa_activity_callback);
                     ops_properties.reserved1[1] = nullptr;
                     ops_properties.reserved1[2] = nullptr;
+#else
+                    hsa_ops_properties_t ops_properties{
+                        table, reinterpret_cast<void*>(&hsa_activity_callback), nullptr,
+                        nullptr
+                    };
 #endif
                     roctracer_set_properties(ACTIVITY_DOMAIN_HSA_OPS, &ops_properties);
 
