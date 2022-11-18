@@ -51,6 +51,12 @@ from common import getVersion
 ################################################
 # Helper Functions
 ################################################
+def run_subprocess(cmd):
+    subprocess.run(
+        cmd,
+        check=True
+    )
+
 def resolve_rocprof():
     # ROCPROF INFO
     global rocprof_cmd
@@ -253,7 +259,7 @@ def mibench(args):
         )
         sys.exit(1)
 
-    subprocess.run(
+    run_subprocess(
         [
             path_to_binary,
             "-o",
@@ -294,7 +300,7 @@ def run_prof(fname, workload_dir, perfmon_dir, cmd, verbose):
         print("pmc file:", os.path.basename(fname))
 
     # profile the app
-    subprocess.run(
+    run_subprocess(
         [
             rocprof_cmd,
             "-i",
@@ -339,7 +345,7 @@ def omniperf_profile(args,VER):
     for fname in glob.glob(workload_dir + "/perfmon/*.txt"):
         # Kernel filtering (in-place replacement)
         if not args.kernel == None:
-            subprocess.run(
+            run_subprocess(
                 [
                     "sed",
                     "-i",
@@ -351,7 +357,7 @@ def omniperf_profile(args,VER):
 
         # Dispatch filtering (inplace replacement)
         if not args.dispatch == None:
-            subprocess.run(
+            run_subprocess(
                 [
                     "sed",
                     "-i",
@@ -363,7 +369,7 @@ def omniperf_profile(args,VER):
         run_prof(fname, workload_dir, perfmon_dir, args.remaining, args.verbose)
 
     # run again with timestamps
-    subprocess.run(
+    run_subprocess(
         [
             rocprof_cmd,
             # "-i", fname,
@@ -398,7 +404,7 @@ def omniperf_profile(args,VER):
                 )
                 sys.exit(1)
 
-            subprocess.run(
+            run_subprocess(
                 [
                     path_to_binary,
                     "-o",
