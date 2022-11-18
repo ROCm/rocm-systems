@@ -366,7 +366,13 @@ const AgentInfo* HsaRsrcFactory::AddAgentInfo(const hsa_agent_t agent) {
     agent_info->vgpr_block_size = 4;
 
     // Set GPU index
-    agent_info->dev_index = gpu_list_.size();
+    uint32_t driver_node_id;
+    status = hsa_api_.hsa_agent_get_info(
+            agent,
+            static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_DRIVER_NODE_ID),
+            &driver_node_id);
+    CHECK_STATUS("hsa_agent_get_info(gpu hsa_driver_node_id)", status);
+    agent_info->dev_index = driver_node_id;
     gpu_list_.push_back(agent_info);
     gpu_agents_.push_back(agent);
   }
