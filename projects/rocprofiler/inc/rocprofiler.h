@@ -2541,7 +2541,7 @@ typedef struct {
 // Profiling callback data
 typedef struct {
   hsa_agent_t agent;                                   // GPU agent handle
-  uint32_t agent_index;                                // GPU index
+  uint32_t agent_index;                                // GPU index (GPU Driver Node ID as reported in the sysfs topology)
   const hsa_queue_t* queue;                            // HSA queue
   uint64_t queue_index;                                // Index in the queue
   uint32_t queue_id;                                   // Queue id
@@ -2660,7 +2660,7 @@ typedef union {
 
 // Profiling info data
 typedef struct {
-  uint32_t agent_index; // GPU HSA agent index
+  uint32_t agent_index; // GPU HSA agent index (GPU Driver Node ID as reported in the sysfs topology)
   rocprofiler_info_kind_t kind; // info data kind
   union {
     struct {
