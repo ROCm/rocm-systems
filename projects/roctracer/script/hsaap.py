@@ -503,7 +503,7 @@ class API_DescrParser:
     content = ''
     if n == -1:
       content += '#ifdef __cplusplus\n'
-      content += '#include <hsa_ostream_ops.h>\n'
+      content += '#include "hsa_ostream_ops.h"\n'
       content += 'typedef std::pair<uint32_t, hsa_api_data_t> hsa_api_data_pair_t;\n'
       content += 'inline std::ostream& operator<< (std::ostream& out, const hsa_api_data_pair_t& data_pair) {\n'
       content += '  const uint32_t cid = data_pair.first;\n'
