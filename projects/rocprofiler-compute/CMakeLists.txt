@@ -224,10 +224,11 @@ install(
     TYPE BIN
     PATTERN "rooflines*" EXCLUDE)
 # src/utils/rooflines
-install(PROGRAMS src/utils/rooflines/roofline-rhel8-mi200-rocm5
-                 src/utils/rooflines/roofline-sle15sp3-mi200-rocm5
-                 src/utils/rooflines/roofline-ubuntu20_04-mi200-rocm5
-        DESTINATION ${CMAKE_INSTALL_BINDIR}/utils/rooflines)
+install(
+    PROGRAMS src/utils/rooflines/roofline-rhel8-mi200-rocm5
+             src/utils/rooflines/roofline-sle15sp3-mi200-rocm5
+             src/utils/rooflines/roofline-ubuntu20_04-mi200-rocm5
+    DESTINATION ${CMAKE_INSTALL_BINDIR}/utils/rooflines)
 # src/perfmon_pub
 install(
     DIRECTORY src/perfmon_pub
