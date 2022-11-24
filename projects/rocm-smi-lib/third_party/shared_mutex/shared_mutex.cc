@@ -1,5 +1,5 @@
 /*
-Modifications Copyright © 2019 – 2020 Advanced Micro Devices, Inc. All Rights
+Modifications Copyright 2019 - 2022 Advanced Micro Devices, Inc. All Rights
 Reserved.
 Copyright (c) 2018 Oleg Yamnikov
 
@@ -34,7 +34,49 @@ THE SOFTWARE.
 #include <time.h>   // clock_gettime
 #include <assert.h>
 
+#include <sys/types.h>
+#include <dirent.h>
+#include <algorithm>
+#include <string>
+#include <vector>
+
 #include "rocm_smi/rocm_smi_exception.h"
+
+// find which processes are using the file by searching /proc/*/fd
+static std::vector<std::string> lsof(const char* filename) {
+  struct dirent *entry = nullptr;
+  DIR *dp = nullptr;
+  std::vector<std::string> process_id;
+
+  dp = opendir("/proc");
+  if (dp != nullptr) {
+    while ((entry = readdir(dp))) {
+      std::string id(entry->d_name);
+      // the process id should be a number
+      if (std::all_of(id.begin(), id.end(), ::isdigit)) {
+        process_id.push_back(entry->d_name);
+      }
+    }
+    closedir(dp);
+  }
+
+  std::vector<std::string> matched_process;
+  for (unsigned int i=0; i < process_id.size(); i++) {
+      std::string folder_name("/proc/");
+      folder_name += process_id[i]+"/fd/";
+      dp = opendir(folder_name.c_str());
+      if (dp == nullptr) continue;
+      while ((entry = readdir(dp))) {
+         std::string p(folder_name+entry->d_name);
+         char buf[512];
+         memset(buf, 0, 512);
+         if (readlink(p.c_str(), buf, sizeof(buf)-1) < 0) continue;
+         if (!strcmp(filename, buf)) matched_process.push_back(process_id[i]);
+      }
+      closedir(dp);
+  }
+  return matched_process;
+}
 
 shared_mutex_t shared_mutex_init(const char *name, mode_t mode) {
   shared_mutex_t mutex = {NULL, 0, NULL, 0};
@@ -80,6 +122,15 @@ shared_mutex_t shared_mutex_init(const char *name, mode_t mode) {
   }
 
   pthread_mutex_t *mutex_ptr =  reinterpret_cast<pthread_mutex_t *>(addr);
+
+  // When process crash before unlock the mutex, the mutex is in bad status.
+  // reset the mutex if no process is using it
+  std::vector<std::string> ids = lsof(name);
+  if (ids.size() == 0) {  // no process is using it
+    memset(mutex_ptr, 0, sizeof(pthread_mutex_t));
+    // Set mutex.created == 1 so that it can be initialized latter.
+    mutex.created = 1;
+  }
 
   // Make sure the mutex wasn't left in a locked state. If we can't
   // acquire it in 5 sec., re-do everything.
