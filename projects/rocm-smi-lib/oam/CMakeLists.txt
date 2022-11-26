@@ -97,16 +97,19 @@ target_include_directories(${OAM_TARGET}
                            "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
                            "$<INSTALL_INTERFACE:{OAM_NAME}/include>")
 
-
 ## Add the install directives for the runtime library.
 install(TARGETS ${OAM_TARGET}
           EXPORT rocm_smiTargets
           LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-          ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
-          COMPONENT ${OAM_COMPONENT})
+          COMPONENT dev)
+install(TARGETS ${OAM_TARGET}
+          LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+          COMPONENT asan)
+
 install(FILES ${COMMON_SRC_ROOT}/oam/include/oam/oam_mapi.h
               ${COMMON_SRC_ROOT}/oam/include/oam/amd_oam.h
-                                        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/oam)
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/oam
+        COMPONENT dev)
 
 # Generate Doxygen documentation
 if (DOXYGEN_FOUND)
