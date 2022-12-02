@@ -29,7 +29,7 @@ from matplotlib.pyplot import axis
 import pandas as pd
 import numpy as np
 from tabulate import tabulate
-from omniperf_cli.utils import schema
+from omniperf_analyze.utils import schema
 
 # ------------------------------------------------------------------------------
 # Internal global definitions
@@ -68,6 +68,7 @@ supported_denom = {
     "per_wave": "SQ_WAVES",
     "per_cycle": "GRBM_GUI_ACTIVE",
     "per_second": "((EndNs - BeginNs) / 1000000000)",
+    "per_kernel": "1"
 }
 
 # Build-in defined in mongodb variables:

@@ -212,11 +212,11 @@ install(PROGRAMS src/omniperf TYPE BIN)
 install(FILES src/parser.py TYPE BIN)
 install(FILES src/common.py TYPE BIN)
 install(FILES VERSION VERSION.sha DESTINATION ${CMAKE_INSTALL_PREFIX})
-# src/omniperf_cli
+# src/omniperf_analyze
 install(
-    DIRECTORY src/omniperf_cli
+    DIRECTORY src/omniperf_analyze
     TYPE BIN
-    PATTERN src/omniperf_cli/tests EXCLUDE
+    PATTERN src/omniperf_analyze/tests EXCLUDE
     PATTERN "__pycache__" EXCLUDE)
 # src/utils
 install(

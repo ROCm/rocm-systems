@@ -28,7 +28,7 @@ import yaml
 import collections
 from collections import OrderedDict
 from pathlib import Path
-from omniperf_cli.utils import schema
+from omniperf_analyze.utils import schema
 
 # TODO: use pandas chunksize or dask to read really large csv file
 # from dask import dataframe as dd

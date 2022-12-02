@@ -37,7 +37,7 @@ from utils.perfagg import perfmon_filter, pmc_filter
 from utils import remove_workload
 from utils import csv_converter  # Import workload
 from utils import plot_roofline  # standalone roofline
-from omniperf_cli.omniperf_cli import omniperf_cli  # CLI analysis
+from omniperf_analyze.omniperf_analyze import analyze  # CLI analysis
 
 from common import (
     OMNIPERF_HOME,
@@ -608,7 +608,7 @@ def main():
     ##############
     if args.mode == "analyze":
         if args.list_metrics:
-            omniperf_cli(args)
+            analyze(args)
         else:
             if args.path:
                 if ".." in str(args.path):
@@ -632,7 +632,7 @@ def main():
                         my_parser, dir[0]
                     )  # Verify workload is valid before analyzing
 
-                omniperf_cli(args)
+                analyze(args)
             else:
                 throw_parse_error(
                     my_parser,

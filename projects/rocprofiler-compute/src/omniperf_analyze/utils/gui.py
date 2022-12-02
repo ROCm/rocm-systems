@@ -36,11 +36,12 @@ import plotly.express as px
 
 import colorlover
 
-from omniperf_cli.utils import parser, file_io, schema
+from omniperf_analyze.utils import parser, file_io, schema
 
-from omniperf_cli.utils.gui_components.header import get_header
-from omniperf_cli.utils.gui_components.roofline import get_roofline
-from omniperf_cli.utils.gui_components.memchart import get_memchart
+from omniperf_analyze.utils.gui_components.header import get_header
+from omniperf_analyze.utils.gui_components.roofline import get_roofline
+from omniperf_analyze.utils.gui_components.memchart import get_memchart
+from omniperf_analyze.omniperf_analyze import initialize_run
 
 pd.set_option(
     "mode.chained_assignment", None
@@ -303,6 +304,7 @@ def build_layout(
     path_to_dir,
     debug,
     verbose,
+    args,
 ):
     """
     Build gui layout
@@ -312,8 +314,8 @@ def build_layout(
     app.layout = html.Div(style={"backgroundColor": "rgb(50, 50, 50)" if IS_DARK else ""})
 
     filt_kernel_names = []
-    kernel_top_df = runs[path_to_dir].dfs[1]
-    for kernel_id in runs[path_to_dir].filter_kernel_ids:
+    kernel_top_df = base_data.dfs[1]
+    for kernel_id in base_data.filter_kernel_ids:
         filt_kernel_names.append(kernel_top_df.loc[kernel_id, "KernelName"])
 
     app.layout.children = html.Div(
@@ -321,7 +323,7 @@ def build_layout(
             dbc.Spinner(
                 children=[
                     get_header(
-                        runs[path_to_dir].raw_pmc, input_filters, filt_kernel_names
+                        base_data.raw_pmc, input_filters, filt_kernel_names
                     ),
                     html.Div(id="container", children=[]),
                 ],
@@ -337,26 +339,30 @@ def build_layout(
         [Input("disp-filt", "value")],
         [Input("kernel-filt", "value")],
         [Input("gcd-filt", "value")],
+        [Input("norm-filt", "value")],
         [State("container", "children")],
     )
-    def generate_from_filter(disp_filt, kernel_filter, gcd_filter, div_children):
-        runs[path_to_dir].dfs = copy.deepcopy(archConfigs.dfs)  # reset the equations
+    def generate_from_filter(disp_filt, kernel_filter, gcd_filter, norm_filt, div_children):
+        if verbose <= 1:
+            print("normalization is ", norm_filt)
+        
+        base_data = initialize_run(args, norm_filt) # Re-initalize everything
         panel_configs = copy.deepcopy(archConfigs.panel_configs)
         # Generate original raw df
-        runs[path_to_dir].raw_pmc = file_io.create_df_pmc(path_to_dir)
+        base_data[base_run].raw_pmc = file_io.create_df_pmc(path_to_dir)
         if verbose >= 1:
             print("disp-filter is ", disp_filt)
             print("kernel-filter is ", kernel_filter)
             print("gpu-filter is ", gcd_filter, "\n")
-        runs[path_to_dir].filter_kernel_ids = kernel_filter
-        runs[path_to_dir].filter_gpu_ids = gcd_filter
-        runs[path_to_dir].filter_dispatch_ids = disp_filt
+        base_data[base_run].filter_kernel_ids = kernel_filter
+        base_data[base_run].filter_gpu_ids = gcd_filter
+        base_data[base_run].filter_dispatch_ids = disp_filt
         # Reload the pmc_kernel_top.csv for Top Stats panel
         num_results = 10
         file_io.create_df_kernel_top_stats(
             path_to_dir,
-            runs[path_to_dir].filter_gpu_ids,
-            runs[path_to_dir].filter_dispatch_ids,
+            base_data[base_run].filter_gpu_ids,
+            base_data[base_run].filter_dispatch_ids,
             time_unit,
             num_results,
         )
@@ -365,11 +371,11 @@ def build_layout(
         if not (disp_filt or kernel_filter or gcd_filter):
             temp = {}
             keep = [1, 201, 101, 1901]
-            for key in runs[path_to_dir].dfs:
+            for key in base_data[base_run].dfs:
                 if keep.count(key) != 0:
-                    temp[key] = runs[path_to_dir].dfs[key]
+                    temp[key] = base_data[base_run].dfs[key]
 
-            runs[path_to_dir].dfs = temp
+            base_data[base_run].dfs = temp
             temp = {}
             keep = [0, 100, 200, 1900]
             for key in panel_configs:
@@ -378,18 +384,18 @@ def build_layout(
             panel_configs = temp
 
         parser.load_table_data(
-            runs[path_to_dir], path_to_dir, True, debug, verbose
+            base_data[base_run], path_to_dir, True, debug, verbose
         )  # Note: All the filtering happens in this function
 
         div_children = []
         div_children.append(
-            get_memchart(archConfigs.panel_configs[1900]["data source"], base_data)
+            get_memchart(panel_configs[1900]["data source"], base_data[base_run])
         )
         # append roofline section
         div_children.append(
             get_roofline(
                 path_to_dir,
-                parser.apply_filters(runs[path_to_dir], is_gui, debug),
+                parser.apply_filters(base_data[base_run], is_gui, debug),
                 verbose,
             )
         )
@@ -411,7 +417,7 @@ def build_layout(
                 for data_source in panel["data source"]:
                     for t_type, table_config in data_source.items():
                         content = []
-                        original_df = base_data.dfs[table_config["id"]]
+                        original_df = base_data[base_run].dfs[table_config["id"]]
 
                         # The sys info table need to add index back
                         if t_type == "raw_csv_table" and "Info" in original_df.keys():
