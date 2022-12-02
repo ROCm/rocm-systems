@@ -322,9 +322,7 @@ def build_layout(
         children=[
             dbc.Spinner(
                 children=[
-                    get_header(
-                        base_data.raw_pmc, input_filters, filt_kernel_names
-                    ),
+                    get_header(base_data.raw_pmc, input_filters, filt_kernel_names),
                     html.Div(id="container", children=[]),
                 ],
                 fullscreen=True,
@@ -342,11 +340,13 @@ def build_layout(
         [Input("norm-filt", "value")],
         [State("container", "children")],
     )
-    def generate_from_filter(disp_filt, kernel_filter, gcd_filter, norm_filt, div_children):
+    def generate_from_filter(
+        disp_filt, kernel_filter, gcd_filter, norm_filt, div_children
+    ):
         if verbose <= 1:
             print("normalization is ", norm_filt)
-        
-        base_data = initialize_run(args, norm_filt) # Re-initalize everything
+
+        base_data = initialize_run(args, norm_filt)  # Re-initalize everything
         panel_configs = copy.deepcopy(archConfigs.panel_configs)
         # Generate original raw df
         base_data[base_run].raw_pmc = file_io.create_df_pmc(path_to_dir)

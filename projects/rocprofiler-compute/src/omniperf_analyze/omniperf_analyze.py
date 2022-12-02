@@ -92,7 +92,7 @@ def initialize_run(args, normalization_filter=None):
     if not normalization_filter:
         for k, v in archConfigs.items():
             parser.build_metric_value_string(v.dfs, v.dfs_type, args.normal_unit)
-    else: 
+    else:
         for k, v in archConfigs.items():
             parser.build_metric_value_string(v.dfs, v.dfs_type, normalization_filter)
 
@@ -121,9 +121,9 @@ def initialize_run(args, normalization_filter=None):
         w.dfs_type = archConfigs[arch].dfs_type
         w.soc_spec = file_io.get_soc_params(soc_spec_df, arch)
         runs[d[0]] = w
-    
+
     # Return rather than referencing 'runs' globally (since used outside of file scope)
-    return runs 
+    return runs
 
 
 def run_gui(args, runs):
@@ -151,7 +151,7 @@ def run_gui(args, runs):
             "kernel": runs[args.path[0][0]].filter_kernel_ids,
             "gpu": runs[args.path[0][0]].filter_gpu_ids,
             "dispatch": runs[args.path[0][0]].filter_dispatch_ids,
-            "normalization": args.normal_unit
+            "normalization": args.normal_unit,
         }
 
         gui.build_layout(
@@ -171,8 +171,10 @@ def run_gui(args, runs):
     else:
         print("Multiple runs not supported yet")
 
+
 def run_cli(args, runs):
     from omniperf_analyze.utils import tty
+
     # NB:
     # If we assume the panel layout for all archs are similar, it doesn't matter
     # which archConfig passed into show_all function.

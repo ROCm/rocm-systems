@@ -68,7 +68,7 @@ supported_denom = {
     "per_wave": "SQ_WAVES",
     "per_cycle": "GRBM_GUI_ACTIVE",
     "per_second": "((EndNs - BeginNs) / 1000000000)",
-    "per_kernel": "1"
+    "per_kernel": "1",
 }
 
 # Build-in defined in mongodb variables:
