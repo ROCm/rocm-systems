@@ -50,6 +50,9 @@ target_link_libraries(att_plugin PRIVATE ${ROCPROFILER_TARGET}
 
 install(TARGETS att_plugin
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/${PROJECT_NAME}
+                COMPONENT asan)
+install(TARGETS att_plugin
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/${PROJECT_NAME}
                 COMPONENT runtime)
 
 configure_file(att.py att/att.py COPYONLY)

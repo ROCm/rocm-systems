@@ -251,6 +251,7 @@ endif()
 ## Install libraries: Non versioned lib file in dev package
 install ( TARGETS ${ROCPROFILER_TARGET} LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT dev NAMELINK_ONLY )
 install ( TARGETS ${ROCPROFILER_TARGET} LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT runtime NAMELINK_SKIP )
+install ( TARGETS ${ROCPROFILER_TARGET} LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT asan )
 
 configure_file(${PROJECT_SOURCE_DIR}/src/core/counters/metrics/basic_counters.xml ${PROJECT_BINARY_DIR}/counters/basic_counters.xml COPYONLY)
 configure_file(${PROJECT_SOURCE_DIR}/src/core/counters/metrics/derived_counters.xml ${PROJECT_BINARY_DIR}/counters/derived_counters.xml COPYONLY)

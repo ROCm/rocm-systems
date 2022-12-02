@@ -36,6 +36,9 @@ endif()
 install(TARGETS rocprofiler_tool LIBRARY
   DESTINATION ${CMAKE_INSTALL_LIBDIR}
   COMPONENT runtime)
+install(TARGETS rocprofiler_tool LIBRARY
+  DESTINATION ${CMAKE_INSTALL_LIBDIR}
+  COMPONENT asan)
 
 add_subdirectory(amdsys)
 add_subdirectory(rocprofv2)

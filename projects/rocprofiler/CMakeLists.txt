@@ -201,6 +201,7 @@ install(
   FILES ${CMAKE_CURRENT_SOURCE_DIR}/src/core/activity.h
   DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/${ROCPROFILER_NAME}
   COMPONENT dev)
+
 # rpl_run.sh
 install(
   FILES ${CMAKE_CURRENT_SOURCE_DIR}/bin/rpl_run.sh
@@ -245,6 +246,11 @@ install(
   COMPONENT runtime)
 
 install(
+  FILES ${PROJECT_BINARY_DIR}/test/librocprof-tool.so
+  DESTINATION ${CMAKE_INSTALL_LIBDIR}/${ROCPROFILER_NAME}
+  COMPONENT asan)
+
+install(
   FILES ${PROJECT_BINARY_DIR}/test/rocprof-ctrl
   DESTINATION ${CMAKE_INSTALL_LIBDIR}/${ROCPROFILER_NAME}
   PERMISSIONS
@@ -257,9 +263,13 @@ install(
     WORLD_EXECUTE
   COMPONENT runtime)
 
-# File reorg Backward compatibility
-option(FILE_REORG_BACKWARD_COMPATIBILITY
+# File reorg backward compatibility for non ASAN packaging
+if ( NOT ENABLE_ASAN_PACKAGING )
+  # File reorg Backward compatibility
+  option(FILE_REORG_BACKWARD_COMPATIBILITY
        "Enable File Reorg with backward compatibility" ON)
+endif()
+
 if(FILE_REORG_BACKWARD_COMPATIBILITY)
   # To enabe/disable #error in wrapper header files
   if(NOT DEFINED ROCM_HEADER_WRAPPER_WERROR)
@@ -305,11 +315,21 @@ if(${LIBRARY_TYPE} STREQUAL SHARED)
     message("Using CPACK_PACKAGE_VERSION ${CPACK_PACKAGE_VERSION}")
   endif()
 
+
+
+  # Debian package specific variable for ASAN
+  set ( CPACK_DEBIAN_ASAN_PACKAGE_NAME "${ROCPROFILER_NAME}-asan" )
+  set ( CPACK_DEBIAN_ASAN_PACKAGE_DEPENDS "hsa-rocr-asan, rocm-core-asan" )
+
   # Install license file
   install(
     FILES ${CPACK_RESOURCE_FILE_LICENSE}
     DESTINATION ${CMAKE_INSTALL_DOCDIR}
     COMPONENT runtime)
+  install(
+    FILES ${CPACK_RESOURCE_FILE_LICENSE}
+    DESTINATION ${CMAKE_INSTALL_DOCDIR}-asan
+    COMPONENT asan)
 
   # Debian package specific variables
   if(DEFINED ENV{CPACK_DEBIAN_PACKAGE_RELEASE})
@@ -384,12 +404,18 @@ if(${LIBRARY_TYPE} STREQUAL SHARED)
       "${PROJECT_NAME}, hsa-rocr-dev, rocm-core")
   message("CPACK_RPM_PACKAGE_RELEASE: ${CPACK_RPM_PACKAGE_RELEASE}")
 
+  # RPM package specific variable for ASAN
+  set ( CPACK_RPM_ASAN_PACKAGE_NAME "${ROCPROFILER_NAME}-asan" )
+  set ( CPACK_RPM_ASAN_PACKAGE_REQUIRES "hsa-rocr-asan, rocm-core-asan" )
+  
   # Remove dependency on rocm-core if -DROCM_DEP_ROCMCORE=ON not given to cmake
   if(NOT ROCM_DEP_ROCMCORE)
     string(REGEX REPLACE ",? ?rocm-core" "" CPACK_RPM_RUNTIME_PACKAGE_REQUIRES
                          ${CPACK_RPM_RUNTIME_PACKAGE_REQUIRES})
     string(REGEX REPLACE ",? ?rocm-core" "" CPACK_RPM_DEV_PACKAGE_REQUIRES
                          ${CPACK_RPM_DEV_PACKAGE_REQUIRES})
+    string(REGEX REPLACE ",? ?rocm-core-asan" "" CPACK_RPM_ASAN_PACKAGE_REQUIRES
+                         ${CPACK_RPM_ASAN_PACKAGE_REQUIRES})
     string(REGEX REPLACE ",? ?rocm-core" "" CPACK_RPM_TESTS_PACKAGE_REQUIRES
                          ${CPACK_RPM_TESTS_PACKAGE_REQUIRES})
     string(REGEX REPLACE ",? ?rocm-core" "" CPACK_RPM_SAMPLES_PACKAGE_REQUIRES
@@ -403,6 +429,8 @@ if(${LIBRARY_TYPE} STREQUAL SHARED)
                    ${CPACK_DEBIAN_RUNTIME_PACKAGE_DEPENDS})
     string(REGEX REPLACE ",? ?rocm-core" "" CPACK_DEBIAN_DEV_PACKAGE_DEPENDS
                          ${CPACK_DEBIAN_DEV_PACKAGE_DEPENDS})
+    string(REGEX REPLACE ",? ?rocm-core-asan" "" CPACK_DEBIAN_ASAN_PACKAGE_DEPENDS
+                         ${CPACK_DEBIAN_ASAN_PACKAGE_DEPENDS})
     string(REGEX REPLACE ",? ?rocm-core" "" CPACK_DEBIAN_TESTS_PACKAGE_DEPENDS
                          ${CPACK_DEBIAN_TESTS_PACKAGE_DEPENDS})
     string(REGEX
@@ -415,7 +443,14 @@ if(${LIBRARY_TYPE} STREQUAL SHARED)
                    ${CPACK_DEBIAN_PLUGINS_PACKAGE_DEPENDS})
   endif()
 
-  set(CPACK_COMPONENTS_ALL runtime dev tests docs plugins samples)
+  ## set components
+  if(ENABLE_ASAN_PACKAGING)
+    # ASAN Package requires only asan component with libraries and license file
+    set(CPACK_COMPONENTS_ALL asan)
+  else()
+    set(CPACK_COMPONENTS_ALL runtime dev tests docs plugins samples)
+  endif()
+
   include(CPack)
 
   cpack_add_component(
@@ -452,6 +487,12 @@ if(${LIBRARY_TYPE} STREQUAL SHARED)
     DISPLAY_NAME "Documentation"
     DESCRIPTION "Documentation for the ROCProfiler API"
     DEPENDS dev)
+
+  cpack_add_component(
+    asan
+    DISPLAY_NAME "ASAN"
+    DESCRIPTION "ASAN libraries for the ROCPROFILER"
+    DEPENDS asan)
 endif()
 
 find_package(Doxygen)
@@ -492,3 +533,4 @@ if(DOXYGEN_FOUND)
     OPTIONAL
     COMPONENT docs)
 endif()
+
