@@ -48,3 +48,7 @@ target_link_libraries(file_plugin PRIVATE util roctracer  amd_comgr hsa-runtime6
 install(TARGETS file_plugin LIBRARY
         DESTINATION ${CMAKE_INSTALL_LIBDIR}/${PROJECT_NAME}
         COMPONENT runtime)
+
+install(TARGETS file_plugin LIBRARY
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/${PROJECT_NAME}
+        COMPONENT asan)

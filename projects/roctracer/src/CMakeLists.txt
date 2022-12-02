@@ -176,6 +176,10 @@ install(TARGETS roctracer LIBRARY
   DESTINATION ${CMAKE_INSTALL_LIBDIR}
   COMPONENT dev NAMELINK_ONLY)
 
+install(TARGETS roctracer LIBRARY
+  DESTINATION ${CMAKE_INSTALL_LIBDIR}
+  COMPONENT asan)
+
 ## Build the ROCTX library
 file(GLOB ROCTX_SOURCES "roctx/*.cpp")
 add_library(roctx ${LIBRARY_TYPE} ${ROCTX_SOURCES})
@@ -202,6 +206,10 @@ install(TARGETS roctx LIBRARY
   DESTINATION ${CMAKE_INSTALL_LIBDIR}
   COMPONENT dev NAMELINK_ONLY)
 
+install(TARGETS roctx LIBRARY
+  DESTINATION ${CMAKE_INSTALL_LIBDIR}
+  COMPONENT asan)
+
 ## Build the tracer_tool library
 if (${LIBRARY_TYPE} STREQUAL SHARED)
 
@@ -224,15 +232,20 @@ target_link_libraries(roctracer_tool util roctracer hsa-runtime64::hsa-runtime64
 target_link_options(roctracer_tool PRIVATE -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/tracer_tool/exportmap -Wl,--no-undefined)
 
 install(TARGETS roctracer_tool LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/${PROJECT_NAME} COMPONENT runtime)
+install(TARGETS roctracer_tool LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/${PROJECT_NAME} COMPONENT asan)
 
 add_library(hip_stats SHARED hip_stats/hip_stats.cpp)
 target_compile_definitions(hip_stats PRIVATE __HIP_PLATFORM_AMD__)
 target_link_libraries(hip_stats roctracer stdc++fs)
 install(TARGETS hip_stats LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/${PROJECT_NAME} COMPONENT runtime)
+install(TARGETS hip_stats LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/${PROJECT_NAME} COMPONENT asan)
 
 endif()
 
-option(FILE_REORG_BACKWARD_COMPATIBILITY "Enable File Reorg with backward compatibility" ON)
+if(NOT ENABLE_ASAN_PACKAGING)
+  option(FILE_REORG_BACKWARD_COMPATIBILITY "Enable File Reorg with backward compatibility" ON)
+endif()
+
 if(FILE_REORG_BACKWARD_COMPATIBILITY)
   include(${PROJECT_SOURCE_DIR}/roctracer-backward-compat.cmake)
 endif()
