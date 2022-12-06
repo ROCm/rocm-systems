@@ -23,7 +23,7 @@
 import pandas as pd
 from tabulate import tabulate
 
-from omniperf_cli.utils import schema, parser
+from omniperf_analyze.utils import schema, parser
 
 hidden_columns = ["Tips", "coll_level"]
 

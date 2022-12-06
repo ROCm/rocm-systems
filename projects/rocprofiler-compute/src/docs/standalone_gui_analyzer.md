@@ -41,7 +41,7 @@ Analyze
 
 Dash is running on http://0.0.0.0:8050/
 
- * Serving Flask app 'omniperf_cli.omniperf_cli' (lazy loading)
+ * Serving Flask app 'omniperf_analyze.omniperf_analyze' (lazy loading)
  * Environment: production
    WARNING: This is a development server. Do not use it in a production deployment.
    Use a production WSGI server instead.

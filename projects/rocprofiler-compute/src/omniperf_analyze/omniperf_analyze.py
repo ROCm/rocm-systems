@@ -24,7 +24,7 @@
 
 """
     Quick run:
-        omniperf_cli.py -d 1st_run_dir -d 2nd_run_dir -b 2
+        analyze.py -d 1st_run_dir -d 2nd_run_dir -b 2
 
     Common abbreviations in the code:
         df - pandas.dataframe
@@ -40,32 +40,21 @@ import sys
 import argparse
 import os.path
 from pathlib import Path
+from omniperf_analyze.utils import parser, file_io
 
 
-def omniperf_cli(args):
-    cur_root = Path(__file__).resolve()
-
-    if args.dependency:
-        print("pip3 install astunparse numpy tabulate pandas pyyaml")
-        sys.exit(0)
-
+def initialize_run(args, normalization_filter=None):
     import pandas as pd
     from collections import OrderedDict
-    from dataclasses import dataclass, field
+    from omniperf_analyze.utils import schema
     from tabulate import tabulate
-
-    # from utils import schema, parser, file_io, tty, plot
-    from omniperf_cli.utils import schema, parser, file_io, tty
 
     # Fixme: cur_root.parent.joinpath('soc_params')
     soc_params_dir = os.path.join(os.path.dirname(__file__), "..", "soc_params")
-
     soc_spec_df = file_io.load_soc_params(soc_params_dir)
 
-    # NB: maybe create bak file for the old run before open it
-    output = open(args.output_file, "w+") if args.output_file else sys.stdout
-
     single_panel_config = file_io.is_single_panel_config(Path(args.config_dir))
+    global archConfigs
     archConfigs = {}
     for arch in file_io.supported_arch.keys():
         ac = schema.ArchConfig()
@@ -99,8 +88,13 @@ def omniperf_cli(args):
         )
         sys.exit(0)
 
-    for k, v in archConfigs.items():
-        parser.build_metric_value_string(v.dfs, v.dfs_type, args.normal_unit)
+    # Use original normalization or user input from GUI
+    if not normalization_filter:
+        for k, v in archConfigs.items():
+            parser.build_metric_value_string(v.dfs, v.dfs_type, args.normal_unit)
+    else:
+        for k, v in archConfigs.items():
+            parser.build_metric_value_string(v.dfs, v.dfs_type, normalization_filter)
 
     runs = OrderedDict()
 
@@ -128,6 +122,102 @@ def omniperf_cli(args):
         w.soc_spec = file_io.get_soc_params(soc_spec_df, arch)
         runs[d[0]] = w
 
+    # Return rather than referencing 'runs' globally (since used outside of file scope)
+    return runs
+
+
+def run_gui(args, runs):
+    import dash
+    from omniperf_analyze.utils import gui
+    import dash_bootstrap_components as dbc
+
+    app = dash.Dash(__name__, external_stylesheets=[dbc.themes.CYBORG])
+
+    if len(runs) == 1:
+        num_results = 10
+        file_io.create_df_kernel_top_stats(
+            args.path[0][0],
+            runs[args.path[0][0]].filter_gpu_ids,
+            runs[args.path[0][0]].filter_dispatch_ids,
+            args.time_unit,
+            num_results,
+        )
+        runs[args.path[0][0]].raw_pmc = file_io.create_df_pmc(
+            args.path[0][0]
+        )  # create mega df
+        parser.load_kernel_top(runs[args.path[0][0]], args.path[0][0])
+
+        input_filters = {
+            "kernel": runs[args.path[0][0]].filter_kernel_ids,
+            "gpu": runs[args.path[0][0]].filter_gpu_ids,
+            "dispatch": runs[args.path[0][0]].filter_dispatch_ids,
+            "normalization": args.normal_unit,
+        }
+
+        gui.build_layout(
+            app,
+            runs,
+            archConfigs["gfx90a"],
+            input_filters,
+            args.decimal,
+            args.time_unit,
+            args.cols,
+            str(args.path[0][0]),
+            args.g,
+            args.verbose,
+            args,
+        )
+        app.run_server(debug=False, host="0.0.0.0", port=args.gui)
+    else:
+        print("Multiple runs not supported yet")
+
+
+def run_cli(args, runs):
+    from omniperf_analyze.utils import tty
+
+    # NB:
+    # If we assume the panel layout for all archs are similar, it doesn't matter
+    # which archConfig passed into show_all function.
+    # After decide to how to manage kernels display patterns, we can revisit it.
+    for d in args.path:
+        num_results = 10
+        file_io.create_df_kernel_top_stats(
+            d[0],
+            runs[d[0]].filter_gpu_ids,
+            runs[d[0]].filter_dispatch_ids,
+            args.time_unit,
+            num_results,
+        )
+        runs[d[0]].raw_pmc = file_io.create_df_pmc(d[0])  # creates mega dataframe
+        is_gui = False
+        parser.load_table_data(
+            runs[d[0]], d[0], is_gui, args.g, args.verbose
+        )  # create the loaded table
+    if args.list_kernels:
+        tty.show_kernels(runs, archConfigs["gfx90a"], output, args.decimal)
+    else:
+        tty.show_all(
+            runs,
+            archConfigs["gfx90a"],
+            output,
+            args.decimal,
+            args.time_unit,
+            args.cols,
+        )
+
+
+def analyze(args):
+    if args.dependency:
+        print("pip3 install astunparse numpy tabulate pandas pyyaml")
+        sys.exit(0)
+
+    # NB: maybe create bak file for the old run before open it
+    global output
+    output = open(args.output_file, "w+") if args.output_file else sys.stdout
+
+    # Initalize archConfigs and runs[]
+    runs = initialize_run(args)
+
     # Filtering
     if args.gpu_kernel:
         for d, gk in zip(args.path, args.gpu_kernel):
@@ -140,14 +230,12 @@ def omniperf_cli(args):
                     )
                     sys.exit(2)
             runs[d[0]].filter_kernel_ids = gk
-
     if args.gpu_id:
         if len(args.gpu_id) == 1 and len(args.path) != 1:
             for i in range(len(args.path) - 1):
                 args.gpu_id.extend(args.gpu_id)
         for d, gi in zip(args.path, args.gpu_id):
             runs[d[0]].filter_gpu_ids = gi
-    # NOTE: INVALID DISPATCH IDS ARE NOT CAUGHT HERE. THEY CAUSE AN ERROR IN TABLE GENERATION!!!!!!!!!
     if args.gpu_dispatch_id:
         if len(args.gpu_dispatch_id) == 1 and len(args.path) != 1:
             for i in range(len(args.path) - 1):
@@ -155,76 +243,8 @@ def omniperf_cli(args):
         for d, gd in zip(args.path, args.gpu_dispatch_id):
             runs[d[0]].filter_dispatch_ids = gd
 
+    # Launch CLI analysis or GUI
     if args.gui:
-        import dash
-        from omniperf_cli.utils import gui
-        import dash_bootstrap_components as dbc
-
-        app = dash.Dash(__name__, external_stylesheets=[dbc.themes.CYBORG])
-
-        if len(runs) == 1:
-            num_results = 10
-            file_io.create_df_kernel_top_stats(
-                args.path[0][0],
-                runs[args.path[0][0]].filter_gpu_ids,
-                runs[args.path[0][0]].filter_dispatch_ids,
-                args.time_unit,
-                num_results,
-            )
-            runs[args.path[0][0]].raw_pmc = file_io.create_df_pmc(
-                args.path[0][0]
-            )  # create mega df
-            is_gui = False
-            parser.load_kernel_top(runs[args.path[0][0]], args.path[0][0])
-
-            input_filters = {
-                "kernel": runs[args.path[0][0]].filter_kernel_ids,
-                "gpu": runs[args.path[0][0]].filter_gpu_ids,
-                "dispatch": runs[args.path[0][0]].filter_dispatch_ids,
-            }
-
-            gui.build_layout(
-                app,
-                runs,
-                archConfigs["gfx90a"],
-                input_filters,
-                args.decimal,
-                args.time_unit,
-                args.cols,
-                str(args.path[0][0]),
-                args.g,
-                args.verbose,
-            )
-            app.run_server(debug=False, host="0.0.0.0", port=args.gui)
-        else:
-            print("Multiple runs not supported yet")
+        run_gui(args, runs)
     else:
-        # NB:
-        # If we assume the panel layout for all archs are similar, it doesn't matter
-        # which archConfig passed into show_all function.
-        # After decide to how to manage kernels display patterns, we can revisit it.
-        for d in args.path:
-            num_results = 10
-            file_io.create_df_kernel_top_stats(
-                d[0],
-                runs[d[0]].filter_gpu_ids,
-                runs[d[0]].filter_dispatch_ids,
-                args.time_unit,
-                num_results,
-            )
-            runs[d[0]].raw_pmc = file_io.create_df_pmc(d[0])  # creates mega dataframe
-            is_gui = False
-            parser.load_table_data(
-                runs[d[0]], d[0], is_gui, args.g, args.verbose
-            )  # create the loaded table
-        if args.list_kernels:
-            tty.show_kernels(runs, archConfigs["gfx90a"], output, args.decimal)
-        else:
-            tty.show_all(
-                runs,
-                archConfigs["gfx90a"],
-                output,
-                args.decimal,
-                args.time_unit,
-                args.cols,
-            )
+        run_cli(args, runs)

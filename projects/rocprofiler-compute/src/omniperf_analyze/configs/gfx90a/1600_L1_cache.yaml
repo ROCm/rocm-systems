@@ -25,8 +25,8 @@ Panel Config:
               != 0) else None))
             tips: 
           Cache BW:
-            value: AVG(((100 * TCP_TOTAL_CACHE_ACCESSES_sum) / ((GRBM_GUI_ACTIVE * $numCU)
-              * 4)))
+            value: ((100 * AVG(((TCP_TOTAL_CACHE_ACCESSES_sum * 64) / (EndNs - BeginNs))))
+              / ((($sclk / 1000) * 64) * $numCU))
             tips: 
           Cache Hit:
             value: AVG(((100 - ((100 * (((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum)

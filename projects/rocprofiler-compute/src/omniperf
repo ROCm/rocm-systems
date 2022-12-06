@@ -37,7 +37,7 @@ from utils.perfagg import perfmon_filter, pmc_filter
 from utils import remove_workload
 from utils import csv_converter  # Import workload
 from utils import plot_roofline  # standalone roofline
-from omniperf_cli.omniperf_cli import omniperf_cli  # CLI analysis
+from omniperf_analyze.omniperf_analyze import analyze  # CLI analysis
 
 from common import (
     OMNIPERF_HOME,
@@ -76,6 +76,7 @@ def resolve_rocprof():
         sys.exit(1)
 
     print("ROC Profiler: ", rocprof_path.stdout.decode("utf-8"))
+
 
 def get_soc():
     mspec = specs.get_machine_specs(0)
@@ -183,8 +184,6 @@ def gen_sysinfo(workload_name, workload_dir, ip_blocks, app_cmd, skip_roof):
         if not skip_roof:
             blocks.append("roofline")
 
-
-
     # ip block info
     if ip_blocks == None:
         t = ["SQ", "LDS", "SQC", "TA", "TD", "TCP", "TCC", "SPI", "CPC", "CPF"]
@@ -205,9 +204,11 @@ def mongo_import(args, profileAndImport):
     csv_converter.convert_folder(connectionInfo, Extractionlvl)
     print("-- Complete! --")
 
+
 ################################################
 # Roofline Helpers
 ################################################
+
 
 def detect_roofline():
     mspec = specs.get_machine_specs(0)
@@ -222,7 +223,7 @@ def detect_roofline():
         rooflineBinary = os.environ["ROOFLINE_BIN"]
         if os.path.exists(rooflineBinary):
             print("Detected user-supplied binary")
-            return {"rocm_ver":"override", "distro":"override", "path":rooflineBinary}
+            return {"rocm_ver": "override", "distro": "override", "path": rooflineBinary}
         else:
             print("ROOFLINE ERROR: user-supplied path to binary not accessible")
             print("--> ROOFLINE_BIN = %s\n" % target_binary)
@@ -240,23 +241,31 @@ def detect_roofline():
         print("ROOFLINE ERROR: Cannot find a valid binary for your operating system")
         sys.exit(1)
 
-    target_binary = { "rocm_ver":rocm_ver, "distro":distro }
+    target_binary = {"rocm_ver": rocm_ver, "distro": distro}
     return target_binary
+
 
 def mibench(args):
     print("No roofline data found. Generating...")
-    
+
     target_binary = detect_roofline()
     if target_binary["rocm_ver"] == "override":
         path_to_binary = target_binary["path"]
     else:
-        path_to_binary = str(OMNIPERF_HOME) + "/utils/rooflines/roofline" + "-" + DISTRO_MAP[target_binary["distro"]] + "-" + args.target.lower() + "-rocm" + target_binary["rocm_ver"]
+        path_to_binary = (
+            str(OMNIPERF_HOME)
+            + "/utils/rooflines/roofline"
+            + "-"
+            + DISTRO_MAP[target_binary["distro"]]
+            + "-"
+            + args.target.lower()
+            + "-rocm"
+            + target_binary["rocm_ver"]
+        )
 
     # Distro is valid but cant find rocm ver
     if not os.path.exists(path_to_binary):
-        print(
-            "ROOFLINE ERROR: ROCm version not supported."
-        )
+        print("ROOFLINE ERROR: Unable to locate expected binary (%s)." % path_to_binary)
         sys.exit(1)
 
     run_subprocess(
@@ -285,6 +294,7 @@ def characterize_app(path, cmd, verbose):
     for fname in glob.glob(workload_dir + "/perfmon/*.txt"):
         print(fname)
         run_prof(fname, workload_dir, perfmon_dir, app_cmd, verbose)
+
 
 ################################################
 # Profiling Helpers
@@ -316,7 +326,7 @@ def run_prof(fname, workload_dir, perfmon_dir, cmd, verbose):
     )
 
 
-def omniperf_profile(args,VER):
+def omniperf_profile(args, VER):
     # Verify valid target
     if args.target not in SOC_LIST:
         parse.print_help(sys.stderr)
@@ -396,11 +406,21 @@ def omniperf_profile(args,VER):
             if target_binary["rocm_ver"] == "override":
                 path_to_binary = target_binary["path"]
             else:
-                path_to_binary = str(OMNIPERF_HOME) + "/utils/rooflines/roofline" + "-" + DISTRO_MAP[target_binary["distro"]] + "-" + args.target.lower() + "-rocm" + target_binary["rocm_ver"]
-            # Distro is valid but cant find rocm ver
+                path_to_binary = (
+                    str(OMNIPERF_HOME)
+                    + "/utils/rooflines/roofline"
+                    + "-"
+                    + DISTRO_MAP[target_binary["distro"]]
+                    + "-"
+                    + args.target.lower()
+                    + "-rocm"
+                    + target_binary["rocm_ver"]
+                )
+            # Distro is valid but cant find valid binary
             if not os.path.exists(path_to_binary):
                 print(
-                    "ROOFLINE ERROR: ROCm version not supported."
+                    "ROOFLINE ERROR: Unable to locate expected binary (%s))."
+                    % path_to_binary
                 )
                 sys.exit(1)
 
@@ -413,6 +433,7 @@ def omniperf_profile(args,VER):
                     str(args.device),
                 ]
             )
+
 
 ################################################
 # MAIN
@@ -432,7 +453,7 @@ def main():
     args = my_parser.parse_args()
 
     vData = getVersion()
-    VER   = vData['version']
+    VER = vData["version"]
 
     if args.mode == None:
         throw_parse_error(
@@ -532,7 +553,7 @@ def main():
         # Profile only
         else:
             print("\n-------------\nProfile only\n-------------\n")
-            omniperf_profile(args,VER)
+            omniperf_profile(args, VER)
 
     ##############
     # DATABASE MODE
@@ -593,7 +614,7 @@ def main():
     ##############
     if args.mode == "analyze":
         if args.list_metrics:
-            omniperf_cli(args)
+            analyze(args)
         else:
             if args.path:
                 if ".." in str(args.path):
@@ -617,7 +638,7 @@ def main():
                         my_parser, dir[0]
                     )  # Verify workload is valid before analyzing
 
-                omniperf_cli(args)
+                analyze(args)
             else:
                 throw_parse_error(
                     my_parser,
