@@ -30,6 +30,7 @@ import glob
 import pandas as pd
 from datetime import datetime
 from pathlib import Path as path
+import warnings
 
 from parser import parse
 from utils import specs
@@ -51,6 +52,12 @@ from common import getVersion
 ################################################
 # Helper Functions
 ################################################
+def run_subprocess(cmd):
+    subprocess.run(
+        cmd,
+        check=True
+    )
+
 def resolve_rocprof():
     # ROCPROF INFO
     global rocprof_cmd
@@ -109,11 +116,14 @@ def isWorkloadEmpty(my_parser, path):
 
 def replace_timestamps(workload_dir):
     df_stamps = pd.read_csv(workload_dir + "/timestamps.csv")
-    df_pmc_perf = pd.read_csv(workload_dir + "/pmc_perf.csv")
+    if "BeginNs" in df_stamps.columns and "EndNs" in df_stamps.columns:
+        df_pmc_perf = pd.read_csv(workload_dir + "/pmc_perf.csv")
 
-    df_pmc_perf["BeginNs"] = df_stamps["BeginNs"]
-    df_pmc_perf["EndNs"] = df_stamps["EndNs"]
-    df_pmc_perf.to_csv(workload_dir + "/pmc_perf.csv", index=False)
+        df_pmc_perf["BeginNs"] = df_stamps["BeginNs"]
+        df_pmc_perf["EndNs"] = df_stamps["EndNs"]
+        df_pmc_perf.to_csv(workload_dir + "/pmc_perf.csv", index=False)
+    else:
+        warnings.warn("WARNING: Incomplete profiling data detected. Unable to update timestamps.")
 
 
 def gen_sysinfo(workload_name, workload_dir, ip_blocks, app_cmd, skip_roof):
@@ -262,7 +272,7 @@ def mibench(args):
         print("ROOFLINE ERROR: Unable to locate expected binary (%s)." % path_to_binary)
         sys.exit(1)
 
-    subprocess.run(
+    run_subprocess(
         [
             path_to_binary,
             "-o",
@@ -304,7 +314,7 @@ def run_prof(fname, workload_dir, perfmon_dir, cmd, verbose):
         print("pmc file:", os.path.basename(fname))
 
     # profile the app
-    subprocess.run(
+    run_subprocess(
         [
             rocprof_cmd,
             "-i",
@@ -349,7 +359,7 @@ def omniperf_profile(args, VER):
     for fname in glob.glob(workload_dir + "/perfmon/*.txt"):
         # Kernel filtering (in-place replacement)
         if not args.kernel == None:
-            subprocess.run(
+            run_subprocess(
                 [
                     "sed",
                     "-i",
@@ -361,7 +371,7 @@ def omniperf_profile(args, VER):
 
         # Dispatch filtering (inplace replacement)
         if not args.dispatch == None:
-            subprocess.run(
+            run_subprocess(
                 [
                     "sed",
                     "-i",
@@ -373,7 +383,7 @@ def omniperf_profile(args, VER):
         run_prof(fname, workload_dir, perfmon_dir, args.remaining, args.verbose)
 
     # run again with timestamps
-    subprocess.run(
+    run_subprocess(
         [
             rocprof_cmd,
             # "-i", fname,
@@ -418,7 +428,7 @@ def omniperf_profile(args, VER):
                 )
                 sys.exit(1)
 
-            subprocess.run(
+            run_subprocess(
                 [
                     path_to_binary,
                     "-o",
