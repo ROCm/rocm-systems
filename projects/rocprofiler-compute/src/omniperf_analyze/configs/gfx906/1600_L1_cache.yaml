@@ -130,6 +130,12 @@ Panel Config:
               / $denom))
             unit: (Req  + $normUnit)
             tips: 
+          Cache BW:
+            avg: AVG(((TCP_TOTAL_CACHE_ACCESSES_sum * 64) / (EndNs - BeginNs)))
+            min: MIN(((TCP_TOTAL_CACHE_ACCESSES_sum * 64) / (EndNs - BeginNs)))
+            max: MAX(((TCP_TOTAL_CACHE_ACCESSES_sum * 64) / (EndNs - BeginNs)))
+            unit: GB/s
+            tips:
           Cache Accesses:
             avg: AVG((TCP_TOTAL_CACHE_ACCESSES_sum / $denom))
             min: MIN((TCP_TOTAL_CACHE_ACCESSES_sum / $denom))
@@ -169,7 +175,13 @@ Panel Config:
             max: MAX((TCP_TOTAL_WRITEBACK_INVALIDATES_sum / $denom))
             unit: ( + $normUnit)
             tips: 
-          L1-TCR Read:
+          L1-L2 BW:
+            avg: AVG(((64 * (TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / $denom))
+            min: MIN(((64 * (TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / $denom))
+            max: MAX(((64 * (TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / $denom))
+            unit: (Bytes + $normUnit)
+            tips:
+          L1-L2 Read:
             avg: AVG((TCP_TCC_READ_REQ_sum / $denom))
             min: MIN((TCP_TCC_READ_REQ_sum / $denom))
             max: MAX((TCP_TCC_READ_REQ_sum / $denom))
