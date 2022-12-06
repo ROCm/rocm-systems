@@ -36,7 +36,7 @@
 #include <sstream>
 #include <string>
 
-#include <cxxabi.h>
+#include <amd_comgr/amd_comgr.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
@@ -103,14 +103,34 @@ std::string truncate_name(const std::string& name) {
   return name.substr(rend - rit, rit - rbeg);
 }
 
+#define amd_comgr_(call)                                                                           \
+  do {                                                                                             \
+    if (amd_comgr_status_t status = amd_comgr_##call; status != AMD_COMGR_STATUS_SUCCESS) {        \
+      const char* reason = "";                                                                     \
+      amd_comgr_status_string(status, &reason);                                                    \
+      fatal(#call " failed: %s", reason);                                                          \
+    }                                                                                              \
+  } while (false)
+
 // C++ symbol demangle
 std::string cxx_demangle(const std::string& symbol) {
-  int status;
-  char* demangled = abi::__cxa_demangle(symbol.c_str(), nullptr, nullptr, &status);
-  if (status != 0) return symbol;
-  std::string ret(demangled);
-  free(demangled);
-  return ret;
+  amd_comgr_data_t mangled_data;
+  amd_comgr_(create_data(AMD_COMGR_DATA_KIND_BYTES, &mangled_data));
+  amd_comgr_(set_data(mangled_data, symbol.size(), symbol.data()));
+
+  amd_comgr_data_t demangled_data;
+  amd_comgr_(demangle_symbol_name(mangled_data, &demangled_data));
+
+  size_t demangled_size = 0;
+  amd_comgr_(get_data(demangled_data, &demangled_size, nullptr));
+
+  std::string demangled_str;
+  demangled_str.resize(demangled_size);
+  amd_comgr_(get_data(demangled_data, &demangled_size, demangled_str.data()));
+
+  amd_comgr_(release_data(mangled_data));
+  amd_comgr_(release_data(demangled_data));
+  return demangled_str;
 }
 
 class file_plugin_t {

@@ -20,6 +20,14 @@
 ## IN THE SOFTWARE.
 ################################################################################
 
+find_package(amd_comgr REQUIRED CONFIG
+  PATHS
+    /opt/rocm/
+  PATH_SUFFIXES
+    lib/cmake/amd_comgr
+)
+MESSAGE(STATUS "Code Object Manager found at ${amd_comgr_DIR}.")
+
 file(GLOB FILE_SOURCES "*.cpp")
 add_library(file_plugin ${LIBRARY_TYPE} ${FILE_SOURCES})
 
@@ -35,7 +43,7 @@ target_include_directories(file_plugin PRIVATE ${PROJECT_SOURCE_DIR}/inc)
 
 target_link_options(file_plugin PRIVATE -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/../exportmap -Wl,--no-undefined)
 
-target_link_libraries(file_plugin PRIVATE util roctracer hsa-runtime64::hsa-runtime64 stdc++fs)
+target_link_libraries(file_plugin PRIVATE util roctracer  amd_comgr hsa-runtime64::hsa-runtime64 stdc++fs amd_comgr)
 
 install(TARGETS file_plugin LIBRARY
         DESTINATION ${CMAKE_INSTALL_LIBDIR}/${PROJECT_NAME}
