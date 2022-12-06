@@ -129,7 +129,13 @@ Panel Config:
             max: MAX(((TCP_TOTAL_ATOMIC_WITH_RET_sum + TCP_TOTAL_ATOMIC_WITHOUT_RET_sum)
               / $denom))
             unit: (Req  + $normUnit)
-            tips: 
+            tips:
+          Cache BW:
+            avg: AVG(((TCP_TOTAL_CACHE_ACCESSES_sum * 64) / (EndNs - BeginNs)))
+            min: MIN(((TCP_TOTAL_CACHE_ACCESSES_sum * 64) / (EndNs - BeginNs)))
+            max: MAX(((TCP_TOTAL_CACHE_ACCESSES_sum * 64) / (EndNs - BeginNs)))
+            unit: GB/s
+            tips:
           Cache Accesses:
             avg: AVG((TCP_TOTAL_CACHE_ACCESSES_sum / $denom))
             min: MIN((TCP_TOTAL_CACHE_ACCESSES_sum / $denom))
