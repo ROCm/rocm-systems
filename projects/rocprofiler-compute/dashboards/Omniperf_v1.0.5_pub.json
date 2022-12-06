@@ -24,8 +24,8 @@
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
-  "id": 39,
-  "iteration": 1669660765918,
+  "id": 41,
+  "iteration": 1670355676329,
   "links": [],
   "liveNow": false,
   "panels": [
@@ -190,8 +190,7 @@
                 "mode": "absolute",
                 "steps": [
                   {
-                    "color": "text",
-                    "value": null
+                    "color": "text"
                   }
                 ]
               },
@@ -214,8 +213,7 @@
                       "mode": "absolute",
                       "steps": [
                         {
-                          "color": "transparent",
-                          "value": null
+                          "color": "transparent"
                         },
                         {
                           "color": "orange",
@@ -414,8 +412,7 @@
                 "mode": "absolute",
                 "steps": [
                   {
-                    "color": "green",
-                    "value": null
+                    "color": "green"
                   },
                   {
                     "color": "red",
@@ -500,8 +497,7 @@
                 "mode": "absolute",
                 "steps": [
                   {
-                    "color": "green",
-                    "value": null
+                    "color": "green"
                   },
                   {
                     "color": "red",
@@ -6967,7 +6963,7 @@
       "type": "row"
     },
     {
-      "collapsed": true,
+      "collapsed": false,
       "datasource": {
         "type": "amd-miperf-data-plugin",
         "uid": "oVK0I__nk"
@@ -6979,729 +6975,7 @@
         "y": 14
       },
       "id": 112,
-      "panels": [
-        {
-          "fieldConfig": {
-            "defaults": {
-              "color": {
-                "mode": "thresholds"
-              },
-              "decimals": 1,
-              "mappings": [],
-              "max": 100,
-              "min": 0,
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {
-                    "color": "green",
-                    "value": null
-                  },
-                  {
-                    "color": "#EAB839",
-                    "value": 50
-                  },
-                  {
-                    "color": "red",
-                    "value": 90
-                  }
-                ]
-              },
-              "unit": "percent"
-            },
-            "overrides": []
-          },
-          "gridPos": {
-            "h": 13,
-            "w": 12,
-            "x": 0,
-            "y": 15
-          },
-          "id": 165,
-          "options": {
-            "displayMode": "gradient",
-            "minVizHeight": 10,
-            "minVizWidth": 0,
-            "orientation": "horizontal",
-            "reduceOptions": {
-              "calcs": [
-                "lastNotNull"
-              ],
-              "fields": "",
-              "values": false
-            },
-            "showUnfilled": true,
-            "text": {}
-          },
-          "pluginVersion": "8.3.4",
-          "targets": [
-            {
-              "datasource": {
-                "type": "amd-miperf-data-plugin",
-                "uid": "Zzw1yR27k"
-              },
-              "rawQuery": true,
-              "refId": "A",
-              "target": "${Workload1}.pmc_perf.aggregate([\n  {\"$match\": {\n    \"Index\": { \"$in\": [${DispatchIDFilter:raw}] },\n    \"gpu-id\": { \"$in\": [${gpuFilter:raw}] },\n    \"KernelName\": { \"$in\": ${KernelNameFilter:json}}\n  }},\n    {\"$group\": {\n        \"_id\": null,\n        \"bufferCoalescing_pct\": {\n            \"$avg\": {\n                \"$cond\": [  {\"$ne\": [\"&TCP_TOTAL_ACCESSES_sum\", 0] },\n                            { \"$divide\": [{\"$multiply\": [\"&TA_TOTAL_WAVEFRONTS_sum\", 64, 100]}, {\"$multiply\": [\"&TCP_TOTAL_ACCESSES_sum\", 4]}] },\n                            null\n                ]\n            }\n        },\n        \"cacheUtil_pct\": {\n            \"$avg\": {\n                \"$cond\": [  {\"$ne\": [\"&TCP_GATE_EN1_sum\", 0] },\n                            { \"$divide\": [{\"$multiply\": [\"&TCP_GATE_EN2_sum\", 100]}, \"&TCP_GATE_EN1_sum\"] },\n                            null\n                ]\n            }\n        },\n        \n        \"cacheBW_pct\": {\n            \"$avg\": { \"$divide\": [ {\"$multiply\":[64, \"&TCP_TOTAL_CACHE_ACCESSES_sum\"]}, \n                                   {\"$subtract\":[\"&EndNs\", \"&BeginNs\"]} \n                                 ] \n            }\n        },\n        \"cacheHit_pct\": {\n            \"$avg\": {\n                \"$cond\": [  {\"$ne\": [\"&TCP_TOTAL_CACHE_ACCESSES_sum\", 0] },\n                            { \"$subtract\": [100, \n                                            { \"$divide\": [ \n                                                { \"$multiply\": [100, \n                                                                { \"$add\": [\"&TCP_TCC_READ_REQ_sum\", \"&TCP_TCC_WRITE_REQ_sum\", \"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"] }\n                                                                ] \n                                                }, \n                                                \"&TCP_TOTAL_CACHE_ACCESSES_sum\"\n                                                ]\n                                            }] \n                            },\n                            null\n                ]\n            }\n        }\n    }},\n  {\"$set\": {\n    \"array\": [\n        {\n          \"Buffer Coalescing\": \"&bufferCoalescing_pct\",\n          \"Cache Util\": \"&cacheUtil_pct\",\n          \"Cache BW\": { \"$divide\": [{ \"$multiply\": [100, \"&cacheBW_pct\"] }, { \"$multiply\": [ { \"$multiply\": [{ \"$divide\": [$sclk, 1000] }, 64] }, $numCU]}] },\n          \"Cache Hit\": \"&cacheHit_pct\"\n     }\n      ]\n  }},\n  {\"$unwind\": {\n    \"path\": \"&array\"\n  }},\n  {\"$replaceRoot\": {\n    \"newRoot\": \"&array\"\n  }}\n]);",
-              "type": "table"
-            },
-            {
-              "datasource": {
-                "type": "amd-miperf-data-plugin",
-                "uid": "Zzw1yR27k"
-              },
-              "hide": false,
-              "rawQuery": true,
-              "refId": "B",
-              "target": "${Workload2}.pmc_perf.aggregate([\n  {\"$match\": {\n    \"Index\": { \"$in\": [${DispatchIDFilter2:raw}] },\n    \"gpu-id\": { \"$in\": [${gpuFilter2:raw}] },\n    \"KernelName\": { \"$in\": ${KernelNameFilter2:json}},\n    \"$expr\":{\"$regexMatch\": {\"input\":\"${select}\",\"regex\":\"(Vector L1D Cache)\"}}\n  }},\n    {\"$group\": {\n        \"_id\": null,\n        \"bufferCoalescing_pct\": {\n            \"$avg\": {\n                \"$cond\": [  {\"$ne\": [\"&TCP_TOTAL_ACCESSES_sum\", 0] },\n                            { \"$divide\": [{\"$multiply\": [\"&TA_TOTAL_WAVEFRONTS_sum\", 64, 100]}, {\"$multiply\": [\"&TCP_TOTAL_ACCESSES_sum\", 4]}] },\n                            null\n                ]\n            }\n        },\n        \"cacheUtil_pct\": {\n            \"$avg\": {\n                \"$cond\": [  {\"$ne\": [\"&TCP_GATE_EN1_sum\", 0] },\n                            { \"$divide\": [{\"$multiply\": [\"&TCP_GATE_EN2_sum\", 100]}, \"&TCP_GATE_EN1_sum\"] },\n                            null\n                ]\n            }\n        },\n        \"cacheBW_pct\": {\n          \"$avg\": { \"$divide\": [ {\"$multiply\":[64, \"&TCP_TOTAL_CACHE_ACCESSES_sum\"]}, \n                    {\"$subtract\":[\"&EndNs\", \"&BeginNs\"]} \n                  ] \n          }\n        },\n        \"cacheHit_pct\": {\n            \"$avg\": {\n                \"$cond\": [  {\"$ne\": [\"&TCP_TOTAL_CACHE_ACCESSES_sum\", 0] },\n                            { \"$subtract\": [100, \n                                            { \"$divide\": [ \n                                                { \"$multiply\": [100, \n                                                                { \"$add\": [\"&TCP_TCC_READ_REQ_sum\", \"&TCP_TCC_WRITE_REQ_sum\", \"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"] }\n                                                                ] \n                                                }, \n                                                \"&TCP_TOTAL_CACHE_ACCESSES_sum\"\n                                                ]\n                                            }] \n                            },\n                            null\n                ]\n            }\n        }\n    }},\n  {\"$set\": {\n    \"array\": [\n        {\n          \"Buffer Coalescing\": \"&bufferCoalescing_pct\",\n          \"Cache Util\": \"&cacheUtil_pct\",\n          \"Cache BW\": { \"$divide\": [{ \"$multiply\": [100, \"&cacheBW_pct\"] }, { \"$multiply\": [ { \"$multiply\": [{ \"$divide\": [$sclk2, 1000] }, 64] }, $numCU2]}] },\n          \"Cache Hit\": \"&cacheHit_pct\"\n     }\n      ]\n  }},\n  {\"$unwind\": {\n    \"path\": \"&array\"\n  }},\n  {\"$replaceRoot\": {\n    \"newRoot\": \"&array\"\n  }}\n]);",
-              "type": "table"
-            }
-          ],
-          "title": "Speed-of-Light: Vector L1D Cache",
-          "transformations": [
-            {
-              "id": "concatenate",
-              "options": {}
-            },
-            {
-              "id": "organize",
-              "options": {
-                "excludeByName": {},
-                "indexByName": {
-                  "128B Read Combining 1": 6,
-                  "128B Read Combining 2": 7,
-                  "Buffer Coalescing 1": 0,
-                  "Buffer Coalescing 2": 1,
-                  "Cache BW 1": 2,
-                  "Cache BW 2": 3,
-                  "Cache Hit 1": 4,
-                  "Cache Hit 2": 5
-                },
-                "renameByName": {
-                  "128B Read Combining 1": "128B Read Combining (Current)",
-                  "128B Read Combining 2": "128B Read Combining(Baseline)",
-                  "Buffer Coalescing 1": "Buf Coalescing (Current)",
-                  "Buffer Coalescing 2": "Buf Coalescing (Baseline)",
-                  "Cache BW 1": "Cache BW (Current)",
-                  "Cache BW 2": "Cache BW (Baseline)",
-                  "Cache Hit 1": "Cache Hit (Current)",
-                  "Cache Hit 2": "Cache Hit (Baseline)",
-                  "Cache Util 1": "Cache Util (Current)",
-                  "Cache Util 2": "Cache Util (Baseline)"
-                }
-              }
-            }
-          ],
-          "transparent": true,
-          "type": "bargauge"
-        },
-        {
-          "datasource": {},
-          "fieldConfig": {
-            "defaults": {
-              "color": {
-                "mode": "thresholds"
-              },
-              "custom": {
-                "align": "auto",
-                "displayMode": "color-background"
-              },
-              "decimals": 1,
-              "mappings": [],
-              "max": 100,
-              "thresholds": {
-                "mode": "percentage",
-                "steps": [
-                  {
-                    "color": "transparent",
-                    "value": null
-                  },
-                  {
-                    "color": "#EAB839",
-                    "value": 50
-                  },
-                  {
-                    "color": "red",
-                    "value": 80
-                  }
-                ]
-              },
-              "unit": "percent"
-            },
-            "overrides": [
-              {
-                "matcher": {
-                  "id": "byName",
-                  "options": "unit"
-                },
-                "properties": [
-                  {
-                    "id": "custom.width",
-                    "value": 52
-                  }
-                ]
-              },
-              {
-                "matcher": {
-                  "id": "byName",
-                  "options": "Metric"
-                },
-                "properties": [
-                  {
-                    "id": "custom.width",
-                    "value": 199
-                  }
-                ]
-              },
-              {
-                "matcher": {
-                  "id": "byName",
-                  "options": "Avg (Current)"
-                },
-                "properties": [
-                  {
-                    "id": "custom.width",
-                    "value": 121
-                  }
-                ]
-              },
-              {
-                "matcher": {
-                  "id": "byName",
-                  "options": "Avg (Baseline)"
-                },
-                "properties": [
-                  {
-                    "id": "custom.width",
-                    "value": 144
-                  }
-                ]
-              }
-            ]
-          },
-          "gridPos": {
-            "h": 13,
-            "w": 12,
-            "x": 12,
-            "y": 15
-          },
-          "id": 116,
-          "options": {
-            "footer": {
-              "fields": "",
-              "reducer": [
-                "sum"
-              ],
-              "show": false
-            },
-            "showHeader": true,
-            "sortBy": []
-          },
-          "pluginVersion": "8.3.4",
-          "targets": [
-            {
-              "datasource": {
-                "type": "amd-miperf-data-plugin",
-                "uid": "Zzw1yR27k"
-              },
-              "rawQuery": true,
-              "refId": "A",
-              "target": "${Workload1}.pmc_perf.aggregate([\n    {\"$match\": {\n        \"Index\": { \"$in\": [${DispatchIDFilter:raw}] },\n        \"gpu-id\": { \"$in\": [${gpuFilter:raw}] },\n        \"KernelName\": { \"$in\": ${KernelNameFilter:json}}\n    }},\n    {\"$group\": {\n        \"_id\": null,\n\n            \"l2Pending_avg\": {\"$avg\": {\n                \"$cond\":[\n                    {\"$ne\": [\"&TCP_GATE_EN1_sum\", 0]}, \n                    {\"$divide\": [ { \"$multiply\": [100, \"&TCP_PENDING_STALL_CYCLES_sum\"] }, \"&TCP_GATE_EN1_sum\"] },\n                    null\n                ]\n            }},\n            \"l2Pending_min\": {\"$min\": {\n                \"$cond\":[\n                    {\"$ne\": [\"&TCP_GATE_EN1_sum\", 0]}, \n                    {\"$divide\": [ { \"$multiply\": [100, \"&TCP_PENDING_STALL_CYCLES_sum\"] }, \"&TCP_GATE_EN1_sum\"] },\n                    null\n                ]\n            }},\n            \"l2Pending_max\": {\"$max\": {\n                \"$cond\":[\n                    {\"$ne\": [\"&TCP_GATE_EN1_sum\", 0]}, \n                    {\"$divide\": [ { \"$multiply\": [100, \"&TCP_PENDING_STALL_CYCLES_sum\"] }, \"&TCP_GATE_EN1_sum\"] },\n                    null\n                ]\n            }},\n\n\n            \"tcr2tcp_Stall_avg\":{\"$avg\":{\n                \"$cond\":[\n                    {\"$ne\": [\"&TCP_GATE_EN1_sum\", 0]}, \n                    {\"$divide\": [ { \"$multiply\": [100, \"&TCP_TCR_TCP_STALL_CYCLES_sum\"] }, \"&TCP_GATE_EN1_sum\"] },\n                    null\n                ]\n            }},\n            \"tcr2tcp_Stall_min\":{\"$min\":{\n                \"$cond\":[\n                    {\"$ne\": [\"&TCP_GATE_EN1_sum\", 0]}, \n                    {\"$divide\": [ { \"$multiply\": [100, \"&TCP_TCR_TCP_STALL_CYCLES_sum\"] }, \"&TCP_GATE_EN1_sum\"] },\n                    null\n                ]\n            }},\n            \"tcr2tcp_Stall_max\":{\"$max\":{\n                \"$cond\":[\n                    {\"$ne\": [\"&TCP_GATE_EN1_sum\", 0]}, \n                    {\"$divide\": [ { \"$multiply\": [100, \"&TCP_TCR_TCP_STALL_CYCLES_sum\"] }, \"&TCP_GATE_EN1_sum\"] },\n                    null\n                ]\n            }},\n             \n            \"readTagRam_Stall_avg\": {\"$avg\":{\n                \"$cond\":[\n                    {\"$ne\": [\"&TCP_GATE_EN1_sum\", 0]}, \n                    {\"$divide\": [ { \"$multiply\": [100, \"&TCP_READ_TAGCONFLICT_STALL_CYCLES_sum\"] }, \"&TCP_GATE_EN1_sum\"]},\n                    null\n                ]\n            }},\n            \"readTagRam_Stall_min\": {\"$min\":{\n                \"$cond\":[\n                    {\"$ne\": [\"&TCP_GATE_EN1_sum\", 0]}, \n                    {\"$divide\": [ { \"$multiply\": [100, \"&TCP_READ_TAGCONFLICT_STALL_CYCLES_sum\"] }, \"&TCP_GATE_EN1_sum\"]},\n                    null\n                ]\n            }},\n            \"readTagRam_Stall_max\": {\"$max\":{\n                \"$cond\":[\n                    {\"$ne\": [\"&TCP_GATE_EN1_sum\", 0]}, \n                    {\"$divide\": [ { \"$multiply\": [100, \"&TCP_READ_TAGCONFLICT_STALL_CYCLES_sum\"] }, \"&TCP_GATE_EN1_sum\"]},\n                    null\n                ]\n            }},\n            \n            \"writeTagRam_Stall_avg\": {\"$avg\":{\n                \"$cond\":[\n                    {\"$ne\": [\"&TCP_GATE_EN1_sum\", 0]}, \n                    {\"$divide\": [ { \"$multiply\": [100, \"&TCP_WRITE_TAGCONFLICT_STALL_CYCLES_sum\"] }, \"&TCP_GATE_EN1_sum\"] },\n                    null\n                ]\n            }},\n            \"writeTagRam_Stall_min\": {\"$min\":{\n                \"$cond\":[\n                    {\"$ne\": [\"&TCP_GATE_EN1_sum\", 0]}, \n                    {\"$divide\": [ { \"$multiply\": [100, \"&TCP_WRITE_TAGCONFLICT_STALL_CYCLES_sum\"] }, \"&TCP_GATE_EN1_sum\"] },\n                    null\n                ]\n            }},\n            \"writeTagRam_Stall_max\": {\"$max\":{\n                \"$cond\":[\n                    {\"$ne\": [\"&TCP_GATE_EN1_sum\", 0]}, \n                    {\"$divide\": [ { \"$multiply\": [100, \"&TCP_WRITE_TAGCONFLICT_STALL_CYCLES_sum\"] }, \"&TCP_GATE_EN1_sum\"] },\n                    null\n                ]\n            }},\n            \n            \n            \"atomicTagRam_Stall_avg\":{\"$avg\":{\n                \"$cond\":[\n                    {\"$ne\": [\"&TCP_GATE_EN1_sum\", 0]}, \n                    {\"$divide\": [ { \"$multiply\": [100, \"&TCP_ATOMIC_TAGCONFLICT_STALL_CYCLES_sum\"] }, \"&TCP_GATE_EN1_sum\"] },\n                    null\n                ]\n            }}, \n            \"atomicTagRam_Stall_min\":{\"$min\":{\n                \"$cond\":[\n                    {\"$ne\": [\"&TCP_GATE_EN1_sum\", 0]}, \n                    {\"$divide\": [ { \"$multiply\": [100, \"&TCP_ATOMIC_TAGCONFLICT_STALL_CYCLES_sum\"] }, \"&TCP_GATE_EN1_sum\"] },\n                    null\n                ]\n            }}, \n            \"atomicTagRam_Stall_max\":{\"$max\":{\n                \"$cond\":[\n                    {\"$ne\": [\"&TCP_GATE_EN1_sum\", 0]}, \n                    {\"$divide\": [ { \"$multiply\": [100, \"&TCP_ATOMIC_TAGCONFLICT_STALL_CYCLES_sum\"] }, \"&TCP_GATE_EN1_sum\"] },\n                    null\n                ]\n            }} \n\n    }},\n    {\"$set\": {\n        \"array\": [\n            {\n            \"Metric\": \"Stalled on L2 Data\",\n            \"Mean\": \"&l2Pending_avg\",\n            \"Min\":  \"&l2Pending_min\",\n            \"Max\":  \"&l2Pending_max\",\n            \"unit\":\"pct\"\n            },\n            {\n            \"Metric\": \"Stalled on L2 Req\",\n            \"Mean\": \"&tcr2tcp_Stall_avg\",\n            \"Min\":\"&tcr2tcp_Stall_min\",\n            \"Max\":\"&tcr2tcp_Stall_max\",\n            \"unit\":\"pct\"\n            },\n            {\n            \"Metric\": \"Tag RAM Stall (Read)\",\n            \"Mean\": \"&readTagRam_Stall_avg\",\n            \"Min\":  \"&readTagRam_Stall_min\",\n            \"Max\":  \"&readTagRam_Stall_max\",\n            \"unit\":\"pct\"\n            },\n            {\n            \"Metric\": \"Tag RAM Stall (Write)\",\n            \"Mean\": \"&writeTagRam_Stall_avg\",\n            \"Min\":  \"&writeTagRam_Stall_min\",\n            \"Max\":  \"&writeTagRam_Stall_max\",\n            \"unit\":\"pct\"\n            },\n            {\n            \"Metric\": \"Tag RAM Stall (Atomic)\",\n            \"Mean\": \"&atomicTagRam_Stall_avg\",\n            \"Min\":  \"&atomicTagRam_Stall_min\",\n            \"Max\":  \"&atomicTagRam_Stall_max\",\n            \"unit\":\"pct\"\n            }\n        ]\n    }},\n    {\"$unwind\": {\n        \"path\": \"&array\"\n    }},\n    {\"$replaceRoot\": {\n        \"newRoot\": \"&array\"\n    }}\n]);",
-              "type": "table"
-            },
-            {
-              "datasource": {
-                "type": "amd-miperf-data-plugin",
-                "uid": "Zzw1yR27k"
-              },
-              "hide": false,
-              "rawQuery": true,
-              "refId": "B",
-              "target": "${Workload2}.pmc_perf.aggregate([\n    {\"$match\": {\n        \"Index\": { \"$in\": [${DispatchIDFilter2:raw}] },\n        \"gpu-id\": { \"$in\": [${gpuFilter2:raw}] },\n        \"KernelName\": { \"$in\": ${KernelNameFilter2:json}},\n        \"$expr\":{\"$regexMatch\": {\"input\":\"${select}\",\"regex\":\"(Vector L1D Cache)\"}}\n    }},\n    {\"$group\": {\n        \"_id\": null,\n\n            \"l2Pending_avg\": {\"$avg\": {\n                \"$cond\":[\n                    {\"$ne\": [\"&TCP_GATE_EN1_sum\", 0]}, \n                    {\"$divide\": [ { \"$multiply\": [100, \"&TCP_PENDING_STALL_CYCLES_sum\"] }, \"&TCP_GATE_EN1_sum\"] },\n                    null\n                ]\n            }},\n            \"l2Pending_min\": {\"$min\": {\n                \"$cond\":[\n                    {\"$ne\": [\"&TCP_GATE_EN1_sum\", 0]}, \n                    {\"$divide\": [ { \"$multiply\": [100, \"&TCP_PENDING_STALL_CYCLES_sum\"] }, \"&TCP_GATE_EN1_sum\"] },\n                    null\n                ]\n            }},\n            \"l2Pending_max\": {\"$max\": {\n                \"$cond\":[\n                    {\"$ne\": [\"&TCP_GATE_EN1_sum\", 0]}, \n                    {\"$divide\": [ { \"$multiply\": [100, \"&TCP_PENDING_STALL_CYCLES_sum\"] }, \"&TCP_GATE_EN1_sum\"] },\n                    null\n                ]\n            }},\n\n            \"tcr2tcp_Stall_avg\":{\"$avg\":{\n                \"$cond\":[\n                    {\"$ne\": [\"&TCP_GATE_EN1_sum\", 0]}, \n                    {\"$divide\": [ { \"$multiply\": [100, \"&TCP_TCR_TCP_STALL_CYCLES_sum\"] }, \"&TCP_GATE_EN1_sum\"] },\n                    null\n                ]\n            }},\n            \"tcr2tcp_Stall_min\":{\"$min\":{\n                \"$cond\":[\n                    {\"$ne\": [\"&TCP_GATE_EN1_sum\", 0]}, \n                    {\"$divide\": [ { \"$multiply\": [100, \"&TCP_TCR_TCP_STALL_CYCLES_sum\"] }, \"&TCP_GATE_EN1_sum\"] },\n                    null\n                ]\n            }},\n            \"tcr2tcp_Stall_max\":{\"$max\":{\n                \"$cond\":[\n                    {\"$ne\": [\"&TCP_GATE_EN1_sum\", 0]}, \n                    {\"$divide\": [ { \"$multiply\": [100, \"&TCP_TCR_TCP_STALL_CYCLES_sum\"] }, \"&TCP_GATE_EN1_sum\"] },\n                    null\n                ]\n            }},\n             \n            \"readTagRam_Stall_avg\": {\"$avg\":{\n                \"$cond\":[\n                    {\"$ne\": [\"&TCP_GATE_EN1_sum\", 0]}, \n                    {\"$divide\": [ { \"$multiply\": [100, \"&TCP_READ_TAGCONFLICT_STALL_CYCLES_sum\"] }, \"&TCP_GATE_EN1_sum\"]},\n                    null\n                ]\n            }},\n            \"readTagRam_Stall_min\": {\"$min\":{\n                \"$cond\":[\n                    {\"$ne\": [\"&TCP_GATE_EN1_sum\", 0]}, \n                    {\"$divide\": [ { \"$multiply\": [100, \"&TCP_READ_TAGCONFLICT_STALL_CYCLES_sum\"] }, \"&TCP_GATE_EN1_sum\"]},\n                    null\n                ]\n            }},\n            \"readTagRam_Stall_max\": {\"$max\":{\n                \"$cond\":[\n                    {\"$ne\": [\"&TCP_GATE_EN1_sum\", 0]}, \n                    {\"$divide\": [ { \"$multiply\": [100, \"&TCP_READ_TAGCONFLICT_STALL_CYCLES_sum\"] }, \"&TCP_GATE_EN1_sum\"]},\n                    null\n                ]\n            }},\n            \n            \"writeTagRam_Stall_avg\": {\"$avg\":{\n                \"$cond\":[\n                    {\"$ne\": [\"&TCP_GATE_EN1_sum\", 0]}, \n                    {\"$divide\": [ { \"$multiply\": [100, \"&TCP_WRITE_TAGCONFLICT_STALL_CYCLES_sum\"] }, \"&TCP_GATE_EN1_sum\"] },\n                    null\n                ]\n            }},\n            \"writeTagRam_Stall_min\": {\"$min\":{\n                \"$cond\":[\n                    {\"$ne\": [\"&TCP_GATE_EN1_sum\", 0]}, \n                    {\"$divide\": [ { \"$multiply\": [100, \"&TCP_WRITE_TAGCONFLICT_STALL_CYCLES_sum\"] }, \"&TCP_GATE_EN1_sum\"] },\n                    null\n                ]\n            }},\n            \"writeTagRam_Stall_max\": {\"$max\":{\n                \"$cond\":[\n                    {\"$ne\": [\"&TCP_GATE_EN1_sum\", 0]}, \n                    {\"$divide\": [ { \"$multiply\": [100, \"&TCP_WRITE_TAGCONFLICT_STALL_CYCLES_sum\"] }, \"&TCP_GATE_EN1_sum\"] },\n                    null\n                ]\n            }},\n            \n            \n            \"atomicTagRam_Stall_avg\":{\"$avg\":{\n                \"$cond\":[\n                    {\"$ne\": [\"&TCP_GATE_EN1_sum\", 0]}, \n                    {\"$divide\": [ { \"$multiply\": [100, \"&TCP_ATOMIC_TAGCONFLICT_STALL_CYCLES_sum\"] }, \"&TCP_GATE_EN1_sum\"] },\n                    null\n                ]\n            }}, \n            \"atomicTagRam_Stall_min\":{\"$min\":{\n                \"$cond\":[\n                    {\"$ne\": [\"&TCP_GATE_EN1_sum\", 0]}, \n                    {\"$divide\": [ { \"$multiply\": [100, \"&TCP_ATOMIC_TAGCONFLICT_STALL_CYCLES_sum\"] }, \"&TCP_GATE_EN1_sum\"] },\n                    null\n                ]\n            }}, \n            \"atomicTagRam_Stall_max\":{\"$max\":{\n                \"$cond\":[\n                    {\"$ne\": [\"&TCP_GATE_EN1_sum\", 0]}, \n                    {\"$divide\": [ { \"$multiply\": [100, \"&TCP_ATOMIC_TAGCONFLICT_STALL_CYCLES_sum\"] }, \"&TCP_GATE_EN1_sum\"] },\n                    null\n                ]\n            }} \n\n    }},\n    {\"$set\": {\n        \"array\": [\n            {\n            \"Metric\": \"Stalled on L2 Data\",\n            \"Mean\": \"&l2Pending_avg\",\n            \"Min\":  \"&l2Pending_min\",\n            \"Max\":  \"&l2Pending_max\",\n            \"unit\":\"pct\"\n            },\n            {\n            \"Metric\": \"Stalled on L2 Req\",\n            \"Mean\": \"&tcr2tcp_Stall_avg\",\n            \"Min\":\"&tcr2tcp_Stall_min\",\n            \"Max\":\"&tcr2tcp_Stall_max\",\n            \"unit\":\"pct\"\n            },\n\n            {\n            \"Metric\": \"Tag RAM Stall (Read)\",\n            \"Mean\": \"&readTagRam_Stall_avg\",\n            \"Min\":  \"&readTagRam_Stall_min\",\n            \"Max\":  \"&readTagRam_Stall_max\",\n            \"unit\":\"pct\"\n            },\n            {\n            \"Metric\": \"Tag RAM Stall (Write)\",\n            \"Mean\": \"&writeTagRam_Stall_avg\",\n            \"Min\":  \"&writeTagRam_Stall_min\",\n            \"Max\":  \"&writeTagRam_Stall_max\",\n            \"unit\":\"pct\"\n            },\n            {\n            \"Metric\": \"Tag RAM Stall (Atomic)\",\n            \"Mean\": \"&atomicTagRam_Stall_avg\",\n            \"Min\":  \"&atomicTagRam_Stall_min\",\n            \"Max\":  \"&atomicTagRam_Stall_max\",\n            \"unit\":\"pct\"\n            }\n        ]\n    }},\n    {\"$unwind\": {\n        \"path\": \"&array\"\n    }},\n    {\"$replaceRoot\": {\n        \"newRoot\": \"&array\"\n    }}\n]);",
-              "type": "table"
-            }
-          ],
-          "title": "Vector L1D Cache Stalls",
-          "transformations": [
-            {
-              "id": "concatenate",
-              "options": {}
-            },
-            {
-              "id": "organize",
-              "options": {
-                "excludeByName": {
-                  "Metric 2": true,
-                  "Units 2": true,
-                  "unit 2": true
-                },
-                "indexByName": {
-                  "Max 1": 6,
-                  "Max 2": 7,
-                  "Mean 1": 2,
-                  "Mean 2": 3,
-                  "Metric 1": 0,
-                  "Metric 2": 1,
-                  "Min 1": 4,
-                  "Min 2": 5,
-                  "unit 1": 9,
-                  "unit 2": 8
-                },
-                "renameByName": {
-                  "Max 1": "Max (Current)",
-                  "Max 2": "Max (Baseline)",
-                  "Mean 1": "Avg (Current)",
-                  "Mean 2": "Avg (Baseline)",
-                  "Min 1": "Min (Current)",
-                  "Min 2": "Min (Baseline)",
-                  "unit 1": "Unit"
-                }
-              }
-            }
-          ],
-          "type": "table"
-        },
-        {
-          "datasource": {},
-          "fieldConfig": {
-            "defaults": {
-              "color": {
-                "mode": "thresholds"
-              },
-              "custom": {
-                "align": "auto",
-                "displayMode": "auto"
-              },
-              "decimals": 0,
-              "mappings": [],
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {
-                    "color": "green",
-                    "value": null
-                  },
-                  {
-                    "color": "red",
-                    "value": 80
-                  }
-                ]
-              },
-              "unit": "locale"
-            },
-            "overrides": [
-              {
-                "matcher": {
-                  "id": "byName",
-                  "options": "Unit"
-                },
-                "properties": [
-                  {
-                    "id": "custom.width",
-                    "value": 116
-                  }
-                ]
-              },
-              {
-                "matcher": {
-                  "id": "byName",
-                  "options": "Avg (Current)"
-                },
-                "properties": [
-                  {
-                    "id": "custom.width",
-                    "value": 78
-                  }
-                ]
-              },
-              {
-                "matcher": {
-                  "id": "byName",
-                  "options": "Min (Current)"
-                },
-                "properties": [
-                  {
-                    "id": "custom.width",
-                    "value": 139
-                  }
-                ]
-              },
-              {
-                "matcher": {
-                  "id": "byName",
-                  "options": "Max (Current)"
-                },
-                "properties": [
-                  {
-                    "id": "custom.width",
-                    "value": 50
-                  }
-                ]
-              },
-              {
-                "matcher": {
-                  "id": "byName",
-                  "options": "max"
-                },
-                "properties": [
-                  {
-                    "id": "custom.width",
-                    "value": 148
-                  }
-                ]
-              },
-              {
-                "matcher": {
-                  "id": "byName",
-                  "options": "Avg (Baseline)"
-                },
-                "properties": [
-                  {
-                    "id": "custom.width",
-                    "value": 127
-                  }
-                ]
-              },
-              {
-                "matcher": {
-                  "id": "byName",
-                  "options": "Min (Baseline)"
-                },
-                "properties": [
-                  {
-                    "id": "custom.width",
-                    "value": 111
-                  }
-                ]
-              }
-            ]
-          },
-          "gridPos": {
-            "h": 18,
-            "w": 12,
-            "x": 0,
-            "y": 28
-          },
-          "id": 128,
-          "options": {
-            "footer": {
-              "fields": "",
-              "reducer": [
-                "sum"
-              ],
-              "show": false
-            },
-            "showHeader": true,
-            "sortBy": []
-          },
-          "pluginVersion": "8.3.4",
-          "targets": [
-            {
-              "datasource": {
-                "type": "amd-miperf-data-plugin",
-                "uid": "Zzw1yR27k"
-              },
-              "hide": false,
-              "rawQuery": true,
-              "refId": "A",
-              "target": "${Workload1}.pmc_perf.aggregate([\n    {\"$match\": {\n    \"Index\": { \"$in\": [${DispatchIDFilter:raw}] },\n    \"gpu-id\": { \"$in\": [${gpuFilter:raw}] },\n    \"KernelName\": { \"$in\": ${KernelNameFilter:json}}\n    }},\n    {\"$addFields\": {\n        \"denom\": {\n                \"$switch\" : {\n                \"branches\": [\n                    {\n                        \"case\":  { \"$eq\": [ $normUnit, \"per Wave\"]} ,\n                        \"then\":  \"&SQ_WAVES\"\n                    },\n                    {\n                        \"case\":  { \"$eq\": [ $normUnit, \"per Cycle\"]} ,\n                        \"then\":  \"&GRBM_GUI_ACTIVE\"\n                    },\n                    {\n                        \"case\":  { \"$eq\": [ $normUnit, \"per Sec\"]} ,\n                        \"then\":  {\"$divide\":[{\"$subtract\": [\"&EndNs\", \"&BeginNs\" ]}, 1000000000]}\n                    }\n                ],\n                \"default\": 1\n                }         \n        } \n    }},\n    {\"$group\": {\n        \"_id\": null,\n\n            \"totalReq_avg\":{\"$avg\": { \"$divide\": [ \"&TCP_TOTAL_ACCESSES_sum\", \"&denom\" ] }},\n            \"totalReq_min\":{\"$min\": { \"$divide\": [ \"&TCP_TOTAL_ACCESSES_sum\", \"&denom\" ] }},\n            \"totalReq_max\":{\"$max\": { \"$divide\": [ \"&TCP_TOTAL_ACCESSES_sum\", \"&denom\" ] }},\n\n            \"readReq_avg\":{\"$avg\": {\"$divide\": [ \"&TCP_TOTAL_READ_sum\", \"&denom\" ] }},\n            \"readReq_min\":{\"$min\": {\"$divide\": [ \"&TCP_TOTAL_READ_sum\", \"&denom\" ] }},\n            \"readReq_max\":{\"$max\": {\"$divide\": [ \"&TCP_TOTAL_READ_sum\", \"&denom\" ] }},\n\n            \"writeReq_avg\":{\"$avg\": {\"$divide\": [ \"&TCP_TOTAL_WRITE_sum\", \"&denom\" ]}},\n            \"writeReq_min\":{\"$min\": {\"$divide\": [ \"&TCP_TOTAL_WRITE_sum\", \"&denom\" ]}},\n            \"writeReq_max\":{\"$max\": {\"$divide\": [ \"&TCP_TOTAL_WRITE_sum\", \"&denom\" ]}},\n\n            \"atomicReq_avg\":{\"$avg\": {\"$divide\": [ { \"$add\": [\"&TCP_TOTAL_ATOMIC_WITH_RET_sum\", \"&TCP_TOTAL_ATOMIC_WITHOUT_RET_sum\"] }, \"&denom\"]}},\n            \"atomicReq_min\":{\"$min\": {\"$divide\": [ { \"$add\": [\"&TCP_TOTAL_ATOMIC_WITH_RET_sum\", \"&TCP_TOTAL_ATOMIC_WITHOUT_RET_sum\"] }, \"&denom\"]}},\n            \"atomicReq_max\":{\"$max\": {\"$divide\": [ { \"$add\": [\"&TCP_TOTAL_ATOMIC_WITH_RET_sum\", \"&TCP_TOTAL_ATOMIC_WITHOUT_RET_sum\"] }, \"&denom\"]}},\n\n            \"cacheAccess_avg\":{\"$avg\": {\"$divide\": [ \"&TCP_TOTAL_CACHE_ACCESSES_sum\", \"&denom\"]}},\n            \"cacheAccess_min\":{\"$min\": {\"$divide\": [ \"&TCP_TOTAL_CACHE_ACCESSES_sum\", \"&denom\"]}},\n            \"cacheAccess_max\":{\"$max\": {\"$divide\": [ \"&TCP_TOTAL_CACHE_ACCESSES_sum\", \"&denom\"]}},\n\n            \"cacheHits_avg\":{\"$avg\": {\"$divide\": [ \n                                { \"$subtract\": [\n                                    \"&TCP_TOTAL_CACHE_ACCESSES_sum\", \n                                    { \"$add\": [\"&TCP_TCC_READ_REQ_sum\", \"&TCP_TCC_WRITE_REQ_sum\", \"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"]}\n                                ]}, \n                                \"&denom\"\n                        ]}\n            },\n            \"cacheHits_min\":{\"$min\": {\"$divide\": [ \n                                { \"$subtract\": [\n                                    \"&TCP_TOTAL_CACHE_ACCESSES_sum\", \n                                    { \"$add\": [\"&TCP_TCC_READ_REQ_sum\", \"&TCP_TCC_WRITE_REQ_sum\", \"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"]}\n                                ]}, \n                                \"&denom\"\n                        ]}\n            },\n            \"cacheHits_max\":{\"$max\": {\"$divide\": [ \n                                { \"$subtract\": [\n                                    \"&TCP_TOTAL_CACHE_ACCESSES_sum\", \n                                    { \"$add\": [\"&TCP_TCC_READ_REQ_sum\", \"&TCP_TCC_WRITE_REQ_sum\", \"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"]}\n                                ]}, \n                                \"&denom\"\n                        ]}\n            },\n            \n            \"cacheHitRate_avg\":{\"$avg\": {\n                \"$cond\": [{\"$ne\": [\"&TCP_TOTAL_CACHE_ACCESSES_sum\", 0]},                 \n                            {\"$subtract\": [100, \n                                            { \"$divide\": [ \n                                                { \"$multiply\": [100, \n                                                                { \"$add\": [\"&TCP_TCC_READ_REQ_sum\", \"&TCP_TCC_WRITE_REQ_sum\", \"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"] }\n                                                                ] \n                                                }, \n                                                \"&TCP_TOTAL_CACHE_ACCESSES_sum\"\n                                            ]}\n                        ]},\n                        null\n                ]\n            }},\n            \"cacheHitRate_min\":{\"$min\": {\n                \"$cond\": [{\"$ne\": [\"&TCP_TOTAL_CACHE_ACCESSES_sum\", 0]},                 \n                            {\"$subtract\": [100, \n                                            { \"$divide\": [ \n                                                { \"$multiply\": [100, \n                                                                { \"$add\": [\"&TCP_TCC_READ_REQ_sum\", \"&TCP_TCC_WRITE_REQ_sum\", \"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"] }\n                                                                ] \n                                                }, \n                                                \"&TCP_TOTAL_CACHE_ACCESSES_sum\"\n                                            ]}\n                        ]},\n                        null\n                ]\n            }},\n            \"cacheHitRate_max\":{\"$max\": {\n                \"$cond\": [{\"$ne\": [\"&TCP_TOTAL_CACHE_ACCESSES_sum\", 0]},                 \n                            {\"$subtract\": [100, \n                                            { \"$divide\": [ \n                                                { \"$multiply\": [100, \n                                                                { \"$add\": [\"&TCP_TCC_READ_REQ_sum\", \"&TCP_TCC_WRITE_REQ_sum\", \"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"] }\n                                                                ] \n                                                }, \n                                                \"&TCP_TOTAL_CACHE_ACCESSES_sum\"\n                                            ]}\n                        ]},\n                        null\n                ]\n            }},\n\n\n            \"l2TCRRead_avg\":{\"$avg\": {\"$divide\": [ \"&TCP_TCC_READ_REQ_sum\", \"&denom\"]}},\n            \"l2TCRRead_min\":{\"$min\": {\"$divide\": [ \"&TCP_TCC_READ_REQ_sum\", \"&denom\"]}},\n            \"l2TCRRead_max\":{\"$max\": {\"$divide\": [ \"&TCP_TCC_READ_REQ_sum\", \"&denom\"]}},\n\n\n            \"l2Write_avg\":{\"$avg\": {\"$divide\": [ \"&TCP_TCC_WRITE_REQ_sum\", \"&denom\"] }},\n            \"l2Write_min\":{\"$min\": {\"$divide\": [ \"&TCP_TCC_WRITE_REQ_sum\", \"&denom\"] }},\n            \"l2Write_max\":{\"$max\": {\"$divide\": [ \"&TCP_TCC_WRITE_REQ_sum\", \"&denom\"] }},\n\n            \"l2Atomic_avg\":{\"$avg\": {\"$divide\": [ { \"$add\": [\"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"] }, \"&denom\"] }},\n            \"l2Atomic_min\":{\"$min\": {\"$divide\": [ { \"$add\": [\"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"] }, \"&denom\"] }},\n            \"l2Atomic_max\":{\"$max\": {\"$divide\": [ { \"$add\": [\"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"] }, \"&denom\"] }},\n\n            \"invalidate_avg\":{\"$avg\": {\"$divide\": [ \"&TCP_TOTAL_WRITEBACK_INVALIDATES_sum\", \"&denom\"] }},\n            \"invalidate_min\":{\"$min\": {\"$divide\": [ \"&TCP_TOTAL_WRITEBACK_INVALIDATES_sum\", \"&denom\"] }},\n            \"invalidate_max\":{\"$max\": {\"$divide\": [ \"&TCP_TOTAL_WRITEBACK_INVALIDATES_sum\", \"&denom\"] }},\n\n\n            \"l1Latency_avg\":{\"$avg\": {\n                \"$cond\": [\n                    {\"$ne\": [\"&TCP_TA_TCP_STATE_READ_sum\", 0]},\n                    {\"$divide\": [ \"&TCP_TCP_LATENCY_sum\", \"&TCP_TA_TCP_STATE_READ_sum\" ]},\n                    null\n                ] \n            }},\n            \"l1Latency_min\":{\"$min\": {\n                \"$cond\": [\n                    {\"$ne\": [\"&TCP_TA_TCP_STATE_READ_sum\", 0]},\n                    {\"$divide\": [ \"&TCP_TCP_LATENCY_sum\", \"&TCP_TA_TCP_STATE_READ_sum\" ]},\n                    null\n                ] \n            }},\n            \"l1Latency_max\":{\"$max\": {\n                \"$cond\": [\n                    {\"$ne\": [\"&TCP_TA_TCP_STATE_READ_sum\", 0]},\n                    {\"$divide\": [ \"&TCP_TCP_LATENCY_sum\", \"&TCP_TA_TCP_STATE_READ_sum\" ]},\n                    null\n                ] \n            }},\n\n\n            \"l2ReadLatency_avg\":{\"$avg\": {\n                \"$cond\": [\n                    {\"$ne\": [{\"$add\": [\"&TCP_TCC_READ_REQ_sum\", \"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\"]}, 0]},\n                    {\"$divide\": [ \"&TCP_TCC_READ_REQ_LATENCY_sum\", { \"$add\": [\"&TCP_TCC_READ_REQ_sum\", \"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\"] }]},\n                    null\n                ] \n            }},\n            \"l2ReadLatency_min\":{\"$min\": {\n                \"$cond\": [\n                    {\"$ne\": [{\"$add\": [\"&TCP_TCC_READ_REQ_sum\", \"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\"]}, 0]},\n                    {\"$divide\": [ \"&TCP_TCC_READ_REQ_LATENCY_sum\", { \"$add\": [\"&TCP_TCC_READ_REQ_sum\", \"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\"] }]},\n                    null\n                ] \n            }},\n            \"l2ReadLatency_max\":{\"$max\": {\n                \"$cond\": [\n                    {\"$ne\": [{\"$add\": [\"&TCP_TCC_READ_REQ_sum\", \"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\"]}, 0]},\n                    {\"$divide\": [ \"&TCP_TCC_READ_REQ_LATENCY_sum\", { \"$add\": [\"&TCP_TCC_READ_REQ_sum\", \"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\"] }]},\n                    null\n                ] \n            }},\n\n            \"l2WriteLatency_avg\":{\"$avg\": {\n                \"$cond\": [\n                    {\"$ne\": [{\"$add\": [\"&TCP_TCC_WRITE_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"]}, 0]},\n                    {\"$divide\": [ \"&TCP_TCC_WRITE_REQ_LATENCY_sum\", { \"$add\": [\"&TCP_TCC_WRITE_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"] }]},\n                    null\n                ]\n            }},\n            \"l2WriteLatency_min\":{\"$min\": {\n                \"$cond\": [\n                    {\"$ne\": [{\"$add\": [\"&TCP_TCC_WRITE_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"]}, 0]},\n                    {\"$divide\": [ \"&TCP_TCC_WRITE_REQ_LATENCY_sum\", { \"$add\": [\"&TCP_TCC_WRITE_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"] }]},\n                    null\n                ]\n            }},\n            \"l2WriteLatency_max\":{\"$max\": {\n                \"$cond\": [\n                    {\"$ne\": [{\"$add\": [\"&TCP_TCC_WRITE_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"]}, 0]},\n                    {\"$divide\": [ \"&TCP_TCC_WRITE_REQ_LATENCY_sum\", { \"$add\": [\"&TCP_TCC_WRITE_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"] }]},\n                    null\n                ]\n            }}\n\n\n    }},\n    {\"$set\": {\n    \"array\": [\n        {\n            \"metric\": \"Total Req\",\n            \"avg\": \"&totalReq_avg\",\n            \"min\": \"&totalReq_min\",\n            \"max\": \"&totalReq_max\",\n            \"Unit\": {\"$concat\": [\"Req \", $normUnit]}\n        },\n        {\n            \"metric\": \"Read Req\",\n            \"avg\": \"&readReq_avg\",\n            \"min\": \"&readReq_min\",\n            \"max\": \"&readReq_max\",\n            \"Unit\": {\"$concat\": [\"Req \", $normUnit]}\n        },\n        {\n            \"metric\": \"Write Req\",\n            \"avg\": \"&writeReq_avg\",\n            \"min\": \"&writeReq_min\",\n            \"max\": \"&writeReq_max\",\n            \"Unit\": {\"$concat\": [\"Req \", $normUnit]}\n        },\n        {\n            \"metric\": \"Atomic Req\",\n            \"avg\": \"&atomicReq_avg\",\n            \"min\": \"&atomicReq_min\",\n            \"max\": \"&atomicReq_max\",\n            \"Unit\": {\"$concat\": [\"Req \", $normUnit]}\n        },\n        {\n            \"metric\": \"Cache Accesses\",\n            \"avg\": \"&cacheAccess_avg\",\n            \"min\": \"&cacheAccess_min\",\n            \"max\": \"&cacheAccess_max\",\n            \"Unit\": {\"$concat\": [\"Req \", $normUnit]}\n        },\n        {\n            \"metric\": \"Cache Hits\",\n            \"avg\": \"&cacheHits_avg\",\n            \"min\": \"&cacheHits_min\",\n            \"max\": \"&cacheHits_max\",\n            \"Unit\": {\"$concat\": [\"Req \", $normUnit]}\n        },\n        {\n            \"metric\": \"Cache Hit Rate\",\n            \"avg\": \"&cacheHitRate_avg\",\n            \"min\": \"&cacheHitRate_min\",\n            \"max\": \"&cacheHitRate_max\",\n            \"Unit\": \"pct\"\n        },\n        {\n            \"metric\": \"Invalidate\",\n            \"avg\": \"&invalidate_avg\",\n            \"min\": \"&invalidate_min\",\n            \"max\": \"&invalidate_max\",\n            \"Unit\": {\"$concat\": [\"\", $normUnit]}\n        },\n        {\n            \"metric\": \"L1-TCR Read\",\n            \"avg\": \"&l2TCRRead_avg\",\n            \"min\": \"&l2TCRRead_min\",\n            \"max\": \"&l2TCRRead_max\",\n            \"Unit\": {\"$concat\": [\"Req \", $normUnit]}\n        },\n        {\n            \"metric\": \"L1-L2 Write\",\n            \"avg\": \"&l2Write_avg\",\n            \"min\": \"&l2Write_min\",\n            \"max\": \"&l2Write_max\",\n            \"Unit\": {\"$concat\": [\"Req \", $normUnit]}\n        },\n        {\n            \"metric\": \"L1-L2 Atomic\",\n            \"avg\": \"&l2Atomic_avg\",\n            \"min\": \"&l2Atomic_min\",\n            \"max\": \"&l2Atomic_max\",\n            \"Unit\": {\"$concat\": [\"Req \", $normUnit]}\n        },\n        {\n            \"metric\": \"L1 Access Latency\",\n            \"avg\": \"&l1Latency_avg\",\n            \"min\": \"&l1Latency_min\",\n            \"max\": \"&l1Latency_max\",\n            \"Unit\": \"Cycles\"\n        },\n        {\n            \"metric\": \"L1-L2 Read Latency\",\n            \"avg\": \"&l2ReadLatency_avg\",\n            \"min\": \"&l2ReadLatency_min\",\n            \"max\": \"&l2ReadLatency_max\",\n            \"Unit\": \"Cycles\"\n        },\n        {\n            \"metric\": \"L1-L2 Write Latency\",\n            \"avg\": \"&l2WriteLatency_avg\",\n            \"min\": \"&l2WriteLatency_min\",\n            \"max\": \"&l2WriteLatency_max\",\n            \"Unit\": \"Cycles\"\n        }\n        ]\n    }},\n    {\"$unwind\": {\n    \"path\": \"&array\"\n    }},\n    {\"$replaceRoot\": {\n    \"newRoot\": \"&array\"\n    }}\n]);",
-              "type": "table"
-            },
-            {
-              "datasource": {
-                "type": "amd-miperf-data-plugin",
-                "uid": "Zzw1yR27k"
-              },
-              "hide": false,
-              "rawQuery": true,
-              "refId": "B",
-              "target": "${Workload2}.pmc_perf.aggregate([\n    {\"$match\": {\n        \"Index\": { \"$in\": [${DispatchIDFilter2:raw}] },\n        \"gpu-id\": { \"$in\": [${gpuFilter2:raw}] },\n        \"KernelName\": { \"$in\": ${KernelNameFilter2:json}},\n        \"$expr\":{\"$regexMatch\": {\"input\":\"${select}\",\"regex\":\"(Vector L1D Cache)\"}}\n    }},\n    {\"$addFields\": {\n        \"denom\": {\n                \"$switch\" : {\n                \"branches\": [\n                    {\n                        \"case\":  { \"$eq\": [ $normUnit, \"per Wave\"]} ,\n                        \"then\":  \"&SQ_WAVES\"\n                    },\n                    {\n                        \"case\":  { \"$eq\": [ $normUnit, \"per Cycle\"]} ,\n                        \"then\":  \"&GRBM_GUI_ACTIVE\"\n                    },\n                    {\n                        \"case\":  { \"$eq\": [ $normUnit, \"per Sec\"]} ,\n                        \"then\":  {\"$divide\":[{\"$subtract\": [\"&EndNs\", \"&BeginNs\" ]}, 1000000000]}\n                    }\n                ],\n                \"default\": 1\n                }         \n        } \n    }},\n    {\"$group\": {\n        \"_id\": null,\n\n            \"totalReq_avg\":{\"$avg\": { \"$divide\": [ \"&TCP_TOTAL_ACCESSES_sum\", \"&denom\" ] }},\n            \"totalReq_min\":{\"$min\": { \"$divide\": [ \"&TCP_TOTAL_ACCESSES_sum\", \"&denom\" ] }},\n            \"totalReq_max\":{\"$max\": { \"$divide\": [ \"&TCP_TOTAL_ACCESSES_sum\", \"&denom\" ] }},\n\n            \"readReq_avg\":{\"$avg\": {\"$divide\": [ \"&TCP_TOTAL_READ_sum\", \"&denom\" ] }},\n            \"readReq_min\":{\"$min\": {\"$divide\": [ \"&TCP_TOTAL_READ_sum\", \"&denom\" ] }},\n            \"readReq_max\":{\"$max\": {\"$divide\": [ \"&TCP_TOTAL_READ_sum\", \"&denom\" ] }},\n\n            \"writeReq_avg\":{\"$avg\": {\"$divide\": [ \"&TCP_TOTAL_WRITE_sum\", \"&denom\" ]}},\n            \"writeReq_min\":{\"$min\": {\"$divide\": [ \"&TCP_TOTAL_WRITE_sum\", \"&denom\" ]}},\n            \"writeReq_max\":{\"$max\": {\"$divide\": [ \"&TCP_TOTAL_WRITE_sum\", \"&denom\" ]}},\n\n            \"atomicReq_avg\":{\"$avg\": {\"$divide\": [ { \"$add\": [\"&TCP_TOTAL_ATOMIC_WITH_RET_sum\", \"&TCP_TOTAL_ATOMIC_WITHOUT_RET_sum\"] }, \"&denom\"]}},\n            \"atomicReq_min\":{\"$min\": {\"$divide\": [ { \"$add\": [\"&TCP_TOTAL_ATOMIC_WITH_RET_sum\", \"&TCP_TOTAL_ATOMIC_WITHOUT_RET_sum\"] }, \"&denom\"]}},\n            \"atomicReq_max\":{\"$max\": {\"$divide\": [ { \"$add\": [\"&TCP_TOTAL_ATOMIC_WITH_RET_sum\", \"&TCP_TOTAL_ATOMIC_WITHOUT_RET_sum\"] }, \"&denom\"]}},\n\n            \"cacheAccess_avg\":{\"$avg\": {\"$divide\": [ \"&TCP_TOTAL_CACHE_ACCESSES_sum\", \"&denom\"]}},\n            \"cacheAccess_min\":{\"$min\": {\"$divide\": [ \"&TCP_TOTAL_CACHE_ACCESSES_sum\", \"&denom\"]}},\n            \"cacheAccess_max\":{\"$max\": {\"$divide\": [ \"&TCP_TOTAL_CACHE_ACCESSES_sum\", \"&denom\"]}},\n\n            \"cacheHits_avg\":{\"$avg\": {\"$divide\": [ \n                                { \"$subtract\": [\n                                    \"&TCP_TOTAL_CACHE_ACCESSES_sum\", \n                                    { \"$add\": [\"&TCP_TCC_READ_REQ_sum\", \"&TCP_TCC_WRITE_REQ_sum\", \"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"]}\n                                ]}, \n                                \"&denom\"\n                        ]}\n            },\n            \"cacheHits_min\":{\"$min\": {\"$divide\": [ \n                                { \"$subtract\": [\n                                    \"&TCP_TOTAL_CACHE_ACCESSES_sum\", \n                                    { \"$add\": [\"&TCP_TCC_READ_REQ_sum\", \"&TCP_TCC_WRITE_REQ_sum\", \"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"]}\n                                ]}, \n                                \"&denom\"\n                        ]}\n            },\n            \"cacheHits_max\":{\"$max\": {\"$divide\": [ \n                                { \"$subtract\": [\n                                    \"&TCP_TOTAL_CACHE_ACCESSES_sum\", \n                                    { \"$add\": [\"&TCP_TCC_READ_REQ_sum\", \"&TCP_TCC_WRITE_REQ_sum\", \"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"]}\n                                ]}, \n                                \"&denom\"\n                        ]}\n            },\n            \n            \"cacheHitRate_avg\":{\"$avg\": {\n                \"$cond\": [{\"$ne\": [\"&TCP_TOTAL_CACHE_ACCESSES_sum\", 0]},                 \n                            {\"$subtract\": [100, \n                                            { \"$divide\": [ \n                                                { \"$multiply\": [100, \n                                                                { \"$add\": [\"&TCP_TCC_READ_REQ_sum\", \"&TCP_TCC_WRITE_REQ_sum\", \"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"] }\n                                                                ] \n                                                }, \n                                                \"&TCP_TOTAL_CACHE_ACCESSES_sum\"\n                                            ]}\n                        ]},\n                        null\n                ]\n            }},\n            \"cacheHitRate_min\":{\"$min\": {\n                \"$cond\": [{\"$ne\": [\"&TCP_TOTAL_CACHE_ACCESSES_sum\", 0]},                 \n                            {\"$subtract\": [100, \n                                            { \"$divide\": [ \n                                                { \"$multiply\": [100, \n                                                                { \"$add\": [\"&TCP_TCC_READ_REQ_sum\", \"&TCP_TCC_WRITE_REQ_sum\", \"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"] }\n                                                                ] \n                                                }, \n                                                \"&TCP_TOTAL_CACHE_ACCESSES_sum\"\n                                            ]}\n                        ]},\n                        null\n                ]\n            }},\n            \"cacheHitRate_max\":{\"$max\": {\n                \"$cond\": [{\"$ne\": [\"&TCP_TOTAL_CACHE_ACCESSES_sum\", 0]},                 \n                            {\"$subtract\": [100, \n                                            { \"$divide\": [ \n                                                { \"$multiply\": [100, \n                                                                { \"$add\": [\"&TCP_TCC_READ_REQ_sum\", \"&TCP_TCC_WRITE_REQ_sum\", \"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"] }\n                                                                ] \n                                                }, \n                                                \"&TCP_TOTAL_CACHE_ACCESSES_sum\"\n                                            ]}\n                        ]},\n                        null\n                ]\n            }},\n\n\n            \"l2TCRRead_avg\":{\"$avg\": {\"$divide\": [ \"&TCP_TCC_READ_REQ_sum\", \"&denom\"]}},\n            \"l2TCRRead_min\":{\"$min\": {\"$divide\": [ \"&TCP_TCC_READ_REQ_sum\", \"&denom\"]}},\n            \"l2TCRRead_max\":{\"$max\": {\"$divide\": [ \"&TCP_TCC_READ_REQ_sum\", \"&denom\"]}},\n\n\n            \"l2Write_avg\":{\"$avg\": {\"$divide\": [ \"&TCP_TCC_WRITE_REQ_sum\", \"&denom\"] }},\n            \"l2Write_min\":{\"$min\": {\"$divide\": [ \"&TCP_TCC_WRITE_REQ_sum\", \"&denom\"] }},\n            \"l2Write_max\":{\"$max\": {\"$divide\": [ \"&TCP_TCC_WRITE_REQ_sum\", \"&denom\"] }},\n\n            \"l2Atomic_avg\":{\"$avg\": {\"$divide\": [ { \"$add\": [\"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"] }, \"&denom\"] }},\n            \"l2Atomic_min\":{\"$min\": {\"$divide\": [ { \"$add\": [\"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"] }, \"&denom\"] }},\n            \"l2Atomic_max\":{\"$max\": {\"$divide\": [ { \"$add\": [\"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"] }, \"&denom\"] }},\n\n\n\n            \"invalidate_avg\":{\"$avg\": {\"$divide\": [ \"&TCP_TOTAL_WRITEBACK_INVALIDATES_sum\", \"&denom\"] }},\n            \"invalidate_min\":{\"$min\": {\"$divide\": [ \"&TCP_TOTAL_WRITEBACK_INVALIDATES_sum\", \"&denom\"] }},\n            \"invalidate_max\":{\"$max\": {\"$divide\": [ \"&TCP_TOTAL_WRITEBACK_INVALIDATES_sum\", \"&denom\"] }},\n\n\n            \"l1Latency_avg\":{\"$avg\": {\n                \"$cond\": [\n                    {\"$ne\": [\"&TCP_TA_TCP_STATE_READ_sum\", 0]},\n                    {\"$divide\": [ \"&TCP_TCP_LATENCY_sum\", \"&TCP_TA_TCP_STATE_READ_sum\" ]},\n                    null\n                ] \n            }},\n            \"l1Latency_min\":{\"$min\": {\n                \"$cond\": [\n                    {\"$ne\": [\"&TCP_TA_TCP_STATE_READ_sum\", 0]},\n                    {\"$divide\": [ \"&TCP_TCP_LATENCY_sum\", \"&TCP_TA_TCP_STATE_READ_sum\" ]},\n                    null\n                ] \n            }},\n            \"l1Latency_max\":{\"$max\": {\n                \"$cond\": [\n                    {\"$ne\": [\"&TCP_TA_TCP_STATE_READ_sum\", 0]},\n                    {\"$divide\": [ \"&TCP_TCP_LATENCY_sum\", \"&TCP_TA_TCP_STATE_READ_sum\" ]},\n                    null\n                ] \n            }},\n\n\n            \"l2ReadLatency_avg\":{\"$avg\": {\n                \"$cond\": [\n                    {\"$ne\": [{\"$add\": [\"&TCP_TCC_READ_REQ_sum\", \"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\"]}, 0]},\n                    {\"$divide\": [ \"&TCP_TCC_READ_REQ_LATENCY_sum\", { \"$add\": [\"&TCP_TCC_READ_REQ_sum\", \"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\"] }]},\n                    null\n                ] \n            }},\n            \"l2ReadLatency_min\":{\"$min\": {\n                \"$cond\": [\n                    {\"$ne\": [{\"$add\": [\"&TCP_TCC_READ_REQ_sum\", \"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\"]}, 0]},\n                    {\"$divide\": [ \"&TCP_TCC_READ_REQ_LATENCY_sum\", { \"$add\": [\"&TCP_TCC_READ_REQ_sum\", \"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\"] }]},\n                    null\n                ] \n            }},\n            \"l2ReadLatency_max\":{\"$max\": {\n                \"$cond\": [\n                    {\"$ne\": [{\"$add\": [\"&TCP_TCC_READ_REQ_sum\", \"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\"]}, 0]},\n                    {\"$divide\": [ \"&TCP_TCC_READ_REQ_LATENCY_sum\", { \"$add\": [\"&TCP_TCC_READ_REQ_sum\", \"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\"] }]},\n                    null\n                ] \n            }},\n\n            \"l2WriteLatency_avg\":{\"$avg\": {\n                \"$cond\": [\n                    {\"$ne\": [{\"$add\": [\"&TCP_TCC_WRITE_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"]}, 0]},\n                    {\"$divide\": [ \"&TCP_TCC_WRITE_REQ_LATENCY_sum\", { \"$add\": [\"&TCP_TCC_WRITE_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"] }]},\n                    null\n                ]\n            }},\n            \"l2WriteLatency_min\":{\"$min\": {\n                \"$cond\": [\n                    {\"$ne\": [{\"$add\": [\"&TCP_TCC_WRITE_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"]}, 0]},\n                    {\"$divide\": [ \"&TCP_TCC_WRITE_REQ_LATENCY_sum\", { \"$add\": [\"&TCP_TCC_WRITE_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"] }]},\n                    null\n                ]\n            }},\n            \"l2WriteLatency_max\":{\"$max\": {\n                \"$cond\": [\n                    {\"$ne\": [{\"$add\": [\"&TCP_TCC_WRITE_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"]}, 0]},\n                    {\"$divide\": [ \"&TCP_TCC_WRITE_REQ_LATENCY_sum\", { \"$add\": [\"&TCP_TCC_WRITE_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"] }]},\n                    null\n                ]\n            }}\n\n    }},\n    {\"$set\": {\n    \"array\": [\n        {\n            \"metric\": \"Total Req\",\n            \"avg\": \"&totalReq_avg\",\n            \"min\": \"&totalReq_min\",\n            \"max\": \"&totalReq_max\",\n            \"Unit\": {\"$concat\": [\"Req \", $normUnit]}\n        },\n        {\n            \"metric\": \"Read Req\",\n            \"avg\": \"&readReq_avg\",\n            \"min\": \"&readReq_min\",\n            \"max\": \"&readReq_max\",\n            \"Unit\": {\"$concat\": [\"Req \", $normUnit]}\n        },\n        {\n            \"metric\": \"Write Req\",\n            \"avg\": \"&writeReq_avg\",\n            \"min\": \"&writeReq_min\",\n            \"max\": \"&writeReq_max\",\n            \"Unit\": {\"$concat\": [\"Req \", $normUnit]}\n        },\n        {\n            \"metric\": \"Atomic Req\",\n            \"avg\": \"&atomicReq_avg\",\n            \"min\": \"&atomicReq_min\",\n            \"max\": \"&atomicReq_max\",\n            \"Unit\": {\"$concat\": [\"Req \", $normUnit]}\n        },\n        {\n            \"metric\": \"Cache Accesses\",\n            \"avg\": \"&cacheAccess_avg\",\n            \"min\": \"&cacheAccess_min\",\n            \"max\": \"&cacheAccess_max\",\n            \"Unit\": {\"$concat\": [\"Req \", $normUnit]}\n        },\n        {\n            \"metric\": \"Cache Hits\",\n            \"avg\": \"&cacheHits_avg\",\n            \"min\": \"&cacheHits_min\",\n            \"max\": \"&cacheHits_max\",\n            \"Unit\": {\"$concat\": [\"Req \", $normUnit]}\n        },\n        {\n            \"metric\": \"Cache Hit Rate\",\n            \"avg\": \"&cacheHitRate_avg\",\n            \"min\": \"&cacheHitRate_min\",\n            \"max\": \"&cacheHitRate_max\",\n            \"Unit\": \"pct\"\n        },\n        {\n            \"metric\": \"Invalidate\",\n            \"avg\": \"&invalidate_avg\",\n            \"min\": \"&invalidate_min\",\n            \"max\": \"&invalidate_max\",\n            \"Unit\": {\"$concat\": [\"\", $normUnit]}\n        },\n        {\n            \"metric\": \"L1-TCR Read\",\n            \"avg\": \"&l2TCRRead_avg\",\n            \"min\": \"&l2TCRRead_min\",\n            \"max\": \"&l2TCRRead_max\",\n            \"Unit\": {\"$concat\": [\"Req \", $normUnit]}\n        },\n        {\n            \"metric\": \"L1-L2 Write\",\n            \"avg\": \"&l2Write_avg\",\n            \"min\": \"&l2Write_min\",\n            \"max\": \"&l2Write_max\",\n            \"Unit\": {\"$concat\": [\"Req \", $normUnit]}\n        },\n        {\n            \"metric\": \"L1-L2 Atomic\",\n            \"avg\": \"&l2Atomic_avg\",\n            \"min\": \"&l2Atomic_min\",\n            \"max\": \"&l2Atomic_max\",\n            \"Unit\": {\"$concat\": [\"Req \", $normUnit]}\n        },\n        {\n            \"metric\": \"L1 Access Latency\",\n            \"avg\": \"&l1Latency_avg\",\n            \"min\": \"&l1Latency_min\",\n            \"max\": \"&l1Latency_max\",\n            \"Unit\": \"Cycles\"\n        },\n        {\n            \"metric\": \"L1-L2 Read Latency\",\n            \"avg\": \"&l2ReadLatency_avg\",\n            \"min\": \"&l2ReadLatency_min\",\n            \"max\": \"&l2ReadLatency_max\",\n            \"Unit\": \"Cycles\"\n        },\n        {\n            \"metric\": \"L1-L2 Write Latency\",\n            \"avg\": \"&l2WriteLatency_avg\",\n            \"min\": \"&l2WriteLatency_min\",\n            \"max\": \"&l2WriteLatency_max\",\n            \"Unit\": \"Cycles\"\n        }\n        ]\n    }},\n    {\"$unwind\": {\n    \"path\": \"&array\"\n    }},\n    {\"$replaceRoot\": {\n    \"newRoot\": \"&array\"\n    }}\n]);",
-              "type": "table"
-            }
-          ],
-          "title": "Vector L1D Cache Accesses",
-          "transformations": [
-            {
-              "id": "concatenate",
-              "options": {}
-            },
-            {
-              "id": "organize",
-              "options": {
-                "excludeByName": {
-                  "Unit 2": true,
-                  "metric 2": true
-                },
-                "indexByName": {
-                  "Unit 1": 9,
-                  "Unit 2": 8,
-                  "avg 1": 1,
-                  "avg 2": 2,
-                  "max 1": 5,
-                  "max 2": 6,
-                  "metric 1": 0,
-                  "metric 2": 7,
-                  "min 1": 3,
-                  "min 2": 4
-                },
-                "renameByName": {
-                  "avg 1": "Avg (Current)",
-                  "avg 2": "Avg (Baseline)",
-                  "max 1": "Max (Current)",
-                  "max 2": "Max (Baseline)",
-                  "min 1": "Min (Current)",
-                  "min 2": "Min (Baseline)"
-                }
-              }
-            }
-          ],
-          "type": "table"
-        },
-        {
-          "Aggregate": "last",
-          "BarPadding": 30,
-          "BaseLineColor": "#ff0000",
-          "BaseLineWidth": 1,
-          "CurveType": "Monotone",
-          "DateFormat": "YYYY-MM-DD HH:mm:ss",
-          "DateTimeColName": "date",
-          "DotColor": "white",
-          "DotSize": 10,
-          "EvenRowColor": "rgba(61, 61, 64, 0.78)",
-          "FlashHighLimitBar": false,
-          "FlashLowLimitBar": false,
-          "GroupColName": "Coherency",
-          "GroupCols": 2,
-          "GroupGap": 5,
-          "GroupLabelColor": "#FF9830",
-          "GroupLabelFontSize": "100%",
-          "GroupNameFilter": "",
-          "GroupRenamingRules": [],
-          "GroupSortString": "",
-          "HighAxisColor": "#ffffff",
-          "HighAxisWidth": 1,
-          "HighBarColor": "rgb(120, 128, 0)",
-          "HighLimitBarColor": "#ff0000",
-          "HighLimitBarFlashColor": "#ffa500",
-          "HighLimitBarFlashTimeout": 1000,
-          "HighLimitLineColor": "#ff0000",
-          "HighLmitLineWidth": 1,
-          "HighSideMargin": 0,
-          "Horizontal": true,
-          "LabelColName": "Xfer",
-          "LabelColor": "#ffffff",
-          "LabelFontSize": "100%",
-          "LabelNameFilter": "",
-          "LabelRenamingRules": [],
-          "LableAngle": 0,
-          "Legend": false,
-          "LineColor": "blue",
-          "LineWidth": 5,
-          "Links": [],
-          "LowAxisColor": "#ffffff",
-          "LowAxisWidth": 1,
-          "LowBarColor": "teal",
-          "LowLimitBarColor": "#ff0000",
-          "LowLimitBarFlashColor": "#ffa500",
-          "LowLimitBarFlashTimeout": 200,
-          "LowLimitLineColor": "#ff0000",
-          "LowLmitLineWidth": 1,
-          "LowSideMargin": 0,
-          "MaxLineColor": "rgb(74, 232, 12)",
-          "MaxLineWidth": 1,
-          "MinLineColor": "#ff0000",
-          "MinLineWidth": 1,
-          "MultiBarPadding": 10,
-          "OddRowColor": "rgba(33, 33, 34, 0.92)",
-          "OutOfRangeLabelColor": "#ffffff",
-          "OutlineColor": "rgba(245, 255, 0, 0.1)",
-          "RecolorHighLimitBar": false,
-          "RecolorLowLimitBar": false,
-          "RecolorRules": [],
-          "ScaleFactor": 1,
-          "ShowBars": true,
-          "ShowBaseLine": false,
-          "ShowDate": false,
-          "ShowGroupLabels": true,
-          "ShowHighLimitLine": false,
-          "ShowLabels": true,
-          "ShowLeftAxis": true,
-          "ShowLines": false,
-          "ShowLowLimitLine": false,
-          "ShowMaxLine": false,
-          "ShowMinLine": false,
-          "ShowRightAxis": true,
-          "ShowValues": true,
-          "SortColName": "value",
-          "SortDirection": "ascending",
-          "TZOffsetHours": 0,
-          "ToolTipFontSize": "100%",
-          "ToolTipType": "",
-          "TooltipDateFormat": "YYYY-MM-DD HH:mm:ss",
-          "VGroupGap": 5,
-          "ValueColName": "",
-          "ValueColor": "#FADE2A",
-          "ValueDecimals": 0,
-          "ValueFontSize": "100%",
-          "ValuePosition": "top",
-          "Values": [
-            {
-              "$$hashKey": "object:172",
-              "Col": 2,
-              "HighBarColor": "rgb(120, 128, 0)",
-              "LowBarColor": "teal",
-              "Name": "Mean",
-              "Selected": true
-            }
-          ],
-          "gridPos": {
-            "h": 8,
-            "w": 12,
-            "x": 12,
-            "y": 28
-          },
-          "id": 120,
-          "pluginVersion": "8.2.1",
-          "targets": [
-            {
-              "datasource": {
-                "type": "amd-miperf-data-plugin",
-                "uid": "tlh8EwUnk"
-              },
-              "rawQuery": true,
-              "refId": "A",
-              "target": "$Workload1.pmc_perf.aggregate([\n  {\"$match\": {\n      \"Index\": { \"$in\": [${DispatchIDFilter:raw}] },\n      \"gpu-id\": { \"$in\": [${gpuFilter:raw}] },\n      \"KernelName\": { \"$in\": ${KernelNameFilter:json}}\n  }},\n  {\"$addFields\": {\n      \"denom\": {\n             \"$switch\" : {\n                \"branches\": [\n                   {\n                        \"case\":  { \"$eq\": [ $normUnit, \"per Wave\"]} ,\n                        \"then\":  \"&SQ_WAVES\"\n                   },\n                   {\n                        \"case\":  { \"$eq\": [ $normUnit, \"per Cycle\"]} ,\n                        \"then\":  \"&GRBM_GUI_ACTIVE\"\n                   },\n                   {\n                        \"case\":  { \"$eq\": [ $normUnit, \"per Sec\"]} ,\n                        \"then\":  {\"$divide\":[{\"$subtract\": [\"&EndNs\", \"&BeginNs\" ]}, 1000000000]}\n                   }\n                ],\n               \"default\": 1\n             }         \n      } \n  }},\n\n    {\"$group\": {\n        \"_id\": null,\n\n        \"readNC_avg\": {\n            \"$avg\": { \"$divide\": [\"&TCP_TCC_NC_READ_REQ_sum\", \"&denom\"] }\n        },\n        \"readNC_min\": {\n            \"$min\": { \"$divide\": [\"&TCP_TCC_NC_READ_REQ_sum\", \"&denom\"] }\n        },\n        \"readNC_max\": {\n            \"$max\": { \"$divide\": [\"&TCP_TCC_NC_READ_REQ_sum\", \"&denom\"] }\n        },\n        \"readUC_avg\": {\n            \"$avg\": { \"$divide\": [\"&TCP_TCC_UC_READ_REQ_sum\", \"&denom\"] }\n        },\n        \"readUC_min\": {\n            \"$min\": { \"$divide\": [\"&TCP_TCC_UC_READ_REQ_sum\", \"&denom\"] }\n        },\n        \"readUC_max\": {\n            \"$max\": { \"$divide\": [\"&TCP_TCC_UC_READ_REQ_sum\", \"&denom\"] }\n        },\n        \"readCC_avg\": {\n            \"$avg\": { \"$divide\": [\"&TCP_TCC_CC_READ_REQ_sum\", \"&denom\"] }\n        },\n        \"readCC_min\": {\n            \"$min\": { \"$divide\": [\"&TCP_TCC_CC_READ_REQ_sum\", \"&denom\"] }\n        },\n        \"readCC_max\": {\n            \"$max\": { \"$divide\": [\"&TCP_TCC_CC_READ_REQ_sum\", \"&denom\"] }\n        },\n        \"readRW_avg\": {\n            \"$avg\": { \"$divide\": [\"&TCP_TCC_RW_READ_REQ_sum\", \"&denom\"] }\n        },\n        \"readRW_min\": {\n            \"$min\": { \"$divide\": [\"&TCP_TCC_RW_READ_REQ_sum\", \"&denom\"] }\n        },\n        \"readRW_max\": {\n            \"$max\": { \"$divide\": [\"&TCP_TCC_RW_READ_REQ_sum\", \"&denom\"] }\n        },\n        \n        \"writeNC_avg\": {\n            \"$avg\": { \"$divide\": [\"&TCP_TCC_NC_WRITE_REQ_sum\", \"&denom\"] }\n        },\n        \"writeNC_min\": {\n            \"$min\": { \"$divide\": [\"&TCP_TCC_NC_WRITE_REQ_sum\", \"&denom\"] }\n        },\n        \"writeNC_max\": {\n            \"$max\": { \"$divide\": [\"&TCP_TCC_NC_WRITE_REQ_sum\", \"&denom\"] }\n        },\n        \"writeUC_avg\": {\n            \"$avg\": { \"$divide\": [\"&TCP_TCC_UC_WRITE_REQ_sum\", \"&denom\"] }\n        },\n        \"writeUC_min\": {\n            \"$min\": { \"$divide\": [\"&TCP_TCC_UC_WRITE_REQ_sum\", \"&denom\"] }\n        },\n        \"writeUC_max\": {\n            \"$max\": { \"$divide\": [\"&TCP_TCC_UC_WRITE_REQ_sum\", \"&denom\"] }\n        },\n        \"writeCC_avg\": {\n            \"$avg\": { \"$divide\": [\"&TCP_TCC_CC_WRITE_REQ_sum\", \"&denom\"] }\n        },\n        \"writeCC_min\": {\n            \"$min\": { \"$divide\": [\"&TCP_TCC_CC_WRITE_REQ_sum\", \"&denom\"] }\n        },\n        \"writeCC_max\": {\n            \"$max\": { \"$divide\": [\"&TCP_TCC_CC_WRITE_REQ_sum\", \"&denom\"] }\n        },\n        \"writeRW_avg\": {\n            \"$avg\": { \"$divide\": [\"&TCP_TCC_RW_WRITE_REQ_sum\", \"&denom\"] }\n        },\n        \"writeRW_min\": {\n            \"$min\": { \"$divide\": [\"&TCP_TCC_RW_WRITE_REQ_sum\", \"&denom\"] }\n        },\n        \"writeRW_max\": {\n            \"$max\": { \"$divide\": [\"&TCP_TCC_RW_WRITE_REQ_sum\", \"&denom\"] }\n        },\n        \n        \"atomicNC_avg\": {\n            \"$avg\": { \"$divide\": [\"&TCP_TCC_NC_ATOMIC_REQ_sum\", \"&denom\"] }\n        },\n        \"atomicNC_min\": {\n            \"$min\": { \"$divide\": [\"&TCP_TCC_NC_ATOMIC_REQ_sum\", \"&denom\"] }\n        },\n        \"atomicNC_max\": {\n            \"$max\": { \"$divide\": [\"&TCP_TCC_NC_ATOMIC_REQ_sum\", \"&denom\"] }\n        },\n        \"atomicUC_avg\": {\n            \"$avg\": { \"$divide\": [\"&TCP_TCC_UC_ATOMIC_REQ_sum\", \"&denom\"] }\n        },\n        \"atomicUC_min\": {\n            \"$min\": { \"$divide\": [\"&TCP_TCC_UC_ATOMIC_REQ_sum\", \"&denom\"] }\n        },\n        \"atomicUC_max\": {\n            \"$max\": { \"$divide\": [\"&TCP_TCC_UC_ATOMIC_REQ_sum\", \"&denom\"] }\n        },\n        \"atomicCC_avg\": {\n            \"$avg\": { \"$divide\": [\"&TCP_TCC_CC_ATOMIC_REQ_sum\", \"&denom\"] }\n        },\n        \"atomicCC_min\": {\n            \"$min\": { \"$divide\": [\"&TCP_TCC_CC_ATOMIC_REQ_sum\", \"&denom\"] }\n        },\n        \"atomicCC_max\": {\n            \"$max\": { \"$divide\": [\"&TCP_TCC_CC_ATOMIC_REQ_sum\", \"&denom\"] }\n        },\n        \"atomicRW_avg\": {\n            \"$avg\": { \"$divide\": [\"&TCP_TCC_RW_ATOMIC_REQ_sum\", \"&denom\"] }\n        },\n        \"atomicRW_min\": {\n            \"$min\": { \"$divide\": [\"&TCP_TCC_RW_ATOMIC_REQ_sum\", \"&denom\"] }\n        },\n        \"atomicRW_max\": {\n            \"$max\": { \"$divide\": [\"&TCP_TCC_RW_ATOMIC_REQ_sum\", \"&denom\"] }\n        }\n    }},\n    {\"$set\": {\n    \"array\": [\n        {\n          \"Xfer\": \"Read\",\n          \"Coherency\": \"NC\",\n          \"Mean\": \"&readNC_avg\",\n          \"Min\": \"&readNC_min\",\n          \"Max\": \"&readNC_max\",\n          \"Unit\": {\"$concat\": [\"Req \", $normUnit]}\n        },\n        {\n          \"Xfer\": \"Read\",\n          \"Coherency\": \"UC\",\n          \"Mean\": \"&readUC_avg\",\n          \"Min\": \"&readUC_min\",\n          \"Max\": \"&readUC_max\",\n          \"Unit\": {\"$concat\": [\"Req \", $normUnit]}\n        },\n        {\n          \"Xfer\": \"Read\",\n          \"Coherency\": \"CC\",\n          \"Mean\": \"&readCC_avg\",\n          \"Min\": \"&readCC_min\",\n          \"Max\": \"&readCC_max\",\n          \"Unit\": {\"$concat\": [\"Req \", $normUnit]}\n        },\n        {\n          \"Xfer\": \"Read\",\n          \"Coherency\": \"RW\",\n          \"Mean\": \"&readRW_avg\",\n          \"Min\": \"&readRW_min\",\n          \"Max\": \"&readRW_max\",\n          \"Unit\": {\"$concat\": [\"Req \", $normUnit]}\n        },\n        {\n          \"Xfer\": \"Write\",\n          \"Coherency\": \"RW\",\n          \"Mean\": \"&writeRW_avg\",\n          \"Min\": \"&writeRW_min\",\n          \"Max\": \"&writeRW_max\",\n          \"Unit\": {\"$concat\": [\"Req \", $normUnit]}\n        },\n        {\n          \"Xfer\": \"Write\",\n          \"Coherency\": \"NC\",\n          \"Mean\": \"&writeNC_avg\",\n          \"Min\": \"&writeNC_min\",\n          \"Max\": \"&writeNC_max\",\n          \"Unit\": {\"$concat\": [\"Req \", $normUnit]}\n        },\n        {\n          \"Xfer\": \"Write\",\n          \"Coherency\": \"UC\",\n          \"Mean\": \"&writeUC_avg\",\n          \"Min\": \"&writeUC_min\",\n          \"Max\": \"&writeUC_max\",\n          \"Unit\": {\"$concat\": [\"Req \", $normUnit]}\n        },\n        {\n          \"Xfer\": \"Write\",\n          \"Coherency\": \"CC\",\n          \"Mean\": \"&writeCC_avg\",\n          \"Min\": \"&writeCC_min\",\n          \"Max\": \"&writeCC_max\",\n          \"Unit\": {\"$concat\": [\"Req \", $normUnit]}\n        },\n\n        {\n          \"Xfer\": \"Atomic\",\n          \"Coherency\": \"NC\",\n          \"Mean\": \"&atomicNC_avg\",\n          \"Min\": \"&atomicNC_min\",\n          \"Max\": \"&atomicNC_max\",\n          \"Unit\": {\"$concat\": [\"Req \", $normUnit]}\n        },\n        {\n          \"Xfer\": \"Atomic\",\n          \"Coherency\": \"UC\",\n          \"Mean\": \"&atomicUC_avg\",\n          \"Min\": \"&atomicUC_min\",\n          \"Max\": \"&atomicUC_max\",\n          \"Unit\": {\"$concat\": [\"Req \", $normUnit]}\n        },\n        {\n          \"Xfer\": \"Atomic\",\n          \"Coherency\": \"CC\",\n          \"Mean\": \"&atomicCC_avg\",\n          \"Min\": \"&atomicCC_min\",\n          \"Max\": \"&atomicCC_max\",\n          \"Unit\": {\"$concat\": [\"Req \", $normUnit]}\n        },\n        {\n          \"Xfer\": \"Atomic\",\n          \"Coherency\": \"RW\",\n          \"Mean\": \"&atomicRW_avg\",\n          \"Min\": \"&atomicRW_min\",\n          \"Max\": \"&atomicRW_max\",\n          \"Unit\": {\"$concat\": [\"Req \", $normUnit]}\n        }\n      ]\n  }},\n  {\"$unwind\": {\n    \"path\": \"&array\"\n  }},\n  {\"$replaceRoot\": {\n    \"newRoot\": \"&array\"\n  }}\n]);",
-              "type": "table"
-            }
-          ],
-          "title": "Vector L1D - L2 Transactions  Req $normUnit",
-          "transparent": true,
-          "type": "michaeldmoore-multistat-panel"
-        },
-        {
-          "datasource": {},
-          "fieldConfig": {
-            "defaults": {
-              "color": {
-                "mode": "thresholds"
-              },
-              "custom": {
-                "align": "auto",
-                "displayMode": "auto"
-              },
-              "decimals": 0,
-              "mappings": [],
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {
-                    "color": "green",
-                    "value": null
-                  },
-                  {
-                    "color": "red",
-                    "value": 80
-                  }
-                ]
-              },
-              "unit": "locale"
-            },
-            "overrides": [
-              {
-                "matcher": {
-                  "id": "byName",
-                  "options": "Units"
-                },
-                "properties": [
-                  {
-                    "id": "custom.width",
-                    "value": 75
-                  }
-                ]
-              }
-            ]
-          },
-          "gridPos": {
-            "h": 7,
-            "w": 12,
-            "x": 12,
-            "y": 36
-          },
-          "id": 124,
-          "options": {
-            "footer": {
-              "fields": "",
-              "reducer": [
-                "sum"
-              ],
-              "show": false
-            },
-            "showHeader": true,
-            "sortBy": []
-          },
-          "pluginVersion": "8.3.4",
-          "targets": [
-            {
-              "datasource": {
-                "type": "amd-miperf-data-plugin",
-                "uid": "Zzw1yR27k"
-              },
-              "rawQuery": true,
-              "refId": "A",
-              "target": "${Workload1}.pmc_perf.aggregate([\n    {\"$match\": {\n        \"Index\": { \"$in\": [${DispatchIDFilter:raw}] },\n        \"gpu-id\": { \"$in\": [${gpuFilter:raw}] },\n        \"KernelName\": { \"$in\": ${KernelNameFilter:json}}\n    }},\n    {\"$addFields\": {\n        \"denom\": {\n                \"$switch\" : {\n                \"branches\": [\n                    {\n                        \"case\":  { \"$eq\": [ $normUnit, \"per Wave\"]} ,\n                        \"then\":  \"&SQ_WAVES\"\n                    },\n                    {\n                        \"case\":  { \"$eq\": [ $normUnit, \"per Cycle\"]} ,\n                        \"then\":  \"&GRBM_GUI_ACTIVE\"\n                    },\n                    {\n                        \"case\":  { \"$eq\": [ $normUnit, \"per Sec\"]} ,\n                        \"then\":  {\"$divide\":[{\"$subtract\": [\"&EndNs\", \"&BeginNs\" ]}, 1000000000]}\n                    }\n                ],\n                \"default\": 1\n                }         \n        } \n    }},\n    {\"$group\": {\n        \"_id\": null,\n            \"req_avg\":{\"$avg\": { \"$divide\": [\"&TCP_UTCL1_REQUEST_sum\" ,\"&denom\"] }},\n            \"req_min\":{\"$min\": { \"$divide\": [\"&TCP_UTCL1_REQUEST_sum\" ,\"&denom\"] }},\n            \"req_max\":{\"$max\": { \"$divide\": [\"&TCP_UTCL1_REQUEST_sum\" ,\"&denom\"] }},\n\n\n            \"hitRatio_avg\":{\"$avg\": {\n                \"$cond\": [\n                    {\"$ne\": [\"&TCP_UTCL1_REQUEST_sum\", 0]},\n                    {\"$divide\": [{ \"$multiply\": [100, \"&TCP_UTCL1_TRANSLATION_HIT_sum\"] },\"&TCP_UTCL1_REQUEST_sum\"]},\n                    null\n                ]\n            }},\n            \"hitRatio_min\":{\"$min\": {\n                \"$cond\": [\n                    {\"$ne\": [\"&TCP_UTCL1_REQUEST_sum\", 0]},\n                    {\"$divide\": [{ \"$multiply\": [100, \"&TCP_UTCL1_TRANSLATION_HIT_sum\"] },\"&TCP_UTCL1_REQUEST_sum\"]},\n                    null\n                ]\n            }},\n            \"hitRatio_max\":{\"$max\": {\n                \"$cond\": [\n                    {\"$ne\": [\"&TCP_UTCL1_REQUEST_sum\", 0]},\n                    {\"$divide\": [{ \"$multiply\": [100, \"&TCP_UTCL1_TRANSLATION_HIT_sum\"] },\"&TCP_UTCL1_REQUEST_sum\"]},\n                    null\n                ]\n            }},\n\n            \"hits_avg\":{\"$avg\": { \"$divide\": [\"&TCP_UTCL1_TRANSLATION_HIT_sum\" ,\"&denom\"] }},\n            \"hits_min\":{\"$min\": { \"$divide\": [\"&TCP_UTCL1_TRANSLATION_HIT_sum\" ,\"&denom\"] }},\n            \"hits_max\":{\"$max\": { \"$divide\": [\"&TCP_UTCL1_TRANSLATION_HIT_sum\" ,\"&denom\"] }},\n\n            \"missesTrans_avg\":{\"$avg\": {\"$divide\": [\"&TCP_UTCL1_TRANSLATION_MISS_sum\" ,\"&denom\"] }},\n            \"missesTrans_min\":{\"$min\": {\"$divide\": [\"&TCP_UTCL1_TRANSLATION_MISS_sum\" ,\"&denom\"] }},\n            \"missesTrans_max\":{\"$max\": {\"$divide\": [\"&TCP_UTCL1_TRANSLATION_MISS_sum\" ,\"&denom\"] }},\n\n            \"missesPermis_avg\":{\"$avg\": {\"$divide\": [\"&TCP_UTCL1_PERMISSION_MISS_sum\" ,\"&denom\"] }},\n            \"missesPermis_min\":{\"$min\": {\"$divide\": [\"&TCP_UTCL1_PERMISSION_MISS_sum\" ,\"&denom\"] }},\n            \"missesPermis_max\":{\"$max\": {\"$divide\": [\"&TCP_UTCL1_PERMISSION_MISS_sum\" ,\"&denom\"] }}\n\n    }},\n    {\"$set\": {\n        \"array\": [\n            {\n            \"Metric\": \"Req\",\n            \"Mean\": \"&req_avg\",\n            \"Min\":\"&req_min\",\n            \"Max\":\"&req_max\",\n            \"Units\":{\"$concat\": [\"\", $normUnit]  }\n            },\n            {\n            \"Metric\": \"Hit Ratio\",\n            \"Mean\": \"&hitRatio_avg\",\n            \"Min\":\"&hitRatio_min\",\n            \"Max\":\"&hitRatio_max\",\n            \"Units\":\"pct\"\n            },\n            {\n            \"Metric\": \"Hits\",\n            \"Mean\": \"&hits_avg\",\n            \"Min\":\"&hits_min\",\n            \"Max\":\"&hits_max\",\n            \"Units\":{  \"$concat\": [\"\", $normUnit] }\n            },\n            {\n            \"Metric\": \"Misses (Translation)\",\n            \"Mean\": \"&missesTrans_avg\",\n            \"Min\":\"&missesTrans_min\",\n            \"Max\":\"&missesTrans_max\",\n            \"Units\":{\"$concat\": [\"\", $normUnit] }\n            },\n            {\n            \"Metric\": \"Misses (Permission)\",\n            \"Mean\": \"&missesPermis_avg\",\n            \"Min\":\"&missesPermis_min\",\n            \"Max\":\"&missesPermis_max\",\n            \"Units\":{\"$concat\": [\"\", $normUnit] }\n            }\n        ]\n    }},\n    {\"$unwind\": {\n        \"path\": \"&array\"\n    }},\n    {\"$replaceRoot\": {\n        \"newRoot\": \"&array\"\n    }}\n]);",
-              "type": "table"
-            },
-            {
-              "datasource": {
-                "type": "amd-miperf-data-plugin",
-                "uid": "Zzw1yR27k"
-              },
-              "hide": false,
-              "rawQuery": true,
-              "refId": "B",
-              "target": "${Workload2}.pmc_perf.aggregate([\n    {\"$match\": {\n        \"Index\": { \"$in\": [${DispatchIDFilter2:raw}] },\n        \"gpu-id\": { \"$in\": [${gpuFilter2:raw}] },\n        \"KernelName\": { \"$in\": ${KernelNameFilter2:json}},\n        \"$expr\":{\"$regexMatch\": {\"input\":\"${select}\",\"regex\":\"(Vector L1D Cache)\"}}\n    }},\n    {\"$addFields\": {\n        \"denom\": {\n                \"$switch\" : {\n                \"branches\": [\n                    {\n                        \"case\":  { \"$eq\": [ $normUnit, \"per Wave\"]} ,\n                        \"then\":  \"&SQ_WAVES\"\n                    },\n                    {\n                        \"case\":  { \"$eq\": [ $normUnit, \"per Cycle\"]} ,\n                        \"then\":  \"&GRBM_GUI_ACTIVE\"\n                    },\n                    {\n                        \"case\":  { \"$eq\": [ $normUnit, \"per Sec\"]} ,\n                        \"then\":  {\"$divide\":[{\"$subtract\": [\"&EndNs\", \"&BeginNs\" ]}, 1000000000]}\n                    }\n                ],\n                \"default\": 1\n                }         \n        } \n    }},\n    {\"$group\": {\n        \"_id\": null,\n            \"req_avg\":{\"$avg\": { \"$divide\": [\"&TCP_UTCL1_REQUEST_sum\" ,\"&denom\"] }},\n            \"req_min\":{\"$min\": { \"$divide\": [\"&TCP_UTCL1_REQUEST_sum\" ,\"&denom\"] }},\n            \"req_max\":{\"$max\": { \"$divide\": [\"&TCP_UTCL1_REQUEST_sum\" ,\"&denom\"] }},\n\n\n            \"hitRatio_avg\":{\"$avg\": {\n                \"$cond\": [\n                    {\"$ne\": [\"&TCP_UTCL1_REQUEST_sum\", 0]},\n                    {\"$divide\": [{ \"$multiply\": [100, \"&TCP_UTCL1_TRANSLATION_HIT_sum\"] },\"&TCP_UTCL1_REQUEST_sum\"]},\n                    null\n                ]\n            }},\n            \"hitRatio_min\":{\"$min\": {\n                \"$cond\": [\n                    {\"$ne\": [\"&TCP_UTCL1_REQUEST_sum\", 0]},\n                    {\"$divide\": [{ \"$multiply\": [100, \"&TCP_UTCL1_TRANSLATION_HIT_sum\"] },\"&TCP_UTCL1_REQUEST_sum\"]},\n                    null\n                ]\n            }},\n            \"hitRatio_max\":{\"$max\": {\n                \"$cond\": [\n                    {\"$ne\": [\"&TCP_UTCL1_REQUEST_sum\", 0]},\n                    {\"$divide\": [{ \"$multiply\": [100, \"&TCP_UTCL1_TRANSLATION_HIT_sum\"] },\"&TCP_UTCL1_REQUEST_sum\"]},\n                    null\n                ]\n            }},\n\n            \"hits_avg\":{\"$avg\": { \"$divide\": [\"&TCP_UTCL1_TRANSLATION_HIT_sum\" ,\"&denom\"] }},\n            \"hits_min\":{\"$min\": { \"$divide\": [\"&TCP_UTCL1_TRANSLATION_HIT_sum\" ,\"&denom\"] }},\n            \"hits_max\":{\"$max\": { \"$divide\": [\"&TCP_UTCL1_TRANSLATION_HIT_sum\" ,\"&denom\"] }},\n\n            \"missesTrans_avg\":{\"$avg\": {\"$divide\": [\"&TCP_UTCL1_TRANSLATION_MISS_sum\" ,\"&denom\"] }},\n            \"missesTrans_min\":{\"$min\": {\"$divide\": [\"&TCP_UTCL1_TRANSLATION_MISS_sum\" ,\"&denom\"] }},\n            \"missesTrans_max\":{\"$max\": {\"$divide\": [\"&TCP_UTCL1_TRANSLATION_MISS_sum\" ,\"&denom\"] }},\n\n            \"missesPermis_avg\":{\"$avg\": {\"$divide\": [\"&TCP_UTCL1_PERMISSION_MISS_sum\" ,\"&denom\"] }},\n            \"missesPermis_min\":{\"$min\": {\"$divide\": [\"&TCP_UTCL1_PERMISSION_MISS_sum\" ,\"&denom\"] }},\n            \"missesPermis_max\":{\"$max\": {\"$divide\": [\"&TCP_UTCL1_PERMISSION_MISS_sum\" ,\"&denom\"] }}\n\n    }},\n    {\"$set\": {\n        \"array\": [\n            {\n            \"Metric\": \"Req\",\n            \"Mean\": \"&req_avg\",\n            \"Min\":\"&req_min\",\n            \"Max\":\"&req_max\",\n            \"Units\":{\"$concat\": [\"\", $normUnit]  }\n            },\n            {\n            \"Metric\": \"Hit Ratio\",\n            \"Mean\": \"&hitRatio_avg\",\n            \"Min\":\"&hitRatio_min\",\n            \"Max\":\"&hitRatio_max\",\n            \"Units\":\"pct\"\n            },\n            {\n            \"Metric\": \"Hits\",\n            \"Mean\": \"&hits_avg\",\n            \"Min\":\"&hits_min\",\n            \"Max\":\"&hits_max\",\n            \"Units\":{  \"$concat\": [\"\", $normUnit] }\n            },\n            {\n            \"Metric\": \"Misses (Translation)\",\n            \"Mean\": \"&missesTrans_avg\",\n            \"Min\":\"&missesTrans_min\",\n            \"Max\":\"&missesTrans_max\",\n            \"Units\":{\"$concat\": [\"\", $normUnit] }\n            },\n            {\n            \"Metric\": \"Misses (Permission)\",\n            \"Mean\": \"&missesPermis_avg\",\n            \"Min\":\"&missesPermis_min\",\n            \"Max\":\"&missesPermis_max\",\n            \"Units\":{\"$concat\": [\"\", $normUnit] }\n            }\n        ]\n    }},\n    {\"$unwind\": {\n        \"path\": \"&array\"\n    }},\n    {\"$replaceRoot\": {\n        \"newRoot\": \"&array\"\n    }}\n]);",
-              "type": "table"
-            }
-          ],
-          "title": "Vector L1D Addr Translation",
-          "transformations": [
-            {
-              "id": "concatenate",
-              "options": {}
-            },
-            {
-              "id": "organize",
-              "options": {
-                "excludeByName": {
-                  "Metric 2": true,
-                  "Units 2": true
-                },
-                "indexByName": {
-                  "Max 1": 7,
-                  "Max 2": 8,
-                  "Mean 1": 3,
-                  "Mean 2": 4,
-                  "Metric 1": 0,
-                  "Metric 2": 1,
-                  "Min 1": 5,
-                  "Min 2": 6,
-                  "Units 1": 9,
-                  "Units 2": 2
-                },
-                "renameByName": {
-                  "Max 1": "Max (Current)",
-                  "Max 2": "Max (Baseline)",
-                  "Mean 1": "Avg (Current)",
-                  "Mean 2": "Avg (Baseline)",
-                  "Min 1": "Min (Current)",
-                  "Min 2": "Min (Baseline)"
-                }
-              }
-            }
-          ],
-          "type": "table"
-        }
-      ],
+      "panels": [],
       "targets": [
         {
           "datasource": {
@@ -7715,6 +6989,726 @@
       "type": "row"
     },
     {
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "decimals": 1,
+          "mappings": [],
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "#EAB839",
+                "value": 50
+              },
+              {
+                "color": "red",
+                "value": 90
+              }
+            ]
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 13,
+        "w": 12,
+        "x": 0,
+        "y": 15
+      },
+      "id": 165,
+      "options": {
+        "displayMode": "gradient",
+        "minVizHeight": 10,
+        "minVizWidth": 0,
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showUnfilled": true,
+        "text": {}
+      },
+      "pluginVersion": "8.3.4",
+      "targets": [
+        {
+          "datasource": {
+            "type": "amd-miperf-data-plugin",
+            "uid": "Zzw1yR27k"
+          },
+          "rawQuery": true,
+          "refId": "A",
+          "target": "${Workload1}.pmc_perf.aggregate([\n  {\"$match\": {\n    \"Index\": { \"$in\": [${DispatchIDFilter:raw}] },\n    \"gpu-id\": { \"$in\": [${gpuFilter:raw}] },\n    \"KernelName\": { \"$in\": ${KernelNameFilter:json}}\n  }},\n    {\"$group\": {\n        \"_id\": null,\n        \"bufferCoalescing_pct\": {\n            \"$avg\": {\n                \"$cond\": [  {\"$ne\": [\"&TCP_TOTAL_ACCESSES_sum\", 0] },\n                            { \"$divide\": [{\"$multiply\": [\"&TA_TOTAL_WAVEFRONTS_sum\", 64, 100]}, {\"$multiply\": [\"&TCP_TOTAL_ACCESSES_sum\", 4]}] },\n                            null\n                ]\n            }\n        },\n        \"cacheUtil_pct\": {\n            \"$avg\": {\n                \"$cond\": [  {\"$ne\": [\"&TCP_GATE_EN1_sum\", 0] },\n                            { \"$divide\": [{\"$multiply\": [\"&TCP_GATE_EN2_sum\", 100]}, \"&TCP_GATE_EN1_sum\"] },\n                            null\n                ]\n            }\n        },\n        \n        \"cacheBW_pct\": {\n            \"$avg\": { \"$divide\": [ {\"$multiply\":[64, \"&TCP_TOTAL_CACHE_ACCESSES_sum\"]}, \n                                   {\"$subtract\":[\"&EndNs\", \"&BeginNs\"]} \n                                 ] \n            }\n        },\n        \"cacheHit_pct\": {\n            \"$avg\": {\n                \"$cond\": [  {\"$ne\": [\"&TCP_TOTAL_CACHE_ACCESSES_sum\", 0] },\n                            { \"$subtract\": [100, \n                                            { \"$divide\": [ \n                                                { \"$multiply\": [100, \n                                                                { \"$add\": [\"&TCP_TCC_READ_REQ_sum\", \"&TCP_TCC_WRITE_REQ_sum\", \"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"] }\n                                                                ] \n                                                }, \n                                                \"&TCP_TOTAL_CACHE_ACCESSES_sum\"\n                                                ]\n                                            }] \n                            },\n                            null\n                ]\n            }\n        }\n    }},\n  {\"$set\": {\n    \"array\": [\n        {\n          \"Buffer Coalescing\": \"&bufferCoalescing_pct\",\n          \"Cache Util\": \"&cacheUtil_pct\",\n          \"Cache BW\": { \"$divide\": [{ \"$multiply\": [100, \"&cacheBW_pct\"] }, { \"$multiply\": [ { \"$multiply\": [{ \"$divide\": [$sclk, 1000] }, 64] }, $numCU]}] },\n          \"Cache Hit\": \"&cacheHit_pct\"\n     }\n      ]\n  }},\n  {\"$unwind\": {\n    \"path\": \"&array\"\n  }},\n  {\"$replaceRoot\": {\n    \"newRoot\": \"&array\"\n  }}\n]);",
+          "type": "table"
+        },
+        {
+          "datasource": {
+            "type": "amd-miperf-data-plugin",
+            "uid": "Zzw1yR27k"
+          },
+          "hide": false,
+          "rawQuery": true,
+          "refId": "B",
+          "target": "${Workload2}.pmc_perf.aggregate([\n  {\"$match\": {\n    \"Index\": { \"$in\": [${DispatchIDFilter2:raw}] },\n    \"gpu-id\": { \"$in\": [${gpuFilter2:raw}] },\n    \"KernelName\": { \"$in\": ${KernelNameFilter2:json}},\n    \"$expr\":{\"$regexMatch\": {\"input\":\"${select}\",\"regex\":\"(Vector L1D Cache)\"}}\n  }},\n    {\"$group\": {\n        \"_id\": null,\n        \"bufferCoalescing_pct\": {\n            \"$avg\": {\n                \"$cond\": [  {\"$ne\": [\"&TCP_TOTAL_ACCESSES_sum\", 0] },\n                            { \"$divide\": [{\"$multiply\": [\"&TA_TOTAL_WAVEFRONTS_sum\", 64, 100]}, {\"$multiply\": [\"&TCP_TOTAL_ACCESSES_sum\", 4]}] },\n                            null\n                ]\n            }\n        },\n        \"cacheUtil_pct\": {\n            \"$avg\": {\n                \"$cond\": [  {\"$ne\": [\"&TCP_GATE_EN1_sum\", 0] },\n                            { \"$divide\": [{\"$multiply\": [\"&TCP_GATE_EN2_sum\", 100]}, \"&TCP_GATE_EN1_sum\"] },\n                            null\n                ]\n            }\n        },\n        \"cacheBW_pct\": {\n          \"$avg\": { \"$divide\": [ {\"$multiply\":[64, \"&TCP_TOTAL_CACHE_ACCESSES_sum\"]}, \n                    {\"$subtract\":[\"&EndNs\", \"&BeginNs\"]} \n                  ] \n          }\n        },\n        \"cacheHit_pct\": {\n            \"$avg\": {\n                \"$cond\": [  {\"$ne\": [\"&TCP_TOTAL_CACHE_ACCESSES_sum\", 0] },\n                            { \"$subtract\": [100, \n                                            { \"$divide\": [ \n                                                { \"$multiply\": [100, \n                                                                { \"$add\": [\"&TCP_TCC_READ_REQ_sum\", \"&TCP_TCC_WRITE_REQ_sum\", \"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"] }\n                                                                ] \n                                                }, \n                                                \"&TCP_TOTAL_CACHE_ACCESSES_sum\"\n                                                ]\n                                            }] \n                            },\n                            null\n                ]\n            }\n        }\n    }},\n  {\"$set\": {\n    \"array\": [\n        {\n          \"Buffer Coalescing\": \"&bufferCoalescing_pct\",\n          \"Cache Util\": \"&cacheUtil_pct\",\n          \"Cache BW\": { \"$divide\": [{ \"$multiply\": [100, \"&cacheBW_pct\"] }, { \"$multiply\": [ { \"$multiply\": [{ \"$divide\": [$sclk2, 1000] }, 64] }, $numCU2]}] },\n          \"Cache Hit\": \"&cacheHit_pct\"\n     }\n      ]\n  }},\n  {\"$unwind\": {\n    \"path\": \"&array\"\n  }},\n  {\"$replaceRoot\": {\n    \"newRoot\": \"&array\"\n  }}\n]);",
+          "type": "table"
+        }
+      ],
+      "title": "Speed-of-Light: Vector L1D Cache",
+      "transformations": [
+        {
+          "id": "concatenate",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {},
+            "indexByName": {
+              "128B Read Combining 1": 6,
+              "128B Read Combining 2": 7,
+              "Buffer Coalescing 1": 0,
+              "Buffer Coalescing 2": 1,
+              "Cache BW 1": 2,
+              "Cache BW 2": 3,
+              "Cache Hit 1": 4,
+              "Cache Hit 2": 5
+            },
+            "renameByName": {
+              "128B Read Combining 1": "128B Read Combining (Current)",
+              "128B Read Combining 2": "128B Read Combining(Baseline)",
+              "Buffer Coalescing 1": "Buf Coalescing (Current)",
+              "Buffer Coalescing 2": "Buf Coalescing (Baseline)",
+              "Cache BW 1": "Cache BW (Current)",
+              "Cache BW 2": "Cache BW (Baseline)",
+              "Cache Hit 1": "Cache Hit (Current)",
+              "Cache Hit 2": "Cache Hit (Baseline)",
+              "Cache Util 1": "Cache Util (Current)",
+              "Cache Util 2": "Cache Util (Baseline)"
+            }
+          }
+        }
+      ],
+      "transparent": true,
+      "type": "bargauge"
+    },
+    {
+      "datasource": {},
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "align": "auto",
+            "displayMode": "color-background"
+          },
+          "decimals": 1,
+          "mappings": [],
+          "max": 100,
+          "thresholds": {
+            "mode": "percentage",
+            "steps": [
+              {
+                "color": "transparent",
+                "value": null
+              },
+              {
+                "color": "#EAB839",
+                "value": 50
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "percent"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "unit"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 52
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Metric"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 199
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Avg (Current)"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 121
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Avg (Baseline)"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 144
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 13,
+        "w": 12,
+        "x": 12,
+        "y": 15
+      },
+      "id": 116,
+      "options": {
+        "footer": {
+          "fields": "",
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
+        "showHeader": true,
+        "sortBy": []
+      },
+      "pluginVersion": "8.3.4",
+      "targets": [
+        {
+          "datasource": {
+            "type": "amd-miperf-data-plugin",
+            "uid": "Zzw1yR27k"
+          },
+          "rawQuery": true,
+          "refId": "A",
+          "target": "${Workload1}.pmc_perf.aggregate([\n    {\"$match\": {\n        \"Index\": { \"$in\": [${DispatchIDFilter:raw}] },\n        \"gpu-id\": { \"$in\": [${gpuFilter:raw}] },\n        \"KernelName\": { \"$in\": ${KernelNameFilter:json}}\n    }},\n    {\"$group\": {\n        \"_id\": null,\n\n            \"l2Pending_avg\": {\"$avg\": {\n                \"$cond\":[\n                    {\"$ne\": [\"&TCP_GATE_EN1_sum\", 0]}, \n                    {\"$divide\": [ { \"$multiply\": [100, \"&TCP_PENDING_STALL_CYCLES_sum\"] }, \"&TCP_GATE_EN1_sum\"] },\n                    null\n                ]\n            }},\n            \"l2Pending_min\": {\"$min\": {\n                \"$cond\":[\n                    {\"$ne\": [\"&TCP_GATE_EN1_sum\", 0]}, \n                    {\"$divide\": [ { \"$multiply\": [100, \"&TCP_PENDING_STALL_CYCLES_sum\"] }, \"&TCP_GATE_EN1_sum\"] },\n                    null\n                ]\n            }},\n            \"l2Pending_max\": {\"$max\": {\n                \"$cond\":[\n                    {\"$ne\": [\"&TCP_GATE_EN1_sum\", 0]}, \n                    {\"$divide\": [ { \"$multiply\": [100, \"&TCP_PENDING_STALL_CYCLES_sum\"] }, \"&TCP_GATE_EN1_sum\"] },\n                    null\n                ]\n            }},\n\n\n            \"tcr2tcp_Stall_avg\":{\"$avg\":{\n                \"$cond\":[\n                    {\"$ne\": [\"&TCP_GATE_EN1_sum\", 0]}, \n                    {\"$divide\": [ { \"$multiply\": [100, \"&TCP_TCR_TCP_STALL_CYCLES_sum\"] }, \"&TCP_GATE_EN1_sum\"] },\n                    null\n                ]\n            }},\n            \"tcr2tcp_Stall_min\":{\"$min\":{\n                \"$cond\":[\n                    {\"$ne\": [\"&TCP_GATE_EN1_sum\", 0]}, \n                    {\"$divide\": [ { \"$multiply\": [100, \"&TCP_TCR_TCP_STALL_CYCLES_sum\"] }, \"&TCP_GATE_EN1_sum\"] },\n                    null\n                ]\n            }},\n            \"tcr2tcp_Stall_max\":{\"$max\":{\n                \"$cond\":[\n                    {\"$ne\": [\"&TCP_GATE_EN1_sum\", 0]}, \n                    {\"$divide\": [ { \"$multiply\": [100, \"&TCP_TCR_TCP_STALL_CYCLES_sum\"] }, \"&TCP_GATE_EN1_sum\"] },\n                    null\n                ]\n            }},\n             \n            \"readTagRam_Stall_avg\": {\"$avg\":{\n                \"$cond\":[\n                    {\"$ne\": [\"&TCP_GATE_EN1_sum\", 0]}, \n                    {\"$divide\": [ { \"$multiply\": [100, \"&TCP_READ_TAGCONFLICT_STALL_CYCLES_sum\"] }, \"&TCP_GATE_EN1_sum\"]},\n                    null\n                ]\n            }},\n            \"readTagRam_Stall_min\": {\"$min\":{\n                \"$cond\":[\n                    {\"$ne\": [\"&TCP_GATE_EN1_sum\", 0]}, \n                    {\"$divide\": [ { \"$multiply\": [100, \"&TCP_READ_TAGCONFLICT_STALL_CYCLES_sum\"] }, \"&TCP_GATE_EN1_sum\"]},\n                    null\n                ]\n            }},\n            \"readTagRam_Stall_max\": {\"$max\":{\n                \"$cond\":[\n                    {\"$ne\": [\"&TCP_GATE_EN1_sum\", 0]}, \n                    {\"$divide\": [ { \"$multiply\": [100, \"&TCP_READ_TAGCONFLICT_STALL_CYCLES_sum\"] }, \"&TCP_GATE_EN1_sum\"]},\n                    null\n                ]\n            }},\n            \n            \"writeTagRam_Stall_avg\": {\"$avg\":{\n                \"$cond\":[\n                    {\"$ne\": [\"&TCP_GATE_EN1_sum\", 0]}, \n                    {\"$divide\": [ { \"$multiply\": [100, \"&TCP_WRITE_TAGCONFLICT_STALL_CYCLES_sum\"] }, \"&TCP_GATE_EN1_sum\"] },\n                    null\n                ]\n            }},\n            \"writeTagRam_Stall_min\": {\"$min\":{\n                \"$cond\":[\n                    {\"$ne\": [\"&TCP_GATE_EN1_sum\", 0]}, \n                    {\"$divide\": [ { \"$multiply\": [100, \"&TCP_WRITE_TAGCONFLICT_STALL_CYCLES_sum\"] }, \"&TCP_GATE_EN1_sum\"] },\n                    null\n                ]\n            }},\n            \"writeTagRam_Stall_max\": {\"$max\":{\n                \"$cond\":[\n                    {\"$ne\": [\"&TCP_GATE_EN1_sum\", 0]}, \n                    {\"$divide\": [ { \"$multiply\": [100, \"&TCP_WRITE_TAGCONFLICT_STALL_CYCLES_sum\"] }, \"&TCP_GATE_EN1_sum\"] },\n                    null\n                ]\n            }},\n            \n            \n            \"atomicTagRam_Stall_avg\":{\"$avg\":{\n                \"$cond\":[\n                    {\"$ne\": [\"&TCP_GATE_EN1_sum\", 0]}, \n                    {\"$divide\": [ { \"$multiply\": [100, \"&TCP_ATOMIC_TAGCONFLICT_STALL_CYCLES_sum\"] }, \"&TCP_GATE_EN1_sum\"] },\n                    null\n                ]\n            }}, \n            \"atomicTagRam_Stall_min\":{\"$min\":{\n                \"$cond\":[\n                    {\"$ne\": [\"&TCP_GATE_EN1_sum\", 0]}, \n                    {\"$divide\": [ { \"$multiply\": [100, \"&TCP_ATOMIC_TAGCONFLICT_STALL_CYCLES_sum\"] }, \"&TCP_GATE_EN1_sum\"] },\n                    null\n                ]\n            }}, \n            \"atomicTagRam_Stall_max\":{\"$max\":{\n                \"$cond\":[\n                    {\"$ne\": [\"&TCP_GATE_EN1_sum\", 0]}, \n                    {\"$divide\": [ { \"$multiply\": [100, \"&TCP_ATOMIC_TAGCONFLICT_STALL_CYCLES_sum\"] }, \"&TCP_GATE_EN1_sum\"] },\n                    null\n                ]\n            }} \n\n    }},\n    {\"$set\": {\n        \"array\": [\n            {\n            \"Metric\": \"Stalled on L2 Data\",\n            \"Mean\": \"&l2Pending_avg\",\n            \"Min\":  \"&l2Pending_min\",\n            \"Max\":  \"&l2Pending_max\",\n            \"unit\":\"pct\"\n            },\n            {\n            \"Metric\": \"Stalled on L2 Req\",\n            \"Mean\": \"&tcr2tcp_Stall_avg\",\n            \"Min\":\"&tcr2tcp_Stall_min\",\n            \"Max\":\"&tcr2tcp_Stall_max\",\n            \"unit\":\"pct\"\n            },\n            {\n            \"Metric\": \"Tag RAM Stall (Read)\",\n            \"Mean\": \"&readTagRam_Stall_avg\",\n            \"Min\":  \"&readTagRam_Stall_min\",\n            \"Max\":  \"&readTagRam_Stall_max\",\n            \"unit\":\"pct\"\n            },\n            {\n            \"Metric\": \"Tag RAM Stall (Write)\",\n            \"Mean\": \"&writeTagRam_Stall_avg\",\n            \"Min\":  \"&writeTagRam_Stall_min\",\n            \"Max\":  \"&writeTagRam_Stall_max\",\n            \"unit\":\"pct\"\n            },\n            {\n            \"Metric\": \"Tag RAM Stall (Atomic)\",\n            \"Mean\": \"&atomicTagRam_Stall_avg\",\n            \"Min\":  \"&atomicTagRam_Stall_min\",\n            \"Max\":  \"&atomicTagRam_Stall_max\",\n            \"unit\":\"pct\"\n            }\n        ]\n    }},\n    {\"$unwind\": {\n        \"path\": \"&array\"\n    }},\n    {\"$replaceRoot\": {\n        \"newRoot\": \"&array\"\n    }}\n]);",
+          "type": "table"
+        },
+        {
+          "datasource": {
+            "type": "amd-miperf-data-plugin",
+            "uid": "Zzw1yR27k"
+          },
+          "hide": false,
+          "rawQuery": true,
+          "refId": "B",
+          "target": "${Workload2}.pmc_perf.aggregate([\n    {\"$match\": {\n        \"Index\": { \"$in\": [${DispatchIDFilter2:raw}] },\n        \"gpu-id\": { \"$in\": [${gpuFilter2:raw}] },\n        \"KernelName\": { \"$in\": ${KernelNameFilter2:json}},\n        \"$expr\":{\"$regexMatch\": {\"input\":\"${select}\",\"regex\":\"(Vector L1D Cache)\"}}\n    }},\n    {\"$group\": {\n        \"_id\": null,\n\n            \"l2Pending_avg\": {\"$avg\": {\n                \"$cond\":[\n                    {\"$ne\": [\"&TCP_GATE_EN1_sum\", 0]}, \n                    {\"$divide\": [ { \"$multiply\": [100, \"&TCP_PENDING_STALL_CYCLES_sum\"] }, \"&TCP_GATE_EN1_sum\"] },\n                    null\n                ]\n            }},\n            \"l2Pending_min\": {\"$min\": {\n                \"$cond\":[\n                    {\"$ne\": [\"&TCP_GATE_EN1_sum\", 0]}, \n                    {\"$divide\": [ { \"$multiply\": [100, \"&TCP_PENDING_STALL_CYCLES_sum\"] }, \"&TCP_GATE_EN1_sum\"] },\n                    null\n                ]\n            }},\n            \"l2Pending_max\": {\"$max\": {\n                \"$cond\":[\n                    {\"$ne\": [\"&TCP_GATE_EN1_sum\", 0]}, \n                    {\"$divide\": [ { \"$multiply\": [100, \"&TCP_PENDING_STALL_CYCLES_sum\"] }, \"&TCP_GATE_EN1_sum\"] },\n                    null\n                ]\n            }},\n\n            \"tcr2tcp_Stall_avg\":{\"$avg\":{\n                \"$cond\":[\n                    {\"$ne\": [\"&TCP_GATE_EN1_sum\", 0]}, \n                    {\"$divide\": [ { \"$multiply\": [100, \"&TCP_TCR_TCP_STALL_CYCLES_sum\"] }, \"&TCP_GATE_EN1_sum\"] },\n                    null\n                ]\n            }},\n            \"tcr2tcp_Stall_min\":{\"$min\":{\n                \"$cond\":[\n                    {\"$ne\": [\"&TCP_GATE_EN1_sum\", 0]}, \n                    {\"$divide\": [ { \"$multiply\": [100, \"&TCP_TCR_TCP_STALL_CYCLES_sum\"] }, \"&TCP_GATE_EN1_sum\"] },\n                    null\n                ]\n            }},\n            \"tcr2tcp_Stall_max\":{\"$max\":{\n                \"$cond\":[\n                    {\"$ne\": [\"&TCP_GATE_EN1_sum\", 0]}, \n                    {\"$divide\": [ { \"$multiply\": [100, \"&TCP_TCR_TCP_STALL_CYCLES_sum\"] }, \"&TCP_GATE_EN1_sum\"] },\n                    null\n                ]\n            }},\n             \n            \"readTagRam_Stall_avg\": {\"$avg\":{\n                \"$cond\":[\n                    {\"$ne\": [\"&TCP_GATE_EN1_sum\", 0]}, \n                    {\"$divide\": [ { \"$multiply\": [100, \"&TCP_READ_TAGCONFLICT_STALL_CYCLES_sum\"] }, \"&TCP_GATE_EN1_sum\"]},\n                    null\n                ]\n            }},\n            \"readTagRam_Stall_min\": {\"$min\":{\n                \"$cond\":[\n                    {\"$ne\": [\"&TCP_GATE_EN1_sum\", 0]}, \n                    {\"$divide\": [ { \"$multiply\": [100, \"&TCP_READ_TAGCONFLICT_STALL_CYCLES_sum\"] }, \"&TCP_GATE_EN1_sum\"]},\n                    null\n                ]\n            }},\n            \"readTagRam_Stall_max\": {\"$max\":{\n                \"$cond\":[\n                    {\"$ne\": [\"&TCP_GATE_EN1_sum\", 0]}, \n                    {\"$divide\": [ { \"$multiply\": [100, \"&TCP_READ_TAGCONFLICT_STALL_CYCLES_sum\"] }, \"&TCP_GATE_EN1_sum\"]},\n                    null\n                ]\n            }},\n            \n            \"writeTagRam_Stall_avg\": {\"$avg\":{\n                \"$cond\":[\n                    {\"$ne\": [\"&TCP_GATE_EN1_sum\", 0]}, \n                    {\"$divide\": [ { \"$multiply\": [100, \"&TCP_WRITE_TAGCONFLICT_STALL_CYCLES_sum\"] }, \"&TCP_GATE_EN1_sum\"] },\n                    null\n                ]\n            }},\n            \"writeTagRam_Stall_min\": {\"$min\":{\n                \"$cond\":[\n                    {\"$ne\": [\"&TCP_GATE_EN1_sum\", 0]}, \n                    {\"$divide\": [ { \"$multiply\": [100, \"&TCP_WRITE_TAGCONFLICT_STALL_CYCLES_sum\"] }, \"&TCP_GATE_EN1_sum\"] },\n                    null\n                ]\n            }},\n            \"writeTagRam_Stall_max\": {\"$max\":{\n                \"$cond\":[\n                    {\"$ne\": [\"&TCP_GATE_EN1_sum\", 0]}, \n                    {\"$divide\": [ { \"$multiply\": [100, \"&TCP_WRITE_TAGCONFLICT_STALL_CYCLES_sum\"] }, \"&TCP_GATE_EN1_sum\"] },\n                    null\n                ]\n            }},\n            \n            \n            \"atomicTagRam_Stall_avg\":{\"$avg\":{\n                \"$cond\":[\n                    {\"$ne\": [\"&TCP_GATE_EN1_sum\", 0]}, \n                    {\"$divide\": [ { \"$multiply\": [100, \"&TCP_ATOMIC_TAGCONFLICT_STALL_CYCLES_sum\"] }, \"&TCP_GATE_EN1_sum\"] },\n                    null\n                ]\n            }}, \n            \"atomicTagRam_Stall_min\":{\"$min\":{\n                \"$cond\":[\n                    {\"$ne\": [\"&TCP_GATE_EN1_sum\", 0]}, \n                    {\"$divide\": [ { \"$multiply\": [100, \"&TCP_ATOMIC_TAGCONFLICT_STALL_CYCLES_sum\"] }, \"&TCP_GATE_EN1_sum\"] },\n                    null\n                ]\n            }}, \n            \"atomicTagRam_Stall_max\":{\"$max\":{\n                \"$cond\":[\n                    {\"$ne\": [\"&TCP_GATE_EN1_sum\", 0]}, \n                    {\"$divide\": [ { \"$multiply\": [100, \"&TCP_ATOMIC_TAGCONFLICT_STALL_CYCLES_sum\"] }, \"&TCP_GATE_EN1_sum\"] },\n                    null\n                ]\n            }} \n\n    }},\n    {\"$set\": {\n        \"array\": [\n            {\n            \"Metric\": \"Stalled on L2 Data\",\n            \"Mean\": \"&l2Pending_avg\",\n            \"Min\":  \"&l2Pending_min\",\n            \"Max\":  \"&l2Pending_max\",\n            \"unit\":\"pct\"\n            },\n            {\n            \"Metric\": \"Stalled on L2 Req\",\n            \"Mean\": \"&tcr2tcp_Stall_avg\",\n            \"Min\":\"&tcr2tcp_Stall_min\",\n            \"Max\":\"&tcr2tcp_Stall_max\",\n            \"unit\":\"pct\"\n            },\n\n            {\n            \"Metric\": \"Tag RAM Stall (Read)\",\n            \"Mean\": \"&readTagRam_Stall_avg\",\n            \"Min\":  \"&readTagRam_Stall_min\",\n            \"Max\":  \"&readTagRam_Stall_max\",\n            \"unit\":\"pct\"\n            },\n            {\n            \"Metric\": \"Tag RAM Stall (Write)\",\n            \"Mean\": \"&writeTagRam_Stall_avg\",\n            \"Min\":  \"&writeTagRam_Stall_min\",\n            \"Max\":  \"&writeTagRam_Stall_max\",\n            \"unit\":\"pct\"\n            },\n            {\n            \"Metric\": \"Tag RAM Stall (Atomic)\",\n            \"Mean\": \"&atomicTagRam_Stall_avg\",\n            \"Min\":  \"&atomicTagRam_Stall_min\",\n            \"Max\":  \"&atomicTagRam_Stall_max\",\n            \"unit\":\"pct\"\n            }\n        ]\n    }},\n    {\"$unwind\": {\n        \"path\": \"&array\"\n    }},\n    {\"$replaceRoot\": {\n        \"newRoot\": \"&array\"\n    }}\n]);",
+          "type": "table"
+        }
+      ],
+      "title": "Vector L1D Cache Stalls",
+      "transformations": [
+        {
+          "id": "concatenate",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Metric 2": true,
+              "Units 2": true,
+              "unit 2": true
+            },
+            "indexByName": {
+              "Max 1": 6,
+              "Max 2": 7,
+              "Mean 1": 2,
+              "Mean 2": 3,
+              "Metric 1": 0,
+              "Metric 2": 1,
+              "Min 1": 4,
+              "Min 2": 5,
+              "unit 1": 9,
+              "unit 2": 8
+            },
+            "renameByName": {
+              "Max 1": "Max (Current)",
+              "Max 2": "Max (Baseline)",
+              "Mean 1": "Avg (Current)",
+              "Mean 2": "Avg (Baseline)",
+              "Min 1": "Min (Current)",
+              "Min 2": "Min (Baseline)",
+              "unit 1": "Unit"
+            }
+          }
+        }
+      ],
+      "type": "table"
+    },
+    {
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "align": "auto",
+            "displayMode": "auto"
+          },
+          "decimals": 0,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "locale"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Unit"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 116
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Avg (Current)"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 78
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Min (Current)"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 139
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Max (Current)"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 50
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "max"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 148
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Avg (Baseline)"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 127
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Min (Baseline)"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 111
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 18,
+        "w": 12,
+        "x": 0,
+        "y": 28
+      },
+      "id": 128,
+      "options": {
+        "footer": {
+          "fields": "",
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
+        "showHeader": true,
+        "sortBy": []
+      },
+      "pluginVersion": "8.3.4",
+      "targets": [
+        {
+          "datasource": {
+            "type": "amd-miperf-data-plugin",
+            "uid": "Zzw1yR27k"
+          },
+          "hide": false,
+          "rawQuery": true,
+          "refId": "A",
+          "target": "${Workload1}.pmc_perf.aggregate([\n    {\"$match\": {\n    \"Index\": { \"$in\": [${DispatchIDFilter:raw}] },\n    \"gpu-id\": { \"$in\": [${gpuFilter:raw}] },\n    \"KernelName\": { \"$in\": ${KernelNameFilter:json}}\n    }},\n    {\"$addFields\": {\n        \"denom\": {\n                \"$switch\" : {\n                \"branches\": [\n                    {\n                        \"case\":  { \"$eq\": [ $normUnit, \"per Wave\"]} ,\n                        \"then\":  \"&SQ_WAVES\"\n                    },\n                    {\n                        \"case\":  { \"$eq\": [ $normUnit, \"per Cycle\"]} ,\n                        \"then\":  \"&GRBM_GUI_ACTIVE\"\n                    },\n                    {\n                        \"case\":  { \"$eq\": [ $normUnit, \"per Sec\"]} ,\n                        \"then\":  {\"$divide\":[{\"$subtract\": [\"&EndNs\", \"&BeginNs\" ]}, 1000000000]}\n                    }\n                ],\n                \"default\": 1\n                }         \n        } \n    }},\n    {\"$group\": {\n        \"_id\": null,\n\n            \"totalReq_avg\":{\"$avg\": { \"$divide\": [ \"&TCP_TOTAL_ACCESSES_sum\", \"&denom\" ] }},\n            \"totalReq_min\":{\"$min\": { \"$divide\": [ \"&TCP_TOTAL_ACCESSES_sum\", \"&denom\" ] }},\n            \"totalReq_max\":{\"$max\": { \"$divide\": [ \"&TCP_TOTAL_ACCESSES_sum\", \"&denom\" ] }},\n\n            \"readReq_avg\":{\"$avg\": {\"$divide\": [ \"&TCP_TOTAL_READ_sum\", \"&denom\" ] }},\n            \"readReq_min\":{\"$min\": {\"$divide\": [ \"&TCP_TOTAL_READ_sum\", \"&denom\" ] }},\n            \"readReq_max\":{\"$max\": {\"$divide\": [ \"&TCP_TOTAL_READ_sum\", \"&denom\" ] }},\n\n            \"writeReq_avg\":{\"$avg\": {\"$divide\": [ \"&TCP_TOTAL_WRITE_sum\", \"&denom\" ]}},\n            \"writeReq_min\":{\"$min\": {\"$divide\": [ \"&TCP_TOTAL_WRITE_sum\", \"&denom\" ]}},\n            \"writeReq_max\":{\"$max\": {\"$divide\": [ \"&TCP_TOTAL_WRITE_sum\", \"&denom\" ]}},\n\n            \"atomicReq_avg\":{\"$avg\": {\"$divide\": [ { \"$add\": [\"&TCP_TOTAL_ATOMIC_WITH_RET_sum\", \"&TCP_TOTAL_ATOMIC_WITHOUT_RET_sum\"] }, \"&denom\"]}},\n            \"atomicReq_min\":{\"$min\": {\"$divide\": [ { \"$add\": [\"&TCP_TOTAL_ATOMIC_WITH_RET_sum\", \"&TCP_TOTAL_ATOMIC_WITHOUT_RET_sum\"] }, \"&denom\"]}},\n            \"atomicReq_max\":{\"$max\": {\"$divide\": [ { \"$add\": [\"&TCP_TOTAL_ATOMIC_WITH_RET_sum\", \"&TCP_TOTAL_ATOMIC_WITHOUT_RET_sum\"] }, \"&denom\"]}},\n\n            \"cacheBW_avg\":{\"$avg\": { \"$divide\": [{ \"$multiply\": [\"&TCP_TOTAL_CACHE_ACCESSES_sum\", 64 ] }, { \"$subtract\": [\"&EndNs\", \"&BeginNs\"] } ] }},\n            \"cacheBW_min\":{\"$min\": { \"$divide\": [{ \"$multiply\": [\"&TCP_TOTAL_CACHE_ACCESSES_sum\", 64 ] }, { \"$subtract\": [\"&EndNs\", \"&BeginNs\"] } ] }},\n            \"cacheBW_max\":{\"$max\": { \"$divide\": [{ \"$multiply\": [\"&TCP_TOTAL_CACHE_ACCESSES_sum\", 64 ] }, { \"$subtract\": [\"&EndNs\", \"&BeginNs\"] } ] }},\n            \n            \"cacheAccess_avg\":{\"$avg\": {\"$divide\": [ \"&TCP_TOTAL_CACHE_ACCESSES_sum\", \"&denom\"]}},\n            \"cacheAccess_min\":{\"$min\": {\"$divide\": [ \"&TCP_TOTAL_CACHE_ACCESSES_sum\", \"&denom\"]}},\n            \"cacheAccess_max\":{\"$max\": {\"$divide\": [ \"&TCP_TOTAL_CACHE_ACCESSES_sum\", \"&denom\"]}},\n\n            \"cacheHits_avg\":{\"$avg\": {\"$divide\": [ \n                                { \"$subtract\": [\n                                    \"&TCP_TOTAL_CACHE_ACCESSES_sum\", \n                                    { \"$add\": [\"&TCP_TCC_READ_REQ_sum\", \"&TCP_TCC_WRITE_REQ_sum\", \"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"]}\n                                ]}, \n                                \"&denom\"\n                        ]}\n            },\n            \"cacheHits_min\":{\"$min\": {\"$divide\": [ \n                                { \"$subtract\": [\n                                    \"&TCP_TOTAL_CACHE_ACCESSES_sum\", \n                                    { \"$add\": [\"&TCP_TCC_READ_REQ_sum\", \"&TCP_TCC_WRITE_REQ_sum\", \"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"]}\n                                ]}, \n                                \"&denom\"\n                        ]}\n            },\n            \"cacheHits_max\":{\"$max\": {\"$divide\": [ \n                                { \"$subtract\": [\n                                    \"&TCP_TOTAL_CACHE_ACCESSES_sum\", \n                                    { \"$add\": [\"&TCP_TCC_READ_REQ_sum\", \"&TCP_TCC_WRITE_REQ_sum\", \"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"]}\n                                ]}, \n                                \"&denom\"\n                        ]}\n            },\n            \n            \"cacheHitRate_avg\":{\"$avg\": {\n                \"$cond\": [{\"$ne\": [\"&TCP_TOTAL_CACHE_ACCESSES_sum\", 0]},                 \n                            {\"$subtract\": [100, \n                                            { \"$divide\": [ \n                                                { \"$multiply\": [100, \n                                                                { \"$add\": [\"&TCP_TCC_READ_REQ_sum\", \"&TCP_TCC_WRITE_REQ_sum\", \"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"] }\n                                                                ] \n                                                }, \n                                                \"&TCP_TOTAL_CACHE_ACCESSES_sum\"\n                                            ]}\n                        ]},\n                        null\n                ]\n            }},\n            \"cacheHitRate_min\":{\"$min\": {\n                \"$cond\": [{\"$ne\": [\"&TCP_TOTAL_CACHE_ACCESSES_sum\", 0]},                 \n                            {\"$subtract\": [100, \n                                            { \"$divide\": [ \n                                                { \"$multiply\": [100, \n                                                                { \"$add\": [\"&TCP_TCC_READ_REQ_sum\", \"&TCP_TCC_WRITE_REQ_sum\", \"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"] }\n                                                                ] \n                                                }, \n                                                \"&TCP_TOTAL_CACHE_ACCESSES_sum\"\n                                            ]}\n                        ]},\n                        null\n                ]\n            }},\n            \"cacheHitRate_max\":{\"$max\": {\n                \"$cond\": [{\"$ne\": [\"&TCP_TOTAL_CACHE_ACCESSES_sum\", 0]},                 \n                            {\"$subtract\": [100, \n                                            { \"$divide\": [ \n                                                { \"$multiply\": [100, \n                                                                { \"$add\": [\"&TCP_TCC_READ_REQ_sum\", \"&TCP_TCC_WRITE_REQ_sum\", \"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"] }\n                                                                ] \n                                                }, \n                                                \"&TCP_TOTAL_CACHE_ACCESSES_sum\"\n                                            ]}\n                        ]},\n                        null\n                ]\n            }},\n            \n            \"l2_l1_read_avg\":{\"$avg\": {\"$divide\": [ \"&TCP_TCC_READ_REQ_sum\", \"&denom\"]}},\n            \"l2_l1_read_min\":{\"$min\": {\"$divide\": [ \"&TCP_TCC_READ_REQ_sum\", \"&denom\"]}},\n            \"l2_l1_read_max\":{\"$max\": {\"$divide\": [ \"&TCP_TCC_READ_REQ_sum\", \"&denom\"]}},\n\n            \"l2_l1_write_avg\":{\"$avg\": {\"$divide\": [ \"&TCP_TCC_WRITE_REQ_sum\", \"&denom\"] }},\n            \"l2_l1_write_min\":{\"$min\": {\"$divide\": [ \"&TCP_TCC_WRITE_REQ_sum\", \"&denom\"] }},\n            \"l2_l1_write_max\":{\"$max\": {\"$divide\": [ \"&TCP_TCC_WRITE_REQ_sum\", \"&denom\"] }},\n\n\n            \"l2_l1_atomic_avg\":{\"$avg\": {\"$divide\": [ { \"$add\": [\"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"] }, \"&denom\"] }},\n            \"l2_l1_atomic_min\":{\"$min\": {\"$divide\": [ { \"$add\": [\"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"] }, \"&denom\"] }},\n            \"l2_l1_atomic_max\":{\"$max\": {\"$divide\": [ { \"$add\": [\"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"] }, \"&denom\"] }},\n\n            \"l2_l1_bw_avg\":{\"$avg\": {\"$divide\": [{\"$multiply\": [64, {\"$add\": [\"&TCP_TCC_READ_REQ_sum\", \"&TCP_TCC_WRITE_REQ_sum\", \"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"] } ]}, \"&denom\" ]}},\n            \"l2_l1_bw_min\":{\"$min\": {\"$divide\": [{\"$multiply\": [64, {\"$add\": [\"&TCP_TCC_READ_REQ_sum\", \"&TCP_TCC_WRITE_REQ_sum\", \"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"] } ]}, \"&denom\" ]}},\n            \"l2_l1_bw_max\":{\"$max\": {\"$divide\": [{\"$multiply\": [64, {\"$add\": [\"&TCP_TCC_READ_REQ_sum\", \"&TCP_TCC_WRITE_REQ_sum\", \"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"] } ]}, \"&denom\" ]}},\n\n            \"invalidate_avg\":{\"$avg\": {\"$divide\": [ \"&TCP_TOTAL_WRITEBACK_INVALIDATES_sum\", \"&denom\"] }},\n            \"invalidate_min\":{\"$min\": {\"$divide\": [ \"&TCP_TOTAL_WRITEBACK_INVALIDATES_sum\", \"&denom\"] }},\n            \"invalidate_max\":{\"$max\": {\"$divide\": [ \"&TCP_TOTAL_WRITEBACK_INVALIDATES_sum\", \"&denom\"] }},\n\n\n            \"l1Latency_avg\":{\"$avg\": {\n                \"$cond\": [\n                    {\"$ne\": [\"&TCP_TA_TCP_STATE_READ_sum\", 0]},\n                    {\"$divide\": [ \"&TCP_TCP_LATENCY_sum\", \"&TCP_TA_TCP_STATE_READ_sum\" ]},\n                    null\n                ] \n            }},\n            \"l1Latency_min\":{\"$min\": {\n                \"$cond\": [\n                    {\"$ne\": [\"&TCP_TA_TCP_STATE_READ_sum\", 0]},\n                    {\"$divide\": [ \"&TCP_TCP_LATENCY_sum\", \"&TCP_TA_TCP_STATE_READ_sum\" ]},\n                    null\n                ] \n            }},\n            \"l1Latency_max\":{\"$max\": {\n                \"$cond\": [\n                    {\"$ne\": [\"&TCP_TA_TCP_STATE_READ_sum\", 0]},\n                    {\"$divide\": [ \"&TCP_TCP_LATENCY_sum\", \"&TCP_TA_TCP_STATE_READ_sum\" ]},\n                    null\n                ] \n            }},\n\n\n            \"l2ReadLatency_avg\":{\"$avg\": {\n                \"$cond\": [\n                    {\"$ne\": [{\"$add\": [\"&TCP_TCC_READ_REQ_sum\", \"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\"]}, 0]},\n                    {\"$divide\": [ \"&TCP_TCC_READ_REQ_LATENCY_sum\", { \"$add\": [\"&TCP_TCC_READ_REQ_sum\", \"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\"] }]},\n                    null\n                ] \n            }},\n            \"l2ReadLatency_min\":{\"$min\": {\n                \"$cond\": [\n                    {\"$ne\": [{\"$add\": [\"&TCP_TCC_READ_REQ_sum\", \"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\"]}, 0]},\n                    {\"$divide\": [ \"&TCP_TCC_READ_REQ_LATENCY_sum\", { \"$add\": [\"&TCP_TCC_READ_REQ_sum\", \"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\"] }]},\n                    null\n                ] \n            }},\n            \"l2ReadLatency_max\":{\"$max\": {\n                \"$cond\": [\n                    {\"$ne\": [{\"$add\": [\"&TCP_TCC_READ_REQ_sum\", \"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\"]}, 0]},\n                    {\"$divide\": [ \"&TCP_TCC_READ_REQ_LATENCY_sum\", { \"$add\": [\"&TCP_TCC_READ_REQ_sum\", \"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\"] }]},\n                    null\n                ] \n            }},\n\n            \"l2WriteLatency_avg\":{\"$avg\": {\n                \"$cond\": [\n                    {\"$ne\": [{\"$add\": [\"&TCP_TCC_WRITE_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"]}, 0]},\n                    {\"$divide\": [ \"&TCP_TCC_WRITE_REQ_LATENCY_sum\", { \"$add\": [\"&TCP_TCC_WRITE_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"] }]},\n                    null\n                ]\n            }},\n            \"l2WriteLatency_min\":{\"$min\": {\n                \"$cond\": [\n                    {\"$ne\": [{\"$add\": [\"&TCP_TCC_WRITE_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"]}, 0]},\n                    {\"$divide\": [ \"&TCP_TCC_WRITE_REQ_LATENCY_sum\", { \"$add\": [\"&TCP_TCC_WRITE_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"] }]},\n                    null\n                ]\n            }},\n            \"l2WriteLatency_max\":{\"$max\": {\n                \"$cond\": [\n                    {\"$ne\": [{\"$add\": [\"&TCP_TCC_WRITE_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"]}, 0]},\n                    {\"$divide\": [ \"&TCP_TCC_WRITE_REQ_LATENCY_sum\", { \"$add\": [\"&TCP_TCC_WRITE_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"] }]},\n                    null\n                ]\n            }}\n\n\n    }},\n    {\"$set\": {\n    \"array\": [\n        {\n            \"metric\": \"Total Req\",\n            \"avg\": \"&totalReq_avg\",\n            \"min\": \"&totalReq_min\",\n            \"max\": \"&totalReq_max\",\n            \"Unit\": {\"$concat\": [\"Req \", $normUnit]}\n        },\n        {\n            \"metric\": \"Read Req\",\n            \"avg\": \"&readReq_avg\",\n            \"min\": \"&readReq_min\",\n            \"max\": \"&readReq_max\",\n            \"Unit\": {\"$concat\": [\"Req \", $normUnit]}\n        },\n        {\n            \"metric\": \"Write Req\",\n            \"avg\": \"&writeReq_avg\",\n            \"min\": \"&writeReq_min\",\n            \"max\": \"&writeReq_max\",\n            \"Unit\": {\"$concat\": [\"Req \", $normUnit]}\n        },\n        {\n            \"metric\": \"Atomic Req\",\n            \"avg\": \"&l2_l1_atomic_avg\",\n            \"min\": \"&l2_l1_atomic_min\",\n            \"max\": \"&l2_l1_atomic_max\",\n            \"Unit\": {\"$concat\": [\"Req \", $normUnit]}\n        },\n        {\n            \"metric\": \"Cache BW\",\n            \"avg\": \"&cacheBW_avg\",\n            \"min\": \"&cacheBW_min\",\n            \"max\": \"&cacheBW_max\",\n            \"Unit\": \"GB/s\"\n        },\n        {\n            \"metric\": \"Cache Accesses\",\n            \"avg\": \"&cacheAccess_avg\",\n            \"min\": \"&cacheAccess_min\",\n            \"max\": \"&cacheAccess_max\",\n            \"Unit\": {\"$concat\": [\"Req \", $normUnit]}\n        },\n        {\n            \"metric\": \"Cache Hits\",\n            \"avg\": \"&cacheHits_avg\",\n            \"min\": \"&cacheHits_min\",\n            \"max\": \"&cacheHits_max\",\n            \"Unit\": {\"$concat\": [\"Req \", $normUnit]}\n        },\n        {\n            \"metric\": \"Cache Hit Rate\",\n            \"avg\": \"&cacheHitRate_avg\",\n            \"min\": \"&cacheHitRate_min\",\n            \"max\": \"&cacheHitRate_max\",\n            \"Unit\": \"pct\"\n        },\n        {\n            \"metric\": \"Invalidate\",\n            \"avg\": \"&invalidate_avg\",\n            \"min\": \"&invalidate_min\",\n            \"max\": \"&invalidate_max\",\n            \"Unit\": {\"$concat\": [\"\", $normUnit]}\n        },\n        {\n            \"metric\": \"L1-L2 BW\",\n            \"avg\": \"&l2_l1_bw_avg\",\n            \"min\": \"&l2_l1_bw_avg\",\n            \"max\": \"&l2_l1_bw_avg\",\n            \"Unit\": {\"$concat\": [\"Bytes \", $normUnit]}\n        },\n        {\n            \"metric\": \"L1-L2 Read\",\n            \"avg\": \"&l2_l1_read_avg\",\n            \"min\": \"&l2_l1_read_min\",\n            \"max\": \"&l2_l1_read_max\",\n            \"Unit\": {\"$concat\": [\"Req \", $normUnit]}\n        },\n        {\n            \"metric\": \"L1-L2 Write\",\n            \"avg\": \"&l2_l1_write_avg\",\n            \"min\": \"&l2_l1_write_min\",\n            \"max\": \"&l2_l1_write_max\",\n            \"Unit\": {\"$concat\": [\"Req \", $normUnit]}\n        },\n        {\n            \"metric\": \"L1-L2 Atomic\",\n            \"avg\": \"&l2_l1_atomic_avg\",\n            \"min\": \"&l2_l1_atomic_min\",\n            \"max\": \"&l2_l1_atomic_max\",\n            \"Unit\": {\"$concat\": [\"Req \", $normUnit]}\n        },\n        {\n            \"metric\": \"L1 Access Latency\",\n            \"avg\": \"&l1Latency_avg\",\n            \"min\": \"&l1Latency_min\",\n            \"max\": \"&l1Latency_max\",\n            \"Unit\": \"Cycles\"\n        },\n        {\n            \"metric\": \"L1-L2 Read Latency\",\n            \"avg\": \"&l2ReadLatency_avg\",\n            \"min\": \"&l2ReadLatency_min\",\n            \"max\": \"&l2ReadLatency_max\",\n            \"Unit\": \"Cycles\"\n        },\n        {\n            \"metric\": \"L1-L2 Write Latency\",\n            \"avg\": \"&l2WriteLatency_avg\",\n            \"min\": \"&l2WriteLatency_min\",\n            \"max\": \"&l2WriteLatency_max\",\n            \"Unit\": \"Cycles\"\n        }\n        ]\n    }},\n    {\"$unwind\": {\n    \"path\": \"&array\"\n    }},\n    {\"$replaceRoot\": {\n    \"newRoot\": \"&array\"\n    }}\n]);",
+          "type": "table"
+        },
+        {
+          "datasource": {
+            "type": "amd-miperf-data-plugin",
+            "uid": "Zzw1yR27k"
+          },
+          "hide": false,
+          "rawQuery": true,
+          "refId": "B",
+          "target": "${Workload2}.pmc_perf.aggregate([\n     {\"$match\": {\n        \"Index\": { \"$in\": [${DispatchIDFilter2:raw}] },\n        \"gpu-id\": { \"$in\": [${gpuFilter2:raw}] },\n        \"KernelName\": { \"$in\": ${KernelNameFilter2:json}},\n        \"$expr\":{\"$regexMatch\": {\"input\":\"${select}\",\"regex\":\"(Vector L1D Cache)\"}}\n    }},\n    {\"$addFields\": {\n        \"denom\": {\n                \"$switch\" : {\n                \"branches\": [\n                    {\n                        \"case\":  { \"$eq\": [ $normUnit, \"per Wave\"]} ,\n                        \"then\":  \"&SQ_WAVES\"\n                    },\n                    {\n                        \"case\":  { \"$eq\": [ $normUnit, \"per Cycle\"]} ,\n                        \"then\":  \"&GRBM_GUI_ACTIVE\"\n                    },\n                    {\n                        \"case\":  { \"$eq\": [ $normUnit, \"per Sec\"]} ,\n                        \"then\":  {\"$divide\":[{\"$subtract\": [\"&EndNs\", \"&BeginNs\" ]}, 1000000000]}\n                    }\n                ],\n                \"default\": 1\n                }         \n        } \n    }},\n    {\"$group\": {\n        \"_id\": null,\n\n            \"totalReq_avg\":{\"$avg\": { \"$divide\": [ \"&TCP_TOTAL_ACCESSES_sum\", \"&denom\" ] }},\n            \"totalReq_min\":{\"$min\": { \"$divide\": [ \"&TCP_TOTAL_ACCESSES_sum\", \"&denom\" ] }},\n            \"totalReq_max\":{\"$max\": { \"$divide\": [ \"&TCP_TOTAL_ACCESSES_sum\", \"&denom\" ] }},\n\n            \"readReq_avg\":{\"$avg\": {\"$divide\": [ \"&TCP_TOTAL_READ_sum\", \"&denom\" ] }},\n            \"readReq_min\":{\"$min\": {\"$divide\": [ \"&TCP_TOTAL_READ_sum\", \"&denom\" ] }},\n            \"readReq_max\":{\"$max\": {\"$divide\": [ \"&TCP_TOTAL_READ_sum\", \"&denom\" ] }},\n\n            \"writeReq_avg\":{\"$avg\": {\"$divide\": [ \"&TCP_TOTAL_WRITE_sum\", \"&denom\" ]}},\n            \"writeReq_min\":{\"$min\": {\"$divide\": [ \"&TCP_TOTAL_WRITE_sum\", \"&denom\" ]}},\n            \"writeReq_max\":{\"$max\": {\"$divide\": [ \"&TCP_TOTAL_WRITE_sum\", \"&denom\" ]}},\n\n            \"atomicReq_avg\":{\"$avg\": {\"$divide\": [ { \"$add\": [\"&TCP_TOTAL_ATOMIC_WITH_RET_sum\", \"&TCP_TOTAL_ATOMIC_WITHOUT_RET_sum\"] }, \"&denom\"]}},\n            \"atomicReq_min\":{\"$min\": {\"$divide\": [ { \"$add\": [\"&TCP_TOTAL_ATOMIC_WITH_RET_sum\", \"&TCP_TOTAL_ATOMIC_WITHOUT_RET_sum\"] }, \"&denom\"]}},\n            \"atomicReq_max\":{\"$max\": {\"$divide\": [ { \"$add\": [\"&TCP_TOTAL_ATOMIC_WITH_RET_sum\", \"&TCP_TOTAL_ATOMIC_WITHOUT_RET_sum\"] }, \"&denom\"]}},\n\n            \"cacheBW_avg\":{\"$avg\": { \"$divide\": [{ \"$multiply\": [\"&TCP_TOTAL_CACHE_ACCESSES_sum\", 64 ] }, { \"$subtract\": [\"&EndNs\", \"&BeginNs\"] } ] }},\n            \"cacheBW_min\":{\"$min\": { \"$divide\": [{ \"$multiply\": [\"&TCP_TOTAL_CACHE_ACCESSES_sum\", 64 ] }, { \"$subtract\": [\"&EndNs\", \"&BeginNs\"] } ] }},\n            \"cacheBW_max\":{\"$max\": { \"$divide\": [{ \"$multiply\": [\"&TCP_TOTAL_CACHE_ACCESSES_sum\", 64 ] }, { \"$subtract\": [\"&EndNs\", \"&BeginNs\"] } ] }},\n            \n            \"cacheAccess_avg\":{\"$avg\": {\"$divide\": [ \"&TCP_TOTAL_CACHE_ACCESSES_sum\", \"&denom\"]}},\n            \"cacheAccess_min\":{\"$min\": {\"$divide\": [ \"&TCP_TOTAL_CACHE_ACCESSES_sum\", \"&denom\"]}},\n            \"cacheAccess_max\":{\"$max\": {\"$divide\": [ \"&TCP_TOTAL_CACHE_ACCESSES_sum\", \"&denom\"]}},\n\n            \"cacheHits_avg\":{\"$avg\": {\"$divide\": [ \n                                { \"$subtract\": [\n                                    \"&TCP_TOTAL_CACHE_ACCESSES_sum\", \n                                    { \"$add\": [\"&TCP_TCC_READ_REQ_sum\", \"&TCP_TCC_WRITE_REQ_sum\", \"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"]}\n                                ]}, \n                                \"&denom\"\n                        ]}\n            },\n            \"cacheHits_min\":{\"$min\": {\"$divide\": [ \n                                { \"$subtract\": [\n                                    \"&TCP_TOTAL_CACHE_ACCESSES_sum\", \n                                    { \"$add\": [\"&TCP_TCC_READ_REQ_sum\", \"&TCP_TCC_WRITE_REQ_sum\", \"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"]}\n                                ]}, \n                                \"&denom\"\n                        ]}\n            },\n            \"cacheHits_max\":{\"$max\": {\"$divide\": [ \n                                { \"$subtract\": [\n                                    \"&TCP_TOTAL_CACHE_ACCESSES_sum\", \n                                    { \"$add\": [\"&TCP_TCC_READ_REQ_sum\", \"&TCP_TCC_WRITE_REQ_sum\", \"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"]}\n                                ]}, \n                                \"&denom\"\n                        ]}\n            },\n            \n            \"cacheHitRate_avg\":{\"$avg\": {\n                \"$cond\": [{\"$ne\": [\"&TCP_TOTAL_CACHE_ACCESSES_sum\", 0]},                 \n                            {\"$subtract\": [100, \n                                            { \"$divide\": [ \n                                                { \"$multiply\": [100, \n                                                                { \"$add\": [\"&TCP_TCC_READ_REQ_sum\", \"&TCP_TCC_WRITE_REQ_sum\", \"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"] }\n                                                                ] \n                                                }, \n                                                \"&TCP_TOTAL_CACHE_ACCESSES_sum\"\n                                            ]}\n                        ]},\n                        null\n                ]\n            }},\n            \"cacheHitRate_min\":{\"$min\": {\n                \"$cond\": [{\"$ne\": [\"&TCP_TOTAL_CACHE_ACCESSES_sum\", 0]},                 \n                            {\"$subtract\": [100, \n                                            { \"$divide\": [ \n                                                { \"$multiply\": [100, \n                                                                { \"$add\": [\"&TCP_TCC_READ_REQ_sum\", \"&TCP_TCC_WRITE_REQ_sum\", \"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"] }\n                                                                ] \n                                                }, \n                                                \"&TCP_TOTAL_CACHE_ACCESSES_sum\"\n                                            ]}\n                        ]},\n                        null\n                ]\n            }},\n            \"cacheHitRate_max\":{\"$max\": {\n                \"$cond\": [{\"$ne\": [\"&TCP_TOTAL_CACHE_ACCESSES_sum\", 0]},                 \n                            {\"$subtract\": [100, \n                                            { \"$divide\": [ \n                                                { \"$multiply\": [100, \n                                                                { \"$add\": [\"&TCP_TCC_READ_REQ_sum\", \"&TCP_TCC_WRITE_REQ_sum\", \"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"] }\n                                                                ] \n                                                }, \n                                                \"&TCP_TOTAL_CACHE_ACCESSES_sum\"\n                                            ]}\n                        ]},\n                        null\n                ]\n            }},\n\n            \"l2_l1_read_avg\":{\"$avg\": {\"$divide\": [ \"&TCP_TCC_READ_REQ_sum\", \"&denom\"]}},\n            \"l2_l1_read_min\":{\"$min\": {\"$divide\": [ \"&TCP_TCC_READ_REQ_sum\", \"&denom\"]}},\n            \"l2_l1_read_max\":{\"$max\": {\"$divide\": [ \"&TCP_TCC_READ_REQ_sum\", \"&denom\"]}},\n\n            \"l2_l1_write_avg\":{\"$avg\": {\"$divide\": [ \"&TCP_TCC_WRITE_REQ_sum\", \"&denom\"] }},\n            \"l2_l1_write_min\":{\"$min\": {\"$divide\": [ \"&TCP_TCC_WRITE_REQ_sum\", \"&denom\"] }},\n            \"l2_l1_write_max\":{\"$max\": {\"$divide\": [ \"&TCP_TCC_WRITE_REQ_sum\", \"&denom\"] }},\n\n\n            \"l2_l1_atomic_avg\":{\"$avg\": {\"$divide\": [ { \"$add\": [\"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"] }, \"&denom\"] }},\n            \"l2_l1_atomic_min\":{\"$min\": {\"$divide\": [ { \"$add\": [\"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"] }, \"&denom\"] }},\n            \"l2_l1_atomic_max\":{\"$max\": {\"$divide\": [ { \"$add\": [\"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"] }, \"&denom\"] }},\n\n            \"l2_l1_bw_avg\":{\"$avg\": {\"$divide\": [{\"$multiply\": [64, {\"$add\": [\"&TCP_TCC_READ_REQ_sum\", \"&TCP_TCC_WRITE_REQ_sum\", \"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"] } ]}, \"&denom\" ]}},\n            \"l2_l1_bw_min\":{\"$min\": {\"$divide\": [{\"$multiply\": [64, {\"$add\": [\"&TCP_TCC_READ_REQ_sum\", \"&TCP_TCC_WRITE_REQ_sum\", \"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"] } ]}, \"&denom\" ]}},\n            \"l2_l1_bw_max\":{\"$max\": {\"$divide\": [{\"$multiply\": [64, {\"$add\": [\"&TCP_TCC_READ_REQ_sum\", \"&TCP_TCC_WRITE_REQ_sum\", \"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"] } ]}, \"&denom\" ]}},\n\n            \"invalidate_avg\":{\"$avg\": {\"$divide\": [ \"&TCP_TOTAL_WRITEBACK_INVALIDATES_sum\", \"&denom\"] }},\n            \"invalidate_min\":{\"$min\": {\"$divide\": [ \"&TCP_TOTAL_WRITEBACK_INVALIDATES_sum\", \"&denom\"] }},\n            \"invalidate_max\":{\"$max\": {\"$divide\": [ \"&TCP_TOTAL_WRITEBACK_INVALIDATES_sum\", \"&denom\"] }},\n\n\n            \"l1Latency_avg\":{\"$avg\": {\n                \"$cond\": [\n                    {\"$ne\": [\"&TCP_TA_TCP_STATE_READ_sum\", 0]},\n                    {\"$divide\": [ \"&TCP_TCP_LATENCY_sum\", \"&TCP_TA_TCP_STATE_READ_sum\" ]},\n                    null\n                ] \n            }},\n            \"l1Latency_min\":{\"$min\": {\n                \"$cond\": [\n                    {\"$ne\": [\"&TCP_TA_TCP_STATE_READ_sum\", 0]},\n                    {\"$divide\": [ \"&TCP_TCP_LATENCY_sum\", \"&TCP_TA_TCP_STATE_READ_sum\" ]},\n                    null\n                ] \n            }},\n            \"l1Latency_max\":{\"$max\": {\n                \"$cond\": [\n                    {\"$ne\": [\"&TCP_TA_TCP_STATE_READ_sum\", 0]},\n                    {\"$divide\": [ \"&TCP_TCP_LATENCY_sum\", \"&TCP_TA_TCP_STATE_READ_sum\" ]},\n                    null\n                ] \n            }},\n\n\n            \"l2ReadLatency_avg\":{\"$avg\": {\n                \"$cond\": [\n                    {\"$ne\": [{\"$add\": [\"&TCP_TCC_READ_REQ_sum\", \"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\"]}, 0]},\n                    {\"$divide\": [ \"&TCP_TCC_READ_REQ_LATENCY_sum\", { \"$add\": [\"&TCP_TCC_READ_REQ_sum\", \"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\"] }]},\n                    null\n                ] \n            }},\n            \"l2ReadLatency_min\":{\"$min\": {\n                \"$cond\": [\n                    {\"$ne\": [{\"$add\": [\"&TCP_TCC_READ_REQ_sum\", \"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\"]}, 0]},\n                    {\"$divide\": [ \"&TCP_TCC_READ_REQ_LATENCY_sum\", { \"$add\": [\"&TCP_TCC_READ_REQ_sum\", \"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\"] }]},\n                    null\n                ] \n            }},\n            \"l2ReadLatency_max\":{\"$max\": {\n                \"$cond\": [\n                    {\"$ne\": [{\"$add\": [\"&TCP_TCC_READ_REQ_sum\", \"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\"]}, 0]},\n                    {\"$divide\": [ \"&TCP_TCC_READ_REQ_LATENCY_sum\", { \"$add\": [\"&TCP_TCC_READ_REQ_sum\", \"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\"] }]},\n                    null\n                ] \n            }},\n\n            \"l2WriteLatency_avg\":{\"$avg\": {\n                \"$cond\": [\n                    {\"$ne\": [{\"$add\": [\"&TCP_TCC_WRITE_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"]}, 0]},\n                    {\"$divide\": [ \"&TCP_TCC_WRITE_REQ_LATENCY_sum\", { \"$add\": [\"&TCP_TCC_WRITE_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"] }]},\n                    null\n                ]\n            }},\n            \"l2WriteLatency_min\":{\"$min\": {\n                \"$cond\": [\n                    {\"$ne\": [{\"$add\": [\"&TCP_TCC_WRITE_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"]}, 0]},\n                    {\"$divide\": [ \"&TCP_TCC_WRITE_REQ_LATENCY_sum\", { \"$add\": [\"&TCP_TCC_WRITE_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"] }]},\n                    null\n                ]\n            }},\n            \"l2WriteLatency_max\":{\"$max\": {\n                \"$cond\": [\n                    {\"$ne\": [{\"$add\": [\"&TCP_TCC_WRITE_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"]}, 0]},\n                    {\"$divide\": [ \"&TCP_TCC_WRITE_REQ_LATENCY_sum\", { \"$add\": [\"&TCP_TCC_WRITE_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"] }]},\n                    null\n                ]\n            }}\n\n    }},\n    {\"$set\": {\n    \"array\": [\n        {\n            \"metric\": \"Total Req\",\n            \"avg\": \"&totalReq_avg\",\n            \"min\": \"&totalReq_min\",\n            \"max\": \"&totalReq_max\",\n            \"Unit\": {\"$concat\": [\"Req \", $normUnit]}\n        },\n        {\n            \"metric\": \"Read Req\",\n            \"avg\": \"&readReq_avg\",\n            \"min\": \"&readReq_min\",\n            \"max\": \"&readReq_max\",\n            \"Unit\": {\"$concat\": [\"Req \", $normUnit]}\n        },\n        {\n            \"metric\": \"Write Req\",\n            \"avg\": \"&writeReq_avg\",\n            \"min\": \"&writeReq_min\",\n            \"max\": \"&writeReq_max\",\n            \"Unit\": {\"$concat\": [\"Req \", $normUnit]}\n        },\n        {\n            \"metric\": \"Atomic Req\",\n            \"avg\": \"&atomicReq_avg\",\n            \"min\": \"&atomicReq_min\",\n            \"max\": \"&atomicReq_max\",\n            \"Unit\": {\"$concat\": [\"Req \", $normUnit]}\n        },\n        {\n            \"metric\": \"Cache BW\",\n            \"avg\": \"&cacheBW_avg\",\n            \"min\": \"&cacheBW_min\",\n            \"max\": \"&cacheBW_max\",\n            \"Unit\": \"GB/s\"\n        },\n        {\n            \"metric\": \"Cache Accesses\",\n            \"avg\": \"&cacheAccess_avg\",\n            \"min\": \"&cacheAccess_min\",\n            \"max\": \"&cacheAccess_max\",\n            \"Unit\": {\"$concat\": [\"Req \", $normUnit]}\n        },\n        {\n            \"metric\": \"Cache Hits\",\n            \"avg\": \"&cacheHits_avg\",\n            \"min\": \"&cacheHits_min\",\n            \"max\": \"&cacheHits_max\",\n            \"Unit\": {\"$concat\": [\"Req \", $normUnit]}\n        },\n        {\n            \"metric\": \"Cache Hit Rate\",\n            \"avg\": \"&cacheHitRate_avg\",\n            \"min\": \"&cacheHitRate_min\",\n            \"max\": \"&cacheHitRate_max\",\n            \"Unit\": \"pct\"\n        },\n        {\n            \"metric\": \"Invalidate\",\n            \"avg\": \"&invalidate_avg\",\n            \"min\": \"&invalidate_min\",\n            \"max\": \"&invalidate_max\",\n            \"Unit\": {\"$concat\": [\"\", $normUnit]}\n        },\n        {\n            \"metric\": \"L1-L2 BW\",\n            \"avg\": \"&l2_l1_bw_avg\",\n            \"min\": \"&l2_l1_bw_avg\",\n            \"max\": \"&l2_l1_bw_avg\",\n            \"Unit\": {\"$concat\": [\"Bytes \", $normUnit]}\n        },\n        {\n            \"metric\": \"L1-L2 Read\",\n            \"avg\": \"&l2_l1_read_avg\",\n            \"min\": \"&l2_l1_read_min\",\n            \"max\": \"&l2_l1_read_max\",\n            \"Unit\": {\"$concat\": [\"Req \", $normUnit]}\n        },\n        {\n            \"metric\": \"L1-L2 Write\",\n            \"avg\": \"&l2_l1_write_avg\",\n            \"min\": \"&l2_l1_write_min\",\n            \"max\": \"&l2_l1_write_max\",\n            \"Unit\": {\"$concat\": [\"Req \", $normUnit]}\n        },\n        {\n            \"metric\": \"L1-L2 Atomic\",\n            \"avg\": \"&l2_l1_atomic_avg\",\n            \"min\": \"&l2_l1_atomic_min\",\n            \"max\": \"&l2_l1_atomic_max\",\n            \"Unit\": {\"$concat\": [\"Req \", $normUnit]}\n        },\n        {\n            \"metric\": \"L1 Access Latency\",\n            \"avg\": \"&l1Latency_avg\",\n            \"min\": \"&l1Latency_min\",\n            \"max\": \"&l1Latency_max\",\n            \"Unit\": \"Cycles\"\n        },\n        {\n            \"metric\": \"L1-L2 Read Latency\",\n            \"avg\": \"&l2ReadLatency_avg\",\n            \"min\": \"&l2ReadLatency_min\",\n            \"max\": \"&l2ReadLatency_max\",\n            \"Unit\": \"Cycles\"\n        },\n        {\n            \"metric\": \"L1-L2 Write Latency\",\n            \"avg\": \"&l2WriteLatency_avg\",\n            \"min\": \"&l2WriteLatency_min\",\n            \"max\": \"&l2WriteLatency_max\",\n            \"Unit\": \"Cycles\"\n        }\n        ]\n    }},\n    {\"$unwind\": {\n    \"path\": \"&array\"\n    }},\n    {\"$replaceRoot\": {\n    \"newRoot\": \"&array\"\n    }}\n]);",
+          "type": "table"
+        }
+      ],
+      "title": "Vector L1D Cache Accesses",
+      "transformations": [
+        {
+          "id": "concatenate",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Unit 2": true,
+              "metric 2": true
+            },
+            "indexByName": {
+              "Unit 1": 9,
+              "Unit 2": 8,
+              "avg 1": 1,
+              "avg 2": 2,
+              "max 1": 5,
+              "max 2": 6,
+              "metric 1": 0,
+              "metric 2": 7,
+              "min 1": 3,
+              "min 2": 4
+            },
+            "renameByName": {
+              "avg 1": "Avg (Current)",
+              "avg 2": "Avg (Baseline)",
+              "max 1": "Max (Current)",
+              "max 2": "Max (Baseline)",
+              "min 1": "Min (Current)",
+              "min 2": "Min (Baseline)"
+            }
+          }
+        }
+      ],
+      "type": "table"
+    },
+    {
+      "Aggregate": "last",
+      "BarPadding": 30,
+      "BaseLineColor": "#ff0000",
+      "BaseLineWidth": 1,
+      "CurveType": "Monotone",
+      "DateFormat": "YYYY-MM-DD HH:mm:ss",
+      "DateTimeColName": "date",
+      "DotColor": "white",
+      "DotSize": 10,
+      "EvenRowColor": "rgba(61, 61, 64, 0.78)",
+      "FlashHighLimitBar": false,
+      "FlashLowLimitBar": false,
+      "GroupColName": "Coherency",
+      "GroupCols": 2,
+      "GroupGap": 5,
+      "GroupLabelColor": "#FF9830",
+      "GroupLabelFontSize": "100%",
+      "GroupNameFilter": "",
+      "GroupRenamingRules": [],
+      "GroupSortString": "",
+      "HighAxisColor": "#ffffff",
+      "HighAxisWidth": 1,
+      "HighBarColor": "rgb(120, 128, 0)",
+      "HighLimitBarColor": "#ff0000",
+      "HighLimitBarFlashColor": "#ffa500",
+      "HighLimitBarFlashTimeout": 1000,
+      "HighLimitLineColor": "#ff0000",
+      "HighLmitLineWidth": 1,
+      "HighSideMargin": 0,
+      "Horizontal": true,
+      "LabelColName": "Xfer",
+      "LabelColor": "#ffffff",
+      "LabelFontSize": "100%",
+      "LabelNameFilter": "",
+      "LabelRenamingRules": [],
+      "LableAngle": 0,
+      "Legend": false,
+      "LineColor": "blue",
+      "LineWidth": 5,
+      "Links": [],
+      "LowAxisColor": "#ffffff",
+      "LowAxisWidth": 1,
+      "LowBarColor": "teal",
+      "LowLimitBarColor": "#ff0000",
+      "LowLimitBarFlashColor": "#ffa500",
+      "LowLimitBarFlashTimeout": 200,
+      "LowLimitLineColor": "#ff0000",
+      "LowLmitLineWidth": 1,
+      "LowSideMargin": 0,
+      "MaxLineColor": "rgb(74, 232, 12)",
+      "MaxLineWidth": 1,
+      "MinLineColor": "#ff0000",
+      "MinLineWidth": 1,
+      "MultiBarPadding": 10,
+      "OddRowColor": "rgba(33, 33, 34, 0.92)",
+      "OutOfRangeLabelColor": "#ffffff",
+      "OutlineColor": "rgba(245, 255, 0, 0.1)",
+      "RecolorHighLimitBar": false,
+      "RecolorLowLimitBar": false,
+      "RecolorRules": [],
+      "ScaleFactor": 1,
+      "ShowBars": true,
+      "ShowBaseLine": false,
+      "ShowDate": false,
+      "ShowGroupLabels": true,
+      "ShowHighLimitLine": false,
+      "ShowLabels": true,
+      "ShowLeftAxis": true,
+      "ShowLines": false,
+      "ShowLowLimitLine": false,
+      "ShowMaxLine": false,
+      "ShowMinLine": false,
+      "ShowRightAxis": true,
+      "ShowValues": true,
+      "SortColName": "value",
+      "SortDirection": "ascending",
+      "TZOffsetHours": 0,
+      "ToolTipFontSize": "100%",
+      "ToolTipType": "",
+      "TooltipDateFormat": "YYYY-MM-DD HH:mm:ss",
+      "VGroupGap": 5,
+      "ValueColName": "",
+      "ValueColor": "#FADE2A",
+      "ValueDecimals": 0,
+      "ValueFontSize": "100%",
+      "ValuePosition": "top",
+      "Values": [
+        {
+          "$$hashKey": "object:172",
+          "Col": 2,
+          "HighBarColor": "rgb(120, 128, 0)",
+          "LowBarColor": "teal",
+          "Name": "Mean",
+          "Selected": true
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 28
+      },
+      "id": 120,
+      "pluginVersion": "8.2.1",
+      "targets": [
+        {
+          "datasource": {
+            "type": "amd-miperf-data-plugin",
+            "uid": "tlh8EwUnk"
+          },
+          "rawQuery": true,
+          "refId": "A",
+          "target": "$Workload1.pmc_perf.aggregate([\n  {\"$match\": {\n      \"Index\": { \"$in\": [${DispatchIDFilter:raw}] },\n      \"gpu-id\": { \"$in\": [${gpuFilter:raw}] },\n      \"KernelName\": { \"$in\": ${KernelNameFilter:json}}\n  }},\n  {\"$addFields\": {\n      \"denom\": {\n             \"$switch\" : {\n                \"branches\": [\n                   {\n                        \"case\":  { \"$eq\": [ $normUnit, \"per Wave\"]} ,\n                        \"then\":  \"&SQ_WAVES\"\n                   },\n                   {\n                        \"case\":  { \"$eq\": [ $normUnit, \"per Cycle\"]} ,\n                        \"then\":  \"&GRBM_GUI_ACTIVE\"\n                   },\n                   {\n                        \"case\":  { \"$eq\": [ $normUnit, \"per Sec\"]} ,\n                        \"then\":  {\"$divide\":[{\"$subtract\": [\"&EndNs\", \"&BeginNs\" ]}, 1000000000]}\n                   }\n                ],\n               \"default\": 1\n             }         \n      } \n  }},\n\n    {\"$group\": {\n        \"_id\": null,\n\n        \"readNC_avg\": {\n            \"$avg\": { \"$divide\": [\"&TCP_TCC_NC_READ_REQ_sum\", \"&denom\"] }\n        },\n        \"readNC_min\": {\n            \"$min\": { \"$divide\": [\"&TCP_TCC_NC_READ_REQ_sum\", \"&denom\"] }\n        },\n        \"readNC_max\": {\n            \"$max\": { \"$divide\": [\"&TCP_TCC_NC_READ_REQ_sum\", \"&denom\"] }\n        },\n        \"readUC_avg\": {\n            \"$avg\": { \"$divide\": [\"&TCP_TCC_UC_READ_REQ_sum\", \"&denom\"] }\n        },\n        \"readUC_min\": {\n            \"$min\": { \"$divide\": [\"&TCP_TCC_UC_READ_REQ_sum\", \"&denom\"] }\n        },\n        \"readUC_max\": {\n            \"$max\": { \"$divide\": [\"&TCP_TCC_UC_READ_REQ_sum\", \"&denom\"] }\n        },\n        \"readCC_avg\": {\n            \"$avg\": { \"$divide\": [\"&TCP_TCC_CC_READ_REQ_sum\", \"&denom\"] }\n        },\n        \"readCC_min\": {\n            \"$min\": { \"$divide\": [\"&TCP_TCC_CC_READ_REQ_sum\", \"&denom\"] }\n        },\n        \"readCC_max\": {\n            \"$max\": { \"$divide\": [\"&TCP_TCC_CC_READ_REQ_sum\", \"&denom\"] }\n        },\n        \"readRW_avg\": {\n            \"$avg\": { \"$divide\": [\"&TCP_TCC_RW_READ_REQ_sum\", \"&denom\"] }\n        },\n        \"readRW_min\": {\n            \"$min\": { \"$divide\": [\"&TCP_TCC_RW_READ_REQ_sum\", \"&denom\"] }\n        },\n        \"readRW_max\": {\n            \"$max\": { \"$divide\": [\"&TCP_TCC_RW_READ_REQ_sum\", \"&denom\"] }\n        },\n        \n        \"writeNC_avg\": {\n            \"$avg\": { \"$divide\": [\"&TCP_TCC_NC_WRITE_REQ_sum\", \"&denom\"] }\n        },\n        \"writeNC_min\": {\n            \"$min\": { \"$divide\": [\"&TCP_TCC_NC_WRITE_REQ_sum\", \"&denom\"] }\n        },\n        \"writeNC_max\": {\n            \"$max\": { \"$divide\": [\"&TCP_TCC_NC_WRITE_REQ_sum\", \"&denom\"] }\n        },\n        \"writeUC_avg\": {\n            \"$avg\": { \"$divide\": [\"&TCP_TCC_UC_WRITE_REQ_sum\", \"&denom\"] }\n        },\n        \"writeUC_min\": {\n            \"$min\": { \"$divide\": [\"&TCP_TCC_UC_WRITE_REQ_sum\", \"&denom\"] }\n        },\n        \"writeUC_max\": {\n            \"$max\": { \"$divide\": [\"&TCP_TCC_UC_WRITE_REQ_sum\", \"&denom\"] }\n        },\n        \"writeCC_avg\": {\n            \"$avg\": { \"$divide\": [\"&TCP_TCC_CC_WRITE_REQ_sum\", \"&denom\"] }\n        },\n        \"writeCC_min\": {\n            \"$min\": { \"$divide\": [\"&TCP_TCC_CC_WRITE_REQ_sum\", \"&denom\"] }\n        },\n        \"writeCC_max\": {\n            \"$max\": { \"$divide\": [\"&TCP_TCC_CC_WRITE_REQ_sum\", \"&denom\"] }\n        },\n        \"writeRW_avg\": {\n            \"$avg\": { \"$divide\": [\"&TCP_TCC_RW_WRITE_REQ_sum\", \"&denom\"] }\n        },\n        \"writeRW_min\": {\n            \"$min\": { \"$divide\": [\"&TCP_TCC_RW_WRITE_REQ_sum\", \"&denom\"] }\n        },\n        \"writeRW_max\": {\n            \"$max\": { \"$divide\": [\"&TCP_TCC_RW_WRITE_REQ_sum\", \"&denom\"] }\n        },\n        \n        \"atomicNC_avg\": {\n            \"$avg\": { \"$divide\": [\"&TCP_TCC_NC_ATOMIC_REQ_sum\", \"&denom\"] }\n        },\n        \"atomicNC_min\": {\n            \"$min\": { \"$divide\": [\"&TCP_TCC_NC_ATOMIC_REQ_sum\", \"&denom\"] }\n        },\n        \"atomicNC_max\": {\n            \"$max\": { \"$divide\": [\"&TCP_TCC_NC_ATOMIC_REQ_sum\", \"&denom\"] }\n        },\n        \"atomicUC_avg\": {\n            \"$avg\": { \"$divide\": [\"&TCP_TCC_UC_ATOMIC_REQ_sum\", \"&denom\"] }\n        },\n        \"atomicUC_min\": {\n            \"$min\": { \"$divide\": [\"&TCP_TCC_UC_ATOMIC_REQ_sum\", \"&denom\"] }\n        },\n        \"atomicUC_max\": {\n            \"$max\": { \"$divide\": [\"&TCP_TCC_UC_ATOMIC_REQ_sum\", \"&denom\"] }\n        },\n        \"atomicCC_avg\": {\n            \"$avg\": { \"$divide\": [\"&TCP_TCC_CC_ATOMIC_REQ_sum\", \"&denom\"] }\n        },\n        \"atomicCC_min\": {\n            \"$min\": { \"$divide\": [\"&TCP_TCC_CC_ATOMIC_REQ_sum\", \"&denom\"] }\n        },\n        \"atomicCC_max\": {\n            \"$max\": { \"$divide\": [\"&TCP_TCC_CC_ATOMIC_REQ_sum\", \"&denom\"] }\n        },\n        \"atomicRW_avg\": {\n            \"$avg\": { \"$divide\": [\"&TCP_TCC_RW_ATOMIC_REQ_sum\", \"&denom\"] }\n        },\n        \"atomicRW_min\": {\n            \"$min\": { \"$divide\": [\"&TCP_TCC_RW_ATOMIC_REQ_sum\", \"&denom\"] }\n        },\n        \"atomicRW_max\": {\n            \"$max\": { \"$divide\": [\"&TCP_TCC_RW_ATOMIC_REQ_sum\", \"&denom\"] }\n        }\n    }},\n    {\"$set\": {\n    \"array\": [\n        {\n          \"Xfer\": \"Read\",\n          \"Coherency\": \"NC\",\n          \"Mean\": \"&readNC_avg\",\n          \"Min\": \"&readNC_min\",\n          \"Max\": \"&readNC_max\",\n          \"Unit\": {\"$concat\": [\"Req \", $normUnit]}\n        },\n        {\n          \"Xfer\": \"Read\",\n          \"Coherency\": \"UC\",\n          \"Mean\": \"&readUC_avg\",\n          \"Min\": \"&readUC_min\",\n          \"Max\": \"&readUC_max\",\n          \"Unit\": {\"$concat\": [\"Req \", $normUnit]}\n        },\n        {\n          \"Xfer\": \"Read\",\n          \"Coherency\": \"CC\",\n          \"Mean\": \"&readCC_avg\",\n          \"Min\": \"&readCC_min\",\n          \"Max\": \"&readCC_max\",\n          \"Unit\": {\"$concat\": [\"Req \", $normUnit]}\n        },\n        {\n          \"Xfer\": \"Read\",\n          \"Coherency\": \"RW\",\n          \"Mean\": \"&readRW_avg\",\n          \"Min\": \"&readRW_min\",\n          \"Max\": \"&readRW_max\",\n          \"Unit\": {\"$concat\": [\"Req \", $normUnit]}\n        },\n        {\n          \"Xfer\": \"Write\",\n          \"Coherency\": \"RW\",\n          \"Mean\": \"&writeRW_avg\",\n          \"Min\": \"&writeRW_min\",\n          \"Max\": \"&writeRW_max\",\n          \"Unit\": {\"$concat\": [\"Req \", $normUnit]}\n        },\n        {\n          \"Xfer\": \"Write\",\n          \"Coherency\": \"NC\",\n          \"Mean\": \"&writeNC_avg\",\n          \"Min\": \"&writeNC_min\",\n          \"Max\": \"&writeNC_max\",\n          \"Unit\": {\"$concat\": [\"Req \", $normUnit]}\n        },\n        {\n          \"Xfer\": \"Write\",\n          \"Coherency\": \"UC\",\n          \"Mean\": \"&writeUC_avg\",\n          \"Min\": \"&writeUC_min\",\n          \"Max\": \"&writeUC_max\",\n          \"Unit\": {\"$concat\": [\"Req \", $normUnit]}\n        },\n        {\n          \"Xfer\": \"Write\",\n          \"Coherency\": \"CC\",\n          \"Mean\": \"&writeCC_avg\",\n          \"Min\": \"&writeCC_min\",\n          \"Max\": \"&writeCC_max\",\n          \"Unit\": {\"$concat\": [\"Req \", $normUnit]}\n        },\n\n        {\n          \"Xfer\": \"Atomic\",\n          \"Coherency\": \"NC\",\n          \"Mean\": \"&atomicNC_avg\",\n          \"Min\": \"&atomicNC_min\",\n          \"Max\": \"&atomicNC_max\",\n          \"Unit\": {\"$concat\": [\"Req \", $normUnit]}\n        },\n        {\n          \"Xfer\": \"Atomic\",\n          \"Coherency\": \"UC\",\n          \"Mean\": \"&atomicUC_avg\",\n          \"Min\": \"&atomicUC_min\",\n          \"Max\": \"&atomicUC_max\",\n          \"Unit\": {\"$concat\": [\"Req \", $normUnit]}\n        },\n        {\n          \"Xfer\": \"Atomic\",\n          \"Coherency\": \"CC\",\n          \"Mean\": \"&atomicCC_avg\",\n          \"Min\": \"&atomicCC_min\",\n          \"Max\": \"&atomicCC_max\",\n          \"Unit\": {\"$concat\": [\"Req \", $normUnit]}\n        },\n        {\n          \"Xfer\": \"Atomic\",\n          \"Coherency\": \"RW\",\n          \"Mean\": \"&atomicRW_avg\",\n          \"Min\": \"&atomicRW_min\",\n          \"Max\": \"&atomicRW_max\",\n          \"Unit\": {\"$concat\": [\"Req \", $normUnit]}\n        }\n      ]\n  }},\n  {\"$unwind\": {\n    \"path\": \"&array\"\n  }},\n  {\"$replaceRoot\": {\n    \"newRoot\": \"&array\"\n  }}\n]);",
+          "type": "table"
+        }
+      ],
+      "title": "Vector L1D - L2 Transactions  Req $normUnit",
+      "transparent": true,
+      "type": "michaeldmoore-multistat-panel"
+    },
+    {
+      "datasource": {},
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "custom": {
+            "align": "auto",
+            "displayMode": "auto"
+          },
+          "decimals": 0,
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "locale"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Units"
+            },
+            "properties": [
+              {
+                "id": "custom.width",
+                "value": 75
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 36
+      },
+      "id": 124,
+      "options": {
+        "footer": {
+          "fields": "",
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
+        "showHeader": true,
+        "sortBy": []
+      },
+      "pluginVersion": "8.3.4",
+      "targets": [
+        {
+          "datasource": {
+            "type": "amd-miperf-data-plugin",
+            "uid": "Zzw1yR27k"
+          },
+          "rawQuery": true,
+          "refId": "A",
+          "target": "${Workload1}.pmc_perf.aggregate([\n    {\"$match\": {\n        \"Index\": { \"$in\": [${DispatchIDFilter:raw}] },\n        \"gpu-id\": { \"$in\": [${gpuFilter:raw}] },\n        \"KernelName\": { \"$in\": ${KernelNameFilter:json}}\n    }},\n    {\"$addFields\": {\n        \"denom\": {\n                \"$switch\" : {\n                \"branches\": [\n                    {\n                        \"case\":  { \"$eq\": [ $normUnit, \"per Wave\"]} ,\n                        \"then\":  \"&SQ_WAVES\"\n                    },\n                    {\n                        \"case\":  { \"$eq\": [ $normUnit, \"per Cycle\"]} ,\n                        \"then\":  \"&GRBM_GUI_ACTIVE\"\n                    },\n                    {\n                        \"case\":  { \"$eq\": [ $normUnit, \"per Sec\"]} ,\n                        \"then\":  {\"$divide\":[{\"$subtract\": [\"&EndNs\", \"&BeginNs\" ]}, 1000000000]}\n                    }\n                ],\n                \"default\": 1\n                }         \n        } \n    }},\n    {\"$group\": {\n        \"_id\": null,\n            \"req_avg\":{\"$avg\": { \"$divide\": [\"&TCP_UTCL1_REQUEST_sum\" ,\"&denom\"] }},\n            \"req_min\":{\"$min\": { \"$divide\": [\"&TCP_UTCL1_REQUEST_sum\" ,\"&denom\"] }},\n            \"req_max\":{\"$max\": { \"$divide\": [\"&TCP_UTCL1_REQUEST_sum\" ,\"&denom\"] }},\n\n\n            \"hitRatio_avg\":{\"$avg\": {\n                \"$cond\": [\n                    {\"$ne\": [\"&TCP_UTCL1_REQUEST_sum\", 0]},\n                    {\"$divide\": [{ \"$multiply\": [100, \"&TCP_UTCL1_TRANSLATION_HIT_sum\"] },\"&TCP_UTCL1_REQUEST_sum\"]},\n                    null\n                ]\n            }},\n            \"hitRatio_min\":{\"$min\": {\n                \"$cond\": [\n                    {\"$ne\": [\"&TCP_UTCL1_REQUEST_sum\", 0]},\n                    {\"$divide\": [{ \"$multiply\": [100, \"&TCP_UTCL1_TRANSLATION_HIT_sum\"] },\"&TCP_UTCL1_REQUEST_sum\"]},\n                    null\n                ]\n            }},\n            \"hitRatio_max\":{\"$max\": {\n                \"$cond\": [\n                    {\"$ne\": [\"&TCP_UTCL1_REQUEST_sum\", 0]},\n                    {\"$divide\": [{ \"$multiply\": [100, \"&TCP_UTCL1_TRANSLATION_HIT_sum\"] },\"&TCP_UTCL1_REQUEST_sum\"]},\n                    null\n                ]\n            }},\n\n            \"hits_avg\":{\"$avg\": { \"$divide\": [\"&TCP_UTCL1_TRANSLATION_HIT_sum\" ,\"&denom\"] }},\n            \"hits_min\":{\"$min\": { \"$divide\": [\"&TCP_UTCL1_TRANSLATION_HIT_sum\" ,\"&denom\"] }},\n            \"hits_max\":{\"$max\": { \"$divide\": [\"&TCP_UTCL1_TRANSLATION_HIT_sum\" ,\"&denom\"] }},\n\n            \"missesTrans_avg\":{\"$avg\": {\"$divide\": [\"&TCP_UTCL1_TRANSLATION_MISS_sum\" ,\"&denom\"] }},\n            \"missesTrans_min\":{\"$min\": {\"$divide\": [\"&TCP_UTCL1_TRANSLATION_MISS_sum\" ,\"&denom\"] }},\n            \"missesTrans_max\":{\"$max\": {\"$divide\": [\"&TCP_UTCL1_TRANSLATION_MISS_sum\" ,\"&denom\"] }},\n\n            \"missesPermis_avg\":{\"$avg\": {\"$divide\": [\"&TCP_UTCL1_PERMISSION_MISS_sum\" ,\"&denom\"] }},\n            \"missesPermis_min\":{\"$min\": {\"$divide\": [\"&TCP_UTCL1_PERMISSION_MISS_sum\" ,\"&denom\"] }},\n            \"missesPermis_max\":{\"$max\": {\"$divide\": [\"&TCP_UTCL1_PERMISSION_MISS_sum\" ,\"&denom\"] }}\n\n    }},\n    {\"$set\": {\n        \"array\": [\n            {\n            \"Metric\": \"Req\",\n            \"Mean\": \"&req_avg\",\n            \"Min\":\"&req_min\",\n            \"Max\":\"&req_max\",\n            \"Units\":{\"$concat\": [\"\", $normUnit]  }\n            },\n            {\n            \"Metric\": \"Hit Ratio\",\n            \"Mean\": \"&hitRatio_avg\",\n            \"Min\":\"&hitRatio_min\",\n            \"Max\":\"&hitRatio_max\",\n            \"Units\":\"pct\"\n            },\n            {\n            \"Metric\": \"Hits\",\n            \"Mean\": \"&hits_avg\",\n            \"Min\":\"&hits_min\",\n            \"Max\":\"&hits_max\",\n            \"Units\":{  \"$concat\": [\"\", $normUnit] }\n            },\n            {\n            \"Metric\": \"Misses (Translation)\",\n            \"Mean\": \"&missesTrans_avg\",\n            \"Min\":\"&missesTrans_min\",\n            \"Max\":\"&missesTrans_max\",\n            \"Units\":{\"$concat\": [\"\", $normUnit] }\n            },\n            {\n            \"Metric\": \"Misses (Permission)\",\n            \"Mean\": \"&missesPermis_avg\",\n            \"Min\":\"&missesPermis_min\",\n            \"Max\":\"&missesPermis_max\",\n            \"Units\":{\"$concat\": [\"\", $normUnit] }\n            }\n        ]\n    }},\n    {\"$unwind\": {\n        \"path\": \"&array\"\n    }},\n    {\"$replaceRoot\": {\n        \"newRoot\": \"&array\"\n    }}\n]);",
+          "type": "table"
+        },
+        {
+          "datasource": {
+            "type": "amd-miperf-data-plugin",
+            "uid": "Zzw1yR27k"
+          },
+          "hide": false,
+          "rawQuery": true,
+          "refId": "B",
+          "target": "${Workload2}.pmc_perf.aggregate([\n    {\"$match\": {\n        \"Index\": { \"$in\": [${DispatchIDFilter2:raw}] },\n        \"gpu-id\": { \"$in\": [${gpuFilter2:raw}] },\n        \"KernelName\": { \"$in\": ${KernelNameFilter2:json}},\n        \"$expr\":{\"$regexMatch\": {\"input\":\"${select}\",\"regex\":\"(Vector L1D Cache)\"}}\n    }},\n    {\"$addFields\": {\n        \"denom\": {\n                \"$switch\" : {\n                \"branches\": [\n                    {\n                        \"case\":  { \"$eq\": [ $normUnit, \"per Wave\"]} ,\n                        \"then\":  \"&SQ_WAVES\"\n                    },\n                    {\n                        \"case\":  { \"$eq\": [ $normUnit, \"per Cycle\"]} ,\n                        \"then\":  \"&GRBM_GUI_ACTIVE\"\n                    },\n                    {\n                        \"case\":  { \"$eq\": [ $normUnit, \"per Sec\"]} ,\n                        \"then\":  {\"$divide\":[{\"$subtract\": [\"&EndNs\", \"&BeginNs\" ]}, 1000000000]}\n                    }\n                ],\n                \"default\": 1\n                }         \n        } \n    }},\n    {\"$group\": {\n        \"_id\": null,\n            \"req_avg\":{\"$avg\": { \"$divide\": [\"&TCP_UTCL1_REQUEST_sum\" ,\"&denom\"] }},\n            \"req_min\":{\"$min\": { \"$divide\": [\"&TCP_UTCL1_REQUEST_sum\" ,\"&denom\"] }},\n            \"req_max\":{\"$max\": { \"$divide\": [\"&TCP_UTCL1_REQUEST_sum\" ,\"&denom\"] }},\n\n\n            \"hitRatio_avg\":{\"$avg\": {\n                \"$cond\": [\n                    {\"$ne\": [\"&TCP_UTCL1_REQUEST_sum\", 0]},\n                    {\"$divide\": [{ \"$multiply\": [100, \"&TCP_UTCL1_TRANSLATION_HIT_sum\"] },\"&TCP_UTCL1_REQUEST_sum\"]},\n                    null\n                ]\n            }},\n            \"hitRatio_min\":{\"$min\": {\n                \"$cond\": [\n                    {\"$ne\": [\"&TCP_UTCL1_REQUEST_sum\", 0]},\n                    {\"$divide\": [{ \"$multiply\": [100, \"&TCP_UTCL1_TRANSLATION_HIT_sum\"] },\"&TCP_UTCL1_REQUEST_sum\"]},\n                    null\n                ]\n            }},\n            \"hitRatio_max\":{\"$max\": {\n                \"$cond\": [\n                    {\"$ne\": [\"&TCP_UTCL1_REQUEST_sum\", 0]},\n                    {\"$divide\": [{ \"$multiply\": [100, \"&TCP_UTCL1_TRANSLATION_HIT_sum\"] },\"&TCP_UTCL1_REQUEST_sum\"]},\n                    null\n                ]\n            }},\n\n            \"hits_avg\":{\"$avg\": { \"$divide\": [\"&TCP_UTCL1_TRANSLATION_HIT_sum\" ,\"&denom\"] }},\n            \"hits_min\":{\"$min\": { \"$divide\": [\"&TCP_UTCL1_TRANSLATION_HIT_sum\" ,\"&denom\"] }},\n            \"hits_max\":{\"$max\": { \"$divide\": [\"&TCP_UTCL1_TRANSLATION_HIT_sum\" ,\"&denom\"] }},\n\n            \"missesTrans_avg\":{\"$avg\": {\"$divide\": [\"&TCP_UTCL1_TRANSLATION_MISS_sum\" ,\"&denom\"] }},\n            \"missesTrans_min\":{\"$min\": {\"$divide\": [\"&TCP_UTCL1_TRANSLATION_MISS_sum\" ,\"&denom\"] }},\n            \"missesTrans_max\":{\"$max\": {\"$divide\": [\"&TCP_UTCL1_TRANSLATION_MISS_sum\" ,\"&denom\"] }},\n\n            \"missesPermis_avg\":{\"$avg\": {\"$divide\": [\"&TCP_UTCL1_PERMISSION_MISS_sum\" ,\"&denom\"] }},\n            \"missesPermis_min\":{\"$min\": {\"$divide\": [\"&TCP_UTCL1_PERMISSION_MISS_sum\" ,\"&denom\"] }},\n            \"missesPermis_max\":{\"$max\": {\"$divide\": [\"&TCP_UTCL1_PERMISSION_MISS_sum\" ,\"&denom\"] }}\n\n    }},\n    {\"$set\": {\n        \"array\": [\n            {\n            \"Metric\": \"Req\",\n            \"Mean\": \"&req_avg\",\n            \"Min\":\"&req_min\",\n            \"Max\":\"&req_max\",\n            \"Units\":{\"$concat\": [\"\", $normUnit]  }\n            },\n            {\n            \"Metric\": \"Hit Ratio\",\n            \"Mean\": \"&hitRatio_avg\",\n            \"Min\":\"&hitRatio_min\",\n            \"Max\":\"&hitRatio_max\",\n            \"Units\":\"pct\"\n            },\n            {\n            \"Metric\": \"Hits\",\n            \"Mean\": \"&hits_avg\",\n            \"Min\":\"&hits_min\",\n            \"Max\":\"&hits_max\",\n            \"Units\":{  \"$concat\": [\"\", $normUnit] }\n            },\n            {\n            \"Metric\": \"Misses (Translation)\",\n            \"Mean\": \"&missesTrans_avg\",\n            \"Min\":\"&missesTrans_min\",\n            \"Max\":\"&missesTrans_max\",\n            \"Units\":{\"$concat\": [\"\", $normUnit] }\n            },\n            {\n            \"Metric\": \"Misses (Permission)\",\n            \"Mean\": \"&missesPermis_avg\",\n            \"Min\":\"&missesPermis_min\",\n            \"Max\":\"&missesPermis_max\",\n            \"Units\":{\"$concat\": [\"\", $normUnit] }\n            }\n        ]\n    }},\n    {\"$unwind\": {\n        \"path\": \"&array\"\n    }},\n    {\"$replaceRoot\": {\n        \"newRoot\": \"&array\"\n    }}\n]);",
+          "type": "table"
+        }
+      ],
+      "title": "Vector L1D Addr Translation",
+      "transformations": [
+        {
+          "id": "concatenate",
+          "options": {}
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Metric 2": true,
+              "Units 2": true
+            },
+            "indexByName": {
+              "Max 1": 7,
+              "Max 2": 8,
+              "Mean 1": 3,
+              "Mean 2": 4,
+              "Metric 1": 0,
+              "Metric 2": 1,
+              "Min 1": 5,
+              "Min 2": 6,
+              "Units 1": 9,
+              "Units 2": 2
+            },
+            "renameByName": {
+              "Max 1": "Max (Current)",
+              "Max 2": "Max (Baseline)",
+              "Mean 1": "Avg (Current)",
+              "Mean 2": "Avg (Baseline)",
+              "Min 1": "Min (Current)",
+              "Min 2": "Min (Baseline)"
+            }
+          }
+        }
+      ],
+      "type": "table"
+    },
+    {
       "collapsed": true,
       "datasource": {
         "type": "amd-miperf-data-plugin",
@@ -7724,7 +7718,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 15
+        "y": 46
       },
       "id": 56,
       "panels": [
@@ -7902,7 +7896,7 @@
             "h": 7,
             "w": 12,
             "x": 0,
-            "y": 16
+            "y": 47
           },
           "id": 64,
           "options": {
@@ -8057,7 +8051,7 @@
             "h": 16,
             "w": 12,
             "x": 12,
-            "y": 16
+            "y": 47
           },
           "id": 62,
           "options": {
@@ -8227,7 +8221,7 @@
             "h": 20,
             "w": 12,
             "x": 0,
-            "y": 23
+            "y": 54
           },
           "id": 58,
           "options": {
@@ -8405,7 +8399,7 @@
             "h": 7,
             "w": 12,
             "x": 12,
-            "y": 32
+            "y": 63
           },
           "id": 60,
           "targets": [
@@ -8447,7 +8441,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 16
+        "y": 47
       },
       "id": 66,
       "panels": [
@@ -12744,9 +12738,9 @@
       },
       {
         "current": {
-          "selected": true,
-          "text": "omniperf_aasg_vcopy_all_mi200",
-          "value": "omniperf_aasg_vcopy_all_mi200"
+          "selected": false,
+          "text": "miperf_ast_reproducer_swatomics_mi200",
+          "value": "miperf_ast_reproducer_swatomics_mi200"
         },
         "definition": "workload_names.names.aggregate([\n  {\"$group\": {\n    \"_id\": \"&name\"\n  }}\n]);",
         "hide": 0,
@@ -12765,8 +12759,8 @@
       {
         "current": {
           "selected": false,
-          "text": "579909",
-          "value": "579909"
+          "text": "1528823703",
+          "value": "1528823703"
         },
         "definition": "$Workload1.pmc_perf.aggregate([\n{\"$match\": {\n    \"Index\": { \"$in\": [${DispatchIDFilter:raw}] },\n    \"gpu-id\": { \"$in\": [${gpuFilter:raw}] },\n    \"KernelName\": { \"$in\": ${KernelNameFilter:json}}\n  }},\n\n  {\"$group\": {\n      \"_id\": null,\n      \"myAvg\": {\n        \"$avg\": { \"$multiply\": [{ \"$divide\": [{ \"$subtract\": [\"&EndNs\", \"&BeginNs\"] }, 1000] }, $sclk] }\n      }\n  }},\n  {\"$set\": {\n    \"array\": [\n        {\n          \"_id\": { \"$round\": [\"&myAvg\", 0] }\n        }\n      ]\n  }},\n  {\"$unwind\": {\n    \"path\": \"&array\"\n  }},\n  {\"$replaceRoot\": {\n    \"newRoot\": \"&array\"\n  }}\n]);",
         "hide": 2,
@@ -12785,8 +12779,8 @@
       {
         "current": {
           "selected": false,
-          "text": "58",
-          "value": "58"
+          "text": "110",
+          "value": "110"
         },
         "definition": "$Workload1.pmc_perf.aggregate([\n  {\"$match\": {\n    \"Index\": { \"$in\": [${DispatchIDFilter:raw}] },\n    \"gpu-id\": { \"$in\": [${gpuFilter:raw}] },\n    \"KernelName\": { \"$in\": ${KernelNameFilter:json}}\n  }},\n  {\"$group\": {\n    \"_id\": null,\n    \"theAvg\": {\n      \"$avg\": {\n        \"$cond\":[\n          {\"$ne\": [\"&GRBM_GUI_ACTIVE\", 0]},\n          {\"$divide\": [{ \"$multiply\": [4, \"&SQ_BUSY_CU_CYCLES\"] }, \"&GRBM_GUI_ACTIVE\"]},\n          \"\"\n        ]\n      }\n    }\n  }},\n  {\"$set\": {\n    \"array\": [\n        {\n          \"_id\": {\"$toInt\": { \"$min\": [{ \"$add\": [{ \"$multiply\": [{ \"$divide\": [{ \"$round\": [\"$theAvg\", 0] }, $maxWavesPerCU] },8] }, { \"$min\": [{ \"$mod\": [{ \"$round\": [\"$theAvg\", 0] }, $maxWavesPerCU] }, 8] }] }, $numCU] }}\n        }\n    ]\n  }},\n  {\"$unwind\": {\n    \"path\": \"$array\"\n  }},\n  {\"$replaceRoot\": {\n    \"newRoot\": \"$array\"\n  }}\n]);",
         "hide": 2,
@@ -13330,8 +13324,8 @@
   },
   "timepicker": {},
   "timezone": "",
-  "title": "Omniperf_v1.0.3_pub",
-  "uid": "MIPerf_v1_0_063020221",
-  "version": 4,
+  "title": "Omniperf_v1.0.5_pub",
+  "uid": "MIPerf_v1_0_0630202211",
+  "version": 3,
   "weekStart": ""
 }
