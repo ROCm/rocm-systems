@@ -28,6 +28,8 @@ import sys
 from pathlib import Path
 
 import numpy
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib.pyplot import get, text
 from math import log, pi, sqrt

@@ -1,6 +1,7 @@
 #include "gfx906_metrics.xml"
 #include "gfx908_metrics.xml"
 #include "gfx90a_metrics.xml"
+#include "gfx900_metrics.xml"
 
 <gfx8_expr>
   <metric name="TA_BUSY_avr" expr=avr(TA_TA_BUSY,16) descr="TA block is busy. Average over TA instances."></metric>
@@ -22,7 +23,7 @@
   <metric name="WRITE_REQ_32B" expr=TCC_MC_WRREQ_sum descr="The total number of 32-byte effective memory writes."></metric>
 </gfx8_expr>
 
-<gfx9_expr>
+<gfx900_expr>
   <metric name="TA_BUSY_avr" expr=avr(TA_TA_BUSY,16) descr="TA block is busy. Average over TA instances."></metric>
   <metric name="TA_BUSY_max" expr=max(TA_TA_BUSY,16) descr="TA block is busy. Max over TA instances."></metric>
   <metric name="TA_BUSY_min" expr=min(TA_TA_BUSY,16) descr="TA block is busy. Min over TA instances."></metric>
@@ -197,7 +198,7 @@
   #<metric name="TCP_TCC_RW_WRITE_REQ_sum"                               expr=sum(TCP_TCC_RW_WRITE_REQ,16) descr="."></metric>
   #<metric name="TCP_TCC_RW_ATOMIC_REQ_sum"                              expr=sum(TCP_TCC_RW_ATOMIC_REQ,16) descr="."></metric>
 
-</gfx9_expr>
+</gfx900_expr>
 
 <gfx906_expr base="gfx9_expr">
   # EA1
