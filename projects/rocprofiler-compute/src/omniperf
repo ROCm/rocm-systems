@@ -357,6 +357,31 @@ def omniperf_profile(args):
         else:
             print("rocscope must be in the PATH")
             sys.exit(1)
+    elif not args.summaries == None and args.summaries == True:
+        print("creating kernel summaries")
+        #look for whether workload_dir exists  - create if not
+        try:
+            os.makedirs(workload_dir, exist_ok = True)
+        except Exception as e:
+            print("Unable to create workload directory: ", workload_dir)
+            print(e)
+            sys.exit(1)
+
+        result = subprocess.run(["which", "rocscope"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        if result.returncode == 0:
+            rs_cmd = [result.stdout.decode('ascii').strip(), 
+                      "summary",
+                      "-p", args.path,
+                      "-n", args.name,
+                      "--", args.remaining]
+            print(rs_cmd)
+            result = subprocess.run(rs_cmd) #, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            if result.returncode != 0:
+                print(result.stderr.decode('ascii'))
+        else:
+            print("rocscope must be in the PATH")
+            sys.exit(1)
+
     else:
         for fname in glob.glob(workload_dir + "/perfmon/*.txt"):
             # Kernel filtering (in-place replacement)

@@ -125,6 +125,17 @@ def parse(my_parser):
         dest="lucky",
         help="\t\t\tProfile only the most time consuming kernels.",
     )
+    
+    profile_group.add_argument(
+        "-s",
+        "--kernel-summaries",
+        required=False,
+        default=False,
+        action="store_true",
+        dest="summaries",
+        help="\t\t\tCreate kernel summaries.",
+    )
+
     profile_group.add_argument(
         "-b",
         "--ipblocks",
