@@ -485,6 +485,12 @@ def eval_metric(dfs, dfs_type, sys_info, soc_spec, raw_pmc_df, debug):
         # NB: assume all build in vars from pmc_perf.csv for now
         s = build_eval_string(value, schema.pmc_perf_file_prefix)
         try:
+            print(s)
+            print("ammolite__maxWavesPerCU: ", ammolite__maxWavesPerCU)
+            print("ammolite__numCU: ", ammolite__numCU);
+            print(raw_pmc_df.get('pmc_perf').get("GRBM_GUI_ACTIVE"))
+            #if raw_pmc_df.get('pmc_perf').get("GRBM_GUI_ACTIVE") == 0:
+            #    raw_cmd_df.get('pmc_perf').set("GRBM_GUI_ACTIVE", 0)
             ammolite__build_in[key] = eval(compile(s, "<string>", "eval"))
         except TypeError:
             ammolite__build_in[key] = None
