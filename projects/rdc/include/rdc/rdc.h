@@ -431,7 +431,7 @@ typedef enum {
 /**
  * @brief The maximum test cases to run
  */
-const uint32_t MAX_TEST_CASES =  RDC_DIAG_TEST_LAST - RDC_DIAG_TEST_FIRST + 1;
+#define MAX_TEST_CASES  (RDC_DIAG_TEST_LAST - RDC_DIAG_TEST_FIRST + 1)
 
 /**
  * @brief The maximum length of the diagnostic messages
