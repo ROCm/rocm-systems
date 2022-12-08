@@ -2146,7 +2146,7 @@ def showRasInfo(deviceList, rasType):
                         row.append(ec.correctable_err)
                         row.append(ec.uncorrectable_err)
                 data.append(row)
-        printTableLog(['         Block', '     Status  ', 'uncorrectable err', 'correctable err'], data, device,
+        printTableLog(['         Block', '     Status  ', 'Correctable Error', 'Uncorrectable Error'], data, device,
                       'RAS INFO')
         # TODO: Use dynamic spacing for column widths
         printLogSpacer(None, '_')
