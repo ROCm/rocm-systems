@@ -407,6 +407,8 @@
   <metric name="SQ_INSTS_FLAT" block=SQ event=57 descr="Number of FLAT instructions issued. {emulated, C2}"></metric>
   <metric name="SQ_INSTS_LDS" block=SQ event=59 descr="Number of LDS indexed instructions issued. {emulated, C1}"></metric>
   <metric name="SQ_INSTS_GDS" block=SQ event=55 descr="Number of GDS instructions issued. {emulated, C1}"></metric>
+  <metric name="SQ_INSTS_TEX_LOAD" block=SQ event=69 descr="Number of buffer load, image load, sample, or atomic (with return) instructions issued. {emulated, C1}"></metric>
+  <metric name="SQ_INSTS_TEX_STORE" block=SQ event=70 descr="Number of buffer store, image store, or atomic (without return) instructions issued. {emulated, C1}"></metric>
   <metric name="SQ_WAIT_INST_LDS" block=SQ event=31 descr="Number of clock cycles spent waiting for LDS (indexed) instruction issue. In units of cycles. {nondeterministic, C1}"></metric>
   
   <metric name="TA_TA_BUSY" block=TA event=15 descr="TA block is busy. Perf_Windowing not supported for this counter."></metric>
