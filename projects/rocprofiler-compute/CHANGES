@@ -1,3 +1,12 @@
+Version 1.0.5 (13 Dec 2022)
+
+  * store application command-line parameters in profiling output (#27)
+  * enable additional normalizations in CLI mode (#30)
+  * update L1 bandwidth metric calculations (#36)
+  * add L1 <-> L2 bandwidth calculation (#37)
+  * documentation updates (#38, #41)
+  * maintain git sha in production installs from tarball (#53)
+
 Version 1.0.4 (11 Nov 2022)
 
   * update python requirements.txt with minimum versions for numpy and pandas
