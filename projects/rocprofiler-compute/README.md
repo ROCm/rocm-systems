@@ -35,9 +35,25 @@ release. This branch will only receive bug fixes and users may
 checkout to preview upcoming features.
 
 ## How to Cite
-[![DOI](https://zenodo.org/badge/561919887.svg)](https://zenodo.org/badge/latestdoi/561919887)
 
 This software can be cited using a Zenodo
 [DOI](https://doi.org/10.5281/zenodo.7314631) reference. A BibTex
-style reference is available [here](https://zenodo.org/record/7314632/export/hx).
+style reference is provided below for convenience:
+
+```
+@software{xiaomin_lu_2022_7314632,
+  author       = {Xiaomin Lu and
+                  Cole Ramos and
+                  Fei Zheng and
+                  Karl W. Schulz and
+                  Jose Santos},
+  title        = {AMDResearch/omniperf: v1.0.4 (11 November 2022)},
+  month        = nov,
+  year         = 2022,
+  publisher    = {Zenodo},
+  version      = {v1.0.4},
+  doi          = {10.5281/zenodo.7314632},
+  url          = {https://doi.org/10.5281/zenodo.7314632}
+}
+```
 
