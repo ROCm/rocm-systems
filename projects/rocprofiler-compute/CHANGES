@@ -6,6 +6,8 @@ Version 1.0.5 (13 Dec 2022)
   * add L1 <-> L2 bandwidth calculation (#37)
   * documentation updates (#38, #41)
   * maintain git sha in production installs from tarball (#53)
+  * enhanced subprocess logging to identify critical errors in rocprofiler (#50)
+  * add missing ubuntu 20.04 roofline binary to packaging (#34)
 
 Version 1.0.4 (11 Nov 2022)
 
