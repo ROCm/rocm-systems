@@ -1,6 +1,6 @@
 # Description
 
-omniperf_cli.py is a post-processing profiling tool with the raw data collected from omniperf.
+omniperf_analyze.py is a post-processing profiling tool with the raw data collected from omniperf.
 
 ## Features
 

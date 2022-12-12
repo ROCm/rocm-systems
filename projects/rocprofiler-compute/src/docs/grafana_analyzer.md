@@ -68,6 +68,11 @@ The uniform color coding is applied to most visualizations (bars, table, diagram
 ## Grafana GUI Import
 The omniperf database `--import` option imports the raw profiling data to Grafana's backend MongoDB database. This step is only required for Grafana GUI based performance analysis. 
 
+Default username and password for MongoDB (to be used in database mode) are as follows:
+
+ - Username: **temp**
+ - Password: **temp123**
+
 Each workload is imported to a separate database with the following naming convention:
 
     omniperf_<team>_<database>_<soc>

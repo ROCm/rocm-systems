@@ -216,11 +216,11 @@ install(PROGRAMS src/omniperf TYPE BIN)
 install(FILES src/parser.py TYPE BIN)
 install(FILES src/common.py TYPE BIN)
 install(FILES VERSION VERSION.sha DESTINATION ${CMAKE_INSTALL_PREFIX})
-# src/omniperf_cli
+# src/omniperf_analyze
 install(
-    DIRECTORY src/omniperf_cli
+    DIRECTORY src/omniperf_analyze
     TYPE BIN
-    PATTERN src/omniperf_cli/tests EXCLUDE
+    PATTERN src/omniperf_analyze/tests EXCLUDE
     PATTERN "__pycache__" EXCLUDE)
 # src/utils
 install(
@@ -228,9 +228,11 @@ install(
     TYPE BIN
     PATTERN "rooflines*" EXCLUDE)
 # src/utils/rooflines
-install(PROGRAMS src/utils/rooflines/roofline-rhel8-mi200-rocm5
-                 src/utils/rooflines/roofline-sle15sp3-mi200-rocm5
-        DESTINATION ${CMAKE_INSTALL_BINDIR}/utils/rooflines)
+install(
+    PROGRAMS src/utils/rooflines/roofline-rhel8-mi200-rocm5
+             src/utils/rooflines/roofline-sle15sp3-mi200-rocm5
+             src/utils/rooflines/roofline-ubuntu20_04-mi200-rocm5
+    DESTINATION ${CMAKE_INSTALL_BINDIR}/utils/rooflines)
 # src/perfmon_pub
 install(
     DIRECTORY src/perfmon_pub

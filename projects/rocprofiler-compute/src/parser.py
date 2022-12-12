@@ -394,15 +394,15 @@ def parse(my_parser):
         dest="normal_unit",
         metavar="",
         default="per_wave",
-        choices=["per_wave", "per_cycle", "per_second"],
-        help="\t\tSpecify the normalization unit: (DEFAULT: per_wave)\n\t\t   per_wave\n\t\t   per_cycle\n\t\t   per_second",
+        choices=["per_wave", "per_cycle", "per_second", "per_kernel"],
+        help="\t\tSpecify the normalization unit: (DEFAULT: per_wave)\n\t\t   per_wave\n\t\t   per_cycle\n\t\t   per_second\n\t\t   per_kernel",
     )
     analyze_group.add_argument(
         "--config-dir",
         dest="config_dir",
         metavar="",
         help="\t\tSpecify the directory of customized configs.",
-        default=OMNIPERF_HOME.joinpath("omniperf_cli/configs"),
+        default=OMNIPERF_HOME.joinpath("omniperf_analyze/configs"),
     )
     analyze_group.add_argument(
         "-t",

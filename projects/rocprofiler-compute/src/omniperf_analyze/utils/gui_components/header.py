@@ -24,9 +24,9 @@ from dash import html, dash_table, dcc
 import dash_bootstrap_components as dbc
 from matplotlib.style import available
 
-from omniperf_cli.utils import schema
+from omniperf_analyze.utils import schema
 
-avail_normalizations = ["per Wave", "per Cycle", "per Sec", "per Kernel"]
+avail_normalizations = ["per_wave", "per_cycle", "per_second", "per_kernel"]
 
 # List all the unique column values for desired column in df, 'target_col'
 def list_unique(orig_list, is_numeric):
@@ -152,10 +152,10 @@ def get_header(raw_pmc, input_filters, kernel_names):
                                             ),
                                             dcc.Dropdown(
                                                 avail_normalizations,
-                                                value="per Wave",
+                                                id="norm-filt",
+                                                value=input_filters["normalization"],
                                                 clearable=False,
                                                 style={"width": "150px"},
-                                                disabled=True,  # TODO: Turn this off once multi normalization is enabled
                                             ),
                                         ]
                                     )

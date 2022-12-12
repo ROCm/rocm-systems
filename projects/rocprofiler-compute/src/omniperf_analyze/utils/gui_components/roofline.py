@@ -20,7 +20,7 @@
 # THE SOFTWARE.
 ################################################################################
 
-from omniperf_cli.utils import roofline_calc
+from omniperf_analyze.utils import roofline_calc
 
 import numpy as np
 from dash import html, dash_table

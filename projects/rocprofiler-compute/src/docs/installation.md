@@ -180,7 +180,7 @@ $ sudo docker-compose up -d
 > Note that TCP ports for Grafana (4000) and MongoDB (27017) in the docker container are mapped to 14000 and 27018, respectively, on the host side.
 
 ### Setup Grafana Instance
-Once you've launced your docker container you should be able to reach Grafana at **http://\<host-ip>:1400**. The default login credentials for the first-time Grafana setup are:
+Once you've launced your docker container you should be able to reach Grafana at **http://\<host-ip>:14000**. The default login credentials for the first-time Grafana setup are:
 
 - Username: **admin**
 - Password: **admin**

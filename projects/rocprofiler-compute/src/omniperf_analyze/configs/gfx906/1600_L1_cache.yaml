@@ -25,8 +25,8 @@ Panel Config:
               != 0) else None))
             tips: 
           Cache BW:
-            value: AVG(((100 * TCP_TOTAL_CACHE_ACCESSES_sum) / ((GRBM_GUI_ACTIVE * $numCU)
-              * 4)))
+            value: ((100 * AVG(((TCP_TOTAL_CACHE_ACCESSES_sum * 64) / (EndNs - BeginNs))))
+              / ((($sclk / 1000) * 64) * $numCU))
             tips: 
           Cache Hit:
             value: AVG(((100 - ((100 * (((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum)
@@ -130,6 +130,12 @@ Panel Config:
               / $denom))
             unit: (Req  + $normUnit)
             tips: 
+          Cache BW:
+            avg: AVG(((TCP_TOTAL_CACHE_ACCESSES_sum * 64) / (EndNs - BeginNs)))
+            min: MIN(((TCP_TOTAL_CACHE_ACCESSES_sum * 64) / (EndNs - BeginNs)))
+            max: MAX(((TCP_TOTAL_CACHE_ACCESSES_sum * 64) / (EndNs - BeginNs)))
+            unit: GB/s
+            tips:
           Cache Accesses:
             avg: AVG((TCP_TOTAL_CACHE_ACCESSES_sum / $denom))
             min: MIN((TCP_TOTAL_CACHE_ACCESSES_sum / $denom))
@@ -169,7 +175,13 @@ Panel Config:
             max: MAX((TCP_TOTAL_WRITEBACK_INVALIDATES_sum / $denom))
             unit: ( + $normUnit)
             tips: 
-          L1-TCR Read:
+          L1-L2 BW:
+            avg: AVG(((64 * (TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / $denom))
+            min: MIN(((64 * (TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / $denom))
+            max: MAX(((64 * (TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / $denom))
+            unit: (Bytes + $normUnit)
+            tips:
+          L1-L2 Read:
             avg: AVG((TCP_TCC_READ_REQ_sum / $denom))
             min: MIN((TCP_TCC_READ_REQ_sum / $denom))
             max: MAX((TCP_TCC_READ_REQ_sum / $denom))
@@ -233,35 +245,41 @@ Panel Config:
           tips: Tips
         metric:
           NC - Read:
-            mean: AVG((TCP_TCC_NC_READ_REQ_sum / $denom))
-            min: MIN((TCP_TCC_NC_READ_REQ_sum / $denom))
-            max: MAX((TCP_TCC_NC_READ_REQ_sum / $denom))
+            mean: None # No perf counter
+            min: None # No perf counter
+            max: None # No perf counter
             unit: (Req  + $normUnit)
-            tips: 
+            tips:
           UC - Read:
-            mean: AVG((TCP_TCC_UC_READ_REQ_sum / $denom))
-            min: MIN((TCP_TCC_UC_READ_REQ_sum / $denom))
-            max: MAX((TCP_TCC_UC_READ_REQ_sum / $denom))
+            mean: None # No perf counter
+            min: None # No perf counter
+            max: None # No perf counter
             unit: (Req  + $normUnit)
-            tips: 
+            tips:
           CC - Read:
-            mean: AVG((TCP_TCC_CC_READ_REQ_sum / $denom))
-            min: MIN((TCP_TCC_CC_READ_REQ_sum / $denom))
-            max: MAX((TCP_TCC_CC_READ_REQ_sum / $denom))
+            mean: None # No perf counter
+            min: None # No perf counter
+            max: None # No perf counter
             unit: (Req  + $normUnit)
-            tips: 
+            tips:
           RW - Read:
-            mean: AVG((TCP_TCC_RW_READ_REQ_sum / $denom))
-            min: MIN((TCP_TCC_RW_READ_REQ_sum / $denom))
-            max: MAX((TCP_TCC_RW_READ_REQ_sum / $denom))
+            mean: None # No perf counter
+            min: None # No perf counter
+            max: None # No perf counter
             unit: (Req  + $normUnit)
-            tips: 
+            tips:
           RW - Write:
-            mean: AVG((TCP_TCC_RW_WRITE_REQ_sum / $denom))
-            min: MIN((TCP_TCC_RW_WRITE_REQ_sum / $denom))
-            max: MAX((TCP_TCC_RW_WRITE_REQ_sum / $denom))
+            mean: None # No perf counter
+            min: None # No perf counter
+            max: None # No perf counter
             unit: (Req  + $normUnit)
-            tips: 
+            tips:
+          NC - Write:
+            mean: AVG((TCP_TCC_NC_WRITE_REQ_sum / $denom))
+            min: MIN((TCP_TCC_NC_WRITE_REQ_sum / $denom))
+            max: MAX((TCP_TCC_NC_WRITE_REQ_sum / $denom))
+            unit: (Req  + $normUnit)
+            tips:
           NC - Write:
             mean: AVG((TCP_TCC_NC_WRITE_REQ_sum / $denom))
             min: MIN((TCP_TCC_NC_WRITE_REQ_sum / $denom))
@@ -274,36 +292,30 @@ Panel Config:
             max: MAX((TCP_TCC_UC_WRITE_REQ_sum / $denom))
             unit: (Req  + $normUnit)
             tips: 
-          CC - Write:
-            mean: AVG((TCP_TCC_CC_WRITE_REQ_sum / $denom))
-            min: MIN((TCP_TCC_CC_WRITE_REQ_sum / $denom))
-            max: MAX((TCP_TCC_CC_WRITE_REQ_sum / $denom))
-            unit: (Req  + $normUnit)
-            tips: 
           NC - Atomic:
-            mean: AVG((TCP_TCC_NC_ATOMIC_REQ_sum / $denom))
-            min: MIN((TCP_TCC_NC_ATOMIC_REQ_sum / $denom))
-            max: MAX((TCP_TCC_NC_ATOMIC_REQ_sum / $denom))
+            mean: None # No perf counter
+            min: None # No perf counter
+            max: None # No perf counter
             unit: (Req  + $normUnit)
-            tips: 
+            tips:
           UC - Atomic:
-            mean: AVG((TCP_TCC_UC_ATOMIC_REQ_sum / $denom))
-            min: MIN((TCP_TCC_UC_ATOMIC_REQ_sum / $denom))
-            max: MAX((TCP_TCC_UC_ATOMIC_REQ_sum / $denom))
+            mean: None # No perf counter
+            min: None # No perf counter
+            max: None # No perf counter
             unit: (Req  + $normUnit)
-            tips: 
+            tips:
           CC - Atomic:
-            mean: AVG((TCP_TCC_CC_ATOMIC_REQ_sum / $denom))
-            min: MIN((TCP_TCC_CC_ATOMIC_REQ_sum / $denom))
-            max: MAX((TCP_TCC_CC_ATOMIC_REQ_sum / $denom))
+            mean: None # No perf counter
+            min: None # No perf counter
+            max: None # No perf counter
             unit: (Req  + $normUnit)
-            tips: 
+            tips:
           RW - Atomic:
-            mean: AVG((TCP_TCC_RW_ATOMIC_REQ_sum / $denom))
-            min: MIN((TCP_TCC_RW_ATOMIC_REQ_sum / $denom))
-            max: MAX((TCP_TCC_RW_ATOMIC_REQ_sum / $denom))
+            mean: None # No perf counter
+            min: None # No perf counter
+            max: None # No perf counter
             unit: (Req  + $normUnit)
-            tips: 
+            tips:
 
     - metric_table:
         id: 1605
