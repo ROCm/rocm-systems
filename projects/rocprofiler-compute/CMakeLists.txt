@@ -35,13 +35,15 @@ include(GNUInstallDirs)
 
 # version control info
 find_package(Git)
-
 if(Git_FOUND AND EXISTS "${PROJECT_SOURCE_DIR}/.git")
     execute_process(
         COMMAND git log --pretty=format:%h -n 1
         OUTPUT_VARIABLE OMNIPERF_GIT_REV
         OUTPUT_STRIP_TRAILING_WHITESPACE)
     message(STATUS "Git revision: ${OMNIPERF_GIT_REV}")
+    set(GIT_CLONE TRUE)
+else()
+    set(GIT_CLONE FALSER)
 endif()
 
 set(CMAKE_BUILD_TYPE "Release")
@@ -163,8 +165,10 @@ if(LOCALHOST MATCHES "TheraS01|.*\.thera\.amd\.com|thera-hn")
 endif()
 
 # git versioning file
-configure_file(${PROJECT_SOURCE_DIR}/cmake/VERSION.sha.in
-               ${PROJECT_SOURCE_DIR}/VERSION.sha @ONLY)
+if(${GIT_CLONE})
+    configure_file(${PROJECT_SOURCE_DIR}/cmake/VERSION.sha.in
+                   ${PROJECT_SOURCE_DIR}/VERSION.sha @ONLY)
+endif()
 
 enable_testing()
 
