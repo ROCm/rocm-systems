@@ -1,4 +1,6 @@
-[![Docs](https://github.com/AMDResearch/omniperf/actions/workflows/pages/pages-build-deployment/badge.svg?branch=gh-pages)](https://amdresearch.github.io/omniperf/) [![GitHub commits since last release](https://img.shields.io/github/commits-since/AMDResearch/omniperf/latest/dev.svg)](https://github.com/AMDResearch/omniperf/compare/main...dev) 
+[![Docs](https://github.com/AMDResearch/omniperf/actions/workflows/pages/pages-build-deployment/badge.svg?branch=gh-pages)](https://amdresearch.github.io/omniperf/)
+[![DOI](https://zenodo.org/badge/561919887.svg)](https://zenodo.org/badge/latestdoi/561919887)
+[![GitHub commits since last release](https://img.shields.io/github/commits-since/AMDResearch/omniperf/latest/dev.svg)](https://github.com/AMDResearch/omniperf/compare/main...dev) 
 
 # Omniperf
 
@@ -34,4 +36,8 @@ checkout to preview upcoming features.
 
 ## How to Cite
 [![DOI](https://zenodo.org/badge/561919887.svg)](https://zenodo.org/badge/latestdoi/561919887)
+
+This software can be cited using a Zenodo
+[DOI](https://doi.org/10.5281/zenodo.7314631) reference. A BibTex
+style reference is available [here](https://zenodo.org/record/7314632/export/hx).
 
