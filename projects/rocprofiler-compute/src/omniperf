@@ -319,8 +319,6 @@ def run_prof(fname, workload_dir, perfmon_dir, cmd, verbose):
             rocprof_cmd,
             "-i",
             fname,
-            "-m",
-            perfmon_dir + "/" + "metrics.xml",
             "--timestamp",
             "on",
             "-o",
