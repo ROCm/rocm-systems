@@ -127,6 +127,16 @@ def parse(my_parser):
     )
     
     profile_group.add_argument(
+        "-r",
+        "--use-rocscope",
+        required=False,
+        default=False,
+        action="store_true",
+        dest="use_rocscope",
+        help="\t\t\tUse rocscope for profiling",
+    )
+    
+    profile_group.add_argument(
         "-s",
         "--kernel-summaries",
         required=False,
