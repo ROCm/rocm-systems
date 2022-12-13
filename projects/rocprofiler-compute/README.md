@@ -41,19 +41,19 @@ This software can be cited using a Zenodo
 style reference is provided below for convenience:
 
 ```
-@software{xiaomin_lu_2022_7314632,
+@software{xiamin_lu_2022_7434848,
   author       = {Xiaomin Lu and
                   Cole Ramos and
                   Fei Zheng and
                   Karl W. Schulz and
                   Jose Santos},
-  title        = {AMDResearch/omniperf: v1.0.4 (11 November 2022)},
-  month        = nov,
+  title        = {AMDResearch/omniperf: v1.0.5 (13 December 2022)},
+  month        = dec,
   year         = 2022,
   publisher    = {Zenodo},
-  version      = {v1.0.4},
-  doi          = {10.5281/zenodo.7314632},
-  url          = {https://doi.org/10.5281/zenodo.7314632}
+  version      = {v1.0.5},
+  doi          = {10.5281/zenodo.7314631},
+  url          = {https://doi.org/10.5281/zenodo.7314631}
 }
 ```
 
