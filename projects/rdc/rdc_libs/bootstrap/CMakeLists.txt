@@ -25,11 +25,11 @@ message("BOOTSTRAP_LIB_INC_LIST=${BOOTSTRAP_LIB_INC_LIST}")
 add_library(${BOOTSTRAP_LIB} SHARED ${BOOTSTRAP_LIB_SRC_LIST} ${BOOTSTRAP_LIB_INC_LIST})
 target_link_libraries(${BOOTSTRAP_LIB} pthread dl)
 target_include_directories(${BOOTSTRAP_LIB} PRIVATE
-    "${RSMI_INC_DIR}"
-    "${ROCM_DIR}/include"
     "${PROJECT_SOURCE_DIR}"
     "${PROJECT_SOURCE_DIR}/include"
-    "${COMMON_DIR}")
+    "${COMMON_DIR}"
+    "${RSMI_INC_DIR}"
+    "${ROCM_DIR}/include")
 
 target_include_directories(${BOOTSTRAP_LIB}
     PUBLIC

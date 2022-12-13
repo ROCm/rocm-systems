@@ -29,6 +29,7 @@ THE SOFTWARE.
 #include "rdc_lib/RdcTelemetry.h"
 #include "rdc_lib/impl/RdcRasLib.h"
 #include "rdc_lib/impl/RdcSmiLib.h"
+#include "rdc_lib/impl/RdcRocpLib.h"
 #include "rdc_lib/RdcMetricFetcher.h"
 
 namespace amd {
@@ -50,7 +51,8 @@ class RdcTelemetryModule : public RdcTelemetry {
             uint32_t fields_count);
 
     RdcTelemetryModule(const RdcSmiLibPtr& smi_lib,
-            const RdcRasLibPtr& ras_module);
+            const RdcRasLibPtr& ras_module,
+            const RdcRocpLibPtr& rocp_module);
 
  private:
     //< Helper function to dispatch fields to module

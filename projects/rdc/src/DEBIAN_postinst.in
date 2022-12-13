@@ -1,9 +1,18 @@
 #!/bin/bash
 
+set -e
+
 # This will return 0 if an id is created and non-zero if
 # it already exists
+# https://www.debian.org/doc/debian-policy/ch-opersys.html#users-and-groups
 do_create_rdc_user() {
-    useradd -r -s /bin/nologin rdc
+    adduser \
+        --system \
+        --quiet \
+        --home /nonexistent \
+        --no-create-home \
+        --disabled-password \
+        rdc
     if [ $(getent group render) ]; then
         usermod -a -G render rdc
     else
@@ -13,16 +22,25 @@ do_create_rdc_user() {
     return 0
 }
 
+create_rdc_service() {
+    #Symlink RDC Service
+    if [ -d /run/systemd/system ]; then
+        ln -s -f -r /@CPACK_PACKAGING_INSTALL_PREFIX@/@CMAKE_INSTALL_LIBEXECDIR@/rdc/rdc.service /lib/systemd/system/rdc.service
+    fi
+}
+
 reload_systemd() {
-    systemctl daemon-reload
+    if [ -d /run/systemd/system ]; then
+        systemctl daemon-reload
+    fi
     return 0
 }
+
 
 case "$1" in
    configure)
        do_create_rdc_user
-       #Symlink RDC Service
-       ln -s -f -r /@CPACK_PACKAGING_INSTALL_PREFIX@/@CMAKE_INSTALL_LIBEXECDIR@/rdc/rdc.service /lib/systemd/system/rdc.service
+       create_rdc_service
        reload_systemd
        exit 0
    ;;

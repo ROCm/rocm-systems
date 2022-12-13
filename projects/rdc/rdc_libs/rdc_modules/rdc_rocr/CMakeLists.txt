@@ -36,15 +36,15 @@ if(BUILD_ROCRTEST)
     message("RDC_ROCR_LIB_INC_LIST=${RDC_ROCR_LIB_INC_LIST}")
 
     set(HSA_LIB "hsa-runtime64")
-    set(RDC_LIBS_MODULES ${RDC_LIBS_MODULES} ${RDC_ROCR_LIB} PARENT_SCOPE)
+    set(RDC_LIB_MODULES ${RDC_LIB_MODULES} ${RDC_ROCR_LIB} PARENT_SCOPE)
     add_library(${RDC_ROCR_LIB} SHARED ${RDC_ROCR_LIB_SRC_LIST} ${RDC_ROCR_LIB_INC_LIST})
     target_link_libraries(${RDC_ROCR_LIB} ${RDC_LIB} ${BOOTSTRAP_LIB} ${HSA_LIB} pthread dl)
     target_include_directories(${RDC_ROCR_LIB} PRIVATE
-        "${RSMI_INC_DIR}"
-        "${ROCM_DIR}/include"
         "${PROJECT_SOURCE_DIR}"
         "${PROJECT_SOURCE_DIR}/include"
-        "${COMMON_DIR}")
+        "${COMMON_DIR}"
+        "${RSMI_INC_DIR}"
+        "${ROCM_DIR}/include")
 
     # Set the VERSION and SOVERSION values
     set_property(TARGET ${RDC_ROCR_LIB} PROPERTY

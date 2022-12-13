@@ -49,6 +49,10 @@ option(BUILD_RASLIB "Build targets for raslib" OFF)
 # which requires the Rocm run time.
 option(BUILD_ROCRTEST "Build targets for librdc_rocr.so" ON)
 
+# When cmake -DBUILD_ROCPTEST=off, it will not build the librdc_rocp.so
+# which requires the Rocm profiler.
+option(BUILD_ROCPTEST "Build targets for librdc_rocp.so" ON)
+
 # When cmake -DBUILD_TESTS=off, it will not build RDC tests.
 option(BUILD_TESTS "Build test suite" OFF)
 
@@ -80,9 +84,6 @@ if(DEFINED ENV{ROCM_RPATH})
 endif()
 
 set(COMMON_DIR "${CMAKE_CURRENT_SOURCE_DIR}/common")
-
-set(RSMI_INC_DIR "${ROCM_DIR}/${CMAKE_INSTALL_INCLUDEDIR}" CACHE INTERNAL "ROCm SMI include directory.")
-set(RSMI_LIB_DIR "${ROCM_DIR}/${CMAKE_INSTALL_LIBDIR}" CACHE INTERNAL "ROCm SMI library directory.")
 
 set(GRPC_ROOT_DEFAULT "/usr")
 set(GRPC_ROOT ${GRPC_ROOT_DEFAULT} CACHE STRING "GRPC installation directory.")
@@ -140,6 +141,13 @@ if(NOT EXISTS "${CMAKE_SOURCE_DIR}/raslib/.git" AND BUILD_RASLIB)
     git submodule update --init --recursive
     If you do not want to build raslib, use cmake -DBUILD_RASLIB=off")
 endif()
+
+find_package(RSMI
+    NAMES rocm_smi
+    HINTS ${ROCM_DIR}/lib/cmake
+    CONFIGURE REQUIRED)
+set(RSMI_INC_DIR "${ROCM_SMI_INCLUDE_DIR}" CACHE INTERNAL "ROCm SMI include directory.")
+set(RSMI_LIB_DIR "${ROCM_SMI_LIB_DIR}" CACHE INTERNAL "ROCm SMI library directory.")
 
 if(NOT EXISTS "${RSMI_INC_DIR}" OR NOT EXISTS "${RSMI_LIB_DIR}")
     message(FATAL_ERROR "rocm_smi not found in ${RSMI_INC_DIR}. Please
