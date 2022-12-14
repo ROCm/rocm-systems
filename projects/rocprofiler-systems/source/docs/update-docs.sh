@@ -19,9 +19,10 @@ cmake -DSOURCE_DIR=${SOURCE_DIR} -P ${WORK_DIR}/generate-doxyfile.cmake
 
 message "Generating doxygen xml files"
 doxygen omnitrace.dox
+doxygen omnitrace.dox
 
 message "Building html documentation"
-make html
+make html SPHINXOPTS="-W --keep-going -n"
 
 if [ -d ${SOURCE_DIR}/docs ]; then
     message "Removing stale documentation in ${SOURCE_DIR}/docs/"

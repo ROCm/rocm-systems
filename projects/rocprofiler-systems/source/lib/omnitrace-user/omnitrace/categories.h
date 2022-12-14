@@ -87,10 +87,11 @@ extern "C"
         // be the last enumerated id
     } omnitrace_category_t;
 
-    /// @typedef omnitrace_annotation_type_t
+    /// @enum OMNITRACE_ANNOTATION_TYPE
     /// @brief Identifier for the data type of the annotation.
     /// if the data type is not a pointer, pass the address of
     /// data.
+    /// @typedef OMNITRACE_ANNOTATION_TYPE omnitrace_annotation_type_t
     typedef enum OMNITRACE_ANNOTATION_TYPE
     {
         // Do not use first enum value
@@ -134,14 +135,12 @@ extern "C"
         OMNITRACE_VALUE_LAST
     } omnitrace_annotation_type_t;
 
-    /// @typedef omnitrace_annotation
+    /// @struct omnitrace_annotation
     /// @brief A struct containing annotation data to be included in the perfetto trace.
     ///
     /// @code{.cpp}
     /// #include <cstddef>
     /// #include <cstdint>
-    ///
-    /// #include <omnitrace/user.h>
     ///
     /// double
     /// compute_residual(size_t n, double* data);
@@ -173,12 +172,15 @@ extern "C"
     ///     return residual;
     /// }
     /// @endcode
-    ///
+    /// @typedef omnitrace_annotation omnitrace_annotation_t
     typedef struct omnitrace_annotation
     {
+        /// label for annotation
         const char* name;
-        uintptr_t   type;
-        void*       value;
+        /// omnitrace_annotation_type_t
+        uintptr_t type;
+        /// data to annotate
+        void* value;
     } omnitrace_annotation_t;
 
 #if defined(__cplusplus)

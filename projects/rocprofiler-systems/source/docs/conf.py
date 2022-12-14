@@ -131,10 +131,12 @@ breathe_projects = {"omnitrace": "_doxygen/xml"}
 breathe_default_project = "omnitrace"
 breathe_default_members = ("members",)
 breathe_projects_source = {
-    "auto": (
-        os.path.join(project_root, "source"),
+    "omnitrace": (
+        os.path.join(project_root, "source", "lib", "omnitrace-user"),
         [
-            "lib/omnitrace-user/omnitrace/user.h",
+            "omnitrace/types.h",
+            "omnitrace/categories.h",
+            "omnitrace/user.h",
         ],
     )
 }

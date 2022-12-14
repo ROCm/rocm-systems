@@ -42,36 +42,36 @@ extern "C"
 #endif
 
     /// @fn int omnitrace_user_start_trace(void)
-    /// @return @ref OMNITRACE_USER_ERROR value
+    /// @return omnitrace_user_error_t value
     /// @brief Enable tracing on this thread and all subsequently created threads
     extern int omnitrace_user_start_trace(void) OMNITRACE_PUBLIC_API;
 
     /// @fn int omnitrace_user_stop_trace(void)
-    /// @return @ref OMNITRACE_USER_ERROR value
+    /// @return omnitrace_user_error_t value
     /// @brief Disable tracing on this thread and all subsequently created threads
     extern int omnitrace_user_stop_trace(void) OMNITRACE_PUBLIC_API;
 
     /// @fn int omnitrace_user_start_thread_trace(void)
-    /// @return @ref OMNITRACE_USER_ERROR value
+    /// @return omnitrace_user_error_t value
     /// @brief Enable tracing on this specific thread. Does not apply to subsequently
     /// created threads
     extern int omnitrace_user_start_thread_trace(void) OMNITRACE_PUBLIC_API;
 
     /// @fn int omnitrace_user_stop_thread_trace(void)
-    /// @return @ref OMNITRACE_USER_ERROR value
+    /// @return omnitrace_user_error_t value
     /// @brief Disable tracing on this specific thread. Does not apply to subsequently
     /// created threads
     extern int omnitrace_user_stop_thread_trace(void) OMNITRACE_PUBLIC_API;
 
     /// @fn int omnitrace_user_push_region(const char* id)
     /// @param id The string identifier for the region
-    /// @return @ref OMNITRACE_USER_ERROR value
+    /// @return omnitrace_user_error_t value
     /// @brief Start a user defined region.
     extern int omnitrace_user_push_region(const char*) OMNITRACE_PUBLIC_API;
 
     /// @fn int omnitrace_user_pop_region(const char* id)
     /// @param id The string identifier for the region
-    /// @return @ref OMNITRACE_USER_ERROR value
+    /// @return omnitrace_user_error_t value
     /// @brief End a user defined region. In general, user regions should be popped in
     /// the inverse order that they were pushed, i.e. first-in, last-out (FILO). The
     /// timemory backend was designed to accommodate asynchronous tasking, where FILO may
@@ -80,13 +80,15 @@ extern "C"
     /// results in timemory vs. perfetto.
     extern int omnitrace_user_pop_region(const char*) OMNITRACE_PUBLIC_API;
 
+    /// @typedef omnitrace_annotation omnitrace_annotation_t
+    ///
     /// @fn int omnitrace_user_push_annotated_region(const char* id,
     ///                                              omnitrace_annotation_t* annotations,
     ///                                              size_t num_annotations)
     /// @param id The string identifier for the region
-    /// @param annotations Array of @ref omnitrace_annotation_t instances
+    /// @param annotations Array of @ref omnitrace_annotation instances
     /// @param num_annotations Number of annotations
-    /// @return @ref OMNITRACE_USER_ERROR value
+    /// @return omnitrace_user_error_t value
     /// @brief Start a user defined region and adds the annotations to the perfetto trace.
     extern int omnitrace_user_push_annotated_region(const char*, omnitrace_annotation_t*,
                                                     size_t) OMNITRACE_PUBLIC_API;
@@ -95,23 +97,23 @@ extern "C"
     ///                                             omnitrace_annotation_t* annotations,
     ///                                             size_t num_annotations)
     /// @param id The string identifier for the region
-    /// @param annotations Array of @ref omnitrace_annotation_t instances
+    /// @param annotations Array of @ref omnitrace_annotation instances
     /// @param num_annotations Number of annotations
-    /// @return @ref OMNITRACE_USER_ERROR value
+    /// @return omnitrace_user_error_t value
     /// @brief Stop a user defined region and adds the annotations to the perfetto trace.
     extern int omnitrace_user_pop_annotated_region(const char*, omnitrace_annotation_t*,
                                                    size_t) OMNITRACE_PUBLIC_API;
 
-    /// @fn int omnitrace_user_configure(omnitrace_user_configure_mode_t cfg,
-    ///                                  omnitrace_user_callbacks_t new_callbacks,
-    ///                                  omnitrace_user_callbacks_t* old_callbacks)
-    /// @param[in] config Specifies how the new callbacks are merged with the old
+    /// @fn int omnitrace_user_configure(omnitrace_user_configure_mode_t mode,
+    ///                                  omnitrace_user_callbacks_t inp,
+    ///                                  omnitrace_user_callbacks_t* out)
+    /// @param[in] mode Specifies how the new callbacks are merged with the old
     /// callbacks
-    /// @param[in] new_callbacks An @ref omnitrace_user_callbacks_t instance specifying
+    /// @param[in] inp An @ref omnitrace_user_callbacks instance specifying
     ///            the callbacks which should be invoked by the user API.
-    /// @param[out] old_callbacks Pointer to @ref omnitrace_user_callbacks_t which,
+    /// @param[out] out Pointer to @ref omnitrace_user_callbacks which,
     ///             when non-NULL, will be assigned the former callbacks.
-    /// @return @ref omnitrace_user_error_t value
+    /// @return omnitrace_user_error_t value
     /// @brief Configure the function pointers invoked by the omnitrace user API.
     /// The initial callbacks are set via the omnitrace-dl library when it is loaded but
     /// the user can user this feature to turn on/off the user API or customize how the
@@ -120,8 +122,8 @@ extern "C"
     /// regions to the annotated user regions with annotations about some global state.
     /// Changing the callbacks is thread-safe but not thread-local.
     extern int omnitrace_user_configure(
-        omnitrace_user_configure_mode_t, omnitrace_user_callbacks_t new_callbacks,
-        omnitrace_user_callbacks_t* old_callbacks) OMNITRACE_PUBLIC_API;
+        omnitrace_user_configure_mode_t mode, omnitrace_user_callbacks_t inp,
+        omnitrace_user_callbacks_t* out) OMNITRACE_PUBLIC_API;
 
     /// @fn int omnitrace_user_get_callbacks(int category, void** begin_func, void**
     /// end_func)
@@ -130,7 +132,7 @@ extern "C"
     /// the category, e.g. omnitrace_user_start_trace or omnitrace_user_push_region
     /// @param[out] end_func The pointer to the function which corresponds to "ending" the
     /// category, e.g. omnitrace_user_stop_trace or omnitrace_user_pop_region
-    /// @return @ref OMNITRACE_USER_ERROR value
+    /// @return omnitrace_user_error_t value
     /// @brief Get the current function pointers for a given category. The initial values
     /// are assigned by omnitrace-dl at start up.
     extern int omnitrace_user_get_callbacks(omnitrace_user_callbacks_t*)
@@ -138,7 +140,7 @@ extern "C"
 
     /// @fn const char* omnitrace_user_error_string(int error_category)
     /// @param error_category OMNITRACE_USER_ERROR value
-    /// @return @ref OMNITRACE_USER_ERROR value
+    /// @return String descripting the error code
     /// @brief Return a descriptor for the provided error code
     extern const char* omnitrace_user_error_string(int) OMNITRACE_PUBLIC_API;
 

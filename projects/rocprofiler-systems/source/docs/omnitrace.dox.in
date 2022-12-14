@@ -40,6 +40,8 @@ EXTENSION_MAPPING      = hpp=C++ \
                          cpp=C++ \
                          hh=C++ \
                          cc=C++ \
+                         h=C \
+                         c=C \
                          py=Python
 MARKDOWN_SUPPORT       = YES
 TOC_INCLUDE_HEADINGS   = 2
@@ -105,14 +107,16 @@ WARNINGS               = YES
 WARN_IF_UNDOCUMENTED   = YES
 WARN_IF_DOC_ERROR      = YES
 WARN_NO_PARAMDOC       = YES
-WARN_AS_ERROR          = NO
+WARN_AS_ERROR          = YES
 WARN_FORMAT            = "---> WARNING!   $file:$line: $text"
 WARN_LOGFILE           = doc/warnings.log
 #---------------------------------------------------------------------------
 # Configuration options related to the input files
 #---------------------------------------------------------------------------
 INPUT                  = @SOURCE_DIR@/README.md \
-                         @SOURCE_DIR@/source/lib/omnitrace-user
+                         @SOURCE_DIR@/source/lib/omnitrace-user/omnitrace/types.h \
+                         @SOURCE_DIR@/source/lib/omnitrace-user/omnitrace/categories.h \
+                         @SOURCE_DIR@/source/lib/omnitrace-user/omnitrace/user.h
 INPUT_ENCODING         = UTF-8
 FILE_PATTERNS          = *.h \
                          *.hh \
@@ -212,7 +216,7 @@ QHP_CUST_FILTER_ATTRS  =
 QHP_SECT_FILTER_ATTRS  =
 QHG_LOCATION           =
 GENERATE_ECLIPSEHELP   = NO
-ECLIPSE_DOC_ID         = org.doxygen.timemory
+ECLIPSE_DOC_ID         = org.doxygen.omnitrace
 DISABLE_INDEX          = NO
 GENERATE_TREEVIEW      = YES
 ENUM_VALUES_PER_LINE   = 1
@@ -306,9 +310,8 @@ ENABLE_PREPROCESSING   = YES
 MACRO_EXPANSION        = YES
 EXPAND_ONLY_PREDEF     = NO
 SEARCH_INCLUDES        = YES
-INCLUDE_PATH           = @SOURCE_DIR@/source/timemory
+INCLUDE_PATH           = @SOURCE_DIR@/source/lib/omnitrace-user
 INCLUDE_FILE_PATTERNS  = *.h \
-                         *.hh \
                          *.hpp
 PREDEFINED             = OMNITRACE_PUBLIC_API= \
                          OMNITRACE_HIDDEN_API= \
@@ -316,6 +319,8 @@ PREDEFINED             = OMNITRACE_PUBLIC_API= \
                          "OMNITRACE_VISIBILITY(...)=" \
                          "__attribute__(x)=" \
                          "__declspec(x)=" \
+                         "size_t=unsigned long" \
+                         "uintptr_t=unsigned long" \
                          DOXYGEN_SHOULD_SKIP_THIS
 EXPAND_AS_DEFINED      =
 SKIP_FUNCTION_MACROS   = NO

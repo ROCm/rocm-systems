@@ -94,17 +94,17 @@ extern "C"
                       _annotation_count);
     }
 
-    int omnitrace_user_configure(omnitrace_user_configure_mode_t _mode,
-                                 omnitrace_user_callbacks_t      _inp,
-                                 omnitrace_user_callbacks_t*     _out)
+    int omnitrace_user_configure(omnitrace_user_configure_mode_t mode,
+                                 omnitrace_user_callbacks_t      inp,
+                                 omnitrace_user_callbacks_t*     out)
     {
         auto _former = _callbacks;
 
-        switch(_mode)
+        switch(mode)
         {
             case OMNITRACE_USER_REPLACE_CONFIG:
             {
-                _callbacks = _inp;
+                _callbacks = inp;
                 break;
             }
             case OMNITRACE_USER_UNION_CONFIG:
@@ -115,14 +115,14 @@ extern "C"
 
                 user_callbacks_t _v = _callbacks;
 
-                _update(_v.start_trace, _inp.start_trace);
-                _update(_v.stop_trace, _inp.stop_trace);
-                _update(_v.start_thread_trace, _inp.start_thread_trace);
-                _update(_v.stop_thread_trace, _inp.stop_thread_trace);
-                _update(_v.push_region, _inp.push_region);
-                _update(_v.pop_region, _inp.pop_region);
-                _update(_v.push_annotated_region, _inp.push_annotated_region);
-                _update(_v.pop_annotated_region, _inp.pop_annotated_region);
+                _update(_v.start_trace, inp.start_trace);
+                _update(_v.stop_trace, inp.stop_trace);
+                _update(_v.start_thread_trace, inp.start_thread_trace);
+                _update(_v.stop_thread_trace, inp.stop_thread_trace);
+                _update(_v.push_region, inp.push_region);
+                _update(_v.pop_region, inp.pop_region);
+                _update(_v.push_annotated_region, inp.push_annotated_region);
+                _update(_v.pop_annotated_region, inp.pop_annotated_region);
 
                 _callbacks = _v;
                 break;
@@ -135,26 +135,26 @@ extern "C"
 
                 user_callbacks_t _v = _callbacks;
 
-                _update(_v.start_trace, _inp.start_trace);
-                _update(_v.stop_trace, _inp.stop_trace);
-                _update(_v.start_thread_trace, _inp.start_thread_trace);
-                _update(_v.stop_thread_trace, _inp.stop_thread_trace);
-                _update(_v.push_region, _inp.push_region);
-                _update(_v.pop_region, _inp.pop_region);
-                _update(_v.push_annotated_region, _inp.push_annotated_region);
-                _update(_v.pop_annotated_region, _inp.pop_annotated_region);
+                _update(_v.start_trace, inp.start_trace);
+                _update(_v.stop_trace, inp.stop_trace);
+                _update(_v.start_thread_trace, inp.start_thread_trace);
+                _update(_v.stop_thread_trace, inp.stop_thread_trace);
+                _update(_v.push_region, inp.push_region);
+                _update(_v.pop_region, inp.pop_region);
+                _update(_v.push_annotated_region, inp.push_annotated_region);
+                _update(_v.pop_annotated_region, inp.pop_annotated_region);
 
                 _callbacks = _v;
                 break;
             }
             default:
             {
-                if(_out) *_out = _former;
+                if(out) *out = _former;
                 return OMNITRACE_USER_ERROR_INVALID_CATEGORY;
             }
         }
 
-        if(_out) *_out = _former;
+        if(out) *out = _former;
 
         return OMNITRACE_USER_SUCCESS;
     }

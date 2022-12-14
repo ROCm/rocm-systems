@@ -35,7 +35,7 @@ jobs:
           generate_release_notes: True
 
   release-docs:
-    if: github.repository == 'AMDResearch/omnitrace' && startsWith(github.ref, 'refs/tags/')
+    if: github.repository == 'AMDResearch/omnitrace' && (startsWith(github.ref, 'refs/tags/') || contains(github.ref, 'releases/'))
     runs-on: ubuntu-20.04
     permissions:
       contents: write
@@ -43,25 +43,33 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v3
-        with:
-          ref: gh-pages
+      - name: Update Source
+        run: |
+          git config --global user.name 'Jonathan R. Madsen'
+          git config --global user.email 'jrmadsen@users.noreply.github.com'
+          git config --global pull.rebase true
+          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}
+          git fetch origin
+          git checkout gh-pages
+          git pull origin main
       - name: Install Conda
         uses: s-weigand/setup-conda@v1
       - name: Update Docs
         working-directory: source/docs
         run: |
           conda env create -n omnitrace-docs -f environment.yml
+          source activate
           conda activate omnitrace-docs
-          git config --global user.name 'Jonathan R. Madsen'
-          git config --global user.email 'jrmadsen@users.noreply.github.com'
-          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}
-          git pull --rebase=true origin ${{ github.ref }}
           ./update-docs.sh
-          git add ../../docs
+      - name: Push changes
+        if: github.repository == 'AMDResearch/omnitrace' && startsWith(github.ref, 'refs/tags/')
+        run: |
+          git add docs
           git commit -m "Update HTML (automated)"
           git push -f
 
-  ubuntu:
+  installers:
+    if: github.repository == 'AMDResearch/omnitrace'
     runs-on: ubuntu-20.04
     strategy:
       fail-fast: false
