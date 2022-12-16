@@ -24,6 +24,7 @@
 
 import os
 import re
+import sys
 import socket
 import subprocess
 
@@ -174,11 +175,25 @@ def get_machine_specs(devicenum):
         "version-libs",
         "version-utils",
     ]
+
+    rocmFound = False
     for itr in version_loc:
         _path = os.path.join(os.getenv("ROCM_PATH", "/opt/rocm"), ".info", itr)
         if os.path.exists(_path):
+            print(_path)
             rocm_ver = path(_path).read_text()
+            rocmFound = True
             break
+
+    if not rocmFound:
+        _rocm_path = os.getenv("ROCM_PATH", "/opt/rocm")
+        print("Error: Unable to detect a complete local ROCm installation.")
+        print(
+            "\nThe expected %s/.info/ versioning directory is missing. Please"
+            % _rocm_path
+        )
+        print("ensure you have valid ROCm installation.")
+        sys.exit(1)
 
     (
         gpu_id,
