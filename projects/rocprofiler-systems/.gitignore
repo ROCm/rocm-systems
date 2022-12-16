@@ -39,3 +39,5 @@
 /.cache
 /.clangd
 /compile_commands.json
+/omnitrace-install.py
+/scripts/omnitrace-install.py
