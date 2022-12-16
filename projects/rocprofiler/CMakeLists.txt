@@ -31,8 +31,6 @@ set ( ROCPROFILER_TARGET "${ROCPROFILER_NAME}64" )
 set ( ROCPROFILER_LIBRARY "lib${ROCPROFILER_TARGET}" )
 project ( ${ROCPROFILER_NAME} )
 
-# Set default libdir to be "lib" for ROCm
-set(CMAKE_INSTALL_LIBDIR "lib" CACHE STRING "Library install directory")
 include(GNUInstallDirs)
 ## Adding default path cmake modules
 list ( APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules" )
