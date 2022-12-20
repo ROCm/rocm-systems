@@ -1,7 +1,8 @@
 #!/bin/bash
 
+# https://fedoraproject.org/wiki/Packaging%3aUsersAndGroups
 do_create_rdc_user() {
-    useradd -r -s /bin/nologin rdc
+    useradd -r -s /sbin/nologin rdc
     if [ $(getent group render) ]; then
         usermod -a -G render rdc
     else
@@ -12,14 +13,23 @@ do_create_rdc_user() {
     return 0
 }
 
+create_rdc_service() {
+    if [ -d /run/systemd/system ]; then
+        ln -s -f -r /@CPACK_PACKAGING_INSTALL_PREFIX@/@CMAKE_INSTALL_LIBEXECDIR@/rdc/rdc.service @DISTRO_ROOT@/rdc.service
+    fi
+}
+
 reload_systemd() {
-    systemctl daemon-reload
+    if [ -d /run/systemd/system ]; then
+        systemctl daemon-reload
+    fi
     return 0
 }
+
 do_create_rdc_user
 
 #Symlink RDC Service
-ln -s -f -r /@CPACK_PACKAGING_INSTALL_PREFIX@/@CMAKE_INSTALL_LIBEXECDIR@/rdc/rdc.service @DISTRO_ROOT@/rdc.service
+create_rdc_service
 
 #Request systemctl to reload file since RDC is adding new file/service
 reload_systemd

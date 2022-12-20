@@ -104,11 +104,11 @@ typedef enum {
 
 
 //! ID used to represent an invalid GPU
-#define GPU_ID_INVALID          -1
+#define GPU_ID_INVALID          (-1)
 //! Used to specify all GPUs
-#define RDC_GROUP_ALL_GPUS      -1000
+#define RDC_GROUP_ALL_GPUS      (-1000)
 //! Used to specify all stats fields
-#define RDC_JOB_STATS_FIELDS    -1000
+#define RDC_JOB_STATS_FIELDS    (-1000)
 
 /**
  * @brief The max rdc field string length
@@ -223,6 +223,25 @@ typedef enum {
   RDC_FI_ECC_UMC_SEC,              //!< UMC Single Error Correction
   RDC_FI_ECC_UMC_DED,              //!< UMC Double Error Detection
 
+  /**
+   * @brief ROC-profiler related fields
+   */
+  RDC_FI_PROF_ELAPSED_CYCLES = 700, //!< Number of elapsed cycles over all SMs
+  RDC_FI_PROF_ACTIVE_WAVES,         //!< Number of Active Waves
+  RDC_FI_PROF_ACTIVE_CYCLES,        //!< Number of Active Cycles
+  RDC_FI_PROF_CU_OCCUPANCY,         //!< Active Waves / maximum active Waves supported
+  RDC_FI_PROF_CU_UTILIZATION,       //!< Total active cycles / Total elapsed cycles
+  RDC_FI_PROF_FETCH_SIZE,           //!< Number of kilobytes fetched from video memory
+  RDC_FI_PROF_WRITE_SIZE,           //!< Number of kilobytes written to video memory
+  RDC_FI_PROF_FLOPS_16,             //!< Number of fp16 OPS / second
+  RDC_FI_PROF_FLOPS_32,             //!< Number of fp32 OPS / second
+  RDC_FI_PROF_FLOPS_64,             //!< Number of fp64 OPS / second
+  RDC_FI_PROF_GFLOPS_16,            //!< Number of fp16 GOPS / second
+  RDC_FI_PROF_GFLOPS_32,            //!< Number of fp32 GOPS / second
+  RDC_FI_PROF_GFLOPS_64,            //!< Number of fp64 GOPS / second
+  RDC_FI_PROF_MEMR_BW_KBPNS,        //!< HBM Read Bandwidth in kilobytes / nanosecond
+  RDC_FI_PROF_MEMW_BW_KBPNS,        //!< HBM Write Bandwidth in kilobytes / nanosecond
+
   /*
    * @brief Raw XGMI counter events
    */
@@ -253,7 +272,7 @@ typedef enum {
                                      //!< neighbor 1
   RDC_EVNT_XGMI_1_BEATS_TX,          //!< Data beats sent to
                                      //!< neighbor 1; Each beat
-                                     //!< represnts 32 bytes
+                                     //!< represents 32 bytes
 
   // "Composite" events. These events have additional processing beyond
   // the value provided by the rocm_smi library.
@@ -328,7 +347,7 @@ typedef struct {
 
     uint64_t energy_consumed;               //!< GPU Energy consumed
     uint64_t ecc_correct;                   //!< Correctable errors
-    uint64_t ecc_uncorrect;                 //!< Uncorrtable errors
+    uint64_t ecc_uncorrect;                 //!< Uncorrectable errors
     rdc_stats_summary_t pcie_tx;            //!< Bytes sent over PCIe stats
     rdc_stats_summary_t pcie_rx;            //!< Bytes received over PCIe stats
     rdc_stats_summary_t power_usage;        //!< GPU Power usage stats
@@ -348,7 +367,7 @@ typedef struct {
      uint32_t num_gpus;              //!< Number of GPUs used by job
      rdc_gpu_usage_info_t summary;   //!< Job usage summary statistics
                                      //!< (overall)
-     rdc_gpu_usage_info_t gpus[16];  //!< Job usage summary staticstics by GPU
+     rdc_gpu_usage_info_t gpus[16];  //!< Job usage summary statistics by GPU
 } rdc_job_info_t;
 
 /**
@@ -958,18 +977,18 @@ rdc_status_t rdc_field_unwatch(rdc_handle_t p_rdc_handle,
 /**
  *  @brief Run the diagnostic test cases
  *
- *  @details Run the diagnostic test cases at differenet levles.
+ *  @details Run the diagnostic test cases at different levels.
  *
  *  @param[in] p_rdc_handle The RDC handler.
  *
  *  @param[in] group_id The GPU group id.
  *
  *  @param[in] level  The level decides how long the test will run.
- *  The RDC_DIAG_LVL_SHORT only take a few seconds, and the 
+ *  The RDC_DIAG_LVL_SHORT only take a few seconds, and the
  *  the RDC_DIAG_LVL_LONG may take up to 15 minutes.
- * 
+ *
  *  @param[inout] response  The detail results of the tests run.
- * 
+ *
  *  @retval ::RDC_ST_OK is returned upon successful call.
  */
 rdc_status_t rdc_diagnostic_run(
@@ -988,9 +1007,9 @@ rdc_status_t rdc_diagnostic_run(
  *  @param[in] group_id The GPU group id.
  *
  *  @param[in] test_case  The test case to run.
- * 
+ *
  *  @param[inout] result  The results of the test.
- * 
+ *
  *  @retval ::RDC_ST_OK is returned upon successful call.
  */
 rdc_status_t rdc_test_case_run(

@@ -59,6 +59,7 @@ set(RDC_LIB_INC_DIR "${INC_DIR}")
 set(BOOTSTRAP_LIB "rdc_bootstrap")
 set(RDC_LIB "rdc")
 set(RDC_ROCR_LIB "rdc_rocr")
+set(RDC_ROCP_LIB "rdc_rocp")
 set(RDCCLIENT_LIB "rdc_client")
 
 ## Set RUNPATH if ROCM_RPATH is defined and passed by the environment
@@ -90,7 +91,8 @@ set(CPACK_DEBIAN_PACKAGE_DEPENDS "rocm-core")
 set(CPACK_RPM_PACKAGE_REQUIRES "rocm-core")
 
 # link grpc and ROCm to RSMI
-link_directories(${RSMI_LIB_DIR} "${GRPC_ROOT}/lib" "${GRPC_ROOT}/lib64" "${ROCM_DIR}/lib")
+#link_directories(${RSMI_LIB_DIR} "${GRPC_ROOT}/lib" "${GRPC_ROOT}/lib64" "${ROCM_DIR}/lib")
+link_directories(${RSMI_LIB_DIR} "${GRPC_ROOT}/lib" "${GRPC_ROOT}/lib64")
 
 # add librdc_bootstrap.so
 add_subdirectory(bootstrap)
@@ -98,8 +100,11 @@ add_subdirectory(bootstrap)
 # add librdc.so
 add_subdirectory(rdc)
 
-# add librdc_rocr.so to RDC_LIBS_MODULES
+# add librdc_rocr.so to RDC_LIB_MODULES
 add_subdirectory(rdc_modules/rdc_rocr)
+
+# add librdc_rocp.so to RDC_LIB_MODULES
+add_subdirectory(rdc_modules/rdc_rocp)
 
 if(BUILD_STANDALONE)
     # add librdc_client.so
@@ -125,7 +130,7 @@ else()
 endif()
 
 # Add module directives if those exist
-if(RDC_LIBS_MODULES)
+if(RDC_LIB_MODULES)
     install(TARGETS ${RDC_LIB_MODULES}
         EXPORT rdcTargets
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/${RDC}

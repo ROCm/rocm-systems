@@ -1,17 +1,30 @@
+#!/bin/bash
+
 stop_rdc() {
     #stop RDC if running
-    systemctl stop rdc
+    if [ -d /run/systemd/system ]; then
+        systemctl stop rdc
+    fi
+    return 0
+}
+
+rm_rdc_service() {
+    if [ -e /run/systemd/system ]; then
+        unlink @DISTRO_ROOT@/rdc.service
+    fi
     return 0
 }
 
 reload_systemd() {
-    systemctl daemon-reload
+    if [ -d /run/systemd/system ]; then
+        systemctl daemon-reload
+    fi
     return 0
 }
 
 if [ $1 -le 1 ]; then
     # perform the below actions for rpm remove($1=0) or upgrade($1=1) operations
     stop_rdc
-    unlink @DISTRO_ROOT@/rdc.service
+    rm_rdc_service
     reload_systemd
 fi

@@ -3,13 +3,24 @@
 set -e
 
 stop_rdc() {
-    #stop RDC if running
-    systemctl stop rdc
+    if [ -d /run/systemd/system ]; then
+        #stop RDC if running
+        systemctl stop rdc
+    fi
+    return 0
+}
+
+rm_rdc_service() {
+    if [ -e /run/systemd/system ]; then
+       unlink /lib/systemd/system/rdc.service
+    fi
     return 0
 }
 
 reload_systemd() {
-    systemctl daemon-reload
+    if [ -d /run/systemd/system ]; then
+        systemctl daemon-reload
+    fi
     return 0
 }
 
@@ -21,7 +32,7 @@ rm_pyc() {
 case "$1" in
    remove | upgrade )
        stop_rdc
-       unlink /lib/systemd/system/rdc.service
+       rm_rdc_service
        reload_systemd
        rm_pyc
    ;;
