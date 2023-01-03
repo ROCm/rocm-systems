@@ -650,7 +650,12 @@ def empirical_roof(args):
     dtype = plot_roof(inputs, roof_data)  # Also returns chosen dtype
     plot_application(inputs, args.verbose)
 
-    filename = IMGNAME + "_gpu-" + str(inputs["device"]) + "_{}".format(dtype) + ".pdf"
+    if inputs["device"] == -1:
+        dev_id="ALL"
+    else:
+        dev_id=str(inputs["device"])
+
+    filename = IMGNAME + "_gpu-" + dev_id + "_{}".format(dtype) + ".pdf"
 
     full_path = os.path.abspath(inputs["path"])
     path_to_output = full_path + "/" + filename
