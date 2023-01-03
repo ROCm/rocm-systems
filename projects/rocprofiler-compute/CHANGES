@@ -1,3 +1,8 @@
+Version 1.0.6 (21 Dec 2022)
+
+  * CI update: documentation now published via github action (#22)
+  * better error detection for incomplete ROCm installs (#56)
+
 Version 1.0.5 (13 Dec 2022)
 
   * store application command-line parameters in profiling output (#27)
