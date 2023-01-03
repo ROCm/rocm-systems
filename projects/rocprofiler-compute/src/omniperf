@@ -298,6 +298,21 @@ def characterize_app(path, cmd, verbose):
     for fname in glob.glob(workload_dir + "/perfmon/*.txt"):
         print(fname)
         run_prof(fname, workload_dir, perfmon_dir, app_cmd, verbose)
+    # run again with timestamps
+    run_subprocess(
+        [
+            rocprof_cmd,
+            # "-i", fname,
+            # "-m", perfmon_dir + "/" + "metrics.xml",
+            "--timestamp",
+            "on",
+            "-o",
+            workload_dir + "/" + "timestamps.csv",
+            '"' + app_cmd + '"',
+        ]
+    )
+    # Update pmc_perf.csv timestamps
+    replace_timestamps(workload_dir)
 
 
 ################################################
