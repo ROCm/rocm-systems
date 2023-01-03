@@ -334,6 +334,10 @@ def omniperf_profile(args, VER):
         parse.print_help(sys.stderr)
         sys.exit(1)
 
+    #Verify valid name
+    if args.name.find(".") != -1 or args.name.find("-") != -1:
+        raise ValueError("'-' and '.' are not permited in workload name", args.name)
+
     # Basic Info
     print(PROG, "ver: ", VER)
     print("Path: ", args.path)
