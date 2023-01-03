@@ -651,9 +651,9 @@ def empirical_roof(args):
     plot_application(inputs, args.verbose)
 
     if inputs["device"] == -1:
-        dev_id="ALL"
+        dev_id = "ALL"
     else:
-        dev_id=str(inputs["device"])
+        dev_id = str(inputs["device"])
 
     filename = IMGNAME + "_gpu-" + dev_id + "_{}".format(dtype) + ".pdf"
 
