@@ -76,24 +76,12 @@ set(SERVER_DAEMON_EXE "rdcd")
 configure_file("rdc.service.in" "${PROJECT_BINARY_DIR}/rdc.service" @ONLY)
 set(SERVICE_FILE_NAME "rdc.service")
 
-link_directories(${RSMI_LIB_DIR} "${GRPC_ROOT}/lib" "${GRPC_ROOT}/lib64")
-
-## Set RUNPATH if ROCM_RPATH is defined and passed by the environment
-## RUNPATH should help to run "rdcd" without the usage of ldconfig
-if(DEFINED ENV{ROCM_RPATH})
-    set(CMAKE_EXE_LINKER_FLAGS "-Wl,--enable-new-dtags -Wl,--no-as-needed -Wl,-z,origin")
-    set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_RPATH}:${LIB_RUNPATH}")
-    set(CMAKE_BUILD_WITH_INSTALL_RPATH TRUE)
-    set(CMAKE_SKIP_BUILD_RPATH TRUE)
-
-    # Set other library
-    set(RDCD_EXTRA_LIB ${RDCD_EXTRA_LIB} address_sorting gpr upb ssl crypto)
-endif()
+link_directories(${RSMI_LIB_DIR})
 
 add_executable(${SERVER_DAEMON_EXE} "${SERVER_SRC_LIST}")
 
 target_link_libraries(${SERVER_DAEMON_EXE} pthread rt gRPC::grpc++
-    cap dl rocm_smi64 rdc_bootstrap ${RDCD_EXTRA_LIB})
+    cap dl rocm_smi64 rdc_bootstrap)
 
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/${SERVER_DAEMON_EXE}
     PERMISSIONS OWNER_EXECUTE OWNER_READ OWNER_WRITE GROUP_READ

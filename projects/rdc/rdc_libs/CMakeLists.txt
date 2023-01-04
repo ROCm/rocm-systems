@@ -62,15 +62,6 @@ set(RDC_ROCR_LIB "rdc_rocr")
 set(RDC_ROCP_LIB "rdc_rocp")
 set(RDCCLIENT_LIB "rdc_client")
 
-## Set RUNPATH if ROCM_RPATH is defined and passed by the environment
-## RUNPATH should help to run "rdcd" without the usage of ldconfig
-if(DEFINED ENV{ROCM_RPATH})
-    set(CMAKE_SHARED_LINKER_FLAGS "-Wl,--enable-new-dtags -Wl,--no-as-needed -Wl,-z,origin")
-    set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_RPATH}:${LIB_RUNPATH}")
-    set(CMAKE_BUILD_WITH_INSTALL_RPATH TRUE)
-    set(CMAKE_SKIP_BUILD_RPATH TRUE)
-endif()
-
 ################# Determine the library version #########################
 ## Setup the SO version based on git tags.
 set(SO_VERSION_GIT_TAG_PREFIX "rdc_so_ver")
@@ -90,9 +81,8 @@ set(CPACK_PACKAGE_FILE_NAME "${RDC_PACKAGE}-${VERSION_STRING}")
 set(CPACK_DEBIAN_PACKAGE_DEPENDS "rocm-core")
 set(CPACK_RPM_PACKAGE_REQUIRES "rocm-core")
 
-# link grpc and ROCm to RSMI
-#link_directories(${RSMI_LIB_DIR} "${GRPC_ROOT}/lib" "${GRPC_ROOT}/lib64" "${ROCM_DIR}/lib")
-link_directories(${RSMI_LIB_DIR} "${GRPC_ROOT}/lib" "${GRPC_ROOT}/lib64")
+# link RSMI
+link_directories(${RSMI_LIB_DIR})
 
 # add librdc_bootstrap.so
 add_subdirectory(bootstrap)

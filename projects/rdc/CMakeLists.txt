@@ -75,12 +75,33 @@ include(GNUInstallDirs)
 # ROCM_DIR should be passed in via command line; it will be used
 # in sub-projects. Override with -DROCM_DIR=
 set(ROCM_DIR "/opt/rocm" CACHE STRING "ROCm directory.")
-# LIB_RUNPATH is later used for linking
+
+# Only populate RUNPATH if ROCM_RPATH env variable is set
+# Mostly makes sense in ROCm build scripts context
+#
+# Best attempt at finding libraries without modifying LD_LIBRARY_PATH
+#
+# Reasons for some $ORIGIN paths:
+# $ORIGIN
+# - rocm/lib/librdc.so needs rocm/lib/librocm_smi64.so
+# $ORIGIN/..
+# - rocm/lib/rdc/librdc_rocp.so needs rocm/lib/rdc/../librdc_bootstrap.so
+# $ORIGIN/../lib
+# - rocm/bin/rdci needs rocm/lib/../lib/librdc_bootstrap.so.0
+# - rocm/bin/rdcd needs rocm/lib/../lib/librdc_bootstrap.so.0
+# $ORIGIN/../lib/rdc/grpc/lib
+# - rocm/lib/librdc_client.so needs rocm/lib/../lib/rdc/grpc/lib/libgrpc++.so
+# All other versions are for inconsistencies between systems and custom installation paths
 if(DEFINED ENV{ROCM_RPATH})
-    set(RDC_RUNPATH "\$ORIGIN:\$ORIGIN/../lib:\$ORIGIN/../lib64:\$ORIGIN/../lib/rdc:\$ORIGIN/../lib64/rdc")
-    set(GRPC_RUNPATH "\$ORIGIN/../grpc/lib:\$ORIGIN/../lib/grpc/lib:\$ORIGIN/../lib/rdc/grpc/lib:\$ORIGIN/../lib64/rdc/grpc/lib")
-    set(GRPC_RUNPATH64 "\$ORIGIN/../grpc/lib64:\$ORIGIN/../lib/grpc/lib64:\$ORIGIN/../lib/rdc/grpc/lib64:\$ORIGIN/../lib64/rdc/grpc/lib64")
-    set(LIB_RUNPATH "${RDC_RUNPATH}:${GRPC_RUNPATH}:${GRPC_RUNPATH64}")
+    set(RDC_RUNPATH "\$ORIGIN:\$ORIGIN/..:\$ORIGIN/../lib:\$ORIGIN/../lib64")
+    set(GRPC_RUNPATH "\$ORIGIN/grpc/lib:\$ORIGIN/../grpc/lib:\$ORIGIN/../lib/grpc/lib:\$ORIGIN/../lib/rdc/grpc/lib:\$ORIGIN/../lib64/rdc/grpc/lib")
+    set(GRPC_RUNPATH64 "\$ORIGIN/grpc/lib64:\$ORIGIN/../grpc/lib64:\$ORIGIN/../lib/grpc/lib64:\$ORIGIN/../lib/rdc/grpc/lib64:\$ORIGIN/../lib64/rdc/grpc/lib64")
+    set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_RPATH}:${RDC_RUNPATH}:${GRPC_RUNPATH}:${GRPC_RUNPATH64}")
+
+    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,--enable-new-dtags -Wl,--no-as-needed -Wl,-z,origin")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,--enable-new-dtags -Wl,--no-as-needed -Wl,-z,origin")
+    set(CMAKE_BUILD_WITH_INSTALL_RPATH TRUE)
+    set(CMAKE_SKIP_BUILD_RPATH TRUE)
 endif()
 
 set(COMMON_DIR "${CMAKE_CURRENT_SOURCE_DIR}/common")

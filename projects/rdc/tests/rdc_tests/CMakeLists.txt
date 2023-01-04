@@ -51,13 +51,6 @@ if(NOT GTest_FOUND STREQUAL "TRUE" OR NOT DEFINED GTest_VERSION)
     FetchContent_MakeAvailable(googletest)
 endif()
 
-if(DEFINED ENV{ROCM_RPATH})
-    set(CMAKE_SHARED_LINKER_FLAGS "-Wl,--enable-new-dtags -Wl,--no-as-needed -Wl,-z,origin")
-    set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_RPATH}:${LIB_RUNPATH}")
-    set(CMAKE_BUILD_WITH_INSTALL_RPATH TRUE)
-    set(CMAKE_SKIP_BUILD_RPATH TRUE)
-endif()
-
 # Source files
 aux_source_directory(${SRC_DIR} rdctstSources)
 
