@@ -1,3 +1,4 @@
+[![Ubuntu 20.04](https://github.com/AMDResearch/omniperf/actions/workflows/ubuntu-focal.yml/badge.svg)](https://github.com/AMDResearch/omniperf/actions/workflows/ubuntu-focal.yml)
 [![Docs](https://github.com/AMDResearch/omniperf/actions/workflows/docs.yml/badge.svg)](https://amdresearch.github.io/omniperf/)
 [![DOI](https://zenodo.org/badge/561919887.svg)](https://zenodo.org/badge/latestdoi/561919887)
 
