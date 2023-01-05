@@ -1,6 +1,6 @@
 # This is a basic workflow to help you get started with Actions
 
-name: analyze-commands
+name: Ubuntu 20.04
 
 # Controls when the workflow will run
 on:
@@ -45,7 +45,11 @@ jobs:
           cd build
           cmake -DCMAKE_INSTALL_PREFIX=/opt/omniperf ..
           make install
-      - name: Run ctest
+      - name: CTEST- Analyze Commands
         run: |
           cd build
           ctest --verbose -R test_analyze_commands
+      - name: CTEST- Analyze Workloads
+        run: |
+          cd build
+          ctest --verbose -R test_analyze_workloads test_saved_analysis
