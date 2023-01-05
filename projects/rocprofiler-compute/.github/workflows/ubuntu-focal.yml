@@ -5,9 +5,9 @@ name: Ubuntu 20.04
 # Controls when the workflow will run
 on:
   push:
-    branches: [ main, dev ]
+    branches: [ main, dev, ci-reorg ]
   pull_request:
-    branches: [ main, dev ]
+    branches: [ main, dev, ci-reorg ]
 
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
