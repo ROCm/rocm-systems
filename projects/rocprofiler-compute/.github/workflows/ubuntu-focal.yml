@@ -5,9 +5,9 @@ name: Ubuntu 20.04
 # Controls when the workflow will run
 on:
   push:
-    branches: [ main, dev, ci-reorg ]
+    branches: [ main, dev ]
   pull_request:
-    branches: [ main, dev, ci-reorg ]
+    branches: [ main, dev ]
 
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
@@ -45,11 +45,11 @@ jobs:
           cd build
           cmake -DCMAKE_INSTALL_PREFIX=/opt/omniperf ..
           make install
-      - name: CTEST- Analyze Commands
+      - name: CTest- Analyze Commands
         run: |
           cd build
           ctest --verbose -R test_analyze_commands
-      - name: CTEST- Analyze Workloads
+      - name: CTest- Analyze Workloads
         run: |
           cd build
           ctest --verbose -R test_analyze_workloads test_saved_analysis
