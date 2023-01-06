@@ -5,9 +5,9 @@ name: RHEL 8
 # Controls when the workflow will run
 on:
   push:
-    branches: [ main, dev, ci-reorg ]
+    branches: [ main, dev ]
   pull_request:
-    branches: [ main, dev, ci-reorg ]
+    branches: [ main, dev ]
 
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
@@ -35,9 +35,6 @@ jobs:
         with:
           submodules: recursive
           token: ${{ secrets.GH_PAT }}
-      - name: Upgrade Python to 3.9
-        run: |
-
       - name: Install Python prereqs
         run: |
           python3.9 -m pip install -r requirements.txt
