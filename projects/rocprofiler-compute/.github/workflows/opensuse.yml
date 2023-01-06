@@ -26,10 +26,10 @@ jobs:
         uses: styfle/cancel-workflow-action@0.11.0
       - name: Install baseline OS dependencies
         run: |
-          sudo yum -y update
-          sudo yum -y install git
-          sudo yum -y install python39
-          sudo yum -y install cmake3
+          yum -y update
+          yum -y install git
+          yum -y install python39
+          yum -y install cmake3
       - name: Checkout
         uses: actions/checkout@v3
         with:
