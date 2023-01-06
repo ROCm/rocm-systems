@@ -2052,8 +2052,11 @@ def showProductName(deviceList):
             # Retrieve the device SKU as a substring from VBIOS
             ret = rocmsmi.rsmi_dev_vbios_version_get(device, vbios, 256)
             if rsmi_ret_ok(ret, device) and vbios.value.decode():
-                # Device SKU is just 6 characters after the first occurance of '-' in vbios_version
-                device_sku = vbios.value.decode().split('-')[1][:6]
+                # Device SKU is just the characters in between the two '-' in vbios_version
+                if vbios.value.decode().count('-') == 2 and len(str(vbios.value.decode().split('-')[1])) > 1:
+                    device_sku = vbios.value.decode().split('-')[1]
+                else:
+                    device_sku = 'unknown'
             printLog(device, 'Card SKU', '\t\t' + device_sku)
         else:
             printLog(device, 'Incompatible device.\n' \
