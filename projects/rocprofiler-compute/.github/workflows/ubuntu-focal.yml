@@ -1,7 +1,6 @@
 # This is a basic workflow to help you get started with Actions
 
-name: analyze-workloads
-
+name: Ubuntu 20.04
 
 # Controls when the workflow will run
 on:
@@ -31,7 +30,7 @@ jobs:
           sudo apt-get install -y git
           sudo apt-get install -y python3-pip
           sudo apt-get install -y cmake
-      - name: Checkout	  
+      - name: Checkout
         uses: actions/checkout@v3
         with:
           submodules: recursive
@@ -39,14 +38,18 @@ jobs:
       - name: Install Python prereqs
         run: |
           python3 -m pip install -r requirements.txt
-          python3 -m pip install pyinstaller pytest pytest-cov
-      - name: Configure and install 
+          python3 -m pip install pyinstaller pytest pytest-cov mock
+      - name: Configure and install
         run: |
           mkdir build
           cd build
           cmake -DCMAKE_INSTALL_PREFIX=/opt/omniperf ..
           make install
-      - name: run ctest
+      - name: CTest- Analyze Commands
+        run: |
+          cd build
+          ctest --verbose -R test_analyze_commands
+      - name: CTest- Analyze Workloads
         run: |
           cd build
           ctest --verbose -R test_analyze_workloads test_saved_analysis
