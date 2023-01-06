@@ -760,7 +760,7 @@ def resetPerfDeterminism(deviceList):
         if rsmi_ret_ok(ret, device, 'disable performance determinism'):
             printLog(device, 'Successfully disabled performance determinism', None)
         else:
-            logging.error('GPU[%s]\t\t: Unable to diable performance determinism', device)
+            logging.error('GPU[%s]\t\t: Unable to disable performance determinism', device)
     printLogSpacer()
 
 
@@ -1303,6 +1303,37 @@ def setProfile(deviceList, profile):
                         else:
                             printErrLog(device, 'Failed to set profile to: %s' % (desiredProfile))
         printLogSpacer()
+
+
+def setComputePartition(deviceList, computePartitionType):
+    """ Sets compute partitioning for a list of device
+
+    @param deviceList: List of DRM devices (can be a single-item list)
+    @param computePartition: Compute Partition type to set as
+    """
+    printLogSpacer(' Set compute partition to %s ' % (str(computePartitionType).upper()))
+    for device in deviceList:
+        computePartitionType = computePartitionType.upper()
+        if computePartitionType not in compute_partition_type_l:
+            printErrLog(device, 'Invalid compute partition type %s'
+                        '\nValid compute partition types are %s'
+                        % ( computePartitionType.upper(),
+                        (', '.join(map(str, compute_partition_type_l))) ))
+            return (None, None)
+        ret = rocmsmi.rsmi_dev_compute_partition_set(device,
+                rsmi_compute_partition_type_dict[computePartitionType])
+        if rsmi_ret_ok(ret, device, silent=True):
+            printLog(device,
+                'Successfully set compute partition to %s' % (computePartitionType),
+                None)
+        elif ret == rsmi_status_t.RSMI_STATUS_PERMISSION:
+            printLog(device, 'Permission denied', None)
+        elif ret == rsmi_status_t.RSMI_STATUS_NOT_SUPPORTED:
+            printLog(device, 'Not supported on the given system', None)
+        else:
+            rsmi_ret_ok(ret, device)
+            printErrLog(device, 'Failed to retrieve compute partition, even though device supports it.')
+    printLogSpacer()
 
 
 def showAllConcise(deviceList):
@@ -2732,6 +2763,24 @@ def showNodesBw(deviceList):
     if nonXgmi:
         printLog(None,"Non-xGMI links detected and is currently not supported", None)
 
+def showComputePartition(deviceList):
+    """ Returns the current compute partitioning for a list of devices
+
+    @param deviceList: List of DRM devices (can be a single-item list)
+    """
+    currentComputePartition = create_string_buffer(256)
+    printLogSpacer(' Current Compute Partition ')
+    for device in deviceList:
+        ret = rocmsmi.rsmi_dev_compute_partition_get(device, currentComputePartition, 256)
+        if rsmi_ret_ok(ret, device, silent=True) and currentComputePartition.value.decode():
+            printLog(device, 'Compute Partition', currentComputePartition.value.decode())
+        elif ret == rsmi_status_t.RSMI_STATUS_NOT_SUPPORTED:
+            printLog(device, 'Not supported on the given system', None)
+        else:
+            rsmi_ret_ok(ret, device)
+            printErrLog(device, 'Failed to retrieve compute partition, even though device supports it.', None)
+    printLogSpacer()
+
 def checkAmdGpus(deviceList):
     """ Check if there are any AMD GPUs being queried,
     return False if there are none
@@ -2905,6 +2954,8 @@ def relaunchAsSudo():
     """
     if os.geteuid() != 0:
         os.execvp('sudo', ['sudo'] + sys.argv)
+        #keeping below, if we want to run sudo with user's env variables
+        #os.execvp('sudo', ['sudo', '-E'] + sys.argv)
 
 
 def rsmi_ret_ok(my_ret, device=None, metric=None, silent=False):
@@ -2935,7 +2986,6 @@ def rsmi_ret_ok(my_ret, device=None, metric=None, silent=False):
         RETCODE = my_ret
         return False
     return True
-
 
 def save(deviceList, savefilepath):
     """ Save clock frequencies and fan speeds for a list of devices to a specified file path.
@@ -3077,6 +3127,7 @@ if __name__ == '__main__':
     groupDisplay.add_argument('--showenergycounter', help='Energy accumulator that stores amount of energy consumed',
                               action='store_true')
     groupDisplay.add_argument('--shownodesbw', help='Shows the numa nodes ', action='store_true')
+    groupDisplay.add_argument('--showcomputepartition', help='Shows current compute partitioning ', action='store_true')
 
     groupActionReset.add_argument('-r', '--resetclocks', help='Reset clocks and OverDrive to default',
                                   action='store_true')
@@ -3121,6 +3172,10 @@ if __name__ == '__main__':
     groupAction.add_argument('--setperfdeterminism',
                              help='Set clock frequency limit to get minimal performance variation', type=int,
                              metavar='SCLK', nargs=1)
+    groupAction.add_argument('--setcomputepartition', help='Set compute partition',
+                             choices=compute_partition_type_l + [x.lower() for x in compute_partition_type_l],
+                             type=str, nargs=1
+                             )
     groupAction.add_argument('--rasenable', help='Enable RAS for specified block and error type', type=str, nargs=2,
                              metavar=('BLOCK', 'ERRTYPE'))
     groupAction.add_argument('--rasdisable', help='Disable RAS for specified block and error type', type=str, nargs=2,
@@ -3158,7 +3213,7 @@ if __name__ == '__main__':
             or args.resetclocks or args.setprofile or args.resetprofile or args.setoverdrive or args.setmemoverdrive \
             or args.setpoweroverdrive or args.resetpoweroverdrive or args.rasenable or args.rasdisable or \
             args.rasinject or args.gpureset or args.setperfdeterminism or args.setslevel or args.setmlevel or \
-            args.setvc or args.setsrange or args.setmrange or args.setclock:
+            args.setvc or args.setsrange or args.setmrange or args.setclock or args.setcomputepartition:
         relaunchAsSudo()
 
     # If there is one or more device specified, use that for all commands, otherwise use a
@@ -3220,6 +3275,7 @@ if __name__ == '__main__':
         args.showpidgpus = []
         args.showreplaycount = True
         args.showvc = True
+        args.showcomputepartition = True
 
         if not PRINT_JSON:
             args.showprofile = True
@@ -3348,6 +3404,8 @@ if __name__ == '__main__':
         showVoltageCurve(deviceList)
     if args.showenergycounter:
         showEnergy(deviceList)
+    if args.showcomputepartition:
+        showComputePartition(deviceList)
     if args.setclock:
         setClocks(deviceList, args.setclock[0], [int(args.setclock[1])])
     if args.setsclk:
@@ -3386,6 +3444,8 @@ if __name__ == '__main__':
         setClockRange(deviceList, 'mclk', args.setmrange[0], args.setmrange[1], args.autorespond)
     if args.setperfdeterminism:
         setPerfDeterminism(deviceList, args.setperfdeterminism[0])
+    if args.setcomputepartition:
+        setComputePartition(deviceList, args.setcomputepartition[0])
     if args.resetprofile:
         resetProfile(deviceList)
     if args.resetxgmierr:

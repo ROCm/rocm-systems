@@ -113,6 +113,7 @@ class RocmSMI {
                            uint64_t *weight);
     int get_node_index(uint32_t dv_ind, uint32_t *node_ind);
     const RocmSMI_env_vars& getEnv(void);
+    static const std::map<amd::smi::DevInfoTypes, std::string> devInfoTypesStrings;
 
  private:
     std::vector<std::shared_ptr<Device>> devices_;

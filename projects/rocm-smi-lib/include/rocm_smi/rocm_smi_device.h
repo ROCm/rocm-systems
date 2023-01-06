@@ -3,7 +3,7 @@
  * The University of Illinois/NCSA
  * Open Source License (NCSA)
  *
- * Copyright (c) 2017, Advanced Micro Devices, Inc.
+ * Copyright (c) 2017-2023, Advanced Micro Devices, Inc.
  * All rights reserved.
  *
  * Developed by:
@@ -161,7 +161,8 @@ enum DevInfoTypes {
   kDevMemPageBad,
   kDevNumaNode,
   kDevGpuMetrics,
-  kDevGpuReset
+  kDevGpuReset,
+  kDevComputePartition
 };
 
 typedef struct {

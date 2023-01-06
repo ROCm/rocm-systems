@@ -5,7 +5,7 @@
  * The University of Illinois/NCSA
  * Open Source License (NCSA)
  *
- * Copyright (c) 2017, Advanced Micro Devices, Inc.
+ * Copyright (c) 2017-2023, Advanced Micro Devices, Inc.
  * All rights reserved.
  *
  * Developed by:
@@ -50,13 +50,14 @@
 #include <vector>
 #include <iostream>
 #include <bitset>
+#include <map>
 
 #include "rocm_smi/rocm_smi.h"
 
 #define PRINT_RSMI_ERR(RET) { \
   if (RET != RSMI_STATUS_SUCCESS) { \
     const char *err_str; \
-    std::cout << "RSMI call returned " << (RET) \
+    std::cout << "[ERROR] RSMI call returned " << (RET) \
       << " at line " << __LINE__ << std::endl; \
       rsmi_status_string((RET), &err_str); \
       std::cout << err_str << std::endl; \
@@ -68,6 +69,11 @@
   if (RET != RSMI_STATUS_SUCCESS) { \
     return (RET); \
   } \
+}
+
+#define CHK_AND_PRINT_RSMI_ERR_RET(RET) { \
+  PRINT_RSMI_ERR(RET) \
+  CHK_RSMI_RET(RET) \
 }
 
 #define CHK_RSMI_RET_I(RET) { \
@@ -85,11 +91,24 @@
     } \
 }
 
+#define CHK_RSMI_NOT_SUPPORTED_RET(RET) { \
+    if ((RET) == RSMI_STATUS_NOT_SUPPORTED) { \
+      std::cout << "This function is not supported in the current environment." \
+      << std::endl; \
+    } else { \
+      CHK_RSMI_RET(RET) \
+    } \
+}
+
 static void print_test_header(const char *str, uint32_t dv_ind) {
   std::cout << "********************************" << std::endl;
   std::cout << "*** " << str << std::endl;
   std::cout << "********************************" << std::endl;
   std::cout << "Device index: " << dv_ind << std::endl;
+}
+
+static void print_mini_header(const char *str) {
+  std::cout << "\n>> " << str << " <<" << std::endl;
 }
 
 static const char *
@@ -112,6 +131,33 @@ power_profile_string(rsmi_power_profile_preset_masks_t profile) {
   }
 }
 
+static const std::string
+compute_partition_string(rsmi_compute_partition_type partition) {
+  switch (partition) {
+    case RSMI_COMPUTE_PARTITION_CPX:
+      return "CPX";
+    case RSMI_COMPUTE_PARTITION_SPX:
+      return "SPX";
+    case RSMI_COMPUTE_PARTITION_DPX:
+      return "DPX";
+    case RSMI_COMPUTE_PARTITION_TPX:
+      return "TPX";
+    case RSMI_COMPUTE_PARTITION_QPX:
+      return "QPX";
+    default:
+      return "UNKNOWN";
+  }
+}
+
+static std::map<std::string, rsmi_compute_partition_type_t>
+mapStringToRSMIComputePartitionTypes {
+  {"CPX", RSMI_COMPUTE_PARTITION_CPX},
+  {"SPX", RSMI_COMPUTE_PARTITION_SPX},
+  {"DPX", RSMI_COMPUTE_PARTITION_DPX},
+  {"TPX", RSMI_COMPUTE_PARTITION_TPX},
+  {"QPX", RSMI_COMPUTE_PARTITION_QPX}
+};
+
 static const char *
 perf_level_string(rsmi_dev_perf_level_t perf_lvl) {
   switch (perf_lvl) {
@@ -126,6 +172,34 @@ perf_level_string(rsmi_dev_perf_level_t perf_lvl) {
     default:
       return "UNKNOWN";
   }
+}
+
+static bool isUserRunningAsSudo() {
+  bool isRunningWithSudo = false;
+  auto myUID = getuid();
+  auto myPrivledges = geteuid();
+  if (myUID == myPrivledges) {
+    isRunningWithSudo = true;
+  }
+  return isRunningWithSudo;
+}
+
+bool isFileWritable(rsmi_status_t response) {
+  // Clock files may not be writable, causing sets to
+  // return RSMI_STATUS_PERMISSION. If running as sudo,
+  // this means file is not writable.
+  // isFileWritable(ret) - intends to capture this
+  // response situation.
+  bool fileWritable = true;
+  if (isUserRunningAsSudo() && (response == RSMI_STATUS_PERMISSION)) {
+      PRINT_RSMI_ERR(response)
+      std::cout << "[WARN] User is running with sudo "
+                << "permissions, file is not writable." << std::endl;
+      fileWritable = false;
+  } else {
+      CHK_AND_PRINT_RSMI_ERR_RET(response)
+  }
+  return fileWritable;
 }
 
 static rsmi_status_t test_power_profile(uint32_t dv_ind) {
@@ -355,13 +429,19 @@ static rsmi_status_t test_set_freq(uint32_t dv_ind) {
   uint32_t freq_bitmask;
   rsmi_clk_type rsmi_clk;
 
+  // Clock files may not be writable, causing sets to
+  // return RSMI_STATUS_PERMISSION even if running with
+  // sudo. See isFileWritable() for more info.
+
   print_test_header("Clock Frequency Control", dv_ind);
   for (uint32_t clk = (uint32_t)RSMI_CLK_TYPE_FIRST;
                                            clk <= RSMI_CLK_TYPE_LAST; ++clk) {
+    std::string miniHeader = "Testing clock" + std::to_string(clk);
+    print_mini_header(miniHeader.c_str());
     rsmi_clk = (rsmi_clk_type)clk;
 
     ret = rsmi_dev_gpu_clk_freq_get(dv_ind, rsmi_clk, &f);
-    CHK_RSMI_RET(ret)
+    CHK_AND_PRINT_RSMI_ERR_RET(ret)
 
     std::cout << "Initial frequency for clock" << rsmi_clk << " is " <<
                                                       f.current << std::endl;
@@ -380,19 +460,20 @@ static rsmi_status_t test_set_freq(uint32_t dv_ind) {
         " to 0b" << freq_bm_str << " ..." << std::endl;
 
     ret = rsmi_dev_gpu_clk_freq_set(dv_ind, rsmi_clk, freq_bitmask);
-    CHK_RSMI_RET(ret)
+    isFileWritable(ret);
 
     ret = rsmi_dev_gpu_clk_freq_get(dv_ind, rsmi_clk, &f);
-    CHK_RSMI_RET(ret)
+    CHK_AND_PRINT_RSMI_ERR_RET(ret)
 
     std::cout << "Frequency is now index " << f.current << std::endl;
     std::cout << "Resetting mask to all frequencies." << std::endl;
     ret = rsmi_dev_gpu_clk_freq_set(dv_ind, rsmi_clk, 0xFFFFFFFF);
-    CHK_RSMI_RET(ret)
+    isFileWritable(ret);
 
     ret = rsmi_dev_perf_level_set_v1(dv_ind, RSMI_DEV_PERF_LEVEL_AUTO);
-    CHK_RSMI_RET(ret)
+    isFileWritable(ret);
   }
+  std::cout << std::endl;
   return RSMI_STATUS_SUCCESS;
 }
 
@@ -406,13 +487,75 @@ static void print_frequencies(rsmi_frequencies_t *f) {
     std::cout << std::endl;
   }
 }
+
+static rsmi_status_t test_set_compute_partitioning(uint32_t dv_ind) {
+  rsmi_status_t ret;
+  uint32_t buffer_len = 10;
+  char originalComputePartition[buffer_len];
+  print_test_header("Compute Partitioning Control", dv_ind);
+  /**
+  typedef enum {
+  RSMI_COMPUTE_PARTITION_INVALID = 0,
+  RSMI_COMPUTE_PARTITION_CPX,         //!< Core mode (CPX)- Per-chip XCC with
+                                      //!< shared memory
+  RSMI_COMPUTE_PARTITION_SPX,         //!< Single GPU mode (SPX)- All XCCs work
+                                      //!< together with shared memory
+  RSMI_COMPUTE_PARTITION_DPX,         //!< Dual GPU mode (DPX)- Half XCCs work
+                                      //!< together with shared memory
+  RSMI_COMPUTE_PARTITION_TPX,         //!< Triple GPU mode (TPX)- One-third XCCs
+                                      //!< work together with shared memory
+  RSMI_COMPUTE_PARTITION_QPX,         //!< Quad GPU mode (QPX)- Quarter XCCs
+                                      //!< work together with shared memory
+  } rsmi_compute_partition_type_t;
+  */
+  ret = rsmi_dev_compute_partition_get(dv_ind, originalComputePartition, buffer_len);
+  CHK_RSMI_NOT_SUPPORTED_RET(ret)
+  if (ret == RSMI_STATUS_NOT_SUPPORTED) {
+    std::cout << "Device does not support the compute partition feature."
+              << std::endl;
+    std::cout << "*********************************************" << std::endl;
+    return RSMI_STATUS_SUCCESS;
+  } else {
+    CHK_AND_PRINT_RSMI_ERR_RET(ret)
+    std::cout << "Original compute partition is " << originalComputePartition
+              << "." << std::endl;
+  }
+
+  for (int newComputePartition = RSMI_COMPUTE_PARTITION_CPX;
+       newComputePartition <= RSMI_COMPUTE_PARTITION_QPX;
+       newComputePartition++) {
+    rsmi_compute_partition_type newPartition
+      = static_cast<rsmi_compute_partition_type>(newComputePartition);
+    std::cout << "Attempting to set compute partition to "
+              << compute_partition_string(newPartition) << "..."
+              << std::endl;
+    ret = rsmi_dev_compute_partition_set(dv_ind, newPartition);
+    CHK_RSMI_NOT_SUPPORTED_RET(ret)
+    std::cout << "Done setting compute partition to "
+              << compute_partition_string(newPartition)
+              << "." << std::endl;
+    std::cout << std::endl << std::endl;
+  }
+
+  std::string myComputePartition = originalComputePartition;
+  if (myComputePartition.empty() == false) {
+    std::cout << "Resetting compute partition to " << originalComputePartition
+              << "... " << std::endl;
+    rsmi_compute_partition_type origComputePartitionType
+      = mapStringToRSMIComputePartitionTypes[originalComputePartition];
+    CHK_RSMI_NOT_SUPPORTED_RET(ret)
+    std::cout << "Done" << std::endl;
+    ret = rsmi_dev_compute_partition_set(dv_ind, origComputePartitionType);
+  }
+  return RSMI_STATUS_SUCCESS;
+}
+
 int main() {
   rsmi_status_t ret;
 
   ret = rsmi_init(0);
   CHK_RSMI_RET_I(ret)
 
-  std::string val_str;
   std::vector<std::string> val_vec;
   uint64_t val_ui64, val2_ui64;
   int64_t val_i64;
@@ -424,98 +567,111 @@ int main() {
   rsmi_gpu_metrics_t p;
 
   rsmi_num_monitor_devices(&num_monitor_devs);
-  for (uint32_t i = 0; i< num_monitor_devs; ++i) {
+  for (uint32_t i = 0; i < num_monitor_devs; ++i) {
     ret = rsmi_dev_id_get(i, &val_ui16);
     CHK_RSMI_RET_I(ret)
     std::cout << "\t**Device ID: 0x" << std::hex << val_ui64 << std::endl;
 
+    std::cout << std::endl << std::endl;
+    std::cout << "Starting to call "
+              << "rsmi_dev_compute_partition_get()..."
+              << std::endl;
+    char current_compute_partition[256];
+    ret = rsmi_dev_compute_partition_get(i, current_compute_partition, 256);
+    CHK_RSMI_NOT_SUPPORTED_RET(ret)
+    std::cout << "\t**Current Compute Partition setting: "
+              << current_compute_partition << std::endl;
+
     ret = rsmi_dev_gpu_metrics_info_get(i, &p);
-    CHK_RSMI_RET(ret)
+    CHK_AND_PRINT_RSMI_ERR_RET(ret)
     std::cout << "\t**GPU METRICS" << std::endl;
 
     ret = rsmi_dev_perf_level_get(i, &pfl);
-    CHK_RSMI_RET_I(ret)
+    CHK_AND_PRINT_RSMI_ERR_RET(ret)
     std::cout << "\t**Performance Level:" <<
                                           perf_level_string(pfl) << std::endl;
-
     ret = rsmi_dev_overdrive_level_get(i, &val_ui32);
-    CHK_RSMI_RET_I(ret)
+    CHK_AND_PRINT_RSMI_ERR_RET(ret)
     std::cout << "\t**OverDrive Level:" << val_ui32 << std::endl;
 
     ret = rsmi_dev_gpu_clk_freq_get(i, RSMI_CLK_TYPE_MEM, &f);
-    CHK_RSMI_RET_I(ret)
+    CHK_AND_PRINT_RSMI_ERR_RET(ret)
     std::cout << "\t**Supported GPU Memory clock frequencies: ";
     std::cout << f.num_supported << std::endl;
     print_frequencies(&f);
 
     ret = rsmi_dev_gpu_clk_freq_get(i, RSMI_CLK_TYPE_SYS, &f);
-    CHK_RSMI_RET_I(ret)
+    CHK_AND_PRINT_RSMI_ERR_RET(ret)
     std::cout << "\t**Supported GPU clock frequencies: ";
     std::cout << f.num_supported << std::endl;
     print_frequencies(&f);
 
-    char name[20];
-    ret = rsmi_dev_name_get(i, name, 20);
-    CHK_RSMI_RET_I(ret)
+    char name[128];
+    ret = rsmi_dev_name_get(i, name, 128);
+    CHK_AND_PRINT_RSMI_ERR_RET(ret)
     std::cout << "\t**Monitor name: " << name << std::endl;
 
     ret = rsmi_dev_temp_metric_get(i, 0, RSMI_TEMP_CURRENT, &val_i64);
-    CHK_RSMI_RET_I(ret)
+    CHK_AND_PRINT_RSMI_ERR_RET(ret)
     std::cout << "\t**Temperature: " << val_i64/1000 << "C" << std::endl;
 
     ret = rsmi_dev_volt_metric_get(i, RSMI_VOLT_TYPE_VDDGFX,
                                                RSMI_VOLT_CURRENT, &val_i64);
-    CHK_RSMI_RET_I(ret)
+    CHK_AND_PRINT_RSMI_ERR_RET(ret)
     std::cout << "\t**Voltage: " << val_i64 << "mV" << std::endl;
 
     ret = rsmi_dev_fan_speed_get(i, 0, &val_i64);
-    CHK_RSMI_RET_I(ret)
+    CHK_AND_PRINT_RSMI_ERR_RET(ret)
     ret = rsmi_dev_fan_speed_max_get(i, 0, &val_ui64);
-    CHK_RSMI_RET_I(ret)
+    CHK_AND_PRINT_RSMI_ERR_RET(ret)
     std::cout << "\t**Current Fan Speed: ";
     std::cout << val_i64/static_cast<int64_t>(val_ui64)*100;
     std::cout << "% ("<< val_i64 << "/" << val_ui64 << ")" << std::endl;
 
     ret = rsmi_dev_fan_rpms_get(i, 0, &val_i64);
-    CHK_RSMI_RET_I(ret)
+    CHK_AND_PRINT_RSMI_ERR_RET(ret)
     std::cout << "\t**Current fan RPMs: " << val_i64 << std::endl;
 
     ret = rsmi_dev_power_cap_get(i, 0, &val_ui64);
-    CHK_RSMI_PERM_RET(ret)
+    CHK_AND_PRINT_RSMI_ERR_RET(ret)
     std::cout << "\t**Current Power Cap: " << val_ui64 << "uW" <<std::endl;
 
     ret = rsmi_dev_power_cap_range_get(i, 0, &val_ui64, &val2_ui64);
-    CHK_RSMI_PERM_RET(ret)
+    CHK_AND_PRINT_RSMI_ERR_RET(ret)
     std::cout << "\t**Power Cap Range: " << val2_ui64 << " to " <<
                                                val_ui64 << " uW" << std::endl;
 
     ret = rsmi_dev_power_ave_get(i, 0, &val_ui64);
-    CHK_RSMI_PERM_RET(ret)
+    CHK_AND_PRINT_RSMI_ERR_RET(ret)
     std::cout << "\t**Averge Power Usage: ";
-    std::cout << static_cast<float>(val_ui64)/1000 << " W" <<
-                                                                    std::endl;
+    std::cout << static_cast<float>(val_ui64)/1000 << " W" << std::endl;
+    ret = rsmi_dev_power_ave_get(i, 0, &val_ui64);
+    CHK_AND_PRINT_RSMI_ERR_RET(ret)
     std::cout << "\t=======" << std::endl;
   }
 
   std::cout << "***** Testing write api's" << std::endl;
   for (uint32_t i = 0; i< num_monitor_devs; ++i) {
     ret = test_set_overdrive(i);
-    CHK_RSMI_RET_I(ret)
+    CHK_AND_PRINT_RSMI_ERR_RET(ret)
 
     ret = test_set_perf_level(i);
-    CHK_RSMI_RET_I(ret)
-
-    ret = test_set_freq(i);
-    CHK_RSMI_RET_I(ret)
+    CHK_AND_PRINT_RSMI_ERR_RET(ret)
 
     ret = test_set_fan_speed(i);
-    CHK_RSMI_RET_I(ret)
+    CHK_AND_PRINT_RSMI_ERR_RET(ret)
 
     ret = test_power_cap(i);
-    CHK_RSMI_RET_I(ret)
+    CHK_AND_PRINT_RSMI_ERR_RET(ret)
 
     ret = test_power_profile(i);
-    CHK_RSMI_RET_I(ret)
+    CHK_AND_PRINT_RSMI_ERR_RET(ret)
+
+    ret = test_set_compute_partitioning(i);
+    CHK_AND_PRINT_RSMI_ERR_RET(ret)
+
+    ret = test_set_freq(i);
+    CHK_AND_PRINT_RSMI_ERR_RET(ret)
   }
 
   return 0;

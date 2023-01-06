@@ -3,7 +3,7 @@
  * The University of Illinois/NCSA
  * Open Source License (NCSA)
  *
- * Copyright (c) 2021, Advanced Micro Devices, Inc.
+ * Copyright (c) 2017-2023, Advanced Micro Devices, Inc.
  * All rights reserved.
  *
  * Developed by:
@@ -280,7 +280,7 @@ rsmi_dev_gpu_metrics_info_get(uint32_t dv_ind, rsmi_gpu_metrics_t *smu) {
     return RSMI_STATUS_NOT_SUPPORTED;
   }
 
-  // Initialize the smu fiedls to zero as some of them only valid in
+  // Initialize the smu fields to zero as some of them only valid in
   // a specific version.
   *smu = {};
 
