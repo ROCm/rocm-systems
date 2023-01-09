@@ -180,7 +180,6 @@ def get_machine_specs(devicenum):
     for itr in version_loc:
         _path = os.path.join(os.getenv("ROCM_PATH", "/opt/rocm"), ".info", itr)
         if os.path.exists(_path):
-            print(_path)
             rocm_ver = path(_path).read_text()
             rocmFound = True
             break
