@@ -294,6 +294,8 @@ Panel Config:
         title: L2 - EA Interface Stalls
         header:
           metric: Metric
+          type: Type
+          transaction: Transaction
           avg: Avg
           min: Min
           max: Max
@@ -301,42 +303,56 @@ Panel Config:
           tips: Tips
         metric:
           Read - Remote Socket Stall:
+            type: Remote Socket Stall
+            transaction: Read
             avg: AVG((TCC_EA_RDREQ_IO_CREDIT_STALL_sum / $denom))
             min: MIN((TCC_EA_RDREQ_IO_CREDIT_STALL_sum / $denom))
             max: MAX((TCC_EA_RDREQ_IO_CREDIT_STALL_sum / $denom))
             unit: (Req  + $normUnit)
             tips: 
           Read - Peer GCD Stall:
+            type: Peer GCD Stall
+            transaction: Read
             avg: AVG((TCC_EA_RDREQ_GMI_CREDIT_STALL_sum / $denom))
             min: MIN((TCC_EA_RDREQ_GMI_CREDIT_STALL_sum / $denom))
             max: MAX((TCC_EA_RDREQ_GMI_CREDIT_STALL_sum / $denom))
             unit: (Req  + $normUnit)
             tips: 
           Read - HBM Stall:
+            type: HBM Stall
+            transaction: Read
             avg: AVG((TCC_EA_RDREQ_DRAM_CREDIT_STALL_sum / $denom))
             min: MIN((TCC_EA_RDREQ_DRAM_CREDIT_STALL_sum / $denom))
             max: MAX((TCC_EA_RDREQ_DRAM_CREDIT_STALL_sum / $denom))
             unit: (Req  + $normUnit)
             tips: 
           Write - Remote Socket Stall:
+            type: Remote Socket Stall
+            transaction: Write
             avg: AVG((TCC_EA_WRREQ_IO_CREDIT_STALL_sum / $denom))
             min: MIN((TCC_EA_WRREQ_IO_CREDIT_STALL_sum / $denom))
             max: MAX((TCC_EA_WRREQ_IO_CREDIT_STALL_sum / $denom))
             unit: (Req  + $normUnit)
             tips: 
           Write - Peer GCD Stall:
+            type: Peer GCD Stall
+            transaction: Write
             avg: AVG((TCC_EA_WRREQ_GMI_CREDIT_STALL_sum / $denom))
             min: MIN((TCC_EA_WRREQ_GMI_CREDIT_STALL_sum / $denom))
             max: MAX((TCC_EA_WRREQ_GMI_CREDIT_STALL_sum / $denom))
             unit: (Req  + $normUnit)
             tips: 
           Write - HBM Stall:
+            type: HBM Stall 
+            transaction: Write
             avg: AVG((TCC_EA_WRREQ_DRAM_CREDIT_STALL_sum / $denom))
             min: MIN((TCC_EA_WRREQ_DRAM_CREDIT_STALL_sum / $denom))
             max: MAX((TCC_EA_WRREQ_DRAM_CREDIT_STALL_sum / $denom))
             unit: (Req  + $normUnit)
             tips: 
           Write - Credit Starvation:
+            type: Credit Starvation
+            transaction: Write
             avg: AVG((TCC_TOO_MANY_EA_WRREQS_STALL_sum / $denom))
             min: MIN((TCC_TOO_MANY_EA_WRREQS_STALL_sum / $denom))
             max: MAX((TCC_TOO_MANY_EA_WRREQS_STALL_sum / $denom))

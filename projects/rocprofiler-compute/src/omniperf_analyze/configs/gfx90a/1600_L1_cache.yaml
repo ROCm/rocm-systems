@@ -237,81 +237,107 @@ Panel Config:
         id: 1604
         title: L1D - L2 Transactions
         header:
+          metric: Metric
           xfer: Xfer
-          mean: Mean
+          coherency: Coherency
+          avg: Avg
           min: Min
           max: Max
           unit: Unit
           tips: Tips
         metric:
           NC - Read:
-            mean: AVG((TCP_TCC_NC_READ_REQ_sum / $denom))
+            xfer: Read
+            coherency: NC
+            avg: AVG((TCP_TCC_NC_READ_REQ_sum / $denom))
             min: MIN((TCP_TCC_NC_READ_REQ_sum / $denom))
             max: MAX((TCP_TCC_NC_READ_REQ_sum / $denom))
             unit: (Req  + $normUnit)
             tips: 
           UC - Read:
-            mean: AVG((TCP_TCC_UC_READ_REQ_sum / $denom))
+            xfer: Read
+            coherency: UC
+            avg: AVG((TCP_TCC_UC_READ_REQ_sum / $denom))
             min: MIN((TCP_TCC_UC_READ_REQ_sum / $denom))
             max: MAX((TCP_TCC_UC_READ_REQ_sum / $denom))
             unit: (Req  + $normUnit)
             tips: 
           CC - Read:
-            mean: AVG((TCP_TCC_CC_READ_REQ_sum / $denom))
+            xfer: Read
+            coherency: CC
+            avg: AVG((TCP_TCC_CC_READ_REQ_sum / $denom))
             min: MIN((TCP_TCC_CC_READ_REQ_sum / $denom))
             max: MAX((TCP_TCC_CC_READ_REQ_sum / $denom))
             unit: (Req  + $normUnit)
             tips: 
           RW - Read:
-            mean: AVG((TCP_TCC_RW_READ_REQ_sum / $denom))
+            xfer: Read
+            coherency: RW
+            avg: AVG((TCP_TCC_RW_READ_REQ_sum / $denom))
             min: MIN((TCP_TCC_RW_READ_REQ_sum / $denom))
             max: MAX((TCP_TCC_RW_READ_REQ_sum / $denom))
             unit: (Req  + $normUnit)
             tips: 
           RW - Write:
-            mean: AVG((TCP_TCC_RW_WRITE_REQ_sum / $denom))
+            xfer: Write
+            coherency: RW
+            avg: AVG((TCP_TCC_RW_WRITE_REQ_sum / $denom))
             min: MIN((TCP_TCC_RW_WRITE_REQ_sum / $denom))
             max: MAX((TCP_TCC_RW_WRITE_REQ_sum / $denom))
             unit: (Req  + $normUnit)
             tips: 
           NC - Write:
-            mean: AVG((TCP_TCC_NC_WRITE_REQ_sum / $denom))
+            xfer: Write
+            coherency: NC
+            avg: AVG((TCP_TCC_NC_WRITE_REQ_sum / $denom))
             min: MIN((TCP_TCC_NC_WRITE_REQ_sum / $denom))
             max: MAX((TCP_TCC_NC_WRITE_REQ_sum / $denom))
             unit: (Req  + $normUnit)
             tips: 
           UC - Write:
-            mean: AVG((TCP_TCC_UC_WRITE_REQ_sum / $denom))
+            xfer: Write
+            coherency: UC
+            avg: AVG((TCP_TCC_UC_WRITE_REQ_sum / $denom))
             min: MIN((TCP_TCC_UC_WRITE_REQ_sum / $denom))
             max: MAX((TCP_TCC_UC_WRITE_REQ_sum / $denom))
             unit: (Req  + $normUnit)
             tips: 
           CC - Write:
-            mean: AVG((TCP_TCC_CC_WRITE_REQ_sum / $denom))
+            xfer: Write
+            coherency: CC
+            avg: AVG((TCP_TCC_CC_WRITE_REQ_sum / $denom))
             min: MIN((TCP_TCC_CC_WRITE_REQ_sum / $denom))
             max: MAX((TCP_TCC_CC_WRITE_REQ_sum / $denom))
             unit: (Req  + $normUnit)
             tips: 
           NC - Atomic:
-            mean: AVG((TCP_TCC_NC_ATOMIC_REQ_sum / $denom))
+            xfer: Atomic
+            coherency: NC
+            avg: AVG((TCP_TCC_NC_ATOMIC_REQ_sum / $denom))
             min: MIN((TCP_TCC_NC_ATOMIC_REQ_sum / $denom))
             max: MAX((TCP_TCC_NC_ATOMIC_REQ_sum / $denom))
             unit: (Req  + $normUnit)
             tips: 
           UC - Atomic:
-            mean: AVG((TCP_TCC_UC_ATOMIC_REQ_sum / $denom))
+            xfer: Atomic
+            coherency: UC
+            avg: AVG((TCP_TCC_UC_ATOMIC_REQ_sum / $denom))
             min: MIN((TCP_TCC_UC_ATOMIC_REQ_sum / $denom))
             max: MAX((TCP_TCC_UC_ATOMIC_REQ_sum / $denom))
             unit: (Req  + $normUnit)
             tips: 
           CC - Atomic:
-            mean: AVG((TCP_TCC_CC_ATOMIC_REQ_sum / $denom))
+            xfer: Atomic
+            coherency: CC
+            avg: AVG((TCP_TCC_CC_ATOMIC_REQ_sum / $denom))
             min: MIN((TCP_TCC_CC_ATOMIC_REQ_sum / $denom))
             max: MAX((TCP_TCC_CC_ATOMIC_REQ_sum / $denom))
             unit: (Req  + $normUnit)
             tips: 
           RW - Atomic:
-            mean: AVG((TCP_TCC_RW_ATOMIC_REQ_sum / $denom))
+            xfer: Atomic
+            coherency: RW
+            avg: AVG((TCP_TCC_RW_ATOMIC_REQ_sum / $denom))
             min: MIN((TCP_TCC_RW_ATOMIC_REQ_sum / $denom))
             max: MAX((TCP_TCC_RW_ATOMIC_REQ_sum / $denom))
             unit: (Req  + $normUnit)

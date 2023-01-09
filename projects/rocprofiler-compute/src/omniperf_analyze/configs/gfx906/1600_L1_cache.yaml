@@ -237,81 +237,107 @@ Panel Config:
         id: 1604
         title: L1D - L2 Transactions
         header:
+          metric: Metric
           xfer: Xfer
-          mean: Mean
+          coherency: Coherency
+          avg: Avg
           min: Min
           max: Max
           unit: Unit
           tips: Tips
         metric:
           NC - Read:
-            mean: None # No perf counter
+            xfer: Read
+            coherency: NC
+            avg: None # No perf counter
             min: None # No perf counter
             max: None # No perf counter
             unit: (Req  + $normUnit)
             tips:
           UC - Read:
-            mean: None # No perf counter
+            xfer: Read
+            coherency: UC
+            avg: None # No perf counter
             min: None # No perf counter
             max: None # No perf counter
             unit: (Req  + $normUnit)
             tips:
           CC - Read:
-            mean: None # No perf counter
+            xfer: Read
+            coherency: CC
+            avg: None # No perf counter
             min: None # No perf counter
             max: None # No perf counter
             unit: (Req  + $normUnit)
             tips:
           RW - Read:
-            mean: None # No perf counter
+            xfer: Read
+            coherency: RW
+            avg: None # No perf counter
             min: None # No perf counter
             max: None # No perf counter
             unit: (Req  + $normUnit)
             tips:
           RW - Write:
-            mean: None # No perf counter
+            xfer: Write
+            coherency: RW
+            avg: None # No perf counter
             min: None # No perf counter
             max: None # No perf counter
             unit: (Req  + $normUnit)
             tips:
           NC - Write:
-            mean: AVG((TCP_TCC_NC_WRITE_REQ_sum / $denom))
+            xfer: Write
+            coherency: NC
+            avg: AVG((TCP_TCC_NC_WRITE_REQ_sum / $denom))
             min: MIN((TCP_TCC_NC_WRITE_REQ_sum / $denom))
             max: MAX((TCP_TCC_NC_WRITE_REQ_sum / $denom))
             unit: (Req  + $normUnit)
             tips:
-          NC - Write:
-            mean: AVG((TCP_TCC_NC_WRITE_REQ_sum / $denom))
-            min: MIN((TCP_TCC_NC_WRITE_REQ_sum / $denom))
-            max: MAX((TCP_TCC_NC_WRITE_REQ_sum / $denom))
+          CC - Write:
+            xfer: Write
+            coherency: CC
+            avg: AVG((TCP_TCC_CC_WRITE_REQ_sum / $denom))
+            min: MIN((TCP_TCC_CC_WRITE_REQ_sum / $denom))
+            max: MAX((TCP_TCC_CC_WRITE_REQ_sum / $denom))
             unit: (Req  + $normUnit)
             tips: 
           UC - Write:
-            mean: AVG((TCP_TCC_UC_WRITE_REQ_sum / $denom))
+            xfer: Write
+            coherency: UC
+            avg: AVG((TCP_TCC_UC_WRITE_REQ_sum / $denom))
             min: MIN((TCP_TCC_UC_WRITE_REQ_sum / $denom))
             max: MAX((TCP_TCC_UC_WRITE_REQ_sum / $denom))
             unit: (Req  + $normUnit)
             tips: 
           NC - Atomic:
-            mean: None # No perf counter
+            xfer: Atomic
+            coherency: NC
+            avg: None # No perf counter
             min: None # No perf counter
             max: None # No perf counter
             unit: (Req  + $normUnit)
             tips:
           UC - Atomic:
-            mean: None # No perf counter
+            xfer: Atomic
+            coherency: UC
+            avg: None # No perf counter
             min: None # No perf counter
             max: None # No perf counter
             unit: (Req  + $normUnit)
             tips:
           CC - Atomic:
-            mean: None # No perf counter
+            xfer: Atomic
+            coherency: CC
+            avg: None # No perf counter
             min: None # No perf counter
             max: None # No perf counter
             unit: (Req  + $normUnit)
             tips:
           RW - Atomic:
-            mean: None # No perf counter
+            xfer: Atomic
+            coherency: RW
+            avg: None # No perf counter
             min: None # No perf counter
             max: None # No perf counter
             unit: (Req  + $normUnit)

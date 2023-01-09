@@ -60,7 +60,9 @@ barchart_elements = [
     1301,  # Instruc cache SOL
     1401,  # SL1D cache SOL
     1601,  # VL1D cache SOL
+    1604,  # L1D-L2 Transactions
     1701,  # L2 cache SOL
+    1704,  # L1-Fabric Interface Stalls
 ]
 
 
@@ -70,6 +72,25 @@ def filter_df(column, df, filt):
         filt_df = df.loc[df[schema.pmc_perf_file_prefix][column].astype(str).isin(filt)]
     return filt_df
 
+def multi_bar_chart(table_id, display_df):
+    if table_id == 1604:
+        nested_bar = {
+            'NC': {},
+            'UC': {},
+            'RW': {},
+            'CC': {}
+        }
+        for index, row in display_df.iterrows():
+            nested_bar[row["Coherency"]][row["Xfer"]] = row["Avg"]
+    if table_id == 1704:
+        nested_bar = {
+            'Read': {},
+            'Write': {}
+        }
+        for index, row in display_df.iterrows():
+            nested_bar[row["Transaction"]][row["Type"]] = row["Avg"]
+
+    return nested_bar
 
 def discrete_background_color_bins(df, n_bins=5, columns="all"):
 
@@ -149,6 +170,30 @@ def build_bar_chart(display_df, table_config):
                 orientation="h",
             )
         )
+
+    # Multi bar chart
+    elif table_config["id"] == 1604 or table_config["id"] == 1704:
+        display_df["Avg"] = [
+            x.astype(int) if x != "" else int(0) for x in display_df["Avg"]
+        ]
+        df_unit = display_df["Unit"][0]
+        nested_bar = multi_bar_chart(table_config["id"], display_df)
+        # generate chart for each coherency
+        for group, metric in nested_bar.items():
+            d_figs.append(
+                px.bar(
+                    title=group,
+                    x=metric.values(),
+                    y=metric.keys(),
+                    labels={
+                        "x": df_unit,
+                        "y": ""
+                    },
+                    text=metric.values(),
+                    orientation="h",
+                    height=200
+                ).update_xaxes(showgrid=False, rangemode="nonnegative").update_yaxes(showgrid=False).update_layout(title_x=0.5)
+            )
 
     # Speed-of-light bar chart
     else:
@@ -434,10 +479,22 @@ def build_layout(
                         # a) Barchart
                         if table_config["id"] in barchart_elements:
                             d_figs = build_bar_chart(display_df, table_config)
-                            for fig in d_figs:
+                            # Smaller formatting if barchart yeilds several graphs
+                            if len(d_figs) > 2:
+                                temp_obj = []
+                                for fig in d_figs:
+                                    temp_obj.append(
+                                        html.Div(className="float-child", children=[dcc.Graph(figure=fig, style={"margin": "2%"})])
+                                    )
                                 content.append(
-                                    dcc.Graph(figure=fig, style={"margin": "2%"})
+                                    html.Div(className="float-container", children=temp_obj)
                                 )
+                            # Normal formatting if < 2 graphs
+                            else:
+                                for fig in d_figs:
+                                    content.append(
+                                        dcc.Graph(figure=fig, style={"margin": "2%"})
+                                    )
                         # B) Tablechart
                         else:
                             d_figs = build_table_chart(
