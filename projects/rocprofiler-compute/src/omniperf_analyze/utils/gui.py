@@ -72,25 +72,19 @@ def filter_df(column, df, filt):
         filt_df = df.loc[df[schema.pmc_perf_file_prefix][column].astype(str).isin(filt)]
     return filt_df
 
+
 def multi_bar_chart(table_id, display_df):
     if table_id == 1604:
-        nested_bar = {
-            'NC': {},
-            'UC': {},
-            'RW': {},
-            'CC': {}
-        }
+        nested_bar = {"NC": {}, "UC": {}, "RW": {}, "CC": {}}
         for index, row in display_df.iterrows():
             nested_bar[row["Coherency"]][row["Xfer"]] = row["Avg"]
     if table_id == 1704:
-        nested_bar = {
-            'Read': {},
-            'Write': {}
-        }
+        nested_bar = {"Read": {}, "Write": {}}
         for index, row in display_df.iterrows():
             nested_bar[row["Transaction"]][row["Type"]] = row["Avg"]
 
     return nested_bar
+
 
 def discrete_background_color_bins(df, n_bins=5, columns="all"):
 
@@ -185,14 +179,14 @@ def build_bar_chart(display_df, table_config):
                     title=group,
                     x=metric.values(),
                     y=metric.keys(),
-                    labels={
-                        "x": df_unit,
-                        "y": ""
-                    },
+                    labels={"x": df_unit, "y": ""},
                     text=metric.values(),
                     orientation="h",
-                    height=200
-                ).update_xaxes(showgrid=False, rangemode="nonnegative").update_yaxes(showgrid=False).update_layout(title_x=0.5)
+                    height=200,
+                )
+                .update_xaxes(showgrid=False, rangemode="nonnegative")
+                .update_yaxes(showgrid=False)
+                .update_layout(title_x=0.5)
             )
 
     # Speed-of-light bar chart
@@ -484,10 +478,19 @@ def build_layout(
                                 temp_obj = []
                                 for fig in d_figs:
                                     temp_obj.append(
-                                        html.Div(className="float-child", children=[dcc.Graph(figure=fig, style={"margin": "2%"})])
+                                        html.Div(
+                                            className="float-child",
+                                            children=[
+                                                dcc.Graph(
+                                                    figure=fig, style={"margin": "2%"}
+                                                )
+                                            ],
+                                        )
                                     )
                                 content.append(
-                                    html.Div(className="float-container", children=temp_obj)
+                                    html.Div(
+                                        className="float-container", children=temp_obj
+                                    )
                                 )
                             # Normal formatting if < 2 graphs
                             else:
