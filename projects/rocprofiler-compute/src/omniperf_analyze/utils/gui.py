@@ -52,18 +52,12 @@ HIDDEN_COLUMNS = ["Tips", "coll_level"]
 IS_DARK = True  # default dark theme
 
 # Add any elements you'd like displayed as a bar chart
-barchart_elements = [
-    1001,  # Instr mix
-    1002,  # VALU Arith Instr mix
-    1101,  # Compute pipe SOL
-    1201,  # LDS SOL
-    1301,  # Instruc cache SOL
-    1401,  # SL1D cache SOL
-    1601,  # VL1D cache SOL
-    1604,  # L1D-L2 Transactions
-    1701,  # L2 cache SOL
-    1704,  # L1-Fabric Interface Stalls
-]
+barchart_elements = {
+    # organized by barchart type
+    "instr_mix": [1001, 1002],
+    "multi_bar": [1604, 1704],
+    "sol": [1101, 1201, 1301, 1401, 1601, 1701],
+}
 
 
 def filter_df(column, df, filt):
@@ -148,7 +142,7 @@ def build_bar_chart(display_df, table_config):
     d_figs = []
 
     # Insr Mix bar chart
-    if table_config["id"] == 1001 or table_config["id"] == 1002:
+    if table_config["id"] in barchart_elements["instr_mix"]:
         display_df["Count"] = [
             x.astype(int) if x != "" else int(0) for x in display_df["Count"]
         ]
@@ -166,7 +160,7 @@ def build_bar_chart(display_df, table_config):
         )
 
     # Multi bar chart
-    elif table_config["id"] == 1604 or table_config["id"] == 1704:
+    elif table_config["id"] in barchart_elements["multi_bar"]:
         display_df["Avg"] = [
             x.astype(int) if x != "" else int(0) for x in display_df["Avg"]
         ]
@@ -190,7 +184,7 @@ def build_bar_chart(display_df, table_config):
             )
 
     # Speed-of-light bar chart
-    else:
+    elif table_config["id"] in barchart_elements["sol"]:
         display_df["Value"] = [
             x.astype(float) if x != "" else float(0) for x in display_df["Value"]
         ]
@@ -233,6 +227,13 @@ def build_bar_chart(display_df, table_config):
                     orientation="h",
                 ).update_xaxes(range=[0, 110])
             )
+    else:
+        print(
+            "ERROR: Table id {}. Cannot determine barchart type.".format(
+                table_config["id"]
+            )
+        )
+        sys.exit(-1)
 
     # update layout for each of the charts
     for fig in d_figs:
@@ -471,7 +472,9 @@ def build_layout(
 
                         # Determine chart type:
                         # a) Barchart
-                        if table_config["id"] in barchart_elements:
+                        if table_config["id"] in [
+                            x for i in barchart_elements.values() for x in i
+                        ]:
                             d_figs = build_bar_chart(display_df, table_config)
                             # Smaller formatting if barchart yeilds several graphs
                             if len(d_figs) > 2:
