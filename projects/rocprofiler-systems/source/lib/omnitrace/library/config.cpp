@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "library/config.hpp"
+#include "common/defines.h"
 #include "library/debug.hpp"
 #include "library/defines.hpp"
 #include "library/gpu.hpp"
@@ -42,6 +43,7 @@
 #include <timemory/settings/types.hpp>
 #include <timemory/utility/argparse.hpp>
 #include <timemory/utility/declaration.hpp>
+#include <timemory/utility/join.hpp>
 #include <timemory/utility/signals.hpp>
 
 #include <algorithm>
@@ -64,12 +66,22 @@ using settings = tim::settings;
 
 namespace
 {
+TIMEMORY_NOINLINE bool&
+_settings_are_configured()
+{
+    static bool _v = false;
+    return _v;
+}
+
 auto
 get_config()
 {
-    static auto _once = (configure_settings(), true);
+    if(!_settings_are_configured())
+    {
+        static auto _once = (configure_settings(), true);
+        (void) _once;
+    }
     return settings::shared_instance();
-    (void) _once;
 }
 
 std::string
@@ -93,14 +105,21 @@ get_available_perfetto_categories()
     return _v;
 }
 
-template <typename Tp = int64_t>
-std::set<Tp>
-parse_numeric_range(std::string _input_string, const std::string& _label)
+template <typename Tp = int64_t, typename ContainerT = std::set<Tp>, typename Up = Tp>
+ContainerT
+parse_numeric_range(std::string _input_string, const std::string& _label, Up _incr)
 {
+    auto _get_value = [](const std::string& _inp) {
+        std::stringstream iss{ _inp };
+        auto              var = Tp{};
+        iss >> var;
+        return var;
+    };
+
     for(auto& itr : _input_string)
         itr = tolower(itr);
-    auto _result = std::set<Tp>{};
-    for(const auto& _v : tim::delimit(_input_string, ",; \t"))
+    auto _result = ContainerT{};
+    for(const auto& _v : tim::delimit(_input_string, ",; \t\n\r"))
     {
         if(_v.find_first_not_of("0123456789-") != std::string::npos)
         {
@@ -118,12 +137,23 @@ parse_numeric_range(std::string _input_string, const std::string& _label)
                 _vv.size() != 2,
                 "Invalid %s range specification: %s. Required format N-M, e.g. 0-4",
                 _label.c_str(), _v.c_str());
-            for(int64_t i = std::stol(_vv.at(0)); i <= std::stol(_vv.at(1)); ++i)
-                _result.emplace(i);
+            Tp _vn = _get_value(_vv.at(0));
+            Tp _vN = _get_value(_vv.at(1));
+            do
+            {
+                if constexpr(std::is_same<ContainerT, std::set<Tp>>::value)
+                    _result.emplace(_vn);
+                else
+                    _result.emplace_back(_vn);
+                _vn += _incr;
+            } while(_vn <= _vN);
         }
         else
         {
-            _result.emplace(std::stol(_v));
+            if constexpr(std::is_same<ContainerT, std::set<Tp>>::value)
+                _result.emplace(std::stol(_v));
+            else
+                _result.emplace_back(std::stol(_v));
         }
     }
     return _result;
@@ -178,13 +208,8 @@ inline namespace config
 {
 namespace
 {
-TIMEMORY_NOINLINE bool&
-_settings_are_configured()
-{
-    static bool _v = false;
-    return _v;
+auto cfg_fini_callbacks = std::vector<std::function<void()>>{};
 }
-}  // namespace
 
 void
 finalize()
@@ -192,6 +217,8 @@ finalize()
     OMNITRACE_DEBUG("[omnitrace_finalize] Disabling signal handling...\n");
     tim::signals::disable_signal_detection();
     _settings_are_configured() = false;
+    for(const auto& itr : cfg_fini_callbacks)
+        if(itr) itr();
 }
 
 bool
@@ -823,8 +850,8 @@ configure_settings(bool _init)
             }
             if(!_iss.str().empty())
             {
-                OMNITRACE_BASIC_PRINT("config file '%s':\n%s\n", fitr.c_str(),
-                                      _iss.str().c_str());
+                OMNITRACE_BASIC_VERBOSE(1, "config file '%s':\n%s\n", fitr.c_str(),
+                                        _iss.str().c_str());
             }
         }
     }
@@ -898,14 +925,14 @@ configure_mode_settings()
     auto _set = [](const std::string& _name, bool _v) {
         if(!set_setting_value(_name, _v))
         {
-            OMNITRACE_VERBOSE(
+            OMNITRACE_BASIC_VERBOSE(
                 4, "[configure_mode_settings] No configuration setting named '%s'...\n",
                 _name.data());
         }
         else
         {
             bool _changed = get_setting_value<bool>(_name).second != _v;
-            OMNITRACE_VERBOSE(
+            OMNITRACE_BASIC_VERBOSE(
                 1 && _changed,
                 "[configure_mode_settings] Overriding %s to %s in %s mode...\n",
                 _name.c_str(), JOIN("", std::boolalpha, _v).c_str(),
@@ -938,8 +965,8 @@ configure_mode_settings()
 
     if(gpu::device_count() == 0)
     {
-        OMNITRACE_VERBOSE(1, "No HIP devices were found: disabling roctracer, "
-                             "rocprofiler, and rocm_smi...\n");
+        OMNITRACE_BASIC_VERBOSE(1, "No HIP devices were found: disabling roctracer, "
+                                   "rocprofiler, and rocm_smi...\n");
         _set("OMNITRACE_USE_ROCPROFILER", false);
         _set("OMNITRACE_USE_ROCTRACER", false);
         _set("OMNITRACE_USE_ROCM_SMI", false);
@@ -961,8 +988,8 @@ configure_mode_settings()
                 _message =
                     JOIN("", " (forced. Previous value: '", _current_kokkosp_lib, "')");
             }
-            OMNITRACE_VERBOSE_F(1, "Setting KOKKOS_PROFILE_LIBRARY=%s%s\n",
-                                "libomnitrace.so", _message.c_str());
+            OMNITRACE_BASIC_VERBOSE_F(1, "Setting KOKKOS_PROFILE_LIBRARY=%s%s\n",
+                                      "libomnitrace.so", _message.c_str());
             tim::set_env("KOKKOS_PROFILE_LIBRARY", "libomnitrace.so", _force);
         }
     }
@@ -1069,14 +1096,14 @@ configure_disabled_settings()
             auto _disabled = _config->disable_category(_category);
             _config->enable(_opt);
             for(auto&& itr : _disabled)
-                OMNITRACE_VERBOSE(3, "[%s=OFF]    disabled option :: '%s'\n",
-                                  _opt.c_str(), itr.c_str());
+                OMNITRACE_BASIC_VERBOSE(3, "[%s=OFF]    disabled option :: '%s'\n",
+                                        _opt.c_str(), itr.c_str());
             return false;
         }
         auto _enabled = _config->enable_category(_category);
         for(auto&& itr : _enabled)
-            OMNITRACE_VERBOSE(3, "[%s=ON]      enabled option :: '%s'\n", _opt.c_str(),
-                              itr.c_str());
+            OMNITRACE_BASIC_VERBOSE(3, "[%s=ON]      enabled option :: '%s'\n",
+                                    _opt.c_str(), itr.c_str());
         return true;
     };
 
@@ -1197,13 +1224,13 @@ handle_deprecated_setting(const std::string& _old, const std::string& _new, int 
             std::array<char, 79> _v = {};
             _v.fill('=');
             _v.back() = '\0';
-            OMNITRACE_VERBOSE(_verbose, "#%s#\n", _v.data());
+            OMNITRACE_BASIC_VERBOSE(_verbose, "#%s#\n", _v.data());
         };
         _separator();
-        OMNITRACE_VERBOSE(_verbose, "#\n");
-        OMNITRACE_VERBOSE(_verbose, "# DEPRECATION NOTICE:\n");
-        OMNITRACE_VERBOSE(_verbose, "#   %s is deprecated!\n", _old.c_str());
-        OMNITRACE_VERBOSE(_verbose, "#   Use %s instead!\n", _new.c_str());
+        OMNITRACE_BASIC_VERBOSE(_verbose, "#\n");
+        OMNITRACE_BASIC_VERBOSE(_verbose, "# DEPRECATION NOTICE:\n");
+        OMNITRACE_BASIC_VERBOSE(_verbose, "#   %s is deprecated!\n", _old.c_str());
+        OMNITRACE_BASIC_VERBOSE(_verbose, "#   Use %s instead!\n", _new.c_str());
 
         if(!_new_setting->second->get_environ_updated() &&
            !_new_setting->second->get_config_updated())
@@ -1216,15 +1243,15 @@ handle_deprecated_setting(const std::string& _old, const std::string& _new, int 
             {
                 std::string _cause =
                     (_old_setting->second->get_environ_updated()) ? "environ" : "config";
-                OMNITRACE_VERBOSE(_verbose, "#\n");
-                OMNITRACE_VERBOSE(_verbose, "# %s :: '%s' -> '%s'\n", _new.c_str(),
-                                  _before.c_str(), _after.c_str());
-                OMNITRACE_VERBOSE(_verbose, "#   via %s (%s)\n", _old.c_str(),
-                                  _cause.c_str());
+                OMNITRACE_BASIC_VERBOSE(_verbose, "#\n");
+                OMNITRACE_BASIC_VERBOSE(_verbose, "# %s :: '%s' -> '%s'\n", _new.c_str(),
+                                        _before.c_str(), _after.c_str());
+                OMNITRACE_BASIC_VERBOSE(_verbose, "#   via %s (%s)\n", _old.c_str(),
+                                        _cause.c_str());
             }
         }
 
-        OMNITRACE_VERBOSE(_verbose, "#\n");
+        OMNITRACE_BASIC_VERBOSE(_verbose, "#\n");
         _separator();
     }
 }
@@ -1242,7 +1269,23 @@ print_banner(std::ostream& _os)
      \______/  |__|  |__| |__| \__| |__|     |__|     | _| `._____/__/     \__\ \______||_______|
 
     )banner";
-    tim::log::stream(_os, tim::log::color::info()) << _banner;
+    auto               _tag    = std::string_view{ OMNITRACE_GIT_DESCRIBE };
+    auto               _rev    = std::string_view{ OMNITRACE_GIT_REVISION };
+    std::stringstream  _version_info{};
+    _version_info << "omnitrace v" << OMNITRACE_VERSION_STRING;
+    if(!_tag.empty() || !_rev.empty())
+    {
+        _version_info << " (";
+        if(!_tag.empty())
+        {
+            _version_info << "tag: " << OMNITRACE_GIT_DESCRIBE;
+            if(!_rev.empty()) _version_info << ", ";
+        }
+        if(!_rev.empty()) _version_info << "rev: " << OMNITRACE_GIT_REVISION;
+        _version_info << ")";
+    }
+
+    tim::log::stream(_os, tim::log::color::info()) << _banner << _version_info.str();
     _os << std::endl;
 }
 
@@ -1906,7 +1949,7 @@ get_sampling_tids()
 {
     static auto _v = get_config()->find("OMNITRACE_SAMPLING_TIDS");
     return parse_numeric_range<>(
-        static_cast<tim::tsettings<std::string>&>(*_v->second).get(), "thread IDs");
+        static_cast<tim::tsettings<std::string>&>(*_v->second).get(), "thread IDs", 1);
 }
 
 std::set<int64_t>
@@ -1914,7 +1957,7 @@ get_sampling_cpu_tids()
 {
     static auto _v = get_config()->find("OMNITRACE_SAMPLING_CPUTIME_TIDS");
     return parse_numeric_range<>(
-        static_cast<tim::tsettings<std::string>&>(*_v->second).get(), "thread IDs");
+        static_cast<tim::tsettings<std::string>&>(*_v->second).get(), "thread IDs", 1);
 }
 
 std::set<int64_t>
@@ -1922,7 +1965,7 @@ get_sampling_real_tids()
 {
     static auto _v = get_config()->find("OMNITRACE_SAMPLING_REALTIME_TIDS");
     return parse_numeric_range<>(
-        static_cast<tim::tsettings<std::string>&>(*_v->second).get(), "thread IDs");
+        static_cast<tim::tsettings<std::string>&>(*_v->second).get(), "thread IDs", 1);
 }
 
 bool
@@ -2066,12 +2109,16 @@ tmp_file::tmp_file(std::string _v)
 : filename{ std::move(_v) }
 {}
 
-tmp_file::~tmp_file() { close(); }
+tmp_file::~tmp_file()
+{
+    close();
+    remove();
+}
 
 void
 tmp_file::open(std::ios::openmode _mode)
 {
-    OMNITRACE_VERBOSE_F(2, "Opening temporary file '%s'...\n", filename.c_str());
+    OMNITRACE_BASIC_VERBOSE(2, "Opening temporary file '%s'...\n", filename.c_str());
 
     if(!filepath::exists(filename))
     {
@@ -2089,6 +2136,17 @@ tmp_file::close()
     if(stream.is_open()) stream.close();
 }
 
+void
+tmp_file::remove()
+{
+    close();
+    if(filepath::exists(filename))
+    {
+        OMNITRACE_BASIC_VERBOSE(2, "Removing temporary file '%s'...\n", filename.c_str());
+        ::remove(filename.c_str());
+    }
+}
+
 std::shared_ptr<tmp_file>
 get_tmp_file(std::string _basename, std::string _ext)
 {
@@ -2098,6 +2156,19 @@ get_tmp_file(std::string _basename, std::string _ext)
         std::unordered_map<std::string, std::shared_ptr<tmp_file>>{};
     static std::mutex            _mutex{};
     std::unique_lock<std::mutex> _lk{ _mutex };
+
+    cfg_fini_callbacks.emplace_back([]() {
+        for(auto itr : _existing_files)
+        {
+            if(itr.second)
+            {
+                itr.second->close();
+                itr.second->remove();
+                itr.second.reset();
+            }
+        }
+        _existing_files.clear();
+    });
 
     auto _cfg          = settings::compose_filename_config{};
     _cfg.use_suffix    = true;

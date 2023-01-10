@@ -1851,7 +1851,7 @@ jacu(int k)
  */
 void
 l2norm(int nx0, int ny0, int nz0, int ist, int iend, int jst, int jend,
-       double v[][ISIZ2 / 2 * 2 + 1][ISIZ1 / 2 * 2 + 1][5], double sum[])
+       double v[][ISIZ2 / 2 * 2 + 1][ISIZ1 / 2 * 2 + 1][5], double sum[5])
 {
     /*
      * ---------------------------------------------------------------------

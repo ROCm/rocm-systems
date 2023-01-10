@@ -181,6 +181,21 @@ def parse_cdash_args(args):
     parser.add_argument(
         "--submit-url", help="CDash submission site", default=SUBMIT_URL, type=str
     )
+    parser.add_argument(
+        "--repeat-until-pass", help="<N> for --repeat until-pass:<N>", default=3, type=int
+    )
+    parser.add_argument(
+        "--repeat-until-fail",
+        help="<N> for --repeat until-fail:<N>",
+        default=None,
+        type=int,
+    )
+    parser.add_argument(
+        "--repeat-after-timeout",
+        help="<N> for --repeat after-timeout:<N>",
+        default=2,
+        type=int,
+    )
 
     return parser.parse_args(args)
 
@@ -207,6 +222,17 @@ def parse_args(args=None):
 
     if cdash_args.coverage:
         cmake_args += ["-DOMNITRACE_BUILD_CODECOV=ON", "-DOMNITRACE_STRIP_LIBRARIES=OFF"]
+
+    def get_repeat_val(_param):
+        _value = getattr(cdash_args, f"repeat_{_param}".replace("-", "_"))
+        return [f"{_param}:{_value}"] if _value is not None and _value > 1 else []
+
+    repeat_args = (
+        get_repeat_val("until-pass")
+        + get_repeat_val("until-fail")
+        + get_repeat_val("after-timeout")
+    )
+    ctest_args += ["--repeat"] + repeat_args if len(repeat_args) > 0 else []
 
     return [cdash_args, cmake_args, ctest_args]
 

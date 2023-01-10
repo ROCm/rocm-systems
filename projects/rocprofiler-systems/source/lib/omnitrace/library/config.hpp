@@ -357,6 +357,7 @@ struct tmp_file
 
     void open(std::ios::openmode = std::ios::binary | std::ios::in | std::ios::out);
     void close();
+    void remove();
 
     operator bool() const { return stream.is_open() && stream.good(); }
 
