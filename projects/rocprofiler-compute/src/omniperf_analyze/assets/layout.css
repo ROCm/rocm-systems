@@ -593,20 +593,6 @@ button.report:hover {
 #l2_cache_per_channel a, #l2_cache_per_channel a:visited { color: #fff; }
 #l2_cache_per_channel a:hover, #l2_cache_per_channel a:focus { color: #11ABB0; }
 
-#l2_cache_per_channel .float-container {
-   /* border: 3px solid #fff; */
-   padding: 20px;
-}
-#l2_cache_per_channel .float-child {
-   width: 100%;
-   float: left;
-   padding: 20px;
-   /* border: 2px solid red; */
-}
-#l2_cache_per_channel .float-child h3 {
-   color: #fff;
-}
-
 /* ------------------------------------------------------------------ */
 /* c. About Section
 /* ------------------------------------------------------------------ */

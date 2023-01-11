@@ -51,15 +51,18 @@ HIDDEN_SECTIONS = ["Memory Chart Analysis", "Kernels"]
 HIDDEN_COLUMNS = ["Tips", "coll_level"]
 IS_DARK = True  # default dark theme
 
-# Add any elements you'd like displayed as a bar chart
+# Define different types of bar charts
 barchart_elements = {
-    # organized by barchart type
+    # Group table ids by chart type
     "instr_mix": [1001, 1002],
     "multi_bar": [1604, 1704],
     "sol": [1101, 1201, 1301, 1401, 1601, 1701],
+    "l2_cache_per_chan": [1801, 1802],
 }
 
-
+##################
+# HELPER FUNCTIONS
+##################
 def filter_df(column, df, filt):
     filt_df = df
     if filt != []:
@@ -137,8 +140,10 @@ def discrete_background_color_bins(df, n_bins=5, columns="all"):
 
     return (styles, html.Div(legend, style={"padding": "5px 0 5px 0"}))
 
-
-def build_bar_chart(display_df, table_config):
+####################
+# GRAPHICAL ELEMENTS
+####################
+def build_bar_chart(display_df, table_config, norm_filt):
     d_figs = []
 
     # Insr Mix bar chart
@@ -181,6 +186,28 @@ def build_bar_chart(display_df, table_config):
                 .update_xaxes(showgrid=False, rangemode="nonnegative")
                 .update_yaxes(showgrid=False)
                 .update_layout(title_x=0.5)
+            )
+    # L2 Cache per channel
+    elif table_config["id"] in barchart_elements["l2_cache_per_chan"]:
+        nested_bar = {}
+        channels = []
+        for (colName, colData) in display_df.items():
+            if colName == "Channel":
+                channels = list(colData.values)
+            else:
+                display_df[colName] = [
+                    x.astype(float) if x != "" and x != None else float(0) for x in display_df[colName]
+                ]
+                nested_bar[colName] = list(display_df[colName])
+        for group, metric in nested_bar.items():
+            d_figs.append(
+                px.bar(
+                    title=group[0:group.rfind("(")],
+                    x=channels,
+                    y=metric,
+                    labels={"x": "Channel", "y":group[group.rfind("(")+1: len(group)-1].replace("per", norm_filt)}
+                )
+                .update_yaxes(rangemode="nonnegative")
             )
 
     # Speed-of-light bar chart
@@ -383,7 +410,7 @@ def build_layout(
     def generate_from_filter(
         disp_filt, kernel_filter, gcd_filter, norm_filt, div_children
     ):
-        if verbose <= 1:
+        if verbose >= 1:
             print("normalization is ", norm_filt)
 
         base_data = initialize_run(args, norm_filt)  # Re-initalize everything
@@ -475,9 +502,9 @@ def build_layout(
                         if table_config["id"] in [
                             x for i in barchart_elements.values() for x in i
                         ]:
-                            d_figs = build_bar_chart(display_df, table_config)
+                            d_figs = build_bar_chart(display_df, table_config, norm_filt)
                             # Smaller formatting if barchart yeilds several graphs
-                            if len(d_figs) > 2:
+                            if len(d_figs) > 2 and not table_config["id"] in barchart_elements["l2_cache_per_chan"]:
                                 temp_obj = []
                                 for fig in d_figs:
                                     temp_obj.append(
