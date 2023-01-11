@@ -140,6 +140,7 @@ def discrete_background_color_bins(df, n_bins=5, columns="all"):
 
     return (styles, html.Div(legend, style={"padding": "5px 0 5px 0"}))
 
+
 ####################
 # GRAPHICAL ELEMENTS
 ####################
@@ -196,18 +197,23 @@ def build_bar_chart(display_df, table_config, norm_filt):
                 channels = list(colData.values)
             else:
                 display_df[colName] = [
-                    x.astype(float) if x != "" and x != None else float(0) for x in display_df[colName]
+                    x.astype(float) if x != "" and x != None else float(0)
+                    for x in display_df[colName]
                 ]
                 nested_bar[colName] = list(display_df[colName])
         for group, metric in nested_bar.items():
             d_figs.append(
                 px.bar(
-                    title=group[0:group.rfind("(")],
+                    title=group[0 : group.rfind("(")],
                     x=channels,
                     y=metric,
-                    labels={"x": "Channel", "y":group[group.rfind("(")+1: len(group)-1].replace("per", norm_filt)}
-                )
-                .update_yaxes(rangemode="nonnegative")
+                    labels={
+                        "x": "Channel",
+                        "y": group[group.rfind("(") + 1 : len(group) - 1].replace(
+                            "per", norm_filt
+                        ),
+                    },
+                ).update_yaxes(rangemode="nonnegative")
             )
 
     # Speed-of-light bar chart
@@ -504,7 +510,11 @@ def build_layout(
                         ]:
                             d_figs = build_bar_chart(display_df, table_config, norm_filt)
                             # Smaller formatting if barchart yeilds several graphs
-                            if len(d_figs) > 2 and not table_config["id"] in barchart_elements["l2_cache_per_chan"]:
+                            if (
+                                len(d_figs) > 2
+                                and not table_config["id"]
+                                in barchart_elements["l2_cache_per_chan"]
+                            ):
                                 temp_obj = []
                                 for fig in d_figs:
                                     temp_obj.append(
