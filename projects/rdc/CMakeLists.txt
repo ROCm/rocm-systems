@@ -93,10 +93,31 @@ set(ROCM_DIR "/opt/rocm" CACHE STRING "ROCm directory.")
 # - rocm/lib/librdc_client.so needs rocm/lib/../lib/rdc/grpc/lib/libgrpc++.so
 # All other versions are for inconsistencies between systems and custom installation paths
 if(DEFINED ENV{ROCM_RPATH})
-    set(RDC_RUNPATH "\$ORIGIN:\$ORIGIN/..:\$ORIGIN/../lib:\$ORIGIN/../lib64")
-    set(GRPC_RUNPATH "\$ORIGIN/grpc/lib:\$ORIGIN/../grpc/lib:\$ORIGIN/../lib/grpc/lib:\$ORIGIN/../lib/rdc/grpc/lib:\$ORIGIN/../lib64/rdc/grpc/lib")
-    set(GRPC_RUNPATH64 "\$ORIGIN/grpc/lib64:\$ORIGIN/../grpc/lib64:\$ORIGIN/../lib/grpc/lib64:\$ORIGIN/../lib/rdc/grpc/lib64:\$ORIGIN/../lib64/rdc/grpc/lib64")
-    set(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_RPATH}:${RDC_RUNPATH}:${GRPC_RUNPATH}:${GRPC_RUNPATH64}")
+    set(RDC_RUNPATH
+        "\$ORIGIN"
+        "\$ORIGIN/.."
+        "\$ORIGIN/../lib"
+        "\$ORIGIN/../lib/rdc")
+    # replace lib with lib64
+    list(TRANSFORM RDC_RUNPATH REPLACE "lib" "lib64" OUTPUT_VARIABLE RDC_RUNPATH64)
+
+    set(GRPC_RUNPATH
+        "\$ORIGIN/grpc/lib"
+        "\$ORIGIN/../grpc/lib"
+        "\$ORIGIN/../lib/grpc/lib"
+        "\$ORIGIN/../lib/rdc/grpc/lib"
+        "\$ORIGIN/../lib64/rdc/grpc/lib")
+    # replace /grpc/lib with /grpc/lib64
+    list(TRANSFORM GRPC_RUNPATH REPLACE "/grpc/lib" "/grpc/lib64" OUTPUT_VARIABLE GRPC_RUNPATH64)
+
+    # combine lists
+    set(CMAKE_INSTALL_RPATH
+        ${CMAKE_INSTALL_RPATH}
+        ${RDC_RUNPATH}
+        ${RDC_RUNPATH64}
+        ${GRPC_RUNPATH}
+        ${GRPC_RUNPATH64})
+    list(REMOVE_DUPLICATES CMAKE_INSTALL_RPATH)
 
     set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,--enable-new-dtags -Wl,--no-as-needed -Wl,-z,origin")
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,--enable-new-dtags -Wl,--no-as-needed -Wl,-z,origin")
@@ -318,6 +339,11 @@ if(BUILD_RASLIB)
     message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
 
     add_subdirectory("raslib")
+else()
+    add_library(rdc_ras INTERFACE
+        ${PROJECT_SOURCE_DIR}/ras_prebuild/librdc_ras.so)
+    # needed for copying the pre-built library
+    get_target_property(RAS_SOURCES rdc_ras SOURCES)
 endif()
 
 # Folders for both standalone and embedded
@@ -364,7 +390,7 @@ install(DIRECTORY ${PROJECT_SOURCE_DIR}/example
     COMPONENT dev)
 
 # Prebuild packages to install
-install(FILES ${PROJECT_SOURCE_DIR}/ras_prebuild/librdc_ras.so
+install(FILES ${RAS_SOURCES}
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/${RDC}
     COMPONENT ${CLIENT_COMPONENT})
 install(DIRECTORY ${PROJECT_SOURCE_DIR}/ras_prebuild/config

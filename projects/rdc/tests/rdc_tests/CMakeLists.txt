@@ -10,6 +10,19 @@ endif()
 # Required Defines first:
 option(INSTALL_GTEST "Install GTest (only useful if GTest is not already installed)" OFF)
 
+# Hack to find libraries after installation
+# /opt/rocm/share/rdc/rdctst_tests/../../../ = /opt/rocm
+set(RDCTST_RPATH
+    "\$ORIGIN/../../../lib"
+    "\$ORIGIN/../../../lib/rdc")
+# replace lib with lib64
+list(TRANSFORM RDCTST_RPATH REPLACE "lib" "lib64" OUTPUT_VARIABLE RDCTST_RPATH64)
+# combine lists
+set(CMAKE_INSTALL_RPATH
+    ${CMAKE_INSTALL_RPATH}
+    ${RDCTST_RPATH}
+    ${RDCTST_RPATH64})
+
 #
 # Print out the build configuration being used:
 #
@@ -69,11 +82,12 @@ target_include_directories(
     PUBLIC ${RSMI_INC_DIR}
     PUBLIC ${SRC_DIR}/..)
 
-# TODO: figure out if this properly does runtime linking
 target_link_libraries(${RDCTST}
     PUBLIC GTest::gtest_main
     PUBLIC rdc_bootstrap
     PUBLIC rdc
+    PUBLIC rdc_ras
+    PUBLIC rdc_rocp
     PUBLIC c
     PUBLIC stdc++
     PUBLIC pthread)
