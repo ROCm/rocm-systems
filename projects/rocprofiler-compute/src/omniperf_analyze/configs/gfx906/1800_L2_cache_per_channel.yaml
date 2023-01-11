@@ -10,28 +10,28 @@ Panel Config:
   data source:
     - metric_table:
         id: 1801
-        title: Channel 0 -15
+        title: Channel 0-15
         columnwise: True
         header:
           channel: Channel
-          hit rate: Hit Rate
-          req: Req
-          read req: Read Req
-          write req: Write Req
-          atomicreq: AtomicReq
-          ea read req: EA Read Req
-          ea write req: EA Write Req
-          ea atomicreq: EA AtomicReq
-          ea read lat - cycles: EA Read Lat - cycles
-          ea write lat - cycles: EA Write Lat - cycles
-          ea atomic lat - cycles: EA Atomic Lat - cycles
-          ea read stall - io: EA Read Stall - IO
-          ea read stall - gmi: EA Read Stall - GMI
-          ea read stall - dram: EA Read Stall - DRAM
-          ea write stall - io: EA Write Stall - IO
-          ea write stall - gmi: EA Write Stall - GMI
-          ea write stall - dram: EA Write Stall - DRAM
-          ea write stall - starve: EA Write Stall - Starve
+          hit rate: L2 Cache Hit Rate (%)
+          req: Requests (Requests)
+          read req: L1-L2 Read (Requests)
+          write req: L1-L2 Write (Requests)
+          atomic req: L1-L2 Atomic (Requests)
+          ea read req: L2-EA Read (Requests)
+          ea write req: L2-EA Write (Requests)
+          ea atomic req: L2-EA Atomic (Requests)
+          ea read lat - cycles: L2-EA Read Latency (Cycles)
+          ea write lat - cycles: L2-EA Write Latency (Cycles)
+          ea atomic lat - cycles: L2-EA Atomic Latency (Cycles)
+          ea read stall - io: L2-EA Read Stall - IO (Cycles per)
+          ea read stall - gmi: L2-EA Read Stall - GMI (Cycles per)
+          ea read stall - dram: L2-EA Read Stall - DRAM (Cycles per)
+          ea write stall - io: L2-EA Write Stall - IO (Cycles per)
+          ea write stall - gmi: L2-EA Write Stall - GMI (Cycles per)
+          ea write stall - dram: L2-EA Write Stall - DRAM (Cycles per)
+          ea write stall - starve: L2-EA Write Stall - Starve (Cycles per)
           tips: Tips
         metric:
           "0":
@@ -41,10 +41,10 @@ Panel Config:
             req: AVG((TO_INT(TCC_REQ[0]) / $denom))
             read req: AVG((TO_INT(TCC_READ[0]) / $denom))
             write req: AVG((TO_INT(TCC_WRITE[0]) / $denom))
-            atomicreq: AVG((TO_INT(TCC_ATOMIC[0]) / $denom))
+            atomic req: AVG((TO_INT(TCC_ATOMIC[0]) / $denom))
             ea read req: AVG((TO_INT(TCC_EA_RDREQ[0]) / $denom))
             ea write req: AVG((TO_INT(TCC_EA_WRREQ[0]) / $denom))
-            ea atomicreq: AVG((TO_INT(TCC_EA_ATOMIC[0]) / $denom))
+            ea atomic req: AVG((TO_INT(TCC_EA_ATOMIC[0]) / $denom))
             ea read lat - cycles:
               AVG(((TCC_EA_RDREQ_LEVEL[0] / TCC_EA_RDREQ[0]) if (TCC_EA_RDREQ[0]
               != 0) else None))
@@ -69,10 +69,10 @@ Panel Config:
             req: AVG((TO_INT(TCC_REQ[1]) / $denom))
             read req: AVG((TO_INT(TCC_READ[1]) / $denom))
             write req: AVG((TO_INT(TCC_WRITE[1]) / $denom))
-            atomicreq: AVG((TO_INT(TCC_ATOMIC[1]) / $denom))
+            atomic req: AVG((TO_INT(TCC_ATOMIC[1]) / $denom))
             ea read req: AVG((TO_INT(TCC_EA_RDREQ[1]) / $denom))
             ea write req: AVG((TO_INT(TCC_EA_WRREQ[1]) / $denom))
-            ea atomicreq: AVG((TO_INT(TCC_EA_ATOMIC[1]) / $denom))
+            ea atomic req: AVG((TO_INT(TCC_EA_ATOMIC[1]) / $denom))
             ea read lat - cycles:
               AVG(((TCC_EA_RDREQ_LEVEL[1] / TCC_EA_RDREQ[1]) if (TCC_EA_RDREQ[1]
               != 0) else None))
@@ -97,10 +97,10 @@ Panel Config:
             req: AVG((TO_INT(TCC_REQ[2]) / $denom))
             read req: AVG((TO_INT(TCC_READ[2]) / $denom))
             write req: AVG((TO_INT(TCC_WRITE[2]) / $denom))
-            atomicreq: AVG((TO_INT(TCC_ATOMIC[2]) / $denom))
+            atomic req: AVG((TO_INT(TCC_ATOMIC[2]) / $denom))
             ea read req: AVG((TO_INT(TCC_EA_RDREQ[2]) / $denom))
             ea write req: AVG((TO_INT(TCC_EA_WRREQ[2]) / $denom))
-            ea atomicreq: AVG((TO_INT(TCC_EA_ATOMIC[2]) / $denom))
+            ea atomic req: AVG((TO_INT(TCC_EA_ATOMIC[2]) / $denom))
             ea read lat - cycles:
               AVG(((TCC_EA_RDREQ_LEVEL[2] / TCC_EA_RDREQ[2]) if (TCC_EA_RDREQ[2]
               != 0) else None))
@@ -125,10 +125,10 @@ Panel Config:
             req: AVG((TO_INT(TCC_REQ[3]) / $denom))
             read req: AVG((TO_INT(TCC_READ[3]) / $denom))
             write req: AVG((TO_INT(TCC_WRITE[3]) / $denom))
-            atomicreq: AVG((TO_INT(TCC_ATOMIC[3]) / $denom))
+            atomic req: AVG((TO_INT(TCC_ATOMIC[3]) / $denom))
             ea read req: AVG((TO_INT(TCC_EA_RDREQ[3]) / $denom))
             ea write req: AVG((TO_INT(TCC_EA_WRREQ[3]) / $denom))
-            ea atomicreq: AVG((TO_INT(TCC_EA_ATOMIC[3]) / $denom))
+            ea atomic req: AVG((TO_INT(TCC_EA_ATOMIC[3]) / $denom))
             ea read lat - cycles:
               AVG(((TCC_EA_RDREQ_LEVEL[3] / TCC_EA_RDREQ[3]) if (TCC_EA_RDREQ[3]
               != 0) else None))
@@ -153,10 +153,10 @@ Panel Config:
             req: AVG((TO_INT(TCC_REQ[4]) / $denom))
             read req: AVG((TO_INT(TCC_READ[4]) / $denom))
             write req: AVG((TO_INT(TCC_WRITE[4]) / $denom))
-            atomicreq: AVG((TO_INT(TCC_ATOMIC[4]) / $denom))
+            atomic req: AVG((TO_INT(TCC_ATOMIC[4]) / $denom))
             ea read req: AVG((TO_INT(TCC_EA_RDREQ[4]) / $denom))
             ea write req: AVG((TO_INT(TCC_EA_WRREQ[4]) / $denom))
-            ea atomicreq: AVG((TO_INT(TCC_EA_ATOMIC[4]) / $denom))
+            ea atomic req: AVG((TO_INT(TCC_EA_ATOMIC[4]) / $denom))
             ea read lat - cycles:
               AVG(((TCC_EA_RDREQ_LEVEL[4] / TCC_EA_RDREQ[4]) if (TCC_EA_RDREQ[4]
               != 0) else None))
@@ -181,10 +181,10 @@ Panel Config:
             req: AVG((TO_INT(TCC_REQ[5]) / $denom))
             read req: AVG((TO_INT(TCC_READ[5]) / $denom))
             write req: AVG((TO_INT(TCC_WRITE[5]) / $denom))
-            atomicreq: AVG((TO_INT(TCC_ATOMIC[5]) / $denom))
+            atomic req: AVG((TO_INT(TCC_ATOMIC[5]) / $denom))
             ea read req: AVG((TO_INT(TCC_EA_RDREQ[5]) / $denom))
             ea write req: AVG((TO_INT(TCC_EA_WRREQ[5]) / $denom))
-            ea atomicreq: AVG((TO_INT(TCC_EA_ATOMIC[5]) / $denom))
+            ea atomic req: AVG((TO_INT(TCC_EA_ATOMIC[5]) / $denom))
             ea read lat - cycles:
               AVG(((TCC_EA_RDREQ_LEVEL[5] / TCC_EA_RDREQ[5]) if (TCC_EA_RDREQ[5]
               != 0) else None))
@@ -209,10 +209,10 @@ Panel Config:
             req: AVG((TO_INT(TCC_REQ[6]) / $denom))
             read req: AVG((TO_INT(TCC_READ[6]) / $denom))
             write req: AVG((TO_INT(TCC_WRITE[6]) / $denom))
-            atomicreq: AVG((TO_INT(TCC_ATOMIC[6]) / $denom))
+            atomic req: AVG((TO_INT(TCC_ATOMIC[6]) / $denom))
             ea read req: AVG((TO_INT(TCC_EA_RDREQ[6]) / $denom))
             ea write req: AVG((TO_INT(TCC_EA_WRREQ[6]) / $denom))
-            ea atomicreq: AVG((TO_INT(TCC_EA_ATOMIC[6]) / $denom))
+            ea atomic req: AVG((TO_INT(TCC_EA_ATOMIC[6]) / $denom))
             ea read lat - cycles:
               AVG(((TCC_EA_RDREQ_LEVEL[6] / TCC_EA_RDREQ[6]) if (TCC_EA_RDREQ[6]
               != 0) else None))
@@ -237,10 +237,10 @@ Panel Config:
             req: AVG((TO_INT(TCC_REQ[7]) / $denom))
             read req: AVG((TO_INT(TCC_READ[7]) / $denom))
             write req: AVG((TO_INT(TCC_WRITE[7]) / $denom))
-            atomicreq: AVG((TO_INT(TCC_ATOMIC[7]) / $denom))
+            atomic req: AVG((TO_INT(TCC_ATOMIC[7]) / $denom))
             ea read req: AVG((TO_INT(TCC_EA_RDREQ[7]) / $denom))
             ea write req: AVG((TO_INT(TCC_EA_WRREQ[7]) / $denom))
-            ea atomicreq: AVG((TO_INT(TCC_EA_ATOMIC[7]) / $denom))
+            ea atomic req: AVG((TO_INT(TCC_EA_ATOMIC[7]) / $denom))
             ea read lat - cycles:
               AVG(((TCC_EA_RDREQ_LEVEL[7] / TCC_EA_RDREQ[7]) if (TCC_EA_RDREQ[7]
               != 0) else None))
@@ -265,10 +265,10 @@ Panel Config:
             req: AVG((TO_INT(TCC_REQ[8]) / $denom))
             read req: AVG((TO_INT(TCC_READ[8]) / $denom))
             write req: AVG((TO_INT(TCC_WRITE[8]) / $denom))
-            atomicreq: AVG((TO_INT(TCC_ATOMIC[8]) / $denom))
+            atomic req: AVG((TO_INT(TCC_ATOMIC[8]) / $denom))
             ea read req: AVG((TO_INT(TCC_EA_RDREQ[8]) / $denom))
             ea write req: AVG((TO_INT(TCC_EA_WRREQ[8]) / $denom))
-            ea atomicreq: AVG((TO_INT(TCC_EA_ATOMIC[8]) / $denom))
+            ea atomic req: AVG((TO_INT(TCC_EA_ATOMIC[8]) / $denom))
             ea read lat - cycles:
               AVG(((TCC_EA_RDREQ_LEVEL[8] / TCC_EA_RDREQ[8]) if (TCC_EA_RDREQ[8]
               != 0) else None))
@@ -293,10 +293,10 @@ Panel Config:
             req: AVG((TO_INT(TCC_REQ[9]) / $denom))
             read req: AVG((TO_INT(TCC_READ[9]) / $denom))
             write req: AVG((TO_INT(TCC_WRITE[9]) / $denom))
-            atomicreq: AVG((TO_INT(TCC_ATOMIC[9]) / $denom))
+            atomic req: AVG((TO_INT(TCC_ATOMIC[9]) / $denom))
             ea read req: AVG((TO_INT(TCC_EA_RDREQ[9]) / $denom))
             ea write req: AVG((TO_INT(TCC_EA_WRREQ[9]) / $denom))
-            ea atomicreq: AVG((TO_INT(TCC_EA_ATOMIC[9]) / $denom))
+            ea atomic req: AVG((TO_INT(TCC_EA_ATOMIC[9]) / $denom))
             ea read lat - cycles:
               AVG(((TCC_EA_RDREQ_LEVEL[9] / TCC_EA_RDREQ[9]) if (TCC_EA_RDREQ[9]
               != 0) else None))
@@ -321,10 +321,10 @@ Panel Config:
             req: AVG((TO_INT(TCC_REQ[10]) / $denom))
             read req: AVG((TO_INT(TCC_READ[10]) / $denom))
             write req: AVG((TO_INT(TCC_WRITE[10]) / $denom))
-            atomicreq: AVG((TO_INT(TCC_ATOMIC[10]) / $denom))
+            atomic req: AVG((TO_INT(TCC_ATOMIC[10]) / $denom))
             ea read req: AVG((TO_INT(TCC_EA_RDREQ[10]) / $denom))
             ea write req: AVG((TO_INT(TCC_EA_WRREQ[10]) / $denom))
-            ea atomicreq: AVG((TO_INT(TCC_EA_ATOMIC[10]) / $denom))
+            ea atomic req: AVG((TO_INT(TCC_EA_ATOMIC[10]) / $denom))
             ea read lat - cycles:
               AVG(((TCC_EA_RDREQ_LEVEL[10] / TCC_EA_RDREQ[10]) if (TCC_EA_RDREQ[10]
               != 0) else None))
@@ -349,10 +349,10 @@ Panel Config:
             req: AVG((TO_INT(TCC_REQ[11]) / $denom))
             read req: AVG((TO_INT(TCC_READ[11]) / $denom))
             write req: AVG((TO_INT(TCC_WRITE[11]) / $denom))
-            atomicreq: AVG((TO_INT(TCC_ATOMIC[11]) / $denom))
+            atomic req: AVG((TO_INT(TCC_ATOMIC[11]) / $denom))
             ea read req: AVG((TO_INT(TCC_EA_RDREQ[11]) / $denom))
             ea write req: AVG((TO_INT(TCC_EA_WRREQ[11]) / $denom))
-            ea atomicreq: AVG((TO_INT(TCC_EA_ATOMIC[11]) / $denom))
+            ea atomic req: AVG((TO_INT(TCC_EA_ATOMIC[11]) / $denom))
             ea read lat - cycles:
               AVG(((TCC_EA_RDREQ_LEVEL[11] / TCC_EA_RDREQ[11]) if (TCC_EA_RDREQ[11]
               != 0) else None))
@@ -377,10 +377,10 @@ Panel Config:
             req: AVG((TO_INT(TCC_REQ[12]) / $denom))
             read req: AVG((TO_INT(TCC_READ[12]) / $denom))
             write req: AVG((TO_INT(TCC_WRITE[12]) / $denom))
-            atomicreq: AVG((TO_INT(TCC_ATOMIC[12]) / $denom))
+            atomic req: AVG((TO_INT(TCC_ATOMIC[12]) / $denom))
             ea read req: AVG((TO_INT(TCC_EA_RDREQ[12]) / $denom))
             ea write req: AVG((TO_INT(TCC_EA_WRREQ[12]) / $denom))
-            ea atomicreq: AVG((TO_INT(TCC_EA_ATOMIC[12]) / $denom))
+            ea atomic req: AVG((TO_INT(TCC_EA_ATOMIC[12]) / $denom))
             ea read lat - cycles:
               AVG(((TCC_EA_RDREQ_LEVEL[12] / TCC_EA_RDREQ[12]) if (TCC_EA_RDREQ[12]
               != 0) else None))
@@ -405,10 +405,10 @@ Panel Config:
             req: AVG((TO_INT(TCC_REQ[13]) / $denom))
             read req: AVG((TO_INT(TCC_READ[13]) / $denom))
             write req: AVG((TO_INT(TCC_WRITE[13]) / $denom))
-            atomicreq: AVG((TO_INT(TCC_ATOMIC[13]) / $denom))
+            atomic req: AVG((TO_INT(TCC_ATOMIC[13]) / $denom))
             ea read req: AVG((TO_INT(TCC_EA_RDREQ[13]) / $denom))
             ea write req: AVG((TO_INT(TCC_EA_WRREQ[13]) / $denom))
-            ea atomicreq: AVG((TO_INT(TCC_EA_ATOMIC[13]) / $denom))
+            ea atomic req: AVG((TO_INT(TCC_EA_ATOMIC[13]) / $denom))
             ea read lat - cycles:
               AVG(((TCC_EA_RDREQ_LEVEL[13] / TCC_EA_RDREQ[13]) if (TCC_EA_RDREQ[13]
               != 0) else None))
@@ -433,10 +433,10 @@ Panel Config:
             req: AVG((TO_INT(TCC_REQ[14]) / $denom))
             read req: AVG((TO_INT(TCC_READ[14]) / $denom))
             write req: AVG((TO_INT(TCC_WRITE[14]) / $denom))
-            atomicreq: AVG((TO_INT(TCC_ATOMIC[14]) / $denom))
+            atomic req: AVG((TO_INT(TCC_ATOMIC[14]) / $denom))
             ea read req: AVG((TO_INT(TCC_EA_RDREQ[14]) / $denom))
             ea write req: AVG((TO_INT(TCC_EA_WRREQ[14]) / $denom))
-            ea atomicreq: AVG((TO_INT(TCC_EA_ATOMIC[14]) / $denom))
+            ea atomic req: AVG((TO_INT(TCC_EA_ATOMIC[14]) / $denom))
             ea read lat - cycles:
               AVG(((TCC_EA_RDREQ_LEVEL[14] / TCC_EA_RDREQ[14]) if (TCC_EA_RDREQ[14]
               != 0) else None))
@@ -461,10 +461,10 @@ Panel Config:
             req: AVG((TO_INT(TCC_REQ[15]) / $denom))
             read req: AVG((TO_INT(TCC_READ[15]) / $denom))
             write req: AVG((TO_INT(TCC_WRITE[15]) / $denom))
-            atomicreq: AVG((TO_INT(TCC_ATOMIC[15]) / $denom))
+            atomic req: AVG((TO_INT(TCC_ATOMIC[15]) / $denom))
             ea read req: AVG((TO_INT(TCC_EA_RDREQ[15]) / $denom))
             ea write req: AVG((TO_INT(TCC_EA_WRREQ[15]) / $denom))
-            ea atomicreq: AVG((TO_INT(TCC_EA_ATOMIC[15]) / $denom))
+            ea atomic req: AVG((TO_INT(TCC_EA_ATOMIC[15]) / $denom))
             ea read lat - cycles:
               AVG(((TCC_EA_RDREQ_LEVEL[15] / TCC_EA_RDREQ[15]) if (TCC_EA_RDREQ[15]
               != 0) else None))
@@ -485,28 +485,28 @@ Panel Config:
 
     - metric_table:
         id: 1802
-        title: Channel 16 -31
+        title: Channel 16-31
         columnwise: True
         header:
           channel: Channel
-          hit rate: Hit Rate
-          req: Req
-          read req: Read Req
-          write req: Write Req
-          atomicreq: AtomicReq
-          ea read req: EA Read Req
-          ea write req: EA Write Req
-          ea atomicreq: EA AtomicReq
-          ea read lat - cycles: EA Read Lat - cycles
-          ea write lat - cycles: EA Write Lat - cycles
-          ea atomic lat - cycles: EA Atomic Lat - cycles
-          ea read stall - io: EA Read Stall - IO
-          ea read stall - gmi: EA Read Stall - GMI
-          ea read stall - dram: EA Read Stall - DRAM
-          ea write stall - io: EA Write Stall - IO
-          ea write stall - gmi: EA Write Stall - GMI
-          ea write stall - dram: EA Write Stall - DRAM
-          ea write stall - starve: EA Write Stall - Starve
+          hit rate: L2 Cache Hit Rate (%)
+          req: Requests (Requests)
+          read req: L1-L2 Read (Requests)
+          write req: L1-L2 Write (Requests)
+          atomic req: L1-L2 Atomic (Requests)
+          ea read req: L2-EA Read (Requests)
+          ea write req: L2-EA Write (Requests)
+          ea atomic req: L2-EA Atomic (Requests)
+          ea read lat - cycles: L2-EA Read Latency (Cycles)
+          ea write lat - cycles: L2-EA Write Latency (Cycles)
+          ea atomic lat - cycles: L2-EA Atomic Latency (Cycles)
+          ea read stall - io: L2-EA Read Stall - IO (Cycles per)
+          ea read stall - gmi: L2-EA Read Stall - GMI (Cycles per)
+          ea read stall - dram: L2-EA Read Stall - DRAM (Cycles per)
+          ea write stall - io: L2-EA Write Stall - IO (Cycles per)
+          ea write stall - gmi: L2-EA Write Stall - GMI (Cycles per)
+          ea write stall - dram: L2-EA Write Stall - DRAM (Cycles per)
+          ea write stall - starve: L2-EA Write Stall - Starve (Cycles per)
           tips: Tips
         metric:
           "16":
@@ -514,10 +514,10 @@ Panel Config:
             req: None # No perf counter
             read req: None # No perf counter
             write req: None # No perf counter
-            atomicreq: None # No perf counter
+            atomic req: None # No perf counter
             ea read req: None # No perf counter
             ea write req: None # No perf counter
-            ea atomicreq: None # No perf counter
+            ea atomic req: None # No perf counter
             ea read lat - cycles: None # No perf counter
             ea write lat - cycles: None # No perf counter
             ea atomic lat - cycles: None # No perf counter
@@ -534,10 +534,10 @@ Panel Config:
             req: None # No perf counter
             read req: None # No perf counter
             write req: None # No perf counter
-            atomicreq: None # No perf counter
+            atomic req: None # No perf counter
             ea read req: None # No perf counter
             ea write req: None # No perf counter
-            ea atomicreq: None # No perf counter
+            ea atomic req: None # No perf counter
             ea read lat - cycles: None # No perf counter
             ea write lat - cycles: None # No perf counter
             ea atomic lat - cycles: None # No perf counter
@@ -554,10 +554,10 @@ Panel Config:
             req: None # No perf counter
             read req: None # No perf counter
             write req: None # No perf counter
-            atomicreq: None # No perf counter
+            atomic req: None # No perf counter
             ea read req: None # No perf counter
             ea write req: None # No perf counter
-            ea atomicreq: None # No perf counter
+            ea atomic req: None # No perf counter
             ea read lat - cycles: None # No perf counter
             ea write lat - cycles: None # No perf counter
             ea atomic lat - cycles: None # No perf counter
@@ -574,10 +574,10 @@ Panel Config:
             req: None # No perf counter
             read req: None # No perf counter
             write req: None # No perf counter
-            atomicreq: None # No perf counter
+            atomic req: None # No perf counter
             ea read req: None # No perf counter
             ea write req: None # No perf counter
-            ea atomicreq: None # No perf counter
+            ea atomic req: None # No perf counter
             ea read lat - cycles: None # No perf counter
             ea write lat - cycles: None # No perf counter
             ea atomic lat - cycles: None # No perf counter
@@ -594,10 +594,10 @@ Panel Config:
             req: None # No perf counter
             read req: None # No perf counter
             write req: None # No perf counter
-            atomicreq: None # No perf counter
+            atomic req: None # No perf counter
             ea read req: None # No perf counter
             ea write req: None # No perf counter
-            ea atomicreq: None # No perf counter
+            ea atomic req: None # No perf counter
             ea read lat - cycles: None # No perf counter
             ea write lat - cycles: None # No perf counter
             ea atomic lat - cycles: None # No perf counter
@@ -614,10 +614,10 @@ Panel Config:
             req: None # No perf counter
             read req: None # No perf counter
             write req: None # No perf counter
-            atomicreq: None # No perf counter
+            atomic req: None # No perf counter
             ea read req: None # No perf counter
             ea write req: None # No perf counter
-            ea atomicreq: None # No perf counter
+            ea atomic req: None # No perf counter
             ea read lat - cycles: None # No perf counter
             ea write lat - cycles: None # No perf counter
             ea atomic lat - cycles: None # No perf counter
@@ -634,10 +634,10 @@ Panel Config:
             req: None # No perf counter
             read req: None # No perf counter
             write req: None # No perf counter
-            atomicreq: None # No perf counter
+            atomic req: None # No perf counter
             ea read req: None # No perf counter
             ea write req: None # No perf counter
-            ea atomicreq: None # No perf counter
+            ea atomic req: None # No perf counter
             ea read lat - cycles: None # No perf counter
             ea write lat - cycles: None # No perf counter
             ea atomic lat - cycles: None # No perf counter
@@ -654,10 +654,10 @@ Panel Config:
             req: None # No perf counter
             read req: None # No perf counter
             write req: None # No perf counter
-            atomicreq: None # No perf counter
+            atomic req: None # No perf counter
             ea read req: None # No perf counter
             ea write req: None # No perf counter
-            ea atomicreq: None # No perf counter
+            ea atomic req: None # No perf counter
             ea read lat - cycles: None # No perf counter
             ea write lat - cycles: None # No perf counter
             ea atomic lat - cycles: None # No perf counter
@@ -674,10 +674,10 @@ Panel Config:
             req: None # No perf counter
             read req: None # No perf counter
             write req: None # No perf counter
-            atomicreq: None # No perf counter
+            atomic req: None # No perf counter
             ea read req: None # No perf counter
             ea write req: None # No perf counter
-            ea atomicreq: None # No perf counter
+            ea atomic req: None # No perf counter
             ea read lat - cycles: None # No perf counter
             ea write lat - cycles: None # No perf counter
             ea atomic lat - cycles: None # No perf counter
@@ -694,10 +694,10 @@ Panel Config:
             req: None # No perf counter
             read req: None # No perf counter
             write req: None # No perf counter
-            atomicreq: None # No perf counter
+            atomic req: None # No perf counter
             ea read req: None # No perf counter
             ea write req: None # No perf counter
-            ea atomicreq: None # No perf counter
+            ea atomic req: None # No perf counter
             ea read lat - cycles: None # No perf counter
             ea write lat - cycles: None # No perf counter
             ea atomic lat - cycles: None # No perf counter
@@ -714,10 +714,10 @@ Panel Config:
             req: None # No perf counter
             read req: None # No perf counter
             write req: None # No perf counter
-            atomicreq: None # No perf counter
+            atomic req: None # No perf counter
             ea read req: None # No perf counter
             ea write req: None # No perf counter
-            ea atomicreq: None # No perf counter
+            ea atomic req: None # No perf counter
             ea read lat - cycles: None # No perf counter
             ea write lat - cycles: None # No perf counter
             ea atomic lat - cycles: None # No perf counter
@@ -734,10 +734,10 @@ Panel Config:
             req: None # No perf counter
             read req: None # No perf counter
             write req: None # No perf counter
-            atomicreq: None # No perf counter
+            atomic req: None # No perf counter
             ea read req: None # No perf counter
             ea write req: None # No perf counter
-            ea atomicreq: None # No perf counter
+            ea atomic req: None # No perf counter
             ea read lat - cycles: None # No perf counter
             ea write lat - cycles: None # No perf counter
             ea atomic lat - cycles: None # No perf counter
@@ -754,10 +754,10 @@ Panel Config:
             req: None # No perf counter
             read req: None # No perf counter
             write req: None # No perf counter
-            atomicreq: None # No perf counter
+            atomic req: None # No perf counter
             ea read req: None # No perf counter
             ea write req: None # No perf counter
-            ea atomicreq: None # No perf counter
+            ea atomic req: None # No perf counter
             ea read lat - cycles: None # No perf counter
             ea write lat - cycles: None # No perf counter
             ea atomic lat - cycles: None # No perf counter
@@ -774,10 +774,10 @@ Panel Config:
             req: None # No perf counter
             read req: None # No perf counter
             write req: None # No perf counter
-            atomicreq: None # No perf counter
+            atomic req: None # No perf counter
             ea read req: None # No perf counter
             ea write req: None # No perf counter
-            ea atomicreq: None # No perf counter
+            ea atomic req: None # No perf counter
             ea read lat - cycles: None # No perf counter
             ea write lat - cycles: None # No perf counter
             ea atomic lat - cycles: None # No perf counter
@@ -794,10 +794,10 @@ Panel Config:
             req: None # No perf counter
             read req: None # No perf counter
             write req: None # No perf counter
-            atomicreq: None # No perf counter
+            atomic req: None # No perf counter
             ea read req: None # No perf counter
             ea write req: None # No perf counter
-            ea atomicreq: None # No perf counter
+            ea atomic req: None # No perf counter
             ea read lat - cycles: None # No perf counter
             ea write lat - cycles: None # No perf counter
             ea atomic lat - cycles: None # No perf counter
@@ -814,10 +814,10 @@ Panel Config:
             req: None # No perf counter
             read req: None # No perf counter
             write req: None # No perf counter
-            atomicreq: None # No perf counter
+            atomic req: None # No perf counter
             ea read req: None # No perf counter
             ea write req: None # No perf counter
-            ea atomicreq: None # No perf counter
+            ea atomic req: None # No perf counter
             ea read lat - cycles: None # No perf counter
             ea write lat - cycles: None # No perf counter
             ea atomic lat - cycles: None # No perf counter

@@ -10,28 +10,28 @@ Panel Config:
   data source:
     - metric_table:
         id: 1801
-        title: Channel 0 -15
+        title: Channel 0-15
         columnwise: True
         header:
           channel: Channel
-          hit rate: Hit Rate
-          req: Req
-          read req: Read Req
-          write req: Write Req
-          atomicreq: AtomicReq
-          ea read req: EA Read Req
-          ea write req: EA Write Req
-          ea atomicreq: EA AtomicReq
-          ea read lat - cycles: EA Read Lat - cycles
-          ea write lat - cycles: EA Write Lat - cycles
-          ea atomic lat - cycles: EA Atomic Lat - cycles
-          ea read stall - io: EA Read Stall - IO
-          ea read stall - gmi: EA Read Stall - GMI
-          ea read stall - dram: EA Read Stall - DRAM
-          ea write stall - io: EA Write Stall - IO
-          ea write stall - gmi: EA Write Stall - GMI
-          ea write stall - dram: EA Write Stall - DRAM
-          ea write stall - starve: EA Write Stall - Starve
+          hit rate: L2 Cache Hit Rate (%)
+          req: Requests (Requests)
+          read req: L1-L2 Read (Requests)
+          write req: L1-L2 Write (Requests)
+          atomic req: L1-L2 Atomic (Requests)
+          ea read req: L2-EA Read (Requests)
+          ea write req: L2-EA Write (Requests)
+          ea atomic req: L2-EA Atomic (Requests)
+          ea read lat - cycles: L2-EA Read Latency (Cycles)
+          ea write lat - cycles: L2-EA Write Latency (Cycles)
+          ea atomic lat - cycles: L2-EA Atomic Latency (Cycles)
+          ea read stall - io: L2-EA Read Stall - IO (Cycles per)
+          ea read stall - gmi: L2-EA Read Stall - GMI (Cycles per)
+          ea read stall - dram: L2-EA Read Stall - DRAM (Cycles per)
+          ea write stall - io: L2-EA Write Stall - IO (Cycles per)
+          ea write stall - gmi: L2-EA Write Stall - GMI (Cycles per)
+          ea write stall - dram: L2-EA Write Stall - DRAM (Cycles per)
+          ea write stall - starve: L2-EA Write Stall - Starve (Cycles per)
           tips: Tips
         metric:
           "0":
@@ -41,10 +41,10 @@ Panel Config:
             req: AVG((TO_INT(TCC_REQ[0]) / $denom))
             read req: AVG((TO_INT(TCC_READ[0]) / $denom))
             write req: AVG((TO_INT(TCC_WRITE[0]) / $denom))
-            atomicreq: AVG((TO_INT(TCC_ATOMIC[0]) / $denom))
+            atomic req: AVG((TO_INT(TCC_ATOMIC[0]) / $denom))
             ea read req: AVG((TO_INT(TCC_EA_RDREQ[0]) / $denom))
             ea write req: AVG((TO_INT(TCC_EA_WRREQ[0]) / $denom))
-            ea atomicreq: AVG((TO_INT(TCC_EA_ATOMIC[0]) / $denom))
+            ea atomic req: AVG((TO_INT(TCC_EA_ATOMIC[0]) / $denom))
             ea read lat - cycles:
               AVG(((TCC_EA_RDREQ_LEVEL[0] / TCC_EA_RDREQ[0]) if (TCC_EA_RDREQ[0]
               != 0) else None))
@@ -69,10 +69,10 @@ Panel Config:
             req: AVG((TO_INT(TCC_REQ[1]) / $denom))
             read req: AVG((TO_INT(TCC_READ[1]) / $denom))
             write req: AVG((TO_INT(TCC_WRITE[1]) / $denom))
-            atomicreq: AVG((TO_INT(TCC_ATOMIC[1]) / $denom))
+            atomic req: AVG((TO_INT(TCC_ATOMIC[1]) / $denom))
             ea read req: AVG((TO_INT(TCC_EA_RDREQ[1]) / $denom))
             ea write req: AVG((TO_INT(TCC_EA_WRREQ[1]) / $denom))
-            ea atomicreq: AVG((TO_INT(TCC_EA_ATOMIC[1]) / $denom))
+            ea atomic req: AVG((TO_INT(TCC_EA_ATOMIC[1]) / $denom))
             ea read lat - cycles:
               AVG(((TCC_EA_RDREQ_LEVEL[1] / TCC_EA_RDREQ[1]) if (TCC_EA_RDREQ[1]
               != 0) else None))
@@ -97,10 +97,10 @@ Panel Config:
             req: AVG((TO_INT(TCC_REQ[2]) / $denom))
             read req: AVG((TO_INT(TCC_READ[2]) / $denom))
             write req: AVG((TO_INT(TCC_WRITE[2]) / $denom))
-            atomicreq: AVG((TO_INT(TCC_ATOMIC[2]) / $denom))
+            atomic req: AVG((TO_INT(TCC_ATOMIC[2]) / $denom))
             ea read req: AVG((TO_INT(TCC_EA_RDREQ[2]) / $denom))
             ea write req: AVG((TO_INT(TCC_EA_WRREQ[2]) / $denom))
-            ea atomicreq: AVG((TO_INT(TCC_EA_ATOMIC[2]) / $denom))
+            ea atomic req: AVG((TO_INT(TCC_EA_ATOMIC[2]) / $denom))
             ea read lat - cycles:
               AVG(((TCC_EA_RDREQ_LEVEL[2] / TCC_EA_RDREQ[2]) if (TCC_EA_RDREQ[2]
               != 0) else None))
@@ -125,10 +125,10 @@ Panel Config:
             req: AVG((TO_INT(TCC_REQ[3]) / $denom))
             read req: AVG((TO_INT(TCC_READ[3]) / $denom))
             write req: AVG((TO_INT(TCC_WRITE[3]) / $denom))
-            atomicreq: AVG((TO_INT(TCC_ATOMIC[3]) / $denom))
+            atomic req: AVG((TO_INT(TCC_ATOMIC[3]) / $denom))
             ea read req: AVG((TO_INT(TCC_EA_RDREQ[3]) / $denom))
             ea write req: AVG((TO_INT(TCC_EA_WRREQ[3]) / $denom))
-            ea atomicreq: AVG((TO_INT(TCC_EA_ATOMIC[3]) / $denom))
+            ea atomic req: AVG((TO_INT(TCC_EA_ATOMIC[3]) / $denom))
             ea read lat - cycles:
               AVG(((TCC_EA_RDREQ_LEVEL[3] / TCC_EA_RDREQ[3]) if (TCC_EA_RDREQ[3]
               != 0) else None))
@@ -153,10 +153,10 @@ Panel Config:
             req: AVG((TO_INT(TCC_REQ[4]) / $denom))
             read req: AVG((TO_INT(TCC_READ[4]) / $denom))
             write req: AVG((TO_INT(TCC_WRITE[4]) / $denom))
-            atomicreq: AVG((TO_INT(TCC_ATOMIC[4]) / $denom))
+            atomic req: AVG((TO_INT(TCC_ATOMIC[4]) / $denom))
             ea read req: AVG((TO_INT(TCC_EA_RDREQ[4]) / $denom))
             ea write req: AVG((TO_INT(TCC_EA_WRREQ[4]) / $denom))
-            ea atomicreq: AVG((TO_INT(TCC_EA_ATOMIC[4]) / $denom))
+            ea atomic req: AVG((TO_INT(TCC_EA_ATOMIC[4]) / $denom))
             ea read lat - cycles:
               AVG(((TCC_EA_RDREQ_LEVEL[4] / TCC_EA_RDREQ[4]) if (TCC_EA_RDREQ[4]
               != 0) else None))
@@ -181,10 +181,10 @@ Panel Config:
             req: AVG((TO_INT(TCC_REQ[5]) / $denom))
             read req: AVG((TO_INT(TCC_READ[5]) / $denom))
             write req: AVG((TO_INT(TCC_WRITE[5]) / $denom))
-            atomicreq: AVG((TO_INT(TCC_ATOMIC[5]) / $denom))
+            atomic req: AVG((TO_INT(TCC_ATOMIC[5]) / $denom))
             ea read req: AVG((TO_INT(TCC_EA_RDREQ[5]) / $denom))
             ea write req: AVG((TO_INT(TCC_EA_WRREQ[5]) / $denom))
-            ea atomicreq: AVG((TO_INT(TCC_EA_ATOMIC[5]) / $denom))
+            ea atomic req: AVG((TO_INT(TCC_EA_ATOMIC[5]) / $denom))
             ea read lat - cycles:
               AVG(((TCC_EA_RDREQ_LEVEL[5] / TCC_EA_RDREQ[5]) if (TCC_EA_RDREQ[5]
               != 0) else None))
@@ -209,10 +209,10 @@ Panel Config:
             req: AVG((TO_INT(TCC_REQ[6]) / $denom))
             read req: AVG((TO_INT(TCC_READ[6]) / $denom))
             write req: AVG((TO_INT(TCC_WRITE[6]) / $denom))
-            atomicreq: AVG((TO_INT(TCC_ATOMIC[6]) / $denom))
+            atomic req: AVG((TO_INT(TCC_ATOMIC[6]) / $denom))
             ea read req: AVG((TO_INT(TCC_EA_RDREQ[6]) / $denom))
             ea write req: AVG((TO_INT(TCC_EA_WRREQ[6]) / $denom))
-            ea atomicreq: AVG((TO_INT(TCC_EA_ATOMIC[6]) / $denom))
+            ea atomic req: AVG((TO_INT(TCC_EA_ATOMIC[6]) / $denom))
             ea read lat - cycles:
               AVG(((TCC_EA_RDREQ_LEVEL[6] / TCC_EA_RDREQ[6]) if (TCC_EA_RDREQ[6]
               != 0) else None))
@@ -237,10 +237,10 @@ Panel Config:
             req: AVG((TO_INT(TCC_REQ[7]) / $denom))
             read req: AVG((TO_INT(TCC_READ[7]) / $denom))
             write req: AVG((TO_INT(TCC_WRITE[7]) / $denom))
-            atomicreq: AVG((TO_INT(TCC_ATOMIC[7]) / $denom))
+            atomic req: AVG((TO_INT(TCC_ATOMIC[7]) / $denom))
             ea read req: AVG((TO_INT(TCC_EA_RDREQ[7]) / $denom))
             ea write req: AVG((TO_INT(TCC_EA_WRREQ[7]) / $denom))
-            ea atomicreq: AVG((TO_INT(TCC_EA_ATOMIC[7]) / $denom))
+            ea atomic req: AVG((TO_INT(TCC_EA_ATOMIC[7]) / $denom))
             ea read lat - cycles:
               AVG(((TCC_EA_RDREQ_LEVEL[7] / TCC_EA_RDREQ[7]) if (TCC_EA_RDREQ[7]
               != 0) else None))
@@ -265,10 +265,10 @@ Panel Config:
             req: AVG((TO_INT(TCC_REQ[8]) / $denom))
             read req: AVG((TO_INT(TCC_READ[8]) / $denom))
             write req: AVG((TO_INT(TCC_WRITE[8]) / $denom))
-            atomicreq: AVG((TO_INT(TCC_ATOMIC[8]) / $denom))
+            atomic req: AVG((TO_INT(TCC_ATOMIC[8]) / $denom))
             ea read req: AVG((TO_INT(TCC_EA_RDREQ[8]) / $denom))
             ea write req: AVG((TO_INT(TCC_EA_WRREQ[8]) / $denom))
-            ea atomicreq: AVG((TO_INT(TCC_EA_ATOMIC[8]) / $denom))
+            ea atomic req: AVG((TO_INT(TCC_EA_ATOMIC[8]) / $denom))
             ea read lat - cycles:
               AVG(((TCC_EA_RDREQ_LEVEL[8] / TCC_EA_RDREQ[8]) if (TCC_EA_RDREQ[8]
               != 0) else None))
@@ -293,10 +293,10 @@ Panel Config:
             req: AVG((TO_INT(TCC_REQ[9]) / $denom))
             read req: AVG((TO_INT(TCC_READ[9]) / $denom))
             write req: AVG((TO_INT(TCC_WRITE[9]) / $denom))
-            atomicreq: AVG((TO_INT(TCC_ATOMIC[9]) / $denom))
+            atomic req: AVG((TO_INT(TCC_ATOMIC[9]) / $denom))
             ea read req: AVG((TO_INT(TCC_EA_RDREQ[9]) / $denom))
             ea write req: AVG((TO_INT(TCC_EA_WRREQ[9]) / $denom))
-            ea atomicreq: AVG((TO_INT(TCC_EA_ATOMIC[9]) / $denom))
+            ea atomic req: AVG((TO_INT(TCC_EA_ATOMIC[9]) / $denom))
             ea read lat - cycles:
               AVG(((TCC_EA_RDREQ_LEVEL[9] / TCC_EA_RDREQ[9]) if (TCC_EA_RDREQ[9]
               != 0) else None))
@@ -321,10 +321,10 @@ Panel Config:
             req: AVG((TO_INT(TCC_REQ[10]) / $denom))
             read req: AVG((TO_INT(TCC_READ[10]) / $denom))
             write req: AVG((TO_INT(TCC_WRITE[10]) / $denom))
-            atomicreq: AVG((TO_INT(TCC_ATOMIC[10]) / $denom))
+            atomic req: AVG((TO_INT(TCC_ATOMIC[10]) / $denom))
             ea read req: AVG((TO_INT(TCC_EA_RDREQ[10]) / $denom))
             ea write req: AVG((TO_INT(TCC_EA_WRREQ[10]) / $denom))
-            ea atomicreq: AVG((TO_INT(TCC_EA_ATOMIC[10]) / $denom))
+            ea atomic req: AVG((TO_INT(TCC_EA_ATOMIC[10]) / $denom))
             ea read lat - cycles:
               AVG(((TCC_EA_RDREQ_LEVEL[10] / TCC_EA_RDREQ[10]) if (TCC_EA_RDREQ[10]
               != 0) else None))
@@ -349,10 +349,10 @@ Panel Config:
             req: AVG((TO_INT(TCC_REQ[11]) / $denom))
             read req: AVG((TO_INT(TCC_READ[11]) / $denom))
             write req: AVG((TO_INT(TCC_WRITE[11]) / $denom))
-            atomicreq: AVG((TO_INT(TCC_ATOMIC[11]) / $denom))
+            atomic req: AVG((TO_INT(TCC_ATOMIC[11]) / $denom))
             ea read req: AVG((TO_INT(TCC_EA_RDREQ[11]) / $denom))
             ea write req: AVG((TO_INT(TCC_EA_WRREQ[11]) / $denom))
-            ea atomicreq: AVG((TO_INT(TCC_EA_ATOMIC[11]) / $denom))
+            ea atomic req: AVG((TO_INT(TCC_EA_ATOMIC[11]) / $denom))
             ea read lat - cycles:
               AVG(((TCC_EA_RDREQ_LEVEL[11] / TCC_EA_RDREQ[11]) if (TCC_EA_RDREQ[11]
               != 0) else None))
@@ -377,10 +377,10 @@ Panel Config:
             req: AVG((TO_INT(TCC_REQ[12]) / $denom))
             read req: AVG((TO_INT(TCC_READ[12]) / $denom))
             write req: AVG((TO_INT(TCC_WRITE[12]) / $denom))
-            atomicreq: AVG((TO_INT(TCC_ATOMIC[12]) / $denom))
+            atomic req: AVG((TO_INT(TCC_ATOMIC[12]) / $denom))
             ea read req: AVG((TO_INT(TCC_EA_RDREQ[12]) / $denom))
             ea write req: AVG((TO_INT(TCC_EA_WRREQ[12]) / $denom))
-            ea atomicreq: AVG((TO_INT(TCC_EA_ATOMIC[12]) / $denom))
+            ea atomic req: AVG((TO_INT(TCC_EA_ATOMIC[12]) / $denom))
             ea read lat - cycles:
               AVG(((TCC_EA_RDREQ_LEVEL[12] / TCC_EA_RDREQ[12]) if (TCC_EA_RDREQ[12]
               != 0) else None))
@@ -405,10 +405,10 @@ Panel Config:
             req: AVG((TO_INT(TCC_REQ[13]) / $denom))
             read req: AVG((TO_INT(TCC_READ[13]) / $denom))
             write req: AVG((TO_INT(TCC_WRITE[13]) / $denom))
-            atomicreq: AVG((TO_INT(TCC_ATOMIC[13]) / $denom))
+            atomic req: AVG((TO_INT(TCC_ATOMIC[13]) / $denom))
             ea read req: AVG((TO_INT(TCC_EA_RDREQ[13]) / $denom))
             ea write req: AVG((TO_INT(TCC_EA_WRREQ[13]) / $denom))
-            ea atomicreq: AVG((TO_INT(TCC_EA_ATOMIC[13]) / $denom))
+            ea atomic req: AVG((TO_INT(TCC_EA_ATOMIC[13]) / $denom))
             ea read lat - cycles:
               AVG(((TCC_EA_RDREQ_LEVEL[13] / TCC_EA_RDREQ[13]) if (TCC_EA_RDREQ[13]
               != 0) else None))
@@ -433,10 +433,10 @@ Panel Config:
             req: AVG((TO_INT(TCC_REQ[14]) / $denom))
             read req: AVG((TO_INT(TCC_READ[14]) / $denom))
             write req: AVG((TO_INT(TCC_WRITE[14]) / $denom))
-            atomicreq: AVG((TO_INT(TCC_ATOMIC[14]) / $denom))
+            atomic req: AVG((TO_INT(TCC_ATOMIC[14]) / $denom))
             ea read req: AVG((TO_INT(TCC_EA_RDREQ[14]) / $denom))
             ea write req: AVG((TO_INT(TCC_EA_WRREQ[14]) / $denom))
-            ea atomicreq: AVG((TO_INT(TCC_EA_ATOMIC[14]) / $denom))
+            ea atomic req: AVG((TO_INT(TCC_EA_ATOMIC[14]) / $denom))
             ea read lat - cycles:
               AVG(((TCC_EA_RDREQ_LEVEL[14] / TCC_EA_RDREQ[14]) if (TCC_EA_RDREQ[14]
               != 0) else None))
@@ -461,10 +461,10 @@ Panel Config:
             req: AVG((TO_INT(TCC_REQ[15]) / $denom))
             read req: AVG((TO_INT(TCC_READ[15]) / $denom))
             write req: AVG((TO_INT(TCC_WRITE[15]) / $denom))
-            atomicreq: AVG((TO_INT(TCC_ATOMIC[15]) / $denom))
+            atomic req: AVG((TO_INT(TCC_ATOMIC[15]) / $denom))
             ea read req: AVG((TO_INT(TCC_EA_RDREQ[15]) / $denom))
             ea write req: AVG((TO_INT(TCC_EA_WRREQ[15]) / $denom))
-            ea atomicreq: AVG((TO_INT(TCC_EA_ATOMIC[15]) / $denom))
+            ea atomic req: AVG((TO_INT(TCC_EA_ATOMIC[15]) / $denom))
             ea read lat - cycles:
               AVG(((TCC_EA_RDREQ_LEVEL[15] / TCC_EA_RDREQ[15]) if (TCC_EA_RDREQ[15]
               != 0) else None))
@@ -485,28 +485,28 @@ Panel Config:
 
     - metric_table:
         id: 1802
-        title: Channel 16 -31
+        title: Channel 16-31
         columnwise: True
         header:
           channel: Channel
-          hit rate: Hit Rate
-          req: Req
-          read req: Read Req
-          write req: Write Req
-          atomicreq: AtomicReq
-          ea read req: EA Read Req
-          ea write req: EA Write Req
-          ea atomicreq: EA AtomicReq
-          ea read lat - cycles: EA Read Lat - cycles
-          ea write lat - cycles: EA Write Lat - cycles
-          ea atomic lat - cycles: EA Atomic Lat - cycles
-          ea read stall - io: EA Read Stall - IO
-          ea read stall - gmi: EA Read Stall - GMI
-          ea read stall - dram: EA Read Stall - DRAM
-          ea write stall - io: EA Write Stall - IO
-          ea write stall - gmi: EA Write Stall - GMI
-          ea write stall - dram: EA Write Stall - DRAM
-          ea write stall - starve: EA Write Stall - Starve
+          hit rate: L2 Cache Hit Rate (%)
+          req: Requests (Requests)
+          read req: L1-L2 Read (Requests)
+          write req: L1-L2 Write (Requests)
+          atomic req: L1-L2 Atomic (Requests)
+          ea read req: L2-EA Read (Requests)
+          ea write req: L2-EA Write (Requests)
+          ea atomic req: L2-EA Atomic (Requests)
+          ea read lat - cycles: L2-EA Read Latency (Cycles)
+          ea write lat - cycles: L2-EA Write Latency (Cycles)
+          ea atomic lat - cycles: L2-EA Atomic Latency (Cycles)
+          ea read stall - io: L2-EA Read Stall - IO (Cycles per)
+          ea read stall - gmi: L2-EA Read Stall - GMI (Cycles per)
+          ea read stall - dram: L2-EA Read Stall - DRAM (Cycles per)
+          ea write stall - io: L2-EA Write Stall - IO (Cycles per)
+          ea write stall - gmi: L2-EA Write Stall - GMI (Cycles per)
+          ea write stall - dram: L2-EA Write Stall - DRAM (Cycles per)
+          ea write stall - starve: L2-EA Write Stall - Starve (Cycles per)
           tips: Tips
         metric:
           "16":
@@ -516,10 +516,10 @@ Panel Config:
             req: AVG((TO_INT(TCC_REQ[16]) / $denom))
             read req: AVG((TO_INT(TCC_READ[16]) / $denom))
             write req: AVG((TO_INT(TCC_WRITE[16]) / $denom))
-            atomicreq: AVG((TO_INT(TCC_ATOMIC[16]) / $denom))
+            atomic req: AVG((TO_INT(TCC_ATOMIC[16]) / $denom))
             ea read req: AVG((TO_INT(TCC_EA_RDREQ[16]) / $denom))
             ea write req: AVG((TO_INT(TCC_EA_WRREQ[16]) / $denom))
-            ea atomicreq: AVG((TO_INT(TCC_EA_ATOMIC[16]) / $denom))
+            ea atomic req: AVG((TO_INT(TCC_EA_ATOMIC[16]) / $denom))
             ea read lat - cycles:
               AVG(((TCC_EA_RDREQ_LEVEL[16] / TCC_EA_RDREQ[16]) if (TCC_EA_RDREQ[16]
               != 0) else None))
@@ -544,10 +544,10 @@ Panel Config:
             req: AVG((TO_INT(TCC_REQ[17]) / $denom))
             read req: AVG((TO_INT(TCC_READ[17]) / $denom))
             write req: AVG((TO_INT(TCC_WRITE[17]) / $denom))
-            atomicreq: AVG((TO_INT(TCC_ATOMIC[17]) / $denom))
+            atomic req: AVG((TO_INT(TCC_ATOMIC[17]) / $denom))
             ea read req: AVG((TO_INT(TCC_EA_RDREQ[17]) / $denom))
             ea write req: AVG((TO_INT(TCC_EA_WRREQ[17]) / $denom))
-            ea atomicreq: AVG((TO_INT(TCC_EA_ATOMIC[17]) / $denom))
+            ea atomic req: AVG((TO_INT(TCC_EA_ATOMIC[17]) / $denom))
             ea read lat - cycles:
               AVG(((TCC_EA_RDREQ_LEVEL[17] / TCC_EA_RDREQ[17]) if (TCC_EA_RDREQ[17]
               != 0) else None))
@@ -572,10 +572,10 @@ Panel Config:
             req: AVG((TO_INT(TCC_REQ[18]) / $denom))
             read req: AVG((TO_INT(TCC_READ[18]) / $denom))
             write req: AVG((TO_INT(TCC_WRITE[18]) / $denom))
-            atomicreq: AVG((TO_INT(TCC_ATOMIC[18]) / $denom))
+            atomic req: AVG((TO_INT(TCC_ATOMIC[18]) / $denom))
             ea read req: AVG((TO_INT(TCC_EA_RDREQ[18]) / $denom))
             ea write req: AVG((TO_INT(TCC_EA_WRREQ[18]) / $denom))
-            ea atomicreq: AVG((TO_INT(TCC_EA_ATOMIC[18]) / $denom))
+            ea atomic req: AVG((TO_INT(TCC_EA_ATOMIC[18]) / $denom))
             ea read lat - cycles:
               AVG(((TCC_EA_RDREQ_LEVEL[18] / TCC_EA_RDREQ[18]) if (TCC_EA_RDREQ[18]
               != 0) else None))
@@ -600,10 +600,10 @@ Panel Config:
             req: AVG((TO_INT(TCC_REQ[19]) / $denom))
             read req: AVG((TO_INT(TCC_READ[19]) / $denom))
             write req: AVG((TO_INT(TCC_WRITE[19]) / $denom))
-            atomicreq: AVG((TO_INT(TCC_ATOMIC[19]) / $denom))
+            atomic req: AVG((TO_INT(TCC_ATOMIC[19]) / $denom))
             ea read req: AVG((TO_INT(TCC_EA_RDREQ[19]) / $denom))
             ea write req: AVG((TO_INT(TCC_EA_WRREQ[19]) / $denom))
-            ea atomicreq: AVG((TO_INT(TCC_EA_ATOMIC[19]) / $denom))
+            ea atomic req: AVG((TO_INT(TCC_EA_ATOMIC[19]) / $denom))
             ea read lat - cycles:
               AVG(((TCC_EA_RDREQ_LEVEL[19] / TCC_EA_RDREQ[19]) if (TCC_EA_RDREQ[19]
               != 0) else None))
@@ -628,10 +628,10 @@ Panel Config:
             req: AVG((TO_INT(TCC_REQ[20]) / $denom))
             read req: AVG((TO_INT(TCC_READ[20]) / $denom))
             write req: AVG((TO_INT(TCC_WRITE[20]) / $denom))
-            atomicreq: AVG((TO_INT(TCC_ATOMIC[20]) / $denom))
+            atomic req: AVG((TO_INT(TCC_ATOMIC[20]) / $denom))
             ea read req: AVG((TO_INT(TCC_EA_RDREQ[20]) / $denom))
             ea write req: AVG((TO_INT(TCC_EA_WRREQ[20]) / $denom))
-            ea atomicreq: AVG((TO_INT(TCC_EA_ATOMIC[20]) / $denom))
+            ea atomic req: AVG((TO_INT(TCC_EA_ATOMIC[20]) / $denom))
             ea read lat - cycles:
               AVG(((TCC_EA_RDREQ_LEVEL[20] / TCC_EA_RDREQ[20]) if (TCC_EA_RDREQ[20]
               != 0) else None))
@@ -656,10 +656,10 @@ Panel Config:
             req: AVG((TO_INT(TCC_REQ[21]) / $denom))
             read req: AVG((TO_INT(TCC_READ[21]) / $denom))
             write req: AVG((TO_INT(TCC_WRITE[21]) / $denom))
-            atomicreq: AVG((TO_INT(TCC_ATOMIC[21]) / $denom))
+            atomic req: AVG((TO_INT(TCC_ATOMIC[21]) / $denom))
             ea read req: AVG((TO_INT(TCC_EA_RDREQ[21]) / $denom))
             ea write req: AVG((TO_INT(TCC_EA_WRREQ[21]) / $denom))
-            ea atomicreq: AVG((TO_INT(TCC_EA_ATOMIC[21]) / $denom))
+            ea atomic req: AVG((TO_INT(TCC_EA_ATOMIC[21]) / $denom))
             ea read lat - cycles:
               AVG(((TCC_EA_RDREQ_LEVEL[21] / TCC_EA_RDREQ[21]) if (TCC_EA_RDREQ[21]
               != 0) else None))
@@ -684,10 +684,10 @@ Panel Config:
             req: AVG((TO_INT(TCC_REQ[22]) / $denom))
             read req: AVG((TO_INT(TCC_READ[22]) / $denom))
             write req: AVG((TO_INT(TCC_WRITE[22]) / $denom))
-            atomicreq: AVG((TO_INT(TCC_ATOMIC[22]) / $denom))
+            atomic req: AVG((TO_INT(TCC_ATOMIC[22]) / $denom))
             ea read req: AVG((TO_INT(TCC_EA_RDREQ[22]) / $denom))
             ea write req: AVG((TO_INT(TCC_EA_WRREQ[22]) / $denom))
-            ea atomicreq: AVG((TO_INT(TCC_EA_ATOMIC[22]) / $denom))
+            ea atomic req: AVG((TO_INT(TCC_EA_ATOMIC[22]) / $denom))
             ea read lat - cycles:
               AVG(((TCC_EA_RDREQ_LEVEL[22] / TCC_EA_RDREQ[22]) if (TCC_EA_RDREQ[22]
               != 0) else None))
@@ -712,10 +712,10 @@ Panel Config:
             req: AVG((TO_INT(TCC_REQ[23]) / $denom))
             read req: AVG((TO_INT(TCC_READ[23]) / $denom))
             write req: AVG((TO_INT(TCC_WRITE[23]) / $denom))
-            atomicreq: AVG((TO_INT(TCC_ATOMIC[23]) / $denom))
+            atomic req: AVG((TO_INT(TCC_ATOMIC[23]) / $denom))
             ea read req: AVG((TO_INT(TCC_EA_RDREQ[23]) / $denom))
             ea write req: AVG((TO_INT(TCC_EA_WRREQ[23]) / $denom))
-            ea atomicreq: AVG((TO_INT(TCC_EA_ATOMIC[23]) / $denom))
+            ea atomic req: AVG((TO_INT(TCC_EA_ATOMIC[23]) / $denom))
             ea read lat - cycles:
               AVG(((TCC_EA_RDREQ_LEVEL[23] / TCC_EA_RDREQ[23]) if (TCC_EA_RDREQ[23]
               != 0) else None))
@@ -740,10 +740,10 @@ Panel Config:
             req: AVG((TO_INT(TCC_REQ[24]) / $denom))
             read req: AVG((TO_INT(TCC_READ[24]) / $denom))
             write req: AVG((TO_INT(TCC_WRITE[24]) / $denom))
-            atomicreq: AVG((TO_INT(TCC_ATOMIC[24]) / $denom))
+            atomic req: AVG((TO_INT(TCC_ATOMIC[24]) / $denom))
             ea read req: AVG((TO_INT(TCC_EA_RDREQ[24]) / $denom))
             ea write req: AVG((TO_INT(TCC_EA_WRREQ[24]) / $denom))
-            ea atomicreq: AVG((TO_INT(TCC_EA_ATOMIC[24]) / $denom))
+            ea atomic req: AVG((TO_INT(TCC_EA_ATOMIC[24]) / $denom))
             ea read lat - cycles:
               AVG(((TCC_EA_RDREQ_LEVEL[24] / TCC_EA_RDREQ[24]) if (TCC_EA_RDREQ[24]
               != 0) else None))
@@ -768,10 +768,10 @@ Panel Config:
             req: AVG((TO_INT(TCC_REQ[25]) / $denom))
             read req: AVG((TO_INT(TCC_READ[25]) / $denom))
             write req: AVG((TO_INT(TCC_WRITE[25]) / $denom))
-            atomicreq: AVG((TO_INT(TCC_ATOMIC[25]) / $denom))
+            atomic req: AVG((TO_INT(TCC_ATOMIC[25]) / $denom))
             ea read req: AVG((TO_INT(TCC_EA_RDREQ[25]) / $denom))
             ea write req: AVG((TO_INT(TCC_EA_WRREQ[25]) / $denom))
-            ea atomicreq: AVG((TO_INT(TCC_EA_ATOMIC[25]) / $denom))
+            ea atomic req: AVG((TO_INT(TCC_EA_ATOMIC[25]) / $denom))
             ea read lat - cycles:
               AVG(((TCC_EA_RDREQ_LEVEL[25] / TCC_EA_RDREQ[25]) if (TCC_EA_RDREQ[25]
               != 0) else None))
@@ -796,10 +796,10 @@ Panel Config:
             req: AVG((TO_INT(TCC_REQ[26]) / $denom))
             read req: AVG((TO_INT(TCC_READ[26]) / $denom))
             write req: AVG((TO_INT(TCC_WRITE[26]) / $denom))
-            atomicreq: AVG((TO_INT(TCC_ATOMIC[26]) / $denom))
+            atomic req: AVG((TO_INT(TCC_ATOMIC[26]) / $denom))
             ea read req: AVG((TO_INT(TCC_EA_RDREQ[26]) / $denom))
             ea write req: AVG((TO_INT(TCC_EA_WRREQ[26]) / $denom))
-            ea atomicreq: AVG((TO_INT(TCC_EA_ATOMIC[26]) / $denom))
+            ea atomic req: AVG((TO_INT(TCC_EA_ATOMIC[26]) / $denom))
             ea read lat - cycles:
               AVG(((TCC_EA_RDREQ_LEVEL[26] / TCC_EA_RDREQ[26]) if (TCC_EA_RDREQ[26]
               != 0) else None))
@@ -824,10 +824,10 @@ Panel Config:
             req: AVG((TO_INT(TCC_REQ[27]) / $denom))
             read req: AVG((TO_INT(TCC_READ[27]) / $denom))
             write req: AVG((TO_INT(TCC_WRITE[27]) / $denom))
-            atomicreq: AVG((TO_INT(TCC_ATOMIC[27]) / $denom))
+            atomic req: AVG((TO_INT(TCC_ATOMIC[27]) / $denom))
             ea read req: AVG((TO_INT(TCC_EA_RDREQ[27]) / $denom))
             ea write req: AVG((TO_INT(TCC_EA_WRREQ[27]) / $denom))
-            ea atomicreq: AVG((TO_INT(TCC_EA_ATOMIC[27]) / $denom))
+            ea atomic req: AVG((TO_INT(TCC_EA_ATOMIC[27]) / $denom))
             ea read lat - cycles:
               AVG(((TCC_EA_RDREQ_LEVEL[27] / TCC_EA_RDREQ[27]) if (TCC_EA_RDREQ[27]
               != 0) else None))
@@ -852,10 +852,10 @@ Panel Config:
             req: AVG((TO_INT(TCC_REQ[28]) / $denom))
             read req: AVG((TO_INT(TCC_READ[28]) / $denom))
             write req: AVG((TO_INT(TCC_WRITE[28]) / $denom))
-            atomicreq: AVG((TO_INT(TCC_ATOMIC[28]) / $denom))
+            atomic req: AVG((TO_INT(TCC_ATOMIC[28]) / $denom))
             ea read req: AVG((TO_INT(TCC_EA_RDREQ[28]) / $denom))
             ea write req: AVG((TO_INT(TCC_EA_WRREQ[28]) / $denom))
-            ea atomicreq: AVG((TO_INT(TCC_EA_ATOMIC[28]) / $denom))
+            ea atomic req: AVG((TO_INT(TCC_EA_ATOMIC[28]) / $denom))
             ea read lat - cycles:
               AVG(((TCC_EA_RDREQ_LEVEL[28] / TCC_EA_RDREQ[28]) if (TCC_EA_RDREQ[28]
               != 0) else None))
@@ -880,10 +880,10 @@ Panel Config:
             req: AVG((TO_INT(TCC_REQ[29]) / $denom))
             read req: AVG((TO_INT(TCC_READ[29]) / $denom))
             write req: AVG((TO_INT(TCC_WRITE[29]) / $denom))
-            atomicreq: AVG((TO_INT(TCC_ATOMIC[29]) / $denom))
+            atomic req: AVG((TO_INT(TCC_ATOMIC[29]) / $denom))
             ea read req: AVG((TO_INT(TCC_EA_RDREQ[29]) / $denom))
             ea write req: AVG((TO_INT(TCC_EA_WRREQ[29]) / $denom))
-            ea atomicreq: AVG((TO_INT(TCC_EA_ATOMIC[29]) / $denom))
+            ea atomic req: AVG((TO_INT(TCC_EA_ATOMIC[29]) / $denom))
             ea read lat - cycles:
               AVG(((TCC_EA_RDREQ_LEVEL[29] / TCC_EA_RDREQ[29]) if (TCC_EA_RDREQ[29]
               != 0) else None))
@@ -908,10 +908,10 @@ Panel Config:
             req: AVG((TO_INT(TCC_REQ[30]) / $denom))
             read req: AVG((TO_INT(TCC_READ[30]) / $denom))
             write req: AVG((TO_INT(TCC_WRITE[30]) / $denom))
-            atomicreq: AVG((TO_INT(TCC_ATOMIC[30]) / $denom))
+            atomic req: AVG((TO_INT(TCC_ATOMIC[30]) / $denom))
             ea read req: AVG((TO_INT(TCC_EA_RDREQ[30]) / $denom))
             ea write req: AVG((TO_INT(TCC_EA_WRREQ[30]) / $denom))
-            ea atomicreq: AVG((TO_INT(TCC_EA_ATOMIC[30]) / $denom))
+            ea atomic req: AVG((TO_INT(TCC_EA_ATOMIC[30]) / $denom))
             ea read lat - cycles:
               AVG(((TCC_EA_RDREQ_LEVEL[30] / TCC_EA_RDREQ[30]) if (TCC_EA_RDREQ[30]
               != 0) else None))
@@ -936,10 +936,10 @@ Panel Config:
             req: AVG((TO_INT(TCC_REQ[31]) / $denom))
             read req: AVG((TO_INT(TCC_READ[31]) / $denom))
             write req: AVG((TO_INT(TCC_WRITE[31]) / $denom))
-            atomicreq: AVG((TO_INT(TCC_ATOMIC[31]) / $denom))
+            atomic req: AVG((TO_INT(TCC_ATOMIC[31]) / $denom))
             ea read req: AVG((TO_INT(TCC_EA_RDREQ[31]) / $denom))
             ea write req: AVG((TO_INT(TCC_EA_WRREQ[31]) / $denom))
-            ea atomicreq: AVG((TO_INT(TCC_EA_ATOMIC[31]) / $denom))
+            ea atomic req: AVG((TO_INT(TCC_EA_ATOMIC[31]) / $denom))
             ea read lat - cycles:
               AVG(((TCC_EA_RDREQ_LEVEL[31] / TCC_EA_RDREQ[31]) if (TCC_EA_RDREQ[31]
               != 0) else None))
