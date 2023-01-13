@@ -1,7 +1,5 @@
 #!/bin/bash
 
-set -e
-
 stop_rdc() {
     if [ -d /run/systemd/system ]; then
         #stop RDC if running
@@ -11,8 +9,9 @@ stop_rdc() {
 }
 
 rm_rdc_service() {
-    if [ -e /run/systemd/system ]; then
-       unlink /lib/systemd/system/rdc.service
+    local LINK=/lib/systemd/system/rdc.service
+    if [ -L $LINK ]; then
+       unlink $LINK
     fi
     return 0
 }

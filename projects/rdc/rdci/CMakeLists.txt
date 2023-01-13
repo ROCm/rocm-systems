@@ -53,7 +53,6 @@ endif()
 
 set(SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src")
 set(INC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
-set(LIB_BOOSTRAP_DIR "${PROJECT_BINARY_DIR}/rdc_libs")
 
 include_directories(${INC_DIR} ${PROJECT_SOURCE_DIR}/include
     "${GRPC_ROOT}/include"
@@ -73,23 +72,9 @@ set(RDCI_SRC_LIST
 message("RDCI_SRC_LIST=${RDCI_SRC_LIST}")
 set(RDCI_EXE "rdci")
 
-link_directories(${LIB_BOOSTRAP_DIR} "${GRPC_ROOT}/lib" "${GRPC_ROOT}/lib64")
-
 add_executable(${RDCI_EXE} "${RDCI_SRC_LIST}")
 
-## RUNPATH should help to run "rdci" without the usage of ldconfig
-if(DEFINED ENV{ROCM_RPATH})
-    set(CMAKE_EXE_LINKER_FLAGS "-Wl,--enable-new-dtags -Wl,--rpath,${LIB_RUNPATH} -Wl,--no-as-needed -Wl,-z,origin")
-    set(CMAKE_SKIP_BUILD_RPATH TRUE)
-    set(CMAKE_BUILD_WITH_INSTALL_RPATH TRUE)
-    set(CMAKE_SKIP_RPATH TRUE)
-
-    # Set other library
-    set(RDCD_EXTRA_LIB ${RDCD_EXTRA_LIB} address_sorting gpr upb ssl crypto
-        gRPC::grpc++)
-endif()
-
-target_link_libraries(${RDCI_EXE} ${RDCD_EXTRA_LIB} pthread dl rdc_bootstrap)
+target_link_libraries(${RDCI_EXE} pthread dl rdc_bootstrap gRPC::grpc++)
 
 
 ## Add the install directives for the rdci executable

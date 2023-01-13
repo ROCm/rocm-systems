@@ -21,8 +21,7 @@ set(RDCCLIENT_LIB_INC_LIST "${PROJECT_SOURCE_DIR}/include/rdc/rdc.h"
 message("RDCCLIENT_LIB_INC_LIST=${RDCCLIENT_LIB_INC_LIST}")
 
 add_library(${RDCCLIENT_LIB} SHARED ${RDCCLIENT_LIB_SRC_LIST} ${RDCCLIENT_LIB_INC_LIST})
-target_link_libraries(${RDCCLIENT_LIB} ${BOOTSTRAP_LIB} pthread rt grpc grpc++ grpc++_reflection
-    dl protobuf)
+target_link_libraries(${RDCCLIENT_LIB} ${BOOTSTRAP_LIB} pthread rt gRPC::grpc++ dl)
 target_include_directories(${RDCCLIENT_LIB} PRIVATE
     "${GRPC_ROOT}/include"
     "${PROJECT_SOURCE_DIR}"

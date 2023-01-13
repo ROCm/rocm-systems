@@ -9,8 +9,9 @@ stop_rdc() {
 }
 
 rm_rdc_service() {
-    if [ -e /run/systemd/system ]; then
-        unlink @DISTRO_ROOT@/rdc.service
+    local LINK=@DISTRO_ROOT@/rdc.service
+    if [ -L $LINK ]; then
+       unlink $LINK
     fi
     return 0
 }
