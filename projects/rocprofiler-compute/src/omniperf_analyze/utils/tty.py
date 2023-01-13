@@ -103,8 +103,14 @@ def show_all(runs, archConfigs, output, decimal, time_unit, selected_cols, verbo
                                 ):
                                     if run != base_run:
                                         # calc percentage over the baseline
-                                        base_df[header]=[float(x) if x != '' else float(0) for x in base_df[header]]
-                                        cur_df[header]=[float(x) if x != '' else float(0) for x in cur_df[header]]
+                                        base_df[header] = [
+                                            float(x) if x != "" else float(0)
+                                            for x in base_df[header]
+                                        ]
+                                        cur_df[header] = [
+                                            float(x) if x != "" else float(0)
+                                            for x in cur_df[header]
+                                        ]
                                         t_df = (
                                             pd.concat(
                                                 [
