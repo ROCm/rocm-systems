@@ -53,6 +53,7 @@
 #include <regex>  // NOLINT
 #include <vector>
 #include <pthread.h>
+#include <string.h>
 
 #include "rocm_smi/rocm_smi_common.h"  // Should go before rocm_smi.h
 #include "rocm_smi/rocm_smi_main.h"
