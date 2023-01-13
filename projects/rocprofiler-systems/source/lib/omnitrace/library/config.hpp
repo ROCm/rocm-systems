@@ -221,6 +221,12 @@ bool
 get_use_rcclp();
 
 bool
+get_trace_hip_api();
+
+bool
+get_trace_hip_activity();
+
+bool
 get_trace_hsa_api();
 
 bool

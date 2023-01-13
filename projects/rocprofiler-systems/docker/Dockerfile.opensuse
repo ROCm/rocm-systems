@@ -24,7 +24,6 @@ ARG AMDGPU_RPM=latest/sle/15/amdgpu-install-21.50.50000-1.noarch.rpm
 
 RUN if [ "${ROCM_VERSION}" != "0.0" ]; then \
         zypper --no-gpg-checks install -y https://repo.radeon.com/amdgpu-install/${AMDGPU_RPM} && \
-        zypper addrepo https://download.opensuse.org/repositories/devel:languages:perl/SLE_15/devel:languages:perl.repo && \
         zypper --non-interactive --gpg-auto-import-keys refresh && \
         amdgpu-install --usecase=rocm,hip,hiplibsdk --no-dkms -y && \
         zypper install -y rocm-hip-sdk rocm-smi-lib roctracer-dev rocprofiler-dev rccl-devel && \

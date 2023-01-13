@@ -962,7 +962,7 @@ omnitrace_finalize_hidden(void)
         tim::timemory_finalize(_timemory_manager.get());
 
         auto _cfg       = settings::compose_filename_config{};
-        _cfg.use_suffix = true;
+        _cfg.use_suffix = config::get_use_pid();
         _timemory_manager->write_metadata(settings::get_global_output_prefix(),
                                           "omnitrace", _cfg);
     }

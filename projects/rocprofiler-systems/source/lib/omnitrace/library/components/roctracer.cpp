@@ -155,15 +155,24 @@ roctracer::setup()
                              "invalid domain ID(4)  in: roctracer_enable_activity()" };
 #endif
 
-    OMNITRACE_ROCTRACER_CALL(roctracer_enable_domain_callback(ACTIVITY_DOMAIN_HIP_API,
-                                                              hip_api_callback, nullptr));
+    if(get_trace_hip_api())
+    {
+        OMNITRACE_ROCTRACER_CALL(roctracer_enable_domain_callback(
+            ACTIVITY_DOMAIN_HIP_API, hip_api_callback, nullptr));
+    }
+
     if(get_use_roctx())
     {
         OMNITRACE_ROCTRACER_CALL(roctracer_enable_domain_callback(
             ACTIVITY_DOMAIN_ROCTX, roctx_api_callback, nullptr));
     }
-    // Enable HIP activity tracing
-    OMNITRACE_ROCTRACER_CALL(roctracer_enable_domain_activity(ACTIVITY_DOMAIN_HIP_OPS));
+
+    if(get_trace_hip_activity())
+    {
+        // Enable HIP activity tracing
+        OMNITRACE_ROCTRACER_CALL(
+            roctracer_enable_domain_activity(ACTIVITY_DOMAIN_HIP_OPS));
+    }
 
     // callback for HSA
     for(auto& itr : roctracer_setup_routines())
@@ -212,14 +221,31 @@ roctracer::shutdown()
     };
 #endif
 
-    // OMNITRACE_ROCTRACER_CALL(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_ROCTX));
-    OMNITRACE_VERBOSE_F(
-        2, "executing roctracer_disable_domain_callback(ACTIVITY_DOMAIN_HIP_API)...\n");
-    OMNITRACE_ROCTRACER_CALL(roctracer_disable_domain_callback(ACTIVITY_DOMAIN_HIP_API));
+    if(get_trace_hip_api())
+    {
+        OMNITRACE_VERBOSE_F(
+            2,
+            "executing roctracer_disable_domain_callback(ACTIVITY_DOMAIN_HIP_API)...\n");
+        OMNITRACE_ROCTRACER_CALL(
+            roctracer_disable_domain_callback(ACTIVITY_DOMAIN_HIP_API));
+    }
 
-    OMNITRACE_VERBOSE_F(
-        2, "executing roctracer_disable_domain_activity(ACTIVITY_DOMAIN_HIP_OPS)...\n");
-    OMNITRACE_ROCTRACER_CALL(roctracer_disable_domain_activity(ACTIVITY_DOMAIN_HIP_OPS));
+    if(get_use_roctx())
+    {
+        OMNITRACE_VERBOSE_F(
+            2, "executing roctracer_disable_domain_activity(ACTIVITY_DOMAIN_ROCTX)...\n");
+        OMNITRACE_ROCTRACER_CALL(
+            roctracer_disable_domain_callback(ACTIVITY_DOMAIN_ROCTX));
+    }
+
+    if(get_trace_hip_activity())
+    {
+        OMNITRACE_VERBOSE_F(
+            2,
+            "executing roctracer_disable_domain_activity(ACTIVITY_DOMAIN_HIP_OPS)...\n");
+        OMNITRACE_ROCTRACER_CALL(
+            roctracer_disable_domain_activity(ACTIVITY_DOMAIN_HIP_OPS));
+    }
 
     if(roctracer_activity_count() == 0)
     {

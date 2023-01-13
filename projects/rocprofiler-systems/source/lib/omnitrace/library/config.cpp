@@ -561,6 +561,14 @@ configure_settings(bool _init)
             std::to_string(_sigrt_range),
         0, "sampling", "advanced");
 
+    OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_ROCTRACER_HIP_API",
+                             "Enable HIP API tracing support", true, "roctracer", "rocm",
+                             "advanced");
+
+    OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_ROCTRACER_HIP_ACTIVITY",
+                             "Enable HIP activity tracing support", true, "roctracer",
+                             "rocm", "advanced");
+
     OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_ROCTRACER_HSA_ACTIVITY",
                              "Enable HSA activity tracing support", false, "roctracer",
                              "rocm", "advanced");
@@ -1739,6 +1747,20 @@ get_sampling_rtoffset()
 {
     static auto _v = get_config()->find("OMNITRACE_SAMPLING_REALTIME_OFFSET");
     return static_cast<tim::tsettings<int>&>(*_v->second).get();
+}
+
+bool
+get_trace_hip_api()
+{
+    static auto _v = get_config()->find("OMNITRACE_ROCTRACER_HIP_API");
+    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
+}
+
+bool
+get_trace_hip_activity()
+{
+    static auto _v = get_config()->find("OMNITRACE_ROCTRACER_HIP_ACTIVITY");
+    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
 }
 
 bool
