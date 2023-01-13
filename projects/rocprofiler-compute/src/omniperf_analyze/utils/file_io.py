@@ -180,7 +180,7 @@ def create_df_kernel_top_stats(
         grouped.to_csv(os.path.join(raw_data_dir, "pmc_kernel_top.csv"), index=False)
 
 
-def create_df_pmc(raw_data_dir):
+def create_df_pmc(raw_data_dir, verbose):
     """
     Load all raw pmc counters and join into one df.
     """
@@ -200,8 +200,8 @@ def create_df_pmc(raw_data_dir):
                 coll_levels.append(f[:-4])
     final_df = pd.concat(dfs, keys=coll_levels, axis=1, copy=False)
     # TODO: join instead of concat!
-
-    # print("pmc_raw_data final_df ", final_df.info())
+    if verbose >= 2:
+        print("pmc_raw_data final_df ", final_df.info())
     return final_df
 
 

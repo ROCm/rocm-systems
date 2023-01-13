@@ -44,19 +44,20 @@ def string_multiple_lines(source, width, max_rows):
     return "\n".join(lines)
 
 
-def show_all(runs, archConfigs, output, decimal, time_unit, selected_cols):
+def show_all(runs, archConfigs, output, decimal, time_unit, selected_cols, verbose):
     """
     Show all panels with their data in plain text mode.
     """
     comparable_columns = parser.build_comparable_columns(time_unit)
 
     for panel_id, panel in archConfigs.panel_configs.items():
-
+        # Skip panels that don't support baseline comparison
+        if panel_id == 1900:
+            continue
         ss = ""  # store content of all data_source from one pannel
 
         for data_source in panel["data source"]:
             for type, table_config in data_source.items():
-
                 # take the 1st run as baseline
                 base_run, base_data = next(iter(runs.items()))
                 base_df = base_data.dfs[table_config["id"]]
@@ -102,18 +103,21 @@ def show_all(runs, archConfigs, output, decimal, time_unit, selected_cols):
                                 ):
                                     if run != base_run:
                                         # calc percentage over the baseline
+                                        base_df[header]=[float(x) if x != '' else float(0) for x in base_df[header]]
+                                        cur_df[header]=[float(x) if x != '' else float(0) for x in cur_df[header]]
                                         t_df = (
                                             pd.concat(
                                                 [
-                                                    base_df[header].astype("double"),
-                                                    cur_df[header].astype("double"),
+                                                    base_df[header],
+                                                    cur_df[header],
                                                 ],
                                                 axis=1,
                                             )
                                             .pct_change(axis="columns")
                                             .iloc[:, 1]
                                         )
-                                        # print("---------", header, t_df)
+                                        if verbose >= 2:
+                                            print("---------", header, t_df)
 
                                         # show value + percentage
                                         # TODO: better alignment

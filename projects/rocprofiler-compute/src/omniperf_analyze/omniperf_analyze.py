@@ -143,7 +143,8 @@ def run_gui(args, runs):
             num_results,
         )
         runs[args.path[0][0]].raw_pmc = file_io.create_df_pmc(
-            args.path[0][0]
+            args.path[0][0],
+            args.verbose
         )  # create mega df
         parser.load_kernel_top(runs[args.path[0][0]], args.path[0][0])
 
@@ -188,7 +189,7 @@ def run_cli(args, runs):
             args.time_unit,
             num_results,
         )
-        runs[d[0]].raw_pmc = file_io.create_df_pmc(d[0])  # creates mega dataframe
+        runs[d[0]].raw_pmc = file_io.create_df_pmc(d[0], args.verbose)  # creates mega dataframe
         is_gui = False
         parser.load_table_data(
             runs[d[0]], d[0], is_gui, args.g, args.verbose
@@ -203,6 +204,7 @@ def run_cli(args, runs):
             args.decimal,
             args.time_unit,
             args.cols,
+            args.verbose,
         )
 
 

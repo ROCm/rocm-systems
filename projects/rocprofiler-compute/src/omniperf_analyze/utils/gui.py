@@ -422,7 +422,7 @@ def build_layout(
         base_data = initialize_run(args, norm_filt)  # Re-initalize everything
         panel_configs = copy.deepcopy(archConfigs.panel_configs)
         # Generate original raw df
-        base_data[base_run].raw_pmc = file_io.create_df_pmc(path_to_dir)
+        base_data[base_run].raw_pmc = file_io.create_df_pmc(path_to_dir, verbose)
         if verbose >= 1:
             print("disp-filter is ", disp_filt)
             print("kernel-filter is ", kernel_filter)
