@@ -26,6 +26,7 @@ from tabulate import tabulate
 from omniperf_analyze.utils import schema, parser
 
 hidden_columns = ["Tips", "coll_level"]
+hidden_sections = [1900, 2000]
 
 
 def string_multiple_lines(source, width, max_rows):
@@ -52,7 +53,7 @@ def show_all(runs, archConfigs, output, decimal, time_unit, selected_cols, verbo
 
     for panel_id, panel in archConfigs.panel_configs.items():
         # Skip panels that don't support baseline comparison
-        if panel_id == 1900:
+        if panel_id in hidden_sections:
             continue
         ss = ""  # store content of all data_source from one pannel
 
