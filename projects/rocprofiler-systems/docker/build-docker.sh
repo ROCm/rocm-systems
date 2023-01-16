@@ -166,7 +166,7 @@ do
                 4.1* | 4.0*)
                     ROCM_REPO_DIST="xenial"
                     ;;
-                5.3*)
+                5.3* | 5.4*)
                     case "${VERSION}" in
                         22.04)
                             ROCM_REPO_DIST="jammy"
@@ -239,6 +239,9 @@ do
                     ;;
             esac
             case "${ROCM_VERSION}" in
+                5.4 | 5.4.*)
+                    ROCM_RPM=${ROCM_VERSION}/sle/${VERSION}/amdgpu-install-${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1.noarch.rpm
+                    ;;
                 5.3 | 5.3.*)
                     ROCM_RPM=${ROCM_VERSION}/sle/${VERSION}/amdgpu-install-${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1.noarch.rpm
                     ;;
