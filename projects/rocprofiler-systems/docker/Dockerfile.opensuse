@@ -20,9 +20,10 @@ RUN zypper update -y && \
 
 ARG ROCM_VERSION=0.0
 ARG AMDGPU_RPM=latest/sle/15/amdgpu-install-21.50.50000-1.noarch.rpm
-# ARG AMDGPU_RPM=21.40.2/sle/15/amdgpu-install-21.40.2.40502-1.noarch.rpm
+ARG PERL_REPO=SLE_15
 
 RUN if [ "${ROCM_VERSION}" != "0.0" ]; then \
+        zypper addrepo https://mirrorcache-us.opensuse.org/repositories/devel:/languages:/perl/${PERL_REPO}/devel:languages:perl.repo && \
         zypper --no-gpg-checks install -y https://repo.radeon.com/amdgpu-install/${AMDGPU_RPM} && \
         zypper --non-interactive --gpg-auto-import-keys refresh && \
         amdgpu-install --usecase=rocm,hip,hiplibsdk --no-dkms -y && \

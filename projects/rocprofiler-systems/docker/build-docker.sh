@@ -143,6 +143,9 @@ if [ ! -f ${DOCKER_FILE} ]; then send-error "File \"${DOCKER_FILE}\" not found";
 
 for VERSION in ${VERSIONS}
 do
+    VERSION_MAJOR=$(echo ${VERSION} | sed 's/\./ /g' | awk '{print $1}')
+    VERSION_MINOR=$(echo ${VERSION} | sed 's/\./ /g' | awk '{print $2}')
+    VERSION_PATCH=$(echo ${VERSION} | sed 's/\./ /g' | awk '{print $3}')
     for ROCM_VERSION in ${ROCM_VERSIONS}
     do
         CONTAINER=${USER}/omnitrace:release-base-${DISTRO}-${VERSION}-rocm-${ROCM_VERSION}
@@ -257,7 +260,8 @@ do
                     send-error "Unsupported combination :: ${DISTRO}-${VERSION} + ROCm ${ROCM_VERSION}"
                 ;;
             esac
-            verbose-build docker build . -f ${DOCKER_FILE} --tag ${CONTAINER} --build-arg DISTRO=${DISTRO_IMAGE} --build-arg VERSION=${VERSION} --build-arg ROCM_VERSION=${ROCM_VERSION} --build-arg AMDGPU_RPM=${ROCM_RPM} --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\"
+            PERL_REPO="SLE_${VERSION_MAJOR}_SP${VERSION_MINOR}"
+            verbose-build docker build . -f ${DOCKER_FILE} --tag ${CONTAINER} --build-arg DISTRO=${DISTRO_IMAGE} --build-arg VERSION=${VERSION} --build-arg ROCM_VERSION=${ROCM_VERSION} --build-arg AMDGPU_RPM=${ROCM_RPM} --build-arg PERL_REPO=${PERL_REPO} --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\"
         fi
         if [ "${PUSH}" -ne 0 ]; then
             docker push ${CONTAINER}
