@@ -5,6 +5,7 @@
 [![Ubuntu 22.04 (GCC, Python, ROCm)](https://github.com/AMDResearch/omnitrace/actions/workflows/ubuntu-jammy.yml/badge.svg)](https://github.com/AMDResearch/omnitrace/actions/workflows/ubuntu-jammy.yml)
 [![OpenSUSE 15.x with GCC](https://github.com/AMDResearch/omnitrace/actions/workflows/opensuse.yml/badge.svg)](https://github.com/AMDResearch/omnitrace/actions/workflows/opensuse.yml)
 [![Installer Packaging (CPack)](https://github.com/AMDResearch/omnitrace/actions/workflows/cpack.yml/badge.svg)](https://github.com/AMDResearch/omnitrace/actions/workflows/cpack.yml)
+[![Documentation](https://github.com/AMDResearch/omnitrace/actions/workflows/docs.yml/badge.svg)](https://github.com/AMDResearch/omnitrace/actions/workflows/docs.yml)
 
 > ***[Omnitrace](https://github.com/AMDResearch/omnitrace) is an AMD open source research project and is not supported as part of the ROCm software stack.***
 

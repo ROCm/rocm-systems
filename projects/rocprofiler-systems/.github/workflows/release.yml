@@ -1,0 +1,39 @@
+name: Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - v*
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
+
+jobs:
+  release:
+    if: github.repository == 'AMDResearch/omnitrace'
+    runs-on: ubuntu-20.04
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Generate generic installer script
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake
+          cmake -D OUTPUT_DIR=${PWD} -P scripts/write-omnitrace-install.cmake
+      - name: Generate Release
+        uses: softprops/action-gh-release@v1
+        with:
+          draft: False
+          generate_release_notes: True
+          fail_on_unmatched_files: True
+          files: |
+            omnitrace-install.py
