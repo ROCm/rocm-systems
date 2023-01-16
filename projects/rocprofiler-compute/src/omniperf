@@ -275,14 +275,29 @@ def characterize_app(path, cmd, verbose):
     # Workload profiling
     for fname in glob.glob(workload_dir + "/perfmon/*.txt"):
         print(fname)
-        run_prof(fname, workload_dir, perfmon_dir, app_cmd, verbose)
+        run_prof(fname, workload_dir, perfmon_dir, app_cmd, verbose, False)
 
 ################################################
 # Profiling Helpers
 ################################################
 
+def run_rocscope(args):
+    # profile the app
+    if args.use_rocscope == True:
+        result = subprocess.run(["which", "rocscope"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        if result.returncode == 0:
+            rs_cmd = [result.stdout.decode('ascii').strip(), 
+                      "metrics",
+                      "-p", args.path,
+                      "-n", args.name,
+                      "--", args.remaining]
+            print(rs_cmd)
+            result = subprocess.run(rs_cmd) #, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            if result.returncode != 0:
+                print(result.stderr.decode('ascii'))
 
-def run_prof(fname, workload_dir, perfmon_dir, cmd, verbose):
+
+def run_prof(fname, workload_dir, perfmon_dir, cmd, verbose, use_rocscope):
     global rocprof_cmd
 
     fbase = os.path.splitext(os.path.basename(fname))[0]
@@ -290,7 +305,6 @@ def run_prof(fname, workload_dir, perfmon_dir, cmd, verbose):
     if verbose:
         print("pmc file:", os.path.basename(fname))
 
-    # profile the app
     subprocess.run(
         [
             rocprof_cmd,
@@ -407,7 +421,7 @@ def omniperf_profile(args):
                         fname,
                     ]
                 )
-            run_prof(fname, workload_dir, perfmon_dir, args.remaining, args.verbose)
+            run_prof(fname, workload_dir, perfmon_dir, args.remaining, args.verbose, args.use_rocscope)
         
 
 
