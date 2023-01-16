@@ -25,6 +25,7 @@ THE SOFTWARE.
 #include <signal.h>
 #include <assert.h>
 
+#include <cmath>
 #include <limits>
 #include <iomanip>
 #include <unordered_map>
@@ -569,6 +570,7 @@ void RdciDmonSubSystem::process() {
                             << value.value.l_int;
                      } else if (value.type == DOUBLE) {
                          std::cout << std::left << std::setw(20)
+                            << std::fixed << std::setprecision(3)
                             << value.value.dbl;
                      } else {
                          std::cout << std::left << std::setw(20)
