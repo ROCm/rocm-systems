@@ -113,10 +113,7 @@ For an RDC client application to monitor and/or control a remote system, the RDC
 When *rdcd* is started from a command-line the *capabilities* are determined by privilege of the *user* starting *rdcd*
 
 ```bash
-## Note that this environment variable is automatically set in rdc.service
-## If RDC_FI_PROF_* metrics are required - you MUST export ROCMTOOLS_METRICS_PATH before starting rdcd
 ## NOTE: Replace /opt/rocm with specific rocm version if needed
-export ROCMTOOLS_METRICS_PATH=/opt/rocm/libexec/rocmtools/counters/derived_counters.xml
 
 ## To run with authentication. Ensure SSL keys are setup properly
 ## version will be the version number(ex:3.10.0) of ROCm where RDC was packaged with
@@ -188,9 +185,8 @@ ERROR, INFO, DEBUG logging levels are supported
 - Reading `RDC_FI_PROF_*` crashes rdcd
 - All `RDC_FI_PROF_*` metrics return N/A
 
-    1. Is `ROCMTOOLS_METRICS_PATH` set?
-    2. Does your GPU support selected fields?  
+    1. Does your GPU support selected fields?  
         Field 700 (`RDC_FI_PROF_ELAPSED_CYCLES`) is supposed to be accessible on most GPUs.  
         Others are mostly intended for MI series.
-    3. Set `RDC_LOG=DEBUG` as stated above
-    4. Is rocmtools installed? Can you find `librocmtools.so`?
+    2. Set `RDC_LOG=DEBUG` as stated above
+    3. Is rocmtools installed? Can you find `librocmtools.so`?

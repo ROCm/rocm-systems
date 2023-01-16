@@ -18,11 +18,6 @@ Group=rdc
 
 Type=simple
 
-# Needed for accessing fields 700-799 provided by ROCMTools
-# At the time of writing - rdcd will crash if these metrics are accessed
-# without the following environment variable
-Environment=ROCMTOOLS_METRICS_PATH=/@CPACK_PACKAGING_INSTALL_PREFIX@/libexec/rocmtools/counters/derived_counters.xml
-
 CapabilityBoundingSet=CAP_DAC_OVERRIDE
 AmbientCapabilities=CAP_DAC_OVERRIDE
 

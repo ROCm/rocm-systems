@@ -56,8 +56,6 @@ class RdcRocpLib : public RdcTelemetry {
         rdc_gpu_field_t* fields,
         uint32_t fields_count) override;
 
-    uint64_t get_profiler_version();
-
     explicit RdcRocpLib(const char* lib_name);
 
     ~RdcRocpLib();
@@ -82,6 +80,17 @@ class RdcRocpLib : public RdcTelemetry {
     rdc_status_t (*telemetry_fields_unwatch_)(
         rdc_gpu_field_t* fields,
         uint32_t fields_count);
+
+    /**
+     * @brief Extract current ROCM_PATH from library or the environment
+     */
+    std::string get_rocm_path();
+
+    /**
+     * @brief Set ROCMTOOLS_METRICS_PATH environment variable needed by
+     * librocmtools
+     */
+    rdc_status_t set_rocmtools_path();
 };
 
 using RdcRocpLibPtr = std::shared_ptr<RdcRocpLib>;
