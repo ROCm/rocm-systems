@@ -20,19 +20,7 @@
 # THE SOFTWARE.
 ################################################################################
 
-from linecache import cache
-import subprocess
-from operator import sub
-import os
 import sys
-from pathlib import Path
-
-import numpy
-import matplotlib.pyplot as plt
-from matplotlib.pyplot import get, text
-from math import log, pi, sqrt
-import pandas as pd
-import pylab
 
 from dataclasses import dataclass
 import csv
@@ -100,7 +88,7 @@ def get_color(catagory):
 # -------------------------------------------------------------------------------------
 #                           Plot BW at each cache level
 # -------------------------------------------------------------------------------------
-def plot_roof(roof_details, roof_data):
+def plot_roof(roof_details, roof_data, verbose):
 
     graphPoints = {"hbm": [], "l2": [], "l1": [], "lds": [], "valu": [], "mfma": []}
 
@@ -116,7 +104,8 @@ def plot_roof(roof_details, roof_data):
         )
     for i in range(0, len(cacheHierarchy)):
         # Plot BW line
-        # print("Current cache level is ", cacheHierarchy[i])
+        if verbose >= 3:
+            print("Current cache level is ", cacheHierarchy[i])
         curr_bw = cacheHierarchy[i] + "Bw"
         peakBw = float(roof_data[curr_bw][roof_details["device"]])
 
@@ -142,8 +131,9 @@ def plot_roof(roof_details, roof_data):
         y2_mfma = peakMFMA
 
         # These are the points to use:
-        # print("x = [{}, {}]".format(x1,x2_mfma))
-        # print("y = [{}, {}]".format(y1, y2_mfma))
+        if verbose >= 3:
+            print("x = [{}, {}]".format(x1, x2_mfma))
+            print("y = [{}, {}]".format(y1, y2_mfma))
 
         graphPoints[cacheHierarchy[i].lower()].append([x1, x2_mfma])
         graphPoints[cacheHierarchy[i].lower()].append([y1, y2_mfma])
@@ -159,7 +149,8 @@ def plot_roof(roof_details, roof_data):
         if x2 < x0:
             x0 = x2
 
-        # print("FMA ROOF [{}, {}], [{},{}]".format(x0, XMAX, peakOps, peakOps))
+        if verbose >= 3:
+            print("FMA ROOF [{}, {}], [{},{}]".format(x0, XMAX, peakOps, peakOps))
         graphPoints["valu"].append([x0, XMAX])
         graphPoints["valu"].append([peakOps, peakOps])
         graphPoints["valu"].append(peakOps)
@@ -172,7 +163,8 @@ def plot_roof(roof_details, roof_data):
         if x2_mfma < x0_mfma:
             x0_mfma = x2_mfma
 
-        # print("MFMA ROOF [{}, {}], [{},{}]".format(x0_mfma, XMAX, peakMFMA, peakMFMA))
+        if verbose >= 3:
+            print("MFMA ROOF [{}, {}], [{},{}]".format(x0_mfma, XMAX, peakMFMA, peakMFMA))
         graphPoints["mfma"].append([x0_mfma, XMAX])
         graphPoints["mfma"].append([peakMFMA, peakMFMA])
         graphPoints["mfma"].append(peakMFMA)
@@ -474,7 +466,7 @@ def plot_application(sortType, ret_df, verbose):
     return intensityPoints
 
 
-def empirical_roof(roof_info):
+def empirical_roof(roof_info, verbose):
 
     if roof_info["sort"] != "kernels" and roof_info["sort"] != "dispatches":
         sys.exit("Invalid sort. Must be either 'kernels' or 'dispatches'")
@@ -517,7 +509,7 @@ def empirical_roof(roof_info):
     # ------------------
     #  Generate Roofline
     # ------------------
-    results = plot_roof(roof_info, roof_data)
+    results = plot_roof(roof_info, roof_data, verbose)
     # for key in results:
     #     print(key, "->", results[key])
 

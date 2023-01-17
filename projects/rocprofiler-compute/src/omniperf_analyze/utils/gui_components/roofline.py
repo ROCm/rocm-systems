@@ -39,7 +39,7 @@ def to_int(a):
 def generate_plots(roof_info, ai_data, verbose, fig=None):
     if fig is None:
         fig = go.Figure()
-    line_data = roofline_calc.empirical_roof(roof_info)
+    line_data = roofline_calc.empirical_roof(roof_info, verbose)
 
     #######################
     # Plot BW Lines

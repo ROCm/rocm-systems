@@ -20,9 +20,8 @@
 # THE SOFTWARE.
 ################################################################################
 
-from dash import html, dash_table, dcc
+from dash import html, dcc
 import dash_bootstrap_components as dbc
-from matplotlib.style import available
 
 from omniperf_analyze.utils import schema
 

@@ -23,7 +23,6 @@
 from selectors import EpollSelector
 import sys
 import copy
-from matplotlib.axis import XAxis
 import pandas as pd
 from dash.dash_table import FormatTemplate
 from dash.dash_table.Format import Format, Scheme, Symbol
