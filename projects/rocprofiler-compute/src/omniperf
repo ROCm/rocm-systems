@@ -275,13 +275,13 @@ def characterize_app(path, cmd, verbose):
     # Workload profiling
     for fname in glob.glob(workload_dir + "/perfmon/*.txt"):
         print(fname)
-        run_prof(fname, workload_dir, perfmon_dir, app_cmd, verbose, False)
+        run_prof(fname, workload_dir, perfmon_dir, app_cmd, verbose)
 
 ################################################
 # Profiling Helpers
 ################################################
 
-def run_rocscope(args):
+def run_rocscope(args, fname):
     # profile the app
     if args.use_rocscope == True:
         result = subprocess.run(["which", "rocscope"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
@@ -290,14 +290,16 @@ def run_rocscope(args):
                       "metrics",
                       "-p", args.path,
                       "-n", args.name,
+                      "-t", fname,
                       "--", args.remaining]
             print(rs_cmd)
             result = subprocess.run(rs_cmd) #, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             if result.returncode != 0:
                 print(result.stderr.decode('ascii'))
+                sys.exit(1)
 
 
-def run_prof(fname, workload_dir, perfmon_dir, cmd, verbose, use_rocscope):
+def run_prof(fname, workload_dir, perfmon_dir, cmd, verbose):
     global rocprof_cmd
 
     fbase = os.path.splitext(os.path.basename(fname))[0]
@@ -421,7 +423,10 @@ def omniperf_profile(args):
                         fname,
                     ]
                 )
-            run_prof(fname, workload_dir, perfmon_dir, args.remaining, args.verbose, args.use_rocscope)
+            if args.use_rocscope == True:
+                run_rocscope(args, fname)
+            else:
+                run_prof(fname, workload_dir, perfmon_dir, args.remaining, args.verbose)
         
 
 
