@@ -107,7 +107,7 @@ foreach(header ${PUBLIC_HEADERS})
   get_filename_component(header_subdir ${header} DIRECTORY)
   install(FILES ${PROJECT_SOURCE_DIR}/inc/${header}
           DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}/${header_subdir}
-          COMPONENT runtime)
+          COMPONENT dev)
 endforeach()
 
 set(GENERATED_HEADERS
@@ -118,7 +118,7 @@ set(GENERATED_HEADERS
 foreach(header ${GENERATED_HEADERS})
   install(FILES ${CMAKE_CURRENT_BINARY_DIR}/${header}
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}
-    COMPONENT runtime)
+    COMPONENT dev)
 endforeach()
 
 ## Build the util library
@@ -170,7 +170,11 @@ target_link_libraries(roctracer PRIVATE util hsa-runtime64::hsa-runtime64 stdc++
 
 install(TARGETS roctracer LIBRARY
   DESTINATION ${CMAKE_INSTALL_LIBDIR}
-  COMPONENT runtime)
+  COMPONENT runtime NAMELINK_SKIP)
+## Install name link library in dev component
+install(TARGETS roctracer LIBRARY
+  DESTINATION ${CMAKE_INSTALL_LIBDIR}
+  COMPONENT dev NAMELINK_ONLY)
 
 ## Build the ROCTX library
 file(GLOB ROCTX_SOURCES "roctx/*.cpp")
@@ -192,7 +196,11 @@ target_link_options(roctx PRIVATE -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DI
 
 install(TARGETS roctx LIBRARY
   DESTINATION ${CMAKE_INSTALL_LIBDIR}
-  COMPONENT runtime)
+  COMPONENT runtime NAMELINK_SKIP)
+## Install name link library in dev component
+install(TARGETS roctx LIBRARY
+  DESTINATION ${CMAKE_INSTALL_LIBDIR}
+  COMPONENT dev NAMELINK_ONLY)
 
 ## Build the tracer_tool library
 if (${LIBRARY_TYPE} STREQUAL SHARED)
