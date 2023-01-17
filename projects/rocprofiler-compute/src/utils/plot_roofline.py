@@ -21,14 +21,22 @@
 ################################################################################
 
 from linecache import cache
-import subprocess
-from operator import sub
 import os
 import sys
 from pathlib import Path
 
 import numpy
-import matplotlib.pyplot as plt
+import matplotlib
+
+try:
+
+    import matplotlib.pyplot as plt
+except ImportError:
+    # other non-interactive options:
+    #   cairo, pdf, pgf, ps, svg, template
+    matplotlib.use("agg", force=True)
+    import matplotlib.pyplot as plt
+
 from matplotlib.pyplot import get, text
 from math import log, pi, sqrt
 import pandas as pd
@@ -510,8 +518,6 @@ def plot_application(inputs, verbose):
         i += 1
 
     print(intensities)
-
-    # fig, ax = plt.subplots()
 
     plotted_spots = []
     labels = []
