@@ -3,7 +3,7 @@
  * The University of Illinois/NCSA
  * Open Source License (NCSA)
  *
- * Copyright (c) 2017, Advanced Micro Devices, Inc.
+ * Copyright (c) 2017-2023, Advanced Micro Devices, Inc.
  * All rights reserved.
  *
  * Developed by:
@@ -45,7 +45,7 @@
 #include <errno.h>
 #include <sys/utsname.h>
 #include <pthread.h>
-#include <string.h>
+#include <string>
 #include <unistd.h>
 #include <poll.h>
 #include <fcntl.h>
@@ -1678,11 +1678,28 @@ static std::vector<std::string> pci_name_files = {
   "/var/lib/pciutils/pci.ids"
 };
 
-
 enum eNameStrType {
   NAME_STR_VENDOR = 0,
   NAME_STR_DEVICE,
   NAME_STR_SUBSYS
+};
+
+std::map<std::string, rsmi_compute_partition_type_t>
+mapStringToRSMIComputePartitionTypes {
+  {"CPX", RSMI_COMPUTE_PARTITION_CPX},
+  {"SPX", RSMI_COMPUTE_PARTITION_SPX},
+  {"DPX", RSMI_COMPUTE_PARTITION_DPX},
+  {"TPX", RSMI_COMPUTE_PARTITION_TPX},
+  {"QPX", RSMI_COMPUTE_PARTITION_QPX}
+};
+
+std::map<rsmi_compute_partition_type_t, std::string>
+mapRSMIToStringComputePartitionTypes {
+  {RSMI_COMPUTE_PARTITION_CPX, "CPX"},
+  {RSMI_COMPUTE_PARTITION_SPX, "SPX"},
+  {RSMI_COMPUTE_PARTITION_DPX, "DPX"},
+  {RSMI_COMPUTE_PARTITION_TPX, "TPX"},
+  {RSMI_COMPUTE_PARTITION_QPX, "QPX"}
 };
 
 static std::string
@@ -3694,6 +3711,117 @@ rsmi_is_P2P_accessible(uint32_t dv_ind_src, uint32_t dv_ind_dst,
   }
   *accessible = false;
   return RSMI_STATUS_SUCCESS;
+  CATCH
+}
+
+static rsmi_status_t
+get_compute_partition(uint32_t dv_ind, std::string &compute_partition) {
+  TRY
+  std::string val_str;
+
+  if (compute_partition.c_str() == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+  CHK_SUPPORT_NAME_ONLY(compute_partition.c_str())
+
+  DEVICE_MUTEX
+  rsmi_status_t ret = get_dev_value_str(amd::smi::kDevComputePartition,
+                                        dv_ind, &val_str);
+
+  if (ret != RSMI_STATUS_SUCCESS) {
+    return ret;
+  }
+
+  switch (mapStringToRSMIComputePartitionTypes[val_str]) {
+    case RSMI_COMPUTE_PARTITION_INVALID:
+      // Retrieved an unknown compute partition
+      return RSMI_STATUS_UNEXPECTED_DATA;
+    case RSMI_COMPUTE_PARTITION_CPX:
+      break;
+    case RSMI_COMPUTE_PARTITION_SPX:
+      break;
+    case RSMI_COMPUTE_PARTITION_DPX:
+      break;
+    case RSMI_COMPUTE_PARTITION_TPX:
+      break;
+    case RSMI_COMPUTE_PARTITION_QPX:
+      break;
+    default:
+      // Retrieved an unknown compute partition
+      return RSMI_STATUS_UNEXPECTED_DATA;
+  }
+  compute_partition = val_str;
+  return RSMI_STATUS_SUCCESS;
+  CATCH
+}
+
+rsmi_status_t
+rsmi_dev_compute_partition_get(uint32_t dv_ind, char *compute_partition,
+                               uint32_t len) {
+  CHK_SUPPORT_NAME_ONLY(compute_partition)
+  if ((len == 0) || (compute_partition == nullptr)) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  TRY
+  std::string returning_compute_partition;
+  rsmi_status_t ret = get_compute_partition(dv_ind,
+                               returning_compute_partition);
+
+  if (ret != RSMI_STATUS_SUCCESS) { return ret; }
+
+  std::size_t length = returning_compute_partition.copy(compute_partition, len);
+  compute_partition[length]='\0';
+
+  if (len < (returning_compute_partition.size() + 1)) {
+    return RSMI_STATUS_INSUFFICIENT_SIZE;
+  }
+  return ret;
+  CATCH
+}
+
+rsmi_status_t
+rsmi_dev_compute_partition_set(uint32_t dv_ind,
+                              rsmi_compute_partition_type_t compute_partition) {
+  TRY
+  REQUIRE_ROOT_ACCESS
+  DEVICE_MUTEX
+
+  std::string newComputePartitionStr
+              = mapRSMIToStringComputePartitionTypes[compute_partition];
+  std::string currentComputePartition;
+
+  switch (compute_partition) {
+    case RSMI_COMPUTE_PARTITION_INVALID:
+      // Retrieved an unknown compute partition
+      return RSMI_STATUS_INVALID_ARGS;
+    case RSMI_COMPUTE_PARTITION_CPX:
+      break;
+    case RSMI_COMPUTE_PARTITION_SPX:
+      break;
+    case RSMI_COMPUTE_PARTITION_DPX:
+      break;
+    case RSMI_COMPUTE_PARTITION_TPX:
+      break;
+    case RSMI_COMPUTE_PARTITION_QPX:
+      break;
+    default:
+      return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  // do nothing if compute_partition is the current compute partition
+  get_compute_partition(dv_ind, currentComputePartition);
+  rsmi_compute_partition_type_t currRSMIComputePartition
+    = mapStringToRSMIComputePartitionTypes[currentComputePartition];
+  if (currRSMIComputePartition == compute_partition) {
+    return RSMI_STATUS_SUCCESS;
+  }
+
+  newComputePartitionStr = mapRSMIToStringComputePartitionTypes[compute_partition];
+  GET_DEV_FROM_INDX
+  int ret = dev->writeDevInfo(amd::smi::kDevComputePartition,
+                              newComputePartitionStr);
+  return amd::smi::ErrnoToRsmiStatus(ret);
   CATCH
 }
 

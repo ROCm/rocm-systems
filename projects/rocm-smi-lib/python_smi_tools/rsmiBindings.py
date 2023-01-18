@@ -582,3 +582,28 @@ class rsmi_func_id_value_t(Union):
     _fields_ = [('id', c_uint64),
                 ('name', c_char_p),
                 ('submodule', submodule_union)]
+
+class rsmi_compute_partition_type_t(c_int):
+    RSMI_COMPUTE_PARTITION_INVALID = 0
+    RSMI_COMPUTE_PARTITION_CPX = 1
+    RSMI_COMPUTE_PARTITION_SPX = 2
+    RSMI_COMPUTE_PARTITION_DPX = 3
+    RSMI_COMPUTE_PARTITION_TPX = 4
+    RSMI_COMPUTE_PARTITION_QPX = 5
+
+rsmi_compute_partition_type_dict = {
+    #'RSMI_COMPUTE_PARTITION_INVALID': 0,
+    'CPX': 1,
+    'SPX': 2,
+    'DPX': 3,
+    'TPX': 4,
+    'QPX': 5
+}
+
+rsmi_compute_partition_type = rsmi_compute_partition_type_t
+
+# compute_partition_type_l includes string names for the rsmi_compute_partition_type_t
+# Usage example to get corresponding names:
+# compute_partition_type_l[rsmi_compute_partition_type_t.RSMI_COMPUTE_PARTITION_CPX]
+# will return string 'CPX'
+compute_partition_type_l = ['CPX', 'SPX', 'DPX', 'TPX', 'QPX']

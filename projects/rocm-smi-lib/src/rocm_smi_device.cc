@@ -3,7 +3,7 @@
  * The University of Illinois/NCSA
  * Open Source License (NCSA)
  *
- * Copyright (c) 2017, Advanced Micro Devices, Inc.
+ * Copyright (c) 2017-2023, Advanced Micro Devices, Inc.
  * All rights reserved.
  *
  * Developed by:
@@ -121,6 +121,7 @@ static const char *kDevXGMIErrorFName = "xgmi_error";
 static const char *kDevSerialNumberFName = "serial_number";
 static const char *kDevNumaNodeFName = "numa_node";
 static const char *kDevGpuMetricsFName = "gpu_metrics";
+static const char *kDevComputePartitionFName = "current_compute_partition";
 
 // Firmware version files
 static const char *kDevFwVersionAsdFName = "fw_version/asd_fw_version";
@@ -290,6 +291,7 @@ static const std::map<DevInfoTypes, const char *> kDevAttribNameMap = {
     {kDevNumaNode, kDevNumaNodeFName},
     {kDevGpuMetrics, kDevGpuMetricsFName},
     {kDevGpuReset, kDevGpuResetFName},
+    {kDevComputePartition, kDevComputePartitionFName},
 };
 
 static const std::map<rsmi_dev_perf_level, const char *> kDevPerfLvlMap = {
@@ -413,6 +415,8 @@ static const std::map<const char *, dev_depends_t> kDevFuncDependsMap = {
   {"rsmi_topo_numa_affinity_get",        {{kDevNumaNodeFName}, {}}},
   {"rsmi_dev_gpu_metrics_info_get",      {{kDevGpuMetricsFName}, {}}},
   {"rsmi_dev_gpu_reset",                 {{kDevGpuResetFName}, {}}},
+  {"rsmi_dev_compute_partition_get",     {{kDevComputePartitionFName}, {}}},
+  {"rsmi_dev_compute_partition_set",     {{kDevComputePartitionFName}, {}}},
 
   // These functions with variants, but no sensors/units. (May or may not
   // have mandatory dependencies.)
@@ -563,9 +567,6 @@ int Device::openSysfsFileStream(DevInfoTypes type, T *fs, const char *str) {
   if (env_->path_DRM_root_override && type == env_->enum_override) {
     sysfs_path = env_->path_DRM_root_override;
 
-    if (str) {
-      sysfs_path += ".write";
-    }
   }
 #endif
 
@@ -587,7 +588,7 @@ int Device::openSysfsFileStream(DevInfoTypes type, T *fs, const char *str) {
   fs->open(sysfs_path);
 
   if (!fs->is_open()) {
-      return errno;
+    return errno;
   }
 
   return 0;
@@ -696,6 +697,7 @@ int Device::writeDevInfo(DevInfoTypes type, std::string val) {
     case kDevPCIEClk:
     case kDevPowerODVoltage:
     case kDevSOCClk:
+    case kDevComputePartition:
       return writeDevInfoStr(type, val);
 
     default:
@@ -922,6 +924,7 @@ int Device::readDevInfo(DevInfoTypes type, std::string *val) {
     case kDevVBiosVer:
     case kDevPCIEThruPut:
     case kDevSerialNumber:
+    case kDevComputePartition:
       return readDevInfoStr(type, val);
       break;
 

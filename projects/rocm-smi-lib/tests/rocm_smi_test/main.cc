@@ -5,7 +5,7 @@
  * The University of Illinois/NCSA
  * Open Source License (NCSA)
  *
- * Copyright (c) 2018, Advanced Micro Devices, Inc.
+ * Copyright (c) 2017-2023, Advanced Micro Devices, Inc.
  * All rights reserved.
  *
  * Developed by:
@@ -81,6 +81,7 @@
 #include "functional/mutual_exclusion.h"
 #include "functional/evt_notif_read_write.h"
 #include "functional/init_shutdown_refcount.h"
+#include "functional/computepartition_read_write.h"
 #include "rocm_smi_test/functional/hw_topology_read.h"
 #include "rocm_smi_test/functional/gpu_metrics_read.h"
 #include "rocm_smi_test/functional/metrics_counter_read.h"
@@ -265,6 +266,10 @@ TEST(rsmitstReadOnly, TestMutualExclusion) {
 }
 TEST(rsmitstReadWrite, TestEvtNotifReadWrite) {
   TestEvtNotifReadWrite tst;
+  RunGenericTest(&tst);
+}
+TEST(rsmitstReadWrite, TestComputePartitionReadWrite) {
+  TestComputePartitionReadWrite tst;
   RunGenericTest(&tst);
 }
 TEST(rsmitstReadOnly, TestConcurrentInit) {
