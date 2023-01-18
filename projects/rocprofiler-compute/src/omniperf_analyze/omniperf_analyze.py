@@ -41,6 +41,7 @@ import argparse
 import os.path
 from pathlib import Path
 from omniperf_analyze.utils import parser, file_io
+from omniperf_analyze.utils.gui_components.roofline import get_roofline
 
 
 def initialize_run(args, normalization_filter=None):
@@ -207,6 +208,20 @@ def run_cli(args, runs):
             args.cols,
             args.verbose,
         )
+
+
+def roofline_only(path_to_dir, verbose, dev_id):
+    import pandas as pd
+    from collections import OrderedDict
+
+    app_path = path_to_dir + "/pmc_perf.csv"
+    roofline_exists = os.path.isfile(app_path)
+    if not roofline_exists:
+        print("Error: {} does not exist")
+        sys.exit(0)
+    t_df = OrderedDict()
+    t_df["pmc_perf"] = pd.read_csv(app_path)
+    get_roofline(path_to_dir, t_df, dev_id, verbose, True)
 
 
 def analyze(args):

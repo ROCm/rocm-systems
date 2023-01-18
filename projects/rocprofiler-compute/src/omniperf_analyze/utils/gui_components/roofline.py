@@ -164,8 +164,9 @@ def generate_plots(roof_info, ai_data, verbose, fig=None):
     return fig
 
 
-def get_roofline(path_to_dir, ret_df, verbose):
+def get_roofline(path_to_dir, ret_df, dev_id, verbose, isStandalone=False):
     # Roofline settings
+    # TODO: Make "sort" attribute dynamic so user can select desired sort
     fp32_details = {
         "path": path_to_dir,
         "sort": "kernels",
@@ -185,6 +186,7 @@ def get_roofline(path_to_dir, ret_df, verbose):
     ai_data = roofline_calc.plot_application("kernels", ret_df, verbose)
     if verbose >= 1:
         # print AI data for each mem level
+        print("AI at each mem level")
         for i in ai_data:
             print(i, "->", ai_data[i])
         print("\n")
@@ -193,27 +195,37 @@ def get_roofline(path_to_dir, ret_df, verbose):
     fp16_fig = generate_plots(fp16_details, ai_data, verbose)
     ml_combo_fig = generate_plots(int8_details, ai_data, verbose, fp16_fig)
 
-    return html.Section(
-        id="roofline",
-        children=[
-            html.Div(
-                className="float-container",
-                children=[
-                    html.Div(
-                        className="float-child",
-                        children=[
-                            html.H3(children="Empirical Roofline Analysis (FP32/FP64)"),
-                            dcc.Graph(figure=fp32_fig),
-                        ],
-                    ),
-                    html.Div(
-                        className="float-child",
-                        children=[
-                            html.H3(children="Empirical Roofline Analysis (FP16/INT8)"),
-                            dcc.Graph(figure=ml_combo_fig),
-                        ],
-                    ),
-                ],
-            )
-        ],
-    )
+    if isStandalone:
+        dev_id = "ALL" if dev_id == -1 else str(dev_id)
+
+        fp32_fig.write_image(path_to_dir + "/empirRoof_gpu-{}_fp32".format(dev_id))
+        ml_combo_fig.write_image(path_to_dir + "empirRoof_gpu-{}_fp8_fp16".format(dev_id))
+    else:
+        return html.Section(
+            id="roofline",
+            children=[
+                html.Div(
+                    className="float-container",
+                    children=[
+                        html.Div(
+                            className="float-child",
+                            children=[
+                                html.H3(
+                                    children="Empirical Roofline Analysis (FP32/FP64)"
+                                ),
+                                dcc.Graph(figure=fp32_fig),
+                            ],
+                        ),
+                        html.Div(
+                            className="float-child",
+                            children=[
+                                html.H3(
+                                    children="Empirical Roofline Analysis (FP16/INT8)"
+                                ),
+                                dcc.Graph(figure=ml_combo_fig),
+                            ],
+                        ),
+                    ],
+                )
+            ],
+        )

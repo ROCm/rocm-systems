@@ -89,7 +89,7 @@ def get_color(catagory):
 #                           Plot BW at each cache level
 # -------------------------------------------------------------------------------------
 def plot_roof(roof_details, roof_data, verbose):
-
+    # TODO: This is where filtering by memory level will need to occur for standalone
     graphPoints = {"hbm": [], "l2": [], "l1": [], "lds": [], "valu": [], "mfma": []}
 
     cacheHierarchy = ["HBM", "L2", "L1", "LDS"]
