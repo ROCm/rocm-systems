@@ -40,6 +40,7 @@ def generate_plots(roof_info, ai_data, verbose, fig=None):
     if fig is None:
         fig = go.Figure()
     line_data = roofline_calc.empirical_roof(roof_info, verbose)
+    print("Line data:\n", line_data)
 
     #######################
     # Plot BW Lines
@@ -49,12 +50,12 @@ def generate_plots(roof_info, ai_data, verbose, fig=None):
             x=line_data["hbm"][0],
             y=line_data["hbm"][1],
             name="HBM-{}".format(roof_info["dtype"]),
-            mode="lines",
+            mode="lines+text",
             hovertemplate="<b>%{text}</b>",
             text=[
                 "{} GB/s".format(to_int(line_data["hbm"][2])),
-                "{} GFLOP/s".format(to_int(line_data["hbm"][2])),
             ],
+            textposition="top center"
         )
     )
     fig.add_trace(
@@ -62,12 +63,12 @@ def generate_plots(roof_info, ai_data, verbose, fig=None):
             x=line_data["l2"][0],
             y=line_data["l2"][1],
             name="L2-{}".format(roof_info["dtype"]),
-            mode="lines",
+            mode="lines+text",
             hovertemplate="<b>%{text}</b>",
             text=[
                 "{} GB/s".format(to_int(line_data["l2"][2])),
-                "{} GFLOP/s".format(to_int(line_data["l2"][2])),
             ],
+            textposition="top center"
         )
     )
     fig.add_trace(
@@ -75,12 +76,12 @@ def generate_plots(roof_info, ai_data, verbose, fig=None):
             x=line_data["l1"][0],
             y=line_data["l1"][1],
             name="L1-{}".format(roof_info["dtype"]),
-            mode="lines",
+            mode="lines+text",
             hovertemplate="<b>%{text}</b>",
             text=[
                 "{} GB/s".format(to_int(line_data["l1"][2])),
-                "{} GFLOP/s".format(to_int(line_data["l1"][2])),
             ],
+            textposition="top center"
         )
     )
     fig.add_trace(
@@ -88,12 +89,12 @@ def generate_plots(roof_info, ai_data, verbose, fig=None):
             x=line_data["lds"][0],
             y=line_data["lds"][1],
             name="LDS-{}".format(roof_info["dtype"]),
-            mode="lines",
+            mode="lines+text",
             hovertemplate="<b>%{text}</b>",
             text=[
                 "{} GB/s".format(to_int(line_data["lds"][2])),
-                "{} GFLOP/s".format(to_int(line_data["lds"][2])),
             ],
+            textposition="top center"
         )
     )
     if roof_info["dtype"] != "FP16" and roof_info["dtype"] != "I8":
@@ -102,25 +103,32 @@ def generate_plots(roof_info, ai_data, verbose, fig=None):
                 x=line_data["valu"][0],
                 y=line_data["valu"][1],
                 name="Peak VALU-{}".format(roof_info["dtype"]),
-                mode="lines",
+                mode="lines+text",
                 hovertemplate="<b>%{text}</b>",
                 text=[
-                    "{} GFLOP/s".format(to_int(line_data["valu"][2])),
+                    None,
                     "{} GFLOP/s".format(to_int(line_data["valu"][2])),
                 ],
+                textposition="top center"
             )
         )
+
+    if roof_info["dtype"] == "FP16":
+        pos = "bottom center"
+    else:
+        pos = "top center"
     fig.add_trace(
         go.Scatter(
             x=line_data["mfma"][0],
             y=line_data["mfma"][1],
             name="Peak MFMA-{}".format(roof_info["dtype"]),
-            mode="lines",
+            mode="lines+text",
             hovertemplate="<b>%{text}</b>",
             text=[
-                "{} GFLOP/s".format(to_int(line_data["mfma"][2])),
+                None,
                 "{} GFLOP/s".format(to_int(line_data["mfma"][2])),
             ],
+            textposition=pos
         )
     )
     #######################
@@ -164,7 +172,7 @@ def generate_plots(roof_info, ai_data, verbose, fig=None):
     return fig
 
 
-def get_roofline(path_to_dir, ret_df, dev_id, verbose, isStandalone=False):
+def get_roofline(path_to_dir, ret_df, verbose, dev_id=None, isStandalone=False):
     # Roofline settings
     # TODO: Make "sort" attribute dynamic so user can select desired sort
     fp32_details = {
@@ -198,8 +206,8 @@ def get_roofline(path_to_dir, ret_df, dev_id, verbose, isStandalone=False):
     if isStandalone:
         dev_id = "ALL" if dev_id == -1 else str(dev_id)
 
-        fp32_fig.write_image(path_to_dir + "/empirRoof_gpu-{}_fp32".format(dev_id))
-        ml_combo_fig.write_image(path_to_dir + "empirRoof_gpu-{}_fp8_fp16".format(dev_id))
+        fp32_fig.write_image(path_to_dir + "/empirRoof_gpu-{}_fp32.pdf".format(dev_id))
+        ml_combo_fig.write_image(path_to_dir + "/empirRoof_gpu-{}_fp8_fp16.pdf".format(dev_id))
     else:
         return html.Section(
             id="roofline",
