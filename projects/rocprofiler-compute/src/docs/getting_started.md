@@ -70,7 +70,7 @@ Modes change the fundamental behavior of the Omniperf command line tool. Dependi
 - **Database**: Our detailed Grafana GUI is built on a MongoDB database. `--import` profiling results to the DB to interact with the workload in Grafana or `--remove` the workload from the DB.
 
     Connection options will need to be specified. See the [*Grafana
-    Analysis*](grafana_analyzer.md#grafana-gui-import) import section
+    Analysis*](https://amdresearch.github.io/omniperf/analysis.html#grafana-gui-import) import section
     for more details on this.
 
     ```shell
