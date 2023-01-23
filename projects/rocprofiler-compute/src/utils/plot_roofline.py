@@ -21,16 +21,22 @@
 ################################################################################
 
 from linecache import cache
-import subprocess
-from operator import sub
 import os
 import sys
 from pathlib import Path
 
 import numpy
 import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
+
+try:
+
+    import matplotlib.pyplot as plt
+except ImportError:
+    # other non-interactive options:
+    #   cairo, pdf, pgf, ps, svg, template
+    matplotlib.use("agg", force=True)
+    import matplotlib.pyplot as plt
+
 from matplotlib.pyplot import get, text
 from math import log, pi, sqrt
 import pandas as pd
@@ -296,7 +302,7 @@ def plot_application(inputs, verbose):
                     avgDuration / calls,
                 )
             )
-            if verbose:
+            if verbose >= 2:
                 print(
                     "Just added {} to AI_Data at index {}. # of calls: {}".format(
                         kernelName, index, calls
@@ -356,7 +362,7 @@ def plot_application(inputs, verbose):
                 + (row["SQ_INSTS_VALU_MFMA_MOPS_F64"] * 512)
             )
         except KeyError:
-            if verbose:
+            if verbose >= 2:
                 print("Skipped total_flops at index {}".format(index))
             pass
         try:
@@ -384,7 +390,7 @@ def plot_application(inputs, verbose):
                 )
             )
         except KeyError:
-            if verbose:
+            if verbose >= 2:
                 print("Skipped valu_flops at index {}".format(index))
             pass
 
@@ -395,7 +401,7 @@ def plot_application(inputs, verbose):
             mfma_flops_f64 += row["SQ_INSTS_VALU_MFMA_MOPS_F64"] * 512
             mfma_iops_i8 += row["SQ_INSTS_VALU_MFMA_MOPS_I8"] * 512
         except KeyError:
-            if verbose:
+            if verbose >= 2:
                 print("Skipped mfma ops at index {}".format(index))
             pass
 
@@ -404,14 +410,14 @@ def plot_application(inputs, verbose):
                 (row["SQ_LDS_IDX_ACTIVE"] - row["SQ_LDS_BANK_CONFLICT"]) * 4 * L2_BANKS
             )  # L2_BANKS = 32 (since assuming mi200)
         except KeyError:
-            if verbose:
+            if verbose >= 2:
                 print("Skipped lds_data at index {}".format(index))
             pass
 
         try:
             L1cache_data += row["TCP_TOTAL_CACHE_ACCESSES_sum"] * 64
         except KeyError:
-            if verbose:
+            if verbose >= 2:
                 print("Skipped L1cache_data at index {}".format(index))
             pass
 
@@ -423,7 +429,7 @@ def plot_application(inputs, verbose):
                 + row["TCP_TCC_READ_REQ_sum"] * 64
             )
         except KeyError:
-            if verbose:
+            if verbose >= 2:
                 print("Skipped L2cache_data at index {}".format(index))
             pass
         try:
@@ -434,7 +440,7 @@ def plot_application(inputs, verbose):
                 + ((row["TCC_EA_WRREQ_sum"] - row["TCC_EA_WRREQ_64B_sum"]) * 32)
             )
         except KeyError:
-            if verbose:
+            if verbose >= 2:
                 print("Skipped hbm_data at index {}".format(index))
             pass
 
@@ -512,8 +518,6 @@ def plot_application(inputs, verbose):
         i += 1
 
     print(intensities)
-
-    # fig, ax = plt.subplots()
 
     plotted_spots = []
     labels = []
@@ -652,7 +656,12 @@ def empirical_roof(args):
     dtype = plot_roof(inputs, roof_data)  # Also returns chosen dtype
     plot_application(inputs, args.verbose)
 
-    filename = IMGNAME + "_gpu-" + str(inputs["device"]) + "_{}".format(dtype) + ".pdf"
+    if inputs["device"] == -1:
+        dev_id = "ALL"
+    else:
+        dev_id = str(inputs["device"])
+
+    filename = IMGNAME + "_gpu-" + dev_id + "_{}".format(dtype) + ".pdf"
 
     full_path = os.path.abspath(inputs["path"])
     path_to_output = full_path + "/" + filename

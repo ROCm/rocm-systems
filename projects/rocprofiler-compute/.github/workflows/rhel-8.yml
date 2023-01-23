@@ -1,0 +1,55 @@
+# This is a basic workflow to help you get started with Actions
+
+name: RHEL 8
+
+# Controls when the workflow will run
+on:
+  push:
+    branches: [ main, dev ]
+  pull_request:
+    branches: [ main, dev ]
+
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+jobs:
+  build:
+    # The type of runner that the job will run on
+    runs-on: ubuntu-latest
+    container:
+       image: colramos/target-images:rhel8
+    # Steps represent a sequence of tasks that will be executed as part of the job
+    steps:
+      # Cancel any previous runs
+      - name: Cancel Previous Runs
+        uses: styfle/cancel-workflow-action@0.11.0
+      - name: Install baseline OS dependencies
+        run: |
+          yum -y update
+          yum -y install git
+          yum -y install python39
+          yum -y install cmake3
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          submodules: recursive
+          token: ${{ secrets.GH_PAT }}
+      - name: Install Python prereqs
+        run: |
+          python3.9 -m pip install -r requirements.txt
+          python3.9 -m pip install pyinstaller pytest pytest-cov mock
+      - name: Configure and install
+        run: |
+          mkdir build
+          cd build
+          cmake -DCMAKE_INSTALL_PREFIX=/opt/omniperf ..
+          make install
+      - name: CTest- Analyze Commands
+        run: |
+          cd build
+          ctest --verbose -R test_analyze_commands
+      - name: CTest- Analyze Workloads
+        run: |
+          cd build
+          ctest --verbose -R test_analyze_workloads test_saved_analysis

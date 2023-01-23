@@ -31,5 +31,5 @@ pythonpath = [
       ".",
       "src",
       "src/utils",
-      "src/omniperf_cli/utils"
+      "src/omniperf_analyze/utils"
     ]

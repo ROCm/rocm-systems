@@ -10,7 +10,7 @@
    high_level_design
    installation
    getting_started
-   performance_analysis
-   grafana_analyzer
+   profiling
+   analysis
    faq
 ```

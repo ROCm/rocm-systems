@@ -1,4 +1,4 @@
-# Omniperf High Level Design
+# High Level Design
 
 ```eval_rst
 .. toctree::

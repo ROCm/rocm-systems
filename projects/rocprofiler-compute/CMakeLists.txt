@@ -33,6 +33,19 @@ project(
 include(ExternalProject)
 include(GNUInstallDirs)
 
+# version control info
+find_package(Git)
+if(Git_FOUND AND EXISTS "${PROJECT_SOURCE_DIR}/.git")
+    execute_process(
+        COMMAND git log --pretty=format:%h -n 1
+        OUTPUT_VARIABLE OMNIPERF_GIT_REV
+        OUTPUT_STRIP_TRAILING_WHITESPACE)
+    message(STATUS "Git revision: ${OMNIPERF_GIT_REV}")
+    set(GIT_CLONE TRUE)
+else()
+    set(GIT_CLONE FALSER)
+endif()
+
 set(CMAKE_BUILD_TYPE "Release")
 if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
     set(CMAKE_INSTALL_PREFIX
@@ -140,7 +153,7 @@ if(LOCALHOST MATCHES ".*\.crusher\.olcf\.ornl\.gov")
 endif()
 
 # Thera mods
-if(LOCALHOST MATCHES ".*\.thera\.amd\.com")
+if(LOCALHOST MATCHES "TheraS01|.*\.thera\.amd\.com|thera-hn")
     list(APPEND CMAKE_MESSAGE_INDENT "  ")
     message(STATUS "Using thera-specific modulefile modification")
     file(READ ${PROJECT_SOURCE_DIR}/cmake/modfile.thera.mod mod_additions)
@@ -149,6 +162,12 @@ if(LOCALHOST MATCHES ".*\.thera\.amd\.com")
         ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/modulefiles/${PROJECT_NAME}/${PROJECT_VERSION}.lua
         ${mod_additions})
     list(POP_BACK CMAKE_MESSAGE_INDENT)
+endif()
+
+# git versioning file
+if(${GIT_CLONE})
+    configure_file(${PROJECT_SOURCE_DIR}/cmake/VERSION.sha.in
+                   ${PROJECT_SOURCE_DIR}/VERSION.sha @ONLY)
 endif()
 
 enable_testing()
@@ -196,12 +215,12 @@ add_test(
 install(PROGRAMS src/omniperf TYPE BIN)
 install(FILES src/parser.py TYPE BIN)
 install(FILES src/common.py TYPE BIN)
-install(FILES VERSION DESTINATION ${CMAKE_INSTALL_PREFIX})
-# src/omniperf_cli
+install(FILES VERSION VERSION.sha DESTINATION ${CMAKE_INSTALL_PREFIX})
+# src/omniperf_analyze
 install(
-    DIRECTORY src/omniperf_cli
+    DIRECTORY src/omniperf_analyze
     TYPE BIN
-    PATTERN src/omniperf_cli/tests EXCLUDE
+    PATTERN src/omniperf_analyze/tests EXCLUDE
     PATTERN "__pycache__" EXCLUDE)
 # src/utils
 install(
@@ -209,9 +228,11 @@ install(
     TYPE BIN
     PATTERN "rooflines*" EXCLUDE)
 # src/utils/rooflines
-install(PROGRAMS src/utils/rooflines/roofline-rhel8-mi200-rocm5
-                 src/utils/rooflines/roofline-sle15sp3-mi200-rocm5
-        DESTINATION ${CMAKE_INSTALL_BINDIR}/utils/rooflines)
+install(
+    PROGRAMS src/utils/rooflines/roofline-rhel8-mi200-rocm5
+             src/utils/rooflines/roofline-sle15sp3-mi200-rocm5
+             src/utils/rooflines/roofline-ubuntu20_04-mi200-rocm5
+    DESTINATION ${CMAKE_INSTALL_BINDIR}/utils/rooflines)
 # src/perfmon_pub
 install(
     DIRECTORY src/perfmon_pub
@@ -272,6 +293,13 @@ install(
 
 # Source tarball
 set(CPACK_SOURCE_GENERATOR "TGZ")
-set(CPACK_SOURCE_PACKAGE_FILE_NAME ${CMAKE_PROJECT_NAME}-${PROJECT_VERSION})
-set(CPACK_SOURCE_IGNORE_FILES ".*~$" \.git/ \.github /tests /build)
+set(CPACK_SOURCE_PACKAGE_FILE_NAME ${CMAKE_PROJECT_NAME}-${FULL_VERSION_STRING})
+set(CPACK_SOURCE_IGNORE_FILES
+    ".*~$"
+    \.git/
+    \.github
+    \.gitmodules
+    \.gitignore
+    /tests
+    /build)
 include(CPack)

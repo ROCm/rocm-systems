@@ -5,7 +5,7 @@ pyinstaller src/omniperf.py \
     --add-data "src/perfmon_pub/*:perfmon_pub" \
     --add-data "src/utils/*:utils" \
     --add-data "src/soc_params/*.csv:soc_params" \
-    --add-data "src/omniperf_cli/*:omniperf_cli" \
+    --add-data "src/omniperf_analyze/*:omniperf_analyze" \
     --hidden-import matplotlib.backends.backend_pdf \
     ${@}
 
@@ -57,8 +57,8 @@ cp -r ${dash_loc:10}/dash_svg "$distpath"/omniperf/
 
 echo "(build.sh) Fixing flattened directories"
 #TODO: Copy orig file structure from over to flattened packaged version
-rm -rf "$distpath"/omniperf/omniperf_cli/
-cp -r src/omniperf_cli/ "$distpath"/omniperf/
+rm -rf "$distpath"/omniperf/omniperf_analyze/
+cp -r src/omniperf_analyze/ "$distpath"/omniperf/
 
 rm -rf "$distpath"/omniperf/perfmon_pub/
 cp -r src/perfmon_pub/ "$distpath"/omniperf/

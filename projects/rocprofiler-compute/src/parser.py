@@ -28,11 +28,16 @@ from common import (
     OMNIPERF_HOME,
     PROG,
     SOC_LIST,
-    VER,
 )  # Import global variables
+from common import getVersion, getVersionDisplay
 
 
 def parse(my_parser):
+
+    # versioning info
+    vData = getVersion()
+    versionString = getVersionDisplay(vData["version"], vData["sha"], vData["mode"])
+
     # -----------------------------------------
     # Parse arguments (dependent on mode)
     # -----------------------------------------
@@ -42,9 +47,7 @@ def parse(my_parser):
     general_group = my_parser.add_argument_group("General Options")
     my_parser._positionals.title = "Modes"
     my_parser._optionals.title = "Help"
-    general_group.add_argument(
-        "-v", "--version", action="version", version=PROG + " (" + VER + ")"
-    )
+    general_group.add_argument("-v", "--version", action="version", version=versionString)
 
     subparsers = my_parser.add_subparsers(
         dest="mode", help="Select mode of interaction with the target application:"
@@ -78,13 +81,10 @@ def parse(my_parser):
     profile_group = profile_parser.add_argument_group("Profile Options")
     roofline_group = profile_parser.add_argument_group("Standalone Roofline Options")
 
+    general_group.add_argument("-v", "--version", action="version", version=versionString)
     general_group.add_argument(
-        "-v", "--version", action="version", version="%(PROG)s (" + VER + ")"
+        "-V", "--verbose", help="Increase output verbosity", action="count", default=0
     )
-    general_group.add_argument(
-        "-V", "--verbose", help="Increase output verbosity", action="store_true"
-    )
-
     profile_group.add_argument(
         "-n",
         "--name",
@@ -248,8 +248,8 @@ def parse(my_parser):
 
                                         \n\n-------------------------------------------------------------------------------
                                         \nExamples:
-                                        \n\tomniperf database --import -H pavii1 -u amd -t asw -w workloads/vcopy/mi200/
-                                        \n\tomniperf database --remove -H pavii1 -u amd -w omniperf_asw_sample_mi200
+                                        \n\tomniperf database --import -H pavii1 -u temp -t asw -w workloads/vcopy/mi200/
+                                        \n\tomniperf database --remove -H pavii1 -u temp -w omniperf_asw_sample_mi200
                                         \n-------------------------------------------------------------------------------\n
                                         """,
         prog="tool",
@@ -264,11 +264,9 @@ def parse(my_parser):
     interaction_group = db_parser.add_argument_group("Interaction Type")
     connection_group = db_parser.add_argument_group("Connection Options")
 
+    general_group.add_argument("-v", "--version", action="version", version=versionString)
     general_group.add_argument(
-        "-v", "--version", action="version", version="%(PROG)s (" + VER + ")"
-    )
-    general_group.add_argument(
-        "-V", "--verbose", help="Increase output verbosity", action="store_true"
+        "-V", "--verbose", help="Increase output verbosity", action="count", default=0
     )
 
     interaction_group.add_argument(
@@ -364,11 +362,9 @@ def parse(my_parser):
     general_group = analyze_parser.add_argument_group("General Options")
     analyze_group = analyze_parser.add_argument_group("Analyze Options")
 
+    general_group.add_argument("-v", "--version", action="version", version=versionString)
     general_group.add_argument(
-        "-v", "--version", action="version", version="%(PROG)s (" + VER + ")"
-    )
-    general_group.add_argument(
-        "-V", "--verbose", help="Increase output verbosity", action="store_true"
+        "-V", "--verbose", help="Increase output verbosity", action="count", default=0
     )
 
     analyze_group.add_argument(
@@ -435,15 +431,15 @@ def parse(my_parser):
         dest="normal_unit",
         metavar="",
         default="per_wave",
-        choices=["per_wave", "per_cycle", "per_second"],
-        help="\t\tSpecify the normalization unit: (DEFAULT: per_wave)\n\t\t   per_wave\n\t\t   per_cycle\n\t\t   per_second",
+        choices=["per_wave", "per_cycle", "per_second", "per_kernel"],
+        help="\t\tSpecify the normalization unit: (DEFAULT: per_wave)\n\t\t   per_wave\n\t\t   per_cycle\n\t\t   per_second\n\t\t   per_kernel",
     )
     analyze_group.add_argument(
         "--config-dir",
         dest="config_dir",
         metavar="",
         help="\t\tSpecify the directory of customized configs.",
-        default=OMNIPERF_HOME.joinpath("omniperf_cli/configs"),
+        default=OMNIPERF_HOME.joinpath("omniperf_analyze/configs"),
     )
     analyze_group.add_argument(
         "-t",

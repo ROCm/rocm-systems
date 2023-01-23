@@ -1,4 +1,4 @@
-# Omniperf Deployment
+# Deployment
 
 ```eval_rst
 .. toctree::
@@ -24,7 +24,7 @@ Omniperf requires the following basic software dependencies prior to usage:
 
 * Python (>=3.7)
 * CMake (>= 3.19)
-* ROCm (>= 5.1)
+* ROCm (>= 5.2.0)
 
 In addition, Omniperf leverages a number of Python packages that are
 documented in the top-level `requirements.txt` file.  These must be
@@ -146,7 +146,7 @@ optional `ROCPROF` environment variable.
 
 ---
 
-## Omniperf Server Setup
+## Server-side Setup
 
 Note: Server-side setup is not required to profile or analyze
 performance data from the CLI. It is provided as an additional mechanism to import performance
@@ -157,10 +157,10 @@ use the provided Docker file to build the Grafana and MongoDB
 instance.
 
 ### Install MongoDB Utils
-Omniperf uses [mongoimport](https://www.mongodb.com/docs/database-tools/mongoimport/) to upload data to Grafana's backend database
+Omniperf uses [mongoimport](https://www.mongodb.com/docs/database-tools/mongoimport/) to upload data to Grafana's backend database. Install for Ubuntu 20.04 is as follows:
 ```bash 
 $ wget https://fastdl.mongodb.org/tools/db/mongodb-database-tools-ubuntu2004-x86_64-100.6.1.deb
-$ sudo apt intall ./mongodb-database-tools-ubuntu2004-x86_64-100.6.1.deb
+$ sudo apt install ./mongodb-database-tools-ubuntu2004-x86_64-100.6.1.deb
 ```
 > Find install for alternative distros [here](https://www.mongodb.com/download-center/database-tools/releases/archive)
 
@@ -177,3 +177,38 @@ $ sudo docker volume create --driver local --opt type=none --opt device=/usr/loc
 $ sudo docker-compose build
 $ sudo docker-compose up -d
 ```
+> Note that TCP ports for Grafana (4000) and MongoDB (27017) in the docker container are mapped to 14000 and 27018, respectively, on the host side.
+
+### Setup Grafana Instance
+Once you've launced your docker container you should be able to reach Grafana at **http://\<host-ip>:14000**. The default login credentials for the first-time Grafana setup are:
+
+- Username: **admin**
+- Password: **admin**
+
+![Grafana Welcome Page](images/grafana_welcome.png)
+
+MongoDB Datasource Configuration
+
+The MongoDB Datasource shall be configured prior to the first-time use. Navigate to Grafana's Configuration page (shown below) to add the **Omniperf Data** connection.
+
+![Omniperf Datasource Config](images/datasource_config.png)
+
+Configure the following fields in the datasource:
+
+- HTTP URL: set to *http://localhost:3333*
+- MongoDB URL: set to *mongodb://temp:temp123@\<host-ip>:27018/admin?authSource=admin*
+- Database Name: set to *admin*
+
+After properly configuring these fields click **Save & Test** to make sure your connection is successful.
+
+> Note to avoid potential DNS issue, one may need to use the actual IP address for the host node in the MongoDB URL.
+
+![Datasource Settings](images/datasource_settings.png)
+
+Omniperf Dashboard Import
+
+From *Create* → *Import*, (as seen below) upload the dashboard file, `/dashboards/Omniperf_v{__VERSION__}_pub.json`, from the Omniperf tarball.
+
+Edit both the Dashboard Name and the Unique Identifier (UID) to uniquely identify the dashboard he/she will use. Click Import to finish the process.
+
+![Import Dashboard](images/import_dashboard.png)
