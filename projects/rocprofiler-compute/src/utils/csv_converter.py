@@ -224,7 +224,7 @@ def convert_folder(connectionInfo, Extractionlvl):
                     df_saved_file = t2.to_csv(newfilepath + file)
 
                     cmd = (
-                        'mongoimport --quiet --uri mongodb://{}:{}@{}:{}/{}?authSource=admin --file {} -c {} --drop --type csv --headerline'
+                        "mongoimport --quiet --uri mongodb://{}:{}@{}:{}/{}?authSource=admin --file {} -c {} --drop --type csv --headerline"
                     ).format(
                         connectionInfo["username"],
                         connectionInfo["password"],
@@ -232,13 +232,12 @@ def convert_folder(connectionInfo, Extractionlvl):
                         connectionInfo["port"],
                         connectionInfo["db"],
                         newfilepath + file,
-                        
                         fileName,
                     )
                     os.system(cmd)
                 else:
                     cmd = (
-                        'mongoimport --quiet --uri mongodb://{}:{}@{}:{}/{}?authSource=admin --file {} -c {} --drop --type csv --headerline'
+                        "mongoimport --quiet --uri mongodb://{}:{}@{}:{}/{}?authSource=admin --file {} -c {} --drop --type csv --headerline"
                     ).format(
                         connectionInfo["username"],
                         connectionInfo["password"],
