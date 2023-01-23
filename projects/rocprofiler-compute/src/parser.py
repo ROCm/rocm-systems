@@ -119,7 +119,9 @@ def parse(my_parser):
         help="\t\t\tKernel filtering.",
     )
 
-    result = subprocess.run(["which", "rocscope"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    result = subprocess.run(
+        ["which", "rocscope"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
+    )
     if result.returncode == 0:
         profile_group.add_argument(
             "-l",
@@ -149,9 +151,15 @@ def parse(my_parser):
             help="\t\t\tCreate kernel summaries.",
         )
     else:
-        profile_group.add_argument("--i-feel-lucky", default=False, dest="lucky", help=argparse.SUPPRESS)
-        profile_group.add_argument("--use-rocscope", default=False, dest="use_rocscope", help=argparse.SUPPRESS)
-        profile_group.add_argument("--kernel-summaries", default=False, dest="summaries", help=argparse.SUPPRESS)
+        profile_group.add_argument(
+            "--i-feel-lucky", default=False, dest="lucky", help=argparse.SUPPRESS
+        )
+        profile_group.add_argument(
+            "--use-rocscope", default=False, dest="use_rocscope", help=argparse.SUPPRESS
+        )
+        profile_group.add_argument(
+            "--kernel-summaries", default=False, dest="summaries", help=argparse.SUPPRESS
+        )
 
     profile_group.add_argument(
         "-b",

@@ -32,7 +32,7 @@ from dataclasses import dataclass
 from pathlib import Path as path
 from textwrap import dedent
 
-gpu_list = {"gfx906", "gfx908", "gfx90a","gfx900"}
+gpu_list = {"gfx906", "gfx908", "gfx90a", "gfx900"}
 
 
 @dataclass
