@@ -89,6 +89,8 @@ def get_soc():
         target = "mi100"
     elif mspec.GPU == "gfx90a":
         target = "mi200"
+    elif mspec.GPU == "gfx900":
+        target = "vega10"
     else:
         print("\nInvalid SoC")
         sys.exit(0)
@@ -319,6 +321,23 @@ def characterize_app(path, cmd, verbose):
 # Profiling Helpers
 ################################################
 
+def run_rocscope(args, fname):
+    # profile the app
+    if args.use_rocscope == True:
+        result = subprocess.run(["which", "rocscope"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        if result.returncode == 0:
+            rs_cmd = [result.stdout.decode('ascii').strip(), 
+                      "metrics",
+                      "-p", args.path,
+                      "-n", args.name,
+                      "-t", fname,
+                      "--", args.remaining]
+            print(rs_cmd)
+            result = subprocess.run(rs_cmd) #, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            if result.returncode != 0:
+                print(result.stderr.decode('ascii'))
+                sys.exit(1)
+
 
 def run_prof(fname, workload_dir, perfmon_dir, cmd, verbose):
     global rocprof_cmd
@@ -360,6 +379,7 @@ def omniperf_profile(args, VER):
     print("Command: ", args.remaining)
     print("Kernel Selection: ", args.kernel)
     print("Dispatch Selection: ", args.dispatch)
+
     if args.ipblocks == None:
         print("IP Blocks: All")
     else:
@@ -368,53 +388,107 @@ def omniperf_profile(args, VER):
     # Set up directories
     workload_dir = args.path + "/" + args.name + "/" + args.target
     perfmon_dir = str(OMNIPERF_HOME) + "/perfmon_pub"
-
+    
     # Perfmon filtering
     perfmon_filter(workload_dir, perfmon_dir, args)
 
-    # Workload profiling
-    for fname in glob.glob(workload_dir + "/perfmon/*.txt"):
-        # Kernel filtering (in-place replacement)
-        if not args.kernel == None:
-            run_subprocess(
-                [
-                    "sed",
-                    "-i",
-                    "-r",
-                    "s%^(kernel:).*%" + "kernel: " + ",".join(args.kernel) + "%g",
-                    fname,
-                ]
-            )
+    if not args.lucky == None and args.lucky == True:
+        print("You're feeling lucky - only profiling top N kernels")
+        #look for whether workload_dir exists  - create if not
+        try:
+            os.makedirs(workload_dir, exist_ok = True)
+        except Exception as e:
+            print("Unable to create workload directory: ", workload_dir)
+            print(e)
+            sys.exit(1)
 
-        # Dispatch filtering (inplace replacement)
-        if not args.dispatch == None:
-            run_subprocess(
-                [
-                    "sed",
-                    "-i",
-                    "-r",
-                    "s%^(range:).*%" + "range: " + ",".join(args.dispatch) + "%g",
-                    fname,
-                ]
-            )
-        run_prof(fname, workload_dir, perfmon_dir, args.remaining, args.verbose)
+        result = subprocess.run(["which", "rocscope"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        if result.returncode == 0:
+            rs_cmd = [result.stdout.decode('ascii').strip(), 
+                      "top10",
+                      "-p", args.path,
+                      "-n", args.name,
+                      "--", args.remaining]
+            print(rs_cmd)
+            result = subprocess.run(rs_cmd) #, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            if result.returncode != 0:
+                print(result.stderr.decode('ascii'))
+        else:
+            print("rocscope must be in the PATH")
+            sys.exit(1)
+    elif not args.summaries == None and args.summaries == True:
+        print("creating kernel summaries")
+        #look for whether workload_dir exists  - create if not
+        try:
+            os.makedirs(workload_dir, exist_ok = True)
+        except Exception as e:
+            print("Unable to create workload directory: ", workload_dir)
+            print(e)
+            sys.exit(1)
 
-    # run again with timestamps
-    run_subprocess(
-        [
-            rocprof_cmd,
-            # "-i", fname,
-            # "-m", perfmon_dir + "/" + "metrics.xml",
-            "--timestamp",
-            "on",
-            "-o",
-            workload_dir + "/" + "timestamps.csv",
-            '"' + args.remaining + '"',
-        ]
-    )
+        result = subprocess.run(["which", "rocscope"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        if result.returncode == 0:
+            rs_cmd = [result.stdout.decode('ascii').strip(), 
+                      "summary",
+                      "-p", args.path,
+                      "-n", args.name,
+                      "--", args.remaining]
+            print(rs_cmd)
+            result = subprocess.run(rs_cmd) #, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            if result.returncode != 0:
+                print(result.stderr.decode('ascii'))
+        else:
+            print("rocscope must be in the PATH")
+            sys.exit(1)
 
-    # Update pmc_perf.csv timestamps
-    replace_timestamps(workload_dir)
+    else:
+        for fname in glob.glob(workload_dir + "/perfmon/*.txt"):
+            # Kernel filtering (in-place replacement)
+            if not args.kernel == None:
+                run_subprocess(
+                    [
+                        "sed",
+                        "-i",
+                        "-r",
+                        "s%^(kernel:).*%" + "kernel: " + ",".join(args.kernel) + "%g",
+                        fname,
+                    ]
+                )
+
+            # Dispatch filtering (inplace replacement)
+            if not args.dispatch == None:
+                run_subprocess(
+                    [
+                        "sed",
+                        "-i",
+                        "-r",
+                        "s%^(range:).*%" + "range: " + " ".join(args.dispatch) + "%g",
+                        fname,
+                    ]
+                )
+            if args.use_rocscope == True:
+                run_rocscope(args, fname)
+            else:
+                run_prof(fname, workload_dir, perfmon_dir, args.remaining, args.verbose)
+        
+
+
+        # run again with timestamps
+        run_subprocess(
+            [
+                rocprof_cmd,
+                # "-i", fname,
+                # "-m", perfmon_dir + "/" + "metrics.xml",
+                "--timestamp",
+                "on",
+                "-o",
+                workload_dir + "/" + "timestamps.csv",
+                '"' + args.remaining + '"',
+            ]
+        )
+
+        # Update pmc_perf.csv timestamps
+        replace_timestamps(workload_dir)
 
     # Generate sysinfo
     gen_sysinfo(args.name, workload_dir, args.ipblocks, args.remaining, args.no_roof)
@@ -485,6 +559,7 @@ def main():
     # PROFILE MODE
     ##############
     if args.mode == "profile":
+        print("Resolving rocprof")
         resolve_rocprof()
         if ".." in str(args.path):
             throw_parse_error(

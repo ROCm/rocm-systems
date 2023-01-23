@@ -29,6 +29,19 @@ prog = "omniperf"
 # Per IP block max number of simulutaneous counters
 # GFX IP Blocks
 perfmon_config = {
+    "vega10": {
+        "SQ": 8,
+        "TA": 2,
+        "TD": 2,
+        "TCP": 4,
+        "TCC": 4,
+        "CPC": 2,
+        "CPF": 2,
+        "SPI": 2,
+        "GRBM": 2,
+        "GDS": 4,
+        "TCC_channels": 16,
+    },
     "mi50": {
         "SQ": 8,
         "TA": 2,
