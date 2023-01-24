@@ -160,7 +160,7 @@ cd /opt/rocm/rdc/bin
 # below requires rocmtools to be installed
 ./rdci dmon -u -i 0 -c 5 -e 700             ## monitor field 700 on gpu 0 for count of 5
 # below is only likely to work on MI series GPUs
-./rdci dmon -u -i 0 -c 5 -e 700,701,702,706 ## monitor fields 700,701,702,706
+./rdci dmon -u -i 0 -c 5 -e 700,701,702     ## monitor fields 700,701,702
 ```
 
 ## Troubleshooting rdcd
@@ -185,8 +185,9 @@ ERROR, INFO, DEBUG logging levels are supported
 - Reading `RDC_FI_PROF_*` crashes rdcd
 - All `RDC_FI_PROF_*` metrics return N/A
 
+    0. ROCMTools support is in beta.
+        Reading registers beyond 700-702 range is not guaranteed to work.
     1. Does your GPU support selected fields?  
         Field 700 (`RDC_FI_PROF_ELAPSED_CYCLES`) is supposed to be accessible on most GPUs.  
         Others are mostly intended for MI series.
-    2. Set `RDC_LOG=DEBUG` as stated above
-    3. Is rocmtools installed? Can you find `librocmtools.so`?
+    2. Is rocmtools installed? Can you find `librocmtools.so`?

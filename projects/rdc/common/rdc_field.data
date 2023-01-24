@@ -81,22 +81,22 @@ FLD_DESC_ENT(RDC_FI_ECC_UMC_DED,         "UMC Double Error Detection",          
 // This doesn't map to rocprofiler counters directly
 // See counter_map in rdc/include/rdc_libs/rdc_modules/rdc_rocp/RdcRocpBase.h
 // See metrics.xml in rocmtools
+// TODO: uncomment rest of the fields when implemented
 FLD_DESC_ENT(RDC_FI_PROF_ELAPSED_CYCLES, "Number of Elapsed Cycles over all SMs",      "PROF_ELAPSED_COUNT",  false)
 FLD_DESC_ENT(RDC_FI_PROF_ACTIVE_WAVES,   "Number of Active Waves",                     "PROF_ACTIVE_WAVES",   false)
 FLD_DESC_ENT(RDC_FI_PROF_ACTIVE_CYCLES,  "Number of Active Cycles",                    "PROF_ACTIVE_CYCLES",  false)
-FLD_DESC_ENT(RDC_FI_PROF_CU_OCCUPANCY,   "Active Waves / maximum Active Waves per CU", "PROF_CU_OCCUPANCY",   false)
-FLD_DESC_ENT(RDC_FI_PROF_CU_UTILIZATION, "Active Cycles / total Elapsed Cycles",       "PROF_CU_UTILIZATION", false)
-FLD_DESC_ENT(RDC_FI_PROF_FETCH_SIZE,     "kb fetched from video memory",               "PROF_FETCH_SIZE",     false)
-FLD_DESC_ENT(RDC_FI_PROF_WRITE_SIZE,     "kb written to video memory",                 "PROF_WRITE_SIZE",     false)
-FLD_DESC_ENT(RDC_FI_PROF_FLOPS_16,       "Number of fp16 OPS / second",                "PROF_FLOPS_16",       false)
-FLD_DESC_ENT(RDC_FI_PROF_FLOPS_32,       "Number of fp32 OPS / second",                "PROF_FLOPS_32",       false)
-FLD_DESC_ENT(RDC_FI_PROF_FLOPS_64,       "Number of fp64 OPS / second",                "PROF_FLOPS_64",       false)
-// TODO: uncomment when below are implemented
-FLD_DESC_ENT(RDC_FI_PROF_GFLOPS_16,      "Number of fp16 GOPS / second",               "PROF_GFLOPS_16",      false)
-FLD_DESC_ENT(RDC_FI_PROF_GFLOPS_32,      "Number of fp32 GOPS / second",               "PROF_GFLOPS_32",      false)
-FLD_DESC_ENT(RDC_FI_PROF_GFLOPS_64,      "Number of fp64 GOPS / second",               "PROF_GFLOPS_64",      false)
-FLD_DESC_ENT(RDC_FI_PROF_MEMR_BW_KBPNS,  "HBM Read Bandwidth in kb/ns",                "PROF_MEMR_BW_KBPNS",  false)
-FLD_DESC_ENT(RDC_FI_PROF_MEMW_BW_KBPNS,  "HBM Write Bandwidth in kb/ns",               "PROF_MEMW_BW_KBPNS",  false)
+//FLD_DESC_ENT(RDC_FI_PROF_CU_OCCUPANCY,   "Active Waves / maximum Active Waves per CU", "PROF_CU_OCCUPANCY",   false)
+//FLD_DESC_ENT(RDC_FI_PROF_CU_UTILIZATION, "Active Cycles / total Elapsed Cycles",       "PROF_CU_UTILIZATION", false)
+//FLD_DESC_ENT(RDC_FI_PROF_FETCH_SIZE,     "kb fetched from video memory",               "PROF_FETCH_SIZE",     false)
+//FLD_DESC_ENT(RDC_FI_PROF_WRITE_SIZE,     "kb written to video memory",                 "PROF_WRITE_SIZE",     false)
+//FLD_DESC_ENT(RDC_FI_PROF_FLOPS_16,       "Number of fp16 OPS / second",                "PROF_FLOPS_16",       false)
+//FLD_DESC_ENT(RDC_FI_PROF_FLOPS_32,       "Number of fp32 OPS / second",                "PROF_FLOPS_32",       false)
+//FLD_DESC_ENT(RDC_FI_PROF_FLOPS_64,       "Number of fp64 OPS / second",                "PROF_FLOPS_64",       false)
+//FLD_DESC_ENT(RDC_FI_PROF_GFLOPS_16,      "Number of fp16 GOPS / second",               "PROF_GFLOPS_16",      false)
+//FLD_DESC_ENT(RDC_FI_PROF_GFLOPS_32,      "Number of fp32 GOPS / second",               "PROF_GFLOPS_32",      false)
+//FLD_DESC_ENT(RDC_FI_PROF_GFLOPS_64,      "Number of fp64 GOPS / second",               "PROF_GFLOPS_64",      false)
+//FLD_DESC_ENT(RDC_FI_PROF_MEMR_BW_KBPNS,  "HBM Read Bandwidth in kb/ns",                "PROF_MEMR_BW_KBPNS",  false)
+//FLD_DESC_ENT(RDC_FI_PROF_MEMW_BW_KBPNS,  "HBM Write Bandwidth in kb/ns",               "PROF_MEMW_BW_KBPNS",  false)
 
 // Events
 FLD_DESC_ENT(RDC_EVNT_XGMI_0_NOP_TX,     "NOPs sent to neighbor 0",                     "XGMI_NOP_0",       false)
