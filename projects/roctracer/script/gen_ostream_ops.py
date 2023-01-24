@@ -154,7 +154,10 @@ def process_struct(file_handle, cppHeader_struct, cppHeader, parent_hier_name, a
             str += "    if (std::string(\"" + cppHeader_struct + "::" + name + "\").find(" + apiname.upper() + "_structs_regex" + ") != std::string::npos)   {\n"
             indent = "    "
             str += indent + "  std::operator<<(out, \"" + name + "=\");\n"
-            str += indent + "  roctracer::" + apiname.lower() + "_support::detail::operator<<(out, v." + name + ");\n"
+            if (name == 'reserved' and apiname.upper() == 'HIP'):
+              str += indent + "  roctracer::" + apiname.lower() + "_support::detail::operator<<(out, 0);\n"
+            else:
+              str += indent + "  roctracer::" + apiname.lower() + "_support::detail::operator<<(out, v." + name + ");\n"
             str += indent + "  std::operator<<(out, \", \");\n"
             str += "    }\n"
             if "void" not in mtype:
