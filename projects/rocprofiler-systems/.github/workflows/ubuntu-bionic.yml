@@ -20,7 +20,6 @@ concurrency:
 env:
   BUILD_TYPE: Release
   ELFUTILS_DOWNLOAD_VERSION: 0.183
-  OMNITRACE_VERBOSE: 1
   OMNITRACE_CI: ON
   GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
   OMNITRACE_TMPDIR: "%env{PWD}%/testing-tmp"
@@ -111,7 +110,7 @@ jobs:
           -DOMNITRACE_PYTHON_PREFIX=/opt/conda/envs
           -DOMNITRACE_PYTHON_ENVS="py3.6;py3.7;py3.8;py3.9;py3.10"
           -DLULESH_BUILD_KOKKOS=OFF
-          -DOMNITRACE_MAX_THREADS=32
+          -DOMNITRACE_MAX_THREADS=64
           -DOMNITRACE_DISABLE_EXAMPLES="transpose;rccl"
           -DOMNITRACE_BUILD_NUMBER=${{ github.run_attempt }}
 

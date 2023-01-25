@@ -192,7 +192,7 @@ are interpreted as belonging to omnitrace and all arguments following the double
 application and it's arguments. The double-hyphen is only necessary when passing command line arguments to the target
 which also use hyphens. E.g. `omnitrace-sample ls` works but, in order to run `ls -la`, use `omnitrace-sample -- ls -la`.
 
-[Configuring Omnitrace Runtime](runtime.md) establish the precedence of environment variable values over values specified in the configuration files. This enables
+[Configuring OmniTrace Runtime](runtime.md) establish the precedence of environment variable values over values specified in the configuration files. This enables
 the user to configure the omnitrace runtime to their preferred default behavior in a file such as `~/.omnitrace.cfg` and then easily override
 those settings via something like `OMNITRACE_ENABLED=OFF omnitrace-sample -- foo`.
 Similarly, the command line arguments passed to `omnitrace-sample` take precedence over environment variables.

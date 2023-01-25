@@ -28,6 +28,7 @@ omnitrace_add_interface_library(omnitrace-ptl "Enables PTL support (tasking)")
 omnitrace_add_interface_library(omnitrace-papi "Enable PAPI support")
 omnitrace_add_interface_library(omnitrace-ompt "Enable OMPT support")
 omnitrace_add_interface_library(omnitrace-python "Enables Python support")
+omnitrace_add_interface_library(omnitrace-elfutils "Provides ElfUtils")
 omnitrace_add_interface_library(omnitrace-perfetto "Enables Perfetto support")
 omnitrace_add_interface_library(omnitrace-timemory "Provides timemory libraries")
 omnitrace_add_interface_library(omnitrace-timemory-config
@@ -257,6 +258,19 @@ endif()
 
 omnitrace_target_compile_definitions(
     omnitrace-ompt INTERFACE OMNITRACE_USE_OMPT=$<BOOL:${OMNITRACE_USE_OMPT}>)
+
+# ----------------------------------------------------------------------------------------#
+#
+# ElfUtils
+#
+# ----------------------------------------------------------------------------------------#
+
+include(ElfUtils)
+
+target_include_directories(omnitrace-elfutils SYSTEM INTERFACE ${ElfUtils_INCLUDE_DIRS})
+target_compile_definitions(omnitrace-elfutils INTERFACE ${ElfUtils_DEFINITIONS})
+target_link_directories(omnitrace-elfutils INTERFACE ${ElfUtils_LIBRARY_DIRS})
+target_link_libraries(omnitrace-elfutils INTERFACE ${ElfUtils_LIBRARIES})
 
 # ----------------------------------------------------------------------------------------#
 #

@@ -8,7 +8,7 @@
 
 ## Operating System
 
-Omnitrace is only supported on Linux.
+OmniTrace is only supported on Linux.
 
 - Ubuntu 18.04
 - Ubuntu 20.04
@@ -76,16 +76,16 @@ mkdir /opt/omnitrace
 ./omnitrace-1.0.0-ubuntu-18.04-ROCm-405000-OMPT-PAPI.sh --prefix=/opt/omnitrace --exclude-subdir
 ```
 
-## Installing Omnitrace from source
+## Installing OmniTrace from source
 
 ### Build Requirements
 
-Omnitrace needs a GCC compiler with full support for C++17 and CMake v3.16 or higher.
+OmniTrace needs a GCC compiler with full support for C++17 and CMake v3.16 or higher.
 The Clang compiler may be used in lieu of the GCC compiler if Dyninst is already installed.
 
 - GCC compiler v7+
   - Older GCC compilers may be supported but are not tested
-  - Clang compilers are generally supported for [Omnitrace](https://github.com/AMDResearch/omnitrace) but not Dyninst
+  - Clang compilers are generally supported for [OmniTrace](https://github.com/AMDResearch/omnitrace) but not Dyninst
 - [CMake](https://cmake.org/) v3.16+
 
 > ***If the system installed cmake is too old, installing a new version of cmake can be done through several methods.***
@@ -114,8 +114,8 @@ and Dyninst requires TBB), and the CMake option to build the package alongside o
 
 | Third-Party Library | Minimum Version | Required By | CMake Option                              |
 |---------------------|-----------------|-------------|-------------------------------------------|
-| Dyninst             | 10.0            | Omnitrace   | `OMNITRACE_BUILD_DYNINST` (default: OFF)  |
-| Libunwind           |                 | Omnitrace   | `OMNITRACE_BUILD_LIBUNWIND` (default: ON) |
+| Dyninst             | 10.0            | OmniTrace   | `OMNITRACE_BUILD_DYNINST` (default: OFF)  |
+| Libunwind           |                 | OmniTrace   | `OMNITRACE_BUILD_LIBUNWIND` (default: ON) |
 | TBB                 | 2018.6          | Dyninst     | `DYNINST_BUILD_TBB` (default: OFF)        |
 | ElfUtils            | 0.178           | Dyninst     | `DYNINST_BUILD_ELFUTILS` (default: OFF)   |
 | LibIberty           |                 | Dyninst     | `DYNINST_BUILD_LIBIBERTY` (default: OFF)  |
@@ -144,7 +144,7 @@ and Dyninst requires TBB), and the CMake option to build the package alongside o
 
 ### Installing DynInst
 
-#### Building Dyninst alongside Omnitrace
+#### Building Dyninst alongside OmniTrace
 
 The easiest way to install Dyninst is to configure omnitrace with `OMNITRACE_BUILD_DYNINST=ON`. Depending on the version of Ubuntu, the apt package manager may have current enough
 versions of Dyninst's Boost, TBB, and LibIberty dependencies (i.e. `apt-get install libtbb-dev libiberty-dev libboost-dev`); however, it is possible to request Dyninst to install
@@ -173,7 +173,7 @@ spack load -r dyninst
 
 ### Installing omnitrace
 
-Omnitrace has cmake configuration options for supporting MPI (`OMNITRACE_USE_MPI` or `OMNITRACE_USE_MPI_HEADERS`), HIP kernel tracing (`OMNITRACE_USE_ROCTRACER`),
+OmniTrace has cmake configuration options for supporting MPI (`OMNITRACE_USE_MPI` or `OMNITRACE_USE_MPI_HEADERS`), HIP kernel tracing (`OMNITRACE_USE_ROCTRACER`),
 sampling ROCm devices (`OMNITRACE_USE_ROCM_SMI`), OpenMP-Tools (`OMNITRACE_USE_OMPT`), hardware counters via PAPI (`OMNITRACE_USE_PAPI`), among others.
 Various additional features can be enabled via the [`TIMEMORY_USE_*` CMake options](https://timemory.readthedocs.io/en/develop/installation.html#cmake-options).
 Any `OMNITRACE_USE_<VAL>` option which has a corresponding `TIMEMORY_USE_<VAL>` option means that the support within timemory for this feature has been integrated
@@ -204,9 +204,9 @@ cmake --build omnitrace-build --target install
 source /opt/omnitrace/share/omnitrace/setup-env.sh
 ```
 
-#### MPI Support within Omnitrace
+#### MPI Support within OmniTrace
 
-[Omnitrace](https://github.com/AMDResearch/omnitrace) can have full (`OMNITRACE_USE_MPI=ON`) or partial (`OMNITRACE_USE_MPI_HEADERS=ON`) MPI support.
+[OmniTrace](https://github.com/AMDResearch/omnitrace) can have full (`OMNITRACE_USE_MPI=ON`) or partial (`OMNITRACE_USE_MPI_HEADERS=ON`) MPI support.
 The only difference between these two modes is whether or not the results collected via timemory and/or perfetto can be aggregated into a single
 output file during finalization. When full MPI support is enabled, combining the timemory results always occurs whereas combining the perfetto
 results is configurable via the `OMNITRACE_PERFETTO_COMBINE_TRACES` setting.

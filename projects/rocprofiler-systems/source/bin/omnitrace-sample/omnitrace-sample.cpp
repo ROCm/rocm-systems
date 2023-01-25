@@ -36,7 +36,8 @@ main(int argc, char** argv)
     for(int i = 1; i < argc; ++i)
     {
         auto _arg = std::string_view{ argv[i] };
-        if(_arg == "--" || _arg == "-?" || _arg == "-h" || _arg == "--help")
+        if(_arg == "--" || _arg == "-?" || _arg == "-h" || _arg == "--help" ||
+           _arg == "--version")
             _has_double_hyphen = true;
     }
 

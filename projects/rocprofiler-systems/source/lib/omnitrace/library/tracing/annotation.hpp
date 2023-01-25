@@ -195,7 +195,8 @@ add_perfetto_annotation(perfetto_event_context_t&     ctx,
         }
         else
         {
-            throw std::runtime_error("invalid annotation value type");
+            throw ::omnitrace::exception<std::runtime_error>(
+                "invalid annotation value type");
         }
     }
 }

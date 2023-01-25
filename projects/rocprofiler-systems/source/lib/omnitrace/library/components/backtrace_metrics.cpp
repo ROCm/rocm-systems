@@ -96,8 +96,7 @@ struct perfetto_rusage
 unique_ptr_t<std::vector<std::string>>&
 get_papi_labels(int64_t _tid)
 {
-    static auto& _v =
-        papi_label_instances::instances(papi_label_instances::construct_on_init{});
+    static auto& _v = papi_label_instances::instances(construct_on_init{});
     return _v.at(_tid);
 }
 
@@ -119,8 +118,7 @@ get_backtrace_metrics_init(int64_t _tid)
 unique_ptr_t<bool>&
 get_sampler_running(int64_t _tid)
 {
-    static auto& _v = sampler_running_instances::instances(
-        sampler_running_instances::construct_on_init{}, false);
+    static auto& _v = sampler_running_instances::instances(construct_on_init{}, false);
     return _v.at(_tid);
 }
 }  // namespace

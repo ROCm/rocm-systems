@@ -60,6 +60,13 @@ get_sampling_on_child_threads_history(int64_t _idx = utility::get_thread_index()
 {
     static auto _v = utility::get_filled_array<OMNITRACE_MAX_THREADS>(
         []() { return utility::get_reserved_vector<bool>(32); });
+
+    if(_idx >= OMNITRACE_MAX_THREADS)
+    {
+        static thread_local auto _tl_v = utility::get_reserved_vector<bool>(32);
+        return _tl_v;
+    }
+
     return _v.at(_idx);
 }
 
@@ -96,17 +103,19 @@ get_cputime_signal()
 
 std::set<int> get_sampling_signals(int64_t)
 {
-    auto _sigreal = get_realtime_signal();
-    auto _sigprof = get_cputime_signal();
+    auto _v = std::set<int>{};
+    if(config::get_use_causal())
+    {
+        _v.emplace(get_cputime_signal());
+        _v.emplace(get_realtime_signal());
+    }
+    else
+    {
+        if(config::get_use_sampling_cputime()) _v.emplace(get_cputime_signal());
+        if(config::get_use_sampling_realtime()) _v.emplace(get_realtime_signal());
+    }
 
-    if(config::get_use_sampling_realtime() && config::get_use_sampling_cputime())
-        return std::set<int>{ _sigreal, _sigprof };
-    else if(config::get_use_sampling_realtime())
-        return std::set<int>{ _sigreal };
-    else if(config::get_use_sampling_cputime())
-        return std::set<int>{ _sigprof };
-
-    return std::set<int>{};
+    return _v;
 }
 
 std::atomic<uint64_t>&
@@ -124,8 +133,8 @@ get_cpu_cid_stack(int64_t _tid, int64_t _parent)
     using init_data_t   = thread_data<bool, omnitrace_cpu_cid_stack>;
     using thread_data_t = thread_data<std::vector<uint64_t>, omnitrace_cpu_cid_stack>;
 
-    static auto& _v = thread_data_t::instances(thread_data_t::construct_on_init{});
-    static auto& _b = init_data_t::instances(init_data_t::construct_on_init{}, false);
+    static auto& _v = thread_data_t::instances(construct_on_init{});
+    static auto& _b = init_data_t::instances(construct_on_init{}, false);
 
     auto& _v_tid = _v.at(_tid);
     if(_b.at(_tid) && !(*_b.at(_tid)))
@@ -147,8 +156,8 @@ get_cpu_cid_parents(int64_t _tid)
     struct omnitrace_cpu_cid_stack
     {};
     using thread_data_t = thread_data<cpu_cid_parent_map_t, omnitrace_cpu_cid_stack>;
-    static auto& _v     = thread_data_t::instances(thread_data_t::construct_on_init{},
-                                               cpu_cid_parent_map_t{});
+    static auto& _v =
+        thread_data_t::instances(construct_on_init{}, cpu_cid_parent_map_t{});
     return _v.at(_tid);
 }
 

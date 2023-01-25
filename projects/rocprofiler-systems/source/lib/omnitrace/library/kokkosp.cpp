@@ -34,6 +34,7 @@
 #include <timemory/api/kokkosp.hpp>
 #include <timemory/backends/process.hpp>
 #include <timemory/hash/types.hpp>
+#include <timemory/mpl/concepts.hpp>
 #include <timemory/utility/procfs/maps.hpp>
 
 #include <cstdlib>
@@ -86,6 +87,64 @@ namespace
 {
 bool                     _standalone_initialized = false;
 std::vector<std::string> _initialize_arguments   = {};
+size_t                   _name_len_limit         = 0;
+std::string              _kp_prefix              = {};
+
+template <typename Tp>
+void
+set_invalid_id(Tp* _v)
+{
+    constexpr bool is32 = std::is_same<Tp, uint32_t>::value;
+    constexpr bool is64 = std::is_same<Tp, uint64_t>::value;
+    static_assert(is32 || is64, "only support uint32_t or uint64_t");
+
+    *_v = std::numeric_limits<Tp>::max();
+}
+
+template <typename Tp>
+bool
+is_invalid_id(Tp _v)
+{
+    constexpr bool is32 = std::is_same<Tp, uint32_t>::value;
+    constexpr bool is64 = std::is_same<Tp, uint64_t>::value;
+    static_assert(is32 || is64, "only support uint32_t or uint64_t");
+
+    return (_v == std::numeric_limits<Tp>::max());
+}
+
+template <typename Tp>
+auto
+strlength(Tp&& _v)
+{
+    using type = ::tim::concepts::unqualified_type_t<Tp>;
+    if constexpr(std::is_same<type, std::string_view>::value ||
+                 std::is_same<type, std::string>::value)
+        return _v.length();
+    else
+        return strnlen(_v, std::max<size_t>(_name_len_limit, 1));
+}
+
+template <typename Arg, typename... Args>
+bool
+violates_name_rules(Arg&& _arg, Args&&... _args)
+{
+    // for causal profiling we only consider callbacks which are explicitly named
+    if(omnitrace::config::get_use_causal() &&
+       (std::string_view{ _arg }.find("Kokkos::") == 0 ||
+        std::string_view{ _arg }.find("Space::") != std::string_view::npos))
+        return true;
+
+    size_t _len =
+        (strlength(std::forward<Arg>(_arg)) + ... + strlength(std::forward<Args>(_args)));
+
+    // ignore labels without names
+    if(_len == 0)
+        return true;
+    else if(_name_len_limit == 0)
+        return false;
+
+    return (_len >= _name_len_limit);
+}
 }  // namespace
 
 //--------------------------------------------------------------------------------------//
@@ -205,6 +264,13 @@ extern "C"
             fprintf(stderr, "%sDone\n%s", tim::log::color::info(),
                     tim::log::color::end());
         }
+
+        _name_len_limit = omnitrace::config::get_setting_value<int64_t>(
+                              "OMNITRACE_KOKKOSP_NAME_LENGTH_MAX")
+                              .second;
+        _kp_prefix =
+            omnitrace::config::get_setting_value<std::string>("OMNITRACE_KOKKOSP_PREFIX")
+                .second;
     }
 
     void kokkosp_finalize_library()
@@ -229,12 +295,13 @@ extern "C"
 
     void kokkosp_begin_parallel_for(const char* name, uint32_t devid, uint64_t* kernid)
     {
+        if(violates_name_rules(name)) return set_invalid_id(kernid);
+
         OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
-        auto pname =
-            (devid > std::numeric_limits<uint16_t>::max())  // junk device number
-                ? TIMEMORY_JOIN(" ", "[kokkos]", name)
-                : TIMEMORY_JOIN(" ", TIMEMORY_JOIN("", "[kokkos][dev", devid, ']'), name);
-        *kernid = kokkosp::get_unique_id();
+        auto pname = (devid > std::numeric_limits<uint16_t>::max())  // junk device number
+                         ? JOIN(" ", _kp_prefix, name, "[for]")
+                         : JOIN(" ", _kp_prefix, name, JOIN("", "[for][dev", devid, ']'));
+        *kernid    = kokkosp::get_unique_id();
         kokkosp::logger_t{}.mark(1, __FUNCTION__, name, *kernid);
         kokkosp::create_profiler<kokkosp_region>(pname, *kernid);
         kokkosp::start_profiler<kokkosp_region>(*kernid);
@@ -242,6 +309,8 @@ extern "C"
 
     void kokkosp_end_parallel_for(uint64_t kernid)
     {
+        if(is_invalid_id(kernid)) return;
+
         OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
         kokkosp::logger_t{}.mark(-1, __FUNCTION__, kernid);
         kokkosp::stop_profiler<kokkosp_region>(kernid);
@@ -252,11 +321,13 @@ extern "C"
 
     void kokkosp_begin_parallel_reduce(const char* name, uint32_t devid, uint64_t* kernid)
     {
+        if(violates_name_rules(name)) return set_invalid_id(kernid);
+
         OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
         auto pname =
             (devid > std::numeric_limits<uint16_t>::max())  // junk device number
-                ? TIMEMORY_JOIN(" ", "[kokkos]", name)
-                : TIMEMORY_JOIN(" ", TIMEMORY_JOIN("", "[kokkos][dev", devid, ']'), name);
+                ? JOIN(" ", _kp_prefix, name, "[reduce]")
+                : JOIN(" ", _kp_prefix, name, JOIN("", "[reduce][dev", devid, ']'));
         *kernid = kokkosp::get_unique_id();
         kokkosp::logger_t{}.mark(1, __FUNCTION__, name, *kernid);
         kokkosp::create_profiler<kokkosp_region>(pname, *kernid);
@@ -265,6 +336,8 @@ extern "C"
 
     void kokkosp_end_parallel_reduce(uint64_t kernid)
     {
+        if(is_invalid_id(kernid)) return;
+
         OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
         kokkosp::logger_t{}.mark(-1, __FUNCTION__, kernid);
         kokkosp::stop_profiler<kokkosp_region>(kernid);
@@ -275,11 +348,13 @@ extern "C"
 
     void kokkosp_begin_parallel_scan(const char* name, uint32_t devid, uint64_t* kernid)
     {
+        if(violates_name_rules(name)) return set_invalid_id(kernid);
+
         OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
         auto pname =
             (devid > std::numeric_limits<uint16_t>::max())  // junk device number
-                ? TIMEMORY_JOIN(" ", "[kokkos]", name)
-                : TIMEMORY_JOIN(" ", TIMEMORY_JOIN("", "[kokkos][dev", devid, ']'), name);
+                ? JOIN(" ", _kp_prefix, name, "[scan]")
+                : JOIN(" ", _kp_prefix, name, JOIN("", "[scan][dev", devid, ']'));
         *kernid = kokkosp::get_unique_id();
         kokkosp::logger_t{}.mark(1, __FUNCTION__, name, *kernid);
         kokkosp::create_profiler<kokkosp_region>(pname, *kernid);
@@ -288,6 +363,8 @@ extern "C"
 
     void kokkosp_end_parallel_scan(uint64_t kernid)
     {
+        if(is_invalid_id(kernid)) return;
+
         OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
         kokkosp::logger_t{}.mark(-1, __FUNCTION__, kernid);
         kokkosp::stop_profiler<kokkosp_region>(kernid);
@@ -298,11 +375,13 @@ extern "C"
 
     void kokkosp_begin_fence(const char* name, uint32_t devid, uint64_t* kernid)
     {
+        if(violates_name_rules(name)) return set_invalid_id(kernid);
+
         OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
         auto pname =
             (devid > std::numeric_limits<uint16_t>::max())  // junk device number
-                ? TIMEMORY_JOIN(" ", "[kokkos]", name)
-                : TIMEMORY_JOIN(" ", TIMEMORY_JOIN("", "[kokkos][dev", devid, ']'), name);
+                ? JOIN(" ", _kp_prefix, name, "[fence]")
+                : JOIN(" ", _kp_prefix, name, JOIN("", "[fence][dev", devid, ']'));
         *kernid = kokkosp::get_unique_id();
         kokkosp::logger_t{}.mark(1, __FUNCTION__, name, *kernid);
         kokkosp::create_profiler<kokkosp_region>(pname, *kernid);
@@ -311,6 +390,8 @@ extern "C"
 
     void kokkosp_end_fence(uint64_t kernid)
     {
+        if(is_invalid_id(kernid)) return;
+
         OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
         kokkosp::logger_t{}.mark(-1, __FUNCTION__, kernid);
         kokkosp::stop_profiler<kokkosp_region>(kernid);
@@ -323,9 +404,9 @@ extern "C"
     {
         OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
         kokkosp::logger_t{}.mark(1, __FUNCTION__, name);
-        kokkosp::get_profiler_stack<kokkosp_region>().push_back(
-            kokkosp::profiler_t<kokkosp_region>(name));
-        kokkosp::get_profiler_stack<kokkosp_region>().back().start();
+        kokkosp::get_profiler_stack<kokkosp_region>()
+            .emplace_back(kokkosp::profiler_t<kokkosp_region>(name))
+            .start();
     }
 
     void kokkosp_pop_profile_region()
@@ -343,8 +424,8 @@ extern "C"
     {
         OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
         *secid     = kokkosp::get_unique_id();
-        auto pname = TIMEMORY_JOIN(" ", "[kokkos]", name);
-        kokkosp::create_profiler<kokkosp_region>(pname, *secid);
+        auto pname = std::string{ name };
+        kokkosp::create_profiler<kokkosp_region>(name, *secid);
     }
 
     void kokkosp_destroy_profile_section(uint32_t secid)
@@ -366,7 +447,7 @@ extern "C"
     {
         OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
         kokkosp::logger_t{}.mark(-1, __FUNCTION__, secid);
-        kokkosp::start_profiler<kokkosp_region>(secid);
+        kokkosp::stop_profiler<kokkosp_region>(secid);
     }
 
     //----------------------------------------------------------------------------------//
@@ -374,23 +455,31 @@ extern "C"
     void kokkosp_allocate_data(const SpaceHandle space, const char* label,
                                const void* const ptr, const uint64_t size)
     {
+        if(violates_name_rules(label)) return;
+        if(omnitrace::config::get_use_causal()) return;
+
         OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
         kokkosp::logger_t{}.mark(0, __FUNCTION__, space.name, label,
-                                 TIMEMORY_JOIN("", '[', ptr, ']'), size);
-        kokkosp::profiler_alloc_t<>{ TIMEMORY_JOIN(" ", "[kokkos][allocate]", space.name,
-                                                   label) }
-            .store(std::plus<int64_t>{}, size);
+                                 JOIN("", '[', ptr, ']'), size);
+        auto pname =
+            JOIN(" ", _kp_prefix, label, JOIN("", '[', space.name, "][allocate]"));
+        kokkosp::profiler_alloc_t<>{ pname }.store(std::plus<int64_t>{}, size);
+        kokkosp::profiler_t<kokkosp_region>{ pname }.mark();
     }
 
     void kokkosp_deallocate_data(const SpaceHandle space, const char* label,
                                  const void* const ptr, const uint64_t size)
     {
+        if(violates_name_rules(label)) return;
+        if(omnitrace::config::get_use_causal()) return;
+
         OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
         kokkosp::logger_t{}.mark(0, __FUNCTION__, space.name, label,
-                                 TIMEMORY_JOIN("", '[', ptr, ']'), size);
-        kokkosp::profiler_alloc_t<>{ TIMEMORY_JOIN(" ", "[kokkos][deallocate]",
-                                                   space.name, label) }
-            .store(std::plus<int64_t>{}, size);
+                                 JOIN("", '[', ptr, ']'), size);
+        auto pname =
+            JOIN(" ", _kp_prefix, label, JOIN("", '[', space.name, "][deallocate]"));
+        kokkosp::profiler_alloc_t<>{ pname }.store(std::plus<int64_t>{}, size);
+        kokkosp::profiler_t<kokkosp_region>{ pname }.mark();
     }
 
     //----------------------------------------------------------------------------------//
@@ -399,14 +488,16 @@ extern "C"
                                  const void* dst_ptr, SpaceHandle src_handle,
                                  const char* src_name, const void* src_ptr, uint64_t size)
     {
+        if(violates_name_rules(dst_name, src_name)) return;
+        if(omnitrace::config::get_use_causal()) return;
+
         OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
         kokkosp::logger_t{}.mark(1, __FUNCTION__, dst_handle.name, dst_name,
-                                 TIMEMORY_JOIN("", '[', dst_ptr, ']'), src_handle.name,
-                                 src_name, TIMEMORY_JOIN("", '[', src_ptr, ']'), size);
+                                 JOIN("", '[', dst_ptr, ']'), src_handle.name, src_name,
+                                 JOIN("", '[', src_ptr, ']'), size);
 
-        auto name = TIMEMORY_JOIN(" ", "[kokkos][deep_copy]",
-                                  TIMEMORY_JOIN('=', dst_handle.name, dst_name),
-                                  TIMEMORY_JOIN('=', src_handle.name, src_name));
+        auto name = JOIN(" ", _kp_prefix, JOIN('=', dst_handle.name, dst_name), "<-",
+                         JOIN('=', src_handle.name, src_name), "[deep_copy]");
 
         auto& _data = kokkosp::get_profiler_stack<kokkosp_region>();
         _data.emplace_back(name);
@@ -418,6 +509,7 @@ extern "C"
 
     void kokkosp_end_deep_copy()
     {
+        if(omnitrace::config::get_use_causal()) return;
         OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
         kokkosp::logger_t{}.mark(-1, __FUNCTION__);
         auto& _data = kokkosp::get_profiler_stack<kokkosp_region>();
@@ -432,32 +524,50 @@ extern "C"
     void kokkosp_profile_event(const char* name)
     {
         OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
-        kokkosp::profiler_t<kokkosp_region>{}.mark(name);
+        auto _name = tim::get_hash_identifier_fast(tim::add_hash_id(name));
+        kokkosp::profiler_t<kokkosp_region>{ _name }.mark();
     }
 
     //----------------------------------------------------------------------------------//
 
     void kokkosp_dual_view_sync(const char* label, const void* const, bool is_device)
     {
+        if(violates_name_rules(label)) return;
+
         OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
         if(omnitrace::config::get_use_perfetto())
         {
             auto _name = tim::get_hash_identifier_fast(
-                tim::add_hash_id(TIMEMORY_JOIN(" ", "[kokkos][dual_view_sync]", label)));
+                tim::add_hash_id(JOIN(" ", _kp_prefix, label, "[dual_view_sync]")));
             TRACE_EVENT_INSTANT("user", ::perfetto::StaticString{ _name.data() },
                                 "target", (is_device) ? "device" : "host");
+        }
+        else if(omnitrace::config::get_use_causal())
+        {
+            auto _name = tim::get_hash_identifier_fast(tim::add_hash_id(JOIN(
+                "", label, " [dual_view_sync][", (is_device) ? "device" : "host", "]")));
+            kokkosp::profiler_t<kokkosp_region>{ _name }.mark();
         }
     }
 
     void kokkosp_dual_view_modify(const char* label, const void* const, bool is_device)
     {
+        if(violates_name_rules(label)) return;
+
         OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
         if(omnitrace::config::get_use_perfetto())
         {
-            auto _name = tim::get_hash_identifier_fast(tim::add_hash_id(
-                TIMEMORY_JOIN(" ", "[kokkos][dual_view_modify]", label)));
+            auto _name = tim::get_hash_identifier_fast(
+                tim::add_hash_id(JOIN(" ", _kp_prefix, label, "[dual_view_modify]")));
             TRACE_EVENT_INSTANT("user", ::perfetto::StaticString{ _name.data() },
                                 "target", (is_device) ? "device" : "host");
+        }
+        else if(omnitrace::config::get_use_causal())
+        {
+            auto _name = tim::get_hash_identifier_fast(
+                tim::add_hash_id(JOIN(" ", _kp_prefix, label, "[dual_view_modify][",
+                                      (is_device) ? "device" : "host", "]")));
+            kokkosp::profiler_t<kokkosp_region>{ _name }.mark();
         }
     }
 

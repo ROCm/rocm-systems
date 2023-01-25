@@ -71,6 +71,9 @@ if(OMNITRACE_CLANG_FORMAT_EXE
         ${PROJECT_SOURCE_DIR}/source/*CMakeLists.txt
         ${PROJECT_SOURCE_DIR}/examples/*CMakeLists.txt
         ${PROJECT_SOURCE_DIR}/tests/*CMakeLists.txt
+        ${PROJECT_SOURCE_DIR}/source/*.cmake
+        ${PROJECT_SOURCE_DIR}/examples/*.cmake
+        ${PROJECT_SOURCE_DIR}/tests/*.cmake
         ${PROJECT_SOURCE_DIR}/cmake/*.cmake
         ${PROJECT_SOURCE_DIR}/source/*.cmake)
     list(APPEND cmake_files ${PROJECT_SOURCE_DIR}/CMakeLists.txt)

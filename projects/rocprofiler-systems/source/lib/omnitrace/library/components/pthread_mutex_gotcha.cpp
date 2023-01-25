@@ -156,7 +156,7 @@ pthread_mutex_gotcha::configure()
                     "pthread_spin_unlock" });
         }
 
-        if(config::get_trace_thread_join())
+        if(config::get_trace_thread_join() && !get_use_causal())
         {
             pthread_mutex_gotcha_t::configure(
                 comp::gotcha_config<12, int, pthread_t, void**>{ "pthread_join" });
@@ -208,10 +208,9 @@ pthread_mutex_gotcha::operator()(uintptr_t&& _id, int (*_callee)(Args...),
     uint32_t _depth      = 0;
     int64_t  _ts         = 0;
 
-    OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
-
     if(_id < std::numeric_limits<uintptr_t>::max() && get_use_critical_trace())
     {
+        OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
         std::tie(_cid, _parent_cid, _depth) = create_cpu_cid_entry();
         _ts                                 = comp::wall_clock::record();
     }
@@ -222,11 +221,11 @@ pthread_mutex_gotcha::operator()(uintptr_t&& _id, int (*_callee)(Args...),
 
     if(_id < std::numeric_limits<uintptr_t>::max() && get_use_critical_trace())
     {
+        OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
         add_critical_trace<Device::CPU, Phase::DELTA>(
             threading::get_id(), _cid, 0, _parent_cid, _ts, comp::wall_clock::record(), 0,
             _id, get_hashes().at(m_data->index), _depth);
     }
-
     tim::consume_parameters(_id, _cid, _parent_cid, _depth, _ts);
     return _ret;
 }

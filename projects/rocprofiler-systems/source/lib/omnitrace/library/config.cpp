@@ -43,6 +43,7 @@
 #include <timemory/settings/types.hpp>
 #include <timemory/utility/argparse.hpp>
 #include <timemory/utility/declaration.hpp>
+#include <timemory/utility/filepath.hpp>
 #include <timemory/utility/join.hpp>
 #include <timemory/utility/signals.hpp>
 
@@ -314,6 +315,10 @@ configure_settings(bool _init)
                              !_config->get<bool>("OMNITRACE_USE_PERFETTO"), "backend",
                              "timemory");
 
+    OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_USE_CAUSAL",
+                             "Enable causal profiling analysis", false, "backend",
+                             "causal", "analysis");
+
     OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_USE_ROCTRACER",
                              "Enable ROCm API and kernel tracing", true, "backend",
                              "roctracer", "rocm");
@@ -366,8 +371,18 @@ configure_settings(bool _init)
         false, "rocm", "rccl", "backend");
 
     OMNITRACE_CONFIG_CL_SETTING(
-        bool, "OMNITRACE_KOKKOS_KERNEL_LOGGER", "Enables kernel logging", false,
+        bool, "OMNITRACE_KOKKOSP_KERNEL_LOGGER", "Enables kernel logging", false,
         "--omnitrace-kokkos-kernel-logger", "kokkos", "debugging", "advanced");
+
+    OMNITRACE_CONFIG_SETTING(int64_t, "OMNITRACE_KOKKOSP_NAME_LENGTH_MAX",
+                             "Set this to a value > 0 to help avoid unnamed Kokkos Tools "
+                             "callbacks. Generally, unnamed callbacks are the demangled "
+                             "name of the function, which is very long",
+                             0, "kokkos", "debugging", "advanced");
+
+    OMNITRACE_CONFIG_SETTING(std::string, "OMNITRACE_KOKKOSP_PREFIX",
+                             "Set to [kokkos] to maintain old naming convention", "",
+                             "kokkos", "debugging", "advanced");
 
     OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_USE_OMPT",
                              "Enable support for OpenMP-Tools", false, "openmp", "ompt",
@@ -682,6 +697,101 @@ configure_settings(bool _init)
         std::string, "OMNITRACE_TMPDIR", "Base directory for temporary files",
         get_env<std::string>("TMPDIR", "/tmp"), "io", "data", "advanced");
 
+    OMNITRACE_CONFIG_SETTING(
+        std::string, "OMNITRACE_CAUSAL_MODE",
+        "Perform causal experiments at the function-scope or line-scope. Ideally, use "
+        "function first to locate function with highest impact and then switch to line "
+        "mode + OMNITRACE_CAUSAL_FUNCTION_SCOPE set to the function being targeted.",
+        std::string{ "function" }, "causal", "analysis", "advanced");
+
+    OMNITRACE_CONFIG_SETTING(
+        double, "OMNITRACE_CAUSAL_DELAY",
+        "Length of time to wait (in seconds) before starting the first causal experiment",
+        0.0, "causal", "analysis");
+
+    OMNITRACE_CONFIG_SETTING(
+        double, "OMNITRACE_CAUSAL_DURATION",
+        "Length of time to perform causal experimentation (in seconds) after the first "
+        "experiment has started. After this amount of time has elapsed, no more causal "
+        "experiments will be performed and the application will continue without any "
+        "overhead from causal profiling. Any value <= 0 means until the application "
+        "completes",
+        0.0, "causal", "analysis");
+
+    OMNITRACE_CONFIG_SETTING(
+        bool, "OMNITRACE_CAUSAL_END_TO_END",
+        "Perform causal experiment over the length of the entire application", false,
+        "causal", "analysis", "advanced");
+
+    OMNITRACE_CONFIG_SETTING(std::string, "OMNITRACE_CAUSAL_FILE",
+                             "Name of causal output filename (w/o extension)",
+                             std::string{ "experiments" }, "causal", "analysis",
+                             "advanced", "io");
+
+    OMNITRACE_CONFIG_SETTING(
+        bool, "OMNITRACE_CAUSAL_FILE_RESET",
+        "Overwrite any existing causal output file instead of appending to it", false,
+        "causal", "analysis", "advanced", "io");
+
+    OMNITRACE_CONFIG_SETTING(
+        uint64_t, "OMNITRACE_CAUSAL_RANDOM_SEED",
+        "Seed for random number generator which selects speedups and experiments -- "
+        "please note that the lines selected for experimentation are not reproducible "
+        "but the speedup selection is. If set to zero, std::random_device{}() will be "
+        "used.",
+        0, "causal", "analysis");
+
+    OMNITRACE_CONFIG_SETTING(std::string, "OMNITRACE_CAUSAL_FIXED_SPEEDUP",
+                             "List of virtual speedups between 0 and 100 (inclusive) to "
+                             "sample from for causal profiling",
+                             std::string{}, "causal", "analysis", "advanced");
+
+    OMNITRACE_CONFIG_SETTING(
+        std::string, "OMNITRACE_CAUSAL_BINARY_SCOPE",
+        "Limits causal experiments to the binaries matching the provided list of regular "
+        "expressions (separated by tab, semi-colon, and/or quotes (single or double))",
+        std::string{ "%MAIN%" }, "causal", "analysis");
+
+    OMNITRACE_CONFIG_SETTING(
+        std::string, "OMNITRACE_CAUSAL_SOURCE_SCOPE",
+        "Limits causal experiments to the source files or source file + lineno pair "
+        "(i.e. <file> or <file>:<line>) matching the provided list of regular "
+        "expressions (separated by tab, semi-colon, and/or quotes (single or double))",
+        std::string{}, "causal", "analysis");
+
+    OMNITRACE_CONFIG_SETTING(
+        std::string, "OMNITRACE_CAUSAL_FUNCTION_SCOPE",
+        "List of <function> regex entries for causal profiling (separated by tab, "
+        "semi-colon, and/or quotes (single or double))",
+        std::string{}, "causal", "analysis");
+
+    OMNITRACE_CONFIG_SETTING(
+        std::string, "OMNITRACE_CAUSAL_BINARY_EXCLUDE",
+        "Excludes binaries matching the list of provided regexes from causal experiments "
+        "(separated by tab, semi-colon, and/or quotes (single or double))",
+        std::string{}, "causal", "analysis");
+
+    OMNITRACE_CONFIG_SETTING(
+        std::string, "OMNITRACE_CAUSAL_SOURCE_EXCLUDE",
+        "Excludes source files or source file + lineno pair (i.e. <file> or "
+        "<file>:<line>) matching the list of provided regexes from causal experiments "
+        "(separated by tab, semi-colon, and/or quotes (single or double))",
+        std::string{}, "causal", "analysis");
+
+    OMNITRACE_CONFIG_SETTING(
+        std::string, "OMNITRACE_CAUSAL_FUNCTION_EXCLUDE",
+        "Excludes functions matching the list of provided regexes from causal "
+        "experiments (separated by tab, semi-colon, and/or quotes (single or double))",
+        std::string{}, "causal", "analysis");
+
+    OMNITRACE_CONFIG_SETTING(
+        bool, "OMNITRACE_CAUSAL_FUNCTION_EXCLUDE_DEFAULTS",
+        "This controls adding a series of function exclude regexes to avoid "
+        "experimenting on STL implementation functions, etc. which are, "
+        "generally, not helpful. Details: excludes demangled function names "
+        "starting with '_' or containing '::_M'.",
+        true, "causal", "analysis", "advanced");
+
     // set the defaults
     _config->get_flamegraph_output()     = false;
     _config->get_ctest_notes()           = false;
@@ -819,8 +929,9 @@ configure_settings(bool _init)
     auto _cmd     = tim::read_command_line(process::get_id());
     auto _cmd_env = tim::get_env<std::string>("OMNITRACE_COMMAND_LINE", "");
     if(!_cmd_env.empty()) _cmd = tim::delimit(_cmd_env, " ");
-    auto _exe = (_cmd.empty()) ? "exe" : _cmd.front();
-    auto _pos = _exe.find_last_of('/');
+    auto _exe          = (_cmd.empty()) ? "exe" : _cmd.front();
+    get_exe_realpath() = filepath::realpath(_exe, nullptr, false);
+    auto _pos          = _exe.find_last_of('/');
     if(_pos < _exe.length() - 1) _exe = _exe.substr(_pos + 1);
     get_exe_name() = _exe;
     _config->set_tag(_exe);
@@ -948,12 +1059,15 @@ configure_mode_settings()
         }
     };
 
+    auto _use_causal = get_setting_value<bool>("OMNITRACE_USE_CAUSAL");
+    if(_use_causal.first && _use_causal.second) set_env("OMNITRACE_MODE", "causal", 1);
+
     if(get_mode() == Mode::Coverage)
     {
         set_default_setting_value("OMNITRACE_USE_CODE_COVERAGE", true);
         _set("OMNITRACE_USE_PERFETTO", false);
         _set("OMNITRACE_USE_TIMEMORY", false);
-        //_set("OMNITRACE_USE_CAUSAL", false);
+        _set("OMNITRACE_USE_CAUSAL", false);
         _set("OMNITRACE_USE_ROCM_SMI", false);
         _set("OMNITRACE_USE_ROCTRACER", false);
         _set("OMNITRACE_USE_ROCPROFILER", false);
@@ -964,6 +1078,15 @@ configure_mode_settings()
         _set("OMNITRACE_USE_PROCESS_SAMPLING", false);
         _set("OMNITRACE_CRITICAL_TRACE", false);
     }
+    else if(get_mode() == Mode::Causal)
+    {
+        _set("OMNITRACE_USE_CAUSAL", true);
+        _set("OMNITRACE_USE_PERFETTO", false);
+        _set("OMNITRACE_USE_TIMEMORY", false);
+        _set("OMNITRACE_CRITICAL_TRACE", false);
+        _set("OMNITRACE_USE_SAMPLING", false);
+        _set("OMNITRACE_USE_PROCESS_SAMPLING", false);
+    }
     else if(get_mode() == Mode::Sampling)
     {
         set_default_setting_value("OMNITRACE_USE_SAMPLING", true);
@@ -973,8 +1096,10 @@ configure_mode_settings()
 
     if(gpu::device_count() == 0)
     {
+#if OMNITRACE_HIP_VERSION > 0
         OMNITRACE_BASIC_VERBOSE(1, "No HIP devices were found: disabling roctracer, "
                                    "rocprofiler, and rocm_smi...\n");
+#endif
         _set("OMNITRACE_USE_ROCPROFILER", false);
         _set("OMNITRACE_USE_ROCTRACER", false);
         _set("OMNITRACE_USE_ROCM_SMI", false);
@@ -1010,7 +1135,7 @@ configure_mode_settings()
     {
         _set("OMNITRACE_USE_PERFETTO", false);
         _set("OMNITRACE_USE_TIMEMORY", false);
-        //_set("OMNITRACE_USE_CAUSAL", false);
+        _set("OMNITRACE_USE_CAUSAL", false);
         _set("OMNITRACE_USE_ROCM_SMI", false);
         _set("OMNITRACE_USE_ROCTRACER", false);
         _set("OMNITRACE_USE_ROCPROFILER", false);
@@ -1117,6 +1242,7 @@ configure_disabled_settings()
 
     _handle_use_option("OMNITRACE_USE_SAMPLING", "sampling");
     _handle_use_option("OMNITRACE_USE_PROCESS_SAMPLING", "process_sampling");
+    _handle_use_option("OMNITRACE_USE_CAUSAL", "causal");
     _handle_use_option("OMNITRACE_USE_KOKKOSP", "kokkos");
     _handle_use_option("OMNITRACE_USE_PERFETTO", "perfetto");
     _handle_use_option("OMNITRACE_USE_TIMEMORY", "timemory");
@@ -1436,6 +1562,18 @@ get_exe_name()
     return _v;
 }
 
+std::string&
+get_exe_realpath()
+{
+    static std::string _v = []() {
+        auto _cmd_line = tim::read_command_line(process::get_id());
+        if(!_cmd_line.empty())
+            return filepath::realpath(_cmd_line.front(), nullptr, false);
+        return std::string{};
+    }();
+    return _v;
+}
+
 std::string
 get_config_file()
 {
@@ -1449,15 +1587,18 @@ get_mode()
     if(!settings_are_configured())
     {
         auto _mode = tim::get_env_choice<std::string>(
-            "OMNITRACE_MODE", "trace", { "trace", "sampling", "coverage" });
+            "OMNITRACE_MODE", "trace", { "trace", "sampling", "causal", "coverage" });
         if(_mode == "sampling")
             return Mode::Sampling;
+        else if(_mode == "causal")
+            return Mode::Causal;
         else if(_mode == "coverage")
             return Mode::Coverage;
         return Mode::Trace;
     }
     static auto _m =
         std::unordered_map<std::string_view, Mode>{ { "trace", Mode::Trace },
+                                                    { "causal", Mode::Causal },
                                                     { "sampling", Mode::Sampling },
                                                     { "coverage", Mode::Coverage } };
     static auto _v = get_config()->find("OMNITRACE_MODE");
@@ -1561,6 +1702,13 @@ bool&
 get_use_timemory()
 {
     static auto _v = get_config()->find("OMNITRACE_USE_TIMEMORY");
+    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
+}
+
+bool&
+get_use_causal()
+{
+    static auto _v = get_config()->find("OMNITRACE_USE_CAUSAL");
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
 }
 
@@ -1671,7 +1819,7 @@ get_use_kokkosp()
 bool
 get_use_kokkosp_kernel_logger()
 {
-    static auto _v = get_config()->find("OMNITRACE_KOKKOS_KERNEL_LOGGER");
+    static auto _v = get_config()->find("OMNITRACE_KOKKOSP_KERNEL_LOGGER");
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
 }
 
@@ -2213,6 +2361,153 @@ get_tmp_file(std::string _basename, std::string _ext)
     _v->open();
     _existing_files.emplace(_fname, std::move(_v));
     return _existing_files.at(_fname);
+}
+
+CausalMode
+get_causal_mode()
+{
+    if(!settings_are_configured())
+    {
+        auto _mode = tim::get_env_choice<std::string>("OMNITRACE_CAUSAL_MODE", "function",
+                                                      { "line", "function" });
+        if(_mode == "line") return CausalMode::Line;
+        return CausalMode::Function;
+    }
+    static auto _causal_mode = []() {
+        auto _m = std::unordered_map<std::string_view, CausalMode>{
+            { "line", CausalMode::Line },
+            { "func", CausalMode::Function },
+            { "function", CausalMode::Function }
+        };
+        auto _v = get_config()->find("OMNITRACE_CAUSAL_MODE");
+        try
+        {
+            return _m.at(static_cast<tim::tsettings<std::string>&>(*_v->second).get());
+        } catch(std::runtime_error& _e)
+        {
+            auto _mode = static_cast<tim::tsettings<std::string>&>(*_v->second).get();
+            std::stringstream _ss{};
+            for(const auto& itr : _v->second->get_choices())
+                _ss << ", " << itr;
+            auto _msg = (_ss.str().length() > 2) ? _ss.str().substr(2) : std::string{};
+            OMNITRACE_THROW("[%s] invalid causal mode %s. Choices: %s\n", __FUNCTION__,
+                            _mode.c_str(), _msg.c_str());
+        }
+        return CausalMode::Function;
+    }();
+    return _causal_mode;
+}
+
+bool
+get_causal_end_to_end()
+{
+    static auto _v = get_config()->find("OMNITRACE_CAUSAL_END_TO_END");
+    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
+}
+
+std::vector<int64_t>
+get_causal_fixed_speedup()
+{
+    static auto _v = get_config()->find("OMNITRACE_CAUSAL_FIXED_SPEEDUP");
+    return parse_numeric_range<int64_t, std::vector<int64_t>>(
+        static_cast<tim::tsettings<std::string>&>(*_v->second).get(),
+        "causal fixed speedup", 5);
+}
+
+std::string
+get_causal_output_filename()
+{
+    static auto _v     = get_config()->find("OMNITRACE_CAUSAL_FILE");
+    auto        _fname = static_cast<tim::tsettings<std::string>&>(*_v->second).get();
+    for(auto&& itr : std::initializer_list<std::string>{ ".txt", ".json", ".xml" })
+    {
+        auto _pos = _fname.find(itr);
+        // if extension is found at end of string, remove
+        if(_pos != std::string::npos && (_pos + itr.length()) == _fname.length())
+            _fname = _fname.substr(0, _fname.length() - itr.length());
+    }
+    return _fname;
+}
+
+namespace
+{
+std::vector<std::string>
+format_causal_scopes(std::vector<std::string> _value, const std::string& _tag)
+{
+    const auto _config   = get_config();
+    const auto _main_re  = std::regex{ "(^|[^a-zA-Z])(MAIN|%MAIN%)($|[^a-zA-Z])" };
+    const auto _space_re = std::regex{ "^([ ]*)(.*)([ ]*)$" };
+    for(auto& itr : _value)
+    {
+        // replace any output/input keys, e.g. %argv0%
+        itr = settings::format(itr, _tag);
+        // replace MAIN or %MAIN% with (<exe_basename>|<exe_realpath>)
+        if(std::regex_search(itr, _main_re))
+        {
+            itr = std::regex_replace(
+                itr, _main_re,
+                join("", "$1", "(", get_exe_name(), "|", get_exe_realpath(), ")", "$3"));
+        }
+        // trim leading and trailing spaces since we didn't delimit spaces
+        if(std::regex_search(itr, _space_re))
+            itr = std::regex_replace(itr, _space_re, "$2");
+    }
+    return _value;
+}
+}  // namespace
+
+std::vector<std::string>
+get_causal_binary_scope()
+{
+    auto&&      _config = get_config();
+    static auto _v      = _config->find("OMNITRACE_CAUSAL_BINARY_SCOPE");
+    return format_causal_scopes(
+        tim::delimit(static_cast<tim::tsettings<std::string>&>(*_v->second).get(),
+                     "\t\"';"),
+        _config->get_tag());
+}
+
+std::vector<std::string>
+get_causal_source_scope()
+{
+    static auto _v = get_config()->find("OMNITRACE_CAUSAL_SOURCE_SCOPE");
+    return tim::delimit(static_cast<tim::tsettings<std::string>&>(*_v->second).get(),
+                        "\t\"';");
+}
+
+std::vector<std::string>
+get_causal_function_scope()
+{
+    static auto _v = get_config()->find("OMNITRACE_CAUSAL_FUNCTION_SCOPE");
+    return tim::delimit(static_cast<tim::tsettings<std::string>&>(*_v->second).get(),
+                        "\t\"';");
+}
+
+std::vector<std::string>
+get_causal_binary_exclude()
+{
+    auto&&      _config = get_config();
+    static auto _v      = _config->find("OMNITRACE_CAUSAL_BINARY_EXCLUDE");
+    return format_causal_scopes(
+        tim::delimit(static_cast<tim::tsettings<std::string>&>(*_v->second).get(),
+                     "\t\"';"),
+        _config->get_tag());
+}
+
+std::vector<std::string>
+get_causal_source_exclude()
+{
+    static auto _v = get_config()->find("OMNITRACE_CAUSAL_SOURCE_EXCLUDE");
+    return tim::delimit(static_cast<tim::tsettings<std::string>&>(*_v->second).get(),
+                        "\t\"';");
+}
+
+std::vector<std::string>
+get_causal_function_exclude()
+{
+    static auto _v = get_config()->find("OMNITRACE_CAUSAL_FUNCTION_EXCLUDE");
+    return tim::delimit(static_cast<tim::tsettings<std::string>&>(*_v->second).get(),
+                        "\t\"';");
 }
 }  // namespace config
 }  // namespace omnitrace

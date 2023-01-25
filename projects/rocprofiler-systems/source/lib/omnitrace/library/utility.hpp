@@ -22,10 +22,17 @@
 
 #pragma once
 
+#include "library/concepts.hpp"
+
+#include <timemory/mpl/concepts.hpp>
+#include <timemory/utility/join.hpp>
+
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <stdexcept>
 #include <vector>
 
 namespace omnitrace
@@ -87,5 +94,137 @@ template <size_t StartN, size_t EndN>
 using make_index_sequence_range =
     typename offset_index_sequence<std::make_index_sequence<(EndN - StartN)>,
                                    StartN>::type;
+
+template <typename Tp>
+struct generate
+{
+    using type = Tp;
+
+    template <typename... Args>
+    auto operator()(Args&&... _args) const
+    {
+        if constexpr(concepts::is_unique_pointer<Tp>::value)
+        {
+            using value_type = typename type::element_type;
+
+            if constexpr(use_placement_new_when_generating_unique_ptr<value_type>::value)
+            {
+                // create a thread-local buffer for placement-new
+                static thread_local auto _buffer = std::array<char, sizeof(value_type)>{};
+                if constexpr(std::is_constructible<value_type, Args...>::value)
+                {
+                    return type{ new(_buffer.data())
+                                     value_type{ std::forward<Args>(_args)... } };
+                }
+                else
+                {
+                    return type{ new(_buffer.data())
+                                     value_type{ invoke(std::forward<Args>(_args))... } };
+                }
+            }
+            else
+            {
+                if constexpr(std::is_constructible<value_type, Args...>::value)
+                {
+                    return type{ new value_type{ std::forward<Args>(_args)... } };
+                }
+                else
+                {
+                    return type{ new value_type{ invoke(std::forward<Args>(_args))... } };
+                }
+            }
+        }
+        else
+        {
+            if constexpr(std::is_constructible<type, Args...>::value)
+            {
+                return type{ std::forward<Args>(_args)... };
+            }
+            else
+            {
+                return type{ invoke(std::forward<Args>(_args))... };
+            }
+        }
+    }
+
+private:
+    template <typename Up>
+    static auto invoke(Up&& _v, int,
+                       std::enable_if_t<std::is_invocable<Up>::value, int> = 0)
+        -> decltype(std::forward<Up>(_v)())
+    {
+        return std::forward<Up>(_v)();
+    }
+
+    template <typename Up>
+    static auto&& invoke(Up&& _v, long)
+    {
+        return std::forward<Up>(_v);
+    }
+
+    template <typename Up>
+    static decltype(auto) invoke(Up&& _v)
+    {
+        return invoke(std::forward<Up>(_v), 0);
+    }
+};
+
+template <template <typename, typename...> class ContainerT, typename DataT,
+          typename... TailT, typename PredicateT = bool (*)(const DataT&)>
+inline ContainerT<DataT, TailT...>&
+filter_sort_unique(
+    ContainerT<DataT, TailT...>& _v,
+    PredicateT&&                 _predicate = [](const auto& itr) { return !itr; })
+{
+    _v.erase(std::remove_if(_v.begin(), _v.end(), std::forward<PredicateT>(_predicate)),
+             _v.end());
+    std::sort(_v.begin(), _v.end());
+
+    auto _last = std::unique(_v.begin(), _v.end());
+    if(std::distance(_v.begin(), _last) > 0) _v.erase(_last, _v.end());
+    return _v;
+}
+
+template <typename LhsT, typename RhsT>
+inline LhsT&
+combine(LhsT& _lhs, RhsT&& _rhs)
+{
+    for(auto&& itr : _rhs)
+        _lhs.emplace_back(itr);
+    return _lhs;
+}
+
+template <template <typename, typename...> class ContainerT, typename Tp,
+          typename... TailT>
+std::string
+get_regex_or(const ContainerT<Tp, TailT...>& _container, const std::string& _fallback)
+{
+    static_assert(tim::concepts::is_string_type<Tp>::value,
+                  "get_regex_or requires a container of string types");
+
+    if(_container.empty()) return _fallback;
+
+    namespace join = timemory::join;
+    return join::join(join::array_config{ "|", "(", ")" }, _container);
+}
+
+template <template <typename, typename...> class ContainerT, typename Tp,
+          typename... TailT, typename PredicateT>
+std::string
+get_regex_or(const ContainerT<Tp, TailT...>& _container, PredicateT&& _predicate,
+             const std::string& _fallback)
+{
+    static_assert(tim::concepts::is_string_type<Tp>::value,
+                  "get_regex_or requires a container of string types");
+
+    if(_container.empty()) return _fallback;
+
+    auto _dest = std::vector<std::string>{};
+    _dest.reserve(_container.size());
+    for(const auto& itr : _container)
+        _dest.emplace_back(_predicate(itr));
+
+    return get_regex_or(_dest, _fallback);
+}
 }  // namespace utility
 }  // namespace omnitrace

@@ -4,6 +4,7 @@
 .. doxygenfile:: omnitrace/types.h
 .. doxygenfile:: omnitrace/categories.h
 .. doxygenfile:: omnitrace/user.h
+.. doxygenfile:: omnitrace/causal.h
 ```
 
 By default, when omnitrace detects any `omnitrace_user_start_*` or `omnitrace_user_stop_*` function, instrumentation
@@ -12,6 +13,26 @@ can be manually controlled via the `OMNITRACE_INIT_ENABLED` environment variable
 recorded, regardless of whether whether `omnitrace_user_start_*` or `omnitrace_user_stop_*` has been called.
 
 ## Example
+
+### Compilation
+
+#### CMake
+
+```cmake
+find_package(omnitrace REQUIRED COMPONENTS user)
+
+add_executable(foo foo.cpp)
+
+target_link_libraries(foo PRIVATE omnitrace::omnitrace-user-library)
+```
+
+#### General
+
+Assuming omnitrace installed in `/opt/omnitrace`:
+
+```bash
+g++ -I/opt/omnitrace foo.cpp -o foo -lomnitrace-user
+```
 
 ### User API Implementation
 

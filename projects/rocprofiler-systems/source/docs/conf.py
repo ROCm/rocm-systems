@@ -137,6 +137,7 @@ breathe_projects_source = {
             "omnitrace/types.h",
             "omnitrace/categories.h",
             "omnitrace/user.h",
+            "omnitrace/causal.h",
         ],
     )
 }

@@ -13,11 +13,17 @@ endif()
 
 set(CMAKE_BUILD_TYPE "Release")
 find_package(Threads REQUIRED)
+
+add_library(parallel-overhead-compile-options INTERFACE)
+target_compile_options(parallel-overhead-compile-options INTERFACE -g)
+
 add_executable(parallel-overhead parallel-overhead.cpp)
-target_link_libraries(parallel-overhead PRIVATE Threads::Threads)
+target_link_libraries(parallel-overhead PRIVATE Threads::Threads
+                                                parallel-overhead-compile-options)
 
 add_executable(parallel-overhead-locks parallel-overhead.cpp)
-target_link_libraries(parallel-overhead-locks PRIVATE Threads::Threads)
+target_link_libraries(parallel-overhead-locks PRIVATE Threads::Threads
+                                                      parallel-overhead-compile-options)
 target_compile_definitions(parallel-overhead-locks PRIVATE USE_LOCKS=1)
 
 if(OMNITRACE_INSTALL_EXAMPLES)

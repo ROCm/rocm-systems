@@ -92,6 +92,9 @@ extern "C"
                                    const char* source) OMNITRACE_PUBLIC_API;
     void omnitrace_register_coverage(const char* file, const char* func,
                                      size_t address) OMNITRACE_PUBLIC_API;
+    void omnitrace_progress(const char*) OMNITRACE_PUBLIC_API;
+    void omnitrace_annotated_progress(const char*, omnitrace_annotation_t*,
+                                      size_t) OMNITRACE_PUBLIC_API;
 
 #if defined(OMNITRACE_DL_SOURCE) && (OMNITRACE_DL_SOURCE > 0)
     void omnitrace_preinit_library(void) OMNITRACE_HIDDEN_API;
@@ -111,6 +114,9 @@ extern "C"
     int omnitrace_user_pop_annotated_region_dl(const char*, omnitrace_annotation_t*,
                                                size_t) OMNITRACE_HIDDEN_API;
 
+    int omnitrace_user_progress_dl(const char* name) OMNITRACE_HIDDEN_API;
+    int omnitrace_user_annotated_progress_dl(const char*, omnitrace_annotation_t*,
+                                             size_t) OMNITRACE_HIDDEN_API;
     // KokkosP
     struct OMNITRACE_HIDDEN_API SpaceHandle
     {

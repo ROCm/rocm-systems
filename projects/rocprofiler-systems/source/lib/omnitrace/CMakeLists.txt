@@ -32,6 +32,7 @@ target_link_libraries(
         $<BUILD_INTERFACE:omnitrace::omnitrace-compile-definitions>
         $<BUILD_INTERFACE:omnitrace::omnitrace-perfetto>
         $<BUILD_INTERFACE:omnitrace::omnitrace-timemory>
+        $<BUILD_INTERFACE:omnitrace::omnitrace-elfutils>
         $<BUILD_INTERFACE:omnitrace::omnitrace-bfd>
         $<BUILD_INTERFACE:omnitrace::omnitrace-mpi>
         $<BUILD_INTERFACE:omnitrace::omnitrace-ptl>
@@ -57,7 +58,8 @@ add_library(omnitrace::omnitrace-object-library ALIAS omnitrace-object-library)
 target_sources(
     omnitrace-object-library
     PRIVATE ${CMAKE_CURRENT_LIST_DIR}/library.cpp ${CMAKE_CURRENT_LIST_DIR}/regions.cpp
-            ${CMAKE_CURRENT_LIST_DIR}/api.cpp ${CMAKE_CURRENT_LIST_DIR}/api.hpp)
+            ${CMAKE_CURRENT_LIST_DIR}/progress.cpp ${CMAKE_CURRENT_LIST_DIR}/api.cpp
+            ${CMAKE_CURRENT_LIST_DIR}/api.hpp)
 
 add_subdirectory(library)
 

@@ -22,6 +22,8 @@
 
 #pragma once
 
+#include "library/exception.hpp"
+
 #define AMD_INTERNAL_BUILD 1
 
 #include <hsa.h>
@@ -57,7 +59,7 @@
             char _buffer[HSA_MESSAGE_LENGTH];                                            \
             snprintf(_buffer, HSA_MESSAGE_LENGTH - 1, "%s: %s", msg,                     \
                      emsg ? emsg : "<unknown error>");                                   \
-            throw std::runtime_error(_buffer);                                           \
+            throw ::omnitrace::exception<std::runtime_error>(_buffer);                   \
         }                                                                                \
     } while(0)
 
@@ -71,7 +73,7 @@
             char _buffer[HSA_MESSAGE_LENGTH];                                            \
             snprintf(_buffer, HSA_MESSAGE_LENGTH - 1, "%s: %s", msg,                     \
                      emsg ? emsg : "<unknown error>");                                   \
-            throw std::runtime_error(_buffer);                                           \
+            throw ::omnitrace::exception<std::runtime_error>(_buffer);                   \
         }                                                                                \
     } while(0)
 

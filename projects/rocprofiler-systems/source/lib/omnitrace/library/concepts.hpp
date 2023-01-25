@@ -25,13 +25,17 @@
 #include "library/defines.hpp"
 
 #include <timemory/mpl/concepts.hpp>
+#include <timemory/utility/types.hpp>
 
 #include <memory>
 #include <optional>
+#include <type_traits>
 
 namespace omnitrace
 {
 namespace concepts = ::tim::concepts;  // NOLINT
+
+static constexpr size_t max_supported_threads = OMNITRACE_MAX_THREADS;
 
 template <typename Tp>
 struct thread_deleter;
@@ -39,6 +43,15 @@ struct thread_deleter;
 // unique ptr type for omnitrace
 template <typename Tp>
 using unique_ptr_t = std::unique_ptr<Tp, thread_deleter<Tp>>;
+
+using construct_on_init = std::true_type;
+
+using tim::identity;    // NOLINT
+using tim::identity_t;  // NOLINT
+
+template <typename Tp>
+struct use_placement_new_when_generating_unique_ptr : std::false_type
+{};
 }  // namespace omnitrace
 
 namespace tim

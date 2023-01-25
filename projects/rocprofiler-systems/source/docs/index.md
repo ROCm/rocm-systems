@@ -1,4 +1,4 @@
-# Welcome to the [Omnitrace](https://github.com/AMDResearch/omnitrace) Documentation!
+# Welcome to the [OmniTrace](https://github.com/AMDResearch/omnitrace) Documentation!
 
 ```eval_rst
 .. toctree::
@@ -14,6 +14,7 @@
    runtime
    sampling
    instrumenting
+   causal_profiling
    critical_trace
    output
    user_api

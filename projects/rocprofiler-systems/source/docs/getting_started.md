@@ -101,7 +101,7 @@ e.g., omnitrace's meaning of the term "module" when instrumenting Python.
 
 ## Data Collection Mode(s)
 
-Omnitrace supports several modes of recording trace and profiling data for your application:
+OmniTrace supports several modes of recording trace and profiling data for your application:
 
 | Mode                        | Descriptions                                                                                                                                                  |
 |-----------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------|

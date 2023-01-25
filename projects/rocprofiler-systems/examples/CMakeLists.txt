@@ -18,7 +18,7 @@ set(CMAKE_CXX_CLANG_TIDY)
 set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME examples)
 
 if(OMNITRACE_BUILD_DEBUG)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g  -fno-omit-frame-pointer")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g3 -fno-omit-frame-pointer")
 endif()
 
 option(BUILD_SHARED_LIBS "Build dynamic libraries" ON)
@@ -36,6 +36,12 @@ if(OMNITRACE_INSTALL_EXAMPLES)
     include(GNUInstallDirs)
 endif()
 
+set(OMNITRACE_EXAMPLE_ROOT_DIR
+    ${CMAKE_CURRENT_LIST_DIR}
+    CACHE INTERNAL "")
+# defines function for creating causal profiling exes
+include(${CMAKE_CURRENT_LIST_DIR}/causal-helpers.cmake)
+
 add_subdirectory(transpose)
 add_subdirectory(parallel-overhead)
 add_subdirectory(code-coverage)
@@ -46,3 +52,4 @@ add_subdirectory(python)
 add_subdirectory(lulesh)
 add_subdirectory(rccl)
 add_subdirectory(rewrite-caller)
+add_subdirectory(causal)

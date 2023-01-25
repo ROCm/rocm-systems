@@ -40,6 +40,7 @@
 #include <timemory/components/skeletons.hpp>
 #include <timemory/mpl/types.hpp>
 #include <timemory/timemory.hpp>
+#include <timemory/unwind/bfd.hpp>
 #include <timemory/utility/types.hpp>
 #include <timemory/utility/utility.hpp>
 
@@ -113,6 +114,7 @@ int gpu_count = 0;
 int
 main(int argc, char** argv)
 {
+    tim::unwind::set_bfd_verbose(3);
     tim::set_env("OMNITRACE_INIT_TOOLING", "OFF", 1);
     omnitrace_init_library();
 
@@ -172,6 +174,9 @@ main(int argc, char** argv)
     parser_t parser("omnitrace-avail");
 
     parser.enable_help();
+    parser.enable_version("omnitrace-avail", "v" OMNITRACE_VERSION_STRING,
+                          OMNITRACE_GIT_DESCRIBE, OMNITRACE_GIT_REVISION);
+
     parser.set_help_width(40);
     parser.add_argument({ "--debug" }, "Enable debug messages")
         .max_count(1)

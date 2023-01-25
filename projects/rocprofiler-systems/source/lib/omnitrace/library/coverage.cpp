@@ -87,8 +87,7 @@ get_coverage_data()
 auto&
 get_coverage_count(int64_t _tid = tim::threading::get_id())
 {
-    static auto& _v =
-        coverage_thread_data::instances(coverage_thread_data::construct_on_init{});
+    static auto& _v = coverage_thread_data::instances(construct_on_init{});
     return _v.at(_tid);
 }
 }  // namespace

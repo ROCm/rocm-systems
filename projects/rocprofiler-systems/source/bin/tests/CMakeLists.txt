@@ -296,6 +296,7 @@ omnitrace_add_bin_test(
          _P
          ~PERFETTO
          ~PROCESS_SAMPLING
+         ~KOKKOSP
          --csv
          --brief
          --advanced

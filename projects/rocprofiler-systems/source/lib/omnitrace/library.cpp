@@ -26,12 +26,16 @@
 
 #include "api.hpp"
 #include "common/setup.hpp"
+#include "library/causal/data.hpp"
+#include "library/causal/experiment.hpp"
+#include "library/causal/sampling.hpp"
 #include "library/components/exit_gotcha.hpp"
 #include "library/components/fork_gotcha.hpp"
 #include "library/components/fwd.hpp"
 #include "library/components/mpi_gotcha.hpp"
 #include "library/components/pthread_gotcha.hpp"
 #include "library/components/rocprofiler.hpp"
+#include "library/concepts.hpp"
 #include "library/config.hpp"
 #include "library/coverage.hpp"
 #include "library/critical_trace.hpp"
@@ -52,6 +56,7 @@
 #include "library/utility.hpp"
 #include "omnitrace/categories.h"  // in omnitrace-user
 
+#include <timemory/process/threading.hpp>
 #include <timemory/signals/signal_handlers.hpp>
 #include <timemory/signals/types.hpp>
 #include <timemory/hash/types.hpp>
@@ -67,6 +72,8 @@
 #include <mutex>
 #include <string_view>
 #include <utility>
+#include <cstdlib>
+#include <stdexcept>
 
 using namespace omnitrace;
 
@@ -92,9 +99,39 @@ namespace
 auto _timemory_manager  = tim::manager::instance();
 auto _timemory_settings = tim::settings::shared_instance();
 
+bool
+ensure_initialization(bool _offset, int64_t _glob_n, int64_t _offset_n)
+{
+    auto _exit_info = component::exit_gotcha::get_exit_info();
+    if(_exit_info.is_known && _exit_info.exit_code != EXIT_SUCCESS) return _offset;
+
+    auto _tid         = utility::get_thread_index();
+    auto _max_threads = grow_data(_tid + 1);
+
+    if(_tid > 0 && _tid < _max_threads)
+    {
+        const auto& _info = thread_info::get();
+        OMNITRACE_BASIC_VERBOSE_F(3,
+                                  "thread info: %s, offset: %s, global counter: %li, "
+                                  "offset counter: %li, max threads: %li\n",
+                                  std::to_string(static_cast<bool>(_info)).c_str(),
+                                  std::to_string(_offset).c_str(), _glob_n, _offset_n,
+                                  _max_threads);
+    }
+
+    return _offset;
+}
+
 auto
 ensure_finalization(bool _static_init = false)
 {
+    if(_static_init)
+    {
+        auto _idx = threading::add_callback(&ensure_initialization);
+        if(_idx < 0)
+            throw exception<std::runtime_error>("failure adding threading callback");
+    }
+
     const auto& _info = thread_info::init();
     const auto& _tid  = _info->index_data;
     if(_tid)
@@ -149,6 +186,51 @@ is_system_backend()
 
 using Device = critical_trace::Device;
 using Phase  = critical_trace::Phase;
+
+template <typename... Tp>
+struct fini_bundle
+{
+    using data_type = std::tuple<Tp...>;
+
+    TIMEMORY_DEFAULT_OBJECT(fini_bundle)
+
+    fini_bundle(std::string_view _label)
+    : m_label{ _label }
+    {}
+
+    template <typename... Args>
+    void start(Args&&... _args)
+    {
+        TIMEMORY_FOLD_EXPRESSION(tim::operation::start<Tp>{}(
+            std::get<Tp>(m_data), std::forward<Args>(_args)...));
+    }
+
+    template <typename... Args>
+    void stop(Args&&... _args)
+    {
+        TIMEMORY_FOLD_EXPRESSION(tim::operation::stop<Tp>{}(
+            std::get<Tp>(m_data), std::forward<Args>(_args)...));
+    }
+
+    std::string as_string(bool _print_prefix = true) const
+    {
+        std::stringstream _ss;
+        if(_print_prefix && m_label.length() > 0) _ss << m_label << " : ";
+        _ss << timemory::join::join(", ", std::get<Tp>(m_data)...);
+        return _ss.str();
+    }
+
+    std::string_view m_label = {};
+    data_type        m_data  = {};
+};
+
+template <typename... Tp>
+struct fini_bundle<tim::lightweight_tuple<Tp...>>
+{
+    using base_type = fini_bundle<Tp...>;
+};
+
+using fini_bundle_t = typename fini_bundle<main_bundle_t>::base_type;
 }  // namespace
 
 //======================================================================================//
@@ -365,13 +447,21 @@ omnitrace_init_tooling_hidden()
             OMNITRACE_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
             process_sampler::setup();
         }
-        if(get_use_sampling())
+        if(get_use_causal())
         {
-            OMNITRACE_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
-            sampling::setup();
+            {
+                OMNITRACE_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
+                causal::sampling::setup();
+            }
+            push_enable_sampling_on_child_threads(get_use_causal());
+            sampling::unblock_signals();
         }
-        if(get_use_sampling())
+        else if(get_use_sampling())
         {
+            {
+                OMNITRACE_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
+                sampling::setup();
+            }
             push_enable_sampling_on_child_threads(get_use_sampling());
             sampling::unblock_signals();
         }
@@ -399,6 +489,8 @@ omnitrace_init_tooling_hidden()
     if(get_use_sampling()) sampling::block_signals();
 
     tasking::setup();
+
+    if(get_use_causal()) causal::start_experimenting();
 
     if(get_use_timemory())
     {
@@ -457,13 +549,14 @@ omnitrace_init_tooling_hidden()
 //======================================================================================//
 
 extern "C" void
-omnitrace_init_hidden(const char* _mode, bool _is_binary_rewrite, const char* _argv0)
+omnitrace_init_hidden(const char* _mode, bool _is_binary_rewrite, const char* _argv0_c)
 {
     static int  _total_count = 0;
     static auto _args = std::make_pair(std::string_view{ _mode }, _is_binary_rewrite);
 
     auto _count   = _total_count++;
     auto _mode_sv = std::string_view{ _mode };
+    auto _argv0   = (_argv0_c) ? std::string{ _argv0_c } : config::get_exe_name();
     // this function may be called multiple times if multiple libraries are instrumented
     // we want to guard against multiple calls which with different arguments
     if(_count > 0 &&
@@ -495,21 +588,23 @@ omnitrace_init_hidden(const char* _mode, bool _is_binary_rewrite, const char* _a
                 "called after omnitrace was initialized. state = %s. Mode-based settings "
                 "(via -M <MODE> passed to omnitrace exe) may not be properly "
                 "configured.\n",
-                _mode, std::to_string(_is_binary_rewrite).c_str(), _argv0,
+                _mode, std::to_string(_is_binary_rewrite).c_str(), _argv0.c_str(),
                 std::to_string(get_state()).c_str());
         }
     }
 
-    tracing::get_finalization_functions().emplace_back([_argv0]() {
+    tracing::get_finalization_functions().emplace_back([_argv0_c]() {
         OMNITRACE_CI_THROW(get_state() != State::Active,
                            "Finalizer function for popping main invoked in non-active "
                            "state :: state = %s\n",
                            std::to_string(get_state()).c_str());
         if(get_state() == State::Active)
         {
+            auto _name = (_argv0_c) ? std::string{ _argv0_c } : config::get_exe_name();
             // if main hasn't been popped yet, pop it
-            OMNITRACE_BASIC_VERBOSE(2, "Running omnitrace_pop_trace(%s)...\n", _argv0);
-            omnitrace_pop_trace_hidden(_argv0);
+            OMNITRACE_BASIC_VERBOSE(2, "Running omnitrace_pop_trace(%s)...\n",
+                                    _name.c_str());
+            omnitrace_pop_trace_hidden(_name.c_str());
         }
     });
 
@@ -521,7 +616,7 @@ omnitrace_init_hidden(const char* _mode, bool _is_binary_rewrite, const char* _a
     OMNITRACE_CONDITIONAL_BASIC_PRINT_F(
         get_debug_env() || get_verbose_env() > 2,
         "mode: %s | is binary rewrite: %s | command: %s\n", _mode,
-        (_is_binary_rewrite) ? "y" : "n", _argv0);
+        (_is_binary_rewrite) ? "y" : "n", _argv0.c_str());
 
     tim::set_env("OMNITRACE_MODE", _mode, 0);
     config::is_binary_rewrite() = _is_binary_rewrite;
@@ -561,6 +656,8 @@ omnitrace_finalize_hidden(void)
 {
     // disable thread id recycling during finalization
     threading::recycle_ids() = false;
+    // disable initialization callback
+    threading::remove_callback(&ensure_initialization);
 
     set_thread_state(ThreadState::Completed);
 
@@ -629,13 +726,6 @@ omnitrace_finalize_hidden(void)
     tim::signals::enable_signal_detection({ tim::signals::sys_signal::Interrupt },
                                           [](int) {});
 
-    std::string              _bundle_name = OMNITRACE_FUNCTION;
-    comp::user_global_bundle _bundle{ _bundle_name.c_str() };
-    _bundle.clear();
-    _bundle.insert<comp::wall_clock, comp::cpu_clock, comp::peak_rss, comp::page_rss,
-                   comp::cpu_util>();
-    _bundle.start();
-
     OMNITRACE_DEBUG_F("Copying over all timemory hash information to main thread...\n");
     // copy these over so that all hashes are known
     auto& _hzero = tracing::get_timemory_hash_ids(0);
@@ -662,6 +752,9 @@ omnitrace_finalize_hidden(void)
         OMNITRACE_DEBUG_F("Stopping main bundle...\n");
         get_main_bundle()->stop();
     }
+
+    fini_bundle_t _finalization{};
+    _finalization.start();
 
     if(get_use_rcclp())
     {
@@ -741,6 +834,12 @@ omnitrace_finalize_hidden(void)
         rocprofiler::rocm_cleanup();
     }
 
+    if(get_use_causal())
+    {
+        OMNITRACE_VERBOSE_F(1, "Shutting down causal sampling...\n");
+        causal::sampling::shutdown();
+    }
+
     if(get_use_sampling())
     {
         OMNITRACE_VERBOSE_F(1, "Shutting down sampling...\n");
@@ -764,6 +863,7 @@ omnitrace_finalize_hidden(void)
     // if they are still running (e.g. thread-pool still alive), the
     // thread-specific data will be wrong if try to stop them from
     // the main thread.
+    auto _thr_verbose = (config::get_use_causal()) ? 1 : 0;
     for(auto& itr : thread_data<thread_bundle_t>::instances())
     {
         if(itr && itr->get<comp::wall_clock>() &&
@@ -772,7 +872,7 @@ omnitrace_finalize_hidden(void)
             std::string _msg = JOIN("", *itr);
             auto        _pos = _msg.find(">>>  ");
             if(_pos != std::string::npos) _msg = _msg.substr(_pos + 5);
-            OMNITRACE_VERBOSE_F(0, "%s\n", _msg.c_str());
+            OMNITRACE_VERBOSE_F(_thr_verbose, "%s\n", _msg.c_str());
         }
     }
 
@@ -783,6 +883,12 @@ omnitrace_finalize_hidden(void)
     {
         OMNITRACE_VERBOSE_F(1, "Post-processing the sampling backtraces...\n");
         sampling::post_process();
+    }
+
+    if(get_use_causal())
+    {
+        OMNITRACE_VERBOSE_F(1, "Finishing the causal experiments...\n");
+        causal::finish_experimenting();
     }
 
     if(get_use_critical_trace() || (get_use_rocm_smi() && get_use_roctracer()))
@@ -929,18 +1035,6 @@ omnitrace_finalize_hidden(void)
         }
     }
 
-    _bundle.stop();
-    auto _get_metric = [](auto* _v, std::string_view _tail) -> std::string {
-        return (_v) ? JOIN("", *_v, _tail) : std::string{};
-    };
-
-    OMNITRACE_VERBOSE_F(0, "Finalization metrics: %s%s%s%s%s\n",
-                        _get_metric(_bundle.get<comp::wall_clock>(), ", ").c_str(),
-                        _get_metric(_bundle.get<comp::peak_rss>(), ", ").c_str(),
-                        _get_metric(_bundle.get<comp::page_rss>(), ", ").c_str(),
-                        _get_metric(_bundle.get<comp::cpu_clock>(), ", ").c_str(),
-                        _get_metric(_bundle.get<comp::cpu_util>(), "").c_str());
-
     if(_timemory_manager && _timemory_manager != nullptr)
     {
         _timemory_manager->add_metadata([](auto& ar) {
@@ -967,6 +1061,8 @@ omnitrace_finalize_hidden(void)
                                           "omnitrace", _cfg);
     }
 
+    _finalization.stop();
+
     if(_perfetto_output_error)
     {
         OMNITRACE_THROW("Error opening perfetto output file: %s",
@@ -984,7 +1080,7 @@ omnitrace_finalize_hidden(void)
 
     config::finalize();
 
-    OMNITRACE_VERBOSE_F(0, "Finalized\n");
+    OMNITRACE_VERBOSE_F(0, "Finalized: %s\n", _finalization.as_string().c_str());
 }
 
 //======================================================================================//

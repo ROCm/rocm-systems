@@ -71,6 +71,7 @@
 #define OMNITRACE_VISIBILITY(MODE)  OMNITRACE_ATTRIBUTE(visibility(MODE))
 #define OMNITRACE_PUBLIC_API        OMNITRACE_VISIBILITY("default")
 #define OMNITRACE_HIDDEN_API        OMNITRACE_VISIBILITY("hidden")
+#define OMNITRACE_INTERNAL_API      OMNITRACE_VISIBILITY("internal")
 #define OMNITRACE_INLINE            OMNITRACE_ATTRIBUTE(always_inline) inline
 #define OMNITRACE_NOINLINE          OMNITRACE_ATTRIBUTE(noinline)
 #define OMNITRACE_HOT               OMNITRACE_ATTRIBUTE(hot)
@@ -80,6 +81,8 @@
 #define OMNITRACE_WEAK              OMNITRACE_ATTRIBUTE(weak)
 #define OMNITRACE_PACKED            OMNITRACE_ATTRIBUTE(__packed__)
 #define OMNITRACE_PACKED_ALIGN(VAL) OMNITRACE_PACKED OMNITRACE_ATTRIBUTE(__aligned__(VAL))
+#define OMNITRACE_LIKELY(...)       __builtin_expect((__VA_ARGS__), 1)
+#define OMNITRACE_UNLIKELY(...)     __builtin_expect((__VA_ARGS__), 0)
 
 #if defined(OMNITRACE_CI) && OMNITRACE_CI > 0
 #    if defined(NDEBUG)

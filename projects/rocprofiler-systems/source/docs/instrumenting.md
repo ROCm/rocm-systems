@@ -311,7 +311,7 @@ omnitrace --simulate -o foo.inst -- foo
 
 ### Excluding and Including Modules and Functions
 
-[Omnitrace](https://github.com/AMDResearch/omnitrace) has a set of 6 command-line options which each accept one or more regular expressions for customizing the scope of which module and/or functions are
+[OmniTrace](https://github.com/AMDResearch/omnitrace) has a set of 6 command-line options which each accept one or more regular expressions for customizing the scope of which module and/or functions are
 instrumented. Multiple regexes per option are treated as an OR operation, e.g. `--module-include libfoo libbar` is effectively that same as `--module-include 'libfoo|libbar'`.
 
 If you would like to force the inclusion of certain modules and/or function without changing any of the heuristics, use the `--module-include` and/or `--function-include` options.
@@ -616,7 +616,7 @@ background system-level thread sampling by default.
 Tracing capabilities which do not rely on instrumentation, such as the HIP API and kernel tracing
 (which is collected via roctracer), will still be available.
 
-[Omnitrace](https://github.com/AMDResearch/omnitrace)'s sampling capabilities are always available, even in trace mode, but is deactivated by default.
+[OmniTrace](https://github.com/AMDResearch/omnitrace)'s sampling capabilities are always available, even in trace mode, but is deactivated by default.
 In order to activate sampling in trace mode, simply set `OMNITRACE_USE_SAMPLING=ON` in the environment
 or in an omnitrace configuration file.
 

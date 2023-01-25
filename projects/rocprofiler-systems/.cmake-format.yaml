@@ -50,6 +50,28 @@ parse:
         BASELINE_FAIL_REGEX: '*'
         REWRITE_RUN_PASS_REGEX: '*'
         REWRITE_RUN_FAIL_REGEX: '*'
+    omnitrace_add_causal_test:
+      flags:
+        - SKIP_BASELINE
+      kwargs:
+        NAME: '*'
+        TARGET: '*'
+        CAUSAL_TIMEOUT: '*'
+        CAUSAL_VALIDATE_TIMEOUT: '*'
+        CAUSAL_MODE: '*'
+        CAUSAL_ARGS: '*'
+        CAUSAL_VALIDATE_ARGS: '*'
+        RUNTIME_ARGS: '*'
+        RUN_ARGS: '*'
+        ENVIRONMENT: '*'
+        LABELS: '*'
+        PROPERTIES: '*'
+        CAUSAL_PASS_REGEX: '*'
+        CAUSAL_FAIL_REGEX: '*'
+        BASELINE_PASS_REGEX: '*'
+        BASELINE_FAIL_REGEX: '*'
+        CAUSAL_VALIDATE_PASS_REGEX: '*'
+        CAUSAL_VALIDATE_FAIL_REGEX: '*'
     omnitrace_target_compile_definitions:
       kwargs:
         PUBLIC: '*'
@@ -186,6 +208,13 @@ parse:
         PATHS: '*'
         PATH_SUFFIXES: '*'
         DOC: '*'
+    omnitrace_causal_example_executable:
+      kwargs:
+        TAG: '*'
+        SOURCES: '*'
+        DEFINITIONS: '*'
+        LINK_LIBRARIES: '*'
+        INCLUDE_DIRECTORIES: '*'
   override_spec: {}
   vartags: []
   proptags: []

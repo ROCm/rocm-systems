@@ -80,6 +80,11 @@ extern "C"
         return invoke(_callbacks.pop_region, id);
     }
 
+    int omnitrace_user_progress(const char* id)
+    {
+        return invoke(_callbacks.progress, id);
+    }
+
     int omnitrace_user_push_annotated_region(const char* id, annotation_t* _annotations,
                                              size_t _annotation_count)
     {
@@ -92,6 +97,12 @@ extern "C"
     {
         return invoke(_callbacks.pop_annotated_region, id, _annotations,
                       _annotation_count);
+    }
+
+    int omnitrace_user_annotated_progress(const char* id, annotation_t* _annotations,
+                                          size_t _annotation_count)
+    {
+        return invoke(_callbacks.annotated_progress, id, _annotations, _annotation_count);
     }
 
     int omnitrace_user_configure(omnitrace_user_configure_mode_t mode,
@@ -121,8 +132,10 @@ extern "C"
                 _update(_v.stop_thread_trace, inp.stop_thread_trace);
                 _update(_v.push_region, inp.push_region);
                 _update(_v.pop_region, inp.pop_region);
+                _update(_v.progress, inp.progress);
                 _update(_v.push_annotated_region, inp.push_annotated_region);
                 _update(_v.pop_annotated_region, inp.pop_annotated_region);
+                _update(_v.annotated_progress, inp.annotated_progress);
 
                 _callbacks = _v;
                 break;
@@ -141,8 +154,10 @@ extern "C"
                 _update(_v.stop_thread_trace, inp.stop_thread_trace);
                 _update(_v.push_region, inp.push_region);
                 _update(_v.pop_region, inp.pop_region);
+                _update(_v.progress, inp.progress);
                 _update(_v.push_annotated_region, inp.push_annotated_region);
                 _update(_v.pop_annotated_region, inp.pop_annotated_region);
+                _update(_v.annotated_progress, inp.annotated_progress);
 
                 _callbacks = _v;
                 break;

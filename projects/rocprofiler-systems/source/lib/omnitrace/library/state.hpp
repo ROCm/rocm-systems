@@ -24,6 +24,7 @@
 
 #include "library/defines.hpp"
 
+#include <cstdint>
 #include <string>
 
 namespace omnitrace
@@ -51,7 +52,14 @@ enum class Mode : unsigned short
 {
     Trace = 0,
     Sampling,
+    Causal,
     Coverage
+};
+
+enum class CausalMode : unsigned short
+{
+    Line = 0,
+    Function
 };
 
 //
@@ -99,4 +107,7 @@ to_string(omnitrace::ThreadState _v);
 
 std::string
 to_string(omnitrace::Mode _v);
+
+std::string
+to_string(omnitrace::CausalMode _v);
 }  // namespace std

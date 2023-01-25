@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "omnitrace.hpp"
+#include "common/defines.h"
 #include "fwd.hpp"
 #include "log.hpp"
 
@@ -349,10 +350,6 @@ main(int argc, char** argv)
                   << std::endl;
     }
 
-    verbprintf(0, "\n");
-    verbprintf(0, "command :: '%s'...\n", cmd_string(_cmdc, _cmdv).c_str());
-    verbprintf(0, "\n");
-
     if(_cmdc > 0) cmdv0 = _cmdv[0];
 
     // now can loop through the options.  If the first character is '-', then we know
@@ -364,6 +361,9 @@ main(int argc, char** argv)
     string_t extra_help = "-- <CMD> <ARGS>";
 
     parser.enable_help();
+    parser.enable_version("omnitrace", "v" OMNITRACE_VERSION_STRING,
+                          OMNITRACE_GIT_DESCRIBE, OMNITRACE_GIT_REVISION);
+
     parser.add_argument({ "" }, "");
     parser.add_argument({ "[DEBUG OPTIONS]" }, "");
     parser.add_argument({ "" }, "");
@@ -874,6 +874,10 @@ main(int argc, char** argv)
         parser.print_help(extra_help);
         return 0;
     }
+
+    verbprintf(0, "\n");
+    verbprintf(0, "command :: '%s'...\n", cmd_string(_cmdc, _cmdv).c_str());
+    verbprintf(0, "\n");
 
     if(err)
     {

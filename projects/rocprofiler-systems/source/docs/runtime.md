@@ -1,4 +1,4 @@
-# Configuring Omnitrace Runtime
+# Configuring OmniTrace Runtime
 
 ```eval_rst
 .. toctree::
@@ -49,7 +49,7 @@ match to nearly all common expressions for boolean logic: ON, OFF, YES, NO, TRUE
 
 ### Exploring Components
 
-[Omnitrace](https://github.com/AMDResearch/omnitrace) uses [timemory](https://github.com/NERSC/timemory) extensively to provide various capabilities and manage
+[OmniTrace](https://github.com/AMDResearch/omnitrace) uses [timemory](https://github.com/NERSC/timemory) extensively to provide various capabilities and manage
 data and resources. By default, when `OMNITRACE_USE_TIMEMORY=ON`, omnitrace will only collect wall-clock
 timing values; however, by modifying the `OMNITRACE_TIMEMORY_COMPONENTS` setting, omnitrace can be configured to
 collect hardware counters, CPU-clock timers, memory usage, context-switches, page-faults, network statistics,
@@ -72,7 +72,7 @@ omnitrace-avail --components --available --string --brief
 
 ### Exploring Hardware Counters
 
-[Omnitrace](https://github.com/AMDResearch/omnitrace) supports collecting hardware counters via PAPI and ROCm.
+[OmniTrace](https://github.com/AMDResearch/omnitrace) supports collecting hardware counters via PAPI and ROCm.
 Generally, PAPI is used to collect CPU-based hardware counters and ROCm is used to collect GPU-based hardware
 counters; although it is possible to install PAPI with ROCm support and collect GPU-based hardware counters
 via PAPI but this is not recommended because CPU hardware counters via PAPI cannot be collected simultaneously.
@@ -143,7 +143,7 @@ OMNITRACE_PAPI_EVENTS = PAPI_TOT_INS        perf::CACHE-REFERENCES  perf::CACHE-
 
 #### OMNITRACE_ROCM_EVENTS
 
-Omnitrace reads the ROCm events from the `${ROCM_PATH}/lib/rocprofiler/metrics.xml` file. Use the `ROCP_METRICS` environment
+OmniTrace reads the ROCm events from the `${ROCM_PATH}/lib/rocprofiler/metrics.xml` file. Use the `ROCP_METRICS` environment
 variable to point omnitrace to a different XML metrics file, e.g., `export ROCP_METRICS=${PWD}/custom_metrics.xml`.
 `omnitrace-avail -H -c GPU` will show event names with a suffix of `:device=N` where `N` is the device number.
 For example, if you have two devices, you will see:
@@ -201,7 +201,7 @@ OMNITRACE_CRITICAL_TRACE_SERIALIZE_NAMES           = false
 OMNITRACE_DEBUG                                    = false
 OMNITRACE_DL_VERBOSE                               = 0
 OMNITRACE_INSTRUMENTATION_INTERVAL                 = 1
-OMNITRACE_KOKKOS_KERNEL_LOGGER                     = false
+OMNITRACE_KOKKOSP_KERNEL_LOGGER                    = false
 OMNITRACE_PAPI_EVENTS                              = PAPI_TOT_CYC
 OMNITRACE_PERFETTO_BACKEND                         = inprocess
 OMNITRACE_PERFETTO_BUFFER_SIZE_KB                  = 1024000
@@ -302,7 +302,7 @@ $ omnitrace-avail -S -bd
 | OMNITRACE_INPUT_PREFIX                  | Explicitly specify the prefix for in... |
 | OMNITRACE_INSTRUMENTATION_INTERVAL      | Instrumentation only takes measureme... |
 | OMNITRACE_JSON_OUTPUT                   | Write json output files                 |
-| OMNITRACE_KOKKOS_KERNEL_LOGGER          | Enables kernel logging                  |
+| OMNITRACE_KOKKOSP_KERNEL_LOGGER         | Enables kernel logging                  |
 | OMNITRACE_MAX_DEPTH                     | Set the maximum depth of label hiera... |
 | OMNITRACE_MAX_THREAD_BOOKMARKS          | Maximum number of times a worker thr... |
 | OMNITRACE_MAX_WIDTH                     | Set the maximum width for component ... |
@@ -1161,7 +1161,7 @@ $ omnitrace-avail -H -bd
 
 ## Creating a Configuration File
 
-[Omnitrace](https://github.com/AMDResearch/omnitrace) supports 3 configuration file formats: JSON, XML, and plain text.
+[OmniTrace](https://github.com/AMDResearch/omnitrace) supports 3 configuration file formats: JSON, XML, and plain text.
 Use `omnitrace-avail -G <filename> -F txt json xml` to generate default configuration files of each format and, optionally,
 include the `--all` flag for descriptions, etc.
 Configuration files are specified via the `OMNITRACE_CONFIG_FILE` environment variable

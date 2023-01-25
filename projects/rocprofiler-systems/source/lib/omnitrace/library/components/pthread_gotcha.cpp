@@ -23,7 +23,6 @@
 #include "library/components/pthread_gotcha.hpp"
 #include "library/components/pthread_create_gotcha.hpp"
 #include "library/components/pthread_mutex_gotcha.hpp"
-#include "library/components/roctracer.hpp"
 #include "library/config.hpp"
 #include "library/debug.hpp"
 #include "library/runtime.hpp"

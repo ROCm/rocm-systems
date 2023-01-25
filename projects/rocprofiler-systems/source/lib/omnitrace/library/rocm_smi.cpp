@@ -450,10 +450,10 @@ device_count()
         std::call_once(_once, _rsmi_init_once);
 
         OMNITRACE_ROCM_SMI_CALL(rsmi_num_monitor_devices(&_num_devices));
-    } catch(const std::exception& _e)
+    } catch(std::exception& _e)
     {
-        OMNITRACE_BASIC_PRINT("Exception thrown getting the rocm-smi devices: %s\n",
-                              _e.what());
+        OMNITRACE_BASIC_VERBOSE(1, "Exception thrown getting the rocm-smi devices: %s\n",
+                                _e.what());
     }
     return _num_devices;
 }

@@ -113,12 +113,19 @@ namespace threading = ::tim::threading;  // NOLINT
 namespace scope     = ::tim::scope;      // NOLINT
 namespace policy    = ::tim::policy;     // NOLINT
 namespace trait     = ::tim::trait;      // NOLINT
+namespace cereal    = ::tim::cereal;     // NOLINT
 
 using ::tim::auto_lock_t;   // NOLINT
 using ::tim::demangle;      // NOLINT
 using ::tim::get_env;       // NOLINT
+using ::tim::set_env;       // NOLINT
 using ::tim::try_demangle;  // NOLINT
 using ::tim::type_mutex;    // NOLINT
+
+struct construct_on_thread
+{
+    int64_t index = threading::get_id();
+};
 }  // namespace omnitrace
 
 // same sort of functionality as python's " ".join([...])

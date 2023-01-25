@@ -1,4 +1,4 @@
-# Omnitrace Output
+# OmniTrace Output
 
 ```eval_rst
 .. toctree::
@@ -55,7 +55,7 @@ $ omnitrace -- ./foo
 
 ## Metadata
 
-[Omnitrace](https://github.com/AMDResearch/omnitrace) will output a metadata.json file. This metadata file will contain
+[OmniTrace](https://github.com/AMDResearch/omnitrace) will output a metadata.json file. This metadata file will contain
 information about the settings, environment variables, output files, and info about the system and the run:
 
 - Hardware cache sizes
@@ -237,7 +237,7 @@ information about the settings, environment variables, output files, and info ab
 
 ### Core Configuration Settings
 
-> ***See also: [Customizing Omnitrace Runtime](runtime.md)***
+> ***See also: [Customizing OmniTrace Runtime](runtime.md)***
 
 | Setting                   | Value              | Description                                                                                       |
 |---------------------------|--------------------|---------------------------------------------------------------------------------------------------|

@@ -104,6 +104,13 @@ extern "C"
     extern int omnitrace_user_pop_annotated_region(const char*, omnitrace_annotation_t*,
                                                    size_t) OMNITRACE_PUBLIC_API;
 
+    /// mark causal progress
+    extern int omnitrace_user_progress(const char*) OMNITRACE_PUBLIC_API;
+
+    /// mark causal progress with annotations
+    extern int omnitrace_user_annotated_progress(const char*, omnitrace_annotation_t*,
+                                                 size_t) OMNITRACE_PUBLIC_API;
+
     /// @fn int omnitrace_user_configure(omnitrace_user_configure_mode_t mode,
     ///                                  omnitrace_user_callbacks_t inp,
     ///                                  omnitrace_user_callbacks_t* out)

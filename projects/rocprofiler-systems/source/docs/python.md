@@ -6,7 +6,7 @@
    :maxdepth: 3
 ```
 
-[Omnitrace](https://github.com/AMDResearch/omnitrace) supports profiling Python code at the source-level and/or the script-level.
+[OmniTrace](https://github.com/AMDResearch/omnitrace) supports profiling Python code at the source-level and/or the script-level.
 Python support is enabled via the `OMNITRACE_USE_PYTHON` and the `OMNITRACE_PYTHON_VERSIONS="<MAJOR>.<MINOR>` CMake options.
 Alternatively, to build multiple python versions, use `OMNITRACE_PYTHON_VERSIONS="<MAJOR>.<MINOR>;[<MAJOR>.<MINOR>]"`,
 and `OMNITRACE_PYTHON_ROOT_DIRS="/path/to/version;[/path/to/version]"` instead of `OMNITRACE_PYTHON_VERSION`.
@@ -30,9 +30,9 @@ export PYTHONPATH=/opt/omnitrace/lib/python3.8/site-packages:${PYTHONPATH}
 If using either the `share/omnitrace/setup-env.sh` script or the modulefile in `share/modulefiles/omnitrace`, prefixing the `PYTHONPATH`
 environment variable is automatically handled.
 
-## Running Omnitrace on a Python Script
+## Running OmniTrace on a Python Script
 
-Omnitrace provides an `omnitrace-python` helper bash script which effectively handles ensuring `PYTHONPATH` is properly set and the correct python interpreter is used.
+OmniTrace provides an `omnitrace-python` helper bash script which effectively handles ensuring `PYTHONPATH` is properly set and the correct python interpreter is used.
 Thus the following are effectively equivalent:
 
 ```bash
@@ -57,7 +57,7 @@ optional arguments:
                         Logging verbosity
   -b, --builtin         Put 'profile' in the builtins. Use '@profile' to decorate a single function, or 'with profile:' to profile a single section of code.
   -c FILE, --config FILE
-                        Omnitrace configuration file
+                        OmniTrace configuration file
   -s FILE, --setup FILE
                         Code to execute before the code to profile
   -F [BOOL], --full-filepath [BOOL]
@@ -168,7 +168,7 @@ And executed with `omnitrace-python -b -- ./example.py`, omnitrace would produce
 |-----------------------------------------------------------|
 ```
 
-## Omnitrace Python Source Instrumentation
+## OmniTrace Python Source Instrumentation
 
 Starting from the unmodified `example.py` script above, we start by importing the `omnitrace` module:
 
@@ -232,7 +232,7 @@ The results for both of the source-level instrumentation modes are identical to 
 > ***When `omnitrace-python` is used without built-ins, the profiling results will likely be cluttered by***
 > ***numerous functions called during the importing of more complex modules, e.g. `import numpy`.***
 
-### Omnitrace Python Source Instrumentation Configuration
+### OmniTrace Python Source Instrumentation Configuration
 
 Within the Python source code, the profiler can be configured by directly modifying the `omnitrace.profiler.config` data fields.
 

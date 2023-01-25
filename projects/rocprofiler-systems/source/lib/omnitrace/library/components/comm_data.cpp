@@ -120,9 +120,9 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, int cou
     auto      _name = std::string_view{ _data.tool_id };
     tracker_t _a{ _name };
     add(_a, count * _size);
-    tracker_t _b{ JOIN('_', _name, "dst", dst) };
+    tracker_t _b{ JOIN('/', _name, JOIN('=', "dst", dst)) };
     add(_b, count * _size);
-    add(JOIN('_', _name, "dst", dst, "tag", tag), count * _size);
+    add(JOIN('/', _name, JOIN('=', "dst", dst), JOIN('=', "tag", tag)), count * _size);
 }
 
 // MPI_Recv
@@ -139,9 +139,9 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, int count,
     auto      _name = std::string_view{ _data.tool_id };
     tracker_t _a{ _name };
     add(_a, count * _size);
-    tracker_t _b{ JOIN('_', _name, "dst", dst) };
+    tracker_t _b{ JOIN('/', _name, JOIN('=', "dst", dst)) };
     add(_b, count * _size);
-    add(JOIN('_', _name, "dst", dst, "tag", tag), count * _size);
+    add(JOIN('/', _name, JOIN('=', "dst", dst), JOIN('=', "tag", tag)), count * _size);
 }
 
 // MPI_Isend
@@ -158,9 +158,9 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, int cou
     auto      _name = std::string_view{ _data.tool_id };
     tracker_t _a{ _name };
     add(_a, count * _size);
-    tracker_t _b{ JOIN('_', _name, "dst", dst) };
+    tracker_t _b{ JOIN('/', _name, JOIN('=', "dst", dst)) };
     add(_b, count * _size);
-    add(JOIN('_', _name, "dst", dst, "tag", tag), count * _size);
+    add(JOIN('/', _name, JOIN('=', "dst", dst), JOIN('=', "tag", tag)), count * _size);
 }
 
 // MPI_Irecv
@@ -177,9 +177,9 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, int count,
     auto      _name = std::string_view{ _data.tool_id };
     tracker_t _a{ _name };
     add(_a, count * _size);
-    tracker_t _b{ JOIN('_', _name, "dst", dst) };
+    tracker_t _b{ JOIN('/', _name, JOIN('=', "dst", dst)) };
     add(_b, count * _size);
-    add(JOIN('_', _name, "dst", dst, "tag", tag), count * _size);
+    add(JOIN('/', _name, JOIN('=', "dst", dst), JOIN('=', "tag", tag)), count * _size);
 }
 
 // MPI_Bcast
@@ -196,7 +196,7 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, int count,
     auto      _name = std::string_view{ _data.tool_id };
     tracker_t _t{ _name };
     add(_t, count * _size);
-    add(JOIN('_', _name, "root", root), count * _size);
+    add(JOIN('/', _name, JOIN('=', "root", root)), count * _size);
 }
 
 // MPI_Allreduce
@@ -232,20 +232,22 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, int sen
     tracker_t _t{ _name };
     add(_t, sendcount * _send_size + recvcount * _recv_size);
     {
-        tracker_t _b{ JOIN('_', _name, "send") };
+        tracker_t _b{ JOIN('/', _name, "send") };
         add(_b, sendcount * _send_size);
-        tracker_t _c{ JOIN('_', _name, "send", dst) };
+        tracker_t _c{ JOIN('/', _name, JOIN('=', "send", dst)) };
         add(_b, sendcount * _send_size);
-        add(JOIN('_', _name, "send", "tag", sendtag), sendcount * _send_size);
-        add(JOIN('_', _name, "send", dst, "tag", sendtag), sendcount * _send_size);
+        add(JOIN('/', _name, "send", JOIN('=', "tag", sendtag)), sendcount * _send_size);
+        add(JOIN('/', _name, JOIN('=', "send", dst), JOIN('=', "tag", sendtag)),
+            sendcount * _send_size);
     }
     {
-        tracker_t _b{ JOIN('_', _name, "recv") };
+        tracker_t _b{ JOIN('/', _name, "recv") };
         add(_b, recvcount * _recv_size);
-        tracker_t _c{ JOIN('_', _name, "recv", src) };
+        tracker_t _c{ JOIN('/', _name, JOIN('=', "recv", src)) };
         add(_b, recvcount * _recv_size);
-        add(JOIN('_', _name, "recv", "tag", recvtag), recvcount * _recv_size);
-        add(JOIN('_', _name, "recv", src, "tag", recvtag), recvcount * _recv_size);
+        add(JOIN('/', _name, "recv", JOIN('=', "tag", recvtag)), recvcount * _recv_size);
+        add(JOIN('/', _name, JOIN('=', "recv", src), JOIN('=', "tag", recvtag)),
+            recvcount * _recv_size);
     }
 }
 
@@ -267,10 +269,10 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, int sen
     auto      _name = std::string_view{ _data.tool_id };
     tracker_t _t{ _name };
     add(_t, sendcount * _send_size + recvcount * _recv_size);
-    tracker_t _r(JOIN('_', _name, "root", root));
+    tracker_t _r(JOIN('/', _name, JOIN('=', "root", root)));
     add(_r, sendcount * _send_size + recvcount * _recv_size);
-    add(JOIN('_', _name, "root", root, "send"), sendcount * _send_size);
-    add(JOIN('_', _name, "root", root, "recv"), recvcount * _recv_size);
+    add(JOIN('/', _name, JOIN('=', "root", root), "send"), sendcount * _send_size);
+    add(JOIN('/', _name, JOIN('=', "root", root), "recv"), recvcount * _recv_size);
 }
 
 // MPI_Alltoall
@@ -290,8 +292,8 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, int sen
     auto      _name = std::string_view{ _data.tool_id };
     tracker_t _t{ _name };
     add(_t, sendcount * _send_size + recvcount * _recv_size);
-    add(JOIN('_', _name, "send"), sendcount * _send_size);
-    add(JOIN('_', _name, "recv"), recvcount * _recv_size);
+    add(JOIN('/', _name, "send"), sendcount * _send_size);
+    add(JOIN('/', _name, "recv"), recvcount * _recv_size);
 }
 #endif
 
@@ -311,7 +313,7 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, const v
     auto      _name = std::string_view{ _data.tool_id };
     tracker_t _t{ _name };
     add(_t, count * _size);
-    add(JOIN('_', _name, "root", root), count * _size);
+    add(JOIN('/', _name, JOIN('=', "root", root)), count * _size);
 }
 
 // ncclSend
@@ -350,7 +352,7 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, size_t 
 
     tracker_t _t{ _name };
     add(_t, count * _size);
-    add(JOIN('_', _name, _label, peer), count * _size);
+    add(JOIN('/', _name, JOIN('=', _label, peer)), count * _size);
 }
 
 // ncclBroadcast
@@ -367,7 +369,7 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, const v
     auto      _name = std::string_view{ _data.tool_id };
     tracker_t _t{ _name };
     add(_t, count * _size);
-    add(JOIN('_', _data.tool_id, "root", root), count * _size);
+    add(JOIN('/', _data.tool_id, JOIN('=', "root", root)), count * _size);
 }
 
 // ncclAllReduce

@@ -145,7 +145,7 @@ endif()
 # non-debug optimizations
 #
 omnitrace_add_interface_library(omnitrace-compile-extra "Extra optimization flags")
-if(NOT OMNITRACE_USE_COVERAGE)
+if(NOT OMNITRACE_USE_COVERAGE AND OMNITRACE_BUILD_EXTRA_OPTIMIZATIONS)
     add_target_flag_if_avail(
         omnitrace-compile-extra "-finline-functions" "-funroll-loops" "-ftree-vectorize"
         "-ftree-loop-optimize" "-ftree-loop-vectorize")

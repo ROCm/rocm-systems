@@ -79,6 +79,9 @@ print_settings(bool include_env = true);
 std::string&
 get_exe_name();
 
+std::string&
+get_exe_realpath();
+
 template <typename Tp>
 bool
 set_setting_value(const std::string& _name, Tp&& _v)
@@ -165,6 +168,9 @@ get_use_perfetto() OMNITRACE_HOT;
 
 bool&
 get_use_timemory() OMNITRACE_HOT;
+
+bool&
+get_use_causal() OMNITRACE_HOT;
 
 bool
 get_use_roctracer() OMNITRACE_HOT;
@@ -365,7 +371,7 @@ struct tmp_file
     void close();
     void remove();
 
-    operator bool() const { return stream.is_open() && stream.good(); }
+    explicit operator bool() const { return stream.is_open() && stream.good(); }
 
     std::string  filename = {};
     std::fstream stream   = {};
@@ -373,5 +379,35 @@ struct tmp_file
 
 std::shared_ptr<tmp_file>
 get_tmp_file(std::string _basename, std::string _ext = "dat");
+
+CausalMode
+get_causal_mode();
+
+bool
+get_causal_end_to_end();
+
+std::vector<int64_t>
+get_causal_fixed_speedup();
+
+std::string
+get_causal_output_filename();
+
+std::vector<std::string>
+get_causal_binary_scope();
+
+std::vector<std::string>
+get_causal_source_scope();
+
+std::vector<std::string>
+get_causal_function_scope();
+
+std::vector<std::string>
+get_causal_binary_exclude();
+
+std::vector<std::string>
+get_causal_source_exclude();
+
+std::vector<std::string>
+get_causal_function_exclude();
 }  // namespace config
 }  // namespace omnitrace

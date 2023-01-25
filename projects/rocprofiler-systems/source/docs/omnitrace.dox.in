@@ -116,7 +116,8 @@ WARN_LOGFILE           = doc/warnings.log
 INPUT                  = @SOURCE_DIR@/README.md \
                          @SOURCE_DIR@/source/lib/omnitrace-user/omnitrace/types.h \
                          @SOURCE_DIR@/source/lib/omnitrace-user/omnitrace/categories.h \
-                         @SOURCE_DIR@/source/lib/omnitrace-user/omnitrace/user.h
+                         @SOURCE_DIR@/source/lib/omnitrace-user/omnitrace/user.h \
+                         @SOURCE_DIR@/source/lib/omnitrace-user/omnitrace/causal.h
 INPUT_ENCODING         = UTF-8
 FILE_PATTERNS          = *.h \
                          *.hh \

@@ -22,10 +22,12 @@
 
 #pragma once
 
+#include "library/causal/data.hpp"
 #include "library/config.hpp"
 #include "library/critical_trace.hpp"
 #include "library/defines.hpp"
 #include "library/runtime.hpp"
+#include "library/state.hpp"
 #include "library/timemory.hpp"
 #include "library/tracing.hpp"
 #include "library/tracing/annotation.hpp"
@@ -41,6 +43,9 @@ namespace tim
 {
 namespace quirk
 {
+struct causal : concepts::quirk_type
+{};
+
 struct perfetto : concepts::quirk_type
 {};
 
@@ -53,6 +58,34 @@ namespace omnitrace
 {
 namespace component
 {
+using tim::is_one_of;
+using tim::type_list;
+
+// these categories increment push/pop counts, which are used for sanity checks since
+// they should ALWAYS be popped if they were pushed
+using tracing_count_categories_t =
+    type_list<category::host, category::mpi, category::pthread, category::rocm_hip,
+              category::rocm_hsa, category::rocm_rccl>;
+
+// these categories are added to the critical trace
+using critical_trace_categories_t = type_list<category::host>;
+
+// convert these categories to throughput points
+using causal_throughput_categories_t =
+    type_list<category::host, category::kokkos, category::ompt, category::rocm_hip,
+              category::rocm_hsa, category::rocm_rccl, category::rocm_roctx>;
+
+// define this outside of category region functions so that the
+// static thread_local is global instead of per-template instantiation
+inline ThreadState
+get_thread_status()
+{
+    static thread_local auto _thread_init_once = std::once_flag{};
+    std::call_once(_thread_init_once, tracing::thread_init);
+
+    return get_thread_state();
+}
+
 // timemory component which calls omnitrace functions
 // (used in gotcha wrappers)
 template <typename CategoryT>
@@ -69,6 +102,9 @@ struct category_region : comp::base<category_region<CategoryT>, void>
 
     template <typename... OptsT, typename... Args>
     static void stop(std::string_view name, Args&&...);
+
+    template <typename... OptsT, typename... Args>
+    static void mark(std::string_view name, Args&&...);
 
     template <typename... OptsT, typename... Args>
     static void audit(const gotcha_data_t&, audit::incoming, Args&&...);
@@ -96,7 +132,7 @@ category_region<CategoryT>::start(std::string_view name, Args&&... args)
 
     // unconditionally return if thread is disabled or finalized
     if(get_thread_state() == ThreadState::Disabled) return;
-    if(get_state() == State::Finalized) return;
+    if(get_state() >= State::Finalized) return;
 
     OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
 
@@ -105,29 +141,34 @@ category_region<CategoryT>::start(std::string_view name, Args&&... args)
     // tooling one time and as it exits set it to active and return true.
     if(get_state() != State::Active && !omnitrace_init_tooling_hidden()) return;
 
-    tracing::thread_init();
-
-    // thread initialization may have disabled the thread
-    if(get_thread_state() == ThreadState::Disabled) return;
-
-    tracing::thread_init_sampling();
+    if(get_thread_status() == ThreadState::Disabled) return;
 
     constexpr bool _ct_use_timemory =
-        (sizeof...(OptsT) == 0 ||
-         tim::is_one_of<quirk::timemory, tim::type_list<OptsT...>>::value);
+        (sizeof...(OptsT) == 0 || is_one_of<quirk::timemory, type_list<OptsT...>>::value);
 
     constexpr bool _ct_use_perfetto =
-        (sizeof...(OptsT) == 0 ||
-         tim::is_one_of<quirk::perfetto, tim::type_list<OptsT...>>::value);
+        (sizeof...(OptsT) == 0 || is_one_of<quirk::perfetto, type_list<OptsT...>>::value);
 
-    OMNITRACE_CONDITIONAL_PRINT(tracing::debug_push,
-                                "[%s][PID=%i][state=%s] omnitrace_push_region(%s)\n",
-                                category_name, process::get_id(),
-                                std::to_string(get_state()).c_str(), name.data());
+    constexpr bool _ct_use_causal =
+        (sizeof...(OptsT) == 0 || is_one_of<quirk::causal, type_list<OptsT...>>::value);
 
-    if constexpr(tim::is_one_of<CategoryT, tim::type_list<category::host>>::value)
+    OMNITRACE_CONDITIONAL_PRINT(
+        tracing::debug_push,
+        "[%s][PID=%i][state=%s][thread_state=%s] omnitrace_push_region(%s)\n",
+        category_name, process::get_id(), std::to_string(get_state()).c_str(),
+        std::to_string(get_thread_state()).c_str(), name.data());
+
+    if constexpr(is_one_of<CategoryT, tracing_count_categories_t>::value)
     {
         ++tracing::push_count();
+    }
+
+    if constexpr(_ct_use_causal)
+    {
+        if constexpr(!is_one_of<CategoryT, causal_throughput_categories_t>::value)
+        {
+            if(get_use_causal()) causal::push_progress_point(name);
+        }
     }
 
     if constexpr(_ct_use_perfetto)
@@ -146,7 +187,7 @@ category_region<CategoryT>::start(std::string_view name, Args&&... args)
         }
     }
 
-    if constexpr(tim::is_one_of<CategoryT, tim::type_list<category::host>>::value)
+    if constexpr(is_one_of<CategoryT, critical_trace_categories_t>::value)
     {
         using Device = critical_trace::Device;
         using Phase  = critical_trace::Phase;
@@ -178,22 +219,24 @@ category_region<CategoryT>::stop(std::string_view name, Args&&... args)
     OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
 
     constexpr bool _ct_use_timemory =
-        (sizeof...(OptsT) == 0 ||
-         tim::is_one_of<quirk::timemory, tim::type_list<OptsT...>>::value);
+        (sizeof...(OptsT) == 0 || is_one_of<quirk::timemory, type_list<OptsT...>>::value);
 
     constexpr bool _ct_use_perfetto =
-        (sizeof...(OptsT) == 0 ||
-         tim::is_one_of<quirk::perfetto, tim::type_list<OptsT...>>::value);
+        (sizeof...(OptsT) == 0 || is_one_of<quirk::perfetto, type_list<OptsT...>>::value);
 
-    OMNITRACE_CONDITIONAL_PRINT(tracing::debug_pop,
-                                "[%s][PID=%i][state=%s] omnitrace_pop_region(%s)\n",
-                                category_name, process::get_id(),
-                                std::to_string(get_state()).c_str(), name.data());
+    constexpr bool _ct_use_causal =
+        (sizeof...(OptsT) == 0 || is_one_of<quirk::causal, type_list<OptsT...>>::value);
+
+    OMNITRACE_CONDITIONAL_PRINT(
+        tracing::debug_pop,
+        "[%s][PID=%i][state=%s][thread_state=%s] omnitrace_pop_region(%s)\n",
+        category_name, process::get_id(), std::to_string(get_state()).c_str(),
+        std::to_string(get_thread_state()).c_str(), name.data());
 
     // only execute when active
     if(get_state() == State::Active)
     {
-        if constexpr(tim::is_one_of<CategoryT, tim::type_list<category::host>>::value)
+        if constexpr(is_one_of<CategoryT, tracing_count_categories_t>::value)
         {
             ++tracing::pop_count();
         }
@@ -216,7 +259,19 @@ category_region<CategoryT>::stop(std::string_view name, Args&&... args)
             }
         }
 
-        if constexpr(tim::is_one_of<CategoryT, tim::type_list<category::host>>::value)
+        if constexpr(_ct_use_causal)
+        {
+            if constexpr(is_one_of<CategoryT, causal_throughput_categories_t>::value)
+            {
+                if(get_use_causal()) causal::mark_progress_point(name);
+            }
+            else
+            {
+                if(get_use_causal()) causal::pop_progress_point(name);
+            }
+        }
+
+        if constexpr(is_one_of<CategoryT, critical_trace_categories_t>::value)
         {
             using Device = critical_trace::Device;
             using Phase  = critical_trace::Phase;
@@ -246,6 +301,41 @@ category_region<CategoryT>::stop(std::string_view name, Args&&... args)
         OMNITRACE_CONDITIONAL_BASIC_PRINT(
             _debug, "[%s] omnitrace_pop_region(%s) ignored :: state = %s\n",
             category_name, name.data(), std::to_string(get_state()).c_str());
+    }
+}
+
+template <typename CategoryT>
+template <typename... OptsT, typename... Args>
+void
+category_region<CategoryT>::mark(std::string_view name, Args&&...)
+{
+    constexpr bool _ct_use_causal =
+        (sizeof...(OptsT) == 0 || is_one_of<quirk::causal, type_list<OptsT...>>::value);
+
+    if constexpr(!_ct_use_causal) return;
+
+    // skip if category is disabled
+    if(!trait::runtime_enabled<CategoryT>::get()) return;
+
+    // the expectation here is that if the state is not active then the call
+    // to omnitrace_init_tooling_hidden will activate all the appropriate
+    // tooling one time and as it exits set it to active and return true.
+    if(get_state() != State::Active && !omnitrace_init_tooling_hidden()) return;
+
+    // unconditionally return if thread is disabled or finalized
+    if(get_thread_state() >= ThreadState::Completed) return;
+
+    OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
+
+    if(get_use_causal())
+    {
+        OMNITRACE_CONDITIONAL_PRINT(
+            tracing::debug_mark,
+            "[%s][PID=%i][state=%s][thread_state=%s] omnitrace_progress(%s)\n",
+            category_name, process::get_id(), std::to_string(get_state()).c_str(),
+            std::to_string(get_thread_state()).c_str(), name.data());
+
+        causal::mark_progress_point(name);
     }
 }
 
@@ -345,6 +435,13 @@ struct local_category_region : comp::base<local_category_region<CategoryT>, void
     {
         if(m_prefix.empty()) return;
         return impl_type::template stop<OptsT...>(m_prefix, std::forward<Args>(args)...);
+    }
+
+    template <typename... OptsT, typename... Args>
+    auto mark(Args&&... args)
+    {
+        if(m_prefix.empty()) return;
+        return impl_type::template mark<OptsT...>(m_prefix, std::forward<Args>(args)...);
     }
 
     template <typename... OptsT, typename... Args>

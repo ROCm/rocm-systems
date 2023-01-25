@@ -86,6 +86,13 @@ extern "C"
     void omnitrace_register_coverage(const char* file, const char* func,
                                      size_t address) OMNITRACE_PUBLIC_API;
 
+    /// mark causal progress
+    void omnitrace_progress(const char*) OMNITRACE_PUBLIC_API;
+
+    /// mark causal progress with annotations
+    void omnitrace_annotated_progress(const char*, omnitrace_annotation_t*,
+                                      size_t) OMNITRACE_PUBLIC_API;
+
     // these are the real implementations for internal calling convention
     void omnitrace_init_library_hidden(void) OMNITRACE_HIDDEN_API;
     bool omnitrace_init_tooling_hidden(void) OMNITRACE_HIDDEN_API;
@@ -108,4 +115,7 @@ extern "C"
                                           const char*) OMNITRACE_HIDDEN_API;
     void omnitrace_register_coverage_hidden(const char*, const char*,
                                             size_t) OMNITRACE_HIDDEN_API;
+    void omnitrace_progress_hidden(const char*) OMNITRACE_HIDDEN_API;
+    void omnitrace_annotated_progress_hidden(const char*, omnitrace_annotation_t*,
+                                             size_t) OMNITRACE_HIDDEN_API;
 }

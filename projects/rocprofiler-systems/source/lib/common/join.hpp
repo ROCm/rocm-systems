@@ -22,9 +22,13 @@
 
 #pragma once
 
+#include <array>
+#include <initializer_list>
 #include <ios>
 #include <sstream>
 #include <string>
+#include <string_view>
+#include <tuple>
 #include <type_traits>
 
 #if !defined(OMNITRACE_FOLD_EXPRESSION)
@@ -126,6 +130,42 @@ join(QuoteStrings&&, DelimT&& _delim, Args&&... _args)
         auto&& _len = std::string{ _delim }.length();
         return (_ret.length() > _len) ? _ret.substr(_len) : std::string{};
     }
+}
+
+template <typename... Args>
+auto
+join(std::array<std::string_view, 3>&& _delim, Args&&... _args)
+{
+    return join("", std::get<0>(_delim),
+                join(std::get<1>(_delim), std::forward<Args>(_args)...),
+                std::get<2>(_delim));
+}
+
+template <typename... Args>
+auto
+join(QuoteStrings&&, std::array<std::string_view, 3>&& _delim, Args&&... _args)
+{
+    return join(QuoteStrings{}, "", std::get<0>(_delim),
+                join(std::get<1>(_delim), std::forward<Args>(_args)...),
+                std::get<2>(_delim));
+}
+
+template <typename DelimB, typename DelimT, typename DelimE, typename... Args>
+auto
+join(std::tuple<DelimB, DelimT, DelimE>&& _delim, Args&&... _args)
+{
+    return join("", std::get<0>(_delim),
+                join(std::get<1>(_delim), std::forward<Args>(_args)...),
+                std::get<2>(_delim));
+}
+
+template <typename DelimB, typename DelimT, typename DelimE, typename... Args>
+auto
+join(QuoteStrings&&, std::tuple<DelimB, DelimT, DelimE>&& _delim, Args&&... _args)
+{
+    return join(QuoteStrings{}, "", std::get<0>(_delim),
+                join(std::get<1>(_delim), std::forward<Args>(_args)...),
+                std::get<2>(_delim));
 }
 }  // namespace
 }  // namespace common

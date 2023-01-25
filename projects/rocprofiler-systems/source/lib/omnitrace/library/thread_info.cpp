@@ -21,6 +21,9 @@
 // SOFTWARE.
 
 #include "library/thread_info.hpp"
+#include "library/causal/delay.hpp"
+#include "library/common.hpp"
+#include "library/concepts.hpp"
 #include "library/config.hpp"
 #include "library/debug.hpp"
 #include "library/runtime.hpp"
@@ -30,20 +33,39 @@
 
 #include <timemory/backends/threading.hpp>
 #include <timemory/components/timing/backends.hpp>
+#include <timemory/process/threading.hpp>
 
 namespace omnitrace
 {
 namespace
 {
-using thread_index_data_t =
-    thread_data<std::optional<thread_index_data>, project::omnitrace>;
-using thread_info_data_t = thread_data<std::optional<thread_info>, project::omnitrace>;
+auto&
+get_info_data()
+{
+    using thread_data_t = thread_data<std::optional<thread_info>, project::omnitrace>;
+    static auto& _v     = thread_data_t::instance(construct_on_init{});
+    return _v;
+}
+
+auto&
+get_index_data()
+{
+    using thread_data_t =
+        thread_data<std::optional<thread_index_data>, project::omnitrace>;
+    static auto& _v = thread_data_t::instance(construct_on_init{});
+    return _v;
+}
+
+auto&
+get_info_data(int64_t _tid)
+{
+    return get_info_data()->at(_tid);
+}
 
 auto&
 get_index_data(int64_t _tid)
 {
-    static auto& _v = thread_index_data_t::instances();
-    return _v.at(_tid);
+    return get_index_data()->at(_tid);
 }
 
 auto
@@ -76,52 +98,104 @@ init_index_data(int64_t _tid, bool _offset = false)
 const auto unknown_thread = std::optional<thread_info>{};
 }  // namespace
 
+int64_t
+grow_data(int64_t _tid)
+{
+    struct data_growth
+    {};
+
+    static int64_t _max_threads = max_supported_threads;
+    if(_tid >= _max_threads)
+    {
+        OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
+        auto_lock_t _lk{ type_mutex<data_growth>() };
+
+        // check again after locking
+        if(_tid >= _max_threads)
+        {
+            TIMEMORY_PRINTF_WARNING(
+                stderr, "[%li] Growing thread data from %li to %li...\n", _tid,
+                _max_threads, _max_threads + max_supported_threads);
+            fflush(stderr);
+
+            // auto _expected = _max_threads + max_supported_threads;
+            for(auto itr : grow_functors())
+            {
+                if(itr)
+                {
+                    int64_t _new_capacity = (*itr)(_tid + 1);
+                    TIMEMORY_PRINTF_WARNING(stderr,
+                                            "[%li] Grew thread data from %li to %li...\n",
+                                            _tid, _max_threads, _new_capacity);
+                }
+            }
+            _max_threads += max_supported_threads;
+        }
+    }
+
+    return _max_threads;
+}
+
 const std::optional<thread_info>&
 thread_info::init(bool _offset)
 {
     static thread_local bool _once      = false;
-    auto&                    _instances = thread_info_data_t::instances();
+    auto&                    _info_data = get_info_data();
     auto                     _tid       = utility::get_thread_index();
+
+    if(!_info_data)
+    {
+        static auto _dummy = std::optional<thread_info>{};
+        return (_dummy.reset(), _dummy);  // always reset for safety
+    }
 
     if(!_once && (_once = true))
     {
+        grow_data(_tid);
         threading::offset_this_id(_offset);
-        auto& _info           = _instances.at(_tid);
+        auto& _info           = _info_data->at(_tid);
         _info                 = thread_info{};
         _info->is_offset      = threading::offset_this_id();
         _info->index_data     = init_index_data(_tid, _info->is_offset);
+        _info->causal_count   = &causal::delay::get_local();
         _info->lifetime.first = tim::get_clock_real_now<uint64_t, std::nano>();
         if(_info->is_offset) set_thread_state(ThreadState::Disabled);
     }
 
-    return _instances.at(_tid);
+    return _info_data->at(_tid);
 }
 
 const std::optional<thread_info>&
 thread_info::get()
 {
-    return thread_info_data_t::instances().at(utility::get_thread_index());
+    return get_info_data(utility::get_thread_index());
 }
 
 const std::optional<thread_info>&
 thread_info::get(int64_t _tid, ThreadIdType _type)
 {
     if(_type == ThreadIdType::InternalTID)
-        return thread_info_data_t::instances().at(_tid);
+        return get_info_data(_tid);
     else if(_type == ThreadIdType::SystemTID)
     {
-        const auto& _v = thread_info_data_t::instances();
-        for(const auto& itr : _v)
+        const auto& _v = get_info_data();
+        if(_v)
         {
-            if(itr && itr->index_data->system_value == _tid) return itr;
+            for(const auto& itr : *_v)
+            {
+                if(itr && itr->index_data->system_value == _tid) return itr;
+            }
         }
     }
     else if(_type == ThreadIdType::SequentTID)
     {
-        const auto& _v = thread_info_data_t::instances();
-        for(const auto& itr : _v)
+        const auto& _v = get_info_data();
+        if(_v)
         {
-            if(itr && itr->index_data->sequent_value == _tid) return itr;
+            for(const auto& itr : *_v)
+            {
+                if(itr && itr->index_data->sequent_value == _tid) return itr;
+            }
         }
     }
 
@@ -132,7 +206,7 @@ thread_info::get(int64_t _tid, ThreadIdType _type)
 void
 thread_info::set_start(uint64_t _ts, bool _force)
 {
-    auto& _v = thread_info_data_t::instances().at(utility::get_thread_index());
+    auto& _v = get_info_data(utility::get_thread_index());
     if(!_v) init();
     if(_force || (_ts > 0 && (_v->lifetime.first == 0 || _ts < _v->lifetime.first)))
         _v->lifetime.first = _ts;
@@ -142,7 +216,7 @@ void
 thread_info::set_stop(uint64_t _ts)
 {
     auto  _tid = utility::get_thread_index();
-    auto& _v   = thread_info_data_t::instances().at(_tid);
+    auto& _v   = get_info_data(_tid);
     if(_v)
     {
         _v->lifetime.second = _ts;
@@ -150,7 +224,7 @@ thread_info::set_stop(uint64_t _ts)
         // less than or equal to the main thread end lifetime
         if(_tid == 0)
         {
-            for(auto& itr : thread_info_data_t::instances())
+            for(auto& itr : *get_info_data())
             {
                 if(itr && itr->index_data && itr->index_data->internal_value != _tid)
                 {
@@ -210,6 +284,7 @@ thread_info::as_string() const
     if(index_data)
         _ss << ", index_data=(" << index_data->internal_value << ", "
             << index_data->system_value << ", " << index_data->sequent_value << ")";
+    if(causal_count) _ss << ", causal count=" << *causal_count;
     _ss << ", lifetime=(" << lifetime.first << ":" << lifetime.second << ")";
     return _ss.str();
 }

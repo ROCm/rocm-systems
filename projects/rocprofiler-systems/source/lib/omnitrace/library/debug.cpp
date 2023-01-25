@@ -21,11 +21,16 @@
 // SOFTWARE.
 
 #include "library/debug.hpp"
+#include "library/binary/address_range.hpp"
 #include "library/runtime.hpp"
 #include "library/state.hpp"
 
 #include <timemory/log/color.hpp>
 #include <timemory/utility/filepath.hpp>
+
+#include <iomanip>
+#include <sstream>
+#include <string>
 
 namespace omnitrace
 {
@@ -45,6 +50,9 @@ get_source_location_history()
     static thread_local auto _v = source_location_history{};
     return _v;
 }
+
+auto _protect_lock   = std::atomic<bool>{ false };
+auto _protect_unlock = std::atomic<bool>{ false };
 }  // namespace
 
 void
@@ -58,19 +66,23 @@ set_source_location(source_location&& _v)
 lock::lock()
 : m_lk{ tim::type_mutex<decltype(std::cerr)>(), std::defer_lock }
 {
-    if(!m_lk.owns_lock())
+    if(!m_lk.owns_lock() && !_protect_lock)
     {
+        _protect_lock.store(true);
         push_thread_state(ThreadState::Internal);
         m_lk.lock();
+        _protect_lock.store(false);
     }
 }
 
 lock::~lock()
 {
-    if(m_lk.owns_lock())
+    if(m_lk.owns_lock() && !_protect_unlock)
     {
+        _protect_unlock.store(true);
         m_lk.unlock();
         pop_thread_state();
+        _protect_unlock.store(false);
     }
 }
 
@@ -85,4 +97,29 @@ get_file()
     return _v;
 }
 }  // namespace debug
+
+template <typename Tp>
+std::string
+as_hex(Tp _v, size_t _width)
+{
+    std::stringstream _ss;
+    _ss.fill('0');
+    _ss << "0x" << std::hex << std::setw(_width) << _v;
+    return _ss.str();
+}
+
+template <>
+std::string
+as_hex<address_range_t>(address_range_t _v, size_t _width)
+{
+    return (_v.is_range()) ? JOIN('-', as_hex(_v.low, _width), as_hex(_v.high, _width))
+                           : as_hex(_v.low, _width);
+}
+
+template std::string as_hex<int32_t>(int32_t, size_t);
+template std::string as_hex<uint32_t>(uint32_t, size_t);
+template std::string as_hex<int64_t>(int64_t, size_t);
+template std::string as_hex<uint64_t>(uint64_t, size_t);
+template std::string
+as_hex<void*>(void*, size_t);
 }  // namespace omnitrace

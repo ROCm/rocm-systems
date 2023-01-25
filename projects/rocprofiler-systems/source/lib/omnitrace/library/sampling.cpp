@@ -28,6 +28,7 @@
 #include "library/components/fwd.hpp"
 #include "library/config.hpp"
 #include "library/debug.hpp"
+#include "library/locking.hpp"
 #include "library/ptl.hpp"
 #include "library/runtime.hpp"
 #include "library/state.hpp"
@@ -58,12 +59,14 @@
 #include <timemory/units.hpp>
 #include <timemory/utility/backtrace.hpp>
 #include <timemory/utility/demangle.hpp>
+#include <timemory/utility/procfs/maps.hpp>
 #include <timemory/utility/types.hpp>
 #include <timemory/variadic.hpp>
 
 #include <array>
 #include <chrono>
 #include <condition_variable>
+#include <csignal>
 #include <cstring>
 #include <ctime>
 #include <initializer_list>
@@ -76,20 +79,36 @@
 #include <pthread.h>
 #include <signal.h>
 
+namespace tim
+{
+namespace math
+{
+template <typename Tp, typename Up>
+TIMEMORY_INLINE Tp
+plus(Tp&& _lhs, const Up& _rhs)
+{
+    Tp _v = _lhs;
+    plus(_v, _rhs);
+    return _v;
+}
+}  // namespace math
+}  // namespace tim
 namespace omnitrace
 {
 namespace sampling
 {
+using ::tim::sampling::dynamic;
+using tim::sampling::timer;
+
 using hw_counters               = typename component::backtrace_metrics::hw_counters;
 using signal_type_instances     = thread_data<std::set<int>, category::sampling>;
 using sampler_running_instances = thread_data<bool, category::sampling>;
 using bundle_t =
-    tim::lightweight_tuple<backtrace_timestamp, backtrace, backtrace_metrics>;
-using sampler_t              = tim::sampling::sampler<bundle_t, tim::sampling::dynamic>;
+    tim::lightweight_tuple<component::backtrace_timestamp, component::backtrace,
+                           component::backtrace_metrics>;
+using sampler_t              = tim::sampling::sampler<bundle_t, dynamic>;
 using sampler_instances      = thread_data<sampler_t, category::sampling>;
 using sampler_init_instances = thread_data<bundle_t, category::sampling>;
-
-using tim::sampling::timer;
 }  // namespace sampling
 }  // namespace omnitrace
 
@@ -225,8 +244,7 @@ get_sampler_init(int64_t _tid = threading::get_id())
 unique_ptr_t<bool>&
 get_sampler_running(int64_t _tid)
 {
-    static auto& _v = sampler_running_instances::instances(
-        sampler_running_instances::construct_on_init{}, false);
+    static auto& _v = sampler_running_instances::instances(construct_on_init{}, false);
     return _v.at(_tid);
 }
 
@@ -356,10 +374,10 @@ get_offload_file()
     return _v;
 }
 
-std::mutex&
+locking::atomic_mutex&
 get_offload_mutex()
 {
-    static auto _v = std::mutex{};
+    static auto _v = locking::atomic_mutex{};
     return _v;
 }
 
@@ -369,12 +387,25 @@ using sampler_buffer_t = tim::data_storage::ring_buffer<sampler_bundle_t>;
 void
 offload_buffer(int64_t _seq, sampler_buffer_t&& _buf)
 {
-    auto  _lk   = std::unique_lock<std::mutex>{ get_offload_mutex() };
+    OMNITRACE_REQUIRE(get_use_tmp_files())
+        << "Error! sampling allocator tries to offload buffer of samples but "
+           "omnitrace was configured to not use temporary files\n";
+
+    // use homemade atomic_mutex/atomic_lock since contention will be low
+    // and using pthread_lock might trigger our wrappers
+    auto  _lk   = locking::atomic_lock{ get_offload_mutex() };
     auto& _file = get_offload_file();
-    if(!_file) return;
+
+    OMNITRACE_REQUIRE(_file)
+        << "Error! sampling allocator tried to offload buffer of samples but the "
+           "offload file does not exist\n";
 
     OMNITRACE_VERBOSE_F(3, "Saving sampling buffer for thread %li...\n", _seq);
     auto& _fs = _file->stream;
+
+    OMNITRACE_REQUIRE(_fs.good())
+        << "Error! temporary file for offloading buffer is in an invalid state\n";
+
     _fs.write(reinterpret_cast<char*>(&_seq), sizeof(_seq));
     auto _data = std::move(_buf);
     _data.save(_fs);
@@ -388,14 +419,27 @@ load_offload_buffer()
     auto _data = std::map<int64_t, std::vector<sampler_buffer_t>>{};
     if(!get_use_tmp_files()) return _data;
 
-    auto  _lk   = std::unique_lock<std::mutex>{ get_offload_mutex() };
+    // use homemade atomic_mutex/atomic_lock since contention will be low
+    // and using pthread_lock might trigger our wrappers
+    auto  _lk   = locking::atomic_lock{ get_offload_mutex() };
     auto& _file = get_offload_file();
-    if(!_file) return _data;
+    if(!_file)
+    {
+        OMNITRACE_WARNING_F(
+            0, "[sampling] returning no data because the offload file no longer exists");
+        return _data;
+    }
 
     auto& _fs = _file->stream;
 
     _fs.close();
     _file->open(std::ios::binary | std::ios::in);
+
+    if(!_fs)
+    {
+        OMNITRACE_WARNING_F(0, "[sampling] %s failed to open", _file->filename.c_str());
+    }
+
     while(!_fs.eof())
     {
         int64_t _seq = 0;
@@ -420,6 +464,10 @@ configure(bool _setup, int64_t _tid)
     auto&       _running      = get_sampler_running(_tid);
     bool        _is_running   = (!_running) ? false : *_running;
     auto&       _signal_types = sampling::get_signal_types(_tid);
+
+    OMNITRACE_CONDITIONAL_THROW(get_use_causal(),
+                                "Internal error! configuring sampling not permitted when "
+                                "causal profiling is enabled");
 
     OMNITRACE_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
 
@@ -520,7 +568,7 @@ configure(bool _setup, int64_t _tid)
             if(_timer)
             {
                 OMNITRACE_VERBOSE(
-                    1,
+                    2,
                     "[SIG%i] Sampler for thread %lu will be triggered %.1fx per "
                     "second of %s-time (every %.3e milliseconds)...\n",
                     itr, _tid, _timer->get_frequency(units::sec), _type,
@@ -669,19 +717,24 @@ unblock_signals(std::set<int> _signals)
 void
 post_process()
 {
+    OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
+
+    size_t _total_data       = 0;
+    size_t _total_threads    = 0;
+    auto   _external_samples = std::atomic<size_t>{ 0 };
+    auto   _internal_samples = std::atomic<size_t>{ 0 };
+
+    OMNITRACE_VERBOSE(2 || get_debug_sampling(), "Stopping sampling components...\n");
     omnitrace::component::backtrace::stop();
-    OMNITRACE_VERBOSE(2 || get_debug_sampling(), "Stopping backtrace metrics...\n");
-
-    for(size_t i = 0; i < max_supported_threads; ++i)
-        backtrace_metrics::configure(false, i);
-
-    size_t _total_data    = 0;
-    size_t _total_threads = 0;
-
     for(size_t i = 0; i < max_supported_threads; ++i)
     {
+        backtrace_metrics::configure(false, i);
         auto& _sampler = get_sampler(i);
-        if(_sampler) _sampler->set_offload(nullptr);
+        if(_sampler)
+        {
+            _sampler->stop();
+            _sampler->set_offload(nullptr);
+        }
     }
 
     auto _loaded_data = load_offload_buffer();
@@ -715,7 +768,6 @@ post_process()
         OMNITRACE_VERBOSE(3 || get_debug_sampling(),
                           "Getting sampler data for thread %lu...\n", i);
 
-        _sampler->stop();
         auto _raw_data = _sampler->get_data();
         for(auto litr : _loaded_data[i])
         {
@@ -742,45 +794,58 @@ post_process()
         std::vector<sampling::bundle_t*> _data{};
         for(auto& itr : _raw_data)
         {
-            _data.reserve(_data.size() + itr.size());
             auto* _bt = itr.get<backtrace>();
             auto* _ts = itr.get<backtrace_timestamp>();
-            if(!_bt || !_ts) continue;
-            if(_bt->empty()) continue;
-            if(!_thread_info->is_valid_time(_ts->get_timestamp())) continue;
-            _data.emplace_back(&itr);
+            if(_thread_info && _bt && !_bt->empty() && _ts &&
+               _thread_info->is_valid_time(_ts->get_timestamp()))
+            {
+                _data.emplace_back(&itr);
+            }
         }
 
-        if(_data.empty())
+        _total_data += _data.size();
+        _total_threads += (!_data.empty()) ? 1 : 0;
+
+        if(!_data.empty())
+        {
+            OMNITRACE_VERBOSE(2 || get_debug_sampling(),
+                              "Sampler data for thread %lu has %zu valid entries...\n", i,
+                              _data.size());
+
+            if(get_use_perfetto()) post_process_perfetto(i, _init, _data);
+            if(get_use_timemory()) post_process_timemory(i, _init, _data);
+        }
+        else
         {
             OMNITRACE_VERBOSE(2 || get_debug_sampling(),
                               "Sampler data for thread %lu has zero valid entries out of "
                               "%zu... (skipped)\n",
                               i, _raw_data.size());
-            continue;
         }
-
-        OMNITRACE_VERBOSE(2 || get_debug_sampling(),
-                          "Sampler data for thread %lu has %zu valid entries...\n", i,
-                          _raw_data.size());
-
-        _total_data += _raw_data.size();
-        _total_threads += 1;
-
-        if(get_use_perfetto()) post_process_perfetto(i, _init, _data);
-        if(get_use_timemory()) post_process_timemory(i, _init, _data);
     }
 
-    OMNITRACE_VERBOSE(3 || get_debug_sampling(), "Destroying samplers...\n");
+    OMNITRACE_VERBOSE(3 || get_debug_sampling(),
+                      "Destroying samplers and allocators...\n");
 
     for(size_t i = 0; i < max_supported_threads; ++i)
-    {
         get_sampler(i).reset();
+
+    for(auto& itr : get_sampler_allocators())
+    {
+        if(itr) itr.reset();
+    }
+
+    if(get_offload_file())
+    {
+        get_offload_file()->remove();
+        get_offload_file().reset();
     }
 
     OMNITRACE_VERBOSE(1 || get_debug_sampling(),
-                      "Collected %zu samples from %zu threads...\n", _total_data,
-                      _total_threads);
+                      "Collected %zu samples from %zu threads... %zu samples out of %zu "
+                      "were taken while within instrumented routines\n",
+                      _total_data, _total_threads, _internal_samples.load(),
+                      (_internal_samples + _external_samples));
 }
 
 namespace

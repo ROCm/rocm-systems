@@ -23,6 +23,7 @@
 #pragma once
 
 #include "api.hpp"
+#include "library/causal/components/causal_gotcha.hpp"
 #include "library/common.hpp"
 #include "library/components/exit_gotcha.hpp"
 #include "library/components/fork_gotcha.hpp"
@@ -51,7 +52,8 @@ using preinit_bundle_t =
     tim::lightweight_tuple<exit_gotcha_t, fork_gotcha_t, mpi_gotcha_t>;
 
 // started during init phase
-using init_bundle_t = tim::lightweight_tuple<pthread_gotcha, component::numa_gotcha>;
+using init_bundle_t = tim::lightweight_tuple<causal::component::causal_gotcha,
+                                             pthread_gotcha, component::numa_gotcha>;
 
 // bundle of components around omnitrace_init and omnitrace_finalize
 using main_bundle_t =

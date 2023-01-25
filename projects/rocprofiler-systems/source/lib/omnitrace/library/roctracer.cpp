@@ -101,7 +101,7 @@ get_roctracer_hip_data(int64_t _tid = threading::get_id())
 {
     using data_t        = std::unordered_map<uint64_t, roctracer_bundle_t>;
     using thread_data_t = thread_data<data_t, category::roctracer>;
-    static auto& _v     = thread_data_t::instances(thread_data_t::construct_on_init{});
+    static auto& _v     = thread_data_t::instances(construct_on_init{});
     return _v.at(_tid);
 }
 
@@ -142,7 +142,7 @@ get_roctracer_cid_data(int64_t _tid = threading::get_id())
 {
     using thread_data_t =
         thread_data<std::unordered_map<uint64_t, cid_data>, category::roctracer>;
-    static auto& _v = thread_data_t::instances(thread_data_t::construct_on_init{});
+    static auto& _v = thread_data_t::instances(construct_on_init{});
     return *_v.at(_tid);
 }
 
@@ -151,7 +151,7 @@ get_hip_activity_callbacks(int64_t _tid = threading::get_id())
 {
     using thread_data_t =
         thread_data<std::vector<std::function<void()>>, category::roctracer>;
-    static auto& _v = thread_data_t::instances(thread_data_t::construct_on_init{});
+    static auto& _v = thread_data_t::instances(construct_on_init{});
     return _v.at(_tid);
 }
 

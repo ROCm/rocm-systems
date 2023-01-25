@@ -97,11 +97,11 @@ omnitrace_main(int argc, char** argv, char** envp)
     const char* mode = getenv("OMNITRACE_MODE");
     omnitrace_init(mode ? mode : "sampling", false, argv[0]);
     omnitrace_init_tooling();
-    omnitrace_push_trace("main(int argc, char** argv)");
+    omnitrace_push_trace(basename(argv[0]));
 
     int ret = main_real(argc, argv, envp);
 
-    omnitrace_pop_trace("main(int argc, char** argv)");
+    omnitrace_pop_trace(basename(argv[0]));
     omnitrace_finalize();
 
     return ret;

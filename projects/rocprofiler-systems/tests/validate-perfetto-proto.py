@@ -5,6 +5,30 @@ import argparse
 from perfetto.trace_processor import TraceProcessor
 
 
+def load_trace(inp, max_tries=5, retry_wait=1):
+    """Occasionally connecting to the trace processor fails with HTTP errors
+    so this function tries to reduce spurious test failures"""
+
+    n = 0
+    tp = None
+    while tp is None:
+        try:
+            tp = TraceProcessor(trace=(inp))
+            break
+        except Exception as e:
+            sys.stderr.write(f"{e}\n")
+            sys.stderr.flush()
+            if n >= max_tries:
+                raise
+            else:
+                import time
+
+                time.sleep(retry_wait)
+        finally:
+            n += 1
+    return tp
+
+
 def validate_perfetto(data, labels, counts, depths):
     expected = []
     for litr, citr, ditr in zip(labels, counts, depths):
@@ -55,7 +79,11 @@ if __name__ == "__main__":
             "The same number of labels, counts, and depths must be specified"
         )
 
-    tp = TraceProcessor(trace=(args.input))
+    tp = load_trace(args.input)
+
+    if tp is None:
+        raise ValueError(f"trace {args.input} could not be loaded")
+
     pdata = {}
     # get data from perfetto
     qr_it = tp.query("SELECT name, depth, category FROM slice")

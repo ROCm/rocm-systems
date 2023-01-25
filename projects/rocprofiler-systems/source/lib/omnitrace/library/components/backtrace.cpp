@@ -118,6 +118,7 @@ backtrace::filter_and_patch(const std::vector<entry_type>& _data)
         bool       _keep_internal = get_sampling_keep_internal();
         const auto _npos          = std::string::npos;
         if(_keep_internal) return 1;
+        if(_lbl.find("omnitrace_main") != _npos) return 0;
         if(_lbl.find("omnitrace::common::") != _npos) return 0;
         if(_lbl.find("omnitrace::") != _npos) return 0;
         if(_lbl.find("tim::") != _npos) return 0;
@@ -184,7 +185,7 @@ backtrace::sample(int)
 {
     using namespace tim::backtrace;
     constexpr bool   with_signal_frame = false;
-    constexpr size_t ignore_depth      = 4;
+    constexpr size_t ignore_depth      = 3;
     // ignore depth based on:
     // 1. this frame
     // 2. tim::sampling::sampler<...>::sample(...) [always inline]

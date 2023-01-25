@@ -101,6 +101,19 @@ omnitrace_pop_category_region(omnitrace_category_t _category, const char* _name,
 }
 
 extern "C" void
+omnitrace_progress(const char* _name)
+{
+    omnitrace_progress_hidden(_name);
+}
+
+extern "C" void
+omnitrace_annotated_progress(const char* _name, omnitrace_annotation_t* _annotations,
+                             size_t _annotation_count)
+{
+    omnitrace_annotated_progress_hidden(_name, _annotations, _annotation_count);
+}
+
+extern "C" void
 omnitrace_init_library(void)
 {
     omnitrace_init_library_hidden();

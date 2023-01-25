@@ -12,6 +12,8 @@ if(OMNITRACE_DISABLE_EXAMPLES)
 endif()
 
 set(CMAKE_BUILD_TYPE "RelWithDebInfo")
+string(REGEX REPLACE " -g(|[0-2]) " " -g3 " CMAKE_CXX_FLAGS_RELWITHDEBINFO
+                     "${CMAKE_CXX_FLAGS_RELWITHDEBINFO}")
 
 list(INSERT CMAKE_MODULE_PATH 0 ${PROJECT_SOURCE_DIR}/cmake/Modules)
 
@@ -63,9 +65,11 @@ endif()
 file(GLOB headers ${PROJECT_SOURCE_DIR}/*.h ${PROJECT_SOURCE_DIR}/*.hxx)
 file(GLOB sources ${PROJECT_SOURCE_DIR}/*.cc)
 
-add_executable(lulesh ${sources} ${headers})
-target_include_directories(lulesh PRIVATE ${PROJECT_SOURCE_DIR}/includes)
-target_link_libraries(lulesh PRIVATE Kokkos::kokkos lulesh-mpi)
+omnitrace_causal_example_executable(
+    "lulesh"
+    SOURCES ${sources} ${headers}
+    LINK_LIBRARIES Kokkos::kokkos lulesh-mpi
+    INCLUDE_DIRECTORIES ${PROJECT_SOURCE_DIR}/includes)
 
 if(OMNITRACE_INSTALL_EXAMPLES)
     if(LULESH_BUILD_KOKKOS)
@@ -76,8 +80,4 @@ if(OMNITRACE_INSTALL_EXAMPLES)
         set_target_properties(lulesh PROPERTIES INSTALL_RPATH
                                                 "\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}")
     endif()
-    install(
-        TARGETS lulesh
-        DESTINATION bin
-        COMPONENT omnitrace-examples)
 endif()

@@ -13,6 +13,8 @@
 
 #include "lulesh.h"
 
+#include "causal.hpp"
+
 static Kokkos::View<Real_t*> buffer;
 static size_t                buffer_size;
 static size_t                buffer_offset;
@@ -46,6 +48,7 @@ TimeIncrement(Domain& domain)
 
     if((domain.dtfixed() <= Real_t(0.0)) && (domain.cycle() != Int_t(0)))
     {
+        // CAUSAL_BEGIN("TimeIncrement_Iteration")
         Real_t ratio;
         Real_t olddt = domain.deltatime();
 
@@ -86,6 +89,8 @@ TimeIncrement(Domain& domain)
             newdt = domain.dtmax();
         }
         domain.deltatime() = newdt;
+        CAUSAL_PROGRESS_NAMED("TimeIncrement_Iteration");
+        // CAUSAL_END("TimeIncrement_Iteration")
     }
 
     if((targetdt > domain.deltatime()) &&
@@ -2241,12 +2246,15 @@ main(int argc, char* argv[])
         while((locDom.time() < locDom.stoptime()) && (locDom.cycle() < opts.its))
         {
             Kokkos::Tools::startSection(_time_incrp);
+            //CAUSAL_BEGIN("Iteration")
             TimeIncrement(locDom);
             Kokkos::Tools::stopSection(_time_incrp);
 
             Kokkos::Tools::startSection(_leap_frogp);
             LagrangeLeapFrog(locDom);
             Kokkos::Tools::stopSection(_leap_frogp);
+            CAUSAL_PROGRESS_NAMED("Iteration")
+            //CAUSAL_END("Iteration")
 
             if((opts.showProg != 0) && (opts.quiet == 0) && (myRank == 0))
             {
@@ -2254,6 +2262,7 @@ main(int argc, char* argv[])
                        double(locDom.time()), double(locDom.deltatime()));
             }
             Kokkos::Tools::markEvent("completed_timestep");
+            CAUSAL_PROGRESS
         }
 
         Kokkos::Tools::destroyProfileSection(_time_incrp);

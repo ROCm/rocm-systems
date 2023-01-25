@@ -26,6 +26,7 @@
 #include "library/defines.hpp"
 #include "library/runtime.hpp"
 #include "library/sampling.hpp"
+#include "library/state.hpp"
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
 
@@ -71,6 +72,7 @@ auto _thread_pool_cfg = []() {
         thread_info::init(true);
         threading::set_thread_name(
             JOIN('.', "ptl", PTL::Threading::GetThreadId()).c_str());
+        set_thread_state(ThreadState::Disabled);
         sampling::block_signals();
     };
     _v.finalizer = []() {};
@@ -94,6 +96,19 @@ get_thread_pool()
     return _v;
 }
 }  // namespace
+
+namespace general
+{
+namespace
+{
+auto&
+get_thread_pool_state()
+{
+    static auto _v = State::PreInit;
+    return _v;
+}
+}  // namespace
+}  // namespace general
 
 namespace roctracer
 {
@@ -144,13 +159,20 @@ join()
 
     if(critical_trace::get_thread_pool_state() == State::Active)
     {
-        OMNITRACE_DEBUG_F("waiting for all critical tasks to complete...\n");
+        OMNITRACE_DEBUG_F("waiting for all critical trace tasks to complete...\n");
         for(size_t i = 0; i < max_supported_threads; ++i)
             critical_trace::get_task_group(i).join();
     }
     else
     {
         OMNITRACE_DEBUG_F("critical-trace thread-pool is not active...\n");
+    }
+
+    if(general::get_thread_pool_state() == State::Active)
+    {
+        OMNITRACE_DEBUG_F("waiting for all general tasks to complete...\n");
+        for(size_t i = 0; i < max_supported_threads; ++i)
+            general::get_task_group(i).join();
     }
 }
 
@@ -189,6 +211,18 @@ shutdown()
         OMNITRACE_DEBUG_F("critical-trace thread-pool is not active...\n");
     }
 
+    if(general::get_thread_pool_state() == State::Active)
+    {
+        OMNITRACE_DEBUG_F("Waiting on completion of general tasks...\n");
+        for(size_t i = 0; i < max_supported_threads; ++i)
+        {
+            general::get_task_group(i).join();
+            general::get_task_group(i).clear();
+            general::get_task_group(i).set_pool(nullptr);
+        }
+        general::get_thread_pool_state() = State::Finalized;
+    }
+
     if(get_thread_pool_state() == State::Active)
     {
         OMNITRACE_DEBUG_F("Destroying the omnitrace thread pool...\n");
@@ -205,6 +239,17 @@ size_t
 initialize_threadpool(size_t _v)
 {
     return get_thread_pool().initialize_threadpool(_v);
+}
+
+PTL::TaskGroup<void>&
+general::get_task_group(int64_t _tid)
+{
+    struct local
+    {};
+    using thread_data_t = thread_data<PTL::TaskGroup<void>, local>;
+    static auto& _v =
+        thread_data_t::instances(construct_on_init{}, &tasking::get_thread_pool());
+    return *_v.at(_tid);
 }
 
 PTL::TaskGroup<void>&

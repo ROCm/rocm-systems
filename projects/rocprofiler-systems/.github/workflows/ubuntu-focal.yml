@@ -18,7 +18,6 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  OMNITRACE_VERBOSE: 1
   OMNITRACE_CI: ON
   OMNITRACE_TMPDIR: "%env{PWD}%/testing-tmp"
 
@@ -136,7 +135,7 @@ jobs:
           -DOMNITRACE_BUILD_STATIC_LIBSTDCXX=${{ matrix.static-libstdcxx }}
           -DOMNITRACE_PYTHON_PREFIX=/opt/conda/envs
           -DOMNITRACE_PYTHON_ENVS="py3.6;py3.7;py3.8;py3.9;py3.10"
-          -DOMNITRACE_MAX_THREADS=32
+          -DOMNITRACE_MAX_THREADS=64
           -DOMNITRACE_DISABLE_EXAMPLES="transpose;rccl"
           -DOMNITRACE_BUILD_NUMBER=${{ github.run_attempt }}
           -DMPI_HEADERS_ALLOW_MPICH=OFF
@@ -316,7 +315,7 @@ jobs:
           -DOMNITRACE_BUILD_LTO=OFF
           -DOMNITRACE_USE_MPI=OFF
           -DOMNITRACE_USE_HIP=ON
-          -DOMNITRACE_MAX_THREADS=32
+          -DOMNITRACE_MAX_THREADS=64
           -DOMNITRACE_USE_PAPI=OFF
           -DOMNITRACE_USE_OMPT=OFF
           -DOMNITRACE_USE_PYTHON=ON
@@ -403,7 +402,6 @@ jobs:
 
     env:
       ELFUTILS_DOWNLOAD_VERSION: 0.186
-      OMNITRACE_VERBOSE: 1
 
     steps:
     - uses: actions/checkout@v3
@@ -468,7 +466,7 @@ jobs:
           -DDYNINST_BUILD_SHARED_LIBS=ON
           -DDYNINST_BUILD_STATIC_LIBS=OFF
           -DDYNINST_ELFUTILS_DOWNLOAD_VERSION=${{ env.ELFUTILS_DOWNLOAD_VERSION }}
-          -DOMNITRACE_MAX_THREADS=32
+          -DOMNITRACE_MAX_THREADS=64
           -DOMNITRACE_DISABLE_EXAMPLES="transpose;rccl"
           -DOMNITRACE_BUILD_NUMBER=${{ github.run_attempt }}
           -DMPI_HEADERS_ALLOW_MPICH=ON
@@ -597,6 +595,6 @@ jobs:
           -DOMNITRACE_USE_PAPI=ON
           -DOMNITRACE_USE_HIP=OFF
           -DOMNITRACE_USE_RCCL=OFF
-          -DOMNITRACE_MAX_THREADS=32
+          -DOMNITRACE_MAX_THREADS=64
           -DOMNITRACE_DISABLE_EXAMPLES="transpose;rccl"
           -DOMNITRACE_BUILD_NUMBER=${{ github.run_attempt }}

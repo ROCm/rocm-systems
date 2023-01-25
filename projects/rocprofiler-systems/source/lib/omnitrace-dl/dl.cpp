@@ -266,6 +266,9 @@ struct OMNITRACE_HIDDEN_API indirect
                         "omnitrace_register_source");
         OMNITRACE_DLSYM(omnitrace_register_coverage_f, m_omnihandle,
                         "omnitrace_register_coverage");
+        OMNITRACE_DLSYM(omnitrace_progress_f, m_omnihandle, "omnitrace_progress");
+        OMNITRACE_DLSYM(omnitrace_annotated_progress_f, m_omnihandle,
+                        "omnitrace_annotated_progress");
 
         OMNITRACE_DLSYM(kokkosp_print_help_f, m_omnihandle, "kokkosp_print_help");
         OMNITRACE_DLSYM(kokkosp_parse_args_f, m_omnihandle, "kokkosp_parse_args");
@@ -343,8 +346,10 @@ struct OMNITRACE_HIDDEN_API indirect
             _cb.stop_thread_trace          = &omnitrace_user_stop_thread_trace_dl;
             _cb.push_region                = &omnitrace_user_push_region_dl;
             _cb.pop_region                 = &omnitrace_user_pop_region_dl;
+            _cb.progress                   = &omnitrace_user_progress_dl;
             _cb.push_annotated_region      = &omnitrace_user_push_annotated_region_dl;
             _cb.pop_annotated_region       = &omnitrace_user_pop_annotated_region_dl;
+            _cb.annotated_progress         = &omnitrace_user_annotated_progress_dl;
             (*omnitrace_user_configure_f)(OMNITRACE_USER_REPLACE_CONFIG, _cb, nullptr);
         }
     }
@@ -370,6 +375,9 @@ public:
                                             omnitrace_annotation_t*, size_t) = nullptr;
     int (*omnitrace_pop_category_region_f)(omnitrace_category_t, const char*,
                                            omnitrace_annotation_t*, size_t)  = nullptr;
+    void (*omnitrace_progress_f)(const char*)                                = nullptr;
+    void (*omnitrace_annotated_progress_f)(const char*, omnitrace_annotation_t*,
+                                           size_t)                           = nullptr;
 
     // libomnitrace-user functions
     int (*omnitrace_user_configure_f)(int, user_cb_t, user_cb_t*) = nullptr;
@@ -772,6 +780,12 @@ extern "C"
         return OMNITRACE_DL_INVOKE(get_indirect().omnitrace_pop_region_f, name);
     }
 
+    int omnitrace_user_progress_dl(const char* name)
+    {
+        OMNITRACE_DL_INVOKE(get_indirect().omnitrace_progress_f, name);
+        return 0;
+    }
+
     int omnitrace_user_push_annotated_region_dl(const char*             name,
                                                 omnitrace_annotation_t* _annotations,
                                                 size_t                  _annotation_count)
@@ -790,6 +804,28 @@ extern "C"
         return OMNITRACE_DL_INVOKE(get_indirect().omnitrace_pop_category_region_f,
                                    OMNITRACE_CATEGORY_USER, name, _annotations,
                                    _annotation_count);
+    }
+
+    int omnitrace_user_annotated_progress_dl(const char*             name,
+                                             omnitrace_annotation_t* _annotations,
+                                             size_t                  _annotation_count)
+    {
+        OMNITRACE_DL_INVOKE(get_indirect().omnitrace_annotated_progress_f, name,
+                            _annotations, _annotation_count);
+        return 0;
+    }
+
+    void omnitrace_progress(const char* _name)
+    {
+        return OMNITRACE_DL_INVOKE(get_indirect().omnitrace_progress_f, _name);
+    }
+
+    void omnitrace_annotated_progress(const char*             _name,
+                                      omnitrace_annotation_t* _annotations,
+                                      size_t                  _annotation_count)
+    {
+        return OMNITRACE_DL_INVOKE(get_indirect().omnitrace_annotated_progress_f, _name,
+                                   _annotations, _annotation_count);
     }
 
     //----------------------------------------------------------------------------------//
@@ -1033,11 +1069,13 @@ omnitrace_preload()
     {
         // reset_omnitrace_preload();
         omnitrace_preinit_library();
+        auto _causal = get_env("OMNITRACE_USE_CAUSAL", false);
+        auto _mode   = get_env("OMNITRACE_MODE", (_causal) ? "causal" : "sampling");
         OMNITRACE_DL_LOG(1, "[%s] invoking %s(%s)\n", __FUNCTION__, "omnitrace_init",
-                         ::omnitrace::join(::omnitrace::QuoteStrings{}, ", ", "sampling",
-                                           false, "main")
+                         ::omnitrace::join(::omnitrace::QuoteStrings{}, ", ", _mode,
+                                           false, "omnitrace")
                              .c_str());
-        omnitrace_init("sampling", false, "omnitrace");
+        omnitrace_init(_mode.c_str(), false, nullptr);
         omnitrace_init_tooling();
     }
 

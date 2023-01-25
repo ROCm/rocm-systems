@@ -104,7 +104,9 @@ get_initial_environment()
     auto* _omni_libpath =
         realpath(get_internal_libpath("libomnitrace.so").c_str(), nullptr);
 
-    update_env(_env, "OMNITRACE_USE_SAMPLING", true);
+    auto _mode = get_env<std::string>("OMNITRACE_MODE", "sampling", false);
+
+    update_env(_env, "OMNITRACE_USE_SAMPLING", (_mode != "causal"));
     update_env(_env, "OMNITRACE_CRITICAL_TRACE", false);
     update_env(_env, "OMNITRACE_USE_PROCESS_SAMPLING", false);
 
@@ -147,6 +149,8 @@ get_internal_libpath(const std::string& _lib)
 void
 print_updated_environment(std::vector<char*> _env)
 {
+    if(get_env<int>("OMNITRACE_VERBOSE", 0) < 0) return;
+
     std::sort(_env.begin(), _env.end(), [](auto* _lhs, auto* _rhs) {
         if(!_lhs) return false;
         if(!_rhs) return true;
@@ -335,6 +339,8 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
     };
 
     parser.enable_help();
+    parser.enable_version("omnitrace-sample", "v" OMNITRACE_VERSION_STRING,
+                          OMNITRACE_GIT_DESCRIBE, OMNITRACE_GIT_REVISION);
 
     auto _cols = std::get<0>(tim::utility::console::get_columns());
     if(_cols > parser.get_help_width() + 8)

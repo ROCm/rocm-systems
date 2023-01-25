@@ -57,7 +57,7 @@ namespace
 {
 using cpu_data_tuple_t = std::tuple<size_t, int64_t, int64_t, int64_t, int64_t, int64_t,
                                     int64_t, int64_t, component::cpu_freq>;
-std::deque<cpu_data_tuple_t> cpu_data = {};
+std::deque<cpu_data_tuple_t> data = {};
 
 template <typename... Types>
 void init_perfetto_counter_tracks(type_list<Types...>)
@@ -97,7 +97,7 @@ sample()
     auto _freqs  = component::cpu_freq{}.sample();
 
     // user and kernel mode times are in microseconds
-    cpu_data.emplace_back(
+    data.emplace_back(
         _ts, tim::get_page_rss(), tim::get_virt_mem(), _rcache.get_peak_rss(),
         _rcache.get_num_priority_context_switch() +
             _rcache.get_num_voluntary_context_switch(),
@@ -161,7 +161,7 @@ post_process()
 {
     OMNITRACE_VERBOSE(1,
                       "Post-processing %zu cpu frequency and memory usage entries...\n",
-                      cpu_data.size());
+                      data.size());
     auto _process_frequencies = [](size_t _idx, size_t _offset) {
         using freq_track = perfetto_counter_track<category::cpu_freq>;
 
@@ -177,7 +177,7 @@ post_process()
             freq_track::emplace(_idx, addendum("Frequency"), "MHz");
         }
 
-        for(auto& itr : cpu_data)
+        for(auto& itr : data)
         {
             uint64_t _ts   = std::get<0>(itr);
             double   _freq = std::get<8>(itr).at(_offset);
@@ -203,7 +203,7 @@ post_process()
         OMNITRACE_CI_THROW(!_thread_info, "Missing thread info for thread 0");
         if(!_thread_info) return;
 
-        for(auto& itr : cpu_data)
+        for(auto& itr : data)
         {
             uint64_t _ts = std::get<0>(itr);
             if(!_thread_info->is_valid_time(_ts)) continue;

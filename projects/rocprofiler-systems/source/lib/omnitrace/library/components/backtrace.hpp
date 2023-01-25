@@ -79,6 +79,7 @@ struct backtrace
     bool                    empty() const;
     size_t                  size() const;
     std::vector<entry_type> get() const;
+    data_t                  get_data() const { return m_data; }
 
 private:
     data_t m_data = {};

@@ -32,6 +32,8 @@ such as the memory usage, page-faults, and context-switches, and thread-level me
   - Periodic software interrupts per-thread
 - Process-level sampling
   - Background thread records process-, system- and device-level metrics while the application executes
+- Causal profiling
+  - Quantifies the potential impact of optimizations in parallel codes
 - Critical trace generation
 
 ### Data Analysis
@@ -41,6 +43,7 @@ such as the memory usage, page-faults, and context-switches, and thread-level me
   - Ideal for running at scale
 - Comprehensive traces
   - Every individual event/measurement
+- Application speedup predictions resulting from potential optimizations in functions and lines of code (causal profiling)
 - Critical trace analysis (alpha)
 
 ### Parallelism API Support

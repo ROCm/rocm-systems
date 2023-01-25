@@ -23,6 +23,7 @@
 #pragma once
 
 #include "library/defines.hpp"
+#include "library/exception.hpp"
 
 #include <timemory/api.hpp>
 #include <timemory/backends/dmp.hpp>
@@ -126,6 +127,27 @@ get_chars(T&& _c, std::index_sequence<Idx...>)
 }
 }  // namespace
 }  // namespace debug
+
+namespace binary
+{
+struct address_range;
+}
+
+using address_range_t = binary::address_range;
+
+template <typename Tp>
+std::string
+as_hex(Tp, size_t _wdith = 16);
+
+template <>
+std::string as_hex<address_range_t>(address_range_t, size_t);
+
+extern template std::string as_hex<int32_t>(int32_t, size_t);
+extern template std::string as_hex<uint32_t>(uint32_t, size_t);
+extern template std::string as_hex<int64_t>(int64_t, size_t);
+extern template std::string as_hex<uint64_t>(uint64_t, size_t);
+extern template std::string
+as_hex<void*>(void*, size_t);
 }  // namespace omnitrace
 
 #if !defined(OMNITRACE_DEBUG_BUFFER_LEN)
@@ -213,7 +235,8 @@ get_chars(T&& _c, std::index_sequence<Idx...>)
         ::omnitrace::debug::flush();                                                     \
         ::omnitrace::debug::lock _debug_lk{};                                            \
         OMNITRACE_FPRINTF_STDERR_COLOR(info);                                            \
-        fprintf(::omnitrace::debug::get_file(), "[omnitrace]%s",                         \
+        fprintf(::omnitrace::debug::get_file(), "[omnitrace][%i]%s",                     \
+                OMNITRACE_DEBUG_PROCESS_IDENTIFIER,                                      \
                 ::omnitrace::debug::is_bracket(__VA_ARGS__) ? "" : " ");                 \
         fprintf(::omnitrace::debug::get_file(), __VA_ARGS__);                            \
         ::omnitrace::debug::flush();                                                     \
@@ -241,7 +264,8 @@ get_chars(T&& _c, std::index_sequence<Idx...>)
         ::omnitrace::debug::flush();                                                     \
         ::omnitrace::debug::lock _debug_lk{};                                            \
         OMNITRACE_FPRINTF_STDERR_COLOR(info);                                            \
-        fprintf(::omnitrace::debug::get_file(), "[omnitrace][%s]%s", OMNITRACE_FUNCTION, \
+        fprintf(::omnitrace::debug::get_file(), "[omnitrace][%i][%s]%s",                 \
+                OMNITRACE_DEBUG_PROCESS_IDENTIFIER, OMNITRACE_FUNCTION,                  \
                 ::omnitrace::debug::is_bracket(__VA_ARGS__) ? "" : " ");                 \
         fprintf(::omnitrace::debug::get_file(), __VA_ARGS__);                            \
         ::omnitrace::debug::flush();                                                     \
@@ -270,7 +294,8 @@ get_chars(T&& _c, std::index_sequence<Idx...>)
         ::omnitrace::debug::flush();                                                     \
         ::omnitrace::debug::lock _debug_lk{};                                            \
         OMNITRACE_FPRINTF_STDERR_COLOR(warning);                                         \
-        fprintf(::omnitrace::debug::get_file(), "[omnitrace]%s",                         \
+        fprintf(::omnitrace::debug::get_file(), "[omnitrace][%i]%s",                     \
+                OMNITRACE_DEBUG_PROCESS_IDENTIFIER,                                      \
                 ::omnitrace::debug::is_bracket(__VA_ARGS__) ? "" : " ");                 \
         fprintf(::omnitrace::debug::get_file(), __VA_ARGS__);                            \
         ::omnitrace::debug::flush();                                                     \
@@ -298,7 +323,8 @@ get_chars(T&& _c, std::index_sequence<Idx...>)
         ::omnitrace::debug::flush();                                                     \
         ::omnitrace::debug::lock _debug_lk{};                                            \
         OMNITRACE_FPRINTF_STDERR_COLOR(warning);                                         \
-        fprintf(::omnitrace::debug::get_file(), "[omnitrace][%s]%s", OMNITRACE_FUNCTION, \
+        fprintf(::omnitrace::debug::get_file(), "[omnitrace][%i][%s]%s",                 \
+                OMNITRACE_DEBUG_PROCESS_IDENTIFIER, OMNITRACE_FUNCTION,                  \
                 ::omnitrace::debug::is_bracket(__VA_ARGS__) ? "" : " ");                 \
         fprintf(::omnitrace::debug::get_file(), __VA_ARGS__);                            \
         ::omnitrace::debug::flush();                                                     \
@@ -306,7 +332,7 @@ get_chars(T&& _c, std::index_sequence<Idx...>)
 
 //--------------------------------------------------------------------------------------//
 
-#define OMNITRACE_CONDITIONAL_THROW(COND, ...)                                           \
+#define OMNITRACE_CONDITIONAL_THROW_E(COND, TYPE, ...)                                   \
     if(COND)                                                                             \
     {                                                                                    \
         char _msg_buffer[OMNITRACE_DEBUG_BUFFER_LEN];                                    \
@@ -316,30 +342,44 @@ get_chars(T&& _c, std::index_sequence<Idx...>)
                  ::omnitrace::debug::is_bracket(__VA_ARGS__) ? "" : " ");                \
         auto len = strlen(_msg_buffer);                                                  \
         snprintf(_msg_buffer + len, OMNITRACE_DEBUG_BUFFER_LEN - len, __VA_ARGS__);      \
-        throw std::runtime_error(                                                        \
+        throw ::omnitrace::exception<TYPE>(                                              \
             ::tim::log::string(::tim::log::color::fatal(), _msg_buffer));                \
     }
 
-#define OMNITRACE_CONDITIONAL_BASIC_THROW(COND, ...)                                     \
+#define OMNITRACE_CONDITIONAL_BASIC_THROW_E(COND, TYPE, ...)                             \
     if(COND)                                                                             \
     {                                                                                    \
         char _msg_buffer[OMNITRACE_DEBUG_BUFFER_LEN];                                    \
-        snprintf(_msg_buffer, OMNITRACE_DEBUG_BUFFER_LEN, "[omnitrace][%s]%s",           \
-                 OMNITRACE_FUNCTION,                                                     \
+        snprintf(_msg_buffer, OMNITRACE_DEBUG_BUFFER_LEN, "[omnitrace][%i][%s]%s",       \
+                 OMNITRACE_DEBUG_PROCESS_IDENTIFIER, OMNITRACE_FUNCTION,                 \
                  ::omnitrace::debug::is_bracket(__VA_ARGS__) ? "" : " ");                \
         auto len = strlen(_msg_buffer);                                                  \
         snprintf(_msg_buffer + len, OMNITRACE_DEBUG_BUFFER_LEN - len, __VA_ARGS__);      \
-        throw std::runtime_error(                                                        \
+        throw ::omnitrace::exception<TYPE>(                                              \
             ::tim::log::string(::tim::log::color::fatal(), _msg_buffer));                \
     }
 
+#define OMNITRACE_CI_THROW_E(COND, TYPE, ...)                                            \
+    OMNITRACE_CONDITIONAL_THROW_E(                                                       \
+        ::omnitrace::get_is_continuous_integration() && (COND), TYPE, __VA_ARGS__)
+
+#define OMNITRACE_CI_BASIC_THROW_E(COND, TYPE, ...)                                      \
+    OMNITRACE_CONDITIONAL_BASIC_THROW_E(                                                 \
+        ::omnitrace::get_is_continuous_integration() && (COND), TYPE, __VA_ARGS__)
+
+//--------------------------------------------------------------------------------------//
+
+#define OMNITRACE_CONDITIONAL_THROW(COND, ...)                                           \
+    OMNITRACE_CONDITIONAL_THROW_E((COND), std::runtime_error, __VA_ARGS__)
+
+#define OMNITRACE_CONDITIONAL_BASIC_THROW(COND, ...)                                     \
+    OMNITRACE_CONDITIONAL_BASIC_THROW_E((COND), std::runtime_error, __VA_ARGS__)
+
 #define OMNITRACE_CI_THROW(COND, ...)                                                    \
-    OMNITRACE_CONDITIONAL_THROW(::omnitrace::get_is_continuous_integration() && (COND),  \
-                                __VA_ARGS__)
+    OMNITRACE_CI_THROW_E((COND), std::runtime_error, __VA_ARGS__)
 
 #define OMNITRACE_CI_BASIC_THROW(COND, ...)                                              \
-    OMNITRACE_CONDITIONAL_BASIC_THROW(                                                   \
-        ::omnitrace::get_is_continuous_integration() && (COND), __VA_ARGS__)
+    OMNITRACE_CI_BASIC_THROW_E((COND), std::runtime_error, __VA_ARGS__)
 
 //--------------------------------------------------------------------------------------//
 
@@ -364,7 +404,8 @@ get_chars(T&& _c, std::index_sequence<Idx...>)
     {                                                                                    \
         ::omnitrace::debug::flush();                                                     \
         OMNITRACE_FPRINTF_STDERR_COLOR(fatal);                                           \
-        fprintf(::omnitrace::debug::get_file(), "[omnitrace]%s",                         \
+        fprintf(::omnitrace::debug::get_file(), "[omnitrace][%i]%s",                     \
+                OMNITRACE_DEBUG_PROCESS_IDENTIFIER,                                      \
                 ::omnitrace::debug::is_bracket(__VA_ARGS__) ? "" : " ");                 \
         fprintf(::omnitrace::debug::get_file(), __VA_ARGS__);                            \
         ::omnitrace::debug::flush();                                                     \
@@ -396,7 +437,8 @@ get_chars(T&& _c, std::index_sequence<Idx...>)
     {                                                                                    \
         ::omnitrace::debug::flush();                                                     \
         OMNITRACE_FPRINTF_STDERR_COLOR(fatal);                                           \
-        fprintf(::omnitrace::debug::get_file(), "[omnitrace][%s]%s", OMNITRACE_FUNCTION, \
+        fprintf(::omnitrace::debug::get_file(), "[omnitrace][%i][%s]%s",                 \
+                OMNITRACE_DEBUG_PROCESS_IDENTIFIER, OMNITRACE_FUNCTION,                  \
                 ::omnitrace::debug::is_bracket(__VA_ARGS__) ? "" : " ");                 \
         fprintf(::omnitrace::debug::get_file(), __VA_ARGS__);                            \
         ::omnitrace::debug::flush();                                                     \
@@ -536,6 +578,26 @@ get_chars(T&& _c, std::index_sequence<Idx...>)
 
 #define OMNITRACE_WARNING_IF_F(COND, ...)                                                \
     OMNITRACE_CONDITIONAL_WARN_F((COND), __VA_ARGS__)
+
+#define OMNITRACE_WARNING_OR_CI_THROW(LEVEL, ...)                                        \
+    {                                                                                    \
+        if(::omnitrace::get_is_continuous_integration())                                 \
+        {                                                                                \
+            OMNITRACE_CI_THROW(true, __VA_ARGS__);                                       \
+        }                                                                                \
+        else                                                                             \
+        {                                                                                \
+            OMNITRACE_CONDITIONAL_WARN(::omnitrace::get_debug() ||                       \
+                                           (::omnitrace::get_verbose() >= LEVEL),        \
+                                       __VA_ARGS__)                                      \
+        }                                                                                \
+    }
+
+#define OMNITRACE_REQUIRE(...) TIMEMORY_REQUIRE(__VA_ARGS__)
+#define OMNITRACE_PREFER(COND)                                                           \
+    (COND)                                           ? ::tim::log::base()                \
+    : (::omnitrace::get_is_continuous_integration()) ? TIMEMORY_FATAL                    \
+                                                     : TIMEMORY_WARNING
 
 //--------------------------------------------------------------------------------------//
 //

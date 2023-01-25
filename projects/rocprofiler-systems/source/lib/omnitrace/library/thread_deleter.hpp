@@ -20,31 +20,33 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "library/thread_data.hpp"
-#include "library/components/pthread_create_gotcha.hpp"
-#include "library/thread_info.hpp"
-#include "library/utility.hpp"
+#pragma once
 
-#include <timemory/backends/threading.hpp>
-#include <timemory/components/timing/backends.hpp>
+#include "library/concepts.hpp"
+#include "library/defines.hpp"
 
 namespace omnitrace
 {
-instrumentation_bundles::instance_array_t&
-instrumentation_bundles::instances()
+template <>
+struct thread_deleter<void>
 {
-    static auto _v = instance_array_t{};
-    return _v;
-}
+    void operator()() const;
+};
 
-void
-thread_deleter<void>::operator()() const
+extern template struct thread_deleter<void>;
+
+template <typename Tp>
+struct thread_deleter
 {
-    component::pthread_create_gotcha::shutdown(threading::get_id());
-    set_thread_state(ThreadState::Completed);
-    if(get_state() != State::Finalized && threading::get_id() == 0)
-        omnitrace_finalize_hidden();
-}
+    void operator()(Tp* ptr) const
+    {
+        constexpr bool delete_pointer =
+            (use_placement_new_when_generating_unique_ptr<Tp>::value == false);
 
-template struct thread_deleter<void>;
+        thread_deleter<void>{}();
+        if constexpr(delete_pointer) delete ptr;
+
+        (void) ptr;
+    }
+};
 }  // namespace omnitrace

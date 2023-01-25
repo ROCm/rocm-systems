@@ -51,6 +51,12 @@ get_thread_state_history(int64_t _idx = utility::get_thread_index())
     static auto _v = utility::get_filled_array<OMNITRACE_MAX_THREADS>(
         []() { return utility::get_reserved_vector<ThreadState>(32); });
 
+    if(_idx >= OMNITRACE_MAX_THREADS)
+    {
+        static thread_local auto _tl_v = utility::get_reserved_vector<ThreadState>(32);
+        return _tl_v;
+    }
+
     return _v.at(_idx);
 }
 }  // namespace
@@ -147,7 +153,19 @@ to_string(omnitrace::Mode _v)
     {
         case omnitrace::Mode::Trace: return "Trace";
         case omnitrace::Mode::Sampling: return "Sampling";
+        case omnitrace::Mode::Causal: return "Causal";
         case omnitrace::Mode::Coverage: return "Coverage";
+    }
+    return {};
+}
+
+std::string
+to_string(omnitrace::CausalMode _v)
+{
+    switch(_v)
+    {
+        case omnitrace::CausalMode::Line: return "Line";
+        case omnitrace::CausalMode::Function: return "Function";
     }
     return {};
 }
