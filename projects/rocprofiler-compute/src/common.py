@@ -31,7 +31,7 @@ OMNIPERF_HOME = Path(__file__).resolve().parent
 
 # OMNIPERF INFO
 PROG = "omniperf"
-SOC_LIST = ["mi50", "mi100", "mi200"]
+SOC_LIST = ["mi50", "mi100", "mi200", "vega10"]
 DISTRO_MAP = {"platform:el8": "rhel8", "15.3": "sle15sp3", "20.04": "ubuntu20_04"}
 
 

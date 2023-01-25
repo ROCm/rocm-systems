@@ -22,6 +22,8 @@
 
 import os
 import argparse
+import subprocess
+
 from common import (
     OMNIPERF_HOME,
     PROG,
@@ -116,6 +118,49 @@ def parse(my_parser):
         default=None,
         help="\t\t\tKernel filtering.",
     )
+
+    result = subprocess.run(
+        ["which", "rocscope"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
+    )
+    if result.returncode == 0:
+        profile_group.add_argument(
+            "-l",
+            "--i-feel-lucky",
+            required=False,
+            default=False,
+            action="store_true",
+            dest="lucky",
+            help="\t\t\tProfile only the most time consuming kernels.",
+        )
+        profile_group.add_argument(
+            "-r",
+            "--use-rocscope",
+            required=False,
+            default=False,
+            action="store_true",
+            dest="use_rocscope",
+            help="\t\t\tUse rocscope for profiling",
+        )
+        profile_group.add_argument(
+            "-s",
+            "--kernel-summaries",
+            required=False,
+            default=False,
+            action="store_true",
+            dest="summaries",
+            help="\t\t\tCreate kernel summaries.",
+        )
+    else:
+        profile_group.add_argument(
+            "--i-feel-lucky", default=False, dest="lucky", help=argparse.SUPPRESS
+        )
+        profile_group.add_argument(
+            "--use-rocscope", default=False, dest="use_rocscope", help=argparse.SUPPRESS
+        )
+        profile_group.add_argument(
+            "--kernel-summaries", default=False, dest="summaries", help=argparse.SUPPRESS
+        )
+
     profile_group.add_argument(
         "-b",
         "--ipblocks",

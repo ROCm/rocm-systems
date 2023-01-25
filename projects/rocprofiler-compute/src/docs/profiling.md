@@ -1,4 +1,4 @@
-# Performance Profiling
+# Profiling
 
 ```eval_rst
 .. toctree::
