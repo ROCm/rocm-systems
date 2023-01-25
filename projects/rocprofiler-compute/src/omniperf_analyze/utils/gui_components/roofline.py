@@ -35,10 +35,10 @@ def to_int(a):
     else:
         return int(a)
 
-
-def generate_plots(roof_info, ai_data, verbose, fig=None):
+def generate_plots(roof_info, ai_data, isStandalone, verbose, fig=None):
     if fig is None:
         fig = go.Figure()
+    plotMode = "lines+text" if isStandalone else "lines"
     line_data = roofline_calc.empirical_roof(roof_info, verbose)
     print("Line data:\n", line_data)
 
@@ -50,10 +50,11 @@ def generate_plots(roof_info, ai_data, verbose, fig=None):
             x=line_data["hbm"][0],
             y=line_data["hbm"][1],
             name="HBM-{}".format(roof_info["dtype"]),
-            mode="lines+text",
+            mode=plotMode,
             hovertemplate="<b>%{text}</b>",
             text=[
                 "{} GB/s".format(to_int(line_data["hbm"][2])),
+                None if isStandalone else "{} GB/s".format(to_int(line_data["hbm"][2]))
             ],
             textposition="top right",
         )
@@ -63,10 +64,11 @@ def generate_plots(roof_info, ai_data, verbose, fig=None):
             x=line_data["l2"][0],
             y=line_data["l2"][1],
             name="L2-{}".format(roof_info["dtype"]),
-            mode="lines+text",
+            mode=plotMode,
             hovertemplate="<b>%{text}</b>",
             text=[
                 "{} GB/s".format(to_int(line_data["l2"][2])),
+                None if isStandalone else "{} GB/s".format(to_int(line_data["l2"][2]))
             ],
             textposition="top right",
         )
@@ -76,10 +78,11 @@ def generate_plots(roof_info, ai_data, verbose, fig=None):
             x=line_data["l1"][0],
             y=line_data["l1"][1],
             name="L1-{}".format(roof_info["dtype"]),
-            mode="lines+text",
+            mode=plotMode,
             hovertemplate="<b>%{text}</b>",
             text=[
                 "{} GB/s".format(to_int(line_data["l1"][2])),
+                None if isStandalone else "{} GB/s".format(to_int(line_data["l1"][2]))
             ],
             textposition="top right",
         )
@@ -89,10 +92,11 @@ def generate_plots(roof_info, ai_data, verbose, fig=None):
             x=line_data["lds"][0],
             y=line_data["lds"][1],
             name="LDS-{}".format(roof_info["dtype"]),
-            mode="lines+text",
+            mode=plotMode,
             hovertemplate="<b>%{text}</b>",
             text=[
                 "{} GB/s".format(to_int(line_data["lds"][2])),
+                None if isStandalone else "{} GB/s".format(to_int(line_data["lds"][2]))
             ],
             textposition="top right",
         )
@@ -103,10 +107,10 @@ def generate_plots(roof_info, ai_data, verbose, fig=None):
                 x=line_data["valu"][0],
                 y=line_data["valu"][1],
                 name="Peak VALU-{}".format(roof_info["dtype"]),
-                mode="lines+text",
+                mode=plotMode,
                 hovertemplate="<b>%{text}</b>",
                 text=[
-                    None,
+                    None if isStandalone else "{} GFLOP/s".format(to_int(line_data["valu"][2])),
                     "{} GFLOP/s".format(to_int(line_data["valu"][2])),
                 ],
                 textposition="top left",
@@ -122,10 +126,10 @@ def generate_plots(roof_info, ai_data, verbose, fig=None):
             x=line_data["mfma"][0],
             y=line_data["mfma"][1],
             name="Peak MFMA-{}".format(roof_info["dtype"]),
-            mode="lines+text",
+            mode=plotMode,
             hovertemplate="<b>%{text}</b>",
             text=[
-                None,
+                None if isStandalone else "{} GFLOP/s".format(to_int(line_data["mfma"][2])),
                 "{} GFLOP/s".format(to_int(line_data["mfma"][2])),
             ],
             textposition=pos,
@@ -199,9 +203,9 @@ def get_roofline(path_to_dir, ret_df, verbose, dev_id=None, isStandalone=False):
             print(i, "->", ai_data[i])
         print("\n")
 
-    fp32_fig = generate_plots(fp32_details, ai_data, verbose)
-    fp16_fig = generate_plots(fp16_details, ai_data, verbose)
-    ml_combo_fig = generate_plots(int8_details, ai_data, verbose, fp16_fig)
+    fp32_fig = generate_plots(fp32_details, ai_data, isStandalone, verbose)
+    fp16_fig = generate_plots(fp16_details, ai_data, isStandalone, verbose)
+    ml_combo_fig = generate_plots(int8_details, ai_data, isStandalone, verbose, fp16_fig)
 
     if isStandalone:
         dev_id = "ALL" if dev_id == -1 else str(dev_id)
