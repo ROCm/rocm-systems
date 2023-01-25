@@ -55,7 +55,7 @@ def generate_plots(roof_info, ai_data, verbose, fig=None):
             text=[
                 "{} GB/s".format(to_int(line_data["hbm"][2])),
             ],
-            textposition="top center"
+            textposition="top right",
         )
     )
     fig.add_trace(
@@ -68,7 +68,7 @@ def generate_plots(roof_info, ai_data, verbose, fig=None):
             text=[
                 "{} GB/s".format(to_int(line_data["l2"][2])),
             ],
-            textposition="top center"
+            textposition="top right",
         )
     )
     fig.add_trace(
@@ -81,7 +81,7 @@ def generate_plots(roof_info, ai_data, verbose, fig=None):
             text=[
                 "{} GB/s".format(to_int(line_data["l1"][2])),
             ],
-            textposition="top center"
+            textposition="top right",
         )
     )
     fig.add_trace(
@@ -94,7 +94,7 @@ def generate_plots(roof_info, ai_data, verbose, fig=None):
             text=[
                 "{} GB/s".format(to_int(line_data["lds"][2])),
             ],
-            textposition="top center"
+            textposition="top right",
         )
     )
     if roof_info["dtype"] != "FP16" and roof_info["dtype"] != "I8":
@@ -109,14 +109,14 @@ def generate_plots(roof_info, ai_data, verbose, fig=None):
                     None,
                     "{} GFLOP/s".format(to_int(line_data["valu"][2])),
                 ],
-                textposition="top center"
+                textposition="top left",
             )
         )
 
     if roof_info["dtype"] == "FP16":
-        pos = "bottom center"
+        pos = "bottom left"
     else:
-        pos = "top center"
+        pos = "top left"
     fig.add_trace(
         go.Scatter(
             x=line_data["mfma"][0],
@@ -128,7 +128,7 @@ def generate_plots(roof_info, ai_data, verbose, fig=None):
                 None,
                 "{} GFLOP/s".format(to_int(line_data["mfma"][2])),
             ],
-            textposition=pos
+            textposition=pos,
         )
     )
     #######################
@@ -207,7 +207,9 @@ def get_roofline(path_to_dir, ret_df, verbose, dev_id=None, isStandalone=False):
         dev_id = "ALL" if dev_id == -1 else str(dev_id)
 
         fp32_fig.write_image(path_to_dir + "/empirRoof_gpu-{}_fp32.pdf".format(dev_id))
-        ml_combo_fig.write_image(path_to_dir + "/empirRoof_gpu-{}_fp8_fp16.pdf".format(dev_id))
+        ml_combo_fig.write_image(
+            path_to_dir + "/empirRoof_gpu-{}_fp8_fp16.pdf".format(dev_id)
+        )
     else:
         return html.Section(
             id="roofline",
