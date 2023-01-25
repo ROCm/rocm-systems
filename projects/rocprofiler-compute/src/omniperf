@@ -331,9 +331,11 @@ def run_rocscope(args, fname):
                       "-p", args.path,
                       "-n", args.name,
                       "-t", fname,
-                      "--", args.remaining]
+                      "--"]
+            for i in args.remaining.split():
+                rs_cmd.append(i)
             print(rs_cmd)
-            result = subprocess.run(rs_cmd) #, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            result = run_subprocess(rs_cmd) #, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             if result.returncode != 0:
                 print(result.stderr.decode('ascii'))
                 sys.exit(1)
@@ -381,9 +383,9 @@ def omniperf_profile(args, VER):
     print("Dispatch Selection: ", args.dispatch)
 
     if args.ipblocks == None:
-        print("IP Blocks: All")
+        print("IP Blocks: All", "\n")
     else:
-        print("IP Blocks: ", args.ipblocks)
+        print("IP Blocks: ", args.ipblocks, "\n")
 
     # Set up directories
     workload_dir = args.path + "/" + args.name + "/" + args.target
@@ -408,9 +410,11 @@ def omniperf_profile(args, VER):
                       "top10",
                       "-p", args.path,
                       "-n", args.name,
-                      "--", args.remaining]
+                      "--"]
+            for i in args.remaining.split():
+                rs_cmd.append(i)
             print(rs_cmd)
-            result = subprocess.run(rs_cmd) #, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            result = run_subprocess(rs_cmd) #, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             if result.returncode != 0:
                 print(result.stderr.decode('ascii'))
         else:
@@ -432,9 +436,11 @@ def omniperf_profile(args, VER):
                       "summary",
                       "-p", args.path,
                       "-n", args.name,
-                      "--", args.remaining]
+                      "--"]
+            for i in args.remaining.split():
+                rs_cmd.append(i)
             print(rs_cmd)
-            result = subprocess.run(rs_cmd) #, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            result = run_subprocess(rs_cmd) #, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             if result.returncode != 0:
                 print(result.stderr.decode('ascii'))
         else:
