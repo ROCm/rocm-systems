@@ -210,9 +210,14 @@ def run_cli(args, runs):
         )
 
 
-def roofline_only(path_to_dir, verbose, dev_id):
+def roofline_only(path_to_dir, dev_id, sort_type, mem_level, verbose):
     import pandas as pd
     from collections import OrderedDict
+
+    # Change vL1D to a interpretable str, if required
+    if "vL1D" in mem_level:
+        mem_level.remove("vL1D")
+        mem_level.append("L1")
 
     app_path = path_to_dir + "/pmc_perf.csv"
     roofline_exists = os.path.isfile(app_path)
@@ -221,7 +226,15 @@ def roofline_only(path_to_dir, verbose, dev_id):
         sys.exit(0)
     t_df = OrderedDict()
     t_df["pmc_perf"] = pd.read_csv(app_path)
-    get_roofline(path_to_dir, t_df, dev_id, verbose, True)
+    get_roofline(
+        path_to_dir,
+        t_df,
+        verbose,
+        dev_id,  # [Optional] Specify device id to collect roofline info from
+        sort_type,  # [Optional] Sort AI by top kernels or dispatches
+        mem_level,  # [Optional] Toggle particular level(s) of memory hierarchy
+        True,  # [Optional] Generate a standalone roofline analysis
+    )
 
 
 def analyze(args):

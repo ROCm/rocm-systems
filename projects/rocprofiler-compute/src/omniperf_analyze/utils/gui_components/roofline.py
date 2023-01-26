@@ -22,6 +22,7 @@
 
 from omniperf_analyze.utils import roofline_calc
 
+import time
 import numpy as np
 from dash import html, dash_table
 
@@ -35,72 +36,40 @@ def to_int(a):
     else:
         return int(a)
 
-def generate_plots(roof_info, ai_data, isStandalone, verbose, fig=None):
+
+def generate_plots(roof_info, ai_data, mem_level, is_standalone, verbose, fig=None):
     if fig is None:
         fig = go.Figure()
-    plotMode = "lines+text" if isStandalone else "lines"
-    line_data = roofline_calc.empirical_roof(roof_info, verbose)
+    plotMode = "lines+text" if is_standalone else "lines"
+    line_data = roofline_calc.empirical_roof(roof_info, mem_level, verbose)
     print("Line data:\n", line_data)
 
     #######################
     # Plot BW Lines
     #######################
-    fig.add_trace(
-        go.Scatter(
-            x=line_data["hbm"][0],
-            y=line_data["hbm"][1],
-            name="HBM-{}".format(roof_info["dtype"]),
-            mode=plotMode,
-            hovertemplate="<b>%{text}</b>",
-            text=[
-                "{} GB/s".format(to_int(line_data["hbm"][2])),
-                None if isStandalone else "{} GB/s".format(to_int(line_data["hbm"][2]))
-            ],
-            textposition="top right",
+    if mem_level == "ALL":
+        cacheHierarchy = ["HBM", "L2", "L1", "LDS"]
+    else:
+        cacheHierarchy = mem_level
+
+    for cacheLevel in cacheHierarchy:
+        fig.add_trace(
+            go.Scatter(
+                x=line_data[cacheLevel.lower()][0],
+                y=line_data[cacheLevel.lower()][1],
+                name="{}-{}".format(cacheLevel, roof_info["dtype"]),
+                mode=plotMode,
+                hovertemplate="<b>%{text}</b>",
+                text=[
+                    "{} GB/s".format(to_int(line_data[cacheLevel.lower()][2])),
+                    None
+                    if is_standalone
+                    else "{} GB/s".format(to_int(line_data[cacheLevel.lower()][2])),
+                ],
+                textposition="top right",
+            )
         )
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=line_data["l2"][0],
-            y=line_data["l2"][1],
-            name="L2-{}".format(roof_info["dtype"]),
-            mode=plotMode,
-            hovertemplate="<b>%{text}</b>",
-            text=[
-                "{} GB/s".format(to_int(line_data["l2"][2])),
-                None if isStandalone else "{} GB/s".format(to_int(line_data["l2"][2]))
-            ],
-            textposition="top right",
-        )
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=line_data["l1"][0],
-            y=line_data["l1"][1],
-            name="L1-{}".format(roof_info["dtype"]),
-            mode=plotMode,
-            hovertemplate="<b>%{text}</b>",
-            text=[
-                "{} GB/s".format(to_int(line_data["l1"][2])),
-                None if isStandalone else "{} GB/s".format(to_int(line_data["l1"][2]))
-            ],
-            textposition="top right",
-        )
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=line_data["lds"][0],
-            y=line_data["lds"][1],
-            name="LDS-{}".format(roof_info["dtype"]),
-            mode=plotMode,
-            hovertemplate="<b>%{text}</b>",
-            text=[
-                "{} GB/s".format(to_int(line_data["lds"][2])),
-                None if isStandalone else "{} GB/s".format(to_int(line_data["lds"][2]))
-            ],
-            textposition="top right",
-        )
-    )
+
     if roof_info["dtype"] != "FP16" and roof_info["dtype"] != "I8":
         fig.add_trace(
             go.Scatter(
@@ -110,7 +79,9 @@ def generate_plots(roof_info, ai_data, isStandalone, verbose, fig=None):
                 mode=plotMode,
                 hovertemplate="<b>%{text}</b>",
                 text=[
-                    None if isStandalone else "{} GFLOP/s".format(to_int(line_data["valu"][2])),
+                    None
+                    if is_standalone
+                    else "{} GFLOP/s".format(to_int(line_data["valu"][2])),
                     "{} GFLOP/s".format(to_int(line_data["valu"][2])),
                 ],
                 textposition="top left",
@@ -129,7 +100,9 @@ def generate_plots(roof_info, ai_data, isStandalone, verbose, fig=None):
             mode=plotMode,
             hovertemplate="<b>%{text}</b>",
             text=[
-                None if isStandalone else "{} GFLOP/s".format(to_int(line_data["mfma"][2])),
+                None
+                if is_standalone
+                else "{} GFLOP/s".format(to_int(line_data["mfma"][2])),
                 "{} GFLOP/s".format(to_int(line_data["mfma"][2])),
             ],
             textposition=pos,
@@ -176,26 +149,33 @@ def generate_plots(roof_info, ai_data, isStandalone, verbose, fig=None):
     return fig
 
 
-def get_roofline(path_to_dir, ret_df, verbose, dev_id=None, isStandalone=False):
+def get_roofline(
+    path_to_dir,
+    ret_df,
+    verbose,
+    dev_id=None,
+    sort_type="kernels",
+    mem_level="ALL",
+    is_standalone=False,
+):
     # Roofline settings
-    # TODO: Make "sort" attribute dynamic so user can select desired sort
     fp32_details = {
         "path": path_to_dir,
-        "sort": "kernels",
+        "sort": sort_type,
         "device": 0,
         "dtype": "FP32",
     }
     fp16_details = {
         "path": path_to_dir,
-        "sort": "kernels",
+        "sort": sort_type,
         "device": 0,
         "dtype": "FP16",
     }
-    int8_details = {"path": path_to_dir, "sort": "kernels", "device": 0, "dtype": "I8"}
+    int8_details = {"path": path_to_dir, "sort": sort_type, "device": 0, "dtype": "I8"}
 
     # Generate roofline plots
     print("Path: ", path_to_dir)
-    ai_data = roofline_calc.plot_application("kernels", ret_df, verbose)
+    ai_data = roofline_calc.plot_application(sort_type, ret_df, verbose)
     if verbose >= 1:
         # print AI data for each mem level
         print("AI at each mem level")
@@ -203,17 +183,26 @@ def get_roofline(path_to_dir, ret_df, verbose, dev_id=None, isStandalone=False):
             print(i, "->", ai_data[i])
         print("\n")
 
-    fp32_fig = generate_plots(fp32_details, ai_data, isStandalone, verbose)
-    fp16_fig = generate_plots(fp16_details, ai_data, isStandalone, verbose)
-    ml_combo_fig = generate_plots(int8_details, ai_data, isStandalone, verbose, fp16_fig)
+    fp32_fig = generate_plots(fp32_details, ai_data, mem_level, is_standalone, verbose)
+    fp16_fig = generate_plots(fp16_details, ai_data, mem_level, is_standalone, verbose)
+    ml_combo_fig = generate_plots(
+        int8_details, ai_data, mem_level, is_standalone, verbose, fp16_fig
+    )
 
-    if isStandalone:
+    if is_standalone:
         dev_id = "ALL" if dev_id == -1 else str(dev_id)
 
         fp32_fig.write_image(path_to_dir + "/empirRoof_gpu-{}_fp32.pdf".format(dev_id))
         ml_combo_fig.write_image(
             path_to_dir + "/empirRoof_gpu-{}_fp8_fp16.pdf".format(dev_id)
         )
+        time.sleep(1)
+        # Re-save to remove loading MathJax pop up
+        fp32_fig.write_image(path_to_dir + "/empirRoof_gpu-{}_fp32.pdf".format(dev_id))
+        ml_combo_fig.write_image(
+            path_to_dir + "/empirRoof_gpu-{}_fp8_fp16.pdf".format(dev_id)
+        )
+        print("Empirical Roofline PDFs saved!")
     else:
         return html.Section(
             id="roofline",

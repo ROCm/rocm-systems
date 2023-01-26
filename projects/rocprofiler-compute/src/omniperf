@@ -649,7 +649,7 @@ def main():
             # Setup prerequisits for roofline
             roof_setup(args, my_parser)
             # Generate roofline
-            roofline_only(args.path, args.verbose, args.device)
+            roofline_only(args.path, args.device, args.sort, args.mem_level, args.verbose)
 
         # Profile only
         else:

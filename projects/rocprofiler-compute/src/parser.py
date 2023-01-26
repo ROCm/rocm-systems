@@ -211,6 +211,7 @@ def parse(my_parser):
         metavar="",
         type=str,
         default="kernels",
+        choices=["kernels", "dispatches"],
         help="\t\t\tOverlay top kernels or top dispatches: (DEFAULT: kernels)\n\t\t\t   kernels\n\t\t\t   dispatches",
     )
     roofline_group.add_argument(
@@ -219,18 +220,10 @@ def parse(my_parser):
         required=False,
         choices=["HBM", "L2", "vL1D", "LDS"],
         metavar="",
+        nargs="+",
         type=str,
         default="ALL",
         help="\t\t\tFilter by memory level: (DEFAULT: ALL)\n\t\t\t   HBM\n\t\t\t   L2\n\t\t\t   vL1D\n\t\t\t   LDS",
-    )
-    roofline_group.add_argument(
-        "--axes",
-        default=None,
-        type=float,
-        required=False,
-        nargs="+",
-        metavar="",
-        help="\t\t\tDesired axis values for graph. As follows:\n\t\t\t   xmin xmax ymin ymax",
     )
     roofline_group.add_argument(
         "--device",
