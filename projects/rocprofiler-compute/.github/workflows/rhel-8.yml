@@ -30,6 +30,7 @@ jobs:
           yum -y install git
           yum -y install python39
           yum -y install cmake3
+          yum -y install which
       - name: Checkout
         uses: actions/checkout@v3
         with:
