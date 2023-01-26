@@ -37,7 +37,7 @@ from utils import specs
 from utils.perfagg import perfmon_filter, pmc_filter
 from utils import remove_workload
 from utils import csv_converter  # Import workload
-from omniperf_analyze.omniperf_analyze import roofline_only
+from omniperf_analyze.omniperf_analyze import roofline_only # Standalone roofline
 from omniperf_analyze.omniperf_analyze import analyze  # CLI analysis
 
 from common import (
