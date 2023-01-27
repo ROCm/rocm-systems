@@ -142,7 +142,7 @@ def parse(args, profileAndExport):
         print("Unable to parse SoC or workload name from sysinfo.csv")
         sys.exit(1)
 
-    db = "omniperf_" + args.team + "_" + name + "_" + soc
+    db = "omniperf_" + str(args.team) + "_" + str(name) + "_" + soc
 
     if Extractionlvl >= 5:
         print("KernelName shortening disabled")
