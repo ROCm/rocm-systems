@@ -25,7 +25,7 @@
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
   "id": 42,
-  "iteration": 1673969861340,
+  "iteration": 1674838967359,
   "links": [],
   "liveNow": false,
   "panels": [
@@ -58,7 +58,8 @@
                 "mode": "absolute",
                 "steps": [
                   {
-                    "color": "green"
+                    "color": "green",
+                    "value": null
                   },
                   {
                     "color": "red",
@@ -98,7 +99,7 @@
               "hide": false,
               "rawQuery": true,
               "refId": "A",
-              "target": "${Workload1}.sysinfo.aggregate([\n    {\"$project\": {\n        \"_id\": 0,\n        \"date\":1,\n        \"host_name\": 1,\n        \"host_cpu\": 1,\n        \"host_distro\": 1,\n        \"host_kernel\": 1,\n        \"host_rocmver\": 1,\n        \"gpu_soc\": 1,\n        \"name\": 1,\n        \"numSE\": 1,\n        \"numSQC\": 1,\n        \"numCU\": 1,\n        \"numSIMD\": 1,\n        \"waveSize\": 1,\n        \"maxWavesPerCU\": 1,\n        \"maxWorkgroupSize\":1,\n        \"L1\":1,\n        \"L2\":1,\n        \"L2Banks\": 1,\n        \"sclk\":1,\n        \"mclk\":1,\n        \"cur_sclk\": 1,\n        \"cur_mclk\":1,\n        \"hbmBW\":1\n    }},\n    {\"$set\": {\n        \"array\": [\n            {\n                \"Metric\":\"Date\",\n                \"Value\": \"&date\"\n            },\n            {\n                \"Metric\":\"Host Name\",\n                \"Value\": \"&host_name\"\n            },\n            {\n                \"Metric\":\"Host CPU\",\n                \"Value\": \"&host_cpu\"\n            },\n            {\n                \"Metric\":\"Host Distro\",\n                \"Value\": \"&host_distro\"\n            },\n            {\n                \"Metric\":\"Host Kernel\",\n                \"Value\": \"&host_kernel\"\n            },\n            {\n                \"Metric\":\"ROCm Version\",\n                \"Value\": \"&host_rocmver\"\n            },\n            {\n                \"Metric\":\"GFX SoC\",\n                \"Value\": \"&name\"\n            },\n            {\n                \"Metric\":\"GFX ID\",\n                \"Value\": \"&gpu_soc\"\n            },\n            {\n                \"Metric\":\"Total SEs\",\n                \"Value\":\"&numSE\"\n            },\n            {\n                \"Metric\":\"Total SQCs\",\n                \"Value\":\"&numSQC\"\n            },\n            {\n\n                \"Metric\":\"Total CUs\",\n                \"Value\":\"&numCU\"\n            },\n            {\n                \"Metric\":\"SIMDs/CU\",\n                \"Value\": \"&numSIMD\"\n            },\n            {\n                \"Metric\":\"Max Wavefronts Occupancy Per CU\",\n                \"Value\":\"&maxWavesPerCU\"\n            },\n            {\n                \"Metric\":\"Max Workgroup Size\",\n                \"Value\":\"&maxWorkgroupSize\"\n            },\n            {\n                \"Metric\":\"L1Cache per CU (KB)\",\n                \"Value\":\"&L1\"\n            },\n            {\n                \"Metric\":\"L2Cache (KB)\",\n                \"Value\":\"&L2\"\n            },\n            {\n                \"Metric\":\"L2Cache Channels\",\n                \"Value\":\"&L2Banks\"\n            },\n            {\n                \"Metric\":\"Sys Clock (Max) - MHz\",\n                \"Value\":\"&sclk\"\n                \n            },\n            {\n                \"Metric\":\"Memory Clock (Max) - MHz\",\n                \"Value\":\"&mclk\"\n            },\n            {\n                \"Metric\":\"Sys Clock (Cur) - MHz\",\n                \"Value\":\"&cur_sclk\"\n                \n            },\n            {\n                \"Metric\":\"Memory Clock (Cur) - MHz\",\n                \"Value\":\"&cur_mclk\"\n            },\n            {\n                \"Metric\":\"HBM Bandwidth - GB/s\",\n                \"Value\":\"&hbmBW\"\n            }\n        ]\n    }},\n    {\"$unwind\": {\n        \"path\": \"&array\"\n    }},\n    {\"$replaceRoot\": {\n        \"newRoot\": \"&array\"\n    }}\n]);",
+              "target": "${Workload1}.sysinfo.aggregate([\n    {\"$project\": {\n        \"_id\": 0,\n        \"date\":1,\n        \"command\": 1,\n        \"host_name\": 1,\n        \"host_cpu\": 1,\n        \"host_distro\": 1,\n        \"host_kernel\": 1,\n        \"host_rocmver\": 1,\n        \"gpu_soc\": 1,\n        \"name\": 1,\n        \"numSE\": 1,\n        \"numSQC\": 1,\n        \"numCU\": 1,\n        \"numSIMD\": 1,\n        \"waveSize\": 1,\n        \"maxWavesPerCU\": 1,\n        \"maxWorkgroupSize\":1,\n        \"L1\":1,\n        \"L2\":1,\n        \"L2Banks\": 1,\n        \"sclk\":1,\n        \"mclk\":1,\n        \"cur_sclk\": 1,\n        \"cur_mclk\":1,\n        \"hbmBW\":1\n    }},\n    {\"$set\": {\n        \"array\": [\n            {\n                \"Metric\":\"Date\",\n                \"Value\": \"&date\"\n            },\n            {\n                \"Metric\":\"App Command\",\n                \"Value\": \"&command\"\n            },\n            {\n                \"Metric\":\"Host Name\",\n                \"Value\": \"&host_name\"\n            },\n            {\n                \"Metric\":\"Host CPU\",\n                \"Value\": \"&host_cpu\"\n            },\n            {\n                \"Metric\":\"Host Distro\",\n                \"Value\": \"&host_distro\"\n            },\n            {\n                \"Metric\":\"Host Kernel\",\n                \"Value\": \"&host_kernel\"\n            },\n            {\n                \"Metric\":\"ROCm Version\",\n                \"Value\": \"&host_rocmver\"\n            },\n            {\n                \"Metric\":\"GFX SoC\",\n                \"Value\": \"&name\"\n            },\n            {\n                \"Metric\":\"GFX ID\",\n                \"Value\": \"&gpu_soc\"\n            },\n            {\n                \"Metric\":\"Total SEs\",\n                \"Value\":\"&numSE\"\n            },\n            {\n                \"Metric\":\"Total SQCs\",\n                \"Value\":\"&numSQC\"\n            },\n            {\n\n                \"Metric\":\"Total CUs\",\n                \"Value\":\"&numCU\"\n            },\n            {\n                \"Metric\":\"SIMDs/CU\",\n                \"Value\": \"&numSIMD\"\n            },\n            {\n                \"Metric\":\"Max Wavefronts Occupancy Per CU\",\n                \"Value\":\"&maxWavesPerCU\"\n            },\n            {\n                \"Metric\":\"Max Workgroup Size\",\n                \"Value\":\"&maxWorkgroupSize\"\n            },\n            {\n                \"Metric\":\"L1Cache per CU (KB)\",\n                \"Value\":\"&L1\"\n            },\n            {\n                \"Metric\":\"L2Cache (KB)\",\n                \"Value\":\"&L2\"\n            },\n            {\n                \"Metric\":\"L2Cache Channels\",\n                \"Value\":\"&L2Banks\"\n            },\n            {\n                \"Metric\":\"Sys Clock (Max) - MHz\",\n                \"Value\":\"&sclk\"\n                \n            },\n            {\n                \"Metric\":\"Memory Clock (Max) - MHz\",\n                \"Value\":\"&mclk\"\n            },\n            {\n                \"Metric\":\"Sys Clock (Cur) - MHz\",\n                \"Value\":\"&cur_sclk\"\n                \n            },\n            {\n                \"Metric\":\"Memory Clock (Cur) - MHz\",\n                \"Value\":\"&cur_mclk\"\n            },\n            {\n                \"Metric\":\"HBM Bandwidth - GB/s\",\n                \"Value\":\"&hbmBW\"\n            }\n        ]\n    }},\n    {\"$unwind\": {\n        \"path\": \"&array\"\n    }},\n    {\"$replaceRoot\": {\n        \"newRoot\": \"&array\"\n    }}\n]);",
               "type": "table"
             },
             {
@@ -109,7 +110,7 @@
               "hide": false,
               "rawQuery": true,
               "refId": "B",
-              "target": "${Workload2}.sysinfo.aggregate([\n      {\"$match\": {\n        \"$expr\":{\"$regexMatch\": {\"input\":\"${select}\",\"regex\":\"(System Info)\"}}\n      }},\n\n    {\"$project\": {\n        \"_id\": 0,\n        \"date\":1,\n        \"host_name\": 1,\n        \"host_cpu\": 1,\n        \"host_distro\": 1,\n        \"host_kernel\": 1,\n        \"host_rocmver\": 1,\n        \"gpu_soc\": 1,\n        \"name\": 1,\n        \"numSE\": 1,\n        \"numSQC\": 1,\n        \"numCU\": 1,\n        \"numSIMD\": 1,\n        \"waveSize\": 1,\n        \"maxWavesPerCU\": 1,\n        \"maxWorkgroupSize\":1,\n        \"L1\":1,\n        \"L2\":1,\n        \"L2Banks\": 1,\n        \"sclk\":1,\n        \"mclk\":1,\n        \"cur_sclk\": 1,\n        \"cur_mclk\":1,\n        \"hbmBW\":1\n    }},\n    {\"$set\": {\n        \"array\": [\n            {\n                \"Metric\":\"Date\",\n                \"Value\": \"&date\"\n            },\n            {\n                \"Metric\":\"Host Name\",\n                \"Value\": \"&host_name\"\n            },\n            {\n                \"Metric\":\"Host CPU\",\n                \"Value\": \"&host_cpu\"\n            },\n            {\n                \"Metric\":\"Host Distro\",\n                \"Value\": \"&host_distro\"\n            },\n            {\n                \"Metric\":\"Host Kernel\",\n                \"Value\": \"&host_kernel\"\n            },\n            {\n                \"Metric\":\"ROCm Version\",\n                \"Value\": \"&host_rocmver\"\n            },\n            {\n                \"Metric\":\"GFX SoC\",\n                \"Value\": \"&name\"\n            },\n            {\n                \"Metric\":\"GFX ID\",\n                \"Value\": \"&gpu_soc\"\n            },\n            {\n                \"Metric\":\"Total SEs\",\n                \"Value\":\"&numSE\"\n            },\n            {\n                \"Metric\":\"Total SQCs\",\n                \"Value\":\"&numSQC\"\n            },\n            {\n\n                \"Metric\":\"Total CUs\",\n                \"Value\":\"&numCU\"\n            },\n            {\n                \"Metric\":\"SIMDs/CU\",\n                \"Value\": \"&numSIMD\"\n            },\n            {\n                \"Metric\":\"Max Wavefronts Occupancy Per CU\",\n                \"Value\":\"&maxWavesPerCU\"\n            },\n            {\n                \"Metric\":\"Max Workgroup Size\",\n                \"Value\":\"&maxWorkgroupSize\"\n            },\n            {\n                \"Metric\":\"L1Cache per CU (KB)\",\n                \"Value\":\"&L1\"\n            },\n            {\n                \"Metric\":\"L2Cache (KB)\",\n                \"Value\":\"&L2\"\n            },\n            {\n                \"Metric\":\"L2Cache Channels\",\n                \"Value\":\"&L2Banks\"\n            },\n            {\n                \"Metric\":\"Sys Clock (Max) - MHz\",\n                \"Value\":\"&sclk\"\n                \n            },\n            {\n                \"Metric\":\"Memory Clock (Max) - MHz\",\n                \"Value\":\"&mclk\"\n            },\n            {\n                \"Metric\":\"Sys Clock (Cur) - MHz\",\n                \"Value\":\"&cur_sclk\"\n                \n            },\n            {\n                \"Metric\":\"Memory Clock (Cur) - MHz\",\n                \"Value\":\"&cur_mclk\"\n            },\n            {\n                \"Metric\":\"HBM Bandwidth - GB/s\",\n                \"Value\":\"&hbmBW\"\n            }\n        ]\n    }},\n    {\"$unwind\": {\n        \"path\": \"&array\"\n    }},\n    {\"$replaceRoot\": {\n        \"newRoot\": \"&array\"\n    }}\n]);",
+              "target": "${Workload2}.sysinfo.aggregate([\n      {\"$match\": {\n        \"$expr\":{\"$regexMatch\": {\"input\":\"${select}\",\"regex\":\"(System Info)\"}}\n      }},\n\n      {\"$project\": {\n        \"_id\": 0,\n        \"date\":1,\n        \"command\": 1,\n        \"host_name\": 1,\n        \"host_cpu\": 1,\n        \"host_distro\": 1,\n        \"host_kernel\": 1,\n        \"host_rocmver\": 1,\n        \"gpu_soc\": 1,\n        \"name\": 1,\n        \"numSE\": 1,\n        \"numSQC\": 1,\n        \"numCU\": 1,\n        \"numSIMD\": 1,\n        \"waveSize\": 1,\n        \"maxWavesPerCU\": 1,\n        \"maxWorkgroupSize\":1,\n        \"L1\":1,\n        \"L2\":1,\n        \"L2Banks\": 1,\n        \"sclk\":1,\n        \"mclk\":1,\n        \"cur_sclk\": 1,\n        \"cur_mclk\":1,\n        \"hbmBW\":1\n    }},\n    {\"$set\": {\n        \"array\": [\n            {\n                \"Metric\":\"Date\",\n                \"Value\": \"&date\"\n            },\n            {\n                \"Metric\":\"App Command\",\n                \"Value\": \"&command\"\n            },\n            {\n                \"Metric\":\"Host Name\",\n                \"Value\": \"&host_name\"\n            },\n            {\n                \"Metric\":\"Host CPU\",\n                \"Value\": \"&host_cpu\"\n            },\n            {\n                \"Metric\":\"Host Distro\",\n                \"Value\": \"&host_distro\"\n            },\n            {\n                \"Metric\":\"Host Kernel\",\n                \"Value\": \"&host_kernel\"\n            },\n            {\n                \"Metric\":\"ROCm Version\",\n                \"Value\": \"&host_rocmver\"\n            },\n            {\n                \"Metric\":\"GFX SoC\",\n                \"Value\": \"&name\"\n            },\n            {\n                \"Metric\":\"GFX ID\",\n                \"Value\": \"&gpu_soc\"\n            },\n            {\n                \"Metric\":\"Total SEs\",\n                \"Value\":\"&numSE\"\n            },\n            {\n                \"Metric\":\"Total SQCs\",\n                \"Value\":\"&numSQC\"\n            },\n            {\n\n                \"Metric\":\"Total CUs\",\n                \"Value\":\"&numCU\"\n            },\n            {\n                \"Metric\":\"SIMDs/CU\",\n                \"Value\": \"&numSIMD\"\n            },\n            {\n                \"Metric\":\"Max Wavefronts Occupancy Per CU\",\n                \"Value\":\"&maxWavesPerCU\"\n            },\n            {\n                \"Metric\":\"Max Workgroup Size\",\n                \"Value\":\"&maxWorkgroupSize\"\n            },\n            {\n                \"Metric\":\"L1Cache per CU (KB)\",\n                \"Value\":\"&L1\"\n            },\n            {\n                \"Metric\":\"L2Cache (KB)\",\n                \"Value\":\"&L2\"\n            },\n            {\n                \"Metric\":\"L2Cache Channels\",\n                \"Value\":\"&L2Banks\"\n            },\n            {\n                \"Metric\":\"Sys Clock (Max) - MHz\",\n                \"Value\":\"&sclk\"\n                \n            },\n            {\n                \"Metric\":\"Memory Clock (Max) - MHz\",\n                \"Value\":\"&mclk\"\n            },\n            {\n                \"Metric\":\"Sys Clock (Cur) - MHz\",\n                \"Value\":\"&cur_sclk\"\n                \n            },\n            {\n                \"Metric\":\"Memory Clock (Cur) - MHz\",\n                \"Value\":\"&cur_mclk\"\n            },\n            {\n                \"Metric\":\"HBM Bandwidth - GB/s\",\n                \"Value\":\"&hbmBW\"\n            }\n        ]\n    }},\n    {\"$unwind\": {\n        \"path\": \"&array\"\n    }},\n    {\"$replaceRoot\": {\n        \"newRoot\": \"&array\"\n    }}\n]);",
               "type": "table"
             }
           ],
@@ -190,8 +191,7 @@
                 "mode": "absolute",
                 "steps": [
                   {
-                    "color": "text",
-                    "value": null
+                    "color": "text"
                   }
                 ]
               },
@@ -214,8 +214,7 @@
                       "mode": "absolute",
                       "steps": [
                         {
-                          "color": "transparent",
-                          "value": null
+                          "color": "transparent"
                         },
                         {
                           "color": "orange",
@@ -414,8 +413,7 @@
                 "mode": "absolute",
                 "steps": [
                   {
-                    "color": "green",
-                    "value": null
+                    "color": "green"
                   },
                   {
                     "color": "red",
@@ -500,8 +498,7 @@
                 "mode": "absolute",
                 "steps": [
                   {
-                    "color": "green",
-                    "value": null
+                    "color": "green"
                   },
                   {
                     "color": "red",
@@ -12735,9 +12732,9 @@
       },
       {
         "current": {
-          "selected": false,
-          "text": "omniperf_gfxWL_test_gemm_BF16_profile10k_mi200",
-          "value": "omniperf_gfxWL_test_gemm_BF16_profile10k_mi200"
+          "selected": true,
+          "text": "omniperf_asw_mix_mi200",
+          "value": "omniperf_asw_mix_mi200"
         },
         "definition": "workload_names.names.aggregate([\n  {\"$group\": {\n    \"_id\": \"&name\"\n  }}\n]);",
         "hide": 0,
@@ -12756,8 +12753,8 @@
       {
         "current": {
           "selected": false,
-          "text": "148579",
-          "value": "148579"
+          "text": "433323",
+          "value": "433323"
         },
         "definition": "$Workload1.pmc_perf.aggregate([\n{\"$match\": {\n    \"Index\": { \"$in\": [${DispatchIDFilter:raw}] },\n    \"gpu-id\": { \"$in\": [${gpuFilter:raw}] },\n    \"KernelName\": { \"$in\": ${KernelNameFilter:json}}\n  }},\n\n  {\"$group\": {\n      \"_id\": null,\n      \"myAvg\": {\n        \"$avg\": { \"$multiply\": [{ \"$divide\": [{ \"$subtract\": [\"&EndNs\", \"&BeginNs\"] }, 1000] }, $sclk] }\n      }\n  }},\n  {\"$set\": {\n    \"array\": [\n        {\n          \"_id\": { \"$round\": [\"&myAvg\", 0] }\n        }\n      ]\n  }},\n  {\"$unwind\": {\n    \"path\": \"&array\"\n  }},\n  {\"$replaceRoot\": {\n    \"newRoot\": \"&array\"\n  }}\n]);",
         "hide": 2,
@@ -12776,8 +12773,8 @@
       {
         "current": {
           "selected": false,
-          "text": "63",
-          "value": "63"
+          "text": "103",
+          "value": "103"
         },
         "definition": "$Workload1.pmc_perf.aggregate([\n  {\"$match\": {\n    \"Index\": { \"$in\": [${DispatchIDFilter:raw}] },\n    \"gpu-id\": { \"$in\": [${gpuFilter:raw}] },\n    \"KernelName\": { \"$in\": ${KernelNameFilter:json}}\n  }},\n  {\"$group\": {\n    \"_id\": null,\n    \"theAvg\": {\n      \"$avg\": {\n        \"$cond\":[\n          {\"$ne\": [\"&GRBM_GUI_ACTIVE\", 0]},\n          {\"$divide\": [{ \"$multiply\": [4, \"&SQ_BUSY_CU_CYCLES\"] }, \"&GRBM_GUI_ACTIVE\"]},\n          \"\"\n        ]\n      }\n    }\n  }},\n  {\"$set\": {\n    \"array\": [\n        {\n          \"_id\": {\"$toInt\": { \"$min\": [{ \"$add\": [{ \"$multiply\": [{ \"$divide\": [{ \"$round\": [\"$theAvg\", 0] }, $maxWavesPerCU] },8] }, { \"$min\": [{ \"$mod\": [{ \"$round\": [\"$theAvg\", 0] }, $maxWavesPerCU] }, 8] }] }, $numCU] }}\n        }\n    ]\n  }},\n  {\"$unwind\": {\n    \"path\": \"$array\"\n  }},\n  {\"$replaceRoot\": {\n    \"newRoot\": \"$array\"\n  }}\n]);",
         "hide": 2,
@@ -13323,6 +13320,6 @@
   "timezone": "",
   "title": "Omniperf_v1.0.7_pub",
   "uid": "MIPerf_v1_0_06302022112",
-  "version": 1,
+  "version": 2,
   "weekStart": ""
 }
