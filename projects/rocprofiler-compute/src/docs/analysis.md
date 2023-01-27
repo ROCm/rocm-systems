@@ -317,10 +317,12 @@ allowing users to view results from within a web browser.
 
 Note that the standalone GUI analyzer publishes a web interface on port 8050 by default.
 On production HPC systems where profiling jobs run
-under the auspices of a resource manager, additional ssh tunneling
+under the auspices of a resource manager, additional SSH tunneling
 between the desired web browser host (e.g. login node or remote workstation) and compute host may be
 required. Alternatively, users may find it more convenient to download
 profiled workloads to perform analysis on their local system.
+
+See [FAQ](https://amdresearch.github.io/omniperf/faq.html) for more details on SSH tunneling.
 ```
 
 #### Usage

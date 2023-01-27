@@ -30,3 +30,26 @@ Workaround:
 $ export LC_ALL=C.UTF-8
 $ export LANG=C.UTF-8
 ```
+
+**3. How can I SSH Tunnel in MobaXterm?**
+
+1. Open MobaXterm
+2. In the top ribbon, select `Tunneling`
+![Tunnel Button](images/tunnel_demo1.png)
+This pop up will appear
+![Pop up](images/tunnel_demo2.png)
+3. Press `New SSH tunnel`
+![Pop up](images/tunnel_demo3.png)
+4. Configure tunnel accordingly
+
+   Local clients
+   - Forwarded Port: [PORT]
+   
+   Remote Server
+   - Remote Server: localhost
+   - Remote Port: [PORT]
+   
+   SSH Server
+   - SSH server: Name of the server one is connecting to
+   - SSH login: Username to login to the server
+   - SSH port: 22
