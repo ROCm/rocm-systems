@@ -150,7 +150,7 @@ def gen_sysinfo(workload_name, workload_dir, ip_blocks, app_cmd, skip_roof):
     timestamp = now.strftime("%c") + " (" + local_tzname + ")"
     # host info
     param = [workload_name]
-    param += [app_cmd]
+    param += ["\"" + app_cmd + "\""]
     param += [
         mspec.hostname,
         mspec.cpu,
