@@ -83,7 +83,8 @@ set(pythonDeps
     "tabulate"
     "tqdm"
     "dash_svg"
-    "dash_bootstrap_components")
+    "dash_bootstrap_components"
+    "kaleido")
 
 message(STATUS "Checking for required Python package dependencies...")
 set_property(GLOBAL PROPERTY pythonDepsFlag "groovy")

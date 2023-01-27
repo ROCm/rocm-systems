@@ -37,7 +37,7 @@ from utils import specs
 from utils.perfagg import perfmon_filter, pmc_filter
 from utils import remove_workload
 from utils import csv_converter  # Import workload
-from utils import plot_roofline  # standalone roofline
+from omniperf_analyze.omniperf_analyze import roofline_only # Standalone roofline
 from omniperf_analyze.omniperf_analyze import analyze  # CLI analysis
 
 from common import (
@@ -214,7 +214,61 @@ def mongo_import(args, profileAndImport):
 ################################################
 # Roofline Helpers
 ################################################
+def roof_setup(args, my_parser):
+    if args.path == os.getcwd() + "/workloads":
+        args.path += "/" + args.name + "/" + str(get_soc())
+    # Verify valid axes parameters
+    if args.axes:
+        if len(args.axes) != 4:
+            throw_parse_error(
+                my_parser,
+                "Invalid argument for --axes.\nMust contain four values formatted as: --axes xmin xmax ymin ymax",
+            )
 
+        if args.axes[0] > args.axes[1] or args.axes[2] > args.axes[3]:
+            throw_parse_error(
+                my_parser,
+                "Invalid argument for --axes.\nBreaks required conditions: (xmax > xmin && ymax > ymin)",
+            )
+
+    # We need to make a directory for a new roofline
+    if not os.path.isdir(args.path):
+        os.makedirs(args.path)
+    # does roof data exist?
+    print("Checking for roofline.csv in ", args.path)
+    roof_path = args.path + "/roofline.csv"
+    roofline_exists = os.path.isfile(roof_path)
+    if not roofline_exists:
+        if get_soc() != "mi200":
+            throw_parse_error(
+                my_parser, "Invalid SoC.\nRoofline only availible on MI200."
+            )
+        mibench(args)
+
+    # does sysinfo exist?
+    print("Checking for sysinfo.csv in ", args.path)
+    sysinfo_path = args.path + "/sysinfo.csv"
+    sysinfo_exists = os.path.isfile(sysinfo_path)
+    if not sysinfo_exists:
+        print("sysinfo not found")
+        gen_sysinfo(args.name, args.path, [], args.remaining, False)
+
+    # does app data exist?
+    print("Checking for pmc_perf.csv in ", args.path)
+    app_path = args.path + "/pmc_perf.csv"
+    app_exists = os.path.isfile(app_path)
+    if not app_exists:
+        if get_soc() != "mi200":
+            throw_parse_error(
+                my_parser, "Invalid SoC.\nRoofline only availible on MI200."
+            )
+        if not args.remaining:
+            throw_parse_error(
+                my_parser,
+                "Cannot find existing application data.\nAttempting to generate application data from -- <app_cmd>.\n-- <app_cmd> option is required to generate application data.",
+            )
+        else:
+            characterize_app(args.path, args.remaining, args.verbose)
 
 def detect_roofline():
     mspec = specs.get_machine_specs(0)
@@ -250,7 +304,6 @@ def detect_roofline():
     target_binary = {"rocm_ver": rocm_ver, "distro": distro}
     return target_binary
 
-
 def mibench(args):
     print("No roofline data found. Generating...")
 
@@ -284,7 +337,6 @@ def mibench(args):
         ]
     )
 
-
 def characterize_app(path, cmd, verbose):
     target = get_soc()
     workload_dir = path
@@ -315,7 +367,6 @@ def characterize_app(path, cmd, verbose):
     )
     # Update pmc_perf.csv timestamps
     replace_timestamps(workload_dir)
-
 
 ################################################
 # Profiling Helpers
@@ -595,62 +646,10 @@ def main():
 
         elif args.roof_only:
             print("\n--------\nRoofline only\n--------\n")
-            if args.path == os.getcwd() + "/workloads":
-                args.path += "/" + args.name + "/" + str(get_soc())
-            # Verify valid axes parameters
-            if args.axes:
-                if len(args.axes) != 4:
-                    throw_parse_error(
-                        my_parser,
-                        "Invalid argument for --axes.\nMust contain four values formatted as: --axes xmin xmax ymin ymax",
-                    )
-
-                if args.axes[0] > args.axes[1] or args.axes[2] > args.axes[3]:
-                    throw_parse_error(
-                        my_parser,
-                        "Invalid argument for --axes.\nBreaks required conditions: (xmax > xmin && ymax > ymin)",
-                    )
-
-            # We need to make a directory for a new roofline
-            if not os.path.isdir(args.path):
-                os.makedirs(args.path)
-            # does roof data exist?
-            print("Checking for roofline.csv in ", args.path)
-            roof_path = args.path + "/roofline.csv"
-            roofline_exists = os.path.isfile(roof_path)
-            if not roofline_exists:
-                if get_soc() != "mi200":
-                    throw_parse_error(
-                        my_parser, "Invalid SoC.\nRoofline only availible on MI200."
-                    )
-                mibench(args)
-
-            # does sysinfo exist?
-            print("Checking for sysinfo.csv in ", args.path)
-            sysinfo_path = args.path + "/sysinfo.csv"
-            sysinfo_exists = os.path.isfile(sysinfo_path)
-            if not sysinfo_exists:
-                print("sysinfo not found")
-                gen_sysinfo(args.name, args.path, [], args.remaining, False)
-
-            # does app data exist?
-            print("Checking for pmc_perf.csv in ", args.path)
-            app_path = args.path + "/pmc_perf.csv"
-            app_exists = os.path.isfile(app_path)
-            if not app_exists:
-                if get_soc() != "mi200":
-                    throw_parse_error(
-                        my_parser, "Invalid SoC.\nRoofline only availible on MI200."
-                    )
-                if not args.remaining:
-                    throw_parse_error(
-                        my_parser,
-                        "Cannot find existing application data.\nAttempting to generate application data from -- <app_cmd>.\n-- <app_cmd> option is required to generate application data.",
-                    )
-                else:
-                    characterize_app(args.path, args.remaining, args.verbose)
+            # Setup prerequisits for roofline
+            roof_setup(args, my_parser)
             # Generate roofline
-            plot_roofline.empirical_roof(args)
+            roofline_only(args.path, args.device, args.sort, args.mem_level, args.verbose)
 
         # Profile only
         else:

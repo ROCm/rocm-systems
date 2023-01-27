@@ -56,6 +56,7 @@ class AI_Data:
     mfma_flops_bf16: float
     mfma_flops_f32: float
     mfma_flops_f64: float
+    mfma_iops_i8: float
     lds_data: float
     L1cache_data: float
     L2cache_data: float
@@ -88,11 +89,14 @@ def get_color(catagory):
 # -------------------------------------------------------------------------------------
 #                           Plot BW at each cache level
 # -------------------------------------------------------------------------------------
-def plot_roof(roof_details, roof_data, verbose):
-
+def plot_roof(roof_details, roof_data, mem_level, verbose):
+    # TODO: This is where filtering by memory level will need to occur for standalone
     graphPoints = {"hbm": [], "l2": [], "l1": [], "lds": [], "valu": [], "mfma": []}
 
-    cacheHierarchy = ["HBM", "L2", "L1", "LDS"]
+    if mem_level == "ALL":
+        cacheHierarchy = ["HBM", "L2", "L1", "LDS"]
+    else:
+        cacheHierarchy = mem_level
 
     x1 = y1 = x2 = y2 = -1
     x1_mfma = y1_mfma = x2_mfma = y2_mfma = -1
@@ -223,6 +227,7 @@ def plot_application(sortType, ret_df, verbose):
                     mfma_flops_bf16 / calls,
                     mfma_flops_f32 / calls,
                     mfma_flops_f64 / calls,
+                    mfma_iops_i8 / calls,
                     lds_data / calls,
                     L1cache_data / calls,
                     L2cache_data / calls,
@@ -466,10 +471,7 @@ def plot_application(sortType, ret_df, verbose):
     return intensityPoints
 
 
-def empirical_roof(roof_info, verbose):
-
-    if roof_info["sort"] != "kernels" and roof_info["sort"] != "dispatches":
-        sys.exit("Invalid sort. Must be either 'kernels' or 'dispatches'")
+def empirical_roof(roof_info, mem_level, verbose):
 
     roofPath = roof_info["path"] + "/roofline.csv"
     # -----------------------------------------------------
@@ -509,7 +511,7 @@ def empirical_roof(roof_info, verbose):
     # ------------------
     #  Generate Roofline
     # ------------------
-    results = plot_roof(roof_info, roof_data, verbose)
+    results = plot_roof(roof_info, roof_data, mem_level, verbose)
     # for key in results:
     #     print(key, "->", results[key])
 
