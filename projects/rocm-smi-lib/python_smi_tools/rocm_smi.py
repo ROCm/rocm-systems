@@ -18,6 +18,9 @@ import sys
 import subprocess
 import _thread
 import time
+import multiprocessing
+import trace
+from io import StringIO
 from time import ctime
 from subprocess import check_output
 from rsmiBindings import *
@@ -509,7 +512,7 @@ def printEventList(device, delay, eventList):
                            data.message.decode('utf8') + '\r']])
 
 
-def printLog(device, metricName, value):
+def printLog(device, metricName, value, extraSpace=False):
     """ Print out to the SMI log
 
     @param device: DRM device identifier
@@ -530,7 +533,13 @@ def printLog(device, metricName, value):
     if device is None:
         logstr = logstr[13:]
     # Force thread safe printing
-    print(logstr + '\n', end='')
+    lock = multiprocessing.Lock()
+    lock.acquire()
+    if extraSpace:
+        print('\n' + logstr + '\n', end='', flush=True)
+    else:
+        print(logstr + '\n', end='', flush=True)
+    lock.release()
 
 
 def printListLog(metricName, valuesList):
@@ -1333,6 +1342,76 @@ def setComputePartition(deviceList, computePartitionType):
         else:
             rsmi_ret_ok(ret, device)
             printErrLog(device, 'Failed to retrieve compute partition, even though device supports it.')
+    printLogSpacer()
+
+
+def progressbar(it, prefix="", size=60, out=sys.stdout):
+    count = len(it)
+    def show(j):
+        x = int(size*j/count)
+        lock = multiprocessing.Lock()
+        lock.acquire()
+        print("{}[{}{}] {}/{} secs remain".format(prefix, u"█"*x, "."*(size-x), j, count),
+                end='\r', file=out, flush=True)
+        lock.release()
+    show(0)
+    for i, item in enumerate(it):
+        yield item
+        show(i+1)
+    lock = multiprocessing.Lock()
+    lock.acquire()
+    print("\n", flush=True, file=out)
+    lock.release()
+
+def showProgressbar(title="", timeInSeconds=13):
+    if title != "":
+        title += ": "
+    for i in progressbar(range(timeInSeconds), title, 40):
+        time.sleep(1)
+
+
+def setNPSMode(deviceList, npsMode):
+    """ Sets nps mode (memory partition) for a list of devices
+
+    @param deviceList: List of DRM devices (can be a single-item list)
+    @param npsMode: NPS Mode type to set as
+    """
+    printLogSpacer(' Set nps mode to %s ' % (str(npsMode).upper()))
+    for device in deviceList:
+        npsMode = npsMode.upper()
+        if npsMode not in nps_mode_type_l:
+            printErrLog(device, 'Invalid nps mode type %s'
+                        '\nValid nps mode types are %s'
+                        % ( npsMode.upper(),
+                        (', '.join(map(str, nps_mode_type_l))) ))
+            return (None, None)
+
+        t1 = multiprocessing.Process(target=showProgressbar,
+                            args=("Updating NPS mode",13,))
+        t1.start()
+        addExtraLine=True
+        start=time.time()
+        ret = rocmsmi.rsmi_dev_nps_mode_set(device,
+            rsmi_nps_mode_type_dict[npsMode])
+        stop=time.time()
+        duration=stop-start
+        if t1.is_alive():
+            t1.terminate()
+            t1.join()
+        if duration < float(0.1):   # For longer runs, add extra line before output
+            addExtraLine=False      # This is to prevent overriding progress bar
+
+        if rsmi_ret_ok(ret, device, silent=True):
+            printLog(device,
+                'Successfully set nps mode to %s' % (npsMode),
+                None, addExtraLine)
+        elif ret == rsmi_status_t.RSMI_STATUS_PERMISSION:
+            printLog(device, 'Permission denied', None, addExtraLine)
+        elif ret == rsmi_status_t.RSMI_STATUS_NOT_SUPPORTED:
+            printLog(device, 'Not supported on the given system', None, addExtraLine)
+        else:
+            rsmi_ret_ok(ret, device)
+            printErrLog(device, 'Failed to retrieve NPS mode, even though device supports it.')
     printLogSpacer()
 
 
@@ -2780,8 +2859,27 @@ def showComputePartition(deviceList):
             printLog(device, 'Not supported on the given system', None)
         else:
             rsmi_ret_ok(ret, device)
-            printErrLog(device, 'Failed to retrieve compute partition, even though device supports it.', None)
+            printErrLog(device, 'Failed to retrieve compute partition, even though device supports it.')
     printLogSpacer()
+
+def showNPSMode(deviceList):
+    """ Returns the current NPS mode for a list of devices
+
+    @param deviceList: List of DRM devices (can be a single-item list)
+    """
+    npsMode = create_string_buffer(256)
+    printLogSpacer(' Current NPS Mode ')
+    for device in deviceList:
+        ret = rocmsmi.rsmi_dev_nps_mode_get(device, npsMode, 256)
+        if rsmi_ret_ok(ret, device, silent=True) and npsMode.value.decode():
+            printLog(device, 'NPS Mode', npsMode.value.decode())
+        elif ret == rsmi_status_t.RSMI_STATUS_NOT_SUPPORTED:
+            printLog(device, 'Not supported on the given system', None)
+        else:
+            rsmi_ret_ok(ret, device)
+            printErrLog(device, 'Failed to retrieve NPS mode, even though device supports it.')
+    printLogSpacer()
+
 
 def checkAmdGpus(deviceList):
     """ Check if there are any AMD GPUs being queried,
@@ -3130,6 +3228,7 @@ if __name__ == '__main__':
                               action='store_true')
     groupDisplay.add_argument('--shownodesbw', help='Shows the numa nodes ', action='store_true')
     groupDisplay.add_argument('--showcomputepartition', help='Shows current compute partitioning ', action='store_true')
+    groupDisplay.add_argument('--shownpsmode', help='Shows current nps mode ', action='store_true')
 
     groupActionReset.add_argument('-r', '--resetclocks', help='Reset clocks and OverDrive to default',
                                   action='store_true')
@@ -3176,8 +3275,10 @@ if __name__ == '__main__':
                              metavar='SCLK', nargs=1)
     groupAction.add_argument('--setcomputepartition', help='Set compute partition',
                              choices=compute_partition_type_l + [x.lower() for x in compute_partition_type_l],
-                             type=str, nargs=1
-                             )
+                             type=str, nargs=1)
+    groupAction.add_argument('--setnpsmode', help='Set nps mode',
+                             choices=nps_mode_type_l + [x.lower() for x in nps_mode_type_l],
+                             type=str, nargs=1)
     groupAction.add_argument('--rasenable', help='Enable RAS for specified block and error type', type=str, nargs=2,
                              metavar=('BLOCK', 'ERRTYPE'))
     groupAction.add_argument('--rasdisable', help='Disable RAS for specified block and error type', type=str, nargs=2,
@@ -3215,7 +3316,8 @@ if __name__ == '__main__':
             or args.resetclocks or args.setprofile or args.resetprofile or args.setoverdrive or args.setmemoverdrive \
             or args.setpoweroverdrive or args.resetpoweroverdrive or args.rasenable or args.rasdisable or \
             args.rasinject or args.gpureset or args.setperfdeterminism or args.setslevel or args.setmlevel or \
-            args.setvc or args.setsrange or args.setmrange or args.setclock or args.setcomputepartition:
+            args.setvc or args.setsrange or args.setmrange or args.setclock or \
+            args.setcomputepartition or args.setnpsmode:
         relaunchAsSudo()
 
     # If there is one or more device specified, use that for all commands, otherwise use a
@@ -3278,6 +3380,7 @@ if __name__ == '__main__':
         args.showreplaycount = True
         args.showvc = True
         args.showcomputepartition = True
+        args.shownpsmode = True
 
         if not PRINT_JSON:
             args.showprofile = True
@@ -3408,6 +3511,8 @@ if __name__ == '__main__':
         showEnergy(deviceList)
     if args.showcomputepartition:
         showComputePartition(deviceList)
+    if args.shownpsmode:
+        showNPSMode(deviceList)
     if args.setclock:
         setClocks(deviceList, args.setclock[0], [int(args.setclock[1])])
     if args.setsclk:
@@ -3448,6 +3553,8 @@ if __name__ == '__main__':
         setPerfDeterminism(deviceList, args.setperfdeterminism[0])
     if args.setcomputepartition:
         setComputePartition(deviceList, args.setcomputepartition[0])
+    if args.setnpsmode:
+        setNPSMode(deviceList, args.setnpsmode[0])
     if args.resetprofile:
         resetProfile(deviceList)
     if args.resetxgmierr:

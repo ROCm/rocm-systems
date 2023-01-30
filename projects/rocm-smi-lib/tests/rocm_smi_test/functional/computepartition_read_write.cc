@@ -204,7 +204,6 @@ void TestComputePartitionReadWrite::Run(void) {
     // Verify api support checking functionality is working
     err = rsmi_dev_compute_partition_set(dv_ind, new_computePartition);
     // Note: new_computePartition is not set
-    // DISPLAY_RSMI_ERR(err)
     EXPECT_TRUE((err == RSMI_STATUS_INVALID_ARGS) ||
                 (err == RSMI_STATUS_NOT_SUPPORTED));
     IF_VERB(STANDARD) {
@@ -222,7 +221,6 @@ void TestComputePartitionReadWrite::Run(void) {
     new_computePartition
       = rsmi_compute_partition_type::RSMI_COMPUTE_PARTITION_INVALID;
     err = rsmi_dev_compute_partition_set(dv_ind, new_computePartition);
-    // DISPLAY_RSMI_ERR(err)
     EXPECT_TRUE((err == RSMI_STATUS_INVALID_ARGS) ||
                 (err == RSMI_STATUS_NOT_SUPPORTED) ||
                 (err == RSMI_STATUS_PERMISSION));

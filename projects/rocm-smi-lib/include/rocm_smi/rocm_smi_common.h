@@ -5,7 +5,7 @@
  * The University of Illinois/NCSA
  * Open Source License (NCSA)
  *
- * Copyright (c) 2018, Advanced Micro Devices, Inc.
+ * Copyright (c) 2018-2023, Advanced Micro Devices, Inc.
  * All rights reserved.
  *
  * Developed by:
@@ -49,6 +49,7 @@
 #include <map>
 #include <vector>
 #include <string>
+#include <unordered_set>
 
 #define CHECK_DV_IND_RANGE \
     amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance(); \
@@ -165,7 +166,9 @@ struct RocmSMI_env_vars {
 
     // The integer value of sysfs field enum that is to be over-ridden.
     // Env. variable RSMI_DEBUG_ENUM_OVERRIDE is used to specify this.
-    uint32_t enum_override;
+    // A set of enum overrides, RSMI_DEBUG_ENUM_OVERRIDE now supports
+    // comma delimited values.
+    std::unordered_set<uint32_t> enum_overrides;
 
     // Sysfs path overrides
 

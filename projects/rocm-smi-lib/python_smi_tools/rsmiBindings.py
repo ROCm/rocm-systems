@@ -66,6 +66,10 @@ class rsmi_status_t(c_int):
     RSMI_STATUS_INTERRUPT = 0xC
     RSMI_STATUS_UNEXPECTED_SIZE = 0xD
     RSMI_STATUS_NO_DATA = 0xE
+    RSMI_STATUS_UNEXPECTED_DATA = 0xF
+    RSMI_STATUS_BUSY = 0x10
+    RSMI_STATUS_REFCOUNT_OVERFLOW = 0x11
+    RSMI_STATUS_AMDGPU_RESTART_ERR = 0x12
     RSMI_STATUS_UNKNOWN_ERROR = 0xFFFFFFFF
 
 
@@ -86,6 +90,10 @@ rsmi_status_verbose_err_out = {
     rsmi_status_t.RSMI_STATUS_INTERRUPT: 'Interrupt occured during execution',
     rsmi_status_t.RSMI_STATUS_UNEXPECTED_SIZE: 'Unexpected amount of data read',
     rsmi_status_t.RSMI_STATUS_NO_DATA: 'No data found for the given input',
+    rsmi_status_t.RSMI_STATUS_UNEXPECTED_DATA: 'Unexpected data received',
+    rsmi_status_t.RSMI_STATUS_BUSY: 'Busy - resources are preventing call the ability to execute',
+    rsmi_status_t.RSMI_STATUS_REFCOUNT_OVERFLOW: 'Data overflow - data exceeded INT32_MAX',
+    rsmi_status_t.RSMI_STATUS_AMDGPU_RESTART_ERR: 'Could not successfully restart the amdgpu driver',
     rsmi_status_t.RSMI_STATUS_UNKNOWN_ERROR: 'Unknown error occured'
 }
 
@@ -607,3 +615,25 @@ rsmi_compute_partition_type = rsmi_compute_partition_type_t
 # compute_partition_type_l[rsmi_compute_partition_type_t.RSMI_COMPUTE_PARTITION_CPX]
 # will return string 'CPX'
 compute_partition_type_l = ['CPX', 'SPX', 'DPX', 'TPX', 'QPX']
+
+class rsmi_nps_mode_type_t(c_int):
+    RSMI_MEMORY_PARTITION_UNKNOWN = 0
+    RSMI_MEMORY_PARTITION_NPS1 = 1
+    RSMI_MEMORY_PARTITION_NPS2 = 2
+    RSMI_MEMORY_PARTITION_NPS4 = 3
+    RSMI_MEMORY_PARTITION_NPS8 = 4
+
+rsmi_nps_mode_type_dict = {
+    'NPS1': 1,
+    'NPS2': 2,
+    'NPS4': 3,
+    'NPS8': 4
+}
+
+rsmi_nps_mode_type = rsmi_nps_mode_type_t
+
+# nps_mode_type_l includes string names for the rsmi_compute_partition_type_t
+# Usage example to get corresponding names:
+# nps_mode_type_l[rsmi_nps_mode_type_t.RSMI_MEMORY_PARTITION_NPS2]
+# will return string 'NPS2'
+nps_mode_type_l = ['NPS1', 'NPS2', 'NPS4', 'NPS8']

@@ -30,10 +30,9 @@ modules.builtin
 *.lzma
 *.xz
 *.lzo
-#*.patch
+*.patch
 *.gcno
 *.pyc
-*current_compute_partition
 
 #
 # Top-level generic files/folders
@@ -122,3 +121,8 @@ _deps
 # Removes generated config headers like rocmsmi64Config.h & oamConfig.h
 #
 *Config.h
+
+#
+# Fake SYSFS files
+#
+/device/*

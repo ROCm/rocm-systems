@@ -162,7 +162,8 @@ enum DevInfoTypes {
   kDevNumaNode,
   kDevGpuMetrics,
   kDevGpuReset,
-  kDevComputePartition
+  kDevComputePartition,
+  kDevMemoryPartition
 };
 
 typedef struct {
@@ -215,6 +216,7 @@ class Device {
     void DumpSupportedFunctions(void);
     bool DeviceAPISupported(std::string name, uint64_t variant,
                                                         uint64_t sub_variant);
+    rsmi_status_t restartAMDGpuDriver(void);
 
  private:
     std::shared_ptr<Monitor> monitor_;
