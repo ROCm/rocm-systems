@@ -1,0 +1,59 @@
+name: Update AARInternal
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  copy-files:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout current repo
+        uses: actions/checkout@v3
+        with:
+          path: 'src'
+          ref: 'main'
+          persist-credentials: false
+
+      - name: Checkout dest repo
+        uses: actions/checkout@v3
+        with:
+          path: 'dest'
+          ref: 'main'
+          repository: 'AARInternal/omniperf'
+          token: ${{ secrets.GH_PAT }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Copy common files to dest repo
+        shell: bash
+        run: |
+          rm -rf dest/*
+          cp -rv src/* dest/
+
+      - name: Check for new files
+        id: newFiles
+        shell: bash
+        working-directory: dest
+        run: |
+          pwd
+          ls
+          echo $(git status)
+          git add -A
+          git status --porcelain | wc -l
+          if [[ $(git status --porcelain | wc -l) -gt 0 ]]
+          then
+            echo "::set-output name=hasNewFiles::true"
+          else
+            echo "::set-output name=hasNewFiles::false"
+          fi
+      - name: Push new files
+        if: ${{ steps.newFiles.outputs.hasNewFiles == 'true' }}
+        shell: bash
+        working-directory: dest
+        run: |
+          git config --global user.name "${{ secrets.USER_NAME }}"
+          git config --global user.email "${{ secrets.USER_EMAIL }}"
+          git commit -m "maint: Updated common files from ref: ${{ github.ref }}"
+          git push
+
