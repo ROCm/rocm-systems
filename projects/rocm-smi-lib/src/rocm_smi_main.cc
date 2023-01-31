@@ -543,12 +543,7 @@ static const uint32_t kAmdGpuId = 0x1002;
 
 static bool isAMDGPU(std::string dev_path) {
   std::string vend_path = dev_path + "/device/vendor";
-  std::string vbios_v_path = dev_path + "/device/vbios_version";
   if (!FileExists(vend_path.c_str())) {
-    return false;
-  }
-
-  if (!FileExists(vbios_v_path.c_str())) {
     return false;
   }
 
