@@ -217,19 +217,6 @@ def mongo_import(args, profileAndImport):
 def roof_setup(args, my_parser):
     if args.path == os.getcwd() + "/workloads":
         args.path += "/" + args.name + "/" + str(get_soc())
-    # Verify valid axes parameters
-    if args.axes:
-        if len(args.axes) != 4:
-            throw_parse_error(
-                my_parser,
-                "Invalid argument for --axes.\nMust contain four values formatted as: --axes xmin xmax ymin ymax",
-            )
-
-        if args.axes[0] > args.axes[1] or args.axes[2] > args.axes[3]:
-            throw_parse_error(
-                my_parser,
-                "Invalid argument for --axes.\nBreaks required conditions: (xmax > xmin && ymax > ymin)",
-            )
 
     # We need to make a directory for a new roofline
     if not os.path.isdir(args.path):
