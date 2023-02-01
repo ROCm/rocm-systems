@@ -71,12 +71,13 @@ find_package(hsa-runtime64 CONFIG REQUIRED HINTS ${CMAKE_INSTALL_PREFIX} PATHS /
 find_package(hsakmt CONFIG REQUIRED HINTS ${CMAKE_INSTALL_PREFIX} PATHS /opt/rocm PATH_SUFFIXES lib/cmake/hsakmt )
 
 ## Find ROCm
-find_library ( HSA_KMT_LIB "libhsakmt.so" )
-if ( "${HSA_KMT_LIB_PATH}" STREQUAL "" )
-  find_library ( HSA_KMT_LIB "libhsakmt.a" )
+## TODO: Need a better method to find the ROCm path
+find_path ( HSA_KMT_INC_PATH "hsakmt/hsakmt.h" )
+if ( "${HSA_KMT_INC_PATH}" STREQUAL "" )
+  get_target_property(HSA_KMT_INC_PATH hsakmt::hsakmt INTERFACE_INCLUDE_DIRECTORIES)
 endif()
-get_filename_component ( HSA_KMT_LIB_PATH "${HSA_KMT_LIB}" DIRECTORY )
-get_filename_component ( ROCM_ROOT_DIR "${HSA_KMT_LIB_PATH}" DIRECTORY )
+## Include path: /opt/rocm-ver/include. Go up one level to get ROCm  path
+get_filename_component ( ROCM_ROOT_DIR "${HSA_KMT_INC_PATH}" DIRECTORY )
 
 ## Basic Tool Chain Information
 message ( "----------Build-Type: ${CMAKE_BUILD_TYPE}" )
