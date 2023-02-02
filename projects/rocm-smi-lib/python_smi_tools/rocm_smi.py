@@ -2069,7 +2069,9 @@ def showProductName(deviceList):
                     device_sku = vbios.value.decode().split('-')[1]
                 else:
                     device_sku = 'unknown'
-            printLog(device, 'Card SKU', '\t\t' + device_sku)
+                printLog(device, 'Card SKU', '\t\t' + device_sku)
+            else:
+                printErrLog(device, "Unable to decode VBIOS value for device SKU")
         else:
             printLog(device, 'Incompatible device.\n' \
                              'GPU[%s]\t\t: Expected vendor name: Advanced Micro Devices, Inc. [AMD/ATI]\n' \
