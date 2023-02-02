@@ -26,6 +26,7 @@ THE SOFTWARE.
 #include <chrono>
 #include <cstring>
 #include <vector>
+#include "hsa.h"
 #include "rdc/rdc.h"
 #include "rdc_lib/RdcLogger.h"
 #include "rdc_lib/rdc_common.h"
@@ -35,6 +36,14 @@ namespace amd {
 namespace rdc {
 
 RdcRocpBase::RdcRocpBase() {
+    hsa_status_t err = hsa_init();
+    if (err != HSA_STATUS_SUCCESS) {
+        const char* errstr = nullptr;
+        hsa_status_string(err, &errstr);
+        throw std::runtime_error(
+            "hsa error code: " + std::to_string(err) + " " + errstr);
+    }
+
     auto status = rocmtools_initialize();
     RDC_LOG(RDC_INFO, "rocmtools_initialize status: " << status);
 }
@@ -47,6 +56,15 @@ RdcRocpBase::~RdcRocpBase() {
     sessions.clear();
     auto status = rocmtools_finalize();
     RDC_LOG(RDC_INFO, "rocmtools_finalize status: " << status);
+
+    hsa_status_t err = hsa_shut_down();
+    if (err != HSA_STATUS_SUCCESS) {
+        const char* errstr = nullptr;
+        hsa_status_string(err, &errstr);
+        // cannot throw an error here. print instead
+        RDC_LOG(
+            RDC_ERROR, "hsa error code: " + std::to_string(err) + " " + errstr);
+    }
 }
 
 rdc_status_t RdcRocpBase::rocp_lookup(

@@ -85,8 +85,6 @@ rdc_status_t rdc_telemetry_fields_value_get(
             bulk_count = 0;
         }
 
-        RDC_LOG(RDC_DEBUG, "ID: " << fields[i].field_id);
-
         status = rocp.rocp_lookup(
             std::make_pair(fields[i].gpu_index, fields[i].field_id), &value);
 
@@ -97,7 +95,6 @@ rdc_status_t rdc_telemetry_fields_value_get(
         values[bulk_count].field_value.ts = curTime;
         values[bulk_count].field_value.value.dbl = value;
         values[bulk_count].field_value.field_id = fields[i].field_id;
-        RDC_LOG(RDC_DEBUG, "VALUE: " << value);
         bulk_count++;
     }
     if (bulk_count != 0) {

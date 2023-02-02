@@ -65,13 +65,6 @@ hsa_status_t CommonCleanUp(RdcRocrBase* test) {
   err = hsa_shut_down();
   throw_if_error(err);
 
-  // Ensure that HSA is actually closed.
-  hsa_status_t check = hsa_shut_down();
-  if (check != HSA_STATUS_ERROR_NOT_INITIALIZED) {
-    RDC_LOG(RDC_ERROR, "hsa_init reference count was too high.");
-    return HSA_STATUS_ERROR;
-  }
-
   std::string intr_val;
 
   if (test->orig_hsa_enable_interrupt() == nullptr) {
