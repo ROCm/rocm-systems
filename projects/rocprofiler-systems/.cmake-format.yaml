@@ -215,6 +215,22 @@ parse:
         DEFINITIONS: '*'
         LINK_LIBRARIES: '*'
         INCLUDE_DIRECTORIES: '*'
+    omnitrace_add_validation_test:
+      kwargs:
+        NAME: '*'
+        ARGS: '*'
+        LABELS: '*'
+        TIMEOUT: '*'
+        DEPENDS: '*'
+        PROPERTIES: '*'
+        PASS_REGEX: '*'
+        FAIL_REGEX: '*'
+        SKIP_REGEX: '*'
+        ENVIRONMENT: '*'
+        PERFETTO_FILE: '*'
+        PERFETTO_METRIC: '*'
+        TIMEMORY_FILE: '*'
+        TIMEMORY_METRIC: '*'
   override_spec: {}
   vartags: []
   proptags: []

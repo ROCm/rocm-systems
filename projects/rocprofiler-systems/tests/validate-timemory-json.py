@@ -42,6 +42,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "-d", "--depths", nargs="+", type=int, help="Expected depths", default=[]
     )
+    parser.add_argument(
+        "-p", "--print", action="store_true", help="Print the processed perfetto data"
+    )
     parser.add_argument("-i", "--input", type=str, help="Input file", required=True)
 
     args = parser.parse_args()
@@ -54,6 +57,19 @@ if __name__ == "__main__":
     ret = 0
     with open(args.input) as f:
         data = json.load(f)
+
+        # demo display of data
+        if args.print:
+            for itr in data["timemory"][args.metric]["ranks"][0]["graph"]:
+                _prefix = itr["prefix"]
+                _depth = itr["depth"]
+                _count = itr["entry"]["laps"]
+                _idx = _prefix.find(">>>")
+                if _idx is not None:
+                    _prefix = _prefix[(_idx + 4) :]
+
+                print("| {:40} | {:6} | {:6} |".format(_prefix, _count, _depth))
+
         try:
             validate_json(
                 data["timemory"][args.metric]["ranks"][0]["graph"],

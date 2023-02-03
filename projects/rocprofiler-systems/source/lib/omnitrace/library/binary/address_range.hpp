@@ -43,7 +43,7 @@ struct address_range
     uintptr_t low  = std::numeric_limits<uintptr_t>::max();
     uintptr_t high = std::numeric_limits<uintptr_t>::min();
 
-    TIMEMORY_DEFAULT_OBJECT(address_range)
+    OMNITRACE_DEFAULT_OBJECT(address_range)
 
     explicit address_range(uintptr_t _v);
     address_range(uintptr_t _low, uintptr_t _high);

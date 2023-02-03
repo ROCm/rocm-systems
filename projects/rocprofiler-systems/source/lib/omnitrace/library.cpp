@@ -20,12 +20,13 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-// clang-format off
 #include <timemory/log/color.hpp>
-// clang-format on
-
+//
+//  above should always be included first
+//
 #include "api.hpp"
 #include "common/setup.hpp"
+#include "library/categories.hpp"
 #include "library/causal/data.hpp"
 #include "library/causal/experiment.hpp"
 #include "library/causal/sampling.hpp"
@@ -37,6 +38,7 @@
 #include "library/components/rocprofiler.hpp"
 #include "library/concepts.hpp"
 #include "library/config.hpp"
+#include "library/constraint.hpp"
 #include "library/coverage.hpp"
 #include "library/critical_trace.hpp"
 #include "library/debug.hpp"
@@ -56,24 +58,25 @@
 #include "library/utility.hpp"
 #include "omnitrace/categories.h"  // in omnitrace-user
 
-#include <timemory/process/threading.hpp>
-#include <timemory/signals/signal_handlers.hpp>
-#include <timemory/signals/types.hpp>
 #include <timemory/hash/types.hpp>
 #include <timemory/manager/manager.hpp>
+#include <timemory/mpl/type_traits.hpp>
 #include <timemory/operations/types/file_output_message.hpp>
-#include <timemory/signals/signal_mask.hpp>
+#include <timemory/process/threading.hpp>
 #include <timemory/settings/types.hpp>
+#include <timemory/signals/signal_handlers.hpp>
+#include <timemory/signals/signal_mask.hpp>
+#include <timemory/signals/types.hpp>
 #include <timemory/utility/backtrace.hpp>
 #include <timemory/utility/procfs/maps.hpp>
 
 #include <atomic>
 #include <cstdio>
+#include <cstdlib>
 #include <mutex>
+#include <stdexcept>
 #include <string_view>
 #include <utility>
-#include <cstdlib>
-#include <stdexcept>
 
 using namespace omnitrace;
 
@@ -122,15 +125,30 @@ ensure_initialization(bool _offset, int64_t _glob_n, int64_t _offset_n)
     return _offset;
 }
 
+void
+finalization_handler()
+{
+    if(get_state() == State::Active) omnitrace_finalize();
+}
+
 auto
 ensure_finalization(bool _static_init = false)
 {
+    if(config::set_signal_handler(nullptr) == nullptr)
+        config::set_signal_handler(&finalization_handler);
+
     if(_static_init)
     {
         auto _idx = threading::add_callback(&ensure_initialization);
         if(_idx < 0)
             throw exception<std::runtime_error>("failure adding threading callback");
     }
+
+    OMNITRACE_CI_BASIC_THROW(
+        config::set_signal_handler(nullptr) != &finalization_handler,
+        "Assignment of signal handler failed. signal handler is %s, expected %s\n",
+        as_hex(reinterpret_cast<void*>(config::set_signal_handler(nullptr))).c_str(),
+        as_hex(reinterpret_cast<void*>(&finalization_handler)).c_str());
 
     const auto& _info = thread_info::init();
     const auto& _tid  = _info->index_data;
@@ -144,7 +162,7 @@ ensure_finalization(bool _static_init = false)
                            _tid->system_value);
     }
 
-    if(!get_env("OMNITRACE_COLORIZED_LOG", true)) tim::log::colorized() = false;
+    if(get_env("OMNITRACE_MONOCHROME", false)) tim::log::monochrome() = true;
 
     (void) tim::manager::instance();
     (void) tim::settings::shared_instance();
@@ -192,7 +210,7 @@ struct fini_bundle
 {
     using data_type = std::tuple<Tp...>;
 
-    TIMEMORY_DEFAULT_OBJECT(fini_bundle)
+    OMNITRACE_DEFAULT_OBJECT(fini_bundle)
 
     fini_bundle(std::string_view _label)
     : m_label{ _label }
@@ -400,7 +418,7 @@ omnitrace_init_library_hidden()
 extern "C" bool
 omnitrace_init_tooling_hidden()
 {
-    if(!get_env("OMNITRACE_COLORIZED_LOG", true, false)) tim::log::colorized() = false;
+    if(get_env("OMNITRACE_MONOCHROME", false, false)) tim::log::monochrome() = true;
 
     if(!tim::get_env("OMNITRACE_INIT_TOOLING", true))
     {
@@ -537,6 +555,8 @@ omnitrace_init_tooling_hidden()
     {
         omnitrace::perfetto::start();
     }
+
+    categories::setup();
 
     // if static objects are destroyed in the inverse order of when they are
     // created this should ensure that finalization is called before perfetto
@@ -700,6 +720,10 @@ omnitrace_finalize_hidden(void)
 
     push_enable_sampling_on_child_threads(false);
     set_sampling_on_all_future_threads(false);
+
+    // if the categories are not enabled, it can/will suppress generating output for data
+    // in category
+    categories::enable_categories();
 
     auto _debug_init  = get_debug_finalize();
     auto _debug_value = get_debug();
@@ -951,7 +975,7 @@ omnitrace_finalize_hidden(void)
     bool _perfetto_output_error = false;
     if(get_use_perfetto() && !is_system_backend())
     {
-        auto& tracing_session = tracing::get_perfetto_session();
+        auto& tracing_session = get_perfetto_session();
 
         OMNITRACE_CI_THROW(tracing_session == nullptr,
                            "Null pointer to the tracing session");
@@ -1060,6 +1084,8 @@ omnitrace_finalize_hidden(void)
         _timemory_manager->write_metadata(settings::get_global_output_prefix(),
                                           "omnitrace", _cfg);
     }
+
+    categories::shutdown();
 
     _finalization.stop();
 

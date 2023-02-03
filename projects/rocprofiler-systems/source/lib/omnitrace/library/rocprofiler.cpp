@@ -660,7 +660,7 @@ post_process_timemory()
         rocm_event*                      parent   = nullptr;
         mutable std::vector<local_event> children = {};
 
-        TIMEMORY_DEFAULT_OBJECT(local_event)
+        OMNITRACE_DEFAULT_OBJECT(local_event)
 
         explicit local_event(rocm_event* _v)
         : parent{ _v }

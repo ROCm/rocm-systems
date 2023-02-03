@@ -154,6 +154,7 @@ for pref in preferences:
 
 from recommonmark.transform import AutoStructify
 
+
 # app setup hook
 def setup(app):
     app.add_config_value(

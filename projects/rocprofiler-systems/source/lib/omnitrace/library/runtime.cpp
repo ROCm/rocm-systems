@@ -89,35 +89,6 @@ sampling_on_child_threads()
 }
 }  // namespace
 
-int
-get_realtime_signal()
-{
-    return SIGRTMIN + config::get_sampling_rtoffset();
-}
-
-int
-get_cputime_signal()
-{
-    return SIGPROF;
-}
-
-std::set<int> get_sampling_signals(int64_t)
-{
-    auto _v = std::set<int>{};
-    if(config::get_use_causal())
-    {
-        _v.emplace(get_cputime_signal());
-        _v.emplace(get_realtime_signal());
-    }
-    else
-    {
-        if(config::get_use_sampling_cputime()) _v.emplace(get_cputime_signal());
-        if(config::get_use_sampling_realtime()) _v.emplace(get_realtime_signal());
-    }
-
-    return _v;
-}
-
 std::atomic<uint64_t>&
 get_cpu_cid()
 {

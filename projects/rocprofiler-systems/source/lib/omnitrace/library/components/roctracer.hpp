@@ -51,7 +51,7 @@ struct roctracer
     using base_type    = base<roctracer, void>;
     using tracker_type = policy::instance_tracker<roctracer, false>;
 
-    TIMEMORY_DEFAULT_OBJECT(roctracer)
+    OMNITRACE_DEFAULT_OBJECT(roctracer)
 
     static void preinit();
     static void global_init() { setup(); }

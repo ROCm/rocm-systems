@@ -274,7 +274,6 @@ def compute_speedups(_data, args):
 
 
 def get_validations(args):
-
     data = []
     _len = len(args.validate)
     if _len == 0:
@@ -297,7 +296,6 @@ def get_validations(args):
 
 
 def main():
-
     import argparse
 
     parser = argparse.ArgumentParser()

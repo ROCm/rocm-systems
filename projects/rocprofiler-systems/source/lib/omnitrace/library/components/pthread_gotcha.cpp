@@ -48,7 +48,7 @@ struct stop<omnitrace::component::pthread_create_gotcha_t>
 {
     using type = omnitrace::component::pthread_create_gotcha_t;
 
-    TIMEMORY_DEFAULT_OBJECT(stop)
+    OMNITRACE_DEFAULT_OBJECT(stop)
 
     template <typename... Args>
     explicit stop(type&, Args&&...)

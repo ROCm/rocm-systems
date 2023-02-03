@@ -854,11 +854,19 @@ void
 post_process_perfetto(int64_t _tid, const bundle_t* _init,
                       const std::vector<bundle_t*>& _data)
 {
+    auto _valid_metrics = backtrace_metrics::valid_array_t{};
+
+    for(const auto& itr : _data)
+    {
+        const auto* _bt_mt = itr->get<backtrace_metrics>();
+        if(_bt_mt) _valid_metrics |= _bt_mt->get_valid();
+    }
+
     if(trait::runtime_enabled<backtrace_metrics>::get())
     {
         OMNITRACE_VERBOSE(3 || get_debug_sampling(),
                           "[%li] Post-processing metrics for perfetto...\n", _tid);
-        backtrace_metrics::init_perfetto(_tid);
+        backtrace_metrics::init_perfetto(_tid, _valid_metrics);
         for(const auto& itr : _data)
         {
             const auto* _bt_metrics = itr->get<backtrace_metrics>();
@@ -867,8 +875,7 @@ post_process_perfetto(int64_t _tid, const bundle_t* _init,
             if(_bt_time->get_tid() != _tid) continue;
             _bt_metrics->post_process_perfetto(_tid, _bt_time->get_timestamp());
         }
-
-        backtrace_metrics::fini_perfetto(_tid);
+        backtrace_metrics::fini_perfetto(_tid, _valid_metrics);
     }
 
     OMNITRACE_VERBOSE(3 || get_debug_sampling(),
@@ -936,6 +943,12 @@ post_process_perfetto(int64_t _tid, const bundle_t* _init,
                 _bt_mt->get_hw_counters().size() ==
                     _last->get<backtrace_metrics>()->get_hw_counters().size();
 
+            auto _hw_counters_enabled = [](const auto* _bt_v) {
+                return (_bt_v != nullptr) &&
+                       (*_bt_v)(type_list<backtrace_metrics::hw_counters>{}) &&
+                       (*_bt_v)(category::thread_hardware_counter{});
+            };
+
             // annotations common to both modes
             auto _common_annotate = [&](::perfetto::EventContext& ctx, bool _is_last) {
                 if(_include_common && _is_last)
@@ -943,7 +956,9 @@ post_process_perfetto(int64_t _tid, const bundle_t* _init,
                     tracing::add_perfetto_annotation(ctx, "begin_ns", _beg);
                     tracing::add_perfetto_annotation(ctx, "end_ns", _end);
                 }
-                if(_include_hw && _is_last)
+                if(_include_hw && _is_last && _last &&
+                   _hw_counters_enabled(_last->get<backtrace_metrics>()) &&
+                   _hw_counters_enabled(_bt_mt))
                 {
                     // current values when read
                     auto _hw_cnt_vals = _bt_mt->get_hw_counters();
@@ -1048,16 +1063,15 @@ post_process_timemory(int64_t _tid, const bundle_t* _init,
         using bundle_t = tim::lightweight_tuple<comp::trip_count, sampling_wall_clock,
                                                 sampling_cpu_clock, hw_counters>;
 
-        auto* _bt_data    = itr->get<backtrace>();
-        auto* _bt_time    = itr->get<backtrace_timestamp>();
-        auto* _bt_metrics = itr->get<backtrace_metrics>();
+        auto*       _bt_data      = itr->get<backtrace>();
+        auto*       _bt_time      = itr->get<backtrace_timestamp>();
+        auto*       _bt_metrics   = itr->get<backtrace_metrics>();
+        const auto* _last_metrics = _last->get<backtrace_metrics>();
 
-        if(!_bt_data || !_bt_time || !_bt_metrics) continue;
+        if(!_bt_data || !_bt_time) continue;
 
         double _elapsed_wc = (_bt_time->get_timestamp() -
                               _last->get<backtrace_timestamp>()->get_timestamp());
-        double _elapsed_cc = (_bt_metrics->get_cpu_timestamp() -
-                              _last->get<backtrace_metrics>()->get_cpu_timestamp());
 
         std::vector<bundle_t> _tc{};
         _tc.reserve(_bt_data->size());
@@ -1090,31 +1104,45 @@ post_process_timemory(int64_t _tid, const bundle_t* _init,
             if constexpr(tim::trait::is_available<sampling_cpu_clock>::value)
             {
                 auto* _cc = iitr.get<sampling_cpu_clock>();
-                if(_cc)
+
+                if(_cc && _bt_metrics && _last_metrics &&
+                   (*_bt_metrics)(category::thread_cpu_time{}) &&
+                   (*_last_metrics)(category::thread_cpu_time{}))
                 {
+                    double _elapsed_cc = (_bt_metrics->get_cpu_timestamp() -
+                                          _last_metrics->get_cpu_timestamp());
+
                     _cc->set_value(_elapsed_cc / sampling_cpu_clock::get_unit());
                     _cc->set_accum(_elapsed_cc / sampling_cpu_clock::get_unit());
                 }
             }
             if constexpr(tim::trait::is_available<hw_counters>::value)
             {
-                auto _hw_cnt_vals = _bt_metrics->get_hw_counters();
-                if(_last && _bt_metrics->get_hw_counters().size() ==
-                                _last->get<backtrace_metrics>()->get_hw_counters().size())
+                auto _hw_counters_enabled = [](const auto* _bt_v) {
+                    return (_bt_v != nullptr) &&
+                           (*_bt_v)(type_list<backtrace_metrics::hw_counters>{}) &&
+                           (*_bt_v)(category::thread_hardware_counter{});
+                };
+
+                if(_bt_metrics && _last_metrics && _hw_counters_enabled(_bt_metrics) &&
+                   _hw_counters_enabled(_last_metrics))
                 {
-                    for(size_t k = 0; k < _bt_metrics->get_hw_counters().size(); ++k)
+                    auto _hw_cnt_vals = _bt_metrics->get_hw_counters();
+                    if(_bt_metrics->get_hw_counters().size() ==
+                       _last_metrics->get_hw_counters().size())
                     {
-                        if(_last->get<backtrace_metrics>()->get_hw_counters()[k] >
-                           _hw_cnt_vals[k])
-                            _hw_cnt_vals[k] -=
-                                _last->get<backtrace_metrics>()->get_hw_counters()[k];
+                        for(size_t k = 0; k < _bt_metrics->get_hw_counters().size(); ++k)
+                        {
+                            if(_last_metrics->get_hw_counters()[k] > _hw_cnt_vals[k])
+                                _hw_cnt_vals[k] -= _last_metrics->get_hw_counters()[k];
+                        }
                     }
-                }
-                auto* _hw_counter = iitr.get<hw_counters>();
-                if(_hw_counter)
-                {
-                    _hw_counter->set_value(_hw_cnt_vals);
-                    _hw_counter->set_accum(_hw_cnt_vals);
+                    auto* _hw_counter = iitr.get<hw_counters>();
+                    if(_hw_counter)
+                    {
+                        _hw_counter->set_value(_hw_cnt_vals);
+                        _hw_counter->set_accum(_hw_cnt_vals);
+                    }
                 }
             }
             iitr.pop();

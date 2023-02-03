@@ -98,6 +98,15 @@ init_index_data(int64_t _tid, bool _offset = false)
 const auto unknown_thread = std::optional<thread_info>{};
 }  // namespace
 
+std::string
+thread_index_data::as_string() const
+{
+    auto _ss = std::stringstream{};
+    _ss << sequent_value << " [" << as_hex(system_value) << "] (#" << internal_value
+        << ")";
+    return _ss.str();
+}
+
 int64_t
 grow_data(int64_t _tid)
 {

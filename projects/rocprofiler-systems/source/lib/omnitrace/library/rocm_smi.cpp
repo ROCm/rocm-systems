@@ -442,20 +442,7 @@ post_process()
 uint32_t
 device_count()
 {
-    uint32_t _num_devices = 0;
-    try
-    {
-        static auto _rsmi_init_once = []() { OMNITRACE_ROCM_SMI_CALL(rsmi_init(0)); };
-        static std::once_flag _once{};
-        std::call_once(_once, _rsmi_init_once);
-
-        OMNITRACE_ROCM_SMI_CALL(rsmi_num_monitor_devices(&_num_devices));
-    } catch(std::exception& _e)
-    {
-        OMNITRACE_BASIC_VERBOSE(1, "Exception thrown getting the rocm-smi devices: %s\n",
-                                _e.what());
-    }
-    return _num_devices;
+    return gpu::rsmi_device_count();
 }
 }  // namespace rocm_smi
 }  // namespace omnitrace

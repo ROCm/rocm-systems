@@ -44,7 +44,7 @@ struct exit_gotcha : tim::component::base<exit_gotcha, void>
     using exit_func_t  = void (*)(int);
     using abort_func_t = void (*)();
 
-    TIMEMORY_DEFAULT_OBJECT(exit_gotcha)
+    OMNITRACE_DEFAULT_OBJECT(exit_gotcha)
 
     // string id for component
     static std::string label() { return "exit_gotcha"; }

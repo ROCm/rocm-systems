@@ -164,6 +164,17 @@ set(_rccl_environment
     "${_test_openmp_env}"
     "${_test_library_path}")
 
+set(_window_environment
+    "OMNITRACE_USE_PERFETTO=ON"
+    "OMNITRACE_USE_TIMEMORY=ON"
+    "OMNITRACE_USE_SAMPLING=OFF"
+    "OMNITRACE_USE_PROCESS_SAMPLING=OFF"
+    "OMNITRACE_TIME_OUTPUT=OFF"
+    "OMNITRACE_FILE_OUTPUT=ON"
+    "OMNITRACE_VERBOSE=2"
+    "${_test_openmp_env}"
+    "${_test_library_path}")
+
 # -------------------------------------------------------------------------------------- #
 
 set(MPIEXEC_EXECUTABLE_ARGS)
@@ -231,7 +242,7 @@ endif()
 
 function(OMNITRACE_WRITE_TEST_CONFIG _FILE _ENV)
     set(_ENV_ONLY
-        "OMNITRACE_(MODE|USE_MPIP|DEBUG_SETTINGS|FORCE_ROCPROFILER_INIT|DEFAULT_MIN_INSTRUCTIONS|COLORIZED_LOG)="
+        "OMNITRACE_(MODE|USE_MPIP|DEBUG_SETTINGS|FORCE_ROCPROFILER_INIT|DEFAULT_MIN_INSTRUCTIONS|MONOCHROME)="
         )
     set(_FILE_CONTENTS)
     set(_ENV_CONTENTS)
@@ -436,7 +447,7 @@ function(OMNITRACE_ADD_TEST)
 
             set(_environ
                 "OMNITRACE_DEFAULT_MIN_INSTRUCTIONS=64" "${TEST_ENVIRONMENT}"
-                "OMNITRACE_OUTPUT_PATH=omnitrace-tests-output"
+                "OMNITRACE_OUTPUT_PATH=${PROJECT_BINARY_DIR}/omnitrace-tests-output"
                 "OMNITRACE_OUTPUT_PREFIX=${_prefix}")
 
             set(_timeout ${TEST_REWRITE_TIMEOUT})
@@ -575,7 +586,7 @@ function(OMNITRACE_ADD_CAUSAL_TEST)
 
             set(_environ
                 "${_causal_environment}"
-                "OMNITRACE_OUTPUT_PATH=omnitrace-tests-output"
+                "OMNITRACE_OUTPUT_PATH=${PROJECT_BINARY_DIR}/omnitrace-tests-output"
                 "OMNITRACE_OUTPUT_PREFIX=${_prefix}"
                 "OMNITRACE_CI=ON"
                 "OMNITRACE_USE_PID=OFF"
@@ -737,5 +748,148 @@ function(OMNITRACE_ADD_PYTHON_TEST)
                        REQUIRED_FILES
                        "${TEST_FILE}"
                        ${_TEST_PROPERTIES})
+    endforeach()
+endfunction()
+
+# -------------------------------------------------------------------------------------- #
+#
+# Find Python3 interpreter for output validation
+#
+# -------------------------------------------------------------------------------------- #
+
+if(NOT OMNITRACE_USE_PYTHON)
+    find_package(Python3 QUIET COMPONENTS Interpreter)
+
+    if(Python3_FOUND)
+        set(OMNITRACE_VALIDATION_PYTHON ${Python3_EXECUTABLE})
+        execute_process(COMMAND ${Python3_EXECUTABLE} -c "import perfetto"
+                        RESULT_VARIABLE OMNITRACE_VALIDATION_PYTHON_PERFETTO)
+
+        if(NOT OMNITRACE_VALIDATION_PYTHON_PERFETTO EQUAL 0)
+            omnitrace_message(AUTHOR_WARNING
+                              "Python3 found but perfetto support is disabled")
+        endif()
+    endif()
+else()
+    set(_INDEX 0)
+    foreach(_VERSION ${OMNITRACE_PYTHON_VERSIONS})
+        if(NOT OMNITRACE_USE_PYTHON)
+            continue()
+        endif()
+
+        list(GET OMNITRACE_PYTHON_ROOT_DIRS ${_INDEX} _PYTHON_ROOT_DIR)
+
+        omnitrace_find_python(
+            _PYTHON
+            ROOT_DIR "${_PYTHON_ROOT_DIR}"
+            COMPONENTS Interpreter)
+
+        if(_PYTHON_EXECUTABLE)
+            set(OMNITRACE_VALIDATION_PYTHON ${_PYTHON_EXECUTABLE})
+            execute_process(COMMAND ${_PYTHON_EXECUTABLE} -c "import perfetto"
+                            RESULT_VARIABLE OMNITRACE_VALIDATION_PYTHON_PERFETTO)
+
+            # prefer Python3 with perfetto support
+            if(OMNITRACE_VALIDATION_PYTHON_PERFETTO EQUAL 0)
+                break()
+            else()
+                omnitrace_message(
+                    AUTHOR_WARNING
+                    "${_PYTHON_EXECUTABLE} found but perfetto support is disabled")
+            endif()
+        endif()
+
+        math(EXPR _INDEX "${_INDEX} + 1")
+    endforeach()
+endif()
+
+if(NOT OMNITRACE_VALIDATION_PYTHON)
+    omnitrace_message(AUTHOR_WARNING
+                      "Python3 interpreter not found. Validation tests will be disabled")
+endif()
+
+# -------------------------------------------------------------------------------------- #
+#
+# Output validation test function
+#
+# -------------------------------------------------------------------------------------- #
+
+function(OMNITRACE_ADD_VALIDATION_TEST)
+
+    if(NOT OMNITRACE_VALIDATION_PYTHON)
+        return()
+    endif()
+
+    cmake_parse_arguments(
+        TEST
+        ""
+        "NAME;TIMEOUT;TIMEMORY_METRIC;TIMEMORY_FILE;PERFETTO_METRIC;PERFETTO_FILE"
+        "ENVIRONMENT;LABELS;PROPERTIES;PASS_REGEX;FAIL_REGEX;SKIP_REGEX;DEPENDS;ARGS"
+        ${ARGN})
+
+    if(NOT TEST_TIMEOUT)
+        set(TEST_TIMEOUT 30)
+    endif()
+
+    set(PYTHON_EXECUTABLE "${OMNITRACE_VALIDATION_PYTHON}")
+
+    list(APPEND TEST_LABELS "validate")
+    foreach(_DEP ${TEST_DEPENDS})
+        list(APPEND TEST_LABELS "validate-${_DEP}")
+    endforeach()
+
+    list(APPEND TEST_DEPENDS "${TEST_NAME}")
+
+    if(NOT TEST_PASS_REGEX)
+        set(TEST_PASS_REGEX
+            "omnitrace-tests-output/${TEST_NAME}/(${TEST_TIMEMORY_FILE}|${TEST_PERFETTO_FILE}) validated"
+            )
+    endif()
+
+    add_test(
+        NAME validate-${TEST_NAME}-timemory
+        COMMAND
+            ${OMNITRACE_VALIDATION_PYTHON}
+            ${CMAKE_CURRENT_LIST_DIR}/validate-timemory-json.py -m ${TEST_TIMEMORY_METRIC}
+            ${TEST_ARGS} -i
+            ${PROJECT_BINARY_DIR}/omnitrace-tests-output/${TEST_NAME}/${TEST_TIMEMORY_FILE}
+        WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
+
+    if(OMNITRACE_VALIDATION_PYTHON_PERFETTO EQUAL 0)
+        add_test(
+            NAME validate-${TEST_NAME}-perfetto
+            COMMAND
+                ${OMNITRACE_VALIDATION_PYTHON}
+                ${CMAKE_CURRENT_LIST_DIR}/validate-perfetto-proto.py -m
+                ${TEST_PERFETTO_METRIC} ${TEST_ARGS} -i
+                ${PROJECT_BINARY_DIR}/omnitrace-tests-output/${TEST_NAME}/${TEST_PERFETTO_FILE}
+            WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
+    endif()
+
+    foreach(_TEST validate-${TEST_NAME}-timemory validate-${TEST_NAME}-perfetto)
+
+        if(NOT TEST "${_TEST}")
+            continue()
+        endif()
+
+        set_tests_properties(
+            ${_TEST}
+            PROPERTIES ENVIRONMENT
+                       "${_TEST_ENV}"
+                       TIMEOUT
+                       ${TEST_TIMEOUT}
+                       LABELS
+                       "${TEST_LABELS}"
+                       DEPENDS
+                       "${TEST_DEPENDS};${TEST_NAME}"
+                       PASS_REGULAR_EXPRESSION
+                       "${TEST_PASS_REGEX}"
+                       FAIL_REGULAR_EXPRESSION
+                       "${TEST_FAIL_REGEX}"
+                       SKIP_REGULAR_EXPRESSION
+                       "${TEST_SKIP_REGEX}"
+                       REQUIRED_FILES
+                       "${TEST_FILE}"
+                       ${TEST_PROPERTIES})
     endforeach()
 endfunction()

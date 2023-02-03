@@ -22,12 +22,12 @@
 
 #include "library/config.hpp"
 #include "common/defines.h"
+#include "library/constraint.hpp"
 #include "library/debug.hpp"
 #include "library/defines.hpp"
 #include "library/gpu.hpp"
 #include "library/mproc.hpp"
 #include "library/perfetto.hpp"
-#include "library/runtime.hpp"
 
 #include <timemory/backends/dmp.hpp>
 #include <timemory/backends/mpi.hpp>
@@ -43,12 +43,14 @@
 #include <timemory/settings/types.hpp>
 #include <timemory/utility/argparse.hpp>
 #include <timemory/utility/declaration.hpp>
+#include <timemory/utility/delimit.hpp>
 #include <timemory/utility/filepath.hpp>
 #include <timemory/utility/join.hpp>
 #include <timemory/utility/signals.hpp>
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <csignal>
 #include <cstdint>
 #include <cstdlib>
@@ -98,7 +100,7 @@ get_setting_name(std::string _v)
 
 template <typename Tp>
 Tp
-get_available_perfetto_categories()
+get_available_categories()
 {
     auto _v = Tp{};
     for(auto itr : { OMNITRACE_PERFETTO_CATEGORIES })
@@ -287,8 +289,8 @@ configure_settings(bool _init)
                              "for continuous integration)",
                              false, "debugging", "advanced");
 
-    OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_COLORIZED_LOG", "Enable colorized logging",
-                             true, "debugging", "advanced");
+    OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_MONOCHROME", "Disable colorized logging",
+                             false, "debugging", "advanced");
 
     OMNITRACE_CONFIG_EXT_SETTING(int, "OMNITRACE_DL_VERBOSE",
                                  "Verbosity within the omnitrace-dl library", 0,
@@ -392,10 +394,45 @@ configure_settings(bool _init)
                              "Enable support for code coverage", false, "coverage",
                              "backend", "advanced");
 
-    OMNITRACE_CONFIG_SETTING(size_t, "OMNITRACE_INSTRUMENTATION_INTERVAL",
-                             "Instrumentation only takes measurements once every N "
-                             "function calls (not statistical)",
-                             size_t{ 1 }, "instrumentation", "data_sampling", "advanced");
+    OMNITRACE_CONFIG_SETTING(
+        double, "OMNITRACE_TRACE_DELAY",
+        "Time in seconds to wait before enabling trace/profile data collection. If "
+        "multiple delays + durations are needed, see OMNITRACE_TRACE_PERIODS.",
+        0.0, "trace", "profile", "perfetto", "timemory");
+
+    OMNITRACE_CONFIG_SETTING(
+        double, "OMNITRACE_TRACE_DURATION",
+        "If > 0.0, time (in seconds) to collect trace/profile data. If multiple delays + "
+        "durations are needed, see OMNITRACE_TRACE_PERIODS.",
+        0.0, "trace", "profile", "perfetto", "timemory");
+
+    auto _clock_s =
+        config::get_setting_value<std::string>("OMNITRACE_TRACE_PERIOD_CLOCK_ID").second;
+
+    auto _clock_choices = std::vector<std::string>{};
+
+    for(const auto& itr : constraint::get_valid_clock_ids())
+    {
+        _clock_choices.emplace_back(
+            join("", "(", join('|', itr.name, itr.value, itr.raw_name), ")"));
+    }
+
+    OMNITRACE_CONFIG_SETTING(std::string, "OMNITRACE_TRACE_PERIODS",
+                             "Similar to specify trace delay and/or duration except in "
+                             "the form <DELAY>:<DURATION>, <DELAY>:<DURATION>:<REPEAT>, "
+                             "and/or <DELAY>:<DURATION>:<REPEAT>:<CLOCK_ID>",
+                             std::string{}, "trace", "profile", "perfetto", "timemory");
+
+    OMNITRACE_CONFIG_SETTING(
+        std::string, "OMNITRACE_TRACE_PERIOD_CLOCK_ID",
+        "Set the default clock ID for OMNITRACE_TRACE_DELAY, OMNITRACE_TRACE_DURATION, "
+        "and/or OMNITRACE_TRACE_PERIODS. E.g. \"realtime\" == the delay/duration is "
+        "governed by the elapsed realtime, \"cputime\" == the delay/duration is governed "
+        "by the elapsed CPU-time within the process, etc. Note: when using CPU-based "
+        "timing, it is recommened to scale the value by the number of threads and be "
+        "aware that omnitrace may contribute to advancing the process CPU-time",
+        "CLOCK_REALTIME", "trace", "profile", "perfetto", "timemory")
+        ->set_choices(_clock_choices);
 
     OMNITRACE_CONFIG_SETTING(
         double, "OMNITRACE_SAMPLING_FREQ",
@@ -639,10 +676,18 @@ configure_settings(bool _init)
         "discard", "perfetto", "data")
         ->set_choices({ "fill", "discard" });
 
-    OMNITRACE_CONFIG_SETTING(std::string, "OMNITRACE_PERFETTO_CATEGORIES",
-                             "Categories to collect within perfetto", "", "perfetto",
-                             "data", "advanced")
-        ->set_choices(get_available_perfetto_categories<std::vector<std::string>>());
+    OMNITRACE_CONFIG_SETTING(std::string, "OMNITRACE_ENABLE_CATEGORIES",
+                             "Enable collecting profiling and trace data for these "
+                             "categories and disable all other categories",
+                             "", "trace", "profile", "perfetto", "timemory", "data",
+                             "advanced")
+        ->set_choices(get_available_categories<std::vector<std::string>>());
+
+    OMNITRACE_CONFIG_SETTING(
+        std::string, "OMNITRACE_DISABLE_CATEGORIES",
+        "Disable collecting profiling and trace data for these categories", "", "trace",
+        "profile", "perfetto", "timemory", "data", "advanced")
+        ->set_choices(get_available_categories<std::vector<std::string>>());
 
     OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_PERFETTO_ANNOTATIONS",
                              "Include debug annotations in perfetto trace. When enabled, "
@@ -977,8 +1022,8 @@ configure_settings(bool _init)
 
     settings::suppress_config() = true;
 
-    if(!get_env("OMNITRACE_COLORIZED_LOG", _config->get<bool>("OMNITRACE_COLORIZED_LOG")))
-        tim::log::colorized() = false;
+    if(get_env("OMNITRACE_MONOCHROME", _config->get<bool>("OMNITRACE_MONOCHROME")))
+        tim::log::monochrome() = true;
 
     if(_init)
     {
@@ -1105,8 +1150,6 @@ configure_mode_settings()
         _set("OMNITRACE_USE_ROCM_SMI", false);
     }
 
-    get_instrumentation_interval() = std::max<size_t>(get_instrumentation_interval(), 1);
-
     if(get_use_kokkosp())
     {
         auto _current_kokkosp_lib = tim::get_env<std::string>("KOKKOS_PROFILE_LIBRARY");
@@ -1156,6 +1199,13 @@ namespace
 using signal_settings = tim::signals::signal_settings;
 using sys_signal      = tim::signals::sys_signal;
 
+std::atomic<signal_handler_t>&
+get_signal_handler()
+{
+    static auto _v = std::atomic<signal_handler_t>{ nullptr };
+    return _v;
+}
+
 void
 omnitrace_exit_action(int nsig)
 {
@@ -1163,7 +1213,8 @@ omnitrace_exit_action(int nsig)
                                 tim::signals::sigmask_scope::process);
     OMNITRACE_BASIC_PRINT("Finalizing afer signal %i :: %s\n", nsig,
                           signal_settings::str(static_cast<sys_signal>(nsig)).c_str());
-    if(get_state() == State::Active) omnitrace_finalize();
+    auto _handler = get_signal_handler().load();
+    if(_handler) (*_handler)();
     kill(process::get_id(), nsig);
 }
 
@@ -1182,6 +1233,28 @@ omnitrace_trampoline_handler(int _v)
     }
 }
 }  // namespace
+
+signal_handler_t
+set_signal_handler(signal_handler_t _func)
+{
+    if(_func)
+    {
+        auto _handler = get_signal_handler().load(std::memory_order_relaxed);
+        if(get_signal_handler().compare_exchange_strong(_handler, _func,
+                                                        std::memory_order_relaxed))
+        {
+            return _handler;
+        }
+        else
+        {
+            _handler = get_signal_handler().load(std::memory_order_seq_cst);
+            get_signal_handler().store(_func);
+            return _handler;
+        }
+    }
+
+    return get_signal_handler().load();
+}
 
 void
 configure_signal_handler()
@@ -1216,6 +1289,35 @@ configure_signal_handler()
         _action.sa_handler = omnitrace_trampoline_handler;
         sigaction(_dyninst_trampoline_signal, &_action, nullptr);
     }
+}
+
+int
+get_realtime_signal()
+{
+    return SIGRTMIN + get_sampling_rtoffset();
+}
+
+int
+get_cputime_signal()
+{
+    return SIGPROF;
+}
+
+std::set<int> get_sampling_signals(int64_t)
+{
+    auto _v = std::set<int>{};
+    if(get_use_causal())
+    {
+        _v.emplace(get_cputime_signal());
+        _v.emplace(get_realtime_signal());
+    }
+    else
+    {
+        if(get_use_sampling_cputime()) _v.emplace(get_cputime_signal());
+        if(get_use_sampling_realtime()) _v.emplace(get_realtime_signal());
+    }
+
+    return _v;
 }
 
 void
@@ -1964,18 +2066,74 @@ get_perfetto_fill_policy()
     return static_cast<tim::tsettings<std::string>&>(*_v->second).get();
 }
 
-std::set<std::string>
-get_perfetto_categories()
+namespace
 {
-    static auto _v     = get_config()->find("OMNITRACE_PERFETTO_CATEGORIES");
-    static auto _avail = get_available_perfetto_categories<std::set<std::string>>();
-    auto        _ret   = std::set<std::string>{};
-    for(auto itr : tim::delimit(
-            static_cast<tim::tsettings<std::string>&>(*_v->second).get(), " ,;:"))
-    {
-        if(_avail.count(itr) > 0) _ret.emplace(itr);
-    }
-    return _ret;
+auto
+get_category_config()
+{
+    using strset_t = std::set<std::string>;
+
+    static auto _v = []() {
+        auto _avail = get_available_categories<strset_t>();
+        auto _parse = [&_avail](const auto& _setting) {
+            auto _ret = strset_t{};
+            for(auto itr : tim::delimit(
+                    static_cast<tim::tsettings<std::string>&>(*_setting->second).get(),
+                    " ,;:\n\t"))
+            {
+                if(_avail.count(itr) > 0) _ret.emplace(itr);
+            }
+            return _ret;
+        };
+
+        auto _enabled  = _parse(get_config()->find("OMNITRACE_ENABLE_CATEGORIES"));
+        auto _disabled = _parse(get_config()->find("OMNITRACE_DISABLE_CATEGORIES"));
+
+        if(_enabled.empty() && _disabled.empty())
+        {
+            _enabled = _avail;
+        }
+        else if(_enabled.empty() && !_disabled.empty())
+        {
+            for(auto itr : _avail)
+            {
+                if(_disabled.count(itr) == 0) _enabled.emplace(itr);
+            }
+        }
+        else if(!_enabled.empty() && _disabled.empty())
+        {
+            for(auto itr : _avail)
+            {
+                if(_enabled.count(itr) == 0) _disabled.emplace(itr);
+            }
+        }
+        else
+        {
+            OMNITRACE_ABORT("Error! Conflicting options OMNITRACE_ENABLE_CATEGORIES and "
+                            "OMNITRACE_DISABLE_CATEGORIES were both provided.");
+        }
+
+        OMNITRACE_CI_THROW(_enabled.size() + _disabled.size() != _avail.size(),
+                           "Error! Internal error for categories: %zu (enabled) + %zu "
+                           "(disabled) != %zu (total)\n",
+                           _enabled.size(), _disabled.size(), _avail.size());
+
+        return std::make_pair(_enabled, _disabled);
+    }();
+
+    return _v;
+}
+}  // namespace
+std::set<std::string>
+get_enabled_categories()
+{
+    return get_category_config().first;
+}
+
+std::set<std::string>
+get_disabled_categories()
+{
+    return get_category_config().second;
 }
 
 bool
@@ -2041,13 +2199,6 @@ get_perfetto_output_filename()
     if(!_val.empty() && _val.at(0) != '/')
         return settings::format(JOIN('/', "%env{PWD}%", _val), get_config()->get_tag());
     return _val;
-}
-
-size_t&
-get_instrumentation_interval()
-{
-    static auto _v = get_config()->find("OMNITRACE_INSTRUMENTATION_INTERVAL");
-    return static_cast<tim::tsettings<size_t>&>(*_v->second).get();
 }
 
 double

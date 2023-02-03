@@ -64,7 +64,7 @@ namespace binary
 namespace
 {
 binary_info
-parse_line_info(const std::string& _name)
+parse_line_info(const std::string& _name, bool _process_dwarf)
 {
     auto _info = binary_info{};
 
@@ -105,10 +105,17 @@ parse_line_info(const std::string& _name)
             << "section set size (" << _section_set.size() << ") != section map size ("
             << _section_map.size() << ")\n";
 
-        _info.debug_info = dwarf_entry::process_dwarf(_bfd->fd, _info.ranges);
+        if(_process_dwarf)
+        {
+            std::tie(_info.debug_info, _info.ranges, _info.breakpoints) =
+                dwarf_entry::process_dwarf(_bfd->fd);
+        }
 
         for(auto& itr : _info.symbols)
-            itr.read_dwarf(_info.debug_info);
+        {
+            itr.read_dwarf_entries(_info.debug_info);
+            itr.read_dwarf_breakpoints(_info.breakpoints);
+        }
 
         _info.sort();
     }
@@ -122,7 +129,7 @@ parse_line_info(const std::string& _name)
 
 std::vector<binary_info>
 get_binary_info(const std::vector<std::string>&  _files,
-                const std::vector<scope_filter>& _filters)
+                const std::vector<scope_filter>& _filters, bool _process_dwarf)
 {
     auto _satisfies_filter = [&_filters](auto _scope, const std::string& _value) {
         for(const auto& itr : _filters)  // NOLINT
@@ -157,7 +164,7 @@ get_binary_info(const std::vector<std::string>&  _files,
             if(filepath::exists(_filename) && _satisfies_binary_filter(_filename) &&
                _exists.find(_filename) == _exists.end())
             {
-                _data.emplace_back(parse_line_info(_filename));
+                _data.emplace_back(parse_line_info(_filename, _process_dwarf));
                 _exists.emplace(_filename);
             }
         }

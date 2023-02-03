@@ -45,7 +45,7 @@ struct unblocking_gotcha : comp::base<unblocking_gotcha, void>
 {
     static constexpr size_t gotcha_capacity = 8;
 
-    TIMEMORY_DEFAULT_OBJECT(unblocking_gotcha)
+    OMNITRACE_DEFAULT_OBJECT(unblocking_gotcha)
 
     // string id for component
     static std::string label();

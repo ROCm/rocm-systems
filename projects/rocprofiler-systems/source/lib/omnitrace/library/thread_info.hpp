@@ -64,6 +64,8 @@ struct thread_index_data
     int64_t internal_value = utility::get_thread_index();
     int64_t system_value   = tim::threading::get_sys_tid();
     int64_t sequent_value  = tim::threading::get_id();
+
+    std::string as_string() const;
 };
 
 int64_t grow_data(int64_t);

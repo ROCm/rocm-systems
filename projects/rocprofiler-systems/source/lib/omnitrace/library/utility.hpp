@@ -32,6 +32,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <sstream>
 #include <stdexcept>
 #include <vector>
 
@@ -225,6 +226,17 @@ get_regex_or(const ContainerT<Tp, TailT...>& _container, PredicateT&& _predicate
         _dest.emplace_back(_predicate(itr));
 
     return get_regex_or(_dest, _fallback);
+}
+
+template <typename Tp>
+Tp
+convert(std::string_view _inp)
+{
+    auto _iss = std::stringstream{};
+    auto _ret = Tp{};
+    _iss << _inp;
+    _iss >> _ret;
+    return _ret;
 }
 }  // namespace utility
 }  // namespace omnitrace

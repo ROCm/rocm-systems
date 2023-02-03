@@ -116,8 +116,6 @@ if(CI_BUILD)
                          ADVANCED)
     omnitrace_add_option(OMNITRACE_BUILD_DEBUG
                          "Enable building with extensive debug symbols" OFF ADVANCED)
-    omnitrace_add_option(OMNITRACE_CUSTOM_DATA_SOURCE "Enable custom data source" OFF
-                         ADVANCED)
     omnitrace_add_option(
         OMNITRACE_BUILD_HIDDEN_VISIBILITY
         "Build with hidden visibility (disable for Debug builds)" OFF ADVANCED)
@@ -131,8 +129,6 @@ else()
                          ADVANCED)
     omnitrace_add_option(OMNITRACE_BUILD_DEBUG
                          "Enable building with extensive debug symbols" OFF ADVANCED)
-    omnitrace_add_option(OMNITRACE_CUSTOM_DATA_SOURCE "Enable custom data source" OFF
-                         ADVANCED)
     omnitrace_add_option(
         OMNITRACE_BUILD_HIDDEN_VISIBILITY
         "Build with hidden visibility (disable for Debug builds)" ON ADVANCED)

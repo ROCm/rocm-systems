@@ -47,7 +47,7 @@ namespace causal
 {
 struct selected_entry
 {
-    TIMEMORY_DEFAULT_OBJECT(selected_entry)
+    OMNITRACE_DEFAULT_OBJECT(selected_entry)
 
     uintptr_t      address        = 0x0;
     uintptr_t      symbol_address = 0x0;

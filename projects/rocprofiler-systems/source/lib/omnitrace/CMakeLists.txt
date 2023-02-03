@@ -15,12 +15,8 @@ target_include_directories(
     omnitrace-interface-library INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}
                                           ${CMAKE_CURRENT_BINARY_DIR})
 
-target_compile_definitions(
-    omnitrace-interface-library
-    INTERFACE
-        OMNITRACE_MAX_THREADS=${OMNITRACE_MAX_THREADS}
-        $<BUILD_INTERFACE:$<IF:$<BOOL:${OMNITRACE_CUSTOM_DATA_SOURCE}>,CUSTOM_DATA_SOURCE,>>
-    )
+target_compile_definitions(omnitrace-interface-library
+                           INTERFACE OMNITRACE_MAX_THREADS=${OMNITRACE_MAX_THREADS})
 
 target_link_libraries(
     omnitrace-interface-library

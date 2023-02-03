@@ -97,7 +97,7 @@ struct comm_data : base<comm_data, void>
         static constexpr auto label = "RCCL Comm Send";
     };
 
-    TIMEMORY_DEFAULT_OBJECT(comm_data)
+    OMNITRACE_DEFAULT_OBJECT(comm_data)
 
     static void preinit();
     static void configure();

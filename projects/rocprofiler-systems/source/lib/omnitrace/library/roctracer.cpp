@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "library/roctracer.hpp"
+#include "library/components/category_region.hpp"
 #include "library/components/fwd.hpp"
 #include "library/config.hpp"
 #include "library/critical_trace.hpp"
@@ -99,7 +100,7 @@ get_roctracer_kernels()
 auto&
 get_roctracer_hip_data(int64_t _tid = threading::get_id())
 {
-    using data_t        = std::unordered_map<uint64_t, roctracer_bundle_t>;
+    using data_t        = std::unordered_map<uint64_t, roctracer_hip_bundle_t>;
     using thread_data_t = thread_data<data_t, category::roctracer>;
     static auto& _v     = thread_data_t::instances(construct_on_init{});
     return _v.at(_tid);
@@ -124,7 +125,7 @@ struct cid_data : cid_tuple_t
 {
     using cid_tuple_t::cid_tuple_t;
 
-    TIMEMORY_DEFAULT_OBJECT(cid_data)
+    OMNITRACE_DEFAULT_OBJECT(cid_data)
 
     auto& cid() { return std::get<0>(*this); }
     auto& pcid() { return std::get<1>(*this); }
@@ -454,20 +455,12 @@ roctx_api_callback(uint32_t domain, uint32_t cid, const void* callback_data,
     {
         case ROCTX_API_ID_roctxRangePushA:
         {
-            if(get_use_perfetto())
-                tracing::push_perfetto(category::rocm_roctx{}, _data->args.message);
-
-            if(get_use_timemory())
-                tracing::push_timemory(category::rocm_roctx{}, _data->args.message);
-
+            component::category_region<category::rocm_roctx>::start(_data->args.message);
             break;
         }
         case ROCTX_API_ID_roctxRangePop:
         {
-            if(get_use_timemory())
-                tracing::pop_timemory(category::rocm_roctx{}, _data->args.message);
-            if(get_use_perfetto())
-                tracing::pop_perfetto(category::rocm_roctx{}, _data->args.message);
+            component::category_region<category::rocm_roctx>::stop(_data->args.message);
             break;
         }
         case ROCTX_API_ID_roctxRangeStartA:
@@ -479,11 +472,7 @@ roctx_api_callback(uint32_t domain, uint32_t cid, const void* callback_data,
                                    std::string_view{ _data->args.message });
             }
 
-            if(get_use_perfetto())
-                tracing::push_perfetto(category::rocm_roctx{}, _data->args.message);
-
-            if(get_use_timemory())
-                tracing::push_timemory(category::rocm_roctx{}, _data->args.message);
+            component::category_region<category::rocm_roctx>::start(_data->args.message);
             break;
         }
         case ROCTX_API_ID_roctxRangeStop:
@@ -510,10 +499,7 @@ roctx_api_callback(uint32_t domain, uint32_t cid, const void* callback_data,
 
             if(!_message.empty())
             {
-                if(get_use_timemory())
-                    tracing::pop_timemory(category::rocm_roctx{}, _message.data());
-                if(get_use_perfetto())
-                    tracing::pop_perfetto(category::rocm_roctx{}, _message.data());
+                component::category_region<category::rocm_roctx>::stop(_message.data());
             }
 
             break;
@@ -733,8 +719,8 @@ hip_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
         }
         if(get_use_timemory())
         {
-            auto itr = get_roctracer_hip_data()->emplace(_corr_id,
-                                                         roctracer_bundle_t{ op_name });
+            auto itr = get_roctracer_hip_data()->emplace(
+                _corr_id, roctracer_hip_bundle_t{ op_name });
             if(itr.second)
             {
                 itr.first->second.start();
@@ -983,7 +969,7 @@ hip_activity_callback(const char* begin, const char* end, void* arg)
         if(_found && _name != nullptr && get_use_timemory())
         {
             auto _func = [_beg_ns, _end_ns, _name]() {
-                roctracer_bundle_t _bundle{ _name };
+                roctracer_hip_bundle_t _bundle{ _name };
                 _bundle.start()
                     .store(std::plus<double>{}, static_cast<double>(_end_ns - _beg_ns))
                     .stop()

@@ -94,5 +94,33 @@ public:
     static constexpr bool value = sfinae(0);
     constexpr auto        operator()() const { return sfinae(0); }
 };
+
+template <size_t N, typename Tp, bool>
+struct tuple_element_impl;
+
+template <size_t N, typename... Tp>
+struct tuple_element_impl<N, std::tuple<Tp...>, true>
+{
+    using type = typename std::tuple_element<N, std::tuple<Tp...>>::type;
+};
+
+template <size_t N, typename... Tp>
+struct tuple_element_impl<N, std::tuple<Tp...>, false>
+{
+    using type = void;
+};
+
+template <size_t N, typename Tp>
+struct tuple_element;
+
+template <size_t N, typename... Tp>
+struct tuple_element<N, std::tuple<Tp...>>
+{
+    using type =
+        typename tuple_element_impl<N, std::tuple<Tp...>, (N < sizeof...(Tp))>::type;
+};
+
+template <size_t N, typename Tp>
+using tuple_element_t = typename tuple_element<N, Tp>::type;
 }  // namespace concepts
 }  // namespace tim

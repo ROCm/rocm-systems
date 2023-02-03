@@ -54,14 +54,47 @@
 namespace color = tim::log::color;
 using namespace timemory::join;
 using tim::get_env;
-using tim::log::colorized;
+using tim::log::monochrome;
 using tim::log::stream;
 
 namespace
 {
-int  verbose       = 0;
-auto updated_envs  = std::set<std::string_view>{};
-auto original_envs = std::set<std::string>{};
+int  verbose          = 0;
+auto updated_envs     = std::set<std::string_view>{};
+auto original_envs    = std::set<std::string>{};
+auto clock_id_choices = []() {
+    auto clock_name = [](std::string _v) {
+        constexpr auto _clock_prefix = std::string_view{ "clock_" };
+        for(auto& itr : _v)
+            itr = tolower(itr);
+        auto _pos = _v.find(_clock_prefix);
+        if(_pos == 0) _v = _v.substr(_pos + _clock_prefix.length());
+        if(_v == "process_cputime_id") _v = "cputime";
+        return _v;
+    };
+
+#define OMNITRACE_CLOCK_IDENTIFIER(VAL)                                                  \
+    std::make_tuple(clock_name(#VAL), VAL, std::string_view{ #VAL })
+
+    auto _choices = std::vector<std::string>{};
+    auto _aliases = std::map<std::string, std::vector<std::string>>{};
+    for(auto itr : { OMNITRACE_CLOCK_IDENTIFIER(CLOCK_REALTIME),
+                     OMNITRACE_CLOCK_IDENTIFIER(CLOCK_MONOTONIC),
+                     OMNITRACE_CLOCK_IDENTIFIER(CLOCK_PROCESS_CPUTIME_ID),
+                     OMNITRACE_CLOCK_IDENTIFIER(CLOCK_MONOTONIC_RAW),
+                     OMNITRACE_CLOCK_IDENTIFIER(CLOCK_REALTIME_COARSE),
+                     OMNITRACE_CLOCK_IDENTIFIER(CLOCK_MONOTONIC_COARSE),
+                     OMNITRACE_CLOCK_IDENTIFIER(CLOCK_BOOTTIME) })
+    {
+        auto _choice = std::to_string(std::get<1>(itr));
+        _choices.emplace_back(_choice);
+        _aliases[_choice] = { std::get<0>(itr), std::string{ std::get<2>(itr) } };
+    }
+
+#undef OMNITRACE_CLOCK_IDENTIFIER
+
+    return std::make_pair(_choices, _aliases);
+}();
 }  // namespace
 
 std::string
@@ -329,15 +362,7 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
     %{INDENT}%- discard     : new data is ignored
     %{INDENT}%- ring_buffer : new data overwrites oldest data)";
 
-    auto _add_separator = [&](std::string _v, const std::string& _desc) {
-        parser.add_argument({ "" }, "");
-        parser
-            .add_argument({ join("", "[", _v, "]") },
-                          (_desc.empty()) ? _desc : join({ "", "(", ")" }, _desc))
-            .color(tim::log::color::info());
-        parser.add_argument({ "" }, "");
-    };
-
+    parser.set_use_color(true);
     parser.enable_help();
     parser.enable_version("omnitrace-sample", "v" OMNITRACE_VERSION_STRING,
                           OMNITRACE_GIT_DESCRIBE, OMNITRACE_GIT_REVISION);
@@ -347,16 +372,16 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
         parser.set_description_width(
             std::min<int>(_cols - parser.get_help_width() - 8, 120));
 
-    _add_separator("DEBUG OPTIONS", "");
+    parser.start_group("DEBUG OPTIONS", "");
     parser.add_argument({ "--monochrome" }, "Disable colorized output")
         .max_count(1)
         .dtype("bool")
         .action([&](parser_t& p) {
-            auto _colorized = !p.get<bool>("monochrome");
-            colorized()     = _colorized;
-            p.set_use_color(_colorized);
-            update_env(_env, "OMNITRACE_COLORIZED_LOG", (_colorized) ? "1" : "0");
-            update_env(_env, "COLORIZED_LOG", (_colorized) ? "1" : "0");
+            auto _monochrome = p.get<bool>("monochrome");
+            monochrome()     = _monochrome;
+            p.set_use_color(!_monochrome);
+            update_env(_env, "OMNITRACE_MONOCHROME", (_monochrome) ? "1" : "0");
+            update_env(_env, "MONOCHROME", (_monochrome) ? "1" : "0");
         });
     parser.add_argument({ "--debug" }, "Debug output")
         .max_count(1)
@@ -371,7 +396,8 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
             update_env(_env, "OMNITRACE_VERBOSE", _v);
         });
 
-    _add_separator("GENERAL OPTIONS", "");
+    parser.start_group("GENERAL OPTIONS",
+                       "These are options which are ubiquitously applied");
     parser.add_argument({ "-c", "--config" }, "Configuration file")
         .min_count(0)
         .dtype("filepath")
@@ -437,8 +463,28 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
             update_env(_env, "OMNITRACE_USE_PROCESS_SAMPLING", _h || _d);
             update_env(_env, "OMNITRACE_USE_ROCM_SMI", _d);
         });
+    parser
+        .add_argument({ "-w", "--wait" },
+                      "This option is a combination of '--trace-wait' and "
+                      "'--sampling-wait'. See the descriptions for those two options.")
+        .count(1)
+        .action([&](parser_t& p) {
+            update_env(_env, "OMNITRACE_TRACE_DELAY", p.get<double>("wait"));
+            update_env(_env, "OMNITRACE_SAMPLING_DELAY", p.get<double>("wait"));
+        });
+    parser
+        .add_argument(
+            { "-d", "--duration" },
+            "This option is a combination of '--trace-duration' and "
+            "'--sampling-duration'. See the descriptions for those two options.")
+        .count(1)
+        .action([&](parser_t& p) {
+            update_env(_env, "OMNITRACE_TRACE_DURATION", p.get<double>("duration"));
+            update_env(_env, "OMNITRACE_SAMPLING_DURATION", p.get<double>("duration"));
+        });
 
-    _add_separator("TRACING OPTIONS", "");
+    parser.start_group("TRACING OPTIONS", "Specific options controlling tracing (i.e. "
+                                          "deterministic measurements of every event)");
     parser
         .add_argument({ "--trace-file" },
                       "Specify the trace output filename. Relative filepath will be with "
@@ -464,8 +510,57 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
             update_env(_env, "OMNITRACE_PERFETTO_FILL_POLICY",
                        p.get<std::string>("trace-fill-policy"));
         });
+    parser
+        .add_argument({ "--trace-wait" },
+                      "Set the wait time (in seconds) "
+                      "before collecting trace and/or profiling data"
+                      "(in seconds). By default, the duration is in seconds of realtime "
+                      "but that can changed via --trace-clock-id.")
+        .count(1)
+        .action([&](parser_t& p) {
+            update_env(_env, "OMNITRACE_TRACE_DELAY", p.get<double>("trace-wait"));
+        });
+    parser
+        .add_argument({ "--trace-duration" },
+                      "Set the duration of the trace and/or profile data collection (in "
+                      "seconds). By default, the duration is in seconds of realtime but "
+                      "that can changed via --trace-clock-id.")
+        .count(1)
+        .action([&](parser_t& p) {
+            update_env(_env, "OMNITRACE_TRACE_DURATION", p.get<double>("trace-duration"));
+        });
+    parser
+        .add_argument(
+            { "--trace-periods" },
+            "More powerful version of specifying trace delay and/or duration. Format is "
+            "one or more groups of: <DELAY>:<DURATION>, <DELAY>:<DURATION>:<REPEAT>, "
+            "and/or <DELAY>:<DURATION>:<REPEAT>:<CLOCK_ID>.")
+        .min_count(1)
+        .action([&](parser_t& p) {
+            update_env(_env, "OMNITRACE_TRACE_PERIODS",
+                       join(array_config{ ",", "", "" },
+                            p.get<std::vector<std::string>>("trace-periods")));
+        });
+    parser
+        .add_argument(
+            { "--trace-clock-id" },
+            "Set the default clock ID for for trace delay/duration. Note: \"cputime\" is "
+            "the *process* CPU time and might need to be scaled based on the number of "
+            "threads, i.e. 4 seconds of CPU-time for an application with 4 fully active "
+            "threads would equate to ~1 second of realtime. If this proves to be "
+            "difficult to handle in practice, please file a feature request for "
+            "omnitrace to auto-scale based on the number of threads.")
+        .count(1)
+        .action([&](parser_t& p) {
+            update_env(_env, "OMNITRACE_TRACE_PERIOD_CLOCK_ID",
+                       p.get<double>("trace-clock-id"));
+        })
+        .choices(clock_id_choices.first)
+        .choice_aliases(clock_id_choices.second);
 
-    _add_separator("PROFILE OPTIONS", "");
+    parser.start_group("PROFILE OPTIONS",
+                       "Specific options controlling profiling (i.e. deterministic "
+                       "measurements which are aggregated into a summary)");
     parser.add_argument({ "--profile-format" }, "Data formats for profiling results")
         .min_count(1)
         .max_count(3)
@@ -496,7 +591,10 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
             if(_v.size() > 1) update_env(_env, "OMNITRACE_INPUT_PREFIX", _v.at(1));
         });
 
-    _add_separator("HOST/DEVICE (PROCESS SAMPLING) OPTIONS", "");
+    parser.start_group(
+        "HOST/DEVICE (PROCESS SAMPLING) OPTIONS",
+        "Process sampling is background measurements for resources available to the "
+        "entire process. These samples are not tied to specific lines/regions of code");
     parser
         .add_argument({ "--process-freq" },
                       "Set the default host/device sampling frequency "
@@ -545,7 +643,8 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
                 join(array_config{ "," }, p.get<std::vector<std::string>>("gpus")));
         });
 
-    _add_separator("GENERAL SAMPLING OPTIONS", "");
+    parser.start_group("GENERAL SAMPLING OPTIONS",
+                       "General options for timer-based sampling per-thread");
     parser
         .add_argument({ "-f", "--freq" }, "Set the default sampling frequency "
                                           "(number of interrupts per second)")
@@ -555,23 +654,24 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
         });
     parser
         .add_argument(
-            { "-w", "--wait" },
+            { "--sampling-wait" },
             "Set the default wait time (i.e. delay) before taking first sample "
             "(in seconds). This delay time is based on the clock of the sampler, i.e., a "
             "delay of 1 second for CPU-clock sampler may not equal 1 second of realtime")
         .count(1)
         .action([&](parser_t& p) {
-            update_env(_env, "OMNITRACE_SAMPLING_DELAY", p.get<double>("wait"));
+            update_env(_env, "OMNITRACE_SAMPLING_DELAY", p.get<double>("sampling-wait"));
         });
     parser
         .add_argument(
-            { "-d", "--duration" },
+            { "--sampling-duration" },
             "Set the duration of the sampling (in seconds of realtime). I.e., it is "
             "possible (currently) to set a CPU-clock time delay that exceeds the "
             "real-time duration... resulting in zero samples being taken")
         .count(1)
         .action([&](parser_t& p) {
-            update_env(_env, "OMNITRACE_SAMPLING_DURATION", p.get<double>("duration"));
+            update_env(_env, "OMNITRACE_SAMPLING_DURATION",
+                       p.get<double>("sampling-duration"));
         });
     parser
         .add_argument({ "-t", "--tids" },
@@ -584,7 +684,9 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
                        join(array_config{ ", " }, p.get<std::vector<int64_t>>("tids")));
         });
 
-    _add_separator("SAMPLING TIMER OPTIONS", "");
+    parser.start_group(
+        "SAMPLING TIMER OPTIONS",
+        "These options determine the heuristic for deciding when to take a sample");
     parser.add_argument({ "--cputime" }, _cputime_desc)
         .min_count(0)
         .action([&](parser_t& p) {
@@ -660,8 +762,9 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
     _backend_choices.erase("rocprofiler");
 #endif
 
-    _add_separator("BACKEND OPTIONS", "These options control region information captured "
-                                      "w/o sampling or instrumentation");
+    parser.start_group("BACKEND OPTIONS",
+                       "These options control region information captured "
+                       "w/o sampling or instrumentation");
     parser.add_argument({ "-I", "--include" }, "Include data from these backends")
         .choices(_backend_choices)
         .action([&](parser_t& p) {
@@ -727,7 +830,7 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
                 remove_env(_env, "KOKKOS_PROFILE_LIBRARY");
         });
 
-    _add_separator("HARDWARE COUNTER OPTIONS", "");
+    parser.start_group("HARDWARE COUNTER OPTIONS", "See also: omnitrace-avail -H");
     parser
         .add_argument({ "-C", "--cpu-events" },
                       "Set the CPU hardware counter events to record (ref: "
@@ -750,7 +853,7 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
         });
 #endif
 
-    _add_separator("MISCELLANEOUS OPTIONS", "");
+    parser.start_group("MISCELLANEOUS OPTIONS", "");
     parser
         .add_argument({ "-i", "--inlines" },
                       "Include inline info in output when available")
@@ -767,6 +870,8 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
         .action([&](parser_t& p) {
             update_env(_env, "HSA_ENABLE_INTERRUPT", p.get<int>("hsa-interrupt"));
         });
+
+    parser.end_group();
 
     auto _inpv = std::vector<char*>{};
     auto _outv = std::vector<char*>{};

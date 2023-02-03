@@ -52,7 +52,7 @@ struct progress_point : comp::base<progress_point, void>
     static std::string label();
     static std::string description();
 
-    TIMEMORY_DEFAULT_OBJECT(progress_point)
+    OMNITRACE_DEFAULT_OBJECT(progress_point)
 
     void            start();
     void            stop();
@@ -130,7 +130,7 @@ struct push_node<omnitrace::causal::component::progress_point>
 {
     using type = omnitrace::causal::component::progress_point;
 
-    TIMEMORY_DEFAULT_OBJECT(push_node)
+    OMNITRACE_DEFAULT_OBJECT(push_node)
 
     push_node(type& _obj, scope::config _scope, hash_value_t _hash,
               int64_t _tid = threading::get_id())
@@ -147,7 +147,7 @@ struct pop_node<omnitrace::causal::component::progress_point>
 {
     using type = omnitrace::causal::component::progress_point;
 
-    TIMEMORY_DEFAULT_OBJECT(pop_node)
+    OMNITRACE_DEFAULT_OBJECT(pop_node)
 
     pop_node(type& _obj, int64_t _tid = threading::get_id()) { (*this)(_obj, _tid); }
 

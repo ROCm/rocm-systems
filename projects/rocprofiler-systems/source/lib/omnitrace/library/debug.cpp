@@ -22,7 +22,6 @@
 
 #include "library/debug.hpp"
 #include "library/binary/address_range.hpp"
-#include "library/runtime.hpp"
 #include "library/state.hpp"
 
 #include <timemory/log/color.hpp>
@@ -91,7 +90,7 @@ get_file()
 {
     static FILE* _v = []() {
         auto&& _fname = tim::get_env<std::string>("OMNITRACE_LOG_FILE", "");
-        if(!_fname.empty()) tim::log::colorized() = false;
+        if(!_fname.empty()) tim::log::monochrome() = true;
         return (_fname.empty()) ? stderr : tim::filepath::fopen(_fname, "w");
     }();
     return _v;

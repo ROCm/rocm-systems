@@ -39,13 +39,59 @@ namespace omnitrace
 {
 namespace binary
 {
+namespace
+{
+const open_modes_vec_t default_link_open_modes = { (RTLD_LAZY | RTLD_NOLOAD),
+                                                   (RTLD_LAZY | RTLD_LOCAL) };
+}
+
+std::string
+get_linked_path(const char* _name, open_modes_vec_t&& _open_modes)
+{
+    if(_name == nullptr) return config::get_exe_realpath();
+
+    if(_open_modes.empty()) _open_modes = default_link_open_modes;
+
+    auto  _lib    = std::string{ _name };
+    void* _handle = nullptr;
+    bool  _noload = false;
+    for(auto _mode : _open_modes)
+    {
+        _handle = dlopen(_name, _mode);
+        _noload = (_mode & RTLD_NOLOAD) == RTLD_NOLOAD;
+        if(_handle) break;
+    }
+
+    if(_handle)
+    {
+        struct link_map* _link_map = nullptr;
+        dlinfo(_handle, RTLD_DI_LINKMAP, &_link_map);
+        if(_link_map != nullptr && !std::string_view{ _link_map->l_name }.empty())
+        {
+            _lib = filepath::realpath(_link_map->l_name, nullptr, false);
+        }
+        if(_noload == false) dlclose(_handle);
+    }
+    return _lib;
+}
+
 std::set<link_file>
 get_link_map(const char* _lib, const std::string& _exclude_linked_by,
-             const std::string& _exclude_re)
+             const std::string& _exclude_re, open_modes_vec_t&& _open_modes)
 {
-    auto _get_chain = [](const char* _name) {
-        void* _handle = dlopen(_name, RTLD_LAZY | RTLD_NOLOAD);
-        auto  _chain  = std::set<std::string>{};
+    if(_open_modes.empty()) _open_modes = default_link_open_modes;
+
+    auto _get_chain = [&_open_modes](const char* _name) {
+        void* _handle = nullptr;
+        bool  _noload = false;
+        for(auto _mode : _open_modes)
+        {
+            _handle = dlopen(_name, _mode);
+            _noload = (_mode & RTLD_NOLOAD) == RTLD_NOLOAD;
+            if(_handle) break;
+        }
+
+        auto _chain = std::set<std::string>{};
         if(_handle)
         {
             struct link_map* _link_map = nullptr;
@@ -66,6 +112,8 @@ get_link_map(const char* _lib, const std::string& _exclude_linked_by,
                 }
                 _next = _next->l_next;
             }
+
+            if(_noload == false) dlclose(_handle);
         }
         return _chain;
     };
@@ -78,6 +126,7 @@ get_link_map(const char* _lib, const std::string& _exclude_linked_by,
 
     for(const auto& itr : _full_chain)
     {
+        std::cout << itr << std::endl;
         if(_excl_chain.find(itr) == _excl_chain.end())
         {
             if(_exclude_re.empty() || !std::regex_search(itr, std::regex{ _exclude_re }))

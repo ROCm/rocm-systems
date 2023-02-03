@@ -108,27 +108,57 @@ function(OMNITRACE_CAPITALIZE str var)
 endfunction()
 
 # ------------------------------------------------------------------------------#
-# function omnitrace_strip_target()
+# function omnitrace_strip_target(<TARGET> [FORCE] [EXPLICIT])
 #
-# Creates a target which runs ctest but depends on all the tests being built.
+# Creates a post-build command which strips a binary. FORCE flag will override
 #
-function(OMNITRACE_STRIP_TARGET _TARGET)
-    if(CMAKE_STRIP AND OMNITRACE_STRIP_LIBRARIES)
-        add_custom_command(
-            TARGET ${_TARGET}
-            POST_BUILD
-            COMMAND
-                ${CMAKE_STRIP} -w --keep-symbol="omnitrace_init"
-                --keep-symbol="omnitrace_finalize" --keep-symbol="omnitrace_push_trace"
-                --keep-symbol="omnitrace_pop_trace" --keep-symbol="omnitrace_push_region"
-                --keep-symbol="omnitrace_pop_region" --keep-symbol="omnitrace_set_env"
-                --keep-symbol="omnitrace_set_mpi" --keep-symbol="omnitrace_reset_preload"
-                --keep-symbol="omnitrace_user_*" --keep-symbol="ompt_start_tool"
-                --keep-symbol="kokkosp_*" --keep-symbol="OnLoad" --keep-symbol="OnUnload"
-                --keep-symbol="OnLoadToolProp" --keep-symbol="OnUnloadTool"
-                --keep-symbol="__libc_start_main" ${ARGN} $<TARGET_FILE:${_TARGET}>
-            WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-            COMMENT "Stripping ${_TARGET}...")
+function(OMNITRACE_STRIP_TARGET)
+    cmake_parse_arguments(STRIP "FORCE;EXPLICIT" "" "ARGS" ${ARGN})
+
+    list(LENGTH STRIP_UNPARSED_ARGUMENTS NUM_UNPARSED)
+
+    if(NUM_UNPARSED EQUAL 1)
+        set(_TARGET "${STRIP_UNPARSED_ARGUMENTS}")
+    else()
+        omnitrace_message(FATAL_ERROR
+                          "omnitrace_strip_target cannot deduce target from \"${ARGN}\"")
+    endif()
+
+    if(NOT TARGET "${_TARGET}")
+        omnitrace_message(
+            FATAL_ERROR
+            "omnitrace_strip_target not provided valid target: \"${_TARGET}\"")
+    endif()
+
+    if(CMAKE_STRIP AND (STRIP_FORCE OR OMNITRACE_STRIP_LIBRARIES))
+        if(STRIP_EXPLICIT)
+            add_custom_command(
+                TARGET ${_TARGET}
+                POST_BUILD
+                COMMAND ${CMAKE_STRIP} ${STRIP_ARGS} $<TARGET_FILE:${_TARGET}>
+                WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+                COMMENT "Stripping ${_TARGET}...")
+        else()
+            add_custom_command(
+                TARGET ${_TARGET}
+                POST_BUILD
+                COMMAND
+                    ${CMAKE_STRIP} -w --keep-symbol="omnitrace_init"
+                    --keep-symbol="omnitrace_finalize"
+                    --keep-symbol="omnitrace_push_trace"
+                    --keep-symbol="omnitrace_pop_trace"
+                    --keep-symbol="omnitrace_push_region"
+                    --keep-symbol="omnitrace_pop_region" --keep-symbol="omnitrace_set_env"
+                    --keep-symbol="omnitrace_set_mpi"
+                    --keep-symbol="omnitrace_reset_preload"
+                    --keep-symbol="omnitrace_user_*" --keep-symbol="ompt_start_tool"
+                    --keep-symbol="kokkosp_*" --keep-symbol="OnLoad"
+                    --keep-symbol="OnUnload" --keep-symbol="OnLoadToolProp"
+                    --keep-symbol="OnUnloadTool" --keep-symbol="__libc_start_main"
+                    ${STRIP_ARGS} $<TARGET_FILE:${_TARGET}>
+                WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+                COMMENT "Stripping ${_TARGET}...")
+        endif()
     endif()
 endfunction()
 

@@ -82,7 +82,7 @@ struct data
     using mem_usage_t = uint64_t;
     using temp_t      = int64_t;
 
-    TIMEMORY_DEFAULT_OBJECT(data)
+    OMNITRACE_DEFAULT_OBJECT(data)
 
     explicit data(uint32_t _dev_id);
 

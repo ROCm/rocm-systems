@@ -90,7 +90,7 @@ struct experiment
     static std::string                     description();
     static const std::atomic<experiment*>& get_current_experiment();
 
-    TIMEMORY_DEFAULT_OBJECT(experiment)
+    OMNITRACE_DEFAULT_OBJECT(experiment)
 
     bool        start();
     bool        wait() const;  // returns false if interrupted

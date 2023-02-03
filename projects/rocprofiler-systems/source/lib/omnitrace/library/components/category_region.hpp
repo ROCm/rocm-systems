@@ -68,7 +68,10 @@ using tracing_count_categories_t =
               category::rocm_hsa, category::rocm_rccl>;
 
 // these categories are added to the critical trace
-using critical_trace_categories_t = type_list<category::host>;
+using critical_trace_categories_t =
+    type_list<category::host, category::mpi, category::pthread, category::rocm_hip,
+              category::rocm_hsa, category::rocm_rccl, category::device_hip,
+              category::device_hsa, category::numa, category::python>;
 
 // convert these categories to throughput points
 using causal_throughput_categories_t =
@@ -128,7 +131,7 @@ void
 category_region<CategoryT>::start(std::string_view name, Args&&... args)
 {
     // skip if category is disabled
-    if(!trait::runtime_enabled<CategoryT>::get()) return;
+    if(tracing::category_push_disabled<CategoryT>()) return;
 
     // unconditionally return if thread is disabled or finalized
     if(get_thread_state() == ThreadState::Disabled) return;
@@ -212,7 +215,7 @@ void
 category_region<CategoryT>::stop(std::string_view name, Args&&... args)
 {
     // skip if category is disabled
-    if(!trait::runtime_enabled<CategoryT>::get()) return;
+    if(tracing::category_pop_disabled<CategoryT>()) return;
 
     if(get_thread_state() == ThreadState::Disabled) return;
 
@@ -315,7 +318,7 @@ category_region<CategoryT>::mark(std::string_view name, Args&&...)
     if constexpr(!_ct_use_causal) return;
 
     // skip if category is disabled
-    if(!trait::runtime_enabled<CategoryT>::get()) return;
+    if(tracing::category_mark_disabled<CategoryT>()) return;
 
     // the expectation here is that if the state is not active then the call
     // to omnitrace_init_tooling_hidden will activate all the appropriate
@@ -345,9 +348,6 @@ void
 category_region<CategoryT>::audit(const gotcha_data_t& _data, audit::incoming,
                                   Args&&... _args)
 {
-    // skip if category is disabled
-    if(!trait::runtime_enabled<CategoryT>::get()) return;
-
     start<OptsT...>(_data.tool_id.c_str(), [&](perfetto::EventContext ctx) {
         if(config::get_perfetto_annotations())
         {
@@ -364,9 +364,6 @@ void
 category_region<CategoryT>::audit(const gotcha_data_t& _data, audit::outgoing,
                                   Args&&... _args)
 {
-    // skip if category is disabled
-    if(!trait::runtime_enabled<CategoryT>::get()) return;
-
     stop<OptsT...>(_data.tool_id.c_str(), [&](perfetto::EventContext ctx) {
         if(config::get_perfetto_annotations())
             tracing::add_perfetto_annotation(ctx, "return", JOIN(", ", _args...));
@@ -379,9 +376,6 @@ void
 category_region<CategoryT>::audit(std::string_view _name, audit::incoming,
                                   Args&&... _args)
 {
-    // skip if category is disabled
-    if(!trait::runtime_enabled<CategoryT>::get()) return;
-
     start<OptsT...>(_name.data(), [&](perfetto::EventContext ctx) {
         if(config::get_perfetto_annotations())
         {
@@ -398,9 +392,6 @@ void
 category_region<CategoryT>::audit(std::string_view _name, audit::outgoing,
                                   Args&&... _args)
 {
-    // skip if category is disabled
-    if(!trait::runtime_enabled<CategoryT>::get()) return;
-
     stop<OptsT...>(_name.data(), [&](perfetto::EventContext ctx) {
         if(config::get_perfetto_annotations())
             tracing::add_perfetto_annotation(ctx, "return", JOIN(", ", _args...));
@@ -466,6 +457,5 @@ struct local_category_region : comp::base<local_category_region<CategoryT>, void
 private:
     std::string_view m_prefix = {};
 };
-
 }  // namespace component
 }  // namespace omnitrace

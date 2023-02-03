@@ -504,7 +504,7 @@ set(_ompt_preload_environ
     "OMNITRACE_SAMPLING_REALTIME=ON"
     "OMNITRACE_SAMPLING_CPUTIME_FREQ=1000"
     "OMNITRACE_SAMPLING_REALTIME_FREQ=500"
-    "OMNITRACE_COLORIZED_LOG=OFF")
+    "OMNITRACE_MONOCHROME=ON")
 
 set(_ompt_sample_no_tmpfiles_environ
     "${_ompt_environment}"
@@ -516,7 +516,7 @@ set(_ompt_sample_no_tmpfiles_environ
     "OMNITRACE_SAMPLING_REALTIME=OFF"
     "OMNITRACE_SAMPLING_CPUTIME_FREQ=700"
     "OMNITRACE_USE_TEMPORARY_FILES=OFF"
-    "OMNITRACE_COLORIZED_LOG=OFF")
+    "OMNITRACE_MONOCHROME=ON")
 
 set(_ompt_preload_samp_regex
     "Sampler for thread 0 will be triggered 1000.0x per second of CPU-time(.*)Sampler for thread 0 will be triggered 500.0x per second of wall-time(.*)Sampling will be disabled after 0.250000 seconds(.*)Sampling duration of 0.250000 seconds has elapsed. Shutting down sampling"
@@ -684,6 +684,111 @@ omnitrace_add_test(
     RUNTIME_PASS_REGEX "(\\\[[0-9]+\\\]) function coverage ::  66.67%"
     REWRITE_RUN_PASS_REGEX "(\\\[[0-9]+\\\]) function coverage ::  66.67%")
 
+omnitrace_add_test(
+    SKIP_BASELINE SKIP_SAMPLING SKIP_PRELOAD
+    NAME trace-time-window
+    TARGET trace-time-window
+    REWRITE_ARGS -e -v 2 --caller-include inner -i 4096
+    RUNTIME_ARGS -e -v 1 --caller-include inner -i 4096
+    LABELS "time-window"
+    ENVIRONMENT "${_window_environment};OMNITRACE_TRACE_DURATION=1.25")
+
+omnitrace_add_validation_test(
+    NAME trace-time-window-binary-rewrite
+    TIMEMORY_METRIC "wall_clock"
+    TIMEMORY_FILE "wall_clock.json"
+    PERFETTO_METRIC "host"
+    PERFETTO_FILE "perfetto-trace.proto"
+    LABELS "time-window"
+    FAIL_REGEX "outer_d"
+    ARGS -l
+         main
+         outer_a
+         outer_b
+         outer_c
+         -c
+         1
+         1
+         1
+         1
+         -d
+         0
+         1
+         1
+         1
+         -p)
+
+omnitrace_add_validation_test(
+    NAME trace-time-window-runtime-instrument
+    TIMEMORY_METRIC "wall_clock"
+    TIMEMORY_FILE "wall_clock.json"
+    PERFETTO_METRIC "host"
+    PERFETTO_FILE "perfetto-trace.proto"
+    LABELS "time-window"
+    FAIL_REGEX "outer_d"
+    ARGS -l
+         main
+         outer_a
+         outer_b
+         outer_c
+         -c
+         1
+         1
+         1
+         1
+         -d
+         0
+         1
+         1
+         1
+         -p)
+
+omnitrace_add_test(
+    SKIP_BASELINE SKIP_SAMPLING SKIP_PRELOAD
+    NAME trace-time-window-delay
+    TARGET trace-time-window
+    REWRITE_ARGS -e -v 2 --caller-include inner -i 4096
+    RUNTIME_ARGS -e -v 1 --caller-include inner -i 4096
+    LABELS "time-window"
+    ENVIRONMENT
+        "${_window_environment};OMNITRACE_TRACE_DELAY=0.75;OMNITRACE_TRACE_DURATION=0.75")
+
+omnitrace_add_validation_test(
+    NAME trace-time-window-delay-binary-rewrite
+    TIMEMORY_METRIC "wall_clock"
+    TIMEMORY_FILE "wall_clock.json"
+    PERFETTO_METRIC "host"
+    PERFETTO_FILE "perfetto-trace.proto"
+    LABELS "time-window"
+    ARGS -l
+         outer_c
+         outer_d
+         -c
+         1
+         1
+         -d
+         0
+         0
+         -p)
+
+omnitrace_add_validation_test(
+    NAME trace-time-window-delay-runtime-instrument
+    TIMEMORY_METRIC "wall_clock"
+    TIMEMORY_FILE "wall_clock.json"
+    PERFETTO_METRIC "host"
+    PERFETTO_FILE "perfetto-trace.proto"
+    LABELS "time-window"
+    ARGS -l
+         outer_c
+         outer_d
+         -c
+         1
+         1
+         -d
+         0
+         0
+         -p)
+
 # -------------------------------------------------------------------------------------- #
 #
 # critical-trace tests
@@ -823,6 +928,10 @@ foreach(_TARGET ${RCCL_TEST_TARGETS})
             line
             return
             args
+            -ME
+            sysdeps
+            --log-file
+            rccl-test-${_NAME}.log
         RUN_ARGS -t
                  1
                  -g
@@ -910,7 +1019,7 @@ omnitrace_add_causal_test(
     )
 
 set(_causal_common_args
-    "-n 10 -e -s 0 10 20 30 -B $<TARGET_FILE_BASE_NAME:causal-cpu-omni>")
+    "-n 20 -e -s 0 10 20 30 -B $<TARGET_FILE_BASE_NAME:causal-cpu-omni>")
 
 macro(
     causal_e2e_args_and_validation
@@ -945,7 +1054,7 @@ omnitrace_add_causal_test(
     SKIP_BASELINE
     NAME cpu-omni-slow-func-e2e
     TARGET causal-cpu-omni
-    RUN_ARGS 80 30 432525 200000000
+    RUN_ARGS 80 12 432525 250000000
     CAUSAL_MODE "func"
     CAUSAL_ARGS ${_causal_slow_func_args}
     CAUSAL_VALIDATE_ARGS ${_causal_slow_func_valid}
@@ -957,7 +1066,7 @@ omnitrace_add_causal_test(
     SKIP_BASELINE
     NAME cpu-omni-fast-func-e2e
     TARGET causal-cpu-omni
-    RUN_ARGS 80 30 432525 200000000
+    RUN_ARGS 80 12 432525 250000000
     CAUSAL_MODE "func"
     CAUSAL_ARGS ${_causal_fast_func_args}
     CAUSAL_VALIDATE_ARGS ${_causal_fast_func_valid}
@@ -969,7 +1078,7 @@ omnitrace_add_causal_test(
     SKIP_BASELINE
     NAME cpu-omni-line-155-e2e
     TARGET causal-cpu-omni
-    RUN_ARGS 80 30 432525 200000000
+    RUN_ARGS 80 12 432525 250000000
     CAUSAL_MODE "line"
     CAUSAL_ARGS ${_causal_line_155_args}
     CAUSAL_VALIDATE_ARGS ${_causal_line_155_valid}
@@ -981,7 +1090,7 @@ omnitrace_add_causal_test(
     SKIP_BASELINE
     NAME cpu-omni-line-165-e2e
     TARGET causal-cpu-omni
-    RUN_ARGS 80 30 432525 200000000
+    RUN_ARGS 80 12 432525 250000000
     CAUSAL_MODE "line"
     CAUSAL_ARGS ${_causal_line_165_args}
     CAUSAL_VALIDATE_ARGS ${_causal_line_165_valid}

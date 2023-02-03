@@ -34,20 +34,6 @@ bool debug_pop  = tim::get_env("OMNITRACE_DEBUG_POP", false) || get_debug_env();
 bool debug_mark = tim::get_env("OMNITRACE_DEBUG_MARK", false) || get_debug_env();
 bool debug_user = tim::get_env("OMNITRACE_DEBUG_USER_REGIONS", false) || get_debug_env();
 
-perfetto::TraceConfig&
-get_perfetto_config()
-{
-    static auto _v = ::perfetto::TraceConfig{};
-    return _v;
-}
-
-std::unique_ptr<perfetto::TracingSession>&
-get_perfetto_session()
-{
-    static auto _v = std::unique_ptr<perfetto::TracingSession>{};
-    return _v;
-}
-
 std::unordered_map<hash_value_t, std::string>&
 get_perfetto_track_uuids()
 {
@@ -114,7 +100,6 @@ thread_init()
                                                      process::get_id(), "thread",
                                                      threading::get_id()),
                                                 quirk::config<quirk::auto_start>{});
-        get_interval_data()->reserve(512);
         // save the hash maps
         get_timemory_hash_ids()     = tim::get_hash_ids();
         get_timemory_hash_aliases() = tim::get_hash_aliases();

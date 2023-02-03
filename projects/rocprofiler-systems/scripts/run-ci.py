@@ -19,7 +19,6 @@ def which(cmd, require):
 
 
 def generate_custom(args, cmake_args, ctest_args):
-
     if not os.path.exists(args.binary_dir):
         os.makedirs(args.binary_dir)
 
@@ -74,7 +73,6 @@ def generate_custom(args, cmake_args, ctest_args):
 
 
 def generate_dashboard_script(args):
-
     CODECOV = 1 if args.coverage else 0
     DASHBOARD_MODE = args.mode
     SOURCE_DIR = os.path.realpath(args.source_dir)
@@ -244,7 +242,6 @@ def run(*args, **kwargs):
 
 
 if __name__ == "__main__":
-
     args, cmake_args, ctest_args = parse_args()
 
     if not os.path.exists(args.binary_dir):

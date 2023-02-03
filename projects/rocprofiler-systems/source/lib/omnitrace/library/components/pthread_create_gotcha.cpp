@@ -161,6 +161,7 @@ pthread_create_gotcha::wrapper::operator()() const
     auto        _signals     = std::set<int>{};
     auto        _coverage    = (get_mode() == Mode::Coverage);
     const auto& _parent_info = thread_info::get(m_config.parent_tid, InternalTID);
+    const auto& _info        = thread_info::init(m_config.offset);
     auto        _dtor        = [&]() {
         set_thread_state(ThreadState::Internal);
         if(_is_sampling)
@@ -189,16 +190,22 @@ pthread_create_gotcha::wrapper::operator()() const
                 _thr_bundle->stop();
             if(_bundle) stop_bundle(*_bundle, _tid);
             pthread_create_gotcha::shutdown(_tid);
+            OMNITRACE_BASIC_VERBOSE(
+                1, "[PID=%i][rank=%i] Thread %s (parent: %s) exited\n", process::get_id(),
+                dmp::rank(), _info->index_data->as_string().c_str(),
+                _parent_info->index_data->as_string().c_str());
         }
     };
 
     auto _active = (get_state() == ::omnitrace::State::Active && bundles != nullptr &&
                     bundles_mutex != nullptr);
-
-    const auto& _info = thread_info::init(m_config.offset);
     if(_active && !_coverage && !m_config.offset)
     {
         _tid = _info->index_data->sequent_value;
+        OMNITRACE_BASIC_VERBOSE(1, "[PID=%i][rank=%i] Thread %s (parent: %s) created\n",
+                                process::get_id(), dmp::rank(),
+                                _info->index_data->as_string().c_str(),
+                                _parent_info->index_data->as_string().c_str());
         threading::set_thread_name(TIMEMORY_JOIN(" ", "Thread", _tid).c_str());
         if(!thread_bundle_data_t::instances().at(_tid))
         {
@@ -234,6 +241,14 @@ pthread_create_gotcha::wrapper::operator()() const
             _signals = sampling::setup();
             sampling::unblock_signals();
         }
+    }
+    else if(m_config.offset)
+    {
+        OMNITRACE_BASIC_VERBOSE(
+            2,
+            "[PID=%i][rank=%i] Thread %s (parent: %s) created [started by omnitrace]\n",
+            process::get_id(), dmp::rank(), _info->index_data->as_string().c_str(),
+            _parent_info->index_data->as_string().c_str());
     }
 
     // notify the wrapper that all internal work is completed
@@ -399,8 +414,9 @@ pthread_create_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
 
     if(_active && !_disabled && !_info->is_offset)
     {
-        OMNITRACE_VERBOSE(1, "Creating new thread on PID %i (rank: %i), TID %li\n",
-                          process::get_id(), dmp::rank(), _tid);
+        OMNITRACE_BASIC_VERBOSE(2, "[PID=%i][rank=%i] Starting new thread on %s...\n",
+                                process::get_id(), dmp::rank(),
+                                _info->index_data->as_string().c_str());
     }
 
     // ensure that cpu cid stack exists on the parent thread if active

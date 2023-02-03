@@ -136,7 +136,7 @@ symbol::operator bool() const
 }
 
 size_t
-symbol::read_dwarf(const std::deque<dwarf_entry>& _info)
+symbol::read_dwarf_entries(const std::deque<dwarf_entry>& _info)
 {
     for(const auto& itr : _info)
     {
@@ -171,6 +171,20 @@ symbol::read_dwarf(const std::deque<dwarf_entry>& _info)
     }
 
     return dwarf_info.size();
+}
+
+size_t
+symbol::read_dwarf_breakpoints(const std::vector<uintptr_t>& _bkpts)
+{
+    for(const auto& itr : _bkpts)
+    {
+        if(address.contains(itr)) breakpoints.emplace_back(itr);
+    }
+
+    // make sure the breakpoints are sorted low to high
+    std::sort(breakpoints.begin(), breakpoints.end());
+
+    return breakpoints.size();
 }
 
 bool

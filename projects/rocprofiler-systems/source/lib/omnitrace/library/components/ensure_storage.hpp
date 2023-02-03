@@ -39,7 +39,7 @@ namespace
 template <typename... Tp>
 struct ensure_storage
 {
-    TIMEMORY_DEFAULT_OBJECT(ensure_storage)
+    OMNITRACE_DEFAULT_OBJECT(ensure_storage)
 
     void operator()() const { OMNITRACE_FOLD_EXPRESSION((*this)(tim::type_list<Tp>{})); }
 

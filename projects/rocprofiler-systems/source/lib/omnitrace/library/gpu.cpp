@@ -20,30 +20,34 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#if !defined(OMNITRACE_USE_ROCM_SMI)
+#    define OMNITRACE_USE_ROCM_SMI 0
+#endif
+
+#if !defined(OMNITRACE_USE_HIP)
+#    define OMNITRACE_USE_HIP 0
+#endif
+
+#if OMNITRACE_USE_HIP > 0
+#    if !defined(TIMEMORY_USE_HIP)
+#        define TIMEMORY_USE_HIP 1
+#    endif
+#endif
+
 #include "library/gpu.hpp"
 #include "library/debug.hpp"
 #include "library/defines.hpp"
 
 #include <timemory/manager.hpp>
 
-#if defined(OMNITRACE_USE_ROCM_SMI) && OMNITRACE_USE_ROCM_SMI > 0
-#    include "library/rocm_smi.hpp"
-#elif !defined(OMNITRACE_USE_ROCM_SMI)
-#    define OMNITRACE_USE_ROCM_SMI 0
-#endif
-
-#if defined(OMNITRACE_USE_HIP) && OMNITRACE_USE_HIP > 0
-#    if !defined(TIMEMORY_USE_HIP)
-#        define TIMEMORY_USE_HIP 1
-#    endif
-#    include <timemory/components/hip/backends.hpp>
-#elif !defined(OMNITRACE_USE_HIP)
-#    define OMNITRACE_USE_HIP 0
+#if OMNITRACE_USE_ROCM_SMI > 0
+#    include <rocm_smi/rocm_smi.h>
 #endif
 
 #if OMNITRACE_USE_HIP > 0
 #    include <hip/hip_runtime.h>
 #    include <hip/hip_runtime_api.h>
+#    include <timemory/components/hip/backends.hpp>
 
 #    if !defined(OMNITRACE_HIP_RUNTIME_CALL)
 #        define OMNITRACE_HIP_RUNTIME_CALL(err)                                          \
@@ -62,6 +66,49 @@ namespace omnitrace
 {
 namespace gpu
 {
+namespace
+{
+namespace scope = ::tim::scope;
+
+#if OMNITRACE_USE_ROCM_SMI > 0
+#    define OMNITRACE_ROCM_SMI_CALL(ERROR_CODE)                                          \
+        ::omnitrace::gpu::check_rsmi_error(ERROR_CODE, __FILE__, __LINE__)
+
+void
+check_rsmi_error(rsmi_status_t _code, const char* _file, int _line)
+{
+    if(_code == RSMI_STATUS_SUCCESS) return;
+    const char* _msg = nullptr;
+    auto        _err = rsmi_status_string(_code, &_msg);
+    if(_err != RSMI_STATUS_SUCCESS)
+        OMNITRACE_THROW("rsmi_status_string failed. No error message available. "
+                        "Error code %i originated at %s:%i\n",
+                        static_cast<int>(_code), _file, _line);
+    OMNITRACE_THROW("[%s:%i] Error code %i :: %s", _file, _line, static_cast<int>(_code),
+                    _msg);
+}
+
+bool
+rsmi_init()
+{
+    auto _rsmi_init = []() {
+        try
+        {
+            OMNITRACE_ROCM_SMI_CALL(::rsmi_init(0));
+        } catch(std::exception& _e)
+        {
+            OMNITRACE_BASIC_VERBOSE(1, "Exception thrown initializing rocm-smi: %s\n",
+                                    _e.what());
+            return false;
+        }
+        return true;
+    }();
+
+    return _rsmi_init;
+}
+#endif
+}  // namespace
+
 int
 hip_device_count()
 {
@@ -73,12 +120,36 @@ hip_device_count()
 }
 
 int
+rsmi_device_count()
+{
+#if OMNITRACE_USE_ROCM_SMI > 0
+    if(!rsmi_init()) return 0;
+
+    static auto _num_devices = []() {
+        uint32_t _v = 0;
+        try
+        {
+            OMNITRACE_ROCM_SMI_CALL(rsmi_num_monitor_devices(&_v));
+        } catch(std::exception& _e)
+        {
+            OMNITRACE_BASIC_VERBOSE(
+                1, "Exception thrown getting the rocm-smi devices: %s\n", _e.what());
+        }
+        return _v;
+    }();
+
+    return _num_devices;
+#else
+    return 0;
+#endif
+}
+
+int
 device_count()
 {
 #if OMNITRACE_USE_ROCM_SMI > 0
     // store as static since calls after rsmi_shutdown will return zero
-    static auto _v = rocm_smi::device_count();
-    return _v;
+    return rsmi_device_count();
 #elif OMNITRACE_USE_HIP > 0
     return ::tim::hip::device_count();
 #else

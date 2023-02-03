@@ -39,7 +39,7 @@ struct address_multirange
     struct coarse
     {};
 
-    TIMEMORY_DEFAULT_OBJECT(address_multirange)
+    OMNITRACE_DEFAULT_OBJECT(address_multirange)
 
     address_multirange& operator+=(std::pair<coarse, uintptr_t>&&);
     address_multirange& operator+=(std::pair<coarse, address_range>&& _v);

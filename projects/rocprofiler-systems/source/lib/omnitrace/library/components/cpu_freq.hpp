@@ -45,7 +45,7 @@ struct cpu_freq
     using storage_type = tim::storage<cpu_freq, value_type>;
     using cpu_id_set_t = std::set<uint64_t>;
 
-    TIMEMORY_DEFAULT_OBJECT(cpu_freq)
+    OMNITRACE_DEFAULT_OBJECT(cpu_freq)
 
     // string id for component
     static std::string label();

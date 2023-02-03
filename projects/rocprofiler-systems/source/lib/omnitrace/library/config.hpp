@@ -22,7 +22,6 @@
 
 #pragma once
 
-#include "api.hpp"
 #include "library/common.hpp"
 #include "library/defines.hpp"
 #include "library/state.hpp"
@@ -43,6 +42,12 @@ namespace omnitrace
 //
 inline namespace config
 {
+using signal_handler_t = void (*)(void);
+
+// if arg is nullptr, returns current signal handler
+// if arg is non-null, returns replaced signal handler
+signal_handler_t set_signal_handler(signal_handler_t);
+
 bool
 settings_are_configured() OMNITRACE_HOT;
 
@@ -54,6 +59,15 @@ configure_mode_settings();
 
 void
 configure_signal_handler();
+
+int
+get_realtime_signal();
+
+int
+get_cputime_signal();
+
+std::set<int>
+get_sampling_signals(int64_t _tid = 0);
 
 void
 configure_disabled_settings();
@@ -257,7 +271,10 @@ std::string
 get_perfetto_fill_policy();
 
 std::set<std::string>
-get_perfetto_categories();
+get_enabled_categories();
+
+std::set<std::string>
+get_disabled_categories();
 
 bool
 get_perfetto_annotations() OMNITRACE_HOT;
@@ -284,8 +301,11 @@ get_perfetto_roctracer_per_stream() OMNITRACE_HOT;
 int64_t
 get_critical_trace_count();
 
-size_t&
-get_instrumentation_interval();
+double
+get_trace_delay();
+
+double
+get_trace_duration();
 
 double
 get_sampling_freq();

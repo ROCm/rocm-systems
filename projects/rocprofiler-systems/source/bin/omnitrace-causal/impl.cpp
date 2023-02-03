@@ -58,7 +58,7 @@ namespace console  = ::tim::utility::console;
 namespace argparse = ::tim::argparse;
 using namespace timemory::join;
 using tim::get_env;
-using tim::log::colorized;
+using tim::log::monochrome;
 using tim::log::stream;
 
 namespace std
@@ -535,15 +535,6 @@ parse_args(int argc, char** argv, std::vector<char*>& _env,
         exit(EXIT_FAILURE);
     });
 
-    auto _add_separator = [&](std::string _v, const std::string& _desc) {
-        parser.add_argument({ "" }, "");
-        parser
-            .add_argument({ join("", "[", _v, "]") },
-                          (_desc.empty()) ? _desc : join({ "", "(", ")" }, _desc))
-            .color(color::info());
-        parser.add_argument({ "" }, "");
-    };
-
     parser.enable_help();
     parser.enable_version("omnitrace-causal", "v" OMNITRACE_VERSION_STRING,
                           OMNITRACE_GIT_DESCRIBE, OMNITRACE_GIT_REVISION);
@@ -553,16 +544,16 @@ parse_args(int argc, char** argv, std::vector<char*>& _env,
         parser.set_description_width(
             std::min<int>(_cols - parser.get_help_width() - 8, 120));
 
-    _add_separator("DEBUG OPTIONS", "");
+    parser.start_group("DEBUG OPTIONS", "");
     parser.add_argument({ "--monochrome" }, "Disable colorized output")
         .max_count(1)
         .dtype("bool")
         .action([&](parser_t& p) {
-            auto _colorized = !p.get<bool>("monochrome");
-            colorized()     = _colorized;
-            p.set_use_color(_colorized);
-            update_env(_env, "OMNITRACE_COLORIZED_LOG", (_colorized) ? "1" : "0");
-            update_env(_env, "COLORIZED_LOG", (_colorized) ? "1" : "0");
+            auto _monochrome = p.get<bool>("monochrome");
+            monochrome()     = _monochrome;
+            p.set_use_color(!_monochrome);
+            update_env(_env, "OMNITRACE_MONOCHROME", (_monochrome) ? "1" : "0");
+            update_env(_env, "MONOCHROME", (_monochrome) ? "1" : "0");
         });
     parser.add_argument({ "--debug" }, "Debug output")
         .max_count(1)
@@ -582,7 +573,7 @@ parse_args(int argc, char** argv, std::vector<char*>& _env,
     bool        _generate_configs = false;
     bool        _add_defaults     = true;
 
-    _add_separator("GENERAL OPTIONS", "");
+    parser.start_group("GENERAL OPTIONS", "");
     parser.add_argument({ "-c", "--config" }, "Base configuration file")
         .min_count(0)
         .dtype("filepath")
@@ -629,8 +620,8 @@ parse_args(int argc, char** argv, std::vector<char*>& _env,
         .dtype("bool")
         .action([&](parser_t& p) { _add_defaults = !p.get<bool>("no-defaults"); });
 
-    _add_separator("CAUSAL PROFILING OPTIONS (General)",
-                   "These settings will be applied to all causal profiling runs");
+    parser.start_group("CAUSAL PROFILING OPTIONS (General)",
+                       "These settings will be applied to all causal profiling runs");
     parser.add_argument({ "-m", "--mode" }, "Causal profiling mode")
         .count(1)
         .dtype("string")
@@ -706,7 +697,7 @@ parse_args(int argc, char** argv, std::vector<char*>& _env,
         .dtype("int")
         .action([&](parser_t& p) { _niterations = p.get<int64_t>("iterations"); });
 
-    _add_separator(
+    parser.start_group(
         "CAUSAL PROFILING OPTIONS (Combinatorial)",
         "Each individual argument to these options will multiply the number runs by the "
         "number of arguments and the number of iterations. E.g. -n 2 -B \"MAIN\" -F "
@@ -803,6 +794,8 @@ parse_args(int argc, char** argv, std::vector<char*>& _env,
         .action([&](parser_t& p) {
             _function_excludes = p.get<std::vector<std::string>>("function-exclude");
         });
+
+    parser.end_group();
 
 #if OMNITRACE_HIP_VERSION > 0 && OMNITRACE_HIP_VERSION < 50300
     update_env(_env, "HSA_ENABLE_INTERRUPT", 0);

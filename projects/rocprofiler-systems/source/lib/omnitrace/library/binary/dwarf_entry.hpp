@@ -31,7 +31,11 @@ namespace binary
 {
 struct dwarf_entry
 {
-    TIMEMORY_DEFAULT_OBJECT(dwarf_entry)
+    // tuple of dwarf line info, address ranges, and breakpoints
+    using dwarf_tuple_t = std::tuple<std::deque<dwarf_entry>, std::vector<address_range>,
+                                     std::vector<uintptr_t>>;
+
+    OMNITRACE_DEFAULT_OBJECT(dwarf_entry)
 
     bool          begin_statement = false;
     bool          end_sequence    = false;
@@ -53,7 +57,7 @@ struct dwarf_entry
     bool     operator!=(const dwarf_entry&) const;
     explicit operator bool() const { return is_valid(); }
 
-    static std::deque<dwarf_entry> process_dwarf(int _fd, std::vector<address_range>&);
+    static dwarf_tuple_t process_dwarf(int _fd);
 
     template <typename ArchiveT>
     void serialize(ArchiveT&, const unsigned int);

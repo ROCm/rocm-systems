@@ -23,14 +23,18 @@
 #pragma once
 
 #include <cstdint>
+#include <dlfcn.h>
 #include <set>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace omnitrace
 {
 namespace binary
 {
+using open_modes_vec_t = std::vector<int>;
+
 struct link_file
 {
     link_file(std::string_view&& _v)
@@ -44,11 +48,16 @@ struct link_file
     std::string name = {};
 };
 
+// helper function for translating generic lib name to resolved path
+std::string
+get_linked_path(const char*, open_modes_vec_t&& = {});
+
 // default parameters: get the linked binaries for the exe but exclude the linked binaries
 // from libomnitrace
 std::set<link_file>
 get_link_map(const char*        _lib               = nullptr,
              const std::string& _exclude_linked_by = "libomnitrace.so",
-             const std::string& _exclude_re        = "libomnitrace-([a-zA-Z]+)\\.so");
+             const std::string& _exclude_re        = "libomnitrace-([a-zA-Z]+)\\.so",
+             open_modes_vec_t&& _open_modes        = {});
 }  // namespace binary
 }  // namespace omnitrace

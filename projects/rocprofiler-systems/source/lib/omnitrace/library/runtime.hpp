@@ -78,15 +78,6 @@ get_init_bundle();
 std::unique_ptr<preinit_bundle_t>&
 get_preinit_bundle();
 
-int
-get_realtime_signal();
-
-int
-get_cputime_signal();
-
-std::set<int>
-get_sampling_signals(int64_t _tid = 0);
-
 std::atomic<uint64_t>&
 get_cpu_cid() TIMEMORY_HOT;
 

@@ -122,6 +122,8 @@ OMNITRACE_DEFINE_CATEGORY(category, process_context_switch, OMNITRACE_CATEGORY_P
 OMNITRACE_DEFINE_CATEGORY(category, process_page_fault, OMNITRACE_CATEGORY_PROCESS_PAGE_FAULT, "process_page_fault", "Memory page faults in process (collected in background thread)")
 OMNITRACE_DEFINE_CATEGORY(category, process_user_mode_time, OMNITRACE_CATEGORY_PROCESS_USER_MODE_TIME, "process_user_cpu_time", "CPU time of functions executing in user-space in process in seconds (collected in background thread)")
 OMNITRACE_DEFINE_CATEGORY(category, process_kernel_mode_time, OMNITRACE_CATEGORY_PROCESS_KERNEL_MODE_TIME, "process_kernel_cpu_time", "CPU time of functions executing in kernel-space in process in seconds (collected in background thread)")
+OMNITRACE_DEFINE_CATEGORY(category, thread_wall_time, OMNITRACE_CATEGORY_THREAD_WALL_TIME, "thread_wall_time", "Wall-clock time on thread (derived from sampling)")
+OMNITRACE_DEFINE_CATEGORY(category, thread_cpu_time, OMNITRACE_CATEGORY_THREAD_CPU_TIME, "thread_cpu_time", "CPU time on thread (derived from sampling)")
 OMNITRACE_DEFINE_CATEGORY(category, thread_page_fault, OMNITRACE_CATEGORY_THREAD_PAGE_FAULT, "thread_page_fault", "Memory page faults on thread (derived from sampling)")
 OMNITRACE_DEFINE_CATEGORY(category, thread_peak_memory, OMNITRACE_CATEGORY_THREAD_PEAK_MEMORY, "thread_peak_memory", "Peak memory usage on thread in MB (derived from sampling)")
 OMNITRACE_DEFINE_CATEGORY(category, thread_context_switch, OMNITRACE_CATEGORY_THREAD_CONTEXT_SWITCH, "thread_context_switch", "Context switches on thread (derived from sampling)")
@@ -182,6 +184,8 @@ using name = perfetto_category<Tp...>;
         OMNITRACE_PERFETTO_CATEGORY(category::process_page_fault),                       \
         OMNITRACE_PERFETTO_CATEGORY(category::process_user_mode_time),                   \
         OMNITRACE_PERFETTO_CATEGORY(category::process_kernel_mode_time),                 \
+        OMNITRACE_PERFETTO_CATEGORY(category::thread_wall_time),                         \
+        OMNITRACE_PERFETTO_CATEGORY(category::thread_cpu_time),                          \
         OMNITRACE_PERFETTO_CATEGORY(category::thread_page_fault),                        \
         OMNITRACE_PERFETTO_CATEGORY(category::thread_peak_memory),                       \
         OMNITRACE_PERFETTO_CATEGORY(category::thread_context_switch),                    \
@@ -193,3 +197,33 @@ using name = perfetto_category<Tp...>;
 #if defined(TIMEMORY_USE_PERFETTO)
 #    define TIMEMORY_PERFETTO_CATEGORIES OMNITRACE_PERFETTO_CATEGORIES
 #endif
+
+#include <set>
+#include <string>
+
+namespace omnitrace
+{
+inline namespace config
+{
+std::set<std::string>
+get_enabled_categories();
+
+std::set<std::string>
+get_disabled_categories();
+}  // namespace config
+
+namespace categories
+{
+void
+enable_categories(const std::set<std::string>& = config::get_enabled_categories());
+
+void
+disable_categories(const std::set<std::string>& = config::get_disabled_categories());
+
+void
+setup();
+
+void
+shutdown();
+}  // namespace categories
+}  // namespace omnitrace

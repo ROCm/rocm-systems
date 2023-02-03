@@ -109,7 +109,7 @@ struct rocprofiler
     using base_type    = base<rocprofiler, void>;
     using tracker_type = policy::instance_tracker<rocprofiler, false>;
 
-    TIMEMORY_DEFAULT_OBJECT(rocprofiler)
+    OMNITRACE_DEFAULT_OBJECT(rocprofiler)
 
     static void preinit();
     static void global_init() { setup(); }
@@ -173,7 +173,7 @@ struct set_storage<component::rocm_data_tracker>
     using storage_array_t               = std::array<storage<type>*, max_threads>;
     friend struct get_storage<component::rocm_data_tracker>;
 
-    TIMEMORY_DEFAULT_OBJECT(set_storage)
+    OMNITRACE_DEFAULT_OBJECT(set_storage)
 
     auto operator()(storage<type>*, size_t) const {}
     auto operator()(type&, size_t) const {}
@@ -192,7 +192,7 @@ struct get_storage<component::rocm_data_tracker>
 {
     using type = component::rocm_data_tracker;
 
-    TIMEMORY_DEFAULT_OBJECT(get_storage)
+    OMNITRACE_DEFAULT_OBJECT(get_storage)
 
     auto operator()(const type&) const
     {

@@ -550,8 +550,8 @@ extern "C"
 {
     void omnitrace_preinit_library(void)
     {
-        if(!omnitrace::common::get_env("OMNITRACE_COLORIZED_LOG", tim::log::colorized()))
-            tim::log::colorized() = false;
+        if(omnitrace::common::get_env("OMNITRACE_MONOCHROME", tim::log::monochrome()))
+            tim::log::monochrome() = true;
     }
 
     int omnitrace_preload_library(void)

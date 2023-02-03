@@ -67,7 +67,8 @@ struct symbol : private tim::unwind::bfd_file::symbol
     explicit operator bool() const;
 
     bool          read_bfd(bfd_file&);
-    size_t        read_dwarf(const std::deque<dwarf_entry>&);
+    size_t        read_dwarf_entries(const std::deque<dwarf_entry>&);
+    size_t        read_dwarf_breakpoints(const std::vector<uintptr_t>&);
     address_range ipaddr() const { return address + load_address; }
     symbol        clone() const;
 
@@ -89,6 +90,7 @@ struct symbol : private tim::unwind::bfd_file::symbol
     address_range               address      = {};
     std::string                 func         = {};
     std::string                 file         = {};
+    std::vector<uintptr_t>      breakpoints  = {};
     std::vector<inlined_symbol> inlines      = {};
     std::vector<dwarf_entry>    dwarf_info   = {};
 };
