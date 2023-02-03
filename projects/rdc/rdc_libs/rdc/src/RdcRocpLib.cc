@@ -106,8 +106,6 @@ rdc_status_t RdcRocpLib::rdc_telemetry_fields_value_get(
         return RDC_ST_FAIL_LOAD_MODULE;
     }
 
-    RDC_LOG(RDC_DEBUG, "Fetch " << fields_count << " fields from rocp_lib.");
-
     return telemetry_fields_value_get_(
         fields, fields_count, callback, user_data);
 }
