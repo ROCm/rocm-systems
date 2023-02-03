@@ -1,0 +1,165 @@
+################################################################################
+# Copyright (c) 2022 Advanced Micro Devices, Inc.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to
+# deal in the Software without restriction, including without limitation the
+# rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+# sell copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+# IN THE SOFTWARE.
+################################################################################
+
+%YAML 1.2
+--- !<tag:barectf.org,2020/3/config>
+trace:
+  $include:
+    # Environment (generated file).
+    - env.yaml
+  type:
+    $include:
+      - stdint.yaml
+      - stdmisc.yaml
+    native-byte-order: little-endian
+    clock-types:
+      default:
+        origin-is-unix-epoch: true
+        $c-type: uint64_t
+    data-stream-types:
+      hsa_api:
+        event-record-common-context-field-type:
+          class: struct
+          members:
+            - _thread_id: uint32
+            - _queue_id: uint32
+            - _agent_id: uint32
+            - _correlation_id: uint64
+        $include:
+          # Base.
+          - dst_base.yaml
+
+          # HSA API event record types (generated file).
+          - hsa_erts.yaml
+      hip_api:
+        event-record-common-context-field-type:
+          class: struct
+          members:
+            - _thread_id: uint32
+            - _queue_id: uint32
+            - _agent_id: uint32
+            - _correlation_id: uint64
+            - _kernel_name: str
+        $include:
+          # Base.
+          - dst_base.yaml
+
+          # HIP API event record types (generated file).
+          - hip_erts.yaml
+      roctx:
+        $include:
+          # Base
+          - dst_base.yaml
+        event-record-common-context-field-type:
+          class: struct
+          members:
+            - _thread_id: uint32
+        event-record-types:
+          roctx:
+            payload-field-type:
+              class: struct
+              members:
+                - _id: sint64
+                - _msg: str
+      hsa_handles:
+        $include:
+          # Base.
+          - dst_base.yaml
+        event-record-types:
+          hsa_handle_type:
+            payload-field-type:
+              class: struct
+              members:
+                - _handle: uint64
+                - _type:
+                    field-type:
+                      class: uenum
+                      size: 8
+                      mappings:
+                        CPU: [0]
+                        GPU: [1]
+      api_ops:
+        $include:
+          # Base.
+          - dst_base.yaml
+        event-record-common-context-field-type:
+          class: struct
+          members:
+            - _thread_id: uint32
+            - _queue_id: uint32
+            - _agent_id: uint32
+            - _correlation_id: uint64
+        event-record-types:
+          hsa_op_begin:
+            payload-field-type:
+              class: struct
+          hsa_op_end:
+            payload-field-type:
+              class: struct
+          hip_op_begin:
+            payload-field-type:
+              class: struct
+              members:
+                - _kernel_name: str
+          hip_op_end:
+            payload-field-type:
+              class: struct
+      profiler:
+        $include:
+          # Base.
+          - dst_base.yaml
+        event-record-common-context-field-type:
+          class: struct
+          members:
+            - _dispatch: uint64
+            - _gpu_id: uint64
+            - _queue_id: uint64
+            - _queue_index: uint64
+            - _process_id: uint32
+            - _thread_id: uint32
+            - _kernel_id: uint64
+            - _kernel_name: str
+            - _counter_names:
+                field-type:
+                  class: dynamic-array
+                  element-field-type: str
+            - _counter_values:
+                field-type:
+                  class: dynamic-array
+                  element-field-type: uint64
+        event-record-types:
+          profiler_record:
+            payload-field-type:
+              class: struct
+          profiler_record_with_kernel_properties:
+            payload-field-type:
+              class: struct
+              members:
+                - _grid_size: uint64
+                - _workgroup_size: uint64
+                - _lds_size: uint64
+                - _scratch_size: uint64
+                - _arch_vgpr_count: uint64
+                - _accum_vgpr_count: uint64
+                - _sgpr_count: uint64
+                - _wave_size: uint64
+                - _signal_handle: uint64

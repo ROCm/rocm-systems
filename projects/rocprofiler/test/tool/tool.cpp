@@ -26,6 +26,8 @@ THE SOFTWARE.
 //                                                                           //
 ///////////////////////////////////////////////////////////////////////////////
 
+#define ROCPROFILER_V1
+
 #include <assert.h>
 #include <cxxabi.h>
 #include <dirent.h>

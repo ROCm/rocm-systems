@@ -25,7 +25,7 @@ POSSIBILITY OF SUCH DAMAGE.
 #ifndef TEST_UTIL_HSA_RSRC_FACTORY_H_
 #define TEST_UTIL_HSA_RSRC_FACTORY_H_
 
-#define AMD_INTERNAL_BUILD
+// #define AMD_INTERNAL_BUILD
 
 #include <hsa/hsa.h>
 #include <hsa/hsa_api_trace.h>

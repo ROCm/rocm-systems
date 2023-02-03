@@ -32,10 +32,10 @@ THE SOFTWARE.
 #include <string>
 
 // Tracer messages protocol
+#define USE_PROF_API
 #include <prof_protocol.h>
 
 #include "core/context.h"
-#include "inc/rocprofiler.h"
 #include "util/hsa_rsrc_factory.h"
 
 #define PUBLIC_API __attribute__((visibility("default")))

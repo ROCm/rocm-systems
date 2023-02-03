@@ -19,10 +19,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 ################################################################################
-
-cmake_minimum_required ( VERSION 2.8.12 )
-set ( CMAKE_VERBOSE_MAKEFILE TRUE CACHE BOOL "Verbose Output" FORCE )
-
+cmake_minimum_required(VERSION 3.16.0)
 set ( EXE_NAME "rocprof-ctrl" )
 
 if ( NOT DEFINED TEST_DIR )
@@ -34,6 +31,19 @@ endif ()
 
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
+
+add_definitions(-DAMD_INTERNAL_BUILD=1)
+
+find_package(Threads REQUIRED)
+find_package(hsa-runtime64 REQUIRED CONFIG HINTS ${CMAKE_INSTALL_PREFIX} PATHS ${ROCM_PATH})
+get_property(HSA_RUNTIME_INCLUDE_DIRECTORIES TARGET hsa-runtime64::hsa-runtime64 PROPERTY INTERFACE_INCLUDE_DIRECTORIES)
+find_file(HSA_H hsa.h
+  PATHS ${HSA_RUNTIME_INCLUDE_DIRECTORIES}
+  PATH_SUFFIXES hsa
+  NO_DEFAULT_PATH
+  REQUIRED)
+get_filename_component(HSA_RUNTIME_INC_PATH ${HSA_H} DIRECTORY)
+include_directories(${HSA_RUNTIME_INC_PATH})
 
 ## C test
 add_executable ( "c_test" ${TEST_DIR}/app/c_test.c )

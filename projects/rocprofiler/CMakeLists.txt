@@ -20,18 +20,32 @@
 # THE SOFTWARE.
 ################################################################################
 
-cmake_minimum_required ( VERSION 2.8.12 )
-
-## Verbose output.
-set ( CMAKE_VERBOSE_MAKEFILE TRUE CACHE BOOL "Verbose Output" FORCE )
+cmake_minimum_required ( VERSION 3.18.0 )
 
 ## Set module name and project name.
 set ( ROCPROFILER_NAME "rocprofiler" )
 set ( ROCPROFILER_TARGET "${ROCPROFILER_NAME}64" )
 set ( ROCPROFILER_LIBRARY "lib${ROCPROFILER_TARGET}" )
-project ( ${ROCPROFILER_NAME} )
+project(${ROCPROFILER_NAME} VERSION 2.0.0)
 
 include(GNUInstallDirs)
+
+# set default ROCM_PATH
+if(NOT DEFINED ROCM_PATH)
+  set(ROCM_PATH "/opt/rocm" CACHE STRING "Default ROCM installation directory")
+endif()
+
+## Build is not supported on Windows plaform
+if(WIN32)
+  message(FATAL_ERROR "Windows build is not supported.")
+endif()
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+add_compile_options(-Wall)
+
+set(THREADS_PREFER_PTHREAD_FLAG ON)
+
 ## Adding default path cmake modules
 list ( APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules" )
 ## Include common cmake modules
@@ -40,7 +54,7 @@ include ( utils )
 include ( env )
 
 ## Setup the package version.
-get_version ( "1.0.0" )
+get_version ( "2.0.0" )
 message ( "-- LIB-VERSION: ${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH}" )
 
 set ( BUILD_VERSION_MAJOR ${VERSION_MAJOR} )
@@ -68,10 +82,38 @@ set ( ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}" )
 set ( LIB_DIR "${ROOT_DIR}/src" )
 set ( TEST_DIR "${ROOT_DIR}/test" )
 
+find_package(amd_comgr REQUIRED CONFIG HINTS ${CMAKE_INSTALL_PREFIX} PATHS ${ROCM_PATH} PATH_SUFFIXES lib/cmake/amd_comgr)
+MESSAGE(STATUS "Code Object Manager found at ${amd_comgr_DIR}.")
+link_libraries(amd_comgr)
+
+find_package(Threads REQUIRED)
+find_package(hsa-runtime64 REQUIRED CONFIG HINTS ${CMAKE_INSTALL_PREFIX} PATHS ${ROCM_PATH})
+find_package(HIP REQUIRED CONFIG HINTS ${CMAKE_INSTALL_PREFIX} PATHS ${ROCM_PATH})
+
+get_property(HSA_RUNTIME_INCLUDE_DIRECTORIES TARGET hsa-runtime64::hsa-runtime64 PROPERTY INTERFACE_INCLUDE_DIRECTORIES)
+find_file(HSA_H hsa.h
+  PATHS ${HSA_RUNTIME_INCLUDE_DIRECTORIES}
+  PATH_SUFFIXES hsa
+  NO_DEFAULT_PATH
+  REQUIRED)
+get_filename_component(HSA_RUNTIME_INC_PATH ${HSA_H} DIRECTORY)
+include_directories(${HSA_RUNTIME_INC_PATH})
+
+if(NOT DEFINED LIBRARY_TYPE)
+  set(LIBRARY_TYPE SHARED)
+endif()
+
 ## Enable tracing API
 if (NOT USE_PROF_API)
   set(USE_PROF_API 1)
 endif()
+
+configure_file(rocprofv2 ${PROJECT_BINARY_DIR} COPYONLY)
+install(FILES
+  ${PROJECT_SOURCE_DIR}/rocprofv2
+  DESTINATION ${CMAKE_INSTALL_BINDIR}
+  PERMISSIONS OWNER_READ OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
+  COMPONENT runtime)
 
 # Protocol header lookup
 set(PROF_API_HEADER_NAME prof_protocol.h)
@@ -87,26 +129,27 @@ if(USE_PROF_API EQUAL 1)
     if(NOT PROF_API_HEADER_DIR)
         MESSAGE(FATAL_ERROR "Profiling API header not found. Tracer integration disabled. Use -DPROF_API_HEADER_PATH=<path to ${PROF_API_HEADER_NAME} header>")
     else()
-        add_definitions(-DUSE_PROF_API=1)
         include_directories(${PROF_API_HEADER_DIR})
         MESSAGE(STATUS "Profiling API: ${PROF_API_HEADER_DIR}/${PROF_API_HEADER_NAME}")
     endif()
 endif()
 
-## Build library
-include ( ${LIB_DIR}/CMakeLists.txt )
+## Build libraries
+add_subdirectory(src)
 
-## Set the VERSION and SOVERSION values
-set_property ( TARGET ${TARGET_NAME} PROPERTY VERSION "${LIB_VERSION_STRING}" )
-set_property ( TARGET ${TARGET_NAME} PROPERTY SOVERSION "${LIB_VERSION_MAJOR}" )
+if(${LIBRARY_TYPE} STREQUAL SHARED)
+  ## Build samples
+  add_subdirectory(samples)
 
-## If the library is a release, strip the target library
-if ( "${CMAKE_BUILD_TYPE}" STREQUAL release )
-  add_custom_command ( TARGET ${ROCPROFILER_TARGET} POST_BUILD COMMAND ${CMAKE_STRIP} *.so )
-endif ()
+  ## Build tests
+  add_subdirectory(tests)
+endif()
+
+## Build Plugins
+add_subdirectory(plugin)
 
 ## Build tests
-add_subdirectory ( ${TEST_DIR} ${PROJECT_BINARY_DIR}/test )
+add_subdirectory(${TEST_DIR} ${PROJECT_BINARY_DIR}/test)
 
 ## Installation and packaging
 set ( DEST_NAME ${ROCPROFILER_NAME} )
@@ -130,18 +173,8 @@ message ( "CMake-install-prefix: ${CMAKE_INSTALL_PREFIX}" )
 message ( "CPack-install-prefix: ${CPACK_PACKAGING_INSTALL_PREFIX}" )
 message ( "-----------Dest-name: ${DEST_NAME}" )
 
-## set components
-set ( CPACK_COMPONENTS_ALL runtime dev )
-## Enable Component Install
-set(CPACK_RPM_COMPONENT_INSTALL ON)
-set(CPACK_DEB_COMPONENT_INSTALL ON)
-
-## Install libraries: Non versioned lib file in dev package
-install ( TARGETS ${ROCPROFILER_TARGET} LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT dev NAMELINK_ONLY )
-install ( TARGETS ${ROCPROFILER_TARGET} LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT runtime NAMELINK_SKIP )
 ## Install headers
 install ( FILES
-          ${CMAKE_CURRENT_SOURCE_DIR}/inc/rocprofiler.h
           ${CMAKE_CURRENT_SOURCE_DIR}/src/core/activity.h
           DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/${DEST_NAME}
           COMPONENT dev )
@@ -178,77 +211,114 @@ install ( FILES ${PROJECT_BINARY_DIR}/test/rocprof-ctrl DESTINATION ${CMAKE_INST
           COMPONENT runtime )
 
 # File reorg Backward compatibility
-option(FILE_REORG_BACKWARD_COMPATIBILITY "Enable File Reorg with backward compatibility" ON)
-if(FILE_REORG_BACKWARD_COMPATIBILITY)
-  include (rocprofiler-backward-compat.cmake)
-endif()
+# option(FILE_REORG_BACKWARD_COMPATIBILITY "Enable File Reorg with backward compatibility" ON)
+# if(FILE_REORG_BACKWARD_COMPATIBILITY)
+#   include (rocprofiler-backward-compat.cmake)
+# endif()
 
-## Packaging directives
-set ( CPACK_GENERATOR "DEB" "RPM" "TGZ" CACHE STRING "CPACK GENERATOR e.g. DEB;RPM" )
-set ( ENABLE_LDCONFIG ON CACHE BOOL "Set library links and caches using ldconfig.")
-set ( CPACK_PACKAGE_VENDOR "Advanced Micro Devices, Inc." )
-set ( CPACK_PACKAGE_VERSION_MAJOR ${BUILD_VERSION_MAJOR} )
-set ( CPACK_PACKAGE_VERSION_MINOR ${BUILD_VERSION_MINOR} )
-set ( CPACK_PACKAGE_VERSION_PATCH ${BUILD_VERSION_PATCH} )
-set ( CPACK_PACKAGE_VERSION "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}" )
-set ( CPACK_PACKAGE_CONTACT "ROCm Profiler Support <dl.ROCm-Profiler.support@amd.com>" )
-set ( CPACK_PACKAGE_DESCRIPTION_SUMMARY "ROCPROFILER library for AMD HSA runtime API extension support" )
-set ( CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE" )
+if(${LIBRARY_TYPE} STREQUAL SHARED)
+  # # Installation and packaging
+  if(DEFINED CPACK_PACKAGING_INSTALL_PREFIX)
+    get_filename_component(DEST_NAME ${CPACK_PACKAGING_INSTALL_PREFIX} NAME)
+    get_filename_component(DEST_DIR ${CPACK_PACKAGING_INSTALL_PREFIX} DIRECTORY)
+    set(CPACK_PACKAGING_INSTALL_PREFIX ${DEST_DIR})
+  endif()
 
-# Install license file
-install(FILES ${CPACK_RESOURCE_FILE_LICENSE} DESTINATION ${CMAKE_INSTALL_DOCDIR} COMPONENT runtime)
+  message("-----------Dest-name: ${DEST_NAME}")
+  message("------Install-prefix: ${CMAKE_INSTALL_PREFIX}")
+  message("-----------CPACK-dir: ${CPACK_PACKAGING_INSTALL_PREFIX}")
 
-if ( DEFINED ENV{ROCM_LIBPATCH_VERSION} )
-  set ( CPACK_PACKAGE_VERSION "${CPACK_PACKAGE_VERSION}.$ENV{ROCM_LIBPATCH_VERSION}" )
-  message ( "Using CPACK_PACKAGE_VERSION ${CPACK_PACKAGE_VERSION}" )
-endif()
+  ## Packaging directives
+  set(CPACK_GENERATOR "DEB" "RPM" "TGZ" CACHE STRING "CPACK GENERATOR DEB;RPM")
+  set(ENABLE_LDCONFIG ON CACHE BOOL "Set library links and caches using ldconfig.")
+  set(CPACK_PACKAGE_NAME "${PROJECT_NAME}")
+  set(CPACK_PACKAGE_VENDOR "Advanced Micro Devices, Inc.")
+  set(CPACK_PACKAGE_VERSION_MAJOR ${PROJECT_VERSION_MAJOR})
+  set(CPACK_PACKAGE_VERSION_MINOR ${PROJECT_VERSION_MINOR})
+  set(CPACK_PACKAGE_VERSION_PATCH ${PROJECT_VERSION_PATCH})
+  set(CPACK_PACKAGE_VERSION "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}")
+  set(CPACK_PACKAGE_CONTACT "ROCm Profiler Support <dl.ROCm-Profiler.support@amd.com>")
+  set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "AMD ROCMTOOLS library")
+  set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
 
-## Debian package specific variables
-if ( DEFINED ENV{CPACK_DEBIAN_PACKAGE_RELEASE} )
-  set ( CPACK_DEBIAN_PACKAGE_RELEASE $ENV{CPACK_DEBIAN_PACKAGE_RELEASE} )
-else()
-  set ( CPACK_DEBIAN_PACKAGE_RELEASE "local" )
-endif()
-message ( "Using CPACK_DEBIAN_PACKAGE_RELEASE ${CPACK_DEBIAN_PACKAGE_RELEASE}" )
-set ( CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT" )
+  if(DEFINED ENV{ROCM_LIBPATCH_VERSION})
+    set(CPACK_PACKAGE_VERSION "${CPACK_PACKAGE_VERSION}.$ENV{ROCM_LIBPATCH_VERSION}")
+    message("Using CPACK_PACKAGE_VERSION ${CPACK_PACKAGE_VERSION}")
+  endif()
 
-set ( CPACK_DEBIAN_RUNTIME_PACKAGE_NAME "${ROCPROFILER_NAME}" )
-set ( CPACK_DEBIAN_RUNTIME_PACKAGE_DEPENDS "hsa-rocr-dev, rocm-core" )
-set ( CPACK_DEBIAN_DEV_PACKAGE_NAME "${ROCPROFILER_NAME}-dev" )
-set ( CPACK_DEBIAN_DEV_PACKAGE_DEPENDS "${ROCPROFILER_NAME}, hsa-rocr-dev, rocm-core" )
+  # # Install license file
+  install(FILES ${CPACK_RESOURCE_FILE_LICENSE}
+    DESTINATION ${CMAKE_INSTALL_DOCDIR}
+    COMPONENT runtime)
+
+  # # Debian package specific variables
+  if(DEFINED ENV{CPACK_DEBIAN_PACKAGE_RELEASE})
+    set(CPACK_DEBIAN_PACKAGE_RELEASE $ENV{CPACK_DEBIAN_PACKAGE_RELEASE})
+  else()
+    set(CPACK_DEBIAN_PACKAGE_RELEASE "local")
+  endif()
+
+  message("Using CPACK_DEBIAN_PACKAGE_RELEASE ${CPACK_DEBIAN_PACKAGE_RELEASE}")
+  set(CPACK_DEB_COMPONENT_INSTALL ON)
+  set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
+  set(CPACK_DEBIAN_RUNTIME_PACKAGE_NAME "${PROJECT_NAME}")
+  set(CPACK_DEBIAN_RUNTIME_PACKAGE_DEPENDS "hsa-rocr-dev, rocm-core")
+  set(CPACK_DEBIAN_DEV_PACKAGE_NAME "${PROJECT_NAME}-dev" )
+  set(CPACK_DEBIAN_DEV_PACKAGE_DEPENDS "${PROJECT_NAME}, hsa-rocr-dev, rocm-core" )
+  set(CPACK_DEBIAN_TESTS_PACKAGE_NAME "${PROJECT_NAME}-tests")
+  set(CPACK_DEBIAN_TESTS_PACKAGE_DEPENDS "${PROJECT_NAME}-dev, hsa-rocr-dev, rocm-core")
+  set(CPACK_DEBIAN_SAMPLES_PACKAGE_NAME "${PROJECT_NAME}-samples")
+  set(CPACK_DEBIAN_SAMPLES_PACKAGE_DEPENDS "${PROJECT_NAME}-dev, hsa-rocr-dev, rocm-core")
+  set(CPACK_DEBIAN_DOCS_PACKAGE_NAME "${PROJECT_NAME}-docs")
+  set(CPACK_DEBIAN_DOCS_PACKAGE_DEPENDS "${PROJECT_NAME}-dev, hsa-rocr-dev, rocm-core")
+  set(CPACK_DEBIAN_PLUGINS_PACKAGE_NAME "${PROJECT_NAME}-plugins")
+  set(CPACK_DEBIAN_PLUGINS_PACKAGE_DEPENDS "${PROJECT_NAME}, hsa-rocr-dev, rocm-core")
+
 ## Process the Debian install/remove scripts to update the CPACK variables
 configure_file ( ${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/postinst.in DEBIAN/postinst @ONLY )
 configure_file ( ${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/prerm.in DEBIAN/prerm @ONLY )
 set ( CPACK_DEBIAN_RUNTIME_PACKAGE_CONTROL_EXTRA "DEBIAN/postinst;DEBIAN/prerm" )
 
-## RPM package specific variables
-if ( DEFINED ENV{CPACK_RPM_PACKAGE_RELEASE} )
-  set ( CPACK_RPM_PACKAGE_RELEASE $ENV{CPACK_RPM_PACKAGE_RELEASE} )
-else()
-  set ( CPACK_RPM_PACKAGE_RELEASE "local" )
-endif()
-message ( "Using CPACK_RPM_PACKAGE_RELEASE ${CPACK_RPM_PACKAGE_RELEASE}" )
+  # # RPM package specific variables
+  if(DEFINED ENV{CPACK_RPM_PACKAGE_RELEASE})
+    set(CPACK_RPM_PACKAGE_RELEASE $ENV{CPACK_RPM_PACKAGE_RELEASE})
+  else()
+    set(CPACK_RPM_PACKAGE_RELEASE "local")
+  endif()
 
-set( CPACK_RPM_PACKAGE_LICENSE "MIT" )
+  message("Using CPACK_RPM_PACKAGE_RELEASE ${CPACK_RPM_PACKAGE_RELEASE}")
 
-## 'dist' breaks manual builds on debian systems due to empty Provides
-execute_process( COMMAND rpm --eval %{?dist}
-                 RESULT_VARIABLE PROC_RESULT
-                 OUTPUT_VARIABLE EVAL_RESULT
-                 OUTPUT_STRIP_TRAILING_WHITESPACE )
-message("RESULT_VARIABLE ${PROC_RESULT} OUTPUT_VARIABLE: ${EVAL_RESULT}")
+  set(CPACK_RPM_PACKAGE_LICENSE "MIT")
 
-if ( PROC_RESULT EQUAL "0" AND NOT EVAL_RESULT STREQUAL "" )
-  string ( APPEND CPACK_RPM_PACKAGE_RELEASE "%{?dist}" )
-endif()
-set ( CPACK_RPM_FILE_NAME "RPM-DEFAULT" )
+  # # 'dist' breaks manual builds on debian systems due to empty Provides
+  execute_process(COMMAND rpm --eval %{?dist}
+    RESULT_VARIABLE PROC_RESULT
+    OUTPUT_VARIABLE EVAL_RESULT
+    OUTPUT_STRIP_TRAILING_WHITESPACE)
+  message("RESULT_VARIABLE ${PROC_RESULT} OUTPUT_VARIABLE: ${EVAL_RESULT}")
 
-set ( CPACK_RPM_RUNTIME_PACKAGE_NAME "${ROCPROFILER_NAME}" )
-set ( CPACK_RPM_RUNTIME_PACKAGE_REQUIRES "hsa-rocr-devel, rocm-core" )
-set ( CPACK_RPM_DEV_PACKAGE_NAME "${ROCPROFILER_NAME}-devel" )
-set ( CPACK_RPM_DEV_PACKAGE_REQUIRES "${ROCPROFILER_NAME}, hsa-rocr-devel, rocm-core" )
-set ( CPACK_RPM_DEV_PACKAGE_PROVIDES "${ROCPROFILER_NAME}-dev" )
-set ( CPACK_RPM_DEV_PACKAGE_OBSOLETES "${ROCPROFILER_NAME}-dev" )
+  if(PROC_RESULT EQUAL "0" AND NOT EVAL_RESULT STREQUAL "")
+    string(APPEND CPACK_RPM_PACKAGE_RELEASE "%{?dist}")
+  endif()
+
+  set(CPACK_RPM_COMPONENT_INSTALL ON)
+  set(CPACK_RPM_FILE_NAME "RPM-DEFAULT")
+  set(CPACK_RPM_RUNTIME_PACKAGE_NAME "${PROJECT_NAME}")
+  set(CPACK_RPM_RUNTIME_PACKAGE_REQUIRES "hsa-rocr-dev, rocm-core")
+  set(CPACK_RPM_DEV_PACKAGE_NAME "${PROJECT_NAME}-devel")
+  set(CPACK_RPM_DEV_PACKAGE_REQUIRES "${PROJECT_NAME}, hsa-rocr-dev, rocm-core")
+  set(CPACK_RPM_DEV_PACKAGE_PROVIDES "${PROJECT_NAME}-dev")
+  set(CPACK_RPM_DEV_PACKAGE_OBSOLETES "${PROJECT_NAME}-dev")
+  set(CPACK_RPM_TESTS_PACKAGE_NAME "${PROJECT_NAME}-tests")
+  set(CPACK_RPM_TESTS_PACKAGE_REQUIRES "${PROJECT_NAME}-devel, hsa-rocr-dev, rocm-core")
+  set(CPACK_RPM_SAMPLES_PACKAGE_NAME "${PROJECT_NAME}-samples")
+  set(CPACK_RPM_SAMPLES_PACKAGE_REQUIRES "${PROJECT_NAME}-devel, hsa-rocr-dev, rocm-core")
+  set(CPACK_RPM_DOCS_PACKAGE_NAME "${PROJECT_NAME}-docs")
+  set(CPACK_RPM_DOCS_PACKAGE_REQUIRES "${PROJECT_NAME}-devel, hsa-rocr-dev, rocm-core")
+  set(CPACK_RPM_PLUGINS_PACKAGE_NAME "${PROJECT_NAME}-plugins")
+  set(CPACK_RPM_PLUGINS_PACKAGE_REQUIRES "${PROJECT_NAME}, hsa-rocr-dev, rocm-core")
+  message("CPACK_RPM_PACKAGE_RELEASE: ${CPACK_RPM_PACKAGE_RELEASE}")
+
 ## Process the Rpm install/remove scripts to update the CPACK variables
 configure_file ( "${CMAKE_CURRENT_SOURCE_DIR}/RPM/post.in" RPM/post @ONLY )
 configure_file ( "${CMAKE_CURRENT_SOURCE_DIR}/RPM/postun.in" RPM/postun @ONLY )
@@ -256,11 +326,85 @@ configure_file ( "${CMAKE_CURRENT_SOURCE_DIR}/RPM/postun.in" RPM/postun @ONLY )
 set ( CPACK_RPM_RUNTIME_POST_INSTALL_SCRIPT_FILE "${CMAKE_CURRENT_BINARY_DIR}/RPM/post" )
 set ( CPACK_RPM_RUNTIME_POST_UNINSTALL_SCRIPT_FILE "${CMAKE_CURRENT_BINARY_DIR}/RPM/postun" )
 # Remove dependency on rocm-core if -DROCM_DEP_ROCMCORE=ON not given to cmake
-if(NOT ROCM_DEP_ROCMCORE)
-    string(REGEX REPLACE ",? ?rocm-core" "" CPACK_RPM_RUNTIME_PACKAGE_REQUIRES ${CPACK_RPM_RUNTIME_PACKAGE_REQUIRES})
-    string(REGEX REPLACE ",? ?rocm-core" "" CPACK_RPM_DEV_PACKAGE_REQUIRES ${CPACK_RPM_DEV_PACKAGE_REQUIRES})
-    string(REGEX REPLACE ",? ?rocm-core" "" CPACK_DEBIAN_RUNTIME_PACKAGE_DEPENDS ${CPACK_DEBIAN_RUNTIME_PACKAGE_DEPENDS})
-    string(REGEX REPLACE ",? ?rocm-core" "" CPACK_DEBIAN_DEV_PACKAGE_DEPENDS ${CPACK_DEBIAN_DEV_PACKAGE_DEPENDS})
+  if(NOT ROCM_DEP_ROCMCORE)
+  string(REGEX REPLACE ",? ?rocm-core" "" CPACK_RPM_RUNTIME_PACKAGE_REQUIRES ${CPACK_RPM_RUNTIME_PACKAGE_REQUIRES})
+  string(REGEX REPLACE ",? ?rocm-core" "" CPACK_RPM_DEV_PACKAGE_REQUIRES ${CPACK_RPM_DEV_PACKAGE_REQUIRES})
+  string(REGEX REPLACE ",? ?rocm-core" "" CPACK_RPM_TESTS_PACKAGE_REQUIRES ${CPACK_RPM_TESTS_PACKAGE_REQUIRES})
+  string(REGEX REPLACE ",? ?rocm-core" "" CPACK_RPM_SAMPLES_PACKAGE_REQUIRES ${CPACK_RPM_SAMPLES_PACKAGE_REQUIRES})
+  string(REGEX REPLACE ",? ?rocm-core" "" CPACK_RPM_DOCS_PACKAGE_REQUIRES ${CPACK_RPM_DOCS_PACKAGE_REQUIRES})
+  string(REGEX REPLACE ",? ?rocm-core" "" CPACK_RPM_PLUGINS_PACKAGE_REQUIRES ${CPACK_RPM_PLUGINS_PACKAGE_REQUIRES})
+  string(REGEX REPLACE ",? ?rocm-core" "" CPACK_DEBIAN_RUNTIME_PACKAGE_DEPENDS ${CPACK_DEBIAN_RUNTIME_PACKAGE_DEPENDS})
+  string(REGEX REPLACE ",? ?rocm-core" "" CPACK_DEBIAN_DEV_PACKAGE_DEPENDS ${CPACK_DEBIAN_DEV_PACKAGE_DEPENDS})
+  string(REGEX REPLACE ",? ?rocm-core" "" CPACK_DEBIAN_TESTS_PACKAGE_DEPENDS ${CPACK_DEBIAN_TESTS_PACKAGE_DEPENDS})
+  string(REGEX REPLACE ",? ?rocm-core" "" CPACK_DEBIAN_SAMPLES_PACKAGE_DEPENDS ${CPACK_DEBIAN_SAMPLES_PACKAGE_DEPENDS})
+  string(REGEX REPLACE ",? ?rocm-core" "" CPACK_DEBIAN_DOCS_PACKAGE_DEPENDS ${CPACK_DEBIAN_DOCS_PACKAGE_DEPENDS})
+  string(REGEX REPLACE ",? ?rocm-core" "" CPACK_DEBIAN_PLUGINS_PACKAGE_DEPENDS ${CPACK_DEBIAN_PLUGINS_PACKAGE_DEPENDS})
+  endif()
+
+  set(CPACK_COMPONENTS_ALL runtime dev tests docs samples plugins)
+  include(CPack)
+
+  cpack_add_component(runtime
+    DISPLAY_NAME "Runtime"
+    DESCRIPTION "Dynamic libraries for the ROCProfiler")
+
+  cpack_add_component(dev
+    DISPLAY_NAME "Development"
+    DESCRIPTION "Development needed header files for ROCProfiler"
+    DEPENDS runtime)
+
+  cpack_add_component(plugins
+    DISPLAY_NAME "ROCProfile Plugins"
+    DESCRIPTION "Plugins for handling ROCProfiler data output"
+    DEPENDS runtime)
+
+  cpack_add_component(tests
+    DISPLAY_NAME "Tests"
+    DESCRIPTION "Tests for the ROCProfiler"
+    DEPENDS dev)
+
+  cpack_add_component(samples
+    DISPLAY_NAME "Samples"
+    DESCRIPTION "Samples for the ROCProfiler"
+    DEPENDS dev)
+
+  cpack_add_component(docs
+    DISPLAY_NAME "Documentation"
+    DESCRIPTION "Documentation for the ROCProfiler API"
+    DEPENDS dev)
 endif()
 
-include ( CPack )
+find_package(Doxygen)
+
+if(DOXYGEN_FOUND)
+  # # Set input and output files
+  set(DOXYGEN_IN ${CMAKE_CURRENT_SOURCE_DIR}/doc/Doxyfile.in)
+  set(DOXYGEN_OUT ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile)
+
+  # # Request to configure the file
+  configure_file(${DOXYGEN_IN} ${DOXYGEN_OUT} @ONLY)
+
+  add_custom_command(
+    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/doc/html/index.html ${CMAKE_CURRENT_BINARY_DIR}/doc/latex/refman.pdf
+    COMMAND ${DOXYGEN_EXECUTABLE} ${DOXYGEN_OUT}
+    COMMAND make -C ${CMAKE_CURRENT_BINARY_DIR}/doc/latex pdf
+    MAIN_DEPENDENCY ${DOXYGEN_OUT} ${DOXYGEN_IN}
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/inc/rocprofiler.h ${CMAKE_CURRENT_SOURCE_DIR}/inc/rocprofiler_plugin.h
+    COMMENT "Generating documentation")
+
+  add_custom_target(doc DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/doc/html/index.html
+    ${CMAKE_CURRENT_BINARY_DIR}/doc/latex/refman.pdf)
+
+  install(FILES
+    "${CMAKE_CURRENT_BINARY_DIR}/doc/latex/refman.pdf"
+    DESTINATION ${CMAKE_INSTALL_DOCDIR}
+    RENAME "${PROJECT_NAME}.pdf"
+    OPTIONAL
+    COMPONENT docs)
+
+  install(DIRECTORY
+    "${CMAKE_CURRENT_BINARY_DIR}/doc/html/"
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/html/${PROJECT_NAME}
+    OPTIONAL
+    COMPONENT docs)
+endif()

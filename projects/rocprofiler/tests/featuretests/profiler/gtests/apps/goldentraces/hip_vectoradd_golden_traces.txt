@@ -1,0 +1,16 @@
+0x2147aa0 agent cpu
+0x2148b30 agent gpu
+844395826761899
+
+
+ROCMTools: Collecting the following counters:
+- GRBM_COUNT
+
+Enabling Counter Collection
+ System minor 0
+ System major 9
+ agent prop name AMD Radeon VII
+hip Device prop succeeded 
+PASSED!
+dispatch[2], gpu_id(0), queue_id(1), queue_index(0), pid(1531435), tid(0), grd(0), wgr(0), lds(0), scr(0), arch_vgpr(0), accum_vgpr(0), sgpr(0), wave_size(0), sig(0), obj(140553153857024), kernel-name("vectoradd_float"), start_time(844396006072252), end_time(844396006104732)
+, GRBM_COUNT (67002)

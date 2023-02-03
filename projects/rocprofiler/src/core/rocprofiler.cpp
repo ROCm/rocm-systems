@@ -39,6 +39,8 @@ THE SOFTWARE.
 #include "util/exception.h"
 #include "util/hsa_rsrc_factory.h"
 #include "util/logger.h"
+#include "src/core/hsa/hsa_support.h"
+#include "src/utils/helper.h"
 
 #define PUBLIC_API __attribute__((visibility("default")))
 #define CONSTRUCTOR_API __attribute__((constructor))
@@ -47,7 +49,6 @@ THE SOFTWARE.
 #define API_METHOD_PREFIX                                                                          \
   hsa_status_t status = HSA_STATUS_SUCCESS;                                                        \
   try {
-
 #define API_METHOD_SUFFIX                                                                          \
   }                                                                                                \
   catch (std::exception & e) {                                                                     \
@@ -56,10 +57,12 @@ THE SOFTWARE.
   }                                                                                                \
   return status;
 
-#define ONLOAD_TRACE(str) \
-  if (getenv("ROCP_ONLOAD_TRACE")) do { \
-    std::cout << "PID(" << GetPid() << "): PROF_LIB::" << __FUNCTION__ << " " << str << std::endl << std::flush; \
-  } while(0);
+#define ONLOAD_TRACE(str)                                                                          \
+  if (getenv("ROCP_ONLOAD_TRACE")) do {                                                            \
+      std::cout << "PID(" << GetPid() << "): PROF_LIB::" << __FUNCTION__ << " " << str             \
+                << std::endl                                                                       \
+                << std::flush;                                                                     \
+    } while (0);
 #define ONLOAD_TRACE_BEG() ONLOAD_TRACE("begin")
 #define ONLOAD_TRACE_END() ONLOAD_TRACE("end")
 
@@ -69,15 +72,10 @@ static inline uint32_t GetPid() { return syscall(__NR_getpid); }
 // Internal library methods
 //
 namespace rocprofiler {
-hsa_status_t CreateQueuePro(
-    hsa_agent_t agent,
-    uint32_t size,
-    hsa_queue_type32_t type,
-    void (*callback)(hsa_status_t status, hsa_queue_t *source, void *data),
-    void *data,
-    uint32_t private_segment_size,
-    uint32_t group_segment_size,
-    hsa_queue_t **queue);
+hsa_status_t CreateQueuePro(hsa_agent_t agent, uint32_t size, hsa_queue_type32_t type,
+                            void (*callback)(hsa_status_t status, hsa_queue_t* source, void* data),
+                            void* data, uint32_t private_segment_size, uint32_t group_segment_size,
+                            hsa_queue_t** queue);
 
 decltype(hsa_queue_create)* hsa_queue_create_fn;
 decltype(hsa_queue_destroy)* hsa_queue_destroy_fn;
@@ -161,7 +159,7 @@ void StandaloneIntercept() {
 
 typedef void (*tool_handler_t)();
 typedef void (*tool_handler_prop_t)(rocprofiler_settings_t*);
-void * tool_handle = NULL;
+void* tool_handle = NULL;
 
 // Load profiling tool library
 // Return true if intercepting mode is enabled
@@ -189,13 +187,17 @@ uint32_t LoadTool() {
       abort();
     }
     tool_handler_t handler = reinterpret_cast<tool_handler_t>(dlsym(tool_handle, "OnLoadTool"));
-    tool_handler_prop_t handler_prop = reinterpret_cast<tool_handler_prop_t>(dlsym(tool_handle, "OnLoadToolProp"));
+    tool_handler_prop_t handler_prop =
+        reinterpret_cast<tool_handler_prop_t>(dlsym(tool_handle, "OnLoadToolProp"));
     if ((handler == NULL) && (handler_prop == NULL)) {
-      fprintf(stderr, "ROCProfiler: tool library corrupted, OnLoadTool()/OnLoadToolProp() method is expected\n");
+      fprintf(stderr,
+              "ROCProfiler: tool library corrupted, OnLoadTool()/OnLoadToolProp() method is "
+              "expected\n");
       fprintf(stderr, "%s\n", dlerror());
       abort();
     }
-    tool_handler_t on_unload_handler = reinterpret_cast<tool_handler_t>(dlsym(tool_handle, "OnUnloadTool"));
+    tool_handler_t on_unload_handler =
+        reinterpret_cast<tool_handler_t>(dlsym(tool_handle, "OnUnloadTool"));
     if (on_unload_handler == NULL) {
       fprintf(stderr, "ROCProfiler: tool library corrupted, OnUnloadTool() method is expected\n");
       fprintf(stderr, "%s\n", dlerror());
@@ -205,13 +207,15 @@ uint32_t LoadTool() {
     rocprofiler_settings_t settings{};
     settings.intercept_mode = (intercept_mode != 0) ? 1 : 0;
     settings.trace_size = TraceProfile::GetSize();
-    settings.trace_local = TraceProfile::IsLocal() ? 1: 0;
+    settings.trace_local = TraceProfile::IsLocal() ? 1 : 0;
     settings.timeout = util::HsaRsrcFactory::GetTimeoutNs();
     settings.timestamp_on = InterceptQueue::IsTrackerOn() ? 1 : 0;
     settings.code_obj_tracking = 1;
 
-    if (handler) handler();
-    else if (handler_prop) handler_prop(&settings);
+    if (handler)
+      handler();
+    else if (handler_prop)
+      handler_prop(&settings);
 
     TraceProfile::SetSize(settings.trace_size);
     TraceProfile::SetLocal(settings.trace_local != 0);
@@ -266,7 +270,8 @@ void UnloadTool() {
   if (tool_handle) {
     tool_handler_t handler = reinterpret_cast<tool_handler_t>(dlsym(tool_handle, "OnUnloadTool"));
     if (handler == NULL) {
-      fprintf(stderr, "ROCProfiler error: tool library corrupted, OnUnloadTool() method is expected\n");
+      fprintf(stderr,
+              "ROCProfiler error: tool library corrupted, OnUnloadTool() method is expected\n");
       fprintf(stderr, "%s\n", dlerror());
       abort();
     }
@@ -305,26 +310,13 @@ hsa_status_t GetExcStatus(const std::exception& e) {
                                : HSA_STATUS_ERROR;
 }
 
-hsa_status_t CreateQueuePro(
-    hsa_agent_t agent,
-    uint32_t size,
-    hsa_queue_type32_t type,
-    void (*callback)(hsa_status_t status, hsa_queue_t *source, void *data),
-    void *data,
-    uint32_t private_segment_size,
-    uint32_t group_segment_size,
-    hsa_queue_t **queue)
-{
+hsa_status_t CreateQueuePro(hsa_agent_t agent, uint32_t size, hsa_queue_type32_t type,
+                            void (*callback)(hsa_status_t status, hsa_queue_t* source, void* data),
+                            void* data, uint32_t private_segment_size, uint32_t group_segment_size,
+                            hsa_queue_t** queue) {
   // Create HSA queue
-  hsa_status_t status = hsa_queue_create_fn(
-    agent,
-    size,
-    type,
-    callback,
-    data,
-    private_segment_size,
-    group_segment_size,
-    queue);
+  hsa_status_t status = hsa_queue_create_fn(agent, size, type, callback, data, private_segment_size,
+                                            group_segment_size, queue);
   if (status != HSA_STATUS_SUCCESS) return status;
 
   // Issue PMC-enable GPU command
@@ -339,18 +331,18 @@ bool async_copy_handler(hsa_signal_value_t value, void* arg) {
   return false;
 }
 
-hsa_status_t hsa_amd_memory_async_copy_interceptor(
-    void* dst, hsa_agent_t dst_agent, const void* src,
-    hsa_agent_t src_agent, size_t size, uint32_t num_dep_signals,
-    const hsa_signal_t* dep_signals, hsa_signal_t completion_signal)
-{
+hsa_status_t hsa_amd_memory_async_copy_interceptor(void* dst, hsa_agent_t dst_agent,
+                                                   const void* src, hsa_agent_t src_agent,
+                                                   size_t size, uint32_t num_dep_signals,
+                                                   const hsa_signal_t* dep_signals,
+                                                   hsa_signal_t completion_signal) {
   Tracker* tracker = &Tracker::Instance();
   Tracker::entry_t* tracker_entry = tracker->Alloc(hsa_agent_t{}, completion_signal);
-  hsa_status_t status = hsa_amd_memory_async_copy_fn(dst, dst_agent, src,
-                                                     src_agent, size, num_dep_signals,
-                                                     dep_signals, tracker_entry->signal);
+  hsa_status_t status = hsa_amd_memory_async_copy_fn(
+      dst, dst_agent, src, src_agent, size, num_dep_signals, dep_signals, tracker_entry->signal);
   if (status == HSA_STATUS_SUCCESS) {
-    tracker->EnableMemcopy(tracker_entry, async_copy_handler, reinterpret_cast<void*>(tracker_entry));
+    tracker->EnableMemcopy(tracker_entry, async_copy_handler,
+                           reinterpret_cast<void*>(tracker_entry));
   } else {
     tracker->Delete(tracker_entry);
   }
@@ -361,16 +353,15 @@ hsa_status_t hsa_amd_memory_async_copy_rect_interceptor(
     const hsa_pitched_ptr_t* dst, const hsa_dim3_t* dst_offset, const hsa_pitched_ptr_t* src,
     const hsa_dim3_t* src_offset, const hsa_dim3_t* range, hsa_agent_t copy_agent,
     hsa_amd_copy_direction_t dir, uint32_t num_dep_signals, const hsa_signal_t* dep_signals,
-    hsa_signal_t completion_signal)
-{
+    hsa_signal_t completion_signal) {
   Tracker* tracker = &Tracker::Instance();
   Tracker::entry_t* tracker_entry = tracker->Alloc(hsa_agent_t{}, completion_signal);
-  hsa_status_t status = hsa_amd_memory_async_copy_rect_fn(dst, dst_offset, src,
-                                                          src_offset, range, copy_agent,
-                                                          dir, num_dep_signals, dep_signals,
-                                                          tracker_entry->signal);
+  hsa_status_t status =
+      hsa_amd_memory_async_copy_rect_fn(dst, dst_offset, src, src_offset, range, copy_agent, dir,
+                                        num_dep_signals, dep_signals, tracker_entry->signal);
   if (status == HSA_STATUS_SUCCESS) {
-    tracker->EnableMemcopy(tracker_entry, async_copy_handler, reinterpret_cast<void*>(tracker_entry));
+    tracker->EnableMemcopy(tracker_entry, async_copy_handler,
+                           reinterpret_cast<void*>(tracker_entry));
   } else {
     tracker->Delete(tracker_entry);
   }
@@ -385,19 +376,31 @@ Tracker::mutex_t Tracker::glob_mutex_;
 Tracker::counter_t Tracker::counter_ = 0;
 util::Logger::mutex_t util::Logger::mutex_;
 std::atomic<util::Logger*> util::Logger::instance_{};
-}
+}  // namespace rocprofiler
 
 CONTEXT_INSTANTIATE();
+
+static bool started{false};
+// #include "src/core/hsa/hsa_support.h"
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 // Public library methods
 //
 extern "C" {
 
+// The HSA_AMD_TOOL_PRIORITY variable must be a constant value type
+// initialized by the loader itself, not by code during _init. 'extern const'
+// seems do that although that is not a guarantee.
+ROCPROFILER_EXPORT extern const uint32_t HSA_AMD_TOOL_PRIORITY = 25;
+
+
 // HSA-runtime tool on-load method
 PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t failed_tool_count,
                        const char* const* failed_tool_names) {
   ONLOAD_TRACE_BEG();
+  if (started) rocmtools::fatal("HSA Tool started already!");
+  started = true;
+  rocmtools::hsa_support::Initialize(table);
   rocprofiler::SaveHsaApi(table);
   rocprofiler::ProxyQueue::InitFactory();
 
@@ -411,17 +414,19 @@ PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t fa
     switch (intercept_env_value) {
       case 0:
       case 1:
-	// 0: Intercepting disabled
-	// 1: Intercepting enabled without timestamping
+        // 0: Intercepting disabled
+        // 1: Intercepting enabled without timestamping
         rocprofiler::InterceptQueue::TrackerOn(false);
         break;
       case 2:
-	// Intercepting enabled with timestamping
+        // Intercepting enabled with timestamping
         rocprofiler::InterceptQueue::TrackerOn(true);
         break;
       default:
-        ERR_LOGGING("Bad ROCP_HSA_INTERCEPT env var value (" << intercept_env << "): " <<
-		    "valid values are 0 (standalone), 1 (intercepting without timestamp), 2 (intercepting with timestamp)");
+        ERR_LOGGING("Bad ROCP_HSA_INTERCEPT env var value ("
+                    << intercept_env << "): "
+                    << "valid values are 0 (standalone), 1 (intercepting without timestamp), 2 "
+                       "(intercepting with timestamp)");
         return false;
     }
   }
@@ -436,9 +441,12 @@ PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t fa
     hsa_status_t status = hsa_amd_profiling_async_copy_enable(true);
     if (status != HSA_STATUS_SUCCESS) EXC_ABORT(status, "hsa_amd_profiling_async_copy_enable");
     rocprofiler::hsa_amd_memory_async_copy_fn = table->amd_ext_->hsa_amd_memory_async_copy_fn;
-    rocprofiler::hsa_amd_memory_async_copy_rect_fn = table->amd_ext_->hsa_amd_memory_async_copy_rect_fn;
-    table->amd_ext_->hsa_amd_memory_async_copy_fn = rocprofiler::hsa_amd_memory_async_copy_interceptor;
-    table->amd_ext_->hsa_amd_memory_async_copy_rect_fn = rocprofiler::hsa_amd_memory_async_copy_rect_interceptor;
+    rocprofiler::hsa_amd_memory_async_copy_rect_fn =
+        table->amd_ext_->hsa_amd_memory_async_copy_rect_fn;
+    table->amd_ext_->hsa_amd_memory_async_copy_fn =
+        rocprofiler::hsa_amd_memory_async_copy_interceptor;
+    table->amd_ext_->hsa_amd_memory_async_copy_rect_fn =
+        rocprofiler::hsa_amd_memory_async_copy_rect_interceptor;
   }
   if (intercept_mode_mask & rocprofiler::HSA_INTERCEPT_MODE) {
     if (intercept_mode_mask & rocprofiler::MEMCOPY_INTERCEPT_MODE) {
@@ -456,22 +464,21 @@ PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t fa
     rocprofiler::StandaloneIntercept();
   }
 
-  ONLOAD_TRACE("end intercept_mode(" << std::hex << intercept_env_value << ")" <<
-               " intercept_mode_mask(" << std::hex << intercept_mode_mask << ")" << std::dec);
+  ONLOAD_TRACE("end intercept_mode(" << std::hex << intercept_env_value << ")"
+                                     << " intercept_mode_mask(" << std::hex << intercept_mode_mask
+                                     << ")" << std::dec);
   return true;
 }
 
 // HSA-runtime tool on-unload method
 PUBLIC_API void OnUnload() {
   ONLOAD_TRACE_BEG();
+  if (!started) rocmtools::fatal("HSA Tool hasn't started yet!");
+  rocmtools::hsa_support::Finalize();
   rocprofiler::UnloadTool();
   rocprofiler::RestoreHsaApi();
   ONLOAD_TRACE_END();
 }
-
-// Returns library vesrion
-PUBLIC_API uint32_t rocprofiler_version_major() { return ROCPROFILER_VERSION_MAJOR; }
-PUBLIC_API uint32_t rocprofiler_version_minor() { return ROCPROFILER_VERSION_MINOR; }
 
 // Returns the last error message
 PUBLIC_API hsa_status_t rocprofiler_error_string(const char** str) {
@@ -482,8 +489,8 @@ PUBLIC_API hsa_status_t rocprofiler_error_string(const char** str) {
 
 // Create new profiling context
 PUBLIC_API hsa_status_t rocprofiler_open(hsa_agent_t agent, rocprofiler_feature_t* features,
-                                         uint32_t feature_count, rocprofiler_t** handle, uint32_t mode,
-                                         rocprofiler_properties_t* properties) {
+                                         uint32_t feature_count, rocprofiler_t** handle,
+                                         uint32_t mode, rocprofiler_properties_t* properties) {
   API_METHOD_PREFIX
   rocprofiler::util::HsaRsrcFactory* hsa_rsrc = &rocprofiler::util::HsaRsrcFactory::Instance();
   const rocprofiler::util::AgentInfo* agent_info = hsa_rsrc->GetAgentInfo(agent);
@@ -495,7 +502,8 @@ PUBLIC_API hsa_status_t rocprofiler_open(hsa_agent_t agent, rocprofiler_feature_
   if (mode != 0) {
     if (mode & ROCPROFILER_MODE_STANDALONE) {
       if (mode & ROCPROFILER_MODE_CREATEQUEUE) {
-        if (hsa_rsrc->CreateQueue(agent_info, properties->queue_depth, &(properties->queue)) == false) {
+        if (hsa_rsrc->CreateQueue(agent_info, properties->queue_depth, &(properties->queue)) ==
+            false) {
           EXC_RAISING(HSA_STATUS_ERROR, "CreateQueue() failed");
         }
       }
@@ -623,7 +631,8 @@ PUBLIC_API hsa_status_t rocprofiler_get_metrics(const rocprofiler_t* handle) {
 }
 
 // Set/remove queue callbacks
-PUBLIC_API hsa_status_t rocprofiler_set_queue_callbacks(rocprofiler_queue_callbacks_t callbacks, void* data) {
+PUBLIC_API hsa_status_t rocprofiler_set_queue_callbacks(rocprofiler_queue_callbacks_t callbacks,
+                                                        void* data) {
   API_METHOD_PREFIX
   rocprofiler::InterceptQueue::SetCallbacks(callbacks, data);
   API_METHOD_SUFFIX
@@ -659,12 +668,13 @@ PUBLIC_API hsa_status_t rocprofiler_iterate_trace_data(
 
 ////////////////////////////////////////////////////////////////////////////////
 // Open profiling pool
-PUBLIC_API hsa_status_t rocprofiler_pool_open(hsa_agent_t agent,        // GPU handle
-                                   rocprofiler_feature_t* features,     // [in] profiling features array
-                                   uint32_t feature_count,              // profiling info count
-                                   rocprofiler_pool_t** pool,           // [out] context object
-                                   uint32_t mode,                       // profiling mode mask
-                                   rocprofiler_pool_properties_t* properties)  // pool properties
+PUBLIC_API hsa_status_t
+rocprofiler_pool_open(hsa_agent_t agent,                          // GPU handle
+                      rocprofiler_feature_t* features,            // [in] profiling features array
+                      uint32_t feature_count,                     // profiling info count
+                      rocprofiler_pool_t** pool,                  // [out] context object
+                      uint32_t mode,                              // profiling mode mask
+                      rocprofiler_pool_properties_t* properties)  // pool properties
 {
   API_METHOD_PREFIX
   rocprofiler::util::HsaRsrcFactory* hsa_rsrc = &rocprofiler::util::HsaRsrcFactory::Instance();
@@ -674,14 +684,8 @@ PUBLIC_API hsa_status_t rocprofiler_pool_open(hsa_agent_t agent,        // GPU h
   }
 
   rocprofiler::ContextPool* obj = rocprofiler::ContextPool::Create(
-    properties->num_entries,
-    properties->payload_bytes,
-    agent_info,
-    features,
-    feature_count,
-    properties->handler,
-    properties->handler_arg
-  );
+      properties->num_entries, properties->payload_bytes, agent_info, features, feature_count,
+      properties->handler, properties->handler_arg);
   *pool = reinterpret_cast<rocprofiler_pool_t*>(obj);
   API_METHOD_SUFFIX
 }
@@ -696,8 +700,9 @@ PUBLIC_API hsa_status_t rocprofiler_pool_close(rocprofiler_pool_t* pool)  // pro
 }
 
 // Fetch profiling pool entry
-PUBLIC_API hsa_status_t rocprofiler_pool_fetch(rocprofiler_pool_t* pool,  // profiling pool handle
-                                    rocprofiler_pool_entry_t* entry)      // [out] empty profling pool entry
+PUBLIC_API hsa_status_t
+rocprofiler_pool_fetch(rocprofiler_pool_t* pool,         // profiling pool handle
+                       rocprofiler_pool_entry_t* entry)  // [out] empty profling pool entry
 {
   API_METHOD_PREFIX
   rocprofiler::ContextPool* context_pool = reinterpret_cast<rocprofiler::ContextPool*>(pool);
@@ -716,11 +721,8 @@ PUBLIC_API hsa_status_t rocprofiler_pool_flush(rocprofiler_pool_t* pool)  // pro
 
 ////////////////////////////////////////////////////////////////////////////////
 // Return the info for a given info kind
-PUBLIC_API hsa_status_t rocprofiler_get_info(
-  const hsa_agent_t *agent,
-  rocprofiler_info_kind_t kind,
-  void *data)
-{
+PUBLIC_API hsa_status_t rocprofiler_get_info(const hsa_agent_t* agent, rocprofiler_info_kind_t kind,
+                                             void* data) {
   API_METHOD_PREFIX
   if (agent == NULL) EXC_RAISING(HSA_STATUS_ERROR, "NULL agent");
   uint32_t* result_32bit_ptr = reinterpret_cast<uint32_t*>(data);
@@ -738,13 +740,11 @@ PUBLIC_API hsa_status_t rocprofiler_get_info(
   API_METHOD_SUFFIX
 }
 
-// Iterate over the info for a given info kind, and invoke an application-defined callback on every iteration
+// Iterate over the info for a given info kind, and invoke an application-defined callback on every
+// iteration
 PUBLIC_API hsa_status_t rocprofiler_iterate_info(
-  const hsa_agent_t* agent,
-  rocprofiler_info_kind_t kind,
-  hsa_status_t (*callback)(const rocprofiler_info_data_t info, void* data),
-  void* data)
-{
+    const hsa_agent_t* agent, rocprofiler_info_kind_t kind,
+    hsa_status_t (*callback)(const rocprofiler_info_data_t info, void* data), void* data) {
   API_METHOD_PREFIX
   rocprofiler::util::HsaRsrcFactory* hsa_rsrc = &rocprofiler::util::HsaRsrcFactory::Instance();
   rocprofiler_info_data_t info{};
@@ -763,8 +763,7 @@ PUBLIC_API hsa_status_t rocprofiler_iterate_info(
     info.agent_index = agent_idx;
 
     switch (kind) {
-      case ROCPROFILER_INFO_KIND_METRIC:
-      {
+      case ROCPROFILER_INFO_KIND_METRIC: {
         const rocprofiler::MetricsDict* dict = rocprofiler::GetMetrics(agent_info->dev_id);
         auto nodes_vec = dict->GetNodes();
 
@@ -788,24 +787,31 @@ PUBLIC_API hsa_status_t rocprofiler_iterate_info(
 
             // Query block id info
             hsa_ven_amd_aqlprofile_id_query_t query = {block_name.c_str(), 0, 0};
-            hsa_status_t status = rocprofiler::util::HsaRsrcFactory::Instance().AqlProfileApi()->hsa_ven_amd_aqlprofile_get_info(
-              &profile, HSA_VEN_AMD_AQLPROFILE_INFO_BLOCK_ID, &query);
-            if (status != HSA_STATUS_SUCCESS) AQL_EXC_RAISING(HSA_STATUS_ERROR, "get block id info: '" << block_name << "'");
+            hsa_status_t status = rocprofiler::util::HsaRsrcFactory::Instance()
+                                      .AqlProfileApi()
+                                      ->hsa_ven_amd_aqlprofile_get_info(
+                                          &profile, HSA_VEN_AMD_AQLPROFILE_INFO_BLOCK_ID, &query);
+            if (status != HSA_STATUS_SUCCESS)
+              AQL_EXC_RAISING(HSA_STATUS_ERROR, "get block id info: '" << block_name << "'");
 
             // Metric object
             const std::string metric_name = (query.instance_count > 1) ? name + "[0]" : name;
             const rocprofiler::Metric* metric = dict->Get(metric_name);
-            if (metric == NULL) EXC_RAISING(HSA_STATUS_ERROR, "metric '" << name << "' is not found");
+            if (metric == NULL)
+              EXC_RAISING(HSA_STATUS_ERROR, "metric '" << name << "' is not found");
 
             // Process metrics counters
             const rocprofiler::counters_vec_t& counters_vec = metric->GetCounters();
-            if (counters_vec.size() != 1) EXC_RAISING(HSA_STATUS_ERROR, "error: '" << metric->GetName() << "' is not basic");
+            if (counters_vec.size() != 1)
+              EXC_RAISING(HSA_STATUS_ERROR, "error: '" << metric->GetName() << "' is not basic");
 
             // Query block counters number
             uint32_t block_counters;
             profile.events = &(counters_vec[0]->event);
-            status = rocprofiler::util::HsaRsrcFactory::Instance().AqlProfileApi()->hsa_ven_amd_aqlprofile_get_info(
-              &profile, HSA_VEN_AMD_AQLPROFILE_INFO_BLOCK_COUNTERS, &block_counters);
+            status = rocprofiler::util::HsaRsrcFactory::Instance()
+                         .AqlProfileApi()
+                         ->hsa_ven_amd_aqlprofile_get_info(
+                             &profile, HSA_VEN_AMD_AQLPROFILE_INFO_BLOCK_COUNTERS, &block_counters);
             if (status != HSA_STATUS_SUCCESS) continue;
 
             info.metric.instances = query.instance_count;
@@ -818,8 +824,7 @@ PUBLIC_API hsa_status_t rocprofiler_iterate_info(
         }
         break;
       }
-      case ROCPROFILER_INFO_KIND_TRACE:
-      {
+      case ROCPROFILER_INFO_KIND_TRACE: {
         info.trace.name = strdup("TT");
         info.trace.description = strdup("Thread Trace");
         info.trace.parameter_count = 5;
@@ -841,13 +846,11 @@ PUBLIC_API hsa_status_t rocprofiler_iterate_info(
   API_METHOD_SUFFIX
 }
 
-// Iterate over the info for a given info query, and invoke an application-defined callback on every iteration
+// Iterate over the info for a given info query, and invoke an application-defined callback on every
+// iteration
 PUBLIC_API hsa_status_t rocprofiler_query_info(
-  const hsa_agent_t *agent,
-  rocprofiler_info_query_t query,
-  hsa_status_t (*callback)(const rocprofiler_info_data_t info, void *data),
-  void *data)
-{
+    const hsa_agent_t* agent, rocprofiler_info_query_t query,
+    hsa_status_t (*callback)(const rocprofiler_info_data_t info, void* data), void* data) {
   API_METHOD_PREFIX
   EXC_RAISING(HSA_STATUS_ERROR, "Not implemented");
   API_METHOD_SUFFIX
@@ -856,23 +859,17 @@ PUBLIC_API hsa_status_t rocprofiler_query_info(
 // Creates a profiled queue. All dispatches on this queue will be profiled
 PUBLIC_API hsa_status_t rocprofiler_queue_create_profiled(
     hsa_agent_t agent, uint32_t size, hsa_queue_type32_t type,
-    void (*callback)(hsa_status_t status, hsa_queue_t* source, void* data),
-    void* data, uint32_t private_segment_size, uint32_t group_segment_size,
-    hsa_queue_t** queue)
-{
+    void (*callback)(hsa_status_t status, hsa_queue_t* source, void* data), void* data,
+    uint32_t private_segment_size, uint32_t group_segment_size, hsa_queue_t** queue) {
   API_METHOD_PREFIX
   status = rocprofiler::InterceptQueue::QueueCreateTracked(
-    agent, size, type, callback, data, private_segment_size, group_segment_size, queue);
+      agent, size, type, callback, data, private_segment_size, group_segment_size, queue);
   API_METHOD_SUFFIX
 }
 
 // Return time value for a given time ID and profiling timestamp
-PUBLIC_API hsa_status_t rocprofiler_get_time(
-  rocprofiler_time_id_t time_id,
-  uint64_t timestamp,
-  uint64_t* value_ns,
-  uint64_t* error_ns)
-{
+PUBLIC_API hsa_status_t rocprofiler_get_time(rocprofiler_time_id_t time_id, uint64_t timestamp,
+                                             uint64_t* value_ns, uint64_t* error_ns) {
   API_METHOD_PREFIX
   if (error_ns != NULL) {
     *error_ns = 0;
@@ -891,14 +888,16 @@ PUBLIC_API hsa_status_t rocprofiler_get_time(
 // HSA API callbacks routines
 //
 bool rocprofiler::HsaInterceptor::enable_ = false;
-thread_local bool rocprofiler::HsaInterceptor::recursion_ = false;;
+thread_local bool rocprofiler::HsaInterceptor::recursion_ = false;
+;
 rocprofiler_hsa_callbacks_t rocprofiler::HsaInterceptor::callbacks_{};
 rocprofiler::HsaInterceptor::arg_t rocprofiler::HsaInterceptor::arg_{};
 hsa_ven_amd_loader_1_01_pfn_t rocprofiler::HsaInterceptor::LoaderApiTable{};
 rocprofiler::HsaInterceptor::mutex_t rocprofiler::HsaInterceptor::mutex_;
 
 // Set HSA callbacks. If a callback is NULL then it is disabled
-extern "C" PUBLIC_API hsa_status_t rocprofiler_set_hsa_callbacks(const rocprofiler_hsa_callbacks_t callbacks, void* arg) {
+extern "C" PUBLIC_API hsa_status_t
+rocprofiler_set_hsa_callbacks(const rocprofiler_hsa_callbacks_t callbacks, void* arg) {
   API_METHOD_PREFIX
   rocprofiler::HsaInterceptor::SetCallbacks(callbacks, arg);
   rocprofiler::InterceptQueue::SetSubmitCallback(callbacks.submit, arg);

@@ -1,0 +1,247 @@
+#!/bin/bash
+
+ROCPROFV2_DIR=$(dirname -- $(realpath ${BASH_SOURCE[0]}));
+ROCM_DIR=$(dirname -- ${ROCPROFV2_DIR})
+RUN_FROM_BUILD=0
+if [[ $ROCPROFV2_DIR == *"/build"* ]]; then
+  RUN_FROM_BUILD=1
+elif [[ $ROCPROFV2_DIR == *"/rocprofiler"* ]]; then
+  RUN_FROM_BUILD=1
+  ROCM_DIR=$ROCPROFV2_DIR
+fi
+
+usage() {
+  echo -e "ROCProfiler Run Script Usage:"
+  echo -e "-h   | --help               For showing this message"
+  echo -e "--list-counters             For showing all available counters for the current GPUs"
+  if [ $RUN_FROM_BUILD == 1 ]; then
+    echo -e "-b   | --build              For compiling"
+    echo -e "-cb  | --clean-build        For full clean build"
+    echo -e "-t   | --test               For Running the tests"
+    echo -e "-ct  | --clean-build-test   For Running the tests after a clean build"
+    echo -e "-mt  | --mem-test           For Running the Memory Leak tests. This run requires building using -acb | --asan-clean-build option"
+    echo -e "-acb | --asan-clean-build   For compiling with ASAN library attached"
+    echo -e "--install                   For installing rocprofiler without clean build in the default installation folder (review build.sh to know more about the default paths)"
+    echo -e "--clean-install             For installing rocprofiler with new clean build in the default installation folder (review build.sh to know more about the default paths)"
+  fi
+  echo -e "--hip-api                   For Collecting HIP API Traces"
+  echo -e "--hip-activity              For Collecting HSA API Activities Traces"
+  echo -e "--hsa-api                   For Collecting HIP API Traces"
+  echo -e "--hsa-activity              For Collecting HSA API Activities Traces"
+  echo -e "--roctx-trace               For Collecting ROCTx Traces"
+  echo -e "--kernel-trace              For Collecting Kernel dispatch Traces"
+  echo -e "--sys-trace                 For Collecting HIP and HSA APIs and their Activities Traces along ROCTX and Kernel Dispatch traces"
+  echo -e "--plugin PLUGIN_NAME        For enabling a plugin (file/perfetto)"
+  echo -e "-i   | --input              For adding counters file path (every line in the text file represents a counter)"
+  echo -e "-o   | --output-file        For the output file name"
+  echo -e "-d   | --output-directory   For adding output path where the output files will be saved"
+  echo -e "-fi  | --flush-interval     For adding a flush interval in milliseconds, every \"flush interval\" the buffers will be flushed"
+  exit 1
+}
+
+if [ -z "$1" ] ; then
+  usage
+  exit 1
+fi
+
+while [ 1 ] ; do
+  if [[ "$1" = "-h" || "$1" = "--help" ]] ; then
+    usage
+    exit 1
+  elif [[ "$1" = "-b" || "$1" = "--build" ]] ; then
+    if [ $RUN_FROM_BUILD == 1 ]; then
+      TO_CLEAN=no ./build.sh
+      exit 1
+    fi
+  elif [[ "$1" = "-acb" || "$1" = "--asan-clean-build" ]] ; then
+    if [ $RUN_FROM_BUILD == 1 ]; then
+      ASAN=yes TO_CLEAN=yes ./build.sh
+      exit 1
+    fi
+  elif [[ "$1" = "-cb" || "$1" = "--clean-build" ]] ; then
+    if [ $RUN_FROM_BUILD == 1 ]; then
+      TO_CLEAN=yes ./build.sh
+      exit 1
+    fi
+  elif [[ "$1" = "-t" || "$1" = "--test" ]] ; then
+    if [ $RUN_FROM_BUILD == 1 ]; then
+      export ROCPROFILER_METRICS_PATH=$ROCM_DIR/build/counters/derived_counters.xml
+      TO_CLEAN=no $ROCM_DIR/build.sh
+      pushd build
+      ./run_tests.sh
+      exit 1
+    fi
+  elif [[ "$1" = "-mt" || "$1" = "--mem-test" ]] ; then
+    if [ $RUN_FROM_BUILD == 1 ]; then
+      ASAN=yes TO_CLEAN=yes ./build.sh
+      ./tests/memorytests/run_asan_tests.sh $ROCM_DIR/build/tests/featuretests/profiler/gtests/apps/hip_vectoradd $ROCM_DIR/build/memleaks.log
+      exit 1
+    fi
+  elif [[ "$1" = "-ct" || "$1" = "--clean-build-test" ]] ; then
+    if [ $RUN_FROM_BUILD == 1 ]; then
+      TO_CLEAN=yes $ROCM_DIR/build.sh
+      pushd build
+      ./run_tests.sh
+      exit 1
+    fi
+  elif [[ "$1" = "--install" ]] ; then
+    if [ $RUN_FROM_BUILD == 1 ]; then
+      TO_CLEAN=no $ROCM_DIR/build.sh
+      pushd build
+      make install
+      exit 1
+    fi
+  elif [[ "$1" = "--clean-install" ]] ; then
+    if [ $RUN_FROM_BUILD == 1 ]; then
+      TO_CLEAN=yes $ROCM_DIR/build.sh
+      pushd build
+      make install
+      exit 1
+    fi
+  elif [[ "$1" = "--list-counters" ]] ; then
+    if [ $RUN_FROM_BUILD == 1 ]; then
+      export ROCPROFILER_METRICS_PATH=$ROCM_DIR/build/counters/derived_counters.xml
+      eval $ROCM_DIR/build/src/tools/ctrl
+    else
+      export ROCPROFILER_METRICS_PATH=$ROCPROFV2_DIR/../libexec/rocprofiler/counters/derived_counters.xml
+      export LD_LIBRARY_PATH=$ROCPROFV2_DIR/../lib:$LD_LIBRARY_PATH
+      export LD_PRELOAD=$ROCPROFV2_DIR/../lib/librocprofiler_tool.so
+      eval $ROCPROFV2_DIR/../libexec/rocprofiler/ctrl
+    fi
+    exit 1
+  elif [[ "$1" = "-i" || "$1" = "--input"  ]] ; then
+    if [ $2 ] && [ -n $2 ] && [ -r $2 ] ; then
+      if [ $RUN_FROM_BUILD == 1 ]; then
+        export ROCPROFILER_METRICS_PATH=$ROCM_DIR/build/counters/derived_counters.xml
+      else
+        export ROCPROFILER_METRICS_PATH=$ROCPROFV2_DIR/../libexec/rocprofiler/counters/derived_counters.xml
+      fi
+      export COUNTERS_PATH=$2
+    else
+      echo -e "Error: \"$2\" doesn't exist!"
+      usage
+      exit 1
+    fi
+    shift
+    shift
+  elif [[ "$1" = "-o" || "$1" = "--output-file-name"  ]] ; then
+    if [ $2 ] ; then
+      export OUT_FILE_NAME=$2
+    else
+      usage
+      exit 1
+    fi
+    shift
+    shift
+  elif [[ "$1" = "-d" || "$1" = "--output-directory"  ]] ; then
+    if [ $2 ] ; then
+      mkdir -p $2
+      export OUTPUT_PATH=$2
+      OUTPUT_PATH_INTERNAL=$2
+    else
+      usage
+      exit 1
+    fi
+    shift
+    shift
+  elif [[ "$1" = "-fi" || "$1" = "--flush-interval" ]] ; then
+    if [ $2 ] && [ $2 -gt 0 ] ; then
+      export ROCPROFILER_FLUSH_INTERVAL=$2
+    else
+      echo -e "Wrong input \"$2\" for flush interval, it needs to be integer greater than zero!"
+      usage
+      exit 1
+    fi
+    shift
+    shift
+  elif [ "$1" = "--hip-api" ] ; then
+    export ROCPROFILER_HIP_API_TRACE=1
+    shift
+  elif [ "$1" = "--hip-activity" ] ; then
+    export ROCPROFILER_HIP_API_TRACE=1
+    export ROCPROFILER_HIP_ACTIVITY_TRACE=1
+    shift
+  elif [ "$1" = "--hsa-api" ] ; then
+    export ROCPROFILER_HSA_API_TRACE=1
+    shift
+  elif [ "$1" = "--hsa-activity" ] ; then
+    export ROCPROFILER_HSA_API_TRACE=1
+    export ROCPROFILER_HSA_ACTIVITY_TRACE=1
+    shift
+  elif [ "$1" = "--roctx-trace" ] ; then
+    export ROCPROFILER_ROCTX_TRACE=1
+    shift
+  elif [ "$1" = "--kernel-trace" ] ; then
+    export ROCPROFILER_KERNEL_TRACE=1
+    shift
+  elif [ "$1" = "--sys-trace" ] ; then
+    export ROCPROFILER_HIP_API_TRACE=1
+    export ROCPROFILER_HIP_ACTIVITY_TRACE=1
+    export ROCPROFILER_HSA_API_TRACE=1
+    export ROCPROFILER_HSA_ACTIVITY_TRACE=1
+    export ROCPROFILER_ROCTX_TRACE=1
+    export ROCPROFILER_KERNEL_TRACE=1
+    shift
+  elif [ "$1" = "--amd-sys" ] ; then
+    export ROCPROFILER_ENABLE_AMDSYS=$2
+    shift
+    shift
+  elif [ "$1" = "--plugin" ] ; then
+    if [ -n $2 ] ; then
+      PLUGIN=$2
+      if [ $RUN_FROM_BUILD == 1 ]; then
+        export ROCPROFILER_PLUGIN_LIB=lib${PLUGIN}_plugin.so
+      else
+        export ROCPROFILER_PLUGIN_LIB=rocprofiler/lib${PLUGIN}_plugin.so
+      fi
+    else
+      echo -e "Wrong input \"$2\" for plugin!"
+      usage
+      exit 1
+    fi
+    shift
+    shift
+  elif [[ "$1" = "-"* || "$1" = "--"* ]] ; then
+    echo -e "Wrong option \"$1\", Please use the following options:\n"
+    usage
+    exit 1
+  else
+    break
+  fi
+done
+
+PMC_LINES=()
+if [ -n "$COUNTERS_PATH" ]; then
+  input=$COUNTERS_PATH
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    PMC_LINES+=( "$line" )
+  done < $input
+fi
+
+if [ -n "$PMC_LINES" ]; then
+  COUNTER=1
+  for i in ${!PMC_LINES[@]}; do
+    export ROCPROFILER_COUNTERS="${PMC_LINES[$i]}"
+    if [ -n "$OUTPUT_PATH" ]; then
+      FINAL_PATH="$OUTPUT_PATH_INTERNAL/pmc_$COUNTER"
+      echo -e "\nThe output path for the following counters: $FINAL_PATH"
+      mkdir -p $FINAL_PATH
+      echo $ROCPROFILER_COUNTERS > $FINAL_PATH/pmc.txt
+      export OUTPUT_PATH=$FINAL_PATH
+      let COUNTER=COUNTER+1
+    fi
+    if [ $RUN_FROM_BUILD == 1 ]; then
+      LD_PRELOAD=$LD_PRELOAD:$ROCM_DIR/build/librocprofiler_tool.so $*
+    else
+      LD_PRELOAD=$LD_PRELOAD:$ROCM_DIR/lib/librocprofiler_tool.so $*
+    fi
+  done
+else
+  if [ $RUN_FROM_BUILD == 1 ]; then
+    LD_PRELOAD=$LD_PRELOAD:$ROCM_DIR/build/librocprofiler_tool.so $*
+  else
+    LD_PRELOAD=$LD_PRELOAD:$ROCM_DIR/lib/librocprofiler_tool.so $*
+  fi
+fi
+
+

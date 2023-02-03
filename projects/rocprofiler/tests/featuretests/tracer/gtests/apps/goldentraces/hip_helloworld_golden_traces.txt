@@ -1,0 +1,14 @@
+0x2fbdf0 agent cpu
+0x2fcc70 agent gpu
+9598333364898937
+Enabling API Tracing
+Record [1], Domain(HIP_API_DOMAIN), Begin(9598333370773048), End(9598333370809238), Correlation ID( 1), ROCTX ID(2), Function(hipGetDeviceProperties)
+Record [3], Domain(HIP_API_DOMAIN), Begin(9598333370859109), End(9598333370912969), Correlation ID( 2), ROCTX ID(0), Function(hipMalloc)
+Record [5], Domain(HIP_API_DOMAIN), Begin(9598333370924259), End(9598333370928959), Correlation ID( 3), ROCTX ID(0), Function(hipMalloc)
+Record [7], Domain(HIP_API_DOMAIN), Begin(9598333370940519), End(9598333575713652), Correlation ID( 4), ROCTX ID(0), Function(hipMemcpy)
+Record [9], Domain(HIP_API_DOMAIN), Begin(9598333575750182), End(9598333575768982), Correlation ID( 5), ROCTX ID(0), Function(__hipPushCallConfiguration)
+Record [11], Domain(HIP_API_DOMAIN), Begin(9598333575779902), End(9598333575783532), Correlation ID( 6), ROCTX ID(0), Function(__hipPopCallConfiguration)
+Record [13], Domain(HIP_API_DOMAIN), Begin(9598333575791112), End(9598333576071305), Correlation ID( 7), ROCTX ID(0), Function(hipLaunchKernel), Kernel Name(helloworld(char*, char*))
+Record [15], Domain(HIP_API_DOMAIN), Begin(9598333576098325), End(9598333576567689), Correlation ID( 8), ROCTX ID(0), Function(hipMemcpy)
+Record [17], Domain(HIP_API_DOMAIN), Begin(9598333576581979), End(9598333576591729), Correlation ID( 9), ROCTX ID(0), Function(hipFree)
+Record [19], Domain(HIP_API_DOMAIN), Begin(9598333576600359), End(9598333576603379), Correlation ID( 10), ROCTX ID(0), Function(hipFree)

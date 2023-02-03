@@ -1,0 +1,16 @@
+0xd1eeb0 agent cpu
+0xd4b380 agent gpu
+844434431085362
+
+
+ROCMTools: Collecting the following counters:
+- GRBM_COUNT
+
+Enabling Counter Collection
+Only 1 GPU found with required VRAM. Peer-to-Peer copy will be skipped.
+CPU is "AMD Ryzen 9 5950X 16-Core Processor"
+GPU1 is "gfx906"
+Copying 4096 bytes from gpu1 memory to system memory...
+Success!
+Copying 4096 bytes from system memory to gpu1 memory...
+Success!
