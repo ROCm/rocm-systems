@@ -22,12 +22,12 @@
 
 #include "library/components/mpi_gotcha.hpp"
 #include "api.hpp"
+#include "core/components/fwd.hpp"
+#include "core/config.hpp"
+#include "core/debug.hpp"
+#include "core/mproc.hpp"
 #include "library/components/category_region.hpp"
 #include "library/components/comm_data.hpp"
-#include "library/components/fwd.hpp"
-#include "library/config.hpp"
-#include "library/debug.hpp"
-#include "library/mproc.hpp"
 
 #include <timemory/backends/mpi.hpp>
 #include <timemory/backends/process.hpp>

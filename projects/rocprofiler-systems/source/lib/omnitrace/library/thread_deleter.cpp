@@ -21,9 +21,9 @@
 // SOFTWARE.
 
 #include "library/thread_deleter.hpp"
+#include "core/utility.hpp"
 #include "library/components/pthread_create_gotcha.hpp"
 #include "library/thread_info.hpp"
-#include "library/utility.hpp"
 
 #include <timemory/backends/threading.hpp>
 #include <timemory/components/timing/backends.hpp>

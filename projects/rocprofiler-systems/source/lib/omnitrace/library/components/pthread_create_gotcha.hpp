@@ -22,10 +22,10 @@
 
 #pragma once
 
-#include "library/common.hpp"
-#include "library/defines.hpp"
+#include "core/common.hpp"
+#include "core/defines.hpp"
+#include "core/timemory.hpp"
 #include "library/thread_data.hpp"
-#include "library/timemory.hpp"
 
 #include <cstdint>
 #include <future>

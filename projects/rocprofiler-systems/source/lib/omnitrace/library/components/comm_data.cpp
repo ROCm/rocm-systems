@@ -21,9 +21,9 @@
 // SOFTWARE.
 
 #include "library/components/comm_data.hpp"
-#include "library/components/fwd.hpp"
-#include "library/config.hpp"
-#include "library/perfetto.hpp"
+#include "core/components/fwd.hpp"
+#include "core/config.hpp"
+#include "core/perfetto.hpp"
 #include "library/tracing.hpp"
 
 #include <timemory/backends/mpi.hpp>

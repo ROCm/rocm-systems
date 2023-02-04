@@ -19,6 +19,9 @@ else()
 endif()
 
 add_subdirectory(common)
+add_subdirectory(core)
+add_subdirectory(binary)
+
 add_subdirectory(omnitrace)
 add_subdirectory(omnitrace-dl)
 add_subdirectory(omnitrace-user)

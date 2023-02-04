@@ -21,11 +21,11 @@
 // SOFTWARE.
 
 #include "library/rocprofiler.hpp"
-#include "library/common.hpp"
-#include "library/config.hpp"
-#include "library/debug.hpp"
-#include "library/gpu.hpp"
-#include "library/perfetto.hpp"
+#include "core/common.hpp"
+#include "core/config.hpp"
+#include "core/debug.hpp"
+#include "core/gpu.hpp"
+#include "core/perfetto.hpp"
 #include "library/rocm.hpp"
 #include "library/rocm/hsa_rsrc_factory.hpp"
 

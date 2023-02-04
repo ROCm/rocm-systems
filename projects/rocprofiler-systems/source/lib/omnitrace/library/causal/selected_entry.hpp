@@ -22,12 +22,12 @@
 
 #pragma once
 
-#include "library/binary/dwarf_entry.hpp"
-#include "library/binary/fwd.hpp"
-#include "library/binary/symbol.hpp"
+#include "binary/dwarf_entry.hpp"
+#include "binary/symbol.hpp"
+#include "core/binary/fwd.hpp"
+#include "core/debug.hpp"
+#include "core/defines.hpp"
 #include "library/causal/fwd.hpp"
-#include "library/debug.hpp"
-#include "library/defines.hpp"
 
 #include <timemory/hash/types.hpp>
 #include <timemory/unwind/dlinfo.hpp>

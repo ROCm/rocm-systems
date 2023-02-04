@@ -21,7 +21,7 @@
 // SOFTWARE.
 
 #include "api.hpp"
-#include "library/debug.hpp"
+#include "core/debug.hpp"
 
 #include <exception>
 #include <stdexcept>

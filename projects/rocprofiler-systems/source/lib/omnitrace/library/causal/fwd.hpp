@@ -22,9 +22,9 @@
 
 #pragma once
 
-#include "library/binary/fwd.hpp"
-#include "library/containers/static_vector.hpp"
-#include "library/defines.hpp"
+#include "core/binary/fwd.hpp"
+#include "core/containers/static_vector.hpp"
+#include "core/defines.hpp"
 
 #include <timemory/hash/types.hpp>
 #include <timemory/unwind/stack.hpp>

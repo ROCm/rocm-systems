@@ -22,11 +22,11 @@
 
 #pragma once
 
-#include "library/config.hpp"
+#include "core/config.hpp"
+#include "core/debug.hpp"
+#include "core/defines.hpp"
+#include "core/perfetto.hpp"
 #include "library/critical_trace.hpp"
-#include "library/debug.hpp"
-#include "library/defines.hpp"
-#include "library/perfetto.hpp"
 #include "library/ptl.hpp"
 
 #include <PTL/ThreadPool.hh>

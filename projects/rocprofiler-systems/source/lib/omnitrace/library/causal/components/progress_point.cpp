@@ -21,12 +21,12 @@
 // SOFTWARE.
 
 #include "library/causal/components/progress_point.hpp"
+#include "core/common.hpp"
+#include "core/concepts.hpp"
+#include "core/debug.hpp"
+#include "core/timemory.hpp"
 #include "library/causal/experiment.hpp"
-#include "library/common.hpp"
-#include "library/concepts.hpp"
-#include "library/debug.hpp"
 #include "library/thread_data.hpp"
-#include "library/timemory.hpp"
 
 #include <timemory/hash/types.hpp>
 #include <timemory/mpl/type_traits.hpp>

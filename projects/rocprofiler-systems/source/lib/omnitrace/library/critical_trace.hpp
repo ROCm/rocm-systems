@@ -22,10 +22,10 @@
 
 #pragma once
 
-#include "library/common.hpp"
-#include "library/config.hpp"
-#include "library/defines.hpp"
-#include "library/perfetto.hpp"
+#include "core/common.hpp"
+#include "core/config.hpp"
+#include "core/defines.hpp"
+#include "core/perfetto.hpp"
 #include "library/runtime.hpp"
 #include "library/thread_data.hpp"
 

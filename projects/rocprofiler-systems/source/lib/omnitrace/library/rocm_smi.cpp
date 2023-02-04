@@ -31,15 +31,15 @@
 #endif
 
 #include "library/rocm_smi.hpp"
-#include "library/common.hpp"
-#include "library/components/fwd.hpp"
-#include "library/config.hpp"
+#include "core/common.hpp"
+#include "core/components/fwd.hpp"
+#include "core/config.hpp"
+#include "core/debug.hpp"
+#include "core/gpu.hpp"
+#include "core/perfetto.hpp"
+#include "core/state.hpp"
 #include "library/critical_trace.hpp"
-#include "library/debug.hpp"
-#include "library/gpu.hpp"
-#include "library/perfetto.hpp"
 #include "library/runtime.hpp"
-#include "library/state.hpp"
 #include "library/thread_info.hpp"
 
 #include <timemory/backends/threading.hpp>

@@ -22,12 +22,12 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "library/common.hpp"
+#include "core/common.hpp"
+#include "core/components/fwd.hpp"
+#include "core/defines.hpp"
+#include "core/timemory.hpp"
 #include "library/components/category_region.hpp"
 #include "library/components/comm_data.hpp"
-#include "library/components/fwd.hpp"
-#include "library/defines.hpp"
-#include "library/timemory.hpp"
 
 #include <timemory/api/macros.hpp>
 #include <timemory/components/macros.hpp>

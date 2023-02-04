@@ -22,14 +22,14 @@
 
 #pragma once
 
-#include "library/binary/analysis.hpp"
-#include "library/binary/fwd.hpp"
+#include "binary/analysis.hpp"
+#include "core/binary/fwd.hpp"
+#include "core/containers/c_array.hpp"
+#include "core/containers/static_vector.hpp"
+#include "core/defines.hpp"
+#include "core/utility.hpp"
 #include "library/causal/fwd.hpp"
-#include "library/containers/c_array.hpp"
-#include "library/containers/static_vector.hpp"
-#include "library/defines.hpp"
 #include "library/thread_data.hpp"
-#include "library/utility.hpp"
 
 #include <timemory/hash/types.hpp>
 #include <timemory/tpls/cereal/cereal/cereal.hpp>

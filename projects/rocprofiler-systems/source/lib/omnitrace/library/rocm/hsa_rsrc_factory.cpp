@@ -21,8 +21,8 @@ THE SOFTWARE.
 *******************************************************************************/
 
 #include "library/rocm/hsa_rsrc_factory.hpp"
-#include "library/debug.hpp"
-#include "library/defines.hpp"
+#include "core/debug.hpp"
+#include "core/defines.hpp"
 
 #include <timemory/manager.hpp>
 

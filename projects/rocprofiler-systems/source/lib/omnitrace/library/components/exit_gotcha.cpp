@@ -21,12 +21,12 @@
 // SOFTWARE.
 
 #include "library/components/exit_gotcha.hpp"
-#include "library/common.hpp"
-#include "library/config.hpp"
-#include "library/debug.hpp"
+#include "core/common.hpp"
+#include "core/config.hpp"
+#include "core/debug.hpp"
+#include "core/state.hpp"
+#include "core/timemory.hpp"
 #include "library/runtime.hpp"
-#include "library/state.hpp"
-#include "library/timemory.hpp"
 
 #include <timemory/backends/threading.hpp>
 #include <timemory/process/threading.hpp>

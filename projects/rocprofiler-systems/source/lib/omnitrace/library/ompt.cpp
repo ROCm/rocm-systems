@@ -21,17 +21,17 @@
 // SOFTWARE.
 
 #include "api.hpp"
-#include "library/common.hpp"
-#include "library/config.hpp"
-#include "library/debug.hpp"
-#include "library/defines.hpp"
+#include "core/common.hpp"
+#include "core/config.hpp"
+#include "core/debug.hpp"
+#include "core/defines.hpp"
 
 #include <timemory/defines.h>
 
 #if defined(OMNITRACE_USE_OMPT) && OMNITRACE_USE_OMPT > 0
 
+#    include "core/components/fwd.hpp"
 #    include "library/components/category_region.hpp"
-#    include "library/components/fwd.hpp"
 
 #    include <timemory/components/ompt.hpp>
 #    include <timemory/components/ompt/extern.hpp>

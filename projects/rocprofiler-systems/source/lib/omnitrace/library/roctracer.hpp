@@ -22,10 +22,10 @@
 
 #pragma once
 
+#include "core/config.hpp"
+#include "core/debug.hpp"
+#include "core/perfetto.hpp"
 #include "library/components/roctracer.hpp"
-#include "library/config.hpp"
-#include "library/debug.hpp"
-#include "library/perfetto.hpp"
 #include "library/ptl.hpp"
 
 #include <roctracer.h>

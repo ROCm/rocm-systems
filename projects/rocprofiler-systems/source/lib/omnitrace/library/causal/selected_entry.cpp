@@ -21,8 +21,8 @@
 // SOFTWARE.
 
 #include "library/causal/selected_entry.hpp"
-#include "library/common.hpp"
-#include "library/timemory.hpp"
+#include "core/common.hpp"
+#include "core/timemory.hpp"
 
 namespace omnitrace
 {

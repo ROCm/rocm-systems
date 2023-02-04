@@ -21,16 +21,16 @@
 // SOFTWARE.
 
 #include "library/cpu_freq.hpp"
-#include "library/common.hpp"
+#include "core/common.hpp"
+#include "core/components/fwd.hpp"
+#include "core/config.hpp"
+#include "core/debug.hpp"
+#include "core/defines.hpp"
+#include "core/perfetto.hpp"
+#include "core/timemory.hpp"
 #include "library/components/cpu_freq.hpp"
-#include "library/components/fwd.hpp"
-#include "library/config.hpp"
-#include "library/debug.hpp"
-#include "library/defines.hpp"
-#include "library/perfetto.hpp"
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
-#include "library/timemory.hpp"
 
 #include <timemory/components/rusage/backends.hpp>
 #include <timemory/mpl/types.hpp>

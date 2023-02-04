@@ -22,16 +22,16 @@
 
 #pragma once
 
-#include "library/binary/dwarf_entry.hpp"
-#include "library/binary/symbol.hpp"
+#include "binary/dwarf_entry.hpp"
+#include "binary/symbol.hpp"
+#include "core/containers/c_array.hpp"
+#include "core/defines.hpp"
+#include "core/utility.hpp"
 #include "library/causal/components/backtrace.hpp"
 #include "library/causal/components/progress_point.hpp"
 #include "library/causal/data.hpp"
 #include "library/causal/sample_data.hpp"
 #include "library/causal/selected_entry.hpp"
-#include "library/containers/c_array.hpp"
-#include "library/defines.hpp"
-#include "library/utility.hpp"
 
 #include <timemory/hash/types.hpp>
 #include <timemory/mpl/concepts.hpp>

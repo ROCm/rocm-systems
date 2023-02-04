@@ -14,7 +14,6 @@ set(component_sources
     ${CMAKE_CURRENT_LIST_DIR}/pthread_mutex_gotcha.cpp)
 
 set(component_headers
-    ${CMAKE_CURRENT_LIST_DIR}/fwd.hpp
     ${CMAKE_CURRENT_LIST_DIR}/backtrace.hpp
     ${CMAKE_CURRENT_LIST_DIR}/backtrace_metrics.hpp
     ${CMAKE_CURRENT_LIST_DIR}/backtrace_timestamp.hpp

@@ -22,8 +22,8 @@
 
 #pragma once
 
-#include "library/defines.hpp"
-#include "library/utility.hpp"
+#include "core/defines.hpp"
+#include "core/utility.hpp"
 
 #include <PTL/PTL.hh>
 

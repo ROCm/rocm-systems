@@ -23,18 +23,18 @@
 #pragma once
 
 #include "api.hpp"
+#include "core/common.hpp"
+#include "core/defines.hpp"
+#include "core/state.hpp"
+#include "core/timemory.hpp"
 #include "library/causal/components/causal_gotcha.hpp"
-#include "library/common.hpp"
 #include "library/components/exit_gotcha.hpp"
 #include "library/components/fork_gotcha.hpp"
 #include "library/components/mpi_gotcha.hpp"
 #include "library/components/numa_gotcha.hpp"
 #include "library/components/pthread_gotcha.hpp"
 #include "library/components/roctracer.hpp"
-#include "library/defines.hpp"
-#include "library/state.hpp"
 #include "library/thread_data.hpp"
-#include "library/timemory.hpp"
 
 #include <timemory/backends/threading.hpp>
 #include <timemory/macros/language.hpp>

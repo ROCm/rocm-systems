@@ -22,7 +22,7 @@
 
 #pragma once
 
-#include "library/defines.hpp"
+#include "core/defines.hpp"
 #include "omnitrace/categories.h"  // in omnitrace-user
 
 #include <timemory/compat/macros.h>

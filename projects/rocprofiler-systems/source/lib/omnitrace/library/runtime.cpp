@@ -22,12 +22,12 @@
 
 #include "library/runtime.hpp"
 #include "api.hpp"
-#include "library/config.hpp"
-#include "library/debug.hpp"
-#include "library/defines.hpp"
+#include "core/config.hpp"
+#include "core/debug.hpp"
+#include "core/defines.hpp"
+#include "core/utility.hpp"
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
-#include "library/utility.hpp"
 
 #include <timemory/backends/dmp.hpp>
 #include <timemory/backends/mpi.hpp>

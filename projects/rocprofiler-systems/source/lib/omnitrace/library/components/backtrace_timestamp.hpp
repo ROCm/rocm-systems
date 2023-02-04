@@ -22,10 +22,10 @@
 
 #pragma once
 
-#include "library/common.hpp"
-#include "library/components/fwd.hpp"
-#include "library/defines.hpp"
-#include "library/timemory.hpp"
+#include "core/common.hpp"
+#include "core/components/fwd.hpp"
+#include "core/defines.hpp"
+#include "core/timemory.hpp"
 
 #include <timemory/components/base.hpp>
 #include <timemory/macros/language.hpp>

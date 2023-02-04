@@ -51,7 +51,7 @@ set(OMNITRACE_EXTENSION_LIBRARIES
 
 target_include_directories(
     omnitrace-headers
-    INTERFACE ${PROJECT_BINARY_DIR}/source/lib ${PROJECT_BINARY_DIR}/source/lib/omnitrace
+    INTERFACE ${PROJECT_BINARY_DIR}/source/lib ${PROJECT_BINARY_DIR}/source/lib/core
               ${PROJECT_SOURCE_DIR}/source/lib ${PROJECT_SOURCE_DIR}/source/lib/omnitrace
               ${PROJECT_SOURCE_DIR}/source/lib/omnitrace-user)
 
@@ -223,6 +223,7 @@ endif()
 # RCCL
 #
 # ----------------------------------------------------------------------------------------#
+
 if(OMNITRACE_USE_RCCL)
     find_package(RCCL-Headers ${omnitrace_FIND_QUIETLY} REQUIRED)
     target_link_libraries(omnitrace-rccl INTERFACE roc::rccl-headers)

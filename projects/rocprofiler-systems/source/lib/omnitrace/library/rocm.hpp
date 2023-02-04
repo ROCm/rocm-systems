@@ -22,7 +22,7 @@
 
 #pragma once
 
-#include "library/defines.hpp"
+#include "core/defines.hpp"
 
 #if defined(OMNITRACE_USE_ROCPROFILER) && OMNITRACE_USE_ROCPROFILER > 0
 #    include <rocprofiler.h>

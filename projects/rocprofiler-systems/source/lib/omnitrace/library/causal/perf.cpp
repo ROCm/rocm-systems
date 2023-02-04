@@ -21,8 +21,8 @@
 // SOFTWARE.
 
 #include "library/causal/perf.hpp"
-#include "library/timemory.hpp"
-#include "library/utility.hpp"
+#include "core/timemory.hpp"
+#include "core/utility.hpp"
 
 #include <timemory/log/logger.hpp>
 #include <timemory/log/macros.hpp>

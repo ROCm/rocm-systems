@@ -22,7 +22,7 @@
 
 #pragma once
 
-#include "library/utility.hpp"
+#include "core/utility.hpp"
 
 #include <timemory/backends/threading.hpp>
 

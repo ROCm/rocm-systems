@@ -22,8 +22,8 @@
 
 #pragma once
 
-#include "library/concepts.hpp"
-#include "library/defines.hpp"
+#include "core/concepts.hpp"
+#include "core/defines.hpp"
 
 #include <cstdint>
 #include <memory>

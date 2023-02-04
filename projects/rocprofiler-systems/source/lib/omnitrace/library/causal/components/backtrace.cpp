@@ -21,18 +21,18 @@
 // SOFTWARE.
 
 #include "library/causal/components/backtrace.hpp"
+#include "core/concepts.hpp"
+#include "core/config.hpp"
+#include "core/debug.hpp"
+#include "core/state.hpp"
+#include "core/utility.hpp"
 #include "library/causal/data.hpp"
 #include "library/causal/delay.hpp"
 #include "library/causal/experiment.hpp"
-#include "library/concepts.hpp"
-#include "library/config.hpp"
-#include "library/debug.hpp"
 #include "library/runtime.hpp"
-#include "library/state.hpp"
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
 #include "library/tracing.hpp"
-#include "library/utility.hpp"
 
 #include <timemory/components/timing/backends.hpp>
 #include <timemory/components/timing/wall_clock.hpp>

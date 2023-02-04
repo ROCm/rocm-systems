@@ -21,9 +21,9 @@
 // SOFTWARE.
 
 #include "library/causal/components/causal_gotcha.hpp"
+#include "core/config.hpp"
 #include "library/causal/components/blocking_gotcha.hpp"
 #include "library/causal/components/unblocking_gotcha.hpp"
-#include "library/config.hpp"
 
 #include <timemory/backends/threading.hpp>
 #include <timemory/utility/macros.hpp>

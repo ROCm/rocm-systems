@@ -21,10 +21,10 @@
 // SOFTWARE.
 
 #include "library/causal/components/unblocking_gotcha.hpp"
+#include "core/config.hpp"
+#include "core/debug.hpp"
 #include "library/causal/delay.hpp"
 #include "library/causal/experiment.hpp"
-#include "library/config.hpp"
-#include "library/debug.hpp"
 #include "library/runtime.hpp"
 
 #include <timemory/components/macros.hpp>

@@ -21,9 +21,9 @@
 // SOFTWARE.
 
 #include "api.hpp"
-#include "library/categories.hpp"
+#include "core/categories.hpp"
+#include "core/config.hpp"
 #include "library/components/category_region.hpp"
-#include "library/config.hpp"
 #include "library/tracing.hpp"
 
 #if defined(__GNUC__) && (__GNUC__ == 7)

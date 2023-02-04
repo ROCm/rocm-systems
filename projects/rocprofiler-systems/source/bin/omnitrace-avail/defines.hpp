@@ -25,5 +25,6 @@
 #define TIMEMORY_DISABLE_BANNER
 #define TIMEMORY_DISABLE_COMPONENT_STORAGE_INIT
 
-#include "library/config.hpp"
-#include "library/defines.hpp"
+#include "common/defines.h"
+#include "core/config.hpp"
+#include "core/defines.hpp"

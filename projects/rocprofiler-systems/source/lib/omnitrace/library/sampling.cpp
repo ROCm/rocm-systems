@@ -21,22 +21,22 @@
 // SOFTWARE.
 
 #include "library/sampling.hpp"
-#include "library/common.hpp"
+#include "core/common.hpp"
+#include "core/components/fwd.hpp"
+#include "core/config.hpp"
+#include "core/debug.hpp"
+#include "core/locking.hpp"
+#include "core/state.hpp"
+#include "core/utility.hpp"
 #include "library/components/backtrace.hpp"
 #include "library/components/backtrace_metrics.hpp"
 #include "library/components/backtrace_timestamp.hpp"
-#include "library/components/fwd.hpp"
-#include "library/config.hpp"
-#include "library/debug.hpp"
-#include "library/locking.hpp"
 #include "library/ptl.hpp"
 #include "library/runtime.hpp"
-#include "library/state.hpp"
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
 #include "library/tracing.hpp"
 #include "library/tracing/annotation.hpp"
-#include "library/utility.hpp"
 
 #include <timemory/backends/papi.hpp>
 #include <timemory/backends/threading.hpp>
@@ -417,7 +417,12 @@ auto
 load_offload_buffer()
 {
     auto _data = std::map<int64_t, std::vector<sampler_buffer_t>>{};
-    if(!get_use_tmp_files()) return _data;
+    if(!get_use_tmp_files())
+    {
+        OMNITRACE_WARNING_F(
+            2, "[sampling] returning no data because using temporary files is disabled");
+        return _data;
+    }
 
     // use homemade atomic_mutex/atomic_lock since contention will be low
     // and using pthread_lock might trigger our wrappers
@@ -444,11 +449,15 @@ load_offload_buffer()
     {
         int64_t _seq = 0;
         _fs.read(reinterpret_cast<char*>(&_seq), sizeof(_seq));
-        if(_fs.eof()) break;
+        if(_fs.eof())
+        {
+            OMNITRACE_VERBOSE_F(2, "[sampling] No more samples found in file...\n");
+            break;
+        }
         sampler_buffer_t _buffer{};
         _buffer.load(_fs);
-        OMNITRACE_VERBOSE_F(2, "Loading %zu samples for thread %li...\n", _buffer.count(),
-                            _seq);
+        OMNITRACE_VERBOSE_F(2, "[sampling] Loading %zu samples for thread %li...\n",
+                            _buffer.count(), _seq);
         _data[_seq].emplace_back(std::move(_buffer));
     }
     _file.reset();
@@ -732,8 +741,8 @@ post_process()
         auto& _sampler = get_sampler(i);
         if(_sampler)
         {
-            _sampler->stop();
             _sampler->set_offload(nullptr);
+            _sampler->stop();
         }
     }
 

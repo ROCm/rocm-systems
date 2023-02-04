@@ -21,14 +21,14 @@
 // SOFTWARE.
 
 #include "library/components/pthread_gotcha.hpp"
+#include "core/config.hpp"
+#include "core/debug.hpp"
+#include "core/utility.hpp"
 #include "library/components/pthread_create_gotcha.hpp"
 #include "library/components/pthread_mutex_gotcha.hpp"
-#include "library/config.hpp"
-#include "library/debug.hpp"
 #include "library/runtime.hpp"
 #include "library/sampling.hpp"
 #include "library/thread_data.hpp"
-#include "library/utility.hpp"
 
 #include <timemory/backends/threading.hpp>
 #include <timemory/utility/macros.hpp>

@@ -21,11 +21,11 @@
 // SOFTWARE.
 
 #include "library/roctracer.hpp"
+#include "core/components/fwd.hpp"
+#include "core/config.hpp"
+#include "core/debug.hpp"
 #include "library/components/category_region.hpp"
-#include "library/components/fwd.hpp"
-#include "library/config.hpp"
 #include "library/critical_trace.hpp"
-#include "library/debug.hpp"
 #include "library/runtime.hpp"
 #include "library/sampling.hpp"
 #include "library/thread_data.hpp"

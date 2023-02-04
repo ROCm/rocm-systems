@@ -21,12 +21,12 @@
 // SOFTWARE.
 
 #include "library/components/roctracer.hpp"
-#include "library/common.hpp"
-#include "library/config.hpp"
-#include "library/debug.hpp"
-#include "library/defines.hpp"
-#include "library/dynamic_library.hpp"
-#include "library/redirect.hpp"
+#include "core/common.hpp"
+#include "core/config.hpp"
+#include "core/debug.hpp"
+#include "core/defines.hpp"
+#include "core/dynamic_library.hpp"
+#include "core/redirect.hpp"
 #include "library/roctracer.hpp"
 #include "library/runtime.hpp"
 #include "library/sampling.hpp"

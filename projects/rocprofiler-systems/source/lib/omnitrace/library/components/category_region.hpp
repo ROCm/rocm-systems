@@ -22,13 +22,13 @@
 
 #pragma once
 
+#include "core/config.hpp"
+#include "core/defines.hpp"
+#include "core/state.hpp"
+#include "core/timemory.hpp"
 #include "library/causal/data.hpp"
-#include "library/config.hpp"
 #include "library/critical_trace.hpp"
-#include "library/defines.hpp"
 #include "library/runtime.hpp"
-#include "library/state.hpp"
-#include "library/timemory.hpp"
 #include "library/tracing.hpp"
 #include "library/tracing/annotation.hpp"
 

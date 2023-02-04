@@ -20,12 +20,12 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "library/common.hpp"
+#include "core/common.hpp"
+#include "core/components/fwd.hpp"
+#include "core/config.hpp"
+#include "core/debug.hpp"
+#include "core/perfetto.hpp"
 #include "library/components/ensure_storage.hpp"
-#include "library/components/fwd.hpp"
-#include "library/config.hpp"
-#include "library/debug.hpp"
-#include "library/perfetto.hpp"
 #include "library/ptl.hpp"
 #include "library/runtime.hpp"
 #include "library/sampling.hpp"

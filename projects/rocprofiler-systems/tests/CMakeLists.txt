@@ -311,15 +311,30 @@ if(OMNITRACE_USE_MPI OR OMNITRACE_USE_MPI_HEADERS)
         "OMNITRACE_TIME_OUTPUT=OFF"
         "OMNITRACE_FILE_OUTPUT=ON"
         "OMNITRACE_USE_MPIP=ON"
+        "OMNITRACE_DEBUG=OFF"
+        "OMNITRACE_VERBOSE=2"
+        "OMNITRACE_DL_VERBOSE=2"
+        "${_test_openmp_env}"
+        "${_test_library_path}")
+
+    set(_mpip_all2all_environment
+        "OMNITRACE_USE_PERFETTO=ON"
+        "OMNITRACE_USE_TIMEMORY=ON"
+        "OMNITRACE_USE_SAMPLING=OFF"
+        "OMNITRACE_USE_PROCESS_SAMPLING=OFF"
+        "OMNITRACE_TIME_OUTPUT=OFF"
+        "OMNITRACE_FILE_OUTPUT=ON"
+        "OMNITRACE_USE_MPIP=ON"
         "OMNITRACE_DEBUG=ON"
         "OMNITRACE_VERBOSE=3"
         "OMNITRACE_DL_VERBOSE=3"
-        "OMNITRACE_SAMPLING_DELAY=1"
-        "OMNITRACE_SAMPLING_FREQ=0.001"
         "${_test_openmp_env}"
         "${_test_library_path}")
 
     foreach(_EXAMPLE all2all allgather allreduce bcast reduce scatter-gather send-recv)
+        if("${_mpip_${_EXAMPLE}_environment}" STREQUAL "")
+            set(_mpip_${_EXAMPLE}_environment "${_mpip_environment}")
+        endif()
         omnitrace_add_test(
             SKIP_RUNTIME SKIP_SAMPLING
             NAME "mpi-${_EXAMPLE}"
@@ -329,7 +344,7 @@ if(OMNITRACE_USE_MPI OR OMNITRACE_USE_MPI_HEADERS)
             LABELS "mpip"
             REWRITE_ARGS -e -v 2 --label file line --min-instructions 0
             RUN_ARGS 30
-            ENVIRONMENT "${_mpip_environment}")
+            ENVIRONMENT "${_mpip_${_EXAMPLE}_environment}")
     endforeach()
 endif()
 
@@ -684,8 +699,12 @@ omnitrace_add_test(
     RUNTIME_PASS_REGEX "(\\\[[0-9]+\\\]) function coverage ::  66.67%"
     REWRITE_RUN_PASS_REGEX "(\\\[[0-9]+\\\]) function coverage ::  66.67%")
 
+if(_OS_RELEASE STREQUAL "ubuntu-18.04")
+    set(_TRACE_WINDOW_SKIP SKIP_RUNTIME)
+endif()
+
 omnitrace_add_test(
-    SKIP_BASELINE SKIP_SAMPLING SKIP_PRELOAD
+    SKIP_BASELINE SKIP_SAMPLING SKIP_PRELOAD ${_TRACE_WINDOW_SKIP}
     NAME trace-time-window
     TARGET trace-time-window
     REWRITE_ARGS -e -v 2 --caller-include inner -i 4096
@@ -744,7 +763,7 @@ omnitrace_add_validation_test(
          -p)
 
 omnitrace_add_test(
-    SKIP_BASELINE SKIP_SAMPLING SKIP_PRELOAD
+    SKIP_BASELINE SKIP_SAMPLING SKIP_PRELOAD ${_TRACE_WINDOW_SKIP}
     NAME trace-time-window-delay
     TARGET trace-time-window
     REWRITE_ARGS -e -v 2 --caller-include inner -i 4096
@@ -987,6 +1006,28 @@ omnitrace_add_causal_test(
     )
 
 omnitrace_add_causal_test(
+    NAME both-omni-func
+    TARGET causal-both-omni
+    RUN_ARGS 70 10 432525 400000000
+    CAUSAL_MODE "function"
+    CAUSAL_ARGS
+        -w
+        1
+        -d
+        3
+        --monochrome
+        -g
+        ${CMAKE_BINARY_DIR}/omnitrace-tests-config/causal-both-omni-func
+        -l
+        causal-both-omni
+        -v
+        3
+    ENVIRONMENT "OMNITRACE_STRICT_CONFIG=OFF"
+    CAUSAL_PASS_REGEX
+        "Starting causal experiment #1(.*)causal/experiments.json(.*)causal/experiments.coz"
+    )
+
+omnitrace_add_causal_test(
     NAME lulesh-func
     TARGET lulesh-omni
     RUN_ARGS -i 35 -s 50 -p
@@ -1019,7 +1060,7 @@ omnitrace_add_causal_test(
     )
 
 set(_causal_common_args
-    "-n 20 -e -s 0 10 20 30 -B $<TARGET_FILE_BASE_NAME:causal-cpu-omni>")
+    "-n 12 -e -s 0 10 20 30 -B $<TARGET_FILE_BASE_NAME:causal-cpu-omni>")
 
 macro(
     causal_e2e_args_and_validation

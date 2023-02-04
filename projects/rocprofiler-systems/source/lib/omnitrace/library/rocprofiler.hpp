@@ -22,9 +22,9 @@
 
 #pragma once
 
+#include "core/defines.hpp"
+#include "core/timemory.hpp"
 #include "library/components/rocprofiler.hpp"
-#include "library/defines.hpp"
-#include "library/timemory.hpp"
 
 #include <timemory/backends/hardware_counters.hpp>
 #include <timemory/macros.hpp>

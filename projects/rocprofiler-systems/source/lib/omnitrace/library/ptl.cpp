@@ -21,16 +21,17 @@
 // SOFTWARE.
 
 #include "library/ptl.hpp"
-#include "library/config.hpp"
-#include "library/debug.hpp"
-#include "library/defines.hpp"
+#include "core/config.hpp"
+#include "core/debug.hpp"
+#include "core/defines.hpp"
+#include "core/state.hpp"
 #include "library/runtime.hpp"
 #include "library/sampling.hpp"
-#include "library/state.hpp"
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
 
 #include <PTL/ThreadPool.hh>
+#include <PTL/UserTaskQueue.hh>
 
 #include <timemory/backends/threading.hpp>
 #include <timemory/utility/declaration.hpp>
@@ -63,6 +64,9 @@ auto _thread_pool_cfg = []() {
         }
     }
 
+    static char  buffer[sizeof(PTL::UserTaskQueue)];
+    static auto* _task_queue = new((void*) buffer) PTL::UserTaskQueue(_nthreads);
+
     PTL::ThreadPool::Config _v{};
     _v.init         = true;
     _v.use_affinity = false;
@@ -75,9 +79,10 @@ auto _thread_pool_cfg = []() {
         set_thread_state(ThreadState::Disabled);
         sampling::block_signals();
     };
-    _v.finalizer = []() {};
-    _v.priority  = 5;
-    _v.pool_size = _nthreads;
+    _v.finalizer  = []() {};
+    _v.priority   = 5;
+    _v.pool_size  = _nthreads;
+    _v.task_queue = _task_queue;
     return _v;
 };
 

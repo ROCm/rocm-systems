@@ -22,10 +22,10 @@
 
 #pragma once
 
-#include "library/common.hpp"
-#include "library/components/fwd.hpp"
-#include "library/defines.hpp"
-#include "library/state.hpp"
+#include "core/common.hpp"
+#include "core/components/fwd.hpp"
+#include "core/defines.hpp"
+#include "core/state.hpp"
 #include "library/thread_data.hpp"
 
 #include <atomic>

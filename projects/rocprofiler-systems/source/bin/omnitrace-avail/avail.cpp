@@ -29,8 +29,8 @@
 #include "get_availability.hpp"
 #include "info_type.hpp"
 
-#include "library/config.hpp"
-#include "library/gpu.hpp"
+#include "core/config.hpp"
+#include "core/gpu.hpp"
 #include "library/rocprofiler.hpp"
 
 #include <timemory/components.hpp>

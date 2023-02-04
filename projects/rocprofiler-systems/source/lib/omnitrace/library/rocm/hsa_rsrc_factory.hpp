@@ -22,7 +22,7 @@
 
 #pragma once
 
-#include "library/exception.hpp"
+#include "core/exception.hpp"
 
 #define AMD_INTERNAL_BUILD 1
 

@@ -21,14 +21,14 @@
 // SOFTWARE.
 
 #include "library/components/pthread_mutex_gotcha.hpp"
+#include "core/config.hpp"
+#include "core/debug.hpp"
+#include "core/utility.hpp"
 #include "library/components/category_region.hpp"
-#include "library/config.hpp"
 #include "library/critical_trace.hpp"
-#include "library/debug.hpp"
 #include "library/runtime.hpp"
 #include "library/sampling.hpp"
 #include "library/thread_info.hpp"
-#include "library/utility.hpp"
 
 #include <timemory/backends/threading.hpp>
 #include <timemory/utility/signals.hpp>

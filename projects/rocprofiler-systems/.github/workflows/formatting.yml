@@ -64,7 +64,7 @@ jobs:
         fi
 
   source:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
 
     steps:
     - uses: actions/checkout@v3
@@ -72,12 +72,7 @@ jobs:
       run: |
         DISTRIB_CODENAME=$(cat /etc/lsb-release | grep DISTRIB_CODENAME | awk -F '=' '{print $NF}')
         sudo apt-get update
-        sudo apt-get install -y software-properties-common wget curl
-        wget -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
-        echo "deb http://apt.llvm.org/${DISTRIB_CODENAME}/ llvm-toolchain-${DISTRIB_CODENAME}-11 main" | sudo tee -a /etc/apt/sources.list.d/llvm-toolchain.list
-        echo "deb-src http://apt.llvm.org/${DISTRIB_CODENAME}/ llvm-toolchain-${DISTRIB_CODENAME}-11 main" | sudo tee -a /etc/apt/sources.list.d/llvm-toolchain.list
-        sudo apt-get update
-        sudo apt-get install -y clang-format-11
+        sudo apt-get install -y software-properties-common wget curl clang-format-11
     - name: clang-format
       run: |
         set +e
@@ -99,8 +94,8 @@ jobs:
     - name: check-includes
       run: |
         set +e
-        FILES=$(find source examples -type f | egrep '\.hpp$|\.cpp$|\.cpp\.in$')
-        MATCHES=$(egrep 'include "timemory|include <bits' ${FILES})
+        FILES=$(find source examples -type f | egrep '\.(hpp|cpp)(|\.in)$')
+        MATCHES=$(egrep 'include "timemory/|include <bits/' ${FILES})
         if [ -n "${MATCHES}" ]; then
           echo -e "\nError! Included timemory header with quotes or bits folder included\n"
           echo -e "### MATCHES: ###"

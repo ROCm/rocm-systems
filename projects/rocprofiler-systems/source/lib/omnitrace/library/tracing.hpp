@@ -23,20 +23,20 @@
 #pragma once
 
 #include "common/defines.h"
+#include "core/common.hpp"
+#include "core/concepts.hpp"
+#include "core/config.hpp"
+#include "core/debug.hpp"
+#include "core/defines.hpp"
+#include "core/perfetto.hpp"
+#include "core/state.hpp"
+#include "core/timemory.hpp"
+#include "core/utility.hpp"
 #include "library/causal/sampling.hpp"
-#include "library/common.hpp"
-#include "library/concepts.hpp"
-#include "library/config.hpp"
-#include "library/debug.hpp"
-#include "library/defines.hpp"
-#include "library/perfetto.hpp"
 #include "library/runtime.hpp"
 #include "library/sampling.hpp"
-#include "library/state.hpp"
 #include "library/thread_data.hpp"
-#include "library/timemory.hpp"
 #include "library/tracing/annotation.hpp"
-#include "library/utility.hpp"
 
 #include <timemory/components/timing/backends.hpp>
 #include <timemory/hash/types.hpp>

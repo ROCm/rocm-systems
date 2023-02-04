@@ -23,12 +23,12 @@
 #define TIMEMORY_KOKKOSP_POSTFIX OMNITRACE_PUBLIC_API
 
 #include "api.hpp"
+#include "core/components/fwd.hpp"
+#include "core/config.hpp"
+#include "core/debug.hpp"
+#include "core/defines.hpp"
+#include "core/perfetto.hpp"
 #include "library/components/category_region.hpp"
-#include "library/components/fwd.hpp"
-#include "library/config.hpp"
-#include "library/debug.hpp"
-#include "library/defines.hpp"
-#include "library/perfetto.hpp"
 #include "library/runtime.hpp"
 
 #include <timemory/api/kokkosp.hpp>

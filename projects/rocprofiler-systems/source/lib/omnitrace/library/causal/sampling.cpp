@@ -21,19 +21,19 @@
 // SOFTWARE.
 
 #include "library/causal/sampling.hpp"
+#include "core/common.hpp"
+#include "core/concepts.hpp"
+#include "core/config.hpp"
+#include "core/debug.hpp"
+#include "core/state.hpp"
+#include "core/utility.hpp"
 #include "library/causal/components/backtrace.hpp"
 #include "library/causal/data.hpp"
-#include "library/common.hpp"
-#include "library/concepts.hpp"
-#include "library/config.hpp"
-#include "library/debug.hpp"
 #include "library/ptl.hpp"
 #include "library/runtime.hpp"
 #include "library/sampling.hpp"
-#include "library/state.hpp"
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
-#include "library/utility.hpp"
 
 #include <timemory/macros.hpp>
 #include <timemory/sampling/allocator.hpp>

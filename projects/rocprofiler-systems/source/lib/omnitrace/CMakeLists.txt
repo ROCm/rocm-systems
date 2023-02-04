@@ -73,21 +73,41 @@ endif()
 #
 # ------------------------------------------------------------------------------#
 
-add_library(omnitrace-library SHARED $<TARGET_OBJECTS:omnitrace-object-library>)
-add_library(omnitrace::omnitrace-library ALIAS omnitrace-library)
+add_library(omnitrace-static-library STATIC $<TARGET_OBJECTS:omnitrace-object-library>)
+add_library(omnitrace::libomnitrace-static ALIAS omnitrace-static-library)
 
-target_link_libraries(omnitrace-library PRIVATE omnitrace::omnitrace-interface-library)
+target_link_libraries(
+    omnitrace-static-library
+    PRIVATE omnitrace::omnitrace-interface-library omnitrace::omnitrace-core
+            omnitrace::omnitrace-core omnitrace::omnitrace-binary)
+
+set_target_properties(omnitrace-static-library PROPERTIES OUTPUT_NAME omnitrace)
+
+# ------------------------------------------------------------------------------#
+#
+# omnitrace shared library
+#
+# ------------------------------------------------------------------------------#
+
+add_library(omnitrace-shared-library SHARED $<TARGET_OBJECTS:omnitrace-object-library>)
+add_library(omnitrace::libomnitrace-shared ALIAS omnitrace-shared-library)
+add_library(omnitrace::omnitrace-library ALIAS omnitrace-shared-library)
+
+target_link_libraries(
+    omnitrace-shared-library
+    PRIVATE omnitrace::omnitrace-interface-library omnitrace::omnitrace-core
+            omnitrace::omnitrace-core omnitrace::omnitrace-binary)
 
 set_target_properties(
-    omnitrace-library
+    omnitrace-shared-library
     PROPERTIES OUTPUT_NAME omnitrace
                VERSION ${PROJECT_VERSION}
                SOVERSION ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}
                INSTALL_RPATH "${OMNITRACE_LIB_INSTALL_RPATH}")
 
-omnitrace_strip_target(omnitrace-library)
+omnitrace_strip_target(omnitrace-shared-library)
 
 install(
-    TARGETS omnitrace-library
+    TARGETS omnitrace-shared-library
     DESTINATION ${CMAKE_INSTALL_LIBDIR}
     OPTIONAL)

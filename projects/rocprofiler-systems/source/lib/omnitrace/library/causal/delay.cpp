@@ -21,13 +21,13 @@
 // SOFTWARE.
 
 #include "library/causal/delay.hpp"
+#include "core/state.hpp"
+#include "core/utility.hpp"
 #include "library/causal/experiment.hpp"
 #include "library/runtime.hpp"
-#include "library/state.hpp"
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
 #include "library/tracing.hpp"
-#include "library/utility.hpp"
 
 #include <timemory/components/macros.hpp>
 #include <timemory/mpl/concepts.hpp>

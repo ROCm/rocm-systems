@@ -22,8 +22,8 @@
 
 #pragma once
 
-#include "library/components/fwd.hpp"
-#include "library/defines.hpp"
+#include "core/components/fwd.hpp"
+#include "core/defines.hpp"
 #include "library/thread_data.hpp"
 
 #include <timemory/api.hpp>

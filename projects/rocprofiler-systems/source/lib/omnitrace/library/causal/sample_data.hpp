@@ -22,8 +22,8 @@
 
 #pragma once
 
-#include "library/defines.hpp"
-#include "library/timemory.hpp"
+#include "core/defines.hpp"
+#include "core/timemory.hpp"
 
 #include <chrono>
 #include <cstdint>

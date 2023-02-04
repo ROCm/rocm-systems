@@ -22,7 +22,7 @@
 
 #pragma once
 
-#include "library/defines.hpp"
+#include "core/defines.hpp"
 
 #include <timemory/backends/threading.hpp>
 #include <timemory/mpl/type_traits.hpp>

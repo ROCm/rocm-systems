@@ -21,8 +21,8 @@
 // SOFTWARE.
 
 #include "library/tracing.hpp"
-#include "library/config.hpp"
-#include "library/state.hpp"
+#include "core/config.hpp"
+#include "core/state.hpp"
 #include "library/thread_info.hpp"
 
 namespace omnitrace

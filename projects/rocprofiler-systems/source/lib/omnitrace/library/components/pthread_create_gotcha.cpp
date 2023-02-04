@@ -21,17 +21,17 @@
 // SOFTWARE.
 
 #include "library/components/pthread_create_gotcha.hpp"
+#include "core/config.hpp"
+#include "core/debug.hpp"
+#include "core/state.hpp"
+#include "core/utility.hpp"
 #include "library/causal/delay.hpp"
 #include "library/components/category_region.hpp"
 #include "library/components/roctracer.hpp"
-#include "library/config.hpp"
-#include "library/debug.hpp"
 #include "library/runtime.hpp"
 #include "library/sampling.hpp"
-#include "library/state.hpp"
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
-#include "library/utility.hpp"
 
 #include <timemory/backends/threading.hpp>
 #include <timemory/components/macros.hpp>

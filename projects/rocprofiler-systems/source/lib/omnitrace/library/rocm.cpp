@@ -21,12 +21,12 @@
 // SOFTWARE.
 
 #include "library/rocm.hpp"
+#include "core/config.hpp"
+#include "core/debug.hpp"
+#include "core/dynamic_library.hpp"
+#include "core/gpu.hpp"
 #include "library/components/rocprofiler.hpp"
 #include "library/components/roctracer.hpp"
-#include "library/config.hpp"
-#include "library/debug.hpp"
-#include "library/dynamic_library.hpp"
-#include "library/gpu.hpp"
 #include "library/rocm/hsa_rsrc_factory.hpp"
 #include "library/rocm_smi.hpp"
 #include "library/rocprofiler.hpp"
@@ -81,10 +81,11 @@ bool       on_load_trace = (get_env<int>("ROCP_ONLOAD_TRACE", 0) > 0);
 }  // namespace rocm
 }  // namespace omnitrace
 
+#if defined(OMNITRACE_USE_ROCPROFILER) && OMNITRACE_USE_ROCPROFILER > 0
 std::ostream&
 operator<<(std::ostream& _os, const rocprofiler_settings_t& _v)
 {
-#define ROCPROF_SETTING_FIELD_STR(NAME) JOIN('=', #NAME, _v.NAME)
+#    define ROCPROF_SETTING_FIELD_STR(NAME) JOIN('=', #    NAME, _v.NAME)
 
     _os << JOIN(
         ", ", ROCPROF_SETTING_FIELD_STR(intercept_mode),
@@ -97,6 +98,7 @@ operator<<(std::ostream& _os, const rocprofiler_settings_t& _v)
         ROCPROF_SETTING_FIELD_STR(obj_dumping));
     return _os;
 }
+#endif
 
 // HSA-runtime tool on-load method
 extern "C"

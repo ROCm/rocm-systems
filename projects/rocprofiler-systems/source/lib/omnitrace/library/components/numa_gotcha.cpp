@@ -21,13 +21,13 @@
 // SOFTWARE.
 
 #include "library/components/numa_gotcha.hpp"
-#include "library/common.hpp"
+#include "core/common.hpp"
+#include "core/config.hpp"
+#include "core/debug.hpp"
+#include "core/state.hpp"
+#include "core/timemory.hpp"
 #include "library/components/category_region.hpp"
-#include "library/config.hpp"
-#include "library/debug.hpp"
 #include "library/runtime.hpp"
-#include "library/state.hpp"
-#include "library/timemory.hpp"
 
 #include <timemory/backends/threading.hpp>
 #include <timemory/mpl/concepts.hpp>

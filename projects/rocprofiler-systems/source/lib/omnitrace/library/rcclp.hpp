@@ -24,7 +24,7 @@
 
 #pragma once
 
-#include "library/defines.hpp"
+#include "core/defines.hpp"
 
 namespace omnitrace
 {

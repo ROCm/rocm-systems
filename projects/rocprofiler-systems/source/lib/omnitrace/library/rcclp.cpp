@@ -23,11 +23,11 @@
 // SOFTWARE.
 
 #include "library/components/rcclp.hpp"
+#include "core/components/fwd.hpp"
+#include "core/defines.hpp"
+#include "core/dynamic_library.hpp"
+#include "core/timemory.hpp"
 #include "library/components/category_region.hpp"
-#include "library/components/fwd.hpp"
-#include "library/defines.hpp"
-#include "library/dynamic_library.hpp"
-#include "library/timemory.hpp"
 
 #include <timemory/timemory.hpp>
 

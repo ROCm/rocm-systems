@@ -905,11 +905,12 @@ parse_args(int argc, char** argv, std::vector<char*>& _env,
     {
         auto _is_omni_cfg = [](std::string_view itr) {
             return (itr.find("OMNITRACE") == 0 && itr.find("OMNITRACE_MODE") != 0 &&
-                    itr.find("OMNITRACE_CONFIG_FILE") != 0 &&
-                    itr.find('=') < itr.length());
+                    itr.find("OMNITRACE_DEBUG_") != 0 && itr.find('=') < itr.length());
+            // omnitrace has miscellaneous env options starting with OMNITRACE_DEBUG_ that
+            // are not official options
         };
 
-        auto _omni_env = std::map<std::string, std::string>{};
+        auto _omni_env_m = std::map<std::string, std::string>{};
         for(auto* itr : _env)
         {
             if(_is_omni_cfg(itr))
@@ -918,11 +919,24 @@ parse_args(int argc, char** argv, std::vector<char*>& _env,
                 auto _pos     = _env_var.find('=');
                 auto _env_val = _env_var.substr(_pos + 1);
                 _env_var      = _env_var.substr(0, _pos);
-                _omni_env.emplace(_env_var, _env_val);
+                _omni_env_m.emplace(_env_var, _env_val);
             }
         }
 
         _env.erase(std::remove_if(_env.begin(), _env.end(), _is_omni_cfg), _env.end());
+
+        auto _omni_env = std::vector<std::pair<std::string, std::string>>{};
+        // make sure that OMNITRACE_CONFIG_FILE is the first entry
+        {
+            auto citr = _omni_env_m.find("OMNITRACE_CONFIG_FILE");
+            if(citr != _omni_env_m.end())
+            {
+                _omni_env.emplace_back(citr->first, citr->second);
+                _omni_env_m.erase(citr);
+            }
+        }
+        for(const auto& itr : _omni_env_m)
+            _omni_env.emplace_back(itr.first, itr.second);
 
         _causal_envs_tmp = std::move(_causal_envs);
         _causal_envs.clear();

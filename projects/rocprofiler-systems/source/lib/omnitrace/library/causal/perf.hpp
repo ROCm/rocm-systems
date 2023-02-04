@@ -22,8 +22,8 @@
 
 #pragma once
 
-#include "library/containers/c_array.hpp"
-#include "library/defines.hpp"
+#include "core/containers/c_array.hpp"
+#include "core/defines.hpp"
 
 #include <cstddef>
 #include <cstdint>

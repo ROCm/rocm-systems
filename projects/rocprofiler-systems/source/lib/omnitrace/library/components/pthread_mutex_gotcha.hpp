@@ -22,9 +22,9 @@
 
 #pragma once
 
-#include "library/common.hpp"
-#include "library/defines.hpp"
-#include "library/timemory.hpp"
+#include "core/common.hpp"
+#include "core/defines.hpp"
+#include "core/timemory.hpp"
 
 #include <timemory/components/gotcha/backends.hpp>
 #include <timemory/mpl/macros.hpp>

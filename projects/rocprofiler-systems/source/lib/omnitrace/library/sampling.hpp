@@ -22,14 +22,14 @@
 
 #pragma once
 
-#include "library/common.hpp"
+#include "core/common.hpp"
+#include "core/components/fwd.hpp"
+#include "core/defines.hpp"
+#include "core/timemory.hpp"
 #include "library/components/backtrace.hpp"
 #include "library/components/backtrace_metrics.hpp"
 #include "library/components/backtrace_timestamp.hpp"
-#include "library/components/fwd.hpp"
-#include "library/defines.hpp"
 #include "library/thread_data.hpp"
-#include "library/timemory.hpp"
 
 #include <timemory/macros/language.hpp>
 #include <timemory/variadic/types.hpp>

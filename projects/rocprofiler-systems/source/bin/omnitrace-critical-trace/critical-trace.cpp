@@ -23,9 +23,9 @@
 #include "critical-trace.hpp"
 
 #include "api.hpp"
-#include "library/config.hpp"
-#include "library/debug.hpp"
-#include "library/perfetto.hpp"
+#include "core/config.hpp"
+#include "core/debug.hpp"
+#include "core/perfetto.hpp"
 #include "library/tracing.hpp"
 
 #include <timemory/hash/types.hpp>

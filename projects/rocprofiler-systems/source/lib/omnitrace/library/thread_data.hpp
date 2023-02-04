@@ -23,15 +23,15 @@
 #pragma once
 
 #include "api.hpp"
-#include "library/common.hpp"
-#include "library/concepts.hpp"
-#include "library/config.hpp"
-#include "library/containers/stable_vector.hpp"
-#include "library/defines.hpp"
-#include "library/state.hpp"
+#include "core/common.hpp"
+#include "core/concepts.hpp"
+#include "core/config.hpp"
+#include "core/containers/stable_vector.hpp"
+#include "core/defines.hpp"
+#include "core/state.hpp"
+#include "core/timemory.hpp"
+#include "core/utility.hpp"
 #include "library/thread_deleter.hpp"
-#include "library/timemory.hpp"
-#include "library/utility.hpp"
 
 #include <timemory/utility/macros.hpp>
 #include <timemory/utility/types.hpp>
