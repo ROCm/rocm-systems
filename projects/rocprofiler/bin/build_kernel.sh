@@ -73,6 +73,10 @@ fi
 for GFXIP in $TGT_LIST ; do
   OBJ_PREF=$GFXIP
   OBJ_FILE="${OBJ_PREF}_${OBJ_NAME}.$SO_EXT"
+  # Kernels are currently compiled with code object version 4. In order to
+  # switch to code object version 5, kernel argument setup in
+  # rocprofiler/test/simple_convolution/simple_convolution needs to be updated
+  # according to https://llvm.org/docs/AMDGPUUsage.html#amdgpu-amdhsa-code-object-kernel-argument-metadata-map-table-v5
   $BIN_DIR/clang -cl-std=CL$OCL_VER -include $INC_DIR/opencl-c.h $BITCODE_OPTS -target amdgcn-amd-amdhsa -mcpu=$GFXIP -mcode-object-version=4 $TEST_NAME.cl -o $DST_DIR/$OBJ_FILE
   echo "'$OBJ_FILE' generated"
 done
