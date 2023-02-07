@@ -185,6 +185,12 @@ target_link_libraries ( profiler_api_test ${ROCPROFILER_TARGET} ${ROCPROFILER_TA
 target_include_directories(profiler_api_test PRIVATE ${TEST_DIR} ${ROOT_DIR} ${HSA_RUNTIME_INC_PATH} ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/tests/featuretests/profiler)
 add_dependencies(tests profiler_api_test)
 
+set_source_files_properties(discretetests/api/att_test.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+hip_add_executable ( profiler_api_att_test discretetests/api/att_test.cpp utils/test_utils.cpp )
+target_link_libraries ( profiler_api_att_test ${ROCPROFILER_TARGET} ${ROCPROFILER_TARGET} hsa-runtime64::hsa-runtime64 Threads::Threads dl stdc++fs )
+target_include_directories(profiler_api_att_test PRIVATE ${TEST_DIR} ${ROOT_DIR} ${HSA_RUNTIME_INC_PATH} ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/tests/featuretests/profiler)
+add_dependencies(tests profiler_api_att_test)
+
 set_source_files_properties(discretetests/api/spm_test.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
 hip_add_executable ( profiler_api_spm_test discretetests/api/spm_test.cpp utils/test_utils.cpp )
 target_link_libraries ( profiler_api_spm_test ${ROCPROFILER_TARGET} ${ROCPROFILER_TARGET} hsa-runtime64::hsa-runtime64 Threads::Threads dl stdc++fs )

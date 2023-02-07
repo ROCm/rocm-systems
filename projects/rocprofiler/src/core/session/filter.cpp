@@ -35,12 +35,25 @@ Filter::Filter(rocprofiler_filter_id_t id, rocprofiler_filter_kind_t filter_kind
     }
     case ROCPROFILER_COUNTERS_COLLECTION: {
       profiler_counter_names_.clear();
-      for (uint32_t j = 0; j < data_count; j++)
+      for (uint32_t j = 0; j < data_count; j++) {
         profiler_counter_names_.emplace_back(filter_data.counters_names[j]);
+      }
       break;
     }
-    case ROCPROFILER_PC_SAMPLING_COLLECTION:
-    case ROCPROFILER_ATT_TRACE: {
+    case ROCPROFILER_PC_SAMPLING_COLLECTION:{
+      break;
+    }
+    case ROCPROFILER_ATT_TRACE_COLLECTION: {
+      att_parameters_.clear();
+      profiler_counter_names_.clear();
+
+      for (uint32_t j = 0; j < data_count; j++) {
+        if (filter_data.att_parameters[j].parameter_name != ROCPROFILER_ATT_PERFCOUNTER_NAME) {
+          att_parameters_.emplace_back(filter_data.att_parameters[j]);
+        } else {
+          profiler_counter_names_.emplace_back(filter_data.att_parameters[j].counter_name);
+        }
+      }
       break;
     }
     case ROCPROFILER_SPM_COLLECTION: {
@@ -49,8 +62,9 @@ Filter::Filter(rocprofiler_filter_id_t id, rocprofiler_filter_kind_t filter_kind
     }
     case ROCPROFILER_API_TRACE: {
       tracer_apis_.clear();
-      for (uint32_t j = 0; j < data_count; j++)
-        tracer_apis_.emplace_back(filter_data.trace_apis[j]);
+      for (uint32_t j = 0; j < data_count; j++){
+          tracer_apis_.emplace_back(filter_data.trace_apis[j]);
+      }     
       break;
     }
     default: {
@@ -73,7 +87,7 @@ rocprofiler_filter_kind_t Filter::GetKind() { return kind_; }
 
 std::mutex counter_data_lock;
 std::vector<std::string> Filter::GetCounterData() {
-  if (kind_ == ROCPROFILER_COUNTERS_COLLECTION) {
+  if (kind_ == ROCPROFILER_COUNTERS_COLLECTION || kind_ == ROCPROFILER_ATT_TRACE_COLLECTION) {
     std::lock_guard<std::mutex> lock(counter_data_lock);
     return profiler_counter_names_;
   }
@@ -90,6 +104,16 @@ std::vector<rocprofiler_tracer_activity_domain_t> Filter::GetTraceData() {
       "Error: ROCMtools filter specified is not supported for "
       "profiler mode!\n");
 }
+
+std::vector<rocprofiler_att_parameter_t> Filter::GetAttParametersData() {
+  if (kind_ == ROCPROFILER_ATT_TRACE_COLLECTION) {
+    return att_parameters_;
+  }
+  fatal(
+      "Error: ROCMtools filter specified is not supported for "
+      "ATT tracing mode!\n");
+}
+
 rocprofiler_spm_parameter_t* Filter::GetSpmParameterData() {
   if (kind_ == ROCPROFILER_SPM_COLLECTION) {
     return spm_parameter_;
@@ -143,7 +167,8 @@ void Filter::SetProperty(rocprofiler_filter_property_t property) {
     }
     case ROCPROFILER_FILTER_KERNEL_NAMES: {
       if (kind_ == ROCPROFILER_COUNTERS_COLLECTION ||
-          kind_ == ROCPROFILER_DISPATCH_TIMESTAMPS_COLLECTION) {
+          kind_ == ROCPROFILER_DISPATCH_TIMESTAMPS_COLLECTION ||
+          kind_ == ROCPROFILER_ATT_TRACE_COLLECTION) {
         kernel_names_.clear();
         for (uint32_t j = 0; j < property.data_count; j++)
           kernel_names_.emplace_back(property.name_regex[j]);
@@ -166,23 +191,29 @@ std::variant<std::vector<std::string>, uint32_t*> Filter::GetProperty(
   switch (kind) {
     case ROCPROFILER_FILTER_GPU_NAME: {
       property = agent_names_;
+      break;
     }
     case ROCPROFILER_FILTER_RANGE: {
       property = static_cast<uint32_t*>(dispatch_range_);
+      break;
     }
     case ROCPROFILER_FILTER_KERNEL_NAMES: {
       property = kernel_names_;
+      break;
     }
     case ROCPROFILER_FILTER_HSA_TRACER_API_FUNCTIONS: {
       property = hsa_tracer_api_calls_;
+      break;
     }
     case ROCPROFILER_FILTER_HIP_TRACER_API_FUNCTIONS: {
       property = hip_tracer_api_calls_;
+      break;
     }
     default:
       fatal(
           "Error: ROCMtools filter specified is not supported for the given "
           "kind!");
+      break;
   }
   return property;
 }

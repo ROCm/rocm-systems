@@ -37,6 +37,7 @@
 #include "src/core/session/filter.h"
 #include "profiler/profiler.h"
 #include "tracer/tracer.h"
+#include "att/att.h"
 #include "spm/spm.h"
 #include "src/pcsampler/session/pc_sampler.h"
 
@@ -58,6 +59,7 @@ class Session {
 
   profiler::Profiler* GetProfiler();
   tracer::Tracer* GetTracer();
+  att::AttTracer* GetAttTracer();
   spm::SpmCounters* GetSpmCounter();
   pc_sampler::PCSampler* GetPCSampler();
 
@@ -104,6 +106,8 @@ class Session {
 
   std::atomic<bool> profiler_started_{false};
   std::atomic<bool> tracer_started_{false};
+  std::atomic<bool> att_tracer_started_{false};
+  att::AttTracer* att_tracer_;
   std::atomic<bool> spm_started_{false};
 
   profiler::Profiler* profiler_;

@@ -55,5 +55,25 @@ hsa_amd_memory_pool_t& GetCommandPool();
 hsa_amd_memory_pool_t& GetOutputPool();
 
 
+hsa_ven_amd_aqlprofile_profile_t* GenerateATTPackets(
+    hsa_agent_t cpu_agent, hsa_agent_t gpu_agent,
+    std::vector<hsa_ven_amd_aqlprofile_parameter_t>& att_params, packet_t* start_packet,
+    packet_t* stop_packet);
+
+
+uint8_t* AllocateSysMemory(hsa_agent_t gpu_agent, size_t size, hsa_amd_memory_pool_t* cpu_pool);
+
+void get_command_buffer_map(std::map<size_t, uint8_t*> );
+void get_outbuffer_map(std::map<size_t, uint8_t*> );
+void initialize_pools(hsa_agent_t cpu_agent);
+
+typedef struct {
+  hsa_amd_memory_pool_t cpu_mem_pool;
+  hsa_amd_memory_pool_t gpu_mem_pool;
+} att_memory_pools_t;
+
+att_memory_pools_t* GetAttMemPools(hsa_agent_t gpu_agent);
+
+
 }  // namespace Packet
 #endif  // SRC_CORE_HSA_PACKETS_PACKETS_GENERATOR_H_

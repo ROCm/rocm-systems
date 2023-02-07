@@ -471,7 +471,7 @@ typedef enum {
   /**
    * Represents a ATT tracing record (Not available yet)
    */
-  ROCPROFILER_ATT_RECORD = 2,
+  ROCPROFILER_ATT_TRACER_RECORD = 2,
   /**
    * Represents a PC sampling record
    */
@@ -1045,6 +1045,66 @@ typedef struct {
   rocprofiler_record_se_spm_data_t shader_engine_data[4];
 
 } rocprofiler_record_spm_t;
+
+/**
+ * struct to store the trace data from a shader engine.
+ */
+typedef struct {
+  void* buffer_ptr;
+  uint32_t buffer_size;
+} rocprofiler_record_se_att_data_t;
+
+ /**
+ * ATT tracing record structure.
+ * This will represent all the information reported by the
+ * ATT tracer such as the kernel and its thread trace data.
+ * This record can be flushed to the user using
+ * ::rocmtools_buffer_callback_t
+ */
+typedef struct {
+  /**
+   * ROCMtool General Record base header to identify the id and kind of every
+   * record
+   */
+  rocprofiler_record_header_t header;
+  /**
+   * Kernel Identifier to be used by the user to get the kernel info using
+   * ::rocmtools_query_kernel_info
+   */
+  rocprofiler_kernel_id_t kernel_id;
+  /**
+   * Agent Identifier to be used by the user to get the Agent Information using
+   * ::rocmtools_query_agent_info
+   */
+  rocprofiler_agent_id_t gpu_id;
+  /**
+   * Queue Identifier to be used by the user to get the Queue Information using
+   * ::rocmtools_query_agent_info
+   */
+  rocprofiler_queue_id_t queue_id;
+  /**
+   * kernel properties, including the grid size, work group size,
+   * registers count, wave size and completion signal
+   */
+  rocprofiler_kernel_properties_t kernel_properties;
+  /**
+   * Thread id
+   */
+  rocprofiler_thread_id_t thread_id;
+  /**
+   * Queue Index - packet index in the queue
+   */
+  rocprofiler_queue_index_t queue_idx;
+  /**
+   * ATT data output from each shader engine.
+   */
+  rocprofiler_record_se_att_data_t* shader_engine_data;
+  /**
+   * The count of the shader engine ATT data
+   */
+  uint64_t shader_engine_data_count;
+} rocprofiler_record_att_tracer_t;
+
 
 
 /** @} */
@@ -1721,7 +1781,7 @@ typedef enum {
   /**
    * ATT Tracing. (Not Yet Supported)
    */
-  ROCPROFILER_ATT_TRACE = 4,
+  ROCPROFILER_ATT_TRACE_COLLECTION = 4,
   /**
    * SPM collection. (Not Yet Supported)
    */
@@ -1763,6 +1823,31 @@ typedef enum {
 // TODO(aelwazir): Another way to define this as needed
 typedef const char* rocprofiler_hip_function_name_t;
 typedef const char* rocprofiler_hsa_function_name_t;
+
+// ATT tracing parameter names
+typedef enum {
+  ROCPROFILER_ATT_COMPUTE_UNIT_TARGET = 0,
+  ROCPROFILER_ATT_VM_ID_MASK = 1,
+  ROCPROFILER_ATT_MASK = 2,
+  ROCPROFILER_ATT_TOKEN_MASK = 3,
+  ROCPROFILER_ATT_TOKEN_MASK2 = 4,
+  ROCPROFILER_ATT_SE_MASK = 5,
+  ROCPROFILER_ATT_SAMPLE_RATE = 6,
+  ROCPROFILER_ATT_PERF_MASK = 240,
+  ROCPROFILER_ATT_PERF_CTRL = 241,
+  ROCPROFILER_ATT_PERFCOUNTER = 242,
+  ROCPROFILER_ATT_PERFCOUNTER_NAME = 243,
+  ROCPROFILER_ATT_MAXVALUE
+} rocprofiler_att_parameter_name_t;
+
+// att tracing parameters object
+typedef struct {
+  rocprofiler_att_parameter_name_t parameter_name;
+  union {
+    uint32_t value;
+    const char* counter_name;
+  };
+} rocprofiler_att_parameter_t;
 
 /**
  * Filter Data Type
@@ -1822,6 +1907,10 @@ typedef union {
    * Counters to profile
    */
   const char** counters_names;
+  /**
+   * att parameters
+   */
+  rocprofiler_att_parameter_t* att_parameters;
   /**
    * spm counters parameters
    */

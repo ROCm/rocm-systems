@@ -43,7 +43,8 @@ GenericBuffer::GenericBuffer(rocprofiler_session_id_t session_id, rocprofiler_bu
     // pointer moves to the other buffer. Each buffer should be large enough to
     // hold at least 2 activity records, as record pairs may be written when
     // external correlation ids are used.
-    const size_t allocation_size = 2 * std::max(2 * sizeof(rocprofiler_record_header_t), buffer_size);
+    const size_t allocation_size =
+        2 * std::max(2 * sizeof(rocprofiler_record_header_t), buffer_size);
     pool_begin_ = nullptr;
     AllocateMemory(&pool_begin_, allocation_size);
     assert(pool_begin_ != nullptr && "pool allocator failed");
@@ -212,6 +213,12 @@ bool GetNextRecord(const rocprofiler_record_header_t* record,
       // }
       // break;
       *next = reinterpret_cast<const rocprofiler_record_header_t*>(tracer_record + 1);
+    }
+    case ROCPROFILER_ATT_TRACER_RECORD: {
+      const rocprofiler_record_att_tracer_t* att_tracer_record =
+          reinterpret_cast<const rocprofiler_record_att_tracer_t*>(record);
+      *next = reinterpret_cast<const rocprofiler_record_header_t*>(att_tracer_record + 1);
+      break;
     }
     default:
       const rocprofiler_record_tracer_t* tracer_record =

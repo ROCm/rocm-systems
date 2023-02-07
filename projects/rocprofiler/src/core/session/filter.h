@@ -47,7 +47,7 @@ class Filter {
 
   std::vector<std::string> GetCounterData();
   std::vector<rocprofiler_tracer_activity_domain_t> GetTraceData();
-
+  std::vector<rocprofiler_att_parameter_t> GetAttParametersData();
   void SetCallback(rocprofiler_sync_callback_t& callback);
   rocprofiler_sync_callback_t& GetCallback();
 
@@ -71,6 +71,7 @@ class Filter {
   std::vector<std::string> profiler_counter_names_;              // Counter Names to collect
   std::vector<rocprofiler_tracer_activity_domain_t> tracer_apis_;  // ROCTX/HIP/HSA API
   rocprofiler_spm_parameter_t* spm_parameter_;                     // spm parameter
+  std::vector<rocprofiler_att_parameter_t> att_parameters_;  // ATT Parameters
 
   rocprofiler_sync_callback_t callback_;
 };

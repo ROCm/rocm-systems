@@ -403,6 +403,9 @@ class file_plugin_t {
           FlushTracerRecord(*tracer_record, session_id, buffer_id);
           break;
         }
+        case ROCPROFILER_ATT_TRACER_RECORD: {
+          break;
+        }
         case ROCPROFILER_PC_SAMPLING_RECORD: {
           const rocprofiler_record_pc_sample_t *pc_sampling_record =
              reinterpret_cast<const rocprofiler_record_pc_sample_t *>(begin);

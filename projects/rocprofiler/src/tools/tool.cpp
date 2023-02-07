@@ -172,6 +172,134 @@ std::vector<std::string> GetCounterNames() {
   return counters;
 }
 
+typedef std::tuple<
+  std::vector<std::pair<rocprofiler_att_parameter_name_t, uint32_t>>,
+  std::vector<std::string>, std::vector<std::string>
+> att_parsed_input_t;
+
+att_parsed_input_t GetATTParams() {
+  std::vector<std::pair<rocprofiler_att_parameter_name_t, uint32_t>> parameters;
+  std::vector<std::string> kernel_names;
+  std::vector<std::string> counters_names;
+  const char* path = getenv("COUNTERS_PATH");
+
+  // List of parameters the user can set. Maxvalue is unused.
+  std::unordered_map<std::string, rocprofiler_att_parameter_name_t> ATT_PARAM_NAMES{};
+
+  ATT_PARAM_NAMES["att: TARGET_CU"] = ROCPROFILER_ATT_COMPUTE_UNIT_TARGET;
+  ATT_PARAM_NAMES["SIMD_MASK"] = ROCPROFILER_ATT_MAXVALUE;
+  ATT_PARAM_NAMES["PERFCOUNTER_ID"] = ROCPROFILER_ATT_PERFCOUNTER;
+  ATT_PARAM_NAMES["PERFCOUNTER"] = ROCPROFILER_ATT_PERFCOUNTER_NAME;
+  ATT_PARAM_NAMES["PERFCOUNTERS_COL_PERIOD"] = ROCPROFILER_ATT_MAXVALUE;
+  ATT_PARAM_NAMES["KERNEL"] = ROCPROFILER_ATT_MAXVALUE;
+  ATT_PARAM_NAMES["REDUCED_MEMORY"] = ROCPROFILER_ATT_MAXVALUE;
+ /*
+  ATT_PARAM_NAMES["ATT_MASK"] = ROCMTOOLS_ATT_MASK;
+  ATT_PARAM_NAMES["TOKEN_MASK"] = ROCMTOOLS_ATT_TOKEN_MASK;
+  ATT_PARAM_NAMES["TOKEN_MASK2"] = ROCMTOOLS_ATT_TOKEN_MASK2;
+  ATT_PARAM_NAMES["SE_MASK"] = ROCMTOOLS_ATT_SE_MASK;
+  ATT_PARAM_NAMES["PERF_MASK"] = ROCMTOOLS_ATT_PERF_MASK;
+  ATT_PARAM_NAMES["PERF_CTRL"] = ROCMTOOLS_ATT_PERF_CTRL;
+*/
+
+  // Default values used for token generation.
+  std::unordered_map<std::string, uint32_t> default_params = {
+    {"ATT_MASK", 0x3F01},
+    {"TOKEN_MASK", 0x344B},
+    {"TOKEN_MASK2", 0x3FFFF}
+  };
+
+  bool started_att_counters = false;
+
+  if (!path) return {parameters, kernel_names, counters_names};
+
+  std::string line;
+  std::ifstream trace_file(path);
+  if (!trace_file.is_open()) {
+    std::cout << "Unable to open att trace file." << std::endl;
+    return {parameters, kernel_names, counters_names};
+  }
+
+  while (getline(trace_file, line)) {
+    if (line.find("//") != std::string::npos)
+      line = line.substr(0, line.find("//")); // Remove comments
+
+    auto pos = line.find('=');
+    if (pos == std::string::npos)
+      continue;
+
+    std::string param_name = line.substr(0, pos);
+    uint32_t param_value;
+
+    if (param_name == "att: TARGET_CU") started_att_counters = true;
+    if (!started_att_counters) continue;
+
+    if (param_name == "KERNEL") {
+      kernel_names.push_back(line.substr(pos+1));
+      continue;
+    } else if (param_name == "PERFCOUNTER") {
+      counters_names.push_back(line.substr(pos+1));
+      continue;
+    } else { // param_value is a number
+      try {
+        auto hexa_pos = line.find("0x", pos);                 // Is it hex?
+        if (hexa_pos != std::string::npos)
+          param_value = stoi(line.substr(hexa_pos+2), 0, 16); // hexadecimal
+        else
+          param_value = stoi(line.substr(pos+1), 0, 10);      // decimal
+      } catch(...) {
+        printf("Error: Invalid parameter value %s - (%s)\n",
+              line.substr(pos+1, line.size()).c_str(), line.c_str());
+        exit(1);
+      }
+    }
+
+    if (param_name == "PERFCOUNTERS_COL_PERIOD") {
+      default_params["TOKEN_MASK"] |= 0x4000;
+      param_value = ((param_value & 0x1F) << 8) | 0x007F;
+      parameters.push_back(std::make_pair(ROCPROFILER_ATT_PERF_CTRL, param_value));
+      continue;
+    } else if (param_name == "SIMD_MASK") {
+      default_params["ATT_MASK"] &= ~0xF00;
+      default_params["ATT_MASK"] |= (param_value<<8) & 0xF00;
+      continue;
+    } else if (param_name == "att: TARGET_CU") {
+      default_params["ATT_MASK"] &= ~0xF;
+      default_params["ATT_MASK"] |= param_value & 0xF;
+    } else if (param_name == "PERFCOUNTER_ID") {
+      param_value = param_value | (param_value ? (0xF<<24) : 0);
+    } else if (param_name == "REDUCED_MEMORY") {
+      default_params["TOKEN_MASK2"] = 0;
+      continue;
+    }
+
+    if (ATT_PARAM_NAMES.find(param_name) != ATT_PARAM_NAMES.end()) {
+      parameters.push_back(std::make_pair(ATT_PARAM_NAMES[param_name], param_value));
+      try { default_params.erase(param_name); } catch(...) {};
+    } else {
+        printf("Error: Invalid parameter name: %s  - (%s)\nList of available params:\n", 
+                param_name.c_str(), line.c_str());
+        for (auto& name : ATT_PARAM_NAMES) printf("%s\n", name.first.c_str());
+    }
+  }
+  trace_file.close();
+
+  if (!started_att_counters) return {parameters, kernel_names, counters_names};
+
+  ATT_PARAM_NAMES["ATT_MASK"] = ROCPROFILER_ATT_MASK;
+  ATT_PARAM_NAMES["TOKEN_MASK"] = ROCPROFILER_ATT_TOKEN_MASK;
+  ATT_PARAM_NAMES["TOKEN_MASK2"] = ROCPROFILER_ATT_TOKEN_MASK2;
+    
+  for (auto& param : default_params)
+    parameters.push_back(std::make_pair(ATT_PARAM_NAMES[param.first], param.second));
+
+  // If no kernel names were provided, collect them all.
+  // Empty string always returns true for "str.find()".
+  if (kernel_names.size() == 0) kernel_names.push_back("");
+
+  return {parameters, kernel_names, counters_names};
+}
+
 void finish() {
   if (amd_sys_handler.load(std::memory_order_release)) {
     amd_sys_handler.exchange(false, std::memory_order_release);
@@ -335,11 +463,26 @@ ROCPROFILER_EXPORT bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
   std::vector<const char*> counters_;
 
   if (counters.size() > 0) {
-    printf("ROCMTools: Collecting the following counters:\n");
+    printf("ROCProfilerV2: Collecting the following counters:\n");
     for (size_t i = 0; i < counters.size(); i++) {
       counters_.emplace_back(counters.at(i).c_str());
       printf("- %s\n", counters_.back());
     }
+  }
+  // ATT Parameters
+  std::vector<rocprofiler_att_parameter_t> parameters;
+  std::vector<std::pair<rocprofiler_att_parameter_name_t, uint32_t>> params;
+  std::vector<std::string> kernel_names;
+  std::vector<std::string> att_counters_names;
+  std::tie(params, kernel_names, att_counters_names) = GetATTParams();
+
+  for (auto& kv_pair : params)
+    parameters.emplace_back(rocprofiler_att_parameter_t{kv_pair.first, kv_pair.second});
+  for (std::string& name : att_counters_names) {
+    rocprofiler_att_parameter_t param;
+    param.parameter_name = ROCPROFILER_ATT_PERFCOUNTER_NAME;
+    param.counter_name = name.c_str();
+    parameters.emplace_back(param);
   }
 
   CHECK_ROCMTOOLS(rocprofiler_create_session(ROCPROFILER_KERNEL_REPLAY_MODE, &session_id));
@@ -347,7 +490,7 @@ ROCPROFILER_EXPORT bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
   bool want_pc_sampling = getenv("ROCPROFILER_PC_SAMPLING");
 
   std::vector<rocprofiler_filter_kind_t> filters_requested;
-  if ((counters.size() == 0 && (apis_requested.size() == 0 || getenv("ROCPROFILER_KERNEL_TRACE")))
+  if (((counters.size() == 0 && parameters.size() == 0) && (apis_requested.size() == 0 || getenv("ROCPROFILER_KERNEL_TRACE")))
       || want_pc_sampling /* PC sampling needs a profiler, even it's doing
                              nothing */)
     filters_requested.emplace_back(ROCPROFILER_DISPATCH_TIMESTAMPS_COLLECTION);
@@ -356,6 +499,7 @@ ROCPROFILER_EXPORT bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
   }
   if (counters.size() > 0) filters_requested.emplace_back(ROCPROFILER_COUNTERS_COLLECTION);
   if (apis_requested.size() > 0) filters_requested.emplace_back(ROCPROFILER_API_TRACE);
+  if (parameters.size() > 0) filters_requested.emplace_back(ROCPROFILER_ATT_TRACE_COLLECTION);
 
   rocprofiler_buffer_id_t buffer_id;
   CHECK_ROCMTOOLS(rocprofiler_create_buffer(
@@ -364,7 +508,7 @@ ROCPROFILER_EXPORT bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
          rocprofiler_session_id_t session_id, rocprofiler_buffer_id_t buffer_id) {
         if (plugin) plugin->write_buffer_records(record, end_record, session_id, buffer_id);
       },
-      0x9999, &buffer_id));
+      1<<20, &buffer_id));
   buffer_ids.emplace_back(buffer_id);
 
   rocprofiler_buffer_id_t buffer_id_1;
@@ -374,7 +518,7 @@ ROCPROFILER_EXPORT bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
          rocprofiler_session_id_t session_id, rocprofiler_buffer_id_t buffer_id_1) {
         if (plugin) plugin->write_buffer_records(record, end_record, session_id, buffer_id_1);
       },
-      0x9999, &buffer_id_1));
+      1<<20, &buffer_id_1));
   buffer_ids.emplace_back(buffer_id_1);
 
   for (rocprofiler_filter_kind_t filter_kind : filters_requested) {
@@ -409,6 +553,26 @@ ROCPROFILER_EXPORT bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
         CHECK_ROCMTOOLS(rocprofiler_set_filter_buffer(session_id, filter_id, buffer_id));
         CHECK_ROCMTOOLS(
             rocprofiler_set_api_trace_sync_callback(session_id, filter_id, plugin_write_record));
+        filter_ids.emplace_back(filter_id);
+        break;
+      }
+      case ROCPROFILER_ATT_TRACE_COLLECTION: {
+        printf("Enabling ATT Tracing\n");
+        rocprofiler_filter_id_t filter_id;
+
+        std::vector<const char*> kernel_names_c;
+        for (auto& name : kernel_names) kernel_names_c.push_back(name.data());
+
+        rocprofiler_filter_property_t property = {};
+        property.kind = ROCPROFILER_FILTER_KERNEL_NAMES;
+        property.data_count = kernel_names_c.size();
+        property.name_regex = kernel_names_c.data();
+
+        CHECK_ROCMTOOLS(
+            rocprofiler_create_filter(session_id, ROCPROFILER_ATT_TRACE_COLLECTION,
+                                    rocprofiler_filter_data_t{.att_parameters = &parameters[0]},
+                                    parameters.size(), &filter_id, property));
+        CHECK_ROCMTOOLS(rocprofiler_set_filter_buffer(session_id, filter_id, buffer_id_1));
         filter_ids.emplace_back(filter_id);
         break;
       }

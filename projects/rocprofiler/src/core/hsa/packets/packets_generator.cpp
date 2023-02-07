@@ -486,4 +486,146 @@ hsa_ven_amd_aqlprofile_profile_t* InitializeDeviceProfilingAqlPackets(
   return profile;
 }
 
+// ATT
+uint32_t g_output_buffer_size = 0x8000000;  // 128M x 16 = 2GB
+bool g_output_buffer_local = true;
+
+// Allocate system memory accessible by both CPU and GPU
+uint8_t* AllocateSysMemory(hsa_agent_t gpu_agent, size_t size, hsa_amd_memory_pool_t* cpu_pool) {
+  hsa_status_t status = HSA_STATUS_ERROR;
+  uint8_t* buffer = NULL;
+  size = (size + MEM_PAGE_MASK) & ~MEM_PAGE_MASK;
+  // if (!cpu_agents_.empty()) {
+  status = hsa_amd_memory_pool_allocate(*cpu_pool, size, 0, reinterpret_cast<void**>(&buffer));
+  // Both the CPU and GPU can access the memory
+  if (status == HSA_STATUS_SUCCESS) {
+    hsa_agent_t ag_list[1] = {gpu_agent};
+    status = hsa_amd_agents_allow_access(1, ag_list, NULL, buffer);
+  }
+  // }
+  uint8_t* ptr = (status == HSA_STATUS_SUCCESS) ? buffer : NULL;
+  return ptr;
+}
+
+// Allocate memory for use by a kernel of specified size
+uint8_t* AllocateLocalMemory(size_t size, hsa_amd_memory_pool_t* gpu_pool) {
+  hsa_status_t status = HSA_STATUS_ERROR;
+  uint8_t* buffer = NULL;
+  size = (size + MEM_PAGE_MASK) & ~MEM_PAGE_MASK;
+  status = hsa_amd_memory_pool_allocate(*gpu_pool, size, 0, reinterpret_cast<void**>(&buffer));
+  uint8_t* ptr = (status == HSA_STATUS_SUCCESS) ? buffer : NULL;
+  return ptr;
+}
+
+hsa_status_t Allocate(hsa_agent_t gpu_agent, hsa_ven_amd_aqlprofile_profile_t* profile,
+                      hsa_amd_memory_pool_t* cpu_pool, hsa_amd_memory_pool_t* gpu_pool) {
+  profile->command_buffer.ptr =
+      AllocateSysMemory(gpu_agent, profile->command_buffer.size, cpu_pool);
+  profile->output_buffer.size = g_output_buffer_size;
+  profile->output_buffer.ptr = (g_output_buffer_local)
+      ? AllocateLocalMemory(profile->output_buffer.size, gpu_pool)
+      : AllocateSysMemory(gpu_agent, profile->output_buffer.size, cpu_pool);
+  return (profile->command_buffer.ptr && profile->output_buffer.ptr) ? HSA_STATUS_SUCCESS
+                                                                     : HSA_STATUS_ERROR;
+}
+
+bool AllocateMemoryPools(hsa_agent_t cpu_agent, hsa_agent_t gpu_agent,
+                         hsa_amd_memory_pool_t* cpu_pool, hsa_amd_memory_pool_t* gpu_pool) {
+  hsa_status_t status = hsa_amd_agent_iterate_memory_pools(cpu_agent, FindStandardPool, cpu_pool);
+  CHECK_HSA_STATUS("hsa_amd_agent_iterate_memory_pools(cpu_pool)", status);
+
+  status = hsa_amd_agent_iterate_memory_pools(gpu_agent, FindStandardPool, gpu_pool);
+  CHECK_HSA_STATUS("hsa_amd_agent_iterate_memory_pools(gpu_pool)", status);
+
+  return true;
+}
+
+// map between gpu agent handle and att_memory_pools_t
+typedef std::map<uint64_t, att_memory_pools_t*> att_mem_pools_map_t;
+
+att_mem_pools_map_t* agent_att_mem_pools_map = nullptr;
+std::atomic<bool> att_map_init{false};
+
+att_mem_pools_map_t* GetAttMemPoolsMap() {
+  if (!att_map_init.load(std::memory_order_relaxed)) {
+    agent_att_mem_pools_map = new att_mem_pools_map_t();
+    att_map_init.exchange(true, std::memory_order_release);
+  }
+
+  return agent_att_mem_pools_map;
+}
+
+
+att_memory_pools_t* GetAttMemPools(hsa_agent_t gpu_agent) {
+  auto it = GetAttMemPoolsMap()->find(gpu_agent.handle);
+  if (it != GetAttMemPoolsMap()->end()) {
+    return it->second;
+  }
+  printf("Error: att_memory_pools_t instance not found for given gpu agent handle: %lu\n",
+         gpu_agent.handle);
+
+  return nullptr;
+}
+
+// Generate start and stop packets for collecting ATT traces
+// Also generate and return the profile object which has the PM4
+// command buffer and the output buffer for retrieving the traces
+hsa_ven_amd_aqlprofile_profile_t* GenerateATTPackets(
+    hsa_agent_t cpu_agent, hsa_agent_t gpu_agent,
+    std::vector<hsa_ven_amd_aqlprofile_parameter_t>& att_params, packet_t* start_packet,
+    packet_t* stop_packet) {
+  att_memory_pools_t* att_mem_pools = NULL;
+  auto it = GetAttMemPoolsMap()->find(gpu_agent.handle);
+  if (it == GetAttMemPoolsMap()->end()) {
+    att_mem_pools = new att_memory_pools_t;
+
+    // Allocate memory pools for cpu and gpu
+    AllocateMemoryPools(cpu_agent, gpu_agent, &att_mem_pools->cpu_mem_pool,
+                        &att_mem_pools->gpu_mem_pool);
+
+    GetAttMemPoolsMap()->emplace(gpu_agent.handle, att_mem_pools);
+  } else
+    att_mem_pools = it->second;
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wconversion-null"
+  // Preparing the profile structure to get the packets
+  hsa_ven_amd_aqlprofile_profile_t* profile =
+      new hsa_ven_amd_aqlprofile_profile_t{gpu_agent,
+                                           HSA_VEN_AMD_AQLPROFILE_EVENT_TYPE_TRACE,
+                                           nullptr,
+                                           0,
+                                           &att_params[0],
+                                           (uint32_t)att_params.size(),
+                                           NULL,
+                                           NULL};
+#pragma GCC diagnostic pop
+
+  // Check the profile buffer sizes
+  hsa_status_t status = hsa_ven_amd_aqlprofile_start(profile, NULL);
+  if (status != HSA_STATUS_SUCCESS) printf("Error: aqlprofile_start(NULL)");
+  // // Double output buffer size if concurrent
+  // if (is_concurrent) profile.output_buffer.size *= 2;
+
+  // TODO: create a separate class for memory allocations
+  // Maintain pools per device
+  // handle allocation and resource cleanup
+
+
+  // Allocate command and output buffers
+  // command buffer -> from CPU memory pool
+  // output buffer -> from GPU memory pool
+  status =
+      Allocate(gpu_agent, profile, &att_mem_pools->cpu_mem_pool, &att_mem_pools->gpu_mem_pool);
+  if (status != HSA_STATUS_SUCCESS) printf("Error: Allocate()");
+
+  // Generate start/stop/read profiling packets
+  status = hsa_ven_amd_aqlprofile_start(profile, start_packet);
+  if (status != HSA_STATUS_SUCCESS) printf("Error: aqlprofile_start");
+  status = hsa_ven_amd_aqlprofile_stop(profile, stop_packet);
+  if (status != HSA_STATUS_SUCCESS) printf("Error: aqlprofile_stop");
+  if (status == HSA_STATUS_ERROR) return nullptr;
+  return profile;
+}
+
 }  // namespace Packet
