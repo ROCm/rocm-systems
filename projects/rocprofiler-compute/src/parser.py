@@ -386,7 +386,9 @@ def parse(my_parser):
         help="\t\tSpecify the output file.",
     )
     analyze_group.add_argument(
-        "--list-kernels", action="store_true", help="\t\tList kernels."
+        "--list-kernels",
+        action="store_true",
+        help="\t\tList kernels. Top 10 kernels sorted by duration (descending order).",
     )
     analyze_group.add_argument(
         "--list-metrics",
