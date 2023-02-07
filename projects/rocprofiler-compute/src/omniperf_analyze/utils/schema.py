@@ -33,7 +33,6 @@ from collections import OrderedDict
 
 @dataclass
 class ArchConfig:
-
     # [id: panel_config] pairs
     panel_configs: OrderedDict = field(default=dict)
 

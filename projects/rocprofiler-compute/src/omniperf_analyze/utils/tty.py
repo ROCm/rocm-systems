@@ -74,11 +74,9 @@ def show_all(runs, archConfigs, output, decimal, time_unit, selected_cols, verbo
                         )
                         or (type == "raw_csv_table")
                     ):
-
                         if header in hidden_columns:
                             pass
                         elif header not in comparable_columns:
-
                             if (
                                 type == "raw_csv_table"
                                 and table_config["source"] == "pmc_kernel_top.csv"

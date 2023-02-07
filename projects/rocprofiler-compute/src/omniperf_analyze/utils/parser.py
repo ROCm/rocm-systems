@@ -346,7 +346,6 @@ def build_dfs(archConfigs, filter_metrics):
 
                     i = 0
                     for key, entries in data_cofig["metric"].items():
-
                         data_source_idx = (
                             str(data_cofig["id"] // 100)
                             + "."
@@ -365,7 +364,6 @@ def build_dfs(archConfigs, filter_metrics):
                             # the whole IP block in filter
                             (str(panel_id // 100) in filter_metrics)
                         ):
-
                             values.append(metric_idx)
                             values.append(key)
                             for k, v in entries.items():
@@ -401,7 +399,6 @@ def build_dfs(archConfigs, filter_metrics):
                         or (data_source_idx == "0")  # no filter
                         or (data_source_idx in filter_metrics)
                     ):
-
                         if (
                             "columnwise" in data_cofig
                             and data_cofig["columnwise"] == True

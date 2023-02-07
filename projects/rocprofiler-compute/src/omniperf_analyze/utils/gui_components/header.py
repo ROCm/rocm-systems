@@ -27,6 +27,7 @@ from omniperf_analyze.utils import schema
 
 avail_normalizations = ["per_wave", "per_cycle", "per_second", "per_kernel"]
 
+
 # List all the unique column values for desired column in df, 'target_col'
 def list_unique(orig_list, is_numeric):
     list_set = set(orig_list)

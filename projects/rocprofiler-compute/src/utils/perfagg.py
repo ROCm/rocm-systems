@@ -85,7 +85,6 @@ perfmon_config = {
 
 
 def perfmon_coalesce(pmc_files_list, workload_dir, soc):
-
     workload_perfmon_dir = workload_dir + "/perfmon"
 
     # match pattern for pmc counters
@@ -110,7 +109,6 @@ def perfmon_coalesce(pmc_files_list, workload_dir, soc):
 
     # Extract all PMC counters and store in separate buckets
     for fname in pmc_files_list:
-
         lines = open(fname, "r").read().splitlines()
 
         for line in lines:
@@ -183,7 +181,6 @@ def perfmon_coalesce(pmc_files_list, workload_dir, soc):
 
 
 def perfmon_emit(pmc_list, workload_dir, soc):
-
     workload_perfmon_dir = workload_dir + "/perfmon"
 
     # Calculate the minimum number of iteration to save the pmc counters
@@ -246,7 +243,6 @@ def perfmon_emit(pmc_list, workload_dir, soc):
 
 
 def perfmon_filter(workload_dir, perfmon_dir, args):
-
     workload_perfmon_dir = workload_dir + "/perfmon"
     soc = args.target
 
@@ -288,7 +284,6 @@ def perfmon_filter(workload_dir, perfmon_dir, args):
 
 
 def pmc_filter(workload_dir, perfmon_dir, soc):
-
     workload_perfmon_dir = workload_dir + "/perfmon"
 
     if not os.path.isdir(workload_perfmon_dir):

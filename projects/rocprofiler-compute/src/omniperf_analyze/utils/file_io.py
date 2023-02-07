@@ -217,7 +217,6 @@ def collect_wave_occu_per_cu(in_dir, out_dir, numSE):
     for i in range(numSE):
         p = Path(in_dir, "wave_occu_se" + str(i) + ".csv")
         if p.exists():
-
             tmp_df = pd.read_csv(p)
             SE_idx = "SE" + str(tmp_df.loc[0, "SE"])
             tmp_df.rename(

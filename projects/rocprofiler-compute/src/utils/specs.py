@@ -84,7 +84,6 @@ class MachineSpecs:
 
 
 def gpuinfo():
-
     rocminfo = run(["rocminfo"]).split("\n")
 
     for idx1, linetext in enumerate(rocminfo):
@@ -97,7 +96,6 @@ def gpuinfo():
 
     L1, L2 = "", ""
     for idx2, linetext in enumerate(rocminfo[idx1 + 1 :]):
-
         key = search(r"^\s*L1:\s+ ([a-zA-Z0-9]+)\s*", linetext)
         if key != None:
             L1 = key
@@ -159,7 +157,6 @@ def search(pattern, string):
 
 
 def get_machine_specs(devicenum):
-
     cpuinfo = path("/proc/cpuinfo").read_text()
     meminfo = path("/proc/meminfo").read_text()
     version = path("/proc/version").read_text()

@@ -59,6 +59,7 @@ barchart_elements = {
     "l2_cache_per_chan": [1801, 1802],
 }
 
+
 ##################
 # HELPER FUNCTIONS
 ##################
@@ -83,7 +84,6 @@ def multi_bar_chart(table_id, display_df):
 
 
 def discrete_background_color_bins(df, n_bins=5, columns="all"):
-
     bounds = [i * (1.0 / n_bins) for i in range(n_bins + 1)]
     if columns == "all":
         if "id" in df:
@@ -191,7 +191,7 @@ def build_bar_chart(display_df, table_config, norm_filt):
     elif table_config["id"] in barchart_elements["l2_cache_per_chan"]:
         nested_bar = {}
         channels = []
-        for (colName, colData) in display_df.items():
+        for colName, colData in display_df.items():
             if colName == "Channel":
                 channels = list(colData.values)
             else:

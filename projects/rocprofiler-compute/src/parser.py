@@ -33,7 +33,6 @@ from common import getVersion, getVersionDisplay
 
 
 def parse(my_parser):
-
     # versioning info
     vData = getVersion()
     versionString = getVersionDisplay(vData["version"], vData["sha"], vData["mode"])

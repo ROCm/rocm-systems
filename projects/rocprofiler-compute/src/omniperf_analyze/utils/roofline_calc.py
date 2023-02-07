@@ -42,6 +42,7 @@ FONT_WEIGHT = "bold"
 
 SUPPORTED_SOC = ["mi200"]
 
+
 ################################################
 # Helper funcs
 ################################################
@@ -181,7 +182,6 @@ def plot_roof(roof_details, roof_data, mem_level, verbose):
 # -------------------------------------------------------------------------------------
 # Calculate relevent metrics for ai calculation
 def plot_application(sortType, ret_df, verbose):
-
     df = ret_df["pmc_perf"]
     # Sort by top kernels or top dispatches?
     df = df.sort_values(by=["KernelName"])
@@ -472,7 +472,6 @@ def plot_application(sortType, ret_df, verbose):
 
 
 def empirical_roof(roof_info, mem_level, verbose):
-
     roofPath = roof_info["path"] + "/roofline.csv"
     # -----------------------------------------------------
     # Initialize roofline data dictionary from roofline.csv

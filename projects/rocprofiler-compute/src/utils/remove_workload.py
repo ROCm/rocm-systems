@@ -26,6 +26,7 @@ import argparse
 import getpass
 from pymongo import MongoClient
 
+
 # Verify target directory and setup connection
 def remove_workload(args):
     # parser = argparse.ArgumentParser(description='Remove a workload from an Omniperf Instance')

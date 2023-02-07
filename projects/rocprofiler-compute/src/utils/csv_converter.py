@@ -37,7 +37,6 @@ MAX_SERVER_SEL_DELAY = 5000  # 5 sec connection timeout
 
 
 def kernel_name_shortener(df, cache, level):
-
     if level >= 5:
         return df
 
@@ -50,7 +49,6 @@ def kernel_name_shortener(df, cache, level):
     if columnName == "KernelName" or columnName == "Name":
         # loop through all indices
         for index in df.index:
-
             original_name = df.loc[index, columnName]
             if original_name in cache:
                 continue
