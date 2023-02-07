@@ -23,6 +23,7 @@
 #include "omnitrace.hpp"
 #include "common/defines.h"
 #include "fwd.hpp"
+#include "internal_libs.hpp"
 #include "log.hpp"
 
 #include <timemory/backends/process.hpp>
@@ -81,31 +82,33 @@ get_default_min_address_range()
 }
 }  // namespace
 
-bool     use_return_info         = false;
-bool     use_args_info           = false;
-bool     use_file_info           = false;
-bool     use_line_info           = false;
-bool     allow_overlapping       = false;
-bool     loop_level_instr        = false;
-bool     instr_dynamic_callsites = false;
-bool     instr_traps             = false;
-bool     instr_loop_traps        = false;
-size_t   min_address_range       = get_default_min_address_range();  // 4096
-size_t   min_loop_address_range  = get_default_min_address_range();  // 4096
-size_t   min_instructions        = get_default_min_instructions();   // 1024
-size_t   min_loop_instructions   = get_default_min_instructions();   // 1024
-bool     werror                  = false;
-bool     debug_print             = false;
-bool     instr_print             = false;
-bool     simulate                = false;
-bool     include_uninstr         = false;
-int      verbose_level           = tim::get_env<int>("OMNITRACE_VERBOSE_INSTRUMENT", 0);
-int      num_log_entries         = tim::get_env<int>("OMNITRACE_LOG_COUNT", 20);
-string_t main_fname              = "main";
-string_t argv0                   = {};
-string_t cmdv0                   = {};
-string_t default_components      = "wall_clock";
-string_t prefer_library          = {};
+bool     use_return_info              = false;
+bool     use_args_info                = false;
+bool     use_file_info                = false;
+bool     use_line_info                = false;
+bool     allow_overlapping            = false;
+bool     loop_level_instr             = false;
+bool     instr_dynamic_callsites      = false;
+bool     instr_traps                  = false;
+bool     instr_loop_traps             = false;
+bool     parse_all_modules            = false;
+size_t   min_address_range            = get_default_min_address_range();  // 4096
+size_t   min_loop_address_range       = get_default_min_address_range();  // 4096
+size_t   min_instructions             = get_default_min_instructions();   // 1024
+size_t   min_loop_instructions        = get_default_min_instructions();   // 1024
+bool     werror                       = false;
+bool     debug_print                  = false;
+bool     instr_print                  = false;
+bool     simulate                     = false;
+bool     include_uninstr              = false;
+bool     include_internal_linked_libs = false;
+int      verbose_level      = tim::get_env<int>("OMNITRACE_VERBOSE_INSTRUMENT", 0);
+int      num_log_entries    = tim::get_env<int>("OMNITRACE_LOG_COUNT", 20);
+string_t main_fname         = "main";
+string_t argv0              = {};
+string_t cmdv0              = {};
+string_t default_components = "wall_clock";
+string_t prefer_library     = {};
 //
 //  global variables
 //
@@ -126,7 +129,15 @@ regexvec_t       file_exclude                  = {};
 regexvec_t       file_restrict                 = {};
 regexvec_t       func_restrict                 = {};
 regexvec_t       caller_include                = {};
+regexvec_t       func_internal_include         = {};
+regexvec_t       file_internal_include         = {};
+regexvec_t       instruction_exclude           = {};
 CodeCoverageMode coverage_mode                 = CODECOV_NONE;
+
+symtab_data_s                 symtab_data        = {};
+std::set<symbol_linkage_t>    enabled_linkage    = { SL_GLOBAL, SL_LOCAL, SL_UNIQUE };
+std::set<symbol_visibility_t> enabled_visibility = { SV_DEFAULT, SV_HIDDEN, SV_INTERNAL,
+                                                     SV_PROTECTED };
 
 std::unique_ptr<std::ofstream> log_ofs = {};
 
@@ -143,7 +154,6 @@ bool                                       is_attached          = false;
 bool                                       use_mpi              = false;
 bool                                       is_static_exe        = false;
 bool                                       force_config         = false;
-bool                                       parse_all_modules    = false;
 size_t                                     batch_size           = 50;
 strset_t                                   extra_libs           = {};
 std::vector<std::pair<uint64_t, string_t>> hash_ids             = {};
@@ -211,9 +221,6 @@ activate_signal_handlers(const std::vector<sys_signal>& _signals)
             stderr, "omnitrace exited with signal %i :: %s\n", nsig,
             signal_settings::str(static_cast<sys_signal>(nsig)).c_str());
 
-        // print the last log entries
-        print_log_entries(std::cerr, num_log_entries);
-
         // print any forced entries
         print_log_entries(
             std::cerr, -1, [](const auto& _v) { return _v.forced(); },
@@ -221,6 +228,9 @@ activate_signal_handlers(const std::vector<sys_signal>& _signals)
                 tim::log::stream(std::cerr, tim::log::color::info())
                     << "\n[omnitrace][exe] Potentially important log entries:\n\n";
             });
+
+        // print the last log entries
+        print_log_entries(std::cerr, num_log_entries);
 
         TIMEMORY_PRINTF_FATAL(stderr, "\n");
         TIMEMORY_PRINTF_FATAL(
@@ -406,7 +416,7 @@ main(int argc, char** argv)
                       "{available,instrumented,excluded,overlapping} module "
                       "function lists, e.g. available.txt")
         .max_count(1)
-        .dtype("bool")
+        .dtype("boolean")
         .action([](parser_t& p) { simulate = p.get<bool>("simulate"); });
     parser
         .add_argument({ "--print-format" },
@@ -620,7 +630,7 @@ main(int argc, char** argv)
             { "--all-functions" },
             "When finding functions, include the functions which are not instrumentable. "
             "This is purely diagnostic for the available/excluded functions output")
-        .dtype("bool")
+        .dtype("boolean")
         .max_count(1)
         .action([](parser_t& p) { include_uninstr = p.get<bool>("all-functions"); });
 
@@ -646,6 +656,102 @@ main(int argc, char** argv)
     parser.add_argument({ "-MR", "--module-restrict" },
                         "Regex(es) for restricting modules/files/libraries only to those "
                         "that match the provided regular-expressions");
+    parser.add_argument({ "--internal-function-include" },
+                        "Regex(es) for including functions which are (likely) utilized "
+                        "by omnitrace itself. Use this option with care.");
+    parser.add_argument(
+        { "--internal-module-include" },
+        "Regex(es) for including modules/libraries which are (likely) utilized "
+        "by omnitrace itself. Use this option with care.");
+    parser.add_argument(
+        { "--instruction-exclude" },
+        "Regex(es) for excluding functions containing certain instructions");
+
+    parser
+        .add_argument({ "--internal-library-deps" },
+                      "Treat the libraries linked to the internal libraries as internal "
+                      "libraries. This increase the internal library processing time and "
+                      "consume more memory (so use with care) but may be useful when the "
+                      "application uses Boost libraries and Dyninst is dynamically "
+                      "linked against the same boost libraries")
+        .min_count(0)
+        .max_count(1)
+        .dtype("boolean")
+        .action([](parser_t& p) {
+            include_internal_linked_libs = p.get<bool>("internal-library-deps");
+        });
+
+    auto _internal_libs = get_internal_basic_libs();
+
+    parser
+        .add_argument({ "--internal-library-append" },
+                      "Append to the list of libraries which omnitrace treats as being "
+                      "used internally, e.g. OmniTrace will find all the symbols in "
+                      "this library and prevent them from being instrumented.")
+        .action([](parser_t& p) {
+            for(const auto& itr : p.get<strvec_t>("internal-library-append"))
+                get_internal_basic_libs().emplace(itr);
+        });
+
+    parser
+        .add_argument({ "--internal-library-remove" },
+                      "Remove the specified libraries from being treated as being "
+                      "used internally, e.g. OmniTrace will permit all the symbols in "
+                      "these libraries to be eligible for instrumentation.")
+        .choices(_internal_libs)
+        .action([](parser_t& p) {
+            auto  _remove   = p.get<strset_t>("internal-library-remove");
+            auto& _internal = get_internal_basic_libs();
+            for(const auto& itr : _remove)
+                _internal.erase(itr);
+        });
+
+    using timemory::join::array_config;
+    using timemory::join::join;
+
+    auto available_linkage    = std::vector<symbol_linkage_t>{};
+    auto available_visibility = std::vector<symbol_visibility_t>{};
+
+    for(int i = SL_UNKNOWN; i < SL_END_V; ++i)
+        available_linkage.emplace_back(static_cast<symbol_linkage_t>(i));
+    for(int i = SV_UNKNOWN; i < SV_END_V; ++i)
+        available_visibility.emplace_back(static_cast<symbol_visibility_t>(i));
+
+    auto _get_strvec = [](const auto& _inp) {
+        auto _ret = std::vector<std::string>{};
+        _ret.reserve(_inp.size());
+        for(const auto& itr : _inp)
+            _ret.emplace_back(std::to_string(itr));
+        return _ret;
+    };
+
+    parser
+        .add_argument({ "--linkage" },
+                      join("",
+                           "Only instrument functions with specified linkage (default: ",
+                           join(array_config{ ", ", "", "" }, enabled_linkage), ")"))
+        .min_count(1)
+        .choices(available_linkage)
+        .set_default(_get_strvec(enabled_linkage))
+        .action([](parser_t& p) {
+            enabled_linkage.clear();
+            for(const auto& itr : p.get<std::set<std::string>>("linkage"))
+                enabled_linkage.emplace(from_string<symbol_linkage_t>(itr));
+        });
+
+    parser
+        .add_argument(
+            { "--visibility" },
+            join("", "Only instrument functions with specified visibility (default: ",
+                 join(array_config{ ", ", "", "" }, enabled_visibility), ")"))
+        .min_count(1)
+        .choices(available_visibility)
+        .set_default(_get_strvec(enabled_visibility))
+        .action([](parser_t& p) {
+            enabled_visibility.clear();
+            for(const auto& itr : p.get<std::set<std::string>>("visibility"))
+                enabled_visibility.emplace(from_string<symbol_visibility_t>(itr));
+        });
 
     parser.add_argument({ "" }, "");
     parser.add_argument({ "[RUNTIME OPTIONS]" }, "");
@@ -805,7 +911,7 @@ main(int argc, char** argv)
             "ensure the instrumentation fits. In this case, Dyninst replaces the "
             "instruction with a single-byte instruction that generates a trap.")
         .max_count(1)
-        .dtype("bool")
+        .dtype("boolean")
         .set_default(instr_traps)
         .action([](parser_t& p) { instr_traps = p.get<bool>("traps"); });
     parser
@@ -813,7 +919,7 @@ main(int argc, char** argv)
                       "Instrument points within a loop which require using a trap (only "
                       "relevant when --instrument-loops is enabled).")
         .max_count(1)
-        .dtype("bool")
+        .dtype("boolean")
         .set_default(instr_loop_traps)
         .action([](parser_t& p) { instr_loop_traps = p.get<bool>("loop-traps"); });
     parser
@@ -1111,6 +1217,8 @@ main(int argc, char** argv)
         add_regex(func_restrict, tim::get_env<string_t>("OMNITRACE_REGEX_RESTRICT", ""));
         add_regex(caller_include,
                   tim::get_env<string_t>("OMNITRACE_REGEX_CALLER_INCLUDE"));
+        add_regex(func_internal_include,
+                  tim::get_env<string_t>("OMNITRACE_REGEX_INTERNAL_INCLUDE", ""));
 
         add_regex(file_include,
                   tim::get_env<string_t>("OMNITRACE_REGEX_MODULE_INCLUDE", ""));
@@ -1118,6 +1226,11 @@ main(int argc, char** argv)
                   tim::get_env<string_t>("OMNITRACE_REGEX_MODULE_EXCLUDE", ""));
         add_regex(file_restrict,
                   tim::get_env<string_t>("OMNITRACE_REGEX_MODULE_RESTRICT", ""));
+        add_regex(file_internal_include,
+                  tim::get_env<string_t>("OMNITRACE_REGEX_MODULE_INTERNAL_INCLUDE", ""));
+
+        add_regex(instruction_exclude,
+                  tim::get_env<string_t>("OMNITRACE_REGEX_INSTRUCTION_EXCLUDE", ""));
 
         //  Helper function for parsing the regex options
         auto _parse_regex_option = [&parser, &add_regex](const string_t& _option,
@@ -1134,9 +1247,12 @@ main(int argc, char** argv)
         _parse_regex_option("function-exclude", func_exclude);
         _parse_regex_option("function-restrict", func_restrict);
         _parse_regex_option("caller-include", caller_include);
+        _parse_regex_option("internal-function-include", func_internal_include);
         _parse_regex_option("module-include", file_include);
         _parse_regex_option("module-exclude", file_exclude);
         _parse_regex_option("module-restrict", file_restrict);
+        _parse_regex_option("internal-module-include", file_internal_include);
+        _parse_regex_option("instruction-exclude", instruction_exclude);
     }
 
     //----------------------------------------------------------------------------------//
@@ -1253,11 +1369,13 @@ main(int argc, char** argv)
 
     // get image
     verbprintf(1, "Getting the address space image, modules, and procedures...\n");
-    image_t*                  app_image     = addr_space->getImage();
-    bpvector_t<module_t*>*    app_modules   = app_image->getModules();
-    bpvector_t<procedure_t*>* app_functions = app_image->getProcedures(include_uninstr);
-    std::set<module_t*>       modules       = {};
-    std::set<procedure_t*>    functions     = {};
+    image_t*                   app_image     = addr_space->getImage();
+    std::vector<module_t*>*    app_modules   = app_image->getModules();
+    std::vector<procedure_t*>* app_functions = app_image->getProcedures(include_uninstr);
+    std::set<module_t*>        modules       = {};
+    std::set<procedure_t*>     functions     = {};
+
+    if(app_modules) process_modules(*app_modules);
 
     //----------------------------------------------------------------------------------//
     //
@@ -1659,8 +1777,8 @@ main(int argc, char** argv)
     //
     //----------------------------------------------------------------------------------//
 
-    bpvector_t<point_t*>* main_entr_points = nullptr;
-    bpvector_t<point_t*>* main_exit_points = nullptr;
+    std::vector<point_t*>* main_entr_points = nullptr;
+    std::vector<point_t*>* main_exit_points = nullptr;
 
     if(main_func)
     {
@@ -2324,7 +2442,7 @@ query_instr(procedure_t* funcToInstr, procedure_loc_t traceLoc, flow_graph_t* cf
     module_t* module = funcToInstr->getModule();
     if(!module) return false;
 
-    bpvector_t<point_t*>* _points = nullptr;
+    std::vector<point_t*>* _points = nullptr;
 
     if(cfGraph && loopToInstrument)
     {
@@ -2362,7 +2480,7 @@ query_instr(procedure_t* funcToInstr, procedure_loc_t traceLoc, flow_graph_t* cf
 
     if(!cfGraph) cfGraph = funcToInstr->getCFG();
 
-    bpvector_t<point_t*>* _points = nullptr;
+    std::vector<point_t*>* _points = nullptr;
 
     if((cfGraph && loopToInstrument) ||
        (traceLoc == BPatch_locLoopEntry || traceLoc == BPatch_locLoopExit))

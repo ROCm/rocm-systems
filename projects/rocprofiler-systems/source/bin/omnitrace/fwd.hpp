@@ -49,8 +49,10 @@
 #include <BPatch_process.h>
 #include <BPatch_snippet.h>
 #include <BPatch_statement.h>
+#include <Function.h>
 #include <Instruction.h>
 #include <InstructionCategories.h>
+#include <Module.h>
 #include <Symtab.h>
 #include <SymtabReader.h>
 #include <dyntypes.h>
@@ -61,6 +63,7 @@
 #include <cstring>
 #include <exception>
 #include <fstream>
+#include <istream>
 #include <limits>
 #include <memory>
 #include <numeric>
@@ -87,9 +90,6 @@
 struct function_signature;
 struct basic_block_signature;
 struct module_function;
-
-template <typename Tp>
-using bpvector_t = BPatch_Vector<Tp>;
 
 using string_t               = std::string;
 using string_view_t          = std::string_view;
@@ -127,13 +127,39 @@ using snippet_handle_t       = BPatchSnippetHandle;
 using patch_pointer_t        = std::shared_ptr<patch_t>;
 using snippet_pointer_t      = std::shared_ptr<snippet_t>;
 using call_expr_pointer_t    = std::shared_ptr<call_expr_t>;
-using snippet_vec_t          = bpvector_t<snippet_t*>;
-using procedure_vec_t        = bpvector_t<procedure_t*>;
+using snippet_vec_t          = std::vector<snippet_t*>;
+using procedure_vec_t        = std::vector<procedure_t*>;
 using basic_block_set_t      = std::set<basic_block_t*>;
-using basic_loop_vec_t       = bpvector_t<basic_loop_t*>;
+using basic_loop_vec_t       = std::vector<basic_loop_t*>;
 using snippet_pointer_vec_t  = std::vector<snippet_pointer_t>;
 using instruction_t          = Dyninst::InstructionAPI::Instruction;
 using instruction_category_t = Dyninst::InstructionAPI::InsnCategory;
+
+namespace SymTab          = ::Dyninst::SymtabAPI;
+using symtab_t            = SymTab::Symtab;
+using symtab_module_t     = SymTab::Module;
+using symtab_symbol_t     = SymTab::Symbol;
+using symtab_func_t       = SymTab::Function;
+using symbol_linkage_t    = SymTab::Symbol::SymbolLinkage;
+using symbol_visibility_t = SymTab::Symbol::SymbolVisibility;
+
+constexpr auto SL_UNKNOWN = symtab_symbol_t::SL_UNKNOWN;
+constexpr auto SL_GLOBAL  = symtab_symbol_t::SL_GLOBAL;
+constexpr auto SL_LOCAL   = symtab_symbol_t::SL_LOCAL;
+constexpr auto SL_WEAK    = symtab_symbol_t::SL_WEAK;
+constexpr auto SL_UNIQUE  = symtab_symbol_t::SL_UNIQUE;
+
+constexpr auto SV_UNKNOWN   = symtab_symbol_t::SV_UNKNOWN;
+constexpr auto SV_DEFAULT   = symtab_symbol_t::SV_DEFAULT;
+constexpr auto SV_INTERNAL  = symtab_symbol_t::SV_INTERNAL;
+constexpr auto SV_HIDDEN    = symtab_symbol_t::SV_HIDDEN;
+constexpr auto SV_PROTECTED = symtab_symbol_t::SV_PROTECTED;
+
+constexpr auto SL_END_V =
+    std::max({ SL_UNKNOWN, SL_GLOBAL, SL_LOCAL, SL_WEAK, SL_UNIQUE }) + 1;
+
+constexpr auto SV_END_V =
+    std::max({ SV_UNKNOWN, SV_DEFAULT, SV_INTERNAL, SV_HIDDEN, SV_PROTECTED }) + 1;
 
 void
 omnitrace_prefork_callback(thread_t* parent, thread_t* child);
@@ -165,6 +191,7 @@ extern bool   loop_level_instr;
 extern bool   instr_dynamic_callsites;
 extern bool   instr_traps;
 extern bool   instr_loop_traps;
+extern bool   parse_all_modules;
 extern size_t min_address_range;
 extern size_t min_loop_address_range;
 extern size_t min_instructions;
@@ -182,6 +209,7 @@ extern int  num_log_entries;
 //
 extern bool simulate;
 extern bool include_uninstr;
+extern bool include_internal_linked_libs;
 //
 //  string settings
 //
@@ -209,7 +237,26 @@ extern regexvec_t       file_exclude;
 extern regexvec_t       file_restrict;
 extern regexvec_t       func_restrict;
 extern regexvec_t       caller_include;
+extern regexvec_t       func_internal_include;
+extern regexvec_t       file_internal_include;
+extern regexvec_t       instruction_exclude;
 extern CodeCoverageMode coverage_mode;
+//
+// symtab variables
+//
+struct symtab_data_s
+{
+    std::vector<symtab_module_t*>                           modules              = {};
+    std::map<symtab_module_t*, std::vector<symtab_func_t*>> functions            = {};
+    std::map<symtab_func_t*, std::vector<symtab_symbol_t*>> symbols              = {};
+    std::unordered_map<std::string, symtab_symbol_t*>       mangled_symbol_names = {};
+    std::unordered_map<std::string, symtab_func_t*>         typed_func_names     = {};
+    std::unordered_map<std::string, symtab_symbol_t*>       typed_symbol_names   = {};
+};
+
+extern symtab_data_s                 symtab_data;
+extern std::set<symbol_linkage_t>    enabled_linkage;
+extern std::set<symbol_visibility_t> enabled_visibility;
 
 // logging
 extern std::unique_ptr<std::ofstream> log_ofs;
@@ -267,6 +314,9 @@ consume_parameters(T&&...)
 
 //======================================================================================//
 
+void
+process_modules(const std::vector<module_t*>&);
+
 strset_t
 get_whole_function_names();
 
@@ -293,7 +343,7 @@ query_instr(procedure_t* funcToInstr, procedure_loc_t traceLoc, flow_graph_t* cf
 
 template <typename Tp>
 bool
-insert_instr(address_space_t* mutatee, const bpvector_t<point_t*>& _points, Tp traceFunc,
+insert_instr(address_space_t* mutatee, const std::vector<point_t*>& _points, Tp traceFunc,
              procedure_loc_t traceLoc, bool allow_traps = instr_traps);
 
 template <typename Tp>
@@ -317,13 +367,33 @@ void
 error_func_fake(error_level_t level, int num, const char* const* params);
 
 std::string_view
-get_name(procedure_t* _module);
+get_name(procedure_t*);
 
 std::string_view
-get_name(module_t* _module);
+get_name(module_t*);
+
+symtab_func_t*
+get_symtab_function(procedure_t*);
 
 namespace std
 {
 std::string to_string(instruction_category_t);
 std::string to_string(error_level_t);
+std::string to_string(symbol_visibility_t);
+std::string to_string(symbol_linkage_t);
 }  // namespace std
+
+template <typename Tp>
+Tp from_string(std::string_view);
+
+std::ostream&
+operator<<(std::ostream&, symbol_linkage_t);
+
+std::ostream&
+operator<<(std::ostream&, symbol_visibility_t);
+
+std::istream&
+operator>>(std::istream&, symbol_linkage_t&);
+
+std::istream&
+operator>>(std::istream&, symbol_visibility_t&);

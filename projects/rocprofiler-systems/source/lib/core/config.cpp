@@ -1030,7 +1030,6 @@ configure_settings(bool _init)
         using argparser_t = tim::argparse::argument_parser;
         argparser_t _parser{ _exe };
         tim::timemory_init(_cmd, _parser, "omnitrace-");
-        _settings_are_configured() = true;
     }
 
 #if !defined(OMNITRACE_USE_MPI) && !defined(OMNITRACE_USE_MPI_HEADERS)
@@ -1076,15 +1075,17 @@ configure_settings(bool _init)
         trait::runtime_enabled<comp::papi_vector>::set(false);
     }
 
-    configure_mode_settings();
-    configure_signal_handler();
-    configure_disabled_settings();
+    configure_mode_settings(_config);
+    configure_signal_handler(_config);
+    configure_disabled_settings(_config);
 
-    OMNITRACE_VERBOSE(2, "configuration complete\n");
+    OMNITRACE_BASIC_VERBOSE(2, "configuration complete\n");
+
+    _settings_are_configured() = true;
 }
 
 void
-configure_mode_settings()
+configure_mode_settings(const std::shared_ptr<settings>& _config)
 {
     auto _set = [](const std::string& _name, bool _v) {
         if(!set_setting_value(_name, _v))
@@ -1150,7 +1151,7 @@ configure_mode_settings()
         _set("OMNITRACE_USE_ROCM_SMI", false);
     }
 
-    if(get_use_kokkosp())
+    if(_config->get<bool>("OMNITRACE_USE_KOKKOSP"))
     {
         auto _current_kokkosp_lib = tim::get_env<std::string>("KOKKOS_PROFILE_LIBRARY");
         if(_current_kokkosp_lib.find("libomnitrace-dl.so") == std::string::npos &&
@@ -1171,10 +1172,10 @@ configure_mode_settings()
     }
 
     // recycle all subsequent thread ids
-    threading::recycle_ids() =
-        tim::get_env<bool>("OMNITRACE_RECYCLE_TIDS", !get_use_sampling());
+    threading::recycle_ids() = tim::get_env<bool>(
+        "OMNITRACE_RECYCLE_TIDS", !_config->get<bool>("OMNITRACE_USE_SAMPLING"));
 
-    if(!get_config()->get_enabled())
+    if(!_config->get_enabled())
     {
         _set("OMNITRACE_USE_PERFETTO", false);
         _set("OMNITRACE_USE_TIMEMORY", false);
@@ -1257,9 +1258,8 @@ set_signal_handler(signal_handler_t _func)
 }
 
 void
-configure_signal_handler()
+configure_signal_handler(const std::shared_ptr<settings>& _config)
 {
-    auto _config = settings::shared_instance();
     auto _ignore_dyninst_trampoline =
         tim::get_env("OMNITRACE_IGNORE_DYNINST_TRAMPOLINE", false);
     // this is how dyninst looks up the env variable
@@ -1321,9 +1321,8 @@ std::set<int> get_sampling_signals(int64_t)
 }
 
 void
-configure_disabled_settings()
+configure_disabled_settings(const std::shared_ptr<settings>& _config)
 {
-    auto _config            = settings::shared_instance();
     auto _handle_use_option = [_config](const std::string& _opt,
                                         const std::string& _category) {
         if(!_config->get<bool>(_opt))

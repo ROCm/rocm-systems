@@ -45,14 +45,13 @@ const open_modes_vec_t default_link_open_modes = { (RTLD_LAZY | RTLD_NOLOAD),
                                                    (RTLD_LAZY | RTLD_LOCAL) };
 }
 
-std::string
+std::optional<std::string>
 get_linked_path(const char* _name, open_modes_vec_t&& _open_modes)
 {
     if(_name == nullptr) return config::get_exe_realpath();
 
     if(_open_modes.empty()) _open_modes = default_link_open_modes;
 
-    auto  _lib    = std::string{ _name };
     void* _handle = nullptr;
     bool  _noload = false;
     for(auto _mode : _open_modes)
@@ -68,11 +67,12 @@ get_linked_path(const char* _name, open_modes_vec_t&& _open_modes)
         dlinfo(_handle, RTLD_DI_LINKMAP, &_link_map);
         if(_link_map != nullptr && !std::string_view{ _link_map->l_name }.empty())
         {
-            _lib = filepath::realpath(_link_map->l_name, nullptr, false);
+            return filepath::realpath(_link_map->l_name, nullptr, false);
         }
         if(_noload == false) dlclose(_handle);
     }
-    return _lib;
+
+    return std::optional<std::string>{};
 }
 
 std::set<link_file>
@@ -139,14 +139,14 @@ get_link_map(const char* _lib, const std::string& _exclude_linked_by,
     auto _name = (!_lib) ? config::get_exe_realpath() : std::string{ _lib };
     for(const auto& itr : _fini_chain)
     {
-        OMNITRACE_VERBOSE(2, "[linkmap][%s]: %s\n", filepath::basename(_name),
-                          itr.real().c_str());
+        OMNITRACE_BASIC_VERBOSE(2, "[linkmap][%s]: %s\n", filepath::basename(_name),
+                                itr.real().c_str());
     }
 
     for(const auto& itr : _excl_chain)
     {
-        OMNITRACE_VERBOSE(3, "[linkmap][%s]: %s\n", _exclude_linked_by.c_str(),
-                          link_file{ itr }.real().c_str());
+        OMNITRACE_BASIC_VERBOSE(3, "[linkmap][%s]: %s\n", _exclude_linked_by.c_str(),
+                                link_file{ itr }.real().c_str());
     }
 
     return _fini_chain;

@@ -24,6 +24,7 @@
 
 #include <cstdint>
 #include <dlfcn.h>
+#include <optional>
 #include <set>
 #include <string>
 #include <string_view>
@@ -49,7 +50,7 @@ struct link_file
 };
 
 // helper function for translating generic lib name to resolved path
-std::string
+std::optional<std::string>
 get_linked_path(const char*, open_modes_vec_t&& = {});
 
 // default parameters: get the linked binaries for the exe but exclude the linked binaries

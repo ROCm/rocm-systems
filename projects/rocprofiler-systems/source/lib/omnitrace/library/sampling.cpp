@@ -400,7 +400,8 @@ offload_buffer(int64_t _seq, sampler_buffer_t&& _buf)
         << "Error! sampling allocator tried to offload buffer of samples but the "
            "offload file does not exist\n";
 
-    OMNITRACE_VERBOSE_F(3, "Saving sampling buffer for thread %li...\n", _seq);
+    OMNITRACE_VERBOSE_F(2, "Offloading %zu samples for thread %li to %s...\n",
+                        _buf.count(), _seq, _file->filename.c_str());
     auto& _fs = _file->stream;
 
     OMNITRACE_REQUIRE(_fs.good())

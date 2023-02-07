@@ -83,6 +83,7 @@ read_inliner_info(bfd* _inp)
 symbol::symbol(const base_type& _v)
 : base_type{ _v }
 , address{ _v.address, _v.address + _v.symsize }
+, func{ std::string{ base_type::name } }
 {}
 
 bool
@@ -188,7 +189,7 @@ symbol::read_dwarf_breakpoints(const std::vector<uintptr_t>& _bkpts)
 }
 
 bool
-symbol::read_bfd(bfd_file& _bfd)
+symbol::read_bfd_line_info(bfd_file& _bfd)
 {
     auto*         _section = static_cast<asection*>(section);
     bfd_vma       _vma     = bfd_section_vma(_section);

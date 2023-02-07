@@ -327,7 +327,7 @@ omnitrace_fork_callback(thread_t* parent, thread_t* child)
 //
 template <typename Tp>
 bool
-insert_instr(address_space_t* mutatee, const bpvector_t<point_t*>& _points, Tp traceFunc,
+insert_instr(address_space_t* mutatee, const std::vector<point_t*>& _points, Tp traceFunc,
              procedure_loc_t, bool allow_traps)
 {
     if(!traceFunc || _points.empty()) return false;
@@ -378,11 +378,12 @@ insert_instr(address_space_t* mutatee, procedure_t* funcToInstr, Tp traceFunc,
              procedure_loc_t traceLoc, flow_graph_t* cfGraph,
              basic_loop_t* loopToInstrument, bool allow_traps)
 {
+    if(!funcToInstr) return false;
     module_t* module = funcToInstr->getModule();
     if(!module || !traceFunc) return false;
 
-    bpvector_t<point_t*>* _points = nullptr;
-    auto                  _trace  = traceFunc.get();
+    std::vector<point_t*>* _points = nullptr;
+    auto                   _trace  = traceFunc.get();
 
     OMNITRACE_ADD_LOG_ENTRY("Searching for loop instrumentation points in function",
                             get_name(funcToInstr));

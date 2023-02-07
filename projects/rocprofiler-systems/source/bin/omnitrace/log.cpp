@@ -121,16 +121,40 @@ print_log_entries(std::ostream& _os, int64_t _count,
     }
 
     // the requested number of log entries
+    auto   _last   = std::string{};
+    size_t _last_i = 0;
+    size_t _last_n = 0;
     for(size_t i = i0; i < log_entries.size(); ++i)
     {
         auto& itr = log_entries.at(i);
 
         if(!_condition || _condition(itr))
         {
-            _os << "[" << _color << std::setw(_w) << i << "/" << log_entries.size()
-                << _end << "]"
-                << ((_color_entries) ? itr.as_string() : itr.as_string("", "", ""))
-                << "\n";
+            auto _msg = ((_color_entries) ? itr.as_string() : itr.as_string("", "", ""));
+            if(_msg != _last)
+            {
+                if(_last_n > 0 && !_last.empty())
+                {
+                    _os << "[" << _color << std::setw(_w) << _last_i << "/"
+                        << log_entries.size() << _end << "] ... repeated " << _last_n
+                        << " times ...\n";
+                }
+                _last_n = 0;
+                _last_i = i;
+                _last   = _msg;
+                _os << "[" << _color << std::setw(_w) << i << "/" << log_entries.size()
+                    << _end << "]" << _msg << "\n";
+            }
+            else
+            {
+                ++_last_n;
+            }
         }
+    }
+
+    if(_last_n > 0)
+    {
+        _os << "[" << _color << std::setw(_w) << _last_i << "/" << log_entries.size()
+            << _end << "] ... repeated " << _last_n << " times ...\n";
     }
 }

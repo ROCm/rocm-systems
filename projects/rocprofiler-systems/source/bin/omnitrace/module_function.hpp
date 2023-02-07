@@ -66,11 +66,12 @@ struct module_function
     bool should_coverage_instrument() const;
 
     // hard constraints
-    bool is_instrumentable() const;       // checks whether can instrument
-    bool can_instrument_entry() const;    // checks for entry points
-    bool can_instrument_exit() const;     // checks for exit points
-    bool is_module_constrained() const;   // checks module constraints
-    bool is_routine_constrained() const;  // checks function constraints
+    bool is_instrumentable() const;        // checks whether can instrument
+    bool can_instrument_entry() const;     // checks for entry points
+    bool can_instrument_exit() const;      // checks for exit points
+    bool is_internal_constrained() const;  // checks internal usage constraint
+    bool is_module_constrained() const;    // checks module constraints
+    bool is_routine_constrained() const;   // checks function constraints
 
     // user bypass of heuristics
     bool is_user_restricted() const;  // checks user restrict regexes
@@ -85,15 +86,22 @@ struct module_function
     // applied before address range and # instruction constraints
     bool is_dynamic_callsite_forced() const;  // checks dynamic callsites
 
+    // user exclusion based on instructions
+    bool is_instruction_constrained() const;
+
     // estimate the size/work of the function
     bool is_address_range_constrained() const;     // checks address range constraint
     bool is_num_instructions_constrained() const;  // check # instructions constraint
+
+    bool is_visibility_constrained() const;
+    bool is_linkage_constrained() const;
 
     size_t                                      start_address     = 0;
     uint64_t                                    address_range     = 0;
     uint64_t                                    num_instructions  = 0;
     module_t*                                   module            = nullptr;
     procedure_t*                                function          = nullptr;
+    symtab_func_t*                              symtab_function   = nullptr;
     flow_graph_t*                               flow_graph        = nullptr;
     string_t                                    module_name       = {};
     string_t                                    function_name     = {};
@@ -108,6 +116,8 @@ struct module_function
     bool is_overlapping() const;  // checks if func overlaps
 
 private:
+    symbol_linkage_t    get_linkage() const;
+    symbol_visibility_t get_visibility() const;
     bool is_loop_num_instructions_constrained() const;  // checks loop instr constraint
     bool is_loop_address_range_constrained() const;  // checks loop addr range constraint
     bool contains_dynamic_callsites() const;
@@ -120,18 +130,18 @@ public:
 
     friend bool operator<(const module_function& lhs, const module_function& rhs)
     {
-        return std::tie(lhs.module_name, lhs.start_address, lhs.function_name,
-                        lhs.address_range, lhs.num_instructions, lhs.signature) <
-               std::tie(rhs.module_name, rhs.start_address, rhs.function_name,
-                        rhs.address_range, rhs.num_instructions, rhs.signature);
+        return std::tie(lhs.module_name, lhs.function_name, lhs.start_address,
+                        lhs.address_range, lhs.num_instructions) <
+               std::tie(rhs.module_name, rhs.function_name, rhs.start_address,
+                        rhs.address_range, rhs.num_instructions);
     }
 
     friend bool operator==(const module_function& lhs, const module_function& rhs)
     {
-        return std::tie(lhs.module_name, lhs.start_address, lhs.function_name,
-                        lhs.address_range, lhs.num_instructions, lhs.signature) ==
-               std::tie(rhs.module_name, rhs.start_address, rhs.function_name,
-                        rhs.address_range, rhs.num_instructions, rhs.signature);
+        return std::tie(lhs.start_address, lhs.address_range, lhs.num_instructions,
+                        lhs.module_name, lhs.function_name) ==
+               std::tie(rhs.start_address, rhs.address_range, rhs.num_instructions,
+                        rhs.module_name, rhs.function_name);
     }
 
     friend std::ostream& operator<<(std::ostream& os, const module_function& rhs)
@@ -155,6 +165,8 @@ public:
            << std::setw(14) << rhs.address_range << " "
            << std::setw(14) << rhs.num_instructions << " "
            << std::setw(6) << std::setprecision(2) << std::fixed << (rhs.address_range / static_cast<double>(rhs.num_instructions)) << "  "
+           << std::setw(7) << std::to_string(rhs.get_linkage()) << " "
+           << std::setw(10) << std::to_string(rhs.get_visibility()) << " "
            << std::setw(w0 + 8) << std::left << _get_str(rhs.module_name) << " "
            << std::setw(w1 + 8) << std::left << _get_str(rhs.function_name) << " "
            << std::setw(w2 + 8) << std::left << _get_str(rhs.signature.get());
@@ -185,7 +197,9 @@ module_function::serialize(ArchiveT& ar, const unsigned)
 
     if constexpr(tim::concepts::is_output_archive<ArchiveT>::value)
     {
-        ar(cereal::make_nvp("num_basic_blocks", basic_blocks.size()),
+        ar(cereal::make_nvp("linkage", std::to_string(get_linkage())),
+           cereal::make_nvp("visibility", std::to_string(get_visibility())),
+           cereal::make_nvp("num_basic_blocks", basic_blocks.size()),
            cereal::make_nvp("num_outer_loops", loop_blocks.size()));
         ar.setNextName("heuristics");
         ar.startNode();
@@ -195,6 +209,7 @@ module_function::serialize(ArchiveT& ar, const unsigned)
            cereal::make_nvp("can_instrument_entry", can_instrument_entry()),
            cereal::make_nvp("can_instrument_exit", can_instrument_exit()),
            cereal::make_nvp("contains_dynamic_callsites", contains_dynamic_callsites()),
+           cereal::make_nvp("is_internal_constrained", is_internal_constrained()),
            cereal::make_nvp("is_module_constrained", is_module_constrained()),
            cereal::make_nvp("is_routine_constrained", is_routine_constrained()),
            cereal::make_nvp("is_user_restricted", is_user_restricted()),
@@ -205,10 +220,13 @@ module_function::serialize(ArchiveT& ar, const unsigned)
            cereal::make_nvp("is_entry_trap_constrained", is_entry_trap_constrained()),
            cereal::make_nvp("is_exit_trap_constrained", is_exit_trap_constrained()),
            cereal::make_nvp("is_dynamic_callsite_forced", is_dynamic_callsite_forced()),
+           cereal::make_nvp("is_linkage_constrained", is_linkage_constrained()),
+           cereal::make_nvp("is_visibility_constrained", is_visibility_constrained()),
            cereal::make_nvp("is_address_range_constrained",
                             is_address_range_constrained()),
            cereal::make_nvp("is_num_instructions_constrained",
                             is_num_instructions_constrained()),
+           cereal::make_nvp("is_instruction_constrained", is_instruction_constrained()),
            cereal::make_nvp("is_loop_address_range_constrained",
                             is_loop_address_range_constrained()),
            cereal::make_nvp("is_loop_num_instructions_constrained",

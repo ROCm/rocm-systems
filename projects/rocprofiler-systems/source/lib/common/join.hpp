@@ -69,7 +69,15 @@ template <typename ArgT>
 auto
 as_string(ArgT&& _v, std::enable_if_t<is_string<ArgT>::value, int> = 0)
 {
-    return std::string{ "\"" } + _v + std::string{ "\"" };
+    if constexpr(std::is_pointer<std::decay_t<ArgT>>::value)
+    {
+        return (_v == nullptr) ? std::string{ "\"\"" }
+                               : (std::string{ "\"" } + _v + std::string{ "\"" });
+    }
+    else
+    {
+        return std::string{ "\"" } + _v + std::string{ "\"" };
+    }
 }
 
 template <typename ArgT>

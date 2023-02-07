@@ -55,6 +55,7 @@ using hash_value_t = ::tim::hash_value_t;
 
 std::vector<binary_info>
 get_binary_info(const std::vector<std::string>&, const std::vector<scope_filter>&,
-                bool _process_dwarf = true);
+                bool _process_dwarf = true, bool _process_bfd = true,
+                bool _include_all = false);
 }  // namespace binary
 }  // namespace omnitrace

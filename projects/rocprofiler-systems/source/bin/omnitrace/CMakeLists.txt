@@ -10,17 +10,19 @@ add_executable(omnitrace-exe)
 
 target_sources(
     omnitrace-exe
-    PRIVATE ${CMAKE_CURRENT_LIST_DIR}/omnitrace.cpp
-            ${CMAKE_CURRENT_LIST_DIR}/details.cpp
+    PRIVATE ${CMAKE_CURRENT_LIST_DIR}/details.cpp
             ${CMAKE_CURRENT_LIST_DIR}/function_signature.cpp
-            ${CMAKE_CURRENT_LIST_DIR}/log.cpp
-            ${CMAKE_CURRENT_LIST_DIR}/module_function.cpp
-            ${CMAKE_CURRENT_LIST_DIR}/omnitrace.hpp
-            ${CMAKE_CURRENT_LIST_DIR}/fwd.hpp
             ${CMAKE_CURRENT_LIST_DIR}/function_signature.hpp
+            ${CMAKE_CURRENT_LIST_DIR}/fwd.hpp
             ${CMAKE_CURRENT_LIST_DIR}/info.hpp
+            ${CMAKE_CURRENT_LIST_DIR}/internal_libs.cpp
+            ${CMAKE_CURRENT_LIST_DIR}/internal_libs.hpp
+            ${CMAKE_CURRENT_LIST_DIR}/log.cpp
             ${CMAKE_CURRENT_LIST_DIR}/log.hpp
-            ${CMAKE_CURRENT_LIST_DIR}/module_function.hpp)
+            ${CMAKE_CURRENT_LIST_DIR}/module_function.cpp
+            ${CMAKE_CURRENT_LIST_DIR}/module_function.hpp
+            ${CMAKE_CURRENT_LIST_DIR}/omnitrace.cpp
+            ${CMAKE_CURRENT_LIST_DIR}/omnitrace.hpp)
 
 target_link_libraries(
     omnitrace-exe

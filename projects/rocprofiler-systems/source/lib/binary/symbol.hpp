@@ -66,7 +66,7 @@ struct symbol : private tim::unwind::bfd_file::symbol
     symbol&  operator+=(const symbol&);
     explicit operator bool() const;
 
-    bool          read_bfd(bfd_file&);
+    bool          read_bfd_line_info(bfd_file&);
     size_t        read_dwarf_entries(const std::deque<dwarf_entry>&);
     size_t        read_dwarf_breakpoints(const std::vector<uintptr_t>&);
     address_range ipaddr() const { return address + load_address; }

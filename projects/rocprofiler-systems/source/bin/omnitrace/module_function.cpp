@@ -23,8 +23,11 @@
 #include "module_function.hpp"
 #include "InstructionCategories.h"
 #include "fwd.hpp"
+#include "internal_libs.hpp"
 #include "log.hpp"
 #include "omnitrace.hpp"
+
+#include <timemory/utility/join.hpp>
 
 #include <stdexcept>
 
@@ -56,6 +59,7 @@ module_function::update_width(const module_function& rhs)
 module_function::module_function(module_t* mod, procedure_t* proc)
 : module{ mod }
 , function{ proc }
+, symtab_function{ proc->isInstrumentable() ? get_symtab_function(proc) : nullptr }
 , flow_graph{ proc->getCFG() }
 , module_name{ get_name(module) }
 , function_name{ get_name(function) }
@@ -145,6 +149,8 @@ module_function::write_header(std::ostream& os)
        << " " << std::setw(14) << "AddressRange"
        << " " << std::setw(14) << "#Instructions"
        << " " << std::setw(6) << "Ratio"
+       << " " << std::setw(7) << "Linkage"
+       << " " << std::setw(10) << "Visibility"
        << "  " << std::setw(w0 + 8) << std::left << "Module"
        << " " << std::setw(w1 + 8) << std::left << "Function"
        << " " << std::setw(w2 + 8) << std::left << "FunctionSignature"
@@ -164,6 +170,7 @@ module_function::should_coverage_instrument() const
     // hard constraints
     if(!is_instrumentable()) return false;
     if(!can_instrument_entry()) return false;
+    if(is_internal_constrained()) return false;
     if(is_module_constrained()) return false;
     if(is_routine_constrained()) return false;
 
@@ -190,6 +197,7 @@ module_function::should_coverage_instrument() const
 
     if(is_address_range_constrained()) return false;
     if(is_num_instructions_constrained()) return false;
+    if(is_instruction_constrained()) return false;
 
     return true;
 }
@@ -201,6 +209,7 @@ module_function::should_instrument(bool coverage) const
     if(!is_instrumentable()) return false;
     if(!can_instrument_entry()) return false;
     if(!coverage && !can_instrument_exit()) return false;
+    if(is_internal_constrained()) return false;
     if(is_module_constrained()) return false;
     if(is_routine_constrained()) return false;
 
@@ -230,8 +239,16 @@ module_function::should_instrument(bool coverage) const
     if(!file_restrict.empty() || !func_restrict.empty()) return !is_user_restricted();
     if(is_user_included()) return true;
 
+    // do not apply visibility and linkage constraints to code coverage
+    if(!coverage)
+    {
+        if(is_linkage_constrained()) return false;
+        if(is_visibility_constrained()) return false;
+    }
+
     if(is_address_range_constrained()) return false;
     if(is_num_instructions_constrained()) return false;
+    if(is_instruction_constrained()) return false;
 
     return true;
 }
@@ -375,6 +392,100 @@ module_function::is_overlapping() const
     return function->findOverlapping(_overlapping);
 }
 
+symbol_linkage_t
+module_function::get_linkage() const
+{
+    constexpr auto unknown_v = SymTab::Symbol::SL_UNKNOWN;
+
+    if(symtab_function == nullptr) return unknown_v;
+    symbol_linkage_t _v = unknown_v;
+    for(const auto& itr : symtab_data.symbols.at(symtab_function))
+    {
+        auto litr = itr->getLinkage();
+        if(litr > unknown_v) _v = (_v == unknown_v) ? litr : std::min(_v, litr);
+    }
+    return _v;
+}
+
+symbol_visibility_t
+module_function::get_visibility() const
+{
+    constexpr auto unknown_v = SymTab::Symbol::SV_UNKNOWN;
+
+    if(symtab_function == nullptr) return unknown_v;
+    symbol_visibility_t _v = unknown_v;
+    for(const auto& itr : symtab_data.symbols.at(symtab_function))
+    {
+        auto litr = itr->getVisibility();
+        if(litr > unknown_v) _v = (_v == unknown_v) ? litr : std::min(_v, litr);
+    }
+    return _v;
+}
+
+bool
+module_function::is_internal_constrained() const
+{
+    using ::timemory::join::join;
+    auto _basename = [](std::string_view _v) {
+        return std::string{ tim::filepath::basename(_v) };
+    };
+    auto _realpath = [](const std::string& _v) {
+        return tim::filepath::realpath(_v, nullptr, false);
+    };
+
+    auto _report = [&](const string_t& _action, const std::string& _type,
+                       const string_t& _reason, int _lvl) {
+        messages.emplace_back(_lvl, _action, _type, _reason, module_name);
+        return true;
+    };
+
+    const auto& _gnu_libs = get_internal_libs_data();
+
+    auto _module_base = _basename(module_name);
+    auto _module_real = _realpath(module_name);
+
+    if(std::regex_search(module_name, std::regex{ "lib(omnitrace|timemory|perfetto)" }))
+        return _report("Excluding", "module", "omnitrace", 3);
+    else if(std::regex_match(module_name,
+                             std::regex{ ".*/source/lib/"
+                                         "(core|common|binary|omnitrace|omnitrace-dl|"
+                                         "omnitrace-user)/.*/.*\\.(h|c|cpp|hpp)$" }))
+        return _report("Excluding", "module", "omnitrace", 3);
+
+    if(std::regex_search(function_name, std::regex{ "9omnitrace|omnitrace(::|_)" }))
+        return _report("Excluding", "function", "omnitrace", 3);
+    else if(std::regex_search(function_name, std::regex{ "3tim|tim::|timemory(::|_)" }))
+        return _report("Excluding", "function", "timemory", 3);
+    else if(std::regex_search(function_name, std::regex{ "9perfetto|perfetto(::|_)" }))
+        return _report("Excluding", "function", "perfetto", 3);
+
+    if(_gnu_libs.find(module_name) != _gnu_libs.end() ||
+       _gnu_libs.find(_module_real) != _gnu_libs.end() ||
+       _gnu_libs.find(_module_base) != _gnu_libs.end())
+        return _report("Excluding", "module", "internal library", 3);
+
+    for(const auto& litr : _gnu_libs)
+    {
+        if(_module_base == _basename(litr.first) ||
+           litr.second.find(_module_base) != litr.second.end() ||
+           _module_real == litr.first ||
+           litr.second.find(_module_real) != litr.second.end() ||
+           litr.second.find(module_name) != litr.second.end())
+            return _report("Excluding", "module",
+                           join(" ", "internal library", litr.first), 3);
+
+        for(const auto& fitr : litr.second)
+        {
+            using ::timemory::join::join;
+            if(fitr.second.find(function_name) != fitr.second.end())
+                return _report("Excluding", "function",
+                               join(" ", "internal library", litr.first), 3);
+        }
+    }
+
+    return false;
+}
+
 bool
 module_function::is_module_constrained() const
 {
@@ -401,12 +512,8 @@ module_function::is_module_constrained() const
     static std::regex core_cmod_regex{
         "^(malloc|(f|)lock|sig|sem)[a-z_]+(|64|_r|_l)\\.c$"
     };
-    static std::regex core_lib_regex{
-        "^(lib|)(c|dl|dw|pthread|tcmalloc|profiler|"
-        "tbbmalloc|tbbmalloc_proxy|malloc|stdc\\+\\+)(-|\\.)",
-        regex_opts
-    };
-    static std::regex prefix_regex{ "^(_|\\.[a-zA-Z0-9])", regex_opts };
+    static std::regex core_lib_regex{ "lib(elf)(-|\\.)", regex_opts };
+    // static std::regex prefix_regex{ "^(_|\\.[a-zA-Z0-9])", regex_opts };
 
     // file extensions that should not be instrumented
     if(std::regex_search(module_name, ext_regex))
@@ -432,8 +539,8 @@ module_function::is_module_constrained() const
 
     // known set of modules whose starting sequence of characters suggest it should not be
     // instrumented (wastes time)
-    if(std::regex_search(module_name, prefix_regex))
-        return _report("Excluding", "prefix match", 3);
+    // if(std::regex_search(module_name, prefix_regex))
+    //    return _report("Excluding", "prefix match", 3);
 
     return false;
 }
@@ -461,18 +568,21 @@ module_function::is_routine_constrained() const
 
     static std::regex exclude(
         "(omnitrace|tim::|MPI_Init|MPI_Finalize|dyninst|DYNINST|tm_clones)", regex_opts);
-    static std::regex exclude_printf("(|v|f)printf$", regex_opts);
+    // static std::regex exclude_printf("(|v|f)printf$", regex_opts);
     static std::regex exclude_cxx(
         "(std::_Sp_counted_base|std::(use|has)_facet|std::locale|::sentry|^std::_|::_(M|"
         "S)_|::basic_string[a-zA-Z,<>: ]+::_M_create|::__|::_(Alloc|State)|"
         "std::(basic_|)(ifstream|ios|istream|ostream|stream))",
         regex_opts);
     static std::regex leading(
-        "^(_|\\.|frame_dummy|transaction clone|virtual thunk|non-virtual thunk|"
-        "\\(|targ|kmp_threadprivate_|Kokkos::Profiling::|dlopen|dlsym)",
+        "^(\\.|frame_dummy|transaction clone|virtual thunk|non-virtual thunk|"
+        "\\(|targ|kmp_threadprivate_|Kokkos::Profiling::|_IO_|___|"
+        "__(GI|cxa|libc|IO|rpc|run|call|pthread|dl|nl|nss|new|old|internal|argp|malloc|"
+        "libio|printf)_)",
         regex_opts);
-    static std::regex trailing(
-        "(_|\\.part\\.[0-9]+|\\.constprop\\.[0-9]+|\\.|\\.[0-9]+)$", regex_opts);
+    static std::regex trailing("(_internal)$", regex_opts);
+    // static std::regex trailing(
+    //    "(_|\\.part\\.[0-9]+|\\.constprop\\.[0-9]+|\\.|\\.[0-9]+)$", regex_opts);
     static strset_t whole = []() {
         auto _v   = get_whole_function_names();
         auto _ret = _v;
@@ -489,10 +599,10 @@ module_function::is_routine_constrained() const
         return _report("Excluding", "critical", 3);
     }
 
-    if(std::regex_search(function_name, exclude_printf))
-    {
-        return _report("Excluding", "critical-printf", 3);
-    }
+    // if(std::regex_search(function_name, exclude_printf))
+    //{
+    //    return _report("Excluding", "critical-printf", 3);
+    //}
 
     if(whole.count(function_name) > 0)
     {
@@ -539,7 +649,7 @@ module_function::contains_user_callsite() const
 {
     if(caller_include.empty()) return false;
 
-    bpvector_t<BPatch_point*> call_points;
+    std::vector<BPatch_point*> call_points;
     function->getCallPoints(call_points);
     for(const auto& call_point : call_points)
     {
@@ -578,6 +688,33 @@ module_function::is_address_range_constrained() const
         messages.emplace_back(2, "Skipping", "function", "min-address-range",
                               function_name);
         return true;
+    }
+    return false;
+}
+
+bool
+module_function::is_instruction_constrained() const
+{
+    if(!instruction_exclude.empty())
+    {
+        for(auto&& itr : instructions)
+        {
+            auto _instrss = std::stringstream{};
+            for(auto&& iitr : itr)
+                _instrss << " " << iitr.first.format();
+
+            auto _instr = _instrss.str();
+            if(!_instr.empty())
+            {
+                _instr = _instr.substr(1);
+                if(check_regex_restrictions(_instr, instruction_exclude))
+                {
+                    messages.emplace_back(2, "Skipping", "function",
+                                          "instruction-exclude-regex", function_name);
+                    return true;
+                }
+            }
+        }
     }
     return false;
 }
@@ -625,6 +762,22 @@ module_function::is_loop_num_instructions_constrained() const
     }
 
     return false;
+}
+
+bool
+module_function::is_visibility_constrained() const
+{
+    auto _visibility = get_visibility();
+    return (_visibility != SV_UNKNOWN &&
+            enabled_visibility.find(_visibility) == enabled_visibility.end());
+}
+
+bool
+module_function::is_linkage_constrained() const
+{
+    auto _linkage = get_linkage();
+    return (_linkage != SL_UNKNOWN &&
+            enabled_linkage.find(_linkage) == enabled_linkage.end());
 }
 
 bool
@@ -709,6 +862,8 @@ module_function::operator()(address_space_t* _addr_space, procedure_t* _entr_tra
 {
     std::pair<size_t, size_t> _count = { 0, 0 };
 
+    if(!function || !module) return _count;
+
     auto _name       = signature.get();
     auto _trace_entr = omnitrace_call_expr(_name.c_str());
     auto _trace_exit = omnitrace_call_expr(_name.c_str());
@@ -726,6 +881,7 @@ module_function::operator()(address_space_t* _addr_space, procedure_t* _entr_tra
     for(size_t i = 0; i < loop_blocks.size(); ++i)
     {
         if(!loop_level_instr) continue;
+        if(!flow_graph) continue;
 
         auto* itr             = loop_blocks.at(i);
         auto  _is_constrained = [this](bool _v, const std::string& _label,

@@ -64,14 +64,15 @@ namespace binary
 namespace
 {
 binary_info
-parse_line_info(const std::string& _name, bool _process_dwarf)
+parse_line_info(const std::string& _name, bool _process_dwarf, bool _process_bfd,
+                bool _include_all)
 {
     auto _info = binary_info{};
 
     auto& _bfd = _info.bfd;
     _bfd       = std::make_shared<bfd_file>(_name);
 
-    OMNITRACE_VERBOSE(0, "[binary] Reading line info for '%s'...\n", _name.c_str());
+    OMNITRACE_BASIC_VERBOSE(0, "[binary] Reading line info for '%s'...\n", _name.c_str());
 
     if(_bfd && _bfd->is_good())
     {
@@ -80,7 +81,7 @@ parse_line_info(const std::string& _name, bool _process_dwarf)
         auto  _processed   = std::set<uintptr_t>{};
         for(auto&& itr : _bfd->get_symbols())
         {
-            if(itr.symsize == 0) continue;
+            if(!_include_all && itr.symsize == 0) continue;
             auto& _sym = _info.symbols.emplace_back(symbol{ itr });
             // if(itr.symsize == 0) continue;
             auto* _section = static_cast<asection*>(itr.section);
@@ -88,7 +89,7 @@ parse_line_info(const std::string& _name, bool _process_dwarf)
             _processed.emplace(itr.address);
             _info.ranges.emplace_back(
                 address_range{ itr.address, itr.address + itr.symsize });
-            _sym.read_bfd(*_bfd);
+            if(_process_bfd) _sym.read_bfd_line_info(*_bfd);
         }
 
         for(auto* itr : _section_set)
@@ -101,7 +102,7 @@ parse_line_info(const std::string& _name, bool _process_dwarf)
             _section_map[_section_range] = _section;
         }
 
-        TIMEMORY_REQUIRE(_section_set.size() == _section_map.size())
+        TIMEMORY_REQUIRE(_include_all || _section_set.size() == _section_map.size())
             << "section set size (" << _section_set.size() << ") != section map size ("
             << _section_map.size() << ")\n";
 
@@ -120,8 +121,8 @@ parse_line_info(const std::string& _name, bool _process_dwarf)
         _info.sort();
     }
 
-    OMNITRACE_VERBOSE(1, "[binary] Reading line info for '%s'... %zu entries\n",
-                      _bfd->name.c_str(), _info.symbols.size());
+    OMNITRACE_BASIC_VERBOSE(1, "[binary] Reading line info for '%s'... %zu entries\n",
+                            _bfd->name.c_str(), _info.symbols.size());
 
     return _info;
 }
@@ -129,7 +130,8 @@ parse_line_info(const std::string& _name, bool _process_dwarf)
 
 std::vector<binary_info>
 get_binary_info(const std::vector<std::string>&  _files,
-                const std::vector<scope_filter>& _filters, bool _process_dwarf)
+                const std::vector<scope_filter>& _filters, bool _process_dwarf,
+                bool _process_bfd, bool _include_all)
 {
     auto _satisfies_filter = [&_filters](auto _scope, const std::string& _value) {
         for(const auto& itr : _filters)  // NOLINT
@@ -164,14 +166,15 @@ get_binary_info(const std::vector<std::string>&  _files,
             if(filepath::exists(_filename) && _satisfies_binary_filter(_filename) &&
                _exists.find(_filename) == _exists.end())
             {
-                _data.emplace_back(parse_line_info(_filename, _process_dwarf));
+                _data.emplace_back(parse_line_info(_filename, _process_dwarf,
+                                                   _process_bfd, _include_all));
                 _exists.emplace(_filename);
             }
         }
     }
 
     // get the memory maps
-    auto _maps = procfs::get_contiguous_maps(process::get_id(), _filter, true);
+    auto _maps = procfs::get_contiguous_maps(process::get_id(), _filter, false);
 
     for(auto& itr : _data)
     {

@@ -55,10 +55,13 @@ void
 configure_settings(bool _init = true);
 
 void
-configure_mode_settings();
+configure_mode_settings(const std::shared_ptr<settings>&);
 
 void
-configure_signal_handler();
+configure_signal_handler(const std::shared_ptr<settings>&);
+
+void
+configure_disabled_settings(const std::shared_ptr<settings>&);
 
 int
 get_realtime_signal();
@@ -68,9 +71,6 @@ get_cputime_signal();
 
 std::set<int>
 get_sampling_signals(int64_t _tid = 0);
-
-void
-configure_disabled_settings();
 
 void
 finalize();
