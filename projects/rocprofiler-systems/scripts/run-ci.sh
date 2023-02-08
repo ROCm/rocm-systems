@@ -200,51 +200,62 @@ set(CTEST_BINARY_DIRECTORY ${BINARY_DIR})
 
 set(CTEST_UPDATE_COMMAND ${GIT_CMD})
 set(CTEST_CONFIGURE_COMMAND "${CMAKE_CMD} -B ${BINARY_DIR} ${SOURCE_DIR} -DOMNITRACE_BUILD_CI=ON ${CMAKE_ARGS}")
-set(CTEST_BUILD_COMMAND "${CMAKE_CMD} --build ${BINARY_DIR} --target all")
+set(CTEST_BUILD_COMMAND "${CMAKE_CMD} --build ${BINARY_DIR} --target all --parallel ${CMAKE_BUILD_PARALLEL_LEVEL}")
 set(CTEST_COVERAGE_COMMAND ${GCOV_CMD})
 EOF
 
 verbose-run cd ${BINARY_DIR}
 
 cat << EOF > dashboard.cmake
+cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
 
 include("\${CMAKE_CURRENT_LIST_DIR}/CTestCustom.cmake")
 
+set(_STAGES ${DASHBOARD_STAGES})
+
+macro(handle_submit)
+    if("Submit" IN_LIST _STAGES)
+        ctest_submit(
+            ${ARGN}
+            CAPTURE_CMAKE_ERROR _submit_err)
+        if(NOT \${_submit_err} EQUAL 0)
+            message(WARNING "Submission failed: ctest_submit(\${ARGN})")
+        endif()
+    endif()
+endmacro()
+
 macro(handle_error _message _ret)
     if(NOT \${\${_ret}} EQUAL 0)
-        ctest_submit(PARTS Done RETURN_VALUE _submit_ret)
+        handle_submit(PARTS Done RETURN_VALUE _submit_ret)
         message(FATAL_ERROR "\${_message} failed: \${\${_ret}}")
     endif()
 endmacro()
 
 ctest_start(${DASHBOARD_MODE})
 ctest_update(SOURCE "${SOURCE_DIR}")
-ctest_submit(PARTS Start Update RETURN_VALUE _submit_ret)
-
 ctest_configure(BUILD "${BINARY_DIR}" RETURN_VALUE _configure_ret)
-ctest_submit(PARTS Configure RETURN_VALUE _submit_ret)
 
+handle_submit(PARTS Start Update Configure RETURN_VALUE _submit_ret)
 handle_error("Configure" _configure_ret)
 
 ctest_build(BUILD "${BINARY_DIR}" RETURN_VALUE _build_ret)
-ctest_submit(PARTS Build RETURN_VALUE _submit_ret)
-
+handle_submit(PARTS Build RETURN_VALUE _submit_ret)
 handle_error("Build" _build_ret)
 
 ctest_test(BUILD "${BINARY_DIR}" RETURN_VALUE _test_ret)
-ctest_submit(PARTS Test RETURN_VALUE _submit_ret)
+handle_submit(PARTS Test RETURN_VALUE _submit_ret)
 
 if("${CODECOV}" GREATER 0)
     ctest_coverage(
         BUILD "${BINARY_DIR}"
         RETURN_VALUE _coverage_ret
         CAPTURE_CMAKE_ERROR _coverage_err)
-    ctest_submit(PARTS Coverage RETURN_VALUE _submit_ret)
+    handle_submit(PARTS Coverage RETURN_VALUE _submit_ret)
 endif()
 
 handle_error("Testing" _test_ret)
 
-ctest_submit(PARTS Done RETURN_VALUE _submit_ret)
+handle_submit(PARTS Done RETURN_VALUE _submit_ret)
 EOF
 
 verbose-run cat CTestCustom.cmake

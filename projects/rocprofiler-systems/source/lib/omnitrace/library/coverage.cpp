@@ -337,7 +337,7 @@ omnitrace_register_coverage_hidden(const char* file, const char* func, size_t ad
     if(omnitrace::get_state() < omnitrace::State::Active &&
        !omnitrace_init_tooling_hidden())
         return;
-    else if(omnitrace::get_state() == omnitrace::State::Finalized)
+    else if(omnitrace::get_state() >= omnitrace::State::Finalized)
         return;
 
     OMNITRACE_BASIC_VERBOSE_F(3, "[0x%x] %-20s :: %20s\n", (unsigned int) address, func,

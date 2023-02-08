@@ -86,6 +86,12 @@ set_source_location(source_location&&);
 FILE*
 get_file();
 //
+void
+close_file();
+//
+int64_t
+get_tid();
+//
 inline void
 flush()
 {
@@ -168,7 +174,7 @@ as_hex<void*>(void*, size_t);
 #endif
 
 #if !defined(OMNITRACE_DEBUG_THREAD_IDENTIFIER)
-#    define OMNITRACE_DEBUG_THREAD_IDENTIFIER ::tim::threading::get_id()
+#    define OMNITRACE_DEBUG_THREAD_IDENTIFIER ::omnitrace::debug::get_tid()
 #endif
 
 #if !defined(OMNITRACE_SOURCE_LOCATION)
@@ -394,7 +400,6 @@ as_hex<void*>(void*, size_t);
         fprintf(::omnitrace::debug::get_file(), __VA_ARGS__);                            \
         ::omnitrace::debug::flush();                                                     \
         ::omnitrace::set_state(::omnitrace::State::Finalized);                           \
-        ::tim::signals::disable_signal_detection();                                      \
         timemory_print_demangled_backtrace<64>();                                        \
         METHOD;                                                                          \
     }
@@ -410,7 +415,6 @@ as_hex<void*>(void*, size_t);
         fprintf(::omnitrace::debug::get_file(), __VA_ARGS__);                            \
         ::omnitrace::debug::flush();                                                     \
         ::omnitrace::set_state(::omnitrace::State::Finalized);                           \
-        ::tim::signals::disable_signal_detection();                                      \
         timemory_print_demangled_backtrace<64>();                                        \
         METHOD;                                                                          \
     }
@@ -427,7 +431,6 @@ as_hex<void*>(void*, size_t);
         fprintf(::omnitrace::debug::get_file(), __VA_ARGS__);                            \
         ::omnitrace::debug::flush();                                                     \
         ::omnitrace::set_state(::omnitrace::State::Finalized);                           \
-        ::tim::signals::disable_signal_detection();                                      \
         timemory_print_demangled_backtrace<64>();                                        \
         METHOD;                                                                          \
     }
@@ -443,7 +446,6 @@ as_hex<void*>(void*, size_t);
         fprintf(::omnitrace::debug::get_file(), __VA_ARGS__);                            \
         ::omnitrace::debug::flush();                                                     \
         ::omnitrace::set_state(::omnitrace::State::Finalized);                           \
-        ::tim::signals::disable_signal_detection();                                      \
         timemory_print_demangled_backtrace<64>();                                        \
         METHOD;                                                                          \
     }

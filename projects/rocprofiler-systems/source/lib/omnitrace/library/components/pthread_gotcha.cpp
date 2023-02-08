@@ -27,7 +27,6 @@
 #include "library/components/pthread_create_gotcha.hpp"
 #include "library/components/pthread_mutex_gotcha.hpp"
 #include "library/runtime.hpp"
-#include "library/sampling.hpp"
 #include "library/thread_data.hpp"
 
 #include <timemory/backends/threading.hpp>

@@ -27,7 +27,6 @@
 #include "library/components/category_region.hpp"
 #include "library/critical_trace.hpp"
 #include "library/runtime.hpp"
-#include "library/sampling.hpp"
 #include "library/thread_info.hpp"
 
 #include <timemory/backends/threading.hpp>

@@ -35,6 +35,7 @@
 
 #    include <timemory/components/ompt.hpp>
 #    include <timemory/components/ompt/extern.hpp>
+#    include <timemory/mpl/type_traits.hpp>
 #    include <timemory/timemory.hpp>
 
 #    include <memory>
@@ -85,6 +86,7 @@ shutdown()
     _protect = true;
     if(f_bundle)
     {
+        if(tim::manager::instance()) tim::manager::instance()->cleanup("omnitrace-ompt");
         f_bundle->stop();
         ompt_context_t::cleanup();
         trait::runtime_enabled<ompt_toolset_t>::set(false);

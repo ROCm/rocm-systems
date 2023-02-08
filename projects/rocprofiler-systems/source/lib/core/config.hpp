@@ -100,11 +100,16 @@ template <typename Tp>
 bool
 set_setting_value(const std::string& _name, Tp&& _v)
 {
+    auto _user_upd = tim::settings::update_type::user;
     auto _instance = tim::settings::shared_instance();
     auto _setting  = _instance->find(_name);
     if(_setting == _instance->end()) return false;
     if(!_setting->second) return false;
-    return _setting->second->set(std::forward<Tp>(_v));
+    auto& itr      = _setting->second;
+    auto  _upd     = itr->set_user_updated();
+    auto  _success = itr->set(std::forward<Tp>(_v), _user_upd);
+    if(!_success) itr->set_updated(_upd);
+    return _success;
 }
 
 template <typename Tp>

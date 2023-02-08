@@ -333,7 +333,7 @@ start_duration_thread()
                 if(!_lk.owns_lock()) _lk.lock();
                 get_duration_cv().wait_until(_lk, _end);
                 auto _premature = (std::chrono::steady_clock::now() < _end);
-                auto _finalized = (get_state() == State::Finalized);
+                auto _finalized = (get_state() >= State::Finalized);
                 if(_premature && !_finalized)
                 {
                     // protect against spurious wakeups
@@ -480,6 +480,7 @@ configure(bool _setup, int64_t _tid)
                                 "causal profiling is enabled");
 
     OMNITRACE_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
+    OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
 
     auto&& _cpu_tids  = get_sampling_cpu_tids();
     auto&& _real_tids = get_sampling_real_tids();
@@ -673,6 +674,13 @@ setup()
 std::set<int>
 shutdown()
 {
+    if(is_child_process())
+    {
+        for(auto& itr : sampler_instances::instances())
+            itr.release();
+        return std::set<int>{};
+    }
+
     auto _v = configure(false);
     if(utility::get_thread_index() == 0) stop_duration_thread();
     return _v;

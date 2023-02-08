@@ -810,6 +810,13 @@ omnitrace_add_validation_test(
          0
          -p)
 
+omnitrace_add_test(
+    NAME fork
+    TARGET fork-example
+    REWRITE_ARGS -e -v 2 --print-instrumented modules -i 16
+    RUNTIME_ARGS -e -v 1 --label file -i 16
+    ENVIRONMENT "${_base_environment};OMNITRACE_CRITICAL_TRACE=ON")
+
 # -------------------------------------------------------------------------------------- #
 #
 # critical-trace tests
@@ -846,7 +853,6 @@ set(_parallel_overhead_critical_trace_environ
     "OMNITRACE_OUTPUT_PREFIX=parallel-overhead-critical-trace/"
     "OMNITRACE_CRITICAL_TRACE_DEBUG=ON"
     "OMNITRACE_VERBOSE=4"
-    "OMNITRACE_DEBUG=ON"
     "OMNITRACE_USE_PID=OFF"
     "OMNITRACE_TIME_OUTPUT=OFF")
 

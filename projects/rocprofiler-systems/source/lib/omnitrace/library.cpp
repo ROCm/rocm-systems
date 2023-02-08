@@ -68,6 +68,7 @@
 #include <timemory/signals/signal_mask.hpp>
 #include <timemory/signals/types.hpp>
 #include <timemory/utility/backtrace.hpp>
+#include <timemory/utility/join.hpp>
 #include <timemory/utility/procfs/maps.hpp>
 
 #include <atomic>
@@ -679,6 +680,8 @@ omnitrace_finalize_hidden(void)
     // disable initialization callback
     threading::remove_callback(&ensure_initialization);
 
+    bool _is_child = is_child_process();
+
     set_thread_state(ThreadState::Completed);
 
     // return if not active
@@ -686,6 +689,12 @@ omnitrace_finalize_hidden(void)
     {
         OMNITRACE_BASIC_DEBUG_F("State = %s. Finalization skipped\n",
                                 std::to_string(get_state()).c_str());
+        return;
+    }
+    else if(_is_child)
+    {
+        set_state(State::Finalized);
+        std::quick_exit(EXIT_SUCCESS);
         return;
     }
 
@@ -1104,9 +1113,14 @@ omnitrace_finalize_hidden(void)
                       _push_count, "vs. popped:", _pop_count)
             .c_str());
 
+    debug::close_file();
     config::finalize();
 
     OMNITRACE_VERBOSE_F(0, "Finalized: %s\n", _finalization.as_string().c_str());
+
+    tim::signals::enable_signal_detection(
+        { tim::signals::sys_signal::SegFault, tim::signals::sys_signal::Stop },
+        [](int) {});
 }
 
 //======================================================================================//

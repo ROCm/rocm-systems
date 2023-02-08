@@ -29,6 +29,7 @@
 #include <cstring>
 #include <functional>
 #include <string>
+#include <unistd.h>
 
 #if !defined(OMNITRACE_COMMON_LIBRARY_NAME)
 #    define OMNITRACE_COMMON_LIBRARY_NAME "common"
@@ -77,9 +78,9 @@ ignore(const char* _name, int _verbose, int _value, const char* _reason, Args...
         fflush(stderr);
         fprintf(stderr,
                 "[omnitrace][" OMNITRACE_COMMON_LIBRARY_NAME
-                "][%li] %s(%s) was ignored :: %s\n",
-                get_thread_index(), _name, join(QuoteStrings{}, ", ", _args...).c_str(),
-                _reason);
+                "][%i][%li] %s(%s) was ignored :: %s\n",
+                getpid(), get_thread_index(), _name,
+                join(QuoteStrings{}, ", ", _args...).c_str(), _reason);
         fflush(stderr);
     }
 }
@@ -109,8 +110,8 @@ invoke(const char* _name, int _verbose, bool& _toggle, FuncT&& _func, Args... _a
                 OMNITRACE_COMMON_LIBRARY_LOG_START
                 fprintf(stderr,
                         "[omnitrace][" OMNITRACE_COMMON_LIBRARY_NAME
-                        "][%li][%i] %s(%s)\n",
-                        get_thread_index(), _lk, _name,
+                        "][%i][%li][%i] %s(%s)\n",
+                        getpid(), get_thread_index(), _lk, _name,
                         join(QuoteStrings{}, ", ", _args...).c_str());
                 OMNITRACE_COMMON_LIBRARY_LOG_END
                 fflush(stderr);
@@ -123,8 +124,8 @@ invoke(const char* _name, int _verbose, bool& _toggle, FuncT&& _func, Args... _a
             OMNITRACE_COMMON_LIBRARY_LOG_START
             fprintf(stderr,
                     "[omnitrace][" OMNITRACE_COMMON_LIBRARY_NAME
-                    "][%li] %s(%s) was guarded :: value = %i\n",
-                    get_thread_index(), _name,
+                    "][%i][%li] %s(%s) was guarded :: value = %i\n",
+                    getpid(), get_thread_index(), _name,
                     join(QuoteStrings{}, ", ", _args...).c_str(), _lk);
             OMNITRACE_COMMON_LIBRARY_LOG_END
             fflush(stderr);
@@ -135,8 +136,9 @@ invoke(const char* _name, int _verbose, bool& _toggle, FuncT&& _func, Args... _a
         OMNITRACE_COMMON_LIBRARY_LOG_START
         fprintf(stderr,
                 "[omnitrace][" OMNITRACE_COMMON_LIBRARY_NAME
-                "][%li] %s(%s) ignored :: null function pointer\n",
-                get_thread_index(), _name, join(QuoteStrings{}, ", ", _args...).c_str());
+                "][%i][%li] %s(%s) ignored :: null function pointer\n",
+                getpid(), get_thread_index(), _name,
+                join(QuoteStrings{}, ", ", _args...).c_str());
         OMNITRACE_COMMON_LIBRARY_LOG_END
     }
 

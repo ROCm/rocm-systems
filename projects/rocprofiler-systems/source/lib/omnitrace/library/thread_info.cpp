@@ -78,7 +78,7 @@ init_index_data(int64_t _tid, bool _offset = false)
         itr       = thread_index_data{};
         int _verb = 2;
         // if thread created using finalization, bump up the minimum verbosity level
-        if(get_state() == State::Finalized && _offset) _verb += 2;
+        if(get_state() >= State::Finalized && _offset) _verb += 2;
         if(!config::settings_are_configured())
         {
             OMNITRACE_BASIC_VERBOSE_F(
@@ -145,6 +145,12 @@ grow_data(int64_t _tid)
     return _max_threads;
 }
 
+bool
+thread_info::exists()
+{
+    return (get_info_data() != nullptr);
+}
+
 const std::optional<thread_info>&
 thread_info::init(bool _offset)
 {
@@ -177,6 +183,11 @@ thread_info::init(bool _offset)
 const std::optional<thread_info>&
 thread_info::get()
 {
+    if(!exists())
+    {
+        static thread_local auto _v = std::optional<thread_info>{};
+        return _v;
+    }
     return get_info_data(utility::get_thread_index());
 }
 

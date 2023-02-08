@@ -227,19 +227,17 @@ finalize()
 bool
 settings_are_configured()
 {
-    volatile bool _v = _settings_are_configured();
-    return _v;
+    return _settings_are_configured();
 }
 
 void
 configure_settings(bool _init)
 {
-    volatile bool _v = _settings_are_configured();
-    if(_v) return;
-
     static bool _once = false;
     if(_once) return;
     _once = true;
+
+    if(settings_are_configured()) return;
 
     if(get_is_continuous_integration() && get_state() < State::Init)
     {
@@ -2192,9 +2190,11 @@ get_perfetto_output_filename()
         _ext = _val.substr(_pos_ext + 1);
         _val = _val.substr(0, _pos_ext);
     }
-    _val = settings::compose_output_filename(_val, _ext, settings::use_output_suffix(),
-                                             settings::default_process_suffix(), false,
-                                             _dir);
+
+    auto _cfg = settings::compose_filename_config{ settings::use_output_suffix(),
+                                                   settings::default_process_suffix(),
+                                                   false, _dir };
+    _val      = settings::compose_output_filename(_val, _ext, _cfg);
     if(!_val.empty() && _val.at(0) != '/')
         return settings::format(JOIN('/', "%env{PWD}%", _val), get_config()->get_tag());
     return _val;

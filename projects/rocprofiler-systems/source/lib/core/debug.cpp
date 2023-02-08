@@ -25,6 +25,7 @@
 #include "state.hpp"
 
 #include <timemory/log/color.hpp>
+#include <timemory/process/threading.hpp>
 #include <timemory/utility/filepath.hpp>
 
 #include <iomanip>
@@ -42,6 +43,29 @@ struct source_location_history
     std::array<source_location, 10> data = {};
     size_t                          size = 0;
 };
+
+const std::string&
+get_file_name()
+{
+    static auto _fname = tim::get_env<std::string>("OMNITRACE_LOG_FILE", "");
+    return _fname;
+}
+
+std::atomic<FILE*>&
+get_file_pointer()
+{
+    static auto _v = std::atomic<FILE*>{ []() {
+        const auto&_fname= get_file_name();
+        if(!_fname.empty()) tim::log::monochrome() = true;
+        return (_fname.empty())
+                   ? stderr
+                   : filepath::fopen(
+                         settings::format(_fname, filepath::basename(filepath::realpath(
+                                                      "/proc/self/exe", nullptr, false))),
+                         "w");
+    }() };
+    return _v;
+}
 
 auto&
 get_source_location_history()
@@ -88,11 +112,28 @@ lock::~lock()
 FILE*
 get_file()
 {
-    static FILE* _v = []() {
-        auto&& _fname = tim::get_env<std::string>("OMNITRACE_LOG_FILE", "");
-        if(!_fname.empty()) tim::log::monochrome() = true;
-        return (_fname.empty()) ? stderr : tim::filepath::fopen(_fname, "w");
-    }();
+    return get_file_pointer();
+}
+
+void
+close_file()
+{
+    if(get_file() != stderr)
+    {
+        auto* _file = get_file_pointer().load();
+        get_file_pointer().store(stderr);
+        fclose(_file);
+        // Write the trace into a file.
+        if(get_verbose() >= 0)
+            operation::file_output_message<tim::project::omnitrace>{}(
+                get_file_name(), std::string{ "debug" });
+    }
+}
+
+int64_t
+get_tid()
+{
+    static thread_local auto _v = threading::get_id();
     return _v;
 }
 }  // namespace debug

@@ -28,11 +28,11 @@
 #include "core/timemory.hpp"
 #include "library/thread_data.hpp"
 
-#include <timemory/components/base.hpp>
-#include <timemory/macros/language.hpp>
+#include <timemory/components/base/declaration.hpp>
 #include <timemory/mpl/concepts.hpp>
-#include <timemory/utility/unwind.hpp>
-#include <timemory/variadic/types.hpp>
+#include <timemory/unwind/cache.hpp>
+#include <timemory/unwind/processed_entry.hpp>
+#include <timemory/unwind/stack.hpp>
 
 #include <array>
 #include <chrono>

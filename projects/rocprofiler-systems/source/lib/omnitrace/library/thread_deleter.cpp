@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "library/thread_deleter.hpp"
+#include "api.hpp"
 #include "core/utility.hpp"
 #include "library/components/pthread_create_gotcha.hpp"
 #include "library/thread_info.hpp"
@@ -35,10 +36,22 @@ template struct component_bundle_cache<instrumentation_bundle_t>;
 void
 thread_deleter<void>::operator()() const
 {
-    component::pthread_create_gotcha::shutdown(threading::get_id());
-    set_thread_state(ThreadState::Completed);
-    if(get_state() != State::Finalized && threading::get_id() == 0)
-        omnitrace_finalize_hidden();
+    // called after thread info is deleted
+    if(!thread_info::exists()) return;
+
+    const auto& _info = thread_info::get();
+    if(_info && _info->index_data)
+    {
+        auto _tid = _info->index_data->sequent_value;
+
+        component::pthread_create_gotcha::shutdown(_tid);
+        set_thread_state(ThreadState::Completed);
+        if(get_state() < State::Finalized && _tid == 0) omnitrace_finalize_hidden();
+    }
+    else
+    {
+        set_thread_state(ThreadState::Completed);
+    }
 }
 
 template struct thread_deleter<void>;

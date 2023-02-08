@@ -137,6 +137,8 @@ category_region<CategoryT>::start(std::string_view name, Args&&... args)
     if(get_thread_state() == ThreadState::Disabled) return;
     if(get_state() >= State::Finalized) return;
 
+    if(name.empty()) return;
+
     OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
 
     // the expectation here is that if the state is not active then the call
@@ -186,7 +188,7 @@ category_region<CategoryT>::start(std::string_view name, Args&&... args)
     {
         if(get_use_timemory())
         {
-            tracing::push_timemory(CategoryT{}, name.data(), std::forward<Args>(args)...);
+            tracing::push_timemory(CategoryT{}, name, std::forward<Args>(args)...);
         }
     }
 
@@ -248,8 +250,7 @@ category_region<CategoryT>::stop(std::string_view name, Args&&... args)
         {
             if(get_use_timemory())
             {
-                tracing::pop_timemory(CategoryT{}, name.data(),
-                                      std::forward<Args>(args)...);
+                tracing::pop_timemory(CategoryT{}, name, std::forward<Args>(args)...);
             }
         }
 

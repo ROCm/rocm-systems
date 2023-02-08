@@ -32,7 +32,6 @@
 #include "library/rocprofiler.hpp"
 #include "library/roctracer.hpp"
 #include "library/runtime.hpp"
-#include "library/sampling.hpp"
 #include "library/thread_data.hpp"
 #include "library/tracing.hpp"
 

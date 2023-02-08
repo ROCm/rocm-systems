@@ -232,8 +232,6 @@ data::shutdown()
 void
 data::post_process(uint32_t _dev_id)
 {
-    OMNITRACE_VERBOSE(1, "Post-processing rocm-smi data for device %u\n", _dev_id);
-
     using component::sampling_gpu_busy;
     using component::sampling_gpu_memory;
     using component::sampling_gpu_power;
@@ -244,6 +242,9 @@ data::post_process(uint32_t _dev_id)
     auto&       _rocm_smi_v = sampler_instances::instances().at(_dev_id);
     auto        _rocm_smi   = (_rocm_smi_v) ? *_rocm_smi_v : std::deque<rocm_smi::data>{};
     const auto& _thread_info = thread_info::get(0, InternalTID);
+
+    OMNITRACE_VERBOSE(1, "Post-processing %zu rocm-smi samples from device %u\n",
+                      _rocm_smi.size(), _dev_id);
 
     OMNITRACE_CI_THROW(!_thread_info, "Missing thread info for thread 0");
     if(!_thread_info) return;

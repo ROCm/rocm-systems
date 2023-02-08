@@ -102,29 +102,34 @@ auto     mpi_comm_records  = std::map<uintptr_t, comm_rank_data>{};
 using tim::auto_lock_t;
 using tim::type_mutex;
 
+#if defined(TIMEMORY_USE_MPI)
+int
+omnitrace_mpi_copy(MPI_Comm, int, void*, void*, void*, int*)
+{
+    return MPI_SUCCESS;
+}
+
+int
+omnitrace_mpi_fini(MPI_Comm, int, void*, void*)
+{
+    OMNITRACE_DEBUG("MPI Comm attribute finalize\n");
+    auto _blocked = get_sampling_signals();
+    if(!_blocked.empty())
+        tim::signals::block_signals(_blocked, tim::signals::sigmask_scope::process);
+    if(mpip_index != std::numeric_limits<uint64_t>::max())
+        comp::deactivate_mpip<mpip_bundle_t, project::omnitrace>(mpip_index);
+    if(is_root_process()) omnitrace_finalize_hidden();
+    return MPI_SUCCESS;
+}
+#endif
+
 // this ensures omnitrace_finalize is called before MPI_Finalize
 void
 omnitrace_mpi_set_attr()
 {
 #if defined(TIMEMORY_USE_MPI)
-    static auto _mpi_copy = [](MPI_Comm, int, void*, void*, void*, int*) {
-        return MPI_SUCCESS;
-    };
-    static auto _mpi_fini = [](MPI_Comm, int, void*, void*) {
-        OMNITRACE_DEBUG("MPI Comm attribute finalize\n");
-        auto _blocked = get_sampling_signals();
-        if(!_blocked.empty())
-            tim::signals::block_signals(_blocked, tim::signals::sigmask_scope::process);
-        if(mpip_index != std::numeric_limits<uint64_t>::max())
-            comp::deactivate_mpip<mpip_bundle_t, project::omnitrace>(mpip_index);
-        omnitrace_finalize_hidden();
-        return MPI_SUCCESS;
-    };
-    using copy_func_t = int (*)(MPI_Comm, int, void*, void*, void*, int*);
-    using fini_func_t = int (*)(MPI_Comm, int, void*, void*);
-    int _comm_key     = -1;
-    if(PMPI_Comm_create_keyval(static_cast<copy_func_t>(_mpi_copy),
-                               static_cast<fini_func_t>(_mpi_fini), &_comm_key,
+    int _comm_key = -1;
+    if(PMPI_Comm_create_keyval(&omnitrace_mpi_copy, &omnitrace_mpi_fini, &_comm_key,
                                nullptr) == MPI_SUCCESS)
         PMPI_Comm_set_attr(MPI_COMM_SELF, _comm_key, nullptr);
 #endif
@@ -258,7 +263,7 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming)
     tim::mpi::is_initialized_callback() = []() { return false; };
     tim::mpi::is_finalized()            = true;
 #else
-    omnitrace_finalize_hidden();
+    if(is_root_process()) omnitrace_finalize_hidden();
 #endif
 }
 

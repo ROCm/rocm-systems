@@ -35,6 +35,7 @@
 #include <timemory/backends/threading.hpp>
 #include <timemory/components/rusage/backends.hpp>
 #include <timemory/environment.hpp>
+#include <timemory/process/process.hpp>
 #include <timemory/sampling/allocator.hpp>
 #include <timemory/settings.hpp>
 #include <timemory/settings/types.hpp>
@@ -55,6 +56,8 @@ namespace omnitrace
 {
 namespace
 {
+auto root_process_id = get_env<pid_t>("OMNITRACE_ROOT_PROCESS", process::get_id(), false);
+
 auto&
 get_sampling_on_child_threads_history(int64_t _idx = utility::get_thread_index())
 {
@@ -258,5 +261,23 @@ set_sampling_on_all_future_threads(bool _v)
 {
     for(size_t i = 0; i < max_supported_threads; ++i)
         get_sampling_on_child_threads_history(i).emplace_back(_v);
+}
+
+pid_t
+get_root_process_id()
+{
+    return root_process_id;
+}
+
+bool
+is_root_process()
+{
+    return (root_process_id == process::get_id());
+}
+
+bool
+is_child_process()
+{
+    return (root_process_id != process::get_id());
 }
 }  // namespace omnitrace

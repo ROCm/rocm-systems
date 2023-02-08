@@ -19,7 +19,6 @@ omnitrace_add_option(OMNITRACE_BUILD_EXTRA_OPTIMIZATIONS "Extra optimization fla
 omnitrace_add_option(OMNITRACE_BUILD_LTO "Build with link-time optimization" OFF)
 omnitrace_add_option(OMNITRACE_USE_COMPILE_TIMING
                      "Build with timing metrics for compilation" OFF)
-omnitrace_add_option(OMNITRACE_USE_COVERAGE "Build with code-coverage flags" OFF)
 omnitrace_add_option(OMNITRACE_USE_SANITIZER
                      "Build with -fsanitze=\${OMNITRACE_SANITIZER_TYPE}" OFF)
 omnitrace_add_option(OMNITRACE_BUILD_STATIC_LIBGCC
@@ -145,13 +144,15 @@ endif()
 # non-debug optimizations
 #
 omnitrace_add_interface_library(omnitrace-compile-extra "Extra optimization flags")
-if(NOT OMNITRACE_USE_COVERAGE AND OMNITRACE_BUILD_EXTRA_OPTIMIZATIONS)
+if(NOT OMNITRACE_BUILD_CODECOV AND OMNITRACE_BUILD_EXTRA_OPTIMIZATIONS)
     add_target_flag_if_avail(
         omnitrace-compile-extra "-finline-functions" "-funroll-loops" "-ftree-vectorize"
         "-ftree-loop-optimize" "-ftree-loop-vectorize")
 endif()
 
-if(NOT "${CMAKE_BUILD_TYPE}" STREQUAL "Debug" AND OMNITRACE_BUILD_EXTRA_OPTIMIZATIONS)
+if(NOT "${CMAKE_BUILD_TYPE}" STREQUAL "Debug"
+   AND OMNITRACE_BUILD_EXTRA_OPTIMIZATIONS
+   AND NOT OMNITRACE_BUILD_CODECOV)
     target_link_libraries(omnitrace-compile-options
                           INTERFACE $<BUILD_INTERFACE:omnitrace-compile-extra>)
     add_flag_if_avail(
@@ -166,29 +167,32 @@ endif()
 #
 add_cxx_flag_if_avail("-faligned-new")
 
-omnitrace_save_variables(FLTO VARIABLES CMAKE_CXX_FLAGS)
-set(_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
-set(CMAKE_CXX_FLAGS "-flto=thin ${_CXX_FLAGS}")
-
 omnitrace_add_interface_library(omnitrace-lto "Adds link-time-optimization flags")
-add_target_flag_if_avail(omnitrace-lto "-flto=thin")
-if(NOT cxx_omnitrace_lto_flto_thin)
-    set(CMAKE_CXX_FLAGS "-flto ${_CXX_FLAGS}")
-    add_target_flag_if_avail(omnitrace-lto "-flto")
-    if(NOT cxx_omnitrace_lto_flto)
-        set(OMNITRACE_BUILD_LTO OFF)
-    else()
-        target_link_options(omnitrace-lto INTERFACE -flto)
-    endif()
-    add_target_flag_if_avail(omnitrace-lto "-fno-fat-lto-objects")
-    if(cxx_omnitrace_lto_fno_fat_lto_objects)
-        target_link_options(omnitrace-lto INTERFACE -fno-fat-lto-objects)
-    endif()
-else()
-    target_link_options(omnitrace-lto INTERFACE -flto=thin)
-endif()
 
-omnitrace_restore_variables(FLTO VARIABLES CMAKE_CXX_FLAGS)
+if(NOT OMNITRACE_BUILD_CODECOV)
+    omnitrace_save_variables(FLTO VARIABLES CMAKE_CXX_FLAGS)
+    set(_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
+    set(CMAKE_CXX_FLAGS "-flto=thin ${_CXX_FLAGS}")
+
+    add_target_flag_if_avail(omnitrace-lto "-flto=thin")
+    if(NOT cxx_omnitrace_lto_flto_thin)
+        set(CMAKE_CXX_FLAGS "-flto ${_CXX_FLAGS}")
+        add_target_flag_if_avail(omnitrace-lto "-flto")
+        if(NOT cxx_omnitrace_lto_flto)
+            set(OMNITRACE_BUILD_LTO OFF)
+        else()
+            target_link_options(omnitrace-lto INTERFACE -flto)
+        endif()
+        add_target_flag_if_avail(omnitrace-lto "-fno-fat-lto-objects")
+        if(cxx_omnitrace_lto_fno_fat_lto_objects)
+            target_link_options(omnitrace-lto INTERFACE -fno-fat-lto-objects)
+        endif()
+    else()
+        target_link_options(omnitrace-lto INTERFACE -flto=thin)
+    endif()
+
+    omnitrace_restore_variables(FLTO VARIABLES CMAKE_CXX_FLAGS)
+endif()
 
 # ----------------------------------------------------------------------------------------#
 # print compilation timing reports (Clang compiler)

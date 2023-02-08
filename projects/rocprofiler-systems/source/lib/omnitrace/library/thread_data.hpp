@@ -22,7 +22,6 @@
 
 #pragma once
 
-#include "api.hpp"
 #include "core/common.hpp"
 #include "core/concepts.hpp"
 #include "core/config.hpp"

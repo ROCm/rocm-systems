@@ -121,6 +121,15 @@ struct scoped_child_sampling
     scoped_child_sampling(bool _v) { push_enable_sampling_on_child_threads(_v); }
     ~scoped_child_sampling() { pop_enable_sampling_on_child_threads(); }
 };
+
+pid_t
+get_root_process_id();
+
+bool
+is_root_process();
+
+bool
+is_child_process();
 }  // namespace omnitrace
 
 #define OMNITRACE_SCOPED_SAMPLING_ON_CHILD_THREADS(VALUE)                                \

@@ -26,7 +26,6 @@
 #include "library/cpu_freq.hpp"
 #include "library/rocm_smi.hpp"
 #include "library/runtime.hpp"
-#include "library/sampling.hpp"
 
 #include <memory>
 #include <vector>
@@ -95,11 +94,11 @@ sampler::poll(std::atomic<State>* _state, nsec_t _interval, promise_t* _ready)
     auto _now = std::chrono::steady_clock::now();
     auto _end =
         _now + std::chrono::nanoseconds{ static_cast<uint64_t>(_duration * units::sec) };
-    while(_state && _state->load() != State::Finalized && get_state() != State::Finalized)
+    while(_state && _state->load() < State::Finalized && get_state() < State::Finalized)
     {
         std::this_thread::sleep_until(_now);
         if(_state->load() != State::Active) continue;
-        if(get_state() == State::Finalized) break;
+        if(get_state() >= State::Finalized) break;
         if(get_state() != State::Active) continue;
         get_sampler_is_sampling().store(true);
         for(auto& itr : instances)
@@ -112,7 +111,7 @@ sampler::poll(std::atomic<State>* _state, nsec_t _interval, promise_t* _ready)
     // ensure this is always false
     get_sampler_is_sampling().store(false);
 
-    if(_has_duration && _now >= _end && get_state() != State::Finalized)
+    if(_has_duration && _now >= _end && get_state() < State::Finalized)
     {
         OMNITRACE_VERBOSE(
             1,

@@ -60,28 +60,33 @@ invoke_exit_gotcha(const exit_gotcha::gotcha_data& _data, FuncT _func, Args... _
 {
     threading::clear_callbacks();
 
+    if(get_state() < State::Finalized)
+    {
+        if(config::settings_are_configured())
+        {
+            OMNITRACE_VERBOSE(0, "finalizing %s before calling %s(%s)...\n",
+                              get_exe_name().c_str(), _data.tool_id.c_str(),
+                              JOIN(", ", _args...).c_str());
+        }
+        else
+        {
+            OMNITRACE_BASIC_VERBOSE(0, "finalizing %s before calling %s(%s)...\n",
+                                    get_exe_name().c_str(), _data.tool_id.c_str(),
+                                    JOIN(", ", _args...).c_str());
+        }
+
+        omnitrace_finalize();
+    }
+
     if(config::settings_are_configured())
     {
-        OMNITRACE_VERBOSE(0, "%s called %s(%s)...\n", get_exe_name().c_str(),
-                          _data.tool_id.c_str(), JOIN(", ", _args...).c_str());
+        OMNITRACE_VERBOSE(0, "calling %s(%s) in %s...\n", _data.tool_id.c_str(),
+                          JOIN(", ", _args...).c_str(), get_exe_name().c_str());
     }
     else
     {
-        OMNITRACE_BASIC_VERBOSE(0, "%s called %s(%s)...\n", get_exe_name().c_str(),
-                                _data.tool_id.c_str(), JOIN(", ", _args...).c_str());
-    }
-
-    if(get_state() != State::Finalized) omnitrace_finalize_hidden();
-
-    if(config::settings_are_configured())
-    {
-        OMNITRACE_VERBOSE(0, "%s called %s(%s)...\n", get_exe_name().c_str(),
-                          _data.tool_id.c_str(), JOIN(", ", _args...).c_str());
-    }
-    else
-    {
-        OMNITRACE_BASIC_VERBOSE(0, "%s called %s(%s)...\n", get_exe_name().c_str(),
-                                _data.tool_id.c_str(), JOIN(", ", _args...).c_str());
+        OMNITRACE_BASIC_VERBOSE(0, "calling %s(%s) in %s...\n", _data.tool_id.c_str(),
+                                JOIN(", ", _args...).c_str(), get_exe_name().c_str());
     }
 
     (*_func)(_args...);

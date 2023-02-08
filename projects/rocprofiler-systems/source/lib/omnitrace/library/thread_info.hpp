@@ -95,6 +95,7 @@ struct thread_info
 
     std::string as_string() const;
 
+    static bool                              exists();
     static const std::optional<thread_info>& init(bool _offset = false);
     static const std::optional<thread_info>& get();
     static const std::optional<thread_info>& get(int64_t _tid, ThreadIdType _type);
