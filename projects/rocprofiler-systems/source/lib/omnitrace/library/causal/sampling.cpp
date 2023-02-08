@@ -25,6 +25,7 @@
 #include "core/concepts.hpp"
 #include "core/config.hpp"
 #include "core/debug.hpp"
+#include "core/locking.hpp"
 #include "core/state.hpp"
 #include "core/utility.hpp"
 #include "library/causal/components/backtrace.hpp"
@@ -172,12 +173,10 @@ causal_offload_buffer(int64_t, causal_sampler_buffer_t&& _buf)
 
     if(!_processed.empty())
     {
-        tasking::general::get_task_group().exec([_processed]() {
-            static std::mutex _mutex;
-            auto              _lk = std::scoped_lock<std::mutex>{ _mutex };
-            for(const auto& itr : _processed)
-                add_samples(itr.first, itr.second);
-        });
+        static auto _mutex = locking::atomic_mutex{};
+        auto        _lk    = locking::atomic_lock{ _mutex };
+        for(const auto& itr : _processed)
+            add_samples(itr.first, itr.second);
     }
 }
 
@@ -252,11 +251,16 @@ configure(bool _setup, int64_t _tid)
 
             for(int64_t i = 1; i < OMNITRACE_MAX_THREADS; ++i)
             {
-                if(get_causal_sampler(i)) get_causal_sampler(i)->reset();
+                if(get_causal_sampler(i))
+                {
+                    get_causal_sampler(i)->stop();
+                    get_causal_sampler(i)->reset();
+                }
             }
         }
 
         _causal->stop();
+        _causal->reset();
 
         OMNITRACE_DEBUG("Causal sampler destroyed for thread %lu\n", _tid);
     }
@@ -293,11 +297,13 @@ void
 block_samples()
 {
     trait::runtime_enabled<causal_sampler_t>::set(false);
+    trait::runtime_enabled<causal::component::backtrace>::set(false);
 }
 
 void
 unblock_samples()
 {
+    trait::runtime_enabled<causal::component::backtrace>::set(true);
     trait::runtime_enabled<causal_sampler_t>::set(true);
 }
 
@@ -326,6 +332,8 @@ post_process()
 
     OMNITRACE_VERBOSE(2 || get_debug_sampling(),
                       "Stopping causal sampling components...\n");
+
+    block_samples();
 
     for(size_t i = 0; i < max_supported_threads; ++i)
     {

@@ -37,6 +37,7 @@
 #include <timemory/components/timing/backends.hpp>
 #include <timemory/components/timing/wall_clock.hpp>
 #include <timemory/mpl/concepts.hpp>
+#include <timemory/mpl/type_traits.hpp>
 #include <timemory/mpl/types.hpp>
 #include <timemory/process/threading.hpp>
 #include <timemory/units.hpp>
@@ -126,7 +127,8 @@ backtrace::sample(int _sig)
     // update the last sample for backtrace signal(s) even when in use
     static thread_local int64_t _last_sample = 0;
 
-    if(is_in_use())
+    if(is_in_use() ||
+       OMNITRACE_UNLIKELY(!trait::runtime_enabled<causal::component::backtrace>::get()))
     {
         if(_sig == get_realtime_signal()) _last_sample = tracing::now();
         return;

@@ -20,6 +20,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include "causal.hpp"
+
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -90,7 +92,11 @@ cpu_func_impl(int64_t n, int nloop)
     auto _cpu_now = get_clock_cpu_now();
     auto _cpu_end = _cpu_now + n;
     // clang-format off
-    while(get_clock_cpu_now() < _cpu_end) { for(volatile int i = 0; i < nloop; ++i) {} }
+    while(get_clock_cpu_now() < _cpu_end) 
+    { 
+        for(volatile int i = 0; i < nloop; ++i) {} 
+        CAUSAL_PROGRESS_NAMED("cpu_impl"); 
+    }
     // clang-format on
     return V;
 }

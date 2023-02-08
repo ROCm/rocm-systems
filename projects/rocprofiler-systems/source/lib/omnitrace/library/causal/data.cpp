@@ -424,7 +424,13 @@ void
 compute_eligible_lines()
 {
     static auto _once = std::once_flag{};
-    std::call_once(_once, compute_eligible_lines_impl);
+    std::call_once(_once, []() {
+        compute_eligible_lines_impl();
+        auto _cfg         = settings::compose_filename_config{};
+        _cfg.subdirectory = "causal/binary-info";
+        _cfg.use_suffix   = config::get_use_pid();
+        save_line_info(_cfg, config::get_verbose());
+    });
 }
 
 void
@@ -435,7 +441,7 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
     using duration_sec_t  = std::chrono::duration<double, std::ratio<1>>;
 
     const auto& _thr_info = thread_info::init(true);
-    OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
+    set_thread_state(ThreadState::Disabled);
     OMNITRACE_CONDITIONAL_THROW(!_thr_info->is_offset,
                                 "Error! causal profiling thread should be offset");
 
@@ -918,11 +924,6 @@ start_experimenting()
     }
 
     compute_eligible_lines();
-
-    auto _cfg         = settings::compose_filename_config{};
-    _cfg.subdirectory = "causal/binary-info";
-    _cfg.use_suffix   = config::get_use_pid();
-    save_line_info(_cfg, config::get_verbose());
 
     if(get_state() < State::Finalized)
     {

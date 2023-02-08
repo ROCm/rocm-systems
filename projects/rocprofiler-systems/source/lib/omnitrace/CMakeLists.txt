@@ -1,49 +1,5 @@
 # ------------------------------------------------------------------------------#
 #
-# omnitrace interface library
-#
-# ------------------------------------------------------------------------------#
-
-if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.20)
-    cmake_policy(SET CMP0115 NEW)
-endif()
-
-add_library(omnitrace-interface-library INTERFACE)
-add_library(omnitrace::omnitrace-interface-library ALIAS omnitrace-interface-library)
-
-target_include_directories(
-    omnitrace-interface-library INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}
-                                          ${CMAKE_CURRENT_BINARY_DIR})
-
-target_compile_definitions(omnitrace-interface-library
-                           INTERFACE OMNITRACE_MAX_THREADS=${OMNITRACE_MAX_THREADS})
-
-target_link_libraries(
-    omnitrace-interface-library
-    INTERFACE
-        $<BUILD_INTERFACE:omnitrace::omnitrace-headers>
-        $<BUILD_INTERFACE:omnitrace::omnitrace-threading>
-        $<BUILD_INTERFACE:omnitrace::omnitrace-common-library>
-        $<BUILD_INTERFACE:omnitrace::omnitrace-compile-options>
-        $<BUILD_INTERFACE:omnitrace::omnitrace-compile-definitions>
-        $<BUILD_INTERFACE:omnitrace::omnitrace-perfetto>
-        $<BUILD_INTERFACE:omnitrace::omnitrace-timemory>
-        $<BUILD_INTERFACE:omnitrace::omnitrace-elfutils>
-        $<BUILD_INTERFACE:omnitrace::omnitrace-bfd>
-        $<BUILD_INTERFACE:omnitrace::omnitrace-mpi>
-        $<BUILD_INTERFACE:omnitrace::omnitrace-ptl>
-        $<BUILD_INTERFACE:omnitrace::omnitrace-hip>
-        $<BUILD_INTERFACE:omnitrace::omnitrace-roctracer>
-        $<BUILD_INTERFACE:omnitrace::omnitrace-rocprofiler>
-        $<BUILD_INTERFACE:omnitrace::omnitrace-rocm-smi>
-        $<BUILD_INTERFACE:omnitrace::omnitrace-rccl>
-        $<BUILD_INTERFACE:omnitrace::omnitrace-static-libgcc-optional>
-        $<BUILD_INTERFACE:omnitrace::omnitrace-static-libstdcxx-optional>
-        $<BUILD_INTERFACE:omnitrace::omnitrace-sanitizer>
-        $<BUILD_INTERFACE:$<IF:$<BOOL:${OMNITRACE_BUILD_LTO}>,omnitrace::omnitrace-lto,>>)
-
-# ------------------------------------------------------------------------------#
-#
 # omnitrace object library
 #
 # ------------------------------------------------------------------------------#
@@ -69,7 +25,7 @@ endif()
 
 # ------------------------------------------------------------------------------#
 #
-# omnitrace shared library
+# omnitrace static library
 #
 # ------------------------------------------------------------------------------#
 
@@ -79,7 +35,7 @@ add_library(omnitrace::libomnitrace-static ALIAS omnitrace-static-library)
 target_link_libraries(
     omnitrace-static-library
     PRIVATE omnitrace::omnitrace-interface-library omnitrace::omnitrace-core
-            omnitrace::omnitrace-core omnitrace::omnitrace-binary)
+            omnitrace::omnitrace-binary)
 
 set_target_properties(omnitrace-static-library PROPERTIES OUTPUT_NAME omnitrace)
 
@@ -96,7 +52,7 @@ add_library(omnitrace::omnitrace-library ALIAS omnitrace-shared-library)
 target_link_libraries(
     omnitrace-shared-library
     PRIVATE omnitrace::omnitrace-interface-library omnitrace::omnitrace-core
-            omnitrace::omnitrace-core omnitrace::omnitrace-binary)
+            omnitrace::omnitrace-binary)
 
 set_target_properties(
     omnitrace-shared-library

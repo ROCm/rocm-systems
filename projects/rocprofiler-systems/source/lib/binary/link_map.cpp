@@ -126,7 +126,6 @@ get_link_map(const char* _lib, const std::string& _exclude_linked_by,
 
     for(const auto& itr : _full_chain)
     {
-        std::cout << itr << std::endl;
         if(_excl_chain.find(itr) == _excl_chain.end())
         {
             if(_exclude_re.empty() || !std::regex_search(itr, std::regex{ _exclude_re }))

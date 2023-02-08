@@ -48,6 +48,10 @@ struct causal_gotcha : tim::component::base<causal_gotcha, void>
 
     static void start();
     static void stop();
+
+    static void block_signals();
+    static void unblock_signals();
+    static void remove_signals(sigset_t*);
 };
 }  // namespace component
 }  // namespace causal

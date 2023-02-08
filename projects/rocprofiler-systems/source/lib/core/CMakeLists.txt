@@ -48,5 +48,22 @@ target_include_directories(omnitrace-core-library BEFORE
 
 target_link_libraries(omnitrace-core-library
                       PRIVATE omnitrace::omnitrace-interface-library)
+target_link_libraries(
+    omnitrace-core-library
+    PRIVATE
+        $<BUILD_INTERFACE:omnitrace::omnitrace-headers>
+        $<BUILD_INTERFACE:omnitrace::omnitrace-threading>
+        $<BUILD_INTERFACE:omnitrace::omnitrace-common-library>
+        $<BUILD_INTERFACE:omnitrace::omnitrace-compile-definitions>
+        $<BUILD_INTERFACE:omnitrace::omnitrace-compile-options>
+        $<BUILD_INTERFACE:omnitrace::omnitrace-perfetto>
+        $<BUILD_INTERFACE:omnitrace::omnitrace-timemory>
+        $<BUILD_INTERFACE:omnitrace::omnitrace-mpi>
+        $<BUILD_INTERFACE:omnitrace::omnitrace-hip>
+        $<BUILD_INTERFACE:omnitrace::omnitrace-rocm-smi>
+        $<BUILD_INTERFACE:omnitrace::omnitrace-static-libgcc-optional>
+        $<BUILD_INTERFACE:omnitrace::omnitrace-static-libstdcxx-optional>
+        $<BUILD_INTERFACE:omnitrace::omnitrace-sanitizer>
+        $<BUILD_INTERFACE:$<IF:$<BOOL:${OMNITRACE_BUILD_LTO}>,omnitrace::omnitrace-lto,>>)
 
 set_target_properties(omnitrace-core-library PROPERTIES OUTPUT_NAME omnitrace-core)

@@ -567,6 +567,12 @@ process_modules(const std::vector<module_t*>& _app_modules)
 {
     parse_internal_libs_data();
 
+    auto _erase_nullptrs = [](auto& _vec) {
+        _vec.erase(std::remove_if(_vec.begin(), _vec.end(),
+                                  [](const auto* itr) { return (itr == nullptr); }),
+                   _vec.end());
+    };
+
     auto _wc = tim::component::wall_clock{};
     auto _pr = tim::component::peak_rss{};
     _wc.start();
@@ -578,21 +584,30 @@ process_modules(const std::vector<module_t*>& _app_modules)
         if(_module) symtab_data.modules.emplace_back(_module);
     }
 
+    _erase_nullptrs(symtab_data.modules);
+
     verbprintf(0, "Processing %zu modules...\n", symtab_data.modules.size());
+
+    if(symtab_data.modules.empty()) return;
 
     const auto& _data  = get_internal_libs_data();
     auto        _names = std::set<std::string_view>{};
     for(const auto& itr : _data)
     {
-        _names.emplace(itr.first);
-        for(const auto& ditr : itr.second)
-            _names.emplace(ditr.first);
+        if(!itr.first.empty())
+        {
+            _names.emplace(itr.first);
+            for(const auto& ditr : itr.second)
+                _names.emplace(ditr.first);
+        }
     }
 
     for(auto* itr : symtab_data.modules)
     {
         const auto* _base_name = tim::filepath::basename(itr->fullName());
         auto        _real_name = tim::filepath::realpath(itr->fullName(), nullptr, false);
+
+        if(!_base_name) continue;
 
         if(_names.count(_base_name) == 0 && _names.count(_real_name) == 0)
         {
@@ -601,13 +616,17 @@ process_modules(const std::vector<module_t*>& _app_modules)
         }
 
         symtab_data.functions.emplace(itr, std::vector<symtab_func_t*>{});
-        itr->getAllFunctions(symtab_data.functions.at(itr));
+        if(!itr->getAllFunctions(symtab_data.functions.at(itr))) continue;
+        _erase_nullptrs(symtab_data.functions.at(itr));
+
         for(auto* fitr : symtab_data.functions.at(itr))
         {
             symtab_data.typed_func_names[tim::demangle(fitr->getName())] = fitr;
 
             symtab_data.symbols.emplace(fitr, std::vector<symtab_symbol_t*>{});
-            fitr->getSymbols(symtab_data.symbols.at(fitr));
+            if(!fitr->getSymbols(symtab_data.symbols.at(fitr))) continue;
+            _erase_nullptrs(symtab_data.symbols.at(fitr));
+
             for(auto* sitr : symtab_data.symbols.at(fitr))
             {
                 symtab_data.mangled_symbol_names[sitr->getMangledName()] = sitr;

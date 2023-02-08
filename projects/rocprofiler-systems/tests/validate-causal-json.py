@@ -4,6 +4,7 @@ import os
 import re
 import sys
 import json
+import math
 import argparse
 from collections import OrderedDict
 
@@ -31,7 +32,15 @@ class validation(object):
         self.program_speedup = float(_expected)
         self.tolerance = float(_tolerance)
 
-    def validate(self, _exp_name, _pp_name, _virt_speedup, _prog_speedup):
+    def validate(
+        self,
+        _exp_name,
+        _pp_name,
+        _virt_speedup,
+        _prog_speedup,
+        _prog_speedup_stddev,
+        _base_speedup_stddev,
+    ):
         if (
             not re.search(self.experiment_filter, _exp_name)
             or not re.search(self.progress_pt_filter, _pp_name)
@@ -39,9 +48,21 @@ class validation(object):
         ):
             return None
 
-        return _prog_speedup >= (
-            self.program_speedup - self.tolerance
-        ) and _prog_speedup <= (self.program_speedup + self.tolerance)
+        _tolerance = self.tolerance
+        if _base_speedup_stddev > 2.0 * self.tolerance:
+            sys.stderr.write(
+                f"  [{_exp_name}][{_pp_name}][{_virt_speedup}] base speedup has stddev > 2 * tolerance (+/- {_base_speedup_stddev:.3f}). Relaxing validation...\n"
+            )
+            _tolerance += math.sqrt(_base_speedup_stddev)
+        elif _prog_speedup_stddev > 2.0 * self.tolerance:
+            sys.stderr.write(
+                f"  [{_exp_name}][{_pp_name}][{_virt_speedup}] program speedup has stddev > 2 * tolerance (+/- {_prog_speedup_stddev:.3f}). Relaxing validation...\n"
+            )
+            _tolerance += math.sqrt(_prog_speedup_stddev)
+
+        return _prog_speedup >= (self.program_speedup - _tolerance) and _prog_speedup <= (
+            self.program_speedup + _tolerance
+        )
 
 
 class experiment_data(object):
@@ -360,6 +381,8 @@ def main():
         print("")
         print(f"{itr}")
 
+    sys.stdout.flush()
+
     validations = get_validations(args)
 
     expected_validations = len(validations)
@@ -369,12 +392,19 @@ def main():
         for eitr in results:
             _experiment = eitr.data[0].get_name()
             _progresspt = eitr.data[0].prog
+            _base_speedup_stddev = eitr.data[0].compute_speedup_stddev()
             for ditr in eitr.data:
                 _virt_speedup = ditr.virtual_speedup()
                 _prog_speedup = ditr.compute_speedup()
+                _prog_speedup_stddev = ditr.compute_speedup_stddev()
                 for vitr in validations:
                     _v = vitr.validate(
-                        _experiment, _progresspt, _virt_speedup, _prog_speedup
+                        _experiment,
+                        _progresspt,
+                        _virt_speedup,
+                        _prog_speedup,
+                        _prog_speedup_stddev,
+                        _base_speedup_stddev,
                     )
                     if _v is None:
                         continue

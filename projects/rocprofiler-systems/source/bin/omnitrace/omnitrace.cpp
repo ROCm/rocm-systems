@@ -324,7 +324,7 @@ main(int argc, char** argv)
                     std::regex_replace(argv[j], std::regex{ "(.*)([ \t\n\r]+)$" }, "$1");
                 copy_str(_cmdv[k], _v.c_str());
             }
-            mutname = _cmdv[0];
+            if(_cmdc > 0) mutname = _cmdv[0];
             break;
         }
         else

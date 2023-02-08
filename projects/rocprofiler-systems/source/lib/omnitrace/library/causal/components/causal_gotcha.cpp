@@ -26,6 +26,7 @@
 #include "library/causal/components/unblocking_gotcha.hpp"
 
 #include <timemory/backends/threading.hpp>
+#include <timemory/signals/signal_mask.hpp>
 #include <timemory/utility/macros.hpp>
 #include <timemory/utility/types.hpp>
 
@@ -40,6 +41,8 @@ namespace component
 {
 namespace
 {
+namespace signals = ::tim::signals;
+
 using bundle_t = tim::lightweight_tuple<blocking_gotcha_t, unblocking_gotcha_t>;
 
 auto&
@@ -47,6 +50,13 @@ get_bundle()
 {
     static auto _v = std::unique_ptr<bundle_t>{};
     if(!_v) _v = std::make_unique<bundle_t>("causal_gotcha");
+    return _v;
+}
+
+const auto&
+sampling_signals()
+{
+    static auto _v = get_sampling_signals();
     return _v;
 }
 
@@ -89,6 +99,31 @@ causal_gotcha::stop()
 {
     get_bundle()->stop();
     shutdown();
+}
+
+void
+causal_gotcha::block_signals()
+{
+    signals::block_signals(sampling_signals(), signals::sigmask_scope::thread);
+}
+
+void
+causal_gotcha::unblock_signals()
+{
+    signals::unblock_signals(sampling_signals(), signals::sigmask_scope::thread);
+}
+
+void
+causal_gotcha::remove_signals(sigset_t* _set)
+{
+    for(auto _sig : sampling_signals())
+    {
+        if(sigismember(_set, _sig) != 0) sigdelset(_set, _sig);
+    }
+
+    if(sigismember(_set, SIGSEGV) != 0) sigdelset(_set, SIGSEGV);
+
+    if(sigismember(_set, SIGABRT) != 0) sigdelset(_set, SIGABRT);
 }
 }  // namespace component
 }  // namespace causal

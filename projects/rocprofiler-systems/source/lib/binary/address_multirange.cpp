@@ -53,8 +53,8 @@ address_multirange::operator+=(uintptr_t _v)
 {
     *this += std::make_pair(coarse{}, _v);
 
-    for(auto&& itr : m_fine_ranges)
-        if(itr.contains(_v)) return *this;
+    // for(auto&& itr : m_fine_ranges)
+    //    if(itr.contains(_v)) return *this;
 
     m_fine_ranges.emplace(address_range{ _v });
     return *this;
@@ -65,8 +65,8 @@ address_multirange::operator+=(address_range _v)
 {
     *this += std::make_pair(coarse{}, _v);
 
-    for(auto&& itr : m_fine_ranges)
-        if(itr.contains(_v)) return *this;
+    // for(auto&& itr : m_fine_ranges)
+    //    if(itr.contains(_v)) return *this;
 
     m_fine_ranges.emplace(_v);
     return *this;

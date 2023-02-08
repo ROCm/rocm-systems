@@ -265,9 +265,9 @@ get_library_search_paths_impl()
     }
 
     // search hard-coded system paths
-    for(const char* itr : { "/usr/local/lib", "/usr/share/lib", "/usr/lib", "/usr/lib64",
-                            "/usr/lib/x86_64-linux-gnu", "/lib", "/lib64",
-                            "/lib/x86_64-linux-gnu", "/usr/lib/i386-linux-gnu" })
+    for(const char* itr :
+        { "/usr/local/lib", "/usr/share/lib", "/usr/lib", "/usr/lib64",
+          "/usr/lib/x86_64-linux-gnu", "/lib", "/lib64", "/lib/x86_64-linux-gnu" })
     {
         _emplace_if_exists(itr);
     }

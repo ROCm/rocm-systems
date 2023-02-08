@@ -11,7 +11,7 @@ omnitrace_checkout_git_submodule(
     RELATIVE_PATH external/papi
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
     REPO_URL https://bitbucket.org/icl/papi.git
-    REPO_BRANCH master
+    REPO_BRANCH effd1ef4e0fd4b80e36546791277215a2d6b9eba
     TEST_FILE src/configure)
 
 set(PAPI_LIBPFM_SOVERSION
@@ -39,6 +39,10 @@ if(NOT EXISTS "${OMNITRACE_PAPI_INSTALL_DIR}")
             ${CMAKE_COMMAND} -E touch ${OMNITRACE_PAPI_INSTALL_DIR}/lib/libpapi.a
             ${OMNITRACE_PAPI_INSTALL_DIR}/lib/libpfm.a
             ${OMNITRACE_PAPI_INSTALL_DIR}/lib/libpfm.so)
+    set(_OMNITRACE_PAPI_BUILD_BYPRODUCTS
+        ${OMNITRACE_PAPI_INSTALL_DIR}/lib/libpapi.a
+        ${OMNITRACE_PAPI_INSTALL_DIR}/lib/libpfm.a
+        ${OMNITRACE_PAPI_INSTALL_DIR}/lib/libpfm.so)
 endif()
 
 omnitrace_add_option(OMNITRACE_PAPI_AUTO_COMPONENTS "Automatically enable components" OFF)
@@ -48,7 +52,6 @@ omnitrace_add_option(OMNITRACE_PAPI_AUTO_COMPONENTS "Automatically enable compon
 set(_OMNITRACE_VALID_PAPI_COMPONENTS
     appio
     bgpm
-    components
     coretemp
     coretemp_freebsd
     cuda
@@ -202,23 +205,23 @@ externalproject_add(
     BUILD_IN_SOURCE 1
     PATCH_COMMAND
         ${CMAKE_COMMAND} -E env CC=${PAPI_C_COMPILER}
-        CFLAGS=-fPIC\ -O3\ -g\ -Wno-stringop-truncation LIBS=-lrt LDFLAGS=-lrt
+        CFLAGS=-fPIC\ -O3\ -Wno-stringop-truncation LIBS=-lrt LDFLAGS=-lrt
         ${OMNITRACE_PAPI_EXTRA_ENV} <SOURCE_DIR>/configure
         --prefix=${OMNITRACE_PAPI_INSTALL_DIR} --with-static-lib=yes --with-shared-lib=no
         --with-perf-events --with-tests=no --with-components=${_OMNITRACE_PAPI_COMPONENTS}
-    CONFIGURE_COMMAND
-        ${CMAKE_COMMAND} -E env CFLAGS=-fPIC\ -O3\ -g\ -Wno-stringop-truncation
-        ${OMNITRACE_PAPI_EXTRA_ENV} ${MAKE_EXECUTABLE} static install
-    BUILD_COMMAND ${CMAKE_COMMAND} -E env CFLAGS=-fPIC\ -O3\ -g\ -Wno-stringop-truncation
+    CONFIGURE_COMMAND ${CMAKE_COMMAND} -E env CFLAGS=-fPIC\ -O3\ -Wno-stringop-truncation
+                      ${OMNITRACE_PAPI_EXTRA_ENV} ${MAKE_EXECUTABLE} static install
+    BUILD_COMMAND ${CMAKE_COMMAND} -E env CFLAGS=-fPIC\ -O3\ -Wno-stringop-truncation
                   ${OMNITRACE_PAPI_EXTRA_ENV} ${MAKE_EXECUTABLE} utils install-utils
-    INSTALL_COMMAND "")
+    INSTALL_COMMAND ""
+    BUILD_BYPRODUCTS "${_OMNITRACE_PAPI_BUILD_BYPRODUCTS}")
 
 # target for re-executing the installation
 add_custom_target(
     omnitrace-papi-install
-    COMMAND ${CMAKE_COMMAND} -E env CFLAGS=-fPIC\ -O3\ -g\ -Wno-stringop-truncation
+    COMMAND ${CMAKE_COMMAND} -E env CFLAGS=-fPIC\ -O3\ -Wno-stringop-truncation
             ${OMNITRACE_PAPI_EXTRA_ENV} ${MAKE_EXECUTABLE} static install
-    COMMAND ${CMAKE_COMMAND} -E env CFLAGS=-fPIC\ -O3\ -g\ -Wno-stringop-truncation
+    COMMAND ${CMAKE_COMMAND} -E env CFLAGS=-fPIC\ -O3\ -Wno-stringop-truncation
             ${OMNITRACE_PAPI_EXTRA_ENV} ${MAKE_EXECUTABLE} utils install-utils
     WORKING_DIRECTORY ${OMNITRACE_PAPI_SOURCE_DIR}/src
     COMMENT "Installing PAPI...")

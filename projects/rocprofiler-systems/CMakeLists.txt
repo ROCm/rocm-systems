@@ -387,6 +387,15 @@ if(OMNITRACE_BUILD_TESTING)
     add_subdirectory(tests)
 endif()
 
+# install the validate-causal-json python script as a utility
+configure_file(
+    ${PROJECT_SOURCE_DIR}/tests/validate-causal-json.py
+    ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/omnitrace-causal-print
+    USE_SOURCE_PERMISSIONS COPYONLY)
+
+install(PROGRAMS ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/omnitrace-causal-print
+        DESTINATION ${CMAKE_INSTALL_BINDIR})
+
 # ------------------------------------------------------------------------------#
 #
 # packaging

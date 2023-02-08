@@ -519,7 +519,7 @@ omnitrace_checkout_git_submodule(
     RELATIVE_PATH external/perfetto
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
     REPO_URL https://android.googlesource.com/platform/external/perfetto
-    REPO_BRANCH v17.0
+    REPO_BRANCH v28.0
     TEST_FILE sdk/perfetto.cc)
 
 include(Perfetto)
@@ -756,7 +756,7 @@ if(NOT TARGET PTL::ptl-shared)
         RELATIVE_PATH external/PTL
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
         REPO_URL https://github.com/jrmadsen/PTL.git
-        REPO_BRANCH master)
+        REPO_BRANCH omnitrace)
 
     set(PTL_BUILD_EXAMPLES OFF)
     set(PTL_USE_TBB OFF)
@@ -942,6 +942,9 @@ set(CMAKE_INSTALL_PYTHONDIR ${OMNITRACE_INSTALL_PYTHONDIR})
 if("${CMAKE_BUILD_TYPE}" MATCHES "Release" AND NOT OMNITRACE_BUILD_DEBUG)
     add_target_flag_if_avail(omnitrace-compile-options "-g1")
 endif()
+
+target_compile_definitions(omnitrace-compile-definitions
+                           INTERFACE OMNITRACE_MAX_THREADS=${OMNITRACE_MAX_THREADS})
 
 foreach(_LIB ${OMNITRACE_EXTENSION_LIBRARIES})
     get_target_property(_COMPILE_DEFS ${_LIB} INTERFACE_COMPILE_DEFINITIONS)

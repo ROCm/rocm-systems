@@ -114,7 +114,7 @@ and Dyninst requires TBB), and the CMake option to build the package alongside o
 
 | Third-Party Library | Minimum Version | Required By | CMake Option                              |
 |---------------------|-----------------|-------------|-------------------------------------------|
-| Dyninst             | 10.0            | OmniTrace   | `OMNITRACE_BUILD_DYNINST` (default: OFF)  |
+| Dyninst             | 12.0            | OmniTrace   | `OMNITRACE_BUILD_DYNINST` (default: OFF)  |
 | Libunwind           |                 | OmniTrace   | `OMNITRACE_BUILD_LIBUNWIND` (default: ON) |
 | TBB                 | 2018.6          | Dyninst     | `DYNINST_BUILD_TBB` (default: OFF)        |
 | ElfUtils            | 0.178           | Dyninst     | `DYNINST_BUILD_ELFUTILS` (default: OFF)   |
