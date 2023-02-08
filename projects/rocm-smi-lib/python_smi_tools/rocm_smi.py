@@ -2476,7 +2476,7 @@ def showXgmiErr(deviceList):
     printLogSpacer('XGMI Error status')
     xe = rsmi_xgmi_status_t()
     for device in deviceList:
-        ret = rocmsmi.rsmi_dev_xgmi_error_status(device, xe)
+        ret = rocmsmi.rsmi_dev_xgmi_error_status(device, byref(xe))
         if rsmi_ret_ok(ret, device, 'xgmi status'):
             desc = ''
             if xe.value is None:
