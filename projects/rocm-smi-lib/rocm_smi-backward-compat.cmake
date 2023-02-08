@@ -63,7 +63,7 @@ function(create_header_template)
 #define @include_guard@
 
 #if defined(__GNUC__)
-#warning \"This file is deprecated. Use file from include path /opt/rocm-ver/include/ and prefix with @prefix_name@\"
+#error \"This file is deprecated. Use file from include path /opt/rocm-ver/include/ and prefix with @prefix_name@\"
 #else
 #pragma message(\"This file is deprecated. Use file from include path /opt/rocm-ver/include/ and prefix with @prefix_name@\")
 #endif
