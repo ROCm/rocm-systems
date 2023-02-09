@@ -892,4 +892,34 @@ function(OMNITRACE_INSTALL_TPL _TPL_TARGET _NEW_NAME _BUILD_TREE_DIR _COMPONENT)
 
 endfunction()
 
+function(COMPUTE_POW2_CEIL _OUTPUT _VALUE)
+    find_package(Python3 COMPONENTS Interpreter)
+
+    if(Python3_FOUND)
+        execute_process(
+            COMMAND
+                ${Python3_EXECUTABLE} -c
+                "VALUE = ${_VALUE}; ispow2 = lambda x: x if (x and (not(x & (x - 1)))) else None; v = list(filter(ispow2, [x for x in range(VALUE, VALUE**2)])); print(v[0])"
+            RESULT_VARIABLE _POW2_RET
+            OUTPUT_VARIABLE _POW2_OUT
+            ERROR_VARIABLE _POW2_ERR
+            OUTPUT_STRIP_TRAILING_WHITESPACE)
+
+        if(_POW2_RET EQUAL 0)
+            set(${_OUTPUT}
+                ${_POW2_OUT}
+                PARENT_SCOPE)
+        else()
+            set(${_OUTPUT}
+                "-1"
+                PARENT_SCOPE)
+        endif()
+    else()
+        set(${_OUTPUT}
+            "-1"
+            PARENT_SCOPE)
+    endif()
+
+endfunction()
+
 cmake_policy(POP)

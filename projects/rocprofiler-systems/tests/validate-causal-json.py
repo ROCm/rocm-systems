@@ -65,13 +65,15 @@ class validation(object):
         )
 
 
-class experiment_data(object):
+class throughput_point(object):
     def __init__(self, _speedup):
         self.speedup = _speedup
+        self.delta = []
         self.duration = []
 
-    def __iadd__(self, _val):
-        self.duration += [float(_val)]
+    def __iadd__(self, _data):
+        self.delta += [float(_data[0])]
+        self.duration += [float(_data[1])]
 
     def __len__(self):
         return len(self.duration)
@@ -85,11 +87,48 @@ class experiment_data(object):
     def __lt__(self, rhs):
         return self.speedup < rhs.speedup
 
-    def mean(self):
-        return mean(self.duration)
+    def get_data(self):
+        return [x / y for x, y in zip(self.duration, self.delta)]
 
-    def stddev(self):
-        return stddev(self.duration)
+    def mean(self):
+        return sum(self.duration) / sum(self.delta)
+
+
+class latency_point(object):
+    def __init__(self, _speedup):
+        self.speedup = _speedup
+        self.arrivals = []
+        self.departures = []
+        self.duration = []
+
+    def __iadd__(self, _data):
+        self.arrivals += [float(_data[0])]
+        self.departures += [float(_data[1])]
+        self.duration += [float(_data[2])]
+
+    def __len__(self):
+        return len(self.duration)
+
+    def __eq__(self, rhs):
+        return self.speedup == rhs.speedup
+
+    def __neq__(self, rhs):
+        return not self == rhs
+
+    def __lt__(self, rhs):
+        return self.speedup < rhs.speedup
+
+    def get_data(self):
+        _duration = sum(self.duration)
+        return [y / x for x, y in zip(self.arrivals, self.duration)]
+
+    def get_difference(self):
+        _duration = sum(self.duration)
+        return [x / _duration for x in self.duration]
+
+    def mean(self):
+        rate = sum(self.arrivals) / sum(self.duration)
+        return sum(self.get_difference()) / rate
 
 
 class line_speedup(object):
@@ -114,7 +153,7 @@ class line_speedup(object):
             return 0.0
         _data = []
         _base = self.base.mean()
-        for ditr in self.data.duration:
+        for ditr in self.data.get_data():
             _data += [((_base - ditr) / _base) * 100]
         return stddev(_data)
 
@@ -164,19 +203,18 @@ class experiment_progress(object):
         self.data = _data
 
     def get_impact(self):
-        """
         speedup_c = [x.compute_speedup() for x in self.data]
         speedup_v = [x.virtual_speedup() for x in self.data]
         impact = []
         for i in range(len(self.data) - 1):
             x = speedup_v[i + 1] - speedup_v[i]
-            y_low = speedup_c[i]
-            y_upp = speedup_c[i + 1]
-            a_low = x * min([y_low, y_upp])
-            a_high = 0.5 * x * (max([y_low, y_upp]) - min([y_low, y_upp]))
-            impact += [a_low + a_high]
-        """
-        impact = [x.compute_speedup() for x in self.data]
+            y = [speedup_c[i], speedup_c[i + 1]]
+            y_min = min(y)
+            y_max = max(y)
+            a_low = x * y_min
+            a_upp = 0.5 * x * (y_max - y_min)
+            impact += [a_low + a_upp]
+        # impact = [x.compute_speedup() for x in self.data]
         return [sum(impact), mean(impact), stddev(impact)]
 
     def __len__(self):
@@ -197,9 +235,12 @@ class experiment_progress(object):
         return self.get_impact()[0] < rhs.get_impact()[0]
 
 
-def find_or_insert(_data, _value):
+def find_or_insert(_data, _value, _type):
     if _value not in _data:
-        _data[_value] = experiment_data(_value)
+        if _type == "throughput":
+            _data[_value] = throughput_point(_value)
+        elif _type == "latency":
+            _data[_value] = latency_point(_value)
     return _data[_value]
 
 
@@ -232,19 +273,18 @@ def process_data(data, _data, args):
                 if "delta" in pts:
                     _delt = pts["delta"]
                     if _delt > 0:
-                        itr = find_or_insert(data[_selected][_name], _speedup)
-                        itr += float(_duration) / float(_delt)
-                    else:
-                        _diff = pts["arrival"] - pts["departure"] + 1
-                        _rate = pts["arrival"] / float(_duration)
-                        if _rate > 0:
-                            itr = find_or_insert(data[_selected][_name], _speedup)
-                            itr += float(_diff) / float(_rate)
+                        itr = find_or_insert(
+                            data[_selected][_name], _speedup, "throughput"
+                        )
+                        itr += [_delt, _duration]
+                    elif "arrival" in pts and pts["arrival"] > 0:
+                        itr = find_or_insert(data[_selected][_name], _speedup, "latency")
+                        itr += [pts["arrival"], pts["departure"], _duration]
                 else:
                     _delt = pts["laps"]
                     if _delt > 0:
                         itr = find_or_insert(data[_selected][_name], _speedup)
-                        itr += float(_duration) / float(_delt)
+                        itr += [_delt, _duration]
 
     return data
 

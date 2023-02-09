@@ -233,10 +233,19 @@ endif()
 
 include(ProcessorCount)
 processorcount(OMNITRACE_PROCESSOR_COUNT)
-math(EXPR OMNITRACE_THREAD_COUNT "16 * ${OMNITRACE_PROCESSOR_COUNT}")
-if(OMNITRACE_THREAD_COUNT LESS 128)
+
+if(OMNITRACE_PROCESSOR_COUNT LESS 8)
     set(OMNITRACE_THREAD_COUNT 128)
+else()
+    math(EXPR OMNITRACE_THREAD_COUNT "16 * ${OMNITRACE_PROCESSOR_COUNT}")
+    compute_pow2_ceil(OMNITRACE_THREAD_COUNT "16 * ${OMNITRACE_PROCESSOR_COUNT}")
+
+    # set the default to 2048 if it could not be calculated
+    if(OMNITRACE_THREAD_COUNT LESS 2)
+        set(OMNITRACE_THREAD_COUNT 2048)
+    endif()
 endif()
+
 set(OMNITRACE_MAX_THREADS
     "${OMNITRACE_THREAD_COUNT}"
     CACHE
@@ -247,6 +256,21 @@ omnitrace_add_feature(
     OMNITRACE_MAX_THREADS
     "Maximum number of total threads supported in the host application (default: max of 128 or 16 * nproc)"
     )
+
+compute_pow2_ceil(_MAX_THREADS "${OMNITRACE_MAX_THREADS}")
+
+if(_MAX_THREADS GREATER 0 AND NOT OMNITRACE_MAX_THREADS EQUAL _MAX_THREADS)
+    omnitrace_message(
+        FATAL_ERROR
+        "Error! OMNITRACE_MAX_THREADS must be a power of 2. Recommendation: ${_MAX_THREADS}"
+        )
+elseif(NOT OMNITRACE_MAX_THREADS EQUAL _MAX_THREADS)
+    omnitrace_message(
+        AUTHOR_WARNING
+        "OMNITRACE_MAX_THREADS (=${OMNITRACE_MAX_THREADS}) must be a power of 2. We were unable to verify it so we are emitting this warning instead. Estimate resulted in: ${_MAX_THREADS}"
+        )
+endif()
+
 set(OMNITRACE_MAX_UNWIND_DEPTH
     "64"
     CACHE

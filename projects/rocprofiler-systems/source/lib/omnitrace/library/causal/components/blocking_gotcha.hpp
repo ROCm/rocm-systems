@@ -40,11 +40,9 @@ namespace causal
 {
 namespace component
 {
-using timespec_t = struct timespec;
-// this is used to wrap pthread_mutex()
 struct blocking_gotcha : comp::base<blocking_gotcha, void>
 {
-    static constexpr size_t gotcha_capacity = 13;
+    static constexpr size_t gotcha_capacity = 19;
 
     OMNITRACE_DEFAULT_OBJECT(blocking_gotcha)
 
@@ -57,20 +55,29 @@ struct blocking_gotcha : comp::base<blocking_gotcha, void>
     static void configure();
     static void shutdown();
 
-    void start();
-    void audit(const comp::gotcha_data&, audit::outgoing, int);
-    void stop();
+    template <typename Ret, typename... Args>
+    Ret operator()(const comp::gotcha_data&, Ret (*)(Args...), Args...) const noexcept;
 
-private:
-    int64_t delay_value = 0;
+    int operator()(const comp::gotcha_data&, int (*)(const sigset_t*, int*),
+                   const sigset_t*, int*) const noexcept;
+
+    int operator()(const comp::gotcha_data&, int (*)(const sigset_t*, siginfo_t*),
+                   const sigset_t*, siginfo_t*) const noexcept;
+
+    int operator()(const comp::gotcha_data&,
+                   int (*)(const sigset_t*, siginfo_t*, const struct timespec*),
+                   const sigset_t*, siginfo_t*, const struct timespec*) const noexcept;
 };
 
 using blocking_gotcha_t =
-    comp::gotcha<blocking_gotcha::gotcha_capacity,
-                 tim::lightweight_tuple<blocking_gotcha>, category::causal>;
+    comp::gotcha<blocking_gotcha::gotcha_capacity, tim::type_list<>, blocking_gotcha>;
 }  // namespace component
 }  // namespace causal
 }  // namespace omnitrace
 
 OMNITRACE_DEFINE_CONCRETE_TRAIT(prevent_reentry, causal::component::blocking_gotcha_t,
                                 false_type)
+OMNITRACE_DEFINE_CONCRETE_TRAIT(static_data, causal::component::blocking_gotcha_t,
+                                false_type)
+OMNITRACE_DEFINE_CONCRETE_TRAIT(fast_gotcha, causal::component::blocking_gotcha_t,
+                                true_type)

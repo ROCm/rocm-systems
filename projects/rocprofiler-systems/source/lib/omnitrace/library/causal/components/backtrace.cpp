@@ -70,38 +70,6 @@ get_delay_statistics()
     static auto& _v = thread_data_t::instance(construct_on_init{});
     return _v;
 }
-
-auto&
-get_in_use()
-{
-    using thread_data_t = thread_data<identity<bool>, category::sampling>;
-
-    static_assert(
-        use_placement_new_when_generating_unique_ptr<thread_data_t>::value,
-        "sampling is_use thread data should use placement new to allocate unique_ptr");
-
-    static auto& _v = thread_data_t::instance(construct_on_init{});
-    return _v;
-}
-
-struct scoped_in_use
-{
-    scoped_in_use(int64_t _tid = utility::get_thread_index())
-    : value{ get_in_use()->at(_tid) }
-    {
-        value = true;
-    }
-    ~scoped_in_use() { value = false; }
-
-    bool& value;
-};
-
-auto
-is_in_use(int64_t _tid = threading::get_id())
-{
-    return get_in_use()->at(_tid);
-}
-
 }  // namespace
 
 void
@@ -111,12 +79,25 @@ backtrace::start()
     // before it is called in sampler or else a deadlock will occur when
     // the sample interrupts a malloc call
     (void) get_delay_statistics();
-    (void) get_in_use();
 }
 
 void
 backtrace::stop()
 {}
+
+void
+sample_rate::sample(int _sig)
+{
+    if(_sig != get_realtime_signal()) return;
+
+    // update the last sample for backtrace signal(s) even when in use
+    static thread_local int64_t _last_sample = 0;
+
+    auto  _this_sample = tracing::now();
+    auto& _period_stat = get_delay_statistics()->at(threading::get_id());
+    if(_last_sample > 0) _period_stat += (_this_sample - _last_sample);
+    _last_sample = _this_sample;
+}
 
 void
 backtrace::sample(int _sig)
@@ -125,16 +106,17 @@ backtrace::sample(int _sig)
     constexpr int64_t ignore_depth = ::omnitrace::causal::unwind_offset;
 
     // update the last sample for backtrace signal(s) even when in use
-    static thread_local int64_t _last_sample = 0;
+    static thread_local size_t _protect_flag = 0;
 
-    if(is_in_use() ||
+    // sampling_guard _guard{};
+
+    if((_protect_flag & 1) == 1 ||
        OMNITRACE_UNLIKELY(!trait::runtime_enabled<causal::component::backtrace>::get()))
     {
-        if(_sig == get_realtime_signal()) _last_sample = tracing::now();
         return;
     }
-    scoped_in_use _in_use{};
 
+    ++_protect_flag;
     m_index = causal::experiment::get_index();
     m_stack = get_unw_signal_frame_stack_raw<depth, ignore_depth>();
 
@@ -150,10 +132,8 @@ backtrace::sample(int _sig)
     }
     else if(_sig == get_realtime_signal())
     {
-        auto  _this_sample = tracing::now();
-        auto& _period_stat = get_delay_statistics()->at(threading::get_id());
-        if(_last_sample > 0) _period_stat += (_this_sample - _last_sample);
-        _last_sample = _this_sample;
+        static thread_local auto _tid         = threading::get_id();
+        auto&                    _period_stat = get_delay_statistics()->at(_tid);
 
         if(causal::experiment::is_active() && causal::experiment::is_selected(m_stack))
         {
@@ -173,6 +153,8 @@ backtrace::sample(int _sig)
     {
         OMNITRACE_THROW("unhandled signal %i\n", _sig);
     }
+
+    ++_protect_flag;
 }
 
 template <typename Tp>
@@ -194,13 +176,10 @@ backtrace::get_period(uint64_t _units)
 tim::statistics<int64_t>
 backtrace::get_period_stats()
 {
-    scoped_in_use _in_use{};
-    auto          _data = tim::statistics<int64_t>{};
+    auto _data = tim::statistics<int64_t>{};
     if(!get_delay_statistics()) return _data;
-    for(size_t i = 0; i < get_delay_statistics()->size(); ++i)
+    for(auto itr : *get_delay_statistics())
     {
-        scoped_in_use _thr_in_use{ static_cast<int64_t>(i) };
-        const auto&   itr = get_delay_statistics()->at(i);
         if(itr.get_count() > 1) _data += itr;
     }
     return _data;
@@ -209,11 +188,9 @@ backtrace::get_period_stats()
 void
 backtrace::reset_period_stats()
 {
-    scoped_in_use _in_use{};
-    for(size_t i = 0; i < get_delay_statistics()->size(); ++i)
+    for(auto& itr : *get_delay_statistics())
     {
-        scoped_in_use _thr_in_use{ static_cast<int64_t>(i) };
-        get_delay_statistics()->at(i).reset();
+        itr.reset();
     }
 }
 }  // namespace component

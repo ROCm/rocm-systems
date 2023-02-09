@@ -24,17 +24,40 @@
 #include "core/config.hpp"
 #include "core/debug.hpp"
 #include "core/state.hpp"
+#include "library/causal/components/causal_gotcha.hpp"
 #include "library/causal/delay.hpp"
 #include "library/causal/experiment.hpp"
+#include "library/causal/sampling.hpp"
 #include "library/runtime.hpp"
 
 #include <timemory/components/macros.hpp>
 #include <timemory/hash/types.hpp>
+#include <timemory/utility/types.hpp>
 
+#include <atomic>
 #include <csignal>
 #include <cstdint>
 #include <pthread.h>
 #include <stdexcept>
+
+#pragma weak pthread_join
+#pragma weak pthread_mutex_lock
+#pragma weak pthread_spin_lock
+#pragma weak pthread_cond_wait
+#pragma weak pthread_rwlock_rdlock
+#pragma weak pthread_rwlock_wrlock
+#pragma weak pthread_tryjoin_np
+#pragma weak pthread_timedjoin_np
+#pragma weak pthread_cond_timedwait
+#pragma weak pthread_rwlock_timedrdlock
+#pragma weak pthread_rwlock_timedwrlock
+#pragma weak pthread_mutex_trylock
+#pragma weak pthread_spin_trylock
+#pragma weak pthread_rwlock_trywrlock
+#pragma weak sigwait
+#pragma weak sigwaitinfo
+#pragma weak sigtimedwait
+#pragma weak sigsuspend
 
 namespace omnitrace
 {
@@ -67,48 +90,48 @@ blocking_gotcha::configure()
     blocking_gotcha_t::get_initializer() = []() {
         if(!config::get_use_causal()) return;
 
-        blocking_gotcha_t::configure(
-            comp::gotcha_config<0, int, pthread_mutex_t*>{ "pthread_mutex_lock" });
+        // postblock(true)
+        //  - pthread_join
+        //  - pthread_mutex_lock
+        //  - pthread_cond_wait
+        //  - pthread_barrier_wait
+        //  - pthread_rwlock_rdlock
+        //  - pthread_rwlock_wrlock
 
-        blocking_gotcha_t::configure(
-            comp::gotcha_config<1, int, pthread_mutex_t*>{ "pthread_mutex_trylock" });
+        TIMEMORY_C_GOTCHA(blocking_gotcha_t, 0, pthread_join);
+        TIMEMORY_C_GOTCHA(blocking_gotcha_t, 1, pthread_mutex_lock);
+        TIMEMORY_C_GOTCHA(blocking_gotcha_t, 2, pthread_spin_lock);
+        TIMEMORY_C_GOTCHA(blocking_gotcha_t, 3, pthread_cond_wait);
+        TIMEMORY_C_GOTCHA(blocking_gotcha_t, 4, pthread_rwlock_rdlock);
+        TIMEMORY_C_GOTCHA(blocking_gotcha_t, 5, pthread_rwlock_wrlock);
 
-        blocking_gotcha_t::configure(
-            comp::gotcha_config<2, int, pthread_rwlock_t*>{ "pthread_rwlock_wrlock" });
+        // postblock(result == 0)
+        //  - pthread_tryjoin_np
+        //  - pthread_timedjoin_np
+        //  - pthread_cond_timedwait
+        //  - pthread_rwlock_timedrdlock
+        //  - pthread_rwlock_timedwrlock
 
-        blocking_gotcha_t::configure(
-            comp::gotcha_config<3, int, pthread_rwlock_t*>{ "pthread_rwlock_trywrlock" });
+        TIMEMORY_C_GOTCHA(blocking_gotcha_t, 6, pthread_tryjoin_np);
+        TIMEMORY_C_GOTCHA(blocking_gotcha_t, 7, pthread_timedjoin_np);
+        TIMEMORY_C_GOTCHA(blocking_gotcha_t, 8, pthread_cond_timedwait);
+        TIMEMORY_C_GOTCHA(blocking_gotcha_t, 9, pthread_rwlock_timedrdlock);
+        TIMEMORY_C_GOTCHA(blocking_gotcha_t, 10, pthread_rwlock_timedwrlock);
 
-        blocking_gotcha_t::configure(
-            comp::gotcha_config<4, int, pthread_spinlock_t*>{ "pthread_spin_lock" });
+        TIMEMORY_C_GOTCHA(blocking_gotcha_t, 11, pthread_mutex_trylock);
+        TIMEMORY_C_GOTCHA(blocking_gotcha_t, 12, pthread_spin_trylock);
+        TIMEMORY_C_GOTCHA(blocking_gotcha_t, 13, pthread_rwlock_trywrlock);
 
-        blocking_gotcha_t::configure(
-            comp::gotcha_config<5, int, pthread_spinlock_t*>{ "pthread_spin_trylock" });
+        // postblock(...)
+        //  - sigwait
+        //  - sigwaitinfo
+        //  - sigtimedwait
+        TIMEMORY_C_GOTCHA(blocking_gotcha_t, 14, sigwait);
+        TIMEMORY_C_GOTCHA(blocking_gotcha_t, 15, sigwaitinfo);
+        TIMEMORY_C_GOTCHA(blocking_gotcha_t, 16, sigtimedwait);
 
-        blocking_gotcha_t::configure(
-            comp::gotcha_config<6, int, pthread_t, void**>{ "pthread_join" });
-
-        blocking_gotcha_t::configure(
-            comp::gotcha_config<7, int, pthread_cond_t*, pthread_mutex_t*>{
-                "pthread_cond_wait" });
-
-        blocking_gotcha_t::configure(
-            comp::gotcha_config<8, int, pthread_cond_t*, pthread_mutex_t*,
-                                const struct timespec*>{ "pthread_cond_timedwait" });
-
-        blocking_gotcha_t::configure(
-            comp::gotcha_config<9, int, const sigset_t*, int*>{ "sigwait" });
-
-        blocking_gotcha_t::configure(
-            comp::gotcha_config<10, int, const sigset_t*, int*, siginfo_t*>{
-                "sigwaitinfo" });
-
-        blocking_gotcha_t::configure(
-            comp::gotcha_config<11, int, const sigset_t*, int*, siginfo_t*,
-                                const struct timespec*>{ "sigtimedwait" });
-
-        blocking_gotcha_t::configure(
-            comp::gotcha_config<12, int, const sigset_t*>{ "sigsuspend" });
+        // other
+        TIMEMORY_C_GOTCHA(blocking_gotcha_t, 17, sigsuspend);
     };
 }
 
@@ -118,34 +141,114 @@ blocking_gotcha::shutdown()
     blocking_gotcha_t::disable();
 }
 
-void
-blocking_gotcha::start()
+template <typename Ret, typename... Args>
+Ret
+blocking_gotcha::operator()(const comp::gotcha_data& _data, Ret (*_func)(Args...),
+                            Args... _args) const noexcept
 {
-    if(causal::experiment::is_active() &&
-       get_thread_state() == ::omnitrace::ThreadState::Enabled && delay_value == 0)
-        delay_value = causal::delay::get_global().load();
+    int64_t _delay_value = causal::delay::get_global().load(std::memory_order_relaxed);
+
+    causal::sampling::block_backtrace_samples();
+    auto _ret = (*_func)(_args...);
+    causal::sampling::unblock_backtrace_samples();
+
+    if(get_thread_state() < ::omnitrace::ThreadState::Internal)
+    {
+        if(_data.index <= 5)
+            causal::delay::postblock(_delay_value);
+        else if(_ret == 0 && _data.index >= 6 && _data.index <= 13)
+            causal::delay::postblock(_delay_value);
+        else
+            OMNITRACE_FAIL_F("Error! unexpected index %zu ('%s')\n", _data.index,
+                             _data.tool_id.c_str());
+    }
+
+    return _ret;
 }
 
-void
-blocking_gotcha::audit(const comp::gotcha_data& _data, audit::outgoing, int _ret)
+int
+blocking_gotcha::operator()(const comp::gotcha_data&, int (*)(const sigset_t*, int*),
+                            const sigset_t* _set_v, int* _sig) const noexcept
 {
-    // if one of the try/timed functions did not succeed, reset the delay value to zero
-    if(_ret != 0 && _ret != ETIMEDOUT &&
-       std::set<size_t>{ 1, 3, 5, 8, 11 }.count(_data.index) > 0)
-    {
-        delay_value = 0;
-    }
+    auto _active = get_thread_state() < ::omnitrace::ThreadState::Internal;
+
+    sigset_t _set = *_set_v;
+    causal_gotcha::remove_signals(&_set);
+    siginfo_t _info;
+
+    int64_t _delay_value = (_active) ? causal::delay::get_global().load() : 0;
+
+    auto* _data         = blocking_gotcha_t::at(16);
+    auto  f_sigwaitinfo = reinterpret_cast<decltype(&sigwaitinfo)>(_data->wrappee);
+
+    causal::sampling::block_backtrace_samples();
+    auto _ret = (*f_sigwaitinfo)(&_set, &_info);
+    causal::sampling::unblock_backtrace_samples();
+
+    // Woken up by another thread if the call did not fail and this is waking process
+    if(_active && _ret != -1 && _info.si_pid == process::get_id())
+        causal::delay::postblock(_delay_value);
+
+    if(_ret == -1)
+        return errno;  // If there was an error, return the error code
+    else
+        *_sig = _ret;  // sig is declared as non-null so skip check
+
+    return 0;
 }
 
-void
-blocking_gotcha::stop()
+int
+blocking_gotcha::operator()(const comp::gotcha_data&,
+                            int (*_func)(const sigset_t*, siginfo_t*),
+                            const sigset_t* _set_v, siginfo_t* _info_v) const noexcept
 {
-    if(delay_value > 0 && causal::experiment::is_active() &&
-       get_thread_state() == ::omnitrace::ThreadState::Enabled)
-    {
-        causal::delay::postblock(delay_value);
-        delay_value = 0;
-    }
+    auto _active = get_thread_state() < ::omnitrace::ThreadState::Internal;
+
+    sigset_t _set = *_set_v;
+    causal_gotcha::remove_signals(&_set);
+    siginfo_t _info;
+
+    int64_t _delay_value = (_active) ? causal::delay::get_global().load() : 0;
+
+    causal::sampling::block_backtrace_samples();
+    auto _ret = (*_func)(&_set, &_info);
+    causal::sampling::unblock_backtrace_samples();
+
+    // Woken up by another thread if the call did not fail and this is waking process
+    if(_active && _ret > 0 && _info.si_pid == process::get_id())
+        causal::delay::postblock(_delay_value);
+
+    if(_ret > 0 && _info_v) *_info_v = _info;
+
+    return _ret;
+}
+
+int
+blocking_gotcha::operator()(const comp::gotcha_data&,
+                            int (*_func)(const sigset_t*, siginfo_t*,
+                                         const struct timespec*),
+                            const sigset_t* _set_v, siginfo_t* _info_v,
+                            const struct timespec* _wait_v) const noexcept
+{
+    auto _active = get_thread_state() < ::omnitrace::ThreadState::Internal;
+
+    sigset_t _set = *_set_v;
+    causal_gotcha::remove_signals(&_set);
+    siginfo_t _info;
+
+    int64_t _delay_value = (_active) ? causal::delay::get_global().load() : 0;
+
+    causal::sampling::block_backtrace_samples();
+    auto _ret = (*_func)(&_set, &_info, _wait_v);
+    causal::sampling::unblock_backtrace_samples();
+
+    // Woken up by another thread if the call did not fail and this is waking process
+    if(_active && _ret > 0 && _info.si_pid == process::get_id())
+        causal::delay::postblock(_delay_value);
+
+    if(_ret > 0 && _info_v) *_info_v = _info;
+
+    return _ret;
 }
 }  // namespace component
 }  // namespace causal

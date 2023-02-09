@@ -45,6 +45,12 @@ block_samples();
 void
 unblock_samples();
 
+void
+block_backtrace_samples();
+
+void
+unblock_backtrace_samples();
+
 void block_signals(std::set<int> = {});
 
 void unblock_signals(std::set<int> = {});

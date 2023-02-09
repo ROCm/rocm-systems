@@ -23,17 +23,30 @@
 #include "library/causal/components/unblocking_gotcha.hpp"
 #include "core/config.hpp"
 #include "core/debug.hpp"
+#include "core/state.hpp"
+#include "library/causal/components/causal_gotcha.hpp"
 #include "library/causal/delay.hpp"
 #include "library/causal/experiment.hpp"
+#include "library/causal/sampling.hpp"
 #include "library/runtime.hpp"
 
 #include <timemory/components/macros.hpp>
 #include <timemory/hash/types.hpp>
+#include <timemory/utility/types.hpp>
 
 #include <csignal>
 #include <cstdint>
 #include <pthread.h>
 #include <stdexcept>
+
+#pragma weak pthread_mutex_unlock
+#pragma weak pthread_spin_unlock
+#pragma weak pthread_cond_signal
+#pragma weak pthread_cond_broadcast
+#pragma weak pthread_kill
+#pragma weak pthread_sigqueue
+#pragma weak pthread_barrier_wait
+#pragma weak kill
 
 namespace omnitrace
 {
@@ -66,29 +79,15 @@ unblocking_gotcha::configure()
     unblocking_gotcha_t::get_initializer() = []() {
         if(!config::get_use_causal()) return;
 
-        unblocking_gotcha_t::configure(
-            comp::gotcha_config<0, int, pthread_mutex_t*>{ "pthread_mutex_unlock" });
-
-        unblocking_gotcha_t::configure(
-            comp::gotcha_config<1, int, pthread_rwlock_t*>{ "pthread_rwlock_unlock" });
-
-        unblocking_gotcha_t::configure(
-            comp::gotcha_config<2, int, pthread_spinlock_t*>{ "pthread_spin_unlock" });
-
-        unblocking_gotcha_t::configure(
-            comp::gotcha_config<3, int, pthread_barrier_t*>{ "pthread_barrier_wait" });
-
-        unblocking_gotcha_t::configure(
-            comp::gotcha_config<4, int, pthread_cond_t*>{ "pthread_cond_signal" });
-
-        unblocking_gotcha_t::configure(
-            comp::gotcha_config<5, int, pthread_cond_t*>{ "pthread_cond_broadcast" });
-
-        unblocking_gotcha_t::configure(
-            comp::gotcha_config<6, int, pthread_t, int>{ "pthread_kill" });
-
-        unblocking_gotcha_t::configure(
-            comp::gotcha_config<7, void, void*>{ "pthread_exit" });
+        TIMEMORY_C_GOTCHA(unblocking_gotcha_t, 0, pthread_mutex_unlock);
+        TIMEMORY_C_GOTCHA(unblocking_gotcha_t, 1, pthread_spin_unlock);
+        TIMEMORY_C_GOTCHA(unblocking_gotcha_t, 2, pthread_rwlock_unlock);
+        TIMEMORY_C_GOTCHA(unblocking_gotcha_t, 3, pthread_cond_signal);
+        TIMEMORY_C_GOTCHA(unblocking_gotcha_t, 4, pthread_cond_broadcast);
+        TIMEMORY_C_GOTCHA(unblocking_gotcha_t, 5, pthread_kill);
+        TIMEMORY_C_GOTCHA(unblocking_gotcha_t, 6, pthread_sigqueue);
+        TIMEMORY_C_GOTCHA(unblocking_gotcha_t, 7, pthread_barrier_wait);
+        TIMEMORY_C_GOTCHA(unblocking_gotcha_t, 8, kill);
     };
 }
 
@@ -98,35 +97,45 @@ unblocking_gotcha::shutdown()
     unblocking_gotcha_t::disable();
 }
 
-void
-unblocking_gotcha::start()
+template <typename Ret, typename... Args>
+Ret
+unblocking_gotcha::operator()(const comp::gotcha_data& _data, Ret (*_func)(Args...),
+                              Args... _args) const noexcept
 {
-    if(causal::experiment::is_active() &&
-       get_thread_state() == ::omnitrace::ThreadState::Enabled)
-        causal::delay::process();
+    auto _active = get_thread_state() < ::omnitrace::ThreadState::Internal;
+
+    if(_active) causal::delay::process();
+
+    if(_active && _data.index == 7)
+    {
+        int64_t _delay_value = (_active) ? causal::delay::get_global().load() : 0;
+
+        causal::sampling::block_backtrace_samples();
+        auto _ret = (*_func)(_args...);
+        causal::sampling::unblock_backtrace_samples();
+
+        causal::delay::postblock(_delay_value);
+        return _ret;
+    }
+    else
+    {
+        return (*_func)(_args...);
+    }
 }
 
-void
-unblocking_gotcha::stop()
+int
+unblocking_gotcha::operator()(const comp::gotcha_data&, int (*_func)(pid_t, int),
+                              pid_t _pid, int _sig) const noexcept
 {
-    if(causal::experiment::is_active() &&
-       get_thread_state() == ::omnitrace::ThreadState::Enabled)
-        causal::delay::credit();
-}
+    auto _active = get_thread_state() < ::omnitrace::ThreadState::Internal;
 
-void
-unblocking_gotcha::set_data(const comp::gotcha_data& _data)
-{
-    OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
-    auto   _hash  = tim::add_hash_id(_data.tool_id);
-    auto&& _ident = tim::get_hash_identifier(_hash);
-    if(_ident != _data.tool_id)
-        throw ::omnitrace::exception<std::runtime_error>(
-            JOIN("", "Error! resolving hash for \"", _data.tool_id, "\" (", _hash,
-                 ") returns ", _ident.c_str()));
-#if defined(OMNITRACE_CI)
-    OMNITRACE_VERBOSE_F(3, "data set for '%s'...\n", _data.tool_id.c_str());
-#endif
+    if(_active && _pid == process::get_id()) causal::delay::process();
+
+    causal::sampling::block_backtrace_samples();
+    auto _ret = (*_func)(_pid, _sig);
+    causal::sampling::unblock_backtrace_samples();
+
+    return _ret;
 }
 }  // namespace component
 }  // namespace causal

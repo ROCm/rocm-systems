@@ -43,6 +43,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <gnu/lib-names.h>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -340,7 +341,9 @@ prepare_environment_for_run(std::vector<char*>& _env)
     if(launcher.empty())
     {
         update_env(_env, "LD_PRELOAD",
-                   get_realpath(get_internal_libpath("libomnitrace-dl.so")), true);
+                   join(":", LIBPTHREAD_SO,
+                        get_realpath(get_internal_libpath("libomnitrace-dl.so"))),
+                   true);
     }
 }
 

@@ -60,7 +60,8 @@ namespace sampling
 using ::tim::sampling::dynamic;
 using ::tim::sampling::timer;
 
-using causal_bundle_t  = tim::lightweight_tuple<causal::component::backtrace>;
+using causal_bundle_t =
+    tim::lightweight_tuple<causal::component::sample_rate, causal::component::backtrace>;
 using causal_sampler_t = tim::sampling::sampler<causal_bundle_t, dynamic>;
 }  // namespace sampling
 }  // namespace causal
@@ -305,6 +306,20 @@ unblock_samples()
 {
     trait::runtime_enabled<causal::component::backtrace>::set(true);
     trait::runtime_enabled<causal_sampler_t>::set(true);
+}
+
+void
+block_backtrace_samples()
+{
+    trait::runtime_enabled<causal::component::backtrace>::set(scope::thread_scope{},
+                                                              false);
+}
+
+void
+unblock_backtrace_samples()
+{
+    trait::runtime_enabled<causal::component::backtrace>::set(scope::thread_scope{},
+                                                              true);
 }
 
 void

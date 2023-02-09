@@ -467,6 +467,9 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
         }
     }
 
+    // allow ~10 samples to be collected
+    std::this_thread::sleep_for(std::chrono::milliseconds{ 10 });
+
     double _delay_sec =
         config::get_setting_value<double>("OMNITRACE_CAUSAL_DELAY").second;
     double _duration_sec =

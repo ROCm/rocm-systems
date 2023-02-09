@@ -97,9 +97,6 @@ int64_t sleep_for_overhead = compute_sleep_for_overhead();
 void
 delay::process()
 {
-    if(!trait::runtime_enabled<delay>::get()) return;
-    if(get_state() >= ::omnitrace::State::Finalized) return;
-
     if(causal::experiment::is_active())
     {
         if(get_global() < get_local())
@@ -126,9 +123,6 @@ delay::process()
 void
 delay::credit()
 {
-    if(!trait::runtime_enabled<delay>::get()) return;
-    if(get_state() >= ::omnitrace::State::Finalized) return;
-
     auto _diff = get_global() - get_local();
     if(_diff > 0)
     {
@@ -139,9 +133,6 @@ delay::credit()
 void
 delay::preblock()
 {
-    if(!trait::runtime_enabled<delay>::get()) return;
-    if(get_state() >= ::omnitrace::State::Finalized) return;
-
     auto _diff = get_global() - get_local();
     if(_diff > 0)
     {
@@ -152,9 +143,6 @@ delay::preblock()
 void
 delay::postblock(int64_t _preblock_global_delay_value)
 {
-    if(!trait::runtime_enabled<delay>::get()) return;
-    if(get_state() >= ::omnitrace::State::Finalized) return;
-
     get_local() += (get_global() - _preblock_global_delay_value);
 }
 

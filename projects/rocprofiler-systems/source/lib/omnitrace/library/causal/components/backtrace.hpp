@@ -45,6 +45,14 @@ namespace causal
 {
 namespace component
 {
+struct sample_rate
+: tim::component::empty_base
+, tim::concepts::component
+{
+    using value_type = void;
+    static void sample(int = -1);
+};
+
 struct backtrace
 : tim::component::empty_base
 , tim::concepts::component
