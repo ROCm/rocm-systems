@@ -53,7 +53,7 @@ function(create_header_template)
 #define @include_guard@
 
 #if defined(__GNUC__)
-#warning \"This file is deprecated. Use file from include path /opt/rocm-ver/include/ and prefix with rocprofiler\"
+#error \"This file is deprecated. Use file from include path /opt/rocm-ver/include/ and prefix with rocprofiler\"
 #else
 #pragma message(\"This file is deprecated. Use file from include path /opt/rocm-ver/include/ and prefix with rocprofiler\")
 #endif
