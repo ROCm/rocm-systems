@@ -24,7 +24,7 @@
 #define @include_guard@
 
 #if defined(__GNUC__)
-#warning "This file is deprecated. Use file from include path /opt/rocm-ver/include/ and prefix with roctracer"
+#error "This file is deprecated. Use file from include path /opt/rocm-ver/include/ and prefix with roctracer"
 #else
 #pragma message("This file is deprecated. Use file from include path /opt/rocm-ver/include/ and prefix with roctracer")
 #endif
