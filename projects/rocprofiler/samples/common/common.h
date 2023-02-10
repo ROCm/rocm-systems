@@ -26,7 +26,7 @@
 #include <string>
 #include <mutex>
 
-#include "src/utils/helper.h"
+#include "helper.h"
 
 // Custom assert to print error messages
 #define ASSERTM(exp, msg) assert(((void)msg, exp))
@@ -103,6 +103,7 @@ const char* GetDomainName(rocprofiler_tracer_activity_domain_t domain) {
       break;
     default:
       return "";
+      break;
   }
 }
 
@@ -117,7 +118,7 @@ void FlushTracerRecord(rocprofiler_record_tracer_t tracer_record, rocprofiler_se
   std::string kernel_name;
   std::string function_name;
   std::string roctx_message;
-  uint64_t roctx_id;
+  uint64_t roctx_id = 0;
   if ((tracer_record.operation_id.id == 0 && tracer_record.domain == ACTIVITY_DOMAIN_HIP_OPS)) {
     if (tracer_record.api_data_handle.handle &&
         strlen(reinterpret_cast<const char*>(tracer_record.api_data_handle.handle)) > 1)
@@ -207,12 +208,11 @@ void FlushProfilerRecord(const rocprofiler_record_profiler_t* profiler_record,
                          rocprofiler_session_id_t session_id, rocprofiler_buffer_id_t buffer_id) {
   std::lock_guard<std::mutex> lock(writing_lock);
   size_t name_length = 0;
-  bool is_counter = true;
   CHECK_ROCPROFILER(rocprofiler_query_kernel_info_size(ROCPROFILER_KERNEL_NAME,
                                                    profiler_record->kernel_id, &name_length));
   // Taken from rocprofiler: The size hasn't changed in  recent past
   static const uint32_t lds_block_size = 128 * 4;
-  const char* kernel_name_c;
+  const char* kernel_name_c = "";
   if (name_length > 1) {
     kernel_name_c = static_cast<const char*>(malloc(name_length * sizeof(char)));
     CHECK_ROCPROFILER(rocprofiler_query_kernel_info(ROCPROFILER_KERNEL_NAME, profiler_record->kernel_id,
@@ -345,6 +345,7 @@ void kernelCalls(char c) {
     }
     default: {
       fprintf(stderr, "Error: Wrong Kernel character (%c) Given for kernelCalls!\n", c);
+      break;
     }
   }
 }

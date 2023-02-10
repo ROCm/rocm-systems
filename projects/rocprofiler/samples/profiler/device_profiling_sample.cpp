@@ -9,12 +9,15 @@ int main(int argc, char** argv) {
   int poll_duration = 5;
   if (argc > 1) poll_duration = atoi(argv[1]);
 
+  hipDeviceProp_t devProp;
+  HIP_CALL(hipGetDeviceProperties(&devProp, 0));
+
   CHECK_ROCPROFILER(rocprofiler_initialize());
   printf("initialize\n");
 
   rocprofiler_session_id_t dp_session_id;
   std::vector<const char*> counters;
-  counters.emplace_back("FETCH_SIZE");
+  counters.emplace_back("GRBM_COUNT");
 
   printf("session create\n");
 
