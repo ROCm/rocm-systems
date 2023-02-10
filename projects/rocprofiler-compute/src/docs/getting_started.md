@@ -82,7 +82,8 @@ Modes change the fundamental behavior of the Omniperf command line tool. Dependi
 Operation | Mode | Required Arguments
 :--|:--|:--
 Profile a workload | profile | `--name`, `-- <profile_cmd>`
-Standalone roofline analysis | profile | `--name`, `--only-roof`, `-- <profile_cmd>`
+Standalone roofline analysis | profile | `--name`, `--roof-only`, `-- <profile_cmd>`
 Import a workload to database | database | `--import`, `--host`, `--username`, `--workload`, `--team`
 Remove a workload from database | database | `--remove`, `--host`, `--username`, `--workload`, `--team`
-Interact with profiling results from CLI | analyze | `--path`, `--gui`
+Launch standalone GUI from CLI | analyze | `--path`, `--gui`
+Interact with profiling results from CLI | analyze | `--path`

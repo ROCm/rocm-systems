@@ -171,7 +171,7 @@ $ omniperf analyze -p workloads/vcopy/mi200/ --list-metrics gfx90a
 ├─────────┼─────────────────────────────┤
 ...
  ```
- 2. Choose your own customized subset of metrics with `-b` (a.k.a. `--filter-metrics`), or build your own config following [config_template](https://github.com/AMDResearch/omniperf/blob/main/src/omniperf_analyze/configs/panel_config_template.yaml). Below we'll inspect block 2 (a.k.a. System Speed-of-Light).
+ 2. Choose your own customized subset of metrics with `-b` (a.k.a. `--metric`), or build your own config following [config_template](https://github.com/AMDResearch/omniperf/blob/main/src/omniperf_analyze/configs/panel_config_template.yaml). Below we'll inspect block 2 (a.k.a. System Speed-of-Light).
 ```shell
 $ omniperf analyze -p workloads/vcopy/mi200/ -b 2
 --------
