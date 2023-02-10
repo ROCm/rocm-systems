@@ -55,14 +55,14 @@ class att_plugin_t {
   bool is_valid_{true};
 
   inline bool att_file_exists(const std::string& name) {
-    struct stat buffer;   
+    struct stat buffer;
     return stat(name.c_str(), &buffer) == 0;
   }
 
   bool IsValid() const { return is_valid_; }
 
   void FlushATTRecord(const rocprofiler_record_att_tracer_t* att_tracer_record,
-                       rocprofiler_session_id_t session_id, rocprofiler_buffer_id_t buffer_id) {
+                      rocprofiler_session_id_t session_id, rocprofiler_buffer_id_t buffer_id) {
     std::lock_guard<std::mutex> lock(writing_lock);
 
     if (!att_tracer_record) {
@@ -72,26 +72,32 @@ class att_plugin_t {
 
     size_t name_length;
     CHECK_ROCMTOOLS(rocprofiler_query_kernel_info_size(ROCPROFILER_KERNEL_NAME,
-                                                     att_tracer_record->kernel_id, &name_length));
+                                                       att_tracer_record->kernel_id, &name_length));
     const char* kernel_name_c = static_cast<const char*>(malloc(name_length * sizeof(char)));
     CHECK_ROCMTOOLS(rocprofiler_query_kernel_info(ROCPROFILER_KERNEL_NAME,
-                                                att_tracer_record->kernel_id, &kernel_name_c));
+                                                  att_tracer_record->kernel_id, &kernel_name_c));
 
     std::string name_demangled = rocmtools::truncate_name(rocmtools::cxx_demangle(kernel_name_c));
 
     // Get the number of shader engine traces
     int se_num = att_tracer_record->shader_engine_data_count;
-
+    std::string outpath;
+    if (getenv("OUTPUT_PATH") == nullptr) {
+      outpath = "";
+    } else {
+      outpath = std::string(getenv("OUTPUT_PATH")) + "/";
+    }
     // Find if this filename already exists. If so, increment vname.
     int file_iteration = -1;
     bool bIncrementVersion = true;
-    while(bIncrementVersion) {
+    while (bIncrementVersion) {
       file_iteration += 1;
-      std::string fss = name_demangled+"_v"+std::to_string(file_iteration);
-      bIncrementVersion = att_file_exists(fss + "_kernel.txt");
+      std::string fss = name_demangled + "_v" + std::to_string(file_iteration);
+      bIncrementVersion = att_file_exists(outpath + fss + "_kernel.txt");
     }
 
-    std::string fname = name_demangled+"_v"+std::to_string(file_iteration)+"_kernel.txt";
+    std::string fname =
+        outpath + name_demangled + "_v" + std::to_string(file_iteration) + "_kernel.txt";
     std::ofstream(fname.c_str()) << name_demangled << ": " << kernel_name_c << '\n';
 
     // iterate over each shader engine att trace
@@ -106,7 +112,7 @@ class att_plugin_t {
 
       // dump data in binary format
       std::ostringstream oss;
-      oss << name_demangled << "_v" << file_iteration << "_se" << i << ".att";
+      oss << outpath + name_demangled << "_v" << file_iteration << "_se" << i << ".att";
       std::ofstream out(oss.str().c_str(), std::ios::binary);
       if (out.is_open()) {
         out.write((char*)data_buffer_ptr, size);
@@ -118,8 +124,8 @@ class att_plugin_t {
   }
 
   int WriteBufferRecords(const rocprofiler_record_header_t* begin,
-                         const rocprofiler_record_header_t* end, rocprofiler_session_id_t session_id,
-                         rocprofiler_buffer_id_t buffer_id) {
+                         const rocprofiler_record_header_t* end,
+                         rocprofiler_session_id_t session_id, rocprofiler_buffer_id_t buffer_id) {
     while (begin < end) {
       if (!begin) return 0;
       switch (begin->kind) {
@@ -131,8 +137,9 @@ class att_plugin_t {
           break;
 
         case ROCPROFILER_ATT_TRACER_RECORD: {
-          rocprofiler_record_att_tracer_t* att_record = const_cast<rocprofiler_record_att_tracer_t*>(
-              reinterpret_cast<const rocprofiler_record_att_tracer_t*>(begin));
+          rocprofiler_record_att_tracer_t* att_record =
+              const_cast<rocprofiler_record_att_tracer_t*>(
+                  reinterpret_cast<const rocprofiler_record_att_tracer_t*>(begin));
           FlushATTRecord(att_record, session_id, buffer_id);
           break;
         }
@@ -151,7 +158,7 @@ att_plugin_t* att_plugin = nullptr;
 }  // namespace
 
 ROCPROFILER_EXPORT int rocprofiler_plugin_initialize(uint32_t rocprofiler_major_version,
-                                                 uint32_t rocprofiler_minor_version) {
+                                                     uint32_t rocprofiler_minor_version) {
   if (rocprofiler_major_version != ROCPROFILER_VERSION_MAJOR ||
       rocprofiler_minor_version < ROCPROFILER_VERSION_MINOR)
     return -1;
@@ -173,16 +180,15 @@ ROCPROFILER_EXPORT void rocprofiler_plugin_finalize() {
   att_plugin = nullptr;
 }
 
-ROCPROFILER_EXPORT int rocprofiler_plugin_write_buffer_records(const rocprofiler_record_header_t* begin,
-                                                           const rocprofiler_record_header_t* end,
-                                                           rocprofiler_session_id_t session_id,
-                                                           rocprofiler_buffer_id_t buffer_id) {
+ROCPROFILER_EXPORT int rocprofiler_plugin_write_buffer_records(
+    const rocprofiler_record_header_t* begin, const rocprofiler_record_header_t* end,
+    rocprofiler_session_id_t session_id, rocprofiler_buffer_id_t buffer_id) {
   if (!att_plugin || !att_plugin->IsValid()) return -1;
   return att_plugin->WriteBufferRecords(begin, end, session_id, buffer_id);
 }
 
 ROCPROFILER_EXPORT int rocprofiler_plugin_write_record(rocprofiler_record_tracer_t record,
-                                                   rocprofiler_session_id_t session_id) {
+                                                       rocprofiler_session_id_t session_id) {
   if (!att_plugin || !att_plugin->IsValid()) return -1;
   if (record.header.id.handle == 0) return 0;
   return 0;

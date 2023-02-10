@@ -124,6 +124,7 @@ def parse_binary(filename, kernel=None):
         print('Parsing kernel:', kernel[0].split(': ')[0])
         kernel = kernel[0].split(': ')[1].split('.kd')[0]
         kernel = str(kernel).encode('utf-8')
+    filename = os.path.abspath(str(filename))
     info = SO.wrapped_parse_binary(str(filename).encode('utf-8'), kernel)
 
     code = []
@@ -149,6 +150,7 @@ def parse_binary(filename, kernel=None):
 
 
 def getWaves(filename, target_cu, verbose):
+    filename = os.path.abspath(str(filename))
     info = SO.AnalyseBinary(filename.encode('utf-8'), target_cu, verbose)
 
     waves = [info.wavedata[k] for k in range(info.num_waves)]
@@ -282,21 +284,12 @@ def Copy_Files(output_ui):
 
 
 def get_delta_time(events):
-    for begin in range(len(events)):
-        tg_cu = events[begin].cu
-        for e in range(begin+1,len(events)):
-            if events[e].cu == tg_cu:
-                return events[e].time-events[begin].time
-    return 1
-
-
-def num_cus(EVENTS):
-    cus = 0
-    for events in EVENTS:
-        for e in events:
-            cus = max(cus, e.cu)
-    return cus+1
-
+    try:
+        CUS = [[e.time for e in events if e.cu==k and e.bank==0] for k in range(16)]
+        CUS = [np.asarray(c).astype(np.int64) for c in CUS if len(c) > 2]
+        return np.min([np.min(abs(c[1:]-c[:-1])) for c in CUS])
+    except:
+        return 1
 
 def draw_wave_metrics(selections, normalize):
     global PIC_SAVE_FOLDER
@@ -309,18 +302,18 @@ def draw_wave_metrics(selections, normalize):
 
     plt.figure(figsize=(15,3))
 
-    delta_time = int(0.5+np.mean([get_delta_time(events) for events in EVENTS]))
+    delta_time = int(0.5+np.min([get_delta_time(events) for events in EVENTS]))
     maxtime = np.max([np.max([e.time for e in events]) for events in EVENTS])+1
     event_timeline = np.zeros((16, maxtime), dtype=np.int32)
     print('Delta:', delta_time)
     print('Max_cycles:', maxtime)
 
-    kernsize = 2*(delta_time//8)+1
+    kernsize = 2*(delta_time//14)+1
     trim = max(maxtime//5000,1)
     cycles = 4*np.arange(maxtime)[::trim]
 
     kernel = np.asarray([np.exp(-abs(k/kernsize)**2) for k in range(-kernsize*3,kernsize*3+1)])
-    kernel /= np.sum(kernel)*len(EVENTS)*delta_time#*5.12 # SEslots/100%
+    kernel /= np.sum(kernel)*len(EVENTS)*delta_time
 
     for events in EVENTS:
         for e in range(len(events)-1):
@@ -336,7 +329,6 @@ def draw_wave_metrics(selections, normalize):
 
     if normalize:
         event_timeline = [100*e/max(e.max(), 1E-5) for e in event_timeline]
-    #event_timeline[0] = np.clip(event_timeline[0]*8.5, 0, 100) #CC rate
     
     colors = ['blue', 'green', 'gray', 'red', 'orange', 'cyan', 'black', 'darkviolet',
                 'yellow', 'darkred', 'pink', 'lime', 'gold', 'tan', 'aqua', 'olive']
@@ -369,7 +361,7 @@ def draw_wave_states(selections, normalize):
     if normalize:
         timelines = np.array(timelines) / np.maximum(np.sum(timelines,0)*1E-2,1E-7)
 
-    kernsize = maxtime//120+3
+    kernsize = maxtime//150+1
     trim = max(maxtime//5000,1)
     cycles = np.arange(timelines[0].size)[::trim]
 
@@ -395,19 +387,22 @@ def draw_wave_states(selections, normalize):
     plt.savefig(PIC_SAVE_FOLDER+'timeline.png', dpi=150)
 
 
-def GeneratePIC(selections=[True for k in range(4)], normalize=True):
-    if len(EVENTS) > 0 and np.sum([len(e) for e in EVENTS]) > 32:
+def GeneratePIC(selections=[True for k in range(16)], normalize=True, bScounter=True):
+    if bScounter and len(EVENTS) > 0 and np.sum([len(e) for e in EVENTS]) > 32:
         draw_wave_metrics(selections, normalize)
     else:
         draw_wave_states(selections, normalize)
 
 
 if __name__ == "__main__":
+    pathenv = os.getenv('OUTPUT_PATH')
+    if pathenv is None:
+        pathenv = "."
     parser = argparse.ArgumentParser()
     parser.add_argument("assembly_code", help="Path of the assembly code")
     parser.add_argument("--trace_file", help="Filter for trace files", default=None, type=str)
     parser.add_argument("-o", "--output_ui", help="Output Folder", default='/dev/shm/attplugin/')
-    parser.add_argument("-k", "--att_kernel", help="Kernel file", type=str, default='*_kernel.txt')
+    parser.add_argument("-k", "--att_kernel", help="Kernel file", type=str, default=pathenv+'/*_kernel.txt')
     parser.add_argument("-w", "--wave_id", help="wave id")
     parser.add_argument("-p", "--ports", help="Server and websocket ports, default: 8000,18000")
     parser.add_argument("--target_cu", help="Collected target CU id{0-15}", type=int, default=None)
@@ -422,7 +417,6 @@ if __name__ == "__main__":
 
         EVENT_NAMES = []
         clean = lambda x: x.split('=')[1].split(' ')[0].split('\n')[0]
-
         for line in lines:
             if 'PERFCOUNTER_ID=' in line:
                 EVENT_NAMES += ['id: '+clean(line)]

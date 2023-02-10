@@ -256,7 +256,7 @@ att_parsed_input_t GetATTParams() {
 
     if (param_name == "PERFCOUNTERS_COL_PERIOD") {
       default_params["TOKEN_MASK"] |= 0x4000;
-      param_value = ((param_value & 0x1F) << 8) | 0x007F;
+      param_value = ((param_value & 0x1F) << 8) | 0xFFFF00FF;
       parameters.push_back(std::make_pair(ROCPROFILER_ATT_PERF_CTRL, param_value));
       continue;
     } else if (param_name == "SIMD_MASK") {

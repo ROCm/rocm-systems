@@ -262,7 +262,11 @@ if [ -n "$PMC_LINES" ]; then
   for i in ${!PMC_LINES[@]}; do
     export ROCPROFILER_COUNTERS="${PMC_LINES[$i]}"
     if [ -n "$OUTPUT_PATH" ]; then
-      FINAL_PATH="$OUTPUT_PATH_INTERNAL/pmc_$COUNTER"
+      if [ ! -n "$ATT_ARGV" ]; then
+        FINAL_PATH="$OUTPUT_PATH_INTERNAL/pmc_$COUNTER"
+      else
+        FINAL_PATH="$OUTPUT_PATH"
+      fi
       echo -e "\nThe output path for the following counters: $FINAL_PATH"
       mkdir -p $FINAL_PATH
       echo $ROCPROFILER_COUNTERS > $FINAL_PATH/pmc.txt

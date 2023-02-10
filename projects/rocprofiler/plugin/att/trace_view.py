@@ -161,7 +161,7 @@ def stitch(insts, code, jumps):
 
     N = max(N, 1)
     if len(result) != N:
-        print('Warning - Stitching rate: {'+str(len(result) * 100 / N)+'% matched')
+        print('Warning - Stitching rate: '+str(len(result) * 100 / N)+'% matched')
 
     return result, loopCount, mem_unroll, flight_count
 
@@ -327,8 +327,8 @@ class NoCacheHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         global PICTURE_CALLBACK
         if 'timeline.png?' in self.path:
             selections = [int(s)!=0 for s in self.path.split('timeline.png?')[1]]
-            print('Sel:', selections)
             PICTURE_CALLBACK(selections[1:], selections[0])
+            #PICTURE_CALLBACK(selections[2:], selections[1], selections[0])
         http.server.SimpleHTTPRequestHandler.do_GET(self)
 
 class RocTCPServer(socketserver.TCPServer):
