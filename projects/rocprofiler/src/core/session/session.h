@@ -40,6 +40,7 @@
 #include "att/att.h"
 #include "spm/spm.h"
 #include "src/pcsampler/session/pc_sampler.h"
+#include "counters_sampler.h"
 
 #define ASSERTM(exp, msg) assert(((void)msg, exp))
 
@@ -62,6 +63,7 @@ class Session {
   att::AttTracer* GetAttTracer();
   spm::SpmCounters* GetSpmCounter();
   pc_sampler::PCSampler* GetPCSampler();
+  CountersSampler* GetCountersSampler();
 
   // Filter
   rocprofiler_filter_id_t CreateFilter(rocprofiler_filter_kind_t filter_kind,
@@ -116,6 +118,9 @@ class Session {
 
   std::atomic<bool> pc_sampler_started_{false};
   pc_sampler::PCSampler* pc_sampler_;
+
+  std::atomic<bool> counters_sampler_started_{false};
+  CountersSampler* counters_sampler_;
 
   std::atomic<uint64_t> buffers_counter_{1};
   std::mutex buffers_lock_;

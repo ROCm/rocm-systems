@@ -148,6 +148,16 @@ void Session::Start() {
       pc_sampler_->Start();
     }
 
+    if (FindFilterWithKind(ROCPROFILER_COUNTERS_SAMPLER)) {
+      if (!counters_sampler_started_.load(std::memory_order_release)) {
+        counters_sampler_ = new CountersSampler(
+            GetFilter(GetFilterIdWithKind(ROCPROFILER_COUNTERS_SAMPLER))->GetBufferId(),
+            GetFilter(GetFilterIdWithKind(ROCPROFILER_COUNTERS_SAMPLER))->GetId(), session_id_);
+        counters_sampler_started_.exchange(true, std::memory_order_release);
+      }
+      counters_sampler_->Start();
+    }
+
     is_active_ = true;
     if (FindFilterWithKind(ROCPROFILER_SPM_COLLECTION)) startSpm();
   }
@@ -179,6 +189,14 @@ void Session::Terminate() {
       }
     }
 
+    if (FindFilterWithKind(ROCPROFILER_COUNTERS_SAMPLER)) {
+      if (counters_sampler_started_.load(std::memory_order_release)) {
+        counters_sampler_->Stop();
+        delete counters_sampler_;
+        counters_sampler_started_.exchange(false, std::memory_order_release);
+      }
+    }
+
     is_active_ = false;
   }
 }
@@ -191,6 +209,7 @@ att::AttTracer* Session::GetAttTracer() { return att_tracer_; }
 tracer::Tracer* Session::GetTracer() { return tracer_; }
 spm::SpmCounters* Session::GetSpmCounter() { return spmcounter_; }
 pc_sampler::PCSampler* Session::GetPCSampler() { return pc_sampler_; }
+CountersSampler* Session::GetCountersSampler() { return counters_sampler_; }
 
 rocprofiler_filter_id_t Session::CreateFilter(rocprofiler_filter_kind_t filter_kind,
                                             rocprofiler_filter_data_t filter_data,

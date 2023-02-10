@@ -84,6 +84,16 @@ target_link_options(profiler_device_profiling PRIVATE "-Wl,--build-id=md5")
 add_dependencies(samples profiler_device_profiling)
 install(TARGETS profiler_device_profiling RUNTIME DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/samples COMPONENT samples)
 
+## Build Counters Sampling example
+set_source_files_properties(counters_sampler/pcie_counters_example.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+hip_add_executable(pcie_counters_sampler counters_sampler/pcie_counters_example.cpp ${ROCPROFILER_UTIL_SRC_FILES})
+target_include_directories(pcie_counters_sampler PRIVATE ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/inc ${CMAKE_CURRENT_SOURCE_DIR}/common)
+target_link_libraries(pcie_counters_sampler PRIVATE ${ROCPROFILER_TARGET} systemd amd_comgr)
+add_dependencies(samples pcie_counters_sampler)
+install(TARGETS pcie_counters_sampler RUNTIME DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/samples COMPONENT samples)
+
+# ################################################################################################################
+
 # ############################################################################################################################################
 # Tracer Samples
 # ############################################################################################################################################

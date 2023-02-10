@@ -285,6 +285,16 @@ void FlushPCSamplingRecord(
               << std::endl;
 }
 
+void FlushCountersSamplerRecord(
+  const rocprofiler_record_counters_sampler_t *counters_sampler_record) {
+  for (uint32_t i = 0; i < counters_sampler_record->num_counters; i++) {
+    output_file << ",Counter_" << i << "("
+                << std::to_string(counters_sampler_record->counters[i].value.value) << ")"
+                << std::endl;
+  }
+  output_file << std::endl;
+}
+
 int WriteBufferRecords(const rocprofiler_record_header_t* begin, const rocprofiler_record_header_t* end,
                        rocprofiler_session_id_t session_id, rocprofiler_buffer_id_t buffer_id) {
   while (begin < end) {
@@ -308,8 +318,15 @@ int WriteBufferRecords(const rocprofiler_record_header_t* begin, const rocprofil
         FlushPCSamplingRecord(pc_sampling_record);
         break;
       }
-      default: {
+      case ROCPROFILER_COUNTERS_SAMPLER_RECORD: {
+        const rocprofiler_record_counters_sampler_t *counters_sampler_record =
+         reinterpret_cast<const rocprofiler_record_counters_sampler_t *>(begin);
+        FlushCountersSamplerRecord(counters_sampler_record);
         break;
+      }
+      default: {
+        std::cout <<"unknown record\n";
+          break;
       }
     }
     rocprofiler_next_record(begin, &begin, session_id, buffer_id);

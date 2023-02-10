@@ -67,10 +67,15 @@ Filter::Filter(rocprofiler_filter_id_t id, rocprofiler_filter_kind_t filter_kind
       }     
       break;
     }
+    case ROCPROFILER_COUNTERS_SAMPLER: {
+      counters_sampler_parameters_ = filter_data.counters_sampler_parameters;
+      break;
+    }
     default: {
       warning(
           "Error: ROCProfiler filter specified is not supported for "
           "profiler mode!\n");
+      break;
     }
   }
 }
@@ -122,6 +127,16 @@ rocprofiler_spm_parameter_t* Filter::GetSpmParameterData() {
       "Error: ROCProfiler filter specified is not supported for "
       "SPM collection  mode!\n");
 }
+
+rocprofiler_counters_sampler_parameters_t Filter::GetCountersSamplerParameterData() {
+  if (kind_ == ROCPROFILER_COUNTERS_SAMPLER) {
+    return counters_sampler_parameters_;
+  }
+  fatal(
+      "Error: ROCMtools filter specified is not supported for "
+      "Counters sampler mode!\n");
+}
+
 void Filter::SetProperty(rocprofiler_filter_property_t property) {
   switch (property.kind) {
     case ROCPROFILER_FILTER_HSA_TRACER_API_FUNCTIONS: {

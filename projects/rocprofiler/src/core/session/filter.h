@@ -56,6 +56,7 @@ class Filter {
       rocprofiler_filter_property_kind_t kind);
   size_t GetPropertiesCount(rocprofiler_filter_property_kind_t kind);
   rocprofiler_spm_parameter_t* GetSpmParameterData();
+  rocprofiler_counters_sampler_parameters_t GetCountersSamplerParameterData();
 
  private:
   rocprofiler_filter_id_t id_;
@@ -72,6 +73,7 @@ class Filter {
   std::vector<rocprofiler_tracer_activity_domain_t> tracer_apis_;  // ROCTX/HIP/HSA API
   rocprofiler_spm_parameter_t* spm_parameter_;                     // spm parameter
   std::vector<rocprofiler_att_parameter_t> att_parameters_;  // ATT Parameters
+  rocprofiler_counters_sampler_parameters_t counters_sampler_parameters_;        // sampled counters parameters
 
   rocprofiler_sync_callback_t callback_;
 };

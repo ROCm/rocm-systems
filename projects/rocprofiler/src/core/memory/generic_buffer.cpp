@@ -220,11 +220,18 @@ bool GetNextRecord(const rocprofiler_record_header_t* record,
       *next = reinterpret_cast<const rocprofiler_record_header_t*>(att_tracer_record + 1);
       break;
     }
+    case ROCPROFILER_COUNTERS_SAMPLER_RECORD: {
+      const rocprofiler_record_counters_sampler_t* sampler_record =
+          reinterpret_cast<const rocprofiler_record_counters_sampler_t*>(record);
+      *next = reinterpret_cast<const rocprofiler_record_header_t*>(sampler_record + 1);
+      break;
+    }
     default:
       const rocprofiler_record_tracer_t* tracer_record =
           reinterpret_cast<const rocprofiler_record_tracer_t*>(record);
       *next = reinterpret_cast<const rocprofiler_record_header_t*>(tracer_record + 1);
       // size_to_add = sizeof(rocprofiler_record_header_t);
+      break;
   }
   // const std::byte* ptr = reinterpret_cast<const std::byte*>(record);
   // ptr += size_to_add;

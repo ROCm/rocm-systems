@@ -479,7 +479,11 @@ typedef enum {
   /**
    * Represents SPM records
    */
-  ROCPROFILER_SPM_RECORD = 4
+  ROCPROFILER_SPM_RECORD = 4,
+  /**
+   * Represents Counters sampler records
+   */
+  ROCPROFILER_COUNTERS_SAMPLER_RECORD = 5
 } rocprofiler_record_kind_t;
 
 /**
@@ -1789,7 +1793,11 @@ typedef enum {
   /**
    * HIP/HSA/ROCTX/SYS Trace.
    */
-  ROCPROFILER_API_TRACE = 6
+  ROCPROFILER_API_TRACE = 6,
+  /**
+   * Sampled Counters
+   */
+  ROCPROFILER_COUNTERS_SAMPLER = 7
 } rocprofiler_filter_kind_t;
 
 /**
@@ -1895,6 +1903,69 @@ typedef struct {
 
 } rocprofiler_spm_parameter_t;
 
+typedef enum{
+  ROCPROFILER_COUNTERS_SAMPLER_PCIE_COUNTERS = 0
+} rocprofiler_counters_sampler_counter_type_t;
+
+typedef struct{
+  char* name;
+  rocprofiler_counters_sampler_counter_type_t type;
+} rocprofiler_counters_sampler_counter_input_t;
+
+typedef struct{
+  rocprofiler_counters_sampler_counter_type_t type;
+  rocprofiler_record_counter_value_t value;
+} rocprofiler_counters_sampler_counter_output_t;
+
+typedef struct{
+  /**
+   * Counters to profile
+   */
+  rocprofiler_counters_sampler_counter_input_t* counters;
+  /**
+   * Counters count
+   */
+  int counters_num;
+  /**
+   * Sampling rate (ms)
+   */
+  uint32_t sampling_rate;
+  /**
+   * Total sampling duration (ms); time between sampling start/stop
+   */
+  uint32_t sampling_duration;
+  /**
+   * Initial delay (ms)
+   */
+  uint32_t initial_delay;
+  /**
+   * Preferred agents to collect counters from
+   */
+  int gpu_agent_index;
+}rocprofiler_counters_sampler_parameters_t;
+
+typedef struct{
+  /**
+   * ROCMtool General Record base header to identify the id and kind of every
+   * record
+   */
+  rocprofiler_record_header_t header;
+  /**
+   * Agent Identifier to be used by the user to get the Agent Information using
+   * ::rocprofiler_query_agent_info
+   */
+  rocprofiler_agent_id_t gpu_id;
+  /**
+   * Counters, including identifiers to get counter information and Counters
+   * values
+   */
+  rocprofiler_counters_sampler_counter_output_t* counters;
+  /**
+   * Number of counter values
+   */
+  uint32_t num_counters;
+}rocprofiler_record_counters_sampler_t;
+
 /**
  * Filter Kind Data
  */
@@ -1915,6 +1986,10 @@ typedef union {
    * spm counters parameters
    */
   rocprofiler_spm_parameter_t* spm_parameters;
+  /**
+   * sampled counters parameters
+   */
+  rocprofiler_counters_sampler_parameters_t counters_sampler_parameters;
 } rocprofiler_filter_data_t;
 
 /**
