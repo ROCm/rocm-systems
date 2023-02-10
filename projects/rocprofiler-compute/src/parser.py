@@ -397,35 +397,36 @@ def parse(my_parser):
     )
     analyze_group.add_argument(
         "-b",
-        "--filter-metrics",
+        "--metric",
+        dest="filter_metrics",
         metavar="",
         nargs="+",
-        help="\t\tSpecify IP block/metric Ids from --list-metrics.",
+        help="\t\tSpecify IP block/metric id(s) from --list-metrics for filtering.",
     )
     analyze_group.add_argument(
         "-k",
-        "--filter-kernels",
+        "--kernel",
         metavar="",
         type=int,
         dest="gpu_kernel",
         nargs="+",
         action="append",
-        help="\t\tSpecify kernel id from --list-kernels.",
+        help="\t\tSpecify kernel id(s) from --list-kernels for filtering.",
     )
     analyze_group.add_argument(
-        "--filter-dispatch-ids",
+        "--dispatch",
         dest="gpu_dispatch_id",
         metavar="",
         nargs="+",
         action="append",
-        help="\t\tSpecify dispatch IDs.",
+        help="\t\tSpecify dispatch id(s) for filtering.",
     )
     analyze_group.add_argument(
-        "--filter-gpu-ids",
+        "--gpu-id",
         dest="gpu_id",
         metavar="",
         nargs="+",
-        help="\t\tSpecify GPU IDs.",
+        help="\t\tSpecify GPU id(s) for filtering.",
     )
     analyze_group.add_argument(
         "-n",
