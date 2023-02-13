@@ -2,19 +2,19 @@
 
 ##############################################################################bl
 # MIT License
-# 
+#
 # Copyright (c) 2021 - 2023 Advanced Micro Devices, Inc. All Rights Reserved.
-# 
+#
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
 # in the Software without restriction, including without limitation the rights
 # to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
-# 
+#
 # The above copyright notice and this permission notice shall be included in all
 # copies or substantial portions of the Software.
-# 
+#
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 # FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -39,7 +39,7 @@ from utils import specs
 from utils.perfagg import perfmon_filter, pmc_filter
 from utils import remove_workload
 from utils import csv_converter  # Import workload
-from omniperf_analyze.omniperf_analyze import roofline_only # Standalone roofline
+from omniperf_analyze.omniperf_analyze import roofline_only  # Standalone roofline
 from omniperf_analyze.omniperf_analyze import analyze  # CLI analysis
 
 from common import (
@@ -55,10 +55,8 @@ from common import getVersion
 # Helper Functions
 ################################################
 def run_subprocess(cmd):
-    subprocess.run(
-        cmd,
-        check=True
-    )
+    subprocess.run(cmd, check=True)
+
 
 def resolve_rocprof():
     # ROCPROF INFO
@@ -127,7 +125,9 @@ def replace_timestamps(workload_dir):
         df_pmc_perf["EndNs"] = df_stamps["EndNs"]
         df_pmc_perf.to_csv(workload_dir + "/pmc_perf.csv", index=False)
     else:
-        warnings.warn("WARNING: Incomplete profiling data detected. Unable to update timestamps.")
+        warnings.warn(
+            "WARNING: Incomplete profiling data detected. Unable to update timestamps."
+        )
 
 
 def gen_sysinfo(workload_name, workload_dir, ip_blocks, app_cmd, skip_roof):
@@ -152,7 +152,7 @@ def gen_sysinfo(workload_name, workload_dir, ip_blocks, app_cmd, skip_roof):
     timestamp = now.strftime("%c") + " (" + local_tzname + ")"
     # host info
     param = [workload_name]
-    param += ["\"" + app_cmd + "\""]
+    param += ['"' + app_cmd + '"']
     param += [
         mspec.hostname,
         mspec.cpu,
@@ -259,6 +259,7 @@ def roof_setup(args, my_parser):
         else:
             characterize_app(args.path, args.remaining, args.verbose)
 
+
 def detect_roofline():
     mspec = specs.get_machine_specs(0)
     rocm_ver = mspec.rocmversion[:1]
@@ -293,6 +294,7 @@ def detect_roofline():
     target_binary = {"rocm_ver": rocm_ver, "distro": distro}
     return target_binary
 
+
 def mibench(args):
     print("No roofline data found. Generating...")
 
@@ -326,6 +328,7 @@ def mibench(args):
         ]
     )
 
+
 def characterize_app(path, cmd, verbose):
     target = get_soc()
     workload_dir = path
@@ -357,27 +360,38 @@ def characterize_app(path, cmd, verbose):
     # Update pmc_perf.csv timestamps
     replace_timestamps(workload_dir)
 
+
 ################################################
 # Profiling Helpers
 ################################################
 
+
 def run_rocscope(args, fname):
     # profile the app
     if args.use_rocscope == True:
-        result = subprocess.run(["which", "rocscope"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        result = subprocess.run(
+            ["which", "rocscope"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
+        )
         if result.returncode == 0:
-            rs_cmd = [result.stdout.decode('ascii').strip(), 
-                      "metrics",
-                      "-p", args.path,
-                      "-n", args.name,
-                      "-t", fname,
-                      "--"]
+            rs_cmd = [
+                result.stdout.decode("ascii").strip(),
+                "metrics",
+                "-p",
+                args.path,
+                "-n",
+                args.name,
+                "-t",
+                fname,
+                "--",
+            ]
             for i in args.remaining.split():
                 rs_cmd.append(i)
             print(rs_cmd)
-            result = run_subprocess(rs_cmd) #, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            result = run_subprocess(
+                rs_cmd
+            )  # , stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             if result.returncode != 0:
-                print(result.stderr.decode('ascii'))
+                print(result.stderr.decode("ascii"))
                 sys.exit(1)
 
 
@@ -410,7 +424,7 @@ def omniperf_profile(args, VER):
         parse.print_help(sys.stderr)
         sys.exit(1)
 
-    #Verify valid name
+    # Verify valid name
     if args.name.find(".") != -1 or args.name.find("-") != -1:
         raise ValueError("'-' and '.' are not permited in workload name", args.name)
 
@@ -430,59 +444,75 @@ def omniperf_profile(args, VER):
     # Set up directories
     workload_dir = args.path + "/" + args.name + "/" + args.target
     perfmon_dir = str(OMNIPERF_HOME) + "/perfmon_pub"
-    
+
     # Perfmon filtering
     perfmon_filter(workload_dir, perfmon_dir, args)
 
     if not args.lucky == None and args.lucky == True:
         print("You're feeling lucky - only profiling top N kernels")
-        #look for whether workload_dir exists  - create if not
+        # look for whether workload_dir exists  - create if not
         try:
-            os.makedirs(workload_dir, exist_ok = True)
+            os.makedirs(workload_dir, exist_ok=True)
         except Exception as e:
             print("Unable to create workload directory: ", workload_dir)
             print(e)
             sys.exit(1)
 
-        result = subprocess.run(["which", "rocscope"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        result = subprocess.run(
+            ["which", "rocscope"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
+        )
         if result.returncode == 0:
-            rs_cmd = [result.stdout.decode('ascii').strip(), 
-                      "top10",
-                      "-p", args.path,
-                      "-n", args.name,
-                      "--"]
+            rs_cmd = [
+                result.stdout.decode("ascii").strip(),
+                "top10",
+                "-p",
+                args.path,
+                "-n",
+                args.name,
+                "--",
+            ]
             for i in args.remaining.split():
                 rs_cmd.append(i)
             print(rs_cmd)
-            result = run_subprocess(rs_cmd) #, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            result = run_subprocess(
+                rs_cmd
+            )  # , stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             if result.returncode != 0:
-                print(result.stderr.decode('ascii'))
+                print(result.stderr.decode("ascii"))
         else:
             print("rocscope must be in the PATH")
             sys.exit(1)
     elif not args.summaries == None and args.summaries == True:
         print("creating kernel summaries")
-        #look for whether workload_dir exists  - create if not
+        # look for whether workload_dir exists  - create if not
         try:
-            os.makedirs(workload_dir, exist_ok = True)
+            os.makedirs(workload_dir, exist_ok=True)
         except Exception as e:
             print("Unable to create workload directory: ", workload_dir)
             print(e)
             sys.exit(1)
 
-        result = subprocess.run(["which", "rocscope"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        result = subprocess.run(
+            ["which", "rocscope"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
+        )
         if result.returncode == 0:
-            rs_cmd = [result.stdout.decode('ascii').strip(), 
-                      "summary",
-                      "-p", args.path,
-                      "-n", args.name,
-                      "--"]
+            rs_cmd = [
+                result.stdout.decode("ascii").strip(),
+                "summary",
+                "-p",
+                args.path,
+                "-n",
+                args.name,
+                "--",
+            ]
             for i in args.remaining.split():
                 rs_cmd.append(i)
             print(rs_cmd)
-            result = run_subprocess(rs_cmd) #, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            result = run_subprocess(
+                rs_cmd
+            )  # , stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             if result.returncode != 0:
-                print(result.stderr.decode('ascii'))
+                print(result.stderr.decode("ascii"))
         else:
             print("rocscope must be in the PATH")
             sys.exit(1)
@@ -516,8 +546,6 @@ def omniperf_profile(args, VER):
                 run_rocscope(args, fname)
             else:
                 run_prof(fname, workload_dir, perfmon_dir, args.remaining, args.verbose)
-        
-
 
         # run again with timestamps
         run_subprocess(
