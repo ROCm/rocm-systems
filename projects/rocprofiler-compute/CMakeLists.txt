@@ -292,6 +292,18 @@ install(
 # set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "omniperf") set(CPACK_RESOURCE_FILE_LICENSE
 # "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
 
+# License header update(s)
+add_custom_target(
+    license
+    COMMAND
+        ${PROJECT_SOURCE_DIR}/utils/update_license.py --source ${PROJECT_SOURCE_DIR}/src
+        --license ${PROJECT_SOURCE_DIR}/LICENSE --extension '.py'
+    COMMAND
+        ${PROJECT_SOURCE_DIR}/utils/update_license.py --source ${PROJECT_SOURCE_DIR}
+        --license ${PROJECT_SOURCE_DIR}/LICENSE --file
+        "src/omniperf,cmake/Dockerfile,cmake/rocm_install.sh,docker/docker-entrypoint.sh,src/omniperf_analyze/convertor/mongodb/convert"
+    )
+
 # Source tarball
 set(CPACK_SOURCE_GENERATOR "TGZ")
 set(CPACK_SOURCE_PACKAGE_FILE_NAME ${CMAKE_PROJECT_NAME}-${FULL_VERSION_STRING})
