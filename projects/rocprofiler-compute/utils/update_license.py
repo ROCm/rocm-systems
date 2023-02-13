@@ -12,33 +12,33 @@ import re
 import filecmp
 import shutil
 
-begDelim='######bl$'
-endDelim='######el$'
-maxHeaderLines=200
+begDelim = "######bl$"
+endDelim = "######el$"
+maxHeaderLines = 200
 
 
-def cacheLicenseFile(infile,comment='#'):
+def cacheLicenseFile(infile, comment="#"):
     if not os.path.isfile(infile):
         logging.error("Unable to access license file - >%s" % infile)
         sys.exit(1)
 
     license = ""
-    with open(infile, 'r') as file_in:
+    with open(infile, "r") as file_in:
         for line in file_in:
-            license += comment + ' ' + line
-    return(license)
+            license += comment + " " + line
+    return license
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--license',  required=True,help='License File')
-parser.add_argument('--source',   required=True,help='Source directory')
+parser.add_argument("--license", required=True, help="License File")
+parser.add_argument("--source", required=True, help="Source directory")
 parser.add_argument("--dryrun", help="enable dryrun mode", action="store_true")
 
 group = parser.add_mutually_exclusive_group(required=True)
-group.add_argument('--extension',help='file extension to parse')
-group.add_argument('--files',    help='specific file(s) to parse')
+group.add_argument("--extension", help="file extension to parse")
+group.add_argument("--files", help="specific file(s) to parse")
 
-logging.basicConfig(format='%(levelname)s: %(message)s',level=logging.INFO)
+logging.basicConfig(format="%(levelname)s: %(message)s", level=logging.INFO)
 
 args = parser.parse_args()
 
@@ -61,13 +61,13 @@ if specificFiles:
 license = cacheLicenseFile(args.license)
 
 # Scan files in provided source directory...
-for filename in glob.iglob(srcDir + '/**', recursive=True):
-     # skip directories
+for filename in glob.iglob(srcDir + "/**", recursive=True):
+    # skip directories
     if os.path.isdir(filename):
-         continue
+        continue
 
     # File matching options:
-    
+
     # (1) filter non-matching extensions
     if fileExtension:
         if not filename.endswith(fileExtension):
@@ -77,26 +77,26 @@ for filename in glob.iglob(srcDir + '/**', recursive=True):
     if specificFiles:
         found = False
         for file in specificFiles:
-            fullPath = os.path.join(srcDir,file)
+            fullPath = os.path.join(srcDir, file)
             if fullPath == filename:
                 found = True
                 break
         if not found:
             continue
-        
+
     logging.debug("Examining %s for license..." % filename)
 
     # Update license header contents if delimiters are found
-    with open(filename, 'r') as file_in:
+    with open(filename, "r") as file_in:
         baseName = os.path.basename(filename)
-        dirName  = os.path.dirname(filename)
-        tmpFile  = dirName + "/." + baseName + ".tmp"
+        dirName = os.path.dirname(filename)
+        tmpFile = dirName + "/." + baseName + ".tmp"
 
-        file_out = open(tmpFile,'w')
-        
+        file_out = open(tmpFile, "w")
+
         for line in file_in:
 
-            if re.search(begDelim,line):
+            if re.search(begDelim, line):
                 logging.debug("Found beginning delimiter")
                 file_out.write(line)
                 file_out.write(license)
@@ -105,7 +105,7 @@ for filename in glob.iglob(srcDir + '/**', recursive=True):
 
                 for i in range(maxHeaderLines):
                     line = file_in.readline()
-                    if re.search(endDelim,line):
+                    if re.search(endDelim, line):
                         logging.debug("Found ending delimiter")
                         file_out.write(line)
                         foundEnd = True
@@ -119,15 +119,11 @@ for filename in glob.iglob(srcDir + '/**', recursive=True):
 
     file_out.close()
 
-
     # Check if file changed and update
-    if not filecmp.cmp(filename,tmpFile,shallow=False):
+    if not filecmp.cmp(filename, tmpFile, shallow=False):
         logging.info("%s changed" % filename)
-        shutil.copystat(filename,tmpFile)
+        shutil.copystat(filename, tmpFile)
         if not args.dryrun:
-            os.rename(tmpFile,filename)
+            os.rename(tmpFile, filename)
     else:
         os.unlink(tmpFile)
-
-        
-
