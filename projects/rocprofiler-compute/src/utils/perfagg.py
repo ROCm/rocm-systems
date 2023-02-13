@@ -1,4 +1,4 @@
-################################################################################
+##############################################################################bl
 # Copyright (c) 2021 - 2022 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -18,7 +18,7 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
-################################################################################
+##############################################################################el
 
 import sys, os, pathlib, shutil, subprocess, argparse, glob, re
 import numpy as np
