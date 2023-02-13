@@ -25,7 +25,10 @@ def cacheLicenseFile(infile, comment="#"):
     license = ""
     with open(infile, "r") as file_in:
         for line in file_in:
-            license += comment + " " + line
+            license += comment
+            if line.strip() != "":
+                license += " "
+            license += line
     return license
 
 
