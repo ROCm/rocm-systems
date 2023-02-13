@@ -145,7 +145,7 @@ def test_filter_dispatch_ids_mi100():
                 "analyze",
                 "--path",
                 "tests/workloads/mixbench/mi100",
-                "--filter-dispatch-ids",
+                "--dispatch",
                 "0",
             ],
         ):
@@ -162,7 +162,7 @@ def test_filter_dispatch_ids_inv_mi100():
                 "analyze",
                 "--path",
                 "tests/workloads/mixbench/mi100",
-                "--filter-dispatch-ids",
+                "--dispatch",
                 "99",
             ],
         ):
@@ -179,7 +179,7 @@ def test_filter_gpu_ids_mi100():
                 "analyze",
                 "--path",
                 "tests/workloads/mixbench/mi100",
-                "--filter-gpu-ids",
+                "--gpu-id",
                 "0",
             ],
         ):
@@ -196,7 +196,7 @@ def test_filter_gpu_ids_inv_mi100():
                 "analyze",
                 "--path",
                 "tests/workloads/mixbench/mi100",
-                "--filter-gpu-ids",
+                "--gpu-id",
                 "99",
             ],
         ):
@@ -490,7 +490,7 @@ def test_filter_dispatch_ids_mi200():
                 "analyze",
                 "--path",
                 "tests/workloads/mixbench/mi200",
-                "--filter-dispatch-ids",
+                "--dispatch",
                 "0",
             ],
         ):
@@ -507,7 +507,7 @@ def test_filter_dispatch_ids_inv_mi200():
                 "analyze",
                 "--path",
                 "tests/workloads/mixbench/mi200",
-                "--filter-dispatch-ids",
+                "--dispatch",
                 "99",
             ],
         ):
@@ -524,7 +524,7 @@ def test_filter_gpu_ids_mi200():
                 "analyze",
                 "--path",
                 "tests/workloads/mixbench/mi200",
-                "--filter-gpu-ids",
+                "--gpu-id",
                 "0",
             ],
         ):
@@ -541,7 +541,7 @@ def test_filter_gpu_ids_inv_mi200():
                 "analyze",
                 "--path",
                 "tests/workloads/mixbench/mi200",
-                "--filter-gpu-ids",
+                "--gpu-id",
                 "99",
             ],
         ):
