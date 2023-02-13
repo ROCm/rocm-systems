@@ -55,14 +55,14 @@ class att_plugin_t {
   bool is_valid_{true};
 
   inline bool att_file_exists(const std::string& name) {
-    struct stat buffer;
+    struct stat buffer;   
     return stat(name.c_str(), &buffer) == 0;
   }
 
   bool IsValid() const { return is_valid_; }
 
   void FlushATTRecord(const rocprofiler_record_att_tracer_t* att_tracer_record,
-                      rocprofiler_session_id_t session_id, rocprofiler_buffer_id_t buffer_id) {
+                       rocprofiler_session_id_t session_id, rocprofiler_buffer_id_t buffer_id) {
     std::lock_guard<std::mutex> lock(writing_lock);
 
     if (!att_tracer_record) {
@@ -124,8 +124,8 @@ class att_plugin_t {
   }
 
   int WriteBufferRecords(const rocprofiler_record_header_t* begin,
-                         const rocprofiler_record_header_t* end,
-                         rocprofiler_session_id_t session_id, rocprofiler_buffer_id_t buffer_id) {
+                         const rocprofiler_record_header_t* end, rocprofiler_session_id_t session_id,
+                         rocprofiler_buffer_id_t buffer_id) {
     while (begin < end) {
       if (!begin) return 0;
       switch (begin->kind) {
@@ -133,13 +133,13 @@ class att_plugin_t {
         case ROCPROFILER_TRACER_RECORD:
         case ROCPROFILER_PC_SAMPLING_RECORD:
         case ROCPROFILER_SPM_RECORD:
+        case ROCPROFILER_COUNTERS_SAMPLER_RECORD:
           printf("Invalid record Kind: %d", begin->kind);
           break;
 
         case ROCPROFILER_ATT_TRACER_RECORD: {
-          rocprofiler_record_att_tracer_t* att_record =
-              const_cast<rocprofiler_record_att_tracer_t*>(
-                  reinterpret_cast<const rocprofiler_record_att_tracer_t*>(begin));
+          rocprofiler_record_att_tracer_t* att_record = const_cast<rocprofiler_record_att_tracer_t*>(
+              reinterpret_cast<const rocprofiler_record_att_tracer_t*>(begin));
           FlushATTRecord(att_record, session_id, buffer_id);
           break;
         }
@@ -158,7 +158,7 @@ att_plugin_t* att_plugin = nullptr;
 }  // namespace
 
 ROCPROFILER_EXPORT int rocprofiler_plugin_initialize(uint32_t rocprofiler_major_version,
-                                                     uint32_t rocprofiler_minor_version) {
+                                                 uint32_t rocprofiler_minor_version) {
   if (rocprofiler_major_version != ROCPROFILER_VERSION_MAJOR ||
       rocprofiler_minor_version < ROCPROFILER_VERSION_MINOR)
     return -1;
@@ -180,15 +180,16 @@ ROCPROFILER_EXPORT void rocprofiler_plugin_finalize() {
   att_plugin = nullptr;
 }
 
-ROCPROFILER_EXPORT int rocprofiler_plugin_write_buffer_records(
-    const rocprofiler_record_header_t* begin, const rocprofiler_record_header_t* end,
-    rocprofiler_session_id_t session_id, rocprofiler_buffer_id_t buffer_id) {
+ROCPROFILER_EXPORT int rocprofiler_plugin_write_buffer_records(const rocprofiler_record_header_t* begin,
+                                                           const rocprofiler_record_header_t* end,
+                                                           rocprofiler_session_id_t session_id,
+                                                           rocprofiler_buffer_id_t buffer_id) {
   if (!att_plugin || !att_plugin->IsValid()) return -1;
   return att_plugin->WriteBufferRecords(begin, end, session_id, buffer_id);
 }
 
 ROCPROFILER_EXPORT int rocprofiler_plugin_write_record(rocprofiler_record_tracer_t record,
-                                                       rocprofiler_session_id_t session_id) {
+                                                   rocprofiler_session_id_t session_id) {
   if (!att_plugin || !att_plugin->IsValid()) return -1;
   if (record.header.id.handle == 0) return 0;
   return 0;

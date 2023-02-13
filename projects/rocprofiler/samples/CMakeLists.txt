@@ -92,6 +92,14 @@ target_link_libraries(pcie_counters_sampler PRIVATE ${ROCPROFILER_TARGET} system
 add_dependencies(samples pcie_counters_sampler)
 install(TARGETS pcie_counters_sampler RUNTIME DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/samples COMPONENT samples)
 
+## Build XGMI Counters Sampling example
+set_source_files_properties(counters_sampler/xgmi_counters_sampler_example.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+hip_add_executable(xgmi_counters_sampler counters_sampler/xgmi_counters_sampler_example.cpp ${ROCPROFILER_UTIL_SRC_FILES})
+target_include_directories(xgmi_counters_sampler PRIVATE ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/inc ${CMAKE_CURRENT_SOURCE_DIR}/common)
+target_link_libraries(xgmi_counters_sampler PRIVATE ${ROCPROFILER_TARGET} systemd amd_comgr)
+add_dependencies(samples xgmi_counters_sampler)
+install(TARGETS xgmi_counters_sampler RUNTIME DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/samples COMPONENT samples)
+
 # ################################################################################################################
 
 # ############################################################################################################################################

@@ -18,8 +18,8 @@
  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  THE SOFTWARE. */
 
- #ifndef SRC_CORE_NON_GFXIP_COUNTERS_MMIO_H
- #define SRC_CORE_NON_GFXIP_COUNTERS_MMIO_H
+#ifndef SRC_CORE_NON_GFXIP_COUNTERS_MMIO_H
+#define SRC_CORE_NON_GFXIP_COUNTERS_MMIO_H
 
 #include <hsa/hsa.h>
 #include "src/core/hardware/hsa_info.h"
@@ -36,13 +36,14 @@ namespace rocmtools {
 namespace mmio {
 
 #define FUNCTION_START() PrintFunctionPhase(__FUNCTION__, 0)
-#define FUNCTION_END()  PrintFunctionPhase(__FUNCTION__, 1)
+#define FUNCTION_END() PrintFunctionPhase(__FUNCTION__, 1)
 
 // uncomment below to see register write sequences
 // #define DEBUG_TRACE = 1
 
 void PrintFunctionPhase(const char* function_name, int phase);
-void PrintRegisterData(uint32_t& index_value, uint32_t& data_value, const char* function_name, int phase);
+void PrintRegisterData(uint32_t& index_value, uint32_t& data_value, const char* function_name,
+                       int phase);
 
 // Index/Data registers
 const static uint32_t INDIRECT_REG_INDEX = 0x38;
@@ -53,50 +54,58 @@ typedef enum { DEFAULT_MMAP, DF_PERFMON, UMC_PERFMON, PCIE_PERFMON } mmap_type_t
 class MMIOManager;
 
 class MMIO {
-   public:
-    virtual bool RegisterWriteAPI(uint32_t reg_offset, uint32_t value);
-    virtual bool RegisterReadAPI(uint32_t reg_offset, uint32_t& value);
-    virtual void SetIndexDataRegisters(const uint32_t index_reg, const uint32_t data_reg) {
-        index_reg_addr = (uint32_t*)((char*)pci_memory_ + index_reg);
-        data_reg_addr = (uint32_t*)((char*)pci_memory_ + data_reg);
-    }
+ public:
+  virtual bool RegisterWriteAPI(uint32_t reg_offset, uint32_t value);
+  virtual bool RegisterReadAPI(uint32_t reg_offset, uint32_t& value);
+  virtual void SetIndexDataRegisters(const uint32_t index_reg, const uint32_t data_reg) {
+    index_reg_addr = (uint32_t*)((char*)pci_memory_ + index_reg);
+    data_reg_addr = (uint32_t*)((char*)pci_memory_ + data_reg);
+  }
 
-    MMIO(MMIO& other) = delete;
-    void operator=(const MMIO&) = delete;
-    virtual ~MMIO();
-    friend class MMIOManager;
+  MMIO(MMIO& other) = delete;
+  void operator=(const MMIO&) = delete;
+  virtual ~MMIO();
+  friend class MMIOManager;
 
-    const Agent::AgentInfo& GetAgentInfo() { return *agent_info_; }
-    mmap_type_t Type() { return type_; }
+  const Agent::AgentInfo& GetAgentInfo() { return *agent_info_; }
+  mmap_type_t Type() { return type_; }
 
-   protected:
-    MMIO(const Agent::AgentInfo& info);
+ protected:
+  MMIO(const Agent::AgentInfo& info);
 
-    // default constructor; helpful for derived classes 
-    // which want to setup mmio construction differently  
-    MMIO(){ type_ = DEFAULT_MMAP; };
+  // default constructor; helpful for derived classes
+  // which want to setup mmio construction differently
+  MMIO() { type_ = DEFAULT_MMAP; };
 
-    const Agent::AgentInfo* agent_info_;
-    struct pci_device* pci_device_;
-    size_t pci_memory_size_;
-    uint32_t* pci_memory_;
-    mmap_type_t type_;
+  const Agent::AgentInfo* agent_info_;
+  struct pci_device* pci_device_;
+  size_t pci_memory_size_;
+  uint32_t* pci_memory_;
+  mmap_type_t type_;
 
-    uint32_t* index_reg_addr;
-    uint32_t* data_reg_addr;
+  uint32_t* index_reg_addr;
+  uint32_t* data_reg_addr;
 };
 
-// PciePerfmonMMIO has same mmio setup approach as 
+// PciePerfmonMMIO has same mmio setup approach as
 // done in MMIO class
-class PciePerfmonMMIO : public MMIO{
-   public:
-    friend class MMIOManager;
-   protected:
-    PciePerfmonMMIO(const Agent::AgentInfo& info): MMIO(info) {
-      type_ = PCIE_PERFMON;
-    };
+class PciePerfmonMMIO : public MMIO {
+ public:
+  friend class MMIOManager;
+
+ protected:
+  PciePerfmonMMIO(const Agent::AgentInfo& info) : MMIO(info) { type_ = PCIE_PERFMON; };
 };
 
+// DFPerfmonMMIO has same mmio setup approach as
+// done in MMIO class
+class DFPerfmonMMIO : public MMIO {
+ public:
+  friend class MMIOManager;
+
+ protected:
+  DFPerfmonMMIO(const Agent::AgentInfo& info) : MMIO(info) { type_ = DF_PERFMON; };
+};
 /*
     Class to manage mmio for UMC/DF/PCIe etc.
     The mmio approach for the different IPs may
@@ -104,11 +113,12 @@ class PciePerfmonMMIO : public MMIO{
     the same mmio and index/data registers
 */
 class MMIOManager {
-   public:
-    static MMIO* CreateMMIO(mmap_type_t type, const Agent::AgentInfo& info);
-    static MMIO* GetMMIOInstance(mmap_type_t type, const Agent::AgentInfo& info);
-    static void DestroyMMIOInstance(MMIO* instance);
-  private:
+ public:
+  static MMIO* CreateMMIO(mmap_type_t type, const Agent::AgentInfo& info);
+  static MMIO* GetMMIOInstance(mmap_type_t type, const Agent::AgentInfo& info);
+  static void DestroyMMIOInstance(MMIO* instance);
+
+ private:
   static void AddInstance(MMIO* instance);
   static std::map<decltype(hsa_agent_t::handle), std::vector<MMIO*>> mmio_instances_;
 };

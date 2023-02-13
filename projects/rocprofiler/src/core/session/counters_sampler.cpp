@@ -22,23 +22,23 @@
 #include "src/core/hsa/hsa_support.h"
 #include "src/api/rocmtool.h"
 #include "src/core/counters/mmio/pcie_counters_mi200.h"
+#include "src/core/counters/mmio/df_counters_mi200.h"
 
 namespace rocmtools {
 
-CountersSampler::CountersSampler(
- rocprofiler_buffer_id_t buffer_id,
- rocprofiler_filter_id_t filter_id,
- rocprofiler_session_id_t session_id)
-: buffer_id_(buffer_id)
-, filter_id_(filter_id)
-, session_id_(session_id)
-, pci_system_initialized_(pci_system_init() == 0)
+CountersSampler::CountersSampler(rocprofiler_buffer_id_t buffer_id,
+                                 rocprofiler_filter_id_t filter_id,
+                                 rocprofiler_session_id_t session_id)
+    : buffer_id_(buffer_id),
+      filter_id_(filter_id),
+      session_id_(session_id),
+      pci_system_initialized_(pci_system_init() == 0)
 
 {
   params_ = rocmtools::GetROCMToolObj()
-             ->GetSession(session_id_)
-             ->GetFilter(filter_id_)
-             ->GetCountersSamplerParameterData();
+                ->GetSession(session_id_)
+                ->GetFilter(filter_id_)
+                ->GetCountersSamplerParameterData();
 
   std::vector<hsa_agent_t> agents;
   rocmtools::hsa_support::GetCoreApiTable().hsa_iterate_agents_fn(
@@ -57,15 +57,30 @@ CountersSampler::CountersSampler(
   // PCIE counters
   std::vector<std::string> pcie_counter_names;
   for (int i = 0; i < params_.counters_num; i++) {
-    if(params_.counters[i].type == ROCPROFILER_COUNTERS_SAMPLER_PCIE_COUNTERS)
+    if (params_.counters[i].type == ROCPROFILER_COUNTERS_SAMPLER_PCIE_COUNTERS)
       pcie_counter_names.push_back(params_.counters[i].name);
   }
 
   if (pcie_counter_names.size() > 0) {
     auto agentInfo = rocmtools::hsa_support::GetAgentInfo(agents[params_.gpu_agent_index].handle);
-    if(agentInfo.getName() == "gfx90a"){
+    if (agentInfo.getName() == "gfx90a") {
       PciePerfMonMI200* perfmon = new PciePerfMonMI200(agentInfo);
       perfmon->SetCounterNames(pcie_counter_names);
+      perfmon_instances_.push_back(perfmon);
+    }
+  }
+  // XGMI counters
+  std::vector<std::string> xgmi_counter_names;
+  for (int i = 0; i < params_.counters_num; i++) {
+    if (params_.counters[i].type == ROCPROFILER_COUNTERS_SAMPLER_XGMI_COUNTERS)
+      xgmi_counter_names.push_back(params_.counters[i].name);
+  }
+
+  if (xgmi_counter_names.size() > 0) {
+    auto agentInfo = rocmtools::hsa_support::GetAgentInfo(agents[params_.gpu_agent_index].handle);
+    if (agentInfo.getName() == "gfx90a") {
+      DFPerfMonMI200* perfmon = new DFPerfMonMI200(agentInfo);
+      perfmon->SetCounterNames(xgmi_counter_names);
       perfmon_instances_.push_back(perfmon);
     }
   }
@@ -73,9 +88,8 @@ CountersSampler::CountersSampler(
 
 CountersSampler::~CountersSampler() {
   // cleanup perfmon instancess
-    for (auto &perfmon : perfmon_instances_) {
-      if(perfmon != nullptr)
-        delete perfmon;
+  for (auto& perfmon : perfmon_instances_) {
+    if (perfmon != nullptr) delete perfmon;
   }
   // clean up libpcieaccess resources
   // TODO: should be part of mmio class in future
@@ -86,7 +100,9 @@ CountersSampler::~CountersSampler() {
 }
 
 void CountersSampler::Start() {
-  if (sampler_thread_.joinable()) { return; }
+  if (sampler_thread_.joinable()) {
+    return;
+  }
 
   std::cout << "Sampler Start\n";
   // Start all Perfmons
@@ -100,7 +116,9 @@ void CountersSampler::Start() {
 }
 
 void CountersSampler::Stop() {
-  if (!sampler_thread_.joinable()) { return; }
+  if (!sampler_thread_.joinable()) {
+    return;
+  }
 
   std::cout << "Sampler Stop\n";
   // Stop all Perfmons
@@ -113,20 +131,17 @@ void CountersSampler::Stop() {
   sampler_thread_.join();
 }
 
-void CountersSampler::AddRecord(rocprofiler_record_counters_sampler_t &record) {
+void CountersSampler::AddRecord(rocprofiler_record_counters_sampler_t& record) {
   const auto tool = rocmtools::GetROCMToolObj();
   const auto session = tool->GetSession(session_id_);
   const auto buffer = session->GetBuffer(buffer_id_);
 
   std::lock_guard<std::mutex> lk(session->GetSessionLock());
 
-  record.header = {
-    ROCPROFILER_COUNTERS_SAMPLER_RECORD,
-    { tool->GetUniqueRecordId() }
-  };
+  record.header = {ROCPROFILER_COUNTERS_SAMPLER_RECORD, {tool->GetUniqueRecordId()}};
 
-  // Add the record to the buffer(a deep-copy operation) along with 
-  // a lambda function to deep-copy the record.counters member to 
+  // Add the record to the buffer(a deep-copy operation) along with
+  // a lambda function to deep-copy the record.counters member to
   // the newly created buffer record
   buffer->AddRecord(
       record, record.counters,
@@ -139,7 +154,7 @@ void CountersSampler::AddRecord(rocprofiler_record_counters_sampler_t &record) {
 
 void CountersSampler::SamplerLoop() {
   std::this_thread::sleep_until(std::chrono::steady_clock::now() +
-                                    std::chrono::milliseconds(params_.initial_delay));
+                                std::chrono::milliseconds(params_.initial_delay));
   uint32_t elapsed = 0;
   while (keep_running_ && (elapsed <= params_.sampling_duration)) {
     auto next_tick =
@@ -147,12 +162,11 @@ void CountersSampler::SamplerLoop() {
 
     rocprofiler_record_counters_sampler_t record;
     std::vector<rocprofiler_counters_sampler_counter_output_t> values;
-    for (auto& perfmon : perfmon_instances_){
+    for (auto& perfmon : perfmon_instances_) {
       perfmon->Read(values);
     }
-    record.counters =
-        static_cast<rocprofiler_counters_sampler_counter_output_t*>(
-            malloc(values.size() * sizeof(rocprofiler_counters_sampler_counter_output_t)));
+    record.counters = static_cast<rocprofiler_counters_sampler_counter_output_t*>(
+        malloc(values.size() * sizeof(rocprofiler_counters_sampler_counter_output_t)));
     ::memcpy(record.counters, &(values)[0],
              values.size() * sizeof(rocprofiler_counters_sampler_counter_output_t));
     record.num_counters = values.size();
@@ -165,4 +179,4 @@ void CountersSampler::SamplerLoop() {
   }
 }
 
-} // namespace rocmtools
+}  // namespace rocmtools

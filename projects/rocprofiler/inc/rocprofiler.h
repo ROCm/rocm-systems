@@ -1904,7 +1904,8 @@ typedef struct {
 } rocprofiler_spm_parameter_t;
 
 typedef enum{
-  ROCPROFILER_COUNTERS_SAMPLER_PCIE_COUNTERS = 0
+  ROCPROFILER_COUNTERS_SAMPLER_PCIE_COUNTERS = 0,
+  ROCPROFILER_COUNTERS_SAMPLER_XGMI_COUNTERS = 1
 } rocprofiler_counters_sampler_counter_type_t;
 
 typedef struct{
