@@ -96,9 +96,7 @@ for filename in glob.iglob(srcDir + "/**", recursive=True):
         tmpFile = dirName + "/." + baseName + ".tmp"
 
         file_out = open(tmpFile, "w")
-
         for line in file_in:
-
             if re.search(begDelim, line):
                 logging.debug("Found beginning delimiter")
                 file_out.write(line)
