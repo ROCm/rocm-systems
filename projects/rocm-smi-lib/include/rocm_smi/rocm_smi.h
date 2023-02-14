@@ -3540,12 +3540,13 @@ rsmi_is_P2P_accessible(uint32_t dv_ind_src, uint32_t dv_ind_dst,
  *  which the device's current compute partition will be written to.
  *
  *  @param[in] len the length of the caller provided buffer @p compute_partition
+ *  , suggested length is 4 or greater.
  *
  *  @retval ::RSMI_STATUS_SUCCESS call was successful
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  *  @retval ::RSMI_STATUS_UNEXPECTED_DATA data provided to function is not valid
  *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
- *  support this function with the given arguments
+ *  support this function
  *  @retval ::RSMI_STATUS_INSUFFICIENT_SIZE is returned if @p len bytes is not
  *  large enough to hold the entire compute partition value. In this case,
  *  only @p len bytes will be written.
@@ -3572,12 +3573,29 @@ rsmi_dev_compute_partition_get(uint32_t dv_ind, char *compute_partition,
  *  @retval ::RSMI_STATUS_PERMISSION function requires root access
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
- *  support this function with the given arguments
+ *  support this function
  *
  */
 rsmi_status_t
 rsmi_dev_compute_partition_set(uint32_t dv_ind,
                                rsmi_compute_partition_type_t compute_partition);
+
+/**
+ *  @brief Reverts a selected device's compute partition setting back to its
+ *  boot state.
+ *
+ *  @details Given a device index @p dv_ind , this function will attempt to
+ *  revert its compute partition setting back to its boot state.
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful
+ *  @retval ::RSMI_STATUS_PERMISSION function requires root access
+ *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
+ *  support this function
+ *
+ */
+rsmi_status_t rsmi_dev_compute_partition_reset(uint32_t dv_ind);
 
 /** @} */  // end of ComputePartition
 
@@ -3609,7 +3627,7 @@ rsmi_dev_compute_partition_set(uint32_t dv_ind,
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  *  @retval ::RSMI_STATUS_UNEXPECTED_DATA data provided to function is not valid
  *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
- *  support this function with the given arguments
+ *  support this function
  *  @retval ::RSMI_STATUS_INSUFFICIENT_SIZE is returned if @p len bytes is not
  *  large enough to hold the entire nps mode value. In this case,
  *  only @p len bytes will be written.
@@ -3634,13 +3652,32 @@ rsmi_dev_nps_mode_get(uint32_t dv_ind, char *nps_mode, uint32_t len);
  *  @retval ::RSMI_STATUS_PERMISSION function requires root access
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
- *  support this function with the given arguments
+ *  support this function
  *  @retval ::RSMI_STATUS_AMDGPU_RESTART_ERR could not successfully restart
  *  the amdgpu driver
  *
  */
 rsmi_status_t
 rsmi_dev_nps_mode_set(uint32_t dv_ind, rsmi_nps_mode_type_t nps_mode);
+
+/**
+ *  @brief Reverts a selected device's NPS mode setting back to its
+ *  boot state.
+ *
+ *  @details Given a device index @p dv_ind , this function will attempt to
+ *  revert its NPS mode setting back to its boot state.
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful
+ *  @retval ::RSMI_STATUS_PERMISSION function requires root access
+ *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
+ *  support this function
+ *  @retval ::RSMI_STATUS_AMDGPU_RESTART_ERR could not successfully restart
+ *  the amdgpu driver
+ *
+ */
+rsmi_status_t rsmi_dev_nps_mode_reset(uint32_t dv_ind);
 
 /** @} */  // end of NPSMode
 

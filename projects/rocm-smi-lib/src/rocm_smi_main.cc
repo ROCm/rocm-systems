@@ -373,6 +373,7 @@ RocmSMI::Initialize(uint64_t flags) {
   // 1. construct kfd_node_map_ with gpu_id as key and *Device as value
   // 2. for each kfd node, write the corresponding dv_ind
   // 3. for each amdgpu device, write the corresponding gpu_id
+  // 4. for each amdgpu device, attempt to store it's boot partition
   for (uint32_t dv_ind = 0; dv_ind < devices_.size(); ++dv_ind) {
     dev = devices_[dv_ind];
     uint64_t bdfid = dev->bdfid();
@@ -387,7 +388,12 @@ RocmSMI::Initialize(uint64_t flags) {
     uint64_t gpu_id = tmp_map[bdfid]->gpu_id();
     dev->set_kfd_gpu_id(gpu_id);
     kfd_node_map_[gpu_id] = tmp_map[bdfid];
+
+    // store each device boot partition state, if file doesn't exist
+    dev->storeDevicePartitions(dv_ind);
   }
+  // Leaving below to help debug temp file issues
+  // displayAppTmpFilesContent();
 }
 
 void

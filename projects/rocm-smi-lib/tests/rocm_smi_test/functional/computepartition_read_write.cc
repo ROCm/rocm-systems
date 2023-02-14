@@ -269,13 +269,13 @@ void TestComputePartitionReadWrite::Run(void) {
                   << computePartitionString(new_computePartition)
                   << " ===============" << std::endl;
       }
-      ret = rsmi_dev_compute_partition_set(dv_ind, new_computePartition);
-      CHK_ERR_ASRT(ret)
       IF_VERB(STANDARD) {
         std::cout << "\t**"
                   << "Attempting to set compute partition to: "
                   << computePartitionString(new_computePartition) << std::endl;
       }
+      ret = rsmi_dev_compute_partition_set(dv_ind, new_computePartition);
+      CHK_ERR_ASRT(ret)
       ret = rsmi_dev_compute_partition_get(dv_ind, current_char_computePartition,
                                           255);
       CHK_ERR_ASRT(ret)
@@ -288,6 +288,46 @@ void TestComputePartitionReadWrite::Run(void) {
       EXPECT_EQ(RSMI_STATUS_SUCCESS, ret);
       EXPECT_STREQ(computePartitionString(new_computePartition).c_str(),
                    current_char_computePartition);
+    }
+
+     /* TEST RETURN TO BOOT COMPUTE PARTITION SETTING */
+    IF_VERB(STANDARD) {
+      std::cout << std::endl;
+      std::cout << "\t**"
+                << "=========== TEST RETURN TO BOOT COMPUTE PARTITION SETTING "
+                << "========" << std::endl;
+    }
+    std::string oldPartition = current_char_computePartition;
+    bool wasResetSuccess = false;
+    ret = rsmi_dev_compute_partition_reset(dv_ind);
+    ASSERT_TRUE((ret == RSMI_STATUS_SUCCESS) ||
+                (ret == RSMI_STATUS_NOT_SUPPORTED));
+    if (ret == RSMI_STATUS_SUCCESS) {
+      wasResetSuccess = true;
+    }
+    ret = rsmi_dev_compute_partition_get(dv_ind, current_char_computePartition,
+                                        255);
+    CHK_ERR_ASRT(ret)
+    IF_VERB(STANDARD) {
+      std::cout << "\t**"
+                << "Current compute partition: " << current_char_computePartition << std::endl;
+    }
+    if (wasResetSuccess) {
+      ASSERT_STRNE(oldPartition.c_str(), current_char_computePartition);
+      IF_VERB(STANDARD) {
+      std::cout << "\t**"
+                << "Confirmed prior partition (" << oldPartition << ") is not "
+                << "equal to current partition ("
+                << current_char_computePartition << ")" << std::endl;
+      }
+    } else {
+      ASSERT_STREQ(oldPartition.c_str(), current_char_computePartition);
+      IF_VERB(STANDARD) {
+      std::cout << "\t**"
+                << "Confirmed prior partition (" << oldPartition << ") is equal"
+                << " to current partition ("
+                << current_char_computePartition << ")" << std::endl;
+      }
     }
 
     /* TEST RETURN TO ORIGINAL COMPUTE PARTITIONING SETTING */

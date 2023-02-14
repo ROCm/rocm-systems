@@ -83,11 +83,13 @@
   } \
 }
 
-#define CHK_RSMI_PERM_RET(RET) { \
+#define CHK_FILE_PERMISSIONS(RET) { \
     if ((RET) == RSMI_STATUS_PERMISSION) { \
-      std::cout << "This command requires root access." << std::endl; \
+      if (isFileWritable(RET)) { \
+        CHK_RSMI_RET(RET) \
+      } \
     } else { \
-      CHK_RSMI_RET_I(RET) \
+      CHK_RSMI_RET(RET) \
     } \
 }
 
@@ -229,7 +231,7 @@ static bool isUserRunningAsSudo() {
   bool isRunningWithSudo = false;
   auto myUID = getuid();
   auto myPrivledges = geteuid();
-  if (myUID == myPrivledges) {
+  if ((myUID == myPrivledges) && (myPrivledges == 0)) {
     isRunningWithSudo = true;
   }
   return isRunningWithSudo;
@@ -243,7 +245,6 @@ static bool isFileWritable(rsmi_status_t response) {
   // response situation.
   bool fileWritable = true;
   if (isUserRunningAsSudo() && (response == RSMI_STATUS_PERMISSION)) {
-      PRINT_RSMI_ERR(response)
       std::cout << "[WARN] User is running with sudo "
                 << "permissions, file is not writable." << std::endl;
       fileWritable = false;
@@ -511,18 +512,18 @@ static rsmi_status_t test_set_freq(uint32_t dv_ind) {
         " to 0b" << freq_bm_str << " ..." << std::endl;
 
     ret = rsmi_dev_gpu_clk_freq_set(dv_ind, rsmi_clk, freq_bitmask);
-    isFileWritable(ret);
+    CHK_FILE_PERMISSIONS(ret)
 
     ret = rsmi_dev_gpu_clk_freq_get(dv_ind, rsmi_clk, &f);
-    CHK_AND_PRINT_RSMI_ERR_RET(ret)
+    CHK_FILE_PERMISSIONS(ret)
 
     std::cout << "Frequency is now index " << f.current << std::endl;
     std::cout << "Resetting mask to all frequencies." << std::endl;
     ret = rsmi_dev_gpu_clk_freq_set(dv_ind, rsmi_clk, 0xFFFFFFFF);
-    isFileWritable(ret);
+    CHK_FILE_PERMISSIONS(ret)
 
     ret = rsmi_dev_perf_level_set_v1(dv_ind, RSMI_DEV_PERF_LEVEL_AUTO);
-    isFileWritable(ret);
+    CHK_FILE_PERMISSIONS(ret)
   }
   std::cout << std::endl;
   return RSMI_STATUS_SUCCESS;
@@ -576,15 +577,20 @@ static rsmi_status_t test_set_compute_partitioning(uint32_t dv_ind) {
     std::cout << std::endl << std::endl;
   }
 
+  std::cout << "About to initate compute partition reset..." << std::endl;
+  ret = rsmi_dev_compute_partition_reset(dv_ind);
+  CHK_RSMI_NOT_SUPPORTED_RET(ret)
+  std::cout << "Done resetting compute partition." << std::endl;
+
   std::string myComputePartition = originalComputePartition;
   if (myComputePartition.empty() == false) {
-    std::cout << "Resetting compute partition to " << originalComputePartition
-              << "... " << std::endl;
+    std::cout << "Resetting back to original compute partition to "
+              << originalComputePartition << "... " << std::endl;
     rsmi_compute_partition_type origComputePartitionType
       = mapStringToRSMIComputePartitionTypes[originalComputePartition];
+    ret = rsmi_dev_compute_partition_set(dv_ind, origComputePartitionType);
     CHK_RSMI_NOT_SUPPORTED_RET(ret)
     std::cout << "Done" << std::endl;
-    ret = rsmi_dev_compute_partition_set(dv_ind, origComputePartitionType);
   }
   return RSMI_STATUS_SUCCESS;
 }
@@ -629,15 +635,20 @@ static rsmi_status_t test_set_nps_mode(uint32_t dv_ind) {
     std::cout << std::endl << std::endl;
   }
 
+  std::cout << "About to initate nps mode reset..." << std::endl;
+  ret = rsmi_dev_nps_mode_reset(dv_ind);
+  CHK_RSMI_NOT_SUPPORTED_RET(ret)
+  std::cout << "Done resetting nps mode." << std::endl;
+
   std::string myNpsMode = originalNpsMode;
   if (myNpsMode.empty() == false) {
     std::cout << "Resetting compute partition to " << originalNpsMode
               << "... " << std::endl;
     rsmi_nps_mode_type_t origNpsModeType
       = mapStringToRSMINpsModeTypes[originalNpsMode];
+    ret = rsmi_dev_nps_mode_set(dv_ind, origNpsModeType);
     CHK_RSMI_NOT_SUPPORTED_RET(ret)
     std::cout << "Done" << std::endl;
-    ret = rsmi_dev_nps_mode_set(dv_ind, origNpsModeType);
   }
   return RSMI_STATUS_SUCCESS;
 }
@@ -664,10 +675,6 @@ int main() {
     CHK_RSMI_RET_I(ret)
     std::cout << "\t**Device ID: 0x" << std::hex << val_ui64 << std::endl;
 
-    std::cout << std::endl << std::endl;
-    std::cout << "Starting to call "
-              << "rsmi_dev_compute_partition_get()..."
-              << std::endl;
     char current_compute_partition[256];
     current_compute_partition[0] = '\0';
     ret = rsmi_dev_compute_partition_get(i, current_compute_partition, 256);
@@ -679,10 +686,6 @@ int main() {
                   ? "UNKNOWN" : current_compute_partition)
               << std::endl;
 
-    std::cout << std::endl << std::endl;
-    std::cout << "Starting to call "
-              << "rsmi_dev_nps_mode_get()..."
-              << std::endl;
     uint32_t len = 5;
     char nps_mode[len];
     nps_mode[0] = '\0';
@@ -764,6 +767,12 @@ int main() {
   }
 
   std::cout << "***** Testing write api's" << std::endl;
+  if (isUserRunningAsSudo() == false) {
+    std::cout << "Write APIs require users to execute with sudo. "
+              << "Cannot proceed." << std::endl;
+    return 0;
+  }
+
   for (uint32_t i = 0; i< num_monitor_devs; ++i) {
     ret = test_set_overdrive(i);
     CHK_AND_PRINT_RSMI_ERR_RET(ret)

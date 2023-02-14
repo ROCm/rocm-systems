@@ -3986,6 +3986,47 @@ rsmi_dev_nps_mode_get(uint32_t dv_ind, char *nps_mode,
   CATCH
 }
 
+rsmi_status_t rsmi_dev_compute_partition_reset(uint32_t dv_ind) {
+  TRY
+  REQUIRE_ROOT_ACCESS
+  DEVICE_MUTEX
+  GET_DEV_FROM_INDX
+  rsmi_status_t ret = RSMI_STATUS_NOT_SUPPORTED;
+  // read temp file
+  std::string bootState =
+          dev->readBootPartitionState<rsmi_compute_partition_type_t>(dv_ind);
+  // Initiate reset
+  // If bootState is UNKNOWN, we cannot reset - return RSMI_STATUS_NOT_SUPPORTED
+  // Likely due to device not supporting it
+  if (bootState != "UNKNOWN") {
+    rsmi_compute_partition_type_t compute_partition =
+                              mapStringToRSMIComputePartitionTypes[bootState];
+    ret = rsmi_dev_compute_partition_set(dv_ind, compute_partition);
+  }
+  return ret;
+  CATCH
+}
+
+rsmi_status_t rsmi_dev_nps_mode_reset(uint32_t dv_ind) {
+  TRY
+  REQUIRE_ROOT_ACCESS
+  DEVICE_MUTEX
+  GET_DEV_FROM_INDX
+  rsmi_status_t ret = RSMI_STATUS_NOT_SUPPORTED;
+  // read temp file
+  std::string bootState =
+          dev->readBootPartitionState<rsmi_nps_mode_type_t>(dv_ind);
+  // Initiate reset
+  // If bootState is UNKNOWN, we cannot reset - return RSMI_STATUS_NOT_SUPPORTED
+  // Likely due to device not supporting it
+  if (bootState != "UNKNOWN") {
+    rsmi_nps_mode_type_t nps_mode = mapStringToNPSModeTypes[bootState];
+    ret = rsmi_dev_nps_mode_set(dv_ind, nps_mode);
+  }
+  return ret;
+  CATCH
+}
+
 enum iterator_handle_type {
   FUNC_ITER = 0,
   VARIANT_ITER,

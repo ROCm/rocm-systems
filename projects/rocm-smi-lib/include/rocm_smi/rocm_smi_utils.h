@@ -66,18 +66,23 @@ namespace amd {
 namespace smi {
 
 pthread_mutex_t *GetMutex(uint32_t dv_ind);
-
 int SameFile(const std::string fileA, const std::string fileB);
 bool FileExists(char const *filename);
 int isRegularFile(std::string fname, bool *is_reg);
-
 int ReadSysfsStr(std::string path, std::string *retStr);
 int WriteSysfsStr(std::string path, std::string val);
-
 bool IsInteger(const std::string & n_str);
-
-std::pair<bool, std::string> executeCommand(std::string command, bool stdOut = true);
-
+std::pair<bool, std::string> executeCommand(std::string command,
+                                            bool stdOut = true);
+rsmi_status_t storeTmpFile(uint32_t dv_ind, std::string parameterName,
+                           std::string stateName, std::string storageData);
+std::vector<std::string> getListOfAppTmpFiles();
+bool containsString(std::string originalString, std::string substring);
+std::tuple<bool, std::string> readTmpFile(
+                                          uint32_t dv_ind,
+                                          std::string stateName,
+                                          std::string parameterName);
+void displayAppTmpFilesContent(void);
 rsmi_status_t handleException();
 rsmi_status_t
 GetDevValueVec(amd::smi::DevInfoTypes type,
