@@ -341,7 +341,7 @@ set ( CPACK_RPM_RUNTIME_POST_UNINSTALL_SCRIPT_FILE "${CMAKE_CURRENT_BINARY_DIR}/
   string(REGEX REPLACE ",? ?rocm-core" "" CPACK_DEBIAN_PLUGINS_PACKAGE_DEPENDS ${CPACK_DEBIAN_PLUGINS_PACKAGE_DEPENDS})
   endif()
 
-  set(CPACK_COMPONENTS_ALL runtime dev tests docs samples plugins)
+  set(CPACK_COMPONENTS_ALL runtime dev tests docs plugins)
   include(CPack)
 
   cpack_add_component(runtime
