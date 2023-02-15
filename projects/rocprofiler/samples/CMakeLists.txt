@@ -97,39 +97,39 @@ install(TARGETS tracer_hip_hsa RUNTIME DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/
 # PC Sampling Samples
 # ############################################################################################################################################
 
-set(CODE_PRINTING_SAMPLE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/pcsampler/code_printing_sample)
-file(GLOB PC_SAMPLING_CODE_PRINTING_FILES ${CODE_PRINTING_SAMPLE_DIR}/*.cpp)
-set_source_files_properties(${PC_SAMPLING_CODE_PRINTING_FILES} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
-hip_add_executable(pc_sampling_code_printing ${PC_SAMPLING_CODE_PRINTING_FILES}
-  HIPCC_OPTIONS
-  -std=c++17
+#set(CODE_PRINTING_SAMPLE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/pcsampler/code_printing_sample)
+#file(GLOB PC_SAMPLING_CODE_PRINTING_FILES ${CODE_PRINTING_SAMPLE_DIR}/*.cpp)
+#set_source_files_properties(${PC_SAMPLING_CODE_PRINTING_FILES} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+#hip_add_executable(pc_sampling_code_printing ${PC_SAMPLING_CODE_PRINTING_FILES}
+#  HIPCC_OPTIONS
+#  -std=c++17
   # Include debugging symbols and source for the contextual disassembly
-  -gdwarf-4)
+#  -gdwarf-4)
 
-check_c_source_compiles("
+#check_c_source_compiles("
   #define _GNU_SOURCE
   #include <sys/mman.h>
-  int main() { return memfd_create (\"cmake_test\", 0); }
-  " HAVE_MEMFD_CREATE)
-if (HAVE_MEMFD_CREATE)
-  target_compile_definitions(pc_sampling_code_printing PRIVATE HAVE_MEMFD_CREATE)
-endif()
+  #  int main() { return memfd_create (\"cmake_test\", 0); }
+  #" HAVE_MEMFD_CREATE)
+  #if (HAVE_MEMFD_CREATE)
+  #target_compile_definitions(pc_sampling_code_printing PRIVATE HAVE_MEMFD_CREATE)
+  #endif()
 
-target_link_libraries(pc_sampling_code_printing
-  PRIVATE
-  ${ROCPROFILER_TARGET}
-  rocm-dbgapi
-  ${LIBELF_LIBRARIES}
-  ${LIBDW_LIBRARIES}
-  hsa-runtime64::hsa-runtime64 Threads::Threads dl)
-target_include_directories(pc_sampling_code_printing
-  PRIVATE
+  #target_link_libraries(pc_sampling_code_printing
+  #PRIVATE
+  #${ROCPROFILER_TARGET}
+  #rocm-dbgapi
+  #${LIBELF_LIBRARIES}
+  #${LIBDW_LIBRARIES}
+  #hsa-runtime64::hsa-runtime64 Threads::Threads dl)
+  #target_include_directories(pc_sampling_code_printing
+  #PRIVATE
   # INTERFACE_INCLUDE_DIRECTORIES
-  ${TEST_DIR}
-  ${ROOT_DIR}
-  ${HSA_RUNTIME_INC_PATH}
-  ${PROJECT_SOURCE_DIR})
-add_dependencies(samples pc_sampling_code_printing)
+  #${TEST_DIR}
+  #${ROOT_DIR}
+  #${HSA_RUNTIME_INC_PATH}
+  #${PROJECT_SOURCE_DIR})
+  #add_dependencies(samples pc_sampling_code_printing)
 # install(TARGETS pc_sampling_code_printing RUNTIME DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/samples COMPONENT samples)
 
 # ############################################################################################################################################
