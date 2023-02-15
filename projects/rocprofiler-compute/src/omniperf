@@ -343,7 +343,7 @@ def characterize_app(path, cmd, verbose):
     # Workload profiling
     for fname in glob.glob(workload_dir + "/perfmon/*.txt"):
         print(fname)
-        run_prof(fname, workload_dir, perfmon_dir, app_cmd, verbose)
+        run_prof(fname, workload_dir, perfmon_dir, app_cmd, target, verbose)
     # run again with timestamps
     run_subprocess(
         [
@@ -395,7 +395,7 @@ def run_rocscope(args, fname):
                 sys.exit(1)
 
 
-def run_prof(fname, workload_dir, perfmon_dir, cmd, verbose):
+def run_prof(fname, workload_dir, perfmon_dir, cmd, target, verbose):
     global rocprof_cmd
 
     fbase = os.path.splitext(os.path.basename(fname))[0]
@@ -403,19 +403,36 @@ def run_prof(fname, workload_dir, perfmon_dir, cmd, verbose):
     if verbose:
         print("pmc file:", os.path.basename(fname))
 
-    # profile the app
-    run_subprocess(
-        [
-            rocprof_cmd,
-            "-i",
-            fname,
-            "--timestamp",
-            "on",
-            "-o",
-            workload_dir + "/" + fbase + ".csv",
-            '"' + cmd + '"',
-        ]
-    )
+    # profile the app (run w/ custom config files for mi100)
+    if target == "mi100":
+        print("RUNNING WITH CUSTOM METRICS")
+        run_subprocess(
+            [
+                rocprof_cmd,
+                "-i",
+                fname,
+                "-m",
+                perfmon_dir + "/" + "metrics.xml",
+                "--timestamp",
+                "on",
+                "-o",
+                workload_dir + "/" + fbase + ".csv",
+                '"' + cmd + '"',
+            ]
+        )
+    else:
+        run_subprocess(
+            [
+                rocprof_cmd,
+                "-i",
+                fname,
+                "--timestamp",
+                "on",
+                "-o",
+                workload_dir + "/" + fbase + ".csv",
+                '"' + cmd + '"',
+            ]
+        )
 
 
 def omniperf_profile(args, VER):
@@ -545,7 +562,7 @@ def omniperf_profile(args, VER):
             if args.use_rocscope == True:
                 run_rocscope(args, fname)
             else:
-                run_prof(fname, workload_dir, perfmon_dir, args.remaining, args.verbose)
+                run_prof(fname, workload_dir, perfmon_dir, args.remaining, args.target, args.verbose)
 
         # run again with timestamps
         run_subprocess(
