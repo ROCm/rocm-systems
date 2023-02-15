@@ -35,7 +35,9 @@
 #include <timemory/backends/process.hpp>
 #include <timemory/hash/types.hpp>
 #include <timemory/mpl/concepts.hpp>
+#include <timemory/mpl/type_traits.hpp>
 #include <timemory/utility/procfs/maps.hpp>
+#include <timemory/utility/types.hpp>
 
 #include <cstdlib>
 #include <sstream>
@@ -504,7 +506,8 @@ extern "C"
         _data.back().audit(dst_handle, dst_name, dst_ptr, src_handle, src_name, src_ptr,
                            size);
         _data.back().start();
-        _data.back().store(std::plus<int64_t>{}, size);
+        _data.back().store(tim::mpl::piecewise_select<kokkosp::memory_tracker>{},
+                           std::plus<int64_t>{}, size);
     }
 
     void kokkosp_end_deep_copy()
@@ -514,7 +517,8 @@ extern "C"
         kokkosp::logger_t{}.mark(-1, __FUNCTION__);
         auto& _data = kokkosp::get_profiler_stack<kokkosp_region>();
         if(_data.empty()) return;
-        _data.back().store(std::minus<int64_t>{}, 0);
+        _data.back().store(tim::mpl::piecewise_select<kokkosp::memory_tracker>{},
+                           std::minus<int64_t>{}, 0);
         _data.back().stop();
         _data.pop_back();
     }
