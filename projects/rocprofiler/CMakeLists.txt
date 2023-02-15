@@ -139,7 +139,7 @@ add_subdirectory(src)
 
 if(${LIBRARY_TYPE} STREQUAL SHARED)
   ## Build samples
-  add_subdirectory(samples)
+  #add_subdirectory(samples)
 
   ## Build tests
   add_subdirectory(tests)
