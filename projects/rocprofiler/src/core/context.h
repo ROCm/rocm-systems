@@ -436,7 +436,8 @@ class Context {
       if (kind == ROCPROFILER_FEATURE_KIND_METRIC) {  // Processing metrics features
         const Metric* metric = metrics_->Get(name);
         if (metric == NULL)
-          EXC_RAISING(HSA_STATUS_ERROR, "input metric '" << name << "' is not found");
+          EXC_RAISING(HSA_STATUS_ERROR, "input metric '" << name << "' is not supported on this hardware: "
+          << agent_info_->name);
 #if 0
         std::cout << "    " << name << (metric->GetExpr() ? " = " + metric->GetExpr()->String() : " counter") << std::endl;
 #endif

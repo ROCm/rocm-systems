@@ -1,6 +1,6 @@
 #include "eval_metrics.h"
 #include "src/utils/helper.h"
-
+#include "src/core/hsa/hsa_common.h"
 #include <set>
 
 using namespace rocmtools;
@@ -92,7 +92,12 @@ bool metrics::ExtractMetricEvents(
       // TODO: saurabh
       //   const Metric* metric = metrics_dict->GetMetricByName(metric_names[i]);
       const Metric* metric = metrics_dict->Get(metric_names[i]);
-      if (metric == nullptr) fatal("input metric'%s' not found", metric_names[i].c_str());
+      if (metric == nullptr) {
+          Agent::AgentInfo& agentInfo = rocmtools::hsa_support::GetAgentInfo(gpu_agent.handle);
+          fatal("input metric'%s' not supported on this hardware: %s ", metric_names[i].c_str(), 
+          agentInfo.getName().data());
+
+      } 
 
       // adding result object for derived metric
       std::lock_guard<std::mutex> lock(extract_metric_events_lock);
