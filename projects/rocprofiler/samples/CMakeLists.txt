@@ -130,7 +130,7 @@ target_include_directories(pc_sampling_code_printing
   ${HSA_RUNTIME_INC_PATH}
   ${PROJECT_SOURCE_DIR})
 add_dependencies(samples pc_sampling_code_printing)
-install(TARGETS pc_sampling_code_printing RUNTIME DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/samples COMPONENT samples)
+# install(TARGETS pc_sampling_code_printing RUNTIME DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/samples COMPONENT samples)
 
 # ############################################################################################################################################
 # Scripts to run samples
