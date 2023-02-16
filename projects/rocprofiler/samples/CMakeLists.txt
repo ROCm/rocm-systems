@@ -128,7 +128,6 @@ check_c_source_compiles("
   hsa-runtime64::hsa-runtime64 Threads::Threads dl)
   target_include_directories(pc_sampling_code_printing
   PRIVATE
-   INTERFACE_INCLUDE_DIRECTORIES
   ${TEST_DIR}
   ${ROOT_DIR}
   ${HSA_RUNTIME_INC_PATH}

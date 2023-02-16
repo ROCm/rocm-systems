@@ -45,16 +45,6 @@ if ( DEFINED ENV{CMAKE_LD_AQLPROFILE} )
   add_definitions ( -DROCP_LD_AQLPROFILE=1 )
 endif()
 
-## Make env vars
-if ( NOT DEFINED CMAKE_BUILD_TYPE OR "${CMAKE_BUILD_TYPE}" STREQUAL "" )
-  if ( DEFINED ENV{CMAKE_BUILD_TYPE} )
-    set ( CMAKE_BUILD_TYPE $ENV{CMAKE_BUILD_TYPE} )
-  endif()
-endif()
-if ( NOT DEFINED CMAKE_PREFIX_PATH AND DEFINED ENV{CMAKE_PREFIX_PATH} )
-  set ( CMAKE_PREFIX_PATH $ENV{CMAKE_PREFIX_PATH} )
-endif()
-
 ## Find hsa-runtime
 find_package(hsa-runtime64 CONFIG REQUIRED HINTS ${CMAKE_INSTALL_PREFIX} PATHS /opt/rocm PATH_SUFFIXES lib/cmake/hsa-runtime64 )
 
