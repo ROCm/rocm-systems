@@ -3,7 +3,7 @@
  * The University of Illinois/NCSA
  * Open Source License (NCSA)
  *
- * Copyright (c) 2018, Advanced Micro Devices, Inc.
+ * Copyright (c) 2018-2023, Advanced Micro Devices, Inc.
  * All rights reserved.
  *
  * Developed by:
@@ -75,6 +75,8 @@ int ReadSysfsStr(std::string path, std::string *retStr);
 int WriteSysfsStr(std::string path, std::string val);
 
 bool IsInteger(const std::string & n_str);
+
+std::pair<bool, std::string> executeCommand(std::string command, bool stdOut = true);
 
 rsmi_status_t handleException();
 rsmi_status_t

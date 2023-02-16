@@ -5,7 +5,7 @@
  * The University of Illinois/NCSA
  * Open Source License (NCSA)
  *
- * Copyright (c) 2017, Advanced Micro Devices, Inc.
+ * Copyright (c) 2017-2023, Advanced Micro Devices, Inc.
  * All rights reserved.
  *
  * Developed by:
@@ -113,6 +113,7 @@ class RocmSMI {
                            uint64_t *weight);
     int get_node_index(uint32_t dv_ind, uint32_t *node_ind);
     const RocmSMI_env_vars& getEnv(void);
+    void printEnvVarInfo(void);
     static const std::map<amd::smi::DevInfoTypes, std::string> devInfoTypesStrings;
 
  private:

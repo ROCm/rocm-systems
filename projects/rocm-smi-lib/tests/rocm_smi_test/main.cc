@@ -87,6 +87,7 @@
 #include "rocm_smi_test/functional/gpu_metrics_read.h"
 #include "rocm_smi_test/functional/metrics_counter_read.h"
 #include "rocm_smi_test/functional/perf_determinism.h"
+#include "functional/npsmode_read_write.h"
 
 static RSMITstGlobals *sRSMIGlvalues = nullptr;
 
@@ -277,7 +278,11 @@ TEST(rsmitstReadWrite, TestComputePartitionReadWrite) {
   TestComputePartitionReadWrite tst;
   RunGenericTest(&tst);
 }
-TEST(rsmitstReadOnly, TestConcurrentInit) {
+TEST(rsmitstReadWrite, TestNPSModeReadWrite) {
+  TestNPSModeReadWrite tst;
+  RunGenericTest(&tst);
+}
+TEST(rsmitstReadOnly, Test) {
   TestConcurrentInit tst;
   SetFlags(&tst);
   tst.DisplayTestInfo();

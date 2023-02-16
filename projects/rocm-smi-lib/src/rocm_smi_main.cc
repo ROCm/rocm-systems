@@ -57,6 +57,7 @@
 #include <cerrno>
 #include <unordered_map>
 #include <iostream>
+#include <sstream>
 
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_device.h"
@@ -141,7 +142,8 @@ const std::map<amd::smi::DevInfoTypes, std::string> amd::smi::RocmSMI::devInfoTy
   {amd::smi::kDevNumaNode, amdSMI + "kDevNumaNode"},
   {amd::smi::kDevGpuMetrics, amdSMI + "kDevGpuMetrics"},
   {amd::smi::kDevGpuReset, amdSMI + "kDevGpuReset"},
-  {amd::smi::kDevComputePartition, amdSMI + "kDevComputePartition"}
+  {amd::smi::kDevComputePartition, amdSMI + "kDevComputePartition"},
+  {amd::smi::kDevMemoryPartition, amdSMI + "kDevMemoryPartition"}
 };
 
 namespace amd {
@@ -305,6 +307,8 @@ RocmSMI::Initialize(uint64_t flags) {
   euid_ = geteuid();
 
   GetEnvVariables();
+  // To help debug env variable issues
+  // printEnvVarInfo();
 
   while (env_vars_.debug_inf_loop) {}
 
@@ -429,6 +433,31 @@ static uint32_t GetEnvVarUInteger(const char *ev_str) {
   return 0;
 }
 
+static std::unordered_set<uint32_t> GetEnvVarUIntegerSets(const char *ev_str) {
+  std::unordered_set<uint32_t> returnSet;
+#ifndef DEBUG
+  (void)ev_str;
+#else
+  ev_str = getenv(ev_str);
+  if(ev_str == nullptr) { return returnSet; }
+  std::string stringEnv = ev_str;
+
+  if (stringEnv.empty() == false) {
+    // parse out values by commas
+    std::string parsedVal;
+    std::istringstream ev_str_ss(stringEnv);
+
+    while (std::getline(ev_str_ss, parsedVal, ',')) {
+      int parsedInt = std::stoi(parsedVal);
+      assert(parsedInt >= 0);
+      uint32_t parsedUInt = static_cast<uint32_t>(parsedInt);
+      returnSet.insert(parsedUInt);
+    }
+  }
+#endif
+  return returnSet;
+}
+
 // Get and store env. variables in this method
 void RocmSMI::GetEnvVariables(void) {
 #ifndef DEBUG
@@ -437,20 +466,57 @@ void RocmSMI::GetEnvVariables(void) {
   env_vars_.path_DRM_root_override = nullptr;
   env_vars_.path_HWMon_root_override = nullptr;
   env_vars_.path_power_root_override = nullptr;
-  env_vars_.enum_override = 0;
   env_vars_.debug_inf_loop = 0;
+  env_vars_.enum_overrides.clear();
 #else
   env_vars_.debug_output_bitfield = GetEnvVarUInteger("RSMI_DEBUG_BITFIELD");
   env_vars_.path_DRM_root_override   = getenv("RSMI_DEBUG_DRM_ROOT_OVERRIDE");
   env_vars_.path_HWMon_root_override = getenv("RSMI_DEBUG_HWMON_ROOT_OVERRIDE");
   env_vars_.path_power_root_override = getenv("RSMI_DEBUG_PP_ROOT_OVERRIDE");
-  env_vars_.enum_override = GetEnvVarUInteger("RSMI_DEBUG_ENUM_OVERRIDE");
   env_vars_.debug_inf_loop = GetEnvVarUInteger("RSMI_DEBUG_INFINITE_LOOP");
+  env_vars_.enum_overrides = GetEnvVarUIntegerSets("RSMI_DEBUG_ENUM_OVERRIDE");
 #endif
 }
 
 const RocmSMI_env_vars& RocmSMI::getEnv(void) {
   return env_vars_;
+}
+
+void RocmSMI::printEnvVarInfo(void) {
+  std::cout << __PRETTY_FUNCTION__ << " | env_vars_.debug_output_bitfield = "
+            << ((env_vars_.debug_output_bitfield == 0) ? "<undefined>"
+                : std::to_string(env_vars_.debug_output_bitfield))
+            << std::endl;
+  std::cout << __PRETTY_FUNCTION__ << " | env_vars_.path_DRM_root_override = "
+            << ((env_vars_.path_DRM_root_override == nullptr)
+                ? "<undefined>" : env_vars_.path_DRM_root_override)
+            << std::endl;
+  std::cout << __PRETTY_FUNCTION__ << " | env_vars_.path_HWMon_root_override = "
+            << ((env_vars_.path_HWMon_root_override == nullptr)
+                ? "<undefined>" : env_vars_.path_HWMon_root_override)
+            << std::endl;
+  std::cout << __PRETTY_FUNCTION__ << " | env_vars_.path_power_root_override = "
+            << ((env_vars_.path_power_root_override == nullptr)
+                ? "<undefined>" : env_vars_.path_power_root_override)
+            << std::endl;
+  std::cout << __PRETTY_FUNCTION__ << " | env_vars_.debug_inf_loop = "
+            << ((env_vars_.debug_inf_loop == 0) ? "<undefined>"
+                : std::to_string(env_vars_.debug_output_bitfield))
+            << std::endl;
+  std::cout << __PRETTY_FUNCTION__ << " | env_vars_.enum_overrides = {";
+  if (env_vars_.enum_overrides.empty()) {
+    std::cout << "}" << std::endl;
+    return;
+  }
+  for (auto it=env_vars_.enum_overrides.begin();
+       it != env_vars_.enum_overrides.end(); ++it) {
+    std::cout << *it;
+    auto temp_it = it;
+    if(++temp_it != env_vars_.enum_overrides.end()) {
+      std::cout << ",";
+    }
+  }
+  std::cout << "}" << std::endl;
 }
 
 std::shared_ptr<Monitor>

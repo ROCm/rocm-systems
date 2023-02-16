@@ -45,6 +45,7 @@
 #include <errno.h>
 #include <sys/utsname.h>
 #include <pthread.h>
+#include <ctype.h>
 #include <string>
 #include <unistd.h>
 #include <poll.h>
@@ -61,6 +62,7 @@
 #include <map>
 #include <fstream>
 #include <iostream>
+#include <tuple>
 
 #include "rocm_smi/rocm_smi_common.h"  // Should go before rocm_smi.h
 #include "rocm_smi/rocm_smi.h"
@@ -1695,11 +1697,29 @@ mapStringToRSMIComputePartitionTypes {
 
 std::map<rsmi_compute_partition_type_t, std::string>
 mapRSMIToStringComputePartitionTypes {
+  {RSMI_COMPUTE_PARTITION_INVALID, "UNKNOWN"},
   {RSMI_COMPUTE_PARTITION_CPX, "CPX"},
   {RSMI_COMPUTE_PARTITION_SPX, "SPX"},
   {RSMI_COMPUTE_PARTITION_DPX, "DPX"},
   {RSMI_COMPUTE_PARTITION_TPX, "TPX"},
   {RSMI_COMPUTE_PARTITION_QPX, "QPX"}
+};
+
+std::map<rsmi_nps_mode_type_t, std::string>
+mapRSMIToStringNPSModeTypes {
+  {RSMI_MEMORY_PARTITION_UNKNOWN, "UNKNOWN"},
+  {RSMI_MEMORY_PARTITION_NPS1, "NPS1"},
+  {RSMI_MEMORY_PARTITION_NPS2, "NPS2"},
+  {RSMI_MEMORY_PARTITION_NPS4, "NPS4"},
+  {RSMI_MEMORY_PARTITION_NPS8, "NPS8"}
+};
+
+std::map<std::string, rsmi_nps_mode_type_t>
+mapStringToNPSModeTypes {
+  {"NPS1", RSMI_MEMORY_PARTITION_NPS1},
+  {"NPS2", RSMI_MEMORY_PARTITION_NPS2},
+  {"NPS4", RSMI_MEMORY_PARTITION_NPS4},
+  {"NPS8", RSMI_MEMORY_PARTITION_NPS8}
 };
 
 static std::string
@@ -1935,7 +1955,7 @@ rsmi_dev_name_get(uint32_t dv_ind, char *name, size_t len) {
 
   ret = get_dev_name_from_file(dv_ind, name, len);
 
-  if (ret || name[0] == '\0') {
+  if (ret || name[0] == '\0' || !isprint(name[0]) ) {
     ret = get_dev_name_from_id(dv_ind, name, len, NAME_STR_DEVICE);
   }
 
@@ -2779,71 +2799,84 @@ rsmi_status_string(rsmi_status_t status, const char **status_string) {
       break;
 
     case RSMI_STATUS_OUT_OF_RESOURCES:
-      *status_string = "Unable to acquire memory or other resource";
+      *status_string = "RSMI_STATUS_OUT_OF_RESOURCES: Unable to acquire memory "
+                       "or other resource";
       break;
 
     case RSMI_STATUS_INTERNAL_EXCEPTION:
-      *status_string = "An internal exception was caught";
+      *status_string = "RSMI_STATUS_INTERNAL_EXCEPTION: An internal exception "
+                       "was caught";
       break;
 
     case RSMI_STATUS_INPUT_OUT_OF_BOUNDS:
-      *status_string = "The provided input is out of allowable or safe range";
+      *status_string = "RSMI_STATUS_INPUT_OUT_OF_BOUNDS: The provided input is "
+                       "out of allowable or safe range";
       break;
 
     case RSMI_STATUS_INIT_ERROR:
-      *status_string = "An error occurred during initialization, during "
-       "monitor discovery or when when initializing internal data structures";
+      *status_string = "RSMI_STATUS_INIT_ERROR: An error occurred during "
+                       "initialization, during monitor discovery or when when "
+                       "initializing internal data structures";
       break;
 
     case RSMI_STATUS_NOT_YET_IMPLEMENTED:
-      *status_string = "The called function has not been implemented in this "
-        "system for this device type";
+      *status_string = "RSMI_STATUS_NOT_YET_IMPLEMENTED: The called function "
+                        "has not been implemented in this system for this "
+                        "device type";
       break;
 
     case RSMI_STATUS_NOT_FOUND:
-      *status_string = "An item required to complete the call was not found";
+      *status_string = "RSMI_STATUS_NOT_FOUND: An item required to complete "
+                       "the call was not found";
       break;
 
     case RSMI_STATUS_INSUFFICIENT_SIZE:
-      *status_string = "Not enough resources were available to fully execute"
-                             " the call";
+      *status_string = "RSMI_STATUS_INSUFFICIENT_SIZE: Not enough resources "
+                       "were available to fully execute the call";
       break;
 
     case RSMI_STATUS_INTERRUPT:
-      *status_string = "An interrupt occurred while executing the function";
+      *status_string = "RSMI_STATUS_INTERRUPT: An interrupt occurred while "
+                       "executing the function";
       break;
 
     case RSMI_STATUS_UNEXPECTED_SIZE:
-      *status_string = "Data (usually from reading a file) was out of"
-                                              " range from what was expected";
+      *status_string = "RSMI_STATUS_UNEXPECTED_SIZE: Data (usually from reading"
+                       " a file) was out of range from what was expected";
       break;
 
     case RSMI_STATUS_NO_DATA:
-      *status_string = "No data was found (usually from reading a file) "
-                                                    "where data was expected";
+      *status_string = "RSMI_STATUS_NO_DATA: No data was found (usually from "
+                       "reading a file) where data was expected";
       break;
 
     case RSMI_STATUS_UNEXPECTED_DATA:
-      *status_string = "Data (usually from reading a file) was not of the "
-                                                     "type that was expected";
+      *status_string = "RSMI_STATUS_UNEXPECTED_DATA: Data (usually from reading"
+                       " a file) was not of the type that was expected";
       break;
 
     case RSMI_STATUS_BUSY:
-      *status_string = "A resource or mutex could not be acquired "
-                                           "because it is already being used";
+      *status_string = "RSMI_STATUS_BUSY: A resource or mutex could not be "
+                        "acquired because it is already being used";
     break;
 
     case RSMI_STATUS_REFCOUNT_OVERFLOW:
-      *status_string = "An internal reference counter exceeded INT32_MAX";
+      *status_string = "RSMI_STATUS_REFCOUNT_OVERFLOW: An internal reference "
+                       "counter exceeded INT32_MAX";
+      break;
+
+    case RSMI_STATUS_AMDGPU_RESTART_ERR:
+      *status_string = "RSMI_STATUS_AMDGPU_RESTART_ERR: Could not successfully "
+                        "restart the amdgpu driver";
       break;
 
     case RSMI_STATUS_UNKNOWN_ERROR:
-      *status_string = "An unknown error prevented the call from completing"
-                          " successfully";
+      *status_string = "RSMI_STATUS_UNKNOWN_ERROR: An unknown error prevented "
+                       "the call from completing successfully";
       break;
 
     default:
-      *status_string = "An unknown error occurred";
+      *status_string = "RSMI_STATUS_UNKNOWN_ERROR: An unknown error occurred";
       return RSMI_STATUS_UNKNOWN_ERROR;
   }
   return RSMI_STATUS_SUCCESS;
@@ -3717,12 +3750,8 @@ rsmi_is_P2P_accessible(uint32_t dv_ind_src, uint32_t dv_ind_dst,
 static rsmi_status_t
 get_compute_partition(uint32_t dv_ind, std::string &compute_partition) {
   TRY
-  std::string val_str;
-
-  if (compute_partition.c_str() == nullptr) {
-    return RSMI_STATUS_INVALID_ARGS;
-  }
   CHK_SUPPORT_NAME_ONLY(compute_partition.c_str())
+  std::string val_str;
 
   DEVICE_MUTEX
   rsmi_status_t ret = get_dev_value_str(amd::smi::kDevComputePartition,
@@ -3810,18 +3839,150 @@ rsmi_dev_compute_partition_set(uint32_t dv_ind,
   }
 
   // do nothing if compute_partition is the current compute partition
-  get_compute_partition(dv_ind, currentComputePartition);
+  rsmi_status_t ret_get = get_compute_partition(dv_ind, currentComputePartition);
+  // we can try to set, even if we get unexpected data
+  if (ret_get != RSMI_STATUS_SUCCESS
+      && ret_get != RSMI_STATUS_UNEXPECTED_DATA) {
+    return ret_get;
+  }
   rsmi_compute_partition_type_t currRSMIComputePartition
     = mapStringToRSMIComputePartitionTypes[currentComputePartition];
   if (currRSMIComputePartition == compute_partition) {
     return RSMI_STATUS_SUCCESS;
   }
 
-  newComputePartitionStr = mapRSMIToStringComputePartitionTypes[compute_partition];
   GET_DEV_FROM_INDX
   int ret = dev->writeDevInfo(amd::smi::kDevComputePartition,
                               newComputePartitionStr);
   return amd::smi::ErrnoToRsmiStatus(ret);
+  CATCH
+}
+
+static rsmi_status_t get_nps_mode(uint32_t dv_ind, std::string &nps_mode) {
+  TRY
+  CHK_SUPPORT_NAME_ONLY(nps_mode.c_str())
+  std::string val_str;
+
+  DEVICE_MUTEX
+  rsmi_status_t ret = get_dev_value_str(amd::smi::kDevMemoryPartition,
+                                        dv_ind, &val_str);
+
+  if (ret != RSMI_STATUS_SUCCESS) {
+    return ret;
+  }
+
+  switch (mapStringToNPSModeTypes[val_str]) {
+    case RSMI_MEMORY_PARTITION_UNKNOWN:
+      // Retrieved an unknown NPS mode
+      return RSMI_STATUS_UNEXPECTED_DATA;
+    case RSMI_MEMORY_PARTITION_NPS1:
+      break;
+    case RSMI_MEMORY_PARTITION_NPS2:
+      break;
+    case RSMI_MEMORY_PARTITION_NPS4:
+      break;
+    case RSMI_MEMORY_PARTITION_NPS8:
+      break;
+    default:
+      // Retrieved an unknown NPS mode
+      return RSMI_STATUS_UNEXPECTED_DATA;
+  }
+  nps_mode = val_str;
+  return RSMI_STATUS_SUCCESS;
+  CATCH
+}
+
+rsmi_status_t
+rsmi_dev_nps_mode_set(uint32_t dv_ind, rsmi_nps_mode_type_t nps_mode) {
+  TRY
+  REQUIRE_ROOT_ACCESS
+  DEVICE_MUTEX
+  bool isCorrectDevice = false;
+  char boardName[128];
+  boardName[0] = '\0';
+  // rsmi_dev_nps_mode_set is only available for for discrete variant,
+  // others are required to update through bios settings
+  rsmi_dev_name_get(dv_ind, boardName, 128);
+  std::string myBoardName = boardName;
+  if (!myBoardName.empty()) {
+    std::transform(myBoardName.begin(), myBoardName.end(), myBoardName.begin(),
+                   ::tolower);
+    if (myBoardName.find("mi") != std::string::npos &&
+        myBoardName.find("00x") != std::string::npos) {
+      isCorrectDevice = true;
+    }
+  }
+
+  if (isCorrectDevice == false) {
+    return RSMI_STATUS_NOT_SUPPORTED;
+  }
+
+  std::string newNPSMode
+              = mapRSMIToStringNPSModeTypes[nps_mode];
+  std::string currentNPSMode;
+
+  switch (nps_mode) {
+    case RSMI_MEMORY_PARTITION_UNKNOWN:
+      // Retrieved an unknown NPS mode
+      return RSMI_STATUS_INVALID_ARGS;
+    case RSMI_MEMORY_PARTITION_NPS1:
+      break;
+    case RSMI_MEMORY_PARTITION_NPS2:
+      break;
+    case RSMI_MEMORY_PARTITION_NPS4:
+      break;
+    case RSMI_MEMORY_PARTITION_NPS8:
+      break;
+    default:
+      return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  // do nothing if nps_mode is the current NPS mode
+  rsmi_status_t ret_get = get_nps_mode(dv_ind, currentNPSMode);
+  // we can try to set, even if we get unexpected data
+  if (ret_get != RSMI_STATUS_SUCCESS
+      && ret_get != RSMI_STATUS_UNEXPECTED_DATA) {
+    return ret_get;
+  }
+  rsmi_nps_mode_type_t currRSMINpsMode
+    = mapStringToNPSModeTypes[currentNPSMode];
+  if (currRSMINpsMode == nps_mode) {
+    return RSMI_STATUS_SUCCESS;
+  }
+
+  GET_DEV_FROM_INDX
+  int ret = dev->writeDevInfo(amd::smi::kDevMemoryPartition, newNPSMode);
+
+  if (amd::smi::ErrnoToRsmiStatus(ret) != RSMI_STATUS_SUCCESS) {
+    return amd::smi::ErrnoToRsmiStatus(ret);
+  }
+
+  return dev->restartAMDGpuDriver();
+  CATCH
+}
+
+rsmi_status_t
+rsmi_dev_nps_mode_get(uint32_t dv_ind, char *nps_mode,
+                               uint32_t len) {
+  CHK_SUPPORT_NAME_ONLY(nps_mode)
+  if ((len == 0) || (nps_mode == nullptr)) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  TRY
+  std::string returning_nps_mode;
+  rsmi_status_t ret = get_nps_mode(dv_ind,
+                               returning_nps_mode);
+
+  if (ret != RSMI_STATUS_SUCCESS) { return ret; }
+
+  std::size_t length = returning_nps_mode.copy(nps_mode, len);
+  nps_mode[length]='\0';
+
+  if (len < (returning_nps_mode.size() + 1)) {
+    return RSMI_STATUS_INSUFFICIENT_SIZE;
+  }
+  return ret;
   CATCH
 }
 

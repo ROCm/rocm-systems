@@ -124,8 +124,10 @@ typedef enum {
   RSMI_STATUS_BUSY,                      //!< A resource or mutex could not be
                                          //!< acquired because it is already
                                          //!< being used
-  RSMI_STATUS_REFCOUNT_OVERFLOW,          //!< An internal reference counter
+  RSMI_STATUS_REFCOUNT_OVERFLOW,         //!< An internal reference counter
                                          //!< exceeded INT32_MAX
+  RSMI_STATUS_AMDGPU_RESTART_ERR,        //!< Could not successfully restart
+                                         //!< the amdgpu driver
 
   RSMI_STATUS_UNKNOWN_ERROR = 0xFFFFFFFF,  //!< An unknown error occurred
 } rsmi_status_t;
@@ -353,7 +355,8 @@ typedef rsmi_clk_type_t rsmi_clk_type;
 /// \endcond
 
 /**
- * Compute Partition types
+ * @brief Compute Partition. This enum is used to identify
+ * various compute partitioning settings.
  */
 typedef enum {
   RSMI_COMPUTE_PARTITION_INVALID = 0,
@@ -365,11 +368,35 @@ typedef enum {
                                       //!< together with shared memory
   RSMI_COMPUTE_PARTITION_TPX,         //!< Triple GPU mode (TPX)- One-third XCCs
                                       //!< work together with shared memory
-  RSMI_COMPUTE_PARTITION_QPX,         //!< Quad GPU mode (QPX)- Quarter XCCs
+  RSMI_COMPUTE_PARTITION_QPX          //!< Quad GPU mode (QPX)- Quarter XCCs
                                       //!< work together with shared memory
 } rsmi_compute_partition_type_t;
 /// \cond Ignore in docs.
 typedef rsmi_compute_partition_type_t rsmi_compute_partition_type;
+/// \endcond
+
+/**
+ * @brief NPS Modes. This enum is used to identify various
+ * NPS mode types.
+ */
+typedef enum {
+  RSMI_MEMORY_PARTITION_UNKNOWN = 0,
+  RSMI_MEMORY_PARTITION_NPS1,        //!< NPS1 - All CCD & XCD data is interleaved
+                                     //!< accross all 8 HBM stacks (all stacks/1).
+  RSMI_MEMORY_PARTITION_NPS2,        //!< NPS2 - 2 sets of CCDs or 4 XCD interleaved
+                                     //!< accross the 4 HBM stacks per AID pair
+                                     //!< (8 stacks/2).
+  RSMI_MEMORY_PARTITION_NPS4,        //!< NPS4 - Each XCD data is interleaved accross
+                                     //!< accross 2 (or single) HBM stacks
+                                     //!< (8 stacks/8 or 8 stacks/4).
+  RSMI_MEMORY_PARTITION_NPS8,        //!< NPS8 - Each XCD uses a single HBM stack
+                                     //!< (8 stacks/8). Or each XCD uses a single
+                                     //!< HBM stack & CCDs share 2 non-interleaved
+                                     //!< HBM stacks on its AID
+                                     //!< (AID[1,2,3] = 6 stacks/6).
+} rsmi_nps_mode_type_t;
+/// \cond Ignore in docs.
+typedef rsmi_nps_mode_type_t rsmi_nps_mode_type;
 /// \endcond
 
 /**
@@ -3512,7 +3539,7 @@ rsmi_is_P2P_accessible(uint32_t dv_ind_src, uint32_t dv_ind_dst,
  *  @param[inout] compute_partition a pointer to a char string variable,
  *  which the device's current compute partition will be written to.
  *
- * @param[in] len the length of the caller provided buffer @p compute_partition
+ *  @param[in] len the length of the caller provided buffer @p compute_partition
  *
  *  @retval ::RSMI_STATUS_SUCCESS call was successful
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
@@ -3537,7 +3564,7 @@ rsmi_dev_compute_partition_get(uint32_t dv_ind, char *compute_partition,
  *
  *  @param[in] dv_ind a device index
  *
- *  @param[inout] compute_partition using enum ::rsmi_copmpute_partition_type_t,
+ *  @param[in] compute_partition using enum ::rsmi_compute_partition_type_t,
  *  define what the selected device's compute partition setting should be
  *  updated to.
  *
@@ -3553,6 +3580,69 @@ rsmi_dev_compute_partition_set(uint32_t dv_ind,
                                rsmi_compute_partition_type_t compute_partition);
 
 /** @} */  // end of ComputePartition
+
+/*****************************************************************************/
+/** @defgroup NPSMode NPS Mode Functions
+ *  These functions are used to query the device's NPS mode (memory partition).
+ *  @{
+ */
+
+/**
+ *  @brief Retrieves the NPS mode (memory partition) for a desired device
+ *
+ *  @details
+ *  Given a device index @p dv_ind and a string @p nps_mode ,
+ *  and uint32 @p len , this function will attempt to obtain the device's
+ *  nps mode string. Upon successful retreival, the obtained device's
+ *  nps mode string shall be stored in the passed @p nps_mode char string
+ *  variable.
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[inout] nps_mode a pointer to a char string variable,
+ *  which the device's nps mode will be written to.
+ *
+ *  @param[in] len the length of the caller provided buffer @p nps_mode ,
+ *  suggested length is 5 or greater.
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful
+ *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
+ *  @retval ::RSMI_STATUS_UNEXPECTED_DATA data provided to function is not valid
+ *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
+ *  support this function with the given arguments
+ *  @retval ::RSMI_STATUS_INSUFFICIENT_SIZE is returned if @p len bytes is not
+ *  large enough to hold the entire nps mode value. In this case,
+ *  only @p len bytes will be written.
+ *
+ */
+rsmi_status_t
+rsmi_dev_nps_mode_get(uint32_t dv_ind, char *nps_mode, uint32_t len);
+
+/**
+ *  @brief Modifies a selected device's NPS mode (memory partition) setting.
+ *
+ *  @details Given a device index @p dv_ind and a type of nps mode
+ *  @p nps_mode, this function will attempt to update the selected
+ *  device's nps mode setting.
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[in] nps_mode using enum ::rsmi_nps_mode_type_t,
+ *  define what the selected device's NPS mode setting should be updated to.
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful
+ *  @retval ::RSMI_STATUS_PERMISSION function requires root access
+ *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
+ *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
+ *  support this function with the given arguments
+ *  @retval ::RSMI_STATUS_AMDGPU_RESTART_ERR could not successfully restart
+ *  the amdgpu driver
+ *
+ */
+rsmi_status_t
+rsmi_dev_nps_mode_set(uint32_t dv_ind, rsmi_nps_mode_type_t nps_mode);
+
+/** @} */  // end of NPSMode
 
 /*****************************************************************************/
 /** @defgroup APISupport Supported Functions

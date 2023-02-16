@@ -100,6 +100,33 @@
     } \
 }
 
+#define CHK_RSMI_NOT_SUPPORTED_OR_UNEXPECTED_DATA_RET(RET) { \
+    if ((RET) == RSMI_STATUS_NOT_SUPPORTED) { \
+      std::cout << "This function is not supported in the current environment." \
+      << std::endl; \
+    } else if ((RET) == RSMI_STATUS_UNEXPECTED_DATA) { \
+      std::cout << "[ERROR] RSMI_STATUS_UNEXPECTED_DATA retrieved." \
+      << std::endl; \
+    } else { \
+      CHK_RSMI_RET(RET) \
+    } \
+}
+
+#define CHK_NOT_SUPPORTED_OR_UNEXPECTED_DATA_OR_INSUFFICIENT_SIZE_RET(RET) { \
+    if ((RET) == RSMI_STATUS_NOT_SUPPORTED) { \
+      std::cout << "This function is not supported in the current environment." \
+      << std::endl; \
+    } else if ((RET) == RSMI_STATUS_UNEXPECTED_DATA) { \
+      std::cout << "[WARN] RSMI_STATUS_UNEXPECTED_DATA retrieved." \
+      << std::endl; \
+    } else if ((RET) == RSMI_STATUS_INSUFFICIENT_SIZE) { \
+      std::cout << "[WARN] RSMI_STATUS_INSUFFICIENT_SIZE retrieved." \
+      << std::endl; \
+    } else { \
+      CHK_RSMI_RET(RET) \
+    } \
+}
+
 static void print_test_header(const char *str, uint32_t dv_ind) {
   std::cout << "********************************" << std::endl;
   std::cout << "*** " << str << std::endl;
@@ -158,6 +185,30 @@ mapStringToRSMIComputePartitionTypes {
   {"QPX", RSMI_COMPUTE_PARTITION_QPX}
 };
 
+static const std::string
+nps_mode_string(rsmi_nps_mode_type_t partition) {
+  switch (partition) {
+    case RSMI_MEMORY_PARTITION_NPS1:
+      return "NPS1";
+    case RSMI_MEMORY_PARTITION_NPS2:
+      return "NPS2";
+    case RSMI_MEMORY_PARTITION_NPS4:
+      return "NPS4";
+    case RSMI_MEMORY_PARTITION_NPS8:
+      return "NPS8";
+    default:
+      return "UNKNOWN";
+  }
+}
+
+static std::map<std::string, rsmi_nps_mode_type_t>
+mapStringToRSMINpsModeTypes {
+  {"NPS1", RSMI_MEMORY_PARTITION_NPS1},
+  {"NPS2", RSMI_MEMORY_PARTITION_NPS2},
+  {"NPS4", RSMI_MEMORY_PARTITION_NPS4},
+  {"NPS8", RSMI_MEMORY_PARTITION_NPS8}
+};
+
 static const char *
 perf_level_string(rsmi_dev_perf_level_t perf_lvl) {
   switch (perf_lvl) {
@@ -184,7 +235,7 @@ static bool isUserRunningAsSudo() {
   return isRunningWithSudo;
 }
 
-bool isFileWritable(rsmi_status_t response) {
+static bool isFileWritable(rsmi_status_t response) {
   // Clock files may not be writable, causing sets to
   // return RSMI_STATUS_PERMISSION. If running as sudo,
   // this means file is not writable.
@@ -492,34 +543,22 @@ static rsmi_status_t test_set_compute_partitioning(uint32_t dv_ind) {
   rsmi_status_t ret;
   uint32_t buffer_len = 10;
   char originalComputePartition[buffer_len];
+  originalComputePartition[0] = '\0';
   print_test_header("Compute Partitioning Control", dv_ind);
-  /**
-  typedef enum {
-  RSMI_COMPUTE_PARTITION_INVALID = 0,
-  RSMI_COMPUTE_PARTITION_CPX,         //!< Core mode (CPX)- Per-chip XCC with
-                                      //!< shared memory
-  RSMI_COMPUTE_PARTITION_SPX,         //!< Single GPU mode (SPX)- All XCCs work
-                                      //!< together with shared memory
-  RSMI_COMPUTE_PARTITION_DPX,         //!< Dual GPU mode (DPX)- Half XCCs work
-                                      //!< together with shared memory
-  RSMI_COMPUTE_PARTITION_TPX,         //!< Triple GPU mode (TPX)- One-third XCCs
-                                      //!< work together with shared memory
-  RSMI_COMPUTE_PARTITION_QPX,         //!< Quad GPU mode (QPX)- Quarter XCCs
-                                      //!< work together with shared memory
-  } rsmi_compute_partition_type_t;
-  */
-  ret = rsmi_dev_compute_partition_get(dv_ind, originalComputePartition, buffer_len);
-  CHK_RSMI_NOT_SUPPORTED_RET(ret)
+
+  ret = rsmi_dev_compute_partition_get(dv_ind, originalComputePartition,
+                                       buffer_len);
+  CHK_RSMI_NOT_SUPPORTED_OR_UNEXPECTED_DATA_RET(ret)
   if (ret == RSMI_STATUS_NOT_SUPPORTED) {
-    std::cout << "Device does not support the compute partition feature."
-              << std::endl;
-    std::cout << "*********************************************" << std::endl;
     return RSMI_STATUS_SUCCESS;
-  } else {
-    CHK_AND_PRINT_RSMI_ERR_RET(ret)
-    std::cout << "Original compute partition is " << originalComputePartition
-              << "." << std::endl;
   }
+
+  std::cout << "Original Compute Partition: "
+            << (((originalComputePartition == nullptr)
+                || ((originalComputePartition != nullptr)
+                && (originalComputePartition[0] == '\0')))
+                ? "UNKNOWN" : originalComputePartition)
+            << std::endl << std::endl;
 
   for (int newComputePartition = RSMI_COMPUTE_PARTITION_CPX;
        newComputePartition <= RSMI_COMPUTE_PARTITION_QPX;
@@ -546,6 +585,59 @@ static rsmi_status_t test_set_compute_partitioning(uint32_t dv_ind) {
     CHK_RSMI_NOT_SUPPORTED_RET(ret)
     std::cout << "Done" << std::endl;
     ret = rsmi_dev_compute_partition_set(dv_ind, origComputePartitionType);
+  }
+  return RSMI_STATUS_SUCCESS;
+}
+
+static rsmi_status_t test_set_nps_mode(uint32_t dv_ind) {
+  rsmi_status_t ret;
+  uint32_t buffer_len = 10;
+  char originalNpsMode[buffer_len];
+  originalNpsMode[0] = '\0';
+  print_test_header("NPS Mode Control", dv_ind);
+
+  ret = rsmi_dev_nps_mode_get(dv_ind, originalNpsMode, buffer_len);
+  CHK_RSMI_NOT_SUPPORTED_OR_UNEXPECTED_DATA_RET(ret)
+  if (ret == RSMI_STATUS_NOT_SUPPORTED) {
+    return RSMI_STATUS_SUCCESS;
+  }
+
+  std::cout << "Original NPS Mode: "
+            << (((originalNpsMode == nullptr)
+                || ((originalNpsMode != nullptr)
+                && (originalNpsMode[0] == '\0')))
+                ? "UNKNOWN" : originalNpsMode)
+            << std::endl << std::endl;
+
+  for (int newNpsMode = RSMI_MEMORY_PARTITION_NPS1;
+       newNpsMode <= RSMI_MEMORY_PARTITION_NPS8;
+       newNpsMode++) {
+    rsmi_nps_mode_type_t newMemoryPartition
+      = static_cast<rsmi_nps_mode_type_t>(newNpsMode);
+    std::cout << "Attempting to set NPS mode to "
+              << nps_mode_string(newMemoryPartition) << "..."
+              << std::endl;
+    ret = rsmi_dev_nps_mode_set(dv_ind, newMemoryPartition);
+    CHK_RSMI_NOT_SUPPORTED_RET(ret)
+    if (ret == RSMI_STATUS_NOT_SUPPORTED) {
+      // do not continue attempting to set, device does not support setting
+      return RSMI_STATUS_SUCCESS;
+    }
+    std::cout << "Done setting NPS mode to "
+              << nps_mode_string(newMemoryPartition)
+              << "." << std::endl;
+    std::cout << std::endl << std::endl;
+  }
+
+  std::string myNpsMode = originalNpsMode;
+  if (myNpsMode.empty() == false) {
+    std::cout << "Resetting compute partition to " << originalNpsMode
+              << "... " << std::endl;
+    rsmi_nps_mode_type_t origNpsModeType
+      = mapStringToRSMINpsModeTypes[originalNpsMode];
+    CHK_RSMI_NOT_SUPPORTED_RET(ret)
+    std::cout << "Done" << std::endl;
+    ret = rsmi_dev_nps_mode_set(dv_ind, origNpsModeType);
   }
   return RSMI_STATUS_SUCCESS;
 }
@@ -577,10 +669,31 @@ int main() {
               << "rsmi_dev_compute_partition_get()..."
               << std::endl;
     char current_compute_partition[256];
+    current_compute_partition[0] = '\0';
     ret = rsmi_dev_compute_partition_get(i, current_compute_partition, 256);
-    CHK_RSMI_NOT_SUPPORTED_RET(ret)
-    std::cout << "\t**Current Compute Partition setting: "
-              << current_compute_partition << std::endl;
+    CHK_RSMI_NOT_SUPPORTED_OR_UNEXPECTED_DATA_RET(ret)
+    std::cout << "\t**Current Compute Partition: "
+              << (((current_compute_partition == nullptr)
+                  || ((current_compute_partition != nullptr)
+                  && (current_compute_partition[0] == '\0')))
+                  ? "UNKNOWN" : current_compute_partition)
+              << std::endl;
+
+    std::cout << std::endl << std::endl;
+    std::cout << "Starting to call "
+              << "rsmi_dev_nps_mode_get()..."
+              << std::endl;
+    uint32_t len = 5;
+    char nps_mode[len];
+    nps_mode[0] = '\0';
+    ret = rsmi_dev_nps_mode_get(i, nps_mode, len);
+    CHK_NOT_SUPPORTED_OR_UNEXPECTED_DATA_OR_INSUFFICIENT_SIZE_RET(ret)
+    std::cout << "\t**NPS Mode: "
+              << (((nps_mode == nullptr)
+                  || ((nps_mode != nullptr)
+                  && (nps_mode[0] == '\0')))
+                  ? "UNKNOWN" : nps_mode)
+              << std::endl;
 
     ret = rsmi_dev_gpu_metrics_info_get(i, &p);
     CHK_AND_PRINT_RSMI_ERR_RET(ret)
@@ -671,6 +784,9 @@ int main() {
     CHK_AND_PRINT_RSMI_ERR_RET(ret)
 
     ret = test_set_freq(i);
+    CHK_AND_PRINT_RSMI_ERR_RET(ret)
+
+    ret = test_set_nps_mode(i);
     CHK_AND_PRINT_RSMI_ERR_RET(ret)
   }
 

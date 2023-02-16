@@ -49,6 +49,24 @@ endif()
 
 set(RSMI_INC_DIR ${ROCM_DIR}/include)
 set(RSMI_LIB_DIR ${ROCM_DIR}/lib)
+
+
+message("")
+message("Google Test Configuration init:")
+message("-----------ROCM_DIR: " ${ROCM_DIR})
+message("-----------GOOGLE_TEST_FRWK_NAME: " ${GOOGLE_TEST_FRWK_NAME})
+message("-----------RSMITST: " ${RSMITST})
+message("-----------RSMITST_ROOT: " ${RSMITST_ROOT})
+message("-----------RSMITST_LIBS: " ${RSMITST_LIBS})
+message("-----------PROJECT_BINARY_DIR: " ${PROJECT_BINARY_DIR})
+message("-----------RSMI_LIB_DIR: " ${RSMI_LIB_DIR})
+message("-----------GTEST_LIB_DIR: " ${GTEST_LIB_DIR})
+message("-----------RSMI_INC_DIR: " ${RSMI_INC_DIR})
+message("-----------rsmitstSources: " ${rsmitstSources})
+message("-----------functionalSources: " ${functionalSources})
+message("")
+
+
 #
 # Determine RSMI Header files are present
 #  (no external source dependencies)
@@ -75,6 +93,21 @@ else()
     return()
   endif()
 endif()
+
+message("")
+message("Google Test Configuration (after lib check):")
+message("-----------ROCM_DIR: " ${ROCM_DIR})
+message("-----------GOOGLE_TEST_FRWK_NAME: " ${GOOGLE_TEST_FRWK_NAME})
+message("-----------RSMITST: " ${RSMITST})
+message("-----------RSMITST_ROOT: " ${RSMITST_ROOT})
+message("-----------RSMITST_LIBS: " ${RSMITST_LIBS})
+message("-----------PROJECT_BINARY_DIR: " ${PROJECT_BINARY_DIR})
+message("-----------RSMI_LIB_DIR: " ${RSMI_LIB_DIR})
+message("-----------GTEST_LIB_DIR: " ${GTEST_LIB_DIR})
+message("-----------RSMI_INC_DIR: " ${RSMI_INC_DIR})
+message("-----------rsmitstSources: " ${rsmitstSources})
+message("-----------functionalSources: " ${functionalSources})
+message("")
 
 string(TOLOWER "${RSMITST_BLD_TYPE}" tmp)
 if("${tmp}" STREQUAL release)
@@ -223,4 +256,19 @@ install(TARGETS ${RSMITST}
         ARCHIVE DESTINATION ${PROJECT_BINARY_DIR}/lib
         LIBRARY DESTINATION ${PROJECT_BINARY_DIR}/lib
         RUNTIME DESTINATION ${PROJECT_BINARY_DIR}/bin)
+
+message("")
+message("Google Test Configuration:")
+message("-----------ROCM_DIR: " ${ROCM_DIR})
+message("-----------GOOGLE_TEST_FRWK_NAME: " ${GOOGLE_TEST_FRWK_NAME})
+message("-----------RSMITST: " ${RSMITST})
+message("-----------RSMITST_ROOT: " ${RSMITST_ROOT})
+message("-----------RSMITST_LIBS: " ${RSMITST_LIBS})
+message("-----------PROJECT_BINARY_DIR: " ${PROJECT_BINARY_DIR})
+message("-----------RSMI_LIB_DIR: " ${RSMI_LIB_DIR})
+message("-----------GTEST_LIB_DIR: " ${GTEST_LIB_DIR})
+message("-----------RSMI_INC_DIR: " ${RSMI_INC_DIR})
+message("-----------rsmitstSources: " ${rsmitstSources})
+message("-----------functionalSources: " ${functionalSources})
+message("")
 

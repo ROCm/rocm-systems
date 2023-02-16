@@ -122,6 +122,7 @@ static const char *kDevSerialNumberFName = "serial_number";
 static const char *kDevNumaNodeFName = "numa_node";
 static const char *kDevGpuMetricsFName = "gpu_metrics";
 static const char *kDevComputePartitionFName = "current_compute_partition";
+static const char *kDevMemoryPartitionFName = "current_memory_partition";
 
 // Firmware version files
 static const char *kDevFwVersionAsdFName = "fw_version/asd_fw_version";
@@ -292,6 +293,7 @@ static const std::map<DevInfoTypes, const char *> kDevAttribNameMap = {
     {kDevGpuMetrics, kDevGpuMetricsFName},
     {kDevGpuReset, kDevGpuResetFName},
     {kDevComputePartition, kDevComputePartitionFName},
+    {kDevMemoryPartition, kDevMemoryPartitionFName},
 };
 
 static const std::map<rsmi_dev_perf_level, const char *> kDevPerfLvlMap = {
@@ -417,6 +419,8 @@ static const std::map<const char *, dev_depends_t> kDevFuncDependsMap = {
   {"rsmi_dev_gpu_reset",                 {{kDevGpuResetFName}, {}}},
   {"rsmi_dev_compute_partition_get",     {{kDevComputePartitionFName}, {}}},
   {"rsmi_dev_compute_partition_set",     {{kDevComputePartitionFName}, {}}},
+  {"rsmi_dev_memory_partition_get",      {{kDevMemoryPartitionFName}, {}}},
+  {"rsmi_dev_memory_partition_set",      {{kDevMemoryPartitionFName}, {}}},
 
   // These functions with variants, but no sensors/units. (May or may not
   // have mandatory dependencies.)
@@ -564,9 +568,9 @@ int Device::openSysfsFileStream(DevInfoTypes type, T *fs, const char *str) {
   auto sysfs_path = path_;
 
 #ifdef DEBUG
-  if (env_->path_DRM_root_override && type == env_->enum_override) {
+  if (env_->path_DRM_root_override
+      && (env_->enum_overrides.find(type) != env_->enum_overrides.end())) {
     sysfs_path = env_->path_DRM_root_override;
-
   }
 #endif
 
@@ -698,6 +702,7 @@ int Device::writeDevInfo(DevInfoTypes type, std::string val) {
     case kDevPowerODVoltage:
     case kDevSOCClk:
     case kDevComputePartition:
+    case kDevMemoryPartition:
       return writeDevInfoStr(type, val);
 
     default:
@@ -925,6 +930,7 @@ int Device::readDevInfo(DevInfoTypes type, std::string *val) {
     case kDevPCIEThruPut:
     case kDevSerialNumber:
     case kDevComputePartition:
+    case kDevMemoryPartition:
       return readDevInfoStr(type, val);
       break;
 
@@ -1100,6 +1106,44 @@ bool Device::DeviceAPISupported(std::string name, uint64_t variant,
   assert(false);  // We should not reach here
 
   return false;
+}
+
+rsmi_status_t Device::restartAMDGpuDriver(void) {
+  REQUIRE_ROOT_ACCESS
+  bool restartSuccessful = true;
+  bool success = false;
+  std::string out = "";
+  bool wasGdmServiceActive = false;
+
+  // sudo systemctl is-active gdm
+  // we do not care about the success of checking if gdm is active
+  std::tie(success, out) = executeCommand("systemctl is-active gdm");
+  (out == "active") ? (restartSuccessful &= success) :
+                         (restartSuccessful = true);
+
+  // if gdm is active -> sudo systemctl stop gdm
+  // TODO: are are there other display manager's we need to take into account?
+  // see https://en.wikipedia.org/wiki/GNOME_Display_Manager
+  if (success && (out == "active")) {
+    wasGdmServiceActive = true;
+    std::tie(success, out) = executeCommand("systemctl stop gdm&", false);
+    restartSuccessful &= success;
+  }
+
+  // sudo modprobe -r amdgpu
+  // sudo modprobe amdgpu
+  std::tie(success, out) =
+    executeCommand("modprobe -r amdgpu && modprobe amdgpu&", false);
+  restartSuccessful &= success;
+
+  // if gdm was active -> sudo systemctl start gdm
+  if (wasGdmServiceActive) {
+    std::tie(success, out) = executeCommand("systemctl start gdm&", false);
+    restartSuccessful &= success;
+  }
+
+  return (restartSuccessful ? RSMI_STATUS_SUCCESS :
+          RSMI_STATUS_AMDGPU_RESTART_ERR);
 }
 
 #undef RET_IF_NONZERO
