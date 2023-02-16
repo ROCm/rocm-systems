@@ -55,15 +55,6 @@ if ( NOT DEFINED CMAKE_PREFIX_PATH AND DEFINED ENV{CMAKE_PREFIX_PATH} )
   set ( CMAKE_PREFIX_PATH $ENV{CMAKE_PREFIX_PATH} )
 endif()
 
-## Extend Compiler flags based on build type
-string ( TOLOWER "${CMAKE_BUILD_TYPE}" CMAKE_BUILD_TYPE )
-if ( "${CMAKE_BUILD_TYPE}" STREQUAL debug )
-  set ( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -ggdb" )
-  set ( CMAKE_BUILD_TYPE "debug" )
-else ()
-  set ( CMAKE_BUILD_TYPE "release" )
-endif ()
-
 ## Find hsa-runtime
 find_package(hsa-runtime64 CONFIG REQUIRED HINTS ${CMAKE_INSTALL_PREFIX} PATHS /opt/rocm PATH_SUFFIXES lib/cmake/hsa-runtime64 )
 

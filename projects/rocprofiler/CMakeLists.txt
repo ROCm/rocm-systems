@@ -139,7 +139,7 @@ add_subdirectory(src)
 
 if(${LIBRARY_TYPE} STREQUAL SHARED)
   ## Build samples
-  #add_subdirectory(samples)
+  add_subdirectory(samples)
 
   ## Build tests
   add_subdirectory(tests)
@@ -340,8 +340,8 @@ set ( CPACK_RPM_RUNTIME_POST_UNINSTALL_SCRIPT_FILE "${CMAKE_CURRENT_BINARY_DIR}/
   string(REGEX REPLACE ",? ?rocm-core" "" CPACK_DEBIAN_DOCS_PACKAGE_DEPENDS ${CPACK_DEBIAN_DOCS_PACKAGE_DEPENDS})
   string(REGEX REPLACE ",? ?rocm-core" "" CPACK_DEBIAN_PLUGINS_PACKAGE_DEPENDS ${CPACK_DEBIAN_PLUGINS_PACKAGE_DEPENDS})
   endif()
-
-  set(CPACK_COMPONENTS_ALL runtime dev tests docs plugins)
+  
+  set(CPACK_COMPONENTS_ALL runtime dev tests docs plugins samples)
   include(CPack)
 
   cpack_add_component(runtime

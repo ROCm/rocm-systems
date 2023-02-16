@@ -1,5 +1,4 @@
 include (CheckCSourceCompiles)
-
 # ############################################################################################################################################
 # ############################################################################################################################################
 # General Requirements
@@ -54,6 +53,7 @@ set_source_files_properties(profiler/application_replay_sample.cpp PROPERTIES HI
 hip_add_executable(profiler_application_replay profiler/application_replay_sample.cpp ${ROCPROFILER_UTIL_SRC_FILES})
 target_include_directories(profiler_application_replay PRIVATE ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/inc ${CMAKE_CURRENT_SOURCE_DIR}/common)
 target_link_libraries(profiler_application_replay PRIVATE ${ROCPROFILER_TARGET} systemd amd_comgr)
+target_link_options(profiler_application_replay PRIVATE "-Wl,--build-id=md5")
 add_dependencies(samples profiler_application_replay)
 install(TARGETS profiler_application_replay RUNTIME DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/samples COMPONENT samples)
 
@@ -62,6 +62,7 @@ set_source_files_properties(profiler/kernel_replay_sample.cpp PROPERTIES HIP_SOU
 hip_add_executable(profiler_kernel_replay profiler/kernel_replay_sample.cpp ${ROCPROFILER_UTIL_SRC_FILES})
 target_include_directories(profiler_kernel_replay PRIVATE ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/inc ${CMAKE_CURRENT_SOURCE_DIR}/common)
 target_link_libraries(profiler_kernel_replay PRIVATE ${ROCPROFILER_TARGET} systemd amd_comgr)
+target_link_options(profiler_kernel_replay PRIVATE "-Wl,--build-id=md5")
 add_dependencies(samples profiler_kernel_replay)
 install(TARGETS profiler_kernel_replay RUNTIME DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/samples COMPONENT samples)
 
@@ -69,6 +70,7 @@ install(TARGETS profiler_kernel_replay RUNTIME DESTINATION ${CMAKE_INSTALL_DATAR
 set_source_files_properties(profiler/user_replay_sample.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
 hip_add_executable(profiler_user_replay profiler/user_replay_sample.cpp ${ROCPROFILER_UTIL_SRC_FILES})
 target_include_directories(profiler_user_replay PRIVATE ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/inc ${CMAKE_CURRENT_SOURCE_DIR}/common)
+target_link_options(profiler_user_replay PRIVATE "-Wl,--build-id=md5")
 target_link_libraries(profiler_user_replay PRIVATE ${ROCPROFILER_TARGET} systemd amd_comgr)
 add_dependencies(samples profiler_user_replay)
 install(TARGETS profiler_user_replay RUNTIME DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/samples COMPONENT samples)
@@ -78,6 +80,7 @@ set_source_files_properties(profiler/device_profiling_sample.cpp PROPERTIES HIP_
 hip_add_executable(profiler_device_profiling profiler/device_profiling_sample.cpp ${ROCPROFILER_UTIL_SRC_FILES})
 target_include_directories(profiler_device_profiling PRIVATE ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/inc ${CMAKE_CURRENT_SOURCE_DIR}/common)
 target_link_libraries(profiler_device_profiling PRIVATE ${ROCPROFILER_TARGET} systemd amd_comgr)
+target_link_options(profiler_device_profiling PRIVATE "-Wl,--build-id=md5")
 add_dependencies(samples profiler_device_profiling)
 install(TARGETS profiler_device_profiling RUNTIME DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/samples COMPONENT samples)
 
@@ -90,6 +93,7 @@ set_source_files_properties(tracer/sample.cpp PROPERTIES HIP_SOURCE_PROPERTY_FOR
 hip_add_executable(tracer_hip_hsa tracer/sample.cpp ${ROCPROFILER_UTIL_SRC_FILES})
 target_include_directories(tracer_hip_hsa PRIVATE ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/inc ${CMAKE_CURRENT_SOURCE_DIR}/common)
 target_link_libraries(tracer_hip_hsa PRIVATE ${ROCPROFILER_TARGET} systemd amd_comgr)
+target_link_options(tracer_hip_hsa PRIVATE "-Wl,--build-id=md5")
 add_dependencies(samples tracer_hip_hsa)
 install(TARGETS tracer_hip_hsa RUNTIME DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/samples COMPONENT samples)
 
@@ -97,40 +101,41 @@ install(TARGETS tracer_hip_hsa RUNTIME DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/
 # PC Sampling Samples
 # ############################################################################################################################################
 
-#set(CODE_PRINTING_SAMPLE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/pcsampler/code_printing_sample)
-#file(GLOB PC_SAMPLING_CODE_PRINTING_FILES ${CODE_PRINTING_SAMPLE_DIR}/*.cpp)
-#set_source_files_properties(${PC_SAMPLING_CODE_PRINTING_FILES} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
-#hip_add_executable(pc_sampling_code_printing ${PC_SAMPLING_CODE_PRINTING_FILES}
-#  HIPCC_OPTIONS
-#  -std=c++17
+set(CODE_PRINTING_SAMPLE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/pcsampler/code_printing_sample)
+file(GLOB PC_SAMPLING_CODE_PRINTING_FILES ${CODE_PRINTING_SAMPLE_DIR}/*.cpp)
+set_source_files_properties(${PC_SAMPLING_CODE_PRINTING_FILES} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+hip_add_executable(pc_sampling_code_printing ${PC_SAMPLING_CODE_PRINTING_FILES}
+  HIPCC_OPTIONS
+  -std=c++17
   # Include debugging symbols and source for the contextual disassembly
-#  -gdwarf-4)
+  -gdwarf-4)
 
-#check_c_source_compiles("
+check_c_source_compiles("
   #define _GNU_SOURCE
   #include <sys/mman.h>
-  #  int main() { return memfd_create (\"cmake_test\", 0); }
-  #" HAVE_MEMFD_CREATE)
-  #if (HAVE_MEMFD_CREATE)
-  #target_compile_definitions(pc_sampling_code_printing PRIVATE HAVE_MEMFD_CREATE)
-  #endif()
+  int main() { return memfd_create (\"cmake_test\", 0); }
+  " HAVE_MEMFD_CREATE)
+  if (HAVE_MEMFD_CREATE)
+  target_compile_definitions(pc_sampling_code_printing PRIVATE HAVE_MEMFD_CREATE)
+  endif()
 
-  #target_link_libraries(pc_sampling_code_printing
-  #PRIVATE
-  #${ROCPROFILER_TARGET}
-  #rocm-dbgapi
-  #${LIBELF_LIBRARIES}
-  #${LIBDW_LIBRARIES}
-  #hsa-runtime64::hsa-runtime64 Threads::Threads dl)
-  #target_include_directories(pc_sampling_code_printing
-  #PRIVATE
-  # INTERFACE_INCLUDE_DIRECTORIES
-  #${TEST_DIR}
-  #${ROOT_DIR}
-  #${HSA_RUNTIME_INC_PATH}
-  #${PROJECT_SOURCE_DIR})
-  #add_dependencies(samples pc_sampling_code_printing)
-# install(TARGETS pc_sampling_code_printing RUNTIME DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/samples COMPONENT samples)
+  target_link_libraries(pc_sampling_code_printing
+  PRIVATE
+  ${ROCPROFILER_TARGET}
+  rocm-dbgapi
+  ${LIBELF_LIBRARIES}
+  ${LIBDW_LIBRARIES}
+  hsa-runtime64::hsa-runtime64 Threads::Threads dl)
+  target_include_directories(pc_sampling_code_printing
+  PRIVATE
+   INTERFACE_INCLUDE_DIRECTORIES
+  ${TEST_DIR}
+  ${ROOT_DIR}
+  ${HSA_RUNTIME_INC_PATH}
+  ${PROJECT_SOURCE_DIR})
+  target_link_options(pc_sampling_code_printing PRIVATE "-Wl,--build-id=md5")
+  add_dependencies(samples pc_sampling_code_printing)
+ install(TARGETS pc_sampling_code_printing RUNTIME DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/samples COMPONENT samples)
 
 # ############################################################################################################################################
 # Scripts to run samples
