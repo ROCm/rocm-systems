@@ -36,10 +36,10 @@
 
 #include "src/utils/helper.h"
 
-// Macro to check ROCMTools calls status
-#define CHECK_ROCMTOOLS(call)                                                                      \
+// Macro to check ROCProfiler calls status
+#define CHECK_ROCPROFILER(call)                                                                      \
   do {                                                                                             \
-    if ((call) != ROCPROFILER_STATUS_SUCCESS) rocmtools::fatal("Error: ROCMTools API Call Error!");  \
+    if ((call) != ROCPROFILER_STATUS_SUCCESS) rocmtools::fatal("Error: ROCProfiler API Call Error!");  \
   } while (false)
 
 namespace {

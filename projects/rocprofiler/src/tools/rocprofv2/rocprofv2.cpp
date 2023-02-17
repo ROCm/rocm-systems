@@ -34,7 +34,7 @@ namespace fs = std::experimental::filesystem;
 
 // Usage message
 void printUsage() {
-  std::cout << "ROCMTools Run Binary Usage:" << std::endl;
+  std::cout << "ROCProfiler Run Binary Usage:" << std::endl;
   std::cout << "\nTo run ./run.sh PARAMs, PARAMs can be the following:" << std::endl;
   std::cout << "-h   | --help               For showing this message" << std::endl;
   std::cout << "-t   | --test               For Running the tests" << std::endl;
@@ -122,7 +122,7 @@ int main(int argc, char** argv) {
   }
   current_path[sizeof(current_path) - 1] = '\0';
 
-  // Getting the rocprofv2 binary path to locate rocmtools library path
+  // Getting the rocprofv2 binary path to locate rocprofiler library path
   fs::path bin_path;
   if (Dl_info dl_info; dladdr((void*)runApp, &dl_info) != 0) {
     bin_path = fs::path(dl_info.dli_fname);
@@ -140,7 +140,7 @@ int main(int argc, char** argv) {
     if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "-h") == 0) {
       printUsage();
       return 1;
-      // Normal ROCMTools Tests
+      // Normal ROCProfiler Tests
     } else if (strcmp(argv[i], "-t") == 0 || strcmp(argv[i], "--test") == 0) {
       fs::path test_path = bin_path;
       test_path = test_path.replace_filename("run_tests.sh");
@@ -225,7 +225,7 @@ int main(int argc, char** argv) {
   }
   app_args[j] = NULL;
 
-  // Providing LD_PRELOAD of ROCMTools Library to runApp function
+  // Providing LD_PRELOAD of ROCProfiler Library to runApp function
   std::string pathenv_str = "LD_PRELOAD=librocprofiler_tool.so";
   std::string current_ld_preload;
   if (getenv("LD_PRELOAD")) current_ld_preload = getenv("LD_PRELOAD");

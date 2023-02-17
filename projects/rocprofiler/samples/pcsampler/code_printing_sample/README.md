@@ -95,7 +95,7 @@ by one or more payloads:
  */
 typedef struct {
   /**
-   * ROCMtool General Record base header to identify the id and kind of every
+   * ROCProfiler General Record base header to identify the id and kind of every
    * record
    */
   rocprofiler_record_header_t header;

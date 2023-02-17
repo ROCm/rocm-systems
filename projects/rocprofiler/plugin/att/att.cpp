@@ -71,10 +71,10 @@ class att_plugin_t {
     }
 
     size_t name_length;
-    CHECK_ROCMTOOLS(rocprofiler_query_kernel_info_size(ROCPROFILER_KERNEL_NAME,
+    CHECK_ROCPROFILER(rocprofiler_query_kernel_info_size(ROCPROFILER_KERNEL_NAME,
                                                        att_tracer_record->kernel_id, &name_length));
     const char* kernel_name_c = static_cast<const char*>(malloc(name_length * sizeof(char)));
-    CHECK_ROCMTOOLS(rocprofiler_query_kernel_info(ROCPROFILER_KERNEL_NAME,
+    CHECK_ROCPROFILER(rocprofiler_query_kernel_info(ROCPROFILER_KERNEL_NAME,
                                                   att_tracer_record->kernel_id, &kernel_name_c));
 
     std::string name_demangled = rocmtools::truncate_name(rocmtools::cxx_demangle(kernel_name_c));

@@ -22,6 +22,11 @@
 
 cmake_minimum_required(VERSION 3.18.0)
 
+# Build is not supported on Windows plaform
+if(WIN32)
+  message(FATAL_ERROR "Windows build is not supported.")
+endif()
+
 # Set module name and project name.
 set(ROCPROFILER_NAME "rocprofiler")
 set(ROCPROFILER_TARGET "${ROCPROFILER_NAME}64")
@@ -35,11 +40,6 @@ if(NOT DEFINED ROCM_PATH)
   set(ROCM_PATH
       "/opt/rocm"
       CACHE STRING "Default ROCM installation directory")
-endif()
-
-# Build is not supported on Windows plaform
-if(WIN32)
-  message(FATAL_ERROR "Windows build is not supported.")
 endif()
 
 set(CMAKE_CXX_STANDARD 17)

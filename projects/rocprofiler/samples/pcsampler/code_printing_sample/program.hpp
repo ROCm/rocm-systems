@@ -41,7 +41,7 @@
 #define ROCPROFILER_ERROR(code)                                           \
     do {                                                                \
         fprintf(stderr,                                                 \
-                PROGNAME ": Assertion failed at %s:%d, ROCmtools error: %s\n", \
+                PROGNAME ": Assertion failed at %s:%d, ROCProfiler error: %s\n", \
                 __FILE__, __LINE__, rocprofiler_error_str(code));      \
         fflush(stderr);                                                 \
     } while (false);

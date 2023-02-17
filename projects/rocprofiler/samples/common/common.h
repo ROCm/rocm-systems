@@ -44,7 +44,7 @@
 // Macro to check ROCPROFILER calls status
 #define CHECK_ROCPROFILER(call)                                                                      \
   do {                                                                                             \
-    if ((call) != ROCPROFILER_STATUS_SUCCESS) rocmtools::fatal("Error: ROCMTools API Call Error!");  \
+    if ((call) != ROCPROFILER_STATUS_SUCCESS) rocmtools::fatal("Error: ROCProfiler API Call Error!");  \
   } while (false)
 
 // Device (Kernel) functions, it must be void

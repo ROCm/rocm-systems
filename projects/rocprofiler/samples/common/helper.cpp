@@ -84,7 +84,7 @@ std::string string_printf(const char* format, ...) {
   message += info.sstream.str();
 #endif /* defined (ENABLE_BACKTRACE) */
 
-  std::string errmsg("ROCMTools: fatal error: " + message);
+  std::string errmsg("ROCProfiler: fatal error: " + message);
   fputs(errmsg.c_str(), stderr);
 
   throw(errmsg);

@@ -18,17 +18,17 @@
  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  THE SOFTWARE. */
 
-/** \section rocprofiler_plugin_api ROCMTools Plugin API
+/** \section rocprofiler_plugin_api ROCProfiler Plugin API
  *
- * The ROCMTools Plugin API is used by the ROCMTools Tool to output all
- * profiling information. Different implementations of the ROCMTools Plugin
+ * The ROCProfiler Plugin API is used by the ROCProfiler Tool to output all
+ * profiling information. Different implementations of the ROCProfiler Plugin
  * API can be developed that output the data in different formats. The
- * ROCMTools Tool can be configured to load a specific library that supports
+ * ROCProfiler Tool can be configured to load a specific library that supports
  * the user desired format.
  *
- * The API is not thread safe. It is the responsibility of the ROCMTools Tool
+ * The API is not thread safe. It is the responsibility of the ROCProfiler Tool
  * to ensure the operations are synchronized and not called concurrently. There
- * is no requirement for the ROCMTools Tool to report trace data in any
+ * is no requirement for the ROCProfiler Tool to report trace data in any
  * specific order. If the format supported by plugin requires specific
  * ordering, it is the responsibility of the plugin implementation to perform
  * any necessary sorting.
@@ -36,7 +36,7 @@
 
 /**
  * \file
- * ROCMTools Tool Plugin API interface.
+ * ROCProfiler Tool Plugin API interface.
  */
 
 #ifndef ROCPROFILER_PLUGIN_H_
@@ -50,14 +50,14 @@
 extern "C" {
 #endif /* __cplusplus */
 
-/** \defgroup rocprofiler_plugins ROCMTools Plugin API Specification
+/** \defgroup rocprofiler_plugins ROCProfiler Plugin API Specification
  * @{
  */
 
 /** \defgroup initialization_group Initialization and Finalization
  * \ingroup rocprofiler_plugins
  *
- * The ROCMTools Plugin API must be initialized before using any of the
+ * The ROCProfiler Plugin API must be initialized before using any of the
  * operations to report trace data, and finalized after the last trace data has
  * been reported.
  *
@@ -68,14 +68,14 @@ extern "C" {
  * Initialize plugin.
  * Must be called before any other operation.
  *
- * @param[in] rocprofiler_major_version The major version of the ROCMTools API
- * being used by the ROCMTools Tool. An error is reported if this does not
- * match the major version of the ROCMTools API used to build the plugin
+ * @param[in] rocprofiler_major_version The major version of the ROCProfiler API
+ * being used by the ROCProfiler Tool. An error is reported if this does not
+ * match the major version of the ROCProfiler API used to build the plugin
  * library. This ensures compatibility of the trace data format.
- * @param[in] rocprofiler_minor_version The minor version of the ROCMTools API
- * being used by the ROCMTools Tool. An error is reported if the
- * \p ROCMTools_major_version matches and this is greater than the minor
- * version of the ROCMTools API used to build the plugin library. This ensures
+ * @param[in] rocprofiler_minor_version The minor version of the ROCProfiler API
+ * being used by the ROCProfiler Tool. An error is reported if the
+ * \p rocprofiler_major_version matches and this is greater than the minor
+ * version of the ROCProfiler API used to build the plugin library. This ensures
  * compatibility of the trace data format.
  * @return Returns 0 on success and -1 on error.
  */

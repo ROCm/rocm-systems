@@ -59,10 +59,10 @@
 
 namespace fs = std::experimental::filesystem;
 
-// Macro to check ROCMTools calls status
-#define CHECK_ROCMTOOLS(call)                                                                      \
+// Macro to check ROCProfiler calls status
+#define CHECK_ROCPROFILER(call)                                                                      \
   do {                                                                                             \
-    if ((call) != ROCPROFILER_STATUS_SUCCESS) rocmtools::fatal("Error: ROCMTools API Call Error!");  \
+    if ((call) != ROCPROFILER_STATUS_SUCCESS) rocmtools::fatal("Error: ROCProfiler API Call Error!");  \
   } while (false)
 
 namespace {
@@ -193,14 +193,6 @@ att_parsed_input_t GetATTParams() {
   ATT_PARAM_NAMES["PERFCOUNTERS_COL_PERIOD"] = ROCPROFILER_ATT_MAXVALUE;
   ATT_PARAM_NAMES["KERNEL"] = ROCPROFILER_ATT_MAXVALUE;
   ATT_PARAM_NAMES["REDUCED_MEMORY"] = ROCPROFILER_ATT_MAXVALUE;
- /*
-  ATT_PARAM_NAMES["ATT_MASK"] = ROCMTOOLS_ATT_MASK;
-  ATT_PARAM_NAMES["TOKEN_MASK"] = ROCMTOOLS_ATT_TOKEN_MASK;
-  ATT_PARAM_NAMES["TOKEN_MASK2"] = ROCMTOOLS_ATT_TOKEN_MASK2;
-  ATT_PARAM_NAMES["SE_MASK"] = ROCMTOOLS_ATT_SE_MASK;
-  ATT_PARAM_NAMES["PERF_MASK"] = ROCMTOOLS_ATT_PERF_MASK;
-  ATT_PARAM_NAMES["PERF_CTRL"] = ROCMTOOLS_ATT_PERF_CTRL;
-*/
 
   // Default values used for token generation.
   std::unordered_map<std::string, uint32_t> default_params = {
@@ -308,14 +300,14 @@ void finish() {
   }
   if (session_created.load(std::memory_order_relaxed)) {
     session_created.exchange(false, std::memory_order_release);
-    CHECK_ROCMTOOLS(rocprofiler_terminate_session(session_id));
+    CHECK_ROCPROFILER(rocprofiler_terminate_session(session_id));
     for ([[maybe_unused]] rocprofiler_buffer_id_t buffer_id : buffer_ids) {
-      CHECK_ROCMTOOLS(rocprofiler_flush_data(session_id, buffer_id));
+      CHECK_ROCPROFILER(rocprofiler_flush_data(session_id, buffer_id));
     }
   }
 
-  // CHECK_ROCMTOOLS(rocprofiler_destroy_session(session_id));
-  // CHECK_ROCMTOOLS(rocprofiler_finalize());
+  // CHECK_ROCPROFILER(rocprofiler_destroy_session(session_id));
+  // CHECK_ROCPROFILER(rocprofiler_finalize());
 }
 
 // load plugins
@@ -327,7 +319,7 @@ void plugins_load() {
       if (fs::path(dl_info.dli_fname).string().find("build") != std::string::npos) {
         plugin_name = "libfile_plugin.so";
       } else {
-        plugin_name = "rocmtools/libfile_plugin.so";
+        plugin_name = "rocprofiler/libfile_plugin.so";
       }
     }
     if (!plugin.emplace(fs::path(dl_info.dli_fname).replace_filename(plugin_name)).is_valid()) {
@@ -353,7 +345,7 @@ void wait_for_amdsys() {
         // Start
         case 4: {
           printf("AMDSYS:: Starting Tools Session...\n");
-          CHECK_ROCMTOOLS(rocprofiler_start_session(session_id));
+          CHECK_ROCPROFILER(rocprofiler_start_session(session_id));
           session_created.exchange(true, std::memory_order_release);
           break;
         }
@@ -362,9 +354,9 @@ void wait_for_amdsys() {
           if (session_created.load(std::memory_order_relaxed)) {
             printf("AMDSYS:: Stopping Tools Session...\n");
             session_created.exchange(false, std::memory_order_release);
-            CHECK_ROCMTOOLS(rocprofiler_terminate_session(session_id));
+            CHECK_ROCPROFILER(rocprofiler_terminate_session(session_id));
             for ([[maybe_unused]] rocprofiler_buffer_id_t buffer_id : buffer_ids) {
-              CHECK_ROCMTOOLS(rocprofiler_flush_data(session_id, buffer_id));
+              CHECK_ROCPROFILER(rocprofiler_flush_data(session_id, buffer_id));
             }
           }
           break;
@@ -375,9 +367,9 @@ void wait_for_amdsys() {
           if (session_created.load(std::memory_order_relaxed)) {
             printf("AMDSYS:: Stopping Tools Session...\n");
             session_created.exchange(false, std::memory_order_release);
-            CHECK_ROCMTOOLS(rocprofiler_terminate_session(session_id));
+            CHECK_ROCPROFILER(rocprofiler_terminate_session(session_id));
             for ([[maybe_unused]] rocprofiler_buffer_id_t buffer_id : buffer_ids) {
-              CHECK_ROCMTOOLS(rocprofiler_flush_data(session_id, buffer_id));
+              CHECK_ROCPROFILER(rocprofiler_flush_data(session_id, buffer_id));
             }
           }
           amd_sys_handler.exchange(false, std::memory_order_release);
@@ -421,7 +413,7 @@ ROCPROFILER_EXPORT bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
                              uint64_t failed_tool_count, const char* const* failed_tool_names) {
   if (rocprofiler_version_major() != ROCPROFILER_VERSION_MAJOR ||
       rocprofiler_version_minor() < ROCPROFILER_VERSION_MINOR) {
-    warning("the ROCMTools API version is not compatible with this tool");
+    warning("the ROCProfiler API version is not compatible with this tool");
     return true;
   }
 
@@ -434,7 +426,7 @@ ROCPROFILER_EXPORT bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
     amd_sys_handler.exchange(true, std::memory_order_release);
   }
 
-  CHECK_ROCMTOOLS(rocprofiler_initialize());
+  CHECK_ROCPROFILER(rocprofiler_initialize());
 
   // Printing out info
   char* info_symb = getenv("ROCPROFILER_COUNTER_LIST");
@@ -443,7 +435,7 @@ ROCPROFILER_EXPORT bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
       printf("Basic HW counters:\n");
     else
       printf("Derived metrics:\n");
-    CHECK_ROCMTOOLS(rocprofiler_iterate_counters(info_callback));
+    CHECK_ROCPROFILER(rocprofiler_iterate_counters(info_callback));
     exit(1);
   }
 
@@ -485,7 +477,7 @@ ROCPROFILER_EXPORT bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
     parameters.emplace_back(param);
   }
 
-  CHECK_ROCMTOOLS(rocprofiler_create_session(ROCPROFILER_KERNEL_REPLAY_MODE, &session_id));
+  CHECK_ROCPROFILER(rocprofiler_create_session(ROCPROFILER_KERNEL_REPLAY_MODE, &session_id));
 
   bool want_pc_sampling = getenv("ROCPROFILER_PC_SAMPLING");
 
@@ -502,7 +494,7 @@ ROCPROFILER_EXPORT bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
   if (parameters.size() > 0) filters_requested.emplace_back(ROCPROFILER_ATT_TRACE_COLLECTION);
 
   rocprofiler_buffer_id_t buffer_id;
-  CHECK_ROCMTOOLS(rocprofiler_create_buffer(
+  CHECK_ROCPROFILER(rocprofiler_create_buffer(
       session_id,
       [](const rocprofiler_record_header_t* record, const rocprofiler_record_header_t* end_record,
          rocprofiler_session_id_t session_id, rocprofiler_buffer_id_t buffer_id) {
@@ -512,7 +504,7 @@ ROCPROFILER_EXPORT bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
   buffer_ids.emplace_back(buffer_id);
 
   rocprofiler_buffer_id_t buffer_id_1;
-  CHECK_ROCMTOOLS(rocprofiler_create_buffer(
+  CHECK_ROCPROFILER(rocprofiler_create_buffer(
       session_id,
       [](const rocprofiler_record_header_t* record, const rocprofiler_record_header_t* end_record,
          rocprofiler_session_id_t session_id, rocprofiler_buffer_id_t buffer_id_1) {
@@ -527,19 +519,19 @@ ROCPROFILER_EXPORT bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
         printf("Enabling Counter Collection\n");
         rocprofiler_filter_id_t filter_id;
         [[maybe_unused]] rocprofiler_filter_property_t property = {};
-        CHECK_ROCMTOOLS(rocprofiler_create_filter(
+        CHECK_ROCPROFILER(rocprofiler_create_filter(
             session_id, filter_kind, rocprofiler_filter_data_t{.counters_names = &counters_[0]},
             counters_.size(), &filter_id, property));
-        CHECK_ROCMTOOLS(rocprofiler_set_filter_buffer(session_id, filter_id, buffer_id_1));
+        CHECK_ROCPROFILER(rocprofiler_set_filter_buffer(session_id, filter_id, buffer_id_1));
         filter_ids.emplace_back(filter_id);
         break;
       }
       case ROCPROFILER_DISPATCH_TIMESTAMPS_COLLECTION: {
         rocprofiler_filter_id_t filter_id;
         [[maybe_unused]] rocprofiler_filter_property_t property = {};
-        CHECK_ROCMTOOLS(rocprofiler_create_filter(session_id, filter_kind, rocprofiler_filter_data_t{},
+        CHECK_ROCPROFILER(rocprofiler_create_filter(session_id, filter_kind, rocprofiler_filter_data_t{},
                                                 0, &filter_id, property));
-        CHECK_ROCMTOOLS(rocprofiler_set_filter_buffer(session_id, filter_id, buffer_id_1));
+        CHECK_ROCPROFILER(rocprofiler_set_filter_buffer(session_id, filter_id, buffer_id_1));
         filter_ids.emplace_back(filter_id);
         break;
       }
@@ -547,11 +539,11 @@ ROCPROFILER_EXPORT bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
         printf("Enabling API Tracing\n");
         rocprofiler_filter_id_t filter_id;
         [[maybe_unused]] rocprofiler_filter_property_t property = {};
-        CHECK_ROCMTOOLS(rocprofiler_create_filter(session_id, filter_kind,
+        CHECK_ROCPROFILER(rocprofiler_create_filter(session_id, filter_kind,
                                                 rocprofiler_filter_data_t{&apis_requested[0]},
                                                 apis_requested.size(), &filter_id, property));
-        CHECK_ROCMTOOLS(rocprofiler_set_filter_buffer(session_id, filter_id, buffer_id));
-        CHECK_ROCMTOOLS(
+        CHECK_ROCPROFILER(rocprofiler_set_filter_buffer(session_id, filter_id, buffer_id));
+        CHECK_ROCPROFILER(
             rocprofiler_set_api_trace_sync_callback(session_id, filter_id, plugin_write_record));
         filter_ids.emplace_back(filter_id);
         break;
@@ -568,11 +560,11 @@ ROCPROFILER_EXPORT bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
         property.data_count = kernel_names_c.size();
         property.name_regex = kernel_names_c.data();
 
-        CHECK_ROCMTOOLS(
+        CHECK_ROCPROFILER(
             rocprofiler_create_filter(session_id, ROCPROFILER_ATT_TRACE_COLLECTION,
                                     rocprofiler_filter_data_t{.att_parameters = &parameters[0]},
                                     parameters.size(), &filter_id, property));
-        CHECK_ROCMTOOLS(rocprofiler_set_filter_buffer(session_id, filter_id, buffer_id_1));
+        CHECK_ROCPROFILER(rocprofiler_set_filter_buffer(session_id, filter_id, buffer_id_1));
         filter_ids.emplace_back(filter_id);
         break;
       }
@@ -580,10 +572,10 @@ ROCPROFILER_EXPORT bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
         puts("Enabling PC sampling");
         rocprofiler_filter_id_t filter_id;
         [[maybe_unused]] rocprofiler_filter_property_t property = {};
-        CHECK_ROCMTOOLS(rocprofiler_create_filter(session_id, filter_kind,
+        CHECK_ROCPROFILER(rocprofiler_create_filter(session_id, filter_kind,
                                                 rocprofiler_filter_data_t{},
                                                 0, &filter_id, property));
-        CHECK_ROCMTOOLS(rocprofiler_set_filter_buffer(session_id, filter_id, buffer_id));
+        CHECK_ROCPROFILER(rocprofiler_set_filter_buffer(session_id, filter_id, buffer_id));
         filter_ids.emplace_back(filter_id);
         break;
       }
@@ -593,7 +585,7 @@ ROCPROFILER_EXPORT bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
   }
 
   if (getenv("ROCPROFILER_ENABLE_AMDSYS") == nullptr) {
-    CHECK_ROCMTOOLS(rocprofiler_start_session(session_id));
+    CHECK_ROCPROFILER(rocprofiler_start_session(session_id));
     session_created.exchange(true, std::memory_order_release);
   }
   return true;

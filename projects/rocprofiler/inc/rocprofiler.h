@@ -37,11 +37,11 @@ THE SOFTWARE.
 // a profiling queue supporting a submit callback interface.
 //
 //
-/** \mainpage ROCMTools API Specification
+/** \mainpage ROCProfiler API Specification
  *
  * \section introduction Introduction
  *
- * ROCMTools library, GPU Applications Profiling/Tracing APIs.
+ * ROCProfiler library, GPU Applications Profiling/Tracing APIs.
  * The API provides functionality for profiling GPU applications in kernel and
  * application and user mode and also with no replay mode at all and it
  * provides the records pool support with an easy sequence of calls, so the
@@ -201,7 +201,7 @@ ROCPROFILER_API uint32_t rocprofiler_version_minor();
  */
 
 /**
- * ROCMTools API status codes.
+ * ROCProfiler API status codes.
  */
 typedef enum {
   /**
@@ -213,11 +213,11 @@ typedef enum {
    */
   ROCPROFILER_STATUS_ERROR = -1,
   /**
-   * ROCMTool is already initialized.
+   * ROCProfiler is already initialized.
    */
   ROCPROFILER_STATUS_ERROR_ALREADY_INITIALIZED = -2,
   /**
-   * ROCMTool is not initialized.
+   * ROCProfiler is not initialized.
    */
   ROCPROFILER_STATUS_ERROR_NOT_INITIALIZED = -3,
   /**
@@ -347,7 +347,7 @@ typedef enum {
 /**
  * Query the textual description of the given error for the current thread.
  *
- * Returns a NULL terminated string describing the error of the given ROCMTools
+ * Returns a NULL terminated string describing the error of the given ROCProfiler
  * API call by the calling thread that did not return success.
  *
  * @retval Return the error string.
@@ -356,7 +356,7 @@ ROCPROFILER_API const char* rocprofiler_error_str(rocprofiler_status_t status) R
 
 /** @} */
 
-/** \defgroup rocprofiler_general_group General ROCMTools Requirements
+/** \defgroup rocprofiler_general_group General ROCProfiler Requirements
  * @{
  */
 
@@ -385,7 +385,7 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_finalize() ROCPROFILER_VERSION_
 /**
  * \addtogroup sessions_handling_group
  * @{
- * ROCMTools Session Modes.
+ * ROCProfiler Session Modes.
  */
 
 /**
@@ -483,7 +483,7 @@ typedef enum {
 } rocprofiler_record_kind_t;
 
 /**
- * Generic ROCMtool record header.
+ * Generic ROCProfiler record header.
  */
 typedef struct {
   /**
@@ -954,7 +954,7 @@ typedef struct {
  */
 typedef struct {
   /**
-   * ROCMtool General Record base header to identify the id and kind of every
+   * ROCProfiler General Record base header to identify the id and kind of every
    * record
    */
   rocprofiler_record_header_t header;
@@ -1030,7 +1030,7 @@ typedef struct {
  */
 typedef struct {
   /**
-   * ROCMtool General Record base header to identify the id and kind of every
+   * ROCProfiler General Record base header to identify the id and kind of every
    * record
    */
   rocprofiler_record_header_t header;
@@ -1059,27 +1059,27 @@ typedef struct {
  * This will represent all the information reported by the
  * ATT tracer such as the kernel and its thread trace data.
  * This record can be flushed to the user using
- * ::rocmtools_buffer_callback_t
+ * ::rocprofiler_buffer_callback_t
  */
 typedef struct {
   /**
-   * ROCMtool General Record base header to identify the id and kind of every
+   * ROCProfiler General Record base header to identify the id and kind of every
    * record
    */
   rocprofiler_record_header_t header;
   /**
    * Kernel Identifier to be used by the user to get the kernel info using
-   * ::rocmtools_query_kernel_info
+   * ::rocprofiler_query_kernel_info
    */
   rocprofiler_kernel_id_t kernel_id;
   /**
    * Agent Identifier to be used by the user to get the Agent Information using
-   * ::rocmtools_query_agent_info
+   * ::rocprofiler_query_agent_info
    */
   rocprofiler_agent_id_t gpu_id;
   /**
    * Queue Identifier to be used by the user to get the Queue Information using
-   * ::rocmtools_query_agent_info
+   * ::rocprofiler_query_agent_info
    */
   rocprofiler_queue_id_t queue_id;
   /**
@@ -1481,7 +1481,7 @@ typedef struct {
  */
 typedef struct {
   /**
-   * ROCMtool General Record base header to identify the id and kind of every
+   * ROCProfiler General Record base header to identify the id and kind of every
    * record
    */
   rocprofiler_record_header_t header;
@@ -1574,7 +1574,7 @@ typedef struct {
  */
 typedef struct {
   /**
-   * ROCMtool General Record base header to identify the id and kind of every
+   * ROCProfiler General Record base header to identify the id and kind of every
    * record
    */
   rocprofiler_record_header_t header;
@@ -1682,7 +1682,7 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_next_record(const rocprofiler_r
 
 /** @} */
 
-/** \defgroup sessions_handling_group ROCMTools Sessions
+/** \defgroup sessions_handling_group ROCProfiler Sessions
  * @{
  */
 
@@ -1712,7 +1712,7 @@ typedef enum {
 
 /**
  * Create Session
- * A ROCMtools Session is having enough information about what needs to be
+ * A ROCProfiler Session is having enough information about what needs to be
  * collected or traced and it allows the user to start/stop profiling/tracing
  * whenever required.
  * Session will hold multiple mode, that can be added using

@@ -52,7 +52,7 @@ THE SOFTWARE.
  *
  * \section introduction Introduction
  *
- * The goal of this test is to test ROCmTools APIs to collect ATT traces.
+ * The goal of this test is to test ROCProfiler APIs to collect ATT traces.
  *
  * A simple vectoradd_float kernel is launched and the trace results are printed 
  * as console output
@@ -62,7 +62,7 @@ THE SOFTWARE.
 // function to check att tracing API status
 auto CheckApi = [](rocprofiler_status_t status) {
   if (status != ROCPROFILER_STATUS_SUCCESS) {
-    std::cout << "ROCmTools API Error" << std::endl;
+    std::cout << "ROCProfiler API Error" << std::endl;
   }
   assert(status == ROCPROFILER_STATUS_SUCCESS);
 };
@@ -210,7 +210,7 @@ int LaunchVectorAddKernel() {
 
 int main(int argc, char** argv) {
 
-  // inititalize rocmtools
+  // inititalize ROCProfiler
   CheckApi(rocprofiler_initialize());
 
   // Att trace collection parameters
@@ -253,7 +253,7 @@ int main(int argc, char** argv) {
   // destroy session
   CheckApi(rocprofiler_destroy_session(session_id));
 
-  // finalize att tracing by destroying rocmtool object
+  // finalize att tracing by destroying rocprofiler object
   CheckApi(rocprofiler_finalize());
   return 0;
 }

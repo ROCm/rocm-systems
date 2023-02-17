@@ -1,8 +1,8 @@
-= CTF plugin for ROCMTools
+= CTF plugin for ROCProfiler
 13 December 2022
 Philippe Proulx
 
-This plugin writes the received ROCMTools tracer and profiler records to
+This plugin writes the received ROCProfiler tracer and profiler records to
 a https://diamon.org/ctf/[CTF] trace.
 
 == Build requirements
@@ -77,7 +77,7 @@ All CTF event records have the following common fields:
     Correlation ID.
 --
 +
-For each ROCMTools HSA API tracer record for the HSA function named
+For each ROCProfiler HSA API tracer record for the HSA function named
 `__name__`, this plugin writes two event records:
 +
 `__name___begin`:::
@@ -112,7 +112,7 @@ All CTF event records have the following common fields:
     Kernel name (empty string if not available).
 --
 +
-For each ROCMTools HIP API tracer record for the HIP function named
+For each ROCProfiler HIP API tracer record for the HIP function named
 `__name__`, this plugin writes two event records:
 +
 `__name__Begin`:::

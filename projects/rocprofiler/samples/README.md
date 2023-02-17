@@ -48,10 +48,10 @@ This code sample demonstrates how to use the APIs to collect counters and metric
 
 
 ## How to compile
-In order to get the samples to compile, make sure to copy rocmtools binaries into /opt/rocm/lib
-Running 'make install' inside the rocmtools/build folder will copy the binaries to /opt/rocm/lib
+In order to get the samples to compile, make sure to copy rocprofiler binaries into /opt/rocm/lib
+Running 'make install' inside the rocprofiler/build folder will copy the binaries to /opt/rocm/lib
 
-Alternately, change the 'ROCMTOOLS_LIBS_PATH' variable in the Makefile to point to the rocmtools/build folder. 
+Alternately, change the 'ROCPROFILER_LIBS_PATH' variable in the Makefile to point to the rocprofiler/build folder. 
 After modifications to Makefile are done, run:
 
   ```bash

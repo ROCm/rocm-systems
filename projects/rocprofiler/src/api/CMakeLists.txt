@@ -1,5 +1,5 @@
 # ############################################################################################################################################
-# ROCMTOOL General Requirements
+# ROCProfiler General Requirements
 # ############################################################################################################################################
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
@@ -71,7 +71,7 @@ execute_process(
 # COMMENT "Generating derived_counter.cpp...")
 
 # ############################################################################################################################################
-# ROCMTOOL Tracer HIP/HSA Parsing
+# ROCProfiler Tracer HIP/HSA Parsing
 # ############################################################################################################################################
 get_property(HIP_INCLUDE_DIRECTORIES TARGET hip::amdhip64 PROPERTY INTERFACE_INCLUDE_DIRECTORIES)
 find_file(HIP_RUNTIME_API_H hip_runtime_api.h
@@ -127,7 +127,7 @@ set(GENERATED_SOURCES
   hsa_prof_str.inline.h)
 
 # ############################################################################################################################################
-# ROCMTOOL API
+# ROCProfiler API
 # ############################################################################################################################################
 # PC sampling uses libpciaccess as a fallback if the debugfs ioctl is
 # unavailable
@@ -150,8 +150,8 @@ file(GLOB ROCPROFILER_SRC_FILES ${CMAKE_CURRENT_SOURCE_DIR}/*.cpp)
 file(GLOB ROCPROFILER_PROFILER_SRC_FILES ${PROJECT_SOURCE_DIR}/src/core/session/profiler/profiler.cpp)
 file(GLOB ROCPROFILER_TRACER_SRC_FILES ${PROJECT_SOURCE_DIR}/src/core/session/tracer/*.cpp)
 file(GLOB ROCPROFILER_ROCTRACER_SRC_FILES ${PROJECT_SOURCE_DIR}/src/core/session/tracer/src/*.cpp)
-file(GLOB ROCMTOOLS_ATT_SRC_FILES ${PROJECT_SOURCE_DIR}/src/core/session/att/att.cpp)
-file(GLOB ROCMTOOL_CLASS_SRC_FILES ${CMAKE_CURRENT_SOURCE_DIR}/rocmtool.cpp)
+file(GLOB ROCPROFILER_ATT_SRC_FILES ${PROJECT_SOURCE_DIR}/src/core/session/att/att.cpp)
+file(GLOB ROCPROFILER_CLASS_SRC_FILES ${CMAKE_CURRENT_SOURCE_DIR}/rocmtool.cpp)
 file(GLOB ROCPROFILER_SPM_SRC_FILES ${PROJECT_SOURCE_DIR}/src/core/session/spm/spm.cpp)
 
 
@@ -188,9 +188,9 @@ file(GLOB CORE_PC_SAMPLING_FILES ${CORE_PC_SAMPLING_DIR}/core/*.cpp ${CORE_PC_SA
 # Compiling/Installing ROCProfiler API
 add_library(${ROCPROFILER_TARGET} SHARED 
   ${ROCPROFILER_SRC_FILES}
-  ${ROCMTOOL_CLASS_SRC_FILES}
+  ${ROCPROFILER_CLASS_SRC_FILES}
   ${ROCPROFILER_PROFILER_SRC_FILES}
-  ${ROCMTOOLS_ATT_SRC_FILES}
+  ${ROCPROFILER_ATT_SRC_FILES}
   ${CORE_HARDWARE_SRC_FILES}
   ${CORE_HSA_SRC_FILES}
   ${ROCPROFILER_SPM_SRC_FILES}

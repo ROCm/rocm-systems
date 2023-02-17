@@ -776,7 +776,7 @@ namespace {
 
 constexpr std::uint64_t ns_per_s = 1'000'000'000ULL;
 
-// Samples the ROCMTools clock and returns the value.
+// Samples the ROCProfiler clock and returns the value.
 std::uint64_t GetClkVal() {
   rocprofiler_timestamp_t ts;
   [[maybe_unused]] const auto ret = rocprofiler_get_timestamp(&ts);
@@ -786,16 +786,16 @@ std::uint64_t GetClkVal() {
 }
 
 // Updates `offset` and `delta`, if needed, to a more accurate clock
-// class offset and a smaller ROCMTools clock value delta.
+// class offset and a smaller ROCProfiler clock value delta.
 //
-// This function samples the ROCMTools clock twice, also sampling the
-// real-time clock in between, and uses the average ROCMTools clock
+// This function samples the ROCProfiler clock twice, also sampling the
+// real-time clock in between, and uses the average ROCProfiler clock
 // value to approximate the actual clock class offset.
 //
 // This strategy is based on the measure_single_clock_offset() function
 // of the LTTng-tools project <https://lttng.org/>.
 void UpdateClkClsOffsetAndDelta(std::uint64_t& offset, std::uint64_t& delta) {
-  // Sample ROCMTools clock (first time).
+  // Sample ROCProfiler clock (first time).
   const auto rocm_clk_val1 = GetClkVal();
 
   // Sample real-time clock.
@@ -804,10 +804,10 @@ void UpdateClkClsOffsetAndDelta(std::uint64_t& offset, std::uint64_t& delta) {
 
   assert(ret == 0);
 
-  // Sample ROCMTools clock (second time).
+  // Sample ROCProfiler clock (second time).
   const auto rocm_clk_val2 = GetClkVal();
 
-  // Compute the current ROCMTools clock value delta.
+  // Compute the current ROCProfiler clock value delta.
   const auto this_delta = rocm_clk_val2 - rocm_clk_val1;
 
   if (this_delta > delta) {
@@ -815,7 +815,7 @@ void UpdateClkClsOffsetAndDelta(std::uint64_t& offset, std::uint64_t& delta) {
     return;
   }
 
-  // Compute the average ROCMTools clock value.
+  // Compute the average ROCProfiler clock value.
   const auto rocm_clk_val_avg = (rocm_clk_val1 + rocm_clk_val2) >> 1;
 
   // Compute the real-time clock value in nanoseconds.

@@ -69,7 +69,7 @@ Filter::Filter(rocprofiler_filter_id_t id, rocprofiler_filter_kind_t filter_kind
     }
     default: {
       warning(
-          "Error: ROCMtools filter specified is not supported for "
+          "Error: ROCProfiler filter specified is not supported for "
           "profiler mode!\n");
     }
   }
@@ -92,7 +92,7 @@ std::vector<std::string> Filter::GetCounterData() {
     return profiler_counter_names_;
   }
   fatal(
-      "Error: ROCMtools filter specified is not supported for "
+      "Error: ROCProfiler filter specified is not supported for "
       "Counter Collection Filter!\n");
 }
 
@@ -101,7 +101,7 @@ std::vector<rocprofiler_tracer_activity_domain_t> Filter::GetTraceData() {
     return tracer_apis_;
   }
   fatal(
-      "Error: ROCMtools filter specified is not supported for "
+      "Error: ROCProfiler filter specified is not supported for "
       "profiler mode!\n");
 }
 
@@ -110,7 +110,7 @@ std::vector<rocprofiler_att_parameter_t> Filter::GetAttParametersData() {
     return att_parameters_;
   }
   fatal(
-      "Error: ROCMtools filter specified is not supported for "
+      "Error: ROCProfiler filter specified is not supported for "
       "ATT tracing mode!\n");
 }
 
@@ -119,7 +119,7 @@ rocprofiler_spm_parameter_t* Filter::GetSpmParameterData() {
     return spm_parameter_;
   }
   fatal(
-      "Error: ROCMtools filter specified is not supported for "
+      "Error: ROCProfiler filter specified is not supported for "
       "SPM collection  mode!\n");
 }
 void Filter::SetProperty(rocprofiler_filter_property_t property) {
@@ -181,7 +181,7 @@ void Filter::SetProperty(rocprofiler_filter_property_t property) {
       break;
       // TODO(aelwazir): Check for empty property
       // warning(
-      //     "Error: ROCMtools filter specified is not supported for "
+      //     "Error: ROCProfiler filter specified is not supported for "
       //     "profiler mode!\n");
   }
 }
@@ -211,7 +211,7 @@ std::variant<std::vector<std::string>, uint32_t*> Filter::GetProperty(
     }
     default:
       fatal(
-          "Error: ROCMtools filter specified is not supported for the given "
+          "Error: ROCProfiler filter specified is not supported for the given "
           "kind!");
       break;
   }
@@ -241,7 +241,7 @@ size_t Filter::GetPropertiesCount(rocprofiler_filter_property_kind_t kind) {
     }
   }
   fatal(
-      "Error: ROCMtools filter specified is not supported for the given "
+      "Error: ROCProfiler filter specified is not supported for the given "
       "kind!");
 }
 

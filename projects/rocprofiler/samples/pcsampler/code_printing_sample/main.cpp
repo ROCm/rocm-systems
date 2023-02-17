@@ -228,7 +228,7 @@ run_kernel(program_options const &opts)
           rocprofiler_create_session(ROCPROFILER_NONE_REPLAY_MODE, &sid),
           rocprofiler_ok);
         if (ROCPROFILER_STATUS_SUCCESS != rocprofiler_ok) {
-            fputs("error: failed to create rocmtools session\n", stderr);
+            fputs("error: failed to create rocprofiler session\n", stderr);
             return EXIT_FAILURE;
         }
 

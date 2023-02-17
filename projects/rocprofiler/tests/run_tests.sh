@@ -1,12 +1,11 @@
 #!/bin/bash
 
 CURRENT_DIR="$( dirname -- "$0"; )";
-export PATH=$rocmtoolsdir:$PATH
 
 
 echo -e "Running Profiler Tests"
 
-echo -e "Running Unit tests for rocmtools"
+echo -e "Running Unit tests for rocprofiler"
 eval ${CURRENT_DIR}/tests/unittests/core/runCoreUnitTests
 eval ${CURRENT_DIR}/tests/unittests/profiler/runProfilerUnitTests
 

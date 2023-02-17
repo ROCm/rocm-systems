@@ -1,11 +1,11 @@
-# ROCMTools testing environment.
+# ROCProfiler testing environment.
 
-This document explains how ROCMTools testing environment works.
+This document explains how ROCProfiler testing environment works.
 We make use of the GoogleTest (Gtest) framework to automatically find and add test cases to the CMAKE testing environment.
 
 # Test Categories
 
-ROCMTools testing is categorised as following:
+ROCProfiler testing is categorised as following:
 
 - unittests (Gtest Based)
 - featuretests (standalone and Gtest Based)
@@ -14,8 +14,8 @@ ROCMTools testing is categorised as following:
 
 ### Quickstart
 
-ROCMTools tests are integrated into the top-level cmake project. The tests depend upon the installed version of ROCMTools.
-Typical usage (paths relative to top of the ROCMTools repo):
+ROCProfiler tests are integrated into the top-level cmake project. The tests depend upon the installed version of ROCProfiler.
+Typical usage (paths relative to top of the ROCProfiler repo):
 ```
 $ ./build.sh
 $ ./rocprofv2 -ct

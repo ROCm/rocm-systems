@@ -162,7 +162,7 @@ class file_plugin_t {
     output_file_t begin_ts("begin_ts_file.txt");
 
     [[maybe_unused]] rocprofiler_timestamp_t app_begin_timestamp = {};
-    CHECK_ROCMTOOLS(rocprofiler_get_timestamp(&app_begin_timestamp));
+    CHECK_ROCPROFILER(rocprofiler_get_timestamp(&app_begin_timestamp));
 
     begin_ts << std::dec << app_begin_timestamp.value << std::endl;
     if (begin_ts.fail()) {
@@ -215,12 +215,12 @@ class file_plugin_t {
     }
     if (tracer_record.domain == ACTIVITY_DOMAIN_HSA_API) {
       size_t function_name_size = 0;
-      CHECK_ROCMTOOLS(rocprofiler_query_hsa_tracer_api_data_info_size(
+      CHECK_ROCPROFILER(rocprofiler_query_hsa_tracer_api_data_info_size(
           session_id, ROCPROFILER_HSA_FUNCTION_NAME, tracer_record.api_data_handle,
           tracer_record.operation_id, &function_name_size));
       if (function_name_size > 1) {
         char* function_name_c = (char*)malloc(function_name_size);
-        CHECK_ROCMTOOLS(rocprofiler_query_hsa_tracer_api_data_info(
+        CHECK_ROCPROFILER(rocprofiler_query_hsa_tracer_api_data_info(
             session_id, ROCPROFILER_HSA_FUNCTION_NAME, tracer_record.api_data_handle,
             tracer_record.operation_id, &function_name_c));
         if (function_name_c) function_name = std::string(function_name_c);
@@ -228,23 +228,23 @@ class file_plugin_t {
     }
     if (tracer_record.domain == ACTIVITY_DOMAIN_HIP_API) {
       size_t function_name_size = 0;
-      CHECK_ROCMTOOLS(rocprofiler_query_hip_tracer_api_data_info_size(
+      CHECK_ROCPROFILER(rocprofiler_query_hip_tracer_api_data_info_size(
           session_id, ROCPROFILER_HIP_FUNCTION_NAME, tracer_record.api_data_handle,
           tracer_record.operation_id, &function_name_size));
       if (function_name_size > 1) {
         char* function_name_c = (char*)malloc(function_name_size);
-        CHECK_ROCMTOOLS(rocprofiler_query_hip_tracer_api_data_info(
+        CHECK_ROCPROFILER(rocprofiler_query_hip_tracer_api_data_info(
             session_id, ROCPROFILER_HIP_FUNCTION_NAME, tracer_record.api_data_handle,
             tracer_record.operation_id, &function_name_c));
         if (function_name_c) function_name = std::string(function_name_c);
       }
       size_t kernel_name_size = 0;
-      CHECK_ROCMTOOLS(rocprofiler_query_hip_tracer_api_data_info_size(
+      CHECK_ROCPROFILER(rocprofiler_query_hip_tracer_api_data_info_size(
           session_id, ROCPROFILER_HIP_KERNEL_NAME, tracer_record.api_data_handle,
           tracer_record.operation_id, &kernel_name_size));
       if (kernel_name_size > 1) {
         char* kernel_name_str = (char*)malloc(kernel_name_size * sizeof(char));
-        CHECK_ROCMTOOLS(rocprofiler_query_hip_tracer_api_data_info(
+        CHECK_ROCPROFILER(rocprofiler_query_hip_tracer_api_data_info(
             session_id, ROCPROFILER_HIP_KERNEL_NAME, tracer_record.api_data_handle,
             tracer_record.operation_id, &kernel_name_str));
         if (kernel_name_str) kernel_name = rocmtools::cxx_demangle(std::string(kernel_name_str));
@@ -252,26 +252,26 @@ class file_plugin_t {
     }
     if (tracer_record.domain == ACTIVITY_DOMAIN_ROCTX) {
       size_t roctx_message_size = 0;
-      CHECK_ROCMTOOLS(rocprofiler_query_roctx_tracer_api_data_info_size(
+      CHECK_ROCPROFILER(rocprofiler_query_roctx_tracer_api_data_info_size(
           session_id, ROCPROFILER_ROCTX_MESSAGE, tracer_record.api_data_handle,
           tracer_record.operation_id, &roctx_message_size));
       if (roctx_message_size > 1) {
         [[maybe_unused]] char* roctx_message_str =
             static_cast<char*>(malloc(roctx_message_size * sizeof(char)));
-        CHECK_ROCMTOOLS(rocprofiler_query_roctx_tracer_api_data_info(
+        CHECK_ROCPROFILER(rocprofiler_query_roctx_tracer_api_data_info(
             session_id, ROCPROFILER_ROCTX_MESSAGE, tracer_record.api_data_handle,
             tracer_record.operation_id, &roctx_message_str));
         if (roctx_message_str)
           roctx_message = rocmtools::cxx_demangle(std::string(strdup(roctx_message_str)));
       }
       size_t roctx_id_size = 0;
-      CHECK_ROCMTOOLS(rocprofiler_query_roctx_tracer_api_data_info_size(
+      CHECK_ROCPROFILER(rocprofiler_query_roctx_tracer_api_data_info_size(
           session_id, ROCPROFILER_ROCTX_ID, tracer_record.api_data_handle, tracer_record.operation_id,
           &roctx_id_size));
       if (roctx_id_size > 1) {
         [[maybe_unused]] char* roctx_id_str =
             static_cast<char*>(malloc(roctx_id_size * sizeof(char)));
-        CHECK_ROCMTOOLS(rocprofiler_query_roctx_tracer_api_data_info(
+        CHECK_ROCPROFILER(rocprofiler_query_roctx_tracer_api_data_info(
             session_id, ROCPROFILER_ROCTX_ID, tracer_record.api_data_handle,
             tracer_record.operation_id, &roctx_id_str));
         if (roctx_id_str) {
@@ -299,14 +299,14 @@ class file_plugin_t {
     size_t name_length = 0;
     output_file_t* output_file{nullptr};
     output_file = get_output_file(output_type_t::COUNTER);
-    CHECK_ROCMTOOLS(rocprofiler_query_kernel_info_size(ROCPROFILER_KERNEL_NAME,
+    CHECK_ROCPROFILER(rocprofiler_query_kernel_info_size(ROCPROFILER_KERNEL_NAME,
                                                      profiler_record->kernel_id, &name_length));
     // Taken from rocprofiler: The size hasn't changed in  recent past
     static const uint32_t lds_block_size = 128 * 4;
     const char* kernel_name_c;
     if (name_length > 1) {
       kernel_name_c = static_cast<const char*>(malloc(name_length * sizeof(char)));
-      CHECK_ROCMTOOLS(rocprofiler_query_kernel_info(ROCPROFILER_KERNEL_NAME, profiler_record->kernel_id,
+      CHECK_ROCPROFILER(rocprofiler_query_kernel_info(ROCPROFILER_KERNEL_NAME, profiler_record->kernel_id,
                                                   &kernel_name_c));
     }
     *output_file << std::string("dispatch[") << std::to_string(profiler_record->header.id.handle)
@@ -355,12 +355,12 @@ class file_plugin_t {
       for (uint64_t i = 0; i < profiler_record->counters_count.value; i++) {
         if (profiler_record->counters[i].counter_handler.handle > 0) {
           size_t counter_name_length = 0;
-          CHECK_ROCMTOOLS(rocprofiler_query_counter_info_size(
+          CHECK_ROCPROFILER(rocprofiler_query_counter_info_size(
               session_id, ROCPROFILER_COUNTER_NAME, profiler_record->counters[i].counter_handler,
               &counter_name_length));
           if (counter_name_length > 1) {
             const char* name_c = static_cast<const char*>(malloc(name_length * sizeof(char)));
-            CHECK_ROCMTOOLS(rocprofiler_query_counter_info(
+            CHECK_ROCPROFILER(rocprofiler_query_counter_info(
                 session_id, ROCPROFILER_COUNTER_NAME, profiler_record->counters[i].counter_handler,
                 &name_c));
             *output_file << ", " << name_c << " ("
