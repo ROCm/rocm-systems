@@ -10,7 +10,7 @@ file(GLOB ROCPROFILER_AMDSYS_SRC_FILES ${CMAKE_CURRENT_SOURCE_DIR}/*.cpp)
 add_executable(rocprofiler_amdsys_fe ${ROCPROFILER_AMDSYS_SRC_FILES})
 
 set_target_properties(rocprofiler_amdsys_fe PROPERTIES
-  OUTPUT_NAME "amdsys")
+  OUTPUT_NAME "rocsys")
 
 target_include_directories(rocprofiler_amdsys_fe
   PRIVATE
