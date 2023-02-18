@@ -298,12 +298,12 @@ def draw_wave_metrics(selections, normalize):
     global EVENT_NAMES
 
     #event_names = ['Busy CUs', 'Occupancy', 'Eligible waves', 'Waves waiting']
-    with open(PIC_SAVE_FOLDER+'counters.json', 'w') as f:
+    with open(os.path.join(PIC_SAVE_FOLDER,'counters.json'), 'w') as f:
         f.write(json.dumps({"counters": EVENT_NAMES}))
 
     plt.figure(figsize=(15,3))
 
-    delta_time = int(0.5+np.min([get_delta_time(events) for events in EVENTS]))
+    delta_time = max(1,int(0.5+np.min([get_delta_time(events) for events in EVENTS])))
     maxtime = np.max([np.max([e.time for e in events]) for events in EVENTS])+1
     event_timeline = np.zeros((16, maxtime), dtype=np.int32)
     print('Delta:', delta_time)
@@ -342,7 +342,7 @@ def draw_wave_metrics(selections, normalize):
     else:
         plt.ylabel('Value')
     plt.subplots_adjust(left=0.05, right=1, top=1, bottom=0.07)
-    plt.savefig(PIC_SAVE_FOLDER+'timeline.png', dpi=150)
+    plt.savefig(os.path.join(PIC_SAVE_FOLDER,'timeline.png'), dpi=150)
     #plt.show()
 
 
@@ -371,7 +371,7 @@ def draw_wave_states(selections, normalize):
 
     timelines = [np.convolve(time, kernel)[kernsize//2:-kernsize//2][::trim] for time in timelines]
 
-    with open(PIC_SAVE_FOLDER+'counters.json', 'w') as f:
+    with open(os.path.join(PIC_SAVE_FOLDER,'counters.json'), 'w') as f:
         f.write(json.dumps({"counters": STATES}))
 
     [plt.plot(cycles, t, label='State '+s, linewidth=1.1, color=c)
@@ -385,7 +385,7 @@ def draw_wave_states(selections, normalize):
     plt.ylim(-1)
     plt.xlim(-maxtime//200, maxtime+maxtime//200)
     plt.subplots_adjust(left=0.05, right=1, top=1, bottom=0.07)
-    plt.savefig(PIC_SAVE_FOLDER+'timeline.png', dpi=150)
+    plt.savefig(os.path.join(PIC_SAVE_FOLDER,'timeline.png'), dpi=150)
 
 
 def GeneratePIC(selections=[True for k in range(16)], normalize=True, bScounter=True):
@@ -402,12 +402,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("assembly_code", help="Path of the assembly code")
     parser.add_argument("--trace_file", help="Filter for trace files", default=None, type=str)
-    parser.add_argument("-o", "--output_ui", help="Output Folder", default='/dev/shm/attplugin/')
+    parser.add_argument("-o", "--output_ui", help="Output Folder", default='.')
     parser.add_argument("-k", "--att_kernel", help="Kernel file", type=str, default=pathenv+'/*_kernel.txt')
-    parser.add_argument("-w", "--wave_id", help="wave id")
     parser.add_argument("-p", "--ports", help="Server and websocket ports, default: 8000,18000")
     parser.add_argument("--target_cu", help="Collected target CU id{0-15}", type=int, default=None)
-    parser.add_argument("-v", "--verbose", action="store_true")
     parser.add_argument("-g", "--genasm",
                         help="Generate post-processed asm file at this path", type=str, default="")
     args = parser.parse_args()
@@ -478,7 +476,7 @@ if __name__ == "__main__":
     TIMELINES = [np.zeros(int(1E4),dtype=np.int32) for k in range(5)]
     EVENTS = []
     for name in filenames:
-        SIMD, perfevents = getWaves(name, args.target_cu, args.verbose)
+        SIMD, perfevents = getWaves(name, args.target_cu, False)
         EVENTS.append(perfevents)
         DBFILES.append( persist(args.output_ui, name, SIMD) )
         for wave in SIMD:
@@ -500,6 +498,11 @@ if __name__ == "__main__":
                 TIMELINES[state[0]][time_acc:time_acc+state[1]] += 1
                 time_acc += state[1]
 
+    global PIC_SAVE_FOLDER
+    PIC_SAVE_FOLDER = os.path.abspath(os.path.join(args.output_ui, 'ui'))
+    #GeneratePIC()
+    #quit()
+
     if args.genasm and len(args.genasm) > 0:
         flight_count = view_trace(args, 0, code, jumps, DBFILES, filenames, True, None)
 
@@ -513,6 +516,4 @@ if __name__ == "__main__":
             for k in keys:
                 file.write(assembly_code[k]+'\n')
     else:
-        global PIC_SAVE_FOLDER
-        PIC_SAVE_FOLDER = args.output_ui+"/ui/"
         view_trace(args, 0, code, jumps, DBFILES, filenames, False, GeneratePIC)

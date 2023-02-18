@@ -102,7 +102,7 @@ class att_plugin_t {
 
     // iterate over each shader engine att trace
     for (int i = 0; i < se_num; i++) {
-      if (!att_tracer_record->shader_engine_data &&
+      if (!att_tracer_record->shader_engine_data ||
           !att_tracer_record->shader_engine_data[i].buffer_ptr)
         continue;
       printf("--------------collecting data for shader_engine %d---------------\n", i);

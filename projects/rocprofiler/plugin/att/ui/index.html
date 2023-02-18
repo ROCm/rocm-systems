@@ -58,7 +58,11 @@
 			ctx.fill();
 		}
 		
-		function DrawCanvas(waitcnt) {
+		var canvas_waitcnt = 0
+		function DrawCanvas() {
+			if (canvas_waitcnt == 0) return;
+			var waitcnt = canvas_waitcnt
+
 			const canvas = document.getElementById("arrows");
 			if (canvas.getContext) {
 				const ctx = canvas.getContext("2d");
@@ -98,7 +102,6 @@
 						for(var s=smin; s<=smax; s++) {
 							slots[s] += 1
 							max_slots = Math.max(max_slots, waitcnt[w][1][l][1])
-							console.log(waitcnt[w][2])
 						}
 					}
 				}
@@ -150,6 +153,8 @@
 				}
 			}
 		}
+
+		setInterval(DrawCanvas, 200)
 
 		function WaveButtonHtml(index) {
 			return '<button class="btn" id="wv_button' + index + '" onclick="FetchNamesAndGather(' + index + ')">Wave'+index+'</button>\n'
@@ -617,7 +622,7 @@
 							}
 						})
 
-					DrawCanvas(data.wave.waitcnt)
+					canvas_waitcnt = data.wave.waitcnt
 
 					/*var all_nodes = d3.select("#code")
 						.selectAll("li")

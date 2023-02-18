@@ -12,7 +12,7 @@ from struct import *
 from collections import defaultdict
 import json
 import time
-import webbrowser
+#import webbrowser
 import http.server
 import socketserver
 import socket
@@ -308,9 +308,9 @@ def extract_data(df, output_ui, se_number, code, jumps):
 
     return flight_count, all_filenames
 
-def open_browser():
-    time.sleep(0.1)
-    webbrowser.open_new_tab('http://{0}:{1}'.format(IPAddr, PORT))
+#def open_browser():
+#    time.sleep(0.1)
+#    webbrowser.open_new_tab('http://{0}:{1}'.format(IPAddr, PORT))
 
 
 class NoCacheHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
@@ -452,7 +452,7 @@ def view_trace(args, wait, code, jumps, dbnames, att_filenames, bReturnLoc, pic_
     if wait == 0:
         try:
             PROCS = [Process(target=run_server),
-                     Process(target=open_browser),
+                     #Process(target=open_browser),
                      Process(target=run_websocket)]
             if pic_thread is not None:
                 pic_thread.join()

@@ -213,7 +213,7 @@ while [ 1 ] ; do
         ATT_PATH=$ROCPROFV2_DIR/../libexec/rocprofiler/att/att.py
       fi
       ATT_ARGV=$3
-      shift 
+      shift
 
       ATT_OPTIONS="Not done"
       while [ "$ATT_OPTIONS" = "Not done" ]; do
@@ -221,7 +221,7 @@ while [ 1 ] ; do
           ATT_ARGV="$ATT_ARGV $3 \"$4\""
           shift
           shift
-        elif [[ "$3" = "--genasm" || "$3" = "--target_cu" || "$3" = "-o" || "$3" == "-k" || "$3" == "--att_kernel" ]]; then
+        elif [[ "$3" = "--ports" || "$3" = "--genasm" || "$3" = "--target_cu" || "$3" = "-o" || "$3" == "-k" || "$3" == "--att_kernel" ]]; then
           ATT_ARGV="$ATT_ARGV $3 $4"
           shift
           shift
@@ -229,11 +229,6 @@ while [ 1 ] ; do
           ATT_OPTIONS="Done"
         fi
       done
-      if [ $RUN_FROM_BUILD == 1 ]; then
-        ATT_PATH=$ROCPROFV2_DIR/build/plugin/att/att/att.py
-      else
-        ATT_PATH=$ROCPROFV2_DIR/../libexec/rocprofiler/att/att.py
-      fi
     fi
     shift
     shift
@@ -289,6 +284,9 @@ fi
 
 if [ -n "$ATT_PATH" ]; then
   if [ -n "$ATT_ARGV" ]; then
+    if [ -n "$OUTPUT_PATH" ]; then
+      ATT_ARGV="$ATT_ARGV -o $OUTPUT_PATH"
+    fi
     eval "python3 $ATT_PATH $ATT_ARGV"
   elif [ ! -n "$PMC_LINES" ]; then
     echo "ATT File  is required!"
