@@ -69,7 +69,8 @@ class rsmi_status_t(c_int):
     RSMI_STATUS_UNEXPECTED_DATA = 0xF
     RSMI_STATUS_BUSY = 0x10
     RSMI_STATUS_REFCOUNT_OVERFLOW = 0x11
-    RSMI_STATUS_AMDGPU_RESTART_ERR = 0x12
+    RSMI_STATUS_SETTING_UNAVAILABLE = 0x12
+    RSMI_STATUS_AMDGPU_RESTART_ERR = 0x13
     RSMI_STATUS_UNKNOWN_ERROR = 0xFFFFFFFF
 
 
@@ -93,6 +94,7 @@ rsmi_status_verbose_err_out = {
     rsmi_status_t.RSMI_STATUS_UNEXPECTED_DATA: 'Unexpected data received',
     rsmi_status_t.RSMI_STATUS_BUSY: 'Busy - resources are preventing call the ability to execute',
     rsmi_status_t.RSMI_STATUS_REFCOUNT_OVERFLOW: 'Data overflow - data exceeded INT32_MAX',
+    rsmi_status_t.RSMI_STATUS_SETTING_UNAVAILABLE: 'Requested setting is unavailable for current device',
     rsmi_status_t.RSMI_STATUS_AMDGPU_RESTART_ERR: 'Could not successfully restart the amdgpu driver',
     rsmi_status_t.RSMI_STATUS_UNKNOWN_ERROR: 'Unknown error occured'
 }

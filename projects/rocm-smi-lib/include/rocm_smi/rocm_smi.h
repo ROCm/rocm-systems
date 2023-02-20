@@ -126,6 +126,8 @@ typedef enum {
                                          //!< being used
   RSMI_STATUS_REFCOUNT_OVERFLOW,         //!< An internal reference counter
                                          //!< exceeded INT32_MAX
+  RSMI_STATUS_SETTING_UNAVAILABLE,       //!< Requested setting is unavailable
+                                         //!< for the current device
   RSMI_STATUS_AMDGPU_RESTART_ERR,        //!< Could not successfully restart
                                          //!< the amdgpu driver
 
@@ -3572,6 +3574,8 @@ rsmi_dev_compute_partition_get(uint32_t dv_ind, char *compute_partition,
  *  @retval ::RSMI_STATUS_SUCCESS call was successful
  *  @retval ::RSMI_STATUS_PERMISSION function requires root access
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
+ *  @retval ::RSMI_STATUS_SETTING_UNAVAILABLE the provided setting is
+ *  unavailable for current device
  *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
  *  support this function
  *

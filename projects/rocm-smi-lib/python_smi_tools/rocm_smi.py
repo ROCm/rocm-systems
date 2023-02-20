@@ -1421,6 +1421,9 @@ def setComputePartition(deviceList, computePartitionType):
                 None)
         elif ret == rsmi_status_t.RSMI_STATUS_PERMISSION:
             printLog(device, 'Permission denied', None)
+        elif ret == rsmi_status_t.RSMI_STATUS_SETTING_UNAVAILABLE:
+            printLog(device, 'Requested setting (%s) is unavailable for current device'
+                     %computePartitionType, None)
         elif ret == rsmi_status_t.RSMI_STATUS_NOT_SUPPORTED:
             printLog(device, 'Not supported on the given system', None)
         else:

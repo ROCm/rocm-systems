@@ -122,6 +122,8 @@ static const char *kDevXGMIErrorFName = "xgmi_error";
 static const char *kDevSerialNumberFName = "serial_number";
 static const char *kDevNumaNodeFName = "numa_node";
 static const char *kDevGpuMetricsFName = "gpu_metrics";
+static const char *kDevAvailableComputePartitionFName =
+                  "available_compute_partition";
 static const char *kDevComputePartitionFName = "current_compute_partition";
 static const char *kDevMemoryPartitionFName = "current_memory_partition";
 
@@ -293,6 +295,7 @@ static const std::map<DevInfoTypes, const char *> kDevAttribNameMap = {
     {kDevNumaNode, kDevNumaNodeFName},
     {kDevGpuMetrics, kDevGpuMetricsFName},
     {kDevGpuReset, kDevGpuResetFName},
+    {kDevAvailableComputePartition, kDevAvailableComputePartitionFName},
     {kDevComputePartition, kDevComputePartitionFName},
     {kDevMemoryPartition, kDevMemoryPartitionFName},
 };
@@ -930,6 +933,7 @@ int Device::readDevInfo(DevInfoTypes type, std::string *val) {
     case kDevVBiosVer:
     case kDevPCIEThruPut:
     case kDevSerialNumber:
+    case kDevAvailableComputePartition:
     case kDevComputePartition:
     case kDevMemoryPartition:
       return readDevInfoStr(type, val);

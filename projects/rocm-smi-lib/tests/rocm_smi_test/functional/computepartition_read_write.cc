@@ -174,8 +174,8 @@ void TestComputePartitionReadWrite::Run(void) {
     IF_VERB(STANDARD) {
       if (err == RSMI_STATUS_INSUFFICIENT_SIZE) {
         std::cout << "\t**"
-                  << "Confirmed RSMI_STATUS_INSUFFICIENT_SIZE was returned "
-                  << "and size matches length requested." << std::endl;
+                  << "Confirmed RSMI_STATUS_INSUFFICIENT_SIZE was returned"
+                  << "\n\t  and size matches length requested." << std::endl;
       }
     }
 
@@ -275,19 +275,48 @@ void TestComputePartitionReadWrite::Run(void) {
                   << computePartitionString(new_computePartition) << std::endl;
       }
       ret = rsmi_dev_compute_partition_set(dv_ind, new_computePartition);
-      CHK_ERR_ASRT(ret)
-      ret = rsmi_dev_compute_partition_get(dv_ind, current_char_computePartition,
-                                          255);
-      CHK_ERR_ASRT(ret)
+      bool isSettingUnavailable = false;
+      ASSERT_TRUE((ret == RSMI_STATUS_SUCCESS) ||
+                  (ret == RSMI_STATUS_SETTING_UNAVAILABLE));
+      if (ret == RSMI_STATUS_SETTING_UNAVAILABLE) {
+        isSettingUnavailable = true;
+      }
+      rsmi_status_t retGet =
+          rsmi_dev_compute_partition_get(dv_ind, current_char_computePartition,
+                                         255);
+      CHK_ERR_ASRT(retGet)
       IF_VERB(STANDARD) {
         std::cout << "\t**"
                   << "Current compute partition: "
                   << current_char_computePartition
                   << std::endl;
       }
-      EXPECT_EQ(RSMI_STATUS_SUCCESS, ret);
-      EXPECT_STREQ(computePartitionString(new_computePartition).c_str(),
-                   current_char_computePartition);
+      if (isSettingUnavailable) {
+        ASSERT_EQ(RSMI_STATUS_SETTING_UNAVAILABLE, ret);
+        ASSERT_STRNE(computePartitionString(new_computePartition).c_str(),
+                     current_char_computePartition);
+        IF_VERB(STANDARD) {
+          std::cout << "\t**"
+                    << "Confirmed after receiving "
+                    << "RSMI_STATUS_SETTING_UNAVAILABLE,\n\t  current compute "
+                    << "partition (" << current_char_computePartition
+                    << ") did not update to ("
+                    << computePartitionString(new_computePartition) << ")"
+                    << std::endl;
+        }
+      } else {
+        ASSERT_EQ(RSMI_STATUS_SUCCESS, ret);
+        ASSERT_STREQ(computePartitionString(new_computePartition).c_str(),
+                     current_char_computePartition);
+        IF_VERB(STANDARD) {
+          std::cout << "\t**"
+                    << "Confirmed current compute partition ("
+                    << current_char_computePartition << ") matches"
+                    << "\n\t  requested compute partition ("
+                    << computePartitionString(new_computePartition) << ")"
+                    << std::endl;
+        }
+      }
     }
 
      /* TEST RETURN TO BOOT COMPUTE PARTITION SETTING */
@@ -309,15 +338,15 @@ void TestComputePartitionReadWrite::Run(void) {
                                         255);
     CHK_ERR_ASRT(ret)
     IF_VERB(STANDARD) {
-      std::cout << "\t**"
-                << "Current compute partition: " << current_char_computePartition << std::endl;
+      std::cout << "\t**" << "Current compute partition: "
+                << current_char_computePartition << std::endl;
     }
     if (wasResetSuccess) {
       ASSERT_STRNE(oldPartition.c_str(), current_char_computePartition);
       IF_VERB(STANDARD) {
       std::cout << "\t**"
                 << "Confirmed prior partition (" << oldPartition << ") is not "
-                << "equal to current partition ("
+                << "equal to current\n\t  partition ("
                 << current_char_computePartition << ")" << std::endl;
       }
     } else {
@@ -325,16 +354,16 @@ void TestComputePartitionReadWrite::Run(void) {
       IF_VERB(STANDARD) {
       std::cout << "\t**"
                 << "Confirmed prior partition (" << oldPartition << ") is equal"
-                << " to current partition ("
+                << " to current\n\t  partition ("
                 << current_char_computePartition << ")" << std::endl;
       }
     }
 
-    /* TEST RETURN TO ORIGINAL COMPUTE PARTITIONING SETTING */
+    /* TEST RETURN TO ORIGINAL COMPUTE PARTITION SETTING */
     IF_VERB(STANDARD) {
       std::cout << std::endl;
       std::cout << "\t**"
-                << "=========== TEST RETURN TO ORIGINAL COMPUTE PARTITIONING "
+                << "=========== TEST RETURN TO ORIGINAL COMPUTE PARTITION "
                 << "SETTING ========" << std::endl;
     }
     new_computePartition
@@ -351,8 +380,8 @@ void TestComputePartitionReadWrite::Run(void) {
     IF_VERB(STANDARD) {
       std::cout << "\t**" << "Attempted to set compute partition: "
                 << computePartitionString(new_computePartition) << std::endl
-                << "\t**"
-                << "Current compute partition: " << current_char_computePartition
+                << "\t**" << "Current compute partition: "
+                << current_char_computePartition
                 << std::endl;
     }
     EXPECT_EQ(RSMI_STATUS_SUCCESS, ret);

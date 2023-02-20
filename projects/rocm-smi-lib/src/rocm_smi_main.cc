@@ -75,7 +75,8 @@ static const char *kDeviceNamePrefix = "card";
 static const char *kAMDMonitorTypes[] = {"radeon", "amdgpu", ""};
 
 static const std::string amdSMI = "amd::smi::";
-const std::map<amd::smi::DevInfoTypes, std::string> amd::smi::RocmSMI::devInfoTypesStrings = {
+const std::map<amd::smi::DevInfoTypes, std::string>
+amd::smi::RocmSMI::devInfoTypesStrings = {
   {amd::smi::kDevPerfLevel, amdSMI + "kDevPerfLevel"},
   {amd::smi::kDevOverDriveLevel, amdSMI + "kDevOverDriveLevel"},
   {amd::smi::kDevMemOverDriveLevel, amdSMI + "kDevMemOverDriveLevel"},
@@ -142,6 +143,8 @@ const std::map<amd::smi::DevInfoTypes, std::string> amd::smi::RocmSMI::devInfoTy
   {amd::smi::kDevNumaNode, amdSMI + "kDevNumaNode"},
   {amd::smi::kDevGpuMetrics, amdSMI + "kDevGpuMetrics"},
   {amd::smi::kDevGpuReset, amdSMI + "kDevGpuReset"},
+  {amd::smi::kDevAvailableComputePartition, amdSMI +
+      "kDevAvailableComputePartition"},
   {amd::smi::kDevComputePartition, amdSMI + "kDevComputePartition"},
   {amd::smi::kDevMemoryPartition, amdSMI + "kDevMemoryPartition"}
 };

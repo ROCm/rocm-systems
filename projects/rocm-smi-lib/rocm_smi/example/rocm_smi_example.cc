@@ -114,6 +114,18 @@
     } \
 }
 
+#define CHK_RSMI_NOT_SUPPORTED_OR_SETTING_UNAVAILABLE_RET(RET) {\
+    if ((RET) == RSMI_STATUS_NOT_SUPPORTED) { \
+      std::cout << "This function is not supported in the current environment."\
+      << std::endl; \
+    } else if ((RET) == RSMI_STATUS_SETTING_UNAVAILABLE) { \
+      std::cout << "[WARN] RSMI_STATUS_SETTING_UNAVAILABLE retrieved." \
+      << std::endl; \
+    } else { \
+      CHK_RSMI_RET(RET) \
+    } \
+}
+
 #define CHK_NOT_SUPPORTED_OR_UNEXPECTED_DATA_OR_INSUFFICIENT_SIZE_RET(RET) { \
     if ((RET) == RSMI_STATUS_NOT_SUPPORTED) { \
       std::cout << "This function is not supported in the current environment." \
@@ -570,10 +582,9 @@ static rsmi_status_t test_set_compute_partitioning(uint32_t dv_ind) {
               << compute_partition_string(newPartition) << "..."
               << std::endl;
     ret = rsmi_dev_compute_partition_set(dv_ind, newPartition);
-    CHK_RSMI_NOT_SUPPORTED_RET(ret)
+    CHK_RSMI_NOT_SUPPORTED_OR_SETTING_UNAVAILABLE_RET(ret)
     std::cout << "Done setting compute partition to "
-              << compute_partition_string(newPartition)
-              << "." << std::endl;
+              << compute_partition_string(newPartition) << "." << std::endl;
     std::cout << std::endl << std::endl;
   }
 
@@ -589,7 +600,7 @@ static rsmi_status_t test_set_compute_partitioning(uint32_t dv_ind) {
     rsmi_compute_partition_type origComputePartitionType
       = mapStringToRSMIComputePartitionTypes[originalComputePartition];
     ret = rsmi_dev_compute_partition_set(dv_ind, origComputePartitionType);
-    CHK_RSMI_NOT_SUPPORTED_RET(ret)
+    CHK_RSMI_NOT_SUPPORTED_OR_SETTING_UNAVAILABLE_RET(ret)
     std::cout << "Done" << std::endl;
   }
   return RSMI_STATUS_SUCCESS;

@@ -390,7 +390,7 @@ std::string readTemporaryFile(std::string path) {
   return fileContent;
 }
 
-// Used to debug application temporary files (idenified by kTmpFilePrefix)
+// Used to debug application temporary files (identified by kTmpFilePrefix)
 // and their content
 void displayAppTmpFilesContent() {
   std::vector<std::string> tmpFiles = getListOfAppTmpFiles();
