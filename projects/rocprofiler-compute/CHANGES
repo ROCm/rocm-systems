@@ -10,6 +10,7 @@ Version 1.0.7 (21 Feb 2023)
   * support alternative profilers (#70)
   * add MI100 configs to override rocprofiler's incomplete default (#75)
   * improve error message when no GPU(s) detected (#85)
+  * separate CI tests by Linux distro and add status badges
   
 Version 1.0.6 (21 Dec 2022)
 
