@@ -148,6 +148,9 @@ def gpuinfo():
 
 def run(cmd):
     p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if cmd[0] == 'rocm-smi' and p.returncode == 8:
+        print("ERROR: No GPU detected. Unable to load rocm-smi")
+        sys.exit(1)
     return p.stdout.decode("ascii")
 
 
@@ -215,10 +218,6 @@ def get_machine_specs(devicenum):
         wave_occu,
     ) = gpuinfo()
     rocm_smi = run(["rocm-smi"])
-
-    if search(r"ERROR(\S*)", rocm_smi) != None:
-        print("ERROR: No GPU detected. Unable to load rocm-smi")
-        sys.exit(1)
 
     device = rf"^\s*{devicenum}(.*)"
 
