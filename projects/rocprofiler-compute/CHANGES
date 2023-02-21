@@ -1,3 +1,7 @@
+Version 1.0.7 (21 Feb 2023)
+
+  * Improve error message when no GPU(s) detected (#85)
+
 Version 1.0.6 (21 Dec 2022)
 
   * CI update: documentation now published via github action (#22)
