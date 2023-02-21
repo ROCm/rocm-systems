@@ -1,5 +1,7 @@
-################################################################################
-# Copyright (c) 2021 - 2022 Advanced Micro Devices, Inc. All rights reserved.
+##############################################################################bl
+# MIT License
+#
+# Copyright (c) 2021 - 2023 Advanced Micro Devices, Inc. All Rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -8,17 +10,17 @@
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
 #
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
 #
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
 # AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-################################################################################
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+##############################################################################el
 
 from PyQt5.QtWidgets import (
     QMainWindow,
@@ -163,7 +165,6 @@ class mainWindow(QMainWindow):
             self.exportPMCCounters(fileName)
 
     def exportPMCCounters(self, fileName):
-
         f = open(fileName, "w")
 
         total_IP_blocks = len(list(self.perfmon_config.keys()))
@@ -188,7 +189,6 @@ class mainWindow(QMainWindow):
         return
 
     def pmc_metric_selected(self, metric_name, col):
-
         # check if the metric already exists
         metric_selected = False
 
@@ -314,7 +314,6 @@ class mainWindow(QMainWindow):
             self.table.setItem(row, col, QTableWidgetItem(metric_name))
 
     def pmc_select(self, item):
-
         metric_name = item.data()
         if (
             not metric_name in self.nodes_dict
@@ -334,13 +333,11 @@ class mainWindow(QMainWindow):
 
     # Function to save populate treeview with a dictionary
     def importData(self, xmlparsed, root=None):
-
         self.model.setRowCount(0)
         if root is None:
             root = self.model.invisibleRootItem()
 
         for x in xmlparsed.getiterator():
-
             # Add SoC node to Root
             if x.tag in self.soc_arch_list:
                 parent = root
@@ -349,10 +346,8 @@ class mainWindow(QMainWindow):
 
             # check all metrics in an SoC family
             if x.tag == "metric" and x.getparent().tag in self.soc_arch_list:
-
                 # New IP block (e.g., SQ), detected, create a new hierarchy for the block
                 if not x.attrib["block"] in self.block_list:
-
                     self.block_list.append(x.attrib["block"])
                     parent = self.nodes_dict[x.getparent().tag]  # the SoC node
                     parent.appendRow(
@@ -386,7 +381,6 @@ class mainWindow(QMainWindow):
 
 
 if __name__ == "__main__":
-
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
 

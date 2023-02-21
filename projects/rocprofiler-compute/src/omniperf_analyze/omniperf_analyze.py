@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 
-################################################################################
-# Copyright (c) 2021 - 2022 Advanced Micro Devices, Inc. All rights reserved.
+##############################################################################bl
+# MIT License
+#
+# Copyright (c) 2021 - 2023 Advanced Micro Devices, Inc. All Rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -10,17 +12,17 @@
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
 #
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
 #
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
 # AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-################################################################################
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+##############################################################################el
 
 """
     Quick run:
@@ -41,6 +43,7 @@ import argparse
 import os.path
 from pathlib import Path
 from omniperf_analyze.utils import parser, file_io
+from omniperf_analyze.utils.gui_components.roofline import get_roofline
 
 
 def initialize_run(args, normalization_filter=None):
@@ -143,7 +146,7 @@ def run_gui(args, runs):
             num_results,
         )
         runs[args.path[0][0]].raw_pmc = file_io.create_df_pmc(
-            args.path[0][0]
+            args.path[0][0], args.verbose
         )  # create mega df
         parser.load_kernel_top(runs[args.path[0][0]], args.path[0][0])
 
@@ -188,7 +191,9 @@ def run_cli(args, runs):
             args.time_unit,
             num_results,
         )
-        runs[d[0]].raw_pmc = file_io.create_df_pmc(d[0])  # creates mega dataframe
+        runs[d[0]].raw_pmc = file_io.create_df_pmc(
+            d[0], args.verbose
+        )  # creates mega dataframe
         is_gui = False
         parser.load_table_data(
             runs[d[0]], d[0], is_gui, args.g, args.verbose
@@ -203,7 +208,35 @@ def run_cli(args, runs):
             args.decimal,
             args.time_unit,
             args.cols,
+            args.verbose,
         )
+
+
+def roofline_only(path_to_dir, dev_id, sort_type, mem_level, verbose):
+    import pandas as pd
+    from collections import OrderedDict
+
+    # Change vL1D to a interpretable str, if required
+    if "vL1D" in mem_level:
+        mem_level.remove("vL1D")
+        mem_level.append("L1")
+
+    app_path = path_to_dir + "/pmc_perf.csv"
+    roofline_exists = os.path.isfile(app_path)
+    if not roofline_exists:
+        print("Error: {} does not exist")
+        sys.exit(0)
+    t_df = OrderedDict()
+    t_df["pmc_perf"] = pd.read_csv(app_path)
+    get_roofline(
+        path_to_dir,
+        t_df,
+        verbose,
+        dev_id,  # [Optional] Specify device id to collect roofline info from
+        sort_type,  # [Optional] Sort AI by top kernels or dispatches
+        mem_level,  # [Optional] Toggle particular level(s) of memory hierarchy
+        True,  # [Optional] Generate a standalone roofline analysis
+    )
 
 
 def analyze(args):

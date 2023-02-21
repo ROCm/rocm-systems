@@ -1,7 +1,9 @@
 """Get host/gpu specs."""
 
-################################################################################
-# Copyright (c) 2021 - 2022 Advanced Micro Devices, Inc. All rights reserved.
+##############################################################################bl
+# MIT License
+#
+# Copyright (c) 2021 - 2023 Advanced Micro Devices, Inc. All Rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -10,17 +12,17 @@
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
 #
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
 #
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
 # AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-################################################################################
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+##############################################################################el
 
 import os
 import re
@@ -32,7 +34,7 @@ from dataclasses import dataclass
 from pathlib import Path as path
 from textwrap import dedent
 
-gpu_list = {"gfx906", "gfx908", "gfx90a"}
+gpu_list = {"gfx906", "gfx908", "gfx90a", "gfx900"}
 
 
 @dataclass
@@ -84,7 +86,6 @@ class MachineSpecs:
 
 
 def gpuinfo():
-
     rocminfo = run(["rocminfo"]).split("\n")
 
     for idx1, linetext in enumerate(rocminfo):
@@ -97,7 +98,6 @@ def gpuinfo():
 
     L1, L2 = "", ""
     for idx2, linetext in enumerate(rocminfo[idx1 + 1 :]):
-
         key = search(r"^\s*L1:\s+ ([a-zA-Z0-9]+)\s*", linetext)
         if key != None:
             L1 = key
@@ -148,6 +148,9 @@ def gpuinfo():
 
 def run(cmd):
     p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if cmd[0] == "rocm-smi" and p.returncode == 8:
+        print("ERROR: No GPU detected. Unable to load rocm-smi")
+        sys.exit(1)
     return p.stdout.decode("ascii")
 
 
@@ -159,7 +162,6 @@ def search(pattern, string):
 
 
 def get_machine_specs(devicenum):
-
     cpuinfo = path("/proc/cpuinfo").read_text()
     meminfo = path("/proc/meminfo").read_text()
     version = path("/proc/version").read_text()
@@ -180,7 +182,6 @@ def get_machine_specs(devicenum):
     for itr in version_loc:
         _path = os.path.join(os.getenv("ROCM_PATH", "/opt/rocm"), ".info", itr)
         if os.path.exists(_path):
-            print(_path)
             rocm_ver = path(_path).read_text()
             rocmFound = True
             break

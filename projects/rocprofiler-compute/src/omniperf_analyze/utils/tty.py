@@ -1,5 +1,7 @@
-################################################################################
-# Copyright (c) 2021 - 2022 Advanced Micro Devices, Inc. All rights reserved.
+##############################################################################bl
+# MIT License
+#
+# Copyright (c) 2021 - 2023 Advanced Micro Devices, Inc. All Rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -8,17 +10,17 @@
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
 #
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
 #
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
 # AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-################################################################################
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+##############################################################################el
 
 import pandas as pd
 from tabulate import tabulate
@@ -26,6 +28,7 @@ from tabulate import tabulate
 from omniperf_analyze.utils import schema, parser
 
 hidden_columns = ["Tips", "coll_level"]
+hidden_sections = [1900, 2000]
 
 
 def string_multiple_lines(source, width, max_rows):
@@ -44,19 +47,20 @@ def string_multiple_lines(source, width, max_rows):
     return "\n".join(lines)
 
 
-def show_all(runs, archConfigs, output, decimal, time_unit, selected_cols):
+def show_all(runs, archConfigs, output, decimal, time_unit, selected_cols, verbose):
     """
     Show all panels with their data in plain text mode.
     """
     comparable_columns = parser.build_comparable_columns(time_unit)
 
     for panel_id, panel in archConfigs.panel_configs.items():
-
+        # Skip panels that don't support baseline comparison
+        if panel_id in hidden_sections:
+            continue
         ss = ""  # store content of all data_source from one pannel
 
         for data_source in panel["data source"]:
             for type, table_config in data_source.items():
-
                 # take the 1st run as baseline
                 base_run, base_data = next(iter(runs.items()))
                 base_df = base_data.dfs[table_config["id"]]
@@ -72,11 +76,9 @@ def show_all(runs, archConfigs, output, decimal, time_unit, selected_cols):
                         )
                         or (type == "raw_csv_table")
                     ):
-
                         if header in hidden_columns:
                             pass
                         elif header not in comparable_columns:
-
                             if (
                                 type == "raw_csv_table"
                                 and table_config["source"] == "pmc_kernel_top.csv"
@@ -102,18 +104,27 @@ def show_all(runs, archConfigs, output, decimal, time_unit, selected_cols):
                                 ):
                                     if run != base_run:
                                         # calc percentage over the baseline
+                                        base_df[header] = [
+                                            float(x) if x != "" else float(0)
+                                            for x in base_df[header]
+                                        ]
+                                        cur_df[header] = [
+                                            float(x) if x != "" else float(0)
+                                            for x in cur_df[header]
+                                        ]
                                         t_df = (
                                             pd.concat(
                                                 [
-                                                    base_df[header].astype("double"),
-                                                    cur_df[header].astype("double"),
+                                                    base_df[header],
+                                                    cur_df[header],
                                                 ],
                                                 axis=1,
                                             )
                                             .pct_change(axis="columns")
                                             .iloc[:, 1]
                                         )
-                                        # print("---------", header, t_df)
+                                        if verbose >= 2:
+                                            print("---------", header, t_df)
 
                                         # show value + percentage
                                         # TODO: better alignment

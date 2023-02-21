@@ -24,7 +24,7 @@ Omniperf requires the following basic software dependencies prior to usage:
 
 * Python (>=3.7)
 * CMake (>= 3.19)
-* ROCm (>= 5.1)
+* ROCm (>= 5.2.0)
 
 In addition, Omniperf leverages a number of Python packages that are
 documented in the top-level `requirements.txt` file.  These must be

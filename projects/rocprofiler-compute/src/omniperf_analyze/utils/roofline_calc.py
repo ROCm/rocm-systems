@@ -1,5 +1,7 @@
-################################################################################
-# Copyright (c) 2021 - 2022 Advanced Micro Devices, Inc. All rights reserved.
+##############################################################################bl
+# MIT License
+#
+# Copyright (c) 2021 - 2023 Advanced Micro Devices, Inc. All Rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -8,31 +10,19 @@
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
 #
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
 #
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
 # AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-################################################################################
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+##############################################################################el
 
-from linecache import cache
-import subprocess
-from operator import sub
-import os
 import sys
-from pathlib import Path
-
-import numpy
-import matplotlib.pyplot as plt
-from matplotlib.pyplot import get, text
-from math import log, pi, sqrt
-import pandas as pd
-import pylab
 
 from dataclasses import dataclass
 import csv
@@ -54,6 +44,7 @@ FONT_WEIGHT = "bold"
 
 SUPPORTED_SOC = ["mi200"]
 
+
 ################################################
 # Helper funcs
 ################################################
@@ -68,6 +59,7 @@ class AI_Data:
     mfma_flops_bf16: float
     mfma_flops_f32: float
     mfma_flops_f64: float
+    mfma_iops_i8: float
     lds_data: float
     L1cache_data: float
     L2cache_data: float
@@ -100,11 +92,14 @@ def get_color(catagory):
 # -------------------------------------------------------------------------------------
 #                           Plot BW at each cache level
 # -------------------------------------------------------------------------------------
-def plot_roof(roof_details, roof_data):
-
+def plot_roof(roof_details, roof_data, mem_level, verbose):
+    # TODO: This is where filtering by memory level will need to occur for standalone
     graphPoints = {"hbm": [], "l2": [], "l1": [], "lds": [], "valu": [], "mfma": []}
 
-    cacheHierarchy = ["HBM", "L2", "L1", "LDS"]
+    if mem_level == "ALL":
+        cacheHierarchy = ["HBM", "L2", "L1", "LDS"]
+    else:
+        cacheHierarchy = mem_level
 
     x1 = y1 = x2 = y2 = -1
     x1_mfma = y1_mfma = x2_mfma = y2_mfma = -1
@@ -116,7 +111,8 @@ def plot_roof(roof_details, roof_data):
         )
     for i in range(0, len(cacheHierarchy)):
         # Plot BW line
-        # print("Current cache level is ", cacheHierarchy[i])
+        if verbose >= 3:
+            print("Current cache level is ", cacheHierarchy[i])
         curr_bw = cacheHierarchy[i] + "Bw"
         peakBw = float(roof_data[curr_bw][roof_details["device"]])
 
@@ -142,8 +138,9 @@ def plot_roof(roof_details, roof_data):
         y2_mfma = peakMFMA
 
         # These are the points to use:
-        # print("x = [{}, {}]".format(x1,x2_mfma))
-        # print("y = [{}, {}]".format(y1, y2_mfma))
+        if verbose >= 3:
+            print("x = [{}, {}]".format(x1, x2_mfma))
+            print("y = [{}, {}]".format(y1, y2_mfma))
 
         graphPoints[cacheHierarchy[i].lower()].append([x1, x2_mfma])
         graphPoints[cacheHierarchy[i].lower()].append([y1, y2_mfma])
@@ -159,7 +156,8 @@ def plot_roof(roof_details, roof_data):
         if x2 < x0:
             x0 = x2
 
-        # print("FMA ROOF [{}, {}], [{},{}]".format(x0, XMAX, peakOps, peakOps))
+        if verbose >= 3:
+            print("FMA ROOF [{}, {}], [{},{}]".format(x0, XMAX, peakOps, peakOps))
         graphPoints["valu"].append([x0, XMAX])
         graphPoints["valu"].append([peakOps, peakOps])
         graphPoints["valu"].append(peakOps)
@@ -172,7 +170,8 @@ def plot_roof(roof_details, roof_data):
         if x2_mfma < x0_mfma:
             x0_mfma = x2_mfma
 
-        # print("MFMA ROOF [{}, {}], [{},{}]".format(x0_mfma, XMAX, peakMFMA, peakMFMA))
+        if verbose >= 3:
+            print("MFMA ROOF [{}, {}], [{},{}]".format(x0_mfma, XMAX, peakMFMA, peakMFMA))
         graphPoints["mfma"].append([x0_mfma, XMAX])
         graphPoints["mfma"].append([peakMFMA, peakMFMA])
         graphPoints["mfma"].append(peakMFMA)
@@ -185,7 +184,6 @@ def plot_roof(roof_details, roof_data):
 # -------------------------------------------------------------------------------------
 # Calculate relevent metrics for ai calculation
 def plot_application(sortType, ret_df, verbose):
-
     df = ret_df["pmc_perf"]
     # Sort by top kernels or top dispatches?
     df = df.sort_values(by=["KernelName"])
@@ -231,6 +229,7 @@ def plot_application(sortType, ret_df, verbose):
                     mfma_flops_bf16 / calls,
                     mfma_flops_f32 / calls,
                     mfma_flops_f64 / calls,
+                    mfma_iops_i8 / calls,
                     lds_data / calls,
                     L1cache_data / calls,
                     L2cache_data / calls,
@@ -474,11 +473,7 @@ def plot_application(sortType, ret_df, verbose):
     return intensityPoints
 
 
-def empirical_roof(roof_info):
-
-    if roof_info["sort"] != "kernels" and roof_info["sort"] != "dispatches":
-        sys.exit("Invalid sort. Must be either 'kernels' or 'dispatches'")
-
+def empirical_roof(roof_info, mem_level, verbose):
     roofPath = roof_info["path"] + "/roofline.csv"
     # -----------------------------------------------------
     # Initialize roofline data dictionary from roofline.csv
@@ -517,7 +512,7 @@ def empirical_roof(roof_info):
     # ------------------
     #  Generate Roofline
     # ------------------
-    results = plot_roof(roof_info, roof_data)
+    results = plot_roof(roof_info, roof_data, mem_level, verbose)
     # for key in results:
     #     print(key, "->", results[key])
 

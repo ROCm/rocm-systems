@@ -1,3 +1,17 @@
+Version 1.0.7 (21 Feb 2023)
+
+  * update documentation (#52, #64)
+  * improved detection of invalid command line arguments (#58, #76)
+  * enhancements to standalone roofline (#61)
+  * enable Omniperf on systems with X-server (#62)
+  * raise minimum version requirement for rocm (#64)
+  * enable baseline comparison in CLI analysis (#65)
+  * add multi-normalization to new metrics (#68, #81)
+  * support alternative profilers (#70)
+  * add MI100 configs to override rocprofiler's incomplete default (#75)
+  * improve error message when no GPU(s) detected (#85)
+  * separate CI tests by Linux distro and add status badges
+  
 Version 1.0.6 (21 Dec 2022)
 
   * CI update: documentation now published via github action (#22)

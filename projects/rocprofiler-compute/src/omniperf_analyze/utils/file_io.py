@@ -1,5 +1,7 @@
-################################################################################
-# Copyright (c) 2021 - 2022 Advanced Micro Devices, Inc. All rights reserved.
+##############################################################################bl
+# MIT License
+#
+# Copyright (c) 2021 - 2023 Advanced Micro Devices, Inc. All Rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -8,17 +10,17 @@
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
 #
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
 #
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
 # AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-################################################################################
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+##############################################################################el
 
 import os
 import pandas as pd
@@ -180,7 +182,7 @@ def create_df_kernel_top_stats(
         grouped.to_csv(os.path.join(raw_data_dir, "pmc_kernel_top.csv"), index=False)
 
 
-def create_df_pmc(raw_data_dir):
+def create_df_pmc(raw_data_dir, verbose):
     """
     Load all raw pmc counters and join into one df.
     """
@@ -200,8 +202,8 @@ def create_df_pmc(raw_data_dir):
                 coll_levels.append(f[:-4])
     final_df = pd.concat(dfs, keys=coll_levels, axis=1, copy=False)
     # TODO: join instead of concat!
-
-    # print("pmc_raw_data final_df ", final_df.info())
+    if verbose >= 2:
+        print("pmc_raw_data final_df ", final_df.info())
     return final_df
 
 
@@ -217,7 +219,6 @@ def collect_wave_occu_per_cu(in_dir, out_dir, numSE):
     for i in range(numSE):
         p = Path(in_dir, "wave_occu_se" + str(i) + ".csv")
         if p.exists():
-
             tmp_df = pd.read_csv(p)
             SE_idx = "SE" + str(tmp_df.loc[0, "SE"])
             tmp_df.rename(

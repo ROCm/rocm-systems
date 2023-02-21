@@ -1,5 +1,7 @@
-################################################################################
-# Copyright (c) 2021 - 2022 Advanced Micro Devices, Inc. All rights reserved.
+##############################################################################bl
+# MIT License
+#
+# Copyright (c) 2021 - 2023 Advanced Micro Devices, Inc. All Rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -8,17 +10,17 @@
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
 #
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
 #
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
 # AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-################################################################################
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+##############################################################################el
 
 import argparse
 import collections
@@ -37,7 +39,6 @@ MAX_SERVER_SEL_DELAY = 5000  # 5 sec connection timeout
 
 
 def kernel_name_shortener(df, cache, level):
-
     if level >= 5:
         return df
 
@@ -50,7 +51,6 @@ def kernel_name_shortener(df, cache, level):
     if columnName == "KernelName" or columnName == "Name":
         # loop through all indices
         for index in df.index:
-
             original_name = df.loc[index, columnName]
             if original_name in cache:
                 continue
@@ -142,7 +142,7 @@ def parse(args, profileAndExport):
         print("Unable to parse SoC or workload name from sysinfo.csv")
         sys.exit(1)
 
-    db = "omniperf_" + args.team + "_" + name + "_" + soc
+    db = "omniperf_" + str(args.team) + "_" + str(name) + "_" + soc
 
     if Extractionlvl >= 5:
         print("KernelName shortening disabled")
@@ -224,27 +224,27 @@ def convert_folder(connectionInfo, Extractionlvl):
                     df_saved_file = t2.to_csv(newfilepath + file)
 
                     cmd = (
-                        'mongoimport --quiet --uri mongodb://{}:{}@{}:{} --authenticationDatabase "admin" --file {} -d {} -c {} --drop --type csv --headerline'
+                        "mongoimport --quiet --uri mongodb://{}:{}@{}:{}/{}?authSource=admin --file {} -c {} --drop --type csv --headerline"
                     ).format(
                         connectionInfo["username"],
                         connectionInfo["password"],
                         connectionInfo["host"],
                         connectionInfo["port"],
-                        newfilepath + file,
                         connectionInfo["db"],
+                        newfilepath + file,
                         fileName,
                     )
                     os.system(cmd)
                 else:
                     cmd = (
-                        'mongoimport --quiet --uri mongodb://{}:{}@{}:{} --authenticationDatabase "admin" --file {} -d {} -c {} --drop --type csv --headerline'
+                        "mongoimport --quiet --uri mongodb://{}:{}@{}:{}/{}?authSource=admin --file {} -c {} --drop --type csv --headerline"
                     ).format(
                         connectionInfo["username"],
                         connectionInfo["password"],
                         connectionInfo["host"],
                         connectionInfo["port"],
-                        connectionInfo["workload"] + "/" + file,
                         connectionInfo["db"],
+                        connectionInfo["workload"] + "/" + file,
                         fileName,
                     )
                     os.system(cmd)

@@ -1,5 +1,7 @@
-################################################################################
-# Copyright (c) 2021 - 2022 Advanced Micro Devices, Inc. All rights reserved.
+##############################################################################bl
+# MIT License
+#
+# Copyright (c) 2021 - 2023 Advanced Micro Devices, Inc. All Rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -8,17 +10,17 @@
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
 #
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
 #
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
 # AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-################################################################################
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+##############################################################################el
 
 import sys, os, pathlib, shutil, subprocess, argparse, glob, re
 import numpy as np
@@ -29,6 +31,19 @@ prog = "omniperf"
 # Per IP block max number of simulutaneous counters
 # GFX IP Blocks
 perfmon_config = {
+    "vega10": {
+        "SQ": 8,
+        "TA": 2,
+        "TD": 2,
+        "TCP": 4,
+        "TCC": 4,
+        "CPC": 2,
+        "CPF": 2,
+        "SPI": 2,
+        "GRBM": 2,
+        "GDS": 4,
+        "TCC_channels": 16,
+    },
     "mi50": {
         "SQ": 8,
         "TA": 2,
@@ -72,7 +87,6 @@ perfmon_config = {
 
 
 def perfmon_coalesce(pmc_files_list, workload_dir, soc):
-
     workload_perfmon_dir = workload_dir + "/perfmon"
 
     # match pattern for pmc counters
@@ -97,7 +111,6 @@ def perfmon_coalesce(pmc_files_list, workload_dir, soc):
 
     # Extract all PMC counters and store in separate buckets
     for fname in pmc_files_list:
-
         lines = open(fname, "r").read().splitlines()
 
         for line in lines:
@@ -170,7 +183,6 @@ def perfmon_coalesce(pmc_files_list, workload_dir, soc):
 
 
 def perfmon_emit(pmc_list, workload_dir, soc):
-
     workload_perfmon_dir = workload_dir + "/perfmon"
 
     # Calculate the minimum number of iteration to save the pmc counters
@@ -233,7 +245,6 @@ def perfmon_emit(pmc_list, workload_dir, soc):
 
 
 def perfmon_filter(workload_dir, perfmon_dir, args):
-
     workload_perfmon_dir = workload_dir + "/perfmon"
     soc = args.target
 
@@ -275,7 +286,6 @@ def perfmon_filter(workload_dir, perfmon_dir, args):
 
 
 def pmc_filter(workload_dir, perfmon_dir, soc):
-
     workload_perfmon_dir = workload_dir + "/perfmon"
 
     if not os.path.isdir(workload_perfmon_dir):

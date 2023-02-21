@@ -104,28 +104,28 @@ Panel Config:
             unit: Instr/wavefront
             tips: 
           Wave Cycles:
-            avg: AVG(((4 * SQ_WAVE_CYCLES) / SQ_WAVES))
-            min: MIN(((4 * SQ_WAVE_CYCLES) / SQ_WAVES))
-            max: MAX(((4 * SQ_WAVE_CYCLES) / SQ_WAVES))
-            unit: Cycles/wave
+            avg: AVG(((4 * SQ_WAVE_CYCLES) / $denom))
+            min: MIN(((4 * SQ_WAVE_CYCLES) / $denom))
+            max: MAX(((4 * SQ_WAVE_CYCLES) / $denom))
+            unit: (Cycles + $normUnit)
             tips: 
           Dependency Wait Cycles:
-            avg: AVG(((4 * SQ_WAIT_ANY) / SQ_WAVES))
-            min: MIN(((4 * SQ_WAIT_ANY) / SQ_WAVES))
-            max: MAX(((4 * SQ_WAIT_ANY) / SQ_WAVES))
-            unit: Cycles/wave
+            avg: AVG(((4 * SQ_WAIT_ANY) / $denom))
+            min: MIN(((4 * SQ_WAIT_ANY) / $denom))
+            max: MAX(((4 * SQ_WAIT_ANY) / $denom))
+            unit: (Cycles + $normUnit)
             tips: 
           Issue Wait Cycles:
-            avg: AVG(((4 * SQ_WAIT_INST_ANY) / SQ_WAVES))
-            min: MIN(((4 * SQ_WAIT_INST_ANY) / SQ_WAVES))
-            max: MAX(((4 * SQ_WAIT_INST_ANY) / SQ_WAVES))
-            unit: Cycles/wave
+            avg: AVG(((4 * SQ_WAIT_INST_ANY) / $denom))
+            min: MIN(((4 * SQ_WAIT_INST_ANY) / $denom))
+            max: MAX(((4 * SQ_WAIT_INST_ANY) / $denom))
+            unit: (Cycles + $normUnit)
             tips: 
           Active Cycles:
-            avg: AVG(((4 * SQ_ACTIVE_INST_ANY) / SQ_WAVES))
-            min: MIN(((4 * SQ_ACTIVE_INST_ANY) / SQ_WAVES))
-            max: MAX(((4 * SQ_ACTIVE_INST_ANY) / SQ_WAVES))
-            unit: Cycles/wave
+            avg: AVG(((4 * SQ_ACTIVE_INST_ANY) / $denom))
+            min: MIN(((4 * SQ_ACTIVE_INST_ANY) / $denom))
+            max: MAX(((4 * SQ_ACTIVE_INST_ANY) / $denom))
+            unit: (Cycles + $normUnit)
             tips: 
           Wavefront Occupancy:
             avg: AVG((SQ_ACCUM_PREV_HIRES / GRBM_GUI_ACTIVE))

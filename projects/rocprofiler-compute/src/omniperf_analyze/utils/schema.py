@@ -1,5 +1,7 @@
-################################################################################
-# Copyright (c) 2021 - 2022 Advanced Micro Devices, Inc. All rights reserved.
+##############################################################################bl
+# MIT License
+#
+# Copyright (c) 2021 - 2023 Advanced Micro Devices, Inc. All Rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -8,17 +10,17 @@
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
 #
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
 #
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
 # AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-################################################################################
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+##############################################################################el
 
 #
 # Define all common data storage classes,
@@ -33,7 +35,6 @@ from collections import OrderedDict
 
 @dataclass
 class ArchConfig:
-
     # [id: panel_config] pairs
     panel_configs: OrderedDict = field(default=dict)
 
@@ -84,24 +85,24 @@ supported_field = [
     "Alias",
     # Special keywords for L2 channel
     "Channel",
-    "Hit Rate",
-    "Req",
-    "Read Req",
-    "Write Req",
-    "AtomicReq",
-    "EA Read Req",
-    "EA Write Req",
-    "EA AtomicReq",
-    "EA Read Lat - cycles",
-    "EA Write Lat - cycles",
-    "EA Atomic Lat - cycles",
-    "EA Read Stall - IO",
-    "EA Read Stall - GMI",
-    "EA Read Stall - DRAM",
-    "EA Write Stall - IO",
-    "EA Write Stall - GMI",
-    "EA Write Stall - DRAM",
-    "EA Write Stall - Starve",
+    "L2 Cache Hit Rate (%)",
+    "Requests (Requests)",
+    "L1-L2 Read (Requests)",
+    "L1-L2 Write (Requests)",
+    "L1-L2 Atomic (Requests)",
+    "L2-EA Read (Requests)",
+    "L2-EA Write (Requests)",
+    "L2-EA Atomic (Requests)",
+    "L2-EA Read Latency (Cycles)",
+    "L2-EA Write Latency (Cycles)",
+    "L2-EA Atomic Latency (Cycles)",
+    "L2-EA Read Stall - IO (Cycles per)",
+    "L2-EA Read Stall - GMI (Cycles per)",
+    "L2-EA Read Stall - DRAM (Cycles per)",
+    "L2-EA Write Stall - IO (Cycles per)",
+    "L2-EA Write Stall - GMI (Cycles per)",
+    "L2-EA Write Stall - DRAM (Cycles per)",
+    "L2-EA Write Stall - Starve (Cycles per)",
 ]
 
 # The prefix of raw pmc_perf.csv

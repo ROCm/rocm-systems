@@ -1,5 +1,7 @@
-################################################################################
-# Copyright (c) 2021 - 2022 Advanced Micro Devices, Inc. All rights reserved.
+##############################################################################bl
+# MIT License
+#
+# Copyright (c) 2021 - 2023 Advanced Micro Devices, Inc. All Rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -8,22 +10,21 @@
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
 #
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
 #
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
 # AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-################################################################################
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+##############################################################################el
 
 from selectors import EpollSelector
 import sys
 import copy
-from matplotlib.axis import XAxis
 import pandas as pd
 from dash.dash_table import FormatTemplate
 from dash.dash_table.Format import Format, Scheme, Symbol
@@ -51,19 +52,19 @@ HIDDEN_SECTIONS = ["Memory Chart Analysis", "Kernels"]
 HIDDEN_COLUMNS = ["Tips", "coll_level"]
 IS_DARK = True  # default dark theme
 
-# Add any elements you'd like displayed as a bar chart
-barchart_elements = [
-    1001,  # Instr mix
-    1002,  # VALU Arith Instr mix
-    1101,  # Compute pipe SOL
-    1201,  # LDS SOL
-    1301,  # Instruc cache SOL
-    1401,  # SL1D cache SOL
-    1601,  # VL1D cache SOL
-    1701,  # L2 cache SOL
-]
+# Define different types of bar charts
+barchart_elements = {
+    # Group table ids by chart type
+    "instr_mix": [1001, 1002],
+    "multi_bar": [1604, 1704],
+    "sol": [1101, 1201, 1301, 1401, 1601, 1701],
+    "l2_cache_per_chan": [1801, 1802],
+}
 
 
+##################
+# HELPER FUNCTIONS
+##################
 def filter_df(column, df, filt):
     filt_df = df
     if filt != []:
@@ -71,8 +72,20 @@ def filter_df(column, df, filt):
     return filt_df
 
 
-def discrete_background_color_bins(df, n_bins=5, columns="all"):
+def multi_bar_chart(table_id, display_df):
+    if table_id == 1604:
+        nested_bar = {"NC": {}, "UC": {}, "RW": {}, "CC": {}}
+        for index, row in display_df.iterrows():
+            nested_bar[row["Coherency"]][row["Xfer"]] = row["Avg"]
+    if table_id == 1704:
+        nested_bar = {"Read": {}, "Write": {}}
+        for index, row in display_df.iterrows():
+            nested_bar[row["Transaction"]][row["Type"]] = row["Avg"]
 
+    return nested_bar
+
+
+def discrete_background_color_bins(df, n_bins=5, columns="all"):
     bounds = [i * (1.0 / n_bins) for i in range(n_bins + 1)]
     if columns == "all":
         if "id" in df:
@@ -129,11 +142,14 @@ def discrete_background_color_bins(df, n_bins=5, columns="all"):
     return (styles, html.Div(legend, style={"padding": "5px 0 5px 0"}))
 
 
-def build_bar_chart(display_df, table_config):
+####################
+# GRAPHICAL ELEMENTS
+####################
+def build_bar_chart(display_df, table_config, norm_filt):
     d_figs = []
 
     # Insr Mix bar chart
-    if table_config["id"] == 1001 or table_config["id"] == 1002:
+    if table_config["id"] in barchart_elements["instr_mix"]:
         display_df["Count"] = [
             x.astype(int) if x != "" else int(0) for x in display_df["Count"]
         ]
@@ -150,8 +166,59 @@ def build_bar_chart(display_df, table_config):
             )
         )
 
+    # Multi bar chart
+    elif table_config["id"] in barchart_elements["multi_bar"]:
+        display_df["Avg"] = [
+            x.astype(int) if x != "" else int(0) for x in display_df["Avg"]
+        ]
+        df_unit = display_df["Unit"][0]
+        nested_bar = multi_bar_chart(table_config["id"], display_df)
+        # generate chart for each coherency
+        for group, metric in nested_bar.items():
+            d_figs.append(
+                px.bar(
+                    title=group,
+                    x=metric.values(),
+                    y=metric.keys(),
+                    labels={"x": df_unit, "y": ""},
+                    text=metric.values(),
+                    orientation="h",
+                    height=200,
+                )
+                .update_xaxes(showgrid=False, rangemode="nonnegative")
+                .update_yaxes(showgrid=False)
+                .update_layout(title_x=0.5)
+            )
+    # L2 Cache per channel
+    elif table_config["id"] in barchart_elements["l2_cache_per_chan"]:
+        nested_bar = {}
+        channels = []
+        for colName, colData in display_df.items():
+            if colName == "Channel":
+                channels = list(colData.values)
+            else:
+                display_df[colName] = [
+                    x.astype(float) if x != "" and x != None else float(0)
+                    for x in display_df[colName]
+                ]
+                nested_bar[colName] = list(display_df[colName])
+        for group, metric in nested_bar.items():
+            d_figs.append(
+                px.bar(
+                    title=group[0 : group.rfind("(")],
+                    x=channels,
+                    y=metric,
+                    labels={
+                        "x": "Channel",
+                        "y": group[group.rfind("(") + 1 : len(group) - 1].replace(
+                            "per", norm_filt
+                        ),
+                    },
+                ).update_yaxes(rangemode="nonnegative")
+            )
+
     # Speed-of-light bar chart
-    else:
+    elif table_config["id"] in barchart_elements["sol"]:
         display_df["Value"] = [
             x.astype(float) if x != "" else float(0) for x in display_df["Value"]
         ]
@@ -194,6 +261,13 @@ def build_bar_chart(display_df, table_config):
                     orientation="h",
                 ).update_xaxes(range=[0, 110])
             )
+    else:
+        print(
+            "ERROR: Table id {}. Cannot determine barchart type.".format(
+                table_config["id"]
+            )
+        )
+        sys.exit(-1)
 
     # update layout for each of the charts
     for fig in d_figs:
@@ -343,13 +417,13 @@ def build_layout(
     def generate_from_filter(
         disp_filt, kernel_filter, gcd_filter, norm_filt, div_children
     ):
-        if verbose <= 1:
+        if verbose >= 1:
             print("normalization is ", norm_filt)
 
         base_data = initialize_run(args, norm_filt)  # Re-initalize everything
         panel_configs = copy.deepcopy(archConfigs.panel_configs)
         # Generate original raw df
-        base_data[base_run].raw_pmc = file_io.create_df_pmc(path_to_dir)
+        base_data[base_run].raw_pmc = file_io.create_df_pmc(path_to_dir, verbose)
         if verbose >= 1:
             print("disp-filter is ", disp_filt)
             print("kernel-filter is ", kernel_filter)
@@ -432,12 +506,39 @@ def build_layout(
 
                         # Determine chart type:
                         # a) Barchart
-                        if table_config["id"] in barchart_elements:
-                            d_figs = build_bar_chart(display_df, table_config)
-                            for fig in d_figs:
+                        if table_config["id"] in [
+                            x for i in barchart_elements.values() for x in i
+                        ]:
+                            d_figs = build_bar_chart(display_df, table_config, norm_filt)
+                            # Smaller formatting if barchart yeilds several graphs
+                            if (
+                                len(d_figs) > 2
+                                and not table_config["id"]
+                                in barchart_elements["l2_cache_per_chan"]
+                            ):
+                                temp_obj = []
+                                for fig in d_figs:
+                                    temp_obj.append(
+                                        html.Div(
+                                            className="float-child",
+                                            children=[
+                                                dcc.Graph(
+                                                    figure=fig, style={"margin": "2%"}
+                                                )
+                                            ],
+                                        )
+                                    )
                                 content.append(
-                                    dcc.Graph(figure=fig, style={"margin": "2%"})
+                                    html.Div(
+                                        className="float-container", children=temp_obj
+                                    )
                                 )
+                            # Normal formatting if < 2 graphs
+                            else:
+                                for fig in d_figs:
+                                    content.append(
+                                        dcc.Graph(figure=fig, style={"margin": "2%"})
+                                    )
                         # B) Tablechart
                         else:
                             d_figs = build_table_chart(

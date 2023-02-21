@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 
-################################################################################
-# Copyright (c) 2021 - 2022 Advanced Micro Devices, Inc. All rights reserved.
+##############################################################################bl
+# MIT License
+#
+# Copyright (c) 2021 - 2023 Advanced Micro Devices, Inc. All Rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -10,17 +12,17 @@
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
 #
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
 #
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
 # AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-################################################################################
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+##############################################################################el
 
 import sys
 import os
@@ -37,7 +39,7 @@ from utils import specs
 from utils.perfagg import perfmon_filter, pmc_filter
 from utils import remove_workload
 from utils import csv_converter  # Import workload
-from utils import plot_roofline  # standalone roofline
+from omniperf_analyze.omniperf_analyze import roofline_only  # Standalone roofline
 from omniperf_analyze.omniperf_analyze import analyze  # CLI analysis
 
 from common import (
@@ -53,10 +55,8 @@ from common import getVersion
 # Helper Functions
 ################################################
 def run_subprocess(cmd):
-    subprocess.run(
-        cmd,
-        check=True
-    )
+    subprocess.run(cmd, check=True)
+
 
 def resolve_rocprof():
     # ROCPROF INFO
@@ -89,6 +89,8 @@ def get_soc():
         target = "mi100"
     elif mspec.GPU == "gfx90a":
         target = "mi200"
+    elif mspec.GPU == "gfx900":
+        target = "vega10"
     else:
         print("\nInvalid SoC")
         sys.exit(0)
@@ -123,7 +125,9 @@ def replace_timestamps(workload_dir):
         df_pmc_perf["EndNs"] = df_stamps["EndNs"]
         df_pmc_perf.to_csv(workload_dir + "/pmc_perf.csv", index=False)
     else:
-        warnings.warn("WARNING: Incomplete profiling data detected. Unable to update timestamps.")
+        warnings.warn(
+            "WARNING: Incomplete profiling data detected. Unable to update timestamps."
+        )
 
 
 def gen_sysinfo(workload_name, workload_dir, ip_blocks, app_cmd, skip_roof):
@@ -148,7 +152,7 @@ def gen_sysinfo(workload_name, workload_dir, ip_blocks, app_cmd, skip_roof):
     timestamp = now.strftime("%c") + " (" + local_tzname + ")"
     # host info
     param = [workload_name]
-    param += [app_cmd]
+    param += ['"' + app_cmd + '"']
     param += [
         mspec.hostname,
         mspec.cpu,
@@ -212,6 +216,48 @@ def mongo_import(args, profileAndImport):
 ################################################
 # Roofline Helpers
 ################################################
+def roof_setup(args, my_parser):
+    if args.path == os.getcwd() + "/workloads":
+        args.path += "/" + args.name + "/" + str(get_soc())
+
+    # We need to make a directory for a new roofline
+    if not os.path.isdir(args.path):
+        os.makedirs(args.path)
+    # does roof data exist?
+    print("Checking for roofline.csv in ", args.path)
+    roof_path = args.path + "/roofline.csv"
+    roofline_exists = os.path.isfile(roof_path)
+    if not roofline_exists:
+        if get_soc() != "mi200":
+            throw_parse_error(
+                my_parser, "Invalid SoC.\nRoofline only availible on MI200."
+            )
+        mibench(args)
+
+    # does sysinfo exist?
+    print("Checking for sysinfo.csv in ", args.path)
+    sysinfo_path = args.path + "/sysinfo.csv"
+    sysinfo_exists = os.path.isfile(sysinfo_path)
+    if not sysinfo_exists:
+        print("sysinfo not found")
+        gen_sysinfo(args.name, args.path, [], args.remaining, False)
+
+    # does app data exist?
+    print("Checking for pmc_perf.csv in ", args.path)
+    app_path = args.path + "/pmc_perf.csv"
+    app_exists = os.path.isfile(app_path)
+    if not app_exists:
+        if get_soc() != "mi200":
+            throw_parse_error(
+                my_parser, "Invalid SoC.\nRoofline only availible on MI200."
+            )
+        if not args.remaining:
+            throw_parse_error(
+                my_parser,
+                "Cannot find existing application data.\nAttempting to generate application data from -- <app_cmd>.\n-- <app_cmd> option is required to generate application data.",
+            )
+        else:
+            characterize_app(args.path, args.remaining, args.verbose)
 
 
 def detect_roofline():
@@ -297,89 +343,7 @@ def characterize_app(path, cmd, verbose):
     # Workload profiling
     for fname in glob.glob(workload_dir + "/perfmon/*.txt"):
         print(fname)
-        run_prof(fname, workload_dir, perfmon_dir, app_cmd, verbose)
-
-
-################################################
-# Profiling Helpers
-################################################
-
-
-def run_prof(fname, workload_dir, perfmon_dir, cmd, verbose):
-    global rocprof_cmd
-
-    fbase = os.path.splitext(os.path.basename(fname))[0]
-
-    if verbose:
-        print("pmc file:", os.path.basename(fname))
-
-    # profile the app
-    run_subprocess(
-        [
-            rocprof_cmd,
-            "-i",
-            fname,
-            "--timestamp",
-            "on",
-            "-o",
-            workload_dir + "/" + fbase + ".csv",
-            '"' + cmd + '"',
-        ]
-    )
-
-
-def omniperf_profile(args, VER):
-    # Verify valid target
-    if args.target not in SOC_LIST:
-        parse.print_help(sys.stderr)
-        sys.exit(1)
-
-    # Basic Info
-    print(PROG, "ver: ", VER)
-    print("Path: ", args.path)
-    print("Target: ", args.target)
-    print("Command: ", args.remaining)
-    print("Kernel Selection: ", args.kernel)
-    print("Dispatch Selection: ", args.dispatch)
-    if args.ipblocks == None:
-        print("IP Blocks: All")
-    else:
-        print("IP Blocks: ", args.ipblocks)
-
-    # Set up directories
-    workload_dir = args.path + "/" + args.name + "/" + args.target
-    perfmon_dir = str(OMNIPERF_HOME) + "/perfmon_pub"
-
-    # Perfmon filtering
-    perfmon_filter(workload_dir, perfmon_dir, args)
-
-    # Workload profiling
-    for fname in glob.glob(workload_dir + "/perfmon/*.txt"):
-        # Kernel filtering (in-place replacement)
-        if not args.kernel == None:
-            run_subprocess(
-                [
-                    "sed",
-                    "-i",
-                    "-r",
-                    "s%^(kernel:).*%" + "kernel: " + ",".join(args.kernel) + "%g",
-                    fname,
-                ]
-            )
-
-        # Dispatch filtering (inplace replacement)
-        if not args.dispatch == None:
-            run_subprocess(
-                [
-                    "sed",
-                    "-i",
-                    "-r",
-                    "s%^(range:).*%" + "range: " + ",".join(args.dispatch) + "%g",
-                    fname,
-                ]
-            )
-        run_prof(fname, workload_dir, perfmon_dir, args.remaining, args.verbose)
-
+        run_prof(fname, workload_dir, perfmon_dir, app_cmd, target, verbose)
     # run again with timestamps
     run_subprocess(
         [
@@ -390,12 +354,232 @@ def omniperf_profile(args, VER):
             "on",
             "-o",
             workload_dir + "/" + "timestamps.csv",
-            '"' + args.remaining + '"',
+            '"' + app_cmd + '"',
         ]
     )
-
     # Update pmc_perf.csv timestamps
     replace_timestamps(workload_dir)
+
+
+################################################
+# Profiling Helpers
+################################################
+
+
+def run_rocscope(args, fname):
+    # profile the app
+    if args.use_rocscope == True:
+        result = subprocess.run(
+            ["which", "rocscope"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
+        )
+        if result.returncode == 0:
+            rs_cmd = [
+                result.stdout.decode("ascii").strip(),
+                "metrics",
+                "-p",
+                args.path,
+                "-n",
+                args.name,
+                "-t",
+                fname,
+                "--",
+            ]
+            for i in args.remaining.split():
+                rs_cmd.append(i)
+            print(rs_cmd)
+            result = run_subprocess(
+                rs_cmd
+            )  # , stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            if result.returncode != 0:
+                print(result.stderr.decode("ascii"))
+                sys.exit(1)
+
+
+def run_prof(fname, workload_dir, perfmon_dir, cmd, target, verbose):
+    global rocprof_cmd
+
+    fbase = os.path.splitext(os.path.basename(fname))[0]
+
+    if verbose:
+        print("pmc file:", os.path.basename(fname))
+
+    # profile the app (run w/ custom config files for mi100)
+    if target == "mi100":
+        print("RUNNING WITH CUSTOM METRICS")
+        run_subprocess(
+            [
+                rocprof_cmd,
+                "-i",
+                fname,
+                "-m",
+                perfmon_dir + "/" + "metrics.xml",
+                "--timestamp",
+                "on",
+                "-o",
+                workload_dir + "/" + fbase + ".csv",
+                '"' + cmd + '"',
+            ]
+        )
+    else:
+        run_subprocess(
+            [
+                rocprof_cmd,
+                "-i",
+                fname,
+                "--timestamp",
+                "on",
+                "-o",
+                workload_dir + "/" + fbase + ".csv",
+                '"' + cmd + '"',
+            ]
+        )
+
+
+def omniperf_profile(args, VER):
+    # Verify valid target
+    if args.target not in SOC_LIST:
+        parse.print_help(sys.stderr)
+        sys.exit(1)
+
+    # Verify valid name
+    if args.name.find(".") != -1 or args.name.find("-") != -1:
+        raise ValueError("'-' and '.' are not permited in workload name", args.name)
+
+    # Basic Info
+    print(PROG, "ver: ", VER)
+    print("Path: ", args.path)
+    print("Target: ", args.target)
+    print("Command: ", args.remaining)
+    print("Kernel Selection: ", args.kernel)
+    print("Dispatch Selection: ", args.dispatch)
+
+    if args.ipblocks == None:
+        print("IP Blocks: All", "\n")
+    else:
+        print("IP Blocks: ", args.ipblocks, "\n")
+
+    # Set up directories
+    workload_dir = args.path + "/" + args.name + "/" + args.target
+    perfmon_dir = str(OMNIPERF_HOME) + "/perfmon_pub"
+
+    # Perfmon filtering
+    perfmon_filter(workload_dir, perfmon_dir, args)
+
+    if not args.lucky == None and args.lucky == True:
+        print("You're feeling lucky - only profiling top N kernels")
+        # look for whether workload_dir exists  - create if not
+        try:
+            os.makedirs(workload_dir, exist_ok=True)
+        except Exception as e:
+            print("Unable to create workload directory: ", workload_dir)
+            print(e)
+            sys.exit(1)
+
+        result = subprocess.run(
+            ["which", "rocscope"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
+        )
+        if result.returncode == 0:
+            rs_cmd = [
+                result.stdout.decode("ascii").strip(),
+                "top10",
+                "-p",
+                args.path,
+                "-n",
+                args.name,
+                "--",
+            ]
+            for i in args.remaining.split():
+                rs_cmd.append(i)
+            print(rs_cmd)
+            result = run_subprocess(
+                rs_cmd
+            )  # , stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            if result.returncode != 0:
+                print(result.stderr.decode("ascii"))
+        else:
+            print("rocscope must be in the PATH")
+            sys.exit(1)
+    elif not args.summaries == None and args.summaries == True:
+        print("creating kernel summaries")
+        # look for whether workload_dir exists  - create if not
+        try:
+            os.makedirs(workload_dir, exist_ok=True)
+        except Exception as e:
+            print("Unable to create workload directory: ", workload_dir)
+            print(e)
+            sys.exit(1)
+
+        result = subprocess.run(
+            ["which", "rocscope"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
+        )
+        if result.returncode == 0:
+            rs_cmd = [
+                result.stdout.decode("ascii").strip(),
+                "summary",
+                "-p",
+                args.path,
+                "-n",
+                args.name,
+                "--",
+            ]
+            for i in args.remaining.split():
+                rs_cmd.append(i)
+            print(rs_cmd)
+            result = run_subprocess(
+                rs_cmd
+            )  # , stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            if result.returncode != 0:
+                print(result.stderr.decode("ascii"))
+        else:
+            print("rocscope must be in the PATH")
+            sys.exit(1)
+
+    else:
+        for fname in glob.glob(workload_dir + "/perfmon/*.txt"):
+            # Kernel filtering (in-place replacement)
+            if not args.kernel == None:
+                run_subprocess(
+                    [
+                        "sed",
+                        "-i",
+                        "-r",
+                        "s%^(kernel:).*%" + "kernel: " + ",".join(args.kernel) + "%g",
+                        fname,
+                    ]
+                )
+
+            # Dispatch filtering (inplace replacement)
+            if not args.dispatch == None:
+                run_subprocess(
+                    [
+                        "sed",
+                        "-i",
+                        "-r",
+                        "s%^(range:).*%" + "range: " + " ".join(args.dispatch) + "%g",
+                        fname,
+                    ]
+                )
+            if args.use_rocscope == True:
+                run_rocscope(args, fname)
+            else:
+                run_prof(fname, workload_dir, perfmon_dir, args.remaining, args.target, args.verbose)
+
+        # run again with timestamps
+        run_subprocess(
+            [
+                rocprof_cmd,
+                # "-i", fname,
+                # "-m", perfmon_dir + "/" + "metrics.xml",
+                "--timestamp",
+                "on",
+                "-o",
+                workload_dir + "/" + "timestamps.csv",
+                '"' + args.remaining + '"',
+            ]
+        )
+
+        # Update pmc_perf.csv timestamps
+        replace_timestamps(workload_dir)
 
     # Generate sysinfo
     gen_sysinfo(args.name, workload_dir, args.ipblocks, args.remaining, args.no_roof)
@@ -466,6 +650,7 @@ def main():
     # PROFILE MODE
     ##############
     if args.mode == "profile":
+        print("Resolving rocprof")
         resolve_rocprof()
         if ".." in str(args.path):
             throw_parse_error(
@@ -495,62 +680,10 @@ def main():
 
         elif args.roof_only:
             print("\n--------\nRoofline only\n--------\n")
-            if args.path == os.getcwd() + "/workloads":
-                args.path += "/" + args.name + "/" + str(get_soc())
-            # Verify valid axes parameters
-            if args.axes:
-                if len(args.axes) != 4:
-                    throw_parse_error(
-                        my_parser,
-                        "Invalid argument for --axes.\nMust contain four values formatted as: --axes xmin xmax ymin ymax",
-                    )
-
-                if args.axes[0] > args.axes[1] or args.axes[2] > args.axes[3]:
-                    throw_parse_error(
-                        my_parser,
-                        "Invalid argument for --axes.\nBreaks required conditions: (xmax > xmin && ymax > ymin)",
-                    )
-
-            # We need to make a directory for a new roofline
-            if not os.path.isdir(args.path):
-                os.makedirs(args.path)
-            # does roof data exist?
-            print("Checking for roofline.csv in ", args.path)
-            roof_path = args.path + "/roofline.csv"
-            roofline_exists = os.path.isfile(roof_path)
-            if not roofline_exists:
-                if get_soc() != "mi200":
-                    throw_parse_error(
-                        my_parser, "Invalid SoC.\nRoofline only availible on MI200."
-                    )
-                mibench(args)
-
-            # does sysinfo exist?
-            print("Checking for sysinfo.csv in ", args.path)
-            sysinfo_path = args.path + "/sysinfo.csv"
-            sysinfo_exists = os.path.isfile(sysinfo_path)
-            if not sysinfo_exists:
-                print("sysinfo not found")
-                gen_sysinfo(args.name, args.path, [], args.remaining, False)
-
-            # does app data exist?
-            print("Checking for pmc_perf.csv in ", args.path)
-            app_path = args.path + "/pmc_perf.csv"
-            app_exists = os.path.isfile(app_path)
-            if not app_exists:
-                if get_soc() != "mi200":
-                    throw_parse_error(
-                        my_parser, "Invalid SoC.\nRoofline only availible on MI200."
-                    )
-                if not args.remaining:
-                    throw_parse_error(
-                        my_parser,
-                        "Cannot find existing application data.\nAttempting to generate application data from -- <app_cmd>.\n-- <app_cmd> option is required to generate application data.",
-                    )
-                else:
-                    characterize_app(args.path, args.remaining, args.verbose)
+            # Setup prerequisits for roofline
+            roof_setup(args, my_parser)
             # Generate roofline
-            plot_roofline.empirical_roof(args)
+            roofline_only(args.path, args.device, args.sort, args.mem_level, args.verbose)
 
         # Profile only
         else:

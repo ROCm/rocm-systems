@@ -1,5 +1,7 @@
-################################################################################
-# Copyright (c) 2021 - 2022 Advanced Micro Devices, Inc. All rights reserved.
+##############################################################################bl
+# MIT License
+#
+# Copyright (c) 2021 - 2023 Advanced Micro Devices, Inc. All Rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -8,20 +10,22 @@
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
 #
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
 #
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
 # AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-################################################################################
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+##############################################################################el
 
 import os
 import argparse
+import subprocess
+
 from common import (
     OMNIPERF_HOME,
     PROG,
@@ -31,7 +35,6 @@ from common import getVersion, getVersionDisplay
 
 
 def parse(my_parser):
-
     # versioning info
     vData = getVersion()
     versionString = getVersionDisplay(vData["version"], vData["sha"], vData["mode"])
@@ -116,6 +119,49 @@ def parse(my_parser):
         default=None,
         help="\t\t\tKernel filtering.",
     )
+
+    result = subprocess.run(
+        ["which", "rocscope"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
+    )
+    if result.returncode == 0:
+        profile_group.add_argument(
+            "-l",
+            "--i-feel-lucky",
+            required=False,
+            default=False,
+            action="store_true",
+            dest="lucky",
+            help="\t\t\tProfile only the most time consuming kernels.",
+        )
+        profile_group.add_argument(
+            "-r",
+            "--use-rocscope",
+            required=False,
+            default=False,
+            action="store_true",
+            dest="use_rocscope",
+            help="\t\t\tUse rocscope for profiling",
+        )
+        profile_group.add_argument(
+            "-s",
+            "--kernel-summaries",
+            required=False,
+            default=False,
+            action="store_true",
+            dest="summaries",
+            help="\t\t\tCreate kernel summaries.",
+        )
+    else:
+        profile_group.add_argument(
+            "--i-feel-lucky", default=False, dest="lucky", help=argparse.SUPPRESS
+        )
+        profile_group.add_argument(
+            "--use-rocscope", default=False, dest="use_rocscope", help=argparse.SUPPRESS
+        )
+        profile_group.add_argument(
+            "--kernel-summaries", default=False, dest="summaries", help=argparse.SUPPRESS
+        )
+
     profile_group.add_argument(
         "-b",
         "--ipblocks",
@@ -166,6 +212,7 @@ def parse(my_parser):
         metavar="",
         type=str,
         default="kernels",
+        choices=["kernels", "dispatches"],
         help="\t\t\tOverlay top kernels or top dispatches: (DEFAULT: kernels)\n\t\t\t   kernels\n\t\t\t   dispatches",
     )
     roofline_group.add_argument(
@@ -174,18 +221,10 @@ def parse(my_parser):
         required=False,
         choices=["HBM", "L2", "vL1D", "LDS"],
         metavar="",
+        nargs="+",
         type=str,
         default="ALL",
         help="\t\t\tFilter by memory level: (DEFAULT: ALL)\n\t\t\t   HBM\n\t\t\t   L2\n\t\t\t   vL1D\n\t\t\t   LDS",
-    )
-    roofline_group.add_argument(
-        "--axes",
-        default=None,
-        type=float,
-        required=False,
-        nargs="+",
-        metavar="",
-        help="\t\t\tDesired axis values for graph. As follows:\n\t\t\t   xmin xmax ymin ymax",
     )
     roofline_group.add_argument(
         "--device",
@@ -348,7 +387,9 @@ def parse(my_parser):
         help="\t\tSpecify the output file.",
     )
     analyze_group.add_argument(
-        "--list-kernels", action="store_true", help="\t\tList kernels."
+        "--list-kernels",
+        action="store_true",
+        help="\t\tList kernels. Top 10 kernels sorted by duration (descending order).",
     )
     analyze_group.add_argument(
         "--list-metrics",
@@ -358,35 +399,36 @@ def parse(my_parser):
     )
     analyze_group.add_argument(
         "-b",
-        "--filter-metrics",
+        "--metric",
+        dest="filter_metrics",
         metavar="",
         nargs="+",
-        help="\t\tSpecify IP block/metric Ids from --list-metrics.",
+        help="\t\tSpecify IP block/metric id(s) from --list-metrics for filtering.",
     )
     analyze_group.add_argument(
         "-k",
-        "--filter-kernels",
+        "--kernel",
         metavar="",
         type=int,
         dest="gpu_kernel",
         nargs="+",
         action="append",
-        help="\t\tSpecify kernel id from --list-kernels.",
+        help="\t\tSpecify kernel id(s) from --list-kernels for filtering.",
     )
     analyze_group.add_argument(
-        "--filter-dispatch-ids",
+        "--dispatch",
         dest="gpu_dispatch_id",
         metavar="",
         nargs="+",
         action="append",
-        help="\t\tSpecify dispatch IDs.",
+        help="\t\tSpecify dispatch id(s) for filtering.",
     )
     analyze_group.add_argument(
-        "--filter-gpu-ids",
+        "--gpu-id",
         dest="gpu_id",
         metavar="",
         nargs="+",
-        help="\t\tSpecify GPU IDs.",
+        help="\t\tSpecify GPU id(s) for filtering.",
     )
     analyze_group.add_argument(
         "-n",
