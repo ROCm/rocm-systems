@@ -216,6 +216,10 @@ def get_machine_specs(devicenum):
     ) = gpuinfo()
     rocm_smi = run(["rocm-smi"])
 
+    if search(r"ERROR(\S*)", rocm_smi) != None:
+        print("ERROR: No GPU detected. Unable to load rocm-smi")
+        sys.exit(1)
+
     device = rf"^\s*{devicenum}(.*)"
 
     hostname = socket.gethostname()
