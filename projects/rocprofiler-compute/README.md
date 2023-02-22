@@ -31,10 +31,7 @@ branching model. As a result, our latest stable release is shipped
 from the `main` branch, while new features are developed in our
 `dev` branch.
 
-Before publishing a new release, we'll open a new `release-*` branch
-from `dev` with `*` being the version number of the upcoming
-release. This branch will only receive bug fixes and users may
-checkout to preview upcoming features.
+Users may checkout `dev` to preview upcoming features.
 
 ## How to Cite
 
