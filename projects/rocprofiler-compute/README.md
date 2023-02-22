@@ -45,12 +45,13 @@ style reference is provided below for convenience:
                   Cole Ramos and
                   Fei Zheng and
                   Karl W. Schulz and
-                  Jose Santos},
-  title        = {AMDResearch/omniperf: v1.0.6 (21 December 2022)},
-  month        = dec,
-  year         = 2022,
+                  Jose Santos and
+                  Keith Lowery},
+  title        = {AMDResearch/omniperf: v1.0.7 (22 February 2023)},
+  month        = feb,
+  year         = 2023,
   publisher    = {Zenodo},
-  version      = {v1.0.6},
+  version      = {v1.0.7},
   doi          = {10.5281/zenodo.7314631},
   url          = {https://doi.org/10.5281/zenodo.7314631}
 }
