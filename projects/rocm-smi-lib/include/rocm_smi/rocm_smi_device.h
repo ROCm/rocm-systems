@@ -217,6 +217,8 @@ class Device {
     bool DeviceAPISupported(std::string name, uint64_t variant,
                                                         uint64_t sub_variant);
     rsmi_status_t restartAMDGpuDriver(void);
+    rsmi_status_t storeDevicePartitions(uint32_t dv_ind);
+    template <typename T> std::string readBootPartitionState(uint32_t dv_ind);
 
  private:
     std::shared_ptr<Monitor> monitor_;

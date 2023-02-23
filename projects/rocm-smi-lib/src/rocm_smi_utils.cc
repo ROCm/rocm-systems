@@ -43,6 +43,8 @@
 #include <assert.h>
 #include <errno.h>
 #include <sys/stat.h>
+#include <unistd.h>
+#include <dirent.h>
 
 #include <fstream>
 #include <string>
@@ -61,6 +63,7 @@
 
 namespace amd {
 namespace smi {
+const std::string kTmpFilePrefix = "rocmsmi_";
 
 // Return 0 if same file, 1 if not, and -1 for error
 int SameFile(const std::string fileA, const std::string fileB) {
@@ -298,5 +301,140 @@ std::pair<bool, std::string> executeCommand(std::string command, bool stdOut) {
   return std::make_pair(successfulRun, stdoutAndErr);
 }
 
+// originalstring - string to search for substring
+// substring - string looking to find
+bool containsString(std::string originalString, std::string substring) {
+  if (originalString.find(substring) != std::string::npos) {
+    return true;
+  } else {
+    return false;
+  }
+}
+
+// Creates and stores supplied data into a temporary file (within /tmp/).
+// All temporary files are removed upon reboot.
+// Allows all users/groups to read the temporary file.
+//
+// For more detail, refer to mkstemp manpage:
+// https://man7.org/linux/man-pages/man3/mkstemp.3.html
+//
+// Temporary file name format:
+// <app prefix>_<state name>_<paramenter name>_<device id>
+// <app prefix> - prefix for our application's identifier (see kTmpFilePrefix)
+// <paramenter name> - name of parameter being stored
+// <state name> - state at which the stored value captures
+// <device index> - device identifier
+//
+// dv_ind - device index
+// parameterName - name of parameter stored
+// stateName - state at which the stored value captures
+// storageData - string value of data to be stored
+rsmi_status_t storeTmpFile(uint32_t dv_ind, std::string parameterName,
+                           std::string stateName, std::string storageData) {
+  // Required tags needed to store our files
+  // Files name format:
+  // <app prefix>_<stateName>_<parameterName>_<device id>
+  std::string fullFileName = kTmpFilePrefix + stateName + "_" +
+                             parameterName + "_" + std::to_string(dv_ind);
+  bool doesFileExist;
+  std::tie(doesFileExist, std::ignore) =
+        readTmpFile(dv_ind, stateName, parameterName);
+  if (doesFileExist) {
+    // do not store, if file already exists
+    return RSMI_STATUS_SUCCESS;
+  }
+  // template for our file
+  std::string fullTempFilePath = "/tmp/" + fullFileName + ".XXXXXX";
+  char *fileName = &fullTempFilePath[0];
+  int fd = mkstemp(fileName);
+  if (fd == -1) {
+    return RSMI_STATUS_FILE_ERROR;
+  }
+
+  chmod(fileName, S_IRUSR|S_IRGRP|S_IROTH);
+  write(fd, storageData.c_str(), storageData.size());
+  close(fd);
+  return RSMI_STATUS_SUCCESS;
+}
+
+std::vector<std::string> getListOfAppTmpFiles() {
+  std::string path = "/tmp";
+  DIR *dir;
+  struct dirent *ent;
+  std::vector<std::string> tmpFiles;
+
+  if ((dir = opendir(path.c_str())) != nullptr) {
+    // captures all files & directories under specified path
+    while ((ent  = readdir(dir)) != nullptr) {
+      std::string fileDirName = ent->d_name;
+      // we only want our app specific files
+      if (containsString(fileDirName, kTmpFilePrefix)) {
+        tmpFiles.emplace_back(path + "/" + fileDirName);
+      } else {
+        continue;
+      }
+    }
+  }
+  return tmpFiles;
+}
+
+// Reads a temporary file in path provided
+// If file does not exist, returns an empty string
+// If file exists, returns content (which could be an empty string)
+std::string readTemporaryFile(std::string path) {
+  std::string fileContent;
+  std::ifstream inFileStream(path);
+  if (inFileStream.is_open()) {
+    inFileStream >> fileContent;
+  }
+  return fileContent;
+}
+
+// Used to debug application temporary files (idenified by kTmpFilePrefix)
+// and their content
+void displayAppTmpFilesContent() {
+  std::vector<std::string> tmpFiles = getListOfAppTmpFiles();
+  if (tmpFiles.empty() == false) {
+    for (auto &x: tmpFiles) {
+      std::string out = readTemporaryFile(x);
+      std::cout << __PRETTY_FUNCTION__ << " | Temporary file: " << x
+                << "; Contained content: " << out << std::endl;
+    }
+  } else {
+    std::cout << __PRETTY_FUNCTION__ << " | No temporary files were found"
+              << std::endl;
+  }
+}
+
+// Attempts to read application specific temporary file
+// This method is to be used for reading (or determing if it exists),
+// in order to keep file naming scheme consistent.
+//
+// dv_ind - device index
+// parameterName - name of parameter stored
+// stateName - state at which the stored value captures
+// Returns:
+// boolean - if temporary file exists
+// string - content of temporary file, if it exists (otherwise, an empty
+// string is returned)
+std::tuple<bool, std::string> readTmpFile(uint32_t dv_ind,
+                                          std::string stateName,
+                                          std::string parameterName) {
+  bool fileExists = false;
+  std::string tmpFileName = kTmpFilePrefix + stateName + "_" +parameterName +
+                            "_" + std::to_string(dv_ind);
+  std::string fileContent;
+  std::vector<std::string> tmpFiles = getListOfAppTmpFiles();
+  if (tmpFiles.empty() == false) {
+    for (auto &x: tmpFiles) {
+      if (containsString(x, tmpFileName)) {
+        fileContent = readTemporaryFile(x);
+        fileExists = true;
+        break;
+      }
+    }
+  }
+  return std::make_tuple(fileExists, fileContent);
+}
 }  // namespace smi
 }  // namespace amd

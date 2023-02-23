@@ -411,6 +411,30 @@ def getVersion(deviceList, component):
     return None
 
 
+def getComputePartition(device):
+    """ Return the current compute partition of a given device
+
+    @param device: DRM device identifier
+    """
+    currentComputePartition = create_string_buffer(256)
+    ret = rocmsmi.rsmi_dev_compute_partition_get(device, currentComputePartition, 256)
+    if rsmi_ret_ok(ret, device, silent=True) and currentComputePartition.value.decode():
+        return str(currentComputePartition.value.decode())
+    return "UNKNOWN"
+
+
+def getMemoryPartition(device):
+    """ Return the current memory partition of a given device
+
+    @param device: DRM device identifier
+    """
+    currentNPSMode = create_string_buffer(256)
+    ret = rocmsmi.rsmi_dev_nps_mode_get(device, currentNPSMode, 256)
+    if rsmi_ret_ok(ret, device, silent=True) and currentNPSMode.value.decode():
+        return str(currentNPSMode.value.decode())
+    return "UNKNOWN"
+
+
 def print2DArray(dataArray):
     """ Print 2D Array with uniform spacing """
     global PRINT_JSON
@@ -789,6 +813,66 @@ def resetPerfDeterminism(deviceList):
             printLog(device, 'Successfully disabled performance determinism', None)
         else:
             logging.error('GPU[%s]\t\t: Unable to disable performance determinism', device)
+    printLogSpacer()
+
+
+def resetComputePartition(deviceList):
+    """ Reset Compute Partition to its boot state
+
+    @param deviceList: List of DRM devices (can be a single-item list)
+    """
+    printLogSpacer(" Reset compute partition to its boot state ")
+    for device in deviceList:
+        originalPartition = getComputePartition(device)
+        ret = rocmsmi.rsmi_dev_compute_partition_reset(device)
+        if rsmi_ret_ok(ret, device, silent=True):
+            resetBootState = getComputePartition(device)
+            printLog(device, "Successfully reset compute partition (" +
+                originalPartition + ") to boot state (" + resetBootState +
+                ")", None)
+        elif ret == rsmi_status_t.RSMI_STATUS_PERMISSION:
+            printLog(device, 'Permission denied', None)
+        elif ret == rsmi_status_t.RSMI_STATUS_NOT_SUPPORTED:
+            printLog(device, 'Not supported on the given system', None)
+        else:
+            rsmi_ret_ok(ret, device)
+            printErrLog(device, 'Failed to reset the compute partition to boot state')
+    printLogSpacer()
+
+
+def resetNpsMode(deviceList):
+    """ Reset NPS mode to its boot state
+
+    @param deviceList: List of DRM devices (can be a single-item list)
+    """
+    printLogSpacer(" Reset nps mode to its boot state ")
+    for device in deviceList:
+        originalPartition = getMemoryPartition(device)
+        t1 = multiprocessing.Process(target=showProgressbar,
+                            args=("Resetting NPS mode",13,))
+        t1.start()
+        addExtraLine=True
+        start=time.time()
+        ret = rocmsmi.rsmi_dev_nps_mode_reset(device)
+        stop=time.time()
+        duration=stop-start
+        if t1.is_alive():
+            t1.terminate()
+            t1.join()
+        if duration < float(0.1):   # For longer runs, add extra line before output
+            addExtraLine=False      # This is to prevent overriding progress bar
+        if rsmi_ret_ok(ret, device, silent=True):
+            resetBootState = getMemoryPartition(device)
+            printLog(device, "Successfully reset nps mode (" +
+                originalPartition + ") to boot state (" +
+                resetBootState + ")", None, addExtraLine)
+        elif ret == rsmi_status_t.RSMI_STATUS_PERMISSION:
+            printLog(device, 'Permission denied', None, addExtraLine)
+        elif ret == rsmi_status_t.RSMI_STATUS_NOT_SUPPORTED:
+            printLog(device, 'Not supported on the given system', None, addExtraLine)
+        else:
+            rsmi_ret_ok(ret, device)
+            printErrLog(device, 'Failed to reset nps mode to boot state')
     printLogSpacer()
 
 
@@ -3247,7 +3331,7 @@ if __name__ == '__main__':
                               action='store_true')
     groupDisplay.add_argument('--shownodesbw', help='Shows the numa nodes ', action='store_true')
     groupDisplay.add_argument('--showcomputepartition', help='Shows current compute partitioning ', action='store_true')
-    groupDisplay.add_argument('--shownpsmode', help='Shows current nps mode ', action='store_true')
+    groupDisplay.add_argument('--shownpsmode', help='Shows current NPS mode ', action='store_true')
 
     groupActionReset.add_argument('-r', '--resetclocks', help='Reset clocks and OverDrive to default',
                                   action='store_true')
@@ -3257,7 +3341,9 @@ if __name__ == '__main__':
                                   help='Set the maximum GPU power back to the device deafult state',
                                   action='store_true')
     groupActionReset.add_argument('--resetxgmierr', help='Reset XGMI error count', action='store_true')
-    groupAction.add_argument('--resetperfdeterminism', help='Disable performance determinism', action='store_true')
+    groupActionReset.add_argument('--resetperfdeterminism', help='Disable performance determinism', action='store_true')
+    groupActionReset.add_argument('--resetcomputepartition', help='Resets to boot compute partition state', action='store_true')
+    groupActionReset.add_argument('--resetnpsmode', help='Resets to boot NPS mode state', action='store_true')
     groupAction.add_argument('--setclock',
                              help='Set Clock Frequency Level(s) for specified clock (requires manual Perf level)',
                              metavar=('TYPE','LEVEL'), nargs=2)
@@ -3336,7 +3422,7 @@ if __name__ == '__main__':
             or args.setpoweroverdrive or args.resetpoweroverdrive or args.rasenable or args.rasdisable or \
             args.rasinject or args.gpureset or args.setperfdeterminism or args.setslevel or args.setmlevel or \
             args.setvc or args.setsrange or args.setmrange or args.setclock or \
-            args.setcomputepartition or args.setnpsmode:
+            args.setcomputepartition or args.setnpsmode or args.resetcomputepartition or args.resetnpsmode:
         relaunchAsSudo()
 
     # If there is one or more device specified, use that for all commands, otherwise use a
@@ -3580,6 +3666,10 @@ if __name__ == '__main__':
         resetXgmiErr(deviceList)
     if args.resetperfdeterminism:
         resetPerfDeterminism(deviceList)
+    if args.resetcomputepartition:
+        resetComputePartition(deviceList)
+    if args.resetnpsmode:
+        resetNpsMode(deviceList)
     if args.rasenable:
         setRas(deviceList, 'enable', args.rasenable[0], args.rasenable[1])
     if args.rasdisable:

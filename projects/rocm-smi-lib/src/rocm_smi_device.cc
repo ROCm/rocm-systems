@@ -48,6 +48,7 @@
 #include <assert.h>
 #include <sys/stat.h>
 #include <stdint.h>
+
 #include <string>
 #include <map>
 #include <fstream>
@@ -1144,6 +1145,128 @@ rsmi_status_t Device::restartAMDGpuDriver(void) {
 
   return (restartSuccessful ? RSMI_STATUS_SUCCESS :
           RSMI_STATUS_AMDGPU_RESTART_ERR);
+}
+
+template <typename T> rsmi_status_t storeParameter(uint32_t dv_ind);
+
+// Stores parameters depending on which rsmi type is provided.
+// Uses template specialization, to restrict types to identify
+// calls needed to complete the function.
+// typename - restricted to
+// rsmi_compute_partition_type_t or rsmi_compute_partition_type_t
+// dv_ind - device index
+// tempFileName - base file name
+template <>
+rsmi_status_t storeParameter<rsmi_compute_partition_type_t>(uint32_t dv_ind) {
+  rsmi_status_t returnStatus = RSMI_STATUS_SUCCESS;
+  bool doesFileExist;
+  std::tie(doesFileExist, std::ignore) = readTmpFile(dv_ind, "boot",
+                                                     "compute_partition");
+  // if temporary file exists -> we do not need to store anything new
+  // if not, read & store the state value
+  if (doesFileExist) {
+    return returnStatus;
+  }
+  uint32_t length = 128;
+  char data[length];
+  rsmi_status_t ret = rsmi_dev_compute_partition_get(dv_ind, data, length);
+  rsmi_status_t storeRet;
+
+  if (ret == RSMI_STATUS_SUCCESS) {
+    storeRet = storeTmpFile(dv_ind, "compute_partition", "boot", data);
+  } else if (ret == RSMI_STATUS_NOT_SUPPORTED) {
+    // not supported is ok
+    storeRet = storeTmpFile(dv_ind, "compute_partition", "boot", "UNKNOWN");
+  } else {
+    storeRet = storeTmpFile(dv_ind, "compute_partition", "boot", "UNKNOWN");
+    returnStatus = ret;
+  }
+
+  if (storeRet != RSMI_STATUS_SUCCESS) {
+    // file storage err takes precedence over other errors
+    returnStatus = storeRet;
+  }
+  return returnStatus;
+}
+
+// Stores parameters depending on which rsmi type is provided.
+// Uses template specialization, to restrict types to identify
+// calls needed to complete the function.
+// typename - restricted to
+// rsmi_compute_partition_type_t or rsmi_compute_partition_type_t
+// dv_ind - device index
+// tempFileName - base file name
+template <> rsmi_status_t storeParameter<rsmi_nps_mode_type_t>(uint32_t dv_ind) {
+  rsmi_status_t returnStatus = RSMI_STATUS_SUCCESS;
+  uint32_t length = 128;
+  char data[length];
+  bool doesFileExist;
+  std::tie(doesFileExist, std::ignore) = readTmpFile(dv_ind, "boot",
+                                                     "nps_mode");
+  // if temporary file exists -> we do not need to store anything new
+  // if not, read & store the state value
+  if (doesFileExist) {
+    return returnStatus;
+  }
+  rsmi_status_t ret = rsmi_dev_nps_mode_get(dv_ind, data, length);
+  rsmi_status_t storeRet;
+
+  if (ret == RSMI_STATUS_SUCCESS) {
+    storeRet = storeTmpFile(dv_ind, "nps_mode", "boot", data);
+  } else if (ret == RSMI_STATUS_NOT_SUPPORTED) {
+    // not supported is ok
+    storeRet = storeTmpFile(dv_ind, "nps_mode", "boot", "UNKNOWN");
+  } else {
+    storeRet = storeTmpFile(dv_ind, "nps_mode", "boot", "UNKNOWN");
+    returnStatus = ret;
+  }
+
+  if (storeRet != RSMI_STATUS_SUCCESS) {
+    // file storage err takes precedence over other errors
+    returnStatus = storeRet;
+  }
+  return returnStatus;
+}
+
+rsmi_status_t Device::storeDevicePartitions(uint32_t dv_ind) {
+  rsmi_status_t returnStatus = RSMI_STATUS_SUCCESS;
+  returnStatus = storeParameter<rsmi_compute_partition_type_t>(dv_ind);
+  rsmi_status_t npsRet = storeParameter<rsmi_nps_mode_type_t>(dv_ind);
+  if (returnStatus == RSMI_STATUS_SUCCESS) { // only record earliest error
+    returnStatus = npsRet;
+  }
+  return returnStatus;
+}
+
+// Reads a device's boot partition state, depending on which rsmi type is
+// provided and device index.
+// Uses template specialization, to restrict types to identify
+// calls needed to complete the function.
+// typename - restricted to rsmi_compute_partition_type_t
+// or rsmi_compute_partition_type_t
+// dv_ind - device index
+template <>
+std::string Device::readBootPartitionState<rsmi_compute_partition_type_t>(
+    uint32_t dv_ind) {
+  std::string boot_state;
+  std::tie(std::ignore, boot_state) = readTmpFile(dv_ind, "boot",
+                                                  "compute_partition");
+  return boot_state;
+}
+
+// Reads a device's boot partition state, depending on which rsmi type is
+// provided and device index.
+// Uses template specialization, to restrict types to identify
+// calls needed to complete the function.
+// typename - restricted to rsmi_compute_partition_type_t
+// or rsmi_compute_partition_type_t
+// dv_ind - device index
+template <>
+std::string Device::readBootPartitionState<rsmi_nps_mode_type_t>(
+    uint32_t dv_ind) {
+  std::string boot_state;
+  std::tie(std::ignore, boot_state) = readTmpFile(dv_ind, "boot", "nps_mode");
+  return boot_state;
 }
 
 #undef RET_IF_NONZERO

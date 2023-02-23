@@ -221,11 +221,11 @@ void TestNPSModeReadWrite::Run(void) {
     EXPECT_TRUE((err == RSMI_STATUS_INVALID_ARGS) ||
                 (err == RSMI_STATUS_NOT_SUPPORTED) ||
                 (err == RSMI_STATUS_PERMISSION));
-      if (err == RSMI_STATUS_INVALID_ARGS) {
-        IF_VERB(STANDARD) {
-          std::cout << "\t**"
-                    << "Confirmed RSMI_STATUS_INVALID_ARGS was returned."
-                    << std::endl;
+    if (err == RSMI_STATUS_INVALID_ARGS) {
+      IF_VERB(STANDARD) {
+        std::cout << "\t**"
+                  << "Confirmed RSMI_STATUS_INVALID_ARGS was returned."
+                  << std::endl;
       } else if (err == RSMI_STATUS_PERMISSION) {
         DISPLAY_RSMI_ERR(err)
         // tests should not continue if err is a permission issue
@@ -251,13 +251,14 @@ void TestNPSModeReadWrite::Run(void) {
                   << npsModeString(new_nps_mode)
                   << " ===============" << std::endl;
       }
-      ret = rsmi_dev_nps_mode_set(dv_ind, new_nps_mode);
-      CHK_ERR_ASRT(ret)
       IF_VERB(STANDARD) {
         std::cout << "\t**"
                   << "Attempting to set nps mode to: "
                   << npsModeString(new_nps_mode) << std::endl;
       }
+      ret = rsmi_dev_nps_mode_set(dv_ind, new_nps_mode);
+      CHK_ERR_ASRT(ret)
+
       ret = rsmi_dev_nps_mode_get(dv_ind, current_nps_mode, 255);
       CHK_ERR_ASRT(ret)
       IF_VERB(STANDARD) {
@@ -266,6 +267,45 @@ void TestNPSModeReadWrite::Run(void) {
       }
       EXPECT_EQ(RSMI_STATUS_SUCCESS, ret);
       EXPECT_STREQ(npsModeString(new_nps_mode).c_str(), current_nps_mode);
+    }
+
+    /* TEST RETURN TO BOOT NPS MODE SETTING */
+    IF_VERB(STANDARD) {
+      std::cout << std::endl;
+      std::cout << "\t**"
+                << "=========== TEST RETURN TO BOOT NPS MODE SETTING "
+                << "========" << std::endl;
+    }
+    std::string oldMode = current_nps_mode;
+    bool wasResetSuccess = false;
+    ret = rsmi_dev_nps_mode_reset(dv_ind);
+    ASSERT_TRUE((ret == RSMI_STATUS_SUCCESS) ||
+                (ret == RSMI_STATUS_NOT_SUPPORTED));
+    if (ret == RSMI_STATUS_SUCCESS) {
+      wasResetSuccess = true;
+    }
+    ret = rsmi_dev_nps_mode_get(dv_ind, current_nps_mode, 255);
+    CHK_ERR_ASRT(ret)
+    IF_VERB(STANDARD) {
+      std::cout << "\t**"
+                << "Current nps mode: " << current_nps_mode << std::endl;
+    }
+    if (wasResetSuccess) {
+      ASSERT_STRNE(oldMode.c_str(), current_nps_mode);
+      IF_VERB(STANDARD) {
+      std::cout << "\t**"
+                << "Confirmed prior nps mode (" << oldMode << ") is not "
+                << "equal to current nps mode ("
+                << current_nps_mode << ")" << std::endl;
+      }
+    } else {
+      ASSERT_STREQ(oldMode.c_str(), current_nps_mode);
+      IF_VERB(STANDARD) {
+      std::cout << "\t**"
+                << "Confirmed prior nps mode (" << oldMode << ") is equal"
+                << " to current nps mode ("
+                << current_nps_mode << ")" << std::endl;
+      }
     }
 
     /* TEST RETURN TO ORIGINAL NPS MODE SETTING */
@@ -277,18 +317,18 @@ void TestNPSModeReadWrite::Run(void) {
     }
     new_nps_mode
       = mapStringToRSMINpsModeTypes.at(orig_nps_mode);
-    ret = rsmi_dev_nps_mode_set(dv_ind, new_nps_mode);
-    CHK_ERR_ASRT(ret)
     IF_VERB(STANDARD) {
       std::cout << "\t**" << "Returning nps mode to: "
                 << npsModeString(new_nps_mode) << std::endl;
     }
+    ret = rsmi_dev_nps_mode_set(dv_ind, new_nps_mode);
+    CHK_ERR_ASRT(ret)
     ret = rsmi_dev_nps_mode_get(dv_ind, current_nps_mode, 255);
     CHK_ERR_ASRT(ret)
     IF_VERB(STANDARD) {
       std::cout << "\t**" << "Attempted to set nps mode: "
                 << npsModeString(new_nps_mode) << std::endl
-                << "\t**" << "Current compute partition: " << current_nps_mode
+                << "\t**" << "Current nps mode: " << current_nps_mode
                 << std::endl;
     }
     EXPECT_EQ(RSMI_STATUS_SUCCESS, ret);
