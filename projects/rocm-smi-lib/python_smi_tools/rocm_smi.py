@@ -1539,7 +1539,7 @@ def showAllConcise(deviceList):
         else:
             gpu_busy = 'Unsupported'
         memInfo = getMemInfo(device, 'vram')
-        if memInfo[0] == None or memInfo[1] == None:
+        if memInfo[0] == None or memInfo[1] == None or float(memInfo[1]) == 0:
             mem_use = 'N/A'
         else:
             mem_use_pct = '% 3.0f%%' % (100 * (float(memInfo[0]) / float(memInfo[1])))
