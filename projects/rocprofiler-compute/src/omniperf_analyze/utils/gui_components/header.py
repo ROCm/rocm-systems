@@ -104,7 +104,7 @@ def get_header(raw_pmc, input_filters, kernel_names):
                                             dbc.DropdownMenuItem("Cache", header=True),
                                             dbc.DropdownMenuItem(
                                                 "Local Data Share (LDS)",
-                                                href="#local_data_sharelds",
+                                                href="#local_data_share_lds",
                                                 external_link=True,
                                             ),
                                             dbc.DropdownMenuItem(
