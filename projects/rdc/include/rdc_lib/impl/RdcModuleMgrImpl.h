@@ -28,7 +28,6 @@ THE SOFTWARE.
 #include "rdc_lib/RdcModuleMgr.h"
 #include "rdc_lib/RdcTelemetry.h"
 #include "rdc_lib/impl/RdcRasLib.h"
-#include "rdc_lib/impl/RdcRocpLib.h"
 #include "rdc_lib/impl/RdcRocrLib.h"
 #include "rdc_lib/impl/RdcSmiLib.h"
 
@@ -51,7 +50,6 @@ class RdcModuleMgrImpl : public RdcModuleMgr {
     RdcSmiLibPtr smi_lib_;
     RdcMetricFetcherPtr fetcher_;
     RdcRocrLibPtr rocr_lib_;
-    RdcRocpLibPtr rocp_lib_;
 };
 
 }  // namespace rdc

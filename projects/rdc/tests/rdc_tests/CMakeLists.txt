@@ -87,7 +87,6 @@ target_link_libraries(${RDCTST}
     PUBLIC rdc_bootstrap
     PUBLIC rdc
     PUBLIC rdc_ras
-    PUBLIC rdc_rocp
     PUBLIC c
     PUBLIC stdc++
     PUBLIC pthread)

@@ -51,7 +51,7 @@ option(BUILD_ROCRTEST "Build targets for librdc_rocr.so" ON)
 
 # When cmake -DBUILD_ROCPTEST=off, it will not build the librdc_rocp.so
 # which requires the Rocm profiler.
-option(BUILD_ROCPTEST "Build targets for librdc_rocp.so" ON)
+option(BUILD_ROCPTEST "Build targets for librdc_rocp.so" OFF)
 
 # When cmake -DBUILD_TESTS=off, it will not build RDC tests.
 option(BUILD_TESTS "Build test suite" OFF)
