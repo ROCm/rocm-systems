@@ -44,6 +44,8 @@ FONT_WEIGHT = "bold"
 
 SUPPORTED_SOC = ["mi200"]
 
+TOP_N = 10
+
 
 ################################################
 # Helper funcs
@@ -428,9 +430,11 @@ def plot_application(sortType, ret_df, verbose):
     # print("Top 5 intensities ('{}')...".format(roof_details["sort"]))
     intensities = {"ai_l1": [], "ai_l2": [], "ai_hbm": []}
     curr_perf = []
+    kernelNames = []
     i = 0
     # Create list of top 5 intensities
-    while i <= 9 and i != len(myList):
+    while i < TOP_N and i != len(myList):
+        kernelNames.append(myList[i].KernelName)
         intensities["ai_l1"].append(
             myList[i].total_flops / myList[i].L1cache_data
         ) if myList[i].L1cache_data else intensities["ai_l1"].append(0)
@@ -469,6 +473,9 @@ def plot_application(sortType, ret_df, verbose):
 
         intensityPoints[i].append(x)
         intensityPoints[i].append(y)
+
+    # Add an entry for kernel names
+    intensityPoints["kernelNames"] = kernelNames
 
     return intensityPoints
 
