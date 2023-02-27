@@ -211,8 +211,8 @@ bool GetNextRecord(const rocprofiler_record_header_t* record,
       // if (tracer_record->api_data_handle.size > 0) {
       //   size_to_add += tracer_record->api_data_handle.size;
       // }
-      // break;
       *next = reinterpret_cast<const rocprofiler_record_header_t*>(tracer_record + 1);
+      break;
     }
     case ROCPROFILER_ATT_TRACER_RECORD: {
       const rocprofiler_record_att_tracer_t* att_tracer_record =
