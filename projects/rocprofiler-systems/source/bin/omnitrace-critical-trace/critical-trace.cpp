@@ -97,9 +97,9 @@ namespace
 void
 init_perfetto()
 {
-    perfetto::TracingInitArgs               args{};
-    perfetto::TraceConfig                   cfg{};
-    perfetto::protos::gen::TrackEventConfig track_event_cfg{};
+    ::perfetto::TracingInitArgs               args{};
+    ::perfetto::TraceConfig                   cfg{};
+    ::perfetto::protos::gen::TrackEventConfig track_event_cfg{};
 
     auto  shmem_size_hint = config::get_perfetto_shmem_size_hint();
     auto  buffer_size     = config::get_perfetto_buffer_size();
@@ -107,19 +107,19 @@ init_perfetto()
 
     buffer_config->set_size_kb(buffer_size);
     buffer_config->set_fill_policy(
-        perfetto::protos::gen::TraceConfig_BufferConfig_FillPolicy_DISCARD);
+        ::perfetto::protos::gen::TraceConfig_BufferConfig_FillPolicy_DISCARD);
 
     auto* ds_cfg = cfg.add_data_sources()->mutable_config();
     ds_cfg->set_name("track_event");
     ds_cfg->set_track_event_config_raw(track_event_cfg.SerializeAsString());
 
-    args.backends |= perfetto::kInProcessBackend;
+    args.backends |= ::perfetto::kInProcessBackend;
     args.shmem_size_hint_kb = shmem_size_hint;
 
-    perfetto::Tracing::Initialize(args);
-    perfetto::TrackEvent::Register();
+    ::perfetto::Tracing::Initialize(args);
+    ::perfetto::TrackEvent::Register();
 
-    tracing_session = perfetto::Tracing::NewTrace();
+    tracing_session = ::perfetto::Tracing::NewTrace();
     tracing_session->Setup(cfg);
     tracing_session->StartBlocking();
 }
@@ -128,7 +128,7 @@ void
 fini_perfetto()
 {
     // Make sure the last event is closed for this example.
-    perfetto::TrackEvent::Flush();
+    ::perfetto::TrackEvent::Flush();
 
     OMNITRACE_DEBUG_F("Stopping the blocking perfetto trace sessions...\n");
     tracing_session->StopBlocking();

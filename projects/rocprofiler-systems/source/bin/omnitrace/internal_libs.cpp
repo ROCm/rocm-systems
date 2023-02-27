@@ -467,7 +467,7 @@ get_internal_libs_data_impl()
                                         file_internal_include))
                 continue;
 
-            verbprintf(2, "[internal]     parsing module: '%s' (via '%s')...\n",
+            verbprintf(3, "[internal]     parsing module: '%s' (via '%s')...\n",
                        _mname.c_str(), filepath::basename(itr.first));
 
             _data[itr.first].emplace(_mpath, func_set_t{});

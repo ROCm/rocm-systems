@@ -33,6 +33,7 @@
 #include "library/tracing/annotation.hpp"
 
 #include <timemory/components/gotcha/backends.hpp>
+#include <timemory/hash/types.hpp>
 #include <timemory/mpl/concepts.hpp>
 #include <timemory/mpl/types.hpp>
 #include <timemory/utility/types.hpp>
@@ -167,6 +168,9 @@ category_region<CategoryT>::start(std::string_view name, Args&&... args)
     {
         ++tracing::push_count();
     }
+
+    auto _hash = tim::add_hash_id(name);
+    name       = tim::get_hash_identifier_fast(_hash);
 
     if constexpr(_ct_use_causal)
     {
@@ -349,7 +353,7 @@ void
 category_region<CategoryT>::audit(const gotcha_data_t& _data, audit::incoming,
                                   Args&&... _args)
 {
-    start<OptsT...>(_data.tool_id.c_str(), [&](perfetto::EventContext ctx) {
+    start<OptsT...>(_data.tool_id.c_str(), [&](::perfetto::EventContext ctx) {
         if(config::get_perfetto_annotations())
         {
             int64_t _n = 0;
@@ -365,7 +369,7 @@ void
 category_region<CategoryT>::audit(const gotcha_data_t& _data, audit::outgoing,
                                   Args&&... _args)
 {
-    stop<OptsT...>(_data.tool_id.c_str(), [&](perfetto::EventContext ctx) {
+    stop<OptsT...>(_data.tool_id.c_str(), [&](::perfetto::EventContext ctx) {
         if(config::get_perfetto_annotations())
             tracing::add_perfetto_annotation(ctx, "return", JOIN(", ", _args...));
     });
@@ -377,7 +381,7 @@ void
 category_region<CategoryT>::audit(std::string_view _name, audit::incoming,
                                   Args&&... _args)
 {
-    start<OptsT...>(_name.data(), [&](perfetto::EventContext ctx) {
+    start<OptsT...>(_name.data(), [&](::perfetto::EventContext ctx) {
         if(config::get_perfetto_annotations())
         {
             int64_t _n = 0;
@@ -393,7 +397,7 @@ void
 category_region<CategoryT>::audit(std::string_view _name, audit::outgoing,
                                   Args&&... _args)
 {
-    stop<OptsT...>(_name.data(), [&](perfetto::EventContext ctx) {
+    stop<OptsT...>(_name.data(), [&](::perfetto::EventContext ctx) {
         if(config::get_perfetto_annotations())
             tracing::add_perfetto_annotation(ctx, "return", JOIN(", ", _args...));
     });

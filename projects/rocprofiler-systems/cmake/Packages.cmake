@@ -51,9 +51,11 @@ set(OMNITRACE_EXTENSION_LIBRARIES
 
 target_include_directories(
     omnitrace-headers
-    INTERFACE ${PROJECT_BINARY_DIR}/source/lib ${PROJECT_BINARY_DIR}/source/lib/core
-              ${PROJECT_SOURCE_DIR}/source/lib ${PROJECT_SOURCE_DIR}/source/lib/omnitrace
-              ${PROJECT_SOURCE_DIR}/source/lib/omnitrace-user)
+    INTERFACE $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/source/lib>
+              $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/source/lib/core>
+              $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/source/lib>
+              $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/source/lib/omnitrace>
+              $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/source/lib/omnitrace-user>)
 
 # include threading because of rooflines
 target_link_libraries(omnitrace-headers INTERFACE omnitrace::omnitrace-threading)
@@ -630,6 +632,12 @@ set(TIMEMORY_USE_LIBUNWIND
 set(TIMEMORY_USE_VISIBILITY
     OFF
     CACHE BOOL "Enable/disable using visibility decorations")
+set(TIMEMORY_USE_SANITIZER
+    ${OMNITRACE_USE_SANITIZER}
+    CACHE BOOL "Build with -fsanitze=\${OMNITRACE_SANITIZER_TYPE}" FORCE)
+set(TIMEMORY_SANITIZER_TYPE
+    ${OMNITRACE_SANITIZER_TYPE}
+    CACHE STRING "Sanitizer type, e.g. leak, thread, address, memory, etc." FORCE)
 
 if(DEFINED TIMEMORY_BUILD_GOTCHA AND NOT TIMEMORY_BUILD_GOTCHA)
     omnitrace_message(
@@ -788,8 +796,11 @@ if(NOT TARGET PTL::ptl-shared)
                   CMAKE_VISIBILITY_INLINES_HIDDEN)
 endif()
 
-target_sources(omnitrace-ptl INTERFACE $<TARGET_OBJECTS:PTL::ptl-object>)
-target_link_libraries(omnitrace-ptl INTERFACE PTL::ptl-object)
+target_sources(omnitrace-ptl
+               INTERFACE $<BUILD_INTERFACE:$<TARGET_OBJECTS:PTL::ptl-object>>)
+target_include_directories(
+    omnitrace-ptl INTERFACE $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/external/PTL/source>
+                            $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/external/PTL/source>)
 
 # ----------------------------------------------------------------------------------------#
 #

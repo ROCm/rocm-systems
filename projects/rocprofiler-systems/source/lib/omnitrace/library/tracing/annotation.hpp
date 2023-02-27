@@ -107,30 +107,30 @@ add_perfetto_annotation(
     }
     else if constexpr(std::is_same<value_type, bool>::value)
     {
-        _get_dbg()->set_bool_value(std::forward<Tp>(_val));
+        _get_dbg()->set_bool_value(_val);
     }
     else if constexpr(std::is_enum<value_type>::value)
     {
-        _get_dbg()->set_int_value(static_cast<int64_t>(std::forward<Tp>(_val)));
+        _get_dbg()->set_int_value(static_cast<int64_t>(_val));
     }
     else if constexpr(std::is_floating_point<value_type>::value)
     {
-        _get_dbg()->set_double_value(std::forward<Tp>(_val));
+        _get_dbg()->set_double_value(static_cast<double>(_val));
     }
     else if constexpr(std::is_integral<value_type>::value)
     {
         if constexpr(std::is_unsigned<value_type>::value)
         {
-            _get_dbg()->set_uint_value(std::forward<Tp>(_val));
+            _get_dbg()->set_uint_value(_val);
         }
         else
         {
-            _get_dbg()->set_int_value(std::forward<Tp>(_val));
+            _get_dbg()->set_int_value(_val);
         }
     }
     else if constexpr(std::is_pointer<value_type>::value)
     {
-        _get_dbg()->set_pointer_value(reinterpret_cast<uint64_t>(std::forward<Tp>(_val)));
+        _get_dbg()->set_pointer_value(reinterpret_cast<uint64_t>(_val));
     }
     else if constexpr(concepts::can_stringify<value_type>::value)
     {

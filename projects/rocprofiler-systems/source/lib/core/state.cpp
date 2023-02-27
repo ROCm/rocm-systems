@@ -25,6 +25,7 @@
 #include "debug.hpp"
 #include "utility.hpp"
 
+#include <atomic>
 #include <string>
 
 namespace omnitrace
@@ -34,14 +35,14 @@ namespace
 auto&
 get_state_value()
 {
-    static State _v{ State::PreInit };
+    static auto _v = std::atomic<State>{ State::PreInit };
     return _v;
 }
 
 ThreadState&
 get_thread_state_value()
 {
-    static thread_local ThreadState _v{ ThreadState::Enabled };
+    static thread_local auto _v = ThreadState{ ThreadState::Enabled };
     return _v;
 }
 
@@ -64,7 +65,7 @@ get_thread_state_history(int64_t _idx = utility::get_thread_index())
 State
 get_state()
 {
-    return get_state_value();
+    return get_state_value().load(std::memory_order_relaxed);
 }
 
 ThreadState
@@ -83,8 +84,10 @@ set_state(State _n)
     OMNITRACE_CI_BASIC_THROW(
         _n < get_state(), "State is being assigned to a lesser value :: %s -> %s",
         std::to_string(get_state()).c_str(), std::to_string(_n).c_str());
-    std::swap(get_state_value(), _n);
-    return _n;
+    auto _v = get_state();
+    get_state_value().store(_n, std::memory_order_relaxed);
+    // std::swap(get_state_value(), _n);
+    return _v;
 }
 
 ThreadState

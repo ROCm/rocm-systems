@@ -47,7 +47,4 @@ omnitrace_strip_target(omnitrace-dl-library)
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/dl.hpp
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/omnitrace)
 
-install(
-    TARGETS omnitrace-dl-library
-    EXPORT omnitrace-library-targets
-    DESTINATION ${CMAKE_INSTALL_LIBDIR})
+install(TARGETS omnitrace-dl-library DESTINATION ${CMAKE_INSTALL_LIBDIR})

@@ -337,8 +337,7 @@ target_link_options(
 
 target_compile_options(
     omnitrace-static-libstdcxx
-    INTERFACE $<$<COMPILE_LANGUAGE:CXX>:$<$<CXX_COMPILER_ID:GNU,Clang>:-static-libstdc++>>
-    )
+    INTERFACE $<$<COMPILE_LANGUAGE:CXX>:$<$<CXX_COMPILER_ID:GNU>:-static-libstdc++>>)
 target_link_options(
     omnitrace-static-libstdcxx INTERFACE
     $<$<COMPILE_LANGUAGE:CXX>:$<$<CXX_COMPILER_ID:GNU,Clang>:-static-libstdc++>>)

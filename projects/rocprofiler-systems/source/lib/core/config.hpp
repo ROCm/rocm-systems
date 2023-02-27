@@ -294,7 +294,7 @@ std::string
 get_trace_hsa_api_types();
 
 std::string&
-get_backend();
+get_perfetto_backend();
 
 // make this visible so omnitrace-avail can call it
 std::string
@@ -392,14 +392,17 @@ struct tmp_file
     tmp_file(std::string);
     ~tmp_file();
 
-    void open(std::ios::openmode = std::ios::binary | std::ios::in | std::ios::out);
-    void close();
-    void remove();
+    bool open(std::ios::openmode = std::ios::binary | std::ios::in | std::ios::out);
+    bool fopen(const char* = "r+");
+    bool close();
+    bool remove();
 
-    explicit operator bool() const { return stream.is_open() && stream.good(); }
+    explicit operator bool() const;
 
     std::string  filename = {};
     std::fstream stream   = {};
+    FILE*        file     = nullptr;
+    int          fd       = -1;
 };
 
 std::shared_ptr<tmp_file>

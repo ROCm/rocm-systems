@@ -22,6 +22,8 @@
 
 #pragma once
 
+#include <timemory/utility/locking.hpp>
+
 #include <atomic>
 #include <mutex>
 
@@ -29,50 +31,7 @@ namespace omnitrace
 {
 namespace locking
 {
-/// simple mutex which spins on an atomic while trying to lock.
-/// Provided for internal use for when there is low contention
-/// but we want to avoid using pthread mutexes since those
-/// are wrapped by library
-struct atomic_mutex
-{
-    atomic_mutex()  = default;
-    ~atomic_mutex() = default;
-
-    atomic_mutex(const atomic_mutex&)     = delete;
-    atomic_mutex(atomic_mutex&&) noexcept = delete;
-
-    atomic_mutex& operator=(const atomic_mutex&) = delete;
-    atomic_mutex& operator=(atomic_mutex&&) noexcept = delete;
-
-    void lock();
-    void unlock();
-    bool try_lock();
-
-private:
-    std::atomic<int64_t> m_value = {};
-};
-
-struct atomic_lock
-{
-    atomic_lock(atomic_mutex&);
-    atomic_lock(atomic_mutex&, std::defer_lock_t);
-    ~atomic_lock();
-
-    atomic_lock(const atomic_lock&)     = delete;
-    atomic_lock(atomic_lock&&) noexcept = delete;
-
-    atomic_lock& operator=(const atomic_lock&) = delete;
-    atomic_lock& operator=(atomic_lock&&) noexcept = delete;
-
-    bool owns_lock() const;
-
-    void lock();
-    void unlock();
-    bool try_lock();
-
-private:
-    bool          m_owns = false;
-    atomic_mutex& m_mutex;
-};
+using atomic_mutex = ::tim::locking::spin_mutex;
+using atomic_lock  = ::tim::locking::spin_lock;
 }  // namespace locking
 }  // namespace omnitrace

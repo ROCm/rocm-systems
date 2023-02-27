@@ -56,9 +56,6 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang"
         transpose
         PRIVATE $<TARGET_NAME_IF_EXISTS:omnitrace::omnitrace-compile-options>
                 $<TARGET_NAME_IF_EXISTS:hip::host> $<TARGET_NAME_IF_EXISTS:hip::device>)
-elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    target_link_libraries(
-        transpose PRIVATE $<TARGET_NAME_IF_EXISTS:omnitrace::omnitrace-compile-options>)
 else()
     target_compile_options(transpose PRIVATE -W -Wall)
 endif()

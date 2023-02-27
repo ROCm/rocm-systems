@@ -122,7 +122,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(omnitrace REQUIRED COMPONENTS user dl)
+find_package(omnitrace REQUIRED COMPONENTS user)
 find_package(Threads REQUIRED)
 
 get_target_property(LIBS omnitrace::omnitrace INTERFACE_LINK_LIBRARIES)

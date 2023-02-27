@@ -1,0 +1,17 @@
+leak:Dyninst::
+leak:dyninst
+leak:tbb::
+leak:boost::
+leak:libdw
+leak:libamd_comgr
+leak:libpfm4
+leak:libhsa
+leak:libamdhip64
+leak:libroctracer64
+leak:librocprofiler64
+leak:__cxx_global_var_init
+leak:tim::timemory_argparse
+leak:tim::argparse::argument_parser::parse_known_args
+leak:std::shared_ptr<std::promise<void> >
+leak:realloc
+leak:Kokkos::

@@ -99,6 +99,27 @@ if(NOT EXISTS "${OMNITRACE_PERFETTO_SOURCE_DIR}")
                 ${OMNITRACE_PERFETTO_SOURCE_DIR})
 endif()
 
+file(READ ${PROJECT_SOURCE_DIR}/external/perfetto/sdk/perfetto.h _PERFETTO_HEADER)
+
+string(
+    REGEX
+    REPLACE " perfetto::internal::ValidateEventNameType"
+            " ::perfetto::internal::ValidateEventNameType" _PERFETTO_HEADER
+            "${_PERFETTO_HEADER}")
+
+if(OMNITRACE_USE_SANITIZER AND OMNITRACE_SANITIZER_TYPE MATCHES "address")
+    string(REPLACE "__asan_poison_memory_region((a), (s))" "" _PERFETTO_HEADER
+                   "${_PERFETTO_HEADER}")
+    string(REPLACE "__asan_unpoison_memory_region((a), (s))" "" _PERFETTO_HEADER
+                   "${_PERFETTO_HEADER}")
+endif()
+
+file(WRITE ${OMNITRACE_PERFETTO_SOURCE_DIR}/sdk/perfetto.h.tmp "${_PERFETTO_HEADER}")
+
+configure_file(${OMNITRACE_PERFETTO_SOURCE_DIR}/sdk/perfetto.h.tmp
+               ${OMNITRACE_PERFETTO_SOURCE_DIR}/sdk/perfetto.h COPYONLY)
+configure_file(${PROJECT_SOURCE_DIR}/external/perfetto/sdk/perfetto.cc
+               ${OMNITRACE_PERFETTO_SOURCE_DIR}/sdk/perfetto.cc COPYONLY)
 configure_file(${PROJECT_SOURCE_DIR}/cmake/Templates/args.gn.in
                ${OMNITRACE_PERFETTO_BINARY_DIR}/args.gn @ONLY)
 
@@ -178,7 +199,7 @@ target_sources(
 target_link_libraries(
     omnitrace-perfetto-library
     PRIVATE omnitrace::omnitrace-threading omnitrace::omnitrace-static-libgcc
-            omnitrace::omnitrace-static-libstdcxx omnitrace::omnitrace-compile-options)
+            omnitrace::omnitrace-static-libstdcxx)
 set_target_properties(
     omnitrace-perfetto-library
     PROPERTIES OUTPUT_NAME perfetto

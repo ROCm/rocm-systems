@@ -257,10 +257,12 @@ set(PAPI_pfm_STATIC_LIBRARY
     ${OMNITRACE_PAPI_INSTALL_DIR}/lib/libpfm.a
     CACHE FILEPATH "PAPI library" FORCE)
 
-target_include_directories(omnitrace-papi SYSTEM INTERFACE ${PAPI_INCLUDE_DIR})
-target_link_libraries(omnitrace-papi INTERFACE ${PAPI_LIBRARY} ${PAPI_pfm_LIBRARY})
-omnitrace_target_compile_definitions(omnitrace-papi INTERFACE OMNITRACE_USE_PAPI
-                                                              TIMEMORY_USE_PAPI=1)
+target_include_directories(omnitrace-papi SYSTEM
+                           INTERFACE $<BUILD_INTERFACE:${PAPI_INCLUDE_DIR}>)
+target_link_libraries(omnitrace-papi INTERFACE $<BUILD_INTERFACE:${PAPI_LIBRARY}>
+                                               $<BUILD_INTERFACE:${PAPI_pfm_LIBRARY}>)
+omnitrace_target_compile_definitions(
+    omnitrace-papi INTERFACE OMNITRACE_USE_PAPI $<BUILD_INTERFACE:TIMEMORY_USE_PAPI=1>)
 
 install(
     DIRECTORY ${OMNITRACE_PAPI_INSTALL_DIR}/lib/

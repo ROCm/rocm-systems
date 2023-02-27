@@ -20,83 +20,27 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "locking.hpp"
+#pragma once
+
+namespace tim
+{
+class manager;
+}
 
 namespace omnitrace
 {
-namespace locking
+namespace perfetto
 {
 void
-atomic_mutex::lock()
-{
-    while(!try_lock())
-    {}
-}
+setup();
 
 void
-atomic_mutex::unlock()
-{
-    if((m_value.load() & 1) == 1) ++m_value;
-}
-
-bool
-atomic_mutex::try_lock()
-{
-    auto _targ = m_value.load(std::memory_order_relaxed);
-    if((_targ & 1) == 0)
-    {
-        return (
-            m_value.compare_exchange_strong(_targ, _targ + 1, std::memory_order_relaxed));
-    }
-    return false;
-}
-
-atomic_lock::atomic_lock(atomic_mutex& _v)
-: m_mutex{ _v }
-{
-    lock();
-}
-
-atomic_lock::atomic_lock(atomic_mutex& _v, std::defer_lock_t)
-: m_mutex{ _v }
-{}
-
-atomic_lock::~atomic_lock() { unlock(); }
-
-bool
-atomic_lock::owns_lock() const
-{
-    return m_owns;
-}
+start();
 
 void
-atomic_lock::lock()
-{
-    if(!owns_lock())
-    {
-        m_mutex.lock();
-        m_owns = true;
-    }
-}
+stop();
 
 void
-atomic_lock::unlock()
-{
-    if(owns_lock())
-    {
-        m_mutex.unlock();
-        m_owns = false;
-    }
-}
-
-bool
-atomic_lock::try_lock()
-{
-    if(!owns_lock())
-    {
-        m_owns = m_mutex.try_lock();
-    }
-    return m_owns;
-}
-}  // namespace locking
+post_process(tim::manager*, bool&);
+}  // namespace perfetto
 }  // namespace omnitrace

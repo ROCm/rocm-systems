@@ -53,6 +53,7 @@
 #include <atomic>
 #include <csignal>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <fstream>
 #include <limits>
@@ -280,7 +281,8 @@ configure_settings(bool _init)
         std::string, "OMNITRACE_MODE",
         "Data collection mode. Used to set default values for OMNITRACE_USE_* options. "
         "Typically set by omnitrace binary instrumenter.",
-        std::string{ "trace" }, "backend", "advanced");
+        std::string{ "trace" }, "backend", "advanced")
+        ->set_choices({ "trace", "sampling", "causal", "coverage" });
 
     OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_CI",
                              "Enable some runtime validation checks (typically enabled "
@@ -2164,7 +2166,7 @@ get_trace_hsa_api_types()
 }
 
 std::string&
-get_backend()
+get_perfetto_backend()
 {
     // select inprocess, system, or both (i.e. all)
     static auto _v = get_config()->find("OMNITRACE_PERFETTO_BACKEND");
@@ -2435,7 +2437,7 @@ tmp_file::~tmp_file()
     remove();
 }
 
-void
+bool
 tmp_file::open(std::ios::openmode _mode)
 {
     OMNITRACE_BASIC_VERBOSE(2, "Opening temporary file '%s'...\n", filename.c_str());
@@ -2448,23 +2450,67 @@ tmp_file::open(std::ios::openmode _mode)
     }
 
     stream.open(filename, _mode);
+
+    return (stream.is_open() && stream.good());
 }
 
-void
+bool
+tmp_file::fopen(const char* _mode)
+{
+    OMNITRACE_BASIC_VERBOSE(2, "Opening temporary file '%s'...\n", filename.c_str());
+
+    if(!filepath::exists(filename))
+    {
+        // if the filepath does not exist, open in out mode to create it
+        std::ofstream _ofs{};
+        filepath::open(_ofs, filename);
+    }
+
+    file = filepath::fopen(filename, _mode);
+    if(file) fd = ::fileno(file);
+
+    return (file != nullptr && fd > 0);
+}
+
+bool
 tmp_file::close()
 {
-    if(stream.is_open()) stream.close();
+    if(stream.is_open())
+    {
+        stream.close();
+        return !stream.is_open();
+    }
+    else if(file != nullptr)
+    {
+        auto _ret = fclose(file);
+        if(_ret == 0)
+        {
+            file = nullptr;
+            fd   = -1;
+        }
+        return (_ret == 0);
+    }
+
+    return true;
 }
 
-void
+bool
 tmp_file::remove()
 {
     close();
     if(filepath::exists(filename))
     {
         OMNITRACE_BASIC_VERBOSE(2, "Removing temporary file '%s'...\n", filename.c_str());
-        ::remove(filename.c_str());
+        auto _ret = ::remove(filename.c_str());
+        return (_ret == 0);
     }
+
+    return true;
+}
+
+tmp_file::operator bool() const
+{
+    return (stream.is_open() && stream.good()) || (file != nullptr && fd > 0);
 }
 
 std::shared_ptr<tmp_file>
@@ -2508,7 +2554,6 @@ get_tmp_file(std::string _basename, std::string _ext)
     if(itr != _existing_files.end()) return itr->second;
 
     auto _v = std::make_shared<tmp_file>(_fname);
-    _v->open();
     _existing_files.emplace(_fname, std::move(_v));
     return _existing_files.at(_fname);
 }

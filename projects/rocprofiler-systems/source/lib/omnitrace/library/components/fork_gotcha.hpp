@@ -46,10 +46,7 @@ struct fork_gotcha : comp::base<fork_gotcha, void>
     static void configure();
 
     // this will get called right before fork
-    static void audit(const gotcha_data_t& _data, audit::incoming);
-
-    // this will get called right after fork with the return value
-    static void audit(const gotcha_data_t& _data, audit::outgoing, pid_t _pid);
+    pid_t operator()(const gotcha_data_t&, pid_t (*)()) const;
 
     // silence SFINAE disabled for omnitrace::fork_gotcha warnings
     static inline void start() {}
@@ -57,7 +54,6 @@ struct fork_gotcha : comp::base<fork_gotcha, void>
 };
 }  // namespace component
 
-using fork_gotcha_t =
-    comp::gotcha<component::fork_gotcha::gotcha_capacity,
-                 tim::component_tuple<component::fork_gotcha>, project::omnitrace>;
+using fork_gotcha_t = comp::gotcha<component::fork_gotcha::gotcha_capacity, std::tuple<>,
+                                   component::fork_gotcha>;
 }  // namespace omnitrace

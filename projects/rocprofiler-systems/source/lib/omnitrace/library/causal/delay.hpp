@@ -46,6 +46,7 @@ struct delay
 
     OMNITRACE_DEFAULT_OBJECT(delay)
 
+    static void    setup();
     static void    process();
     static void    credit();
     static void    preblock();

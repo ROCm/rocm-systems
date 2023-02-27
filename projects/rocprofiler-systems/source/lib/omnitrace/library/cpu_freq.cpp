@@ -180,7 +180,7 @@ post_process()
         for(auto& itr : data)
         {
             uint64_t _ts   = std::get<0>(itr);
-            double   _freq = std::get<8>(itr).at(_offset);
+            double   _freq = static_cast<double>(std::get<8>(itr).at(_offset));
             if(!_thread_info->is_valid_time(_ts)) continue;
             write_perfetto_counter_track<category::cpu_freq>(index{ _idx }, _ts, _freq);
         }

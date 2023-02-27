@@ -347,7 +347,7 @@ main(int argc, char** argv)
         if(resolved_mutname != mutname)
         {
             mutname = resolved_mutname;
-            delete _cmdv[0];
+            free(_cmdv[0]);
             copy_str(_cmdv[0], resolved_mutname.c_str());
         }
     }
@@ -1342,6 +1342,8 @@ main(int argc, char** argv)
 
     addr_space =
         omnitrace_get_address_space(bpatch, _cmdc, _cmdv, binary_rewrite, _pid, mutname);
+
+    // addr_space->allowTraps(instr_traps);
 
     if(!addr_space)
     {

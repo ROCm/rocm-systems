@@ -6,8 +6,9 @@ set(CMAKE_BUILD_TYPE "RelWithDebInfo")
 string(REPLACE " " ";" _FLAGS "${CMAKE_CXX_FLAGS_DEBUG}")
 
 find_package(Threads REQUIRED)
+find_package(omnitrace REQUIRED COMPONENTS user)
 add_executable(fork-example fork.cpp)
-target_link_libraries(fork-example PRIVATE Threads::Threads)
+target_link_libraries(fork-example PRIVATE Threads::Threads omnitrace::omnitrace)
 target_compile_options(fork-example PRIVATE ${_FLAGS})
 
 if(OMNITRACE_INSTALL_EXAMPLES)

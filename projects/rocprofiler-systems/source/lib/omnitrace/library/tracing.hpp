@@ -108,11 +108,11 @@ pop_perfetto_ts(CategoryT, const char*, uint64_t, Args&&...);
 
 template <typename CategoryT, typename... Args>
 inline void
-push_perfetto_track(CategoryT, const char*, perfetto::Track, uint64_t, Args&&...);
+push_perfetto_track(CategoryT, const char*, ::perfetto::Track, uint64_t, Args&&...);
 
 template <typename CategoryT, typename... Args>
 inline void
-pop_perfetto_track(CategoryT, const char*, perfetto::Track, uint64_t, Args&&...);
+pop_perfetto_track(CategoryT, const char*, ::perfetto::Track, uint64_t, Args&&...);
 
 template <typename CategoryT, typename... Args>
 inline void
@@ -124,7 +124,7 @@ mark_perfetto_ts(CategoryT, const char*, uint64_t, Args&&...);
 
 template <typename CategoryT, typename... Args>
 inline void
-mark_perfetto_track(CategoryT, const char*, perfetto::Track, uint64_t, Args&&...);
+mark_perfetto_track(CategoryT, const char*, ::perfetto::Track, uint64_t, Args&&...);
 
 //
 //  definitions
@@ -336,19 +336,21 @@ push_perfetto(CategoryT, const char* name, Args&&... args)
     if(category_push_disabled<CategoryT>()) return;
 
     if constexpr(sizeof...(Args) == 1 &&
-                 std::is_invocable<Args..., perfetto::EventContext>::value)
+                 std::is_invocable<Args..., ::perfetto::EventContext>::value)
     {
         ++get_tracing_stack<CategoryT>();
         uint64_t _ts = now();
         if(config::get_perfetto_annotations())
         {
-            TRACE_EVENT_BEGIN(trait::name<CategoryT>::value, perfetto::StaticString(name),
-                              _ts, "begin_ns", _ts, std::forward<Args>(args)...);
+            TRACE_EVENT_BEGIN(trait::name<CategoryT>::value,
+                              ::perfetto::StaticString(name), _ts, "begin_ns", _ts,
+                              std::forward<Args>(args)...);
         }
         else
         {
-            TRACE_EVENT_BEGIN(trait::name<CategoryT>::value, perfetto::StaticString(name),
-                              _ts, std::forward<Args>(args)...);
+            TRACE_EVENT_BEGIN(trait::name<CategoryT>::value,
+                              ::perfetto::StaticString(name), _ts,
+                              std::forward<Args>(args)...);
         }
     }
     else
@@ -357,7 +359,7 @@ push_perfetto(CategoryT, const char* name, Args&&... args)
         using arg0_type  = concepts::tuple_element_t<0, tuple_type>;
         using arg1_type  = concepts::tuple_element_t<1, tuple_type>;
 
-        if constexpr(std::is_same<arg0_type, perfetto::Track>::value &&
+        if constexpr(std::is_same<arg0_type, ::perfetto::Track>::value &&
                      std::is_same<arg1_type, uint64_t>::value)
         {
             push_perfetto_track(CategoryT{}, name, std::forward<Args>(args)...);
@@ -371,8 +373,8 @@ push_perfetto(CategoryT, const char* name, Args&&... args)
             ++get_tracing_stack<CategoryT>();
             uint64_t _ts = now();
             TRACE_EVENT_BEGIN(
-                trait::name<CategoryT>::value, perfetto::StaticString(name), _ts,
-                std::forward<Args>(args)..., [&](perfetto::EventContext ctx) {
+                trait::name<CategoryT>::value, ::perfetto::StaticString(name), _ts,
+                std::forward<Args>(args)..., [&](::perfetto::EventContext ctx) {
                     if(config::get_perfetto_annotations())
                     {
                         tracing::add_perfetto_annotation(ctx, "begin_ns", _ts);
@@ -390,7 +392,7 @@ pop_perfetto(CategoryT, const char* name, Args&&... args)
     if(tracing_pop_disabled<CategoryT>()) return;
 
     if constexpr(sizeof...(Args) == 1 &&
-                 std::is_invocable<Args..., perfetto::EventContext>::value)
+                 std::is_invocable<Args..., ::perfetto::EventContext>::value)
     {
         // decrement tracing stack
         --get_tracing_stack<CategoryT>();
@@ -412,7 +414,7 @@ pop_perfetto(CategoryT, const char* name, Args&&... args)
         using arg0_type  = concepts::tuple_element_t<0, tuple_type>;
         using arg1_type  = concepts::tuple_element_t<1, tuple_type>;
 
-        if constexpr(std::is_same<arg0_type, perfetto::Track>::value &&
+        if constexpr(std::is_same<arg0_type, ::perfetto::Track>::value &&
                      std::is_same<arg1_type, uint64_t>::value)
         {
             pop_perfetto_track(CategoryT{}, name, std::forward<Args>(args)...);
@@ -427,7 +429,8 @@ pop_perfetto(CategoryT, const char* name, Args&&... args)
             --get_tracing_stack<CategoryT>();
             uint64_t _ts = now();
             TRACE_EVENT_END(trait::name<CategoryT>::value, _ts,
-                            std::forward<Args>(args)..., [&](perfetto::EventContext ctx) {
+                            std::forward<Args>(args)...,
+                            [&](::perfetto::EventContext ctx) {
                                 if(config::get_perfetto_annotations())
                                 {
                                     tracing::add_perfetto_annotation(ctx, "end_ns", _ts);
@@ -447,7 +450,7 @@ push_perfetto_ts(CategoryT, const char* name, uint64_t _ts, Args&&... args)
     if(category_push_disabled<CategoryT>()) return;
 
     ++get_tracing_stack<CategoryT>();
-    TRACE_EVENT_BEGIN(trait::name<CategoryT>::value, perfetto::StaticString(name), _ts,
+    TRACE_EVENT_BEGIN(trait::name<CategoryT>::value, ::perfetto::StaticString(name), _ts,
                       std::forward<Args>(args)...);
 }
 
@@ -466,20 +469,20 @@ pop_perfetto_ts(CategoryT, const char*, uint64_t _ts, Args&&... args)
 
 template <typename CategoryT, typename... Args>
 inline void
-push_perfetto_track(CategoryT, const char* name, perfetto::Track _track, uint64_t _ts,
+push_perfetto_track(CategoryT, const char* name, ::perfetto::Track _track, uint64_t _ts,
                     Args&&... args)
 {
     // skip if category is disabled
     if(category_push_disabled<CategoryT>()) return;
 
     ++get_tracing_stack<CategoryT>();
-    TRACE_EVENT_BEGIN(trait::name<CategoryT>::value, perfetto::StaticString(name), _track,
-                      _ts, std::forward<Args>(args)...);
+    TRACE_EVENT_BEGIN(trait::name<CategoryT>::value, ::perfetto::StaticString(name),
+                      _track, _ts, std::forward<Args>(args)...);
 }
 
 template <typename CategoryT, typename... Args>
 inline void
-pop_perfetto_track(CategoryT, const char*, perfetto::Track _track, uint64_t _ts,
+pop_perfetto_track(CategoryT, const char*, ::perfetto::Track _track, uint64_t _ts,
                    Args&&... args)
 {
     // skip if category is disabled and not pushed on this thread
@@ -500,19 +503,19 @@ mark_perfetto(CategoryT, const char* name, Args&&... args)
     if(category_mark_disabled<CategoryT>()) return;
 
     if constexpr(sizeof...(Args) == 1 &&
-                 std::is_invocable<Args..., perfetto::EventContext>::value)
+                 std::is_invocable<Args..., ::perfetto::EventContext>::value)
     {
         uint64_t _ts = now();
         if(config::get_perfetto_annotations())
         {
             TRACE_EVENT_INSTANT(trait::name<CategoryT>::value,
-                                perfetto::StaticString(name), _ts, "ns", _ts,
+                                ::perfetto::StaticString(name), _ts, "ns", _ts,
                                 std::forward<Args>(args)...);
         }
         else
         {
             TRACE_EVENT_INSTANT(trait::name<CategoryT>::value,
-                                perfetto::StaticString(name), _ts,
+                                ::perfetto::StaticString(name), _ts,
                                 std::forward<Args>(args)...);
         }
     }
@@ -522,7 +525,7 @@ mark_perfetto(CategoryT, const char* name, Args&&... args)
         using arg0_type  = concepts::tuple_element_t<0, tuple_type>;
         using arg1_type  = concepts::tuple_element_t<1, tuple_type>;
 
-        if constexpr(std::is_same<arg0_type, perfetto::Track>::value &&
+        if constexpr(std::is_same<arg0_type, ::perfetto::Track>::value &&
                      std::is_same<arg1_type, uint64_t>::value)
         {
             mark_perfetto_track(CategoryT{}, name, std::forward<Args>(args)...);
@@ -535,8 +538,8 @@ mark_perfetto(CategoryT, const char* name, Args&&... args)
         {
             uint64_t _ts = now();
             TRACE_EVENT_INSTANT(
-                trait::name<CategoryT>::value, perfetto::StaticString(name), _ts,
-                std::forward<Args>(args)..., [&](perfetto::EventContext ctx) {
+                trait::name<CategoryT>::value, ::perfetto::StaticString(name), _ts,
+                std::forward<Args>(args)..., [&](::perfetto::EventContext ctx) {
                     if(config::get_perfetto_annotations())
                     {
                         tracing::add_perfetto_annotation(ctx, "ns", _ts);
@@ -553,13 +556,13 @@ mark_perfetto_ts(CategoryT, const char* name, uint64_t _ts, Args&&... args)
     // skip if category is disabled
     if(category_mark_disabled<CategoryT>()) return;
 
-    TRACE_EVENT_INSTANT(trait::name<CategoryT>::value, perfetto::StaticString(name), _ts,
-                        std::forward<Args>(args)...);
+    TRACE_EVENT_INSTANT(trait::name<CategoryT>::value, ::perfetto::StaticString(name),
+                        _ts, std::forward<Args>(args)...);
 }
 
 template <typename CategoryT, typename... Args>
 inline void
-mark_perfetto_track(CategoryT, const char*, perfetto::Track _track, uint64_t _ts,
+mark_perfetto_track(CategoryT, const char*, ::perfetto::Track _track, uint64_t _ts,
                     Args&&... args)
 {
     // skip if category is disabled

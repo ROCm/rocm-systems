@@ -1,4 +1,6 @@
 
+#include <omnitrace/user.h>
+
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -19,6 +21,7 @@ run(const char* _name, int nchildren)
 {
     for(int i = 0; i < nchildren; ++i)
     {
+        omnitrace_user_push_region("launch_child");
         auto _run = [i, _name]() {
             pid_t _pid = fork();
             if(_pid == 0)
@@ -33,8 +36,10 @@ run(const char* _name, int nchildren)
             }
         };
         std::thread{ _run }.join();
-        //_run();
+        omnitrace_user_pop_region("launch_child");
     }
+
+    omnitrace_user_push_region("wait_for_children");
 
     int   _status   = 0;
     pid_t _wait_pid = 0;
@@ -64,6 +69,8 @@ run(const char* _name, int nchildren)
             printf("unknown\n");
         }
     }
+
+    omnitrace_user_pop_region("wait_for_children");
     return _status;
 }
 

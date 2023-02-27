@@ -424,8 +424,18 @@ update_env(std::vector<char*>& _environ, std::string_view _env_var, Tp&& _env_va
                 {
                     auto _val = std::string{ itr }.substr(_key.length());
                     free(itr);
-                    itr = strdup(
-                        join('=', _env_var, join(_join_delim, _env_val, _val)).c_str());
+                    if(_env_var == "LD_PRELOAD")
+                    {
+                        itr =
+                            strdup(join('=', _env_var, join(_join_delim, _val, _env_val))
+                                       .c_str());
+                    }
+                    else
+                    {
+                        itr =
+                            strdup(join('=', _env_var, join(_join_delim, _env_val, _val))
+                                       .c_str());
+                    }
                 }
             }
             else

@@ -34,6 +34,8 @@ PERFETTO_DEFINE_CATEGORIES(OMNITRACE_PERFETTO_CATEGORIES);
 
 #include "debug.hpp"
 
+#include <timemory/process/process.hpp>
+
 #include <map>
 #include <memory>
 #include <string>
@@ -43,8 +45,8 @@ PERFETTO_DEFINE_CATEGORIES(OMNITRACE_PERFETTO_CATEGORIES);
 
 namespace omnitrace
 {
-std::unique_ptr<::perfetto::TracingSession>&
-get_perfetto_session();
+std::unique_ptr<::perfetto::TracingSession>& get_perfetto_session(
+    pid_t = process::get_id());
 
 template <typename Tp>
 struct perfetto_counter_track
@@ -151,5 +153,4 @@ perfetto_counter_track<Tp>::emplace(size_t _idx, const std::string& _v,
     }
     return _index;
 }
-
 }  // namespace omnitrace

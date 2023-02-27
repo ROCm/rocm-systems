@@ -341,7 +341,7 @@ macro(OMNITRACE_ADD_INTERFACE_LIBRARY _TARGET)
         TARGETS ${_TARGET}
         DESTINATION ${CMAKE_INSTALL_LIBDIR}
         COMPONENT core
-        EXPORT ${PROJECT_NAME}-library-depends
+        EXPORT ${PROJECT_NAME}-interface-targets
         OPTIONAL)
     if(NOT "${ARGN}" STREQUAL "")
         set_property(GLOBAL APPEND PROPERTY ${PROJECT_NAME}_CMAKE_INTERFACE_DOC

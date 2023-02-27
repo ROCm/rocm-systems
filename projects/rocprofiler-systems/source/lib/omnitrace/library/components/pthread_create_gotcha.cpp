@@ -207,6 +207,8 @@ pthread_create_gotcha::wrapper::operator()() const
                                 _info->index_data->as_string().c_str(),
                                 _parent_info->index_data->as_string().c_str());
         threading::set_thread_name(TIMEMORY_JOIN(" ", "Thread", _tid).c_str());
+        auto _manager = tim::manager::instance();
+        if(_manager) _manager->initialize();
         if(!thread_bundle_data_t::instances().at(_tid))
         {
             thread_data<thread_bundle_t>::construct(
@@ -262,12 +264,15 @@ pthread_create_gotcha::wrapper::operator()() const
     // execute the original function
     _ret = m_routine(m_arg);
 
-    pop_thread_state();
+    if(get_state() < ::omnitrace::State::Finalized)
+    {
+        pop_thread_state();
 
-    // execute the destructor actions
-    _dtor();
+        // execute the destructor actions
+        _dtor();
 
-    set_thread_state(ThreadState::Completed);
+        set_thread_state(ThreadState::Completed);
+    }
 
     return _ret;
 }
@@ -281,7 +286,12 @@ pthread_create_gotcha::wrapper::wrap(void* _arg)
     wrapper* _wrapper = static_cast<wrapper*>(_arg);
 
     // execute the original function
-    return (*_wrapper)();
+    void* _ret = (*_wrapper)();
+
+    // eliminate memory leak
+    if(_ret != _arg) delete _wrapper;
+
+    return _ret;
 }
 
 void

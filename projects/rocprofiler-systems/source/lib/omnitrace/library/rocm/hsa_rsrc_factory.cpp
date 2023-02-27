@@ -145,7 +145,8 @@ HsaRsrcFactory::HsaRsrcFactory(bool initialize_hsa)
         CHECK_STATUS("Kern-arg memory pool is not found", HSA_STATUS_ERROR);
 
     // Get AqlProfile API table
-    aqlprofile_api_ = { nullptr };
+    aqlprofile_api_ = {};
+    memset(&aqlprofile_api_, 0, sizeof(aqlprofile_api_));
 #ifdef ROCP_LD_AQLPROFILE
     status = LoadAqlProfileLib(&aqlprofile_api_);
 #else
@@ -156,8 +157,9 @@ HsaRsrcFactory::HsaRsrcFactory(bool initialize_hsa)
     CHECK_STATUS("aqlprofile API table load failed", status);
 
     // Get Loader API table
-    loader_api_ = { nullptr };
-    status      = hsa_api_.hsa_system_get_major_extension_table(
+    loader_api_ = {};
+    memset(&loader_api_, 0, sizeof(loader_api_));
+    status = hsa_api_.hsa_system_get_major_extension_table(
         HSA_EXTENSION_AMD_LOADER, 1, sizeof(loader_api_), &loader_api_);
     CHECK_STATUS("loader API table query failed", status);
 

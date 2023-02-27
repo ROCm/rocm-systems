@@ -13,12 +13,15 @@ set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
 add_library(omnitrace-user-library SHARED)
 add_library(omnitrace::omnitrace-user-library ALIAS omnitrace-user-library)
 
-target_sources(
-    omnitrace-user-library
-    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/user.cpp
-            ${CMAKE_CURRENT_SOURCE_DIR}/omnitrace/user.h
-            ${CMAKE_CURRENT_SOURCE_DIR}/omnitrace/causal.h
-            ${CMAKE_CURRENT_SOURCE_DIR}/omnitrace/types.h)
+set(_user_headers
+    ${CMAKE_CURRENT_SOURCE_DIR}/omnitrace/user.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/omnitrace/types.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/omnitrace/causal.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/omnitrace/categories.h)
+
+set(_user_sources ${CMAKE_CURRENT_SOURCE_DIR}/user.cpp)
+
+target_sources(omnitrace-user-library PRIVATE ${_user_sources} ${_user_headers})
 target_include_directories(
     omnitrace-user-library PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
                                   $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
@@ -36,12 +39,14 @@ set_target_properties(
 
 omnitrace_strip_target(omnitrace-user-library)
 
-install(
-    FILES ${CMAKE_CURRENT_SOURCE_DIR}/omnitrace/user.h
-          ${CMAKE_CURRENT_SOURCE_DIR}/omnitrace/types.h
-          ${CMAKE_CURRENT_SOURCE_DIR}/omnitrace/causal.h
-          ${CMAKE_CURRENT_SOURCE_DIR}/omnitrace/categories.h
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/omnitrace)
+foreach(_HEADER ${_user_headers})
+    string(REPLACE "${CMAKE_CURRENT_SOURCE_DIR}/"
+                   "${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_INCLUDEDIR}/" _DEST
+                   "${_HEADER}")
+    configure_file(${_HEADER} ${_DEST} COPYONLY)
+endforeach()
+
+install(FILES ${_user_headers} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/omnitrace)
 
 install(
     TARGETS omnitrace-user-library

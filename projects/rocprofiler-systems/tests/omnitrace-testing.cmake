@@ -257,7 +257,7 @@ endif()
 
 function(OMNITRACE_WRITE_TEST_CONFIG _FILE _ENV)
     set(_ENV_ONLY
-        "OMNITRACE_(MODE|USE_MPIP|DEBUG_SETTINGS|FORCE_ROCPROFILER_INIT|DEFAULT_MIN_INSTRUCTIONS|MONOCHROME)="
+        "OMNITRACE_(MODE|USE_MPIP|DEBUG_SETTINGS|FORCE_ROCPROFILER_INIT|DEFAULT_MIN_INSTRUCTIONS|MONOCHROME|VERBOSE)="
         )
     set(_FILE_CONTENTS)
     set(_ENV_CONTENTS)
@@ -295,6 +295,43 @@ ${_FILE_CONTENTS}
         "${_ENV_CONTENTS}"
         PARENT_SCOPE)
 endfunction()
+
+# -------------------------------------------------------------------------------------- #
+# extends the timeout when sanitizers are used due to slowdown
+function(OMNITRACE_ADJUST_TIMEOUT_FOR_SANITIZER _VAR)
+    if(OMNITRACE_USE_SANITIZER)
+        math(EXPR _timeout_v "2 * ${${_VAR}}")
+        set(${_VAR}
+            "${_timeout_v}"
+            PARENT_SCOPE)
+    endif()
+endfunction()
+
+# -------------------------------------------------------------------------------------- #
+# extends the timeout when sanitizers are used due to slowdown
+macro(OMNITRACE_PATCH_SANITIZER_ENVIRONMENT _VAR)
+    if(OMNITRACE_USE_SANITIZER)
+        if(OMNITRACE_USE_SANITIZER)
+            if(OMNITRACE_SANITIZER_TYPE MATCHES "address")
+                if(NOT ASAN_LIBRARY)
+                    omnitrace_message(
+                        FATAL_ERROR
+                        "Please define the realpath to the address sanitizer library in variable ASAN_LIBRARY"
+                        )
+                endif()
+                list(APPEND ${_VAR} "LD_PRELOAD=${ASAN_LIBRARY}")
+            elseif(OMNITRACE_SANITIZER_TYPE MATCHES "thread")
+                if(NOT TSAN_LIBRARY)
+                    omnitrace_message(
+                        FATAL_ERROR
+                        "Please define the realpath to the thread sanitizer library in variable TSAN_LIBRARY"
+                        )
+                endif()
+                list(APPEND ${_VAR} "LD_PRELOAD=${TSAN_LIBRARY}")
+            endif()
+        endif()
+    endif()
+endmacro()
 
 # -------------------------------------------------------------------------------------- #
 
@@ -370,7 +407,7 @@ function(OMNITRACE_ADD_TEST)
             list(APPEND TEST_ENVIRONMENT "OMNITRACE_USE_PID=OFF")
         endif()
 
-        if(NOT TEST_SKIP_BASELINE)
+        if(NOT TEST_SKIP_BASELINE AND NOT OMNITRACE_USE_SANITIZER)
             add_test(
                 NAME ${TEST_NAME}-baseline
                 COMMAND ${COMMAND_PREFIX} $<TARGET_FILE:${TEST_TARGET}> ${TEST_RUN_ARGS}
@@ -419,7 +456,7 @@ function(OMNITRACE_ADD_TEST)
                 WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
         endif()
 
-        if(NOT TEST_SKIP_RUNTIME)
+        if(NOT TEST_SKIP_RUNTIME AND NOT OMNITRACE_USE_SANITIZER)
             add_test(
                 NAME ${TEST_NAME}-runtime-instrument
                 COMMAND $<TARGET_FILE:omnitrace-exe> ${TEST_RUNTIME_ARGS} --
@@ -427,7 +464,8 @@ function(OMNITRACE_ADD_TEST)
                 WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
         endif()
 
-        if(TEST_FORCE_SAMPLING OR (NOT TEST_SKIP_RUNTIME AND NOT TEST_SKIP_SAMPLING))
+        if((TEST_FORCE_SAMPLING OR (NOT TEST_SKIP_RUNTIME AND NOT TEST_SKIP_SAMPLING))
+           AND NOT OMNITRACE_USE_SANITIZER)
             add_test(
                 NAME ${TEST_NAME}-runtime-instrument-sampling
                 COMMAND $<TARGET_FILE:omnitrace-exe> -M sampling ${TEST_RUNTIME_ARGS} --
@@ -493,6 +531,12 @@ function(OMNITRACE_ADD_TEST)
             else()
                 set(_REGEX_VAR)
             endif()
+
+            if("${_TEST}" MATCHES "binary-rewrite-run|runtime-instrument|preload")
+                omnitrace_patch_sanitizer_environment(_environ)
+            endif()
+
+            omnitrace_adjust_timeout_for_sanitizer(_timeout)
 
             foreach(_TYPE PASS FAIL SKIP)
                 if(_REGEX_VAR)
@@ -570,10 +614,18 @@ function(OMNITRACE_ADD_CAUSAL_TEST)
             WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
 
         if(NOT "${TEST_CAUSAL_VALIDATE_ARGS}" STREQUAL "")
+            if("$ENV{OMNITRACE_CI}" MATCHES "ON|on|1|true|TRUE"
+               OR "$ENV{CI}" MATCHES "true"
+               OR NOT "$ENV{GITHUB_RUN_ID}" STREQUAL "")
+                set(_VALIDATE_EXTRA "--ci")
+            else()
+                set(_VALIDATE_EXTRA "")
+            endif()
+
             add_test(
                 NAME validate-causal-${TEST_NAME}
                 COMMAND ${CMAKE_CURRENT_LIST_DIR}/validate-causal-json.py
-                        ${TEST_CAUSAL_VALIDATE_ARGS}
+                        ${_VALIDATE_EXTRA} ${TEST_CAUSAL_VALIDATE_ARGS}
                 WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
         endif()
 
@@ -609,6 +661,8 @@ function(OMNITRACE_ADD_CAUSAL_TEST)
                 "${TEST_ENVIRONMENT}")
 
             set(_timeout ${TEST_CAUSAL_TIMEOUT})
+
+            omnitrace_adjust_timeout_for_sanitizer(_timeout)
 
             if("${_TEST}" MATCHES "validate-causal")
                 set(_timeout ${TEST_CAUSAL_VALIDATE_TIMEOUT})
@@ -670,6 +724,8 @@ function(OMNITRACE_ADD_PYTHON_TEST)
     if(NOT TEST_TIMEOUT)
         set(TEST_TIMEOUT 120)
     endif()
+
+    omnitrace_adjust_timeout_for_sanitizer(TEST_TIMEOUT)
 
     set(PYTHON_EXECUTABLE "${TEST_PYTHON_EXECUTABLE}")
 
@@ -852,6 +908,8 @@ function(OMNITRACE_ADD_VALIDATION_TEST)
     if(NOT TEST_TIMEOUT)
         set(TEST_TIMEOUT 30)
     endif()
+
+    omnitrace_adjust_timeout_for_sanitizer(TEST_TIMEOUT)
 
     set(PYTHON_EXECUTABLE "${OMNITRACE_VALIDATION_PYTHON}")
 

@@ -926,6 +926,7 @@ start_experimenting()
         }
     }
 
+    delay::setup();
     compute_eligible_lines();
 
     if(get_state() < State::Finalized)

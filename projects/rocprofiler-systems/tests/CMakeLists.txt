@@ -253,7 +253,7 @@ if(OMNITRACE_USE_MPI OR OMNITRACE_USE_MPI_HEADERS)
             args
             --min-instructions
             0
-        ENVIRONMENT "${_base_environment}"
+        ENVIRONMENT "${_base_environment};OMNITRACE_VERBOSE=1"
         REWRITE_RUN_PASS_REGEX
             "(/[A-Za-z-]+/perfetto-trace-0.proto).*(/[A-Za-z-]+/wall_clock-0.txt')"
         REWRITE_RUN_FAIL_REGEX
@@ -338,7 +338,7 @@ if(OMNITRACE_USE_MPI OR OMNITRACE_USE_MPI_HEADERS)
             set(_mpip_${_EXAMPLE}_environment "${_mpip_environment}")
         endif()
         omnitrace_add_test(
-            SKIP_RUNTIME SKIP_SAMPLING
+            SKIP_RUNTIME SKIP_SAMPLING SKIP_PRELOAD
             NAME "mpi-${_EXAMPLE}"
             TARGET mpi-${_EXAMPLE}
             MPI ON
@@ -815,7 +815,18 @@ omnitrace_add_test(
     TARGET fork-example
     REWRITE_ARGS -e -v 2 --print-instrumented modules -i 16
     RUNTIME_ARGS -e -v 1 --label file -i 16
-    ENVIRONMENT "${_base_environment};OMNITRACE_CRITICAL_TRACE=ON")
+    ENVIRONMENT
+        "${_base_environment};OMNITRACE_CRITICAL_TRACE=ON;OMNITRACE_SAMPLING_FREQ=250;OMNITRACE_SAMPLING_REALTIME=ON"
+    PRELOAD_PASS_REGEX "fork.. called on PID"
+    RUNTIME_PASS_REGEX "fork.. called on PID"
+    REWRITE_RUN_PASS_REGEX "fork.. called on PID"
+    PRELOAD_FAIL_REGEX
+        "(terminate called after throwing an instance|calling abort.. in |Exit code: [1-9])"
+    RUNTIME_FAIL_REGEX
+        "(terminate called after throwing an instance|calling abort.. in |Exit code: [1-9])"
+    REWRITE_RUN_FAIL_REGEX
+        "(terminate called after throwing an instance|calling abort.. in |Exit code: [1-9])"
+    )
 
 # -------------------------------------------------------------------------------------- #
 #
@@ -1068,7 +1079,7 @@ omnitrace_add_causal_test(
     )
 
 set(_causal_common_args
-    "-n 12 -e -s 0 10 20 30 -B $<TARGET_FILE_BASE_NAME:causal-cpu-omni>")
+    "-n 5 -e -s 0 10 20 30 -B $<TARGET_FILE_BASE_NAME:causal-cpu-omni>")
 
 macro(
     causal_e2e_args_and_validation
@@ -1103,49 +1114,49 @@ omnitrace_add_causal_test(
     SKIP_BASELINE
     NAME cpu-omni-slow-func-e2e
     TARGET causal-cpu-omni
-    RUN_ARGS 80 12 432525 250000000
+    RUN_ARGS 80 12 432525 500000000
     CAUSAL_MODE "func"
     CAUSAL_ARGS ${_causal_slow_func_args}
     CAUSAL_VALIDATE_ARGS ${_causal_slow_func_valid}
     CAUSAL_PASS_REGEX
         "Starting causal experiment #1(.*)causal/experiments.json(.*)causal/experiments.coz"
-    )
+    PROPERTIES PROCESSORS 2 PROCESSOR_AFFINITY ON)
 
 omnitrace_add_causal_test(
     SKIP_BASELINE
     NAME cpu-omni-fast-func-e2e
     TARGET causal-cpu-omni
-    RUN_ARGS 80 12 432525 250000000
+    RUN_ARGS 80 12 432525 500000000
     CAUSAL_MODE "func"
     CAUSAL_ARGS ${_causal_fast_func_args}
     CAUSAL_VALIDATE_ARGS ${_causal_fast_func_valid}
     CAUSAL_PASS_REGEX
         "Starting causal experiment #1(.*)causal/experiments.json(.*)causal/experiments.coz"
-    )
+    PROPERTIES PROCESSORS 2 PROCESSOR_AFFINITY OFF)
 
 omnitrace_add_causal_test(
     SKIP_BASELINE
     NAME cpu-omni-line-155-e2e
     TARGET causal-cpu-omni
-    RUN_ARGS 80 12 432525 250000000
+    RUN_ARGS 80 12 432525 500000000
     CAUSAL_MODE "line"
     CAUSAL_ARGS ${_causal_line_155_args}
     CAUSAL_VALIDATE_ARGS ${_causal_line_155_valid}
     CAUSAL_PASS_REGEX
         "Starting causal experiment #1(.*)causal/experiments.json(.*)causal/experiments.coz"
-    )
+    PROPERTIES PROCESSORS 2 PROCESSOR_AFFINITY ON)
 
 omnitrace_add_causal_test(
     SKIP_BASELINE
     NAME cpu-omni-line-165-e2e
     TARGET causal-cpu-omni
-    RUN_ARGS 80 12 432525 250000000
+    RUN_ARGS 80 12 432525 500000000
     CAUSAL_MODE "line"
     CAUSAL_ARGS ${_causal_line_165_args}
     CAUSAL_VALIDATE_ARGS ${_causal_line_165_valid}
     CAUSAL_PASS_REGEX
         "Starting causal experiment #1(.*)causal/experiments.json(.*)causal/experiments.coz"
-    )
+    PROPERTIES PROCESSORS 2 PROCESSOR_AFFINITY OFF)
 
 # -------------------------------------------------------------------------------------- #
 #

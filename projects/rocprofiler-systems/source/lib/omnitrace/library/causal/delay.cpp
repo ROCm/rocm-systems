@@ -91,8 +91,15 @@ compute_sleep_for_overhead()
     return _stats.get_mean();
 }
 
-int64_t sleep_for_overhead = compute_sleep_for_overhead();
+int64_t sleep_for_overhead = 0;
 }  // namespace
+
+void
+delay::setup()
+{
+    static std::once_flag _once{};
+    std::call_once(_once, []() { sleep_for_overhead = compute_sleep_for_overhead(); });
+}
 
 void
 delay::process()

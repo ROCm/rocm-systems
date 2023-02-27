@@ -30,6 +30,7 @@
 #include "library/runtime.hpp"
 
 #include <timemory/backends/threading.hpp>
+#include <timemory/components/macros.hpp>
 #include <timemory/mpl/concepts.hpp>
 #include <timemory/utility/types.hpp>
 
@@ -204,3 +205,5 @@ numa_gotcha::audit(const gotcha_data& _data, audit::outgoing, void* ret)
 }
 }  // namespace component
 }  // namespace omnitrace
+
+TIMEMORY_STORAGE_INITIALIZER(omnitrace::component::numa_gotcha)
