@@ -326,6 +326,7 @@ def draw_wave_metrics(selections, normalize):
         event_timeline[bk:bk+4, start:start+delta_time] += \
             np.asarray(events[-1].toTuple()[1:5])[:, None]
 
+
     event_timeline = [np.convolve(e, kernel)[3*kernsize:-3*kernsize] for e in event_timeline]
 
     if normalize:
@@ -369,7 +370,7 @@ def draw_wave_states(selections, normalize):
     kernel = np.asarray([np.exp(-abs(10*k/kernsize)) for k in range(-kernsize//2,kernsize//2+1)])
     kernel /= np.sum(kernel)
 
-    timelines = [np.convolve(time, kernel)[kernsize//2:-kernsize//2][::trim] for time in timelines]
+    timelines = [np.convolve(time, kernel)[kernsize//2:-kernsize//2][::trim] if len(time) > 0 else cycles*0 for time in timelines]
 
     with open(os.path.join(PIC_SAVE_FOLDER,'counters.json'), 'w') as f:
         f.write(json.dumps({"counters": STATES}))
@@ -383,7 +384,7 @@ def draw_wave_states(selections, normalize):
     else:
         plt.ylabel('Waves state total')
     plt.ylim(-1)
-    plt.xlim(-maxtime//200, maxtime+maxtime//200)
+    plt.xlim(-maxtime//200, maxtime+maxtime//200+1)
     plt.subplots_adjust(left=0.05, right=1, top=1, bottom=0.07)
     plt.savefig(os.path.join(PIC_SAVE_FOLDER,'timeline.png'), dpi=150)
 
@@ -475,8 +476,14 @@ if __name__ == "__main__":
     global EVENTS
     TIMELINES = [np.zeros(int(1E4),dtype=np.int32) for k in range(5)]
     EVENTS = []
+
+    analysed_filenames = []
     for name in filenames:
         SIMD, perfevents = getWaves(name, args.target_cu, False)
+        if len(SIMD) == 0:
+            print("Error parsing ", name)
+            continue
+        analysed_filenames.append(name)
         EVENTS.append(perfevents)
         DBFILES.append( persist(args.output_ui, name, SIMD) )
         for wave in SIMD:
@@ -492,7 +499,7 @@ if __name__ == "__main__":
 
                 if time_acc+state[1] > TIMELINES[state[0]].size:
                     TIMELINES[state[0]] = np.hstack([
-                        TIMELINES[state[0]], 
+                        TIMELINES[state[0]],
                         np.zeros_like(TIMELINES[state[0]])
                     ])
                 TIMELINES[state[0]][time_acc:time_acc+state[1]] += 1
@@ -500,11 +507,9 @@ if __name__ == "__main__":
 
     global PIC_SAVE_FOLDER
     PIC_SAVE_FOLDER = os.path.abspath(os.path.join(args.output_ui, 'ui'))
-    #GeneratePIC()
-    #quit()
 
     if args.genasm and len(args.genasm) > 0:
-        flight_count = view_trace(args, 0, code, jumps, DBFILES, filenames, True, None)
+        flight_count = view_trace(args, 0, code, jumps, DBFILES, analysed_filenames, True, None)
 
         with open(args.assembly_code, 'r') as file:
             lines = file.readlines()
@@ -516,4 +521,4 @@ if __name__ == "__main__":
             for k in keys:
                 file.write(assembly_code[k]+'\n')
     else:
-        view_trace(args, 0, code, jumps, DBFILES, filenames, False, GeneratePIC)
+        view_trace(args, 0, code, jumps, DBFILES, analysed_filenames, False, GeneratePIC)
