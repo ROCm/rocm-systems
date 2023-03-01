@@ -1,12 +1,5 @@
 # Handle HSA Interception Tool Tests
 find_package(hsa-runtime64 REQUIRED CONFIG PATHS ${ROCM_PATH})
-file(GLOB PUBLIC_API_HEADERS "${PROJECT_SOURCE_DIR}/inc/*.h")
-foreach(header ${PUBLIC_API_HEADERS})
-  get_filename_component(header_subdir ${header} DIRECTORY)
-  install(FILES ${header}
-          DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}/${header_subdir}
-          COMPONENT runtime)
-endforeach()
 
 get_property(HSA_RUNTIME_INCLUDE_DIRECTORIES TARGET hsa-runtime64::hsa-runtime64 PROPERTY INTERFACE_INCLUDE_DIRECTORIES)
 find_file(HSA_H hsa.h
@@ -160,7 +153,7 @@ function(generate_hsaco TARGET_ID INPUT_FILE OUTPUT_FILE)
   set(HSACO_TARGET_LIST ${HSACO_TARGET_LIST} ${PROJECT_BINARY_DIR}/tests/featuretests/profiler/${OUTPUT_FILE} PARENT_SCOPE)
 endfunction(generate_hsaco)
 
-foreach(target_id ${GPU_TARGETS})
+foreach(target_id ${GPU_TARGETS_LIST})
   ## generate kernel bitcodes
   generate_hsaco(${target_id} ${CMAKE_CURRENT_SOURCE_DIR}/discretetests/binary/copy.cl ${target_id}_copy.hsaco)
 endforeach(target_id)
@@ -172,6 +165,7 @@ add_custom_target(hsaco_targets DEPENDS ${HSACO_TARGET_LIST})
  target_link_libraries(multiqueue_testapp PRIVATE ${ROCPROFILER_TARGET} hsa-runtime64::hsa-runtime64  GTest::gtest GTest::gtest_main stdc++fs Threads::Threads amd_comgr dl)
  add_dependencies(multiqueue_testapp hsaco_targets)
  add_dependencies(tests multiqueue_testapp )
+ install(TARGETS multiqueue_testapp RUNTIME DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/tests COMPONENT tests)
 
 add_executable(profiler_multiqueue_test discretetests/binary/multiqueue_test.cpp utils/csv_parser.cpp  utils/test_utils.cpp)
 target_include_directories(profiler_multiqueue_test PRIVATE ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/tests/featuretests/profiler)

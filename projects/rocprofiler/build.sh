@@ -70,6 +70,7 @@ if [ -z "$HIP_VDI" ] ; then HIP_VDI=0; fi
 if [ -n "$ROCM_RPATH" ] ; then LD_RUNPATH_FLAG=" -Wl,--enable-new-dtags -Wl,--rpath,${ROCM_RPATH}"; fi
 if [ -z "$TO_CLEAN" ] ; then TO_CLEAN=yes; fi
 if [ -z "$ASAN" ] ; then ASAN=False; fi
+if [ -z "$GPU_LIST" ] ; then GPU_LIST='gfx900 gfx906 gfx908 gfx90a gfx1030'; fi
 
 ROCPROFILER_ROOT=$(cd $ROCPROFILER_ROOT && echo $PWD)
 
@@ -88,9 +89,18 @@ cmake \
     -DCPACK_GENERATOR=${CPACKGEN:-'DEB;RPM'} \
     -DCMAKE_INSTALL_RPATH=${ROCM_RPATH} \
     -DCMAKE_INSTALL_RPATH_USE_LINK_PATH=FALSE \
+    -DGPU_TARGETS="$GPU_LIST" \
     $ROCPROFILER_ROOT
 
-make -j
-make -j package
+popd
+
+MAKE_OPTS="-j -C $ROCPROFILER_ROOT/$BUILD_DIR"
+
+cmake --build "$BUILD_DIR" -- $MAKE_OPTS
+cmake --build "$BUILD_DIR" -- $MAKE_OPTS doc
+cmake --build "$BUILD_DIR" -- $MAKE_OPTS samples
+cmake --build "$BUILD_DIR" -- $MAKE_OPTS mytest
+cmake --build "$BUILD_DIR" -- $MAKE_OPTS tests
+cmake --build "$BUILD_DIR" -- $MAKE_OPTS package
 
 exit 0

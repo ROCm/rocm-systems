@@ -12,7 +12,7 @@ fi
 test_app=$*
 
 # ROC profiler library loaded by HSA runtime
-export HSA_TOOLS_LIB=librocprofiler64.so.1
+export HSA_TOOLS_LIB=librocprofiler64.so
 
 # tool library loaded by ROC profiler
 if [ -z "$ROCP_TOOL_LIB" ] ; then
