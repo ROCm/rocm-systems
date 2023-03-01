@@ -400,73 +400,76 @@ PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t fa
   ONLOAD_TRACE_BEG();
   if (started) rocmtools::fatal("HSA Tool started already!");
   started = true;
-  rocmtools::hsa_support::Initialize(table);
-  rocprofiler::SaveHsaApi(table);
-  rocprofiler::ProxyQueue::InitFactory();
-
-  // Checking environment to enable intercept mode
-  const char* intercept_env = getenv("ROCP_HSA_INTERCEPT");
-
-  int intercept_env_value = 0;
-  if (intercept_env != NULL) {
-    intercept_env_value = atoi(intercept_env);
-
-    switch (intercept_env_value) {
-      case 0:
-      case 1:
-        // 0: Intercepting disabled
-        // 1: Intercepting enabled without timestamping
-        rocprofiler::InterceptQueue::TrackerOn(false);
-        break;
-      case 2:
-        // Intercepting enabled with timestamping
-        rocprofiler::InterceptQueue::TrackerOn(true);
-        break;
-      default:
-        ERR_LOGGING("Bad ROCP_HSA_INTERCEPT env var value ("
-                    << intercept_env << "): "
-                    << "valid values are 0 (standalone), 1 (intercepting without timestamp), 2 "
-                       "(intercepting with timestamp)");
-        return false;
-    }
-  }
-
-  // always enable excutable tracking
-  rocprofiler::util::HsaRsrcFactory::EnableExecutableTracking(table);
-
-  // Loading a tool lib and setting of intercept mode
-  const uint32_t intercept_mode_mask = rocprofiler::LoadTool();
-
-  if (intercept_mode_mask & rocprofiler::MEMCOPY_INTERCEPT_MODE) {
-    hsa_status_t status = hsa_amd_profiling_async_copy_enable(true);
-    if (status != HSA_STATUS_SUCCESS) EXC_ABORT(status, "hsa_amd_profiling_async_copy_enable");
-    rocprofiler::hsa_amd_memory_async_copy_fn = table->amd_ext_->hsa_amd_memory_async_copy_fn;
-    rocprofiler::hsa_amd_memory_async_copy_rect_fn =
-        table->amd_ext_->hsa_amd_memory_async_copy_rect_fn;
-    table->amd_ext_->hsa_amd_memory_async_copy_fn =
-        rocprofiler::hsa_amd_memory_async_copy_interceptor;
-    table->amd_ext_->hsa_amd_memory_async_copy_rect_fn =
-        rocprofiler::hsa_amd_memory_async_copy_rect_interceptor;
-  }
-  if (intercept_mode_mask & rocprofiler::HSA_INTERCEPT_MODE) {
-    if (intercept_mode_mask & rocprofiler::MEMCOPY_INTERCEPT_MODE) {
-      EXC_ABORT(HSA_STATUS_ERROR, "HSA_INTERCEPT and MEMCOPY_INTERCEPT conflict");
-    }
-    rocprofiler::HsaInterceptor::Enable(true);
-    rocprofiler::HsaInterceptor::HsaIntercept(table);
-  }
-
-  // HSA intercepting
-  if (intercept_env_value != 0) {
-    rocprofiler::ProxyQueue::HsaIntercept(table);
-    rocprofiler::InterceptQueue::HsaIntercept(table);
+  if (!getenv("ROCP_TOOL_LIB") && !getenv("ROCP_HSA_INTERCEPT")) {
+    rocmtools::hsa_support::Initialize(table);
   } else {
-    rocprofiler::StandaloneIntercept();
-  }
+    rocprofiler::SaveHsaApi(table);
+    rocprofiler::ProxyQueue::InitFactory();
 
-  ONLOAD_TRACE("end intercept_mode(" << std::hex << intercept_env_value << ")"
-                                     << " intercept_mode_mask(" << std::hex << intercept_mode_mask
-                                     << ")" << std::dec);
+    // Checking environment to enable intercept mode
+    const char* intercept_env = getenv("ROCP_HSA_INTERCEPT");
+
+    int intercept_env_value = 0;
+    if (intercept_env != NULL) {
+      intercept_env_value = atoi(intercept_env);
+
+      switch (intercept_env_value) {
+        case 0:
+        case 1:
+          // 0: Intercepting disabled
+          // 1: Intercepting enabled without timestamping
+          rocprofiler::InterceptQueue::TrackerOn(false);
+          break;
+        case 2:
+          // Intercepting enabled with timestamping
+          rocprofiler::InterceptQueue::TrackerOn(true);
+          break;
+        default:
+          ERR_LOGGING("Bad ROCP_HSA_INTERCEPT env var value ("
+                      << intercept_env << "): "
+                      << "valid values are 0 (standalone), 1 (intercepting without timestamp), 2 "
+                         "(intercepting with timestamp)");
+          return false;
+      }
+    }
+
+    // always enable excutable tracking
+    rocprofiler::util::HsaRsrcFactory::EnableExecutableTracking(table);
+
+    // Loading a tool lib and setting of intercept mode
+    const uint32_t intercept_mode_mask = rocprofiler::LoadTool();
+
+    if (intercept_mode_mask & rocprofiler::MEMCOPY_INTERCEPT_MODE) {
+      hsa_status_t status = hsa_amd_profiling_async_copy_enable(true);
+      if (status != HSA_STATUS_SUCCESS) EXC_ABORT(status, "hsa_amd_profiling_async_copy_enable");
+      rocprofiler::hsa_amd_memory_async_copy_fn = table->amd_ext_->hsa_amd_memory_async_copy_fn;
+      rocprofiler::hsa_amd_memory_async_copy_rect_fn =
+          table->amd_ext_->hsa_amd_memory_async_copy_rect_fn;
+      table->amd_ext_->hsa_amd_memory_async_copy_fn =
+          rocprofiler::hsa_amd_memory_async_copy_interceptor;
+      table->amd_ext_->hsa_amd_memory_async_copy_rect_fn =
+          rocprofiler::hsa_amd_memory_async_copy_rect_interceptor;
+    }
+    if (intercept_mode_mask & rocprofiler::HSA_INTERCEPT_MODE) {
+      if (intercept_mode_mask & rocprofiler::MEMCOPY_INTERCEPT_MODE) {
+        EXC_ABORT(HSA_STATUS_ERROR, "HSA_INTERCEPT and MEMCOPY_INTERCEPT conflict");
+      }
+      rocprofiler::HsaInterceptor::Enable(true);
+      rocprofiler::HsaInterceptor::HsaIntercept(table);
+    }
+
+    // HSA intercepting
+    if (intercept_env_value != 0) {
+      rocprofiler::ProxyQueue::HsaIntercept(table);
+      rocprofiler::InterceptQueue::HsaIntercept(table);
+    } else {
+      rocprofiler::StandaloneIntercept();
+    }
+
+    ONLOAD_TRACE("end intercept_mode(" << std::hex << intercept_env_value << ")"
+                                       << " intercept_mode_mask(" << std::hex << intercept_mode_mask
+                                       << ")" << std::dec);
+  }
   return true;
 }
 
@@ -474,9 +477,12 @@ PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t fa
 PUBLIC_API void OnUnload() {
   ONLOAD_TRACE_BEG();
   if (!started) rocmtools::fatal("HSA Tool hasn't started yet!");
-  rocmtools::hsa_support::Finalize();
-  rocprofiler::UnloadTool();
-  rocprofiler::RestoreHsaApi();
+  if (!getenv("ROCP_TOOL_LIB") && !getenv("ROCP_HSA_INTERCEPT")) {
+    rocmtools::hsa_support::Finalize();
+  } else {
+    rocprofiler::UnloadTool();
+    rocprofiler::RestoreHsaApi();
+  }
   ONLOAD_TRACE_END();
 }
 
