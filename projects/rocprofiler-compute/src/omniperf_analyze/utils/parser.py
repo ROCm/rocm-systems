@@ -27,7 +27,6 @@ import sys
 import astunparse
 import re
 import os
-from matplotlib.pyplot import axis
 import pandas as pd
 import numpy as np
 from tabulate import tabulate
