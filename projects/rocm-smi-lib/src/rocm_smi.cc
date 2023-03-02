@@ -3791,12 +3791,12 @@ get_compute_partition(uint32_t dv_ind, std::string &compute_partition) {
 rsmi_status_t
 rsmi_dev_compute_partition_get(uint32_t dv_ind, char *compute_partition,
                                uint32_t len) {
-  CHK_SUPPORT_NAME_ONLY(compute_partition)
+  TRY
   if ((len == 0) || (compute_partition == nullptr)) {
     return RSMI_STATUS_INVALID_ARGS;
   }
+  CHK_SUPPORT_NAME_ONLY(compute_partition)
 
-  TRY
   std::string returning_compute_partition;
   rsmi_status_t ret = get_compute_partition(dv_ind,
                                returning_compute_partition);
@@ -3996,12 +3996,12 @@ rsmi_dev_nps_mode_set(uint32_t dv_ind, rsmi_nps_mode_type_t nps_mode) {
 rsmi_status_t
 rsmi_dev_nps_mode_get(uint32_t dv_ind, char *nps_mode,
                                uint32_t len) {
-  CHK_SUPPORT_NAME_ONLY(nps_mode)
+  TRY
   if ((len == 0) || (nps_mode == nullptr)) {
     return RSMI_STATUS_INVALID_ARGS;
   }
+  CHK_SUPPORT_NAME_ONLY(nps_mode)
 
-  TRY
   std::string returning_nps_mode;
   rsmi_status_t ret = get_nps_mode(dv_ind,
                                returning_nps_mode);
