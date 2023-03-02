@@ -3315,11 +3315,23 @@ rsmi_compute_process_gpus_get(uint32_t pid, uint32_t *dv_indices,
   uint32_t i = 0;
   amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
 
+  // filter out the devices not visible to container
+  auto& nodes = smi.kfd_node_map();
+  for (auto nit = gpu_set.begin(); nit != gpu_set.end();) {
+    uint64_t gpu_id_val = (*nit);
+    auto kfd_ite = nodes.find(gpu_id_val);
+    if (kfd_ite == nodes.end()) {
+      nit = gpu_set.erase(nit);
+    } else {
+      nit++;
+    }
+  }
+
   if (dv_indices != nullptr) {
     for (auto it = gpu_set.begin(); i < *num_devices && it != gpu_set.end();
                                                                   ++it, ++i) {
       uint64_t gpu_id_val = (*it);
-      dv_indices[i] = smi.kfd_node_map()[gpu_id_val]->amdgpu_dev_index();
+      dv_indices[i] = nodes[gpu_id_val]->amdgpu_dev_index();
     }
   }
 
