@@ -1440,6 +1440,9 @@ def setComputePartition(deviceList, computePartitionType):
                 None)
         elif ret == rsmi_status_t.RSMI_STATUS_PERMISSION:
             printLog(device, 'Permission denied', None)
+        elif ret == rsmi_status_t.RSMI_STATUS_SETTING_UNAVAILABLE:
+            printLog(device, 'Requested setting (%s) is unavailable for current device'
+                     %computePartitionType, None)
         elif ret == rsmi_status_t.RSMI_STATUS_NOT_SUPPORTED:
             printLog(device, 'Not supported on the given system', None)
         else:
@@ -1558,13 +1561,12 @@ def showAllConcise(deviceList):
         else:
             gpu_busy = 'Unsupported'
         memInfo = getMemInfo(device, 'vram')
-        if memInfo[0] == None or memInfo[1] == None:
-            mem_use = 'N/A'
-        else:
+        mem_use_pct = 0
+        if memInfo[0] != None and memInfo[1] != None and float(memInfo[1]) != 0:
             mem_use_pct = '% 3.0f%%' % (100 * (float(memInfo[0]) / float(memInfo[1])))
         values['card%s' % (str(device))] = [device, temp, avgPwr, sclk, mclk, fan, str(perf).lower(), pwrCap,
                                             mem_use_pct, gpu_busy]
-        val_widths = {}
+    val_widths = {}
     for device in deviceList:
         val_widths[device] = [len(str(val)) + 2 for val in values['card%s' % (str(device))]]
     max_widths = head_widths

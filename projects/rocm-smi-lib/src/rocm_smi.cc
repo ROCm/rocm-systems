@@ -2865,6 +2865,11 @@ rsmi_status_string(rsmi_status_t status, const char **status_string) {
                        "counter exceeded INT32_MAX";
       break;
 
+    case RSMI_STATUS_SETTING_UNAVAILABLE:
+      *status_string = "RSMI_STATUS_SETTING_UNAVAILABLE: Requested setting is "
+                        "unavailable for the current device";
+      break;
+
     case RSMI_STATUS_AMDGPU_RESTART_ERR:
       *status_string = "RSMI_STATUS_AMDGPU_RESTART_ERR: Could not successfully "
                         "restart the amdgpu driver";
@@ -3751,17 +3756,16 @@ static rsmi_status_t
 get_compute_partition(uint32_t dv_ind, std::string &compute_partition) {
   TRY
   CHK_SUPPORT_NAME_ONLY(compute_partition.c_str())
-  std::string val_str;
+  std::string compute_partition_str;
 
   DEVICE_MUTEX
   rsmi_status_t ret = get_dev_value_str(amd::smi::kDevComputePartition,
-                                        dv_ind, &val_str);
-
+                                        dv_ind, &compute_partition_str);
   if (ret != RSMI_STATUS_SUCCESS) {
     return ret;
   }
 
-  switch (mapStringToRSMIComputePartitionTypes[val_str]) {
+  switch (mapStringToRSMIComputePartitionTypes[compute_partition_str]) {
     case RSMI_COMPUTE_PARTITION_INVALID:
       // Retrieved an unknown compute partition
       return RSMI_STATUS_UNEXPECTED_DATA;
@@ -3779,7 +3783,7 @@ get_compute_partition(uint32_t dv_ind, std::string &compute_partition) {
       // Retrieved an unknown compute partition
       return RSMI_STATUS_UNEXPECTED_DATA;
   }
-  compute_partition = val_str;
+  compute_partition = compute_partition_str;
   return RSMI_STATUS_SUCCESS;
   CATCH
 }
@@ -3809,13 +3813,33 @@ rsmi_dev_compute_partition_get(uint32_t dv_ind, char *compute_partition,
   CATCH
 }
 
+static rsmi_status_t
+is_available_compute_partition(uint32_t dv_ind,
+                               std::string new_compute_partition) {
+  TRY
+  DEVICE_MUTEX
+  std::string availableComputePartitions;
+  rsmi_status_t ret =
+      get_dev_value_line(amd::smi::kDevAvailableComputePartition,
+                         dv_ind, &availableComputePartitions);
+  if (ret != RSMI_STATUS_SUCCESS) {
+    return ret;
+  }
+
+  bool isComputePartitionAvailable =
+      amd::smi::containsString(availableComputePartitions,
+                               new_compute_partition);
+  return (isComputePartitionAvailable) ? RSMI_STATUS_SUCCESS :
+                                         RSMI_STATUS_SETTING_UNAVAILABLE;
+  CATCH
+}
+
 rsmi_status_t
 rsmi_dev_compute_partition_set(uint32_t dv_ind,
                               rsmi_compute_partition_type_t compute_partition) {
   TRY
   REQUIRE_ROOT_ACCESS
   DEVICE_MUTEX
-
   std::string newComputePartitionStr
               = mapRSMIToStringComputePartitionTypes[compute_partition];
   std::string currentComputePartition;
@@ -3836,6 +3860,14 @@ rsmi_dev_compute_partition_set(uint32_t dv_ind,
       break;
     default:
       return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  // Confirm what we are trying to set is available, otherwise provide
+  // RSMI_STATUS_SETTING_UNAVAILABLE
+  rsmi_status_t available_ret =
+      is_available_compute_partition(dv_ind, newComputePartitionStr);
+  if (available_ret != RSMI_STATUS_SUCCESS) {
+    return available_ret;
   }
 
   // do nothing if compute_partition is the current compute partition

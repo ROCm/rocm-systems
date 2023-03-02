@@ -162,6 +162,7 @@ enum DevInfoTypes {
   kDevNumaNode,
   kDevGpuMetrics,
   kDevGpuReset,
+  kDevAvailableComputePartition,
   kDevComputePartition,
   kDevMemoryPartition
 };
