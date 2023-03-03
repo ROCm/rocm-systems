@@ -46,14 +46,14 @@ if ( DEFINED ENV{CMAKE_LD_AQLPROFILE} )
 endif()
 
 ## Find hsa-runtime
-find_package(hsa-runtime64 CONFIG REQUIRED HINTS ${CMAKE_INSTALL_PREFIX} PATHS /opt/rocm PATH_SUFFIXES lib/cmake/hsa-runtime64 )
+find_package(hsa-runtime64 CONFIG REQUIRED HINTS ${CMAKE_PREFIX_PATH} PATHS /opt/rocm PATH_SUFFIXES lib/cmake/hsa-runtime64 )
 
 # find KFD thunk
-find_package(hsakmt CONFIG REQUIRED HINTS ${CMAKE_INSTALL_PREFIX} PATHS /opt/rocm PATH_SUFFIXES lib/cmake/hsakmt )
+find_package(hsakmt CONFIG REQUIRED HINTS ${CMAKE_PREFIX_PATH} PATHS /opt/rocm PATH_SUFFIXES lib/cmake/hsakmt )
 
 ## Find ROCm
 ## TODO: Need a better method to find the ROCm path
-find_path ( HSA_KMT_INC_PATH "hsakmt/hsakmt.h" )
+find_path ( HSA_KMT_INC_PATH "hsakmt/hsakmt.h" HINTS ${CMAKE_PREFIX_PATH} PATHS /opt/rocm PATH_SUFFIXES include )
 if ( "${HSA_KMT_INC_PATH}" STREQUAL "" )
   get_target_property(HSA_KMT_INC_PATH hsakmt::hsakmt INTERFACE_INCLUDE_DIRECTORIES)
 endif()
