@@ -70,7 +70,8 @@ def stitch(insts, code, jumps):
     mem_unroll = []
     flight_count = []
 
-    ordering = 0 # 0 for in order, 1 for ongoing flats and 2 for SMEM
+    smem_ordering = 0
+    vmem_ordering = 0
     while i < N:
         inst = insts[i]
         if line >= len(code):
@@ -85,14 +86,15 @@ def stitch(insts, code, jumps):
             num_inflight = NUM_FLAT + NUM_SMEM + NUM_VMEM
 
             if inst[1] == 1 or inst[1] == 5: # SMEM, LDS
-                ordering = 2 if inst[1] == 1 else ordering
+                smem_ordering = 2 if inst[1] == 1 else smem_ordering
                 SMEM_INST.append([line,  num_inflight])
                 NUM_SMEM += 1
             elif inst[1] == 3 or (inst[1] == 4 and 'global_' in as_line[0]): # VMEM R/W
                 VMEM_INST.append([line,  num_inflight])
                 NUM_VMEM += 1
             elif inst[1] == 4: # FLAT
-                ordering = max(ordering, 1)
+                smem_ordering = max(smem_ordering, 1)
+                vmem_ordering = 1
                 FLAT_INST.append([line,  num_inflight])
                 NUM_FLAT += 1
             elif inst[1] == 9 and 'waitcnt' in as_line[0]:
@@ -101,8 +103,8 @@ def stitch(insts, code, jumps):
                     wait_N = int(as_line[0].split('lgkmcnt(')[1].split(')')[0])
                     flight_count.append([as_line[-1], num_inflight, wait_N])
                     if wait_N == 0:
-                        ordering = 0
-                    if ordering == 0:
+                        smem_ordering = 0
+                    if smem_ordering == 0:
                         offset = len(SMEM_INST)-wait_N
                         mem_unroll.append( [line, SMEM_INST[:offset]+FLAT_INST] )
                         SMEM_INST = SMEM_INST[offset:]
@@ -116,9 +118,9 @@ def stitch(insts, code, jumps):
                 if 'vmcnt' in as_line[0]:
                     wait_N = int(as_line[0].split('vmcnt(')[1].split(')')[0])
                     flight_count.append([as_line[-1], num_inflight, wait_N])
-                    if wait_N == 0 and ordering != 2:
-                        ordering = 0
-                    if ordering == 0:
+                    if wait_N == 0:
+                        vmem_ordering = 0
+                    if vmem_ordering == 0:
                         offset = len(VMEM_INST)-wait_N
                         mem_unroll.append( [line, VMEM_INST[:offset]+FLAT_INST] )
                         VMEM_INST = VMEM_INST[offset:]
@@ -129,9 +131,11 @@ def stitch(insts, code, jumps):
                         NUM_VMEM = min(max(wait_N-NUM_FLAT, 0), NUM_VMEM)
                         NUM_FLAT = min(max(wait_N-NUM_VMEM, 0), NUM_FLAT)
 
-
         elif inst[1] == 7 and as_line[1] == 10:  # jump
             matched, next = True, as_line[2]
+            if next is None or next == 0:
+                print('Jump to unknown location!', as_line)
+                return result, loopCount, mem_unroll, flight_count
         elif inst[1] == 8 and as_line[1] == 10:  # next
             matched, next = True, line + 1
         else:
@@ -141,11 +145,6 @@ def stitch(insts, code, jumps):
             next = line + 1
             if i+1 < N and line+1 < len(code):
                 if try_match_swapped(insts, code, i, line):
-                    #print('Swap:', code[line])
-                    #print('For:', code[line+1])
-                    #result += (*(insts[i+1]), line),
-                    #result += (*inst, line+1),
-                    #i, next = i+2, line+2
                     temp = insts[i]
                     insts[i] = insts[i+1]
                     insts[i+1] = temp
@@ -162,9 +161,7 @@ def stitch(insts, code, jumps):
     N = max(N, 1)
     if len(result) != N:
         print('Warning - Stitching rate: '+str(len(result) * 100 / N)+'% matched')
-
     return result, loopCount, mem_unroll, flight_count
-
 
 def extract_tuple(content, num):
     vals = content.split(',')
@@ -301,6 +298,7 @@ def extract_data(df, output_ui, se_number, code, jumps):
 
         OUT = output_ui+'/ui/se'+str(se_number)+'_sm'+str(df['simd'][wave_id])+\
                 '_wv'+str(df['wave_slot'][wave_id])+'.json'
+                #'_wv'+str(wave_id)+'.json'
 
         with open(OUT, 'w') as f:
             f.write(json.dumps(data_obj))

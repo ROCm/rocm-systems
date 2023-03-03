@@ -43,9 +43,9 @@
 	</div>
 	<div id="minimap"></div>
 	<div id="ma_code">
-		<ul id="code" style="position: absolute; top:610px; left:80px"></ul>
+		<ul id="code" style="position: absolute; top:610px; left:390px"></ul>
 	</div>
-	<canvas id="arrows" width="100px" height="500px" style="position: absolute; top:630px; left:1px;"></canvas>
+	<canvas id="arrows" width="400px" height="500px" style="position: absolute; top:630px; left:1px;"></canvas>
 
 	<script src="https://cdn.jsdelivr.net/npm/d3@7.0.0/dist/d3.min.js"></script>
 	<script>
@@ -105,7 +105,8 @@
 						}
 					}
 				}
-				var spacing = 80.0 / max_slots
+				var spacing = 380.0 / max_slots
+				if (spacing > 10) spacing = 10;
 
 				var connect = []
 				for(const f in offsets) { connect.push([]) };
@@ -135,19 +136,19 @@
 						for(var s=smin; s<=smax; s++)
 							slots[s] -= 1
 
-						var xpos = 80 - spacing*waitcnt[w][1][l][1]
+						var xpos = 380 - spacing*waitcnt[w][1][l][1]
 						const ypos = offsets[elem];
 
 						var wnc_y = y0;
 						if(ypos > y0) { wnc_y += 3; }
 						else { wnc_y -= 3; }
 
-						DrawArrow(ctx, 87, ypos);
+						DrawArrow(ctx, 387, ypos);
 						ctx.fillRect(xpos, wnc_y, 3, ypos-wnc_y);
 
-						ctx.fillRect(xpos, wnc_y-1.5, 87-xpos, 3);
-						ctx.fillRect(xpos, ypos-1.5, 87-xpos, 3);
-						DrawArrow(ctx, 87, wnc_y);
+						ctx.fillRect(xpos, wnc_y-1.5, 387-xpos, 3);
+						ctx.fillRect(xpos, ypos-1.5, 387-xpos, 3);
+						DrawArrow(ctx, 387, wnc_y);
 						color_count += 1;
 					}
 				}
