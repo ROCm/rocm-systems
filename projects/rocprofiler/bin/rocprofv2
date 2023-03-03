@@ -1,5 +1,5 @@
 #!/bin/bash
-
+CURRENT_DIR="$( dirname -- "$0"; )";
 ROCPROFV2_DIR=$(dirname -- $(realpath ${BASH_SOURCE[0]}));
 ROCM_DIR=$(dirname -- ${ROCPROFV2_DIR})
 RUN_FROM_BUILD=0
@@ -74,8 +74,12 @@ while [ 1 ] ; do
     if [ $RUN_FROM_BUILD == 1 ]; then
       export ROCPROFILER_METRICS_PATH=$ROCM_DIR/build/counters/derived_counters.xml
       TO_CLEAN=no $ROCM_DIR/build.sh
-      pushd build
-      ./run_tests.sh
+      if [ "$CURRENT_DIR/build" -ef "./build" ] ; then
+        ./run_tests.sh
+      else
+	      pushd build
+        ./run_tests.sh
+      fi
       exit 1
     fi
   elif [[ "$1" = "-mt" || "$1" = "--mem-test" ]] ; then
@@ -87,8 +91,12 @@ while [ 1 ] ; do
   elif [[ "$1" = "-ct" || "$1" = "--clean-build-test" ]] ; then
     if [ $RUN_FROM_BUILD == 1 ]; then
       TO_CLEAN=yes $ROCM_DIR/build.sh
-      pushd build
-      ./run_tests.sh
+      if [ "$CURRENT_DIR/build" -ef "./build" ] ; then
+        ./run_tests.sh
+      else
+	      pushd build
+        ./run_tests.sh
+      fi
       exit 1
     fi
   elif [[ "$1" = "--install" ]] ; then
