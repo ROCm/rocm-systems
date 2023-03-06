@@ -124,6 +124,7 @@ def generate_plots(roof_info, ai_data, mem_level, is_standalone, verbose, fig=No
                 name="ai_l1",
                 mode="markers",
                 marker_symbol=SYMBOLS,
+                marker={"color": "#00CC96"}
             )
         )
         fig.add_trace(
@@ -133,6 +134,7 @@ def generate_plots(roof_info, ai_data, mem_level, is_standalone, verbose, fig=No
                 name="ai_l2",
                 mode="markers",
                 marker_symbol=SYMBOLS,
+                marker={"color": "#EF553B"}
             )
         )
         fig.add_trace(
@@ -142,6 +144,7 @@ def generate_plots(roof_info, ai_data, mem_level, is_standalone, verbose, fig=No
                 name="ai_hbm",
                 mode="markers",
                 marker_symbol=SYMBOLS,
+                marker={"color": "#636EFA"}
             )
         )
 
