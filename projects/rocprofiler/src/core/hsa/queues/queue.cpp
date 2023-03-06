@@ -433,7 +433,6 @@ bool AsyncSignalHandler(hsa_signal_value_t signal_value, void* data) {
       }
       if (session->FindBuffer(pending.buffer_id)) {
         Memory::GenericBuffer* buffer = session->GetBuffer(pending.buffer_id);
-        record.header.id = rocprofiler_record_id_t{GetROCMToolObj()->GetUniqueRecordId()};
         if (pending.profile && pending.counters_count > 0) {
           rocprofiler_record_counter_instance_t* record_counters = record.counters;
           buffer->AddRecord(
@@ -514,7 +513,6 @@ bool AsyncSignalHandlerATT(hsa_signal_value_t /* signal */, void* data) {
       }
       if (session->FindBuffer(pending.buffer_id)) {
         Memory::GenericBuffer* buffer = session->GetBuffer(pending.buffer_id);
-        record.header.id = rocprofiler_record_id_t{GetROCMToolObj()->GetUniqueRecordId()};
         buffer->AddRecord(record);
       }
       hsa_status_t status = rocmtools::hsa_support::GetAmdExtTable().hsa_amd_memory_pool_free_fn(
