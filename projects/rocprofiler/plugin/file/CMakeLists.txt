@@ -37,7 +37,7 @@ target_include_directories(file_plugin PRIVATE ${PROJECT_SOURCE_DIR}/inc ${PROJE
 
 target_link_options(file_plugin PRIVATE -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/../exportmap -Wl,--no-undefined)
 
-target_link_libraries(file_plugin PRIVATE ${ROCPROFILER_TARGET} hsa-runtime64::hsa-runtime64 systemd stdc++fs amd_comgr dl)
+target_link_libraries(file_plugin PRIVATE ${ROCPROFILER_TARGET} hsa-runtime64::hsa-runtime64 stdc++fs amd_comgr dl)
 
 install(TARGETS file_plugin LIBRARY
   DESTINATION ${CMAKE_INSTALL_LIBDIR}/${PROJECT_NAME}

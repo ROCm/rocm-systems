@@ -48,7 +48,6 @@ target_link_options(ctf_plugin PRIVATE
 target_link_libraries(ctf_plugin PRIVATE
                       ${ROCPROFILER_TARGET}
                       hsa-runtime64::hsa-runtime64
-                      systemd
                       stdc++fs
                       dl)
 install(TARGETS ctf_plugin LIBRARY

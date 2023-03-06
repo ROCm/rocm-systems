@@ -20,7 +20,7 @@ target_include_directories(perfetto_plugin
 target_link_options(perfetto_plugin
         PRIVATE -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/../exportmap -Wl,--no-undefined)
 
-target_link_libraries(perfetto_plugin PRIVATE ${ROCPROFILER_TARGET} Threads::Threads systemd stdc++fs amd_comgr)
+target_link_libraries(perfetto_plugin PRIVATE ${ROCPROFILER_TARGET} Threads::Threads stdc++fs amd_comgr)
 
 install(TARGETS perfetto_plugin LIBRARY
         DESTINATION ${CMAKE_INSTALL_LIBDIR}/${PROJECT_NAME}

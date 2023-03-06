@@ -91,7 +91,6 @@ ROCProfilerV2 is a newly developed design for AMD’s tooling infrastructure tha
 - Gtest Development Package (Ubuntu: libgtest-dev)
 - Cppheaderparser Python 3 Package
 - Lxml Python 3 Package
-- Systemd Development Package (Ubuntu: libsystemd-dev)
 
 ### Build
 

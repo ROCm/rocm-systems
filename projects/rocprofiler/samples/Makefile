@@ -3,7 +3,7 @@ ROCPROFILER_LIBS_PATH ?=$(ROCM_PATH)/lib
 ROCM_INCLUDES=-I$(ROCM_PATH)/include
 ROCPROFILER_INCLUDES=-I$(ROCM_PATH)/include/rocprofiler/
 
-LIBS=-L$(ROCPROFILER_LIBS_PATH) -lrocprofiler64 -lamd_comgr -lsystemd
+LIBS=-L$(ROCPROFILER_LIBS_PATH) -lrocprofiler64 -lamd_comgr
 
 ifndef ROCPROFILER_LIBS_PATH
 $(warning You may need to set ROCPROFILER_LIBS_PATH to the path of the rocprofiler source)

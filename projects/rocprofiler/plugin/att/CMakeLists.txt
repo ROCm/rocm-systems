@@ -45,7 +45,7 @@ target_link_options(
   att_plugin PRIVATE
   -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/../exportmap
   -Wl,--no-undefined)
-target_link_libraries(att_plugin PRIVATE ${ROCPROFILER_TARGET} systemd
+target_link_libraries(att_plugin PRIVATE ${ROCPROFILER_TARGET}
                                          hsa-runtime64::hsa-runtime64 stdc++fs)
 
 install(TARGETS att_plugin

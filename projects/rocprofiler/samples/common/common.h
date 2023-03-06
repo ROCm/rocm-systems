@@ -9,7 +9,6 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include <fcntl.h>
-#include <systemd/sd-id128.h>
 
 #include <cstdint>
 #include <cstdio>
@@ -61,14 +60,7 @@ __global__ void kernelF() { printf("\nKernel F\n"); }
 }
 
 [[maybe_unused]] uint64_t GetMachineID() {
-  char hostname[1023] = "\0";
-  gethostname(hostname, 1023);
-  sd_id128_t ret;
-  char machine_id[SD_ID128_STRING_MAX];
-  [[maybe_unused]] int status = sd_id128_get_machine(&ret);
-  assert(status == 0 && "Error: Couldn't get machine id!");
-  if (sd_id128_to_string(ret, machine_id)) return std::hash<std::string>{}(machine_id);
-  return std::rand();
+  return gethostid();
 }
 
 std::ofstream output_file;
