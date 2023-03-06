@@ -43,7 +43,9 @@ def to_int(a):
         return int(a)
 
 
-def generate_plots(roof_info, ai_data, mem_level, is_standalone, verbose, fig=None):
+def generate_plots(
+    roof_info, ai_data, mem_level, is_standalone, kernel_names, verbose, fig=None
+):
     if fig is None:
         fig = go.Figure()
     plotMode = "lines+text" if is_standalone else "lines"
@@ -124,8 +126,8 @@ def generate_plots(roof_info, ai_data, mem_level, is_standalone, verbose, fig=No
                 y=ai_data["ai_l1"][1],
                 name="ai_l1",
                 mode="markers",
-                marker_symbol=SYMBOLS,
                 marker={"color": "#00CC96"},
+                marker_symbol=SYMBOLS if kernel_names else None,
             )
         )
         fig.add_trace(
@@ -134,8 +136,8 @@ def generate_plots(roof_info, ai_data, mem_level, is_standalone, verbose, fig=No
                 y=ai_data["ai_l2"][1],
                 name="ai_l2",
                 mode="markers",
-                marker_symbol=SYMBOLS,
                 marker={"color": "#EF553B"},
+                marker_symbol=SYMBOLS if kernel_names else None,
             )
         )
         fig.add_trace(
@@ -144,8 +146,8 @@ def generate_plots(roof_info, ai_data, mem_level, is_standalone, verbose, fig=No
                 y=ai_data["ai_hbm"][1],
                 name="ai_hbm",
                 mode="markers",
-                marker_symbol=SYMBOLS,
                 marker={"color": "#636EFA"},
+                marker_symbol=SYMBOLS if kernel_names else None,
             )
         )
 
@@ -200,10 +202,14 @@ def get_roofline(
             print(i, "->", ai_data[i])
         print("\n")
 
-    fp32_fig = generate_plots(fp32_details, ai_data, mem_level, is_standalone, verbose)
-    fp16_fig = generate_plots(fp16_details, ai_data, mem_level, is_standalone, verbose)
+    fp32_fig = generate_plots(
+        fp32_details, ai_data, mem_level, is_standalone, kernel_names, verbose
+    )
+    fp16_fig = generate_plots(
+        fp16_details, ai_data, mem_level, is_standalone, kernel_names, verbose
+    )
     ml_combo_fig = generate_plots(
-        int8_details, ai_data, mem_level, is_standalone, verbose, fp16_fig
+        int8_details, ai_data, mem_level, is_standalone, kernel_names, verbose, fp16_fig
     )
     legend = go.Figure(
         go.Scatter(
@@ -231,14 +237,17 @@ def get_roofline(
         ml_combo_fig.write_image(
             path_to_dir + "/empirRoof_gpu-{}_fp8_fp16.pdf".format(dev_id)
         )
-        legend.write_image(path_to_dir + "/kernelName_legend.pdf")
+        if kernel_names:
+            # only save a legend if kernel_names option is toggled
+            legend.write_image(path_to_dir + "/kernelName_legend.pdf")
         time.sleep(1)
         # Re-save to remove loading MathJax pop up
         fp32_fig.write_image(path_to_dir + "/empirRoof_gpu-{}_fp32.pdf".format(dev_id))
         ml_combo_fig.write_image(
             path_to_dir + "/empirRoof_gpu-{}_fp8_fp16.pdf".format(dev_id)
         )
-        legend.write_image(path_to_dir + "/kernelName_legend.pdf")
+        if kernel_names:
+            legend.write_image(path_to_dir + "/kernelName_legend.pdf")
         print("Empirical Roofline PDFs saved!")
     else:
         return html.Section(
