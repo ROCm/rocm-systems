@@ -50,7 +50,7 @@ set(OMNITRACE_PERFETTO_BINARY_DIR
 set(OMNITRACE_PERFETTO_INSTALL_DIR
     ${PROJECT_BINARY_DIR}/external/perfetto/source/out/linux/stripped)
 set(OMNITRACE_PERFETTO_LINK_FLAGS
-    "-static-libgcc -static-libstdc++"
+    "-static-libgcc"
     CACHE STRING "Link flags for perfetto")
 set(OMNITRACE_PERFETTO_BUILD_THREADS
     ${_NUM_THREADS}
@@ -67,10 +67,10 @@ if(CMAKE_CXX_COMPILER_IS_CLANG)
 else()
     set(PERFETTO_IS_CLANG false)
     set(OMNITRACE_PERFETTO_C_FLAGS
-        "-static-libgcc -static-libstdc++ -Wno-maybe-uninitialized"
+        "-static-libgcc -Wno-maybe-uninitialized"
         CACHE STRING "Perfetto C flags")
     set(OMNITRACE_PERFETTO_CXX_FLAGS
-        "-static-libgcc -static-libstdc++ -Wno-maybe-uninitialized"
+        "-static-libgcc -Wno-maybe-uninitialized"
         CACHE STRING "Perfetto C++ flags")
 endif()
 

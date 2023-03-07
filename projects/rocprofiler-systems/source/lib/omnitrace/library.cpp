@@ -180,6 +180,8 @@ ensure_finalization(bool _static_init = false)
         OMNITRACE_DEBUG_F("\n");
     }
 
+    if(_timemory_manager) _timemory_manager->set_write_metadata(-1);
+
     return scope::destructor{ []() { omnitrace_finalize_hidden(); } };
 }
 
@@ -992,8 +994,6 @@ omnitrace_finalize_hidden(void)
             ar(tim::cereal::make_nvp("memory_maps_files", _libs),
                tim::cereal::make_nvp("memory_maps", _maps));
         });
-
-        _timemory_manager->set_write_metadata(-1);
 
         OMNITRACE_VERBOSE_F(1, "Finalizing timemory...\n");
         tim::timemory_finalize(_timemory_manager.get());

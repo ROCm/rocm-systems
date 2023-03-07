@@ -27,7 +27,7 @@ COPY ./dyninst-source /tmp/dyninst
 
 RUN apt-get update && \
     apt-get dist-upgrade -y && \
-    apt-get install -y build-essential cmake wget gnupg2 m4 bash-completion git-core autoconf libtool autotools-dev python3-pip lsb-release zlib1g-dev libpapi-dev libpfm4-dev zip unzip locales bzip2 gzip curl && \
+    apt-get install -y autoconf autotools-dev bash-completion build-essential bzip2 clang cmake curl environment-modules git-core gnupg2 gzip libiberty-dev libmpich-dev libpapi-dev libpfm4-dev libtool locales lsb-release m4 mpich python3-pip unzip wget zip zlib1g-dev && \
     python3 -m pip install 'cmake==3.18.4' && \
     apt-get autoclean && \
     locale -a && \
@@ -42,6 +42,7 @@ RUN apt-get update && \
     conda update -c defaults -n base conda && \
     for i in ${PYTHON_VERSIONS}; do conda create -n py3.${i} -c defaults python=3.${i} pip numpy; done && \
     conda clean -a -y && \
+    for i in ${PYTHON_VERSIONS}; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy perfetto dataclasses; done && \
     cd /tmp && \
     shopt -s dotglob extglob && \
     rm -rf *

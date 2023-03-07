@@ -102,6 +102,13 @@ inline void
 stop_bundle(bundle_t& _bundle, int64_t _tid, Args&&... _args)
 {
     if(!get_use_timemory() && !get_use_perfetto()) return;
+
+    auto _main_manager = tim::manager::master_instance();
+    auto _this_manager = tim::manager::instance();
+    if(!_main_manager || !_this_manager || _main_manager->is_finalized() ||
+       _this_manager->is_finalized())
+        return;
+
     OMNITRACE_BASIC_VERBOSE_F(3, "stopping bundle '%s' in thread %li...\n",
                               _bundle.key().c_str(), _tid);
     if(get_use_timemory())

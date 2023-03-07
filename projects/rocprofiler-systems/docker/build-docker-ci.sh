@@ -35,8 +35,8 @@ usage()
 
     echo ""
     print_default_option() { printf "    --%-20s %-24s     %s (default: %s)\n" "${1}" "${2}" "${3}" "$(tolower ${4})"; }
-    print_default_option distro "[ubuntu|opensuse]" "OS distribution" "${DISTRO}"
-    print_default_option versions "[VERSION] [VERSION...]" "Ubuntu or OpenSUSE release" "${VERSIONS}"
+    print_default_option distro "[ubuntu|opensuse|rhel]" "OS distribution" "${DISTRO}"
+    print_default_option versions "[VERSION] [VERSION...]" "Ubuntu, OpenSUSE, or RHEL release" "${VERSIONS}"
     print_default_option "jobs -j" "[N]" "parallel build jobs" "${NJOBS}"
     print_default_option elfutils-version "[0.183..0.186]" "ElfUtils version" "${ELFUTILS_VERSION}"
     print_default_option boost-version "[1.67.0..1.79.0]" "Boost version" "${BOOST_VERSION}"
@@ -126,9 +126,13 @@ verbose-run rm -rf ./dyninst-source/{build,install}*
 
 set -e
 
-DISTRO_IMAGE=${DISTRO}
-
-if [ "${DISTRO}" = "opensuse" ]; then DISTRO_IMAGE="opensuse/leap"; fi
+if [ "${DISTRO}" = "opensuse" ]; then 
+    DISTRO_IMAGE="opensuse/leap"
+elif [ "${DISTRO}" = "rhel" ]; then 
+    DISTRO_IMAGE="rockylinux"
+else
+    DISTRO_IMAGE=${DISTRO}
+fi
 
 for VERSION in ${VERSIONS}
 do

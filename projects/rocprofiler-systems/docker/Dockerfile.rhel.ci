@@ -1,5 +1,5 @@
-ARG DISTRO=opensuse/leap
-ARG VERSION=15.3
+ARG DISTRO=rockylinux
+ARG VERSION=8
 FROM ${DISTRO}:${VERSION}
 
 ENV HOME /root
@@ -16,12 +16,12 @@ ARG EXTRA_PACKAGES=""
 ARG ELFUTILS_DOWNLOAD_VERSION="0.186"
 ARG NJOBS="12"
 
-RUN zypper update -y && \
-    zypper dist-upgrade -y && \
-    zypper install -y -t pattern devel_basis && \
-    zypper install -y python3-pip openmpi3-devel gcc-c++ git libnuma-devel dpkg-devel rpm-build papi-devel curl wget binutils-gold && \
-    python3 -m pip install 'cmake==3.18.4' && \
-    zypper clean --all
+RUN yum update -y && \
+    yum groupinstall -y "Development Tools" && \
+    yum install -y epel-release && \
+    yum install -y --allowerasing curl dpkg-devel numactl-devel openmpi-devel papi-devel python3-pip wget zlib-devel && \
+    yum clean all && \
+    python3 -m pip install 'cmake==3.21.4'
 
 COPY ./dyninst-source /tmp/dyninst
 

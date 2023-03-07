@@ -233,7 +233,7 @@ if(OMNITRACE_BUILD_DEVELOPER)
         omnitrace-compile-options "-Werror" "-Wdouble-promotion" "-Wshadow" "-Wextra"
         "-Wpedantic" "-Wstack-usage=524288" # 512 KB
         "/showIncludes")
-    if(OMNITRACE_BUILD_NUMBER LESS 2)
+    if(OMNITRACE_BUILD_NUMBER GREATER 2)
         add_target_flag_if_avail(omnitrace-compile-options "-gsplit-dwarf")
     endif()
 endif()

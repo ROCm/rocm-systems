@@ -25,6 +25,7 @@
 #include "core/config.hpp"
 #include "core/debug.hpp"
 #include "core/perfetto.hpp"
+#include "core/state.hpp"
 #include "library/components/ensure_storage.hpp"
 #include "library/ptl.hpp"
 #include "library/runtime.hpp"
@@ -184,6 +185,9 @@ backtrace::size() const
 void
 backtrace::sample(int)
 {
+    // on RedHat, the unw_step within get_unw_stack involves a mutex lock
+    OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
+
     using namespace tim::backtrace;
     constexpr bool   with_signal_frame = false;
     constexpr size_t ignore_depth      = 3;

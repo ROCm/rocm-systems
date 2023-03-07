@@ -36,6 +36,12 @@ jobs:
             version: "15.3"
           - distro: "opensuse"
             version: "15.4"
+          - distro: "rhel"
+            version: "8.7"
+          - distro: "rhel"
+            version: "9.0"
+          - distro: "rhel"
+            version: "9.1"
 
     steps:
       - uses: actions/checkout@v3

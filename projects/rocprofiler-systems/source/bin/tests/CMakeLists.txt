@@ -34,7 +34,8 @@ function(OMNITRACE_ADD_BIN_TEST)
 
     # common
     list(APPEND TEST_ENVIRONMENT "OMNITRACE_CI=ON" "OMNITRACE_CONFIG_FILE="
-         "OMNITRACE_OUTPUT_PATH=omnitrace-tests-output" "TWD=${TEST_WORKING_DIRECTORY}")
+         "OMNITRACE_OUTPUT_PATH=${PROJECT_BINARY_DIR}/omnitrace-tests-output"
+         "TWD=${TEST_WORKING_DIRECTORY}")
     # copy for inverse
     set(TEST_ENVIRONMENT_INV "${TEST_ENVIRONMENT}")
 
@@ -155,6 +156,15 @@ omnitrace_add_bin_test(
         ".*\\\[omnitrace\\\] Usage:.*\\\[DEBUG OPTIONS\\\].*\\\[MODE OPTIONS\\\].*\\\[LIBRARY OPTIONS\\\].*\\\[SYMBOL SELECTION OPTIONS\\\].*\\\[RUNTIME OPTIONS\\\].*\\\[GRANULARITY OPTIONS\\\].*\\\[DYNINST OPTIONS\\\].*"
     )
 
+# on RedHat, /usr/bin/ls is a script for `coreutils --coreutils-prog=ls`
+if(EXISTS /usr/bin/coreutils)
+    set(LS_NAME "coreutils")
+    set(LS_ARGS "--coreutils-prog=ls")
+else()
+    set(LS_NAME ls)
+    set(LS_ARGS)
+endif()
+
 omnitrace_add_bin_test(
     NAME omnitrace-exe-simulate-ls
     TARGET omnitrace-exe
@@ -167,9 +177,10 @@ omnitrace_add_bin_test(
          2
          --all-functions
          --
-         ls
+         ${LS_NAME}
+         ${LS_ARGS}
     LABELS "simulate"
-    TIMEOUT 120)
+    TIMEOUT 240)
 
 omnitrace_add_bin_test(
     NAME omnitrace-exe-simulate-ls-check
@@ -191,10 +202,35 @@ omnitrace_add_bin_test(
         "\\\[omnitrace\\\]\\\[exe\\\] Runtime instrumentation is not possible!(.*)\n(.*)\\\[omnitrace\\\]\\\[exe\\\] Switching to binary rewrite mode and assuming '--simulate --all-functions'"
     )
 
+file(MAKE_DIRECTORY ${PROJECT_BINARY_DIR}/omnitrace-tests-output/tmp)
+
+omnitrace_add_bin_test(
+    NAME omnitrace-exe-simulate-lib-basename
+    TARGET omnitrace-exe
+    ARGS --print-available
+         functions
+         -v
+         2
+         -o
+         ${PROJECT_BINARY_DIR}/omnitrace-tests-output/omnitrace-exe-simulate-lib-basename/${CMAKE_SHARED_LIBRARY_PREFIX}$<TARGET_FILE_BASE_NAME:omnitrace-user-library>${CMAKE_SHARED_LIBRARY_SUFFIX}
+         --
+         ${CMAKE_SHARED_LIBRARY_PREFIX}$<TARGET_FILE_BASE_NAME:omnitrace-user-library>${CMAKE_SHARED_LIBRARY_SUFFIX}
+    LABELS "simulate"
+    TIMEOUT 120
+    WORKING_DIRECTORY ${PROJECT_BINARY_DIR}/omnitrace-tests-output/tmp)
+
 omnitrace_add_bin_test(
     NAME omnitrace-exe-write-log
     TARGET omnitrace-exe
-    ARGS --print-instrumented functions -v 1 --log-file user.log -- ls
+    ARGS --print-instrumented
+         functions
+         -v
+         1
+         --log-file
+         user.log
+         --
+         ${LS_NAME}
+         ${LS_ARGS}
     LABELS "log"
     TIMEOUT 120
     PASS_REGEX "Opening .*/instrumentation/user.log")

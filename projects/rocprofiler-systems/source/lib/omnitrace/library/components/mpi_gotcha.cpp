@@ -128,10 +128,17 @@ void
 omnitrace_mpi_set_attr()
 {
 #if defined(TIMEMORY_USE_MPI)
+    auto _blocked = get_sampling_signals();
+    if(!_blocked.empty())
+        tim::signals::block_signals(_blocked, tim::signals::sigmask_scope::process);
+
     int _comm_key = -1;
     if(PMPI_Comm_create_keyval(&omnitrace_mpi_copy, &omnitrace_mpi_fini, &_comm_key,
                                nullptr) == MPI_SUCCESS)
         PMPI_Comm_set_attr(MPI_COMM_SELF, _comm_key, nullptr);
+
+    if(!_blocked.empty())
+        tim::signals::unblock_signals(_blocked, tim::signals::sigmask_scope::process);
 #endif
 }
 
@@ -263,7 +270,8 @@ mpi_gotcha::audit(const gotcha_data_t& _data, audit::incoming)
     tim::mpi::is_initialized_callback() = []() { return false; };
     tim::mpi::is_finalized()            = true;
 #else
-    if(is_root_process()) omnitrace_finalize_hidden();
+    if(is_root_process() && omnitrace::get_state() < omnitrace::State::Finalized)
+        omnitrace_finalize_hidden();
 #endif
 }
 

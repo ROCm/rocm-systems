@@ -79,7 +79,7 @@ jobs:
           add-apt-repository -y ppa:ubuntu-toolchain-r/test &&
           apt-get update &&
           apt-get upgrade -y &&
-          apt-get install -y build-essential m4 autoconf libtool python3-pip libiberty-dev clang libomp-dev libmpich-dev mpich environment-modules ${{ matrix.compiler }} &&
+          apt-get install -y build-essential m4 autoconf libtool python3-pip libiberty-dev clang libmpich-dev mpich environment-modules ${{ matrix.compiler }} &&
           python3 -m pip install --upgrade pip &&
           python3 -m pip install numpy &&
           python3 -m pip install perfetto &&
@@ -222,12 +222,18 @@ jobs:
       fail-fast: false
       matrix:
         compiler: ['g++']
-        rocm-version: ['4.3', '4.5', '5.0']
+        rocm-version: ['4.5', '5.0', '5.1', '5.2', '5.3']
         mpi-headers: ['OFF']
-        build-jobs: ['4']
+        build-jobs: ['3']
         ctest-exclude: ['-LE "mpi-example|transpose"']
-        perfetto-tools: ['ON']
+        perfetto-tools: ['OFF']
         include:
+          - compiler: 'g++'
+            rocm-version: '4.3'
+            mpi-headers: 'ON'
+            build-jobs: '2'
+            ctest-exclude: '-LE transpose'
+            perfetto-tools: 'ON'
           - compiler: 'g++'
             rocm-version: 'debian'
             mpi-headers: 'ON'

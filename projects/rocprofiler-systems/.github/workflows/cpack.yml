@@ -115,6 +115,36 @@ jobs:
           - os-distro: "opensuse"
             os-version: "15.4"
             rocm-version: "5.4"
+          # RHEL 8.7
+          - os-distro: "rhel"
+            os-version: "8.7"
+            rocm-version: "0.0"
+          - os-distro: "rhel"
+            os-version: "8.7"
+            rocm-version: "5.3"
+          - os-distro: "rhel"
+            os-version: "8.7"
+            rocm-version: "5.4"
+          # RHEL 9.0
+          - os-distro: "rhel"
+            os-version: "9.0"
+            rocm-version: "0.0"
+          - os-distro: "rhel"
+            os-version: "9.0"
+            rocm-version: "5.3"
+          - os-distro: "rhel"
+            os-version: "9.0"
+            rocm-version: "5.4"
+          # RHEL 9.1
+          - os-distro: "rhel"
+            os-version: "9.1"
+            rocm-version: "0.0"
+          - os-distro: "rhel"
+            os-version: "9.1"
+            rocm-version: "5.3"
+          - os-distro: "rhel"
+            os-version: "9.1"
+            rocm-version: "5.4"
 
     steps:
       - uses: actions/checkout@v3

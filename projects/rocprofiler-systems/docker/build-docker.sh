@@ -29,8 +29,8 @@ usage()
 
     echo ""
     print_default_option() { printf "    --%-20s %-24s     %s (default: %s)\n" "${1}" "${2}" "${3}" "$(tolower ${4})"; }
-    print_default_option distro "[ubuntu|opensuse]" "OS distribution" "${DISTRO}"
-    print_default_option versions "[VERSION] [VERSION...]" "Ubuntu or OpenSUSE release" "${VERSIONS}"
+    print_default_option distro "[ubuntu|opensuse|rhel]" "OS distribution" "${DISTRO}"
+    print_default_option versions "[VERSION] [VERSION...]" "Ubuntu, OpenSUSE, or RHEL release" "${VERSIONS}"
     print_default_option rocm-versions "[VERSION] [VERSION...]" "ROCm versions" "${ROCM_VERSIONS}"
     print_default_option python-versions "[VERSION] [VERSION...]" "Python 3 minor releases" "${PYTHON_VERSIONS}"
     print_default_option "user -u" "[USERNAME]" "DockerHub username" "${USER}"
@@ -185,41 +185,26 @@ do
                     ;;
             esac
             verbose-build docker build . -f ${DOCKER_FILE} --tag ${CONTAINER} --build-arg DISTRO=${DISTRO} --build-arg VERSION=${VERSION} --build-arg ROCM_VERSION=${ROCM_VERSION} --build-arg ROCM_REPO_VERSION=${ROCM_REPO_VERSION} --build-arg ROCM_REPO_DIST=${ROCM_REPO_DIST} --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\"
-        elif [ "${DISTRO}" = "centos" ]; then
-            case "${VERSION}" in
-                7)
-                    RPM_PATH=7.9
-                    RPM_TAG=".el7"
-                    TOOLSET_VERSION=9
-                    ;;
-                8)
-                    RPM_PATH=8.4
-                    RPM_TAG=".el8"
-                    TOOLSET_VERSION=11
-                    ;;
-                9)
-                    RPM_PATH=9.0
-                    RPM_TAG=".el9"
-                    TOOLSET_VERSION=11
-                    ;;
-                *)
-                    send-error "Invalid centos version ${VERSION}. Supported: 7, 8, 9"
-            esac
+        elif [ "${DISTRO}" = "rhel" ]; then
+            if [ -z "${VERSION_MINOR}" ]; then
+                send-error "Please provide a major and minor version of the OS. Supported: >= 8.7, <= 9.1"
+            fi
+
+            # Components used to create the sub-URL below
+            #   set <OS-VERSION> in amdgpu-install/<ROCM-VERSION>/rhel/<OS-VERSION>
+            RPM_PATH=${VERSION_MAJOR}.${VERSION_MINOR}
+            RPM_TAG=".el${VERSION_MAJOR}"
+
+            # set the sub-URL in https://repo.radeon.com/amdgpu-install/<sub-URL>
             case "${ROCM_VERSION}" in
+                5.4 | 5.4.*)
+                    ROCM_RPM=${ROCM_VERSION}/rhel/${RPM_PATH}/amdgpu-install-${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1${RPM_TAG}.noarch.rpm
+                    ;;
                 5.3 | 5.3.*)
                     ROCM_RPM=${ROCM_VERSION}/rhel/${RPM_PATH}/amdgpu-install-${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1${RPM_TAG}.noarch.rpm
                     ;;
-                5.2 | 5.2.*)
-                    ROCM_RPM=22.20${ROCM_SEP}${ROCM_PATCH}/rhel/${RPM_PATH}/amdgpu-install-22.20.${ROCM_VERSN}-1${RPM_TAG}.noarch.rpm
-                    ;;
-                5.1 | 5.1.*)
-                    ROCM_RPM=22.10${ROCM_SEP}${ROCM_PATCH}/rhel/${RPM_PATH}/amdgpu-install-22.10${ROCM_SEP}${ROCM_PATCH}.${ROCM_VERSN}-1${RPM_TAG}.noarch.rpm
-                    ;;
-                5.0 | 5.0.*)
-                    ROCM_RPM=21.50${ROCM_SEP}${ROCM_PATCH}/rhel/${RPM_PATH}/amdgpu-install-21.50${ROCM_SEP}${ROCM_PATCH}.${ROCM_VERSN}-1${RPM_TAG}.noarch.rpm
-                    ;;
-                4.5 | 4.5.*)
-                    ROCM_RPM=21.40${ROCM_SEP}${ROCM_PATCH}/rhel/${RPM_PATH}/amdgpu-install-21.40${ROCM_SEP}${ROCM_PATCH}.${ROCM_VERSN}-1.noarch.rpm
+                5.2 | 5.2.* | 5.1 | 5.1.* | 5.0 | 5.0.* | 4.*)
+                    send-error "Invalid ROCm version ${ROCM_VERSION}. Supported: >= 5.3.0, <= 5.4.x"
                     ;;
                 0.0)
                     ;;
@@ -227,7 +212,11 @@ do
                     send-error "Unsupported combination :: ${DISTRO}-${VERSION} + ROCm ${ROCM_VERSION}"
                     ;;
             esac
-            verbose-build docker build . -f ${DOCKER_FILE} --tag ${CONTAINER} --build-arg DISTRO=${DISTRO} --build-arg VERSION=${VERSION} --build-arg ROCM_VERSION=${ROCM_VERSION} --build-arg TOOLSET_VERSION=${TOOLSET_VERSION} --build-arg AMDGPU_RPM=${ROCM_RPM} --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\"
+
+            # use Rocky Linux as a base image for RHEL builds
+            DISTRO_BASE_IMAGE=rockylinux
+
+            verbose-build docker build . -f ${DOCKER_FILE} --tag ${CONTAINER} --build-arg DISTRO=${DISTRO_BASE_IMAGE} --build-arg VERSION=${VERSION} --build-arg ROCM_VERSION=${ROCM_VERSION} --build-arg AMDGPU_RPM=${ROCM_RPM} --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\"
         elif [ "${DISTRO}" = "opensuse" ]; then
             case "${VERSION}" in
                 15.*)

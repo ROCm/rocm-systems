@@ -117,6 +117,8 @@ backtrace::sample(int _sig)
     }
 
     ++_protect_flag;
+    // on RedHat, the unw_step within get_unw_signal_frame_stack_raw involves a mutex lock
+    OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
     m_index = causal::experiment::get_index();
     m_stack = get_unw_signal_frame_stack_raw<depth, ignore_depth>();
 

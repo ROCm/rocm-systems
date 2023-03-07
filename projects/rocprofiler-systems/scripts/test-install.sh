@@ -177,17 +177,31 @@ test-omnitrace-python()
 
 test-omnitrace-rewrite()
 {
-    verbose-run omnitrace -e -v 1 -o ${CONFIG_DIR}/ls.inst --simulate -- ls
+    if [ -f /usr/bin/coreutils ]; then
+        local LS_NAME=coreutils
+        local LS_ARGS="--coreutils-prog=ls"
+    else
+        local LS_NAME=ls
+        local LS_ARGS=""
+    fi
+    verbose-run omnitrace -e -v 1 -o ${CONFIG_DIR}/ls.inst --simulate -- ${LS_NAME}
     for i in $(find ${CONFIG_DIR}/omnitrace-tests-output/ls.inst -type f); do verbose-run ls ${i}; done
-    verbose-run omnitrace -e -v 1 -o ${CONFIG_DIR}/ls.inst -- ls
-    verbose-run ${CONFIG_DIR}/ls.inst
+    verbose-run omnitrace -e -v 1 -o ${CONFIG_DIR}/ls.inst -- ${LS_NAME}
+    verbose-run ${CONFIG_DIR}/ls.inst ${LS_ARGS}
 }
 
 test-omnitrace-runtime()
 {
-    verbose-run omnitrace -e -v 1 --simulate -- ls
-    for i in $(find ${CONFIG_DIR}/omnitrace-tests-output/ls -type f); do verbose-run ls ${i}; done
-    verbose-run omnitrace -e -v 1 -- ls
+    if [ -f /usr/bin/coreutils ]; then
+        local LS_NAME=coreutils
+        local LS_ARGS="--coreutils-prog=ls"
+    else
+        local LS_NAME=ls
+        local LS_ARGS=""
+    fi
+    verbose-run omnitrace -e -v 1 --simulate -- ${LS_NAME} ${LS_ARGS}
+    for i in $(find ${CONFIG_DIR}/omnitrace-tests-output/$(basename ${LS_NAME}) -type f); do verbose-run ls ${i}; done
+    verbose-run omnitrace -e -v 1 -- ${LS_NAME} ${LS_ARGS}
 }
 
 test-omnitrace-critical-trace()

@@ -13,12 +13,12 @@ set -e
 
 tolower()
 {
-    echo "$@" | awk -F '\|~\|' '{print tolower($1)}';
+    echo "$@" | awk -F '\\|~\\|' '{print tolower($1)}';
 }
 
 toupper()
 {
-    echo "$@" | awk -F '\|~\|' '{print toupper($1)}';
+    echo "$@" | awk -F '\\|~\\|' '{print toupper($1)}';
 }
 
 usage()
@@ -29,7 +29,7 @@ usage()
 
     echo ""
     print_default_option() { printf "    --%-20s %-24s     %s (default: %s)\n" "${1}" "${2}" "${3}" "$(tolower ${4})"; }
-    print_default_option distro "[ubuntu|opensuse]" "OS distribution" "${DISTRO}"
+    print_default_option distro "[ubuntu|opensuse|rhel]" "OS distribution" "${DISTRO}"
     print_default_option versions "[VERSION] [VERSION...]" "Ubuntu or OpenSUSE release" "${VERSIONS}"
     print_default_option rocm-versions "[VERSION] [VERSION...]" "ROCm versions" "${ROCM_VERSIONS}"
     print_default_option python-versions "[VERSION] [VERSION...]" "Python 3 minor releases" "${PYTHON_VERSIONS}"
@@ -156,6 +156,10 @@ do
 done
 
 CODE_VERSION=$(cat VERSION)
+
+if [ "${DISTRO}" = "rhel" ]; then
+    SCRIPT_ARGS="${SCRIPT_ARGS} --static-libstdcxx off"
+fi
 
 for VERSION in ${VERSIONS}
 do

@@ -27,7 +27,11 @@
 
 #include <timemory/components/rusage/components.hpp>
 #include <timemory/components/timing/wall_clock.hpp>
+#include <timemory/utility/join.hpp>
 
+#include <algorithm>
+#include <link.h>
+#include <linux/limits.h>
 #include <string>
 #include <vector>
 
@@ -43,10 +47,10 @@ get_whole_function_names()
         "sem_getvalue", "sem_clockwait", "sem_timedwait", "sem_trywait", "sem_unlink",
         "fork", "do_futex_wait", "dl_iterate_phdr", "dlinfo", "dlopen", "dlmopen",
         "dlvsym", "dlsym", "dlerror", "dladdr", "_dl_sym", "_dl_vsym", "_dl_addr",
-        "getenv", "setenv", "unsetenv", "printf", "fprintf", "vprintf",
-        "buffered_vfprintf", "vfprintf", "printf_positional", "puts", "fputs", "vfputs",
-        "fflush", "fwrite", "malloc", "malloc_stats", "malloc_trim", "mallopt", "calloc",
-        "free", "pvalloc", "valloc", "sysmalloc", "posix_memalign", "freehook",
+        "_dl_relocate_static_pie", "getenv", "setenv", "unsetenv", "printf", "fprintf",
+        "vprintf", "buffered_vfprintf", "vfprintf", "printf_positional", "puts", "fputs",
+        "vfputs", "fflush", "fwrite", "malloc", "malloc_stats", "malloc_trim", "mallopt",
+        "calloc", "free", "pvalloc", "valloc", "sysmalloc", "posix_memalign", "freehook",
         "mallochook", "memalignhook", "mprobe", "reallochook", "mmap", "munmap", "fopen",
         "fclose", "fmemopen", "fmemclose", "backtrace", "backtrace_symbols",
         "backtrace_symbols_fd", "sigaddset", "sigandset", "sigdelset", "sigemptyset",
@@ -477,6 +481,198 @@ find_function(image_t* app_image, const std::string& _name, const strset_t& _ext
     }
 
     return _func;
+}
+
+//======================================================================================//
+//
+//  Get the realpath to this exe
+//
+bool
+is_text_file(const std::string& filename)
+{
+    std::ifstream _file{ filename, std::ios::in | std::ios::binary };
+    if(!_file.is_open())
+    {
+        errprintf(-1, "Error! '%s' could not be opened...\n", filename.c_str());
+        return false;
+    }
+
+    constexpr size_t buffer_size = 1024;
+    char             buffer[buffer_size];
+    while(_file.read(buffer, sizeof(buffer)))
+    {
+        for(char itr : buffer)
+        {
+            if(itr == '\0') return false;
+        }
+    }
+
+    if(_file.gcount() > 0)
+    {
+        for(std::streamsize i = 0; i < _file.gcount(); ++i)
+        {
+            if(buffer[i] == '\0') return false;
+        }
+    }
+
+    return true;
+}
+
+//======================================================================================//
+//
+//  Get the realpath to this exe
+//
+std::string&
+omnitrace_get_exe_realpath()
+{
+    static std::string _v = []() {
+        auto _cmd_line = tim::read_command_line(tim::process::get_id());
+        if(!_cmd_line.empty())
+        {
+            using array_config_t = timemory::join::array_config;
+            OMNITRACE_ADD_DETAILED_LOG_ENTRY(array_config_t{ " ", "[ ", " ]" },
+                                             "cmdline:: ", _cmd_line);
+            return _cmd_line.front();
+            // return tim::filepath::realpath(_cmd_line.front(), nullptr, false);
+        }
+        return std::string{};
+    }();
+    return _v;
+}
+
+//======================================================================================//
+//
+//  Error callback routine.
+//
+std::vector<std::string>
+omnitrace_get_link_map(const char* _lib, const std::string& _exclude_linked_by,
+                       const std::string& _exclude_re, std::vector<int>&& _open_modes)
+{
+    if(_open_modes.empty()) _open_modes = { (RTLD_LAZY | RTLD_NOLOAD) };
+
+    auto _get_chain = [&_open_modes](const char* _name) {
+        void* _handle = nullptr;
+        bool  _noload = false;
+        for(auto _mode : _open_modes)
+        {
+            _handle = dlopen(_name, _mode);
+            _noload = (_mode & RTLD_NOLOAD) == RTLD_NOLOAD;
+            if(_handle) break;
+        }
+
+        auto _chain = std::vector<std::string>{};
+        if(_handle)
+        {
+            struct link_map* _link_map = nullptr;
+            dlinfo(_handle, RTLD_DI_LINKMAP, &_link_map);
+            struct link_map* _next = _link_map;
+            while(_next)
+            {
+                if(_name == nullptr && _next == _link_map &&
+                   std::string_view{ _next->l_name }.empty())
+                {
+                    // only insert exe name if dlopened the exe and
+                    // empty name is first entry
+                    _chain.emplace_back(omnitrace_get_exe_realpath());
+                }
+                else if(!std::string_view{ _next->l_name }.empty())
+                {
+                    _chain.emplace_back(_next->l_name);
+                }
+                _next = _next->l_next;
+            }
+
+            if(_noload == false) dlclose(_handle);
+        }
+        return _chain;
+    };
+
+    auto _full_chain = _get_chain(_lib);
+    auto _excl_chain = (_exclude_linked_by.empty())
+                           ? std::vector<std::string>{}
+                           : _get_chain(_exclude_linked_by.c_str());
+    auto _fini_chain = std::vector<std::string>{};
+    _fini_chain.reserve(_full_chain.size());
+
+    for(const auto& itr : _full_chain)
+    {
+        auto _found = std::any_of(_excl_chain.begin(), _excl_chain.end(),
+                                  [itr](const auto& _v) { return (itr == _v); });
+        if(!_found)
+        {
+            if(_exclude_re.empty() || !std::regex_search(itr, std::regex{ _exclude_re }))
+                _fini_chain.emplace_back(itr);
+            else
+                _excl_chain.emplace_back(itr);
+        }
+    }
+
+    return _fini_chain;
+}
+
+//======================================================================================//
+//
+//  Get the path of a loaded dynamic binary
+//
+std::optional<std::string>
+omnitrace_get_loaded_path(const char* _name, std::vector<int>&& _open_modes)
+{
+    if(_open_modes.empty()) _open_modes = { (RTLD_LAZY | RTLD_NOLOAD) };
+
+    void* _handle = nullptr;
+    bool  _noload = false;
+    for(auto _mode : _open_modes)
+    {
+        _handle = dlopen(_name, _mode);
+        _noload = (_mode & RTLD_NOLOAD) == RTLD_NOLOAD;
+        if(_handle) break;
+    }
+
+    if(_handle)
+    {
+        struct link_map* _link_map = nullptr;
+        dlinfo(_handle, RTLD_DI_LINKMAP, &_link_map);
+        if(_link_map != nullptr && !std::string_view{ _link_map->l_name }.empty())
+        {
+            return tim::filepath::realpath(_link_map->l_name, nullptr, false);
+        }
+        if(_noload == false) dlclose(_handle);
+    }
+
+    return std::optional<std::string>{};
+}
+
+//======================================================================================//
+//
+//  Get the path of a loaded dynamic binary
+//
+std::optional<std::string>
+omnitrace_get_origin(const char* _name, std::vector<int>&& _open_modes)
+{
+    if(_open_modes.empty()) _open_modes = { (RTLD_LAZY | RTLD_NOLOAD) };
+
+    void* _handle = nullptr;
+    bool  _noload = false;
+    for(auto _mode : _open_modes)
+    {
+        _handle = dlopen(_name, _mode);
+        _noload = (_mode & RTLD_NOLOAD) == RTLD_NOLOAD;
+        if(_handle) break;
+    }
+
+    if(_handle)
+    {
+        char _buffer[PATH_MAX + 1];
+        memset(_buffer, '\0', PATH_MAX * sizeof(char));
+        dlinfo(_handle, RTLD_DI_ORIGIN, _buffer);
+        if(strnlen(_buffer, PATH_MAX + 1) <= PATH_MAX)
+        {
+            return tim::filepath::realpath(_buffer, nullptr, false);
+        }
+        if(_noload == false) dlclose(_handle);
+    }
+
+    return std::optional<std::string>{};
 }
 
 //======================================================================================//

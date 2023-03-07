@@ -30,34 +30,16 @@
 
 #include <timemory/utility/filepath.hpp>
 
+#include <dlfcn.h>
+#include <ios>
 #include <string>
 #include <sys/stat.h>
 #include <unistd.h>
 
 //======================================================================================//
 
-inline string_t
-get_absolute_path(const char* fname)
-{
-    char  path_save[PATH_MAX];
-    char  abs_exe_path[PATH_MAX];
-    char* p = nullptr;
-
-    if(!(p = strrchr((char*) fname, '/')))
-    {
-        auto* ret = getcwd(abs_exe_path, sizeof(abs_exe_path));
-        consume_parameters(ret);
-    }
-    else
-    {
-        auto* rets = getcwd(path_save, sizeof(path_save));
-        auto  retf = chdir(fname);
-        auto* reta = getcwd(abs_exe_path, sizeof(abs_exe_path));
-        auto  retp = chdir(path_save);
-        consume_parameters(rets, retf, reta, retp);
-    }
-    return string_t(abs_exe_path);
-}
+bool
+is_text_file(const std::string& filename);
 
 //======================================================================================//
 
@@ -190,12 +172,20 @@ omnitrace_get_is_executable(std::string_view _cmd, bool _default_v)
 //
 static inline address_space_t*
 omnitrace_get_address_space(patch_pointer_t& _bpatch, int _cmdc, char** _cmdv,
-                            bool _rewrite, int _pid = -1, const string_t& _name = {})
+                            bool _rewrite, int _pid = -1, const std::string& _name = {})
 {
     address_space_t* mutatee = nullptr;
 
     if(_rewrite)
     {
+        if(is_text_file(_name))
+        {
+            errprintf(
+                -127,
+                "'%s' is a text file. OmniTrace only supports instrumenting binary files",
+                _name.c_str());
+        }
+
         verbprintf(1, "Opening '%s' for binary rewrite... ", _name.c_str());
         fflush(stderr);
         if(!_name.empty()) mutatee = _bpatch->openBinary(_name.c_str(), false);
@@ -221,6 +211,16 @@ omnitrace_get_address_space(patch_pointer_t& _bpatch, int _cmdc, char** _cmdv,
     }
     else
     {
+        if(_cmdc < 1) errprintf(-127, "No command provided");
+
+        if(is_text_file(_cmdv[0]))
+        {
+            errprintf(-1,
+                      "'%s' is a text file. OmniTrace only supports instrumenting "
+                      "binary files",
+                      _cmdv[0]);
+        }
+
         std::stringstream ss;
         for(int i = 0; i < _cmdc; ++i)
         {
@@ -321,6 +321,21 @@ omnitrace_fork_callback(thread_t* parent, thread_t* child)
         }
     }
 }
+//
+//======================================================================================//
+// path resolution helpers
+//
+std::string&
+omnitrace_get_exe_realpath();
+//
+std::optional<std::string>
+omnitrace_get_origin(const char*        _name,
+                     std::vector<int>&& _open_modes = { (RTLD_LAZY | RTLD_NOLOAD) });
+//
+std::vector<std::string>
+omnitrace_get_link_map(const char* _lib, const std::string& _exclude_linked_by = {},
+                       const std::string& _exclude_re = {},
+                       std::vector<int>&& _open_modes = { (RTLD_LAZY | RTLD_NOLOAD) });
 //
 //======================================================================================//
 // insert_instr -- insert instrumentation into a function
