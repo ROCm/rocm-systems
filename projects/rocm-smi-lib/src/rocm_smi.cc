@@ -3315,11 +3315,23 @@ rsmi_compute_process_gpus_get(uint32_t pid, uint32_t *dv_indices,
   uint32_t i = 0;
   amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
 
+  // filter out the devices not visible to container
+  auto& nodes = smi.kfd_node_map();
+  for (auto nit = gpu_set.begin(); nit != gpu_set.end();) {
+    uint64_t gpu_id_val = (*nit);
+    auto kfd_ite = nodes.find(gpu_id_val);
+    if (kfd_ite == nodes.end()) {
+      nit = gpu_set.erase(nit);
+    } else {
+      nit++;
+    }
+  }
+
   if (dv_indices != nullptr) {
     for (auto it = gpu_set.begin(); i < *num_devices && it != gpu_set.end();
                                                                   ++it, ++i) {
       uint64_t gpu_id_val = (*it);
-      dv_indices[i] = smi.kfd_node_map()[gpu_id_val]->amdgpu_dev_index();
+      dv_indices[i] = nodes[gpu_id_val]->amdgpu_dev_index();
     }
   }
 
@@ -3791,12 +3803,12 @@ get_compute_partition(uint32_t dv_ind, std::string &compute_partition) {
 rsmi_status_t
 rsmi_dev_compute_partition_get(uint32_t dv_ind, char *compute_partition,
                                uint32_t len) {
-  CHK_SUPPORT_NAME_ONLY(compute_partition)
+  TRY
   if ((len == 0) || (compute_partition == nullptr)) {
     return RSMI_STATUS_INVALID_ARGS;
   }
+  CHK_SUPPORT_NAME_ONLY(compute_partition)
 
-  TRY
   std::string returning_compute_partition;
   rsmi_status_t ret = get_compute_partition(dv_ind,
                                returning_compute_partition);
@@ -3996,12 +4008,12 @@ rsmi_dev_nps_mode_set(uint32_t dv_ind, rsmi_nps_mode_type_t nps_mode) {
 rsmi_status_t
 rsmi_dev_nps_mode_get(uint32_t dv_ind, char *nps_mode,
                                uint32_t len) {
-  CHK_SUPPORT_NAME_ONLY(nps_mode)
+  TRY
   if ((len == 0) || (nps_mode == nullptr)) {
     return RSMI_STATUS_INVALID_ARGS;
   }
+  CHK_SUPPORT_NAME_ONLY(nps_mode)
 
-  TRY
   std::string returning_nps_mode;
   rsmi_status_t ret = get_nps_mode(dv_ind,
                                returning_nps_mode);

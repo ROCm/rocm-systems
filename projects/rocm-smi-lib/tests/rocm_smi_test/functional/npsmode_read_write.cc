@@ -113,7 +113,6 @@ void TestNPSModeReadWrite::Run(void) {
   char current_nps_mode[255];
   orig_nps_mode[0] = '\0';
   current_nps_mode[0] = '\0';
-  rsmi_nps_mode_type new_nps_mode;
 
   TestBase::Run();
   if (setup_failed_) {
@@ -122,6 +121,11 @@ void TestNPSModeReadWrite::Run(void) {
   }
 
   for (uint32_t dv_ind = 0; dv_ind < num_monitor_devs(); ++dv_ind) {
+    if (dv_ind != 0) {
+      IF_VERB(STANDARD) {
+        std::cout << std::endl;
+      }
+    }
     PrintDeviceHeader(dv_ind);
 
     //Standard checks to see if API is supported, before running full tests
@@ -131,7 +135,7 @@ void TestNPSModeReadWrite::Run(void) {
           std::cout << "\t**" <<  ": "
                     << "Not supported on this machine" << std::endl;
         }
-        return;
+        continue;
     } else {
         CHK_ERR_ASRT(ret)
     }
@@ -145,9 +149,9 @@ void TestNPSModeReadWrite::Run(void) {
        (orig_nps_mode[0] == '\0')) {
       std::cout << "***System nps mode value is not defined or received unexpected data. "
                   "Skip nps mode test." << std::endl;
-      return;
+      continue;
     }
-    EXPECT_TRUE(ret == RSMI_STATUS_SUCCESS);
+    ASSERT_TRUE(ret == RSMI_STATUS_SUCCESS);
 
     // Verify api support checking functionality is working
     uint32_t length = 2;
@@ -166,19 +170,20 @@ void TestNPSModeReadWrite::Run(void) {
 
     // Verify api support checking functionality is working
     err = rsmi_dev_nps_mode_get(dv_ind, nullptr, 255);
-    ASSERT_EQ(err, RSMI_STATUS_NOT_SUPPORTED);
+    ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
 
-    if (err == RSMI_STATUS_NOT_SUPPORTED) {
+    if (err == RSMI_STATUS_INVALID_ARGS) {
       IF_VERB(STANDARD) {
         std::cout << "\t**"
-                  << "Confirmed RSMI_STATUS_NOT_SUPPORTED was returned."
+                  << "Confirmed RSMI_STATUS_INVALID_ARGS was returned."
                   << std::endl;
       }
     }
 
     // Verify api support checking functionality is working
     err = rsmi_dev_nps_mode_get(dv_ind, orig_nps_mode, 0);
-    ASSERT_EQ(err, (RSMI_STATUS_INVALID_ARGS || RSMI_STATUS_NOT_SUPPORTED));
+    ASSERT_TRUE((err == RSMI_STATUS_INVALID_ARGS) ||
+                (err == RSMI_STATUS_NOT_SUPPORTED));
     if (err == RSMI_STATUS_INVALID_ARGS) {
       IF_VERB(STANDARD) {
         std::cout << "\t**"
@@ -191,9 +196,10 @@ void TestNPSModeReadWrite::Run(void) {
     /* rsmi_dev_nps_mode_set(...) */
     /******************************/
     // Verify api support checking functionality is working
+    rsmi_nps_mode_type new_nps_mode;
     err = rsmi_dev_nps_mode_set(dv_ind, new_nps_mode);
     // Note: new_nps_mode is not set
-    EXPECT_TRUE((err == RSMI_STATUS_INVALID_ARGS) ||
+    ASSERT_TRUE((err == RSMI_STATUS_INVALID_ARGS) ||
                 (err == RSMI_STATUS_NOT_SUPPORTED));
     if (err == RSMI_STATUS_INVALID_ARGS) {
       IF_VERB(STANDARD) {
@@ -204,12 +210,12 @@ void TestNPSModeReadWrite::Run(void) {
     } else if (err == RSMI_STATUS_NOT_SUPPORTED) {
          IF_VERB(STANDARD) {
           std::cout << "\t**" <<  ": "
-                    << "rsmi_dev_nps_mode_set not supported on this machine"
-                    << "\n\t    (if rsmi_dev_nps_mode_get work, then likely "
+                    << "rsmi_dev_nps_mode_set not supported on this device"
+                    << "\n\t    (if rsmi_dev_nps_mode_get works, then likely "
                     << "need to set in bios)"
                     << std::endl;
         }
-        return;
+        continue;
     } else {
         DISPLAY_RSMI_ERR(err)
     }
@@ -218,7 +224,7 @@ void TestNPSModeReadWrite::Run(void) {
     // Verify api support checking functionality is working
     new_nps_mode = rsmi_nps_mode_type::RSMI_MEMORY_PARTITION_UNKNOWN;
     err = rsmi_dev_nps_mode_set(dv_ind, new_nps_mode);
-    EXPECT_TRUE((err == RSMI_STATUS_INVALID_ARGS) ||
+    ASSERT_TRUE((err == RSMI_STATUS_INVALID_ARGS) ||
                 (err == RSMI_STATUS_NOT_SUPPORTED) ||
                 (err == RSMI_STATUS_PERMISSION));
     if (err == RSMI_STATUS_INVALID_ARGS) {
@@ -237,13 +243,12 @@ void TestNPSModeReadWrite::Run(void) {
 
     // Re-run original get, so we can reset to later
     ret = rsmi_dev_nps_mode_get(dv_ind, orig_nps_mode, 255);
-    EXPECT_EQ(RSMI_STATUS_SUCCESS, ret);
+    ASSERT_EQ(RSMI_STATUS_SUCCESS, ret);
 
     for (int partition = RSMI_MEMORY_PARTITION_NPS1;
          partition <= RSMI_MEMORY_PARTITION_NPS8;
          partition++) {
-      new_nps_mode
-        = static_cast<rsmi_nps_mode_type>(partition);
+      new_nps_mode = static_cast<rsmi_nps_mode_type>(partition);
       IF_VERB(STANDARD) {
         std::cout << std::endl;
         std::cout << "\t**"
@@ -265,8 +270,8 @@ void TestNPSModeReadWrite::Run(void) {
         std::cout << "\t**"
                   << "Current nps mode: " << current_nps_mode << std::endl;
       }
-      EXPECT_EQ(RSMI_STATUS_SUCCESS, ret);
-      EXPECT_STREQ(npsModeString(new_nps_mode).c_str(), current_nps_mode);
+      ASSERT_EQ(RSMI_STATUS_SUCCESS, ret);
+      ASSERT_STREQ(npsModeString(new_nps_mode).c_str(), current_nps_mode);
     }
 
     /* TEST RETURN TO BOOT NPS MODE SETTING */
@@ -331,8 +336,7 @@ void TestNPSModeReadWrite::Run(void) {
                 << "\t**" << "Current nps mode: " << current_nps_mode
                 << std::endl;
     }
-    EXPECT_EQ(RSMI_STATUS_SUCCESS, ret);
-    EXPECT_STREQ(npsModeString(new_nps_mode).c_str(), current_nps_mode);
-
+    ASSERT_EQ(RSMI_STATUS_SUCCESS, ret);
+    ASSERT_STREQ(npsModeString(new_nps_mode).c_str(), current_nps_mode);
   }
 }

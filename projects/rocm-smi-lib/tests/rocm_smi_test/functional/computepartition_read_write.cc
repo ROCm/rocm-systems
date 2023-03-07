@@ -55,8 +55,8 @@
 
 TestComputePartitionReadWrite::TestComputePartitionReadWrite() : TestBase() {
   set_title("RSMI Compute Partition Read/Write Test");
-  set_description("The Compute Parition tests verifies that the compute "
-                  "parition can be read and updated properly.");
+  set_description("The Compute Partition tests verifies that the compute "
+                  "partition can be read and updated properly.");
 }
 
 TestComputePartitionReadWrite::~TestComputePartitionReadWrite(void) {
@@ -127,7 +127,6 @@ void TestComputePartitionReadWrite::Run(void) {
   rsmi_status_t ret, err;
   char orig_char_computePartition[255];
   char current_char_computePartition[255];
-  rsmi_compute_partition_type new_computePartition;
 
   TestBase::Run();
   if (setup_failed_) {
@@ -136,6 +135,11 @@ void TestComputePartitionReadWrite::Run(void) {
   }
 
   for (uint32_t dv_ind = 0; dv_ind < num_monitor_devs(); ++dv_ind) {
+    if (dv_ind != 0) {
+      IF_VERB(STANDARD) {
+        std::cout << std::endl;
+      }
+    }
     PrintDeviceHeader(dv_ind);
 
     //Standard checks to see if API is supported, before running full tests
@@ -144,9 +148,9 @@ void TestComputePartitionReadWrite::Run(void) {
     if (ret == RSMI_STATUS_NOT_SUPPORTED) {
        IF_VERB(STANDARD) {
           std::cout << "\t**" <<  ": "
-                    << "Not supported on this machine" << std::endl;
+                    << "Not supported on this device" << std::endl;
         }
-        return;
+        continue;
     } else {
         CHK_ERR_ASRT(ret)
     }
@@ -160,9 +164,9 @@ void TestComputePartitionReadWrite::Run(void) {
        (orig_char_computePartition[0] == '\0')) {
       std::cout << "***System compute partition value is not defined. "
                   "Skip compute partition test." << std::endl;
-      return;
+      continue;
     }
-    EXPECT_EQ(RSMI_STATUS_SUCCESS, ret);
+    ASSERT_EQ(RSMI_STATUS_SUCCESS, ret);
 
     // Verify api support checking functionality is working
     uint32_t length = 2;
@@ -181,47 +185,32 @@ void TestComputePartitionReadWrite::Run(void) {
 
     // Verify api support checking functionality is working
     err = rsmi_dev_compute_partition_get(dv_ind, nullptr, 255);
-    ASSERT_EQ(err, RSMI_STATUS_NOT_SUPPORTED);
+    ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
     IF_VERB(STANDARD) {
-      if (err == RSMI_STATUS_NOT_SUPPORTED) {
+      if (err == RSMI_STATUS_INVALID_ARGS) {
         std::cout << "\t**"
-                  << "Confirmed RSMI_STATUS_NOT_SUPPORTED was returned."
+                  << "Confirmed RSMI_STATUS_INVALID_ARGS was returned."
                   << std::endl;
       }
     }
 
     // Verify api support checking functionality is working
     err = rsmi_dev_compute_partition_get(dv_ind, orig_char_computePartition, 0);
-    ASSERT_EQ(err, (RSMI_STATUS_INVALID_ARGS || RSMI_STATUS_NOT_SUPPORTED));
-    IF_VERB(STANDARD) {
-      if (err == RSMI_STATUS_INVALID_ARGS) {
-        std::cout << "\t**"
-                  << "Confirmed RSMI_STATUS_INVALID_ARGS was returned."
-                  << std::endl;
-      }
-    }
-
-    // Verify api support checking functionality is working
-    err = rsmi_dev_compute_partition_set(dv_ind, new_computePartition);
-    // Note: new_computePartition is not set
-    EXPECT_TRUE((err == RSMI_STATUS_INVALID_ARGS) ||
+    ASSERT_TRUE((err == RSMI_STATUS_INVALID_ARGS) ||
                 (err == RSMI_STATUS_NOT_SUPPORTED));
     IF_VERB(STANDARD) {
       if (err == RSMI_STATUS_INVALID_ARGS) {
         std::cout << "\t**"
                   << "Confirmed RSMI_STATUS_INVALID_ARGS was returned."
                   << std::endl;
-      } else {
-        DISPLAY_RSMI_ERR(err)
       }
     }
-    ASSERT_FALSE(err == RSMI_STATUS_PERMISSION);
 
     // Verify api support checking functionality is working
-    new_computePartition
+    rsmi_compute_partition_type new_computePartition
       = rsmi_compute_partition_type::RSMI_COMPUTE_PARTITION_INVALID;
     err = rsmi_dev_compute_partition_set(dv_ind, new_computePartition);
-    EXPECT_TRUE((err == RSMI_STATUS_INVALID_ARGS) ||
+    ASSERT_TRUE((err == RSMI_STATUS_INVALID_ARGS) ||
                 (err == RSMI_STATUS_NOT_SUPPORTED) ||
                 (err == RSMI_STATUS_PERMISSION));
     IF_VERB(STANDARD) {
@@ -241,7 +230,7 @@ void TestComputePartitionReadWrite::Run(void) {
     // Re-run original get, so we can reset to later
     ret = rsmi_dev_compute_partition_get(dv_ind, orig_char_computePartition,
                                           255);
-    EXPECT_EQ(RSMI_STATUS_SUCCESS, ret);
+    ASSERT_EQ(RSMI_STATUS_SUCCESS, ret);
 
     /**
      * RSMI_COMPUTE_PARTITION_INVALID = 0,
@@ -384,8 +373,8 @@ void TestComputePartitionReadWrite::Run(void) {
                 << current_char_computePartition
                 << std::endl;
     }
-    EXPECT_EQ(RSMI_STATUS_SUCCESS, ret);
-    EXPECT_STREQ(computePartitionString(new_computePartition).c_str(),
+    ASSERT_EQ(RSMI_STATUS_SUCCESS, ret);
+    ASSERT_STREQ(computePartitionString(new_computePartition).c_str(),
                  current_char_computePartition);
   }
 }
