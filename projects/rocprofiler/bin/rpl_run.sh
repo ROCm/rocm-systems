@@ -294,14 +294,14 @@ run() {
     log_file="$ROCP_OUTPUT_DIR/log.txt"
     exit_file="$ROCP_OUTPUT_DIR/exit.txt"
     {
-      HSA_TOOLS_LIB="$MY_HSA_TOOLS_LIB" LD_PRELOAD="$MY_LD_PRELOAD" eval "$APP_CMD"
+      HSA_TOOLS_LIB="$MY_HSA_TOOLS_LIB" LD_PRELOAD=$LD_PRELOAD:"$MY_LD_PRELOAD" eval "$APP_CMD"
       retval=$?
       echo "exit($retval)" > $exit_file
     } 2>&1 | tee "$log_file"
     exitval=`cat "$exit_file" | sed -n "s/^.*exit(\([0-9]*\)).*$/\1/p"`
     if [ -n "$exitval" ] ; then retval=$exitval; fi
   else
-    HSA_TOOLS_LIB="$MY_HSA_TOOLS_LIB" LD_PRELOAD="$MY_LD_PRELOAD" eval "$APP_CMD"
+    HSA_TOOLS_LIB="$MY_HSA_TOOLS_LIB" LD_PRELOAD=$LD_PRELOAD:"$MY_LD_PRELOAD" eval "$APP_CMD"
     retval=$?
   fi
   return $retval
