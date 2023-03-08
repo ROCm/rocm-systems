@@ -1,5 +1,6 @@
 #!/bin/bash -e
 
+: ${VERBOSE:=0}
 : ${EXTRA_ARGS:=""}
 : ${BUILD_DIR:=build-release}
 : ${VERSION:=0.0.4}
@@ -14,7 +15,7 @@
 : ${MAX_THREADS:=2048}
 : ${PERFETTO_TOOLS:="ON"}
 : ${HIDDEN_VIZ:="ON"}
-: ${PYTHON_VERSIONS:="6 7 8 9 10"}
+: ${PYTHON_VERSIONS:="6 7 8 9 10 11"}
 : ${GENERATORS:="STGZ DEB RPM"}
 : ${MPI_IMPL:="openmpi"}
 : ${CLEAN:=0}
@@ -24,6 +25,7 @@
 : ${WITH_ROCM:=0}
 : ${WITH_ROCM_MPI:=0}
 : ${IS_DOCKER:=0}
+: ${CONDA_ROOT:=/opt/conda}
 
 if [ -z "${DISTRO}" ]; then
     if [ -f /etc/os-release ]; then
@@ -35,17 +37,17 @@ fi
 
 tolower()
 {
-    echo "$@" | awk -F '\|~\|' '{print tolower($1)}';
+    echo "$@" | awk -F '\\|~\\|' '{print tolower($1)}';
 }
 
 toupper()
 {
-    echo "$@" | awk -F '\|~\|' '{print toupper($1)}';
+    echo "$@" | awk -F '\\|~\\|' '{print toupper($1)}';
 }
 
 usage()
 {
-    print_option() { printf "    --%-10s %-24s     %s\n" "${1}" "${2}" "${3}"; }
+    print_option() { printf "    --%-10s %-36s     %s\n" "${1}" "${2}" "${3}"; }
     echo "Options:"
     python_info="(Use '+nopython' to build w/o python, use '+python' to python build with python)"
     print_option core "[+nopython] [+python]" "Core ${python_info}"
@@ -55,7 +57,7 @@ usage()
     print_option mpi-impl "[openmpi|mpich]" "MPI implementation"
 
     echo ""
-    print_default_option() { printf "    --%-20s %-14s     %s (default: %s)\n" "${1}" "${2}" "${3}" "$(tolower ${4})"; }
+    print_default_option() { printf "    --%-20s %-26s     %s (default: %s)\n" "${1}" "${2}" "${3}" "$(tolower ${4})"; }
     print_default_option lto "[on|off]" "Enable LTO" "${LTO}"
     print_default_option strip "[on|off]" "Strip libraries" "${STRIP}"
     print_default_option perfetto-tools "[on|off]" "Install perfetto tools" "${PERFETTO_TOOLS}"
@@ -64,7 +66,22 @@ usage()
     print_default_option hidden-visibility "[on|off]" "Build with hidden visibility" "${HIDDEN_VIZ}"
     print_default_option max-threads "N" "Max number of threads supported" "${MAX_THREADS}"
     print_default_option parallel "N" "Number of parallel build jobs" "${NJOBS}"
+    print_default_option generators "[STGZ][DEB][RPM][+others]" "CPack generators" "${GENERATORS}"
 }
+
+send-error()
+{
+    usage
+    echo -e "\nError: ${@}"
+    exit 1
+}
+
+reset-last()
+{
+    last() { send-error "Unsupported argument :: ${1}"; }
+}
+
+reset-last
 
 while [[ $# -gt 0 ]]
 do
@@ -75,10 +92,12 @@ do
     case "${ARG}" in
         --clean)
             CLEAN=1
+            reset-last
             continue
             ;;
         --fresh)
             FRESH=1
+            reset-last
             continue
             ;;
     esac
@@ -103,56 +122,72 @@ do
             ;;
         --core)
             WITH_CORE=${VAL}
+            reset-last
             ;;
         --mpi)
             WITH_MPI=${VAL}
+            reset-last
             ;;
         --rocm)
             WITH_ROCM=${VAL}
+            reset-last
             ;;
         --rocm-mpi)
             WITH_ROCM_MPI=${VAL}
+            reset-last
             ;;
         --mpi-impl)
             MPI_IMPL=${1}
             shift
+            reset-last
             ;;
         --lto)
             LTO=$(toupper ${1})
             shift
+            reset-last
             ;;
         --static-libgcc)
             LIBGCC=$(toupper ${1})
             shift
+            reset-last
             ;;
         --static-libstdcxx)
             LIBSTDCXX=$(toupper ${1})
             shift
+            reset-last
             ;;
         --strip)
             STRIP=$(toupper ${1})
             shift
+            reset-last
             ;;
         --hidden-visibility)
             HIDDEN_VIZ=$(toupper ${1})
             shift
+            reset-last
             ;;
         --perfetto-tools)
             PERFETTO_TOOLS=$(toupper ${1})
             shift
+            reset-last
             ;;
         --max-threads)
             MAX_THREADS=${1}
             shift
+            reset-last
             ;;
         --parallel)
             NJOBS=${1}
             shift
+            reset-last
+            ;;
+        --generators)
+            GENERATORS=$(toupper ${1})
+            shift
+            last() { GENERATORS="${GENERATORS} $(toupper ${1})"; }
             ;;
         *)
-            echo -e "Error! Unknown option : ${ARG}"
-            usage
-            exit 1
+            last ${ARG} ${1}
             ;;
     esac
 done
@@ -210,7 +245,9 @@ build-and-package-base()
     fi
     pushd ${BUILD_DIR}/${DIR}
     verbose-run cat CPackConfig.cmake
-    verbose-run cat cmake_install.cmake
+    if [ "${VERBOSE}" -gt 0 ]; then
+        verbose-run cat cmake_install.cmake
+    fi
     popd
     verbose-run cmake --build ${BUILD_DIR}/${DIR} --target all --parallel ${NJOBS}
     verbose-run cmake --build ${BUILD_DIR}/${DIR} --target install --parallel ${NJOBS}
@@ -233,11 +270,53 @@ build-and-package-base()
                 SEP="_"
                 DEST="deb"
                 ;;
-            DEB | RPM)
+            RPM)
                 verbose-run cpack -G RPM -D CPACK_PACKAGING_INSTALL_PREFIX=/opt/omnitrace
                 EXT="rpm"
                 SEP="-"
                 DEST="rpm"
+                ;;
+            7Z | 7ZIP)
+                verbose-run cpack -G 7Z
+                EXT="7z"
+                SEP="-"
+                DEST="zip"
+                ;;
+            TBZ2)
+                verbose-run cpack -G TBZ2
+                EXT="tar.bz2"
+                SEP="-"
+                DEST="zip"
+                ;;
+            TGZ)
+                verbose-run cpack -G TGZ
+                EXT="tar.gz"
+                SEP="-"
+                DEST="zip"
+                ;;
+            TXZ)
+                verbose-run cpack -G TXZ
+                EXT="tar.xz"
+                SEP="-"
+                DEST="zip"
+                ;;
+            TZ)
+                verbose-run cpack -G TZ
+                EXT="tar.Z"
+                SEP="-"
+                DEST="zip"
+                ;;
+            TZST)
+                verbose-run cpack -G TZST
+                EXT="tar.zst"
+                SEP="-"
+                DEST="zip"
+                ;;
+            ZIP)
+                verbose-run cpack -G ZIP
+                EXT="zip"
+                SEP="-"
+                DEST="zip"
                 ;;
             *)
                 echo "Unsupported cpack generator: ${i}"
@@ -284,14 +363,16 @@ build-and-package()
     fi
 }
 
-if [ -d /opt/conda/bin ]; then
-    export PATH=${PATH}:/opt/conda/bin
+if [ -d ${CONDA_ROOT}/bin ]; then
+    export PATH=${PATH}:${CONDA_ROOT}/bin
     source activate
 fi
 
 if [ "${IS_DOCKER}" -ne 0 ]; then git config --global --add safe.directory ${PWD}; fi
 
-build-and-package ${WITH_CORE} ${DISTRO}-core -DOMNITRACE_USE_HIP=OFF
-build-and-package ${WITH_MPI} ${DISTRO}-${MPI_IMPL} -DOMNITRACE_USE_HIP=ON
-build-and-package ${WITH_ROCM} ${DISTRO}-rocm-${ROCM_VERSION} -DOMNITRACE_USE_HIP=ON
+verbose-run echo "Build omnitrace installers with generators: ${GENERATORS}"
+
+build-and-package ${WITH_CORE} ${DISTRO}-core -DOMNITRACE_USE_HIP=OFF -DOMNITRACE_USE_MPI=OFF
+build-and-package ${WITH_MPI} ${DISTRO}-${MPI_IMPL} -DOMNITRACE_USE_HIP=OFF -DOMNITRACE_USE_MPI=ON
+build-and-package ${WITH_ROCM} ${DISTRO}-rocm-${ROCM_VERSION} -DOMNITRACE_USE_HIP=ON -DOMNITRACE_USE_MPI=OFF
 build-and-package ${WITH_ROCM_MPI} ${DISTRO}-rocm-${ROCM_VERSION}-${MPI_IMPL} -DOMNITRACE_USE_HIP=ON -DOMNITRACE_USE_MPI=ON

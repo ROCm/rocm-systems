@@ -53,6 +53,9 @@
 #include <stdexcept>
 #include <unordered_map>
 
+#define OMNITRACE_PYTHON_VERSION                                                         \
+    ((10000 * PY_MAJOR_VERSION) + (100 * PY_MINOR_VERSION) + PY_MICRO_VERSION)
+
 namespace pyomnitrace
 {
 namespace pyprofile
@@ -260,10 +263,34 @@ get_config()
     return *_tl_instance;
 }
 //
-int32_t
-get_depth(PyFrameObject* frame)
+int
+get_frame_lineno(PyFrameObject* frame)
 {
-    return (frame->f_back) ? (get_depth(frame->f_back) + 1) : 0;
+#if OMNITRACE_PYTHON_VERSION >= 31100
+    return PyFrame_GetLineNumber(frame);
+#else
+    return frame->f_lineno;
+#endif
+}
+//
+int
+get_frame_lasti(PyFrameObject* frame)
+{
+#if OMNITRACE_PYTHON_VERSION >= 31100
+    return PyFrame_GetLasti(frame);
+#else
+    return frame->f_lasti;
+#endif
+}
+//
+auto
+get_frame_code(PyFrameObject* frame)
+{
+#if OMNITRACE_PYTHON_VERSION >= 31100
+    return PyFrame_GetCode(frame);
+#else
+    return frame->f_code;
+#endif
 }
 //
 void
@@ -364,9 +391,9 @@ profiler_function(py::object pframe, const char* swhat, py::object arg)
         }
         // append the line number
         if(_config.include_line && _config.include_filename)
-            _funcname.append(TIMEMORY_JOIN("", ':', frame->f_lineno, ']'));
+            _funcname.append(TIMEMORY_JOIN("", ':', get_frame_lineno(frame), ']'));
         else if(_config.include_line)
-            _funcname.append(TIMEMORY_JOIN("", ':', frame->f_lineno));
+            _funcname.append(TIMEMORY_JOIN("", ':', get_frame_lineno(frame)));
         else if(_config.include_filename)
             _funcname += "]";
         return _funcname;
@@ -386,7 +413,7 @@ profiler_function(py::object pframe, const char* swhat, py::object arg)
     auto& _only_funcs = _config.restrict_functions;
     auto& _incl_funcs = _config.include_functions;
     auto& _skip_funcs = _config.exclude_functions;
-    auto  _func       = py::cast<std::string>(frame->f_code->co_name);
+    auto  _func       = py::cast<std::string>(get_frame_code(frame)->co_name);
 
     if(!_only_funcs.empty())
     {
@@ -419,7 +446,7 @@ profiler_function(py::object pframe, const char* swhat, py::object arg)
     auto& _only_files = _config.restrict_filenames;
     auto& _incl_files = _config.include_filenames;
     auto& _skip_files = _config.exclude_filenames;
-    auto  _full       = py::cast<std::string>(frame->f_code->co_filename);
+    auto  _full       = py::cast<std::string>(get_frame_code(frame)->co_filename);
     auto  _file       = (_full.find('/') != std::string::npos)
                             ? _full.substr(_full.find_last_of('/') + 1)
                             : _full;
@@ -470,14 +497,18 @@ profiler_function(py::object pframe, const char* swhat, py::object arg)
 
     // start function
     auto _profiler_call = [&]() {
+        int _lineno = 0;
+        int _lasti  = 0;
         if(_annotate)
         {
+            _lineno                         = get_frame_lineno(frame);
+            _lasti                          = get_frame_lasti(frame);
             _config.annotations.at(0).value = const_cast<char*>(_full.c_str());
-            _config.annotations.at(1).value = &frame->f_lineno;
-            _config.annotations.at(2).value = &frame->f_lasti;
-            _config.annotations.at(3).value = &frame->f_code->co_argcount;
-            _config.annotations.at(4).value = &frame->f_code->co_nlocals;
-            _config.annotations.at(5).value = &frame->f_code->co_stacksize;
+            _config.annotations.at(1).value = &_lineno;
+            _config.annotations.at(2).value = &_lasti;
+            _config.annotations.at(3).value = &get_frame_code(frame)->co_argcount;
+            _config.annotations.at(4).value = &get_frame_code(frame)->co_nlocals;
+            _config.annotations.at(5).value = &get_frame_code(frame)->co_stacksize;
         }
 
         _config.records.emplace_back([&_label_ref, _annotate]() {

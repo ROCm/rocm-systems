@@ -34,14 +34,15 @@ RUN if [ "${ROCM_VERSION}" != "0.0" ]; then \
         yum clean all; \
     fi
 
-ARG PYTHON_VERSIONS="6 7 8 9 10"
+ARG PYTHON_VERSIONS="6 7 8 9 10 11"
 
 RUN wget https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh && \
     bash miniconda.sh -b -p /opt/conda && \
     export PATH="/opt/conda/bin:${PATH}" && \
     conda config --set always_yes yes --set changeps1 no && \
     conda update -c defaults -n base conda && \
-    for i in ${PYTHON_VERSIONS}; do conda create -n py3.${i} -c defaults python=3.${i} pip; done && \
+    for i in ${PYTHON_VERSIONS}; do conda create -n py3.${i} -c defaults -c conda-forge python=3.${i} pip; done && \
+    for i in ${PYTHON_VERSIONS}; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy perfetto dataclasses; done && \
     conda clean -a -y && \
     conda init
 
@@ -50,3 +51,5 @@ RUN if [ "${ROCM_VERSION}" != "0.0" ]; then ln -sf /opt/rocm-${ROCM_VERSION}* /o
 WORKDIR /home
 ENV LC_ALL C.UTF-8
 SHELL [ "/bin/bash", "--login", "-c" ]
+COPY ./entrypoint-rhel.sh /docker-entrypoint.sh
+ENTRYPOINT [ "/docker-entrypoint.sh" ]

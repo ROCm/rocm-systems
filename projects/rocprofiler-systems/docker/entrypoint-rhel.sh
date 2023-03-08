@@ -1,10 +1,13 @@
-#!/bin/bash
+#!/bin/bash -l
 
-source /etc/profile.d/modules.sh
-module load mpi
+if [ -f /etc/profile.d/modules.sh ]; then
+    source /etc/profile.d/modules.sh
+    module load mpi &> /dev/null
+endif
 
 if [ -z "${1}" ]; then
-    exec bash
+    : ${SHELL:=/bin/bash}
+    exec ${SHELL}
 else
     set -e
     eval $@

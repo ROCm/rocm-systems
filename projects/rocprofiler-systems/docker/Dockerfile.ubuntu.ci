@@ -16,7 +16,7 @@ ARG EXTRA_PACKAGES=""
 ARG ELFUTILS_DOWNLOAD_VERSION="0.186"
 ARG BOOST_DOWNLOAD_VERSION="1.79.0"
 ARG NJOBS="12"
-ARG PYTHON_VERSIONS="6 7 8 9 10"
+ARG PYTHON_VERSIONS="6 7 8 9 10 11"
 
 ENV PATH /usr/local/bin:${PATH}
 ENV LIBRARY_PATH /usr/local/lib:/usr/local/lib64:${LIBRARY_PATH}
@@ -27,7 +27,7 @@ COPY ./dyninst-source /tmp/dyninst
 
 RUN apt-get update && \
     apt-get dist-upgrade -y && \
-    apt-get install -y autoconf autotools-dev bash-completion build-essential bzip2 clang cmake curl environment-modules git-core gnupg2 gzip libiberty-dev libmpich-dev libpapi-dev libpfm4-dev libtool locales lsb-release m4 mpich python3-pip unzip wget zip zlib1g-dev && \
+    apt-get install -y autoconf autotools-dev bash-completion build-essential bzip2 cmake curl environment-modules git-core gnupg2 gzip libiberty-dev libpapi-dev libpfm4-dev libtool locales lsb-release m4 python3-pip unzip wget zip zlib1g-dev && \
     python3 -m pip install 'cmake==3.18.4' && \
     apt-get autoclean && \
     locale -a && \
@@ -40,9 +40,9 @@ RUN apt-get update && \
     export PATH="/opt/conda/bin:${PATH}" && \
     conda config --set always_yes yes --set changeps1 no && \
     conda update -c defaults -n base conda && \
-    for i in ${PYTHON_VERSIONS}; do conda create -n py3.${i} -c defaults python=3.${i} pip numpy; done && \
-    conda clean -a -y && \
+    for i in ${PYTHON_VERSIONS}; do conda create -n py3.${i} -c defaults -c conda-forge python=3.${i} pip numpy; done && \
     for i in ${PYTHON_VERSIONS}; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy perfetto dataclasses; done && \
+    conda clean -a -y && \
     cd /tmp && \
     shopt -s dotglob extglob && \
     rm -rf *

@@ -4,21 +4,22 @@
 : ${ROCM_VERSIONS:="5.0"}
 : ${DISTRO:=ubuntu}
 : ${VERSIONS:=20.04}
-: ${PYTHON_VERSIONS:="6 7 8 9 10"}
+: ${PYTHON_VERSIONS:="6 7 8 9 10 11"}
 : ${BUILD_CI:=""}
 : ${PUSH:=0}
+: ${PULL:=--pull}
 : ${RETRY:=3}
 
 set -e
 
 tolower()
 {
-    echo "$@" | awk -F '\|~\|' '{print tolower($1)}';
+    echo "$@" | awk -F '\\|~\\|' '{print tolower($1)}';
 }
 
 toupper()
 {
-    echo "$@" | awk -F '\|~\|' '{print toupper($1)}';
+    echo "$@" | awk -F '\\|~\\|' '{print toupper($1)}';
 }
 
 usage()
@@ -26,6 +27,7 @@ usage()
     print_option() { printf "    --%-20s %-24s     %s\n" "${1}" "${2}" "${3}"; }
     echo "Options:"
     print_option "help -h" "" "This message"
+    print_option "no-pull" "" "Do not pull down most recent base container"
 
     echo ""
     print_default_option() { printf "    --%-20s %-24s     %s (default: %s)\n" "${1}" "${2}" "${3}" "$(tolower ${4})"; }
@@ -118,6 +120,11 @@ do
             ;;
         --push)
             PUSH=1
+            reset-last
+            ;;
+        --no-pull)
+            PULL=""
+            reset-last
             ;;
         --retry|-r)
             shift
@@ -184,7 +191,7 @@ do
                 *)
                     ;;
             esac
-            verbose-build docker build . -f ${DOCKER_FILE} --tag ${CONTAINER} --build-arg DISTRO=${DISTRO} --build-arg VERSION=${VERSION} --build-arg ROCM_VERSION=${ROCM_VERSION} --build-arg ROCM_REPO_VERSION=${ROCM_REPO_VERSION} --build-arg ROCM_REPO_DIST=${ROCM_REPO_DIST} --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\"
+            verbose-build docker build . ${PULL} -f ${DOCKER_FILE} --tag ${CONTAINER} --build-arg DISTRO=${DISTRO} --build-arg VERSION=${VERSION} --build-arg ROCM_VERSION=${ROCM_VERSION} --build-arg ROCM_REPO_VERSION=${ROCM_REPO_VERSION} --build-arg ROCM_REPO_DIST=${ROCM_REPO_DIST} --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\"
         elif [ "${DISTRO}" = "rhel" ]; then
             if [ -z "${VERSION_MINOR}" ]; then
                 send-error "Please provide a major and minor version of the OS. Supported: >= 8.7, <= 9.1"
@@ -216,7 +223,7 @@ do
             # use Rocky Linux as a base image for RHEL builds
             DISTRO_BASE_IMAGE=rockylinux
 
-            verbose-build docker build . -f ${DOCKER_FILE} --tag ${CONTAINER} --build-arg DISTRO=${DISTRO_BASE_IMAGE} --build-arg VERSION=${VERSION} --build-arg ROCM_VERSION=${ROCM_VERSION} --build-arg AMDGPU_RPM=${ROCM_RPM} --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\"
+            verbose-build docker build . ${PULL} -f ${DOCKER_FILE} --tag ${CONTAINER} --build-arg DISTRO=${DISTRO_BASE_IMAGE} --build-arg VERSION=${VERSION} --build-arg ROCM_VERSION=${ROCM_VERSION} --build-arg AMDGPU_RPM=${ROCM_RPM} --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\"
         elif [ "${DISTRO}" = "opensuse" ]; then
             case "${VERSION}" in
                 15.*)
@@ -253,7 +260,7 @@ do
                 ;;
             esac
             PERL_REPO="SLE_${VERSION_MAJOR}_SP${VERSION_MINOR}"
-            verbose-build docker build . -f ${DOCKER_FILE} --tag ${CONTAINER} --build-arg DISTRO=${DISTRO_IMAGE} --build-arg VERSION=${VERSION} --build-arg ROCM_VERSION=${ROCM_VERSION} --build-arg AMDGPU_RPM=${ROCM_RPM} --build-arg PERL_REPO=${PERL_REPO} --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\"
+            verbose-build docker build . ${PULL} -f ${DOCKER_FILE} --tag ${CONTAINER} --build-arg DISTRO=${DISTRO_IMAGE} --build-arg VERSION=${VERSION} --build-arg ROCM_VERSION=${ROCM_VERSION} --build-arg AMDGPU_RPM=${ROCM_RPM} --build-arg PERL_REPO=${PERL_REPO} --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\"
         fi
         if [ "${PUSH}" -ne 0 ]; then
             docker push ${CONTAINER}

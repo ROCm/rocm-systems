@@ -109,16 +109,16 @@ externalproject_add(
         CFLAGS=-fPIC\ -O3\ -Wno-error=null-dereference CXX=${ElfUtils_CXX_COMPILER}
         CXXFLAGS=-fPIC\ -O3\ -Wno-error=null-dereference
         [=[LDFLAGS=-Wl,-rpath='$$ORIGIN']=] <SOURCE_DIR>/configure --enable-install-elfh
-        --prefix=${_eu_root} --disable-libdebuginfod --disable-debuginfod
-        --enable-thread-safety
-    BUILD_COMMAND ${MAKE_COMMAND} install
+        --prefix=${_eu_root} --disable-libdebuginfod --disable-debuginfod --disable-nls
+        --enable-thread-safety --enable-silent-rules
+    BUILD_COMMAND ${MAKE_COMMAND} install -s
     BUILD_BYPRODUCTS "${_eu_build_byproducts}"
     INSTALL_COMMAND "")
 
 # target for re-executing the installation
 add_custom_target(
     omnitrace-elfutils-install
-    COMMAND ${MAKE_COMMAND} install
+    COMMAND ${MAKE_COMMAND} install -s
     WORKING_DIRECTORY ${PROJECT_BINARY_DIR}/external/elfutils/src/ElfUtils-External
     COMMENT "Installing ElfUtils...")
 

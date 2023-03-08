@@ -161,6 +161,21 @@ jobs:
         run: |
           echo "CI_SCRIPT_ARGS=--rocm +python" >> $GITHUB_ENV
 
+      - name: Configure Ubuntu Generators
+        if: ${{ matrix.os-distro == 'ubuntu' }}
+        run: |
+          echo "CI_GENERATOR_ARGS=--generators STGZ DEB" >> $GITHUB_ENV
+
+      - name: Configure OpenSUSE Generators
+        if: ${{ matrix.os-distro == 'opensuse' }}
+        run: |
+          echo "CI_GENERATOR_ARGS=--generators STGZ RPM" >> $GITHUB_ENV
+
+      - name: Configure RedHat Generators
+        if: ${{ matrix.os-distro == 'rhel' }}
+        run: |
+          echo "CI_GENERATOR_ARGS=--generators STGZ" >> $GITHUB_ENV
+
       - name: Build Base Container
         timeout-minutes: 30
         run: |
@@ -172,7 +187,7 @@ jobs:
         timeout-minutes: 150
         run: |
           pushd docker
-          ./build-docker-release.sh --distro ${{ matrix.os-distro }} --versions ${{ matrix.os-version }} --rocm-versions ${{ matrix.rocm-version }} -- ${CI_SCRIPT_ARGS}
+          ./build-docker-release.sh --distro ${{ matrix.os-distro }} --versions ${{ matrix.os-version }} --rocm-versions ${{ matrix.rocm-version }} -- ${CI_SCRIPT_ARGS} ${CI_GENERATOR_ARGS}
           popd
 
       - name: List Files
@@ -199,7 +214,7 @@ jobs:
 
       - name: RPM Artifacts
         timeout-minutes: 10
-        if: ${{ matrix.os-distro != 'ubuntu' }}
+        if: ${{ matrix.os-distro == 'opensuse' }}
         uses: actions/upload-artifact@v3
         with:
           name: omnitrace-rpm-${{ matrix.os-distro }}-${{ matrix.os-version }}-rocm-${{ matrix.rocm-version }}-installer
@@ -252,7 +267,7 @@ jobs:
 
       - name: Test RPM Install
         timeout-minutes: 20
-        if: ${{ matrix.os-distro != 'ubuntu' }}
+        if: ${{ matrix.os-distro == 'opensuse' }}
         run: |
           set -v
           for i in omnitrace-*.rpm
@@ -262,7 +277,7 @@ jobs:
 
       - name: Upload RPM Release Assets
         uses: softprops/action-gh-release@v1
-        if: matrix.os-distro != 'ubuntu' && startsWith(github.ref, 'refs/tags/') && github.repository == 'AMDResearch/omnitrace'
+        if: matrix.os-distro == 'opensuse' && startsWith(github.ref, 'refs/tags/') && github.repository == 'AMDResearch/omnitrace'
         with:
           fail_on_unmatched_files: True
           files: |

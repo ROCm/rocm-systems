@@ -8,7 +8,9 @@ set -e
 : ${NJOBS=$(nproc)}
 : ${ELFUTILS_VERSION:=0.186}
 : ${BOOST_VERSION:=1.79.0}
+: ${PYTHON_VERSIONS:="6 7 8 9 10 11"}
 : ${PUSH:=0}
+: ${PULL:=--pull}
 
 verbose-run()
 {
@@ -18,12 +20,12 @@ verbose-run()
 
 tolower()
 {
-    echo "$@" | awk -F '\|~\|' '{print tolower($1)}';
+    echo "$@" | awk -F '\\|~\\|' '{print tolower($1)}';
 }
 
 toupper()
 {
-    echo "$@" | awk -F '\|~\|' '{print toupper($1)}';
+    echo "$@" | awk -F '\\|~\\|' '{print toupper($1)}';
 }
 
 usage()
@@ -32,11 +34,13 @@ usage()
     echo "Options:"
     print_option "help -h" "" "This message"
     print_option "push" "" "Push the container to DockerHub when completed"
+    print_option "no-pull" "" "Do not pull down most recent base container"
 
     echo ""
     print_default_option() { printf "    --%-20s %-24s     %s (default: %s)\n" "${1}" "${2}" "${3}" "$(tolower ${4})"; }
     print_default_option distro "[ubuntu|opensuse|rhel]" "OS distribution" "${DISTRO}"
     print_default_option versions "[VERSION] [VERSION...]" "Ubuntu, OpenSUSE, or RHEL release" "${VERSIONS}"
+    print_default_option python-versions "[VERSION] [VERSION...]" "Python 3 minor releases" "${PYTHON_VERSIONS}"
     print_default_option "jobs -j" "[N]" "parallel build jobs" "${NJOBS}"
     print_default_option elfutils-version "[0.183..0.186]" "ElfUtils version" "${ELFUTILS_VERSION}"
     print_default_option boost-version "[1.67.0..1.79.0]" "Boost version" "${BOOST_VERSION}"
@@ -75,6 +79,11 @@ do
             VERSIONS=${1}
             last() { VERSIONS="${VERSIONS} ${1}"; }
             ;;
+        "--python-versions")
+            shift
+            PYTHON_VERSIONS=${1}
+            last() { PYTHON_VERSIONS="${PYTHON_VERSIONS} ${1}"; }
+            ;;
         --jobs|-j)
             shift
             NJOBS=${1}
@@ -97,6 +106,10 @@ do
             ;;
         "--push")
             PUSH=1
+            reset-last
+            ;;
+        "--no-pull")
+            PULL=""
             reset-last
             ;;
         --*)
@@ -137,11 +150,13 @@ fi
 for VERSION in ${VERSIONS}
 do
     verbose-run docker build . \
+        ${PULL} \
         -f ${DOCKER_FILE} \
         --tag ${USER}/omnitrace:ci-base-${DISTRO}-${VERSION} \
         --build-arg DISTRO=${DISTRO_IMAGE} \
         --build-arg VERSION=${VERSION} \
         --build-arg NJOBS=${NJOBS} \
+        --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\" \
         --build-arg ELFUTILS_DOWNLOAD_VERSION=${ELFUTILS_VERSION} \
         --build-arg BOOST_DOWNLOAD_VERSION=${BOOST_VERSION}
 done

@@ -55,7 +55,6 @@ def get_rocm_version(rocm_hint):
 
 
 def get_os_info(os_distrib, os_version):
-
     _os_info = {}
     with open("/etc/os-release", "r") as f:
         for line in [_v.strip() for _v in f.readlines()]:
@@ -67,10 +66,18 @@ def get_os_info(os_distrib, os_version):
             os_distrib = "ubuntu"
         elif "suse" in _os_info["ID_LIKE"]:
             os_distrib = "opensuse"
+        elif "rhel" in _os_info["ID_LIKE"]:
+            os_distrib = "rhel"
+        elif "fedora" in _os_info["ID_LIKE"]:
+            os_distrib = "rhel"
+        elif "centos" in _os_info["ID_LIKE"]:
+            os_distrib = "rhel"
         else:
             raise RuntimeError(
                 "Unknown ID_LIKE value in /etc/os-release: {}".format(_os_info["ID_LIKE"])
             )
+    elif os_distrib == "fedora" or os_distrib == "centos":
+        os_distrib = "rhel"
 
     if os_version is None:
 
@@ -84,7 +91,6 @@ def get_os_info(os_distrib, os_version):
 
 
 def print_log(*args, **kwargs):
-
     sys.stdout.flush()
     sys.stderr.flush()
     sys.stderr.write("### ")
@@ -94,14 +100,12 @@ def print_log(*args, **kwargs):
 
 
 def run(*args, **kwargs):
-
     print_log("Executing: {}\n".format(" ".join(*args)))
     sp.run(*args, **kwargs, check=True)
     sys.stderr.write("\n")
 
 
 if __name__ == "__main__":
-
     parser = argparse.ArgumentParser()
 
     parser.add_argument(
@@ -131,7 +135,7 @@ if __name__ == "__main__":
         help="Target OS distribution",
         type=str,
         default=None,
-        choices=("auto", "ubuntu", "opensuse"),
+        choices=("auto", "ubuntu", "opensuse", "rhel", "centos", "fedora"),
     )
     parser.add_argument(
         "-v", "--os-version", help="Target OS version", type=str, default=None

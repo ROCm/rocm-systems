@@ -21,7 +21,7 @@ verbose-run()
 
 toupper()
 {
-    echo "$@" | awk -F '\|~\|' '{print toupper($1)}';
+    echo "$@" | awk -F '\\|~\\|' '{print toupper($1)}';
 }
 
 get-bool()

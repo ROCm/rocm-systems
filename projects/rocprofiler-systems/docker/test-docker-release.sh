@@ -13,12 +13,12 @@ set -e
 
 tolower()
 {
-    echo "$@" | awk -F '\|~\|' '{print tolower($1)}';
+    echo "$@" | awk -F '\\|~\\|' '{print tolower($1)}';
 }
 
 toupper()
 {
-    echo "$@" | awk -F '\|~\|' '{print toupper($1)}';
+    echo "$@" | awk -F '\\|~\\|' '{print toupper($1)}';
 }
 
 usage()

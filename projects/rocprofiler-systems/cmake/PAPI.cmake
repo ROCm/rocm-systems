@@ -206,13 +206,13 @@ externalproject_add(
     PATCH_COMMAND
         ${CMAKE_COMMAND} -E env CC=${PAPI_C_COMPILER}
         CFLAGS=-fPIC\ -O3\ -Wno-stringop-truncation LIBS=-lrt LDFLAGS=-lrt
-        ${OMNITRACE_PAPI_EXTRA_ENV} <SOURCE_DIR>/configure
+        ${OMNITRACE_PAPI_EXTRA_ENV} <SOURCE_DIR>/configure --quiet
         --prefix=${OMNITRACE_PAPI_INSTALL_DIR} --with-static-lib=yes --with-shared-lib=no
         --with-perf-events --with-tests=no --with-components=${_OMNITRACE_PAPI_COMPONENTS}
     CONFIGURE_COMMAND ${CMAKE_COMMAND} -E env CFLAGS=-fPIC\ -O3\ -Wno-stringop-truncation
-                      ${OMNITRACE_PAPI_EXTRA_ENV} ${MAKE_EXECUTABLE} static install
+                      ${OMNITRACE_PAPI_EXTRA_ENV} ${MAKE_EXECUTABLE} static install -s
     BUILD_COMMAND ${CMAKE_COMMAND} -E env CFLAGS=-fPIC\ -O3\ -Wno-stringop-truncation
-                  ${OMNITRACE_PAPI_EXTRA_ENV} ${MAKE_EXECUTABLE} utils install-utils
+                  ${OMNITRACE_PAPI_EXTRA_ENV} ${MAKE_EXECUTABLE} utils install-utils -s
     INSTALL_COMMAND ""
     BUILD_BYPRODUCTS "${_OMNITRACE_PAPI_BUILD_BYPRODUCTS}")
 
@@ -220,9 +220,9 @@ externalproject_add(
 add_custom_target(
     omnitrace-papi-install
     COMMAND ${CMAKE_COMMAND} -E env CFLAGS=-fPIC\ -O3\ -Wno-stringop-truncation
-            ${OMNITRACE_PAPI_EXTRA_ENV} ${MAKE_EXECUTABLE} static install
+            ${OMNITRACE_PAPI_EXTRA_ENV} ${MAKE_EXECUTABLE} static install -s
     COMMAND ${CMAKE_COMMAND} -E env CFLAGS=-fPIC\ -O3\ -Wno-stringop-truncation
-            ${OMNITRACE_PAPI_EXTRA_ENV} ${MAKE_EXECUTABLE} utils install-utils
+            ${OMNITRACE_PAPI_EXTRA_ENV} ${MAKE_EXECUTABLE} utils install-utils -s
     WORKING_DIRECTORY ${OMNITRACE_PAPI_SOURCE_DIR}/src
     COMMENT "Installing PAPI...")
 
@@ -288,7 +288,24 @@ foreach(
     papi_native_avail
     papi_version
     papi_xml_event_info)
+
     string(REPLACE "_" "-" _UTIL_EXE_INSTALL_NAME "omnitrace-${_UTIL_EXE}")
+
+    # RPM installer on RedHat/RockyLinux throws error that #!/usr/bin/python should either
+    # be #!/usr/bin/python2 or #!/usr/bin/python3
+    if(_UTIL_EXE STREQUAL "papi_hl_output_writer.py")
+        file(
+            READ
+            "${PROJECT_BINARY_DIR}/external/papi/source/src/high-level/scripts/${_UTIL_EXE}"
+            _HL_OUTPUT_WRITER)
+        string(REPLACE "#!/usr/bin/python\n" "#!/usr/bin/python3\n" _HL_OUTPUT_WRITER
+                       "${_HL_OUTPUT_WRITER}")
+        file(MAKE_DIRECTORY "${OMNITRACE_PAPI_INSTALL_DIR}/bin")
+        file(WRITE "${OMNITRACE_PAPI_INSTALL_DIR}/bin/${_UTIL_EXE}3"
+             "${_HL_OUTPUT_WRITER}")
+        set(_UTIL_EXE "${_UTIL_EXE}3")
+    endif()
+
     install(
         PROGRAMS ${OMNITRACE_PAPI_INSTALL_DIR}/bin/${_UTIL_EXE}
         DESTINATION ${CMAKE_INSTALL_BINDIR}
