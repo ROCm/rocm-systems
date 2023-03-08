@@ -284,8 +284,8 @@ class file_plugin_t {
     if (tracer_record.domain != ACTIVITY_DOMAIN_ROCTX)
       *output_file << "), End(" << tracer_record.timestamps.end.value;
     *output_file << "), Correlation ID( " << tracer_record.correlation_id.value << ")";
-    if (roctx_id >= 0) *output_file << ", ROCTX ID(" << roctx_id << ")";
-    if (roctx_message.size() > 1) *output_file << ", ROCTX Message(" << roctx_message << ")";
+    if (tracer_record.domain == ACTIVITY_DOMAIN_ROCTX && roctx_id >= 0) *output_file << ", ROCTX ID(" << roctx_id << ")";
+    if (tracer_record.domain == ACTIVITY_DOMAIN_ROCTX && roctx_message.size() > 1) *output_file << ", ROCTX Message(" << roctx_message << ")";
     if (function_name.size() > 1) *output_file << ", Function(" << function_name << ")";
     if (kernel_name.size() > 1) *output_file << ", Kernel Name(" << kernel_name.c_str() << ")";
     *output_file << std::endl;
