@@ -51,11 +51,7 @@ namespace {
 static std::string output_file_name;
 class file_plugin_t {
  private:
-  enum class output_type_t {
-    COUNTER,
-    TRACER,
-    PC_SAMPLING
-  };
+  enum class output_type_t { COUNTER, TRACER, PC_SAMPLING };
 
   class output_file_t {
    public:
@@ -200,7 +196,8 @@ class file_plugin_t {
     }
   }
 
-  void FlushTracerRecord(rocprofiler_record_tracer_t tracer_record, rocprofiler_session_id_t session_id,
+  void FlushTracerRecord(rocprofiler_record_tracer_t tracer_record,
+                         rocprofiler_session_id_t session_id,
                          rocprofiler_buffer_id_t buffer_id = rocprofiler_buffer_id_t{0}) {
     std::lock_guard<std::mutex> lock(writing_lock);
     std::string kernel_name;
@@ -266,8 +263,8 @@ class file_plugin_t {
       }
       size_t roctx_id_size = 0;
       CHECK_ROCPROFILER(rocprofiler_query_roctx_tracer_api_data_info_size(
-          session_id, ROCPROFILER_ROCTX_ID, tracer_record.api_data_handle, tracer_record.operation_id,
-          &roctx_id_size));
+          session_id, ROCPROFILER_ROCTX_ID, tracer_record.api_data_handle,
+          tracer_record.operation_id, &roctx_id_size));
       if (roctx_id_size > 1) {
         [[maybe_unused]] char* roctx_id_str =
             static_cast<char*>(malloc(roctx_id_size * sizeof(char)));
@@ -283,9 +280,10 @@ class file_plugin_t {
     output_file_t* output_file = get_output_file(output_type_t::TRACER, tracer_record.domain);
     *output_file << "Record [" << tracer_record.header.id.handle << "], Domain("
                  << GetDomainName(tracer_record.domain) << "), Begin("
-                 << tracer_record.timestamps.begin.value << "), End("
-                 << tracer_record.timestamps.end.value << "), Correlation ID( "
-                 << tracer_record.correlation_id.value << ")";
+                 << tracer_record.timestamps.begin.value;
+    if (tracer_record.domain != ACTIVITY_DOMAIN_ROCTX)
+      *output_file << "), End(" << tracer_record.timestamps.end.value;
+    *output_file << "), Correlation ID( " << tracer_record.correlation_id.value << ")";
     if (roctx_id >= 0) *output_file << ", ROCTX ID(" << roctx_id << ")";
     if (roctx_message.size() > 1) *output_file << ", ROCTX Message(" << roctx_message << ")";
     if (function_name.size() > 1) *output_file << ", Function(" << function_name << ")";
@@ -300,14 +298,14 @@ class file_plugin_t {
     output_file_t* output_file{nullptr};
     output_file = get_output_file(output_type_t::COUNTER);
     CHECK_ROCPROFILER(rocprofiler_query_kernel_info_size(ROCPROFILER_KERNEL_NAME,
-                                                     profiler_record->kernel_id, &name_length));
+                                                         profiler_record->kernel_id, &name_length));
     // Taken from rocprofiler: The size hasn't changed in  recent past
     static const uint32_t lds_block_size = 128 * 4;
     const char* kernel_name_c;
     if (name_length > 1) {
       kernel_name_c = static_cast<const char*>(malloc(name_length * sizeof(char)));
-      CHECK_ROCPROFILER(rocprofiler_query_kernel_info(ROCPROFILER_KERNEL_NAME, profiler_record->kernel_id,
-                                                  &kernel_name_c));
+      CHECK_ROCPROFILER(rocprofiler_query_kernel_info(ROCPROFILER_KERNEL_NAME,
+                                                      profiler_record->kernel_id, &kernel_name_c));
     }
     *output_file << std::string("dispatch[") << std::to_string(profiler_record->header.id.handle)
                  << "], " << std::string("gpu_id(")
@@ -372,22 +370,20 @@ class file_plugin_t {
     }
   }
 
-  void FlushPCSamplingRecord(
-    const rocprofiler_record_pc_sample_t *pc_sampling_record) {
+  void FlushPCSamplingRecord(const rocprofiler_record_pc_sample_t* pc_sampling_record) {
     output_file_t* output_file{nullptr};
     output_file = get_output_file(output_type_t::PC_SAMPLING);
-    const auto &sample = pc_sampling_record->pc_sample;
+    const auto& sample = pc_sampling_record->pc_sample;
     *output_file << "dispatch[" << sample.dispatch_id.value << "], "
                  << "timestamp(" << sample.timestamp.value << "), "
                  << "gpu_id(" << sample.gpu_id.handle << "), "
                  << "pc-sample(" << std::hex << std::showbase << sample.pc << "), "
-                 << "se(" << sample.se << ')'
-                 << std::endl;
+                 << "se(" << sample.se << ')' << std::endl;
   }
 
   int WriteBufferRecords(const rocprofiler_record_header_t* begin,
-                         const rocprofiler_record_header_t* end, rocprofiler_session_id_t session_id,
-                         rocprofiler_buffer_id_t buffer_id) {
+                         const rocprofiler_record_header_t* end,
+                         rocprofiler_session_id_t session_id, rocprofiler_buffer_id_t buffer_id) {
     while (begin < end) {
       if (!begin) return 0;
       switch (begin->kind) {
@@ -407,8 +403,8 @@ class file_plugin_t {
           break;
         }
         case ROCPROFILER_PC_SAMPLING_RECORD: {
-          const rocprofiler_record_pc_sample_t *pc_sampling_record =
-             reinterpret_cast<const rocprofiler_record_pc_sample_t *>(begin);
+          const rocprofiler_record_pc_sample_t* pc_sampling_record =
+              reinterpret_cast<const rocprofiler_record_pc_sample_t*>(begin);
           FlushPCSamplingRecord(pc_sampling_record);
           break;
         }
@@ -436,7 +432,7 @@ file_plugin_t* file_plugin = nullptr;
 }  // namespace
 
 ROCPROFILER_EXPORT int rocprofiler_plugin_initialize(uint32_t rocprofiler_major_version,
-                                                 uint32_t rocprofiler_minor_version) {
+                                                     uint32_t rocprofiler_minor_version) {
   if (rocprofiler_major_version != ROCPROFILER_VERSION_MAJOR ||
       rocprofiler_minor_version < ROCPROFILER_VERSION_MINOR)
     return -1;
@@ -458,16 +454,15 @@ ROCPROFILER_EXPORT void rocprofiler_plugin_finalize() {
   file_plugin = nullptr;
 }
 
-ROCPROFILER_EXPORT int rocprofiler_plugin_write_buffer_records(const rocprofiler_record_header_t* begin,
-                                                           const rocprofiler_record_header_t* end,
-                                                           rocprofiler_session_id_t session_id,
-                                                           rocprofiler_buffer_id_t buffer_id) {
+ROCPROFILER_EXPORT int rocprofiler_plugin_write_buffer_records(
+    const rocprofiler_record_header_t* begin, const rocprofiler_record_header_t* end,
+    rocprofiler_session_id_t session_id, rocprofiler_buffer_id_t buffer_id) {
   if (!file_plugin || !file_plugin->is_valid()) return -1;
   return file_plugin->WriteBufferRecords(begin, end, session_id, buffer_id);
 }
 
 ROCPROFILER_EXPORT int rocprofiler_plugin_write_record(rocprofiler_record_tracer_t record,
-                                                   rocprofiler_session_id_t session_id) {
+                                                       rocprofiler_session_id_t session_id) {
   if (!file_plugin || !file_plugin->is_valid()) return -1;
   if (record.header.id.handle == 0) return 0;
   file_plugin->FlushTracerRecord(record, session_id);
