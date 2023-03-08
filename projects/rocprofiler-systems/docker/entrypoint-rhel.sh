@@ -3,7 +3,7 @@
 if [ -f /etc/profile.d/modules.sh ]; then
     source /etc/profile.d/modules.sh
     module load mpi &> /dev/null
-endif
+fi
 
 if [ -z "${1}" ]; then
     : ${SHELL:=/bin/bash}
