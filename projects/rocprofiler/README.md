@@ -89,8 +89,9 @@ ROCProfilerV2 is a newly developed design for AMD’s tooling infrastructure tha
 
 - Makecache
 - Gtest Development Package (Ubuntu: libgtest-dev)
-- Cppheaderparser Python 3 Package
-- Lxml Python 3 Package
+- Cppheaderparser Python3 Package
+- Lxml Python3 Package
+- Barectf Python3 Package (has to be installed using pip not OS artifactory)
 
 ### Build
 
