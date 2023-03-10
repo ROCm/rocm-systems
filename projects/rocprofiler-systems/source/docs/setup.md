@@ -39,7 +39,7 @@ If all the following commands execute successfully with output, then you are rea
 which omnitrace
 which omnitrace-avail
 which omnitrace-sample
-omnitrace --help
+omnitrace-instrument --help
 omnitrace-avail --all
 omnitrace-sample --help
 

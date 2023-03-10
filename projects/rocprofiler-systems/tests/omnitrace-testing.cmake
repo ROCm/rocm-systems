@@ -426,7 +426,7 @@ function(OMNITRACE_ADD_TEST)
             add_test(
                 NAME ${TEST_NAME}-binary-rewrite
                 COMMAND
-                    $<TARGET_FILE:omnitrace-exe> -o
+                    $<TARGET_FILE:omnitrace-instrument> -o
                     $<TARGET_FILE_DIR:${TEST_TARGET}>/${TEST_NAME}.inst
                     ${TEST_REWRITE_ARGS} -- $<TARGET_FILE:${TEST_TARGET}>
                 WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
@@ -443,7 +443,7 @@ function(OMNITRACE_ADD_TEST)
             add_test(
                 NAME ${TEST_NAME}-binary-rewrite-sampling
                 COMMAND
-                    $<TARGET_FILE:omnitrace-exe> -o
+                    $<TARGET_FILE:omnitrace-instrument> -o
                     $<TARGET_FILE_DIR:${TEST_TARGET}>/${TEST_NAME}.samp -M sampling
                     ${TEST_REWRITE_ARGS} -- $<TARGET_FILE:${TEST_TARGET}>
                 WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
@@ -459,7 +459,7 @@ function(OMNITRACE_ADD_TEST)
         if(NOT TEST_SKIP_RUNTIME AND NOT OMNITRACE_USE_SANITIZER)
             add_test(
                 NAME ${TEST_NAME}-runtime-instrument
-                COMMAND $<TARGET_FILE:omnitrace-exe> ${TEST_RUNTIME_ARGS} --
+                COMMAND $<TARGET_FILE:omnitrace-instrument> ${TEST_RUNTIME_ARGS} --
                         $<TARGET_FILE:${TEST_TARGET}> ${TEST_RUN_ARGS}
                 WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
         endif()
@@ -468,8 +468,9 @@ function(OMNITRACE_ADD_TEST)
            AND NOT OMNITRACE_USE_SANITIZER)
             add_test(
                 NAME ${TEST_NAME}-runtime-instrument-sampling
-                COMMAND $<TARGET_FILE:omnitrace-exe> -M sampling ${TEST_RUNTIME_ARGS} --
-                        $<TARGET_FILE:${TEST_TARGET}> ${TEST_RUN_ARGS}
+                COMMAND
+                    $<TARGET_FILE:omnitrace-instrument> -M sampling ${TEST_RUNTIME_ARGS}
+                    -- $<TARGET_FILE:${TEST_TARGET}> ${TEST_RUN_ARGS}
                 WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
         endif()
 

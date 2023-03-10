@@ -147,13 +147,13 @@ function(OMNITRACE_ADD_BIN_TEST)
 endfunction()
 
 omnitrace_add_bin_test(
-    NAME omnitrace-exe-help
-    TARGET omnitrace-exe
+    NAME omnitrace-instrument-help
+    TARGET omnitrace-instrument
     ARGS --help
-    LABELS omnitrace-exe
+    LABELS omnitrace-instrument
     TIMEOUT 45
     PASS_REGEX
-        ".*\\\[omnitrace\\\] Usage:.*\\\[DEBUG OPTIONS\\\].*\\\[MODE OPTIONS\\\].*\\\[LIBRARY OPTIONS\\\].*\\\[SYMBOL SELECTION OPTIONS\\\].*\\\[RUNTIME OPTIONS\\\].*\\\[GRANULARITY OPTIONS\\\].*\\\[DYNINST OPTIONS\\\].*"
+        ".*\\\[omnitrace-instrument\\\] Usage:.*\\\[DEBUG OPTIONS\\\].*\\\[MODE OPTIONS\\\].*\\\[LIBRARY OPTIONS\\\].*\\\[SYMBOL SELECTION OPTIONS\\\].*\\\[RUNTIME OPTIONS\\\].*\\\[GRANULARITY OPTIONS\\\].*\\\[DYNINST OPTIONS\\\].*"
     )
 
 # on RedHat, /usr/bin/ls is a script for `coreutils --coreutils-prog=ls`
@@ -166,8 +166,8 @@ else()
 endif()
 
 omnitrace_add_bin_test(
-    NAME omnitrace-exe-simulate-ls
-    TARGET omnitrace-exe
+    NAME omnitrace-instrument-simulate-ls
+    TARGET omnitrace-instrument
     ARGS --simulate
          --print-format
          json
@@ -183,9 +183,9 @@ omnitrace_add_bin_test(
     TIMEOUT 240)
 
 omnitrace_add_bin_test(
-    NAME omnitrace-exe-simulate-ls-check
-    DEPENDS omnitrace-exe-simulate-ls
-    COMMAND ls omnitrace-tests-output/omnitrace-exe-simulate-ls/instrumentation
+    NAME omnitrace-instrument-simulate-ls-check
+    DEPENDS omnitrace-instrument-simulate-ls
+    COMMAND ls omnitrace-tests-output/omnitrace-instrument-simulate-ls/instrumentation
     TIMEOUT 60
     PASS_REGEX
         ".*available.json.*available.txt.*available.xml.*excluded.json.*excluded.txt.*excluded.xml.*instrumented.json.*instrumented.txt.*instrumented.xml.*overlapping.json.*overlapping.txt.*overlapping.xml.*"
@@ -193,8 +193,8 @@ omnitrace_add_bin_test(
 
 omnitrace_add_bin_test(
     ADD_INVERSE
-    NAME omnitrace-exe-simulate-lib
-    TARGET omnitrace-exe
+    NAME omnitrace-instrument-simulate-lib
+    TARGET omnitrace-instrument
     ARGS --print-available functions -v 2 -- $<TARGET_FILE:omnitrace-user-library>
     LABELS "simulate"
     TIMEOUT 120
@@ -205,14 +205,14 @@ omnitrace_add_bin_test(
 file(MAKE_DIRECTORY ${PROJECT_BINARY_DIR}/omnitrace-tests-output/tmp)
 
 omnitrace_add_bin_test(
-    NAME omnitrace-exe-simulate-lib-basename
-    TARGET omnitrace-exe
+    NAME omnitrace-instrument-simulate-lib-basename
+    TARGET omnitrace-instrument
     ARGS --print-available
          functions
          -v
          2
          -o
-         ${PROJECT_BINARY_DIR}/omnitrace-tests-output/omnitrace-exe-simulate-lib-basename/${CMAKE_SHARED_LIBRARY_PREFIX}$<TARGET_FILE_BASE_NAME:omnitrace-user-library>${CMAKE_SHARED_LIBRARY_SUFFIX}
+         ${PROJECT_BINARY_DIR}/omnitrace-tests-output/omnitrace-instrument-simulate-lib-basename/${CMAKE_SHARED_LIBRARY_PREFIX}$<TARGET_FILE_BASE_NAME:omnitrace-user-library>${CMAKE_SHARED_LIBRARY_SUFFIX}
          --
          ${CMAKE_SHARED_LIBRARY_PREFIX}$<TARGET_FILE_BASE_NAME:omnitrace-user-library>${CMAKE_SHARED_LIBRARY_SUFFIX}
     LABELS "simulate"
@@ -220,8 +220,8 @@ omnitrace_add_bin_test(
     WORKING_DIRECTORY ${PROJECT_BINARY_DIR}/omnitrace-tests-output/tmp)
 
 omnitrace_add_bin_test(
-    NAME omnitrace-exe-write-log
-    TARGET omnitrace-exe
+    NAME omnitrace-instrument-write-log
+    TARGET omnitrace-instrument
     ARGS --print-instrumented
          functions
          -v
@@ -236,9 +236,10 @@ omnitrace_add_bin_test(
     PASS_REGEX "Opening .*/instrumentation/user.log")
 
 omnitrace_add_bin_test(
-    NAME omnitrace-exe-write-log-check
-    DEPENDS omnitrace-exe-write-log
-    COMMAND ls omnitrace-tests-output/omnitrace-exe-write-log/instrumentation/user.log
+    NAME omnitrace-instrument-write-log-check
+    DEPENDS omnitrace-instrument-write-log
+    COMMAND ls
+            omnitrace-tests-output/omnitrace-instrument-write-log/instrumentation/user.log
     LABELS "log"
     TIMEOUT 60
     PASS_REGEX "user.log"

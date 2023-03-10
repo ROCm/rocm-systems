@@ -64,11 +64,11 @@ e.g., omnitrace's meaning of the term "module" when instrumenting Python.
 - **Instrumentation Traps**
   - On the x86 architecture, because instructions are of variable size, the instruction at a point may be too small for Dyninst to replace it with the normal code sequence used to call instrumentation
     - Also, when instrumentation is placed at points other than subroutine entry, exit, or call points, traps may be used to ensure the instrumentation fits
-  - By default, omnitrace avoids instrumentation which requires using a trap
+  - By default, omnitrace-instrument avoids instrumentation which requires using a trap
 - **Overlapping functions**
   - Due to language constructs or compiler optimizations, it may be possible for multiple functions to overlap (that is, share part of the same function body) or for a single function to have multiple entry points
   - In practice, it is impossible to determine the difference between multiple overlapping functions and a single function with multiple entry points
-  - By default, omnitrace avoids instrumenting overlapping functions
+  - By default, omnitrace-instrument avoids instrumenting overlapping functions
 
 ## General Tips
 
@@ -173,7 +173,7 @@ such as `fib`, will result in *significant* overhead since this simple function 
 exit snippets are ~1024 instructions. Thus, ***we generally want to avoid instrumenting functions where the instrumented function has significantly fewer
 instructions than entry + exit instrumentation*** (please note, however, that many of the instructions entry/exit functions are either logging functions or
 depend on the runtime settins and thus may never be executed). However, due to the number of potentially executed instructions in the entry/exit snippets,
-the default behavior of omnitrace is to only instrument functions which contain fewer than 1024 instructions.
+the default behavior of omnitrace-instrument is to only instrument functions which contain fewer than 1024 instructions.
 
 However, recording every single invocation of the function can be extremely useful for detecting anomalies: profiles will show min/max values much smaller/larger
 than the average and/or high standard deviation and traces will allow you to identify exactly when and where those instances deviated from the norm.

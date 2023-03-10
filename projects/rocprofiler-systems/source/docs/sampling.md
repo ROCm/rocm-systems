@@ -14,14 +14,14 @@ Call-stack sampling can be activated with either a binary instrumented via the `
 - Binary rewrite with only instrumentation necessary to start/stop sampling
 
 ```console
-omnitrace -M sampling -o foo.inst -- foo
+omnitrace-instrument -M sampling -o foo.inst -- foo
 ./foo.inst
 ```
 
 - Runtime instrumentation with only instrumentation necessary to start/stop sampling
 
 ```console
-omnitrace -M sampling -- foo
+omnitrace-instrument -M sampling -- foo
 ```
 
 - No instrumentation required
@@ -30,17 +30,17 @@ omnitrace -M sampling -- foo
 omnitrace-sample -- foo
 ```
 
-All `omnitrace -M sampling` (referred to as "instrumented-sampling" henceforth) does is wrap the `main` of the executable with initialization
+All `omnitrace-instrument -M sampling` (referred to as "instrumented-sampling" henceforth) does is wrap the `main` of the executable with initialization
 before `main` starts and finalization after `main` ends.
 This can be easily accomplished without instrumentation via a `LD_PRELOAD` of a library with containing a dynamic symbol wrapper around `__libc_start_main`.
-Thus, whenever binary instrumentation is unnecessary, using `omnitrace-sample` is recommended over `omnitrace -M sampling` for several reasons:
+Thus, whenever binary instrumentation is unnecessary, using `omnitrace-sample` is recommended over `omnitrace-instrument -M sampling` for several reasons:
 
 1. `omnitrace-sample` provides command-line options for controlling features of omnitrace instead of *requiring* configuration files or environment variables
 2. Despite the fact that instrumented-sampling only requires inserting snippets around one function (`main`), Dyninst
    does not have a feature for specifying that parsing and processing all the other symbols in the binary is unnecessary,
    thus, in the best case scenario, instrumented-sampling has a slightly slower launch time when the target binary is relatively small
    but, in the worst case scenarios, requires a significant amount of time and memory to launch
-3. `omnitrace-sample` is fully compatible with MPI, e.g. `mpirun -n 2 omnitrace-sample -- foo`, whereas `mpirun -n 2 omnitrace -M sampling -- foo`
+3. `omnitrace-sample` is fully compatible with MPI, e.g. `mpirun -n 2 omnitrace-sample -- foo`, whereas `mpirun -n 2 omnitrace-instrument -M sampling -- foo`
    is incompatible with some MPI distributions (particularly OpenMPI) because of MPI restrictions against forking within an MPI rank
     - If you recall, when MPI and binary instrumentation is involved, two steps are involed: (1) do a binary rewrite of the executable
       and (2) use the instrumented executable in leiu of the original executable. `omnitrace-sample` is thus much easier to use with MPI.

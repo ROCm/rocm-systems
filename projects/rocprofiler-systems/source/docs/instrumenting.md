@@ -6,103 +6,138 @@
    :maxdepth: 4
 ```
 
-## omnitrace Executable
+## omnitrace-instrument Executable
 
 > ***NOTE: With the introduction of `omnitrace-sample`, in future versions of omnitrace, the current `omnitrace` executable***
 > ***noted below will likely be renamed to `omnitrace-instrument` and a new `omnitrace` executable will serve as a common***
-> ***executable for multiple executables, e.g. `omnitrace sample ...`, `omnitrace run ...`, `omnitrace rewrite ...`, etc.***
+> ***executable for multiple executables, e.g. `omnitrace-instrument sample ...`, `omnitrace run ...`, `omnitrace rewrite ...`, etc.***
 
 Instrumentation is performed with the `omnitrace` executable. View the help menu with the `-h` / `--help` option:
 
 ```console
-$ omnitrace --help
-[omnitrace] Usage: omnitrace   [ --help (count: 0, dtype: bool)
-                                 --debug (max: 1, dtype: bool)
-                                 --verbose (max: 1, dtype: bool)
-                                 --error (max: 1, dtype: boolean)
-                                 --simulate (max: 1, dtype: bool)
-                                 --print-format (min: 1, dtype: string)
-                                 --print-dir (count: 1, dtype: string)
-                                 --print-available (count: 1)
-                                 --print-instrumented (count: 1)
-                                 --print-excluded (count: 1)
-                                 --print-overlapping (count: 1)
-                                 --output (count: 1)
-                                 --pid (count: 1, dtype: int)
-                                 --mode (count: 1)
-                                 --command (count: 1)
-                                 --prefer (count: 1)
-                                 --library (count: unlimited)
-                                 --main-function (count: 1)
-                                 --driver (max: 1, dtype: boolean)
-                                 --load (count: unlimited, dtype: string)
-                                 --load-instr (count: unlimited, dtype: filepath)
-                                 --init-functions (count: unlimited, dtype: string)
-                                 --fini-functions (count: unlimited, dtype: string)
-                                 --function-include (count: unlimited)
-                                 --function-exclude (count: unlimited)
-                                 --module-include (count: unlimited)
-                                 --module-exclude (count: unlimited)
-                                 --label (count: unlimited, dtype: string)
-                                 --default-components (count: unlimited, dtype: string)
-                                 --env (count: unlimited)
-                                 --mpi (max: 1, dtype: bool)
-                                 --instrument-loops (max: 1, dtype: boolean)
-                                 --min-address-range (count: 1, dtype: int)
-                                 --min-address-range-loop (count: 1, dtype: int)
-                                 --dynamic-callsites (max: 1, dtype: boolean)
-                                 --traps (max: 1, dtype: bool)
-                                 --loop-traps (max: 1, dtype: bool)
-                                 --allow-overlapping (count: 0, dtype: bool)
-                                 --batch-size (count: 1, dtype: int)
-                                 --dyninst-options (count: unlimited)
-                               ] -- <CMD> <ARGS>
+$ omnitrace-instrument --help
+[omnitrace-instrument] Usage: omnitrace-instrument [ --help (count: 0, dtype: bool)
+                                                     --version (count: 0, dtype: bool)
+                                                     --verbose (max: 1, dtype: bool)
+                                                     --error (max: 1, dtype: boolean)
+                                                     --debug (max: 1, dtype: bool)
+                                                     --log (count: 1)
+                                                     --log-file (count: 1)
+                                                     --simulate (max: 1, dtype: boolean)
+                                                     --print-format (min: 1, dtype: string)
+                                                     --print-dir (count: 1, dtype: string)
+                                                     --print-available (count: 1)
+                                                     --print-instrumented (count: 1)
+                                                     --print-coverage (count: 1)
+                                                     --print-excluded (count: 1)
+                                                     --print-overlapping (count: 1)
+                                                     --print-instructions (max: 1, dtype: bool)
+                                                     --output (min: 0, dtype: string)
+                                                     --pid (count: 1, dtype: int)
+                                                     --mode (count: 1)
+                                                     --force (max: 1, dtype: bool)
+                                                     --command (count: 1)
+                                                     --prefer (count: 1)
+                                                     --library (count: unlimited)
+                                                     --main-function (count: 1)
+                                                     --load (count: unlimited, dtype: string)
+                                                     --load-instr (count: unlimited, dtype: filepath)
+                                                     --init-functions (count: unlimited, dtype: string)
+                                                     --fini-functions (count: unlimited, dtype: string)
+                                                     --all-functions (max: 1, dtype: boolean)
+                                                     --function-include (count: unlimited)
+                                                     --function-exclude (count: unlimited)
+                                                     --function-restrict (count: unlimited)
+                                                     --caller-include (count: unlimited)
+                                                     --module-include (count: unlimited)
+                                                     --module-exclude (count: unlimited)
+                                                     --module-restrict (count: unlimited)
+                                                     --internal-function-include (count: unlimited)
+                                                     --internal-module-include (count: unlimited)
+                                                     --instruction-exclude (count: unlimited)
+                                                     --internal-library-deps (min: 0, dtype: boolean)
+                                                     --internal-library-append (count: unlimited)
+                                                     --internal-library-remove (count: unlimited)
+                                                     --linkage (min: 1)
+                                                     --visibility (min: 1)
+                                                     --label (count: unlimited, dtype: string)
+                                                     --config (min: 1, dtype: string)
+                                                     --default-components (count: unlimited, dtype: string)
+                                                     --env (count: unlimited)
+                                                     --mpi (max: 1, dtype: bool)
+                                                     --instrument-loops (max: 1, dtype: boolean)
+                                                     --min-instructions (count: 1, dtype: int)
+                                                     --min-address-range (count: 1, dtype: int)
+                                                     --min-instructions-loop (count: 1, dtype: int)
+                                                     --min-address-range-loop (count: 1, dtype: int)
+                                                     --coverage (max: 1, dtype: bool)
+                                                     --dynamic-callsites (max: 1, dtype: boolean)
+                                                     --traps (max: 1, dtype: boolean)
+                                                     --loop-traps (max: 1, dtype: boolean)
+                                                     --allow-overlapping (max: 1, dtype: bool)
+                                                     --parse-all-modules (max: 1, dtype: bool)
+                                                     --batch-size (count: 1, dtype: int)
+                                                     --dyninst-rt (min: 1, dtype: filepath)
+                                                     --dyninst-options (count: unlimited)
+                                                   ] -- <CMD> <ARGS>
 
 Options:
     -h, -?, --help                 Shows this page
+    --version                      Prints the version and exit
 
     [DEBUG OPTIONS]
 
-    --debug                        Debug output
     -v, --verbose                  Verbose output
     -e, --error                    All warnings produce runtime errors
+    --debug                        Debug output
+    --log                          Number of log entries to display after an error. Any value < 0 will emit the entire log
+    --log-file                     Write the log out the specified file during the run
     --simulate                     Exit after outputting diagnostic {available,instrumented,excluded,overlapping} module
-                                   function lists, e.g. available-instr.txt
+                                   function lists, e.g. available.txt
     --print-format [ json | txt | xml ]
                                    Output format for diagnostic {available,instrumented,excluded,overlapping} module
-                                   function lists, e.g. {print-dir}/available-instr.txt
+                                   function lists, e.g. {print-dir}/available.txt
     --print-dir                    Output directory for diagnostic {available,instrumented,excluded,overlapping} module
-                                   function lists, e.g. {print-dir}/available-instr.txt
+                                   function lists, e.g. {print-dir}/available.txt
     --print-available [ functions | functions+ | modules | pair | pair+ ]
                                    Print the available entities for instrumentation (functions, modules, or module-function
-                                   pair) to stdout applying regular expressions and exit
+                                   pair) to stdout after applying regular expressions
     --print-instrumented [ functions | functions+ | modules | pair | pair+ ]
                                    Print the instrumented entities (functions, modules, or module-function pair) to stdout
-                                   after applying regular expressions and exit
+                                   after applying regular expressions
+    --print-coverage [ functions | functions+ | modules | pair | pair+ ]
+                                   Print the instrumented coverage entities (functions, modules, or module-function pair) to
+                                   stdout after applying regular expressions
     --print-excluded [ functions | functions+ | modules | pair | pair+ ]
                                    Print the entities for instrumentation (functions, modules, or module-function pair)
                                    which are excluded from the instrumentation to stdout after applying regular expressions
-                                   and exit
     --print-overlapping [ functions | functions+ | modules | pair | pair+ ]
                                    Print the entities for instrumentation (functions, modules, or module-function pair)
-                                   which overlap other function calls or have multiple entry points to stdout applying
-                                   regular expressions and exit
+                                   which overlap other function calls or have multiple entry points to stdout after applying
+                                   regular expressions
+    --print-instructions           Print the instructions for each basic-block in the JSON/XML outputs
 
     [MODE OPTIONS]
 
-    -o, --output                   Enable generation of a new executable (binary-rewrite)
+    -o, --output                   Enable generation of a new executable (binary-rewrite). If a filename is not provided,
+                                   omnitrace will use the basename and output to the cwd, unless the target binary is in the
+                                   cwd. In the latter case, omnitrace will either use ${PWD}/<basename>.inst (non-libraries)
+                                   or ${PWD}/instrumented/<basename> (libraries)
     -p, --pid                      Connect to running process
-    -M, --mode [ sampling | trace ]
+    -M, --mode [ coverage | sampling | trace ]
                                    Instrumentation mode. 'trace' mode instruments the selected functions, 'sampling' mode
                                    only instruments the main function to start and stop the sampler.
+    -f, --force                    Force the command-line argument configuration, i.e. don't get cute. Useful for forcing
+                                   runtime instrumentation of an executable that [A] Dyninst thinks is a library after
+                                   reading ELF and [B] whose name makes it look like a library (e.g. starts with 'lib'
+                                   and/or ends in '.so', '.so.*', or '.a')
     -c, --command                  Input executable and arguments (if '-- <CMD>' not provided)
 
     [LIBRARY OPTIONS]
 
     --prefer [ shared | static ]   Prefer this library types when available
-    -L, --library                  Libraries with instrumentation routines (default: "libomnitrace")
+    -L, --library                  Libraries with instrumentation routines (default: "libomnitrace-dl")
     -m, --main-function            The primary function to instrument around, e.g. 'main'
-    --driver                       Force main or _init/_fini instrumentation
     --load                         Supplemental instrumentation library names w/o extension (e.g. 'libinstr' for
                                    'libinstr.so' or 'libinstr.a')
     --load-instr                   Load {available,instrumented,excluded,overlapping}-instr JSON or XML file(s) and override
@@ -110,13 +145,99 @@ Options:
     --init-functions               Initialization function(s) for supplemental instrumentation libraries (see '--load'
                                    option)
     --fini-functions               Finalization function(s) for supplemental instrumentation libraries (see '--load' option)
+    --all-functions                When finding functions, include the functions which are not instrumentable. This is
+                                   purely diagnostic for the available/excluded functions output
 
     [SYMBOL SELECTION OPTIONS]
 
-    -I, -R, --function-include     Regex for selecting functions
-    -E, --function-exclude         Regex for excluding functions
-    -MI, -MR, --module-include     Regex for selecting modules/files/libraries
-    -ME, --module-exclude          Regex for excluding modules/files/libraries
+    -I, --function-include         Regex(es) for including functions (despite heuristics)
+    -E, --function-exclude         Regex(es) for excluding functions (always applied)
+    -R, --function-restrict        Regex(es) for restricting functions only to those that match the provided
+                                   regular-expressions
+    --caller-include               Regex(es) for including functions that call the listed functions (despite heuristics)
+    -MI, --module-include          Regex(es) for selecting modules/files/libraries (despite heuristics)
+    -ME, --module-exclude          Regex(es) for excluding modules/files/libraries (always applied)
+    -MR, --module-restrict         Regex(es) for restricting modules/files/libraries only to those that match the provided
+                                   regular-expressions
+    --internal-function-include    Regex(es) for including functions which are (likely) utilized by omnitrace itself. Use
+                                   this option with care.
+    --internal-module-include      Regex(es) for including modules/libraries which are (likely) utilized by omnitrace
+                                   itself. Use this option with care.
+    --instruction-exclude          Regex(es) for excluding functions containing certain instructions
+    --internal-library-deps        Treat the libraries linked to the internal libraries as internal libraries. This increase
+                                   the internal library processing time and consume more memory (so use with care) but may
+                                   be useful when the application uses Boost libraries and Dyninst is dynamically linked
+                                   against the same boost libraries
+    --internal-library-append      Append to the list of libraries which omnitrace treats as being used internally, e.g.
+                                   OmniTrace will find all the symbols in this library and prevent them from being
+                                   instrumented.
+    --internal-library-remove [ ld-linux-x86-64.so.2
+                                libBrokenLocale.so.1
+                                libanl.so.1
+                                libbfd.so
+                                libbz2.so
+                                libc.so.6
+                                libcaliper.so
+                                libcommon.so
+                                libcrypt.so.1
+                                libdl.so.2
+                                libdw.so
+                                libdwarf.so
+                                libdyninstAPI_RT.so
+                                libelf.so
+                                libgcc_s.so.1
+                                libgotcha.so
+                                liblikwid.so
+                                liblzma.so
+                                libnsl.so.1
+                                libnss_compat.so.2
+                                libnss_db.so.2
+                                libnss_dns.so.2
+                                libnss_files.so.2
+                                libnss_hesiod.so.2
+                                libnss_ldap.so.2
+                                libnss_nis.so.2
+                                libnss_nisplus.so.2
+                                libnss_test1.so.2
+                                libnss_test2.so.2
+                                libpapi.so
+                                libpfm.so
+                                libprofiler.so
+                                libpthread.so.0
+                                libresolv.so.2
+                                librocm_smi64.so
+                                librocmtools.so
+                                librocprofiler64.so
+                                libroctracer64.so
+                                libroctx64.so
+                                librt.so.1
+                                libstdc++.so.6
+                                libtbb.so
+                                libtbbmalloc.so
+                                libtbbmalloc_proxy.so
+                                libtcmalloc.so
+                                libtcmalloc_and_profiler.so
+                                libtcmalloc_debug.so
+                                libtcmalloc_minimal.so
+                                libtcmalloc_minimal_debug.so
+                                libthread_db.so.1
+                                libunwind-coredump.so
+                                libunwind-generic.so
+                                libunwind-ptrace.so
+                                libunwind-setjmp.so
+                                libunwind-x86_64.so
+                                libunwind.so
+                                libutil.so.1
+                                libz.so
+                                libzstd.so ]
+                                   Remove the specified libraries from being treated as being used internally, e.g.
+                                   OmniTrace will permit all the symbols in these libraries to be eligible for
+                                   instrumentation.
+    --linkage [ global | local | unique | unknown | weak ]
+                                   Only instrument functions with specified linkage (default: global, local, unique)
+    --visibility [ default | hidden | internal | protected | unknown ]
+                                   Only instrument functions with specified visibility (default: default, internal, hidden,
+                                   protected)
 
     [RUNTIME OPTIONS]
 
@@ -124,21 +245,30 @@ Options:
                                    Labeling info for functions. By default, just the function name is recorded. Use these
                                    options to gain more information about the function signature or location of the
                                    functions
+    -C, --config                   Read in a configuration file and encode these values as the defaults in the executable
     -d, --default-components       Default components to instrument (only useful when timemory is enabled in omnitrace
                                    library)
     --env                          Environment variables to add to the runtime in form VARIABLE=VALUE. E.g. use '--env
                                    OMNITRACE_USE_TIMEMORY=ON' to default to using timemory instead of perfetto
-    --mpi                          Enable MPI support (requires omnitrace built w/ MPI and GOTCHA support). NOTE: this will
-                                   automatically be activated if MPI_Init/MPI_Init_thread and MPI_Finalize are found in the
-                                   symbol table of target
+    --mpi                          Enable MPI support (requires omnitrace built w/ full or partial MPI support). NOTE: this
+                                   will automatically be activated if MPI_Init, MPI_Init_thread, MPI_Finalize,
+                                   MPI_Comm_rank, or MPI_Comm_size are found in the symbol table of target
 
     [GRANULARITY OPTIONS]
 
     -l, --instrument-loops         Instrument at the loop level
+    -i, --min-instructions         If the number of instructions in a function is less than this value, exclude it from
+                                   instrumentation
     -r, --min-address-range        If the address range of a function is less than this value, exclude it from
                                    instrumentation
+    --min-instructions-loop        If the number of instructions in a function containing a loop is less than this value,
+                                   exclude it from instrumentation
     --min-address-range-loop       If the address range of a function containing a loop is less than this value, exclude it
                                    from instrumentation
+    --coverage [ basic_block | function | none ]
+                                   Enable recording the code coverage. If instrumenting in coverage mode ('-M converage'),
+                                   this simply specifies the granularity. If instrumenting in trace or sampling mode, this
+                                   enables recording code-coverage in addition to the instrumentation of that mode (if any).
     --dynamic-callsites            Force instrumentation if a function has dynamic callsites (e.g. function pointers)
     --traps                        Instrument points which require using a trap. On the x86 architecture, because
                                    instructions are of variable size, the instruction at a point may be too small for
@@ -151,19 +281,32 @@ Options:
     --allow-overlapping            Allow dyninst to instrument either multiple functions which overlap (share part of same
                                    function body) or single functions with multiple entry points. For more info, see Section
                                    2 of the DyninstAPI documentation.
+    --parse-all-modules            By default, omnitrace simply requests Dyninst to provide all the procedures in the
+                                   application image. If this option is enabled, omnitrace will iterate over all the modules
+                                   and extract the functions. Theoretically, it should be the same but the data is slightly
+                                   different, possibly due to weak binding scopes. In general, enabling option will probably
+                                   have no visible effect
 
     [DYNINST OPTIONS]
 
     -b, --batch-size               Dyninst supports batch insertion of multiple points during runtime instrumentation. If
                                    one large batch insertion fails, this value will be used to create smaller batches.
                                    Larger batches generally decrease the instrumentation time
-    --dyninst-options [ BaseTrampDeletion | DebugParsing | DelayedParsing | InstrStackFrames | MergeTramp | SaveFPR | TrampRecursive | TypeChecking ]
+    --dyninst-rt                   Path(s) to the dyninstAPI_RT library
+    --dyninst-options [ BaseTrampDeletion
+                        DebugParsing
+                        DelayedParsing
+                        InstrStackFrames
+                        MergeTramp
+                        SaveFPR
+                        TrampRecursive
+                        TypeChecking ]
                                    Advanced dyninst options: BPatch::set<OPTION>(bool), e.g. bpatch->setTrampRecursive(true)
 ```
 
 There are three ways to perform instrumentation:
 
-1. Running the application via the omnitrace executable (analagous to `gdb --args <program> <args>`)
+1. Running the application via the omnitrace-instrument executable (analagous to `gdb --args <program> <args>`)
    - This mode is the default if neither the `-p` nor `-o` comand-line options are used
    - Runtime instrumentation supports instrumenting not only the target executable but also the
      the shared libraries loaded by the target executable. Consequently, this mode consumes more memory,
@@ -187,29 +330,29 @@ There are three ways to perform instrumentation:
 > ***Attaching to a running process is an alpha feature and support for detaching from the target process***
 > ***without ending the target process is not currently supported.***
 
-The general syntax for separating omnitrace command line arguments from the application arguments follows the
+The general syntax for separating omnitrace command line arguments from the application arguments
 is consistent with the LLVM style of using a standalone double-hyphen (`--`). All arguments preceding the double-hyphen
 are interpreted as belonging to omnitrace and all arguments following the double-hyphen are interpreted as the
 application and it's arguments. In binary rewrite mode, all application arguments after the first argument
-are ignored, i.e. `./omnitrace -o ls.inst -- ls -l` interprets `ls` as the target to instrument (ignores the `-l` argument)
+are ignored, i.e. `./omnitrace-instrument -o ls.inst -- ls -l` interprets `ls` as the target to instrument (ignores the `-l` argument)
 and generates a `ls.inst` executable that you can subsequently run `ls.inst -l` with.
 
 ## Runtime Instrumentation
 
 ```shell
-omnitrace <omnitrace-options> -- <exe> [<exe-options>...]
+omnitrace-instrument <omnitrace-options> -- <exe> [<exe-options>...]
 ```
 
 ## Attaching to Running Process
 
 ```shell
-omnitrace <omnitrace-options> -p <PID> -- <exe-name>
+omnitrace-instrument <omnitrace-options> -p <PID> -- <exe-name>
 ```
 
 ## Binary Rewrite
 
 ```shell
-omnitrace <omnitrace-options> -o <name-of-new-exe-or-library> -- <exe-or-library>
+omnitrace-instrument <omnitrace-options> -o <name-of-new-exe-or-library> -- <exe-or-library>
 ```
 
 ### Binary Rewriting a Library
@@ -249,8 +392,8 @@ $ ldd /usr/local/bin/foo
 Generate binary rewrites of `foo` and `libfoo.so.2`:
 
 ```shell
-omnitrace -o ./foo.inst -- foo
-omnitrace -o ./libfoo.so.2 -- /usr/local/lib/libfoo.so.2
+omnitrace-instrument -o ./foo.inst -- foo
+omnitrace-instrument -o ./libfoo.so.2 -- /usr/local/lib/libfoo.so.2
 ```
 
 At this point, the instrumented `foo.inst` executable will still dynamically load the original `libfoo.so.2` in `/usr/local/lib`:
@@ -279,11 +422,15 @@ $ ldd ./foo.inst
 
 ## Selective Instrumentation
 
-The default behavior of omnitrace does not instrument every symbol in the binary. These default rules are:
+The default behavior of omnitrace-instrument does not instrument every symbol in the binary. These default rules are:
 
 - Skip instrumenting dynamic call-sites (i.e. function pointers)
     - Option `--dynamic-callsites` will force instrumentation for all dynamic call-sites
-- The cost of a function can be loosely approximated by the size of the function in the binary so by default, omnitrace only instruments functions which span an address range of 256 bytes.
+- The cost of a function can be loosely approximated by the number of instruction so by default, omnitrace-instrument only instruments functions with at least 1024 instructions
+    - Option `--min-instructions` will modify this heuristic for all functions which do not contain loops
+    - Option `--min-instructions-loop` will modify this heuristic for functions which contain loops
+        - This separate loop option is provided because functions with loops can be compact in the binary while also being costly
+- The cost of a function can be also be loosely approximated by the size of the function in the binary so this heuristic can also be used in lieu of or in addition to the minimum number of instructions
     - Option `--min-address-range` will modify this heuristic for all functions which do not contain loops
     - Option `--min-address-range-loop` will modify this heuristic for functions which contain loops
         - This separate loop option is provided because functions with loops can be compact in the binary while also being costly
@@ -296,17 +443,17 @@ The default behavior of omnitrace does not instrument every symbol in the binary
 
 ### Viewing the Available, Instrumented, Excluded, and Overlapping Functions
 
-Whenever omnitrace is executed with a verbosity of zero or higher, it emits files which detail which functions (and which module they were defined in)
+Whenever omnitrace-instrument is executed with a verbosity of zero or higher, it emits files which detail which functions (and which module they were defined in)
 were available for instrumentation, which functions were instrumented, which functions were excluded, and which functions contained overlapping function bodies.
 The default output path of these files will be in a `omnitrace-<NAME>-output` folder where `<NAME>` is the basename of the targeted binary or
 (in the case of binary rewrite, the basename of the resulting executable), e.g.
-`omnitrace -- ls` will output it's files to `omnitrace-ls-output` whereas `omnitrace -o ls.inst -- ls` will output to `omnitrace-ls.inst-output`.
+`omnitrace-instrument -- ls` will output it's files to `omnitrace-ls-output` whereas `omnitrace-instrument -o ls.inst -- ls` will output to `omnitrace-ls.inst-output`.
 
 If you would like to generate these files without executing or generating an executable, use the `--simulate` option:
 
 ```shell
-omnitrace --simulate -- foo
-omnitrace --simulate -o foo.inst -- foo
+omnitrace-instrument --simulate -- foo
+omnitrace-instrument --simulate -o foo.inst -- foo
 ```
 
 ### Excluding and Including Modules and Functions
@@ -326,7 +473,7 @@ These options are always applied regardless of whether the module or function sa
 
 #### Example Available Module and Function Info Output
 
-> ***`omnitrace -o lulesh.inst --label file line args --simulate -- lulesh`***
+> ***`omnitrace-instrument -o lulesh.inst --label file line args --simulate -- lulesh`***
 
 ```console
   AddressRange  Module                                    Function                                                                                 FunctionSignature
@@ -544,7 +691,7 @@ These options are always applied regardless of whether the module or function sa
 
 #### Example Instrumented Module and Function Info Output
 
-> ***`omnitrace -o lulesh.inst --label file line args --simulate -- lulesh`***
+> ***`omnitrace-instrument -o lulesh.inst --label file line args --simulate -- lulesh`***
 
 After the heuristics are applied in [Example Available Module and Function Info Output](#example-available-module-and-function-info-output),
 the selected module/functions are:
@@ -610,7 +757,9 @@ the selected module/functions are:
 
 ## Sampling
 
-By default, omnitrace uses `--mode trace` for instrumentation. The `--mode sampling` option
+> ***NOTE: This capability has been deprecated in favor of [omnitrace-sample](sampling.md)***
+
+By default, omnitrace-instrument uses `--mode trace` for instrumentation. The `--mode sampling` option
 will only instrument `main` in an executable and will activate both CPU call-stack sampling and
 background system-level thread sampling by default.
 Tracing capabilities which do not rely on instrumentation, such as the HIP API and kernel tracing
@@ -629,7 +778,7 @@ binary may be used later in a different login sessions when the environment may 
 For example, if the following sequence of commands are run:
 
 ```shell
-omnitrace -o ./foo.inst -- ./foo
+omnitrace-instrument -o ./foo.inst -- ./foo
 export OMNITRACE_USE_SAMPLING=ON
 export OMNITRACE_SAMPLING_FREQ=5
 ./foo.inst
@@ -638,7 +787,7 @@ export OMNITRACE_SAMPLING_FREQ=5
 These configuration settings will not be preserved in another session, whereas:
 
 ```shell
-omnitrace -o ./foo.samp --env OMNITRACE_USE_SAMPLING=ON OMNITRACE_SAMPLING_FREQ=5 -- ./foo
+omnitrace-instrument -o ./foo.samp --env OMNITRACE_USE_SAMPLING=ON OMNITRACE_SAMPLING_FREQ=5 -- ./foo
 ```
 
 will preserve those environment variables:

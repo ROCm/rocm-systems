@@ -23,7 +23,7 @@
 #include "function_signature.hpp"
 #include "fwd.hpp"
 #include "log.hpp"
-#include "omnitrace.hpp"
+#include "omnitrace-instrument.hpp"
 
 #include <timemory/components/rusage/components.hpp>
 #include <timemory/components/timing/wall_clock.hpp>

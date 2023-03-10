@@ -167,7 +167,7 @@ custom_push_region(const char* name)
 ### User API Output
 
 ```console
-$ omnitrace -l --min-instructions=8 -E custom_push_region -o -- ./user-api
+$ omnitrace-instrument -l --min-instructions=8 -E custom_push_region -o -- ./user-api
 ...
 $ export OMNITRACE_USE_TIMEMORY=ON
 $ export OMNITRACE_USE_PID=OFF

@@ -169,8 +169,8 @@ configuration variable to `ON`.
 Similar to `omnitrace-sample`, use a double-hypen (`--`) to separate the command-line arguments for `omnitrace` from the target application and it's arguments.
 
 ```shell
-omnitrace --help
-omnitrace <omnitrace-options> -- <exe-or-library> <exe-options>
+omnitrace-instrument --help
+omnitrace-instrument <omnitrace-options> -- <exe-or-library> <exe-options>
 ```
 
 #### Binary Rewrite
@@ -178,7 +178,7 @@ omnitrace <omnitrace-options> -- <exe-or-library> <exe-options>
 Rewrite the text section of an executable or library with instrumentation:
 
 ```shell
-omnitrace -o app.inst -- /path/to/app
+omnitrace-instrument -o app.inst -- /path/to/app
 ```
 
 In binary rewrite mode, if you also want instrumentation in the linked libraries, you must also rewrite those libraries.
@@ -186,7 +186,7 @@ Example of rewriting the functions starting with `"hip"` with instrumentation in
 
 ```shell
 mkdir -p ./lib
-omnitrace -R '^hip' -o ./lib/libamdhip64.so.4 -- /opt/rocm/lib/libamdhip64.so.4
+omnitrace-instrument -R '^hip' -o ./lib/libamdhip64.so.4 -- /opt/rocm/lib/libamdhip64.so.4
 export LD_LIBRARY_PATH=${PWD}/lib:${LD_LIBRARY_PATH}
 ```
 
@@ -206,7 +206,7 @@ is 1024000 KB (1 GiB):
 
 ```shell
 # buffer size defaults to 1024000
-omnitrace -o app.inst -- /path/to/app
+omnitrace-instrument -o app.inst -- /path/to/app
 ./app.inst
 ```
 
@@ -214,7 +214,7 @@ Passing `--env OMNITRACE_PERFETTO_BUFFER_SIZE_KB=5120000` will change the defaul
 
 ```shell
 # defaults to 5 GiB buffer size
-omnitrace -o app.inst --env OMNITRACE_PERFETTO_BUFFER_SIZE_KB=5120000 -- /path/to/app
+omnitrace-instrument -o app.inst --env OMNITRACE_PERFETTO_BUFFER_SIZE_KB=5120000 -- /path/to/app
 ./app.inst
 ```
 
@@ -231,9 +231,9 @@ linked libraries. Thus, it may be useful to exclude those libraries via the `-ME
 or exclude specific functions with the `-E` regex option.
 
 ```shell
-omnitrace -- /path/to/app
-omnitrace -ME '^(libhsa-runtime64|libz\\.so)' -- /path/to/app
-omnitrace -E 'rocr::atomic|rocr::core|rocr::HSA' --  /path/to/app
+omnitrace-instrument -- /path/to/app
+omnitrace-instrument -ME '^(libhsa-runtime64|libz\\.so)' -- /path/to/app
+omnitrace-instrument -E 'rocr::atomic|rocr::core|rocr::HSA' --  /path/to/app
 ```
 
 ### Python Profiling and Tracing
@@ -328,12 +328,12 @@ export OMNITRACE_PERFETTO_BACKEND=system
 And finally, execute your instrumented application. Either the binary rewritten application:
 
 ```shell
-omnitrace -o ./myapp.inst -- ./myapp
+omnitrace-instrument -o ./myapp.inst -- ./myapp
 ./myapp.inst
 ```
 
 Or with runtime instrumentation:
 
 ```shell
-omnitrace -- ./myapp
+omnitrace-instrument -- ./myapp
 ```

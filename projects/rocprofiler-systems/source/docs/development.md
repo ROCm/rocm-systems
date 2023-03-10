@@ -36,9 +36,9 @@ for each variant:
 - child process launches `<command> <command-args>` via `execvpe` which modified environment for variant
 - parent process waits for child process to finish
 
-### omnitrace: [source/bin/omnitrace](https://github.com/AMDResearch/omnitrace/tree/main/source/bin/omnitrace)
+### omnitrace-instrument: [source/bin/omnitrace-instrument](https://github.com/AMDResearch/omnitrace/tree/main/source/bin/omnitrace-instrument)
 
-- Requires a command-line format of `omnitrace <options> -- <command> <command-args>`
+- Requires a command-line format of `omnitrace-instrument <options> -- <command> <command-args>`
 - User specifies in options whether they want to do runtime instrumentation, binary rewrite, or attach to process
 - Either opens the instrumentation target (binary rewrite), launches the target and stops it before it starts executing main (runtime), or
   attaches to running executable and pauses it
@@ -294,7 +294,7 @@ The last component [backtrace_metrics](https://github.com/AMDResearch/omnitrace/
 metrics for that sample, e.g. peak RSS, HW counters, etc. These 3 components are bundled together in a tuple-like struct (e.g. `tuple<backtrace_timestamp, backtrace, backtrace_metrics>`)
 a buffer of at least 1024 instances of this tuple are mmap'ed per-thread. When this buffer is full, before taking the next sample, the sampler will hand the buffer
 off to it's allocator thread and mmap a new buffer. The allocator thread takes this data and either dynamically stores it in memory or writes it to a file depending on the value of `OMNITRACE_USE_TEMPORARY_FILES`.
-This schema avoids all allocations in the signal handler, allows the data to grow dynamically, avoid potentially slow I/O within the signal handler, and also enables the capability to avoid I/O altogether. 
+This schema avoids all allocations in the signal handler, allows the data to grow dynamically, avoid potentially slow I/O within the signal handler, and also enables the capability to avoid I/O altogether.
 The maximum number of samplers handled by each allocator is governed by the setting `OMNITRACE_SAMPLING_ALLOCATOR_SIZE` setting (the default is 8) -- whenever an allocator has reached it's limit,
 a new internal thread is created to handle the new samplers.
 

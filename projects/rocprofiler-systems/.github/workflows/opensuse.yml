@@ -99,14 +99,14 @@ jobs:
         ldd $(which omnitrace-critical-trace)
         which omnitrace
         ldd $(which omnitrace)
-        omnitrace --help
-        omnitrace -e -v 1 -o ls.inst --simulate -- ls
+        omnitrace-instrument --help
+        omnitrace-instrument -e -v 1 -o ls.inst --simulate -- ls
         for i in $(find omnitrace-ls.inst-output -type f); do echo -e "\n\n --> ${i} \n\n"; cat ${i}; done
-        omnitrace -e -v 1 -o ls.inst -- ls
+        omnitrace-instrument -e -v 1 -o ls.inst -- ls
         ./ls.inst
-        omnitrace -e -v 1 --simulate -- ls
+        omnitrace-instrument -e -v 1 --simulate -- ls
         for i in $(find omnitrace-ls-output -type f); do echo -e "\n\n --> ${i} \n\n"; cat ${i}; done
-        omnitrace -e -v 1 -- ls
+        omnitrace-instrument -e -v 1 -- ls
 
     - name: Test User API
       timeout-minutes: 10

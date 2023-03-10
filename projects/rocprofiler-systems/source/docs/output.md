@@ -21,7 +21,7 @@ export OMNITRACE_USE_PERFETTO=ON
 ```
 
 ```shell
-$ omnitrace -- ./foo
+$ omnitrace-instrument -- ./foo
 ...
 [omnitrace] Outputting 'omnitrace-example-output/perfetto-trace.proto'...
 
@@ -33,7 +33,7 @@ If we enable the `OMNITRACE_USE_PID` option, then when our non-MPI executable is
 
 ```shell
 $ export OMNITRACE_USE_PID=ON
-$ omnitrace -- ./foo
+$ omnitrace-instrument -- ./foo
 ...
 [omnitrace] Outputting 'omnitrace-example-output/perfetto-trace-63453.proto'...
 
@@ -45,7 +45,7 @@ If we enable `OMNITRACE_TIME_OUTPUT`, then a job started on January 31, 2022 at 
 
 ```shell
 $ export OMNITRACE_TIME_OUTPUT=ON
-$ omnitrace -- ./foo
+$ omnitrace-instrument -- ./foo
 ...
 [omnitrace] Outputting 'omnitrace-example-output/2022-01-31_12.30_PM/perfetto-trace-63453.proto'...
 

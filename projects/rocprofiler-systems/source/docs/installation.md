@@ -35,8 +35,11 @@ The relevent fields are `ID` and the `VERSION_ID`.
 
 ## Architecture
 
-At present, only amd64 (x86_64) architectures are tested but Dyninst supports several more architectures.
-Thus, omnitrace should support other CPU architectures such as aarch64, ppc64, etc.
+With regards to instrumentation, at present only amd64 (x86_64) architectures are tested; however,
+Dyninst supports several more architectures and thus, omnitrace instrumentation may support other
+CPU architectures such as aarch64, ppc64, etc.
+Other modes of use, such as sampling and causal profiling, are not dependent on Dyninst and therefore
+may be more portable.
 
 ## Installing omnitrace from binary distributions
 
@@ -244,7 +247,7 @@ source /opt/omnitrace/share/omnitrace/setup-env.sh
 Successful execution of these commands indicates that the installation does not have any issues locating the installed libraries:
 
 ```shell
-omnitrace --help
+omnitrace-instrument --help
 omnitrace-avail --help
 ```
 

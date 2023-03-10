@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "omnitrace.hpp"
+#include "omnitrace-instrument.hpp"
 #include "common/defines.h"
 #include "fwd.hpp"
 #include "internal_libs.hpp"
@@ -453,7 +453,7 @@ main(int argc, char** argv)
     // it is unrecognized, then set the errflag to report an error.  When we come to a
     // non '-' charcter, then we must be at the application name.
     using parser_t = tim::argparse::argument_parser;
-    parser_t parser("omnitrace");
+    parser_t parser("omnitrace-instrument");
     string_t extra_help = "-- <CMD> <ARGS>";
 
     parser.enable_help();

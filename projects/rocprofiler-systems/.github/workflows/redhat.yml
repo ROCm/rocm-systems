@@ -40,7 +40,7 @@ jobs:
       shell: bash
       run:
         echo "CC=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')" >> $GITHUB_ENV &&
-        echo "CXX=${{ matrix.compiler }}" >> $GITHUB_ENV && 
+        echo "CXX=${{ matrix.compiler }}" >> $GITHUB_ENV &&
         env
 
     - name: Install Packages
@@ -57,8 +57,8 @@ jobs:
         if [ "${OS_VERSION_MAJOR}" -eq 8 ]; then PERL_REPO=powertools; else PERL_REPO=crb; fi && \
         dnf -y --enablerepo=${PERL_REPO} install perl-File-BaseDir
         yum install -y https://repo.radeon.com/amdgpu-install/${{ matrix.rocm-version }}/rhel/${{ matrix.os-release }}/amdgpu-install-${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1${RPM_TAG}.noarch.rpm
-        amdgpu-install --usecase=rocm,hip,hiplibsdk --no-dkms --skip-broken -y 
-        yum install -y rocm-hip-sdk rocm-smi-lib roctracer-dev rocprofiler-dev 
+        amdgpu-install --usecase=rocm,hip,hiplibsdk --no-dkms --skip-broken -y
+        yum install -y rocm-hip-sdk rocm-smi-lib roctracer-dev rocprofiler-dev
 
     - name: Configure, Build, and Test
       timeout-minutes: 115
@@ -104,7 +104,7 @@ jobs:
       run: |
         set -v
         source /opt/omnitrace/share/omnitrace/setup-env.sh
-        ./scripts/test-install.sh --test-omnitrace{,-avail,-sample,-rewrite,-runtime,-critical-trace,-python}=1
+        ./scripts/test-install.sh --test-omnitrace-{instrument,avail,sample,rewrite,runtime,critical-trace,python}=1
 
     - name: Test User API
       timeout-minutes: 10

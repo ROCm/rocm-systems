@@ -25,7 +25,7 @@
 #include "fwd.hpp"
 #include "internal_libs.hpp"
 #include "log.hpp"
-#include "omnitrace.hpp"
+#include "omnitrace-instrument.hpp"
 
 #include <timemory/utility/join.hpp>
 
