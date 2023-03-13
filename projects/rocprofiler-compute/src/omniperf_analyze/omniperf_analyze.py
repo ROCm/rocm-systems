@@ -212,7 +212,7 @@ def run_cli(args, runs):
         )
 
 
-def roofline_only(path_to_dir, dev_id, sort_type, mem_level, verbose):
+def roofline_only(path_to_dir, dev_id, sort_type, mem_level, kernel_names, verbose):
     import pandas as pd
     from collections import OrderedDict
 
@@ -235,6 +235,7 @@ def roofline_only(path_to_dir, dev_id, sort_type, mem_level, verbose):
         dev_id,  # [Optional] Specify device id to collect roofline info from
         sort_type,  # [Optional] Sort AI by top kernels or dispatches
         mem_level,  # [Optional] Toggle particular level(s) of memory hierarchy
+        kernel_names,  # [Optional] Toggle overlay of kernel names in plot
         True,  # [Optional] Generate a standalone roofline analysis
     )
 

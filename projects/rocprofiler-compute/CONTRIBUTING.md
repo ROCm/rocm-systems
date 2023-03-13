@@ -1,12 +1,12 @@
 ## How to fork from us
 
-To keep our development fast and conflict free, we recommend you to [fork](https://github.com/AMDResearch/omniperf/fork) our repository and start your work from our `develop` branch in your private repository.
+To keep our development fast and conflict free, we recommend you to [fork](https://github.com/AMDResearch/omniperf/fork) our repository and start your work from our `dev` branch in your private repository.
 
 Afterwards, git clone your repository to your local machine. But that is not it! To keep track of the original develop repository, add it as another remote.
 
 ```
 git remote add mainline https://github.com/AMDResearch/omniperf.git
-git checkout develop
+git checkout dev
 ```
 
 As always in git, start a new branch with
@@ -31,7 +31,7 @@ and apply your changes there.
 
 - Ensure the PR description clearly describes the problem and solution. If there is an existing GitHub issue open describing this bug, please include it in the description so we can close it.
 
-- Ensure the PR is based on the `develop` branch of the Omniperf GitHub repository.
+- Ensure the PR is based on the `dev` branch of the Omniperf GitHub repository.
 
 - Omniperf requires new commits to include a "Signed-off-by" token in the commit message (typically enabled via the `git commit -s` option), indicating your agreement to the projects's [Developer's Certificate of Origin](https://developercertificate.org/) and compatability with the project [LICENSE](https://github.com/AMDResearch/omniperf/blob/main/LICENSE):
 

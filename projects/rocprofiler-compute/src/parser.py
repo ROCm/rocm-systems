@@ -234,6 +234,13 @@ def parse(my_parser):
         type=int,
         help="\t\t\tGPU device ID. (DEFAULT: ALL)",
     )
+    roofline_group.add_argument(
+        "--kernel-names",
+        required=False,
+        default=False,
+        action="store_true",
+        help="\t\t\tInclude kernel names in roofline plot.",
+    )
     # roofline_group.add_argument('-w', '--workgroups', required=False, default=-1, type=int, help="\t\t\tNumber of kernel workgroups (DEFAULT: 1024)")
     # roofline_group.add_argument('--wsize', required=False, default=-1, type=int, help="\t\t\tWorkgroup size (DEFAULT: 256)")
     # roofline_group.add_argument('--dataset', required=False, default = -1, type=int, help="\t\t\tDataset size (DEFAULT: 536M)")
