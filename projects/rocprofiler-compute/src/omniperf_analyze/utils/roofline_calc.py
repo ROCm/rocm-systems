@@ -218,10 +218,10 @@ def plot_application(sortType, ret_df, verbose):
         # Calculate + append AI data if
         # a) current KernelName is different than previous OR
         # b) We've reached the end of list
-        if(idx + 1 == df.shape[0]):
+        if idx + 1 == df.shape[0]:
             at_end = True
         else:
-            next_kernelName = df["KernelName"][idx+1]
+            next_kernelName = df["KernelName"][idx + 1]
 
         kernelName = df["KernelName"][idx]
         try:
@@ -304,7 +304,9 @@ def plot_application(sortType, ret_df, verbose):
 
         try:
             lds_data += (
-                (df["SQ_LDS_IDX_ACTIVE"][idx] - df["SQ_LDS_BANK_CONFLICT"][idx]) * 4 * L2_BANKS
+                (df["SQ_LDS_IDX_ACTIVE"][idx] - df["SQ_LDS_BANK_CONFLICT"][idx])
+                * 4
+                * L2_BANKS
             )  # L2_BANKS = 32 (since assuming mi200)
         except KeyError:
             if verbose >= 3:
@@ -347,7 +349,7 @@ def plot_application(sortType, ret_df, verbose):
 
         calls += 1
 
-        if sortType == "kernels" and (at_end == True  or (kernelName != next_kernelName)):
+        if sortType == "kernels" and (at_end == True or (kernelName != next_kernelName)):
             myList.append(
                 AI_Data(
                     kernelName,
