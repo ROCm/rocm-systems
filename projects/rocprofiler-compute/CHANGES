@@ -1,3 +1,10 @@
+Version 1.0.8-PR1 (13 Mar 2023)
+
+  * add `--kernel-names` option to toggle kernelName overlay in standalone roofline plot (#93)
+  * remove unused python modules (#96)
+  * fix empirical roofline calculation for single dispatch workloads (#97)
+  * match color of arithmetic intensity points to corresponding bw lines
+  
 Version 1.0.7 (21 Feb 2023)
 
   * update documentation (#52, #64)
