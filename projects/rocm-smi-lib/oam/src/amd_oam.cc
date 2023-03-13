@@ -250,7 +250,7 @@ int amdoam_get_sensors_info(uint32_t device_id, oam_sensor_type_t type,
     case OAM_SENSOR_TYPE_POWER:
       for (i = 0; i < num_sensors; i++) {
         snprintf(sensor_info[i].sensor_name, OAM_SENSOR_NAME_MAX,
-                                 "POWER_SENSOR_%d", i+1);
+                                 "POWER_SENSOR_%u", i+1);
         sensor_info[i].sensor_type = type;
         status = rsmi_dev_power_ave_get(device_id, i,
                             reinterpret_cast<uint64_t*>(&sensor_info[i].value));
@@ -262,7 +262,7 @@ int amdoam_get_sensors_info(uint32_t device_id, oam_sensor_type_t type,
     case OAM_SENSOR_TYPE_VOLTAGE:
       for (i = 0; i < num_sensors; i++) {
         snprintf(sensor_info[i].sensor_name, OAM_SENSOR_NAME_MAX,
-                                  "VOLTAGE_SENSOR_%d", i);
+                                  "VOLTAGE_SENSOR_%u", i);
         sensor_info[i].sensor_type = type;
         status = rsmi_dev_volt_metric_get(device_id, RSMI_VOLT_TYPE_VDDGFX,
                           RSMI_VOLT_CURRENT, &sensor_info[i].value);
@@ -274,7 +274,7 @@ int amdoam_get_sensors_info(uint32_t device_id, oam_sensor_type_t type,
     case OAM_SENSOR_TYPE_TEMP:
       for (i = 0; i < num_sensors; i++) {
         snprintf(sensor_info[i].sensor_name, OAM_SENSOR_NAME_MAX,
-                                   "TEMP_SENSOR_%d", i+1);
+                                   "TEMP_SENSOR_%u", i+1);
         sensor_info[i].sensor_type = type;
         status = rsmi_dev_temp_metric_get(device_id, i, RSMI_TEMP_CURRENT,
                                          &sensor_info[i].value);
@@ -286,7 +286,7 @@ int amdoam_get_sensors_info(uint32_t device_id, oam_sensor_type_t type,
     case OAM_SENSOR_TYPE_FAN_SPEED:
       for (i = 0; i < num_sensors; i++) {
         snprintf(sensor_info[i].sensor_name, OAM_SENSOR_NAME_MAX,
-                                   "FAN_SENSOR_%d", i+1);
+                                   "FAN_SENSOR_%u", i+1);
         sensor_info[i].sensor_type = type;
         status = rsmi_dev_fan_speed_get(device_id, i, &sensor_info[i].value);
         if (status != RSMI_STATUS_SUCCESS)
