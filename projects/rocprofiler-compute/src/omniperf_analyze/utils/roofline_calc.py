@@ -44,6 +44,8 @@ FONT_WEIGHT = "bold"
 
 SUPPORTED_SOC = ["mi200"]
 
+TOP_N = 10
+
 
 ################################################
 # Helper funcs
@@ -208,17 +210,146 @@ def plot_application(sortType, ret_df, verbose):
     kernelName = ""
 
     myList = []
-    for index, row in df.iterrows():
+    at_end = False
+    next_kernelName = ""
+
+    for idx in df.index:
         # CASE: Top kernels
         # Calculate + append AI data if
         # a) current KernelName is different than previous OR
         # b) We've reached the end of list
-        if sortType == "kernels" and (
-            (row["KernelName"] != kernelName and kernelName != "")
-            or index == df.shape[0] - 1
-        ):
-            if df.shape[0] - 1 == index:
-                calls += 1
+        if idx + 1 == df.shape[0]:
+            at_end = True
+        else:
+            next_kernelName = df["KernelName"][idx + 1]
+
+        kernelName = df["KernelName"][idx]
+        try:
+            total_flops += (
+                (
+                    64
+                    * (
+                        df["SQ_INSTS_VALU_ADD_F16"][idx]
+                        + df["SQ_INSTS_VALU_MUL_F16"][idx]
+                        + (2 * df["SQ_INSTS_VALU_FMA_F16"][idx])
+                        + df["SQ_INSTS_VALU_TRANS_F16"][idx]
+                    )
+                )
+                + (
+                    64
+                    * (
+                        df["SQ_INSTS_VALU_ADD_F32"][idx]
+                        + df["SQ_INSTS_VALU_MUL_F32"][idx]
+                        + (2 * df["SQ_INSTS_VALU_FMA_F32"][idx])
+                        + df["SQ_INSTS_VALU_TRANS_F32"][idx]
+                    )
+                )
+                + (
+                    64
+                    * (
+                        df["SQ_INSTS_VALU_ADD_F64"][idx]
+                        + df["SQ_INSTS_VALU_MUL_F64"][idx]
+                        + (2 * df["SQ_INSTS_VALU_FMA_F64"][idx])
+                        + df["SQ_INSTS_VALU_TRANS_F64"][idx]
+                    )
+                )
+                + (df["SQ_INSTS_VALU_MFMA_MOPS_F16"][idx] * 512)
+                + (df["SQ_INSTS_VALU_MFMA_MOPS_BF16"][idx] * 512)
+                + (df["SQ_INSTS_VALU_MFMA_MOPS_F32"][idx] * 512)
+                + (df["SQ_INSTS_VALU_MFMA_MOPS_F64"][idx] * 512)
+            )
+        except KeyError:
+            if verbose >= 3:
+                print("{}: Skipped total_flops at index {}".format(kernelName[:35], idx))
+            pass
+        try:
+            valu_flops += (
+                64
+                * (
+                    df["SQ_INSTS_VALU_ADD_F16"][idx]
+                    + df["SQ_INSTS_VALU_MUL_F16"][idx]
+                    + (2 * df["SQ_INSTS_VALU_FMA_F16"][idx])
+                    + df["SQ_INSTS_VALU_TRANS_F16"][idx]
+                )
+                + 64
+                * (
+                    df["SQ_INSTS_VALU_ADD_F32"][idx]
+                    + df["SQ_INSTS_VALU_MUL_F32"][idx]
+                    + (2 * df["SQ_INSTS_VALU_FMA_F32"][idx])
+                    + df["SQ_INSTS_VALU_TRANS_F32"][idx]
+                )
+                + 64
+                * (
+                    df["SQ_INSTS_VALU_ADD_F64"][idx]
+                    + df["SQ_INSTS_VALU_MUL_F64"][idx]
+                    + (2 * df["SQ_INSTS_VALU_FMA_F64"][idx])
+                    + df["SQ_INSTS_VALU_TRANS_F64"][idx]
+                )
+            )
+        except KeyError:
+            if verbose >= 3:
+                print("{}: Skipped valu_flops at index {}".format(kernelName[:35], idx))
+            pass
+
+        try:
+            mfma_flops_f16 += df["SQ_INSTS_VALU_MFMA_MOPS_F16"][idx] * 512
+            mfma_flops_bf16 += df["SQ_INSTS_VALU_MFMA_MOPS_BF16"][idx] * 512
+            mfma_flops_f32 += df["SQ_INSTS_VALU_MFMA_MOPS_F32"][idx] * 512
+            mfma_flops_f64 += df["SQ_INSTS_VALU_MFMA_MOPS_F64"][idx] * 512
+            mfma_iops_i8 += df["SQ_INSTS_VALU_MFMA_MOPS_I8"][idx] * 512
+        except KeyError:
+            if verbose >= 3:
+                print("{}: Skipped mfma ops at index {}".format(kernelName[:35], idx))
+            pass
+
+        try:
+            lds_data += (
+                (df["SQ_LDS_IDX_ACTIVE"][idx] - df["SQ_LDS_BANK_CONFLICT"][idx])
+                * 4
+                * L2_BANKS
+            )  # L2_BANKS = 32 (since assuming mi200)
+        except KeyError:
+            if verbose >= 3:
+                print("{}: Skipped lds_data at index {}".format(kernelName[:35], idx))
+            pass
+
+        try:
+            L1cache_data += df["TCP_TOTAL_CACHE_ACCESSES_sum"][idx] * 64
+        except KeyError:
+            if verbose >= 3:
+                print("{}: Skipped L1cache_data at index {}".format(kernelName[:35], idx))
+            pass
+
+        try:
+            L2cache_data += (
+                df["TCP_TCC_WRITE_REQ_sum"][idx] * 64
+                + df["TCP_TCC_ATOMIC_WITH_RET_REQ_sum"][idx] * 64
+                + df["TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum"][idx] * 64
+                + df["TCP_TCC_READ_REQ_sum"][idx] * 64
+            )
+        except KeyError:
+            if verbose >= 3:
+                print("{}: Skipped L2cache_data at index {}".format(kernelName[:35], idx))
+            pass
+        try:
+            hbm_data += (
+                (df["TCC_EA_RDREQ_32B_sum"][idx] * 32)
+                + ((df["TCC_EA_RDREQ_sum"][idx] - df["TCC_EA_RDREQ_32B_sum"][idx]) * 64)
+                + (df["TCC_EA_WRREQ_64B_sum"][idx] * 64)
+                + ((df["TCC_EA_WRREQ_sum"][idx] - df["TCC_EA_WRREQ_64B_sum"][idx]) * 32)
+            )
+        except KeyError:
+            if verbose >= 3:
+                print("{}: Skipped hbm_data at index {}".format(kernelName[:35], idx))
+            pass
+
+        totalDuration += df["EndNs"][idx] - df["BeginNs"][idx]
+
+        avgDuration += df["EndNs"][idx] - df["BeginNs"][idx]
+
+        calls += 1
+
+        if sortType == "kernels" and (at_end == True or (kernelName != next_kernelName)):
             myList.append(
                 AI_Data(
                     kernelName,
@@ -241,7 +372,7 @@ def plot_application(sortType, ret_df, verbose):
             if verbose >= 2:
                 print(
                     "Just added {} to AI_Data at index {}. # of calls: {}".format(
-                        kernelName, index, calls
+                        kernelName, idx, calls
                     )
                 )
             total_flops = (
@@ -262,129 +393,6 @@ def plot_application(sortType, ret_df, verbose):
                 L1cache_data
             ) = L2cache_data = hbm_data = calls = totalDuration = avgDuration = 0.0
 
-        kernelName = row["KernelName"]
-        try:
-            total_flops += (
-                (
-                    64
-                    * (
-                        row["SQ_INSTS_VALU_ADD_F16"]
-                        + row["SQ_INSTS_VALU_MUL_F16"]
-                        + (2 * row["SQ_INSTS_VALU_FMA_F16"])
-                        + row["SQ_INSTS_VALU_TRANS_F16"]
-                    )
-                )
-                + (
-                    64
-                    * (
-                        row["SQ_INSTS_VALU_ADD_F32"]
-                        + row["SQ_INSTS_VALU_MUL_F32"]
-                        + (2 * row["SQ_INSTS_VALU_FMA_F32"])
-                        + row["SQ_INSTS_VALU_TRANS_F32"]
-                    )
-                )
-                + (
-                    64
-                    * (
-                        row["SQ_INSTS_VALU_ADD_F64"]
-                        + row["SQ_INSTS_VALU_MUL_F64"]
-                        + (2 * row["SQ_INSTS_VALU_FMA_F64"])
-                        + row["SQ_INSTS_VALU_TRANS_F64"]
-                    )
-                )
-                + (row["SQ_INSTS_VALU_MFMA_MOPS_F16"] * 512)
-                + (row["SQ_INSTS_VALU_MFMA_MOPS_BF16"] * 512)
-                + (row["SQ_INSTS_VALU_MFMA_MOPS_F32"] * 512)
-                + (row["SQ_INSTS_VALU_MFMA_MOPS_F64"] * 512)
-            )
-        except KeyError:
-            if verbose >= 2:
-                print("Skipped total_flops at index {}".format(index))
-            pass
-        try:
-            valu_flops += (
-                64
-                * (
-                    row["SQ_INSTS_VALU_ADD_F16"]
-                    + row["SQ_INSTS_VALU_MUL_F16"]
-                    + (2 * row["SQ_INSTS_VALU_FMA_F16"])
-                    + row["SQ_INSTS_VALU_TRANS_F16"]
-                )
-                + 64
-                * (
-                    row["SQ_INSTS_VALU_ADD_F32"]
-                    + row["SQ_INSTS_VALU_MUL_F32"]
-                    + (2 * row["SQ_INSTS_VALU_FMA_F32"])
-                    + row["SQ_INSTS_VALU_TRANS_F32"]
-                )
-                + 64
-                * (
-                    row["SQ_INSTS_VALU_ADD_F64"]
-                    + row["SQ_INSTS_VALU_MUL_F64"]
-                    + (2 * row["SQ_INSTS_VALU_FMA_F64"])
-                    + row["SQ_INSTS_VALU_TRANS_F64"]
-                )
-            )
-        except KeyError:
-            if verbose >= 2:
-                print("Skipped valu_flops at index {}".format(index))
-            pass
-
-        try:
-            mfma_flops_f16 += row["SQ_INSTS_VALU_MFMA_MOPS_F16"] * 512
-            mfma_flops_bf16 += row["SQ_INSTS_VALU_MFMA_MOPS_BF16"] * 512
-            mfma_flops_f32 += row["SQ_INSTS_VALU_MFMA_MOPS_F32"] * 512
-            mfma_flops_f64 += row["SQ_INSTS_VALU_MFMA_MOPS_F64"] * 512
-            mfma_iops_i8 += row["SQ_INSTS_VALU_MFMA_MOPS_I8"] * 512
-        except KeyError:
-            if verbose >= 2:
-                print("Skipped mfma ops at index {}".format(index))
-            pass
-
-        try:
-            lds_data += (
-                (row["SQ_LDS_IDX_ACTIVE"] - row["SQ_LDS_BANK_CONFLICT"]) * 4 * L2_BANKS
-            )  # L2_BANKS = 32 (since assuming mi200)
-        except KeyError:
-            if verbose >= 2:
-                print("Skipped lds_data at index {}".format(index))
-            pass
-
-        try:
-            L1cache_data += row["TCP_TOTAL_CACHE_ACCESSES_sum"] * 64
-        except KeyError:
-            if verbose >= 2:
-                print("Skipped L1cache_data at index {}".format(index))
-            pass
-
-        try:
-            L2cache_data += (
-                row["TCP_TCC_WRITE_REQ_sum"] * 64
-                + row["TCP_TCC_ATOMIC_WITH_RET_REQ_sum"] * 64
-                + row["TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum"] * 64
-                + row["TCP_TCC_READ_REQ_sum"] * 64
-            )
-        except KeyError:
-            if verbose >= 2:
-                print("Skipped L2cache_data at index {}".format(index))
-            pass
-        try:
-            hbm_data += (
-                (row["TCC_EA_RDREQ_32B_sum"] * 32)
-                + ((row["TCC_EA_RDREQ_sum"] - row["TCC_EA_RDREQ_32B_sum"]) * 64)
-                + (row["TCC_EA_WRREQ_64B_sum"] * 64)
-                + ((row["TCC_EA_WRREQ_sum"] - row["TCC_EA_WRREQ_64B_sum"]) * 32)
-            )
-        except KeyError:
-            if verbose >= 2:
-                print("Skipped hbm_data at index {}".format(index))
-            pass
-
-        totalDuration += row["EndNs"] - row["BeginNs"]
-
-        avgDuration += row["EndNs"] - row["BeginNs"]
-
-        calls += 1
         if sortType == "dispatches":
             myList.append(
                 AI_Data(
@@ -428,9 +436,11 @@ def plot_application(sortType, ret_df, verbose):
     # print("Top 5 intensities ('{}')...".format(roof_details["sort"]))
     intensities = {"ai_l1": [], "ai_l2": [], "ai_hbm": []}
     curr_perf = []
+    kernelNames = []
     i = 0
     # Create list of top 5 intensities
-    while i <= 9 and i != len(myList):
+    while i < TOP_N and i != len(myList):
+        kernelNames.append(myList[i].KernelName)
         intensities["ai_l1"].append(
             myList[i].total_flops / myList[i].L1cache_data
         ) if myList[i].L1cache_data else intensities["ai_l1"].append(0)
@@ -469,6 +479,9 @@ def plot_application(sortType, ret_df, verbose):
 
         intensityPoints[i].append(x)
         intensityPoints[i].append(y)
+
+    # Add an entry for kernel names
+    intensityPoints["kernelNames"] = kernelNames
 
     return intensityPoints
 

@@ -25,11 +25,15 @@
 from omniperf_analyze.utils import roofline_calc
 
 import time
+import sys
 import numpy as np
 from dash import html, dash_table
 
 from dash import dcc
 import plotly.graph_objects as go
+
+
+SYMBOLS = [0, 1, 2, 3, 4, 5, 13, 17, 18, 20]
 
 
 def to_int(a):
@@ -39,7 +43,9 @@ def to_int(a):
         return int(a)
 
 
-def generate_plots(roof_info, ai_data, mem_level, is_standalone, verbose, fig=None):
+def generate_plots(
+    roof_info, ai_data, mem_level, is_standalone, kernel_names, verbose, fig=None
+):
     if fig is None:
         fig = go.Figure()
     plotMode = "lines+text" if is_standalone else "lines"
@@ -120,6 +126,8 @@ def generate_plots(roof_info, ai_data, mem_level, is_standalone, verbose, fig=No
                 y=ai_data["ai_l1"][1],
                 name="ai_l1",
                 mode="markers",
+                marker={"color": "#00CC96"},
+                marker_symbol=SYMBOLS if kernel_names else None,
             )
         )
         fig.add_trace(
@@ -128,6 +136,8 @@ def generate_plots(roof_info, ai_data, mem_level, is_standalone, verbose, fig=No
                 y=ai_data["ai_l2"][1],
                 name="ai_l2",
                 mode="markers",
+                marker={"color": "#EF553B"},
+                marker_symbol=SYMBOLS if kernel_names else None,
             )
         )
         fig.add_trace(
@@ -136,6 +146,8 @@ def generate_plots(roof_info, ai_data, mem_level, is_standalone, verbose, fig=No
                 y=ai_data["ai_hbm"][1],
                 name="ai_hbm",
                 mode="markers",
+                marker={"color": "#636EFA"},
+                marker_symbol=SYMBOLS if kernel_names else None,
             )
         )
 
@@ -158,8 +170,13 @@ def get_roofline(
     dev_id=None,
     sort_type="kernels",
     mem_level="ALL",
+    kernel_names=False,
     is_standalone=False,
 ):
+    if kernel_names and (not is_standalone):
+        print("ERROR: --roof-only is required for --kernel-names")
+        sys.exit(1)
+
     # Roofline settings
     fp32_details = {
         "path": path_to_dir,
@@ -185,11 +202,33 @@ def get_roofline(
             print(i, "->", ai_data[i])
         print("\n")
 
-    fp32_fig = generate_plots(fp32_details, ai_data, mem_level, is_standalone, verbose)
-    fp16_fig = generate_plots(fp16_details, ai_data, mem_level, is_standalone, verbose)
-    ml_combo_fig = generate_plots(
-        int8_details, ai_data, mem_level, is_standalone, verbose, fp16_fig
+    fp32_fig = generate_plots(
+        fp32_details, ai_data, mem_level, is_standalone, kernel_names, verbose
     )
+    fp16_fig = generate_plots(
+        fp16_details, ai_data, mem_level, is_standalone, kernel_names, verbose
+    )
+    ml_combo_fig = generate_plots(
+        int8_details, ai_data, mem_level, is_standalone, kernel_names, verbose, fp16_fig
+    )
+    legend = go.Figure(
+        go.Scatter(
+            mode="markers",
+            x=[0] * 10,
+            y=ai_data["kernelNames"],
+            marker_symbol=SYMBOLS,
+            marker_size=15,
+        )
+    )
+    legend.update_layout(
+        title="Kernel Names and Markers",
+        margin=dict(b=0, r=0),
+        xaxis_range=[-1, 1],
+        xaxis_side="top",
+        height=400,
+        width=1000,
+    )
+    legend.update_xaxes(dtick=1)
 
     if is_standalone:
         dev_id = "ALL" if dev_id == -1 else str(dev_id)
@@ -198,12 +237,17 @@ def get_roofline(
         ml_combo_fig.write_image(
             path_to_dir + "/empirRoof_gpu-{}_fp8_fp16.pdf".format(dev_id)
         )
+        if kernel_names:
+            # only save a legend if kernel_names option is toggled
+            legend.write_image(path_to_dir + "/kernelName_legend.pdf")
         time.sleep(1)
         # Re-save to remove loading MathJax pop up
         fp32_fig.write_image(path_to_dir + "/empirRoof_gpu-{}_fp32.pdf".format(dev_id))
         ml_combo_fig.write_image(
             path_to_dir + "/empirRoof_gpu-{}_fp8_fp16.pdf".format(dev_id)
         )
+        if kernel_names:
+            legend.write_image(path_to_dir + "/kernelName_legend.pdf")
         print("Empirical Roofline PDFs saved!")
     else:
         return html.Section(
