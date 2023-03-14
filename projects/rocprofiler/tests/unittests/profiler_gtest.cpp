@@ -20,19 +20,82 @@
 
 #include <gtest/gtest.h>
 
-#include <memory>
 #include <vector>
+#include <mutex>
+#include <memory>
 
+#include "api/rocmtool.h"
 #include "core/memory/generic_buffer.h"
+#include "core/hardware/hsa_info.h"
 #include "core/session/session.h"
+#include "utils/helper.h"
 
-void (*buffer_callback_fun)(const rocprofiler_record_header_t* begin,
-                            const rocprofiler_record_header_t* end, rocprofiler_session_id_t session_id,
-                            rocprofiler_buffer_id_t buffer_id);
+
+/*
+ *  ###############################################
+ *  ################TESTING HSA_INFO###############
+ *  ###############################################
+ */
+
+TEST(WhenTestingAgentInfoGetterSetters, TestRunsSuccessfully) {
+  Agent::AgentInfo agent_info = Agent::AgentInfo();
+  char gpu_name[] = "gfx10";
+  agent_info.setName(gpu_name);
+  agent_info.setIndex(0);
+  agent_info.setType(hsa_device_type_t::HSA_DEVICE_TYPE_GPU);
+
+  EXPECT_EQ(agent_info.getName(), gpu_name);
+  EXPECT_EQ(agent_info.getIndex(), 0);
+  EXPECT_EQ(agent_info.getType(), hsa_device_type_t::HSA_DEVICE_TYPE_GPU);
+
+  Agent::CounterHardwareInfo hw_info(0, "GRBM");
+  EXPECT_TRUE(getHardwareInfo(0, "GRBM", &hw_info));
+}
+
+void buffer_callback_fun(const rocprofiler_record_header_t* begin,
+                         const rocprofiler_record_header_t* end,
+                         rocprofiler_session_id_t session_id, rocprofiler_buffer_id_t buffer_id) {
+  std::cout << "buffer callback" << std::endl;
+}
+
+/*
+*  ###############################################
+*  ################TESTING BUFFERS###############
+*  ###############################################
+*/
+
+// A lot have changed in the class, since this test was written
+// Need to rewrite all the test cases again.
+TEST(WhenAddingARecordToBuffer, DISABLED_RecordGetsAddedSuccefully) {
+  Memory::GenericBuffer* buffer = new Memory::GenericBuffer(
+      rocprofiler_session_id_t{0}, rocprofiler_buffer_id_t{0}, 0x8000, buffer_callback_fun);
+
+  uint64_t start_time = 0;
+  uint64_t end_time = 10;
+
+  uint64_t kernel_object = 123456789;
+  uint64_t gpu_name_descriptor = 1234565789;
+  rocprofiler_record_profiler_t record = rocprofiler_record_profiler_t{
+      rocprofiler_record_header_t{ROCPROFILER_PROFILER_RECORD, rocprofiler_record_id_t{0}},
+      rocprofiler_kernel_id_t{kernel_object},
+      rocprofiler_agent_id_t{gpu_name_descriptor},
+      rocprofiler_queue_id_t{0},
+      rocprofiler_record_header_timestamp_t{start_time, end_time},
+      nullptr,
+      0};
+
+  EXPECT_TRUE(buffer->AddRecord(record));
+  delete buffer;
+}
+
+/*
+ *  ###############################################
+ *  ################TESTING SESSIONS###############
+ *  ###############################################
+ */
 
 /**
- * @brief This class creates a single timestamp session
- *
+ * This class creates a single timestamp session
  */
 
 class TimeStampSession : public ::testing::Test {
@@ -91,9 +154,9 @@ TEST_F(TimeStampSession, ForANewlyCreatedSessionValidSessionIdIsReturned) {
 }
 
 /**
- * @brief This class creates multiple time stamp sessions
- *
+ * This class creates multiple time stamp sessions
  */
+
 class TestingMultipleSessions : public ::testing::Test {
  protected:
   std::vector<std::unique_ptr<rocmtools::Session>> session_list;
@@ -160,6 +223,13 @@ TEST_F(TestingMultipleSessions, DeactivatingAnActivatedSessionPasses) {
   }
 }
 
+/*
+*  ###############################################
+*  ################TESTING ROCMTOOLS##############
+*  ###############################################
+*/
+
+
 // Createing sessions with 2 different profiling mode
 TEST(WhenCreatingTwoSessionsWithDiffProfilingMode, BothSessionsAreCreated) {
   std::map<uint64_t, std::unique_ptr<rocmtools::Session>> sessions;
@@ -172,14 +242,15 @@ TEST(WhenCreatingTwoSessionsWithDiffProfilingMode, BothSessionsAreCreated) {
     std::vector<const char*> counters;
     counters.emplace_back("SQ_WAVES");
     counters.emplace_back("GRBM_COUNT");
-    sessions.emplace(session_id.handle,
-                     std::make_unique<rocmtools::Session>(ROCPROFILER_NONE_REPLAY_MODE, session_id));
+    sessions.emplace(
+        session_id.handle,
+        std::make_unique<rocmtools::Session>(ROCPROFILER_NONE_REPLAY_MODE, session_id));
 
     rocprofiler_filter_id_t filter_id =
         sessions.at(session_id.handle)
             ->CreateFilter(ROCPROFILER_COUNTERS_COLLECTION,
-                           rocprofiler_filter_data_t{.counters_names = &counters[0]}, counters.size(),
-                           rocprofiler_filter_property_t{});
+                           rocprofiler_filter_data_t{.counters_names = &counters[0]},
+                           counters.size(), rocprofiler_filter_property_t{});
     rocprofiler_buffer_id_t buffer_id =
         sessions.at(session_id.handle)->CreateBuffer(buffer_callback_fun, 0x9999);
     sessions.at(session_id.handle)->GetFilter(filter_id)->SetBufferId(buffer_id);
@@ -187,12 +258,13 @@ TEST(WhenCreatingTwoSessionsWithDiffProfilingMode, BothSessionsAreCreated) {
   {
     // create a timestamp collection session
     rocprofiler_session_id_t session_id{2};
-    sessions.emplace(session_id.handle,
-                     std::make_unique<rocmtools::Session>(ROCPROFILER_NONE_REPLAY_MODE, session_id));
+    sessions.emplace(
+        session_id.handle,
+        std::make_unique<rocmtools::Session>(ROCPROFILER_NONE_REPLAY_MODE, session_id));
     rocprofiler_filter_id_t filter_id =
         sessions.at(session_id.handle)
-            ->CreateFilter(ROCPROFILER_DISPATCH_TIMESTAMPS_COLLECTION, rocprofiler_filter_data_t{}, 0,
-                           rocprofiler_filter_property_t{});
+            ->CreateFilter(ROCPROFILER_DISPATCH_TIMESTAMPS_COLLECTION, rocprofiler_filter_data_t{},
+                           0, rocprofiler_filter_property_t{});
     rocprofiler_buffer_id_t buffer_id =
         sessions.at(session_id.handle)->CreateBuffer(buffer_callback_fun, 0x9999);
     sessions.at(session_id.handle)->GetFilter(filter_id)->SetBufferId(buffer_id);
@@ -203,4 +275,82 @@ TEST(WhenCreatingTwoSessionsWithDiffProfilingMode, BothSessionsAreCreated) {
   EXPECT_TRUE(sessions.at(2)->FindFilterWithKind(ROCPROFILER_DISPATCH_TIMESTAMPS_COLLECTION));
 
   sessions.clear();
+}
+
+void (*callback_fun)(const rocprofiler_record_header_t* begin,
+                     const rocprofiler_record_header_t* end, rocprofiler_session_id_t session_id,
+                     rocprofiler_buffer_id_t buffer_id);
+
+TEST(WhenTestingCounterCollectionMode, TestSucceeds) {
+  rocprofiler_session_id_t session_id;
+
+  rocmtools::rocmtool toolobj;
+  session_id = toolobj.CreateSession(ROCPROFILER_NONE_REPLAY_MODE);
+  rocprofiler_filter_id_t filter_id =
+      toolobj.GetSession(session_id)
+          ->CreateFilter(ROCPROFILER_COUNTERS_COLLECTION, rocprofiler_filter_data_t{}, 0,
+                         rocprofiler_filter_property_t{});
+  rocprofiler_buffer_id_t buffer_id =
+      toolobj.GetSession(session_id)->CreateBuffer(callback_fun, 0x9999);
+  toolobj.GetSession(session_id)->GetFilter(filter_id)->SetBufferId(buffer_id);
+
+
+  rocmtools::Session* session = toolobj.GetSession(session_id);
+  EXPECT_TRUE(session->FindFilterWithKind(ROCPROFILER_COUNTERS_COLLECTION));
+  toolobj.DestroySession(session_id);
+}
+
+TEST(WhenTestingTimeStampCollectionMode, TestSucceeds) {
+  rocprofiler_session_id_t session_id;
+
+  rocmtools::rocmtool toolobj;
+  session_id = toolobj.CreateSession(ROCPROFILER_NONE_REPLAY_MODE);
+  rocprofiler_filter_id_t filter_id =
+      toolobj.GetSession(session_id)
+          ->CreateFilter(ROCPROFILER_DISPATCH_TIMESTAMPS_COLLECTION, rocprofiler_filter_data_t{}, 0,
+                         rocprofiler_filter_property_t{});
+  rocprofiler_buffer_id_t buffer_id =
+      toolobj.GetSession(session_id)->CreateBuffer(callback_fun, 0x9999);
+  toolobj.GetSession(session_id)->GetFilter(filter_id)->SetBufferId(buffer_id);
+
+
+  rocmtools::Session* session = toolobj.GetSession(session_id);
+
+  EXPECT_TRUE(session->FindFilterWithKind(ROCPROFILER_DISPATCH_TIMESTAMPS_COLLECTION));
+  toolobj.DestroySession(session_id);
+}
+
+TEST(WhenTestingApplicationReplayMode, TestSucceeds) {
+  std::vector<const char*> counters;
+  counters.emplace_back("SQ_WAVES");
+  rocprofiler_session_id_t session_id;
+
+  rocmtools::rocmtool toolobj;
+  session_id = toolobj.CreateSession(ROCPROFILER_APPLICATION_REPLAY_MODE);
+
+  rocprofiler_filter_id_t filter_id =
+      toolobj.GetSession(session_id)
+          ->CreateFilter(ROCPROFILER_COUNTERS_COLLECTION,
+                         rocprofiler_filter_data_t{.counters_names = &counters[0]}, counters.size(),
+                         rocprofiler_filter_property_t{});
+  rocprofiler_buffer_id_t buffer_id =
+      toolobj.GetSession(session_id)->CreateBuffer(callback_fun, 0x8000);
+  toolobj.GetSession(session_id)->GetFilter(filter_id)->SetBufferId(buffer_id);
+
+  rocmtools::Session* session = toolobj.GetSession(session_id);
+
+  EXPECT_TRUE(session->FindFilterWithKind(ROCPROFILER_COUNTERS_COLLECTION));
+  toolobj.DestroySession(session_id);
+}
+
+TEST(WhenTrucatingLongKernelNames, KernelNameGetsTruncatedProperly) {
+  std::string long_kernel_name =
+      "void kernel_7r_3d_pml<32, 8, 4>(long long, long long, long long, int, "
+      "int, int, long long, long long, long long, long long, long long, long "
+      "long, long long, long long, long long, float, float, float, float "
+      "const*, float*, float const*, float*, float const*) [clone .kd]";
+
+  std::string trunkated_name = rocmtools::truncate_name(long_kernel_name);
+
+  EXPECT_EQ("kernel_7r_3d_pml", trunkated_name);
 }
