@@ -255,8 +255,15 @@ def extract_data(df, output_ui, se_number, code, jumps):
     cu_waves = extract_waves(df)
     all_filenames = []
     flight_count = []
+    maxgrade = [{df['wave_slot'][wave_id]: -1 for wave_id in df['id']} for k in range(4)]
+    non_stitched = [{df['wave_slot'][wave_id]: -1 for wave_id in df['id']} for k in range(4)]
+
+    print('Number of waves:', len(df['id']))
 
     for wave_id in df['id']:
+        if non_stitched[df['simd'][wave_id]][df['wave_slot'][wave_id]] == 0:
+            continue
+        print(f"Parsing :{se_number}-{df['simd'][wave_id]}-{df['wave_slot'][wave_id]}")
         insts, timeline = [], []
         if len(df['instructions'][wave_id]) == 0 or len(df['timeline'][wave_id]) == 0:
             continue
@@ -267,6 +274,12 @@ def extract_data(df, output_ui, se_number, code, jumps):
             timeline.append(extract_tuple(x, 2))
 
         stitched, loopCount, mem_unroll, count = stitch(insts, code, jumps)
+        srate = len(stitched)**2 / max(len(insts), 1)
+        if srate <= maxgrade[df['simd'][wave_id]][df['wave_slot'][wave_id]]:
+            continue
+
+        maxgrade[df['simd'][wave_id]][df['wave_slot'][wave_id]] = srate
+        non_stitched[df['simd'][wave_id]][df['wave_slot'][wave_id]] = len(insts) - len(stitched)
         flight_count.append(count)
 
         wave_entry = {  
