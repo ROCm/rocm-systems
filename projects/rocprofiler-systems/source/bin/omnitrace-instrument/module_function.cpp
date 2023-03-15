@@ -499,7 +499,8 @@ module_function::is_module_constrained() const
 
     // always instrument these modules
     if(module_name == "DEFAULT_MODULE" || module_name == "LIBRARY_MODULE")
-        return _report("Skipping", "default module", 2);
+        // return _report("Skipping", "default module", 2);
+        return false;
 
     static std::regex ext_regex{ "\\.(s|S)$", regex_opts };
     static std::regex sys_regex{ "^(s|k|e|w)_[A-Za-z_0-9\\-]+\\.(c|C)$", regex_opts };

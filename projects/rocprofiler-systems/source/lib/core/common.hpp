@@ -22,10 +22,10 @@
 
 #pragma once
 
-#include "categories.hpp"
 #include "common/join.hpp"
-#include "concepts.hpp"
-#include "defines.hpp"
+#include "core/categories.hpp"
+#include "core/concepts.hpp"
+#include "core/defines.hpp"
 
 #include <timemory/api.hpp>
 #include <timemory/api/macros.hpp>

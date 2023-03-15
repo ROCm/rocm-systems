@@ -97,7 +97,7 @@ e.g., omnitrace's meaning of the term "module" when instrumenting Python.
   - Binary rewrites only instrument the functions defined in the target binary, whereas runtime instrumentation can/will instrument functions defined in the shared libraries which are linked into the target binary
 - When using binary instrumentation with MPI, avoid runtime instrumentation
   - Runtime instrumentation requires a fork + ptrace: which is generally incompatible with how MPI applications spawn their processes
-  - Binary rewrite the executable using MPI (and, optionally, libraries used by the executable) and execute the generated instrumented executable instead of the original, e.g. `mpirun -n 2 ./myexe` should be `mpirun -n 2 ./myexe.inst` where `myexe.inst` is the generated instrumented `myexe` executable.
+  - Binary rewrite the executable using MPI (and, optionally, libraries used by the executable) and execute the generated instrumented executable via `omnitrace-run` instead of the original, e.g. `mpirun -n 2 ./myexe` should be `mpirun -n 2 omnitrace-run -- ./myexe.inst` where `myexe.inst` is the generated instrumented `myexe` executable.
 
 ## Data Collection Mode(s)
 

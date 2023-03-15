@@ -22,6 +22,7 @@
 
 #include "omnitrace-instrument.hpp"
 #include "common/defines.h"
+#include "dl/dl.hpp"
 #include "fwd.hpp"
 #include "internal_libs.hpp"
 #include "log.hpp"
@@ -56,6 +57,7 @@
 #include <string>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <thread>
 #include <tuple>
 #include <unistd.h>
@@ -86,6 +88,8 @@ get_default_min_address_range()
 }
 }  // namespace
 
+using InstrumentMode = ::omnitrace::dl::InstrumentMode;
+
 bool   use_return_info              = false;
 bool   use_args_info                = false;
 bool   use_file_info                = false;
@@ -108,7 +112,7 @@ bool   include_uninstr              = false;
 bool   include_internal_linked_libs = false;
 int    verbose_level   = tim::get_env<int>("OMNITRACE_VERBOSE_INSTRUMENT", 0);
 int    num_log_entries = tim::get_env<int>(
-    "OMNITRACE_LOG_COUNT", tim::get_env<bool>("OMNITRACE_CI", false) ? 20 : -1);
+    "OMNITRACE_LOG_COUNT", tim::get_env<bool>("OMNITRACE_CI", false) ? 20 : 50);
 string_t main_fname         = "main";
 string_t argv0              = {};
 string_t cmdv0              = {};
@@ -1410,8 +1414,27 @@ main(int argc, char** argv)
     //
     //----------------------------------------------------------------------------------//
 
-    addr_space =
-        omnitrace_get_address_space(bpatch, _cmdc, _cmdv, binary_rewrite, _pid, mutname);
+    // prioritize the user environment arguments
+    auto instr_mode_v     = (binary_rewrite) ? InstrumentMode::BinaryRewrite
+                            : (_pid < 0)     ? InstrumentMode::ProcessCreate
+                                             : InstrumentMode::ProcessAttach;
+    auto instr_mode_v_int = static_cast<int>(instr_mode_v);
+    auto env_vars         = parser.get<strvec_t>("env");
+    env_vars.reserve(env_vars.size() + env_config_variables.size());
+    for(auto&& itr : env_config_variables)
+        env_vars.emplace_back(itr);
+    env_vars.emplace_back(TIMEMORY_JOIN('=', "OMNITRACE_MODE", instr_mode));
+    env_vars.emplace_back(
+        TIMEMORY_JOIN('=', "OMNITRACE_INSTRUMENT_MODE", instr_mode_v_int));
+    env_vars.emplace_back(TIMEMORY_JOIN('=', "OMNITRACE_MPI_INIT", "OFF"));
+    env_vars.emplace_back(TIMEMORY_JOIN('=', "OMNITRACE_MPI_FINALIZE", "OFF"));
+    env_vars.emplace_back(
+        TIMEMORY_JOIN('=', "OMNITRACE_TIMEMORY_COMPONENTS", default_components));
+    env_vars.emplace_back(TIMEMORY_JOIN('=', "OMNITRACE_USE_CODE_COVERAGE",
+                                        (coverage_mode != CODECOV_NONE) ? "ON" : "OFF"));
+
+    addr_space = omnitrace_get_address_space(bpatch, _cmdc, _cmdv, env_vars,
+                                             binary_rewrite, _pid, mutname);
 
     // addr_space->allowTraps(instr_traps);
 
@@ -1704,14 +1727,15 @@ main(int argc, char** argv)
 
     verbprintf(0, "Finding instrumentation functions...\n");
 
-    auto* init_func    = find_function(app_image, "omnitrace_init");
-    auto* fini_func    = find_function(app_image, "omnitrace_finalize");
-    auto* env_func     = find_function(app_image, "omnitrace_set_env");
-    auto* mpi_func     = find_function(app_image, "omnitrace_set_mpi");
-    auto* entr_trace   = find_function(app_image, "omnitrace_push_trace");
-    auto* exit_trace   = find_function(app_image, "omnitrace_pop_trace");
-    auto* reg_src_func = find_function(app_image, "omnitrace_register_source");
-    auto* reg_cov_func = find_function(app_image, "omnitrace_register_coverage");
+    auto* init_func      = find_function(app_image, "omnitrace_init");
+    auto* fini_func      = find_function(app_image, "omnitrace_finalize");
+    auto* env_func       = find_function(app_image, "omnitrace_set_env");
+    auto* mpi_func       = find_function(app_image, "omnitrace_set_mpi");
+    auto* entr_trace     = find_function(app_image, "omnitrace_push_trace");
+    auto* exit_trace     = find_function(app_image, "omnitrace_pop_trace");
+    auto* reg_src_func   = find_function(app_image, "omnitrace_register_source");
+    auto* reg_cov_func   = find_function(app_image, "omnitrace_register_coverage");
+    auto* set_instr_func = find_function(app_image, "omnitrace_set_instrumented");
 
     if(!main_func && main_fname == "main") main_func = find_function(app_image, "_main");
 
@@ -1828,12 +1852,14 @@ main(int argc, char** argv)
 
     using pair_t = std::pair<procedure_t*, string_t>;
 
-    for(const auto& itr :
-        { pair_t(entr_trace, "omnitrace_push_trace"),
-          pair_t(exit_trace, "omnitrace_pop_trace"), pair_t(init_func, "omnitrace_init"),
-          pair_t(fini_func, "omnitrace_finalize"), pair_t(env_func, "omnitrace_set_env"),
-          pair_t(reg_src_func, "omnitrace_register_source"),
-          pair_t(reg_cov_func, "omnitrace_register_coverage") })
+    for(const auto& itr : { pair_t{ entr_trace, "omnitrace_push_trace" },
+                            pair_t{ exit_trace, "omnitrace_pop_trace" },
+                            pair_t{ init_func, "omnitrace_init" },
+                            pair_t{ fini_func, "omnitrace_finalize" },
+                            pair_t{ env_func, "omnitrace_set_env" },
+                            pair_t{ set_instr_func, "omnitrace_set_instrumented" },
+                            pair_t{ reg_src_func, "omnitrace_register_source" },
+                            pair_t{ reg_cov_func, "omnitrace_register_coverage" } })
     {
         if(!itr.first)
         {
@@ -1888,19 +1914,20 @@ main(int argc, char** argv)
     if(main_func) main_sign.get();
 
     auto main_call_args = omnitrace_call_expr(main_sign.get());
-    auto init_call_args = omnitrace_call_expr(instr_mode, binary_rewrite, _init_arg0);
+    auto init_call_args = omnitrace_call_expr(instr_mode, binary_rewrite, "");
     auto fini_call_args = omnitrace_call_expr();
     auto umpi_call_args = omnitrace_call_expr(use_mpi, is_attached);
     auto none_call_args = omnitrace_call_expr();
+    auto set_instr_args = omnitrace_call_expr(instr_mode_v_int);
 
     verbprintf(2, "Done\n");
     verbprintf(2, "Getting call snippets... ");
 
-    auto init_call = init_call_args.get(init_func);
-    auto fini_call = fini_call_args.get(fini_func);
-    auto umpi_call = umpi_call_args.get(mpi_func);
-
-    auto main_beg_call = main_call_args.get(entr_trace);
+    auto init_call      = init_call_args.get(init_func);
+    auto fini_call      = fini_call_args.get(fini_func);
+    auto umpi_call      = umpi_call_args.get(mpi_func);
+    auto set_instr_call = set_instr_args.get(set_instr_func);
+    auto main_beg_call  = main_call_args.get(entr_trace);
 
     verbprintf(2, "Done\n");
 
@@ -1924,35 +1951,27 @@ main(int argc, char** argv)
     }
     if(_libname.empty()) _libname = "libomnitrace-dl.so";
 
-    // prioritize the user environment arguments
-    auto env_vars = parser.get<strvec_t>("env");
-    env_vars.reserve(env_vars.size() + env_config_variables.size());
-    for(auto&& itr : env_config_variables)
-        env_vars.emplace_back(itr);
-    env_vars.emplace_back(TIMEMORY_JOIN('=', "OMNITRACE_MODE", instr_mode));
-    env_vars.emplace_back(TIMEMORY_JOIN('=', "OMNITRACE_MPI_INIT", "OFF"));
-    env_vars.emplace_back(TIMEMORY_JOIN('=', "OMNITRACE_MPI_FINALIZE", "OFF"));
+    if(!binary_rewrite && !is_attached) env_vars.clear();
+
     env_vars.emplace_back(
         TIMEMORY_JOIN('=', "OMNITRACE_INIT_ENABLED",
                       (user_start_func && user_stop_func) ? "OFF" : "ON"));
-    env_vars.emplace_back(
-        TIMEMORY_JOIN('=', "OMNITRACE_TIMEMORY_COMPONENTS", default_components));
     env_vars.emplace_back(TIMEMORY_JOIN('=', "OMNITRACE_USE_MPIP",
                                         (binary_rewrite && use_mpi) ? "ON" : "OFF"));
-    env_vars.emplace_back(TIMEMORY_JOIN('=', "OMNITRACE_USE_CODE_COVERAGE",
-                                        (coverage_mode != CODECOV_NONE) ? "ON" : "OFF"));
     if(use_mpi) env_vars.emplace_back(TIMEMORY_JOIN('=', "OMNITRACE_USE_PID", "ON"));
 
     for(auto& itr : env_vars)
     {
-        auto p = tim::delimit(itr, "=");
-        if(p.size() != 2)
+        auto _pos = itr.find('=');
+        if(_pos == std::string::npos)
         {
             errprintf(0, "environment variable %s not in form VARIABLE=VALUE\n",
                       itr.c_str());
         }
-        tim::set_env(p.at(0), p.at(1));
-        auto _expr = omnitrace_call_expr(p.at(0), p.at(1));
+        auto _var = itr.substr(0, _pos);
+        auto _val = itr.substr(_pos + 1);
+        tim::set_env(_var, _val);
+        auto _expr = omnitrace_call_expr(_var, _val);
         env_variables.emplace_back(_expr.get(env_func));
     }
 
@@ -1961,6 +1980,12 @@ main(int argc, char** argv)
     //  Configure the initialization and finalization routines
     //
     //----------------------------------------------------------------------------------//
+
+    // call into omnitrace-dl to notify that instrumentation is occurring
+    if(binary_rewrite)
+    {
+        init_names.emplace(init_names.begin(), set_instr_call.get());
+    }
 
     for(const auto& itr : env_variables)
     {
@@ -1981,8 +2006,9 @@ main(int argc, char** argv)
     }
 
     if(umpi_call) init_names.emplace_back(umpi_call.get());
-    if(init_call) init_names.emplace_back(init_call.get());
-    if(main_func && main_beg_call) init_names.emplace_back(main_beg_call.get());
+    if(!binary_rewrite && init_call) init_names.emplace_back(init_call.get());
+    if(is_attached && main_func && main_beg_call)
+        init_names.emplace_back(main_beg_call.get());
 
     for(const auto& itr : end_expr)
         if(itr.second) fini_names.emplace_back(itr.second.get());
@@ -2047,34 +2073,56 @@ main(int argc, char** argv)
     auto _init_sequence = sequence_t{ init_names };
     auto _fini_sequence = sequence_t{ fini_names };
 
-    if(app_thread && is_attached)
+    if(!is_attached)
     {
-        assert(app_thread != nullptr);
-        verbprintf(1, "Executing initial snippets...\n");
-        for(auto* itr : init_names)
-            app_thread->oneTimeCode(*itr);
-    }
-    else
-    {
-        if(main_entr_points)
-        {
-            verbprintf(1, "Adding main entry snippets...\n");
-            addr_space->insertSnippet(_init_sequence, *main_entr_points);
-            // insert_instr(addr_space, *main_entr_points, _init_sequence, BPatch_entry);
-        }
-        else
-        {
+        auto _insert_init_callbacks = std::function<bool()>{};
+        auto _insert_init_snippets  = std::function<bool()>{};
+
+        _insert_init_snippets = [&]() {
+            if(main_entr_points)
+            {
+                verbprintf(1, "Adding main entry snippets...\n");
+                addr_space->insertSnippet(_init_sequence, *main_entr_points);
+            }
+            else
+            {
+                errprintf(0, "Dyninst error inserting main entry snippets: no main entry "
+                             "points\n");
+                return false;
+            }
+            return true;
+        };
+
+        _insert_init_callbacks = [&]() {
+            verbprintf(1, "Adding main init callbacks...\n");
+            size_t _ninits = 0;
             for(auto* itr : _objs)
             {
+                if(itr->name().find("libomnitrace") != std::string::npos) continue;
                 try
                 {
-                    itr->insertInitCallback(_init_sequence);
+                    verbprintf(2, "Adding main init callbacks (via %s)...\n",
+                               itr->name().c_str());
+                    if(itr->insertInitCallback(_init_sequence))
+                    {
+                        ++_ninits;
+                    }
                 } catch(std::runtime_error& _e)
                 {
                     errprintf(0, "Dyninst error inserting init callback: %s\n",
                               _e.what());
                 }
             }
+            return (_ninits > 0);
+        };
+
+        if(binary_rewrite)
+        {
+            if(!_insert_init_callbacks()) _insert_init_snippets();
+        }
+        else
+        {
+            if(!_insert_init_snippets()) _insert_init_callbacks();
         }
     }
 
@@ -2469,6 +2517,12 @@ main(int argc, char** argv)
         }
         else if(!app_thread->isTerminated() && is_attached)
         {
+            bpatch->setDebugParsing(false);
+            bpatch->setDelayedParsing(true);
+            verbprintf(1, "Executing initial snippets...\n");
+            for(auto* itr : init_names)
+                app_thread->oneTimeCode(*itr);
+
             app_thread->continueExecution();
             while(!app_thread->isTerminated())
             {
@@ -2492,7 +2546,7 @@ main(int argc, char** argv)
     delete[] _cmdv;
 
     verbprintf(0, "End of omnitrace\n");
-    verbprintf(1, "Exit code: %i\n", code);
+    verbprintf((code != 0) ? 0 : 1, "Exit code: %i\n", code);
 
     if(log_ofs)
     {

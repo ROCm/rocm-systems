@@ -187,7 +187,7 @@ test-omnitrace-rewrite()
     verbose-run omnitrace-instrument -e -v 1 -o ${CONFIG_DIR}/ls.inst --simulate -- ${LS_NAME}
     for i in $(find ${CONFIG_DIR}/omnitrace-tests-output/ls.inst -type f); do verbose-run ls ${i}; done
     verbose-run omnitrace-instrument -e -v 1 -o ${CONFIG_DIR}/ls.inst -- ${LS_NAME}
-    verbose-run ${CONFIG_DIR}/ls.inst ${LS_ARGS}
+    verbose-run omnitrace-run -- ${CONFIG_DIR}/ls.inst ${LS_ARGS}
 }
 
 test-omnitrace-runtime()

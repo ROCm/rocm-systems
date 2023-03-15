@@ -17,8 +17,8 @@ add_library(omnitrace::omnitrace-dl-library ALIAS omnitrace-dl-library)
 
 target_sources(
     omnitrace-dl-library
-    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/dl.cpp ${CMAKE_CURRENT_SOURCE_DIR}/dl.hpp
-            ${CMAKE_CURRENT_SOURCE_DIR}/main.c)
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/dl.cpp ${CMAKE_CURRENT_SOURCE_DIR}/main.c
+            ${CMAKE_CURRENT_SOURCE_DIR}/dl/dl.hpp)
 target_include_directories(
     omnitrace-dl-library
     PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
@@ -44,7 +44,7 @@ set_target_properties(
 
 omnitrace_strip_target(omnitrace-dl-library)
 
-install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/dl.hpp
-        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/omnitrace)
+install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/dl/dl.hpp
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/omnitrace/dl)
 
 install(TARGETS omnitrace-dl-library DESTINATION ${CMAKE_INSTALL_LIBDIR})

@@ -19,6 +19,7 @@ add_subdirectory(omnitrace-critical-trace)
 add_subdirectory(omnitrace-causal)
 add_subdirectory(omnitrace-sample)
 add_subdirectory(omnitrace-instrument)
+add_subdirectory(omnitrace-run)
 # omnitrace-exe is deprecated
 add_subdirectory(omnitrace-exe)
 

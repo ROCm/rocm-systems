@@ -15,7 +15,7 @@ Call-stack sampling can be activated with either a binary instrumented via the `
 
 ```console
 omnitrace-instrument -M sampling -o foo.inst -- foo
-./foo.inst
+omnitrace-run -- ./foo.inst
 ```
 
 - Runtime instrumentation with only instrumentation necessary to start/stop sampling

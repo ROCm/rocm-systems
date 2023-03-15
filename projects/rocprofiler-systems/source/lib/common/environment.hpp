@@ -26,8 +26,10 @@
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
+#include <stdexcept>
 #include <string>
 #include <string_view>
+#include <type_traits>
 
 namespace omnitrace
 {
@@ -36,7 +38,7 @@ inline namespace common
 namespace
 {
 inline std::string
-get_env(std::string_view env_id, std::string_view _default)
+get_env_impl(std::string_view env_id, std::string_view _default)
 {
     if(env_id.empty()) return std::string{ _default };
     char* env_var = ::std::getenv(env_id.data());
@@ -45,13 +47,13 @@ get_env(std::string_view env_id, std::string_view _default)
 }
 
 inline std::string
-get_env(std::string_view env_id, const char* _default)
+get_env_impl(std::string_view env_id, const char* _default)
 {
-    return get_env(env_id, std::string_view{ _default });
+    return get_env_impl(env_id, std::string_view{ _default });
 }
 
 inline int
-get_env(std::string_view env_id, int _default)
+get_env_impl(std::string_view env_id, int _default)
 {
     if(env_id.empty()) return _default;
     char* env_var = ::std::getenv(env_id.data());
@@ -73,15 +75,21 @@ get_env(std::string_view env_id, int _default)
 }
 
 inline bool
-get_env(std::string_view env_id, bool _default)
+get_env_impl(std::string_view env_id, bool _default)
 {
     if(env_id.empty()) return _default;
     char* env_var = ::std::getenv(env_id.data());
     if(env_var)
     {
+        if(std::string_view{ env_var }.empty())
+            throw std::runtime_error(std::string{ "No boolean value provided for " } +
+                                     std::string{ env_id });
+
         if(std::string_view{ env_var }.find_first_not_of("0123456789") ==
            std::string_view::npos)
+        {
             return static_cast<bool>(std::stoi(env_var));
+        }
         else
         {
             for(size_t i = 0; i < strlen(env_var); ++i)
@@ -92,6 +100,22 @@ get_env(std::string_view env_id, bool _default)
         return true;
     }
     return _default;
+}
+
+template <typename Tp>
+inline auto
+get_env(std::string_view env_id, Tp&& _default)
+{
+    if constexpr(std::is_enum<Tp>::value)
+    {
+        using Up = std::underlying_type_t<Tp>;
+        // cast to underlying type -> get_env -> cast to enum type
+        return static_cast<Tp>(get_env_impl(env_id, static_cast<Up>(_default)));
+    }
+    else
+    {
+        return get_env_impl(env_id, std::forward<Tp>(_default));
+    }
 }
 }  // namespace
 }  // namespace common

@@ -117,7 +117,7 @@ print_command(const std::vector<char*>& _argv)
 std::vector<char*>
 get_initial_environment()
 {
-    std::vector<char*> _env;
+    auto _env = std::vector<char*>{};
     if(environ != nullptr)
     {
         int idx = 0;
@@ -497,7 +497,7 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
         .count(1)
         .dtype("filepath")
         .action([&](parser_t& p) {
-            update_env(_env, "OMNITRACE_PERFETTO_FILE", p.get<int64_t>("trace-file"));
+            update_env(_env, "OMNITRACE_PERFETTO_FILE", p.get<std::string>("trace-file"));
         });
     parser
         .add_argument({ "--trace-buffer-size" },
@@ -634,7 +634,7 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
         .requires({ "host" })
         .action([&](parser_t& p) {
             update_env(
-                _env, "OMNITRACE_PROCESS_SAMPLING_CPUS",
+                _env, "OMNITRACE_SAMPLING_CPUS",
                 join(array_config{ "," }, p.get<std::vector<std::string>>("cpus")));
         });
     parser
@@ -644,7 +644,7 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
         .requires({ "device" })
         .action([&](parser_t& p) {
             update_env(
-                _env, "OMNITRACE_PROCESS_SAMPLING_GPUS",
+                _env, "OMNITRACE_SAMPLING_GPUS",
                 join(array_config{ "," }, p.get<std::vector<std::string>>("gpus")));
         });
 

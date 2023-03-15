@@ -197,7 +197,7 @@ Once you have rewritten your executable and/or libraries with instrumentation, y
 or exectuable which loads the instrumented libraries normally, e.g.:
 
 ```shell
-./app.inst
+omnitrace-run -- ./app.inst
 ```
 
 If you want to re-define certain settings to new default in a binary rewrite, use the `--env` option. This `omnitrace` option
@@ -207,7 +207,7 @@ is 1024000 KB (1 GiB):
 ```shell
 # buffer size defaults to 1024000
 omnitrace-instrument -o app.inst -- /path/to/app
-./app.inst
+omnitrace-run -- ./app.inst
 ```
 
 Passing `--env OMNITRACE_PERFETTO_BUFFER_SIZE_KB=5120000` will change the default value in `app.inst` to 5120000 KiB (5 GiB):
@@ -215,13 +215,15 @@ Passing `--env OMNITRACE_PERFETTO_BUFFER_SIZE_KB=5120000` will change the defaul
 ```shell
 # defaults to 5 GiB buffer size
 omnitrace-instrument -o app.inst --env OMNITRACE_PERFETTO_BUFFER_SIZE_KB=5120000 -- /path/to/app
-./app.inst
+omnitrace-run -- ./app.inst
 ```
 
 ```shell
-# override default 5 GiB buffer size to 200 MB
+# override default 5 GiB buffer size to 200 MB via command-line
+omnitrace-run --trace-buffer-size=200000 -- ./app.inst
+# override default 5 GiB buffer size to 200 MB via environment
 export OMNITRACE_PERFETTO_BUFFER_SIZE_KB=200000
-./app.inst
+omnitrace-run -- ./app.inst
 ```
 
 #### Runtime Instrumentation
@@ -319,21 +321,18 @@ perfetto --out ./omnitrace-perfetto.proto --txt -c ${OMNITRACE_ROOT}/share/omnit
 > ***NOTE: if the perfetto tools were installed by omnitrace, replace `traced` with `omnitrace-perfetto-traced` and***
 > ***`perfetto` with `omnitrace-perfetto`.***
 
-Configure omnitrace to use the perfetto system backend:
+Configure omnitrace to use the perfetto system backend via the `--perfetto-backend` option of `omnitrace-run`:
 
 ```shell
-export OMNITRACE_PERFETTO_BACKEND=system
-```
-
-And finally, execute your instrumented application. Either the binary rewritten application:
-
-```shell
+# enable sampling on the uninstrumented binary
+omnitrace-run --sample --trace --perfetto-backend=system -- ./myapp
+# trace the instrument the binary
 omnitrace-instrument -o ./myapp.inst -- ./myapp
-./myapp.inst
+omnitrace-run --trace --perfetto-backend=system -- ./myapp.inst
 ```
 
-Or with runtime instrumentation:
+or via the `--env` option of `omnitrace-instrument` + runtime instrumentation:
 
 ```shell
-omnitrace-instrument -- ./myapp
+omnitrace-instrument --env OMNITRACE_PERFETTO_BACKEND=system -- ./myapp
 ```

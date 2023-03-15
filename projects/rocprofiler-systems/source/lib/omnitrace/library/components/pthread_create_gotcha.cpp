@@ -36,6 +36,7 @@
 #include <timemory/backends/threading.hpp>
 #include <timemory/components/macros.hpp>
 #include <timemory/components/timing/wall_clock.hpp>
+#include <timemory/mpl/types.hpp>
 #include <timemory/sampling/allocator.hpp>
 #include <timemory/utility/types.hpp>
 
@@ -76,6 +77,7 @@ inline void
 start_bundle(bundle_t& _bundle, Args&&... _args)
 {
     if(!get_use_timemory() && !get_use_perfetto()) return;
+    trait::runtime_enabled<comp::roctracer_data>::set(get_use_roctracer());
     OMNITRACE_BASIC_VERBOSE_F(3, "starting bundle '%s'...\n", _bundle.key().c_str());
     if constexpr(sizeof...(Args) > 0)
     {

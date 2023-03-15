@@ -169,11 +169,7 @@ custom_push_region(const char* name)
 ```console
 $ omnitrace-instrument -l --min-instructions=8 -E custom_push_region -o -- ./user-api
 ...
-$ export OMNITRACE_USE_TIMEMORY=ON
-$ export OMNITRACE_USE_PID=OFF
-$ export OMNITRACE_TIME_OUTPUT=OFF
-$ export OMNITRACE_OUTPUT_PATH=omnitrace-example-output
-$ ./user-api.inst 20 4 100
+$ omnitrace-run --profile --use-pid off --time-output off -- ./user-api.inst 20 4 100
 Pushing custom region :: ./user-api.inst
 [omnitrace][omnitrace_init_tooling] Instrumentation mode: Trace
 

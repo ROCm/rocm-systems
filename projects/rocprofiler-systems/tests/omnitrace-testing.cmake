@@ -257,7 +257,7 @@ endif()
 
 function(OMNITRACE_WRITE_TEST_CONFIG _FILE _ENV)
     set(_ENV_ONLY
-        "OMNITRACE_(MODE|USE_MPIP|DEBUG_SETTINGS|FORCE_ROCPROFILER_INIT|DEFAULT_MIN_INSTRUCTIONS|MONOCHROME|VERBOSE)="
+        "OMNITRACE_(CI|MODE|USE_MPIP|DEBUG_SETTINGS|FORCE_ROCPROFILER_INIT|DEFAULT_MIN_INSTRUCTIONS|MONOCHROME|VERBOSE)="
         )
     set(_FILE_CONTENTS)
     set(_ENV_CONTENTS)
@@ -434,8 +434,8 @@ function(OMNITRACE_ADD_TEST)
             add_test(
                 NAME ${TEST_NAME}-binary-rewrite-run
                 COMMAND
-                    ${COMMAND_PREFIX} $<TARGET_FILE_DIR:${TEST_TARGET}>/${TEST_NAME}.inst
-                    ${TEST_RUN_ARGS}
+                    ${COMMAND_PREFIX} $<TARGET_FILE:omnitrace-run> --
+                    $<TARGET_FILE_DIR:${TEST_TARGET}>/${TEST_NAME}.inst ${TEST_RUN_ARGS}
                 WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
         endif()
 
@@ -451,8 +451,8 @@ function(OMNITRACE_ADD_TEST)
             add_test(
                 NAME ${TEST_NAME}-binary-rewrite-sampling-run
                 COMMAND
-                    ${COMMAND_PREFIX} $<TARGET_FILE_DIR:${TEST_TARGET}>/${TEST_NAME}.samp
-                    ${TEST_RUN_ARGS}
+                    ${COMMAND_PREFIX} $<TARGET_FILE:omnitrace-run> --
+                    $<TARGET_FILE_DIR:${TEST_TARGET}>/${TEST_NAME}.samp ${TEST_RUN_ARGS}
                 WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
         endif()
 

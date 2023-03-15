@@ -55,6 +55,7 @@ target_include_directories(
               $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/source/lib/core>
               $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/source/lib>
               $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/source/lib/omnitrace>
+              $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/source/lib/omnitrace-dl>
               $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/source/lib/omnitrace-user>)
 
 # include threading because of rooflines

@@ -410,3 +410,119 @@ omnitrace_add_bin_test(
     PASS_REGEX
         "OMNITRACE_CONFIG_FILE(.*)OMNITRACE_ENABLED(.*)OMNITRACE_SUPPRESS_CONFIG(.*)OMNITRACE_SUPPRESS_PARSING(.*)OMNITRACE_VERBOSE"
     )
+
+omnitrace_add_bin_test(
+    NAME omnitrace-run-help
+    TARGET omnitrace-run
+    ARGS --help
+    TIMEOUT 45
+    LABELS "omnitrace-run")
+
+file(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}/omnitrace-tests-config")
+file(
+    WRITE "${PROJECT_BINARY_DIR}/omnitrace-tests-config/empty.cfg"
+    "
+#
+# empty config file
+#
+")
+
+add_executable(sleeper ${CMAKE_CURRENT_SOURCE_DIR}/sleeper.cpp)
+set_target_properties(
+    sleeper PROPERTIES BUILD_TYPE RelWithDebInfo RUNTIME_OUTPUT_DIRECTORY
+                                                 ${PROJECT_BINARY_DIR}/bin/testing)
+
+omnitrace_add_bin_test(
+    NAME omnitrace-run-args
+    TARGET omnitrace-run
+    ARGS --monochrome
+         --debug=false
+         -v
+         1
+         -c
+         %env{TWD}%/omnitrace-tests-config/empty.cfg
+         -o
+         omnitrace-tests-output
+         omnitrace-run-args-output/
+         -TPHD
+         -S
+         cputime
+         realtime
+         --trace-wait=1.0e-12
+         --trace-duration=5.0
+         --wait=1.0
+         --duration=3.0
+         --trace-file=perfetto-run-args-trace.proto
+         --trace-buffer-size=100
+         --trace-fill-policy=ring_buffer
+         --profile-format
+         console
+         json
+         text
+         --process-freq
+         1000
+         --process-wait
+         0.0
+         --process-duration
+         10
+         --cpus
+         0-4
+         --gpus
+         0
+         -f
+         1000
+         --sampling-wait
+         1.0
+         --sampling-duration
+         10
+         -t
+         0-3
+         --sample-cputime
+         1000
+         1.0
+         0-3
+         --sample-realtime
+         10
+         0.5
+         0-3
+         -I
+         all
+         -E
+         mutex-locks
+         rw-locks
+         spin-locks
+         -C
+         perf::INSTRUCTIONS
+         --inlines
+         --hsa-interrupt
+         0
+         --use-causal=false
+         --use-kokkosp
+         --num-threads-hint=4
+         --sampling-allocator-size=32
+         --ci
+         --dl-verbose=3
+         --perfetto-annotations=off
+         --kokkosp-kernel-logger
+         --kokkosp-name-length-max=1024
+         --kokkosp-prefix="[kokkos]"
+         --tmpdir
+         ${CMAKE_BINARY_DIR}/omnitrace-tests-config/tmpdir
+         --perfetto-backend
+         inprocess
+         --use-pid
+         false
+         --time-output
+         off
+         --thread-pool-size
+         0
+         --timemory-components
+         wall_clock
+         cpu_clock
+         peak_rss
+         page_rss
+         --
+         $<TARGET_FILE:sleeper>
+         5
+    TIMEOUT 45
+    LABELS "omnitrace-run")

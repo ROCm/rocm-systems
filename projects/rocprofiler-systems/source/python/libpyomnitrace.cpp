@@ -21,7 +21,7 @@
 // SOFTWARE.
 
 #include "libpyomnitrace.hpp"
-#include "dl.hpp"
+#include "dl/dl.hpp"
 #include "library/coverage.hpp"
 #include "library/coverage/impl.hpp"
 #include "omnitrace/categories.h"
@@ -123,6 +123,8 @@ PYBIND11_MODULE(libpyomnitrace, omni)
             if(_is_initialized)
                 throw std::runtime_error("Error! omnitrace is already initialized");
             _is_initialized = true;
+            omnitrace_set_instrumented(
+                static_cast<int>(omnitrace::dl::InstrumentMode::PythonProfile));
             omnitrace_set_mpi(_get_use_mpi(), false);
             std::string _cmd      = {};
             std::string _cmd_line = {};

@@ -3,6 +3,7 @@ configure_file(${CMAKE_CURRENT_SOURCE_DIR}/defines.hpp.in
                ${CMAKE_CURRENT_BINARY_DIR}/defines.hpp @ONLY)
 
 set(core_sources
+    ${CMAKE_CURRENT_LIST_DIR}/argparse.cpp
     ${CMAKE_CURRENT_LIST_DIR}/categories.cpp
     ${CMAKE_CURRENT_LIST_DIR}/config.cpp
     ${CMAKE_CURRENT_LIST_DIR}/constraint.cpp
@@ -16,6 +17,7 @@ set(core_sources
     ${CMAKE_CURRENT_LIST_DIR}/timemory.cpp)
 
 set(core_headers
+    ${CMAKE_CURRENT_LIST_DIR}/argparse.hpp
     ${CMAKE_CURRENT_LIST_DIR}/categories.hpp
     ${CMAKE_CURRENT_LIST_DIR}/common.hpp
     ${CMAKE_CURRENT_LIST_DIR}/concepts.hpp

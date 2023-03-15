@@ -22,8 +22,9 @@
 
 #define _GNU_SOURCE
 
-#define OMNITRACE_PUBLIC_API __attribute__((visibility("default")));
-#define OMNITRACE_HIDDEN_API __attribute__((visibility("hidden")));
+#define OMNITRACE_PUBLIC_API   __attribute__((visibility("default")));
+#define OMNITRACE_HIDDEN_API   __attribute__((visibility("hidden")));
+#define OMNITRACE_INTERNAL_API __attribute__((visibility("internal")));
 
 #include <dlfcn.h>
 #include <stdbool.h>
@@ -35,25 +36,18 @@
 //
 // local type definitions
 //
+typedef int (*main_func_t)(int, char**, char**);
 typedef int (*start_main_t)(int (*)(int, char**, char**), int, char**,
                             int (*)(int, char**, char**), void (*)(void), void (*)(void),
                             void*);
 
 //
-// local variables
-//
-static int (*main_real)(int, char**, char**);  // Trampoline for the real main()
-
-//
 // local function declarations
 //
 int
-omnitrace_main(int, char**, char**) OMNITRACE_HIDDEN_API;
-
-int
 omnitrace_libc_start_main(int (*)(int, char**, char**), int, char**,
                           int (*)(int, char**, char**), void (*)(void), void (*)(void),
-                          void*) OMNITRACE_HIDDEN_API;
+                          void*) OMNITRACE_INTERNAL_API;
 
 int
 __libc_start_main(int (*)(int, char**, char**), int, char**, int (*)(int, char**, char**),
@@ -80,32 +74,13 @@ omnitrace_init_tooling(void);
 extern void
 omnitrace_init(const char*, bool, const char*);
 
-//
-//  local function definitions
-//
-int
-omnitrace_main(int argc, char** argv, char** envp)
-{
-    // prevent re-entry
-    static int _reentry = 0;
-    if(_reentry > 0) return -1;
-    _reentry = 1;
+extern char*
+basename(const char*);
 
-    // set the relevant environment variables
-    // omnitrace_update_env(&envp);
+extern void omnitrace_set_main(main_func_t) OMNITRACE_INTERNAL_API;
 
-    const char* mode = getenv("OMNITRACE_MODE");
-    omnitrace_init(mode ? mode : "sampling", false, argv[0]);
-    omnitrace_init_tooling();
-    omnitrace_push_trace(basename(argv[0]));
-
-    int ret = main_real(argc, argv, envp);
-
-    omnitrace_pop_trace(basename(argv[0]));
-    omnitrace_finalize();
-
-    return ret;
-}
+extern int
+omnitrace_main(int argc, char** argv, char** envp) OMNITRACE_INTERNAL_API;
 
 int
 omnitrace_libc_start_main(int (*_main)(int, char**, char**), int _argc, char** _argv,
@@ -123,7 +98,7 @@ omnitrace_libc_start_main(int (*_main)(int, char**, char**), int _argc, char** _
     void* _this_func = __builtin_return_address(0);
 
     // Save the real main function address
-    main_real = _main;
+    omnitrace_set_main(_main);
 
     // Find the real __libc_start_main()
     start_main_t user_main = dlsym(RTLD_NEXT, "__libc_start_main");
@@ -136,8 +111,7 @@ omnitrace_libc_start_main(int (*_main)(int, char**, char**), int _argc, char** _
         if(_preload == 0)
         {
             // call original main
-            return user_main(main_real, _argc, _argv, _init, _fini, _rtld_fini,
-                             _stack_end);
+            return user_main(_main, _argc, _argv, _init, _fini, _rtld_fini, _stack_end);
         }
         else
         {

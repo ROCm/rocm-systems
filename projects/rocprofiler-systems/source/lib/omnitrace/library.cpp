@@ -150,7 +150,7 @@ ensure_finalization(bool _static_init = false)
                            _tid->system_value);
     }
 
-    if(get_env("OMNITRACE_MONOCHROME", false)) tim::log::monochrome() = true;
+    if(common::get_env("OMNITRACE_MONOCHROME", false)) tim::log::monochrome() = true;
 
     (void) tim::manager::instance();
     (void) tim::settings::shared_instance();
@@ -637,7 +637,7 @@ extern "C" void
 omnitrace_reset_preload_hidden(void)
 {
     tim::set_env("OMNITRACE_PRELOAD", "0", 1);
-    auto&& _preload_libs = get_env("LD_PRELOAD", std::string{});
+    auto&& _preload_libs = common::get_env("LD_PRELOAD", std::string{});
     if(_preload_libs.find("libomnitrace") != std::string::npos)
     {
         auto _modified_preload = std::string{};
@@ -732,7 +732,8 @@ omnitrace_finalize_hidden(void)
         if(dmp::rank() == 0)
         {
             OMNITRACE_PRINT_F("\n");
-            config::print_settings(get_env<bool>("OMNITRACE_PRINT_ENV", get_debug()));
+            config::print_settings(
+                tim::get_env<bool>("OMNITRACE_PRINT_ENV", get_debug()));
         }
     }
 

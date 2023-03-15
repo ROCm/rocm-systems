@@ -151,6 +151,7 @@ function(OMNITRACE_STRIP_TARGET)
                     --keep-symbol="omnitrace_pop_region" --keep-symbol="omnitrace_set_env"
                     --keep-symbol="omnitrace_set_mpi"
                     --keep-symbol="omnitrace_reset_preload"
+                    --keep-symbol="omnitrace_set_instrumented"
                     --keep-symbol="omnitrace_user_*" --keep-symbol="ompt_start_tool"
                     --keep-symbol="kokkosp_*" --keep-symbol="OnLoad"
                     --keep-symbol="OnUnload" --keep-symbol="OnLoadToolProp"

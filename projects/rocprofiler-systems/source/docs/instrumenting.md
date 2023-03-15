@@ -335,7 +335,7 @@ is consistent with the LLVM style of using a standalone double-hyphen (`--`). Al
 are interpreted as belonging to omnitrace and all arguments following the double-hyphen are interpreted as the
 application and it's arguments. In binary rewrite mode, all application arguments after the first argument
 are ignored, i.e. `./omnitrace-instrument -o ls.inst -- ls -l` interprets `ls` as the target to instrument (ignores the `-l` argument)
-and generates a `ls.inst` executable that you can subsequently run `ls.inst -l` with.
+and generates a `ls.inst` executable that you can subsequently run `omnitrace-run -- ls.inst -l` with.
 
 ## Runtime Instrumentation
 
@@ -781,7 +781,7 @@ For example, if the following sequence of commands are run:
 omnitrace-instrument -o ./foo.inst -- ./foo
 export OMNITRACE_USE_SAMPLING=ON
 export OMNITRACE_SAMPLING_FREQ=5
-./foo.inst
+omnitrace-run -- ./foo.inst
 ```
 
 These configuration settings will not be preserved in another session, whereas:
@@ -794,7 +794,7 @@ will preserve those environment variables:
 
 ```shell
 # will sample 5x per second
-./foo.samp
+omnitrace-run -- ./foo.samp
 ```
 
 while still allowing the subsequent session to override those defaults:
@@ -802,7 +802,7 @@ while still allowing the subsequent session to override those defaults:
 ```shell
 # will sample 100x per second
 export OMNITRACE_SAMPLING_FREQ=100
-./foo.samp
+omnitrace-run -- ./foo.samp
 ```
 
 ### Troubleshooting

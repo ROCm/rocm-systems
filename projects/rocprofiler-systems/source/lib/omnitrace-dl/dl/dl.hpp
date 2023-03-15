@@ -76,6 +76,7 @@ extern "C"
     void omnitrace_set_env(const char* env_name,
                            const char* env_val) OMNITRACE_PUBLIC_API;
     void omnitrace_set_mpi(bool use, bool attached) OMNITRACE_PUBLIC_API;
+    void omnitrace_set_instrumented(int) OMNITRACE_PUBLIC_API;
     void omnitrace_push_trace(const char* name) OMNITRACE_PUBLIC_API;
     void omnitrace_pop_trace(const char* name) OMNITRACE_PUBLIC_API;
     int  omnitrace_push_region(const char*) OMNITRACE_PUBLIC_API;
@@ -190,5 +191,21 @@ extern "C"
 #    endif
 #endif
 }
+
+namespace omnitrace
+{
+namespace dl
+{
+enum class InstrumentMode : int
+{
+    None          = -1,
+    BinaryRewrite = 0,
+    ProcessCreate = 1,  // runtime instrumentation at start of process
+    ProcessAttach = 2,  // runtime instrumentation of running process
+    PythonProfile = 3,  // python setprofile
+    Last,
+};
+}
+}  // namespace omnitrace
 
 #endif  // OMNITRACE_DL_HPP_ 1

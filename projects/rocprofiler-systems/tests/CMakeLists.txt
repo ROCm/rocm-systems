@@ -281,7 +281,7 @@ if(OMNITRACE_USE_MPI OR OMNITRACE_USE_MPI_HEADERS)
         ENVIRONMENT
             "${_flat_environment};OMNITRACE_USE_SAMPLING=OFF;OMNITRACE_STRICT_CONFIG=OFF;OMNITRACE_USE_MPIP=ON"
         REWRITE_RUN_PASS_REGEX
-            ">>> main(.*\n.*)>>> MPI_Init_thread(.*\n.*)>>> pthread_create(.*\n.*)>>> MPI_Comm_size(.*\n.*)>>> MPI_Comm_rank(.*\n.*)>>> MPI_Barrier(.*\n.*)>>> MPI_Alltoall"
+            ">>> mpi-flat-mpip.inst(.*\n.*)>>> MPI_Init_thread(.*\n.*)>>> pthread_create(.*\n.*)>>> MPI_Comm_size(.*\n.*)>>> MPI_Comm_rank(.*\n.*)>>> MPI_Barrier(.*\n.*)>>> MPI_Alltoall"
         )
 
     omnitrace_add_test(
@@ -303,7 +303,7 @@ if(OMNITRACE_USE_MPI OR OMNITRACE_USE_MPI_HEADERS)
             0
         ENVIRONMENT "${_flat_environment};OMNITRACE_USE_SAMPLING=OFF"
         REWRITE_RUN_PASS_REGEX
-            ">>> main(.*\n.*)>>> MPI_Init_thread(.*\n.*)>>> pthread_create(.*\n.*)>>> MPI_Comm_size(.*\n.*)>>> MPI_Comm_rank(.*\n.*)>>> MPI_Barrier(.*\n.*)>>> MPI_Alltoall"
+            ">>> mpi-flat.inst(.*\n.*)>>> MPI_Init_thread(.*\n.*)>>> pthread_create(.*\n.*)>>> MPI_Comm_size(.*\n.*)>>> MPI_Comm_rank(.*\n.*)>>> MPI_Barrier(.*\n.*)>>> MPI_Alltoall"
         )
 
     set(_mpip_environment
@@ -724,7 +724,7 @@ omnitrace_add_validation_test(
     LABELS "time-window"
     FAIL_REGEX "outer_d"
     ARGS -l
-         main
+         trace-time-window.inst
          outer_a
          outer_b
          outer_c
@@ -749,7 +749,7 @@ omnitrace_add_validation_test(
     LABELS "time-window"
     FAIL_REGEX "outer_d"
     ARGS -l
-         main
+         trace-time-window
          outer_a
          outer_b
          outer_c

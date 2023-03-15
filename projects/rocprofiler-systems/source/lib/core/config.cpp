@@ -281,7 +281,7 @@ configure_settings(bool _init)
         std::string, "OMNITRACE_MODE",
         "Data collection mode. Used to set default values for OMNITRACE_USE_* options. "
         "Typically set by omnitrace binary instrumenter.",
-        std::string{ "trace" }, "backend", "advanced")
+        std::string{ "trace" }, "backend", "advanced", "mode")
         ->set_choices({ "trace", "sampling", "causal", "coverage" });
 
     OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_CI",
@@ -308,7 +308,7 @@ configure_settings(bool _init)
         "threads that get sampled, omnitrace can start all the background threads during "
         "initialization",
         get_env<size_t>("OMNITRACE_NUM_THREADS", 1), "threading", "performance",
-        "sampling", "debugging", "advanced");
+        "sampling", "parallelism", "advanced");
 
     OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_USE_PERFETTO", "Enable perfetto backend",
                              _default_perfetto_v, "backend", "perfetto");
@@ -680,13 +680,13 @@ configure_settings(bool _init)
                              "Enable collecting profiling and trace data for these "
                              "categories and disable all other categories",
                              "", "trace", "profile", "perfetto", "timemory", "data",
-                             "advanced")
+                             "category", "advanced")
         ->set_choices(get_available_categories<std::vector<std::string>>());
 
     OMNITRACE_CONFIG_SETTING(
         std::string, "OMNITRACE_DISABLE_CATEGORIES",
         "Disable collecting profiling and trace data for these categories", "", "trace",
-        "profile", "perfetto", "timemory", "data", "advanced")
+        "profile", "perfetto", "timemory", "data", "category", "advanced")
         ->set_choices(get_available_categories<std::vector<std::string>>());
 
     OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_PERFETTO_ANNOTATIONS",
@@ -705,19 +705,18 @@ configure_settings(bool _init)
 
     OMNITRACE_CONFIG_EXT_SETTING(int64_t, "OMNITRACE_CRITICAL_TRACE_COUNT",
                                  "Number of critical trace to export (0 == all)",
-                                 int64_t{ 0 }, "data", "critical_trace",
-                                 "omnitrace-critical-trace", "perfetto", "advanced");
+                                 int64_t{ 0 }, "critical_trace",
+                                 "omnitrace-critical-trace", "advanced");
 
     OMNITRACE_CONFIG_SETTING(uint64_t, "OMNITRACE_CRITICAL_TRACE_BUFFER_COUNT",
                              "Number of critical trace records to store in thread-local "
                              "memory before submitting to shared buffer",
-                             uint64_t{ 2000 }, "data", "critical_trace", "advanced");
+                             uint64_t{ 2000 }, "critical_trace", "advanced");
 
     OMNITRACE_CONFIG_EXT_SETTING(
         int64_t, "OMNITRACE_CRITICAL_TRACE_PER_ROW",
         "How many critical traces per row in perfetto (0 == all in one row)",
-        int64_t{ 0 }, "io", "critical_trace", "omnitrace-critical-trace", "perfetto",
-        "advanced");
+        int64_t{ 0 }, "critical_trace", "omnitrace-critical-trace", "advanced");
 
     OMNITRACE_CONFIG_SETTING(
         std::string, "OMNITRACE_TIMEMORY_COMPONENTS",
@@ -1506,9 +1505,15 @@ print_banner(std::ostream& _os)
     )banner";
     auto               _tag    = std::string_view{ OMNITRACE_GIT_DESCRIBE };
     auto               _rev    = std::string_view{ OMNITRACE_GIT_REVISION };
-    std::stringstream  _version_info{};
+#if OMNITRACE_HIP_VERSION_MAJOR > 0
+    auto _hip = JOIN('.', OMNITRACE_HIP_VERSION_MAJOR, OMNITRACE_HIP_VERSION_MINOR, "x");
+#else
+    auto _hip                 = std::string_view{};
+#endif
+
+    std::stringstream _version_info{};
     _version_info << "omnitrace v" << OMNITRACE_VERSION_STRING;
-    if(!_tag.empty() || !_rev.empty())
+    if(!_tag.empty() || !_rev.empty() || !_hip.empty())
     {
         _version_info << " (";
         if(!_tag.empty())
@@ -1516,9 +1521,20 @@ print_banner(std::ostream& _os)
             _version_info << "tag: " << OMNITRACE_GIT_DESCRIBE;
             if(!_rev.empty()) _version_info << ", ";
         }
-        if(!_rev.empty()) _version_info << "rev: " << OMNITRACE_GIT_REVISION;
-        _version_info << ")";
+
+        if(!_rev.empty())
+        {
+            _version_info << "rev: " << OMNITRACE_GIT_REVISION;
+            if(!_hip.empty()) _version_info << ", ";
+        }
+
+        if(!_hip.empty())
+        {
+            _version_info << "rocm: " << _hip;
+        }
     }
+
+    if(!_version_info.str().empty()) _version_info << ")";
 
     tim::log::stream(_os, tim::log::color::info()) << _banner << _version_info.str();
     _os << std::endl;
