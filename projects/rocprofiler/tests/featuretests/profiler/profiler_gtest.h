@@ -32,6 +32,13 @@ THE SOFTWARE.
 #include <sstream>
 #include <string>
 #include <vector>
+#include <stdio.h>
+#include <functional>
+#include <thread>
+#include <cassert>
+#include <chrono>
+#include <memory>
+#include <stdexcept>
 
 /* --------------------------------------------------------------------------*/
 /**
@@ -45,7 +52,7 @@ THE SOFTWARE.
 
 class ApplicationParser : public ::testing::Test {
  protected:
-  virtual void SetUp(const char *app_name) { SetApplicationEnv(app_name); }
+  virtual void SetUp(const char* app_name) { SetApplicationEnv(app_name); }
   virtual void TearDown() {}
   //!< This can be appended for other kernel info fields; eg: Agent-Name etc.
   struct KernelInfo {
@@ -66,29 +73,26 @@ class ApplicationParser : public ::testing::Test {
 
  public:
   //!< Sets application enviornment by seting HSA_TOOLS_LIB.
-  void SetApplicationEnv(const char *app_name);
+  void SetApplicationEnv(const char* app_name);
 
   //!< Parses kernel-info from a pre-saved golden out files
   // and saves them in a vector.
-  void GetKernelInfoForGoldenOutput(
-      const char *app_name, std::string filename,
-      std::vector<KernelInfo> *kernel_info_output);
+  void GetKernelInfoForGoldenOutput(const char* app_name, std::string filename,
+                                    std::vector<KernelInfo>* kernel_info_output);
 
   //!< Parses kernel-info after running profiler against curent application
   // and saves them in a vector.
-  void GetKernelInfoForRunningApplication(
-      std::vector<KernelInfo> *kernel_info_output);
+  void GetKernelInfoForRunningApplication(std::vector<KernelInfo>* kernel_info_output);
 
  private:
   //!< Runs a given appllication and saves profiler output.
   // These output lines can be letter passed for kernel informations
   // i.e: kernel_names
-  void ProcessApplication(std::stringstream &ss);
+  void ProcessApplication(std::stringstream& ss);
 
   //!< Parses kernel info fields from given input
   // i.e: kernel_names, kernel_duration
-  void ParseKernelInfoFields(const std::string &s,
-                             std::vector<KernelInfo> *kernel_info_output);
+  void ParseKernelInfoFields(const std::string& s, std::vector<KernelInfo>* kernel_info_output);
 };
 
 /* --------------------------------------------------------------------------*/
@@ -100,8 +104,6 @@ class ApplicationParser : public ::testing::Test {
 
 class ProfilerTest : public ApplicationParser {
  protected:
-  virtual void SetUp(const char *app_name) {
-    ApplicationParser::SetUp(app_name);
-  }
+  virtual void SetUp(const char* app_name) { ApplicationParser::SetUp(app_name); }
 };
 #endif  // TESTS_FEATURETESTS_PROFILER_GTESTS_APPS_PROFILER_GTEST_H_

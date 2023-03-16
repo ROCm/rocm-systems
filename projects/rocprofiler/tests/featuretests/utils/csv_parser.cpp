@@ -20,7 +20,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
-#include "utils/csv_parser.h"
+#include "csv_parser.h"
 
 namespace rocmtools {
 namespace tests {

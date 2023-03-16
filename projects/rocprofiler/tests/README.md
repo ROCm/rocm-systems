@@ -8,7 +8,7 @@ We make use of the GoogleTest (Gtest) framework to automatically find and add te
 ROCProfiler testing is categorised as following:
 
 - unittests (Gtest Based)
-- featuretests (standalone and Gtest Based)
+- featuretests (Gtest Based)
 - memorytests (standalone)
 - performancetests (TBD)
 
@@ -29,17 +29,21 @@ Copy this to a new test name and modify it.
 
 ### Run subsets of all tests:
 ```
-# Run core unit tests on the commandline
-./build/tests/unittests/core/runCoreUnitTests
 
-# Run tool unit tests on the commandline
-./build/tests/unittests/profiler/runProfilerUnitTests
+# Run unit tests on the commandline
+./build/tests/unittests/runUnitTests
 
-# Run feature unit tests on the commandline
+# Run profilerfeaturetests on the commandline
 ./build/tests/featuretests/profiler/runFeatureTests
+
+# Run tracer featuretests on the commandline
+./build/tests/featuretests/tracer/runTracerFeatureTests
 
 # Run all tests:
 ./rocprofv2 -t OR ./rocprofv2 -ct
+               OR
+ make -j check OR ./run_tests.sh
+
 ```
 
 ### Performance tests:

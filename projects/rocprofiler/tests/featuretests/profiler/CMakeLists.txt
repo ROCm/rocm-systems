@@ -9,7 +9,10 @@ find_file(HSA_H hsa.h
   REQUIRED)
 get_filename_component(HSA_RUNTIME_INC_PATH ${HSA_H} DIRECTORY)
 
-include_directories(${PROJECT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR} ${HSA_RUNTIME_INC_PATH})
+include_directories(${PROJECT_SOURCE_DIR} 
+ ${CMAKE_CURRENT_SOURCE_DIR} 
+ ${HSA_RUNTIME_INC_PATH} 
+ ${PROJECT_SOURCE_DIR}/tests/featuretests)
 
 find_package(Clang REQUIRED CONFIG
              PATHS "${ROCM_PATH}"
@@ -40,23 +43,32 @@ endif()
 # ############################################################################################################################################
 
 # installing the golden traces
-file(GLOB files RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "gtests/apps/goldentraces/*.txt")
+file(GLOB files RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "apps/goldentraces/*.txt")
 foreach(file ${files})
     configure_file(${file} ${PROJECT_BINARY_DIR}/tests/featuretests/profiler/${file} COPYONLY)
 endforeach()
 
 # Compile Applications
 # hip_helloworld
-set_source_files_properties(gtests/apps/hip/hello_world.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
-hip_add_executable(hip_helloworld gtests/apps/hip/hello_world.cpp)
-set_target_properties(hip_helloworld PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/tests/featuretests/profiler/gtests/apps")
+set_source_files_properties(apps/hello_world_hip.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+hip_add_executable(hip_helloworld apps/hello_world_hip.cpp)
+set_target_properties(hip_helloworld PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/tests/featuretests/profiler/apps")
 
 
 #hip_vectoradd
-set_source_files_properties(gtests/apps/hip/vector_add.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
-hip_add_executable(hip_vectoradd gtests/apps/hip/vector_add.cpp)
-set_target_properties(hip_vectoradd PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/tests/featuretests/profiler/gtests/apps")
+set_source_files_properties(apps/vector_add_hip.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+hip_add_executable(hip_vectoradd apps/vector_add_hip.cpp)
+set_target_properties(hip_vectoradd PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/tests/featuretests/profiler/apps")
 
+#mpi_vectoradd
+find_package(MPI)
+if (MPI_CXX_FOUND)
+include_directories(SYSTEM ${MPI_INCLUDE_PATH})
+set_source_files_properties(apps/vector_add_mpi.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+hip_add_executable(mpi_vectoradd apps/vector_add_mpi.cpp)
+set_target_properties(mpi_vectoradd PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/tests/featuretests/profiler/apps")
+target_link_libraries(mpi_vectoradd ${MPI_C_LIBRARIES} stdc++fs)
+endif()
 
 #openmp_helloworld
 # find_package(hip REQUIRED)
@@ -72,71 +84,34 @@ set_target_properties(hip_vectoradd PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJE
 # target_link_libraries(openmp_helloworld PRIVATE hip::device ${OpenMP_CXX_FLAGS})
 # endif()
 
-#mpi_vectoradd
-find_package(MPI)
-if (MPI_CXX_FOUND)
-include_directories(SYSTEM ${MPI_INCLUDE_PATH})
-set_source_files_properties(gtests/apps/mpi/vector_add.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
-hip_add_executable(mpi_vectoradd gtests/apps/mpi/vector_add.cpp)
-set_target_properties(mpi_vectoradd PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/tests/featuretests/profiler/gtests/apps")
-target_link_libraries(mpi_vectoradd ${MPI_C_LIBRARIES} stdc++fs)
-endif()
-
 #hsa-mem_async_copy -- Not Enabled for Now
-# set_source_files_properties(gtests/apps/hsa/async_mem_copy.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
-# hip_add_executable(hsa_async_mem_copy gtests/apps/hsa/async_mem_copy.cpp)
-# set_target_properties(hsa_async_mem_copy PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/tests/featuretests/profiler/gtests/apps")
-# target_link_libraries(hsa_async_mem_copy hsa-runtime64::hsa-runtime64 Threads::Threads dl stdc++fs)
+set_source_files_properties(apps/async_mem_copy.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+hip_add_executable(hsa_async_mem_copy apps/async_mem_copy.cpp)
+set_target_properties(hsa_async_mem_copy PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/tests/featuretests/profiler/apps")
+target_link_libraries(hsa_async_mem_copy hsa-runtime64::hsa-runtime64 Threads::Threads dl stdc++fs)
 
 
 # Setup testing
 enable_testing()
 find_package(GTest REQUIRED)
 
-# Add test cpp file
-add_executable(runFeatureTests
- gtests/gtests_main.cpp
- utils/test_utils.cpp 
- gtests/apps/profiler_gtest.cpp
- gtests/apps/hip/hello_world_gtest.cpp
- gtests/apps/hip/vector_add_gtest.cpp
- gtests/apps/hsa/async_mem_copy_gtest.cpp     
- gtests/apps/mpi/vector_add_gtest.cpp
-#  gtests/apps/openmp/hello_world_gtest.cpp
- gtests/functional/loadunload_gtest.cpp
-)
+set(CORE_HSA_DIR ${PROJECT_SOURCE_DIR}/src/core/hsa)
+file(GLOB CORE_HSA_SRC_FILES ${CORE_HSA_DIR}/hsa_common.cpp)
+set(CORE_HW_DIR ${PROJECT_SOURCE_DIR}/src/core/hardware)
+file(GLOB CORE_HW_SRC_FILES ${CORE_HW_DIR}/hsa_info.cpp)
+set(CORE_UTILS_DIR ${PROJECT_SOURCE_DIR}/src/utils)
+file(GLOB CORE_UTILS_SRC_FILES ${CORE_UTILS_DIR}/helper.cpp)
+set(TEST_UTILS_DIR ${PROJECT_SOURCE_DIR}/tests/featuretests/utils)
+file(GLOB TEST_UTILS_SRC_FILES ${TEST_UTILS_DIR}/*.cpp)
+set(GTEST_MAIN_DIR ${PROJECT_SOURCE_DIR}/tests/featuretests)
+file(GLOB GTEST_MAIN_SRC_FILE ${GTEST_MAIN_DIR}/gtests_main.cpp)
 
-target_include_directories(runFeatureTests PRIVATE ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/tests/featuretests/profiler)
-# Link test executable against gtest & gtest_main
-target_link_libraries(runFeatureTests PRIVATE hsa-runtime64::hsa-runtime64
-                                              GTest::gtest GTest::gtest_main 
-                                              Threads::Threads dl stdc++fs)
-add_dependencies(tests runFeatureTests)
-
-# ############################################################################################################################################
-# Functional Tests
-# ############################################################################################################################################
-
-file(GLOB ROCPROFILER_UTIL_SRC_FILES ${PROJECT_SOURCE_DIR}/src/utils/helper.cpp)
-
- set_source_files_properties(gtests/functional/multithread_gtest.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
-# # Add test cpp file
- hip_add_executable(runFunctionalTests
-  gtests/gtests_main.cpp
-  ${ROCPROFILER_UTIL_SRC_FILES}
-  utils/test_utils.cpp
-  #gtests/functional/multithread_gtest.cpp
- )
- target_include_directories(runFunctionalTests PRIVATE ${TEST_DIR} ${ROOT_DIR} ${HSA_RUNTIME_INC_PATH} ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/tests/featuretests/profiler)
-# # Link test executable against gtest & gtest_main
- target_link_libraries(runFunctionalTests PRIVATE ${ROCPROFILER_TARGET} ${ROCPROFILER_TARGET} hsa-runtime64::hsa-runtime64
-                                               GTest::gtest GTest::gtest_main 
-                                               Threads::Threads dl stdc++fs amd_comgr)
- add_dependencies(tests runFunctionalTests)
-
-# ############################################################################################################################################
-# Discrete Tests
-# ############################################################################################################################################
+set_source_files_properties(apps/multithreaded_testapp.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+hip_add_executable(multithreaded_testapp apps/multithreaded_testapp.cpp ../utils/test_utils.cpp)
+target_include_directories(multithreaded_testapp PRIVATE ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/featuretests/profiler/apps)
+target_link_libraries(multithreaded_testapp hsa-runtime64::hsa-runtime64 Threads::Threads dl stdc++fs amd_comgr)
+set_target_properties(multithreaded_testapp PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/tests/featuretests/profiler/apps")
+add_dependencies(tests multithreaded_testapp)
 
 # Multi-Queue Dependency Test
 function(generate_hsaco TARGET_ID INPUT_FILE OUTPUT_FILE)
@@ -153,67 +128,52 @@ function(generate_hsaco TARGET_ID INPUT_FILE OUTPUT_FILE)
   set(HSACO_TARGET_LIST ${HSACO_TARGET_LIST} ${PROJECT_BINARY_DIR}/tests/featuretests/profiler/${OUTPUT_FILE} PARENT_SCOPE)
 endfunction(generate_hsaco)
 
-foreach(target_id ${GPU_TARGETS_LIST})
+set(GPU_LIST "gfx900" "gfx906" "gfx908" "gfx90a" "gfx1030")
+foreach(target_id ${GPU_LIST})
   ## generate kernel bitcodes
-  generate_hsaco(${target_id} ${CMAKE_CURRENT_SOURCE_DIR}/discretetests/binary/copy.cl ${target_id}_copy.hsaco)
+  generate_hsaco(${target_id} ${CMAKE_CURRENT_SOURCE_DIR}/apps/copy.cl ${target_id}_copy.hsaco)
 endforeach(target_id)
 add_custom_target(hsaco_targets DEPENDS ${HSACO_TARGET_LIST})
 
- add_executable(multiqueue_testapp  discretetests/binary/multiqueue_testapp.cpp)
+ add_executable(multiqueue_testapp  apps/multiqueue_testapp.cpp)
  target_include_directories(multiqueue_testapp PRIVATE ${PROJECT_SOURCE_DIR}  ${PROJECT_SOURCE_DIR}/inc ${PROJECT_SOURCE_DIR}/tests/featuretests/profiler)
 # Link test executable against gtest & gtest_main
  target_link_libraries(multiqueue_testapp PRIVATE ${ROCPROFILER_TARGET} hsa-runtime64::hsa-runtime64  GTest::gtest GTest::gtest_main stdc++fs Threads::Threads amd_comgr dl)
  add_dependencies(multiqueue_testapp hsaco_targets)
  add_dependencies(tests multiqueue_testapp )
+ set_target_properties(multiqueue_testapp PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/tests/featuretests/profiler/apps")
  install(TARGETS multiqueue_testapp RUNTIME DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/tests COMPONENT tests)
 
-add_executable(profiler_multiqueue_test discretetests/binary/multiqueue_test.cpp utils/csv_parser.cpp  utils/test_utils.cpp)
-target_include_directories(profiler_multiqueue_test PRIVATE ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/tests/featuretests/profiler)
-target_link_libraries(profiler_multiqueue_test PRIVATE hsa-runtime64::hsa-runtime64 Threads::Threads dl stdc++fs amd_comgr)
-add_dependencies(tests profiler_multiqueue_test)
+# add_executable(profiler_multiqueue_test discretetests/binary/multiqueue_test.cpp utils/csv_parser.cpp  utils/test_utils.cpp)
+# target_include_directories(profiler_multiqueue_test PRIVATE ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/tests/featuretests/profiler)
+# target_link_libraries(profiler_multiqueue_test PRIVATE hsa-runtime64::hsa-runtime64 Threads::Threads dl stdc++fs amd_comgr)
+# add_dependencies(tests profiler_multiqueue_test)
 
-##### Profiler Discrete API Test #######
-set_source_files_properties(discretetests/api/multithreaded_test.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
-hip_add_executable ( profiler_api_test discretetests/api/multithreaded_test.cpp utils/test_utils.cpp )
-target_link_libraries ( profiler_api_test ${ROCPROFILER_TARGET} ${ROCPROFILER_TARGET} hsa-runtime64::hsa-runtime64 Threads::Threads dl stdc++fs amd_comgr )
-target_include_directories(profiler_api_test PRIVATE ${TEST_DIR} ${ROOT_DIR} ${HSA_RUNTIME_INC_PATH} ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/tests/featuretests/profiler)
-add_dependencies(tests profiler_api_test)
+# Add test cpp file
+set_source_files_properties(profiler_gtest.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+hip_add_executable(runFeatureTests  profiler_gtest.cpp
+ ${GTEST_MAIN_SRC_FILE}
+ ${CORE_HSA_SRC_FILES}
+ ${CORE_HW_SRC_FILES}
+ ${CORE_UTILS_SRC_FILES}
+ ${TEST_UTILS_SRC_FILES}
+)
 
-set_source_files_properties(discretetests/api/att_test.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
-hip_add_executable ( profiler_api_att_test discretetests/api/att_test.cpp utils/test_utils.cpp )
-target_link_libraries ( profiler_api_att_test ${ROCPROFILER_TARGET} ${ROCPROFILER_TARGET} hsa-runtime64::hsa-runtime64 Threads::Threads dl stdc++fs )
-target_include_directories(profiler_api_att_test PRIVATE ${TEST_DIR} ${ROOT_DIR} ${HSA_RUNTIME_INC_PATH} ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/tests/featuretests/profiler)
-add_dependencies(tests profiler_api_att_test)
+target_include_directories(runFeatureTests PRIVATE  ${TEST_DIR} 
+ ${ROOT_DIR} 
+ ${HSA_RUNTIME_INC_PATH} 
+ ${PROJECT_SOURCE_DIR}  
+ ${PROJECT_SOURCE_DIR}/tests/featuretests/profiler)
 
-set_source_files_properties(discretetests/api/spm_test.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
-hip_add_executable ( profiler_api_spm_test discretetests/api/spm_test.cpp utils/test_utils.cpp )
-target_link_libraries ( profiler_api_spm_test ${ROCPROFILER_TARGET} ${ROCPROFILER_TARGET} hsa-runtime64::hsa-runtime64 Threads::Threads dl stdc++fs )
-target_include_directories(profiler_api_spm_test PRIVATE ${TEST_DIR} ${ROOT_DIR} ${HSA_RUNTIME_INC_PATH} ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/tests/featuretests/profiler)
-add_dependencies(tests profiler_api_spm_test)
-
-
-##### Profiler Discrete Binary Tests #######
-set_source_files_properties(discretetests/binary/multiprocess_test.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
-hip_add_executable(profiler_multiprocess_test discretetests/binary/multiprocess_test.cpp utils/csv_parser.cpp  utils/test_utils.cpp)
-target_include_directories(profiler_multiprocess_test PRIVATE ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/tests/featuretests/profiler)
-target_link_libraries(profiler_multiprocess_test PRIVATE hsa-runtime64::hsa-runtime64 Threads::Threads dl stdc++fs amd_comgr)
-add_dependencies(tests profiler_multiprocess_test)
-
-set_source_files_properties(discretetests/binary/multithreaded_testapp.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
-hip_add_executable(multithreaded_testapp discretetests/binary/multithreaded_testapp.cpp utils/test_utils.cpp)
-target_include_directories(multithreaded_testapp PRIVATE ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/featuretests/profiler)
-target_link_libraries(multithreaded_testapp hsa-runtime64::hsa-runtime64 Threads::Threads dl stdc++fs amd_comgr)
-add_dependencies(tests multithreaded_testapp)
-
-set_source_files_properties(discretetests/binary/multithreaded_test.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
-hip_add_executable(profiler_multithreaded_test discretetests/binary/multithreaded_test.cpp utils/csv_parser.cpp  utils/test_utils.cpp)
-target_include_directories(profiler_multithreaded_test PRIVATE ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/featuretests/profiler)
-target_link_libraries(profiler_multithreaded_test PRIVATE hsa-runtime64::hsa-runtime64 Threads::Threads dl stdc++fs amd_comgr)
-add_dependencies(tests profiler_multithreaded_test)
+# Link test executable against gtest & gtest_main
+target_link_libraries(runFeatureTests PRIVATE  ${ROCPROFILER_TARGET} ${ROCPROFILER_TARGET} hsa-runtime64::hsa-runtime64
+                                              GTest::gtest GTest::gtest_main 
+                                              Threads::Threads dl stdc++fs amd_comgr)
+add_dependencies(tests runFeatureTests)
 
 add_test(AllTests runFeatureTests)
 
 # Copy scripts, input files to samples folder
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/discretetests/run_discrete_tests.sh ${PROJECT_BINARY_DIR}/tests/featuretests/profiler/ COPYONLY)
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/discretetests/basic_metrics.txt ${PROJECT_BINARY_DIR}/tests/featuretests/profiler/ COPYONLY)
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/gtests/apps/mpi/mpi_run.sh ${PROJECT_BINARY_DIR}/tests/featuretests/profiler/gtests/apps/ COPYONLY)
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/apps/goldentraces/basic_metrics.txt ${PROJECT_BINARY_DIR}/tests/featuretests/profiler/apps COPYONLY)
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/apps/goldentraces/input.txt ${PROJECT_BINARY_DIR}/tests/featuretests/profiler/apps COPYONLY)
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/apps/mpi_run.sh ${PROJECT_BINARY_DIR}/tests/featuretests/profiler/apps/ COPYONLY)

@@ -30,6 +30,7 @@ THE SOFTWARE.
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+#include <cstdlib>
 
 #include <experimental/filesystem>
 #include <iostream>
@@ -38,12 +39,12 @@ THE SOFTWARE.
 
 #include "src/utils/exception.h"
 
-#define ASSERT_EQ(val1, val2) \
-  do {                        \
-    if ((val1) != val2) {     \
-      assert(false);          \
-      abort();                \
-    }                         \
+#define ASSERT_EQ(val1, val2)                                                                      \
+  do {                                                                                             \
+    if ((val1) != val2) {                                                                          \
+      assert(false);                                                                               \
+      abort();                                                                                     \
+    }                                                                                              \
   } while (false)
 
 struct Device {
@@ -123,34 +124,30 @@ class MQDependencyTest {
     uint64_t offset_x;
     uint64_t offset_y;
     uint64_t offset_z;
-    void *printf_buffer;
-    void *enqueue;
-    void *enqueue2;
-    void *multi_grid;
+    void* printf_buffer;
+    void* enqueue;
+    void* enqueue2;
+    void* multi_grid;
   };
 
-  bool LoadCodeObject(std::string filename, hsa_agent_t agent,
-                      CodeObject &code_object) {
+  bool LoadCodeObject(std::string filename, hsa_agent_t agent, CodeObject& code_object) {
     hsa_status_t err;
-
+    printf("%s", filename.c_str());
     code_object.file = open(filename.c_str(), O_RDONLY);
     if (code_object.file == -1) {
       abort();
       return false;
     }
 
-    err = hsa_code_object_reader_create_from_file(code_object.file,
-                                                  &code_object.code_obj_rdr);
+    err = hsa_code_object_reader_create_from_file(code_object.file, &code_object.code_obj_rdr);
     ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
-    err = hsa_executable_create_alt(HSA_PROFILE_FULL,
-                                    HSA_DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT,
+    err = hsa_executable_create_alt(HSA_PROFILE_FULL, HSA_DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT,
                                     nullptr, &code_object.executable);
     ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
     err = hsa_executable_load_agent_code_object(code_object.executable, agent,
-                                                code_object.code_obj_rdr,
-                                                nullptr, nullptr);
+                                                code_object.code_obj_rdr, nullptr, nullptr);
     if (err != HSA_STATUS_SUCCESS) return false;
 
     err = hsa_executable_freeze(code_object.executable, nullptr);
@@ -159,45 +156,41 @@ class MQDependencyTest {
     return true;
   }
 
-  bool GetKernel(const CodeObject &code_object, std::string kernel,
-                 hsa_agent_t agent, Kernel &kern) {
+  bool GetKernel(const CodeObject& code_object, std::string kernel, hsa_agent_t agent,
+                 Kernel& kern) {
     hsa_executable_symbol_t symbol;
-    hsa_status_t err = hsa_executable_get_symbol_by_name(
-        code_object.executable, kernel.c_str(), &agent, &symbol);
+    hsa_status_t err =
+        hsa_executable_get_symbol_by_name(code_object.executable, kernel.c_str(), &agent, &symbol);
     if (err != HSA_STATUS_SUCCESS) {
-      err = hsa_executable_get_symbol_by_name(
-          code_object.executable, (kernel + ".kd").c_str(), &agent, &symbol);
+      err = hsa_executable_get_symbol_by_name(code_object.executable, (kernel + ".kd").c_str(),
+                                              &agent, &symbol);
       if (err != HSA_STATUS_SUCCESS) {
         return false;
       }
     }
     // printf("\nkernel-name: %s\n", kernel.c_str());
-    err = hsa_executable_symbol_get_info(
-        symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT, &kern.handle);
+    err = hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT,
+                                         &kern.handle);
     ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
     err = hsa_executable_symbol_get_info(
-        symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_PRIVATE_SEGMENT_SIZE,
-        &kern.scratch);
+        symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_PRIVATE_SEGMENT_SIZE, &kern.scratch);
     ASSERT_EQ(err, HSA_STATUS_SUCCESS);
     // printf("Scratch: %d\n", kern.scratch);
 
     err = hsa_executable_symbol_get_info(
-        symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_GROUP_SEGMENT_SIZE,
-        &kern.group);
+        symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_GROUP_SEGMENT_SIZE, &kern.group);
     ASSERT_EQ(err, HSA_STATUS_SUCCESS);
     // printf("LDS: %d\n", kern.group);
 
     // Remaining needs code object v2 or comgr.
     err = hsa_executable_symbol_get_info(
-        symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_SIZE,
-        &kern.kernarg_size);
+        symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_SIZE, &kern.kernarg_size);
     ASSERT_EQ(err, HSA_STATUS_SUCCESS);
     // printf("Kernarg Size: %d\n", kern.kernarg_size);
 
     err = hsa_executable_symbol_get_info(
-        symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_ALIGNMENT,
-        &kern.kernarg_align);
+        symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_ALIGNMENT, &kern.kernarg_align);
     ASSERT_EQ(err, HSA_STATUS_SUCCESS);
     // printf("Kernarg Align: %d\n", kern.kernarg_align);
 
@@ -205,15 +198,15 @@ class MQDependencyTest {
   }
 
   // Not for parallel insertion.
-  bool SubmitPacket(hsa_queue_t *queue, Aql &pkt) {
+  bool SubmitPacket(hsa_queue_t* queue, Aql& pkt) {
     size_t mask = queue->size - 1;
-    Aql *ring = static_cast<Aql *>(queue->base_address);
+    Aql* ring = static_cast<Aql*>(queue->base_address);
 
     uint64_t write = hsa_queue_load_write_index_relaxed(queue);
     uint64_t read = hsa_queue_load_read_index_relaxed(queue);
     if (write - read + 1 > queue->size) return false;
 
-    Aql &dst = ring[write & mask];
+    Aql& dst = ring[write & mask];
 
     uint16_t header = pkt.header.raw;
     pkt.header.raw = dst.header.raw;
@@ -227,18 +220,18 @@ class MQDependencyTest {
     return true;
   }
 
-  void *hsaMalloc(size_t size, const Device::Memory &mem) {
-    void *ret;
+  void* hsaMalloc(size_t size, const Device::Memory& mem) {
+    void* ret;
     hsa_status_t err = hsa_amd_memory_pool_allocate(mem.pool, size, 0, &ret);
     ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
-    err = hsa_amd_agents_allow_access(Device::all_devices.size(),
-                                      &Device::all_devices[0], nullptr, ret);
+    err = hsa_amd_agents_allow_access(Device::all_devices.size(), &Device::all_devices[0], nullptr,
+                                      ret);
     ASSERT_EQ(err, HSA_STATUS_SUCCESS);
     return ret;
   }
 
-  void *hsaMalloc(size_t size, const Device &dev, bool fine) {
+  void* hsaMalloc(size_t size, const Device& dev, bool fine) {
     uint32_t index = fine ? dev.fine : dev.coarse;
     assert(index != -1u && "Memory type unavailable.");
     return hsaMalloc(size, dev.pools[index]);
@@ -247,7 +240,7 @@ class MQDependencyTest {
   bool DeviceDiscovery() {
     hsa_status_t err;
     err = hsa_iterate_agents(
-        [](hsa_agent_t agent, void *) {
+        [](hsa_agent_t agent, void*) {
           hsa_status_t err;
 
           Device dev;
@@ -265,49 +258,43 @@ class MQDependencyTest {
 
           err = hsa_amd_agent_iterate_memory_pools(
               agent,
-              [](hsa_amd_memory_pool_t pool, void *data) {
-                std::vector<Device::Memory> &pools =
-                    *reinterpret_cast<std::vector<Device::Memory> *>(data);
+              [](hsa_amd_memory_pool_t pool, void* data) {
+                std::vector<Device::Memory>& pools =
+                    *reinterpret_cast<std::vector<Device::Memory>*>(data);
                 hsa_status_t err;
 
                 hsa_amd_segment_t segment;
-                err = hsa_amd_memory_pool_get_info(
-                    pool, HSA_AMD_MEMORY_POOL_INFO_SEGMENT, &segment);
+                err =
+                    hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_SEGMENT, &segment);
                 ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
-                if (segment != HSA_AMD_SEGMENT_GLOBAL)
-                  return HSA_STATUS_SUCCESS;
+                if (segment != HSA_AMD_SEGMENT_GLOBAL) return HSA_STATUS_SUCCESS;
 
                 uint32_t flags;
-                err = hsa_amd_memory_pool_get_info(
-                    pool, HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS, &flags);
+                err = hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS,
+                                                   &flags);
                 ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
                 Device::Memory mem;
                 mem.pool = pool;
-                mem.fine =
-                    (flags & HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_FINE_GRAINED);
-                mem.kernarg =
-                    (flags & HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT);
+                mem.fine = (flags & HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_FINE_GRAINED);
+                mem.kernarg = (flags & HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT);
 
-                err = hsa_amd_memory_pool_get_info(
-                    pool, HSA_AMD_MEMORY_POOL_INFO_SIZE, &mem.size);
+                err = hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_SIZE, &mem.size);
                 ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
                 err = hsa_amd_memory_pool_get_info(
-                    pool, HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_GRANULE,
-                    &mem.granule);
+                    pool, HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_GRANULE, &mem.granule);
                 ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
                 pools.push_back(mem);
                 return HSA_STATUS_SUCCESS;
               },
-              static_cast<void *>(&dev.pools));
+              static_cast<void*>(&dev.pools));
 
           if (!dev.pools.empty()) {
             for (size_t i = 0; i < dev.pools.size(); i++) {
-              if (dev.pools[i].fine && dev.pools[i].kernarg && dev.fine == -1u)
-                dev.fine = i;
+              if (dev.pools[i].fine && dev.pools[i].kernarg && dev.fine == -1u) dev.fine = i;
               if (dev.pools[i].fine && !dev.pools[i].kernarg) dev.fine = i;
               if (!dev.pools[i].fine) dev.coarse = i;
             }
@@ -325,8 +312,8 @@ class MQDependencyTest {
         nullptr);
 
     []() {
-      for (auto &dev : cpu) {
-        for (auto &mem : dev.pools) {
+      for (auto& dev : cpu) {
+        for (auto& mem : dev.pools) {
           if (mem.fine && mem.kernarg) {
             kernarg = mem;
             return;

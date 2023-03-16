@@ -19,35 +19,46 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
-#ifndef TESTS_FEATURETESTS_TRACER_UTILS_TEST_UTILS_H_
-#define TESTS_FEATURETESTS_TRACER_UTILS_TEST_UTILS_H_
-
-#include <cxxabi.h>    // for __cxa_demangle
-#include <dlfcn.h>     // for dladdr
-#include <execinfo.h>  // for backtrace
-
-#include <algorithm>
-#include <cstdlib>
-#include <fstream>
-#include <iostream>
-#include <iterator>
-#include <string>
+#include "test_utils.h"
 
 namespace rocmtools {
 namespace tests {
 namespace utility {
 
-// Get current running path
-std::string GetRunningPath(std::string string_to_erase);
+// This function returns the running path of executable
+std::string GetRunningPath(std::string string_to_erase) {
+  std::string path;
+  char *real_path;
+  Dl_info dl_info;
+
+  if (0 != dladdr(reinterpret_cast<void *>(main), &dl_info)) {
+    std::string to_erase = string_to_erase;
+    path = dl_info.dli_fname;
+    real_path = realpath(path.c_str(), NULL);
+    if (real_path == nullptr) {
+      throw(std::string("Error! in extracting real path"));
+    }
+    path.clear();  // reset path
+    path.append(real_path);
+
+    size_t pos = path.find(to_erase);
+    if (pos != std::string::npos) path.erase(pos, to_erase.length());
+  } else {
+    throw(std::string("Error! in extracting real path"));
+  }
+  return path;
+}
+
+// This function returns number of cores
+// available in system
+int GetNumberOfCores() {
+  std::ifstream cpuinfo("/proc/cpuinfo");
+  const int num_cpu_cores = std::count(
+      std::istream_iterator<std::string>(cpuinfo),
+      std::istream_iterator<std::string>(), std::string("processor"));
+  return num_cpu_cores;
+}
 
 }  // namespace utility
 }  // namespace tests
 }  // namespace rocmtools
-
-// used for dl_addr to locate the running
-// path for executable
-int main(int argc, char** argv);
-
-using rocmtools::tests::utility::GetRunningPath;
-
-#endif  // TESTS_FEATURETESTS_TRACER_UTILS_TEST_UTILS_H_

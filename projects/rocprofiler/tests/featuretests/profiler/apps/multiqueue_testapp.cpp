@@ -29,12 +29,13 @@ THE SOFTWARE.
  *
  */
 
-#include "discretetests/binary/multiqueue_testapp.h"
-
+#include "multiqueue_testapp.h"
 #include "src/utils/exception.h"
 
 namespace fs = std::experimental::filesystem;
 std::vector<hsa_agent_t> Device::all_devices;
+
+std::string GetRunningPath(std::string string_to_erase);
 
 int main() {
   hsa_status_t status;
@@ -48,10 +49,10 @@ int main() {
   ASSERT_EQ(status, HSA_STATUS_SUCCESS);
 
   // Getting Current Path
-  std::string current_path = fs::current_path().generic_string();
+  std::string app_path = GetRunningPath("tests/featuretests/profiler/apps/multiqueue_testapp");
   // Getting hasco Path
-  std::string ko_path = current_path + "/featuretests/profiler/" +
-                        std::string(agent_name) + "_copy.hsaco";
+  std::string ko_path =
+      app_path + "tests/featuretests/profiler/" + std::string(agent_name) + "_copy.hsaco";
 
   MQDependencyTest::CodeObject code_object;
   if (!obj.LoadCodeObject(ko_path, gpu[0].agent, code_object)) {
@@ -85,18 +86,16 @@ int main() {
   args = static_cast<args_t*>(obj.hsaMalloc(sizeof(args_t), kernarg));
   memset(args, 0, sizeof(args_t));
 
-  uint32_t* a =
-      static_cast<uint32_t*>(obj.hsaMalloc(64 * sizeof(uint32_t), kernarg));
-  uint32_t* b =
-      static_cast<uint32_t*>(obj.hsaMalloc(64 * sizeof(uint32_t), kernarg));
+  uint32_t* a = static_cast<uint32_t*>(obj.hsaMalloc(64 * sizeof(uint32_t), kernarg));
+  uint32_t* b = static_cast<uint32_t*>(obj.hsaMalloc(64 * sizeof(uint32_t), kernarg));
 
   memset(a, 0, 64 * sizeof(uint32_t));
   memset(b, 1, 64 * sizeof(uint32_t));
 
   // Create queue in gpu agent and prepare a kernel dispatch packet
   hsa_queue_t* queue1;
-  status = hsa_queue_create(gpu[0].agent, 1024, HSA_QUEUE_TYPE_SINGLE, NULL,
-                            NULL, UINT32_MAX, UINT32_MAX, &queue1);
+  status = hsa_queue_create(gpu[0].agent, 1024, HSA_QUEUE_TYPE_SINGLE, NULL, NULL, UINT32_MAX,
+                            UINT32_MAX, &queue1);
   ASSERT_EQ(status, HSA_STATUS_SUCCESS);
 
   // Create a signal with a value of 1 and attach it to the first kernel
@@ -186,8 +185,8 @@ int main() {
 
   // Create queue 2
   hsa_queue_t* queue2;
-  status = hsa_queue_create(gpu[0].agent, 1024, HSA_QUEUE_TYPE_SINGLE, NULL,
-                            NULL, UINT32_MAX, UINT32_MAX, &queue2);
+  status = hsa_queue_create(gpu[0].agent, 1024, HSA_QUEUE_TYPE_SINGLE, NULL, NULL, UINT32_MAX,
+                            UINT32_MAX, &queue2);
   ASSERT_EQ(status, HSA_STATUS_SUCCESS);
 
   // Create barrier-AND packet that is enqueued in queue 2
@@ -232,16 +231,16 @@ int main() {
   }
 
   // Wait on the completion signal
-  hsa_signal_wait_relaxed(completion_signal_1, HSA_SIGNAL_CONDITION_EQ, 0,
-                          UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
+  hsa_signal_wait_relaxed(completion_signal_1, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX,
+                          HSA_WAIT_STATE_BLOCKED);
 
   // Wait on the completion signal
-  hsa_signal_wait_relaxed(completion_signal_2, HSA_SIGNAL_CONDITION_EQ, 0,
-                          UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
+  hsa_signal_wait_relaxed(completion_signal_2, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX,
+                          HSA_WAIT_STATE_BLOCKED);
 
   // Wait on the completion signal
-  hsa_signal_wait_relaxed(completion_signal_3, HSA_SIGNAL_CONDITION_EQ, 0,
-                          UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
+  hsa_signal_wait_relaxed(completion_signal_3, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX,
+                          HSA_WAIT_STATE_BLOCKED);
 
   for (int i = 0; i < 64; i++) {
     if (a[i] != b[i]) {
@@ -281,4 +280,28 @@ int main() {
   status = hsa_code_object_reader_destroy(code_object.code_obj_rdr);
   ASSERT_EQ(status, HSA_STATUS_SUCCESS);
   close(code_object.file);
+}
+
+// This function returns the running path of executable
+std::string GetRunningPath(std::string string_to_erase) {
+  std::string path;
+  char* real_path;
+  Dl_info dl_info;
+
+  if (0 != dladdr(reinterpret_cast<void*>(main), &dl_info)) {
+    std::string to_erase = string_to_erase;
+    path = dl_info.dli_fname;
+    real_path = realpath(path.c_str(), NULL);
+    if (real_path == nullptr) {
+      throw(std::string("Error! in extracting real path"));
+    }
+    path.clear();  // reset path
+    path.append(real_path);
+
+    size_t pos = path.find(to_erase);
+    if (pos != std::string::npos) path.erase(pos, to_erase.length());
+  } else {
+    throw(std::string("Error! in extracting real path"));
+  }
+  return path;
 }
