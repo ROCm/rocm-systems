@@ -58,6 +58,8 @@ def get_os_info(os_distrib, os_version):
     _os_info = {}
     with open("/etc/os-release", "r") as f:
         for line in [_v.strip() for _v in f.readlines()]:
+            if "=" not in line:
+                continue
             _key, _data = line.split("=", 1)
             _os_info[_key] = _data.strip('"')
 
