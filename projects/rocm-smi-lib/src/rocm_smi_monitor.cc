@@ -367,15 +367,16 @@ Monitor::setVoltSensorLabelMap(void) {
   }
   auto add_volt_sensor_entry = [&](uint32_t file_index) {
     ret = readMonitor(kMonVoltLabel, file_index, &type_str);
-    rsmi_voltage_type_t t_type = kVoltSensorNameMap.at(type_str);
+    rsmi_voltage_type_t t_type;
+
     // If readMonitor fails, there is no label file for the file_index.
     // In that case, map the type to file index 0, which is not supported
     // and will fail appropriately later when we check for support.
     if (ret) {
-      volt_type_index_map_.insert({t_type, 0});
       index_volt_type_map_.insert({file_index, RSMI_VOLT_TYPE_INVALID});
     } else {
-      volt_type_index_map_.insert({t_type, file_index});
+      t_type = kVoltSensorNameMap.at(type_str);
+      volt_type_index_map_[t_type] = file_index;
       index_volt_type_map_.insert({file_index, t_type});
     }
     return 0;
