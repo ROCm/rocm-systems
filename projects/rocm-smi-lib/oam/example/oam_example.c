@@ -51,7 +51,7 @@ int main()
 
 //	amd_oam_ops.get_mapi_version(&version);
 	if (!amd_oam_ops.discover_devices(&dev_cnt))
-		printf("%d AMD devices are discovered\n", dev_cnt);
+		printf("%u AMD devices are discovered\n", dev_cnt);
 	if (!dev_cnt) {
 		printf("No devices are  found.\n");
 		return amd_oam_ops.free();
