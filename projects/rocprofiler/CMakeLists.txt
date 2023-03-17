@@ -404,10 +404,13 @@ if(${LIBRARY_TYPE} STREQUAL SHARED)
       "${PROJECT_NAME}, hsa-rocr-dev, rocm-core")
   message("CPACK_RPM_PACKAGE_RELEASE: ${CPACK_RPM_PACKAGE_RELEASE}")
 
+  #Disable build id for rocprofiler as its creating transaction error
+  set ( CPACK_RPM_SPEC_MORE_DEFINE "%define _build_id_links none" )
+
   # RPM package specific variable for ASAN
   set ( CPACK_RPM_ASAN_PACKAGE_NAME "${ROCPROFILER_NAME}-asan" )
   set ( CPACK_RPM_ASAN_PACKAGE_REQUIRES "hsa-rocr-asan, rocm-core-asan" )
-  
+ 
   # Remove dependency on rocm-core if -DROCM_DEP_ROCMCORE=ON not given to cmake
   if(NOT ROCM_DEP_ROCMCORE)
     string(REGEX REPLACE ",? ?rocm-core" "" CPACK_RPM_RUNTIME_PACKAGE_REQUIRES
