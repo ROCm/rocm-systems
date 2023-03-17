@@ -431,6 +431,21 @@ configure_file(
     "${PROJECT_SOURCE_DIR}/RPM/rpm_postun" FILE_PERMISSIONS ${INST_SCR_PERM})
 #backward compatibility for file reorganization
 if(FILE_REORG_BACKWARD_COMPATIBILITY)
+# To enable/disable #error in wrapper header files
+   if(NOT DEFINED ROCM_HEADER_WRAPPER_WERROR)
+        if(DEFINED ENV{ROCM_HEADER_WRAPPER_WERROR})
+            set(ROCM_HEADER_WRAPPER_WERROR "$ENV{ROCM_HEADER_WRAPPER_WERROR}"
+                  CACHE STRING "Header wrapper warnings as errors.")
+        else()
+            set(ROCM_HEADER_WRAPPER_WERROR "ON" CACHE STRING "Header wrapper warnings as errors.")
+        endif()
+    endif()
+    if(ROCM_HEADER_WRAPPER_WERROR)
+        set(deprecated_error 1)
+    else()
+        set(deprecated_error 0)
+    endif()
+
     include(rdc-backward-compat)
 endif()
 if(DEFINED ENV{ROCM_LIBPATCH_VERSION})
