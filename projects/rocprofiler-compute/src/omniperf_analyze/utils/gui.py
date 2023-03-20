@@ -468,7 +468,7 @@ def build_layout(
         )
         # append roofline section
         has_roofline = os.path.isfile(path_to_dir + "/roofline.csv")
-        if (has_roofline):
+        if has_roofline:
             div_children.append(
                 get_roofline(
                     path_to_dir,
@@ -592,5 +592,18 @@ def build_layout(
                         ],
                     )
                 )
+
+        # Display pop-up message if no filters are applied
+        if not (disp_filt or kernel_filter or gcd_filter):
+            div_children.append(
+                html.Section(
+                    id="popup",
+                    children=[
+                        html.Div(
+                            children="To dive deeper, use the top drop down menus to isolate particular kernel(s) or dispatch(s). You will then see the web page update with additional low-level metrics specific to the filter you've applied..",
+                        ),
+                    ],
+                )
+            )
 
         return div_children
