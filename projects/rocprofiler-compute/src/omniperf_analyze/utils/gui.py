@@ -25,6 +25,7 @@
 from selectors import EpollSelector
 import sys
 import copy
+import os.path
 import pandas as pd
 from dash.dash_table import FormatTemplate
 from dash.dash_table.Format import Format, Scheme, Symbol
@@ -466,13 +467,15 @@ def build_layout(
             get_memchart(panel_configs[1900]["data source"], base_data[base_run])
         )
         # append roofline section
-        div_children.append(
-            get_roofline(
-                path_to_dir,
-                parser.apply_filters(base_data[base_run], is_gui, debug),
-                verbose,
+        has_roofline = os.path.isfile(path_to_dir + "/roofline.csv")
+        if (has_roofline):
+            div_children.append(
+                get_roofline(
+                    path_to_dir,
+                    parser.apply_filters(base_data[base_run], is_gui, debug),
+                    verbose,
+                )
             )
-        )
         # Iterate over each section as defined in panel configs
         for panel_id, panel in panel_configs.items():
             title = str(panel_id // 100) + ". " + panel["title"]
