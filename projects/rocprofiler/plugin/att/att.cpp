@@ -45,6 +45,8 @@
 #include "rocprofiler_plugin.h"
 #include "../utils.h"
 
+#define ATT_FILENAME_MAXBYTES 96
+
 namespace {
 
 class att_plugin_t {
@@ -78,6 +80,10 @@ class att_plugin_t {
                                                     att_tracer_record->kernel_id, &kernel_name_c));
 
     std::string name_demangled = rocmtools::truncate_name(rocmtools::cxx_demangle(kernel_name_c));
+
+    if (name_demangled.size() > ATT_FILENAME_MAXBYTES) { // Limit filename size
+      name_demangled = name_demangled.substr(0, ATT_FILENAME_MAXBYTES);
+    }
 
     // Get the number of shader engine traces
     int se_num = att_tracer_record->shader_engine_data_count;
