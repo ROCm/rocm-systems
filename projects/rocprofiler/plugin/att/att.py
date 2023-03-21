@@ -17,6 +17,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import json
 
+COUNTERS_MAX_CAPTURES = 1<<12
+
 class PerfEvent(ctypes.Structure):
     _fields_ = [
         ('time', c_uint64),
@@ -46,7 +48,7 @@ class KvPair(ctypes.Structure):
     """ Matches pair<int, int> = (key, value) on the python side """
     _fields_ = [('key', ctypes.c_int),
                             ('value', ctypes.c_int)]
-    
+
 
 class ReturnAssemblyInfo(ctypes.Structure):
     """ Matches ReturnAssemblyInfo on the python side """
@@ -303,38 +305,43 @@ def draw_wave_metrics(selections, normalize):
 
     plt.figure(figsize=(15,3))
 
-    delta_time = max(1,int(0.5+np.min([get_delta_time(events) for events in EVENTS])))
-    maxtime = np.max([np.max([e.time for e in events]) for events in EVENTS])+1
+    delta_step = 8
+    quad_delta_time = max(delta_step,int(0.5+np.min([get_delta_time(events) for events in EVENTS])))
+    maxtime = np.max([np.max([e.time for e in events]) for events in EVENTS])/quad_delta_time+1
+
+    if maxtime*delta_step >= COUNTERS_MAX_CAPTURES:
+        delta_step = 1
+    while maxtime >= COUNTERS_MAX_CAPTURES:
+        quad_delta_time *= 2
+        maxtime /= 2
+
+    maxtime = int(min(maxtime*delta_step, COUNTERS_MAX_CAPTURES))
     event_timeline = np.zeros((16, maxtime), dtype=np.int32)
-    print('Delta:', delta_time)
-    print('Max_cycles:', maxtime)
+    print('Delta:', quad_delta_time)
+    print('Max_cycles:', maxtime*quad_delta_time*4//delta_step)
 
-    kernsize = 2*(delta_time//14)+1
-    trim = max(maxtime//5000,1)
-    cycles = 4*np.arange(maxtime)[::trim]
-
-    kernel = np.asarray([np.exp(-abs(k/kernsize)**2) for k in range(-kernsize*3,kernsize*3+1)])
-    kernel /= np.sum(kernel)*len(EVENTS)*delta_time
+    cycles = 4*quad_delta_time//delta_step*np.arange(maxtime)
+    kernel = len(EVENTS)*quad_delta_time
 
     for events in EVENTS:
         for e in range(len(events)-1):
             bk = events[e].bank*4
-            start = events[e].time
-            end = start+delta_time
+            start = events[e].time // (quad_delta_time//delta_step)
+            end = start+delta_step
             event_timeline[bk:bk+4, start:end] += np.asarray(events[e].toTuple()[1:5])[:, None]
         start = events[-1].time
-        event_timeline[bk:bk+4, start:start+delta_time] += \
+        event_timeline[bk:bk+4, start:start+delta_step] += \
             np.asarray(events[-1].toTuple()[1:5])[:, None]
 
-
-    event_timeline = [np.convolve(e, kernel)[3*kernsize:-3*kernsize] for e in event_timeline]
+    event_timeline = [np.convolve(e, [kernel for k in range(3)])[1:-1] for e in event_timeline]
+    #event_timeline = [e/kernel for e in event_timeline]
 
     if normalize:
         event_timeline = [100*e/max(e.max(), 1E-5) for e in event_timeline]
-    
+
     colors = ['blue', 'green', 'gray', 'red', 'orange', 'cyan', 'black', 'darkviolet',
                 'yellow', 'darkred', 'pink', 'lime', 'gold', 'tan', 'aqua', 'olive']
-    [plt.plot(cycles, e[::trim], '-', label=n, color=c)
+    [plt.plot(cycles, e, '-', label=n, color=c)
         for e, n, c, sel in zip(event_timeline, EVENT_NAMES, colors, selections) if sel]
 
     plt.legend()

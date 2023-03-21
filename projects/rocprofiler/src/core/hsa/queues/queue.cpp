@@ -841,12 +841,60 @@ void WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t user_pkt
     }
     /* Write the transformed packets to the hardware queue.  */
     writer(&transformed_packets[0], transformed_packets.size());
-  } else if (session_id.handle > 0 && pkt_count > 0 && is_att_collection_mode && session) {
+  } else if (session_id.handle > 0 && pkt_count > 0 &&
+            is_att_collection_mode && session &&
+            KernelInterceptCount < MAX_ATT_PROFILES
+  ) {
     // att start
     // Getting Queue Data and Information
     auto& queue_info = *static_cast<Queue*>(data);
     std::lock_guard<std::mutex> lk(queue_info.qw_mutex);
     Agent::AgentInfo* agentInfo = &(hsa_support::GetAgentInfo(queue_info.GetGPUAgent().handle));
+
+    bool can_profile_anypacket = false;
+    std::vector<bool> can_profile_packet;
+
+    for (size_t i = 0; i < pkt_count; ++i) {
+      auto& original_packet = static_cast<const hsa_barrier_and_packet_t*>(packets)[i];
+      bool b_profile_this_object = false;
+
+      // Skip packets other than kernel dispatch packets.
+      if (bit_extract(original_packet.header, HSA_PACKET_HEADER_TYPE,
+                      HSA_PACKET_HEADER_TYPE + HSA_PACKET_HEADER_WIDTH_TYPE - 1) ==
+          HSA_PACKET_TYPE_KERNEL_DISPATCH) {
+
+        auto& kdispatch = static_cast<const hsa_kernel_dispatch_packet_s*>(packets)[i];
+        uint64_t kernel_object = kdispatch.kernel_object;
+
+        // Try to match the mangled kernel name with given matches in input.txt
+        try {
+          std::lock_guard<std::mutex> lock(ksymbol_map_lock);
+          assert(ksymbols);
+          const std::string& kernel_name = ksymbols->at(kernel_object);
+
+          // We want to initiate att profiling only if a match exists
+          for(const std::string& kernel_matches : kernel_profile_names) {
+            if (kernel_name.find(kernel_matches) != std::string::npos) {
+              b_profile_this_object = true;
+              break;
+            }
+          }
+          if (!b_profile_this_object) printf("Skipping: %s\n", kernel_name.c_str());
+        } catch (...) {
+          printf("Warning: Unknown name for object %lu\n", kernel_object);
+        }
+      }
+
+      if (b_profile_this_object)
+        can_profile_anypacket = true;
+      can_profile_packet.push_back(b_profile_this_object);
+    }
+
+    if (!can_profile_anypacket) {
+      /* Write the original packets to the hardware if no patch will be profiled */
+      writer(packets, pkt_count);
+      return;
+    }
 
     // Preparing att Packets
     Packet::packet_t start_packet{};
@@ -902,44 +950,12 @@ void WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t user_pkt
                                             att_params, &start_packet, &stop_packet);
     }
 
-
     // Searching across all the packets given during this write
     for (size_t i = 0; i < pkt_count; ++i) {
       auto& original_packet = static_cast<const hsa_barrier_and_packet_t*>(packets)[i];
 
-      // Skip packets other than kernel dispatch packets.
-      if (bit_extract(original_packet.header, HSA_PACKET_HEADER_TYPE,
-                      HSA_PACKET_HEADER_TYPE + HSA_PACKET_HEADER_WIDTH_TYPE - 1) !=
-          HSA_PACKET_TYPE_KERNEL_DISPATCH) {
-        transformed_packets.emplace_back(packets_arr[i]);
-        continue;
-      }
-
-      auto& kdispatch = static_cast<const hsa_kernel_dispatch_packet_s*>(packets)[i];
-      uint64_t kernel_object = kdispatch.kernel_object;
-      bool b_profile_this_object = false;
-
-      // Try to match the mangled kernel name with given matches in input.txt
-      try {
-        std::lock_guard<std::mutex> lock(ksymbol_map_lock);
-        assert(ksymbols);
-        const std::string& kernel_name = ksymbols->at(kernel_object);
-
-        // We want to initiate att profiling only if a match exists
-        for(const std::string& kernel_matches : kernel_profile_names) {
-          if (kernel_name.find(kernel_matches) != std::string::npos) {
-            b_profile_this_object = true;
-            break;
-          }
-        }
-        if (!b_profile_this_object) printf("Skipping: %s\n", kernel_name.c_str());
-      } catch (...) {
-        printf("Warning: Unknown name for object %lu\n", kernel_object);
-      }
-
-      // If no match was found or intercept count > maximum desired profiles, skip this kernel.
-      if (!b_profile_this_object || KernelInterceptCount >= MAX_ATT_PROFILES) {
-        printf("Skipping: %lu\n", kernel_object);
+      // Skip all packets marked with !can_profile
+      if (i >= can_profile_packet.size() || can_profile_packet[i] == false) {
         transformed_packets.emplace_back(packets_arr[i]);
         continue;
       }
