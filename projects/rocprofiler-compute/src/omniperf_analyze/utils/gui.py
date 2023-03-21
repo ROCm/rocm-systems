@@ -343,6 +343,8 @@ def build_table_chart(
         style_cell_conditional=[
             {"if": {"column_id": display_columns[0]}, "textAlign": "left"}
         ],
+        # style cell
+        style_cell={"maxWidth": "500px"},
         # display style
         style_header={
             "backgroundColor": "rgb(30, 30, 30)",
@@ -351,7 +353,7 @@ def build_table_chart(
         }
         if IS_DARK
         else {},
-        style_data={"backgroundColor": "rgb(50, 50, 50)", "color": "white"}
+        style_data={"backgroundColor": "rgb(50, 50, 50)", "color": "white", "whiteSpace": "normal", "height": "auto"}
         if IS_DARK
         else {},
         style_data_conditional=[
