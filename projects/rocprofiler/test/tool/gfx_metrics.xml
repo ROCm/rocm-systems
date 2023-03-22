@@ -425,3 +425,52 @@
 <gfx1032 base="gfx10">
 </gfx1032>
 
+<gfx11>
+  <metric name="GRBM_COUNT" block=GRBM event=0 descr="Tie High - Count Number of Clocks"></metric>
+  <metric name="GRBM_GUI_ACTIVE" block=GRBM event=2 descr="The GUI is Active"></metric>
+
+  <metric name="GL2C_HIT" block=GL2C event=42 descr="Number of cache hits"></metric>
+  <metric name="GL2C_MISS" block=GL2C event=43 descr="Number of cache misses.  UC reads count as misses."></metric>
+  <metric name="GL2C_MC_WRREQ" block=GL2C event=83 descr="Number of transactions (either 32-byte or 64-byte) going over the GL2C_EA_wrreq interface. Atomics may travel over the same interface and are generally classified as write requests. This does not include probe commands"></metric>
+  <metric name="GL2C_EA_WRREQ_64B" block=GL2C event=85 descr="Number of 64-byte transactions going (64-byte write or CMPSWAP) over the TC_EA_wrreq interface."></metric>
+  <metric name="GL2C_MC_WRREQ_STALL" block=GL2C event=88 descr="Number of cycles a write request was stalled."></metric>
+  <metric name="GL2C_MC_RDREQ" block=GL2C event=96 descr="Number of GL2C/EA read requests (either 32-byte or 64-byte or 128-byte)."></metric>
+  <metric name="GL2C_EA_RDREQ_32B" block=GL2C event=99 descr="Number of 32-byte GL2C/EA read requests"></metric>
+  <metric name="GL2C_EA_RDREQ_64B" block=GL2C event=100 descr="Number of 64-byte GL2C/EA read requests"></metric>
+  <metric name="GL2C_EA_RDREQ_96B" block=GL2C event=101 descr="Number of 96-byte GL2C/EA read requests"></metric>
+  <metric name="GL2C_EA_RDREQ_128B" block=GL2C event=102 descr="Number of 128-byte GL2C/EA read requests"></metric>
+
+  <metric name="SQ_WAVES" block=SQ event=4 descr="Count number of waves sent to SQs. {emulated, global, C1}"></metric>
+  <metric name="SQ_WAVE_CYCLES" block=SQ event=24 descr="Number of clock cycles spent by waves in the SQs. Incremented by number of living (valid) waves each cycle. {nondeterministic, C1}"></metric>
+  <metric name="SQ_WAIT_INST_ANY" block=SQ event=26 descr="Number of clock-cycles spent waiting for any instruction issue. In units of cycles. (nondeterministic)"></metric>
+  <metric name="SQ_WAIT_ANY" block=SQ event=35 descr="Number of wave-cycles spent waiting for anything (nondeterministic, C1)"></metric>
+  <metric name="SQ_INSTS_WAVE32" block=SQ event=70 descr="Number of wave32 instructions issued, for flat, lds, valu, tex. {emulated, C1}"></metric>
+  <metric name="SQ_INSTS_WAVE32_LDS" block=SQ event=72 descr="Number of wave32 LDS indexed instructions issued. Wave64 may count 1 or 2, depending on what gets issued. {emulated, C1}"></metric>
+  <metric name="SQ_INSTS_WAVE32_VALU" block=SQ event=73 descr="Number of wave32 valu instructions issued. Wave64 may count 1 or 2, depending on what gets issued. {emulated, C1}"></metric>
+  <metric name="SQ_WAVE32_INSTS" block=SQ event=82 descr="Number of instructions issued by wave32 waves. Skipped instructions are not counted. {emulated}"></metric>
+  <metric name="SQ_WAVE64_INSTS" block=SQ event=83 descr="Number of instructions issued by wave64 waves. Skipped instructions are not counted. {emulated}"></metric>
+  <metric name="SQ_INST_LEVEL_GDS" block=SQ event=87 descr="Number of in-flight GDS instructions. Set next counter to ACCUM_PREV and divide by INSTS_GDS for average latency. {level, nondeterministic, C1}"></metric>
+  <metric name="SQ_INST_LEVEL_LDS" block=SQ event=88 descr="Number of in-flight LDS instructions. Set next counter to ACCUM_PREV and divide by INSTS_LDS for average latency. Includes FLAT instructions. {level, nondeterministic, C1}"></metric>
+  <metric name="SQ_INST_CYCLES_VMEM" block=SQ event=106 descr="Number of cycles needed to send addr and data for VMEM (lds, buffer, image, flat, scratch, global) instructions, windowed by perf_en. {emulated, C1}"></metric>
+  <metric name="SQC_LDS_BANK_CONFLICT" block=SQ event=256 descr="Number of cycles LDS is stalled by bank conflicts. (emulated, C1)"></metric>
+  <metric name="SQC_LDS_IDX_ACTIVE" block=SQ event=261 descr="Number of cycles LDS is used for indexed (non-direct,non-interpolation) operations. {per-simd, emulated, C1}"></metric>
+  <metric name="SQ_INSTS_VALU" block=SQ event=62 descr="Number of VALU instructions issued excluding skipped instructions. {emulated, C1}"></metric>
+  <metric name="SQ_INSTS_SALU" block=SQ event=58 descr="Number of SALU instructions issued. {emulated, C1}"></metric>
+  <metric name="SQ_INSTS_SMEM" block=SQ event=59 descr="Number of SMEM instructions issued. {emulated, C1}"></metric>
+  <metric name="SQ_INSTS_FLAT" block=SQ event=56 descr="Number of FLAT instructions issued. {emulated, C2}"></metric>
+  <metric name="SQ_INSTS_LDS" block=SQ event=57 descr="Number of LDS indexed instructions issued. {emulated, C1}"></metric>
+  <metric name="SQ_INSTS_GDS" block=SQ event=54 descr="Number of GDS instructions issued. {emulated, C1}"></metric>
+  <metric name="SQ_INSTS_TEX_LOAD" block=SQ event=66 descr="Number of buffer load, image load, sample, or atomic (with return) instructions issued. {emulated, C1}"></metric>
+  <metric name="SQ_INSTS_TEX_STORE" block=SQ event=67 descr="Number of buffer store, image store, or atomic (without return) instructions issued. {emulated, C1}"></metric>
+  <metric name="SQ_WAIT_INST_LDS" block=SQ event=29 descr="Number of clock cycles spent waiting for LDS (indexed) instruction issue. In units of cycles. {nondeterministic, C1}"></metric>
+  <metric name="TA_TA_BUSY" block=TA event=15 descr="TA block is busy. Perf_Windowing not supported for this counter."></metric>
+  <metric name="TA_BUFFER_LOAD_WAVEFRONTS" block=TA event=45 descr="Number of buffer load vec32 packets processed by TA"></metric>
+  <metric name="TA_BUFFER_STORE_WAVEFRONTS" block=TA event=46 descr="Number of buffer store vec32 packets processed by TA"></metric>
+
+</gfx11>
+
+<gfx1100 base="gfx11">
+</gfx1100>
+
+<gfx1101 base="gfx11">
+</gfx1101>
