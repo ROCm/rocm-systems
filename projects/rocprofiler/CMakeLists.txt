@@ -393,15 +393,16 @@ if(${LIBRARY_TYPE} STREQUAL SHARED)
   set(CPACK_RPM_TESTS_PACKAGE_NAME "${PROJECT_NAME}-tests")
   set(CPACK_RPM_TESTS_PACKAGE_REQUIRES
       "${PROJECT_NAME}-devel, hsa-rocr-dev, rocm-core")
-  set(CPACK_RPM_SAMPLES_PACKAGE_NAME "${PROJECT_NAME}-samples")
-  set(CPACK_RPM_SAMPLES_PACKAGE_REQUIRES
-      "${PROJECT_NAME}-devel, hsa-rocr-dev, rocm-core")
   set(CPACK_RPM_DOCS_PACKAGE_NAME "${PROJECT_NAME}-docs")
   set(CPACK_RPM_DOCS_PACKAGE_REQUIRES
       "${PROJECT_NAME}-devel, hsa-rocr-dev, rocm-core")
   set(CPACK_RPM_PLUGINS_PACKAGE_NAME "${PROJECT_NAME}-plugins")
   set(CPACK_RPM_PLUGINS_PACKAGE_REQUIRES
       "${PROJECT_NAME}, hsa-rocr-dev, rocm-core")
+  set(CPACK_RPM_PACKAGE_AUTOREQ 0)
+  set(CPACK_RPM_SAMPLES_PACKAGE_NAME "${PROJECT_NAME}-samples")
+  set(CPACK_RPM_SAMPLES_PACKAGE_REQUIRES
+     "${PROJECT_NAME}-devel, hsa-rocr-dev, rocm-core, hip-runtime-amd")
   message("CPACK_RPM_PACKAGE_RELEASE: ${CPACK_RPM_PACKAGE_RELEASE}")
 
   #Disable build id for rocprofiler as its creating transaction error
