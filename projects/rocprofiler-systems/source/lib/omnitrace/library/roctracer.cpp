@@ -448,20 +448,35 @@ roctx_api_callback(uint32_t domain, uint32_t cid, const void* callback_data,
 
     if(domain != ACTIVITY_DOMAIN_ROCTX) return;
 
-    static auto _range_map  = std::unordered_map<roctx_range_id_t, std::string_view>{};
+    static auto _range_map  = std::unordered_map<roctx_range_id_t, std::string>{};
     static auto _range_lock = std::mutex{};
     const auto* _data       = reinterpret_cast<const roctx_api_data_t*>(callback_data);
+    static thread_local auto _range_stack = std::vector<std::string>{};
 
     switch(cid)
     {
         case ROCTX_API_ID_roctxRangePushA:
         {
-            component::category_region<category::rocm_roctx>::start(_data->args.message);
+            if(_data->args.message)
+            {
+                auto& itr = _range_stack.emplace_back(std::string{ _data->args.message });
+                component::category_region<category::rocm_roctx>::start(itr.c_str());
+            }
             break;
         }
         case ROCTX_API_ID_roctxRangePop:
         {
-            component::category_region<category::rocm_roctx>::stop(_data->args.message);
+            if(!_range_stack.empty())
+            {
+                auto& itr = _range_stack.back();
+                component::category_region<category::rocm_roctx>::stop(itr.c_str());
+                _range_stack.pop_back();
+            }
+            else
+            {
+                OMNITRACE_THROW("Error! roctxRangePop stack is empty! Expected "
+                                "roctxRangePush/roctxRangePop on same thread\n");
+            }
             break;
         }
         case ROCTX_API_ID_roctxRangeStartA:
@@ -470,7 +485,7 @@ roctx_api_callback(uint32_t domain, uint32_t cid, const void* callback_data,
                 std::unique_lock<std::mutex> _lk{ _range_lock, std::defer_lock };
                 if(!_lk.owns_lock()) _lk.lock();
                 _range_map.emplace(roctx_range_id_t{ _data->args.id },
-                                   std::string_view{ _data->args.message });
+                                   std::string{ _data->args.message });
             }
 
             component::category_region<category::rocm_roctx>::start(_data->args.message);
@@ -506,7 +521,14 @@ roctx_api_callback(uint32_t domain, uint32_t cid, const void* callback_data,
             break;
         }
         case ROCTX_API_ID_roctxMarkA:
-            // we do nothing with marker events...for now
+        {
+            if(_data->args.message)
+            {
+                component::category_region<category::rocm_roctx>::mark(
+                    _data->args.message);
+            }
+            break;
+        }
         default: break;
     }
 }

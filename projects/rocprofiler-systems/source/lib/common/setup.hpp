@@ -26,9 +26,16 @@
 #include "common/delimit.hpp"
 #include "common/environment.hpp"
 #include "common/join.hpp"
+#include "common/path.hpp"
 
+#include <algorithm>
 #include <cstdlib>
 #include <cstring>
+#include <dlfcn.h>
+#include <fstream>
+#include <ios>
+#include <link.h>
+#include <linux/limits.h>
 #include <string>
 #include <string_view>
 #include <sys/stat.h>
@@ -78,81 +85,32 @@ namespace omnitrace
 {
 inline namespace common
 {
-namespace path
+inline std::vector<env_config>
+get_environ(int _verbose, std::string _search_paths = {},
+            std::string _omnilib    = "libomnitrace.so",
+            std::string _omnilib_dl = "libomnitrace-dl.so")
 {
-inline std::string
-find_path(const std::string& _path, int _verbose, std::string _search_paths = {})
-{
-    auto _exists = [](std::string_view _name) {
-        struct stat _buffer;
-        if(stat(_name.data(), &_buffer) == 0)
-            return (S_ISREG(_buffer.st_mode) != 0 || S_ISLNK(_buffer.st_mode) != 0);
-        return false;
-    };
+    auto _data            = std::vector<env_config>{};
+    auto _omnilib_path    = path::get_origin(_omnilib);
+    auto _omnilib_dl_path = path::get_origin(_omnilib_dl);
 
-    if(_exists(_path) && !_path.empty() && _path.at(0) == '/') return _path;
-
-    auto _default_search_paths =
-        join(":", get_env("OMNITRACE_PATH", ""), get_env("PWD", ""), ".",
-             get_env("LD_LIBRARY_PATH", ""), get_env("LIBRARY_PATH", ""));
-
-    if(_search_paths.empty()) _search_paths = _default_search_paths;
-
-    auto _paths = delimit(_search_paths, ":");
-
-    if(_paths.empty())
+    if(!_omnilib_path.empty())
     {
-        _search_paths = _default_search_paths;
-        _paths        = delimit(_search_paths, ":");
+        _omnilib      = join('/', _omnilib_path, ::basename(_omnilib.c_str()));
+        _search_paths = join(':', _omnilib_path, _search_paths);
     }
 
-    int _verbose_lvl = 2;
-    for(const auto& itr : _paths)
+    if(!_omnilib_dl_path.empty())
     {
-        auto _f = join('/', itr, _path);
-        OMNITRACE_SETUP_LOG(_verbose >= _verbose_lvl, "searching for '%s' in '%s' ...\n",
-                            _path.c_str(), itr.c_str());
-        if(_exists(_f)) return _f;
-        for(const auto* sitr : { "lib", "lib64", "../lib", "../lib64" })
-        {
-            _f = join('/', itr, sitr, _path);
-            OMNITRACE_SETUP_LOG(_verbose >= _verbose_lvl,
-                                "searching for '%s' in '%s' ...\n", _path.c_str(),
-                                common::join('/', itr, sitr).c_str());
-            if(_exists(_f)) return _f;
-        }
+        _omnilib_dl   = join('/', _omnilib_dl_path, ::basename(_omnilib_dl.c_str()));
+        _search_paths = join(':', _omnilib_dl_path, _search_paths);
     }
-    return _path;
-}
 
-inline std::string
-dirname(const std::string& _fname)
-{
-    if(_fname.find('/') != std::string::npos)
-        return _fname.substr(0, _fname.find_last_of('/'));
-    return std::string{};
-}
-
-inline bool
-exists(const std::string& _fname)
-{
-    struct stat _buffer;
-    if(stat(_fname.c_str(), &_buffer) == 0)
-        return (S_ISREG(_buffer.st_mode) != 0 || S_ISLNK(_buffer.st_mode) != 0);
-    return false;
-}
-}  // namespace path
-
-inline void
-setup_environ(int _verbose, const std::string& _search_paths = {},
-              std::string _omnilib    = "libomnitrace.so",
-              std::string _omnilib_dl = "libomnitrace-dl.so")
-{
     _omnilib    = common::path::find_path(_omnilib, _verbose, _search_paths);
     _omnilib_dl = common::path::find_path(_omnilib_dl, _verbose, _search_paths);
 
 #if defined(OMNITRACE_USE_ROCTRACER) && OMNITRACE_USE_ROCTRACER > 0
-    setenv("HSA_TOOLS_LIB", _omnilib.c_str(), 0);
+    _data.emplace_back(env_config{ "HSA_TOOLS_LIB", _omnilib.c_str(), 0 });
 #endif
 
 #if defined(OMNITRACE_USE_ROCPROFILER) && OMNITRACE_USE_ROCPROFILER > 0
@@ -161,11 +119,11 @@ setup_environ(int _verbose, const std::string& _search_paths = {},
 #    else
 #        define ROCPROFILER_METRICS_DIR "rocprofiler/lib"
 #    endif
-    setenv("HSA_TOOLS_LIB", _omnilib.c_str(), 0);
-    setenv("ROCP_TOOL_LIB", _omnilib.c_str(), 0);
-    setenv("ROCPROFILER_LOG", "1", 0);
-    setenv("ROCP_HSA_INTERCEPT", "1", 0);
-    setenv("HSA_TOOLS_REPORT_LOAD_FAILURE", "1", 0);
+    _data.emplace_back(env_config{ "HSA_TOOLS_LIB", _omnilib.c_str(), 0 });
+    _data.emplace_back(env_config{ "ROCP_TOOL_LIB", _omnilib.c_str(), 0 });
+    _data.emplace_back(env_config{ "ROCPROFILER_LOG", "1", 0 });
+    _data.emplace_back(env_config{ "ROCP_HSA_INTERCEPT", "1", 0 });
+    _data.emplace_back(env_config{ "HSA_TOOLS_REPORT_LOAD_FAILURE", "1", 0 });
 
     auto _possible_rocp_metrics = std::vector<std::string>{};
     auto _possible_rocprof_libs = std::vector<std::string>{};
@@ -174,11 +132,11 @@ setup_environ(int _verbose, const std::string& _search_paths = {},
         if(getenv(itr))
         {
             _possible_rocp_metrics.emplace_back(
-                common::join('/', getenv(itr), "lib/rocprofiler", "metrics.xml"));
+                common::join('/', getenv(itr), "lib/rocprofiler"));
             _possible_rocprof_libs.emplace_back(
                 common::join('/', getenv(itr), "lib/rocprofiler", "librocprofiler64.so"));
             _possible_rocp_metrics.emplace_back(
-                common::join('/', getenv(itr), "rocprofiler/lib", "metrics.xml"));
+                common::join('/', getenv(itr), "rocprofiler/lib"));
             _possible_rocprof_libs.emplace_back(
                 common::join('/', getenv(itr), "rocprofiler/lib", "librocprofiler64.so"));
         }
@@ -186,50 +144,137 @@ setup_environ(int _verbose, const std::string& _search_paths = {},
 
     // default path
     _possible_rocp_metrics.emplace_back(
-        common::join('/', OMNITRACE_DEFAULT_ROCM_PATH, "lib/rocprofiler", "metrics.xml"));
+        common::join('/', OMNITRACE_DEFAULT_ROCM_PATH, "lib/rocprofiler"));
     _possible_rocp_metrics.emplace_back(
-        common::join('/', OMNITRACE_DEFAULT_ROCM_PATH, "rocprofiler/lib", "metrics.xml"));
+        common::join('/', OMNITRACE_DEFAULT_ROCM_PATH, "rocprofiler/lib"));
+
+    auto _realpath_and_unique = [](const auto& _inp_v) {
+        auto _out_v = decltype(_inp_v){};
+        for(auto& itr : _inp_v)
+        {
+            if(path::exists(itr)) _out_v.emplace_back(path::realpath(itr));
+        }
+
+        _out_v.erase(std::unique(_out_v.begin(), _out_v.end()), _out_v.end());
+        return _out_v;
+    };
+
+    _possible_rocprof_libs = _realpath_and_unique(_possible_rocprof_libs);
 
     for(const auto& itr : _possible_rocprof_libs)
     {
         if(path::exists(itr))
         {
-            setenv("OMNITRACE_ROCPROFILER_LIBRARY", itr.c_str(), 0);
+            _data.emplace_back(
+                env_config{ "OMNITRACE_ROCPROFILER_LIBRARY", itr.c_str(), 0 });
             _possible_rocp_metrics.emplace(
                 _possible_rocp_metrics.begin(),
-                common::join('/', path::dirname(itr),
-                             "../../lib/rocprofiler/metrics.xml"));
-            _possible_rocp_metrics.emplace(
-                _possible_rocp_metrics.begin(),
-                common::join('/', path::dirname(itr), "metrics.xml"));
+                common::join('/', path::dirname(itr), "../../lib/rocprofiler"));
+            _possible_rocp_metrics.emplace(_possible_rocp_metrics.begin(),
+                                           common::join('/', path::dirname(itr)));
         }
     }
 
-    for(const auto& itr : _possible_rocp_metrics)
-        if(path::exists(itr)) setenv("ROCP_METRICS", itr.c_str(), 0);
+    _possible_rocp_metrics = _realpath_and_unique(_possible_rocp_metrics);
 
-    // default if none of above succeeded
-    setenv("ROCP_METRICS",
-           common::join('/', OMNITRACE_DEFAULT_ROCM_PATH, ROCPROFILER_METRICS_DIR,
-                        "metrics.xml")
-               .c_str(),
-           0);
+    auto _env_rocp_metrics = get_env("ROCP_METRICS", "");
+    if(!_env_rocp_metrics.empty())
+    {
+        if(!path::exists(_env_rocp_metrics))
+            throw std::runtime_error(join("", "Error! ROCP_METRICS file \"",
+                                          _env_rocp_metrics, "\" does not exist"));
+        _possible_rocp_metrics.clear();
+        _possible_rocp_metrics.emplace_back(
+            common::join('/', path::dirname(_env_rocp_metrics)));
+    }
 
+    auto _found_rocp_metrics = (!_env_rocp_metrics.empty())
+                                   ? get_env("OMNITRACE_ROCP_METRICS_FORCE_VALID", false)
+                                   : false;
+
+    if(!_found_rocp_metrics)
+    {
+        for(const auto& itr : _possible_rocp_metrics)
+        {
+            auto _metrics_path = join('/', itr, "metrics.xml");
+            if(path::exists(itr) && path::exists(_metrics_path) &&
+               path::exists(join('/', itr, "gfx_metrics.xml")))
+            {
+                _found_rocp_metrics = true;
+                _data.emplace_back(
+                    env_config{ "ROCP_METRICS", _metrics_path.c_str(), 0 });
+                break;
+            }
+        }
+    }
+
+    // handle error
+    if(!_found_rocp_metrics)
+    {
+        auto _msg = std::stringstream{};
+        _msg << std::boolalpha;
+        if(!_env_rocp_metrics.empty())
+        {
+            auto _env_rocp_metrics_dir = path::dirname(_env_rocp_metrics);
+            auto _rocp_metrics_xml     = join('/', _env_rocp_metrics_dir, "metrics.xml");
+            auto _rocp_gfx_metrics_xml =
+                join('/', _env_rocp_metrics_dir, "gfx_metrics.xml");
+            _msg << "Error! ROCP_METRICS=\"" << _env_rocp_metrics
+                 << "\" in the environment but the directory (" << _env_rocp_metrics_dir
+                 << ") does not contain "
+                    "metrics.xml (found: "
+                 << path::exists(_rocp_metrics_xml) << ") and/or gfx_metrics.xml (found: "
+                 << path::exists(_rocp_gfx_metrics_xml)
+                 << "). To ignore this error, set "
+                    "OMNITRACE_ROCP_METRICS_FORCE_VALID=true in the environment";
+        }
+        else
+        {
+            _msg << "Error! ROCP_METRICS not set in environment and OmniTrace could not "
+                    "find a suitable path. Please set ROCP_METRICS=/path/to/metrics.xml "
+                    "in the environment. This file is typically located in the same "
+                    "folder as the librocprofiler64.so library.\nAdditional note: "
+                    "metrics.xml typically contains:\n\t#include "
+                    "\"gfx_metrics.xml\"\nMake sure the provided path also contains this "
+                    "file.\nExample:\n\texport ROCP_METRICS="
+                 << OMNITRACE_DEFAULT_ROCM_PATH << "/" << ROCPROFILER_METRICS_DIR
+                 << "/metrics.xml\n";
+        }
+        throw std::runtime_error(_msg.str());
+    }
 #endif
 
 #if defined(OMNITRACE_USE_OMPT) && OMNITRACE_USE_OMPT > 0
-    std::string _omni_omp_libs = _omnilib_dl;
-    const char* _omp_libs      = getenv("OMP_TOOL_LIBRARIES");
-    if(_omp_libs != nullptr &&
-       std::string_view{ _omp_libs }.find(_omnilib_dl) == std::string::npos)
-        _omni_omp_libs = common::join(':', _omp_libs, _omnilib_dl);
-    OMNITRACE_SETUP_LOG(_verbose >= 2, "setting OMP_TOOL_LIBRARIES to '%s'\n",
-                        _omni_omp_libs.c_str());
-    setenv("OMP_TOOL_LIBRARIES", _omni_omp_libs.c_str(), 1);
+    if(get_env("OMNITRACE_USE_OMPT", true))
+    {
+        std::string _omni_omp_libs = _omnilib_dl;
+        const char* _omp_libs      = getenv("OMP_TOOL_LIBRARIES");
+        int         _override      = 0;
+        if(_omp_libs != nullptr &&
+           std::string_view{ _omp_libs }.find(_omnilib_dl) == std::string::npos)
+        {
+            _override      = 1;
+            _omni_omp_libs = common::join(':', _omp_libs, _omnilib_dl);
+        }
+        OMNITRACE_SETUP_LOG(_verbose >= 2, "setting OMP_TOOL_LIBRARIES to '%s'\n",
+                            _omni_omp_libs.c_str());
+        _data.emplace_back(
+            env_config{ "OMP_TOOL_LIBRARIES", _omni_omp_libs.c_str(), _override });
+    }
 #endif
 
-    (void) _omnilib;
-    (void) _omnilib_dl;
+    return _data;
+}
+
+inline void
+setup_environ(int _verbose, const std::string& _search_paths = {},
+              std::string _omnilib    = "libomnitrace.so",
+              std::string _omnilib_dl = "libomnitrace-dl.so")
+{
+    auto _data =
+        get_environ(_verbose, _search_paths, std::move(_omnilib), std::move(_omnilib_dl));
+    for(const auto& itr : _data)
+        itr(_verbose >= 3);
 }
 }  // namespace common
 }  // namespace omnitrace
