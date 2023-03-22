@@ -602,7 +602,7 @@ def build_layout(
                     id="popup",
                     children=[
                         html.Div(
-                            children="To dive deeper, use the top drop down menus to isolate particular kernel(s) or dispatch(s). You will then see the web page update with additional low-level metrics specific to the filter you've applied..",
+                            children="To dive deeper, use the top drop down menus to isolate particular kernel(s) or dispatch(s). You will then see the web page update with additional low-level metrics specific to the filter you've applied.",
                         ),
                     ],
                 )

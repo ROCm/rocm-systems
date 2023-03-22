@@ -213,7 +213,9 @@ ul#nav li {
    font-size: 14px;
    text-align: left;
 }
-
+.VirtualizedSelectOption {
+   overflow: hidden;
+}
 #nav .nav-right {
    float: right;
 }
@@ -246,6 +248,7 @@ button.report:hover {
    font-size: 16px;
 }
 
+/* Menu Button */
 .dropdown button {
    display: inline-block;
    font: 16px 'opensans-bold', sans-serif;
