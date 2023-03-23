@@ -115,6 +115,7 @@ class Monitor {
     std::string path_;
     const RocmSMI_env_vars *env_;
     std::map<rsmi_temperature_type_t, uint32_t> temp_type_index_map_;
+    std::map<rsmi_voltage_type_t, uint32_t> volt_type_index_map_;
 
     // This map uses a 64b index instead of 32b (unlike temp_type_index_map_)
     // for flexibility and simplicity. Currently, some parts of the
@@ -124,7 +125,6 @@ class Monitor {
     // a 64b value. Also, if we need to encode anything else, 64b will give
     // us more room to do so, without excessive changes.
     std::map<uint64_t, rsmi_temperature_type_t> index_temp_type_map_;
-    std::map<rsmi_voltage_type_t, uint32_t> volt_type_index_map_;
     std::map<uint64_t, rsmi_voltage_type_t> index_volt_type_map_;
 };
 

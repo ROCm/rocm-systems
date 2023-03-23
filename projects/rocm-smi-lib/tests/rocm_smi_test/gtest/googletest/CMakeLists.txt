@@ -101,12 +101,14 @@ if (INSTALL_GTEST)
   write_basic_package_version_file(${version_file} VERSION ${GOOGLETEST_VERSION} COMPATIBILITY AnyNewerVersion)
   install(EXPORT ${targets_export_name}
     NAMESPACE ${cmake_package_name}::
-    DESTINATION ${cmake_files_install_dir})
+    DESTINATION ${cmake_files_install_dir}
+    COMPONENT dev)
   set(config_file "${generated_dir}/${cmake_package_name}Config.cmake")
   configure_package_config_file("${gtest_SOURCE_DIR}/cmake/Config.cmake.in"
     "${config_file}" INSTALL_DESTINATION ${cmake_files_install_dir})
   install(FILES ${version_file} ${config_file}
-    DESTINATION ${cmake_files_install_dir})
+    DESTINATION ${cmake_files_install_dir}
+    COMPONENT dev)
 endif()
 
 # Where Google Test's .h files can be found.

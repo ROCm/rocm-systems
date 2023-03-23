@@ -143,10 +143,42 @@ set(CMN_INC_LIST ${CMN_INC_LIST} "${COMMON_INC_DIR}/rocm_smi_io_link.h")
 set(CMN_INC_LIST ${CMN_INC_LIST} "${COMMON_INC_DIR}/rocm_smi.h")
 set(CMN_INC_LIST ${CMN_INC_LIST} "${SHR_MUTEX_DIR}/shared_mutex.h")
 
+## set components
+if(ENABLE_ASAN_PACKAGING)
+  # ASAN Package requires only asan component with libraries and license file
+  set(CPACK_COMPONENTS_ALL asan)
+else()
+  set(CPACK_COMPONENTS_ALL dev)
+endif()
+
+# Enable Component Mode & Install Settings
+set(CPACK_DEB_COMPONENT_INSTALL ON)
+set(CPACK_RPM_COMPONENT_INSTALL ON)
+
+#Component Specific Configuration/Flags
+set(CPACK_DEBIAN_ASAN_PACKAGE_NAME ${ROCM_SMI_PACKAGE}-asan)
+set(CPACK_DEBIAN_DEV_PACKAGE_NAME ${ROCM_SMI_PACKAGE})
+set(CPACK_RPM_ASAN_PACKAGE_NAME ${ROCM_SMI_PACKAGE}-asan)
+set(CPACK_RPM_DEV_PACKAGE_NAME ${ROCM_SMI_PACKAGE})
+
+set (CPACK_DEBIAN_ASAN_PACKAGE_PROVIDES "${ROCM_SMI_PACKAGE}-asan")
+set (CPACK_DEBIAN_ASAN_PACKAGE_DEPENDS "python3, rocm-core-asan")
+set (CPACK_DEBIAN_DEV_PACKAGE_PROVIDES "rocm-smi")
+set (CPACK_DEBIAN_DEV_PACKAGE_DEPENDS "python3, rocm-core")
+set (CPACK_RPM_ASAN_PACKAGE_PROVIDES "${ROCM_SMI_PACKAGE}-asan")
+set (CPACK_RPM_ASAN_PACKAGE_REQUIRES "python3, rocm-core-asan")
+set (CPACK_RPM_DEV_PACKAGE_PROVIDES "rocm-smi")
+set (CPACK_RPM_DEV_PACKAGE_REQUIRES "python3, rocm-core")
+
+
 add_subdirectory("rocm_smi")
 add_subdirectory("oam")
 
-option(FILE_REORG_BACKWARD_COMPATIBILITY "Enable File Reorg with backward compatibility" ON)
+# Disable file reorg backward compatibility for ASAN packaging
+if(NOT ENABLE_ASAN_PACKAGING)
+  option(FILE_REORG_BACKWARD_COMPATIBILITY "Enable File Reorg with backward compatibility" ON)
+endif()
+
 if(FILE_REORG_BACKWARD_COMPATIBILITY)
 # To enable/disable #error in wrapper header files
   if(NOT DEFINED ROCM_HEADER_WRAPPER_WERROR)
@@ -166,11 +198,12 @@ if(FILE_REORG_BACKWARD_COMPATIBILITY)
   include(rocm_smi-backward-compat.cmake)
 endif()
 
+include(CMakePackageConfigHelpers)
+
 set(LIB_INSTALL_DIR  "${CMAKE_INSTALL_LIBDIR}")
 set(INCLUDE_INSTALL_DIR  "${CMAKE_INSTALL_INCLUDEDIR}")
 set(BIN_INSTALL_DIR  "${CMAKE_INSTALL_BINDIR}")
 
-include(CMakePackageConfigHelpers)
 
 configure_package_config_file(
     rocm_smi-config.cmake.in
@@ -201,14 +234,22 @@ export(TARGETS ${ROCM_SMI_TARGET} ${OAM_TARGET}
 # Export the package for use from the build-tree
 # (this registers the build-tree with a global CMake-registry)
 export(PACKAGE rocm_smi)
+
 # Create the rocm_smiConfig.cmake and rocm_smiConfigVersion files
 # ... for the build tree
-install(EXPORT rocm_smiTargets DESTINATION
-  "${CMAKE_INSTALL_LIBDIR}/cmake/${ROCM_SMI}" COMPONENT dev)
+install(EXPORT rocm_smiTargets
+    DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${ROCM_SMI}"
+    COMPONENT dev)
 
 #License file
 set(CPACK_RPM_PACKAGE_LICENSE "NCSA")
-install( FILES ${CPACK_RESOURCE_FILE_LICENSE} DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/${ROCM_SMI} RENAME LICENSE.txt)
+# install license file in share/doc/rocm_smi-asan folder
+install(FILES ${CPACK_RESOURCE_FILE_LICENSE}
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/${ROCM_SMI}-asan RENAME LICENSE.txt
+        COMPONENT asan)
+install( FILES ${CPACK_RESOURCE_FILE_LICENSE}
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/${ROCM_SMI} RENAME LICENSE.txt
+        COMPONENT dev)
 
 ###########################
 # Packaging directives
@@ -216,7 +257,11 @@ install( FILES ${CPACK_RESOURCE_FILE_LICENSE} DESTINATION ${CMAKE_INSTALL_DATADI
 set(CPACK_GENERATOR "DEB;RPM"  CACHE STRING "Default packaging generators.")
 set(CPACK_PACKAGING_INSTALL_PREFIX "/opt/rocm" CACHE STRING "Default packaging prefix.")
 set ( ENABLE_LDCONFIG ON CACHE BOOL "Set library links and caches using ldconfig.")
-set(CPACK_PACKAGE_NAME ${ROCM_SMI_PACKAGE})
+if( ENABLE_ASAN_PACKAGING )
+  set(CPACK_PACKAGE_NAME ${ROCM_SMI_PACKAGE}-asan)
+else()
+  set(CPACK_PACKAGE_NAME ${ROCM_SMI_PACKAGE})
+endif()
 set(CPACK_PACKAGE_VENDOR "Advanced Micro Devices, Inc.")
 set(CPACK_PACKAGE_CONTACT "RocmSMILib Support <rocm-smi.support@amd.com>")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "AMD System Management libraries")
@@ -236,8 +281,8 @@ else()
    set(CPACK_DEBIAN_PACKAGE_RELEASE "local")
 endif()
 set (CPACK_DEBIAN_PACKAGE_PROVIDES "rocm-smi")
-set (CPACK_DEBIAN_PACKAGE_SUGGESTS "sudo")
 set (CPACK_DEBIAN_PACKAGE_DEPENDS "python3, rocm-core")
+set (CPACK_DEBIAN_PACKAGE_SUGGESTS "sudo")
 
 ## Process the Debian install/remove scripts to update the CPACK variables
 configure_file ( ${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/postinst.in DEBIAN/postinst @ONLY )
@@ -279,8 +324,24 @@ set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
 set(CPACK_RPM_FILE_NAME "RPM-DEFAULT")
 # Remove dependency on rocm-core if -DROCM_DEP_ROCMCORE=ON not given to cmake
 if(NOT ROCM_DEP_ROCMCORE)
-    string(REGEX REPLACE ",? ?rocm-core" "" CPACK_RPM_PACKAGE_REQUIRES ${CPACK_RPM_PACKAGE_REQUIRES})
-    string(REGEX REPLACE ",? ?rocm-core" "" CPACK_DEBIAN_PACKAGE_DEPENDS ${CPACK_DEBIAN_PACKAGE_DEPENDS})
+  string(REGEX REPLACE ",? ?rocm-core-asan" "" CPACK_RPM_ASAN_PACKAGE_REQUIRES ${CPACK_RPM_ASAN_PACKAGE_REQUIRES})
+  string(REGEX REPLACE ",? ?rocm-core-asan" "" CPACK_DEBIAN_ASAN_PACKAGE_DEPENDS ${CPACK_DEBIAN_ASAN_PACKAGE_DEPENDS})
+  string(REGEX REPLACE ",? ?rocm-core" "" CPACK_RPM_DEV_PACKAGE_REQUIRES ${CPACK_RPM_DEV_PACKAGE_REQUIRES})
+  string(REGEX REPLACE ",? ?rocm-core" "" CPACK_DEBIAN_DEV_PACKAGE_DEPENDS ${CPACK_DEBIAN_DEV_PACKAGE_DEPENDS})
+  string(REGEX REPLACE ",? ?rocm-core" "" CPACK_RPM_PACKAGE_REQUIRES ${CPACK_RPM_PACKAGE_REQUIRES})
+  string(REGEX REPLACE ",? ?rocm-core" "" CPACK_DEBIAN_PACKAGE_DEPENDS ${CPACK_DEBIAN_PACKAGE_DEPENDS})
 endif()
 
 include (CPack)
+
+cpack_add_component(
+  dev
+  DISPLAY_NAME "Development"
+  DESCRIPTION "Development needed header files for ROCM-SMI"
+  DEPENDS dev)
+
+cpack_add_component(
+  asan
+  DISPLAY_NAME "ASAN"
+  DESCRIPTION "ASAN libraries for the ROCM-SMI"
+  DEPENDS asan)

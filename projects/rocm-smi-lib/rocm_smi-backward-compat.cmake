@@ -184,9 +184,17 @@ endfunction()
 create_header_template()
 #Use template header file and generater wrapper header files
 generate_wrapper_header()
-install(DIRECTORY ${RSMI_WRAPPER_INC_DIR} DESTINATION ${ROCM_SMI}/include)
-install(DIRECTORY ${OAM_WRAPPER_INC_DIR} DESTINATION ${OAM_TARGET_NAME}/include)
+install(DIRECTORY ${RSMI_WRAPPER_INC_DIR}
+        DESTINATION ${ROCM_SMI}/include
+        COMPONENT dev)
+install(DIRECTORY ${OAM_WRAPPER_INC_DIR}
+        DESTINATION ${OAM_TARGET_NAME}/include
+        COMPONENT dev)
 # Create symlink to library files
 create_library_symlink()
-install(DIRECTORY ${RSMI_WRAPPER_LIB_DIR} DESTINATION ${ROCM_SMI} COMPONENT lib${ROCM_SMI})
-install(DIRECTORY ${OAM_WRAPPER_LIB_DIR} DESTINATION ${OAM_TARGET_NAME} COMPONENT lib${OAM_TARGET_NAME} )
+install(DIRECTORY ${RSMI_WRAPPER_LIB_DIR}
+        DESTINATION ${ROCM_SMI}
+        COMPONENT dev)
+install(DIRECTORY ${OAM_WRAPPER_LIB_DIR}
+        DESTINATION ${OAM_TARGET_NAME}
+        COMPONENT dev )
