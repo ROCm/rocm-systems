@@ -232,9 +232,10 @@ spec::spec(const std::string& _clock_id, double _delay, double _dur, uint64_t _n
 {}
 
 spec::spec(const std::string& _line)
-: spec{ config::get_setting_value<std::string>("OMNITRACE_TRACE_PERIOD_CLOCK_ID").second,
-        config::get_setting_value<double>("OMNITRACE_TRACE_DELAY").second,
-        config::get_setting_value<double>("OMNITRACE_TRACE_DURATION").second }
+: spec{ config::get_setting_value<std::string>("OMNITRACE_TRACE_PERIOD_CLOCK_ID")
+            .value_or("CLOCK_REALTIME"),
+        config::get_setting_value<double>("OMNITRACE_TRACE_DELAY").value_or(0.0),
+        config::get_setting_value<double>("OMNITRACE_TRACE_DURATION").value_or(0.0) }
 {
     auto _delim = tim::delimit(_line, ":");
     if(!_delim.empty()) delay = utility::convert<double>(_delim.at(0));
@@ -300,12 +301,13 @@ get_trace_specs()
     auto _v = std::vector<constraint::spec>{};
 
     {
-        auto _delay_v = config::get_setting_value<double>("OMNITRACE_TRACE_DELAY").second;
+        auto _delay_v =
+            config::get_setting_value<double>("OMNITRACE_TRACE_DELAY").value_or(0.0);
         auto _duration_v =
-            config::get_setting_value<double>("OMNITRACE_TRACE_DURATION").second;
+            config::get_setting_value<double>("OMNITRACE_TRACE_DURATION").value_or(0.0);
         auto _clock_v = find_clock_identifier(
             config::get_setting_value<std::string>("OMNITRACE_TRACE_PERIOD_CLOCK_ID")
-                .second);
+                .value_or("CLOCK_REALTIME"));
 
         if(_delay_v > 0.0 || _duration_v > 0.0)
         {
@@ -315,7 +317,8 @@ get_trace_specs()
 
     {
         auto _periods_v =
-            config::get_setting_value<std::string>("OMNITRACE_TRACE_PERIODS").second;
+            config::get_setting_value<std::string>("OMNITRACE_TRACE_PERIODS")
+                .value_or("");
         if(!_periods_v.empty())
         {
             for(auto itr : tim::delimit(_periods_v, " ;\t\n"))

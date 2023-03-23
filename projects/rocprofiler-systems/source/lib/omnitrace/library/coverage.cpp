@@ -222,9 +222,8 @@ post_process()
 
     auto _get_setting = [](const std::string& _v) {
         auto&& _b = config::get_setting_value<bool>(_v);
-        OMNITRACE_CI_THROW(!_b.first, "Error! No configuration setting named '%s'",
-                           _v.c_str());
-        return (_b.first) ? _b.second : true;
+        OMNITRACE_CI_THROW(!_b, "Error! No configuration setting named '%s'", _v.c_str());
+        return _b.value_or(true);
     };
 
     auto _text_output = _get_setting("OMNITRACE_TEXT_OUTPUT");

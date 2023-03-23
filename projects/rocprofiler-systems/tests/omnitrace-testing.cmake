@@ -351,6 +351,13 @@ function(OMNITRACE_ADD_TEST)
         "${_KWARGS}"
         ${ARGN})
 
+    foreach(_PREFIX PRELOAD RUNTIME REWRITE REWRITE_RUN BASELINE)
+        if("${${_PREFIX}_FAIL_REGEX}" STREQUAL "")
+            set(${_PREFIX}_FAIL_REGEX
+                "(### ERROR ###|address of faulting memory reference)")
+        endif()
+    endforeach()
+
     if(TEST_GPU AND NOT _VALID_GPU)
         omnitrace_message(STATUS
                           "${TEST_NAME} requires a GPU and no valid GPUs were found")
@@ -389,6 +396,33 @@ function(OMNITRACE_ADD_TEST)
     endif()
 
     list(APPEND TEST_ENVIRONMENT "OMNITRACE_CI=ON")
+
+    if(TEST_GPU)
+        list(APPEND TEST_LABELS "gpu")
+
+        if(NOT "OMNITRACE_USE_ROCTRACER=OFF" IN_LIST TEST_ENVIRONMENT)
+            list(APPEND TEST_LABELS "roctracer")
+        endif()
+
+        if(NOT "OMNITRACE_USE_ROCM_SMI=OFF" IN_LIST TEST_ENVIRONMENT)
+            list(APPEND TEST_LABELS "rocm-smi")
+        endif()
+    endif()
+
+    if("OMNITRACE_USE_ROCTRACER=ON" IN_LIST TEST_ENVIRONMENT AND NOT "roctracer" IN_LIST
+                                                                 TEST_ENVIRONMENT)
+        list(APPEND TEST_LABELS "roctracer")
+    endif()
+
+    if("OMNITRACE_USE_ROCM_SMI=ON" IN_LIST TEST_ENVIRONMENT AND NOT "rocm-smi" IN_LIST
+                                                                TEST_ENVIRONMENT)
+        list(APPEND TEST_LABELS "rocm-smi")
+    endif()
+
+    if("OMNITRACE_USE_ROCPROFILER=ON" IN_LIST TEST_ENVIRONMENT
+       AND NOT "rocprofiler" IN_LIST TEST_ENVIRONMENT)
+        list(APPEND TEST_LABELS "rocprofiler")
+    endif()
 
     if(TARGET ${TEST_TARGET})
         if(DEFINED TEST_MPI

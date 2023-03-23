@@ -22,8 +22,10 @@
 
 #include "library/roctracer.hpp"
 #include "core/components/fwd.hpp"
+#include "core/concepts.hpp"
 #include "core/config.hpp"
 #include "core/debug.hpp"
+#include "core/locking.hpp"
 #include "library/components/category_region.hpp"
 #include "library/critical_trace.hpp"
 #include "library/runtime.hpp"
@@ -67,6 +69,14 @@ namespace omnitrace
 {
 namespace
 {
+template <typename Tp, typename CategoryT = category::roctracer>
+auto&
+roctracer_type_mutex(uint64_t _n = threading::get_id())
+{
+    return tim::type_mutex<Tp, CategoryT, max_supported_threads, locking::atomic_mutex>(
+        _n % max_supported_threads);
+}
+
 std::string
 hip_api_string(hip_api_id_t id, const hip_api_data_t* data)
 {
@@ -163,8 +173,7 @@ using key_data_mutex_t     = std::decay_t<decltype(get_roctracer_key_data())>;
 auto&
 get_hip_activity_mutex(int64_t _tid = threading::get_id())
 {
-    return tim::type_mutex<hip_activity_mutex_t, category::roctracer,
-                           max_supported_threads>(_tid);
+    return roctracer_type_mutex<hip_activity_mutex_t, category::roctracer>(_tid);
 }
 }  // namespace
 
@@ -422,8 +431,8 @@ void
 hip_exec_activity_callbacks(int64_t _tid)
 {
     // OMNITRACE_ROCTRACER_CALL(roctracer_flush_activity());
-    tim::auto_lock_t _lk{ get_hip_activity_mutex(_tid) };
-    auto&            _async_ops = get_hip_activity_callbacks(_tid);
+    locking::atomic_lock _lk{ get_hip_activity_mutex(_tid) };
+    auto&                _async_ops = get_hip_activity_callbacks(_tid);
     if(!_async_ops) return;
     for(auto& itr : *_async_ops)
     {
@@ -434,7 +443,7 @@ hip_exec_activity_callbacks(int64_t _tid)
 
 namespace
 {
-thread_local std::unordered_map<size_t, size_t> gpu_cids = {};
+thread_local std::unordered_map<size_t, size_t> gpu_crit_cids = {};
 }
 
 void
@@ -449,7 +458,7 @@ roctx_api_callback(uint32_t domain, uint32_t cid, const void* callback_data,
     if(domain != ACTIVITY_DOMAIN_ROCTX) return;
 
     static auto _range_map  = std::unordered_map<roctx_range_id_t, std::string>{};
-    static auto _range_lock = std::mutex{};
+    static auto _range_lock = locking::atomic_mutex{};
     const auto* _data       = reinterpret_cast<const roctx_api_data_t*>(callback_data);
     static thread_local auto _range_stack = std::vector<std::string>{};
 
@@ -482,7 +491,7 @@ roctx_api_callback(uint32_t domain, uint32_t cid, const void* callback_data,
         case ROCTX_API_ID_roctxRangeStartA:
         {
             {
-                std::unique_lock<std::mutex> _lk{ _range_lock, std::defer_lock };
+                locking::atomic_lock _lk{ _range_lock, std::defer_lock };
                 if(!_lk.owns_lock()) _lk.lock();
                 _range_map.emplace(roctx_range_id_t{ _data->args.id },
                                    std::string{ _data->args.message });
@@ -495,7 +504,7 @@ roctx_api_callback(uint32_t domain, uint32_t cid, const void* callback_data,
         {
             std::string_view _message = {};
             {
-                std::unique_lock<std::mutex> _lk{ _range_lock, std::defer_lock };
+                locking::atomic_lock _lk{ _range_lock, std::defer_lock };
                 if(!_lk.owns_lock()) _lk.lock();
                 auto itr = _range_map.find(roctx_range_id_t{ _data->args.id });
                 OMNITRACE_CI_THROW(itr == _range_map.end(),
@@ -571,13 +580,13 @@ hip_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
         op_name, cid, data->correlation_id,
         (data->phase == ACTIVITY_API_PHASE_ENTER) ? "on-enter" : "on-exit");
 
-    int64_t   _ts         = comp::wall_clock::record();
-    auto      _tid        = threading::get_id();
-    uint64_t  _cid        = 0;
-    uint64_t  _parent_cid = 0;
-    uint32_t  _depth      = 0;
-    uintptr_t _queue      = 0;
-    auto      _corr_id    = data->correlation_id;
+    int64_t   _ts              = comp::wall_clock::record();
+    auto      _tid             = threading::get_id();
+    uint64_t  _crit_cid        = 0;
+    uint64_t  _parent_crit_cid = 0;
+    uint32_t  _depth           = 0;
+    uintptr_t _queue           = 0;
+    auto      _roct_cid        = data->correlation_id;
 
 #define OMNITRACE_HIP_API_QUEUE_CASE(API_FUNC, VARIABLE)                                 \
     case HIP_API_ID_##API_FUNC:                                                          \
@@ -713,37 +722,67 @@ hip_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
         {
             if(get_use_perfetto() || get_use_timemory() || get_use_rocm_smi())
             {
-                tim::auto_lock_t _lk{ tim::type_mutex<key_data_mutex_t>() };
-                get_roctracer_key_data().emplace(_corr_id, _name);
-                get_roctracer_tid_data().emplace(_corr_id, _tid);
+                locking::atomic_lock _lk{ roctracer_type_mutex<key_data_mutex_t>() };
+                get_roctracer_key_data().emplace(_roct_cid, _name);
+                get_roctracer_tid_data().emplace(_roct_cid, _tid);
             }
         }
 
-        std::tie(_cid, _parent_cid, _depth) = create_cpu_cid_entry();
+        std::tie(_crit_cid, _parent_crit_cid, _depth) = create_cpu_cid_entry();
 
         if(get_use_perfetto())
         {
+            static auto _compact_annotations =
+                config::get_setting_value<bool>(
+                    "OMNITRACE_PERFETTO_COMPACT_ROCTRACER_ANNOTATIONS")
+                    .value_or(false);
+
             auto _api_id = static_cast<hip_api_id_t>(cid);
             tracing::push_perfetto_ts(
-                category::rocm_hip{}, op_name, _ts, ::perfetto::Flow::ProcessScoped(_cid),
+                category::rocm_hip{}, op_name, _ts,
+                ::perfetto::Flow::ProcessScoped(_roct_cid),
                 [&](::perfetto::EventContext ctx) {
                     if(config::get_perfetto_annotations())
                     {
                         tracing::add_perfetto_annotation(ctx, "begin_ns", _ts);
-                        tracing::add_perfetto_annotation(ctx, "pcid", _parent_cid);
+                        tracing::add_perfetto_annotation(ctx, "cid", _crit_cid);
+                        tracing::add_perfetto_annotation(ctx, "pcid", _parent_crit_cid);
                         tracing::add_perfetto_annotation(ctx, "device", _device_id);
                         tracing::add_perfetto_annotation(ctx, "tid", _tid);
                         tracing::add_perfetto_annotation(ctx, "depth", _depth);
-                        tracing::add_perfetto_annotation(ctx, "corr_id", _corr_id);
-                        tracing::add_perfetto_annotation(ctx, "args",
-                                                         hip_api_string(_api_id, data));
+                        tracing::add_perfetto_annotation(ctx, "corr_id", _roct_cid);
+                        if(_compact_annotations)
+                        {
+                            tracing::add_perfetto_annotation(
+                                ctx, "args", hip_api_string(_api_id, data));
+                        }
+                        else
+                        {
+                            auto _args = std::string{ hip_api_string(_api_id, data) };
+                            if(!_args.empty())
+                            {
+                                for(auto itr : tim::delimit(_args, ","))
+                                {
+                                    if(itr.empty()) continue;
+                                    auto _bpos = itr.find_first_not_of(' ');
+                                    auto _epos = itr.find_last_not_of(' ');
+                                    if(_epos > _bpos)
+                                        itr = itr.substr(_bpos, (_epos - _bpos) + 1);
+                                    auto _pos = itr.find('=');
+                                    if(_pos != std::string::npos)
+                                        tracing::add_perfetto_annotation(
+                                            ctx, itr.substr(0, _pos),
+                                            itr.substr(_pos + 1));
+                                }
+                            }
+                        }
                     }
                 });
         }
         if(get_use_timemory())
         {
             auto itr = get_roctracer_hip_data()->emplace(
-                _corr_id, roctracer_hip_bundle_t{ op_name });
+                _roct_cid, roctracer_hip_bundle_t{ op_name });
             if(itr.second)
             {
                 itr.first->second.start();
@@ -757,12 +796,12 @@ hip_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
         if(get_use_critical_trace() || get_use_rocm_smi())
         {
             add_critical_trace<Device::CPU, Phase::BEGIN>(
-                _tid, _cid, _corr_id, _parent_cid, _ts, 0, _device_id, _queue,
+                _tid, _crit_cid, _roct_cid, _parent_crit_cid, _ts, 0, _device_id, _queue,
                 critical_trace::add_hash_id(op_name), _depth);
         }
 
         get_roctracer_cid_data(_tid).emplace(
-            _corr_id, cid_data{ _cid, _parent_cid, _depth, _queue });
+            _roct_cid, cid_data{ _crit_cid, _parent_crit_cid, _depth, _queue });
 
         hip_exec_activity_callbacks(_tid);
     }
@@ -770,8 +809,8 @@ hip_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
     {
         hip_exec_activity_callbacks(_tid);
 
-        std::tie(_cid, _parent_cid, _depth, std::ignore) =
-            get_roctracer_cid_data(_tid).at(_corr_id);
+        std::tie(_crit_cid, _parent_crit_cid, _depth, std::ignore) =
+            get_roctracer_cid_data(_tid).at(_roct_cid);
 
         if(get_use_perfetto())
         {
@@ -785,9 +824,9 @@ hip_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
         }
         if(get_use_timemory())
         {
-            auto _stop = [&_corr_id](int64_t _tid_v) {
+            auto _stop = [&_roct_cid](int64_t _tid_v) {
                 auto& _data = get_roctracer_hip_data(_tid_v);
-                auto  itr   = _data->find(_corr_id);
+                auto  itr   = _data->find(_roct_cid);
                 if(itr != get_roctracer_hip_data()->end())
                 {
                     itr->second.stop();
@@ -807,8 +846,8 @@ hip_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
         if(get_use_critical_trace() || get_use_rocm_smi())
         {
             add_critical_trace<Device::CPU, Phase::END>(
-                _tid, _cid, _corr_id, _parent_cid, _ts, _ts, _device_id, _queue,
-                critical_trace::add_hash_id(op_name), _depth);
+                _tid, _crit_cid, _roct_cid, _parent_crit_cid, _ts, _ts, _device_id,
+                _queue, critical_trace::add_hash_id(op_name), _depth);
         }
     }
     tim::consume_parameters(arg);
@@ -861,33 +900,33 @@ hip_activity_callback(const char* begin, const char* end, void* arg)
 
         const char* op_name =
             roctracer_op_string(record->domain, record->op, record->kind);
-        auto     _ns_skew = get_clock_skew();
-        uint64_t _beg_ns  = record->begin_ns + _ns_skew;
-        uint64_t _end_ns  = record->end_ns + _ns_skew;
-        auto     _corr_id = record->correlation_id;
+        auto     _ns_skew  = get_clock_skew();
+        uint64_t _beg_ns   = record->begin_ns + _ns_skew;
+        uint64_t _end_ns   = record->end_ns + _ns_skew;
+        auto     _roct_cid = record->correlation_id;
 
         auto& _keys = get_roctracer_key_data();
         auto& _tids = get_roctracer_tid_data();
 
-        int16_t     _depth          = 0;                     // depth of kernel launch
-        int64_t     _tid            = 0;                     // thread id
-        uint64_t    _cid            = 0;                     // correlation id
-        uint64_t    _pcid           = 0;                     // parent corr_id
-        int32_t     _devid          = record->device_id;     // device id
-        int64_t     _queid          = record->queue_id;      // queue id
-        uintptr_t   _queue          = 0;                     // Host queue (stream)
-        auto        _laps           = _indexes[_corr_id]++;  // see note #1
+        int16_t     _depth          = 0;                      // depth of kernel launch
+        int64_t     _tid            = 0;                      // thread id
+        uint64_t    _crit_cid       = 0;                      // correlation id
+        uint64_t    _pcid           = 0;                      // parent corr_id
+        int32_t     _devid          = record->device_id;      // device id
+        int64_t     _queid          = record->queue_id;       // queue id
+        uintptr_t   _queue          = 0;                      // Host queue (stream)
+        auto        _laps           = _indexes[_roct_cid]++;  // see note #1
         const char* _name           = nullptr;
         bool        _found          = false;
         bool        _critical_trace = get_use_critical_trace() || get_use_rocm_smi();
 
         {
-            tim::auto_lock_t _lk{ tim::type_mutex<key_data_mutex_t>() };
-            if(_tids.find(_corr_id) != _tids.end())
+            locking::atomic_lock _lk{ roctracer_type_mutex<key_data_mutex_t>() };
+            if(_tids.find(_roct_cid) != _tids.end())
             {
                 _found   = true;
-                _tid     = _tids.at(_corr_id);
-                auto itr = _keys.find(_corr_id);
+                _tid     = _tids.at(_roct_cid);
+                auto itr = _keys.find(_roct_cid);
                 if(itr != _keys.end()) _name = itr->second;
             }
         }
@@ -897,9 +936,9 @@ hip_activity_callback(const char* begin, const char* end, void* arg)
 
         if(_critical_trace)
         {
-            auto& _cids = get_roctracer_cid_data(_tid);
-            if(_cids.find(_corr_id) != _cids.end())
-                std::tie(_cid, _pcid, _depth, _queue) = _cids.at(_corr_id);
+            auto& _crit_cids = get_roctracer_cid_data(_tid);
+            if(_crit_cids.find(_roct_cid) != _crit_cids.end())
+                std::tie(_crit_cid, _pcid, _depth, _queue) = _crit_cids.at(_roct_cid);
             else
             {
                 OMNITRACE_VERBOSE_F(3,
@@ -962,12 +1001,13 @@ hip_activity_callback(const char* begin, const char* end, void* arg)
             assert(_end_ns >= _beg_ns);
             tracing::push_perfetto_track(
                 category::device_hip{}, _kernel_names.at(_name).c_str(), _track, _beg_ns,
-                ::perfetto::Flow::ProcessScoped(_cid), [&](::perfetto::EventContext ctx) {
+                ::perfetto::Flow::ProcessScoped(_roct_cid),
+                [&](::perfetto::EventContext ctx) {
                     if(config::get_perfetto_annotations())
                     {
                         tracing::add_perfetto_annotation(ctx, "begin_ns", _beg_ns);
                         tracing::add_perfetto_annotation(ctx, "end_ns", _end_ns);
-                        tracing::add_perfetto_annotation(ctx, "corr_id", _corr_id);
+                        tracing::add_perfetto_annotation(ctx, "corr_id", _roct_cid);
                         tracing::add_perfetto_annotation(ctx, "device", _devid);
                         tracing::add_perfetto_annotation(ctx, "queue", _queid);
                         tracing::add_perfetto_annotation(ctx, "tid", _tid);
@@ -985,8 +1025,8 @@ hip_activity_callback(const char* begin, const char* end, void* arg)
             auto     _hash = critical_trace::add_hash_id(_name);
             uint16_t _prio = _laps + 1;  // priority
             add_critical_trace<Device::GPU, Phase::DELTA, false>(
-                _tid, _cid, _corr_id, _cid, _beg_ns, _end_ns, _devid, _queid, _hash,
-                _depth + 1, _prio);
+                _tid, _crit_cid, _roct_cid, _crit_cid, _beg_ns, _end_ns, _devid, _queid,
+                _hash, _depth + 1, _prio);
         }
 
         if(_found && _name != nullptr && get_use_timemory())
@@ -1004,8 +1044,8 @@ hip_activity_callback(const char* begin, const char* end, void* arg)
                 _bundle.pop();
             };
 
-            auto&            _async_ops = get_hip_activity_callbacks(_tid);
-            tim::auto_lock_t _lk{ get_hip_activity_mutex(_tid) };
+            auto&                _async_ops = get_hip_activity_callbacks(_tid);
+            locking::atomic_lock _lk{ get_hip_activity_mutex(_tid) };
             _async_ops->emplace_back(std::move(_func));
         }
     }

@@ -493,7 +493,7 @@ experiment::save_experiments(std::string _fname_base, const filename_config_t& _
     }
 
     bool _causal_output_reset =
-        config::get_setting_value<bool>("OMNITRACE_CAUSAL_FILE_RESET").second;
+        config::get_setting_value<bool>("OMNITRACE_CAUSAL_FILE_RESET").value_or(false);
 
     // if(current_record.experiments.empty()) return;
 

@@ -96,8 +96,8 @@ auto&
 get_engine()
 {
     static auto _seed = []() -> hash_value_t {
-        auto _seed_v =
-            config::get_setting_value<uint64_t>("OMNITRACE_CAUSAL_RANDOM_SEED").second;
+        auto _seed_v = config::get_setting_value<uint64_t>("OMNITRACE_CAUSAL_RANDOM_SEED")
+                           .value_or(0);
         if(_seed_v == 0) _seed_v = std::random_device{}();
         return _seed_v;
     }();
@@ -138,7 +138,7 @@ get_filters(std::set<binary::scope_filter::filter_scope> _scopes = {
 
     bool _use_default_excludes =
         config::get_setting_value<bool>("OMNITRACE_CAUSAL_FUNCTION_EXCLUDE_DEFAULTS")
-            .second;
+            .value_or(true);
 
     if(_use_default_excludes && _scopes.count(sf::FUNCTION_FILTER) > 0)
     {
@@ -471,9 +471,9 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
     std::this_thread::sleep_for(std::chrono::milliseconds{ 10 });
 
     double _delay_sec =
-        config::get_setting_value<double>("OMNITRACE_CAUSAL_DELAY").second;
+        config::get_setting_value<double>("OMNITRACE_CAUSAL_DELAY").value_or(0.0);
     double _duration_sec =
-        config::get_setting_value<double>("OMNITRACE_CAUSAL_DURATION").second;
+        config::get_setting_value<double>("OMNITRACE_CAUSAL_DURATION").value_or(0.0);
     auto _duration_nsec = duration_nsec_t{ _duration_sec * units::sec };
 
     if(_delay_sec > 0.0)

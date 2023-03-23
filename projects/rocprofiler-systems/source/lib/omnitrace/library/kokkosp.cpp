@@ -269,10 +269,10 @@ extern "C"
 
         _name_len_limit = omnitrace::config::get_setting_value<int64_t>(
                               "OMNITRACE_KOKKOSP_NAME_LENGTH_MAX")
-                              .second;
+                              .value_or(_name_len_limit);
         _kp_prefix =
             omnitrace::config::get_setting_value<std::string>("OMNITRACE_KOKKOSP_PREFIX")
-                .second;
+                .value_or(_kp_prefix);
     }
 
     void kokkosp_finalize_library()
