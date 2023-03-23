@@ -353,7 +353,12 @@ def build_table_chart(
         }
         if IS_DARK
         else {},
-        style_data={"backgroundColor": "rgb(50, 50, 50)", "color": "white", "whiteSpace": "normal", "height": "auto"}
+        style_data={
+            "backgroundColor": "rgb(50, 50, 50)",
+            "color": "white",
+            "whiteSpace": "normal",
+            "height": "auto",
+        }
         if IS_DARK
         else {},
         style_data_conditional=[
