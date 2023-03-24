@@ -1811,6 +1811,8 @@ static rsmi_status_t get_dev_name_from_id(uint32_t dv_ind, char *name,
   uint16_t subsys_vend_id;
   uint16_t subsys_id;
   bool found_device_vendor = false;
+  // to match subsystem, it must match the device id at previous line
+  bool found_device_id_for_subsys = false;
   std::string val_str;
 
   assert(name != nullptr);
@@ -1857,8 +1859,8 @@ static rsmi_status_t get_dev_name_from_id(uint32_t dv_ind, char *name,
       if (ln[0] == '\t') {
         if (found_device_vendor) {
           if (ln[1] == '\t') {
-            // This is a subsystem line
-            if (typ == NAME_STR_SUBSYS) {
+            // The subsystem line, ignore a line if the device id not match
+            if (typ == NAME_STR_SUBSYS && found_device_id_for_subsys) {
               val_str = get_id_name_str_from_line(subsys_vend_id, ln, &ln_str);
 
               if (val_str.size() > 0) {
@@ -1879,6 +1881,12 @@ static rsmi_status_t get_dev_name_from_id(uint32_t dv_ind, char *name,
 
             if (val_str.size() > 0) {
               break;
+            }
+          } else if (typ == NAME_STR_SUBSYS) {
+            // match the device id line
+            val_str = get_id_name_str_from_line(device_id, ln, &ln_str);
+            if (val_str.size() > 0) {
+              found_device_id_for_subsys = true;
             }
           }
         }
