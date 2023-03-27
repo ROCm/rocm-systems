@@ -259,16 +259,17 @@ static bool bdfid_from_path(const std::string in_name, uint64_t *bdfid) {
 // 1 = not a good bdfid found
 static uint32_t ConstructBDFID(std::string path, uint64_t *bdfid) {
   assert(bdfid != nullptr);
-  char tpath[256] = {'\0'};
+  const unsigned int MAX_BDF_LENGTH = 512;
+  char tpath[MAX_BDF_LENGTH] = {'\0'};
   ssize_t ret;
-  memset(tpath,0,256);
+  memset(tpath,0,MAX_BDF_LENGTH);
 
-  ret = readlink(path.c_str(), tpath, 256);
+  ret = readlink(path.c_str(), tpath, MAX_BDF_LENGTH);
 
   assert(ret > 0);
-  assert(ret < 256);
+  assert(ret < MAX_BDF_LENGTH);
 
-  if (ret <= 0 || ret >= 256) {
+  if (ret <= 0 || ret >= MAX_BDF_LENGTH) {
     return 1;
   }
 
