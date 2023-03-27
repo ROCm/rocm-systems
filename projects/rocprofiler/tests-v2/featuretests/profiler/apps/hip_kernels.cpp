@@ -1,4 +1,5 @@
 #include <hip/hip_runtime.h>
+#include <vector>
 #ifdef NDEBUG
 #define HIP_ASSERT(x) x
 #else
@@ -14,6 +15,7 @@
 #define THREADS_PER_BLOCK_Y 16
 #define THREADS_PER_BLOCK_Z 1
 
+__device__ int counter = 0;
 // empty kernel
 __global__ void kernel() {}
 
@@ -31,13 +33,72 @@ __global__ void vectoradd_float(float* __restrict__ a, const float* __restrict__
   }
 }
 
+__global__ void add(int n, float* x, float* y) {
+
+  if(__hip_atomic_load(&counter, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_AGENT) != 0){
+    abort();
+  }
+  __hip_atomic_fetch_add(&counter, 1, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
+  int index = blockIdx.x * blockDim.x + threadIdx.x;
+  int stride = blockDim.x * gridDim.x;
+  for (int i = index; i < n; i += stride) y[i] = x[i] + y[i];
+   __hip_atomic_fetch_add(&counter, -1, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
+
+}
+
 // launches an empty kernel in profiler context
 void KernelLaunch() {
   // run empty kernel
   kernel<<<1, 1>>>();
   hipDeviceSynchronize();
 }
+void LaunchMultiStreamKernels() {
+  int N = 1 << 4;
+  float* x = new float[N];
+  float* y = new float[N];
+  float* d_x;
+  float* d_y;
+  //   Allocate Unified Memory -- accessible from CPU or GPU
+  HIP_ASSERT(hipMallocManaged(&d_x, N * sizeof(float)));
+  HIP_ASSERT(hipMallocManaged(&d_y, N * sizeof(float)));
 
+  //   initialize x and y arrays on the host
+  for (int i = 0; i < N; i++) {
+    x[i] = 1.0f;
+    y[i] = 2.0f;
+  }
+  std::vector< hipStream_t> hip_streams;
+  for(int i = 0; i < 100; i++) {
+    hipStream_t stream;
+    hipStreamCreate	(&stream);
+    hip_streams.push_back(stream);
+
+  }
+  HIP_ASSERT(hipMemcpy(d_x, x, N * sizeof(float), hipMemcpyHostToDevice));
+  HIP_ASSERT(hipMemcpy(d_y, y, N * sizeof(float), hipMemcpyHostToDevice));
+
+  // Launch kernel on 1M elements on the GPU
+  int blockSize = 64;
+  // This Kernel will always be launched with one wave
+  int numBlocks = 1;
+  for(int i = 0; i < 100; i++) {
+    for(int j = 0; j < hip_streams.size(); j++)
+       hipLaunchKernelGGL(add, numBlocks, blockSize, 0, hip_streams[j], N, d_x, d_y);
+  }
+
+  //Wait for GPU to finish before accessing on host
+  HIP_ASSERT(hipDeviceSynchronize());
+
+  HIP_ASSERT(hipMemcpy(x, d_x, N * sizeof(float), hipMemcpyDeviceToHost));
+  HIP_ASSERT(hipMemcpy(y, d_y, N * sizeof(float), hipMemcpyDeviceToHost));
+
+    //   Free memory
+  HIP_ASSERT(hipFree(d_x));
+  HIP_ASSERT(hipFree(d_y));
+
+  delete[] x;
+  delete[] y;
+}
 int LaunchVectorAddKernel() {
   float* hostA;
   float* hostB;

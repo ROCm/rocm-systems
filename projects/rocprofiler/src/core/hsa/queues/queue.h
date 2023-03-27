@@ -34,7 +34,7 @@
 #include <mutex>
 #include <string>
 #include <vector>
-
+#include <condition_variable>
 #include "src/core/session/profiler/profiler.h"
 
 namespace rocprofiler {
@@ -48,6 +48,19 @@ std::string GetKernelNameFromKsymbols(uint64_t handle);
 uint32_t GetCurrentActiveInterruptSignalsCount();
 
 namespace queue {
+
+/* The enum here represents the
+state of the queue destruction.
+1. normal-The queue  destructor is not initiated.
+2. to_destroy - The queue destructor has been initiated.
+3. done_destroy - The async handler has been unregistered
+and the destructor can now complete.
+*/
+enum is_destroy {
+ normal=0,
+ to_destroy=1,
+ done_destroy=2
+};
 
 class Queue {
  public:
@@ -63,13 +76,20 @@ class Queue {
   uint64_t GetQueueID();
   static void PrintCounters();
   std::mutex qw_mutex;
+  enum is_destroy state;
+  std::condition_variable  cv_ready_signal;
+  hsa_signal_t GetReadySignal();
+  hsa_signal_t GetBlockSignal();
 
  private:
-  std::mutex mutex_;
+
   hsa_agent_t cpu_agent_;
   hsa_agent_t gpu_agent_;
   hsa_queue_t* intercept_queue_;
+  hsa_signal_t block_signal_;
+  hsa_signal_t ready_signal_;
 
+  bool unreg_async_handler_{false};
   hsa_status_t pmcCallback(hsa_ven_amd_aqlprofile_info_type_t info_type,
                            hsa_ven_amd_aqlprofile_info_data_t* info_data, void* data);
 };
@@ -82,6 +102,7 @@ struct queue_info_session_t {
   hsa_signal_t interrupt_signal;
   uint64_t gpu_index;
   uint32_t xcc_count;
+  hsa_signal_t block_signal;
 };
 
 void AddRecordCounters(rocprofiler_record_profiler_t* record, const pending_signal_t& pending);

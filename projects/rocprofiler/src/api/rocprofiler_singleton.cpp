@@ -1,3 +1,4 @@
+
 /* Copyright (c) 2022 Advanced Micro Devices, Inc.
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -135,8 +136,6 @@ rocprofiler_session_id_t ROCProfiler_Singleton::CreateSession(
 }
 
 void ROCProfiler_Singleton::DestroySession(rocprofiler_session_id_t session_id) {
-  while (GetCurrentActiveInterruptSignalsCount() != 0) {
-  }
   {
     std::lock_guard<std::mutex> lock(session_map_lock_);
     ASSERTM(sessions_.find(session_id.handle) != sessions_.end(),
@@ -145,7 +144,7 @@ void ROCProfiler_Singleton::DestroySession(rocprofiler_session_id_t session_id) 
     sessions_.erase(session_id.handle);
   }
 }
-
+profiler_serializer_t& ROCProfiler_Singleton::GetSerializer() { return profiler_serializer; }
 bool ROCProfiler_Singleton::FindDeviceProfilingSession(rocprofiler_session_id_t session_id) {
   std::lock_guard<std::mutex> lock(device_profiling_session_map_lock_);
   return dev_profiling_sessions_.find(session_id.handle) != dev_profiling_sessions_.end();

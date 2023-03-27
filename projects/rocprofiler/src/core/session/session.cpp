@@ -46,9 +46,7 @@ Session::Session(rocprofiler_replay_mode_t replay_mode, rocprofiler_session_id_t
 }
 
 Session::~Session() {
-  while (GetCurrentActiveInterruptSignalsCount() > 0) {
-  }
-  {
+ {
     std::lock_guard<std::mutex> lock(session_lock_);
     if (FindFilterWithKind(ROCPROFILER_SPM_COLLECTION) && spmcounter_ &&
         spm_started_.load(std::memory_order_acquire)) {
@@ -204,8 +202,6 @@ void Session::Start() {
 
 void Session::Terminate() {
   if (is_active_) {
-    while (GetCurrentActiveInterruptSignalsCount() > 0) {
-    }
     rocprofiler::queue::ResetSessionID();
     std::lock_guard<std::mutex> lock(session_lock_);
     if (FindFilterWithKind(ROCPROFILER_SPM_COLLECTION)) {

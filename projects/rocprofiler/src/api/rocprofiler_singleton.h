@@ -42,8 +42,28 @@
 #include "src/core/session/session.h"
 #include "src/core/session/device_profiling.h"
 #include "src/core/hardware/hsa_info.h"
-
+#include "src/core/hsa/queues/queue.h"
 namespace rocprofiler {
+  /*This is a profiler serializer. It should be instantiated
+ only once for the profiler. The following is the
+ description of each field.
+ 1. dispatch_queue - The queue to which the currently dispatched kernel
+            belongs to.
+            At any given time, in serialization only one kernel
+            can be executing.
+ 2. dispatch_ready- It is a software data structure which holds
+            the queues which have a kernel ready to be dispatched.
+            This stores the queues in FIFO order.
+ 3. serializer_mutex - The mutex is used for thread synchronization
+            while accessing the singleton instance of this structure.
+ Currently, in case of profiling kernels are serialized by default.
+*/
+struct profiler_serializer_t {
+  queue::Queue* dispatch_queue{nullptr};
+  std::vector<rocprofiler::queue::Queue*> dispatch_ready;
+  std::mutex serializer_mutex;
+};
+
 
 class ROCProfiler_Singleton {
  public:
@@ -79,7 +99,7 @@ class ROCProfiler_Singleton {
                                                         int cpu_agent_index, int gpu_agent_index);
   void DestroyDeviceProfilingSession(rocprofiler_session_id_t session_id);
   DeviceProfileSession* GetDeviceProfilingSession(rocprofiler_session_id_t session_id);
-
+  profiler_serializer_t& GetSerializer();
 
   // Generic
   bool CheckFilterData(rocprofiler_filter_kind_t filter_kind,
@@ -99,7 +119,7 @@ class ROCProfiler_Singleton {
   std::unordered_map<uint64_t, Agent::DeviceInfo> agent_device_map_;
   ROCProfiler_Singleton();
   ~ROCProfiler_Singleton();
-
+   profiler_serializer_t profiler_serializer;
   /*
    * XXX: Associating PC samples with a running kernel requires an identifier
    * that will be unique across all kernel executions.  It is not enough to use

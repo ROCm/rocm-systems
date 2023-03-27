@@ -24,3 +24,4 @@ void vectoradd_float(float* a, const float* b, const float* c, int width, int he
 void kernel();
 int LaunchVectorAddKernel();
 void KernelLaunch();
+void LaunchMultiStreamKernels();

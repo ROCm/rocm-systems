@@ -887,6 +887,14 @@ class ProfilerAPITest : public ::testing::Test {
         const char* kernel_name_c = static_cast<const char*>(malloc(name_length * sizeof(char)));
         CheckApi(rocprofiler_query_kernel_info(ROCPROFILER_KERNEL_NAME, profiler_record->kernel_id,
                                                &kernel_name_c));
+        if (profiler_record->counters) {
+         for (uint64_t i = 0; i < profiler_record->counters_count.value; i++) {
+          if (profiler_record->counters[i].counter_handler.handle > 0) {
+           if(profiler_record->counters[i].value.value == 0)
+             rocprofiler::fatal("Serialization failed");
+        }
+      }
+    }
         // int gpu_index = profiler_record->gpu_id.handle;
         // uint64_t begin_time = profiler_record->timestamps.begin.value;
         // uint64_t end_time = profiler_record->timestamps.end.value;
@@ -957,6 +965,56 @@ TEST_F(ProfilerAPITest, WhenRunningMultipleThreadsProfilerAPIsWorkFine) {
   // finalize profiler by destroying rocprofiler object
   CheckApi(rocprofiler_finalize());
 }
+
+TEST_F(ProfilerAPITest, WhenRunningMultipleStreamsSerializationWorksFine) {
+  // set global path
+  init_test_path();
+
+  // Get the system cores
+  int num_cpu_cores = GetNumberOfCores();
+
+  // create as many threads as number of cores in system
+  std::vector<std::thread> threads(num_cpu_cores);
+
+  // initialize profiler by creating rocprofiler object
+  CheckApi(rocprofiler_initialize());
+
+  // Counter Collection with timestamps
+  rocprofiler_session_id_t session_id;
+  std::vector<const char*> counters;
+  counters.emplace_back("SQ_WAVES");
+
+  CheckApi(rocprofiler_create_session(ROCPROFILER_NONE_REPLAY_MODE, &session_id));
+
+  rocprofiler_buffer_id_t buffer_id;
+  CheckApi(rocprofiler_create_buffer(session_id, FlushCallback, 0x9999, &buffer_id));
+
+  rocprofiler_filter_id_t filter_id;
+  rocprofiler_filter_property_t property = {};
+  CheckApi(rocprofiler_create_filter(session_id, ROCPROFILER_COUNTERS_COLLECTION,
+                                     rocprofiler_filter_data_t{.counters_names = &counters[0]},
+                                     counters.size(), &filter_id, property));
+
+  CheckApi(rocprofiler_set_filter_buffer(session_id, filter_id, buffer_id));
+
+  // activating profiler session
+  CheckApi(rocprofiler_start_session(session_id));
+
+  LaunchMultiStreamKernels();
+  // deactivate session
+  CheckApi(rocprofiler_terminate_session(session_id));
+
+  // dump profiler data
+  CheckApi(rocprofiler_flush_data(session_id, buffer_id));
+
+  // destroy session
+  CheckApi(rocprofiler_destroy_session(session_id));
+
+  // finalize profiler by destroying rocprofiler object
+  CheckApi(rocprofiler_finalize());
+}
+
+
 
 /*
  * ###################################################
