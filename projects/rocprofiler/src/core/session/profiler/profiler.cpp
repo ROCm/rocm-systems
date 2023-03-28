@@ -126,7 +126,7 @@ void Profiler::AddPendingSignals(uint32_t writer_id, uint64_t kernel_object,
     sessions_pending_signals_.emplace(writer_id, std::vector<pending_signal_t>());
   sessions_pending_signals_.at(writer_id).emplace_back(
       pending_signal_t{kernel_object, completion_signal, session_id_, buffer_id, context,
-                       session_data_count, profile});
+                       session_data_count, profile, kernel_properties, thread_id, queue_index});
 }
 
 const std::vector<pending_signal_t>& Profiler::GetPendingSignals(uint32_t writer_id) {
