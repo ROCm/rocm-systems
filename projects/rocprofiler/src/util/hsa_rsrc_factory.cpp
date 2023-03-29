@@ -415,12 +415,12 @@ uint32_t HsaRsrcFactory::GetCountOfCpuAgents() { return uint32_t(cpu_list_.size(
 bool HsaRsrcFactory::GetGpuAgentInfo(uint32_t idx, const AgentInfo** agent_info) {
   // Determine if request is valid
   uint32_t size = uint32_t(gpu_list_.size());
-  if (idx >= size) {
+  if (idx-cpu_list_.size() >= size) {
     return false;
   }
 
   // Copy AgentInfo from specified index
-  *agent_info = gpu_list_[idx];
+  *agent_info = gpu_list_[idx-cpu_list_.size()];
 
   return true;
 }
