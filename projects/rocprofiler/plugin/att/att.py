@@ -10,12 +10,32 @@ from struct import *
 from ctypes import *
 import ctypes
 from copy import deepcopy
-from trace_view import view_trace
+from trace_view import view_trace, Readable
 import sys
 import glob
 import numpy as np
 import matplotlib.pyplot as plt
-import json
+from io import BytesIO
+
+class FileBytesIO:
+    def __init__(self, iobytes) -> None:
+        self.iobytes = iobytes
+        self.seek = 0
+
+    def __len__(self):
+        return self.iobytes.getbuffer().nbytes
+
+    def read(self, length=0):
+        if length<=0:
+            return bytes(self.getbuffer())
+        else:
+            if self.seek >= len(self):
+                self.seek = 0
+                return None
+            response =  self.iobytes.getbuffer()[self.seek:self.seek+length]
+            self.seek += length
+            return bytes(response)
+
 
 COUNTERS_MAX_CAPTURES = 1<<12
 
@@ -166,7 +186,7 @@ def getWaves(filename, target_cu, verbose):
     return waves, events
 
 
-def persist(output_ui, trace_file, SIMD):
+def persist(trace_file, SIMD):
     trace = Path(trace_file).name
     simds, waves = [], []
     begin_time, end_time, timeline, instructions = [], [], [], []
@@ -278,14 +298,6 @@ def insert_waitcnt(flight_count, assembly_code):
     return assembly_code
 
 
-def Copy_Files(output_ui):
-    curpath = os.path.dirname(os.path.abspath(__file__))
-    outpath = output_ui+'/ui/'
-
-    os.makedirs(outpath, exist_ok=True)
-    os.system('cp '+curpath+'/ui/* '+outpath)
-
-
 def get_delta_time(events):
     try:
         CUS = [[e.time for e in events if e.cu==k and e.bank==0] for k in range(16)]
@@ -295,13 +307,10 @@ def get_delta_time(events):
         return 1
 
 def draw_wave_metrics(selections, normalize):
-    global PIC_SAVE_FOLDER
     global EVENTS
     global EVENT_NAMES
 
-    #event_names = ['Busy CUs', 'Occupancy', 'Eligible waves', 'Waves waiting']
-    with open(os.path.join(PIC_SAVE_FOLDER,'counters.json'), 'w') as f:
-        f.write(json.dumps({"counters": EVENT_NAMES}))
+    response = Readable({"counters": EVENT_NAMES})
 
     plt.figure(figsize=(15,3))
 
@@ -350,13 +359,14 @@ def draw_wave_metrics(selections, normalize):
     else:
         plt.ylabel('Value')
     plt.subplots_adjust(left=0.05, right=1, top=1, bottom=0.07)
-    plt.savefig(os.path.join(PIC_SAVE_FOLDER,'timeline.png'), dpi=150)
-    #plt.show()
+
+    figure_bytes = BytesIO()
+    plt.savefig(figure_bytes, dpi=150)
+    return response, FileBytesIO(figure_bytes)
 
 
 def draw_wave_states(selections, normalize):
     global TIMELINES
-    global PIC_SAVE_FOLDER
     plot_indices = [1, 2, 3, 4]
     STATES = [['Empty', 'Idle', 'Exec', 'Wait', 'Stall'][k] for k in plot_indices]
     colors = [['gray', 'orange', 'green', 'red', 'blue'][k] for k in plot_indices]
@@ -379,9 +389,6 @@ def draw_wave_states(selections, normalize):
 
     timelines = [np.convolve(time, kernel)[kernsize//2:-kernsize//2][::trim] if len(time) > 0 else cycles*0 for time in timelines]
 
-    with open(os.path.join(PIC_SAVE_FOLDER,'counters.json'), 'w') as f:
-        f.write(json.dumps({"counters": STATES}))
-
     [plt.plot(cycles, t, label='State '+s, linewidth=1.1, color=c)
         for t, s, c, sel in zip(timelines, STATES, colors, selections) if sel]
 
@@ -393,14 +400,17 @@ def draw_wave_states(selections, normalize):
     plt.ylim(-1)
     plt.xlim(-maxtime//200, maxtime+maxtime//200+1)
     plt.subplots_adjust(left=0.05, right=1, top=1, bottom=0.07)
-    plt.savefig(os.path.join(PIC_SAVE_FOLDER,'timeline.png'), dpi=150)
+    figure_bytes = BytesIO()
+    plt.savefig(figure_bytes, dpi=150)
+    response = Readable({"counters": STATES})
+    return response, FileBytesIO(figure_bytes)
 
 
 def GeneratePIC(selections=[True for k in range(16)], normalize=True, bScounter=True):
     if bScounter and len(EVENTS) > 0 and np.sum([len(e) for e in EVENTS]) > 32:
-        draw_wave_metrics(selections, normalize)
+        return draw_wave_metrics(selections, normalize)
     else:
-        draw_wave_states(selections, normalize)
+        return draw_wave_states(selections, normalize)
 
 
 if __name__ == "__main__":
@@ -410,7 +420,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("assembly_code", help="Path of the assembly code")
     parser.add_argument("--trace_file", help="Filter for trace files", default=None, type=str)
-    parser.add_argument("-o", "--output_ui", help="Output Folder", default='.')
     parser.add_argument("-k", "--att_kernel", help="Kernel file", type=str, default=pathenv+'/*_kernel.txt')
     parser.add_argument("-p", "--ports", help="Server and websocket ports, default: 8000,18000")
     parser.add_argument("--target_cu", help="Collected target CU id{0-15}", type=int, default=None)
@@ -477,7 +486,6 @@ if __name__ == "__main__":
 
     print('Trace filenames:', filenames)
 
-    Copy_Files(args.output_ui)
     DBFILES = []
     global TIMELINES
     global EVENTS
@@ -492,7 +500,7 @@ if __name__ == "__main__":
             continue
         analysed_filenames.append(name)
         EVENTS.append(perfevents)
-        DBFILES.append( persist(args.output_ui, name, SIMD) )
+        DBFILES.append( persist(name, SIMD) )
         for wave in SIMD:
             time_acc = 0
             tuples1 = wave.timeline.split('(')
@@ -511,9 +519,6 @@ if __name__ == "__main__":
                     ])
                 TIMELINES[state[0]][time_acc:time_acc+state[1]] += 1
                 time_acc += state[1]
-
-    global PIC_SAVE_FOLDER
-    PIC_SAVE_FOLDER = os.path.abspath(os.path.join(args.output_ui, 'ui'))
 
     if args.genasm and len(args.genasm) > 0:
         flight_count = view_trace(args, 0, code, jumps, DBFILES, analysed_filenames, True, None)
