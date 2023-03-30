@@ -255,6 +255,14 @@ configure_settings(bool _init)
     tim::manager::add_metadata("OMNITRACE_GIT_DESCRIBE", OMNITRACE_GIT_DESCRIBE);
     tim::manager::add_metadata("OMNITRACE_GIT_REVISION", OMNITRACE_GIT_REVISION);
 
+    tim::manager::add_metadata("OMNITRACE_LIBRARY_ARCH", OMNITRACE_LIBRARY_ARCH);
+    tim::manager::add_metadata("OMNITRACE_SYSTEM_NAME", OMNITRACE_SYSTEM_NAME);
+    tim::manager::add_metadata("OMNITRACE_SYSTEM_PROCESSOR", OMNITRACE_SYSTEM_PROCESSOR);
+    tim::manager::add_metadata("OMNITRACE_SYSTEM_VERSION", OMNITRACE_SYSTEM_VERSION);
+
+    tim::manager::add_metadata("OMNITRACE_COMPILER_ID", OMNITRACE_COMPILER_ID);
+    tim::manager::add_metadata("OMNITRACE_COMPILER_VERSION", OMNITRACE_COMPILER_VERSION);
+
 #if OMNITRACE_HIP_VERSION > 0
     tim::manager::add_metadata("OMNITRACE_HIP_VERSION", OMNITRACE_HIP_VERSION_STRING);
     tim::manager::add_metadata("OMNITRACE_HIP_VERSION_MAJOR",
@@ -1511,38 +1519,37 @@ print_banner(std::ostream& _os)
      \______/  |__|  |__| |__| \__| |__|     |__|     | _| `._____/__/     \__\ \______||_______|
 
     )banner";
-    auto               _tag    = std::string_view{ OMNITRACE_GIT_DESCRIBE };
-    auto               _rev    = std::string_view{ OMNITRACE_GIT_REVISION };
-#if OMNITRACE_HIP_VERSION_MAJOR > 0
-    auto _hip = JOIN('.', OMNITRACE_HIP_VERSION_MAJOR, OMNITRACE_HIP_VERSION_MINOR, "x");
-#else
-    auto _hip                 = std::string_view{};
-#endif
 
     std::stringstream _version_info{};
     _version_info << "omnitrace v" << OMNITRACE_VERSION_STRING;
-    if(!_tag.empty() || !_rev.empty() || !_hip.empty())
-    {
-        _version_info << " (";
-        if(!_tag.empty())
-        {
-            _version_info << "tag: " << OMNITRACE_GIT_DESCRIBE;
-            if(!_rev.empty()) _version_info << ", ";
-        }
 
-        if(!_rev.empty())
-        {
-            _version_info << "rev: " << OMNITRACE_GIT_REVISION;
-            if(!_hip.empty()) _version_info << ", ";
-        }
+    namespace join = ::timemory::join;
 
-        if(!_hip.empty())
-        {
-            _version_info << "rocm: " << _hip;
-        }
-    }
+    // assemble the list of properties
+    auto _generate_properties =
+        [](std::initializer_list<std::pair<std::string, std::string>>&& _data) {
+            auto _property_info = std::vector<std::string>{};
+            _property_info.reserve(_data.size());
+            for(const auto& itr : _data)
+            {
+                if(!itr.second.empty())
+                    _property_info.emplace_back(
+                        itr.first.empty() ? itr.second
+                                          : join::join(": ", itr.first, itr.second));
+            }
+            return _property_info;
+        };
 
-    if(!_version_info.str().empty()) _version_info << ")";
+    auto _properties =
+        _generate_properties({ { "rev", OMNITRACE_GIT_REVISION },
+                               { "tag", OMNITRACE_GIT_DESCRIBE },
+                               { "", OMNITRACE_LIBRARY_ARCH },
+                               { "compiler", OMNITRACE_COMPILER_STRING },
+                               { "rocm", OMNITRACE_HIP_VERSION_COMPAT_STRING } });
+
+    // <NAME> <VERSION> (<PROPERTIES>)
+    if(!_properties.empty())
+        _version_info << join::join(join::array_config{ ", ", " (", ")" }, _properties);
 
     tim::log::stream(_os, tim::log::color::info()) << _banner << _version_info.str();
     _os << std::endl;

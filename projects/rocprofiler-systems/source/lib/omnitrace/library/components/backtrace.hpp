@@ -45,9 +45,7 @@ namespace omnitrace
 {
 namespace component
 {
-struct backtrace
-: tim::component::empty_base
-, tim::concepts::component
+struct backtrace : comp::empty_base
 {
     static constexpr size_t stack_depth = OMNITRACE_MAX_UNWIND_DEPTH;
 

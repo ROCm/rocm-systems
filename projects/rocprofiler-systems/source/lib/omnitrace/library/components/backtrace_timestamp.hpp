@@ -38,9 +38,7 @@ namespace omnitrace
 {
 namespace component
 {
-struct backtrace_timestamp
-: tim::component::empty_base
-, tim::concepts::component
+struct backtrace_timestamp : comp::empty_base
 {
     using value_type = void;
 

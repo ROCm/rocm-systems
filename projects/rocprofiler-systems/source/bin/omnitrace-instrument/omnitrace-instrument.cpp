@@ -461,8 +461,7 @@ main(int argc, char** argv)
     string_t extra_help = "-- <CMD> <ARGS>";
 
     parser.enable_help();
-    parser.enable_version("omnitrace", "v" OMNITRACE_VERSION_STRING,
-                          OMNITRACE_GIT_DESCRIBE, OMNITRACE_GIT_REVISION);
+    parser.enable_version("omnitrace-instrument", OMNITRACE_ARGPARSE_VERSION_INFO);
 
     parser.add_argument({ "" }, "");
     parser.add_argument({ "[DEBUG OPTIONS]" }, "");

@@ -292,8 +292,7 @@ parse_args(int argc, char** argv, parser_data_t& _parser_data)
     });
 
     parser.enable_help("", "Usage: omnitrace-run <OPTIONS> -- <COMMAND> <ARGS>");
-    parser.enable_version("omnitrace-run", "v" OMNITRACE_VERSION_STRING,
-                          OMNITRACE_GIT_DESCRIBE, OMNITRACE_GIT_REVISION);
+    parser.enable_version("omnitrace-run", OMNITRACE_ARGPARSE_VERSION_INFO);
 
     auto _cols = std::get<0>(console::get_columns());
     if(_cols > parser.get_help_width() + 8)

@@ -38,9 +38,7 @@ namespace omnitrace
 {
 namespace causal
 {
-struct delay
-: tim::component::empty_base
-, tim::concepts::component
+struct delay : comp::empty_base
 {
     using value_type = void;
 

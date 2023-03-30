@@ -124,12 +124,12 @@ start()
         }
         else
         {
-            OMNITRACE_VERBOSE(0, "Resuming perfetto...\n");
+            OMNITRACE_VERBOSE(2, "Resuming perfetto...\n");
             _tmp_file->fopen("a+");
         }
     }
 
-    OMNITRACE_VERBOSE(0, "Setup perfetto...\n");
+    OMNITRACE_VERBOSE(2, "Setup perfetto...\n");
     int   _fd = (_tmp_file) ? _tmp_file->fd : -1;
     auto& cfg = get_config();
     tracing_session->Setup(cfg, _fd);

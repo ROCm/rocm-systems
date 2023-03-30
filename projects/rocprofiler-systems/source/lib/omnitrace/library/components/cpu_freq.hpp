@@ -34,12 +34,11 @@ namespace omnitrace
 namespace component
 {
 struct cpu_freq
-: tim::concepts::component
-, tim::component::empty_base
+: comp::empty_base
 , tim::component::base_format<cpu_freq>
 , tim::component::base_data<std::vector<uint64_t>, 1>
 {
-    using base_type    = tim::component::empty_base;
+    using base_type    = comp::empty_base;
     using this_type    = cpu_freq;
     using value_type   = std::vector<uint64_t>;
     using storage_type = tim::storage<cpu_freq, value_type>;

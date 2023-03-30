@@ -51,9 +51,7 @@ using type_list = ::tim::type_list<Tp...>;
 
 namespace component
 {
-struct backtrace_metrics
-: tim::component::empty_base
-, concepts::component
+struct backtrace_metrics : comp::empty_base
 {
     static constexpr size_t num_hw_counters = TIMEMORY_PAPI_ARRAY_SIZE;
 

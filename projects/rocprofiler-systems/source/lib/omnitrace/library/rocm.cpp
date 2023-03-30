@@ -127,6 +127,8 @@ extern "C"
 
     void OnLoadToolProp(rocprofiler_settings_t* settings)
     {
+        using ::rocprofiler::util::HsaRsrcFactory;
+
         OMNITRACE_BASIC_VERBOSE_F(2 || rocm::on_load_trace, "Loading...\n");
 
         rocm::lock_t _lk{ rocm::rocm_mutex, std::defer_lock };
@@ -332,6 +334,8 @@ extern "C"
         }
         else
         {
+            using ::rocprofiler::util::HsaRsrcFactory;
+
             HsaRsrcFactory::Instance().PrintGpuAgents("ROCm");
         }
 

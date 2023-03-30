@@ -116,6 +116,8 @@ extern std::string settings_rexclude_exact;
 //  leading matches, e.g. OMNITRACE_MPI_[A-Z_]+
 extern std::string settings_rexclude_begin;
 
+constexpr size_t max_error_message_buffer_length = 4096;
+
 //--------------------------------------------------------------------------------------//
 // functions
 
@@ -149,18 +151,27 @@ file_exists(const std::string&);
 // control debug printf statements
 #define errprintf(LEVEL, ...)                                                            \
     {                                                                                    \
-        if(werror || LEVEL < 0)                                                          \
+        if(LEVEL < verbose_level)                                                        \
         {                                                                                \
             if(debug_msg || verbose_level >= LEVEL)                                      \
+            {                                                                            \
+                fprintf(stderr, "%s", tim::log::color::fatal());                         \
                 fprintf(stderr, "[omnitrace][avail] Error! " __VA_ARGS__);               \
-            char _buff[FUNCNAMELEN];                                                     \
-            sprintf(_buff, "[omnitrace][avail] Error! " __VA_ARGS__);                    \
+                fprintf(stderr, "%s", tim::log::color::end());                           \
+            }                                                                            \
+            char _buff[max_error_message_buffer_length];                                 \
+            snprintf(_buff, max_error_message_buffer_length,                             \
+                     "[omnitrace][avail] Error! " __VA_ARGS__);                          \
             throw std::runtime_error(std::string{ _buff });                              \
         }                                                                                \
         else                                                                             \
         {                                                                                \
             if(debug_msg || verbose_level >= LEVEL)                                      \
+            {                                                                            \
+                fprintf(stderr, "%s", tim::log::color::warning());                       \
                 fprintf(stderr, "[omnitrace][avail] Warning! " __VA_ARGS__);             \
+                fprintf(stderr, "%s", tim::log::color::end());                           \
+            }                                                                            \
         }                                                                                \
         fflush(stderr);                                                                  \
     }
@@ -169,12 +180,19 @@ file_exists(const std::string&);
 #define verbprintf(LEVEL, ...)                                                           \
     {                                                                                    \
         if(debug_msg || verbose_level >= LEVEL)                                          \
+        {                                                                                \
+            fprintf(stderr, "%s", tim::log::color::info());                              \
             fprintf(stderr, "[omnitrace][avail] " __VA_ARGS__);                          \
+            fprintf(stderr, "%s", tim::log::color::end());                               \
+        }                                                                                \
         fflush(stderr);                                                                  \
     }
 
 #define verbprintf_bare(LEVEL, ...)                                                      \
     {                                                                                    \
-        if(debug_msg || verbose_level >= LEVEL) fprintf(stderr, __VA_ARGS__);            \
+        if(debug_msg || verbose_level >= LEVEL)                                          \
+        {                                                                                \
+            fprintf(stderr, __VA_ARGS__);                                                \
+        }                                                                                \
         fflush(stderr);                                                                  \
     }

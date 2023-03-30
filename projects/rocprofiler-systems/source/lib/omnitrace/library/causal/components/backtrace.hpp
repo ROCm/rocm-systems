@@ -45,17 +45,13 @@ namespace causal
 {
 namespace component
 {
-struct sample_rate
-: tim::component::empty_base
-, tim::concepts::component
+struct sample_rate : comp::empty_base
 {
     using value_type = void;
     static void sample(int = -1);
 };
 
-struct backtrace
-: tim::component::empty_base
-, tim::concepts::component
+struct backtrace : comp::empty_base
 {
     using value_type        = void;
     using sample_data_set_t = std::set<sample_data>;

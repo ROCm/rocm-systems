@@ -549,8 +549,7 @@ parse_args(int argc, char** argv, std::vector<char*>& _env,
     });
 
     parser.enable_help();
-    parser.enable_version("omnitrace-causal", "v" OMNITRACE_VERSION_STRING,
-                          OMNITRACE_GIT_DESCRIBE, OMNITRACE_GIT_REVISION);
+    parser.enable_version("omnitrace-causal", OMNITRACE_ARGPARSE_VERSION_INFO);
 
     auto _cols = std::get<0>(console::get_columns());
     if(_cols > parser.get_help_width() + 8)

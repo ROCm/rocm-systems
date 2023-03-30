@@ -30,6 +30,17 @@
 #define OMNITRACE_GIT_DESCRIBE "@OMNITRACE_GIT_DESCRIBE@"
 #define OMNITRACE_GIT_REVISION "@OMNITRACE_GIT_REVISION@"
 
+// system info during compilation
+#define OMNITRACE_LIBRARY_ARCH     "@CMAKE_LIBRARY_ARCHITECTURE@"
+#define OMNITRACE_SYSTEM_NAME      "@CMAKE_SYSTEM_NAME@"
+#define OMNITRACE_SYSTEM_PROCESSOR "@CMAKE_SYSTEM_PROCESSOR@"
+#define OMNITRACE_SYSTEM_VERSION   "@CMAKE_SYSTEM_VERSION@"
+
+// compiler information
+#define OMNITRACE_COMPILER_ID      "@CMAKE_CXX_COMPILER_ID@"
+#define OMNITRACE_COMPILER_VERSION "@CMAKE_CXX_COMPILER_VERSION@"
+#define OMNITRACE_COMPILER_STRING  OMNITRACE_COMPILER_ID " v" OMNITRACE_COMPILER_VERSION
+
 #define OMNITRACE_DEFAULT_ROCM_PATH "@ROCmVersion_DIR@"
 #define OMNITRACE_HIP_VERSION_STRING "@OMNITRACE_HIP_VERSION@"
 #define OMNITRACE_HIP_VERSION_MAJOR @OMNITRACE_HIP_VERSION_MAJOR@
@@ -44,6 +55,27 @@
 #define OMNITRACE_HIP_VERSION                                                            \
     ((10000 * OMNITRACE_HIP_VERSION_MAJOR) + (100 * OMNITRACE_HIP_VERSION_MINOR) +       \
      OMNITRACE_HIP_VERSION_PATCH)
+
+#if OMNITRACE_HIP_VERSION_MAJOR > 0
+#    define OMNITRACE_HIP_VERSION_COMPAT_STRING                                          \
+        "v@OMNITRACE_HIP_VERSION_MAJOR@.@OMNITRACE_HIP_VERSION_MINOR@.x"
+#else
+#    define OMNITRACE_HIP_VERSION_COMPAT_STRING ""
+#endif
+
+// this should be passed to argparse::argument_parser::enable_version
+// Example:
+//      parser.enable_version(<name>, OMNITRACE_ARGPARSE_VERSION_INFO);
+#if !defined(OMNITRACE_ARGPARSE_VERSION_INFO)
+#    define OMNITRACE_ARGPARSE_VERSION_INFO                                              \
+        "v" OMNITRACE_VERSION_STRING, OMNITRACE_GIT_DESCRIBE, OMNITRACE_GIT_REVISION,    \
+        {                                                                                \
+            { "", OMNITRACE_LIBRARY_ARCH }, { "compiler", OMNITRACE_COMPILER_STRING },   \
+            {                                                                            \
+                "rocm", OMNITRACE_HIP_VERSION_COMPAT_STRING                              \
+            }                                                                            \
+        }
+#endif
 
 // clang-format off
 #if !defined(OMNITRACE_MAX_THREADS)

@@ -56,6 +56,9 @@ namespace rocprofiler
 {
 namespace
 {
+using ::rocprofiler::util::AgentInfo;
+using ::rocprofiler::util::HsaRsrcFactory;
+
 auto&
 get_event_names()
 {
@@ -271,30 +274,25 @@ metrics_input(unsigned _device, rocprofiler_feature_t** ret)
     return feature_count;
 }
 
-struct info_data
-{
-    const AgentInfo*                         agent = nullptr;
-    std::vector<component::rocm_info_entry>* data  = nullptr;
-};
+using info_data = std::vector<component::rocm_info_entry>;
 
 hsa_status_t
 info_data_callback(const rocprofiler_info_data_t info, void* arg)
 {
     using qualifier_t     = tim::hardware_counters::qualifier;
     using qualifier_vec_t = std::vector<qualifier_t>;
-    auto*       _arg      = static_cast<info_data*>(arg);
-    const auto* _agent    = _arg->agent;
-    auto*       _data     = _arg->data;
+    auto* _data           = static_cast<info_data*>(arg);
+    auto  _dev_index      = info.agent_index;
 
     switch(info.kind)
     {
         case ROCPROFILER_INFO_KIND_METRIC:
         {
-            auto _device_qualifier_sym = JOIN("", ":device=", _agent->dev_index);
-            auto _device_qualifier     = tim::hardware_counters::qualifier{
-                true, static_cast<int>(_agent->dev_index), _device_qualifier_sym,
-                JOIN(" ", "Device", _agent->dev_index)
-            };
+            auto _device_qualifier_sym = JOIN("", ":device=", _dev_index);
+            auto _device_qualifier =
+                tim::hardware_counters::qualifier{ true, static_cast<int>(_dev_index),
+                                                   _device_qualifier_sym,
+                                                   JOIN(" ", "Device", _dev_index) };
             auto _long_desc = std::string{ info.metric.description };
             auto _units     = std::string{};
             auto _pysym     = std::string{};
@@ -313,7 +311,7 @@ info_data_callback(const rocprofiler_info_data_t info, void* arg)
                 {
                     auto _sym = JOIN("", info.metric.name, _device_qualifier_sym);
                     auto _short_desc =
-                        JOIN("", info.metric.name, " on device ", _agent->dev_index);
+                        JOIN("", info.metric.name, " on device ", _dev_index);
                     _data->emplace_back(component::rocm_info_entry(
                         true, tim::hardware_counters::api::rocm, _data->size(), 0, _sym,
                         _pysym, _short_desc, _long_desc, _units,
@@ -331,7 +329,7 @@ info_data_callback(const rocprofiler_info_data_t info, void* arg)
                         auto _sym = JOIN("", info.metric.name, _instance_qualifier_sym,
                                          _device_qualifier_sym);
                         auto _short_desc = JOIN("", info.metric.name, " instance ", i,
-                                                " on device ", _agent->dev_index);
+                                                " on device ", _dev_index);
                         _data->emplace_back(component::rocm_info_entry(
                             true, tim::hardware_counters::api::rocm, _data->size(), 0,
                             _sym, _pysym, _short_desc, _long_desc, _units,
@@ -369,12 +367,26 @@ rocm_metrics()
         const AgentInfo** _agent_p = &_agent;
         HsaRsrcFactory::Instance().GetGpuAgentInfo(i, _agent_p);
 
-        auto _v = info_data{ _agent, &_data };
-        if(!rocm_check_status(
-               rocprofiler_iterate_info(&_agent->dev_id, ROCPROFILER_INFO_KIND_METRIC,
-                                        info_data_callback, reinterpret_cast<void*>(&_v)),
-               { HSA_STATUS_ERROR_NOT_INITIALIZED }))
-            return _data;
+        if(!rocm_check_status(rocprofiler_iterate_info(
+                                  &_agent->dev_id, ROCPROFILER_INFO_KIND_METRIC,
+                                  info_data_callback, reinterpret_cast<void*>(&_data)),
+                              { HSA_STATUS_ERROR_NOT_INITIALIZED }))
+        {
+            OMNITRACE_WARNING_F(-1, "rocprofiler_iterate_info failed for gpu agent %u\n",
+                                i);
+        }
+    }
+
+    if(gpu_count > 0 && _data.empty())
+    {
+        if(!rocm_check_status(rocprofiler_iterate_info(
+                                  nullptr, ROCPROFILER_INFO_KIND_METRIC,
+                                  info_data_callback, reinterpret_cast<void*>(&_data)),
+                              { HSA_STATUS_ERROR_NOT_INITIALIZED }))
+        {
+            OMNITRACE_WARNING_F(-1, "rocprofiler_iterate_info failed for %i gpu agents\n",
+                                gpu_count);
+        }
     }
 
     auto _settings = tim::settings::shared_instance();

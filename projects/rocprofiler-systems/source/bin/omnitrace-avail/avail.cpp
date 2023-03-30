@@ -22,6 +22,7 @@
 
 #include "avail.hpp"
 #include "common.hpp"
+#include "common/defines.h"
 #include "component_categories.hpp"
 #include "defines.hpp"
 #include "enumerated_list.hpp"
@@ -108,7 +109,11 @@ void
 write_hw_counter_info(std::ostream&, const array_t<bool, N>& = {},
                       const array_t<bool, N>& = {}, const array_t<string_t, N>& = {});
 
-int gpu_count = 0;
+namespace
+{
+// initialize HIP before main so that libomnitrace is not HSA_TOOLS_LIB
+int gpu_count = omnitrace::gpu::hip_device_count();
+}  // namespace
 
 //--------------------------------------------------------------------------------------//
 
@@ -174,11 +179,23 @@ main(int argc, char** argv)
 
     parser_t parser("omnitrace-avail");
 
-    parser.enable_help();
-    parser.enable_version("omnitrace-avail", "v" OMNITRACE_VERSION_STRING,
-                          OMNITRACE_GIT_DESCRIBE, OMNITRACE_GIT_REVISION);
-
     parser.set_help_width(40);
+    auto _cols = std::get<0>(tim::utility::console::get_columns());
+    if(_cols > parser.get_help_width() + 8)
+        parser.set_description_width(
+            std::min<int>(_cols - parser.get_help_width() - 8, 120));
+
+    parser.enable_help();
+    parser.enable_version("omnitrace-avail", OMNITRACE_ARGPARSE_VERSION_INFO);
+
+    parser.add_argument({ "--monochrome" }, "Disable colorized output")
+        .max_count(1)
+        .dtype("bool")
+        .action([&](parser_t& p) {
+            auto _monochrome       = p.get<bool>("monochrome");
+            tim::log::monochrome() = _monochrome;
+            p.set_use_color(!_monochrome);
+        });
     parser.add_argument({ "--debug" }, "Enable debug messages")
         .max_count(1)
         .action([](parser_t& p) { debug_msg = p.get<bool>("debug"); });
@@ -468,12 +485,20 @@ main(int argc, char** argv)
     }
 
 #if OMNITRACE_USE_HIP > 0
-    // initialize HIP and call rocm_metrics() which add choices to OMNITRACE_ROCM_EVENTS
-    // setting
-    auto _status = hipGetDeviceCount(&gpu_count);
-    if(gpu_count > 0 && _status == hipSuccess)
+    if(gpu_count > 0)
     {
-        (void) omnitrace::rocprofiler::rocm_metrics();
+        size_t _num_metrics = 0;
+        try
+        {
+            // call to rocm_metrics() will add choices to OMNITRACE_ROCM_EVENTS setting
+            // so always perform this call even if list of HW counters is not requested
+            _num_metrics = omnitrace::rocprofiler::rocm_metrics().size();
+        } catch(std::runtime_error& _e)
+        {
+            verbprintf(0, "Retrieving the GPU HW counters failed: %s", _e.what());
+        }
+        verbprintf(0, "Found %i HIP devices and %zu GPU HW counters\n", gpu_count,
+                   _num_metrics);
     }
     else
     {
