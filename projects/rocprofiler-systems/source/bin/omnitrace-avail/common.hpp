@@ -80,7 +80,7 @@ enum : int
 
 constexpr size_t num_component_options   = 7;
 constexpr size_t num_settings_options    = 4;
-constexpr size_t num_hw_counter_options  = 4;
+constexpr size_t num_hw_counter_options  = 5;
 constexpr size_t num_dump_config_options = TOTAL;
 
 extern std::string       global_delim;

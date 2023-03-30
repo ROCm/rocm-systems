@@ -89,9 +89,19 @@ template <typename Tp>
 void
 write_entry(std::ostream& os, const Tp& _entry, int64_t _w, bool center, bool mark);
 
+template <typename Tp, typename IntArrayT, size_t N>
+void
+write_wrap_entry(std::ostream& os, const Tp& _entry, int64_t _w, bool center, bool mark,
+                 size_t _idx, IntArrayT _breaks, std::array<bool, N> _use);
+
 template <typename IntArrayT, size_t N>
 string_t
 banner(IntArrayT _breaks, std::array<bool, N> _use, char filler = '-', char delim = '|');
+
+template <typename IntArrayT, size_t N>
+string_t
+wrap(size_t idx, IntArrayT _breaks, std::array<bool, N> _use, char filler = ' ',
+     char delim = '|');
 }  // namespace
 
 template <size_t N = num_component_options>
@@ -153,7 +163,7 @@ main(int argc, char** argv)
     std::string cols_via{};
     std::tie(num_cols, cols_via) = tim::utility::console::get_columns();
     std::string col_msg =
-        "(default: " + std::to_string(num_cols) + " [via " + cols_via + "])";
+        ". default: " + std::to_string(num_cols) + " [via " + cols_via + "]";
 
     fields[VAL]      = "VALUE_TYPE";
     fields[ENUM]     = "ENUMERATION";
@@ -188,6 +198,8 @@ main(int argc, char** argv)
     parser.enable_help();
     parser.enable_version("omnitrace-avail", OMNITRACE_ARGPARSE_VERSION_INFO);
 
+    parser.start_group("DEBUG");
+
     parser.add_argument({ "--monochrome" }, "Disable colorized output")
         .max_count(1)
         .dtype("bool")
@@ -204,11 +216,22 @@ main(int argc, char** argv)
         .action([](parser_t& p) {
             verbose_level = (p.get_count("verbose") == 0) ? 1 : p.get<int>("verbose");
         });
+
+    parser.start_group("INFO");
+
     parser
-        .add_argument({ "--advanced" },
-                      "Print advanced settings not relevant to most use cases")
-        .max_count(1)
-        .action([](parser_t& p) { print_advanced = p.get<bool>("advanced"); });
+        .add_argument({ "-S", "--settings", "--print-settings" },
+                      "Display the runtime settings")
+        .max_count(1);
+    parser
+        .add_argument({ "-C", "--components", "--print-components" },
+                      "Only display the components data")
+        .max_count(1);
+    parser
+        .add_argument({ "-H", "--hw-counters", "--print-hw-counters" },
+                      "Write the available hardware counters")
+        .max_count(1);
+
     parser.add_argument({ "-a", "--all" }, "Print all available info")
         .max_count(1)
         .action([&](parser_t& p) {
@@ -225,58 +248,12 @@ main(int argc, char** argv)
             }
         });
 
-    parser.add_argument({ "" }, "");
-    parser.add_argument({ "[CATEGORIES]" }, "");
     parser
-        .add_argument({ "-S", "--settings", "--print-settings" },
-                      "Display the runtime settings")
-        .max_count(1);
-    parser
-        .add_argument({ "-C", "--components", "--print-components" },
-                      "Only display the components data")
-        .max_count(1);
-    parser
-        .add_argument({ "-H", "--hw-counters", "--print-hw-counters" },
-                      "Write the available hardware counters")
-        .max_count(1);
+        .add_argument({ "--advanced" },
+                      "Print advanced settings not relevant to most use cases")
+        .max_count(1)
+        .action([](parser_t& p) { print_advanced = p.get<bool>("advanced"); });
 
-    parser.add_argument({ "" }, "");
-    parser.add_argument({ "[VIEW OPTIONS]" }, "");
-    parser
-        .add_argument({ "-A", "--available" },
-                      "Only display available components/settings/hw-counters")
-        .max_count(1)
-        .action([](parser_t& p) { available_only = p.get<bool>("available"); });
-    parser
-        .add_argument({ "-r", "--filter" },
-                      "Filter the output according to provided regex (egrep + "
-                      "case-sensitive) [e.g. -r \"true\"]. Prefix "
-                      "with '~' to suppress matches")
-        .min_count(1)
-        .dtype("list of strings")
-        .action([](parser_t& p) { regex_keys = p.get<str_vec_t>("filter"); });
-    parser
-        .add_argument({ "-R", "--category-filter" },
-                      "Filter the output according to provided regex w.r.t. the "
-                      "categories (egrep + case-sensitive) [e.g. -r \"true\"]. Prefix "
-                      "with '~' to suppress matches")
-        .min_count(1)
-        .dtype("list of strings")
-        .action([](parser_t& p) {
-            category_regex_keys = p.get<str_vec_t>("category-filter");
-        });
-    parser.add_argument({ "-i", "--ignore-case" }, "Ignore case when filtering")
-        .max_count(1)
-        .dtype("bool")
-        .action([](parser_t& p) { case_insensitive = p.get<bool>("ignore-case"); });
-    parser
-        .add_argument({ "-p", "--hl", "--highlight" },
-                      "Highlight regex matches (only available on UNIX)")
-        .max_count(1)
-        .action([](parser_t&) { regex_hl = true; });
-    parser.add_argument({ "--alphabetical" }, "Sort the output alphabetically")
-        .max_count(1)
-        .action([](parser_t& p) { alphabetical = p.get<bool>("alphabetical"); });
     parser
         .add_argument({ "--list-categories" },
                       "List the available categories for --categories option")
@@ -364,8 +341,46 @@ main(int argc, char** argv)
         .max_count(1)
         .action([](parser_t& p) { expand_keys = p.get<bool>("expand-keys"); });
 
-    parser.add_argument({ "" }, "");
-    parser.add_argument({ "[COLUMN OPTIONS]" }, "");
+    parser.start_group("FILTER");
+
+    parser
+        .add_argument({ "-A", "--available" },
+                      "Only display available components/settings/hw-counters")
+        .max_count(1)
+        .action([](parser_t& p) { available_only = p.get<bool>("available"); });
+    parser
+        .add_argument({ "-r", "--filter" },
+                      "Filter the output according to provided regex (egrep + "
+                      "case-sensitive) [e.g. -r \"true\"]. Prefix "
+                      "with '~' to suppress matches")
+        .min_count(1)
+        .dtype("list of strings")
+        .action([](parser_t& p) { regex_keys = p.get<str_vec_t>("filter"); });
+    parser
+        .add_argument({ "-R", "--category-filter" },
+                      "Filter the output according to provided regex w.r.t. the "
+                      "categories (egrep + case-sensitive) [e.g. -r \"true\"]. Prefix "
+                      "with '~' to suppress matches")
+        .min_count(1)
+        .dtype("list of strings")
+        .action([](parser_t& p) {
+            category_regex_keys = p.get<str_vec_t>("category-filter");
+        });
+    parser.add_argument({ "-i", "--ignore-case" }, "Ignore case when filtering")
+        .max_count(1)
+        .dtype("bool")
+        .action([](parser_t& p) { case_insensitive = p.get<bool>("ignore-case"); });
+    parser
+        .add_argument({ "-p", "--hl", "--highlight" },
+                      "Highlight regex matches (only available on UNIX)")
+        .max_count(1)
+        .action([](parser_t&) { regex_hl = true; });
+    parser.add_argument({ "--alphabetical" }, "Sort the output alphabetically")
+        .max_count(1)
+        .action([](parser_t& p) { alphabetical = p.get<bool>("alphabetical"); });
+
+    parser.start_group("COLUMN");
+
     parser.add_argument({ "-b", "--brief" }, "Suppress availability/value info")
         .max_count(1)
         .action([](parser_t& p) { force_brief = p.get<bool>("brief"); });
@@ -390,8 +405,8 @@ main(int argc, char** argv)
             process_categories(p, _category_options);
         });
 
-    parser.add_argument({ "" }, "");
-    parser.add_argument({ "[WIDTH OPTIONS]" }, "");
+    parser.start_group("DISPLAY");
+
     parser
         .add_argument({ "-w", "--column-width" },
                       "if w > 0, truncate any columns greater than this width")
@@ -409,10 +424,11 @@ main(int argc, char** argv)
         .dtype("int")
         .action([](parser_t& p) { num_cols = p.get<int32_t>("max-total-width"); });
 
+    parser.start_group("OUTPUT");
+
     std::string           _config_file = {};
     std::set<std::string> _config_fmts = {};
-    parser.add_argument({ "" }, "");
-    parser.add_argument({ "[OUTPUT OPTIONS]" }, "");
+
     parser
         .add_argument({ "-G", "--generate-config" },
                       "Dump a configuration to a specified file.")
@@ -466,6 +482,8 @@ main(int argc, char** argv)
                       "Force the generation of an configuration file even if it exists")
         .max_count(1)
         .action([](parser_t& p) { force_config = p.get<bool>("force"); });
+
+    parser.end_group();
 
     parser.add_positional_argument("REGEX_FILTER").set_default(std::string{});
 
@@ -612,8 +630,8 @@ main(int argc, char** argv)
 
     if(include_hw_counters)
     {
-        write_hw_counter_info(*os, { true, !force_brief && !available_only,
-                                     !options[DESC], options[DESC] });
+        write_hw_counter_info(*os, { true, true, !force_brief && !available_only,
+                                     !force_brief && !options[DESC], options[DESC] });
     }
     dump_log();
 
@@ -793,8 +811,12 @@ write_component_info(std::ostream& os, const array_t<bool, N>& options,
             if(!options[i]) continue;
             bool center = (i > 0) ? false : true;
             _selected += (is_selected(std::get<2>(itr).at(i))) ? 1 : 0;
-            write_entry(ss, std::get<2>(itr).at(i), _widths.at(i + 2), center,
-                        _mark.at(i));
+            if(fields.at(i) == "DESCRIPTION")
+                write_wrap_entry(ss, std::get<2>(itr).at(i), _widths.at(i + 2), center,
+                                 _mark.at(i), i + 2, _widths, _wusing);
+            else
+                write_entry(ss, std::get<2>(itr).at(i), _widths.at(i + 2), center,
+                            _mark.at(i));
         }
 
         if(!category_regex_keys.empty())
@@ -1008,7 +1030,11 @@ write_settings_info(std::ostream& os, const array_t<bool, N>& opts,
         {
             if(!_wusing.at(i)) continue;
             _selected += (is_selected(itr.at(i))) ? 1 : 0;
-            write_entry(ss, itr.at(i), _widths.at(i), _center.at(i), _mark.at(i));
+            if(_labels.at(i) == "DESCRIPTION")
+                write_wrap_entry(ss, itr.at(i), _widths.at(i), _center.at(i), _mark.at(i),
+                                 i, _widths, _wusing);
+            else
+                write_entry(ss, itr.at(i), _widths.at(i), _center.at(i), _mark.at(i));
         }
 
         if(_selected > 0)
@@ -1046,6 +1072,15 @@ write_hw_counter_info(std::ostream& os, const array_t<bool, N>& options,
     auto _rocm_events =
         (gpu_count > 0) ? omnitrace::rocprofiler::rocm_metrics() : hwcounter_info_t{};
 
+    if(alphabetical)
+    {
+        auto _sorter = [](const auto& lhs, const auto& rhs) {
+            return (lhs.symbol() < rhs.symbol());
+        };
+        std::sort(_papi_events.begin(), _papi_events.end(), _sorter);
+        std::sort(_rocm_events.begin(), _rocm_events.end(), _sorter);
+    }
+
     auto _process_counters = [](auto& _events_v, int32_t _offset_v) {
         for(auto& iitr : _events_v)
             iitr.offset() += _offset_v;
@@ -1056,48 +1091,93 @@ write_hw_counter_info(std::ostream& os, const array_t<bool, N>& options,
     _offset += _process_counters(_papi_events, _offset);
     _offset += _process_counters(_rocm_events, _offset);
 
-    auto fields        = std::vector<hwcounter_info_t>{ _papi_events, _rocm_events };
-    auto subcategories = std::vector<std::string>{ "CPU", "GPU", "" };
-    array_t<string_t, N> _labels = { "HARDWARE COUNTER", "AVAILABLE", "SUMMARY",
+    auto fields =
+        std::vector<std::pair<std::string, hwcounter_info_t>>{ { "CPU", _papi_events },
+                                                               { "GPU", _rocm_events } };
+    array_t<string_t, N> _labels = { "HARDWARE COUNTER", "DEVICE", "AVAILABLE", "SUMMARY",
                                      "DESCRIPTION" };
-    array_t<bool, N>     _center = { false, true, false, false };
+    array_t<bool, N>     _center = { false, true, true, false, false };
 
-    for(size_t i = 0; i < subcategories.size(); ++i)
+    auto _valid_symbols = std::set<std::string>{};
+    for(auto& fitr : fields)
     {
-        if(i >= fields.size()) break;
-        if(!category_view.empty() && category_view.count(subcategories.at(i)) == 0 &&
-           category_view.count(std::string{ "hw_counters::" } + subcategories.at(i)) == 0)
-            fields.at(i).clear();
-        if(!is_category_selected(subcategories.at(i)) &&
-           !is_category_selected(std::string{ "hw_counters::" } + subcategories.at(i)))
-            fields.at(i).clear();
-        if(fields.at(i).empty()) subcategories.at(i).clear();
+        if(!category_view.empty() && category_view.count(fitr.first) == 0 &&
+           category_view.count(std::string{ "hw_counters::" } + fitr.first) == 0)
+            fitr.second.clear();
+
+        if(!is_category_selected(fitr.first) &&
+           !is_category_selected(std::string{ "hw_counters::" } + fitr.first))
+            fitr.second.clear();
+
+        for(const auto& itr : fitr.second)
+        {
+            if(available_only && !itr.available()) continue;
+            std::stringstream ss;
+            int               _selected = 0;
+            if(options[0])
+            {
+                _selected += (is_selected(itr.symbol())) ? 1 : 0;
+            }
+
+            if(options[2])
+            {
+                std::stringstream _avss{};
+                _avss << std::boolalpha << itr.available();
+                _selected += (is_selected(_avss.str())) ? 1 : 0;
+            }
+
+            for(size_t i = 3; i < N; ++i)
+            {
+                if(options[i])
+                {
+                    _selected += (is_selected(itr.short_description()) ||
+                                  is_selected(itr.long_description()))
+                                     ? 1
+                                     : 0;
+                }
+            }
+
+            if(_selected > 0) _valid_symbols.emplace(itr.symbol());
+        }
+    }
+
+    for(auto& fitr : fields)
+    {
+        fitr.second.erase(std::remove_if(fitr.second.begin(), fitr.second.end(),
+                                         [&_valid_symbols](const auto& itr) {
+                                             return (_valid_symbols.count(itr.symbol()) ==
+                                                     0);
+                                         }),
+                          fitr.second.end());
     }
 
     width_type _widths;
     width_bool _wusing;
-    width_bool _mark = { false, true, false, false };
+    width_bool _mark = { true, false, false, false, false };
     _widths.fill(0);
     _wusing.fill(false);
     for(size_t i = 0; i < _widths.size(); ++i)
     {
-        _widths.at(i) = _labels.at(i).length() + padding;
+        // don't account for AVAILABLE or "DEVICE"
+        if(i != 1 && i != 2) _widths.at(i) = _labels.at(i).length() + padding;
         _wusing.at(i) = options[i];
     }
 
     for(const auto& fitr : fields)
     {
-        for(const auto& itr : fitr)
+        for(const auto& itr : fitr.second)
         {
-            if(available_only && !itr.available()) continue;
-            width_type _w = { { (int64_t) itr.symbol().length(), (int64_t) 6,
+            width_type _w = { { (int64_t) itr.symbol().length(), (int64_t) 4, (int64_t) 6,
                                 (int64_t) itr.short_description().length(),
                                 (int64_t) itr.long_description().length() } };
             for(auto& witr : _w)
                 witr += padding;
 
             for(size_t i = 0; i < N; ++i)
-                _widths.at(i) = std::max<uint64_t>(_widths.at(i), _w.at(i));
+            {
+                if(_wusing.at(i))
+                    _widths.at(i) = std::max<uint64_t>(_widths.at(i), _w.at(i));
+            }
         }
     }
 
@@ -1112,75 +1192,43 @@ write_hw_counter_info(std::ostream& os, const array_t<bool, N>& options,
     }
     os << "\n" << banner(_widths, _wusing, '-');
 
-    size_t nitr = 0;
-    size_t nout = 0;
     for(const auto& fitr : fields)
     {
-        auto idx = nitr++;
+        // if has a label and is empty, continue
+        if(!fitr.first.empty() && fitr.second.empty()) continue;
 
-        if(idx < subcategories.size())
+        for(const auto& itr : fitr.second)
         {
-            if(!markdown && nout != 0) os << banner(_widths, _wusing, '-');
-            if(!subcategories.at(idx).empty())
-            {
-                os << global_delim;
-                if(options[0])
-                {
-                    write_entry(os, subcategories.at(idx), _widths.at(0), true,
-                                _mark.at(0));
-                }
-                for(size_t i = 1; i < N; ++i)
-                {
-                    if(options[i])
-                        write_entry(os, "", _widths.at(i), _center.at(i), _mark.at(i));
-                }
-                os << "\n";
-                if(!markdown) os << banner(_widths, _wusing, '-');
-                ++nout;
-            }
-        }
-        else
-        {
-            if(!markdown) os << banner(_widths, _wusing, '-');
-        }
-
-        for(const auto& itr : fitr)
-        {
-            if(available_only && !itr.available()) continue;
             std::stringstream ss;
-            int               _selected = 0;
             if(options[0])
             {
-                _selected += (is_selected(itr.symbol())) ? 1 : 0;
                 write_entry(ss, itr.symbol(), _widths.at(0), _center.at(0), _mark.at(0));
             }
 
-            if(options[1])
+            write_entry(ss, fitr.first, _widths.at(1), _center.at(1), _mark.at(1));
+
+            if(options[2])
             {
                 std::stringstream _avss{};
                 _avss << std::boolalpha << itr.available();
-                _selected += (is_selected(_avss.str())) ? 1 : 0;
-                write_entry(ss, itr.available(), _widths.at(1), _center.at(1),
+                write_entry(ss, itr.available(), _widths.at(2), _center.at(2),
                             _mark.at(1));
             }
 
-            array_t<string_t, N> _e = { { "", "", itr.short_description(),
+            array_t<string_t, N> _e = { { "", "", "", itr.short_description(),
                                           itr.long_description() } };
-            for(size_t i = 2; i < N; ++i)
+            for(size_t i = 3; i < N; ++i)
             {
                 if(options[i])
                 {
-                    _selected += (is_selected(_e.at(i))) ? 1 : 0;
-                    write_entry(ss, _e.at(i), _widths.at(i), _center.at(i), _mark.at(i));
+                    write_wrap_entry(ss, _e.at(i), _widths.at(i), _center.at(i),
+                                     _mark.at(i), i, _widths, _wusing);
                 }
             }
 
-            if(_selected > 0)
-            {
-                os << global_delim;
-                os << hl_selected(ss.str());
-                os << "\n";
-            }
+            if(!csv) os << global_delim;
+            os << hl_selected(ss.str());
+            os << "\n";
         }
     }
 
@@ -1288,7 +1336,7 @@ write_entry(std::ostream& os, const Tp& _entry, int64_t _w, bool center, bool ma
     auto _sentry = remove(ssentry.str(), { "tim::", "component::" });
 
     auto _decr = (mark && markdown) ? 6 : 5;
-    if(_w > 0 && _sentry.length() > static_cast<size_t>(_w - 2))
+    if(!csv && _w > 0 && _sentry.length() > static_cast<size_t>(_w - 2))
         _sentry = _sentry.substr(0, _w - _decr) + "...";
 
     if(mark && markdown)
@@ -1331,6 +1379,75 @@ write_entry(std::ostream& os, const Tp& _entry, int64_t _w, bool center, bool ma
         else
             ss << std::left << std::setw(_w - 1) << _sentry << global_delim;
     }
+    os << ss.str();
+}
+
+//--------------------------------------------------------------------------------------//
+
+template <typename Tp, typename IntArrayT, size_t N>
+void
+write_wrap_entry(std::ostream& os, const Tp& _entry, int64_t _w, bool center, bool mark,
+                 size_t _idx, IntArrayT _breaks, std::array<bool, N> _use)
+{
+    if(csv)
+    {
+        write_entry(os, _entry, _w, center, mark);
+        return;
+    }
+
+    auto _orig_w = _w;
+    if(max_width > 0 && _w > max_width) _w = max_width;
+
+    auto           _remainder = std::string{};
+    stringstream_t ssentry;
+    stringstream_t ss;
+    ssentry << ' ' << std::boolalpha << ((mark && markdown) ? "`" : "") << _entry;
+    auto _sentry = remove(ssentry.str(), { "tim::", "component::" });
+
+    if(_w > 0 && _sentry.length() > static_cast<size_t>(_w - 2))
+    {
+        auto _decr   = (mark && markdown) ? 4 : 3;
+        auto _lspace = _sentry.substr(0, _w - _decr).find_last_of(" \t");
+        if(_lspace == std::string::npos || _lspace < static_cast<uint64_t>(_w / 2))
+            _lspace = _w - _decr;
+        _remainder = std::string{ " " } + _sentry.substr(_lspace);
+        _sentry    = _sentry.substr(0, _lspace);
+    }
+
+    if(mark && markdown)
+    {
+        _sentry += std::string{ "`" };
+    }
+
+    if(center)
+    {
+        size_t _n = 0;
+        while(_sentry.length() + 2 < static_cast<size_t>(_w))
+        {
+            if(_n++ % 2 == 0)
+            {
+                _sentry += std::string{ " " };
+            }
+            else
+            {
+                _sentry.insert(0, " ");
+            }
+        }
+        if(_w > 0 && _sentry.length() > static_cast<size_t>(_w - 1))
+            _sentry = _sentry.substr(_w - 1);
+        ss << std::left << std::setw(_w - 1) << _sentry << global_delim;
+    }
+    else
+    {
+        ss << std::left << std::setw(_w - 1) << _sentry << global_delim;
+    }
+
+    if(!_remainder.empty())
+    {
+        ss << wrap(_idx, _breaks, _use);
+        write_wrap_entry(ss, _remainder, _orig_w, center, mark, _idx, _breaks, _use);
+    }
+
     os << ss.str();
 }
 
@@ -1389,6 +1506,41 @@ banner(IntArrayT _breaks, std::array<bool, N> _use, char filler, char delim)
     return ss.str();
 }
 
+//--------------------------------------------------------------------------------------//
+
+template <typename IntArrayT, size_t N>
+string_t
+wrap(size_t idx, IntArrayT _breaks, std::array<bool, N> _use, char filler, char delim)
+{
+    if(csv) return string_t{};
+
+    _breaks = compute_max_columns(_breaks, _use);
+
+    for(auto& itr : _breaks)
+    {
+        if(max_width > 0 && itr > max_width) itr = max_width;
+    }
+
+    stringstream_t ss;
+    ss.fill(filler);
+    int64_t _remain = 0;
+    for(size_t i = 0; i < _breaks.size(); ++i)
+    {
+        if(_use.at(i)) _remain += _breaks.at(i);
+    }
+
+    for(size_t i = 1; i < _breaks.size(); ++i)
+    {
+        auto j = i + idx;
+        auto k = j % _breaks.size();
+        if(k == 0) ss << "\n" << delim;
+        if(!_use.at(k)) continue;
+        ss << std::setw(_breaks.at(k) - 1) << "" << delim;
+        _remain -= _breaks.at(k);
+    }
+
+    return ss.str();
+}
 }  // namespace
 
 //--------------------------------------------------------------------------------------//
