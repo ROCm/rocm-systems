@@ -59,7 +59,7 @@ def try_match_swapped(insts, code, i, line):
 
 def stitch(insts, code, jumps):
     result, i, line, loopCount, N = [], 0, 0, defaultdict(int), len(insts)
-    
+
     SMEM_INST = []
     VMEM_INST = []
     FLAT_INST = []
@@ -98,7 +98,7 @@ def stitch(insts, code, jumps):
                 FLAT_INST.append([line,  num_inflight])
                 NUM_FLAT += 1
             elif inst[1] == 9 and 'waitcnt' in as_line[0]:
-                
+
                 if 'lgkmcnt' in as_line[0]:
                     wait_N = int(as_line[0].split('lgkmcnt(')[1].split(')')[0])
                     flight_count.append([as_line[-1], num_inflight, wait_N])
@@ -248,7 +248,7 @@ def extract_waves(waves):
     return result
 
 
-def extract_data(df, output_ui, se_number, code, jumps):    
+def extract_data(df, output_ui, se_number, code, jumps):
     if len(df['id']) == 0 or len(df['instructions']) == 0 or len(df['timeline']) == 0:
         return None
 
@@ -263,7 +263,7 @@ def extract_data(df, output_ui, se_number, code, jumps):
     for wave_id in df['id']:
         if non_stitched[df['simd'][wave_id]][df['wave_slot'][wave_id]] == 0:
             continue
-        print(f"Parsing :{se_number}-{df['simd'][wave_id]}-{df['wave_slot'][wave_id]}")
+        print("Parsing :{se_number}-{df['simd'][wave_id]}-{df['wave_slot'][wave_id]}")
         insts, timeline = [], []
         if len(df['instructions'][wave_id]) == 0 or len(df['timeline'][wave_id]) == 0:
             continue
@@ -282,7 +282,7 @@ def extract_data(df, output_ui, se_number, code, jumps):
         non_stitched[df['simd'][wave_id]][df['wave_slot'][wave_id]] = len(insts) - len(stitched)
         flight_count.append(count)
 
-        wave_entry = {  
+        wave_entry = {
             "id": int(df['id'][wave_id]),
             "simd": int(df['simd'][wave_id]),
             "slot": int(df['wave_slot'][wave_id]),
