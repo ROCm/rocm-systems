@@ -263,7 +263,6 @@ def extract_data(df, output_ui, se_number, code, jumps):
     for wave_id in df['id']:
         if non_stitched[df['simd'][wave_id]][df['wave_slot'][wave_id]] == 0:
             continue
-        print("Parsing :{se_number}-{df['simd'][wave_id]}-{df['wave_slot'][wave_id]}")
         insts, timeline = [], []
         if len(df['instructions'][wave_id]) == 0 or len(df['timeline'][wave_id]) == 0:
             continue
