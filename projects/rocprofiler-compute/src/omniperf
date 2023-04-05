@@ -26,6 +26,8 @@
 
 import sys
 import os
+import io
+import selectors
 import argparse
 import subprocess
 import glob
@@ -57,6 +59,48 @@ from common import getVersion
 def run_subprocess(cmd):
     subprocess.run(cmd, check=True)
 
+def capture_subprocess_output(subprocess_args):
+    # Start subprocess
+    # bufsize = 1 means output is line buffered
+    # universal_newlines = True is required for line buffering
+    process = subprocess.Popen(subprocess_args,
+                               bufsize=1,
+                               stdout=subprocess.PIPE,
+                               stderr=subprocess.STDOUT,
+                               universal_newlines=True)
+
+    # Create callback function for process output
+    buf = io.StringIO()
+    def handle_output(stream, mask):
+        # Because the process' output is line buffered, there's only ever one
+        # line to read when this function is called
+        line = stream.readline()
+        buf.write(line)
+        sys.stdout.write(line)
+
+    # Register callback for an "available for read" event from subprocess' stdout stream
+    selector = selectors.DefaultSelector()
+    selector.register(process.stdout, selectors.EVENT_READ, handle_output)
+
+    # Loop until subprocess is terminated
+    while process.poll() is None:
+        # Wait for events and handle them with their registered callbacks
+        events = selector.select()
+        for key, mask in events:
+            callback = key.data
+            callback(key.fileobj, mask)
+
+    # Get process return code
+    return_code = process.wait()
+    selector.close()
+
+    success = (return_code == 0)
+
+    # Store buffered output
+    output = buf.getvalue()
+    buf.close()
+
+    return (success, output)
 
 def resolve_rocprof():
     # ROCPROF INFO
@@ -337,15 +381,19 @@ def characterize_app(args, VER):
     print("Target: ", args.target)
     print("Command: ", args.remaining)
     print("Kernel Selection: ", args.kernel)
-    print("Dispatch Selection: ", args.dispatch, "\n")
+    print("Dispatch Selection: ", args.dispatch)
 
     perfmon_dir = str(OMNIPERF_HOME) + "/perfmon_pub"
     print("permon dir is ", os.path.abspath(perfmon_dir))
     app_cmd = args.remaining
-    workload_dir =args.path
+    workload_dir = args.path
 
     # Perfmon filtering
     pmc_filter(workload_dir, perfmon_dir, args.target)
+
+    # Set up a log file
+    log = open(workload_dir + "/log.txt", "w")
+    print("Log: ", workload_dir + "/log.txt\n")
 
     # Workload profiling
     for fname in glob.glob(workload_dir + "/perfmon/*.txt"):
@@ -376,7 +424,11 @@ def characterize_app(args, VER):
         if args.use_rocscope == True:
             run_rocscope(args, fname)
         else:
-            run_prof(fname, workload_dir, perfmon_dir, app_cmd, args.target, args.verbose)
+            run_prof(fname, workload_dir, perfmon_dir, app_cmd, args.target, log, args.verbose)
+    
+    # Close log
+    log.close()
+
     # run again with timestamps
     run_subprocess(
         [
@@ -397,7 +449,6 @@ def characterize_app(args, VER):
 ################################################
 # Profiling Helpers
 ################################################
-
 
 def run_rocscope(args, fname):
     # profile the app
@@ -428,7 +479,7 @@ def run_rocscope(args, fname):
                 sys.exit(1)
 
 
-def run_prof(fname, workload_dir, perfmon_dir, cmd, target, verbose):
+def run_prof(fname, workload_dir, perfmon_dir, cmd, target, log_file, verbose):
     global rocprof_cmd
 
     fbase = os.path.splitext(os.path.basename(fname))[0]
@@ -439,7 +490,7 @@ def run_prof(fname, workload_dir, perfmon_dir, cmd, target, verbose):
     # profile the app (run w/ custom config files for mi100)
     if target == "mi100":
         print("RUNNING WITH CUSTOM METRICS")
-        run_subprocess(
+        success, output = capture_subprocess_output(
             [
                 rocprof_cmd,
                 "-i",
@@ -454,7 +505,7 @@ def run_prof(fname, workload_dir, perfmon_dir, cmd, target, verbose):
             ]
         )
     else:
-        run_subprocess(
+        success, output = capture_subprocess_output(
             [
                 rocprof_cmd,
                 "-i",
@@ -466,6 +517,9 @@ def run_prof(fname, workload_dir, perfmon_dir, cmd, target, verbose):
                 '"' + cmd + '"',
             ]
         )
+    # Write output to log
+    log_file.write(output)
+    
 
 
 def omniperf_profile(args, VER):
@@ -482,9 +536,9 @@ def omniperf_profile(args, VER):
     print("Dispatch Selection: ", args.dispatch)
 
     if args.ipblocks == None:
-        print("IP Blocks: All", "\n")
+        print("IP Blocks: All")
     else:
-        print("IP Blocks: ", args.ipblocks, "\n")
+        print("IP Blocks: ", args.ipblocks)
 
     # Set up directories
     workload_dir = args.path + "/" + args.name + "/" + args.target
@@ -492,6 +546,10 @@ def omniperf_profile(args, VER):
 
     # Perfmon filtering
     perfmon_filter(workload_dir, perfmon_dir, args)
+
+    # Set up a log file
+    log = open(workload_dir + "/log.txt", "w")
+    print("Log: ", workload_dir + "/log.txt\n")
 
     if not args.lucky == None and args.lucky == True:
         print("You're feeling lucky - only profiling top N kernels")
@@ -591,7 +649,7 @@ def omniperf_profile(args, VER):
             if args.use_rocscope == True:
                 run_rocscope(args, fname)
             else:
-                run_prof(fname, workload_dir, perfmon_dir, args.remaining, args.target, args.verbose)
+                run_prof(fname, workload_dir, perfmon_dir, args.remaining, args.target, log, args.verbose)
 
         # run again with timestamps
         run_subprocess(
@@ -606,7 +664,6 @@ def omniperf_profile(args, VER):
                 '"' + args.remaining + '"',
             ]
         )
-
         # Update pmc_perf.csv timestamps
         replace_timestamps(workload_dir)
 
@@ -648,6 +705,8 @@ def omniperf_profile(args, VER):
                     str(args.device),
                 ]
             )
+    # Close log
+    log.close()
 
 
 ################################################
