@@ -1,4 +1,4 @@
-ROCPROFILER_1.0 {
+ROCPROFILER_8.0 {
 global: OnLoad;
         OnUnload;
         rocprofiler_version_major;
@@ -41,7 +41,7 @@ global: OnLoad;
 local:  *;
 };
 
-ROCPROFILER_2.0 {
+ROCPROFILER_9.0 {
 global: HSA_AMD_TOOL_PRIORITY;
         rocprofiler_error_str;
         rocprofiler_initialize;
@@ -85,4 +85,4 @@ global: HSA_AMD_TOOL_PRIORITY;
         rocprofiler_device_profiling_session_poll;
         rocprofiler_device_profiling_session_stop;
         rocprofiler_device_profiling_session_destroy;
-} ROCPROFILER_1.0;
+} ROCPROFILER_8.0;

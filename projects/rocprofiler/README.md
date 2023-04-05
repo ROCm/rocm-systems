@@ -64,7 +64,7 @@ To enable verbose tracing:
 $ export ROCPROFILER_TRACE=1
 ```
 
-## ROC Profiler library version 2.0
+## ROC Profiler library version 9.0
 
 ## Introduction
 
@@ -249,8 +249,8 @@ The user has two options for building:
 
       installtion:
       ```bash
-      rocprofiler-plugins_2.0.0-local_amd64.deb
-      rocprofiler-plugins-2.0.0-local.x86_64.rpm
+      rocprofiler-plugins_9.0.0-local_amd64.deb
+      rocprofiler-plugins-9.0.0-local.x86_64.rpm
       ``` 
       usage:
 
@@ -299,8 +299,8 @@ The user has two options for building:
 
   installation:
   ```bash
-  rocprofiler-tests_2.0.0-local_amd64.deb
-  rocprofiler-tests-2.0.0-local.x86_64.rpm
+  rocprofiler-tests_9.0.0-local_amd64.deb
+  rocprofiler-tests-9.0.0-local.x86_64.rpm
   ```
   usage:
   From build directory:
@@ -319,8 +319,8 @@ We make use of doxygen to autmatically generate API documentation. Generated doc
 
    installtion:
    ```bash
-   rocprofiler-docs_2.0.0-local_amd64.deb
-   rocprofiler-docs-2.0.0-local.x86_64.rpm
+   rocprofiler-docs_9.0.0-local_amd64.deb
+   rocprofiler-docs-9.0.0-local.x86_64.rpm
    ```
 ## Samples
 
@@ -329,8 +329,8 @@ We make use of doxygen to autmatically generate API documentation. Generated doc
 
 insalltion:
 ```bash
-rocprofiler-samples_2.0.0-local_amd64.deb
-rocprofiler-samples-2.0.0-local.x86_64.rpm
+rocprofiler-samples_9.0.0-local_amd64.deb
+rocprofiler-samples-9.0.0-local.x86_64.rpm
 ```
 usage:
 

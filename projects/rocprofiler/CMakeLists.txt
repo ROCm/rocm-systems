@@ -55,7 +55,7 @@ include(utils)
 include(env)
 
 # Setup the package version.
-get_version("2.0.0")
+get_version("1.0.0")
 message("-- LIB-VERSION: ${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH}")
 
 set(BUILD_VERSION_MAJOR ${VERSION_MAJOR})
