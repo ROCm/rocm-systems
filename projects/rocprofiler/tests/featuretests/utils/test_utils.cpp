@@ -28,10 +28,10 @@ namespace utility {
 // This function returns the running path of executable
 std::string GetRunningPath(std::string string_to_erase) {
   std::string path;
-  char *real_path;
+  char* real_path;
   Dl_info dl_info;
 
-  if (0 != dladdr(reinterpret_cast<void *>(main), &dl_info)) {
+  if (0 != dladdr(reinterpret_cast<void*>(main), &dl_info)) {
     std::string to_erase = string_to_erase;
     path = dl_info.dli_fname;
     real_path = realpath(path.c_str(), NULL);
@@ -40,6 +40,9 @@ std::string GetRunningPath(std::string string_to_erase) {
     }
     path.clear();  // reset path
     path.append(real_path);
+
+    //std::cout << path << std::endl;
+
 
     size_t pos = path.find(to_erase);
     if (pos != std::string::npos) path.erase(pos, to_erase.length());
@@ -53,10 +56,30 @@ std::string GetRunningPath(std::string string_to_erase) {
 // available in system
 int GetNumberOfCores() {
   std::ifstream cpuinfo("/proc/cpuinfo");
-  const int num_cpu_cores = std::count(
-      std::istream_iterator<std::string>(cpuinfo),
-      std::istream_iterator<std::string>(), std::string("processor"));
+  const int num_cpu_cores =
+      std::count(std::istream_iterator<std::string>(cpuinfo), std::istream_iterator<std::string>(),
+                 std::string("processor"));
   return num_cpu_cores;
+}
+
+bool is_installed_path() {
+  std::string path;
+  char* real_path;
+  Dl_info dl_info;
+
+  if (0 != dladdr(reinterpret_cast<void*>(main), &dl_info)) {
+    path = dl_info.dli_fname;
+    real_path = realpath(path.c_str(), NULL);
+    if (real_path == nullptr) {
+      throw(std::string("Error! in extracting real path"));
+    }
+    path.clear();  // reset path
+    path.append(real_path);
+    if (path.find("/opt") != std::string::npos) {
+      return true;
+    }
+  }
+  return false;
 }
 
 }  // namespace utility

@@ -43,6 +43,8 @@ std::string GetRunningPath(std::string string_to_erase);
 // Get Number of cores in the system
 int GetNumberOfCores();
 
+bool is_installed_path();
+
 }  // namespace utility
 }  // namespace tests
 }  // namespace rocmtools
@@ -53,5 +55,6 @@ int main(int argc, char** argv);
 
 using rocmtools::tests::utility::GetNumberOfCores;
 using rocmtools::tests::utility::GetRunningPath;
+using rocmtools::tests::utility::is_installed_path;
 
 #endif  // TESTS_FEATURETESTS_PROFILER_UTILS_TEST_UTILS_H_

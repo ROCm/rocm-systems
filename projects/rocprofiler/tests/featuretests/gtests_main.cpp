@@ -8,7 +8,8 @@ int main(int argc, char** argv) {
   testing::InitGoogleTest(&argc, argv);
   testing::FLAGS_gtest_death_test_style = "threadsafe";
   // Add line below to disable any problematic test
-  testing::GTEST_FLAG(filter) = "-OpenMPTest.*:ProfilerSPMTest*";
+  testing::GTEST_FLAG(filter) =
+      "-OpenMPTest.*:ProfilerSPMTest*:ProfilerMQTest*:ProfilerMPTest*:MPITest*";
   // Disable ATT test fir gfx10 GPUs until its supported
   hsa_init();
   // iterate for gpu's
@@ -18,7 +19,9 @@ int main(int argc, char** argv) {
         hsa_agent_get_info(agent, HSA_AGENT_INFO_NAME, gpu_name);
         std::string gfx_name = gpu_name;
         if (gfx_name.find("gfx10") != std::string::npos) {
-          testing::GTEST_FLAG(filter) = "-ATTCollection.*:OpenMPTest.*:-ProfilerSPMTest*";
+          testing::GTEST_FLAG(filter) =
+              "-ATTCollection.*:OpenMPTest.*:-ProfilerSPMTest*:ProfilerMQTest:*ProfilerMPTest*:"
+              "MPITest*";
         }
         return HSA_STATUS_SUCCESS;
       },

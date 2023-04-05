@@ -36,6 +36,10 @@ namespace fs = std::experimental::filesystem;
 std::vector<hsa_agent_t> Device::all_devices;
 
 std::string GetRunningPath(std::string string_to_erase);
+static void init_test_path();
+
+std::string test_app_path;
+std::string hasco_path;
 
 int main() {
   hsa_status_t status;
@@ -48,11 +52,12 @@ int main() {
   status = hsa_agent_get_info(gpu[0].agent, HSA_AGENT_INFO_NAME, agent_name);
   ASSERT_EQ(status, HSA_STATUS_SUCCESS);
 
+  // set global test path for this test
+  init_test_path();
   // Getting Current Path
-  std::string app_path = GetRunningPath("tests/featuretests/profiler/apps/multiqueue_testapp");
+  std::string app_path = GetRunningPath(test_app_path + "multiqueue_testapp");
   // Getting hasco Path
-  std::string ko_path =
-      app_path + "tests/featuretests/profiler/" + std::string(agent_name) + "_copy.hsaco";
+  std::string ko_path = app_path + hasco_path + std::string(agent_name) + "_copy.hsaco";
 
   MQDependencyTest::CodeObject code_object;
   if (!obj.LoadCodeObject(ko_path, gpu[0].agent, code_object)) {
@@ -304,4 +309,34 @@ std::string GetRunningPath(std::string string_to_erase) {
     throw(std::string("Error! in extracting real path"));
   }
   return path;
+}
+
+bool is_installed_path() {
+  std::string path;
+  char* real_path;
+  Dl_info dl_info;
+
+  if (0 != dladdr(reinterpret_cast<void*>(main), &dl_info)) {
+    path = dl_info.dli_fname;
+    real_path = realpath(path.c_str(), NULL);
+    if (real_path == nullptr) {
+      throw(std::string("Error! in extracting real path"));
+    }
+    path.clear();  // reset path
+    path.append(real_path);
+    if (path.find("/opt") != std::string::npos) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static void init_test_path() {
+  if (is_installed_path()) {
+    test_app_path = "share/rocprofiler/tests/featuretests/profiler/apps/";
+    hasco_path = "share/rocprofiler/tests/";
+  } else {
+    test_app_path = "tests/featuretests/profiler/apps/";
+    hasco_path = "tests/featuretests/profiler/";
+  }
 }

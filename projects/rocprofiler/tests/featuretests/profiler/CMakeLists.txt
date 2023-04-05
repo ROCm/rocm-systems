@@ -53,12 +53,14 @@ endforeach()
 set_source_files_properties(apps/hello_world_hip.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
 hip_add_executable(hip_helloworld apps/hello_world_hip.cpp)
 set_target_properties(hip_helloworld PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/tests/featuretests/profiler/apps")
+install(TARGETS hip_helloworld RUNTIME DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/tests/featuretests/profiler/apps COMPONENT tests)
 
 
 #hip_vectoradd
 set_source_files_properties(apps/vector_add_hip.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
 hip_add_executable(hip_vectoradd apps/vector_add_hip.cpp)
 set_target_properties(hip_vectoradd PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/tests/featuretests/profiler/apps")
+install(TARGETS hip_vectoradd RUNTIME DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/tests/featuretests/profiler/apps COMPONENT tests)
 
 #mpi_vectoradd
 find_package(MPI)
@@ -67,6 +69,7 @@ include_directories(SYSTEM ${MPI_INCLUDE_PATH})
 set_source_files_properties(apps/vector_add_mpi.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
 hip_add_executable(mpi_vectoradd apps/vector_add_mpi.cpp)
 set_target_properties(mpi_vectoradd PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/tests/featuretests/profiler/apps")
+install(TARGETS mpi_vectoradd RUNTIME DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/tests/featuretests/profiler/apps COMPONENT tests)
 target_link_libraries(mpi_vectoradd ${MPI_C_LIBRARIES} stdc++fs)
 endif()
 
@@ -88,6 +91,7 @@ endif()
 set_source_files_properties(apps/async_mem_copy.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
 hip_add_executable(hsa_async_mem_copy apps/async_mem_copy.cpp)
 set_target_properties(hsa_async_mem_copy PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/tests/featuretests/profiler/apps")
+install(TARGETS hsa_async_mem_copy RUNTIME DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/tests/featuretests/profiler/apps COMPONENT tests)
 target_link_libraries(hsa_async_mem_copy hsa-runtime64::hsa-runtime64 Threads::Threads dl stdc++fs)
 
 
@@ -111,6 +115,7 @@ hip_add_executable(multithreaded_testapp apps/multithreaded_testapp.cpp ../utils
 target_include_directories(multithreaded_testapp PRIVATE ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/featuretests/profiler/apps)
 target_link_libraries(multithreaded_testapp hsa-runtime64::hsa-runtime64 Threads::Threads dl stdc++fs amd_comgr)
 set_target_properties(multithreaded_testapp PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/tests/featuretests/profiler/apps")
+install(TARGETS multithreaded_testapp RUNTIME DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/tests/featuretests/profiler/apps COMPONENT tests)
 add_dependencies(tests multithreaded_testapp)
 
 # Multi-Queue Dependency Test
@@ -132,6 +137,10 @@ set(GPU_LIST "gfx900" "gfx906" "gfx908" "gfx90a" "gfx1030")
 foreach(target_id ${GPU_LIST})
   ## generate kernel bitcodes
   generate_hsaco(${target_id} ${CMAKE_CURRENT_SOURCE_DIR}/apps/copy.cl ${target_id}_copy.hsaco)
+# install(FILES "${PROJECT_BINARY_DIR}/tests/featuretests/profiler/${target_id}_copy.hsaco"
+#        DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/tests"
+#        COMPONENT tests)
+
 endforeach(target_id)
 add_custom_target(hsaco_targets DEPENDS ${HSACO_TARGET_LIST})
 
@@ -142,7 +151,7 @@ add_custom_target(hsaco_targets DEPENDS ${HSACO_TARGET_LIST})
  add_dependencies(multiqueue_testapp hsaco_targets)
  add_dependencies(tests multiqueue_testapp )
  set_target_properties(multiqueue_testapp PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/tests/featuretests/profiler/apps")
- install(TARGETS multiqueue_testapp RUNTIME DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/tests COMPONENT tests)
+ install(TARGETS multiqueue_testapp RUNTIME DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/tests/featuretests/profiler/apps COMPONENT tests)
 
 # add_executable(profiler_multiqueue_test discretetests/binary/multiqueue_test.cpp utils/csv_parser.cpp  utils/test_utils.cpp)
 # target_include_directories(profiler_multiqueue_test PRIVATE ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/tests/featuretests/profiler)
@@ -170,10 +179,15 @@ target_link_libraries(runFeatureTests PRIVATE  ${ROCPROFILER_TARGET} ${ROCPROFIL
                                               GTest::gtest GTest::gtest_main 
                                               Threads::Threads dl stdc++fs amd_comgr)
 add_dependencies(tests runFeatureTests)
-
+install(TARGETS runFeatureTests RUNTIME DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/tests COMPONENT tests)
 add_test(AllTests runFeatureTests)
 
 # Copy scripts, input files to samples folder
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/apps/goldentraces/basic_metrics.txt ${PROJECT_BINARY_DIR}/tests/featuretests/profiler/apps COPYONLY)
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/apps/goldentraces/input.txt ${PROJECT_BINARY_DIR}/tests/featuretests/profiler/apps COPYONLY)
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/apps/mpi_run.sh ${PROJECT_BINARY_DIR}/tests/featuretests/profiler/apps/ COPYONLY)
+
+install(
+  DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/apps/goldentraces/
+  DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/tests/featuretests/profiler/apps/goldentraces
+  COMPONENT tests)
