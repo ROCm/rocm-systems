@@ -100,6 +100,11 @@ void TestVoltRead::Run(void) {
   rsmi_voltage_type_t type = RSMI_VOLT_TYPE_VDDGFX;
 
   for (uint32_t i = 0; i < num_monitor_devs(); ++i) {
+    IF_VERB(STANDARD) {
+      if (i != 0) {
+        std::cout << "\n" << std::endl;
+      }
+    }
     PrintDeviceHeader(i);
 
     auto print_volt_metric = [&](rsmi_voltage_metric_t met,
@@ -111,12 +116,12 @@ void TestVoltRead::Run(void) {
           IF_VERB(STANDARD) {
             std::cout << "\t**" << label << ": " <<
                                "Not supported on this machine" << std::endl;
+          }
 
             // Verify api support checking functionality is working
             err = rsmi_dev_volt_metric_get(i, type, met, nullptr);
             ASSERT_EQ(err, RSMI_STATUS_NOT_SUPPORTED);
             return;
-          }
         } else {
           CHK_ERR_ASRT(err)
         }
@@ -144,8 +149,8 @@ void TestVoltRead::Run(void) {
       print_volt_metric(RSMI_VOLT_MIN_CRIT,
                                 "Voltage critical min value");
       print_volt_metric(RSMI_VOLT_AVERAGE, "Voltage critical max value");
-      print_volt_metric(RSMI_VOLT_LOWEST, "Historical minimum temperature");
-      print_volt_metric(RSMI_VOLT_HIGHEST, "Historical maximum temperature");
+      print_volt_metric(RSMI_VOLT_LOWEST, "Historical minimum voltage");
+      print_volt_metric(RSMI_VOLT_HIGHEST, "Historical maximum voltage");
     }
   }
 }
