@@ -81,10 +81,9 @@ FLD_DESC_ENT(RDC_FI_ECC_UMC_DED,         "UMC Double Error Detection",          
 // This doesn't map to rocprofiler counters directly
 // See counter_map in rdc/include/rdc_libs/rdc_modules/rdc_rocp/RdcRocpBase.h
 // See metrics.xml in rocmtools
-// TODO: uncomment rest of the fields when implemented
-FLD_DESC_ENT(RDC_FI_PROF_ELAPSED_CYCLES, "Number of Elapsed Cycles over all SMs",      "PROF_ELAPSED_COUNT",  false)
-FLD_DESC_ENT(RDC_FI_PROF_ACTIVE_WAVES,   "Number of Active Waves",                     "PROF_ACTIVE_WAVES",   false)
-FLD_DESC_ENT(RDC_FI_PROF_ACTIVE_CYCLES,  "Number of Active Cycles",                    "PROF_ACTIVE_CYCLES",  false)
+//FLD_DESC_ENT(RDC_FI_PROF_ELAPSED_CYCLES, "Number of Elapsed Cycles over all SMs",      "PROF_ELAPSED_COUNT",  false)
+//FLD_DESC_ENT(RDC_FI_PROF_ACTIVE_WAVES,   "Number of Active Waves",                     "PROF_ACTIVE_WAVES",   false)
+//FLD_DESC_ENT(RDC_FI_PROF_ACTIVE_CYCLES,  "Number of Active Cycles",                    "PROF_ACTIVE_CYCLES",  false)
 //FLD_DESC_ENT(RDC_FI_PROF_CU_OCCUPANCY,   "Active Waves / maximum Active Waves per CU", "PROF_CU_OCCUPANCY",   false)
 //FLD_DESC_ENT(RDC_FI_PROF_CU_UTILIZATION, "Active Cycles / total Elapsed Cycles",       "PROF_CU_UTILIZATION", false)
 //FLD_DESC_ENT(RDC_FI_PROF_FETCH_SIZE,     "kb fetched from video memory",               "PROF_FETCH_SIZE",     false)

@@ -94,14 +94,10 @@ rdc_status_t RdcTelemetryModule::rdc_telemetry_fields_unwatch(
 
 RdcTelemetryModule::RdcTelemetryModule(
     const RdcSmiLibPtr& smi_lib,
-    const RdcRasLibPtr& ras_module,
-    const RdcRocpLibPtr& rocp_module) {
+    const RdcRasLibPtr& ras_module) {
     telemetry_modules_.push_back(smi_lib);
     if (ras_module) {
        telemetry_modules_.push_back(ras_module);
-    }
-    if (rocp_module) {
-       telemetry_modules_.push_back(rocp_module);
     }
 
     auto ite = telemetry_modules_.begin();

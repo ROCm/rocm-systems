@@ -23,7 +23,6 @@ RDC can run on AMD ROCm supported platforms, please refer to the **List of Suppo
     Latex (pdfTeX 3.14159265-2.6-1.40.16)   ## required to build the latest documentation
     gRPC and protoc                         ## required for communication
     libcap-dev                              ## required to manage the privileges.
-    rocmtools                               ## required for profiler metrics
 
     AMD ROCm platform (https://github.com/RadeonOpenCompute/ROCm)
         * It is recommended to install the complete AMD ROCm platform.
@@ -31,8 +30,6 @@ RDC can run on AMD ROCm supported platforms, please refer to the **List of Suppo
         * At the minimum, these two components are required
             (i)  AMD ROCm SMI Library (https://github.com/RadeonOpenCompute/rocm_smi_lib)
             (ii) AMD ROCk Kernel driver (https://github.com/RadeonOpenCompute/ROCK-Kernel-Driver)
-        * For profiler metrics, this component is required:
-            (i)  AMD ROCm Tools (https://github.com/ROCm-Developer-Tools/rocmtools)
 
 ## Building gRPC and protoc
 **NOTE:** gRPC and protoc compiler must be built when building RDC from source as pre-built packages are not available. When installing RDC from a package, gRPC and protoc will be installed from the package.
@@ -157,10 +154,6 @@ cd /opt/rocm/rdc/bin
 ./rdci dmon -u --list-all                   ## list all GPU counters
 ./rdci dmon -u -i 0 -c 1 -e 100             ## monitor field 100 on gpu 0 for count of 1
 ./rdci dmon -u -i 0 -c 1 -e 1,2             ## monitor fields 1,2 on gpu 0 for count of 1
-# below requires rocmtools to be installed
-./rdci dmon -u -i 0 -c 5 -e 700             ## monitor field 700 on gpu 0 for count of 5
-# below is only likely to work on MI series GPUs
-./rdci dmon -u -i 0 -c 5 -e 700,701,702     ## monitor fields 700,701,702
 ```
 
 ## Troubleshooting rdcd
@@ -181,13 +174,3 @@ RDC_LOG=DEBUG /opt/rocm/rdc/bin/rdcd
 RDC_LOG=DEBUG also works on rdci
 
 ERROR, INFO, DEBUG logging levels are supported
-
-- Reading `RDC_FI_PROF_*` crashes rdcd
-- All `RDC_FI_PROF_*` metrics return N/A
-
-    0. ROCMTools support is in beta.
-        Reading registers beyond 700-702 range is not guaranteed to work.
-    1. Does your GPU support selected fields?  
-        Field 700 (`RDC_FI_PROF_ELAPSED_CYCLES`) is supposed to be accessible on most GPUs.  
-        Others are mostly intended for MI series.
-    2. Is rocmtools installed? Can you find `librocmtools.so`?

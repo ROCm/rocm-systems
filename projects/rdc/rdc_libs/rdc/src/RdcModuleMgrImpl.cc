@@ -23,7 +23,6 @@ THE SOFTWARE.
 
 #include "rdc_lib/impl/RdcDiagnosticModule.h"
 #include "rdc_lib/impl/RdcRasLib.h"
-#include "rdc_lib/impl/RdcRocpLib.h"
 #include "rdc_lib/impl/RdcRocrLib.h"
 #include "rdc_lib/impl/RdcTelemetryModule.h"
 
@@ -45,13 +44,9 @@ RdcTelemetryPtr RdcModuleMgrImpl::get_telemetry_module() {
         ras_lib_.reset(new RdcRasLib("librdc_ras.so"));
     }
 
-    if (!rocp_lib_) {
-        rocp_lib_.reset(new RdcRocpLib("librdc_rocp.so"));
-    }
-
     if (!rdc_telemetry_module_) {
         rdc_telemetry_module_.reset(
-            new RdcTelemetryModule(smi_lib_, ras_lib_, rocp_lib_));
+            new RdcTelemetryModule(smi_lib_, ras_lib_));
     }
 
     return rdc_telemetry_module_;

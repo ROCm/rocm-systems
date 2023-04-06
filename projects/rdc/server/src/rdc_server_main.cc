@@ -696,6 +696,15 @@ int main(int argc, char** argv) {
 
   rdc_server.Run();
 
+  thr_ret = pthread_cancel(sig_listen_thread);
+
+  // don't fail if it doesn't succeed
+  if (thr_ret) {
+    std::cerr <<
+    "Failed to terminate ProcessSignalLoop. pthread_cancel() returned " <<
+                                                                      thr_ret;
+  }
+
   if (sShutDownServer) {
     std::cout <<  "RDC server successfully shut down." << std::endl;
     return 0;
