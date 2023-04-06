@@ -21,6 +21,7 @@ from multiprocessing import Process, Manager
 import numpy as np
 from copy import deepcopy
 from http import HTTPStatus
+from io import BytesIO
 
 class Readable:
     def __init__(self, jsonstring) -> None:
@@ -41,6 +42,8 @@ class Readable:
     def __len__(self):
         return len(self.jsonstr)
 
+MAX_STITCHED_TOKENS = 3000000
+MAX_FAILED_STITCHES = 256
 STACK_SIZE_LIMIT = 64
 
 SMEM = 1
@@ -114,14 +117,12 @@ class RegisterWatchList:
             self.registers[reg].append(deepcopy(self.labels[label_dest]))
 
     def swappc(self, line, line_num):
-        #print('swappc pc:', line)
         tokens = self.tokenize(line)
         dst = tokens[1]
         src = tokens[2]
-        #print('swap to', self.registers[self.range(src)[0]])
-        self.registers[self.range(dst)[0]].append(line_num+1)
         popped = self.registers[self.range(src)[0]][-1]
         self.registers[self.range(src)[0]] = self.registers[self.range(src)[0]][:-1]
+        self.registers[self.range(dst)[0]].append(line_num+1)
         return popped
 
     def setpc(self, line):
@@ -221,14 +222,13 @@ def stitch(insts, raw_code, jumps):
     watchlist = RegisterWatchList(labels=labels)
 
     num_failed_stitches = 0
-    MAX_FAILED_STITCHES = 128
     loops = 0
     maxline = 0
 
     while i < N:
         #print('L', line)
         loops += 1
-        if line >= len(code) or loops > 100000 or num_failed_stitches >= MAX_FAILED_STITCHES:
+        if line >= len(code) or loops > MAX_STITCHED_TOKENS or num_failed_stitches > MAX_FAILED_STITCHES:
             break
 
         maxline = max(reverse_map[line], maxline)
@@ -442,7 +442,6 @@ def extract_waves(waves):
     return result
 
 
-
 def extract_data(df, se_number, code, jumps):
     if len(df['id']) == 0 or len(df['instructions']) == 0 or len(df['timeline']) == 0:
         return None
@@ -458,6 +457,7 @@ def extract_data(df, se_number, code, jumps):
     for wave_id in df['id']:
         if non_stitched[df['simd'][wave_id]][df['wave_slot'][wave_id]] == 0:
             continue
+        print(f"Parsing :{se_number}-{df['simd'][wave_id]}-{df['wave_slot'][wave_id]}")
         insts, timeline = [], []
         if len(df['instructions'][wave_id]) == 0 or len(df['timeline'][wave_id]) == 0:
             continue
@@ -475,8 +475,8 @@ def extract_data(df, se_number, code, jumps):
         maxgrade[df['simd'][wave_id]][df['wave_slot'][wave_id]] = srate
         non_stitched[df['simd'][wave_id]][df['wave_slot'][wave_id]] = len(insts) - len(stitched)
         flight_count.append(count)
-
-        wave_entry = {
+        
+        wave_entry = {  
             "id": int(df['id'][wave_id]),
             "simd": int(df['simd'][wave_id]),
             "slot": int(df['wave_slot'][wave_id]),
@@ -524,24 +524,28 @@ class NoCacheHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         global PICTURE_CALLBACK
         if 'timeline.png?' in self.path:
             selections = [int(s)!=0 for s in self.path.split('timeline.png?')[1]]
-            counters_json, imagebytes = PICTURE_CALLBACK(selections[1:], selections[0])
+            counters_json, imagebytes, _, _ = PICTURE_CALLBACK(selections[1:], selections[0])
             JSON_GLOBAL_DICTIONARY['counters.json'] = counters_json
             JSON_GLOBAL_DICTIONARY[self.path.split('/')[-1]] = imagebytes
-        if '.json' in self.path or 'timeline.png' in self.path:
+        
+        if '.json' in self.path or 'timeline.png' in self.path or 'wstates' in self.path:
             try:
                 response_file = JSON_GLOBAL_DICTIONARY[self.path.split('/')[-1]]
                 #print(response_file)
             except:
                 print('Invalid json request:', self.path)
                 self.send_error(HTTPStatus.NOT_FOUND, "File not found")
-                #print(JSON_GLOBAL_DICTIONARY.keys())
+                print(JSON_GLOBAL_DICTIONARY.keys())
                 return
             self.send_response(HTTPStatus.OK)
-            if 'timeline.png' in self.path:
+            self.send_header("Content-Length", str(len(response_file)))
+            if '.b' in self.path:
+                self.send_header("Content-type", 'application/octet-stream')
+                response_file = BytesIO(response_file)
+            elif 'timeline.png' in self.path:
                 self.send_header("Content-type", 'image/png')
             else:
                 self.send_header("Content-type", 'application/json')
-            self.send_header("Content-Length", str(len(response_file)))
             self.send_header("Last-Modified", self.date_time_string(time.time()))
             self.end_headers()
             self.copyfile(response_file, self.wfile)
@@ -615,16 +619,20 @@ def assign_ports(ports):
 
 def call_picture_callback(return_dict):
     global PICTURE_CALLBACK
-    response, imagebytes = PICTURE_CALLBACK()
-    return_dict[0] = response
-    return_dict[1] = imagebytes
+    response, imagebytes, wstates, counter_events = PICTURE_CALLBACK()
+    return_dict['counters.json'] = response
+    return_dict['timeline.png'] = imagebytes
+    for n, m in enumerate(wstates):
+        return_dict['wstates'+str(n)+'.json'] = Readable({"data": [int(n) for n in list(np.asarray(m))]})
+    for n, e in enumerate(counter_events):
+        return_dict['se'+str(n)+'_perfcounter.json'] = Readable({"data": [v.toTuple() for v in e]})
 
-
-def view_trace(args, wait, code, jumps, dbnames, att_filenames, bReturnLoc, pic_callback):
+def view_trace(args, wait, code, jumps, dbnames, att_filenames, bReturnLoc, pic_callback, OCCUPANCY):
     global PICTURE_CALLBACK
     PICTURE_CALLBACK = pic_callback
     manager = Manager()
     return_dict = manager.dict()
+    JSON_GLOBAL_DICTIONARY['occupancy.json'] = Readable({str(k): OCCUPANCY[k] for k in range(len(OCCUPANCY))})
 
     pic_thread = Process(target=call_picture_callback, args=(return_dict,))
     pic_thread.start()
@@ -678,8 +686,8 @@ def view_trace(args, wait, code, jumps, dbnames, att_filenames, bReturnLoc, pic_
             PROCS = [Process(target=run_server), Process(target=run_websocket)]
             if pic_thread is not None:
                 pic_thread.join()
-                JSON_GLOBAL_DICTIONARY['counters.json'] = return_dict[0]
-                JSON_GLOBAL_DICTIONARY['timeline.png'] = return_dict[1]
+                for k, v in return_dict.items():
+                    JSON_GLOBAL_DICTIONARY[k] = v
 
             for p in PROCS:
                 p.start()

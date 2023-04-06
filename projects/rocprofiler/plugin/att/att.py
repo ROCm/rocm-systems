@@ -122,7 +122,9 @@ class ReturnInfo(ctypes.Structure):
     _fields_ = [('num_waves', ctypes.c_uint64),
                 ('wavedata', POINTER(Wave)),
                 ('num_events', ctypes.c_uint64),
-                ('perfevents', POINTER(PerfEvent))]
+                ('perfevents', POINTER(PerfEvent)),
+                ('occupancy', POINTER(ctypes.c_uint64)),
+                ('num_occupancy', ctypes.c_uint64)]
 
 rocprofv2_att_lib = os.getenv('ROCPROFV2_ATT_LIB_PATH')
 try: # For build dir
@@ -178,12 +180,20 @@ def getWaves(filename, target_cu, verbose):
 
     waves = [info.wavedata[k] for k in range(info.num_waves)]
     events = [deepcopy(info.perfevents[k]) for k in range(info.num_events)]
+    occupancy = [int(info.occupancy[k]) for k in range(int(info.num_occupancy))]
+
+    '''occupancy = np.asarray([f for f in occupancy if (f&0xFF) == 3])
+    print(occupancy.size, occupancy.dtype)
+    token_time = occupancy >> 16
+    value = (occupancy >> 8) & 0xFF
+    plt.plot(token_time, value); plt.show()
+    quit()'''
 
     for wave in waves:
         wave.timeline = deepcopy(wave.timeline_string.decode("utf-8"))
         wave.instructions = deepcopy(wave.instructions_string.decode("utf-8"))
 
-    return waves, events
+    return waves, events, occupancy
 
 
 def persist(trace_file, SIMD):
@@ -307,6 +317,7 @@ def get_delta_time(events):
         return 1
 
 def draw_wave_metrics(selections, normalize):
+    global TIMELINES
     global EVENTS
     global EVENT_NAMES
 
@@ -317,6 +328,9 @@ def draw_wave_metrics(selections, normalize):
     delta_step = 8
     quad_delta_time = max(delta_step,int(0.5+np.min([get_delta_time(events) for events in EVENTS])))
     maxtime = np.max([np.max([e.time for e in events]) for events in EVENTS])/quad_delta_time+1
+    event_timeline = np.zeros((16, maxtime), dtype=np.int32)
+    print('Delta:', quad_delta_time)
+    print('Max_cycles:', maxtime)
 
     if maxtime*delta_step >= COUNTERS_MAX_CAPTURES:
         delta_step = 1
@@ -362,7 +376,7 @@ def draw_wave_metrics(selections, normalize):
 
     figure_bytes = BytesIO()
     plt.savefig(figure_bytes, dpi=150)
-    return response, FileBytesIO(figure_bytes)
+    return response, FileBytesIO(figure_bytes), TIMELINES, EVENTS
 
 
 def draw_wave_states(selections, normalize):
@@ -403,7 +417,7 @@ def draw_wave_states(selections, normalize):
     figure_bytes = BytesIO()
     plt.savefig(figure_bytes, dpi=150)
     response = Readable({"counters": STATES})
-    return response, FileBytesIO(figure_bytes)
+    return response, FileBytesIO(figure_bytes), TIMELINES, []
 
 
 def GeneratePIC(selections=[True for k in range(16)], normalize=True, bScounter=True):
@@ -491,16 +505,18 @@ if __name__ == "__main__":
     global EVENTS
     TIMELINES = [np.zeros(int(1E4),dtype=np.int32) for k in range(5)]
     EVENTS = []
+    OCCUPANCY = []
 
     analysed_filenames = []
     for name in filenames:
-        SIMD, perfevents = getWaves(name, args.target_cu, False)
+        SIMD, perfevents, occupancy = getWaves(name, args.target_cu, False)
         if len(SIMD) == 0:
             print("Error parsing ", name)
             continue
         analysed_filenames.append(name)
         EVENTS.append(perfevents)
         DBFILES.append( persist(name, SIMD) )
+        OCCUPANCY.append( occupancy )
         for wave in SIMD:
             time_acc = 0
             tuples1 = wave.timeline.split('(')
@@ -521,7 +537,7 @@ if __name__ == "__main__":
                 time_acc += state[1]
 
     if args.genasm and len(args.genasm) > 0:
-        flight_count = view_trace(args, 0, code, jumps, DBFILES, analysed_filenames, True, None)
+        flight_count = view_trace(args, 0, code, jumps, DBFILES, analysed_filenames, True, None, OCCUPANCY)
 
         with open(args.assembly_code, 'r') as file:
             lines = file.readlines()
@@ -533,4 +549,4 @@ if __name__ == "__main__":
             for k in keys:
                 file.write(assembly_code[k]+'\n')
     else:
-        view_trace(args, 0, code, jumps, DBFILES, analysed_filenames, False, GeneratePIC)
+        view_trace(args, 0, code, jumps, DBFILES, analysed_filenames, False, GeneratePIC, OCCUPANCY)
