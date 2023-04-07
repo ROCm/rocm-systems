@@ -2351,8 +2351,13 @@ rsmi_dev_volt_metric_get(uint32_t dv_ind, rsmi_voltage_type_t sensor_type,
 
   // getVoltSensorIndex will throw an out of range exception if sensor_type is
   // not found
-  uint32_t sensor_index =
-     m->getVoltSensorIndex(sensor_type);
+  uint32_t sensor_index;
+  try {
+    sensor_index =
+      m->getVoltSensorIndex(sensor_type);
+  } catch (...) {
+    return RSMI_STATUS_NOT_SUPPORTED;
+  }
   CHK_API_SUPPORT_ONLY(voltage, metric, sensor_index)
 
   ret = get_dev_mon_value(mon_type, dv_ind, sensor_index, voltage);

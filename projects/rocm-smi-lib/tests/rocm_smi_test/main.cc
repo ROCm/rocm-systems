@@ -270,16 +270,16 @@ TEST(rsmitstReadOnly, TestMutualExclusion) {
   tst.Run();
   RunCustomTestEpilog(&tst);
 }
-TEST(rsmitstReadWrite, TestEvtNotifReadWrite) {
-  TestEvtNotifReadWrite tst;
-  RunGenericTest(&tst);
-}
 TEST(rsmitstReadWrite, TestComputePartitionReadWrite) {
   TestComputePartitionReadWrite tst;
   RunGenericTest(&tst);
 }
 TEST(rsmitstReadWrite, TestNPSModeReadWrite) {
   TestNPSModeReadWrite tst;
+  RunGenericTest(&tst);
+}
+TEST(rsmitstReadWrite, TestEvtNotifReadWrite) {
+  TestEvtNotifReadWrite tst;
   RunGenericTest(&tst);
 }
 TEST(rsmitstReadOnly, Test) {

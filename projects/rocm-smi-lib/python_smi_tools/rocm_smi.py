@@ -1095,6 +1095,19 @@ def setClocks(deviceList, clktype, clk):
                 RETCODE = 1
                 return
         if clktype != 'pcie':
+            # Validate frequency bitmask
+            freq = rsmi_frequencies_t()
+            ret = rocmsmi.rsmi_dev_gpu_clk_freq_get(device, rsmi_clk_names_dict[clktype], byref(freq))
+            if rsmi_ret_ok(ret, device, clktype) == False:
+                RETCODE = 1
+                return
+            # The freq_bitmask should be less than 2^(freqs.num_supported)
+            # For example, num_supported == 3,  the max bitmask is 0111
+            if freq_bitmask >= (1 << freq.num_supported):
+                printErrLog(device, 'Invalid clock frequency %s' % hex(freq_bitmask))
+                RETCODE = 1
+                return
+
             ret = rocmsmi.rsmi_dev_gpu_clk_freq_set(device, rsmi_clk_names_dict[clktype], freq_bitmask)
             if rsmi_ret_ok(ret, device):
                 printLog(device, 'Successfully set %s bitmask to' % (clktype), hex(freq_bitmask))
@@ -1102,6 +1115,19 @@ def setClocks(deviceList, clktype, clk):
                 printErrLog(device, 'Unable to set %s bitmask to: %s' % (clktype, hex(freq_bitmask)))
                 RETCODE = 1
         else:
+            # Validate the bandwidth bitmask
+            bw = rsmi_pcie_bandwidth_t()
+            ret = rocmsmi.rsmi_dev_pci_bandwidth_get(device, byref(bw))
+            if rsmi_ret_ok(ret, device, 'PCIe') == False:
+                RETCODE = 1
+                return
+            # The freq_bitmask should be less than 2^(bw.transfer_rate.num_supported)
+            # For example, num_supported == 3,  the max bitmask is 0111
+            if freq_bitmask >= (1 << bw.transfer_rate.num_supported):
+                printErrLog(device, 'Invalid PCIe frequency %s' % hex(freq_bitmask))
+                RETCODE = 1
+                return
+
             ret = rocmsmi.rsmi_dev_pci_bandwidth_set(device, freq_bitmask)
             if rsmi_ret_ok(ret, device):
                 printLog(device, 'Successfully set %s to level bitmask' % (clktype), hex(freq_bitmask))

@@ -93,9 +93,25 @@
     } \
 }
 
+#define CHK_FILE_PERMISSIONS_AND_NOT_SUPPORTED_OR_UNIMPLEMENTED(RET) { \
+    if ((RET) == RSMI_STATUS_PERMISSION) { \
+      if (isFileWritable(RET)) { \
+        CHK_RSMI_RET(RET) \
+      } \
+    } else if ((RET) == RSMI_STATUS_NOT_SUPPORTED) { \
+      std::cout << "Not Supported." \
+      << std::endl; \
+    } else if ((RET) == RSMI_STATUS_NOT_YET_IMPLEMENTED) { \
+      std::cout << "Not Yet Implemented." \
+      << std::endl; \
+    } else { \
+      CHK_RSMI_RET(RET) \
+    } \
+}
+
 #define CHK_RSMI_NOT_SUPPORTED_RET(RET) { \
     if ((RET) == RSMI_STATUS_NOT_SUPPORTED) { \
-      std::cout << "This function is not supported in the current environment." \
+      std::cout << "Not Supported." \
       << std::endl; \
     } else { \
       CHK_RSMI_RET(RET) \
@@ -104,7 +120,7 @@
 
 #define CHK_RSMI_NOT_SUPPORTED_OR_UNEXPECTED_DATA_RET(RET) { \
     if ((RET) == RSMI_STATUS_NOT_SUPPORTED) { \
-      std::cout << "This function is not supported in the current environment." \
+      std::cout << "Not Supported." \
       << std::endl; \
     } else if ((RET) == RSMI_STATUS_UNEXPECTED_DATA) { \
       std::cout << "[ERROR] RSMI_STATUS_UNEXPECTED_DATA retrieved." \
@@ -116,7 +132,7 @@
 
 #define CHK_RSMI_NOT_SUPPORTED_OR_SETTING_UNAVAILABLE_RET(RET) {\
     if ((RET) == RSMI_STATUS_NOT_SUPPORTED) { \
-      std::cout << "This function is not supported in the current environment."\
+      std::cout << "Not Supported."\
       << std::endl; \
     } else if ((RET) == RSMI_STATUS_SETTING_UNAVAILABLE) { \
       std::cout << "[WARN] RSMI_STATUS_SETTING_UNAVAILABLE retrieved." \
@@ -128,7 +144,7 @@
 
 #define CHK_NOT_SUPPORTED_OR_UNEXPECTED_DATA_OR_INSUFFICIENT_SIZE_RET(RET) { \
     if ((RET) == RSMI_STATUS_NOT_SUPPORTED) { \
-      std::cout << "This function is not supported in the current environment." \
+      std::cout << "Not Supported." \
       << std::endl; \
     } else if ((RET) == RSMI_STATUS_UNEXPECTED_DATA) { \
       std::cout << "[WARN] RSMI_STATUS_UNEXPECTED_DATA retrieved." \
@@ -272,7 +288,13 @@ static rsmi_status_t test_power_profile(uint32_t dv_ind) {
 
   print_test_header("Power Profile", dv_ind);
 
+  std::cout << "The available power profiles are: ";
   ret = rsmi_dev_power_profile_presets_get(dv_ind, 0, &status);
+  CHK_RSMI_NOT_SUPPORTED_RET(ret)
+  if (ret != RSMI_STATUS_SUCCESS) {
+    std::cout << "***Skipping Power Profile test." << std::endl;
+    return RSMI_STATUS_SUCCESS;
+  }
   CHK_RSMI_RET(ret)
 
   std::cout << "The available power profiles are:" << std::endl;
@@ -393,13 +415,13 @@ static rsmi_status_t test_set_overdrive(uint32_t dv_ind) {
   CHK_RSMI_RET(ret)
   ret = rsmi_dev_overdrive_level_get(dv_ind, &val);
   CHK_RSMI_RET(ret)
-  std::cout << "\t**New OverDrive Level:" << val << std::endl;
+  std::cout << "\t**New OverDrive Level:" << std::dec << val << std::endl;
   std::cout << "Reset Overdrive level to 0%..." << std::endl;
   ret = rsmi_dev_overdrive_level_set_v1(dv_ind, 0);
   CHK_RSMI_RET(ret)
   ret = rsmi_dev_overdrive_level_get(dv_ind, &val);
   CHK_RSMI_RET(ret)
-  std::cout << "\t**New OverDrive Level:" << val << std::endl;
+  std::cout << "\t**New OverDrive Level:" << std::dec << val << std::endl;
 
   return ret;
 }
@@ -412,9 +434,15 @@ static rsmi_status_t test_set_fan_speed(uint32_t dv_ind) {
 
   print_test_header("Fan Speed Control", dv_ind);
 
+  std::cout << "Original fan speed: ";
   ret = rsmi_dev_fan_speed_get(dv_ind, 0, &orig_speed);
-  CHK_RSMI_RET(ret)
-  std::cout << "Original fan speed: " << orig_speed << std::endl;
+  if (ret == RSMI_STATUS_SUCCESS) {
+    std::cout << orig_speed << std::endl;
+  } else {
+    CHK_RSMI_NOT_SUPPORTED_RET(ret)
+    std::cout << "***Skipping Fan Speed Control test." << std::endl;
+    return RSMI_STATUS_SUCCESS;
+  }
 
   if (orig_speed == 0) {
     std::cout << "***System fan speed value is 0. Skip fan test." << std::endl;
@@ -474,6 +502,11 @@ static rsmi_status_t test_set_perf_level(uint32_t dv_ind) {
   std::cout << "Set Performance Level to " << (uint32_t)pfl << " ..." <<
                                                                    std::endl;
   ret = rsmi_dev_perf_level_set_v1(dv_ind, pfl);
+  if (ret != RSMI_STATUS_SUCCESS) {
+    CHK_RSMI_NOT_SUPPORTED_RET(ret)
+    std::cout << "***Skipping Performance Level Control test." << std::endl;
+    return RSMI_STATUS_SUCCESS;
+  }
   CHK_RSMI_RET(ret)
   ret = rsmi_dev_perf_level_get(dv_ind, &pfl);
   CHK_RSMI_RET(ret)
@@ -505,7 +538,7 @@ static rsmi_status_t test_set_freq(uint32_t dv_ind) {
     rsmi_clk = (rsmi_clk_type)clk;
 
     ret = rsmi_dev_gpu_clk_freq_get(dv_ind, rsmi_clk, &f);
-    CHK_AND_PRINT_RSMI_ERR_RET(ret)
+    CHK_FILE_PERMISSIONS_AND_NOT_SUPPORTED_OR_UNIMPLEMENTED(ret)
 
     std::cout << "Initial frequency for clock" << rsmi_clk << " is " <<
                                                       f.current << std::endl;
@@ -524,15 +557,15 @@ static rsmi_status_t test_set_freq(uint32_t dv_ind) {
         " to 0b" << freq_bm_str << " ..." << std::endl;
 
     ret = rsmi_dev_gpu_clk_freq_set(dv_ind, rsmi_clk, freq_bitmask);
-    CHK_FILE_PERMISSIONS(ret)
+    CHK_FILE_PERMISSIONS_AND_NOT_SUPPORTED_OR_UNIMPLEMENTED(ret)
 
     ret = rsmi_dev_gpu_clk_freq_get(dv_ind, rsmi_clk, &f);
-    CHK_FILE_PERMISSIONS(ret)
+    CHK_FILE_PERMISSIONS_AND_NOT_SUPPORTED_OR_UNIMPLEMENTED(ret)
 
     std::cout << "Frequency is now index " << f.current << std::endl;
     std::cout << "Resetting mask to all frequencies." << std::endl;
     ret = rsmi_dev_gpu_clk_freq_set(dv_ind, rsmi_clk, 0xFFFFFFFF);
-    CHK_FILE_PERMISSIONS(ret)
+    CHK_FILE_PERMISSIONS_AND_NOT_SUPPORTED_OR_UNIMPLEMENTED(ret)
 
     ret = rsmi_dev_perf_level_set_v1(dv_ind, RSMI_DEV_PERF_LEVEL_AUTO);
     CHK_FILE_PERMISSIONS(ret)
@@ -684,30 +717,38 @@ int main() {
   for (uint32_t i = 0; i < num_monitor_devs; ++i) {
     ret = rsmi_dev_id_get(i, &val_ui16);
     CHK_RSMI_RET_I(ret)
-    std::cout << "\t**Device ID: 0x" << std::hex << val_ui64 << std::endl;
+    std::cout << "\t**Device ID: 0x" << std::hex << val_ui16 << std::endl;
 
     char current_compute_partition[256];
     current_compute_partition[0] = '\0';
     ret = rsmi_dev_compute_partition_get(i, current_compute_partition, 256);
-    CHK_RSMI_NOT_SUPPORTED_OR_UNEXPECTED_DATA_RET(ret)
     std::cout << "\t**Current Compute Partition: "
               << (((current_compute_partition == nullptr)
                   || ((current_compute_partition != nullptr)
                   && (current_compute_partition[0] == '\0')))
-                  ? "UNKNOWN" : current_compute_partition)
-              << std::endl;
+                  ? "UNKNOWN" : current_compute_partition);
+    if (ret != RSMI_STATUS_SUCCESS) {
+      std::cout << ", RSMI_STATUS = ";
+    } else {
+      std::cout << std::endl;
+    }
+    CHK_RSMI_NOT_SUPPORTED_OR_UNEXPECTED_DATA_RET(ret)
 
     uint32_t len = 5;
     char nps_mode[len];
     nps_mode[0] = '\0';
     ret = rsmi_dev_nps_mode_get(i, nps_mode, len);
-    CHK_NOT_SUPPORTED_OR_UNEXPECTED_DATA_OR_INSUFFICIENT_SIZE_RET(ret)
     std::cout << "\t**NPS Mode: "
               << (((nps_mode == nullptr)
                   || ((nps_mode != nullptr)
                   && (nps_mode[0] == '\0')))
-                  ? "UNKNOWN" : nps_mode)
-              << std::endl;
+                  ? "UNKNOWN" : nps_mode);
+    if (ret != RSMI_STATUS_SUCCESS) {
+      std::cout << ", RSMI_STATUS = ";
+    } else {
+      std::cout << std::endl;
+    }
+    CHK_NOT_SUPPORTED_OR_UNEXPECTED_DATA_OR_INSUFFICIENT_SIZE_RET(ret)
 
     ret = rsmi_dev_gpu_metrics_info_get(i, &p);
     CHK_AND_PRINT_RSMI_ERR_RET(ret)
@@ -733,47 +774,66 @@ int main() {
     std::cout << f.num_supported << std::endl;
     print_frequencies(&f);
 
+    std::cout << "\t**Monitor name: ";
     char name[128];
     ret = rsmi_dev_name_get(i, name, 128);
     CHK_AND_PRINT_RSMI_ERR_RET(ret)
-    std::cout << "\t**Monitor name: " << name << std::endl;
+    std::cout << name << std::endl;
 
+    std::cout << "\t**Temperature: ";
     ret = rsmi_dev_temp_metric_get(i, 0, RSMI_TEMP_CURRENT, &val_i64);
-    CHK_AND_PRINT_RSMI_ERR_RET(ret)
-    std::cout << "\t**Temperature: " << val_i64/1000 << "C" << std::endl;
+    if (ret == RSMI_STATUS_SUCCESS) {
+      std::cout << val_i64/1000 << "C" << std::endl;
+    }
+    CHK_RSMI_NOT_SUPPORTED_RET(ret)
 
+    std::cout << "\t**Voltage: ";
     ret = rsmi_dev_volt_metric_get(i, RSMI_VOLT_TYPE_VDDGFX,
                                                RSMI_VOLT_CURRENT, &val_i64);
-    CHK_AND_PRINT_RSMI_ERR_RET(ret)
-    std::cout << "\t**Voltage: " << val_i64 << "mV" << std::endl;
+    if (ret == RSMI_STATUS_SUCCESS) {
+      std::cout << val_i64 << "mV" << std::endl;
+    }
+    CHK_RSMI_NOT_SUPPORTED_RET(ret)
 
-    ret = rsmi_dev_fan_speed_get(i, 0, &val_i64);
-    CHK_AND_PRINT_RSMI_ERR_RET(ret)
-    ret = rsmi_dev_fan_speed_max_get(i, 0, &val_ui64);
-    CHK_AND_PRINT_RSMI_ERR_RET(ret)
     std::cout << "\t**Current Fan Speed: ";
-    std::cout << val_i64/static_cast<int64_t>(val_ui64)*100;
-    std::cout << "% ("<< val_i64 << "/" << val_ui64 << ")" << std::endl;
+    ret = rsmi_dev_fan_speed_get(i, 0, &val_i64);
+    if (ret == RSMI_STATUS_SUCCESS) {
+      ret = rsmi_dev_fan_speed_max_get(i, 0, &val_ui64);
+      CHK_AND_PRINT_RSMI_ERR_RET(ret)
+      std::cout << (static_cast<float>(val_i64)/val_ui64) * 100;
+      std::cout << "% (" << std::dec << val_i64 << "/"
+                << std::dec << val_ui64 << ")" << std::endl;
+    }
+    CHK_RSMI_NOT_SUPPORTED_RET(ret)
 
+    std::cout << "\t**Current fan RPMs: ";
     ret = rsmi_dev_fan_rpms_get(i, 0, &val_i64);
-    CHK_AND_PRINT_RSMI_ERR_RET(ret)
-    std::cout << "\t**Current fan RPMs: " << val_i64 << std::endl;
+    if (ret == RSMI_STATUS_SUCCESS) {
+      std::cout << std::dec << val_i64 << std::endl;
+    }
+    CHK_RSMI_NOT_SUPPORTED_RET(ret)
 
+    std::cout << "\t**Current Power Cap: ";
     ret = rsmi_dev_power_cap_get(i, 0, &val_ui64);
-    CHK_AND_PRINT_RSMI_ERR_RET(ret)
-    std::cout << "\t**Current Power Cap: " << val_ui64 << "uW" <<std::endl;
+    if (ret == RSMI_STATUS_SUCCESS) {
+      std::cout << std::dec << val_ui64 << "uW" <<std::endl;
+    }
+    CHK_RSMI_NOT_SUPPORTED_RET(ret)
 
+    std::cout << "\t**Power Cap Range: ";
     ret = rsmi_dev_power_cap_range_get(i, 0, &val_ui64, &val2_ui64);
-    CHK_AND_PRINT_RSMI_ERR_RET(ret)
-    std::cout << "\t**Power Cap Range: " << val2_ui64 << " to " <<
-                                               val_ui64 << " uW" << std::endl;
+    if (ret == RSMI_STATUS_SUCCESS) {
+      std::cout << std::dec << val2_ui64 << " to "
+                << std::dec << val_ui64 << " uW" << std::endl;
+    }
+    CHK_RSMI_NOT_SUPPORTED_RET(ret)
 
-    ret = rsmi_dev_power_ave_get(i, 0, &val_ui64);
-    CHK_AND_PRINT_RSMI_ERR_RET(ret)
     std::cout << "\t**Averge Power Usage: ";
-    std::cout << static_cast<float>(val_ui64)/1000 << " W" << std::endl;
     ret = rsmi_dev_power_ave_get(i, 0, &val_ui64);
-    CHK_AND_PRINT_RSMI_ERR_RET(ret)
+    if (ret == RSMI_STATUS_SUCCESS) {
+      std::cout << static_cast<float>(val_ui64)/1000 << " W" << std::endl;
+    }
+    CHK_RSMI_NOT_SUPPORTED_RET(ret)
     std::cout << "\t=======" << std::endl;
   }
 
