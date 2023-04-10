@@ -318,7 +318,7 @@ void AddRecordCounters(rocprofiler_record_profiler_t* record, const pending_sign
   record->counters_count = rocprofiler_record_counters_instances_count_t{counters_vec.size()};
 }
 
-void AddAttRecord(rocprofiler_record_att_tracer_t* record, hsa_agent_t gpu_agent,                  
+void AddAttRecord(rocprofiler_record_att_tracer_t* record, hsa_agent_t gpu_agent,
                    att_pending_signal_t& pending) {
   att_trace_callback_data_t data;
   hsa_ven_amd_aqlprofile_iterate_data(pending.profile, attTraceDataCallback, &data);
@@ -328,7 +328,7 @@ void AddAttRecord(rocprofiler_record_att_tracer_t* record, hsa_agent_t gpu_agent
 
   // Allocate memory for shader_engine_data
   record->shader_engine_data = static_cast<rocprofiler_record_se_att_data_t*>(
-      malloc(data.size() * sizeof(rocprofiler_record_se_att_data_t)));
+      calloc(data.size(), sizeof(rocprofiler_record_se_att_data_t)));
 
   att_trace_callback_data_t::iterator trace_data_it;
 
