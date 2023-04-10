@@ -22,7 +22,7 @@ Panel Config:
           Access Rate:
             value: AVG(((200 * SQ_ACTIVE_INST_LDS) / (GRBM_GUI_ACTIVE * $numCU)))
             tips: 
-          Bandwith (Pct-of-Peak):
+          Bandwidth (Pct-of-Peak):
             value: AVG((((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($L2Banks))
               / (EndNs - BeginNs)) / (($sclk * $numCU) * 0.00128)))
             tips: 
