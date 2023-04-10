@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt
 from io import BytesIO
 
 class FileBytesIO:
-    def __init__(self, iobytes) -> None:
+    def __init__(self, iobytes):
         self.iobytes = iobytes
         self.seek = 0
 
@@ -493,7 +493,7 @@ if __name__ == "__main__":
 
     # Trace Parsing
     if args.trace_file is None:
-        filenames = glob.glob(args.att_kernel.split('_kernel.txt')[0]+'*.att')
+        filenames = glob.glob(args.att_kernel.split('_kernel.txt')[0]+'_*.att')
         assert(len(filenames) > 0)
     else:
         filenames = glob.glob(args.trace_file)

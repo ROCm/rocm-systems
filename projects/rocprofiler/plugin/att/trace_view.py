@@ -24,7 +24,7 @@ from http import HTTPStatus
 from io import BytesIO
 
 class Readable:
-    def __init__(self, jsonstring) -> None:
+    def __init__(self, jsonstring):
         self.jsonstr = json.dumps(jsonstring)
         self.seek = 0
 
@@ -86,9 +86,10 @@ WaveInstCategory = {
 JSON_GLOBAL_DICTIONARY = {}
 
 class RegisterWatchList:
-    def __init__(self, labels) -> None:
+    def __init__(self, labels):
         self.registers = {'v'+str(k): [[] for m in range(64)] for k in range(64)}
-        self.registers = {**self.registers, **{'s'+str(k): [] for k in range(64)}}
+        for k in range(64):
+            self.registers['s'+str(k)] = []
         self.labels = labels
 
     def try_translate(self, tok):
@@ -457,7 +458,6 @@ def extract_data(df, se_number, code, jumps):
     for wave_id in df['id']:
         if non_stitched[df['simd'][wave_id]][df['wave_slot'][wave_id]] == 0:
             continue
-        print(f"Parsing :{se_number}-{df['simd'][wave_id]}-{df['wave_slot'][wave_id]}")
         insts, timeline = [], []
         if len(df['instructions'][wave_id]) == 0 or len(df['timeline'][wave_id]) == 0:
             continue
