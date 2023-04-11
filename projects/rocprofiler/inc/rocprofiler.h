@@ -2021,7 +2021,7 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_create_filter(rocprofiler_sessi
                                                          rocprofiler_filter_data_t data,
                                                          uint64_t data_count,
                                                          rocprofiler_filter_id_t* filter_id,
-                                                         rocprofiler_filter_property_t property = {}) ROCPROFILER_VERSION_2_0;
+                                                         rocprofiler_filter_property_t property) ROCPROFILER_VERSION_2_0;
 
 /**
  * Set Session Filter Buffer
@@ -2225,7 +2225,7 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_create_ready_session(
     rocprofiler_replay_mode_t replay_mode, rocprofiler_filter_kind_t filter_kind,
     rocprofiler_filter_data_t data, uint64_t data_count, size_t buffer_size,
     rocprofiler_buffer_callback_t buffer_callback, rocprofiler_session_id_t* session_id,
-    rocprofiler_filter_property_t property = {}, rocprofiler_sync_callback_t callback = nullptr) ROCPROFILER_VERSION_2_0;
+    rocprofiler_filter_property_t property, rocprofiler_sync_callback_t callback) ROCPROFILER_VERSION_2_0;
 
 // TODO(aelwazir): Multiple sessions activate for different set of filters
 /**
