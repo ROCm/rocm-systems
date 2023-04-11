@@ -235,7 +235,7 @@ def get_roofline(
 
         fp32_fig.write_image(path_to_dir + "/empirRoof_gpu-{}_fp32.pdf".format(dev_id))
         ml_combo_fig.write_image(
-            path_to_dir + "/empirRoof_gpu-{}_fp8_fp16.pdf".format(dev_id)
+            path_to_dir + "/empirRoof_gpu-{}_int8_fp16.pdf".format(dev_id)
         )
         if kernel_names:
             # only save a legend if kernel_names option is toggled
@@ -244,7 +244,7 @@ def get_roofline(
         # Re-save to remove loading MathJax pop up
         fp32_fig.write_image(path_to_dir + "/empirRoof_gpu-{}_fp32.pdf".format(dev_id))
         ml_combo_fig.write_image(
-            path_to_dir + "/empirRoof_gpu-{}_fp8_fp16.pdf".format(dev_id)
+            path_to_dir + "/empirRoof_gpu-{}_int8_fp16.pdf".format(dev_id)
         )
         if kernel_names:
             legend.write_image(path_to_dir + "/kernelName_legend.pdf")
