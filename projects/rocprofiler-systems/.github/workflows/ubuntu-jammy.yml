@@ -7,11 +7,13 @@ on:
     paths-ignore:
       - '*.md'
       - 'source/docs/**'
+      - 'source/python/gui/**'
   pull_request:
     branches: [ main, develop ]
     paths-ignore:
       - '*.md'
       - 'source/docs/**'
+      - 'source/python/gui/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

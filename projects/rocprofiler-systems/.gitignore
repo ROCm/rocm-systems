@@ -34,6 +34,9 @@
 *.out
 *.app
 
+# Python cache files
+*.pyc
+
 /build*
 /.vscode
 /.cache
