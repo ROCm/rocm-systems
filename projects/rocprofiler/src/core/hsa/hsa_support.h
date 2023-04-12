@@ -29,8 +29,10 @@
 
 #include <atomic>
 #include <string>
+#include <unordered_map>
+#include <memory>
 
-#include "hsa_common.h"
+#include "rocprofiler.h"
 #include "src/core/hardware/hsa_info.h"
 
 // HSA EVT data type
@@ -92,15 +94,78 @@ typedef struct {
 
 namespace rocprofiler {
 
-namespace hsa_support {
 
-void Initialize(HsaApiTable* Table);
-hsa_status_t hsa_iterate_agents_cb(hsa_agent_t agent, void* data);
-void Finalize();
+class HSAAgentInfo {
+ private:
+  hsa_agent_t agent_;
+  Agent::DeviceInfo device_info_;
+  hsa_agent_t near_cpu_agent_;
+  hsa_device_type_t type_;
 
-bool IterateCounters(rocprofiler_counters_info_callback_t counters_info_callback);
 
-}  // namespace hsa_support
+ public:
+  HSAAgentInfo(hsa_agent_t agent, hsa_device_type_t type) : agent_(agent), type_(type){};
+  uint64_t getHandle() const;
+  const Agent::DeviceInfo& GetDeviceInfo() const;
+  void SetNearCpuAgent(hsa_agent_t near_cpu_agent);
+  void SetDeviceInfo(Agent::DeviceInfo device_info);
+  hsa_agent_t GetNearCpuAgent() const;
+  hsa_device_type_t GetType() const;
+  hsa_amd_memory_pool_t cpu_pool_;
+  hsa_amd_memory_pool_t kernarg_pool_;
+  hsa_amd_memory_pool_t gpu_pool_;
+};
+
+
+struct queues_deleter {
+  queues_deleter() {};
+  queues_deleter(queues_deleter&) { };
+  void operator() (void * queue) const;
+};
+
+class HSASupport_Singleton {
+ private:
+  HSASupport_Singleton() {};
+ ~HSASupport_Singleton() = delete;
+  CoreApiTable saved_core_api;
+  AmdExtTable saved_amd_ext_api;
+  hsa_ven_amd_loader_1_01_pfn_t hsa_loader_api;
+  std::mutex info_map_mutex_;
+  std::unordered_map<uint64_t, HSAAgentInfo> HSAagent_info_map_;
+  std::atomic<bool> ksymbols_flag{true};
+  std::atomic<bool> kernel_names_flag{true};
+  std::mutex queues_mutex_;
+  std::unordered_map<hsa_queue_t*, std::unique_ptr<void, queues_deleter&>> queues;
+  void SetCoreApiTable(CoreApiTable& table);
+  void SetAmdExtTable(AmdExtTable& table);
+  void SetHSALoaderApi();
+
+ public:
+ std::vector<hsa_agent_t> gpu_agents;
+ HSAAgentInfo& GetHSAAgentInfo(uint64_t agent_handle);
+ HSAAgentInfo& GetHSAAgentInfo(Agent::DeviceInfo device_info);
+ Agent::DeviceInfo& GetDeviceInfo(HSAAgentInfo* agent_info);
+ std::mutex kernel_names_map_lock;
+ std::map<std::string, std::vector<uint64_t>>* kernel_names;
+ std::mutex ksymbol_map_lock;
+ std::map<uint64_t, std::string>* ksymbols;
+ void SetHSAAgentInfo(hsa_agent_t agent, HSAAgentInfo hsa_agent_info);
+ static HSASupport_Singleton& GetInstance();
+ CoreApiTable& GetCoreApiTable();
+ AmdExtTable& GetAmdExtTable();
+ hsa_ven_amd_loader_1_01_pfn_t& GetHSALoaderApi();
+ void AddQueue(hsa_queue_t* queue, std::unique_ptr<void, queues_deleter&>);
+ void RemoveQueue(hsa_queue_t* queue);
+ void HSAInitialize(HsaApiTable* Table);
+ void HSAFinalize();
+ void InitKsymbols();
+ void FinitKsymbols();
+ HSASupport_Singleton(const  HSASupport_Singleton&) = delete;
+ HSASupport_Singleton& operator=(const  HSASupport_Singleton&) = delete;
+
+};
+
+bool hsa_support_IterateCounters(rocprofiler_counters_info_callback_t counters_info_callback);
 }  // namespace rocprofiler
 
 #include "src/core/session/tracer/src/roctracer.h"
@@ -126,11 +191,6 @@ uint32_t GetApiCode(const char* str);
 
 void RegisterTracerCallback(int (*function)(rocprofiler_tracer_activity_domain_t domain,
                                             uint32_t operation_id, void* data));
-rocprofiler_timestamp_t timestamp_ns();
-
-void Initialize_roctracer(HsaApiTable* table);
-
-
 }  // namespace roctracer::hsa_support
 
 #endif  // SRC_CORE_HSA_HSA_SUPPORT_H_

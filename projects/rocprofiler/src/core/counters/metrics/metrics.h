@@ -44,6 +44,8 @@ THE SOFTWARE.
 #include <mutex>
 #include <unordered_set>
 #include "src/core/hardware/hsa_info.h"
+#include "src/core/hsa/hsa_support.h"
+
 
 namespace fs = std::experimental::filesystem;
 namespace rocprofiler {
@@ -121,10 +123,10 @@ class MetricsDict {
     const cache_t* const cache_;
   };
 
-  static MetricsDict* Create(const Agent::AgentInfo* agent_info) {
+  static MetricsDict* Create(const rocprofiler::HSAAgentInfo* agent_info) {
     std::lock_guard<mutex_t> lck(mutex_);
     if (map_ == NULL) map_ = new map_t;
-    std::string name = agent_info->getGfxip();
+    std::string name = agent_info->GetDeviceInfo().getGfxip();
     auto ret = map_->insert({name, NULL});
     if (ret.second) ret.first->second = new MetricsDict(agent_info);
     return ret.first->second;
@@ -195,7 +197,7 @@ class MetricsDict {
     return (xml_ != NULL) ? xml_->GetNodes("top." + scope + ".metric") : xml::Xml::nodes_t();
   }
 
-  MetricsDict(const Agent::AgentInfo* agent_info) : xml_(NULL), agent_info_(agent_info) {
+  MetricsDict(const rocprofiler::HSAAgentInfo* agent_info) : xml_(NULL), agent_info_(agent_info) {
     std::string xml_name = []() {
       if (const char* path = getenv("ROCPROFILER_METRICS_PATH"); path != nullptr) return path;
       return "";
@@ -208,14 +210,14 @@ class MetricsDict {
     }
     xml_ = xml::Xml::Create(xml_name);
     if (xml_ == NULL) EXC_RAISING(HSA_STATUS_ERROR, "metrics .xml open error '" << xml_name << "'");
-    xml_->AddConst("top.const.metric", "MAX_WAVE_SIZE", agent_info->getMaxQueueSize());
-    xml_->AddConst("top.const.metric", "CU_NUM", agent_info->getCUCount());
+    xml_->AddConst("top.const.metric", "MAX_WAVE_SIZE", agent_info->GetDeviceInfo().getMaxQueueSize());
+    xml_->AddConst("top.const.metric", "CU_NUM", agent_info->GetDeviceInfo().getCUCount());
     xml_->AddConst("top.const.metric", "SIMD_NUM",
-                   agent_info->getSimdCountPerCU() * agent_info->getCUCount());
-    xml_->AddConst("top.const.metric", "SE_NUM", agent_info->getShaderEngineCount());
+                   agent_info->GetDeviceInfo().getSimdCountPerCU() * agent_info->GetDeviceInfo().getCUCount());
+    xml_->AddConst("top.const.metric", "SE_NUM", agent_info->GetDeviceInfo().getShaderEngineCount());
     xml_->AddConst("top.const.metric", "LDS_BANKS", 32);
     ImportMetrics(agent_info, "const");
-    agent_name_ = agent_info->getName();
+    agent_name_ = agent_info->GetDeviceInfo().getName();
 
     if (agent_name_.find(':') != std::string::npos)  // Remove compiler flags from the agent_name
       agent_name_ = agent_name_.substr(0, agent_name_.find(':'));
@@ -233,7 +235,7 @@ class MetricsDict {
     if (supported_agent_names.find(agent_name_) != supported_agent_names.end()) {
       ImportMetrics(agent_info, agent_name_);
     } else {
-      agent_name_ = agent_info->getGfxip();
+      agent_name_ = agent_info->GetDeviceInfo().getGfxip();
       ImportMetrics(agent_info, agent_name_);
     }
     ImportMetrics(agent_info, "global");
@@ -244,7 +246,7 @@ class MetricsDict {
     for (auto& entry : cache_) delete entry.second;
   }
 
-  static hsa_ven_amd_aqlprofile_id_query_t Translate(const Agent::AgentInfo* agent_info,
+  static hsa_ven_amd_aqlprofile_id_query_t Translate(const rocprofiler::HSAAgentInfo* agent_info,
                                                      const std::string& block_name) {
     hsa_ven_amd_aqlprofile_profile_t profile{};
     profile.agent = hsa_agent_t{agent_info->getHandle()};
@@ -256,7 +258,7 @@ class MetricsDict {
     return query;
   }
 
-  void ImportMetrics(const Agent::AgentInfo* agent_info, const std::string& scope) {
+  void ImportMetrics(const rocprofiler::HSAAgentInfo* agent_info, const std::string& scope) {
     auto arr = xml_->GetNodes("top." + scope + ".metric");
     xml::Xml::node_list_t metrics_list(arr.begin(), arr.end());
     uint32_t metrics_number = metrics_list.size();
@@ -380,7 +382,7 @@ class MetricsDict {
   }
 
   xml::Xml* xml_;
-  const Agent::AgentInfo* agent_info_;
+  const rocprofiler::HSAAgentInfo* agent_info_;
   std::string agent_name_;
   cache_t cache_;
 

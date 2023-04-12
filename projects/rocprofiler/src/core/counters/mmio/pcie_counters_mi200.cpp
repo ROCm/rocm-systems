@@ -4,7 +4,7 @@
 
 namespace rocprofiler {
 
-PciePerfMonMI200::PciePerfMonMI200(const Agent::AgentInfo& info) : PerfMon(), mmio_(nullptr) {
+PciePerfMonMI200::PciePerfMonMI200(const HSAAgentInfo& info) : PerfMon(), mmio_(nullptr) {
   mmio_ =
       dynamic_cast<mmio::PciePerfmonMMIO*>(mmio::MMIOManager::CreateMMIO(mmio::PCIE_PERFMON, info));
 }

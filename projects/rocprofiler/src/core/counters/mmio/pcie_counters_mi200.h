@@ -13,7 +13,7 @@ namespace rocprofiler {
 
 class PciePerfMonMI200 : public PerfMon {
  public:
-  PciePerfMonMI200(const Agent::AgentInfo& info);
+  PciePerfMonMI200(const HSAAgentInfo& info);
   ~PciePerfMonMI200();
   void SetCounterNames(std::vector<std::string>& counter_names) override;
   void Start() override;

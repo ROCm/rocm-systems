@@ -1,6 +1,6 @@
 #include "eval_metrics.h"
 #include "src/utils/helper.h"
-#include "src/core/hsa/hsa_common.h"
+#include "src/core/hsa/hsa_support.h"
 #include <set>
 #include <math.h>
 
@@ -93,16 +93,20 @@ bool metrics::ExtractMetricEvents(
       results_list holds the result objects for each event (which means, basic counters only)
   */
   try {
-    uint32_t xcc_count = rocprofiler::hsa_support::GetAgentInfo(gpu_agent.handle).getXccCount();
+    HSASupport_Singleton& hsasupport_singleton = HSASupport_Singleton::GetInstance();
+    uint32_t xcc_count = hsasupport_singleton.GetHSAAgentInfo(gpu_agent.handle).GetDeviceInfo().getXccCount();
+
+
     for (size_t i = 0; i < metric_names.size(); i++) {
       counters_vec_t counters_vec;
       // TODO: saurabh
       //   const Metric* metric = metrics_dict->GetMetricByName(metric_names[i]);
       const Metric* metric = metrics_dict->Get(metric_names[i]);
       if (metric == nullptr) {
-        Agent::AgentInfo& agentInfo = rocprofiler::hsa_support::GetAgentInfo(gpu_agent.handle);
-        fatal("input metric '%s' not supported on this hardware: %s ", metric_names[i].c_str(),
-              agentInfo.getName().data());
+          HSAAgentInfo& agentInfo = HSASupport_Singleton::GetInstance().GetHSAAgentInfo(gpu_agent.handle);
+          fatal("input metric'%s' not supported on this hardware: %s ", metric_names[i].c_str(),
+          agentInfo.GetDeviceInfo().getName().data());
+
       }
 
       // adding result object for derived metric
@@ -176,7 +180,7 @@ bool metrics::ExtractMetricEvents(
 
 bool metrics::GetCounterData(hsa_ven_amd_aqlprofile_profile_t* profile, hsa_agent_t gpu_agent,
                              std::vector<results_t*>& results_list) {
-  uint32_t xcc_count = rocprofiler::hsa_support::GetAgentInfo(gpu_agent.handle).getXccCount();
+  uint32_t xcc_count = HSASupport_Singleton::GetInstance().GetHSAAgentInfo(gpu_agent.handle).GetDeviceInfo().getXccCount();
   uint32_t single_xcc_buff_size = profile->output_buffer.size / (sizeof(uint64_t) * xcc_count);
   callback_data_t callback_data{&results_list, 0, single_xcc_buff_size};
   hsa_status_t status = hsa_ven_amd_aqlprofile_iterate_data(profile, pmcCallback, &callback_data);

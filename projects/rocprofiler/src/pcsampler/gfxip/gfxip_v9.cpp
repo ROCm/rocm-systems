@@ -104,8 +104,8 @@ void fill_record(const device_t& dev, rocprofiler_record_pc_sample_t* record, ui
    * comment in rocprofiler::hsa_support::Initialize about using KFD's gpu_id for
    * more information.
    */
-  record->pc_sample.gpu_id =
-      rocprofiler_agent_id_t{(uint64_t)rocprofiler::hsa_support::GetAgentInfo(hdl).getIndex()};
+  record->pc_sample.gpu_id = rocprofiler_agent_id_t{
+      HSASupport_Singleton::GetInstance().GetHSAAgentInfo(hdl).GetDeviceInfo().getGPUId()};
 }
 
 }  // namespace
@@ -116,9 +116,9 @@ void read_pc_samples_v9(const device_t& dev, PCSampler* sampler) {
   uint32_t saved_grbm_gfx_index = dev.pci_memory_[REG_OFFSET(GC, 0, mmGRBM_GFX_INDEX)];
   uint32_t data;
 
-  for (uint32_t se = 0; se < dev.agent_info_.getShaderEngineCount(); ++se)
-    for (uint32_t sh = 0; sh < dev.agent_info_.getShaderArraysPerSE(); ++sh)
-      for (uint32_t cu = 0; cu < dev.agent_info_.getCUCountPerSH(); ++cu) {
+  for (uint32_t se = 0; se < dev.agent_info_.GetDeviceInfo().getShaderEngineCount(); ++se)
+    for (uint32_t sh = 0; sh < dev.agent_info_.GetDeviceInfo().getShaderArraysPerSE(); ++sh)
+      for (uint32_t cu = 0; cu < dev.agent_info_.GetDeviceInfo().getCUCountPerSH(); ++cu) {
         // Select the SE, SH, and CU.
         data = REG_SET_FIELD(0, GRBM_GFX_INDEX, INSTANCE_INDEX, cu);
         data = REG_SET_FIELD(data, GRBM_GFX_INDEX, SH_INDEX, sh);
@@ -126,8 +126,8 @@ void read_pc_samples_v9(const device_t& dev, PCSampler* sampler) {
         dev.pci_memory_[REG_OFFSET(GC, 0, mmGRBM_GFX_INDEX)] = data;
 
         // Iterate over all the waves in the compute unit.
-        for (uint32_t simd = 0; simd < dev.agent_info_.getSimdCountPerCU(); ++simd)
-          for (uint32_t wave_id = 0; wave_id < dev.agent_info_.getWaveSlotsPerSimd(); ++wave_id) {
+        for (uint32_t simd = 0; simd < dev.agent_info_.GetDeviceInfo().getSimdCountPerCU(); ++simd)
+          for (uint32_t wave_id = 0; wave_id < dev.agent_info_.GetDeviceInfo().getWaveSlotsPerSimd(); ++wave_id) {
             // FatalHalt the wave
             data = REG_SET_FIELD(0, SQ_CMD, CMD, SQ_IND_CMD_CMD_SETFATALHALT);
             data = REG_SET_FIELD(data, SQ_CMD, MODE, SQ_IND_CMD_MODE_SINGLE);
@@ -204,16 +204,16 @@ void read_pc_samples_v9_ioctl(const device_t& dev, PCSampler* sampler) {
 
   uint32_t data;
 
-  for (uint32_t se = 0; se < dev.agent_info_.getShaderEngineCount(); ++se)
-    for (uint32_t sh = 0; sh < dev.agent_info_.getShaderArraysPerSE(); ++sh)
-      for (uint32_t cu = 0; cu < dev.agent_info_.getCUCountPerSH(); ++cu) {
+  for (uint32_t se = 0; se < dev.agent_info_.GetDeviceInfo().getShaderEngineCount(); ++se)
+    for (uint32_t sh = 0; sh < dev.agent_info_.GetDeviceInfo().getShaderArraysPerSE(); ++sh)
+      for (uint32_t cu = 0; cu < dev.agent_info_.GetDeviceInfo().getCUCountPerSH(); ++cu) {
         ioc.grbm.se = se;
         ioc.grbm.sh = sh;
         ioc.grbm.instance = cu;
 
         // Iterate over all the waves in the compute unit.
-        for (uint32_t simd = 0; simd < dev.agent_info_.getSimdCountPerCU(); ++simd)
-          for (uint32_t wave_id = 0; wave_id < dev.agent_info_.getWaveSlotsPerSimd(); ++wave_id) {
+        for (uint32_t simd = 0; simd < dev.agent_info_.GetDeviceInfo().getSimdCountPerCU(); ++simd)
+          for (uint32_t wave_id = 0; wave_id < dev.agent_info_.GetDeviceInfo().getWaveSlotsPerSimd(); ++wave_id) {
             // FatalHalt the wave
             data = REG_SET_FIELD(0, SQ_CMD, CMD, SQ_IND_CMD_CMD_SETFATALHALT);
             data = REG_SET_FIELD(data, SQ_CMD, MODE, SQ_IND_CMD_MODE_SINGLE);

@@ -36,18 +36,15 @@ namespace Agent {
 
 static const uint32_t LDS_BLOCK_SIZE = 128 * 4;
 
-// XXX TODO: This should be merged into rocprofiler::hsa_support::AgentInfo and
-// this file should be removed entirely, as it's completely redundant
-class AgentInfo {
+
+//DeviceInfo supports only GPU
+class DeviceInfo {
  public:
-  AgentInfo();
-  AgentInfo(const hsa_agent_t agent, ::CoreApiTable* table);
+  DeviceInfo() = default;
+  DeviceInfo(uint32_t topology_id, uint32_t gpu_id);
 
-  uint64_t getIndex() const;
-  hsa_device_type_t getType() const;
-  uint64_t getHandle() const;
-  const std::string_view getName() const;
-
+  uint64_t getGPUId() const;
+  std::string_view getName() const;
   std::string getGfxip() const;
   uint32_t getMaxWaveSize() const;
   uint32_t getMaxQueueSize() const;
@@ -61,26 +58,11 @@ class AgentInfo {
   uint32_t getPCIDomain() const;
   uint32_t getPCILocationID() const;
   uint32_t getXccCount() const;
-
-  void setIndex(uint64_t index);
-  void setType(hsa_device_type_t type);
-  void setHandle(uint64_t handle);
-  void setName(const std::string& name);
-
-  void setNumaNode(uint32_t numa_node);
-  uint32_t getNumaNode();
-
-  void setNearCpuAgent(hsa_agent_t near_cpu_agent);
-  hsa_agent_t getNearCpuAgent();
-
-  hsa_amd_memory_pool_t cpu_pool;
-  hsa_amd_memory_pool_t kernarg_pool;
-  hsa_amd_memory_pool_t gpu_pool;
+  uint64_t getUniqueGPUId() const;
+  uint32_t getNumaNode() const;
 
  private:
-  uint64_t index_;
-  hsa_device_type_t type_;  // Agent type - Cpu = 0, Gpu = 1 or Dsp = 2
-  uint64_t handle_;
+
   char name_[64];
   char gfxip_[64];
   uint32_t max_wave_size_;
@@ -95,12 +77,11 @@ class AgentInfo {
   uint32_t wave_slots_per_simd_;
   // Number of XCCs on the GPU
   uint32_t xcc_num_;
-
   uint32_t pci_domain_;
   uint32_t pci_location_id_;
-
+  uint64_t unique_gpu_id_;
   uint32_t numa_node_;
-  hsa_agent_t near_cpu_agent_;
+  uint32_t gpu_id_;
 };
 
 // XXX TODO: This should be moved somewhere else so this file can be deleted

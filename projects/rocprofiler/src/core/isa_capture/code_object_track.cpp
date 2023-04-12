@@ -77,7 +77,7 @@ void codeobj_capture_instance::Load(uint64_t addr, const std::string& URI, uint6
                                     uint64_t mem_size) {
   std::lock_guard<std::mutex> lock(mutex);
   codeobjs[addr] = std::make_shared<codeobj_capture_instance>(
-      addr, URI, mem_addr, mem_size, rocprofiler::GetCurrentTimestamp().value);
+      addr, URI, mem_addr, mem_size, rocprofiler::ROCProfiler_Singleton::GetInstance().timestamp_ns().value);
   std::atomic_thread_fence(std::memory_order_release);  // Fencing the state of the map
   {
     std::lock_guard<std::mutex> lock(codeobj_record::mutex);
@@ -87,7 +87,7 @@ void codeobj_capture_instance::Load(uint64_t addr, const std::string& URI, uint6
 
 void codeobj_capture_instance::Unload(uint64_t addr) {
   std::lock_guard<std::mutex> lock(mutex);
-  codeobjs.at(addr)->end_time = rocprofiler::GetCurrentTimestamp().value;
+  codeobjs.at(addr)->end_time = rocprofiler::ROCProfiler_Singleton::GetInstance().timestamp_ns().value;
   codeobjs.erase(addr);
 }
 

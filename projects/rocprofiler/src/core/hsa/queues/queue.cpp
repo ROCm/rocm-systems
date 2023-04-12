@@ -35,6 +35,7 @@
 #include "src/utils/helper.h"
 #include "src/core/isa_capture/code_object_track.hpp"
 
+
 #define CHECK_HSA_STATUS(msg, status)                                                              \
   do {                                                                                             \
     if ((status) != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK) {                       \
@@ -74,37 +75,37 @@ static inline bool IsEventMatch(const hsa_ven_amd_aqlprofile_event_t& event1,
 
 typedef std::vector<hsa_ven_amd_aqlprofile_info_data_t> att_trace_callback_data_t;
 
-static std::mutex ksymbol_map_lock;
-static std::map<uint64_t, std::string>* ksymbols;
-static std::atomic<bool> ksymbols_flag{true};
+
 void AddKernelName(uint64_t handle, std::string name) {
-  std::lock_guard<std::mutex> lock(ksymbol_map_lock);
-  ksymbols->emplace(handle, name);
+  HSASupport_Singleton& hsasupport_singleton = HSASupport_Singleton::GetInstance();
+  std::lock_guard<std::mutex> lock(hsasupport_singleton.ksymbol_map_lock);
+  hsasupport_singleton.ksymbols->emplace(handle, name);
 }
 void RemoveKernelName(uint64_t handle) {
-  std::lock_guard<std::mutex> lock(ksymbol_map_lock);
-  ksymbols->erase(handle);
+  HSASupport_Singleton& hsasupport_singleton = HSASupport_Singleton::GetInstance();
+  std::lock_guard<std::mutex> lock(hsasupport_singleton.ksymbol_map_lock);
+  hsasupport_singleton.ksymbols->erase(handle);
 }
 std::string GetKernelNameFromKsymbols(uint64_t handle) {
-  std::lock_guard<std::mutex> lock(ksymbol_map_lock);
-  if (ksymbols->find(handle) != ksymbols->end())
-    return ksymbols->at(handle);
+  HSASupport_Singleton& hsasupport_singleton = HSASupport_Singleton::GetInstance();
+  std::lock_guard<std::mutex> lock(hsasupport_singleton.ksymbol_map_lock);
+  if (hsasupport_singleton.ksymbols->find(handle) != hsasupport_singleton.ksymbols->end())
+    return hsasupport_singleton.ksymbols->at(handle);
   else
     return "Unknown Kernel!";
 }
 
-static std::mutex kernel_names_map_lock;
-static std::map<std::string, std::vector<uint64_t>>* kernel_names;
-static std::atomic<bool> kernel_names_flag{true};
 void AddKernelNameWithDispatchID(std::string name, uint64_t id) {
-  std::lock_guard<std::mutex> lock(kernel_names_map_lock);
-  if (kernel_names->find(name) == kernel_names->end())
-    kernel_names->emplace(name, std::vector<uint64_t>());
-  kernel_names->at(name).push_back(id);
+  HSASupport_Singleton& hsasupport_singleton = HSASupport_Singleton::GetInstance();
+  std::lock_guard<std::mutex> lock(hsasupport_singleton.kernel_names_map_lock);
+  if (hsasupport_singleton.kernel_names->find(name) == hsasupport_singleton.kernel_names->end())
+    hsasupport_singleton.kernel_names->emplace(name, std::vector<uint64_t>());
+  hsasupport_singleton.kernel_names->at(name).push_back(id);
 }
 std::string GetKernelNameUsingDispatchID(uint64_t given_id) {
-  std::lock_guard<std::mutex> lock(kernel_names_map_lock);
-  for (auto kernel_name : (*kernel_names)) {
+  HSASupport_Singleton& hsasupport_singleton = HSASupport_Singleton::GetInstance();
+  std::lock_guard<std::mutex> lock(hsasupport_singleton.kernel_names_map_lock);
+  for (auto kernel_name : (*hsasupport_singleton.kernel_names)) {
     for (auto dispatch_id : kernel_name.second) {
       if (dispatch_id == given_id) return kernel_name.first;
     }
@@ -112,34 +113,6 @@ std::string GetKernelNameUsingDispatchID(uint64_t given_id) {
   return "Unknown Kernel!";
 }
 
-void InitKsymbols() {
-  if (ksymbols_flag.load(std::memory_order_relaxed)) {
-    {
-      std::lock_guard<std::mutex> lock(ksymbol_map_lock);
-      ksymbols = new std::map<uint64_t, std::string>();
-      ksymbols_flag.exchange(false, std::memory_order_release);
-    }
-    {
-      std::lock_guard<std::mutex> lock(kernel_names_map_lock);
-      kernel_names = new std::map<std::string, std::vector<uint64_t>>();
-      kernel_names_flag.exchange(false, std::memory_order_release);
-    }
-  }
-}
-void FinitKsymbols() {
-  if (!ksymbols_flag.load(std::memory_order_relaxed)) {
-    std::lock_guard<std::mutex> lock(ksymbol_map_lock);
-    ksymbols->clear();
-    delete ksymbols;
-    ksymbols_flag.exchange(true, std::memory_order_release);
-  }
-  if (!kernel_names_flag.load(std::memory_order_relaxed)) {
-    std::lock_guard<std::mutex> lock(kernel_names_map_lock);
-    kernel_names->clear();
-    delete kernel_names;
-    kernel_names_flag.exchange(true, std::memory_order_release);
-  }
-}
 
 
 struct kernel_descriptor_t {
@@ -185,7 +158,8 @@ enum amd_kernel_code_property_t {
 
 static const kernel_descriptor_t* GetKernelCode(uint64_t kernel_object) {
   const kernel_descriptor_t* kernel_code = NULL;
-  hsa_status_t status = hsa_support::GetHSALoaderApi().hsa_ven_amd_loader_query_host_address(
+  rocprofiler::HSASupport_Singleton&  hsasupport_singleton = rocprofiler::HSASupport_Singleton::GetInstance();
+  hsa_status_t status = hsasupport_singleton.GetHSALoaderApi().hsa_ven_amd_loader_query_host_address(
       reinterpret_cast<const void*>(kernel_object), reinterpret_cast<const void**>(&kernel_code));
   if (HSA_STATUS_SUCCESS != status) {
     kernel_code = reinterpret_cast<kernel_descriptor_t*>(kernel_object);
@@ -193,8 +167,8 @@ static const kernel_descriptor_t* GetKernelCode(uint64_t kernel_object) {
   return kernel_code;
 }
 
-static uint32_t arch_vgpr_count(Agent::AgentInfo& info, const kernel_descriptor_t& kernel_code) {
-  const std::string_view& name = info.getName();
+static uint32_t arch_vgpr_count(const std::string_view& name, const kernel_descriptor_t& kernel_code) {
+
   std::string info_name(name.data(), name.size());
   if (strcmp(name.data(), "gfx90a") == 0 || strncmp(name.data(), "gfx94", 5) == 0)
     return (AMD_HSA_BITS_GET(kernel_code.compute_pgm_rsrc3,
@@ -210,23 +184,23 @@ static uint32_t arch_vgpr_count(Agent::AgentInfo& info, const kernel_descriptor_
            ? 8
            : 4);
 }
-static uint32_t accum_vgpr_count(Agent::AgentInfo& info, const kernel_descriptor_t& kernel_code) {
-  const std::string_view& name = info.getName();
+static uint32_t accum_vgpr_count(const std::string_view& name, const kernel_descriptor_t& kernel_code) {
+
   std::string info_name(name.data(), name.size());
-  if (strcmp(info_name.c_str(), "gfx908") == 0) return arch_vgpr_count(info, kernel_code);
+  if (strcmp(info_name.c_str(), "gfx908") == 0) return arch_vgpr_count(name, kernel_code);
   if (strcmp(info_name.c_str(), "gfx90a") == 0 || strncmp(info_name.c_str(), "gfx94", 5) == 0)
     return (AMD_HSA_BITS_GET(kernel_code.compute_pgm_rsrc1,
                              AMD_COMPUTE_PGM_RSRC_ONE_GRANULATED_WORKITEM_VGPR_COUNT) +
             1) *
         8 -
-        arch_vgpr_count(info, kernel_code);
+        arch_vgpr_count(name, kernel_code);
 
   return 0;
 }
 
-static uint32_t sgpr_count(Agent::AgentInfo& info, const kernel_descriptor_t& kernel_code) {
+static uint32_t sgpr_count(const std::string_view& name, const kernel_descriptor_t& kernel_code) {
   // GFX10 and later always allocate 128 sgprs.
-  const std::string_view name = info.getName();
+
   // TODO(srnagara): Recheck the extraction of gfxip from gpu name
   const char* name_data = name.data();
   const size_t gfxip_label_len = std::min(name.size() - 2, size_t{63});
@@ -259,10 +233,10 @@ rocprofiler_kernel_properties_t set_kernel_properties(hsa_kernel_dispatch_packet
   kernel_properties_ptr.workgroup_size = (uint32_t)workgroup_size;
   kernel_properties_ptr.lds_size = packet.group_segment_size;
   kernel_properties_ptr.scratch_size = packet.private_segment_size;
-  Agent::AgentInfo agent_info = hsa_support::GetAgentInfo(agent.handle);
-  kernel_properties_ptr.arch_vgpr_count = arch_vgpr_count(agent_info, *kernel_code);
-  kernel_properties_ptr.accum_vgpr_count = accum_vgpr_count(agent_info, *kernel_code);
-  kernel_properties_ptr.sgpr_count = sgpr_count(agent_info, *kernel_code);
+  HSAAgentInfo agent_info =  HSASupport_Singleton::GetInstance().GetHSAAgentInfo(agent.handle);
+  kernel_properties_ptr.arch_vgpr_count = arch_vgpr_count(agent_info.GetDeviceInfo().getName(), *kernel_code);
+  kernel_properties_ptr.accum_vgpr_count = accum_vgpr_count(agent_info.GetDeviceInfo().getName(), *kernel_code);
+  kernel_properties_ptr.sgpr_count = sgpr_count(agent_info.GetDeviceInfo().getName(), *kernel_code);
   kernel_properties_ptr.wave_size =
       AMD_HSA_BITS_GET(kernel_code->kernel_code_properties,
                        AMD_KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32)
@@ -275,9 +249,7 @@ rocprofiler_kernel_properties_t set_kernel_properties(hsa_kernel_dispatch_packet
 
 namespace queue {
 
-using rocprofiler::GetROCProfilerSingleton;
-
-hsa_status_t pmcCallback(hsa_ven_amd_aqlprofile_info_type_t info_type,
+  hsa_status_t pmcCallback(hsa_ven_amd_aqlprofile_info_type_t info_type,
                          hsa_ven_amd_aqlprofile_info_data_t* info_data, void* data) {
   hsa_status_t status = HSA_STATUS_SUCCESS;
   pmc_callback_data_t* passed_data = reinterpret_cast<pmc_callback_data_t*>(data);
@@ -330,7 +302,7 @@ void AddRecordCounters(rocprofiler_record_profiler_t* record, const pending_sign
         rocprofiler_record_counter_value_t{value}});
   }
   record->counters = counters;
-  rocprofiler::Session* session = GetROCProfilerSingleton()->GetSession(pending->session_id);
+  rocprofiler::Session* session = rocprofiler::ROCProfiler_Singleton::GetInstance().GetSession(pending->session_id);
   void* initial_handle = const_cast<rocprofiler_record_counter_instance_t*>(record->counters);
   if (session->FindBuffer(pending->buffer_id)) {
     Memory::GenericBuffer* buffer = session->GetBuffer(pending->buffer_id);
@@ -347,7 +319,8 @@ void AddRecordCounters(rocprofiler_record_profiler_t* record, const pending_sign
 
 void AddAttRecord(rocprofiler_record_att_tracer_t* record, hsa_agent_t gpu_agent,
                   att_pending_signal_t& pending) {
-  Agent::AgentInfo agent_info = hsa_support::GetAgentInfo(gpu_agent.handle);
+  HSASupport_Singleton& hsasupport_singleton = HSASupport_Singleton::GetInstance();
+  HSAAgentInfo agent_info = hsasupport_singleton.GetHSAAgentInfo(gpu_agent.handle);
   att_trace_callback_data_t data;
   hsa_status_t status =
       hsa_ven_amd_aqlprofile_iterate_data(pending.profile, attTraceDataCallback, &data);
@@ -373,11 +346,11 @@ void AddAttRecord(rocprofiler_record_att_tracer_t* record, hsa_agent_t gpu_agent
     void* buffer = NULL;
     if (data_size != 0) {
       // Allocate buffer on CPU to copy out trace data
-      buffer = Packet::AllocateSysMemory(gpu_agent, data_size, &agent_info.cpu_pool);
+      buffer = Packet::AllocateSysMemory(gpu_agent, data_size, &agent_info.cpu_pool_);
       if (buffer == NULL) fatal("Trace data buffer allocation failed");
 
-      auto status = rocprofiler::hsa_support::GetCoreApiTable().hsa_memory_copy_fn(buffer, data_ptr,
-                                                                                   data_size);
+      auto status =
+          hsasupport_singleton.GetCoreApiTable().hsa_memory_copy_fn(buffer, data_ptr, data_size);
       if (status != HSA_STATUS_SUCCESS) fatal("Trace data memcopy to host failed");
 
       record->shader_engine_data[se_index].buffer_ptr = buffer;
@@ -392,12 +365,13 @@ void AddAttRecord(rocprofiler_record_att_tracer_t* record, hsa_agent_t gpu_agent
 
 bool AsyncSignalHandler(hsa_signal_value_t signal_value, void* data) {
   auto queue_info_session = static_cast<queue_info_session_t*>(data);
-  if (!queue_info_session || !GetROCProfilerSingleton() ||
-      !GetROCProfilerSingleton()->GetSession(queue_info_session->session_id) ||
-      !GetROCProfilerSingleton()->GetSession(queue_info_session->session_id)->GetProfiler())
+  rocprofiler::ROCProfiler_Singleton& rocprofiler_singleton = rocprofiler::ROCProfiler_Singleton::GetInstance();
+  rocprofiler::HSASupport_Singleton& hsasupport_singleton = rocprofiler::HSASupport_Singleton::GetInstance();
+  if (!queue_info_session ||
+      !rocprofiler_singleton.GetSession(queue_info_session->session_id) ||
+      !rocprofiler_singleton.GetSession(queue_info_session->session_id)->GetProfiler())
     return true;
-  rocprofiler::Session* session =
-      GetROCProfilerSingleton()->GetSession(queue_info_session->session_id);
+  rocprofiler::Session* session = rocprofiler_singleton.GetSession(queue_info_session->session_id);
   std::lock_guard<std::mutex> lock(session->GetSessionLock());
   rocprofiler::profiler::Profiler* profiler = session->GetProfiler();
   std::vector<pending_signal_t*> pending_signals = const_cast<std::vector<pending_signal_t*>&>(
@@ -407,10 +381,9 @@ bool AsyncSignalHandler(hsa_signal_value_t signal_value, void* data) {
     for (auto it = pending_signals.begin(); it != pending_signals.end();
          it = pending_signals.erase(it)) {
       auto& pending = *it;
-      if (hsa_support::GetCoreApiTable().hsa_signal_load_relaxed_fn(pending->new_signal))
-        return true;
+      if (hsasupport_singleton.GetCoreApiTable().hsa_signal_load_relaxed_fn(pending->new_signal)) return true;
       hsa_amd_profiling_dispatch_time_t time;
-      hsa_support::GetAmdExtTable().hsa_amd_profiling_get_dispatch_time_fn(
+     hsasupport_singleton.GetAmdExtTable().hsa_amd_profiling_get_dispatch_time_fn(
           queue_info_session->agent, pending->original_signal, &time);
       uint32_t record_count = 1;
       bool is_individual_xcc_mode = false;
@@ -440,7 +413,7 @@ bool AsyncSignalHandler(hsa_signal_value_t signal_value, void* data) {
         record.correlation_id = rocprofiler_correlation_id_t{pending->correlation_id};
 
         if (pending->session_id.handle == 0) {
-          pending->session_id = GetROCProfilerSingleton()->GetCurrentSessionId();
+          pending->session_id = rocprofiler_singleton.GetCurrentSessionId();
         }
         if (pending->counters_count > 0) {
           if (xcc_id == 0 && pending->context && pending->context->metrics_list.size() > 0 &&
@@ -456,7 +429,7 @@ bool AsyncSignalHandler(hsa_signal_value_t signal_value, void* data) {
                                                  pending->context->metrics_list,
                                                  time.end - time.start);
           AddRecordCounters(&record, pending);
-        } else {
+      }else {
           if (session->FindBuffer(pending->buffer_id)) {
             Memory::GenericBuffer* buffer = session->GetBuffer(pending->buffer_id);
             buffer->AddRecord(record);
@@ -467,13 +440,12 @@ bool AsyncSignalHandler(hsa_signal_value_t signal_value, void* data) {
         // TODO(aelwazir): we need a better way of distributing events and free them
         // if (pending->profile->output_buffer.ptr)
         //   numa_free(pending->profile->output_buffer.ptr, pending->profile->output_buffer.size);
-        hsa_status_t status =
-            rocprofiler::hsa_support::GetAmdExtTable().hsa_amd_memory_pool_free_fn(
-                (pending->profile->output_buffer.ptr));
+        hsa_status_t status =hsasupport_singleton.GetAmdExtTable().hsa_amd_memory_pool_free_fn(
+            (pending->profile->output_buffer.ptr));
         CHECK_HSA_STATUS("Error: Couldn't free output buffer memory", status);
         // if (pending->profile->command_buffer.ptr)
         //   numa_free(pending->profile->command_buffer.ptr, pending->profile->command_buffer.size);
-        status = rocprofiler::hsa_support::GetAmdExtTable().hsa_amd_memory_pool_free_fn(
+        status =hsasupport_singleton.GetAmdExtTable().hsa_amd_memory_pool_free_fn(
             (pending->profile->command_buffer.ptr));
         CHECK_HSA_STATUS("Error: Couldn't free command buffer memory", status);
         delete pending->profile;
@@ -483,9 +455,9 @@ bool AsyncSignalHandler(hsa_signal_value_t signal_value, void* data) {
         delete pending->context;
       }
       if (pending->new_signal.handle)
-        hsa_support::GetCoreApiTable().hsa_signal_destroy_fn(pending->new_signal);
+       hsasupport_singleton.GetCoreApiTable().hsa_signal_destroy_fn(pending->new_signal);
       if (queue_info_session->interrupt_signal.handle)
-        hsa_support::GetCoreApiTable().hsa_signal_destroy_fn(queue_info_session->interrupt_signal);
+       hsasupport_singleton.GetCoreApiTable().hsa_signal_destroy_fn(queue_info_session->interrupt_signal);
     }
   }
   delete queue_info_session;
@@ -496,15 +468,13 @@ bool AsyncSignalHandler(hsa_signal_value_t signal_value, void* data) {
 bool AsyncSignalHandlerATT(hsa_signal_value_t /* signal */, void* data) {
 
   auto queue_info_session = static_cast<queue_info_session_t*>(data);
-  if (!queue_info_session || !GetROCProfilerSingleton())
+  rocprofiler::ROCProfiler_Singleton& rocprofiler_singleton = rocprofiler::ROCProfiler_Singleton::GetInstance();
+  rocprofiler::HSASupport_Singleton& hsasupport_singleton =  rocprofiler::HSASupport_Singleton::GetInstance();
+  if (!queue_info_session ||
+      !rocprofiler_singleton.GetSession(queue_info_session->session_id) ||
+      !rocprofiler_singleton.GetSession(queue_info_session->session_id)->GetAttTracer())
     return true;
-
-  rocprofiler::Session* session =
-      GetROCProfilerSingleton()->GetSession(queue_info_session->session_id);
-  if (!session) return true;
-
-  std::lock_guard<std::mutex> lock(session->GetSessionLock());
-
+  rocprofiler::Session* session = rocprofiler_singleton.GetSession(queue_info_session->session_id);
   rocprofiler::att::AttTracer* att_tracer = session->GetAttTracer();
   if (!session->GetAttTracer()) return true;
 
@@ -516,9 +486,8 @@ bool AsyncSignalHandlerATT(hsa_signal_value_t /* signal */, void* data) {
     for (auto it = pending_signals.begin(); it != pending_signals.end();
          it = pending_signals.erase(it)) {
       auto& pending = *it;
-      if (hsa_support::GetCoreApiTable().hsa_signal_load_relaxed_fn(pending.new_signal))
-        return true;
-
+      std::lock_guard<std::mutex> lock(session->GetSessionLock());
+      if (hsasupport_singleton.GetCoreApiTable().hsa_signal_load_relaxed_fn(pending.new_signal)) return true;
       rocprofiler_record_att_tracer_t record{};
       record.kernel_id = rocprofiler_kernel_id_t{pending.kernel_descriptor};
       record.gpu_id = rocprofiler_agent_id_t{(uint64_t)queue_info_session->gpu_index};
@@ -540,7 +509,7 @@ bool AsyncSignalHandlerATT(hsa_signal_value_t /* signal */, void* data) {
       std::atomic_thread_fence(std::memory_order_release);
 
       if (pending.session_id.handle == 0) {
-        pending.session_id = GetROCProfilerSingleton()->GetCurrentSessionId();
+        pending.session_id = rocprofiler_singleton.GetCurrentSessionId();
       }
       if (session->FindBuffer(pending.buffer_id)) {
         Memory::GenericBuffer* buffer = session->GetBuffer(pending.buffer_id);
@@ -549,10 +518,10 @@ bool AsyncSignalHandlerATT(hsa_signal_value_t /* signal */, void* data) {
       }
       codeobj_record::free_capture(record.header.id);
 
-      hsa_status_t status = rocprofiler::hsa_support::GetAmdExtTable().hsa_amd_memory_pool_free_fn(
+      hsa_status_t status = hsasupport_singleton.GetAmdExtTable().hsa_amd_memory_pool_free_fn(
           (pending.profile->output_buffer.ptr));
       CHECK_HSA_STATUS("Error: Couldn't free output buffer memory", status);
-      status = rocprofiler::hsa_support::GetAmdExtTable().hsa_amd_memory_pool_free_fn(
+      status = hsasupport_singleton.GetAmdExtTable().hsa_amd_memory_pool_free_fn(
           (pending.profile->command_buffer.ptr));
       CHECK_HSA_STATUS("Error: Couldn't free command buffer memory", status);
       delete pending.profile;
@@ -580,20 +549,20 @@ void AddVendorSpecificPacket(const Packet::packet_t* packet,
 }
 
 void SignalAsyncHandler(const hsa_signal_t& signal, void* data) {
-  hsa_status_t status = hsa_support::GetAmdExtTable().hsa_amd_signal_async_handler_fn(
+  hsa_status_t status = HSASupport_Singleton::GetInstance().GetAmdExtTable().hsa_amd_signal_async_handler_fn(
       signal, HSA_SIGNAL_CONDITION_EQ, 0, AsyncSignalHandler, data);
   CHECK_HSA_STATUS("Error: hsa_amd_signal_async_handler failed", status);
 }
 
 void signalAsyncHandlerATT(const hsa_signal_t& signal, void* data) {
-  hsa_status_t status = hsa_support::GetAmdExtTable().hsa_amd_signal_async_handler_fn(
+  hsa_status_t status = HSASupport_Singleton::GetInstance().GetAmdExtTable().hsa_amd_signal_async_handler_fn(
       signal, HSA_SIGNAL_CONDITION_EQ, 0, AsyncSignalHandlerATT, data);
   CHECK_HSA_STATUS("Error: hsa_amd_signal_async_handler for ATT failed", status);
 }
 
 void CreateSignal(uint32_t attribute, hsa_signal_t* signal) {
   hsa_status_t status =
-      hsa_support::GetAmdExtTable().hsa_amd_signal_create_fn(1, 0, nullptr, attribute, signal);
+      HSASupport_Singleton::GetInstance().GetAmdExtTable().hsa_amd_signal_create_fn(1, 0, nullptr, attribute, signal);
   CHECK_HSA_STATUS("Error: hsa_amd_signal_create failed", status);
 }
 
@@ -635,17 +604,16 @@ void ResetSessionID(rocprofiler_session_id_t id) { session_id = id; }
 
 void CheckNeededProfileConfigs() {
   rocprofiler_session_id_t internal_session_id;
-  if (GetROCProfilerSingleton())
     // Getting Session ID
-    internal_session_id = GetROCProfilerSingleton()->GetCurrentSessionId();
-  else
-    internal_session_id = {0};
+  rocprofiler::ROCProfiler_Singleton& rocprofiler_singleton = rocprofiler::ROCProfiler_Singleton::GetInstance();
+  internal_session_id = rocprofiler_singleton.GetCurrentSessionId();
+
 
   if (session_id.handle == 0 || internal_session_id.handle != session_id.handle) {
     session_id = internal_session_id;
     // Getting Counters count from the Session
-    if (session_id.handle > 0 && GetROCProfilerSingleton()) {
-      session = GetROCProfilerSingleton()->GetSession(session_id);
+    if (session_id.handle > 0 ) {
+      session = rocprofiler_singleton.GetSession(session_id);
       if (session && session->FindFilterWithKind(ROCPROFILER_COUNTERS_COLLECTION)) {
         rocprofiler_filter_id_t filter_id =
             session->GetFilterIdWithKind(ROCPROFILER_COUNTERS_COLLECTION);
@@ -690,9 +658,9 @@ std::pair<std::vector<bool>, bool> GetAllowedProfilesList(const void* packets, i
   std::vector<bool> can_profile_packet;
   bool b_can_profile_anypacket = false;
   can_profile_packet.reserve(pkt_count);
-
-  std::lock_guard<std::mutex> lock(ksymbol_map_lock);
-  assert(ksymbols);
+  rocprofiler::HSASupport_Singleton& hsasupport_singleton =  rocprofiler::HSASupport_Singleton::GetInstance();
+  std::lock_guard<std::mutex> lock(hsasupport_singleton.ksymbol_map_lock);
+  assert(hsasupport_singleton.ksymbols);
 
   uint32_t current_writer_id = WRITER_ID.load(std::memory_order_relaxed);
 
@@ -710,7 +678,7 @@ std::pair<std::vector<bool>, bool> GetAllowedProfilesList(const void* packets, i
       for (auto id : kernel_profile_dispatch_ids) b_profile_this_object |= id == current_writer_id;
       try {
         // Can throw
-        const std::string& kernel_name = ksymbols->at(kdispatch.kernel_object);
+        const std::string& kernel_name = hsasupport_singleton.ksymbols->at(kdispatch.kernel_object);
 
         // If no filters specified, auto profile this kernel
         if (kernel_profile_names.size() == 0 && kernel_profile_dispatch_ids.size() == 0 &&
@@ -739,7 +707,7 @@ ProcessATTParams(
   Packet::packet_t& start_packet,
   Packet::packet_t& stop_packet,
   Queue& queue_info,
-  Agent::AgentInfo& agentInfo
+  rocprofiler::HSAAgentInfo& agentInfo
 ) {
   std::vector<hsa_ven_amd_aqlprofile_parameter_t> att_params;
   int num_att_counters = 0;
@@ -805,7 +773,7 @@ ProcessATTParams(
  * pointer to the packet. This packet is written into the queue by this
  * interceptor by invoking the writer function.
  */
-void WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t user_pkt_index, void* data,
+void Queue::WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t user_pkt_index, void* data,
                       hsa_amd_queue_intercept_packet_writer writer) {
 
   static const char* env_MAX_ATT_PROFILES = getenv("ROCPROFILER_MAX_ATT_PROFILES");
@@ -882,7 +850,7 @@ void WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t user_pkt
       rocprofiler_kernel_properties_t kernel_properties =
           set_kernel_properties(dispatch_packet, queue_info.GetGPUAgent());
       if (session) {
-        uint64_t record_id = GetROCProfilerSingleton()->GetUniqueRecordId();
+        uint64_t record_id = rocprofiler::ROCProfiler_Singleton::GetInstance().GetUniqueRecordId();
         AddKernelNameWithDispatchID(GetKernelNameFromKsymbols(dispatch_packet.kernel_object),
                                     record_id);
         if (session_data_count > 0 && profile.second) {
@@ -936,19 +904,21 @@ void WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t user_pkt
             (reinterpret_cast<Packet::packet_t*>(&barrier));
         transformed_packets.emplace_back(*pkt);
       }
-      Agent::AgentInfo& agentInfo =
-          rocprofiler::hsa_support::GetAgentInfo(queue_info.GetGPUAgent().handle);
+       rocprofiler::HSAAgentInfo& agentInfo =
+          rocprofiler::HSASupport_Singleton::GetInstance().GetHSAAgentInfo(queue_info.GetGPUAgent().handle);
       //  Creating Async Handler to be called every time the interrupt signal is
       //  marked complete
       SignalAsyncHandler(
           interrupt_signal,
-          new queue_info_session_t{queue_info.GetGPUAgent(), session_id_snapshot,
-                                   queue_info.GetQueueID(), writer_id, interrupt_signal,
-                                   agentInfo.getIndex(), agentInfo.getXccCount()});
+          new queue_info_session_t{queue_info.GetGPUAgent(), session_id_snapshot, queue_info.GetQueueID(),
+                                   writer_id, interrupt_signal, agentInfo.GetDeviceInfo().getGPUId(),
+                                   agentInfo.GetDeviceInfo().getXccCount()});
       ACTIVE_INTERRUPT_SIGNAL_COUNT.fetch_add(1, std::memory_order_relaxed);
       // profile_id++;
       // } while (replay_mode_count > 0 && profile_id < replay_mode_count);  // Profiles loop end
+
     }
+
     /* Write the transformed packets to the hardware queue.  */
     writer(&transformed_packets[0], transformed_packets.size());
   } else if (session_id_snapshot.handle > 0 && pkt_count > 0 && is_att_collection_mode && session &&
@@ -957,7 +927,7 @@ void WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t user_pkt
     // Getting Queue Data and Information
     auto& queue_info = *static_cast<Queue*>(data);
     std::lock_guard<std::mutex> lk(queue_info.qw_mutex);
-    Agent::AgentInfo agentInfo = hsa_support::GetAgentInfo(queue_info.GetGPUAgent().handle);
+    rocprofiler::HSAAgentInfo& agentInfo =  rocprofiler::HSASupport_Singleton::GetInstance().GetHSAAgentInfo(queue_info.GetGPUAgent().handle);
 
     bool can_profile_anypacket = false;
     std::vector<bool> can_profile_packet;
@@ -1021,7 +991,7 @@ void WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t user_pkt
       // list to be processed by the signal interrupt
       rocprofiler_kernel_properties_t kernel_properties =
           set_kernel_properties(dispatch_packet, queue_info.GetGPUAgent());
-      uint64_t record_id = GetROCProfilerSingleton()->GetUniqueRecordId();
+      uint64_t record_id = rocprofiler::ROCProfiler_Singleton::GetInstance().GetUniqueRecordId();
       AddKernelNameWithDispatchID(GetKernelNameFromKsymbols(dispatch_packet.kernel_object),
                                   record_id);
 
@@ -1080,31 +1050,13 @@ void WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t user_pkt
     /* Write the original packets to the hardware queue if no profiling session
      * is active  */
     writer(packets, pkt_count);
+
   }
 }
 
 
-Queue::Queue(const hsa_agent_t& cpu_agent, const hsa_agent_t& gpu_agent, uint32_t size,
-             hsa_queue_type32_t type,
-             void (*callback)(hsa_status_t status, hsa_queue_t* source, void* data), void* data,
-             uint32_t private_segment_size, uint32_t group_segment_size, hsa_queue_t** queue)
-    : cpu_agent_(cpu_agent), gpu_agent_(gpu_agent) {
-  [[maybe_unused]] hsa_status_t status =
-      hsa_support::GetAmdExtTable().hsa_amd_queue_intercept_create_fn(
-          gpu_agent, size, type, callback, data, private_segment_size, group_segment_size,
-          &intercept_queue_);
-  assert(status == HSA_STATUS_SUCCESS);
-
-  status = hsa_support::GetAmdExtTable().hsa_amd_profiling_set_profiler_enabled_fn(intercept_queue_,
-                                                                                   true);
-  assert(status == HSA_STATUS_SUCCESS);
-
-  hsa_support::GetAmdExtTable().hsa_amd_queue_intercept_register_fn(intercept_queue_,
-                                                                    WriteInterceptor, this);
-  assert(status == HSA_STATUS_SUCCESS);
-
-  *queue = intercept_queue_;
-}
+Queue::Queue(const hsa_agent_t cpu_agent, const hsa_agent_t gpu_agent, hsa_queue_t* queue)
+    : cpu_agent_(cpu_agent), gpu_agent_(gpu_agent), intercept_queue_(queue) { }
 
 Queue::~Queue() {
   while (ACTIVE_INTERRUPT_SIGNAL_COUNT.load(std::memory_order_acquire) > 0) {
@@ -1119,15 +1071,8 @@ hsa_agent_t Queue::GetCPUAgent() { return cpu_agent_; }
 
 uint64_t Queue::GetQueueID() { return intercept_queue_->id; }
 
-void InitializePools(hsa_agent_t cpu_agent, Agent::AgentInfo* agent_info) {
-  Packet::InitializePools(cpu_agent, agent_info);
-}
-void InitializeGPUPool(hsa_agent_t gpu_agent, Agent::AgentInfo* agent_info) {
-  Packet::InitializeGPUPool(gpu_agent, agent_info);
-}
-void CheckPacketReqiurements(std::vector<hsa_agent_t>& gpu_agents) {
-  Packet::CheckPacketReqiurements(gpu_agents);
-}
+void CheckPacketReqiurements() {
+  Packet::CheckPacketReqiurements();}
 
 }  // namespace queue
 }  // namespace rocprofiler

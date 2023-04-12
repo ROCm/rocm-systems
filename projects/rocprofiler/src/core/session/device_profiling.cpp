@@ -9,7 +9,7 @@
 #include "src/utils/exception.h"
 #include "src/core/hsa/queues/queue.h"
 // #include "src/core/counters/rdc/rdc_metrics.h"
-#include "src/core/hsa/hsa_common.h"
+
 
 #include <exception>
 #include <typeinfo>
@@ -183,8 +183,8 @@ DeviceProfileSession::DeviceProfileSession(std::vector<std::string> profiling_da
   if (hsa_agent_get_info(gpu_agent_, HSA_AGENT_INFO_NAME, gpu_name) != HSA_STATUS_SUCCESS)
     fatal("Agent name query failed");
 
-  Agent::AgentInfo* agentInfo = &(hsa_support::GetAgentInfo(gpu_agent_.handle));
-  metrics_dict_ = MetricsDict::Create(agentInfo);
+  HSAAgentInfo agentInfo = (HSASupport_Singleton::GetInstance().GetHSAAgentInfo(gpu_agent_.handle));
+  metrics_dict_ = MetricsDict::Create(&agentInfo);
 
   for (auto& d : profiling_data_) {
     Metric* metric = const_cast<Metric*>(metrics_dict_->Get(d));

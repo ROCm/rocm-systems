@@ -18,47 +18,41 @@
  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  THE SOFTWARE. */
 
-#ifndef SRC_CORE_HSA_HSA_COMMON_H_
-#define SRC_CORE_HSA_HSA_COMMON_H_
-
-#include <hsa/hsa.h>
-#include <hsa/hsa_api_trace.h>
-#include <hsa/hsa_ext_amd.h>
-#include <hsa/hsa_ven_amd_aqlprofile.h>
-#include <hsa/hsa_ven_amd_loader.h>
-
-#include <map>
-#include <mutex>
-
-#include "rocprofiler.h"
-#include "src/core/hardware/hsa_info.h"
-
-#define ASSERTM(exp, msg) assert(((void)msg, exp))
-
-namespace rocprofiler {
-namespace hsa_support {
+#include "HSATool.h"
+extern "C" {
 
 
-std::vector<hsa_agent_t>& GetCPUAgentList();
+/*
+ @brief The HSA_AMD_TOOL_PRIORITY variable must be a constant value type
+   initialized by the loader itself, not by code during _init. 'extern const'
+   seems do that although that is not a guarantee.
+*/
 
-Agent::AgentInfo& GetAgentInfo(decltype(hsa_agent_t::handle) handle);
-void SetAgentInfo(decltype(hsa_agent_t::handle) handle, const Agent::AgentInfo& agent_info);
-hsa_agent_t GetAgentByIndex(uint64_t agent_index);
+TEST_HSA_TOOL_API extern const uint32_t HSA_AMD_TOOL_PRIORITY = 50;
+static rocprofiler_onload_callback rocprofiler_onload_callback_call = nullptr;
 
-CoreApiTable& GetCoreApiTable();
-void SetCoreApiTable(const CoreApiTable& table);
+/*
 
-AmdExtTable GetAmdExtTable();
-void SetAmdExtTable(AmdExtTable* table);
+ @brief Callback function called upon loading the HSA.
+  The function updates the core api table function pointers to point to the
+  interceptor functions in this file.
 
-hsa_ven_amd_loader_1_01_pfn_t GetHSALoaderApi();
-void SetHSALoaderApi();
+*/
 
-void ResetMaps();
+TEST_HSA_TOOL_API bool OnLoad(void* table, uint64_t runtime_version, uint64_t failed_tool_count,
+ const char* const* failed_tool_names) {
+  rocprofiler_onload_callback_call(table, runtime_version, failed_tool_count, failed_tool_names);
+  return true;
+}
 
-rocprofiler_timestamp_t GetCurrentTimestampNS();
+/*
+@brief Callback function upon unloading the HSA.
+*/
 
-}  // namespace hsa_support
-}  // namespace rocprofiler
+TEST_HSA_TOOL_API void OnUnload() { printf("\n\nTool is getting unloaded\n\n"); }
 
-#endif  // SRC_CORE_HSA_HSA_COMMON_H_
+}  // extern "C"
+
+TEST_HSA_TOOL_API void SetHSACallback(rocprofiler_onload_callback callback) {
+  rocprofiler_onload_callback_call = callback;
+}

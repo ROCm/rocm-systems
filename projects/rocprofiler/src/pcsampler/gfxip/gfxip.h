@@ -37,6 +37,7 @@
 
 #include "rocprofiler.h"
 #include "src/core/hardware/hsa_info.h"
+#include "src/core/hsa/hsa_support.h"
 #include "src/utils/handle.h"
 
 #include <pciaccess.h>
@@ -99,14 +100,14 @@ static constexpr int HWIP_MAX_INSTANCE = 11;
    (REG_FIELD_MASK(reg, field) & ((field_val) << REG_FIELD_SHIFT(reg, field))))
 
 struct device_t {
-  device_t(const bool pci_inited, const Agent::AgentInfo& agent_info);
+  device_t(const bool pci_inited, const HSAAgentInfo& agent_info);
   ~device_t();
 
   device_t(const device_t&) = delete;
   device_t& operator=(const device_t&) = delete;
   device_t(device_t&&) = default;
 
-  const Agent::AgentInfo& agent_info_;
+  const HSAAgentInfo& agent_info_;
 
   struct pci_device* pci_device_;
   size_t pci_memory_size_;

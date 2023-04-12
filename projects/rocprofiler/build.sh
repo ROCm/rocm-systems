@@ -72,7 +72,7 @@ if [ -z "$TO_CLEAN" ] ; then TO_CLEAN=yes; fi
 if [ -z "$RUN_TEST" ] ; then RUN_TEST=no; fi
 if [ -z "$ASAN" ] ; then ASAN=False; fi
 if [ -z "$GPU_LIST" ] ; then GPU_LIST="gfx900 gfx906 gfx908 gfx90a gfx940 gfx941 gfx942 gfx1030 gfx1100 gfx1101 gfx1102"; fi
-                                       
+
 
 ROCPROFILER_ROOT=$(cd $ROCPROFILER_ROOT && echo $PWD)
 
@@ -96,6 +96,7 @@ cmake  \
     -DCPACK_READELF_EXECUTABLE="${PACKAGE_ROOT}/llvm/bin/llvm-readelf" \
     -DCPACK_STRIP_EXECUTABLE="${PACKAGE_ROOT}/llvm/bin/llvm-strip" \
     -DCPACK_OBJDUMP_EXECUTABLE="${PACKAGE_ROOT}/llvm/bin/llvm-objdump" \
+    -DHIP_ROOT_DIR=${ROCM_PATH} \
     $ROCPROFILER_ROOT
 
 popd

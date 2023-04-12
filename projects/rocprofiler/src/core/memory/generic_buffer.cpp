@@ -69,8 +69,9 @@ GenericBuffer::GenericBuffer(rocprofiler_session_id_t session_id, rocprofiler_bu
 GenericBuffer::~GenericBuffer() {
   if (is_valid_.load(std::memory_order_acquire)) {
     std::lock_guard lock(buffer_lock_);
-    // if (rocprofiler::GetROCProfiler_Singleton()->GetSession(session_id_))
-    //   rocprofiler::GetROCProfiler_Singleton()->GetSession(session_id_)->DisableTools(id_);
+    //rocprofiler::ROCProfiler_Singleton& instance = rocprofiler::ROCProfiler_Singleton::GetInstance();
+    //if (instance.GetSession(session_id_))
+     // instance.GetSession(session_id_)->DisableTools(id_);
 
     Flush();
 

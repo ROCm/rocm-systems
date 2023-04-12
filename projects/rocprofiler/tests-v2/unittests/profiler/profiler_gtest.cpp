@@ -30,27 +30,12 @@
 #include "core/session/session.h"
 #include "utils/helper.h"
 
-
 /*
  *  ###############################################
  *  ################TESTING HSA_INFO###############
  *  ###############################################
  */
 
-TEST(WhenTestingAgentInfoGetterSetters, TestRunsSuccessfully) {
-  Agent::AgentInfo agent_info = Agent::AgentInfo();
-  char gpu_name[] = "gfx10";
-  agent_info.setName(gpu_name);
-  agent_info.setIndex(0);
-  agent_info.setType(hsa_device_type_t::HSA_DEVICE_TYPE_GPU);
-
-  EXPECT_EQ(agent_info.getName(), gpu_name);
-  EXPECT_EQ(agent_info.getIndex(), 0);
-  EXPECT_EQ(agent_info.getType(), hsa_device_type_t::HSA_DEVICE_TYPE_GPU);
-
-  Agent::CounterHardwareInfo hw_info(0, "GRBM");
-  EXPECT_TRUE(getHardwareInfo(0, "GRBM", &hw_info));
-}
 
 void buffer_callback_fun(const rocprofiler_record_header_t* begin,
                          const rocprofiler_record_header_t* end,
@@ -66,7 +51,7 @@ void buffer_callback_fun(const rocprofiler_record_header_t* begin,
 
 // A lot have changed in the class, since this test was written
 // Need to rewrite all the test cases again.
-TEST(WhenAddingARecordToBuffer, DISABLED_RecordGetsAddedSuccefully) {
+TEST(WhenAddingARecordToBuffer,   DISABLED_RecordGetsAddedSuccefully) {
   Memory::GenericBuffer* buffer = new Memory::GenericBuffer(
       rocprofiler_session_id_t{0}, rocprofiler_buffer_id_t{0}, 0x8000, buffer_callback_fun);
 
@@ -285,7 +270,7 @@ void (*callback_fun)(const rocprofiler_record_header_t* begin,
 TEST(WhenTestingCounterCollectionMode, TestSucceeds) {
   rocprofiler_session_id_t session_id;
 
-  rocprofiler::ROCProfiler_Singleton toolobj;
+  rocprofiler::ROCProfiler_Singleton& toolobj = rocprofiler::ROCProfiler_Singleton::GetInstance();
   session_id = toolobj.CreateSession(ROCPROFILER_NONE_REPLAY_MODE);
   rocprofiler_filter_id_t filter_id =
       toolobj.GetSession(session_id)
@@ -304,7 +289,7 @@ TEST(WhenTestingCounterCollectionMode, TestSucceeds) {
 TEST(WhenTestingTimeStampCollectionMode, TestSucceeds) {
   rocprofiler_session_id_t session_id;
 
-  rocprofiler::ROCProfiler_Singleton toolobj;
+  rocprofiler::ROCProfiler_Singleton& toolobj = rocprofiler::ROCProfiler_Singleton::GetInstance();
   session_id = toolobj.CreateSession(ROCPROFILER_NONE_REPLAY_MODE);
   rocprofiler_filter_id_t filter_id =
       toolobj.GetSession(session_id)

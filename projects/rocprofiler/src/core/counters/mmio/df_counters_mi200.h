@@ -14,7 +14,7 @@ namespace rocprofiler {
 
 class DFPerfMonMI200 : public PerfMon {
  public:
-  DFPerfMonMI200(const Agent::AgentInfo& info);
+  DFPerfMonMI200(const HSAAgentInfo& info);
   ~DFPerfMonMI200();
   void Start() override;
   void Stop(){};

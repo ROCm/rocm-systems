@@ -23,6 +23,7 @@
 #include <sys/syscall.h>
 #include <unistd.h>
 
+#include <experimental/filesystem>
 #include <atomic>
 #include <optional>
 #include <thread>
@@ -34,6 +35,7 @@
 #include "src/utils/logger.h"
 #include "src/core/memory/generic_buffer.h"
 
+namespace fs = std::experimental::filesystem;
 #define ASSERTM(exp, msg) assert(((void)msg, exp))
 
 extern std::mutex sessions_pending_signal_lock;
@@ -42,14 +44,37 @@ static inline uint32_t GetTid() { return syscall(__NR_gettid); }
 
 namespace rocprofiler {
 
-ROCProfiler_Singleton* rocprofiler_singleton;
+
 
 // Constructor of ROCProfiler
 // Takes the buffer size, a buffer callback function and a buffer flush
 // interval to allocate a buffer pool using GenericStorage Also takes the
 // replay mode (application replay/kernel replay/user replay) to set the replay
 // mode for the rocprofiler class object
-ROCProfiler_Singleton::ROCProfiler_Singleton() : current_session_id_(rocprofiler_session_id_t{0}) {}
+ROCProfiler_Singleton::ROCProfiler_Singleton() {
+  fs::path sysfs_nodes_path = "/sys/class/kfd/kfd/topology/nodes";
+  fs::directory_entry dirp("/sys/class/kfd/kfd/topology/nodes");
+  if (!fs::exists(sysfs_nodes_path))
+    rocprofiler::fatal("Could not opendir `%s'", sysfs_nodes_path.c_str());
+  for (auto const& dirp_entry : fs::directory_iterator{dirp}) {
+    fs::path node_path = dirp_entry.path();
+    long long node_id = std::stoll(dirp_entry.path().stem().string());
+    fs::path gpu_path = node_path / "gpu_id";
+    std::ifstream gpu_id_file(gpu_path.c_str());
+    std::string gpu_id_str;
+    if (gpu_id_file.is_open()) {
+      gpu_id_file >> gpu_id_str;
+      if (!gpu_id_str.empty()) {
+        long long gpu_id = std::stoll(gpu_id_str);
+        if (gpu_id > 0) {
+          Agent::DeviceInfo deviceInfo(node_id, gpu_id);
+          // Since it is in static initializer, so its protected
+          agent_device_map_.emplace(deviceInfo.getGPUId(), deviceInfo);
+        }
+      }
+    }
+  }
+}
 
 // Destructor of rocprofiler_singleton
 // deletes the buffer pool
@@ -68,7 +93,11 @@ ROCProfiler_Singleton::~ROCProfiler_Singleton() {
   }
   Counter::ClearBasicCounters();
 }
-
+ROCProfiler_Singleton& ROCProfiler_Singleton::GetInstance() {
+  static ROCProfiler_Singleton* rocprofiler_singleton_instance =
+      new ROCProfiler_Singleton;
+  return *rocprofiler_singleton_instance;
+}
 bool ROCProfiler_Singleton::FindAgent(rocprofiler_agent_id_t agent_id) { return true; }
 size_t ROCProfiler_Singleton::GetAgentInfoSize(rocprofiler_agent_info_kind_t kind,
                                                rocprofiler_agent_id_t agent_id) {
@@ -210,28 +239,45 @@ const char* ROCProfiler_Singleton::GetKernelInfo(rocprofiler_kernel_info_kind_t 
   }
 }
 
+const Agent::DeviceInfo& ROCProfiler_Singleton::GetDeviceInfo(uint64_t gpu_id) {
+  std::lock_guard<std::mutex> info_map_lock(agent_device_map_mutex_);
+  auto it = agent_device_map_.find(gpu_id);
+  if (it == agent_device_map_.end())
+    rocprofiler::fatal("Device Info is not found for the given id:%ld", gpu_id);
+  return it->second;
+}
+
 // TODO(aelwazir): To be implemented
 bool ROCProfiler_Singleton::CheckFilterData(rocprofiler_filter_kind_t filter_kind,
                                             rocprofiler_filter_data_t filter_data) {
   return true;
 }
 
-// End of ROCProfiler_Singleton Class
+rocprofiler_timestamp_t ROCProfiler_Singleton::timestamp_ns() {
 
-ROCProfiler_Singleton* GetROCProfilerSingleton() { return rocprofiler_singleton; }
+  static uint64_t sys_clock_period = 0;
+  struct timespec ts;
+  // We are not full on memory model. At worst each CPU can call it once.
+  // We don't care for this variable's value in global memory as long as we have
+  // non-zero in the CPU cache.
+  if (sys_clock_period == 0) {
+    clock_getres(CLOCK_BOOTTIME, &ts);
+    sys_clock_period = (uint64_t(ts.tv_sec) * 1000000000 + uint64_t(ts.tv_nsec));
+  }
 
-void InitROCProfilerSingleton() { rocprofiler_singleton = new ROCProfiler_Singleton; }
-void ResetROCProfilerSingleton() {
-  delete rocprofiler_singleton;
-  // TODO(aelwazir): We need to use std::optional or std::unique_ptr
-  // if (rocprofiler_singleton) rocprofiler_singleton.reset();
+  clock_gettime(CLOCK_BOOTTIME, &ts);
+  uint64_t time = (uint64_t(ts.tv_sec) * 1000000000 + uint64_t(ts.tv_nsec));
+  if (sys_clock_period != 1)
+    return rocprofiler_timestamp_t{time / sys_clock_period};
+  else
+    return rocprofiler_timestamp_t{time};
 }
-
-rocprofiler_timestamp_t GetCurrentTimestamp() { return hsa_support::GetCurrentTimestampNS(); }
 
 rocprofiler_status_t IterateCounters(rocprofiler_counters_info_callback_t counters_info_callback) {
-  if (hsa_support::IterateCounters(counters_info_callback)) return ROCPROFILER_STATUS_SUCCESS;
+  if (hsa_support_IterateCounters(counters_info_callback)) return ROCPROFILER_STATUS_SUCCESS;
   return ROCPROFILER_STATUS_ERROR;
 }
+
+// End of ROCProfiler_Singleton Class
 
 }  // namespace rocprofiler

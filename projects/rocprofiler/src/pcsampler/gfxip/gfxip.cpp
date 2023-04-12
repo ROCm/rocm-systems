@@ -127,10 +127,10 @@ uint32_t debugfs_ioctl_read_register(const device_t& dev,
   return value;
 }
 
-device_t::device_t(const bool pci_inited, const Agent::AgentInfo& info)
+device_t::device_t(const bool pci_inited, const HSAAgentInfo& info)
     : agent_info_(info), pci_memory_(nullptr) {
-  const auto pci_domain = agent_info_.getPCIDomain();
-  const auto pci_location_id = agent_info_.getPCILocationID();
+  const auto pci_domain = agent_info_.GetDeviceInfo().getPCIDomain();
+  const auto pci_location_id = agent_info_.GetDeviceInfo().getPCILocationID();
 
   std::string name([pci_domain, pci_location_id]() {
     std::ostringstream out;

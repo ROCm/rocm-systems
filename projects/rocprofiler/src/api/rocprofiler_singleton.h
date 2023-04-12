@@ -41,13 +41,15 @@
 
 #include "src/core/session/session.h"
 #include "src/core/session/device_profiling.h"
+#include "src/core/hardware/hsa_info.h"
 
 namespace rocprofiler {
 
 class ROCProfiler_Singleton {
  public:
-  ROCProfiler_Singleton();
-  ~ROCProfiler_Singleton();
+  ROCProfiler_Singleton(const ROCProfiler_Singleton&) = delete;
+  ROCProfiler_Singleton& operator=(const ROCProfiler_Singleton&) = delete;
+  static ROCProfiler_Singleton& GetInstance();
 
   bool FindAgent(rocprofiler_agent_id_t agent_id);
   size_t GetAgentInfoSize(rocprofiler_agent_info_kind_t kind, rocprofiler_agent_id_t agent_id);
@@ -84,7 +86,8 @@ class ROCProfiler_Singleton {
                        rocprofiler_filter_data_t filter_data);
   uint64_t GetUniqueRecordId();
   uint64_t GetUniqueKernelDispatchId();
-
+  const Agent::DeviceInfo& GetDeviceInfo(uint64_t gpu_id);
+  rocprofiler_timestamp_t timestamp_ns();
  private:
   rocprofiler_session_id_t current_session_id_{0};
   std::mutex session_map_lock_;
@@ -92,6 +95,11 @@ class ROCProfiler_Singleton {
   std::atomic<uint64_t> records_counter_{1};
   std::mutex device_profiling_session_map_lock_;
   std::map<uint64_t, DeviceProfileSession*> dev_profiling_sessions_;
+  std::mutex agent_device_map_mutex_;
+  std::unordered_map<uint64_t, Agent::DeviceInfo> agent_device_map_;
+  ROCProfiler_Singleton();
+  ~ROCProfiler_Singleton();
+
   /*
    * XXX: Associating PC samples with a running kernel requires an identifier
    * that will be unique across all kernel executions.  It is not enough to use
@@ -110,14 +118,7 @@ class ROCProfiler_Singleton {
   std::atomic<uint64_t> kernel_dispatch_counter_{1};
 };
 
-void InitROCProfilerSingleton();
-void ResetROCProfilerSingleton();
-ROCProfiler_Singleton* GetROCProfilerSingleton();
-
-rocprofiler_timestamp_t GetCurrentTimestamp();
-
 rocprofiler_status_t IterateCounters(rocprofiler_counters_info_callback_t counters_info_callback);
-
 }  // namespace rocprofiler
 
 #endif  // SRC_TOOLS_ROCPROFILER_SINGLETON_H_

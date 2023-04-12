@@ -1,6 +1,7 @@
 #include "df_counters_mi200.h"
 #include "df_perfmon_registers_mi200.h"
 #include "mmio.h"
+#include "src/core/hsa/hsa_support.h"
 
 namespace rocprofiler {
 
@@ -15,7 +16,7 @@ namespace rocprofiler {
 /* get ficaa value for accessing CakeDlwmActiveTransferCount */
 #define AMDGPU_PMU_SET_FICAA(o) ((o << 16) | 0x1AF5)
 
-DFPerfMonMI200::DFPerfMonMI200(const Agent::AgentInfo& info) : PerfMon(), mmio_(nullptr) {
+DFPerfMonMI200::DFPerfMonMI200(const HSAAgentInfo& info) : PerfMon(), mmio_(nullptr) {
   mmio_ = dynamic_cast<mmio::DFPerfmonMMIO*>(mmio::MMIOManager::CreateMMIO(mmio::DF_PERFMON, info));
 }
 

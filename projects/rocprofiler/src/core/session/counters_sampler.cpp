@@ -35,17 +35,17 @@ CountersSampler::CountersSampler(rocprofiler_buffer_id_t buffer_id,
       pci_system_initialized_(pci_system_init() == 0)
 
 {
-  params_ = rocprofiler::GetROCProfilerSingleton()
-                ->GetSession(session_id_)
+  params_ = rocprofiler::ROCProfiler_Singleton::GetInstance()
+                .GetSession(session_id_)
                 ->GetFilter(filter_id_)
                 ->GetCountersSamplerParameterData();
 
   std::vector<hsa_agent_t> agents;
-  rocprofiler::hsa_support::GetCoreApiTable().hsa_iterate_agents_fn(
+  HSASupport_Singleton::GetInstance().GetCoreApiTable().hsa_iterate_agents_fn(
       [](hsa_agent_t agent, void* arg) {
         auto& agents = *reinterpret_cast<std::vector<hsa_agent_t>*>(arg);
-        const auto& ai = rocprofiler::hsa_support::GetAgentInfo(agent.handle);
-        if (ai.getType() == HSA_DEVICE_TYPE_GPU) {
+        const auto& ai = HSASupport_Singleton::GetInstance().GetHSAAgentInfo(agent.handle);
+        if (ai.GetType() == HSA_DEVICE_TYPE_GPU) {
           agents.emplace_back(agent);
         }
         return HSA_STATUS_SUCCESS;
@@ -62,8 +62,8 @@ CountersSampler::CountersSampler(rocprofiler_buffer_id_t buffer_id,
   }
 
   if (pcie_counter_names.size() > 0) {
-    auto agentInfo = rocprofiler::hsa_support::GetAgentInfo(agents[params_.gpu_agent_index].handle);
-    if (agentInfo.getName() == "gfx90a") {
+    auto agentInfo = HSASupport_Singleton::GetInstance().GetHSAAgentInfo(agents[params_.gpu_agent_index].handle);
+    if (agentInfo.GetDeviceInfo().getName()== "gfx90a") {
       PciePerfMonMI200* perfmon = new PciePerfMonMI200(agentInfo);
       perfmon->SetCounterNames(pcie_counter_names);
       perfmon_instances_.push_back(perfmon);
@@ -77,8 +77,8 @@ CountersSampler::CountersSampler(rocprofiler_buffer_id_t buffer_id,
   }
 
   if (xgmi_counter_names.size() > 0) {
-    auto agentInfo = rocprofiler::hsa_support::GetAgentInfo(agents[params_.gpu_agent_index].handle);
-    if (agentInfo.getName() == "gfx90a") {
+    auto agentInfo = HSASupport_Singleton::GetInstance().GetHSAAgentInfo(agents[params_.gpu_agent_index].handle);
+    if (agentInfo.GetDeviceInfo().getName() == "gfx90a") {
       DFPerfMonMI200* perfmon = new DFPerfMonMI200(agentInfo);
       perfmon->SetCounterNames(xgmi_counter_names);
       perfmon_instances_.push_back(perfmon);
@@ -132,13 +132,13 @@ void CountersSampler::Stop() {
 }
 
 void CountersSampler::AddRecord(rocprofiler_record_counters_sampler_t& record) {
-  const auto tool = rocprofiler::GetROCProfilerSingleton();
-  const auto session = tool->GetSession(session_id_);
+  rocprofiler::ROCProfiler_Singleton& tool = rocprofiler::ROCProfiler_Singleton::GetInstance();
+  const auto session = tool.GetSession(session_id_);
   const auto buffer = session->GetBuffer(buffer_id_);
 
   std::lock_guard<std::mutex> lk(session->GetSessionLock());
 
-  record.header = {ROCPROFILER_COUNTERS_SAMPLER_RECORD, {tool->GetUniqueRecordId()}};
+  record.header = {ROCPROFILER_COUNTERS_SAMPLER_RECORD, {tool.GetUniqueRecordId()}};
 
   // Add the record to the buffer(a deep-copy operation) along with
   // a lambda function to deep-copy the record.counters member to

@@ -51,10 +51,10 @@ void PrintRegisterData(uint32_t& index_value, uint32_t& data_value, const char* 
 #endif
 }
 
-MMIO::MMIO(const Agent::AgentInfo& info)
+MMIO::MMIO(const HSAAgentInfo& info)
     : agent_info_(&info), pci_memory_(nullptr), type_(DEFAULT_MMAP) {
-  const auto pci_domain = agent_info_->getPCIDomain();
-  const auto pci_location_id = agent_info_->getPCILocationID();
+  const auto pci_domain = agent_info_->GetDeviceInfo().getPCIDomain();
+  const auto pci_location_id = agent_info_->GetDeviceInfo().getPCILocationID();
 
   pci_device_ =
       pci_device_find_by_slot(pci_domain, pci_location_id >> 8, pci_location_id & 0xFF, 0);
@@ -123,7 +123,7 @@ bool MMIO::RegisterReadAPI(uint32_t reg_offset, uint32_t& value) {
 }
 
 
-MMIO* MMIOManager::CreateMMIO(mmap_type_t type, const Agent::AgentInfo& info) {
+MMIO* MMIOManager::CreateMMIO(mmap_type_t type, const HSAAgentInfo& info) {
   MMIO* mmio = nullptr;
   switch (type) {
     case PCIE_PERFMON: {
@@ -152,7 +152,7 @@ MMIO* MMIOManager::CreateMMIO(mmap_type_t type, const Agent::AgentInfo& info) {
   return mmio;
 }
 
-MMIO* MMIOManager::GetMMIOInstance(mmap_type_t type, const Agent::AgentInfo& info) {
+MMIO* MMIOManager::GetMMIOInstance(mmap_type_t type, const HSAAgentInfo& info) {
   MMIO* mmio = nullptr;
   auto it = mmio_instances_.find(info.getHandle());
   if (it != mmio_instances_.end()) {

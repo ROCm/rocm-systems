@@ -116,9 +116,10 @@ std::mutex& Tracer::GetTracerLock() { return tracer_lock_; }
 void api_callback(activity_domain_t domain, uint32_t cid, const void* callback_data, void* args) {
   api_callback_data_t* args_data = reinterpret_cast<api_callback_data_t*>(args);
   rocprofiler_tracer_api_data_t api_data{};
-  if (args_data && rocprofiler::GetROCProfilerSingleton() &&
-      rocprofiler::GetROCProfilerSingleton()->GetSession(args_data->session_id) &&
-      rocprofiler::GetROCProfilerSingleton()->GetSession(args_data->session_id)->GetTracer()) {
+  rocprofiler::ROCProfiler_Singleton&  rocprofiler_singleton = rocprofiler::ROCProfiler_Singleton::GetInstance();
+  if (args_data  &&
+      rocprofiler_singleton.GetSession(args_data->session_id) &&
+      rocprofiler_singleton.GetSession(args_data->session_id)->GetTracer()) {
     switch (domain) {
       case ACTIVITY_DOMAIN_ROCTX: {
         const roctx_api_data_t* data = reinterpret_cast<const roctx_api_data_t*>(callback_data);
@@ -127,12 +128,12 @@ void api_callback(activity_domain_t domain, uint32_t cid, const void* callback_d
             rocprofiler_record_tracer_t{
                 rocprofiler_record_header_t{
                     ROCPROFILER_TRACER_RECORD,
-                    rocprofiler_record_id_t{
-                        rocprofiler::GetROCProfilerSingleton()->GetUniqueRecordId()}},
+                    rocprofiler_record_id_t{rocprofiler_singleton.GetUniqueRecordId()}},
                 rocprofiler_tracer_external_id_t{data ? data->args.id : 0}, ACTIVITY_DOMAIN_ROCTX,
                 rocprofiler_tracer_operation_id_t{cid}, api_data,
+
                 rocprofiler_tracer_activity_correlation_id_t{0},
-                rocprofiler_record_header_timestamp_t{roctracer::hsa_support::timestamp_ns(),
+                rocprofiler_record_header_timestamp_t{rocprofiler_singleton.timestamp_ns(),
                                                       rocprofiler_timestamp_t{0}},
                 0, 0, GetTid(), ROCPROFILER_PHASE_ENTER},
             args_data->session_id);
@@ -147,8 +148,7 @@ void api_callback(activity_domain_t domain, uint32_t cid, const void* callback_d
               rocprofiler_record_tracer_t{
                   rocprofiler_record_header_t{
                       ROCPROFILER_TRACER_RECORD,
-                      rocprofiler_record_id_t{
-                          rocprofiler::GetROCProfilerSingleton()->GetUniqueRecordId()}},
+                      rocprofiler_record_id_t{rocprofiler_singleton.GetUniqueRecordId()}},
                   rocprofiler_tracer_external_id_t{0}, ACTIVITY_DOMAIN_HSA_API,
                   rocprofiler_tracer_operation_id_t{cid}, api_data,
                   rocprofiler_tracer_activity_correlation_id_t{data->correlation_id},
@@ -161,8 +161,7 @@ void api_callback(activity_domain_t domain, uint32_t cid, const void* callback_d
               rocprofiler_record_tracer_t{
                   rocprofiler_record_header_t{
                       ROCPROFILER_TRACER_RECORD,
-                      rocprofiler_record_id_t{
-                          rocprofiler::GetROCProfilerSingleton()->GetUniqueRecordId()}},
+                      rocprofiler_record_id_t{rocprofiler_singleton.GetUniqueRecordId()}},
                   rocprofiler_tracer_external_id_t{0}, ACTIVITY_DOMAIN_HSA_API,
                   rocprofiler_tracer_operation_id_t{cid}, api_data,
                   rocprofiler_tracer_activity_correlation_id_t{data->correlation_id},
@@ -182,8 +181,7 @@ void api_callback(activity_domain_t domain, uint32_t cid, const void* callback_d
               rocprofiler_record_tracer_t{
                   rocprofiler_record_header_t{
                       ROCPROFILER_TRACER_RECORD,
-                      rocprofiler_record_id_t{
-                          rocprofiler::GetROCProfilerSingleton()->GetUniqueRecordId()}},
+                      rocprofiler_record_id_t{rocprofiler_singleton.GetUniqueRecordId()}},
                   rocprofiler_tracer_external_id_t{0}, ACTIVITY_DOMAIN_HIP_API,
                   rocprofiler_tracer_operation_id_t{cid}, api_data,
                   rocprofiler_tracer_activity_correlation_id_t{data->correlation_id},
@@ -196,8 +194,7 @@ void api_callback(activity_domain_t domain, uint32_t cid, const void* callback_d
               rocprofiler_record_tracer_t{
                   rocprofiler_record_header_t{
                       ROCPROFILER_TRACER_RECORD,
-                      rocprofiler_record_id_t{
-                          rocprofiler::GetROCProfilerSingleton()->GetUniqueRecordId()}},
+                      rocprofiler_record_id_t{rocprofiler_singleton.GetUniqueRecordId()}},
                   rocprofiler_tracer_external_id_t{0}, ACTIVITY_DOMAIN_HIP_API,
                   rocprofiler_tracer_operation_id_t{cid}, api_data,
                   rocprofiler_tracer_activity_correlation_id_t{data->correlation_id},

@@ -40,7 +40,6 @@
 #include "src/core/counters/basic/basic_counter.h"
 #include "src/utils/exception.h"
 #include "src/utils/logger.h"
-#include "src/core/hsa/hsa_common.h"
 
 #include "src/core/counters/metrics/metrics.h"
 #include "src/core/hardware/hsa_info.h"
@@ -83,13 +82,14 @@ static hsa_status_t FindGlobalPool(hsa_amd_memory_pool_t pool, void* data, bool 
   if (nullptr == data) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
-  err = rocprofiler::hsa_support::GetAmdExtTable().hsa_amd_memory_pool_get_info_fn(
+  rocprofiler::HSASupport_Singleton& hsasupport_singleton = rocprofiler::HSASupport_Singleton::GetInstance();
+  err = hsasupport_singleton.GetAmdExtTable().hsa_amd_memory_pool_get_info_fn(
       pool, HSA_AMD_MEMORY_POOL_INFO_SEGMENT, &segment);
   ASSERTM(err != HSA_STATUS_ERROR, "hsa_amd_memory_pool_get_info");
   if (HSA_AMD_SEGMENT_GLOBAL != segment) {
     return HSA_STATUS_SUCCESS;
   }
-  err = rocprofiler::hsa_support::GetAmdExtTable().hsa_amd_memory_pool_get_info_fn(
+  err = hsasupport_singleton.GetAmdExtTable().hsa_amd_memory_pool_get_info_fn(
       pool, HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS, &flag);
   ASSERTM(err != HSA_STATUS_ERROR, "hsa_amd_memory_pool_get_info");
   uint32_t karg_st = flag & HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT;
@@ -114,20 +114,22 @@ hsa_status_t FindKernArgPool(hsa_amd_memory_pool_t pool, void* data) {
   return FindGlobalPool(pool, data, true);
 }
 
-void InitializePools(hsa_agent_t cpu_agent, Agent::AgentInfo* agent_info) {
+void InitializePools(hsa_agent_t cpu_agent, rocprofiler::HSAAgentInfo* agent_info) {
+  rocprofiler::HSASupport_Singleton& hsasupport_singleton = rocprofiler::HSASupport_Singleton::GetInstance();
   hsa_status_t status =
-      rocprofiler::hsa_support::GetAmdExtTable().hsa_amd_agent_iterate_memory_pools_fn(
-          cpu_agent, FindStandardPool, &(agent_info->cpu_pool));
+      hsasupport_singleton.GetAmdExtTable().hsa_amd_agent_iterate_memory_pools_fn(
+          cpu_agent, FindStandardPool, &(agent_info->cpu_pool_));
   CHECK_HSA_STATUS("Error: Command Buffer Pool is not initialized", status);
 
-  status = rocprofiler::hsa_support::GetAmdExtTable().hsa_amd_agent_iterate_memory_pools_fn(
-      cpu_agent, FindKernArgPool, &(agent_info->kernarg_pool));
+  status = hsasupport_singleton.GetAmdExtTable().hsa_amd_agent_iterate_memory_pools_fn(
+      cpu_agent, FindKernArgPool, &(agent_info->kernarg_pool_));
   CHECK_HSA_STATUS("Error: Output Buffer Pool is not initialized", status);
 }
 
-void InitializeGPUPool(hsa_agent_t gpu_agent, Agent::AgentInfo* agent_info) {
+void InitializeGPUPool(hsa_agent_t gpu_agent, rocprofiler::HSAAgentInfo* agent_info) {
+  rocprofiler::HSASupport_Singleton& hsasupport_singleton = rocprofiler::HSASupport_Singleton::GetInstance();
   hsa_status_t status =
-      hsa_amd_agent_iterate_memory_pools(gpu_agent, FindStandardPool, &(agent_info->gpu_pool));
+      hsasupport_singleton.GetAmdExtTable().hsa_amd_agent_iterate_memory_pools_fn(gpu_agent, FindStandardPool, &(agent_info->gpu_pool_));
   CHECK_HSA_STATUS("hsa_amd_agent_iterate_memory_pools(gpu_pool)", status);
 }
 
@@ -136,13 +138,18 @@ struct block_des_t {
   uint32_t index;
 };
 
-std::map<uint32_t, rocprofiler::MetricsDict*> metricsDict;
+
 static std::atomic<bool> counters_added{false};
 
-void CheckPacketReqiurements(std::vector<hsa_agent_t>& gpu_agents) {
-  for (auto& gpu_agent : gpu_agents) {
+
+std::map<uint32_t, rocprofiler::MetricsDict*> metricsDict;
+
+
+void CheckPacketReqiurements() {
+  rocprofiler::HSASupport_Singleton& hsasupport_singleton = rocprofiler::HSASupport_Singleton::GetInstance();
+  for (auto& gpu_agent : hsasupport_singleton.gpu_agents) {
     // get the instance of MetricsDict
-    Agent::AgentInfo& agentInfo = rocprofiler::hsa_support::GetAgentInfo(gpu_agent.handle);
+    rocprofiler::HSAAgentInfo& agentInfo = hsasupport_singleton.GetHSAAgentInfo(gpu_agent.handle);
     metricsDict[gpu_agent.handle] = rocprofiler::MetricsDict::Create(&agentInfo);
   }
 }
@@ -155,18 +162,18 @@ InitializeAqlPackets(hsa_agent_t cpu_agent, hsa_agent_t gpu_agent,
                      std::vector<std::string>& counter_names, rocprofiler_session_id_t session_id,
                      bool is_spm) {
   hsa_status_t status = HSA_STATUS_SUCCESS;
-
+  rocprofiler::ROCProfiler_Singleton& rocprofiler_singleton = rocprofiler::ROCProfiler_Singleton::GetInstance();
+  rocprofiler::HSASupport_Singleton& hsasupport_singleton = rocprofiler::HSASupport_Singleton::GetInstance();
   if (!counters_added.load(std::memory_order_acquire)) {
     for (auto& name : counter_names) {
-      rocprofiler::GetROCProfilerSingleton()
-          ->GetSession(session_id)
-          ->GetProfiler()
-          ->AddCounterName(name);
+      if (rocprofiler_singleton.HasActiveSession()) {
+        rocprofiler_singleton.GetSession(session_id)->GetProfiler()->AddCounterName(name);
+      }
     }
     counters_added.exchange(true, std::memory_order_release);
   }
 
-  Agent::AgentInfo& agentInfo = rocprofiler::hsa_support::GetAgentInfo(gpu_agent.handle);
+  rocprofiler::HSAAgentInfo& agentInfo = hsasupport_singleton.GetHSAAgentInfo(gpu_agent.handle);
   std::map<std::string, rocprofiler::results_t*> results_map;
   std::vector<rocprofiler::event_t> events_list;
   std::vector<rocprofiler::results_t*> results_list;
@@ -330,8 +337,8 @@ InitializeAqlPackets(hsa_agent_t cpu_agent, hsa_agent_t gpu_agent,
                   << "Error: Command buffer given size is " << size << std::endl;
         abort();
       }
-      status = rocprofiler::hsa_support::GetAmdExtTable().hsa_amd_memory_pool_allocate_fn(
-          agentInfo.cpu_pool, size, 0, reinterpret_cast<void**>(&(profile->command_buffer.ptr)));
+      status =hsasupport_singleton.GetAmdExtTable().hsa_amd_memory_pool_allocate_fn(
+          agentInfo.cpu_pool_, size, 0, reinterpret_cast<void**>(&(profile->command_buffer.ptr)));
       if (status != HSA_STATUS_SUCCESS) {
         profile->command_buffer.ptr = malloc(size);
         /*numa_alloc_onnode(
@@ -344,11 +351,10 @@ InitializeAqlPackets(hsa_agent_t cpu_agent, hsa_agent_t gpu_agent,
         }
       } else {
         // Both the CPU and GPU can access the memory
-        status = rocprofiler::hsa_support::GetAmdExtTable().hsa_amd_agents_allow_access_fn(
+        status =hsasupport_singleton.GetAmdExtTable().hsa_amd_agents_allow_access_fn(
             ag_list_count, ag_list, NULL, profile->command_buffer.ptr);
         CHECK_HSA_STATUS("Error: Allowing access to Command Buffer", status);
       }
-
       if (!is_spm) {
         status = HSA_STATUS_ERROR;
         size_t size = profile->output_buffer.size;
@@ -358,8 +364,8 @@ InitializeAqlPackets(hsa_agent_t cpu_agent, hsa_agent_t gpu_agent,
                     << "Error: Output buffer given size is " << size << std::endl;
           abort();
         }
-        status = rocprofiler::hsa_support::GetAmdExtTable().hsa_amd_memory_pool_allocate_fn(
-            agentInfo.kernarg_pool, size, 0, reinterpret_cast<void**>(&profile->output_buffer.ptr));
+        status =hsasupport_singleton.GetAmdExtTable().hsa_amd_memory_pool_allocate_fn(
+            agentInfo.kernarg_pool_, size, 0, reinterpret_cast<void**>(&profile->output_buffer.ptr));
         if (status != HSA_STATUS_SUCCESS) {
           profile->output_buffer.ptr = malloc(size);
           /*numa_alloc_onnode(
@@ -372,7 +378,7 @@ InitializeAqlPackets(hsa_agent_t cpu_agent, hsa_agent_t gpu_agent,
             abort();
           }
         } else {
-          status = rocprofiler::hsa_support::GetAmdExtTable().hsa_amd_agents_allow_access_fn(
+          status =hsasupport_singleton.GetAmdExtTable().hsa_amd_agents_allow_access_fn(
               ag_list_count, ag_list, NULL, profile->output_buffer.ptr);
           CHECK_HSA_STATUS("Error: GPU Agent can't have output buffer access", status);
           memset(profile->output_buffer.ptr, 0x0, profile->output_buffer.size);
@@ -420,29 +426,34 @@ hsa_ven_amd_aqlprofile_profile_t* InitializeDeviceProfilingAqlPackets(
 
   // Preparing an Getting the size of the command and output buffers
   status = hsa_ven_amd_aqlprofile_start(profile, NULL);
-
-  Agent::AgentInfo& agentInfo = rocprofiler::hsa_support::GetAgentInfo(gpu_agent.handle);
+  rocprofiler::HSASupport_Singleton& hsasupport_singleton = rocprofiler::HSASupport_Singleton::GetInstance();
+  rocprofiler::HSAAgentInfo& agentInfo = hsasupport_singleton.GetHSAAgentInfo(gpu_agent.handle);
   size_t ag_list_count = 1;
   hsa_agent_t ag_list[ag_list_count];
   ag_list[0] = gpu_agent;
 
   // Allocating Command Buffer
+  //FixMe: Command buffer and output buffers are allocated repetatively.
   status = HSA_STATUS_ERROR;
   size_t size = profile->command_buffer.size;
   profile->command_buffer.ptr = nullptr;
   if (size <= 0) return nullptr;
   size = (size + MEM_PAGE_MASK) & ~MEM_PAGE_MASK;
-  status = rocprofiler::hsa_support::GetAmdExtTable().hsa_amd_memory_pool_allocate_fn(
-      agentInfo.cpu_pool, size, 0, reinterpret_cast<void**>(&(profile->command_buffer.ptr)));
+  status =hsasupport_singleton.GetAmdExtTable().hsa_amd_memory_pool_allocate_fn(
+      agentInfo.cpu_pool_, size, 0, reinterpret_cast<void**>(&(profile->command_buffer.ptr)));
   // Both the CPU and GPU can access the memory
   if (status == HSA_STATUS_SUCCESS) {
-    status = rocprofiler::hsa_support::GetAmdExtTable().hsa_amd_agents_allow_access_fn(
+    status =hsasupport_singleton.GetAmdExtTable().hsa_amd_agents_allow_access_fn(
         ag_list_count, ag_list, NULL, profile->command_buffer.ptr);
     CHECK_HSA_STATUS("Error: GPU Agent can't have command buffer access", status);
   } else {
+    hsa_agent_t near_cpu_node = agentInfo.GetNearCpuAgent();
+    uint32_t near_cpu_node_id = 0;
+    hsasupport_singleton.GetCoreApiTable().hsa_agent_get_info_fn(near_cpu_node,
+      HSA_AGENT_INFO_NODE, &near_cpu_node_id);
     profile->command_buffer.ptr = numa_alloc_onnode(
         profile->command_buffer.size,
-        rocprofiler::hsa_support::GetAgentInfo(agentInfo.getNearCpuAgent().handle).getNumaNode());
+       near_cpu_node_id);
     if (profile->command_buffer.ptr != nullptr) {
       status = HSA_STATUS_SUCCESS;
     } else {
@@ -455,12 +466,12 @@ hsa_ven_amd_aqlprofile_profile_t* InitializeDeviceProfilingAqlPackets(
   size = profile->output_buffer.size;
   profile->output_buffer.ptr = nullptr;
   size = (size + MEM_PAGE_MASK) & ~MEM_PAGE_MASK;
-  status = rocprofiler::hsa_support::GetAmdExtTable().hsa_amd_memory_pool_allocate_fn(
-      agentInfo.gpu_pool, size, 0, reinterpret_cast<void**>(&(profile->output_buffer.ptr)));
+  status =hsasupport_singleton.GetAmdExtTable().hsa_amd_memory_pool_allocate_fn(
+      agentInfo.gpu_pool_, size, 0, reinterpret_cast<void**>(&(profile->output_buffer.ptr)));
   CHECK_HSA_STATUS("Error: Can't Allocate Output Buffer", status);
   // Both the CPU and GPU can access the kernel arguments
   if (status == HSA_STATUS_SUCCESS) {
-    status = rocprofiler::hsa_support::GetAmdExtTable().hsa_amd_agents_allow_access_fn(
+    status =hsasupport_singleton.GetAmdExtTable().hsa_amd_agents_allow_access_fn(
         ag_list_count, ag_list, NULL, profile->output_buffer.ptr);
     CHECK_HSA_STATUS("Error: Can't allow access on the Output Buffer for the GPU", status);
     memset(profile->output_buffer.ptr, 0x0, profile->output_buffer.size);
@@ -490,11 +501,12 @@ uint8_t* AllocateSysMemory(hsa_agent_t gpu_agent, size_t size, hsa_amd_memory_po
   hsa_status_t status = HSA_STATUS_ERROR;
   uint8_t* buffer = NULL;
   size = (size + MEM_PAGE_MASK) & ~MEM_PAGE_MASK;
-  status = rocprofiler::hsa_support::GetAmdExtTable().hsa_amd_memory_pool_allocate_fn(
+  rocprofiler::HSASupport_Singleton& hsasupport_singleton = rocprofiler::HSASupport_Singleton::GetInstance();
+  status =hsasupport_singleton.GetAmdExtTable().hsa_amd_memory_pool_allocate_fn(
       *cpu_pool, size, 0, reinterpret_cast<void**>(&buffer));
   // Both the CPU and GPU can access the memory
   if (status == HSA_STATUS_SUCCESS) {
-    status = rocprofiler::hsa_support::GetAmdExtTable().hsa_amd_agents_allow_access_fn(
+    status = hsasupport_singleton.GetAmdExtTable().hsa_amd_agents_allow_access_fn(
         ag_list_count, ag_list, NULL, buffer);
   }
   uint8_t* ptr = (status == HSA_STATUS_SUCCESS) ? buffer : NULL;
@@ -504,32 +516,33 @@ uint8_t* AllocateSysMemory(hsa_agent_t gpu_agent, size_t size, hsa_amd_memory_po
 // Allocate memory for use by a kernel of specified size
 uint8_t* AllocateLocalMemory(size_t size, hsa_amd_memory_pool_t* gpu_pool) {
   hsa_status_t status = HSA_STATUS_ERROR;
+  rocprofiler::HSASupport_Singleton& hsasupport_singleton = rocprofiler::HSASupport_Singleton::GetInstance();
   uint8_t* buffer = NULL;
   size = (size + MEM_PAGE_MASK) & ~MEM_PAGE_MASK;
-  status = hsa_amd_memory_pool_allocate(*gpu_pool, size, 0, reinterpret_cast<void**>(&buffer));
+  status = hsasupport_singleton.GetAmdExtTable().hsa_amd_memory_pool_allocate_fn(*gpu_pool, size, 0, reinterpret_cast<void**>(&buffer));
   uint8_t* ptr = (status == HSA_STATUS_SUCCESS) ? buffer : NULL;
   return ptr;
 }
 
-hsa_status_t Allocate(hsa_agent_t gpu_agent, hsa_ven_amd_aqlprofile_profile_t* profile,
-                      size_t att_buffer_size) {
-  Agent::AgentInfo& agentInfo = rocprofiler::hsa_support::GetAgentInfo(gpu_agent.handle);
+hsa_status_t Allocate(hsa_agent_t gpu_agent, hsa_ven_amd_aqlprofile_profile_t* profile,  size_t att_buffer_size) {
+ rocprofiler::HSAAgentInfo& agentInfo = rocprofiler::HSASupport_Singleton::GetInstance().GetHSAAgentInfo(gpu_agent.handle);
   profile->command_buffer.ptr =
-      AllocateSysMemory(gpu_agent, profile->command_buffer.size, &agentInfo.cpu_pool);
+      AllocateSysMemory(gpu_agent, profile->command_buffer.size, &agentInfo.cpu_pool_);
   profile->output_buffer.size = att_buffer_size;
   profile->output_buffer.ptr = (g_output_buffer_local)
-      ? AllocateLocalMemory(profile->output_buffer.size, &agentInfo.gpu_pool)
-      : AllocateSysMemory(gpu_agent, profile->output_buffer.size, &agentInfo.cpu_pool);
+      ? AllocateLocalMemory(profile->output_buffer.size, &agentInfo.gpu_pool_)
+      : AllocateSysMemory(gpu_agent, profile->output_buffer.size, &agentInfo.cpu_pool_);
   return (profile->command_buffer.ptr && profile->output_buffer.ptr) ? HSA_STATUS_SUCCESS
                                                                      : HSA_STATUS_ERROR;
 }
 
 bool AllocateMemoryPools(hsa_agent_t cpu_agent, hsa_agent_t gpu_agent,
                          hsa_amd_memory_pool_t* cpu_pool, hsa_amd_memory_pool_t* gpu_pool) {
-  hsa_status_t status = hsa_amd_agent_iterate_memory_pools(cpu_agent, FindStandardPool, cpu_pool);
+  rocprofiler::HSASupport_Singleton& hsasupport_singleton =  rocprofiler::HSASupport_Singleton::GetInstance();
+  hsa_status_t status =  hsasupport_singleton.GetAmdExtTable().hsa_amd_agent_iterate_memory_pools_fn(cpu_agent, FindStandardPool, cpu_pool);
   CHECK_HSA_STATUS("hsa_amd_agent_iterate_memory_pools(cpu_pool)", status);
 
-  status = hsa_amd_agent_iterate_memory_pools(gpu_agent, FindStandardPool, gpu_pool);
+  status = hsasupport_singleton.GetAmdExtTable().hsa_amd_agent_iterate_memory_pools_fn(gpu_agent, FindStandardPool, gpu_pool);
   CHECK_HSA_STATUS("hsa_amd_agent_iterate_memory_pools(gpu_pool)", status);
 
   return true;

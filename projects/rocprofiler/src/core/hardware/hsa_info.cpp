@@ -19,8 +19,12 @@
  THE SOFTWARE. */
 
 #include "hsa_info.h"
+#include <fstream>
+#include <experimental/filesystem>
 
 #include "src/utils/helper.h"
+
+namespace fs = std::experimental::filesystem;
 
 #define CHECK_STATUS(msg, status)                                                                  \
   do {                                                                                             \
@@ -35,86 +39,120 @@
 namespace Agent {
 // AgentInfo Class
 
-AgentInfo::AgentInfo() {}
-AgentInfo::AgentInfo(const hsa_agent_t agent, ::CoreApiTable* table) : handle_(agent.handle) {
-  if (table->hsa_agent_get_info_fn(agent, HSA_AGENT_INFO_DEVICE, &type_) != HSA_STATUS_SUCCESS)
-    rocprofiler::fatal("hsa_agent_get_info failed");
+char convert(uint32_t version) {
+  uint32_t diff = version - 10;
+  if (static_cast<char>('a' + diff) >= 'a' && static_cast<char>('a' + diff) <= 'z')
+    return static_cast<char>('a' + diff);
+  rocprofiler::fatal("Incorrect gpu version");
+}
 
-  table->hsa_agent_get_info_fn(agent, HSA_AGENT_INFO_NAME, name_);
+DeviceInfo::DeviceInfo(uint32_t topology_id, uint32_t gpu_id) {
+  fs::path sysfs_nodes_path = "/sys/class/kfd/kfd/topology/nodes/";
+  fs::directory_entry dirp("/sys/class/kfd/kfd/topology/nodes");
+  if (!fs::exists(sysfs_nodes_path))
+    rocprofiler::fatal("Could not opendir `%s'", sysfs_nodes_path.c_str());
+  // Check the type of the device using gpu id
+  if (gpu_id == 0) assert("DeviceInfo does not support CPU");
+  numa_node_ = topology_id;
 
+  fs::path node_path = sysfs_nodes_path / std::to_string(topology_id);
+  if (!fs::exists(node_path)) rocprofiler::fatal("Could not opendir `%s'", node_path.c_str());
+  xcc_num_ = 1;
+  gpu_id_ = gpu_id;
+  fs::path properties_path = node_path / "properties";
+  std::ifstream props_ifs(properties_path);
+  uint32_t cu_per_simd_array = 0, array_count = 0;
+  uint32_t max_waves_per_simd = 0, gfx_target_version = 0;
+  std::string prop_name, minor_version_str, stepping_str;
+  uint64_t prop_value;
+  uint32_t major_version = 0, minor_version = 0, stepping = 0;
+  std::stringstream hex_minor_version;
+  max_wave_size_ = 0;
+  simds_per_cu_ = 0;
+  shader_arrays_per_se_ = 0;
+  se_num_ = 0;
+  waves_per_cu_ = 0;
+  cu_num_ = 0;
+  compute_units_per_sh_ = 0;
+  if (!props_ifs.is_open())
+    rocprofiler::fatal("Could not open %s/properties", properties_path.c_str());
+  while (props_ifs >> prop_name >> prop_value) {
+    if (prop_name == "wave_front_size") {
+      max_wave_size_ = static_cast<uint32_t>(prop_value);
+      if (max_wave_size_ <= 0) rocprofiler::fatal("Invalid max_wave_size_ in the topology file");
+    } else if (prop_name == "cu_per_simd_array") {
+      cu_per_simd_array = static_cast<uint32_t>(prop_value);
+      if (cu_per_simd_array <= 0)
+        rocprofiler::fatal("Invalid cu_per_simd_array in the topology file");
+    } else if (prop_name == "array_count") {
+      array_count = static_cast<uint32_t>(prop_value);
+      if (array_count <= 0) rocprofiler::fatal("Invalid array_count in the topology file");
+    } else if (prop_name == "simd_per_cu") {
+      simds_per_cu_ = static_cast<uint32_t>(prop_value);
+      if (simds_per_cu_ <= 0) rocprofiler::fatal("Invalid simd_per_cu in the topology file");
+    } else if (prop_name == "location_id")
+      pci_location_id_ = static_cast<uint32_t>(prop_value);
+    else if (prop_name == "domain")
+      pci_domain_ = static_cast<uint32_t>(prop_value);
+    else if (prop_name == "simd_arrays_per_engine") {
+      shader_arrays_per_se_ = static_cast<uint32_t>(prop_value);
+      if (shader_arrays_per_se_ <= 0)
+        rocprofiler::fatal("Invalid simd_arrays_per_engine in the topology file");
+    } else if (prop_name == "max_waves_per_simd") {
+      max_waves_per_simd = static_cast<uint32_t>(prop_value);
+      if (max_waves_per_simd <= 0)
+        rocprofiler::fatal("Invalid max_waves_per_simd in the topology file");
+    } else if (prop_name == "gfx_target_version")
+      gfx_target_version = static_cast<uint32_t>(prop_value);
+
+    else if (prop_name == "unique_id")
+      unique_gpu_id_ = static_cast<uint64_t>(prop_value);
+    else if (prop_name == "num_xcc")
+      xcc_num_ = static_cast<uint32_t>(prop_value);
+  }
+
+  se_num_ = array_count / shader_arrays_per_se_;
+  waves_per_cu_ = max_waves_per_simd * simds_per_cu_;
+  cu_num_ = cu_per_simd_array * array_count;
+  major_version = (gfx_target_version / 100) / 100;
+  std::string major_version_str = std::to_string(major_version);
+  minor_version = (gfx_target_version / 100) % 100;
+  if (minor_version > 9)
+    minor_version_str = std::string(1, convert(minor_version));
+  else
+    minor_version_str = std::to_string(minor_version);
+  stepping = (gfx_target_version % 100);
+  if (stepping > 9)
+    stepping_str = std::string(1, convert(stepping));
+  else
+    stepping_str = std::to_string(stepping);
+  std::string gpu_name = "gfx" + major_version_str + minor_version_str + stepping_str;
+  strcpy(name_, gpu_name.c_str());
+  compute_units_per_sh_ = cu_num_ / (se_num_ * shader_arrays_per_se_);
+  wave_slots_per_simd_ = waves_per_cu_ / simds_per_cu_;
   const int gfxip_label_len = std::min(strlen(name_) - 2, sizeof(gfxip_) - 1);
   memcpy(gfxip_, name_, gfxip_label_len);
   gfxip_[gfxip_label_len] = '\0';
-
-  if (type_ != HSA_DEVICE_TYPE_GPU) {
-    return;
-  }
-
-  table->hsa_agent_get_info_fn(agent, HSA_AGENT_INFO_WAVEFRONT_SIZE, &max_wave_size_);
-  table->hsa_agent_get_info_fn(agent, HSA_AGENT_INFO_QUEUE_MAX_SIZE, &max_queue_size_);
-
-  table->hsa_agent_get_info_fn(
-      agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_COMPUTE_UNIT_COUNT), &cu_num_);
-
-  table->hsa_agent_get_info_fn(
-      agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_SIMDS_PER_CU), &simds_per_cu_);
-
-  table->hsa_agent_get_info_fn(
-      agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_SHADER_ENGINES), &se_num_);
-
-  if (table->hsa_agent_get_info_fn(agent,
-                                   (hsa_agent_info_t)HSA_AMD_AGENT_INFO_NUM_SHADER_ARRAYS_PER_SE,
-                                   &shader_arrays_per_se_) != HSA_STATUS_SUCCESS ||
-      table->hsa_agent_get_info_fn(agent, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_MAX_WAVES_PER_CU,
-                                   &waves_per_cu_) != HSA_STATUS_SUCCESS) {
-    rocprofiler::fatal("hsa_agent_get_info for gfxip hardware configuration failed");
-  }
-
-  compute_units_per_sh_ = cu_num_ / (se_num_ * shader_arrays_per_se_);
-  wave_slots_per_simd_ = waves_per_cu_ / simds_per_cu_;
-
-  if (table->hsa_agent_get_info_fn(agent, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_DOMAIN,
-                                   &pci_domain_) != HSA_STATUS_SUCCESS ||
-      table->hsa_agent_get_info_fn(agent, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_BDFID,
-                                   &pci_location_id_) != HSA_STATUS_SUCCESS) {
-    rocprofiler::fatal("hsa_agent_get_info for PCI info failed");
-  }
-
-  // TODO(saurabh, giovanni): Remove this in 5.7
-  if (table->hsa_agent_get_info_fn(agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_XCC),
-                                   &xcc_num_) != HSA_STATUS_SUCCESS) {
-    xcc_num_ = 1;
-  }
 }
 
-uint64_t AgentInfo::getIndex() const { return index_; }
-hsa_device_type_t AgentInfo::getType() const { return type_; }
-uint64_t AgentInfo::getHandle() const { return handle_; }
-const std::string_view AgentInfo::getName() const { return name_; }
-std::string AgentInfo::getGfxip() const { return std::string(gfxip_); }
-uint32_t AgentInfo::getMaxWaveSize() const { return max_wave_size_; }
-uint32_t AgentInfo::getMaxQueueSize() const { return max_queue_size_; }
-uint32_t AgentInfo::getCUCount() const { return cu_num_; }
-uint32_t AgentInfo::getSimdCountPerCU() const { return simds_per_cu_; }
-uint32_t AgentInfo::getShaderEngineCount() const { return se_num_; }
-uint32_t AgentInfo::getShaderArraysPerSE() const { return shader_arrays_per_se_; }
-uint32_t AgentInfo::getMaxWavesPerCU() const { return waves_per_cu_; }
-uint32_t AgentInfo::getCUCountPerSH() const { return compute_units_per_sh_; }
-uint32_t AgentInfo::getWaveSlotsPerSimd() const { return wave_slots_per_simd_; }
-uint32_t AgentInfo::getPCIDomain() const { return pci_domain_; }
-uint32_t AgentInfo::getPCILocationID() const { return pci_location_id_; }
-uint32_t AgentInfo::getXccCount() const { return xcc_num_; }
 
-void AgentInfo::setIndex(uint64_t index) { index_ = index; }
-void AgentInfo::setType(hsa_device_type_t type) { type_ = type; }
-void AgentInfo::setHandle(uint64_t handle) { handle_ = handle; }
-void AgentInfo::setName(const std::string& name) { strcpy(name_, name.c_str()); }
-
-void AgentInfo::setNumaNode(uint32_t numa_node) { numa_node_ = numa_node; }
-uint32_t AgentInfo::getNumaNode() { return numa_node_; }
-
-void AgentInfo::setNearCpuAgent(hsa_agent_t near_cpu_agent) { near_cpu_agent_ = near_cpu_agent; }
-hsa_agent_t AgentInfo::getNearCpuAgent() { return near_cpu_agent_; }
+std::string_view DeviceInfo::getName() const { return name_; }
+std::string DeviceInfo::getGfxip() const { return std::string(gfxip_); }
+uint32_t DeviceInfo::getMaxWaveSize() const { return max_wave_size_; }
+uint32_t DeviceInfo::getMaxQueueSize() const { return max_queue_size_; }
+uint32_t DeviceInfo::getCUCount() const { return cu_num_; }
+uint32_t DeviceInfo::getSimdCountPerCU() const { return simds_per_cu_; }
+uint32_t DeviceInfo::getShaderEngineCount() const { return se_num_; }
+uint32_t DeviceInfo::getShaderArraysPerSE() const { return shader_arrays_per_se_; }
+uint32_t DeviceInfo::getMaxWavesPerCU() const { return waves_per_cu_; }
+uint32_t DeviceInfo::getCUCountPerSH() const { return compute_units_per_sh_; }
+uint32_t DeviceInfo::getWaveSlotsPerSimd() const { return wave_slots_per_simd_; }
+uint32_t DeviceInfo::getPCIDomain() const { return pci_domain_; }
+uint32_t DeviceInfo::getPCILocationID() const { return pci_location_id_; }
+uint32_t DeviceInfo::getXccCount() const { return xcc_num_; }
+uint64_t DeviceInfo::getUniqueGPUId() const { return unique_gpu_id_; }
+uint32_t DeviceInfo::getNumaNode() const { return numa_node_; }
+uint64_t DeviceInfo::getGPUId() const { return gpu_id_; }
 
 // CounterHardwareInfo Class
 

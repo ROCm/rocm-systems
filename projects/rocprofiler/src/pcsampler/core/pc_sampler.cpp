@@ -30,7 +30,6 @@
 #include "src/api/rocprofiler_singleton.h"
 #include "src/pcsampler/session/pc_sampler.h"
 #include "src/pcsampler/gfxip/gfxip.h"
-#include "src/core/hsa/hsa_common.h"
 #include "src/core/hsa/hsa_support.h"
 
 namespace rocprofiler::pc_sampler {
@@ -59,17 +58,18 @@ void PCSampler::Start() {
   using agents_t = std::vector<hsa_agent_t>;
 
   agents_t agents;
-  rocprofiler::hsa_support::GetCoreApiTable().hsa_iterate_agents_fn(
-      [](hsa_agent_t agent, void* arg) {
-        auto& agents = *reinterpret_cast<agents_t*>(arg);
-        agents.emplace_back(agent);
-        return HSA_STATUS_SUCCESS;
-      },
-      &agents);
+  HSASupport_Singleton& hsasupport_singleton = HSASupport_Singleton::GetInstance();
+  hsasupport_singleton.GetCoreApiTable().hsa_iterate_agents_fn(
+   [](hsa_agent_t agent, void *arg){
+     auto &agents = *reinterpret_cast<agents_t *>(arg);
+     agents.emplace_back(agent);
+     return HSA_STATUS_SUCCESS;
+   },
+   &agents);
 
-  for (const auto& agent : agents) {
-    const auto& ai = rocprofiler::hsa_support::GetAgentInfo(agent.handle);
-    if (ai.getType() != HSA_DEVICE_TYPE_GPU) {
+  for (const auto &agent : agents) {
+    const auto& ai = hsasupport_singleton.GetHSAAgentInfo(agent.handle);
+    if (ai.GetType() !=  HSA_DEVICE_TYPE_GPU) {
       continue;
     }
     devices_.emplace(agent.handle, gfxip::device_t{pci_system_initialized_, ai});
@@ -89,13 +89,13 @@ void PCSampler::Stop() {
 }
 
 void PCSampler::AddRecord(rocprofiler_record_pc_sample_t& record) {
-  const auto tool = rocprofiler::GetROCProfilerSingleton();
-  const auto session = tool->GetSession(session_id_);
+  rocprofiler::ROCProfiler_Singleton&  rocprofiler_instance = rocprofiler::ROCProfiler_Singleton::GetInstance();
+  const auto session = rocprofiler_instance.GetSession(session_id_);
   const auto buffer = session->GetBuffer(buffer_id_);
 
   std::lock_guard<std::mutex> lk(session->GetSessionLock());
 
-  record.header = {ROCPROFILER_PC_SAMPLING_RECORD, {tool->GetUniqueRecordId()}};
+  record.header = {ROCPROFILER_PC_SAMPLING_RECORD, {rocprofiler_instance.GetUniqueRecordId()}};
   buffer->AddRecord(record);
 }
 

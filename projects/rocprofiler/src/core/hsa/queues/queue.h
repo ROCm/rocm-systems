@@ -39,8 +39,7 @@
 
 namespace rocprofiler {
 
-void InitKsymbols();
-void FinitKsymbols();
+
 void AddKernelName(uint64_t handle, std::string kernel_name);
 void RemoveKernelName(uint64_t handle);
 void AddKernelNameWithDispatchID(std::string name, uint64_t id);
@@ -52,12 +51,12 @@ namespace queue {
 
 class Queue {
  public:
-  Queue(const hsa_agent_t& cpu_agent, const hsa_agent_t& gpu_agent, uint32_t size,
-        hsa_queue_type32_t type,
-        void (*callback)(hsa_status_t status, hsa_queue_t* source, void* data), void* data,
-        uint32_t private_segment_size, uint32_t group_segment_size, hsa_queue_t** queue);
+  Queue(const hsa_agent_t cpu_agent, const hsa_agent_t gpu_agent,
+         hsa_queue_t* queue);
   ~Queue();
 
+  static void WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t user_pkt_index,
+                               void* data, hsa_amd_queue_intercept_packet_writer writer);
   hsa_queue_t* GetCurrentInterceptQueue();
   hsa_agent_t GetGPUAgent();
   hsa_agent_t GetCPUAgent();
@@ -69,7 +68,6 @@ class Queue {
   std::mutex mutex_;
   hsa_agent_t cpu_agent_;
   hsa_agent_t gpu_agent_;
-  hsa_queue_t* original_queue_;
   hsa_queue_t* intercept_queue_;
 
   hsa_status_t pmcCallback(hsa_ven_amd_aqlprofile_info_type_t info_type,
@@ -88,11 +86,9 @@ struct queue_info_session_t {
 
 void AddRecordCounters(rocprofiler_record_profiler_t* record, const pending_signal_t& pending);
 
-void InitializePools(hsa_agent_t cpu_agent, Agent::AgentInfo* agent_info);
-void InitializeGPUPool(hsa_agent_t gpu_agent, Agent::AgentInfo* agent_info);
-void CheckPacketReqiurements(std::vector<hsa_agent_t>& gpu_agents);
-
 void ResetSessionID(rocprofiler_session_id_t id = rocprofiler_session_id_t{0});
+
+void CheckPacketReqiurements();
 
 }  // namespace queue
 }  // namespace rocprofiler

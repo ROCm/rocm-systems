@@ -23,6 +23,7 @@
 
 #include <hsa/hsa.h>
 #include "src/core/hardware/hsa_info.h"
+#include "src/core/hsa/hsa_support.h"
 
 #include <pciaccess.h>
 #include <mutex>
@@ -67,17 +68,17 @@ class MMIO {
   virtual ~MMIO();
   friend class MMIOManager;
 
-  const Agent::AgentInfo& GetAgentInfo() { return *agent_info_; }
+  const HSAAgentInfo& GetAgentInfo() { return *agent_info_; }
   mmap_type_t Type() { return type_; }
 
  protected:
-  MMIO(const Agent::AgentInfo& info);
+  MMIO(const HSAAgentInfo& info);
 
   // default constructor; helpful for derived classes
   // which want to setup mmio construction differently
   MMIO() { type_ = DEFAULT_MMAP; };
 
-  const Agent::AgentInfo* agent_info_;
+  const HSAAgentInfo* agent_info_;
   struct pci_device* pci_device_;
   size_t pci_memory_size_;
   uint32_t* pci_memory_;
@@ -94,7 +95,7 @@ class PciePerfmonMMIO : public MMIO {
   friend class MMIOManager;
 
  protected:
-  PciePerfmonMMIO(const Agent::AgentInfo& info) : MMIO(info) { type_ = PCIE_PERFMON; };
+  PciePerfmonMMIO(const HSAAgentInfo& info) : MMIO(info) { type_ = PCIE_PERFMON; };
 };
 
 // DFPerfmonMMIO has same mmio setup approach as
@@ -104,7 +105,7 @@ class DFPerfmonMMIO : public MMIO {
   friend class MMIOManager;
 
  protected:
-  DFPerfmonMMIO(const Agent::AgentInfo& info) : MMIO(info) { type_ = DF_PERFMON; };
+  DFPerfmonMMIO( const HSAAgentInfo& info) : MMIO(info) { type_ = DF_PERFMON; };
 };
 /*
     Class to manage mmio for UMC/DF/PCIe etc.
@@ -114,8 +115,8 @@ class DFPerfmonMMIO : public MMIO {
 */
 class MMIOManager {
  public:
-  static MMIO* CreateMMIO(mmap_type_t type, const Agent::AgentInfo& info);
-  static MMIO* GetMMIOInstance(mmap_type_t type, const Agent::AgentInfo& info);
+  static MMIO* CreateMMIO(mmap_type_t type,  const HSAAgentInfo& info);
+  static MMIO* GetMMIOInstance(mmap_type_t type, const HSAAgentInfo& info);
   static void DestroyMMIOInstance(MMIO* instance);
 
  private:

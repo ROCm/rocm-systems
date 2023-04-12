@@ -46,8 +46,8 @@ InitializeAqlPackets(hsa_agent_t cpu_agent, hsa_agent_t gpu_agent,
 uint8_t* AllocateSysMemory(hsa_agent_t gpu_agent, size_t size, hsa_amd_memory_pool_t* cpu_pool);
 void GetCommandBufferMap(std::map<size_t, uint8_t*>);
 void GetOutputBufferMap(std::map<size_t, uint8_t*>);
-void InitializePools(hsa_agent_t cpu_agent, Agent::AgentInfo* agent_info);
-void InitializeGPUPool(hsa_agent_t gpu_agent, Agent::AgentInfo* agent_info);
+void InitializePools(hsa_agent_t cpu_agent, rocprofiler::HSAAgentInfo* agent_info);
+void InitializeGPUPool(hsa_agent_t gpu_agent, rocprofiler::HSAAgentInfo* agent_info);
 hsa_ven_amd_aqlprofile_profile_t* InitializeDeviceProfilingAqlPackets(
     hsa_agent_t cpu_agent, hsa_agent_t gpu_agent, hsa_ven_amd_aqlprofile_event_t* events,
     uint32_t event_count, packet_t* start_packet, packet_t* stop_packet, packet_t* read_packet);
@@ -65,8 +65,7 @@ uint8_t* AllocateSysMemory(hsa_agent_t gpu_agent, size_t size, hsa_amd_memory_po
 
 void get_command_buffer_map(std::map<size_t, uint8_t*>);
 void get_outbuffer_map(std::map<size_t, uint8_t*>);
-void initialize_pools(hsa_agent_t cpu_agent);
-void CheckPacketReqiurements(std::vector<hsa_agent_t>& gpu_agents);
+void CheckPacketReqiurements();
 
 typedef struct {
   hsa_amd_memory_pool_t cpu_mem_pool;

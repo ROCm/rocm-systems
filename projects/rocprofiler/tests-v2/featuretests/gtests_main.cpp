@@ -1,17 +1,14 @@
 #include <gtest/gtest.h>
 #include "src/core/hardware/hsa_info.h"
-//#include "src/core/hsa/hsa_common.h"
-
-// Entry Point for Gtests Infra
 
 int main(int argc, char** argv) {
   testing::InitGoogleTest(&argc, argv);
   testing::FLAGS_gtest_death_test_style = "threadsafe";
   // Add line below to disable any problematic test
+  hsa_init();
   testing::GTEST_FLAG(filter) =
       "-OpenMPTest.*:ProfilerSPMTest.*:ProfilerMQTest.*:ProfilerMPTest.*:MPITest.*";
   // Disable ATT test fir gfx10 GPUs until its supported
-  hsa_init();
   // iterate for gpu's
   hsa_iterate_agents(
       [](hsa_agent_t agent, void*) {
@@ -25,8 +22,9 @@ int main(int argc, char** argv) {
         }
         return HSA_STATUS_SUCCESS;
       },
-      nullptr);
-  // hsa_shut_down(); // Waiting for hsa_shutdown bug to fix
-  // Append filter above to disable any problematic test
-  return RUN_ALL_TESTS();
+    nullptr);
+// Append filter above to disable any problematic test
+  int res = RUN_ALL_TESTS();
+  hsa_shut_down();
+  return res;
 }

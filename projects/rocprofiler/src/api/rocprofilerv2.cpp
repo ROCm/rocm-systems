@@ -132,7 +132,7 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_initialize() {
   API_METHOD_PREFIX
   if (api_started.load(std::memory_order_relaxed))
     throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_ALREADY_INITIALIZED);
-  rocprofiler::InitROCProfilerSingleton();
+  rocprofiler::ROCProfiler_Singleton::GetInstance();
   api_started.exchange(true, std::memory_order_release);
   API_METHOD_SUFFIX
 }
@@ -140,14 +140,13 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_initialize() {
 // Finalize the API
 ROCPROFILER_API rocprofiler_status_t rocprofiler_finalize() {
   API_INIT_CHECKER
-  rocprofiler::ResetROCProfilerSingleton();
   api_started.exchange(false, std::memory_order_release);
   API_METHOD_SUFFIX
 }
 
 ROCPROFILER_API rocprofiler_status_t rocprofiler_get_timestamp(rocprofiler_timestamp_t* timestamp) {
   API_INIT_CHECKER
-  *timestamp = rocprofiler::GetCurrentTimestamp();
+  *timestamp =  rocprofiler::ROCProfiler_Singleton::GetInstance().timestamp_ns();
   if (timestamp->value <= 0)
     throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_TIMESTAMP_NOT_APPLICABLE);
   API_METHOD_SUFFIX
@@ -163,20 +162,21 @@ rocprofiler_iterate_counters(rocprofiler_counters_info_callback_t counters_info_
 ROCPROFILER_API rocprofiler_status_t rocprofiler_query_agent_info_size(
     rocprofiler_agent_info_kind_t kind, rocprofiler_agent_id_t agent_id, size_t* data_size) {
   API_INIT_CHECKER
-  if (!rocprofiler::GetROCProfilerSingleton()->FindAgent(agent_id))
+  auto& rocprofiler_singleton = rocprofiler::ROCProfiler_Singleton::GetInstance();
+  if (!rocprofiler_singleton.FindAgent(agent_id))
     throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_AGENT_NOT_FOUND);
-  *data_size = rocprofiler::GetROCProfilerSingleton()->GetAgentInfoSize(kind, agent_id);
-  if (*data_size <= 0)
-    throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_AGENT_INFORMATION_MISSING);
+  *data_size = rocprofiler_singleton.GetAgentInfoSize(kind, agent_id);
+  if (*data_size <= 0) throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_AGENT_INFORMATION_MISSING);
   API_METHOD_SUFFIX
 }
 
 ROCPROFILER_API rocprofiler_status_t rocprofiler_query_agent_info(
     rocprofiler_agent_info_kind_t kind, rocprofiler_agent_id_t agent_id, const char** data) {
   API_INIT_CHECKER
-  if (!rocprofiler::GetROCProfilerSingleton()->FindAgent(agent_id))
+  auto& rocprofiler_singleton = rocprofiler::ROCProfiler_Singleton::GetInstance();
+  if (!rocprofiler_singleton.FindAgent(agent_id))
     throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_AGENT_NOT_FOUND);
-  if (!(*data = rocprofiler::GetROCProfilerSingleton()->GetAgentInfo(kind, agent_id)))
+  if (!(*data = rocprofiler_singleton.GetAgentInfo(kind, agent_id)))
     throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_AGENT_INFORMATION_MISSING);
   API_METHOD_SUFFIX
 }
@@ -184,20 +184,21 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_query_agent_info(
 ROCPROFILER_API rocprofiler_status_t rocprofiler_query_queue_info_size(
     rocprofiler_queue_info_kind_t kind, rocprofiler_queue_id_t queue_id, size_t* data_size) {
   API_INIT_CHECKER
-  if (!rocprofiler::GetROCProfilerSingleton()->FindQueue(queue_id))
+  auto& rocprofiler_singleton = rocprofiler::ROCProfiler_Singleton::GetInstance();
+  if (!rocprofiler_singleton.FindQueue(queue_id))
     throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_QUEUE_NOT_FOUND);
-  *data_size = rocprofiler::GetROCProfilerSingleton()->GetQueueInfoSize(kind, queue_id);
-  if (*data_size <= 0)
-    throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_QUEUE_INFORMATION_MISSING);
+  *data_size = rocprofiler_singleton.GetQueueInfoSize(kind, queue_id);
+  if (*data_size <= 0) throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_QUEUE_INFORMATION_MISSING);
   API_METHOD_SUFFIX
 }
 
 ROCPROFILER_API rocprofiler_status_t rocprofiler_query_queue_info(
     rocprofiler_queue_info_kind_t kind, rocprofiler_queue_id_t queue_id, const char** data) {
   API_INIT_CHECKER
-  if (!rocprofiler::GetROCProfilerSingleton()->FindQueue(queue_id))
+  auto& rocprofiler_singleton = rocprofiler::ROCProfiler_Singleton::GetInstance();
+  if (!rocprofiler_singleton.FindQueue(queue_id))
     throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_QUEUE_NOT_FOUND);
-  if (!(*data = rocprofiler::GetROCProfilerSingleton()->GetQueueInfo(kind, queue_id)))
+  if (!(*data = rocprofiler_singleton.GetQueueInfo(kind, queue_id)))
     throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_QUEUE_INFORMATION_MISSING);
   API_METHOD_SUFFIX
 }
@@ -205,9 +206,9 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_query_queue_info(
 ROCPROFILER_API rocprofiler_status_t rocprofiler_query_kernel_info_size(
     rocprofiler_kernel_info_kind_t kind, rocprofiler_kernel_id_t kernel_id, size_t* data_size) {
   API_INIT_CHECKER
-  // if (!rocprofiler::GetROCProfilerSingleton()->FindKernel(kernel_id))
+  // if (!rocprofiler::rocmtool::GetInstance().FindKernel(kernel_id))
   //   throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_KERNEL_NOT_FOUND);
-  *data_size = rocprofiler::GetROCProfilerSingleton()->GetKernelInfoSize(kind, kernel_id);
+  *data_size =  rocprofiler::ROCProfiler_Singleton::GetInstance().GetKernelInfoSize(kind, kernel_id);
   if (*data_size <= 0)
     throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_KERNEL_INFORMATION_MISSING);
   API_METHOD_SUFFIX
@@ -216,9 +217,9 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_query_kernel_info_size(
 ROCPROFILER_API rocprofiler_status_t rocprofiler_query_kernel_info(
     rocprofiler_kernel_info_kind_t kind, rocprofiler_kernel_id_t kernel_id, const char** data) {
   API_INIT_CHECKER
-  // if (!rocprofiler::GetROCProfilerSingleton()->FindKernel(kernel_id))
+  // if (!rocprofiler::rocmtool::GetInstance().FindKernel(kernel_id))
   //   throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_KERNEL_NOT_FOUND);
-  if (!(*data = rocprofiler::GetROCProfilerSingleton()->GetKernelInfo(kind, kernel_id)))
+  if (!(*data = rocprofiler::ROCProfiler_Singleton::GetInstance().GetKernelInfo(kind, kernel_id)))
     throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_KERNEL_INFORMATION_MISSING);
   API_METHOD_SUFFIX
 }
@@ -227,14 +228,12 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_query_counter_info_size(
     rocprofiler_session_id_t session_id, rocprofiler_counter_info_kind_t kind,
     rocprofiler_counter_id_t counter_id, size_t* data_size) {
   API_INIT_CHECKER
-  if (!rocprofiler::GetROCProfilerSingleton()
-           ->GetSession(session_id)
-           ->GetProfiler()
-           ->FindCounter(counter_id))
+   rocprofiler::ROCProfiler_Singleton&  rocprofiler_singleton = rocprofiler::ROCProfiler_Singleton::GetInstance();
+  if (!rocprofiler_singleton.GetSession(session_id)->GetProfiler()->FindCounter(counter_id))
     throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_COUNTER_NOT_FOUND);
-  *data_size = rocprofiler::GetROCProfilerSingleton()
-                   ->GetSession(session_id)
-                   ->GetProfiler()
+  *data_size = rocprofiler_singleton
+                    .GetSession(session_id)
+                    ->GetProfiler()
                    ->GetCounterInfoSize(kind, counter_id);
   if (*data_size <= 0)
     throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_COUNTER_INFORMATION_MISSING);
@@ -245,13 +244,11 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_query_counter_info(
     rocprofiler_session_id_t session_id, rocprofiler_counter_info_kind_t kind,
     rocprofiler_counter_id_t counter_id, const char** data) {
   API_INIT_CHECKER
-  if (!rocprofiler::GetROCProfilerSingleton()
-           ->GetSession(session_id)
-           ->GetProfiler()
-           ->FindCounter(counter_id))
+  auto& rocprofiler_singleton = rocprofiler::ROCProfiler_Singleton::GetInstance();
+  if (!rocprofiler_singleton.GetSession(session_id)->GetProfiler()->FindCounter(counter_id))
     throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_COUNTER_NOT_FOUND);
-  if (!(*data = rocprofiler::GetROCProfilerSingleton()
-                    ->GetSession(session_id)
+  if (!(*data = rocprofiler_singleton
+                    .GetSession(session_id)
                     ->GetProfiler()
                     ->GetCounterInfo(kind, counter_id)))
     throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_COUNTER_INFORMATION_MISSING);
@@ -280,14 +277,12 @@ rocprofiler_query_tracer_operation_id(rocprofiler_tracer_activity_domain_t domai
 ROCPROFILER_API rocprofiler_status_t rocprofiler_flush_data(rocprofiler_session_id_t session_id,
                                                             rocprofiler_buffer_id_t buffer_id) {
   API_INIT_CHECKER
-  if (!rocprofiler::GetROCProfilerSingleton()->FindSession(session_id))
+   rocprofiler::ROCProfiler_Singleton&  rocprofiler_singleton = rocprofiler::ROCProfiler_Singleton::GetInstance();
+  if (!rocprofiler_singleton.FindSession(session_id))
     throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_SESSION_NOT_FOUND);
-  if (!rocprofiler::GetROCProfilerSingleton()->GetSession(session_id)->FindBuffer(buffer_id))
+  if (!rocprofiler_singleton.GetSession(session_id)->FindBuffer(buffer_id))
     throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_BUFFER_NOT_FOUND);
-  if (!rocprofiler::GetROCProfilerSingleton()
-           ->GetSession(session_id)
-           ->GetBuffer(buffer_id)
-           ->Flush())
+  if (!rocprofiler_singleton.GetSession(session_id)->GetBuffer(buffer_id)->Flush())
     throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_CORRUPTED_SESSION_BUFFER);
   API_METHOD_SUFFIX
 }
@@ -298,9 +293,10 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_next_record(
     const rocprofiler_record_header_t* record, const rocprofiler_record_header_t** next,
     rocprofiler_session_id_t session_id, rocprofiler_buffer_id_t buffer_id) {
   API_INIT_CHECKER
-  if (!rocprofiler::GetROCProfilerSingleton()->FindSession(session_id))
+   rocprofiler::ROCProfiler_Singleton&  rocprofiler_singleton = rocprofiler::ROCProfiler_Singleton::GetInstance();
+  if (!rocprofiler_singleton.FindSession(session_id))
     throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_SESSION_NOT_FOUND);
-  if (!rocprofiler::GetROCProfilerSingleton()->GetSession(session_id)->FindBuffer(buffer_id))
+  if (!rocprofiler_singleton.GetSession(session_id)->FindBuffer(buffer_id))
     throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_BUFFER_NOT_FOUND);
   if (!Memory::GetNextRecord(record, next))
     throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_RECORD_CORRUPTED);
@@ -311,7 +307,7 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_next_record(
 ROCPROFILER_API rocprofiler_status_t rocprofiler_create_session(
     rocprofiler_replay_mode_t replay_mode, rocprofiler_session_id_t* session_id) {
   API_INIT_CHECKER
-  *session_id = rocprofiler::GetROCProfilerSingleton()->CreateSession(replay_mode);
+  *session_id =  rocprofiler::ROCProfiler_Singleton::GetInstance().CreateSession(replay_mode);
   API_METHOD_SUFFIX
 }
 
@@ -322,15 +318,16 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_create_filter(
   API_INIT_CHECKER
   // TODO(aelwazir): CheckFilterData to be implemented
   // int error_code =
-  //     rocprofiler::GetROCProfilerSingleton()->CheckFilterData(filter_kind,
+  // rocprofiler::ROCProfiler_Singleton::GetInstance().CheckFilterData(filter_kind,
   //     filter_data);
   // if (error_code == -1) throw
   // rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_FILTER_DATA_CORRUPTED); if (error_code == 0)
   //   throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_SESSION_FILTER_DATA_MISMATCH);
-  if (!rocprofiler::GetROCProfilerSingleton()->FindSession(session_id))
+  auto& rocprofiler_singleton = rocprofiler::ROCProfiler_Singleton::GetInstance();
+  if (!rocprofiler_singleton.FindSession(session_id))
     throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_SESSION_NOT_FOUND);
-  *filter_id = rocprofiler::GetROCProfilerSingleton()
-                   ->GetSession(session_id)
+  *filter_id = rocprofiler_singleton
+                   .GetSession(session_id)
                    ->CreateFilter(filter_kind, filter_data, data_count, property);
   API_METHOD_SUFFIX
 }
@@ -338,11 +335,12 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_create_filter(
 ROCPROFILER_API rocprofiler_status_t rocprofiler_destroy_filter(rocprofiler_session_id_t session_id,
                                                                 rocprofiler_filter_id_t filter_id) {
   API_INIT_CHECKER
-  if (!rocprofiler::GetROCProfilerSingleton()->FindSession(session_id))
+  auto& rocprofiler_singleton = rocprofiler::ROCProfiler_Singleton::GetInstance();
+  if (!rocprofiler_singleton.FindSession(session_id))
     throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_SESSION_NOT_FOUND);
-  if (!rocprofiler::GetROCProfilerSingleton()->GetSession(session_id)->FindFilter(filter_id))
+  if (!rocprofiler_singleton.GetSession(session_id)->FindFilter(filter_id))
     throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_FILTER_NOT_FOUND);
-  rocprofiler::GetROCProfilerSingleton()->GetSession(session_id)->DestroyFilter(filter_id);
+  rocprofiler_singleton.GetSession(session_id)->DestroyFilter(filter_id);
   API_METHOD_SUFFIX
 }
 
@@ -350,10 +348,11 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_create_buffer(
     rocprofiler_session_id_t session_id, rocprofiler_buffer_callback_t buffer_callback,
     size_t buffer_size, rocprofiler_buffer_id_t* buffer_id) {
   API_INIT_CHECKER
-  if (!rocprofiler::GetROCProfilerSingleton()->FindSession(session_id))
+  auto& rocprofiler_singleton = rocprofiler::ROCProfiler_Singleton::GetInstance();
+  if (!rocprofiler_singleton.FindSession(session_id))
     throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_SESSION_NOT_FOUND);
-  *buffer_id = rocprofiler::GetROCProfilerSingleton()
-                   ->GetSession(session_id)
+  *buffer_id = rocprofiler_singleton
+                   .GetSession(session_id)
                    ->CreateBuffer(buffer_callback, buffer_size);
   API_METHOD_SUFFIX
 }
@@ -362,12 +361,13 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_set_buffer_properties(
     rocprofiler_session_id_t session_id, rocprofiler_buffer_id_t buffer_id,
     rocprofiler_buffer_property_t* buffer_properties, uint32_t buffer_properties_count) {
   API_INIT_CHECKER
-  if (!rocprofiler::GetROCProfilerSingleton()->FindSession(session_id))
+  auto& rocprofiler_singleton = rocprofiler::ROCProfiler_Singleton::GetInstance();
+  if (!rocprofiler_singleton.FindSession(session_id))
     throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_SESSION_NOT_FOUND);
-  if (!rocprofiler::GetROCProfilerSingleton()->GetSession(session_id)->FindBuffer(buffer_id))
+  if (!rocprofiler_singleton.GetSession(session_id)->FindBuffer(buffer_id))
     throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_BUFFER_NOT_FOUND);
-  rocprofiler::GetROCProfilerSingleton()
-      ->GetSession(session_id)
+  rocprofiler_singleton
+      .GetSession(session_id)
       ->GetBuffer(buffer_id)
       ->SetProperties(buffer_properties, buffer_properties_count);
   API_METHOD_SUFFIX
@@ -376,11 +376,12 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_set_buffer_properties(
 ROCPROFILER_API rocprofiler_status_t rocprofiler_destroy_buffer(rocprofiler_session_id_t session_id,
                                                                 rocprofiler_buffer_id_t buffer_id) {
   API_INIT_CHECKER
-  if (!rocprofiler::GetROCProfilerSingleton()->FindSession(session_id))
+  auto& rocprofiler_singleton = rocprofiler::ROCProfiler_Singleton::GetInstance();
+  if (!rocprofiler_singleton.FindSession(session_id))
     throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_SESSION_NOT_FOUND);
-  if (!rocprofiler::GetROCProfilerSingleton()->GetSession(session_id)->FindBuffer(buffer_id))
+  if (!rocprofiler_singleton.GetSession(session_id)->FindBuffer(buffer_id))
     throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_BUFFER_NOT_FOUND);
-  rocprofiler::GetROCProfilerSingleton()->GetSession(session_id)->DestroyBuffer(buffer_id);
+  rocprofiler_singleton.GetSession(session_id)->DestroyBuffer(buffer_id);
   API_METHOD_SUFFIX
 }
 
@@ -388,20 +389,18 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_set_filter_buffer(
     rocprofiler_session_id_t session_id, rocprofiler_filter_id_t filter_id,
     rocprofiler_buffer_id_t buffer_id) {
   API_INIT_CHECKER
-  if (!rocprofiler::GetROCProfilerSingleton()->FindSession(session_id))
+  auto& rocprofiler_singleton = rocprofiler::ROCProfiler_Singleton::GetInstance();
+  if (!rocprofiler_singleton.FindSession(session_id))
     throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_SESSION_NOT_FOUND);
-  if (!rocprofiler::GetROCProfilerSingleton()->GetSession(session_id)->FindBuffer(buffer_id))
+  if (!rocprofiler_singleton.GetSession(session_id)->FindBuffer(buffer_id))
     throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_BUFFER_NOT_FOUND);
-  if (!rocprofiler::GetROCProfilerSingleton()->GetSession(session_id)->FindFilter(filter_id))
+  if (!rocprofiler_singleton.GetSession(session_id)->FindFilter(filter_id))
     throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_FILTER_NOT_FOUND);
-  if (!rocprofiler::GetROCProfilerSingleton()
-           ->GetSession(session_id)
+  if (!rocprofiler_singleton
+           .GetSession(session_id)
            ->CheckFilterBufferSize(filter_id, buffer_id))
     throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_INCORRECT_SIZE);
-  rocprofiler::GetROCProfilerSingleton()
-      ->GetSession(session_id)
-      ->GetFilter(filter_id)
-      ->SetBufferId(buffer_id);
+  rocprofiler_singleton.GetSession(session_id)->GetFilter(filter_id)->SetBufferId(buffer_id);
   API_METHOD_SUFFIX
 }
 
@@ -409,19 +408,15 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_set_api_trace_sync_callback(
     rocprofiler_session_id_t session_id, rocprofiler_filter_id_t filter_id,
     rocprofiler_sync_callback_t callback) {
   API_INIT_CHECKER
-  if (!rocprofiler::GetROCProfilerSingleton()->FindSession(session_id))
+  auto& rocprofiler_singleton = rocprofiler::ROCProfiler_Singleton::GetInstance();
+  if (!rocprofiler_singleton.FindSession(session_id))
     throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_SESSION_NOT_FOUND);
-  if (!rocprofiler::GetROCProfilerSingleton()->GetSession(session_id)->FindFilter(filter_id))
+  if (!rocprofiler_singleton.GetSession(session_id)->FindFilter(filter_id))
     throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_FILTER_NOT_FOUND);
-  if (rocprofiler::GetROCProfilerSingleton()
-          ->GetSession(session_id)
-          ->GetFilter(filter_id)
-          ->GetKind() != ROCPROFILER_API_TRACE)
+  if (rocprofiler_singleton.GetSession(session_id)->GetFilter(filter_id)->GetKind() !=
+      ROCPROFILER_API_TRACE)
     throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_FILTER_NOT_SUPPORTED);
-  rocprofiler::GetROCProfilerSingleton()
-      ->GetSession(session_id)
-      ->GetFilter(filter_id)
-      ->SetCallback(callback);
+  rocprofiler_singleton.GetSession(session_id)->GetFilter(filter_id)->SetCallback(callback);
   API_METHOD_SUFFIX
 }
 
@@ -433,30 +428,31 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_create_ready_session(
   API_INIT_CHECKER
   // TODO(aelwazir): CheckFilterData to be implemented
   // int error_code =
-  //     rocprofiler::GetROCProfilerSingleton()->CheckFilterData(filter_kind,
+  //  rocprofiler::ROCProfiler_Singleton::GetInstance().CheckFilterData(filter_kind,
   //     filter_data);
   // if (error_code == -1) throw
   // rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_FILTER_DATA_CORRUPTED); if (error_code == 0)
   //   throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_SESSION_FILTER_DATA_MISMATCH);
-  *session_id = rocprofiler::GetROCProfilerSingleton()->CreateSession(replay_mode);
+  rocprofiler::ROCProfiler_Singleton&  rocprofiler_singleton = rocprofiler::ROCProfiler_Singleton::GetInstance();
+  *session_id = rocprofiler_singleton.CreateSession(replay_mode);
   rocprofiler_filter_id_t filter_id =
-      rocprofiler::GetROCProfilerSingleton()
-          ->GetSession(*session_id)
+      rocprofiler_singleton
+          .GetSession(*session_id)
           ->CreateFilter(filter_kind, filter_data, data_count, property);
-  rocprofiler_buffer_id_t buffer_id = rocprofiler::GetROCProfilerSingleton()
-                                          ->GetSession(*session_id)
-                                          ->CreateBuffer(buffer_callback, buffer_size);
+  rocprofiler_buffer_id_t buffer_id = rocprofiler_singleton
+                                        .GetSession(*session_id)
+                                        ->CreateBuffer(buffer_callback, buffer_size);
   if (filter_kind == ROCPROFILER_API_TRACE)
-    rocprofiler::GetROCProfilerSingleton()
-        ->GetSession(*session_id)
+    rocprofiler_singleton
+        .GetSession(*session_id)
         ->GetFilter(filter_id)
         ->SetCallback(callback);
-  if (!rocprofiler::GetROCProfilerSingleton()
-           ->GetSession(*session_id)
+  if (!rocprofiler_singleton
+           .GetSession(*session_id)
            ->CheckFilterBufferSize(filter_id, buffer_id))
     throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_INCORRECT_SIZE);
-  rocprofiler::GetROCProfilerSingleton()
-      ->GetSession(*session_id)
+  rocprofiler_singleton
+       .GetSession(*session_id)
       ->GetFilter(filter_id)
       ->SetBufferId(buffer_id);
   API_METHOD_SUFFIX
@@ -466,9 +462,10 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_create_ready_session(
 ROCPROFILER_API rocprofiler_status_t
 rocprofiler_destroy_session(rocprofiler_session_id_t session_id) {
   API_INIT_CHECKER
-  if (!rocprofiler::GetROCProfilerSingleton()->FindSession(session_id))
+  auto& rocprofiler_singleton = rocprofiler::ROCProfiler_Singleton::GetInstance();
+  if (!rocprofiler_singleton.FindSession(session_id))
     throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_SESSION_NOT_FOUND);
-  rocprofiler::GetROCProfilerSingleton()->DestroySession(session_id);
+  rocprofiler_singleton.DestroySession(session_id);
   API_METHOD_SUFFIX
 }
 
@@ -476,16 +473,17 @@ rocprofiler_destroy_session(rocprofiler_session_id_t session_id) {
 ROCPROFILER_API rocprofiler_status_t
 rocprofiler_start_session(rocprofiler_session_id_t session_id) {
   API_INIT_CHECKER
-  if (!rocprofiler::GetROCProfilerSingleton()->FindSession(session_id))
+  auto& rocprofiler_singleton = rocprofiler::ROCProfiler_Singleton::GetInstance();
+  if (!rocprofiler_singleton.FindSession(session_id))
     throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_SESSION_NOT_FOUND);
-  if (!rocprofiler::GetROCProfilerSingleton()->GetSession(session_id)->HasFilter())
+  if (!rocprofiler_singleton.GetSession(session_id)->HasFilter())
     throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_SESSION_MISSING_FILTER);
-  if (!rocprofiler::GetROCProfilerSingleton()->GetSession(session_id)->HasBuffer())
+  if (!rocprofiler_singleton.GetSession(session_id)->HasBuffer())
     throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_SESSION_MISSING_BUFFER);
-  if (rocprofiler::GetROCProfilerSingleton()->HasActiveSession())
+  if (rocprofiler_singleton.HasActiveSession())
     throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_HAS_ACTIVE_SESSION);
-  rocprofiler::GetROCProfilerSingleton()->GetSession(session_id)->Start();
-  rocprofiler::GetROCProfilerSingleton()->SetCurrentActiveSession(session_id);
+  rocprofiler_singleton.GetSession(session_id)->Start();
+  rocprofiler_singleton.SetCurrentActiveSession(session_id);
   API_METHOD_SUFFIX
 }
 
@@ -493,12 +491,13 @@ rocprofiler_start_session(rocprofiler_session_id_t session_id) {
 ROCPROFILER_API rocprofiler_status_t
 rocprofiler_terminate_session(rocprofiler_session_id_t session_id) {
   API_INIT_CHECKER
-  if (!rocprofiler::GetROCProfilerSingleton()->FindSession(session_id))
+  auto& rocprofiler_singleton = rocprofiler::ROCProfiler_Singleton::GetInstance();
+  if (!rocprofiler_singleton.FindSession(session_id))
     throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_SESSION_NOT_FOUND);
-  if (!rocprofiler::GetROCProfilerSingleton()->IsActiveSession(session_id))
+  if (!rocprofiler_singleton.IsActiveSession(session_id))
     throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_SESSION_NOT_ACTIVE);
-  rocprofiler::GetROCProfilerSingleton()->GetSession(session_id)->Terminate();
-  rocprofiler::GetROCProfilerSingleton()->SetCurrentActiveSession(rocprofiler_session_id_t{0});
+  rocprofiler_singleton.GetSession(session_id)->Terminate();
+  rocprofiler_singleton.SetCurrentActiveSession(rocprofiler_session_id_t{0});
   API_METHOD_SUFFIX
 }
 
@@ -507,8 +506,8 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_device_profiling_session_create
     int cpu_index, int gpu_index) {
   API_METHOD_PREFIX
   std::vector<std::string> counters(counter_names, counter_names + num_counters);
-  *session_id = rocprofiler::GetROCProfilerSingleton()->CreateDeviceProfilingSession(
-      counters, cpu_index, gpu_index);
+  *session_id =
+      rocprofiler::ROCProfiler_Singleton::GetInstance().CreateDeviceProfilingSession(counters, cpu_index, gpu_index);
   API_METHOD_SUFFIX
 }
 
@@ -516,7 +515,7 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_device_profiling_session_create
 ROCPROFILER_API rocprofiler_status_t
 rocprofiler_device_profiling_session_start(rocprofiler_session_id_t session_id) {
   API_METHOD_PREFIX
-  rocprofiler::GetROCProfilerSingleton()->GetDeviceProfilingSession(session_id)->StartSession();
+  rocprofiler::ROCProfiler_Singleton::GetInstance().GetDeviceProfilingSession(session_id)->StartSession();
   API_METHOD_SUFFIX
 }
 
@@ -524,7 +523,7 @@ rocprofiler_device_profiling_session_start(rocprofiler_session_id_t session_id) 
 ROCPROFILER_API rocprofiler_status_t rocprofiler_device_profiling_session_poll(
     rocprofiler_session_id_t session_id, rocprofiler_device_profile_metric_t* data) {
   API_METHOD_PREFIX
-  rocprofiler::GetROCProfilerSingleton()->GetDeviceProfilingSession(session_id)->PollMetrics(data);
+  rocprofiler::ROCProfiler_Singleton::GetInstance().GetDeviceProfilingSession(session_id)->PollMetrics(data);
   API_METHOD_SUFFIX
 }
 
@@ -532,7 +531,7 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_device_profiling_session_poll(
 ROCPROFILER_API rocprofiler_status_t
 rocprofiler_device_profiling_session_stop(rocprofiler_session_id_t session_id) {
   API_METHOD_PREFIX
-  rocprofiler::GetROCProfilerSingleton()->GetDeviceProfilingSession(session_id)->StopSession();
+  rocprofiler::ROCProfiler_Singleton::GetInstance().GetDeviceProfilingSession(session_id)->StopSession();
   API_METHOD_SUFFIX
 }
 
@@ -540,7 +539,7 @@ rocprofiler_device_profiling_session_stop(rocprofiler_session_id_t session_id) {
 ROCPROFILER_API rocprofiler_status_t
 rocprofiler_device_profiling_session_destroy(rocprofiler_session_id_t session_id) {
   API_METHOD_PREFIX
-  rocprofiler::GetROCProfilerSingleton()->DestroyDeviceProfilingSession(session_id);
+  rocprofiler::ROCProfiler_Singleton::GetInstance().DestroyDeviceProfilingSession(session_id);
   API_METHOD_SUFFIX
 }
 
@@ -563,7 +562,7 @@ rocprofiler_codeobj_capture_create(
   uint64_t userdata
 ) {
   API_METHOD_PREFIX
-  id->handle = rocprofiler::GetROCProfilerSingleton()->GetUniqueRecordId();
+  id->handle = rocprofiler::ROCProfiler_Singleton::GetInstance().GetUniqueRecordId();
   codeobj_record::make_capture(*id, mode, userdata);
   API_METHOD_SUFFIX
 }
@@ -618,7 +617,7 @@ ROCPROFILER_EXPORT bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
                                uint64_t failed_tool_count, const char* const* failed_tool_names) {
   if (started) rocprofiler::fatal("HSA Tool started already!");
   started = true;
-  rocprofiler::hsa_support::Initialize(table);
+  rocprofiler::HSASupport_Singleton::GetInstance().HSAInitialize(table);
   return true;
 }
 
@@ -627,7 +626,7 @@ ROCPROFILER_EXPORT bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
  */
 ROCPROFILER_EXPORT void OnUnload() {
   if (!started) rocprofiler::fatal("HSA Tool hasn't started yet!");
-  rocprofiler::hsa_support::Finalize();
+    rocprofiler::HSASupport_Singleton::GetInstance().HSAFinalize();
   started = false;
 }
 
