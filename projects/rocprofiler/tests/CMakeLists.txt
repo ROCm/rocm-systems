@@ -6,4 +6,5 @@ add_custom_target(check COMMAND ${PROJECT_BINARY_DIR}/run_tests.sh DEPENDS tests
 add_subdirectory(unittests)
 add_subdirectory(featuretests)
 add_subdirectory(memorytests)
+add_subdirectory(microbenchmarks)
 configure_file(run_tests.sh ${PROJECT_BINARY_DIR} COPYONLY)
