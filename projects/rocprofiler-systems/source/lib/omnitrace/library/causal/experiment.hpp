@@ -30,13 +30,13 @@
 #include "library/causal/components/backtrace.hpp"
 #include "library/causal/components/progress_point.hpp"
 #include "library/causal/data.hpp"
-#include "library/causal/sample_data.hpp"
 #include "library/causal/selected_entry.hpp"
 
 #include <timemory/hash/types.hpp>
 #include <timemory/mpl/concepts.hpp>
 #include <timemory/tpls/cereal/cereal.hpp>
 #include <timemory/tpls/cereal/cereal/cereal.hpp>
+#include <timemory/unwind/types.hpp>
 #include <timemory/utility/unwind.hpp>
 
 #include <atomic>
@@ -55,17 +55,17 @@ struct experiment
         std::unordered_map<tim::hash_value_t, component::progress_point>;
     using experiments_t     = std::vector<experiment>;
     using filename_config_t = settings::compose_filename_config;
-    using sample_dataset_t  = std::set<sample_data>;
     using period_stats_t    = tim::statistics<int64_t>;
 
-    struct sample
+    struct sample : unwind::processed_entry
     {
-        using line_info = binary::symbol;
+        using base_type = unwind::processed_entry;
 
-        mutable uint64_t count    = 0;
-        uintptr_t        address  = 0;
-        std::string      location = {};
-        line_info        info     = {};
+        sample() = default;
+        sample(const base_type&, uint64_t);
+
+        mutable uint64_t                    count   = 0;
+        std::vector<binary::inlined_symbol> inlines = {};
 
         bool        operator==(const sample&) const;
         bool        operator<(const sample&) const;
@@ -73,6 +73,8 @@ struct experiment
 
         template <typename ArchiveT>
         void serialize(ArchiveT& ar, const unsigned);
+
+        std::string get_identifier() const;
     };
 
     struct record
@@ -80,7 +82,7 @@ struct experiment
         int64_t                 startup     = 0;
         uint64_t                runtime     = 0;
         std::vector<experiment> experiments = {};
-        std::set<sample>        samples     = {};
+        std::vector<sample>     samples     = {};
 
         template <typename ArchiveT>
         void serialize(ArchiveT& ar, const unsigned);
@@ -105,9 +107,17 @@ struct experiment
     static double        get_delay_scaling();
     static uint32_t      get_index();
     static bool          is_active();
+    static bool          is_selected(uint64_t);
     static bool          is_selected(unwind_addr_t);
+    static bool          is_selected(container::c_array<uint64_t>);
     static void          add_selected();
     static experiments_t get_experiments();
+
+    template <size_t N>
+    static bool is_selected(std::array<uint64_t, N> _v)
+    {
+        return is_selected(container::c_array<uint64_t>{ _v.data(), _v.size() });
+    }
 
     static void                save_experiments();
     static void                save_experiments(std::string, const filename_config_t&);
@@ -116,24 +126,23 @@ struct experiment
                                                 bool = true);
 
     bool              running         = false;
-    uint16_t          virtual_speedup = 0;   /// 0-100 in multiples of 5
-    uint32_t          index           = 0;   /// experiment number
-    uint64_t          sampling_period = 0;   /// period b/t samples [nsec]
-    uint64_t          start_time      = 0;   /// start of experiment [nsec]
-    uint64_t          end_time        = 0;   /// end of experiment [nsec]
-    uint64_t          experiment_time = 0;   /// how long the experiment ran [nsec]
-    uint64_t          duration        = 0;   /// runtime - delays [nsec]
-    uint64_t          batch_size      = 10;  /// batch factor for experiment/cooloff
-    uint64_t          scaling_factor  = 50;  /// scaling factor for experiment time
-    uint64_t          sample_delay    = 0;   /// how long to delay [nsec]
-    uint64_t          total_delay     = 0;   /// total delays [nsec]
-    uint64_t          selected        = 0;   /// num times selected line sampled
+    uint16_t          virtual_speedup = 0;    /// 0-100 in multiples of 5
+    uint32_t          index           = 0;    /// experiment number
+    uint64_t          sampling_period = 0;    /// period b/t samples [nsec]
+    uint64_t          start_time      = 0;    /// start of experiment [nsec]
+    uint64_t          end_time        = 0;    /// end of experiment [nsec]
+    uint64_t          experiment_time = 0;    /// how long the experiment ran [nsec]
+    uint64_t          duration        = 0;    /// runtime - delays [nsec]
+    uint64_t          batch_size      = 10;   /// batch factor for experiment/cooloff
+    uint64_t          scaling_factor  = 100;  /// scaling factor for experiment time
+    uint64_t          sample_delay    = 0;    /// how long to delay [nsec]
+    uint64_t          total_delay     = 0;    /// total delays [nsec]
+    uint64_t          selected        = 0;    /// num times selected line sampled
     uint64_t          global_delay    = 0;
     double            delay_scaling   = 0.0;  /// virtual_speedup / 100.
     selected_entry    selection       = {};   /// which line was selected
     progress_points_t init_progress   = {};   /// progress points at start
     progress_points_t fini_progress   = {};   /// progress points at end
-    period_stats_t    period_stats    = {};   /// stats for sampling period
 };
 }  // namespace causal
 }  // namespace omnitrace

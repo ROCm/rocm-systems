@@ -51,14 +51,17 @@ struct sample_data
     }
 };
 
-std::map<uint32_t, std::set<sample_data>>
+std::map<uint32_t, std::vector<sample_data>>
 get_samples();
 
 void
 add_samples(uint32_t, const std::vector<uintptr_t>&);
 
-std::set<sample_data> get_samples(uint32_t);
+std::vector<sample_data> get_samples(uint32_t);
 
-void add_sample(uint32_t, uintptr_t);
+void add_sample(uint32_t, uintptr_t, uint64_t = 1);
+
+void
+add_samples(uint32_t, const std::map<uintptr_t, uint64_t>&);
 }  // namespace causal
 }  // namespace omnitrace

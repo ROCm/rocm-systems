@@ -247,7 +247,7 @@ print_updated_environment(parser_data_t& _data, std::string_view _prefix)
 }
 
 parser_data_t&
-parse_args(int argc, char** argv, parser_data_t& _parser_data)
+parse_args(int argc, char** argv, parser_data_t& _parser_data, bool& _fork_exec)
 {
     get_initial_environment(_parser_data);
 
@@ -305,6 +305,13 @@ parse_args(int argc, char** argv, parser_data_t& _parser_data)
     omnitrace::argparse::add_core_arguments(parser, _parser_data);
     omnitrace::argparse::add_extended_arguments(parser, _parser_data);
 
+    parser.start_group("EXECUTION OPTIONS", "");
+    parser.add_argument({ "--fork" }, "Execute via fork + execvpe instead of execvpe")
+        .min_count(0)
+        .max_count(1)
+        .dtype("boolean")
+        .action([&](parser_t& p) { _fork_exec = p.get<bool>("fork"); });
+
     auto  _inpv = std::vector<char*>{};
     auto& _outv = _parser_data.command;
     bool  _hash = false;
@@ -334,6 +341,8 @@ parse_args(int argc, char** argv, parser_data_t& _parser_data)
         std::cerr << _cerr.what() << std::endl;
         exit(EXIT_FAILURE);
     }
+
+    tim::log::monochrome() = _parser_data.monochrome;
 
     return _parser_data;
 }

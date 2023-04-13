@@ -25,6 +25,7 @@
 #include "concepts.hpp"
 
 #include <timemory/mpl/concepts.hpp>
+#include <timemory/utility/delimit.hpp>
 #include <timemory/utility/join.hpp>
 
 #include <algorithm>
@@ -32,6 +33,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <vector>
@@ -238,5 +240,17 @@ convert(std::string_view _inp)
     _iss >> _ret;
     return _ret;
 }
+
+template <typename Tp = int64_t, typename ContainerT = std::set<Tp>, typename Up = Tp>
+ContainerT
+parse_numeric_range(std::string _input_string, const std::string& _label, Up _incr);
+
+extern template std::set<int64_t>
+parse_numeric_range<int64_t, std::set<int64_t>>(std::string, const std::string&, long);
+extern template std::vector<int64_t>
+parse_numeric_range<int64_t, std::vector<int64_t>>(std::string, const std::string&, long);
+extern template std::unordered_set<int64_t>
+parse_numeric_range<int64_t, std::unordered_set<int64_t>>(std::string, const std::string&,
+                                                          long);
 }  // namespace utility
 }  // namespace omnitrace

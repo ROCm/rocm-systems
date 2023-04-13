@@ -21,6 +21,9 @@
 // SOFTWARE.
 
 #include "library/causal/experiment.hpp"
+#include "binary/analysis.hpp"
+#include "binary/dwarf_entry.hpp"
+#include "binary/symbol.hpp"
 #include "common/defines.h"
 #include "core/config.hpp"
 #include "core/debug.hpp"
@@ -29,11 +32,11 @@
 #include "library/causal/components/progress_point.hpp"
 #include "library/causal/data.hpp"
 #include "library/causal/delay.hpp"
+#include "library/causal/sample_data.hpp"
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
 #include "library/tracing.hpp"
 
-#include <string>
 #include <timemory/components/timing/backends.hpp>
 #include <timemory/hash/types.hpp>
 #include <timemory/mpl/policy.hpp>
@@ -42,10 +45,12 @@
 #include <timemory/tpls/cereal/cereal/archives/json.hpp>
 #include <timemory/tpls/cereal/types.hpp>
 #include <timemory/units.hpp>
+#include <timemory/unwind/dlinfo.hpp>
 
 #include <chrono>
 #include <ratio>
 #include <regex>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -68,26 +73,31 @@ bool    use_exp_speedup_scaling =
     get_env<bool>("OMNITRACE_CAUSAL_SCALE_EXPERIMENT_TIME_BY_SPEEDUP", false);
 }  // namespace
 
+experiment::sample::sample(const base_type& _b, uint64_t _c)
+: base_type{ _b }
+, count{ _c }
+{
+    if(lineinfo)
+    {
+        for(const auto& itr : lineinfo.lines)
+        {
+            if(itr.inlined)
+                inlines.emplace_back(
+                    binary::inlined_symbol{ itr.line, itr.location, itr.name });
+        }
+    }
+}
+
 bool
 experiment::sample::operator==(const sample& _v) const
 {
-    return std::tie(address, info.line, info.file, info.func, location) ==
-           std::tie(_v.address, _v.info.line, _v.info.file, _v.info.func, _v.location);
+    return base_type::operator==(_v);
 }
 
 bool
 experiment::sample::operator<(const sample& _v) const
 {
-    if(info.line > 0 && _v.info.line > 0)
-    {
-        return std::tie(info.line, info.file) == std::tie(_v.info.line, _v.info.file);
-    }
-    else if((info.line + _v.info.line) > 0)
-    {
-        return std::tie(info.file, location, info.line) <
-               std::tie(_v.info.file, _v.location, _v.info.line);
-    }
-    return (location < _v.location);
+    return base_type::operator<(_v);
 }
 
 const auto&
@@ -102,8 +112,35 @@ void
 experiment::sample::serialize(ArchiveT& ar, const unsigned)
 {
     namespace cereal = ::tim::cereal;
-    ar(cereal::make_nvp("location", location), cereal::make_nvp("count", count),
-       cereal::make_nvp("info", info));
+    using cereal::make_nvp;
+
+    ar(cereal::make_nvp("count", count));
+    if constexpr(concepts::is_output_archive<ArchiveT>::value)
+    {
+        ar(cereal::make_nvp("location", get_identifier()));
+    }
+
+    ar.setNextName("info");
+    ar.startNode();
+    ar(make_nvp("address", address), make_nvp("line", lineno), make_nvp("file", location),
+       make_nvp("func", name));
+
+    if constexpr(concepts::is_output_archive<ArchiveT>::value)
+    {
+        ar(cereal::make_nvp("dfunc", demangle(name)),
+           cereal::make_nvp("dwarf_info", std::vector<binary::dwarf_entry>{}));
+    }
+    ar(cereal::make_nvp("inlines", inlines));
+    ar.finishNode();
+
+    ar(cereal::make_nvp("dlinfo", info));
+}
+
+std::string
+experiment::sample::get_identifier() const
+{
+    return (lineno > 0 && !location.empty()) ? join(":", location, lineno)
+                                             : demangle(name);
 }
 
 template <typename ArchiveT>
@@ -119,7 +156,7 @@ experiment::record::serialize(ArchiveT& ar, const unsigned)
     {
         ar(cereal::make_nvp("samples", _samples));
         for(auto& itr : _samples)
-            samples.emplace(std::move(itr));
+            samples.emplace_back(std::move(itr));
     }
     else
     {
@@ -171,8 +208,6 @@ experiment::serialize(ArchiveT& ar, const unsigned)
         }
         ar(cereal::make_nvp("progress_points", _ppts));
     }
-
-    ar(cereal::make_nvp("period_stats", period_stats));
 }
 
 std::string
@@ -203,9 +238,6 @@ experiment::start()
 
     // sampling period in nanoseconds
     sampling_period = backtrace_causal::get_period(units::nsec);
-    // adjust for the real sampling period
-    period_stats = causal::component::backtrace::get_period_stats();
-    if(period_stats.get_count() > 10) sampling_period = period_stats.get_mean();
 
     // experiment time is scaled up for longer speedups
     index           = experiment_history.size() + 1;
@@ -222,10 +254,14 @@ experiment::start()
     OMNITRACE_VERBOSE(0, "Starting causal experiment #%-3u: %s\n", index,
                       as_string().c_str());
 
-    current_experiment_value = *this;
-    current_selected_count.store(0);
-    current_experiment.store(this);
-    return true;
+    if(get_state() < State::Finalized)
+    {
+        current_experiment_value = *this;
+        current_selected_count.store(0);
+        current_experiment.store(this);
+        return true;
+    }
+    return false;
 }
 
 bool
@@ -258,34 +294,46 @@ experiment::stop()
     total_delay     = (global_delay - total_delay);
     duration      = (experiment_time > total_delay) ? (experiment_time - total_delay) : 0;
     fini_progress = component::progress_point::get_progress_points();
-    period_stats  = causal::component::backtrace::get_period_stats();
 
     // sync data
     delay::sync();
 
-    // for larger speedups, we increased the experiment time, so we want to artificially
-    // increase num by the same factor. E.g. 10 throughput points at speedup 50 should
-    // really look like 15
-    double _scale_num  = 1.0 + ((use_exp_speedup_scaling) ? delay_scaling : 0.0);
-    auto   _prog_stats = tim::statistics<int64_t>{};
+    auto _prog_stats = tim::statistics<double>{};
+    auto _prog_vals  = std::vector<int64_t>{};
+    _prog_vals.reserve(fini_progress.size());
     for(auto fitr : fini_progress)
     {
         auto    _pt = fitr.second - init_progress[fitr.first];
         int64_t _num =
             std::max<int64_t>({ _pt.get_laps(), _pt.get_arrival(), _pt.get_departure() });
-        if(_num > 0) _prog_stats += (_num * _scale_num);
+        if(_num > 0) _prog_vals.emplace_back(_num);
     }
+    std::sort(_prog_vals.begin(), _prog_vals.end());
+    for(auto itr : _prog_vals)
+        _prog_stats += itr;
 
-    auto _mean = (_prog_stats.get_count() > 0) ? _prog_stats.get_mean() : 0;
-    auto _high = (_prog_stats.get_count() > 0) ? _prog_stats.get_max() : 0;
-    if(_high < 5)
+    auto _nvals = _prog_vals.size();
+    auto _medi  = (_nvals > 2) ? _prog_vals.at(_nvals / 2) : _prog_vals.front();
+    auto _mean  = (_nvals > 0) ? _prog_stats.get_mean() : 0;
+    auto _high  = (_nvals > 0) ? _prog_stats.get_max() : 0;
+    auto _lowv  = (_nvals > 0) ? _prog_stats.get_min() : 0;
+
+    if(_lowv <= 3 && (_mean < 5 || _medi < 5))
     {
+        OMNITRACE_VERBOSE(2,
+                          "[progress points] increasing experiment time :: low: %6.3f, "
+                          "high: %6.3f, mean: %6.3f, median: %zi\n",
+                          _lowv, _high, _mean, _medi);
         global_scaling *= 2;
         ++global_scaling_increments;  // keep track of how many successive increments have
                                       // been performed
     }
-    else if(_mean > 10 && global_scaling > 1)
+    else if(_mean > 10 && _lowv >= 8 && global_scaling > 1)
     {
+        OMNITRACE_VERBOSE(2,
+                          "[progress points] decreasing experiment time :: low: %6.3f, "
+                          "high: %6.3f, mean: %6.3f, median: %zi\n",
+                          _lowv, _high, _mean, _medi);
         global_scaling /= 2;
         global_scaling_increments = 0;
     }
@@ -304,7 +352,9 @@ experiment::stop()
 
     if(_high > 0) experiment_history.emplace_back(*this);
 
-    std::this_thread::sleep_for(std::chrono::nanoseconds{ sampling_period * batch_size });
+    std::this_thread::sleep_for(
+        std::chrono::nanoseconds{ 5 * sampling_period * batch_size });
+
     return true;
 }
 
@@ -320,7 +370,6 @@ experiment::as_string() const
         _ss << ", duration: " << std::setw(5) << std::fixed << std::setprecision(3)
             << _dur << " sec";
     _ss << " :: experiment: " << as_hex(selection.address) << " ";
-    //_ss << " [" << selection.info.ipaddr().as_string() << "]";
     if(selection.symbol_address > 0 && selection.address != selection.symbol_address)
         _ss << "(symbol@" << as_hex(selection.symbol_address) << ") ";
     if(!selection.symbol.file.empty() && selection.symbol.line > 0)
@@ -376,12 +425,29 @@ experiment::is_active()
 }
 
 bool
+experiment::is_selected(uint64_t _addr)
+{
+    return (is_active() && current_experiment_value.selection.contains(_addr));
+}
+
+bool
 experiment::is_selected(unwind_addr_t _stack)
 {
     if(is_active())
     {
         for(auto itr : _stack)
-            if(current_experiment_value.selection.contains(itr)) return true;
+            if(itr > 0 && current_experiment_value.selection.contains(itr)) return true;
+    }
+    return false;
+}
+
+bool
+experiment::is_selected(container::c_array<uint64_t> _stack)
+{
+    if(is_active())
+    {
+        for(auto itr : _stack)
+            if(itr > 0 && current_experiment_value.selection.contains(itr)) return true;
     }
     return false;
 }
@@ -413,9 +479,6 @@ experiment::save_experiments(std::string _fname_base, const filename_config_t& _
 {
     const auto& _info0 = thread_info::get(0, InternalTID);
 
-    // if(experiment_history.size() > 1)
-    //    experiment_history.erase(experiment_history.begin());
-
     auto current_record    = record{};
     current_record.startup = _info0->lifetime.first;
 
@@ -446,11 +509,7 @@ experiment::save_experiments(std::string _fname_base, const filename_config_t& _
     // update sample data
     {
         auto _add_sample = [&current_record](sample&& _v) {
-            auto fitr = current_record.samples.find(_v);
-            if(fitr != current_record.samples.end())
-                *fitr += _v;
-            else
-                current_record.samples.emplace(std::move(_v));
+            current_record.samples.emplace_back(std::move(_v));
         };
 
         auto _total_samples = std::map<uintptr_t, size_t>{};
@@ -462,40 +521,23 @@ experiment::save_experiments(std::string _fname_base, const filename_config_t& _
             }
         }
 
+        OMNITRACE_VERBOSE_F(1, "Processing line info for %zu sampled addresses...\n",
+                            _total_samples.size());
+
+        for(const auto& itr : _total_samples)
+        {
+            auto _entry = binary::lookup_ipaddr_entry<true>(itr.first);
+            if(_entry) _add_sample(sample{ *_entry, itr.second });
+        }
+
         auto _binfo_cfg         = settings::compose_filename_config{};
         _binfo_cfg.subdirectory = "causal/binary-info";
         _binfo_cfg.use_suffix   = config::get_use_pid();
         save_line_info(_binfo_cfg, config::get_verbose());
-
-        for(const auto& itr : _total_samples)
-        {
-            auto _addr  = itr.first;
-            auto _count = itr.second;
-            if(_count > 0)
-            {
-                auto _linfo = get_line_info(_addr, true);
-                for(const auto& iitr : _linfo)
-                {
-                    auto _name = (iitr.line > 0) ? join(":", iitr.file, iitr.line)
-                                                 : demangle(iitr.func);
-
-                    _name = join(" :: ", as_hex(_addr), _name);
-                    _add_sample(sample{ _count, _addr, _name, iitr });
-                }
-
-                if(_linfo.empty() && config::get_debug())
-                {
-                    _add_sample(
-                        sample{ _count, _addr, as_hex(_addr), sample::line_info{} });
-                }
-            }
-        }
     }
 
     bool _causal_output_reset =
         config::get_setting_value<bool>("OMNITRACE_CAUSAL_FILE_RESET").value_or(false);
-
-    // if(current_record.experiments.empty()) return;
 
     {
         auto _saved_experiments = (_causal_output_reset)
@@ -615,7 +657,8 @@ experiment::save_experiments(std::string _fname_base, const filename_config_t& _
 
         for(const auto& itr : current_record.samples)
         {
-            ofs << "samples\tlocation=" << itr.location << "\tcount=" << itr.count;
+            ofs << "samples\tlocation=" << itr.get_identifier()
+                << "\tcount=" << itr.count;
             if(config::get_debug()) ofs << "\taddress=" << as_hex(itr.address);
             ofs << "\n";
         }

@@ -521,6 +521,7 @@ omnitrace_add_bin_test(
          cpu_clock
          peak_rss
          page_rss
+         --fork
          --
          $<TARGET_FILE:sleeper>
          5

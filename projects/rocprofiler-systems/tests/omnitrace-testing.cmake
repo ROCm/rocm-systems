@@ -262,7 +262,11 @@ function(OMNITRACE_WRITE_TEST_CONFIG _FILE _ENV)
     set(_FILE_CONTENTS)
     set(_ENV_CONTENTS)
 
+    set(_DEBUG_SETTINGS ON)
     foreach(_VAL ${${_ENV}})
+        if("${_VAL}" MATCHES "^OMNITRACE_DEBUG_SETTINGS=")
+            set(_DEBUG_SETTINGS OFF)
+        endif()
         if("${_VAL}" MATCHES "^OMNITRACE_" AND NOT "${_VAL}" MATCHES "${_ENV_ONLY}")
             set(_FILE_CONTENTS "${_FILE_CONTENTS}${_VAL}\n")
         else()
@@ -290,7 +294,9 @@ OMNITRACE_ROCTRACER_HSA_ACTIVITY = ON
 ${_FILE_CONTENTS}
 ")
     list(APPEND _ENV_CONTENTS "OMNITRACE_CONFIG_FILE=${_CONFIG_FILE}")
-    list(APPEND _ENV_CONTENTS "OMNITRACE_DEBUG_SETTINGS=1")
+    if(_DEBUG_SETTINGS)
+        list(APPEND _ENV_CONTENTS "OMNITRACE_DEBUG_SETTINGS=1")
+    endif()
     set(${_ENV}
         "${_ENV_CONTENTS}"
         PARENT_SCOPE)
@@ -336,25 +342,24 @@ endmacro()
 # -------------------------------------------------------------------------------------- #
 
 function(OMNITRACE_ADD_TEST)
-    foreach(_PREFIX PRELOAD RUNTIME REWRITE REWRITE_RUN BASELINE)
+    foreach(_PREFIX SAMPLING RUNTIME REWRITE REWRITE_RUN BASELINE)
         foreach(_TYPE PASS FAIL SKIP)
             list(APPEND _REGEX_OPTS "${_PREFIX}_${_TYPE}_REGEX")
         endforeach()
     endforeach()
-    set(_KWARGS REWRITE_ARGS RUNTIME_ARGS RUN_ARGS ENVIRONMENT LABELS PROPERTIES
-                ${_REGEX_OPTS})
+    set(_KWARGS REWRITE_ARGS RUNTIME_ARGS SAMPLING_ARGS RUN_ARGS ENVIRONMENT LABELS
+                PROPERTIES ${_REGEX_OPTS})
 
     cmake_parse_arguments(
-        TEST
-        "SKIP_BASELINE;SKIP_PRELOAD;SKIP_REWRITE;SKIP_RUNTIME;SKIP_SAMPLING;FORCE_SAMPLING"
-        "NAME;TARGET;MPI;GPU;NUM_PROCS;REWRITE_TIMEOUT;RUNTIME_TIMEOUT;PRELOAD"
-        "${_KWARGS}"
+        TEST "SKIP_BASELINE;SKIP_SAMPLING;SKIP_REWRITE;SKIP_RUNTIME"
+        "NAME;TARGET;MPI;GPU;NUM_PROCS;REWRITE_TIMEOUT;RUNTIME_TIMEOUT" "${_KWARGS}"
         ${ARGN})
 
-    foreach(_PREFIX PRELOAD RUNTIME REWRITE REWRITE_RUN BASELINE)
+    foreach(_PREFIX SAMPLING RUNTIME REWRITE REWRITE_RUN BASELINE)
         if("${${_PREFIX}_FAIL_REGEX}" STREQUAL "")
             set(${_PREFIX}_FAIL_REGEX
-                "(### ERROR ###|address of faulting memory reference)")
+                "(### ERROR ###|address of faulting memory reference|exiting with non-zero exit code)"
+                )
         endif()
     endforeach()
 
@@ -387,8 +392,8 @@ function(OMNITRACE_ADD_TEST)
         set(TEST_RUNTIME_TIMEOUT 300)
     endif()
 
-    if(NOT TEST_PRELOAD_TIMEOUT)
-        set(TEST_PRELOAD_TIMEOUT 120)
+    if(NOT TEST_SAMPLING_TIMEOUT)
+        set(TEST_SAMPLING_TIMEOUT 120)
     endif()
 
     if(NOT DEFINED TEST_ENVIRONMENT OR "${TEST_ENVIRONMENT}" STREQUAL "")
@@ -448,11 +453,12 @@ function(OMNITRACE_ADD_TEST)
                 WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
         endif()
 
-        if(NOT TEST_SKIP_PRELOAD)
+        if(NOT TEST_SKIP_SAMPLING)
             add_test(
-                NAME ${TEST_NAME}-preload
-                COMMAND ${COMMAND_PREFIX} $<TARGET_FILE:omnitrace-sample> --
-                        $<TARGET_FILE:${TEST_TARGET}> ${TEST_RUN_ARGS}
+                NAME ${TEST_NAME}-sampling
+                COMMAND
+                    ${COMMAND_PREFIX} $<TARGET_FILE:omnitrace-sample> ${TEST_SAMPLE_ARGS}
+                    -- $<TARGET_FILE:${TEST_TARGET}> ${TEST_RUN_ARGS}
                 WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
         endif()
 
@@ -473,23 +479,6 @@ function(OMNITRACE_ADD_TEST)
                 WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
         endif()
 
-        if(TEST_FORCE_SAMPLING OR (NOT TEST_SKIP_REWRITE AND NOT TEST_SKIP_SAMPLING))
-            add_test(
-                NAME ${TEST_NAME}-binary-rewrite-sampling
-                COMMAND
-                    $<TARGET_FILE:omnitrace-instrument> -o
-                    $<TARGET_FILE_DIR:${TEST_TARGET}>/${TEST_NAME}.samp -M sampling
-                    ${TEST_REWRITE_ARGS} -- $<TARGET_FILE:${TEST_TARGET}>
-                WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
-
-            add_test(
-                NAME ${TEST_NAME}-binary-rewrite-sampling-run
-                COMMAND
-                    ${COMMAND_PREFIX} $<TARGET_FILE:omnitrace-run> --
-                    $<TARGET_FILE_DIR:${TEST_TARGET}>/${TEST_NAME}.samp ${TEST_RUN_ARGS}
-                WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
-        endif()
-
         if(NOT TEST_SKIP_RUNTIME AND NOT OMNITRACE_USE_SANITIZER)
             add_test(
                 NAME ${TEST_NAME}-runtime-instrument
@@ -498,34 +487,16 @@ function(OMNITRACE_ADD_TEST)
                 WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
         endif()
 
-        if((TEST_FORCE_SAMPLING OR (NOT TEST_SKIP_RUNTIME AND NOT TEST_SKIP_SAMPLING))
-           AND NOT OMNITRACE_USE_SANITIZER)
-            add_test(
-                NAME ${TEST_NAME}-runtime-instrument-sampling
-                COMMAND
-                    $<TARGET_FILE:omnitrace-instrument> -M sampling ${TEST_RUNTIME_ARGS}
-                    -- $<TARGET_FILE:${TEST_TARGET}> ${TEST_RUN_ARGS}
-                WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
-        endif()
-
         if(TEST ${TEST_NAME}-binary-rewrite-run)
             set_tests_properties(${TEST_NAME}-binary-rewrite-run
                                  PROPERTIES DEPENDS ${TEST_NAME}-binary-rewrite)
         endif()
 
-        if(TEST ${TEST_NAME}-binary-rewrite-sampling-run)
-            set_tests_properties(${TEST_NAME}-binary-rewrite-sampling-run
-                                 PROPERTIES DEPENDS ${TEST_NAME}-binary-rewrite-sampling)
-        endif()
-
-        foreach(
-            _TEST
-            baseline preload binary-rewrite binary-rewrite-run binary-rewrite-sampling
-            binary-rewrite-sampling-run runtime-instrument runtime-instrument-sampling)
+        foreach(_TEST baseline sampling binary-rewrite binary-rewrite-run
+                      runtime-instrument)
             string(REGEX REPLACE "-run(-|/)" "\\1" _prefix "${TEST_NAME}-${_TEST}/")
             set(_labels "${_TEST}")
             string(REPLACE "-run" "" _labels "${_TEST}")
-            string(REPLACE "-sampling" ";sampling" _labels "${_labels}")
             if(TEST_TARGET)
                 list(APPEND _labels "${TEST_TARGET}")
             endif()
@@ -539,14 +510,14 @@ function(OMNITRACE_ADD_TEST)
                 "OMNITRACE_OUTPUT_PREFIX=${_prefix}")
 
             set(_timeout ${TEST_REWRITE_TIMEOUT})
-            if("${_TEST}" MATCHES "preload")
-                set(_timeout ${TEST_PRELOAD_TIMEOUT})
+            if("${_TEST}" MATCHES "sampling")
+                set(_timeout ${TEST_SAMPLING_TIMEOUT})
             elseif("${_TEST}" MATCHES "runtime-instrument")
                 set(_timeout ${TEST_RUNTIME_TIMEOUT})
             endif()
 
             set(_props)
-            if("${_TEST}" MATCHES "run|preload|baseline")
+            if("${_TEST}" MATCHES "run|sampling|baseline")
                 set(_props ${TEST_PROPERTIES})
                 if(NOT "RUN_SERIAL" IN_LIST _props)
                     list(APPEND _props RUN_SERIAL ON)
@@ -561,13 +532,13 @@ function(OMNITRACE_ADD_TEST)
                 set(_REGEX_VAR REWRITE)
             elseif("${_TEST}" MATCHES "baseline")
                 set(_REGEX_VAR BASELINE)
-            elseif("${_TEST}" MATCHES "preload")
-                set(_REGEX_VAR PRELOAD)
+            elseif("${_TEST}" MATCHES "sampling")
+                set(_REGEX_VAR SAMPLING)
             else()
                 set(_REGEX_VAR)
             endif()
 
-            if("${_TEST}" MATCHES "binary-rewrite-run|runtime-instrument|preload")
+            if("${_TEST}" MATCHES "binary-rewrite-run|runtime-instrument|sampling")
                 omnitrace_patch_sanitizer_environment(_environ)
             endif()
 
@@ -632,6 +603,12 @@ function(OMNITRACE_ADD_CAUSAL_TEST)
         set(TEST_CAUSAL_VALIDATE_TIMEOUT 60)
     endif()
 
+    if("${TEST_CAUSAL_FAIL_REGEX}" STREQUAL "")
+        set(TEST_CAUSAL_FAIL_REGEX
+            "(### ERROR ###|address of faulting memory reference|exiting with non-zero exit code)"
+            )
+    endif()
+
     if(TARGET ${TEST_TARGET})
         set(COMMAND_PREFIX $<TARGET_FILE:omnitrace-causal> --reset -m ${TEST_CAUSAL_MODE}
                            ${TEST_CAUSAL_ARGS} --)
@@ -692,7 +669,10 @@ function(OMNITRACE_ADD_CAUSAL_TEST)
                 "OMNITRACE_OUTPUT_PREFIX=${_prefix}"
                 "OMNITRACE_CI=ON"
                 "OMNITRACE_USE_PID=OFF"
-                "OMNITRACE_THREAD_POOL_SIZE=1"
+                "OMNITRACE_THREAD_POOL_SIZE=0"
+                "OMNITRACE_VERBOSE=1"
+                "OMNITRACE_DL_VERBOSE=0"
+                "OMNITRACE_DEBUG_SETTINGS=0"
                 "${TEST_ENVIRONMENT}")
 
             set(_timeout ${TEST_CAUSAL_TIMEOUT})
@@ -954,6 +934,9 @@ function(OMNITRACE_ADD_VALIDATION_TEST)
     endforeach()
 
     list(APPEND TEST_DEPENDS "${TEST_NAME}")
+    if("${TEST_NAME}" MATCHES "-binary-rewrite")
+        list(APPEND TEST_DEPENDS "${TEST_NAME}-run")
+    endif()
 
     if(NOT TEST_PASS_REGEX)
         set(TEST_PASS_REGEX

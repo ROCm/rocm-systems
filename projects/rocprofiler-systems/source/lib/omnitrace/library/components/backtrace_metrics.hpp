@@ -114,6 +114,14 @@ struct backtrace_metrics : comp::empty_base
 
     void post_process_perfetto(int64_t _tid, uint64_t _ts) const;
 
+    backtrace_metrics& operator-=(const backtrace_metrics&);
+
+    friend backtrace_metrics operator-(backtrace_metrics        _lhs,
+                                       const backtrace_metrics& _rhs)
+    {
+        return (_lhs -= _rhs);
+    }
+
 private:
     valid_array_t     m_valid      = {};
     int64_t           m_cpu        = 0;

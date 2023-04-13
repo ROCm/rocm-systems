@@ -64,10 +64,13 @@ void
 configure_disabled_settings(const std::shared_ptr<settings>&);
 
 int
-get_realtime_signal();
+get_sampling_overflow_signal();
 
 int
-get_cputime_signal();
+get_sampling_realtime_signal();
+
+int
+get_sampling_cputime_signal();
 
 std::set<int>
 get_sampling_signals(int64_t _tid = 0);
@@ -234,15 +237,6 @@ bool
 get_sampling_keep_internal();
 
 bool
-get_use_sampling_realtime();
-
-bool
-get_use_sampling_cputime();
-
-int
-get_sampling_rtoffset();
-
-bool
 get_use_rcclp();
 
 bool
@@ -316,19 +310,22 @@ double
 get_sampling_freq();
 
 double
-get_sampling_cpu_freq();
+get_sampling_cputime_freq();
 
 double
-get_sampling_real_freq();
+get_sampling_realtime_freq();
+
+double
+get_sampling_overflow_freq();
 
 double
 get_sampling_delay();
 
 double
-get_sampling_cpu_delay();
+get_sampling_cputime_delay();
 
 double
-get_sampling_real_delay();
+get_sampling_realtime_delay();
 
 double
 get_sampling_duration();
@@ -337,10 +334,13 @@ std::string
 get_sampling_cpus();
 
 std::set<int64_t>
-get_sampling_cpu_tids();
+get_sampling_cputime_tids();
 
 std::set<int64_t>
-get_sampling_real_tids();
+get_sampling_realtime_tids();
+
+std::set<int64_t>
+get_sampling_overflow_tids();
 
 bool
 get_sampling_include_inlines();
@@ -407,6 +407,9 @@ struct tmp_file
 
 std::shared_ptr<tmp_file>
 get_tmp_file(std::string _basename, std::string _ext = "dat");
+
+CausalBackend
+get_causal_backend();
 
 CausalMode
 get_causal_mode();

@@ -24,6 +24,7 @@
 
 #include "defines.hpp"
 #include "exception.hpp"
+#include "locking.hpp"
 
 #include <timemory/api.hpp>
 #include <timemory/backends/dmp.hpp>
@@ -109,7 +110,7 @@ struct lock
     ~lock();
 
 private:
-    tim::auto_lock_t m_lk;
+    locking::atomic_lock m_lk;
 };
 //
 template <typename Arg, typename... Args>
@@ -217,6 +218,43 @@ as_hex<void*>(void*, size_t);
 
 #define OMNITRACE_FPRINTF_STDERR_COLOR(COLOR)                                            \
     fprintf(::omnitrace::debug::get_file(), "%s", ::tim::log::color::COLOR())
+
+//--------------------------------------------------------------------------------------//
+
+#define OMNITRACE_CONDITIONAL_PRINT_COLOR(COLOR, COND, ...)                              \
+    if((COND) && ::omnitrace::config::get_debug_tid() &&                                 \
+       ::omnitrace::config::get_debug_pid())                                             \
+    {                                                                                    \
+        ::omnitrace::debug::flush();                                                     \
+        ::omnitrace::debug::lock _debug_lk{};                                            \
+        OMNITRACE_FPRINTF_STDERR_COLOR(COLOR);                                           \
+        fprintf(::omnitrace::debug::get_file(), "[omnitrace][%i][%li]%s",                \
+                OMNITRACE_DEBUG_PROCESS_IDENTIFIER, OMNITRACE_DEBUG_THREAD_IDENTIFIER,   \
+                ::omnitrace::debug::is_bracket(__VA_ARGS__) ? "" : " ");                 \
+        fprintf(::omnitrace::debug::get_file(), __VA_ARGS__);                            \
+        ::omnitrace::debug::flush();                                                     \
+    }
+
+#define OMNITRACE_CONDITIONAL_PRINT_COLOR_F(COLOR, COND, ...)                            \
+    if((COND) && ::omnitrace::config::get_debug_tid() &&                                 \
+       ::omnitrace::config::get_debug_pid())                                             \
+    {                                                                                    \
+        ::omnitrace::debug::flush();                                                     \
+        ::omnitrace::debug::lock _debug_lk{};                                            \
+        OMNITRACE_FPRINTF_STDERR_COLOR(COLOR);                                           \
+        fprintf(::omnitrace::debug::get_file(), "[omnitrace][%i][%li][%s]%s",            \
+                OMNITRACE_DEBUG_PROCESS_IDENTIFIER, OMNITRACE_DEBUG_THREAD_IDENTIFIER,   \
+                OMNITRACE_FUNCTION,                                                      \
+                ::omnitrace::debug::is_bracket(__VA_ARGS__) ? "" : " ");                 \
+        fprintf(::omnitrace::debug::get_file(), __VA_ARGS__);                            \
+        ::omnitrace::debug::flush();                                                     \
+    }
+
+#define OMNITRACE_PRINT_COLOR(COLOR, ...)                                                \
+    OMNITRACE_CONDITIONAL_PRINT_COLOR(COLOR, true, __VA_ARGS__)
+
+#define OMNITRACE_PRINT_COLOR_F(COLOR, ...)                                              \
+    OMNITRACE_CONDITIONAL_PRINT_COLOR_F(COLOR, true, __VA_ARGS__)
 
 //--------------------------------------------------------------------------------------//
 

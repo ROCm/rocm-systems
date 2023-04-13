@@ -66,7 +66,7 @@ get_clock_cpu_now() noexcept;
 //
 template <bool V>
 bool
-rng_func_impl(int64_t n, uint64_t rseed)
+rng_impl_func(int64_t n, uint64_t rseed)
 {
     int64_t _n    = 0;
     auto    _rng  = std::mt19937_64{ rseed };
@@ -77,8 +77,8 @@ rng_func_impl(int64_t n, uint64_t rseed)
     return V;
 }
 
-template bool rng_func_impl<true>(int64_t, uint64_t);
-template bool rng_func_impl<false>(int64_t, uint64_t);
+template bool rng_impl_func<true>(int64_t, uint64_t);
+template bool rng_impl_func<false>(int64_t, uint64_t);
 
 //
 //  This implementation works well for COZ
@@ -86,25 +86,25 @@ template bool rng_func_impl<false>(int64_t, uint64_t);
 //
 template <bool V>
 bool
-cpu_func_impl(int64_t n, int nloop)
+cpu_impl_func(int64_t n, int nloop)
 {
     auto _t       = clock_type::now();
     auto _cpu_now = get_clock_cpu_now();
     auto _cpu_end = _cpu_now + n;
     // clang-format off
-    while(get_clock_cpu_now() < _cpu_end) 
-    { 
-        for(volatile int i = 0; i < nloop; ++i) {} 
-        CAUSAL_PROGRESS_NAMED("cpu_impl"); 
+    while(get_clock_cpu_now() < _cpu_end)
+    {
+        for(volatile int i = 0; i < nloop; ++i) {}
+        CAUSAL_PROGRESS_NAMED("cpu_impl");
     }
     // clang-format on
     return V;
 }
 
 template bool
-cpu_func_impl<true>(int64_t, int);
+cpu_impl_func<true>(int64_t, int);
 template bool
-cpu_func_impl<false>(int64_t, int);
+cpu_impl_func<false>(int64_t, int);
 
 namespace
 {

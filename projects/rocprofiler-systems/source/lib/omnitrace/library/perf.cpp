@@ -20,18 +20,25 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "library/causal/perf.hpp"
+#include "library/perf.hpp"
+#include "core/debug.hpp"
+#include "core/locking.hpp"
+#include "core/state.hpp"
 #include "core/timemory.hpp"
 #include "core/utility.hpp"
+#include "library/thread_data.hpp"
 
 #include <timemory/log/logger.hpp>
 #include <timemory/log/macros.hpp>
 #include <timemory/units.hpp>
 
 #include <asm/unistd.h>
+#include <ctime>
 #include <fcntl.h>
 #include <linux/perf_event.h>
+#include <mutex>
 #include <poll.h>
+#include <regex>
 #include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -42,9 +49,25 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#if !defined(OMNITRACE_RETURN_ERROR_MSG)
+#    define OMNITRACE_RETURN_ERROR_MSG(COND, ...)                                        \
+        if((COND))                                                                       \
+        {                                                                                \
+            auto _msg_ss = std::stringstream{};                                          \
+            _msg_ss << __VA_ARGS__;                                                      \
+            return std::optional<std::string>{ _msg_ss.str() };                          \
+        }
+#endif
+
+#if !defined(OMNITRACE_FATAL)
+#    define OMNITRACE_FATAL TIMEMORY_FATAL
+#endif
+
+#if !defined(OMNITRACE_ASSERT)
+#    define OMNITRACE_ASSERT(COND) (COND) ? ::tim::log::base() : TIMEMORY_FATAL
+#endif
+
 namespace omnitrace
-{
-namespace causal
 {
 namespace perf
 {
@@ -75,7 +98,7 @@ perf_event::perf_event(perf_event&& rhs) noexcept
     if(m_fd != -1 && m_fd != rhs.m_fd)
     {
         ::close(m_fd);
-        TIMEMORY_INFO << "Closed perf event fd " << m_fd;
+        OMNITRACE_VERBOSE(1, "Closed perf event fd %li\n", m_fd);
     }
 
     if(m_mapping != nullptr && m_mapping != rhs.m_mapping) munmap(m_mapping, sizes.mmap);
@@ -100,6 +123,7 @@ perf_event::~perf_event() { close(); }
 perf_event&
 perf_event::operator=(perf_event&& rhs) noexcept
 {
+    OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
     if(&rhs == this) return *this;
 
     // Release resources if the current perf_event is initialized and not equal to this
@@ -123,11 +147,13 @@ perf_event::operator=(perf_event&& rhs) noexcept
 }
 
 // Open a perf_event file and map it (if sampling is enabled)
-bool
+std::optional<std::string>
 perf_event::open(struct perf_event_attr& _pe, pid_t _pid, int _cpu)
 {
+    OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
     m_sample_type = _pe.sample_type;
     m_read_format = _pe.read_format;
+    m_batch_size  = _pe.wakeup_events;
 
     // Set some mandatory fields
     _pe.size     = sizeof(struct perf_event_attr);
@@ -139,27 +165,22 @@ perf_event::open(struct perf_event_attr& _pe, pid_t _pid, int _cpu)
     {
         std::string path = "/proc/sys/kernel/perf_event_paranoid";
 
-        FILE* file = fopen(path.c_str(), "r");
-        OMNITRACE_PREFER(file != nullptr)
-            << "Failed to open " << path << ": " << strerror(errno);
+        auto file = std::ifstream{ path.c_str() };
 
-        if(file == nullptr) return false;
+        OMNITRACE_RETURN_ERROR_MSG(!file,
+                                   "Failed to open " << path << ": " << strerror(errno));
 
-        char value_str[3];
-        int  res = fread(value_str, sizeof(value_str), 1, file);
-        TIMEMORY_REQUIRE(res != -1)
-            << "Failed to read from " << path << ": " << strerror(errno);
+        int value = 4;
+        file >> value;
 
-        if(res == -1) return false;
+        OMNITRACE_RETURN_ERROR_MSG(file.bad(), "Failed to read from " << path << ": "
+                                                                      << strerror(errno));
 
-        value_str[2] = '\0';
-        int value    = atoi(value_str);
-
-        TIMEMORY_WARNING << "Failed to open perf event. "
-                         << "Consider tweaking " << path << " to 2 or less "
-                         << "(current value is " << value << "), "
-                         << "or run omnitrace as a privileged user (with CAP_SYS_ADMIN).";
-        return false;
+        OMNITRACE_RETURN_ERROR_MSG(
+            true, "Failed to open perf event. Consider tweaking "
+                      << path << " to 2 or less "
+                      << "(current value is " << value << "), "
+                      << "or run omnitrace as a privileged user (with CAP_SYS_ADMIN).");
     }
 
     // If sampling, map the perf event file
@@ -168,26 +189,29 @@ perf_event::open(struct perf_event_attr& _pe, pid_t _pid, int _cpu)
         void* ring_buffer =
             mmap(nullptr, sizes.mmap, PROT_READ | PROT_WRITE, MAP_SHARED, m_fd, 0);
 
-        OMNITRACE_PREFER(ring_buffer != MAP_FAILED)
-            << "Mapping perf_event ring buffer failed. "
-            << "Make sure the current user has permission "
-               "to invoke the perf tool, and that "
-            << "the program being profiled does not use "
-               "an excessive number of threads (>1000).\n";
-
-        if(ring_buffer == MAP_FAILED) return false;
+        OMNITRACE_RETURN_ERROR_MSG(
+            ring_buffer == MAP_FAILED,
+            "Mapping perf_event ring buffer failed. Make sure the current user has "
+            "permission to invoke the perf tool, and that the program being profiled "
+            "does not use an excessive number of threads (>1000)");
 
         m_mapping = reinterpret_cast<struct perf_event_mmap_page*>(ring_buffer);
     }
 
-    return true;
+    return std::optional<std::string>{};
 }
 
-bool
+std::optional<std::string>
 perf_event::open(double _freq, uint32_t _batch_size, pid_t _pid, int _cpu)
 {
+    OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
     uint64_t               _period = (1.0 / _freq) * units::sec;
     struct perf_event_attr _pe;
+
+    if(_batch_size > 0)
+        m_batch_size = _batch_size;
+    else
+        _batch_size = m_batch_size;
 
     memset(&_pe, 0, sizeof(_pe));
     _pe.type           = PERF_TYPE_SOFTWARE;
@@ -195,14 +219,27 @@ perf_event::open(double _freq, uint32_t _batch_size, pid_t _pid, int _cpu)
     _pe.sample_type    = PERF_SAMPLE_IP | PERF_SAMPLE_CALLCHAIN;
     _pe.sample_period  = _period;
     _pe.wakeup_events  = _batch_size;
-    _pe.sample_period  = _period;
-    _pe.wakeup_events  = _batch_size;  // This is ignored on linux 3.13 (why?)
     _pe.exclude_idle   = 1;
     _pe.exclude_kernel = 1;
-    _pe.precise_ip     = 0;
     _pe.disabled       = 1;
+    // potential additions
+    _pe.inherit                  = 0;
+    _pe.exclude_hv               = 1;
+    _pe.exclude_callchain_kernel = 1;
+    _pe.use_clockid              = 1;
+    _pe.clockid                  = CLOCK_REALTIME;
+    // _pe.precise_ip               = 0;
+    // _pe.exclusive                = 1;
+    // _pe.pinned                   = 1;
 
     return open(_pe, _pid, _cpu);
+}
+
+/// Read event count
+long
+perf_event::get_fileno() const
+{
+    return m_fd;
 }
 
 /// Read event count
@@ -210,36 +247,49 @@ uint64_t
 perf_event::get_count() const
 {
     uint64_t count;
-    TIMEMORY_REQUIRE(read(m_fd, &count, sizeof(uint64_t)) == sizeof(uint64_t))
+    OMNITRACE_REQUIRE(read(m_fd, &count, sizeof(uint64_t)) == sizeof(uint64_t))
         << "Failed to read event count from perf_event file";
     return count;
 }
 
 /// Start counting events
-void
+bool
 perf_event::start() const
 {
     if(m_fd != -1)
     {
-        TIMEMORY_REQUIRE(ioctl(m_fd, PERF_EVENT_IOC_ENABLE, 0) != -1)
+        OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
+        OMNITRACE_REQUIRE(ioctl(m_fd, PERF_EVENT_IOC_ENABLE, 0) != -1)
             << "Failed to start perf event: " << strerror(errno);
     }
+    return (m_fd != -1);
 }
 
 /// Stop counting events
-void
+bool
 perf_event::stop() const
 {
     if(m_fd != -1)
     {
-        TIMEMORY_REQUIRE(ioctl(m_fd, PERF_EVENT_IOC_DISABLE, 0) != -1)
+        OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
+        OMNITRACE_REQUIRE(ioctl(m_fd, PERF_EVENT_IOC_DISABLE, 0) != -1)
             << "Failed to stop perf event: " << strerror(errno) << " (" << m_fd << ")";
     }
+    return (m_fd != -1);
+}
+
+bool
+perf_event::is_open() const
+{
+    return (m_fd != -1);
 }
 
 void
 perf_event::close()
 {
+    OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
+    stop();
+
     if(m_fd != -1)
     {
         ::close(m_fd);
@@ -256,22 +306,25 @@ perf_event::close()
 void
 perf_event::set_ready_signal(int sig) const
 {
+    OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
     // Set the perf_event file to async
-    TIMEMORY_REQUIRE(fcntl(m_fd, F_SETFL, fcntl(m_fd, F_GETFL, 0) | O_ASYNC) != -1)
+    OMNITRACE_REQUIRE(fcntl(m_fd, F_SETFL, fcntl(m_fd, F_GETFL, 0) | O_ASYNC) != -1)
         << "failed to set perf_event file to async mode";
 
     // Set the notification signal for the perf file
-    TIMEMORY_REQUIRE(fcntl(m_fd, F_SETSIG, sig) != -1)
+    OMNITRACE_REQUIRE(fcntl(m_fd, F_SETSIG, sig) != -1)
         << "failed to set perf_event file signal";
 
     // Set the current thread as the owner of the file (to target signal delivery)
-    TIMEMORY_REQUIRE(fcntl(m_fd, F_SETOWN, gettid()) != -1)
+    OMNITRACE_REQUIRE(fcntl(m_fd, F_SETOWN, gettid()) != -1)
         << "failed to set the owner of the perf_event file";
 }
 
 void
 perf_event::iterator::next()
 {
+    OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
+
     struct perf_event_header _hdr;
 
     // Copy out the record header
@@ -322,6 +375,8 @@ perf_event::iterator::operator!=(const iterator& other) const
 perf_event::record
 perf_event::iterator::get()
 {
+    OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
+
     // Copy out the record header
     perf_event::copy_from_ring_buffer(m_mapping, m_index, _buf,
                                       sizeof(struct perf_event_header));
@@ -332,7 +387,7 @@ perf_event::iterator::get()
     // Copy out the entire record
     perf_event::copy_from_ring_buffer(m_mapping, m_index, _buf, header->size);
 
-    return perf_event::record(m_source, header);
+    return perf_event::record(&m_source, header);
 }
 
 bool
@@ -367,6 +422,8 @@ void
 perf_event::copy_from_ring_buffer(struct perf_event_mmap_page* _mapping, ptrdiff_t _index,
                                   void* _dest, size_t _nbytes)
 {
+    OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
+
     uintptr_t _base    = reinterpret_cast<uintptr_t>(_mapping) + sizes.page;
     size_t    _beg_idx = _index % sizes.data;
     size_t    _end_idx = _beg_idx + _nbytes;
@@ -391,53 +448,74 @@ perf_event::copy_from_ring_buffer(struct perf_event_mmap_page* _mapping, ptrdiff
 uint64_t
 perf_event::record::get_ip() const
 {
-    TIMEMORY_ASSERT(is_sample() && m_source.is_sampling(sample::ip))
-        << "Record does not have an ip field";
+    OMNITRACE_ASSERT(is_sample() && m_source != nullptr &&
+                     m_source->is_sampling(sample::ip))
+        << "Record does not have an ip field (" << is_sample() << "|" << m_source << ")";
     return *locate_field<sample::ip, uint64_t*>();
 }
 
 uint64_t
 perf_event::record::get_pid() const
 {
-    TIMEMORY_ASSERT(is_sample() && m_source.is_sampling(sample::pid_tid))
-        << "Record does not have a `pid` field";
+    OMNITRACE_ASSERT(is_sample() && m_source != nullptr &&
+                     m_source->is_sampling(sample::pid_tid))
+        << "Record does not have a `pid` field (" << is_sample() << "|" << m_source
+        << ")";
     return locate_field<sample::pid_tid, uint32_t*>()[0];
 }
 
 uint64_t
 perf_event::record::get_tid() const
 {
-    TIMEMORY_ASSERT(is_sample() && m_source.is_sampling(sample::pid_tid))
-        << "Record does not have a `tid` field";
+    OMNITRACE_ASSERT(is_sample() && m_source != nullptr &&
+                     m_source->is_sampling(sample::pid_tid))
+        << "Record does not have a `tid` field (" << is_sample() << "|" << m_source
+        << ")";
     return locate_field<sample::pid_tid, uint32_t*>()[1];
 }
 
 uint64_t
 perf_event::record::get_time() const
 {
-    TIMEMORY_ASSERT(is_sample() && m_source.is_sampling(sample::time))
-        << "Record does not have a 'time' field";
+    OMNITRACE_ASSERT(is_sample() && m_source != nullptr &&
+                     m_source->is_sampling(sample::time))
+        << "Record does not have a 'time' field (" << is_sample() << "|" << m_source
+        << ")";
     return *locate_field<sample::time, uint64_t*>();
+}
+
+uint64_t
+perf_event::record::get_period() const
+{
+    OMNITRACE_ASSERT(is_sample() && m_source != nullptr &&
+                     m_source->is_sampling(sample::period))
+        << "Record does not have a 'period' field (" << is_sample() << "|" << m_source
+        << ")";
+    return *locate_field<sample::period, uint64_t*>();
 }
 
 uint32_t
 perf_event::record::get_cpu() const
 {
-    TIMEMORY_ASSERT(is_sample() && m_source.is_sampling(sample::cpu))
-        << "Record does not have a 'cpu' field";
+    OMNITRACE_ASSERT(is_sample() && m_source != nullptr &&
+                     m_source->is_sampling(sample::cpu))
+        << "Record does not have a 'cpu' field (" << is_sample() << "|" << m_source
+        << ")";
     return *locate_field<sample::cpu, uint32_t*>();
 }
 
 container::c_array<uint64_t>
 perf_event::record::get_callchain() const
 {
-    TIMEMORY_ASSERT(is_sample() && m_source.is_sampling(sample::callchain))
-        << "Record does not have a callchain field";
+    OMNITRACE_ASSERT(is_sample() && m_source != nullptr &&
+                     m_source->is_sampling(sample::callchain))
+        << "Record does not have a callchain field (" << is_sample() << "|" << m_source
+        << ")";
 
     uint64_t* _base = locate_field<sample::callchain, uint64_t*>();
     uint64_t  _size = *_base;
     // Advance the callchain array pointer past the size
-    _base++;
+    ++_base;
     return container::wrap_c_array(_base, _size);
 }
 
@@ -445,6 +523,8 @@ template <sample SampleT, typename Tp>
 Tp
 perf_event::record::locate_field() const
 {
+    OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
+
     uintptr_t p =
         reinterpret_cast<uintptr_t>(m_header) + sizeof(struct perf_event_header);
 
@@ -454,41 +534,45 @@ perf_event::record::locate_field() const
 
     // ip
     if constexpr(SampleT == sample::ip) return reinterpret_cast<Tp>(p);
-    if(m_source.is_sampling(sample::ip)) p += sizeof(uint64_t);
+    if(m_source != nullptr && m_source->is_sampling(sample::ip)) p += sizeof(uint64_t);
 
     // pid, tid
     if constexpr(SampleT == sample::pid_tid) return reinterpret_cast<Tp>(p);
-    if(m_source.is_sampling(sample::pid_tid)) p += sizeof(uint32_t) + sizeof(uint32_t);
+    if(m_source != nullptr && m_source->is_sampling(sample::pid_tid))
+        p += sizeof(uint32_t) + sizeof(uint32_t);
 
     // time
     if constexpr(SampleT == sample::time) return reinterpret_cast<Tp>(p);
-    if(m_source.is_sampling(sample::time)) p += sizeof(uint64_t);
+    if(m_source != nullptr && m_source->is_sampling(sample::time)) p += sizeof(uint64_t);
 
     // addr
     if constexpr(SampleT == sample::addr) return reinterpret_cast<Tp>(p);
-    if(m_source.is_sampling(sample::addr)) p += sizeof(uint64_t);
+    if(m_source != nullptr && m_source->is_sampling(sample::addr)) p += sizeof(uint64_t);
 
     // id
     if constexpr(SampleT == sample::id) return reinterpret_cast<Tp>(p);
-    if(m_source.is_sampling(sample::id)) p += sizeof(uint64_t);
+    if(m_source != nullptr && m_source->is_sampling(sample::id)) p += sizeof(uint64_t);
 
     // stream_id
     if constexpr(SampleT == sample::stream_id) return reinterpret_cast<Tp>(p);
-    if(m_source.is_sampling(sample::stream_id)) p += sizeof(uint64_t);
+    if(m_source != nullptr && m_source->is_sampling(sample::stream_id))
+        p += sizeof(uint64_t);
 
     // cpu
     if constexpr(SampleT == sample::cpu) return reinterpret_cast<Tp>(p);
-    if(m_source.is_sampling(sample::cpu)) p += sizeof(uint32_t) + sizeof(uint32_t);
+    if(m_source != nullptr && m_source->is_sampling(sample::cpu))
+        p += sizeof(uint32_t) + sizeof(uint32_t);
 
     // period
     if constexpr(SampleT == sample::period) return reinterpret_cast<Tp>(p);
-    if(m_source.is_sampling(sample::period)) p += sizeof(uint64_t);
+    if(m_source != nullptr && m_source->is_sampling(sample::period))
+        p += sizeof(uint64_t);
 
     // value
     if constexpr(SampleT == sample::read) return reinterpret_cast<Tp>(p);
-    if(m_source.is_sampling(sample::read))
+    if(m_source != nullptr && m_source->is_sampling(sample::read))
     {
-        uint64_t read_format = m_source.get_read_format();
+        uint64_t read_format = m_source->get_read_format();
         if(read_format & PERF_FORMAT_GROUP)
         {
             // Get the number of values in the read format structure
@@ -516,15 +600,15 @@ perf_event::record::locate_field() const
 
     // callchain
     if constexpr(SampleT == sample::callchain) return reinterpret_cast<Tp>(p);
-    if(m_source.is_sampling(sample::callchain))
+    if(m_source != nullptr && m_source->is_sampling(sample::callchain))
     {
         uint64_t nr = *reinterpret_cast<uint64_t*>(p);
-        p += sizeof(uint64_t) + nr * sizeof(uint64_t);
+        p += sizeof(uint64_t) + (nr * sizeof(uint64_t));
     }
 
     // raw
     if constexpr(SampleT == sample::raw) return reinterpret_cast<Tp>(p);
-    if(m_source.is_sampling(sample::raw))
+    if(m_source != nullptr && m_source->is_sampling(sample::raw))
     {
         uint32_t raw_size = *reinterpret_cast<uint32_t*>(p);
         p += sizeof(uint32_t) + raw_size;
@@ -532,24 +616,46 @@ perf_event::record::locate_field() const
 
     // branch_stack
     if constexpr(SampleT == sample::branch_stack) return reinterpret_cast<Tp>(p);
-    if(m_source.is_sampling(sample::branch_stack))
-        TIMEMORY_FATAL << "Branch stack sampling is not supported";
+    if(m_source != nullptr && m_source->is_sampling(sample::branch_stack))
+        OMNITRACE_FATAL << "Branch stack sampling is not supported";
 
     // regs
     if constexpr(SampleT == sample::regs) return reinterpret_cast<Tp>(p);
-    if(m_source.is_sampling(sample::regs))
-        TIMEMORY_FATAL << "Register sampling is not supported";
+    if(m_source != nullptr && m_source->is_sampling(sample::regs))
+        OMNITRACE_FATAL << "Register sampling is not supported";
 
     // stack
     if constexpr(SampleT == sample::stack) return reinterpret_cast<Tp>(p);
-    if(m_source.is_sampling(sample::stack))
-        TIMEMORY_FATAL << "Stack sampling is not supported";
+    if(m_source != nullptr && m_source->is_sampling(sample::stack))
+        OMNITRACE_FATAL << "Stack sampling is not supported";
 
     // end
     if constexpr(SampleT == sample::last) return reinterpret_cast<Tp>(p);
 
-    TIMEMORY_FATAL << "Unsupported sample field requested!";
+    OMNITRACE_FATAL << "Unsupported sample field requested!";
+}
+
+namespace
+{
+inline auto&
+get_instances()
+{
+    using thread_data_t = thread_data<identity<std::unique_ptr<perf_event>>, perf_event>;
+    static auto& _v     = thread_data_t::instance(construct_on_init{});
+    return _v;
+}
+}  // namespace
+
+std::unique_ptr<perf_event>&
+get_instance(int64_t _tid)
+{
+    auto& _data = get_instances();
+    if(static_cast<size_t>(_tid) >= _data->size())
+    {
+        OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
+        _data->resize(_tid + 1);
+    }
+    return _data->at(_tid);
 }
 }  // namespace perf
-}  // namespace causal
 }  // namespace omnitrace

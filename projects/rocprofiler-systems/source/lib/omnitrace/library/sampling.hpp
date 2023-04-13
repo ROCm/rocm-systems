@@ -29,6 +29,7 @@
 #include "library/components/backtrace.hpp"
 #include "library/components/backtrace_metrics.hpp"
 #include "library/components/backtrace_timestamp.hpp"
+#include "library/components/callchain.hpp"
 #include "library/thread_data.hpp"
 
 #include <timemory/macros/language.hpp>
@@ -43,20 +44,6 @@ namespace omnitrace
 {
 namespace sampling
 {
-using component::backtrace;             // NOLINT
-using component::backtrace_cpu_clock;   // NOLINT
-using component::backtrace_fraction;    // NOLINT
-using component::backtrace_metrics;     // NOLINT
-using component::backtrace_timestamp;   // NOLINT
-using component::backtrace_wall_clock;  // NOLINT
-using component::sampling_cpu_clock;
-using component::sampling_gpu_busy;
-using component::sampling_gpu_memory;
-using component::sampling_gpu_power;
-using component::sampling_gpu_temp;
-using component::sampling_percent;
-using component::sampling_wall_clock;
-
 unique_ptr_t<std::set<int>>&
 get_signal_types(int64_t _tid);
 

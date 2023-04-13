@@ -27,12 +27,14 @@
 #include "common/environment.hpp"
 #include "common/join.hpp"
 #include "common/setup.hpp"
+#include "core/mproc.hpp"
+#include "core/utility.hpp"
 
-#include <regex>
 #include <timemory/environment.hpp>
 #include <timemory/log/color.hpp>
 #include <timemory/utility/argparse.hpp>
 #include <timemory/utility/console.hpp>
+#include <timemory/utility/delimit.hpp>
 #include <timemory/utility/filepath.hpp>
 #include <timemory/utility/join.hpp>
 
@@ -45,6 +47,7 @@
 #include <cstring>
 #include <gnu/lib-names.h>
 #include <iostream>
+#include <regex>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -57,10 +60,11 @@ namespace color    = ::tim::log::color;
 namespace filepath = ::tim::filepath;
 namespace console  = ::tim::utility::console;
 namespace argparse = ::tim::argparse;
-using namespace timemory::join;
-using tim::get_env;
-using tim::log::monochrome;
-using tim::log::stream;
+using namespace ::timemory::join;
+using ::omnitrace::utility::parse_numeric_range;
+using ::tim::get_env;
+using ::tim::log::monochrome;
+using ::tim::log::stream;
 
 namespace std
 {
@@ -147,117 +151,13 @@ remove_child_pid(pid_t _v)
 int
 wait_pid(pid_t _pid, int _opts)
 {
-    int   _status = 0;
-    pid_t _pid_v  = -1;
-    _opts |= WUNTRACED;
-    do
-    {
-        if((_opts & WNOHANG) > 0)
-            std::this_thread::sleep_for(std::chrono::milliseconds{ 100 });
-        _pid_v = waitpid(_pid, &_status, _opts);
-    } while(_pid <= 0);
-    return _status;
+    return ::omnitrace::mproc::wait_pid(_pid, _opts);
 }
 
 int
 diagnose_status(pid_t _pid, int _status)
 {
-    auto _verbose = get_verbose();
-    if(_verbose >= 3)
-    {
-        fflush(stderr);
-        fflush(stdout);
-        std::cout << std::flush;
-        std::cerr << std::flush;
-    }
-
-    bool _normal_exit      = (WIFEXITED(_status) > 0);
-    bool _unhandled_signal = (WIFSIGNALED(_status) > 0);
-    bool _core_dump        = (WCOREDUMP(_status) > 0);
-    bool _stopped          = (WIFSTOPPED(_status) > 0);
-    int  _exit_status      = WEXITSTATUS(_status);
-    int  _stop_signal      = (_stopped) ? WSTOPSIG(_status) : 0;
-    int  _ec               = (_unhandled_signal) ? WTERMSIG(_status) : 0;
-
-    if(_verbose >= 4)
-    {
-        TIMEMORY_PRINTF_INFO(
-            stderr,
-            "diagnosing status for process %i :: status: %i... normal exit: %s, "
-            "unhandled signal: %s, core dump: %s, stopped: %s, exit status: %i, stop "
-            "signal: %i, exit code: %i\n",
-            _pid, _status, std::to_string(_normal_exit).c_str(),
-            std::to_string(_unhandled_signal).c_str(), std::to_string(_core_dump).c_str(),
-            std::to_string(_stopped).c_str(), _exit_status, _stop_signal, _ec);
-    }
-    else if(_verbose >= 3)
-    {
-        TIMEMORY_PRINTF_INFO(stderr,
-                             "diagnosing status for process %i :: status: %i ...\n", _pid,
-                             _status);
-    }
-
-    if(!_normal_exit)
-    {
-        if(_ec == 0) _ec = EXIT_FAILURE;
-        if(_verbose >= 0)
-        {
-            TIMEMORY_PRINTF_FATAL(
-                stderr, "process %i terminated abnormally. exit code: %i\n", _pid, _ec);
-        }
-    }
-
-    if(_stopped)
-    {
-        if(_verbose >= 0)
-        {
-            TIMEMORY_PRINTF_FATAL(stderr,
-                                  "process %i stopped with signal %i. exit code: %i\n",
-                                  _pid, _stop_signal, _ec);
-        }
-    }
-
-    if(_core_dump)
-    {
-        if(_verbose >= 0)
-        {
-            TIMEMORY_PRINTF_FATAL(
-                stderr, "process %i terminated and produced a core dump. exit code: %i\n",
-                _pid, _ec);
-        }
-    }
-
-    if(_unhandled_signal)
-    {
-        if(_verbose >= 0)
-        {
-            TIMEMORY_PRINTF_FATAL(stderr,
-                                  "process %i terminated because it received a signal "
-                                  "(%i) that was not handled. exit code: %i\n",
-                                  _pid, _ec, _ec);
-        }
-    }
-
-    if(!_normal_exit && _exit_status > 0)
-    {
-        if(_verbose >= 0)
-        {
-            if(_exit_status == 127)
-            {
-                TIMEMORY_PRINTF_FATAL(
-                    stderr, "execv in process %i failed. exit code: %i\n", _pid, _ec);
-            }
-            else
-            {
-                TIMEMORY_PRINTF_FATAL(
-                    stderr,
-                    "process %i terminated with a non-zero status. exit code: %i\n", _pid,
-                    _ec);
-            }
-        }
-    }
-
-    return _ec;
+    return ::omnitrace::mproc::diagnose_status(_pid, _status, get_verbose());
 }
 
 std::string
@@ -301,6 +201,9 @@ get_initial_environment()
     update_env(_env, "OMNITRACE_USE_TIMEMORY", false);
     update_env(_env, "OMNITRACE_USE_PROCESS_SAMPLING", false);
     update_env(_env, "OMNITRACE_CRITICAL_TRACE", false);
+    update_env(_env, "OMNITRACE_THREAD_POOL_SIZE",
+               get_env<int>("OMNITRACE_THREAD_POOL_SIZE", 0));
+    update_env(_env, "OMNITRACE_LAUNCHER", "omnitrace-causal");
 
     return _env;
 }
@@ -634,13 +537,26 @@ parse_args(int argc, char** argv, std::vector<char*>& _env,
 
     parser.start_group("CAUSAL PROFILING OPTIONS (General)",
                        "These settings will be applied to all causal profiling runs");
-    parser.add_argument({ "-m", "--mode" }, "Causal profiling mode")
+    parser
+        .add_argument({ "-m", "--mode" },
+                      "Causal profiling mode. Function mode tends to resolve statistics "
+                      "faster than line mode (due to smaller sampling space). Ideally, "
+                      "use function mode first to identify a function to target and then "
+                      "switch to line mode + function scope setting")
         .count(1)
         .dtype("string")
         .choices({ "function", "line" })
         .choice_alias("function", { "func" })
         .action([&](parser_t& p) {
             update_env(_env, "OMNITRACE_CAUSAL_MODE", p.get<std::string>("mode"));
+        });
+
+    parser.add_argument({ "-b", "--backend" }, "Causal profiling sampling backend.")
+        .count(1)
+        .dtype("string")
+        .choices({ "auto", "perf", "timer" })
+        .action([&](parser_t& p) {
+            update_env(_env, "OMNITRACE_CAUSAL_BACKEND", p.get<std::string>("backend"));
         });
 
     parser
@@ -717,16 +633,42 @@ parse_args(int argc, char** argv, std::vector<char*>& _env,
         "scopes (MAIN+foo, MAIN+bar, MAIN+foo, MAIN+bar)");
 
     parser
-        .add_argument({ "-s", "--speedups" },
-                      "Pool of virtual speedups to sample from during experimentation. "
-                      "Each space designates a group and multiple speedups can be "
-                      "grouped together by commas, e.g. -s 0 0,10,20-50 is two groups: "
-                      "group #1 is '0' and group #2 is '0 10 20 25 30 35 40 45 50'")
-        .min_count(0)
+        .add_argument(
+            { "-s", "--speedups" },
+            "Pool of virtual speedups to sample from during experimentation. "
+            "Each space designates a group and multiple speedups can be "
+            "grouped together by commas, e.g. '-s 0 0,10,20-50' is two groups: "
+            "group #1 is '0' and group #2 is '0 10 20 25 30 35 40 45 50' -- "
+            "unless end-to-end mode is activated: in end-to-end mode, only one "
+            "speedup is selected for the entire run so all groups are "
+            "expanded. If a range is specified, the default increment is 5, "
+            "however, this can be overridden by suffixing the range with a colon and the "
+            "desired increment, e.g., '0-40:10' would expand to '0 10 20 30 40'")
+        .min_count(1)
         .max_count(-1)
-        .dtype("integers")
+        .dtype("integer | range | range:increment")
         .action([&](parser_t& p) {
-            _virtual_speedups = p.get<std::vector<std::string>>("speedups");
+            auto _val = p.get<std::vector<std::string>>("speedups");
+            if(p.get<bool>("end-to-end"))
+            {
+                _virtual_speedups.clear();
+                for(const auto& itr : _val)
+                {
+                    for(const auto& ditr : tim::delimit(itr, ",; \t\n\r"))
+                    {
+                        for(auto nitr :
+                            parse_numeric_range<int64_t, std::vector<int64_t>>(
+                                ditr, "virtual speedup", 5L))
+                        {
+                            _virtual_speedups.emplace_back(std::to_string(nitr));
+                        }
+                    }
+                }
+            }
+            else
+            {
+                _virtual_speedups = _val;
+            }
         });
 
     parser

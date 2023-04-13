@@ -233,6 +233,8 @@ OMNITRACE_DEFINE_CONCRETE_TRAIT(uses_timing_units, component::sampling_cpu_clock
 // enable percent units
 OMNITRACE_DEFINE_CONCRETE_TRAIT(uses_percent_units, component::sampling_gpu_busy,
                                 true_type)
+OMNITRACE_DEFINE_CONCRETE_TRAIT(uses_percent_units, component::sampling_percent,
+                                true_type)
 
 // enable memory units
 OMNITRACE_DEFINE_CONCRETE_TRAIT(is_memory_category, component::sampling_gpu_memory,
@@ -252,6 +254,9 @@ OMNITRACE_DEFINE_CONCRETE_TRAIT(report_mean, component::sampling_percent, false_
 // reporting categories (stats)
 OMNITRACE_DEFINE_CONCRETE_TRAIT(report_statistics, component::sampling_percent,
                                 false_type)
+
+// reporting categories (self)
+OMNITRACE_DEFINE_CONCRETE_TRAIT(report_self, component::sampling_percent, false_type)
 
 #define OMNITRACE_DECLARE_EXTERN_COMPONENT(NAME, HAS_DATA, ...)                          \
     TIMEMORY_DECLARE_EXTERN_TEMPLATE(                                                    \

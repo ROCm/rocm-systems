@@ -89,6 +89,12 @@ invoke_exit_gotcha(const exit_gotcha::gotcha_data& _data, FuncT _func, Args... _
                                 JOIN(", ", _args...).c_str(), get_exe_name().c_str());
     }
 
+    if(_exit_info.is_known && _exit_info.exit_code != 0)
+    {
+        OMNITRACE_BASIC_VERBOSE(0, "%s exiting with non-zero exit code: %i...\n",
+                                get_exe_name().c_str(), _exit_info.exit_code);
+    }
+
     (*_func)(_args...);
 }
 }  // namespace
@@ -106,6 +112,7 @@ exit_gotcha::operator()(const gotcha_data& _data, exit_func_t _func, int _ec) co
 void
 exit_gotcha::operator()(const gotcha_data& _data, abort_func_t _func) const
 {
+    _exit_info = { true, false, SIGABRT };
     invoke_exit_gotcha(_data, _func);
 }
 

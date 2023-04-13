@@ -57,6 +57,13 @@ enum class Mode : unsigned short
     Coverage
 };
 
+enum class CausalBackend : unsigned short
+{
+    Perf = 0,
+    Timer,
+    Auto,
+};
+
 enum class CausalMode : unsigned short
 {
     Line = 0,

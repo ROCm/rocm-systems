@@ -23,6 +23,7 @@
 #pragma once
 
 #include "core/common.hpp"
+#include "core/containers/c_array.hpp"
 #include "core/debug.hpp"
 #include "core/exception.hpp"
 
@@ -50,6 +51,10 @@ struct static_vector
     static_vector& operator=(static_vector&&) noexcept = default;
 
     static_vector(size_t _n, Tp _v = {});
+    explicit static_vector(c_array<Tp>&&);
+
+    template <size_t M>
+    explicit static_vector(std::array<Tp, M>&&);
 
     static_vector& operator=(std::initializer_list<Tp>&& _v);
     static_vector& operator=(std::pair<std::array<Tp, N>, size_t>&&);
@@ -92,9 +97,15 @@ struct static_vector
     decltype(auto) back() { return *(m_data.begin() + size() - 1); }
     decltype(auto) back() const { return *(m_data.begin() + size() - 1); }
 
+    auto*       data() { return m_data.data(); }
+    const auto* data() const { return m_data.data(); }
+
     void swap(this_type& _v);
 
     friend void swap(this_type& _lhs, this_type& _rhs) { _lhs.swap(_rhs); }
+
+private:
+    void update_size(size_t);
 
 private:
     count_type        m_size = count_type{ 0 };
@@ -104,8 +115,25 @@ private:
 template <typename Tp, size_t N, bool AtomicSizeV>
 static_vector<Tp, N, AtomicSizeV>::static_vector(size_t _n, Tp _v)
 {
-    m_size.store(_n);
     m_data.fill(_v);
+    update_size(_n);
+}
+
+template <typename Tp, size_t N, bool AtomicSizeV>
+static_vector<Tp, N, AtomicSizeV>::static_vector(c_array<Tp>&& _v)
+{
+    auto _n = std::min<size_t>(N, _v.size());
+    for(size_t i = 0; i < _n; ++i, ++m_size)
+        m_data[i] = _v[i];
+}
+
+template <typename Tp, size_t N, bool AtomicSizeV>
+template <size_t M>
+static_vector<Tp, N, AtomicSizeV>::static_vector(std::array<Tp, M>&& _v)
+{
+    auto _n = std::min<size_t>(N, M);
+    for(size_t i = 0; i < _n; ++i, ++m_size)
+        m_data[i] = _v[i];
 }
 
 template <typename Tp, size_t N, bool AtomicSizeV>
@@ -129,14 +157,9 @@ template <typename Tp, size_t N, bool AtomicSizeV>
 static_vector<Tp, N, AtomicSizeV>&
 static_vector<Tp, N, AtomicSizeV>::operator=(std::pair<std::array<Tp, N>, size_t>&& _v)
 {
-    if constexpr(AtomicSizeV) m_size.store(0);
-
+    update_size(0);
     m_data = std::move(_v.first);
-
-    if constexpr(AtomicSizeV)
-        m_size.store(_v.second);
-    else
-        m_size = _v.second;
+    update_size(_v.second);
 
     return *this;
 }
@@ -145,10 +168,7 @@ template <typename Tp, size_t N, bool AtomicSizeV>
 void
 static_vector<Tp, N, AtomicSizeV>::clear()
 {
-    if constexpr(AtomicSizeV)
-        m_size.store(0);
-    else
-        m_size = 0;
+    update_size(0);
 }
 
 template <typename Tp, size_t N, bool AtomicSizeV>
@@ -160,8 +180,8 @@ static_vector<Tp, N, AtomicSizeV>::swap(this_type& _v)
         auto _t_size = m_size;
         auto _v_size = _v.m_size;
         std::swap(m_data, _v.m_data);
-        m_size.store(_v_size);
-        _v.m_size.store(_t_size);
+        update_size(_v_size);
+        _v.update_size(_t_size);
     }
     else
     {
@@ -190,5 +210,14 @@ static_vector<Tp, N, AtomicSizeV>::emplace_back(Args&&... _v)
     return m_data[_idx];
 }
 
+template <typename Tp, size_t N, bool AtomicSizeV>
+void
+static_vector<Tp, N, AtomicSizeV>::update_size(size_t _n)
+{
+    if constexpr(AtomicSizeV)
+        m_size.store(_n);
+    else
+        m_size = _n;
+}
 }  // namespace container
 }  // namespace omnitrace

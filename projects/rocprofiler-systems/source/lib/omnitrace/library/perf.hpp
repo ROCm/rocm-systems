@@ -24,79 +24,31 @@
 
 #include "core/containers/c_array.hpp"
 #include "core/defines.hpp"
+#include "core/locking.hpp"
+#include "core/perf.hpp"
+
+#include <timemory/backends/papi.hpp>
 
 #include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <linux/perf_event.h>
+#include <regex>
+#include <set>
+#include <string>
 #include <sys/types.h>
-
-#if __GLIBC__ == 2 && __GLIBC_MINOR__ < 30
-#    include <sys/syscall.h>
-#    define gettid() syscall(SYS_gettid)
-#endif
-
-// Workaround for missing hw_breakpoint.h include file:
-//   This include file just defines constants used to configure watchpoint registers.
-//   This will be constant across x86 systems.
-enum
-{
-    HW_BREAKPOINT_X = 4
-};
 
 namespace omnitrace
 {
-namespace causal
-{
 namespace perf
 {
-/// An enum class with all the available sampling data
-enum class sample : uint64_t
-{
-    ip        = PERF_SAMPLE_IP,
-    pid_tid   = PERF_SAMPLE_TID,
-    time      = PERF_SAMPLE_TIME,
-    addr      = PERF_SAMPLE_ADDR,
-    id        = PERF_SAMPLE_ID,
-    stream_id = PERF_SAMPLE_STREAM_ID,
-    cpu       = PERF_SAMPLE_CPU,
-    period    = PERF_SAMPLE_PERIOD,
-
-#if defined(PREF_SAMPLE_READ)
-    read = PERF_SAMPLE_READ,
-#else
-    read         = 0,
-#endif
-
-    callchain = PERF_SAMPLE_CALLCHAIN,
-    raw       = PERF_SAMPLE_RAW,
-
-#if defined(PERF_SAMPLE_BRANCH_STACK)
-    branch_stack = PERF_SAMPLE_BRANCH_STACK,
-#else
-    branch_stack = 0,
-#endif
-
-#if defined(PERF_SAMPLE_REGS_USER)
-    regs = PERF_SAMPLE_REGS_USER,
-#else
-    regs         = 0,
-#endif
-
-#if defined(PERF_SAMPLE_STACK_USER)
-    stack = PERF_SAMPLE_STACK_USER,
-#else
-    stack        = 0,
-#endif
-
-    last = PERF_SAMPLE_MAX
-};
-
 struct perf_event
 {
-    enum class record_type;
+    static constexpr uint32_t max_batch_size = 32;
+
     struct record;
     struct sample_record;
+    class iterator;
 
     /// Default constructor
     perf_event() = default;
@@ -113,17 +65,27 @@ struct perf_event
     perf_event& operator=(const perf_event&) = delete;
 
     /// Open a perf_event file using the given options structure
-    bool open(struct perf_event_attr& pe, pid_t pid = 0, int cpu = -1);
-    bool open(double, uint32_t, pid_t pid = 0, int cpu = -1);
+    std::optional<std::string> open(struct perf_event_attr& pe, pid_t pid = 0,
+                                    int cpu = -1);
+    std::optional<std::string> open(double, uint32_t = 0, pid_t pid = 0, int cpu = -1);
+
+    /// Return file descriptor
+    long get_fileno() const;
 
     /// Read event count
     uint64_t get_count() const;
 
+    /// Get the batch size
+    uint32_t get_batch_size() const { return m_batch_size; }
+
     /// Start counting events and collecting samples
-    void start() const;
+    bool start() const;
 
     /// Stop counting events
-    void stop() const;
+    bool stop() const;
+
+    /// Check if counting events and collecting samples
+    bool is_open() const;
 
     /// Close the perf_event file and unmap the ring buffer
     void close();
@@ -141,32 +103,20 @@ struct perf_event
     /// Get the configuration for this perf_event's read format
     inline uint64_t get_read_format() const { return m_read_format; }
 
-    /// An enum to distinguish types of records in the mmapped ring buffer
-    enum class record_type
-    {
-        mmap       = PERF_RECORD_MMAP,
-        lost       = PERF_RECORD_LOST,
-        comm       = PERF_RECORD_COMM,
-        exit       = PERF_RECORD_EXIT,
-        throttle   = PERF_RECORD_THROTTLE,
-        unthrottle = PERF_RECORD_UNTHROTTLE,
-        fork       = PERF_RECORD_FORK,
-        read       = PERF_RECORD_READ,
-        sample     = PERF_RECORD_SAMPLE,
-
-#if defined(PERF_RECORD_MMAP2)
-        mmap2 = PERF_RECORD_MMAP2
-#else
-        mmap2 = 0
-#endif
-    };
-
-    class iterator;
-
     /// A generic record type
     struct record
     {
         friend class perf_event::iterator;
+
+        record()                  = default;
+        ~record()                 = default;
+        record(const record&)     = default;
+        record(record&&) noexcept = default;
+        record& operator=(const record&) = default;
+        record& operator=(record&&) noexcept = default;
+
+        bool is_valid() const { return (m_source != nullptr && m_header != nullptr); }
+             operator bool() const { return is_valid(); }
 
         record_type get_type() const { return static_cast<record_type>(m_header->type); }
 
@@ -188,11 +138,12 @@ struct perf_event
         uint64_t                     get_pid() const;
         uint64_t                     get_tid() const;
         uint64_t                     get_time() const;
+        uint64_t                     get_period() const;
         uint32_t                     get_cpu() const;
         container::c_array<uint64_t> get_callchain() const;
 
     private:
-        record(const perf_event& source, struct perf_event_header* header)
+        record(const perf_event* source, struct perf_event_header* header)
         : m_source(source)
         , m_header(header)
         {}
@@ -200,8 +151,8 @@ struct perf_event
         template <sample SampleT, typename Tp = void*>
         Tp locate_field() const;
 
-        const perf_event&         m_source;
-        struct perf_event_header* m_header;
+        const perf_event*         m_source = nullptr;
+        struct perf_event_header* m_header = nullptr;
     };
 
     class iterator
@@ -232,13 +183,15 @@ struct perf_event
     /// Get an iterator to the beginning of the memory mapped ring buffer
     iterator begin() { return iterator(*this, m_mapping); }
 
-    // Get an iterator to the end of the memory mapped ring buffer
+    /// Get an iterator to the end of the memory mapped ring buffer
     iterator end() { return iterator(*this, nullptr); }
 
 private:
     // Copy data out of the mmap ring buffer
     static void copy_from_ring_buffer(struct perf_event_mmap_page* mapping,
                                       ptrdiff_t index, void* dest, size_t bytes);
+
+    uint32_t m_batch_size = 10;
 
     /// File descriptor for the perf event
     long m_fd = -1;
@@ -251,6 +204,9 @@ private:
     /// The read format from this perf event's configuration
     uint64_t m_read_format = 0;
 };
+
+/// provides thread-local instance of perf_event
+std::unique_ptr<perf_event>&
+get_instance(int64_t _tid);
 }  // namespace perf
-}  // namespace causal
 }  // namespace omnitrace

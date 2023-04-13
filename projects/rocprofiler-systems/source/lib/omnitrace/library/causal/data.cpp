@@ -28,11 +28,14 @@
 #include "binary/scope_filter.hpp"
 #include "core/binary/fwd.hpp"
 #include "core/config.hpp"
+#include "core/containers/c_array.hpp"
 #include "core/debug.hpp"
 #include "core/state.hpp"
 #include "core/utility.hpp"
 #include "library/causal/delay.hpp"
 #include "library/causal/experiment.hpp"
+#include "library/causal/fwd.hpp"
+#include "library/causal/sample_data.hpp"
 #include "library/causal/sampling.hpp"
 #include "library/causal/selected_entry.hpp"
 #include "library/ptl.hpp"
@@ -48,6 +51,7 @@
 #include <timemory/unwind/dlinfo.hpp>
 #include <timemory/unwind/processed_entry.hpp>
 #include <timemory/utility/procfs/maps.hpp>
+#include <timemory/utility/types.hpp>
 
 #include <algorithm>
 #include <atomic>
@@ -117,7 +121,7 @@ get_eligible_address_ranges()
 using sf = binary::scope_filter;
 
 auto
-get_filters(std::set<binary::scope_filter::filter_scope> _scopes = {
+get_filters(const std::set<binary::scope_filter::filter_scope>& _scopes = {
                 sf::BINARY_FILTER, sf::SOURCE_FILTER, sf::FUNCTION_FILTER })
 {
     auto _filters = std::vector<binary::scope_filter>{};
@@ -276,29 +280,15 @@ auto
 compute_eligible_lines_impl()
 {
     const auto& _binary_info = get_cached_binary_info().first;
-    auto&       _filter_info = get_cached_binary_info().second;
+    auto&       _scoped_info = get_cached_binary_info().second;
     auto        _filters     = get_filters();
 
-    auto& _eligible_ar = get_eligible_address_ranges();
     for(const auto& litr : _binary_info)
     {
-        for(const auto& ditr : litr.mappings)
-        {
-            _eligible_ar +=
-                std::make_pair(binary::address_multirange::coarse{},
-                               address_range_t{ ditr.load_address, ditr.last_address });
-        }
-
-        for(const auto& ditr : litr.symbols)
-        {
-            _eligible_ar += ditr.address + ditr.load_address;
-        }
-
-        auto& _filtered    = _filter_info.emplace_back();
-        _filtered.bfd      = litr.bfd;
-        _filtered.mappings = litr.mappings;
-        _filtered.ranges   = litr.ranges;
-        _filtered.sections = litr.sections;
+        auto& _scoped    = _scoped_info.emplace_back();
+        _scoped.bfd      = litr.bfd;
+        _scoped.mappings = litr.mappings;
+        _scoped.sections = litr.sections;
 
         for(const auto& ditr : litr.symbols)
         {
@@ -312,7 +302,8 @@ compute_eligible_lines_impl()
 
             if(ditr(_filters) || (_sym.inlines.size() + _sym.dwarf_info.size()) > 0)
             {
-                _filtered.symbols.emplace_back(_sym);
+                _scoped.ranges.emplace_back(_sym.ipaddr());
+                _scoped.symbols.emplace_back(_sym);
             }
         }
 
@@ -322,17 +313,31 @@ compute_eligible_lines_impl()
                sf::satisfies_filter(_filters, sf::SOURCE_FILTER,
                                     join(':', ditr.file, ditr.line)))
             {
-                _filtered.debug_info.emplace_back(ditr);
+                _scoped.debug_info.emplace_back(ditr);
             }
         }
 
-        _filtered.sort();
+        _scoped.sort();
+    }
+
+    auto& _eligible_ar = get_eligible_address_ranges();
+    for(const auto& litr : _scoped_info)
+    {
+        for(const auto& ditr : litr.symbols)
+        {
+            _eligible_ar += ditr.ipaddr();
+        }
+
+        for(auto ditr : litr.ranges)
+        {
+            _eligible_ar += ditr;
+        }
     }
 
     OMNITRACE_VERBOSE(
         0, "[causal] eligible address ranges: %zu, coarse address range: %zu [%s]\n",
         _eligible_ar.size(), _eligible_ar.range_size(),
-        _eligible_ar.coarse_range.as_string().c_str());
+        _eligible_ar.get_coarse_range().as_string().c_str());
 
     if(_eligible_ar.empty())
     {
@@ -369,9 +374,10 @@ save_maps_info_impl(std::ostream& _ofs)
 
 void
 save_line_info_impl(std::ostream&                           _ofs,
-                    const std::vector<binary::binary_info>& _binary_data)
+                    const std::vector<binary::binary_info>& _binary_data,
+                    const std::array<bool, 3>&              _info = { true, true, true })
 {
-    auto _write_impl = [&_ofs](const binary::binary_info& _data) {
+    auto _write_impl = [&_ofs, &_info](const binary::binary_info& _data) {
         for(const auto& itr : _data.mappings)
         {
             _ofs << itr.pathname << " [" << as_hex(itr.load_address) << " - "
@@ -389,28 +395,38 @@ save_line_info_impl(std::ostream&                           _ofs,
             if(!itr.func.empty()) _ofs << " [" << tim::demangle(itr.func) << "]";
             _ofs << "\n";
 
-            for(const auto& ditr : itr.inlines)
+            if(std::get<0>(_info))
             {
-                _ofs << "        " << ditr.file << ":" << ditr.line;
-                if(!ditr.func.empty()) _ofs << " [" << tim::demangle(ditr.func) << "]";
-                _ofs << "\n";
+                for(const auto& ditr : itr.inlines)
+                {
+                    _ofs << "        " << ditr.file << ":" << ditr.line;
+                    if(!ditr.func.empty())
+                        _ofs << " [" << tim::demangle(ditr.func) << "]";
+                    _ofs << "\n";
+                }
             }
 
-            for(const auto& ditr : itr.dwarf_info)
+            if(std::get<1>(_info))
             {
-                _ofs << "        " << as_hex(ditr.address) << " :: " << ditr.file << ":"
-                     << ditr.line;
-                _ofs << "\n";
-                _emitted_dwarf_addresses.emplace(ditr.address.low);
+                for(const auto& ditr : itr.dwarf_info)
+                {
+                    _ofs << "        " << as_hex(ditr.address) << " :: " << ditr.file
+                         << ":" << ditr.line;
+                    _ofs << "\n";
+                    _emitted_dwarf_addresses.emplace(ditr.address.low);
+                }
             }
         }
 
-        for(const auto& itr : _data.debug_info)
+        if(std::get<2>(_info))
         {
-            if(_emitted_dwarf_addresses.count(itr.address.low) > 0) continue;
-            _ofs << "    " << as_hex(itr.address) << " :: " << itr.file << ":"
-                 << itr.line;
-            _ofs << "\n";
+            for(const auto& itr : _data.debug_info)
+            {
+                if(_emitted_dwarf_addresses.count(itr.address.low) > 0) continue;
+                _ofs << "    " << as_hex(itr.address) << " :: " << itr.file << ":"
+                     << itr.line;
+                _ofs << "\n";
+            }
         }
 
         _ofs << "\n" << std::flush;
@@ -432,6 +448,10 @@ compute_eligible_lines()
         save_line_info(_cfg, config::get_verbose());
     });
 }
+
+auto eligible_pc_history    = std::map<uintptr_t, size_t>{};
+auto eligible_pc_idx        = std::atomic<size_t>{ 0 };
+auto eligible_pc_candidates = std::atomic<size_t>{ 0 };
 
 void
 perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
@@ -455,19 +475,18 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
     // notify that thread has started
     if(_started) _started->set_value();
 
-    // pause at least one second to determine sampling rate
-    // std::this_thread::sleep_for(std::chrono::seconds{ 1 });
-
     if(!config::get_causal_end_to_end())
     {
         // wait for at least one progress point to start
         while(num_progress_points.load(std::memory_order_relaxed) == 0)
         {
+            std::this_thread::yield();
             std::this_thread::sleep_for(std::chrono::milliseconds{ 1 });
         }
     }
 
     // allow ~10 samples to be collected
+    std::this_thread::yield();
     std::this_thread::sleep_for(std::chrono::milliseconds{ 10 });
 
     double _delay_sec =
@@ -481,6 +500,7 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
         OMNITRACE_VERBOSE(1, "[causal] delaying experimentation for %.2f seconds...\n",
                           _delay_sec);
         uint64_t _delay_nsec = _delay_sec * units::sec;
+        std::this_thread::yield();
         std::this_thread::sleep_for(std::chrono::nanoseconds{ _delay_nsec });
     }
 
@@ -515,57 +535,127 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
         {
             if(get_state() == State::Finalized)
             {
-                auto _memory = std::stringstream{};
-                auto _binary = std::stringstream{};
-                auto _scoped = std::stringstream{};
-                auto _sample = std::stringstream{};
-                save_maps_info_impl(_memory);
-                save_line_info_impl(_binary, get_cached_binary_info().first);
-                save_line_info_impl(_scoped, get_cached_binary_info().second);
+                if(_impl_no > 0) return;
 
-                auto _samples = std::map<uintptr_t, size_t>{};
+                OMNITRACE_VERBOSE(
+                    0,
+                    "[causal] experiment failed to start. Number of PC candidates: %zu\n",
+                    eligible_pc_candidates.load());
+
+                auto _memory   = std::stringstream{};
+                auto _binary   = std::stringstream{};
+                auto _scoped   = std::stringstream{};
+                auto _sample   = std::stringstream{};
+                auto _eligible = std::stringstream{};
+                save_maps_info_impl(_memory);
+                save_line_info_impl(_binary, get_cached_binary_info().first,
+                                    { true, true, false });
+                save_line_info_impl(_scoped, get_cached_binary_info().second,
+                                    { true, true, false });
+
+                auto _samples_map = std::map<uintptr_t, size_t>{};
                 for(const auto& itr : get_samples())
                 {
                     for(const auto& iitr : itr.second)
                     {
-                        _samples[iitr.address] += iitr.count;
+                        _samples_map[iitr.address] += iitr.count;
                     }
                 }
+
+                auto _eligible_pc_hist = std::vector<std::pair<uintptr_t, size_t>>{};
+                for(const auto& itr : eligible_pc_history)
+                {
+                    _eligible_pc_hist.emplace_back(std::make_pair(itr.first, itr.second));
+                }
+
+                std::sort(
+                    _eligible_pc_hist.begin(), _eligible_pc_hist.end(),
+                    [](auto&& _lhs, auto&& _rhs) { return _lhs.second > _rhs.second; });
+
+                for(const auto& itr : _eligible_pc_hist)
+                {
+                    _eligible << "    " << std::setw(8) << itr.second
+                              << " :: " << as_hex(itr.first) << "\n";
+                }
+
+                auto _samples = std::vector<std::pair<uintptr_t, size_t>>{};
+                for(const auto& itr : _samples_map)
+                    _samples.emplace_back(std::make_pair(itr.first, itr.second));
+
+                // sort by most samples
+                std::sort(_samples.begin(), _samples.end(),
+                          [](const auto& _lhs, const auto& _rhs) {
+                              return _lhs.second > _rhs.second;
+                          });
 
                 for(const auto& itr : _samples)
                 {
                     if(itr.second > 0)
                     {
-                        auto _linfo = get_line_info(itr.first, true);
-                        // if(_linfo.size() > 1) _linfo.pop_front();
-                        for(const auto& iitr : _linfo)
+                        auto _is_eligible = is_eligible_address(itr.first) &&
+                                            !get_line_info(itr.first, false).empty();
+                        auto _linfo = binary::lookup_ipaddr_entry<true>(itr.first);
+                        if(_linfo)
                         {
                             _sample << "    " << std::setw(8) << itr.second
-                                    << " :: " << as_hex(itr.first) << " [" << iitr.file
-                                    << ":" << iitr.line << "][" << demangle(iitr.func)
-                                    << "]\n";
-                        }
-
-                        if(_linfo.empty())
-                        {
-                            _sample << "    " << std::setw(8) << itr.second
-                                    << " :: " << as_hex(itr.first) << "\n";
+                                    << " :: " << std::setw(5) << std::boolalpha
+                                    << _is_eligible << " :: " << as_hex(itr.first) << " "
+                                    << _linfo->location << ":" << _linfo->lineno << " ["
+                                    << demangle(_linfo->name) << "]\n";
+                            for(const auto& iitr : _linfo->lineinfo.lines)
+                            {
+                                _sample << "    " << std::setw(8) << itr.second
+                                        << " :: " << std::setw(5) << std::boolalpha
+                                        << _is_eligible << " :: " << as_hex(itr.first)
+                                        << " " << iitr.location << ":" << iitr.line
+                                        << " [" << demangle(iitr.name) << "]\n";
+                            }
                         }
                     }
                 }
 
+                OMNITRACE_PRINT_COLOR(fatal, "causal experiment never started\n");
+
                 std::cerr << std::flush;
                 auto _cerr = tim::log::warning_stream(std::cerr);
-                _cerr << "\nmaps:\n\n" << _memory.str() << "\n";
-                _cerr << "\nbinary:\n\n" << _binary.str() << "\n";
-                _cerr << "\nscoped:\n\n" << _scoped.str() << "\n";
-                _cerr << "\nsample:\n\n" << _sample.str() << "\n";
+                _cerr << "\npc samples:\n\n" << _sample.str() << "\n";
+                _cerr << "\neligible pcs:\n\n" << _eligible.str() << "\n";
+                _cerr << "\nscoped pcs:\n\n" << _scoped.str() << "\n";
+                if(get_verbose() >= 1)
+                {
+                    _cerr << "\nbinary pcs:\n\n" << _binary.str() << "\n";
+                    _cerr << "\nmaps:\n\n" << _memory.str() << "\n";
+                }
                 std::cerr << std::flush;
 
-                OMNITRACE_CONDITIONAL_THROW(_impl_no == 0, "experiment never started");
+                // if launched via omnitrace-causal, allow end-to-end runs that do not
+                // start experiments
+                auto _omni_causal_launcher =
+                    get_env<std::string>("OMNITRACE_LAUNCHER", "", false) ==
+                    "omnitrace-causal";
+
+                if(!(get_causal_end_to_end() && _omni_causal_launcher))
+                {
+                    OMNITRACE_CONDITIONAL_THROW(_impl_no == 0,
+                                                "causal experiment never started");
+                }
+
                 return;
             }
+            else
+            {
+                OMNITRACE_VERBOSE(
+                    1,
+                    "[causal] experiment failed to start. Number of PC candidates: %zu\n",
+                    eligible_pc_candidates.load());
+            }
         }
+
+        OMNITRACE_VERBOSE(3,
+                          "[causal] experiment started. Number of PC candidates: %zu\n",
+                          eligible_pc_candidates.load());
+
+        reset_sample_selection();
 
         // wait for the experiment to complete
         if(config::get_causal_end_to_end())
@@ -592,15 +682,14 @@ perform_experiment_impl(std::shared_ptr<std::promise<void>> _started)  // NOLINT
     }
 }
 
-// thread-safe read/write ring-buffer via atomics
-using pc_ring_buffer_t = tim::data_storage::atomic_ring_buffer<uintptr_t>;
 // latest_eligible_pcs is an array of unwind_depth size -> samples will
 // use lowest indexes for most recent functions address in the call-stack
 auto latest_eligible_pc = []() {
-    auto _arr = std::array<std::unique_ptr<pc_ring_buffer_t>, unwind_depth>{};
+    using atomic_uintptr_t      = std::atomic<uintptr_t>;
+    constexpr size_t array_size = unwind_depth;
+    auto             _arr = std::array<std::unique_ptr<atomic_uintptr_t>, array_size>{};
     for(auto& itr : _arr)
-        itr = std::make_unique<pc_ring_buffer_t>(units::get_page_size() /
-                                                 (sizeof(uintptr_t) + 1));
+        itr = std::make_unique<std::atomic<uintptr_t>>(0);
     return _arr;
 }();
 }  // namespace
@@ -610,20 +699,21 @@ auto latest_eligible_pc = []() {
 bool
 is_eligible_address(uintptr_t _v)
 {
-    return get_eligible_address_ranges().coarse_range.contains(_v);
+    return get_eligible_address_ranges().contains(_v);
 }
 
 void
 save_line_info(const settings::compose_filename_config& _cfg, int _verbose)
 {
-    auto _write = [_verbose](const std::string& ofname, const auto& _data) {
+    auto _write = [_verbose](const std::string& ofname, const auto& _data,
+                             const std::array<bool, 3>& _info) {
         auto _ofs = std::ofstream{};
         if(tim::filepath::open(_ofs, ofname))
         {
             if(_verbose >= 0)
                 operation::file_output_message<binary::symbol>{}(
                     ofname, std::string{ "causal_symbol_info" });
-            save_line_info_impl(_ofs, _data);
+            save_line_info_impl(_ofs, _data, _info);
             save_maps_info_impl(_ofs);
         }
         else
@@ -634,27 +724,54 @@ save_line_info(const settings::compose_filename_config& _cfg, int _verbose)
 
     _write(tim::settings::compose_output_filename(
                join('-', config::get_causal_output_filename(), "binary"), "txt", _cfg),
-           get_cached_binary_info().first);
+           get_cached_binary_info().first, { true, true, true });
     _write(tim::settings::compose_output_filename(
                join('-', config::get_causal_output_filename(), "scoped"), "txt", _cfg),
-           get_cached_binary_info().second);
+           get_cached_binary_info().second, { true, true, false });
+}
+
+size_t
+set_current_selection(unwind_addr_t _stack)
+{
+    for(auto itr : _stack)
+    {
+        if(itr == 0) continue;
+        ++eligible_pc_candidates;
+        if(is_eligible_address(itr))
+        {
+            auto _idx = eligible_pc_idx++ % latest_eligible_pc.size();
+            latest_eligible_pc.at(_idx)->store(itr);
+        }
+    }
+
+    return eligible_pc_idx.load(std::memory_order_relaxed);
+}
+
+size_t
+set_current_selection(container::c_array<uint64_t> _stack)
+{
+    for(auto itr : _stack)
+    {
+        if(itr == 0) continue;
+        ++eligible_pc_candidates;
+        if(is_eligible_address(itr))
+        {
+            auto _idx = eligible_pc_idx++ % latest_eligible_pc.size();
+            latest_eligible_pc.at(_idx)->store(itr);
+        }
+    }
+
+    return eligible_pc_idx.load(std::memory_order_relaxed);
 }
 
 void
-set_current_selection(unwind_addr_t _stack)
+reset_sample_selection()
 {
-    if(experiment::is_active()) return;
-
-    size_t _n = 0;
-    for(auto itr : _stack)
+    eligible_pc_idx.store(0);
+    eligible_pc_candidates.store(0);
+    for(auto& itr : latest_eligible_pc)
     {
-        auto& _pcs = latest_eligible_pc.at(_n);
-        if(_pcs && is_eligible_address(itr))
-        {
-            _pcs->write(&itr);
-            // increment after valid found -> first valid pc for call-stack
-            ++_n;
-        }
+        if(itr) itr->store(0);
     }
 }
 
@@ -662,8 +779,6 @@ selected_entry
 sample_selection(size_t _nitr, size_t _wait_ns)
 {
     OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
-
-    size_t _n = 0;
 
     auto _select_address = [&](auto& _address_vec) {
         // this isn't necessary bc of check before calling this lambda but
@@ -687,6 +802,8 @@ sample_selection(size_t _nitr, size_t _wait_ns)
             auto      _dl_info     = unwind::dlinfo::construct(_addr);
 
             _address_vec.erase(_address_vec.begin() + _idx);
+
+            eligible_pc_history[_addr] += 1;
 
             if(get_causal_mode() == CausalMode::Function)
                 _sym_addr = (_dl_info.symbol) ? _dl_info.symbol.address() : _addr;
@@ -725,45 +842,37 @@ sample_selection(size_t _nitr, size_t _wait_ns)
                                  ? linfo.front()
                                  : linfo.back();
             return selected_entry{ _addr, _sym_addr, _linfo_v };
-            // return selected_entry{ address_range_t{ _addr },
-            //                       address_range_t{ _sym_addr },
-            //                       { _linfo_v.second } };
         }
         return selected_entry{};
     };
 
-    while(_n++ < _nitr)
+    while(eligible_pc_idx.load(std::memory_order_relaxed) == 0)
+    {
+        if(get_state() >= State::Finalized) return selected_entry{};
+        std::this_thread::yield();
+        std::this_thread::sleep_for(std::chrono::nanoseconds{ _wait_ns });
+    }
+
+    for(size_t _n = 0; _n < _nitr; ++_n)
     {
         auto _addresses = std::deque<uintptr_t>{};
         for(auto& aitr : latest_eligible_pc)
         {
             if(OMNITRACE_UNLIKELY(!aitr))
             {
-                OMNITRACE_WARNING(0, "invalid ring buffer...\n");
+                OMNITRACE_WARNING(0, "invalid atomic pc...\n");
                 continue;
             }
 
-            auto _naddrs = aitr->count();
-            if(_naddrs == 0) continue;
-
-            for(size_t i = 0; i < _naddrs; ++i)
-            {
-                uintptr_t _addr = 0;
-                if(!aitr->is_empty() && aitr->read(&_addr) != nullptr)
-                {
-                    if(_addr > 0) _addresses.emplace_back(_addr);
-                }
-            }
-
-            if(!_addresses.empty())
-            {
-                auto _selection = _select_address(_addresses);
-                if(_selection) return _selection;
-            }
+            uintptr_t _addr = aitr->load();
+            if(_addr > 0) _addresses.emplace_back(_addr);
         }
 
-        std::this_thread::yield();
-        std::this_thread::sleep_for(std::chrono::nanoseconds{ _wait_ns });
+        if(!_addresses.empty())
+        {
+            auto _selection = _select_address(_addresses);
+            if(_selection) return _selection;
+        }
     }
 
     return selected_entry{};
@@ -781,12 +890,32 @@ get_line_info(uintptr_t _addr, bool _include_discarded)
         {
             auto _local_data = std::deque<binary::symbol>{};
 
+            // make sure the address is in the coarse grained mapped regions
+            // before performing an exhaustive search
+            bool _is_mapped = std::find_if(litr.mappings.begin(), litr.mappings.end(),
+                                           [_addr](const auto& mitr) {
+                                               return address_range_t{ mitr.load_address,
+                                                                       mitr.last_address }
+                                                   .contains(_addr);
+                                           }) != litr.mappings.end();
+
+            if(!_is_mapped) return;
+
             for(const auto& ditr : litr.symbols)
             {
+                // skip if load address is greater than address
+                if(_addr < ditr.load_address) continue;
+                // compute the symbols ip address range
                 auto _ipaddr = ditr.ipaddr();
+                // if the lower bound of the ip address range is greater than the address,
+                // all following symbols are not worth searching since they are at higher
+                // addresses than this symbol (sorted by address)
+                // if(_ipaddr.low > _addr) break;
+
                 if(!_ipaddr.contains(_addr)) continue;
 
-                if(config::get_causal_mode() == CausalMode::Function)
+                if(_include_discarded ||
+                   config::get_causal_mode() == CausalMode::Function)
                 {
                     // check if the primary symbol satisfy the constraints
                     if(ditr(_filters)) _local_data.emplace_back(ditr);
@@ -795,20 +924,20 @@ get_line_info(uintptr_t _addr, bool _include_discarded)
                     // functions may
                     utility::combine(_local_data, ditr.get_inline_symbols(_filters));
                 }
-                else if(config::get_causal_mode() == CausalMode::Line)
+
+                if(_include_discarded || config::get_causal_mode() == CausalMode::Line)
                 {
                     auto _debug_data = std::deque<binary::symbol>{};
                     for(const auto& itr : ditr.get_debug_line_info(_filters))
                     {
+                        if(!_ipaddr.contains(itr.ipaddr()))
+                            OMNITRACE_THROW(
+                                "Error! debug line info ipaddr (%s) is not contained in "
+                                "symbol ipaddr (%s)",
+                                as_hex(itr.ipaddr()).c_str(), as_hex(_ipaddr).c_str());
                         if(itr.ipaddr().contains(_addr)) _debug_data.emplace_back(itr);
                     }
                     utility::combine(_local_data, _debug_data);
-                }
-                else
-                {
-                    throw exception<std::runtime_error>(
-                        join(" ", "Causal mode not supported:",
-                             std::to_string(config::get_causal_mode())));
                 }
             }
 
@@ -816,7 +945,7 @@ get_line_info(uintptr_t _addr, bool _include_discarded)
             {
                 // combine and only allow first match
                 utility::combine(_data, _local_data);
-                break;
+                if(!_include_discarded) break;
             }
         }
     };

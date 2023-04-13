@@ -98,7 +98,8 @@ void
 pthread_mutex_gotcha::configure()
 {
     pthread_mutex_gotcha_t::get_initializer() = []() {
-        if(!tim::settings::enabled()) return;
+        if(!tim::settings::enabled() || get_use_causal()) return;
+
         if(config::get_trace_thread_locks())
         {
             pthread_mutex_gotcha_t::configure(
@@ -155,7 +156,7 @@ pthread_mutex_gotcha::configure()
                     "pthread_spin_unlock" });
         }
 
-        if(config::get_trace_thread_join() && !get_use_causal())
+        if(config::get_trace_thread_join())
         {
             pthread_mutex_gotcha_t::configure(
                 comp::gotcha_config<12, int, pthread_t, void**>{ "pthread_join" });

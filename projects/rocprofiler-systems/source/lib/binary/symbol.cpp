@@ -82,7 +82,7 @@ read_inliner_info(bfd* _inp)
 
 symbol::symbol(const base_type& _v)
 : base_type{ _v }
-, address{ _v.address, _v.address + _v.symsize }
+, address{ _v.address, _v.address + _v.symsize + 1 }
 , func{ std::string{ base_type::name } }
 {}
 
@@ -96,6 +96,15 @@ symbol::operator==(const symbol& _rhs) const
 bool
 symbol::operator<(const symbol& _rhs) const
 {
+    // if both have non-zero load addresses that are not equal, compare based on load
+    // addresses
+    if(load_address > 0 && _rhs.load_address > 0 && load_address != _rhs.load_address)
+        return (load_address < _rhs.load_address);
+
+    // if address is same and name is same, return true if load_address is higher
+    if(address == _rhs.address && base_type::name == _rhs.base_type::name)
+        return load_address > _rhs.load_address;
+
     return std::tie(address, base_type::binding, base_type::visibility, base_type::name) <
            std::tie(_rhs.address, _rhs.base_type::binding, base_type::visibility,
                     base_type::name);
@@ -122,6 +131,10 @@ symbol::operator+=(const symbol& _rhs)
         address += _rhs.address;
         utility::combine(inlines, _rhs.inlines);
         utility::combine(dwarf_info, _rhs.dwarf_info);
+        if(_rhs.binding < binding) binding = _rhs.binding;
+        if(_rhs.visibility < visibility) visibility = _rhs.visibility;
+        if(load_address == 0 && _rhs.load_address > load_address)
+            load_address = _rhs.load_address;
     }
     else
     {
@@ -171,6 +184,20 @@ symbol::read_dwarf_entries(const std::deque<dwarf_entry>& _info)
                                           _get_next_address(itr, itr->address.low) };
     }
 
+    std::sort(dwarf_info.begin(), dwarf_info.end(),
+              [](const auto& _lhs, const auto& _rhs) {
+                  return std::tie(_lhs.address, _lhs.file, _lhs.line, _lhs.col) <
+                         std::tie(_rhs.address, _rhs.file, _rhs.line, _rhs.col);
+              });
+
+    dwarf_info.erase(std::unique(dwarf_info.begin(), dwarf_info.end(),
+                                 [](const auto& _lhs, const auto& _rhs) {
+                                     return std::tie(_lhs.address, _lhs.file,
+                                                     _lhs.line) ==
+                                            std::tie(_rhs.address, _rhs.file, _rhs.line);
+                                 }),
+                     dwarf_info.end());
+
     return dwarf_info.size();
 }
 
@@ -206,15 +233,12 @@ symbol::read_bfd_line_info(bfd_file& _bfd)
     auto* _syms = reinterpret_cast<asymbol**>(_bfd.syms);
 
     {
-        const char*  _file          = nullptr;
-        const char*  _func          = nullptr;
-        unsigned int _line          = 0;
-        unsigned int _discriminator = 0;
+        const char*  _file = nullptr;
+        const char*  _func = nullptr;
+        unsigned int _line = 0;
 
-        // if(bfd_find_nearest_line(_inp, _section, _syms, _pc - _vma, &_file,
-        //                         &_func, &_line) != 0)
-        if(bfd_find_nearest_line_discriminator(_inp, _section, _syms, _pc - _vma, &_file,
-                                               &_func, &_line, &_discriminator) != 0)
+        if(bfd_find_nearest_line(_inp, _section, _syms, _pc - _vma, &_file, &_func,
+                                 &_line) != 0)
         {
             if(_file) file = _file;
             if(_func) func = _func;
@@ -339,6 +363,18 @@ symbol::serialize(ArchiveT& ar, const unsigned int)
     if constexpr(concepts::is_output_archive<ArchiveT>::value)
         ar(cereal::make_nvp("dfunc", demangle(func)));
 }
+
+template void
+inlined_symbol::serialize<cereal::JSONInputArchive>(cereal::JSONInputArchive&,
+                                                    const unsigned int);
+
+template void
+inlined_symbol::serialize<cereal::MinimalJSONOutputArchive>(
+    cereal::MinimalJSONOutputArchive&, const unsigned int);
+
+template void
+inlined_symbol::serialize<cereal::PrettyJSONOutputArchive>(
+    cereal::PrettyJSONOutputArchive&, const unsigned int);
 
 template void
 symbol::serialize<cereal::JSONInputArchive>(cereal::JSONInputArchive&,

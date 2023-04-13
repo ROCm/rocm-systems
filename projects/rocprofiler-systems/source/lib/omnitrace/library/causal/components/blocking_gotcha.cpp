@@ -39,6 +39,7 @@
 #include <cstdint>
 #include <pthread.h>
 #include <stdexcept>
+#include <type_traits>
 
 #pragma weak pthread_join
 #pragma weak pthread_mutex_lock
@@ -141,9 +142,9 @@ blocking_gotcha::shutdown()
     blocking_gotcha_t::disable();
 }
 
-template <typename Ret, typename... Args>
-Ret
-blocking_gotcha::operator()(const comp::gotcha_data& _data, Ret (*_func)(Args...),
+template <size_t Idx, typename Ret, typename... Args>
+std::enable_if_t<(Idx <= blocking_gotcha::indexes::maybe_post_block_max_idx), Ret>
+blocking_gotcha::operator()(gotcha_index<Idx>, Ret (*_func)(Args...),
                             Args... _args) const noexcept
 {
     int64_t _delay_value = causal::delay::get_global().load(std::memory_order_relaxed);
@@ -154,20 +155,26 @@ blocking_gotcha::operator()(const comp::gotcha_data& _data, Ret (*_func)(Args...
 
     if(get_thread_state() < ::omnitrace::ThreadState::Internal)
     {
-        if(_data.index <= 5)
+        if constexpr(Idx >= always_post_block_min_idx && Idx <= always_post_block_max_idx)
+        {
             causal::delay::postblock(_delay_value);
-        else if(_ret == 0 && _data.index >= 6 && _data.index <= 13)
-            causal::delay::postblock(_delay_value);
+        }
+        else if constexpr(Idx >= maybe_post_block_min_idx &&
+                          Idx <= maybe_post_block_max_idx)
+        {
+            if(_ret == 0) causal::delay::postblock(_delay_value);
+        }
         else
-            OMNITRACE_FAIL_F("Error! unexpected index %zu ('%s')\n", _data.index,
-                             _data.tool_id.c_str());
+        {
+            static_assert(Idx > maybe_post_block_max_idx, "Error! bad overload");
+        }
     }
 
     return _ret;
 }
 
 int
-blocking_gotcha::operator()(const comp::gotcha_data&, int (*)(const sigset_t*, int*),
+blocking_gotcha::operator()(gotcha_index<sigwait_idx>, int (*)(const sigset_t*, int*),
                             const sigset_t* _set_v, int* _sig) const noexcept
 {
     auto _active = get_thread_state() < ::omnitrace::ThreadState::Internal;
@@ -198,7 +205,7 @@ blocking_gotcha::operator()(const comp::gotcha_data&, int (*)(const sigset_t*, i
 }
 
 int
-blocking_gotcha::operator()(const comp::gotcha_data&,
+blocking_gotcha::operator()(gotcha_index<sigwaitinfo_idx>,
                             int (*_func)(const sigset_t*, siginfo_t*),
                             const sigset_t* _set_v, siginfo_t* _info_v) const noexcept
 {
@@ -224,7 +231,7 @@ blocking_gotcha::operator()(const comp::gotcha_data&,
 }
 
 int
-blocking_gotcha::operator()(const comp::gotcha_data&,
+blocking_gotcha::operator()(gotcha_index<sigtimedwait_idx>,
                             int (*_func)(const sigset_t*, siginfo_t*,
                                          const struct timespec*),
                             const sigset_t* _set_v, siginfo_t* _info_v,
@@ -247,6 +254,20 @@ blocking_gotcha::operator()(const comp::gotcha_data&,
         causal::delay::postblock(_delay_value);
 
     if(_ret > 0 && _info_v) *_info_v = _info;
+
+    return _ret;
+}
+
+int
+blocking_gotcha::operator()(gotcha_index<sigsuspend_idx>, int (*)(const sigset_t*),
+                            const sigset_t* _set_v) const noexcept
+{
+    auto _old_set = sigset_t{};
+    int  _sig     = 0;
+    ::sigprocmask(SIG_SETMASK, _set_v, &_old_set);
+    // sigwait is wrapped so no need to block/unblock signals
+    auto _ret = ::sigwait(_set_v, &_sig);
+    ::sigprocmask(SIG_SETMASK, &_old_set, nullptr);
 
     return _ret;
 }

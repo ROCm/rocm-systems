@@ -272,6 +272,15 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
     %{INDENT}%   to consume more resources since, while idle, the real-clock time increases (and therefore triggers taking samples)
     %{INDENT}%   whereas the CPU-clock time does not.)";
 
+    const auto* _overflow_desc =
+        R"(Sample based on an overflow event. Accepts zero or more arguments:
+    %{INDENT}%0. Enables sampling based on overflow.
+    %{INDENT}%1. Overflow metric, e.g. PERF_COUNT_HW_INSTRUCTIONS
+    %{INDENT}%2. Overflow value. E.g., if metric == PERF_COUNT_HW_INSTRUCTIONS, then 10000000 == sample every 10,000,000 instructions.
+    %{INDENT}%3+ Thread IDs to target for sampling, starting at 0 (the main thread).
+    %{INDENT}%   May be specified as index or range, e.g., '0 2-4' will be interpreted as:
+    %{INDENT}%      sample the main thread (0), do not sample the first child thread but sample the 2nd, 3rd, and 4th child threads)";
+
     const auto* _hsa_interrupt_desc =
         R"(Set the value of the HSA_ENABLE_INTERRUPT environment variable.
 %{INDENT}%  ROCm version 5.2 and older have a bug which will cause a deadlock if a sample is taken while waiting for the signal
@@ -1075,7 +1084,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
         "SAMPLING TIMER OPTIONS",
         "These options determine the heuristic for deciding when to take a sample");
 
-    if(_data.environ_filter("sample_cputime", _data))
+    if(_data.environ_filter("sampling_cputime", _data))
     {
         _parser.add_argument({ "--sample-cputime" }, _cputime_desc)
             .min_count(0)
@@ -1103,7 +1112,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
         _data.processed_environs.emplace("sampling_cputime");
     }
 
-    if(_data.environ_filter("sample_realtime", _data))
+    if(_data.environ_filter("sampling_realtime", _data))
     {
         _parser.add_argument({ "--sample-realtime" }, _realtime_desc)
             .min_count(0)
@@ -1130,6 +1139,41 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             });
 
         _data.processed_environs.emplace("sampling_realtime");
+    }
+
+    if(_data.environ_filter("sampling_overflow", _data))
+    {
+        _parser.add_argument({ "--sample-overflow" }, _overflow_desc)
+            .min_count(0)
+            .dtype("[event] [freq] [tids...]")
+            .action([&](parser_t& p) {
+                auto _v = p.get<std::deque<std::string>>("sample-overflow");
+                update_env(_data, "OMNITRACE_SAMPLING_OVERFLOW", true);
+
+                if(!_v.empty())
+                {
+                    if(p.exists("sampling-overflow-event") &&
+                       _v.front() != p.get<std::string>("sampling-overflow-event"))
+                        throw exception<std::runtime_error>(join(
+                            "", "'--sample-overflow ", _v.front(),
+                            " ...' conflicts with '--sampling-overflow-event ",
+                            p.get<std::string>("sampling-overflow-event"), "' option"));
+                    update_env(_data, "OMNITRACE_SAMPLING_OVERFLOW_EVENT", _v.front());
+                    _v.pop_front();
+                }
+                if(!_v.empty())
+                {
+                    update_env(_data, "OMNITRACE_SAMPLING_OVERFLOW_FREQ", _v.front());
+                    _v.pop_front();
+                }
+                if(!_v.empty())
+                {
+                    update_env(_data, "OMNITRACE_SAMPLING_OVERFLOW_TIDS",
+                               join(array_config_t{ "," }, _v));
+                }
+            });
+
+        _data.processed_environs.emplace("sampling_overflow");
     }
 
     _parser.start_group(

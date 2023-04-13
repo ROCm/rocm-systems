@@ -63,30 +63,73 @@ def get_os_info(os_distrib, os_version):
             _key, _data = line.split("=", 1)
             _os_info[_key] = _data.strip('"')
 
+    def _parse_version(_v):
+        _version = re.split(r"[\\.-]", _v)
+        return (
+            "{}.{}".format(_version[0], _version[1])
+            if len(_version) > 1
+            else "{}".format(_version[0])
+        )
+
     if os_distrib is None or os_distrib == "auto":
-        if "debian" in _os_info["ID_LIKE"]:
+        if "ubuntu" in _os_info["ID"]:
             os_distrib = "ubuntu"
-        elif "suse" in _os_info["ID_LIKE"]:
+        elif "opensuse" in _os_info["ID"]:
             os_distrib = "opensuse"
-        elif "rhel" in _os_info["ID_LIKE"]:
+        elif "rhel" in _os_info["ID"]:
             os_distrib = "rhel"
-        elif "fedora" in _os_info["ID_LIKE"]:
+        elif "centos" in _os_info["ID"]:
             os_distrib = "rhel"
-        elif "centos" in _os_info["ID_LIKE"]:
+        elif "rockylinux" in _os_info["ID"]:
             os_distrib = "rhel"
+        elif "debian" in _os_info["ID"]:
+            os_distrib = "ubuntu"
+            if "debian" in _os_info["ID"] and os_version is None:
+                _debian_version = float(_parse_version(_os_info["VERSION_ID"]))
+                if _debian_version >= 11.0:
+                    os_version = "20.04"
+                else:
+                    os_version = "18.04"
+        elif "fedora" in _os_info["ID"]:
+            os_distrib = "rhel"
+            # fedora has different versioning system so fallback to 8.7
+            if os_version is None:
+                os_version = "8.7"
         else:
-            raise RuntimeError(
-                "Unknown ID_LIKE value in /etc/os-release: {}".format(_os_info["ID_LIKE"])
-            )
-    elif os_distrib == "fedora" or os_distrib == "centos":
+            # if we don't have an exact match, check ID_LIKE
+            if "ID_LIKE" not in _os_info.keys():
+                _os_info["ID_LIKE"] = _os_info["ID"]
+
+            if "debian" in _os_info["ID_LIKE"]:
+                os_distrib = "ubuntu"
+                if os_version is None:
+                    # fallback on 18.04 if ID is not ubuntu but debian-like
+                    os_version = "18.04"
+            elif "suse" in _os_info["ID_LIKE"]:
+                os_distrib = "opensuse"
+                # fallback on 15.3 if ID is not opensuse but suse-like
+                if os_version is None:
+                    os_version = "15.3"
+            elif "rhel" in _os_info["ID_LIKE"] or "centos" in _os_info["ID_LIKE"]:
+                os_distrib = "rhel"
+                if os_version is None:
+                    os_version = "8.7"
+            else:
+                raise RuntimeError(
+                    "Unknown ID_LIKE value in /etc/os-release: {}".format(
+                        _os_info["ID_LIKE"]
+                    )
+                )
+    elif os_distrib == "centos":
         os_distrib = "rhel"
+        # uses same versioning system
+    elif os_distrib == "fedora":
+        os_distrib = "rhel"
+        if os_version is None:
+            # fedora has different versioning system so fallback to 8.7
+            os_version = "8.7"
 
     if os_version is None:
-
-        def _parse_version(_v):
-            _version = re.split(r"[\\.-]", _v)
-            return "{}.{}".format(_version[0], _version[1])
-
         os_version = _parse_version(_os_info["VERSION_ID"])
 
     return (os_distrib, os_version)

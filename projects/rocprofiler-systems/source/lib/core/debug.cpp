@@ -22,6 +22,7 @@
 
 #include "debug.hpp"
 #include "binary/address_range.hpp"
+#include "locking.hpp"
 #include "state.hpp"
 
 #include <timemory/log/color.hpp>
@@ -87,7 +88,8 @@ set_source_location(source_location&& _v)
 }
 
 lock::lock()
-: m_lk{ tim::type_mutex<decltype(std::cerr)>(), std::defer_lock }
+: m_lk{ tim::type_mutex<decltype(std::cerr), TIMEMORY_API, 1, locking::atomic_mutex>(),
+        std::defer_lock }
 {
     if(!m_lk.owns_lock() && !_protect_lock)
     {

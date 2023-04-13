@@ -99,9 +99,19 @@ See the [Getting Started documentation](https://amdresearch.github.io/omnitrace/
 - Visit [Releases](https://github.com/AMDResearch/omnitrace/releases) page
 - Select appropriate installer (recommendation: `.sh` scripts do not require super-user priviledges unlike the DEB/RPM installers)
   - If targeting a ROCm application, find the installer script with the matching ROCm version
-  - If you are unsure about your Linux distro, check `/etc/os-release`
-  - If no installer script matches your target OS, try one of the Ubuntu 18.04 `*.sh` installers
-    - This installation may be built against older library versions supported on your distro via backwards compatibility
+  - If you are unsure about your Linux distro, check `/etc/os-release` or use the `omnitrace-install.py` script
+
+If the above recommendation is not desired, download the `omnitrace-install.py` and specify `--prefix <install-directory>` when
+executing it. This script will attempt to auto-detect a compatible OS distribution and version.
+If ROCm support is desired, specify `--rocm X.Y` where `X` is the ROCm major version and `Y`
+is the ROCm minor version, e.g. `--rocm 5.4`.
+
+```console
+wget https://github.com/AMDResearch/omnitrace/releases/latest/download/omnitrace-install.py
+python3 ./omnitrace-install.py --prefix /opt/omnitrace/rocm-5.4 --rocm 5.4
+```
+
+See the [Installation Documentation](https://amdresearch.github.io/omnitrace/installation) for detailed information.
 
 ### Setup
 

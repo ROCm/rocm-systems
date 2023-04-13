@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "omnitrace-run.hpp"
+#include "core/mproc.hpp"
 
 #include <timemory/log/color.hpp>
 #include <timemory/log/macros.hpp>
@@ -61,7 +62,8 @@ main(int argc, char** argv)
     }
 
     auto _parse_data = parser_data_t{};
-    parse_args(argc, argv, _parse_data);
+    auto _fork_exec  = false;
+    parse_args(argc, argv, _parse_data, _fork_exec);
     prepare_command_for_run(argv[0], _parse_data);
     prepare_environment_for_run(_parse_data);
 
@@ -73,7 +75,39 @@ main(int argc, char** argv)
         print_command(_parse_data, "OMNITRACE: ");
         _argv.emplace_back(nullptr);
         _envp.emplace_back(nullptr);
-        return execvpe(_argv.front(), _argv.data(), _envp.data());
+
+        if(_fork_exec)
+        {
+            auto _main_pid = getpid();
+            auto _pid      = fork();
+
+            if(_pid == 0)
+            {
+                return execvpe(_argv.front(), _argv.data(), _envp.data());
+            }
+            else
+            {
+                auto _status = omnitrace::mproc::wait_pid(_pid);
+                auto _ec     = omnitrace::mproc::diagnose_status(_pid, _status);
+                if(_ec != 0 && _parse_data.verbose >= 0)
+                {
+                    TIMEMORY_PRINTF_FATAL(
+                        stderr, "process %i exiting with non-zero exit code: %i\n", _pid,
+                        _ec);
+                }
+                else if(_parse_data.verbose >= 2)
+                {
+                    TIMEMORY_PRINTF_FATAL(
+                        stderr, "omnitrace run in process %i completed. exit code: %i\n",
+                        _pid, _ec);
+                }
+                return _ec;
+            }
+        }
+        else
+        {
+            return execvpe(_argv.front(), _argv.data(), _envp.data());
+        }
     }
 
     _print_usage();

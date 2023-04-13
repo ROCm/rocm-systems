@@ -136,6 +136,8 @@ reset_omnitrace_preload()
     auto&& _preload_libs = get_env("LD_PRELOAD", std::string{});
     if(_preload_libs.find("libomnitrace-dl.so") != std::string::npos)
     {
+        (void) get_omnitrace_is_preloaded();
+        (void) get_omnitrace_preload();
         auto _modified_preload = std::string{};
         for(const auto& itr : delimit(_preload_libs, ":"))
         {
@@ -1293,6 +1295,7 @@ verify_instrumented_preloaded()
         case dl::InstrumentMode::None:
         case dl::InstrumentMode::ProcessAttach:
         case dl::InstrumentMode::ProcessCreate:
+        case dl::InstrumentMode::PythonProfile:
         {
             return;
         }

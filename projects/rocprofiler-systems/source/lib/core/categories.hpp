@@ -130,6 +130,8 @@ OMNITRACE_DEFINE_CATEGORY(category, thread_context_switch, OMNITRACE_CATEGORY_TH
 OMNITRACE_DEFINE_CATEGORY(category, thread_hardware_counter, OMNITRACE_CATEGORY_THREAD_HARDWARE_COUNTER, "thread_hardware_counter", "Hardware counter value on thread (derived from sampling)")
 OMNITRACE_DEFINE_CATEGORY(category, kernel_hardware_counter, OMNITRACE_CATEGORY_KERNEL_HARDWARE_COUNTER, "kernel_hardware_counter", "Hardware counter value for kernel (deterministic)")
 OMNITRACE_DEFINE_CATEGORY(category, numa, OMNITRACE_CATEGORY_NUMA, "numa", "Non-unified memory architecture")
+OMNITRACE_DEFINE_CATEGORY(category, timer_sampling, OMNITRACE_CATEGORY_TIMER_SAMPLING, "timer_sampling", "Sampling based on a timer")
+OMNITRACE_DEFINE_CATEGORY(category, overflow_sampling, OMNITRACE_CATEGORY_OVERFLOW_SAMPLING, "overflow_sampling", "Sampling based on a counter overflow")
 
 OMNITRACE_DECLARE_CATEGORY(category, sampling, OMNITRACE_CATEGORY_SAMPLING, "sampling", "Host-side call-stack sampling")
 // clang-format on
@@ -192,6 +194,8 @@ using name = perfetto_category<Tp...>;
         OMNITRACE_PERFETTO_CATEGORY(category::thread_hardware_counter),                  \
         OMNITRACE_PERFETTO_CATEGORY(category::kernel_hardware_counter),                  \
         OMNITRACE_PERFETTO_CATEGORY(category::numa),                                     \
+        OMNITRACE_PERFETTO_CATEGORY(category::timer_sampling),                           \
+        OMNITRACE_PERFETTO_CATEGORY(category::overflow_sampling),                        \
         ::perfetto::Category("timemory").SetDescription("Events from the timemory API")
 
 #if defined(TIMEMORY_USE_PERFETTO)

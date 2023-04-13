@@ -27,7 +27,9 @@
 #include "defines.hpp"
 #include "gpu.hpp"
 #include "mproc.hpp"
+#include "perf.hpp"
 #include "perfetto.hpp"
+#include "utility.hpp"
 
 #include <timemory/backends/dmp.hpp>
 #include <timemory/backends/mpi.hpp>
@@ -109,59 +111,7 @@ get_available_categories()
     return _v;
 }
 
-template <typename Tp = int64_t, typename ContainerT = std::set<Tp>, typename Up = Tp>
-ContainerT
-parse_numeric_range(std::string _input_string, const std::string& _label, Up _incr)
-{
-    auto _get_value = [](const std::string& _inp) {
-        std::stringstream iss{ _inp };
-        auto              var = Tp{};
-        iss >> var;
-        return var;
-    };
-
-    for(auto& itr : _input_string)
-        itr = tolower(itr);
-    auto _result = ContainerT{};
-    for(const auto& _v : tim::delimit(_input_string, ",; \t\n\r"))
-    {
-        if(_v.find_first_not_of("0123456789-") != std::string::npos)
-        {
-            OMNITRACE_VERBOSE_F(
-                0,
-                "Invalid %s specification. Only numerical values (e.g., 0) or "
-                "ranges (e.g., 0-7) are permitted. Ignoring %s...",
-                _label.c_str(), _v.c_str());
-            continue;
-        }
-        if(_v.find('-') != std::string::npos)
-        {
-            auto _vv = tim::delimit(_v, "-");
-            OMNITRACE_CONDITIONAL_THROW(
-                _vv.size() != 2,
-                "Invalid %s range specification: %s. Required format N-M, e.g. 0-4",
-                _label.c_str(), _v.c_str());
-            Tp _vn = _get_value(_vv.at(0));
-            Tp _vN = _get_value(_vv.at(1));
-            do
-            {
-                if constexpr(std::is_same<ContainerT, std::set<Tp>>::value)
-                    _result.emplace(_vn);
-                else
-                    _result.emplace_back(_vn);
-                _vn += _incr;
-            } while(_vn <= _vN);
-        }
-        else
-        {
-            if constexpr(std::is_same<ContainerT, std::set<Tp>>::value)
-                _result.emplace(std::stol(_v));
-            else
-                _result.emplace_back(std::stol(_v));
-        }
-    }
-    return _result;
-}
+using utility::parse_numeric_range;
 
 #define OMNITRACE_CONFIG_SETTING(TYPE, ENV_NAME, DESCRIPTION, INITIAL_VALUE, ...)        \
     [&]() {                                                                              \
@@ -454,6 +404,11 @@ configure_settings(bool _init)
         "Defaults to OMNITRACE_SAMPLING_FREQ when <= 0.0",
         -1.0, "sampling", "advanced");
 
+    OMNITRACE_CONFIG_SETTING(double, "OMNITRACE_SAMPLING_OVERFLOW_FREQ",
+                             "Number of events in between each sample. "
+                             "Defaults to OMNITRACE_SAMPLING_FREQ when <= 0.0",
+                             -1.0, "sampling", "advanced");
+
     OMNITRACE_CONFIG_SETTING(
         double, "OMNITRACE_SAMPLING_DELAY",
         "Time (in seconds) to wait before the first sampling signal is delivered, "
@@ -518,15 +473,22 @@ configure_settings(bool _init)
     OMNITRACE_CONFIG_SETTING(
         std::string, "OMNITRACE_SAMPLING_CPUTIME_TIDS",
         "Same as OMNITRACE_SAMPLING_TIDS but applies specifically to samplers whose "
-        "timers are based on the CPU-time. This is useful when both "
-        "OMNITRACE_SAMPLING_CPUTIME=ON and OMNITRACE_SAMPLING_REALTIME=ON",
+        "timers are based on the CPU-time. This is useful when you want to restrict "
+        "samples to particular threads.",
         std::string{}, "sampling", "advanced");
 
     OMNITRACE_CONFIG_SETTING(
         std::string, "OMNITRACE_SAMPLING_REALTIME_TIDS",
         "Same as OMNITRACE_SAMPLING_TIDS but applies specifically to samplers whose "
-        "timers are based on the real (wall) time. This is useful when both "
-        "OMNITRACE_SAMPLING_CPUTIME=ON and OMNITRACE_SAMPLING_REALTIME=ON",
+        "timers are based on the real (wall) time. This is useful when you want to "
+        "restrict samples to particular threads.",
+        std::string{}, "sampling", "advanced");
+
+    OMNITRACE_CONFIG_SETTING(
+        std::string, "OMNITRACE_SAMPLING_OVERFLOW_TIDS",
+        "Same as OMNITRACE_SAMPLING_TIDS but applies specifically to samplers whose "
+        "samples are based on the overflow of a particular event. This is useful when "
+        "you want to restrict samples to particular threads.",
         std::string{}, "sampling", "advanced");
 
     auto _backend = tim::get_env_choice<std::string>(
@@ -593,29 +555,45 @@ configure_settings(bool _init)
         "thread started by the application.",
         8, "sampling", "debugging", "advanced");
 
+    OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_SAMPLING_OVERFLOW",
+                             "Enable sampling via an overflow of a HW counter. This "
+                             "requires Linux perf (/proc/sys/kernel/perf_event_paranoid "
+                             "created by OS) with a value of 2 or less in that file",
+                             false, "sampling", "advanced");
+
     OMNITRACE_CONFIG_SETTING(
         bool, "OMNITRACE_SAMPLING_REALTIME",
-        "Enable sampling frequency via a wall-clock timer on child threads. This may "
-        "result in typically idle child threads consuming an unnecessary large amount of "
-        "CPU time. The main thread always has this enabled.",
+        "Enable sampling frequency via a wall-clock timer. This may result in typically "
+        "idle child threads consuming an unnecessary large amount of CPU time.",
         false, "sampling", "advanced");
 
-    OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_SAMPLING_CPUTIME",
-                             "Enable sampling frequency via a timer that measures both "
-                             "CPU time used by the current process, "
-                             "and CPU time expended on behalf of the process by the "
-                             "system. This is recommended.",
-                             true, "sampling", "advanced");
-
-    auto _sigrt_range = SIGRTMAX - SIGRTMIN;
-
     OMNITRACE_CONFIG_SETTING(
-        int, "OMNITRACE_SAMPLING_REALTIME_OFFSET",
-        std::string{
-            "Modify this value only if the target process is also using SIGRTMIN. E.g. "
-            "the signal used is SIGRTMIN + <THIS_VALUE>. Value must be <= " } +
-            std::to_string(_sigrt_range),
-        0, "sampling", "advanced");
+        bool, "OMNITRACE_SAMPLING_CPUTIME",
+        "Enable sampling frequency via a timer that measures both CPU time used by the "
+        "current process, and CPU time expended on behalf of the process by the system. "
+        "This is recommended.",
+        false, "sampling", "advanced");
+
+    OMNITRACE_CONFIG_SETTING(int, "OMNITRACE_SAMPLING_CPUTIME_SIGNAL",
+                             "Modify this value only if the target process is also using "
+                             "the same signal (SIGPROF)",
+                             SIGPROF, "sampling", "advanced");
+
+    OMNITRACE_CONFIG_SETTING(int, "OMNITRACE_SAMPLING_REALTIME_SIGNAL",
+                             "Modify this value only if the target process is also using "
+                             "the same signal (SIGRTMIN)",
+                             SIGRTMIN, "sampling", "advanced");
+
+    OMNITRACE_CONFIG_SETTING(int, "OMNITRACE_SAMPLING_OVERFLOW_SIGNAL",
+                             "Modify this value only if the target process is also using "
+                             "the same signal (SIGRTMIN + 1)",
+                             SIGRTMIN + 1, "sampling", "advanced");
+
+    OMNITRACE_CONFIG_SETTING(std::string, "OMNITRACE_SAMPLING_OVERFLOW_EVENT",
+                             "Metric for overflow sampling",
+                             std::string{ "perf::PERF_COUNT_HW_CACHE_REFERENCES" },
+                             "sampling", "hardware_counters")
+        ->set_choices(perf::get_config_choices());
 
     OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_ROCTRACER_HIP_API",
                              "Enable HIP API tracing support", true, "roctracer", "rocm",
@@ -758,11 +736,21 @@ configure_settings(bool _init)
         get_env<std::string>("TMPDIR", "/tmp"), "io", "data", "advanced");
 
     OMNITRACE_CONFIG_SETTING(
+        std::string, "OMNITRACE_CAUSAL_BACKEND",
+        "Backend for call-stack sampling. See "
+        "https://amdresearch.github.io/omnitrace/causal_profiling.html#backends for more "
+        "info. If set to \"auto\", omnitrace will attempt to use the perf backend and "
+        "fallback on the timer backend if unavailable",
+        std::string{ "auto" }, "causal", "analysis")
+        ->set_choices({ "auto", "perf", "timer" });
+
+    OMNITRACE_CONFIG_SETTING(
         std::string, "OMNITRACE_CAUSAL_MODE",
         "Perform causal experiments at the function-scope or line-scope. Ideally, use "
         "function first to locate function with highest impact and then switch to line "
         "mode + OMNITRACE_CAUSAL_FUNCTION_SCOPE set to the function being targeted.",
-        std::string{ "function" }, "causal", "analysis", "advanced");
+        std::string{ "function" }, "causal", "analysis")
+        ->set_choices({ "func", "line", "function" });
 
     OMNITRACE_CONFIG_SETTING(
         double, "OMNITRACE_CAUSAL_DELAY",
@@ -1306,16 +1294,25 @@ configure_signal_handler(const std::shared_ptr<settings>& _config)
     }
 }
 
-int
-get_realtime_signal()
+bool
+get_use_sampling_overflow()
 {
-    return SIGRTMIN + get_sampling_rtoffset();
+    static auto _v = get_config()->find("OMNITRACE_SAMPLING_OVERFLOW");
+    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
 }
 
-int
-get_cputime_signal()
+bool
+get_use_sampling_realtime()
 {
-    return SIGPROF;
+    static auto _v = get_config()->find("OMNITRACE_SAMPLING_REALTIME");
+    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
+}
+
+bool
+get_use_sampling_cputime()
+{
+    static auto _v = get_config()->find("OMNITRACE_SAMPLING_CPUTIME");
+    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
 }
 
 std::set<int> get_sampling_signals(int64_t)
@@ -1323,13 +1320,22 @@ std::set<int> get_sampling_signals(int64_t)
     auto _v = std::set<int>{};
     if(get_use_causal())
     {
-        _v.emplace(get_cputime_signal());
-        _v.emplace(get_realtime_signal());
+        _v.emplace(get_sampling_cputime_signal());
+        _v.emplace(get_sampling_realtime_signal());
     }
     else
     {
-        if(get_use_sampling_cputime()) _v.emplace(get_cputime_signal());
-        if(get_use_sampling_realtime()) _v.emplace(get_realtime_signal());
+        if(get_use_sampling() && !get_use_sampling_cputime() &&
+           !get_use_sampling_realtime() && !get_use_sampling_overflow())
+        {
+            OMNITRACE_VERBOSE_F(1, "sampling enabled by cputime/realtime/overflow not "
+                                   "specified. defaulting to cputime...\n");
+            set_setting_value("OMNITRACE_SAMPLING_CPUTIME", true);
+        }
+
+        if(get_use_sampling_cputime()) _v.emplace(get_sampling_cputime_signal());
+        if(get_use_sampling_realtime()) _v.emplace(get_sampling_realtime_signal());
+        if(get_use_sampling_overflow()) _v.emplace(get_sampling_overflow_signal());
     }
 
     return _v;
@@ -2008,24 +2014,24 @@ get_sampling_keep_internal()
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
 }
 
-bool
-get_use_sampling_realtime()
+int
+get_sampling_overflow_signal()
 {
-    static auto _v = get_config()->find("OMNITRACE_SAMPLING_REALTIME");
-    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
-}
-
-bool
-get_use_sampling_cputime()
-{
-    static auto _v = get_config()->find("OMNITRACE_SAMPLING_CPUTIME");
-    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
+    static auto _v = get_config()->find("OMNITRACE_SAMPLING_OVERFLOW_SIGNAL");
+    return static_cast<tim::tsettings<int>&>(*_v->second).get();
 }
 
 int
-get_sampling_rtoffset()
+get_sampling_realtime_signal()
 {
-    static auto _v = get_config()->find("OMNITRACE_SAMPLING_REALTIME_OFFSET");
+    static auto _v = get_config()->find("OMNITRACE_SAMPLING_REALTIME_SIGNAL");
+    return static_cast<tim::tsettings<int>&>(*_v->second).get();
+}
+
+int
+get_sampling_cputime_signal()
+{
+    static auto _v = get_config()->find("OMNITRACE_SAMPLING_CPUTIME_SIGNAL");
     return static_cast<tim::tsettings<int>&>(*_v->second).get();
 }
 
@@ -2241,7 +2247,7 @@ get_sampling_freq()
 }
 
 double
-get_sampling_cpu_freq()
+get_sampling_cputime_freq()
 {
     static auto _v   = get_config()->find("OMNITRACE_SAMPLING_CPUTIME_FREQ");
     auto&       _val = static_cast<tim::tsettings<double>&>(*_v->second).get();
@@ -2250,9 +2256,18 @@ get_sampling_cpu_freq()
 }
 
 double
-get_sampling_real_freq()
+get_sampling_realtime_freq()
 {
     static auto _v   = get_config()->find("OMNITRACE_SAMPLING_REALTIME_FREQ");
+    auto&       _val = static_cast<tim::tsettings<double>&>(*_v->second).get();
+    if(_val <= 0.0) _val = get_sampling_freq();
+    return _val;
+}
+
+double
+get_sampling_overflow_freq()
+{
+    static auto _v   = get_config()->find("OMNITRACE_SAMPLING_OVERFLOW_FREQ");
     auto&       _val = static_cast<tim::tsettings<double>&>(*_v->second).get();
     if(_val <= 0.0) _val = get_sampling_freq();
     return _val;
@@ -2266,7 +2281,7 @@ get_sampling_delay()
 }
 
 double
-get_sampling_cpu_delay()
+get_sampling_cputime_delay()
 {
     static auto _v   = get_config()->find("OMNITRACE_SAMPLING_CPUTIME_DELAY");
     auto&       _val = static_cast<tim::tsettings<double>&>(*_v->second).get();
@@ -2275,7 +2290,7 @@ get_sampling_cpu_delay()
 }
 
 double
-get_sampling_real_delay()
+get_sampling_realtime_delay()
 {
     static auto _v   = get_config()->find("OMNITRACE_SAMPLING_REALTIME_DELAY");
     auto&       _val = static_cast<tim::tsettings<double>&>(*_v->second).get();
@@ -2293,32 +2308,40 @@ get_sampling_duration()
 std::string
 get_sampling_cpus()
 {
-    static auto _v = get_config()->find("OMNITRACE_SAMPLING_CPUS");
+    auto _v = get_config()->find("OMNITRACE_SAMPLING_CPUS");
     return static_cast<tim::tsettings<std::string>&>(*_v->second).get();
 }
 
 std::set<int64_t>
 get_sampling_tids()
 {
-    static auto _v = get_config()->find("OMNITRACE_SAMPLING_TIDS");
+    auto _v = get_config()->find("OMNITRACE_SAMPLING_TIDS");
     return parse_numeric_range<>(
-        static_cast<tim::tsettings<std::string>&>(*_v->second).get(), "thread IDs", 1);
+        static_cast<tim::tsettings<std::string>&>(*_v->second).get(), "thread IDs", 1L);
 }
 
 std::set<int64_t>
-get_sampling_cpu_tids()
+get_sampling_cputime_tids()
 {
-    static auto _v = get_config()->find("OMNITRACE_SAMPLING_CPUTIME_TIDS");
+    auto _v = get_config()->find("OMNITRACE_SAMPLING_CPUTIME_TIDS");
     return parse_numeric_range<>(
-        static_cast<tim::tsettings<std::string>&>(*_v->second).get(), "thread IDs", 1);
+        static_cast<tim::tsettings<std::string>&>(*_v->second).get(), "thread IDs", 1L);
 }
 
 std::set<int64_t>
-get_sampling_real_tids()
+get_sampling_realtime_tids()
 {
-    static auto _v = get_config()->find("OMNITRACE_SAMPLING_REALTIME_TIDS");
+    auto _v = get_config()->find("OMNITRACE_SAMPLING_REALTIME_TIDS");
     return parse_numeric_range<>(
-        static_cast<tim::tsettings<std::string>&>(*_v->second).get(), "thread IDs", 1);
+        static_cast<tim::tsettings<std::string>&>(*_v->second).get(), "thread IDs", 1L);
+}
+
+std::set<int64_t>
+get_sampling_overflow_tids()
+{
+    auto _v = get_config()->find("OMNITRACE_SAMPLING_OVERFLOW_TIDS");
+    return parse_numeric_range<>(
+        static_cast<tim::tsettings<std::string>&>(*_v->second).get(), "thread IDs", 1L);
 }
 
 bool
@@ -2415,14 +2438,8 @@ get_trace_thread_join()
 bool
 get_debug_tid()
 {
-    static auto _vlist = []() {
-        std::unordered_set<int64_t> _tids{};
-        for(auto itr : tim::delimit<std::vector<int64_t>>(
-                tim::get_env<std::string>("OMNITRACE_DEBUG_TIDS", ""),
-                ",: ", [](const std::string& _v) { return std::stoll(_v); }))
-            _tids.insert(itr);
-        return _tids;
-    }();
+    static auto _vlist = parse_numeric_range<int64_t, std::unordered_set<int64_t>>(
+        tim::get_env<std::string>("OMNITRACE_DEBUG_TIDS", ""), "debug tids", 1L);
     static thread_local bool _v =
         _vlist.empty() || _vlist.count(tim::threading::get_id()) > 0;
     return _v;
@@ -2431,14 +2448,8 @@ get_debug_tid()
 bool
 get_debug_pid()
 {
-    static auto _vlist = []() {
-        std::unordered_set<int64_t> _pids{};
-        for(auto itr : tim::delimit<std::vector<int64_t>>(
-                tim::get_env<std::string>("OMNITRACE_DEBUG_PIDS", ""),
-                ",: ", [](const std::string& _v) { return std::stoll(_v); }))
-            _pids.insert(itr);
-        return _pids;
-    }();
+    static auto _vlist = parse_numeric_range<int64_t, std::unordered_set<int64_t>>(
+        tim::get_env<std::string>("OMNITRACE_DEBUG_PIDS", ""), "debug pids", 1L);
     static bool _v = _vlist.empty() || _vlist.count(tim::process::get_id()) > 0 ||
                      _vlist.count(dmp::rank()) > 0;
     return _v;
@@ -2589,6 +2600,31 @@ get_tmp_file(std::string _basename, std::string _ext)
     return _existing_files.at(_fname);
 }
 
+CausalBackend
+get_causal_backend()
+{
+    static auto _m = std::unordered_map<std::string_view, CausalBackend>{
+        { "auto", CausalBackend::Auto },
+        { "perf", CausalBackend::Perf },
+        { "timer", CausalBackend::Timer },
+    };
+
+    auto _v = get_config()->find("OMNITRACE_CAUSAL_BACKEND");
+    try
+    {
+        return _m.at(static_cast<tim::tsettings<std::string>&>(*_v->second).get());
+    } catch(std::runtime_error& _e)
+    {
+        auto _mode = static_cast<tim::tsettings<std::string>&>(*_v->second).get();
+        OMNITRACE_THROW("[%s] invalid causal backend %s. Choices: %s\n", __FUNCTION__,
+                        _mode.c_str(),
+                        timemory::join::join(timemory::join::array_config{ ", ", "", "" },
+                                             _v->second->get_choices())
+                            .c_str());
+    }
+    return CausalBackend::Auto;
+}
+
 CausalMode
 get_causal_mode()
 {
@@ -2612,12 +2648,11 @@ get_causal_mode()
         } catch(std::runtime_error& _e)
         {
             auto _mode = static_cast<tim::tsettings<std::string>&>(*_v->second).get();
-            std::stringstream _ss{};
-            for(const auto& itr : _v->second->get_choices())
-                _ss << ", " << itr;
-            auto _msg = (_ss.str().length() > 2) ? _ss.str().substr(2) : std::string{};
-            OMNITRACE_THROW("[%s] invalid causal mode %s. Choices: %s\n", __FUNCTION__,
-                            _mode.c_str(), _msg.c_str());
+            OMNITRACE_THROW(
+                "[%s] invalid causal mode %s. Choices: %s\n", __FUNCTION__, _mode.c_str(),
+                timemory::join::join(timemory::join::array_config{ ", ", "", "" },
+                                     _v->second->get_choices())
+                    .c_str());
         }
         return CausalMode::Function;
     }();
@@ -2637,7 +2672,7 @@ get_causal_fixed_speedup()
     static auto _v = get_config()->find("OMNITRACE_CAUSAL_FIXED_SPEEDUP");
     return parse_numeric_range<int64_t, std::vector<int64_t>>(
         static_cast<tim::tsettings<std::string>&>(*_v->second).get(),
-        "causal fixed speedup", 5);
+        "causal fixed speedup", 5L);
 }
 
 std::string

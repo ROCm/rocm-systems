@@ -554,9 +554,11 @@ jobs:
 
     container:
       image: jrmadsen/omnitrace:ci-base-ubuntu-20.04
+      options: --cap-add CAP_SYS_ADMIN
 
     env:
       OMNITRACE_VERBOSE: 2
+      OMNITRACE_CAUSAL_BACKEND: perf
 
     steps:
     - uses: actions/checkout@v3

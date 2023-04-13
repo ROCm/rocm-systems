@@ -29,6 +29,7 @@
 #include "library/causal/data.hpp"
 #include "library/causal/delay.hpp"
 #include "library/causal/experiment.hpp"
+#include "library/perf.hpp"
 #include "library/runtime.hpp"
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
@@ -45,6 +46,7 @@
 
 #include <atomic>
 #include <ctime>
+#include <execinfo.h>
 #include <type_traits>
 
 namespace omnitrace
@@ -57,46 +59,85 @@ namespace
 {
 using ::tim::backtrace::get_unw_signal_frame_stack_raw;
 
-auto&
-get_delay_statistics()
-{
-    using thread_data_t =
-        thread_data<identity<tim::statistics<int64_t>>, category::sampling>;
-
-    static_assert(
-        use_placement_new_when_generating_unique_ptr<thread_data_t>::value,
-        "delay statistics thread data should use placement new to allocate unique_ptr");
-
-    static auto& _v = thread_data_t::instance(construct_on_init{});
-    return _v;
-}
-}  // namespace
+int realtime_signal = 0;
+int cputime_signal  = 0;
+int overflow_signal = 0;
 
 void
-backtrace::start()
+generic_global_init()
 {
     // do not delete these lines. The thread data needs to be allocated
     // before it is called in sampler or else a deadlock will occur when
     // the sample interrupts a malloc call
-    (void) get_delay_statistics();
+    if(realtime_signal + cputime_signal + overflow_signal == 0)
+    {
+        realtime_signal = get_sampling_realtime_signal();
+        cputime_signal  = get_sampling_cputime_signal();
+        overflow_signal = get_sampling_overflow_signal();
+    }
+}
+}  // namespace
+
+void
+overflow::global_init()
+{
+    // do not delete these lines.
+    generic_global_init();
 }
 
 void
-backtrace::stop()
-{}
+backtrace::global_init()
+{
+    // do not delete these lines.
+    generic_global_init();
+}
 
 void
-sample_rate::sample(int _sig)
+overflow::sample(int _sig)
 {
-    if(_sig != get_realtime_signal()) return;
+    OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
 
-    // update the last sample for backtrace signal(s) even when in use
-    static thread_local int64_t _last_sample = 0;
+    static thread_local const auto& _tinfo      = thread_info::get();
+    auto                            _tid        = _tinfo->index_data->sequent_value;
+    auto&                           _perf_event = perf::get_instance(_tid);
 
-    auto  _this_sample = tracing::now();
-    auto& _period_stat = get_delay_statistics()->at(threading::get_id());
-    if(_last_sample > 0) _period_stat += (_this_sample - _last_sample);
-    _last_sample = _this_sample;
+    if(!_perf_event) return;
+
+    m_index = causal::experiment::get_index();
+
+    _perf_event->stop();
+
+    for(auto itr : *_perf_event)
+    {
+        if(itr.is_sample())
+        {
+            auto _sample_ip = itr.get_ip();
+            auto _data      = callchain_t{};
+            _data.emplace_back(_sample_ip);
+            for(auto ditr : itr.get_callchain())
+            {
+                if(ditr != _sample_ip) _data.emplace_back(ditr);
+                if(_data.size() == _data.capacity()) break;
+            }
+
+            if(causal::experiment::is_active() && causal::experiment::is_selected(_data))
+            {
+                ++m_selected;
+                causal::experiment::add_selected();
+                causal::delay::get_local() += causal::experiment::get_delay();
+            }
+            else if(!causal::experiment::is_active())
+            {
+                causal::set_current_selection(_data);
+            }
+
+            m_stack.emplace_back(_data);
+        }
+    }
+
+    _perf_event->start();
+
+    if(_sig == cputime_signal) causal::delay::process();
 }
 
 void
@@ -104,11 +145,16 @@ backtrace::sample(int _sig)
 {
     constexpr size_t  depth        = ::omnitrace::causal::unwind_depth;
     constexpr int64_t ignore_depth = ::omnitrace::causal::unwind_offset;
+    constexpr size_t  select_init  = std::numeric_limits<size_t>::max();
+    constexpr size_t  select_ival  = 5;  // interval at which realtime signal contributes
 
     // update the last sample for backtrace signal(s) even when in use
     static thread_local size_t _protect_flag = 0;
 
-    // sampling_guard _guard{};
+    // the select_count is initialized to max so that realtime signal does
+    // not initially set the current selection
+    static thread_local size_t _select_count = select_init;
+    static thread_local size_t _select_zeros = 0;
 
     if((_protect_flag & 1) == 1 ||
        OMNITRACE_UNLIKELY(!trait::runtime_enabled<causal::component::backtrace>::get()))
@@ -122,33 +168,52 @@ backtrace::sample(int _sig)
     m_index = causal::experiment::get_index();
     m_stack = get_unw_signal_frame_stack_raw<depth, ignore_depth>();
 
-    // the batch handler timer delivers a signal according to the thread CPU
-    // clock, ensuring that setting the current selection and processing the
-    // delays only happens when the thread is active
-    if(_sig == get_cputime_signal())
-    {
-        if(!causal::experiment::is_active())
-            causal::set_current_selection(m_stack);
-        else
-            causal::delay::process();
-    }
-    else if(_sig == get_realtime_signal())
-    {
-        static thread_local auto _tid         = threading::get_id();
-        auto&                    _period_stat = get_delay_statistics()->at(_tid);
+    auto _set_current_selection = [](auto _stack) {
+        // save the former selection count
+        auto _former_count = _select_count;
+        // get the current selection count
+        _select_count = causal::set_current_selection(_stack);
+        // if the selection count was reduced, reset select zeros.
+        // this typically means that a new experiment was started
+        if(_former_count > _select_count) _select_zeros = 0;
+        // if no PCs were selected, increment the select zeros.
+        // if the cputime signal has not selected a PC in select_ival iterations,
+        // then the realtime signal will start contributing to the current
+        // selection. We generally want only the cputime signal to contribute
+        // because those PCs are in-use (since the thread CPU clock in increasing)
+        if(_select_count == 0) ++_select_zeros;
+    };
 
+    // the batch handler timer delivers a signal according to the thread CPU
+    // clock, ensuring that setting the current selection is preferred when the thread
+    // is active and processing the delays happens only when the thread is active
+    if(_sig == cputime_signal)
+    {
+        if(causal::experiment::is_active())
+            causal::delay::process();
+        else
+            _set_current_selection(m_stack);
+    }
+    else if(_sig == realtime_signal)
+    {
         if(causal::experiment::is_active() && causal::experiment::is_selected(m_stack))
         {
             m_selected = true;
             causal::experiment::add_selected();
-            // compute the delay time based on the rate of taking samples,
-            // unless we have taken less than 10, in which case, we just
-            // use the pre-computed value.
-            auto _delay =
-                (_period_stat.get_count() < 10)
-                    ? causal::experiment::get_delay()
-                    : (_period_stat.get_mean() * causal::experiment::get_delay_scaling());
-            causal::delay::get_local() += _delay;
+            causal::delay::get_local() += causal::experiment::get_delay();
+        }
+        else if(!causal::experiment::is_active())
+        {
+            // if no PCs have been selected after at least "select_ival" call-stacks via
+            // the cputime signal, then contribute the call-stack via the realtime signal.
+            // This can be particularly relevant in end-to-end runs targeting a particular
+            // line/function since it is possible that the line/function is situated such
+            // the cputime signal is never delivered when executing the particular
+            // line/function... despite the line/function executing in between the
+            // the cputime signals. This is rare but has been observed
+            //
+            if(_select_count == 0 && _select_zeros >= select_ival)
+                _set_current_selection(m_stack);
         }
     }
     else
@@ -165,35 +230,9 @@ backtrace::get_period(uint64_t _units)
 {
     using cast_type = std::conditional_t<std::is_floating_point<Tp>::value, Tp, double>;
 
-    double _realtime_freq =
-        (get_use_sampling_realtime()) ? get_sampling_real_freq() : 0.0;
-    double _cputime_freq = (get_use_sampling_cputime()) ? get_sampling_cpu_freq() : 0.0;
-
-    auto    _freq        = std::max<double>(_realtime_freq, _cputime_freq);
-    double  _period      = 1.0 / _freq;
+    double  _period      = 1.0 / 1000.0;
     int64_t _period_nsec = static_cast<int64_t>(_period * units::sec) % units::sec;
     return static_cast<Tp>(_period_nsec) / static_cast<cast_type>(_units);
-}
-
-tim::statistics<int64_t>
-backtrace::get_period_stats()
-{
-    auto _data = tim::statistics<int64_t>{};
-    if(!get_delay_statistics()) return _data;
-    for(auto itr : *get_delay_statistics())
-    {
-        if(itr.get_count() > 1) _data += itr;
-    }
-    return _data;
-}
-
-void
-backtrace::reset_period_stats()
-{
-    for(auto& itr : *get_delay_statistics())
-    {
-        itr.reset();
-    }
 }
 }  // namespace component
 }  // namespace causal

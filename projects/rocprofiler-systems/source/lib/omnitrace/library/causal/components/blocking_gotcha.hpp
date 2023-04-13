@@ -44,6 +44,22 @@ struct blocking_gotcha : comp::base<blocking_gotcha, void>
 {
     static constexpr size_t gotcha_capacity = 19;
 
+    template <size_t Idx>
+    using gotcha_index = std::integral_constant<size_t, Idx>;
+
+    enum indexes
+    {
+        always_post_block_min_idx = 0,
+        always_post_block_max_idx = 5,
+        maybe_post_block_min_idx  = 6,
+        maybe_post_block_max_idx  = 13,
+        sigwait_idx               = 14,
+        sigwaitinfo_idx           = 15,
+        sigtimedwait_idx          = 16,
+        sigsuspend_idx            = 17,
+        indexes_max               = gotcha_capacity - 1,
+    };
+
     OMNITRACE_DEFAULT_OBJECT(blocking_gotcha)
 
     // string id for component
@@ -55,18 +71,22 @@ struct blocking_gotcha : comp::base<blocking_gotcha, void>
     static void configure();
     static void shutdown();
 
-    template <typename Ret, typename... Args>
-    Ret operator()(const comp::gotcha_data&, Ret (*)(Args...), Args...) const noexcept;
+    template <size_t Idx, typename Ret, typename... Args>
+    std::enable_if_t<(Idx <= maybe_post_block_max_idx), Ret> operator()(
+        gotcha_index<Idx>, Ret (*)(Args...), Args...) const noexcept;
 
-    int operator()(const comp::gotcha_data&, int (*)(const sigset_t*, int*),
+    int operator()(gotcha_index<sigwait_idx>, int (*)(const sigset_t*, int*),
                    const sigset_t*, int*) const noexcept;
 
-    int operator()(const comp::gotcha_data&, int (*)(const sigset_t*, siginfo_t*),
+    int operator()(gotcha_index<sigwaitinfo_idx>, int (*)(const sigset_t*, siginfo_t*),
                    const sigset_t*, siginfo_t*) const noexcept;
 
-    int operator()(const comp::gotcha_data&,
+    int operator()(gotcha_index<sigtimedwait_idx>,
                    int (*)(const sigset_t*, siginfo_t*, const struct timespec*),
                    const sigset_t*, siginfo_t*, const struct timespec*) const noexcept;
+
+    int operator()(gotcha_index<sigsuspend_idx>, int (*)(const sigset_t*),
+                   const sigset_t*) const noexcept;
 };
 
 using blocking_gotcha_t =

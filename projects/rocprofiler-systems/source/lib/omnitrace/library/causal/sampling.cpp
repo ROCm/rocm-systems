@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "library/causal/sampling.hpp"
+#include "binary/analysis.hpp"
 #include "core/common.hpp"
 #include "core/concepts.hpp"
 #include "core/config.hpp"
@@ -30,6 +31,8 @@
 #include "core/utility.hpp"
 #include "library/causal/components/backtrace.hpp"
 #include "library/causal/data.hpp"
+#include "library/causal/sample_data.hpp"
+#include "library/perf.hpp"
 #include "library/ptl.hpp"
 #include "library/runtime.hpp"
 #include "library/sampling.hpp"
@@ -37,8 +40,11 @@
 #include "library/thread_info.hpp"
 
 #include <timemory/macros.hpp>
+#include <timemory/mpl/types.hpp>
 #include <timemory/sampling/allocator.hpp>
+#include <timemory/sampling/overflow.hpp>
 #include <timemory/sampling/sampler.hpp>
+#include <timemory/sampling/timer.hpp>
 #include <timemory/units.hpp>
 #include <timemory/utility/backtrace.hpp>
 #include <timemory/variadic.hpp>
@@ -46,6 +52,7 @@
 #include <csignal>
 #include <cstring>
 #include <ctime>
+#include <memory>
 #include <mutex>
 #include <sstream>
 #include <string>
@@ -58,11 +65,14 @@ namespace causal
 namespace sampling
 {
 using ::tim::sampling::dynamic;
+using ::tim::sampling::overflow;
 using ::tim::sampling::timer;
 
 using causal_bundle_t =
-    tim::lightweight_tuple<causal::component::sample_rate, causal::component::backtrace>;
-using causal_sampler_t = tim::sampling::sampler<causal_bundle_t, dynamic>;
+    tim::lightweight_tuple<causal::component::overflow, causal::component::backtrace>;
+using causal_sampler_t  = tim::sampling::sampler<causal_bundle_t, dynamic>;
+using backtrace_enabled = trait::runtime_enabled<component::backtrace>;
+using overflow_enabled  = trait::runtime_enabled<component::overflow>;
 }  // namespace sampling
 }  // namespace causal
 }  // namespace omnitrace
@@ -156,17 +166,34 @@ void
 causal_offload_buffer(int64_t, causal_sampler_buffer_t&& _buf)
 {
     auto _data      = std::move(_buf);
-    auto _processed = std::map<uint32_t, std::vector<uintptr_t>>{};
+    auto _processed = std::map<uint32_t, std::map<uintptr_t, uint64_t>>{};
     while(!_data.is_empty())
     {
         auto _bundle = causal_sampler_bundle_t{};
         _data.read(&_bundle);
-        auto* _bt_causal = _bundle.get<causal::component::backtrace>();
+
+        const auto* _bt_causal = _bundle.get<causal::component::backtrace>();
         if(_bt_causal)
         {
-            for(auto&& itr : _bt_causal->get_stack())
+            auto _stack = _bt_causal->get_stack();
+
+            for(auto itr : _stack)
             {
-                if(itr > 0) _processed[_bt_causal->get_index()].emplace_back(itr);
+                if(itr > 0) _processed[_bt_causal->get_index()][itr] += 1;
+            }
+        }
+
+        const auto* _of_causal = _bundle.get<causal::component::overflow>();
+        if(_of_causal)
+        {
+            const auto& _stack = _of_causal->get_stack();
+
+            for(const auto& ditr : _stack)
+            {
+                for(auto aitr : ditr)
+                {
+                    if(aitr > 0) _processed[_of_causal->get_index()][aitr] += 1;
+                }
             }
         }
     }
@@ -177,7 +204,9 @@ causal_offload_buffer(int64_t, causal_sampler_buffer_t&& _buf)
         static auto _mutex = locking::atomic_mutex{};
         auto        _lk    = locking::atomic_lock{ _mutex };
         for(const auto& itr : _processed)
+        {
             add_samples(itr.first, itr.second);
+        }
     }
 }
 
@@ -186,6 +215,7 @@ configure(bool _setup, int64_t _tid)
 {
     const auto& _info         = thread_info::get(_tid, SequentTID);
     auto&       _causal       = get_causal_sampler(_tid);
+    auto&       _causal_perf  = perf::get_instance(_tid);
     auto&       _running      = get_causal_sampler_running(_tid);
     auto&       _signal_types = get_causal_sampler_signals(_tid);
 
@@ -196,6 +226,19 @@ configure(bool _setup, int64_t _tid)
     OMNITRACE_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
 
     if(_setup && _signal_types.empty()) _signal_types = get_sampling_signals(_tid);
+
+    // initialize
+    if(_setup)
+    {
+        using global_init_mode = operation::mode_constant<operation::init_mode::global>;
+        using thread_init_mode = operation::mode_constant<operation::init_mode::thread>;
+        // initialize backtrace
+        operation::init<component::backtrace>{}(global_init_mode{});
+        operation::init<component::backtrace>{}(thread_init_mode{});
+        // initialize overflow
+        operation::init<component::overflow>{}(global_init_mode{});
+        operation::init<component::overflow>{}(thread_init_mode{});
+    }
 
     if(_setup && !_causal && !_running && !_signal_types.empty())
     {
@@ -218,21 +261,95 @@ configure(bool _setup, int64_t _tid)
         _causal = std::make_unique<causal_sampler_t>(_causal_alloc, "omnitrace", _tid,
                                                      _verbose);
 
+        auto _activate_perf_backend = [&_causal, &_causal_perf, &_info, &_tid]() {
+            _causal_perf = std::make_unique<perf::perf_event>();
+            auto _open_error =
+                _causal_perf->open(1000.0, 10, _info->index_data->system_value);
+            if(_open_error)
+            {
+                _causal_perf.reset();
+            }
+            else
+            {
+                overflow_enabled::set(true);
+                overflow_enabled::set(scope::thread_scope{}, true);
+                backtrace_enabled::set(false);
+                backtrace_enabled::set(scope::thread_scope{}, false);
+                _causal->configure(overflow{ get_sampling_overflow_signal(),
+                                             [](int, pid_t, long, int64_t) {
+                                                 // perf::get_instance(_idx)->set_ready_signal(_sig);
+                                                 return true;
+                                             },
+                                             [](int, pid_t, long, int64_t _idx) {
+                                                 return perf::get_instance(_idx)->start();
+                                             },
+                                             [](int, pid_t, long, int64_t _idx) {
+                                                 return perf::get_instance(_idx)->stop();
+                                             },
+                                             _tid, threading::get_sys_tid() });
+                if(_tid == 0) OMNITRACE_VERBOSE(1, "causal profiling backend: perf\n");
+            }
+
+            return _open_error;
+        };
+
+        auto _activate_timer_backend = [&_causal, &_tid]() {
+            backtrace_enabled::set(true);
+            backtrace_enabled::set(scope::thread_scope{}, true);
+            overflow_enabled::set(false);
+            overflow_enabled::set(scope::thread_scope{}, false);
+            _causal->configure(timer{ get_sampling_realtime_signal(), CLOCK_REALTIME,
+                                      SIGEV_THREAD_ID, 1000.0, 1.0e-6, _tid,
+                                      threading::get_sys_tid() });
+            if(_tid == 0) OMNITRACE_VERBOSE(1, "causal profiling backend: timer\n");
+            return true;
+        };
+
         TIMEMORY_REQUIRE(_causal) << "nullptr to causal profiling instance";
 
         _causal->set_flags(SA_RESTART);
         _causal->set_verbose(_verbose);
         _causal->set_offload(&causal_offload_buffer);
 
-        _causal->configure(timer{ get_realtime_signal(), CLOCK_REALTIME, SIGEV_THREAD_ID,
-                                  1000.0, 1.0e-6, _tid, threading::get_sys_tid() });
+        if(get_causal_backend() == CausalBackend::Perf)
+        {
+            auto _perf_error = _activate_perf_backend();
+            OMNITRACE_REQUIRE(!_perf_error)
+                << "perf backend for causal profiling failed to activate: "
+                << *_perf_error << "\n";
+        }
+        else if(get_causal_backend() == CausalBackend::Timer)
+        {
+            OMNITRACE_REQUIRE(_activate_timer_backend())
+                << "timer backend for causal profiling failed to activate\n";
+        }
+        else if(get_causal_backend() == CausalBackend::Auto)
+        {
+            auto _perf_error = _activate_perf_backend();
+            if(!_perf_error)
+            {
+                config::set_setting_value("OMNITRACE_CAUSAL_BACKEND",
+                                          std::string{ "perf" });
+            }
+            else
+            {
+                OMNITRACE_WARNING_F(
+                    0, "perf backend for causal profiling failed to activate: %s\n",
+                    _perf_error->c_str());
 
-        _causal->configure(timer{ get_cputime_signal(), CLOCK_THREAD_CPUTIME_ID,
+                OMNITRACE_REQUIRE(_activate_timer_backend())
+                    << "timer backend for causal profiling failed to activate\n";
+
+                config::set_setting_value("OMNITRACE_CAUSAL_BACKEND",
+                                          std::string{ "timer" });
+            }
+        }
+
+        _causal->configure(timer{ get_sampling_cputime_signal(), CLOCK_THREAD_CPUTIME_ID,
                                   SIGEV_THREAD_ID, 1000.0, 1.0e-6, _tid,
                                   threading::get_sys_tid() });
 
         _running = true;
-        if(_tid == 0) causal::component::backtrace::start();
         _causal->start();
     }
     else if(!_setup && _causal && _running)
@@ -257,11 +374,21 @@ configure(bool _setup, int64_t _tid)
                     get_causal_sampler(i)->stop();
                     get_causal_sampler(i)->reset();
                 }
+
+                if(perf::get_instance(i))
+                {
+                    perf::get_instance(i).reset();
+                }
             }
         }
 
         _causal->stop();
         _causal->reset();
+
+        if(_causal_perf)
+        {
+            _causal_perf.reset();
+        }
 
         OMNITRACE_DEBUG("Causal sampler destroyed for thread %lu\n", _tid);
     }
@@ -311,16 +438,112 @@ unblock_samples()
 void
 block_backtrace_samples()
 {
-    trait::runtime_enabled<causal::component::backtrace>::set(scope::thread_scope{},
-                                                              false);
+    pause(scope::thread_scope{});
 }
 
 void
 unblock_backtrace_samples()
 {
-    trait::runtime_enabled<causal::component::backtrace>::set(scope::thread_scope{},
-                                                              true);
+    resume(scope::thread_scope{});
 }
+
+namespace
+{
+std::optional<bool>              _process_paused = {};
+thread_local std::optional<bool> _thread_paused  = {};
+namespace signals                                = ::tim::signals;
+
+const auto&
+sampling_signals()
+{
+    static thread_local auto _v = get_signal_types(threading::get_id());
+    return _v;
+}
+}  // namespace
+
+template <typename ScopeT>
+void pause(ScopeT)
+{
+    static_assert(
+        tim::is_one_of<ScopeT,
+                       type_list<scope::thread_scope, scope::process_scope>>::value,
+        "Unsupported scope");
+
+    if constexpr(std::is_same<ScopeT, scope::thread_scope>::value)
+    {
+        if(!_thread_paused) _thread_paused = false;
+
+        bool _paused_v = *_thread_paused;
+        if(!_paused_v)
+        {
+            auto& _causal_perf = perf::get_instance(threading::get_id());
+            if(_causal_perf) _causal_perf->stop();
+            signals::block_signals(sampling_signals(), signals::sigmask_scope::thread);
+            _thread_paused = true;
+        }
+    }
+    else
+    {
+        if(!_process_paused) _process_paused = false;
+
+        bool _paused_v = *_process_paused;
+        if(!_paused_v)
+        {
+            for(auto i = 0; i < OMNITRACE_MAX_THREADS; ++i)
+            {
+                auto& _causal_perf = perf::get_instance(i);
+                if(_causal_perf) _causal_perf->stop();
+            }
+            signals::block_signals(sampling_signals(), signals::sigmask_scope::process);
+            _process_paused = true;
+        }
+    }
+}
+
+template <typename ScopeT>
+void resume(ScopeT)
+{
+    static_assert(
+        tim::is_one_of<ScopeT,
+                       type_list<scope::thread_scope, scope::process_scope>>::value,
+        "Unsupported scope");
+
+    if constexpr(std::is_same<ScopeT, scope::thread_scope>::value)
+    {
+        if(!_thread_paused) _thread_paused = true;
+
+        bool _paused_v = *_thread_paused;
+        if(_paused_v)
+        {
+            auto& _causal_perf = perf::get_instance(threading::get_id());
+            if(_causal_perf) _causal_perf->start();
+            signals::unblock_signals(sampling_signals(), signals::sigmask_scope::thread);
+            _thread_paused = false;
+        }
+    }
+    else
+    {
+        if(!_process_paused) _process_paused = true;
+
+        bool _paused_v = *_process_paused;
+        if(_paused_v)
+        {
+            for(auto i = 0; i < OMNITRACE_MAX_THREADS; ++i)
+            {
+                auto& _causal_perf = perf::get_instance(i);
+                if(_causal_perf) _causal_perf->start();
+            }
+            signals::unblock_signals(sampling_signals(), signals::sigmask_scope::process);
+            _process_paused = false;
+        }
+    }
+}
+
+template void pause<scope::thread_scope>(scope::thread_scope);
+template void pause<scope::process_scope>(scope::process_scope);
+
+template void resume<scope::thread_scope>(scope::thread_scope);
+template void resume<scope::process_scope>(scope::process_scope);
 
 void
 block_signals(std::set<int> _signals)
@@ -354,9 +577,14 @@ post_process()
     {
         auto& _causal = get_causal_sampler(i);
         if(_causal) _causal->stop();
+        auto& _causal_perf = perf::get_instance(i);
+        if(_causal_perf) _causal_perf->stop();
     }
 
     configure(false, 0);
+
+    auto _allocator = get_causal_sampler_allocator(false);
+    if(_allocator) _allocator->flush();
 
     for(size_t i = 0; i < max_supported_threads; ++i)
     {
@@ -370,12 +598,15 @@ post_process()
     for(size_t i = 0; i < max_supported_threads; ++i)
     {
         get_causal_sampler(i).reset();
+
+        auto& _causal_perf = perf::get_instance(i);
+        if(_causal_perf)
+        {
+            _causal_perf.reset();
+        }
     }
 
-    if(get_causal_sampler_allocator(false))
-    {
-        get_causal_sampler_allocator(false).reset();
-    }
+    if(_allocator) _allocator.reset();
 }
 
 namespace
@@ -386,9 +617,27 @@ post_process_causal(int64_t, const std::vector<causal_bundle_t>& _data)
     for(const auto& itr : _data)
     {
         const auto* _bt_causal = itr.get<causal::component::backtrace>();
-        for(auto&& ditr : _bt_causal->get_stack())
+        if(_bt_causal)
         {
-            if(ditr > 0) add_sample(_bt_causal->get_index(), ditr);
+            auto _stack = _bt_causal->get_stack();
+            for(auto&& ditr : _stack)
+            {
+                if(ditr > 0) add_sample(_bt_causal->get_index(), ditr);
+            }
+        }
+
+        const auto* _of_causal = itr.get<causal::component::overflow>();
+        if(_of_causal)
+        {
+            const auto& _stack = _of_causal->get_stack();
+
+            for(const auto& ditr : _stack)
+            {
+                for(auto aitr : ditr)
+                {
+                    if(aitr > 0) add_sample(_of_causal->get_index(), aitr);
+                }
+            }
         }
     }
 }

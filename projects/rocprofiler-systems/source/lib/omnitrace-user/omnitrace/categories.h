@@ -83,6 +83,8 @@ extern "C"
         OMNITRACE_CATEGORY_THREAD_HARDWARE_COUNTER,
         OMNITRACE_CATEGORY_KERNEL_HARDWARE_COUNTER,
         OMNITRACE_CATEGORY_NUMA,
+        OMNITRACE_CATEGORY_TIMER_SAMPLING,
+        OMNITRACE_CATEGORY_OVERFLOW_SAMPLING,
         OMNITRACE_CATEGORY_LAST
         // the value of below enum is used for iterating
         // over the enum in C++ templates. It MUST

@@ -57,5 +57,9 @@ std::vector<binary_info>
 get_binary_info(const std::vector<std::string>&, const std::vector<scope_filter>&,
                 bool _process_dwarf = true, bool _process_bfd = true,
                 bool _include_all = false);
+
+template <bool ExcludeInternal>
+std::optional<tim::unwind::processed_entry>
+lookup_ipaddr_entry(uintptr_t, unw_context_t* = nullptr, tim::unwind::cache* = nullptr);
 }  // namespace binary
 }  // namespace omnitrace

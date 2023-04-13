@@ -82,6 +82,14 @@ struct c_array
         return c_array<Tp>(&m_base[start], end - start);
     }
 
+    void pop_front()
+    {
+        ++m_base;
+        --m_size;
+    }
+
+    void pop_back() { --m_size; }
+
     operator Tp*() const { return m_base; }
 
     // Iterator class for convenient range-based for loop support

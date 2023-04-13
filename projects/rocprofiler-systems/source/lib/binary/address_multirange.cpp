@@ -34,16 +34,16 @@ namespace binary
 address_multirange&
 address_multirange::operator+=(std::pair<coarse, uintptr_t>&& _v)
 {
-    coarse_range = address_range{ std::min(coarse_range.low, _v.second),
-                                  std::max(coarse_range.high, _v.second) };
+    m_coarse_range = address_range{ std::min(m_coarse_range.low, _v.second),
+                                    std::max(m_coarse_range.high, _v.second + 1) };
     return *this;
 }
 
 address_multirange&
 address_multirange::operator+=(std::pair<coarse, address_range>&& _v)
 {
-    coarse_range = address_range{ std::min(coarse_range.low, _v.second.low),
-                                  std::max(coarse_range.high, _v.second.high) };
+    m_coarse_range = address_range{ std::min(m_coarse_range.low, _v.second.low),
+                                    std::max(m_coarse_range.high, _v.second.high) };
 
     return *this;
 }

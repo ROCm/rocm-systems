@@ -37,15 +37,18 @@
 #include "core/common.hpp"
 #include "core/config.hpp"
 #include "core/debug.hpp"
+#include "core/locking.hpp"
 #include "core/state.hpp"
 #include "core/utility.hpp"
 #include "dwarf_entry.hpp"
+#include "link_map.hpp"
 #include "scope_filter.hpp"
 #include "symbol.hpp"
 
 #include <timemory/log/macros.hpp>
 #include <timemory/unwind/bfd.hpp>
 #include <timemory/unwind/dlinfo.hpp>
+#include <timemory/unwind/types.hpp>
 #include <timemory/utility/filepath.hpp>
 #include <timemory/utility/join.hpp>
 #include <timemory/utility/procfs/maps.hpp>
@@ -200,5 +203,106 @@ get_binary_info(const std::vector<std::string>&  _files,
 
     return _data;
 }
+
+template <bool ExcludeInternal>
+std::optional<tim::unwind::processed_entry>
+lookup_ipaddr_entry(uintptr_t _addr, unw_context_t* _context_p,
+                    tim::unwind::cache* _cache_p)
+{
+    static auto _mutex     = locking::atomic_mutex{};
+    static auto _cache_v   = tim::unwind::cache{ true };
+    static auto _context_v = []() {
+        auto _v = unw_context_t{};
+        unw_getcontext(&_v);
+        return _v;
+    }();
+
+    if constexpr(ExcludeInternal)
+    {
+        static auto _exclude_range = []() {
+            auto _maps                 = ::tim::procfs::maps::iterate_program_headers();
+            auto _exclude_range_v      = std::set<address_range_t>{};
+            auto _insert_exclude_range = [&_maps,
+                                          &_exclude_range_v](const std::string& _v) {
+                auto _base_v = std::string_view{ filepath::basename(_v) };
+                auto _real_v = filepath::realpath(_v);
+                for(const auto& mitr : _maps)
+                {
+                    if(std::string_view{ filepath::basename(mitr.pathname) } == _base_v ||
+                       _real_v == _v)
+                    {
+                        _exclude_range_v.emplace(
+                            address_range_t{ mitr.load_address, mitr.last_address });
+                    }
+                }
+            };
+
+            for(const auto& itr : binary::get_link_map("libomnitrace.so", "", ""))
+                _insert_exclude_range(itr.real());
+
+            for(const auto& itr : binary::get_link_map("libomnitrace-dl.so", "", ""))
+                _insert_exclude_range(itr.real());
+
+            return _exclude_range_v;
+        }();
+
+        for(auto itr : _exclude_range)
+            if(itr.contains(_addr)) return std::optional<tim::unwind::processed_entry>{};
+    }
+
+    // NOLINTNEXTLINE(readability-misleading-indentation)
+    if(_addr == 0) return std::optional<tim::unwind::processed_entry>{};
+
+    auto _lk = locking::atomic_lock{ _mutex, std::defer_lock };
+
+    if(!_context_p) _context_p = &_context_v;
+    if(!_cache_p)
+    {
+        _cache_p = &_cache_v;
+        // prevent concurrent access to cache
+        _lk.lock();
+    }
+
+    auto _entry = tim::unwind::entry{ _addr };
+
+    auto citr = _cache_p->entries.find(_entry);
+    if(citr != _cache_p->entries.end())
+    {
+        if(citr->second.error == 0) return citr->second;
+        return std::optional<tim::unwind::processed_entry>{};
+    }
+
+    auto _v    = tim::unwind::processed_entry{};
+    _v.address = _entry.address();
+    _v.name    = _entry.template get_name<4096, true>(*_context_p, &_v.offset, &_v.error);
+
+    tim::unwind::processed_entry::construct(_v, &_cache_p->files);
+
+    if(_v.error != 0 && _v.lineinfo)
+    {
+        auto _lineinfo = _v.lineinfo.get();
+        if(_lineinfo)
+        {
+            _v.name  = _lineinfo.name;
+            _v.error = 0;
+        }
+    }
+    else if(_v.info && _v.info.symbol)
+    {
+        _v.name  = _v.info.symbol.name;
+        _v.error = 0;
+    }
+
+    _cache_p->entries.emplace(_entry, _v);
+
+    return (_v.error == 0) ? std::optional<tim::unwind::processed_entry>{ _v }
+                           : std::optional<tim::unwind::processed_entry>{};
+}
+
+template std::optional<tim::unwind::processed_entry>
+lookup_ipaddr_entry<true>(uintptr_t, unw_context_t*, tim::unwind::cache*);
+
+template std::optional<tim::unwind::processed_entry>
+lookup_ipaddr_entry<false>(uintptr_t, unw_context_t*, tim::unwind::cache*);
 }  // namespace binary
 }  // namespace omnitrace

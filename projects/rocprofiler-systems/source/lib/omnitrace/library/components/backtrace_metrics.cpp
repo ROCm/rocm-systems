@@ -317,6 +317,34 @@ backtrace_metrics::fini_perfetto(int64_t _tid, valid_array_t _valid)
     }
 }
 
+backtrace_metrics&
+backtrace_metrics::operator-=(const backtrace_metrics& _rhs)
+{
+    auto& _lhs = *this;
+    if(_lhs(category::thread_peak_memory{}))
+    {
+        _lhs.m_mem_peak -= _rhs.m_mem_peak;
+    }
+
+    if(_lhs(category::thread_context_switch{}))
+    {
+        _lhs.m_ctx_swch -= _rhs.m_ctx_swch;
+    }
+
+    if(_lhs(category::thread_page_fault{}))
+    {
+        _lhs.m_page_flt -= _rhs.m_page_flt;
+    }
+
+    if(_lhs(type_list<hw_counters>{}) && _lhs(category::thread_hardware_counter{}))
+    {
+        for(size_t i = 0; i < _lhs.m_hw_counter.size(); ++i)
+            _lhs.m_hw_counter.at(i) -= _rhs.m_hw_counter.at(i);
+    }
+
+    return _lhs;
+}
+
 void
 backtrace_metrics::post_process_perfetto(int64_t _tid, uint64_t _ts) const
 {
@@ -340,6 +368,7 @@ backtrace_metrics::post_process_perfetto(int64_t _tid, uint64_t _ts) const
                       perfetto_counter_track<perfetto_rusage>::at(_tid, 2), _ts,
                       m_page_flt);
     }
+
     if((*this)(type_list<hw_counters>{}) && (*this)(category::thread_hardware_counter{}))
     {
         for(size_t i = 0; i < perfetto_counter_track<hw_counters>::size(_tid); ++i)

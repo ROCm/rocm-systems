@@ -228,100 +228,6 @@ entry::get_cost() const
     return 0;
 }
 
-int64_t
-entry::get_overlap(const entry& rhs) const
-{
-    if(begin_ns >= rhs.end_ns || end_ns >= rhs.begin_ns)  // no overlap
-        return 0;
-    else if(begin_ns >= rhs.begin_ns && end_ns <= rhs.end_ns)  // inclusive to rhs
-        return get_cost();
-    else if(begin_ns <= rhs.begin_ns && end_ns >= rhs.end_ns)  // rhs is inclusive
-        return rhs.get_cost();
-    else if(begin_ns <= rhs.begin_ns && end_ns <= rhs.end_ns)  // at beginning
-        return (end_ns - rhs.begin_ns);
-    else if(begin_ns >= rhs.begin_ns && end_ns >= rhs.end_ns)  // at end
-        return (rhs.end_ns - begin_ns);
-    else
-    {
-        OMNITRACE_PRINT("Warning! entry::get_overlap(entry, tid) "
-                        "could not determine the overlap :: %s\n",
-                        JOIN("", *this).c_str());
-    }
-    return 0;
-}
-
-int64_t
-entry::get_independent(const entry& rhs) const
-{
-    if(begin_ns >= rhs.end_ns || end_ns >= rhs.begin_ns)  // no overlap
-        return get_cost();
-    else if(begin_ns >= rhs.begin_ns && end_ns <= rhs.end_ns)  // inclusive to rhs
-        return 0;
-    else if(begin_ns <= rhs.begin_ns && end_ns >= rhs.end_ns)  // rhs is inclusive
-        return get_cost() - rhs.get_cost();
-    else if(begin_ns <= rhs.begin_ns && end_ns <= rhs.end_ns)  // at beginning
-        return (rhs.begin_ns - begin_ns);
-    else if(begin_ns >= rhs.begin_ns && end_ns >= rhs.end_ns)  // at end
-        return (end_ns - rhs.end_ns);
-    else
-    {
-        OMNITRACE_PRINT("Warning! entry::get_independent(entry, tid) "
-                        "could not determine the overlap :: %s\n",
-                        JOIN("", *this).c_str());
-    }
-    return 0;
-}
-
-int64_t
-entry::get_overlap(const entry& rhs, int32_t _devid, int32_t _pid, int64_t _tid) const
-{
-    if(_devid != this->devid || _pid != this->pid)  // different device or process id
-        return 0;
-
-    if(!is_delta(*this, __FUNCTION__)) return 0;
-    if(!is_delta(rhs, __FUNCTION__)) return 0;
-
-    if(_tid < 0 || (this->tid == _tid && rhs.tid == _tid))  // all threads or same thread
-        return get_overlap(rhs);
-
-    return 0;
-}
-
-int64_t
-entry::get_independent(const entry& rhs, int32_t _devid, int32_t _pid, int64_t _tid) const
-{
-    if(!is_delta(*this, __FUNCTION__)) return 0;
-    if(!is_delta(rhs, __FUNCTION__)) return 0;
-
-    if(_devid != this->devid || _pid != this->pid)  // different device or process id
-        return get_independent(rhs);
-    else if(_tid < 0 ||
-            (this->tid == _tid && rhs.tid == _tid))  // all threads or same thread
-        return get_independent(rhs);
-    else if(this->tid == _tid && rhs.tid != _tid)  // rhs is on different thread
-        return get_cost();
-    return 0;
-}
-
-bool
-entry::is_bounded(const entry& rhs) const
-{
-    // ignores thread
-    return !(begin_ns < rhs.begin_ns || end_ns > rhs.end_ns);
-}
-
-bool
-entry::is_bounded(const entry& rhs, int32_t _devid, int32_t _pid, int64_t _tid) const
-{
-    if(_devid != this->devid || _pid != this->pid)  // different device or process id
-        return false;
-
-    if(tid == _tid && rhs.tid == _tid)  // all threads or same thread
-        return !(begin_ns < rhs.begin_ns || end_ns > rhs.end_ns);
-
-    return false;
-}
-
 void
 entry::write(std::ostream& _os) const
 {
@@ -354,19 +260,6 @@ entry::write(std::ostream& _os) const
     _os << ", hash: " << hash << " :: " << tim::demangle(tim::get_hash_identifier(hash));
 }
 
-bool
-entry::is_delta(const entry& _v, const std::string_view& _ctx)
-{
-    if(_v.phase != Phase::DELTA)
-    {
-        OMNITRACE_CT_DEBUG(
-            "Warning! Invalid phase for entry. entry::%s requires Phase::DELTA :: %s\n",
-            _ctx.data(), JOIN("", _v).c_str());
-        return true;
-    }
-    return false;
-}
-
 //--------------------------------------------------------------------------------------//
 //
 //                          CALL CHAIN
@@ -380,16 +273,6 @@ call_chain::operator==(const call_chain& rhs) const
     for(size_t i = 0; i < size(); ++i)
         if(at(i) != rhs.at(i)) return false;
     return true;
-}
-
-size_t
-call_chain::get_hash() const
-{
-    if(empty()) return 0;
-    int64_t _hash = this->at(0).get_hash();
-    for(size_t i = 1; i < this->size(); ++i)
-        _hash = get_combined_hash(_hash, at(i).get_hash());
-    return _hash;
 }
 
 int64_t
@@ -409,35 +292,6 @@ call_chain::get_cost(int64_t _tid) const
         }
     }
     return _cost;
-}
-
-int64_t
-call_chain::get_overlap(int32_t _devid, int32_t _pid, int64_t _tid) const
-{
-    int64_t _cost = 0;
-    auto    itr   = this->begin();
-    auto    nitr  = ++this->begin();
-    for(; nitr != this->end(); ++nitr, ++itr)
-        _cost += nitr->get_overlap(*itr, _devid, _pid, _tid);
-    return _cost;
-}
-
-int64_t
-call_chain::get_independent(int32_t _devid, int32_t _pid, int64_t _tid) const
-{
-    int64_t _cost = 0;
-    auto    itr   = this->begin();
-    auto    nitr  = ++this->begin();
-    for(; nitr != this->end(); ++nitr, ++itr)
-        _cost += itr->get_independent(*nitr, _devid, _pid, _tid);
-    return _cost;
-}
-
-std::vector<call_chain>&
-call_chain::get_top_chains()
-{
-    static std::vector<call_chain> _v{};
-    return _v;
 }
 
 template <Device DevT>

@@ -43,6 +43,16 @@ struct unblocking_gotcha : comp::base<unblocking_gotcha, void>
 {
     static constexpr size_t gotcha_capacity = 9;
 
+    enum indexes
+    {
+        pthread_barrier_wait_idx = 7,
+        kill_idx                 = 8,
+        indexes_max              = gotcha_capacity,
+    };
+
+    template <size_t Idx>
+    using gotcha_index = std::integral_constant<size_t, Idx>;
+
     OMNITRACE_DEFAULT_OBJECT(unblocking_gotcha)
 
     // string id for component
@@ -54,10 +64,12 @@ struct unblocking_gotcha : comp::base<unblocking_gotcha, void>
     static void configure();
     static void shutdown();
 
-    template <typename Ret, typename... Args>
-    Ret operator()(const comp::gotcha_data&, Ret (*)(Args...), Args...) const noexcept;
+    template <size_t Idx, typename Ret, typename... Args>
+    std::enable_if_t<(Idx < kill_idx), Ret> operator()(gotcha_index<Idx>,
+                                                       Ret (*)(Args...),
+                                                       Args...) const noexcept;
 
-    int operator()(const comp::gotcha_data&, int (*)(pid_t, int), pid_t,
+    int operator()(gotcha_index<kill_idx>, int (*)(pid_t, int), pid_t,
                    int) const noexcept;
 };
 

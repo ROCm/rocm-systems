@@ -51,6 +51,12 @@ block_backtrace_samples();
 void
 unblock_backtrace_samples();
 
+template <typename Tp = tim::scope::thread_scope>
+void pause(Tp = {});
+
+template <typename Tp = tim::scope::thread_scope>
+void resume(Tp = {});
+
 void block_signals(std::set<int> = {});
 
 void unblock_signals(std::set<int> = {});

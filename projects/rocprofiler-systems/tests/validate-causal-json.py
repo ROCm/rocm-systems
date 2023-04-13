@@ -9,7 +9,7 @@ import argparse
 from collections import OrderedDict
 
 
-num_stddev = 1
+num_stddev = 1.0
 
 
 def mean(_data):
@@ -21,7 +21,7 @@ def stddev(_data):
         return 0.0
     _mean = mean(_data)
     _variance = sum([((x - _mean) ** 2) for x in _data]) / float(len(_data))
-    return _variance**0.5
+    return float(num_stddev) * math.sqrt(_variance)
 
 
 def simpsons_rule(a, b, fa, fb):
@@ -66,21 +66,28 @@ class validation(object):
             return None
 
         _tolerance = self.tolerance
-
-        if _ci is True and _virt_speedup > 10:
-            """On GitHub Action servers, you typically only get one core with two hyperthreads.
-            The hyperthreading causes the speedup potential to drop off at higher virtual speedups
-            so we consider
+        _reason = "[unspecified reason]"
+        if _ci is True:
+            """On GitHub Action servers, you typically only get two CPUs, which may be one
+            core with two hyperthreads. The hyperthreading can causes the speedup potential
+            to drop. Furthermore, these are typically shared resources so the runtime may
+            vary significantly. Thus, always account for stddev to prevent failures due to
+            these causes
             """
             _tolerance += max([_base_speedup_stddev, _prog_speedup_stddev])
+            _reason = "results obtained on a shared CI system... potentially artificially deflating speedup predictions"
         elif _base_speedup_stddev > self.tolerance:
             _tolerance += math.sqrt(_base_speedup_stddev)
+            _reason = (
+                f"large standard deviation of the baseline ({_base_speedup_stddev:.3f})"
+            )
         elif _prog_speedup_stddev > 1.0:
             _tolerance += math.sqrt(_prog_speedup_stddev)
+            _reason = f"large standard deviation of the program speedup ({_prog_speedup_stddev:.3f})"
 
         if _tolerance > self.tolerance:
             sys.stderr.write(
-                f"    [{_exp_name}][{_pp_name}][{_virt_speedup}] Tolerance adjusted due to stddev or to account for hyperthreading on CI systems ({self.tolerance:.3f} increased to {_tolerance:.3f})...\n"
+                f"    [{_exp_name}][{_pp_name}][{_virt_speedup}] Tolerance increased: {_reason} ({self.tolerance:.3f} increased to {_tolerance:.3f})...\n"
             )
 
         def _compute(_speedup_v, _tolerance_v):
@@ -195,9 +202,7 @@ class line_speedup(object):
         if self.data is None or self.base is None:
             return f"{self.name}"
         _line_speedup = self.compute_speedup()
-        _line_stddev = (
-            float(num_stddev) * self.compute_speedup_stddev()
-        )  # 3 stddev == 99.87%
+        _line_stddev = self.compute_speedup_stddev()  # 3 stddev == 99.87%
         _name = self.get_name()
         return f"[{_name}][{self.prog}][{self.data.speedup:3}] speedup: {_line_speedup:6.1f} +/- {_line_stddev:6.2f} %"
 
@@ -345,7 +350,6 @@ def compute_speedups(_data, args):
     for selected, pitr in _data.items():
         for progpt, ditr in pitr.items():
             if 0 not in ditr.keys():
-                # print(f"missing baseline data for {progpt} in {selected}...")
                 continue
             _baseline = ditr[0].mean()
             for speedup, itr in ditr.items():
@@ -353,8 +357,9 @@ def compute_speedups(_data, args):
                     continue
                 if speedup != itr.speedup:
                     raise ValueError(f"in {selected}: {speedup} != {itr.speedup}")
-                _val = line_speedup(selected, progpt, itr, ditr[0])
-                ret.append(_val)
+                if len(itr) >= args.min_experiments:
+                    _val = line_speedup(selected, progpt, itr, ditr[0])
+                    ret.append(_val)
 
     ret.sort()
     _last_name = None
@@ -400,6 +405,8 @@ def get_validations(args):
 def main():
     import argparse
 
+    global num_stddev
+
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "-e", "--experiments", type=str, help="Regex for experiments", default=".*"
@@ -415,6 +422,13 @@ def main():
         "-n", "--num-points", type=int, help="Minimum number of data points", default=5
     )
     parser.add_argument(
+        "-m",
+        "--min-experiments",
+        type=int,
+        help="Minimum number of experiments per speedup (e.g. do not display speedups when there are fewer than X experiments at this speedup)",
+        default=2,
+    )
+    parser.add_argument(
         "-i", "--input", type=str, nargs="*", help="Input file(s)", required=True
     )
     parser.add_argument(
@@ -428,9 +442,9 @@ def main():
     parser.add_argument(
         "-d",
         "--stddev",
-        type=int,
+        type=float,
         help="Number of standard deviations to report",
-        default=1,
+        default=1.0,
     )
     parser.add_argument(
         "-v",
@@ -439,6 +453,12 @@ def main():
         nargs="*",
         help="Validate speedup: {experiment regex} {progress-point regex} {virtual-speedup} {expected-speedup} {tolerance}",
         default=[],
+    )
+    parser.add_argument(
+        "--samples",
+        type=float,
+        help="Report samples within this percentage of the peak (0.0, 100.0] (default: 95 percent)",
+        default=95.0,
     )
     parser.add_argument(
         "--ci",
@@ -454,6 +474,13 @@ def main():
     num_stddev = args.stddev
     num_speedups = len(args.speedups)
 
+    percent_samples = args.samples
+    if not percent_samples > 0.0 and not percent_samples <= 100.0:
+        raise ValueError(
+            f"Invalid samples value: {percent_samples}. Supported range: 0.0 < x <= 100.0"
+        )
+    percent_samples = 1.0 - (percent_samples / 100.0)
+
     if num_speedups > 0 and args.num_points > num_speedups:
         args.num_points = num_speedups
 
@@ -466,9 +493,11 @@ def main():
         samp = process_samples(samp, inp_data)
 
     print("Samples:")
-    width = max([len(x) for x in samp.keys()])
-    for name, count in sorted(samp.items()):
-        print(f"    {name:{width}} :: {count}")
+    width = max([int(math.log10(x) + 1) for _, x in samp.items()])
+    samp_peak = max([count for _, count in samp.items()])
+    for name, count in sorted(samp.items(), key=lambda x: x[1], reverse=True):
+        if count >= samp_peak * percent_samples:
+            print(f"    {count:{width}} :: {name}")
 
     results = compute_speedups(data, args)
     print("")

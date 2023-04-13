@@ -102,19 +102,7 @@ struct OMNITRACE_ATTRIBUTE(packed) entry
 
     int64_t get_cost() const;
 
-    bool    is_bounded(const entry& rhs) const;
-    int64_t get_overlap(const entry& rhs) const;
-    int64_t get_independent(const entry& rhs) const;
-
-    int64_t get_overlap(const entry& rhs, int32_t _devid, int32_t _pid,
-                        int64_t _tid) const;
-    int64_t get_independent(const entry& rhs, int32_t _devid, int32_t _pid,
-                            int64_t _tid) const;
-    bool is_bounded(const entry& rhs, int32_t _devid, int32_t _pid, int64_t _tid) const;
-
     void write(std::ostream& _os) const;
-
-    static bool is_delta(const entry&, const std::string_view&);
 
     friend std::ostream& operator<<(std::ostream& _os, const entry& _v)
     {
@@ -222,11 +210,7 @@ struct call_chain : private std::vector<entry>
     using base_type::reserve;
     using base_type::size;
 
-    size_t  get_hash() const;
     int64_t get_cost(int64_t _tid = -1) const;
-    int64_t get_overlap(int32_t _devid, int32_t _pid, int64_t _tid = -1) const;
-    int64_t get_independent(int32_t _devid, int32_t _pid, int64_t _tid = -1) const;
-    static std::vector<call_chain>& get_top_chains();
 
     bool operator==(const call_chain& rhs) const;
     bool operator!=(const call_chain& rhs) const { return !(*this == rhs); }

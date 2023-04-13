@@ -25,6 +25,7 @@
 #include "core/utility.hpp"
 #include "library/causal/components/causal_gotcha.hpp"
 #include "library/causal/experiment.hpp"
+#include "library/causal/sampling.hpp"
 #include "library/runtime.hpp"
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
@@ -108,17 +109,16 @@ delay::process()
     {
         if(get_global() < get_local())
         {
-            auto _diff = (get_local() - get_global());
-            if(_diff > sleep_for_overhead) get_global() += _diff;
+            get_global() += (get_local() - get_global());
         }
         else if(get_global() > get_local())
         {
-            ::omnitrace::causal::component::causal_gotcha::block_signals();
+            ::omnitrace::causal::sampling::pause();
             auto _beg = tracing::now();
             std::this_thread::sleep_for(
                 std::chrono::nanoseconds{ get_global() - get_local() });
             get_local() += (tracing::now() - _beg);
-            ::omnitrace::causal::component::causal_gotcha::unblock_signals();
+            ::omnitrace::causal::sampling::resume();
         }
     }
     else

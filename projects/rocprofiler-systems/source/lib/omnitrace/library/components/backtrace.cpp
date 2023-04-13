@@ -132,12 +132,12 @@ backtrace::filter_and_patch(const std::vector<entry_type>& _data)
         return 1;
     };
 
-    bool _keep_suffix = tim::get_env<bool>("OMNITRACE_SAMPLING_KEEP_DYNINST_SUFFIX",
-                                           get_debug_sampling());
+    static bool _keep_suffix = tim::get_env<bool>(
+        "OMNITRACE_SAMPLING_KEEP_DYNINST_SUFFIX", get_debug_sampling());
 
     // in the dyninst binary rewrite runtime, instrumented functions are appended with
     // "_dyninst", i.e. "main" will show up as "main_dyninst" in the backtrace.
-    auto _patch_label = [_keep_suffix](std::string_view _lbl) -> std::string {
+    auto _patch_label = [](std::string_view _lbl) -> std::string {
         // debugging feature
         if(_keep_suffix) return std::string{ _lbl };
         const std::string _dyninst{ "_dyninst" };
@@ -183,8 +183,10 @@ backtrace::size() const
 }
 
 void
-backtrace::sample(int)
+backtrace::sample(int signo)
 {
+    if(signo == get_sampling_overflow_signal()) return;
+
     // on RedHat, the unw_step within get_unw_stack involves a mutex lock
     OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
 

@@ -5,6 +5,7 @@ set(library_sources
     ${CMAKE_CURRENT_LIST_DIR}/critical_trace.cpp
     ${CMAKE_CURRENT_LIST_DIR}/kokkosp.cpp
     ${CMAKE_CURRENT_LIST_DIR}/ompt.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/perf.cpp
     ${CMAKE_CURRENT_LIST_DIR}/process_sampler.cpp
     ${CMAKE_CURRENT_LIST_DIR}/ptl.cpp
     ${CMAKE_CURRENT_LIST_DIR}/runtime.cpp
@@ -19,6 +20,7 @@ set(library_headers
     ${CMAKE_CURRENT_LIST_DIR}/critical_trace.hpp
     ${CMAKE_CURRENT_LIST_DIR}/ompt.hpp
     ${CMAKE_CURRENT_LIST_DIR}/process_sampler.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/perf.hpp
     ${CMAKE_CURRENT_LIST_DIR}/ptl.hpp
     ${CMAKE_CURRENT_LIST_DIR}/rcclp.hpp
     ${CMAKE_CURRENT_LIST_DIR}/rocm.hpp

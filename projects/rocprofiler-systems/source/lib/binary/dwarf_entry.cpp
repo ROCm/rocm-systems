@@ -132,8 +132,8 @@ get_dwarf_entry(Dwarf_Die* _die)
 bool
 dwarf_entry::operator<(const dwarf_entry& _rhs) const
 {
-    return std::tie(address, line, col, discriminator) <
-           std::tie(_rhs.address, _rhs.line, _rhs.col, _rhs.discriminator);
+    return std::tie(address, file, line, col, discriminator) <
+           std::tie(_rhs.address, _rhs.file, _rhs.line, _rhs.col, _rhs.discriminator);
 }
 
 bool

@@ -49,14 +49,15 @@ struct address_multirange
     template <typename Tp>
     bool contains(Tp&& _v) const;
 
-    address_range coarse_range = {};
-
     auto size() const { return m_fine_ranges.size(); }
     auto empty() const { return m_fine_ranges.empty(); }
-    auto range_size() const { return coarse_range.size(); }
+    auto range_size() const { return m_coarse_range.size(); }
+    auto get_coarse_range() const { return m_coarse_range; }
+    auto get_ranges() const { return m_fine_ranges; }
 
 private:
-    std::set<address_range> m_fine_ranges = {};
+    address_range           m_coarse_range = {};
+    std::set<address_range> m_fine_ranges  = {};
 };
 
 template <typename Tp>
@@ -68,7 +69,7 @@ address_multirange::contains(Tp&& _v) const
                       std::is_same<type, address_range>::value,
                   "Error! operator+= supports only integrals or address_ranges");
 
-    if(!coarse_range.contains(_v)) return false;
+    if(!m_coarse_range.contains(_v)) return false;
     return std::any_of(m_fine_ranges.begin(), m_fine_ranges.end(),
                        [_v](auto&& itr) { return itr.contains(_v); });
 }

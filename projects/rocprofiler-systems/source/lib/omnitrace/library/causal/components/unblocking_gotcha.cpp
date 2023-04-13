@@ -97,34 +97,35 @@ unblocking_gotcha::shutdown()
     unblocking_gotcha_t::disable();
 }
 
-template <typename Ret, typename... Args>
-Ret
-unblocking_gotcha::operator()(const comp::gotcha_data& _data, Ret (*_func)(Args...),
+template <size_t Idx, typename Ret, typename... Args>
+std::enable_if_t<(Idx < unblocking_gotcha::indexes::kill_idx), Ret>
+unblocking_gotcha::operator()(gotcha_index<Idx>, Ret (*_func)(Args...),
                               Args... _args) const noexcept
 {
     auto _active = get_thread_state() < ::omnitrace::ThreadState::Internal;
 
-    if(_active) causal::delay::process();
-
-    if(_active && _data.index == 7)
+    if(_active)
     {
-        int64_t _delay_value = (_active) ? causal::delay::get_global().load() : 0;
+        causal::delay::process();
 
-        causal::sampling::block_backtrace_samples();
-        auto _ret = (*_func)(_args...);
-        causal::sampling::unblock_backtrace_samples();
+        if constexpr(Idx == pthread_barrier_wait_idx)
+        {
+            int64_t _delay_value = (_active) ? causal::delay::get_global().load() : 0;
 
-        causal::delay::postblock(_delay_value);
-        return _ret;
+            causal::sampling::block_backtrace_samples();
+            auto _ret = (*_func)(_args...);
+            causal::sampling::unblock_backtrace_samples();
+
+            causal::delay::postblock(_delay_value);
+            return _ret;
+        }
     }
-    else
-    {
-        return (*_func)(_args...);
-    }
+
+    return (*_func)(_args...);
 }
 
 int
-unblocking_gotcha::operator()(const comp::gotcha_data&, int (*_func)(pid_t, int),
+unblocking_gotcha::operator()(gotcha_index<kill_idx>, int (*_func)(pid_t, int),
                               pid_t _pid, int _sig) const noexcept
 {
     auto _active = get_thread_state() < ::omnitrace::ThreadState::Internal;

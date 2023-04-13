@@ -41,8 +41,6 @@ namespace component
 {
 namespace
 {
-namespace signals = ::tim::signals;
-
 using bundle_t = tim::lightweight_tuple<blocking_gotcha_t, unblocking_gotcha_t>;
 
 auto&
@@ -99,18 +97,6 @@ causal_gotcha::stop()
 {
     get_bundle()->stop();
     shutdown();
-}
-
-void
-causal_gotcha::block_signals()
-{
-    signals::block_signals(sampling_signals(), signals::sigmask_scope::thread);
-}
-
-void
-causal_gotcha::unblock_signals()
-{
-    signals::unblock_signals(sampling_signals(), signals::sigmask_scope::thread);
 }
 
 void

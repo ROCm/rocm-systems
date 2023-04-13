@@ -6,15 +6,38 @@
    :maxdepth: 4
 ```
 
+## Quick Start (Latest Release, Binary Installer)
+
+Download the `omnitrace-install.py` and specify `--prefix <install-directory>`. This script
+will attempt to auto-detect the appropriate OS distribution and OS version.
+If ROCm support is desired, specify `--rocm X.Y` where `X` is the ROCm major version and `Y`
+is the ROCm minor version, e.g. `--rocm 5.4`.
+
+```console
+wget https://github.com/AMDResearch/omnitrace/releases/latest/download/omnitrace-install.py
+python3 ./omnitrace-install.py --prefix /opt/omnitrace --rocm 5.4
+```
+
+This script supports installation on Ubuntu, OpenSUSE, RedHat, Debian, CentOS, and Fedora.
+If the target OS is compatible with one of the [operating system versions](#operating-system) below,
+specify `-d <DISTRO> -v <VERSION>`, e.g. if the OS is compatible with Ubuntu 18.04, pass
+`-d ubuntu -v 18.04` to the script.
+
 ## Operating System
 
-OmniTrace is only supported on Linux.
+OmniTrace is only supported on Linux. The following distributions are tested:
 
 - Ubuntu 18.04
 - Ubuntu 20.04
+- Ubuntu 22.04
 - OpenSUSE 15.2
 - OpenSUSE 15.3
-- Other OS distributions may be supported but are not tested
+- OpenSUSE 15.4
+- RedHat 8.7
+- RedHat 9.0
+- RedHat 9.1
+
+Other OS distributions may be supported but are not tested.
 
 ### Identifying the Operating System
 

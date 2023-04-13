@@ -80,7 +80,7 @@ address_range::contains(uintptr_t _v) const
 bool
 address_range::contains(address_range _v) const
 {
-    return (*this == _v) || (contains(_v.low) && contains(_v.high));
+    return (*this == _v) || (contains(_v.low) && (contains(_v.high) || _v.high == high));
 }
 
 bool
