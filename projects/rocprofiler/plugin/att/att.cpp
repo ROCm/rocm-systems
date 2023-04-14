@@ -96,9 +96,10 @@ class att_plugin_t {
       bIncrementVersion = att_file_exists(outpath + fss + "_kernel.txt");
     }
 
+    auto dispatch_id = att_tracer_record->header.id.handle;
     std::string fname =
         outpath + name_demangled + "_v" + std::to_string(file_iteration) + "_kernel.txt";
-    std::ofstream(fname.c_str()) << name_demangled << ": " << kernel_name_c << '\n';
+    std::ofstream(fname.c_str()) << name_demangled << " [" << dispatch_id << "]: " << kernel_name_c << '\n';
 
     // iterate over each shader engine att trace
     for (int i = 0; i < se_num; i++) {
