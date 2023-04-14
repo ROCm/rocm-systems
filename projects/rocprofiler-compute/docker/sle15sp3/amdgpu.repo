@@ -1,0 +1,13 @@
+[ROCm-5.1.3]
+name=ROCm5.1.3
+baseurl=https://repo.radeon.com/rocm/zyp/5.1.3/main
+enabled=1
+gpgcheck=0
+gpgkey=https://repo.radeon.com/rocm/rocm.gpg.key
+
+[amdgpu]
+name=amdgpu
+baseurl=https://repo.radeon.com/amdgpu/latest/sle/15.3/main/x86_64
+enabled=1
+gpgcheck=0
+gpgkey=https://repo.radeon.com/rocm/rocm.gpg.key
