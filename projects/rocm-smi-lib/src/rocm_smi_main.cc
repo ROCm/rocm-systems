@@ -520,10 +520,12 @@ void RocmSMI::printEnvVarInfo(void) {
   }
   for (auto it=env_vars_.enum_overrides.begin();
        it != env_vars_.enum_overrides.end(); ++it) {
-    std::cout << *it;
+    DevInfoTypes type = static_cast<DevInfoTypes>(*it);
+    std::cout << (std::to_string(*it) + " (" + devInfoTypesStrings.at(type)
+                  + ")");
     auto temp_it = it;
     if(++temp_it != env_vars_.enum_overrides.end()) {
-      std::cout << ",";
+      std::cout << ", ";
     }
   }
   std::cout << "}" << std::endl;
