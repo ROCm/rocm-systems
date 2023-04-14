@@ -627,7 +627,7 @@ def call_picture_callback(return_dict):
     for n, e in enumerate(counter_events):
         return_dict['se'+str(n)+'_perfcounter.json'] = Readable({"data": [v.toTuple() for v in e]})
 
-def view_trace(args, wait, code, jumps, dbnames, att_filenames, bReturnLoc, pic_callback, OCCUPANCY):
+def view_trace(args, code, jumps, dbnames, att_filenames, bReturnLoc, pic_callback, OCCUPANCY, bDumpOnly):
     global PICTURE_CALLBACK
     PICTURE_CALLBACK = pic_callback
     manager = Manager()
@@ -677,21 +677,29 @@ def view_trace(args, wait, code, jumps, dbnames, att_filenames, bReturnLoc, pic_
 
     JSON_GLOBAL_DICTIONARY['filenames.json'] = Readable({"filenames": simd_wave_filenames})
 
-    if args.ports:
-        assign_ports(args.ports)
-    print('serving at ports: {0},{1}'.format(PORT, WebSocketPort))
+    if pic_thread is not None:
+        pic_thread.join()
+        for k, v in return_dict.items():
+            JSON_GLOBAL_DICTIONARY[k] = v
 
-    if wait == 0:
+    if bDumpOnly == False:
+        if args.ports:
+            assign_ports(args.ports)
+        print('serving at ports: {0},{1}'.format(PORT, WebSocketPort))
         try:
             PROCS = [Process(target=run_server), Process(target=run_websocket)]
-            if pic_thread is not None:
-                pic_thread.join()
-                for k, v in return_dict.items():
-                    JSON_GLOBAL_DICTIONARY[k] = v
-
             for p in PROCS:
                 p.start()
             for p in PROCS:
                 p.join()
         except KeyboardInterrupt:
             print("Exitting.")
+    else:
+        os.makedirs('ui', exist_ok=True)
+        for k, v in JSON_GLOBAL_DICTIONARY.items():
+            if '.json' in k:
+                try:
+                    with open(os.path.join('ui',k), 'w') as f:
+                        f.write(v.read())
+                except:
+                    pass

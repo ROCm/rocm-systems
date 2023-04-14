@@ -434,11 +434,13 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("assembly_code", help="Path of the assembly code")
     parser.add_argument("--trace_file", help="Filter for trace files", default=None, type=str)
-    parser.add_argument("-k", "--att_kernel", help="Kernel file", type=str, default=pathenv+'/*_kernel.txt')
-    parser.add_argument("-p", "--ports", help="Server and websocket ports, default: 8000,18000")
-    parser.add_argument("--target_cu", help="Collected target CU id{0-15}", type=int, default=None)
-    parser.add_argument("-g", "--genasm",
+    parser.add_argument("--att_kernel", help="Kernel file", 
+                        type=str, default=pathenv+'/*_kernel.txt')
+    parser.add_argument("--ports", help="Server and websocket ports, default: 8000,18000")
+    parser.add_argument("--genasm",
                         help="Generate post-processed asm file at this path", type=str, default="")
+    parser.add_argument("--dumpfiles", help="Dont open server, \
+                            dump json files to disk instead.", default=False, action='store_true')
     args = parser.parse_args()
 
     global EVENT_NAMES
@@ -450,7 +452,7 @@ if __name__ == "__main__":
         for line in lines:
             if 'PERFCOUNTER_ID=' in line:
                 EVENT_NAMES += ['id: '+clean(line)]
-            elif args.target_cu is None and 'att: TARGET_CU' in line:
+            elif 'att: TARGET_CU' in line:
                 args.target_cu = int(clean(line))
                 print('Target CU set to:', args.target_cu)
         for line in lines:
@@ -537,7 +539,7 @@ if __name__ == "__main__":
                 time_acc += state[1]
 
     if args.genasm and len(args.genasm) > 0:
-        flight_count = view_trace(args, 0, code, jumps, DBFILES, analysed_filenames, True, None, OCCUPANCY)
+        flight_count = view_trace(args, code, jumps, DBFILES, analysed_filenames, True, None, OCCUPANCY, args.dumpfiles)
 
         with open(args.assembly_code, 'r') as file:
             lines = file.readlines()
@@ -549,4 +551,4 @@ if __name__ == "__main__":
             for k in keys:
                 file.write(assembly_code[k]+'\n')
     else:
-        view_trace(args, 0, code, jumps, DBFILES, analysed_filenames, False, GeneratePIC, OCCUPANCY)
+        view_trace(args, code, jumps, DBFILES, analysed_filenames, False, GeneratePIC, OCCUPANCY, args.dumpfiles)
