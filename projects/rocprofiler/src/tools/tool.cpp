@@ -187,6 +187,7 @@ att_parsed_input_t GetATTParams() {
   std::unordered_map<std::string, rocprofiler_att_parameter_name_t> ATT_PARAM_NAMES{};
 
   ATT_PARAM_NAMES["att: TARGET_CU"] = ROCPROFILER_ATT_COMPUTE_UNIT_TARGET;
+  ATT_PARAM_NAMES["SE_MASK"] = ROCPROFILER_ATT_SE_MASK;
   ATT_PARAM_NAMES["SIMD_MASK"] = ROCPROFILER_ATT_MAXVALUE;
   ATT_PARAM_NAMES["PERFCOUNTER_ID"] = ROCPROFILER_ATT_PERFCOUNTER;
   ATT_PARAM_NAMES["PERFCOUNTER"] = ROCPROFILER_ATT_PERFCOUNTER_NAME;
@@ -198,7 +199,7 @@ att_parsed_input_t GetATTParams() {
   std::unordered_map<std::string, uint32_t> default_params = {
     {"ATT_MASK", 0x3F01},
     {"TOKEN_MASK", 0x344B},
-    {"TOKEN_MASK2", 0x3FFFF}
+    {"TOKEN_MASK2", 0xFFFFFFF}
   };
 
   bool started_att_counters = false;
