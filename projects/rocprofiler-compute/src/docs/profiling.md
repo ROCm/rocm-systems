@@ -1,4 +1,4 @@
-# Profiling
+# Profile Mode
 
 ```eval_rst
 .. toctree::

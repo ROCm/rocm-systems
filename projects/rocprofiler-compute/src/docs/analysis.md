@@ -1,4 +1,4 @@
-# Analysis
+# Analyze Mode
 
 ```eval_rst
 .. toctree::
