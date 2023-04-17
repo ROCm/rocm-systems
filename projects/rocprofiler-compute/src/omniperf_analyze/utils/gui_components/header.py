@@ -39,6 +39,13 @@ def list_unique(orig_list, is_numeric):
     return unique_list
 
 
+def create_span(input):
+    elmt = {}
+    elmt["label"] = (html.Span(str(input), title=str(input)),)
+    elmt["value"] = str(input)
+    return elmt
+
+
 def get_header(raw_pmc, input_filters, kernel_names):
     return html.Header(
         id="home",
@@ -170,40 +177,6 @@ def get_header(raw_pmc, input_filters, kernel_names):
                                         children=[
                                             html.A(
                                                 className="smoothscroll",
-                                                children=["Kernels:"],
-                                            ),
-                                            dcc.Dropdown(
-                                                list_unique(
-                                                    list(
-                                                        map(
-                                                            str,
-                                                            raw_pmc[
-                                                                schema.pmc_perf_file_prefix
-                                                            ]["KernelName"],
-                                                        )
-                                                    ),
-                                                    False,
-                                                ),  # list avail kernel names
-                                                id="kernel-filt",
-                                                multi=True,
-                                                value=kernel_names,
-                                                placeholder="ALL",
-                                                style={
-                                                    "width": "600px",  # TODO: Change these widths to % rather than fixed value
-                                                    "height": "34px",
-                                                },
-                                            ),
-                                        ]
-                                    )
-                                ],
-                            ),
-                            html.Li(
-                                className="filter",
-                                children=[
-                                    html.Div(
-                                        children=[
-                                            html.A(
-                                                className="smoothscroll",
                                                 children=["GCD:"],
                                             ),
                                             dcc.Dropdown(
@@ -256,6 +229,45 @@ def get_header(raw_pmc, input_filters, kernel_names):
                                                 ],  # default to any dispatch filters passed as args
                                                 placeholder="ALL",
                                                 style={"width": "150px"},
+                                            ),
+                                        ]
+                                    )
+                                ],
+                            ),
+                            html.Li(
+                                className="filter",
+                                children=[
+                                    html.Div(
+                                        children=[
+                                            html.A(
+                                                className="smoothscroll",
+                                                children=["Kernels:"],
+                                            ),
+                                            dcc.Dropdown(
+                                                list(
+                                                    map(
+                                                        create_span,
+                                                        list_unique(
+                                                            list(
+                                                                map(
+                                                                    str,
+                                                                    raw_pmc[
+                                                                        schema.pmc_perf_file_prefix
+                                                                    ]["KernelName"],
+                                                                )
+                                                            ),
+                                                            False,
+                                                        ),  # list avail kernel names
+                                                    )
+                                                ),
+                                                id="kernel-filt",
+                                                multi=True,
+                                                value=kernel_names,
+                                                optionHeight=150,
+                                                placeholder="ALL",
+                                                style={
+                                                    "width": "600px",  # TODO: Change these widths to % rather than fixed value
+                                                },
                                             ),
                                         ]
                                     )

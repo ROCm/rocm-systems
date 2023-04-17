@@ -25,6 +25,7 @@
 from selectors import EpollSelector
 import sys
 import copy
+import os.path
 import pandas as pd
 from dash.dash_table import FormatTemplate
 from dash.dash_table.Format import Format, Scheme, Symbol
@@ -342,6 +343,8 @@ def build_table_chart(
         style_cell_conditional=[
             {"if": {"column_id": display_columns[0]}, "textAlign": "left"}
         ],
+        # style cell
+        style_cell={"maxWidth": "500px"},
         # display style
         style_header={
             "backgroundColor": "rgb(30, 30, 30)",
@@ -350,7 +353,12 @@ def build_table_chart(
         }
         if IS_DARK
         else {},
-        style_data={"backgroundColor": "rgb(50, 50, 50)", "color": "white"}
+        style_data={
+            "backgroundColor": "rgb(50, 50, 50)",
+            "color": "white",
+            "whiteSpace": "normal",
+            "height": "auto",
+        }
         if IS_DARK
         else {},
         style_data_conditional=[
@@ -466,13 +474,15 @@ def build_layout(
             get_memchart(panel_configs[1900]["data source"], base_data[base_run])
         )
         # append roofline section
-        div_children.append(
-            get_roofline(
-                path_to_dir,
-                parser.apply_filters(base_data[base_run], is_gui, debug),
-                verbose,
+        has_roofline = os.path.isfile(path_to_dir + "/roofline.csv")
+        if has_roofline:
+            div_children.append(
+                get_roofline(
+                    path_to_dir,
+                    parser.apply_filters(base_data[base_run], is_gui, debug),
+                    verbose,
+                )
             )
-        )
         # Iterate over each section as defined in panel configs
         for panel_id, panel in panel_configs.items():
             title = str(panel_id // 100) + ". " + panel["title"]
@@ -589,5 +599,18 @@ def build_layout(
                         ],
                     )
                 )
+
+        # Display pop-up message if no filters are applied
+        if not (disp_filt or kernel_filter or gcd_filter):
+            div_children.append(
+                html.Section(
+                    id="popup",
+                    children=[
+                        html.Div(
+                            children="To dive deeper, use the top drop down menus to isolate particular kernel(s) or dispatch(s). You will then see the web page update with additional low-level metrics specific to the filter you've applied.",
+                        ),
+                    ],
+                )
+            )
 
         return div_children

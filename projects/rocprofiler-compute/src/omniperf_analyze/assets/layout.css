@@ -213,7 +213,9 @@ ul#nav li {
    font-size: 14px;
    text-align: left;
 }
-
+.VirtualizedSelectOption {
+   overflow: hidden;
+}
 #nav .nav-right {
    float: right;
 }
@@ -246,6 +248,7 @@ button.report:hover {
    font-size: 16px;
 }
 
+/* Menu Button */
 .dropdown button {
    display: inline-block;
    font: 16px 'opensans-bold', sans-serif;
@@ -395,6 +398,18 @@ button.report:hover {
 
 #memchart a, #memchart a:visited { color: #fff; }
 #memchart a:hover, #memchart a:focus { color: #11ABB0; }
+
+/* ------------------------------------------------------------------ */
+/* Popup Section
+/* ------------------------------------------------------------------ */
+#popup{
+   text-align: center;
+   border: 3px solid #F06000;
+   margin: auto;
+   width: 50%;
+   padding: 10px;
+   color: white;
+}
 
 /* ------------------------------------------------------------------ */
 /* Top Stat Section
