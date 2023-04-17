@@ -21,7 +21,7 @@ string(REGEX REPLACE "([0-9]+)\.([0-9]+)\.([0-9]+)(.*)" "\\1.\\2.\\3" OMNIPERF_V
                      "${FULL_VERSION_STRING}")
 
 # string(REGEX REPLACE "(${OMNIPERF_VERSION})(.*)" "\\2" OMNIPERF_VERSION_TWEAK
-#                      "${FULL_VERSION_STRING}")
+# "${FULL_VERSION_STRING}")
 # string(REGEX REPLACE "^\\." "" OMNIPERF_VERSION_TWEAK "${OMNIPERF_VERSION_TWEAK}")
 
 project(
