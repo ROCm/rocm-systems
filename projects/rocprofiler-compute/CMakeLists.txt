@@ -16,12 +16,13 @@ message(STATUS "Hostname: ${LOCALHOST}")
 # Versioning info derived from file
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" FULL_VERSION_STRING LIMIT_COUNT 1)
 string(REGEX REPLACE "(\n|\r)" "" FULL_VERSION_STRING "${FULL_VERSION_STRING}")
+set(OMNIPERF_FULL_VERSION "${FULL_VERSION_STRING}")
 string(REGEX REPLACE "([0-9]+)\.([0-9]+)\.([0-9]+)(.*)" "\\1.\\2.\\3" OMNIPERF_VERSION
                      "${FULL_VERSION_STRING}")
 
-string(REGEX REPLACE "(${OMNIPERF_VERSION})(.*)" "\\2" OMNIPERF_VERSION_TWEAK
-                     "${FULL_VERSION_STRING}")
-string(REGEX REPLACE "^\\." "" OMNIPERF_VERSION_TWEAK "${OMNIPERF_VERSION_TWEAK}")
+# string(REGEX REPLACE "(${OMNIPERF_VERSION})(.*)" "\\2" OMNIPERF_VERSION_TWEAK
+#                      "${FULL_VERSION_STRING}")
+# string(REGEX REPLACE "^\\." "" OMNIPERF_VERSION_TWEAK "${OMNIPERF_VERSION_TWEAK}")
 
 project(
     omniperf
@@ -138,7 +139,7 @@ set(moduleFileTemplate "omniperf.lua.in")
 
 configure_file(
     ${PROJECT_SOURCE_DIR}/cmake/${moduleFileTemplate}
-    ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/modulefiles/${PROJECT_NAME}/${PROJECT_VERSION}.lua
+    ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/modulefiles/${PROJECT_NAME}/${OMNIPERF_FULL_VERSION}.lua
     @ONLY)
 
 # Crusher mods
@@ -148,7 +149,7 @@ if(LOCALHOST MATCHES ".*\.crusher\.olcf\.ornl\.gov")
     file(READ ${PROJECT_SOURCE_DIR}/cmake/modfile.crusher.mod mod_additions)
     file(
         APPEND
-        ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/modulefiles/${PROJECT_NAME}/${PROJECT_VERSION}.lua
+        ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/modulefiles/${PROJECT_NAME}/${OMNIPERF_FULL__VERSION}.lua
         ${mod_additions})
     list(POP_BACK CMAKE_MESSAGE_INDENT)
 endif()
@@ -160,7 +161,7 @@ if(LOCALHOST MATCHES "TheraS01|.*\.thera\.amd\.com|thera-hn")
     file(READ ${PROJECT_SOURCE_DIR}/cmake/modfile.thera.mod mod_additions)
     file(
         APPEND
-        ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/modulefiles/${PROJECT_NAME}/${PROJECT_VERSION}.lua
+        ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/modulefiles/${PROJECT_NAME}/${OMNIPERF_FULL_VERSION}.lua
         ${mod_additions})
     list(POP_BACK CMAKE_MESSAGE_INDENT)
 endif()
@@ -252,7 +253,7 @@ install(DIRECTORY sample TYPE DATA)
 # modulefile
 install(
     FILES
-        ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/modulefiles/${PROJECT_NAME}/${PROJECT_VERSION}.lua
+        ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/modulefiles/${PROJECT_NAME}/${OMNIPERF_FULL_VERSION}.lua
     DESTINATION ${MOD_INSTALL_PATH}/${PROJECT_NAME})
 
 # install(PROGRAMS src/omniperf.py DESTINATION ${OMNIPERF_PYINSTALLER_PATH})
