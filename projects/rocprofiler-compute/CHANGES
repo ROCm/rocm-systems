@@ -1,3 +1,11 @@
+Version 1.0.8-PR2 (17 Apr 2023)
+  * ux improvements in standalone GUI (#101)
+  * enhanced readability for filtering dropdowns in standalone GUI (#102)
+  * new logfile to capture rocprofiler output (#106)
+  * roofline support for sles15 sp4 and future service packs (#109)
+  * adding dockerfiles for all supported Linux distos
+  * new examples for `--roof-only` and `--kernel` options added to documentation
+
 Version 1.0.8-PR1 (13 Mar 2023)
 
   * add `--kernel-names` option to toggle kernelName overlay in standalone roofline plot (#93)
