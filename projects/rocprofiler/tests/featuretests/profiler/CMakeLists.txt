@@ -33,10 +33,9 @@ find_package(HIP REQUIRED MODULE)
 find_program(CLANG_TIDY_EXE NAMES "clang-tidy")
 if (CLANG_TIDY_EXE)
    set(CMAKE_CXX_CLANG_TIDY
-   clang-tidy;
+   ${CLANG_TIDY_EXE};
    -format-style='file';
-   -header-filter=${CMAKE_CURRENT_SOURCE_DIR};
- )
+   -header-filter=${CMAKE_CURRENT_SOURCE_DIR};)
 endif()
 # ############################################################################################################################################
 # App Based FeatureTests
