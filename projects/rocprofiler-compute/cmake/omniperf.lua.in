@@ -3,13 +3,13 @@ local help_message = [[
 Omniperf is an open-source performance analysis tool for profiling
 machine learning/HPC workloads running on AMD MI GPUs.
 
-Version @PROJECT_VERSION@
+Version @OMNIPERF_FULL_VERSION@
 ]]
 
 help(help_message,"\n")
 
 whatis("Name: omniperf")
-whatis("Version: @PROJECT_VERSION@")
+whatis("Version: @OMNIPERF_FULL_VERSION@")
 whatis("Keywords: Profiling, Performance, GPU")
 whatis("Description: tool for GPU performance profiling")
 whatis("URL: https://github.com/AMDResearch/omniperf")
