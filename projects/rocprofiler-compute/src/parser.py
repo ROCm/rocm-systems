@@ -24,7 +24,8 @@
 
 import os
 import argparse
-import subprocess
+import shutil
+
 
 from common import (
     OMNIPERF_HOME,
@@ -120,10 +121,8 @@ def parse(my_parser):
         help="\t\t\tKernel filtering.",
     )
 
-    result = subprocess.run(
-        ["which", "rocscope"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
-    )
-    if result.returncode == 0:
+    result = shutil.which("rocscope")
+    if result:
         profile_group.add_argument(
             "-l",
             "--i-feel-lucky",
