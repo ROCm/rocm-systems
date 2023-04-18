@@ -149,7 +149,7 @@ if(LOCALHOST MATCHES ".*\.crusher\.olcf\.ornl\.gov")
     file(READ ${PROJECT_SOURCE_DIR}/cmake/modfile.crusher.mod mod_additions)
     file(
         APPEND
-        ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/modulefiles/${PROJECT_NAME}/${OMNIPERF_FULL__VERSION}.lua
+        ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/modulefiles/${PROJECT_NAME}/${OMNIPERF_FULL_VERSION}.lua
         ${mod_additions})
     list(POP_BACK CMAKE_MESSAGE_INDENT)
 endif()
