@@ -47,8 +47,8 @@ style reference is provided below for convenience:
                   Karl W. Schulz and
                   Jose Santos and
                   Keith Lowery},
-  title        = {AMDResearch/omniperf: v1.0.8-PR1 (13 March 2023)},
-  month        = mar,
+  title        = {AMDResearch/omniperf: v1.0.8-PR2 (17 April 2023)},
+  month        = apr,
   year         = 2023,
   publisher    = {Zenodo},
   version      = {v1.0.8-PR1},
