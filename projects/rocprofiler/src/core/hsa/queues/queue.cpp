@@ -65,7 +65,10 @@ void AddKernelName(uint64_t handle, std::string name) {
 }
 std::string GetKernelNameFromKsymbols(uint64_t handle) {
   std::lock_guard<std::mutex> lock(ksymbol_map_lock);
-  return ksymbols->at(handle);
+  if(ksymbols->find(handle)!=ksymbols->end())
+    return ksymbols->at(handle);
+  else
+    return "Unknown Kernel!";
 }
 void InitKsymbols() {
   if (ksymbols_flag.load(std::memory_order_relaxed)) {
