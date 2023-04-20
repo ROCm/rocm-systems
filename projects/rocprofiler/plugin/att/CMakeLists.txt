@@ -39,13 +39,13 @@ target_compile_definitions(att_plugin PRIVATE HIP_PROF_HIP_API_STRING=1
                                               __HIP_PLATFORM_HCC__=1)
 
 target_include_directories(
-  att_plugin PRIVATE ${PROJECT_SOURCE_DIR}/inc ${PROJECT_SOURCE_DIR}
+  att_plugin PRIVATE ${PROJECT_SOURCE_DIR}
                      ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_options(
   att_plugin PRIVATE
   -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/../exportmap
   -Wl,--no-undefined)
-target_link_libraries(att_plugin PRIVATE ${ROCPROFILER_TARGET}
+target_link_libraries(att_plugin PRIVATE rocprofiler-v2
                                          hsa-runtime64::hsa-runtime64 stdc++fs)
 
 install(TARGETS att_plugin

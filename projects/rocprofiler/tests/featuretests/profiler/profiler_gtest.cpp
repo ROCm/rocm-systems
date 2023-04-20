@@ -25,7 +25,7 @@ THE SOFTWARE.
 #include <gtest/gtest.h>
 #include <hsa/hsa.h>
 #include <hip/hip_runtime.h>
-#include <rocprofiler.h>
+#include "rocprofiler.h"
 #include <cstdlib>
 #include <thread>
 #include <array>

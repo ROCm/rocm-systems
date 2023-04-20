@@ -41,7 +41,7 @@
 #include <hsa/amd_hsa_kernel_code.h>
 #include <hsa/hsa_ven_amd_loader.h>
 
-#include "rocprofiler.h"
+#include <rocprofiler/v2/rocprofiler.h>
 
 #include "code_printing.hpp"
 #include "program.hpp"

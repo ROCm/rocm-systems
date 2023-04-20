@@ -20,7 +20,7 @@
 #ifndef SRC_CORE_HSA_PACKETS_PACKETS_GENERATOR_H_
 #define SRC_CORE_HSA_PACKETS_PACKETS_GENERATOR_H_
 
-#include "inc/rocprofiler.h"
+#include "rocprofiler.h"
 
 #include <hsa/hsa.h>
 #include <hsa/hsa_api_trace.h>

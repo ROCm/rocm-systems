@@ -19,7 +19,6 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 *******************************************************************************/
-#define ROCPROFILER_V1
-#include "inc/rocprofiler.h"
+#include "rocprofiler/rocprofiler.h"
 const int ret = 0;
 int main() { return ret; }

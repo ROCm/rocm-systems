@@ -18,15 +18,12 @@
  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  THE SOFTWARE. */
 
-#define ROCPROFILER_V2
-
 #include <dirent.h>
 #include <dlfcn.h>
 #include <fcntl.h>
 #include <hsa/hsa.h>
-#include <hsa/hsa_api_trace.h>
-#include <rocprofiler.h>
-#include <rocprofiler_plugin.h>
+#include "rocprofiler.h"
+#include "rocprofiler_plugin.h"
 #include <sys/syscall.h>
 #include <unistd.h>
 #include <sys/ipc.h>
@@ -54,7 +51,6 @@
 #include <thread>
 #include <chrono>
 
-#include "rocprofiler.h"
 #include "utils/helper.h"
 
 namespace fs = std::experimental::filesystem;
@@ -415,7 +411,7 @@ ROCPROFILER_EXPORT extern const uint32_t HSA_AMD_TOOL_PRIORITY = 1025;
 The function updates the core api table function pointers to point to the
 interceptor functions in this file.
 */
-ROCPROFILER_EXPORT bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
+ROCPROFILER_EXPORT bool OnLoad(void* table, uint64_t runtime_version,
                              uint64_t failed_tool_count, const char* const* failed_tool_names) {
   if (rocprofiler_version_major() != ROCPROFILER_VERSION_MAJOR ||
       rocprofiler_version_minor() < ROCPROFILER_VERSION_MINOR) {

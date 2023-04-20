@@ -18,7 +18,6 @@ set_target_properties(rocprofiler_tool PROPERTIES
 target_include_directories(rocprofiler_tool
   PRIVATE
   ${PROJECT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}
-  ${PROJECT_SOURCE_DIR}/inc
   ${PROJECT_SOURCE_DIR}/src)
 
 target_compile_definitions(rocprofiler_tool
@@ -26,10 +25,10 @@ target_compile_definitions(rocprofiler_tool
 
 if(ASAN)
   target_compile_options(rocprofiler_tool PRIVATE -fsanitize=address)
-  target_link_libraries(rocprofiler_tool ${ROCPROFILER_TARGET} hsa-runtime64::hsa-runtime64 Threads::Threads atomic asan dl rt stdc++fs amd_comgr)
+  target_link_libraries(rocprofiler_tool rocprofiler-v2 hsa-runtime64::hsa-runtime64 Threads::Threads atomic asan dl rt stdc++fs amd_comgr)
   target_link_options(rocprofiler_tool PRIVATE -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/exportmap -Wl,--no-undefined,-fsanitize=address)
 else()
-  target_link_libraries(rocprofiler_tool ${ROCPROFILER_TARGET} hsa-runtime64::hsa-runtime64 Threads::Threads atomic dl rt stdc++fs amd_comgr)
+  target_link_libraries(rocprofiler_tool rocprofiler-v2 hsa-runtime64::hsa-runtime64 Threads::Threads atomic dl rt stdc++fs amd_comgr)
   target_link_options(rocprofiler_tool PRIVATE -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/exportmap -Wl,--no-undefined)
 endif()
 
@@ -44,9 +43,8 @@ add_subdirectory(amdsys)
 add_subdirectory(rocprofv2)
 
 add_executable(ctrl ctrl.cpp)
-target_include_directories(ctrl PRIVATE ${PROJECT_SOURCE_DIR}/inc)
 target_link_options(rocprofiler_tool PRIVATE -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/exportmap -Wl,--no-undefined)
-target_link_libraries(ctrl PRIVATE ${ROCPROFILER_TARGET} hsa-runtime64::hsa-runtime64)
+target_link_libraries(ctrl PRIVATE rocprofiler-v2 hsa-runtime64::hsa-runtime64)
 install(TARGETS ctrl RUNTIME
   DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/rocprofiler
   COMPONENT runtime)

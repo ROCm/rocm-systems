@@ -73,7 +73,7 @@ endfunction()
 function(generate_wrapper_header)
   file(MAKE_DIRECTORY ${ROCPROF_WRAPPER_INC_DIR})
   #find all header files from inc
-  file(GLOB include_files ${CMAKE_CURRENT_SOURCE_DIR}/inc/*.h)
+  file(GLOB include_files ${CMAKE_CURRENT_SOURCE_DIR}/include/rocprofiler/*.h)
   #Convert the list of files into #includes
   foreach(header_file ${include_files})
      #set include  guard

@@ -33,7 +33,7 @@ SOFTWARE.
 #include <atomic>
 #include <mutex>
 
-#include "inc/rocprofiler.h"
+#include "rocprofiler.h"
 #include "util/exception.h"
 #include "util/hsa_rsrc_factory.h"
 

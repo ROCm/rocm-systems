@@ -47,7 +47,7 @@ include_directories(${HSA_RUNTIME_INC_PATH})
 
 ## C test
 add_executable ( "c_test" ${TEST_DIR}/app/c_test.c )
-target_include_directories ( "c_test" PRIVATE ${ROOT_DIR} $<TARGET_PROPERTY:hsa-runtime64::hsa-runtime64,INTERFACE_INCLUDE_DIRECTORIES> )
+target_include_directories ( "c_test" PRIVATE ${ROOT_DIR} ${PROJECT_SOURCE_DIR}/include $<TARGET_PROPERTY:hsa-runtime64::hsa-runtime64,INTERFACE_INCLUDE_DIRECTORIES> )
 
 ## Util sources
 file( GLOB UTIL_SRC "${TEST_DIR}/util/*.cpp" )
@@ -93,22 +93,22 @@ add_custom_target( mytest
 
 ## Building standalone test executable
 add_executable ( ${ST_EXE_NAME} ${ST_TST_SRC} ${UTIL_SRC} ${KERN_SRC} )
-target_include_directories ( ${ST_EXE_NAME} PRIVATE ${TEST_DIR} ${ROOT_DIR} )
+target_include_directories ( ${ST_EXE_NAME} PRIVATE ${TEST_DIR} ${ROOT_DIR} ${PROJECT_SOURCE_DIR}/include )
 target_link_libraries ( ${ST_EXE_NAME} ${ROCPROFILER_TARGET} hsa-runtime64::hsa-runtime64 hsakmt::hsakmt Threads::Threads dl )
 
 ## Building standalone intercept test executable
 add_executable ( ${STIN_EXE_NAME} ${STIN_TST_SRC} ${UTIL_SRC} ${KERN_SRC} )
-target_include_directories ( ${STIN_EXE_NAME} PRIVATE ${TEST_DIR} ${ROOT_DIR} )
+target_include_directories ( ${STIN_EXE_NAME} PRIVATE ${TEST_DIR} ${ROOT_DIR} ${PROJECT_SOURCE_DIR}/include )
 target_link_libraries ( ${STIN_EXE_NAME} ${ROCPROFILER_TARGET} hsa-runtime64::hsa-runtime64 hsakmt::hsakmt Threads::Threads dl )
 
 ## Building intercept test executable
 add_library ( ${IN_EXE_NAME} SHARED ${IN_TST_SRC} ${UTIL_SRC} ${KERN_SRC} )
-target_include_directories ( ${IN_EXE_NAME} PRIVATE ${TEST_DIR} ${ROOT_DIR} )
+target_include_directories ( ${IN_EXE_NAME} PRIVATE ${TEST_DIR} ${ROOT_DIR} ${PROJECT_SOURCE_DIR}/include )
 target_link_libraries ( ${IN_EXE_NAME} ${ROCPROFILER_TARGET} hsa-runtime64::hsa-runtime64 hsakmt::hsakmt Threads::Threads dl )
 
 ## Building ctrl test executable
 add_executable ( ${EXE_NAME} ${CTRL_SRC} ${UTIL_SRC} ${KERN_SRC} )
-target_include_directories ( ${EXE_NAME} PRIVATE ${TEST_DIR} ${ROOT_DIR} )
+target_include_directories ( ${EXE_NAME} PRIVATE ${TEST_DIR} ${ROOT_DIR} ${PROJECT_SOURCE_DIR}/include )
 target_link_libraries ( ${EXE_NAME} hsa-runtime64::hsa-runtime64 hsakmt::hsakmt Threads::Threads dl )
 execute_process ( COMMAND sh -xc "cp ${TEST_DIR}/run.sh ${PROJECT_BINARY_DIR}" )
 execute_process ( COMMAND sh -xc "cp ${TEST_DIR}/tool/*.xml ${PROJECT_BINARY_DIR}" )
@@ -118,7 +118,7 @@ execute_process ( COMMAND sh -xc "mkdir -p ${PROJECT_BINARY_DIR}/RESULTS" )
 set ( TEST_LIB "rocprof-tool" )
 set ( TEST_LIB_SRC ${TEST_DIR}/tool/tool.cpp ${UTIL_SRC} )
 add_library ( ${TEST_LIB} SHARED ${TEST_LIB_SRC} )
-target_include_directories ( ${TEST_LIB} PRIVATE ${TEST_DIR} ${ROOT_DIR} )
+target_include_directories ( ${TEST_LIB} PRIVATE ${TEST_DIR} ${ROOT_DIR} ${PROJECT_SOURCE_DIR}/include )
 target_link_libraries ( ${TEST_LIB} ${ROCPROFILER_TARGET} hsa-runtime64::hsa-runtime64 Threads::Threads dl )
 
 ## Build memory test bench

@@ -32,7 +32,7 @@ find_package(LibDw REQUIRED)
 
 ## Add a custom targets to build and run all the tests
 add_custom_target(samples)
-add_dependencies(samples ${ROCPROFILER_TARGET})
+add_dependencies(samples rocprofiler-v2)
 add_custom_target(run-samples COMMAND ${PROJECT_BINARY_DIR}/samples/run_samples.sh DEPENDS samples)
 
 file(GLOB ROCPROFILER_UTIL_SRC_FILES ${PROJECT_SOURCE_DIR}/src/utils/helper.cpp)
@@ -51,8 +51,8 @@ file(GLOB ROCPROFILER_UTIL_SRC_FILES ${PROJECT_SOURCE_DIR}/src/utils/helper.cpp)
 ## Build Application Replay Sample
 set_source_files_properties(profiler/application_replay_sample.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
 hip_add_executable(profiler_application_replay profiler/application_replay_sample.cpp ${ROCPROFILER_UTIL_SRC_FILES})
-target_include_directories(profiler_application_replay PRIVATE ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/inc ${CMAKE_CURRENT_SOURCE_DIR}/common)
-target_link_libraries(profiler_application_replay PRIVATE ${ROCPROFILER_TARGET} amd_comgr)
+target_include_directories(profiler_application_replay PRIVATE ${PROJECT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/common)
+target_link_libraries(profiler_application_replay PRIVATE rocprofiler-v2 amd_comgr)
 target_link_options(profiler_application_replay PRIVATE "-Wl,--build-id=md5")
 add_dependencies(samples profiler_application_replay)
 install(TARGETS profiler_application_replay RUNTIME DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/samples COMPONENT samples)
@@ -60,8 +60,8 @@ install(TARGETS profiler_application_replay RUNTIME DESTINATION ${CMAKE_INSTALL_
 ## Build Kernel Replay Sample
 set_source_files_properties(profiler/kernel_replay_sample.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
 hip_add_executable(profiler_kernel_replay profiler/kernel_replay_sample.cpp ${ROCPROFILER_UTIL_SRC_FILES})
-target_include_directories(profiler_kernel_replay PRIVATE ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/inc ${CMAKE_CURRENT_SOURCE_DIR}/common)
-target_link_libraries(profiler_kernel_replay PRIVATE ${ROCPROFILER_TARGET} amd_comgr)
+target_include_directories(profiler_kernel_replay PRIVATE ${PROJECT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/common)
+target_link_libraries(profiler_kernel_replay PRIVATE rocprofiler-v2 amd_comgr)
 target_link_options(profiler_kernel_replay PRIVATE "-Wl,--build-id=md5")
 add_dependencies(samples profiler_kernel_replay)
 install(TARGETS profiler_kernel_replay RUNTIME DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/samples COMPONENT samples)
@@ -69,17 +69,17 @@ install(TARGETS profiler_kernel_replay RUNTIME DESTINATION ${CMAKE_INSTALL_DATAR
 ## Build User Replay Sample
 set_source_files_properties(profiler/user_replay_sample.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
 hip_add_executable(profiler_user_replay profiler/user_replay_sample.cpp ${ROCPROFILER_UTIL_SRC_FILES})
-target_include_directories(profiler_user_replay PRIVATE ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/inc ${CMAKE_CURRENT_SOURCE_DIR}/common)
+target_include_directories(profiler_user_replay PRIVATE ${PROJECT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/common)
 target_link_options(profiler_user_replay PRIVATE "-Wl,--build-id=md5")
-target_link_libraries(profiler_user_replay PRIVATE ${ROCPROFILER_TARGET} amd_comgr)
+target_link_libraries(profiler_user_replay PRIVATE rocprofiler-v2 amd_comgr)
 add_dependencies(samples profiler_user_replay)
 install(TARGETS profiler_user_replay RUNTIME DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/samples COMPONENT samples)
 
 ## Build Device Profiling Sample
 set_source_files_properties(profiler/device_profiling_sample.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
 hip_add_executable(profiler_device_profiling profiler/device_profiling_sample.cpp ${ROCPROFILER_UTIL_SRC_FILES})
-target_include_directories(profiler_device_profiling PRIVATE ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/inc ${CMAKE_CURRENT_SOURCE_DIR}/common)
-target_link_libraries(profiler_device_profiling PRIVATE ${ROCPROFILER_TARGET} amd_comgr)
+target_include_directories(profiler_device_profiling PRIVATE ${PROJECT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/common)
+target_link_libraries(profiler_device_profiling PRIVATE rocprofiler-v2 amd_comgr)
 target_link_options(profiler_device_profiling PRIVATE "-Wl,--build-id=md5")
 add_dependencies(samples profiler_device_profiling)
 install(TARGETS profiler_device_profiling RUNTIME DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/samples COMPONENT samples)
@@ -87,8 +87,8 @@ install(TARGETS profiler_device_profiling RUNTIME DESTINATION ${CMAKE_INSTALL_DA
 ## Build Counters Sampling example
 set_source_files_properties(counters_sampler/pcie_counters_example.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
 hip_add_executable(pcie_counters_sampler counters_sampler/pcie_counters_example.cpp ${ROCPROFILER_UTIL_SRC_FILES})
-target_include_directories(pcie_counters_sampler PRIVATE ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/inc ${CMAKE_CURRENT_SOURCE_DIR}/common)
-target_link_libraries(pcie_counters_sampler PRIVATE ${ROCPROFILER_TARGET} systemd amd_comgr)
+target_include_directories(pcie_counters_sampler PRIVATE ${PROJECT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/common)
+target_link_libraries(pcie_counters_sampler PRIVATE rocprofiler-v2 systemd amd_comgr)
 target_link_options(pcie_counters_sampler PRIVATE "-Wl,--build-id=md5")
 add_dependencies(samples pcie_counters_sampler)
 install(TARGETS pcie_counters_sampler RUNTIME DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/samples COMPONENT samples)
@@ -96,8 +96,8 @@ install(TARGETS pcie_counters_sampler RUNTIME DESTINATION ${CMAKE_INSTALL_DATARO
 ## Build XGMI Counters Sampling example
 set_source_files_properties(counters_sampler/xgmi_counters_sampler_example.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
 hip_add_executable(xgmi_counters_sampler counters_sampler/xgmi_counters_sampler_example.cpp ${ROCPROFILER_UTIL_SRC_FILES})
-target_include_directories(xgmi_counters_sampler PRIVATE ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/inc ${CMAKE_CURRENT_SOURCE_DIR}/common)
-target_link_libraries(xgmi_counters_sampler PRIVATE ${ROCPROFILER_TARGET} systemd amd_comgr)
+target_include_directories(xgmi_counters_sampler PRIVATE ${PROJECT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/common)
+target_link_libraries(xgmi_counters_sampler PRIVATE rocprofiler-v2 systemd amd_comgr)
 target_link_options(xgmi_counters_sampler PRIVATE "-Wl,--build-id=md5")
 add_dependencies(samples xgmi_counters_sampler)
 install(TARGETS xgmi_counters_sampler RUNTIME DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/samples COMPONENT samples)
@@ -111,8 +111,8 @@ install(TARGETS xgmi_counters_sampler RUNTIME DESTINATION ${CMAKE_INSTALL_DATARO
 ## Build HIP/HSA Trace Sample
 set_source_files_properties(tracer/sample.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
 hip_add_executable(tracer_hip_hsa tracer/sample.cpp ${ROCPROFILER_UTIL_SRC_FILES})
-target_include_directories(tracer_hip_hsa PRIVATE ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/inc ${CMAKE_CURRENT_SOURCE_DIR}/common)
-target_link_libraries(tracer_hip_hsa PRIVATE ${ROCPROFILER_TARGET} amd_comgr)
+target_include_directories(tracer_hip_hsa PRIVATE ${PROJECT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/common)
+target_link_libraries(tracer_hip_hsa PRIVATE rocprofiler-v2 amd_comgr)
 target_link_options(tracer_hip_hsa PRIVATE "-Wl,--build-id=md5")
 add_dependencies(samples tracer_hip_hsa)
 install(TARGETS tracer_hip_hsa RUNTIME DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/samples COMPONENT samples)
@@ -120,8 +120,8 @@ install(TARGETS tracer_hip_hsa RUNTIME DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/
 ## Build HIP/HSA Trace with async output api trace data Sample
 set_source_files_properties(tracer/sample_async.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
 hip_add_executable(tracer_hip_hsa_async tracer/sample_async.cpp ${ROCPROFILER_UTIL_SRC_FILES})
-target_include_directories(tracer_hip_hsa_async PRIVATE ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/inc ${CMAKE_CURRENT_SOURCE_DIR}/common)
-target_link_libraries(tracer_hip_hsa_async PRIVATE ${ROCPROFILER_TARGET} amd_comgr)
+target_include_directories(tracer_hip_hsa_async PRIVATE ${PROJECT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/common)
+target_link_libraries(tracer_hip_hsa_async PRIVATE rocprofiler-v2 amd_comgr)
 target_link_options(tracer_hip_hsa_async PRIVATE "-Wl,--build-id=md5")
 add_dependencies(samples tracer_hip_hsa_async)
 install(TARGETS tracer_hip_hsa_async RUNTIME DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/samples COMPONENT samples)
@@ -150,7 +150,7 @@ check_c_source_compiles("
 
   target_link_libraries(pc_sampling_code_printing
   PRIVATE
-  ${ROCPROFILER_TARGET}
+  rocprofiler-v2
   rocm-dbgapi
   ${LIBELF_LIBRARIES}
   ${LIBDW_LIBRARIES}

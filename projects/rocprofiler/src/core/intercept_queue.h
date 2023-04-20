@@ -36,7 +36,7 @@ THE SOFTWARE.
 #include "core/proxy_queue.h"
 #include "core/tracker.h"
 #include "core/types.h"
-#include "inc/rocprofiler.h"
+#include "rocprofiler.h"
 #include "util/hsa_rsrc_factory.h"
 
 namespace rocprofiler {

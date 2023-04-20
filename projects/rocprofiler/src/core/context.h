@@ -23,7 +23,7 @@ THE SOFTWARE.
 #ifndef SRC_CORE_CONTEXT_H_
 #define SRC_CORE_CONTEXT_H_
 
-#include "inc/rocprofiler.h"
+#include "rocprofiler.h"
 
 #include <hsa/hsa.h>
 #include <hsa/hsa_ext_amd.h>

@@ -29,6 +29,8 @@
 
 #include <fcntl.h>
 
+#include "rocprofiler.h"
+
 #include "gfxip.h"
 #include "src/utils/helper.h"
 

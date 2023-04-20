@@ -25,7 +25,7 @@
 #include <variant>
 #include <vector>
 
-#include "inc/rocprofiler.h"
+#include "rocprofiler.h"
 
 #define ASSERTM(exp, msg) assert(((void)msg, exp))
 

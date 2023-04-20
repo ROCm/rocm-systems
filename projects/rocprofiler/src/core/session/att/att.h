@@ -28,7 +28,7 @@
 #include <string>
 #include <vector>
 
-#include "inc/rocprofiler.h"
+#include "rocprofiler.h"
 
 namespace rocmtools {
 

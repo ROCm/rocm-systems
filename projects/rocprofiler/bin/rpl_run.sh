@@ -61,7 +61,7 @@ unset ROCPROFILER_SESS
 
 # Profiler environment
 # Loading of profiler library by HSA runtime
-MY_HSA_TOOLS_LIB="$RPL_PATH/librocprofiler64.so"
+MY_HSA_TOOLS_LIB="$RPL_PATH/librocprofiler64.so.1"
 # Loading of the test tool by ROC Profiler
 export ROCP_TOOL_LIB=$TLIB_PATH/librocprof-tool.so
 # Enabling HSA dispatches intercepting by ROC PRofiler
@@ -272,16 +272,16 @@ run() {
 
   if [ "$HSA_TRACE" = 1 ] ; then
     export ROCTRACER_DOMAIN=$API_TRACE":hsa"
-    MY_HSA_TOOLS_LIB="$MY_HSA_TOOLS_LIB $ROCM_LIB_PATH/libroctracer64.so $TTLIB_PATH/libroctracer_tool.so"
+    MY_HSA_TOOLS_LIB="$MY_HSA_TOOLS_LIB $ROCM_LIB_PATH/libroctracer64.so.4 $TTLIB_PATH/libroctracer_tool.so"
   elif [ -n "$API_TRACE" ] ; then
     export ROCTRACER_DOMAIN=$API_TRACE
     OUTPUT_LIST="$ROCP_OUTPUT_DIR/"
-    MY_HSA_TOOLS_LIB="$ROCM_LIB_PATH/libroctracer64.so $TTLIB_PATH/libroctracer_tool.so"
+    MY_HSA_TOOLS_LIB="$ROCM_LIB_PATH/libroctracer64.so.4 $TTLIB_PATH/libroctracer_tool.so"
   fi
 
   if [ "$ROCP_STATS_OPT" = 1 ] ; then
     if [ "$ROCTRACER_DOMAIN" = ":hip" ] ; then
-      MY_HSA_TOOLS_LIB="$ROCM_LIB_PATH/libroctracer64.so $TTLIB_PATH/libhip_stats.so"
+      MY_HSA_TOOLS_LIB="$ROCM_LIB_PATH/libroctracer64.so.4 $TTLIB_PATH/libhip_stats.so"
     else
       error_message="ROCP_STATS_OPT is only available with --hip-trace option"
       echo $error_message

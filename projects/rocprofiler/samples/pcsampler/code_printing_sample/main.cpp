@@ -33,7 +33,7 @@
 #include <hip/hip_runtime.h>
 #include <hsa/hsa.h>
 
-#include <rocprofiler.h>
+#include <rocprofiler/v2/rocprofiler.h>
 
 #include "program.hpp"
 #include "program_options.hpp"

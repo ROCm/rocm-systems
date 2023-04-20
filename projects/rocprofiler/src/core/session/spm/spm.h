@@ -10,7 +10,7 @@
 #include "hsa/hsa_ext_amd.h"
 #include "src/core/hsa/packets/packets_generator.h"
 #include "src/utils/exception.h"
-#include "inc/rocprofiler.h"
+#include "rocprofiler.h"
 
 
 namespace rocmtools {

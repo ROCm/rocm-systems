@@ -27,7 +27,7 @@
 #include <string>
 #include <vector>
 
-#include "inc/rocprofiler.h"
+#include "rocprofiler.h"
 #include "src/roctracer.h"
 
 typedef bool is_filtered_domain_t;

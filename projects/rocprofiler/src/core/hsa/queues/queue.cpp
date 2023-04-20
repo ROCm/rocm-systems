@@ -27,7 +27,6 @@
 #include <utility>
 #include <algorithm>
 
-#include "rocprofiler.h"
 #include "src/api/rocmtool.h"
 #include "src/core/hsa/packets/packets_generator.h"
 #include "src/core/hsa/hsa_support.h"

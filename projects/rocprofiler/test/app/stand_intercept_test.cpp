@@ -30,7 +30,7 @@ THE SOFTWARE.
 #include "ctrl/run_kernel.h"
 #include "ctrl/test_aql.h"
 #include "ctrl/test_hsa.h"
-#include "inc/rocprofiler.h"
+#include "rocprofiler/rocprofiler.h"
 #include "dummy_kernel/dummy_kernel.h"
 #include "simple_convolution/simple_convolution.h"
 #include "util/test_assert.h"

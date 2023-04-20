@@ -32,7 +32,7 @@
 #include <variant>
 #include <vector>
 
-#include "inc/rocprofiler.h"
+#include "rocprofiler.h"
 #include "src/core/memory/generic_buffer.h"
 #include "src/core/session/filter.h"
 #include "profiler/profiler.h"

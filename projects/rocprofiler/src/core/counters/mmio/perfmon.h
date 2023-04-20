@@ -21,7 +21,7 @@
 #ifndef SRC_CORE_COUNTERS_PERFMON_H
 #define SRC_CORE_COUNTERS_PERFMON_H
 
-#include "inc/rocprofiler.h"
+#include "rocprofiler.h"
 #include "mmio.h"
 #include <vector>
 

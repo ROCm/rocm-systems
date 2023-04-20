@@ -1,5 +1,5 @@
 #include <hip/hip_runtime.h>
-#include <rocprofiler.h>
+#include <rocprofiler/v2/rocprofiler.h>
 
 #include <cxxabi.h>
 #include <stdarg.h>

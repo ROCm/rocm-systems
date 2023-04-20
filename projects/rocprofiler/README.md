@@ -13,7 +13,9 @@ Library supports GFX8/GFX9.
 
 The library source tree:
  - doc  - Documentation
- - inc/rocprofiler.h - Library public API
+ - include/rocprofiler/rocprofiler.h - Library public API
+ - include/rocprofiler/v2/rocprofiler.h - V2 Beta Library public API
+ - include/rocprofiler/v2/rocprofiler_plugins.h - V2 Beta Tool's Plugins Library public API
  - src  - Library sources
    - core - Library API sources
    - util - Library utils sources

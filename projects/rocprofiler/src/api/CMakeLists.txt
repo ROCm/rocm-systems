@@ -134,15 +134,17 @@ set(GENERATED_SOURCES
 find_path(PCIACCESS_INCLUDE_DIR pciaccess.h REQUIRED)
 find_library(PCIACCESS_LIBRARIES pciaccess REQUIRED)
 
-set(PUBLIC_HEADERS
-  rocprofiler_plugin.h
-  rocprofiler.h)
+set(PUBLIC_HEADERS rocprofiler.h)
 
 foreach(header ${PUBLIC_HEADERS})
-  install(FILES ${PROJECT_SOURCE_DIR}/inc/${header}
+  install(FILES ${PROJECT_SOURCE_DIR}/include/rocprofiler/${header}
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}
     COMPONENT dev)
 endforeach()
+
+install(DIRECTORY ${PROJECT_SOURCE_DIR}/include/rocprofiler/v2
+        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}
+        COMPONENT dev)
 
 # Getting Source files for ROCProfiler, Hardware, HSA, Memory, Session, Counters, Utils
 file(GLOB ROCPROFILER_SRC_FILES ${CMAKE_CURRENT_SOURCE_DIR}/*.cpp)
@@ -187,8 +189,31 @@ file(GLOB CORE_UTILS_SRC_FILES ${CORE_UTILS_DIR}/*.cpp)
 set(CORE_PC_SAMPLING_DIR ${PROJECT_SOURCE_DIR}/src/pcsampler)
 file(GLOB CORE_PC_SAMPLING_FILES ${CORE_PC_SAMPLING_DIR}/core/*.cpp ${CORE_PC_SAMPLING_DIR}/gfxip/*.cpp ${CORE_PC_SAMPLING_DIR}/session/*.cpp)
 
+
+#### V1 Library
+# Compiling/Installing ROCProfiler API V1
+add_library(${ROCPROFILER_TARGET} SHARED ${OLD_LIB_SRC})
+set_target_properties(${ROCPROFILER_TARGET} PROPERTIES
+  CXX_VISIBILITY_PRESET hidden
+  VERSION 1.0.0
+  SOVERSION 1)
+# As ROCR hsa_api_trace header file is not usable unless AMD_INTERNAL_BUILD is defined
+target_compile_definitions(${ROCPROFILER_TARGET} PUBLIC AMD_INTERNAL_BUILD)
+target_include_directories(${ROCPROFILER_TARGET}
+  PUBLIC
+  $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include/rocprofiler>
+  PRIVATE
+  ${LIB_DIR} ${ROOT_DIR}
+  ${PROJECT_SOURCE_DIR}/include/rocprofiler)
+target_link_libraries(${ROCPROFILER_TARGET} PRIVATE ${AQLPROFILE_LIB} hsa-runtime64::hsa-runtime64 c stdc++)
+## Install libraries: Non versioned lib file in dev package
+# install ( TARGETS ${ROCPROFILER_TARGET} LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT dev NAMELINK_COMPONENT runtime)
+install ( TARGETS ${ROCPROFILER_TARGET} LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT runtime NAMELINK_SKIP)
+# install ( TARGETS ${ROCPROFILER_TARGET} LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT asan)
+
+#### V2 Library
 # Compiling/Installing ROCProfiler API
-add_library(${ROCPROFILER_TARGET} SHARED 
+add_library(rocprofiler-v2 SHARED
   ${ROCPROFILER_SRC_FILES}
   ${ROCPROFILER_CLASS_SRC_FILES}
   ${ROCPROFILER_PROFILER_SRC_FILES}
@@ -211,47 +236,54 @@ add_library(${ROCPROFILER_TARGET} SHARED
   ${ROCPROFILER_ROCTRACER_SRC_FILES}
   ${GENERATED_SOURCES}
   ${CORE_COUNTERS_SRC_FILES}
-  ${CORE_PC_SAMPLING_FILES}
-  ${OLD_LIB_SRC})
-
-set_target_properties(${ROCPROFILER_TARGET} PROPERTIES
+  ${CORE_PC_SAMPLING_FILES})
+set_target_properties(rocprofiler-v2 PROPERTIES
   CXX_VISIBILITY_PRESET hidden
   DEFINE_SYMBOL "ROCPROFILER_EXPORTS"
   LINK_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/exportmap
+  OUTPUT_NAME rocprofiler64
+  LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/v2
   VERSION ${PROJECT_VERSION}
   SOVERSION ${PROJECT_VERSION_MAJOR})
-
-target_compile_definitions(${ROCPROFILER_TARGET}
-  PUBLIC AMD_INTERNAL_BUILD
-  PRIVATE PROF_API_IMPL HIP_PROF_HIP_API_STRING=1 __HIP_PLATFORM_AMD__=1)
-
-target_include_directories(${ROCPROFILER_TARGET}
+target_compile_definitions(rocprofiler-v2
+  # As ROCR hsa_api_trace header file is not usable unless AMD_INTERNAL_BUILD is defined
+  PRIVATE AMD_INTERNAL_BUILD
+  PROF_API_IMPL HIP_PROF_HIP_API_STRING=1 __HIP_PLATFORM_AMD__=1)
+target_include_directories(rocprofiler-v2
   PUBLIC
-  ${ROCM_PATH}/include
   ${HIP_INCLUDE_DIRECTORIES} ${HSA_RUNTIME_INCLUDE_DIRECTORIES}
   $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
-  $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/tools>
-  $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/inc>
+  $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include/rocprofiler/v2>
+  $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
   PRIVATE
   ${LIB_DIR} ${ROOT_DIR}
   ${CMAKE_CURRENT_BINARY_DIR}
   ${PROJECT_SOURCE_DIR}
-  ${PROJECT_SOURCE_DIR}/tools
-  ${PROJECT_SOURCE_DIR}/inc)
-
+  ${PROJECT_SOURCE_DIR}/tools)
 if(ASAN)
-  target_compile_options(${ROCPROFILER_TARGET} PRIVATE -fsanitize=address)
-  target_link_options(${ROCPROFILER_TARGET} PRIVATE -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/exportmap -Wl,--no-undefined,-fsanitize=address)
-  target_link_libraries(${ROCPROFILER_TARGET} PRIVATE ${AQLPROFILE_LIB} hsa-runtime64::hsa-runtime64 Threads::Threads atomic asan dl c stdc++ stdc++fs amd_comgr ${PCIACCESS_LIBRARIES})
+  target_compile_options(rocprofiler-v2 PRIVATE -fsanitize=address)
+  target_link_options(rocprofiler-v2 PRIVATE -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/exportmap -Wl,--no-undefined,-fsanitize=address)
+  target_link_libraries(rocprofiler-v2 PRIVATE ${AQLPROFILE_LIB} hsa-runtime64::hsa-runtime64 Threads::Threads atomic asan dl c stdc++ stdc++fs amd_comgr ${PCIACCESS_LIBRARIES})
 else()
-  target_link_options(${ROCPROFILER_TARGET} PRIVATE -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/exportmap -Wl,--no-undefined)
-  target_link_libraries(${ROCPROFILER_TARGET} PRIVATE ${AQLPROFILE_LIB} hsa-runtime64::hsa-runtime64 Threads::Threads atomic dl c stdc++ stdc++fs amd_comgr ${PCIACCESS_LIBRARIES})
+  target_link_options(rocprofiler-v2 PRIVATE -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/exportmap -Wl,--no-undefined)
+  target_link_libraries(rocprofiler-v2 PRIVATE ${AQLPROFILE_LIB} hsa-runtime64::hsa-runtime64 Threads::Threads atomic dl c stdc++ stdc++fs amd_comgr ${PCIACCESS_LIBRARIES})
 endif()
-
 ## Install libraries: Non versioned lib file in dev package
-install ( TARGETS ${ROCPROFILER_TARGET} LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT dev NAMELINK_ONLY )
-install ( TARGETS ${ROCPROFILER_TARGET} LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT runtime NAMELINK_SKIP )
-install ( TARGETS ${ROCPROFILER_TARGET} LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT asan )
+# install(TARGETS rocprofiler-v2 LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT dev)
+install(TARGETS rocprofiler-v2 LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT runtime NAMELINK_SKIP)
+# install(TARGETS rocprofiler-v2 LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT asan)
+
+file(CONFIGURE OUTPUT ${CMAKE_BINARY_DIR}/librocprofiler64.so
+  CONTENT "OUTPUT_FORMAT(elf64-x86-64)\nINPUT(librocprofiler64.so.1)")
+install(FILES ${CMAKE_BINARY_DIR}/librocprofiler64.so DESTINATION ${CMAKE_INSTALL_LIBDIR}
+  PERMISSIONS OWNER_READ OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
+  COMPONENT runtime)
+
+file(CONFIGURE OUTPUT ${CMAKE_BINARY_DIR}/librocprofiler64v2.so
+  CONTENT "OUTPUT_FORMAT(elf64-x86-64)\nINPUT(librocprofiler64.so.${PROJECT_VERSION_MAJOR})")
+install(FILES ${CMAKE_BINARY_DIR}/librocprofiler64v2.so DESTINATION ${CMAKE_INSTALL_LIBDIR}
+  PERMISSIONS OWNER_READ OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
+  COMPONENT runtime)
 
 configure_file(${PROJECT_SOURCE_DIR}/src/core/counters/metrics/basic_counters.xml ${PROJECT_BINARY_DIR}/counters/basic_counters.xml COPYONLY)
 configure_file(${PROJECT_SOURCE_DIR}/src/core/counters/metrics/derived_counters.xml ${PROJECT_BINARY_DIR}/counters/derived_counters.xml COPYONLY)

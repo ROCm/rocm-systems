@@ -23,7 +23,7 @@ THE SOFTWARE.
 #ifndef SRC_CORE_PROFILE_H_
 #define SRC_CORE_PROFILE_H_
 
-#include "inc/rocprofiler.h"
+#include "rocprofiler.h"
 
 #include <hsa/hsa.h>
 #include <vector>

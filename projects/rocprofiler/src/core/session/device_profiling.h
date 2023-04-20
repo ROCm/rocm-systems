@@ -21,7 +21,7 @@
 #ifndef SRC_CORE_SESSION_DEVICE_PROFILING_H_
 #define SRC_CORE_SESSION_DEVICE_PROFILING_H_
 
-#include <rocprofiler.h>
+#include "rocprofiler.h"
 #include "src/core/hsa/packets/packets_generator.h"
 #include <mutex>
 // #include "src/core/counters/rdc/rdc_metrics.h"

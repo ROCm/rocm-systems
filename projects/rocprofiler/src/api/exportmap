@@ -1,48 +1,9 @@
-ROCPROFILER_8.0 {
+ROCPROFILER_9.0 {
 global: OnLoad;
         OnUnload;
         rocprofiler_version_major;
         rocprofiler_version_minor;
-        rocprofiler_error_string;
-        rocprofiler_open;
-        rocprofiler_add_feature;
-        rocprofiler_features_set_open;
-        rocprofiler_close;
-        rocprofiler_reset;
-        rocprofiler_get_agent;
-        rocprofiler_get_time;
-        rocprofiler_set_queue_callbacks;
-        rocprofiler_remove_queue_callbacks;
-        rocprofiler_start_queue_callbacks;
-        rocprofiler_stop_queue_callbacks;
-        rocprofiler_start;
-        rocprofiler_stop;
-        rocprofiler_read;
-        rocprofiler_get_data;
-        rocprofiler_group_count;
-        rocprofiler_get_group;
-        rocprofiler_group_start;
-        rocprofiler_group_stop;
-        rocprofiler_group_read;
-        rocprofiler_group_get_data;
-        rocprofiler_get_metrics;
-        rocprofiler_iterate_trace_data;
-        rocprofiler_get_info;
-        rocprofiler_iterate_info;
-        rocprofiler_query_info;
-        rocprofiler_queue_create_profiled;
-        rocprofiler_pool_open;
-        rocprofiler_pool_close;
-        rocprofiler_pool_fetch;
-        rocprofiler_pool_release;
-        rocprofiler_pool_iterate;
-        rocprofiler_pool_flush;
-        rocprofiler_set_hsa_callbacks;
-local:  *;
-};
-
-ROCPROFILER_9.0 {
-global: HSA_AMD_TOOL_PRIORITY;
+        HSA_AMD_TOOL_PRIORITY;
         rocprofiler_error_str;
         rocprofiler_initialize;
         rocprofiler_finalize;
@@ -85,4 +46,5 @@ global: HSA_AMD_TOOL_PRIORITY;
         rocprofiler_device_profiling_session_poll;
         rocprofiler_device_profiling_session_stop;
         rocprofiler_device_profiling_session_destroy;
-} ROCPROFILER_8.0;
+local:  *;
+};

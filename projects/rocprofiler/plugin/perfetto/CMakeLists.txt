@@ -14,13 +14,13 @@ target_compile_definitions(perfetto_plugin
         __HIP_PLATFORM_HCC__=1)
 
 target_include_directories(perfetto_plugin
-        PRIVATE ${PROJECT_SOURCE_DIR}/inc ${PROJECT_SOURCE_DIR}
+        PRIVATE ${PROJECT_SOURCE_DIR}
         ${PROJECT_SOURCE_DIR}/plugin/perfetto/perfetto_sdk/sdk)
 
 target_link_options(perfetto_plugin
         PRIVATE -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/../exportmap -Wl,--no-undefined)
 
-target_link_libraries(perfetto_plugin PRIVATE ${ROCPROFILER_TARGET} Threads::Threads stdc++fs amd_comgr)
+target_link_libraries(perfetto_plugin PRIVATE rocprofiler-v2 Threads::Threads stdc++fs amd_comgr)
 
 install(TARGETS perfetto_plugin LIBRARY
         DESTINATION ${CMAKE_INSTALL_LIBDIR}/${PROJECT_NAME}

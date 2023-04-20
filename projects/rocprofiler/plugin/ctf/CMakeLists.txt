@@ -38,7 +38,6 @@ target_compile_definitions(ctf_plugin PRIVATE
                            __HIP_PLATFORM_HCC__=1
                            CTF_PLUGIN_METADATA_FILE_PATH="${CMAKE_INSTALL_PREFIX}/${METADATA_STREAM_FILE_DIR}/metadata")
 target_include_directories(ctf_plugin PRIVATE
-                           "${PROJECT_SOURCE_DIR}/inc"
                            "${PROJECT_SOURCE_DIR}"
                            "${CMAKE_BINARY_DIR}/src/api"
                            "${CMAKE_CURRENT_BINARY_DIR}")
@@ -46,7 +45,7 @@ target_link_options(ctf_plugin PRIVATE
                     "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/../exportmap"
                     -Wl,--no-undefined)
 target_link_libraries(ctf_plugin PRIVATE
-                      ${ROCPROFILER_TARGET}
+                      rocprofiler-v2
                       hsa-runtime64::hsa-runtime64
                       stdc++fs
                       dl)

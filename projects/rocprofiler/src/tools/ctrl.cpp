@@ -1,5 +1,5 @@
 #include <hsa/hsa.h>
-#include <rocprofiler.h>
+#include "rocprofiler.h"
 
 #include <cstdio>
 

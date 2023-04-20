@@ -30,7 +30,7 @@ THE SOFTWARE.
 #include <sstream>
 #include <vector>
 
-#include "inc/rocprofiler.h"
+#include "rocprofiler/rocprofiler.h"
 #include "util/hsa_rsrc_factory.h"
 
 #define PUBLIC_API __attribute__((visibility("default")))

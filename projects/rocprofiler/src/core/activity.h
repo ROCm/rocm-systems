@@ -1,13 +1,7 @@
 #ifndef _SRC_CORE_ACTIVITY_H
 #define _SRC_CORE_ACTIVITY_H
 
-#define ROCPROFILER_V1
-
-#ifdef ROCP_INTERNAL_BUILD
-#include "inc/rocprofiler.h"
-#else
-#include <rocprofiler/rocprofiler.h>
-#endif
+#include "rocprofiler.h"
 
 #include <stdint.h>
 

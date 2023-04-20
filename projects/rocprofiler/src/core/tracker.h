@@ -33,7 +33,7 @@ THE SOFTWARE.
 #include <mutex>
 
 #include "util/hsa_rsrc_factory.h"
-#include "inc/rocprofiler.h"
+#include "rocprofiler.h"
 #include "util/exception.h"
 #include "util/logger.h"
 

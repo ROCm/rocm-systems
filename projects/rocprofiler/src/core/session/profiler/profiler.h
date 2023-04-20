@@ -31,7 +31,7 @@
 #include <string>
 #include <vector>
 
-#include "inc/rocprofiler.h"
+#include "rocprofiler.h"
 #include "src/core/counters/basic/basic_counter.h"
 #include "src/core/counters/metrics/eval_metrics.h"
 

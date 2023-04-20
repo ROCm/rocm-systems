@@ -33,7 +33,7 @@
 #include "hip_ostream_ops.h"
 #include "hsa_ostream_ops.h"
 #include "hsa_prof_str.h"
-#include "inc/rocprofiler.h"
+#include "rocprofiler.h"
 #include "src/core/memory/generic_buffer.h"
 
 typedef struct {

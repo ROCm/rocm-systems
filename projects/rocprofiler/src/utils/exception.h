@@ -26,7 +26,7 @@
 #include <string>
 
 #include "helper.h"
-#include "inc/rocprofiler.h"
+#include "rocprofiler.h"
 
 // TODO(aelwazir): namespace rocmtool
 namespace rocmtools {

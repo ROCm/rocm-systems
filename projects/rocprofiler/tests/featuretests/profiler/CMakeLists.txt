@@ -55,7 +55,6 @@ set_target_properties(hip_helloworld PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJ
 target_link_options(hip_helloworld PRIVATE "-Wl,--build-id=md5")
 install(TARGETS hip_helloworld RUNTIME DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/tests/featuretests/profiler/apps COMPONENT tests)
 
-
 #hip_vectoradd
 set_source_files_properties(apps/vector_add_hip.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
 hip_add_executable(hip_vectoradd apps/vector_add_hip.cpp)
@@ -149,9 +148,9 @@ endforeach(target_id)
 add_custom_target(hsaco_targets DEPENDS ${HSACO_TARGET_LIST})
 
  add_executable(multiqueue_testapp  apps/multiqueue_testapp.cpp)
- target_include_directories(multiqueue_testapp PRIVATE ${PROJECT_SOURCE_DIR}  ${PROJECT_SOURCE_DIR}/inc ${PROJECT_SOURCE_DIR}/tests/featuretests/profiler)
+ target_include_directories(multiqueue_testapp PRIVATE ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/tests/featuretests/profiler)
 # Link test executable against gtest & gtest_main
- target_link_libraries(multiqueue_testapp PRIVATE ${ROCPROFILER_TARGET} hsa-runtime64::hsa-runtime64  GTest::gtest GTest::gtest_main stdc++fs Threads::Threads amd_comgr dl)
+ target_link_libraries(multiqueue_testapp PRIVATE rocprofiler-v2 hsa-runtime64::hsa-runtime64  GTest::gtest GTest::gtest_main stdc++fs Threads::Threads amd_comgr dl)
  add_dependencies(multiqueue_testapp hsaco_targets)
  add_dependencies(tests multiqueue_testapp )
  set_target_properties(multiqueue_testapp PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/tests/featuretests/profiler/apps")
@@ -179,7 +178,7 @@ target_include_directories(runFeatureTests PRIVATE  ${TEST_DIR}
  ${PROJECT_SOURCE_DIR}/tests/featuretests/profiler)
 
 # Link test executable against gtest & gtest_main
-target_link_libraries(runFeatureTests PRIVATE  ${ROCPROFILER_TARGET} ${ROCPROFILER_TARGET} hsa-runtime64::hsa-runtime64
+target_link_libraries(runFeatureTests PRIVATE rocprofiler-v2 hsa-runtime64::hsa-runtime64
                                               GTest::gtest GTest::gtest_main 
                                               Threads::Threads dl stdc++fs amd_comgr)
 add_dependencies(tests runFeatureTests)

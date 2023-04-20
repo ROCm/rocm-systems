@@ -20,7 +20,7 @@
 
 #ifndef SRC_CORE_MEMORY_GENERIC_BUFFER_H_
 #define SRC_CORE_MEMORY_GENERIC_BUFFER_H_
-#include "inc/rocprofiler.h"
+#include "rocprofiler.h"
 
 #include <bitset>
 #include <cassert>

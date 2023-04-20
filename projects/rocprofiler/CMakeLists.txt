@@ -516,8 +516,8 @@ if(DOXYGEN_FOUND)
     COMMAND make -C ${CMAKE_CURRENT_BINARY_DIR}/doc/latex pdf
     MAIN_DEPENDENCY ${DOXYGEN_OUT}
     ${DOXYGEN_IN}
-    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/inc/rocprofiler.h
-            ${CMAKE_CURRENT_SOURCE_DIR}/inc/rocprofiler_plugin.h
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/include/rocprofiler/v2/rocprofiler_plugin.h
+            ${CMAKE_CURRENT_SOURCE_DIR}/include/rocprofiler/v2/rocprofiler.h
     COMMENT "Generating documentation")
 
   add_custom_target(

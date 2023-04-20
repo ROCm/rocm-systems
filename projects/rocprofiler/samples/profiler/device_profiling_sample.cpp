@@ -3,7 +3,7 @@
 #include <thread>
 #include <iostream>
 
-#include "rocprofiler.h"
+#include <rocprofiler/v2/rocprofiler.h>
 
 int main(int argc, char** argv) {
   int poll_duration = 5;

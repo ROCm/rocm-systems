@@ -20,7 +20,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 *******************************************************************************/
 
-#include "inc/rocprofiler.h"
+#include "rocprofiler.h"
 
 #include <hsa/hsa.h>
 #include <string.h>
@@ -39,8 +39,6 @@ THE SOFTWARE.
 #include "util/exception.h"
 #include "util/hsa_rsrc_factory.h"
 #include "util/logger.h"
-#include "src/core/hsa/hsa_support.h"
-#include "src/utils/helper.h"
 
 #define PUBLIC_API __attribute__((visibility("default")))
 #define CONSTRUCTOR_API __attribute__((constructor))
@@ -380,9 +378,6 @@ std::atomic<util::Logger*> util::Logger::instance_{};
 
 CONTEXT_INSTANTIATE();
 
-static bool started{false};
-// #include "src/core/hsa/hsa_support.h"
-
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 // Public library methods
 //
@@ -398,11 +393,6 @@ ROCPROFILER_EXPORT extern const uint32_t HSA_AMD_TOOL_PRIORITY = 25;
 PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t failed_tool_count,
                        const char* const* failed_tool_names) {
   ONLOAD_TRACE_BEG();
-  if (started) rocmtools::fatal("HSA Tool started already!");
-  started = true;
-  if (!getenv("ROCP_TOOL_LIB") && !getenv("ROCP_HSA_INTERCEPT")) {
-    rocmtools::hsa_support::Initialize(table);
-  } else {
     rocprofiler::SaveHsaApi(table);
     rocprofiler::ProxyQueue::InitFactory();
 
@@ -469,20 +459,14 @@ PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t fa
     ONLOAD_TRACE("end intercept_mode(" << std::hex << intercept_env_value << ")"
                                        << " intercept_mode_mask(" << std::hex << intercept_mode_mask
                                        << ")" << std::dec);
-  }
   return true;
 }
 
 // HSA-runtime tool on-unload method
 PUBLIC_API void OnUnload() {
   ONLOAD_TRACE_BEG();
-  if (!started) rocmtools::fatal("HSA Tool hasn't started yet!");
-  if (!getenv("ROCP_TOOL_LIB") && !getenv("ROCP_HSA_INTERCEPT")) {
-    rocmtools::hsa_support::Finalize();
-  } else {
     rocprofiler::UnloadTool();
     rocprofiler::RestoreHsaApi();
-  }
   ONLOAD_TRACE_END();
 }
 

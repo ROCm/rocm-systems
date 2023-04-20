@@ -720,7 +720,7 @@ rocprofiler_device_profiling_session_destroy(rocprofiler_session_id_t session_id
 }
 
 
-// static bool started{false};
+static bool started{false};
 
 extern "C" {
 
@@ -729,27 +729,28 @@ extern "C" {
 // The HSA_AMD_TOOL_PRIORITY variable must be a constant value type
 // initialized by the loader itself, not by code during _init. 'extern const'
 // seems do that although that is not a guarantee.
-// ROCPROFILER_EXPORT extern const uint32_t HSA_AMD_TOOL_PRIORITY = 25;
+ROCPROFILER_EXPORT extern const uint32_t HSA_AMD_TOOL_PRIORITY = 25;
 
 /**
  * @brief Callback function called upon loading the HSA.
  * The function updates the core api table function pointers to point to the
  * interceptor functions in this file.
  */
-// ROCPROFILER_EXPORT bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
-//                              uint64_t failed_tool_count, const char* const* failed_tool_names) {
-//   if (started) rocmtools::fatal("HSA Tool started already!");
-//   started = true;
-//   rocmtools::hsa_support::Initialize(table);
-//   return true;
-// }
+ROCPROFILER_EXPORT bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
+                             uint64_t failed_tool_count, const char* const* failed_tool_names) {
+  if (started) rocmtools::fatal("HSA Tool started already!");
+  started = true;
+  rocmtools::hsa_support::Initialize(table);
+  return true;
+}
 
 /**
  * @brief Callback function upon unloading the HSA.
  */
-// ROCPROFILER_EXPORT void OnUnload() {
-//   if (!started) rocmtools::fatal("HSA Tool hasn't started yet!");
-//   rocmtools::hsa_support::Finalize();
-// }
+ROCPROFILER_EXPORT void OnUnload() {
+  if (!started) rocmtools::fatal("HSA Tool hasn't started yet!");
+  rocmtools::hsa_support::Finalize();
+  started=false;
+}
 
 }  // extern "C"
