@@ -11,3 +11,4 @@ tqdm
 dash-svg
 dash-bootstrap-components
 kaleido
+setuptools
