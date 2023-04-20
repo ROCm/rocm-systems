@@ -52,6 +52,7 @@ namespace {
 
 hsa_status_t hsa_executable_iteration_callback(hsa_executable_t executable, hsa_agent_t agent,
                                                hsa_executable_symbol_t symbol, void* args) {
+  
   hsa_symbol_kind_t type;
   rocmtools::hsa_support::GetCoreApiTable().hsa_executable_symbol_get_info_fn(
       symbol, HSA_EXECUTABLE_SYMBOL_INFO_TYPE, &type);
@@ -62,14 +63,21 @@ hsa_status_t hsa_executable_iteration_callback(hsa_executable_t executable, hsa_
     // TODO(aelwazir): to be removed if the HSA fixed the issue of corrupted
     // names overflowing the length given
     if (name_length > 1) {
-      char name[name_length + 1];
-      uint64_t kernel_object;
-      rocmtools::hsa_support::GetCoreApiTable().hsa_executable_symbol_get_info_fn(
-          symbol, HSA_EXECUTABLE_SYMBOL_INFO_NAME, name);
-      rocmtools::hsa_support::GetCoreApiTable().hsa_executable_symbol_get_info_fn(
-          symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT, &kernel_object);
-      std::string kernel_name = std::string(name).substr(0, name_length);
-      rocmtools::AddKernelName(kernel_object, kernel_name);
+      if(!(*static_cast<bool*>(args))) {
+        char name[name_length + 1];
+        uint64_t kernel_object;
+        rocmtools::hsa_support::GetCoreApiTable().hsa_executable_symbol_get_info_fn(
+            symbol, HSA_EXECUTABLE_SYMBOL_INFO_NAME, name);
+        rocmtools::hsa_support::GetCoreApiTable().hsa_executable_symbol_get_info_fn(
+            symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT, &kernel_object);
+        std::string kernel_name = std::string(name).substr(0, name_length);
+        rocmtools::AddKernelName(kernel_object, kernel_name);
+      } else {
+        uint64_t kernel_object;
+        rocmtools::hsa_support::GetCoreApiTable().hsa_executable_symbol_get_info_fn(
+            symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT, &kernel_object);
+        rocmtools::RemoveKernelName(kernel_object);
+      }
     }
   }
 
@@ -447,7 +455,7 @@ hsa_status_t CodeObjectCallback(hsa_executable_t executable,
   ReportActivity(ACTIVITY_DOMAIN_HSA_EVT, HSA_EVT_ID_CODEOBJ, &data);
 
   hsa_executable_iterate_agent_symbols(executable, data.codeobj.agent,
-                                       hsa_executable_iteration_callback, nullptr);
+                                       hsa_executable_iteration_callback, &(data.codeobj.unload));
 
   return HSA_STATUS_SUCCESS;
 }

@@ -63,6 +63,10 @@ void AddKernelName(uint64_t handle, std::string name) {
   std::lock_guard<std::mutex> lock(ksymbol_map_lock);
   ksymbols->emplace(handle, name);
 }
+void RemoveKernelName(uint64_t handle) {
+  std::lock_guard<std::mutex> lock(ksymbol_map_lock);
+  ksymbols->erase(handle);
+}
 std::string GetKernelNameFromKsymbols(uint64_t handle) {
   std::lock_guard<std::mutex> lock(ksymbol_map_lock);
   if(ksymbols->find(handle)!=ksymbols->end())
@@ -70,11 +74,39 @@ std::string GetKernelNameFromKsymbols(uint64_t handle) {
   else
     return "Unknown Kernel!";
 }
+
+static std::mutex kernel_names_map_lock;
+static std::map<std::string, std::vector<uint64_t>>* kernel_names;
+static std::atomic<bool> kernel_names_flag{true};
+void AddKernelNameWithDispatchID(std::string name, uint64_t id) {
+  std::lock_guard<std::mutex> lock(kernel_names_map_lock);
+  if(kernel_names->find(name) == kernel_names->end())
+    kernel_names->emplace(name, std::vector<uint64_t>());
+  kernel_names->at(name).push_back(id);
+}
+std::string GetKernelNameUsingDispatchID(uint64_t given_id) {
+  std::lock_guard<std::mutex> lock(kernel_names_map_lock);
+  for(auto kernel_name : (*kernel_names)) {
+    for(auto dispatch_id : kernel_name.second) {
+      if(dispatch_id == given_id)
+        return kernel_name.first;
+    }
+  }
+  return "Unknown Kernel!";
+}
+
 void InitKsymbols() {
   if (ksymbols_flag.load(std::memory_order_relaxed)) {
-    std::lock_guard<std::mutex> lock(ksymbol_map_lock);
-    ksymbols = new std::map<uint64_t, std::string>();
-    ksymbols_flag.exchange(false, std::memory_order_release);
+    {
+      std::lock_guard<std::mutex> lock(ksymbol_map_lock);
+      ksymbols = new std::map<uint64_t, std::string>();
+      ksymbols_flag.exchange(false, std::memory_order_release);
+    }
+    {
+      std::lock_guard<std::mutex> lock(kernel_names_map_lock);
+      kernel_names = new std::map<std::string, std::vector<uint64_t>>();
+      kernel_names_flag.exchange(false, std::memory_order_release);
+    }
   }
 }
 void FinitKsymbols() {
@@ -84,7 +116,15 @@ void FinitKsymbols() {
     delete ksymbols;
     ksymbols_flag.exchange(true, std::memory_order_release);
   }
+  if (!kernel_names_flag.load(std::memory_order_relaxed)) {
+    std::lock_guard<std::mutex> lock(kernel_names_map_lock);
+    kernel_names->clear();
+    delete kernel_names;
+    kernel_names_flag.exchange(true, std::memory_order_release);
+  }
 }
+
+
 
 struct kernel_descriptor_t {
   uint8_t reserved0[16];
@@ -416,7 +456,6 @@ bool AsyncSignalHandler(hsa_signal_value_t signal_value, void* data) {
       hsa_support::GetAmdExtTable().hsa_amd_profiling_get_dispatch_time_fn(
           queue_info_session->agent, pending.signal, &time);
       rocprofiler_record_profiler_t record{};
-      record.kernel_id = rocprofiler_kernel_id_t{pending.kernel_descriptor};
       record.gpu_id = rocprofiler_agent_id_t{
           (uint64_t)hsa_support::GetAgentInfo(queue_info_session->agent.handle).getIndex()};
       record.kernel_properties = pending.kernel_properties;
@@ -429,7 +468,8 @@ bool AsyncSignalHandler(hsa_signal_value_t signal_value, void* data) {
         AddRecordCounters(&record, pending);
       }
       record.header = {ROCPROFILER_PROFILER_RECORD,
-                       rocprofiler_record_id_t{GetROCMToolObj()->GetUniqueRecordId()}};
+                       rocprofiler_record_id_t{pending.kernel_descriptor}};
+      record.kernel_id = rocprofiler_kernel_id_t{pending.kernel_descriptor};
 
       if (pending.session_id.handle == 0) {
         pending.session_id = GetROCMToolObj()->GetCurrentSessionId();
@@ -509,7 +549,7 @@ bool AsyncSignalHandlerATT(hsa_signal_value_t /* signal */, void* data) {
         AddAttRecord(&record, queue_info_session->agent, pending);
       }
       record.header = {ROCPROFILER_ATT_TRACER_RECORD,
-                       rocprofiler_record_id_t{GetROCMToolObj()->GetUniqueRecordId()}};
+                       rocprofiler_record_id_t{pending.kernel_descriptor}};
 
       if (pending.session_id.handle == 0) {
         pending.session_id = GetROCMToolObj()->GetCurrentSessionId();
@@ -740,14 +780,16 @@ void WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t user_pkt
         rocprofiler_kernel_properties_t kernel_properties =
             set_kernel_properties(dispatch_packet, queue_info.GetGPUAgent());
         if (session) {
+          uint64_t record_id = GetROCMToolObj()->GetUniqueRecordId();
+          AddKernelNameWithDispatchID(GetKernelNameFromKsymbols(dispatch_packet.kernel_object), record_id);
           if (profiles && replay_mode_count > 0) {
             session->GetProfiler()->AddPendingSignals(
-                writer_id, dispatch_packet.kernel_object, dispatch_packet.completion_signal,
+                writer_id, record_id, dispatch_packet.completion_signal,
                 session_id, buffer_id, profile.first, profile.first->metrics_list.size(),
                 profile.second, kernel_properties, (uint32_t)syscall(__NR_gettid), user_pkt_index);
           } else {
             session->GetProfiler()->AddPendingSignals(
-                writer_id, dispatch_packet.kernel_object, dispatch_packet.completion_signal,
+                writer_id, record_id, dispatch_packet.completion_signal,
                 session_id, buffer_id, nullptr, 0, nullptr, kernel_properties,
                 (uint32_t)syscall(__NR_gettid), user_pkt_index);
           }
@@ -929,13 +971,15 @@ void WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t user_pkt
       // list to be processed by the signal interrupt
       rocprofiler_kernel_properties_t kernel_properties =
           set_kernel_properties(dispatch_packet, queue_info.GetGPUAgent());
+      uint64_t record_id = GetROCMToolObj()->GetUniqueRecordId();
+      AddKernelNameWithDispatchID(GetKernelNameFromKsymbols(dispatch_packet.kernel_object), record_id);
       if (session && profile) {
         session->GetAttTracer()->AddPendingSignals(
-            writer_id, dispatch_packet.kernel_object, dispatch_packet.completion_signal, session_id,
+            writer_id, record_id, dispatch_packet.completion_signal, session_id,
             buffer_id, profile, kernel_properties, (uint32_t)syscall(__NR_gettid), user_pkt_index);
       } else {
         session->GetAttTracer()->AddPendingSignals(
-            writer_id, dispatch_packet.kernel_object, dispatch_packet.completion_signal, session_id,
+            writer_id, record_id, dispatch_packet.completion_signal, session_id,
             buffer_id, nullptr, kernel_properties, (uint32_t)syscall(__NR_gettid), user_pkt_index);
       }
 

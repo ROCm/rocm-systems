@@ -199,7 +199,7 @@ size_t rocmtool::GetKernelInfoSize(rocprofiler_kernel_info_kind_t kind,
                                    rocprofiler_kernel_id_t kernel_id) {
   switch (kind) {
     case ROCPROFILER_KERNEL_NAME:
-      return GetKernelNameFromKsymbols(kernel_id.handle).size();
+      return GetKernelNameUsingDispatchID(kernel_id.handle).size();
     default:
       warning("The provided Kernel Kind is not yet supported!");
       return 0;
@@ -209,7 +209,7 @@ const char* rocmtool::GetKernelInfo(rocprofiler_kernel_info_kind_t kind,
                                     rocprofiler_kernel_id_t kernel_id) {
   switch (kind) {
     case ROCPROFILER_KERNEL_NAME:
-      return strdup(GetKernelNameFromKsymbols(kernel_id.handle).c_str());
+      return strdup(GetKernelNameUsingDispatchID(kernel_id.handle).c_str());
     default:
       warning("The provided Kernel Kind is not yet supported!");
       return "";

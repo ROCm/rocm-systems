@@ -42,6 +42,9 @@ namespace rocmtools {
 void InitKsymbols();
 void FinitKsymbols();
 void AddKernelName(uint64_t handle, std::string kernel_name);
+void RemoveKernelName(uint64_t handle);
+void AddKernelNameWithDispatchID(std::string name, uint64_t id);
+std::string GetKernelNameUsingDispatchID(uint64_t given_id);
 std::string GetKernelNameFromKsymbols(uint64_t handle);
 uint32_t GetCurrentActiveInterruptSignalsCount();
 
