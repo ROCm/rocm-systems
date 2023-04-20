@@ -278,16 +278,33 @@ class file_plugin_t {
       }
     }
     output_file_t* output_file = get_output_file(output_type_t::TRACER, tracer_record.domain);
-    *output_file << "Record [" << tracer_record.header.id.handle << "], Domain("
-                 << GetDomainName(tracer_record.domain) << "), Begin("
-                 << tracer_record.timestamps.begin.value;
-    if (tracer_record.domain != ACTIVITY_DOMAIN_ROCTX)
-      *output_file << "), End(" << tracer_record.timestamps.end.value;
-    *output_file << "), Correlation ID( " << tracer_record.correlation_id.value << ")";
-    if (tracer_record.domain == ACTIVITY_DOMAIN_ROCTX && roctx_id >= 0) *output_file << ", ROCTX ID(" << roctx_id << ")";
-    if (tracer_record.domain == ACTIVITY_DOMAIN_ROCTX && roctx_message.size() > 1) *output_file << ", ROCTX Message(" << roctx_message << ")";
-    if (function_name.size() > 1) *output_file << ", Function(" << function_name << ")";
-    if (kernel_name.size() > 1) *output_file << ", Kernel Name(" << kernel_name.c_str() << ")";
+    *output_file << "Record(" << tracer_record.header.id.handle << "), Domain("
+                 << GetDomainName(tracer_record.domain) << "),";
+    if (tracer_record.domain == ACTIVITY_DOMAIN_ROCTX && roctx_id >= 0) *output_file << " ROCTX_ID(" << roctx_id << "),";
+    if (tracer_record.domain == ACTIVITY_DOMAIN_ROCTX && roctx_message.size() > 1) *output_file << " ROCTX_Message(" << roctx_message << "),";
+    if (function_name.size() > 1) *output_file << " Function(" << function_name << "),";
+    if (kernel_name.size() > 1) *output_file << " Kernel_Name(" << kernel_name.c_str() << "),";
+    if (tracer_record.phase == ROCPROFILER_PHASE_NONE) {
+      *output_file << " Begin(" << tracer_record.timestamps.begin.value
+                   << "), End(" << tracer_record.timestamps.end.value << ")";
+    } else {
+      if(tracer_record.phase == ROCPROFILER_PHASE_ENTER && tracer_record.domain != ACTIVITY_DOMAIN_ROCTX){
+        rocprofiler_timestamp_t timestamp;
+        rocprofiler_get_timestamp(&timestamp);
+        *output_file << " Begin(" << timestamp.value << "),";
+      }
+      if(tracer_record.phase == ROCPROFILER_PHASE_ENTER && tracer_record.domain == ACTIVITY_DOMAIN_ROCTX) {
+        rocprofiler_timestamp_t timestamp;
+        rocprofiler_get_timestamp(&timestamp);
+        *output_file << " timestamp(" << timestamp.value << "),";
+      }
+      if (tracer_record.phase == ROCPROFILER_PHASE_EXIT) {
+        rocprofiler_timestamp_t timestamp;
+        rocprofiler_get_timestamp(&timestamp);
+        *output_file << " End(" << timestamp.value << "),";
+      }
+    }
+    *output_file << " Correlation_ID(" << tracer_record.correlation_id.value << ")";
     *output_file << std::endl;
   }
 

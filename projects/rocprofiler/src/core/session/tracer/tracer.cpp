@@ -183,11 +183,12 @@ size_t Tracer::GetHIPApiDataInfoSize(rocprofiler_tracer_hip_api_data_info_t kind
       return strlen(roctracer_op_string(ACTIVITY_DOMAIN_HIP_OPS, operation_id.id)) + 1;
     }
     case ROCPROFILER_HIP_STREAM_ID: {
-      std::lock_guard<std::mutex> lock(stream_ids_map_lock);
-      if (!stream_ids.empty() && stream_ids.find(operation_id.id) != stream_ids.end())
-        return std::to_string(stream_ids.at(operation_id.id).second).size() + 1;
-      else
-        return 0;
+      // std::lock_guard<std::mutex> lock(stream_ids_map_lock);
+      // if (!stream_ids.empty() && stream_ids.find(operation_id.id) != stream_ids.end())
+      //   return std::to_string(stream_ids.at(operation_id.id).second).size() + 1;
+      // else
+      //   return 0;
+      warning("Stream ID is not supported!");
     }
     case ROCPROFILER_HIP_API_DATA: {
       return api_data_id.size;
@@ -258,12 +259,13 @@ char* Tracer::GetHIPApiDataInfo(rocprofiler_tracer_hip_api_data_info_t kind,
       return const_cast<char*>(roctracer_op_string(ACTIVITY_DOMAIN_HIP_OPS, operation_id.id));
     }
     case ROCPROFILER_HIP_STREAM_ID: {
-      std::lock_guard<std::mutex> lock(stream_ids_map_lock);
-      if (!stream_ids.empty() && stream_ids.find(operation_id.id) != stream_ids.end())
-        return strdup(
-            const_cast<char*>(std::to_string(stream_ids.at(operation_id.id).second).c_str()));
-      else
-        return nullptr;
+      // std::lock_guard<std::mutex> lock(stream_ids_map_lock);
+      // if (!stream_ids.empty() && stream_ids.find(operation_id.id) != stream_ids.end())
+      //   return strdup(
+      //       const_cast<char*>(std::to_string(stream_ids.at(operation_id.id).second).c_str()));
+      // else
+      //   return nullptr;
+      warning("Stream ID is not supported!");
     }
     case ROCPROFILER_HIP_API_DATA: {
       return const_cast<char*>(reinterpret_cast<const char*>(api_data_id.handle));
@@ -284,7 +286,6 @@ void api_callback(activity_domain_t domain, uint32_t cid, const void* callback_d
     switch (domain) {
       case ACTIVITY_DOMAIN_ROCTX: {
         const roctx_api_data_t* data = reinterpret_cast<const roctx_api_data_t*>(callback_data);
-        // if (data->args.message) roctx_labels.emplace(data->args.id, data->args.message);
         args_data->user_sync_callback(
             rocprofiler_record_tracer_t{
                 rocprofiler_record_header_t{
@@ -296,7 +297,7 @@ void api_callback(activity_domain_t domain, uint32_t cid, const void* callback_d
                 rocprofiler_tracer_activity_correlation_id_t{0},
                 rocprofiler_record_header_timestamp_t{roctracer::hsa_support::timestamp_ns(),
                                                     rocprofiler_timestamp_t{0}},
-                0, 0, GetTid()},
+                0, 0, GetTid(), ROCPROFILER_PHASE_ENTER},
             args_data->session_id);
         break;
       }
@@ -304,7 +305,18 @@ void api_callback(activity_domain_t domain, uint32_t cid, const void* callback_d
         hsa_api_data_t* data =
             const_cast<hsa_api_data_t*>(reinterpret_cast<const hsa_api_data_t*>(callback_data));
         if (data->phase == ACTIVITY_API_PHASE_ENTER) {
-          *(data->phase_data) = roctracer::hsa_support::timestamp_ns().value;
+          args_data->user_sync_callback(
+              rocprofiler_record_tracer_t{
+                  rocprofiler_record_header_t{
+                      ROCPROFILER_TRACER_RECORD,
+                      rocprofiler_record_id_t{rocmtools::GetROCMToolObj()->GetUniqueRecordId()}},
+                  rocprofiler_tracer_external_id_t{0}, ACTIVITY_DOMAIN_HSA_API,
+                  rocprofiler_tracer_operation_id_t{cid},
+                  rocprofiler_tracer_api_data_handle_t{callback_data, sizeof(*data)},
+                  rocprofiler_tracer_activity_correlation_id_t{data->correlation_id},
+                  rocprofiler_record_header_timestamp_t{rocprofiler_timestamp_t{0}, rocprofiler_timestamp_t{0}},
+                  0, 0, GetTid(), ROCPROFILER_PHASE_ENTER},
+              args_data->session_id);
         } else {
           args_data->user_sync_callback(
               rocprofiler_record_tracer_t{
@@ -315,9 +327,9 @@ void api_callback(activity_domain_t domain, uint32_t cid, const void* callback_d
                   rocprofiler_tracer_operation_id_t{cid},
                   rocprofiler_tracer_api_data_handle_t{callback_data, sizeof(*data)},
                   rocprofiler_tracer_activity_correlation_id_t{data->correlation_id},
-                  rocprofiler_record_header_timestamp_t{rocprofiler_timestamp_t{*(data->phase_data)},
-                                                      roctracer::hsa_support::timestamp_ns()},
-                  0, 0, GetTid()},
+                  rocprofiler_record_header_timestamp_t{rocprofiler_timestamp_t{0},
+                                                      rocprofiler_timestamp_t{0}},
+                  0, 0, GetTid(), ROCPROFILER_PHASE_EXIT},
               args_data->session_id);
         }
         break;
@@ -326,32 +338,6 @@ void api_callback(activity_domain_t domain, uint32_t cid, const void* callback_d
         hip_api_data_t* data =
             const_cast<hip_api_data_t*>(reinterpret_cast<const hip_api_data_t*>(callback_data));
         if (data->phase == ACTIVITY_API_PHASE_ENTER) {
-          *(data->phase_data) = roctracer::hsa_support::timestamp_ns().value;
-        } else {
-          hipApiArgsInit((hip_api_id_t)cid, data);
-          std::string hip_api_data_string = hipApiString((hip_api_id_t)cid, data);
-          std::string start_str = "stream=";
-          int start = hip_api_data_string.find(start_str);
-          uint64_t stream_id = 0;
-          if (start >= 0) {
-            int end = hip_api_data_string.find(",", start);
-            std::string stream_id_str = hip_api_data_string.substr(start + start_str.length(), end);
-            std::stringstream ss;
-            ss << std::hex << stream_id_str;
-            ss >> stream_id;
-          }
-          {
-            std::lock_guard<std::mutex> lock(stream_ids_map_lock);
-            if (used_stream_ids.find(stream_id) == used_stream_ids.end()) {
-              uint64_t stream_generated_id = stream_count.fetch_add(1, std::memory_order_release);
-              used_stream_ids.emplace(stream_id, stream_generated_id);
-              stream_ids.emplace(data->correlation_id,
-                                 std::make_pair(stream_id, stream_generated_id));
-            } else {
-              stream_ids.emplace(data->correlation_id,
-                                 std::make_pair(stream_id, used_stream_ids.at(stream_id)));
-            }
-          }
           args_data->user_sync_callback(
               rocprofiler_record_tracer_t{
                   rocprofiler_record_header_t{
@@ -361,9 +347,48 @@ void api_callback(activity_domain_t domain, uint32_t cid, const void* callback_d
                   rocprofiler_tracer_operation_id_t{cid},
                   rocprofiler_tracer_api_data_handle_t{callback_data, sizeof(*data)},
                   rocprofiler_tracer_activity_correlation_id_t{data->correlation_id},
-                  rocprofiler_record_header_timestamp_t{rocprofiler_timestamp_t{*(data->phase_data)},
-                                                      roctracer::hsa_support::timestamp_ns()},
-                  0, 0, GetTid()},
+                  rocprofiler_record_header_timestamp_t{rocprofiler_timestamp_t{0},
+                                                      rocprofiler_timestamp_t{0}},
+                  0, 0, GetTid(), ROCPROFILER_PHASE_ENTER},
+              args_data->session_id);
+        } else {
+          // TODO(aelwazir): STREAM ID GET need to be removed
+          // hipApiArgsInit((hip_api_id_t)cid, data);
+          // std::string hip_api_data_string = hipApiString((hip_api_id_t)cid, data);
+          // std::string start_str = "stream=";
+          // int start = hip_api_data_string.find(start_str);
+          // uint64_t stream_id = 0;
+          // if (start >= 0) {
+          //   int end = hip_api_data_string.find(",", start);
+          //   std::string stream_id_str = hip_api_data_string.substr(start + start_str.length(), end);
+          //   std::stringstream ss;
+          //   ss << std::hex << stream_id_str;
+          //   ss >> stream_id;
+          // }
+          // {
+          //   std::lock_guard<std::mutex> lock(stream_ids_map_lock);
+          //   if (used_stream_ids.find(stream_id) == used_stream_ids.end()) {
+          //     uint64_t stream_generated_id = stream_count.fetch_add(1, std::memory_order_release);
+          //     used_stream_ids.emplace(stream_id, stream_generated_id);
+          //     stream_ids.emplace(data->correlation_id,
+          //                        std::make_pair(stream_id, stream_generated_id));
+          //   } else {
+          //     stream_ids.emplace(data->correlation_id,
+          //                        std::make_pair(stream_id, used_stream_ids.at(stream_id)));
+          //   }
+          // }
+          args_data->user_sync_callback(
+              rocprofiler_record_tracer_t{
+                  rocprofiler_record_header_t{
+                      ROCPROFILER_TRACER_RECORD,
+                      rocprofiler_record_id_t{rocmtools::GetROCMToolObj()->GetUniqueRecordId()}},
+                  rocprofiler_tracer_external_id_t{0}, ACTIVITY_DOMAIN_HIP_API,
+                  rocprofiler_tracer_operation_id_t{cid},
+                  rocprofiler_tracer_api_data_handle_t{callback_data, sizeof(*data)},
+                  rocprofiler_tracer_activity_correlation_id_t{data->correlation_id},
+                  rocprofiler_record_header_timestamp_t{rocprofiler_timestamp_t{0},
+                                                      rocprofiler_timestamp_t{0}},
+                  0, 0, GetTid(), ROCPROFILER_PHASE_EXIT},
               args_data->session_id);
         }
         break;

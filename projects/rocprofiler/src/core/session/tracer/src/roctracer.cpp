@@ -265,6 +265,7 @@ template <activity_domain_t domain> struct ApiTracer {
                 rocprofiler_timestamp_t{trace_data->phase_enter_timestamp},
                 hsa_support::timestamp_ns()};
             record.thread_id = rocprofiler_thread_id_t{GetTid()};
+            record.phase = ROCPROFILER_PHASE_NONE;
 
             if (auto external_id = ExternalCorrelationId()) {
               rocprofiler_record_tracer_t ext_record{};
@@ -275,6 +276,7 @@ template <activity_domain_t domain> struct ApiTracer {
               ext_record.correlation_id =
                   rocprofiler_tracer_activity_correlation_id_t{record.correlation_id};
               ext_record.external_id = rocprofiler_tracer_external_id_t{*external_id};
+              ext_record.phase = ROCPROFILER_PHASE_NONE;
               // Write the external correlation id record directly followed by the
               // activity record.
               rocmtools::GetROCMToolObj()
@@ -400,6 +402,7 @@ int TracerCallback(activity_domain_t domain, uint32_t operation_id, void* data) 
             rocprofiler_record.agent_id = rocprofiler_agent_id_t{(uint64_t)record->device_id};
             rocprofiler_record.queue_id = rocprofiler_queue_id_t{record->queue_id};
             rocprofiler_record.thread_id = rocprofiler_thread_id_t{GetTid()};
+            rocprofiler_record.phase = ROCPROFILER_PHASE_NONE;
             if (operation_id == HIP_OP_ID_DISPATCH && record->kernel_name != nullptr) {
               rocprofiler_record.api_data_handle.handle = strdup(record->kernel_name);
               rocprofiler_record.api_data_handle.size = (strlen(record->kernel_name) + 1);
@@ -462,6 +465,7 @@ int TracerCallback(activity_domain_t domain, uint32_t operation_id, void* data) 
             rocprofiler_record.agent_id = rocprofiler_agent_id_t{(uint64_t)record->device_id};
             rocprofiler_record.queue_id = rocprofiler_queue_id_t{record->queue_id};
             rocprofiler_record.thread_id = rocprofiler_thread_id_t{GetTid()};
+            rocprofiler_record.phase = ROCPROFILER_PHASE_NONE;
             if (record->kernel_name != nullptr && record->op == HSA_OP_ID_DISPATCH) {
               rocprofiler_record.api_data_handle.handle = strdup(record->kernel_name);
               rocprofiler_record.api_data_handle.size = strlen(record->kernel_name) + 1;

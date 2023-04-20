@@ -1476,6 +1476,21 @@ typedef struct {
   uint64_t id;
 } rocprofiler_tracer_external_id_t;
 
+typedef enum {
+  /**
+   * No phase, it is an activity record or asynchronous output data
+   */
+  ROCPROFILER_PHASE_NONE = 0,
+  /**
+   * Enter phase for API calls
+   */
+  ROCPROFILER_PHASE_ENTER = 1,
+  /**
+   * Exit phase for API calls
+   */
+  ROCPROFILER_PHASE_EXIT = 2
+} rocprofiler_api_tracing_phase_t;
+
 /**
  * Tracing record, this will represent all the information reported by the
  * tracer regarding APIs and their data that were traced and collected
@@ -1530,6 +1545,10 @@ typedef struct {
    * Thread id
    */
   rocprofiler_thread_id_t thread_id;
+  /**
+   * API Tracing phase (Enter/Exit/None(Activity Records/Asynchronous Output Records))
+  */
+  rocprofiler_api_tracing_phase_t phase;
 } rocprofiler_record_tracer_t;
 
 /**
