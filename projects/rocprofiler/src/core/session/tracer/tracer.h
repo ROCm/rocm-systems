@@ -91,6 +91,7 @@ class Tracer {
       roctx_report_activity_;
 
   std::vector<rocprofiler_tracer_activity_domain_t> domains_;
+  bool is_sync_;
   rocprofiler_sync_callback_t callback_;
   rocprofiler_buffer_id_t buffer_id_;
   rocprofiler_session_id_t session_id_;

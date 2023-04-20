@@ -131,7 +131,9 @@ void Session::Start() {
           GetFilter(GetFilterIdWithKind(ROCPROFILER_API_TRACE))->GetTraceData();
       if (!tracer_started_.load(std::memory_order_release)) {
         tracer_ = new tracer::Tracer(
-            session_id_, GetFilter(GetFilterIdWithKind(ROCPROFILER_API_TRACE))->GetCallback(),
+            session_id_, (GetFilter(
+              GetFilterIdWithKind(ROCPROFILER_API_TRACE))->HasCallback() ? GetFilter(
+                GetFilterIdWithKind(ROCPROFILER_API_TRACE))->GetCallback() : nullptr),
             GetFilter(GetFilterIdWithKind(ROCPROFILER_API_TRACE))->GetBufferId(), domains);
         tracer_started_.exchange(true, std::memory_order_release);
       }

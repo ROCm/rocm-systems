@@ -233,9 +233,16 @@ std::variant<std::vector<std::string>, uint32_t*> Filter::GetProperty(
   return property;
 }
 
-void Filter::SetCallback(rocprofiler_sync_callback_t& callback) { callback_ = callback; }
+void Filter::SetCallback(rocprofiler_sync_callback_t& callback) {
+  callback_ = callback;
+  has_sync_callback_ = true;
+}
 
-rocprofiler_sync_callback_t& Filter::GetCallback() { return callback_; }
+bool Filter::HasCallback() { return has_sync_callback_; }
+
+rocprofiler_sync_callback_t& Filter::GetCallback() {
+  return callback_;
+}
 
 size_t Filter::GetPropertiesCount(rocprofiler_filter_property_kind_t kind) {
   switch (kind) {

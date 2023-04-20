@@ -39,9 +39,7 @@ Tracer::Tracer(rocprofiler_session_id_t session_id, rocprofiler_sync_callback_t 
     : domains_(domains), callback_(callback), buffer_id_(buffer_id), session_id_(session_id) {
   assert(!is_active_.load(std::memory_order_release) && "Error: The tracer was initialized!");
   std::lock_guard<std::mutex> lock(tracer_lock_);
-
   callback_data_ = api_callback_data_t{callback, session_id};
-
   is_active_.exchange(true, std::memory_order_release);
 }
 
@@ -406,12 +404,20 @@ void Tracer::InitRoctracer(
     switch (domain.first) {
       case ACTIVITY_DOMAIN_ROCTX: {
         assert(!domain.second && "Error: ROCTX API can't be filtered!");
-        roctracer_enable_domain_callback(ACTIVITY_DOMAIN_ROCTX, api_callback, &callback_data_);
+        if(callback_data_.user_sync_callback)
+          roctracer_enable_domain_callback(ACTIVITY_DOMAIN_ROCTX, api_callback, &callback_data_);
+        else
+          roctracer_enable_domain_activity(ACTIVITY_DOMAIN_ROCTX,
+                                         session_buffer_id_t{session_id_, buffer_id_});
         break;
       }
       case ACTIVITY_DOMAIN_HSA_API: {
         if (!domain.second) {
-          roctracer_enable_domain_callback(ACTIVITY_DOMAIN_HSA_API, api_callback, &callback_data_);
+          if(callback_data_.user_sync_callback)
+            roctracer_enable_domain_callback(ACTIVITY_DOMAIN_HSA_API, api_callback, &callback_data_);
+          else
+            roctracer_enable_domain_activity(ACTIVITY_DOMAIN_HSA_API,
+                                         session_buffer_id_t{session_id_, buffer_id_});
         } else {
           assert(!api_filter_data_vector.empty() &&
                  "Error: HSA API calls filter data is empty and domain "
@@ -421,7 +427,11 @@ void Tracer::InitRoctracer(
       }
       case ACTIVITY_DOMAIN_HIP_API: {
         if (!domain.second) {
-          roctracer_enable_domain_callback(ACTIVITY_DOMAIN_HIP_API, api_callback, &callback_data_);
+          if(callback_data_.user_sync_callback)
+            roctracer_enable_domain_callback(ACTIVITY_DOMAIN_HIP_API, api_callback, &callback_data_);
+          else
+            roctracer_enable_domain_activity(ACTIVITY_DOMAIN_HIP_API,
+                                         session_buffer_id_t{session_id_, buffer_id_});
         } else {
           assert(!api_filter_data_vector.empty() &&
                  "Error: HIP API calls filter data is empty and domain "

@@ -50,6 +50,7 @@ class Filter {
   std::vector<rocprofiler_att_parameter_t> GetAttParametersData();
   void SetCallback(rocprofiler_sync_callback_t& callback);
   rocprofiler_sync_callback_t& GetCallback();
+  bool HasCallback();
 
   void SetProperty(rocprofiler_filter_property_t property);
   std::variant<std::vector<std::string>, uint32_t*> GetProperty(
@@ -75,6 +76,7 @@ class Filter {
   std::vector<rocprofiler_att_parameter_t> att_parameters_;  // ATT Parameters
   rocprofiler_counters_sampler_parameters_t counters_sampler_parameters_;        // sampled counters parameters
 
+  bool has_sync_callback_{false};
   rocprofiler_sync_callback_t callback_;
 };
 

@@ -117,6 +117,15 @@ target_link_options(tracer_hip_hsa PRIVATE "-Wl,--build-id=md5")
 add_dependencies(samples tracer_hip_hsa)
 install(TARGETS tracer_hip_hsa RUNTIME DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/samples COMPONENT samples)
 
+## Build HIP/HSA Trace with async output api trace data Sample
+set_source_files_properties(tracer/sample_async.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+hip_add_executable(tracer_hip_hsa_async tracer/sample_async.cpp ${ROCPROFILER_UTIL_SRC_FILES})
+target_include_directories(tracer_hip_hsa_async PRIVATE ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/inc ${CMAKE_CURRENT_SOURCE_DIR}/common)
+target_link_libraries(tracer_hip_hsa_async PRIVATE ${ROCPROFILER_TARGET} amd_comgr)
+target_link_options(tracer_hip_hsa_async PRIVATE "-Wl,--build-id=md5")
+add_dependencies(samples tracer_hip_hsa_async)
+install(TARGETS tracer_hip_hsa_async RUNTIME DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/samples COMPONENT samples)
+
 # ############################################################################################################################################
 # PC Sampling Samples
 # ############################################################################################################################################
