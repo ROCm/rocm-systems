@@ -849,11 +849,6 @@ void WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t user_pkt
     std::lock_guard<std::mutex> lk(queue_info.qw_mutex);
     Agent::AgentInfo* agentInfo = &(hsa_support::GetAgentInfo(queue_info.GetGPUAgent().handle));
 
-    if (agentInfo->getName().substr(0, 4) != "gfx9") {
-      printf("ATT collection is only supported for gfx9 at the moment!\n");
-      exit(1);
-    }
-
     // Preparing att Packets
     Packet::packet_t start_packet{};
     Packet::packet_t stop_packet{};
