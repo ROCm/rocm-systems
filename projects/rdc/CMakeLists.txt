@@ -519,7 +519,6 @@ set(CPACK_RPM_RUNTIME_PRE_UNINSTALL_SCRIPT_FILE
     "${CMAKE_CURRENT_SOURCE_DIR}/RPM/rpm_preun")
 set(CPACK_RPM_RUNTIME_POST_UNINSTALL_SCRIPT_FILE
     "${CMAKE_CURRENT_SOURCE_DIR}/RPM/rpm_postun")
-set(CPACK_RPM_PACKAGE_VERSION ${VERSION_STRING})
 
 # Treat runtime group as package base.
 # Without it - the base package would be named 'rdc-runtime'
