@@ -610,21 +610,23 @@ class perfetto_plugin_t {
         break;
       }
       case ACTIVITY_DOMAIN_HIP_OPS: {
+        // TODO(aelwazir): Stream ID is removed from the API processing.
+        //        Waiting for better implementation to get the stream id.
         uint64_t stream_id = 0;
-        size_t stream_id_str_size = 0;
-        char* stream_id_str;
-        CHECK_ROCPROFILER(rocprofiler_query_hip_tracer_api_data_info_size(
-            session_id, ROCPROFILER_HIP_STREAM_ID, rocprofiler_tracer_api_data_handle_t{nullptr, 0},
-            rocprofiler_tracer_operation_id_t{(uint32_t)tracer_record.correlation_id.value},
-            &stream_id_str_size));
-        if (stream_id_str_size > 1) {
-          stream_id_str = static_cast<char*>(malloc(stream_id_str_size * sizeof(char)));
-          CHECK_ROCPROFILER(rocprofiler_query_hip_tracer_api_data_info(
-              session_id, ROCPROFILER_HIP_STREAM_ID, rocprofiler_tracer_api_data_handle_t{nullptr, 0},
-              rocprofiler_tracer_operation_id_t{(uint32_t)tracer_record.correlation_id.value},
-              &stream_id_str));
-          if (stream_id_str != nullptr) stream_id = std::stoll(stream_id_str);
-        }
+        // size_t stream_id_str_size = 0;
+        // char* stream_id_str;
+        // CHECK_ROCPROFILER(rocprofiler_query_hip_tracer_api_data_info_size(
+        //     session_id, ROCPROFILER_HIP_STREAM_ID, rocprofiler_tracer_api_data_handle_t{nullptr, 0},
+        //     rocprofiler_tracer_operation_id_t{(uint32_t)tracer_record.correlation_id.value},
+        //     &stream_id_str_size));
+        // if (stream_id_str_size > 1) {
+        //   stream_id_str = static_cast<char*>(malloc(stream_id_str_size * sizeof(char)));
+        //   CHECK_ROCPROFILER(rocprofiler_query_hip_tracer_api_data_info(
+        //       session_id, ROCPROFILER_HIP_STREAM_ID, rocprofiler_tracer_api_data_handle_t{nullptr, 0},
+        //       rocprofiler_tracer_operation_id_t{(uint32_t)tracer_record.correlation_id.value},
+        //       &stream_id_str));
+        //   if (stream_id_str != nullptr) stream_id = std::stoll(stream_id_str);
+        // }
         std::unordered_map<int, perfetto::Track>::iterator stream_track_it;
         {
           std::lock_guard<std::mutex> lock(stream_tracks_lock_);
