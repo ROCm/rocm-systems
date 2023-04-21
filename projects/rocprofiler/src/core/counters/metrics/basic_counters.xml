@@ -498,6 +498,7 @@
   <metric name="SQ_WAVES_RESTORED" block=SQ event=185 descr="Count number of context-restored waves sent to SQs. (per-simd, emulated, global)"></metric>
   <metric name="SQ_WAVES_SAVED" block=SQ event=186 descr="Count number of context-saved waves. (per-simd, emulated, global)"></metric>
   <metric name="SQ_INSTS_SMEM_NORM" block=SQ event=187 descr="Number of SMEM instructions issued normalized to match smem_level (*2 load/store; *2 atomic; *2 memtime; *4 wb/inv). (per-simd, emulated)"></metric>
+  <metric name="SQC_ICACHE_INPUT_VALID_READYB" block=SQ event=257 descr=" Input stalled by SQC (per-SQ, nondeterministic, unwindowed)"></metric>
   <metric name="SQC_DCACHE_INPUT_VALID_READYB" block=SQ event=260 descr="Input stalled by SQC (per-SQ, nondeterministic, unwindowed)"></metric>
   <metric name="SQC_TC_REQ" block=SQ event=262 descr="Total number of TC requests that were issued by instruction and constant caches. (No-Masking, nondeterministic)"></metric>
   <metric name="SQC_TC_INST_REQ" block=SQ event=263 descr="Number of insruction requests to the TC (No-Masking, nondeterministic)"></metric>
@@ -505,10 +506,12 @@
   <metric name="SQC_TC_DATA_WRITE_REQ" block=SQ event=265 descr="Number of data write requests to the TC (No-Masking, nondeterministic)"></metric>
   <metric name="SQC_TC_DATA_ATOMIC_REQ" block=SQ event=266 descr="Number of data atomic requests to the TC (No-Masking, nondeterministic)"></metric>
   <metric name="SQC_TC_STALL" block=SQ event=267 descr="Valid request stalled TC request interface (no-credits). (No-Masking, nondeterministic, unwindowed)"></metric>
+  <metric name="SQC_ICACHE_BUSY_CYCLES" block=SQ event=269 descr="Clock cycles while cache is reporting that it is busy. (No-Masking, nondeterministic, unwindowed)"></metric>
   <metric name="SQC_ICACHE_REQ" block=SQ event=270 descr="Number of requests. (per-SQ, per-Bank)"></metric>
   <metric name="SQC_ICACHE_HITS" block=SQ event=271 descr="Number of cache hits. (per-SQ, per-Bank, nondeterministic)"></metric>
   <metric name="SQC_ICACHE_MISSES" block=SQ event=272 descr="Number of cache misses, includes uncached requests. (per-SQ, per-Bank, nondeterministic)"></metric>
   <metric name="SQC_ICACHE_MISSES_DUPLICATE" block=SQ event=273 descr="Number of misses that were duplicates (access to a non-resident, miss pending CL). (per-SQ, per-Bank, nondeterministic)" ></metric>
+  <metric name="SQC_DCACHE_BUSY_CYCLES" block=SQ event=289 descr=" Clock cycles while cache is reporting that it is busy. (No-Masking, nondeterministic, unwindowed)"></metric>
   <metric name="SQC_DCACHE_REQ" block=SQ event=290 descr="Number of requests (post-bank-serialization). (per-SQ, per-Bank)"></metric>
   <metric name="SQC_DCACHE_HITS" block=SQ event=291 descr="Number of cache hits. (per-SQ, per-Bank, nondeterministic)"></metric>
   <metric name="SQC_DCACHE_MISSES" block=SQ event=292 descr="Number of cache misses, includes uncached requests. (per-SQ, per-Bank, nondeterministic)"></metric>
@@ -591,6 +594,7 @@
   <metric name="TCC_RW_REQ" block=TCC event=8 descr="The number of RW requests. This is measured at the tag block."></metric>
   <metric name="TCC_PROBE" block=TCC event=9 descr="Number of probe requests. Not windowable."></metric>
   <metric name="TCC_PROBE_ALL" block=TCC event=10 descr="Number of external probe requests with with EA_TCC_preq_all== 1. Not windowable."></metric>
+  <metric name="TCC_INTERNAL_PROBE" block=TCC event=11 descr="Number of self-probes spawned by TCC for CC writes/atomic operations. Not windowable."></metric>
   <metric name="TCC_READ" block=TCC event=12 descr="Number of read requests. Compressed reads are included in this, but metadata reads are not included."></metric>
   <metric name="TCC_WRITE" block=TCC event=13 descr="Number of write requests."></metric>
   <metric name="TCC_ATOMIC" block=TCC event=14 descr="Number of atomic requests of all types."></metric>
@@ -599,6 +603,7 @@
   <metric name="TCC_WRITEBACK" block=TCC event=22 descr="Number of lines written back to main memory. This includes writebacks of dirty lines and uncached write/atomic requests."></metric>
   <metric name="TCC_EA0_WRREQ" block=TCC event=26 descr="Number of transactions (either 32-byte or 64-byte) going over the TC_EA_wrreq interface. Atomics may travel over the same interface and are generally classified as write requests. This does not include probe commands."></metric>
   <metric name="TCC_EA0_WRREQ_64B" block=TCC event=27 descr="Number of 64-byte transactions going (64-byte write or CMPSWAP) over the TC_EA_wrreq interface."></metric>
+  <metric name="TCC_EA0_WRREQ_PROBE_COMMAND" block=TCC event=28 descr="Number of probe commands going over the TC_EA_wrreq interface."></metric>
   <metric name="TCC_EA0_WR_UNCACHED_32B" block=TCC event=29 descr="Number of 32-byte write/atomic going over the TC_EA_wrreq interface due to uncached traffic. Note that CC mtypes can produce uncached requests, and those are included in this. A 64-byte request will be counted as 2"></metric>
   <metric name="TCC_EA0_WRREQ_STALL" block=TCC event=30 descr="Number of cycles a write request was stalled."></metric>
   <metric name="TCC_EA0_WRREQ_IO_CREDIT_STALL" block=TCC event=31 descr="Number of cycles a EA write request was stalled because the interface was out of IO credits."></metric>
@@ -620,6 +625,7 @@
   <metric name="TCC_ALL_TC_OP_WB_WRITEBACK" block=TCC event=73 descr="Number of writebacks due to all TC_OP writeback requests."></metric>
   <metric name="TCC_NORMAL_EVICT" block=TCC event=74 descr="Number of evictions due to requests that are not invalidate or probe requests."></metric>
   <metric name="TCC_ALL_TC_OP_INV_EVICT" block=TCC event=80 descr="Number of evictions due to all TC_OP invalidate requests."></metric>
+  <metric name="TCC_PROBE_EVICT" block=TCC event=81 descr="Number of evictions/invalidations due to probes. Not windowable."></metric>
   <metric name="TCC_EA0_RDREQ_DRAM" block=TCC event=102 descr="Number of TCC/EA read requests (either 32-byte or 64-byte) destined for DRAM (MC)."></metric>
   <metric name="TCC_EA0_WRREQ_DRAM" block=TCC event=103 descr="Number of TCC/EA write requests (either 32-byte of 64-byte) destined for DRAM (MC)."></metric>
 </gfx940>

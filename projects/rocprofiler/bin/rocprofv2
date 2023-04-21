@@ -262,6 +262,7 @@ if [ -n "$COUNTERS_PATH" ]; then
   done < $input
 fi
 
+COUNTERS_PMC_DIRS=""
 if [ -n "$PMC_LINES" ]; then
   COUNTER=1
   for i in ${!PMC_LINES[@]}; do
@@ -269,6 +270,7 @@ if [ -n "$PMC_LINES" ]; then
     if [ -n "$OUTPUT_PATH" ]; then
       if [ ! -n "$ATT_ARGV" ]; then
         FINAL_PATH="$OUTPUT_PATH_INTERNAL/pmc_$COUNTER"
+        COUNTERS_PMC_DIRS="$COUNTERS_PMC_DIRS $FINAL_PATH"
       else
         FINAL_PATH="$OUTPUT_PATH"
       fi
@@ -289,6 +291,32 @@ elif [ ! -n "$ATT_ARGV" ]; then
     LD_PRELOAD=$LD_PRELOAD:$ROCM_DIR/build/librocprofiler_tool.so $*
   else
     LD_PRELOAD=$LD_PRELOAD:$ROCM_DIR/lib/rocprofiler/librocprofiler_tool.so $*
+  fi
+fi
+
+get_pmc_results_txt_path(){
+  for file_name in `ls $1` ; do
+    if [[ $file_name == *results.txt ]]; then
+      echo "$1/$file_name"
+    fi
+  done
+}
+
+if [ -n "$COUNTERS_PMC_DIRS" ]; then
+  COUNTERS_RESULTS_TXT=""
+  for PMC_DIR in $COUNTERS_PMC_DIRS; do
+    COUNTERS_RESULTS_TXT="$COUNTERS_RESULTS_TXT $(get_pmc_results_txt_path $PMC_DIR)"
+  done
+  CSV_RESULTS=$OUTPUT_PATH_INTERNAL/results.csv
+  if [ -n "$OUT_FILE_NAME" ]; then
+    CSV_RESULTS=$OUTPUT_PATH_INTERNAL/$OUT_FILE_NAME
+  fi
+  echo "csv results path: $CSV_RESULTS"
+  export ROCP_MERGE_PIDS=1 #required for tblextr.py to work correctly for counters
+  if [ $RUN_FROM_BUILD == 1 ]; then
+    eval "python3 $ROCM_DIR/bin/tblextr.py $CSV_RESULTS $COUNTERS_RESULTS_TXT"
+  else
+    eval "python3 $ROCPROFV2_DIR/../libexec/rocprofiler/tblextr.py $CSV_RESULTS $COUNTERS_RESULTS_TXT"
   fi
 fi
 

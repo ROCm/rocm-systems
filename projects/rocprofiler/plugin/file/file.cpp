@@ -286,10 +286,10 @@ class file_plugin_t {
                                                       profiler_record->kernel_id, &kernel_name_c));
     }
     *output_file << std::string("dispatch[") << std::to_string(profiler_record->header.id.handle)
-                 << "], " << std::string("gpu_id(")
+                 << "], " << std::string("gpu-id(")
                  << std::to_string(profiler_record->gpu_id.handle) << "), "
-                 << std::string("queue_id(") << std::to_string(profiler_record->queue_id.handle)
-                 << "), " << std::string("queue_index(")
+                 << std::string("queue-id(") << std::to_string(profiler_record->queue_id.handle)
+                 << "), " << std::string("queue-index(")
                  << std::to_string(profiler_record->queue_idx.value) << "), " << std::string("pid(")
                  << std::to_string(GetPid()) << "), " << std::string("tid(")
                  << std::to_string(profiler_record->thread_id.value) << ")";
@@ -321,9 +321,9 @@ class file_plugin_t {
                  << std::to_string(profiler_record->kernel_id.handle) << "), "
                  << std::string("kernel-name(\"") << kernel_name << "\")"
                  << std::string(", start_time(")
-                 << std::to_string(profiler_record->timestamps.begin.value) << ")"
-                 << std::string(", end_time(")
-                 << std::to_string(profiler_record->timestamps.end.value) << ")";
+                 << std::string(", time(0,")
+                 << std::to_string(profiler_record->timestamps.begin.value) << ","
+                 << std::to_string(profiler_record->timestamps.end.value) << ",0)";
 
     // For Counters
     *output_file << std::endl;
@@ -339,7 +339,7 @@ class file_plugin_t {
             CHECK_ROCPROFILER(rocprofiler_query_counter_info(
                 session_id, ROCPROFILER_COUNTER_NAME, profiler_record->counters[i].counter_handler,
                 &name_c));
-            *output_file << ", " << name_c << " ("
+            *output_file << " " << name_c << " ("
                          << std::to_string(profiler_record->counters[i].value.value) << ")"
                          << std::endl;
           }

@@ -136,7 +136,8 @@ class MetricsDict {
     const Metric* metric = NULL;
 
     auto it = cache_.find(name);
-    if (it != cache_.end()) metric = it->second;
+    if (it != cache_.end())
+      metric = it->second;
     else {
       const std::size_t pos = name.find(':');
       if (pos != std::string::npos) {
@@ -148,7 +149,8 @@ class MetricsDict {
         const std::size_t pos1 = block_name.find('[');
         if (pos1 != std::string::npos) {
           const std::size_t pos2 = block_name.find(']');
-          if (pos2 == std::string::npos) EXC_RAISING(HSA_STATUS_ERROR, "Malformed metric name '" << name << "'");
+          if (pos2 == std::string::npos)
+            EXC_RAISING(HSA_STATUS_ERROR, "Malformed metric name '" << name << "'");
           block_name = name.substr(0, pos1);
           const std::string block_index_str = name.substr(pos1 + 1, pos2 - (pos1 + 1));
           block_index = atol(block_index_str.c_str());
@@ -156,8 +158,10 @@ class MetricsDict {
         }
 
         const hsa_ven_amd_aqlprofile_id_query_t query = Translate(agent_info_, block_name);
-        const hsa_ven_amd_aqlprofile_block_name_t block_id = (hsa_ven_amd_aqlprofile_block_name_t)query.id;
-        if ((query.instance_count > 1) && (indexed == false)) EXC_RAISING(HSA_STATUS_ERROR, "Malformed indexed metric name '" << name << "'");
+        const hsa_ven_amd_aqlprofile_block_name_t block_id =
+            (hsa_ven_amd_aqlprofile_block_name_t)query.id;
+        if ((query.instance_count > 1) && (indexed == false))
+          EXC_RAISING(HSA_STATUS_ERROR, "Malformed indexed metric name '" << name << "'");
         const uint32_t event_id = atol(event_str.c_str());
         const counter_t counter = {name, {block_id, block_index, event_id}};
         metric = new BaseMetric(name, counter);
@@ -189,22 +193,23 @@ class MetricsDict {
     const char* xml_name = getenv("ROCP_METRICS");
     if (xml_name != NULL) {
       xml_ = xml::Xml::Create(xml_name);
-      if (xml_ == NULL) EXC_RAISING(HSA_STATUS_ERROR, "metrics .xml open error '" << xml_name << "'");
+      if (xml_ == NULL)
+        EXC_RAISING(HSA_STATUS_ERROR, "metrics .xml open error '" << xml_name << "'");
       xml_->AddConst("top.const.metric", "MAX_WAVE_SIZE", agent_info->max_wave_size);
       xml_->AddConst("top.const.metric", "CU_NUM", agent_info->cu_num);
       xml_->AddConst("top.const.metric", "SIMD_NUM", agent_info->simds_per_cu * agent_info->cu_num);
       xml_->AddConst("top.const.metric", "SE_NUM", agent_info->se_num);
       ImportMetrics(agent_info, "const");
       agent_name_ = agent_info->name;
-      if (std::string("gfx906") == agent_info->name ||
-          std::string("gfx908") == agent_info->name ||
-          std::string("gfx90a") == agent_info->name ||
-          std::string("gfx1032") == agent_info->name ||
-          std::string("gfx1031") == agent_info->name ||
-          std::string("gfx1030") == agent_info->name ||
-          std::string("gfx1100") == agent_info->name ||
-          std::string("gfx1101") == agent_info->name) {
-         ImportMetrics(agent_info, agent_info->name);
+      if (agent_name_.substr(0, 6) == "gfx940")
+        agent_name_ =
+            "gfx940";  // To correct the agent_name from "gfx940:forcestoresc1+" -> "gfx940"
+      if (std::string("gfx906") == agent_name_ || std::string("gfx908") == agent_name_ ||
+          std::string("gfx90a") == agent_name_ || std::string("gfx940") == agent_name_ ||
+          std::string("gfx1032") == agent_name_ || std::string("gfx1031") == agent_name_ ||
+          std::string("gfx1030") == agent_name_ || std::string("gfx1100") == agent_name_ ||
+          std::string("gfx1101") == agent_name_) {
+        ImportMetrics(agent_info, agent_name_);
       } else {
         agent_name_ = agent_info->gfxip;
         ImportMetrics(agent_info, agent_info->gfxip);
@@ -218,14 +223,16 @@ class MetricsDict {
     for (auto& entry : cache_) delete entry.second;
   }
 
-  static hsa_ven_amd_aqlprofile_id_query_t Translate(const util::AgentInfo* agent_info, const std::string& block_name) {
+  static hsa_ven_amd_aqlprofile_id_query_t Translate(const util::AgentInfo* agent_info,
+                                                     const std::string& block_name) {
     hsa_ven_amd_aqlprofile_profile_t profile{};
     profile.agent = agent_info->dev_id;
     hsa_ven_amd_aqlprofile_id_query_t query = {block_name.c_str(), 0, 0};
     hsa_status_t status =
         util::HsaRsrcFactory::Instance().AqlProfileApi()->hsa_ven_amd_aqlprofile_get_info(
             &profile, HSA_VEN_AMD_AQLPROFILE_INFO_BLOCK_ID, &query);
-    if (status != HSA_STATUS_SUCCESS) AQL_EXC_RAISING(HSA_STATUS_ERROR, "ImportMetrics: bad block name '" << block_name << "'");
+    if (status != HSA_STATUS_SUCCESS)
+      AQL_EXC_RAISING(HSA_STATUS_ERROR, "ImportMetrics: bad block name '" << block_name << "'");
     return query;
   }
 
@@ -251,7 +258,8 @@ class MetricsDict {
           const uint32_t event_id = atol(event_str.c_str());
 
           const hsa_ven_amd_aqlprofile_id_query_t query = Translate(agent_info, block_name);
-          const hsa_ven_amd_aqlprofile_block_name_t block_id = (hsa_ven_amd_aqlprofile_block_name_t)query.id;
+          const hsa_ven_amd_aqlprofile_block_name_t block_id =
+              (hsa_ven_amd_aqlprofile_block_name_t)query.id;
           if (query.instance_count > 1) {
             for (unsigned block_index = 0; block_index < query.instance_count; ++block_index) {
               std::ostringstream full_name;
@@ -272,9 +280,11 @@ class MetricsDict {
           xml::Expr* expr_obj = NULL;
           try {
             expr_obj = new xml::Expr(expr_str, new ExprCache(&cache_));
-          } catch(const xml::exception_t& exc) {
-              if (do_lookup) metrics_list.push_back(node);
-              else throw(exc);
+          } catch (const xml::exception_t& exc) {
+            if (do_lookup)
+              metrics_list.push_back(node);
+            else
+              throw(exc);
           }
           if (expr_obj) {
 #if 0
@@ -285,7 +295,8 @@ class MetricsDict {
             for (const std::string& var : expr_obj->GetVars()) {
               auto it = cache_.find(var);
               if (it == cache_.end()) {
-                EXC_RAISING(HSA_STATUS_ERROR, "Bad metric '" << name << "', var '" << var << "' is not found");
+                EXC_RAISING(HSA_STATUS_ERROR,
+                            "Bad metric '" << name << "', var '" << var << "' is not found");
               }
               it->second->GetCounters(counters_vec);
             }
@@ -309,23 +320,27 @@ class MetricsDict {
     }
   }
 
-  const Metric* AddMetric(const std::string& name, const std::string& /*alias*/, const counter_t& counter) {
+  const Metric* AddMetric(const std::string& name, const std::string& /*alias*/,
+                          const counter_t& counter) {
     const Metric* metric = NULL;
     const auto ret = cache_.insert({name, NULL});
     if (ret.second) {
       metric = new BaseMetric(name, counter);
       ret.first->second = metric;
-    } else EXC_RAISING(HSA_STATUS_ERROR, "metric redefined '" << name << "'");
+    } else
+      EXC_RAISING(HSA_STATUS_ERROR, "metric redefined '" << name << "'");
     return metric;
   }
 
-  const Metric* AddMetric(const std::string& name, const counters_vec_t& counters_vec, const xml::Expr* expr_obj) {
+  const Metric* AddMetric(const std::string& name, const counters_vec_t& counters_vec,
+                          const xml::Expr* expr_obj) {
     const Metric* metric = NULL;
     const auto ret = cache_.insert({name, NULL});
     if (ret.second) {
       metric = new ExprMetric(name, counters_vec, expr_obj);
       ret.first->second = metric;
-    } else EXC_RAISING(HSA_STATUS_ERROR, "expr-metric redefined '" << name << "'");
+    } else
+      EXC_RAISING(HSA_STATUS_ERROR, "expr-metric redefined '" << name << "'");
     return metric;
   }
 
@@ -336,7 +351,8 @@ class MetricsDict {
       printf("> Metric '%s'\n", metric->GetName().c_str());
       metric->GetCounters(counters_vec);
       for (auto c : counters_vec) {
-        printf("  counter %s, b(%u), i (%u), e (%u)\n", c->name.c_str(), c->event.block_name, c->event.block_index, c->event.counter_id);
+        printf("  counter %s, b(%u), i (%u), e (%u)\n", c->name.c_str(), c->event.block_name,
+               c->event.block_index, c->event.counter_id);
       }
     }
   }

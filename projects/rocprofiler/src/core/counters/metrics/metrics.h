@@ -203,10 +203,14 @@ class MetricsDict {
       xml_->AddConst("top.const.metric", "SE_NUM", agent_info->getShaderEngineCount());
       ImportMetrics(agent_info, "const");
       agent_name_ = agent_info->getName();
+      if (agent_name_.substr(0, 6) == "gfx940")
+        agent_name_ =
+            "gfx940";  // To correct the agent_name from "gfx940:forcestoresc1+" -> "gfx940"
       if (std::string("gfx906") == agent_name_ || std::string("gfx908") == agent_name_ ||
-          std::string("gfx90a") == agent_name_ || std::string("gfx1032") == agent_name_ ||
-          std::string("gfx1031") == agent_name_ || std::string("gfx1030") == agent_name_ ||
-          std::string("gfx1100") == agent_name_ || std::string("gfx1101") == agent_name_) {
+          std::string("gfx90a") == agent_name_ || std::string("gfx940") == agent_name_ ||
+          std::string("gfx1032") == agent_name_ || std::string("gfx1031") == agent_name_ ||
+          std::string("gfx1030") == agent_name_ || std::string("gfx1100") == agent_name_ ||
+          std::string("gfx1101") == agent_name_) {
         ImportMetrics(agent_info, agent_name_);
       } else {
         agent_name_ = agent_info->getGfxip();
