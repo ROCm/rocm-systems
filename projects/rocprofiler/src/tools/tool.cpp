@@ -152,6 +152,11 @@ std::vector<std::string> GetCounterNames() {
   const char* line_c_str = getenv("ROCPROFILER_COUNTERS");
   if (line_c_str) {
     std::string line = line_c_str;
+    //skip commented lines
+    auto found = line.find_first_not_of(" \t");
+    if (found != std::string::npos) {
+      if (line[found] == '#') return {};
+    }
     if (line.find("pmc") == std::string::npos) return counters;
     char seperator = ' ';
     std::string::size_type prev_pos = 0, pos = line.find(seperator, prev_pos);
