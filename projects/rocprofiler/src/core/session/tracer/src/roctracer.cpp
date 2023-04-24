@@ -405,13 +405,16 @@ int TracerCallback(activity_domain_t domain, uint32_t operation_id, void* data) 
             rocprofiler_record.phase = ROCPROFILER_PHASE_NONE;
             if (operation_id == HIP_OP_ID_DISPATCH && record->kernel_name != nullptr) {
               rocprofiler_record.api_data_handle.handle = strdup(record->kernel_name);
+              void* initial_handle = const_cast<void*>(rocprofiler_record.api_data_handle.handle);
               rocprofiler_record.api_data_handle.size = (strlen(record->kernel_name) + 1);
               rocmtools::GetROCMToolObj()
                   ->GetSession((*pool)->session_id)
                   ->GetBuffer((*pool)->buffer_id)
                   ->AddRecord(rocprofiler_record, rocprofiler_record.api_data_handle.handle,
                               rocprofiler_record.api_data_handle.size,
-                              [](auto& rocprofiler_record, const void* data) {
+                              [initial_handle](auto& rocprofiler_record, const void* data) {
+                                if (rocprofiler_record.api_data_handle.handle==initial_handle)
+                                  free(initial_handle);
                                 rocprofiler_record.api_data_handle.handle =
                                     static_cast<const char*>(data);
                               });
@@ -468,13 +471,16 @@ int TracerCallback(activity_domain_t domain, uint32_t operation_id, void* data) 
             rocprofiler_record.phase = ROCPROFILER_PHASE_NONE;
             if (record->kernel_name != nullptr && record->op == HSA_OP_ID_DISPATCH) {
               rocprofiler_record.api_data_handle.handle = strdup(record->kernel_name);
+              void* initial_handle = const_cast<void*>(rocprofiler_record.api_data_handle.handle);
               rocprofiler_record.api_data_handle.size = strlen(record->kernel_name) + 1;
               rocmtools::GetROCMToolObj()
                   ->GetSession((*pool)->session_id)
                   ->GetBuffer((*pool)->buffer_id)
                   ->AddRecord(rocprofiler_record, rocprofiler_record.api_data_handle.handle,
                               rocprofiler_record.api_data_handle.size,
-                              [](auto& rocprofiler_record, const void* data) {
+                              [initial_handle](auto& rocprofiler_record, const void* data) {
+                                if (rocprofiler_record.api_data_handle.handle==initial_handle)
+                                  free(initial_handle);
                                 rocprofiler_record.api_data_handle.handle =
                                     static_cast<const char*>(data);
                               });

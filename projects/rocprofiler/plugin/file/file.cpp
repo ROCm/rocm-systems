@@ -216,7 +216,7 @@ class file_plugin_t {
           session_id, ROCPROFILER_HSA_FUNCTION_NAME, tracer_record.api_data_handle,
           tracer_record.operation_id, &function_name_size));
       if (function_name_size > 1) {
-        char* function_name_c = (char*)malloc(function_name_size);
+        char* function_name_c = nullptr;
         CHECK_ROCPROFILER(rocprofiler_query_hsa_tracer_api_data_info(
             session_id, ROCPROFILER_HSA_FUNCTION_NAME, tracer_record.api_data_handle,
             tracer_record.operation_id, &function_name_c));
@@ -229,7 +229,7 @@ class file_plugin_t {
           session_id, ROCPROFILER_HIP_FUNCTION_NAME, tracer_record.api_data_handle,
           tracer_record.operation_id, &function_name_size));
       if (function_name_size > 1) {
-        char* function_name_c = (char*)malloc(function_name_size);
+        char* function_name_c = nullptr;
         CHECK_ROCPROFILER(rocprofiler_query_hip_tracer_api_data_info(
             session_id, ROCPROFILER_HIP_FUNCTION_NAME, tracer_record.api_data_handle,
             tracer_record.operation_id, &function_name_c));
@@ -240,11 +240,15 @@ class file_plugin_t {
           session_id, ROCPROFILER_HIP_KERNEL_NAME, tracer_record.api_data_handle,
           tracer_record.operation_id, &kernel_name_size));
       if (kernel_name_size > 1) {
-        char* kernel_name_str = (char*)malloc(kernel_name_size * sizeof(char));
+        char* kernel_name_str = nullptr;
         CHECK_ROCPROFILER(rocprofiler_query_hip_tracer_api_data_info(
             session_id, ROCPROFILER_HIP_KERNEL_NAME, tracer_record.api_data_handle,
             tracer_record.operation_id, &kernel_name_str));
-        if (kernel_name_str) kernel_name = rocmtools::cxx_demangle(std::string(kernel_name_str));
+        if (kernel_name_str) {
+          kernel_name = rocmtools::cxx_demangle(std::string(kernel_name_str));
+          free(kernel_name_str);
+          // TODO: Change how this API returns a string.
+        }
       }
     }
     if (tracer_record.domain == ACTIVITY_DOMAIN_ROCTX) {
@@ -277,6 +281,7 @@ class file_plugin_t {
         }
       }
     }
+    //return;
     output_file_t* output_file = get_output_file(output_type_t::TRACER, tracer_record.domain);
     *output_file << "Record(" << tracer_record.header.id.handle << "), Domain("
                  << GetDomainName(tracer_record.domain) << "),";
