@@ -107,7 +107,7 @@ try: # For build dir
     path_to_parser = os.path.abspath(rocprofv2_att_lib)
     SO = CDLL(path_to_parser)
 except: # For installed dir
-    path_to_parser = os.path.abspath('/opt/rocm/lib/hsa-amd-aqlprofile/librocprofv2_att.so')
+    path_to_parser = os.path.abspath('/usr/lib/hsa-amd-aqlprofile/librocprofv2_att.so')
     SO = CDLL(path_to_parser)
 
 SO.AnalyseBinary.restype = ReturnInfo

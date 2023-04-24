@@ -220,6 +220,10 @@ The user has two options for building:
     - (ATT) Advanced Thread Trace: It can collect kernel running time, granular hardware metrics per kernel dispatch and provide hotspot analysis at source code level via hardware tracing.
 
       ```bash
+      # (Optional) setup ROCPROFV2_ATT_LIB_PATH environment variable for AQL-ATT.
+      # The default location is:
+      export ROCPROFV2_ATT_LIB_PATH="/usr/lib/hsa-amd-aqlprofile/librocprofv2_att.so"
+
       # ATT(Advanced Thread Trace) needs few proeconditions before running.
       #1. Make sure to generate the assembly file for application
       export HIPCC_COMPILE_FLAGS_APPEND="--save-temps -g"
