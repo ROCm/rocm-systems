@@ -33,7 +33,7 @@ usage() {
   echo -e "-h   | --help               For showing this message"
   echo -e "-b   | --build              For compiling"
   echo -e "-cb  | --clean-build        For full clean build"
-  echo -e "-act | --asan-clean-build   For compiling with ASAN library attached"
+  echo -e "-acb | --asan-clean-build   For compiling with ASAN library attached"
   exit 1
 }
 
