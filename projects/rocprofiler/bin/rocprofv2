@@ -232,7 +232,7 @@ while [ 1 ] ; do
           ATT_ARGV="$ATT_ARGV $3 \"$4\""
           shift
           shift
-        elif [[ "$3" = "--dumpfiles" || "$3" = "--ports" || "$3" = "--genasm" || "$3" == "--att_kernel" ]]; then
+        elif [[ "$3" = "--mode" || "$3" = "--ports" || "$3" = "--genasm" || "$3" == "--att_kernel" ]]; then
           ATT_ARGV="$ATT_ARGV $3 $4"
           shift
           shift

@@ -434,14 +434,24 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("assembly_code", help="Path of the assembly code")
     parser.add_argument("--trace_file", help="Filter for trace files", default=None, type=str)
-    parser.add_argument("--att_kernel", help="Kernel file", 
+    parser.add_argument("--att_kernel", help="Kernel file",
                         type=str, default=pathenv+'/*_kernel.txt')
     parser.add_argument("--ports", help="Server and websocket ports, default: 8000,18000")
     parser.add_argument("--genasm",
                         help="Generate post-processed asm file at this path", type=str, default="")
-    parser.add_argument("--dumpfiles", help="Dont open server, \
-                            dump json files to disk instead.", default=False, action='store_true')
+    parser.add_argument("--mode", help='''ATT analysis modes:\n
+                        off: Only run ATT collection, disable analysis.\n
+                        file: dump json files to disk.\n
+                        network: Open att server over the network.''', type=str, default="off")
     args = parser.parse_args()
+
+    if args.mode.lower() == 'file':
+        args.dumpfiles = True
+    elif args.mode.lower() == 'network':
+        args.dumpfiles = False
+    else:
+        print('Skipping analysis.')
+        quit()
 
     global EVENT_NAMES
     with open(os.getenv("COUNTERS_PATH"), 'r') as f:
