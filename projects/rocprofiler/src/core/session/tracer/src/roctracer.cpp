@@ -256,7 +256,7 @@ template <activity_domain_t domain> struct ApiTracer {
             assert(trace_data != nullptr);
             rocprofiler_record_tracer_t record{};
             record.header = rocprofiler_record_header_t{ROCPROFILER_TRACER_RECORD,
-                                                      rocprofiler_record_id_t{record_id}};
+                                                        rocprofiler_record_id_t{record_id}};
             record.domain = domain;
             record.operation_id = rocprofiler_tracer_operation_id_t{operation_id};
             record.correlation_id =
@@ -270,9 +270,10 @@ template <activity_domain_t domain> struct ApiTracer {
             if (auto external_id = ExternalCorrelationId()) {
               rocprofiler_record_tracer_t ext_record{};
               ext_record.header = rocprofiler_record_header_t{ROCPROFILER_TRACER_RECORD,
-                                                            rocprofiler_record_id_t{record_id}};
+                                                              rocprofiler_record_id_t{record_id}};
               ext_record.domain = ACTIVITY_DOMAIN_EXT_API;
-              ext_record.operation_id = rocprofiler_tracer_operation_id_t{ACTIVITY_EXT_OP_EXTERN_ID};
+              ext_record.operation_id =
+                  rocprofiler_tracer_operation_id_t{ACTIVITY_EXT_OP_EXTERN_ID};
               ext_record.correlation_id =
                   rocprofiler_tracer_activity_correlation_id_t{record.correlation_id};
               ext_record.external_id = rocprofiler_tracer_external_id_t{*external_id};
@@ -389,8 +390,8 @@ int TracerCallback(activity_domain_t domain, uint32_t operation_id, void* data) 
                                                  ->GetBufferLock());
             record_id = rocmtools::GetROCMToolObj()->GetUniqueRecordId();
             rocprofiler_record_tracer_t rocprofiler_record{};
-            rocprofiler_record.header = rocprofiler_record_header_t{ROCPROFILER_TRACER_RECORD,
-                                                                rocprofiler_record_id_t{record_id}};
+            rocprofiler_record.header = rocprofiler_record_header_t{
+                ROCPROFILER_TRACER_RECORD, rocprofiler_record_id_t{record_id}};
             rocprofiler_record.domain = domain;
             rocprofiler_record.external_id = rocprofiler_tracer_external_id_t{};
             rocprofiler_record.operation_id = rocprofiler_tracer_operation_id_t{record->kind};
@@ -413,8 +414,10 @@ int TracerCallback(activity_domain_t domain, uint32_t operation_id, void* data) 
                   ->AddRecord(rocprofiler_record, rocprofiler_record.api_data_handle.handle,
                               rocprofiler_record.api_data_handle.size,
                               [initial_handle](auto& rocprofiler_record, const void* data) {
-                                if (rocprofiler_record.api_data_handle.handle==initial_handle)
+                                if (rocprofiler_record.api_data_handle.handle == initial_handle &&
+                                    data != initial_handle) {
                                   free(initial_handle);
+                                }
                                 rocprofiler_record.api_data_handle.handle =
                                     static_cast<const char*>(data);
                               });
@@ -455,8 +458,8 @@ int TracerCallback(activity_domain_t domain, uint32_t operation_id, void* data) 
                                                  ->GetBufferLock());
             record_id = rocmtools::GetROCMToolObj()->GetUniqueRecordId();
             rocprofiler_record_tracer_t rocprofiler_record{};
-            rocprofiler_record.header = rocprofiler_record_header_t{ROCPROFILER_TRACER_RECORD,
-                                                                rocprofiler_record_id_t{record_id}};
+            rocprofiler_record.header = rocprofiler_record_header_t{
+                ROCPROFILER_TRACER_RECORD, rocprofiler_record_id_t{record_id}};
             rocprofiler_record.domain = domain;
             rocprofiler_record.external_id = rocprofiler_tracer_external_id_t{0};
             rocprofiler_record.operation_id = rocprofiler_tracer_operation_id_t{record->op};
@@ -479,8 +482,10 @@ int TracerCallback(activity_domain_t domain, uint32_t operation_id, void* data) 
                   ->AddRecord(rocprofiler_record, rocprofiler_record.api_data_handle.handle,
                               rocprofiler_record.api_data_handle.size,
                               [initial_handle](auto& rocprofiler_record, const void* data) {
-                                if (rocprofiler_record.api_data_handle.handle==initial_handle)
+                                if (rocprofiler_record.api_data_handle.handle == initial_handle &&
+                                    data != initial_handle) {
                                   free(initial_handle);
+                                }
                                 rocprofiler_record.api_data_handle.handle =
                                     static_cast<const char*>(data);
                               });

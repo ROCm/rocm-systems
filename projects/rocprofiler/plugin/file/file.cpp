@@ -323,9 +323,8 @@ class file_plugin_t {
                                                          profiler_record->kernel_id, &name_length));
     // Taken from rocprofiler: The size hasn't changed in  recent past
     static const uint32_t lds_block_size = 128 * 4;
-    const char* kernel_name_c;
+    const char* kernel_name_c = nullptr;
     if (name_length > 1) {
-      kernel_name_c = static_cast<const char*>(malloc(name_length * sizeof(char)));
       CHECK_ROCPROFILER(rocprofiler_query_kernel_info(ROCPROFILER_KERNEL_NAME,
                                                       profiler_record->kernel_id, &kernel_name_c));
     }
@@ -389,6 +388,9 @@ class file_plugin_t {
           }
         }
       }
+    }
+    if (kernel_name_c) {
+      free(const_cast<char*>(kernel_name_c));
     }
   }
 
