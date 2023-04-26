@@ -20,7 +20,7 @@ def compare(prev, cur):
 
 ##################################################
 ##          Generated tests                     ##
-##  Meant to run after test_analyze_worloads    ##
+##  Meant to run after test_analyze_workloads   ##
 ##################################################
 
 
