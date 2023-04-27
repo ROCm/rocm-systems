@@ -424,4 +424,29 @@
     <metric name="LDSBankConflict" expr="100*SQC_LDS_BANK_CONFLICT/SQC_LDS_IDX_ACTIVE" descr="The percentage of GPUTime LDS is stalled by bank conflicts. Value range: 0% (optimal) to 100% (bad)."></metric>
   </gfx10>
 
+  <gfx11>
+    <metric name="GPU_UTIL" expr="100*GRBM_GUI_ACTIVE/GRBM_COUNT" descr="Percentage of the time that GUI is active"></metric>
+    <metric name="WAVE_DEP_WAIT" expr="100*SQ_WAIT_ANY/SQ_WAVE_CYCLES" descr="Percentage of the SQ_WAVE_CYCLE time spent waiting for anything."></metric>
+    <metric name="WAVE_ISSUE_WAIT" expr="100*SQ_WAIT_INST_ANY/SQ_WAVE_CYCLES" descr="Percentage of the SQ_WAVE_CYCLE time spent waiting for any instruction issue."></metric>
+    <metric name="TA_BUSY_avr" expr="avr(TA_TA_BUSY,16)" descr="TA block is busy. Average over TA instances."></metric>
+    <metric name="TA_BUSY_max" expr="max(TA_TA_BUSY,16)" descr="TA block is busy. Max over TA instances."></metric>
+    <metric name="TA_BUSY_min" expr="min(TA_TA_BUSY,16)" descr="TA block is busy. Min over TA instances."></metric>
+    <metric name="TA_BUFFER_LOAD_WAVEFRONTS_sum" expr="sum(TA_BUFFER_LOAD_WAVEFRONTS,16)" descr="Number of buffer load vec32 packets processed by the TA. Sum over TA instances."></metric>
+    <metric name="TA_BUFFER_STORE_WAVEFRONTS_sum" expr="sum(TA_BUFFER_STORE_WAVEFRONTS,16)" descr="Number of buffer store vec32 packets processed by the TA. Sum over TA instances."></metric>
+    <metric name="GL2C_HIT_sum" expr="sum(GL2C_HIT,16)" descr="Number of cache hits. Sum over GL2C instances."></metric>
+    <metric name="GL2C_MISS_sum" expr="sum(GL2C_MISS,16)" descr="Number of cache misses. Sum over GL2C instances."></metric>
+    <metric name="GL2C_EA_RDREQ_32B_sum" expr="sum(GL2C_EA_RDREQ_32B,16)" descr="Number of 32-byte GL2C/EA read requests. Sum over GL2C instances."></metric>
+    <metric name="GL2C_EA_RDREQ_64B_sum" expr="sum(GL2C_EA_RDREQ_64B,16)" descr="Number of 64-byte GL2C/EA read requests. Sum over GL2C instances."></metric>
+    <metric name="GL2C_EA_RDREQ_96B_sum" expr="sum(GL2C_EA_RDREQ_96B,16)" descr="Number of 96-byte GL2C/EA read requests. Sum over GL2C instances."></metric>
+    <metric name="GL2C_EA_RDREQ_128B_sum" expr="sum(GL2C_EA_RDREQ_128B,16)" descr="Number of 128-byte GL2C/EA read requests. Sum over GL2C instances."></metric>
+    <metric name="GL2C_MC_RDREQ_sum" expr="sum(GL2C_MC_RDREQ,16)" descr="Number of GL2C/EA read requests (either 32-byte or 64-byte or 128-byte). Sum over GL2C instances."></metric>
+    <metric name="GL2C_MC_WRREQ_sum" expr="sum(GL2C_MC_WRREQ,16)" descr="Number of transactions (either 32-byte or 64-byte) going over the GL2C_MC_wrreq interface. Sum over GL2C instances."></metric>
+    <metric name="GL2C_EA_WRREQ_64B_sum" expr="sum(GL2C_EA_WRREQ_64B,16)" descr="Number of 64-byte transactions going (64-byte write or CMPSWAP) over the GL2C_EA_wrreq interface. Sum over GL2C instances."></metric>
+    <metric name="GL2C_WRREQ_STALL_max" expr="max(GL2C_MC_WRREQ_STALL,16)" descr="Number of cycles a write request was stalled. Max over GL2C instances."></metric>
+    <metric name="L2CacheHit" expr="100*sum(GL2C_HIT,16)/(sum(GL2C_HIT,16)+sum(GL2C_MISS,16))" descr="The percentage of fetch, write, atomic, and other instructions that hit the data in L2 cache. Value range: 0% (no hit) to 100% (optimal)."></metric>
+    <metric name="FETCH_SIZE" expr="(GL2C_EA_RDREQ_32B_sum*32+GL2C_EA_RDREQ_64B_sum*64+GL2C_EA_RDREQ_96B_sum*96+GL2C_EA_RDREQ_128B_sum*128)/1024" descr="The total kilobytes fetched from the video memory. This is measured with all extra fetches and any cache or memory effects taken into account."></metric>
+    <metric name="WriteUnitStalled" expr="100*GL2C_WRREQ_STALL_max/GRBM_GUI_ACTIVE" descr="The percentage of GPUTime the Write unit is stalled. Value range: 0% to 100% (bad)."></metric>
+    <metric name="LDSBankConflict" expr="100*SQC_LDS_BANK_CONFLICT/SQC_LDS_IDX_ACTIVE" descr="The percentage of GPUTime LDS is stalled by bank conflicts. Value range: 0% (optimal) to 100% (bad)."></metric>
+  </gfx11>
+
 </metrics>
