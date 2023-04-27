@@ -326,7 +326,7 @@ def getPerfLevel(device):
     ret = rocmsmi.rsmi_dev_perf_level_get(device, byref(perf))
     if rsmi_ret_ok(ret, device, 'get_perf_level'):
         return perf_level_string(perf.value)
-    return -1
+    return 'N/A'
 
 
 def getPid(name):
@@ -540,8 +540,7 @@ def printEventList(device, delay, eventList):
             print2DArray([['\rGPU[%d]:\t' % (device), ctime().split()[3], notification_type_names[data.event.value - 1],
                            data.message.decode('utf8') + '\r']])
 
-
-def printLog(device, metricName, value, extraSpace=False):
+def printLog(device, metricName, value=None, extraSpace=False):
     """ Print out to the SMI log
 
     @param device: DRM device identifier
@@ -881,7 +880,7 @@ def setClockRange(deviceList, clkType, minvalue, maxvalue, autoRespond):
     try:
         int(minvalue) & int(maxvalue)
     except ValueError:
-        printErrLog(device, 'Unable to set %s range' % (clkType))
+        printErrLog(None, 'Unable to set %s range' % (clkType))
         logging.error('%s or %s is not an integer', minvalue, maxvalue)
         RETCODE = 1
         return
@@ -1057,7 +1056,7 @@ def setClocks(deviceList, clktype, clk):
         int(check_value)
     except ValueError:
         printLog(None, 'Unable to set clock level', None)
-        logging.error('Non-integer characters are present in value %s', value)
+        logging.error('Non-integer characters are present in value %s', check_value)
         RETCODE = 1
         return
     # Generate a frequency bitmask from user input value
@@ -1136,7 +1135,7 @@ def setPerfDeterminism(deviceList, clkvalue):
     try:
         int(clkvalue)
     except ValueError:
-        printErrLog(device, 'Unable to set Performance Determinism')
+        printErrLog(None, 'Unable to set Performance Determinism')
         logging.error('%s is not an integer', clkvalue)
         RETCODE = 1
         return
@@ -1206,19 +1205,16 @@ def setRas(deviceList, rasAction, rasBlock, rasType):
     printLog(None, "This is experimental feature, use 'amdgpuras' tool for ras error manipulations for newer vbios")
 
     if rasAction not in validRasActions:
-        printLog(None, 'Unable to perform RAS command %s on block %s for type %s' % (rasAction, rasBlock, rasType),
-                 None)
+        printLog(None, 'Unable to perform RAS command %s on block %s for type %s' % (rasAction, rasBlock, rasType))
         logging.debug('Action %s is not a valid RAS command' % rasAction)
         return
     if rasBlock not in validRasBlocks:
-        printLog(None, 'Unable to perform RAS command %s on block %s for type %s' % (rasAction, rasBlock, rasType),
-                 None)
+        printLog(None, 'Unable to perform RAS command %s on block %s for type %s' % (rasAction, rasBlock, rasType))
         printLog(None, 'Block %s is not a valid RAS block' % rasBlock)
         return
 
     if rasType not in validRasTypes:
-        printLog(None, 'Unable to perform RAS command %s on block %s for type %s' % (rasAction, rasBlock, rasType),
-                 None)
+        printLog(None, 'Unable to perform RAS command %s on block %s for type %s' % (rasAction, rasBlock, rasType))
         printLog(None, 'Memory error type %s is not a valid RAS memory type' % rasAction)
         return
 
@@ -1258,7 +1254,6 @@ def setFanSpeed(deviceList, fan):
     for device in deviceList:
         if str(fan):
             fanLevel = c_int64()
-            sensor_ind = c_uint32(0)
             last_char = str(fan)[-1]
             if last_char == '%':
                 fanLevel = int(str(fan)[:-1]) / 100 * 255
@@ -1656,7 +1651,6 @@ def showClocks(deviceList):
     printLogSpacer(' Supported clock frequencies ')
     for device in deviceList:
         for clk_type in sorted(rsmi_clk_names_dict):
-            freq_list = []
             if rocmsmi.rsmi_dev_gpu_clk_freq_get(device, rsmi_clk_names_dict[clk_type], None) == 1:
                 ret = rocmsmi.rsmi_dev_gpu_clk_freq_get(device, rsmi_clk_names_dict[clk_type], byref(freq))
                 if rsmi_ret_ok(ret, device, 'get_clk_freq_' + clk_type, True):
@@ -1675,7 +1669,6 @@ def showClocks(deviceList):
             ret = rocmsmi.rsmi_dev_pci_bandwidth_get(device, byref(bw))
             if rsmi_ret_ok(ret, device, 'get_PCIe_bandwidth', True):
                 printLog(device, 'Supported %s frequencies on GPU%s' % ('PCIe', str(device)), None)
-                freq_list = []
                 for x in range(bw.transfer_rate.num_supported):
                     fr = '{:>.1f}GT/s x{}'.format(bw.transfer_rate.frequency[x] / 1000000000, bw.lanes[x])
                     if x == bw.transfer_rate.current:
@@ -1699,8 +1692,6 @@ def showCurrentClocks(deviceList, clk_defined=None, concise=False):
     global PRINT_JSON
     freq = rsmi_frequencies_t()
     bw = rsmi_pcie_bandwidth_t()
-    currentString = ''
-    sortedClocksArray = []
     if not concise:
         printLogSpacer(' Current clock frequencies ')
     for device in deviceList:
@@ -1813,7 +1804,6 @@ def showFwInfo(deviceList, fwType):
         firmware_blocks = fwType
     printLogSpacer(' Firmware Information ')
     for device in deviceList:
-        fw_ver_list = []
         fw_ver = c_uint64()
         for fw_name in firmware_blocks:
             fw_name = fw_name.upper()
@@ -2035,10 +2025,13 @@ def showMemVendor(deviceList):
     printLogSpacer(' Memory Vendor ')
     for device in deviceList:
         ret = rocmsmi.rsmi_dev_vram_vendor_get(device, vendor, 256)
-        if rsmi_ret_ok(ret, device, 'get_vram_vendor') and vendor.value.decode():
-            printLog(device, 'GPU memory vendor', vendor.value.decode())
-        else:
-            logging.debug('GPU memory vendor missing or not supported')
+        try:
+            if rsmi_ret_ok(ret, device, 'get_vram_vendor') and vendor.value.decode():
+                printLog(device, 'GPU memory vendor', vendor.value.decode())
+            else:
+                logging.debug('GPU memory vendor missing or not supported')
+        except UnicodeDecodeError:
+            printErrLog(device, 'Unable to read GPU memory vendor')
     printLogSpacer()
 
 
@@ -2051,6 +2044,8 @@ def showOverDrive(deviceList, odtype):
     rsmi_od = c_uint32()
     printLogSpacer(' OverDrive Level ')
     for device in deviceList:
+        odStr = ''
+        od = ''
         if odtype == 'sclk':
             odStr = 'GPU'
             ret = rocmsmi.rsmi_dev_overdrive_level_get(device, byref(rsmi_od))
@@ -2066,7 +2061,6 @@ def showOverDrive(deviceList, odtype):
         else:
             printErrLog(device, 'Unable to retrieve OverDrive')
             logging.error('Unsupported clock type %s', odtype)
-            RETCODE = 1
         printLog(device, odStr + ' OverDrive value (%)', od)
     printLogSpacer()
 
@@ -2361,7 +2355,7 @@ def showRasInfo(deviceList, rasType):
         for name in rasType:
             if name.upper() not in rsmi_gpu_block_d:
                 rasType.remove(name)
-                printErrLog(device, '%s is not a RAS block' % (name))
+                printErrLog(None, '%s is not a RAS block' % (name))
 
         rasBlocks = [block.upper() for block in rasType]
 
@@ -2503,15 +2497,15 @@ def showEvents(deviceList, eventTypes):
             printErrLog(None, 'Ignoring unrecognized event type %s' % (event.replace(',', '')))
     if len(eventTypeList) == 0:
         eventTypeList = notification_type_names
-    try:
         print2DArray([['DEVICE\t', 'TIME\t', 'TYPE\t', 'DESCRIPTION']])
         # Create a seperate thread for each GPU
         for device in deviceList:
-            _thread.start_new_thread(printEventList, (device, 1000, eventTypeList))
-            time.sleep(0.25)
-    except Exception as e:
-        printErrLog(device, 'Unable to start new thread. %s' % (e))
-        return
+            try:
+                _thread.start_new_thread(printEventList, (device, 1000, eventTypeList))
+                time.sleep(0.25)
+            except Exception as e:
+                printErrLog(device, 'Unable to start new thread. %s' % (e))
+                return
     while 1:  # Exit condition from user keyboard input of 'q' or 'ctrl + c'
         getch = _Getch()
         user_input = getch()
@@ -2536,16 +2530,19 @@ def printTempGraph(deviceList, delay):
         printEmptyLine()
     originalTerminalWidth = os.get_terminal_size()[0]
     while 1:  # Exit condition from user keyboard input of 'q' or 'ctrl + c'
-        printString = ''
+        terminalWidth = os.get_terminal_size()[0]
+        printStrings = list()
         for device in deviceList:
             temp = getTemp(device, 'edge')
-            percentage = temp
+            if temp == 'N/A':
+                percentage = 0
+            else:
+                percentage = temp
             if percentage >= 100:
                 percentage = 100
             if percentage < 0:
                 percentage = 0
             # Get available space based on terminal width
-            terminalWidth = os.get_terminal_size()[0]
             availableSpace = 0
             if terminalWidth >= 20:
                 availableSpace = terminalWidth - 20
@@ -2568,13 +2565,17 @@ def printTempGraph(deviceList, delay):
                 return
             # Two spare Spaces
             tempString = (str(int(temp)) + '°C').ljust(5)
-            printString += '\033[2;30;47mGPU[%d] Temp %s|%s%s\x1b[0m%s\r\n' % (device, tempString, color, paddingSpace[1:], remainderSpace)
+            printStrings.append('\033[2;30;47mGPU[%d] Temp %s|%s%s\x1b[0m%s' % (device, tempString, color, paddingSpace[1:], remainderSpace))
             originalTerminalWidth = terminalWidth
             time.sleep((delay / 1000))
+
         if terminalWidth >= 20:
-            for i in range(devices):
-                printString = '\033[A' + printString
-            print(printString, end = '\r')
+            # go up and prepare to rewrite the lines
+            for i in printStrings:
+                print('\033[A', end='\r')
+            # print all strings
+            for i in printStrings:
+                print(i, end='\r\n')
 
 
 def getGraphColor(percentage):
@@ -2947,7 +2948,7 @@ def showNodesBw(deviceList):
             else:
                 gpu_links_type[srcdevice][destdevice] = "N/A"
     if PRINT_JSON:
-        formatMatrixToJSON(deviceList, "{}-{}".format(minBW.value, maxBW.value),  " min-max bandwidth between DRM devices {} and {}".format(srcdevice, destdevice))
+        # TODO
         return
     printTableRow(None, '      ')
     for row in deviceList:
@@ -3200,7 +3201,10 @@ def rsmi_ret_ok(my_ret, device=None, metric=None, silent=False):
             returnString += '%s GPU[%s]:' % (my_ret, device)
         if metric is not None:
             returnString += ' %s: ' % (metric)
-        returnString += '%s\t' % (err_str.value.decode())
+        else:
+            metric = ''
+        if err_str.value is not None:
+            returnString += '%s\t' % (err_str.value.decode())
         if not PRINT_JSON:
             logging.debug('%s', returnString)
             if not silent:
@@ -3260,7 +3264,7 @@ def save(deviceList, savefilepath):
                                          'fan': fanSpeeds[device], 'overdrivesclk': overDriveGpu[device],
                                          'overdrivemclk': overDriveGpuMem[device], 'profile': profiles[device],
                                          'perflevel': perfLevels[device]}
-    printLog(device, 'Current settings successfully saved to', savefilepath)
+    printLog(None, 'Current settings successfully saved to', savefilepath)
     with open(savefilepath, 'w') as savefile:
         json.dump(jsonData, savefile, ensure_ascii=True)
     printLogSpacer()
