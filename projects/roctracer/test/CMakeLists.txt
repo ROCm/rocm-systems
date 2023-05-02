@@ -43,6 +43,8 @@ add_custom_target(check COMMAND ${PROJECT_BINARY_DIR}/run.sh DEPENDS mytest)
 ## Build MatrixTranspose
 set_source_files_properties(hip/MatrixTranspose.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
 hip_add_executable(MatrixTranspose hip/MatrixTranspose.cpp)
+## Adding generated build-id as hip_add_executable doesn't generate automatically
+target_link_options(MatrixTranspose PRIVATE "-Wl,--build-id=md5")
 target_include_directories(MatrixTranspose PRIVATE ${PROJECT_SOURCE_DIR}/inc)
 target_link_libraries(MatrixTranspose PRIVATE roctracer roctx)
 add_dependencies(mytest MatrixTranspose)
@@ -51,6 +53,8 @@ add_dependencies(mytest MatrixTranspose)
 set_source_files_properties(app/MatrixTranspose_test.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
 function(build_matrix_transpose_test OUTPUT_FILE DEFINITIONS)
   hip_add_executable(${OUTPUT_FILE} app/MatrixTranspose_test.cpp)
+  ## Adding generated build-id as hip_add_executable doesn't generate automatically
+  target_link_options(${OUTPUT_FILE} PRIVATE "-Wl,--build-id=md5")
   target_compile_definitions(${OUTPUT_FILE} PRIVATE ITERATIONS=100 HIP_TEST=1 ${DEFINITIONS})
   target_include_directories(${OUTPUT_FILE} PRIVATE ${PROJECT_SOURCE_DIR}/inc)
   target_link_libraries(${OUTPUT_FILE} PRIVATE roctracer roctx)
@@ -65,6 +69,8 @@ build_matrix_transpose_test(MatrixTranspose_mgpu MGPU_TEST=1)
 add_custom_command(OUTPUT MatrixTranspose.c
   COMMAND ${CMAKE_COMMAND} -E create_symlink ${CMAKE_CURRENT_SOURCE_DIR}/app/MatrixTranspose_test.cpp MatrixTranspose.c)
 hip_add_executable(MatrixTranspose_ctest MatrixTranspose.c)
+## Adding generated build-id as hip_add_executable doesn't generate automatically
+target_link_options(MatrixTranspose_ctest PRIVATE "-Wl,--build-id=md5")
 target_compile_definitions(MatrixTranspose_ctest PRIVATE HIP_TEST=0 __HIP_PLATFORM_HCC__)
 target_include_directories(MatrixTranspose_ctest PRIVATE ${PROJECT_SOURCE_DIR}/inc)
 target_link_libraries(MatrixTranspose_ctest PRIVATE roctracer roctx)
@@ -75,6 +81,7 @@ add_library(codeobj_test SHARED app/codeobj_test.cpp)
 target_include_directories(codeobj_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/inc)
 target_link_libraries(codeobj_test roctracer)
 add_dependencies(mytest codeobj_test)
+install(TARGETS codeobj_test DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/test COMPONENT tests)
 
 ## Build the hsa (standalone) copy test
 function(generate_hsaco TARGET_ID INPUT_FILE OUTPUT_FILE)
@@ -87,7 +94,7 @@ function(generate_hsaco TARGET_ID INPUT_FILE OUTPUT_FILE)
     DEPENDS ${INPUT_FILE} clang
     COMMENT "Building ${OUTPUT_FILE}..."
     VERBATIM)
-  install(FILES ${PROJECT_BINARY_DIR}/${OUTPUT_FILE} DESTINATION test/${PROJECT_NAME} COMPONENT tests)
+  install(FILES ${PROJECT_BINARY_DIR}/${OUTPUT_FILE} DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME} COMPONENT tests)
   set(HSACO_TARGET_LIST ${HSACO_TARGET_LIST} ${PROJECT_BINARY_DIR}/${OUTPUT_FILE} PARENT_SCOPE)
 endfunction(generate_hsaco)
 
@@ -105,6 +112,8 @@ add_dependencies(mytest copy)
 ## Build the ROCTX test
 set_source_files_properties(app/roctx_test.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
 hip_add_executable(roctx_test app/roctx_test.cpp)
+## Adding generated build-id as hip_add_executable doesn't generate automatically
+target_link_options(roctx_test PRIVATE "-Wl,--build-id=md5")
 target_link_libraries(roctx_test Threads::Threads roctx)
 add_dependencies(mytest roctx_test)
 
@@ -132,12 +141,16 @@ add_dependencies(mytest memory_pool)
 ## Build the activity_and_callback test
 set_source_files_properties(directed/activity_and_callback.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
 hip_add_executable(activity_and_callback directed/activity_and_callback.cpp)
+## Adding generated build-id as hip_add_executable doesn't generate automatically
+target_link_options(activity_and_callback PRIVATE "-Wl,--build-id=md5")
 target_link_libraries(activity_and_callback roctracer)
 add_dependencies(mytest activity_and_callback)
 
 ## Build the multi_pool_activities test
 set_source_files_properties(directed/multi_pool_activities.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
 hip_add_executable(multi_pool_activities directed/multi_pool_activities.cpp)
+## Adding generated build-id as hip_add_executable doesn't generate automatically
+target_link_options(multi_pool_activities PRIVATE "-Wl,--build-id=md5")
 target_link_libraries(multi_pool_activities roctracer)
 add_dependencies(mytest multi_pool_activities)
 
@@ -150,16 +163,16 @@ add_dependencies(mytest dlopen)
 ## Copy the golden traces and test scripts
 configure_file(run.sh ${PROJECT_BINARY_DIR} COPYONLY)
 execute_process(COMMAND ${CMAKE_COMMAND} -E create_symlink run.sh ${PROJECT_BINARY_DIR}/run_ci.sh)
-install(PROGRAMS ${PROJECT_BINARY_DIR}/run.sh DESTINATION test/${PROJECT_NAME} COMPONENT tests)
+install(PROGRAMS ${PROJECT_BINARY_DIR}/run.sh RENAME "run_tests.sh" DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME} COMPONENT tests)
 
 configure_file(${PROJECT_SOURCE_DIR}/script/check_trace.py ${PROJECT_BINARY_DIR}/test/check_trace.py COPYONLY)
-install(PROGRAMS ${PROJECT_BINARY_DIR}/test/check_trace.py DESTINATION test/${PROJECT_NAME}/test COMPONENT tests)
+install(PROGRAMS ${PROJECT_BINARY_DIR}/test/check_trace.py DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/test COMPONENT tests)
 
 file(GLOB files RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "golden_traces/tests_trace_cmp_levels.txt" "golden_traces/*_trace.txt")
 foreach(file ${files})
   configure_file(${file} ${PROJECT_BINARY_DIR}/test/${file} COPYONLY)
 endforeach()
-install(DIRECTORY ${PROJECT_BINARY_DIR}/test/golden_traces DESTINATION test/${PROJECT_NAME}/test COMPONENT tests)
+install(DIRECTORY ${PROJECT_BINARY_DIR}/test/golden_traces DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/test COMPONENT tests)
 
 # install all executables
 set(all_executables)
@@ -170,4 +183,4 @@ foreach(target IN LISTS all_targets)
     list(APPEND all_executables ${target})
   endif()
 endforeach()
-install(TARGETS ${all_executables} DESTINATION test/${PROJECT_NAME}/test COMPONENT tests)
+install(TARGETS ${all_executables} DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/test COMPONENT tests)

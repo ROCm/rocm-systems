@@ -167,7 +167,7 @@ if(ENABLE_ASAN_PACKAGING)
   # ASAN Package requires asan component with only libraries and license file
   set(CPACK_COMPONENTS_ALL asan)
 else()
-  set(CPACK_COMPONENTS_ALL runtime dev)
+  set(CPACK_COMPONENTS_ALL runtime dev tests)
 endif()
 
 include(CPack)

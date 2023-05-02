@@ -27,6 +27,12 @@ BIN_NAME=`basename $0`
 BIN_DIR=`dirname $0`
 cd $BIN_DIR
 
+if [ -z "$ROCTRACER_LIB_PATH" ] ; then
+  if test -f "${BIN_DIR}/../../lib/libroctracer64.so" ; then
+    ROCTRACER_LIB_PATH="${BIN_DIR}/../../lib"
+  fi
+fi
+
 # enable tools load failure reporting
 export HSA_TOOLS_REPORT_LOAD_FAILURE=1
 # paths to ROC profiler and other libraries
@@ -38,7 +44,11 @@ if [ -z "$ROCTRACER_LIB_PATH" ] ; then
   ROCTRACER_LIB_PATH="."
 fi
 if [ -z "$ROCTRACER_TOOL_PATH" ] ; then
-  ROCTRACER_TOOL_PATH="."
+  if test -f "${BIN_DIR}/../../lib/roctracer/libroctracer_tool.so" ; then
+    ROCTRACER_TOOL_PATH="${BIN_DIR}/../../lib/roctracer"
+  else
+    ROCTRACER_TOOL_PATH="."
+  fi
 fi
 
 # test filter input
@@ -79,15 +89,15 @@ eval_test() {
   if [ $test_filter = -1  -o $test_filter = $test_number ] ; then
     echo "test $test_number: $test_name \"$label\""
     echo "CMD: \"$cmdline\""
-    mkdir -p test/out
+    mkdir -p /tmp/test/out
     test_runnum=$((test_runnum + 1))
-    eval "$cmdline" 1>test/out/$test_name.out 2>test/out/$test_name.err
+    eval "$cmdline" 1>/tmp/test/out/$test_name.out 2>/tmp/test/out/$test_name.err
     is_failed=$?
     if [ $is_failed != 0 ] ; then
       echo "--- stdout ---"
-      cat test/out/$test_name.out
+      cat /tmp/test/out/$test_name.out
       echo "--- stderr ---"
-      cat test/out/$test_name.err
+      cat /tmp/test/out/$test_name.err
     fi
     if [ $is_failed = 0 ] ; then
       python3 ./test/check_trace.py -in $test_name -ck $check_trace_flag
@@ -169,7 +179,7 @@ unset ROCP_INPUT
 # Check that the tracer tool can be unloaded and then reloaded.
 eval_test "Load/Unload/Reload the tracer tool" ./test/load_unload_reload_test load_unload_reload_trace
 
-export LD_PRELOAD=./test/libcodeobj_test.so
+export LD_PRELOAD=${BIN_DIR}/test/libcodeobj_test.so
 eval_test "tool tracer codeobj" ./test/MatrixTranspose code_obj_trace
 
 unset LD_PRELOAD

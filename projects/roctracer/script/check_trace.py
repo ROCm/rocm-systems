@@ -154,7 +154,7 @@ def check_trace_status(tracename, verbose, check_trace_flag):
       return 0
 
   trace = 'test/golden_traces/' + tracename + '.txt'
-  rtrace = 'test/out/' + tracename + '.out'
+  rtrace = '/tmp/test/out/' + tracename + '.out'
   if os.path.basename(tracename) in trace2info.keys():
     (trace_level, no_events_cnt, events2ignore, events2chkcnt, events2chkord, events2ch) = trace2info[os.path.basename(tracename)]
     trace_level = trace_level.rstrip('\n')
