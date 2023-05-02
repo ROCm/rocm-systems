@@ -117,22 +117,20 @@ class Wave(ctypes.Structure):
         ('timeline_string', ctypes.c_char_p),
         ('instructions_string', ctypes.c_char_p)]
 
-
+# Flags :
+#   IS_NAVI = 0x1
 class ReturnInfo(ctypes.Structure):
     _fields_ = [('num_waves', ctypes.c_uint64),
                 ('wavedata', POINTER(Wave)),
                 ('num_events', ctypes.c_uint64),
                 ('perfevents', POINTER(PerfEvent)),
                 ('occupancy', POINTER(ctypes.c_uint64)),
-                ('num_occupancy', ctypes.c_uint64)]
+                ('num_occupancy', ctypes.c_uint64),
+                ('flags', ctypes.c_uint64)]
 
 rocprofv2_att_lib = os.getenv('ROCPROFV2_ATT_LIB_PATH')
-try: # For build dir
-    path_to_parser = os.path.abspath(rocprofv2_att_lib)
-    SO = CDLL(path_to_parser)
-except: # For installed dir
-    path_to_parser = os.path.abspath('/usr/lib/hsa-amd-aqlprofile/librocprofv2_att.so')
-    SO = CDLL(path_to_parser)
+path_to_parser = os.path.abspath(rocprofv2_att_lib)
+SO = CDLL(path_to_parser)
 
 SO.AnalyseBinary.restype = ReturnInfo
 SO.AnalyseBinary.argtypes = [ctypes.c_char_p, ctypes.c_int, ctypes.c_bool]
@@ -182,18 +180,11 @@ def getWaves(filename, target_cu, verbose):
     events = [deepcopy(info.perfevents[k]) for k in range(info.num_events)]
     occupancy = [int(info.occupancy[k]) for k in range(int(info.num_occupancy))]
 
-    '''occupancy = np.asarray([f for f in occupancy if (f&0xFF) == 3])
-    print(occupancy.size, occupancy.dtype)
-    token_time = occupancy >> 16
-    value = (occupancy >> 8) & 0xFF
-    plt.plot(token_time, value); plt.show()
-    quit()'''
-
     for wave in waves:
         wave.timeline = deepcopy(wave.timeline_string.decode("utf-8"))
         wave.instructions = deepcopy(wave.instructions_string.decode("utf-8"))
 
-    return waves, events, occupancy
+    return waves, events, occupancy, 'navi' if (info.flags & 0x1) else 'vega'
 
 
 def persist(trace_file, SIMD):
@@ -328,9 +319,6 @@ def draw_wave_metrics(selections, normalize):
     delta_step = 8
     quad_delta_time = max(delta_step,int(0.5+np.min([get_delta_time(events) for events in EVENTS])))
     maxtime = np.max([np.max([e.time for e in events]) for events in EVENTS])/quad_delta_time+1
-    event_timeline = np.zeros((16, maxtime), dtype=np.int32)
-    print('Delta:', quad_delta_time)
-    print('Max_cycles:', maxtime)
 
     if maxtime*delta_step >= COUNTERS_MAX_CAPTURES:
         delta_step = 1
@@ -468,7 +456,8 @@ if __name__ == "__main__":
         for line in lines:
             if 'PERFCOUNTER=' in line:
                 EVENT_NAMES += [clean(line).split('SQ_')[1].lower()]
-
+    if len(EVENT_NAMES) == 0:
+        EVENT_NAMES = ['SPI', 'Vdata', 'Sdata', 'LDS']
     if args.target_cu is None:
         args.target_cu = 1
 
@@ -515,13 +504,14 @@ if __name__ == "__main__":
     DBFILES = []
     global TIMELINES
     global EVENTS
-    TIMELINES = [np.zeros(int(1E4),dtype=np.int32) for k in range(5)]
+    TIMELINES = [np.zeros(int(1E4),dtype=np.int16) for k in range(5)]
     EVENTS = []
     OCCUPANCY = []
 
     analysed_filenames = []
+    SIMD_list = []
     for name in filenames:
-        SIMD, perfevents, occupancy = getWaves(name, args.target_cu, False)
+        SIMD, perfevents, occupancy, gfxv = getWaves(name, args.target_cu, False)
         if len(SIMD) == 0:
             print("Error parsing ", name)
             continue
@@ -529,17 +519,36 @@ if __name__ == "__main__":
         EVENTS.append(perfevents)
         DBFILES.append( persist(name, SIMD) )
         OCCUPANCY.append( occupancy )
-        for wave in SIMD:
+        SIMD_list.append( SIMD )
+
+    min_event_time = 2**62
+    for df in DBFILES:
+        if len(df['begin_time']) > 0:
+            min_event_time = min(min_event_time, np.min(df['begin_time']))
+    for perf in EVENTS:
+        for p in perf:
+            min_event_time = min(min_event_time, p.time)
+    for occ in OCCUPANCY:
+        min_event_time = min(min_event_time, np.min(np.array(occ)>>16))
+    print("Min time:", min_event_time)
+    for perf in EVENTS:
+        for p in perf:
+            p.time -= min_event_time
+
+    OCCUPANCY = [[max(min(int((u>>16)-min_event_time)<<16,2**42),0) | (u&0xFFFFF) for u in occ] for occ in OCCUPANCY]
+
+    for df in DBFILES:
+        for T in range(len(df['timeline'])):
+            timeline = df['timeline'][T]
             time_acc = 0
-            tuples1 = wave.timeline.split('(')
+            tuples1 = timeline.split('(')
             tuples2 = [t.split(')')[0].split(',') for t in tuples1 if t != '']
-            tuples3 = [(int(t[0]),int(t[1])) for t in tuples2]
+            tuples3 = [(0,df['begin_time'][T]-min_event_time)]+[(int(t[0]),int(t[1])) for t in tuples2]
 
             for state in tuples3:
-                if state[1] > 1E7:
+                if state[1] > 50E6:
                     print('Warning: Time limit reached for ',state[0], state[1])
                     break
-
                 if time_acc+state[1] > TIMELINES[state[0]].size:
                     TIMELINES[state[0]] = np.hstack([
                         TIMELINES[state[0]],
@@ -549,7 +558,7 @@ if __name__ == "__main__":
                 time_acc += state[1]
 
     if args.genasm and len(args.genasm) > 0:
-        flight_count = view_trace(args, code, jumps, DBFILES, analysed_filenames, True, None, OCCUPANCY, args.dumpfiles)
+        flight_count = view_trace(args, code, jumps, DBFILES, analysed_filenames, True, None, OCCUPANCY, args.dumpfiles, min_event_time, gfxv)
 
         with open(args.assembly_code, 'r') as file:
             lines = file.readlines()
@@ -561,4 +570,4 @@ if __name__ == "__main__":
             for k in keys:
                 file.write(assembly_code[k]+'\n')
     else:
-        view_trace(args, code, jumps, DBFILES, analysed_filenames, False, GeneratePIC, OCCUPANCY, args.dumpfiles)
+        view_trace(args, code, jumps, DBFILES, analysed_filenames, False, GeneratePIC, OCCUPANCY, args.dumpfiles, min_event_time, gfxv)
