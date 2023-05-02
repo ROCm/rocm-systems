@@ -22,9 +22,10 @@
                 ]
             }
         },
+        
         "cacheBW_pct": {
-            "$avg": { "$divide": [ {"$multiply":[100, "&TCP_TOTAL_CACHE_ACCESSES_sum"]}, 
-                                   {"$multiply":["&GRBM_GUI_ACTIVE", $numCU, 4]} 
+            "$avg": { "$divide": [ {"$multiply":[64, "&TCP_TOTAL_CACHE_ACCESSES_sum"]}, 
+                                   {"$subtract":["&EndNs", "&BeginNs"]} 
                                  ] 
             }
         },
@@ -51,7 +52,7 @@
         {
           "Buffer Coalescing": "&bufferCoalescing_pct",
           "Cache Util": "&cacheUtil_pct",
-          "Cache BW": "&cacheBW_pct",
+          "Cache BW": { "$divide": [{ "$multiply": [100, "&cacheBW_pct"] }, { "$multiply": [ { "$multiply": [{ "$divide": [$sclk, 1000] }, 64] }, $numCU]}] },
           "Cache Hit": "&cacheHit_pct"
      }
       ]

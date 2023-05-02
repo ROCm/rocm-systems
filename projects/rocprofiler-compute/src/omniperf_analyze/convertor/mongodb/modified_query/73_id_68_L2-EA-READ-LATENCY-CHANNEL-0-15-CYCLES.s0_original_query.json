@@ -815,7 +815,8 @@
           "EA Write Stall - IO": "&b0_ea_write_stall_io_credit",
           "EA Write Stall - GMI": "&b0_ea_write_stall_gmi_credit",
           "EA Write Stall - DRAM": "&b0_ea_write_stall_dram_credit",
-          "EA Write Stall - Starve": "&b0_ea_write_stall_too_many"
+          "EA Write Stall - Starve": "&b0_ea_write_stall_too_many",
+          "Units": "$denom"
         },
         {
           "Channel": "1",
@@ -836,7 +837,8 @@
           "EA Write Stall - IO": "&b1_ea_write_stall_io_credit",
           "EA Write Stall - GMI": "&b1_ea_write_stall_gmi_credit",
           "EA Write Stall - DRAM": "&b1_ea_write_stall_dram_credit",
-          "EA Write Stall - Starve": "&b1_ea_write_stall_too_many"
+          "EA Write Stall - Starve": "&b1_ea_write_stall_too_many",
+          "Units": "$denom"
         },
         {
           "Channel": "2",
@@ -857,7 +859,8 @@
           "EA Write Stall - IO": "&b2_ea_write_stall_io_credit",
           "EA Write Stall - GMI": "&b2_ea_write_stall_gmi_credit",
           "EA Write Stall - DRAM": "&b2_ea_write_stall_dram_credit",
-          "EA Write Stall - Starve": "&b2_ea_write_stall_too_many"
+          "EA Write Stall - Starve": "&b2_ea_write_stall_too_many",
+          "Units": "$denom"
 
         },
         {
@@ -879,7 +882,8 @@
           "EA Write Stall - IO": "&b3_ea_write_stall_io_credit",
           "EA Write Stall - GMI": "&b3_ea_write_stall_gmi_credit",
           "EA Write Stall - DRAM": "&b3_ea_write_stall_dram_credit",
-          "EA Write Stall - Starve": "&b3_ea_write_stall_too_many"
+          "EA Write Stall - Starve": "&b3_ea_write_stall_too_many",
+          "Units": "$denom"
 
         },
         {
@@ -901,7 +905,8 @@
           "EA Write Stall - IO": "&b4_ea_write_stall_io_credit",
           "EA Write Stall - GMI": "&b4_ea_write_stall_gmi_credit",
           "EA Write Stall - DRAM": "&b4_ea_write_stall_dram_credit",
-          "EA Write Stall - Starve": "&b4_ea_write_stall_too_many"
+          "EA Write Stall - Starve": "&b4_ea_write_stall_too_many",
+          "Units": "$denom"
 
         },
         {
@@ -923,7 +928,8 @@
           "EA Write Stall - IO": "&b5_ea_write_stall_io_credit",
           "EA Write Stall - GMI": "&b5_ea_write_stall_gmi_credit",
           "EA Write Stall - DRAM": "&b5_ea_write_stall_dram_credit",
-          "EA Write Stall - Starve": "&b5_ea_write_stall_too_many"
+          "EA Write Stall - Starve": "&b5_ea_write_stall_too_many",
+          "Units": "$denom"
 
         },
         {
@@ -945,7 +951,8 @@
           "EA Write Stall - IO": "&b6_ea_write_stall_io_credit",
           "EA Write Stall - GMI": "&b6_ea_write_stall_gmi_credit",
           "EA Write Stall - DRAM": "&b6_ea_write_stall_dram_credit",
-          "EA Write Stall - Starve": "&b6_ea_write_stall_too_many"
+          "EA Write Stall - Starve": "&b6_ea_write_stall_too_many",
+          "Units": "$denom"
 
         },
         {
@@ -967,7 +974,8 @@
           "EA Write Stall - IO": "&b7_ea_write_stall_io_credit",
           "EA Write Stall - GMI": "&b7_ea_write_stall_gmi_credit",
           "EA Write Stall - DRAM": "&b7_ea_write_stall_dram_credit",
-          "EA Write Stall - Starve": "&b7_ea_write_stall_too_many"
+          "EA Write Stall - Starve": "&b7_ea_write_stall_too_many",
+          "Units": "$denom"
 
         },
         {
@@ -989,7 +997,8 @@
           "EA Write Stall - IO": "&b8_ea_write_stall_io_credit",
           "EA Write Stall - GMI": "&b8_ea_write_stall_gmi_credit",
           "EA Write Stall - DRAM": "&b8_ea_write_stall_dram_credit",
-          "EA Write Stall - Starve": "&b8_ea_write_stall_too_many"
+          "EA Write Stall - Starve": "&b8_ea_write_stall_too_many",
+          "Units": "$denom"
 
         },
         {
@@ -1011,7 +1020,8 @@
           "EA Write Stall - IO": "&b9_ea_write_stall_io_credit",
           "EA Write Stall - GMI": "&b9_ea_write_stall_gmi_credit",
           "EA Write Stall - DRAM": "&b9_ea_write_stall_dram_credit",
-          "EA Write Stall - Starve": "&b9_ea_write_stall_too_many"
+          "EA Write Stall - Starve": "&b9_ea_write_stall_too_many",
+          "Units": "$denom"
 
         },
         {
@@ -1033,7 +1043,8 @@
           "EA Write Stall - IO": "&b10_ea_write_stall_io_credit",
           "EA Write Stall - GMI": "&b10_ea_write_stall_gmi_credit",
           "EA Write Stall - DRAM": "&b10_ea_write_stall_dram_credit",
-          "EA Write Stall - Starve": "&b10_ea_write_stall_too_many"
+          "EA Write Stall - Starve": "&b10_ea_write_stall_too_many",
+          "Units": "$denom"
 
         },
         {
@@ -1055,7 +1066,8 @@
           "EA Write Stall - IO": "&b11_ea_write_stall_io_credit",
           "EA Write Stall - GMI": "&b11_ea_write_stall_gmi_credit",
           "EA Write Stall - DRAM": "&b11_ea_write_stall_dram_credit",
-          "EA Write Stall - Starve": "&b11_ea_write_stall_too_many"
+          "EA Write Stall - Starve": "&b11_ea_write_stall_too_many",
+          "Units": "$denom"
 
         },
         {
@@ -1077,7 +1089,8 @@
           "EA Write Stall - IO": "&b12_ea_write_stall_io_credit",
           "EA Write Stall - GMI": "&b12_ea_write_stall_gmi_credit",
           "EA Write Stall - DRAM": "&b12_ea_write_stall_dram_credit",
-          "EA Write Stall - Starve": "&b12_ea_write_stall_too_many"
+          "EA Write Stall - Starve": "&b12_ea_write_stall_too_many",
+          "Units": "$denom"
 
         },
         {
@@ -1099,7 +1112,8 @@
           "EA Write Stall - IO": "&b13_ea_write_stall_io_credit",
           "EA Write Stall - GMI": "&b13_ea_write_stall_gmi_credit",
           "EA Write Stall - DRAM": "&b13_ea_write_stall_dram_credit",
-          "EA Write Stall - Starve": "&b13_ea_write_stall_too_many"
+          "EA Write Stall - Starve": "&b13_ea_write_stall_too_many",
+          "Units": "$denom"
 
 
         },
@@ -1122,7 +1136,8 @@
           "EA Write Stall - IO": "&b14_ea_write_stall_io_credit",
           "EA Write Stall - GMI": "&b14_ea_write_stall_gmi_credit",
           "EA Write Stall - DRAM": "&b14_ea_write_stall_dram_credit",
-          "EA Write Stall - Starve": "&b14_ea_write_stall_too_many"
+          "EA Write Stall - Starve": "&b14_ea_write_stall_too_many",
+          "Units": "$denom"
 
 
         },
@@ -1145,7 +1160,8 @@
           "EA Write Stall - IO": "&b15_ea_write_stall_io_credit",
           "EA Write Stall - GMI": "&b15_ea_write_stall_gmi_credit",
           "EA Write Stall - DRAM": "&b15_ea_write_stall_dram_credit",
-          "EA Write Stall - Starve": "&b15_ea_write_stall_too_many"
+          "EA Write Stall - Starve": "&b15_ea_write_stall_too_many",
+          "Units": "$denom"
         }
       ]
   }},
