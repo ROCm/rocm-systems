@@ -54,9 +54,7 @@ HIDDEN_COLUMNS = ["Tips", "coll_level"]
 IS_DARK = True  # default dark theme
 
 # Define any elements which will have full width
-full_width_elmt = {
-    1801
-}
+full_width_elmt = {1801}
 
 # Define different types of bar charts
 barchart_elements = {
@@ -589,7 +587,11 @@ def build_layout(
                         if table_config["id"] in full_width_elmt:
                             # Optionally override default (50%) width
                             html_section.append(
-                                html.Div(className="float-child", children=content, style={"width": "100%"})
+                                html.Div(
+                                    className="float-child",
+                                    children=content,
+                                    style={"width": "100%"},
+                                )
                             )
                         else:
                             html_section.append(

@@ -135,7 +135,8 @@ def to_median(a):
         return a.median()
     else:
         raise Exception("to_median: unsupported type.")
-    
+
+
 def to_std(a):
     if isinstance(a, pd.core.series.Series):
         return a.std()
