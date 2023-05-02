@@ -490,5 +490,5 @@ def parse(my_parser):
     analyze_group.add_argument(
         "--random-port",
         action="store_true",
-        help="\t\tRandomly generate a port to launch GUI application.\n\t\tRegistered Ports range inclusive (1024-49151)."
+        help="\t\tRandomly generate a port to launch GUI application.\n\t\tRegistered Ports range inclusive (1024-49151).",
     )
