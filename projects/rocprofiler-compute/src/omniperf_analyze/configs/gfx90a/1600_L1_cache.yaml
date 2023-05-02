@@ -176,9 +176,12 @@ Panel Config:
             unit: (Req + $normUnit)
             tips: 
           L1-L2 BW:
-            avg: AVG(((64 * (TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / $denom))
-            min: MIN(((64 * (TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / $denom))
-            max: MAX(((64 * (TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / $denom))
+            avg: AVG(((64 * (((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum) + TCP_TCC_ATOMIC_WITH_RET_REQ_sum)
+              + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / $denom))
+            min: AVG(((64 * (((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum) + TCP_TCC_ATOMIC_WITH_RET_REQ_sum)
+              + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / $denom))
+            max: AVG(((64 * (((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum) + TCP_TCC_ATOMIC_WITH_RET_REQ_sum)
+              + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / $denom))
             unit: (Bytes + $normUnit)
             tips:
           L1-L2 Read:
