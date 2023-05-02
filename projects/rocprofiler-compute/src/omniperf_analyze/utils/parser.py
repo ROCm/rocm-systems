@@ -88,6 +88,7 @@ supported_call = {
     # simple aggr
     "AVG": "to_avg",
     "MEDIAN": "to_median",
+    "STD": "to_std",
     # functions apply to whole column of df or a single value
     "TO_INT": "to_int",
     # Support the below with 2 inputs
@@ -134,6 +135,12 @@ def to_median(a):
         return a.median()
     else:
         raise Exception("to_median: unsupported type.")
+    
+def to_std(a):
+    if isinstance(a, pd.core.series.Series):
+        return a.std()
+    else:
+        raise Exception("to_std: unsupported type.")
 
 
 def to_int(a):
@@ -731,7 +738,7 @@ def build_comparable_columns(time_unit):
     Build comparable columns/headers for display
     """
     comparable_columns = schema.supported_field
-    top_stat_base = ["Count", "Sum", "Mean", "Median"]
+    top_stat_base = ["Count", "Sum", "Mean", "Median", "Standard Deviation"]
 
     for h in top_stat_base:
         comparable_columns.append(h + "(" + time_unit + ")")
