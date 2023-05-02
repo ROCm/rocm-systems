@@ -38,6 +38,7 @@ import sys
 
 
 import copy
+import random
 import sys
 import argparse
 import os.path
@@ -170,7 +171,10 @@ def run_gui(args, runs):
             args.verbose,
             args,
         )
-        app.run_server(debug=False, host="0.0.0.0", port=args.gui)
+        if(args.random_port):
+            app.run_server(debug=False, host="0.0.0.0", port=random.randint(1024, 49151))
+        else:
+            app.run_server(debug=False, host="0.0.0.0", port=args.gui)
     else:
         print("Multiple runs not yet supported in GUI. Retry without --gui flag.")
 
@@ -281,4 +285,7 @@ def analyze(args):
     if args.gui:
         run_gui(args, runs)
     else:
+        if(args.random_port):
+            print("ERROR: --gui flag required to enable --random-port")
+            sys.exit(1)
         run_cli(args, runs)

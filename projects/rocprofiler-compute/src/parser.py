@@ -487,3 +487,8 @@ def parse(my_parser):
         const=8050,
         help="\t\tActivate a GUI to interate with Omniperf metrics.\n\t\tOptionally, specify port to launch application (DEFAULT: 8050)",
     )
+    analyze_group.add_argument(
+        "--random-port",
+        action="store_true",
+        help="\t\tRandomly generate a port to launch GUI application.\n\t\tRegistered Ports range inclusive (1024-49151)."
+    )
