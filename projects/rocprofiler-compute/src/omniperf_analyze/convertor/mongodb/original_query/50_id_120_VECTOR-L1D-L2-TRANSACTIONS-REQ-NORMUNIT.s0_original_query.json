@@ -145,7 +145,7 @@
         {
           "Xfer": "Read",
           "Coherency": "NC",
-          "Mean": "&readNC_avg",
+          "Avg": "&readNC_avg",
           "Min": "&readNC_min",
           "Max": "&readNC_max",
           "Unit": {"$concat": ["Req ", $normUnit]}
@@ -153,7 +153,7 @@
         {
           "Xfer": "Read",
           "Coherency": "UC",
-          "Mean": "&readUC_avg",
+          "Avg": "&readUC_avg",
           "Min": "&readUC_min",
           "Max": "&readUC_max",
           "Unit": {"$concat": ["Req ", $normUnit]}
@@ -161,7 +161,7 @@
         {
           "Xfer": "Read",
           "Coherency": "CC",
-          "Mean": "&readCC_avg",
+          "Avg": "&readCC_avg",
           "Min": "&readCC_min",
           "Max": "&readCC_max",
           "Unit": {"$concat": ["Req ", $normUnit]}
@@ -169,7 +169,7 @@
         {
           "Xfer": "Read",
           "Coherency": "RW",
-          "Mean": "&readRW_avg",
+          "Avg": "&readRW_avg",
           "Min": "&readRW_min",
           "Max": "&readRW_max",
           "Unit": {"$concat": ["Req ", $normUnit]}
@@ -177,7 +177,7 @@
         {
           "Xfer": "Write",
           "Coherency": "RW",
-          "Mean": "&writeRW_avg",
+          "Avg": "&writeRW_avg",
           "Min": "&writeRW_min",
           "Max": "&writeRW_max",
           "Unit": {"$concat": ["Req ", $normUnit]}
@@ -185,7 +185,7 @@
         {
           "Xfer": "Write",
           "Coherency": "NC",
-          "Mean": "&writeNC_avg",
+          "Avg": "&writeNC_avg",
           "Min": "&writeNC_min",
           "Max": "&writeNC_max",
           "Unit": {"$concat": ["Req ", $normUnit]}
@@ -193,7 +193,7 @@
         {
           "Xfer": "Write",
           "Coherency": "UC",
-          "Mean": "&writeUC_avg",
+          "Avg": "&writeUC_avg",
           "Min": "&writeUC_min",
           "Max": "&writeUC_max",
           "Unit": {"$concat": ["Req ", $normUnit]}
@@ -201,7 +201,7 @@
         {
           "Xfer": "Write",
           "Coherency": "CC",
-          "Mean": "&writeCC_avg",
+          "Avg": "&writeCC_avg",
           "Min": "&writeCC_min",
           "Max": "&writeCC_max",
           "Unit": {"$concat": ["Req ", $normUnit]}
@@ -210,7 +210,7 @@
         {
           "Xfer": "Atomic",
           "Coherency": "NC",
-          "Mean": "&atomicNC_avg",
+          "Avg": "&atomicNC_avg",
           "Min": "&atomicNC_min",
           "Max": "&atomicNC_max",
           "Unit": {"$concat": ["Req ", $normUnit]}
@@ -218,7 +218,7 @@
         {
           "Xfer": "Atomic",
           "Coherency": "UC",
-          "Mean": "&atomicUC_avg",
+          "Avg": "&atomicUC_avg",
           "Min": "&atomicUC_min",
           "Max": "&atomicUC_max",
           "Unit": {"$concat": ["Req ", $normUnit]}
@@ -226,7 +226,7 @@
         {
           "Xfer": "Atomic",
           "Coherency": "CC",
-          "Mean": "&atomicCC_avg",
+          "Avg": "&atomicCC_avg",
           "Min": "&atomicCC_min",
           "Max": "&atomicCC_max",
           "Unit": {"$concat": ["Req ", $normUnit]}
@@ -234,7 +234,7 @@
         {
           "Xfer": "Atomic",
           "Coherency": "RW",
-          "Mean": "&atomicRW_avg",
+          "Avg": "&atomicRW_avg",
           "Min": "&atomicRW_min",
           "Max": "&atomicRW_max",
           "Unit": {"$concat": ["Req ", $normUnit]}

@@ -53,13 +53,16 @@ HIDDEN_SECTIONS = ["Memory Chart Analysis", "Kernels"]
 HIDDEN_COLUMNS = ["Tips", "coll_level"]
 IS_DARK = True  # default dark theme
 
+# Define any elements which will have full width
+full_width_elmt = {1801}
+
 # Define different types of bar charts
 barchart_elements = {
     # Group table ids by chart type
     "instr_mix": [1001, 1002],
     "multi_bar": [1604, 1704],
     "sol": [1101, 1201, 1301, 1401, 1601, 1701],
-    "l2_cache_per_chan": [1801, 1802],
+    "l2_cache_per_chan": [1802, 1803],
 }
 
 
@@ -580,11 +583,20 @@ def build_layout(
                                     style={"color": "white" if IS_DARK else ""},
                                 ),
                             )
-
                         # Update content for this section
-                        html_section.append(
-                            html.Div(className="float-child", children=content)
-                        )
+                        if table_config["id"] in full_width_elmt:
+                            # Optionally override default (50%) width
+                            html_section.append(
+                                html.Div(
+                                    className="float-child",
+                                    children=content,
+                                    style={"width": "100%"},
+                                )
+                            )
+                        else:
+                            html_section.append(
+                                html.Div(className="float-child", children=content)
+                            )
 
                 # Append the new section with all of it's contents
                 div_children.append(

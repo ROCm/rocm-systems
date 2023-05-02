@@ -1,0 +1,77 @@
+[
+    {"$match": {
+      "Index": { "$in": [${DispatchIDFilter:raw}] },
+      "gpu-id": { "$in": [${gpuFilter:raw}] },
+      "KernelName": { "$in": ${KernelNameFilter:json}}
+    }},
+    {"$addFields": {
+      "denom": {
+             "$switch" : {
+                "branches": [
+                   {
+                        "case":  { "$eq": [ $normUnit, "per Wave"]} ,
+                        "then":  "&SQ_WAVES"
+                   },
+                   {
+                        "case":  { "$eq": [ $normUnit, "per Cycle"]} ,
+                        "then":  "&GRBM_GUI_ACTIVE"
+                   },
+                   {
+                        "case":  { "$eq": [ $normUnit, "per Sec"]} ,
+                        "then":  {"$divide":[{"$subtract": ["&EndNs", "&BeginNs" ]}, 1000000000]}
+                   }
+                ],
+               "default": 1
+             }         
+      } 
+    }},
+    {"$group": {
+        "_id": null,
+        "mfma_i8": {
+          "$avg": { "$divide": [ "&SQ_INSTS_VALU_MFMA_I8", "&denom" ] }
+        },
+        "mfma_f16": {
+          "$avg": { "$divide": [ "&SQ_INSTS_VALU_MFMA_F16", "&denom" ] }
+        },
+        "mfma_bf16": {
+          "$avg": { "$divide": [ "&SQ_INSTS_VALU_MFMA_BF16", "&denom" ] }
+        },
+        "mfma_f32": {
+          "$avg": { "$divide": [ "&SQ_INSTS_VALU_MFMA_F32", "&denom" ] }
+        },
+        "mfma_f64": {
+          "$avg": { "$divide": [ "&SQ_INSTS_VALU_MFMA_F64", "&denom" ] }
+        }
+      }
+    },
+    {"$set": {
+      "array": [
+          {
+            "type": "MFMA-I8",
+            "count": "&mfma_i8"
+          },
+          {
+            "type": "MFMA-F16",
+            "count": "&mfma_f16"
+          },
+          {
+            "type": "MFMA-BF16",
+            "count": "&mfma_bf16"
+          },
+          {
+            "type": "MFMA-F32",
+            "count": "&mfma_f32"
+          },
+          {
+            "type": "MFMA-F64",
+            "count": "&mfma_f64"
+          }
+        ]
+    }},
+    {"$unwind": {
+      "path": "&array"
+    }},
+    {"$replaceRoot": {
+      "newRoot": "&array"
+    }}
+  ]

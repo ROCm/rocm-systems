@@ -44,6 +44,10 @@
             "atomicReq_min":{"$min": {"$divide": [ { "$add": ["&TCP_TOTAL_ATOMIC_WITH_RET_sum", "&TCP_TOTAL_ATOMIC_WITHOUT_RET_sum"] }, "&denom"]}},
             "atomicReq_max":{"$max": {"$divide": [ { "$add": ["&TCP_TOTAL_ATOMIC_WITH_RET_sum", "&TCP_TOTAL_ATOMIC_WITHOUT_RET_sum"] }, "&denom"]}},
 
+            "cacheBW_avg":{"$avg": { "$divide": [{ "$multiply": ["&TCP_TOTAL_CACHE_ACCESSES_sum", 64 ] }, { "$subtract": ["&EndNs", "&BeginNs"] } ] }},
+            "cacheBW_min":{"$min": { "$divide": [{ "$multiply": ["&TCP_TOTAL_CACHE_ACCESSES_sum", 64 ] }, { "$subtract": ["&EndNs", "&BeginNs"] } ] }},
+            "cacheBW_max":{"$max": { "$divide": [{ "$multiply": ["&TCP_TOTAL_CACHE_ACCESSES_sum", 64 ] }, { "$subtract": ["&EndNs", "&BeginNs"] } ] }},
+            
             "cacheAccess_avg":{"$avg": {"$divide": [ "&TCP_TOTAL_CACHE_ACCESSES_sum", "&denom"]}},
             "cacheAccess_min":{"$min": {"$divide": [ "&TCP_TOTAL_CACHE_ACCESSES_sum", "&denom"]}},
             "cacheAccess_max":{"$max": {"$divide": [ "&TCP_TOTAL_CACHE_ACCESSES_sum", "&denom"]}},
@@ -115,20 +119,23 @@
                         null
                 ]
             }},
+            
+            "l2_l1_read_avg":{"$avg": {"$divide": [ "&TCP_TCC_READ_REQ_sum", "&denom"]}},
+            "l2_l1_read_min":{"$min": {"$divide": [ "&TCP_TCC_READ_REQ_sum", "&denom"]}},
+            "l2_l1_read_max":{"$max": {"$divide": [ "&TCP_TCC_READ_REQ_sum", "&denom"]}},
+
+            "l2_l1_write_avg":{"$avg": {"$divide": [ "&TCP_TCC_WRITE_REQ_sum", "&denom"] }},
+            "l2_l1_write_min":{"$min": {"$divide": [ "&TCP_TCC_WRITE_REQ_sum", "&denom"] }},
+            "l2_l1_write_max":{"$max": {"$divide": [ "&TCP_TCC_WRITE_REQ_sum", "&denom"] }},
 
 
-            "l2TCRRead_avg":{"$avg": {"$divide": [ "&TCP_TCC_READ_REQ_sum", "&denom"]}},
-            "l2TCRRead_min":{"$min": {"$divide": [ "&TCP_TCC_READ_REQ_sum", "&denom"]}},
-            "l2TCRRead_max":{"$max": {"$divide": [ "&TCP_TCC_READ_REQ_sum", "&denom"]}},
+            "l2_l1_atomic_avg":{"$avg": {"$divide": [ { "$add": ["&TCP_TCC_ATOMIC_WITH_RET_REQ_sum", "&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum"] }, "&denom"] }},
+            "l2_l1_atomic_min":{"$min": {"$divide": [ { "$add": ["&TCP_TCC_ATOMIC_WITH_RET_REQ_sum", "&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum"] }, "&denom"] }},
+            "l2_l1_atomic_max":{"$max": {"$divide": [ { "$add": ["&TCP_TCC_ATOMIC_WITH_RET_REQ_sum", "&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum"] }, "&denom"] }},
 
-
-            "l2Write_avg":{"$avg": {"$divide": [ "&TCP_TCC_WRITE_REQ_sum", "&denom"] }},
-            "l2Write_min":{"$min": {"$divide": [ "&TCP_TCC_WRITE_REQ_sum", "&denom"] }},
-            "l2Write_max":{"$max": {"$divide": [ "&TCP_TCC_WRITE_REQ_sum", "&denom"] }},
-
-            "l2Atomic_avg":{"$avg": {"$divide": [ { "$add": ["&TCP_TCC_ATOMIC_WITH_RET_REQ_sum", "&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum"] }, "&denom"] }},
-            "l2Atomic_min":{"$min": {"$divide": [ { "$add": ["&TCP_TCC_ATOMIC_WITH_RET_REQ_sum", "&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum"] }, "&denom"] }},
-            "l2Atomic_max":{"$max": {"$divide": [ { "$add": ["&TCP_TCC_ATOMIC_WITH_RET_REQ_sum", "&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum"] }, "&denom"] }},
+            "l2_l1_bw_avg":{"$avg": {"$divide": [{"$multiply": [64, {"$add": ["&TCP_TCC_READ_REQ_sum", "&TCP_TCC_WRITE_REQ_sum", "&TCP_TCC_ATOMIC_WITH_RET_REQ_sum", "&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum"] } ]}, "&denom" ]}},
+            "l2_l1_bw_min":{"$min": {"$divide": [{"$multiply": [64, {"$add": ["&TCP_TCC_READ_REQ_sum", "&TCP_TCC_WRITE_REQ_sum", "&TCP_TCC_ATOMIC_WITH_RET_REQ_sum", "&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum"] } ]}, "&denom" ]}},
+            "l2_l1_bw_max":{"$max": {"$divide": [{"$multiply": [64, {"$add": ["&TCP_TCC_READ_REQ_sum", "&TCP_TCC_WRITE_REQ_sum", "&TCP_TCC_ATOMIC_WITH_RET_REQ_sum", "&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum"] } ]}, "&denom" ]}},
 
             "invalidate_avg":{"$avg": {"$divide": [ "&TCP_TOTAL_WRITEBACK_INVALIDATES_sum", "&denom"] }},
             "invalidate_min":{"$min": {"$divide": [ "&TCP_TOTAL_WRITEBACK_INVALIDATES_sum", "&denom"] }},
@@ -229,10 +236,17 @@
         },
         {
             "metric": "Atomic Req",
-            "avg": "&atomicReq_avg",
-            "min": "&atomicReq_min",
-            "max": "&atomicReq_max",
+            "avg": "&l2_l1_atomic_avg",
+            "min": "&l2_l1_atomic_min",
+            "max": "&l2_l1_atomic_max",
             "Unit": {"$concat": ["Req ", $normUnit]}
+        },
+        {
+            "metric": "Cache BW",
+            "avg": "&cacheBW_avg",
+            "min": "&cacheBW_min",
+            "max": "&cacheBW_max",
+            "Unit": "GB/s"
         },
         {
             "metric": "Cache Accesses",
@@ -263,24 +277,31 @@
             "Unit": {"$concat": ["", $normUnit]}
         },
         {
-            "metric": "L1-TCR Read",
-            "avg": "&l2TCRRead_avg",
-            "min": "&l2TCRRead_min",
-            "max": "&l2TCRRead_max",
+            "metric": "L1-L2 BW",
+            "avg": "&l2_l1_bw_avg",
+            "min": "&l2_l1_bw_avg",
+            "max": "&l2_l1_bw_avg",
+            "Unit": {"$concat": ["Bytes ", $normUnit]}
+        },
+        {
+            "metric": "L1-L2 Read",
+            "avg": "&l2_l1_read_avg",
+            "min": "&l2_l1_read_min",
+            "max": "&l2_l1_read_max",
             "Unit": {"$concat": ["Req ", $normUnit]}
         },
         {
             "metric": "L1-L2 Write",
-            "avg": "&l2Write_avg",
-            "min": "&l2Write_min",
-            "max": "&l2Write_max",
+            "avg": "&l2_l1_write_avg",
+            "min": "&l2_l1_write_min",
+            "max": "&l2_l1_write_max",
             "Unit": {"$concat": ["Req ", $normUnit]}
         },
         {
             "metric": "L1-L2 Atomic",
-            "avg": "&l2Atomic_avg",
-            "min": "&l2Atomic_min",
-            "max": "&l2Atomic_max",
+            "avg": "&l2_l1_atomic_avg",
+            "min": "&l2_l1_atomic_min",
+            "max": "&l2_l1_atomic_max",
             "Unit": {"$concat": ["Req ", $normUnit]}
         },
         {

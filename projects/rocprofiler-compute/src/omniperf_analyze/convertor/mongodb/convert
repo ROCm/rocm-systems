@@ -36,7 +36,7 @@ import os
 import argparse
 from pathlib import Path
 
-input_file_path = '../../../../dashboards/Omniperf_v1.0.3_pub.json'
+input_file_path = '../../../../dashboards/Omniperf_v1.0.8_pub.json'
 #df = pd.read_json(file_path)
 
 staging_path = "./staging/"
@@ -90,6 +90,7 @@ supported_call = {
     # simple aggr
     "$avg": "AVG",
     "$median": "MEDIAN",
+    "$stdDevPop": "STD",
 
     # If the below has single arg, like(expr), it is a aggr.
     # If it has args like list [], support scalar only for now.
@@ -1006,9 +1007,10 @@ def gen_from_modified_query():
         215: "Dispatch IDs - Baseline",  # Unnecessary
         157: "Kernel Time Histogram",  # Not supported yet
         171: "Memory Chart (Normalization: $normUnit)",  # Not supported yet
-        237: "$soc Roofline",  # Not supported yet
-        253: "EMPIRICAL-ROOFLINE-MI200",
         251: "TOP-DISPATCHES",
+        253: "EMPIRICAL-ROOFLINE-FP32FP64-MI200",
+        312: "EMPIRICAL-ROOFLINE-FP16INT8-MI200",
+
 
         # manual
         159: "System Info",  # raw_csv_table with redifined name for each item

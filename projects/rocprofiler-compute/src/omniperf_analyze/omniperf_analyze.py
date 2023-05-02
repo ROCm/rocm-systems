@@ -172,7 +172,7 @@ def run_gui(args, runs):
         )
         app.run_server(debug=False, host="0.0.0.0", port=args.gui)
     else:
-        print("Multiple runs not supported yet")
+        print("Multiple runs not yet supported in GUI. Retry without --gui flag.")
 
 
 def run_cli(args, runs):
