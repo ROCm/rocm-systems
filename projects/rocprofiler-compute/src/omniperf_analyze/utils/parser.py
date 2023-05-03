@@ -718,22 +718,6 @@ def load_table_data(workload, dir, is_gui, debug, verbose):
         debug,
     )
 
-    # Save workload
-    name = "saved_analysis"
-    out_path = os.path.join(dir, name)
-    try:
-        os.mkdir(out_path)
-        if verbose >= 1:
-            print("Created a Saved Analysis folder")
-    except OSError as error:
-        if verbose >= 1:
-            print("Saved Analysis folder exists")
-    for id, df in workload.dfs.items():
-        if "coll_level" in list(df.columns):
-            df = df.drop(["coll_level", "Tips"], axis=1)
-        df.to_csv(os.path.join(out_path, str(id) + ".csv"), index=False)
-
-
 def build_comparable_columns(time_unit):
     """
     Build comparable columns/headers for display
