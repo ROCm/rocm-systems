@@ -143,6 +143,11 @@ def show_all(runs, archConfigs, output, decimal, time_unit, selected_cols, verbo
 
                                         df = pd.concat([df, t_df], axis=1)
                                     else:
+                                        cur_df[header] = [
+                                            round(float(x), decimal) if x != "" else x
+                                            for x in base_df[header]
+                                        ]
+
                                         df = pd.concat([df, cur_df[header]], axis=1)
 
                 if not df.empty:
