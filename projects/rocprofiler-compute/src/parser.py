@@ -446,6 +446,14 @@ def parse(my_parser):
         help="\t\tSpecify the normalization unit: (DEFAULT: per_wave)\n\t\t   per_wave\n\t\t   per_cycle\n\t\t   per_second\n\t\t   per_kernel",
     )
     analyze_group.add_argument(
+        "--max-kernel-num",
+        dest="max_kernel_num",
+        metavar="",
+        type=int,
+        default=10,
+        help="\t\tSpecify the maximum number of kernels shown",
+    )
+    analyze_group.add_argument(
         "--config-dir",
         dest="config_dir",
         metavar="",
