@@ -25,6 +25,7 @@ THE SOFTWARE.
 #include <string.h>
 
 #include <hip/hip_runtime.h>
+#include "utils/test_helper.h"
 
 #include <fstream>
 #include <iostream>
@@ -33,44 +34,39 @@ THE SOFTWARE.
 #define SUCCESS 0
 #define FAILURE 1
 
-__global__ void helloworld(char *in, char *out) {
+__global__ void helloworld(char* in, char* out) {
   int num = hipThreadIdx_x + hipBlockDim_x * hipBlockIdx_x;
   out[num] = in[num] + 1;
 }
 
-int main(int argc, char *argv[]) {
+int main(int argc, char* argv[]) {
   hipDeviceProp_t devProp;
-  hipGetDeviceProperties(&devProp, 0);
+  HIP_RC(hipGetDeviceProperties(&devProp, 0));
   std::cout << " System minor " << devProp.minor << std::endl;
   std::cout << " System major " << devProp.major << std::endl;
   std::cout << " agent prop name " << devProp.name << std::endl;
 
   /* Initial input,output for the host and create memory objects for the
    * kernel*/
-  const char *input = "GdkknVnqkc";
+  const char* input = "GdkknVnqkc";
   size_t strlength = strlen(input);
   std::cout << "input string:" << std::endl;
   std::cout << input << std::endl;
-  char *output = reinterpret_cast<char *>(malloc(strlength + 1));
+  char* output = reinterpret_cast<char*>(malloc(strlength + 1));
 
-  char *inputBuffer;
-  char *outputBuffer;
-  hipMalloc(reinterpret_cast<void **>(&inputBuffer),
-            (strlength + 1) * sizeof(char));
-  hipMalloc(reinterpret_cast<void **>(&outputBuffer),
-            (strlength + 1) * sizeof(char));
+  char* inputBuffer;
+  char* outputBuffer;
+  HIP_RC(hipMalloc(reinterpret_cast<void**>(&inputBuffer), (strlength + 1) * sizeof(char)));
+  HIP_RC(hipMalloc(reinterpret_cast<void**>(&outputBuffer), (strlength + 1) * sizeof(char)));
 
-  hipMemcpy(inputBuffer, input, (strlength + 1) * sizeof(char),
-            hipMemcpyHostToDevice);
+  HIP_RC(hipMemcpy(inputBuffer, input, (strlength + 1) * sizeof(char), hipMemcpyHostToDevice));
 
-  hipLaunchKernelGGL(helloworld, dim3(1), dim3(strlength), 0, 0, inputBuffer,
-                     outputBuffer);
+  HIP_KL(hipLaunchKernelGGL(helloworld, dim3(1), dim3(strlength), 0, 0, inputBuffer, outputBuffer));
 
-  hipMemcpy(output, outputBuffer, (strlength + 1) * sizeof(char),
-            hipMemcpyDeviceToHost);
+  HIP_RC(hipMemcpy(output, outputBuffer, (strlength + 1) * sizeof(char), hipMemcpyDeviceToHost));
 
-  hipFree(inputBuffer);
-  hipFree(outputBuffer);
+  HIP_RC(hipFree(inputBuffer));
+  HIP_RC(hipFree(outputBuffer));
 
   output[strlength] = '\0';  // Add the terminal character to the end of output.
   std::cout << "\noutput string:" << std::endl;

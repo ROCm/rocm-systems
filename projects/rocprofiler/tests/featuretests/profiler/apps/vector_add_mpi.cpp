@@ -27,44 +27,21 @@ THE SOFTWARE.
 #include <iostream>
 
 #include "hip/hip_runtime.h"
-
-#define HIP_RC(call)                                                           \
-  do {                                                                         \
-    hipError_t err = call;                                                     \
-    if (hipSuccess != err) {                                                   \
-      printf("HIP ERROR (code = %d, %s) at %s:%d\n", err,                      \
-             hipGetErrorString(err), __FILE__, __LINE__);                      \
-      assert(0);                                                               \
-      exit(1);                                                                 \
-    }                                                                          \
-  } while (0)
-
-#define HIP_KL(call)                                                           \
-  do {                                                                         \
-    call;                                                                      \
-    hipError_t err = hipGetLastError();                                        \
-    if (hipSuccess != err) {                                                   \
-      printf("HIP ERROR (code = %d, %s) at %s:%d\n", err,                      \
-             hipGetErrorString(err), __FILE__, __LINE__);                      \
-      assert(0);                                                               \
-      exit(1);                                                                 \
-    }                                                                          \
-  } while (0)
+#include "utils/test_helper.h"
 
 // CUDA kernel to add elements of two arrays
-__global__ void add(int n, float *x, float *y) {
+__global__ void add(int n, float* x, float* y) {
   int index = blockIdx.x * blockDim.x + threadIdx.x;
   int stride = blockDim.x * gridDim.x;
-  for (int i = index; i < n; i += stride)
-    y[i] = x[i] + y[i];
+  for (int i = index; i < n; i += stride) y[i] = x[i] + y[i];
 }
 
-int main(int argc, char *argv[]) {
+int main(int argc, char* argv[]) {
   int N = 1 << 20;
-  float *x = new float[N];
-  float *y = new float[N];
-  float *d_x;
-  float *d_y;
+  float* x = new float[N];
+  float* y = new float[N];
+  float* d_x;
+  float* d_y;
 
   int myId;
   int devId;
@@ -75,24 +52,22 @@ int main(int argc, char *argv[]) {
   MPI_Init(&argc, &argv);
   MPI_Comm_rank(MPI_COMM_WORLD, &myId);
   MPI_Comm_size(MPI_COMM_WORLD, &numRank);
-  hipGetDeviceCount(&deviceCount);
+  HIP_RC(hipGetDeviceCount(&deviceCount));
 
-  std::cout << "device count and rank is" << deviceCount << ": " << numRank
-            << std::endl;
+  std::cout << "device count and rank is" << deviceCount << ": " << numRank << std::endl;
 
   // set the device ID to the rank ID mod deviceCount (in this case 4 since
   // there are 4 devices on a node)
   devId = myId % deviceCount;
   // set the device ID
-  hipSetDevice(devId);
+  HIP_RC(hipSetDevice(devId));
 
-  printf("Rank Id: %d | Device Id : %d | Num Devices: %d\n", myId, devId,
-         deviceCount);
+  printf("Rank Id: %d | Device Id : %d | Num Devices: %d\n", myId, devId, deviceCount);
   fflush(stdout);
 
   //   Allocate Unified Memory -- accessible from CPU or GPU
-  hipMallocManaged(&d_x, N * sizeof(float));
-  hipMallocManaged(&d_y, N * sizeof(float));
+  HIP_RC(hipMallocManaged(&d_x, N * sizeof(float)));
+  HIP_RC(hipMallocManaged(&d_y, N * sizeof(float)));
 
   //   initialize x and y arrays on the host
   for (int i = 0; i < N; i++) {
@@ -116,8 +91,7 @@ int main(int argc, char *argv[]) {
 
   //   Check for errors (all values should be 3.0f)
   float maxError = 0.0f;
-  for (int i = 0; i < N; i++)
-    maxError = fmax(maxError, fabs(y[i] - 3.0f));
+  for (int i = 0; i < N; i++) maxError = fmax(maxError, fabs(y[i] - 3.0f));
   printf("Max error: %f\n", maxError);
 
   //   Free memory
