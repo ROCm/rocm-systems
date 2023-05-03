@@ -469,6 +469,12 @@ def parse(my_parser):
         help="\t\tSpecify the decimal to display. (DEFAULT: 2)",
     )
     analyze_group.add_argument(
+        "--save-dfs",
+        dest="df_file_dir",
+        metavar="",
+        help="\t\tSpecify the dirctory to save analysis dataframe csv files.",
+    )
+    analyze_group.add_argument(
         "--cols",
         type=int,
         dest="cols",
