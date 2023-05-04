@@ -718,6 +718,7 @@ def load_table_data(workload, dir, is_gui, debug, verbose):
         debug,
     )
 
+
 def build_comparable_columns(time_unit):
     """
     Build comparable columns/headers for display

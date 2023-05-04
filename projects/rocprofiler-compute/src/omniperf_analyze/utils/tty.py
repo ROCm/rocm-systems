@@ -48,8 +48,9 @@ def string_multiple_lines(source, width, max_rows):
     return "\n".join(lines)
 
 
-def show_all(runs, archConfigs, output, df_file_dir, decimal, time_unit,
-             selected_cols, verbose):
+def show_all(
+    runs, archConfigs, output, df_file_dir, decimal, time_unit, selected_cols, verbose
+):
     """
     Show all panels with their data in plain text mode.
     """
@@ -154,24 +155,26 @@ def show_all(runs, archConfigs, output, df_file_dir, decimal, time_unit,
 
                 if not df.empty:
                     # subtitle for each table in a panel if existing
-                    table_id_str = str(table_config["id"] // 100) + "." + str(
-                        table_config["id"] % 100)
+                    table_id_str = (
+                        str(table_config["id"] // 100)
+                        + "."
+                        + str(table_config["id"] % 100)
+                    )
 
                     if "title" in table_config and table_config["title"]:
-                        ss += (table_id_str + " " + table_config["title"] +
-                               "\n")
+                        ss += table_id_str + " " + table_config["title"] + "\n"
 
                     if df_file_dir:
                         p = Path(df_file_dir)
                         if not p.exists():
                             p.mkdir()
                         if p.is_dir():
-                            if "title" in table_config and table_config[
-                                    "title"]:
-                                table_id_str += ("_" + table_config["title"])
-                            df.to_csv(p.joinpath(
-                                table_id_str.replace(" ", "_") + ".csv"),
-                                      index=False)
+                            if "title" in table_config and table_config["title"]:
+                                table_id_str += "_" + table_config["title"]
+                            df.to_csv(
+                                p.joinpath(table_id_str.replace(" ", "_") + ".csv"),
+                                index=False,
+                            )
 
                     # NB:
                     # "columnwise: True" is a special attr of a table/df
