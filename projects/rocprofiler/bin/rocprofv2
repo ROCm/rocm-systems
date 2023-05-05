@@ -2,6 +2,7 @@
 CURRENT_DIR="$( dirname -- "$0"; )";
 ROCPROFV2_DIR=$(dirname -- $(realpath ${BASH_SOURCE[0]}));
 ROCM_DIR=$(dirname -- ${ROCPROFV2_DIR})
+ROCM_PATH="${ROCM_PATH:=/opt/rocm}"
 RUN_FROM_BUILD=0
 if [[ $ROCPROFV2_DIR == *"/build"* ]]; then
   RUN_FROM_BUILD=1
@@ -217,8 +218,10 @@ while [ 1 ] ; do
     if [ "$2" = "att" ] ; then
       if [ $RUN_FROM_BUILD == 1 ]; then
         ATT_PATH=$ROCPROFV2_DIR/build/plugin/att/att/att.py
+        export ROCPROFV2_ATT_LIB_PATH=$ROCM_PATH/lib/hsa-amd-aqlprofile/librocprofv2_att.so
       else
         ATT_PATH=$ROCPROFV2_DIR/../libexec/rocprofiler/att/att.py
+        export ROCPROFV2_ATT_LIB_PATH=$ROCPROFV2_DIR/../lib/hsa-amd-aqlprofile/librocprofv2_att.so
       fi
       ATT_ARGV=$3
       shift
