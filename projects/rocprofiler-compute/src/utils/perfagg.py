@@ -25,6 +25,7 @@
 import sys, os, pathlib, shutil, subprocess, argparse, glob, re
 import numpy as np
 import math
+import pandas as pd
 
 prog = "omniperf"
 
@@ -84,6 +85,94 @@ perfmon_config = {
         "TCC_channels": 32,
     },
 }
+
+# joins disparate runs less dumbly than rocprof
+def join_prof(workload_dir, out):
+    files = glob.glob(workload_dir + "/" + "pmc_perf_*.csv")
+    df = None
+    
+    for i, file in enumerate(files):
+        #_df = parse_rocprof_kernels(file)
+        _df = pd.read_csv(file)
+        key = _df.groupby("KernelName").cumcount()
+        _df['key'] = _df.KernelName + ' - ' + key.astype(str)
+        
+        if df is None:
+            df = _df
+        else:
+            # join by unique index of kernel
+            df = pd.merge(df, _df, how='inner', on='key', suffixes=('', f'_{i}'))
+    # now, we can:
+    #   A) throw away any of the "boring" duplicats
+    df = df[[k for k in df.keys() if not any(
+            check in k for check in [
+            'gpu', 'queue-id', 'queue-index', 'pid', 'tid', 'grd', 'wgr',
+            'lds', 'scr', 'vgpr', 'sgpr', 'fbar', 'sig', 'obj'])]]
+    #   B) any timestamps that are _not_ the duration, which is the one we care
+    #   about
+    df = df[[k for k in df.keys() if not any(
+        check in k for check in [
+        'stop', 'start', 'DispatchNs', 'CompleteNs'])]]
+    #   C) sanity check the name and key
+    namekeys = [k for k in df.keys() if 'KernelName' in k]
+    assert len(namekeys)
+    for k in namekeys[1:]:
+        assert (df[namekeys[0]] == df[k]).all()
+    df = df.drop(columns=namekeys[1:])
+    # now take the median of the durations
+    dkeys = [k for k in df.keys() if 'duration' in k]
+    duration = df[dkeys].median(axis=1)
+    # compute min and max, just for sanity
+    min_duration = df[dkeys].min(axis=1)
+    max_duration = df[dkeys].max(axis=1)
+    std_duration = df[dkeys].std(axis=1)
+    mean_duration = df[dkeys].mean(axis=1)
+    # and replace
+    df = df.drop(columns=dkeys)
+    df['duration'] = duration
+    df['duration[max]'] = max_duration
+    df['duration[min]'] = min_duration
+    df['duration[std]'] = std_duration
+    df['duration[mean]'] = mean_duration
+    # finally, join the drop key
+    df = df.drop(columns=['key'])
+    # and save to file
+    df.to_csv(out, index=False)
+    # and delete old file(s)
+    for file in files:
+        os.remove(file)
+
+def pmc_perf_split(workload_dir):
+    workload_perfmon_dir = workload_dir + "/perfmon"
+    lines = open(workload_perfmon_dir + "/pmc_perf.txt", "r").read().splitlines()
+
+    # Iterate over each line in pmc_perf.txt
+    mpattern = r"^pmc:(.*)"
+    i = 0
+    for line in lines:
+        # Verify no comments
+        stext = line.split("#")[0].strip()
+        if not stext:
+            continue
+
+        # all pmc counters start with  "pmc:"
+        m = re.match(mpattern, stext)
+        if m is None:
+            continue
+        
+        # Create separate file for each line
+        fd = open(workload_perfmon_dir + "/pmc_perf_" + str(i) + ".txt", "w")
+        fd.write(stext + "\n\n")
+        fd.write("gpu:\n")
+        fd.write("range:\n")
+        fd.write("kernel:\n")
+        fd.close()
+
+        i += 1
+    
+    # Remove old pmc_perf.txt input from perfmon dir
+    os.remove(workload_perfmon_dir + "/pmc_perf.txt")
+
 
 
 def perfmon_coalesce(pmc_files_list, workload_dir, soc):
