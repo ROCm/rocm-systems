@@ -112,7 +112,7 @@ def join_prof(workload_dir, out):
     #   about
     df = df[[k for k in df.keys() if not any(
         check in k for check in [
-        'stop', 'start', 'DispatchNs', 'CompleteNs'])]]
+        'DispatchNs', 'CompleteNs'])]]
     #   C) sanity check the name and key
     namekeys = [k for k in df.keys() if 'KernelName' in k]
     assert len(namekeys)
@@ -120,20 +120,21 @@ def join_prof(workload_dir, out):
         assert (df[namekeys[0]] == df[k]).all()
     df = df.drop(columns=namekeys[1:])
     # now take the median of the durations
-    dkeys = [k for k in df.keys() if 'duration' in k]
-    duration = df[dkeys].median(axis=1)
-    # compute min and max, just for sanity
-    min_duration = df[dkeys].min(axis=1)
-    max_duration = df[dkeys].max(axis=1)
-    std_duration = df[dkeys].std(axis=1)
-    mean_duration = df[dkeys].mean(axis=1)
+    bkeys = []
+    ekeys = []
+    for k in df.keys():
+        if 'Begin' in k:
+            bkeys.append(k)
+        if 'End' in k:
+            ekeys.append(k)
+    # compute mean begin and end timestamps
+    endNs = df[ekeys].mean(axis=1)
+    beginNs = df[bkeys].mean(axis=1)
     # and replace
-    df = df.drop(columns=dkeys)
-    df['duration'] = duration
-    df['duration[max]'] = max_duration
-    df['duration[min]'] = min_duration
-    df['duration[std]'] = std_duration
-    df['duration[mean]'] = mean_duration
+    df= df.drop(columns=bkeys)
+    df= df.drop(columns=ekeys)
+    df['BeginNs'] = beginNs
+    df['EndNs'] = endNs
     # finally, join the drop key
     df = df.drop(columns=['key'])
     # and save to file
