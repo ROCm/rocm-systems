@@ -398,7 +398,7 @@ def characterize_app(args, VER):
     pmc_filter(workload_dir, perfmon_dir, args.target)
 
     # Separate pmc_perf runs
-    pmc_perf_split(workload_dir, perfmon_dir)
+    pmc_perf_split(workload_dir)
 
     # Set up a log file
     log = open(workload_dir + "/log.txt", "w")
@@ -456,7 +456,7 @@ def characterize_app(args, VER):
 
     # Manually join each pmc_perf*.csv output
     if args.use_rocscope == False:
-        join_prof(workload_dir, workload_dir + "/pmc_perf_NEW.csv")
+        join_prof(workload_dir, workload_dir + "/pmc_perf.csv")
 
 
 ################################################
