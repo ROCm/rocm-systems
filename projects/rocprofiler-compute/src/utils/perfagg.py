@@ -86,35 +86,61 @@ perfmon_config = {
     },
 }
 
+
 # joins disparate runs less dumbly than rocprof
 def join_prof(workload_dir, out):
     files = glob.glob(workload_dir + "/" + "pmc_perf_*.csv")
     df = None
-    
+
     for i, file in enumerate(files):
-        #_df = parse_rocprof_kernels(file)
+        # _df = parse_rocprof_kernels(file)
         _df = pd.read_csv(file)
         key = _df.groupby("KernelName").cumcount()
-        _df['key'] = _df.KernelName + ' - ' + key.astype(str)
-        
+        _df["key"] = _df.KernelName + " - " + key.astype(str)
+
         if df is None:
             df = _df
         else:
             # join by unique index of kernel
-            df = pd.merge(df, _df, how='inner', on='key', suffixes=('', f'_{i}'))
+            df = pd.merge(df, _df, how="inner", on="key", suffixes=("", f"_{i}"))
     # now, we can:
-    #   A) throw away any of the "boring" duplicats
-    df = df[[k for k in df.keys() if not any(
-            check in k for check in [
-            'gpu', 'queue-id', 'queue-index', 'pid', 'tid', 'grd', 'wgr',
-            'lds', 'scr', 'vgpr', 'sgpr', 'fbar', 'sig', 'obj'])]]
-    #   B) any timestamps that are _not_ the duration, which is the one we care
-    #   about
-    df = df[[k for k in df.keys() if not any(
-        check in k for check in [
-        'DispatchNs', 'CompleteNs'])]]
-    #   C) sanity check the name and key
-    namekeys = [k for k in df.keys() if 'KernelName' in k]
+    #   A) throw away any of the "boring" duplicats
+    df = df[
+        [
+            k
+            for k in df.keys()
+            if not any(
+                check in k
+                for check in [
+                    "gpu",
+                    "queue-id",
+                    "queue-index",
+                    "pid",
+                    "tid",
+                    "grd",
+                    "wgr",
+                    "lds",
+                    "scr",
+                    "vgpr",
+                    "sgpr",
+                    "fbar",
+                    "sig",
+                    "obj",
+                ]
+            )
+        ]
+    ]
+    #   B) any timestamps that are _not_ the duration, which is the one we care
+    #   about
+    df = df[
+        [
+            k
+            for k in df.keys()
+            if not any(check in k for check in ["DispatchNs", "CompleteNs"])
+        ]
+    ]
+    #   C) sanity check the name and key
+    namekeys = [k for k in df.keys() if "KernelName" in k]
     assert len(namekeys)
     for k in namekeys[1:]:
         assert (df[namekeys[0]] == df[k]).all()
@@ -123,25 +149,26 @@ def join_prof(workload_dir, out):
     bkeys = []
     ekeys = []
     for k in df.keys():
-        if 'Begin' in k:
+        if "Begin" in k:
             bkeys.append(k)
-        if 'End' in k:
+        if "End" in k:
             ekeys.append(k)
     # compute mean begin and end timestamps
     endNs = df[ekeys].mean(axis=1)
     beginNs = df[bkeys].mean(axis=1)
     # and replace
-    df= df.drop(columns=bkeys)
-    df= df.drop(columns=ekeys)
-    df['BeginNs'] = beginNs
-    df['EndNs'] = endNs
+    df = df.drop(columns=bkeys)
+    df = df.drop(columns=ekeys)
+    df["BeginNs"] = beginNs
+    df["EndNs"] = endNs
     # finally, join the drop key
-    df = df.drop(columns=['key'])
+    df = df.drop(columns=["key"])
     # and save to file
     df.to_csv(out, index=False)
     # and delete old file(s)
     for file in files:
         os.remove(file)
+
 
 def pmc_perf_split(workload_dir):
     workload_perfmon_dir = workload_dir + "/perfmon"
@@ -160,7 +187,7 @@ def pmc_perf_split(workload_dir):
         m = re.match(mpattern, stext)
         if m is None:
             continue
-        
+
         # Create separate file for each line
         fd = open(workload_perfmon_dir + "/pmc_perf_" + str(i) + ".txt", "w")
         fd.write(stext + "\n\n")
@@ -170,10 +197,9 @@ def pmc_perf_split(workload_dir):
         fd.close()
 
         i += 1
-    
+
     # Remove old pmc_perf.txt input from perfmon dir
     os.remove(workload_perfmon_dir + "/pmc_perf.txt")
-
 
 
 def perfmon_coalesce(pmc_files_list, workload_dir, soc):
