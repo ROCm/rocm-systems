@@ -138,13 +138,12 @@ def run_gui(args, runs):
     app = dash.Dash(__name__, external_stylesheets=[dbc.themes.CYBORG])
 
     if len(runs) == 1:
-        num_results = 10
         file_io.create_df_kernel_top_stats(
             args.path[0][0],
             runs[args.path[0][0]].filter_gpu_ids,
             runs[args.path[0][0]].filter_dispatch_ids,
             args.time_unit,
-            num_results,
+            args.max_kernel_num,
         )
         runs[args.path[0][0]].raw_pmc = file_io.create_df_pmc(
             args.path[0][0], args.verbose
@@ -156,6 +155,7 @@ def run_gui(args, runs):
             "gpu": runs[args.path[0][0]].filter_gpu_ids,
             "dispatch": runs[args.path[0][0]].filter_dispatch_ids,
             "normalization": args.normal_unit,
+            "top_n": args.max_kernel_num,
         }
 
         gui.build_layout(
@@ -187,13 +187,12 @@ def run_cli(args, runs):
     # which archConfig passed into show_all function.
     # After decide to how to manage kernels display patterns, we can revisit it.
     for d in args.path:
-        num_results = 10
         file_io.create_df_kernel_top_stats(
             d[0],
             runs[d[0]].filter_gpu_ids,
             runs[d[0]].filter_dispatch_ids,
             args.time_unit,
-            num_results,
+            args.max_kernel_num,
         )
         runs[d[0]].raw_pmc = file_io.create_df_pmc(
             d[0], args.verbose

@@ -111,7 +111,7 @@ def create_df_kernel_top_stats(
     filter_gpu_ids,
     filter_dispatch_ids,
     time_unit,
-    num_results,
+    max_kernel_num,
     sortby="sum",
 ):
     """
@@ -172,13 +172,13 @@ def create_df_kernel_top_stats(
     if sortby == "sum":
         grouped = grouped.sort_values(by=("Sum" + time_unit_str), ascending=False)
 
-        grouped = grouped.head(num_results)  # Display only the top n results
+        grouped = grouped.head(max_kernel_num)  # Display only the top n results
 
         grouped.to_csv(os.path.join(raw_data_dir, "pmc_kernel_top.csv"), index=False)
     elif sortby == "kernel":
         grouped = grouped.sort_values("KernelName")
 
-        grouped = grouped.head(num_results)  # Display only the top n results
+        grouped = grouped.head(max_kernel_num)  # Display only the top n results
         grouped.to_csv(os.path.join(raw_data_dir, "pmc_kernel_top.csv"), index=False)
 
 
