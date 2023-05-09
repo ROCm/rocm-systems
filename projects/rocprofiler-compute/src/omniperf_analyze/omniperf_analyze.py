@@ -155,6 +155,7 @@ def run_gui(args, runs):
             "gpu": runs[args.path[0][0]].filter_gpu_ids,
             "dispatch": runs[args.path[0][0]].filter_dispatch_ids,
             "normalization": args.normal_unit,
+            "top_n": args.max_kernel_num,
         }
 
         gui.build_layout(
