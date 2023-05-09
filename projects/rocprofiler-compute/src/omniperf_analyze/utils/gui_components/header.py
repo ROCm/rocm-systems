@@ -241,6 +241,28 @@ def get_header(raw_pmc, input_filters, kernel_names):
                                         children=[
                                             html.A(
                                                 className="smoothscroll",
+                                                children=["Top N:"],
+                                            ),
+                                            dcc.Dropdown(
+                                                [1, 5, 10, 15, 20, 50, 100],
+                                                id="top-n-filt",
+                                                value=input_filters[
+                                                    "top_n"
+                                                ],  # default to any dispatch filters passed as args
+                                                clearable=False,
+                                                style={"width": "50px"},
+                                            ),
+                                        ]
+                                    )
+                                ],
+                            ),
+                            html.Li(
+                                className="filter",
+                                children=[
+                                    html.Div(
+                                        children=[
+                                            html.A(
+                                                className="smoothscroll",
                                                 children=["Kernels:"],
                                             ),
                                             dcc.Dropdown(
