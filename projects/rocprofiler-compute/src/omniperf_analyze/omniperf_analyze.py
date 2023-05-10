@@ -208,6 +208,7 @@ def run_cli(args, runs):
             runs,
             archConfigs["gfx90a"],
             output,
+            args.df_file_dir,
             args.decimal,
             args.time_unit,
             args.cols,
