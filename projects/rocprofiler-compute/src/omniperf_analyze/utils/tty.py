@@ -48,13 +48,11 @@ def string_multiple_lines(source, width, max_rows):
     return "\n".join(lines)
 
 
-def show_all(
-    runs, archConfigs, output, df_file_dir, decimal, time_unit, selected_cols, verbose
-):
+def show_all(args, runs, archConfigs, output):
     """
     Show all panels with their data in plain text mode.
     """
-    comparable_columns = parser.build_comparable_columns(time_unit)
+    comparable_columns = parser.build_comparable_columns(args.time_unit)
 
     for panel_id, panel in archConfigs.panel_configs.items():
         # Skip panels that don't support baseline comparison
@@ -72,11 +70,8 @@ def show_all(
 
                 for header in list(base_df.keys()):
                     if (
-                        (not selected_cols)
-                        or (
-                            selected_cols
-                            and base_df.columns.get_loc(header) in selected_cols
-                        )
+                        (not args.cols)
+                        or (args.cols and base_df.columns.get_loc(header) in args.cols)
                         or (type == "raw_csv_table")
                     ):
                         if header in hidden_columns:
@@ -126,7 +121,7 @@ def show_all(
                                             .pct_change(axis="columns")
                                             .iloc[:, 1]
                                         )
-                                        if verbose >= 2:
+                                        if args.verbose >= 2:
                                             print("---------", header, t_df)
 
                                         # show value + percentage
@@ -134,12 +129,12 @@ def show_all(
                                         t_df = (
                                             cur_df[header]
                                             .astype(float)
-                                            .round(decimal)
+                                            .round(args.decimal)
                                             .map(str)
                                             + " ("
                                             + t_df.astype(float)
                                             .mul(100)
-                                            .round(decimal)
+                                            .round(args.decimal)
                                             .map(str)
                                             + "%)"
                                         )
@@ -147,7 +142,9 @@ def show_all(
                                         df = pd.concat([df, t_df], axis=1)
                                     else:
                                         cur_df[header] = [
-                                            round(float(x), decimal) if x != "" else x
+                                            round(float(x), args.decimal)
+                                            if x != ""
+                                            else x
                                             for x in base_df[header]
                                         ]
 
@@ -164,8 +161,8 @@ def show_all(
                     if "title" in table_config and table_config["title"]:
                         ss += table_id_str + " " + table_config["title"] + "\n"
 
-                    if df_file_dir:
-                        p = Path(df_file_dir)
+                    if args.df_file_dir:
+                        p = Path(args.df_file_dir)
                         if not p.exists():
                             p.mkdir()
                         if p.is_dir():
@@ -191,7 +188,7 @@ def show_all(
                             else df,
                             headers="keys",
                             tablefmt="fancy_grid",
-                            floatfmt="." + str(decimal) + "f",
+                            floatfmt="." + str(args.decimal) + "f",
                         )
                         + "\n"
                     )
@@ -202,7 +199,7 @@ def show_all(
             print(ss, file=output)
 
 
-def show_kernels(runs, archConfigs, output, decimal):
+def show_kernels(args, runs, archConfigs, output):
     """
     Show the kernels from top stats.
     """
@@ -222,7 +219,10 @@ def show_kernels(runs, archConfigs, output, decimal):
 
     print(
         tabulate(
-            df, headers="keys", tablefmt="fancy_grid", floatfmt="." + str(decimal) + "f"
+            df,
+            headers="keys",
+            tablefmt="fancy_grid",
+            floatfmt="." + str(args.decimal) + "f",
         ),
         file=output,
     )
