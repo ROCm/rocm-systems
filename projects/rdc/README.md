@@ -1,4 +1,3 @@
-
 # ROCm<sup>TM</sup> Data Center Tool (RDC)
 
 The ROCm™ Data Center Tool simplifies the administration and addresses key infrastructure challenges in AMD GPUs in cluster and datacenter environments. The main features are:
@@ -32,6 +31,7 @@ RDC can run on AMD ROCm supported platforms, please refer to the **List of Suppo
             (ii) AMD ROCk Kernel driver (https://github.com/RadeonOpenCompute/ROCK-Kernel-Driver)
 
 ## Building gRPC and protoc
+
 **NOTE:** gRPC and protoc compiler must be built when building RDC from source as pre-built packages are not available. When installing RDC from a package, gRPC and protoc will be installed from the package.
 
 **IMPORTANT:** Building gRPC and protocol buffers requires CMake 3.15 or greater. With an older version build will quietly succeed with a *message*. However, all components of gRPC will not be installed and RDC will ***fail*** to run
@@ -50,7 +50,8 @@ mkdir -p build
 
 By default (without using CMAKE_INSTALL_PREFIX option), gRPC will install to /usr/local lib, include and bin directories.  
 It is highly recommended to install gRPC into a unique directory.  
-Below example installs gRPC into /opt/grpc  
+Below example installs gRPC into /opt/grpc
+
 ```bash
 export GRPC_ROOT=/opt/grpc
 cmake -B build -DgRPC_INSTALL=ON -DBUILD_SHARED_LIBS=ON -DCMAKE_INSTALL_PREFIX="$GRPC_ROOT"
