@@ -183,6 +183,14 @@ def parse(my_parser):
         help="\t\t\tDispatch ID filtering.",
     )
     profile_group.add_argument(
+        "--join-type",
+        metavar="",
+        required=False,
+        choices=["kernel", "grid"],
+        default="grid",
+        help="\t\t\tChoose how to join rocprof runs: (DEFAULT: grid)\n\t\t\t   kernel (i.e. By unique kernel name dispatches)\n\t\t\t   grid (i.e. By unique kernel name + grid size dispatches)",
+    )
+    profile_group.add_argument(
         "--no-roof",
         required=False,
         default=False,

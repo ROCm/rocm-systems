@@ -456,7 +456,7 @@ def characterize_app(args, VER):
 
     # Manually join each pmc_perf*.csv output
     if args.use_rocscope == False:
-        join_prof(workload_dir, workload_dir + "/pmc_perf.csv")
+        join_prof(workload_dir, args.join_type)
 
 
 ################################################
@@ -685,7 +685,7 @@ def omniperf_profile(args, VER):
         
         # Manually join each pmc_perf*.csv output
         if args.use_rocscope == False:
-            join_prof(workload_dir, workload_dir + "/pmc_perf.csv")
+            join_prof(workload_dir, args.join_type)
 
     # Generate sysinfo
     gen_sysinfo(args.name, workload_dir, args.ipblocks, args.remaining, args.no_roof)

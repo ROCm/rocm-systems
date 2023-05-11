@@ -88,15 +88,27 @@ perfmon_config = {
 
 
 # joins disparate runs less dumbly than rocprof
-def join_prof(workload_dir, out):
+def join_prof(workload_dir, join_type, out=None):
+    # Set default output directory if not specified
+    if out == None:
+        out = workload_dir + "/pmc_perf.csv"
     files = glob.glob(workload_dir + "/" + "pmc_perf_*.csv")
     df = None
 
     for i, file in enumerate(files):
         # _df = parse_rocprof_kernels(file)
+
         _df = pd.read_csv(file)
         key = _df.groupby("KernelName").cumcount()
-        _df["key"] = _df.KernelName + " - " + key.astype(str)
+        if join_type == "kernel":
+            _df["key"] = _df.KernelName + " - " + key.astype(str)
+        elif join_type == "grid":
+            _df["key"] = (
+                _df.KernelName + " - " + key.astype(str) + " - " + _df.grd.astype(str)
+            )
+        else:
+            print("ERROR: Unrecognized --join-type")
+            sys.exit(1)
 
         if df is None:
             df = _df
