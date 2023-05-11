@@ -202,18 +202,9 @@ def run_cli(args, runs):
             runs[d[0]], d[0], is_gui, args.g, args.verbose
         )  # create the loaded table
     if args.list_kernels:
-        tty.show_kernels(runs, archConfigs["gfx90a"], output, args.decimal)
+        tty.show_kernels(args, runs, archConfigs["gfx90a"], output)
     else:
-        tty.show_all(
-            runs,
-            archConfigs["gfx90a"],
-            output,
-            args.df_file_dir,
-            args.decimal,
-            args.time_unit,
-            args.cols,
-            args.verbose,
-        )
+        tty.show_all(args, runs, archConfigs["gfx90a"], output)
 
 
 def roofline_only(path_to_dir, dev_id, sort_type, mem_level, kernel_names, verbose):
