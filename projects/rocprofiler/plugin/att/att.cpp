@@ -55,7 +55,7 @@ class att_plugin_t {
   bool is_valid_{true};
 
   inline bool att_file_exists(const std::string& name) {
-    struct stat buffer;   
+    struct stat buffer;
     return stat(name.c_str(), &buffer) == 0;
   }
 
@@ -189,8 +189,9 @@ ROCPROFILER_EXPORT int rocprofiler_plugin_write_buffer_records(const rocprofiler
   return att_plugin->WriteBufferRecords(begin, end, session_id, buffer_id);
 }
 
-ROCPROFILER_EXPORT int rocprofiler_plugin_write_record(rocprofiler_record_tracer_t record,
-                                                   rocprofiler_session_id_t session_id) {
+ROCPROFILER_EXPORT int rocprofiler_plugin_write_record(
+    rocprofiler_record_tracer_t record,
+    rocprofiler_plugin_tracer_extra_data_t tracer_extra_data) {
   if (!att_plugin || !att_plugin->IsValid()) return -1;
   if (record.header.id.handle == 0) return 0;
   return 0;

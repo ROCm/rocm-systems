@@ -114,15 +114,38 @@ ROCPROFILER_EXPORT int rocprofiler_plugin_write_buffer_records(const rocprofiler
                                                            rocprofiler_session_id_t session_id,
                                                            rocprofiler_buffer_id_t buffer_id);
 
+
+typedef struct {
+ /**
+  * @brief tracer extra data
+  *
+  * This is applicable only if ::ACTIVITY_DOMAIN_HSA or ACTIVITY_DOMAIN_HIP is the domain of the tracer record
+ */
+ const char* function_name;
+/**
+  * @brief tracer extra data
+  *
+  * This is applicable only if ::ACTIVITY_DOMAIN_HIP is the domain of the tracer record
+ */
+ union {
+  const char* kernel_name;
+ };
+} rocprofiler_plugin_tracer_extra_data_t;
+
+
+
+
 /**
  * Report Synchronous Record.
  *
- * @param[in] record Pointer to the Synchronous Tracer record.
- * @param[in] session_id Session ID
+ * @param[in] record Synchronous Tracer record.
+ * @param[in] data : api_data
+ * @param[in] tracer_data :Tracer record extra data such as function name and kernel name
  * @return Returns 0 on success and -1 on error.
  */
+
 ROCPROFILER_EXPORT int rocprofiler_plugin_write_record(rocprofiler_record_tracer_t record,
-                                                   rocprofiler_session_id_t session_id);
+   rocprofiler_plugin_tracer_extra_data_t tracer_extra_data);
 
 /** @} */
 

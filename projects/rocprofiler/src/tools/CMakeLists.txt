@@ -21,6 +21,7 @@ target_include_directories(rocprofiler_tool
   ${PROJECT_SOURCE_DIR}/src)
 
 target_compile_definitions(rocprofiler_tool
+  PUBLIC AMD_INTERNAL_BUILD
   PRIVATE HIP_PROF_HIP_API_STRING=1 __HIP_PLATFORM_HCC__=1)
 
 if(ASAN)

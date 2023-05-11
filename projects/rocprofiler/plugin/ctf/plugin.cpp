@@ -137,6 +137,11 @@ class RocTxEventRecord final : public TracerEventRecord<barectf_roctx_ctx> {
       : TracerEventRecord<barectf_roctx_ctx>{record, GetRecordBeginClockVal(record)},
         id_{QueryId(record, session_id)},
         msg_{QueryMsg(record, session_id)} {}
+  explicit RocTxEventRecord(const rocprofiler_record_tracer_t& record, uint64_t roctx_id,
+                            std::string roctx_msg)
+      : TracerEventRecord<barectf_roctx_ctx>{record, GetRecordBeginClockVal(record)},
+        id_{roctx_id},
+        msg_{roctx_msg} {}
 
   void Write(barectf_roctx_ctx& barectf_ctx) const override {
     barectf_roctx_trace_roctx(&barectf_ctx, GetThreadId(), id_, msg_.c_str());
@@ -209,7 +214,9 @@ class HsaApiEventRecord : public TracerEventRecord<barectf_hsa_api_ctx> {
                              const rocprofiler_session_id_t session_id, const std::uint64_t clock_val)
       : TracerEventRecord<barectf_hsa_api_ctx>{record, clock_val},
         api_data_{QueryApiData(record, session_id)} {}
-
+  explicit HsaApiEventRecord(const rocprofiler_record_tracer_t& record,
+                             const std::uint64_t clock_val, hsa_api_data_t& api_data)
+      : TracerEventRecord<barectf_hsa_api_ctx>{record, clock_val}, api_data_(api_data) {}
   const hsa_api_data_t& GetApiData() const noexcept { return api_data_; }
 
  private:
@@ -246,6 +253,10 @@ class HsaApiEventRecordBegin final : public HsaApiEventRecord {
   explicit HsaApiEventRecordBegin(const rocprofiler_record_tracer_t& record,
                                   const rocprofiler_session_id_t session_id)
       : HsaApiEventRecord{record, session_id, GetRecordBeginClockVal(record)} {}
+  explicit HsaApiEventRecordBegin(const rocprofiler_record_tracer_t& record,
+                                  hsa_api_data_t& api_data)
+      : HsaApiEventRecord{record, GetRecordBeginClockVal(record),
+                          api_data} {}
 
   void Write(barectf_hsa_api_ctx& barectf_ctx) const override {
     // Include generated switch statement.
@@ -259,6 +270,9 @@ class HsaApiEventRecordEnd final : public HsaApiEventRecord {
   explicit HsaApiEventRecordEnd(const rocprofiler_record_tracer_t& record,
                                 const rocprofiler_session_id_t session_id)
       : HsaApiEventRecord{record, session_id, GetRecordEndClockVal(record)} {}
+  explicit HsaApiEventRecordEnd(const rocprofiler_record_tracer_t& record,
+                                  hsa_api_data_t& api_data)
+      : HsaApiEventRecord{record, GetRecordBeginClockVal(record), api_data} {}
 
   void Write(barectf_hsa_api_ctx& barectf_ctx) const override {
     // Include generated switch statement.
@@ -270,11 +284,17 @@ class HsaApiEventRecordEnd final : public HsaApiEventRecord {
 class HipApiEventRecord : public TracerEventRecord<barectf_hip_api_ctx> {
  protected:
   explicit HipApiEventRecord(const rocprofiler_record_tracer_t& record,
-                             const rocprofiler_session_id_t session_id, const std::uint64_t clock_val)
+                             const rocprofiler_session_id_t session_id,
+                             const std::uint64_t clock_val)
       : TracerEventRecord<barectf_hip_api_ctx>{record, clock_val},
         api_data_{QueryApiData(record, session_id)},
         kernel_name_{QueryKernelName(record, session_id)} {}
-
+  explicit HipApiEventRecord(const rocprofiler_record_tracer_t& record,
+                             const std::uint64_t clock_val, hip_api_data_t& api_data,
+                             std::string kernel_name)
+      : TracerEventRecord<barectf_hip_api_ctx>{record, clock_val},
+        api_data_{api_data},
+        kernel_name_{kernel_name} {}
   const hip_api_data_t& GetApiData() const noexcept { return api_data_; }
   const std::string& GetKernelName() const noexcept { return kernel_name_; }
 
@@ -339,6 +359,9 @@ class HipApiEventRecordBegin final : public HipApiEventRecord {
   explicit HipApiEventRecordBegin(const rocprofiler_record_tracer_t& record,
                                   const rocprofiler_session_id_t session_id)
       : HipApiEventRecord{record, session_id, GetRecordBeginClockVal(record)} {}
+  explicit HipApiEventRecordBegin(const rocprofiler_record_tracer_t& record,
+                                  hip_api_data_t& api_data, std::string kernel_name)
+      : HipApiEventRecord{record, GetRecordBeginClockVal(record), api_data, kernel_name} {}
 
   void Write(barectf_hip_api_ctx& barectf_ctx) const override {
     // Include generated switch statement.
@@ -352,6 +375,9 @@ class HipApiEventRecordEnd final : public HipApiEventRecord {
   explicit HipApiEventRecordEnd(const rocprofiler_record_tracer_t& record,
                                 const rocprofiler_session_id_t session_id)
       : HipApiEventRecord{record, session_id, GetRecordEndClockVal(record)} {}
+  explicit HipApiEventRecordEnd(const rocprofiler_record_tracer_t& record, hip_api_data_t& api_data,
+                                std::string kernel_name)
+      : HipApiEventRecord{record, GetRecordBeginClockVal(record), api_data, kernel_name} {}
 
   void Write(barectf_hip_api_ctx& barectf_ctx) const override {
     // Include generated switch statement.
@@ -686,27 +712,60 @@ Plugin::Plugin(const std::size_t packet_size, const fs::path& trace_dir,
 }
 
 void Plugin::HandleTracerRecord(const rocprofiler_record_tracer_t& record,
-                                const rocprofiler_session_id_t session_id) {
+                                const rocprofiler_session_id_t session_id,
+                                rocprofiler_plugin_trace_record_data_t tracer_data,
+                                const void* data) {
   std::lock_guard<std::mutex> lock{lock_};
 
   // Depending on the domain, create and add an event record to the
   // corresponding tracer.
   switch (record.domain) {
     case ACTIVITY_DOMAIN_ROCTX:
-      roctx_tracer_.AddEventRecord(std::make_shared<const RocTxEventRecord>(record, session_id));
+    /*If data is nullptr then the call is asynchromous*/
+      if (data == nullptr)
+        roctx_tracer_.AddEventRecord(std::make_shared<const RocTxEventRecord>(record, session_id));
+      else {
+        const char* roctx_message = reinterpret_cast<const char*>(data);
+        std::string roctx_msg(roctx_message);
+        roctx_tracer_.AddEventRecord(
+            std::make_shared<const RocTxEventRecord>(record, tracer_data.roctx_id, roctx_msg));
+      }
       break;
     case ACTIVITY_DOMAIN_HSA_API: {
-      hsa_api_tracer_.AddEventRecord(
-          std::make_shared<const HsaApiEventRecordBegin>(record, session_id));
-      hsa_api_tracer_.AddEventRecord(
-          std::make_shared<const HsaApiEventRecordEnd>(record, session_id));
+      /*If data is nullptr then the call is asynchromous*/
+      if (data == nullptr) {
+        hsa_api_tracer_.AddEventRecord(
+            std::make_shared<const HsaApiEventRecordBegin>(record, session_id));
+        hsa_api_tracer_.AddEventRecord(
+            std::make_shared<const HsaApiEventRecordEnd>(record, session_id));
+      } else {
+        hsa_api_data_t hsa_api_data = *reinterpret_cast<const hsa_api_data_t*>(data);
+        hsa_api_tracer_.AddEventRecord(
+            std::make_shared<const HsaApiEventRecordBegin>(record, hsa_api_data));
+        hsa_api_tracer_.AddEventRecord(
+            std::make_shared<const HsaApiEventRecordEnd>(record, hsa_api_data));
+      }
       break;
     }
     case ACTIVITY_DOMAIN_HIP_API: {
-      hip_api_tracer_.AddEventRecord(
-          std::make_shared<const HipApiEventRecordBegin>(record, session_id));
-      hip_api_tracer_.AddEventRecord(
-          std::make_shared<const HipApiEventRecordEnd>(record, session_id));
+      /*If data is nullptr then the call is asynchromous*/
+      if (data == nullptr) {
+        hip_api_tracer_.AddEventRecord(
+            std::make_shared<const HipApiEventRecordBegin>(record, session_id));
+        hip_api_tracer_.AddEventRecord(
+            std::make_shared<const HipApiEventRecordEnd>(record, session_id));
+      } else {
+        std::string kernel_name;
+        hip_api_data_t hip_api_data = *reinterpret_cast<const hip_api_data_t*>(data);
+        if (tracer_data.kernel_name != nullptr)
+          kernel_name = rocmtools::cxx_demangle(std::string(tracer_data.kernel_name));
+        else
+          kernel_name = "";
+        hip_api_tracer_.AddEventRecord(
+            std::make_shared<const HipApiEventRecordBegin>(record, hip_api_data, kernel_name));
+        hip_api_tracer_.AddEventRecord(
+            std::make_shared<const HipApiEventRecordEnd>(record, hip_api_data, kernel_name));
+      }
       break;
     }
     case ACTIVITY_DOMAIN_HSA_OPS:
@@ -738,7 +797,9 @@ void Plugin::HandleBufferRecords(const rocprofiler_record_header_t* begin,
                                  const rocprofiler_buffer_id_t buffer_id) {
   while (begin && begin < end) {
     if (begin->kind == ROCPROFILER_TRACER_RECORD) {
-      HandleTracerRecord(*reinterpret_cast<const rocprofiler_record_tracer_t*>(begin), session_id);
+      rocprofiler_plugin_trace_record_data_t tracer_data = {};
+      HandleTracerRecord(*reinterpret_cast<const rocprofiler_record_tracer_t*>(begin), session_id,
+                         tracer_data);
     } else {
       assert(begin->kind == ROCPROFILER_PROFILER_RECORD);
       HandleProfilerRecord(*reinterpret_cast<const rocprofiler_record_profiler_t*>(begin),

@@ -22,6 +22,11 @@
 #include <dlfcn.h>
 #include <fcntl.h>
 #include <hsa/hsa.h>
+#include <hsa/hsa_ext_amd.h>
+#include "hsa_prof_str.h"
+#include <hip/hip_runtime.h>
+#include <hip/amd_detail/hip_prof_str.h>
+
 #include "rocprofiler.h"
 #include "rocprofiler_plugin.h"
 #include <sys/syscall.h>
@@ -52,6 +57,7 @@
 #include <chrono>
 
 #include "utils/helper.h"
+#include "trace_buffer.h"
 
 namespace fs = std::experimental::filesystem;
 
@@ -60,7 +66,7 @@ namespace fs = std::experimental::filesystem;
   do {                                                                                             \
     if ((call) != ROCPROFILER_STATUS_SUCCESS) rocmtools::fatal("Error: ROCProfiler API Call Error!");  \
   } while (false)
-
+TRACE_BUFFER_INSTANTIATE();
 namespace {
 
 struct shmd_t {
@@ -93,15 +99,12 @@ class rocprofiler_plugin_t {
         reinterpret_cast<decltype(rocprofiler_plugin_write_buffer_records)*>(
             dlsym(plugin_handle_, "rocprofiler_plugin_write_buffer_records"));
     if (!rocprofiler_plugin_write_buffer_records_) return;
-
     rocprofiler_plugin_write_record_ = reinterpret_cast<decltype(rocprofiler_plugin_write_record)*>(
         dlsym(plugin_handle_, "rocprofiler_plugin_write_record"));
     if (!rocprofiler_plugin_write_record_) return;
-
     rocprofiler_plugin_finalize_ = reinterpret_cast<decltype(rocprofiler_plugin_finalize)*>(
         dlsym(plugin_handle_, "rocprofiler_plugin_finalize"));
     if (!rocprofiler_plugin_finalize_) return;
-
     if (auto* initialize = reinterpret_cast<decltype(rocprofiler_plugin_initialize)*>(
             dlsym(plugin_handle_, "rocprofiler_plugin_initialize"));
         initialize != nullptr)
@@ -123,8 +126,7 @@ class rocprofiler_plugin_t {
     assert(is_valid());
     return rocprofiler_plugin_write_buffer_records_(std::forward<Args>(args)...);
   }
-
- private:
+  private:
   bool valid_{false};
   void* plugin_handle_;
 
@@ -134,6 +136,77 @@ class rocprofiler_plugin_t {
 };
 
 std::optional<rocprofiler_plugin_t> plugin;
+
+struct hsa_api_trace_entry_t {
+  std::atomic<uint32_t> valid;
+  rocprofiler_record_tracer_t record;
+  const char* function_name;
+  hsa_api_trace_entry_t(rocprofiler_record_tracer_t tracer_record, const char* function_name_str,
+                        const hsa_api_data_t& data)
+      : valid(rocprofiler::TRACE_ENTRY_INIT) {
+    record = tracer_record;
+    function_name = function_name_str ? strdup(function_name_str) : nullptr;
+    record.api_data_handle.handle = &data;
+  }
+  ~hsa_api_trace_entry_t() { if (function_name != nullptr) free(const_cast<char*>(function_name)); }
+};
+
+struct roctx_trace_entry_t {
+  std::atomic<rocprofiler::TraceEntryState> valid;
+  rocprofiler_record_tracer_t record;
+  roctx_trace_entry_t(rocprofiler_record_tracer_t tracer_record, const char* roctx_message_str)
+      : valid(rocprofiler::TRACE_ENTRY_INIT) {
+    record = tracer_record;
+    roctx_message_str? record.api_data_handle.handle=strdup(roctx_message_str):nullptr; 
+  }
+  ~roctx_trace_entry_t() { }
+};
+
+struct hip_api_trace_entry_t {
+
+  std::atomic<uint32_t> valid;
+  rocprofiler_record_tracer_t record;
+  const char* function_name;
+  const char* kernel_name;
+
+  hip_api_trace_entry_t(rocprofiler_record_tracer_t tracer_record, const char* kernel_name_str,
+                        const char* function_name_str, const hip_api_data_t& data)
+      : valid(rocprofiler::TRACE_ENTRY_INIT) {
+    record = tracer_record;
+    kernel_name = kernel_name_str ? strdup(kernel_name_str) : nullptr;
+    function_name = function_name_str ? strdup(function_name_str) : nullptr;
+    record.api_data_handle.handle=&data;
+  }
+  ~hip_api_trace_entry_t() {
+   if (function_name != nullptr) free(const_cast<char*>(function_name)); 
+   if (kernel_name != nullptr) free(const_cast<char*>(kernel_name)); 
+  }
+};
+
+rocprofiler::TraceBuffer<hip_api_trace_entry_t> hip_api_buffer(
+    "HIP API", 0x200000, [](hip_api_trace_entry_t* entry) {
+      assert(plugin && "plugin is not initialized");
+      rocprofiler_plugin_tracer_extra_data_t tracer_extra_data;
+      tracer_extra_data.function_name = entry->function_name;
+      tracer_extra_data.kernel_name = entry->kernel_name;
+      plugin->write_callback_record(entry->record, tracer_extra_data);
+    });
+rocprofiler::TraceBuffer<hsa_api_trace_entry_t> hsa_api_buffer(
+    "HSA API", 0x200000, [](hsa_api_trace_entry_t* entry) {
+      assert(plugin && "plugin is not initialized");
+      rocprofiler_plugin_tracer_extra_data_t tracer_extra_data;
+      tracer_extra_data.function_name = entry->function_name;
+      plugin->write_callback_record(entry->record,
+      tracer_extra_data);
+    });
+rocprofiler::TraceBuffer<roctx_trace_entry_t> roctx_trace_buffer(
+    "rocTX API", 0x200000, [](roctx_trace_entry_t* entry) {
+      assert(plugin && "plugin is not initialized");
+      rocprofiler_plugin_tracer_extra_data_t tracer_extra_data;
+      tracer_extra_data.function_name = nullptr; 
+      plugin->write_callback_record(
+      entry->record, tracer_extra_data);
+    });
 
 }  // namespace
 
@@ -325,10 +398,94 @@ void plugins_load() {
     }
   }
 }
+/*
+* A callback function for synchronous trace records.
+* This function queries the api infoemation and populates the
+* api_trace buffer and adds it to the trace buffer.
+*/
+void sync_api_trace_callback(rocprofiler_record_tracer_t tracer_record,  rocprofiler_session_id_t session_id) {
+  if (tracer_record.domain == ACTIVITY_DOMAIN_HIP_API) {
+    size_t kernel_name_size = 0, function_name_size = 0;
+    char *function_name_c = nullptr, *kernel_name_c = nullptr;
+    CHECK_ROCPROFILER(rocprofiler_query_hip_tracer_api_data_info_size(
+        session_id, ROCPROFILER_HIP_FUNCTION_NAME, tracer_record.api_data_handle,
+        tracer_record.operation_id, &function_name_size));
+    if (function_name_size > 1) {
+      //function_name_c = (char*)malloc(function_name_size);
+      CHECK_ROCPROFILER(rocprofiler_query_hip_tracer_api_data_info(
+          session_id, ROCPROFILER_HIP_FUNCTION_NAME, tracer_record.api_data_handle,
+          tracer_record.operation_id, &function_name_c));
+    }
+    CHECK_ROCPROFILER(rocprofiler_query_hip_tracer_api_data_info_size(
+        session_id, ROCPROFILER_HIP_KERNEL_NAME, tracer_record.api_data_handle,
+        tracer_record.operation_id, &kernel_name_size));
+    if (kernel_name_size > 1) {
+      CHECK_ROCPROFILER(rocprofiler_query_hip_tracer_api_data_info(
+          session_id, ROCPROFILER_HIP_KERNEL_NAME, tracer_record.api_data_handle,
+          tracer_record.operation_id, &kernel_name_c));
+    }
+    char* data = nullptr;
+    size_t size = 0;
+    CHECK_ROCPROFILER(rocprofiler_query_hip_tracer_api_data_info_size(
+        session_id, ROCPROFILER_HIP_API_DATA, tracer_record.api_data_handle, tracer_record.operation_id, &size));
+    if(size > 0)
+     CHECK_ROCPROFILER(rocprofiler_query_hip_tracer_api_data_info(
+        session_id, ROCPROFILER_HIP_API_DATA, tracer_record.api_data_handle, tracer_record.operation_id, &data));
+    hip_api_data_t hip_api_data = *reinterpret_cast<hip_api_data_t*>(data);
+    //std::cout << "in api calback" << strlen(function_name_c) << "\t" << function_name_c << std::endl;
+    hip_api_trace_entry_t& entry = hip_api_buffer.Emplace(
+        tracer_record,
+         (const char*)kernel_name_c ? strdup(kernel_name_c) : nullptr,
+        (const char*)(function_name_c) ? strdup(function_name_c):nullptr,
+        hip_api_data);
+    entry.valid.store(rocprofiler::TRACE_ENTRY_COMPLETE, std::memory_order_release);
+  }
+  if (tracer_record.domain == ACTIVITY_DOMAIN_HSA_API) {
+    size_t function_name_size = 0;
+    char *function_name_c = nullptr;
+    CHECK_ROCPROFILER(rocprofiler_query_hsa_tracer_api_data_info_size(
+        session_id, ROCPROFILER_HSA_FUNCTION_NAME, tracer_record.api_data_handle,
+        tracer_record.operation_id, &function_name_size));
+    if (function_name_size > 1) {
 
-void plugin_write_record(rocprofiler_record_tracer_t record, rocprofiler_session_id_t session_id) {
-  if (plugin) plugin->write_callback_record(record, session_id);
-}
+      CHECK_ROCPROFILER(rocprofiler_query_hsa_tracer_api_data_info(
+          session_id, ROCPROFILER_HSA_FUNCTION_NAME, tracer_record.api_data_handle,
+          tracer_record.operation_id, &function_name_c));
+    }
+    char* data = nullptr;
+    size_t size=0;
+    CHECK_ROCPROFILER(rocprofiler_query_hip_tracer_api_data_info_size(
+        session_id, ROCPROFILER_HIP_API_DATA, tracer_record.api_data_handle, tracer_record.operation_id, &size));
+    CHECK_ROCPROFILER(rocprofiler_query_hip_tracer_api_data_info(
+        session_id, ROCPROFILER_HIP_API_DATA, tracer_record.api_data_handle, tracer_record.operation_id, &data));
+    hsa_api_data_t hsa_api_data = *reinterpret_cast<hsa_api_data_t*>(data);
+    hsa_api_trace_entry_t& entry = hsa_api_buffer.Emplace(
+        tracer_record,
+         (const char*)(function_name_c),
+         hsa_api_data);
+    entry.valid.store(rocprofiler::TRACE_ENTRY_COMPLETE, std::memory_order_release);
+  }
+  if (tracer_record.domain == ACTIVITY_DOMAIN_ROCTX) {
+      size_t roctx_message_size = 0;
+      char *roctx_message_str = nullptr;
+      uint64_t roctx_id=0;
+      CHECK_ROCPROFILER(rocprofiler_query_roctx_tracer_api_data_info_size(
+          session_id, ROCPROFILER_ROCTX_MESSAGE, tracer_record.api_data_handle,
+          tracer_record.operation_id, &roctx_message_size));
+      if (roctx_message_size > 1) {
+        roctx_message_str =(char*)malloc(roctx_message_size * sizeof(char));
+        CHECK_ROCPROFILER(rocprofiler_query_roctx_tracer_api_data_info(
+            session_id, ROCPROFILER_ROCTX_MESSAGE, tracer_record.api_data_handle,
+            tracer_record.operation_id, &roctx_message_str));
+        if (roctx_message_str)
+          roctx_message_str ? rocmtools::cxx_demangle(std::string(strdup(roctx_message_str))).c_str() : nullptr;
+      }
+      roctx_trace_entry_t& entry = roctx_trace_buffer.Emplace(
+        tracer_record,
+        roctx_message_str);
+    entry.valid.store(rocprofiler::TRACE_ENTRY_COMPLETE, std::memory_order_release);
+    }
+  }
 
 void wait_for_amdsys() {
   while (amd_sys_handler.load(std::memory_order_relaxed)) {
@@ -542,7 +699,7 @@ ROCPROFILER_EXPORT bool OnLoad(void* table, uint64_t runtime_version,
                                                 apis_requested.size(), &filter_id, property));
         CHECK_ROCPROFILER(rocprofiler_set_filter_buffer(session_id, filter_id, buffer_id));
         CHECK_ROCPROFILER(
-            rocprofiler_set_api_trace_sync_callback(session_id, filter_id, plugin_write_record));
+            rocprofiler_set_api_trace_sync_callback(session_id, filter_id, sync_api_trace_callback));
         filter_ids.emplace_back(filter_id);
         break;
       }

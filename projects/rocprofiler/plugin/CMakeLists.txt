@@ -22,5 +22,5 @@
 
 add_subdirectory(file)
 add_subdirectory(perfetto)
-add_subdirectory(ctf)
+#add_subdirectory(ctf)
 add_subdirectory(att)

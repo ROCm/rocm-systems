@@ -198,7 +198,8 @@ class file_plugin_t {
 
   void FlushTracerRecord(rocprofiler_record_tracer_t tracer_record,
                          rocprofiler_session_id_t session_id,
-                         rocprofiler_buffer_id_t buffer_id = rocprofiler_buffer_id_t{0}) {
+                         rocprofiler_plugin_tracer_extra_data_t tracer_extra_data,
+                         rocprofiler_buffer_id_t buffer_id = rocprofiler_buffer_id_t{0}){
     std::lock_guard<std::mutex> lock(writing_lock);
     std::string kernel_name;
     std::string function_name;
@@ -211,81 +212,29 @@ class file_plugin_t {
             reinterpret_cast<const char*>(tracer_record.api_data_handle.handle));
     }
     if (tracer_record.domain == ACTIVITY_DOMAIN_HSA_API) {
-      size_t function_name_size = 0;
-      CHECK_ROCPROFILER(rocprofiler_query_hsa_tracer_api_data_info_size(
-          session_id, ROCPROFILER_HSA_FUNCTION_NAME, tracer_record.api_data_handle,
-          tracer_record.operation_id, &function_name_size));
-      if (function_name_size > 1) {
-        char* function_name_c = nullptr;
-        CHECK_ROCPROFILER(rocprofiler_query_hsa_tracer_api_data_info(
-            session_id, ROCPROFILER_HSA_FUNCTION_NAME, tracer_record.api_data_handle,
-            tracer_record.operation_id, &function_name_c));
-        if (function_name_c) function_name = std::string(function_name_c);
-      }
+      if (tracer_extra_data.function_name)
+         function_name = std::string(tracer_extra_data.function_name);
     }
     if (tracer_record.domain == ACTIVITY_DOMAIN_HIP_API) {
-      size_t function_name_size = 0;
-      CHECK_ROCPROFILER(rocprofiler_query_hip_tracer_api_data_info_size(
-          session_id, ROCPROFILER_HIP_FUNCTION_NAME, tracer_record.api_data_handle,
-          tracer_record.operation_id, &function_name_size));
-      if (function_name_size > 1) {
-        char* function_name_c = nullptr;
-        CHECK_ROCPROFILER(rocprofiler_query_hip_tracer_api_data_info(
-            session_id, ROCPROFILER_HIP_FUNCTION_NAME, tracer_record.api_data_handle,
-            tracer_record.operation_id, &function_name_c));
-        if (function_name_c) function_name = std::string(function_name_c);
-      }
-      size_t kernel_name_size = 0;
-      CHECK_ROCPROFILER(rocprofiler_query_hip_tracer_api_data_info_size(
-          session_id, ROCPROFILER_HIP_KERNEL_NAME, tracer_record.api_data_handle,
-          tracer_record.operation_id, &kernel_name_size));
-      if (kernel_name_size > 1) {
-        char* kernel_name_str = nullptr;
-        CHECK_ROCPROFILER(rocprofiler_query_hip_tracer_api_data_info(
-            session_id, ROCPROFILER_HIP_KERNEL_NAME, tracer_record.api_data_handle,
-            tracer_record.operation_id, &kernel_name_str));
-        if (kernel_name_str) {
-          kernel_name = rocmtools::cxx_demangle(std::string(kernel_name_str));
-          free(kernel_name_str);
-          // TODO: Change how this API returns a string.
-        }
-      }
+        if (tracer_extra_data.kernel_name)
+          kernel_name = rocmtools::cxx_demangle(std::string(tracer_extra_data.kernel_name));
+        if(tracer_extra_data.function_name)
+	  function_name = std::string(tracer_extra_data.function_name);
     }
     if (tracer_record.domain == ACTIVITY_DOMAIN_ROCTX) {
-      size_t roctx_message_size = 0;
-      CHECK_ROCPROFILER(rocprofiler_query_roctx_tracer_api_data_info_size(
-          session_id, ROCPROFILER_ROCTX_MESSAGE, tracer_record.api_data_handle,
-          tracer_record.operation_id, &roctx_message_size));
-      if (roctx_message_size > 1) {
-        [[maybe_unused]] char* roctx_message_str =
-            static_cast<char*>(malloc(roctx_message_size * sizeof(char)));
-        CHECK_ROCPROFILER(rocprofiler_query_roctx_tracer_api_data_info(
-            session_id, ROCPROFILER_ROCTX_MESSAGE, tracer_record.api_data_handle,
-            tracer_record.operation_id, &roctx_message_str));
-        if (roctx_message_str)
-          roctx_message = rocmtools::cxx_demangle(std::string(strdup(roctx_message_str)));
-      }
-      size_t roctx_id_size = 0;
-      CHECK_ROCPROFILER(rocprofiler_query_roctx_tracer_api_data_info_size(
-          session_id, ROCPROFILER_ROCTX_ID, tracer_record.api_data_handle,
-          tracer_record.operation_id, &roctx_id_size));
-      if (roctx_id_size > 1) {
-        [[maybe_unused]] char* roctx_id_str =
-            static_cast<char*>(malloc(roctx_id_size * sizeof(char)));
-        CHECK_ROCPROFILER(rocprofiler_query_roctx_tracer_api_data_info(
-            session_id, ROCPROFILER_ROCTX_ID, tracer_record.api_data_handle,
-            tracer_record.operation_id, &roctx_id_str));
-        if (roctx_id_str) {
-          roctx_id = std::stoll(std::string(strdup(roctx_id_str)));
-          free(roctx_id_str);
-        }
-      }
+        const char* roctx_msg = reinterpret_cast<const char*>(tracer_record.api_data_handle.handle);
+	if(roctx_msg)
+         roctx_message = rocmtools::cxx_demangle(std::string(roctx_msg));
+       roctx_id = tracer_record.operation_id.id;
     }
+    // return;
     output_file_t* output_file = get_output_file(output_type_t::TRACER, tracer_record.domain);
     *output_file << "Record(" << tracer_record.header.id.handle << "), Domain("
                  << GetDomainName(tracer_record.domain) << "),";
-    if (tracer_record.domain == ACTIVITY_DOMAIN_ROCTX && roctx_id >= 0) *output_file << " ROCTX_ID(" << roctx_id << "),";
-    if (tracer_record.domain == ACTIVITY_DOMAIN_ROCTX && roctx_message.size() > 1) *output_file << " ROCTX_Message(" << roctx_message << "),";
+    if (tracer_record.domain == ACTIVITY_DOMAIN_ROCTX && roctx_id >= 0)
+      *output_file << " ROCTX_ID(" << roctx_id << "),";
+    if (tracer_record.domain == ACTIVITY_DOMAIN_ROCTX && roctx_message.size() > 1)
+      *output_file << " ROCTX_Message(" << roctx_message << "),";
     if (function_name.size() > 1) *output_file << " Function(" << function_name << "),";
     if (kernel_name.size() > 1) *output_file << " Kernel_Name(" << kernel_name.c_str() << "),";
     if (tracer_record.domain == ACTIVITY_DOMAIN_HSA_OPS || tracer_record.domain == ACTIVITY_DOMAIN_HIP_OPS) {
@@ -304,15 +253,17 @@ class file_plugin_t {
       }
     }
     if (tracer_record.phase == ROCPROFILER_PHASE_NONE) {
-      *output_file << " Begin(" << tracer_record.timestamps.begin.value
-                   << "), End(" << tracer_record.timestamps.end.value << "),";
+      *output_file << " Begin(" << tracer_record.timestamps.begin.value << "), End("
+                   << tracer_record.timestamps.end.value << "),";
     } else {
-      if(tracer_record.phase == ROCPROFILER_PHASE_ENTER && tracer_record.domain != ACTIVITY_DOMAIN_ROCTX){
+      if (tracer_record.phase == ROCPROFILER_PHASE_ENTER &&
+          tracer_record.domain != ACTIVITY_DOMAIN_ROCTX) {
         rocprofiler_timestamp_t timestamp;
         rocprofiler_get_timestamp(&timestamp);
         *output_file << " Begin(" << timestamp.value << "),";
       }
-      if(tracer_record.phase == ROCPROFILER_PHASE_ENTER && tracer_record.domain == ACTIVITY_DOMAIN_ROCTX) {
+      if (tracer_record.phase == ROCPROFILER_PHASE_ENTER &&
+          tracer_record.domain == ACTIVITY_DOMAIN_ROCTX) {
         rocprofiler_timestamp_t timestamp;
         rocprofiler_get_timestamp(&timestamp);
         *output_file << " timestamp(" << timestamp.value << "),";
@@ -418,7 +369,6 @@ class file_plugin_t {
                  << "pc-sample(" << std::hex << std::showbase << sample.pc << "), "
                  << "se(" << sample.se << ')' << std::endl;
   }
-
   int WriteBufferRecords(const rocprofiler_record_header_t* begin,
                          const rocprofiler_record_header_t* end,
                          rocprofiler_session_id_t session_id, rocprofiler_buffer_id_t buffer_id) {
@@ -432,9 +382,11 @@ class file_plugin_t {
           break;
         }
         case ROCPROFILER_TRACER_RECORD: {
+          rocprofiler_plugin_tracer_extra_data_t tracer_extra_data;
+	  tracer_extra_data.function_name = nullptr;
           rocprofiler_record_tracer_t* tracer_record = const_cast<rocprofiler_record_tracer_t*>(
               reinterpret_cast<const rocprofiler_record_tracer_t*>(begin));
-          FlushTracerRecord(*tracer_record, session_id, buffer_id);
+          FlushTracerRecord(*tracer_record, session_id, tracer_extra_data, buffer_id);
           break;
         }
         case ROCPROFILER_ATT_TRACER_RECORD: {
@@ -454,16 +406,16 @@ class file_plugin_t {
     return 0;
   }
 
-  bool is_valid() const { return valid_; }
+    bool is_valid() const { return valid_; }
 
- private:
-  bool valid_{false};
+   private:
+    bool valid_{false};
 
-  output_file_t roctx_file_{"roctx_trace.txt"}, hsa_api_file_{"hsa_api_trace.txt"},
-      hip_api_file_{"hip_api_trace.txt"}, hip_activity_file_{"hcc_ops_trace.txt"},
-      hsa_async_copy_file_{"async_copy_trace.txt"}, pc_sample_file_{"pcs_trace.txt"},
-      output_file_{"results.txt"};
-};
+    output_file_t roctx_file_{"roctx_trace.txt"}, hsa_api_file_{"hsa_api_trace.txt"},
+        hip_api_file_{"hip_api_trace.txt"}, hip_activity_file_{"hcc_ops_trace.txt"},
+        hsa_async_copy_file_{"async_copy_trace.txt"}, pc_sample_file_{"pcs_trace.txt"},
+        output_file_{"results.txt"};
+  };
 
 file_plugin_t* file_plugin = nullptr;
 
@@ -500,9 +452,9 @@ ROCPROFILER_EXPORT int rocprofiler_plugin_write_buffer_records(
 }
 
 ROCPROFILER_EXPORT int rocprofiler_plugin_write_record(rocprofiler_record_tracer_t record,
-                                                       rocprofiler_session_id_t session_id) {
+                                                      rocprofiler_plugin_tracer_extra_data_t tracer_extra_data){
   if (!file_plugin || !file_plugin->is_valid()) return -1;
   if (record.header.id.handle == 0) return 0;
-  file_plugin->FlushTracerRecord(record, session_id);
+  file_plugin->FlushTracerRecord(record, rocprofiler_session_id_t{0}, tracer_extra_data, rocprofiler_buffer_id_t{0});
   return 0;
 }

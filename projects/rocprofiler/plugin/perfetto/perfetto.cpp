@@ -340,12 +340,13 @@ class perfetto_plugin_t {
     return 0;
   }
 
-  int FlushTracerRecord(rocprofiler_record_tracer_t tracer_record,
-                        rocprofiler_session_id_t session_id) {
+int FlushTracerRecord(rocprofiler_record_tracer_t tracer_record,
+                        rocprofiler_session_id_t session_id,
+                        rocprofiler_plugin_tracer_extra_data_t tracer_extra_data) {
     std::lock_guard<std::mutex> lock(writing_lock);
     if (!tracing_session_) rocmtools::warning("Tracing session is deleted!\n");
     std::string kernel_name;
-    char* function_name;
+    const char* function_name;
     char* activity_name;
     std::string roctx_message;
     uint64_t roctx_id = 0;
@@ -424,35 +425,11 @@ class perfetto_plugin_t {
           }
         }
         auto& roctx_track = roctx_track_it->second;
-
-        size_t roctx_message_size = 0;
-        CHECK_ROCPROFILER(rocprofiler_query_roctx_tracer_api_data_info_size(
-            session_id, ROCPROFILER_ROCTX_MESSAGE, tracer_record.api_data_handle,
-            tracer_record.operation_id, &roctx_message_size));
-        if (roctx_message_size > 1) {
-          char* roctx_message_str = nullptr;
-          CHECK_ROCPROFILER(rocprofiler_query_roctx_tracer_api_data_info(
-              session_id, ROCPROFILER_ROCTX_MESSAGE, tracer_record.api_data_handle,
-              tracer_record.operation_id, &roctx_message_str));
-          if (roctx_message_str)
-            roctx_message = rocmtools::cxx_demangle(std::string(strdup(roctx_message_str)));
-        }
-        size_t roctx_id_size = 0;
-        CHECK_ROCPROFILER(rocprofiler_query_roctx_tracer_api_data_info_size(
-            session_id, ROCPROFILER_ROCTX_ID, tracer_record.api_data_handle,
-            tracer_record.operation_id, &roctx_id_size));
-        if (roctx_id_size > 1) {
-          char* roctx_id_str = nullptr;
-          CHECK_ROCPROFILER(rocprofiler_query_roctx_tracer_api_data_info(
-              session_id, ROCPROFILER_ROCTX_ID, tracer_record.api_data_handle,
-              tracer_record.operation_id, &roctx_id_str));
-          if (roctx_id_str) {
-            roctx_id = std::stoll(std::string(strdup(roctx_id_str)));
-            free(roctx_id_str);
-          }
-        }
-
-        if(tracer_record.phase == ROCPROFILER_PHASE_NONE) {
+        roctx_id = tracer_record.operation_id.id;
+	if (reinterpret_cast<const char*>(tracer_record.api_data_handle.handle))
+          roctx_message = std::string(reinterpret_cast<const char*>(tracer_record.api_data_handle.handle));
+        
+        if (tracer_record.phase == ROCPROFILER_PHASE_NONE) {
           if (tracer_record.operation_id.id == 1) {
             perfetto::StaticString roctx_message_pft(
                 (!roctx_message.empty() ? roctx_message.c_str() : ""));
@@ -465,19 +442,18 @@ class perfetto_plugin_t {
             roctx_track_entries_--;
           }
         } else {
-          rocprofiler_timestamp_t timestamp;
+        rocprofiler_timestamp_t timestamp;
           rocprofiler_get_timestamp(&timestamp);
           if (tracer_record.operation_id.id == 1) {
-          perfetto::StaticString roctx_message_pft(
-              (!roctx_message.empty() ? roctx_message.c_str() : ""));
-          TRACE_EVENT_BEGIN("ROCTX_API", roctx_message_pft, roctx_track,
-                            timestamp.value, "Timestamp(ns)",
-                            timestamp.value, "RocTx ID", roctx_id);
-          roctx_track_entries_++;
-        } else {
-          TRACE_EVENT_END("ROCTX_API", roctx_track, timestamp.value);
-          roctx_track_entries_--;
-        }
+            perfetto::StaticString roctx_message_pft(
+                (!roctx_message.empty() ? roctx_message.c_str() : ""));
+            TRACE_EVENT_BEGIN("ROCTX_API", roctx_message_pft, roctx_track, timestamp.value,
+                              "Timestamp(ns)", timestamp.value, "RocTx ID", roctx_id);
+            roctx_track_entries_++;
+          } else {
+            TRACE_EVENT_END("ROCTX_API", roctx_track, timestamp.value);
+            roctx_track_entries_--;
+          }
         }
         break;
       }
@@ -505,23 +481,15 @@ class perfetto_plugin_t {
           }
         }
         auto& hsa_track = hsa_track_it->second;
-        size_t function_name_size = 0;
-        CHECK_ROCPROFILER(rocprofiler_query_hsa_tracer_api_data_info_size(
-            session_id, ROCPROFILER_HSA_FUNCTION_NAME, tracer_record.api_data_handle,
-            tracer_record.operation_id, &function_name_size));
-        if (function_name_size > 1) {
-          function_name = nullptr;
-          CHECK_ROCPROFILER(rocprofiler_query_hsa_tracer_api_data_info(
-              session_id, ROCPROFILER_HSA_FUNCTION_NAME, tracer_record.api_data_handle,
-              tracer_record.operation_id, &function_name));
-        }
+	function_name = tracer_extra_data.function_name;
+        
         rocprofiler_timestamp_t timestamp;
         rocprofiler_get_timestamp(&timestamp);
-        if(tracer_record.phase == ROCPROFILER_PHASE_ENTER)
+        if (tracer_record.phase == ROCPROFILER_PHASE_ENTER)
           TRACE_EVENT_BEGIN("HSA_API", perfetto::StaticString(function_name), hsa_track,
-                          timestamp.value,
-                          perfetto::Flow::ProcessScoped(tracer_record.correlation_id.value));
-        if(tracer_record.phase == ROCPROFILER_PHASE_EXIT)
+                            timestamp.value,
+                            perfetto::Flow::ProcessScoped(tracer_record.correlation_id.value));
+        if (tracer_record.phase == ROCPROFILER_PHASE_EXIT)
           TRACE_EVENT_END("HSA_API", hsa_track, timestamp.value);
         break;
       }
@@ -550,34 +518,13 @@ class perfetto_plugin_t {
           }
         }
         auto& hip_track = hip_track_it->second;
-        size_t function_name_size = 0;
-        CHECK_ROCPROFILER(rocprofiler_query_hip_tracer_api_data_info_size(
-            session_id, ROCPROFILER_HIP_FUNCTION_NAME, tracer_record.api_data_handle,
-            tracer_record.operation_id, &function_name_size));
-        if (function_name_size > 1) {
-          function_name = nullptr;
-          CHECK_ROCPROFILER(rocprofiler_query_hip_tracer_api_data_info(
-              session_id, ROCPROFILER_HIP_FUNCTION_NAME, tracer_record.api_data_handle,
-              tracer_record.operation_id, &function_name));
-        }
-        size_t kernel_name_size = 0;
-        CHECK_ROCPROFILER(rocprofiler_query_hip_tracer_api_data_info_size(
-            session_id, ROCPROFILER_HIP_KERNEL_NAME, tracer_record.api_data_handle,
-            tracer_record.operation_id, &kernel_name_size));
-        char* kernel_name_str;
-        if (kernel_name_size > 1) {
-          kernel_name_str = nullptr;
-          CHECK_ROCPROFILER(rocprofiler_query_hip_tracer_api_data_info(
-              session_id, ROCPROFILER_HIP_KERNEL_NAME, tracer_record.api_data_handle,
-              tracer_record.operation_id, &kernel_name_str));
-          if (kernel_name_str) {
-            kernel_name = rocmtools::cxx_demangle(std::string(kernel_name_str));
-            free(kernel_name_str);
-          }
-        }
+        function_name = tracer_extra_data.function_name;
+        if (tracer_extra_data.kernel_name != nullptr)
+            kernel_name = std::string(tracer_extra_data.kernel_name);
+        
         rocprofiler_timestamp_t timestamp;
         rocprofiler_get_timestamp(&timestamp);
-        if(tracer_record.phase == ROCPROFILER_PHASE_ENTER) {
+        if (tracer_record.phase == ROCPROFILER_PHASE_ENTER) {
           if (kernel_name.size() > 0) {
             TRACE_EVENT_BEGIN("HIP_API", perfetto::StaticString(function_name), hip_track,
                               timestamp.value, "Kernel Name", kernel_name,
@@ -588,10 +535,10 @@ class perfetto_plugin_t {
                               perfetto::Flow::ProcessScoped(tracer_record.correlation_id.value));
           }
         }
-        if(tracer_record.phase == ROCPROFILER_PHASE_EXIT) {
+        if (tracer_record.phase == ROCPROFILER_PHASE_EXIT) {
           TRACE_EVENT_END("HIP_API", hip_track, timestamp.value);
         }
-        if(tracer_record.phase == ROCPROFILER_PHASE_NONE) {
+        if (tracer_record.phase == ROCPROFILER_PHASE_NONE) {
           if (kernel_name.size() > 0) {
             TRACE_EVENT_BEGIN("HIP_API", perfetto::StaticString(function_name), hip_track,
                               tracer_record.timestamps.begin.value, "Kernel Name", kernel_name,
@@ -616,13 +563,14 @@ class perfetto_plugin_t {
         // size_t stream_id_str_size = 0;
         // char* stream_id_str;
         // CHECK_ROCPROFILER(rocprofiler_query_hip_tracer_api_data_info_size(
-        //     session_id, ROCPROFILER_HIP_STREAM_ID, rocprofiler_tracer_api_data_handle_t{nullptr, 0},
-        //     rocprofiler_tracer_operation_id_t{(uint32_t)tracer_record.correlation_id.value},
+        //     session_id, ROCPROFILER_HIP_STREAM_ID, rocprofiler_tracer_api_data_handle_t{nullptr,
+        //     0}, rocprofiler_tracer_operation_id_t{(uint32_t)tracer_record.correlation_id.value},
         //     &stream_id_str_size));
         // if (stream_id_str_size > 1) {
         //   stream_id_str = static_cast<char*>(malloc(stream_id_str_size * sizeof(char)));
         //   CHECK_ROCPROFILER(rocprofiler_query_hip_tracer_api_data_info(
-        //       session_id, ROCPROFILER_HIP_STREAM_ID, rocprofiler_tracer_api_data_handle_t{nullptr, 0},
+        //       session_id, ROCPROFILER_HIP_STREAM_ID,
+        //       rocprofiler_tracer_api_data_handle_t{nullptr, 0},
         //       rocprofiler_tracer_operation_id_t{(uint32_t)tracer_record.correlation_id.value},
         //       &stream_id_str));
         //   if (stream_id_str != nullptr) stream_id = std::stoll(stream_id_str);
@@ -671,20 +619,20 @@ class perfetto_plugin_t {
           } else {
             activity_name = const_cast<char*>(std::string("N/A").c_str());
           }
-          if(tracer_record.phase == ROCPROFILER_PHASE_NONE)
+          if (tracer_record.phase == ROCPROFILER_PHASE_NONE)
             TRACE_EVENT_BEGIN("HIP_OPS", perfetto::StaticString(activity_name), stream_track,
-                            tracer_record.timestamps.begin.value, "Agent ID",
-                            tracer_record.agent_id.handle, "Process ID", GetPid(),
-                            perfetto::Flow::ProcessScoped(tracer_record.correlation_id.value));
-          else if(tracer_record.phase == ROCPROFILER_PHASE_ENTER)
+                              tracer_record.timestamps.begin.value, "Agent ID",
+                              tracer_record.agent_id.handle, "Process ID", GetPid(),
+                              perfetto::Flow::ProcessScoped(tracer_record.correlation_id.value));
+          else if (tracer_record.phase == ROCPROFILER_PHASE_ENTER)
             TRACE_EVENT_BEGIN("HIP_OPS", perfetto::StaticString(activity_name), stream_track,
-                            timestamp.value, "Agent ID",
-                            tracer_record.agent_id.handle, "Process ID", GetPid(),
-                            perfetto::Flow::ProcessScoped(tracer_record.correlation_id.value));
+                              timestamp.value, "Agent ID", tracer_record.agent_id.handle,
+                              "Process ID", GetPid(),
+                              perfetto::Flow::ProcessScoped(tracer_record.correlation_id.value));
         }
-        if(tracer_record.phase == ROCPROFILER_PHASE_NONE)
+        if (tracer_record.phase == ROCPROFILER_PHASE_NONE)
           TRACE_EVENT_END("HIP_OPS", stream_track, tracer_record.timestamps.end.value);
-        else if(tracer_record.phase == ROCPROFILER_PHASE_EXIT)
+        else if (tracer_record.phase == ROCPROFILER_PHASE_EXIT)
           TRACE_EVENT_END("HIP_OPS", stream_track, timestamp.value);
         break;
       }
@@ -754,9 +702,11 @@ class perfetto_plugin_t {
           break;
         }
         case ROCPROFILER_TRACER_RECORD: {
+	  rocprofiler_plugin_tracer_extra_data_t tracer_extra_data;
+	  tracer_extra_data.function_name = nullptr; 
           rocprofiler_record_tracer_t* tracer_record = const_cast<rocprofiler_record_tracer_t*>(
               reinterpret_cast<const rocprofiler_record_tracer_t*>(begin));
-          FlushTracerRecord(*tracer_record, session_id);
+          FlushTracerRecord(*tracer_record, session_id, tracer_extra_data);
           break;
         }
         default:
@@ -837,10 +787,11 @@ ROCPROFILER_EXPORT int rocprofiler_plugin_write_buffer_records(const rocprofiler
   return perfetto_plugin->WriteBufferRecords(begin, end, session_id, buffer_id);
 }
 
-ROCPROFILER_EXPORT int rocprofiler_plugin_write_record(rocprofiler_record_tracer_t record,
-                                                   rocprofiler_session_id_t session_id) {
+ROCPROFILER_EXPORT int rocprofiler_plugin_write_record(
+    rocprofiler_record_tracer_t record, 
+    rocprofiler_plugin_tracer_extra_data_t tracer_extra_data) {
   if (!perfetto_plugin || !perfetto_plugin->IsValid()) return -1;
   if (record.header.id.handle == 0) return 0;
-  perfetto_plugin->FlushTracerRecord(record, session_id);
+  perfetto_plugin->FlushTracerRecord(record, rocprofiler_session_id_t{0}, tracer_extra_data);
   return 0;
 }
