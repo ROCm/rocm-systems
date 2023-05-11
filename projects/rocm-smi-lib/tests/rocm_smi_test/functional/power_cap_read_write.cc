@@ -54,6 +54,7 @@
 #include "gtest/gtest.h"
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi_test/functional/power_cap_read_write.h"
+#include "rocm_smi/rocm_smi_utils.h"
 #include "rocm_smi_test/test_common.h"
 
 
@@ -118,6 +119,11 @@ void TestPowerCapReadWrite::Run(void) {
     // skip the test otherwise
     if (orig < min || orig > max) {
       std::cout << "Power cap is not within the range. Skipping test for " << dv_ind << std::endl;
+      continue;
+    }
+
+    if (amd::smi::is_vm_guest()) {
+      std::cout << "VM guest is not supported for power cap test. Skipping test for " << dv_ind << std::endl;
       continue;
     }
 

@@ -277,6 +277,10 @@ class ScopedAcquire {
   DISALLOW_COPY_AND_ASSIGN(ScopedAcquire)
 };
 
+// The best effort way to decide whether it is in VM guest environment:
+// In VM environment, the /proc/cpuinfo set hypervisor flag by default
+bool is_vm_guest();
+
 }  // namespace smi
 }  // namespace amd
 
