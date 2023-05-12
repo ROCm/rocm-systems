@@ -211,7 +211,9 @@ The resulting `a.out` will depend on
 - Improved Test Suite
 ### Added
 - 'end_time' need to be disabled in roctx_trace.txt
+- Every API trace in V2 reported synchrounusly will have two records, one for Enter phase and for Exit phase
 ### Fixed
 - rocprof in ROcm/5.4.0 gpu selector broken.
 - rocprof in ROCm/5.4.1 fails to generate kernel info.
 - rocprof clobbers LD_PRELOAD.
+- Samples are fixed to show the new usage of phases.

@@ -41,9 +41,10 @@
   } while (0)
 
 // Macro to check ROCPROFILER calls status
-#define CHECK_ROCPROFILER(call)                                                                      \
+#define CHECK_ROCPROFILER(call)                                                                    \
   do {                                                                                             \
-    if ((call) != ROCPROFILER_STATUS_SUCCESS) rocmtools::fatal("Error: ROCProfiler API Call Error!");  \
+    if ((call) != ROCPROFILER_STATUS_SUCCESS)                                                      \
+      rocmtools::fatal("Error: ROCProfiler API Call Error!");                                      \
   } while (false)
 
 // Device (Kernel) functions, it must be void
@@ -59,9 +60,7 @@ __global__ void kernelF() { printf("\nKernel F\n"); }
   return pid;
 }
 
-[[maybe_unused]] uint64_t GetMachineID() {
-  return gethostid();
-}
+[[maybe_unused]] uint64_t GetMachineID() { return gethostid(); }
 
 std::ofstream output_file;
 
@@ -104,7 +103,8 @@ const char* GetDomainName(rocprofiler_tracer_activity_domain_t domain) {
 //   1- Application is finished
 //   2- Buffer is full
 //   3- Flush Interval specified by the user
-void FlushTracerRecord(rocprofiler_record_tracer_t tracer_record, rocprofiler_session_id_t session_id,
+void FlushTracerRecord(rocprofiler_record_tracer_t tracer_record,
+                       rocprofiler_session_id_t session_id,
                        rocprofiler_buffer_id_t buffer_id = rocprofiler_buffer_id_t{0}) {
   std::lock_guard<std::mutex> lock(writing_lock);
   std::string kernel_name;
@@ -176,19 +176,30 @@ void FlushTracerRecord(rocprofiler_record_tracer_t tracer_record, rocprofiler_se
       [[maybe_unused]] char* roctx_id_str =
           static_cast<char*>(malloc(roctx_id_size * sizeof(char)));
       CHECK_ROCPROFILER(rocprofiler_query_roctx_tracer_api_data_info(
-          session_id, ROCPROFILER_ROCTX_ID, tracer_record.api_data_handle, tracer_record.operation_id,
-          &roctx_id_str));
+          session_id, ROCPROFILER_ROCTX_ID, tracer_record.api_data_handle,
+          tracer_record.operation_id, &roctx_id_str));
       if (roctx_id_str) {
         roctx_id = std::stoll(std::string(strdup(roctx_id_str)));
         free(roctx_id_str);
       }
     }
   }
+
   output_file << "Record [" << tracer_record.header.id.handle << "], Domain("
-              << GetDomainName(tracer_record.domain) << "), Begin("
-              << tracer_record.timestamps.begin.value << "), End("
-              << tracer_record.timestamps.end.value << "), Correlation ID( "
-              << tracer_record.correlation_id.value << ")";
+              << GetDomainName(tracer_record.domain);
+  if (tracer_record.phase == ROCPROFILER_PHASE_ENTER) {
+    rocprofiler_timestamp_t timestamp;
+    rocprofiler_get_timestamp(&timestamp);
+    output_file << "), Begin(" << timestamp.value;
+  } else if (tracer_record.phase == ROCPROFILER_PHASE_EXIT) {
+    rocprofiler_timestamp_t timestamp;
+    rocprofiler_get_timestamp(&timestamp);
+    output_file << "), End(" << timestamp.value;
+  } else {
+    output_file << "), Begin(" << tracer_record.timestamps.begin.value << "), End("
+                << tracer_record.timestamps.end.value;
+  }
+  output_file << "), Correlation ID(" << tracer_record.correlation_id.value << ")";
   if (roctx_id >= 0) output_file << ", ROCTX ID(" << roctx_id << ")";
   if (roctx_message.size() > 1) output_file << ", ROCTX Message(" << roctx_message << ")";
   if (function_name.size() > 1) output_file << ", Function(" << function_name << ")";
@@ -201,14 +212,14 @@ void FlushProfilerRecord(const rocprofiler_record_profiler_t* profiler_record,
   std::lock_guard<std::mutex> lock(writing_lock);
   size_t name_length = 0;
   CHECK_ROCPROFILER(rocprofiler_query_kernel_info_size(ROCPROFILER_KERNEL_NAME,
-                                                   profiler_record->kernel_id, &name_length));
+                                                       profiler_record->kernel_id, &name_length));
   // Taken from rocprofiler: The size hasn't changed in  recent past
   static const uint32_t lds_block_size = 128 * 4;
   const char* kernel_name_c = "";
   if (name_length > 1) {
     kernel_name_c = static_cast<const char*>(malloc(name_length * sizeof(char)));
-    CHECK_ROCPROFILER(rocprofiler_query_kernel_info(ROCPROFILER_KERNEL_NAME, profiler_record->kernel_id,
-                                                &kernel_name_c));
+    CHECK_ROCPROFILER(rocprofiler_query_kernel_info(ROCPROFILER_KERNEL_NAME,
+                                                    profiler_record->kernel_id, &kernel_name_c));
   }
   output_file << std::string("dispatch[") << std::to_string(profiler_record->header.id.handle)
               << "], " << std::string("gpu_id(") << std::to_string(profiler_record->gpu_id.handle)
@@ -254,9 +265,9 @@ void FlushProfilerRecord(const rocprofiler_record_profiler_t* profiler_record,
             &counter_name_length));
         if (counter_name_length > 1) {
           const char* name_c = static_cast<const char*>(malloc(name_length * sizeof(char)));
-          CHECK_ROCPROFILER(rocprofiler_query_counter_info(session_id, ROCPROFILER_COUNTER_NAME,
-                                                       profiler_record->counters[i].counter_handler,
-                                                       &name_c));
+          CHECK_ROCPROFILER(rocprofiler_query_counter_info(
+              session_id, ROCPROFILER_COUNTER_NAME, profiler_record->counters[i].counter_handler,
+              &name_c));
           output_file << ", " << name_c << " ("
                       << std::to_string(profiler_record->counters[i].value.value) << ")"
                       << std::endl;
@@ -266,19 +277,17 @@ void FlushProfilerRecord(const rocprofiler_record_profiler_t* profiler_record,
   }
 }
 
-void FlushPCSamplingRecord(
-  const rocprofiler_record_pc_sample_t *pc_sampling_record) {
-  const auto &sample = pc_sampling_record->pc_sample;
+void FlushPCSamplingRecord(const rocprofiler_record_pc_sample_t* pc_sampling_record) {
+  const auto& sample = pc_sampling_record->pc_sample;
   output_file << "dispatch[" << sample.dispatch_id.value << "], "
               << "timestamp(" << sample.timestamp.value << "), "
               << "gpu_id(" << sample.gpu_id.handle << "), "
               << "pc-sample(" << std::hex << std::showbase << sample.pc << "), "
-              << "se(" << sample.se << ')'
-              << std::endl;
+              << "se(" << sample.se << ')' << std::endl;
 }
 
 void FlushCountersSamplerRecord(
-  const rocprofiler_record_counters_sampler_t *counters_sampler_record) {
+    const rocprofiler_record_counters_sampler_t* counters_sampler_record) {
   for (uint32_t i = 0; i < counters_sampler_record->num_counters; i++) {
     output_file << ",Counter_" << i << "("
                 << std::to_string(counters_sampler_record->counters[i].value.value) << ")"
@@ -287,8 +296,9 @@ void FlushCountersSamplerRecord(
   output_file << std::endl;
 }
 
-int WriteBufferRecords(const rocprofiler_record_header_t* begin, const rocprofiler_record_header_t* end,
-                       rocprofiler_session_id_t session_id, rocprofiler_buffer_id_t buffer_id) {
+int WriteBufferRecords(const rocprofiler_record_header_t* begin,
+                       const rocprofiler_record_header_t* end, rocprofiler_session_id_t session_id,
+                       rocprofiler_buffer_id_t buffer_id) {
   while (begin < end) {
     if (!begin) return 0;
     switch (begin->kind) {
@@ -305,20 +315,20 @@ int WriteBufferRecords(const rocprofiler_record_header_t* begin, const rocprofil
         break;
       }
       case ROCPROFILER_PC_SAMPLING_RECORD: {
-        const rocprofiler_record_pc_sample_t *pc_sampling_record =
-         reinterpret_cast<const rocprofiler_record_pc_sample_t *>(begin);
+        const rocprofiler_record_pc_sample_t* pc_sampling_record =
+            reinterpret_cast<const rocprofiler_record_pc_sample_t*>(begin);
         FlushPCSamplingRecord(pc_sampling_record);
         break;
       }
       case ROCPROFILER_COUNTERS_SAMPLER_RECORD: {
-        const rocprofiler_record_counters_sampler_t *counters_sampler_record =
-         reinterpret_cast<const rocprofiler_record_counters_sampler_t *>(begin);
+        const rocprofiler_record_counters_sampler_t* counters_sampler_record =
+            reinterpret_cast<const rocprofiler_record_counters_sampler_t*>(begin);
         FlushCountersSamplerRecord(counters_sampler_record);
         break;
       }
       default: {
-        std::cout <<"unknown record\n";
-          break;
+        std::cout << "unknown record\n";
+        break;
       }
     }
     rocprofiler_next_record(begin, &begin, session_id, buffer_id);
