@@ -27,6 +27,7 @@
 #include "roctracer.h"
 #include "roctracer_hsa.h"
 
+#include <atomic>
 #include <hsa/hsa.h>
 #include <hsa/amd_hsa_signal.h>
 #include <hsa/hsa_ven_amd_loader.h>
@@ -415,11 +416,13 @@ hsa_status_t ExecutableDestroyIntercept(hsa_executable_t executable) {
   return saved_core_api.hsa_executable_destroy_fn(executable);
 }
 
-bool profiling_async_copy_enable = false;
+std::atomic<bool> profiling_async_copy_enable{false};
 
 hsa_status_t ProfilingAsyncCopyEnableIntercept(bool enable) {
   hsa_status_t status = saved_amd_ext_api.hsa_amd_profiling_async_copy_enable_fn(enable);
-  if (status == HSA_STATUS_SUCCESS) profiling_async_copy_enable = enable;
+  if (status == HSA_STATUS_SUCCESS) {
+    profiling_async_copy_enable.exchange(enable, std::memory_order_release);
+  }
   return status;
 }
 
@@ -434,6 +437,36 @@ void MemoryASyncCopyHandler(const Tracker::entry_t* entry) {
   ReportActivity(ACTIVITY_DOMAIN_HSA_OPS, HSA_OP_ID_COPY, &record);
 }
 
+hsa_status_t MemoryASyncCopyOnEngineIntercept(
+    void* dst, hsa_agent_t dst_agent, const void* src, hsa_agent_t src_agent, size_t size,
+    uint32_t num_dep_signals, const hsa_signal_t* dep_signals, hsa_signal_t completion_signal,
+    hsa_amd_sdma_engine_id_t engine_id, bool force_copy_on_sdma) {
+  bool is_enabled = IsEnabled(ACTIVITY_DOMAIN_HSA_OPS, HSA_OP_ID_COPY);
+
+  // FIXME: what happens if the state changes before returning?
+  [[maybe_unused]] hsa_status_t status = saved_amd_ext_api.hsa_amd_profiling_async_copy_enable_fn(
+      profiling_async_copy_enable.load(std::memory_order_relaxed) || is_enabled);
+  assert(status == HSA_STATUS_SUCCESS && "hsa_amd_profiling_async_copy_enable failed");
+
+  if (!is_enabled) {
+    return saved_amd_ext_api.hsa_amd_memory_async_copy_on_engine_fn(
+        dst, dst_agent, src, src_agent, size, num_dep_signals, dep_signals, completion_signal,
+        engine_id, force_copy_on_sdma);
+  }
+
+  Tracker::entry_t* entry = new Tracker::entry_t();
+  entry->handler = MemoryASyncCopyHandler;
+  entry->correlation_id = CorrelationId();
+  Tracker::Enable(Tracker::COPY_ENTRY_TYPE, hsa_agent_t{}, completion_signal, entry);
+
+  status = saved_amd_ext_api.hsa_amd_memory_async_copy_on_engine_fn(
+      dst, dst_agent, src, src_agent, size, num_dep_signals, dep_signals, entry->signal, engine_id,
+      force_copy_on_sdma);
+  if (status != HSA_STATUS_SUCCESS) Tracker::Disable(entry);
+
+  return status;
+}
+
 hsa_status_t MemoryASyncCopyIntercept(void* dst, hsa_agent_t dst_agent, const void* src,
                                       hsa_agent_t src_agent, size_t size, uint32_t num_dep_signals,
                                       const hsa_signal_t* dep_signals,
@@ -442,7 +475,7 @@ hsa_status_t MemoryASyncCopyIntercept(void* dst, hsa_agent_t dst_agent, const vo
 
   // FIXME: what happens if the state changes before returning?
   [[maybe_unused]] hsa_status_t status = saved_amd_ext_api.hsa_amd_profiling_async_copy_enable_fn(
-      profiling_async_copy_enable | is_enabled);
+      profiling_async_copy_enable.load(std::memory_order_relaxed) || is_enabled);
   assert(status == HSA_STATUS_SUCCESS && "hsa_amd_profiling_async_copy_enable failed");
 
   if (!is_enabled) {
@@ -473,7 +506,7 @@ hsa_status_t MemoryASyncCopyRectIntercept(const hsa_pitched_ptr_t* dst,
 
   // FIXME: what happens if the state changes before returning?
   [[maybe_unused]] hsa_status_t status = saved_amd_ext_api.hsa_amd_profiling_async_copy_enable_fn(
-      profiling_async_copy_enable | is_enabled);
+      profiling_async_copy_enable.load(std::memory_order_relaxed) || is_enabled);
   assert(status == HSA_STATUS_SUCCESS && "hsa_amd_profiling_async_copy_enable failed");
 
   if (!is_enabled) {
@@ -570,6 +603,7 @@ void Initialize(HsaApiTable* table) {
   // Install the HSA_OPS intercept
   table->amd_ext_->hsa_amd_memory_async_copy_fn = MemoryASyncCopyIntercept;
   table->amd_ext_->hsa_amd_memory_async_copy_rect_fn = MemoryASyncCopyRectIntercept;
+  table->amd_ext_->hsa_amd_memory_async_copy_on_engine_fn = MemoryASyncCopyOnEngineIntercept;
   table->amd_ext_->hsa_amd_profiling_async_copy_enable_fn = ProfilingAsyncCopyEnableIntercept;
 
   // Install the HSA_EVT intercept
@@ -590,7 +624,7 @@ void Initialize(HsaApiTable* table) {
 
 void Finalize() {
   if (hsa_status_t status =
-          saved_amd_ext_api.hsa_amd_profiling_async_copy_enable_fn(profiling_async_copy_enable);
+          saved_amd_ext_api.hsa_amd_profiling_async_copy_enable_fn(profiling_async_copy_enable.load(std::memory_order_relaxed));
       status != HSA_STATUS_SUCCESS)
     assert(!"hsa_amd_profiling_async_copy_enable failed");
 
