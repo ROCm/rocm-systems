@@ -212,6 +212,7 @@ The resulting `a.out` will depend on
 ### Added
 - 'end_time' need to be disabled in roctx_trace.txt
 - Every API trace in V2 reported synchrounusly will have two records, one for Enter phase and for Exit phase
+- support for hsa_amd_memory_async_copy_on_engine API function trace
 ### Fixed
 - rocprof in ROcm/5.4.0 gpu selector broken.
 - rocprof in ROCm/5.4.1 fails to generate kernel info.

@@ -291,7 +291,7 @@ class file_plugin_t {
     if (kernel_name.size() > 1) *output_file << " Kernel_Name(" << kernel_name.c_str() << "),";
     if (tracer_record.phase == ROCPROFILER_PHASE_NONE) {
       *output_file << " Begin(" << tracer_record.timestamps.begin.value
-                   << "), End(" << tracer_record.timestamps.end.value << ")";
+                   << "), End(" << tracer_record.timestamps.end.value << "),";
     } else {
       if(tracer_record.phase == ROCPROFILER_PHASE_ENTER && tracer_record.domain != ACTIVITY_DOMAIN_ROCTX){
         rocprofiler_timestamp_t timestamp;

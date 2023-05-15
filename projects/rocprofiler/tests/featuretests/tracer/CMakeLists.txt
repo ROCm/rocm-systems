@@ -29,6 +29,14 @@ set_source_files_properties(apps/hello_world.cpp PROPERTIES HIP_SOURCE_PROPERTY_
 hip_add_executable(tracer_hip_helloworld apps/hello_world.cpp)
 set_target_properties(tracer_hip_helloworld PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/tests/featuretests/tracer/apps")
 
+#hsa-mem_async_copy and async_copy_on_engine
+set_source_files_properties(apps/copy_on_engine.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+hip_add_executable(copy_on_engine apps/copy_on_engine.cpp)
+set_target_properties(copy_on_engine PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/tests/featuretests/tracer/apps")
+target_link_options(copy_on_engine PRIVATE "-Wl,--build-id=md5")
+install(TARGETS copy_on_engine RUNTIME DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/tests/featuretests/tracer/apps COMPONENT tests)
+target_link_libraries(copy_on_engine hsa-runtime64::hsa-runtime64 Threads::Threads dl stdc++fs)
+
 # Add test cpp file
 add_executable(runTracerFeatureTests tracer_gtest.cpp
  ${GTEST_MAIN_SRC_FILE}

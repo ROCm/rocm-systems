@@ -35,7 +35,7 @@ THE SOFTWARE.
 
 /* --------------------------------------------------------------------------*/
 /**
- * @Synopsis Implementation of a Parser class for Profiler output
+ * @Synopsis Implementation of a Parser class for Tracer output
  * Parses pre-saved golden output for kernel info and saves them in a vector
  * Executes appliaction(passed as param:app_name) and saves parsed kernel info
  * in a vector.
@@ -60,7 +60,7 @@ class ApplicationParser : public ::testing::Test {
     std::string function;
   };
 
-  //!< saves lines of profiler output
+  //!< saves lines of tracer output
   std::vector<std::string> output_lines;
 
  public:
@@ -72,12 +72,12 @@ class ApplicationParser : public ::testing::Test {
   void GetKernelInfoForGoldenOutput(const char* app_name, std::string filename,
                                     std::vector<KernelInfo>* kernel_info_output);
 
-  //!< Parses kernel-info after running profiler against curent application
+  //!< Parses kernel-info after running tracer against curent application
   // and saves them in a vector.
   void GetKernelInfoForRunningApplication(std::vector<KernelInfo>* kernel_info_output);
 
  private:
-  //!< Runs a given appllication and saves profiler output.
+  //!< Runs a given appllication and saves tracer output.
   // These output lines can be letter passed for kernel informations
   // i.e: kernel_names
   void ProcessApplication(std::stringstream& ss);
@@ -89,12 +89,12 @@ class ApplicationParser : public ::testing::Test {
 
 /* --------------------------------------------------------------------------*/
 /**
- * @Synopsis Implementation of a ProfilerTest
+ * @Synopsis Implementation of a Tracertest
  * Subsequent tests can use this to parse different applications
  */
 /* --------------------------------------------------------------------------*/
 
-class ProfilerTest : public ApplicationParser {
+class Tracertest : public ApplicationParser {
  protected:
   virtual void SetUp(const char* app_name, const char* trace_option) {
     ApplicationParser::SetUp(app_name, trace_option);

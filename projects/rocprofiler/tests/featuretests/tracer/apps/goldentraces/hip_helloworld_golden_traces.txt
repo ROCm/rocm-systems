@@ -21,4 +21,3 @@ Record(24), Domain(HIP_API_DOMAIN), Function(hipMemcpy), End(2995594192228011), 
 Record(26), Domain(HIP_API_DOMAIN), Function(hipFree), Begin(2995594192237078), Correlation_ID(9)
 Record(27), Domain(HIP_API_DOMAIN), Function(hipFree), End(2995594192256085), Correlation_ID(9)
 Record(29), Domain(HIP_API_DOMAIN), Function(hipFree), Begin(2995594192259622), Correlation_ID(10)
-Record(30), Domain(HIP_API_DOMAIN), Function(hipFree), End(2995594192264101), Correlation_ID(10)

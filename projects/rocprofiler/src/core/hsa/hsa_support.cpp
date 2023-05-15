@@ -52,7 +52,6 @@ namespace {
 
 hsa_status_t hsa_executable_iteration_callback(hsa_executable_t executable, hsa_agent_t agent,
                                                hsa_executable_symbol_t symbol, void* args) {
-  
   hsa_symbol_kind_t type;
   rocmtools::hsa_support::GetCoreApiTable().hsa_executable_symbol_get_info_fn(
       symbol, HSA_EXECUTABLE_SYMBOL_INFO_TYPE, &type);
@@ -63,7 +62,7 @@ hsa_status_t hsa_executable_iteration_callback(hsa_executable_t executable, hsa_
     // TODO(aelwazir): to be removed if the HSA fixed the issue of corrupted
     // names overflowing the length given
     if (name_length > 1) {
-      if(!(*static_cast<bool*>(args))) {
+      if (!(*static_cast<bool*>(args))) {
         char name[name_length + 1];
         uint64_t kernel_object;
         rocmtools::hsa_support::GetCoreApiTable().hsa_executable_symbol_get_info_fn(
@@ -92,7 +91,8 @@ bool IsEnabled(rocprofiler_tracer_activity_domain_t domain, uint32_t operation_i
   return report && report(domain, operation_id, nullptr) == 0;
 }
 
-void ReportActivity(rocprofiler_tracer_activity_domain_t domain, uint32_t operation_id, void* data) {
+void ReportActivity(rocprofiler_tracer_activity_domain_t domain, uint32_t operation_id,
+                    void* data) {
   if (auto report = report_activity.load(std::memory_order_relaxed))
     report(domain, operation_id, data);
 }
@@ -486,12 +486,14 @@ hsa_status_t ExecutableDestroyIntercept(hsa_executable_t executable) {
   return rocmtools::hsa_support::GetCoreApiTable().hsa_executable_destroy_fn(executable);
 }
 
-bool profiling_async_copy_enable = false;
+std::atomic<bool> profiling_async_copy_enable{false};
 
 hsa_status_t ProfilingAsyncCopyEnableIntercept(bool enable) {
   hsa_status_t status =
       rocmtools::hsa_support::GetAmdExtTable().hsa_amd_profiling_async_copy_enable_fn(enable);
-  if (status == HSA_STATUS_SUCCESS) profiling_async_copy_enable = enable;
+  if (status == HSA_STATUS_SUCCESS) {
+    profiling_async_copy_enable.exchange(enable, std::memory_order_release);
+  }
   return status;
 }
 
@@ -515,7 +517,7 @@ hsa_status_t MemoryASyncCopyIntercept(void* dst, hsa_agent_t dst_agent, const vo
   // FIXME: what happens if the state changes before returning?
   [[maybe_unused]] hsa_status_t status =
       rocmtools::hsa_support::GetAmdExtTable().hsa_amd_profiling_async_copy_enable_fn(
-          profiling_async_copy_enable | is_enabled);
+          profiling_async_copy_enable.load(std::memory_order_relaxed) || is_enabled);
   assert(status == HSA_STATUS_SUCCESS && "hsa_amd_profiling_async_copy_enable failed");
 
   if (!is_enabled) {
@@ -547,7 +549,7 @@ hsa_status_t MemoryASyncCopyRectIntercept(const hsa_pitched_ptr_t* dst,
   // FIXME: what happens if the state changes before returning?
   [[maybe_unused]] hsa_status_t status =
       rocmtools::hsa_support::GetAmdExtTable().hsa_amd_profiling_async_copy_enable_fn(
-          profiling_async_copy_enable | is_enabled);
+          profiling_async_copy_enable.load(std::memory_order_relaxed) || is_enabled);
   assert(status == HSA_STATUS_SUCCESS && "hsa_amd_profiling_async_copy_enable failed");
 
   if (!is_enabled) {
@@ -564,6 +566,36 @@ hsa_status_t MemoryASyncCopyRectIntercept(const hsa_pitched_ptr_t* dst,
   status = rocmtools::hsa_support::GetAmdExtTable().hsa_amd_memory_async_copy_rect_fn(
       dst, dst_offset, src, src_offset, range, copy_agent, dir, num_dep_signals, dep_signals,
       entry->signal);
+  if (status != HSA_STATUS_SUCCESS) Tracker::Disable(entry);
+
+  return status;
+}
+
+hsa_status_t MemoryASyncCopyOnEngineIntercept(
+    void* dst, hsa_agent_t dst_agent, const void* src, hsa_agent_t src_agent, size_t size,
+    uint32_t num_dep_signals, const hsa_signal_t* dep_signals, hsa_signal_t completion_signal,
+    hsa_amd_sdma_engine_id_t engine_id, bool force_copy_on_sdma) {
+  bool is_enabled = IsEnabled(ACTIVITY_DOMAIN_HSA_OPS, HSA_OP_ID_COPY);
+
+  // FIXME: what happens if the state changes before returning?
+  [[maybe_unused]] hsa_status_t status = saved_amd_ext_api.hsa_amd_profiling_async_copy_enable_fn(
+      profiling_async_copy_enable.load(std::memory_order_relaxed) || is_enabled);
+  assert(status == HSA_STATUS_SUCCESS && "hsa_amd_profiling_async_copy_enable failed");
+
+  if (!is_enabled) {
+    return saved_amd_ext_api.hsa_amd_memory_async_copy_on_engine_fn(
+        dst, dst_agent, src, src_agent, size, num_dep_signals, dep_signals, completion_signal,
+        engine_id, force_copy_on_sdma);
+  }
+
+  Tracker::entry_t* entry = new Tracker::entry_t();
+  entry->handler = MemoryASyncCopyHandler;
+  entry->correlation_id = CorrelationId();
+  Tracker::Enable(Tracker::COPY_ENTRY_TYPE, hsa_agent_t{}, completion_signal, entry);
+
+  status = saved_amd_ext_api.hsa_amd_memory_async_copy_on_engine_fn(
+      dst, dst_agent, src, src_agent, size, num_dep_signals, dep_signals, entry->signal, engine_id,
+      force_copy_on_sdma);
   if (status != HSA_STATUS_SUCCESS) Tracker::Disable(entry);
 
   return status;
@@ -748,21 +780,21 @@ void Initialize(HsaApiTable* table) {
                 rocmtools::queue::InitializePools(cpu_agent);
                 break;
               case HSA_DEVICE_TYPE_GPU:
-                  // XXX FIXME: When multiple ranks are used, each rank's first
-                  // logical device always has GPU ID 0, regardless of which
-                  // physical device is selected with CUDA_VISIBLE_DEVICES.
-                  // Because of this, when merging traces from multiple ranks,
-                  // GPU IDs from different processes may overlap.
-                  //
-                  // The long term solution is to use KFD's gpu_id, which is
-                  // stable across APIs and processes, but it isn't currently
-                  // exposed by ROCr.  We could use the agent's
-                  // HSA_AMD_AGENT_INFO_DRIVER_NODE_ID in the meantime, as even
-                  // that would be an improvement--it's what legacy roctracer
-                  // is currently doing as well as the roctracer compatibility
-                  // code earlier in this file.
-                  agent_info.setIndex(gpu_agent_count++);
-                  break;
+                // XXX FIXME: When multiple ranks are used, each rank's first
+                // logical device always has GPU ID 0, regardless of which
+                // physical device is selected with CUDA_VISIBLE_DEVICES.
+                // Because of this, when merging traces from multiple ranks,
+                // GPU IDs from different processes may overlap.
+                //
+                // The long term solution is to use KFD's gpu_id, which is
+                // stable across APIs and processes, but it isn't currently
+                // exposed by ROCr.  We could use the agent's
+                // HSA_AMD_AGENT_INFO_DRIVER_NODE_ID in the meantime, as even
+                // that would be an improvement--it's what legacy roctracer
+                // is currently doing as well as the roctracer compatibility
+                // code earlier in this file.
+                agent_info.setIndex(gpu_agent_count++);
+                break;
               default:
                 agent_info.setIndex(other_agent_count++);
                 break;
@@ -787,6 +819,8 @@ void Initialize(HsaApiTable* table) {
       roctracer::hsa_support::MemoryASyncCopyRectIntercept;
   table->amd_ext_->hsa_amd_profiling_async_copy_enable_fn =
       roctracer::hsa_support::ProfilingAsyncCopyEnableIntercept;
+  table->amd_ext_->hsa_amd_memory_async_copy_on_engine_fn =
+      roctracer::hsa_support::MemoryASyncCopyOnEngineIntercept;
 
   // Install the HSA_EVT intercept
   table->core_->hsa_memory_allocate_fn = roctracer::hsa_support::MemoryAllocateIntercept;
@@ -875,11 +909,11 @@ bool IterateCounters(rocprofiler_counters_info_callback_t counters_info_callback
 
       const rocprofiler_counter_info_t counter_info =
           rocprofiler_counter_info_t{strdup(name.c_str()),
-                                   strdup(descr.c_str()),
-                                   expr.empty() ? nullptr : strdup(expr.c_str()),
-                                   query.instance_count,
-                                   block_name.c_str(),
-                                   block_counters};
+                                     strdup(descr.c_str()),
+                                     expr.empty() ? nullptr : strdup(expr.c_str()),
+                                     query.instance_count,
+                                     block_name.c_str(),
+                                     block_counters};
       counters_info_callback(counter_info, gpu_name.c_str(), gpu_counter);
     }
     gpu_counter++;
@@ -890,7 +924,8 @@ bool IterateCounters(rocprofiler_counters_info_callback_t counters_info_callback
     //   std::string expr_str;
     //   if (expr) expr_str = expr->GetStr().c_str();
     //   const rocprofiler_counter_info_t counter_info =
-    //       rocprofiler_counter_info_t{start->first.c_str(), "", expr ? expr_str.c_str() : nullptr};
+    //       rocprofiler_counter_info_t{start->first.c_str(), "", expr ? expr_str.c_str() :
+    //       nullptr};
     //   counters_info_callback(counter_info, gpu_name.c_str(), gpu_counter);
     //   start++;
     // }
