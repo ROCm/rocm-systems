@@ -42,12 +42,6 @@ Panel Config:
           unit: Unit
           tips: Tips
         metric:
-          Wave Cycles:
-            avg: AVG(((4 * SQ_WAVE_CYCLES) / SQ_WAVES))
-            min: MIN(((4 * SQ_WAVE_CYCLES) / SQ_WAVES))
-            max: MAX(((4 * SQ_WAVE_CYCLES) / SQ_WAVES))
-            unit: Cycles/Wave
-            tips: 
           LDS Instrs:
             avg: AVG((SQ_INSTS_LDS / $denom))
             min: MIN((SQ_INSTS_LDS / $denom))
