@@ -50,9 +50,15 @@ Panel Config:
             unit: Wavefronts
             tips: 
           VGPRs:
-            avg: AVG(vgpr)
-            min: MIN(vgpr)
-            max: MAX(vgpr)
+            avg: AVG(arch_vgpr)
+            min: MIN(arch_vgpr)
+            max: MAX(arch_vgpr)
+            unit: Registers
+            tips: 
+          AGPRs:
+            avg: AVG(accum_vgpr)
+            min: MIN(accum_vgpr)
+            max: MAX(accum_vgpr)
             unit: Registers
             tips: 
           SGPRs:

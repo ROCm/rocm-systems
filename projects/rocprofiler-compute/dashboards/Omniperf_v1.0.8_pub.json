@@ -25,7 +25,7 @@
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
   "id": 43,
-  "iteration": 1683039685468,
+  "iteration": 1684188009505,
   "links": [],
   "liveNow": false,
   "panels": [
@@ -1539,7 +1539,8 @@
                 "mode": "absolute",
                 "steps": [
                   {
-                    "color": "green"
+                    "color": "green",
+                    "value": null
                   },
                   {
                     "color": "red",
@@ -1817,7 +1818,7 @@
               },
               "rawQuery": true,
               "refId": "pmc_perf",
-              "target": "$Workload1.pmc_perf.aggregate([\n  {\"$match\": {\n      \"Index\": { \"$in\": [${DispatchIDFilter:raw}] },\n      \"gpu-id\": { \"$in\": [${gpuFilter:raw}] },\n      \"KernelName\": { \"$in\": ${KernelNameFilter:json}}\n    }},\n    {\"$addFields\": {\n      \"denom\": {\n              \"$switch\" : {\n              \"branches\": [\n                  {\n                      \"case\":  { \"$eq\": [ $normUnit, \"per Wave\"]} ,\n                      \"then\":  \"&SQ_WAVES\"\n                  },\n                  {\n                      \"case\":  { \"$eq\": [ $normUnit, \"per Cycle\"]} ,\n                      \"then\":  \"&GRBM_GUI_ACTIVE\"\n                  },\n                  {\n                      \"case\":  { \"$eq\": [ $normUnit, \"per Sec\"]} ,\n                      \"then\":  {\"$divide\":[{\"$subtract\": [\"&EndNs\", \"&BeginNs\" ]}, 1]}\n                  }\n              ],\n              \"default\": 1\n              }         \n      } \n  }},\n  {\"$group\": {\n      \"_id\": null,\n      \"wave_life\": {\n        \"$avg\": {\n          \"$cond\": [\n            { \"$ne\": [\"&SQ_WAVES\", 0] },\n            { \"$multiply\": [4, { \"$divide\": [\"&SQ_WAVE_CYCLES\", \"&SQ_WAVES\"] }] },\n            null\n          ]\n        }\n      },\n      \"salu\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_SALU\", \"&denom\" ] }\n      },\n      \"smem\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_SMEM\", \"&denom\" ] }\n      },\n      \"valu\": {\n          \"$avg\": { \"$divide\": [\"&SQ_INSTS_VALU\", \"&denom\"] }\n      },\n      \"mfma\": {\n          \"$avg\": { \"$divide\": [\"&SQ_INSTS_MFMA\", \"&denom\"] }\n      },\n      \"vmem\": {\n          \"$avg\": { \"$divide\": [\"&SQ_INSTS_VMEM\", \"&denom\"] }\n      },\n      \"lds_instr\": {\n          \"$avg\": { \"$divide\": [\"&SQ_INSTS_LDS\", \"&denom\"] }\n      },\n      \"gws\": {\n          \"$avg\": { \"$divide\": [\"&SQ_INSTS_GDS\", \"&denom\"] }\n      },\n      \"br\": {\n          \"$avg\": { \"$divide\": [\"&SQ_INSTS_BRANCH\", \"&denom\"] }\n      },\n      \"vgpr\": {\n          \"$avg\": \"&vgpr\"\n      },\n      \"sgpr\": {\n          \"$avg\": \"&sgpr\"\n      },\n      \"lds_alloc\": {\n          \"$avg\": \"&lds\"\n      },\n      \"scratch_alloc\": {\n          \"$avg\": \"&scr\"\n      },\n      \"wavefronts\": {\n          \"$avg\": \"&SPI_CSN_WAVE\"\n      },\n      \"workgroups\": {\n          \"$avg\": \"&SPI_CSN_NUM_THREADGROUPS\"\n      },\n      \"lds_req\": {\n          \"$avg\": { \"$divide\": [\"&SQ_INSTS_LDS\", \"&denom\"] }\n      },  \n      \"lds_util\":   {\n            \"$avg\":    {\"$divide\":[ \n                            { \"$multiply\": [ 100,  \"&SQ_LDS_IDX_ACTIVE\" ]}, \n                            {\"$multiply\": [\"&GRBM_GUI_ACTIVE\", $numCU]}\n                       ]}\n      },\n      \"vl1_rd\": {\n          \"$avg\": { \"$divide\": [\"&TCP_TOTAL_READ_sum\", \"&denom\"] }\n      },\n      \"vl1_wr\": {\n          \"$avg\": { \"$divide\": [\"&TCP_TOTAL_WRITE_sum\", \"&denom\"] }\n      },\n      \"vl1_atom\": {\n          \"$avg\": { \"$divide\": [{ \"$add\": [\"&TCP_TOTAL_ATOMIC_WITH_RET_sum\", \"&TCP_TOTAL_ATOMIC_WITHOUT_RET_sum\"] }, \"&denom\"] }\n      },\n      \"il1_fetch\": {\n          \"$avg\": { \"$divide\": [\"&SQC_ICACHE_REQ\", \"&denom\"] }\n      },\n      \"il1_hit\": {\n          \"$avg\": { \"$divide\": [\"&SQC_ICACHE_HITS\", \"&SQC_ICACHE_REQ\"] }\n      },\n      \"il1_l2_req\": {\n          \"$avg\": { \"$divide\": [\"&SQC_TC_INST_REQ\", \"&denom\"] }\n      },\n      \"sl1_rd\": {\n          \"$avg\": { \"$divide\": [\"&SQC_DCACHE_REQ\", \"&denom\"] }\n      },\n      \"sl1_hit\": {\n    \"$avg\": { \n        \"$cond\": [\n            {\"$ne\": [\"&SQC_DCACHE_REQ\", 0]},\n            { \"$divide\": [\"&SQC_DCACHE_HITS\", \"&SQC_DCACHE_REQ\"] },\n            \"\"\n        ]\n    }\n},\n      \"sl1_l2_rd\": {\n          \"$avg\": { \"$divide\": [\"&SQC_TC_DATA_READ_REQ\", \"&denom\"] }\n      },\n      \"sl1_l2_wr\": {\n          \"$avg\": { \"$divide\": [\"&SQC_TC_DATA_WRITE_REQ\", \"&denom\"] }\n      },\n      \"sl1_l2_atom\": {\n          \"$avg\": { \"$divide\": [\"&SQC_TC_DATA_ATOMIC_REQ\", \"&denom\"] }\n      },\n      \"vl1_hit\": {\n          \"$avg\":  {\n            \"$cond\": [\n                { \"$ne\": [\"&TCP_TOTAL_CACHE_ACCESSES_sum\", 0] },\n                { \"$subtract\": [100, { \"$divide\": [{ \"$multiply\": [100, { \"$add\": [\"&TCP_TCC_READ_REQ_sum\", \"&TCP_TCC_WRITE_REQ_sum\", \"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"] }]  }, \"&TCP_TOTAL_CACHE_ACCESSES_sum\"] }] },\n                null\n            ]\n          }\n      },\n      \"vl1_lat\": {\n          \"$avg\": { \n            \"$cond\": [\n              { \"$ne\": [\"&TCP_TA_TCP_STATE_READ_sum\", 0] },\n              { \"$divide\": [\"&TCP_TCP_LATENCY_sum\", \"&TCP_TA_TCP_STATE_READ_sum\"] },\n              null\n            ]\n          }\n      },\n      \"vl1_coales\": {\n            \"$avg\": {\n                \"$cond\": [  {\"$ne\": [\"&TCP_TOTAL_ACCESSES_sum\", 0] },\n                            { \"$divide\": [{\"$multiply\": [\"&TA_TOTAL_WAVEFRONTS_sum\", 64, 100]}, {\"$multiply\": [\"&TCP_TOTAL_ACCESSES_sum\", 4]}] },\n                            0\n                ]\n            }\n      },\n      \"vl1_stall\": {\"$avg\":{\n                \"$cond\":[\n                    {\"$ne\": [\"&TCP_GATE_EN1_sum\", 0]}, \n                    {\"$divide\": [ { \"$multiply\": [100, \"&TCP_TCR_TCP_STALL_CYCLES_sum\"] }, \"&TCP_GATE_EN1_sum\"] },\n                    \"\"\n                ]\n      }},\n      \"vl1_l2_rd\": {\n          \"$avg\": { \"$divide\": [\"&TCP_TCC_READ_REQ_sum\", \"&denom\"] }\n      },\n      \"vl1_l2_wr\": {\n          \"$avg\": { \"$divide\": [\"&TCP_TCC_WRITE_REQ_sum\", \"&denom\"] }\n      },\n      \"vl1_l2_atom\": {\n          \"$avg\": { \"$divide\": [{ \"$add\": [\"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"] }, \"&denom\"] }\n      },\n      \"l2_rd\": {\n          \"$avg\": { \"$divide\": [\"&TCC_READ_sum\", \"&denom\"] }\n      },\n      \"l2_wr\": {\n          \"$avg\": { \"$divide\": [\"&TCC_WRITE_sum\", \"&denom\"] }\n      },\n      \"l2_atom\": {\n          \"$avg\": { \"$divide\": [\"&TCC_ATOMIC_sum\", \"&denom\"] }\n      },\n      \"l2_hit\": {\n          \"$avg\": {\n            \"$cond\": [\n              { \"$ne\": [{ \"$add\": [\"&TCC_HIT_sum\", \"&TCC_MISS_sum\"] }, 0] },\n              { \"$divide\": [{ \"$multiply\": [100, \"&TCC_HIT_sum\"] }, { \"$add\": [\"&TCC_HIT_sum\", \"&TCC_MISS_sum\"] }] },\n              null\n            ]\n          }\n      },\n      \"l2_rd_lat\": {\n          \"$avg\": {\n            \"$cond\": [\n              { \"$ne\": [{ \"$add\": [\"&TCP_TCC_READ_REQ_sum\", \"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\"] }, 0] },\n              { \"$divide\": [\"&TCP_TCC_READ_REQ_LATENCY_sum\", { \"$add\": [\"&TCP_TCC_READ_REQ_sum\", \"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\"] }] },\n              null\n            ]\n          }\n      },\n      \"l2_wr_lat\": {\n          \"$avg\": {\n            \"$cond\": [\n              { \"$ne\": [{ \"$add\": [\"&TCP_TCC_WRITE_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"] }, 0] },\n              { \"$divide\": [\"&TCP_TCC_WRITE_REQ_LATENCY_sum\", { \"$add\": [\"&TCP_TCC_WRITE_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"] }] },\n              null\n            ]\n          }\n      },\n      \"fabric_rd_lat\": {\n          \"$avg\": {\n              \"$cond\": [\n                { \"$ne\": [\"&TCC_EA_RDREQ_sum\", 0] },\n                { \"$divide\": [\"&TCC_EA_RDREQ_LEVEL_sum\", \"&TCC_EA_RDREQ_sum\"] },\n                null\n              ]\n          }\n      },\n      \"fabric_wr_lat\": {          \n          \"$avg\": {\n            \"$cond\": [\n              { \"$ne\": [\"&TCC_EA_WRREQ_sum\", 0] },\n              { \"$divide\": [\"&TCC_EA_WRREQ_LEVEL_sum\", \"&TCC_EA_WRREQ_sum\"] },\n              null\n            ]\n          }\n      },\n      \"fabric_atom_lat\": {\n          \"$avg\": {\n            \"$cond\": [\n              { \"$ne\": [\"&TCC_EA_ATOMIC_sum\", 0] },\n              { \"$divide\": [\"&TCC_EA_ATOMIC_LEVEL_sum\", \"&TCC_EA_ATOMIC_sum\"] },\n              null\n            ]\n          }\n      },\n      \"l2_fabric_rd\": {\n          \"$avg\": { \"$divide\": [\"&TCC_EA_RDREQ_sum\", \"&denom\"] }\n      },\n      \"l2_fabric_wr\": {\n          \"$avg\": { \"$divide\": [\"&TCC_EA_WRREQ_sum\", \"&denom\"] }\n      },\n      \"l2_fabric_atom\": {\n          \"$avg\": { \"$divide\": [\"&TCC_EA_ATOMIC_sum\", \"&denom\"] }\n      },\n      \"hbm_rd\": {\n          \"$avg\": { \"$divide\": [\"&TCC_EA_RDREQ_DRAM_sum\", \"&denom\"] }\n      },\n      \"hbm_wr\": {\n          \"$avg\": { \"$divide\": [\"&TCC_EA_WRREQ_DRAM_sum\", \"&denom\"] }\n      }\n    }},\n    {\"$set\": {\n      \"array\": [\n          {\n            \"Metric\": \"Wave Life\",\n            \"Alias\": \"wave_life_\",\n            \"Value\": { \"$round\": [\"&wave_life\", 0] }\n          },\n          {\n            \"Metric\": \"Active CUs\",\n            \"Alias\": \"active_cu_\",\n            \"Value\": {\"$concat\": [\"$numActiveCUs\", \"/\", \"$numCU\"]}\n          },\n          {\n            \"Metric\": \"SALU\",\n            \"Alias\": \"salu_\",\n            \"Value\": { \"$round\": [\"&salu\", 0] }\n          },\n          {\n            \"Metric\": \"SMEM\",\n            \"Alias\": \"smem_\",\n            \"Value\": { \"$round\": [\"&smem\", 0] }\n          },\n          {\n            \"Metric\": \"VALU\",\n            \"Alias\": \"valu_\",\n            \"Value\": { \"$round\": [\"&valu\", 0] }\n          },\n          {\n            \"Metric\": \"MFMA\",\n            \"Alias\": \"mfma_\",\n            \"Value\": { \"$round\": [\"&mfma\", 0] }\n          },\n          {\n            \"Metric\": \"VMEM\",\n            \"Alias\": \"vmem_\",\n            \"Value\": { \"$round\": [\"&vmem\", 0] }\n          },\n          {\n            \"Metric\": \"LDS\",\n            \"Alias\": \"lds_\",\n            \"Value\": { \"$round\": [\"&lds_instr\", 0] }\n          },\n          {\n            \"Metric\": \"GWS\",\n            \"Alias\": \"gws_\",\n            \"Value\": { \"$round\": [\"&gws\", 0] }\n          },\n          {\n            \"Metric\": \"BR\",\n            \"Alias\": \"br_\",\n            \"Value\": { \"$round\": [\"&br\", 0] }\n          },\n          {\n            \"Metric\": \"VGPR\",\n            \"Alias\": \"vgpr_\",\n            \"Value\": { \"$round\": [\"&vgpr\", 0] }\n          },\n          {\n            \"Metric\": \"SGPR\",\n            \"Alias\": \"sgpr_\",\n            \"Value\": { \"$round\": [\"&sgpr\", 0] }\n          },\n          {\n            \"Metric\": \"LDS Allocation\",\n            \"Alias\": \"lds_alloc_\",\n            \"Value\": { \"$round\": [\"&lds_alloc\", 0] }\n          },\n          {\n            \"Metric\": \"Scratch Allocation\",\n            \"Alias\": \"scratch_alloc_\",\n            \"Value\": { \"$round\": [\"&scratch_alloc\", 0] }\n          },\n          {\n            \"Metric\": \"Wavefronts\",\n            \"Alias\": \"wavefronts_\",\n            \"Value\": { \"$round\": [\"&wavefronts\", 0] }\n          },\n          {\n            \"Metric\": \"Workgroups\",\n            \"Alias\": \"workgroups_\",\n            \"Value\": { \"$round\": [\"&workgroups\", 0] }\n          },\n          {\n            \"Metric\": \"LDS Req\",\n            \"Alias\": \"lds_req_\",\n            \"Value\": { \"$round\": [\"&lds_req\", 0] }\n          },\n          {\n            \"Metric\": \"IL1 Fetch\",\n            \"Alias\": \"il1_fetch_\",\n            \"Value\": { \"$round\": [\"&il1_fetch\", 0] }\n          },\n          {\n            \"Metric\": \"IL1 Hit\",\n            \"Alias\": \"il1_hit_\",\n            \"Value\": { \"$round\": [{ \"$multiply\": [\"&il1_hit\", 100] }, 0] }\n          },\n          {\n            \"Metric\": \"IL1_L2 Rd\",\n            \"Alias\": \"il1_l2_req_\",\n            \"Value\": { \"$round\": [\"&il1_l2_req\", 0] }\n          },\n          {\n            \"Metric\": \"vL1D Rd\",\n            \"Alias\": \"sl1_rd_\",\n            \"Value\": { \"$round\": [\"&sl1_rd\", 0] }\n          },\n          {\n            \"Metric\": \"vL1D Hit\",\n            \"Alias\": \"sl1_hit_\",\n            \"Value\": { \"$round\": [{ \"$multiply\": [\"&sl1_hit\", 100] }, 0] }\n          },\n          {\n            \"Metric\": \"vL1D_L2 Rd\",\n            \"Alias\": \"sl1_l2_rd_\",\n            \"Value\": { \"$round\": [\"&sl1_l2_rd\", 0] }\n          },\n          {\n            \"Metric\": \"vL1D_L2 Wr\",\n            \"Alias\": \"sl1_l2_wr_\",\n            \"Value\": { \"$round\": [\"&sl1_l2_wr\", 0] }\n          },\n          {\n            \"Metric\": \"vL1D_L2 Atomic\",\n            \"Alias\": \"sl1_l2_atom_\",\n            \"Value\": { \"$round\": [\"&sl1_l2_atom\", 0] }\n          },\n          {\n            \"Metric\": \"VL1 Rd\",\n            \"Alias\": \"vl1_rd_\",\n            \"Value\": { \"$round\": [\"&vl1_rd\", 0] }\n          },\n          {\n            \"Metric\": \"VL1 Wr\",\n            \"Alias\": \"vl1_wr_\",\n            \"Value\": { \"$round\": [\"&vl1_wr\", 0] }\n          },\n          {\n            \"Metric\": \"VL1 Atomic\",\n            \"Alias\": \"vl1_atom_\",\n            \"Value\": { \"$round\": [\"&vl1_atom\", 0] }\n          },\n          {\n            \"Metric\": \"VL1 Hit\",\n            \"Alias\": \"vl1_hit_\",\n            \"Value\": { \"$round\": [\"&vl1_hit\", 0] }\n          },\n          {\n            \"Metric\": \"VL1 Lat\",\n            \"Alias\": \"vl1_lat_\",\n            \"Value\": { \"$round\": [\"&vl1_lat\", 0] }\n          },\n          {\n            \"Metric\": \"VL1_L2 Rd\",\n            \"Alias\": \"vl1_l2_rd_\",\n            \"Value\": { \"$round\": [\"&vl1_l2_rd\", 0] }\n          },\n          {\n            \"Metric\": \"VL1_L2 Wr\",\n            \"Alias\": \"vl1_l2_wr_\",\n            \"Value\": { \"$round\": [\"&vl1_l2_wr\", 0] }\n          },\n          {\n            \"Metric\": \"vL1_L2 Atomic\",\n            \"Alias\": \"vl1_l2_atom_\",\n            \"Value\": { \"$round\": [\"&vl1_l2_atom\", 0] }\n          },\n          {\n            \"Metric\": \"L2 Rd\",\n            \"Alias\": \"l2_rd_\",\n            \"Value\": { \"$round\": [\"&l2_rd\", 0] }\n          },\n          {\n            \"Metric\": \"L2 Wr\",\n            \"Alias\": \"l2_wr_\",\n            \"Value\": { \"$round\": [\"&l2_wr\", 0] }\n          },\n          {\n            \"Metric\": \"L2 Atomic\",\n            \"Alias\": \"l2_atom_\",\n            \"Value\": { \"$round\": [\"&l2_atom\", 0] }\n          },\n          {\n            \"Metric\": \"L2 Hit\",\n            \"Alias\": \"l2_hit_\",\n            \"Value\": { \"$round\": [\"&l2_hit\", 0] }\n          },\n          {\n            \"Metric\": \"L2 Rd Lat\",\n            \"Alias\": \"l2_rd_lat_\",\n            \"Value\": { \"$round\": [\"&l2_rd_lat\", 0] }\n          },\n          {\n            \"Metric\": \"L2 Wr Lat\",\n            \"Alias\": \"l2_wr_lat_\",\n            \"Value\": { \"$round\": [\"&l2_wr_lat\", 0] }\n          },\n          {\n            \"Metric\": \"Fabric Rd Lat\",\n            \"Alias\": \"fabric_rd_lat_\",\n            \"Value\": { \"$round\": [\"&fabric_rd_lat\", 0] }\n          },\n          {\n            \"Metric\": \"Fabric Wr Lat\",\n            \"Alias\": \"fabric_wr_lat_\",\n            \"Value\": { \"$round\": [\"&fabric_wr_lat\", 0] }\n          },\n          {\n            \"Metric\": \"Fabric Atomic Lat\",\n            \"Alias\": \"fabric_atom_lat_\",\n            \"Value\": { \"$round\": [\"&fabric_atom_lat\", 0] }\n          },\n          {\n            \"Metric\": \"Fabric_L2 Rd\",\n            \"Alias\": \"l2_fabric_rd_\",\n            \"Value\": { \"$round\": [\"&l2_fabric_rd\", 0] }\n          },\n          {\n            \"Metric\": \"Fabric_L2 Wr\",\n            \"Alias\": \"l2_fabric_wr_\",\n            \"Value\": { \"$round\": [\"&l2_fabric_wr\", 0] }\n          },\n          {\n            \"Metric\": \"Fabric_l2 Atomic\",\n            \"Alias\": \"l2_fabric_atom_\",\n            \"Value\": { \"$round\": [\"&l2_fabric_atom\", 0] }\n          },\n          {\n            \"Metric\": \"HBM Rd\",\n            \"Alias\": \"hbm_rd_\",\n            \"Value\": { \"$round\": [\"&hbm_rd\", 0] }\n          },\n          {\n            \"Metric\": \"HBM Wr\",\n            \"Alias\": \"hbm_wr_\",\n            \"Value\": { \"$round\": [\"&hbm_wr\", 0] }\n          },\n          {\n            \"Metric\": \"LDS Util\",\n            \"Alias\": \"lds_util_\",\n            \"Value\": { \"$round\": [\"&lds_util\", 0] }\n          },\n          {\n            \"Metric\": \"VL1 Coalesce\",\n            \"Alias\": \"vl1_coales_\",\n            \"Value\": { \"$round\": [\"&vl1_coales\", 0]}\n          },\n          {\n            \"Metric\": \"VL1 Stall\",\n            \"Alias\": \"vl1_stall_\",\n            \"Value\": { \"$round\": [\"&vl1_stall\", 0]}\n          }\n        ]\n    }},\n    {\"$unwind\": {\n      \"path\": \"$array\"\n    }},\n    {\"$replaceRoot\": {\n      \"newRoot\": \"$array\"\n    }}\n]);",
+              "target": "$Workload1.pmc_perf.aggregate([\n  {\"$match\": {\n      \"Index\": { \"$in\": [${DispatchIDFilter:raw}] },\n      \"gpu-id\": { \"$in\": [${gpuFilter:raw}] },\n      \"KernelName\": { \"$in\": ${KernelNameFilter:json}}\n    }},\n    {\"$addFields\": {\n      \"denom\": {\n              \"$switch\" : {\n              \"branches\": [\n                  {\n                      \"case\":  { \"$eq\": [ $normUnit, \"per Wave\"]} ,\n                      \"then\":  \"&SQ_WAVES\"\n                  },\n                  {\n                      \"case\":  { \"$eq\": [ $normUnit, \"per Cycle\"]} ,\n                      \"then\":  \"&GRBM_GUI_ACTIVE\"\n                  },\n                  {\n                      \"case\":  { \"$eq\": [ $normUnit, \"per Sec\"]} ,\n                      \"then\":  {\"$divide\":[{\"$subtract\": [\"&EndNs\", \"&BeginNs\" ]}, 1]}\n                  }\n              ],\n              \"default\": 1\n              }         \n      } \n  }},\n  {\"$group\": {\n      \"_id\": null,\n      \"wave_life\": {\n        \"$avg\": {\n          \"$cond\": [\n            { \"$ne\": [\"&SQ_WAVES\", 0] },\n            { \"$multiply\": [4, { \"$divide\": [\"&SQ_WAVE_CYCLES\", \"&SQ_WAVES\"] }] },\n            null\n          ]\n        }\n      },\n      \"salu\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_SALU\", \"&denom\" ] }\n      },\n      \"smem\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_SMEM\", \"&denom\" ] }\n      },\n      \"valu\": {\n          \"$avg\": { \"$divide\": [\"&SQ_INSTS_VALU\", \"&denom\"] }\n      },\n      \"mfma\": {\n          \"$avg\": { \"$divide\": [\"&SQ_INSTS_MFMA\", \"&denom\"] }\n      },\n      \"vmem\": {\n          \"$avg\": { \"$divide\": [\"&SQ_INSTS_VMEM\", \"&denom\"] }\n      },\n      \"lds_instr\": {\n          \"$avg\": { \"$divide\": [\"&SQ_INSTS_LDS\", \"&denom\"] }\n      },\n      \"gws\": {\n          \"$avg\": { \"$divide\": [\"&SQ_INSTS_GDS\", \"&denom\"] }\n      },\n      \"br\": {\n          \"$avg\": { \"$divide\": [\"&SQ_INSTS_BRANCH\", \"&denom\"] }\n      },\n      \"vgpr\": {\n          \"$avg\": \"&arch_vgpr\"\n      },\n      \"sgpr\": {\n          \"$avg\": \"&sgpr\"\n      },\n      \"lds_alloc\": {\n          \"$avg\": \"&lds\"\n      },\n      \"scratch_alloc\": {\n          \"$avg\": \"&scr\"\n      },\n      \"wavefronts\": {\n          \"$avg\": \"&SPI_CSN_WAVE\"\n      },\n      \"workgroups\": {\n          \"$avg\": \"&SPI_CSN_NUM_THREADGROUPS\"\n      },\n      \"lds_req\": {\n          \"$avg\": { \"$divide\": [\"&SQ_INSTS_LDS\", \"&denom\"] }\n      },  \n      \"lds_util\":   {\n            \"$avg\":    {\"$divide\":[ \n                            { \"$multiply\": [ 100,  \"&SQ_LDS_IDX_ACTIVE\" ]}, \n                            {\"$multiply\": [\"&GRBM_GUI_ACTIVE\", $numCU]}\n                       ]}\n      },\n      \"vl1_rd\": {\n          \"$avg\": { \"$divide\": [\"&TCP_TOTAL_READ_sum\", \"&denom\"] }\n      },\n      \"vl1_wr\": {\n          \"$avg\": { \"$divide\": [\"&TCP_TOTAL_WRITE_sum\", \"&denom\"] }\n      },\n      \"vl1_atom\": {\n          \"$avg\": { \"$divide\": [{ \"$add\": [\"&TCP_TOTAL_ATOMIC_WITH_RET_sum\", \"&TCP_TOTAL_ATOMIC_WITHOUT_RET_sum\"] }, \"&denom\"] }\n      },\n      \"il1_fetch\": {\n          \"$avg\": { \"$divide\": [\"&SQC_ICACHE_REQ\", \"&denom\"] }\n      },\n      \"il1_hit\": {\n          \"$avg\": { \"$divide\": [\"&SQC_ICACHE_HITS\", \"&SQC_ICACHE_REQ\"] }\n      },\n      \"il1_l2_req\": {\n          \"$avg\": { \"$divide\": [\"&SQC_TC_INST_REQ\", \"&denom\"] }\n      },\n      \"sl1_rd\": {\n          \"$avg\": { \"$divide\": [\"&SQC_DCACHE_REQ\", \"&denom\"] }\n      },\n      \"sl1_hit\": {\n    \"$avg\": { \n        \"$cond\": [\n            {\"$ne\": [\"&SQC_DCACHE_REQ\", 0]},\n            { \"$divide\": [\"&SQC_DCACHE_HITS\", \"&SQC_DCACHE_REQ\"] },\n            \"\"\n        ]\n    }\n},\n      \"sl1_l2_rd\": {\n          \"$avg\": { \"$divide\": [\"&SQC_TC_DATA_READ_REQ\", \"&denom\"] }\n      },\n      \"sl1_l2_wr\": {\n          \"$avg\": { \"$divide\": [\"&SQC_TC_DATA_WRITE_REQ\", \"&denom\"] }\n      },\n      \"sl1_l2_atom\": {\n          \"$avg\": { \"$divide\": [\"&SQC_TC_DATA_ATOMIC_REQ\", \"&denom\"] }\n      },\n      \"vl1_hit\": {\n          \"$avg\":  {\n            \"$cond\": [\n                { \"$ne\": [\"&TCP_TOTAL_CACHE_ACCESSES_sum\", 0] },\n                { \"$subtract\": [100, { \"$divide\": [{ \"$multiply\": [100, { \"$add\": [\"&TCP_TCC_READ_REQ_sum\", \"&TCP_TCC_WRITE_REQ_sum\", \"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"] }]  }, \"&TCP_TOTAL_CACHE_ACCESSES_sum\"] }] },\n                null\n            ]\n          }\n      },\n      \"vl1_lat\": {\n          \"$avg\": { \n            \"$cond\": [\n              { \"$ne\": [\"&TCP_TA_TCP_STATE_READ_sum\", 0] },\n              { \"$divide\": [\"&TCP_TCP_LATENCY_sum\", \"&TCP_TA_TCP_STATE_READ_sum\"] },\n              null\n            ]\n          }\n      },\n      \"vl1_coales\": {\n            \"$avg\": {\n                \"$cond\": [  {\"$ne\": [\"&TCP_TOTAL_ACCESSES_sum\", 0] },\n                            { \"$divide\": [{\"$multiply\": [\"&TA_TOTAL_WAVEFRONTS_sum\", 64, 100]}, {\"$multiply\": [\"&TCP_TOTAL_ACCESSES_sum\", 4]}] },\n                            0\n                ]\n            }\n      },\n      \"vl1_stall\": {\"$avg\":{\n                \"$cond\":[\n                    {\"$ne\": [\"&TCP_GATE_EN1_sum\", 0]}, \n                    {\"$divide\": [ { \"$multiply\": [100, \"&TCP_TCR_TCP_STALL_CYCLES_sum\"] }, \"&TCP_GATE_EN1_sum\"] },\n                    \"\"\n                ]\n      }},\n      \"vl1_l2_rd\": {\n          \"$avg\": { \"$divide\": [\"&TCP_TCC_READ_REQ_sum\", \"&denom\"] }\n      },\n      \"vl1_l2_wr\": {\n          \"$avg\": { \"$divide\": [\"&TCP_TCC_WRITE_REQ_sum\", \"&denom\"] }\n      },\n      \"vl1_l2_atom\": {\n          \"$avg\": { \"$divide\": [{ \"$add\": [\"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"] }, \"&denom\"] }\n      },\n      \"l2_rd\": {\n          \"$avg\": { \"$divide\": [\"&TCC_READ_sum\", \"&denom\"] }\n      },\n      \"l2_wr\": {\n          \"$avg\": { \"$divide\": [\"&TCC_WRITE_sum\", \"&denom\"] }\n      },\n      \"l2_atom\": {\n          \"$avg\": { \"$divide\": [\"&TCC_ATOMIC_sum\", \"&denom\"] }\n      },\n      \"l2_hit\": {\n          \"$avg\": {\n            \"$cond\": [\n              { \"$ne\": [{ \"$add\": [\"&TCC_HIT_sum\", \"&TCC_MISS_sum\"] }, 0] },\n              { \"$divide\": [{ \"$multiply\": [100, \"&TCC_HIT_sum\"] }, { \"$add\": [\"&TCC_HIT_sum\", \"&TCC_MISS_sum\"] }] },\n              null\n            ]\n          }\n      },\n      \"l2_rd_lat\": {\n          \"$avg\": {\n            \"$cond\": [\n              { \"$ne\": [{ \"$add\": [\"&TCP_TCC_READ_REQ_sum\", \"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\"] }, 0] },\n              { \"$divide\": [\"&TCP_TCC_READ_REQ_LATENCY_sum\", { \"$add\": [\"&TCP_TCC_READ_REQ_sum\", \"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\"] }] },\n              null\n            ]\n          }\n      },\n      \"l2_wr_lat\": {\n          \"$avg\": {\n            \"$cond\": [\n              { \"$ne\": [{ \"$add\": [\"&TCP_TCC_WRITE_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"] }, 0] },\n              { \"$divide\": [\"&TCP_TCC_WRITE_REQ_LATENCY_sum\", { \"$add\": [\"&TCP_TCC_WRITE_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"] }] },\n              null\n            ]\n          }\n      },\n      \"fabric_rd_lat\": {\n          \"$avg\": {\n              \"$cond\": [\n                { \"$ne\": [\"&TCC_EA_RDREQ_sum\", 0] },\n                { \"$divide\": [\"&TCC_EA_RDREQ_LEVEL_sum\", \"&TCC_EA_RDREQ_sum\"] },\n                null\n              ]\n          }\n      },\n      \"fabric_wr_lat\": {          \n          \"$avg\": {\n            \"$cond\": [\n              { \"$ne\": [\"&TCC_EA_WRREQ_sum\", 0] },\n              { \"$divide\": [\"&TCC_EA_WRREQ_LEVEL_sum\", \"&TCC_EA_WRREQ_sum\"] },\n              null\n            ]\n          }\n      },\n      \"fabric_atom_lat\": {\n          \"$avg\": {\n            \"$cond\": [\n              { \"$ne\": [\"&TCC_EA_ATOMIC_sum\", 0] },\n              { \"$divide\": [\"&TCC_EA_ATOMIC_LEVEL_sum\", \"&TCC_EA_ATOMIC_sum\"] },\n              null\n            ]\n          }\n      },\n      \"l2_fabric_rd\": {\n          \"$avg\": { \"$divide\": [\"&TCC_EA_RDREQ_sum\", \"&denom\"] }\n      },\n      \"l2_fabric_wr\": {\n          \"$avg\": { \"$divide\": [\"&TCC_EA_WRREQ_sum\", \"&denom\"] }\n      },\n      \"l2_fabric_atom\": {\n          \"$avg\": { \"$divide\": [\"&TCC_EA_ATOMIC_sum\", \"&denom\"] }\n      },\n      \"hbm_rd\": {\n          \"$avg\": { \"$divide\": [\"&TCC_EA_RDREQ_DRAM_sum\", \"&denom\"] }\n      },\n      \"hbm_wr\": {\n          \"$avg\": { \"$divide\": [\"&TCC_EA_WRREQ_DRAM_sum\", \"&denom\"] }\n      }\n    }},\n    {\"$set\": {\n      \"array\": [\n          {\n            \"Metric\": \"Wave Life\",\n            \"Alias\": \"wave_life_\",\n            \"Value\": { \"$round\": [\"&wave_life\", 0] }\n          },\n          {\n            \"Metric\": \"Active CUs\",\n            \"Alias\": \"active_cu_\",\n            \"Value\": {\"$concat\": [\"$numActiveCUs\", \"/\", \"$numCU\"]}\n          },\n          {\n            \"Metric\": \"SALU\",\n            \"Alias\": \"salu_\",\n            \"Value\": { \"$round\": [\"&salu\", 0] }\n          },\n          {\n            \"Metric\": \"SMEM\",\n            \"Alias\": \"smem_\",\n            \"Value\": { \"$round\": [\"&smem\", 0] }\n          },\n          {\n            \"Metric\": \"VALU\",\n            \"Alias\": \"valu_\",\n            \"Value\": { \"$round\": [\"&valu\", 0] }\n          },\n          {\n            \"Metric\": \"MFMA\",\n            \"Alias\": \"mfma_\",\n            \"Value\": { \"$round\": [\"&mfma\", 0] }\n          },\n          {\n            \"Metric\": \"VMEM\",\n            \"Alias\": \"vmem_\",\n            \"Value\": { \"$round\": [\"&vmem\", 0] }\n          },\n          {\n            \"Metric\": \"LDS\",\n            \"Alias\": \"lds_\",\n            \"Value\": { \"$round\": [\"&lds_instr\", 0] }\n          },\n          {\n            \"Metric\": \"GWS\",\n            \"Alias\": \"gws_\",\n            \"Value\": { \"$round\": [\"&gws\", 0] }\n          },\n          {\n            \"Metric\": \"BR\",\n            \"Alias\": \"br_\",\n            \"Value\": { \"$round\": [\"&br\", 0] }\n          },\n          {\n            \"Metric\": \"VGPR\",\n            \"Alias\": \"vgpr_\",\n            \"Value\": { \"$round\": [\"&vgpr\", 0] }\n          },\n          {\n            \"Metric\": \"SGPR\",\n            \"Alias\": \"sgpr_\",\n            \"Value\": { \"$round\": [\"&sgpr\", 0] }\n          },\n          {\n            \"Metric\": \"LDS Allocation\",\n            \"Alias\": \"lds_alloc_\",\n            \"Value\": { \"$round\": [\"&lds_alloc\", 0] }\n          },\n          {\n            \"Metric\": \"Scratch Allocation\",\n            \"Alias\": \"scratch_alloc_\",\n            \"Value\": { \"$round\": [\"&scratch_alloc\", 0] }\n          },\n          {\n            \"Metric\": \"Wavefronts\",\n            \"Alias\": \"wavefronts_\",\n            \"Value\": { \"$round\": [\"&wavefronts\", 0] }\n          },\n          {\n            \"Metric\": \"Workgroups\",\n            \"Alias\": \"workgroups_\",\n            \"Value\": { \"$round\": [\"&workgroups\", 0] }\n          },\n          {\n            \"Metric\": \"LDS Req\",\n            \"Alias\": \"lds_req_\",\n            \"Value\": { \"$round\": [\"&lds_req\", 0] }\n          },\n          {\n            \"Metric\": \"IL1 Fetch\",\n            \"Alias\": \"il1_fetch_\",\n            \"Value\": { \"$round\": [\"&il1_fetch\", 0] }\n          },\n          {\n            \"Metric\": \"IL1 Hit\",\n            \"Alias\": \"il1_hit_\",\n            \"Value\": { \"$round\": [{ \"$multiply\": [\"&il1_hit\", 100] }, 0] }\n          },\n          {\n            \"Metric\": \"IL1_L2 Rd\",\n            \"Alias\": \"il1_l2_req_\",\n            \"Value\": { \"$round\": [\"&il1_l2_req\", 0] }\n          },\n          {\n            \"Metric\": \"vL1D Rd\",\n            \"Alias\": \"sl1_rd_\",\n            \"Value\": { \"$round\": [\"&sl1_rd\", 0] }\n          },\n          {\n            \"Metric\": \"vL1D Hit\",\n            \"Alias\": \"sl1_hit_\",\n            \"Value\": { \"$round\": [{ \"$multiply\": [\"&sl1_hit\", 100] }, 0] }\n          },\n          {\n            \"Metric\": \"vL1D_L2 Rd\",\n            \"Alias\": \"sl1_l2_rd_\",\n            \"Value\": { \"$round\": [\"&sl1_l2_rd\", 0] }\n          },\n          {\n            \"Metric\": \"vL1D_L2 Wr\",\n            \"Alias\": \"sl1_l2_wr_\",\n            \"Value\": { \"$round\": [\"&sl1_l2_wr\", 0] }\n          },\n          {\n            \"Metric\": \"vL1D_L2 Atomic\",\n            \"Alias\": \"sl1_l2_atom_\",\n            \"Value\": { \"$round\": [\"&sl1_l2_atom\", 0] }\n          },\n          {\n            \"Metric\": \"VL1 Rd\",\n            \"Alias\": \"vl1_rd_\",\n            \"Value\": { \"$round\": [\"&vl1_rd\", 0] }\n          },\n          {\n            \"Metric\": \"VL1 Wr\",\n            \"Alias\": \"vl1_wr_\",\n            \"Value\": { \"$round\": [\"&vl1_wr\", 0] }\n          },\n          {\n            \"Metric\": \"VL1 Atomic\",\n            \"Alias\": \"vl1_atom_\",\n            \"Value\": { \"$round\": [\"&vl1_atom\", 0] }\n          },\n          {\n            \"Metric\": \"VL1 Hit\",\n            \"Alias\": \"vl1_hit_\",\n            \"Value\": { \"$round\": [\"&vl1_hit\", 0] }\n          },\n          {\n            \"Metric\": \"VL1 Lat\",\n            \"Alias\": \"vl1_lat_\",\n            \"Value\": { \"$round\": [\"&vl1_lat\", 0] }\n          },\n          {\n            \"Metric\": \"VL1_L2 Rd\",\n            \"Alias\": \"vl1_l2_rd_\",\n            \"Value\": { \"$round\": [\"&vl1_l2_rd\", 0] }\n          },\n          {\n            \"Metric\": \"VL1_L2 Wr\",\n            \"Alias\": \"vl1_l2_wr_\",\n            \"Value\": { \"$round\": [\"&vl1_l2_wr\", 0] }\n          },\n          {\n            \"Metric\": \"vL1_L2 Atomic\",\n            \"Alias\": \"vl1_l2_atom_\",\n            \"Value\": { \"$round\": [\"&vl1_l2_atom\", 0] }\n          },\n          {\n            \"Metric\": \"L2 Rd\",\n            \"Alias\": \"l2_rd_\",\n            \"Value\": { \"$round\": [\"&l2_rd\", 0] }\n          },\n          {\n            \"Metric\": \"L2 Wr\",\n            \"Alias\": \"l2_wr_\",\n            \"Value\": { \"$round\": [\"&l2_wr\", 0] }\n          },\n          {\n            \"Metric\": \"L2 Atomic\",\n            \"Alias\": \"l2_atom_\",\n            \"Value\": { \"$round\": [\"&l2_atom\", 0] }\n          },\n          {\n            \"Metric\": \"L2 Hit\",\n            \"Alias\": \"l2_hit_\",\n            \"Value\": { \"$round\": [\"&l2_hit\", 0] }\n          },\n          {\n            \"Metric\": \"L2 Rd Lat\",\n            \"Alias\": \"l2_rd_lat_\",\n            \"Value\": { \"$round\": [\"&l2_rd_lat\", 0] }\n          },\n          {\n            \"Metric\": \"L2 Wr Lat\",\n            \"Alias\": \"l2_wr_lat_\",\n            \"Value\": { \"$round\": [\"&l2_wr_lat\", 0] }\n          },\n          {\n            \"Metric\": \"Fabric Rd Lat\",\n            \"Alias\": \"fabric_rd_lat_\",\n            \"Value\": { \"$round\": [\"&fabric_rd_lat\", 0] }\n          },\n          {\n            \"Metric\": \"Fabric Wr Lat\",\n            \"Alias\": \"fabric_wr_lat_\",\n            \"Value\": { \"$round\": [\"&fabric_wr_lat\", 0] }\n          },\n          {\n            \"Metric\": \"Fabric Atomic Lat\",\n            \"Alias\": \"fabric_atom_lat_\",\n            \"Value\": { \"$round\": [\"&fabric_atom_lat\", 0] }\n          },\n          {\n            \"Metric\": \"Fabric_L2 Rd\",\n            \"Alias\": \"l2_fabric_rd_\",\n            \"Value\": { \"$round\": [\"&l2_fabric_rd\", 0] }\n          },\n          {\n            \"Metric\": \"Fabric_L2 Wr\",\n            \"Alias\": \"l2_fabric_wr_\",\n            \"Value\": { \"$round\": [\"&l2_fabric_wr\", 0] }\n          },\n          {\n            \"Metric\": \"Fabric_l2 Atomic\",\n            \"Alias\": \"l2_fabric_atom_\",\n            \"Value\": { \"$round\": [\"&l2_fabric_atom\", 0] }\n          },\n          {\n            \"Metric\": \"HBM Rd\",\n            \"Alias\": \"hbm_rd_\",\n            \"Value\": { \"$round\": [\"&hbm_rd\", 0] }\n          },\n          {\n            \"Metric\": \"HBM Wr\",\n            \"Alias\": \"hbm_wr_\",\n            \"Value\": { \"$round\": [\"&hbm_wr\", 0] }\n          },\n          {\n            \"Metric\": \"LDS Util\",\n            \"Alias\": \"lds_util_\",\n            \"Value\": { \"$round\": [\"&lds_util\", 0] }\n          },\n          {\n            \"Metric\": \"VL1 Coalesce\",\n            \"Alias\": \"vl1_coales_\",\n            \"Value\": { \"$round\": [\"&vl1_coales\", 0]}\n          },\n          {\n            \"Metric\": \"VL1 Stall\",\n            \"Alias\": \"vl1_stall_\",\n            \"Value\": { \"$round\": [\"&vl1_stall\", 0]}\n          }\n        ]\n    }},\n    {\"$unwind\": {\n      \"path\": \"$array\"\n    }},\n    {\"$replaceRoot\": {\n      \"newRoot\": \"$array\"\n    }}\n]);",
               "type": "table"
             },
             {
@@ -4122,7 +4123,6 @@
       "id": 185,
       "panels": [
         {
-          "datasource": {},
           "fieldConfig": {
             "defaults": {
               "color": {
@@ -4322,7 +4322,7 @@
               "hide": false,
               "rawQuery": true,
               "refId": "B",
-              "target": "${Workload2}.pmc_perf.aggregate([\n    {\"$match\": {\n        \"Index\": { \"$in\": [${DispatchIDFilter2:raw}] },\n        \"gpu-id\": { \"$in\": [${gpuFilter2:raw}] },\n        \"KernelName\": { \"$in\": ${KernelNameFilter2:json}},\n        \"$expr\":{\"$regexMatch\": {\"input\":\"${select}\",\"regex\":\"(Wavefront)\"}}\n    }},\n    {\"$group\": {\n        \"_id\": null,\n        \"gridSize_avg\":{\"$avg\": \"&grd\"},\n        \"gridSize_min\":{\"$min\": \"&grd\"},\n        \"gridSize_max\":{\"$max\": \"&grd\"},\n\n        \"workSize_avg\":{\"$avg\": \"&wgr\"},\n        \"workSize_min\":{\"$min\": \"&wgr\"},\n        \"workSize_max\":{\"$max\": \"&wgr\"},\n\n\n        \"totWavefront_avg\":{\"$avg\": \"&SPI_CSN_WAVE\"},\n        \"totWavefront_min\":{\"$min\": \"&SPI_CSN_WAVE\"},\n        \"totWavefront_max\":{\"$max\": \"&SPI_CSN_WAVE\"},\n\n        \"savedWavefront_avg\":{\"$avg\": \"&SQ_WAVES_SAVED\"},\n        \"savedWavefront_min\":{\"$min\": \"&SQ_WAVES_SAVED\"},\n        \"savedWavefront_max\":{\"$max\": \"&SQ_WAVES_SAVED\"},\n\n        \"restoredWavefront_avg\":{\"$avg\": \"&SQ_WAVES_RESTORED\"},\n        \"restoredWavefront_min\":{\"$min\": \"&SQ_WAVES_RESTORED\"},\n        \"restoredWavefront_max\":{\"$max\": \"&SQ_WAVES_RESTORED\"},\n\n\n        \"vgprs_avg\":{\"$avg\": \"&vgpr\"},\n        \"vgprs_min\":{\"$min\": \"&vgpr\"},\n        \"vgprs_max\":{\"$max\": \"&vgpr\"},\n\n        \"sgprs_avg\":{\"$avg\": \"&sgpr\"},\n        \"sgprs_min\":{\"$min\": \"&sgpr\"},\n        \"sgprs_max\":{\"$max\": \"&sgpr\"},\n\n        \"ldsAlloc_avg\":{\"$avg\": \"&lds\"},\n        \"ldsAlloc_min\":{\"$min\": \"&lds\"},\n        \"ldsAlloc_max\":{\"$max\": \"&lds\"},\n\n        \"scratchAlloc_avg\":{\"$avg\": \"&scr\"},\n        \"scratchAlloc_min\":{\"$min\": \"&scr\"},\n        \"scratchAlloc_max\":{\"$max\": \"&scr\"}\n\n    }},\n    {\"$set\": {\n        \"array\": [\n            {\n            \"Metric\": \"Grid Size\",\n            \"Avg\": \"&gridSize_avg\",\n            \"Min\": \"&gridSize_min\",\n            \"Max\": \"&gridSize_max\",\n            \"Unit\": \"Work Items\"\n            },\n            {\n            \"Metric\": \"Workgroup Size\",\n            \"Avg\": \"&workSize_avg\",\n            \"Min\": \"&workSize_min\",\n            \"Max\": \"&workSize_max\",\n            \"Unit\": \"Work Items\"\n            },\n            {\n            \"Metric\": \"Total Wavefronts\",\n            \"Avg\": \"&totWavefront_avg\",\n            \"Min\": \"&totWavefront_min\",\n            \"Max\": \"&totWavefront_max\",\n            \"Unit\": \"Wavefronts\"\n            },\n            {\n            \"Metric\": \"Saved Wavefronts\",\n            \"Avg\": \"&savedWavefront_avg\",\n            \"Min\": \"&savedWavefront_min\",\n            \"Max\": \"&savedWavefront_max\",\n            \"Unit\": \"Wavefronts\"\n            },\n            {\n            \"Metric\": \"Restored Wavefronts\",\n            \"Avg\": \"&restoredWavefront_avg\",\n            \"Min\": \"&restoredWavefront_min\",\n            \"Max\": \"&restoredWavefront_max\",\n            \"Unit\": \"Wavefronts\"\n            },\n            {\n            \"Metric\": \"VGPRs\",\n            \"Avg\": \"&vgprs_avg\",\n            \"Min\": \"&vgprs_min\",\n            \"Max\": \"&vgprs_max\",\n            \"Unit\": \"Registers\"\n            },\n            {\n            \"Metric\": \"SGPRs\",\n            \"Avg\": \"&sgprs_avg\",\n            \"Min\": \"&sgprs_min\",\n            \"Max\": \"&sgprs_max\",\n            \"Unit\":\"Registers\"\n            },\n            {\n            \"Metric\": \"LDS Allocation\",\n            \"Avg\": \"&ldsAlloc_avg\",\n            \"Min\": \"&ldsAlloc_min\",\n            \"Max\": \"&ldsAlloc_max\",\n            \"Unit\": \"Bytes\"\n            },\n            {\n            \"Metric\": \"Scratch Allocation\",\n            \"Avg\": \"&scratchAlloc_avg\",\n            \"Min\": \"&scratchAlloc_min\",\n            \"Max\": \"&scratchAlloc_max\",\n            \"Unit\": \"Bytes\"\n            }\n\n        ]\n    }},\n    {\"$unwind\": {\n        \"path\": \"&array\"\n    }},\n    {\"$replaceRoot\": {\n        \"newRoot\": \"&array\"\n    }}\n]);",
+              "target": "${Workload2}.pmc_perf.aggregate([\n    {\"$match\": {\n        \"Index\": { \"$in\": [${DispatchIDFilter2:raw}] },\n        \"gpu-id\": { \"$in\": [${gpuFilter2:raw}] },\n        \"KernelName\": { \"$in\": ${KernelNameFilter2:json}},\n        \"$expr\":{\"$regexMatch\": {\"input\":\"${select}\",\"regex\":\"(Wavefront)\"}}\n    }},\n       {\"$group\": {\n        \"_id\": null,\n        \"gridSize_avg\":{\"$avg\": \"&grd\"},\n        \"gridSize_min\":{\"$min\": \"&grd\"},\n        \"gridSize_max\":{\"$max\": \"&grd\"},\n\n        \"workSize_avg\":{\"$avg\": \"&wgr\"},\n        \"workSize_min\":{\"$min\": \"&wgr\"},\n        \"workSize_max\":{\"$max\": \"&wgr\"},\n\n        \"totWavefront_avg\":{\"$avg\": \"&SPI_CSN_WAVE\"},\n        \"totWavefront_min\":{\"$min\": \"&SPI_CSN_WAVE\"},\n        \"totWavefront_max\":{\"$max\": \"&SPI_CSN_WAVE\"},\n\n        \"savedWavefront_avg\":{\"$avg\": \"&SQ_WAVES_SAVED\"},\n        \"savedWavefront_min\":{\"$min\": \"&SQ_WAVES_SAVED\"},\n        \"savedWavefront_max\":{\"$max\": \"&SQ_WAVES_SAVED\"},\n\n        \"restoredWavefront_avg\":{\"$avg\": \"&SQ_WAVES_RESTORED\"},\n        \"restoredWavefront_min\":{\"$min\": \"&SQ_WAVES_RESTORED\"},\n        \"restoredWavefront_max\":{\"$max\": \"&SQ_WAVES_RESTORED\"},\n\n        \"vgprs_avg\":{\n            \"$avg\": {\"$cond\": [\n                        {\"$ne\": [{\"$type\": \"&vgpr\"}, \"missing\"]},\n                        \"&vgpr\",\n                        \"&arch_vgpr\"\n                    ]          \n            }\n        },\n        \"vgprs_min\":{\n            \"$min\": {\"$cond\": [\n                        {\"$ne\": [{\"$type\": \"&vgpr\"}, \"missing\"]},\n                        \"&vgpr\",\n                        \"&arch_vgpr\"\n                    ]          \n            }\n        },\n        \"vgprs_max\":{\n            \"$max\": {\"$cond\": [\n                        {\"$ne\": [{\"$type\": \"&vgpr\"}, \"missing\"]},\n                        \"&vgpr\",\n                        \"&arch_vgpr\"\n                    ]          \n            }\n        },\n\n        \"agprs_avg\":{\n            \"$avg\": \"&accum_vgpr\"\n        },\n        \"agprs_min\":{\n            \"$min\": \"&accum_vgpr\"\n        },\n        \"agprs_max\":{\n            \"$max\": \"&accum_vgpr\"\n        },\n\n        \"sgprs_avg\":{\"$avg\": \"&sgpr\"},\n        \"sgprs_min\":{\"$min\": \"&sgpr\"},\n        \"sgprs_max\":{\"$max\": \"&sgpr\"},\n\n        \"ldsAlloc_avg\":{\"$avg\": \"&lds\"},\n        \"ldsAlloc_min\":{\"$min\": \"&lds\"},\n        \"ldsAlloc_max\":{\"$max\": \"&lds\"},\n\n        \"scratchAlloc_avg\":{\"$avg\": \"&scr\"},\n        \"scratchAlloc_min\":{\"$min\": \"&scr\"},\n        \"scratchAlloc_max\":{\"$max\": \"&scr\"}\n\n    }},\n    {\"$set\": {\n        \"array\": [\n            {\n                \"Metric\": \"Grid Size\",\n                \"Avg\": \"&gridSize_avg\",\n                \"Min\": \"&gridSize_min\",\n                \"Max\": \"&gridSize_max\",\n                \"Unit\": \"Work Items\"\n            },\n            {\n                \"Metric\": \"Workgroup Size\",\n                \"Avg\": \"&workSize_avg\",\n                \"Min\": \"&workSize_min\",\n                \"Max\": \"&workSize_max\",\n                \"Unit\": \"Work Items\"\n            },\n            {\n                \"Metric\": \"Total Wavefronts\",\n                \"Avg\": \"&totWavefront_avg\",\n                \"Min\": \"&totWavefront_min\",\n                \"Max\": \"&totWavefront_max\",\n                \"Unit\": \"Wavefronts\"\n            },\n            {\n                \"Metric\": \"Saved Wavefronts\",\n                \"Avg\": \"&savedWavefront_avg\",\n                \"Min\": \"&savedWavefront_min\",\n                \"Max\": \"&savedWavefront_max\",\n                \"Unit\": \"Wavefronts\"\n            },\n            {\n                \"Metric\": \"Restored Wavefronts\",\n                \"Avg\": \"&restoredWavefront_avg\",\n                \"Min\": \"&restoredWavefront_min\",\n                \"Max\": \"&restoredWavefront_max\",\n                \"Unit\": \"Wavefronts\"\n            },\n            {\n                \"Metric\": \"VGPRs\",\n                \"Avg\": \"&vgprs_avg\",\n                \"Min\": \"&vgprs_min\",\n                \"Max\": \"&vgprs_max\",\n                \"Unit\": \"Registers\"\n            },\n            {\n                \"Metric\": \"AGPRs\",\n                \"Avg\": \"&agprs_avg\",\n                \"Min\": \"&agprs_min\",\n                \"Max\": \"&agprs_max\",\n                \"Unit\": \"Registers\"\n            },\n            {\n                \"Metric\": \"SGPRs\",\n                \"Avg\": \"&sgprs_avg\",\n                \"Min\": \"&sgprs_min\",\n                \"Max\": \"&sgprs_max\",\n                \"Unit\":\"Registers\"\n            },\n            {\n                \"Metric\": \"LDS Allocation\",\n                \"Avg\": \"&ldsAlloc_avg\",\n                \"Min\": \"&ldsAlloc_min\",\n                \"Max\": \"&ldsAlloc_max\",\n                \"Unit\": \"Bytes\"\n            },\n            {\n                \"Metric\": \"Scratch Allocation\",\n                \"Avg\": \"&scratchAlloc_avg\",\n                \"Min\": \"&scratchAlloc_min\",\n                \"Max\": \"&scratchAlloc_max\",\n                \"Unit\": \"Bytes\"\n            }\n   \n        ]\n    }},\n    {\"$unwind\": {\n        \"path\": \"&array\"\n    }},\n    {\"$replaceRoot\": {\n        \"newRoot\": \"&array\"\n    }}\n]);",
               "type": "table"
             }
           ],
@@ -4578,7 +4578,7 @@
       "type": "row"
     },
     {
-      "collapsed": false,
+      "collapsed": true,
       "datasource": {
         "type": "amd-miperf-data-plugin",
         "uid": "oVK0I__nk"
@@ -4590,7 +4590,380 @@
         "y": 8
       },
       "id": 209,
-      "panels": [],
+      "panels": [
+        {
+          "datasource": {},
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "decimals": 0,
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green"
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              },
+              "unit": "locale"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 17,
+            "w": 12,
+            "x": 0,
+            "y": 9
+          },
+          "id": 12,
+          "options": {
+            "displayMode": "gradient",
+            "minVizHeight": 10,
+            "minVizWidth": 0,
+            "orientation": "horizontal",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": true
+            },
+            "showUnfilled": true,
+            "text": {
+              "valueSize": 16
+            }
+          },
+          "pluginVersion": "8.3.4",
+          "targets": [
+            {
+              "datasource": {
+                "type": "amd-miperf-data-plugin",
+                "uid": "Zzw1yR27k"
+              },
+              "rawQuery": true,
+              "refId": "A",
+              "target": "$Workload1.pmc_perf.aggregate([\n    {\"$match\": {\n          \"Index\": { \"$in\": [${DispatchIDFilter:raw}] },\n          \"gpu-id\": { \"$in\": [${gpuFilter:raw}] },\n          \"KernelName\": { \"$in\": ${KernelNameFilter:json}}\n        }},\n        {\"$addFields\": {\n            \"denom\": {\n                   \"$switch\" : {\n                      \"branches\": [\n                         {\n                              \"case\":  { \"$eq\": [ $normUnit, \"per Wave\"]} ,\n                              \"then\":  \"&SQ_WAVES\"\n                         },\n                         {\n                              \"case\":  { \"$eq\": [ $normUnit, \"per Cycle\"]} ,\n                              \"then\":  \"&GRBM_GUI_ACTIVE\"\n                         },\n                         {\n                              \"case\":  { \"$eq\": [ $normUnit, \"per Sec\"]} ,\n                              \"then\":  {\"$divide\":[{\"$subtract\": [\"&EndNs\", \"&BeginNs\" ]}, 1000000000]}\n                         }\n                      ],\n                     \"default\": 1\n                   }         \n            } \n        }},\n        {\"$group\": {\n            \"_id\": null,\n            \"valu\": {\n              \"$avg\": { \"$divide\": [ { \"$subtract\": [\"&SQ_INSTS_VALU\", \"&SQ_INSTS_MFMA\"]}, \"&denom\" ] }\n            },\n            \"mfma\": {\n                \"$avg\": { \"$divide\": [ \"&SQ_INSTS_MFMA\", \"&denom\" ] }\n            },\n            \"vmem\": {\n              \"$avg\": { \"$divide\": [ { \"$subtract\": [\"&SQ_INSTS_VMEM\", \"&SQ_INSTS_FLAT_LDS_ONLY\"]}, \"&denom\" ] }\n            },\n            \"lds\": {\n              \"$avg\": { \"$divide\": [ \"&SQ_INSTS_LDS\", \"&denom\" ] }\n            },\n            \"salu\": {\n              \"$avg\": { \"$divide\": [ \"&SQ_INSTS_SALU\", \"&denom\" ] }\n            },\n            \"smem\": {\n              \"$avg\": { \"$divide\": [ \"&SQ_INSTS_SMEM\", \"&denom\" ] }\n            },\n            \"branch\": {\n              \"$avg\": { \"$divide\": [ \"&SQ_INSTS_BRANCH\", \"&denom\" ] }\n            },\n            \"gds\": {\n              \"$avg\": { \"$divide\": [ \"&SQ_INSTS_GDS\", \"&denom\" ] }\n            }\n          }\n        },\n        {\"$set\": {\n          \"array\": [\n              {\n                \"metric\": \"VALU - Vector\",\n                \"count\": \"&valu\"\n              },\n              {\n                \"metric\": \"VMEM\",\n                \"count\": \"&vmem\"\n              },\n              {\n                \"metric\": \"LDS\",\n                \"count\": \"&lds\"\n              },\n              {\n                \"metric\": \"VALU - MFMA\",\n                \"count\": \"&mfma\"\n              },\n              {\n                \"metric\": \"SALU\",\n                \"count\": \"&salu\"\n              },\n              {\n                \"metric\": \"SMEM\",\n                \"count\": \"&smem\"\n              },\n              {\n                \"metric\": \"Branch\",\n                \"count\": \"&branch\"\n              },\n              {\n                \"metric\": \"GDS\",\n                \"count\": \"&gds\"\n              }\n            ]\n        }},\n        {\"$unwind\": {\n          \"path\": \"&array\"\n        }},\n        {\"$replaceRoot\": {\n          \"newRoot\": \"&array\"\n        }}\n      ]);",
+              "type": "table"
+            },
+            {
+              "datasource": {
+                "type": "amd-miperf-data-plugin",
+                "uid": "Zzw1yR27k"
+              },
+              "hide": false,
+              "rawQuery": true,
+              "refId": "B",
+              "target": "$Workload2.pmc_perf.aggregate([\n    {\"$match\": {\n      \"Index\": { \"$in\": [${DispatchIDFilter2:raw}] },\n      \"gpu-id\": { \"$in\": [${gpuFilter2:raw}] },\n      \"KernelName\": { \"$in\": ${KernelNameFilter2:json}},\n      \"$expr\":{\"$regexMatch\": {\"input\":\"${select}\",\"regex\":\"(Instruction Mix)\"}}\n    }},\n    {\"$addFields\": {\n      \"denom\": {\n             \"$switch\" : {\n                \"branches\": [\n                   {\n                        \"case\":  { \"$eq\": [ $normUnit, \"per Wave\"]} ,\n                        \"then\":  \"&SQ_WAVES\"\n                   },\n                   {\n                        \"case\":  { \"$eq\": [ $normUnit, \"per Cycle\"]} ,\n                        \"then\":  \"&GRBM_GUI_ACTIVE\"\n                   },\n                   {\n                        \"case\":  { \"$eq\": [ $normUnit, \"per Sec\"]} ,\n                        \"then\":  {\"$divide\":[{\"$subtract\": [\"&EndNs\", \"&BeginNs\" ]}, 1000000000]}\n                   }\n                ],\n               \"default\": 1\n             }         \n      } \n  }},\n  \n    {\"$group\": {\n        \"_id\": null,\n        \"valu\": {\n        \"$avg\": { \"$divide\": [ { \"$subtract\": [\"&SQ_INSTS_VALU\", \"&SQ_INSTS_MFMA\"]}, \"&denom\" ] }\n        },\n        \"mfma\": {\n            \"$avg\": { \"$divide\": [ \"&SQ_INSTS_MFMA\", \"&denom\" ] }\n        },\n        \"vmem\": {\n        \"$avg\": { \"$divide\": [ { \"$subtract\": [\"&SQ_INSTS_VMEM\", \"&SQ_INSTS_FLAT_LDS_ONLY\"]}, \"&denom\" ] }\n        },\n        \"lds\": {\n        \"$avg\": { \"$divide\": [ \"&SQ_INSTS_LDS\", \"&denom\" ] }\n        },\n        \"salu\": {\n        \"$avg\": { \"$divide\": [ \"&SQ_INSTS_SALU\", \"&denom\" ] }\n        },\n        \"smem\": {\n        \"$avg\": { \"$divide\": [ \"&SQ_INSTS_SMEM\", \"&denom\" ] }\n        },\n        \"branch\": {\n        \"$avg\": { \"$divide\": [ \"&SQ_INSTS_BRANCH\", \"&denom\" ] }\n        },\n        \"gds\": {\n        \"$avg\": { \"$divide\": [ \"&SQ_INSTS_GDS\", \"&denom\" ] }\n        }\n    }},\n      {\"$set\": {\n        \"array\": [\n            {\n              \"metric\": \"VALU - Vector (Baseline)\",\n              \"count\": \"&valu\"\n            },\n            {\n              \"metric\": \"VMEM (Baseline)\",\n              \"count\": \"&vmem\"\n            },\n            {\n              \"metric\": \"LDS (Baseline)\",\n              \"count\": \"&lds\"\n            },\n            {\n              \"metric\": \"VALU - MFMA (Baseline)\",\n              \"count\": \"&mfma\"\n            },\n            {\n              \"metric\": \"SALU (Baseline)\",\n              \"count\": \"&salu\"\n            },\n            {\n              \"metric\": \"SMEM (Baseline)\",\n              \"count\": \"&smem\"\n            },\n            {\n              \"metric\": \"Branch (Baseline)\",\n              \"count\": \"&branch\"\n            },\n            {\n              \"metric\": \"GDS (Baseline)\",\n              \"count\": \"&gds\"\n            }\n          ]\n      }},\n      {\"$unwind\": {\n        \"path\": \"&array\"\n      }},\n      {\"$replaceRoot\": {\n        \"newRoot\": \"&array\"\n      }}\n    ]);",
+              "type": "table"
+            }
+          ],
+          "title": "Instruction Mix",
+          "transformations": [
+            {
+              "id": "merge",
+              "options": {}
+            },
+            {
+              "id": "sortBy",
+              "options": {
+                "fields": {},
+                "sort": [
+                  {
+                    "field": "metric"
+                  }
+                ]
+              }
+            }
+          ],
+          "transparent": true,
+          "type": "bargauge"
+        },
+        {
+          "datasource": {},
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "percentage",
+                "steps": [
+                  {
+                    "color": "green"
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 24,
+            "w": 12,
+            "x": 12,
+            "y": 9
+          },
+          "id": 24,
+          "options": {
+            "displayMode": "gradient",
+            "minVizHeight": 10,
+            "minVizWidth": 0,
+            "orientation": "horizontal",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "/^count$/",
+              "limit": 100,
+              "values": true
+            },
+            "showUnfilled": true,
+            "text": {}
+          },
+          "pluginVersion": "8.3.4",
+          "targets": [
+            {
+              "datasource": {
+                "type": "amd-miperf-data-plugin",
+                "uid": "Zzw1yR27k"
+              },
+              "hide": false,
+              "rawQuery": true,
+              "refId": "A",
+              "target": "${Workload1}.pmc_perf.aggregate([\n    {\"$match\": {\n        \"Index\": { \"$in\": [${DispatchIDFilter:raw}] },\n        \"gpu-id\": { \"$in\": [${gpuFilter:raw}] },\n        \"KernelName\": { \"$in\": ${KernelNameFilter:json}}\n    }},\n    {\"$addFields\": {\n        \"denom\": {\n               \"$switch\" : {\n                  \"branches\": [\n                     {\n                          \"case\":  { \"$eq\": [ $normUnit, \"per Wave\"]} ,\n                          \"then\":  \"&SQ_WAVES\"\n                     },\n                     {\n                          \"case\":  { \"$eq\": [ $normUnit, \"per Cycle\"]} ,\n                          \"then\":  \"&GRBM_GUI_ACTIVE\"\n                     },\n                     {\n                          \"case\":  { \"$eq\": [ $normUnit, \"per Sec\"]} ,\n                          \"then\":  {\"$divide\":[{\"$subtract\": [\"&EndNs\", \"&BeginNs\" ]}, 1000000000]}\n                     }\n                  ],\n                 \"default\": 1\n               }         \n        } \n    }},\n\n    {\"$group\": {\n        \"_id\": null,\n        \"count_int_i32\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_INT32\", \"&denom\" ] }\n        },\n        \"count_int_i64\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_INT64\", \"&denom\" ] }\n        },\n        \"count_f16_add\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_ADD_F16\", \"&denom\" ] }\n        },\n        \"count_f16_MUL\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_MUL_F16\", \"&denom\" ] }\n        },\n        \"count_f16_fma\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_FMA_F16\", \"&denom\" ] }\n        },\n        \"count_f16_trans\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_TRANS_F16\", \"&denom\" ] }\n        },\n        \"count_f32_add\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_ADD_F32\", \"&denom\" ] }\n        },\n        \"count_f32_MUL\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_MUL_F32\", \"&denom\" ] }\n        },\n        \"count_f32_fma\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_FMA_F32\", \"&denom\" ] }\n        },\n        \"count_f32_trans\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_TRANS_F32\", \"&denom\" ] }\n        },\n        \"count_f64_add\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_ADD_F64\", \"&denom\" ] }\n        },\n        \"count_f64_MUL\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_MUL_F64\", \"&denom\" ] }\n        },\n        \"count_f64_fma\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_FMA_F64\", \"&denom\" ] }\n        },\n        \"count_f64_trans\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_TRANS_F64\", \"&denom\" ] }\n        },\n        \"conversion\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_CVT\", \"&denom\" ] }\n        }\n      }\n    },\n    {\"$set\": {\n      \"array\": [\n          {\n            \"metric\": \"INT32\",\n            \"count\": \"&count_int_i32\"\n          },\n          {\n            \"metric\": \"INT64\",\n            \"count\": \"&count_int_i64\"\n          },\n          {\n            \"metric\": \"F16-ADD\",\n            \"count\": \"&count_f16_add\"\n          },\n          {\n            \"metric\": \"F16-MUL\",\n            \"count\": \"&count_f16_MUL\"\n          },\n          {\n            \"metric\": \"F16-FMA\",\n            \"count\": \"&count_f16_fma\"\n          },\n          {\n            \"metric\": \"F16-Trans\",\n            \"count\": \"&count_f16_trans\"\n          },\n          {\n            \"metric\": \"F32-ADD\",\n            \"count\": \"&count_f32_add\"\n          },\n          {\n            \"metric\": \"F32-MUL\",\n            \"count\": \"&count_f32_MUL\"\n          },\n          {\n            \"metric\": \"F32-FMA\",\n            \"count\": \"&count_f32_fma\"\n          },\n          {\n            \"metric\": \"F32-Trans\",\n            \"count\": \"&count_f32_trans\"\n          },\n          {\n            \"metric\": \"F64-ADD\",\n            \"count\": \"&count_f64_add\"\n          },\n          {\n            \"metric\": \"F64-MUL\",\n            \"count\": \"&count_f64_MUL\"\n          },\n          {\n            \"metric\": \"F64-FMA\",\n            \"count\": \"&count_f64_fma\"\n          },\n          {\n            \"metric\": \"F64-Trans\",\n            \"count\": \"&count_f64_trans\"\n          },\n          {\n            \"metric\": \"Conversion\",\n            \"count\": \"&conversion\"\n          }\n        ]\n    }},\n    {\"$unwind\": {\n      \"path\": \"&array\"\n    }},\n    {\"$replaceRoot\": {\n      \"newRoot\": \"&array\"\n    }}\n  ]);",
+              "type": "table"
+            },
+            {
+              "datasource": {
+                "type": "amd-miperf-data-plugin",
+                "uid": "Zzw1yR27k"
+              },
+              "hide": false,
+              "rawQuery": true,
+              "refId": "B",
+              "target": "${Workload2}.pmc_perf.aggregate([\n    {\"$match\": {\n      \"Index\": { \"$in\": [${DispatchIDFilter2:raw}] },\n      \"gpu-id\": { \"$in\": [${gpuFilter2:raw}] },\n      \"KernelName\": { \"$in\": ${KernelNameFilter2:json}},\n      \"$expr\":{\"$regexMatch\": {\"input\":\"${select}\",\"regex\":\"(Instruction Mix)\"}}\n    }},\n    {\"$addFields\": {\n        \"denom\": {\n               \"$switch\" : {\n                  \"branches\": [\n                     {\n                          \"case\":  { \"$eq\": [ $normUnit, \"per Wave\"]} ,\n                          \"then\":  \"&SQ_WAVES\"\n                     },\n                     {\n                          \"case\":  { \"$eq\": [ $normUnit, \"per Cycle\"]} ,\n                          \"then\":  \"&GRBM_GUI_ACTIVE\"\n                     },\n                     {\n                          \"case\":  { \"$eq\": [ $normUnit, \"per Sec\"]} ,\n                          \"then\":  {\"$divide\":[{\"$subtract\": [\"&EndNs\", \"&BeginNs\" ]}, 1000000000]}\n                     }\n                  ],\n                 \"default\": 1\n               }         \n        } \n    }},\n\n    {\"$group\": {\n        \"_id\": null,\n        \"count_int_i32\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_INT32\", \"&denom\" ] }\n        },\n        \"count_int_i64\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_INT64\", \"&denom\" ] }\n        },\n        \"count_f16_add\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_ADD_F16\", \"&denom\" ] }\n        },\n        \"count_f16_MUL\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_MUL_F16\", \"&denom\" ] }\n        },\n        \"count_f16_fma\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_FMA_F16\", \"&denom\" ] }\n        },\n        \"count_f16_trans\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_TRANS_F16\", \"&denom\" ] }\n        },\n        \"count_f32_add\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_ADD_F32\", \"&denom\" ] }\n        },\n        \"count_f32_MUL\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_MUL_F32\", \"&denom\" ] }\n        },\n        \"count_f32_fma\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_FMA_F32\", \"&denom\" ] }\n        },\n        \"count_f32_trans\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_TRANS_F32\", \"&denom\" ] }\n        },\n        \"count_f64_add\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_ADD_F64\", \"&denom\" ] }\n        },\n        \"count_f64_MUL\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_MUL_F64\", \"&denom\" ] }\n        },\n        \"count_f64_fma\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_FMA_F64\", \"&denom\" ] }\n        },\n        \"count_f64_trans\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_TRANS_F64\", \"&denom\" ] }\n        },\n        \"conversion\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_CVT\", \"&denom\" ] }\n        }\n      }\n    },\n    {\"$set\": {\n      \"array\": [\n          {\n            \"metric\": \"INT32 (Baseline)\",\n            \"count\": \"&count_int_i32\"\n          },\n          {\n            \"metric\": \"INT64 (Baseline)\",\n            \"count\": \"&count_int_i64\"\n          },\n          {\n            \"metric\": \"F16-ADD (Baseline)\",\n            \"count\": \"&count_f16_add\"\n          },\n          {\n            \"metric\": \"F16-MUL (Baseline)\",\n            \"count\": \"&count_f16_MUL\"\n          },\n          {\n            \"metric\": \"F16-FMA (Baseline)\",\n            \"count\": \"&count_f16_fma\"\n          },\n          {\n            \"metric\": \"F16-Trans (Baseline)\",\n            \"count\": \"&count_f16_trans\"\n          },\n          {\n            \"metric\": \"F32-ADD (Baseline)\",\n            \"count\": \"&count_f32_add\"\n          },\n          {\n            \"metric\": \"F32-MUL (Baseline)\",\n            \"count\": \"&count_f32_MUL\"\n          },\n          {\n            \"metric\": \"F32-FMA (Baseline)\",\n            \"count\": \"&count_f32_fma\"\n          },\n          {\n            \"metric\": \"F32-Trans (Baseline)\",\n            \"count\": \"&count_f32_trans\"\n          },\n          {\n            \"metric\": \"F64-ADD (Baseline)\",\n            \"count\": \"&count_f64_add\"\n          },\n          {\n            \"metric\": \"F64-MUL (Baseline)\",\n            \"count\": \"&count_f64_MUL\"\n          },\n          {\n            \"metric\": \"F64-FMA (Baseline)\",\n            \"count\": \"&count_f64_fma\"\n          },\n          {\n            \"metric\": \"F64-Trans (Baseline)\",\n            \"count\": \"&count_f64_trans\"\n          },\n          {\n            \"metric\": \"Conversion (Baseline)\",\n            \"count\": \"&conversion\"\n          }\n        ]\n    }},\n    {\"$unwind\": {\n      \"path\": \"&array\"\n    }},\n    {\"$replaceRoot\": {\n      \"newRoot\": \"&array\"\n    }}\n  ]);",
+              "type": "table"
+            }
+          ],
+          "title": "VALU Arithmetic Instr Mix",
+          "transformations": [
+            {
+              "id": "merge",
+              "options": {}
+            },
+            {
+              "id": "sortBy",
+              "options": {
+                "fields": {},
+                "sort": [
+                  {
+                    "field": "metric"
+                  }
+                ]
+              }
+            }
+          ],
+          "transparent": true,
+          "type": "bargauge"
+        },
+        {
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "custom": {
+                "align": "auto",
+                "displayMode": "auto"
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green"
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 11,
+            "w": 12,
+            "x": 0,
+            "y": 26
+          },
+          "id": 275,
+          "options": {
+            "footer": {
+              "fields": "",
+              "reducer": [
+                "sum"
+              ],
+              "show": false
+            },
+            "showHeader": true
+          },
+          "pluginVersion": "8.3.4",
+          "targets": [
+            {
+              "datasource": {
+                "type": "amd-miperf-data-plugin",
+                "uid": "Zzw1yR27k"
+              },
+              "rawQuery": true,
+              "refId": "A",
+              "target": "${Workload1}.pmc_perf.aggregate([\n    {\"$match\": {\n          \"Index\": { \"$in\": [${DispatchIDFilter:raw}] },\n          \"gpu-id\": { \"$in\": [${gpuFilter:raw}] },\n          \"KernelName\": { \"$in\": ${KernelNameFilter:json}}\n        }},\n        {\"$addFields\": {\n            \"denom\": {\n                   \"$switch\" : {\n                      \"branches\": [\n                         {\n                              \"case\":  { \"$eq\": [ $normUnit, \"per Wave\"]} ,\n                              \"then\":  \"&SQ_WAVES\"\n                         },\n                         {\n                              \"case\":  { \"$eq\": [ $normUnit, \"per Cycle\"]} ,\n                              \"then\":  \"&GRBM_GUI_ACTIVE\"\n                         },\n                         {\n                              \"case\":  { \"$eq\": [ $normUnit, \"per Sec\"]} ,\n                              \"then\":  {\"$divide\":[{\"$subtract\": [\"&EndNs\", \"&BeginNs\" ]}, 1000000000]}\n                         }\n                      ],\n                     \"default\": 1\n                   }         \n            } \n        }},\n\n        {\"$group\": {\n            \"_id\": null,\n            \"buffer_instr\": {\n              \"$avg\": { \"$divide\": [ \"&TA_BUFFER_WAVEFRONTS_sum\", \"&denom\" ] }\n            },\n            \"buffer_read\": {\n              \"$avg\": { \"$divide\": [ \"&TA_BUFFER_READ_WAVEFRONTS_sum\", \"&denom\" ] }\n            },\n            \"buffer_write\": {\n              \"$avg\": { \"$divide\": [ \"&TA_BUFFER_WRITE_WAVEFRONTS_sum\", \"&denom\" ] }\n            },\n            \"buffer_atomic\": {\n                \"$avg\": { \"$divide\": [ \"&TA_BUFFER_ATOMIC_WAVEFRONTS_sum\", \"&denom\" ] }\n            },\n  \n            \"flat_instr\": {\n              \"$avg\": { \"$divide\": [ \"&TA_FLAT_WAVEFRONTS_sum\", \"&denom\" ] }\n            },\n            \"flat_read\": {\n              \"$avg\": { \"$divide\": [ \"&TA_FLAT_READ_WAVEFRONTS_sum\", \"&denom\" ] }\n            },\n            \"flat_write\": {\n                \"$avg\": { \"$divide\": [ \"&TA_FLAT_WRITE_WAVEFRONTS_sum\", \"&denom\" ] }\n            },\n            \"flat_atomic\": {\n                \"$avg\": { \"$divide\": [ \"&TA_FLAT_ATOMIC_WAVEFRONTS_sum\", \"&denom\" ] }\n            }\n    \n        }},\n        {\"$set\": {\n          \"array\": [\n              {\n                \"type\": \"Buffer Instr\",\n                \"count\": \"&buffer_instr\"\n              },\n              {\n                \"type\": \"Buffer Read\",\n                \"count\": \"&buffer_read\"\n              },\n              {\n                \"type\": \"Buffer Write\",\n                \"count\": \"&buffer_write\"\n              },\n              {\n                \"type\": \"Buffer Atomic\",\n                \"count\": \"&buffer_atomic\"\n              },\n              {\n                \"type\": \"Flat Instr\",\n                \"count\": \"&flat_instr\"\n              },\n              {\n                \"type\": \"Flat Read\",\n                \"count\": \"&flat_read\"\n              },\n              {\n                \"type\": \"Flat Write\",\n                \"count\": \"&flat_write\"\n              },\n              {\n                \"type\": \"Flat Atomic\",\n                \"count\": \"&flat_atomic\"\n              }\n\n            ]\n        }},\n        {\"$unwind\": {\n          \"path\": \"&array\"\n        }},\n        {\"$replaceRoot\": {\n          \"newRoot\": \"&array\"\n        }}\n      ]);",
+              "type": "table"
+            },
+            {
+              "datasource": {
+                "type": "amd-miperf-data-plugin",
+                "uid": "Zzw1yR27k"
+              },
+              "hide": false,
+              "rawQuery": true,
+              "refId": "B",
+              "target": "${Workload2}.pmc_perf.aggregate([\n    {\"$match\": {\n      \"Index\": { \"$in\": [${DispatchIDFilter2:raw}] },\n      \"gpu-id\": { \"$in\": [${gpuFilter2:raw}] },\n      \"KernelName\": { \"$in\": ${KernelNameFilter2:json}},\n      \"$expr\":{\"$regexMatch\": {\"input\":\"${select}\",\"regex\":\"(Instruction Mix)\"}}\n    }},\n    {\"$addFields\": {\n        \"denom\": {\n               \"$switch\" : {\n                  \"branches\": [\n                     {\n                          \"case\":  { \"$eq\": [ $normUnit, \"per Wave\"]} ,\n                          \"then\":  \"&SQ_WAVES\"\n                     },\n                     {\n                          \"case\":  { \"$eq\": [ $normUnit, \"per Cycle\"]} ,\n                          \"then\":  \"&GRBM_GUI_ACTIVE\"\n                     },\n                     {\n                          \"case\":  { \"$eq\": [ $normUnit, \"per Sec\"]} ,\n                          \"then\":  {\"$divide\":[{\"$subtract\": [\"&EndNs\", \"&BeginNs\" ]}, 1000000000]}\n                     }\n                  ],\n                 \"default\": 1\n               }         \n        } \n    }},\n\n    {\"$group\": {\n        \"_id\": null,\n        \"buffer_instr\": {\n          \"$avg\": { \"$divide\": [ \"&TA_BUFFER_WAVEFRONTS_sum\", \"&denom\" ] }\n        },\n        \"buffer_read\": {\n          \"$avg\": { \"$divide\": [ \"&TA_BUFFER_READ_WAVEFRONTS_sum\", \"&denom\" ] }\n        },\n        \"buffer_write\": {\n          \"$avg\": { \"$divide\": [ \"&TA_BUFFER_WRITE_WAVEFRONTS_sum\", \"&denom\" ] }\n        },\n        \"buffer_atomic\": {\n            \"$avg\": { \"$divide\": [ \"&TA_BUFFER_ATOMIC_WAVEFRONTS_sum\", \"&denom\" ] }\n        },\n\n        \"flat_instr\": {\n          \"$avg\": { \"$divide\": [ \"&TA_FLAT_WAVEFRONTS_sum\", \"&denom\" ] }\n        },\n        \"flat_read\": {\n          \"$avg\": { \"$divide\": [ \"&TA_FLAT_READ_WAVEFRONTS_sum\", \"&denom\" ] }\n        },\n        \"flat_write\": {\n            \"$avg\": { \"$divide\": [ \"&TA_FLAT_WRITE_WAVEFRONTS_sum\", \"&denom\" ] }\n        },\n        \"flat_atomic\": {\n            \"$avg\": { \"$divide\": [ \"&TA_FLAT_ATOMIC_WAVEFRONTS_sum\", \"&denom\" ] }\n        }\n    }},\n    {\"$set\": {\n      \"array\": [\n          {\n            \"type\": \"Buffer Instr (Baseline)\",\n            \"count\": \"&buffer_instr\"\n          },\n          {\n            \"type\": \"Buffer Read (Baseline)\",\n            \"count\": \"&buffer_read\"\n          },\n          {\n            \"type\": \"Buffer Write (Baseline)\",\n            \"count\": \"&buffer_write\"\n          },\n          {\n            \"type\": \"Buffer Atomic (Baseline)\",\n            \"count\": \"&buffer_atomic\"\n          },\n          {\n            \"type\": \"Flat Instr (Baseline)\",\n            \"count\": \"&flat_instr\"\n          },\n          {\n            \"type\": \"Flat Read (Baseline)\",\n            \"count\": \"&flat_read\"\n          },\n          {\n            \"type\": \"Flat Write (Baseline)\",\n            \"count\": \"&flat_write\"\n          },\n          {\n            \"type\": \"Flat Atomic (Baseline)\",\n            \"count\": \"&flat_atomic\"\n          }\n\n        ]\n    }},\n\n      {\"$unwind\": {\n        \"path\": \"&array\"\n      }},\n      {\"$replaceRoot\": {\n        \"newRoot\": \"&array\"\n      }}\n    ]);",
+              "type": "table"
+            }
+          ],
+          "title": "VMEM Instr Mix",
+          "transformations": [
+            {
+              "id": "concatenate",
+              "options": {}
+            },
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "type 2": true
+                },
+                "indexByName": {},
+                "renameByName": {
+                  "count": "Count",
+                  "count 1": "Avg (Current)",
+                  "count 2": "Avg (Baseline)",
+                  "type": "VMEM Instr",
+                  "type 1": "VMEM Instr"
+                }
+              }
+            }
+          ],
+          "transparent": true,
+          "type": "table"
+        },
+        {
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "custom": {
+                "align": "auto",
+                "displayMode": "auto"
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green"
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 10,
+            "w": 12,
+            "x": 12,
+            "y": 33
+          },
+          "id": 16,
+          "options": {
+            "footer": {
+              "fields": "",
+              "reducer": [
+                "sum"
+              ],
+              "show": false
+            },
+            "showHeader": true
+          },
+          "pluginVersion": "8.3.4",
+          "targets": [
+            {
+              "datasource": {
+                "type": "amd-miperf-data-plugin",
+                "uid": "Zzw1yR27k"
+              },
+              "rawQuery": true,
+              "refId": "A",
+              "target": "${Workload1}.pmc_perf.aggregate([\n    {\"$match\": {\n      \"Index\": { \"$in\": [${DispatchIDFilter:raw}] },\n      \"gpu-id\": { \"$in\": [${gpuFilter:raw}] },\n      \"KernelName\": { \"$in\": ${KernelNameFilter:json}}\n    }},\n    {\"$addFields\": {\n      \"denom\": {\n             \"$switch\" : {\n                \"branches\": [\n                   {\n                        \"case\":  { \"$eq\": [ $normUnit, \"per Wave\"]} ,\n                        \"then\":  \"&SQ_WAVES\"\n                   },\n                   {\n                        \"case\":  { \"$eq\": [ $normUnit, \"per Cycle\"]} ,\n                        \"then\":  \"&GRBM_GUI_ACTIVE\"\n                   },\n                   {\n                        \"case\":  { \"$eq\": [ $normUnit, \"per Sec\"]} ,\n                        \"then\":  {\"$divide\":[{\"$subtract\": [\"&EndNs\", \"&BeginNs\" ]}, 1000000000]}\n                   }\n                ],\n               \"default\": 1\n             }         \n      } \n    }},\n    {\"$group\": {\n        \"_id\": null,\n        \"mfma_i8\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_MFMA_I8\", \"&denom\" ] }\n        },\n        \"mfma_f16\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_MFMA_F16\", \"&denom\" ] }\n        },\n        \"mfma_bf16\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_MFMA_BF16\", \"&denom\" ] }\n        },\n        \"mfma_f32\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_MFMA_F32\", \"&denom\" ] }\n        },\n        \"mfma_f64\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_MFMA_F64\", \"&denom\" ] }\n        }\n      }\n    },\n    {\"$set\": {\n      \"array\": [\n          {\n            \"type\": \"MFMA-I8\",\n            \"count\": \"&mfma_i8\"\n          },\n          {\n            \"type\": \"MFMA-F16\",\n            \"count\": \"&mfma_f16\"\n          },\n          {\n            \"type\": \"MFMA-BF16\",\n            \"count\": \"&mfma_bf16\"\n          },\n          {\n            \"type\": \"MFMA-F32\",\n            \"count\": \"&mfma_f32\"\n          },\n          {\n            \"type\": \"MFMA-F64\",\n            \"count\": \"&mfma_f64\"\n          }\n        ]\n    }},\n    {\"$unwind\": {\n      \"path\": \"&array\"\n    }},\n    {\"$replaceRoot\": {\n      \"newRoot\": \"&array\"\n    }}\n  ]);",
+              "type": "table"
+            },
+            {
+              "datasource": {
+                "type": "amd-miperf-data-plugin",
+                "uid": "Zzw1yR27k"
+              },
+              "hide": false,
+              "rawQuery": true,
+              "refId": "B",
+              "target": "${Workload2}.pmc_perf.aggregate([\n  {\"$match\": {\n    \"Index\": { \"$in\": [${DispatchIDFilter2:raw}] },\n    \"gpu-id\": { \"$in\": [${gpuFilter2:raw}] },\n    \"KernelName\": { \"$in\": ${KernelNameFilter2:json}},\n    \"$expr\":{\"$regexMatch\": {\"input\":\"${select}\",\"regex\":\"(Instruction Mix)\"}}\n  }},\n  {\"$addFields\": {\n    \"denom\": {\n           \"$switch\" : {\n              \"branches\": [\n                 {\n                      \"case\":  { \"$eq\": [ $normUnit, \"per Wave\"]} ,\n                      \"then\":  \"&SQ_WAVES\"\n                 },\n                 {\n                      \"case\":  { \"$eq\": [ $normUnit, \"per Cycle\"]} ,\n                      \"then\":  \"&GRBM_GUI_ACTIVE\"\n                 },\n                 {\n                      \"case\":  { \"$eq\": [ $normUnit, \"per Sec\"]} ,\n                      \"then\":  {\"$divide\":[{\"$subtract\": [\"&EndNs\", \"&BeginNs\" ]}, 1000000000]}\n                 }\n              ],\n             \"default\": 1\n           }         \n    } \n  }},\n    {\"$group\": {\n        \"_id\": null,\n        \"mfma_i8\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_MFMA_I8\", \"&denom\" ] }\n        },\n        \"mfma_f16\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_MFMA_F16\", \"&denom\" ] }\n        },\n        \"mfma_bf16\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_MFMA_BF16\", \"&denom\" ] }\n        },\n        \"mfma_f32\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_MFMA_F32\", \"&denom\" ] }\n        },\n        \"mfma_f64\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_MFMA_F64\", \"&denom\" ] }\n        }\n      }\n    },\n    {\"$set\": {\n      \"array\": [\n          {\n            \"type\": \"MFMA-I8 (Baseline)\",\n            \"count\": \"&mfma_i8\"\n          },\n          {\n            \"type\": \"MFMA-F16 (Baseline)\",\n            \"count\": \"&mfma_f16\"\n          },\n          {\n            \"type\": \"MFMA-BF16 (Baseline)\",\n            \"count\": \"&mfma_bf16\"\n          },\n          {\n            \"type\": \"MFMA-F32 (Baseline)\",\n            \"count\": \"&mfma_f32\"\n          },\n          {\n            \"type\": \"MFMA-F64 (Baseline)\",\n            \"count\": \"&mfma_f64\"\n          }\n        ]\n    }},\n    {\"$unwind\": {\n      \"path\": \"&array\"\n    }},\n    {\"$replaceRoot\": {\n      \"newRoot\": \"&array\"\n    }}\n  ]);",
+              "type": "table"
+            }
+          ],
+          "title": "MFMA Arithmetic Instr Mix",
+          "transformations": [
+            {
+              "id": "concatenate",
+              "options": {}
+            },
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "type 2": true
+                },
+                "indexByName": {},
+                "renameByName": {
+                  "count": "Count",
+                  "count 1": "Avg (Current)",
+                  "count 2": "Avg (Baseline)",
+                  "type": "MFMA Instr",
+                  "type 1": "MFMA Instr"
+                }
+              }
+            }
+          ],
+          "transparent": true,
+          "type": "table"
+        }
+      ],
       "targets": [
         {
           "datasource": {
@@ -4604,382 +4977,6 @@
       "type": "row"
     },
     {
-      "datasource": {},
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "decimals": 0,
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "locale"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 17,
-        "w": 12,
-        "x": 0,
-        "y": 9
-      },
-      "id": 12,
-      "options": {
-        "displayMode": "gradient",
-        "minVizHeight": 10,
-        "minVizWidth": 0,
-        "orientation": "horizontal",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": true
-        },
-        "showUnfilled": true,
-        "text": {
-          "valueSize": 16
-        }
-      },
-      "pluginVersion": "8.3.4",
-      "targets": [
-        {
-          "datasource": {
-            "type": "amd-miperf-data-plugin",
-            "uid": "Zzw1yR27k"
-          },
-          "rawQuery": true,
-          "refId": "A",
-          "target": "$Workload1.pmc_perf.aggregate([\n    {\"$match\": {\n          \"Index\": { \"$in\": [${DispatchIDFilter:raw}] },\n          \"gpu-id\": { \"$in\": [${gpuFilter:raw}] },\n          \"KernelName\": { \"$in\": ${KernelNameFilter:json}}\n        }},\n        {\"$addFields\": {\n            \"denom\": {\n                   \"$switch\" : {\n                      \"branches\": [\n                         {\n                              \"case\":  { \"$eq\": [ $normUnit, \"per Wave\"]} ,\n                              \"then\":  \"&SQ_WAVES\"\n                         },\n                         {\n                              \"case\":  { \"$eq\": [ $normUnit, \"per Cycle\"]} ,\n                              \"then\":  \"&GRBM_GUI_ACTIVE\"\n                         },\n                         {\n                              \"case\":  { \"$eq\": [ $normUnit, \"per Sec\"]} ,\n                              \"then\":  {\"$divide\":[{\"$subtract\": [\"&EndNs\", \"&BeginNs\" ]}, 1000000000]}\n                         }\n                      ],\n                     \"default\": 1\n                   }         \n            } \n        }},\n        {\"$group\": {\n            \"_id\": null,\n            \"valu\": {\n              \"$avg\": { \"$divide\": [ { \"$subtract\": [\"&SQ_INSTS_VALU\", \"&SQ_INSTS_MFMA\"]}, \"&denom\" ] }\n            },\n            \"mfma\": {\n                \"$avg\": { \"$divide\": [ \"&SQ_INSTS_MFMA\", \"&denom\" ] }\n            },\n            \"vmem\": {\n              \"$avg\": { \"$divide\": [ { \"$subtract\": [\"&SQ_INSTS_VMEM\", \"&SQ_INSTS_FLAT_LDS_ONLY\"]}, \"&denom\" ] }\n            },\n            \"lds\": {\n              \"$avg\": { \"$divide\": [ \"&SQ_INSTS_LDS\", \"&denom\" ] }\n            },\n            \"salu\": {\n              \"$avg\": { \"$divide\": [ \"&SQ_INSTS_SALU\", \"&denom\" ] }\n            },\n            \"smem\": {\n              \"$avg\": { \"$divide\": [ \"&SQ_INSTS_SMEM\", \"&denom\" ] }\n            },\n            \"branch\": {\n              \"$avg\": { \"$divide\": [ \"&SQ_INSTS_BRANCH\", \"&denom\" ] }\n            },\n            \"gds\": {\n              \"$avg\": { \"$divide\": [ \"&SQ_INSTS_GDS\", \"&denom\" ] }\n            }\n          }\n        },\n        {\"$set\": {\n          \"array\": [\n              {\n                \"metric\": \"VALU - Vector\",\n                \"count\": \"&valu\"\n              },\n              {\n                \"metric\": \"VMEM\",\n                \"count\": \"&vmem\"\n              },\n              {\n                \"metric\": \"LDS\",\n                \"count\": \"&lds\"\n              },\n              {\n                \"metric\": \"VALU - MFMA\",\n                \"count\": \"&mfma\"\n              },\n              {\n                \"metric\": \"SALU\",\n                \"count\": \"&salu\"\n              },\n              {\n                \"metric\": \"SMEM\",\n                \"count\": \"&smem\"\n              },\n              {\n                \"metric\": \"Branch\",\n                \"count\": \"&branch\"\n              },\n              {\n                \"metric\": \"GDS\",\n                \"count\": \"&gds\"\n              }\n            ]\n        }},\n        {\"$unwind\": {\n          \"path\": \"&array\"\n        }},\n        {\"$replaceRoot\": {\n          \"newRoot\": \"&array\"\n        }}\n      ]);",
-          "type": "table"
-        },
-        {
-          "datasource": {
-            "type": "amd-miperf-data-plugin",
-            "uid": "Zzw1yR27k"
-          },
-          "hide": false,
-          "rawQuery": true,
-          "refId": "B",
-          "target": "$Workload2.pmc_perf.aggregate([\n    {\"$match\": {\n      \"Index\": { \"$in\": [${DispatchIDFilter2:raw}] },\n      \"gpu-id\": { \"$in\": [${gpuFilter2:raw}] },\n      \"KernelName\": { \"$in\": ${KernelNameFilter2:json}},\n      \"$expr\":{\"$regexMatch\": {\"input\":\"${select}\",\"regex\":\"(Instruction Mix)\"}}\n    }},\n    {\"$addFields\": {\n      \"denom\": {\n             \"$switch\" : {\n                \"branches\": [\n                   {\n                        \"case\":  { \"$eq\": [ $normUnit, \"per Wave\"]} ,\n                        \"then\":  \"&SQ_WAVES\"\n                   },\n                   {\n                        \"case\":  { \"$eq\": [ $normUnit, \"per Cycle\"]} ,\n                        \"then\":  \"&GRBM_GUI_ACTIVE\"\n                   },\n                   {\n                        \"case\":  { \"$eq\": [ $normUnit, \"per Sec\"]} ,\n                        \"then\":  {\"$divide\":[{\"$subtract\": [\"&EndNs\", \"&BeginNs\" ]}, 1000000000]}\n                   }\n                ],\n               \"default\": 1\n             }         \n      } \n  }},\n  \n    {\"$group\": {\n        \"_id\": null,\n        \"valu\": {\n        \"$avg\": { \"$divide\": [ { \"$subtract\": [\"&SQ_INSTS_VALU\", \"&SQ_INSTS_MFMA\"]}, \"&denom\" ] }\n        },\n        \"mfma\": {\n            \"$avg\": { \"$divide\": [ \"&SQ_INSTS_MFMA\", \"&denom\" ] }\n        },\n        \"vmem\": {\n        \"$avg\": { \"$divide\": [ { \"$subtract\": [\"&SQ_INSTS_VMEM\", \"&SQ_INSTS_FLAT_LDS_ONLY\"]}, \"&denom\" ] }\n        },\n        \"lds\": {\n        \"$avg\": { \"$divide\": [ \"&SQ_INSTS_LDS\", \"&denom\" ] }\n        },\n        \"salu\": {\n        \"$avg\": { \"$divide\": [ \"&SQ_INSTS_SALU\", \"&denom\" ] }\n        },\n        \"smem\": {\n        \"$avg\": { \"$divide\": [ \"&SQ_INSTS_SMEM\", \"&denom\" ] }\n        },\n        \"branch\": {\n        \"$avg\": { \"$divide\": [ \"&SQ_INSTS_BRANCH\", \"&denom\" ] }\n        },\n        \"gds\": {\n        \"$avg\": { \"$divide\": [ \"&SQ_INSTS_GDS\", \"&denom\" ] }\n        }\n    }},\n      {\"$set\": {\n        \"array\": [\n            {\n              \"metric\": \"VALU - Vector (Baseline)\",\n              \"count\": \"&valu\"\n            },\n            {\n              \"metric\": \"VMEM (Baseline)\",\n              \"count\": \"&vmem\"\n            },\n            {\n              \"metric\": \"LDS (Baseline)\",\n              \"count\": \"&lds\"\n            },\n            {\n              \"metric\": \"VALU - MFMA (Baseline)\",\n              \"count\": \"&mfma\"\n            },\n            {\n              \"metric\": \"SALU (Baseline)\",\n              \"count\": \"&salu\"\n            },\n            {\n              \"metric\": \"SMEM (Baseline)\",\n              \"count\": \"&smem\"\n            },\n            {\n              \"metric\": \"Branch (Baseline)\",\n              \"count\": \"&branch\"\n            },\n            {\n              \"metric\": \"GDS (Baseline)\",\n              \"count\": \"&gds\"\n            }\n          ]\n      }},\n      {\"$unwind\": {\n        \"path\": \"&array\"\n      }},\n      {\"$replaceRoot\": {\n        \"newRoot\": \"&array\"\n      }}\n    ]);",
-          "type": "table"
-        }
-      ],
-      "title": "Instruction Mix",
-      "transformations": [
-        {
-          "id": "merge",
-          "options": {}
-        },
-        {
-          "id": "sortBy",
-          "options": {
-            "fields": {},
-            "sort": [
-              {
-                "field": "metric"
-              }
-            ]
-          }
-        }
-      ],
-      "transparent": true,
-      "type": "bargauge"
-    },
-    {
-      "datasource": {},
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "percentage",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 24,
-        "w": 12,
-        "x": 12,
-        "y": 9
-      },
-      "id": 24,
-      "options": {
-        "displayMode": "gradient",
-        "minVizHeight": 10,
-        "minVizWidth": 0,
-        "orientation": "horizontal",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "/^count$/",
-          "limit": 100,
-          "values": true
-        },
-        "showUnfilled": true,
-        "text": {}
-      },
-      "pluginVersion": "8.3.4",
-      "targets": [
-        {
-          "datasource": {
-            "type": "amd-miperf-data-plugin",
-            "uid": "Zzw1yR27k"
-          },
-          "hide": false,
-          "rawQuery": true,
-          "refId": "A",
-          "target": "${Workload1}.pmc_perf.aggregate([\n    {\"$match\": {\n        \"Index\": { \"$in\": [${DispatchIDFilter:raw}] },\n        \"gpu-id\": { \"$in\": [${gpuFilter:raw}] },\n        \"KernelName\": { \"$in\": ${KernelNameFilter:json}}\n    }},\n    {\"$addFields\": {\n        \"denom\": {\n               \"$switch\" : {\n                  \"branches\": [\n                     {\n                          \"case\":  { \"$eq\": [ $normUnit, \"per Wave\"]} ,\n                          \"then\":  \"&SQ_WAVES\"\n                     },\n                     {\n                          \"case\":  { \"$eq\": [ $normUnit, \"per Cycle\"]} ,\n                          \"then\":  \"&GRBM_GUI_ACTIVE\"\n                     },\n                     {\n                          \"case\":  { \"$eq\": [ $normUnit, \"per Sec\"]} ,\n                          \"then\":  {\"$divide\":[{\"$subtract\": [\"&EndNs\", \"&BeginNs\" ]}, 1000000000]}\n                     }\n                  ],\n                 \"default\": 1\n               }         \n        } \n    }},\n\n    {\"$group\": {\n        \"_id\": null,\n        \"count_int_i32\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_INT32\", \"&denom\" ] }\n        },\n        \"count_int_i64\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_INT64\", \"&denom\" ] }\n        },\n        \"count_f16_add\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_ADD_F16\", \"&denom\" ] }\n        },\n        \"count_f16_MUL\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_MUL_F16\", \"&denom\" ] }\n        },\n        \"count_f16_fma\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_FMA_F16\", \"&denom\" ] }\n        },\n        \"count_f16_trans\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_TRANS_F16\", \"&denom\" ] }\n        },\n        \"count_f32_add\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_ADD_F32\", \"&denom\" ] }\n        },\n        \"count_f32_MUL\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_MUL_F32\", \"&denom\" ] }\n        },\n        \"count_f32_fma\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_FMA_F32\", \"&denom\" ] }\n        },\n        \"count_f32_trans\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_TRANS_F32\", \"&denom\" ] }\n        },\n        \"count_f64_add\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_ADD_F64\", \"&denom\" ] }\n        },\n        \"count_f64_MUL\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_MUL_F64\", \"&denom\" ] }\n        },\n        \"count_f64_fma\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_FMA_F64\", \"&denom\" ] }\n        },\n        \"count_f64_trans\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_TRANS_F64\", \"&denom\" ] }\n        },\n        \"conversion\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_CVT\", \"&denom\" ] }\n        }\n      }\n    },\n    {\"$set\": {\n      \"array\": [\n          {\n            \"metric\": \"INT32\",\n            \"count\": \"&count_int_i32\"\n          },\n          {\n            \"metric\": \"INT64\",\n            \"count\": \"&count_int_i64\"\n          },\n          {\n            \"metric\": \"F16-ADD\",\n            \"count\": \"&count_f16_add\"\n          },\n          {\n            \"metric\": \"F16-MUL\",\n            \"count\": \"&count_f16_MUL\"\n          },\n          {\n            \"metric\": \"F16-FMA\",\n            \"count\": \"&count_f16_fma\"\n          },\n          {\n            \"metric\": \"F16-Trans\",\n            \"count\": \"&count_f16_trans\"\n          },\n          {\n            \"metric\": \"F32-ADD\",\n            \"count\": \"&count_f32_add\"\n          },\n          {\n            \"metric\": \"F32-MUL\",\n            \"count\": \"&count_f32_MUL\"\n          },\n          {\n            \"metric\": \"F32-FMA\",\n            \"count\": \"&count_f32_fma\"\n          },\n          {\n            \"metric\": \"F32-Trans\",\n            \"count\": \"&count_f32_trans\"\n          },\n          {\n            \"metric\": \"F64-ADD\",\n            \"count\": \"&count_f64_add\"\n          },\n          {\n            \"metric\": \"F64-MUL\",\n            \"count\": \"&count_f64_MUL\"\n          },\n          {\n            \"metric\": \"F64-FMA\",\n            \"count\": \"&count_f64_fma\"\n          },\n          {\n            \"metric\": \"F64-Trans\",\n            \"count\": \"&count_f64_trans\"\n          },\n          {\n            \"metric\": \"Conversion\",\n            \"count\": \"&conversion\"\n          }\n        ]\n    }},\n    {\"$unwind\": {\n      \"path\": \"&array\"\n    }},\n    {\"$replaceRoot\": {\n      \"newRoot\": \"&array\"\n    }}\n  ]);",
-          "type": "table"
-        },
-        {
-          "datasource": {
-            "type": "amd-miperf-data-plugin",
-            "uid": "Zzw1yR27k"
-          },
-          "hide": false,
-          "rawQuery": true,
-          "refId": "B",
-          "target": "${Workload2}.pmc_perf.aggregate([\n    {\"$match\": {\n      \"Index\": { \"$in\": [${DispatchIDFilter2:raw}] },\n      \"gpu-id\": { \"$in\": [${gpuFilter2:raw}] },\n      \"KernelName\": { \"$in\": ${KernelNameFilter2:json}},\n      \"$expr\":{\"$regexMatch\": {\"input\":\"${select}\",\"regex\":\"(Instruction Mix)\"}}\n    }},\n    {\"$addFields\": {\n        \"denom\": {\n               \"$switch\" : {\n                  \"branches\": [\n                     {\n                          \"case\":  { \"$eq\": [ $normUnit, \"per Wave\"]} ,\n                          \"then\":  \"&SQ_WAVES\"\n                     },\n                     {\n                          \"case\":  { \"$eq\": [ $normUnit, \"per Cycle\"]} ,\n                          \"then\":  \"&GRBM_GUI_ACTIVE\"\n                     },\n                     {\n                          \"case\":  { \"$eq\": [ $normUnit, \"per Sec\"]} ,\n                          \"then\":  {\"$divide\":[{\"$subtract\": [\"&EndNs\", \"&BeginNs\" ]}, 1000000000]}\n                     }\n                  ],\n                 \"default\": 1\n               }         \n        } \n    }},\n\n    {\"$group\": {\n        \"_id\": null,\n        \"count_int_i32\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_INT32\", \"&denom\" ] }\n        },\n        \"count_int_i64\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_INT64\", \"&denom\" ] }\n        },\n        \"count_f16_add\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_ADD_F16\", \"&denom\" ] }\n        },\n        \"count_f16_MUL\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_MUL_F16\", \"&denom\" ] }\n        },\n        \"count_f16_fma\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_FMA_F16\", \"&denom\" ] }\n        },\n        \"count_f16_trans\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_TRANS_F16\", \"&denom\" ] }\n        },\n        \"count_f32_add\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_ADD_F32\", \"&denom\" ] }\n        },\n        \"count_f32_MUL\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_MUL_F32\", \"&denom\" ] }\n        },\n        \"count_f32_fma\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_FMA_F32\", \"&denom\" ] }\n        },\n        \"count_f32_trans\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_TRANS_F32\", \"&denom\" ] }\n        },\n        \"count_f64_add\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_ADD_F64\", \"&denom\" ] }\n        },\n        \"count_f64_MUL\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_MUL_F64\", \"&denom\" ] }\n        },\n        \"count_f64_fma\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_FMA_F64\", \"&denom\" ] }\n        },\n        \"count_f64_trans\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_TRANS_F64\", \"&denom\" ] }\n        },\n        \"conversion\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_CVT\", \"&denom\" ] }\n        }\n      }\n    },\n    {\"$set\": {\n      \"array\": [\n          {\n            \"metric\": \"INT32 (Baseline)\",\n            \"count\": \"&count_int_i32\"\n          },\n          {\n            \"metric\": \"INT64 (Baseline)\",\n            \"count\": \"&count_int_i64\"\n          },\n          {\n            \"metric\": \"F16-ADD (Baseline)\",\n            \"count\": \"&count_f16_add\"\n          },\n          {\n            \"metric\": \"F16-MUL (Baseline)\",\n            \"count\": \"&count_f16_MUL\"\n          },\n          {\n            \"metric\": \"F16-FMA (Baseline)\",\n            \"count\": \"&count_f16_fma\"\n          },\n          {\n            \"metric\": \"F16-Trans (Baseline)\",\n            \"count\": \"&count_f16_trans\"\n          },\n          {\n            \"metric\": \"F32-ADD (Baseline)\",\n            \"count\": \"&count_f32_add\"\n          },\n          {\n            \"metric\": \"F32-MUL (Baseline)\",\n            \"count\": \"&count_f32_MUL\"\n          },\n          {\n            \"metric\": \"F32-FMA (Baseline)\",\n            \"count\": \"&count_f32_fma\"\n          },\n          {\n            \"metric\": \"F32-Trans (Baseline)\",\n            \"count\": \"&count_f32_trans\"\n          },\n          {\n            \"metric\": \"F64-ADD (Baseline)\",\n            \"count\": \"&count_f64_add\"\n          },\n          {\n            \"metric\": \"F64-MUL (Baseline)\",\n            \"count\": \"&count_f64_MUL\"\n          },\n          {\n            \"metric\": \"F64-FMA (Baseline)\",\n            \"count\": \"&count_f64_fma\"\n          },\n          {\n            \"metric\": \"F64-Trans (Baseline)\",\n            \"count\": \"&count_f64_trans\"\n          },\n          {\n            \"metric\": \"Conversion (Baseline)\",\n            \"count\": \"&conversion\"\n          }\n        ]\n    }},\n    {\"$unwind\": {\n      \"path\": \"&array\"\n    }},\n    {\"$replaceRoot\": {\n      \"newRoot\": \"&array\"\n    }}\n  ]);",
-          "type": "table"
-        }
-      ],
-      "title": "VALU Arithmetic Instr Mix",
-      "transformations": [
-        {
-          "id": "merge",
-          "options": {}
-        },
-        {
-          "id": "sortBy",
-          "options": {
-            "fields": {},
-            "sort": [
-              {
-                "field": "metric"
-              }
-            ]
-          }
-        }
-      ],
-      "transparent": true,
-      "type": "bargauge"
-    },
-    {
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "custom": {
-            "align": "auto",
-            "displayMode": "auto"
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 11,
-        "w": 12,
-        "x": 0,
-        "y": 26
-      },
-      "id": 275,
-      "options": {
-        "footer": {
-          "fields": "",
-          "reducer": [
-            "sum"
-          ],
-          "show": false
-        },
-        "showHeader": true
-      },
-      "pluginVersion": "8.3.4",
-      "targets": [
-        {
-          "datasource": {
-            "type": "amd-miperf-data-plugin",
-            "uid": "Zzw1yR27k"
-          },
-          "rawQuery": true,
-          "refId": "A",
-          "target": "${Workload1}.pmc_perf.aggregate([\n    {\"$match\": {\n          \"Index\": { \"$in\": [${DispatchIDFilter:raw}] },\n          \"gpu-id\": { \"$in\": [${gpuFilter:raw}] },\n          \"KernelName\": { \"$in\": ${KernelNameFilter:json}}\n        }},\n        {\"$addFields\": {\n            \"denom\": {\n                   \"$switch\" : {\n                      \"branches\": [\n                         {\n                              \"case\":  { \"$eq\": [ $normUnit, \"per Wave\"]} ,\n                              \"then\":  \"&SQ_WAVES\"\n                         },\n                         {\n                              \"case\":  { \"$eq\": [ $normUnit, \"per Cycle\"]} ,\n                              \"then\":  \"&GRBM_GUI_ACTIVE\"\n                         },\n                         {\n                              \"case\":  { \"$eq\": [ $normUnit, \"per Sec\"]} ,\n                              \"then\":  {\"$divide\":[{\"$subtract\": [\"&EndNs\", \"&BeginNs\" ]}, 1000000000]}\n                         }\n                      ],\n                     \"default\": 1\n                   }         \n            } \n        }},\n\n        {\"$group\": {\n            \"_id\": null,\n            \"buffer_instr\": {\n              \"$avg\": { \"$divide\": [ \"&TA_BUFFER_WAVEFRONTS_sum\", \"&denom\" ] }\n            },\n            \"buffer_read\": {\n              \"$avg\": { \"$divide\": [ \"&TA_BUFFER_READ_WAVEFRONTS_sum\", \"&denom\" ] }\n            },\n            \"buffer_write\": {\n              \"$avg\": { \"$divide\": [ \"&TA_BUFFER_WRITE_WAVEFRONTS_sum\", \"&denom\" ] }\n            },\n            \"buffer_atomic\": {\n                \"$avg\": { \"$divide\": [ \"&TA_BUFFER_ATOMIC_WAVEFRONTS_sum\", \"&denom\" ] }\n            },\n  \n            \"flat_instr\": {\n              \"$avg\": { \"$divide\": [ \"&TA_FLAT_WAVEFRONTS_sum\", \"&denom\" ] }\n            },\n            \"flat_read\": {\n              \"$avg\": { \"$divide\": [ \"&TA_FLAT_READ_WAVEFRONTS_sum\", \"&denom\" ] }\n            },\n            \"flat_write\": {\n                \"$avg\": { \"$divide\": [ \"&TA_FLAT_WRITE_WAVEFRONTS_sum\", \"&denom\" ] }\n            },\n            \"flat_atomic\": {\n                \"$avg\": { \"$divide\": [ \"&TA_FLAT_ATOMIC_WAVEFRONTS_sum\", \"&denom\" ] }\n            }\n    \n        }},\n        {\"$set\": {\n          \"array\": [\n              {\n                \"type\": \"Buffer Instr\",\n                \"count\": \"&buffer_instr\"\n              },\n              {\n                \"type\": \"Buffer Read\",\n                \"count\": \"&buffer_read\"\n              },\n              {\n                \"type\": \"Buffer Write\",\n                \"count\": \"&buffer_write\"\n              },\n              {\n                \"type\": \"Buffer Atomic\",\n                \"count\": \"&buffer_atomic\"\n              },\n              {\n                \"type\": \"Flat Instr\",\n                \"count\": \"&flat_instr\"\n              },\n              {\n                \"type\": \"Flat Read\",\n                \"count\": \"&flat_read\"\n              },\n              {\n                \"type\": \"Flat Write\",\n                \"count\": \"&flat_write\"\n              },\n              {\n                \"type\": \"Flat Atomic\",\n                \"count\": \"&flat_atomic\"\n              }\n\n            ]\n        }},\n        {\"$unwind\": {\n          \"path\": \"&array\"\n        }},\n        {\"$replaceRoot\": {\n          \"newRoot\": \"&array\"\n        }}\n      ]);",
-          "type": "table"
-        },
-        {
-          "datasource": {
-            "type": "amd-miperf-data-plugin",
-            "uid": "Zzw1yR27k"
-          },
-          "hide": false,
-          "rawQuery": true,
-          "refId": "B",
-          "target": "${Workload2}.pmc_perf.aggregate([\n    {\"$match\": {\n      \"Index\": { \"$in\": [${DispatchIDFilter2:raw}] },\n      \"gpu-id\": { \"$in\": [${gpuFilter2:raw}] },\n      \"KernelName\": { \"$in\": ${KernelNameFilter2:json}},\n      \"$expr\":{\"$regexMatch\": {\"input\":\"${select}\",\"regex\":\"(Instruction Mix)\"}}\n    }},\n    {\"$addFields\": {\n        \"denom\": {\n               \"$switch\" : {\n                  \"branches\": [\n                     {\n                          \"case\":  { \"$eq\": [ $normUnit, \"per Wave\"]} ,\n                          \"then\":  \"&SQ_WAVES\"\n                     },\n                     {\n                          \"case\":  { \"$eq\": [ $normUnit, \"per Cycle\"]} ,\n                          \"then\":  \"&GRBM_GUI_ACTIVE\"\n                     },\n                     {\n                          \"case\":  { \"$eq\": [ $normUnit, \"per Sec\"]} ,\n                          \"then\":  {\"$divide\":[{\"$subtract\": [\"&EndNs\", \"&BeginNs\" ]}, 1000000000]}\n                     }\n                  ],\n                 \"default\": 1\n               }         \n        } \n    }},\n\n    {\"$group\": {\n        \"_id\": null,\n        \"buffer_instr\": {\n          \"$avg\": { \"$divide\": [ \"&TA_BUFFER_WAVEFRONTS_sum\", \"&denom\" ] }\n        },\n        \"buffer_read\": {\n          \"$avg\": { \"$divide\": [ \"&TA_BUFFER_READ_WAVEFRONTS_sum\", \"&denom\" ] }\n        },\n        \"buffer_write\": {\n          \"$avg\": { \"$divide\": [ \"&TA_BUFFER_WRITE_WAVEFRONTS_sum\", \"&denom\" ] }\n        },\n        \"buffer_atomic\": {\n            \"$avg\": { \"$divide\": [ \"&TA_BUFFER_ATOMIC_WAVEFRONTS_sum\", \"&denom\" ] }\n        },\n\n        \"flat_instr\": {\n          \"$avg\": { \"$divide\": [ \"&TA_FLAT_WAVEFRONTS_sum\", \"&denom\" ] }\n        },\n        \"flat_read\": {\n          \"$avg\": { \"$divide\": [ \"&TA_FLAT_READ_WAVEFRONTS_sum\", \"&denom\" ] }\n        },\n        \"flat_write\": {\n            \"$avg\": { \"$divide\": [ \"&TA_FLAT_WRITE_WAVEFRONTS_sum\", \"&denom\" ] }\n        },\n        \"flat_atomic\": {\n            \"$avg\": { \"$divide\": [ \"&TA_FLAT_ATOMIC_WAVEFRONTS_sum\", \"&denom\" ] }\n        }\n    }},\n    {\"$set\": {\n      \"array\": [\n          {\n            \"type\": \"Buffer Instr (Baseline)\",\n            \"count\": \"&buffer_instr\"\n          },\n          {\n            \"type\": \"Buffer Read (Baseline)\",\n            \"count\": \"&buffer_read\"\n          },\n          {\n            \"type\": \"Buffer Write (Baseline)\",\n            \"count\": \"&buffer_write\"\n          },\n          {\n            \"type\": \"Buffer Atomic (Baseline)\",\n            \"count\": \"&buffer_atomic\"\n          },\n          {\n            \"type\": \"Flat Instr (Baseline)\",\n            \"count\": \"&flat_instr\"\n          },\n          {\n            \"type\": \"Flat Read (Baseline)\",\n            \"count\": \"&flat_read\"\n          },\n          {\n            \"type\": \"Flat Write (Baseline)\",\n            \"count\": \"&flat_write\"\n          },\n          {\n            \"type\": \"Flat Atomic (Baseline)\",\n            \"count\": \"&flat_atomic\"\n          }\n\n        ]\n    }},\n\n      {\"$unwind\": {\n        \"path\": \"&array\"\n      }},\n      {\"$replaceRoot\": {\n        \"newRoot\": \"&array\"\n      }}\n    ]);",
-          "type": "table"
-        }
-      ],
-      "title": "VMEM Instr Mix",
-      "transformations": [
-        {
-          "id": "concatenate",
-          "options": {}
-        },
-        {
-          "id": "organize",
-          "options": {
-            "excludeByName": {
-              "type 2": true
-            },
-            "indexByName": {},
-            "renameByName": {
-              "count": "Count",
-              "count 1": "Avg (Current)",
-              "count 2": "Avg (Baseline)",
-              "type": "VMEM Instr",
-              "type 1": "VMEM Instr"
-            }
-          }
-        }
-      ],
-      "transparent": true,
-      "type": "table"
-    },
-    {
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "custom": {
-            "align": "auto",
-            "displayMode": "auto"
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 10,
-        "w": 12,
-        "x": 12,
-        "y": 33
-      },
-      "id": 16,
-      "options": {
-        "footer": {
-          "fields": "",
-          "reducer": [
-            "sum"
-          ],
-          "show": false
-        },
-        "showHeader": true
-      },
-      "pluginVersion": "8.3.4",
-      "targets": [
-        {
-          "datasource": {
-            "type": "amd-miperf-data-plugin",
-            "uid": "Zzw1yR27k"
-          },
-          "rawQuery": true,
-          "refId": "A",
-          "target": "${Workload1}.pmc_perf.aggregate([\n    {\"$match\": {\n      \"Index\": { \"$in\": [${DispatchIDFilter:raw}] },\n      \"gpu-id\": { \"$in\": [${gpuFilter:raw}] },\n      \"KernelName\": { \"$in\": ${KernelNameFilter:json}}\n    }},\n    {\"$addFields\": {\n      \"denom\": {\n             \"$switch\" : {\n                \"branches\": [\n                   {\n                        \"case\":  { \"$eq\": [ $normUnit, \"per Wave\"]} ,\n                        \"then\":  \"&SQ_WAVES\"\n                   },\n                   {\n                        \"case\":  { \"$eq\": [ $normUnit, \"per Cycle\"]} ,\n                        \"then\":  \"&GRBM_GUI_ACTIVE\"\n                   },\n                   {\n                        \"case\":  { \"$eq\": [ $normUnit, \"per Sec\"]} ,\n                        \"then\":  {\"$divide\":[{\"$subtract\": [\"&EndNs\", \"&BeginNs\" ]}, 1000000000]}\n                   }\n                ],\n               \"default\": 1\n             }         \n      } \n    }},\n    {\"$group\": {\n        \"_id\": null,\n        \"mfma_i8\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_MFMA_I8\", \"&denom\" ] }\n        },\n        \"mfma_f16\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_MFMA_F16\", \"&denom\" ] }\n        },\n        \"mfma_bf16\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_MFMA_BF16\", \"&denom\" ] }\n        },\n        \"mfma_f32\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_MFMA_F32\", \"&denom\" ] }\n        },\n        \"mfma_f64\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_MFMA_F64\", \"&denom\" ] }\n        }\n      }\n    },\n    {\"$set\": {\n      \"array\": [\n          {\n            \"type\": \"MFMA-I8\",\n            \"count\": \"&mfma_i8\"\n          },\n          {\n            \"type\": \"MFMA-F16\",\n            \"count\": \"&mfma_f16\"\n          },\n          {\n            \"type\": \"MFMA-BF16\",\n            \"count\": \"&mfma_bf16\"\n          },\n          {\n            \"type\": \"MFMA-F32\",\n            \"count\": \"&mfma_f32\"\n          },\n          {\n            \"type\": \"MFMA-F64\",\n            \"count\": \"&mfma_f64\"\n          }\n        ]\n    }},\n    {\"$unwind\": {\n      \"path\": \"&array\"\n    }},\n    {\"$replaceRoot\": {\n      \"newRoot\": \"&array\"\n    }}\n  ]);",
-          "type": "table"
-        },
-        {
-          "datasource": {
-            "type": "amd-miperf-data-plugin",
-            "uid": "Zzw1yR27k"
-          },
-          "hide": false,
-          "rawQuery": true,
-          "refId": "B",
-          "target": "${Workload2}.pmc_perf.aggregate([\n  {\"$match\": {\n    \"Index\": { \"$in\": [${DispatchIDFilter2:raw}] },\n    \"gpu-id\": { \"$in\": [${gpuFilter2:raw}] },\n    \"KernelName\": { \"$in\": ${KernelNameFilter2:json}},\n    \"$expr\":{\"$regexMatch\": {\"input\":\"${select}\",\"regex\":\"(Instruction Mix)\"}}\n  }},\n  {\"$addFields\": {\n    \"denom\": {\n           \"$switch\" : {\n              \"branches\": [\n                 {\n                      \"case\":  { \"$eq\": [ $normUnit, \"per Wave\"]} ,\n                      \"then\":  \"&SQ_WAVES\"\n                 },\n                 {\n                      \"case\":  { \"$eq\": [ $normUnit, \"per Cycle\"]} ,\n                      \"then\":  \"&GRBM_GUI_ACTIVE\"\n                 },\n                 {\n                      \"case\":  { \"$eq\": [ $normUnit, \"per Sec\"]} ,\n                      \"then\":  {\"$divide\":[{\"$subtract\": [\"&EndNs\", \"&BeginNs\" ]}, 1000000000]}\n                 }\n              ],\n             \"default\": 1\n           }         \n    } \n  }},\n    {\"$group\": {\n        \"_id\": null,\n        \"mfma_i8\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_MFMA_I8\", \"&denom\" ] }\n        },\n        \"mfma_f16\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_MFMA_F16\", \"&denom\" ] }\n        },\n        \"mfma_bf16\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_MFMA_BF16\", \"&denom\" ] }\n        },\n        \"mfma_f32\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_MFMA_F32\", \"&denom\" ] }\n        },\n        \"mfma_f64\": {\n          \"$avg\": { \"$divide\": [ \"&SQ_INSTS_VALU_MFMA_F64\", \"&denom\" ] }\n        }\n      }\n    },\n    {\"$set\": {\n      \"array\": [\n          {\n            \"type\": \"MFMA-I8 (Baseline)\",\n            \"count\": \"&mfma_i8\"\n          },\n          {\n            \"type\": \"MFMA-F16 (Baseline)\",\n            \"count\": \"&mfma_f16\"\n          },\n          {\n            \"type\": \"MFMA-BF16 (Baseline)\",\n            \"count\": \"&mfma_bf16\"\n          },\n          {\n            \"type\": \"MFMA-F32 (Baseline)\",\n            \"count\": \"&mfma_f32\"\n          },\n          {\n            \"type\": \"MFMA-F64 (Baseline)\",\n            \"count\": \"&mfma_f64\"\n          }\n        ]\n    }},\n    {\"$unwind\": {\n      \"path\": \"&array\"\n    }},\n    {\"$replaceRoot\": {\n      \"newRoot\": \"&array\"\n    }}\n  ]);",
-          "type": "table"
-        }
-      ],
-      "title": "MFMA Arithmetic Instr Mix",
-      "transformations": [
-        {
-          "id": "concatenate",
-          "options": {}
-        },
-        {
-          "id": "organize",
-          "options": {
-            "excludeByName": {
-              "type 2": true
-            },
-            "indexByName": {},
-            "renameByName": {
-              "count": "Count",
-              "count 1": "Avg (Current)",
-              "count 2": "Avg (Baseline)",
-              "type": "MFMA Instr",
-              "type 1": "MFMA Instr"
-            }
-          }
-        }
-      ],
-      "transparent": true,
-      "type": "table"
-    },
-    {
       "collapsed": true,
       "datasource": {
         "type": "amd-miperf-data-plugin",
@@ -4989,7 +4986,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 43
+        "y": 9
       },
       "id": 8,
       "panels": [
@@ -5008,8 +5005,7 @@
                 "mode": "absolute",
                 "steps": [
                   {
-                    "color": "green",
-                    "value": null
+                    "color": "green"
                   },
                   {
                     "color": "#EAB839",
@@ -5166,8 +5162,7 @@
                 "mode": "absolute",
                 "steps": [
                   {
-                    "color": "green",
-                    "value": null
+                    "color": "green"
                   },
                   {
                     "color": "red",
@@ -5266,8 +5261,7 @@
                 "mode": "absolute",
                 "steps": [
                   {
-                    "color": "green",
-                    "value": null
+                    "color": "green"
                   },
                   {
                     "color": "red",
@@ -5449,8 +5443,7 @@
                 "mode": "absolute",
                 "steps": [
                   {
-                    "color": "green",
-                    "value": null
+                    "color": "green"
                   },
                   {
                     "color": "red",
@@ -5624,7 +5617,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 44
+        "y": 10
       },
       "id": 98,
       "panels": [
@@ -5964,7 +5957,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 45
+        "y": 11
       },
       "id": 44,
       "panels": [
@@ -6212,7 +6205,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 46
+        "y": 12
       },
       "id": 203,
       "panels": [
@@ -6633,7 +6626,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 47
+        "y": 13
       },
       "id": 130,
       "panels": [
@@ -6976,7 +6969,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 48
+        "y": 14
       },
       "id": 112,
       "panels": [
@@ -7719,7 +7712,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 49
+        "y": 15
       },
       "id": 56,
       "panels": [
@@ -8441,7 +8434,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 50
+        "y": 16
       },
       "id": 66,
       "panels": [
@@ -8460,8 +8453,7 @@
                 "mode": "absolute",
                 "steps": [
                   {
-                    "color": "green",
-                    "value": null
+                    "color": "green"
                   },
                   {
                     "color": "red",
@@ -13386,6 +13378,6 @@
   "timezone": "",
   "title": "Omniperf_v1.0.8_pub",
   "uid": "MIPerf_v1_0_063020221121",
-  "version": 9,
+  "version": 11,
   "weekStart": ""
 }
