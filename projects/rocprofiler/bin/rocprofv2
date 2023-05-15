@@ -25,25 +25,18 @@ usage() {
     echo -e "--install                   For installing ROCProfilerV2 without clean build in the default installation folder (review build.sh to know more about the default paths)"
     echo -e "--clean-install             For installing ROCProfilerV2 with new clean build in the default installation folder (review build.sh to know more about the default paths)"
   fi
-  echo -e "--hip-api                   For Collecting HIP API Traces"
-  echo -e "--hip-activity              For Collecting HSA API Activities Traces"
-  echo -e "--hsa-api                   For Collecting HIP API Traces"
-  echo -e "--hsa-activity              For Collecting HSA API Activities Traces"
-  echo -e "--roctx-trace               For Collecting ROCTx Traces"
-  echo -e "--kernel-trace              For Collecting Kernel dispatch Traces"
-  echo -e "--sys-trace                 For Collecting HIP and HSA APIs and their Activities Traces along ROCTX and Kernel Dispatch traces"
-  echo -e "--plugin PLUGIN_NAME        For enabling a plugin (file/perfetto/att)"
-  echo -e "-i   | --input              For adding counters file path (every line in the text file represents a counter)"
-  echo -e "-o   | --output-file        For the output file name"
-  echo -e "-d   | --output-directory   For adding output path where the output files will be saved"
-  echo -e "-fi  | --flush-interval     For adding a flush interval in milliseconds, every \"flush interval\" the buffers will be flushed"
-  # echo -e "\n###ATT Plugin options: ###"
-  # if [ $RUN_FROM_BUILD == 1 ]; then
-  #   ATT_PATH=$ROCPROFV2_DIR/build/plugin/att/att/att.py
-  # else
-  #   ATT_PATH=$ROCPROFV2_DIR/../libexec/rocprofiler/att/att.py
-  # fi
-  # eval "python3 $ATT_PATH --help"
+  echo -e "--hip-api                    For Collecting HIP API Traces"
+  echo -e "--hip-activity | --hip-trace For Collecting HIP API Activities Traces"
+  echo -e "--hsa-api                    For Collecting HSA API Traces"
+  echo -e "--hsa-activity | --hsa-trace For Collecting HSA API Activities Traces"
+  echo -e "--roctx-trace                For Collecting ROCTx Traces"
+  echo -e "--kernel-trace               For Collecting Kernel dispatch Traces"
+  echo -e "--sys-trace                  For Collecting HIP and HSA APIs and their Activities Traces along ROCTX and Kernel Dispatch traces"
+  echo -e "--plugin PLUGIN_NAME         For enabling a plugin (file/perfetto/att)"
+  echo -e "-i   | --input               For adding counters file path (every line in the text file represents a counter)"
+  echo -e "-o   | --output-file         For the output file name"
+  echo -e "-d   | --output-directory    For adding output path where the output files will be saved"
+  echo -e "-fi  | --flush-interval      For adding a flush interval in milliseconds, every \"flush interval\" the buffers will be flushed"
   exit 1
 }
 
@@ -173,14 +166,14 @@ while [ 1 ] ; do
   elif [ "$1" = "--hip-api" ] ; then
     export ROCPROFILER_HIP_API_TRACE=1
     shift
-  elif [ "$1" = "--hip-activity" ] ; then
+  elif [[ "$1" = "--hip-activity" || "$1" = "--hip-trace" ]] ; then
     export ROCPROFILER_HIP_API_TRACE=1
     export ROCPROFILER_HIP_ACTIVITY_TRACE=1
     shift
   elif [ "$1" = "--hsa-api" ] ; then
     export ROCPROFILER_HSA_API_TRACE=1
     shift
-  elif [ "$1" = "--hsa-activity" ] ; then
+  elif [[ "$1" = "--hsa-activity" || "$1" = "--hip-trace" ]] ; then
     export ROCPROFILER_HSA_API_TRACE=1
     export ROCPROFILER_HSA_ACTIVITY_TRACE=1
     shift
