@@ -173,7 +173,7 @@ while [ 1 ] ; do
   elif [ "$1" = "--hsa-api" ] ; then
     export ROCPROFILER_HSA_API_TRACE=1
     shift
-  elif [[ "$1" = "--hsa-activity" || "$1" = "--hip-trace" ]] ; then
+  elif [[ "$1" = "--hsa-activity" || "$1" = "--hsa-trace" ]] ; then
     export ROCPROFILER_HSA_API_TRACE=1
     export ROCPROFILER_HSA_ACTIVITY_TRACE=1
     shift
