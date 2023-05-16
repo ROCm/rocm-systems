@@ -59,6 +59,7 @@ class AgentInfo {
   uint32_t getWaveSlotsPerSimd() const;
   uint32_t getPCIDomain() const;
   uint32_t getPCILocationID() const;
+  uint32_t getXccCount() const;
 
   void setIndex(int index);
   void setType(hsa_device_type_t type);
@@ -81,6 +82,8 @@ class AgentInfo {
   // CUs per SH/SA
   uint32_t compute_units_per_sh_;
   uint32_t wave_slots_per_simd_;
+  // Number of XCCs on the GPU
+  uint32_t xcc_num_;
 
   uint32_t pci_domain_;
   uint32_t pci_location_id_;

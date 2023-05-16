@@ -245,7 +245,7 @@ void DeviceProfileSession::PollMetrics(rocprofiler_device_profile_metric_t* data
   ::signalWait(read_packet_.completion_signal, 1);
 
   // Collect counter values for events
-  metrics::GetCounterData(profile_, results_list_);
+  metrics::GetCounterData(profile_, gpu_agent_, results_list_);
 
   // evaluate metrics based on collected counter values
   metrics::GetMetricsData(results_map_, metrics_list_);

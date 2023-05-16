@@ -84,6 +84,14 @@ AgentInfo::AgentInfo(const hsa_agent_t agent, ::CoreApiTable* table) : handle_(a
   {
       rocmtools::fatal("hsa_agent_get_info for PCI info failed");
   }
+
+  // TODO: (sauverma) use hsa_agent_get_info_fn(HSA_AMD_AGENT_INFO_NUM_XCC) 
+  // to get xcc_num once hsa headers are updated from rocr/hsa
+  std::string gpu_name = std::string(name_).substr(0,6);
+  if (gpu_name == "gfx940")
+    xcc_num_ = 6;
+  else
+    xcc_num_ = 1;
 }
 
 int AgentInfo::getIndex() const { return index_; }
@@ -102,6 +110,7 @@ uint32_t AgentInfo::getCUCountPerSH() const { return compute_units_per_sh_; }
 uint32_t AgentInfo::getWaveSlotsPerSimd() const { return wave_slots_per_simd_; }
 uint32_t AgentInfo::getPCIDomain() const { return pci_domain_; }
 uint32_t AgentInfo::getPCILocationID() const { return pci_location_id_; }
+uint32_t AgentInfo::getXccCount() const { return xcc_num_; }
 
 void AgentInfo::setIndex(int index) { index_ = index; }
 void AgentInfo::setType(hsa_device_type_t type) { type_ = type; }

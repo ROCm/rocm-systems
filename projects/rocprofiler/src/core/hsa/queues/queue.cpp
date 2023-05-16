@@ -290,9 +290,6 @@ hsa_status_t attTraceDataCallback(hsa_ven_amd_aqlprofile_info_type_t info_type,
 }
 
 void AddRecordCounters(rocprofiler_record_profiler_t* record, const pending_signal_t& pending) {
-  rocmtools::metrics::GetCounterData(pending.profile, pending.context->results_list);
-  rocmtools::metrics::GetMetricsData(pending.context->results_map, pending.context->metrics_list);
-
   std::vector<rocprofiler_record_counter_instance_t> counters_vec;
   for (size_t i = 0; i < pending.context->metrics_list.size(); i++) {
     const rocmtools::Metric* metric = pending.context->metrics_list[i];
@@ -453,41 +450,67 @@ bool AsyncSignalHandler(hsa_signal_value_t signal_value, void* data) {
       hsa_amd_profiling_dispatch_time_t time;
       hsa_support::GetAmdExtTable().hsa_amd_profiling_get_dispatch_time_fn(
           queue_info_session->agent, pending.signal, &time);
-      rocprofiler_record_profiler_t record{};
-      record.gpu_id = rocprofiler_agent_id_t{
-          (uint64_t)hsa_support::GetAgentInfo(queue_info_session->agent.handle).getIndex()};
-      record.kernel_properties = pending.kernel_properties;
-      record.thread_id = rocprofiler_thread_id_t{pending.thread_id};
-      record.queue_idx = rocprofiler_queue_index_t{pending.queue_index};
-      record.timestamps = rocprofiler_record_header_timestamp_t{time.start, time.end};
-      record.queue_id = rocprofiler_queue_id_t{queue_info_session->queue_id};
-      if (pending.counters_count > 0 && pending.context->metrics_list.size() > 0 &&
-          pending.profile) {
-        AddRecordCounters(&record, pending);
+      uint32_t record_count = 1;
+      bool is_individual_xcc_mode = false;
+      uint32_t xcc_count =
+          hsa_support::GetAgentInfo(queue_info_session->agent.handle).getXccCount();
+      if (xcc_count > 1) {  // for MI300
+        const char* str = getenv("ROCPROFILER_INDIVIDUAL_XCC_MODE");
+        if (str != NULL) is_individual_xcc_mode = (atol(str) > 0);
+        // for individual xcc mode, there will be xcc_count records for each dispatch
+        // for accumulation mode, there will be only one record for a dispatch
+        if (is_individual_xcc_mode) record_count = xcc_count;
       }
-      // Kernel Descriptor is the right record id generated in the WriteInterceptor function and
-      // will be used to handle the kernel name of that dispatch
-      record.header = {ROCPROFILER_PROFILER_RECORD,
-                       rocprofiler_record_id_t{pending.kernel_descriptor}};
-      record.kernel_id = rocprofiler_kernel_id_t{pending.kernel_descriptor};
+      for (uint32_t xcc_id = 0; xcc_id < record_count; xcc_id++) {
+        rocprofiler_record_profiler_t record{};
+        // TODO: (sauverma) gpu-id will need to support xcc like so- 1.1, 1.2, 1.3 ... 1.5 for
+        // different xcc
+        record.gpu_id = rocprofiler_agent_id_t{
+            (uint64_t)hsa_support::GetAgentInfo(queue_info_session->agent.handle).getIndex() +
+            xcc_id};
+        record.kernel_properties = pending.kernel_properties;
+        record.thread_id = rocprofiler_thread_id_t{pending.thread_id};
+        record.queue_idx = rocprofiler_queue_index_t{pending.queue_index};
+        record.timestamps = rocprofiler_record_header_timestamp_t{time.start, time.end};
+        record.queue_id = rocprofiler_queue_id_t{queue_info_session->queue_id};
+        if (pending.counters_count > 0 && pending.context->metrics_list.size() > 0 &&
+            pending.profile) {
+          if (xcc_id == 0)  // call to GetCounterData() is required only once for a dispatch
+            rocmtools::metrics::GetCounterData(pending.profile, queue_info_session->agent,
+                                               pending.context->results_list);
+          if (is_individual_xcc_mode)
+            rocmtools::metrics::GetCountersAndMetricResultsByXcc(
+                xcc_id, pending.context->results_list, pending.context->results_map,
+                pending.context->metrics_list);
+          else
+            rocmtools::metrics::GetMetricsData(pending.context->results_map,
+                                               pending.context->metrics_list);
+          AddRecordCounters(&record, pending);
+        }
+        // Kernel Descriptor is the right record id generated in the WriteInterceptor function and
+        // will be used to handle the kernel name of that dispatch
+        record.header = {ROCPROFILER_PROFILER_RECORD,
+                         rocprofiler_record_id_t{pending.kernel_descriptor}};
+        record.kernel_id = rocprofiler_kernel_id_t{pending.kernel_descriptor};
 
-      if (pending.session_id.handle == 0) {
-        pending.session_id = GetROCMToolObj()->GetCurrentSessionId();
-      }
-      if (session->FindBuffer(pending.buffer_id)) {
-        Memory::GenericBuffer* buffer = session->GetBuffer(pending.buffer_id);
-        if (pending.profile && pending.counters_count > 0) {
-          rocprofiler_record_counter_instance_t* record_counters = record.counters;
-          buffer->AddRecord(
-              record, record.counters,
-              (record.counters_count.value * (sizeof(rocprofiler_record_counter_instance_t) + 1)),
-              [](auto& record, const void* data) {
-                record.counters = const_cast<rocprofiler_record_counter_instance_t*>(
-                    static_cast<const rocprofiler_record_counter_instance_t*>(data));
-              });
-          free(record_counters);
-        } else {
-          buffer->AddRecord(record);
+        if (pending.session_id.handle == 0) {
+          pending.session_id = GetROCMToolObj()->GetCurrentSessionId();
+        }
+        if (session->FindBuffer(pending.buffer_id)) {
+          Memory::GenericBuffer* buffer = session->GetBuffer(pending.buffer_id);
+          if (pending.profile && pending.counters_count > 0) {
+            rocprofiler_record_counter_instance_t* record_counters = record.counters;
+            buffer->AddRecord(
+                record, record.counters,
+                (record.counters_count.value * (sizeof(rocprofiler_record_counter_instance_t) + 1)),
+                [](auto& record, const void* data) {
+                  record.counters = const_cast<rocprofiler_record_counter_instance_t*>(
+                      static_cast<const rocprofiler_record_counter_instance_t*>(data));
+                });
+            free(record_counters);
+          } else {
+            buffer->AddRecord(record);
+          }
         }
       }
       if (pending.counters_count > 0 && pending.profile && pending.profile->events) {

@@ -33,11 +33,20 @@ THE SOFTWARE.
 
 namespace rocmtools {
 
-typedef struct {
+typedef std::vector<double> xcc_results_t;
+
+ class results_t{
+  public:
+  results_t(std::string in_name, event_t in_event, uint32_t xcc_count): 
+  name(in_name), val_double(0), event(in_event) {
+    xcc_vals.resize(xcc_count);
+    std::fill(xcc_vals.begin(), xcc_vals.end(), 0);
+  }
   std::string name;
   double val_double;
+  xcc_results_t xcc_vals;
   event_t event;
-} results_t;
+};
 
 typedef struct {
   packet_t* start_packet;
@@ -62,11 +71,15 @@ bool ExtractMetricEvents(
     std::map<std::string, std::set<std::string>>& metrics_counters);
 
 
-bool GetCounterData(hsa_ven_amd_aqlprofile_profile_t* profile,
+bool GetCounterData(hsa_ven_amd_aqlprofile_profile_t* profile, hsa_agent_t gpu_agent,
                     std::vector<results_t*>& results_list);
 
 bool GetMetricsData(std::map<std::string, results_t*>& results_map,
                     std::vector<const Metric*>& metrics_list);
+
+void GetCountersAndMetricResultsByXcc(uint32_t xcc_index, std::vector<results_t*>& results_list,
+                                 std::map<std::string, results_t*>& results_map, 
+                                 std::vector<const Metric*>& metrics_list);
 
 }  // namespace metrics
 }  // namespace rocmtools
