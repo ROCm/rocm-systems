@@ -25,6 +25,7 @@
 import sys, os, pathlib, shutil, subprocess, argparse, glob, re
 import numpy as np
 import math
+import warnings
 import pandas as pd
 
 prog = "omniperf"
@@ -87,8 +88,12 @@ perfmon_config = {
 }
 
 
+def test_df_column_equality(df):
+    return df.eq(df.iloc[:, 0], axis=0).all(1).all()
+
+
 # joins disparate runs less dumbly than rocprof
-def join_prof(workload_dir, join_type, out=None):
+def join_prof(workload_dir, join_type, log_file, verbose, out=None):
     # Set default output directory if not specified
     if out == None:
         out = workload_dir + "/pmc_perf.csv"
@@ -96,25 +101,48 @@ def join_prof(workload_dir, join_type, out=None):
     df = None
 
     for i, file in enumerate(files):
-        # _df = parse_rocprof_kernels(file)
-
         _df = pd.read_csv(file)
-        key = _df.groupby("KernelName").cumcount()
         if join_type == "kernel":
-            _df["key"] = _df.KernelName + " - " + key.astype(str)
+            key = _df.groupby("KernelName").cumcount()
         elif join_type == "grid":
-            _df["key"] = (
-                _df.KernelName + " - " + key.astype(str) + " - " + _df.grd.astype(str)
-            )
+            key = _df.groupby(["KernelName", "grd"]).cumcount()
         else:
             print("ERROR: Unrecognized --join-type")
             sys.exit(1)
 
+        _df["key"] = _df.KernelName + " - " + key.astype(str)
         if df is None:
             df = _df
         else:
             # join by unique index of kernel
             df = pd.merge(df, _df, how="inner", on="key", suffixes=("", f"_{i}"))
+
+    # TODO: check for any mismatch in joins
+    duplicate_cols = {
+        "gpu": [col for col in df.columns if "gpu" in col],
+        "grd": [col for col in df.columns if "grd" in col],
+        "wpr": [col for col in df.columns if "wgr" in col],
+        "lds": [col for col in df.columns if "lds" in col],
+        "scr": [col for col in df.columns if "scr" in col],
+        "arch_vgpr": [col for col in df.columns if "arch_vgpr" in col],
+        "accum_vgpr": [col for col in df.columns if "accum_vgpr" in col],
+        "spgr": [col for col in df.columns if "sgpr" in col],
+    }
+    for key, cols in duplicate_cols.items():
+        _df = df[cols]
+        if not test_df_column_equality(_df):
+            msg = (
+                "WARNING: Detected differing {} values while joining pmc_perf.csv".format(
+                    key
+                )
+            )
+            warnings.warn(msg)
+            log_file.write(msg + "\n")
+        if test_df_column_equality(_df) and verbose:
+            msg = "Successfully joined {} in pmc_perf.csv".format(key)
+            print(msg)
+            log_file.write(msg + "\n")
+
     # now, we can:
     #   A) throw away any of the "boring" duplicats
     df = df[
@@ -124,17 +152,20 @@ def join_prof(workload_dir, join_type, out=None):
             if not any(
                 check in k
                 for check in [
-                    # "gpu",
+                    # removed merged counters, keep original
+                    "gpu-id_",
+                    "grd_",
+                    "wgr_",
+                    "lds_",
+                    "scr_",
+                    "vgpr_",
+                    "sgpr_",
+                    "Index_",
+                    # un-mergable, remove all
                     "queue-id",
                     "queue-index",
                     "pid",
                     "tid",
-                    # "grd",
-                    # "wgr",
-                    # "lds",
-                    # "scr",
-                    # "vgpr",
-                    # "sgpr",
                     "fbar",
                     "sig",
                     "obj",
@@ -178,8 +209,9 @@ def join_prof(workload_dir, join_type, out=None):
     # and save to file
     df.to_csv(out, index=False)
     # and delete old file(s)
-    for file in files:
-        os.remove(file)
+    if not verbose:
+        for file in files:
+            os.remove(file)
 
 
 def pmc_perf_split(workload_dir):
