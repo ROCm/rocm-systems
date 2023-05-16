@@ -45,7 +45,7 @@ std::string binary_path;
 static void init_test_path() {
   if (is_installed_path()) {
     running_path = "share/rocprofiler/tests/runFeatureTests";
-    lib_path = "lib/librocprofiler_tool.so";
+    lib_path = "lib/rocprofiler/librocprofiler_tool.so";
     golden_trace_path = "share/rocprofiler/tests/featuretests/profiler/apps/goldentraces/";
     test_app_path = "share/rocprofiler/tests/featuretests/profiler/apps/";
     metrics_path = "lib/rocprofiler/gfx_metrics.xml";

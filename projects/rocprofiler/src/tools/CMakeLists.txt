@@ -33,10 +33,10 @@ else()
 endif()
 
 install(TARGETS rocprofiler_tool LIBRARY
-  DESTINATION ${CMAKE_INSTALL_LIBDIR}
+  DESTINATION ${CMAKE_INSTALL_LIBDIR}/rocprofiler
   COMPONENT runtime)
 install(TARGETS rocprofiler_tool LIBRARY
-  DESTINATION ${CMAKE_INSTALL_LIBDIR}
+  DESTINATION ${CMAKE_INSTALL_LIBDIR}/rocprofiler
   COMPONENT asan)
 
 add_subdirectory(amdsys)

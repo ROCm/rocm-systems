@@ -271,7 +271,7 @@ att_parsed_input_t GetATTParams() {
       parameters.push_back(std::make_pair(ATT_PARAM_NAMES[param_name], param_value));
       try { default_params.erase(param_name); } catch(...) {};
     } else {
-        printf("Error: Invalid parameter name: %s  - (%s)\nList of available params:\n", 
+        printf("Error: Invalid parameter name: %s  - (%s)\nList of available params:\n",
                 param_name.c_str(), line.c_str());
         for (auto& name : ATT_PARAM_NAMES) printf("%s\n", name.first.c_str());
     }
@@ -283,7 +283,7 @@ att_parsed_input_t GetATTParams() {
   ATT_PARAM_NAMES["ATT_MASK"] = ROCPROFILER_ATT_MASK;
   ATT_PARAM_NAMES["TOKEN_MASK"] = ROCPROFILER_ATT_TOKEN_MASK;
   ATT_PARAM_NAMES["TOKEN_MASK2"] = ROCPROFILER_ATT_TOKEN_MASK2;
-    
+
   for (auto& param : default_params)
     parameters.push_back(std::make_pair(ATT_PARAM_NAMES[param.first], param.second));
 
@@ -318,11 +318,7 @@ void plugins_load() {
   if (Dl_info dl_info; dladdr((void*)plugins_load, &dl_info) != 0) {
     const char* plugin_name = getenv("ROCPROFILER_PLUGIN_LIB");
     if (plugin_name == nullptr) {
-      if (fs::path(dl_info.dli_fname).string().find("build") != std::string::npos) {
         plugin_name = "libfile_plugin.so";
-      } else {
-        plugin_name = "rocprofiler/libfile_plugin.so";
-      }
     }
     if (!plugin.emplace(fs::path(dl_info.dli_fname).replace_filename(plugin_name)).is_valid()) {
       plugin.reset();
@@ -387,7 +383,7 @@ void wait_for_amdsys() {
 static int info_callback(const rocprofiler_counter_info_t info, const char* gpu_name,
                          uint32_t gpu_index) {
   fprintf(stdout, "\n  %s:%u : %s : %s\n", gpu_name, gpu_index, info.name, info.description);
-  if (info.expression != nullptr) { 
+  if (info.expression != nullptr) {
     fprintf(stdout, "      %s = %s\n", info.name, info.expression);
   } else {
     if (info.instances_count > 1) fprintf(stdout, "[0-%u]", info.instances_count - 1);

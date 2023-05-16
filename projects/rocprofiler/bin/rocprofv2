@@ -275,14 +275,14 @@ if [ -n "$PMC_LINES" ]; then
     if [ $RUN_FROM_BUILD == 1 ]; then
       LD_PRELOAD=$LD_PRELOAD:$ROCM_DIR/build/librocprofiler_tool.so $*
     else
-      LD_PRELOAD=$LD_PRELOAD:$ROCM_DIR/lib/librocprofiler_tool.so $*
+      LD_PRELOAD=$LD_PRELOAD:$ROCM_DIR/lib/rocprofiler/librocprofiler_tool.so $*
     fi
   done
 elif [ ! -n "$ATT_ARGV" ]; then
   if [ $RUN_FROM_BUILD == 1 ]; then
     LD_PRELOAD=$LD_PRELOAD:$ROCM_DIR/build/librocprofiler_tool.so $*
   else
-    LD_PRELOAD=$LD_PRELOAD:$ROCM_DIR/lib/librocprofiler_tool.so $*
+    LD_PRELOAD=$LD_PRELOAD:$ROCM_DIR/lib/rocprofiler/librocprofiler_tool.so $*
   fi
 fi
 
