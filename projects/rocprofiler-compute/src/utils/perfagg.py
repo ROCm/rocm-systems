@@ -25,6 +25,8 @@
 import sys, os, pathlib, shutil, subprocess, argparse, glob, re
 import numpy as np
 import math
+import warnings
+import pandas as pd
 
 prog = "omniperf"
 
@@ -84,6 +86,164 @@ perfmon_config = {
         "TCC_channels": 32,
     },
 }
+
+
+def test_df_column_equality(df):
+    return df.eq(df.iloc[:, 0], axis=0).all(1).all()
+
+
+# joins disparate runs less dumbly than rocprof
+def join_prof(workload_dir, join_type, log_file, verbose, out=None):
+    # Set default output directory if not specified
+    if out == None:
+        out = workload_dir + "/pmc_perf.csv"
+    files = glob.glob(workload_dir + "/" + "pmc_perf_*.csv")
+    df = None
+
+    for i, file in enumerate(files):
+        _df = pd.read_csv(file)
+        if join_type == "kernel":
+            key = _df.groupby("KernelName").cumcount()
+        elif join_type == "grid":
+            key = _df.groupby(["KernelName", "grd"]).cumcount()
+        else:
+            print("ERROR: Unrecognized --join-type")
+            sys.exit(1)
+
+        _df["key"] = _df.KernelName + " - " + key.astype(str)
+        if df is None:
+            df = _df
+        else:
+            # join by unique index of kernel
+            df = pd.merge(df, _df, how="inner", on="key", suffixes=("", f"_{i}"))
+
+    # TODO: check for any mismatch in joins
+    duplicate_cols = {
+        "gpu": [col for col in df.columns if "gpu" in col],
+        "grd": [col for col in df.columns if "grd" in col],
+        "wpr": [col for col in df.columns if "wgr" in col],
+        "lds": [col for col in df.columns if "lds" in col],
+        "scr": [col for col in df.columns if "scr" in col],
+        "arch_vgpr": [col for col in df.columns if "arch_vgpr" in col],
+        "accum_vgpr": [col for col in df.columns if "accum_vgpr" in col],
+        "spgr": [col for col in df.columns if "sgpr" in col],
+    }
+    for key, cols in duplicate_cols.items():
+        _df = df[cols]
+        if not test_df_column_equality(_df):
+            msg = (
+                "WARNING: Detected differing {} values while joining pmc_perf.csv".format(
+                    key
+                )
+            )
+            warnings.warn(msg)
+            log_file.write(msg + "\n")
+        if test_df_column_equality(_df) and verbose:
+            msg = "Successfully joined {} in pmc_perf.csv".format(key)
+            print(msg)
+            log_file.write(msg + "\n")
+
+    # now, we can:
+    #   A) throw away any of the "boring" duplicats
+    df = df[
+        [
+            k
+            for k in df.keys()
+            if not any(
+                check in k
+                for check in [
+                    # removed merged counters, keep original
+                    "gpu-id_",
+                    "grd_",
+                    "wgr_",
+                    "lds_",
+                    "scr_",
+                    "vgpr_",
+                    "sgpr_",
+                    "Index_",
+                    # un-mergable, remove all
+                    "queue-id",
+                    "queue-index",
+                    "pid",
+                    "tid",
+                    "fbar",
+                    "sig",
+                    "obj",
+                ]
+            )
+        ]
+    ]
+    #   B) any timestamps that are _not_ the duration, which is the one we care
+    #   about
+    df = df[
+        [
+            k
+            for k in df.keys()
+            if not any(check in k for check in ["DispatchNs", "CompleteNs"])
+        ]
+    ]
+    #   C) sanity check the name and key
+    namekeys = [k for k in df.keys() if "KernelName" in k]
+    assert len(namekeys)
+    for k in namekeys[1:]:
+        assert (df[namekeys[0]] == df[k]).all()
+    df = df.drop(columns=namekeys[1:])
+    # now take the median of the durations
+    bkeys = []
+    ekeys = []
+    for k in df.keys():
+        if "Begin" in k:
+            bkeys.append(k)
+        if "End" in k:
+            ekeys.append(k)
+    # compute mean begin and end timestamps
+    endNs = df[ekeys].mean(axis=1)
+    beginNs = df[bkeys].mean(axis=1)
+    # and replace
+    df = df.drop(columns=bkeys)
+    df = df.drop(columns=ekeys)
+    df["BeginNs"] = beginNs
+    df["EndNs"] = endNs
+    # finally, join the drop key
+    df = df.drop(columns=["key"])
+    # and save to file
+    df.to_csv(out, index=False)
+    # and delete old file(s)
+    if not verbose:
+        for file in files:
+            os.remove(file)
+
+
+def pmc_perf_split(workload_dir):
+    workload_perfmon_dir = workload_dir + "/perfmon"
+    lines = open(workload_perfmon_dir + "/pmc_perf.txt", "r").read().splitlines()
+
+    # Iterate over each line in pmc_perf.txt
+    mpattern = r"^pmc:(.*)"
+    i = 0
+    for line in lines:
+        # Verify no comments
+        stext = line.split("#")[0].strip()
+        if not stext:
+            continue
+
+        # all pmc counters start with  "pmc:"
+        m = re.match(mpattern, stext)
+        if m is None:
+            continue
+
+        # Create separate file for each line
+        fd = open(workload_perfmon_dir + "/pmc_perf_" + str(i) + ".txt", "w")
+        fd.write(stext + "\n\n")
+        fd.write("gpu:\n")
+        fd.write("range:\n")
+        fd.write("kernel:\n")
+        fd.close()
+
+        i += 1
+
+    # Remove old pmc_perf.txt input from perfmon dir
+    os.remove(workload_perfmon_dir + "/pmc_perf.txt")
 
 
 def perfmon_coalesce(pmc_files_list, workload_dir, soc):
