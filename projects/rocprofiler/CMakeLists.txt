@@ -411,7 +411,7 @@ if(${LIBRARY_TYPE} STREQUAL SHARED)
   # RPM package specific variable for ASAN
   set ( CPACK_RPM_ASAN_PACKAGE_NAME "${ROCPROFILER_NAME}-asan" )
   set ( CPACK_RPM_ASAN_PACKAGE_REQUIRES "hsa-rocr-asan, rocm-core-asan" )
- 
+
   # Remove dependency on rocm-core if -DROCM_DEP_ROCMCORE=ON not given to cmake
   if(NOT ROCM_DEP_ROCMCORE)
     string(REGEX REPLACE ",? ?rocm-core" "" CPACK_RPM_RUNTIME_PACKAGE_REQUIRES
@@ -533,7 +533,7 @@ if(DOXYGEN_FOUND)
 
   install(
     DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/doc/html/"
-    DESTINATION ${CMAKE_INSTALL_DATADIR}/html/${PROJECT_NAME}
+    DESTINATION ${CMAKE_INSTALL_DOCDIR}/html
     OPTIONAL
     COMPONENT docs)
 endif()

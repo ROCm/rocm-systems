@@ -4,11 +4,13 @@ ROCM_PATH ?= /opt/rocm
 HIP_PATH ?= $(ROCM_PATH)/hip
 HIPCC := $(HIP_PATH)/bin/hipcc
 
+ROCM_PATH ?=/opt/rocm
+ROCPROFILER_LIBS_PATH ?=$(ROCM_PATH)/lib
+ROCPROFILER_INCLUDES=$(ROCPROFILER_LIBS_PATH)/../include/rocprofiler/
+
 ifndef ROCPROFILER_PATH
 $(warning You may need to set ROCPROFILER_PATH to the path of the rocprofiler source)
 endif
-
-ROCPROFILER_PATH ?= $(ROCM_PATH)/include/rocprofiler
 
 CXXFLAGS += -std=c++17 -Wall
 
@@ -35,9 +37,9 @@ deps := $(srcs:%.cpp=%.d)
 CPPFLAGS += -DHAVE_MEMFD_CREATE
 
 $(prog): CC = $(HIPCC)
-$(prog): CPPFLAGS += -I$(ROCM_PATH)/include -I$(ROCPROFILER_PATH)
-$(prog): LDFLAGS := -L$(ROCM_PATH)/lib -L$(ROCPROFILER_PATH)/build
-$(prog): LDLIBS += -ldl -lpthread -lhsa-runtime64 -lrocprofiler64 -lrocm-dbgapi -ldw -lelf
+$(prog): CPPFLAGS += -I$(ROCPROFILER_INCLUDES) -I$(ROCM_PATH)/include
+$(prog): LDFLAGS := -L$(ROCPROFILER_LIBS_PATH) -L$(ROCM_PATH)/lib
+$(prog): LDLIBS += -ldl -lpthread -lhsa-runtime64 -lrocprofiler64v2 -lrocm-dbgapi -ldw -lelf
 $(objs): CXX = $(HIPCC)
 
 # Targets

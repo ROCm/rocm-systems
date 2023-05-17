@@ -201,7 +201,7 @@ int main() {
 This can be built in the following manner:
 
 ```sh
-$ gcc main.c -I/opt/rocm-5.6.0/include -L/opt/rocm-5.6.0/lib -lrocprofiler64-v2
+$ gcc main.c -I/opt/rocm-5.6.0/include -L/opt/rocm-5.6.0/lib -lrocprofiler64v2
 ```
 
 The resulting `a.out` will depend on
