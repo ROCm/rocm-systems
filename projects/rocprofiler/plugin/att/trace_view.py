@@ -45,7 +45,7 @@ class Readable:
         return len(self.jsonstr)
 
 
-MAX_STITCHED_TOKENS = 3000000
+MAX_STITCHED_TOKENS = 10000000
 MAX_FAILED_STITCHES = 256
 STACK_SIZE_LIMIT = 64
 
@@ -117,43 +117,68 @@ class RegisterWatchList:
 
     def getpc(self, line, next_line):
         #print('Get pc:', line)
-        dst = line.split(' ')[1].strip()
-        label_dest = next_line.split(', ')[-1].split('@')[0]
-        for reg in self.range(dst):
-            #print('Setting:', reg, label_dest, self.labels[label_dest])
-            self.registers[reg].append(deepcopy(self.labels[label_dest]))
+        try:
+            dst = line.split(' ')[1].strip()
+            label_dest = next_line.split(', ')[-1].split('@')[0]
+            for reg in self.range(dst):
+                self.registers[reg].append(deepcopy(self.labels[label_dest]))
+        except:
+            pass
 
     def swappc(self, line, line_num):
-        tokens = self.tokenize(line)
-        dst = tokens[1]
-        src = tokens[2]
-        popped = self.registers[self.range(src)[0]][-1]
-        self.registers[self.range(src)[0]] = self.registers[self.range(src)[0]][:-1]
-        self.registers[self.range(dst)[0]].append(line_num+1)
-        return popped
+        try:
+            tokens = self.tokenize(line)
+            dst = tokens[1]
+            src = tokens[2]
+
+            popped = self.registers[self.range(src)[0]][-1]
+            self.registers[self.range(src)[0]] = self.registers[self.range(src)[0]][:-1]
+            self.registers[self.range(dst)[0]].append(line_num+1)
+            return popped
+        except:
+            return 0
 
     def setpc(self, line):
-        #print('Set pc:', line)
-        src = line.split(' ')[1].strip()
-        #print('Going to:', self.registers[self.range(src)[0]], src)
-        popped = self.registers[self.range(src)[0]][-1]
-        self.registers[self.range(src)[0]] = self.registers[self.range(src)[0]][:-1]
-        return popped
+        try:
+            src = line.split(' ')[1].strip()
+            #print('Going to:', self.registers[self.range(src)[0]], src)
+            popped = self.registers[self.range(src)[0]][-1]
+            self.registers[self.range(src)[0]] = self.registers[self.range(src)[0]][:-1]
+            return popped
+        except:
+            return 0
+
+    def scratch(self, line):
+        try:
+            tokens = self.tokenize(line)
+            if '_load' in tokens[0]:
+                dst = tokens[1]
+                src = tokens[3]+tokens[4]
+            else:
+                src = tokens[2]
+                dst = tokens[3]+tokens[4]
+            self.registers[dst] = self.registers[src]
+        except:
+            pass
+
+    def move(self, line):
+        try:
+            tokens = self.tokenize(line)
+            if tokens[2][0] in ['s', 'd'] and tokens[1][0] in ['s', 'd']:
+                self.registers[self.range(tokens[1])[0]] = deepcopy(self.registers[self.range(tokens[2])[0]])
+        except:
+            pass
 
     def updatelane(self, line):
         tokens = self.tokenize(line)
         try:
-            #print('Lane:', tokens)
             if 'v_readlane' in tokens[0]:
                 self.registers[tokens[1]].append(self.registers[tokens[2]][int(tokens[3])][-1])
-                #print('Writelane value', self.registers[tokens[2]][int(tokens[3])])
                 self.registers[tokens[2]][int(tokens[3])] = self.registers[tokens[2]][int(tokens[3])][:-1]
             elif 'v_writelane' in tokens[0]:
                 self.registers[tokens[1]][int(tokens[3])].append(self.registers[tokens[2]][-1])
                 self.registers[tokens[2]] = self.registers[tokens[2]][-STACK_SIZE_LIMIT:]
-                #print('Readlane value', self.registers[tokens[2]])
         except Exception as e:
-            #print(e, 'Could not set:', line)
             pass
 
 
@@ -254,6 +279,12 @@ def stitch(insts, raw_code, jumps, gfxv):
 
         matched = True
         next = line+1
+
+        if '_mov_' in as_line[0]:
+            watchlist.move(as_line[0])
+        elif 'scratch_' in as_line[0]:
+            watchlist.scratch(as_line[0])
+
         if as_line[1] == GETPC: # TODO: @ can put you ahead of label!
             watchlist.getpc(as_line[0], code[line+1][0])
             matched = inst[1] in [SALU, JUMP]
@@ -379,12 +410,11 @@ def stitch(insts, raw_code, jumps, gfxv):
 
         #print(matched, WaveInstCategory[inst[1]], WaveInstCategory[as_line[1]], as_line, inst)
         #print([WaveInstCategory[insts[i+k][1]] for k in range(20) if i+k < len(insts)])
-
         if matched:
             result.append(inst + (reverse_map[line],))
             i += 1
             num_failed_stitches = 0
-        elif inst[1] == IMMED and line != next:
+        elif not bGFX9 and inst[1] == IMMED and line != next:
             skipped_immed += 1
             result.append(inst + (reverse_map[line],))
             next = line
@@ -505,12 +535,13 @@ def extract_data(df, se_number, code, jumps, gfxv):
         return None
 
     cu_waves = extract_waves(df)
-    all_filenames = []
+    wave_filenames = []
     flight_count = []
     maxgrade = [{df['wave_slot'][wave_id]: -1 for wave_id in df['id']} for k in range(4)]
     non_stitched = [{df['wave_slot'][wave_id]: -1 for wave_id in df['id']} for k in range(4)]
 
     print('Number of waves:', len(df['id']))
+    allwaves_maxline = 0
 
     for wave_id in df['id']:
         if non_stitched[df['simd'][wave_id]][df['wave_slot'][wave_id]] == 0:
@@ -529,6 +560,7 @@ def extract_data(df, se_number, code, jumps, gfxv):
         if srate <= maxgrade[df['simd'][wave_id]][df['wave_slot'][wave_id]]:
             continue
 
+        allwaves_maxline = max(allwaves_maxline, maxline)
         maxgrade[df['simd'][wave_id]][df['wave_slot'][wave_id]] = srate
         non_stitched[df['simd'][wave_id]][df['wave_slot'][wave_id]] = len(insts) - len(stitched)
         flight_count.append(count)
@@ -542,7 +574,6 @@ def extract_data(df, se_number, code, jumps, gfxv):
             "info": wave_info(df, wave_id),
             "instructions": stitched,
             "timeline": timeline,
-            "code": code[:maxline+16],
             "waitcnt": mem_unroll
         }
         data_obj = {
@@ -550,21 +581,30 @@ def extract_data(df, se_number, code, jumps, gfxv):
             "kernel": code[0][0],
             "duration": sum(dur for (_, dur) in timeline),
             "wave": wave_entry,
-            "simd_waves": [],
-            "cu_waves": cu_waves,
             "loop_count": loopCount,
             "top_n": get_top_n(stitched),
             "websocket_port": WebSocketPort,
             "generation_time": time.ctime()
         }
-        if len(data_obj["cu_waves"]) == 0:
-            continue
 
         OUT = 'se'+str(se_number)+'_sm'+str(df['simd'][wave_id])+'_wv'+str(df['wave_slot'][wave_id])+'.json'
         JSON_GLOBAL_DICTIONARY[OUT] = Readable(data_obj)
-        all_filenames.append(OUT)
+        wave_filenames.append(OUT)
 
-    return flight_count, all_filenames
+    data_obj = {
+        "name": 'SE'.format(se_number),
+        "kernel": code[0][0],
+        "simd_waves": [],
+        "cu_waves": cu_waves,
+        "code": code[:allwaves_maxline+16],
+        "websocket_port": WebSocketPort,
+        "generation_time": time.ctime()
+    }
+    se_filename = 'se'+str(se_number)+'_code.json'
+    if len(wave_filenames) > 0:
+        JSON_GLOBAL_DICTIONARY[se_filename] = Readable(data_obj)
+
+    return flight_count, wave_filenames, se_filename
 
 
 class NoCacheHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
@@ -699,12 +739,14 @@ def view_trace(args, code, jumps, dbnames, att_filenames, bReturnLoc, pic_callba
     se_numbers = [int(a.split('_se')[1].split('.att')[0]) for a in att_filenames]
     flight_count = []
     simd_wave_filenames = {}
+    se_filenames = []
 
     for se_number, dbname in zip(se_numbers, dbnames):
         if len(dbname['id']) == 0:
             continue
 
-        count, wv_filenames = extract_data(dbname, se_number, code, jumps, gfxv)
+        count, wv_filenames, se_filename = extract_data(dbname, se_number, code, jumps, gfxv)
+        se_filenames.append(se_filename)
 
         if count is not None:
             flight_count.append(count)
@@ -732,7 +774,8 @@ def view_trace(args, code, jumps, dbnames, att_filenames, bReturnLoc, pic_callba
 
         simd_wave_filenames[key] = wv_dict
 
-    JSON_GLOBAL_DICTIONARY['filenames.json'] = Readable({"filenames": simd_wave_filenames,
+    JSON_GLOBAL_DICTIONARY['filenames.json'] = Readable({"wave_filenames": simd_wave_filenames,
+                                                        "se_filenames": se_filenames,
                                                         "global_begin_time": int(se_time_begin),
                                                         "gfxv": gfxv})
 

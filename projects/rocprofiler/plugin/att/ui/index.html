@@ -70,6 +70,8 @@
 				
 				var elem = 0;
 				var elements = document.getElementsByClassName("line_"+elem);
+				if (elements == undefined || !elements || elements.length == 0)
+					return;
 				var y0 = elements[0].getBoundingClientRect().top;
 				
 				var offsets = []
@@ -205,7 +207,7 @@
 		var filename_data = {}
 
 		fetch("filenames.json").then(response => response.json()).then(data => {
-			filename_data = data.filenames
+			filename_data = data.wave_filenames
 
 			wave_cu_index = {};
 			for(var i in filename_data) {
@@ -295,6 +297,13 @@
 			fetch(file_to_gather)
 				.then(response => response.json())
 				.then(data => {
+				code_data_file = file_to_gather.split('_sm')[0]+'_code.json'
+				console.log("Requestd:", file_to_gather)
+				console.log("Request code:", code_data_file)
+
+				fetch(code_data_file)
+				.then(response => response.json())
+				.then(code_data => {
 					const SP = '\u00A0'
 					window.data = data // DEBUG
 					const SOCKET_PORT = data.websocket_port
@@ -453,7 +462,7 @@
 							const CU = cu_waves_div.append('svg')
 								.attr('id', 'CU')
 								.attr('width', WIDTH)
-								.attr('height', data.cu_waves.length * CU_HEIGHT + MARGIN)
+								.attr('height', code_data.cu_waves.length * CU_HEIGHT + MARGIN)
 								.append('g')
 							CU.append('rect')
 								.attr('x', 0)
@@ -548,7 +557,7 @@
 
 					d3.select("#code")
 						.selectAll("li")
-						.data(wav.code)
+						.data(code_data.code)
 						.enter()
 						.append('li')
 						.datum((d) => { return {data:d} })
@@ -581,7 +590,7 @@
 
 					d3.select("#code")
 						.selectAll("li")
-						.data(wav.code)
+						.data(code_data.code)
 						.append('a')
 						.datum((d) => { return {data:d} })
 						.attr("xlink:href", (d,i) => { return d.data[3] })
@@ -611,7 +620,7 @@
 						})
 					d3.select("#code")
 						.selectAll("li")
-						.data(wav.code)
+						.data(code_data.code)
 						.append('span')
 						.datum((d) => { return {data:d} })
 						.classed("tooltip", (d,i) => { return (i in L2FirstToken) })
@@ -903,13 +912,13 @@
 					const show_simd = () => {
 						SIMD.append("rect")
 							.attr("width", WIDTH)
-							.attr("height", HEIGHT * data.simd_waves.length)
+							.attr("height", HEIGHT * code_data.simd_waves.length)
 							.attr("x", 0)
 							.attr("y", HEIGHT)
 							.attr("fill", "black")
 							.attr("opacity", 0.3)
 						let current_height = HEIGHT
-						data.simd_waves.forEach((wave, i) => {
+						code_data.simd_waves.forEach((wave, i) => {
 							// wave: (simd, slot, [(id, start, end)+], instructions, timeline)
 							let [simd, slot, waves] = [wave[0], wave[1], wave[2]]
 							let ins_in_range = wave[3].filter((x) => {
@@ -969,7 +978,7 @@
 					const show_cu = () => {
 						const CU = d3.select('#CU')
 						let current_height = 10
-						data.cu_waves.forEach((wave, i) => {
+						code_data.cu_waves.forEach((wave, i) => {
 							// wave: (simd, slot, [(id, start, end)+], instructions, timeline)
 							let [simd, slot, waves] = [wave[0], wave[1], wave[2]]
 							let ins_in_range = wave[3].filter((x) => {
@@ -1045,6 +1054,7 @@
 						}
 					}
 
+				})
 				}
 			)
 		}
