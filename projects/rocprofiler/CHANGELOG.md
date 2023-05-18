@@ -214,7 +214,6 @@ The resulting `a.out` will depend on
 ### Added
 - 'end_time' need to be disabled in roctx_trace.txt
 - support for hsa_amd_memory_async_copy_on_engine API function trace
-
 ### Fixed
 - rocprof in ROcm/5.4.0 gpu selector broken.
 - rocprof in ROCm/5.4.1 fails to generate kernel info.
@@ -229,6 +228,7 @@ The resulting `a.out` will depend on
 - Limiting file name sizes for ATT plugin.
 - Support for MI300 XCC modes for rocprof v2.
 - MI300 individual XCC counters dumped per-xcc as separate records but with same record-id and kernel dispatch info
+- Naming for MPI ranks. Filenames containing "%rank" are replaced by variables "MPI_RANK", "OMPI_COMM_WORLD_RANK" or "MV2_COMM_WORLD_RANK".
 ### Fixed
 - Samples are fixed to show the new usage of phases.
 - Plugin option validates the plugin names.

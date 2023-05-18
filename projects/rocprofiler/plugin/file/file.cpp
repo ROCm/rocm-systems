@@ -39,6 +39,7 @@
 #include <string>
 #include <hsa/hsa.h>
 #include <mutex>
+#include <unordered_map>
 
 #include "rocprofiler.h"
 #include "rocprofiler_plugin.h"
@@ -94,12 +95,37 @@ class file_plugin_t {
       }
 
       std::stringstream ss;
+      output_file_name = replace_MPI_macros(output_file_name);
+
       ss << output_file_name << GetPid() << "_" << name_;
       stream_.open(output_prefix / ss.str());
     }
 
     bool is_open() const { return stream_.is_open(); }
     bool fail() const { return stream_.fail(); }
+
+    // Returns a string with the MPI %macro replaced with the corresponding envvar
+    std::string replace_MPI_macros(std::string output_file_name) {
+      std::unordered_map<const char*, const char*> MPI_BUILTINS = {
+        {"MPI_RANK", "%rank"},
+        {"OMPI_COMM_WORLD_RANK", "%rank"},
+        {"MV2_COMM_WORLD_RANK", "%rank"}
+      };
+
+      for (const auto& [envvar, key] : MPI_BUILTINS) {
+        size_t key_find = output_file_name.rfind(key);
+        if (key_find == std::string::npos) continue; // Does not contain a %?rank var
+
+        const char* env_var_set = getenv(envvar);
+        if (env_var_set == nullptr) continue; // MPI_COMM_WORLD_x var is does not exist
+
+        int rank = atoi(env_var_set);
+        output_file_name =  output_file_name.substr(0, key_find) + std::to_string(rank)
+                          + output_file_name.substr(key_find + std::string(key).size());
+      }
+
+      return output_file_name;
+    }
 
    private:
     const std::string name_;

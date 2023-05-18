@@ -145,6 +145,7 @@ class perfetto_plugin_t {
     data_source_cfg->set_name("track_event");
     data_source_cfg->set_track_event_config_raw(track_event_cfg.SerializeAsString());
 
+    output_file_name = replace_MPI_macros(output_file_name);
     output_prefix_.append(output_file_name + std::to_string(GetPid()) + "_output.pftrace");
     file_descriptor_ = open(output_prefix_.string().c_str(), O_RDWR | O_CREAT | O_TRUNC, 0600);
     if (file_descriptor_ == -1) rocprofiler::warning("Can't open output file\n");
@@ -167,9 +168,7 @@ class perfetto_plugin_t {
               track_counter_.fetch_add((1 + machine_id) * GetPid(), std::memory_order_acquire);
         }
       }
-      std::string thread_track_str =
-          rocprofiler::string_printf("Node: %s Process ID: %lu Thread ID:", hostname_, GetPid());
-      process_track_desc.mutable_process()->set_process_name(thread_track_str);
+      process_track_desc.mutable_process()->set_process_name(get_thread_track_str());
       perfetto::TrackEvent::SetTrackDescriptor(perfetto::ProcessTrack::Current(),
                                                process_track_desc);
       perfetto::ProcessTrack::Current().Serialize().set_uuid(track_id);
@@ -184,6 +183,40 @@ class perfetto_plugin_t {
       tracing_session_->StopBlocking();
       close(file_descriptor_);
     }
+  }
+
+  std::string replace_MPI_macros(std::string output_file_name) {
+    std::unordered_map<const char*, const char*> MPI_BUILTINS = {
+      {"MPI_RANK", "%rank"},
+      {"OMPI_COMM_WORLD_RANK", "%rank"},
+      {"MV2_COMM_WORLD_RANK", "%rank"}
+    };
+    bIsMPI = false;
+
+    for (const auto& [envvar, key] : MPI_BUILTINS) {
+      size_t key_find = output_file_name.rfind(key);
+      if (key_find == std::string::npos) continue; // Does not contain a %?rank var
+
+      const char* env_var_set = getenv(envvar);
+      if (env_var_set == nullptr) continue; // MPI_COMM_WORLD_x var is does not exist
+
+      int rank = atoi(env_var_set);
+      output_file_name =  output_file_name.substr(0, key_find) + std::to_string(rank)
+                        + output_file_name.substr(key_find + std::string(key).size());
+      if (!bIsMPI)
+        MPI_rank = rank;
+      bIsMPI = true;
+    }
+
+    return output_file_name;
+  }
+
+  std::string get_thread_track_str() {
+    return rocprofiler::string_printf("Node: %s Process ID: %lu Thread ID:", hostname_, GetPid());
+  }
+
+  std::string get_device_track_str() {
+      return rocprofiler::string_printf("Node: %s Device:", hostname_);
   }
 
   const char* GetDomainName(rocprofiler_tracer_activity_domain_t domain) {
@@ -232,8 +265,7 @@ class perfetto_plugin_t {
                 .first;
         auto gpu_desc = device_track_it->second.Serialize();
         gpu_desc.mutable_process()->set_pid(device_id);
-        std::string gpu_str = rocprofiler::string_printf("Node: %s Device:", hostname_);
-        gpu_desc.mutable_process()->set_process_name(gpu_str);
+        gpu_desc.mutable_process()->set_process_name(get_device_track_str());
         perfetto::TrackEvent::SetTrackDescriptor(device_track_it->second, gpu_desc);
         track_ids_used_.emplace_back(device_id + 1 + machine_id);
       }
@@ -370,8 +402,7 @@ class perfetto_plugin_t {
                   .first;
           auto gpu_desc = device_track_it->second.Serialize();
           gpu_desc.mutable_process()->set_pid(device_id);
-          std::string gpu_str = rocprofiler::string_printf("Node: %s Device:", hostname_);
-          gpu_desc.mutable_process()->set_process_name(gpu_str);
+          gpu_desc.mutable_process()->set_process_name(get_device_track_str());
           perfetto::TrackEvent::SetTrackDescriptor(device_track_it->second, gpu_desc);
           track_ids_used_.emplace_back(1 + machine_id + device_id);
         }
@@ -391,10 +422,8 @@ class perfetto_plugin_t {
         thread_track_it =
             thread_tracks_.emplace(thread_id, perfetto::ProcessTrack::Global(track_id)).first;
         auto thread_track_desc = thread_track_it->second.Serialize();
-        std::string thread_track_str =
-            rocprofiler::string_printf("Node: %s Process ID: %lu Thread ID:", hostname_, GetPid());
         thread_track_desc.mutable_process()->set_pid(thread_id);
-        thread_track_desc.mutable_process()->set_process_name(thread_track_str);
+        thread_track_desc.mutable_process()->set_process_name(get_thread_track_str());
         perfetto::TrackEvent::SetTrackDescriptor(thread_track_it->second, thread_track_desc);
       }
     }
@@ -714,6 +743,8 @@ class perfetto_plugin_t {
   std::unique_ptr<perfetto::TracingSession> tracing_session_;
   int file_descriptor_;
   bool is_valid_{false};
+  bool bIsMPI = false;
+  int MPI_rank = 0;
   size_t roctx_track_entries_{0};
 
   // Correlate stream id(s) with correlation id(s) to identify the stream id of every HIP activity

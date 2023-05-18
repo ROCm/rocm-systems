@@ -1346,7 +1346,6 @@ bool FilePluginTest::hasFileInDir(const std::string& filename, const char* direc
   return false;
 }
 
-
 void FilePluginTest::ProcessApplication(std::stringstream& ss) {
   FILE* handle = popen(ss.str().c_str(), "r");
   ASSERT_NE(handle, nullptr);
@@ -1367,7 +1366,7 @@ class VectorAddFileOnlyTest : public FilePluginTest {
   bool hasFile(){ return hasFileInDir("file_test_name", "."); }
 };
 
-TEST_F(VectorAddFileOnlyTest, WhenRunningProfilerWithOnlyOutputFilenameSetTest) {
+TEST_F(VectorAddFileOnlyTest, WhenRunningProfilerWithFilePluginTest) {
   EXPECT_EQ(hasFile(), true);
 }
 
@@ -1380,7 +1379,7 @@ class VectorAddFolderOnlyTest : public FilePluginTest {
   bool hasFile(){ return hasFileInDir("", "./plugin_test_folder_path"); }
 };
 
-TEST_F(VectorAddFolderOnlyTest, WhenRunningProfilerWithOnlyOutputFilenameSetTest) {
+TEST_F(VectorAddFolderOnlyTest, WhenRunningProfilerWithFilePluginTest) {
   EXPECT_EQ(hasFile(), true);
 }
 
@@ -1393,7 +1392,24 @@ class VectorAddFileAndFolderTest : public FilePluginTest {
   bool hasFile(){ return hasFileInDir("file_test_name", "./plugin_test_folder_path"); }
 };
 
-TEST_F(VectorAddFileAndFolderTest, WhenRunningProfilerWithOnlyOutputFilenameSetTest) {
+TEST_F(VectorAddFileAndFolderTest, WhenRunningProfilerWithFilePluginTest) {
+  EXPECT_EQ(hasFile(), true);
+}
+
+class VectorAddFilenameMPITest : public FilePluginTest {
+ protected:
+  virtual void SetUp() {
+    setenv("MPI_RANK", "7", true);
+    RunApplication("hip_vectoradd", "-d ./plugin_test_folder_path -o test_%rank_");
+  }
+  virtual void TearDown() {
+    std::experimental::filesystem::remove_all("./plugin_test_folder_path");
+    unsetenv("MPI_RANK");
+  }
+  bool hasFile(){ return hasFileInDir("test_7_", "./plugin_test_folder_path"); }
+};
+
+TEST_F(VectorAddFilenameMPITest, WhenRunningProfilerWithFilePluginTest) {
   EXPECT_EQ(hasFile(), true);
 }
 */
