@@ -245,6 +245,14 @@ set_target_properties(rocprofiler-v2 PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/v2
   VERSION ${PROJECT_VERSION}
   SOVERSION ${PROJECT_VERSION_MAJOR})
+ 
+# Add custom command to copy the v2 library to buil-dir as well
+add_custom_command(TARGET rocprofiler-v2 POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_BINARY_DIR}/v2/librocprofiler64.so.2 ${CMAKE_BINARY_DIR}
+)
+# Add custom target to trigger the copy command
+add_custom_target(copy_v2_library DEPENDS rocprofiler-v2)
+
 target_compile_definitions(rocprofiler-v2
   # As ROCR hsa_api_trace header file is not usable unless AMD_INTERNAL_BUILD is defined
   PRIVATE AMD_INTERNAL_BUILD
