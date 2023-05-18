@@ -30,6 +30,7 @@ THE SOFTWARE.
 #include <string>
 #include <thread>
 #include <array>
+//#include <experimental/filesystem>
 
 #include "src/utils/helper.h"
 #include "utils/test_utils.h"
@@ -60,6 +61,7 @@ static void init_test_path() {
     binary_path = "rocprofv2";
   }
 }
+
 
 /**
  * Sets application enviornment by seting HSA_TOOLS_LIB.
@@ -1308,3 +1310,90 @@ TEST(ProfilerMPTest, WhenRunningMultiProcessTestItPasses) {
     ASSERT_TRUE(1);
   }
 }
+
+/*
+ * ###################################################
+ * ############ File plugin tests ################
+ * ###################################################
+ */
+
+/**
+ * Sets application output dir.
+ */
+
+/*
+void FilePluginTest::RunApplication(const char* app_name, const char* appParams) {
+  if (is_installed_path()) return; // Only run these tests from build
+
+  init_test_path();
+  unsetenv("OUTPUT_FOLDER");
+
+  std::stringstream os;
+  os << binary_path << " --hsa-activity " << appParams << " ";
+  os << test_app_path << app_name;
+  ProcessApplication(os);
+}
+
+bool FilePluginTest::hasFileInDir(const std::string& filename, const char* directory) {
+  if (is_installed_path()) return true;  // Only run these tests from build
+
+  for (const auto& entry : std::experimental::filesystem::directory_iterator(directory)) {
+    if (filename.size() == 0)
+      return true;
+    if (std::string(entry.path().filename()).substr(0, filename.size()) == filename)
+      return true;
+  }
+  return false;
+}
+
+
+void FilePluginTest::ProcessApplication(std::stringstream& ss) {
+  FILE* handle = popen(ss.str().c_str(), "r");
+  ASSERT_NE(handle, nullptr);
+  pclose(handle);
+}
+
+class VectorAddFileOnlyTest : public FilePluginTest {
+ protected:
+  virtual void SetUp() {
+    RunApplication("hip_vectoradd", "-o file_test_name");
+  }
+  virtual void TearDown() {
+    std::string filename = "file_test_name";
+    for (const auto& entry : std::experimental::filesystem::directory_iterator("./"))
+      if (std::string(entry.path().filename()).substr(0, filename.size()) == filename)
+        std::experimental::filesystem::remove(entry);
+  }
+  bool hasFile(){ return hasFileInDir("file_test_name", "."); }
+};
+
+TEST_F(VectorAddFileOnlyTest, WhenRunningProfilerWithOnlyOutputFilenameSetTest) {
+  EXPECT_EQ(hasFile(), true);
+}
+
+class VectorAddFolderOnlyTest : public FilePluginTest {
+ protected:
+  virtual void SetUp() {
+    RunApplication("hip_vectoradd", "-d ./plugin_test_folder_path");
+  }
+  virtual void TearDown() { std::experimental::filesystem::remove_all("./plugin_test_folder_path"); }
+  bool hasFile(){ return hasFileInDir("", "./plugin_test_folder_path"); }
+};
+
+TEST_F(VectorAddFolderOnlyTest, WhenRunningProfilerWithOnlyOutputFilenameSetTest) {
+  EXPECT_EQ(hasFile(), true);
+}
+
+class VectorAddFileAndFolderTest : public FilePluginTest {
+ protected:
+  virtual void SetUp() {
+    RunApplication("hip_vectoradd", "-d ./plugin_test_folder_path -o file_test_name");
+  }
+  virtual void TearDown() { std::experimental::filesystem::remove_all("./plugin_test_folder_path"); }
+  bool hasFile(){ return hasFileInDir("file_test_name", "./plugin_test_folder_path"); }
+};
+
+TEST_F(VectorAddFileAndFolderTest, WhenRunningProfilerWithOnlyOutputFilenameSetTest) {
+  EXPECT_EQ(hasFile(), true);
+}
+*/

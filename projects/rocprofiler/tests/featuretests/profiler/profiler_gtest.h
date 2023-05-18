@@ -106,4 +106,26 @@ class ProfilerTest : public ApplicationParser {
  protected:
   virtual void SetUp(const char* app_name) { ApplicationParser::SetUp(app_name); }
 };
+
+/* --------------------------------------------------------------------------*/
+/**
+ * @Synopsis Base class for file plugin tests.
+ * The file test will check wether certain filenames are created.
+ * Currently, file plugin tests only from build as they need to create files.
+ */
+/* --------------------------------------------------------------------------*/
+
+/*
+class FilePluginTest : public ::testing::Test {
+ public:
+  //!< Sets application environment by seting rocprofv2.
+  void RunApplication(const char* app_name, const char* appParams);
+
+  //!< Checks wether a file beginning with "filename" exists in "directory"
+  static bool hasFileInDir(const std::string& filename, const char* directory);
+ private:
+  //!< Runs a given appllication with the hsa activity.
+  void ProcessApplication(std::stringstream& ss);
+}; */
+
 #endif  // TESTS_FEATURETESTS_PROFILER_GTESTS_APPS_PROFILER_GTEST_H_

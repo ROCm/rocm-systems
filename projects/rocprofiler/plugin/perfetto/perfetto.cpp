@@ -97,12 +97,14 @@ class perfetto_plugin_t {
     const char* temp_file_name = getenv("OUT_FILE_NAME");
     output_file_name = temp_file_name ? std::string(temp_file_name) + "_" : "";
 
-    if (output_dir == nullptr) {
+    if (output_dir == nullptr && temp_file_name == nullptr) {
       stream_.copyfmt(std::cout);
       stream_.clear(std::cout.rdstate());
       stream_.basic_ios<char>::rdbuf(std::cout.rdbuf());
       return;
     }
+    if (output_dir == nullptr)
+      output_dir = "./";
 
     output_prefix_ = output_dir;
     if (!fs::is_directory(fs::status(output_prefix_))) {

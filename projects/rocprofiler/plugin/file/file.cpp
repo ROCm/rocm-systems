@@ -77,12 +77,14 @@ class file_plugin_t {
       const char* output_dir = getenv("OUTPUT_PATH");
       output_file_name = getenv("OUT_FILE_NAME") ? std::string(getenv("OUT_FILE_NAME")) + "_" : "";
 
-      if (output_dir == nullptr) {
+      if (output_dir == nullptr && getenv("OUT_FILE_NAME") == nullptr) {
         stream_.copyfmt(std::cout);
         stream_.clear(std::cout.rdstate());
         stream_.basic_ios<char>::rdbuf(std::cout.rdbuf());
         return;
       }
+      if (output_dir == nullptr)
+        output_dir = "./";
 
       fs::path output_prefix(output_dir);
       if (!fs::is_directory(fs::status(output_prefix))) {
