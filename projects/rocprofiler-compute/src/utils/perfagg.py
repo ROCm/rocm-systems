@@ -138,10 +138,12 @@ def join_prof(workload_dir, join_type, log_file, verbose, out=None):
             )
             warnings.warn(msg)
             log_file.write(msg + "\n")
-        if test_df_column_equality(_df) and verbose:
+        else:
             msg = "Successfully joined {} in pmc_perf.csv".format(key)
-            print(msg)
             log_file.write(msg + "\n")
+        if test_df_column_equality(_df) and verbose:
+            print(msg)
+            
 
     # now, we can:
     #   A) throw away any of the "boring" duplicats
