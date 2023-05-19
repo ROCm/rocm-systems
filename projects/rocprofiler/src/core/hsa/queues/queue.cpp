@@ -467,7 +467,7 @@ bool AsyncSignalHandler(hsa_signal_value_t signal_value, void* data) {
         AddRecordCounters(&record, pending);
       }
       record.header = {ROCPROFILER_PROFILER_RECORD,
-                       rocprofiler_record_id_t{pending.kernel_descriptor}};
+                       rocprofiler_record_id_t{GetROCMToolObj()->GetUniqueRecordId()}};
       record.kernel_id = rocprofiler_kernel_id_t{pending.kernel_descriptor};
 
       if (pending.session_id.handle == 0) {
@@ -548,7 +548,7 @@ bool AsyncSignalHandlerATT(hsa_signal_value_t /* signal */, void* data) {
         AddAttRecord(&record, queue_info_session->agent, pending);
       }
       record.header = {ROCPROFILER_ATT_TRACER_RECORD,
-                       rocprofiler_record_id_t{pending.kernel_descriptor}};
+                       rocprofiler_record_id_t{GetROCMToolObj()->GetUniqueRecordId()}};
 
       if (pending.session_id.handle == 0) {
         pending.session_id = GetROCMToolObj()->GetCurrentSessionId();
@@ -684,7 +684,7 @@ void WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t user_pkt
       is_att_collection_mode = true;
       buffer_id = session->GetFilter(session->GetFilterIdWithKind(ROCPROFILER_ATT_TRACE_COLLECTION))
                       ->GetBufferId();
-                      
+
       att_counters_names = filter->GetCounterData();
       kernel_profile_names = std::get<std::vector<std::string>>(filter->GetProperty(ROCPROFILER_FILTER_KERNEL_NAMES));
     } else if (session && session->FindFilterWithKind(ROCPROFILER_PC_SAMPLING_COLLECTION)) {
@@ -705,7 +705,7 @@ void WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t user_pkt
     std::vector<std::pair<rocmtools::profiling_context_t*, hsa_ven_amd_aqlprofile_profile_t*>>*
         profiles = nullptr;
 
-    
+
     // Searching accross all the packets given during this write
     for (size_t i = 0; i < pkt_count; ++i) {
       auto& original_packet = static_cast<const hsa_barrier_and_packet_t*>(packets)[i];
