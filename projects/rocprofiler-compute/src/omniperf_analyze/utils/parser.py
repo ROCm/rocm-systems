@@ -478,7 +478,9 @@ def eval_metric(dfs, dfs_type, sys_info, soc_spec, raw_pmc_df, debug):
     ammolite__numWavesPerCU = sys_info.maxWavesPerCU  # todo: check do we still need it
     ammolite__numSQC = sys_info.numSQC
     ammolite__L2Banks = sys_info.L2Banks
-    ammolite__LDSBanks = soc_spec.LDSBanks # todo: eventually switch this over to sys_info. its a new spec so trying not to break compatibility
+    ammolite__LDSBanks = (
+        soc_spec.LDSBanks
+    )  # todo: eventually switch this over to sys_info. its a new spec so trying not to break compatibility
     ammolite__freq = sys_info.cur_sclk  # todo: check do we still need it
     ammolite__mclk = sys_info.cur_mclk
     ammolite__sclk = sys_info.sclk

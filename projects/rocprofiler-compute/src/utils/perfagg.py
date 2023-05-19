@@ -143,7 +143,6 @@ def join_prof(workload_dir, join_type, log_file, verbose, out=None):
             log_file.write(msg + "\n")
         if test_df_column_equality(_df) and verbose:
             print(msg)
-            
 
     # now, we can:
     #   A) throw away any of the "boring" duplicats
