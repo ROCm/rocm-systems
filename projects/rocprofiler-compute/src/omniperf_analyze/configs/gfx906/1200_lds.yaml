@@ -23,7 +23,7 @@ Panel Config:
             value: AVG(((200 * SQ_ACTIVE_INST_LDS) / (GRBM_GUI_ACTIVE * $numCU)))
             tips: 
           Bandwidth (Pct-of-Peak):
-            value: AVG((((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($L2Banks))
+            value: AVG((((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($LDSBanks))
               / (EndNs - BeginNs)) / (($sclk * $numCU) * 0.00128)))
             tips: 
           Bank Conflict Rate:
@@ -49,11 +49,11 @@ Panel Config:
             unit: (Instr  + $normUnit)
             tips: 
           Bandwidth:
-            avg: AVG(((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($L2Banks))
+            avg: AVG(((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($LDSBanks))
               / $denom))
-            min: MIN(((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($L2Banks))
+            min: MIN(((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($LDSBanks))
               / $denom))
-            max: MAX(((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($L2Banks))
+            max: MAX(((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($LDSBanks))
               / $denom))
             unit: (Bytes  + $normUnit)
             tips: 

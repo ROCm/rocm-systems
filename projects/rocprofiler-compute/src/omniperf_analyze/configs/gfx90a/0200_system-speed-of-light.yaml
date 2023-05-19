@@ -121,11 +121,11 @@ Panel Config:
               / SQ_ACTIVE_INST_ANY))) / 5)
             tips: 
           LDS BW:
-            value: AVG(((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($L2Banks))
+            value: AVG(((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($LDSBanks))
               / (EndNs - BeginNs)))
             unit: GB/sec
             peak: (($sclk * $numCU) * 0.128)
-            pop: AVG((((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($L2Banks))
+            pop: AVG((((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($LDSBanks))
               / (EndNs - BeginNs)) / (($sclk * $numCU) * 0.00128)))
             tips: 
           LDS Bank Conflict:

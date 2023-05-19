@@ -188,7 +188,7 @@ def gen_sysinfo(workload_name, workload_dir, ip_blocks, app_cmd, skip_roof):
     header += "command,"
     header += "host_name,host_cpu,host_distro,host_kernel,host_rocmver,date,"
     header += "gpu_soc,numSE,numCU,numSIMD,waveSize,maxWavesPerCU,maxWorkgroupSize,"
-    header += "L1,L2,sclk,mclk,cur_sclk,cur_mclk,L2Banks,name,numSQC,hbmBW,"
+    header += "L1,L2,sclk,mclk,cur_sclk,cur_mclk,L2Banks,LDSBanks,name,numSQC,hbmBW,"
     header += "ip_blocks\n"
     sysinfo.write(header)
 
@@ -232,11 +232,11 @@ def gen_sysinfo(workload_name, workload_dir, ip_blocks, app_cmd, skip_roof):
     blocks = []
     hbmBW = int(mspec.cur_MCLK) / 1000 * 4096 / 8 * 2
     if mspec.GPU == "gfx906":
-        param += ["16", "mi50", str(int(mspec.CU) // 4), str(hbmBW)]
+        param += ["16", "32", "mi50", str(int(mspec.CU) // 4), str(hbmBW)]
     elif mspec.GPU == "gfx908":
-        param += ["32", "mi100", "48", str(hbmBW)]
+        param += ["32", "32", "mi100", "48", str(hbmBW)]
     elif mspec.GPU == "gfx90a":
-        param += ["32", "mi200", "56", str(hbmBW)]
+        param += ["32", "32", "mi200", "56", str(hbmBW)]
         if not skip_roof:
             blocks.append("roofline")
 

@@ -1,2 +1,2 @@
-name,numSE,numCU,numSIMD,numWavesPerCU,numSQC,L2Banks,Freq,mclk
-mi200,8,110,440,32,56,32,1700,1600
+name,numSE,numCU,numSIMD,numWavesPerCU,numSQC,L2Banks,LDSBanks,Freq,mclk
+mi200,8,110,440,32,56,32,32,1700,1600
