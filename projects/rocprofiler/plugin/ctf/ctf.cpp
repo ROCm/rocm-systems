@@ -38,7 +38,8 @@ rocm_ctf::Plugin* the_plugin = nullptr;
 }  // namespace
 
 ROCPROFILER_EXPORT int rocprofiler_plugin_initialize(const uint32_t rocprofiler_major_version,
-                                                     const uint32_t rocprofiler_minor_version) {
+                                                     const uint32_t rocprofiler_minor_version,
+                                                     void* data) {
   if (rocprofiler_major_version != ROCPROFILER_VERSION_MAJOR ||
       rocprofiler_minor_version < ROCPROFILER_VERSION_MINOR) {
     return -1;

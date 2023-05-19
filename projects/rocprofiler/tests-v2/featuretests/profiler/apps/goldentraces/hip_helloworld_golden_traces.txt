@@ -1,27 +1,4 @@
-0x151a880 agent cpu
-0x152b3b0 agent cpu
-0x15399c0 agent cpu
-0x153b2b0 agent cpu
-0x153cb50 agent gpu
-0x1541730 agent gpu
-0x1593250 agent gpu
-0x1597860 agent gpu
-0x159be40 agent gpu
-0x15a03f0 agent gpu
-0x15a49d0 agent gpu
-0x15a8f80 agent gpu
-5114590922279038
 ROCProfilerV2: Collecting the following counters:
 - GRBM_COUNT
 Enabling Counter Collection
- System minor 0
- System major 9
- agent prop name AMD Instinct MI250X
-input string:
-GdkknVnqkc
-
-output string:
-HelloWorld
-Passed!
-dispatch[1], gpu_id(0), queue_id(1), queue_index(1), pid(798749), tid(798749), grd(10), wgr(10), lds(0), scr(0), arch_vgpr(8), accum_vgpr(0), sgpr(16), wave_size(64), sig(139859309564928), obj(1), kernel-name("helloworld"), start_time(5114591230773903), end_time(5114591230779183)
-, GRBM_COUNT (11181.000000)
+Record_ID(1), GPU_ID(4), Queue_ID(1), Queue_Index(1), Process_ID(1879616), Thread_ID(1879616), Grid_Size(10), Workgroup_Size(10), LDS(0), Scratch_Size(0), Arch_VGPR(8), Accumulative_VGPR(0), SGPR(16), Wave_Size(64), Kernel_Name("helloworld"), Begin_Timestamp(140333224562784), End_Timestamp(140337650854112), GRBM_COUNT(13845.000000)

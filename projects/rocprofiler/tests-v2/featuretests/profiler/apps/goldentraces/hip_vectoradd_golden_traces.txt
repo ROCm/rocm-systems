@@ -1,23 +1,4 @@
-0x13615f0 agent cpu
-0x1372390 agent cpu
-0x13809a0 agent cpu
-0x1382290 agent cpu
-0x1383b30 agent gpu
-0x1388710 agent gpu
-0x13da210 agent gpu
-0x13de820 agent gpu
-0x13e2dc0 agent gpu
-0x13e73d0 agent gpu
-0x13eb970 agent gpu
-0x13eff50 agent gpu
-5114627902273635
 ROCProfilerV2: Collecting the following counters:
 - GRBM_COUNT
 Enabling Counter Collection
- System minor 0
- System major 9
- agent prop name AMD Instinct MI250X
-hip Device prop succeeded
-PASSED!
-dispatch[1], gpu_id(0), queue_id(1), queue_index(0), pid(800143), tid(800143), grd(1048576), wgr(256), lds(0), scr(0), arch_vgpr(8), accum_vgpr(0), sgpr(16), wave_size(64), sig(139723878257408), obj(1), kernel-name("vectoradd_float"), start_time(5114628182351915), end_time(5114628182376715)
-, GRBM_COUNT (29099.000000)
+Record_ID(1), GPU_ID(4), Queue_ID(1), Queue_Index(0), Process_ID(1879580), Thread_ID(1879580), Grid_Size(1048576), Workgroup_Size(256), LDS(0), Scratch_Size(0), Arch_VGPR(8), Accumulative_VGPR(0), SGPR(16), Wave_Size(64), Kernel_Name("vectoradd_float"), Begin_Timestamp(139920974811232), End_Timestamp(139925391173856), GRBM_COUNT(40461.000000)

@@ -40,6 +40,8 @@ THE SOFTWARE.
 #include <memory>
 #include <stdexcept>
 
+#include "utils/test_utils.h"
+
 /* --------------------------------------------------------------------------*/
 /**
  * @Synopsis Implementation of a Parser class for Profiler output
@@ -54,19 +56,6 @@ class ApplicationParser : public ::testing::Test {
  protected:
   virtual void SetUp(const char* app_name) { SetApplicationEnv(app_name); }
   virtual void TearDown() {}
-  //!< This can be appended for other kernel info fields; eg: Agent-Name etc.
-  struct KernelInfo {
-    std::string dispatch_id;
-    std::string gpu_id;
-    std::string queue_id;
-    std::string queue_index;
-    std::string pid;
-    std::string tid;
-    std::string obj;
-    std::string kernel_name;
-    std::string start_time;
-    std::string end_time;
-  };
 
   //!< saves lines of profiler output
   std::vector<std::string> output_lines;
@@ -78,11 +67,11 @@ class ApplicationParser : public ::testing::Test {
   //!< Parses kernel-info from a pre-saved golden out files
   // and saves them in a vector.
   void GetKernelInfoForGoldenOutput(const char* app_name, std::string filename,
-                                    std::vector<KernelInfo>* kernel_info_output);
+                                    std::vector<profiler_kernel_info_t>* kernel_info_output);
 
   //!< Parses kernel-info after running profiler against curent application
   // and saves them in a vector.
-  void GetKernelInfoForRunningApplication(std::vector<KernelInfo>* kernel_info_output);
+  void GetKernelInfoForRunningApplication(std::vector<profiler_kernel_info_t>* kernel_info_output);
 
  private:
   //!< Runs a given appllication and saves profiler output.
@@ -92,7 +81,7 @@ class ApplicationParser : public ::testing::Test {
 
   //!< Parses kernel info fields from given input
   // i.e: kernel_names, kernel_duration
-  void ParseKernelInfoFields(const std::string& s, std::vector<KernelInfo>* kernel_info_output);
+  void ParseKernelInfoFields(const std::string& s, std::vector<profiler_kernel_info_t>* kernel_info_output);
 };
 
 /* --------------------------------------------------------------------------*/

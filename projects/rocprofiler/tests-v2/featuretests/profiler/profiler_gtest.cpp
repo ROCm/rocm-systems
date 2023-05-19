@@ -27,13 +27,13 @@ THE SOFTWARE.
 
 #include "rocprofiler.h"
 #include <cstdlib>
+#include <exception>
 #include <string>
 #include <thread>
 #include <array>
 #include <experimental/filesystem>
 
 #include "src/utils/helper.h"
-#include "utils/test_utils.h"
 #include "utils/csv_parser.h"
 #include "src/utils/logger.h"
 #include "apps/hip_kernels.h"
@@ -106,47 +106,18 @@ void ApplicationParser::SetApplicationEnv(const char* app_name) {
  * and saves them in a vector.
  */
 void ApplicationParser::GetKernelInfoForRunningApplication(
-    std::vector<KernelInfo>* kernel_info_output) {
-  KernelInfo kinfo;
+    std::vector<profiler_kernel_info_t>* kernel_info_output) {
+  profiler_kernel_info_t kinfo;
   for (std::string line : output_lines) {
-    if (std::regex_match(line, std::regex("(dispatch)(.*)"))) {
-      int spos = line.find("[");
-      int epos = line.find("]", spos);
-      std::string sub = line.substr(spos + 1, epos - spos - 1);
-      kinfo.dispatch_id = sub;
-      kernel_info_output->push_back(kinfo);
-
-      // Kernel-Name
-      size_t found = line.find("kernel-name");
-      if (found != std::string::npos) {
-        int spos = found;
-        int epos = line.find(")", spos);
-        int length = std::string("kernel-name").length();
-        std::string sub = line.substr(spos + length + 1, epos - spos - length - 1);
-
-        kinfo.kernel_name = sub;
-        kernel_info_output->push_back(kinfo);
-      }
-      // Start-Time
-      found = line.find("start_time");
-      if (found != std::string::npos) {
-        int spos = found;
-        int epos = line.find(",", spos);
-        int length = std::string("start_time").length();
-        std::string sub = line.substr(spos + length + 1, epos - spos - length - 1);
-        kinfo.start_time = sub;
-        kernel_info_output->push_back(kinfo);
-      }
-      // End-Time
-      found = line.find("end_time");
-      if (found != std::string::npos) {
-        int spos = line.find(",", found);
-        int epos = line.find(")", spos);
-        std::string sub = line.substr(spos + 1, epos - spos - 1);
-        kinfo.end_time = sub;
-        kernel_info_output->push_back(kinfo);
-      }
+    // Skip all the lines until  "Record_ID" is found
+    if (line.empty() || line.find("Record_ID") == std::string::npos) {
+      continue;  // Skip to the next line if "Record_ID" is found
     }
+
+    // Parse individual values and store them in the dispatch struct
+    tokenize_profiler_output(line, kinfo);
+
+    kernel_info_output->push_back(kinfo);
   }
 }
 
@@ -154,8 +125,9 @@ void ApplicationParser::GetKernelInfoForRunningApplication(
  * Parses kernel-names from a pre-saved golden out files
  * and saves them in a vector.
  */
-void ApplicationParser::GetKernelInfoForGoldenOutput(const char* app_name, std::string file_name,
-                                                     std::vector<KernelInfo>* kernel_info_output) {
+void ApplicationParser::GetKernelInfoForGoldenOutput(
+    const char* app_name, std::string file_name,
+    std::vector<profiler_kernel_info_t>* kernel_info_output) {
   std::string entry;
   std::string path = GetRunningPath(running_path);
   entry = path.append(golden_trace_path) + file_name;
@@ -195,52 +167,21 @@ void ApplicationParser::ProcessApplication(std::stringstream& ss) {
  * Parses kernel-info for golden output file
  * and saves them in a vector.
  */
-void ApplicationParser::ParseKernelInfoFields(const std::string& s,
-                                              std::vector<KernelInfo>* kernel_info_output) {
+void ApplicationParser::ParseKernelInfoFields(
+    const std::string& s, std::vector<profiler_kernel_info_t>* kernel_info_output) {
   std::string line;
-  KernelInfo kinfo;
+  profiler_kernel_info_t kinfo;
 
   std::ifstream golden_file(s);
   while (!golden_file.eof()) {
     getline(golden_file, line);
-    if (std::regex_match(line, std::regex("(dispatch)(.*)"))) {
-      int spos = line.find("[");
-      int epos = line.find("]", spos);
-      std::string sub = line.substr(spos + 1, epos - spos - 1);
-      kinfo.dispatch_id = sub;
-      kernel_info_output->push_back(kinfo);
-
-      // Kernel-Name
-      size_t found = line.find("kernel-name");
-      if (found != std::string::npos) {
-        int spos = found;
-        int epos = line.find(")", spos);
-        int length = std::string("kernel-name").length();
-        std::string sub = line.substr(spos + length + 1, epos - spos - length - 1);
-
-        kinfo.kernel_name = sub;
-        kernel_info_output->push_back(kinfo);
-      }
-      // Start-Time
-      found = line.find("start_time");
-      if (found != std::string::npos) {
-        int spos = found;
-        int epos = line.find(",", spos);
-        int length = std::string("start_time").length();
-        std::string sub = line.substr(spos + length + 1, epos - spos - length - 1);
-        kinfo.start_time = sub;
-        kernel_info_output->push_back(kinfo);
-      }
-      // End-Time
-      found = line.find("end_time");
-      if (found != std::string::npos) {
-        int spos = line.find(",", found);
-        int epos = line.find(")", spos);
-        std::string sub = line.substr(spos + 1, epos - spos - 1);
-        kinfo.end_time = sub;
-        kernel_info_output->push_back(kinfo);
-      }
+    // Skip all the lines until  "Record_ID" is found
+    if (line.empty() || line.find("Record_ID") == std::string::npos) {
+      continue;  // Skip to the next line if "Record_ID" is found
     }
+    // Parse individual values and store them in the dispatch struct
+    tokenize_profiler_output(line, kinfo);
+    kernel_info_output->push_back(kinfo);
   }
   golden_file.close();
 }
@@ -260,7 +201,7 @@ constexpr auto kGoldenOutputMpi = "mpi_vectoradd_golden_traces.txt";
 
 class HelloWorldTest : public ProfilerTest {
  protected:
-  std::vector<KernelInfo> golden_kernel_info;
+  std::vector<profiler_kernel_info_t> golden_kernel_info;
   void SetUp() {
     ProfilerTest::SetUp("hip_helloworld");
     GetKernelInfoForGoldenOutput("hip_helloworld", kGoldenOutputHelloworld, &golden_kernel_info);
@@ -271,7 +212,7 @@ class HelloWorldTest : public ProfilerTest {
 // profiler output
 TEST_F(HelloWorldTest, WhenRunningProfilerWithAppThenKernelNumbersMatchWithGoldenOutput) {
   // kernel info in current profiler run
-  std::vector<KernelInfo> current_kernel_info;
+  std::vector<profiler_kernel_info_t> current_kernel_info;
 
   GetKernelInfoForRunningApplication(&current_kernel_info);
   ASSERT_TRUE(current_kernel_info.size());
@@ -283,20 +224,19 @@ TEST_F(HelloWorldTest, WhenRunningProfilerWithAppThenKernelNumbersMatchWithGolde
 // profiler output
 TEST_F(HelloWorldTest, WhenRunningProfilerWithAppThenKernelNamessMatchWithGoldenOutput) {
   // kernel info in current profiler run
-  std::vector<KernelInfo> current_kernel_info;
+  std::vector<profiler_kernel_info_t> current_kernel_info;
   GetKernelInfoForRunningApplication(&current_kernel_info);
 
   ASSERT_TRUE(current_kernel_info.size());
-
+  ASSERT_TRUE(golden_kernel_info.size());
   EXPECT_EQ(golden_kernel_info[0].kernel_name, current_kernel_info[0].kernel_name);
-  EXPECT_EQ(golden_kernel_info[1].kernel_name, current_kernel_info[1].kernel_name);
 }
 
 // Test:3 Compares order of kernel-names in golden output against current
 // profiler output
 TEST_F(HelloWorldTest, WhenRunningProfilerWithAppThenKernelDurationShouldBePositive) {
   // kernel info in current profiler run
-  std::vector<KernelInfo> current_kernel_info;
+  std::vector<profiler_kernel_info_t> current_kernel_info;
 
   GetKernelInfoForRunningApplication(&current_kernel_info);
   ASSERT_TRUE(current_kernel_info.size());
@@ -308,14 +248,14 @@ TEST_F(HelloWorldTest, WhenRunningProfilerWithAppThenKernelDurationShouldBePosit
 // profiler output
 TEST_F(HelloWorldTest, WhenRunningProfilerWithAppThenEndTimeIsGreaterThenStartTime) {
   // kernel info in current profiler run
-  std::vector<KernelInfo> current_kernel_info;
+  std::vector<profiler_kernel_info_t> current_kernel_info;
 
   GetKernelInfoForRunningApplication(&current_kernel_info);
   ASSERT_TRUE(current_kernel_info.size());
 
   for (auto& itr : current_kernel_info) {
-    if (!(itr.start_time).empty() && !(itr.end_time).empty()) {
-      EXPECT_GT(itr.end_time, itr.start_time);
+    if (!(itr.begin_time).empty() && !(itr.end_time).empty()) {
+      EXPECT_GT(itr.end_time, itr.begin_time);
     }
   }
 }
@@ -328,7 +268,7 @@ TEST_F(HelloWorldTest, WhenRunningProfilerWithAppThenEndTimeIsGreaterThenStartTi
 
 class VectorAddTest : public ProfilerTest {
  protected:
-  std::vector<KernelInfo> golden_kernel_info;
+  std::vector<profiler_kernel_info_t> golden_kernel_info;
   void SetUp() {
     ProfilerTest::SetUp("hip_vectoradd");
     GetKernelInfoForGoldenOutput("hip_vectoradd", kGoldenOutputVectorAdd, &golden_kernel_info);
@@ -338,7 +278,7 @@ class VectorAddTest : public ProfilerTest {
 // Test:1 Compares total num of kernel-names in golden output against current
 // profiler output
 TEST_F(VectorAddTest, WhenRunningProfilerWithAppThenKernelNumbersMatchWithGoldenOutput) {
-  std::vector<KernelInfo> current_kernel_info;
+  std::vector<profiler_kernel_info_t> current_kernel_info;
 
   GetKernelInfoForRunningApplication(&current_kernel_info);
   ASSERT_TRUE(current_kernel_info.size());
@@ -349,20 +289,20 @@ TEST_F(VectorAddTest, WhenRunningProfilerWithAppThenKernelNumbersMatchWithGolden
 // Test:2 Compares order of kernel-names in golden output against current
 // profiler output
 TEST_F(VectorAddTest, WhenRunningProfilerWithAppThenKernelNamessMatchWithGoldenOutput) {
-  std::vector<KernelInfo> current_kernel_info;
+  std::vector<profiler_kernel_info_t> current_kernel_info;
 
   GetKernelInfoForRunningApplication(&current_kernel_info);
   ASSERT_TRUE(current_kernel_info.size());
+  ASSERT_TRUE(golden_kernel_info.size());
 
   EXPECT_EQ(golden_kernel_info[0].kernel_name, current_kernel_info[0].kernel_name);
-  EXPECT_EQ(golden_kernel_info[1].kernel_name, current_kernel_info[1].kernel_name);
 }
 
 // Test:3 Compares order of kernel-names in golden output against current
 // profiler output
 TEST_F(VectorAddTest, WhenRunningProfilerWithAppThenKernelDurationShouldBePositive) {
   // kernel info in current profiler run
-  std::vector<KernelInfo> current_kernel_info;
+  std::vector<profiler_kernel_info_t> current_kernel_info;
 
   GetKernelInfoForRunningApplication(&current_kernel_info);
   ASSERT_TRUE(current_kernel_info.size());
@@ -374,14 +314,14 @@ TEST_F(VectorAddTest, WhenRunningProfilerWithAppThenKernelDurationShouldBePositi
 // profiler output
 TEST_F(VectorAddTest, WhenRunningProfilerWithAppThenEndTimeIsGreaterThenStartTime) {
   // kernel info in current profiler run
-  std::vector<KernelInfo> current_kernel_info;
+  std::vector<profiler_kernel_info_t> current_kernel_info;
 
   GetKernelInfoForRunningApplication(&current_kernel_info);
   ASSERT_TRUE(current_kernel_info.size());
 
   for (auto& itr : current_kernel_info) {
-    if (!(itr.start_time).empty() && !(itr.end_time).empty()) {
-      EXPECT_GT(itr.end_time, itr.start_time);
+    if (!(itr.begin_time).empty() && !(itr.end_time).empty()) {
+      EXPECT_GT(itr.end_time, itr.begin_time);
     }
   }
 }
@@ -394,7 +334,7 @@ TEST_F(VectorAddTest, WhenRunningProfilerWithAppThenEndTimeIsGreaterThenStartTim
 
 class HSATest : public ProfilerTest {
  protected:
-  std::vector<KernelInfo> golden_kernel_info;
+  std::vector<profiler_kernel_info_t> golden_kernel_info;
   void SetUp() {
     ProfilerTest::SetUp("hsa_async_mem_copy");
     GetKernelInfoForGoldenOutput("hsa_async_mem_copy", kGOldenOutputAsyncCopy, &golden_kernel_info);
@@ -405,7 +345,7 @@ class HSATest : public ProfilerTest {
 // we dont collect any counters by default. Expectation is, both vectors are
 // empty
 TEST_F(HSATest, WhenRunningProfilerWithAppThenKernelNumbersMatchWithGoldenOutput) {
-  std::vector<KernelInfo> current_kernel_info;
+  std::vector<profiler_kernel_info_t> current_kernel_info;
 
   GetKernelInfoForRunningApplication(&current_kernel_info);
 
@@ -423,7 +363,7 @@ TEST_F(HSATest, WhenRunningProfilerWithAppThenKernelNumbersMatchWithGoldenOutput
 
 class OpenMPTest : public ProfilerTest {
  protected:
-  std::vector<KernelInfo> golden_kernel_info;
+  std::vector<profiler_kernel_info_t> golden_kernel_info;
   void SetUp() {
     ProfilerTest::SetUp("openmp_helloworld");
     GetKernelInfoForGoldenOutput("openmp_helloworld", kGoldenOutputOpenMP, &golden_kernel_info);
@@ -433,7 +373,7 @@ class OpenMPTest : public ProfilerTest {
 // Test:1 Compares total num of kernel-names in golden output against current
 // profiler output
 TEST_F(OpenMPTest, WhenRunningProfilerWithAppThenKernelNumbersMatchWithGoldenOutput) {
-  std::vector<KernelInfo> current_kernel_info;
+  std::vector<profiler_kernel_info_t> current_kernel_info;
 
   GetKernelInfoForRunningApplication(&current_kernel_info);
   ASSERT_TRUE(current_kernel_info.size());
@@ -444,7 +384,7 @@ TEST_F(OpenMPTest, WhenRunningProfilerWithAppThenKernelNumbersMatchWithGoldenOut
 // Test:2 Compares order of kernel-names in golden output against current
 // profiler output
 TEST_F(OpenMPTest, WhenRunningProfilerWithAppThenKernelNamessMatchWithGoldenOutput) {
-  std::vector<KernelInfo> current_kernel_info;
+  std::vector<profiler_kernel_info_t> current_kernel_info;
 
   GetKernelInfoForRunningApplication(&current_kernel_info);
   ASSERT_TRUE(current_kernel_info.size());
@@ -457,7 +397,7 @@ TEST_F(OpenMPTest, WhenRunningProfilerWithAppThenKernelNamessMatchWithGoldenOutp
 // profiler output
 TEST_F(OpenMPTest, WhenRunningProfilerWithAppThenKernelDurationShouldBePositive) {
   // kernel info in current profiler run
-  std::vector<KernelInfo> current_kernel_info;
+  std::vector<profiler_kernel_info_t> current_kernel_info;
 
   GetKernelInfoForRunningApplication(&current_kernel_info);
   ASSERT_TRUE(current_kernel_info.size());
@@ -469,14 +409,14 @@ TEST_F(OpenMPTest, WhenRunningProfilerWithAppThenKernelDurationShouldBePositive)
 // profiler output
 TEST_F(OpenMPTest, WhenRunningProfilerWithAppThenEndTimeIsGreaterThenStartTime) {
   // kernel info in current profiler run
-  std::vector<KernelInfo> current_kernel_info;
+  std::vector<profiler_kernel_info_t> current_kernel_info;
 
   GetKernelInfoForRunningApplication(&current_kernel_info);
   ASSERT_TRUE(current_kernel_info.size());
 
   for (auto& itr : current_kernel_info) {
     if (!(itr.end_time).empty()) {
-      EXPECT_GT(itr.end_time, itr.start_time);
+      EXPECT_GT(itr.end_time, itr.begin_time);
     }
   }
 }
@@ -543,7 +483,7 @@ void MPITest::ExecuteAndParseApplication(std::stringstream& ss) {
 // Test:1 Compares total num of kernel-names in golden output against current
 // profiler output
 TEST_F(MPITest, WhenRunningProfilerWithAppThenKernelNumbersMatchWithGoldenOutput) {
-  std::vector<KernelInfo> current_kernel_info;
+  std::vector<profiler_kernel_info_t> current_kernel_info;
 
   GetKernelInfoForRunningApplication(&current_kernel_info);
   ASSERT_TRUE(current_kernel_info.size());
@@ -770,13 +710,13 @@ class ProfilerAPITest : public ::testing::Test {
         CheckApi(rocprofiler_query_kernel_info(ROCPROFILER_KERNEL_NAME, profiler_record->kernel_id,
                                                &kernel_name_c));
         // int gpu_index = profiler_record->gpu_id.handle;
-        // uint64_t start_time = profiler_record->timestamps.begin.value;
+        // uint64_t begin_time = profiler_record->timestamps.begin.value;
         // uint64_t end_time = profiler_record->timestamps.end.value;
         // printf(
         //     "Kernel Info:\n\tGPU Index: %d\n\tKernel Name: %s\n\tStart "
         //     "Time: "
         //     "%lu\n\tEnd Time: %lu\n",
-        //     gpu_index, kernel_name_c, start_time, end_time);
+        //     gpu_index, kernel_name_c, begin_time, end_time);
       }
       CheckApi(rocprofiler_next_record(record, &record, session_id, buffer_id));
     }
@@ -1173,33 +1113,34 @@ TEST(ProfilerMPTest, WhenRunningMultiProcessTestItPasses) {
 //   bool hasFile() { return hasFileInDir("file_test_name", "."); }
 // };
 
-// TEST_F(VectorAddFileOnlyTest, WhenRunningProfilerWithFilePluginTest) { EXPECT_EQ(hasFile(), true); }
+// TEST_F(VectorAddFileOnlyTest, WhenRunningProfilerWithFilePluginTest) { EXPECT_EQ(hasFile(),
+// true); }
 
 // class VectorAddFolderOnlyTest : public FilePluginTest {
 //  protected:
 //   virtual void SetUp() {
-//     RunApplication("hip_vectoradd", " --hsa-activity --hip-activity -d ./plugin_test_folder_path");
+//     RunApplication("hip_vectoradd", " --hsa-activity --hip-activity -d
+//     ./plugin_test_folder_path");
 //   }
 //   virtual void TearDown() {
-//     std::experimental::filesystem::remove_all("./plugin_test_folder_path");
-//   }
-//   bool hasFile() { return hasFileInDir("", "./plugin_test_folder_path"); }
+//   std::experimental::filesystem::remove_all("./plugin_test_folder_path");
+// } bool hasFile(){ return hasFileInDir("", "./plugin_test_folder_path"); }
 // };
 
 // TEST_F(VectorAddFolderOnlyTest, WhenRunningProfilerWithFilePluginTest) {
 //   EXPECT_EQ(hasFile(), true);
 // }
 
+
 // class VectorAddFileAndFolderTest : public FilePluginTest {
 //  protected:
 //   virtual void SetUp() {
-//     RunApplication("hip_vectoradd",
-//                    " --hip-activity -d ./plugin_test_folder_path -o file_test_name");
+//     RunApplication("hip_vectoradd", " --hip-activity -d ./plugin_test_folder_path -o
+// file_test_name");
 //   }
 //   virtual void TearDown() {
-//     std::experimental::filesystem::remove_all("./plugin_test_folder_path");
-//   }
-//   bool hasFile() { return hasFileInDir("file_test_name", "./plugin_test_folder_path"); }
+//   std::experimental::filesystem::remove_all("./plugin_test_folder_path");
+// } bool hasFile(){ return hasFileInDir("file_test_name", "./plugin_test_folder_path"); }
 // };
 
 // TEST_F(VectorAddFileAndFolderTest, WhenRunningProfilerWithFilePluginTest) {
@@ -1210,7 +1151,8 @@ TEST(ProfilerMPTest, WhenRunningMultiProcessTestItPasses) {
 //  protected:
 //   virtual void SetUp() {
 //     setenv("MPI_RANK", "7", true);
-//     RunApplication("hip_vectoradd", " --hip-activity -d ./plugin_test_folder_path -o test_%rank_");
+//     RunApplication("hip_vectoradd", " --hip-activity -d ./plugin_test_folder_path -o
+//     test_%rank_");
 //   }
 //   virtual void TearDown() {
 //     std::experimental::filesystem::remove_all("./plugin_test_folder_path");
@@ -1238,14 +1180,14 @@ TEST(ProfilerMPTest, WhenRunningMultiProcessTestItPasses) {
 //  protected:
 //   virtual void SetUp() {
 //     setenv("MPI_RANK", "7", true);
-//     RunApplication("hip_vectoradd",
-//                    " -d ./plugin_test_folder_path -o test_%rank_ --plugin perfetto");
+//     RunApplication("hip_vectoradd", " -d ./plugin_test_folder_path -o test_%rank_ --plugin
+// perfetto");
 //   }
 //   virtual void TearDown() {
 //     std::experimental::filesystem::remove_all("./plugin_test_folder_path");
 //     unsetenv("MPI_RANK");
 //   }
-//   bool hasFile() { return hasFileInDir("test_7_", "./plugin_test_folder_path"); }
+//   bool hasFile(){ return hasFileInDir("test_7_", "./plugin_test_folder_path"); }
 // };
 
 // TEST_F(VectorAddPerfettoMPITest, WhenRunningProfilerWithPerfettoTest) {

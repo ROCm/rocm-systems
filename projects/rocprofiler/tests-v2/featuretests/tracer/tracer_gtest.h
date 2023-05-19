@@ -32,6 +32,7 @@ THE SOFTWARE.
 #include <sstream>
 #include <string>
 #include <vector>
+#include "../utils/test_utils.h"
 
 /* --------------------------------------------------------------------------*/
 /**
@@ -50,15 +51,6 @@ class ApplicationParser : public ::testing::Test {
   }
   virtual void TearDown() {}
   //!< This can be appended for other kernel info fields; eg: Agent-Name etc.
-  struct KernelInfo {
-    std::string record_id;
-    std::string domain;
-    std::string begin_time;
-    std::string end_time;
-    std::string corelation_id;
-    std::string roctx_id;
-    std::string function;
-  };
 
   //!< saves lines of tracer output
   std::vector<std::string> output_lines;
@@ -70,11 +62,11 @@ class ApplicationParser : public ::testing::Test {
   //!< Parses kernel-info from a pre-saved golden out files
   // and saves them in a vector.
   void GetKernelInfoForGoldenOutput(const char* app_name, std::string filename,
-                                    std::vector<KernelInfo>* kernel_info_output);
+                                    std::vector<tracer_kernel_info_t>* kernel_info_output);
 
   //!< Parses kernel-info after running tracer against curent application
   // and saves them in a vector.
-  void GetKernelInfoForRunningApplication(std::vector<KernelInfo>* kernel_info_output);
+  void GetKernelInfoForRunningApplication(std::vector<tracer_kernel_info_t>* kernel_info_output);
 
  private:
   //!< Runs a given appllication and saves tracer output.
@@ -84,7 +76,8 @@ class ApplicationParser : public ::testing::Test {
 
   //!< Parses kernel info fields from given input
   // i.e: kernel_names, kernel_duration
-  void ParseKernelInfoFields(const std::string& s, std::vector<KernelInfo>* kernel_info_output);
+  void ParseKernelInfoFields(const std::string& s,
+                             std::vector<tracer_kernel_info_t>* kernel_info_output);
 };
 
 /* --------------------------------------------------------------------------*/

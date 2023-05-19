@@ -79,9 +79,10 @@ class att_plugin_t {
     CHECK_ROCPROFILER(rocprofiler_query_kernel_info(ROCPROFILER_KERNEL_NAME,
                                                     att_tracer_record->kernel_id, &kernel_name_c));
 
-    std::string name_demangled = rocprofiler::truncate_name(rocprofiler::cxx_demangle(kernel_name_c));
+    std::string name_demangled =
+        rocprofiler::truncate_name(rocprofiler::cxx_demangle(kernel_name_c));
 
-    if (name_demangled.size() > ATT_FILENAME_MAXBYTES) { // Limit filename size
+    if (name_demangled.size() > ATT_FILENAME_MAXBYTES) {  // Limit filename size
       name_demangled = name_demangled.substr(0, ATT_FILENAME_MAXBYTES);
     }
 
@@ -167,7 +168,8 @@ att_plugin_t* att_plugin = nullptr;
 }  // namespace
 
 ROCPROFILER_EXPORT int rocprofiler_plugin_initialize(uint32_t rocprofiler_major_version,
-                                                     uint32_t rocprofiler_minor_version) {
+                                                     uint32_t rocprofiler_minor_version,
+                                                     void* data) {
   if (rocprofiler_major_version != ROCPROFILER_VERSION_MAJOR ||
       rocprofiler_minor_version < ROCPROFILER_VERSION_MINOR)
     return -1;

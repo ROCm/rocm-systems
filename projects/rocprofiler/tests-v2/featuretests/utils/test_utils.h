@@ -29,6 +29,7 @@ THE SOFTWARE.
 #include <algorithm>
 #include <cstdlib>
 #include <fstream>
+#include <sstream>
 #include <iostream>
 #include <iterator>
 #include <string>
@@ -37,13 +38,54 @@ namespace rocprofiler {
 namespace tests {
 namespace utility {
 
+typedef struct {
+  std::string record_id;
+  std::string gpu_id;
+  std::string queue_id;
+  std::string queue_index;
+  std::string process_id;
+  std::string thread_id;
+  std::string grid_size;
+  std::string workgroup_size;
+  std::string lds;
+  std::string scratch_size;
+  std::string arch_vgpr;
+  std::string accum_vgpr;
+  std::string sgpr;
+  std::string wave_size;
+  std::string kernel_name;
+  std::string begin_time;
+  std::string end_time;
+  std::string counter;
+} profiler_kernel_info_t;
+
+typedef struct {
+  std::string record_id;
+  std::string domain;
+  std::string function;
+  std::string operation;
+  std::string kernel_name;
+  std::string begin_time;
+  std::string end_time;
+  std::string corelation_id;
+  std::string roctx_id;
+  std::string roxtx_msg;
+} tracer_kernel_info_t;
+
 // Get current running path
 std::string GetRunningPath(std::string string_to_erase);
 
 // Get Number of cores in the system
 int GetNumberOfCores();
 
+// Check if running path is /opt/rocm or not
 bool is_installed_path();
+
+// tokenize profiler output
+void tokenize_profiler_output(std::string line, profiler_kernel_info_t& kinfo);
+
+// tokenize tracer output
+void tokenize_tracer_output(std::string line, tracer_kernel_info_t& kinfo);
 
 }  // namespace utility
 }  // namespace tests
@@ -56,5 +98,9 @@ int main(int argc, char** argv);
 using rocprofiler::tests::utility::GetNumberOfCores;
 using rocprofiler::tests::utility::GetRunningPath;
 using rocprofiler::tests::utility::is_installed_path;
+using rocprofiler::tests::utility::profiler_kernel_info_t;
+using rocprofiler::tests::utility::tokenize_profiler_output;
+using rocprofiler::tests::utility::tokenize_tracer_output;
+using rocprofiler::tests::utility::tracer_kernel_info_t;
 
 #endif  // TESTS_FEATURETESTS_PROFILER_UTILS_TEST_UTILS_H_

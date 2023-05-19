@@ -1,14 +1,11 @@
-0x1fd8190 agent cpu
-0x1fd8ee0 agent gpu
-1124305956573108
 Enabling API Tracing
-Record(2), Domain(HIP_API_DOMAIN), Function(hipGetDeviceProperties), Begin(140736506355256), End(1124305958759521), Correlation_ID(1)
-Record(4), Domain(HIP_API_DOMAIN), Function(hipMalloc), Begin(140736506355256), End(1124305958873631), Correlation_ID(2)
-Record(6), Domain(HIP_API_DOMAIN), Function(hipMalloc), Begin(140736506355256), End(1124305958880271), Correlation_ID(3)
-Record(8), Domain(HIP_API_DOMAIN), Function(hipMemcpy), Begin(140736506355256), End(1124306216889435), Correlation_ID(4)
-Record(10), Domain(HIP_API_DOMAIN), Function(__hipPushCallConfiguration), Begin(140736506355256), End(1124306216895505), Correlation_ID(5)
-Record(12), Domain(HIP_API_DOMAIN), Function(__hipPopCallConfiguration), Begin(140736506355256), End(1124306216897125), Correlation_ID(6)
-Record(14), Domain(HIP_API_DOMAIN), Function(hipLaunchKernel), Kernel_Name(helloworld(char*, char*)), Begin(140736506355240), End(1124306217234255), Correlation_ID(7)
-Record(16), Domain(HIP_API_DOMAIN), Function(hipMemcpy), Begin(140736506355256), End(1124306217720846), Correlation_ID(8)
-Record(18), Domain(HIP_API_DOMAIN), Function(hipFree), Begin(140736506355272), End(1124306217730836), Correlation_ID(9)
-Record(20), Domain(HIP_API_DOMAIN), Function(hipFree), Begin(140736506355272), End(1124306217734156), Correlation_ID(10)
+Record_ID(2), Domain(HIP_API_DOMAIN), Function(hipGetDeviceProperties), Start_Timestamp(611510516147389), End_Timestamp(611510516154633), Correlation_ID(1)
+Record_ID(4), Domain(HIP_API_DOMAIN), Function(hipMalloc), Start_Timestamp(611510516160324), End_Timestamp(611510516183168), Correlation_ID(2)
+Record_ID(6), Domain(HIP_API_DOMAIN), Function(hipMalloc), Start_Timestamp(611510516183599), End_Timestamp(611510516189250), Correlation_ID(3)
+Record_ID(8), Domain(HIP_API_DOMAIN), Function(hipMemcpy), Start_Timestamp(611510516192225), End_Timestamp(611510784335292), Correlation_ID(4)
+Record_ID(10), Domain(HIP_API_DOMAIN), Function(__hipPushCallConfiguration), Start_Timestamp(611510784338909), End_Timestamp(611510784341915), Correlation_ID(5)
+Record_ID(12), Domain(HIP_API_DOMAIN), Function(__hipPopCallConfiguration), Start_Timestamp(611510784343228), End_Timestamp(611510784343538), Correlation_ID(6)
+Record_ID(14), Domain(HIP_API_DOMAIN), Function(hipLaunchKernel), Kernel_Name(helloworld(char*, char*)), Start_Timestamp(611510784351053), End_Timestamp(611510784872311), Correlation_ID(7)
+Record_ID(16), Domain(HIP_API_DOMAIN), Function(hipMemcpy), Start_Timestamp(611510784873914), End_Timestamp(611510784891167), Correlation_ID(8)
+Record_ID(18), Domain(HIP_API_DOMAIN), Function(hipFree), Start_Timestamp(611510784893482), End_Timestamp(611510784902690), Correlation_ID(9)
+Record_ID(20), Domain(HIP_API_DOMAIN), Function(hipFree), Start_Timestamp(611510784904944), End_Timestamp(611510784907128), Correlation_ID(10)

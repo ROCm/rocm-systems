@@ -23,7 +23,7 @@ THE SOFTWARE.
 #include <ostream>
 #include <vector>
 #include "tracer_gtest.h"
-#include "../utils/test_utils.h"
+
 
 /**
  * Sets application enviornment by seting HSA_TOOLS_LIB.
@@ -72,40 +72,16 @@ void ApplicationParser::SetApplicationEnv(const char* app_name, const char* trac
  * and saves them in a vector.
  */
 void ApplicationParser::GetKernelInfoForRunningApplication(
-    std::vector<KernelInfo>* kernel_info_output) {
-  KernelInfo kinfo;
+    std::vector<tracer_kernel_info_t>* kernel_info_output) {
+  tracer_kernel_info_t kinfo;
   for (std::string line : output_lines) {
-    // if (std::regex_match(line, std::regex("(Record)(.*)"))) {
-    // Record id
-    size_t found = line.find("Record");
-    if (found != std::string::npos) {
-      int spos = found;
-      int epos = line.find(")", spos);
-      int length = std::string("Record").length();
-      std::string sub = line.substr(spos + length + 1, epos - spos - length - 1);
-
-      kinfo.record_id = sub;
+    // Skip all the lines until  "_DOMAIN" is found
+    if (line.empty() || line.find("_DOMAIN") == std::string::npos) {
+      continue;  // Skip to the next line if "Dispatch_ID" is found
     }
 
-    // Kernel-Name
-    found = line.find("Function");
-    if (found != std::string::npos) {
-      int spos = found;
-      int epos = line.find(")", spos);
-      int length = std::string("Function").length();
-      std::string sub = line.substr(spos + length + 1, epos - spos - length - 1);
-      kinfo.function = sub;
-    }
-
-    // corelation-ids
-    found = line.find("Correlation_ID");
-    if (found != std::string::npos) {
-      int spos = found;
-      int epos = line.find(")", spos);
-      int length = std::string("Correlation_ID").length();
-      std::string sub = line.substr(spos + length + 1, epos - spos - length - 1);
-      kinfo.corelation_id = sub;
-    }
+    // Parse individual values and store them in the dispatch struct
+    tokenize_tracer_output(line, kinfo);
 
     if (kinfo.record_id != "") {
       kernel_info_output->push_back(kinfo);
@@ -117,8 +93,9 @@ void ApplicationParser::GetKernelInfoForRunningApplication(
  * Parses kernel-names from a pre-saved golden out files
  * and saves them in a vector.
  */
-void ApplicationParser::GetKernelInfoForGoldenOutput(const char* app_name, std::string file_name,
-                                                     std::vector<KernelInfo>* kernel_info_output) {
+void ApplicationParser::GetKernelInfoForGoldenOutput(
+    const char* app_name, std::string file_name,
+    std::vector<tracer_kernel_info_t>* kernel_info_output) {
   std::string entry;
   std::string path = GetRunningPath("runTracerFeatureTests");
   entry = path.append("apps/goldentraces/") + file_name;
@@ -159,51 +136,22 @@ void ApplicationParser::ProcessApplication(std::stringstream& ss) {
  * Parses kernel-info for golden output file
  * and saves them in a vector.
  */
-void ApplicationParser::ParseKernelInfoFields(const std::string& s,
-                                              std::vector<KernelInfo>* kernel_info_output) {
+void ApplicationParser::ParseKernelInfoFields(
+    const std::string& s, std::vector<tracer_kernel_info_t>* kernel_info_output) {
   std::string line;
-  KernelInfo kinfo;
+  tracer_kernel_info_t kinfo;
 
   std::ifstream golden_file(s);
   while (!golden_file.eof()) {
     getline(golden_file, line);
-    // if (std::regex_match(line, std::regex("(Record)(.*)"))) {
-    // Record id
-    size_t found = line.find("Record");
-    if (found != std::string::npos) {
-      int spos = found;
-      int epos = line.find(")", spos);
-      int length = std::string("Record").length();
-      std::string sub = line.substr(spos + length + 1, epos - spos - length - 1);
-
-      kinfo.record_id = sub;
-      // kernel_info_output->push_back(kinfo);
+    // Skip all the lines until  "_DOMAIN" is found
+    if (line.empty() || line.find("_DOMAIN") == std::string::npos) {
+      continue;  // Skip to the next line if "Dispatch_ID" is found
     }
 
-    // Kernel-Name
-    found = line.find("Function");
-    if (found != std::string::npos) {
-      int spos = found;
-      int epos = line.find(")", spos);
-      int length = std::string("Function").length();
-      std::string sub = line.substr(spos + length + 1, epos - spos - length - 1);
+    // Parse individual values and store them in the dispatch struct
+    tokenize_tracer_output(line, kinfo);
 
-      kinfo.function = sub;
-      // kernel_info_output->push_back(kinfo);
-    }
-
-    // corealtion-ids
-    found = line.find("Correlation_ID");
-    if (found != std::string::npos) {
-      int spos = found;
-      int epos = line.find(")", spos);
-      int length = std::string("Correlation_ID").length();
-      std::string sub = line.substr(spos + length + 1, epos - spos - length - 1);
-
-      kinfo.corelation_id = sub;
-      // kernel_info_output->push_back(kinfo);
-    }
-    //}
     if (kinfo.record_id != "") {
       kernel_info_output->push_back(kinfo);
     }
@@ -220,7 +168,7 @@ constexpr auto kGoldenOutputHelloworld = "hip_helloworld_golden_traces.txt";
 
 class HelloWorldTest : public Tracertest {
  protected:
-  std::vector<KernelInfo> golden_kernel_info;
+  std::vector<tracer_kernel_info_t> golden_kernel_info;
   void SetUp() {
     Tracertest::SetUp("tracer_hip_helloworld", "--hip-api ");
     GetKernelInfoForGoldenOutput("tracer_hip_helloworld", kGoldenOutputHelloworld,
@@ -233,7 +181,7 @@ class HelloWorldTest : public Tracertest {
 // tracer output
 TEST_F(HelloWorldTest, WhenRunningTracerWithAppThenKernelInfoMatchWithGoldenOutput) {
   // kernel info in current profler run
-  std::vector<KernelInfo> current_kernel_info;
+  std::vector<tracer_kernel_info_t> current_kernel_info;
 
   GetKernelInfoForRunningApplication(&current_kernel_info);
   ASSERT_TRUE(current_kernel_info.size());
@@ -245,7 +193,7 @@ TEST_F(HelloWorldTest, WhenRunningTracerWithAppThenKernelInfoMatchWithGoldenOutp
 // tracer output
 TEST_F(HelloWorldTest, WhenRunningTracerWithAppThenFunctionNamessMatchWithGoldenOutput) {
   // kernel info in current tracer run
-  std::vector<KernelInfo> current_kernel_info;
+  std::vector<tracer_kernel_info_t> current_kernel_info;
   GetKernelInfoForRunningApplication(&current_kernel_info);
 
   ASSERT_TRUE(current_kernel_info.size());
@@ -258,7 +206,7 @@ TEST_F(HelloWorldTest, WhenRunningTracerWithAppThenFunctionNamessMatchWithGolden
 // tracer output
 TEST_F(HelloWorldTest, WhenRunningTracerWithAppThenKernelDurationShouldBePositive) {
   // kernel info in current tracer run
-  std::vector<KernelInfo> current_kernel_info;
+  std::vector<tracer_kernel_info_t> current_kernel_info;
 
   GetKernelInfoForRunningApplication(&current_kernel_info);
   ASSERT_TRUE(current_kernel_info.size());
@@ -283,7 +231,7 @@ class AsyncCopyTest : public Tracertest {
 // tracer output
 TEST_F(AsyncCopyTest, WhenRunningTracerWithAppThenAsyncCopyOutputIsgenerated) {
   // kernel info in current profler run
-  std::vector<KernelInfo> current_kernel_info;
+  std::vector<tracer_kernel_info_t> current_kernel_info;
 
   GetKernelInfoForRunningApplication(&current_kernel_info);
   ASSERT_TRUE(current_kernel_info.size());
@@ -292,14 +240,14 @@ TEST_F(AsyncCopyTest, WhenRunningTracerWithAppThenAsyncCopyOutputIsgenerated) {
 // Test:2 Matches coelation Ids
 TEST_F(AsyncCopyTest, WhenRunningTracerWithAppThenAsyncCorelationCountIsCorrect) {
   // kernel info in current profler run
-  std::vector<KernelInfo> current_kernel_info;
+  std::vector<tracer_kernel_info_t> current_kernel_info;
 
   GetKernelInfoForRunningApplication(&current_kernel_info);
   ASSERT_TRUE(current_kernel_info.size());
 
   std::vector<std::pair<std::string, std::string>> corelation_pair{};
   for (const auto& itr : current_kernel_info) {
-    if (itr.function.find("async_copy_on_engine") != std::string::npos) {
+    if (itr.domain.find("HSA_OPS_DOMAIN") != std::string::npos) {
       corelation_pair.push_back({itr.record_id, itr.corelation_id});
       break;  // we just want first occurance to test
     }

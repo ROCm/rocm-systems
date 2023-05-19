@@ -84,6 +84,7 @@ std::atomic<bool> session_created{false};
 [[maybe_unused]] static rocprofiler_session_id_t session_id;
 static std::vector<rocprofiler_filter_id_t> filter_ids;
 static std::vector<rocprofiler_buffer_id_t> buffer_ids;
+static std::vector<const char*> counter_names;
 
 void warning(const std::string& msg) { std::cerr << msg << std::endl; }
 
@@ -109,7 +110,7 @@ class rocprofiler_plugin_t {
     if (auto* initialize = reinterpret_cast<decltype(rocprofiler_plugin_initialize)*>(
             dlsym(plugin_handle_, "rocprofiler_plugin_initialize"));
         initialize != nullptr)
-      valid_ = initialize(ROCPROFILER_VERSION_MAJOR, ROCPROFILER_VERSION_MINOR) == 0;
+      valid_ = initialize(ROCPROFILER_VERSION_MAJOR, ROCPROFILER_VERSION_MINOR, &counter_names) == 0;
   }
 
   ~rocprofiler_plugin_t() {
@@ -386,7 +387,10 @@ void plugins_load() {
   if (Dl_info dl_info; dladdr((void*)plugins_load, &dl_info) != 0) {
     const char* plugin_name = getenv("ROCPROFILER_PLUGIN_LIB");
     if (plugin_name == nullptr) {
-      plugin_name = "libfile_plugin.so";
+      if(getenv("OUTPUT_PATH"))
+        plugin_name = "libfile_plugin.so";
+      else
+        plugin_name = "libcli_plugin.so";
     }
     if (!plugin.emplace(fs::path(dl_info.dli_fname).replace_filename(plugin_name)).is_valid()) {
       plugin.reset();
@@ -592,6 +596,16 @@ ROCPROFILER_EXPORT bool OnLoad(void* table, uint64_t runtime_version, uint64_t f
     exit(1);
   }
 
+  std::vector<std::string> counters = GetCounterNames();
+
+  if (counters.size() > 0) {
+    printf("ROCProfilerV2: Collecting the following counters:\n");
+    for (size_t i = 0; i < counters.size(); i++) {
+      counter_names.emplace_back(counters.at(i).c_str());
+      printf("- %s\n", counter_names.back());
+    }
+  }
+
   // load the plugins
   plugins_load();
 
@@ -606,16 +620,6 @@ ROCPROFILER_EXPORT bool OnLoad(void* table, uint64_t runtime_version, uint64_t f
     apis_requested.emplace_back(ACTIVITY_DOMAIN_HSA_OPS);
   if (getenv("ROCPROFILER_ROCTX_TRACE")) apis_requested.emplace_back(ACTIVITY_DOMAIN_ROCTX);
 
-  std::vector<std::string> counters = GetCounterNames();
-  std::vector<const char*> counters_;
-
-  if (counters.size() > 0) {
-    printf("ROCProfilerV2: Collecting the following counters:\n");
-    for (size_t i = 0; i < counters.size(); i++) {
-      counters_.emplace_back(counters.at(i).c_str());
-      printf("- %s\n", counters_.back());
-    }
-  }
   // ATT Parameters
   std::vector<rocprofiler_att_parameter_t> parameters;
   std::vector<std::pair<rocprofiler_att_parameter_name_t, uint32_t>> params;
@@ -665,8 +669,8 @@ ROCPROFILER_EXPORT bool OnLoad(void* table, uint64_t runtime_version, uint64_t f
         rocprofiler_filter_id_t filter_id;
         [[maybe_unused]] rocprofiler_filter_property_t property = {};
         CHECK_ROCPROFILER(rocprofiler_create_filter(
-            session_id, filter_kind, rocprofiler_filter_data_t{.counters_names = &counters_[0]},
-            counters_.size(), &filter_id, property));
+            session_id, filter_kind, rocprofiler_filter_data_t{.counters_names = &counter_names[0]},
+            counter_names.size(), &filter_id, property));
         CHECK_ROCPROFILER(rocprofiler_set_filter_buffer(session_id, filter_id, buffer_id));
         filter_ids.emplace_back(filter_id);
         break;

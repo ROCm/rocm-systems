@@ -77,10 +77,12 @@ extern "C" {
  * \p rocprofiler_major_version matches and this is greater than the minor
  * version of the ROCProfiler API used to build the plugin library. This ensures
  * compatibility of the trace data format.
+ * @param[in] data Pointer to the data passed to the ROCProfiler Plugin by the tool
  * @return Returns 0 on success and -1 on error.
  */
 ROCPROFILER_EXPORT int rocprofiler_plugin_initialize(uint32_t rocprofiler_major_version,
-                                                     uint32_t rocprofiler_minor_version);
+                                                     uint32_t rocprofiler_minor_version,
+                                                     void* data);
 
 /**
  * Finalize plugin.

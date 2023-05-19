@@ -79,6 +79,74 @@ bool is_installed_path() {
   return false;
 }
 
+// tokenize profiler output
+void tokenize_profiler_output(std::string line, profiler_kernel_info_t& kinfo) {
+  std::stringstream tokenStream(line);
+  std::string token;
+  std::getline(tokenStream, token, ',');
+  kinfo.record_id = token;
+  std::getline(tokenStream, token, ',');
+  kinfo.gpu_id = token;
+  std::getline(tokenStream, token, ',');
+  kinfo.queue_id = token;
+  std::getline(tokenStream, token, ',');
+  kinfo.queue_index = token;
+  std::getline(tokenStream, token, ',');
+  kinfo.process_id = token;
+  std::getline(tokenStream, token, ',');
+  kinfo.thread_id = token;
+  std::getline(tokenStream, token, ',');
+  kinfo.grid_size = token;
+  std::getline(tokenStream, token, ',');
+  kinfo.workgroup_size = token;
+  std::getline(tokenStream, token, ',');
+  kinfo.lds = token;
+  std::getline(tokenStream, token, ',');
+  kinfo.scratch_size = token;
+  std::getline(tokenStream, token, ',');
+  kinfo.arch_vgpr = token;
+  std::getline(tokenStream, token, ',');
+  kinfo.accum_vgpr = token;
+  std::getline(tokenStream, token, ',');
+  kinfo.sgpr = token;
+  std::getline(tokenStream, token, ',');
+  kinfo.wave_size = token;
+  std::getline(tokenStream, token, ',');
+  kinfo.kernel_name = token;
+  std::getline(tokenStream, token, ',');
+  kinfo.begin_time = token;
+  std::getline(tokenStream, token, ',');
+  kinfo.end_time = token;
+  std::getline(tokenStream, token, ',');
+  kinfo.counter = token;
+}
+
+// tokenize tracer output
+void tokenize_tracer_output(std::string line, tracer_kernel_info_t& kinfo) {
+  std::stringstream tokenStream(line);
+  std::string token;
+  std::getline(tokenStream, token, ',');
+  kinfo.record_id = token;
+  std::getline(tokenStream, token, ',');
+  kinfo.domain = token;
+  std::getline(tokenStream, token, ',');
+  kinfo.function = token;
+  std::getline(tokenStream, token, ',');
+  kinfo.operation = token;
+  std::getline(tokenStream, token, ',');
+  kinfo.kernel_name = token;
+  std::getline(tokenStream, token, ',');
+  kinfo.begin_time = token;
+  std::getline(tokenStream, token, ',');
+  kinfo.end_time = token;
+  std::getline(tokenStream, token, ',');
+  kinfo.corelation_id = token;
+  std::getline(tokenStream, token, ',');
+  kinfo.roctx_id = token;
+  std::getline(tokenStream, token, ',');
+  kinfo.roxtx_msg = token;
+}
+
 }  // namespace utility
 }  // namespace tests
 }  // namespace rocprofiler

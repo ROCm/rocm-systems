@@ -357,12 +357,13 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_query_hsa_tracer_api_data_info(
   //     throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_TRACER_API_DATA_NOT_FOUND);
   //   }
   // }
-  if (!(*data = (kind == ROCPROFILER_HSA_FUNCTION_NAME)
+  *data = (kind == ROCPROFILER_HSA_FUNCTION_NAME)
       ? rocprofiler::tracer::GetApiCallFunctionName(ACTIVITY_DOMAIN_HSA_API, operation_id)
       : rocprofiler::GetROCProfilerSingleton()
                     ->GetSession(session_id)
                     ->GetTracer()
-                    ->GetHSAApiDataInfo(kind, api_data_id, operation_id)))
+                    ->GetHSAApiDataInfo(kind, api_data_id, operation_id);
+  if (*data == nullptr)
     throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_TRACER_API_DATA_INFORMATION_MISSING);
   API_METHOD_SUFFIX
 }

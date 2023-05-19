@@ -768,7 +768,7 @@ perfetto_plugin_t* perfetto_plugin = nullptr;
 }  // namespace
 
 int rocprofiler_plugin_initialize(uint32_t rocprofiler_major_version,
-                                  uint32_t rocprofiler_minor_version) {
+                                  uint32_t rocprofiler_minor_version, void* data) {
   if (rocprofiler_major_version != ROCPROFILER_VERSION_MAJOR ||
       rocprofiler_minor_version > ROCPROFILER_VERSION_MINOR)
     return -1;
