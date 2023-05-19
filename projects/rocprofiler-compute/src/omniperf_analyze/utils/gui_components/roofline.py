@@ -225,6 +225,7 @@ def get_roofline(
         margin=dict(b=0, r=0),
         xaxis_range=[-1, 1],
         xaxis_side="top",
+        yaxis_side="right",
         height=400,
         width=1000,
     )
