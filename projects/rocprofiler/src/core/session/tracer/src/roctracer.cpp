@@ -236,9 +236,7 @@ template <activity_domain_t domain> struct ApiTracer {
   };
 
   static void Exit(OperationId operation_id, TraceData* trace_data) {
-    uint64_t record_id = 0;
     if (rocmtools::GetROCMToolObj()) {
-      record_id = rocmtools::GetROCMToolObj()->GetUniqueRecordId();
       if (auto pool = activity_table.Get(operation_id)) {
         if (rocmtools::GetROCMToolObj() &&
             rocmtools::GetROCMToolObj()->GetSession((*pool)->session_id) &&
@@ -255,8 +253,9 @@ template <activity_domain_t domain> struct ApiTracer {
                                                  ->GetBufferLock());
             assert(trace_data != nullptr);
             rocprofiler_record_tracer_t record{};
-            record.header = rocprofiler_record_header_t{ROCPROFILER_TRACER_RECORD,
-                                                        rocprofiler_record_id_t{record_id}};
+            record.header = rocprofiler_record_header_t{
+                ROCPROFILER_TRACER_RECORD,
+                rocprofiler_record_id_t{rocmtools::GetROCMToolObj()->GetUniqueRecordId()}};
             record.domain = domain;
             record.operation_id = rocprofiler_tracer_operation_id_t{operation_id};
             record.correlation_id =
@@ -269,8 +268,9 @@ template <activity_domain_t domain> struct ApiTracer {
 
             if (auto external_id = ExternalCorrelationId()) {
               rocprofiler_record_tracer_t ext_record{};
-              ext_record.header = rocprofiler_record_header_t{ROCPROFILER_TRACER_RECORD,
-                                                              rocprofiler_record_id_t{record_id}};
+              ext_record.header = rocprofiler_record_header_t{
+                  ROCPROFILER_TRACER_RECORD,
+                  rocprofiler_record_id_t{rocmtools::GetROCMToolObj()->GetUniqueRecordId()}};
               ext_record.domain = ACTIVITY_DOMAIN_EXT_API;
               ext_record.operation_id =
                   rocprofiler_tracer_operation_id_t{ACTIVITY_EXT_OP_EXTERN_ID};
@@ -377,7 +377,6 @@ int TracerCallback(activity_domain_t domain, uint32_t operation_id, void* data) 
           // If the record is for a kernel dispatch, write the kernel name in the pool's data,
           // and make the record point to it. Older HIP runtimes do not provide a kernel name,
           // so record.kernel_name might be null.
-          uint64_t record_id = 0;
           if (!rocmtools::GetROCMToolObj()) return 0;
           if (rocmtools::GetROCMToolObj() &&
               rocmtools::GetROCMToolObj()->GetSession((*pool)->session_id) &&
@@ -388,10 +387,10 @@ int TracerCallback(activity_domain_t domain, uint32_t operation_id, void* data) 
                                                  ->GetSession((*pool)->session_id)
                                                  ->GetBuffer((*pool)->buffer_id)
                                                  ->GetBufferLock());
-            record_id = rocmtools::GetROCMToolObj()->GetUniqueRecordId();
             rocprofiler_record_tracer_t rocprofiler_record{};
             rocprofiler_record.header = rocprofiler_record_header_t{
-                ROCPROFILER_TRACER_RECORD, rocprofiler_record_id_t{record_id}};
+                ROCPROFILER_TRACER_RECORD,
+                rocprofiler_record_id_t{rocmtools::GetROCMToolObj()->GetUniqueRecordId()}};
             rocprofiler_record.domain = domain;
             rocprofiler_record.external_id = rocprofiler_tracer_external_id_t{};
             rocprofiler_record.operation_id = rocprofiler_tracer_operation_id_t{record->kind};
@@ -445,7 +444,6 @@ int TracerCallback(activity_domain_t domain, uint32_t operation_id, void* data) 
     case ACTIVITY_DOMAIN_HSA_OPS:
       if (auto pool = hsa_ops_activity_table.Get(operation_id)) {
         if (auto record = static_cast<activity_record_t*>(data)) {
-          uint64_t record_id = 0;
           if (!rocmtools::GetROCMToolObj()) return 0;
           if (rocmtools::GetROCMToolObj() &&
               rocmtools::GetROCMToolObj()->GetSession((*pool)->session_id) &&
@@ -456,10 +454,10 @@ int TracerCallback(activity_domain_t domain, uint32_t operation_id, void* data) 
                                                  ->GetSession((*pool)->session_id)
                                                  ->GetBuffer((*pool)->buffer_id)
                                                  ->GetBufferLock());
-            record_id = rocmtools::GetROCMToolObj()->GetUniqueRecordId();
             rocprofiler_record_tracer_t rocprofiler_record{};
             rocprofiler_record.header = rocprofiler_record_header_t{
-                ROCPROFILER_TRACER_RECORD, rocprofiler_record_id_t{record_id}};
+                ROCPROFILER_TRACER_RECORD,
+                rocprofiler_record_id_t{rocmtools::GetROCMToolObj()->GetUniqueRecordId()}};
             rocprofiler_record.domain = domain;
             rocprofiler_record.external_id = rocprofiler_tracer_external_id_t{0};
             rocprofiler_record.operation_id = rocprofiler_tracer_operation_id_t{record->op};
@@ -794,7 +792,9 @@ static std::string getKernelNameMultiKernelMultiDevice(hipLaunchParams* launchPa
   return name_str.str();
 }
 
-template <typename... Ts> struct Overloaded : Ts... { using Ts::operator()...; };
+template <typename... Ts> struct Overloaded : Ts... {
+  using Ts::operator()...;
+};
 template <class... Ts> Overloaded(Ts...) -> Overloaded<Ts...>;
 
 std::optional<std::string> GetHipKernelName(uint32_t cid, hip_api_data_t* data) {
