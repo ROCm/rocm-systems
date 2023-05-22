@@ -75,7 +75,7 @@ endfunction()
 
 check_py3_pkg(CppHeaderParser)
 check_py3_pkg(yaml)
-find_program(BARECTF_RES barectf REQUIRED)
+find_program(BARECTF_RES barectf REQUIRED HINTS "$ENV{HOME}/.local/bin")
 
 # Generate barectf YAML and C++ files for HSA API.
 get_property(HSA_RUNTIME_INCLUDE_DIRS
