@@ -281,7 +281,6 @@ class file_plugin_t {
         }
       }
     }
-    //return;
     output_file_t* output_file = get_output_file(output_type_t::TRACER, tracer_record.domain);
     *output_file << "Record(" << tracer_record.header.id.handle << "), Domain("
                  << GetDomainName(tracer_record.domain) << "),";
@@ -289,6 +288,21 @@ class file_plugin_t {
     if (tracer_record.domain == ACTIVITY_DOMAIN_ROCTX && roctx_message.size() > 1) *output_file << " ROCTX_Message(" << roctx_message << "),";
     if (function_name.size() > 1) *output_file << " Function(" << function_name << "),";
     if (kernel_name.size() > 1) *output_file << " Kernel_Name(" << kernel_name.c_str() << "),";
+    if (tracer_record.domain == ACTIVITY_DOMAIN_HSA_OPS || tracer_record.domain == ACTIVITY_DOMAIN_HIP_OPS) {
+      switch (tracer_record.operation_id.id) {
+        case 0:
+          *output_file << " Operation(DISPATCH_OP),";
+          break;
+        case 1:
+          *output_file << " Operation(COPY_OP),";
+          break;
+        case 2:
+          *output_file << " Operation(BARRIER_OP),";
+          break;
+        default:
+          break;
+      }
+    }
     if (tracer_record.phase == ROCPROFILER_PHASE_NONE) {
       *output_file << " Begin(" << tracer_record.timestamps.begin.value
                    << "), End(" << tracer_record.timestamps.end.value << "),";
