@@ -68,7 +68,7 @@ void RemoveKernelName(uint64_t handle) {
 }
 std::string GetKernelNameFromKsymbols(uint64_t handle) {
   std::lock_guard<std::mutex> lock(ksymbol_map_lock);
-  if(ksymbols->find(handle)!=ksymbols->end())
+  if (ksymbols->find(handle) != ksymbols->end())
     return ksymbols->at(handle);
   else
     return "Unknown Kernel!";
@@ -79,16 +79,15 @@ static std::map<std::string, std::vector<uint64_t>>* kernel_names;
 static std::atomic<bool> kernel_names_flag{true};
 void AddKernelNameWithDispatchID(std::string name, uint64_t id) {
   std::lock_guard<std::mutex> lock(kernel_names_map_lock);
-  if(kernel_names->find(name) == kernel_names->end())
+  if (kernel_names->find(name) == kernel_names->end())
     kernel_names->emplace(name, std::vector<uint64_t>());
   kernel_names->at(name).push_back(id);
 }
 std::string GetKernelNameUsingDispatchID(uint64_t given_id) {
   std::lock_guard<std::mutex> lock(kernel_names_map_lock);
-  for(auto kernel_name : (*kernel_names)) {
-    for(auto dispatch_id : kernel_name.second) {
-      if(dispatch_id == given_id)
-        return kernel_name.first;
+  for (auto kernel_name : (*kernel_names)) {
+    for (auto dispatch_id : kernel_name.second) {
+      if (dispatch_id == given_id) return kernel_name.first;
     }
   }
   return "Unknown Kernel!";
@@ -122,7 +121,6 @@ void FinitKsymbols() {
     kernel_names_flag.exchange(true, std::memory_order_release);
   }
 }
-
 
 
 struct kernel_descriptor_t {
@@ -229,7 +227,7 @@ static uint32_t sgpr_count(Agent::AgentInfo& info, const kernel_descriptor_t& ke
 }
 
 rocprofiler_kernel_properties_t set_kernel_properties(hsa_kernel_dispatch_packet_t packet,
-                                                    hsa_agent_t agent) {
+                                                      hsa_agent_t agent) {
   const uint64_t kernel_object = packet.kernel_object;
   rocprofiler_kernel_properties_t kernel_properties_ptr = {};
   const kernel_descriptor_t* kernel_code = GetKernelCode(kernel_object);
@@ -281,7 +279,7 @@ hsa_status_t pmcCallback(hsa_ven_amd_aqlprofile_info_type_t info_type,
 }
 
 hsa_status_t attTraceDataCallback(hsa_ven_amd_aqlprofile_info_type_t info_type,
-                                   hsa_ven_amd_aqlprofile_info_data_t* info_data, void* data) {
+                                  hsa_ven_amd_aqlprofile_info_data_t* info_data, void* data) {
   hsa_status_t status = HSA_STATUS_SUCCESS;
   att_trace_callback_data_t* passed_data = reinterpret_cast<att_trace_callback_data_t*>(data);
   passed_data->push_back(*info_data);
@@ -318,7 +316,7 @@ void AddRecordCounters(rocprofiler_record_profiler_t* record, const pending_sign
 }
 
 void AddAttRecord(rocprofiler_record_att_tracer_t* record, hsa_agent_t gpu_agent,
-                   att_pending_signal_t& pending) {
+                  att_pending_signal_t& pending) {
   att_trace_callback_data_t data;
   hsa_ven_amd_aqlprofile_iterate_data(pending.profile, attTraceDataCallback, &data);
 
@@ -365,7 +363,8 @@ void AddAttRecord(rocprofiler_record_att_tracer_t* record, hsa_agent_t gpu_agent
 // bool BeginSignalHandler(hsa_signal_value_t signal_value, void* data) {
 //   std::lock_guard<std::mutex> lock(begin_signal_lock);
 //   auto profiling_context =
-//       static_cast<std::pair<rocmtools::profiling_context_t*, hsa_ven_amd_aqlprofile_profile_t*>*>(
+//       static_cast<std::pair<rocmtools::profiling_context_t*,
+//       hsa_ven_amd_aqlprofile_profile_t*>*>(
 //           data);
 //   if (!profiling_context->first->begin_completed.load(std::memory_order_relaxed)) {
 //     std::cout << "BeginSignalHandler is called" << std::endl;
@@ -466,8 +465,10 @@ bool AsyncSignalHandler(hsa_signal_value_t signal_value, void* data) {
           pending.profile) {
         AddRecordCounters(&record, pending);
       }
+      // Kernel Descriptor is the right record id generated in the WriteInterceptor function and
+      // will be used to handle the kernel name of that dispatch
       record.header = {ROCPROFILER_PROFILER_RECORD,
-                       rocprofiler_record_id_t{GetROCMToolObj()->GetUniqueRecordId()}};
+                       rocprofiler_record_id_t{pending.kernel_descriptor}};
       record.kernel_id = rocprofiler_kernel_id_t{pending.kernel_descriptor};
 
       if (pending.session_id.handle == 0) {
@@ -547,8 +548,10 @@ bool AsyncSignalHandlerATT(hsa_signal_value_t /* signal */, void* data) {
       if (/*pending.counters_count > 0 && */ pending.profile) {
         AddAttRecord(&record, queue_info_session->agent, pending);
       }
+      // Kernel Descriptor is the right record id generated in the WriteInterceptor function and
+      // will be used to handle the kernel name of that dispatch
       record.header = {ROCPROFILER_ATT_TRACER_RECORD,
-                       rocprofiler_record_id_t{GetROCMToolObj()->GetUniqueRecordId()}};
+                       rocprofiler_record_id_t{pending.kernel_descriptor}};
 
       if (pending.session_id.handle == 0) {
         pending.session_id = GetROCMToolObj()->GetCurrentSessionId();
@@ -664,7 +667,8 @@ void WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t user_pkt
   if (session_id.handle > 0 && GetROCMToolObj()) {
     session = GetROCMToolObj()->GetSession(session_id);
     if (session && session->FindFilterWithKind(ROCPROFILER_COUNTERS_COLLECTION)) {
-      rocprofiler_filter_id_t filter_id = session->GetFilterIdWithKind(ROCPROFILER_COUNTERS_COLLECTION);
+      rocprofiler_filter_id_t filter_id =
+          session->GetFilterIdWithKind(ROCPROFILER_COUNTERS_COLLECTION);
       rocmtools::Filter* filter = session->GetFilter(filter_id);
       session_data = filter->GetCounterData();
       is_counter_collection_mode = true;
@@ -686,7 +690,8 @@ void WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t user_pkt
                       ->GetBufferId();
 
       att_counters_names = filter->GetCounterData();
-      kernel_profile_names = std::get<std::vector<std::string>>(filter->GetProperty(ROCPROFILER_FILTER_KERNEL_NAMES));
+      kernel_profile_names =
+          std::get<std::vector<std::string>>(filter->GetProperty(ROCPROFILER_FILTER_KERNEL_NAMES));
     } else if (session && session->FindFilterWithKind(ROCPROFILER_PC_SAMPLING_COLLECTION)) {
       is_pc_sampling_collection_mode = true;
     }
@@ -780,17 +785,18 @@ void WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t user_pkt
             set_kernel_properties(dispatch_packet, queue_info.GetGPUAgent());
         if (session) {
           uint64_t record_id = GetROCMToolObj()->GetUniqueRecordId();
-          AddKernelNameWithDispatchID(GetKernelNameFromKsymbols(dispatch_packet.kernel_object), record_id);
+          AddKernelNameWithDispatchID(GetKernelNameFromKsymbols(dispatch_packet.kernel_object),
+                                      record_id);
           if (profiles && replay_mode_count > 0) {
             session->GetProfiler()->AddPendingSignals(
-                writer_id, record_id, dispatch_packet.completion_signal,
-                session_id, buffer_id, profile.first, profile.first->metrics_list.size(),
-                profile.second, kernel_properties, (uint32_t)syscall(__NR_gettid), user_pkt_index);
+                writer_id, record_id, dispatch_packet.completion_signal, session_id, buffer_id,
+                profile.first, profile.first->metrics_list.size(), profile.second,
+                kernel_properties, (uint32_t)syscall(__NR_gettid), user_pkt_index);
           } else {
             session->GetProfiler()->AddPendingSignals(
-                writer_id, record_id, dispatch_packet.completion_signal,
-                session_id, buffer_id, nullptr, 0, nullptr, kernel_properties,
-                (uint32_t)syscall(__NR_gettid), user_pkt_index);
+                writer_id, record_id, dispatch_packet.completion_signal, session_id, buffer_id,
+                nullptr, 0, nullptr, kernel_properties, (uint32_t)syscall(__NR_gettid),
+                user_pkt_index);
           }
         }
 
@@ -841,10 +847,8 @@ void WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t user_pkt
     }
     /* Write the transformed packets to the hardware queue.  */
     writer(&transformed_packets[0], transformed_packets.size());
-  } else if (session_id.handle > 0 && pkt_count > 0 &&
-            is_att_collection_mode && session &&
-            KernelInterceptCount < MAX_ATT_PROFILES
-  ) {
+  } else if (session_id.handle > 0 && pkt_count > 0 && is_att_collection_mode && session &&
+             KernelInterceptCount < MAX_ATT_PROFILES) {
     // att start
     // Getting Queue Data and Information
     auto& queue_info = *static_cast<Queue*>(data);
@@ -862,7 +866,6 @@ void WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t user_pkt
       if (bit_extract(original_packet.header, HSA_PACKET_HEADER_TYPE,
                       HSA_PACKET_HEADER_TYPE + HSA_PACKET_HEADER_WIDTH_TYPE - 1) ==
           HSA_PACKET_TYPE_KERNEL_DISPATCH) {
-
         auto& kdispatch = static_cast<const hsa_kernel_dispatch_packet_s*>(packets)[i];
         uint64_t kernel_object = kdispatch.kernel_object;
 
@@ -873,7 +876,7 @@ void WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t user_pkt
           const std::string& kernel_name = ksymbols->at(kernel_object);
 
           // We want to initiate att profiling only if a match exists
-          for(const std::string& kernel_matches : kernel_profile_names) {
+          for (const std::string& kernel_matches : kernel_profile_names) {
             if (kernel_name.find(kernel_matches) != std::string::npos) {
               b_profile_this_object = true;
               break;
@@ -885,8 +888,7 @@ void WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t user_pkt
         }
       }
 
-      if (b_profile_this_object)
-        can_profile_anypacket = true;
+      if (b_profile_this_object) can_profile_anypacket = true;
       can_profile_packet.push_back(b_profile_this_object);
     }
 
@@ -907,10 +909,9 @@ void WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t user_pkt
       int num_att_counters = 0;
 
       for (rocprofiler_att_parameter_t& param : att_parameters_data) {
-        att_params.push_back({
-          static_cast<hsa_ven_amd_aqlprofile_parameter_name_t>(int(param.parameter_name)),
-          param.value
-        });
+        att_params.push_back(
+            {static_cast<hsa_ven_amd_aqlprofile_parameter_name_t>(int(param.parameter_name)),
+             param.value});
         num_att_counters += param.parameter_name == ROCPROFILER_ATT_PERFCOUNTER;
       }
 
@@ -931,23 +932,23 @@ void WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t user_pkt
             printf("Only events from the SQ block can be selected for ATT.");
             exit(1);
           }
-          att_params.push_back({
-            static_cast<hsa_ven_amd_aqlprofile_parameter_name_t>(int(ROCPROFILER_ATT_PERFCOUNTER)),
-            event.counter_id | (event.counter_id ? (0xF<<24) : 0)
-          });
+          att_params.push_back({static_cast<hsa_ven_amd_aqlprofile_parameter_name_t>(
+                                    int(ROCPROFILER_ATT_PERFCOUNTER)),
+                                event.counter_id | (event.counter_id ? (0xF << 24) : 0)});
           num_att_counters += 1;
         }
 
         hsa_ven_amd_aqlprofile_parameter_t zero_perf = {
-          static_cast<hsa_ven_amd_aqlprofile_parameter_name_t>(int(ROCPROFILER_ATT_PERFCOUNTER)), 0};
+            static_cast<hsa_ven_amd_aqlprofile_parameter_name_t>(int(ROCPROFILER_ATT_PERFCOUNTER)),
+            0};
 
         // Fill other perfcounters with 0's
-        for(; num_att_counters<16; num_att_counters++) att_params.push_back(zero_perf);
+        for (; num_att_counters < 16; num_att_counters++) att_params.push_back(zero_perf);
       }
 
       // Get the PM4 Packets using packets_generator
       profile = Packet::GenerateATTPackets(queue_info.GetCPUAgent(), queue_info.GetGPUAgent(),
-                                            att_params, &start_packet, &stop_packet);
+                                           att_params, &start_packet, &stop_packet);
     }
 
     // Searching across all the packets given during this write
@@ -982,15 +983,16 @@ void WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t user_pkt
       rocprofiler_kernel_properties_t kernel_properties =
           set_kernel_properties(dispatch_packet, queue_info.GetGPUAgent());
       uint64_t record_id = GetROCMToolObj()->GetUniqueRecordId();
-      AddKernelNameWithDispatchID(GetKernelNameFromKsymbols(dispatch_packet.kernel_object), record_id);
+      AddKernelNameWithDispatchID(GetKernelNameFromKsymbols(dispatch_packet.kernel_object),
+                                  record_id);
       if (session && profile) {
         session->GetAttTracer()->AddPendingSignals(
-            writer_id, record_id, dispatch_packet.completion_signal, session_id,
-            buffer_id, profile, kernel_properties, (uint32_t)syscall(__NR_gettid), user_pkt_index);
+            writer_id, record_id, dispatch_packet.completion_signal, session_id, buffer_id, profile,
+            kernel_properties, (uint32_t)syscall(__NR_gettid), user_pkt_index);
       } else {
         session->GetAttTracer()->AddPendingSignals(
-            writer_id, record_id, dispatch_packet.completion_signal, session_id,
-            buffer_id, nullptr, kernel_properties, (uint32_t)syscall(__NR_gettid), user_pkt_index);
+            writer_id, record_id, dispatch_packet.completion_signal, session_id, buffer_id, nullptr,
+            kernel_properties, (uint32_t)syscall(__NR_gettid), user_pkt_index);
       }
 
       // Make a copy of the original packet, adding its signal to a barrier packet
