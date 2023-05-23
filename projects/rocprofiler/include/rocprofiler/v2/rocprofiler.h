@@ -350,7 +350,8 @@ typedef enum {
  *
  * @retval Return the error string.
  */
-ROCPROFILER_API const char* rocprofiler_error_str(rocprofiler_status_t status) ROCPROFILER_VERSION_9_0;
+ROCPROFILER_API const char* rocprofiler_error_str(rocprofiler_status_t status)
+    ROCPROFILER_VERSION_9_0;
 
 /** @} */
 
@@ -426,7 +427,8 @@ typedef struct {
  * failed to get the timestamp using HSA Function.
  *
  */
-ROCPROFILER_API rocprofiler_status_t rocprofiler_get_timestamp(rocprofiler_timestamp_t* timestamp) ROCPROFILER_VERSION_9_0;
+ROCPROFILER_API rocprofiler_status_t rocprofiler_get_timestamp(rocprofiler_timestamp_t* timestamp)
+    ROCPROFILER_VERSION_9_0;
 
 /**
  * Timestamps (start & end), it will be used for kernel dispatch tracing as
@@ -565,9 +567,9 @@ typedef enum {
  * @retval ::ROCPROFILER_STATUS_ERROR_AGENT_INFORMATION_MISSING, if the agent
  * was found in the saved agents but the required information is missing
  */
-ROCPROFILER_API rocprofiler_status_t rocprofiler_query_agent_info_size(rocprofiler_agent_info_kind_t kind,
-                                                                 rocprofiler_agent_id_t agent_id,
-                                                                 size_t* data_size) ROCPROFILER_VERSION_9_0;
+ROCPROFILER_API rocprofiler_status_t rocprofiler_query_agent_info_size(
+    rocprofiler_agent_info_kind_t kind, rocprofiler_agent_id_t agent_id,
+    size_t* data_size) ROCPROFILER_VERSION_9_0;
 
 /**
  * Query Agent Information Data using an allocated data pointer by the user,
@@ -586,9 +588,9 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_query_agent_info_size(rocprofil
  * @retval ::ROCPROFILER_STATUS_ERROR_AGENT_INFORMATION_MISSING, if the agent
  * was found in the saved agents but the required information is missing
  */
-ROCPROFILER_API rocprofiler_status_t rocprofiler_query_agent_info(rocprofiler_agent_info_kind_t kind,
-                                                            rocprofiler_agent_id_t descriptor,
-                                                            const char** name) ROCPROFILER_VERSION_9_0;
+ROCPROFILER_API rocprofiler_status_t
+rocprofiler_query_agent_info(rocprofiler_agent_info_kind_t kind, rocprofiler_agent_id_t descriptor,
+                             const char** name) ROCPROFILER_VERSION_9_0;
 
 /** @} */
 
@@ -638,9 +640,9 @@ typedef enum {
  * @retval ::ROCPROFILER_STATUS_ERROR_QUEUE_INFORMATION_MISSING, if the queue
  * was found in the saved queues but the required information is missing
  */
-ROCPROFILER_API rocprofiler_status_t rocprofiler_query_queue_info_size(rocprofiler_queue_info_kind_t kind,
-                                                                 rocprofiler_queue_id_t agent_id,
-                                                                 size_t* data_size) ROCPROFILER_VERSION_9_0;
+ROCPROFILER_API rocprofiler_status_t rocprofiler_query_queue_info_size(
+    rocprofiler_queue_info_kind_t kind, rocprofiler_queue_id_t agent_id,
+    size_t* data_size) ROCPROFILER_VERSION_9_0;
 
 /**
  * Query Queue Information Data using an allocated data pointer by the user,
@@ -659,9 +661,9 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_query_queue_info_size(rocprofil
  * @retval ::ROCPROFILER_STATUS_ERROR_QUEUE_INFORMATION_MISSING, if the queue
  * was found in the saved agents but the required information is missing
  */
-ROCPROFILER_API rocprofiler_status_t rocprofiler_query_queue_info(rocprofiler_queue_info_kind_t kind,
-                                                            rocprofiler_queue_id_t descriptor,
-                                                            const char** name) ROCPROFILER_VERSION_9_0;
+ROCPROFILER_API rocprofiler_status_t
+rocprofiler_query_queue_info(rocprofiler_queue_info_kind_t kind, rocprofiler_queue_id_t descriptor,
+                             const char** name) ROCPROFILER_VERSION_9_0;
 
 /** @} */
 
@@ -709,9 +711,9 @@ typedef enum {
  * @retval ::ROCPROFILER_STATUS_ERROR_KERNEL_INFORMATION_MISSING, if the kernel
  * was found in the saved counters but the required information is missing
  */
-ROCPROFILER_API rocprofiler_status_t rocprofiler_query_kernel_info_size(rocprofiler_kernel_info_kind_t kind,
-                                                                  rocprofiler_kernel_id_t kernel_id,
-                                                                  size_t* data_size) ROCPROFILER_VERSION_9_0;
+ROCPROFILER_API rocprofiler_status_t rocprofiler_query_kernel_info_size(
+    rocprofiler_kernel_info_kind_t kind, rocprofiler_kernel_id_t kernel_id,
+    size_t* data_size) ROCPROFILER_VERSION_9_0;
 
 /**
  * Query Kernel Information Data using an allocated data pointer by the user,
@@ -730,9 +732,9 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_query_kernel_info_size(rocprofi
  * @retval ::ROCPROFILER_STATUS_ERROR_KERNEL_INFORMATION_MISSING, if the kernel
  * was found in the saved kernels but the required information is missing
  */
-ROCPROFILER_API rocprofiler_status_t rocprofiler_query_kernel_info(rocprofiler_kernel_info_kind_t kind,
-                                                             rocprofiler_kernel_id_t kernel_id,
-                                                             const char** data) ROCPROFILER_VERSION_9_0;
+ROCPROFILER_API rocprofiler_status_t rocprofiler_query_kernel_info(
+    rocprofiler_kernel_info_kind_t kind, rocprofiler_kernel_id_t kernel_id,
+    const char** data) ROCPROFILER_VERSION_9_0;
 
 /** @} */
 
@@ -775,10 +777,11 @@ typedef struct {
 } rocprofiler_counter_info_t;
 
 typedef int (*rocprofiler_counters_info_callback_t)(rocprofiler_counter_info_t counter,
-                                                  const char* gpu_name, uint32_t gpu_index) ROCPROFILER_VERSION_9_0;
+                                                    const char* gpu_name,
+                                                    uint32_t gpu_index) ROCPROFILER_VERSION_9_0;
 
-ROCPROFILER_API rocprofiler_status_t
-rocprofiler_iterate_counters(rocprofiler_counters_info_callback_t counters_info_callback) ROCPROFILER_VERSION_9_0;
+ROCPROFILER_API rocprofiler_status_t rocprofiler_iterate_counters(
+    rocprofiler_counters_info_callback_t counters_info_callback) ROCPROFILER_VERSION_9_0;
 
 /**
  * Counter ID to be used to query counter information using
@@ -852,10 +855,9 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_query_counter_info_size(
  * @retval ::ROCPROFILER_STATUS_ERROR_COUNTER_INFORMATION_MISSING, if the counter
  * was found in the saved counters but the required information is missing
  */
-ROCPROFILER_API rocprofiler_status_t rocprofiler_query_counter_info(rocprofiler_session_id_t session_id,
-                                                              rocprofiler_counter_info_kind_t kind,
-                                                              rocprofiler_counter_id_t counter_id,
-                                                              const char** data) ROCPROFILER_VERSION_9_0;
+ROCPROFILER_API rocprofiler_status_t rocprofiler_query_counter_info(
+    rocprofiler_session_id_t session_id, rocprofiler_counter_info_kind_t kind,
+    rocprofiler_counter_id_t counter_id, const char** data) ROCPROFILER_VERSION_9_0;
 
 typedef struct {
   /**
@@ -1056,7 +1058,7 @@ typedef struct {
   uint32_t buffer_size;
 } rocprofiler_record_se_att_data_t;
 
- /**
+/**
  * ATT tracing record structure.
  * This will represent all the information reported by the
  * ATT tracer such as the kernel and its thread trace data.
@@ -1106,7 +1108,6 @@ typedef struct {
    */
   uint64_t shader_engine_data_count;
 } rocprofiler_record_att_tracer_t;
-
 
 
 /** @} */
@@ -1233,8 +1234,8 @@ typedef enum {
  */
 ROCPROFILER_API rocprofiler_status_t rocprofiler_query_roctx_tracer_api_data_info_size(
     rocprofiler_session_id_t session_id, rocprofiler_tracer_roctx_api_data_info_t kind,
-    rocprofiler_tracer_api_data_handle_t api_data_id, rocprofiler_tracer_operation_id_t operation_id,
-    size_t* data_size) ROCPROFILER_VERSION_9_0;
+    rocprofiler_tracer_api_data_handle_t api_data_id,
+    rocprofiler_tracer_operation_id_t operation_id, size_t* data_size) ROCPROFILER_VERSION_9_0;
 
 /**
  * Query API Data Information  using an allocated data pointer by the user,
@@ -1261,8 +1262,8 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_query_roctx_tracer_api_data_inf
  */
 ROCPROFILER_API rocprofiler_status_t rocprofiler_query_roctx_tracer_api_data_info(
     rocprofiler_session_id_t session_id, rocprofiler_tracer_roctx_api_data_info_t kind,
-    rocprofiler_tracer_api_data_handle_t api_data_id, rocprofiler_tracer_operation_id_t operation_id,
-    char** data) ROCPROFILER_VERSION_9_0;
+    rocprofiler_tracer_api_data_handle_t api_data_id,
+    rocprofiler_tracer_operation_id_t operation_id, char** data) ROCPROFILER_VERSION_9_0;
 
 /** @} */
 
@@ -1322,8 +1323,8 @@ typedef enum {
  */
 ROCPROFILER_API rocprofiler_status_t rocprofiler_query_hsa_tracer_api_data_info_size(
     rocprofiler_session_id_t session_id, rocprofiler_tracer_hsa_api_data_info_t kind,
-    rocprofiler_tracer_api_data_handle_t api_data_id, rocprofiler_tracer_operation_id_t operation_id,
-    size_t* data_size) ROCPROFILER_VERSION_9_0;
+    rocprofiler_tracer_api_data_handle_t api_data_id,
+    rocprofiler_tracer_operation_id_t operation_id, size_t* data_size) ROCPROFILER_VERSION_9_0;
 
 /**
  * Query API Data Information  using an allocated data pointer by the user,
@@ -1350,8 +1351,8 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_query_hsa_tracer_api_data_info_
  */
 ROCPROFILER_API rocprofiler_status_t rocprofiler_query_hsa_tracer_api_data_info(
     rocprofiler_session_id_t session_id, rocprofiler_tracer_hsa_api_data_info_t kind,
-    rocprofiler_tracer_api_data_handle_t api_data_id, rocprofiler_tracer_operation_id_t operation_id,
-    char** data) ROCPROFILER_VERSION_9_0;
+    rocprofiler_tracer_api_data_handle_t api_data_id,
+    rocprofiler_tracer_operation_id_t operation_id, char** data) ROCPROFILER_VERSION_9_0;
 
 /** @} */
 
@@ -1435,8 +1436,8 @@ typedef enum {
  */
 ROCPROFILER_API rocprofiler_status_t rocprofiler_query_hip_tracer_api_data_info_size(
     rocprofiler_session_id_t session_id, rocprofiler_tracer_hip_api_data_info_t kind,
-    rocprofiler_tracer_api_data_handle_t api_data_id, rocprofiler_tracer_operation_id_t operation_id,
-    size_t* data_size) ROCPROFILER_VERSION_9_0;
+    rocprofiler_tracer_api_data_handle_t api_data_id,
+    rocprofiler_tracer_operation_id_t operation_id, size_t* data_size) ROCPROFILER_VERSION_9_0;
 
 /**
  * Query API Data Information  using an allocated data pointer by the user,
@@ -1462,8 +1463,8 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_query_hip_tracer_api_data_info_
  */
 ROCPROFILER_API rocprofiler_status_t rocprofiler_query_hip_tracer_api_data_info(
     rocprofiler_session_id_t session_id, rocprofiler_tracer_hip_api_data_info_t kind,
-    rocprofiler_tracer_api_data_handle_t api_data_id, rocprofiler_tracer_operation_id_t operation_id,
-    char** data) ROCPROFILER_VERSION_9_0;
+    rocprofiler_tracer_api_data_handle_t api_data_id,
+    rocprofiler_tracer_operation_id_t operation_id, char** data) ROCPROFILER_VERSION_9_0;
 
 /** @} */
 
@@ -1545,8 +1546,12 @@ typedef struct {
   rocprofiler_thread_id_t thread_id;
   /**
    * API Tracing phase (Enter/Exit/None(Activity Records/Asynchronous Output Records))
-  */
+   */
   rocprofiler_api_tracing_phase_t phase;
+  /**
+   * Kernel Name for HIP API calls that launches kernels or ROCTx message for ROCTx api calls
+   */
+  const char* name;
 } rocprofiler_record_tracer_t;
 
 /**
@@ -1656,9 +1661,9 @@ typedef struct {
  * @param[in] buffer_id The buffer id associated with that record
  */
 typedef void (*rocprofiler_buffer_callback_t)(const rocprofiler_record_header_t* begin,
-                                            const rocprofiler_record_header_t* end,
-                                            rocprofiler_session_id_t session_id,
-                                            rocprofiler_buffer_id_t buffer_id);
+                                              const rocprofiler_record_header_t* end,
+                                              rocprofiler_session_id_t session_id,
+                                              rocprofiler_buffer_id_t buffer_id);
 
 /**
  * Flush specific Buffer
@@ -1674,8 +1679,8 @@ typedef void (*rocprofiler_buffer_callback_t)(const rocprofiler_record_header_t*
  * @retval ::ROCPROFILER_STATUS_ERROR_CORRUPTED_SESSION_BUFFER may return if
  * the session buffer is corrupted
  */
-ROCPROFILER_API rocprofiler_status_t rocprofiler_flush_data(rocprofiler_session_id_t session_id,
-                                                      rocprofiler_buffer_id_t buffer_id) ROCPROFILER_VERSION_9_0;
+ROCPROFILER_API rocprofiler_status_t rocprofiler_flush_data(
+    rocprofiler_session_id_t session_id, rocprofiler_buffer_id_t buffer_id) ROCPROFILER_VERSION_9_0;
 
 /**
  * Get a pointer to the next profiling record.
@@ -1696,10 +1701,9 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_flush_data(rocprofiler_session_
  * get the next record because of corrupted data reported by the previous
  * record
  */
-ROCPROFILER_API rocprofiler_status_t rocprofiler_next_record(const rocprofiler_record_header_t* record,
-                                                       const rocprofiler_record_header_t** next,
-                                                       rocprofiler_session_id_t session_id,
-                                                       rocprofiler_buffer_id_t buffer_id) ROCPROFILER_VERSION_9_0;
+ROCPROFILER_API rocprofiler_status_t rocprofiler_next_record(
+    const rocprofiler_record_header_t* record, const rocprofiler_record_header_t** next,
+    rocprofiler_session_id_t session_id, rocprofiler_buffer_id_t buffer_id) ROCPROFILER_VERSION_9_0;
 
 /** @} */
 
@@ -1761,8 +1765,9 @@ typedef enum {
  * @retval ::ROCPROFILER_STATUS_ERROR_NOT_INITIALIZED, if rocprofiler_initialize
  * wasn't called before or if rocprofiler_finalize is called
  */
-ROCPROFILER_API rocprofiler_status_t rocprofiler_create_session(rocprofiler_replay_mode_t replay_mode,
-                                                          rocprofiler_session_id_t* session_id) ROCPROFILER_VERSION_9_0;
+ROCPROFILER_API rocprofiler_status_t
+rocprofiler_create_session(rocprofiler_replay_mode_t replay_mode,
+                           rocprofiler_session_id_t* session_id) ROCPROFILER_VERSION_9_0;
 
 /**
  * Destroy Session
@@ -1779,7 +1784,8 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_create_session(rocprofiler_repl
  * @retval ::ROCPROFILER_STATUS_ERROR_SESSION_NOT_FOUND may return if
  * the session is not found
  */
-ROCPROFILER_API rocprofiler_status_t rocprofiler_destroy_session(rocprofiler_session_id_t session_id) ROCPROFILER_VERSION_9_0;
+ROCPROFILER_API rocprofiler_status_t
+rocprofiler_destroy_session(rocprofiler_session_id_t session_id) ROCPROFILER_VERSION_9_0;
 
 /** \defgroup session_filter_group Session Filters Handling
  * \ingroup sessions_handling_group
@@ -1920,22 +1926,22 @@ typedef struct {
 
 } rocprofiler_spm_parameter_t;
 
-typedef enum{
+typedef enum {
   ROCPROFILER_COUNTERS_SAMPLER_PCIE_COUNTERS = 0,
   ROCPROFILER_COUNTERS_SAMPLER_XGMI_COUNTERS = 1
 } rocprofiler_counters_sampler_counter_type_t;
 
-typedef struct{
+typedef struct {
   char* name;
   rocprofiler_counters_sampler_counter_type_t type;
 } rocprofiler_counters_sampler_counter_input_t;
 
-typedef struct{
+typedef struct {
   rocprofiler_counters_sampler_counter_type_t type;
   rocprofiler_record_counter_value_t value;
 } rocprofiler_counters_sampler_counter_output_t;
 
-typedef struct{
+typedef struct {
   /**
    * Counters to profile
    */
@@ -1960,9 +1966,9 @@ typedef struct{
    * Preferred agents to collect counters from
    */
   int gpu_agent_index;
-}rocprofiler_counters_sampler_parameters_t;
+} rocprofiler_counters_sampler_parameters_t;
 
-typedef struct{
+typedef struct {
   /**
    * ROCMtool General Record base header to identify the id and kind of every
    * record
@@ -1982,7 +1988,7 @@ typedef struct{
    * Number of counter values
    */
   uint32_t num_counters;
-}rocprofiler_record_counters_sampler_t;
+} rocprofiler_record_counters_sampler_t;
 
 /**
  * Filter Kind Data
@@ -2033,12 +2039,10 @@ typedef union {
  * @retval ::ROCPROFILER_STATUS_ERROR_FILTER_DATA_CORRUPTED Data can't be read or
  * corrupted
  */
-ROCPROFILER_API rocprofiler_status_t rocprofiler_create_filter(rocprofiler_session_id_t session_id,
-                                                         rocprofiler_filter_kind_t filter_kind,
-                                                         rocprofiler_filter_data_t data,
-                                                         uint64_t data_count,
-                                                         rocprofiler_filter_id_t* filter_id,
-                                                         rocprofiler_filter_property_t property) ROCPROFILER_VERSION_9_0;
+ROCPROFILER_API rocprofiler_status_t rocprofiler_create_filter(
+    rocprofiler_session_id_t session_id, rocprofiler_filter_kind_t filter_kind,
+    rocprofiler_filter_data_t data, uint64_t data_count, rocprofiler_filter_id_t* filter_id,
+    rocprofiler_filter_property_t property) ROCPROFILER_VERSION_9_0;
 
 /**
  * Set Session Filter Buffer
@@ -2057,9 +2061,9 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_create_filter(rocprofiler_sessi
  * @retval ::ROCPROFILER_STATUS_SESSION_NOT_FOUND Couldn't find session
  * associated with the given session identifier
  */
-ROCPROFILER_API rocprofiler_status_t rocprofiler_set_filter_buffer(rocprofiler_session_id_t session_id,
-                                                             rocprofiler_filter_id_t filter_id,
-                                                             rocprofiler_buffer_id_t buffer_id) ROCPROFILER_VERSION_9_0;
+ROCPROFILER_API rocprofiler_status_t rocprofiler_set_filter_buffer(
+    rocprofiler_session_id_t session_id, rocprofiler_filter_id_t filter_id,
+    rocprofiler_buffer_id_t buffer_id) ROCPROFILER_VERSION_9_0;
 
 /**
  * Synchronous Callback
@@ -2070,7 +2074,7 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_set_filter_buffer(rocprofiler_s
  * @param[in] session_id The session id associated with that record
  */
 typedef void (*rocprofiler_sync_callback_t)(rocprofiler_record_tracer_t record,
-                                          rocprofiler_session_id_t session_id);
+                                            rocprofiler_session_id_t session_id);
 
 /**
  * Set Session API Tracing Filter Synchronous Callback
@@ -2111,8 +2115,8 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_set_api_trace_sync_callback(
  * associated with the given session identifier
  * @retval ::ROCPROFILER_STATUS_FILTER_NOT_FOUND Couldn't find session filter
  */
-ROCPROFILER_API rocprofiler_status_t rocprofiler_destroy_filter(rocprofiler_session_id_t session_id,
-                                                          rocprofiler_filter_id_t filter_id) ROCPROFILER_VERSION_9_0;
+ROCPROFILER_API rocprofiler_status_t rocprofiler_destroy_filter(
+    rocprofiler_session_id_t session_id, rocprofiler_filter_id_t filter_id) ROCPROFILER_VERSION_9_0;
 
 /**
  * Create Buffer
@@ -2166,7 +2170,8 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_create_buffer(
  */
 ROCPROFILER_API rocprofiler_status_t rocprofiler_set_buffer_properties(
     rocprofiler_session_id_t session_id, rocprofiler_buffer_id_t buffer_id,
-    rocprofiler_buffer_property_t* buffer_properties, uint32_t buffer_properties_count) ROCPROFILER_VERSION_9_0;
+    rocprofiler_buffer_property_t* buffer_properties,
+    uint32_t buffer_properties_count) ROCPROFILER_VERSION_9_0;
 
 /**
  * Destroy Buffer
@@ -2187,8 +2192,8 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_set_buffer_properties(
  * @retval ::ROCPROFILER_STATUS_ERROR_PROPERTY_DATA_CORRUPTED Data can't be read
  * or corrupted
  */
-ROCPROFILER_API rocprofiler_status_t rocprofiler_destroy_buffer(rocprofiler_session_id_t session_id,
-                                                          rocprofiler_buffer_id_t buffer_id) ROCPROFILER_VERSION_9_0;
+ROCPROFILER_API rocprofiler_status_t rocprofiler_destroy_buffer(
+    rocprofiler_session_id_t session_id, rocprofiler_buffer_id_t buffer_id) ROCPROFILER_VERSION_9_0;
 
 /** @} */
 
@@ -2242,7 +2247,8 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_create_ready_session(
     rocprofiler_replay_mode_t replay_mode, rocprofiler_filter_kind_t filter_kind,
     rocprofiler_filter_data_t data, uint64_t data_count, size_t buffer_size,
     rocprofiler_buffer_callback_t buffer_callback, rocprofiler_session_id_t* session_id,
-    rocprofiler_filter_property_t property, rocprofiler_sync_callback_t callback) ROCPROFILER_VERSION_9_0;
+    rocprofiler_filter_property_t property,
+    rocprofiler_sync_callback_t callback) ROCPROFILER_VERSION_9_0;
 
 // TODO(aelwazir): Multiple sessions activate for different set of filters
 /**
@@ -2264,7 +2270,8 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_create_ready_session(
  * @retval ::ROCPROFILER_STATUS_ERROR_HAS_ACTIVE_SESSION if there is already
  * active session
  */
-ROCPROFILER_API rocprofiler_status_t rocprofiler_start_session(rocprofiler_session_id_t session_id) ROCPROFILER_VERSION_9_0;
+ROCPROFILER_API rocprofiler_status_t rocprofiler_start_session(rocprofiler_session_id_t session_id)
+    ROCPROFILER_VERSION_9_0;
 
 /**
  * Deactivate Session
@@ -2280,7 +2287,8 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_start_session(rocprofiler_sessi
  * active
  */
 
-ROCPROFILER_API rocprofiler_status_t rocprofiler_terminate_session(rocprofiler_session_id_t session_id) ROCPROFILER_VERSION_9_0;
+ROCPROFILER_API rocprofiler_status_t
+rocprofiler_terminate_session(rocprofiler_session_id_t session_id) ROCPROFILER_VERSION_9_0;
 
 /** \defgroup session_range_group Session Range Labeling
  * \ingroup sessions_handling_group
@@ -2300,7 +2308,8 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_terminate_session(rocprofiler_s
  * @retval ::ROCPROFILER_STATUS_ERROR_CORRUPTED_LABEL_DATA may return if
  * the label pointer can't be read by the API
  */
-ROCPROFILER_API rocprofiler_status_t rocprofiler_push_range(const char* label) ROCPROFILER_VERSION_9_0;
+ROCPROFILER_API rocprofiler_status_t rocprofiler_push_range(const char* label)
+    ROCPROFILER_VERSION_9_0;
 
 /**
  * Setting an endpoint for a range
@@ -2396,8 +2405,8 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_device_profiling_session_create
  * @retval ::ROCPROFILER_STATUS_SUCCESS The function has been executed
  * successfully.
  */
-ROCPROFILER_API rocprofiler_status_t
-rocprofiler_device_profiling_session_start(rocprofiler_session_id_t session_id) ROCPROFILER_VERSION_9_0;
+ROCPROFILER_API rocprofiler_status_t rocprofiler_device_profiling_session_start(
+    rocprofiler_session_id_t session_id) ROCPROFILER_VERSION_9_0;
 
 /**
  * Poll the device profiling session to read counters from the GPU device.
@@ -2412,7 +2421,8 @@ rocprofiler_device_profiling_session_start(rocprofiler_session_id_t session_id) 
  * successfully.
  */
 ROCPROFILER_API rocprofiler_status_t rocprofiler_device_profiling_session_poll(
-    rocprofiler_session_id_t session_id, rocprofiler_device_profile_metric_t* data) ROCPROFILER_VERSION_9_0;
+    rocprofiler_session_id_t session_id,
+    rocprofiler_device_profile_metric_t* data) ROCPROFILER_VERSION_9_0;
 
 /**
  * Stop the device profiling session that was created previously.
@@ -2422,8 +2432,8 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_device_profiling_session_poll(
  * @retval ::ROCPROFILER_STATUS_SUCCESS The function has been executed
  * successfully.
  */
-ROCPROFILER_API rocprofiler_status_t
-rocprofiler_device_profiling_session_stop(rocprofiler_session_id_t session_id) ROCPROFILER_VERSION_9_0;
+ROCPROFILER_API rocprofiler_status_t rocprofiler_device_profiling_session_stop(
+    rocprofiler_session_id_t session_id) ROCPROFILER_VERSION_9_0;
 
 /**
  * Destroy the device profiling session that was created previously.
@@ -2432,8 +2442,8 @@ rocprofiler_device_profiling_session_stop(rocprofiler_session_id_t session_id) R
  * @retval ::ROCPROFILER_STATUS_SUCCESS The function has been executed
  * successfully.
  */
-ROCPROFILER_API rocprofiler_status_t
-rocprofiler_device_profiling_session_destroy(rocprofiler_session_id_t session_id) ROCPROFILER_VERSION_9_0;
+ROCPROFILER_API rocprofiler_status_t rocprofiler_device_profiling_session_destroy(
+    rocprofiler_session_id_t session_id) ROCPROFILER_VERSION_9_0;
 
 /** @} */
 

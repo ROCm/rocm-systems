@@ -88,8 +88,7 @@ ROCPROFILER_EXPORT int rocprofiler_plugin_write_buffer_records(
   return 0;
 }
 
-ROCPROFILER_EXPORT int rocprofiler_plugin_write_record(
-    const rocprofiler_record_tracer_t record, rocprofiler_plugin_tracer_extra_data_t tracer_data) {
+ROCPROFILER_EXPORT int rocprofiler_plugin_write_record(const rocprofiler_record_tracer_t record) {
   assert(the_plugin);
 
   if (record.header.id.handle == 0) {
@@ -97,7 +96,7 @@ ROCPROFILER_EXPORT int rocprofiler_plugin_write_record(
   }
 
   try {
-    the_plugin->HandleTracerRecord(record, rocprofiler_session_id_t{0}, tracer_data);
+    the_plugin->HandleTracerRecord(record, rocprofiler_session_id_t{0});
   } catch (const std::exception& exc) {
     std::cerr << "rocprofiler_plugin_write_record(): " << exc.what() << std::endl;
     return -1;

@@ -62,9 +62,10 @@
 namespace fs = std::experimental::filesystem;
 
 // Macro to check ROCProfiler calls status
-#define CHECK_ROCPROFILER(call)                                                                      \
+#define CHECK_ROCPROFILER(call)                                                                    \
   do {                                                                                             \
-    if ((call) != ROCPROFILER_STATUS_SUCCESS) rocmtools::fatal("Error: ROCProfiler API Call Error!");  \
+    if ((call) != ROCPROFILER_STATUS_SUCCESS)                                                      \
+      rocmtools::fatal("Error: ROCProfiler API Call Error!");                                      \
   } while (false)
 TRACE_BUFFER_INSTANTIATE();
 namespace {
@@ -126,7 +127,8 @@ class rocprofiler_plugin_t {
     assert(is_valid());
     return rocprofiler_plugin_write_buffer_records_(std::forward<Args>(args)...);
   }
-  private:
+
+ private:
   bool valid_{false};
   void* plugin_handle_;
 
@@ -140,83 +142,68 @@ std::optional<rocprofiler_plugin_t> plugin;
 struct hsa_api_trace_entry_t {
   std::atomic<uint32_t> valid;
   rocprofiler_record_tracer_t record;
-  hsa_api_data_t* api_data;
-  const char* function_name;
-  hsa_api_trace_entry_t(rocprofiler_record_tracer_t tracer_record, const char* function_name_str,
-                        const hsa_api_data_t* data)
+  hsa_api_data_t api_data;
+
+  hsa_api_trace_entry_t(rocprofiler_record_tracer_t tracer_record, const hsa_api_data_t* data)
       : valid(rocprofiler::TRACE_ENTRY_INIT) {
     record = tracer_record;
-    function_name = function_name_str ? strdup(function_name_str) : nullptr;
-    api_data = reinterpret_cast<hsa_api_data_t*>(malloc(sizeof(hsa_api_data_t)));
-    memcpy(api_data, data, sizeof(hsa_api_data_t));
-    record.api_data_handle.handle = api_data;
+    api_data = *data;
+    record.api_data_handle.handle = &api_data;
   }
-  ~hsa_api_trace_entry_t() {
-    if (function_name != nullptr) free(const_cast<char*>(function_name));
-    if (api_data != nullptr) free(const_cast<hsa_api_data_t*>(api_data));
-  }
+  ~hsa_api_trace_entry_t() {}
 };
 
 struct roctx_trace_entry_t {
   std::atomic<rocprofiler::TraceEntryState> valid;
-  const char* roctx_message;
   rocprofiler_record_tracer_t record;
+
   roctx_trace_entry_t(rocprofiler_record_tracer_t tracer_record, const char* roctx_message_str)
       : valid(rocprofiler::TRACE_ENTRY_INIT) {
     record = tracer_record;
-    roctx_message = roctx_message_str ? strdup(roctx_message_str) : nullptr;
-    record.api_data_handle.handle = roctx_message;
+    record.name = roctx_message_str ? strdup(roctx_message_str) : nullptr;
+    record.api_data_handle.handle = roctx_message_str;
   }
   ~roctx_trace_entry_t() {
-    if (roctx_message != nullptr) free(const_cast<char*>(roctx_message));
+    if (record.name != nullptr) free(const_cast<char*>(record.name));
   }
 };
 
 struct hip_api_trace_entry_t {
-
   std::atomic<uint32_t> valid;
-  hip_api_data_t* api_data;
   rocprofiler_record_tracer_t record;
-  const char* function_name;
-  const char* kernel_name;
+
+  union {
+    hip_api_data_t api_data;
+  };
 
   hip_api_trace_entry_t(rocprofiler_record_tracer_t tracer_record, const char* kernel_name_str,
-                        const char* function_name_str, const hip_api_data_t* data)
+                        const hip_api_data_t* data)
       : valid(rocprofiler::TRACE_ENTRY_INIT) {
     record = tracer_record;
-    kernel_name = kernel_name_str ? strdup(kernel_name_str) : nullptr;
-    function_name = function_name_str ? strdup(function_name_str) : nullptr;
 
-    api_data = reinterpret_cast<hip_api_data_t*>(malloc(sizeof(hip_api_data_t)));
-    memcpy(api_data, data, sizeof(hip_api_data_t));
-    record.api_data_handle.handle = api_data;
+    api_data = *data;
+    record.api_data_handle.handle = &api_data;
+    record.name = kernel_name_str ? strdup(kernel_name_str) : nullptr;
   }
   ~hip_api_trace_entry_t() {
-    if (function_name != nullptr) free(const_cast<char*>(function_name));
-    if (kernel_name != nullptr) free(const_cast<char*>(kernel_name));
-    if (api_data != nullptr) free(const_cast<hip_api_data_t*>(api_data));
+    if (record.name != nullptr) free(const_cast<char*>(record.name));
   }
 };
 
 rocprofiler::TraceBuffer<hip_api_trace_entry_t> hip_api_buffer(
     "HIP API", 0x200000, [](hip_api_trace_entry_t* entry) {
       assert(plugin && "plugin is not initialized");
-      plugin->write_callback_record(
-          entry->record,
-          rocprofiler_plugin_tracer_extra_data_t{.function_name = entry->function_name,
-                                                 .kernel_name = entry->kernel_name});
+      plugin->write_callback_record(entry->record);
     });
 rocprofiler::TraceBuffer<hsa_api_trace_entry_t> hsa_api_buffer(
     "HSA API", 0x200000, [](hsa_api_trace_entry_t* entry) {
       assert(plugin && "plugin is not initialized");
-      plugin->write_callback_record(
-          entry->record,
-          rocprofiler_plugin_tracer_extra_data_t{.function_name = entry->function_name});
+      plugin->write_callback_record(entry->record);
     });
 rocprofiler::TraceBuffer<roctx_trace_entry_t> roctx_trace_buffer(
     "rocTX API", 0x200000, [](roctx_trace_entry_t* entry) {
       assert(plugin && "plugin is not initialized");
-      plugin->write_callback_record(entry->record, rocprofiler_plugin_tracer_extra_data_t{});
+      plugin->write_callback_record(entry->record);
     });
 
 }  // namespace
@@ -232,7 +219,7 @@ std::vector<std::string> GetCounterNames() {
   const char* line_c_str = getenv("ROCPROFILER_COUNTERS");
   if (line_c_str) {
     std::string line = line_c_str;
-    //skip commented lines
+    // skip commented lines
     auto found = line.find_first_not_of(" \t");
     if (found != std::string::npos) {
       if (line[found] == '#') return {};
@@ -257,10 +244,9 @@ std::vector<std::string> GetCounterNames() {
   return counters;
 }
 
-typedef std::tuple<
-  std::vector<std::pair<rocprofiler_att_parameter_name_t, uint32_t>>,
-  std::vector<std::string>, std::vector<std::string>
-> att_parsed_input_t;
+typedef std::tuple<std::vector<std::pair<rocprofiler_att_parameter_name_t, uint32_t>>,
+                   std::vector<std::string>, std::vector<std::string>>
+    att_parsed_input_t;
 
 att_parsed_input_t GetATTParams() {
   std::vector<std::pair<rocprofiler_att_parameter_name_t, uint32_t>> parameters;
@@ -282,10 +268,7 @@ att_parsed_input_t GetATTParams() {
 
   // Default values used for token generation.
   std::unordered_map<std::string, uint32_t> default_params = {
-    {"ATT_MASK", 0x3F01},
-    {"TOKEN_MASK", 0x344B},
-    {"TOKEN_MASK2", 0xFFFFFFF}
-  };
+      {"ATT_MASK", 0x3F01}, {"TOKEN_MASK", 0x344B}, {"TOKEN_MASK2", 0xFFFFFFF}};
 
   bool started_att_counters = false;
 
@@ -300,11 +283,10 @@ att_parsed_input_t GetATTParams() {
 
   while (getline(trace_file, line)) {
     if (line.find("//") != std::string::npos)
-      line = line.substr(0, line.find("//")); // Remove comments
+      line = line.substr(0, line.find("//"));  // Remove comments
 
     auto pos = line.find('=');
-    if (pos == std::string::npos)
-      continue;
+    if (pos == std::string::npos) continue;
 
     std::string param_name = line.substr(0, pos);
     uint32_t param_value;
@@ -313,21 +295,21 @@ att_parsed_input_t GetATTParams() {
     if (!started_att_counters) continue;
 
     if (param_name == "KERNEL") {
-      kernel_names.push_back(line.substr(pos+1));
+      kernel_names.push_back(line.substr(pos + 1));
       continue;
     } else if (param_name == "PERFCOUNTER") {
-      counters_names.push_back(line.substr(pos+1));
+      counters_names.push_back(line.substr(pos + 1));
       continue;
-    } else { // param_value is a number
+    } else {  // param_value is a number
       try {
-        auto hexa_pos = line.find("0x", pos);                 // Is it hex?
+        auto hexa_pos = line.find("0x", pos);  // Is it hex?
         if (hexa_pos != std::string::npos)
-          param_value = stoi(line.substr(hexa_pos+2), 0, 16); // hexadecimal
+          param_value = stoi(line.substr(hexa_pos + 2), 0, 16);  // hexadecimal
         else
-          param_value = stoi(line.substr(pos+1), 0, 10);      // decimal
-      } catch(...) {
+          param_value = stoi(line.substr(pos + 1), 0, 10);  // decimal
+      } catch (...) {
         printf("Error: Invalid parameter value %s - (%s)\n",
-              line.substr(pos+1, line.size()).c_str(), line.c_str());
+               line.substr(pos + 1, line.size()).c_str(), line.c_str());
         exit(1);
       }
     }
@@ -339,13 +321,13 @@ att_parsed_input_t GetATTParams() {
       continue;
     } else if (param_name == "SIMD_MASK") {
       default_params["ATT_MASK"] &= ~0xF00;
-      default_params["ATT_MASK"] |= (param_value<<8) & 0xF00;
+      default_params["ATT_MASK"] |= (param_value << 8) & 0xF00;
       continue;
     } else if (param_name == "att: TARGET_CU") {
       default_params["ATT_MASK"] &= ~0xF;
       default_params["ATT_MASK"] |= param_value & 0xF;
     } else if (param_name == "PERFCOUNTER_ID") {
-      param_value = param_value | (param_value ? (0xF<<24) : 0);
+      param_value = param_value | (param_value ? (0xF << 24) : 0);
     } else if (param_name == "REDUCED_MEMORY") {
       default_params["TOKEN_MASK2"] = 0;
       continue;
@@ -353,11 +335,14 @@ att_parsed_input_t GetATTParams() {
 
     if (ATT_PARAM_NAMES.find(param_name) != ATT_PARAM_NAMES.end()) {
       parameters.push_back(std::make_pair(ATT_PARAM_NAMES[param_name], param_value));
-      try { default_params.erase(param_name); } catch(...) {};
+      try {
+        default_params.erase(param_name);
+      } catch (...) {
+      };
     } else {
-        printf("Error: Invalid parameter name: %s  - (%s)\nList of available params:\n",
-                param_name.c_str(), line.c_str());
-        for (auto& name : ATT_PARAM_NAMES) printf("%s\n", name.first.c_str());
+      printf("Error: Invalid parameter name: %s  - (%s)\nList of available params:\n",
+             param_name.c_str(), line.c_str());
+      for (auto& name : ATT_PARAM_NAMES) printf("%s\n", name.first.c_str());
     }
   }
   trace_file.close();
@@ -400,7 +385,7 @@ void plugins_load() {
   if (Dl_info dl_info; dladdr((void*)plugins_load, &dl_info) != 0) {
     const char* plugin_name = getenv("ROCPROFILER_PLUGIN_LIB");
     if (plugin_name == nullptr) {
-        plugin_name = "libfile_plugin.so";
+      plugin_name = "libfile_plugin.so";
     }
     if (!plugin.emplace(fs::path(dl_info.dli_fname).replace_filename(plugin_name)).is_valid()) {
       plugin.reset();
@@ -408,23 +393,15 @@ void plugins_load() {
   }
 }
 /*
-* A callback function for synchronous trace records.
-* This function queries the api infoemation and populates the
-* api_trace buffer and adds it to the trace buffer.
-*/
-void sync_api_trace_callback(rocprofiler_record_tracer_t tracer_record,  rocprofiler_session_id_t session_id) {
+ * A callback function for synchronous trace records.
+ * This function queries the api infoemation and populates the
+ * api_trace buffer and adds it to the trace buffer.
+ */
+void sync_api_trace_callback(rocprofiler_record_tracer_t tracer_record,
+                             rocprofiler_session_id_t session_id) {
   if (tracer_record.domain == ACTIVITY_DOMAIN_HIP_API) {
-    size_t kernel_name_size = 0, function_name_size = 0;
-    char *function_name_c = nullptr, *kernel_name_c = nullptr;
-    CHECK_ROCPROFILER(rocprofiler_query_hip_tracer_api_data_info_size(
-        session_id, ROCPROFILER_HIP_FUNCTION_NAME, tracer_record.api_data_handle,
-        tracer_record.operation_id, &function_name_size));
-    if (function_name_size > 1) {
-      //function_name_c = (char*)malloc(function_name_size);
-      CHECK_ROCPROFILER(rocprofiler_query_hip_tracer_api_data_info(
-          session_id, ROCPROFILER_HIP_FUNCTION_NAME, tracer_record.api_data_handle,
-          tracer_record.operation_id, &function_name_c));
-    }
+    size_t kernel_name_size = 0;
+    char* kernel_name_c = nullptr;
     CHECK_ROCPROFILER(rocprofiler_query_hip_tracer_api_data_info_size(
         session_id, ROCPROFILER_HIP_KERNEL_NAME, tracer_record.api_data_handle,
         tracer_record.operation_id, &kernel_name_size));
@@ -443,35 +420,45 @@ void sync_api_trace_callback(rocprofiler_record_tracer_t tracer_record,  rocprof
           session_id, ROCPROFILER_HIP_API_DATA, tracer_record.api_data_handle,
           tracer_record.operation_id, &data));
     hip_api_data_t* hip_api_data = reinterpret_cast<hip_api_data_t*>(data);
+    if (tracer_record.phase == ROCPROFILER_PHASE_ENTER) {
+      rocprofiler_timestamp_t timestamp;
+      CHECK_ROCPROFILER(rocprofiler_get_timestamp(&timestamp));
+      *hip_api_data->phase_data = timestamp.value;
+      tracer_record.timestamps = rocprofiler_record_header_timestamp_t{.begin = timestamp};
+    } else {
+      rocprofiler_timestamp_t timestamp;
+      CHECK_ROCPROFILER(rocprofiler_get_timestamp(&timestamp));
+      tracer_record.timestamps = rocprofiler_record_header_timestamp_t{
+          .begin = rocprofiler_timestamp_t{reinterpret_cast<uint64_t>(hip_api_data->phase_data)},
+          .end = timestamp};
+    }
     hip_api_trace_entry_t& entry = hip_api_buffer.Emplace(
-        tracer_record,
-         (const char*)kernel_name_c ? strdup(kernel_name_c) : nullptr,
-        (const char*)(function_name_c) ? strdup(function_name_c):nullptr,
-        hip_api_data);
+        tracer_record, (const char*)kernel_name_c ? strdup(kernel_name_c) : nullptr, hip_api_data);
     entry.valid.store(rocprofiler::TRACE_ENTRY_COMPLETE, std::memory_order_release);
   }
   if (tracer_record.domain == ACTIVITY_DOMAIN_HSA_API) {
-    size_t function_name_size = 0;
-    char *function_name_c = nullptr;
-    CHECK_ROCPROFILER(rocprofiler_query_hsa_tracer_api_data_info_size(
-        session_id, ROCPROFILER_HSA_FUNCTION_NAME, tracer_record.api_data_handle,
-        tracer_record.operation_id, &function_name_size));
-    if (function_name_size > 1) {
-
-      CHECK_ROCPROFILER(rocprofiler_query_hsa_tracer_api_data_info(
-          session_id, ROCPROFILER_HSA_FUNCTION_NAME, tracer_record.api_data_handle,
-          tracer_record.operation_id, &function_name_c));
-    }
     char* data = nullptr;
-    size_t size=0;
+    size_t size = 0;
     CHECK_ROCPROFILER(rocprofiler_query_hip_tracer_api_data_info_size(
-        session_id, ROCPROFILER_HIP_API_DATA, tracer_record.api_data_handle, tracer_record.operation_id, &size));
+        session_id, ROCPROFILER_HIP_API_DATA, tracer_record.api_data_handle,
+        tracer_record.operation_id, &size));
     CHECK_ROCPROFILER(rocprofiler_query_hip_tracer_api_data_info(
         session_id, ROCPROFILER_HIP_API_DATA, tracer_record.api_data_handle,
         tracer_record.operation_id, &data));
     hsa_api_data_t* hsa_api_data = reinterpret_cast<hsa_api_data_t*>(data);
-    hsa_api_trace_entry_t& entry =
-        hsa_api_buffer.Emplace(tracer_record, (const char*)(function_name_c), hsa_api_data);
+    if (tracer_record.phase == ROCPROFILER_PHASE_ENTER) {
+      rocprofiler_timestamp_t timestamp;
+      CHECK_ROCPROFILER(rocprofiler_get_timestamp(&timestamp));
+      *hsa_api_data->phase_data = timestamp.value;
+      tracer_record.timestamps = rocprofiler_record_header_timestamp_t{.begin = timestamp};
+    } else {
+      rocprofiler_timestamp_t timestamp;
+      CHECK_ROCPROFILER(rocprofiler_get_timestamp(&timestamp));
+      tracer_record.timestamps = rocprofiler_record_header_timestamp_t{
+          .begin = rocprofiler_timestamp_t{reinterpret_cast<uint64_t>(hsa_api_data->phase_data)},
+          .end = timestamp};
+    }
+    hsa_api_trace_entry_t& entry = hsa_api_buffer.Emplace(tracer_record, hsa_api_data);
     entry.valid.store(rocprofiler::TRACE_ENTRY_COMPLETE, std::memory_order_release);
   }
   if (tracer_record.domain == ACTIVITY_DOMAIN_ROCTX) {
@@ -484,21 +471,17 @@ void sync_api_trace_callback(rocprofiler_record_tracer_t tracer_record,  rocprof
       roctx_message_str = (char*)malloc(roctx_message_size * sizeof(char));
       CHECK_ROCPROFILER(rocprofiler_query_roctx_tracer_api_data_info(
           session_id, ROCPROFILER_ROCTX_MESSAGE, tracer_record.api_data_handle,
-          tracer_record.operation_id, &roctx_message_size));
-      if (roctx_message_size > 1) {
-        roctx_message_str =(char*)malloc(roctx_message_size * sizeof(char));
-        CHECK_ROCPROFILER(rocprofiler_query_roctx_tracer_api_data_info(
-            session_id, ROCPROFILER_ROCTX_MESSAGE, tracer_record.api_data_handle,
-            tracer_record.operation_id, &roctx_message_str));
-        if (roctx_message_str)
-          roctx_message_str ? rocmtools::cxx_demangle(std::string(strdup(roctx_message_str))).c_str() : nullptr;
-      }
-      roctx_trace_entry_t& entry = roctx_trace_buffer.Emplace(
-        tracer_record,
-        roctx_message_str);
-    entry.valid.store(rocprofiler::TRACE_ENTRY_COMPLETE, std::memory_order_release);
+          tracer_record.operation_id, &roctx_message_str));
+      if (roctx_message_str)
+        roctx_message_str ? std::string(strdup(roctx_message_str)).c_str() : nullptr;
     }
+    rocprofiler_timestamp_t timestamp;
+    CHECK_ROCPROFILER(rocprofiler_get_timestamp(&timestamp));
+    tracer_record.timestamps = rocprofiler_record_header_timestamp_t{.begin = timestamp};
+    roctx_trace_entry_t& entry = roctx_trace_buffer.Emplace(tracer_record, roctx_message_str);
+    entry.valid.store(rocprofiler::TRACE_ENTRY_COMPLETE, std::memory_order_release);
   }
+}
 
 void wait_for_amdsys() {
   while (amd_sys_handler.load(std::memory_order_relaxed)) {
@@ -577,8 +560,8 @@ ROCPROFILER_EXPORT extern const uint32_t HSA_AMD_TOOL_PRIORITY = 1025;
 The function updates the core api table function pointers to point to the
 interceptor functions in this file.
 */
-ROCPROFILER_EXPORT bool OnLoad(void* table, uint64_t runtime_version,
-                             uint64_t failed_tool_count, const char* const* failed_tool_names) {
+ROCPROFILER_EXPORT bool OnLoad(void* table, uint64_t runtime_version, uint64_t failed_tool_count,
+                               const char* const* failed_tool_names) {
   if (rocprofiler_version_major() != ROCPROFILER_VERSION_MAJOR ||
       rocprofiler_version_minor() < ROCPROFILER_VERSION_MINOR) {
     warning("the ROCProfiler API version is not compatible with this tool");
@@ -614,9 +597,11 @@ ROCPROFILER_EXPORT bool OnLoad(void* table, uint64_t runtime_version,
   std::vector<rocprofiler_tracer_activity_domain_t> apis_requested;
 
   if (getenv("ROCPROFILER_HIP_API_TRACE")) apis_requested.emplace_back(ACTIVITY_DOMAIN_HIP_API);
-  if (getenv("ROCPROFILER_HIP_ACTIVITY_TRACE")) apis_requested.emplace_back(ACTIVITY_DOMAIN_HIP_OPS);
+  if (getenv("ROCPROFILER_HIP_ACTIVITY_TRACE"))
+    apis_requested.emplace_back(ACTIVITY_DOMAIN_HIP_OPS);
   if (getenv("ROCPROFILER_HSA_API_TRACE")) apis_requested.emplace_back(ACTIVITY_DOMAIN_HSA_API);
-  if (getenv("ROCPROFILER_HSA_ACTIVITY_TRACE")) apis_requested.emplace_back(ACTIVITY_DOMAIN_HSA_OPS);
+  if (getenv("ROCPROFILER_HSA_ACTIVITY_TRACE"))
+    apis_requested.emplace_back(ACTIVITY_DOMAIN_HSA_OPS);
   if (getenv("ROCPROFILER_ROCTX_TRACE")) apis_requested.emplace_back(ACTIVITY_DOMAIN_ROCTX);
 
   std::vector<std::string> counters = GetCounterNames();
@@ -668,7 +653,7 @@ ROCPROFILER_EXPORT bool OnLoad(void* table, uint64_t runtime_version,
          rocprofiler_session_id_t session_id, rocprofiler_buffer_id_t buffer_id) {
         if (plugin) plugin->write_buffer_records(record, end_record, session_id, buffer_id);
       },
-      1<<20, &buffer_id));
+      1 << 20, &buffer_id));
   buffer_ids.emplace_back(buffer_id);
 
   rocprofiler_buffer_id_t buffer_id_1;
@@ -678,7 +663,7 @@ ROCPROFILER_EXPORT bool OnLoad(void* table, uint64_t runtime_version,
          rocprofiler_session_id_t session_id, rocprofiler_buffer_id_t buffer_id_1) {
         if (plugin) plugin->write_buffer_records(record, end_record, session_id, buffer_id_1);
       },
-      1<<20, &buffer_id_1));
+      1 << 20, &buffer_id_1));
   buffer_ids.emplace_back(buffer_id_1);
 
   for (rocprofiler_filter_kind_t filter_kind : filters_requested) {
@@ -697,8 +682,8 @@ ROCPROFILER_EXPORT bool OnLoad(void* table, uint64_t runtime_version,
       case ROCPROFILER_DISPATCH_TIMESTAMPS_COLLECTION: {
         rocprofiler_filter_id_t filter_id;
         [[maybe_unused]] rocprofiler_filter_property_t property = {};
-        CHECK_ROCPROFILER(rocprofiler_create_filter(session_id, filter_kind, rocprofiler_filter_data_t{},
-                                                0, &filter_id, property));
+        CHECK_ROCPROFILER(rocprofiler_create_filter(
+            session_id, filter_kind, rocprofiler_filter_data_t{}, 0, &filter_id, property));
         CHECK_ROCPROFILER(rocprofiler_set_filter_buffer(session_id, filter_id, buffer_id_1));
         filter_ids.emplace_back(filter_id);
         break;
@@ -708,11 +693,11 @@ ROCPROFILER_EXPORT bool OnLoad(void* table, uint64_t runtime_version,
         rocprofiler_filter_id_t filter_id;
         [[maybe_unused]] rocprofiler_filter_property_t property = {};
         CHECK_ROCPROFILER(rocprofiler_create_filter(session_id, filter_kind,
-                                                rocprofiler_filter_data_t{&apis_requested[0]},
-                                                apis_requested.size(), &filter_id, property));
+                                                    rocprofiler_filter_data_t{&apis_requested[0]},
+                                                    apis_requested.size(), &filter_id, property));
         CHECK_ROCPROFILER(rocprofiler_set_filter_buffer(session_id, filter_id, buffer_id));
-        CHECK_ROCPROFILER(
-            rocprofiler_set_api_trace_sync_callback(session_id, filter_id, sync_api_trace_callback));
+        CHECK_ROCPROFILER(rocprofiler_set_api_trace_sync_callback(session_id, filter_id,
+                                                                  sync_api_trace_callback));
         filter_ids.emplace_back(filter_id);
         break;
       }
@@ -730,8 +715,8 @@ ROCPROFILER_EXPORT bool OnLoad(void* table, uint64_t runtime_version,
 
         CHECK_ROCPROFILER(
             rocprofiler_create_filter(session_id, ROCPROFILER_ATT_TRACE_COLLECTION,
-                                    rocprofiler_filter_data_t{.att_parameters = &parameters[0]},
-                                    parameters.size(), &filter_id, property));
+                                      rocprofiler_filter_data_t{.att_parameters = &parameters[0]},
+                                      parameters.size(), &filter_id, property));
         CHECK_ROCPROFILER(rocprofiler_set_filter_buffer(session_id, filter_id, buffer_id_1));
         filter_ids.emplace_back(filter_id);
         break;
@@ -740,9 +725,8 @@ ROCPROFILER_EXPORT bool OnLoad(void* table, uint64_t runtime_version,
         puts("Enabling PC sampling");
         rocprofiler_filter_id_t filter_id;
         [[maybe_unused]] rocprofiler_filter_property_t property = {};
-        CHECK_ROCPROFILER(rocprofiler_create_filter(session_id, filter_kind,
-                                                rocprofiler_filter_data_t{},
-                                                0, &filter_id, property));
+        CHECK_ROCPROFILER(rocprofiler_create_filter(
+            session_id, filter_kind, rocprofiler_filter_data_t{}, 0, &filter_id, property));
         CHECK_ROCPROFILER(rocprofiler_set_filter_buffer(session_id, filter_id, buffer_id));
         filter_ids.emplace_back(filter_id);
         break;

@@ -630,8 +630,7 @@ Plugin::Plugin(const std::size_t packet_size, const fs::path& trace_dir,
 }
 
 void Plugin::HandleTracerRecord(const rocprofiler_record_tracer_t& record,
-                                const rocprofiler_session_id_t session_id,
-                                rocprofiler_plugin_tracer_extra_data_t tracer_data) {
+                                const rocprofiler_session_id_t session_id) {
   std::lock_guard<std::mutex> lock{lock_};
 
   // Depending on the domain, create and add an event record to the
@@ -668,8 +667,8 @@ void Plugin::HandleTracerRecord(const rocprofiler_record_tracer_t& record,
         std::string kernel_name;
         hip_api_data_t hip_api_data =
             *reinterpret_cast<const hip_api_data_t*>(record.api_data_handle.handle);
-        if (tracer_data.kernel_name != nullptr)
-          kernel_name = rocmtools::cxx_demangle(std::string(tracer_data.kernel_name));
+        if (record.name != nullptr)
+          kernel_name = rocmtools::cxx_demangle(std::string(record.name));
         else
           kernel_name = "";
         hip_api_tracer_.AddEventRecord(
@@ -708,9 +707,7 @@ void Plugin::HandleBufferRecords(const rocprofiler_record_header_t* begin,
                                  const rocprofiler_buffer_id_t buffer_id) {
   while (begin && begin < end) {
     if (begin->kind == ROCPROFILER_TRACER_RECORD) {
-      rocprofiler_plugin_tracer_extra_data_t tracer_data = {};
-      HandleTracerRecord(*reinterpret_cast<const rocprofiler_record_tracer_t*>(begin), session_id,
-                         tracer_data);
+      HandleTracerRecord(*reinterpret_cast<const rocprofiler_record_tracer_t*>(begin), session_id);
     } else {
       assert(begin->kind == ROCPROFILER_PROFILER_RECORD);
       HandleProfilerRecord(*reinterpret_cast<const rocprofiler_record_profiler_t*>(begin),

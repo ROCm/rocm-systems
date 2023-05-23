@@ -54,8 +54,7 @@ class Plugin final {
 
   // Handles a tracer record.
   void HandleTracerRecord(const rocprofiler_record_tracer_t& record,
-                          rocprofiler_session_id_t session_id,
-                          rocprofiler_plugin_tracer_extra_data_t tracer_data);
+                          rocprofiler_session_id_t session_id);
 
 
   // Handles a profiler record.
@@ -65,8 +64,8 @@ class Plugin final {
   // Handles tracer or profiler records from `begin` to `end`
   // (excluded).
   void HandleBufferRecords(const rocprofiler_record_header_t* begin,
-                           const rocprofiler_record_header_t* end, rocprofiler_session_id_t session_id,
-                           rocprofiler_buffer_id_t buffer_id);
+                           const rocprofiler_record_header_t* end,
+                           rocprofiler_session_id_t session_id, rocprofiler_buffer_id_t buffer_id);
 
  private:
   // rocTX barectf platform descriptor.

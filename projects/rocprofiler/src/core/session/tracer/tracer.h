@@ -40,11 +40,18 @@ typedef struct {
 namespace rocmtools {
 namespace tracer {
 
+char* GetApiCallFunctionName(rocprofiler_tracer_activity_domain_t domain,
+                             rocprofiler_tracer_operation_id_t operation_id);
+
+size_t GetApiCallFunctionNameSize(rocprofiler_tracer_activity_domain_t domain,
+                                  rocprofiler_tracer_operation_id_t operation_id);
+
 class Tracer {
  public:
   // Getting Buffer and/or sync callback
   Tracer(rocprofiler_session_id_t session_id, rocprofiler_sync_callback_t callback,
-         rocprofiler_buffer_id_t buffer_id, std::vector<rocprofiler_tracer_activity_domain_t> domains);
+         rocprofiler_buffer_id_t buffer_id,
+         std::vector<rocprofiler_tracer_activity_domain_t> domains);
   ~Tracer();
 
   rocprofiler_tracer_api_data_handle_t AddROCTxApiData(std::string api_data);
@@ -87,7 +94,8 @@ class Tracer {
  private:
   std::atomic<bool> is_active_{false};
   std::atomic<bool> roctracer_initiated_{false};
-  std::atomic<int (*)(rocprofiler_tracer_activity_domain_t domain, uint32_t operation_id, void* data)>
+  std::atomic<int (*)(rocprofiler_tracer_activity_domain_t domain, uint32_t operation_id,
+                      void* data)>
       roctx_report_activity_;
 
   std::vector<rocprofiler_tracer_activity_domain_t> domains_;

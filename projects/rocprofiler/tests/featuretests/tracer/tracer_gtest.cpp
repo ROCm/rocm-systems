@@ -84,7 +84,7 @@ void ApplicationParser::GetKernelInfoForRunningApplication(
       kinfo.function = sub;
     }
 
-    // corealtion-ids
+    // corelation-ids
     found = line.find("Correlation_ID");
     if (found != std::string::npos) {
       int spos = found;
@@ -287,16 +287,16 @@ TEST_F(AsyncCopyTest, WhenRunningTracerWithAppThenAsyncCorelationCountIsCorrect)
   }
   ASSERT_TRUE(corelation_pair.size());
 
-  uint32_t corealtion_count = 0;
+  uint32_t corelation_count = 0;
   // check if corelation id appears more than twice
   for (size_t i = 0; i < corelation_pair.size(); i++) {
     for (const auto& itr : current_kernel_info) {
       if ((itr.corelation_id == corelation_pair[i].second) &&
           (itr.record_id != corelation_pair[i].first)) {
-        corealtion_count++;
+        corelation_count++;
       }
     }
   }
 
-  EXPECT_GT(corealtion_count, corelation_pair.size());
+  EXPECT_GT(corelation_count, corelation_pair.size());
 }

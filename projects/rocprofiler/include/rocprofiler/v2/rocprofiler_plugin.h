@@ -80,7 +80,7 @@ extern "C" {
  * @return Returns 0 on success and -1 on error.
  */
 ROCPROFILER_EXPORT int rocprofiler_plugin_initialize(uint32_t rocprofiler_major_version,
-                                                 uint32_t rocprofiler_minor_version);
+                                                     uint32_t rocprofiler_minor_version);
 
 /**
  * Finalize plugin.
@@ -109,31 +109,9 @@ ROCPROFILER_EXPORT void rocprofiler_plugin_finalize();
  * @param[in] buffer_id Buffer ID
  * @return Returns 0 on success and -1 on error.
  */
-ROCPROFILER_EXPORT int rocprofiler_plugin_write_buffer_records(const rocprofiler_record_header_t* begin,
-                                                           const rocprofiler_record_header_t* end,
-                                                           rocprofiler_session_id_t session_id,
-                                                           rocprofiler_buffer_id_t buffer_id);
-
-
-typedef struct {
- /**
-  * @brief tracer extra data
-  *
-  * This is applicable only if ::ACTIVITY_DOMAIN_HSA or ACTIVITY_DOMAIN_HIP is the domain of the tracer record
- */
- const char* function_name;
-/**
-  * @brief tracer extra data
-  *
-  * This is applicable only if ::ACTIVITY_DOMAIN_HIP is the domain of the tracer record
- */
- union {
-  const char* kernel_name;
- };
-} rocprofiler_plugin_tracer_extra_data_t;
-
-
-
+ROCPROFILER_EXPORT int rocprofiler_plugin_write_buffer_records(
+    const rocprofiler_record_header_t* begin, const rocprofiler_record_header_t* end,
+    rocprofiler_session_id_t session_id, rocprofiler_buffer_id_t buffer_id);
 
 /**
  * Report Synchronous Record.
@@ -144,8 +122,7 @@ typedef struct {
  * @return Returns 0 on success and -1 on error.
  */
 
-ROCPROFILER_EXPORT int rocprofiler_plugin_write_record(rocprofiler_record_tracer_t record,
-   rocprofiler_plugin_tracer_extra_data_t tracer_extra_data);
+ROCPROFILER_EXPORT int rocprofiler_plugin_write_record(rocprofiler_record_tracer_t record);
 
 /** @} */
 

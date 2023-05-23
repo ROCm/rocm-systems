@@ -19,6 +19,16 @@
 namespace rocmtools {
 namespace tracer {
 
+char* GetApiCallFunctionName(rocprofiler_tracer_activity_domain_t domain,
+                             rocprofiler_tracer_operation_id_t operation_id) {
+  return const_cast<char*>(roctracer_op_string(domain, operation_id.id));
+}
+
+size_t GetApiCallFunctionNameSize(rocprofiler_tracer_activity_domain_t domain,
+                                  rocprofiler_tracer_operation_id_t operation_id) {
+  return std::string(const_cast<char*>(roctracer_op_string(domain, operation_id.id))).size();
+}
+
 std::mutex stream_ids_map_lock;
 std::map<uint64_t, std::pair<uint64_t, uint64_t>> stream_ids;
 std::map<uint64_t, uint64_t> used_stream_ids;
@@ -236,6 +246,7 @@ char* Tracer::GetHSAApiDataInfo(rocprofiler_tracer_hsa_api_data_info_t kind,
   }
   return nullptr;
 }
+
 char* Tracer::GetHIPApiDataInfo(rocprofiler_tracer_hip_api_data_info_t kind,
                                 rocprofiler_tracer_api_data_handle_t api_data_id,
                                 rocprofiler_tracer_operation_id_t operation_id) {
@@ -294,7 +305,7 @@ void api_callback(activity_domain_t domain, uint32_t cid, const void* callback_d
                 rocprofiler_tracer_api_data_handle_t{callback_data, sizeof(*data)},
                 rocprofiler_tracer_activity_correlation_id_t{0},
                 rocprofiler_record_header_timestamp_t{roctracer::hsa_support::timestamp_ns(),
-                                                    rocprofiler_timestamp_t{0}},
+                                                      rocprofiler_timestamp_t{0}},
                 0, 0, GetTid(), ROCPROFILER_PHASE_ENTER},
             args_data->session_id);
         break;
@@ -312,7 +323,8 @@ void api_callback(activity_domain_t domain, uint32_t cid, const void* callback_d
                   rocprofiler_tracer_operation_id_t{cid},
                   rocprofiler_tracer_api_data_handle_t{callback_data, sizeof(*data)},
                   rocprofiler_tracer_activity_correlation_id_t{data->correlation_id},
-                  rocprofiler_record_header_timestamp_t{rocprofiler_timestamp_t{0}, rocprofiler_timestamp_t{0}},
+                  rocprofiler_record_header_timestamp_t{rocprofiler_timestamp_t{0},
+                                                        rocprofiler_timestamp_t{0}},
                   0, 0, GetTid(), ROCPROFILER_PHASE_ENTER},
               args_data->session_id);
         } else {
@@ -326,7 +338,7 @@ void api_callback(activity_domain_t domain, uint32_t cid, const void* callback_d
                   rocprofiler_tracer_api_data_handle_t{callback_data, sizeof(*data)},
                   rocprofiler_tracer_activity_correlation_id_t{data->correlation_id},
                   rocprofiler_record_header_timestamp_t{rocprofiler_timestamp_t{0},
-                                                      rocprofiler_timestamp_t{0}},
+                                                        rocprofiler_timestamp_t{0}},
                   0, 0, GetTid(), ROCPROFILER_PHASE_EXIT},
               args_data->session_id);
         }
@@ -346,7 +358,7 @@ void api_callback(activity_domain_t domain, uint32_t cid, const void* callback_d
                   rocprofiler_tracer_api_data_handle_t{callback_data, sizeof(*data)},
                   rocprofiler_tracer_activity_correlation_id_t{data->correlation_id},
                   rocprofiler_record_header_timestamp_t{rocprofiler_timestamp_t{0},
-                                                      rocprofiler_timestamp_t{0}},
+                                                        rocprofiler_timestamp_t{0}},
                   0, 0, GetTid(), ROCPROFILER_PHASE_ENTER},
               args_data->session_id);
         } else {
@@ -358,17 +370,15 @@ void api_callback(activity_domain_t domain, uint32_t cid, const void* callback_d
           // uint64_t stream_id = 0;
           // if (start >= 0) {
           //   int end = hip_api_data_string.find(",", start);
-          //   std::string stream_id_str = hip_api_data_string.substr(start + start_str.length(), end);
-          //   std::stringstream ss;
-          //   ss << std::hex << stream_id_str;
-          //   ss >> stream_id;
+          //   std::string stream_id_str = hip_api_data_string.substr(start + start_str.length(),
+          //   end); std::stringstream ss; ss << std::hex << stream_id_str; ss >> stream_id;
           // }
           // {
           //   std::lock_guard<std::mutex> lock(stream_ids_map_lock);
           //   if (used_stream_ids.find(stream_id) == used_stream_ids.end()) {
-          //     uint64_t stream_generated_id = stream_count.fetch_add(1, std::memory_order_release);
-          //     used_stream_ids.emplace(stream_id, stream_generated_id);
-          //     stream_ids.emplace(data->correlation_id,
+          //     uint64_t stream_generated_id = stream_count.fetch_add(1,
+          //     std::memory_order_release); used_stream_ids.emplace(stream_id,
+          //     stream_generated_id); stream_ids.emplace(data->correlation_id,
           //                        std::make_pair(stream_id, stream_generated_id));
           //   } else {
           //     stream_ids.emplace(data->correlation_id,
@@ -385,7 +395,7 @@ void api_callback(activity_domain_t domain, uint32_t cid, const void* callback_d
                   rocprofiler_tracer_api_data_handle_t{callback_data, sizeof(*data)},
                   rocprofiler_tracer_activity_correlation_id_t{data->correlation_id},
                   rocprofiler_record_header_timestamp_t{rocprofiler_timestamp_t{0},
-                                                      rocprofiler_timestamp_t{0}},
+                                                        rocprofiler_timestamp_t{0}},
                   0, 0, GetTid(), ROCPROFILER_PHASE_EXIT},
               args_data->session_id);
         }
@@ -404,20 +414,21 @@ void Tracer::InitRoctracer(
     switch (domain.first) {
       case ACTIVITY_DOMAIN_ROCTX: {
         assert(!domain.second && "Error: ROCTX API can't be filtered!");
-        if(callback_data_.user_sync_callback)
+        if (callback_data_.user_sync_callback)
           roctracer_enable_domain_callback(ACTIVITY_DOMAIN_ROCTX, api_callback, &callback_data_);
         else
           roctracer_enable_domain_activity(ACTIVITY_DOMAIN_ROCTX,
-                                         session_buffer_id_t{session_id_, buffer_id_});
+                                           session_buffer_id_t{session_id_, buffer_id_});
         break;
       }
       case ACTIVITY_DOMAIN_HSA_API: {
         if (!domain.second) {
-          if(callback_data_.user_sync_callback)
-            roctracer_enable_domain_callback(ACTIVITY_DOMAIN_HSA_API, api_callback, &callback_data_);
+          if (callback_data_.user_sync_callback)
+            roctracer_enable_domain_callback(ACTIVITY_DOMAIN_HSA_API, api_callback,
+                                             &callback_data_);
           else
             roctracer_enable_domain_activity(ACTIVITY_DOMAIN_HSA_API,
-                                         session_buffer_id_t{session_id_, buffer_id_});
+                                             session_buffer_id_t{session_id_, buffer_id_});
         } else {
           assert(!api_filter_data_vector.empty() &&
                  "Error: HSA API calls filter data is empty and domain "
@@ -427,11 +438,12 @@ void Tracer::InitRoctracer(
       }
       case ACTIVITY_DOMAIN_HIP_API: {
         if (!domain.second) {
-          if(callback_data_.user_sync_callback)
-            roctracer_enable_domain_callback(ACTIVITY_DOMAIN_HIP_API, api_callback, &callback_data_);
+          if (callback_data_.user_sync_callback)
+            roctracer_enable_domain_callback(ACTIVITY_DOMAIN_HIP_API, api_callback,
+                                             &callback_data_);
           else
             roctracer_enable_domain_activity(ACTIVITY_DOMAIN_HIP_API,
-                                         session_buffer_id_t{session_id_, buffer_id_});
+                                             session_buffer_id_t{session_id_, buffer_id_});
         } else {
           assert(!api_filter_data_vector.empty() &&
                  "Error: HIP API calls filter data is empty and domain "

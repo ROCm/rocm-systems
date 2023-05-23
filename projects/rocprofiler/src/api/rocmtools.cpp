@@ -323,10 +323,12 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_query_hsa_tracer_api_data_info_
   //     throw rocmtools::Exception(ROCPROFILER_STATUS_ERROR_TRACER_API_DATA_NOT_FOUND);
   //   }
   // }
-  *data_size = rocmtools::GetROCMToolObj()
+  *data_size = ((kind == ROCPROFILER_HSA_FUNCTION_NAME)
+      ? rocmtools::tracer::GetApiCallFunctionNameSize(ACTIVITY_DOMAIN_HSA_API, operation_id)
+      : rocmtools::GetROCMToolObj()
                    ->GetSession(session_id)
                    ->GetTracer()
-                   ->GetHSAApiDataInfoSize(kind, api_data_id, operation_id);
+                   ->GetHSAApiDataInfoSize(kind, api_data_id, operation_id));
   if (*data_size <= 0)
     throw rocmtools::Exception(ROCPROFILER_STATUS_ERROR_TRACER_API_DATA_INFORMATION_MISSING);
   API_METHOD_SUFFIX
@@ -355,7 +357,9 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_query_hsa_tracer_api_data_info(
   //     throw rocmtools::Exception(ROCPROFILER_STATUS_ERROR_TRACER_API_DATA_NOT_FOUND);
   //   }
   // }
-  if (!(*data = rocmtools::GetROCMToolObj()
+  if (!(*data = (kind == ROCPROFILER_HSA_FUNCTION_NAME)
+      ? rocmtools::tracer::GetApiCallFunctionName(ACTIVITY_DOMAIN_HSA_API, operation_id)
+      : rocmtools::GetROCMToolObj()
                     ->GetSession(session_id)
                     ->GetTracer()
                     ->GetHSAApiDataInfo(kind, api_data_id, operation_id)))
@@ -386,7 +390,9 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_query_hip_tracer_api_data_info_
   //     throw rocmtools::Exception(ROCPROFILER_STATUS_ERROR_TRACER_API_DATA_NOT_FOUND);
   //   }
   // }
-  *data_size = rocmtools::GetROCMToolObj()
+  *data_size = (kind == ROCPROFILER_HIP_FUNCTION_NAME)
+      ? rocmtools::tracer::GetApiCallFunctionNameSize(ACTIVITY_DOMAIN_HIP_API, operation_id)
+      : rocmtools::GetROCMToolObj()
                    ->GetSession(session_id)
                    ->GetTracer()
                    ->GetHIPApiDataInfoSize(kind, api_data_id, operation_id);
@@ -419,7 +425,9 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_query_hip_tracer_api_data_info(
   //   }
   // }
   // if (!(
-  *data = rocmtools::GetROCMToolObj()
+  *data = (kind == ROCPROFILER_HIP_FUNCTION_NAME)
+      ? rocmtools::tracer::GetApiCallFunctionName(ACTIVITY_DOMAIN_HIP_API, operation_id)
+      : rocmtools::GetROCMToolObj()
               ->GetSession(session_id)
               ->GetTracer()
               ->GetHIPApiDataInfo(kind, api_data_id, operation_id);
