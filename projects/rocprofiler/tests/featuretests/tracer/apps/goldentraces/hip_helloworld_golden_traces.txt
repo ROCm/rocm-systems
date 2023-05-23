@@ -1,34 +1,24 @@
-0xc1e860 agent cpu
-0xc2f430 agent cpu
-0xc3d9f0 agent cpu
-0xc3f2e0 agent cpu
-0xc40b80 agent gpu
-0xc45760 agent gpu
-0xc97270 agent gpu
-0xc9b880 agent gpu
-0xc9fe20 agent gpu
-0xca4430 agent gpu
-0xca89d0 agent gpu
-0xcacfb0 agent gpu
-5115376839436954
+0x398a40 agent cpu
+0x396af0 agent gpu
+943651820506633
 Enabling API Tracing
-Record(1), Domain(HIP_API_DOMAIN), Function(hipGetDeviceProperties), Begin(5115376844103717), Correlation_ID(1)
-Record(2), Domain(HIP_API_DOMAIN), Function(hipGetDeviceProperties), End(5115376844115500), Correlation_ID(1)
-Record(3), Domain(HIP_API_DOMAIN), Function(hipMalloc), Begin(5115376844123646), Correlation_ID(2)
-Record(4), Domain(HIP_API_DOMAIN), Function(hipMalloc), End(5115376844151770), Correlation_ID(2)
-Record(5), Domain(HIP_API_DOMAIN), Function(hipMalloc), Begin(5115376844156289), Correlation_ID(3)
-Record(6), Domain(HIP_API_DOMAIN), Function(hipMalloc), End(5115376844161569), Correlation_ID(3)
-Record(7), Domain(HIP_API_DOMAIN), Function(hipMemcpy), Begin(5115376844168302), Correlation_ID(4)
-Record(8), Domain(HIP_API_DOMAIN), Function(hipMemcpy), End(5115377125694772), Correlation_ID(4)
-Record(9), Domain(HIP_API_DOMAIN), Function(__hipPushCallConfiguration), Begin(5115377125708699), Correlation_ID(5)
-Record(10), Domain(HIP_API_DOMAIN), Function(__hipPushCallConfiguration), End(5115377125712216), Correlation_ID(5)
-Record(11), Domain(HIP_API_DOMAIN), Function(__hipPopCallConfiguration), Begin(5115377125716223), Correlation_ID(6)
-Record(12), Domain(HIP_API_DOMAIN), Function(__hipPopCallConfiguration), End(5115377125718999), Correlation_ID(6)
-Record(13), Domain(HIP_API_DOMAIN), Function(hipLaunchKernel), Kernel_Name(helloworld(char*, char*)), Begin(5115377125755419), Correlation_ID(7)
-Record(14), Domain(HIP_API_DOMAIN), Function(hipLaunchKernel), Kernel_Name(helloworld(char*, char*)), End(5115377126433230), Correlation_ID(7)
-Record(15), Domain(HIP_API_DOMAIN), Function(hipMemcpy), Begin(5115377126441105), Correlation_ID(8)
-Record(16), Domain(HIP_API_DOMAIN), Function(hipMemcpy), End(5115377126468137), Correlation_ID(8)
-Record(17), Domain(HIP_API_DOMAIN), Function(hipFree), Begin(5115377126473838), Correlation_ID(9)
-Record(18), Domain(HIP_API_DOMAIN), Function(hipFree), End(5115377126488276), Correlation_ID(9)
-Record(19), Domain(HIP_API_DOMAIN), Function(hipFree), Begin(5115377126491733), Correlation_ID(10)
-Record(20), Domain(HIP_API_DOMAIN), Function(hipFree), End(5115377126498687), Correlation_ID(10)
+Record(1), Domain(HIP_API_DOMAIN), Function(hipGetDeviceProperties), Begin(943651822351797), Correlation_ID(1)
+Record(2), Domain(HIP_API_DOMAIN), Function(hipGetDeviceProperties), End(943651822358897), Correlation_ID(1)
+Record(3), Domain(HIP_API_DOMAIN), Function(hipMalloc), Begin(943651822367567), Correlation_ID(2)
+Record(4), Domain(HIP_API_DOMAIN), Function(hipMalloc), End(943651822425647), Correlation_ID(2)
+Record(5), Domain(HIP_API_DOMAIN), Function(hipMalloc), Begin(943651822428727), Correlation_ID(3)
+Record(6), Domain(HIP_API_DOMAIN), Function(hipMalloc), End(943651822433697), Correlation_ID(3)
+Record(7), Domain(HIP_API_DOMAIN), Function(hipMemcpy), Begin(943651822439147), Correlation_ID(4)
+Record(8), Domain(HIP_API_DOMAIN), Function(hipMemcpy), End(943652060082603), Correlation_ID(4)
+Record(9), Domain(HIP_API_DOMAIN), Function(__hipPushCallConfiguration), Begin(943652060095823), Correlation_ID(5)
+Record(10), Domain(HIP_API_DOMAIN), Function(__hipPushCallConfiguration), End(943652060098843), Correlation_ID(5)
+Record(11), Domain(HIP_API_DOMAIN), Function(__hipPopCallConfiguration), Begin(943652060102043), Correlation_ID(6)
+Record(12), Domain(HIP_API_DOMAIN), Function(__hipPopCallConfiguration), End(943652060104763), Correlation_ID(6)
+Record(13), Domain(HIP_API_DOMAIN), Function(hipLaunchKernel), Kernel_Name(helloworld(char*, char*)), Begin(943652060131433), Correlation_ID(7)
+Record(14), Domain(HIP_API_DOMAIN), Function(hipLaunchKernel), Kernel_Name(helloworld(char*, char*)), End(943652060469034), Correlation_ID(7)
+Record(15), Domain(HIP_API_DOMAIN), Function(hipMemcpy), Begin(943652060475114), Correlation_ID(8)
+Record(16), Domain(HIP_API_DOMAIN), Function(hipMemcpy), End(943652061248446), Correlation_ID(8)
+Record(17), Domain(HIP_API_DOMAIN), Function(hipFree), Begin(943652061255856), Correlation_ID(9)
+Record(18), Domain(HIP_API_DOMAIN), Function(hipFree), End(943652061272126), Correlation_ID(9)
+Record(19), Domain(HIP_API_DOMAIN), Function(hipFree), Begin(943652061274726), Correlation_ID(10)
+Record(20), Domain(HIP_API_DOMAIN), Function(hipFree), End(943652061282446), Correlation_ID(10)
