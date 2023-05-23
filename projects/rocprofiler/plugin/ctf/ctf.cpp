@@ -38,7 +38,7 @@ rocm_ctf::Plugin* the_plugin = nullptr;
 }  // namespace
 
 ROCPROFILER_EXPORT int rocprofiler_plugin_initialize(const uint32_t rocprofiler_major_version,
-                                                 const uint32_t rocprofiler_minor_version) {
+                                                     const uint32_t rocprofiler_minor_version) {
   if (rocprofiler_major_version != ROCPROFILER_VERSION_MAJOR ||
       rocprofiler_minor_version < ROCPROFILER_VERSION_MINOR) {
     return -1;
@@ -89,8 +89,7 @@ ROCPROFILER_EXPORT int rocprofiler_plugin_write_buffer_records(
 }
 
 ROCPROFILER_EXPORT int rocprofiler_plugin_write_record(
-    const rocprofiler_record_tracer_t record, const void* data,
-    rocprofiler_plugin_trace_record_data_t tracer_data) {
+    const rocprofiler_record_tracer_t record, rocprofiler_plugin_tracer_extra_data_t tracer_data) {
   assert(the_plugin);
 
   if (record.header.id.handle == 0) {
@@ -98,7 +97,7 @@ ROCPROFILER_EXPORT int rocprofiler_plugin_write_record(
   }
 
   try {
-    the_plugin->HandleTracerRecord(record, rocprofiler_session_id_t{0}, tracer_data, data);
+    the_plugin->HandleTracerRecord(record, rocprofiler_session_id_t{0}, tracer_data);
   } catch (const std::exception& exc) {
     std::cerr << "rocprofiler_plugin_write_record(): " << exc.what() << std::endl;
     return -1;

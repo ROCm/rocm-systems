@@ -55,8 +55,7 @@ class Plugin final {
   // Handles a tracer record.
   void HandleTracerRecord(const rocprofiler_record_tracer_t& record,
                           rocprofiler_session_id_t session_id,
-                          rocprofiler_plugin_trace_record_data_t tracer_data,
-                          const void* data = nullptr);
+                          rocprofiler_plugin_tracer_extra_data_t tracer_data);
 
 
   // Handles a profiler record.

@@ -140,72 +140,83 @@ std::optional<rocprofiler_plugin_t> plugin;
 struct hsa_api_trace_entry_t {
   std::atomic<uint32_t> valid;
   rocprofiler_record_tracer_t record;
+  hsa_api_data_t* api_data;
   const char* function_name;
   hsa_api_trace_entry_t(rocprofiler_record_tracer_t tracer_record, const char* function_name_str,
-                        const hsa_api_data_t& data)
+                        const hsa_api_data_t* data)
       : valid(rocprofiler::TRACE_ENTRY_INIT) {
     record = tracer_record;
     function_name = function_name_str ? strdup(function_name_str) : nullptr;
-    record.api_data_handle.handle = &data;
+    api_data = reinterpret_cast<hsa_api_data_t*>(malloc(sizeof(hsa_api_data_t)));
+    memcpy(api_data, data, sizeof(hsa_api_data_t));
+    record.api_data_handle.handle = api_data;
   }
-  ~hsa_api_trace_entry_t() { if (function_name != nullptr) free(const_cast<char*>(function_name)); }
+  ~hsa_api_trace_entry_t() {
+    if (function_name != nullptr) free(const_cast<char*>(function_name));
+    if (api_data != nullptr) free(const_cast<hsa_api_data_t*>(api_data));
+  }
 };
 
 struct roctx_trace_entry_t {
   std::atomic<rocprofiler::TraceEntryState> valid;
+  const char* roctx_message;
   rocprofiler_record_tracer_t record;
   roctx_trace_entry_t(rocprofiler_record_tracer_t tracer_record, const char* roctx_message_str)
       : valid(rocprofiler::TRACE_ENTRY_INIT) {
     record = tracer_record;
-    roctx_message_str? record.api_data_handle.handle=strdup(roctx_message_str):nullptr; 
+    roctx_message = roctx_message_str ? strdup(roctx_message_str) : nullptr;
+    record.api_data_handle.handle = roctx_message;
   }
-  ~roctx_trace_entry_t() { }
+  ~roctx_trace_entry_t() {
+    if (roctx_message != nullptr) free(const_cast<char*>(roctx_message));
+  }
 };
 
 struct hip_api_trace_entry_t {
 
   std::atomic<uint32_t> valid;
+  hip_api_data_t* api_data;
   rocprofiler_record_tracer_t record;
   const char* function_name;
   const char* kernel_name;
 
   hip_api_trace_entry_t(rocprofiler_record_tracer_t tracer_record, const char* kernel_name_str,
-                        const char* function_name_str, const hip_api_data_t& data)
+                        const char* function_name_str, const hip_api_data_t* data)
       : valid(rocprofiler::TRACE_ENTRY_INIT) {
     record = tracer_record;
     kernel_name = kernel_name_str ? strdup(kernel_name_str) : nullptr;
     function_name = function_name_str ? strdup(function_name_str) : nullptr;
-    record.api_data_handle.handle=&data;
+
+    api_data = reinterpret_cast<hip_api_data_t*>(malloc(sizeof(hip_api_data_t)));
+    memcpy(api_data, data, sizeof(hip_api_data_t));
+    record.api_data_handle.handle = api_data;
   }
   ~hip_api_trace_entry_t() {
-   if (function_name != nullptr) free(const_cast<char*>(function_name)); 
-   if (kernel_name != nullptr) free(const_cast<char*>(kernel_name)); 
+    if (function_name != nullptr) free(const_cast<char*>(function_name));
+    if (kernel_name != nullptr) free(const_cast<char*>(kernel_name));
+    if (api_data != nullptr) free(const_cast<hip_api_data_t*>(api_data));
   }
 };
 
 rocprofiler::TraceBuffer<hip_api_trace_entry_t> hip_api_buffer(
     "HIP API", 0x200000, [](hip_api_trace_entry_t* entry) {
       assert(plugin && "plugin is not initialized");
-      rocprofiler_plugin_tracer_extra_data_t tracer_extra_data;
-      tracer_extra_data.function_name = entry->function_name;
-      tracer_extra_data.kernel_name = entry->kernel_name;
-      plugin->write_callback_record(entry->record, tracer_extra_data);
+      plugin->write_callback_record(
+          entry->record,
+          rocprofiler_plugin_tracer_extra_data_t{.function_name = entry->function_name,
+                                                 .kernel_name = entry->kernel_name});
     });
 rocprofiler::TraceBuffer<hsa_api_trace_entry_t> hsa_api_buffer(
     "HSA API", 0x200000, [](hsa_api_trace_entry_t* entry) {
       assert(plugin && "plugin is not initialized");
-      rocprofiler_plugin_tracer_extra_data_t tracer_extra_data;
-      tracer_extra_data.function_name = entry->function_name;
-      plugin->write_callback_record(entry->record,
-      tracer_extra_data);
+      plugin->write_callback_record(
+          entry->record,
+          rocprofiler_plugin_tracer_extra_data_t{.function_name = entry->function_name});
     });
 rocprofiler::TraceBuffer<roctx_trace_entry_t> roctx_trace_buffer(
     "rocTX API", 0x200000, [](roctx_trace_entry_t* entry) {
       assert(plugin && "plugin is not initialized");
-      rocprofiler_plugin_tracer_extra_data_t tracer_extra_data;
-      tracer_extra_data.function_name = nullptr; 
-      plugin->write_callback_record(
-      entry->record, tracer_extra_data);
+      plugin->write_callback_record(entry->record, rocprofiler_plugin_tracer_extra_data_t{});
     });
 
 }  // namespace
@@ -376,13 +387,11 @@ void finish() {
   if (session_created.load(std::memory_order_relaxed)) {
     session_created.exchange(false, std::memory_order_release);
     CHECK_ROCPROFILER(rocprofiler_terminate_session(session_id));
+    rocprofiler::TraceBufferBase::FlushAll();
     for ([[maybe_unused]] rocprofiler_buffer_id_t buffer_id : buffer_ids) {
       CHECK_ROCPROFILER(rocprofiler_flush_data(session_id, buffer_id));
     }
   }
-
-  // CHECK_ROCPROFILER(rocprofiler_destroy_session(session_id));
-  // CHECK_ROCPROFILER(rocprofiler_finalize());
 }
 
 // load plugins
@@ -427,12 +436,13 @@ void sync_api_trace_callback(rocprofiler_record_tracer_t tracer_record,  rocprof
     char* data = nullptr;
     size_t size = 0;
     CHECK_ROCPROFILER(rocprofiler_query_hip_tracer_api_data_info_size(
-        session_id, ROCPROFILER_HIP_API_DATA, tracer_record.api_data_handle, tracer_record.operation_id, &size));
-    if(size > 0)
-     CHECK_ROCPROFILER(rocprofiler_query_hip_tracer_api_data_info(
-        session_id, ROCPROFILER_HIP_API_DATA, tracer_record.api_data_handle, tracer_record.operation_id, &data));
-    hip_api_data_t hip_api_data = *reinterpret_cast<hip_api_data_t*>(data);
-    //std::cout << "in api calback" << strlen(function_name_c) << "\t" << function_name_c << std::endl;
+        session_id, ROCPROFILER_HIP_API_DATA, tracer_record.api_data_handle,
+        tracer_record.operation_id, &size));
+    if (size > 0)
+      CHECK_ROCPROFILER(rocprofiler_query_hip_tracer_api_data_info(
+          session_id, ROCPROFILER_HIP_API_DATA, tracer_record.api_data_handle,
+          tracer_record.operation_id, &data));
+    hip_api_data_t* hip_api_data = reinterpret_cast<hip_api_data_t*>(data);
     hip_api_trace_entry_t& entry = hip_api_buffer.Emplace(
         tracer_record,
          (const char*)kernel_name_c ? strdup(kernel_name_c) : nullptr,
@@ -457,19 +467,22 @@ void sync_api_trace_callback(rocprofiler_record_tracer_t tracer_record,  rocprof
     CHECK_ROCPROFILER(rocprofiler_query_hip_tracer_api_data_info_size(
         session_id, ROCPROFILER_HIP_API_DATA, tracer_record.api_data_handle, tracer_record.operation_id, &size));
     CHECK_ROCPROFILER(rocprofiler_query_hip_tracer_api_data_info(
-        session_id, ROCPROFILER_HIP_API_DATA, tracer_record.api_data_handle, tracer_record.operation_id, &data));
-    hsa_api_data_t hsa_api_data = *reinterpret_cast<hsa_api_data_t*>(data);
-    hsa_api_trace_entry_t& entry = hsa_api_buffer.Emplace(
-        tracer_record,
-         (const char*)(function_name_c),
-         hsa_api_data);
+        session_id, ROCPROFILER_HIP_API_DATA, tracer_record.api_data_handle,
+        tracer_record.operation_id, &data));
+    hsa_api_data_t* hsa_api_data = reinterpret_cast<hsa_api_data_t*>(data);
+    hsa_api_trace_entry_t& entry =
+        hsa_api_buffer.Emplace(tracer_record, (const char*)(function_name_c), hsa_api_data);
     entry.valid.store(rocprofiler::TRACE_ENTRY_COMPLETE, std::memory_order_release);
   }
   if (tracer_record.domain == ACTIVITY_DOMAIN_ROCTX) {
-      size_t roctx_message_size = 0;
-      char *roctx_message_str = nullptr;
-      uint64_t roctx_id=0;
-      CHECK_ROCPROFILER(rocprofiler_query_roctx_tracer_api_data_info_size(
+    size_t roctx_message_size = 0;
+    char* roctx_message_str = nullptr;
+    CHECK_ROCPROFILER(rocprofiler_query_roctx_tracer_api_data_info_size(
+        session_id, ROCPROFILER_ROCTX_MESSAGE, tracer_record.api_data_handle,
+        tracer_record.operation_id, &roctx_message_size));
+    if (roctx_message_size > 1) {
+      roctx_message_str = (char*)malloc(roctx_message_size * sizeof(char));
+      CHECK_ROCPROFILER(rocprofiler_query_roctx_tracer_api_data_info(
           session_id, ROCPROFILER_ROCTX_MESSAGE, tracer_record.api_data_handle,
           tracer_record.operation_id, &roctx_message_size));
       if (roctx_message_size > 1) {

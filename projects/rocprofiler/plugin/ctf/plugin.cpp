@@ -55,7 +55,8 @@ namespace {
 // Abstract tracer event record using the barectf context type `CtxT`.
 template <typename CtxT> class TracerEventRecord : public BarectfEventRecord<CtxT> {
  protected:
-  explicit TracerEventRecord(const rocprofiler_record_tracer_t& record, const std::uint64_t clock_val)
+  explicit TracerEventRecord(const rocprofiler_record_tracer_t& record,
+                             const std::uint64_t clock_val)
       : BarectfEventRecord<CtxT>{clock_val},
         op_{record.operation_id.id},
         thread_id_{record.thread_id.value},
@@ -135,74 +136,16 @@ class RocTxEventRecord final : public TracerEventRecord<barectf_roctx_ctx> {
   explicit RocTxEventRecord(const rocprofiler_record_tracer_t& record,
                             const rocprofiler_session_id_t session_id)
       : TracerEventRecord<barectf_roctx_ctx>{record, GetRecordBeginClockVal(record)},
-        id_{QueryId(record, session_id)},
-        msg_{QueryMsg(record, session_id)} {}
-  explicit RocTxEventRecord(const rocprofiler_record_tracer_t& record, uint64_t roctx_id,
-                            std::string roctx_msg)
-      : TracerEventRecord<barectf_roctx_ctx>{record, GetRecordBeginClockVal(record)},
-        id_{roctx_id},
-        msg_{roctx_msg} {}
+        id_{record.operation_id.id},
+        msg_{
+            rocmtools::cxx_demangle(reinterpret_cast<const char*>(record.api_data_handle.handle))} {
+  }
 
   void Write(barectf_roctx_ctx& barectf_ctx) const override {
     barectf_roctx_trace_roctx(&barectf_ctx, GetThreadId(), id_, msg_.c_str());
   }
 
  private:
-  // Queries and returns the rocTX message of the record `record` and
-  // session ID `session_id`.
-  //
-  // Returns an empty string if not available.
-  static std::string QueryMsg(const rocprofiler_record_tracer_t& record,
-                              const rocprofiler_session_id_t session_id) {
-    // Query size first.
-    std::size_t msg_size = 0;
-    [[maybe_unused]] auto ret = rocprofiler_query_roctx_tracer_api_data_info_size(
-        session_id, ROCPROFILER_ROCTX_MESSAGE, record.api_data_handle, record.operation_id,
-        &msg_size);
-
-    assert(ret == ROCPROFILER_STATUS_SUCCESS && "Query rocTX message size");
-
-    if (msg_size == 0) {
-      // No size: return empty string.
-      return {};
-    }
-
-    // Query data (borrowed from the record: no need to free).
-    char* msg = nullptr;
-
-    ret = rocprofiler_query_roctx_tracer_api_data_info(
-        session_id, ROCPROFILER_ROCTX_MESSAGE, record.api_data_handle, record.operation_id, &msg);
-    assert(ret == ROCPROFILER_STATUS_SUCCESS && "Query rocTX message");
-
-    if (!msg) {
-      // No data: return empty string.
-      return {};
-    }
-
-    return rocmtools::cxx_demangle(msg);
-  }
-
-  // Queries and returns the rocTX ID of the record `record` and the
-  // session ID `session_id`.
-  //
-  // Returns 0 if anything goes wrong.
-  static std::uint64_t QueryId(const rocprofiler_record_tracer_t& record,
-                               const rocprofiler_session_id_t session_id) {
-    try {
-      return std::stoull(QueryAllocStr(
-          [&record, session_id](const auto size) {
-            return rocprofiler_query_roctx_tracer_api_data_info_size(
-                session_id, ROCPROFILER_ROCTX_ID, record.api_data_handle, record.operation_id, size);
-          },
-          [&record, session_id](const auto str) {
-            return rocprofiler_query_roctx_tracer_api_data_info(
-                session_id, ROCPROFILER_ROCTX_ID, record.api_data_handle, record.operation_id, str);
-          }));
-    } catch (...) {
-      return 0;
-    }
-  }
-
   std::uint64_t id_;
   std::string msg_;
 };
@@ -211,7 +154,8 @@ class RocTxEventRecord final : public TracerEventRecord<barectf_roctx_ctx> {
 class HsaApiEventRecord : public TracerEventRecord<barectf_hsa_api_ctx> {
  protected:
   explicit HsaApiEventRecord(const rocprofiler_record_tracer_t& record,
-                             const rocprofiler_session_id_t session_id, const std::uint64_t clock_val)
+                             const rocprofiler_session_id_t session_id,
+                             const std::uint64_t clock_val)
       : TracerEventRecord<barectf_hsa_api_ctx>{record, clock_val},
         api_data_{QueryApiData(record, session_id)} {}
   explicit HsaApiEventRecord(const rocprofiler_record_tracer_t& record,
@@ -255,8 +199,7 @@ class HsaApiEventRecordBegin final : public HsaApiEventRecord {
       : HsaApiEventRecord{record, session_id, GetRecordBeginClockVal(record)} {}
   explicit HsaApiEventRecordBegin(const rocprofiler_record_tracer_t& record,
                                   hsa_api_data_t& api_data)
-      : HsaApiEventRecord{record, GetRecordBeginClockVal(record),
-                          api_data} {}
+      : HsaApiEventRecord{record, GetRecordBeginClockVal(record), api_data} {}
 
   void Write(barectf_hsa_api_ctx& barectf_ctx) const override {
     // Include generated switch statement.
@@ -270,8 +213,7 @@ class HsaApiEventRecordEnd final : public HsaApiEventRecord {
   explicit HsaApiEventRecordEnd(const rocprofiler_record_tracer_t& record,
                                 const rocprofiler_session_id_t session_id)
       : HsaApiEventRecord{record, session_id, GetRecordEndClockVal(record)} {}
-  explicit HsaApiEventRecordEnd(const rocprofiler_record_tracer_t& record,
-                                  hsa_api_data_t& api_data)
+  explicit HsaApiEventRecordEnd(const rocprofiler_record_tracer_t& record, hsa_api_data_t& api_data)
       : HsaApiEventRecord{record, GetRecordBeginClockVal(record), api_data} {}
 
   void Write(barectf_hsa_api_ctx& barectf_ctx) const override {
@@ -288,7 +230,7 @@ class HipApiEventRecord : public TracerEventRecord<barectf_hip_api_ctx> {
                              const std::uint64_t clock_val)
       : TracerEventRecord<barectf_hip_api_ctx>{record, clock_val},
         api_data_{QueryApiData(record, session_id)},
-        kernel_name_{QueryKernelName(record, session_id)} {}
+        kernel_name_{nullptr} {}
   explicit HipApiEventRecord(const rocprofiler_record_tracer_t& record,
                              const std::uint64_t clock_val, hip_api_data_t& api_data,
                              std::string kernel_name)
@@ -321,32 +263,6 @@ class HipApiEventRecord : public TracerEventRecord<barectf_hip_api_ctx> {
 
     // Reinterpret as an HIP API data pointer.
     return *reinterpret_cast<const hip_api_data_t*>(data);
-  }
-
-  // Queries and returns the kernel name of the record `record` and
-  // session ID `session_id`.
-  //
-  // Returns an empty string if not available.
-  static std::string QueryKernelName(const rocprofiler_record_tracer_t& record,
-                                     const rocprofiler_session_id_t session_id) {
-    const auto kernel_name = QueryAllocStr(
-        [&record, session_id](const auto size) {
-          return rocprofiler_query_hip_tracer_api_data_info_size(
-              session_id, ROCPROFILER_HIP_KERNEL_NAME, record.api_data_handle, record.operation_id,
-              size);
-        },
-        [&record, session_id](const auto str) {
-          return rocprofiler_query_hip_tracer_api_data_info(session_id, ROCPROFILER_HIP_KERNEL_NAME,
-                                                          record.api_data_handle,
-                                                          record.operation_id, str);
-        });
-
-    if (kernel_name.size() > 1) {
-      // Return demangled version.
-      return rocmtools::cxx_demangle(kernel_name);
-    }
-
-    return kernel_name;
   }
 
   hip_api_data_t api_data_;
@@ -409,7 +325,8 @@ class HsaHandleTypeEventRecord final : public BarectfEventRecord<barectf_hsa_han
 // Abstract API operation event record.
 class ApiOpEventRecord : public TracerEventRecord<barectf_api_ops_ctx> {
  protected:
-  explicit ApiOpEventRecord(const rocprofiler_record_tracer_t& record, const std::uint64_t clock_val)
+  explicit ApiOpEventRecord(const rocprofiler_record_tracer_t& record,
+                            const std::uint64_t clock_val)
       : TracerEventRecord<barectf_api_ops_ctx>{record, clock_val} {}
 };
 
@@ -540,11 +457,12 @@ class ProfilerEventRecord : public BarectfEventRecord<barectf_profiler_ctx> {
   static std::string QueryKernelName(const rocprofiler_record_profiler_t& record) {
     const auto kernel_name = QueryAllocStr(
         [&record](const auto size) {
-          return rocprofiler_query_kernel_info_size(ROCPROFILER_KERNEL_NAME, record.kernel_id, size);
+          return rocprofiler_query_kernel_info_size(ROCPROFILER_KERNEL_NAME, record.kernel_id,
+                                                    size);
         },
         [&record](const auto str) {
           return rocprofiler_query_kernel_info(ROCPROFILER_KERNEL_NAME, record.kernel_id,
-                                             const_cast<const char**>(str));
+                                               const_cast<const char**>(str));
         });
 
     if (kernel_name.size() <= 1) {
@@ -590,7 +508,7 @@ class ProfilerEventRecord : public BarectfEventRecord<barectf_profiler_ctx> {
       const char* counter_name = nullptr;
 
       ret = rocprofiler_query_counter_info(session_id, ROCPROFILER_COUNTER_NAME,
-                                         counter.counter_handler, &counter_name);
+                                           counter.counter_handler, &counter_name);
       assert(ret == ROCPROFILER_STATUS_SUCCESS && "Query counter name");
 
       if (!counter_name) {
@@ -713,33 +631,25 @@ Plugin::Plugin(const std::size_t packet_size, const fs::path& trace_dir,
 
 void Plugin::HandleTracerRecord(const rocprofiler_record_tracer_t& record,
                                 const rocprofiler_session_id_t session_id,
-                                rocprofiler_plugin_trace_record_data_t tracer_data,
-                                const void* data) {
+                                rocprofiler_plugin_tracer_extra_data_t tracer_data) {
   std::lock_guard<std::mutex> lock{lock_};
 
   // Depending on the domain, create and add an event record to the
   // corresponding tracer.
   switch (record.domain) {
     case ACTIVITY_DOMAIN_ROCTX:
-    /*If data is nullptr then the call is asynchromous*/
-      if (data == nullptr)
-        roctx_tracer_.AddEventRecord(std::make_shared<const RocTxEventRecord>(record, session_id));
-      else {
-        const char* roctx_message = reinterpret_cast<const char*>(data);
-        std::string roctx_msg(roctx_message);
-        roctx_tracer_.AddEventRecord(
-            std::make_shared<const RocTxEventRecord>(record, tracer_data.roctx_id, roctx_msg));
-      }
+      roctx_tracer_.AddEventRecord(std::make_shared<const RocTxEventRecord>(record, session_id));
       break;
     case ACTIVITY_DOMAIN_HSA_API: {
       /*If data is nullptr then the call is asynchromous*/
-      if (data == nullptr) {
+      if (record.api_data_handle.handle == nullptr) {
         hsa_api_tracer_.AddEventRecord(
             std::make_shared<const HsaApiEventRecordBegin>(record, session_id));
         hsa_api_tracer_.AddEventRecord(
             std::make_shared<const HsaApiEventRecordEnd>(record, session_id));
       } else {
-        hsa_api_data_t hsa_api_data = *reinterpret_cast<const hsa_api_data_t*>(data);
+        hsa_api_data_t hsa_api_data =
+            *reinterpret_cast<const hsa_api_data_t*>(record.api_data_handle.handle);
         hsa_api_tracer_.AddEventRecord(
             std::make_shared<const HsaApiEventRecordBegin>(record, hsa_api_data));
         hsa_api_tracer_.AddEventRecord(
@@ -749,14 +659,15 @@ void Plugin::HandleTracerRecord(const rocprofiler_record_tracer_t& record,
     }
     case ACTIVITY_DOMAIN_HIP_API: {
       /*If data is nullptr then the call is asynchromous*/
-      if (data == nullptr) {
+      if (record.api_data_handle.handle == nullptr) {
         hip_api_tracer_.AddEventRecord(
             std::make_shared<const HipApiEventRecordBegin>(record, session_id));
         hip_api_tracer_.AddEventRecord(
             std::make_shared<const HipApiEventRecordEnd>(record, session_id));
       } else {
         std::string kernel_name;
-        hip_api_data_t hip_api_data = *reinterpret_cast<const hip_api_data_t*>(data);
+        hip_api_data_t hip_api_data =
+            *reinterpret_cast<const hip_api_data_t*>(record.api_data_handle.handle);
         if (tracer_data.kernel_name != nullptr)
           kernel_name = rocmtools::cxx_demangle(std::string(tracer_data.kernel_name));
         else
@@ -797,7 +708,7 @@ void Plugin::HandleBufferRecords(const rocprofiler_record_header_t* begin,
                                  const rocprofiler_buffer_id_t buffer_id) {
   while (begin && begin < end) {
     if (begin->kind == ROCPROFILER_TRACER_RECORD) {
-      rocprofiler_plugin_trace_record_data_t tracer_data = {};
+      rocprofiler_plugin_tracer_extra_data_t tracer_data = {};
       HandleTracerRecord(*reinterpret_cast<const rocprofiler_record_tracer_t*>(begin), session_id,
                          tracer_data);
     } else {
