@@ -219,3 +219,4 @@ The resulting `a.out` will depend on
 - rocprof in ROCm/5.4.1 fails to generate kernel info.
 - rocprof clobbers LD_PRELOAD.
 - Samples are fixed to show the new usage of phases.
+- Plugin option validates the plugin names.

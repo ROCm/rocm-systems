@@ -3,6 +3,7 @@ CURRENT_DIR="$( dirname -- "$0"; )";
 ROCPROFV2_DIR=$(dirname -- $(realpath ${BASH_SOURCE[0]}));
 ROCM_DIR=$(dirname -- ${ROCPROFV2_DIR})
 ROCM_PATH="${ROCM_PATH:=/opt/rocm}"
+PLUGIN_LIST=("ctf" "perfetto" "file" "att")
 RUN_FROM_BUILD=0
 if [[ $ROCPROFV2_DIR == *"/build"* ]]; then
   RUN_FROM_BUILD=1
@@ -198,6 +199,11 @@ while [ 1 ] ; do
   elif [ "$1" = "--plugin" ] ; then
     if [ -n $2 ] ; then
       PLUGIN=$2
+      if [[ ! "${PLUGIN_LIST[*]}" =~ $PLUGIN ]]; then
+      echo -e "Wrong input \"$2\" for plugin!"
+      usage
+      exit 1
+      fi
       if [ $RUN_FROM_BUILD == 1 ]; then
         export ROCPROFILER_PLUGIN_LIB=lib${PLUGIN}_plugin.so
       else
