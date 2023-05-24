@@ -78,7 +78,7 @@ static std::vector<std::string> lsof(const char* filename) {
   return matched_process;
 }
 
-shared_mutex_t shared_mutex_init(const char *name, mode_t mode) {
+shared_mutex_t shared_mutex_init(const char *name, mode_t mode, bool retried) {
   shared_mutex_t mutex = {NULL, 0, NULL, 0};
   errno = 0;
 
@@ -123,15 +123,6 @@ shared_mutex_t shared_mutex_init(const char *name, mode_t mode) {
 
   pthread_mutex_t *mutex_ptr =  reinterpret_cast<pthread_mutex_t *>(addr);
 
-  // When process crash before unlock the mutex, the mutex is in bad status.
-  // reset the mutex if no process is using it
-  std::vector<std::string> ids = lsof(name);
-  if (ids.size() == 0) {  // no process is using it
-    memset(mutex_ptr, 0, sizeof(pthread_mutex_t));
-    // Set mutex.created == 1 so that it can be initialized latter.
-    mutex.created = 1;
-  }
-
   // Make sure the mutex wasn't left in a locked state. If we can't
   // acquire it in 5 sec., re-do everything.
   struct timespec expireTime;
@@ -161,6 +152,20 @@ shared_mutex_t shared_mutex_init(const char *name, mode_t mode) {
   } else if (ret || (mutex.created == 0 &&
                      reinterpret_cast<shared_mutex_t *>(addr)->ptr == NULL)) {
     // Something is out of sync.
+
+    // When process crash before unlock the mutex, the mutex is in bad status.
+    // reset the mutex if no process is using it, and then retry lock
+    if (!retried) {
+      std::vector<std::string> ids = lsof(name);
+      if (ids.size() == 0) {  // no process is using it
+        memset(mutex_ptr, 0, sizeof(pthread_mutex_t));
+        // Set mutex.created == 1 so that it can be initialized latter.
+        mutex.created = 1;
+        free(mutex.name);
+        return shared_mutex_init(name, mode, true);
+      }
+    }
+
     fprintf(stderr, "pthread_mutex_timedlock() returned %d\n", ret);
     perror("Failed to initialize RSMI device mutex after 5 seconds. Previous "
      "execution may not have shutdown cleanly. To fix problem, stop all "
