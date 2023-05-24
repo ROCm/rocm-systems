@@ -294,9 +294,6 @@ fi
 
 if [ -n "$ATT_PATH" ]; then
   if [ -n "$ATT_ARGV" ]; then
-    if [ -n "$OUTPUT_PATH" ]; then
-      ATT_ARGV="$ATT_ARGV -o $OUTPUT_PATH"
-    fi
     eval "python3 $ATT_PATH $ATT_ARGV"
   elif [ ! -n "$PMC_LINES" ]; then
     echo "ATT File  is required!"
