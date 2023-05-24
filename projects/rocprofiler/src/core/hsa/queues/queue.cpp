@@ -466,8 +466,7 @@ bool AsyncSignalHandler(hsa_signal_value_t signal_value, void* data) {
         // TODO: (sauverma) gpu-id will need to support xcc like so- 1.1, 1.2, 1.3 ... 1.5 for
         // different xcc
         record.gpu_id = rocprofiler_agent_id_t{
-            (uint64_t)hsa_support::GetAgentInfo(queue_info_session->agent.handle).getIndex() +
-            xcc_id};
+            (uint64_t)hsa_support::GetAgentInfo(queue_info_session->agent.handle).getIndex()};
         record.kernel_properties = pending.kernel_properties;
         record.thread_id = rocprofiler_thread_id_t{pending.thread_id};
         record.queue_idx = rocprofiler_queue_index_t{pending.queue_index};
