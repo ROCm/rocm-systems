@@ -104,13 +104,14 @@ def join_prof(workload_dir, join_type, log_file, verbose, out=None):
         _df = pd.read_csv(file)
         if join_type == "kernel":
             key = _df.groupby("KernelName").cumcount()
+            _df["key"] = _df.KernelName + " - " + key.astype(str)
         elif join_type == "grid":
             key = _df.groupby(["KernelName", "grd"]).cumcount()
+            _df["key"] = _df.KernelName + " - " + _df.grd.astype(str) + " - " + key.astype(str)
         else:
             print("ERROR: Unrecognized --join-type")
             sys.exit(1)
 
-        _df["key"] = _df.KernelName + " - " + key.astype(str)
         if df is None:
             df = _df
         else:
