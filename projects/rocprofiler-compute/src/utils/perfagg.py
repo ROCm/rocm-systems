@@ -104,13 +104,16 @@ def join_prof(workload_dir, join_type, log_file, verbose, out=None):
         _df = pd.read_csv(file)
         if join_type == "kernel":
             key = _df.groupby("KernelName").cumcount()
+            _df["key"] = _df.KernelName + " - " + key.astype(str)
         elif join_type == "grid":
             key = _df.groupby(["KernelName", "grd"]).cumcount()
+            _df["key"] = (
+                _df.KernelName + " - " + _df.grd.astype(str) + " - " + key.astype(str)
+            )
         else:
             print("ERROR: Unrecognized --join-type")
             sys.exit(1)
 
-        _df["key"] = _df.KernelName + " - " + key.astype(str)
         if df is None:
             df = _df
         else:
@@ -121,7 +124,7 @@ def join_prof(workload_dir, join_type, log_file, verbose, out=None):
     duplicate_cols = {
         "gpu": [col for col in df.columns if "gpu" in col],
         "grd": [col for col in df.columns if "grd" in col],
-        "wpr": [col for col in df.columns if "wgr" in col],
+        "wgr": [col for col in df.columns if "wgr" in col],
         "lds": [col for col in df.columns if "lds" in col],
         "scr": [col for col in df.columns if "scr" in col],
         "arch_vgpr": [col for col in df.columns if "arch_vgpr" in col],
