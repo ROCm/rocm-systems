@@ -61,7 +61,7 @@ typedef struct shared_mutex_t {
 // There is no workaround currently, except to run first
 // initialization only before multi-threaded or multi-process
 // functionality.
-shared_mutex_t shared_mutex_init(const char *name, mode_t mode, bool retried=false);
+shared_mutex_t shared_mutex_init(const char *name, mode_t mode);
 
 // Close access to the shared mutex and free all the resources,
 // used by the structure.

@@ -65,9 +65,6 @@
 #include "rocm_smi/rocm_smi_exception.h"
 #include "rocm_smi/rocm_smi_utils.h"
 #include "rocm_smi/rocm_smi_kfd.h"
-#include "rocm_smi/rocm_smi_logger.h"
-
-using namespace ROCmLogging;
 
 static const char *kPathDRMRoot = "/sys/class/drm";
 static const char *kPathHWMonRoot = "/sys/class/hwmon";
@@ -303,16 +300,6 @@ RocmSMI::Initialize(uint64_t flags) {
   uint32_t ret;
   int i_ret;
 
-  LOG_ALWAYS("=============== ROCM SMI initialize ================");
-  Logger::getInstance()->enableAllLogLevels();
-  // Leaving below to allow developers to check current log settings
-  // std::string logSettings = Logger::getInstance()->getLogSettings();
-  // std::cout << "Current log settings:\n" << logSettings << std::endl;
-
-  if (Logger::getInstance()->isLoggerEnabled()) {
-    logSystemDetails();
-  }
-
   assert(ref_count_ == 1);
   if (ref_count_ != 1) {
     throw amd::smi::rsmi_exception(RSMI_INITIALIZATION_ERROR,
@@ -326,6 +313,8 @@ RocmSMI::Initialize(uint64_t flags) {
   GetEnvVariables();
   // To help debug env variable issues
   // printEnvVarInfo();
+
+  while (env_vars_.debug_inf_loop) {}
 
   while (std::string(kAMDMonitorTypes[i]) != "") {
       amd_monitor_types_.insert(kAMDMonitorTypes[i]);
@@ -454,18 +443,6 @@ static uint32_t GetEnvVarUInteger(const char *ev_str) {
   return 0;
 }
 
-// provides a way to get env variable detail in both debug & release
-// helps enable full logging
-static bool getRSMIEnvVar_LoggingEnabled(const char *ev_str) {
-  bool isLoggingEnabled = false;
-  ev_str = getenv(ev_str);
-
-  if (ev_str != nullptr) {
-    isLoggingEnabled = true;
-  }
-  return isLoggingEnabled;
-}
-
 static std::unordered_set<uint32_t> GetEnvVarUIntegerSets(const char *ev_str) {
   std::unordered_set<uint32_t> returnSet;
 #ifndef DEBUG
@@ -493,7 +470,6 @@ static std::unordered_set<uint32_t> GetEnvVarUIntegerSets(const char *ev_str) {
 
 // Get and store env. variables in this method
 void RocmSMI::GetEnvVariables(void) {
-  env_vars_.logging_on = getRSMIEnvVar_LoggingEnabled("RSMI_LOGGING");
 #ifndef DEBUG
   (void)GetEnvVarUInteger(nullptr);  // This is to quiet release build warning.
   env_vars_.debug_output_bitfield = 0;
@@ -516,11 +492,6 @@ const RocmSMI_env_vars& RocmSMI::getEnv(void) {
   return env_vars_;
 }
 
-bool RocmSMI::isLoggingOn(void) {
-  GetEnvVariables();
-  return this->env_vars_.logging_on;
-}
-
 void RocmSMI::printEnvVarInfo(void) {
   std::cout << __PRETTY_FUNCTION__ << " | env_vars_.debug_output_bitfield = "
             << ((env_vars_.debug_output_bitfield == 0) ? "<undefined>"
@@ -540,11 +511,8 @@ void RocmSMI::printEnvVarInfo(void) {
             << std::endl;
   std::cout << __PRETTY_FUNCTION__ << " | env_vars_.debug_inf_loop = "
             << ((env_vars_.debug_inf_loop == 0) ? "<undefined>"
-                : std::to_string(env_vars_.debug_inf_loop))
+                : std::to_string(env_vars_.debug_output_bitfield))
             << std::endl;
-  bool isLoggingOn = (env_vars_.logging_on) ? true : false;
-  std::cout << __PRETTY_FUNCTION__ << " | env_vars_.logging_on = "
-            << (isLoggingOn ? "true" : "false") << std::endl;
   std::cout << __PRETTY_FUNCTION__ << " | env_vars_.enum_overrides = {";
   if (env_vars_.enum_overrides.empty()) {
     std::cout << "}" << std::endl;

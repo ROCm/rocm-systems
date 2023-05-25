@@ -1,99 +1,6 @@
 #!/bin/bash
 
-#set -x
-
-do_addLogFolder() {
-  sudo mkdir -p /var/log/rocm_smi_lib
-  sudo touch /var/log/rocm_smi_lib/ROCm-SMI-lib.log
-  sudo chmod -R a+rw /var/log/rocm_smi_lib
-  sudo chmod a+rw /var/log/rocm_smi_lib/ROCm-SMI-lib.log
-}
-
-do_configureLogrotate() {
-  logrotate --version &>/dev/null
-  if [ $? -ne 0 ]; then
-    echo "[WARNING] Detected logrotate is not installed."\
-    "ROCm-smi logs (when turned on) will not rotate properly."
-    return
-  fi
-
-  if [ ! -f /etc/logrotate.d/rocm_smi.conf ]; then
-    sudo touch /etc/logrotate.d/rocm_smi.conf
-    sudo chmod 644 /etc/logrotate.d/rocm_smi.conf # root r/w, all others read
-    # ROCm SMI logging rotation, rotates files using root user/group
-    # Hourly logrotation check
-    # Only rotates if size grew larger than 1MB
-    # Max of 4 rotation files, oldest will be removed
-    # Rotated files use date extention of ex. ROCm-SMI-lib.log.2023-05-09_16:51:42
-    cat <<'EOF' | sudo tee /etc/logrotate.d/rocm_smi.conf >/dev/null
-/var/log/rocm_smi_lib/ROCm-SMI-lib.log {
-    su root root
-    hourly
-    missingok
-    notifempty
-    rotate 4
-    size 1M
-    copytruncate
-    dateext
-    dateformat .%Y-%m-%d_%H:%M:%S
-}
-EOF
-  # workaround: remove extra 'OURCE' text
-  # from rocm_smi.conf. Unsure if CMAKE,
-  # bash, or here document
-  # issue (only seen on RHEL 8.7)
-  sudo sed -i s/OURCE//g /etc/logrotate.d/rocm_smi.conf
-  fi
-  # check if logrotate uses system timers, Ubuntu/modern OS's do
-  # Several older OS's like RHEL 8.7, do not. Instead defaults
-  # to use daily cron jobs - see https://stackoverflow.com/a/69465677
-  sudo systemctl list-timers|grep -iq logrotate
-  if [ $? -ne 0 ]; then
-    # confirm logrotate file exists in daily
-    if [ -f /etc/cron.daily/logrotate ]; then
-      # move logrotate daily to hourly
-      if [ -f /etc/cron.hourly/logrotate ]; then
-        sudo mv /etc/cron.daily/logrotate /etc/cron.hourly/logrotate
-      else
-        echo "[WARNING] Could find and configure hourly cron for ROCm-smi's"\
-        " logrotate. ROCm-smi logs (when turned on) will not rotate properly."
-        return
-      fi
-    else
-      # confirm that it's already been moved to hourly
-      sudo find /etc/cron.* -iname logrotate -print -quit |grep -iq hourly
-      if [ $? -ne 0 ]; then
-        echo "[WARNING] Could not configure an hourly cron for ROCm-smi's logrotate."\
-        "ROCm-smi logs (when turned on) may not rotate properly."
-      fi
-    fi
-  else
-    # Configure systemd timers - the typical setup for modern Linux logrotation setups
-    if [ -f /lib/systemd/system/logrotate.timer ]; then
-      if [ ! -f /lib/systemd/system/logrotate.timer.backup ]; then
-        sudo cp /lib/systemd/system/logrotate.timer /lib/systemd/system/logrotate.timer.backup
-      fi
-      cat <<'EOF' | sudo tee /lib/systemd/system/logrotate.timer >/dev/null
-[Unit]
-Description=Hourly rotation of log files
-Documentation=man:logrotate(8) man:logrotate.conf(5)
-
-[Timer]
-OnCalendar=
-OnCalendar=hourly
-AccuracySec=1m
-Persistent=true
-
-[Install]
-WantedBy=timers.target
-EOF
-      sudo systemctl reenable --now logrotate.timer
-    else
-      echo "[WARNING] Could not configure systemd timer for ROCm's logrotate."\
-      "ROCm-smi logs (when turned on) will not rotate properly."
-    fi
-  fi
-}
+set -e
 
 do_ldconfig() {
   # left-hand term originates from ENABLE_LDCONFIG = ON/OFF at package build
@@ -106,8 +13,6 @@ do_ldconfig() {
 case "$1" in
   ( configure )
     do_ldconfig
-    do_addLogFolder
-    do_configureLogrotate
   ;;
   ( abort-upgrade | abort-remove | abort-deconfigure )
     echo "$1"

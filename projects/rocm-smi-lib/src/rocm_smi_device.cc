@@ -41,6 +41,7 @@
  *
  */
 
+
 #include <pthread.h>
 #include <unistd.h>
 #include <sys/types.h>
@@ -58,7 +59,6 @@
 #include <memory>
 #include <algorithm>
 #include <iterator>
-#include <cstring>
 
 #include "rocm_smi/rocm_smi_main.h"
 #include "rocm_smi/rocm_smi_device.h"
@@ -66,10 +66,7 @@
 #include "rocm_smi/rocm_smi_exception.h"
 #include "rocm_smi/rocm_smi_utils.h"
 #include "rocm_smi/rocm_smi_kfd.h"
-#include "rocm_smi/rocm_smi_logger.h"
 #include "shared_mutex.h"  // NOLINT
-
-using namespace ROCmLogging;
 
 namespace amd {
 namespace smi {
@@ -573,7 +570,6 @@ int Device::openDebugFileStream(DevInfoTypes type, T *fs, const char *str) {
 template <typename T>
 int Device::openSysfsFileStream(DevInfoTypes type, T *fs, const char *str) {
   auto sysfs_path = path_;
-  std::ostringstream ss;
 
 #ifdef DEBUG
   if (env_->path_DRM_root_override
@@ -591,35 +587,18 @@ int Device::openSysfsFileStream(DevInfoTypes type, T *fs, const char *str) {
   int ret = isRegularFile(sysfs_path, &reg_file);
 
   if (ret != 0) {
-    ss << "File did not exist - SYSFS file (" << sysfs_path
-       << ") for DevInfoInfoType (" << RocmSMI::devInfoTypesStrings.at(type)
-       << "), returning " << std::to_string(ret);
-    LOG_ERROR(ss);
     return ret;
   }
   if (!reg_file) {
-    ss << "File is not a regular file - SYSFS file (" << sysfs_path << ") for "
-       << "DevInfoInfoType (" << RocmSMI::devInfoTypesStrings.at(type) << "),"
-       << " returning ENOENT (" << std::strerror(ENOENT) << ")";
-    LOG_ERROR(ss);
     return ENOENT;
   }
 
   fs->open(sysfs_path);
 
   if (!fs->is_open()) {
-    ss << "Could not open - SYSFS file (" << sysfs_path << ") for "
-       << "DevInfoInfoType (" << RocmSMI::devInfoTypesStrings.at(type) << "), "
-       << ", returning " << std::to_string(errno) << " ("
-       << std::strerror(errno) << ")";
-    LOG_ERROR(ss);
     return errno;
   }
 
-  ss << "Successfully opened SYSFS file (" << sysfs_path
-     << ") for DevInfoInfoType (" << RocmSMI::devInfoTypesStrings.at(type)
-     << ")";
-  LOG_INFO(ss);
   return 0;
 }
 
@@ -627,16 +606,11 @@ int Device::readDebugInfoStr(DevInfoTypes type, std::string *retStr) {
   std::ifstream fs;
   std::string line;
   int ret = 0;
-  std::ostringstream ss;
 
   assert(retStr != nullptr);
 
   ret = openDebugFileStream(type, &fs);
   if (ret != 0) {
-    ss << "Could not read debugInfoStr for DevInfoType ("
-     << RocmSMI::devInfoTypesStrings.at(type)<< "), returning "
-     << std::to_string(ret);
-    LOG_ERROR(ss);
     return ret;
   }
 
@@ -647,34 +621,21 @@ int Device::readDebugInfoStr(DevInfoTypes type, std::string *retStr) {
 
   fs.close();
 
-  ss << "Successfully read debugInfoStr for DevInfoType ("
-     << RocmSMI::devInfoTypesStrings.at(type)<< "), retString= " << *retStr;
-  LOG_INFO(ss);
-
   return 0;
 }
 
 int Device::readDevInfoStr(DevInfoTypes type, std::string *retStr) {
   std::ifstream fs;
   int ret = 0;
-  std::ostringstream ss;
 
   assert(retStr != nullptr);
 
   ret = openSysfsFileStream(type, &fs);
   if (ret != 0) {
-    ss << "Could not read device info string for DevInfoType ("
-     << RocmSMI::devInfoTypesStrings.at(type)<< "), returning "
-     << std::to_string(ret);
-    LOG_ERROR(ss);
     return ret;
   }
 
   fs >> *retStr;
-  std::string info = "Successfully read device info string for DevInfoType (" +
-                      RocmSMI::devInfoTypesStrings.at(type) + "): " +
-                      *retStr;
-  LOG_INFO(info);
   fs.close();
 
   return 0;
@@ -684,30 +645,17 @@ int Device::writeDevInfoStr(DevInfoTypes type, std::string valStr) {
   auto tempPath = path_;
   std::ofstream fs;
   int ret;
-  std::ostringstream ss;
 
   fs.rdbuf()->pubsetbuf(0,0);
   ret = openSysfsFileStream(type, &fs, valStr.c_str());
   if (ret != 0) {
-    ss << "Could not write device info string (" << valStr
-       << ") for DevInfoType (" << RocmSMI::devInfoTypesStrings.at(type)
-       << "), returning " << std::to_string(ret);
-    LOG_ERROR(ss);
     return ret;
   }
 
   // We'll catch any exceptions in rocm_smi.cc code.
   if (fs << valStr) {
-    ss << "Successfully wrote device info string (" << valStr
-       << ") for DevInfoType (" << RocmSMI::devInfoTypesStrings.at(type)
-       << "), returning RSMI_STATUS_SUCCESS";
-    LOG_INFO(ss);
     ret = RSMI_STATUS_SUCCESS;
   } else {
-    ss << "Could not write device info string (" << valStr
-       << ") for DevInfoType (" << RocmSMI::devInfoTypesStrings.at(type)
-       << "), returning RSMI_STATUS_NOT_SUPPORTED";
-    LOG_ERROR(ss);
     ret = RSMI_STATUS_NOT_SUPPORTED;
   }
   fs.close();
@@ -771,23 +719,15 @@ int Device::writeDevInfo(DevInfoTypes type, std::string val) {
 int Device::readDevInfoLine(DevInfoTypes type, std::string *line) {
   int ret;
   std::ifstream fs;
-  std::ostringstream ss;
 
   assert(line != nullptr);
 
   ret = openSysfsFileStream(type, &fs);
   if (ret != 0) {
-    ss << "Could not read DevInfoLine for DevInfoType ("
-       << RocmSMI::devInfoTypesStrings.at(type) << ")";
-    LOG_ERROR(ss);
     return ret;
   }
 
   std::getline(fs, *line);
-  ss << "Successfully read DevInfoLine for DevInfoType ("
-     << RocmSMI::devInfoTypesStrings.at(type) << "), returning *line = "
-     << *line;
-  LOG_INFO(ss);
 
   return 0;
 }
@@ -795,36 +735,20 @@ int Device::readDevInfoLine(DevInfoTypes type, std::string *line) {
 int Device::readDevInfoBinary(DevInfoTypes type, std::size_t b_size,
                                 void *p_binary_data) {
   auto sysfs_path = path_;
-  std::ostringstream ss;
 
   FILE *ptr;
   sysfs_path += "/device/";
   sysfs_path += kDevAttribNameMap.at(type);
   ptr  = fopen(sysfs_path.c_str(), "rb");
   if (!ptr) {
-    ss << "Could not read DevInfoBinary for DevInfoType ("
-       << RocmSMI::devInfoTypesStrings.at(type) << ")"
-       << " - SYSFS (" << sysfs_path << ")"
-       << ", returning " << std::to_string(errno) << " ("
-       << std::strerror(errno) << ")";
-    LOG_ERROR(ss);
     return errno;
   }
 
   size_t num = fread(p_binary_data, b_size, 1, ptr);
   fclose(ptr);
   if ((num*b_size) != b_size) {
-    ss << "Could not read DevInfoBinary for DevInfoType ("
-       << RocmSMI::devInfoTypesStrings.at(type) << ") - SYSFS ("
-       << sysfs_path << "), binary size error, "
-       << ", returning ENOENT (" << std::strerror(ENOENT) << ")";
-    LOG_ERROR(ss);
     return ENOENT;
   }
-  ss << "Successfully read DevInfoBinary for DevInfoType ("
-     << RocmSMI::devInfoTypesStrings.at(type) << ") - SYSFS ("
-     << sysfs_path << "), returning binaryData = " << p_binary_data;
-  LOG_INFO(ss);
   return 0;
 }
 
@@ -833,8 +757,6 @@ int Device::readDevInfoMultiLineStr(DevInfoTypes type,
   std::string line;
   int ret;
   std::ifstream fs;
-  std::string allLines;
-  std::ostringstream ss;
 
   assert(retVec != nullptr);
 
@@ -848,33 +770,12 @@ int Device::readDevInfoMultiLineStr(DevInfoTypes type,
   }
 
   if (retVec->size() == 0) {
-    ss << "Read devInfoMultiLineStr for DevInfoType ("
-       << RocmSMI::devInfoTypesStrings.at(type) << ")"
-       << ", but contained no string lines";
-    LOG_INFO(ss);
     return 0;
   }
   // Remove any *trailing* empty (whitespace) lines
   while (retVec->size() != 0 &&
         retVec->back().find_first_not_of(" \t\n\v\f\r") == std::string::npos) {
     retVec->pop_back();
-  }
-
-  // allow logging output of multiline strings
-  for (auto l: *retVec) {
-    allLines += "\n" + l;
-  }
-
-  if (!allLines.empty()) {
-    ss << "Successfully read devInfoMultiLineStr for DevInfoType ("
-       << RocmSMI::devInfoTypesStrings.at(type) << ") "
-       << ", returning lines read = " << allLines;
-    LOG_INFO(ss);
-  } else {
-    ss << "Read devInfoMultiLineStr for DevInfoType ("
-       << RocmSMI::devInfoTypesStrings.at(type) << ")"
-       << ", but lines were empty";
-    LOG_INFO(ss);
   }
   return 0;
 }

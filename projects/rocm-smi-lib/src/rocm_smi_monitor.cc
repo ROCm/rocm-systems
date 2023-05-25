@@ -57,9 +57,6 @@
 #include "rocm_smi/rocm_smi_monitor.h"
 #include "rocm_smi/rocm_smi_utils.h"
 #include "rocm_smi/rocm_smi_exception.h"
-#include "rocm_smi/rocm_smi_logger.h"
-
-using namespace ROCmLogging;
 
 namespace amd {
 namespace smi {
@@ -319,8 +316,7 @@ int Monitor::readMonitor(MonitorTypes type, uint32_t sensor_id,
   std::string sysfs_path = MakeMonitorPath(type, sensor_id);
 
   DBG_FILE_ERROR(sysfs_path, (std::string *)nullptr)
-  int ret = ReadSysfsStr(sysfs_path, val);
-  return ret;
+  return ReadSysfsStr(sysfs_path, val);
 }
 
 int32_t
