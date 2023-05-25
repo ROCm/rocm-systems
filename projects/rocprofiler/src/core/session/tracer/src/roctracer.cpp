@@ -401,7 +401,7 @@ int TracerCallback(activity_domain_t domain, uint32_t operation_id, void* data) 
             rocprofiler_record.domain = domain;
             rocprofiler_record.external_id = rocprofiler_tracer_external_id_t{};
             rocprofiler_record.operation_id = rocprofiler_tracer_operation_id_t{record->kind};
-            rocprofiler_record.api_data_handle = rocprofiler_tracer_api_data_handle_t{};
+            rocprofiler_record.api_data = rocprofiler_tracer_api_data_t{};
             rocprofiler_record.correlation_id =
                 rocprofiler_tracer_activity_correlation_id_t{record->correlation_id};
             rocprofiler_record.timestamps = rocprofiler_record_header_timestamp_t{
@@ -411,21 +411,14 @@ int TracerCallback(activity_domain_t domain, uint32_t operation_id, void* data) 
             rocprofiler_record.thread_id = rocprofiler_thread_id_t{GetTid()};
             rocprofiler_record.phase = ROCPROFILER_PHASE_NONE;
             if (operation_id == HIP_OP_ID_DISPATCH && record->kernel_name != nullptr) {
-              rocprofiler_record.api_data_handle.handle = strdup(record->kernel_name);
-              void* initial_handle = const_cast<void*>(rocprofiler_record.api_data_handle.handle);
-              rocprofiler_record.api_data_handle.size = (strlen(record->kernel_name) + 1);
+              rocprofiler_record.name = record->kernel_name;
+              size_t kernel_name_size = (strlen(record->kernel_name) + 1);
               rocprofiler::GetROCProfilerSingleton()
                   ->GetSession((*pool)->session_id)
                   ->GetBuffer((*pool)->buffer_id)
-                  ->AddRecord(rocprofiler_record, rocprofiler_record.api_data_handle.handle,
-                              rocprofiler_record.api_data_handle.size,
-                              [initial_handle](auto& rocprofiler_record, const void* data) {
-                                if (rocprofiler_record.api_data_handle.handle == initial_handle &&
-                                    data != initial_handle) {
-                                  free(initial_handle);
-                                }
-                                rocprofiler_record.api_data_handle.handle =
-                                    static_cast<const char*>(data);
+                  ->AddRecord(rocprofiler_record, rocprofiler_record.name, kernel_name_size,
+                              [](auto& rocprofiler_record, const void* data) {
+                                rocprofiler_record.name = static_cast<const char*>(data);
                               });
             } else {
               rocprofiler::GetROCProfilerSingleton()
@@ -469,7 +462,7 @@ int TracerCallback(activity_domain_t domain, uint32_t operation_id, void* data) 
             rocprofiler_record.domain = domain;
             rocprofiler_record.external_id = rocprofiler_tracer_external_id_t{0};
             rocprofiler_record.operation_id = rocprofiler_tracer_operation_id_t{record->op};
-            rocprofiler_record.api_data_handle = rocprofiler_tracer_api_data_handle_t{};
+            rocprofiler_record.api_data = rocprofiler_tracer_api_data_t{};
             rocprofiler_record.correlation_id =
                 rocprofiler_tracer_activity_correlation_id_t{record->correlation_id};
             rocprofiler_record.timestamps = rocprofiler_record_header_timestamp_t{
@@ -479,22 +472,15 @@ int TracerCallback(activity_domain_t domain, uint32_t operation_id, void* data) 
             rocprofiler_record.thread_id = rocprofiler_thread_id_t{GetTid()};
             rocprofiler_record.phase = ROCPROFILER_PHASE_NONE;
             if (record->kernel_name != nullptr && record->op == HSA_OP_ID_DISPATCH) {
-              rocprofiler_record.api_data_handle.handle = strdup(record->kernel_name);
-              void* initial_handle = const_cast<void*>(rocprofiler_record.api_data_handle.handle);
-              rocprofiler_record.api_data_handle.size = strlen(record->kernel_name) + 1;
+              size_t kernel_name_size = strlen(record->kernel_name) + 1;
               rocprofiler::GetROCProfilerSingleton()
                   ->GetSession((*pool)->session_id)
                   ->GetBuffer((*pool)->buffer_id)
-                  ->AddRecord(rocprofiler_record, rocprofiler_record.api_data_handle.handle,
-                              rocprofiler_record.api_data_handle.size,
-                              [initial_handle](auto& rocprofiler_record, const void* data) {
-                                if (rocprofiler_record.api_data_handle.handle == initial_handle &&
-                                    data != initial_handle) {
-                                  free(initial_handle);
-                                }
-                                rocprofiler_record.api_data_handle.handle =
-                                    static_cast<const char*>(data);
-                              });
+                  ->AddRecord(
+                      rocprofiler_record, record->kernel_name, kernel_name_size,
+                      [](auto& rocprofiler_record, const void* data) {
+                        rocprofiler_record.name = static_cast<const char*>(data);
+                      });
             } else {
               rocprofiler::GetROCProfilerSingleton()
                   ->GetSession((*pool)->session_id)

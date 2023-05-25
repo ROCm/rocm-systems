@@ -191,7 +191,7 @@ TEST_F(HelloWorldTest, WhenRunningTracerWithAppThenKernelInfoMatchWithGoldenOutp
 
 // Test:2 Compares order of kernel-names in golden output against current
 // tracer output
-TEST_F(HelloWorldTest, WhenRunningTracerWithAppThenFunctionNamessMatchWithGoldenOutput) {
+TEST_F(HelloWorldTest, WhenRunningTracerWithAppThenFunctionNamesMatchWithGoldenOutput) {
   // kernel info in current tracer run
   std::vector<tracer_kernel_info_t> current_kernel_info;
   GetKernelInfoForRunningApplication(&current_kernel_info);

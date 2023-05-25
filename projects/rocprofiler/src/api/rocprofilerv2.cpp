@@ -1,10 +1,13 @@
 #include <atomic>
 #include <cstdlib>
+#include <cstdio>
 
+#include "rocprofiler.h"
+
+#include "core/session/tracer/tracer.h"
 #include "src/core/hsa/hsa_support.h"
 #include "src/api/rocprofiler_singleton.h"
 #include "src/utils/helper.h"
-#include "rocprofiler.h"
 
 // TODO(aelwazir): change that to adapt with our own Exception
 // What about outside exceptions and callbacks exceptions!!
@@ -255,205 +258,22 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_query_counter_info(
   API_METHOD_SUFFIX
 }
 
-ROCPROFILER_API rocprofiler_status_t rocprofiler_query_roctx_tracer_api_data_info_size(
-    rocprofiler_session_id_t session_id, rocprofiler_tracer_roctx_api_data_info_t kind,
-    rocprofiler_tracer_api_data_handle_t api_data_id,
-    rocprofiler_tracer_operation_id_t operation_id, size_t* data_size) {
-  API_INIT_CHECKER
-  // TODO(aelwazir): To be implemented
-  // if (!rocprofiler::GetROCProfilerSingleton()
-  //          ->GetSession(session_id)
-  //          ->GetTracer()
-  //          ->FindROCTxApiData(api_data_id)) {
-  //   if (rocprofiler::GetROCProfilerSingleton()
-  //           ->GetSession(session_id)
-  //           ->GetTracer()
-  //           ->FindHSAApiData(api_data_id) ||
-  //       rocprofiler::GetROCProfilerSingleton()
-  //           ->GetSession(session_id)
-  //           ->GetTracer()
-  //           ->FindHIPApiData(api_data_id)) {
-  //     throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_INCORRECT_DOMAIN);
-  //   } else {
-  //     throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_TRACER_API_DATA_NOT_FOUND);
-  //   }
-  // }
-  *data_size = rocprofiler::GetROCProfilerSingleton()
-                   ->GetSession(session_id)
-                   ->GetTracer()
-                   ->GetROCTxApiDataInfoSize(kind, api_data_id, operation_id);
-  // if (*data_size <= 0)
-  //   throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_TRACER_API_DATA_INFORMATION_MISSING);
-  API_METHOD_SUFFIX
+ROCPROFILER_API rocprofiler_status_t rocprofiler_query_tracer_operation_name(
+    rocprofiler_tracer_activity_domain_t domain, rocprofiler_tracer_operation_id_t operation_id,
+    const char** name) {
+  *name = rocprofiler::tracer::GetApiCallOperationName(domain, operation_id);
+  return ROCPROFILER_STATUS_SUCCESS;
 }
 
-ROCPROFILER_API rocprofiler_status_t rocprofiler_query_roctx_tracer_api_data_info(
-    rocprofiler_session_id_t session_id, rocprofiler_tracer_roctx_api_data_info_t kind,
-    rocprofiler_tracer_api_data_handle_t api_data_id,
-    rocprofiler_tracer_operation_id_t operation_id, char** data) {
+ROCPROFILER_API rocprofiler_status_t
+rocprofiler_query_tracer_operation_id(rocprofiler_tracer_activity_domain_t domain, const char* name,
+                                      rocprofiler_tracer_operation_id_t* operation_id) {
   API_INIT_CHECKER
-  // TODO(aelwazir): To be implemented
-  // if (!rocprofiler::GetROCProfilerSingleton()
-  //          ->GetSession(session_id)
-  //          ->GetTracer()
-  //          ->FindROCTxApiData(api_data_id)) {
-  //   if (rocprofiler::GetROCProfilerSingleton()
-  //           ->GetSession(session_id)
-  //           ->GetTracer()
-  //           ->FindHSAApiData(api_data_id) ||
-  //       rocprofiler::GetROCProfilerSingleton()
-  //           ->GetSession(session_id)
-  //           ->GetTracer()
-  //           ->FindHIPApiData(api_data_id)) {
-  //     throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_INCORRECT_DOMAIN);
-  //   } else {
-  //     throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_TRACER_API_DATA_NOT_FOUND);
-  //   }
-  // }
-  if (!(*data = rocprofiler::GetROCProfilerSingleton()
-                    ->GetSession(session_id)
-                    ->GetTracer()
-                    ->GetROCTxApiDataInfo(kind, api_data_id, operation_id)))
-    throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_TRACER_API_DATA_INFORMATION_MISSING);
-  API_METHOD_SUFFIX
-}
-
-ROCPROFILER_API rocprofiler_status_t rocprofiler_query_hsa_tracer_api_data_info_size(
-    rocprofiler_session_id_t session_id, rocprofiler_tracer_hsa_api_data_info_t kind,
-    rocprofiler_tracer_api_data_handle_t api_data_id,
-    rocprofiler_tracer_operation_id_t operation_id, size_t* data_size) {
-  API_INIT_CHECKER
-  // TODO(aelwazir): To be implemented
-  // if (!rocprofiler::GetROCProfilerSingleton()
-  //          ->GetSession(session_id)
-  //          ->GetTracer()
-  //          ->FindHSAApiData(api_data_id)) {
-  //   if (rocprofiler::GetROCProfilerSingleton()
-  //           ->GetSession(session_id)
-  //           ->GetTracer()
-  //           ->FindROCTxApiData(api_data_id) ||
-  //       rocprofiler::GetROCProfilerSingleton()
-  //           ->GetSession(session_id)
-  //           ->GetTracer()
-  //           ->FindHIPApiData(api_data_id)) {
-  //     throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_INCORRECT_DOMAIN);
-  //   } else {
-  //     throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_TRACER_API_DATA_NOT_FOUND);
-  //   }
-  // }
-  *data_size =
-      ((kind == ROCPROFILER_HSA_FUNCTION_NAME)
-           ? rocprofiler::tracer::GetApiCallFunctionNameSize(ACTIVITY_DOMAIN_HSA_API, operation_id)
-           : rocprofiler::GetROCProfilerSingleton()
-                 ->GetSession(session_id)
-                 ->GetTracer()
-                 ->GetHSAApiDataInfoSize(kind, api_data_id, operation_id));
-  if (*data_size <= 0)
-    throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_TRACER_API_DATA_INFORMATION_MISSING);
-  API_METHOD_SUFFIX
-}
-
-ROCPROFILER_API rocprofiler_status_t rocprofiler_query_hsa_tracer_api_data_info(
-    rocprofiler_session_id_t session_id, rocprofiler_tracer_hsa_api_data_info_t kind,
-    rocprofiler_tracer_api_data_handle_t api_data_id,
-    rocprofiler_tracer_operation_id_t operation_id, char** data) {
-  API_INIT_CHECKER
-  // TODO(aelwazir): To be implemented
-  // if (!rocprofiler::GetROCProfilerSingleton()
-  //          ->GetSession(session_id)
-  //          ->GetTracer()
-  //          ->FindHSAApiData(api_data_id)) {
-  //   if (rocprofiler::GetROCProfilerSingleton()
-  //           ->GetSession(session_id)
-  //           ->GetTracer()
-  //           ->FindROCTxApiData(api_data_id) ||
-  //       rocprofiler::GetROCProfilerSingleton()
-  //           ->GetSession(session_id)
-  //           ->GetTracer()
-  //           ->FindHIPApiData(api_data_id)) {
-  //     throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_INCORRECT_DOMAIN);
-  //   } else {
-  //     throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_TRACER_API_DATA_NOT_FOUND);
-  //   }
-  // }
-  *data = (kind == ROCPROFILER_HSA_FUNCTION_NAME)
-      ? rocprofiler::tracer::GetApiCallFunctionName(ACTIVITY_DOMAIN_HSA_API, operation_id)
-      : rocprofiler::GetROCProfilerSingleton()
-            ->GetSession(session_id)
-            ->GetTracer()
-            ->GetHSAApiDataInfo(kind, api_data_id, operation_id);
-  if (*data == nullptr)
-    throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_TRACER_API_DATA_INFORMATION_MISSING);
-  API_METHOD_SUFFIX
-}
-
-ROCPROFILER_API rocprofiler_status_t rocprofiler_query_hip_tracer_api_data_info_size(
-    rocprofiler_session_id_t session_id, rocprofiler_tracer_hip_api_data_info_t kind,
-    rocprofiler_tracer_api_data_handle_t api_data_id,
-    rocprofiler_tracer_operation_id_t operation_id, size_t* data_size) {
-  API_INIT_CHECKER
-  // TODO(aelwazir): To be implemented
-  // if (!rocprofiler::GetROCProfilerSingleton()
-  //          ->GetSession(session_id)
-  //          ->GetTracer()
-  //          ->FindHIPApiData(api_data_id)) {
-  //   if (rocprofiler::GetROCProfilerSingleton()
-  //           ->GetSession(session_id)
-  //           ->GetTracer()
-  //           ->FindHSAApiData(api_data_id) ||
-  //       rocprofiler::GetROCProfilerSingleton()
-  //           ->GetSession(session_id)
-  //           ->GetTracer()
-  //           ->FindROCTxApiData(api_data_id)) {
-  //     throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_INCORRECT_DOMAIN);
-  //   } else {
-  //     throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_TRACER_API_DATA_NOT_FOUND);
-  //   }
-  // }
-  *data_size = (kind == ROCPROFILER_HIP_FUNCTION_NAME)
-      ? rocprofiler::tracer::GetApiCallFunctionNameSize(ACTIVITY_DOMAIN_HIP_API, operation_id)
-      : rocprofiler::GetROCProfilerSingleton()
-            ->GetSession(session_id)
-            ->GetTracer()
-            ->GetHIPApiDataInfoSize(kind, api_data_id, operation_id);
-  // if (*data_size <= 0)
-  // throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_TRACER_API_DATA_INFORMATION_MISSING);
-  API_METHOD_SUFFIX
-}
-
-ROCPROFILER_API rocprofiler_status_t rocprofiler_query_hip_tracer_api_data_info(
-    rocprofiler_session_id_t session_id, rocprofiler_tracer_hip_api_data_info_t kind,
-    rocprofiler_tracer_api_data_handle_t api_data_id,
-    rocprofiler_tracer_operation_id_t operation_id, char** data) {
-  API_INIT_CHECKER
-  // TODO(aelwazir): To be implemented
-  // if (!rocprofiler::GetROCProfilerSingleton()
-  //          ->GetSession(session_id)
-  //          ->GetTracer()
-  //          ->FindHIPApiData(api_data_id)) {
-  //   if (rocprofiler::GetROCProfilerSingleton()
-  //           ->GetSession(session_id)
-  //           ->GetTracer()
-  //           ->FindHSAApiData(api_data_id) ||
-  //       rocprofiler::GetROCProfilerSingleton()
-  //           ->GetSession(session_id)
-  //           ->GetTracer()
-  //           ->FindROCTxApiData(api_data_id)) {
-  //     throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_INCORRECT_DOMAIN);
-  //   } else {
-  //     throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_TRACER_API_DATA_NOT_FOUND);
-  //   }
-  // }
-  // if (!(
-  *data = (kind == ROCPROFILER_HIP_FUNCTION_NAME)
-      ? rocprofiler::tracer::GetApiCallFunctionName(ACTIVITY_DOMAIN_HIP_API, operation_id)
-      : rocprofiler::GetROCProfilerSingleton()
-            ->GetSession(session_id)
-            ->GetTracer()
-            ->GetHIPApiDataInfo(kind, api_data_id, operation_id);
-  // ))
-  // throw
-  // rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_TRACER_API_DATA_INFORMATION_MISSING);
+  if (operation_id == nullptr)
+    throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENTS);
+  if (!rocprofiler::tracer::GetApiCallOperationID(domain, name, operation_id))
+    throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_INVALID_OPERATION_ID);
+  return ROCPROFILER_STATUS_SUCCESS;
   API_METHOD_SUFFIX
 }
 

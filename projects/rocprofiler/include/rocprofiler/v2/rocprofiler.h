@@ -194,7 +194,7 @@ THE SOFTWARE.
 #if !defined(ROCPROFILER)
 #if defined(ROCPROFILER_EXPORTS)
 #define ROCPROFILER_API ROCPROFILER_EXPORT
-#else  /* !defined (ROCPROFILER_EXPORTS) */
+#else /* !defined (ROCPROFILER_EXPORTS) */
 #define ROCPROFILER_API ROCPROFILER_IMPORT
 #endif /* !defined (ROCPROFILER_EXPORTS) */
 #endif /* !defined (ROCPROFILER) */
@@ -1293,295 +1293,40 @@ typedef struct {
  * Tracer API Calls Data Handler
  */
 typedef struct {
-  /**
-   * Data Handler Identifier
-   */
-  const void* handle;
-  /**
-   * API Data Size
-   */
-  size_t size;
-} rocprofiler_tracer_api_data_handle_t;
-
-/** \defgroup roctx_tracer_api_data_group Tracer ROCTX API Data
- * \ingroup tracing_api_group
- * @{
- */
+  union {
+    const struct hip_api_data_s* hip;
+    const struct hsa_api_data_s* hsa;
+    const struct roctx_api_data_s* roctx;
+  };
+} rocprofiler_tracer_api_data_t;
 
 /**
- * ROCTX Tracer Data Information Kinds
- */
-typedef enum {
-  /**
-   * ROCTX Tracer Data kind that can be used to return ROCTX message
-   */
-  ROCPROFILER_ROCTX_MESSAGE = 0,
-  /**
-   * ROCTX Tracer Data kind that can be used to return ROCTX id
-   */
-  ROCPROFILER_ROCTX_ID = 1
-} rocprofiler_tracer_roctx_api_data_info_t;
-
-/**
- * Query Tracer API Call Data Information size to allow the user to allocate
- * the right size for the information data requested, the information will be
- * collected using
- * ::rocprofiler_tracer_api_data_id_t by using
- * ::rocprofiler_query_tracer_api_data_info and the user need to identify one
- * type of information available in
- * ::rocprofiler_query_tracer_api_data_info
+ * @brief Get Tracer API Function Name
  *
- * \param[in] session_id Session id where this data was collected
- * \param[in] kind The tyoe of information needed
- * \param[in] api_data_id API Data ID
- * \param[in] operation_id API Operation ID
- * \param[out] data_size API Data Information size
- * \retval ::ROCPROFILER_STATUS_SUCCESS, if the information was found
- * \retval ::ROCPROFILER_STATUS_ERROR_NOT_INITIALIZED, if rocprofiler_initialize
- * wasn't called before or if rocprofiler_finalize is called
- * \retval ::ROCPROFILER_STATUS_ERROR_TRACER_API_DATA_NOT_FOUND \n if the api data
- * was not found in the saved api data
- * \retval ::ROCPROFILER_STATUS_ERROR_TRACER_API_DATA_INFORMATION_MISSING \n  if the
- * api data was found in the saved data but the required information is
- * missing
- * \retval ::ROCPROFILER_STATUS_ERROR_INCORRECT_DOMAIN \n if the user sent a handle
- * that is not related to the requested domain
- */
-ROCPROFILER_API rocprofiler_status_t rocprofiler_query_roctx_tracer_api_data_info_size(
-    rocprofiler_session_id_t session_id, rocprofiler_tracer_roctx_api_data_info_t kind,
-    rocprofiler_tracer_api_data_handle_t api_data_id,
-    rocprofiler_tracer_operation_id_t operation_id, size_t* data_size) ROCPROFILER_VERSION_9_0;
-
-/**
- * Query API Data Information  using an allocated data pointer by the user,
- * user can get the size of the data using
- * ::rocprofiler_query_tracer_api_data_info_length, the user can get the data
- * using ::rocprofiler_tracer_api_data_id_t and the user need to identify one
- * type of information available in ::rocprofiler_tracer_api_data_info_t
+ * Return NULL if the name is not found for given domain and operation_id.
  *
- * \param[in] session_id Session id where this data was collected
- * \param[in] kind Information kind requested by the user
- * \param[in] api_data_id API Data ID
- * \param[in] operation_id API Operation ID
- * \param[out] data API Data Data
- * \retval ::ROCPROFILER_STATUS_SUCCESS, if the information was found
- * \retval ::ROCPROFILER_STATUS_ERROR_NOT_INITIALIZED, if rocprofiler_initialize
- * wasn't called before or if rocprofiler_finalize is called
- * \retval ::ROCPROFILER_STATUS_ERROR_TRACER_API_DATA_NOT_FOUND \n  if the api data
- * was not found in the saved api data
- * \retval ::ROCPROFILER_STATUS_ERROR_TRACER_API_DATA_INFORMATION_MISSING \n  if the
- * api data was found in the saved data but the required information is
- * missing
- * \retval ::ROCPROFILER_STATUS_ERROR_INCORRECT_DOMAIN \n if the user sent a handle
- * that is not related to the requested domain
- */
-ROCPROFILER_API rocprofiler_status_t rocprofiler_query_roctx_tracer_api_data_info(
-    rocprofiler_session_id_t session_id, rocprofiler_tracer_roctx_api_data_info_t kind,
-    rocprofiler_tracer_api_data_handle_t api_data_id,
-    rocprofiler_tracer_operation_id_t operation_id, char** data) ROCPROFILER_VERSION_9_0;
-
-/** @} */
-
-/** \defgroup hsa_tracer_api_data_group Tracer HSA API Data
- * \ingroup tracing_api_group
- * @{
- */
-
-/**
- * hsa Tracer Data Information Kinds
- */
-typedef enum {
-  /**
-   * HSA Tracer Data kind that can be used to return to a pointer to all the
-   * API Call Data
-   */
-  ROCPROFILER_HSA_FUNCTION_NAME = 0,
-  /**
-   * HSA API Data in string format.
-   */
-  ROCPROFILER_HSA_API_DATA_STR = 1,
-  /**
-   * HSA Activity Name
-   */
-  ROCPROFILER_HSA_ACTIVITY_NAME = 2,
-  /**
-   * HSA Data
-   * User has to reinterpret_cast to hsa_api_data_t*
-   */
-  ROCPROFILER_HSA_API_DATA = 3
-} rocprofiler_tracer_hsa_api_data_info_t;
-
-/**
- * Query Tracer API Call Data Information size to allow the user to allocate
- * the right size for the information data requested, the information will be
- * collected using
- * ::rocprofiler_tracer_api_data_id_t by using
- * ::rocprofiler_query_tracer_api_data_info and the user need to identify one
- * type of information available in
- * ::rocprofiler_query_tracer_api_data_info
+ * Note: The returned string is NULL terminated.
  *
- * \param[in] session_id Session id where this data was collected
- * \param[in] kind The tyoe of information needed
- * \param[in] api_data_id API Data ID
- * \param[in] operation_id API Operation ID
- * \param[out] data_size API Data Information size
- * \retval ::ROCPROFILER_STATUS_SUCCESS, if the information was found
- * \retval ::ROCPROFILER_STATUS_ERROR_NOT_INITIALIZED, if rocprofiler_initialize
- * wasn't called before or if rocprofiler_finalize is called
- * \retval ::ROCPROFILER_STATUS_ERROR_TRACER_API_DATA_NOT_FOUND \n  if the api data
- * was not found in the saved api data
- * \retval ::ROCPROFILER_STATUS_ERROR_TRACER_API_DATA_INFORMATION_MISSING \n if the
- * api data was found in the saved data but the required information is
- * missing
- * \retval ::ROCPROFILER_STATUS_ERROR_INCORRECT_DOMAIN \n if the user sent a handle
- * that is not related to the requested domain
+ * @param[in] domain
+ * @param[in] operation_id
+ * @param[out] name
+ * @return ::rocprofiler_status_t
  */
-ROCPROFILER_API rocprofiler_status_t rocprofiler_query_hsa_tracer_api_data_info_size(
-    rocprofiler_session_id_t session_id, rocprofiler_tracer_hsa_api_data_info_t kind,
-    rocprofiler_tracer_api_data_handle_t api_data_id,
-    rocprofiler_tracer_operation_id_t operation_id, size_t* data_size) ROCPROFILER_VERSION_9_0;
+ROCPROFILER_API rocprofiler_status_t rocprofiler_query_tracer_operation_name(
+    rocprofiler_tracer_activity_domain_t domain, rocprofiler_tracer_operation_id_t operation_id,
+    const char** name);
 
 /**
- * Query API Data Information  using an allocated data pointer by the user,
- * user can get the size of the data using
- * ::rocprofiler_query_tracer_api_data_info_length, the user can get the data
- * using ::rocprofiler_tracer_api_data_id_t and the user need to identify one
- * type of information available in ::rocprofiler_tracer_api_data_info_t
+ * @brief Get Tracer API Operation ID
  *
- * \param[in] session_id Session id where this data was collected
- * \param[in] kind Information kind requested by the user
- * \param[in] api_data_id API Data ID
- * \param[in] operation_id API Operation ID
- * \param[out] data API Data Data
- * \retval ::ROCPROFILER_STATUS_SUCCESS, if the information was found
- * \retval ::ROCPROFILER_STATUS_ERROR_NOT_INITIALIZED, if rocprofiler_initialize
- * wasn't called before or if rocprofiler_finalize is called
- * \retval ::ROCPROFILER_STATUS_ERROR_TRACER_API_DATA_NOT_FOUND \n if the api data
- * was not found in the saved api data
- * \retval ::ROCPROFILER_STATUS_ERROR_TRACER_API_DATA_INFORMATION_MISSING \n  if the
- * api data was found in the saved data but the required information is
- * missing
- * \retval ::ROCPROFILER_STATUS_ERROR_INCORRECT_DOMAIN \n if the user sent a handle
- * that is not related to the requested domain
+ * @param [in] domain
+ * @param [in] name
+ * @param [out] operation_id
+ * @return ::rocprofiler_status_t
  */
-ROCPROFILER_API rocprofiler_status_t rocprofiler_query_hsa_tracer_api_data_info(
-    rocprofiler_session_id_t session_id, rocprofiler_tracer_hsa_api_data_info_t kind,
-    rocprofiler_tracer_api_data_handle_t api_data_id,
-    rocprofiler_tracer_operation_id_t operation_id, char** data) ROCPROFILER_VERSION_9_0;
-
-/** @} */
-
-/** \defgroup hip_tracer_api_data_group Tracer HIP API Data
- * \ingroup tracing_api_group
- * @{
- */
-
-/**
- * hip Tracer Data Information Kinds
- */
-typedef enum {
-  // TODO(aelwazir): Get the data from hip_api_data_t
-  /**
-   * hip Tracer Data kind that can be used to return to a pointer to all the
-   * API Call Data
-   */
-  ROCPROFILER_HIP_FUNCTION_NAME = 0,
-  /**
-   * Only available for HIP Functions that lead to kernel launch to get the
-   * kernel name
-   */
-  ROCPROFILER_HIP_KERNEL_NAME = 1,
-  /**
-   * Only available to hip calls that has memory copy operation with source
-   * available
-   */
-  ROCPROFILER_HIP_MEM_COPY_SRC = 2,
-  /**
-   * Only available to hip calls that has memory copy operation with
-   * destination available
-   */
-  ROCPROFILER_HIP_MEM_COPY_DST = 3,
-  /**
-   * Only available to hip calls that has memory copy operation with data size
-   * available
-   */
-  ROCPROFILER_HIP_MEM_COPY_SIZE = 4,
-  /**
-   * Reporting the whole API data as one string
-   */
-  ROCPROFILER_HIP_API_DATA_STR = 5,
-  /**
-   * HIP Activity Name
-   */
-  ROCPROFILER_HIP_ACTIVITY_NAME = 6,
-  /**
-   * Stream ID
-   */
-  ROCPROFILER_HIP_STREAM_ID = 7,
-  /**
-   * HIP API Data
-   * User has to reinterpret_cast to hip_api_data_t*
-   */
-  ROCPROFILER_HIP_API_DATA = 8
-} rocprofiler_tracer_hip_api_data_info_t;
-
-/**
- * Query Tracer API Call Data Information size to allow the user to allocate
- * the right size for the information data requested, the information will be
- * collected using
- * ::rocprofiler_tracer_api_data_id_t by using
- * ::rocprofiler_query_tracer_api_data_info and the user need to identify one
- * type of information available in
- * ::rocprofiler_query_tracer_api_data_info
- *
- * \param[in] session_id Session id where this data was collected
- * \param[in] kind The tyoe of information needed
- * \param[in] api_data_id API Data ID
- * \param[out] data_size API Data Information size
- * \retval ::ROCPROFILER_STATUS_SUCCESS, if the information was found
- * \retval ::ROCPROFILER_STATUS_ERROR_NOT_INITIALIZED, if rocprofiler_initialize
- * wasn't called before or if rocprofiler_finalize is called
- * \retval ::ROCPROFILER_STATUS_ERROR_TRACER_API_DATA_NOT_FOUND \n if the api data
- * was not found in the saved api data
- * \retval ::ROCPROFILER_STATUS_ERROR_TRACER_API_DATA_INFORMATION_MISSING \n if the
- * api data was found in the saved data but the required information is
- * missing
- * \retval ::ROCPROFILER_STATUS_ERROR_INCORRECT_DOMAIN \n if the user sent a handle
- * that is not related to the requested domain
- */
-ROCPROFILER_API rocprofiler_status_t rocprofiler_query_hip_tracer_api_data_info_size(
-    rocprofiler_session_id_t session_id, rocprofiler_tracer_hip_api_data_info_t kind,
-    rocprofiler_tracer_api_data_handle_t api_data_id,
-    rocprofiler_tracer_operation_id_t operation_id, size_t* data_size) ROCPROFILER_VERSION_9_0;
-
-/**
- * Query API Data Information  using an allocated data pointer by the user,
- * user can get the size of the data using
- * ::rocprofiler_query_tracer_api_data_info_length, the user can get the data
- * using ::rocprofiler_tracer_api_data_id_t and the user need to identify one
- * type of information available in ::rocprofiler_tracer_api_data_info_t
- *
- * \param[in] session_id Session id where this data was collected
- * \param[in] kind Information kind requested by the user
- * \param[in] api_data_id API Data ID
- * \param[out] data API Data Data
- * \retval ::ROCPROFILER_STATUS_SUCCESS, if the information was found
- * \retval ::ROCPROFILER_STATUS_ERROR_NOT_INITIALIZED, if rocprofiler_initialize
- * wasn't called before or if rocprofiler_finalize is called
- * \retval ::ROCPROFILER_STATUS_ERROR_TRACER_API_DATA_NOT_FOUND \n if the api data
- * was not found in the saved api data
- * \retval ::ROCPROFILER_STATUS_ERROR_TRACER_API_DATA_INFORMATION_MISSING \n if the
- * api data was found in the saved data but the required information is
- * missing
- * \retval ::ROCPROFILER_STATUS_ERROR_INCORRECT_DOMAIN \n if the user sent a handle
- * that is not related to the requested domain
- */
-ROCPROFILER_API rocprofiler_status_t rocprofiler_query_hip_tracer_api_data_info(
-    rocprofiler_session_id_t session_id, rocprofiler_tracer_hip_api_data_info_t kind,
-    rocprofiler_tracer_api_data_handle_t api_data_id,
-    rocprofiler_tracer_operation_id_t operation_id, char** data) ROCPROFILER_VERSION_9_0;
-
-/** @} */
+ROCPROFILER_API rocprofiler_status_t
+rocprofiler_tracer_operation_id(rocprofiler_tracer_activity_domain_t domain, const char* name,
+                                rocprofiler_tracer_operation_id_t* operation_id);
 
 /**
  * Tracing external ID
@@ -1619,7 +1364,7 @@ typedef struct {
    */
   rocprofiler_record_header_t header;
   /**
-   * Tracing external ID
+   * Tracing external ID, and ROCTX ID if domain is ::ACTIVITY_DOMAIN_ROCTX
    */
   rocprofiler_tracer_external_id_t external_id;
   /**
@@ -1631,12 +1376,9 @@ typedef struct {
    */
   rocprofiler_tracer_operation_id_t operation_id;
   /**
-   * API Data Handler to be used by
-   * ::rocprofiler_query_roctx_tracer_api_data_info or
-   * ::rocprofiler_query_hsa_tracer_api_data_info or
-   * ::rocprofiler_query_hip_tracer_api_data_info depending on the domain type
+   * API Data
    */
-  rocprofiler_tracer_api_data_handle_t api_data_handle;
+  rocprofiler_tracer_api_data_t api_data;
   /**
    * Activity correlation ID
    */

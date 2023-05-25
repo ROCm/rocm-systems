@@ -44,7 +44,7 @@
 #define CHECK_ROCPROFILER(call)                                                                    \
   do {                                                                                             \
     if ((call) != ROCPROFILER_STATUS_SUCCESS)                                                      \
-      rocprofiler::fatal("Error: ROCProfiler API Call Error!");                                      \
+      rocprofiler::fatal("Error: ROCProfiler API Call Error!");                                    \
   } while (false)
 
 // Device (Kernel) functions, it must be void
@@ -107,82 +107,13 @@ void FlushTracerRecord(rocprofiler_record_tracer_t tracer_record,
                        rocprofiler_session_id_t session_id,
                        rocprofiler_buffer_id_t buffer_id = rocprofiler_buffer_id_t{0}) {
   std::lock_guard<std::mutex> lock(writing_lock);
-  std::string kernel_name;
   std::string function_name;
-  std::string roctx_message;
-  uint64_t roctx_id = 0;
-  if ((tracer_record.operation_id.id == 0 && tracer_record.domain == ACTIVITY_DOMAIN_HIP_OPS)) {
-    if (tracer_record.api_data_handle.handle &&
-        strlen(reinterpret_cast<const char*>(tracer_record.api_data_handle.handle)) > 1)
-      kernel_name = rocprofiler::cxx_demangle(
-          reinterpret_cast<const char*>(tracer_record.api_data_handle.handle));
-  }
-  if (tracer_record.domain == ACTIVITY_DOMAIN_HSA_API) {
-    size_t function_name_size = 0;
-    CHECK_ROCPROFILER(rocprofiler_query_hsa_tracer_api_data_info_size(
-        session_id, ROCPROFILER_HSA_FUNCTION_NAME, tracer_record.api_data_handle,
-        tracer_record.operation_id, &function_name_size));
-    if (function_name_size > 1) {
-      char* function_name_c = (char*)malloc(function_name_size);
-      CHECK_ROCPROFILER(rocprofiler_query_hsa_tracer_api_data_info(
-          session_id, ROCPROFILER_HSA_FUNCTION_NAME, tracer_record.api_data_handle,
-          tracer_record.operation_id, &function_name_c));
-      if (function_name_c) function_name = std::string(function_name_c);
-    }
-  }
-  if (tracer_record.domain == ACTIVITY_DOMAIN_HIP_API) {
-    size_t function_name_size = 0;
-    CHECK_ROCPROFILER(rocprofiler_query_hip_tracer_api_data_info_size(
-        session_id, ROCPROFILER_HIP_FUNCTION_NAME, tracer_record.api_data_handle,
-        tracer_record.operation_id, &function_name_size));
-    if (function_name_size > 1) {
-      char* function_name_c = (char*)malloc(function_name_size);
-      CHECK_ROCPROFILER(rocprofiler_query_hip_tracer_api_data_info(
-          session_id, ROCPROFILER_HIP_FUNCTION_NAME, tracer_record.api_data_handle,
-          tracer_record.operation_id, &function_name_c));
-      if (function_name_c) function_name = std::string(function_name_c);
-    }
-    size_t kernel_name_size = 0;
-    CHECK_ROCPROFILER(rocprofiler_query_hip_tracer_api_data_info_size(
-        session_id, ROCPROFILER_HIP_KERNEL_NAME, tracer_record.api_data_handle,
-        tracer_record.operation_id, &kernel_name_size));
-    if (kernel_name_size > 1) {
-      char* kernel_name_str = (char*)malloc(kernel_name_size * sizeof(char));
-      CHECK_ROCPROFILER(rocprofiler_query_hip_tracer_api_data_info(
-          session_id, ROCPROFILER_HIP_KERNEL_NAME, tracer_record.api_data_handle,
-          tracer_record.operation_id, &kernel_name_str));
-      if (kernel_name_str) kernel_name = rocprofiler::cxx_demangle(std::string(kernel_name_str));
-    }
-  }
-  if (tracer_record.domain == ACTIVITY_DOMAIN_ROCTX) {
-    size_t roctx_message_size = 0;
-    CHECK_ROCPROFILER(rocprofiler_query_roctx_tracer_api_data_info_size(
-        session_id, ROCPROFILER_ROCTX_MESSAGE, tracer_record.api_data_handle,
-        tracer_record.operation_id, &roctx_message_size));
-    if (roctx_message_size > 1) {
-      [[maybe_unused]] char* roctx_message_str =
-          static_cast<char*>(malloc(roctx_message_size * sizeof(char)));
-      CHECK_ROCPROFILER(rocprofiler_query_roctx_tracer_api_data_info(
-          session_id, ROCPROFILER_ROCTX_MESSAGE, tracer_record.api_data_handle,
-          tracer_record.operation_id, &roctx_message_str));
-      if (roctx_message_str)
-        roctx_message = rocprofiler::cxx_demangle(std::string(strdup(roctx_message_str)));
-    }
-    size_t roctx_id_size = 0;
-    CHECK_ROCPROFILER(rocprofiler_query_roctx_tracer_api_data_info_size(
-        session_id, ROCPROFILER_ROCTX_ID, tracer_record.api_data_handle, tracer_record.operation_id,
-        &roctx_id_size));
-    if (roctx_id_size > 1) {
-      [[maybe_unused]] char* roctx_id_str =
-          static_cast<char*>(malloc(roctx_id_size * sizeof(char)));
-      CHECK_ROCPROFILER(rocprofiler_query_roctx_tracer_api_data_info(
-          session_id, ROCPROFILER_ROCTX_ID, tracer_record.api_data_handle,
-          tracer_record.operation_id, &roctx_id_str));
-      if (roctx_id_str) {
-        roctx_id = std::stoll(std::string(strdup(roctx_id_str)));
-        free(roctx_id_str);
-      }
-    }
+
+  if (tracer_record.domain == ACTIVITY_DOMAIN_HSA_API || ACTIVITY_DOMAIN_HIP_API) {
+    const char* function_name_c = nullptr;
+    CHECK_ROCPROFILER(rocprofiler_query_tracer_operation_name(
+        tracer_record.domain, tracer_record.operation_id, &function_name_c));
+    function_name = function_name_c ? function_name_c : "";
   }
 
   output_file << "Record [" << tracer_record.header.id.handle << "], Domain("
@@ -200,12 +131,13 @@ void FlushTracerRecord(rocprofiler_record_tracer_t tracer_record,
                 << tracer_record.timestamps.end.value;
   }
   output_file << "), Correlation ID(" << tracer_record.correlation_id.value << ")";
-  if (tracer_record.domain == ACTIVITY_DOMAIN_ROCTX && roctx_id >= 0)
-    output_file << ", ROCTX ID(" << roctx_id << ")";
-  if (tracer_record.domain == ACTIVITY_DOMAIN_ROCTX && roctx_message.size() > 1)
-    output_file << ", ROCTX Message(" << roctx_message << ")";
+  if (tracer_record.domain == ACTIVITY_DOMAIN_ROCTX && tracer_record.operation_id.id >= 0)
+    output_file << ", ROCTX ID(" << tracer_record.operation_id.id << ")";
+  if (tracer_record.domain == ACTIVITY_DOMAIN_ROCTX && tracer_record.name)
+    output_file << ", ROCTX Message(" << tracer_record.name << ")";
   if (function_name.size() > 1) output_file << ", Function(" << function_name << ")";
-  if (kernel_name.size() > 1) output_file << ", Kernel Name(" << kernel_name.c_str() << ")";
+  if (tracer_record.domain == ACTIVITY_DOMAIN_HIP_OPS && tracer_record.name)
+    output_file << ", Kernel Name(" << rocprofiler::cxx_demangle(tracer_record.name) << ")";
   output_file << std::endl;
 }
 

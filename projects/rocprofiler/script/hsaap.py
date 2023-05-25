@@ -383,7 +383,7 @@ class API_DescrParser:
   def gen_arg_struct(self, n, name, call, struct):
     content = ''
     if n == -1:
-      content += 'struct hsa_api_data_t {\n'
+      content += 'typedef struct hsa_api_data_s {\n'
       content += '  uint64_t correlation_id;\n'
       content += '  uint32_t phase;\n'
       content += '  union {\n'
@@ -402,7 +402,7 @@ class API_DescrParser:
     else:
       content += '  } args;\n'
       content += '  uint64_t *phase_data;\n'
-      content += '};\n'
+      content += '} hsa_api_data_t;\n'
     return content
 
   # generate API callbacks

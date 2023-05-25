@@ -34,6 +34,7 @@
 #include <string>
 #include <functional>
 #include <iostream>
+#include <string_view>
 
 #include <cxxabi.h>
 #include <fcntl.h>
@@ -346,8 +347,15 @@ class perfetto_plugin_t {
     std::lock_guard<std::mutex> lock(writing_lock);
     if (!tracing_session_) rocprofiler::warning("Tracing session is deleted!\n");
     std::string kernel_name;
-    const char* function_name;
-    char* activity_name;
+    const char* operation_name_c = nullptr;
+    // ROCTX domain Operation ID doesn't have a name
+    // It depends on the user input of the roctx functions.
+    // ROCTX message is the tracer_record.name
+    if (tracer_record.domain != ACTIVITY_DOMAIN_ROCTX) {
+      CHECK_ROCPROFILER(rocprofiler_query_tracer_operation_name(
+          tracer_record.domain, tracer_record.operation_id, &operation_name_c));
+      if (!operation_name_c) operation_name_c = "Unknown Operation";
+    }
     std::string roctx_message;
     uint64_t roctx_id = 0;
     uint64_t thread_id = tracer_record.thread_id.value;
@@ -447,7 +455,7 @@ class perfetto_plugin_t {
           }
         }
         auto& roctx_track = roctx_track_it->second;
-        roctx_id = tracer_record.operation_id.id;
+        roctx_id = tracer_record.external_id.id;
         roctx_message = tracer_record.name ? tracer_record.name : "";
         if (tracer_record.operation_id.id == 1) {
           perfetto::StaticString roctx_message_pft(
@@ -486,27 +494,14 @@ class perfetto_plugin_t {
           }
         }
         auto& hsa_track = hsa_track_it->second;
-        size_t function_name_size;
-        CHECK_ROCPROFILER(rocprofiler_query_hsa_tracer_api_data_info_size(
-            rocprofiler_session_id_t{0}, ROCPROFILER_HSA_FUNCTION_NAME,
-            tracer_record.api_data_handle, tracer_record.operation_id, &function_name_size));
-        if (function_name_size > 1) {
-          char* function_name_str = new char[function_name_size];
-          CHECK_ROCPROFILER(rocprofiler_query_hsa_tracer_api_data_info(
-              rocprofiler_session_id_t{0}, ROCPROFILER_HSA_FUNCTION_NAME,
-              tracer_record.api_data_handle, tracer_record.operation_id, &function_name_str));
-          function_name = function_name_str;
-        } else {
-          function_name = "Unknown";
-        }
         if (tracer_record.phase == ROCPROFILER_PHASE_ENTER)
-          TRACE_EVENT_BEGIN("HSA_API", perfetto::StaticString(function_name), hsa_track,
+          TRACE_EVENT_BEGIN("HSA_API", perfetto::StaticString(operation_name_c), hsa_track,
                             tracer_record.timestamps.begin.value,
                             perfetto::Flow::ProcessScoped(tracer_record.correlation_id.value));
         if (tracer_record.phase == ROCPROFILER_PHASE_EXIT)
           TRACE_EVENT_END("HSA_API", hsa_track, tracer_record.timestamps.end.value);
         if (tracer_record.phase == ROCPROFILER_PHASE_NONE) {
-          TRACE_EVENT_BEGIN("HSA_API", perfetto::StaticString(function_name), hsa_track,
+          TRACE_EVENT_BEGIN("HSA_API", perfetto::StaticString(operation_name_c), hsa_track,
                             tracer_record.timestamps.begin.value,
                             perfetto::Flow::ProcessScoped(tracer_record.correlation_id.value));
           TRACE_EVENT_END("HSA_API", hsa_track, tracer_record.timestamps.end.value);
@@ -538,43 +533,16 @@ class perfetto_plugin_t {
           }
         }
         auto& hip_track = hip_track_it->second;
-        size_t function_name_size;
-        CHECK_ROCPROFILER(rocprofiler_query_hip_tracer_api_data_info_size(
-            rocprofiler_session_id_t{0}, ROCPROFILER_HIP_FUNCTION_NAME,
-            tracer_record.api_data_handle, tracer_record.operation_id, &function_name_size));
-        if (function_name_size > 1) {
-          char* function_name_str = new char[function_name_size];
-          CHECK_ROCPROFILER(rocprofiler_query_hip_tracer_api_data_info(
-              rocprofiler_session_id_t{0}, ROCPROFILER_HIP_FUNCTION_NAME,
-              tracer_record.api_data_handle, tracer_record.operation_id, &function_name_str));
-          function_name = function_name_str;
-        } else {
-          function_name = "Unknown";
-        }
-        if (tracer_record.phase == ROCPROFILER_PHASE_ENTER) {
-          if (kernel_name.size() > 0) {
-            TRACE_EVENT_BEGIN("HIP_API", perfetto::StaticString(function_name), hip_track,
-                              tracer_record.timestamps.begin.value, "Kernel Name", kernel_name,
-                              perfetto::Flow::ProcessScoped(tracer_record.correlation_id.value));
-          } else {
-            TRACE_EVENT_BEGIN("HIP_API", perfetto::StaticString(function_name), hip_track,
-                              tracer_record.timestamps.begin.value,
-                              perfetto::Flow::ProcessScoped(tracer_record.correlation_id.value));
-          }
-        }
-        if (tracer_record.phase == ROCPROFILER_PHASE_EXIT) {
+        if (tracer_record.phase == ROCPROFILER_PHASE_ENTER)
+          TRACE_EVENT_BEGIN("HIP_API", perfetto::StaticString(operation_name_c), hip_track,
+                            tracer_record.timestamps.begin.value,
+                            perfetto::Flow::ProcessScoped(tracer_record.correlation_id.value));
+        if (tracer_record.phase == ROCPROFILER_PHASE_EXIT)
           TRACE_EVENT_END("HIP_API", hip_track, tracer_record.timestamps.end.value);
-        }
         if (tracer_record.phase == ROCPROFILER_PHASE_NONE) {
-          if (kernel_name.size() > 0) {
-            TRACE_EVENT_BEGIN("HIP_API", perfetto::StaticString(function_name), hip_track,
-                              tracer_record.timestamps.begin.value, "Kernel Name", kernel_name,
-                              perfetto::Flow::ProcessScoped(tracer_record.correlation_id.value));
-          } else {
-            TRACE_EVENT_BEGIN("HIP_API", perfetto::StaticString(function_name), hip_track,
-                              tracer_record.timestamps.begin.value,
-                              perfetto::Flow::ProcessScoped(tracer_record.correlation_id.value));
-          }
+          TRACE_EVENT_BEGIN("HIP_API", perfetto::StaticString(operation_name_c), hip_track,
+                            tracer_record.timestamps.begin.value,
+                            perfetto::Flow::ProcessScoped(tracer_record.correlation_id.value));
           TRACE_EVENT_END("HIP_API", hip_track, tracer_record.timestamps.end.value);
         }
         break;
@@ -584,36 +552,9 @@ class perfetto_plugin_t {
         break;
       }
       case ACTIVITY_DOMAIN_HIP_OPS: {
-        // TODO(aelwazir): Stream ID is removed from the API processing.
-        //        Waiting for better implementation to get the stream id.
-        // uint64_t stream_id = 0;
-        // std::unordered_map<int, perfetto::Track>::iterator stream_track_it;
-        // {
-        //   std::lock_guard<std::mutex> lock(stream_tracks_lock_);
-        //   uint64_t stream_track_id = (stream_id + STREAM_CONSTANT) *
-        //       (tracer_record.agent_id.handle + 2) * (machine_id_ + 2);
-        //   stream_track_it = stream_tracks_.find(stream_track_id);
-        //   if (stream_track_it == stream_tracks_.end()) {
-        //     /* Create a new perfetto::Track */
-        //     stream_track_it =
-        //         stream_tracks_.emplace(stream_track_id, perfetto::Track(stream_track_id,
-        //         gpu_track))
-        //             .first;
-
-        //     auto stream_desc = stream_track_it->second.Serialize();
-        //     std::string stream_str = rocprofiler::string_printf("Stream %d", stream_id);
-        //     stream_desc.set_name(stream_str);
-        //     perfetto::TrackEvent::SetTrackDescriptor(stream_track_it->second, stream_desc);
-        //     track_ids_used_.emplace_back(stream_track_id);
-        //   }
-        // }
-        // auto& stream_track = stream_track_it->second;
-        rocprofiler_timestamp_t timestamp;
-        rocprofiler_get_timestamp(&timestamp);
         std::string::size_type pos = std::string::npos;
-        if (tracer_record.api_data_handle.handle && tracer_record.api_data_handle.size > 1) {
-          kernel_name = rocprofiler::cxx_demangle(
-              strdup(reinterpret_cast<const char*>(tracer_record.api_data_handle.handle)));
+        if (tracer_record.name) {
+          kernel_name = rocprofiler::cxx_demangle(tracer_record.name);
           TRACE_EVENT_BEGIN(
               "HIP_OPS",
               perfetto::StaticString(strdup(rocprofiler::truncate_name(kernel_name).c_str())),
@@ -621,94 +562,35 @@ class perfetto_plugin_t {
               tracer_record.agent_id.handle, "Process ID", GetPid(), "Kernel Name", kernel_name,
               perfetto::Flow::ProcessScoped(tracer_record.correlation_id.value));
         } else {
-          size_t activity_name_size = 0;
-          CHECK_ROCPROFILER(rocprofiler_query_hip_tracer_api_data_info_size(
-              session_id, ROCPROFILER_HIP_ACTIVITY_NAME, tracer_record.api_data_handle,
-              tracer_record.operation_id, &activity_name_size));
-          if (activity_name_size > 1) {
-            activity_name = nullptr;
-            CHECK_ROCPROFILER(rocprofiler_query_hip_tracer_api_data_info(
-                session_id, ROCPROFILER_HIP_ACTIVITY_NAME, tracer_record.api_data_handle,
-                tracer_record.operation_id, &activity_name));
-          } else {
-            activity_name = const_cast<char*>(std::string("N/A").c_str());
-          }
-          pos = std::string(activity_name).find("Copy");
-          if (tracer_record.phase == ROCPROFILER_PHASE_NONE) {
-            if (std::string::npos == pos)
-              TRACE_EVENT_BEGIN("HIP_OPS", perfetto::StaticString(activity_name), gpu_track,
-                                tracer_record.timestamps.begin.value, "Process ID", GetPid(),
-                                perfetto::Flow::ProcessScoped(tracer_record.correlation_id.value));
-            else
-              TRACE_EVENT_BEGIN("MEM_COPIES", perfetto::StaticString(activity_name),
-                                mem_copies_track, tracer_record.timestamps.begin.value,
-                                "Process ID", GetPid(),
-                                perfetto::Flow::ProcessScoped(tracer_record.correlation_id.value));
-          } else if (tracer_record.phase == ROCPROFILER_PHASE_ENTER) {
-            if (std::string::npos == pos)
-              TRACE_EVENT_BEGIN("HIP_OPS", perfetto::StaticString(activity_name), gpu_track,
-                                timestamp.value, "Process ID", GetPid(),
-                                perfetto::Flow::ProcessScoped(tracer_record.correlation_id.value));
-            else
-              TRACE_EVENT_BEGIN("MEM_COPIES", perfetto::StaticString(activity_name),
-                                mem_copies_track, timestamp.value, "Process ID", GetPid(),
-                                perfetto::Flow::ProcessScoped(tracer_record.correlation_id.value));
-          }
-        }
-        if (tracer_record.phase == ROCPROFILER_PHASE_NONE) {
+          // MEM Copies are not correlated to GPUs, so they need a special track
+          pos = operation_name_c ? std::string_view(operation_name_c).find("Copy")
+                                 : std::string::npos;
+
           if (std::string::npos == pos)
-            TRACE_EVENT_END("HIP_OPS", gpu_track, tracer_record.timestamps.end.value);
+            TRACE_EVENT_BEGIN("HIP_OPS", perfetto::StaticString(operation_name_c), gpu_track,
+                              tracer_record.timestamps.begin.value, "Process ID", GetPid(),
+                              perfetto::Flow::ProcessScoped(tracer_record.correlation_id.value));
           else
-            TRACE_EVENT_END("MEM_COPIES", mem_copies_track, tracer_record.timestamps.end.value);
-        } else if (tracer_record.phase == ROCPROFILER_PHASE_EXIT) {
-          if (std::string::npos == pos)
-            TRACE_EVENT_END("HIP_OPS", gpu_track, timestamp.value);
-          else
-            TRACE_EVENT_END("MEM_COPIES", mem_copies_track, timestamp.value);
+            TRACE_EVENT_BEGIN("MEM_COPIES", perfetto::StaticString(operation_name_c),
+                              mem_copies_track, tracer_record.timestamps.begin.value, "Process ID",
+                              GetPid(),
+                              perfetto::Flow::ProcessScoped(tracer_record.correlation_id.value));
         }
+        if (std::string::npos == pos)
+          TRACE_EVENT_END("HIP_OPS", gpu_track, tracer_record.timestamps.end.value);
+        else
+          TRACE_EVENT_END("MEM_COPIES", mem_copies_track, tracer_record.timestamps.end.value);
         break;
       }
       case ACTIVITY_DOMAIN_HSA_OPS: {
-        // std::pair<int, uint64_t> gpu_queue_id =
-        //     std::make_pair(tracer_record.agent_id.handle, tracer_record.queue_id.handle);
-        // std::unordered_map<int, perfetto::Track>::iterator queue_track_it;
-        // {
-        //   std::lock_guard<std::mutex> lock(queue_tracks_lock_);
-        //   uint64_t queue_track_id = (tracer_record.queue_id.handle + 2) *
-        //       (tracer_record.agent_id.handle + 2) * (machine_id_ + 2);
-        //   queue_track_it = queue_tracks_.find(queue_track_id);
-        //   if (queue_track_it == queue_tracks_.end()) {
-        //     /* Create a new perfetto::Track */
-        //     queue_track_it =
-        //         queue_tracks_.emplace(queue_track_id, perfetto::Track(queue_track_id, gpu_track))
-        //             .first;
-
-        //     auto queue_desc = queue_track_it->second.Serialize();
-        //     std::string queue_str = rocprofiler::string_printf("Queue %ld", gpu_queue_id.second);
-        //     queue_desc.set_name(queue_str);
-        //     perfetto::TrackEvent::SetTrackDescriptor(queue_track_it->second, queue_desc);
-        //   }
-        //   track_ids_used_.emplace_back(queue_track_id);
-        // }
-        // auto& queue_track = queue_track_it->second;
-        size_t activity_name_size = 0;
-        CHECK_ROCPROFILER(rocprofiler_query_hsa_tracer_api_data_info_size(
-            session_id, ROCPROFILER_HSA_ACTIVITY_NAME, tracer_record.api_data_handle,
-            tracer_record.operation_id, &activity_name_size));
-        if (activity_name_size > 1) {
-          activity_name = nullptr;
-          CHECK_ROCPROFILER(rocprofiler_query_hsa_tracer_api_data_info(
-              session_id, ROCPROFILER_HSA_ACTIVITY_NAME, tracer_record.api_data_handle,
-              tracer_record.operation_id, &activity_name));
-        }
-        TRACE_EVENT_BEGIN("MEM_COPIES", perfetto::StaticString(activity_name), mem_copies_track,
+        TRACE_EVENT_BEGIN("MEM_COPIES", perfetto::StaticString(operation_name_c), mem_copies_track,
                           tracer_record.timestamps.begin.value, "Process ID", GetPid(),
                           perfetto::Flow::ProcessScoped(tracer_record.correlation_id.value));
         TRACE_EVENT_END("MEM_COPIES", mem_copies_track, tracer_record.timestamps.end.value);
         break;
       }
       default: {
-        rocprofiler::warning("ignored record for domain %d", tracer_record.domain);
+        rocprofiler::warning("Ignored record for domain %d", tracer_record.domain);
         break;
       }
     }

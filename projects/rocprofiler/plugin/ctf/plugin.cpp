@@ -136,7 +136,7 @@ class RocTxEventRecord final : public TracerEventRecord<barectf_roctx_ctx> {
   explicit RocTxEventRecord(const rocprofiler_record_tracer_t& record,
                             const rocprofiler_session_id_t session_id)
       : TracerEventRecord<barectf_roctx_ctx>{record, GetRecordBeginClockVal(record)},
-        id_{record.operation_id.id} {
+        id_{record.external_id.id} {
     msg_ = record.name ? record.name : "";
   }
 
@@ -156,37 +156,13 @@ class HsaApiEventRecord : public TracerEventRecord<barectf_hsa_api_ctx> {
                              const rocprofiler_session_id_t session_id,
                              const std::uint64_t clock_val)
       : TracerEventRecord<barectf_hsa_api_ctx>{record, clock_val},
-        api_data_{QueryApiData(record, session_id)} {}
+        api_data_{*(record.api_data.hsa)} {}
   explicit HsaApiEventRecord(const rocprofiler_record_tracer_t& record,
                              const std::uint64_t clock_val, hsa_api_data_t& api_data)
       : TracerEventRecord<barectf_hsa_api_ctx>{record, clock_val}, api_data_(api_data) {}
   const hsa_api_data_t& GetApiData() const noexcept { return api_data_; }
 
  private:
-  // Queries and returns the API data of the record `record` and session
-  // ID `session_id`.
-  static const hsa_api_data_t& QueryApiData(const rocprofiler_record_tracer_t& record,
-                                            const rocprofiler_session_id_t session_id) {
-    // Query size first (only for assertions).
-    [[maybe_unused]] std::size_t size = 0;
-    [[maybe_unused]] auto ret = rocprofiler_query_hsa_tracer_api_data_info_size(
-        session_id, ROCPROFILER_HSA_API_DATA, record.api_data_handle, record.operation_id, &size);
-
-    assert(ret == ROCPROFILER_STATUS_SUCCESS && "Query HSA API data size");
-    assert(size > 0);
-
-    // Query data (borrowed from the record).
-    char* data = nullptr;
-    ret = rocprofiler_query_hsa_tracer_api_data_info(
-        session_id, ROCPROFILER_HSA_API_DATA, record.api_data_handle, record.operation_id, &data);
-
-    assert(ret == ROCPROFILER_STATUS_SUCCESS && "Query HSA API data");
-    assert(data);
-
-    // Reinterpret as an HSA API data pointer.
-    return *reinterpret_cast<const hsa_api_data_t*>(data);
-  }
-
   hsa_api_data_t api_data_;
 };
 
@@ -228,7 +204,7 @@ class HipApiEventRecord : public TracerEventRecord<barectf_hip_api_ctx> {
                              const rocprofiler_session_id_t session_id,
                              const std::uint64_t clock_val)
       : TracerEventRecord<barectf_hip_api_ctx>{record, clock_val},
-        api_data_{QueryApiData(record, session_id)},
+        api_data_{*(record.api_data.hip)},
         kernel_name_{nullptr} {}
   explicit HipApiEventRecord(const rocprofiler_record_tracer_t& record,
                              const std::uint64_t clock_val, hip_api_data_t& api_data,
@@ -240,30 +216,6 @@ class HipApiEventRecord : public TracerEventRecord<barectf_hip_api_ctx> {
   const std::string& GetKernelName() const noexcept { return kernel_name_; }
 
  private:
-  // Queries and returns the API data of the record `record` and session
-  // ID `session_id`.
-  static const hip_api_data_t& QueryApiData(const rocprofiler_record_tracer_t& record,
-                                            const rocprofiler_session_id_t session_id) {
-    // Query size first (only for assertions).
-    [[maybe_unused]] std::size_t size = 0;
-    [[maybe_unused]] auto ret = rocprofiler_query_hip_tracer_api_data_info_size(
-        session_id, ROCPROFILER_HIP_API_DATA, record.api_data_handle, record.operation_id, &size);
-
-    assert(ret == ROCPROFILER_STATUS_SUCCESS && "Query HIP API data size");
-    assert(size > 0);
-
-    // Query data (borrowed from the record).
-    char* data = nullptr;
-
-    ret = rocprofiler_query_hip_tracer_api_data_info(
-        session_id, ROCPROFILER_HIP_API_DATA, record.api_data_handle, record.operation_id, &data);
-    assert(ret == ROCPROFILER_STATUS_SUCCESS && "Query HIP API data");
-    assert(data);
-
-    // Reinterpret as an HIP API data pointer.
-    return *reinterpret_cast<const hip_api_data_t*>(data);
-  }
-
   hip_api_data_t api_data_;
   std::string kernel_name_;
 };
@@ -370,15 +322,9 @@ class HipOpEventRecordBegin final : public ApiOpEventRecord {
   //
   // Returns an empty string if not available.
   static std::string QueryKernelName(const rocprofiler_record_tracer_t& record) {
-    if (record.operation_id.id == 0) {
-      if (const auto api_handle = record.api_data_handle.handle) {
-        const auto str = reinterpret_cast<const char*>(api_handle);
-
-        if (std::strlen(str) > 1) {
-          // Return demangled version.
-          return rocprofiler::cxx_demangle(str);
-        }
-      }
+    if (record.name) {
+      // Return demangled version.
+      return rocprofiler::cxx_demangle(record.name);
     }
 
     return {};
@@ -640,14 +586,13 @@ void Plugin::HandleTracerRecord(const rocprofiler_record_tracer_t& record,
       break;
     case ACTIVITY_DOMAIN_HSA_API: {
       /*If data is nullptr then the call is asynchromous*/
-      if (record.api_data_handle.handle == nullptr) {
+      if (record.api_data.hsa == nullptr) {
         hsa_api_tracer_.AddEventRecord(
             std::make_shared<const HsaApiEventRecordBegin>(record, session_id));
         hsa_api_tracer_.AddEventRecord(
             std::make_shared<const HsaApiEventRecordEnd>(record, session_id));
       } else {
-        hsa_api_data_t hsa_api_data =
-            *reinterpret_cast<const hsa_api_data_t*>(record.api_data_handle.handle);
+        hsa_api_data_t hsa_api_data = *(record.api_data.hsa);
         hsa_api_tracer_.AddEventRecord(
             std::make_shared<const HsaApiEventRecordBegin>(record, hsa_api_data));
         hsa_api_tracer_.AddEventRecord(
@@ -657,15 +602,14 @@ void Plugin::HandleTracerRecord(const rocprofiler_record_tracer_t& record,
     }
     case ACTIVITY_DOMAIN_HIP_API: {
       /*If data is nullptr then the call is asynchromous*/
-      if (record.api_data_handle.handle == nullptr) {
+      if (record.api_data.hip == nullptr) {
         hip_api_tracer_.AddEventRecord(
             std::make_shared<const HipApiEventRecordBegin>(record, session_id));
         hip_api_tracer_.AddEventRecord(
             std::make_shared<const HipApiEventRecordEnd>(record, session_id));
       } else {
         std::string kernel_name;
-        hip_api_data_t hip_api_data =
-            *reinterpret_cast<const hip_api_data_t*>(record.api_data_handle.handle);
+        hip_api_data_t hip_api_data = *(record.api_data.hip);
         if (record.name != nullptr)
           kernel_name = rocprofiler::cxx_demangle(std::string(record.name));
         else

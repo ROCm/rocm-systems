@@ -40,11 +40,11 @@ typedef struct {
 namespace rocprofiler {
 namespace tracer {
 
-char* GetApiCallFunctionName(rocprofiler_tracer_activity_domain_t domain,
-                             rocprofiler_tracer_operation_id_t operation_id);
+const char* GetApiCallOperationName(rocprofiler_tracer_activity_domain_t domain,
+                                    rocprofiler_tracer_operation_id_t operation_id);
 
-size_t GetApiCallFunctionNameSize(rocprofiler_tracer_activity_domain_t domain,
-                                  rocprofiler_tracer_operation_id_t operation_id);
+bool GetApiCallOperationID(rocprofiler_tracer_activity_domain_t domain, const char* name,
+                           rocprofiler_tracer_operation_id_t* operation_id);
 
 class Tracer {
  public:
@@ -53,34 +53,6 @@ class Tracer {
          rocprofiler_buffer_id_t buffer_id,
          std::vector<rocprofiler_tracer_activity_domain_t> domains);
   ~Tracer();
-
-  rocprofiler_tracer_api_data_handle_t AddROCTxApiData(std::string api_data);
-  rocprofiler_tracer_api_data_handle_t AddHSAApiData(hsa_api_data_t api_data);
-  rocprofiler_tracer_api_data_handle_t AddHIPApiData(hip_api_data_t api_data);
-
-  bool FindROCTxApiData(rocprofiler_tracer_api_data_handle_t api_data_handler);
-  bool FindHSAApiData(rocprofiler_tracer_api_data_handle_t api_data_handler);
-  bool FindHIPApiData(rocprofiler_tracer_api_data_handle_t api_data_handler);
-
-  size_t GetROCTxApiDataInfoSize(rocprofiler_tracer_roctx_api_data_info_t kind,
-                                 rocprofiler_tracer_api_data_handle_t api_data_id,
-                                 rocprofiler_tracer_operation_id_t operation_id);
-  size_t GetHSAApiDataInfoSize(rocprofiler_tracer_hsa_api_data_info_t kind,
-                               rocprofiler_tracer_api_data_handle_t api_data_id,
-                               rocprofiler_tracer_operation_id_t operation_id);
-  size_t GetHIPApiDataInfoSize(rocprofiler_tracer_hip_api_data_info_t kind,
-                               rocprofiler_tracer_api_data_handle_t api_data_id,
-                               rocprofiler_tracer_operation_id_t operation_id);
-
-  char* GetROCTxApiDataInfo(rocprofiler_tracer_roctx_api_data_info_t kind,
-                            rocprofiler_tracer_api_data_handle_t api_data_id,
-                            rocprofiler_tracer_operation_id_t operation_id);
-  char* GetHSAApiDataInfo(rocprofiler_tracer_hsa_api_data_info_t kind,
-                          rocprofiler_tracer_api_data_handle_t api_data_id,
-                          rocprofiler_tracer_operation_id_t operation_id);
-  char* GetHIPApiDataInfo(rocprofiler_tracer_hip_api_data_info_t kind,
-                          rocprofiler_tracer_api_data_handle_t api_data_id,
-                          rocprofiler_tracer_operation_id_t operation_id);
 
   void InitRoctracer(
       const std::map<rocprofiler_tracer_activity_domain_t, is_filtered_domain_t>& domains,

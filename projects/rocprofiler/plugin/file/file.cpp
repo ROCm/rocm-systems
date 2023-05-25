@@ -118,7 +118,7 @@ class file_plugin_t {
         bPrintToStdout = true;
         return;
       }
-      if (output_dir == nullptr) output_dir = "./";
+      if (output_dir == nullptr) output_dir = ".";
 
       fs::path output_prefix(output_dir);
       if (!fs::is_directory(fs::status(output_prefix))) {
@@ -216,7 +216,7 @@ class file_plugin_t {
       case ACTIVITY_DOMAIN_HIP_API: {
         if (hip_api_header_written_.load(std::memory_order_relaxed)) return;
         output_file = get_output_file(output_type_t::TRACER, ACTIVITY_DOMAIN_HIP_API);
-        *output_file << "Domain,Function,Kernel_Name,Start_Timestamp,End_Timestamp,Correlation_ID"
+        *output_file << "Record_ID,Domain,Function,Start_Timestamp,End_Timestamp,Correlation_ID"
                      << std::endl;
         *output_file << std::endl;
         hip_api_header_written_.exchange(true, std::memory_order_release);
@@ -313,106 +313,35 @@ class file_plugin_t {
     if (tracer_record.timestamps.end.value <= 0 && tracer_record.domain != ACTIVITY_DOMAIN_ROCTX)
       return;
     WriteHeader(output_type_t::TRACER, tracer_record.domain);
-    std::string function_name;
-    std::string kernel_name;
     std::string roctx_message;
-    uint64_t roctx_id;
-    if ((tracer_record.operation_id.id == 0 && tracer_record.domain == ACTIVITY_DOMAIN_HIP_OPS)) {
-      if (tracer_record.name) {
-        kernel_name = rocprofiler::cxx_demangle(tracer_record.name);
-        std::string key = "\"";
-        std::size_t found = kernel_name.rfind(key);
-        while (found != std::string::npos) {
-          kernel_name.replace(found, key.length(), "'");
-          found = kernel_name.rfind(key, found - 1);
-        }
-      }
+    if (tracer_record.domain == ACTIVITY_DOMAIN_ROCTX && tracer_record.name) {
+      roctx_message = tracer_record.name;
     }
-    size_t function_name_size = 0;
-    char* function_name_c = nullptr;
-    if (tracer_record.domain == ACTIVITY_DOMAIN_HSA_API) {
-      CHECK_ROCPROFILER(rocprofiler_query_hsa_tracer_api_data_info_size(
-          rocprofiler_session_id_t{0}, ROCPROFILER_HSA_FUNCTION_NAME, tracer_record.api_data_handle,
-          tracer_record.operation_id, &function_name_size));
-      if (function_name_size > 1) {
-        CHECK_ROCPROFILER(rocprofiler_query_hsa_tracer_api_data_info(
-            rocprofiler_session_id_t{0}, ROCPROFILER_HSA_FUNCTION_NAME,
-            tracer_record.api_data_handle, tracer_record.operation_id, &function_name_c));
-        if (function_name_c) function_name = std::string(function_name_c);
-      }
+
+    const char* operation_name_c = nullptr;
+    // ROCTX domain Operation ID doesn't have a name
+    // It depends on the user input of the roctx functions.
+    // ROCTX message is the tracer_record.name
+    if (tracer_record.domain != ACTIVITY_DOMAIN_ROCTX) {
+      CHECK_ROCPROFILER(rocprofiler_query_tracer_operation_name(
+          tracer_record.domain, tracer_record.operation_id, &operation_name_c));
     }
-    if (tracer_record.domain == ACTIVITY_DOMAIN_HIP_API) {
-      CHECK_ROCPROFILER(rocprofiler_query_hip_tracer_api_data_info_size(
-          rocprofiler_session_id_t{0}, ROCPROFILER_HIP_FUNCTION_NAME, tracer_record.api_data_handle,
-          tracer_record.operation_id, &function_name_size));
-      if (function_name_size > 1) {
-        CHECK_ROCPROFILER(rocprofiler_query_hip_tracer_api_data_info(
-            session_id, ROCPROFILER_HIP_FUNCTION_NAME, tracer_record.api_data_handle,
-            tracer_record.operation_id, &function_name_c));
-        if (function_name_c) function_name = std::string(function_name_c);
-      }
-      if (tracer_record.name) {
-        kernel_name = rocprofiler::cxx_demangle(std::string(tracer_record.name));
-        std::string key = "\"";
-        std::size_t found = kernel_name.rfind(key);
-        while (found != std::string::npos) {
-          kernel_name.replace(found, key.length(), "'");
-          found = kernel_name.rfind(key, found - 1);
-        }
-        // TODO: Change how this API returns a string.
-      }
-    }
-    if (tracer_record.domain == ACTIVITY_DOMAIN_ROCTX) {
-      if (tracer_record.name) roctx_message = rocprofiler::cxx_demangle(tracer_record.name);
-      roctx_id = tracer_record.operation_id.id;
-    }
-    char* activity_name = nullptr;
-    if (tracer_record.domain == ACTIVITY_DOMAIN_HIP_OPS) {
-      if (tracer_record.api_data_handle.handle) {
-        kernel_name = rocprofiler::cxx_demangle(
-            const_cast<char*>(reinterpret_cast<const char*>(tracer_record.api_data_handle.handle)));
-      }
-      size_t activity_name_size = 0;
-      CHECK_ROCPROFILER(rocprofiler_query_hip_tracer_api_data_info_size(
-          session_id, ROCPROFILER_HIP_ACTIVITY_NAME, tracer_record.api_data_handle,
-          tracer_record.operation_id, &activity_name_size));
-      if (activity_name_size > 1) {
-        activity_name = nullptr;
-        CHECK_ROCPROFILER(rocprofiler_query_hip_tracer_api_data_info(
-            session_id, ROCPROFILER_HIP_ACTIVITY_NAME, tracer_record.api_data_handle,
-            tracer_record.operation_id, &activity_name));
-      }
-    }
-    if (tracer_record.domain == ACTIVITY_DOMAIN_HSA_OPS) {
-      size_t activity_name_size = 0;
-      CHECK_ROCPROFILER(rocprofiler_query_hsa_tracer_api_data_info_size(
-          session_id, ROCPROFILER_HSA_ACTIVITY_NAME, tracer_record.api_data_handle,
-          tracer_record.operation_id, &activity_name_size));
-      if (activity_name_size > 1) {
-        activity_name = nullptr;
-        CHECK_ROCPROFILER(rocprofiler_query_hsa_tracer_api_data_info(
-            session_id, ROCPROFILER_HSA_ACTIVITY_NAME, tracer_record.api_data_handle,
-            tracer_record.operation_id, &activity_name));
-      }
-    }
-    // return;
     output_file_t* output_file = get_output_file(output_type_t::TRACER, tracer_record.domain);
     *output_file << GetDomainName(tracer_record.domain);
-    if (tracer_record.domain == ACTIVITY_DOMAIN_ROCTX && roctx_id >= 0)
-      *output_file << "," << roctx_id;
+    if (tracer_record.domain == ACTIVITY_DOMAIN_ROCTX && tracer_record.external_id.id >= 0)
+      *output_file << "," << tracer_record.external_id.id;
     if (tracer_record.domain == ACTIVITY_DOMAIN_ROCTX) {
       if (roctx_message.size() > 1)
         *output_file << ",\"" << roctx_message << "\"";
       else
         *output_file << ",";
     }
-    if (function_name.size() > 1) *output_file << ",\"" << function_name << "\"";
-    if (activity_name) *output_file << ",\"" << activity_name << "\"";
-    if (kernel_name.size() > 1)
-      *output_file << ",\"" << kernel_name.c_str() << "\"";
-    else if (tracer_record.domain == ACTIVITY_DOMAIN_HIP_API ||
-             tracer_record.domain == ACTIVITY_DOMAIN_HIP_OPS)
+    if (operation_name_c) *output_file << ",\"" << operation_name_c << "\"";
+    if (tracer_record.name && tracer_record.domain != ACTIVITY_DOMAIN_ROCTX) {
+      *output_file << ",\"" << rocprofiler::cxx_demangle(tracer_record.name) << "\"";
+    } else if (tracer_record.domain == ACTIVITY_DOMAIN_HIP_OPS) {
       *output_file << ",";
+    }
     if (tracer_record.domain != ACTIVITY_DOMAIN_ROCTX) {
       *output_file << "," << tracer_record.timestamps.begin.value << ","
                    << tracer_record.timestamps.end.value;
