@@ -131,7 +131,7 @@ The user has two options for building:
 
   # Optionally, for building API documentation
   cmake --build . -- doc
-  
+
   # Optionally, for building packages (DEB, RPM, TGZ)
   cmake --build . -- package
   ```
@@ -243,7 +243,7 @@ The user has two options for building:
       # app_assembly_file_relative_path is the assembly file with .s extension generated in 1st step
       # app_relative_path is the path for the application binary
       # input.txt gives flexibility to to target the compute unit and provide filters.
-            # input.txt contents: att: TARGET_CU=0 
+            # input.txt contents: att: TARGET_CU=0
       # att needs 2 ports opened (8000, 18000), In case the browser is running on a different machine.
       ```
 
@@ -251,13 +251,13 @@ The user has two options for building:
       - file plugin: outputs the data in txt files.
       - Perfetto plugin: outputs the data in protobuf format.
       - Adavced thread tracer plugin: advanced hardware traces data in binary format.
-      - ctf plugin: Outputs the data in ctf format(a binary trace format)
+      - CTF plugin: Outputs the data in ctf format(a binary trace format)
 
       installtion:
       ```bash
       rocprofiler-plugins_9.0.0-local_amd64.deb
       rocprofiler-plugins-9.0.0-local.x86_64.rpm
-      ``` 
+      ```
       usage:
 
       ```bash
@@ -284,7 +284,7 @@ The user has two options for building:
 
    // profile a kernel -kernelA
    hipLaunchKernelGGL(kernelA, dim3(1), dim3(1), 0, 0);
-   
+
    // Deactivating session
    rocprofiler_terminate_session(session_id);
 
@@ -295,7 +295,7 @@ The user has two options for building:
    rocprofiler_finalize();
    ```
 
- ## Tests: 
+ ## Tests:
  We make use of the GoogleTest (Gtest) framework to automatically find and add test cases to the CMAKE testing environment. ROCProfilerV2 testing is categorized as following:
   - unittests (Gtest Based) : These includes tests for core classes. Any newly added functionality should have a unit test written to it.
 
@@ -349,7 +349,7 @@ samples can be run as independent executables once installed
   - File Plugin
   - Perfetto Plugin
   - Adavced thread tracer Plugin
-  - Grafana Plugin
+  - CTF Plugin
 - Samples: Samples of how to use the API
 - Script: Scripts needed for tracing
 - Src: Source files of the project
