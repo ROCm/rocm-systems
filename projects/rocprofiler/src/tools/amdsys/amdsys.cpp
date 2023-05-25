@@ -84,13 +84,13 @@ int main(int argc, char* argv[]) {
 
   if (argc < 4) {
     perror(
-        "amdsys: start must be preceeded by --session <name>\n\t"
-        "amdsys --session <name> start \n"
-        "amdsys: stop must be preceeded by --session <name>\n \t"
-        "amdsys --session <name> stop \n"
-        "amdsys: launch must be preceeded by --session-new <name>\n \t"
-        "e.g. mpiexec -np 16 amdsys --session-new <name> launch py app.py\n"
-        "where all mpiexec options must come before amdsys");
+        "rocsys: start must be preceeded by --session <name>\n\t"
+        "rocsys --session <name> start \n"
+        "rocsys: stop must be preceeded by --session <name>\n \t"
+        "rocsys --session <name> stop \n"
+        "rocsys: launch must be preceeded by --session-new <name>\n \t"
+        "e.g. mpiexec -np 16 rocsys --session-new <name> launch py app.py\n"
+        "where all mpiexec options must come before rocsys");
     exit(1);
   }
 
@@ -112,7 +112,7 @@ int main(int argc, char* argv[]) {
 
   int sys_type = 0;
 
-  while (std::string(argv[i]).find("amdsys") != std::string::npos) {
+  while (std::string(argv[i]).find("rocsys") != std::string::npos) {
     i++;
     break;
   }
@@ -152,14 +152,14 @@ int main(int argc, char* argv[]) {
       break;
     } else {
       report(
-          "amdsys: start must be preceeded by --session <name>\n\t"
-          "amdsys --session <name> start \n"
-          "amdsys: stop must be preceeded by --session <name>\n \t"
-          "amdsys --session <name> stop \n"
-          "amdsys: launch must be preceeded by --session <name>\n \t"
-          "e.g. amdsys --session <SESSION_NAME> launch <MPI_COMMAND> <MPI_ARGUMENTS> rocprofv2 "
+          "rocsys: start must be preceeded by --session <name>\n\t"
+          "rocsys --session <name> start \n"
+          "rocsys: stop must be preceeded by --session <name>\n \t"
+          "rocsys --session <name> stop \n"
+          "rocsys: launch must be preceeded by --session <name>\n \t"
+          "e.g. rocsys --session <SESSION_NAME> launch <MPI_COMMAND> <MPI_ARGUMENTS> rocprofv2 "
           "<ROCPROFV2_OPTIONS> <APP_EXEC>\n"
-          "where all mpiexec options must come before amdsys\n",
+          "where all mpiexec options must come before rocsys\n",
           1);
     }
   }
@@ -181,13 +181,13 @@ int main(int argc, char* argv[]) {
       if (status < 0) std::cerr << "Invalid Command!" << std::endl;
       session_id_shm = reinterpret_cast<int*>(mmap(0, SIZE, PROT_WRITE, MAP_SHARED, shm_fd, 0));
       *session_id_shm = session_id;
-      printf("AMDSYS:: Session ID: %d\n", session_id);
+      printf("ROCSYS:: Session ID: %d\n", session_id);
 
       int argindex = i;
       std::vector<std::string> env_vars;
       env_vars.emplace_back("");
       if (strncmp(argv[i], "rocprofv2", 8) == 0) {
-        env_vars.emplace_back("--amd-sys");
+        env_vars.emplace_back("--roc-sys");
         env_vars.emplace_back(std::to_string(session_id));
       }
       for (argindex++; argindex < argc; argindex++) {
@@ -195,7 +195,7 @@ int main(int argc, char* argv[]) {
           fs::path command = bin_path;
           command.append("rocprofv2");
           env_vars.emplace_back(command.c_str());
-          env_vars.emplace_back("--amd-sys");
+          env_vars.emplace_back("--roc-sys");
           env_vars.emplace_back(std::to_string(session_id));
         } else {
           env_vars.emplace_back(argv[argindex]);
@@ -231,7 +231,7 @@ int main(int argc, char* argv[]) {
       break;
     }
     default: {
-      report("AMDSYS:: Error: Not possible to reach here, please report(invalid sys_type)!\n", 1);
+      report("ROCSYS:: Error: Not possible to reach here, please report(invalid sys_type)!\n", 1);
     }
   }
   return 1;

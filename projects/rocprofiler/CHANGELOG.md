@@ -220,3 +220,4 @@ The resulting `a.out` will depend on
 - rocprof clobbers LD_PRELOAD.
 - Samples are fixed to show the new usage of phases.
 - Plugin option validates the plugin names.
+- Fixing rocsys, for rocsys options, rocsys -h can be called
