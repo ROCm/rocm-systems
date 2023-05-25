@@ -467,6 +467,11 @@ def eval_metric(dfs, dfs_type, sys_info, soc_spec, raw_pmc_df, debug):
     Execute the expr string for each metric in the df.
     """
 
+    # confirm no illogical counter values
+    if (raw_pmc_df['pmc_perf']['GRBM_GUI_ACTIVE'] == 0).any():
+        print("WARNING: Dectected GRBM_GUI_ACTIVE == 0\nHaulting execution.")
+        sys.exit(1)
+
     # NB:
     #  Following with Omniperf 0.2.0, we are using HW spec from sys_info instead.
     #  The soc_spec is not in using right now, but can be used to do verification
