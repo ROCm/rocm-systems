@@ -32,9 +32,6 @@ jobs:
           sudo apt-get install -y cmake
       - name: Checkout
         uses: actions/checkout@v3
-        with:
-          submodules: recursive
-          token: ${{ secrets.GH_PAT }}
       - name: Install Python prereqs
         run: |
           python3 -m pip install -r requirements.txt
