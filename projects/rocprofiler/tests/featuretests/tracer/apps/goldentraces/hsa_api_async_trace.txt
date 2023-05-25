@@ -1,0 +1,55 @@
+0x22c6900 agent cpu
+0x22c8bf0 agent gpu
+1125004784725841
+Enabling API Tracing
+Only 1 GPU found with required VRAM. Peer-to-Peer copy will be skipped.
+CPU is "AMD Ryzen 9 3900X 12-Core Processor"
+GPU1 is "gfx900"
+Copying 4096 bytes from gpu1 memory to system memory...
+Success!
+Copying 4096 bytes from system memory to gpu1 memory...
+Success!
+Record(3), Domain(HSA_API_DOMAIN), Function(hsa_agent_get_info), Begin(140734995053648), End(1125004785031455), Correlation_ID(2)
+Record(6), Domain(HSA_API_DOMAIN), Function(hsa_amd_memory_pool_get_info), Begin(140734995053280), End(1125004785035995), Correlation_ID(4)
+Record(8), Domain(HSA_API_DOMAIN), Function(hsa_amd_memory_pool_get_info), Begin(140734995053280), End(1125004785036555), Correlation_ID(5)
+Record(10), Domain(HSA_API_DOMAIN), Function(hsa_amd_memory_pool_get_info), Begin(140734995053280), End(1125004785037085), Correlation_ID(6)
+Record(11), Domain(HSA_API_DOMAIN), Function(hsa_amd_agent_iterate_memory_pools), Begin(140734995053648), End(1125004785037355), Correlation_ID(3)
+Record(12), Domain(HSA_API_DOMAIN), Function(hsa_iterate_agents), Begin(140734995054064), End(1125004785037625), Correlation_ID(1)
+Record(15), Domain(HSA_API_DOMAIN), Function(hsa_agent_get_info), Begin(140734995053632), End(1125004785038395), Correlation_ID(8)
+Record(17), Domain(HSA_API_DOMAIN), Function(hsa_agent_get_info), Begin(140734995053632), End(1125004785038995), Correlation_ID(9)
+Record(20), Domain(HSA_API_DOMAIN), Function(hsa_amd_memory_pool_get_info), Begin(140734995053248), End(1125004785043495), Correlation_ID(11)
+Record(22), Domain(HSA_API_DOMAIN), Function(hsa_amd_memory_pool_get_info), Begin(140734995053248), End(1125004785043975), Correlation_ID(12)
+Record(24), Domain(HSA_API_DOMAIN), Function(hsa_amd_memory_pool_get_info), Begin(140734995053248), End(1125004785044445), Correlation_ID(13)
+Record(25), Domain(HSA_API_DOMAIN), Function(hsa_amd_agent_iterate_memory_pools), Begin(140734995053632), End(1125004785044685), Correlation_ID(10)
+Record(26), Domain(HSA_API_DOMAIN), Function(hsa_iterate_agents), Begin(140734995054064), End(1125004785044935), Correlation_ID(7)
+Record(28), Domain(HSA_API_DOMAIN), Function(hsa_amd_memory_pool_allocate), Begin(140734995054048), End(1125004785087865), Correlation_ID(14)
+Record(30), Domain(HSA_API_DOMAIN), Function(hsa_amd_memory_pool_allocate), Begin(140734995054048), End(1125004785211957), Correlation_ID(15)
+Record(32), Domain(HSA_API_DOMAIN), Function(hsa_agent_get_info), Begin(140734995054048), End(1125004785213057), Correlation_ID(16)
+Record(34), Domain(HSA_API_DOMAIN), Function(hsa_agent_get_info), Begin(140734995054048), End(1125004785219267), Correlation_ID(17)
+Record(36), Domain(HSA_API_DOMAIN), Function(hsa_amd_memory_fill), Begin(140734995053904), End(1125004785227097), Correlation_ID(18)
+Record(38), Domain(HSA_API_DOMAIN), Function(hsa_amd_memory_fill), Begin(140734995053904), End(1125004798095315), Correlation_ID(19)
+Record(40), Domain(HSA_API_DOMAIN), Function(hsa_amd_agents_allow_access), Begin(140734995053904), End(1125004798155806), Correlation_ID(20)
+Record(42), Domain(HSA_API_DOMAIN), Function(hsa_signal_create), Begin(140734995053904), End(1125004798159096), Correlation_ID(21)
+Record(44), Domain(HSA_API_DOMAIN), Function(hsa_amd_memory_async_copy), Begin(140734995053872), End(1125004798912335), Correlation_ID(22)
+Record(47), Domain(HSA_API_DOMAIN), Function(hsa_amd_memory_copy_engine_status), Begin(140734995053904), End(1125004799939028), Correlation_ID(23)
+Record(49), Domain(HSA_API_DOMAIN), Function(hsa_amd_memory_async_copy_on_engine), Begin(140734995053856), End(1125004799950448), Correlation_ID(24)
+Record(51), Domain(HSA_API_DOMAIN), Function(hsa_signal_wait_relaxed), Begin(140734995053888), End(1125004799952668), Correlation_ID(25)
+Record(54), Domain(HSA_API_DOMAIN), Function(hsa_amd_memory_fill), Begin(140734995053904), End(1125004799996599), Correlation_ID(26)
+Record(56), Domain(HSA_API_DOMAIN), Function(hsa_amd_memory_fill), Begin(140734995053904), End(1125004800133540), Correlation_ID(27)
+Record(58), Domain(HSA_API_DOMAIN), Function(hsa_amd_memory_fill), Begin(140734995053904), End(1125004800146430), Correlation_ID(28)
+Record(60), Domain(HSA_API_DOMAIN), Function(hsa_amd_agents_allow_access), Begin(140734995053904), End(1125004800150920), Correlation_ID(29)
+Record(62), Domain(HSA_API_DOMAIN), Function(hsa_signal_create), Begin(140734995053904), End(1125004800152290), Correlation_ID(30)
+Record(64), Domain(HSA_API_DOMAIN), Function(hsa_amd_memory_async_copy), Begin(140734995053872), End(1125004800157800), Correlation_ID(31)
+Record(66), Domain(HSA_API_DOMAIN), Function(hsa_amd_memory_copy_engine_status), Begin(140734995053904), End(1125004800158741), Correlation_ID(32)
+Record(68), Domain(HSA_API_DOMAIN), Function(hsa_amd_memory_async_copy_on_engine), Begin(140734995053856), End(1125004800162091), Correlation_ID(33)
+Record(71), Domain(HSA_API_DOMAIN), Function(hsa_signal_wait_relaxed), Begin(140734995053888), End(1125004800172941), Correlation_ID(34)
+Record(73), Domain(HSA_API_DOMAIN), Function(hsa_signal_store_screlease), Begin(140734995053920), End(1125004800174791), Correlation_ID(35)
+Record(75), Domain(HSA_API_DOMAIN), Function(hsa_amd_memory_async_copy), Begin(140734995053872), End(1125004800181531), Correlation_ID(36)
+Record(78), Domain(HSA_API_DOMAIN), Function(hsa_signal_wait_relaxed), Begin(140734995053888), End(1125004800184931), Correlation_ID(37)
+Record(81), Domain(HSA_API_DOMAIN), Function(hsa_amd_memory_pool_free), Begin(140734995054064), End(1125004800235281), Correlation_ID(38)
+Record(83), Domain(HSA_API_DOMAIN), Function(hsa_amd_memory_pool_free), Begin(140734995054064), End(1125004800238011), Correlation_ID(39)
+Record(46), Domain(HSA_OPS_DOMAIN), Operation(COPY_OP), Begin(1125004798940727), End(1125004798945616), Correlation_ID(22)
+Record(53), Domain(HSA_OPS_DOMAIN), Operation(COPY_OP), Begin(1125004799956748), End(1125004799961636), Correlation_ID(24)
+Record(70), Domain(HSA_OPS_DOMAIN), Operation(COPY_OP), Begin(1125004800167536), End(1125004800171091), Correlation_ID(31)
+Record(77), Domain(HSA_OPS_DOMAIN), Operation(COPY_OP), Begin(1125004800175831), End(1125004800179534), Correlation_ID(33)
+Record(80), Domain(HSA_OPS_DOMAIN), Operation(COPY_OP), Begin(1125004800192274), End(1125004800195829), Correlation_ID(36)

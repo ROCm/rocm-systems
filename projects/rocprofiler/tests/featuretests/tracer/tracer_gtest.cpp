@@ -93,7 +93,10 @@ void ApplicationParser::GetKernelInfoForRunningApplication(
       std::string sub = line.substr(spos + length + 1, epos - spos - length - 1);
       kinfo.corelation_id = sub;
     }
-    kernel_info_output->push_back(kinfo);
+
+    if (kinfo.record_id != "") {
+      kernel_info_output->push_back(kinfo);
+    }
   }
 }
 
@@ -169,7 +172,7 @@ void ApplicationParser::ParseKernelInfoFields(const std::string& s,
     if (found != std::string::npos) {
       int spos = found;
       int epos = line.find(")", spos);
-      int length = std::string("kernel-name").length();
+      int length = std::string("Function").length();
       std::string sub = line.substr(spos + length + 1, epos - spos - length - 1);
 
       kinfo.function = sub;
@@ -188,7 +191,9 @@ void ApplicationParser::ParseKernelInfoFields(const std::string& s,
       // kernel_info_output->push_back(kinfo);
     }
     //}
-    kernel_info_output->push_back(kinfo);
+    if (kinfo.record_id != "") {
+      kernel_info_output->push_back(kinfo);
+    }
   }
   golden_file.close();
 }
@@ -283,12 +288,13 @@ TEST_F(AsyncCopyTest, WhenRunningTracerWithAppThenAsyncCorelationCountIsCorrect)
   for (const auto& itr : current_kernel_info) {
     if (itr.function.find("async_copy_on_engine") != std::string::npos) {
       corelation_pair.push_back({itr.record_id, itr.corelation_id});
+      break;  // we just want first occurance to test
     }
   }
   ASSERT_TRUE(corelation_pair.size());
 
   uint32_t corelation_count = 0;
-  // check if corelation id appears more than twice
+  // check if same corelation id appears again but as a different ops record
   for (size_t i = 0; i < corelation_pair.size(); i++) {
     for (const auto& itr : current_kernel_info) {
       if ((itr.corelation_id == corelation_pair[i].second) &&
@@ -298,5 +304,5 @@ TEST_F(AsyncCopyTest, WhenRunningTracerWithAppThenAsyncCorelationCountIsCorrect)
     }
   }
 
-  EXPECT_GT(corelation_count, corelation_pair.size());
+  EXPECT_EQ(corelation_count, corelation_pair.size());
 }
