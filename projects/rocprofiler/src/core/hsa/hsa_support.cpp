@@ -27,6 +27,7 @@
 #include <mutex>
 #include <optional>
 #include <unordered_map>
+#include <unordered_set>
 #include <string>
 #include <atomic>
 #include <cstdint>
@@ -40,6 +41,7 @@
 #include <utility>
 #include <vector>
 
+#include "core/hardware/hsa_info.h"
 #include "src/core/session/tracer/src/correlation_id.h"
 #include "src/core/session/tracer/src/exception.h"
 #include "src/core/session/tracer/src/roctracer.h"
@@ -47,6 +49,9 @@
 
 #include "src/core/hsa/queues/queue.h"
 #include "src/api/rocmtool.h"
+
+#include <experimental/filesystem>
+namespace fs = std::experimental::filesystem;
 
 namespace {
 
@@ -761,11 +766,74 @@ hsa_status_t QueueDestroyInterceptor(hsa_queue_t* hsa_queue) {
   return HSA_STATUS_SUCCESS;
 }
 
+std::unordered_map<uint32_t, hsa_agent_t> numa_node_to_cpu_agent;
+std::unordered_map<long long, long long> gpu_numa_nodes_near_cpu;
+std::vector<hsa_agent_t> gpu_agents;
+
 void Initialize(HsaApiTable* table) {
   InitKsymbols();
   // Save the HSA core api and amd_ext api.
+  long long gpu_numa_nodes_start = 0;
+
   SetCoreApiTable(*table->core_);
   SetAmdExtTable(table->amd_ext_);
+
+  // TODO(aelwazir): FIXME, this is a workaround for the issue of allocating buffers on KernArg
+  // Pools that are nearest to the GPU which is not NUMA local to the CPU. This should be remove
+  // once ROCR provides such API.
+  std::string path = "/sys/class/kfd/kfd/topology/nodes";
+  for (const auto& entry : fs::directory_iterator(path)) {
+    long long node_id = std::stoll(entry.path().filename().c_str());
+    std::ifstream gpu_id_file;
+    std::string gpu_path = entry.path().c_str();
+    gpu_path += "/gpu_id";
+    gpu_id_file.open(gpu_path);
+    std::string gpu_id_str;
+    if (gpu_id_file.is_open()) {
+      gpu_id_file >> gpu_id_str;
+      long long gpu_id = std::stoll(gpu_id_str);
+      if (gpu_id > 0) {
+        gpu_numa_nodes_start = (gpu_numa_nodes_start > node_id || gpu_numa_nodes_start == 0)
+            ? node_id
+            : gpu_numa_nodes_start;
+      }
+    }
+    gpu_id_file.close();
+  }
+  path = "/sys/class/kfd/kfd/topology/nodes";
+  for (const auto& entry : fs::directory_iterator(path)) {
+    long long node_id = std::stoll(entry.path().filename().c_str());
+    std::string numa_node_path = entry.path().c_str();
+    long long agent_id = std::stoll(entry.path().filename().c_str());
+    if (agent_id >= gpu_numa_nodes_start) {
+      numa_node_path += "/io_links";
+      for (const auto& numa_node_entry : fs::directory_iterator(numa_node_path)) {
+        std::string numa_node_entry_properties_path = numa_node_entry.path().c_str();
+        numa_node_entry_properties_path += "/properties";
+        std::ifstream gpu_properties_file;
+        gpu_properties_file.open(numa_node_entry_properties_path);
+        std::string gpu_properties_file_line;
+        if (gpu_properties_file.is_open()) {
+          while (gpu_properties_file) {
+            std::getline(gpu_properties_file, gpu_properties_file_line);
+            std::string delimiter = " ";
+            std::stringstream ss(gpu_properties_file_line);
+            std::string word;
+            ss >> word;
+            if (word.compare("node_to") == 0) {
+              ss >> word;
+              long long near_cpu_node_id = std::stoll(word);
+              if (near_cpu_node_id < gpu_numa_nodes_start) {
+                gpu_numa_nodes_near_cpu[node_id] = near_cpu_node_id;
+              }
+            }
+          }
+        }
+        gpu_properties_file.close();
+      }
+    }
+  }
+
   // Enumerate the agents.
   if (GetCoreApiTable().hsa_iterate_agents_fn(
           [](hsa_agent_t agent, void* data) {
@@ -777,10 +845,16 @@ void Initialize(HsaApiTable* table) {
               case HSA_DEVICE_TYPE_CPU:
                 agent_info.setIndex(cpu_agent_count++);
                 cpu_agent = agent;
-                rocmtools::queue::InitializePools(cpu_agent);
+                rocmtools::queue::InitializePools(cpu_agent, &agent_info);
+                uint32_t cpu_numa_node_id;
+                if (GetCoreApiTable().hsa_agent_get_info_fn(
+                        agent, HSA_AGENT_INFO_NODE, &cpu_numa_node_id) != HSA_STATUS_SUCCESS)
+                  rocmtools::fatal("hsa_agent_get_info(HSA_AGENT_INFO_NODE) failed");
+                agent_info.setNumaNode(cpu_numa_node_id);
+                numa_node_to_cpu_agent[cpu_numa_node_id] = agent;
                 break;
               case HSA_DEVICE_TYPE_GPU:
-                // XXX FIXME: When multiple ranks are used, each rank's first
+                // TODO(FIXME): When multiple ranks are used, each rank's first
                 // logical device always has GPU ID 0, regardless of which
                 // physical device is selected with CUDA_VISIBLE_DEVICES.
                 // Because of this, when merging traces from multiple ranks,
@@ -794,6 +868,15 @@ void Initialize(HsaApiTable* table) {
                 // is currently doing as well as the roctracer compatibility
                 // code earlier in this file.
                 agent_info.setIndex(gpu_agent_count++);
+                uint32_t gpu_cpu_numa_node_id;
+                if (GetCoreApiTable().hsa_agent_get_info_fn(
+                        agent, HSA_AGENT_INFO_NODE, &gpu_cpu_numa_node_id) != HSA_STATUS_SUCCESS)
+                  rocmtools::fatal("hsa_agent_get_info(HSA_AGENT_INFO_NODE) failed");
+                agent_info.setNumaNode(gpu_cpu_numa_node_id);
+                agent_info.setNearCpuAgent(
+                    numa_node_to_cpu_agent[gpu_numa_nodes_near_cpu[gpu_cpu_numa_node_id]]);
+                rocmtools::queue::InitializeGPUPool(agent, &agent_info);
+                gpu_agents.push_back(agent);
                 break;
               default:
                 agent_info.setIndex(other_agent_count++);
@@ -804,6 +887,19 @@ void Initialize(HsaApiTable* table) {
           },
           nullptr) != HSA_STATUS_SUCCESS)
     rocmtools::fatal("hsa_iterate_agents failed");
+
+  for (auto& agent : gpu_agents) {
+    GetAgentInfo(agent.handle).cpu_pool =
+        GetAgentInfo(GetAgentInfo(agent.handle).getNearCpuAgent().handle).cpu_pool;
+    GetAgentInfo(agent.handle).kernarg_pool =
+        GetAgentInfo(GetAgentInfo(agent.handle).getNearCpuAgent().handle).kernarg_pool;
+  }
+
+  rocmtools::queue::CheckPacketReqiurements(gpu_agents);
+
+  gpu_agents.clear();
+  numa_node_to_cpu_agent.clear();
+  gpu_numa_nodes_near_cpu.clear();
 
   SetHSALoaderApi();
 

@@ -99,10 +99,10 @@ bool metrics::ExtractMetricEvents(
       const Metric* metric = metrics_dict->Get(metric_names[i]);
       if (metric == nullptr) {
           Agent::AgentInfo& agentInfo = rocmtools::hsa_support::GetAgentInfo(gpu_agent.handle);
-          fatal("input metric'%s' not supported on this hardware: %s ", metric_names[i].c_str(), 
+          fatal("input metric'%s' not supported on this hardware: %s ", metric_names[i].c_str(),
           agentInfo.getName().data());
 
-      } 
+      }
 
       // adding result object for derived metric
       std::lock_guard<std::mutex> lock(extract_metric_events_lock);
@@ -185,7 +185,7 @@ bool metrics::ExtractMetricEvents(
 }
 
 
-bool metrics::GetCounterData(hsa_ven_amd_aqlprofile_profile_t* profile, hsa_agent_t gpu_agent, 
+bool metrics::GetCounterData(hsa_ven_amd_aqlprofile_profile_t* profile, hsa_agent_t gpu_agent,
                              std::vector<results_t*>& results_list) {
   uint32_t xcc_count = rocmtools::hsa_support::GetAgentInfo(gpu_agent.handle).getXccCount();
   uint32_t single_xcc_buff_size = profile->output_buffer.size /(sizeof(uint64_t) * xcc_count);

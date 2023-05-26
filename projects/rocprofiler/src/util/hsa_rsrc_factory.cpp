@@ -489,7 +489,7 @@ uint8_t* HsaRsrcFactory::AllocateLocalMemory(const AgentInfo* agent_info, size_t
 }
 
 // Allocate memory to pass kernel parameters.
-// Memory is alocated accessible for all CPU agents and for GPU given by AgentInfo parameter.
+// Memory is allocated accessible for all CPU agents and for GPU given by AgentInfo parameter.
 // @param agent_info Agent from whose memory region to allocate
 // @param size Size of memory in terms of bytes
 // @return uint8_t* Pointer to buffer, null if allocation fails.

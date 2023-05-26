@@ -37,8 +37,6 @@
 
 namespace Packet {
 
-static std::mutex pool_lock;
-
 typedef hsa_ext_amd_aql_pm4_packet_t packet_t;
 
 std::vector<std::pair<rocmtools::profiling_context_t*, hsa_ven_amd_aqlprofile_profile_t*>>*
@@ -47,7 +45,8 @@ InitializeAqlPackets(hsa_agent_t cpu_agent, hsa_agent_t gpu_agent,
 uint8_t* AllocateSysMemory(hsa_agent_t gpu_agent, size_t size, hsa_amd_memory_pool_t* cpu_pool);
 void GetCommandBufferMap(std::map<size_t, uint8_t*>);
 void GetOutputBufferMap(std::map<size_t, uint8_t*>);
-void InitializePools(hsa_agent_t cpu_agent);
+void InitializePools(hsa_agent_t cpu_agent, Agent::AgentInfo* agent_info);
+void InitializeGPUPool(hsa_agent_t gpu_agent, Agent::AgentInfo* agent_info);
 hsa_ven_amd_aqlprofile_profile_t* InitializeDeviceProfilingAqlPackets(
     hsa_agent_t cpu_agent, hsa_agent_t gpu_agent, hsa_ven_amd_aqlprofile_event_t* events,
     uint32_t event_count, packet_t* start_packet, packet_t* stop_packet, packet_t* read_packet);
@@ -63,9 +62,10 @@ hsa_ven_amd_aqlprofile_profile_t* GenerateATTPackets(
 
 uint8_t* AllocateSysMemory(hsa_agent_t gpu_agent, size_t size, hsa_amd_memory_pool_t* cpu_pool);
 
-void get_command_buffer_map(std::map<size_t, uint8_t*> );
-void get_outbuffer_map(std::map<size_t, uint8_t*> );
+void get_command_buffer_map(std::map<size_t, uint8_t*>);
+void get_outbuffer_map(std::map<size_t, uint8_t*>);
 void initialize_pools(hsa_agent_t cpu_agent);
+void CheckPacketReqiurements(std::vector<hsa_agent_t>& gpu_agents);
 
 typedef struct {
   hsa_amd_memory_pool_t cpu_mem_pool;

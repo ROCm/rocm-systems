@@ -27,7 +27,7 @@
     if ((status) != HSA_STATUS_SUCCESS) {                                                          \
       const char* emsg = 0;                                                                        \
       hsa_status_string(status, &emsg);                                                            \
-      throw(ROCPROFILER_STATUS_ERROR_HSA_SUPPORT,                                                    \
+      throw(ROCPROFILER_STATUS_ERROR_HSA_SUPPORT,                                                  \
             "Error: " << msg << ": " << emsg ? emsg : "<unknown error>");                          \
     }                                                                                              \
   } while (0)
@@ -62,32 +62,27 @@ AgentInfo::AgentInfo(const hsa_agent_t agent, ::CoreApiTable* table) : handle_(a
   table->hsa_agent_get_info_fn(
       agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_SHADER_ENGINES), &se_num_);
 
-  if (table->hsa_agent_get_info_fn(
-        agent, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_NUM_SHADER_ARRAYS_PER_SE,
-        &shader_arrays_per_se_) != HSA_STATUS_SUCCESS ||
-      table->hsa_agent_get_info_fn(
-        agent, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_MAX_WAVES_PER_CU,
-        &waves_per_cu_) != HSA_STATUS_SUCCESS)
-  {
-      rocmtools::fatal("hsa_agent_get_info for gfxip hardware configuration failed");
+  if (table->hsa_agent_get_info_fn(agent,
+                                   (hsa_agent_info_t)HSA_AMD_AGENT_INFO_NUM_SHADER_ARRAYS_PER_SE,
+                                   &shader_arrays_per_se_) != HSA_STATUS_SUCCESS ||
+      table->hsa_agent_get_info_fn(agent, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_MAX_WAVES_PER_CU,
+                                   &waves_per_cu_) != HSA_STATUS_SUCCESS) {
+    rocmtools::fatal("hsa_agent_get_info for gfxip hardware configuration failed");
   }
 
   compute_units_per_sh_ = cu_num_ / (se_num_ * shader_arrays_per_se_);
   wave_slots_per_simd_ = waves_per_cu_ / simds_per_cu_;
 
-  if (table->hsa_agent_get_info_fn(
-        agent, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_DOMAIN,
-        &pci_domain_) != HSA_STATUS_SUCCESS ||
-      table->hsa_agent_get_info_fn(
-        agent, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_BDFID,
-        &pci_location_id_) != HSA_STATUS_SUCCESS)
-  {
-      rocmtools::fatal("hsa_agent_get_info for PCI info failed");
+  if (table->hsa_agent_get_info_fn(agent, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_DOMAIN,
+                                   &pci_domain_) != HSA_STATUS_SUCCESS ||
+      table->hsa_agent_get_info_fn(agent, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_BDFID,
+                                   &pci_location_id_) != HSA_STATUS_SUCCESS) {
+    rocmtools::fatal("hsa_agent_get_info for PCI info failed");
   }
 
-  // TODO: (sauverma) use hsa_agent_get_info_fn(HSA_AMD_AGENT_INFO_NUM_XCC) 
+  // TODO: (sauverma) use hsa_agent_get_info_fn(HSA_AMD_AGENT_INFO_NUM_XCC)
   // to get xcc_num once hsa headers are updated from rocr/hsa
-  std::string gpu_name = std::string(name_).substr(0,6);
+  std::string gpu_name = std::string(name_).substr(0, 6);
   if (gpu_name == "gfx940")
     xcc_num_ = 6;
   else
@@ -116,6 +111,12 @@ void AgentInfo::setIndex(int index) { index_ = index; }
 void AgentInfo::setType(hsa_device_type_t type) { type_ = type; }
 void AgentInfo::setHandle(uint64_t handle) { handle_ = handle; }
 void AgentInfo::setName(const std::string& name) { strcpy(name_, name.c_str()); }
+
+void AgentInfo::setNumaNode(uint32_t numa_node) { numa_node_ = numa_node; }
+uint32_t AgentInfo::getNumaNode() { return numa_node_; }
+
+void AgentInfo::setNearCpuAgent(hsa_agent_t near_cpu_agent) { near_cpu_agent_ = near_cpu_agent; }
+hsa_agent_t AgentInfo::getNearCpuAgent() { return near_cpu_agent_; }
 
 // CounterHardwareInfo Class
 

@@ -86,7 +86,11 @@ struct queue_info_session_t {
 
 void AddRecordCounters(rocprofiler_record_profiler_t* record, const pending_signal_t& pending);
 
-void InitializePools(hsa_agent_t cpu_agent);
+void InitializePools(hsa_agent_t cpu_agent, Agent::AgentInfo* agent_info);
+void InitializeGPUPool(hsa_agent_t gpu_agent, Agent::AgentInfo* agent_info);
+void CheckPacketReqiurements(std::vector<hsa_agent_t>& gpu_agents);
+
+void ResetSessionID();
 
 }  // namespace queue
 }  // namespace rocmtools

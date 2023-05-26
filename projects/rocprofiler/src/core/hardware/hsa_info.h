@@ -23,6 +23,7 @@
 
 #include <hsa/hsa.h>
 #include <hsa/hsa_api_trace.h>
+#include <hsa/hsa_ext_amd.h>
 
 #include <atomic>
 #include <map>
@@ -66,6 +67,16 @@ class AgentInfo {
   void setHandle(uint64_t handle);
   void setName(const std::string& name);
 
+  void setNumaNode(uint32_t numa_node);
+  uint32_t getNumaNode();
+
+  void setNearCpuAgent(hsa_agent_t near_cpu_agent);
+  hsa_agent_t getNearCpuAgent();
+
+  hsa_amd_memory_pool_t cpu_pool;
+  hsa_amd_memory_pool_t kernarg_pool;
+  hsa_amd_memory_pool_t gpu_pool;
+
  private:
   int index_;
   hsa_device_type_t type_;  // Agent type - Cpu = 0, Gpu = 1 or Dsp = 2
@@ -87,6 +98,9 @@ class AgentInfo {
 
   uint32_t pci_domain_;
   uint32_t pci_location_id_;
+
+  uint32_t numa_node_;
+  hsa_agent_t near_cpu_agent_;
 };
 
 // XXX TODO: This should be moved somewhere else so this file can be deleted

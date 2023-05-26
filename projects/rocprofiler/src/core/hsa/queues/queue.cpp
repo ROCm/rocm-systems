@@ -27,6 +27,7 @@
 #include <utility>
 #include <algorithm>
 
+#include "rocprofiler.h"
 #include "src/api/rocmtool.h"
 #include "src/core/hsa/packets/packets_generator.h"
 #include "src/core/hsa/hsa_support.h"
@@ -284,7 +285,7 @@ hsa_status_t attTraceDataCallback(hsa_ven_amd_aqlprofile_info_type_t info_type,
   att_trace_callback_data_t* passed_data = reinterpret_cast<att_trace_callback_data_t*>(data);
   passed_data->push_back(*info_data);
   // TODO: clear output buffers after copying
-  // either copy here or in AddattRecord
+  // either copy here or in ::AddAttRecord
 
   return status;
 }
@@ -314,11 +315,9 @@ void AddRecordCounters(rocprofiler_record_profiler_t* record, const pending_sign
 
 void AddAttRecord(rocprofiler_record_att_tracer_t* record, hsa_agent_t gpu_agent,
                   att_pending_signal_t& pending) {
+  Agent::AgentInfo agent_info = hsa_support::GetAgentInfo(gpu_agent.handle);
   att_trace_callback_data_t data;
   hsa_ven_amd_aqlprofile_iterate_data(pending.profile, attTraceDataCallback, &data);
-
-  // Get CPU and GPU memory pools
-  Packet::att_memory_pools_t* att_mem_pools = Packet::GetAttMemPools(gpu_agent);
 
   // Allocate memory for shader_engine_data
   record->shader_engine_data = static_cast<rocprofiler_record_se_att_data_t*>(
@@ -336,7 +335,7 @@ void AddAttRecord(rocprofiler_record_att_tracer_t* record, hsa_agent_t gpu_agent
     void* buffer = NULL;
     if (data_size != 0) {
       // Allocate buffer on CPU to copy out trace data
-      buffer = Packet::AllocateSysMemory(gpu_agent, data_size, &att_mem_pools->cpu_mem_pool);
+      buffer = Packet::AllocateSysMemory(gpu_agent, data_size, &agent_info.cpu_pool);
       if (buffer == NULL) fatal("Trace data buffer allocation failed");
 
       auto status =
@@ -352,83 +351,6 @@ void AddAttRecord(rocprofiler_record_att_tracer_t* record, hsa_agent_t gpu_agent
   }
   record->shader_engine_data_count = data.size();
 }
-
-// static const size_t MEM_PAGE_BYTES = 0x1000;
-// static const size_t MEM_PAGE_MASK = MEM_PAGE_BYTES - 1;
-// static std::mutex begin_signal_lock;
-
-// bool BeginSignalHandler(hsa_signal_value_t signal_value, void* data) {
-//   std::lock_guard<std::mutex> lock(begin_signal_lock);
-//   auto profiling_context =
-//       static_cast<std::pair<rocmtools::profiling_context_t*,
-//       hsa_ven_amd_aqlprofile_profile_t*>*>(
-//           data);
-//   if (!profiling_context->first->begin_completed.load(std::memory_order_relaxed)) {
-//     std::cout << "BeginSignalHandler is called" << std::endl;
-//     hsa_status_t status = HSA_STATUS_ERROR;
-//     size_t size = profiling_context->second->command_buffer.size;
-//     size = (size + MEM_PAGE_MASK) & ~MEM_PAGE_MASK;
-//     status = rocmtools::hsa_support::GetAmdExtTable().hsa_amd_memory_pool_allocate_fn(
-//         Packet::GetCommandPool(), size, 0,
-//         reinterpret_cast<void**>(&(profiling_context->second->command_buffer.ptr)));
-
-//     // Both the CPU and GPU can access the memory
-//     if (status == HSA_STATUS_SUCCESS) {
-//       hsa_agent_t ag_list[1] = {profiling_context->first->gpu_agent};
-//       status = rocmtools::hsa_support::GetAmdExtTable().hsa_amd_agents_allow_access_fn(
-//           1, ag_list, NULL, profiling_context->second->command_buffer.ptr);
-
-//       if (status != HSA_STATUS_SUCCESS) {
-//         printf("Error: Can't allow access for both agents to Command Buffer\n");
-//       }
-//     } else if (status == HSA_STATUS_ERROR_OUT_OF_RESOURCES) {
-//       printf("Error: Ran out of GPU memory to allocate Command Buffer\n");
-//     } else {
-//       const char* hsa_err_str = NULL;
-//       if (hsa_status_string(status, &hsa_err_str) != HSA_STATUS_SUCCESS) hsa_err_str = "Unknown";
-//       printf("Error: Allocating command Buffer (Size=%lu) (%s)\n", size, hsa_err_str);
-//     }
-
-//     status = HSA_STATUS_ERROR;
-//     size = profiling_context->second->output_buffer.size;
-//     size = (size + MEM_PAGE_MASK) & ~MEM_PAGE_MASK;
-//     status = rocmtools::hsa_support::GetAmdExtTable().hsa_amd_memory_pool_allocate_fn(
-//         Packet::GetOutputPool(), size, 0,
-//         reinterpret_cast<void**>(&profiling_context->second->output_buffer.ptr));
-
-//     if (status == HSA_STATUS_ERROR_OUT_OF_RESOURCES) {
-//       printf("Error: Ran out of GPU memory to allocate Output Buffer\n");
-//     }
-
-//     if (status == HSA_STATUS_SUCCESS) {
-//       hsa_agent_t ag_list[1] = {profiling_context->first->gpu_agent};
-//       status = rocmtools::hsa_support::GetAmdExtTable().hsa_amd_agents_allow_access_fn(
-//           1, ag_list, NULL, profiling_context->second->output_buffer.ptr);
-
-//       if (status == HSA_STATUS_SUCCESS) {
-//         memset(profiling_context->second->output_buffer.ptr, 0x0,
-//                profiling_context->second->output_buffer.size);
-
-//         // Creating the start/stop/read packets
-//         status = hsa_ven_amd_aqlprofile_start(profiling_context->second,
-//                                               profiling_context->first->start_packet);
-//         status = hsa_ven_amd_aqlprofile_stop(profiling_context->second,
-//                                              profiling_context->first->stop_packet);
-//         status = hsa_ven_amd_aqlprofile_read(profiling_context->second,
-//                                              profiling_context->first->read_packet);
-//       } else {
-//         printf("Error: Can't allow access for both agents to output Buffer\n");
-//       }
-//     } else {
-//       const char* hsa_err_str = NULL;
-//       if (hsa_status_string(status, &hsa_err_str) != HSA_STATUS_SUCCESS) hsa_err_str = "Unknown";
-//       printf("Error: Allocating output Buffer (%s)\n", hsa_err_str);
-//     }
-
-//     profiling_context->first->begin_completed.exchange(true, std::memory_order_relaxed);
-//   }
-//   return true;
-// }
 
 bool AsyncSignalHandler(hsa_signal_value_t signal_value, void* data) {
   auto queue_info_session = static_cast<queue_info_session_t*>(data);
@@ -647,6 +569,75 @@ template <typename Integral> constexpr Integral bit_extract(Integral x, int firs
   return (x >> first) & bit_mask<Integral>(0, last - first);
 }
 
+rocprofiler_session_id_t session_id = rocprofiler_session_id_t{0};
+// Counter Names declaration
+std::vector<std::string> session_data;
+
+rocprofiler_buffer_id_t buffer_id;
+
+uint64_t session_data_count = 0;
+
+bool is_counter_collection_mode = false;
+bool is_timestamp_collection_mode = false;
+bool is_att_collection_mode = false;
+bool is_pc_sampling_collection_mode = false;
+std::vector<rocprofiler_att_parameter_t> att_parameters_data;
+uint32_t replay_mode_count = 0;
+std::vector<std::string> kernel_profile_names;
+std::vector<std::string> att_counters_names;
+
+rocmtools::Session* session = nullptr;
+
+void ResetSessionID() { session_id = rocprofiler_session_id_t{0}; }
+
+void CheckNeededProfileConfigs() {
+  rocprofiler_session_id_t internal_session_id;
+  if (GetROCMToolObj())
+    // Getting Session ID
+    internal_session_id = GetROCMToolObj()->GetCurrentSessionId();
+  else
+    internal_session_id = {0};
+
+  if (session_id.handle == 0 || internal_session_id.handle != session_id.handle) {
+    session_id = internal_session_id;
+    // Getting Counters count from the Session
+    if (session_id.handle > 0 && GetROCMToolObj()) {
+      session = GetROCMToolObj()->GetSession(session_id);
+      if (session && session->FindFilterWithKind(ROCPROFILER_COUNTERS_COLLECTION)) {
+        rocprofiler_filter_id_t filter_id =
+            session->GetFilterIdWithKind(ROCPROFILER_COUNTERS_COLLECTION);
+        rocmtools::Filter* filter = session->GetFilter(filter_id);
+        session_data = filter->GetCounterData();
+        is_counter_collection_mode = true;
+        session_data_count = session_data.size();
+        buffer_id = filter->GetBufferId();
+      } else if (session &&
+                 session->FindFilterWithKind(ROCPROFILER_DISPATCH_TIMESTAMPS_COLLECTION)) {
+        is_timestamp_collection_mode = true;
+        rocprofiler_filter_id_t filter_id =
+            session->GetFilterIdWithKind(ROCPROFILER_DISPATCH_TIMESTAMPS_COLLECTION);
+        rocmtools::Filter* filter = session->GetFilter(filter_id);
+        buffer_id = filter->GetBufferId();
+      } else if (session && session->FindFilterWithKind(ROCPROFILER_ATT_TRACE_COLLECTION)) {
+        rocprofiler_filter_id_t filter_id =
+            session->GetFilterIdWithKind(ROCPROFILER_ATT_TRACE_COLLECTION);
+        rocmtools::Filter* filter = session->GetFilter(filter_id);
+        att_parameters_data = filter->GetAttParametersData();
+        is_att_collection_mode = true;
+        buffer_id =
+            session->GetFilter(session->GetFilterIdWithKind(ROCPROFILER_ATT_TRACE_COLLECTION))
+                ->GetBufferId();
+
+        att_counters_names = filter->GetCounterData();
+        kernel_profile_names = std::get<std::vector<std::string>>(
+            filter->GetProperty(ROCPROFILER_FILTER_KERNEL_NAMES));
+      } else if (session && session->FindFilterWithKind(ROCPROFILER_PC_SAMPLING_COLLECTION)) {
+        is_pc_sampling_collection_mode = true;
+      }
+    }
+  }
+}
+
 static int KernelInterceptCount = 0;
 std::atomic<uint32_t> WRITER_ID{0};
 /**
@@ -660,64 +651,8 @@ void WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t user_pkt
                       hsa_amd_queue_intercept_packet_writer writer) {
   const Packet::packet_t* packets_arr = reinterpret_cast<const Packet::packet_t*>(packets);
   std::vector<Packet::packet_t> transformed_packets;
-  rocprofiler_session_id_t session_id;
-  if (GetROCMToolObj())
-    // Getting Session ID
-    session_id = GetROCMToolObj()->GetCurrentSessionId();
-  else
-    session_id = {0};
 
-  // Counter Names declaration
-  std::vector<std::string> session_data;
-
-  rocprofiler_buffer_id_t buffer_id;
-
-  uint64_t session_data_count = 0;
-
-  bool is_counter_collection_mode = false;
-  bool is_timestamp_collection_mode = false;
-  bool is_att_collection_mode = false;
-  bool is_pc_sampling_collection_mode = false;
-  std::vector<rocprofiler_att_parameter_t> att_parameters_data;
-  uint32_t replay_mode_count = 0;
-  std::vector<std::string> kernel_profile_names;
-  std::vector<std::string> att_counters_names;
-
-  rocmtools::Session* session = nullptr;
-
-  // Getting Counters count from the Session
-  if (session_id.handle > 0 && GetROCMToolObj()) {
-    session = GetROCMToolObj()->GetSession(session_id);
-    if (session && session->FindFilterWithKind(ROCPROFILER_COUNTERS_COLLECTION)) {
-      rocprofiler_filter_id_t filter_id =
-          session->GetFilterIdWithKind(ROCPROFILER_COUNTERS_COLLECTION);
-      rocmtools::Filter* filter = session->GetFilter(filter_id);
-      session_data = filter->GetCounterData();
-      is_counter_collection_mode = true;
-      session_data_count = session_data.size();
-      buffer_id = filter->GetBufferId();
-    } else if (session && session->FindFilterWithKind(ROCPROFILER_DISPATCH_TIMESTAMPS_COLLECTION)) {
-      is_timestamp_collection_mode = true;
-      rocprofiler_filter_id_t filter_id =
-          session->GetFilterIdWithKind(ROCPROFILER_DISPATCH_TIMESTAMPS_COLLECTION);
-      rocmtools::Filter* filter = session->GetFilter(filter_id);
-      buffer_id = filter->GetBufferId();
-    } else if (session && session->FindFilterWithKind(ROCPROFILER_ATT_TRACE_COLLECTION)) {
-      rocprofiler_filter_id_t filter_id =
-          session->GetFilterIdWithKind(ROCPROFILER_ATT_TRACE_COLLECTION);
-      rocmtools::Filter* filter = session->GetFilter(filter_id);
-      att_parameters_data = filter->GetAttParametersData();
-      is_att_collection_mode = true;
-      buffer_id = session->GetFilter(session->GetFilterIdWithKind(ROCPROFILER_ATT_TRACE_COLLECTION))
-                      ->GetBufferId();
-
-      att_counters_names = filter->GetCounterData();
-      kernel_profile_names =
-          std::get<std::vector<std::string>>(filter->GetProperty(ROCPROFILER_FILTER_KERNEL_NAMES));
-    } else if (session && session->FindFilterWithKind(ROCPROFILER_PC_SAMPLING_COLLECTION)) {
-      is_pc_sampling_collection_mode = true;
-    }
-  }
+  CheckNeededProfileConfigs();
 
   if (session_id.handle > 0 && pkt_count > 0 &&
       (is_counter_collection_mode || is_timestamp_collection_mode ||
@@ -764,21 +699,6 @@ void WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t user_pkt
 
         if (session_data_count > 0 && is_counter_collection_mode && profiles &&
             replay_mode_count > 0) {
-          // hsa_signal_t begin_signal{};
-          // CreateSignal(0, &begin_signal);
-          // hsa_barrier_and_packet_t barrier{0};
-          // barrier.header = HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE;
-          // CreateSignal(0, &barrier.completion_signal);
-          // barrier.dep_signal[0] = hsa_signal_t{};
-          // Packet::packet_t* __attribute__((__may_alias__)) pkt =
-          //     (reinterpret_cast<Packet::packet_t*>(&barrier));
-          // transformed_packets.emplace_back(*pkt);
-          // hsa_status_t status = hsa_support::GetAmdExtTable().hsa_amd_signal_async_handler_fn(
-          //     barrier.completion_signal, HSA_SIGNAL_CONDITION_GTE, 1, BeginSignalHandler,
-          //     &profiles->at(profile_id));
-          // if (status != HSA_STATUS_SUCCESS)
-          //   fatal("hsa_amd_signal_async_handler failed for begin signal");
-
           // Adding start packet and its barrier with a dummy signal
           hsa_signal_t dummy_signal{};
           dummy_signal.handle = 0;
@@ -1087,8 +1007,6 @@ Queue::Queue(const hsa_agent_t& cpu_agent, const hsa_agent_t& gpu_agent, uint32_
   *queue = intercept_queue_;
 }
 
-// Queue::~Queue() { std::lock_guard<std::mutex> lk(mutex_); }
-
 hsa_queue_t* Queue::GetCurrentInterceptQueue() { return intercept_queue_; }
 
 hsa_agent_t Queue::GetGPUAgent() { return gpu_agent_; }
@@ -1097,7 +1015,15 @@ hsa_agent_t Queue::GetCPUAgent() { return cpu_agent_; }
 
 uint64_t Queue::GetQueueID() { return intercept_queue_->id; }
 
-void InitializePools(hsa_agent_t cpu_agent) { Packet::InitializePools(cpu_agent); }
+void InitializePools(hsa_agent_t cpu_agent, Agent::AgentInfo* agent_info) {
+  Packet::InitializePools(cpu_agent, agent_info);
+}
+void InitializeGPUPool(hsa_agent_t gpu_agent, Agent::AgentInfo* agent_info) {
+  Packet::InitializeGPUPool(gpu_agent, agent_info);
+}
+void CheckPacketReqiurements(std::vector<hsa_agent_t>& gpu_agents) {
+  Packet::CheckPacketReqiurements(gpu_agents);
+}
 
 }  // namespace queue
 }  // namespace rocmtools
