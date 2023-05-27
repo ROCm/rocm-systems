@@ -23,6 +23,7 @@
 #include <algorithm>
 #include <atomic>
 
+#include "rocprofiler.h"
 #include "src/api/rocmtool.h"
 
 namespace Memory {
@@ -68,8 +69,8 @@ GenericBuffer::GenericBuffer(rocprofiler_session_id_t session_id, rocprofiler_bu
 GenericBuffer::~GenericBuffer() {
   if (is_valid_.load(std::memory_order_release)) {
     std::lock_guard lock(buffer_lock_);
-    if (rocmtools::GetROCMToolObj()->GetSession(session_id_))
-      rocmtools::GetROCMToolObj()->GetSession(session_id_)->DisableTools(id_);
+    // if (rocmtools::GetROCMToolObj()->GetSession(session_id_))
+    //   rocmtools::GetROCMToolObj()->GetSession(session_id_)->DisableTools(id_);
 
     Flush();
 

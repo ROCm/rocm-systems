@@ -75,8 +75,7 @@ class GenericBuffer {
     }
 
     // Store data in the record. Copy the data first if it fits in the buffer
-    // (reserve_data_size != 0).
-    if (reserve_data_size) {
+    if (reserve_data_size != 0) {
       data_ptr_ -= data_size;
       ::memcpy(data_ptr_, data, data_size);
       store_data(record, data_ptr_);
@@ -160,7 +159,8 @@ class GenericBuffer {
   std::mutex buffer_lock_;
 };
 
-bool GetNextRecord(const rocprofiler_record_header_t* record, const rocprofiler_record_header_t** next);
+bool GetNextRecord(const rocprofiler_record_header_t* record,
+                   const rocprofiler_record_header_t** next);
 
 }  // namespace Memory
 #endif  // SRC_CORE_MEMORY_GENERIC_BUFFER_H_

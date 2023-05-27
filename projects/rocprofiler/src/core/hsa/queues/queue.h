@@ -56,7 +56,7 @@ class Queue {
         hsa_queue_type32_t type,
         void (*callback)(hsa_status_t status, hsa_queue_t* source, void* data), void* data,
         uint32_t private_segment_size, uint32_t group_segment_size, hsa_queue_t** queue);
-  ~Queue() {}
+  ~Queue();
 
   hsa_queue_t* GetCurrentInterceptQueue();
   hsa_agent_t GetGPUAgent();
@@ -82,6 +82,8 @@ struct queue_info_session_t {
   uint64_t queue_id;
   uint32_t writer_id;
   hsa_signal_t interrupt_signal;
+  uint64_t gpu_index;
+  uint32_t xcc_count;
 };
 
 void AddRecordCounters(rocprofiler_record_profiler_t* record, const pending_signal_t& pending);

@@ -25,8 +25,11 @@
 #include <hsa/hsa_ven_amd_aqlprofile.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <numa.h>
 
 #include <algorithm>
+#include <atomic>
+#include <exception>
 #include <iostream>
 #include <map>
 #include <string>
@@ -47,23 +50,22 @@
 
 #define CHECK_HSA_STATUS(msg, status)                                                              \
   do {                                                                                             \
-    if ((status) != HSA_STATUS_INFO_BREAK) {                                                       \
-      const char* emsg = 0;                                                                        \
-      hsa_status_string(status, &emsg);                                                            \
-      printf("%s: %s\n", msg, emsg ? emsg : "<unknown error>");                                    \
+    if ((status) != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK) {                       \
+      try {                                                                                        \
+        const char* emsg = nullptr;                                                                \
+        hsa_status_string(status, &emsg);                                                          \
+        if (!emsg) emsg = "<Unknown HSA Error>";                                                   \
+        std::cerr << msg << std::endl;                                                             \
+        std::cerr << emsg << std::endl;                                                            \
+      } catch (std::exception & e) {                                                               \
+      }                                                                                            \
       abort();                                                                                     \
     }                                                                                              \
   } while (0)
 
 namespace Packet {
-
 static const size_t MEM_PAGE_BYTES = 0x1000;
 static const size_t MEM_PAGE_MASK = MEM_PAGE_BYTES - 1;
-// hsa_amd_memory_pool_t command_pool;
-// hsa_amd_memory_pool_t output_pool;
-
-// hsa_amd_memory_pool_t& GetCommandPool() { return command_pool; }
-// hsa_amd_memory_pool_t& GetOutputPool() { return output_pool; }
 
 // This function checks to see if the provided
 // pool has the HSA_AMD_SEGMENT_GLOBAL property. If the kern_arg flag is true,
@@ -116,11 +118,11 @@ void InitializePools(hsa_agent_t cpu_agent, Agent::AgentInfo* agent_info) {
   hsa_status_t status =
       rocmtools::hsa_support::GetAmdExtTable().hsa_amd_agent_iterate_memory_pools_fn(
           cpu_agent, FindStandardPool, &(agent_info->cpu_pool));
-  if ((status != HSA_STATUS_INFO_BREAK)) printf("Error: Command Buffer Pool is not initialized\n");
+  CHECK_HSA_STATUS("Error: Command Buffer Pool is not initialized", status);
 
   status = rocmtools::hsa_support::GetAmdExtTable().hsa_amd_agent_iterate_memory_pools_fn(
       cpu_agent, FindKernArgPool, &(agent_info->kernarg_pool));
-  if ((status != HSA_STATUS_INFO_BREAK)) printf("Error: Output Buffer Pool is not initialized\n");
+  CHECK_HSA_STATUS("Error: Output Buffer Pool is not initialized", status);
 }
 
 void InitializeGPUPool(hsa_agent_t gpu_agent, Agent::AgentInfo* agent_info) {
@@ -135,6 +137,7 @@ struct block_des_t {
 };
 
 std::map<uint32_t, rocmtools::MetricsDict*> metricsDict;
+static std::atomic<bool> counters_added{false};
 
 void CheckPacketReqiurements(std::vector<hsa_agent_t>& gpu_agents) {
   for (auto& gpu_agent : gpu_agents) {
@@ -147,10 +150,22 @@ void CheckPacketReqiurements(std::vector<hsa_agent_t>& gpu_agents) {
 // Initialize the PM4 commands with having the CPU&GPU agents, the counters,
 // counters count to output three packets which are start, stop and read
 // packets
-std::vector<std::pair<rocmtools::profiling_context_t*, hsa_ven_amd_aqlprofile_profile_t*>>*
+std::vector<std::pair<rocmtools::profiling_context_t*, hsa_ven_amd_aqlprofile_profile_t*>>
 InitializeAqlPackets(hsa_agent_t cpu_agent, hsa_agent_t gpu_agent,
                      std::vector<std::string>& counter_names, bool is_spm) {
   hsa_status_t status = HSA_STATUS_SUCCESS;
+
+  if (!counters_added.load(std::memory_order_acquire)) {
+    for (auto& name : counter_names) {
+      if (rocmtools::GetROCMToolObj()->HasActiveSession()) {
+        rocmtools::GetROCMToolObj()
+            ->GetSession(rocmtools::GetROCMToolObj()->GetCurrentSessionId())
+            ->GetProfiler()
+            ->AddCounterName(name);
+      }
+    }
+    counters_added.exchange(true, std::memory_order_release);
+  }
 
   Agent::AgentInfo& agentInfo = rocmtools::hsa_support::GetAgentInfo(gpu_agent.handle);
   std::map<std::string, rocmtools::results_t*> results_map;
@@ -158,242 +173,217 @@ InitializeAqlPackets(hsa_agent_t cpu_agent, hsa_agent_t gpu_agent,
   std::vector<rocmtools::results_t*> results_list;
   std::map<std::pair<uint32_t, uint32_t>, uint64_t> event_to_max_block_count;
   std::map<std::string, std::set<std::string>> metrics_counters;
-  uint32_t counters_count = 0;
 
-  for (auto& name : counter_names) {
-    // std::cout << "Counter from Counter Names: " << name << std::endl;
-
-    if (rocmtools::GetROCMToolObj()->HasActiveSession()) {
-      rocmtools::GetROCMToolObj()
-          ->GetSession(rocmtools::GetROCMToolObj()->GetCurrentSessionId())
-          ->GetProfiler()
-          ->AddCounterName(name);
-    }
-
-    counters_count++;
+  if (!rocmtools::metrics::ExtractMetricEvents(
+          counter_names, gpu_agent, metricsDict[gpu_agent.handle], results_map, events_list,
+          results_list, event_to_max_block_count, metrics_counters)) {
+    std::cerr << "Error: Failed to extract metric events" << std::endl;
+    abort();
   }
-
-  rocmtools::metrics::ExtractMetricEvents(counter_names, gpu_agent, metricsDict[gpu_agent.handle],
-                                          results_map, events_list, results_list,
-                                          event_to_max_block_count, metrics_counters);
 
   // TODO: validate needs to be called on each events_list[i]
   // Validating the events array for the specified gpu agent
-  bool result;
-  hsa_ven_amd_aqlprofile_validate_event(gpu_agent, &events_list[0], &result);
-  if (!result) {
-    printf("Error: Events are not valid for the current gpu agent\n");
-    throw("Error: Events are not valid for the current gpu agent");
+  bool validate_event_result;
+  status =
+      hsa_ven_amd_aqlprofile_validate_event(gpu_agent, &events_list[0], &validate_event_result);
+  CHECK_HSA_STATUS("Error: Validating Counters", status);
+  if (!validate_event_result) {
+    std::cerr << "Error: Events are not valid for the current gpu agent" << std::endl;
+    abort();
   }
 
-  std::vector<std::pair<rocmtools::profiling_context_t*, hsa_ven_amd_aqlprofile_profile_t*>>*
-      profiles = new std::vector<
+  std::vector<std::pair<rocmtools::profiling_context_t*, hsa_ven_amd_aqlprofile_profile_t*>>
+      profiles = std::vector<
           std::pair<rocmtools::profiling_context_t*, hsa_ven_amd_aqlprofile_profile_t*>>();
 
-  do {
-    rocmtools::profiling_context_t* context = new rocmtools::profiling_context_t();
-    context->gpu_agent = gpu_agent;
-    uint64_t i = 0;
-    uint32_t counter_val_iteration = 0;
-    auto result = results_list.begin();
-    std::map<std::pair<uint32_t, uint32_t>, uint32_t> block_max_events_count;
-    std::set<hsa_ven_amd_aqlprofile_block_name_t> block_names_taken;
-    for (auto event = events_list.begin(); event != events_list.end();) {
-      if (block_max_events_count[std::make_pair<uint32_t, uint32_t>(
-              static_cast<uint32_t>(event->block_name),
-              static_cast<uint32_t>(event->block_index))] <
-          event_to_max_block_count[std::make_pair<uint32_t, uint32_t>(
-              static_cast<uint32_t>(event->block_name),
-              static_cast<uint32_t>(event->block_index))]) {
-        context->events_list.push_back(*event);
-        context->results_list.emplace_back(*result);
-        counter_val_iteration++;
-        block_max_events_count[std::make_pair<uint32_t, uint32_t>(
-            static_cast<uint32_t>(event->block_name), static_cast<uint32_t>(event->block_index))]++;
-        results_list.erase(result);
-        events_list.erase(event);
-      } else {
-        event++;
-        result++;
-      }
-      i++;
-    }
-
-    std::set<std::string> counters_taken;
-
-    std::set<std::string> metrics_counters_taken;
-
-    for (auto result : context->results_list) {
-      rocmtools::Metric* metric;
-      if (std::find(counter_names.begin(), counter_names.end(), result->name) !=
-          counter_names.end()) {
-        // std::cout << "Counter from Result List: " << result->name << std::endl;
-        counters_taken.insert(result->name);
-        metric = const_cast<rocmtools::Metric*>(metricsDict[gpu_agent.handle]->Get(result->name));
-        if (metric == nullptr) std::cout << result->name << " not found in metricsDict\n";
-        context->metrics_list.push_back(metric);
-      } else {
-        metrics_counters_taken.insert(result->name);
-        // std::cout << "Counter Added: " << result->name << std::endl;
-      }
-    }
-
-    std::set<std::string> metrics_taken;
-
-    for (auto result : results_map) {
-      if (counters_taken.find(result.first) == counters_taken.end() &&
-          std::find(counter_names.begin(), counter_names.end(), result.first) !=
-              counter_names.end()) {
-        bool flag = true;
-        for (auto result_basic : results_list) {
-          if (result_basic->name.compare(result.first)) {
-            flag = false;
-            break;
-          }
-        }
-        if (flag) metrics_taken.insert(result.first);
-      }
-    }
-
-    for (auto metric_name : metrics_taken) {
-      bool flag = true;
-      if (metrics_counters.find(metric_name) == metrics_counters.end()) continue;
-      for (auto metric_counter_name : metrics_counters.at(metric_name)) {
-        if (metrics_counters_taken.find(metric_counter_name) == metrics_counters_taken.end() &&
-            counters_taken.find(metric_counter_name) == counters_taken.end()) {
-          flag = false;
-          continue;
-        }
-      }
-      if (flag) {
-        // std::cout << "Counter from Result Map: " << metric_name << std::endl;
-        counters_taken.insert(metric_name);
-        rocmtools::Metric* metric =
-            const_cast<rocmtools::Metric*>(metricsDict[gpu_agent.handle]->Get(metric_name));
-        if (metric == nullptr) std::cout << metric_name << " not found in metricsDict\n";
-        context->metrics_list.push_back(metric);
-      }
-    }
-
-    context->results_map = results_map;
-    context->metrics_dict = metricsDict[gpu_agent.handle];
-
-    hsa_ven_amd_aqlprofile_parameter_t* params = {};
-
-    packet_t* start_packet = new packet_t();
-    packet_t* stop_packet = new packet_t();
-    packet_t* read_packet = new packet_t();
-
-    if (context->events_list.size() <= 0) {
-      continue;
-    }
-
-// Preparing the profile structure to get the packets
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wconversion-null"
-    hsa_ven_amd_aqlprofile_event_type_t profile_type = HSA_VEN_AMD_AQLPROFILE_EVENT_TYPE_PMC;
-    if (is_spm) profile_type = HSA_VEN_AMD_AQLPROFILE_EVENT_TYPE_TRACE;
-    hsa_ven_amd_aqlprofile_profile_t* profile =
-        new hsa_ven_amd_aqlprofile_profile_t{gpu_agent,
-                                             profile_type,
-                                             &(context->events_list[0]),
-                                             static_cast<uint32_t>(context->events_list.size()),
-                                             params,
-                                             0,
-                                             NULL,
-                                             NULL};
-#pragma GCC diagnostic pop
-
-    // Preparing an Getting the size of the command and output buffers
-    status = hsa_ven_amd_aqlprofile_start(profile, NULL);
-    if (status != HSA_STATUS_SUCCESS) {
-      const char* hsa_err_str = nullptr;
-      if (hsa_status_string(status, &hsa_err_str) != HSA_STATUS_SUCCESS) hsa_err_str = "Unknown";
-      printf("Error: %s\n", hsa_err_str);
-      continue;
+  // do {
+  rocmtools::profiling_context_t* context = new rocmtools::profiling_context_t();
+  context->gpu_agent = gpu_agent;
+  auto result = results_list.begin();
+  std::map<std::pair<uint32_t, uint32_t>, uint32_t> block_max_events_count;
+  std::set<hsa_ven_amd_aqlprofile_block_name_t> block_names_taken;
+  for (auto event = events_list.begin(); event != events_list.end();) {
+    if (block_max_events_count[std::make_pair<uint32_t, uint32_t>(
+            static_cast<uint32_t>(event->block_name), static_cast<uint32_t>(event->block_index))] <
+        event_to_max_block_count[std::make_pair<uint32_t, uint32_t>(
+            static_cast<uint32_t>(event->block_name), static_cast<uint32_t>(event->block_index))]) {
+      context->events_list.push_back(*event);
+      context->results_list.emplace_back(*result);
+      block_max_events_count[std::make_pair<uint32_t, uint32_t>(
+          static_cast<uint32_t>(event->block_name), static_cast<uint32_t>(event->block_index))]++;
+      results_list.erase(result);
+      events_list.erase(event);
     } else {
-      status = HSA_STATUS_ERROR;
-      size_t size = profile->command_buffer.size;
-      size = (size + MEM_PAGE_MASK) & ~MEM_PAGE_MASK;
-      status = rocmtools::hsa_support::GetAmdExtTable().hsa_amd_memory_pool_allocate_fn(
-          agentInfo.cpu_pool, size, 0, reinterpret_cast<void**>(&(profile->command_buffer.ptr)));
+      event++;
+      result++;
+    }
+  }
 
-      // Both the CPU and GPU can access the memory
-      if (status == HSA_STATUS_SUCCESS) {
-        hsa_agent_t ag_list[1] = {gpu_agent};
-        status = rocmtools::hsa_support::GetAmdExtTable().hsa_amd_agents_allow_access_fn(
-            1, ag_list, NULL, profile->command_buffer.ptr);
+  std::set<std::string> counters_taken;
 
-        if (status != HSA_STATUS_SUCCESS) {
-          printf("Error: Can't allow access for both agents to Command Buffer\n");
-          continue;
-        } else if (status == HSA_STATUS_ERROR_OUT_OF_RESOURCES) {
-          printf("Error: Ran out of GPU memory to allocate Command Buffer\n");
-          continue;
+  std::set<std::string> metrics_counters_taken;
+
+  for (auto result : context->results_list) {
+    rocmtools::Metric* metric;
+    if (std::find(counter_names.begin(), counter_names.end(), result->name) !=
+        counter_names.end()) {
+      // std::cout << "Counter from Result List: " << result->name << std::endl;
+      counters_taken.insert(result->name);
+      metric = const_cast<rocmtools::Metric*>(metricsDict[gpu_agent.handle]->Get(result->name));
+      if (metric == nullptr) std::cout << result->name << " not found in metricsDict\n";
+      context->metrics_list.push_back(metric);
+    } else {
+      metrics_counters_taken.insert(result->name);
+      // std::cout << "Counter Added: " << result->name << std::endl;
+    }
+  }
+
+  std::set<std::string> metrics_taken;
+
+  for (auto result : results_map) {
+    if (counters_taken.find(result.first) == counters_taken.end() &&
+        std::find(counter_names.begin(), counter_names.end(), result.first) !=
+            counter_names.end()) {
+      bool flag = true;
+      for (auto result_basic : results_list) {
+        if (result_basic->name.compare(result.first)) {
+          flag = false;
+          break;
         }
-      } else {
-        const char* hsa_err_str = NULL;
-        if (hsa_status_string(status, &hsa_err_str) != HSA_STATUS_SUCCESS) hsa_err_str = "Unknown";
-        printf("Error: Allocating command Buffer (Size=%lu) (%s)\n", size, hsa_err_str);
       }
+      if (flag) metrics_taken.insert(result.first);
+    }
+  }
 
-      if (!is_spm) {
-        status = HSA_STATUS_ERROR;
-        size = profile->output_buffer.size;
-        size = (size + MEM_PAGE_MASK) & ~MEM_PAGE_MASK;
-        status = rocmtools::hsa_support::GetAmdExtTable().hsa_amd_memory_pool_allocate_fn(
-            agentInfo.kernarg_pool, size, 0, reinterpret_cast<void**>(&profile->output_buffer.ptr));
-
-        if (status == HSA_STATUS_ERROR_OUT_OF_RESOURCES) {
-          printf("Error: Ran out of GPU memory to allocate Output Buffer\n");
-          continue;
-        }
-
-        if (status == HSA_STATUS_SUCCESS) {
-          hsa_agent_t ag_list[1] = {gpu_agent};
-          status = rocmtools::hsa_support::GetAmdExtTable().hsa_amd_agents_allow_access_fn(
-              1, ag_list, NULL, profile->output_buffer.ptr);
-
-          if (status == HSA_STATUS_SUCCESS) {
-            memset(profile->output_buffer.ptr, 0x0, profile->output_buffer.size);
-
-            // Creating the start/stop/read packets
-            status = hsa_ven_amd_aqlprofile_start(profile, start_packet);
-            status = hsa_ven_amd_aqlprofile_stop(profile, stop_packet);
-            status = hsa_ven_amd_aqlprofile_read(profile, read_packet);
-
-            context->start_packet = start_packet;
-            context->stop_packet = stop_packet;
-            context->read_packet = read_packet;
-
-            // add profiles
-            profiles->emplace_back(std::make_pair(context, profile));
-          } else {
-            printf("Error: Can't allow access for both agents to output Buffer\n");
-            continue;
-          }
-        } else {
-          const char* hsa_err_str = NULL;
-          if (hsa_status_string(status, &hsa_err_str) != HSA_STATUS_SUCCESS)
-            hsa_err_str = "Unknown";
-          printf("Error: Allocating output Buffer (%s)\n", hsa_err_str);
-          continue;
-        }
-      } else {
-        profile->output_buffer.size = 0;
-        status = hsa_ven_amd_aqlprofile_start(profile, start_packet);
-        status = hsa_ven_amd_aqlprofile_stop(profile, stop_packet);
-        status = hsa_ven_amd_aqlprofile_read(profile, read_packet);
-
-        context->start_packet = start_packet;
-        context->stop_packet = stop_packet;
-        context->read_packet = read_packet;
-
-        // add profiles
-        profiles->emplace_back(std::make_pair(context, profile));
+  for (auto metric_name : metrics_taken) {
+    bool flag = true;
+    if (metrics_counters.find(metric_name) == metrics_counters.end()) continue;
+    for (auto metric_counter_name : metrics_counters.at(metric_name)) {
+      if (metrics_counters_taken.find(metric_counter_name) == metrics_counters_taken.end() &&
+          counters_taken.find(metric_counter_name) == counters_taken.end()) {
+        flag = false;
+        continue;
       }
     }
-  } while (events_list.size() > 0);
+    if (flag) {
+      // std::cout << "Counter from Result Map: " << metric_name << std::endl;
+      counters_taken.insert(metric_name);
+      rocmtools::Metric* metric =
+          const_cast<rocmtools::Metric*>(metricsDict[gpu_agent.handle]->Get(metric_name));
+      if (metric == nullptr) std::cout << metric_name << " not found in metricsDict\n";
+      context->metrics_list.push_back(metric);
+    }
+  }
+
+  context->results_map = results_map;
+  context->metrics_dict = metricsDict[gpu_agent.handle];
+
+  hsa_ven_amd_aqlprofile_parameter_t* params = {};
+
+  packet_t* start_packet = new packet_t();
+  packet_t* stop_packet = new packet_t();
+  packet_t* read_packet = new packet_t();
+
+  if (context->events_list.size() <= 0) {
+    std::cerr << "Error: No events to profile" << std::endl;
+    abort();
+  }
+
+  // Preparing the profile structure to get the packets
+  hsa_ven_amd_aqlprofile_event_type_t profile_type = HSA_VEN_AMD_AQLPROFILE_EVENT_TYPE_PMC;
+  if (is_spm) profile_type = HSA_VEN_AMD_AQLPROFILE_EVENT_TYPE_TRACE;
+  hsa_ven_amd_aqlprofile_profile_t* profile =
+      new hsa_ven_amd_aqlprofile_profile_t{gpu_agent,
+                                           profile_type,
+                                           &(context->events_list[0]),
+                                           static_cast<uint32_t>(context->events_list.size()),
+                                           params,
+                                           0,
+                                           0,
+                                           0};
+
+  size_t ag_list_count = 1;  // rocmtools::hsa_support::GetCPUAgentList().size();
+  hsa_agent_t ag_list[ag_list_count];
+  ag_list[0] = gpu_agent;
+
+  // Preparing an Getting the size of the command and output buffers
+  status = hsa_ven_amd_aqlprofile_start(profile, NULL);
+  // CHECK_HSA_STATUS("Error: Getting Buffers Size", status);
+
+  if (profile->command_buffer.size > 0 && profile->output_buffer.size > 0) {
+    status = HSA_STATUS_ERROR;
+    size_t size = profile->command_buffer.size;
+    size = (size + MEM_PAGE_MASK) & ~MEM_PAGE_MASK;
+    if (size <= 0) {
+      std::cerr << __FILE__ << ":" << __LINE__ << " "
+                << "Error: Command buffer given size is " << size << std::endl;
+      abort();
+    }
+    status = rocmtools::hsa_support::GetAmdExtTable().hsa_amd_memory_pool_allocate_fn(
+        agentInfo.cpu_pool, size, 0, reinterpret_cast<void**>(&(profile->command_buffer.ptr)));
+    if (status != HSA_STATUS_SUCCESS) {
+      profile->command_buffer.ptr = malloc(size);
+      /*numa_alloc_onnode(
+          size,
+          rocmtools::hsa_support::GetAgentInfo(agentInfo.getNearCpuAgent().handle).getNumaNode());*/
+      if (profile->command_buffer.ptr == NULL) {
+        std::cerr << __FILE__ << ":" << __LINE__ << " "
+                  << "Error: allocating memory for command buffer using NUMA" << std::endl;
+        abort();
+      }
+    } else {
+      // Both the CPU and GPU can access the memory
+      status = rocmtools::hsa_support::GetAmdExtTable().hsa_amd_agents_allow_access_fn(
+          ag_list_count, ag_list, NULL, profile->command_buffer.ptr);
+      CHECK_HSA_STATUS("Error: Allowing access to Command Buffer", status);
+    }
+
+    if (!is_spm) {
+      status = HSA_STATUS_ERROR;
+      size_t size = profile->output_buffer.size;
+      size = (size + MEM_PAGE_MASK) & ~MEM_PAGE_MASK;
+      if (size <= 0) {
+        std::cerr << __FILE__ << ":" << __LINE__ << " "
+                  << "Error: Output buffer given size is " << size << std::endl;
+        abort();
+      }
+      status = rocmtools::hsa_support::GetAmdExtTable().hsa_amd_memory_pool_allocate_fn(
+          agentInfo.kernarg_pool, size, 0, reinterpret_cast<void**>(&profile->output_buffer.ptr));
+      if (status != HSA_STATUS_SUCCESS) {
+        profile->output_buffer.ptr = malloc(size);
+        /*numa_alloc_onnode(
+            size,
+            rocmtools::hsa_support::GetAgentInfo(agentInfo.getNearCpuAgent().handle)
+                .getNumaNode());*/
+        if (profile->output_buffer.ptr == NULL) {
+          std::cerr << __FILE__ << ":" << __LINE__ << " "
+                    << "Error: allocating memory for output buffer using NUMA" << std::endl;
+          abort();
+        }
+      } else {
+        status = rocmtools::hsa_support::GetAmdExtTable().hsa_amd_agents_allow_access_fn(
+            ag_list_count, ag_list, NULL, profile->output_buffer.ptr);
+        CHECK_HSA_STATUS("Error: GPU Agent can't have output buffer access", status);
+        memset(profile->output_buffer.ptr, 0x0, profile->output_buffer.size);
+      }
+    } else {
+      profile->output_buffer.size = 0;
+    }
+    status = hsa_ven_amd_aqlprofile_start(profile, start_packet);
+    // CHECK_HSA_STATUS("Error: Creating Start Packet\n", status);
+    status = hsa_ven_amd_aqlprofile_stop(profile, stop_packet);
+    // CHECK_HSA_STATUS("Error: Creating Stop Packet\n", status);
+    status = hsa_ven_amd_aqlprofile_read(profile, read_packet);
+    // CHECK_HSA_STATUS("Error: Creating Read Packet\n", status);
+
+    context->start_packet = start_packet;
+    context->stop_packet = stop_packet;
+    context->read_packet = read_packet;
+
+    // add profiles
+    profiles.emplace_back(std::make_pair(context, profile));
+  }
+  // } while (events_list.size() > 0);
   return profiles;
 }
 
@@ -407,67 +397,71 @@ hsa_ven_amd_aqlprofile_profile_t* InitializeDeviceProfilingAqlPackets(
 
   // Validating the events array for the specified gpu agent
   bool result;
-  hsa_ven_amd_aqlprofile_validate_event(gpu_agent, events, &result);
-  if (!result) {
-    printf("Error: Events are not valid for the current gpu agent\n");
-    throw("Error: Events are not valid for the current gpu agent");
-  }
+  status = hsa_ven_amd_aqlprofile_validate_event(gpu_agent, events, &result);
+  CHECK_HSA_STATUS("Error: Events are not valid for the current gpu agent\n", status);
 
   hsa_ven_amd_aqlprofile_parameter_t* params = {};
-  uint8_t* command_buffer = nullptr;
-  uint8_t* output_buffer = nullptr;
 
-
-// Preparing the profile structure to get the packets
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wconversion-null"
+  // Preparing the profile structure to get the packets
   hsa_ven_amd_aqlprofile_profile_t* profile = new hsa_ven_amd_aqlprofile_profile_t{
-      gpu_agent, HSA_VEN_AMD_AQLPROFILE_EVENT_TYPE_PMC, events, event_count, params, 0, NULL, NULL};
-#pragma GCC diagnostic pop
+      gpu_agent, HSA_VEN_AMD_AQLPROFILE_EVENT_TYPE_PMC, events, event_count, params, 0, 0, 0};
 
   // Preparing an Getting the size of the command and output buffers
   status = hsa_ven_amd_aqlprofile_start(profile, NULL);
 
   Agent::AgentInfo& agentInfo = rocmtools::hsa_support::GetAgentInfo(gpu_agent.handle);
+  size_t ag_list_count = 1;
+  hsa_agent_t ag_list[ag_list_count];
+  ag_list[0] = gpu_agent;
 
   // Allocating Command Buffer
   status = HSA_STATUS_ERROR;
   size_t size = profile->command_buffer.size;
+  profile->command_buffer.ptr = nullptr;
+  if (size <= 0) return nullptr;
   size = (size + MEM_PAGE_MASK) & ~MEM_PAGE_MASK;
   status = rocmtools::hsa_support::GetAmdExtTable().hsa_amd_memory_pool_allocate_fn(
-      agentInfo.cpu_pool, size, 0, reinterpret_cast<void**>(&command_buffer));
+      agentInfo.cpu_pool, size, 0, reinterpret_cast<void**>(&(profile->command_buffer.ptr)));
   // Both the CPU and GPU can access the memory
   if (status == HSA_STATUS_SUCCESS) {
-    hsa_agent_t ag_list[1] = {gpu_agent};
     status = rocmtools::hsa_support::GetAmdExtTable().hsa_amd_agents_allow_access_fn(
-        1, ag_list, NULL, command_buffer);
+        ag_list_count, ag_list, NULL, profile->command_buffer.ptr);
+    CHECK_HSA_STATUS("Error: GPU Agent can't have command buffer access", status);
+  } else {
+    profile->command_buffer.ptr = numa_alloc_onnode(
+        profile->command_buffer.size,
+        rocmtools::hsa_support::GetAgentInfo(agentInfo.getNearCpuAgent().handle).getNumaNode());
+    if (profile->command_buffer.ptr != nullptr) {
+      status = HSA_STATUS_SUCCESS;
+    } else {
+      CHECK_HSA_STATUS("Error: Allocating Command Buffer", status);
+    }
   }
-  profile->command_buffer.ptr = (status == HSA_STATUS_SUCCESS) ? command_buffer : nullptr;
-  if (status != HSA_STATUS_SUCCESS) printf("Error: Allocating Command Buffer\n");
 
   // Allocating Output Buffer
   status = HSA_STATUS_ERROR;
   size = profile->output_buffer.size;
+  profile->output_buffer.ptr = nullptr;
   size = (size + MEM_PAGE_MASK) & ~MEM_PAGE_MASK;
   status = rocmtools::hsa_support::GetAmdExtTable().hsa_amd_memory_pool_allocate_fn(
-      agentInfo.kernarg_pool, size, 0, reinterpret_cast<void**>(&output_buffer));
+      agentInfo.gpu_pool, size, 0, reinterpret_cast<void**>(&(profile->output_buffer.ptr)));
+  CHECK_HSA_STATUS("Error: Can't Allocate Output Buffer", status);
   // Both the CPU and GPU can access the kernel arguments
   if (status == HSA_STATUS_SUCCESS) {
-    hsa_agent_t ag_list[1] = {gpu_agent};
     status = rocmtools::hsa_support::GetAmdExtTable().hsa_amd_agents_allow_access_fn(
-        1, ag_list, NULL, output_buffer);
-  }
-  if (status == HSA_STATUS_SUCCESS) {
-    profile->output_buffer.ptr = output_buffer;
+        ag_list_count, ag_list, NULL, profile->output_buffer.ptr);
+    CHECK_HSA_STATUS("Error: Can't allow access on the Output Buffer for the GPU", status);
     memset(profile->output_buffer.ptr, 0x0, profile->output_buffer.size);
-  } else {
-    profile->output_buffer.ptr = nullptr;
   }
+
 
   // Creating the start/stop/read packets
   status = hsa_ven_amd_aqlprofile_start(profile, start_packet);
+  CHECK_HSA_STATUS("Error: Creating Start Packet\n", status);
   status = hsa_ven_amd_aqlprofile_stop(profile, stop_packet);
+  CHECK_HSA_STATUS("Error: Creating Stop Packet\n", status);
   status = hsa_ven_amd_aqlprofile_read(profile, read_packet);
+  CHECK_HSA_STATUS("Error: Creating Read Packet\n", status);
 
   if (status == HSA_STATUS_ERROR) return nullptr;
   return profile;
@@ -479,17 +473,19 @@ bool g_output_buffer_local = true;
 
 // Allocate system memory accessible by both CPU and GPU
 uint8_t* AllocateSysMemory(hsa_agent_t gpu_agent, size_t size, hsa_amd_memory_pool_t* cpu_pool) {
+  size_t ag_list_count = 1;  // rocmtools::hsa_support::GetCPUAgentList().size();
+  hsa_agent_t ag_list[ag_list_count];
+  ag_list[0] = gpu_agent;
   hsa_status_t status = HSA_STATUS_ERROR;
   uint8_t* buffer = NULL;
   size = (size + MEM_PAGE_MASK) & ~MEM_PAGE_MASK;
-  // if (!cpu_agents_.empty()) {
-  status = hsa_amd_memory_pool_allocate(*cpu_pool, size, 0, reinterpret_cast<void**>(&buffer));
+  status = rocmtools::hsa_support::GetAmdExtTable().hsa_amd_memory_pool_allocate_fn(
+      *cpu_pool, size, 0, reinterpret_cast<void**>(&buffer));
   // Both the CPU and GPU can access the memory
   if (status == HSA_STATUS_SUCCESS) {
-    hsa_agent_t ag_list[1] = {gpu_agent};
-    status = hsa_amd_agents_allow_access(1, ag_list, NULL, buffer);
+    status = rocmtools::hsa_support::GetAmdExtTable().hsa_amd_agents_allow_access_fn(
+        ag_list_count, ag_list, NULL, buffer);
   }
-  // }
   uint8_t* ptr = (status == HSA_STATUS_SUCCESS) ? buffer : NULL;
   return ptr;
 }
@@ -542,18 +538,6 @@ att_mem_pools_map_t* GetAttMemPoolsMap() {
   return agent_att_mem_pools_map;
 }
 
-
-att_memory_pools_t* GetAttMemPools(hsa_agent_t gpu_agent) {
-  auto it = GetAttMemPoolsMap()->find(gpu_agent.handle);
-  if (it != GetAttMemPoolsMap()->end()) {
-    return it->second;
-  }
-  printf("Error: att_memory_pools_t instance not found for given gpu agent handle: %lu\n",
-         gpu_agent.handle);
-
-  return nullptr;
-}
-
 // Generate start and stop packets for collecting ATT traces
 // Also generate and return the profile object which has the PM4
 // command buffer and the output buffer for retrieving the traces
@@ -573,7 +557,7 @@ hsa_ven_amd_aqlprofile_profile_t* GenerateATTPackets(
 
   // Check the profile buffer sizes
   hsa_status_t status = hsa_ven_amd_aqlprofile_start(profile, NULL);
-  if (status != HSA_STATUS_SUCCESS) printf("Error: aqlprofile_start(NULL)");
+  CHECK_HSA_STATUS("Error: Getting PM4 Start Packet", status);
   // TODO: create a separate class for memory allocations
   // Maintain pools per device
   // handle allocation and resource cleanup
@@ -582,14 +566,13 @@ hsa_ven_amd_aqlprofile_profile_t* GenerateATTPackets(
   // command buffer -> from CPU memory pool
   // output buffer -> from GPU memory pool
   status = Allocate(gpu_agent, profile);
-  if (status != HSA_STATUS_SUCCESS) printf("Error: Allocate()");
+  CHECK_HSA_STATUS("Error: Att Buffers Allocation", status);
 
   // Generate start/stop/read profiling packets
   status = hsa_ven_amd_aqlprofile_start(profile, start_packet);
-  if (status != HSA_STATUS_SUCCESS) printf("Error: aqlprofile_start");
+  CHECK_HSA_STATUS("Error: Creating Start PM4 Packet", status);
   status = hsa_ven_amd_aqlprofile_stop(profile, stop_packet);
-  if (status != HSA_STATUS_SUCCESS) printf("Error: aqlprofile_stop");
-  if (status == HSA_STATUS_ERROR) return nullptr;
+  CHECK_HSA_STATUS("Error: Creating Stop PM4 Packet", status);
   return profile;
 }
 

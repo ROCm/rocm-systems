@@ -110,7 +110,7 @@ THE SOFTWARE.
 #if !defined(ROCPROFILER)
 #if defined(ROCPROFILER_EXPORTS)
 #define ROCPROFILER_API ROCPROFILER_EXPORT
-#else /* !defined (ROCPROFILER_EXPORTS) */
+#else  /* !defined (ROCPROFILER_EXPORTS) */
 #define ROCPROFILER_API ROCPROFILER_IMPORT
 #endif /* !defined (ROCPROFILER_EXPORTS) */
 #endif /* !defined (ROCPROFILER) */
@@ -949,6 +949,14 @@ typedef struct {
   uint64_t signal_handle;
 
 } rocprofiler_kernel_properties_t;
+
+/**
+ * Correlation ID
+ */
+typedef struct {
+  uint64_t value;
+} rocprofiler_correlation_id_t;
+
 /**
  * Profiling record, this will represent all the information reported by the
  * profiler regarding kernel dispatches and their counters that were collected
@@ -986,7 +994,11 @@ typedef struct {
    * Counters, including identifiers to get counter information and Counters
    * values
    */
-  rocprofiler_record_counter_instance_t* counters;
+  const rocprofiler_record_counter_instance_t* counters;
+  /**
+   * The count of the counters that were collected by the profiler
+   */
+  rocprofiler_record_counters_instances_count_t counters_count; /* Counters Count */
   /**
    * kernel properties, including the grid size, work group size,
    * registers count, wave size and completion signal
@@ -1001,9 +1013,9 @@ typedef struct {
    */
   rocprofiler_queue_index_t queue_idx;
   /**
-   * The count of the counters that were collected by the profiler
+   * Correlation id
    */
-  rocprofiler_record_counters_instances_count_t counters_count; /* Counters Count */
+  rocprofiler_correlation_id_t correlation_id;
 } rocprofiler_record_profiler_t;
 
 typedef struct {

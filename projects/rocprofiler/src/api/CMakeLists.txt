@@ -245,7 +245,7 @@ set_target_properties(rocprofiler-v2 PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/v2
   VERSION ${PROJECT_VERSION}
   SOVERSION ${PROJECT_VERSION_MAJOR})
- 
+
 # Add custom command to copy the v2 library to buil-dir as well
 add_custom_command(TARGET rocprofiler-v2 POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_BINARY_DIR}/v2/librocprofiler64.so.2 ${CMAKE_BINARY_DIR}
@@ -271,10 +271,10 @@ target_include_directories(rocprofiler-v2
 if(ASAN)
   target_compile_options(rocprofiler-v2 PRIVATE -fsanitize=address)
   target_link_options(rocprofiler-v2 PRIVATE -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/exportmap -Wl,--no-undefined,-fsanitize=address)
-  target_link_libraries(rocprofiler-v2 PRIVATE ${AQLPROFILE_LIB} hsa-runtime64::hsa-runtime64 Threads::Threads atomic asan dl c stdc++ stdc++fs amd_comgr ${PCIACCESS_LIBRARIES})
+  target_link_libraries(rocprofiler-v2 PRIVATE ${AQLPROFILE_LIB} hsa-runtime64::hsa-runtime64 Threads::Threads atomic numa asan dl c stdc++ stdc++fs amd_comgr ${PCIACCESS_LIBRARIES})
 else()
   target_link_options(rocprofiler-v2 PRIVATE -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/exportmap -Wl,--no-undefined)
-  target_link_libraries(rocprofiler-v2 PRIVATE ${AQLPROFILE_LIB} hsa-runtime64::hsa-runtime64 Threads::Threads atomic dl c stdc++ stdc++fs amd_comgr ${PCIACCESS_LIBRARIES})
+  target_link_libraries(rocprofiler-v2 PRIVATE ${AQLPROFILE_LIB} hsa-runtime64::hsa-runtime64 Threads::Threads atomic numa dl c stdc++ stdc++fs amd_comgr ${PCIACCESS_LIBRARIES})
 endif()
 ## Install libraries: Non versioned lib file in dev package
 # install(TARGETS rocprofiler-v2 LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT dev)

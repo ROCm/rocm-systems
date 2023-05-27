@@ -145,7 +145,8 @@ std::string string_printf(const char* format, ...) {
   std::string errmsg("ROCMTools: fatal error: " + message);
   fputs(errmsg.c_str(), stderr);
 
-  throw(errmsg);
+  std::cerr << errmsg << std::endl;
+  abort();
 }
 
 /* The function extracts the kernel name from

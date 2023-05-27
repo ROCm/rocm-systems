@@ -207,7 +207,8 @@ class Context {
     } catch(...) {
       delete obj;
       obj = NULL;
-      throw;
+      std::cerr << "Error: Context Create failed" << std::endl;
+      abort();
     }
     return obj;
   }

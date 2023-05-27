@@ -281,10 +281,12 @@ class MetricsDict {
           try {
             expr_obj = new xml::Expr(expr_str, new ExprCache(&cache_));
           } catch (const xml::exception_t& exc) {
-            if (do_lookup)
+            if (do_lookup) {
               metrics_list.push_back(node);
-            else
-              throw(exc);
+            } else {
+              std::cerr << "Error: " << exc.what() << std::endl;
+              abort();
+            }
           }
           if (expr_obj) {
 #if 0

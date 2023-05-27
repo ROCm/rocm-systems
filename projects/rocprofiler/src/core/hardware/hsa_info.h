@@ -43,7 +43,7 @@ class AgentInfo {
   AgentInfo();
   AgentInfo(const hsa_agent_t agent, ::CoreApiTable* table);
 
-  int getIndex() const;
+  uint64_t getIndex() const;
   hsa_device_type_t getType() const;
   uint64_t getHandle() const;
   const std::string_view getName() const;
@@ -62,7 +62,7 @@ class AgentInfo {
   uint32_t getPCILocationID() const;
   uint32_t getXccCount() const;
 
-  void setIndex(int index);
+  void setIndex(uint64_t index);
   void setType(hsa_device_type_t type);
   void setHandle(uint64_t handle);
   void setName(const std::string& name);
@@ -78,7 +78,7 @@ class AgentInfo {
   hsa_amd_memory_pool_t gpu_pool;
 
  private:
-  int index_;
+  uint64_t index_;
   hsa_device_type_t type_;  // Agent type - Cpu = 0, Gpu = 1 or Dsp = 2
   uint64_t handle_;
   char name_[64];

@@ -116,6 +116,9 @@ find_package(
   PATHS
   ${ROCM_PATH})
 
+find_library(NUMA NAME numa REQUIRED)
+link_libraries(${NUMA})
+
 get_property(
   HSA_RUNTIME_INCLUDE_DIRECTORIES
   TARGET hsa-runtime64::hsa-runtime64

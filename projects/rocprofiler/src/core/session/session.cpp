@@ -41,7 +41,9 @@
 namespace rocmtools {
 
 Session::Session(rocprofiler_replay_mode_t replay_mode, rocprofiler_session_id_t session_id)
-    : session_id_(session_id), is_active_(false), replay_mode_(replay_mode) {}
+    : session_id_(session_id), is_active_(false), replay_mode_(replay_mode) {
+  buffers_ = new std::map<uint64_t, Memory::GenericBuffer*>();
+}
 
 Session::~Session() {
   while (GetCurrentActiveInterruptSignalsCount() > 0) {
@@ -63,6 +65,7 @@ Session::~Session() {
   //   std::lock_guard<std::mutex> lock(filters_lock_);
   //   buffers_.clear();
   // }
+  delete buffers_;
 }
 
 void Session::DisableTools(rocprofiler_buffer_id_t buffer_id) {
@@ -171,6 +174,8 @@ void Session::Start() {
 
 void Session::Terminate() {
   if (is_active_) {
+    while (GetCurrentActiveInterruptSignalsCount() > 0) {
+    }
     rocmtools::queue::ResetSessionID();
     std::lock_guard<std::mutex> lock(session_lock_);
     if (FindFilterWithKind(ROCPROFILER_SPM_COLLECTION)) {
@@ -202,6 +207,11 @@ void Session::Terminate() {
         delete counters_sampler_;
         counters_sampler_started_.exchange(false, std::memory_order_release);
       }
+    }
+
+    for (auto& buffer : *buffers_) {
+      buffer.second->Flush();
+      delete buffer.second;
     }
 
     is_active_ = false;
@@ -289,7 +299,7 @@ rocprofiler_filter_id_t Session::GetFilterIdWithKind(rocprofiler_filter_kind_t k
   return rocprofiler_filter_id_t{0};
 }
 
-bool Session::HasBuffer() { return buffers_.size() > 0; }
+bool Session::HasBuffer() { return buffers_->size() > 0; }
 
 rocprofiler_buffer_id_t Session::CreateBuffer(rocprofiler_buffer_callback_t buffer_callback,
                                               size_t buffer_size) {
@@ -297,8 +307,8 @@ rocprofiler_buffer_id_t Session::CreateBuffer(rocprofiler_buffer_callback_t buff
       rocprofiler_buffer_id_t{buffers_counter_.fetch_add(1, std::memory_order_release)};
   {
     std::lock_guard<std::mutex> lock(buffers_lock_);
-    buffers_.emplace(id.value,
-                     new Memory::GenericBuffer(session_id_, id, buffer_size, buffer_callback));
+    buffers_->emplace(id.value,
+                      new Memory::GenericBuffer(session_id_, id, buffer_size, buffer_callback));
   }
   return id;
 }
@@ -306,7 +316,7 @@ rocprofiler_buffer_id_t Session::CreateBuffer(rocprofiler_buffer_callback_t buff
 bool Session::FindBuffer(rocprofiler_buffer_id_t buffer_id) {
   {
     std::lock_guard<std::mutex> lock(buffers_lock_);
-    return buffers_.find(buffer_id.value) != buffers_.end();
+    return buffers_->find(buffer_id.value) != buffers_->end();
   }
 }
 
@@ -316,8 +326,8 @@ void Session::DestroyTracer() { /* tracer_.reset(); */
 void Session::DestroyBuffer(rocprofiler_buffer_id_t buffer_id) {
   {
     std::lock_guard<std::mutex> lock(filters_lock_);
-    delete buffers_.at(buffer_id.value);
-    buffers_.erase(buffer_id.value);
+    delete buffers_->at(buffer_id.value);
+    buffers_->erase(buffer_id.value);
     // if (buffers_.find(buffer_id.value) != buffers_.end() &&
     // buffers_.at(buffer_id.value)->IsValid())
     //   buffers_.at(buffer_id.value).reset();
@@ -347,7 +357,7 @@ rocprofiler_status_t Session::stopSpm() {
 Memory::GenericBuffer* Session::GetBuffer(rocprofiler_buffer_id_t buffer_id) {
   {
     std::lock_guard<std::mutex> lock(buffers_lock_);
-    return buffers_.at(buffer_id.value);
+    return buffers_->at(buffer_id.value);
   }
 }
 

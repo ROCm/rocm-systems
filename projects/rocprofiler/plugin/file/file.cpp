@@ -233,7 +233,6 @@ class file_plugin_t {
             tracer_record.api_data_handle, tracer_record.operation_id, &function_name_c));
       }
     }
-    //return;
     output_file_t* output_file = get_output_file(output_type_t::TRACER, tracer_record.domain);
     *output_file << "Record(" << tracer_record.header.id.handle << "), Domain("
                  << GetDomainName(tracer_record.domain) << "),";
@@ -336,7 +335,7 @@ class file_plugin_t {
               session_id, ROCPROFILER_COUNTER_NAME, profiler_record->counters[i].counter_handler,
               &counter_name_length));
           if (counter_name_length > 1) {
-            const char* name_c = static_cast<const char*>(malloc(name_length * sizeof(char)));
+            const char* name_c = nullptr;
             CHECK_ROCPROFILER(rocprofiler_query_counter_info(
                 session_id, ROCPROFILER_COUNTER_NAME, profiler_record->counters[i].counter_handler,
                 &name_c));

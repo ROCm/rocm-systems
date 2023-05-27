@@ -89,7 +89,7 @@ AgentInfo::AgentInfo(const hsa_agent_t agent, ::CoreApiTable* table) : handle_(a
     xcc_num_ = 1;
 }
 
-int AgentInfo::getIndex() const { return index_; }
+uint64_t AgentInfo::getIndex() const { return index_; }
 hsa_device_type_t AgentInfo::getType() const { return type_; }
 uint64_t AgentInfo::getHandle() const { return handle_; }
 const std::string_view AgentInfo::getName() const { return name_; }
@@ -107,7 +107,7 @@ uint32_t AgentInfo::getPCIDomain() const { return pci_domain_; }
 uint32_t AgentInfo::getPCILocationID() const { return pci_location_id_; }
 uint32_t AgentInfo::getXccCount() const { return xcc_num_; }
 
-void AgentInfo::setIndex(int index) { index_ = index; }
+void AgentInfo::setIndex(uint64_t index) { index_ = index; }
 void AgentInfo::setType(hsa_device_type_t type) { type_ = type; }
 void AgentInfo::setHandle(uint64_t handle) { handle_ = handle; }
 void AgentInfo::setName(const std::string& name) { strcpy(name_, name.c_str()); }

@@ -87,7 +87,8 @@ std::string string_printf(const char* format, ...) {
   std::string errmsg("ROCProfiler: fatal error: " + message);
   fputs(errmsg.c_str(), stderr);
 
-  throw(errmsg);
+  // throw(errmsg);
+  abort();
 }
 
 /* The function extracts the kernel name from

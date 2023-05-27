@@ -302,24 +302,6 @@ get_pmc_results_txt_path(){
   done
 }
 
-if [ -n "$COUNTERS_PMC_DIRS" ]; then
-  COUNTERS_RESULTS_TXT=""
-  for PMC_DIR in $COUNTERS_PMC_DIRS; do
-    COUNTERS_RESULTS_TXT="$COUNTERS_RESULTS_TXT $(get_pmc_results_txt_path $PMC_DIR)"
-  done
-  CSV_RESULTS=$OUTPUT_PATH_INTERNAL/results.csv
-  if [ -n "$OUT_FILE_NAME" ]; then
-    CSV_RESULTS=$OUTPUT_PATH_INTERNAL/$OUT_FILE_NAME
-  fi
-  echo "csv results path: $CSV_RESULTS"
-  export ROCP_MERGE_PIDS=1 #required for tblextr.py to work correctly for counters
-  if [ $RUN_FROM_BUILD == 1 ]; then
-    eval "python3 $ROCM_DIR/bin/tblextr.py $CSV_RESULTS $COUNTERS_RESULTS_TXT"
-  else
-    eval "python3 $ROCPROFV2_DIR/../libexec/rocprofiler/tblextr.py $CSV_RESULTS $COUNTERS_RESULTS_TXT"
-  fi
-fi
-
 if [ -n "$ATT_PATH" ]; then
   if [ -n "$ATT_ARGV" ]; then
     eval "python3 $ATT_PATH $ATT_ARGV"

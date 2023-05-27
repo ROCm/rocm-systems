@@ -300,13 +300,13 @@ att_parsed_input_t GetATTParams() {
     } else if (param_name == "PERFCOUNTER") {
       counters_names.push_back(line.substr(pos + 1));
       continue;
-    } else {  // param_value is a number
+    } else {                                                     // param_value is a number
       try {
-        auto hexa_pos = line.find("0x", pos);  // Is it hex?
+        auto hexa_pos = line.find("0x", pos);                    // Is it hex?
         if (hexa_pos != std::string::npos)
           param_value = stoi(line.substr(hexa_pos + 2), 0, 16);  // hexadecimal
         else
-          param_value = stoi(line.substr(pos + 1), 0, 10);  // decimal
+          param_value = stoi(line.substr(pos + 1), 0, 10);       // decimal
       } catch (...) {
         printf("Error: Invalid parameter value %s - (%s)\n",
                line.substr(pos + 1, line.size()).c_str(), line.c_str());
@@ -364,6 +364,9 @@ att_parsed_input_t GetATTParams() {
 }
 
 void finish() {
+  for ([[maybe_unused]] rocprofiler_buffer_id_t buffer_id : buffer_ids) {
+    CHECK_ROCPROFILER(rocprofiler_flush_data(session_id, buffer_id));
+  }
   if (amd_sys_handler.load(std::memory_order_release)) {
     amd_sys_handler.exchange(false, std::memory_order_release);
     wait_for_start_shm.join();
@@ -371,11 +374,8 @@ void finish() {
   }
   if (session_created.load(std::memory_order_relaxed)) {
     session_created.exchange(false, std::memory_order_release);
-    CHECK_ROCPROFILER(rocprofiler_terminate_session(session_id));
     rocprofiler::TraceBufferBase::FlushAll();
-    for ([[maybe_unused]] rocprofiler_buffer_id_t buffer_id : buffer_ids) {
-      CHECK_ROCPROFILER(rocprofiler_flush_data(session_id, buffer_id));
-    }
+    CHECK_ROCPROFILER(rocprofiler_terminate_session(session_id));
   }
 }
 
@@ -646,49 +646,59 @@ ROCPROFILER_EXPORT bool OnLoad(void* table, uint64_t runtime_version, uint64_t f
   if (apis_requested.size() > 0) filters_requested.emplace_back(ROCPROFILER_API_TRACE);
   if (parameters.size() > 0) filters_requested.emplace_back(ROCPROFILER_ATT_TRACE_COLLECTION);
 
-  rocprofiler_buffer_id_t buffer_id;
-  CHECK_ROCPROFILER(rocprofiler_create_buffer(
-      session_id,
-      [](const rocprofiler_record_header_t* record, const rocprofiler_record_header_t* end_record,
-         rocprofiler_session_id_t session_id, rocprofiler_buffer_id_t buffer_id) {
-        if (plugin) plugin->write_buffer_records(record, end_record, session_id, buffer_id);
-      },
-      1 << 20, &buffer_id));
-  buffer_ids.emplace_back(buffer_id);
-
-  rocprofiler_buffer_id_t buffer_id_1;
-  CHECK_ROCPROFILER(rocprofiler_create_buffer(
-      session_id,
-      [](const rocprofiler_record_header_t* record, const rocprofiler_record_header_t* end_record,
-         rocprofiler_session_id_t session_id, rocprofiler_buffer_id_t buffer_id_1) {
-        if (plugin) plugin->write_buffer_records(record, end_record, session_id, buffer_id_1);
-      },
-      1 << 20, &buffer_id_1));
-  buffer_ids.emplace_back(buffer_id_1);
-
   for (rocprofiler_filter_kind_t filter_kind : filters_requested) {
     switch (filter_kind) {
       case ROCPROFILER_COUNTERS_COLLECTION: {
+        rocprofiler_buffer_id_t buffer_id;
+        CHECK_ROCPROFILER(rocprofiler_create_buffer(
+            session_id,
+            [](const rocprofiler_record_header_t* record,
+               const rocprofiler_record_header_t* end_record, rocprofiler_session_id_t session_id,
+               rocprofiler_buffer_id_t buffer_id) {
+              if (plugin) plugin->write_buffer_records(record, end_record, session_id, buffer_id);
+            },
+            1 << 20, &buffer_id));
+        buffer_ids.emplace_back(buffer_id);
         printf("Enabling Counter Collection\n");
         rocprofiler_filter_id_t filter_id;
         [[maybe_unused]] rocprofiler_filter_property_t property = {};
         CHECK_ROCPROFILER(rocprofiler_create_filter(
             session_id, filter_kind, rocprofiler_filter_data_t{.counters_names = &counters_[0]},
             counters_.size(), &filter_id, property));
-        CHECK_ROCPROFILER(rocprofiler_set_filter_buffer(session_id, filter_id, buffer_id_1));
+        CHECK_ROCPROFILER(rocprofiler_set_filter_buffer(session_id, filter_id, buffer_id));
         filter_ids.emplace_back(filter_id);
         break;
       }
       case ROCPROFILER_DISPATCH_TIMESTAMPS_COLLECTION: {
+        rocprofiler_buffer_id_t buffer_id;
+        CHECK_ROCPROFILER(rocprofiler_create_buffer(
+            session_id,
+            [](const rocprofiler_record_header_t* record,
+               const rocprofiler_record_header_t* end_record, rocprofiler_session_id_t session_id,
+               rocprofiler_buffer_id_t buffer_id) {
+              if (plugin) plugin->write_buffer_records(record, end_record, session_id, buffer_id);
+            },
+            1 << 20, &buffer_id));
+        buffer_ids.emplace_back(buffer_id);
         rocprofiler_filter_id_t filter_id;
         [[maybe_unused]] rocprofiler_filter_property_t property = {};
         CHECK_ROCPROFILER(rocprofiler_create_filter(
             session_id, filter_kind, rocprofiler_filter_data_t{}, 0, &filter_id, property));
-        CHECK_ROCPROFILER(rocprofiler_set_filter_buffer(session_id, filter_id, buffer_id_1));
+        CHECK_ROCPROFILER(rocprofiler_set_filter_buffer(session_id, filter_id, buffer_id));
         filter_ids.emplace_back(filter_id);
         break;
       }
       case ROCPROFILER_API_TRACE: {
+        rocprofiler_buffer_id_t buffer_id;
+        CHECK_ROCPROFILER(rocprofiler_create_buffer(
+            session_id,
+            [](const rocprofiler_record_header_t* record,
+               const rocprofiler_record_header_t* end_record, rocprofiler_session_id_t session_id,
+               rocprofiler_buffer_id_t buffer_id) {
+              if (plugin) plugin->write_buffer_records(record, end_record, session_id, buffer_id);
+            },
+            1 << 20, &buffer_id));
+        buffer_ids.emplace_back(buffer_id);
         printf("Enabling API Tracing\n");
         rocprofiler_filter_id_t filter_id;
         [[maybe_unused]] rocprofiler_filter_property_t property = {};
@@ -702,6 +712,16 @@ ROCPROFILER_EXPORT bool OnLoad(void* table, uint64_t runtime_version, uint64_t f
         break;
       }
       case ROCPROFILER_ATT_TRACE_COLLECTION: {
+        rocprofiler_buffer_id_t buffer_id;
+        CHECK_ROCPROFILER(rocprofiler_create_buffer(
+            session_id,
+            [](const rocprofiler_record_header_t* record,
+               const rocprofiler_record_header_t* end_record, rocprofiler_session_id_t session_id,
+               rocprofiler_buffer_id_t buffer_id) {
+              if (plugin) plugin->write_buffer_records(record, end_record, session_id, buffer_id);
+            },
+            1 << 20, &buffer_id));
+        buffer_ids.emplace_back(buffer_id);
         printf("Enabling ATT Tracing\n");
         rocprofiler_filter_id_t filter_id;
 
@@ -717,11 +737,21 @@ ROCPROFILER_EXPORT bool OnLoad(void* table, uint64_t runtime_version, uint64_t f
             rocprofiler_create_filter(session_id, ROCPROFILER_ATT_TRACE_COLLECTION,
                                       rocprofiler_filter_data_t{.att_parameters = &parameters[0]},
                                       parameters.size(), &filter_id, property));
-        CHECK_ROCPROFILER(rocprofiler_set_filter_buffer(session_id, filter_id, buffer_id_1));
+        CHECK_ROCPROFILER(rocprofiler_set_filter_buffer(session_id, filter_id, buffer_id));
         filter_ids.emplace_back(filter_id);
         break;
       }
       case ROCPROFILER_PC_SAMPLING_COLLECTION: {
+        rocprofiler_buffer_id_t buffer_id;
+        CHECK_ROCPROFILER(rocprofiler_create_buffer(
+            session_id,
+            [](const rocprofiler_record_header_t* record,
+               const rocprofiler_record_header_t* end_record, rocprofiler_session_id_t session_id,
+               rocprofiler_buffer_id_t buffer_id) {
+              if (plugin) plugin->write_buffer_records(record, end_record, session_id, buffer_id);
+            },
+            1 << 20, &buffer_id));
+        buffer_ids.emplace_back(buffer_id);
         puts("Enabling PC sampling");
         rocprofiler_filter_id_t filter_id;
         [[maybe_unused]] rocprofiler_filter_property_t property = {};

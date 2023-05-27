@@ -46,8 +46,10 @@ hsa_status_t pmcCallback(hsa_ven_amd_aqlprofile_info_type_t info_type,
     if (info_type == HSA_VEN_AMD_AQLPROFILE_INFO_PMC_DATA) {
       if (IsEventMatch(info_data->pmc_data.event, (*data_it)->event)) {
         uint32_t xcc_index = floor(passed_data->index / passed_data->single_xcc_buff_size);
-        (*data_it)->xcc_vals[xcc_index] += info_data->pmc_data.result;  // stores event result from each xcc separately
-        (*data_it)->val_double += info_data->pmc_data.result;           // stores accumulated event result from all xccs
+        (*data_it)->xcc_vals[xcc_index] +=
+            info_data->pmc_data.result;  // stores event result from each xcc separately
+        (*data_it)->val_double +=
+            info_data->pmc_data.result;  // stores accumulated event result from all xccs
       }
     }
   }
@@ -98,19 +100,16 @@ bool metrics::ExtractMetricEvents(
       //   const Metric* metric = metrics_dict->GetMetricByName(metric_names[i]);
       const Metric* metric = metrics_dict->Get(metric_names[i]);
       if (metric == nullptr) {
-          Agent::AgentInfo& agentInfo = rocmtools::hsa_support::GetAgentInfo(gpu_agent.handle);
-          fatal("input metric'%s' not supported on this hardware: %s ", metric_names[i].c_str(),
-          agentInfo.getName().data());
-
+        Agent::AgentInfo& agentInfo = rocmtools::hsa_support::GetAgentInfo(gpu_agent.handle);
+        fatal("input metric'%s' not supported on this hardware: %s ", metric_names[i].c_str(),
+              agentInfo.getName().data());
       }
 
       // adding result object for derived metric
       std::lock_guard<std::mutex> lock(extract_metric_events_lock);
       if (results_map.find(metric_names[i]) == results_map.end()) {
         results_map[metric_names[i]] = new results_t(metric_names[i], {}, xcc_count);
-      }  // else {
-         //  continue;
-      // }
+      }
 
       counters_vec = metric->GetCounters();
       if (counters_vec.empty())
@@ -129,7 +128,8 @@ bool metrics::ExtractMetricEvents(
           } else {
             // result object for base metric
             // std::cout << "Metric : " << metric->GetName() << " : " << counter->name << std::endl;
-            result = new results_t(counter->name, {}, xcc_count);  // TODO: set correct initial value
+            result =
+                new results_t(counter->name, {}, xcc_count);  // TODO: set correct initial value
             results_map[counter->name] = result;
           }
         } else {
@@ -188,7 +188,7 @@ bool metrics::ExtractMetricEvents(
 bool metrics::GetCounterData(hsa_ven_amd_aqlprofile_profile_t* profile, hsa_agent_t gpu_agent,
                              std::vector<results_t*>& results_list) {
   uint32_t xcc_count = rocmtools::hsa_support::GetAgentInfo(gpu_agent.handle).getXccCount();
-  uint32_t single_xcc_buff_size = profile->output_buffer.size /(sizeof(uint64_t) * xcc_count);
+  uint32_t single_xcc_buff_size = profile->output_buffer.size / (sizeof(uint64_t) * xcc_count);
   callback_data_t callback_data{&results_list, 0, single_xcc_buff_size};
   hsa_status_t status = hsa_ven_amd_aqlprofile_iterate_data(profile, pmcCallback, &callback_data);
   return (status == HSA_STATUS_SUCCESS);
@@ -210,16 +210,19 @@ bool metrics::GetMetricsData(std::map<std::string, results_t*>& results_map,
   return true;
 }
 
-void metrics::GetCountersAndMetricResultsByXcc(uint32_t xcc_index, std::vector<results_t*>& results_list,
-                                 std::map<std::string, results_t*>& results_map,
-                                 std::vector<const Metric*>& metrics_list){
-    for(auto it = results_list.begin(); it != results_list.end(); it++){
-      (*it)->val_double = (*it)->xcc_vals[xcc_index]; // set val_double to hold value for specific xcc
-    }
+void metrics::GetCountersAndMetricResultsByXcc(uint32_t xcc_index,
+                                               std::vector<results_t*>& results_list,
+                                               std::map<std::string, results_t*>& results_map,
+                                               std::vector<const Metric*>& metrics_list) {
+  for (auto it = results_list.begin(); it != results_list.end(); it++) {
+    (*it)->val_double =
+        (*it)->xcc_vals[xcc_index];  // set val_double to hold value for specific xcc
+  }
 
-    for(auto it = results_map.begin(); it != results_map.end(); it++){
-      it->second->val_double = it->second->xcc_vals[xcc_index]; // set val_double to hold value for specific xcc
-    }
+  for (auto it = results_map.begin(); it != results_map.end(); it++) {
+    it->second->val_double =
+        it->second->xcc_vals[xcc_index];  // set val_double to hold value for specific xcc
+  }
 
-    GetMetricsData(results_map, metrics_list);
+  GetMetricsData(results_map, metrics_list);
 }

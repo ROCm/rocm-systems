@@ -30,26 +30,39 @@ std::mutex agents_map_lock;
 std::map<decltype(hsa_agent_t::handle), Agent::AgentInfo> agent_info_map;
 Agent::AgentInfo& GetAgentInfo(decltype(hsa_agent_t::handle) handle) {
   std::lock_guard<std::mutex> lock(agents_map_lock);
-  if (agent_info_map.find(handle) != agent_info_map.end())
+  if (agent_info_map.find(handle) != agent_info_map.end()) {
     return agent_info_map.at(handle);
-  else
-    throw(std::string("Error: Can't find Agent with handle(") + std::to_string(handle) +
-          ") in this system");
+  } else {
+    std::cerr << std::string("Error: Can't find Agent with handle(") << std::to_string(handle) <<
+          ") in this system" << std::endl;
+    abort();
+  }
 }
+
+std::vector<hsa_agent_t> cpu_agents_list;
+
 void SetAgentInfo(decltype(hsa_agent_t::handle) handle, const Agent::AgentInfo& agent_info) {
   std::lock_guard<std::mutex> lock(agents_map_lock);
   agent_info_map.emplace(handle, agent_info);
+  if (agent_info.getType() == HSA_DEVICE_TYPE_GPU) {
+    cpu_agents_list.emplace_back(hsa_agent_t{handle});
+  }
 }
 
-hsa_agent_t GetAgentByIndex(int agent_index) {
+std::vector<hsa_agent_t>& GetCPUAgentList() {
+  return cpu_agents_list;
+}
+
+hsa_agent_t GetAgentByIndex(uint64_t agent_index) {
   std::lock_guard<std::mutex> lock(agents_map_lock);
   for (auto& agent_info : agent_info_map) {
     if (agent_info.second.getIndex() == agent_index) {
       return hsa_agent_t{agent_info.second.getHandle()};
     }
   }
-  throw(std::string("Error: Can't find Agent with Index(") + std::to_string(agent_index) +
-        ") in this system");
+  std::cerr << std::string("Error: Can't find Agent with Index(") << std::to_string(agent_index) <<
+        ") in this system" << std::endl;
+  abort();
 }
 
 CoreApiTable saved_core_api{};

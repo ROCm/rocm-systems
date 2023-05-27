@@ -38,9 +38,12 @@
 namespace rocmtools {
 namespace hsa_support {
 
+
+std::vector<hsa_agent_t>& GetCPUAgentList();
+
 Agent::AgentInfo& GetAgentInfo(decltype(hsa_agent_t::handle) handle);
 void SetAgentInfo(decltype(hsa_agent_t::handle) handle, const Agent::AgentInfo& agent_info);
-hsa_agent_t GetAgentByIndex(int agent_index);
+hsa_agent_t GetAgentByIndex(uint64_t agent_index);
 
 CoreApiTable& GetCoreApiTable();
 void SetCoreApiTable(const CoreApiTable& table);

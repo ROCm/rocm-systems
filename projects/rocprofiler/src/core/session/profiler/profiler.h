@@ -53,6 +53,7 @@ typedef struct {
   rocprofiler_kernel_properties_t kernel_properties;
   uint32_t thread_id;
   uint64_t queue_index;
+  uint64_t correlation_id;
 } pending_signal_t;
 
 namespace profiler {
@@ -71,9 +72,9 @@ class Profiler {
                            rocmtools::profiling_context_t* context, uint64_t session_data_count,
                            hsa_ven_amd_aqlprofile_profile_t* profile,
                            rocprofiler_kernel_properties_t kernel_properties, uint32_t thread_id,
-                           uint64_t queue_index);
+                           uint64_t queue_index, uint64_t correlation_id);
 
-  const std::vector<pending_signal_t>& GetPendingSignals(uint32_t writer_id);
+  const std::vector<pending_signal_t*>& GetPendingSignals(uint32_t writer_id);
   bool CheckPendingSignalsIsEmpty();
 
   void AddCounterName(rocprofiler_counter_id_t handler, std::string counter_name);
@@ -97,7 +98,7 @@ class Profiler {
   rocprofiler_session_id_t session_id_;
 
   std::mutex sessions_pending_signals_lock_;
-  std::map<uint32_t, std::vector<pending_signal_t>> sessions_pending_signals_;
+  std::map<uint32_t, std::vector<pending_signal_t*>>* sessions_pending_signals_;
 };
 
 }  // namespace profiler
