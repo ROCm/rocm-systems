@@ -41,13 +41,13 @@ THE SOFTWARE.
  *
  * \section introduction Introduction
  *
- * ROCProfiler library, GPU Applications Profiling/Tracing APIs.
- * The API provides functionality for profiling GPU applications in kernel and
- * application and user mode and also with no replay mode at all and it
- * provides the records pool support with an easy sequence of calls, so the
- * user can be able to profile and trace in easy small steps, our samples code
- * can give good examples of how to use the API calls for both profiling and
- * tracing
+ * The ROCProfiler library provides GPU Applications Profiling/Tracing APIs.
+ * The API offers functionality for profiling GPU applications in kernel,
+ * application and user mode. It also supports no replay mode and provides
+ * the records pool support through a simple sequence of calls. This enables
+ * users to profile and trace in easy small steps. Our samples code provides
+ * good examples on how to use the API calls for both profiling and
+ * tracing.
  *
  * This document is going to discuss the following:
  * 1. @ref symbol_versions_group
@@ -150,7 +150,7 @@ extern "C" {
  * Version information about the interface and the associated installed
  * library.
  *
- * The semantic version of the interface following semver.org rules. A client
+ * The semantic version of the interface following <https://semver.org> rules. A client
  * that uses this interface is only compatible with the installed library if
  * the major version numbers match and the interface minor version number is
  * less than or equal to the installed library minor version number.
@@ -423,9 +423,8 @@ typedef struct {
  * @param[out] timestamp The system clock timestamp in nano seconds.
  * @retval ::ROCPROFILER_STATUS_SUCCESS The function has been executed
  * successfully.
- * @retval ::ROCPROFILER_STATUS_ERROR_TIMESTAMP_NOT_APPLICABLE The function
- * failed to get the timestamp using HSA Function.
- *
+ * @retval ::ROCPROFILER_STATUS_ERROR_TIMESTAMP_NOT_APPLICABLE <br />
+ * The function failed to get the timestamp using HSA Function.
  */
 ROCPROFILER_API rocprofiler_status_t rocprofiler_get_timestamp(rocprofiler_timestamp_t* timestamp)
     ROCPROFILER_VERSION_9_0;
@@ -559,12 +558,12 @@ typedef enum {
  * @param[in] kind Information kind requested by the user
  * @param[in] agent_id Agent ID
  * @param[out] data_size Size of the information data output
- * @retval ::ROCPROFILER_STATUS_SUCCESS, if the information was found
- * @retval ::ROCPROFILER_STATUS_ERROR_NOT_INITIALIZED, if rocprofiler_initialize
+ * @retval ::ROCPROFILER_STATUS_SUCCESS  if the information was found
+ * @retval ::ROCPROFILER_STATUS_ERROR_NOT_INITIALIZED  if rocprofiler_initialize
  * wasn't called before or if rocprofiler_finalize is called
- * @retval ::ROCPROFILER_STATUS_ERROR_AGENT_NOT_FOUND, if the agent was not found
+ * @retval ::ROCPROFILER_STATUS_ERROR_AGENT_NOT_FOUND <br>, if the agent was not found
  * in the saved agents
- * @retval ::ROCPROFILER_STATUS_ERROR_AGENT_INFORMATION_MISSING, if the agent
+ * @retval ::ROCPROFILER_STATUS_ERROR_AGENT_INFORMATION_MISSING \n if the agent
  * was found in the saved agents but the required information is missing
  */
 ROCPROFILER_API rocprofiler_status_t rocprofiler_query_agent_info_size(
@@ -581,11 +580,11 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_query_agent_info_size(
  * @param[in] agent_id Agent ID
  * @param[out] data_size Size of the information data output
  * @retval ::ROCPROFILER_STATUS_SUCCESS, if the information was found
- * @retval ::ROCPROFILER_STATUS_ERROR_NOT_INITIALIZED, if rocprofiler_initialize
+ * @retval ::ROCPROFILER_STATUS_ERROR_NOT_INITIALIZED <br> if rocprofiler_initialize
  * wasn't called before or if rocprofiler_finalize is called
- * @retval ::ROCPROFILER_STATUS_ERROR_AGENT_NOT_FOUND, if the agent was not found
+ * @retval ::ROCPROFILER_STATUS_ERROR_AGENT_NOT_FOUND <br> if the agent was not found
  * in the saved agents
- * @retval ::ROCPROFILER_STATUS_ERROR_AGENT_INFORMATION_MISSING, if the agent
+ * @retval ::ROCPROFILER_STATUS_ERROR_AGENT_INFORMATION_MISSING \n if the agent
  * was found in the saved agents but the required information is missing
  */
 ROCPROFILER_API rocprofiler_status_t
@@ -632,13 +631,13 @@ typedef enum {
  * @param[in] kind Information kind requested by the user
  * @param[in] agent_id Queue ID
  * @param[out] data_size Size of the information data output
- * @retval ::ROCPROFILER_STATUS_SUCCESS, if the information was found
- * @retval ::ROCPROFILER_STATUS_ERROR_NOT_INITIALIZED, if rocprofiler_initialize
+ * @retval ::ROCPROFILER_STATUS_SUCCESS if the information was found
+ * @retval ::ROCPROFILER_STATUS_ERROR_NOT_INITIALIZED if rocprofiler_initialize
  * wasn't called before or if rocprofiler_finalize is called
- * @retval ::ROCPROFILER_STATUS_ERROR_QUEUE_NOT_FOUND, if the queue was not found
+ * @retval ::ROCPROFILER_STATUS_ERROR_QUEUE_NOT_FOUND \n if the queue was not found
  * in the saved agents
- * @retval ::ROCPROFILER_STATUS_ERROR_QUEUE_INFORMATION_MISSING, if the queue
- * was found in the saved queues but the required information is missing
+ * @retval ::ROCPROFILER_STATUS_ERROR_QUEUE_INFORMATION_MISSING \n
+ * if the queue was found in the saved queues but the required information is missing
  */
 ROCPROFILER_API rocprofiler_status_t rocprofiler_query_queue_info_size(
     rocprofiler_queue_info_kind_t kind, rocprofiler_queue_id_t agent_id,
@@ -656,9 +655,9 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_query_queue_info_size(
  * @retval ::ROCPROFILER_STATUS_SUCCESS, if the information was found
  * @retval ::ROCPROFILER_STATUS_ERROR_NOT_INITIALIZED, if rocprofiler_initialize
  * wasn't called before or if rocprofiler_finalize is called
- * @retval ::ROCPROFILER_STATUS_ERROR_QUEUE_NOT_FOUND, if the queue was not found
+ * @retval ::ROCPROFILER_STATUS_ERROR_QUEUE_NOT_FOUND \n if the queue was not found
  * in the saved agents
- * @retval ::ROCPROFILER_STATUS_ERROR_QUEUE_INFORMATION_MISSING, if the queue
+ * @retval ::ROCPROFILER_STATUS_ERROR_QUEUE_INFORMATION_MISSING \n if the queue
  * was found in the saved agents but the required information is missing
  */
 ROCPROFILER_API rocprofiler_status_t
@@ -706,9 +705,9 @@ typedef enum {
  * @retval ::ROCPROFILER_STATUS_SUCCESS, if the information was found
  * @retval ::ROCPROFILER_STATUS_ERROR_NOT_INITIALIZED, if rocprofiler_initialize
  * wasn't called before or if rocprofiler_finalize is called
- * @retval ::ROCPROFILER_STATUS_ERROR_KERNEL_NOT_FOUND, if the kernel was not
+ * @retval ::ROCPROFILER_STATUS_ERROR_KERNEL_NOT_FOUND \n if the kernel was not
  * found in the saved kernels
- * @retval ::ROCPROFILER_STATUS_ERROR_KERNEL_INFORMATION_MISSING, if the kernel
+ * @retval ::ROCPROFILER_STATUS_ERROR_KERNEL_INFORMATION_MISSING \n if the kernel
  * was found in the saved counters but the required information is missing
  */
 ROCPROFILER_API rocprofiler_status_t rocprofiler_query_kernel_info_size(
@@ -727,9 +726,9 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_query_kernel_info_size(
  * @retval ::ROCPROFILER_STATUS_SUCCESS, if the information was found
  * @retval ::ROCPROFILER_STATUS_ERROR_NOT_INITIALIZED, if rocprofiler_initialize
  * wasn't called before or if rocprofiler_finalize is called
- * @retval ::ROCPROFILER_STATUS_ERROR_KERNEL_NOT_FOUND, if the kernel was not
+ * @retval ::ROCPROFILER_STATUS_ERROR_KERNEL_NOT_FOUND \n if the kernel was not
  * found in the saved kernels
- * @retval ::ROCPROFILER_STATUS_ERROR_KERNEL_INFORMATION_MISSING, if the kernel
+ * @retval ::ROCPROFILER_STATUS_ERROR_KERNEL_INFORMATION_MISSING \n if the kernel
  * was found in the saved kernels but the required information is missing
  */
 ROCPROFILER_API rocprofiler_status_t rocprofiler_query_kernel_info(
@@ -826,11 +825,11 @@ typedef enum {
  * @param[in] counter_id Counter ID
  * @param[out] data_size Counter Information Data size
  * @retval ::ROCPROFILER_STATUS_SUCCESS, if the information was found
- * @retval ::ROCPROFILER_STATUS_ERROR_NOT_INITIALIZED, if rocprofiler_initialize
+ * @retval ::ROCPROFILER_STATUS_ERROR_NOT_INITIALIZED \n  if rocprofiler_initialize
  * wasn't called before or if rocprofiler_finalize is called
- * @retval ::ROCPROFILER_STATUS_ERROR_COUNTER_NOT_FOUND, if the counter was not
+ * @retval ::ROCPROFILER_STATUS_ERROR_COUNTER_NOT_FOUND \n if the counter was not
  * found in the saved counters
- * @retval ::ROCPROFILER_STATUS_ERROR_COUNTER_INFORMATION_MISSING, if the counter
+ * @retval ::ROCPROFILER_STATUS_ERROR_COUNTER_INFORMATION_MISSING \n if the counter
  * was found in the saved counters but the required information is missing
  */
 ROCPROFILER_API rocprofiler_status_t rocprofiler_query_counter_info_size(
@@ -848,11 +847,11 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_query_counter_info_size(
  * @param[in] counter_id Counter ID
  * @param[out] data Information Data
  * @retval ::ROCPROFILER_STATUS_SUCCESS, if the information was found
- * @retval ::ROCPROFILER_STATUS_ERROR_NOT_INITIALIZED, if rocprofiler_initialize
+ * @retval ::ROCPROFILER_STATUS_ERROR_NOT_INITIALIZED \n if rocprofiler_initialize
  * wasn't called before or if rocprofiler_finalize is called
- * @retval ::ROCPROFILER_STATUS_ERROR_COUNTER_NOT_FOUND, if the counter was not
+ * @retval ::ROCPROFILER_STATUS_ERROR_COUNTER_NOT_FOUND \n if the counter was not
  * found in the saved counters
- * @retval ::ROCPROFILER_STATUS_ERROR_COUNTER_INFORMATION_MISSING, if the counter
+ * @retval ::ROCPROFILER_STATUS_ERROR_COUNTER_INFORMATION_MISSING \n if the counter
  * was found in the saved counters but the required information is missing
  */
 ROCPROFILER_API rocprofiler_status_t rocprofiler_query_counter_info(
@@ -1236,12 +1235,12 @@ typedef enum {
  * @retval ::ROCPROFILER_STATUS_SUCCESS, if the information was found
  * @retval ::ROCPROFILER_STATUS_ERROR_NOT_INITIALIZED, if rocprofiler_initialize
  * wasn't called before or if rocprofiler_finalize is called
- * @retval ::ROCPROFILER_STATUS_ERROR_TRACER_API_DATA_NOT_FOUND, if the api data
+ * @retval ::ROCPROFILER_STATUS_ERROR_TRACER_API_DATA_NOT_FOUND \n if the api data
  * was not found in the saved api data
- * @retval ::ROCPROFILER_STATUS_ERROR_TRACER_API_DATA_INFORMATION_MISSING, if the
+ * @retval ::ROCPROFILER_STATUS_ERROR_TRACER_API_DATA_INFORMATION_MISSING \n  if the
  * api data was found in the saved data but the required information is
  * missing
- * @retval ::ROCPROFILER_STATUS_ERROR_INCORRECT_DOMAIN if the user sent a handle
+ * @retval ::ROCPROFILER_STATUS_ERROR_INCORRECT_DOMAIN \n if the user sent a handle
  * that is not related to the requested domain
  */
 ROCPROFILER_API rocprofiler_status_t rocprofiler_query_roctx_tracer_api_data_info_size(
@@ -1264,12 +1263,12 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_query_roctx_tracer_api_data_inf
  * @retval ::ROCPROFILER_STATUS_SUCCESS, if the information was found
  * @retval ::ROCPROFILER_STATUS_ERROR_NOT_INITIALIZED, if rocprofiler_initialize
  * wasn't called before or if rocprofiler_finalize is called
- * @retval ::ROCPROFILER_STATUS_ERROR_TRACER_API_DATA_NOT_FOUND, if the api data
+ * @retval ::ROCPROFILER_STATUS_ERROR_TRACER_API_DATA_NOT_FOUND \n  if the api data
  * was not found in the saved api data
- * @retval ::ROCPROFILER_STATUS_ERROR_TRACER_API_DATA_INFORMATION_MISSING, if the
+ * @retval ::ROCPROFILER_STATUS_ERROR_TRACER_API_DATA_INFORMATION_MISSING \n  if the
  * api data was found in the saved data but the required information is
  * missing
- * @retval ::ROCPROFILER_STATUS_ERROR_INCORRECT_DOMAIN if the user sent a handle
+ * @retval ::ROCPROFILER_STATUS_ERROR_INCORRECT_DOMAIN \n if the user sent a handle
  * that is not related to the requested domain
  */
 ROCPROFILER_API rocprofiler_status_t rocprofiler_query_roctx_tracer_api_data_info(
@@ -1325,12 +1324,12 @@ typedef enum {
  * @retval ::ROCPROFILER_STATUS_SUCCESS, if the information was found
  * @retval ::ROCPROFILER_STATUS_ERROR_NOT_INITIALIZED, if rocprofiler_initialize
  * wasn't called before or if rocprofiler_finalize is called
- * @retval ::ROCPROFILER_STATUS_ERROR_TRACER_API_DATA_NOT_FOUND, if the api data
+ * @retval ::ROCPROFILER_STATUS_ERROR_TRACER_API_DATA_NOT_FOUND \n  if the api data
  * was not found in the saved api data
- * @retval ::ROCPROFILER_STATUS_ERROR_TRACER_API_DATA_INFORMATION_MISSING, if the
+ * @retval ::ROCPROFILER_STATUS_ERROR_TRACER_API_DATA_INFORMATION_MISSING \n if the
  * api data was found in the saved data but the required information is
  * missing
- * @retval ::ROCPROFILER_STATUS_ERROR_INCORRECT_DOMAIN if the user sent a handle
+ * @retval ::ROCPROFILER_STATUS_ERROR_INCORRECT_DOMAIN \n if the user sent a handle
  * that is not related to the requested domain
  */
 ROCPROFILER_API rocprofiler_status_t rocprofiler_query_hsa_tracer_api_data_info_size(
@@ -1353,12 +1352,12 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_query_hsa_tracer_api_data_info_
  * @retval ::ROCPROFILER_STATUS_SUCCESS, if the information was found
  * @retval ::ROCPROFILER_STATUS_ERROR_NOT_INITIALIZED, if rocprofiler_initialize
  * wasn't called before or if rocprofiler_finalize is called
- * @retval ::ROCPROFILER_STATUS_ERROR_TRACER_API_DATA_NOT_FOUND, if the api data
+ * @retval ::ROCPROFILER_STATUS_ERROR_TRACER_API_DATA_NOT_FOUND \n if the api data
  * was not found in the saved api data
- * @retval ::ROCPROFILER_STATUS_ERROR_TRACER_API_DATA_INFORMATION_MISSING, if the
+ * @retval ::ROCPROFILER_STATUS_ERROR_TRACER_API_DATA_INFORMATION_MISSING \n  if the
  * api data was found in the saved data but the required information is
  * missing
- * @retval ::ROCPROFILER_STATUS_ERROR_INCORRECT_DOMAIN if the user sent a handle
+ * @retval ::ROCPROFILER_STATUS_ERROR_INCORRECT_DOMAIN \n if the user sent a handle
  * that is not related to the requested domain
  */
 ROCPROFILER_API rocprofiler_status_t rocprofiler_query_hsa_tracer_api_data_info(
@@ -1438,12 +1437,12 @@ typedef enum {
  * @retval ::ROCPROFILER_STATUS_SUCCESS, if the information was found
  * @retval ::ROCPROFILER_STATUS_ERROR_NOT_INITIALIZED, if rocprofiler_initialize
  * wasn't called before or if rocprofiler_finalize is called
- * @retval ::ROCPROFILER_STATUS_ERROR_TRACER_API_DATA_NOT_FOUND, if the api data
+ * @retval ::ROCPROFILER_STATUS_ERROR_TRACER_API_DATA_NOT_FOUND \n if the api data
  * was not found in the saved api data
- * @retval ::ROCPROFILER_STATUS_ERROR_TRACER_API_DATA_INFORMATION_MISSING, if the
+ * @retval ::ROCPROFILER_STATUS_ERROR_TRACER_API_DATA_INFORMATION_MISSING \n if the
  * api data was found in the saved data but the required information is
  * missing
- * @retval ::ROCPROFILER_STATUS_ERROR_INCORRECT_DOMAIN if the user sent a handle
+ * @retval ::ROCPROFILER_STATUS_ERROR_INCORRECT_DOMAIN \n if the user sent a handle
  * that is not related to the requested domain
  */
 ROCPROFILER_API rocprofiler_status_t rocprofiler_query_hip_tracer_api_data_info_size(
@@ -1465,12 +1464,12 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_query_hip_tracer_api_data_info_
  * @retval ::ROCPROFILER_STATUS_SUCCESS, if the information was found
  * @retval ::ROCPROFILER_STATUS_ERROR_NOT_INITIALIZED, if rocprofiler_initialize
  * wasn't called before or if rocprofiler_finalize is called
- * @retval ::ROCPROFILER_STATUS_ERROR_TRACER_API_DATA_NOT_FOUND, if the api data
+ * @retval ::ROCPROFILER_STATUS_ERROR_TRACER_API_DATA_NOT_FOUND \n if the api data
  * was not found in the saved api data
- * @retval ::ROCPROFILER_STATUS_ERROR_TRACER_API_DATA_INFORMATION_MISSING, if the
+ * @retval ::ROCPROFILER_STATUS_ERROR_TRACER_API_DATA_INFORMATION_MISSING \n if the
  * api data was found in the saved data but the required information is
  * missing
- * @retval ::ROCPROFILER_STATUS_ERROR_INCORRECT_DOMAIN if the user sent a handle
+ * @retval ::ROCPROFILER_STATUS_ERROR_INCORRECT_DOMAIN \n if the user sent a handle
  * that is not related to the requested domain
  */
 ROCPROFILER_API rocprofiler_status_t rocprofiler_query_hip_tracer_api_data_info(
@@ -1686,9 +1685,9 @@ typedef void (*rocprofiler_buffer_callback_t)(const rocprofiler_record_header_t*
  * successfully.
  * @retval ::ROCPROFILER_STATUS_ERROR_NOT_INITIALIZED, if rocprofiler_initialize
  * wasn't called before or if rocprofiler_finalize is called
- * @retval ::ROCPROFILER_STATUS_ERROR_SESSION_NOT_FOUND may return if
+ * @retval ::ROCPROFILER_STATUS_ERROR_SESSION_NOT_FOUND \n may return if
  * the session is not found
- * @retval ::ROCPROFILER_STATUS_ERROR_CORRUPTED_SESSION_BUFFER may return if
+ * @retval ::ROCPROFILER_STATUS_ERROR_CORRUPTED_SESSION_BUFFER \n may return if
  * the session buffer is corrupted
  */
 ROCPROFILER_API rocprofiler_status_t rocprofiler_flush_data(
@@ -1709,7 +1708,7 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_flush_data(
  * successfully.
  * @retval ::ROCPROFILER_STATUS_ERROR_NOT_INITIALIZED, if rocprofiler_initialize
  * wasn't called before or if rocprofiler_finalize is called
- * @retval ::ROCPROFILER_STATUS_ERROR_RECORD_CORRUPTED if the function couldn't
+ * @retval ::ROCPROFILER_STATUS_ERROR_RECORD_CORRUPTED \n if the function couldn't
  * get the next record because of corrupted data reported by the previous
  * record
  */
@@ -1793,7 +1792,7 @@ rocprofiler_create_session(rocprofiler_replay_mode_t replay_mode,
  * successfully
  * @retval ::ROCPROFILER_STATUS_ERROR_NOT_INITIALIZED, if rocprofiler_initialize
  * wasn't called before or if rocprofiler_finalize is called
- * @retval ::ROCPROFILER_STATUS_ERROR_SESSION_NOT_FOUND may return if
+ * @retval ::ROCPROFILER_STATUS_ERROR_SESSION_NOT_FOUND \n may return if
  * the session is not found
  */
 ROCPROFILER_API rocprofiler_status_t
@@ -2046,9 +2045,9 @@ typedef union {
  * wasn't called before or if rocprofiler_finalize is called
  * @retval ::ROCPROFILER_STATUS_SESSION_NOT_FOUND Couldn't find session
  * associated with the given session identifier
- * @retval ::ROCPROFILER_STATUS_ERROR_SESSION_FILTER_DATA_MISMATCH The session
+ * @retval ::ROCPROFILER_STATUS_ERROR_SESSION_FILTER_DATA_MISMATCH \n The session
  * filter can't accept the given data
- * @retval ::ROCPROFILER_STATUS_ERROR_FILTER_DATA_CORRUPTED Data can't be read or
+ * @retval ::ROCPROFILER_STATUS_ERROR_FILTER_DATA_CORRUPTED \n Data can't be read or
  * corrupted
  */
 ROCPROFILER_API rocprofiler_status_t rocprofiler_create_filter(
@@ -2106,7 +2105,7 @@ typedef void (*rocprofiler_sync_callback_t)(rocprofiler_record_tracer_t record,
  * wasn't called before or if rocprofiler_finalize is called
  * @retval ::ROCPROFILER_STATUS_SESSION_NOT_FOUND, Couldn't find session
  * associated with the given session identifier
- * @retval ::ROCPROFILER_STATUS_ERROR_FILTER_NOT_SUPPORTED, if the filter is not
+ * @retval ::ROCPROFILER_STATUS_ERROR_FILTER_NOT_SUPPORTED \n if the filter is not
  * related to API tracing
  */
 ROCPROFILER_API rocprofiler_status_t rocprofiler_set_api_trace_sync_callback(
@@ -2248,9 +2247,9 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_destroy_buffer(
  * successfully.
  * @retval ::ROCPROFILER_STATUS_ERROR_NOT_INITIALIZED, if rocprofiler_initialize
  * wasn't called before or if rocprofiler_finalize is called
- * @retval ::ROCPROFILER_STATUS_ERROR_SESSION_MODE_FILTER_MISMATCH The session
+ * @retval ::ROCPROFILER_STATUS_ERROR_SESSION_MODE_FILTER_MISMATCH \n The session
  * doesn't have the required mode for that filter type
- * @retval ::ROCPROFILER_STATUS_ERROR_FILTER_DATA_CORRUPTED Data can't be read or
+ * @retval ::ROCPROFILER_STATUS_ERROR_FILTER_DATA_CORRUPTED \n Data can't be read or
  * corrupted
  * @retval ::ROCPROFILER_STATUS_ERROR_INCORRECT_SIZE If the size is less than one
  * potential record size
@@ -2273,13 +2272,13 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_create_ready_session(
  * successfully
  * @retval ::ROCPROFILER_STATUS_ERROR_NOT_INITIALIZED, if rocprofiler_initialize
  * wasn't called before or if rocprofiler_finalize is called
- * @retval ::ROCPROFILER_STATUS_ERROR_SESSION_NOT_FOUND may return if
+ * @retval ::ROCPROFILER_STATUS_ERROR_SESSION_NOT_FOUND \n may return if
  * the session is not found
  * @retval ::ROCPROFILER_STATUS_ERROR_SESSION_MODE_NOT_ADDED if there is no
  * session_mode added
  * @retval ::ROCPROFILER_STATUS_ERROR_MISSING_SESSION_CALLBACK if any
  * session_mode is missing callback set
- * @retval ::ROCPROFILER_STATUS_ERROR_HAS_ACTIVE_SESSION if there is already
+ * @retval ::ROCPROFILER_STATUS_ERROR_HAS_ACTIVE_SESSION \n if there is already
  * active session
  */
 ROCPROFILER_API rocprofiler_status_t rocprofiler_start_session(rocprofiler_session_id_t session_id)
@@ -2293,7 +2292,7 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_start_session(rocprofiler_sessi
  * @param[in] session_id Session ID for the session that will be terminated
  * @retval ::ROCPROFILER_STATUS_SUCCESS The function has been executed
  * successfully
- * @retval ::ROCPROFILER_STATUS_ERROR_SESSION_NOT_FOUND may return if
+ * @retval ::ROCPROFILER_STATUS_ERROR_SESSION_NOT_FOUND \n may return if
  * the session is not found
  * @retval ::ROCPROFILER_STATUS_ERROR_SESSION_NOT_ACTIVE if the session is not
  * active
@@ -2317,7 +2316,7 @@ rocprofiler_terminate_session(rocprofiler_session_id_t session_id) ROCPROFILER_V
  * successfully.
  * @retval ::ROCPROFILER_STATUS_ERROR_NOT_INITIALIZED, if rocprofiler_initialize
  * wasn't called before or if rocprofiler_finalize is called
- * @retval ::ROCPROFILER_STATUS_ERROR_CORRUPTED_LABEL_DATA may return if
+ * @retval ::ROCPROFILER_STATUS_ERROR_CORRUPTED_LABEL_DATA \n may return if
  * the label pointer can't be read by the API
  */
 ROCPROFILER_API rocprofiler_status_t rocprofiler_push_range(const char* label)
@@ -2354,7 +2353,7 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_pop_range() ROCPROFILER_VERSION
  * successfully.
  * @retval ::ROCPROFILER_STATUS_ERROR_NOT_INITIALIZED, if rocprofiler_initialize
  * wasn't called before or if rocprofiler_finalize is called
- * @retval ::ROCPROFILER_STATUS_ERROR_SESSION_NOT_FOUND If the no active session
+ * @retval ::ROCPROFILER_STATUS_ERROR_SESSION_NOT_FOUND \n  If the no active session
  * found
  */
 ROCPROFILER_API rocprofiler_status_t rocprofiler_start_replay_pass() ROCPROFILER_VERSION_9_0;
@@ -2367,7 +2366,7 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_start_replay_pass() ROCPROFILER
  * successfully.
  * @retval ::ROCPROFILER_STATUS_ERROR_NOT_INITIALIZED, if rocprofiler_initialize
  * wasn't called before or if rocprofiler_finalize is called
- * @retval ::ROCPROFILER_STATUS_ERROR_PASS_NOT_STARTED if there is no pass
+ * @retval ::ROCPROFILER_STATUS_ERROR_PASS_NOT_STARTED \n if there is no pass
  * started before this call
  */
 ROCPROFILER_API rocprofiler_status_t rocprofiler_end_replay_pass() ROCPROFILER_VERSION_9_0;

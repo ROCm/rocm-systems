@@ -6,7 +6,7 @@ This command line tool is implemented as a script which is setting up the enviro
 ## 2. Profiling Modes
 ‘rocprof’ can be used for GPU profiling using HW counters and application tracing
 ### 2.1. GPU profiling
-GPU profiling is controlled with input file which defines a list of metrics/counters and a profiling scope. An input file is provided using option ‘-i <input file>’. Output CSV file with a line per submitted kernel is generated. Each line has kernel name, kernel parameters and counter values. By option ‘—stats’ the kernel execution stats can be generated in CSV format. Currently profiling has limitation of serializing submitted kernels.
+GPU profiling is controlled with input file which defines a list of metrics/counters and a profiling scope. An input file is provided using option ‘-i [input file]’. Output CSV file with a line per submitted kernel is generated. Each line has kernel name, kernel parameters and counter values. By option ‘—stats’ the kernel execution stats can be generated in CSV format. Currently profiling has limitation of serializing submitted kernels.
 An example of input file:
 ```
    # Perf counters group 1

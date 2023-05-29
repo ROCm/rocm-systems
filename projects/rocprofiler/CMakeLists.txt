@@ -513,9 +513,9 @@ endif()
 find_package(Doxygen)
 
 if(DOXYGEN_FOUND)
-  # # Set input and output files
-  set(DOXYGEN_IN ${CMAKE_CURRENT_SOURCE_DIR}/doc/Doxyfile.in)
-  set(DOXYGEN_OUT ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile)
+  # # Set input and output files for API Document
+  set(DOXYGEN_IN ${CMAKE_CURRENT_SOURCE_DIR}/doc/Doxyfile_API.in)
+  set(DOXYGEN_OUT ${CMAKE_CURRENT_BINARY_DIR}/Doxyfile_API)
 
   # # Request to configure the file
   configure_file(${DOXYGEN_IN} ${DOXYGEN_OUT} @ONLY)
@@ -529,7 +529,7 @@ if(DOXYGEN_FOUND)
     ${DOXYGEN_IN}
     DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/include/rocprofiler/v2/rocprofiler_plugin.h
             ${CMAKE_CURRENT_SOURCE_DIR}/include/rocprofiler/v2/rocprofiler.h
-    COMMENT "Generating documentation")
+    COMMENT "Generating API documentation")
 
   add_custom_target(
     doc DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/doc/html/index.html
@@ -538,7 +538,7 @@ if(DOXYGEN_FOUND)
   install(
     FILES "${CMAKE_CURRENT_BINARY_DIR}/doc/latex/refman.pdf"
     DESTINATION ${CMAKE_INSTALL_DOCDIR}
-    RENAME "${PROJECT_NAME}.pdf"
+    RENAME "${PROJECT_NAME}v2_api_spec.pdf"
     OPTIONAL
     COMPONENT docs)
 
@@ -547,5 +547,41 @@ if(DOXYGEN_FOUND)
     DESTINATION ${CMAKE_INSTALL_DOCDIR}/html
     OPTIONAL
     COMPONENT docs)
+
+  # # Set input and output files for Tools Document
+  set(DOXYGEN_IN ${CMAKE_CURRENT_SOURCE_DIR}/doc/Doxyfile_Tool.in)
+  set(DOXYGEN_OUT ${CMAKE_CURRENT_BINARY_DIR}/tooldoc/Doxyfile_Tool)
+
+  # # Request to configure the file
+  configure_file(${DOXYGEN_IN} ${DOXYGEN_OUT} @ONLY)
+
+  add_custom_command(
+    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/tooldoc/html/index.html
+           ${CMAKE_CURRENT_BINARY_DIR}/tooldoc/latex/refman.pdf
+    COMMAND ${DOXYGEN_EXECUTABLE} ${DOXYGEN_OUT}
+    COMMAND make -C ${CMAKE_CURRENT_BINARY_DIR}/tooldoc/latex pdf
+    MAIN_DEPENDENCY ${DOXYGEN_OUT}
+    ${DOXYGEN_IN}
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/doc/rocprofv2_tool.md
+    COMMENT "Generating Tools documentation")
+
+  add_custom_target(
+    doc_tool DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/tooldoc/html/index.html
+                ${CMAKE_CURRENT_BINARY_DIR}/tooldoc/latex/refman.pdf)
+
+  install(
+    FILES "${CMAKE_CURRENT_BINARY_DIR}/tooldoc/latex/refman.pdf"
+    DESTINATION ${CMAKE_INSTALL_DOCDIR}
+    RENAME "${PROJECT_NAME}v2_tool.pdf"
+    OPTIONAL
+    COMPONENT docs)
+
+  install(
+    DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/tooldoc/html/"
+    DESTINATION ${CMAKE_INSTALL_DOCDIR}/html
+    OPTIONAL
+    COMPONENT docs)
+
+  add_dependencies(doc doc_tool)
 endif()
 
