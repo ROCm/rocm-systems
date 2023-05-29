@@ -429,7 +429,7 @@ void sync_api_trace_callback(rocprofiler_record_tracer_t tracer_record,
       rocprofiler_timestamp_t timestamp;
       CHECK_ROCPROFILER(rocprofiler_get_timestamp(&timestamp));
       tracer_record.timestamps = rocprofiler_record_header_timestamp_t{
-          .begin = rocprofiler_timestamp_t{reinterpret_cast<uint64_t>(hip_api_data->phase_data)},
+          .begin = rocprofiler_timestamp_t{*hip_api_data->phase_data},
           .end = timestamp};
     }
     hip_api_trace_entry_t& entry = hip_api_buffer.Emplace(
@@ -455,7 +455,7 @@ void sync_api_trace_callback(rocprofiler_record_tracer_t tracer_record,
       rocprofiler_timestamp_t timestamp;
       CHECK_ROCPROFILER(rocprofiler_get_timestamp(&timestamp));
       tracer_record.timestamps = rocprofiler_record_header_timestamp_t{
-          .begin = rocprofiler_timestamp_t{reinterpret_cast<uint64_t>(hsa_api_data->phase_data)},
+          .begin = rocprofiler_timestamp_t{*hsa_api_data->phase_data},
           .end = timestamp};
     }
     hsa_api_trace_entry_t& entry = hsa_api_buffer.Emplace(tracer_record, hsa_api_data);
