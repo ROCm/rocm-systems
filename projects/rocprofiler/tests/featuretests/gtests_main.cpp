@@ -20,7 +20,7 @@ int main(int argc, char** argv) {
         std::string gfx_name = gpu_name;
         if (gfx_name.find("gfx10") != std::string::npos) {
           testing::GTEST_FLAG(filter) =
-              "-ATTCollection.*:OpenMPTest.*:-ProfilerSPMTest*:ProfilerMQTest:*ProfilerMPTest*:"
+              "-ATTCollection.*:OpenMPTest.*:ProfilerSPMTest*:ProfilerMQTest:*ProfilerMPTest*:"
               "MPITest*";
         }
         return HSA_STATUS_SUCCESS;
