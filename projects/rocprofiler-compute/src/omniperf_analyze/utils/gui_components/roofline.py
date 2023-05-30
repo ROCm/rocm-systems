@@ -50,7 +50,8 @@ def generate_plots(
         fig = go.Figure()
     plotMode = "lines+text" if is_standalone else "lines"
     line_data = roofline_calc.empirical_roof(roof_info, mem_level, verbose)
-    print("Line data:\n", line_data)
+    if verbose:
+        print("Line data:\n", line_data)
 
     #######################
     # Plot BW Lines
