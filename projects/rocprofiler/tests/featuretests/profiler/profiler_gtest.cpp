@@ -27,6 +27,7 @@ THE SOFTWARE.
 #include <hip/hip_runtime.h>
 #include "rocprofiler.h"
 #include <cstdlib>
+#include <string>
 #include <thread>
 #include <array>
 
@@ -815,8 +816,23 @@ TEST_F(ATTCollection, WhenRunningATTItCollectsTraceData) {
 // empty kernel
 __global__ void kernel() {}
 
+void __attribute__((constructor)) globalsetting() {
+  init_test_path();
+  std::string app_path = GetRunningPath(running_path);
+  std::stringstream gfx_path;
+  gfx_path << app_path << metrics_path;
+  std::cout << gfx_path.str() << std::endl;
+  setenv("ROCPROFILER_METRICS_PATH", gfx_path.str().c_str(), true);
+}
+
 class ProfilerAPITest : public ::testing::Test {
  protected:
+  void SetUp() {
+    std::string app_path = GetRunningPath(running_path);
+    std::stringstream gfx_path;
+    gfx_path << app_path << metrics_path;
+    setenv("ROCPROFILER_METRICS_PATH", gfx_path.str().c_str(), true);
+  }
   // function to check profiler API status
   static void CheckApi(rocprofiler_status_t status) {
     ASSERT_EQ(status, ROCPROFILER_STATUS_SUCCESS);
@@ -862,12 +878,6 @@ class ProfilerAPITest : public ::testing::Test {
 TEST_F(ProfilerAPITest, WhenRunningMultipleThreadsProfilerAPIsWorkFine) {
   // set global path
   init_test_path();
-
-  std::string app_path = GetRunningPath(running_path);
-  std::stringstream gfx_path;
-  gfx_path << app_path << metrics_path;
-
-  setenv("ROCPROFILER_METRICS_PATH", gfx_path.str().c_str(), true);
 
   // Get the system cores
   int num_cpu_cores = GetNumberOfCores();
