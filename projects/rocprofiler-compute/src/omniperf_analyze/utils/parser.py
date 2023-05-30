@@ -468,7 +468,7 @@ def eval_metric(dfs, dfs_type, sys_info, soc_spec, raw_pmc_df, debug):
     """
 
     # confirm no illogical counter values
-    if (raw_pmc_df['pmc_perf']['GRBM_GUI_ACTIVE'] == 0).any():
+    if (raw_pmc_df["pmc_perf"]["GRBM_GUI_ACTIVE"] == 0).any():
         print("WARNING: Dectected GRBM_GUI_ACTIVE == 0\nHaulting execution.")
         sys.exit(1)
 
