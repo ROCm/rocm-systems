@@ -209,6 +209,8 @@ The resulting `a.out` will depend on
 
 ### Optimized
 - Improved Test Suite
+### Changed
+- ATT analysis will not run by default. For ATT to have the same behaviour as 5.5, use --plugin att <as.s> --mode network
 ### Added
 - 'end_time' need to be disabled in roctx_trace.txt
 - support for hsa_amd_memory_async_copy_on_engine API function trace
@@ -231,3 +233,4 @@ The resulting `a.out` will depend on
 - Samples are fixed to show the new usage of phases.
 - Plugin option validates the plugin names.
 - Fixing rocsys, for rocsys options, rocsys -h can be called
+
