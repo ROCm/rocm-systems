@@ -439,11 +439,11 @@ void sync_api_trace_callback(rocprofiler_record_tracer_t tracer_record,
   if (tracer_record.domain == ACTIVITY_DOMAIN_HSA_API) {
     char* data = nullptr;
     size_t size = 0;
-    CHECK_ROCPROFILER(rocprofiler_query_hip_tracer_api_data_info_size(
-        session_id, ROCPROFILER_HIP_API_DATA, tracer_record.api_data_handle,
+    CHECK_ROCPROFILER(rocprofiler_query_hsa_tracer_api_data_info_size(
+        session_id, ROCPROFILER_HSA_API_DATA, tracer_record.api_data_handle,
         tracer_record.operation_id, &size));
-    CHECK_ROCPROFILER(rocprofiler_query_hip_tracer_api_data_info(
-        session_id, ROCPROFILER_HIP_API_DATA, tracer_record.api_data_handle,
+    CHECK_ROCPROFILER(rocprofiler_query_hsa_tracer_api_data_info(
+        session_id, ROCPROFILER_HSA_API_DATA, tracer_record.api_data_handle,
         tracer_record.operation_id, &data));
     hsa_api_data_t* hsa_api_data = reinterpret_cast<hsa_api_data_t*>(data);
     if (tracer_record.phase == ROCPROFILER_PHASE_ENTER) {
