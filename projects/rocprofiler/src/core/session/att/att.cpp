@@ -21,7 +21,7 @@
 #include "att.h"
 #include <cassert>
 
-namespace rocmtools {
+namespace rocprofiler {
 
 namespace att {
 
@@ -54,4 +54,4 @@ const std::vector<att_pending_signal_t>& AttTracer::GetPendingSignals(uint32_t w
 
 }  // namespace att
 
-}  // namespace rocmtools
+}  // namespace rocprofiler

@@ -35,7 +35,7 @@
 
 #define ASSERTM(exp, msg) assert(((void)msg, exp))
 
-namespace rocmtools {
+namespace rocprofiler {
 namespace hsa_support {
 
 
@@ -59,6 +59,6 @@ void ResetMaps();
 rocprofiler_timestamp_t GetCurrentTimestampNS();
 
 }  // namespace hsa_support
-}  // namespace rocmtools
+}  // namespace rocprofiler
 
 #endif  // SRC_CORE_HSA_HSA_COMMON_H_

@@ -23,7 +23,7 @@
 #include "../../../utils/helper.h"
 #include "pcie_perfmon_registers_mi200.h"
 #include "df_perfmon_registers_mi200.h"
-namespace rocmtools {
+namespace rocprofiler {
 
 namespace mmio {
 
@@ -190,4 +190,4 @@ std::map<decltype(hsa_agent_t::handle), std::vector<MMIO*>> MMIOManager::mmio_in
 
 }  // namespace mmio
 
-}  // namespace rocmtools
+}  // namespace rocprofiler

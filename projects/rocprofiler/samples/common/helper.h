@@ -30,7 +30,7 @@
 #include <cxxabi.h>
 // #include "exception.h"
 
-namespace rocmtools {
+namespace rocprofiler {
 
 std::string string_vprintf(const char* format, va_list va);
 
@@ -69,4 +69,4 @@ bool has_counter_format(std::string const& str);
 // trims the begining of the line for spaces
 std::string left_trim(const std::string& s);
 
-}  // namespace rocmtools
+}  // namespace rocprofiler

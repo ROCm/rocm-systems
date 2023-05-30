@@ -27,13 +27,13 @@
 #include <hsa/hsa.h>
 #include <pciaccess.h>
 
-#include "src/api/rocmtool.h"
+#include "src/api/rocprofiler_singleton.h"
 #include "src/pcsampler/session/pc_sampler.h"
 #include "src/pcsampler/gfxip/gfxip.h"
 #include "src/core/hsa/hsa_common.h"
 #include "src/core/hsa/hsa_support.h"
 
-namespace rocmtools::pc_sampler {
+namespace rocprofiler::pc_sampler {
 
 PCSampler::PCSampler(
  rocprofiler_buffer_id_t buffer_id,
@@ -60,7 +60,7 @@ void PCSampler::Start() {
   using agents_t = std::vector<hsa_agent_t>;
 
   agents_t agents;
-  rocmtools::hsa_support::GetCoreApiTable().hsa_iterate_agents_fn(
+  rocprofiler::hsa_support::GetCoreApiTable().hsa_iterate_agents_fn(
    [](hsa_agent_t agent, void *arg){
      auto &agents = *reinterpret_cast<agents_t *>(arg);
      agents.emplace_back(agent);
@@ -69,7 +69,7 @@ void PCSampler::Start() {
    &agents);
 
   for (const auto &agent : agents) {
-    const auto &ai = rocmtools::hsa_support::GetAgentInfo(agent.handle);
+    const auto &ai = rocprofiler::hsa_support::GetAgentInfo(agent.handle);
     if (ai.getType() != HSA_DEVICE_TYPE_GPU) {
       continue;
     }
@@ -88,7 +88,7 @@ void PCSampler::Stop() {
 }
 
 void PCSampler::AddRecord(rocprofiler_record_pc_sample_t &record) {
-  const auto tool = rocmtools::GetROCMToolObj();
+  const auto tool = rocprofiler::GetROCProfilerSingleton();
   const auto session = tool->GetSession(session_id_);
   const auto buffer = session->GetBuffer(buffer_id_);
 
@@ -116,4 +116,4 @@ void PCSampler::SamplerLoop() {
   }
 }
 
-} // namespace rocmtools::pc_sampler
+} // namespace rocprofiler::pc_sampler

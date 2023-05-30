@@ -39,7 +39,7 @@ THE SOFTWARE.
  * can use this to parse different applications.
  */
 /* --------------------------------------------------------------------------*/
-namespace rocmtools {
+namespace rocprofiler {
 namespace tests {
 namespace utility {
 using countermap = std::map<uint32_t, std::map<uint32_t, std::string>>;
@@ -111,8 +111,8 @@ class CSVParser {
 };
 }  // namespace utility
 }  // namespace tests
-}  // namespace rocmtools
+}  // namespace rocprofiler
 
-using rocmtools::tests::utility::countermap;
-using rocmtools::tests::utility::CSVParser;
+using rocprofiler::tests::utility::countermap;
+using rocprofiler::tests::utility::CSVParser;
 #endif  // TESTS_FEATURETESTS_PROFILER_UTILS_CSV_PARSER_H_

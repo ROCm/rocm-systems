@@ -138,7 +138,7 @@ class RocTxEventRecord final : public TracerEventRecord<barectf_roctx_ctx> {
       : TracerEventRecord<barectf_roctx_ctx>{record, GetRecordBeginClockVal(record)},
         id_{record.operation_id.id},
         msg_{
-            rocmtools::cxx_demangle(reinterpret_cast<const char*>(record.api_data_handle.handle))} {
+            rocprofiler::cxx_demangle(reinterpret_cast<const char*>(record.api_data_handle.handle))} {
   }
 
   void Write(barectf_roctx_ctx& barectf_ctx) const override {
@@ -377,7 +377,7 @@ class HipOpEventRecordBegin final : public ApiOpEventRecord {
 
         if (std::strlen(str) > 1) {
           // Return demangled version.
-          return rocmtools::cxx_demangle(str);
+          return rocprofiler::cxx_demangle(str);
         }
       }
     }
@@ -470,7 +470,7 @@ class ProfilerEventRecord : public BarectfEventRecord<barectf_profiler_ctx> {
     }
 
     // Return truncated and demangled version.
-    return rocmtools::truncate_name(rocmtools::cxx_demangle(kernel_name));
+    return rocprofiler::truncate_name(rocprofiler::cxx_demangle(kernel_name));
   }
 
   // Queries and returns the counter infos of the record `record` and
@@ -668,7 +668,7 @@ void Plugin::HandleTracerRecord(const rocprofiler_record_tracer_t& record,
         hip_api_data_t hip_api_data =
             *reinterpret_cast<const hip_api_data_t*>(record.api_data_handle.handle);
         if (record.name != nullptr)
-          kernel_name = rocmtools::cxx_demangle(std::string(record.name));
+          kernel_name = rocprofiler::cxx_demangle(std::string(record.name));
         else
           kernel_name = "";
         hip_api_tracer_.AddEventRecord(

@@ -885,7 +885,7 @@ TEST_F(ProfilerAPITest, WhenRunningMultipleThreadsProfilerAPIsWorkFine) {
   // create as many threads as number of cores in system
   std::vector<std::thread> threads(num_cpu_cores);
 
-  // inititalize profiler by creating rocmtool object
+  // initialize profiler by creating rocprofiler object
   CheckApi(rocprofiler_initialize());
 
   // Counter Collection with timestamps
@@ -928,7 +928,7 @@ TEST_F(ProfilerAPITest, WhenRunningMultipleThreadsProfilerAPIsWorkFine) {
   // destroy session
   CheckApi(rocprofiler_destroy_session(session_id));
 
-  // finalize profiler by destroying rocmtool object
+  // finalize profiler by destroying rocprofiler object
   CheckApi(rocprofiler_finalize());
 }
 
@@ -1061,7 +1061,7 @@ class ProfilerSPMTest : public ::testing::Test {
 };
 
 TEST_F(ProfilerSPMTest, WhenRunningSPMItCollectsSPMData) {
-  // inititalize rocmtools
+  // initialize rocprofiler
   hsa_init();
   CheckApi(rocprofiler_initialize());
 
@@ -1106,7 +1106,7 @@ TEST_F(ProfilerSPMTest, WhenRunningSPMItCollectsSPMData) {
   // destroy session
   CheckApi(rocprofiler_destroy_session(session_id));
 
-  // finalize spm tracing by destroying rocmtool object
+  // finalize spm tracing by destroying rocprofiler object
   CheckApi(rocprofiler_finalize());
   hsa_shut_down();
 }

@@ -31,7 +31,7 @@
 #include <unistd.h>
 #include <sstream>
 
-namespace rocmtools {
+namespace rocprofiler {
 
 namespace mmio {
 
@@ -126,7 +126,7 @@ class MMIOManager {
 
 }  // namespace mmio
 
-}  // namespace rocmtools
+}  // namespace rocprofiler
 
 
 #endif

@@ -72,7 +72,7 @@ template <typename Loader> class BaseLoader {
 
     auto function_ptr = reinterpret_cast<FunctionPtr>(::dlsym(handle_, symbol));
     if (function_ptr == nullptr)
-      rocmtools::fatal("symbol lookup '%s' failed: %s", symbol, ::dlerror());
+      rocprofiler::fatal("symbol lookup '%s' failed: %s", symbol, ::dlerror());
     return function_ptr;
   }
 

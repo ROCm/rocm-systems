@@ -43,7 +43,7 @@
 
 #define __maybe_unused
 
-namespace rocmtools::pc_sampler {
+namespace rocprofiler::pc_sampler {
 
 struct PCSampler;
 
@@ -59,7 +59,7 @@ struct fd_closer {
   void operator()(int fd) { if (fd >= 0) close(fd); }
 };
 
-} // namespace rocmtools::pc_sampler::gfxip::util
+} // namespace rocprofiler::pc_sampler::gfxip::util
 
 struct amdgpu_debugfs_regs2_iocdata {
   __u32 use_srbm, use_grbm, pg_lock;
@@ -114,7 +114,7 @@ struct device_t {
   struct debugfs_fds {
     debugfs_fds() : mmio2(-1) {}
 
-    rocmtools::handle_t<int, util::fd_closer> mmio2;
+    rocprofiler::handle_t<int, util::fd_closer> mmio2;
   } fd_;
 };
 
@@ -132,7 +132,7 @@ void aldebaran_reg_offset_init(device_t& dev);
 void read_pc_samples_v9(const device_t& dev, PCSampler *sampler);
 void read_pc_samples_v9_ioctl(const device_t& dev, PCSampler *sampler);
 
-} // namespace rocmtools::pc_sampler::gfxip
+} // namespace rocprofiler::pc_sampler::gfxip
 
-} // namespace rocmtools::pc_sampler
+} // namespace rocprofiler::pc_sampler
 #endif  // SRC_PCSAMPLER_GFXIP_GFXIP_H_

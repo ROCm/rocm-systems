@@ -25,7 +25,7 @@
 #include <utility>
 #include <cstddef>
 
-namespace rocmtools {
+namespace rocprofiler {
 
 template <typename T, typename D>
 class handle_t {
@@ -109,6 +109,6 @@ public:
   }
 };
 
-} // namespace rocmtools
+} // namespace rocprofiler
 
 #endif // UTILS_HANDLE_H_

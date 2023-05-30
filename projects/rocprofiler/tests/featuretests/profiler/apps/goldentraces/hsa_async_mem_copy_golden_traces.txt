@@ -3,7 +3,7 @@
 844434431085362
 
 
-ROCMTools: Collecting the following counters:
+ROCProfiler: Collecting the following counters:
 - GRBM_COUNT
 
 Enabling Counter Collection

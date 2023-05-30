@@ -28,8 +28,8 @@
 #include "helper.h"
 #include "rocprofiler.h"
 
-// TODO(aelwazir): namespace rocmtool
-namespace rocmtools {
+// TODO(aelwazir): namespace rocprofiler
+namespace rocprofiler {
 
 class Exception : public std::runtime_error {
  public:
@@ -46,7 +46,7 @@ class Exception : public std::runtime_error {
   const rocprofiler_status_t status_;
 };
 
-};  // namespace rocmtool
+};  // namespace rocprofiler
 
 // TODO(aelwazir): throw instead of the macros
 

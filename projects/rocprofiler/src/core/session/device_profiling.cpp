@@ -18,7 +18,7 @@
 #define QUEUE_NUM_PACKETS 64
 static const size_t CMD_SLOT_SIZE_B = 0x40;
 
-using namespace rocmtools;
+using namespace rocprofiler;
 
 typedef std::vector<hsa_ven_amd_aqlprofile_info_data_t> pmc_callback_data_t;
 
@@ -305,7 +305,7 @@ void get_hsa_agents_list(devices_t* device_list) {
 }
 
 
-bool rocmtools::find_hsa_agent_cpu(uint64_t index, hsa_agent_t* agent) {
+bool rocprofiler::find_hsa_agent_cpu(uint64_t index, hsa_agent_t* agent) {
   devices_t device_list;
   get_hsa_agents_list(&device_list);
 
@@ -315,7 +315,7 @@ bool rocmtools::find_hsa_agent_cpu(uint64_t index, hsa_agent_t* agent) {
   return true;
 }
 
-bool rocmtools::find_hsa_agent_gpu(uint64_t index, hsa_agent_t* agent) {
+bool rocprofiler::find_hsa_agent_gpu(uint64_t index, hsa_agent_t* agent) {
   devices_t device_list;
   get_hsa_agents_list(&device_list);
 

@@ -33,7 +33,7 @@ THE SOFTWARE.
 #include <iterator>
 #include <string>
 
-namespace rocmtools {
+namespace rocprofiler {
 namespace tests {
 namespace utility {
 
@@ -47,14 +47,14 @@ bool is_installed_path();
 
 }  // namespace utility
 }  // namespace tests
-}  // namespace rocmtools
+}  // namespace rocprofiler
 
 // used for dl_addr to locate the running
 // path for executable
 int main(int argc, char** argv);
 
-using rocmtools::tests::utility::GetNumberOfCores;
-using rocmtools::tests::utility::GetRunningPath;
-using rocmtools::tests::utility::is_installed_path;
+using rocprofiler::tests::utility::GetNumberOfCores;
+using rocprofiler::tests::utility::GetRunningPath;
+using rocprofiler::tests::utility::is_installed_path;
 
 #endif  // TESTS_FEATURETESTS_PROFILER_UTILS_TEST_UTILS_H_

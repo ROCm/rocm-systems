@@ -2,7 +2,7 @@
 #include "df_perfmon_registers_mi200.h"
 #include "mmio.h"
 
-namespace rocmtools {
+namespace rocprofiler {
 
 #define DF_V3_6_MAX_COUNTERS 4
 
@@ -73,4 +73,4 @@ void DFPerfMonMI200::Start() {
   printf("CakeDlwmActiveTransferCount_2=%u\n", ficaa_out_val);
 }
 
-}  // namespace rocmtools
+}  // namespace rocprofiler

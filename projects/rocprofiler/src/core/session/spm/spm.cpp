@@ -1,7 +1,7 @@
 #include "spm.h"
 #include "src/core/hsa/hsa_support.h"
 #include "src/utils/helper.h"
-#include "src/api/rocmtool.h"
+#include "src/api/rocprofiler_singleton.h"
 
 #include <hsa/hsa.h>
 
@@ -58,7 +58,7 @@ std::mutex processQueueLock;
 //                                     bool* is_data_loss) {
 //   [[maybe_unused]] hsa_status_t status = HSA_STATUS_SUCCESS;
 // #if 0
-//   status = rocmtools::hsa_support::GetAmdExtTable().hsa_amd_spm_set_dest_buffer_fn(
+//   status = rocprofiler::hsa_support::GetAmdExtTable().hsa_amd_spm_set_dest_buffer_fn(
 //       preferred_agent, size_in_bytes, timeout, size_copied, dest, is_data_loss);
 //   ASSERTM(status == HSA_STATUS_SUCCESS, "ERROR: SPM set buffer failed");
 // #endif
@@ -100,9 +100,9 @@ std::mutex processQueueLock;
 //     uint32_t pidx = preIndex.load(std::memory_order_release);
 //     if (spm_buffer_params[idx].len == spm_buffer_params[pidx].size) {
 //       std::cout << "Buffer completely filled with bytes" << spm_buffer_params[idx].len << std::endl;
-//       fd = fopen("SPM_rocmtool_data.txt", "wb");
+//       fd = fopen("SPM_rocprofiler_data.txt", "wb");
 //       size_t retele = fwrite(spm_buffer_params[pidx].addr, 1, spm_buffer_params[idx].len, fd);
-//       if (retele <= 0) rocmtools::warning("SPM Data is wrong!");
+//       if (retele <= 0) rocprofiler::warning("SPM Data is wrong!");
 //       fclose(fd);
 //     } else {
 //       std::cout << "Buffer partially filled with %d bytes" << spm_buffer_params[idx].len
@@ -156,10 +156,10 @@ std::mutex processQueueLock;
 //   uint64_t count = 0;
 //   std::vector<uint64_t> timestamp_vec;
 //   // Get Buffer
-//   rocmtools::Session* session =
-//       rocmtools::GetROCMToolObj()->GetSession(rocmtools::GetROCMToolObj()->GetCurrentSessionId());
+//   rocprofiler::Session* session =
+//       rocprofiler::GetROCProfilerSingleton()->GetSession(rocprofiler::GetROCProfilerSingleton()->GetCurrentSessionId());
 //   rocprofiler_filter_id_t filter_id = session->GetFilterIdWithKind(ROCPROFILER_SPM_COLLECTION);
-//   rocmtools::Filter* filter = session->GetFilter(filter_id);
+//   rocprofiler::Filter* filter = session->GetFilter(filter_id);
 //   rocprofiler_buffer_id_t buffer_id = filter->GetBufferId();
 //   Memory::GenericBuffer* buffer = session->GetBuffer(buffer_id);
 //   // Getting timestamps
@@ -188,7 +188,7 @@ std::mutex processQueueLock;
 //       }
 //       se++;
 //     }
-//     record.header.id = rocprofiler_record_id_t{rocmtools::GetROCMToolObj()->GetUniqueRecordId()};
+//     record.header.id = rocprofiler_record_id_t{rocprofiler::GetROCProfilerSingleton()->GetUniqueRecordId()};
 //     buffer->AddRecord(record);
 //     nSample++;
 //     index += 160;
@@ -197,7 +197,7 @@ std::mutex processQueueLock;
 
 // void spmDataParse() {
 //   std::vector<uint16_t> lines;
-//   fd = fopen("SPM_rocmtool_data.txt", "rb");
+//   fd = fopen("SPM_rocprofiler_data.txt", "rb");
 //   while (!feof(fd)) {
 //     char bytes[2];
 //     size_t size = fread(&bytes, 1, 2, fd);
@@ -214,7 +214,7 @@ hsa_status_t device_cb(hsa_agent_t agent, void* data) {
   hsa_device_type_t device_type;
   devices_t* devices = reinterpret_cast<devices_t*>(data);
   if (hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &device_type) != HSA_STATUS_SUCCESS)
-    rocmtools::fatal("hsa_agent_get_info failed");
+    rocprofiler::fatal("hsa_agent_get_info failed");
   switch (device_type) {
     case HSA_DEVICE_TYPE_CPU:
       devices->cpu_devices.push_back(agent);
@@ -233,16 +233,16 @@ void get_hsa_agents_list(devices_t* device_list) {
   hsa_status_t status;
   // Enumerate the agents.
   status = hsa_iterate_agents(device_cb, device_list);
-  if (status != HSA_STATUS_SUCCESS) rocmtools::fatal("hsa_iterate_agents failed");
+  if (status != HSA_STATUS_SUCCESS) rocprofiler::fatal("hsa_iterate_agents failed");
 }
 uint64_t submitPacket(hsa_queue_t* queue, const void* packet) {
   const uint32_t slot_size_b = CMD_SLOT_SIZE_B;
 
   // advance command queue
   const uint64_t write_idx =
-      rocmtools::hsa_support::GetCoreApiTable().hsa_queue_add_write_index_scacq_screl_fn(queue, 1);
+      rocprofiler::hsa_support::GetCoreApiTable().hsa_queue_add_write_index_scacq_screl_fn(queue, 1);
   while ((write_idx -
-          rocmtools::hsa_support::GetCoreApiTable().hsa_queue_load_read_index_relaxed_fn(queue)) >=
+          rocprofiler::hsa_support::GetCoreApiTable().hsa_queue_load_read_index_relaxed_fn(queue)) >=
          queue->size) {
     sched_yield();  // TODO: remove
   }
@@ -261,7 +261,7 @@ uint64_t submitPacket(hsa_queue_t* queue, const void* packet) {
   header_atomic_ptr->store(slot_data[0], std::memory_order_release);
 
   // ringdoor bell
-  rocmtools::hsa_support::GetCoreApiTable().hsa_signal_store_relaxed_fn(queue->doorbell_signal,
+  rocprofiler::hsa_support::GetCoreApiTable().hsa_signal_store_relaxed_fn(queue->doorbell_signal,
                                                                         write_idx);
 
   return write_idx;
@@ -271,11 +271,11 @@ uint64_t submitPacket(hsa_queue_t* queue, const void* packet) {
 //   // create a single-producer queue
 //   // TODO: check if API args are correct, especially UINT32_MAX
 //   hsa_status_t status;
-//   status = rocmtools::hsa_support::GetCoreApiTable().hsa_queue_create_fn(
+//   status = rocprofiler::hsa_support::GetCoreApiTable().hsa_queue_create_fn(
 //       gpu_agent, QUEUE_NUM_PACKETS, HSA_QUEUE_TYPE_SINGLE, nullptr, nullptr, UINT32_MAX, UINT32_MAX,
 //       queue);
 
-//   if (status != HSA_STATUS_SUCCESS) rocmtools::fatal("queue creation failed");
+//   if (status != HSA_STATUS_SUCCESS) rocprofiler::fatal("queue creation failed");
 
 //   return (status == HSA_STATUS_SUCCESS);
 // }
@@ -288,19 +288,19 @@ hsa_signal_value_t signalWait(const hsa_signal_t& signal, const hsa_signal_value
     // Probably a maximum wait time should be set. We don't want application to hang because of
     // unlimited wait.
     // TODO2 : try 500000 assuming nanosecond granularity -- must be verified.
-    ret_value = rocmtools::hsa_support::GetCoreApiTable().hsa_signal_wait_scacquire_fn(
+    ret_value = rocprofiler::hsa_support::GetCoreApiTable().hsa_signal_wait_scacquire_fn(
         signal, HSA_SIGNAL_CONDITION_LT, signal_value, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
 
     if (ret_value == exp_value) break;
     if (ret_value != signal_value)
-      rocmtools::fatal("Error: signalWait: signal_value(%lu), ret_value(%lu)", signal_value,
+      rocprofiler::fatal("Error: signalWait: signal_value(%lu), ret_value(%lu)", signal_value,
                        ret_value);
   }
   return ret_value;
 }
 
 }  // namespace
-namespace rocmtools {
+namespace rocprofiler {
 
 
 spm::SpmCounters::SpmCounters(rocprofiler_buffer_id_t buffer_id, rocprofiler_filter_id_t filter_id,
@@ -417,9 +417,9 @@ rocprofiler_status_t spm::SpmCounters::stopSpm() {
     status = hsa_support::GetCoreApiTable().hsa_queue_destroy_fn(queue_);
     queue_ = nullptr;
   }
-  if (status != HSA_STATUS_SUCCESS) rocmtools::warning("Queue destroy failed");
+  if (status != HSA_STATUS_SUCCESS) rocprofiler::warning("Queue destroy failed");
   return ROCPROFILER_STATUS_SUCCESS;
 }
 
 
-}  // namespace rocmtools
+}  // namespace rocprofiler

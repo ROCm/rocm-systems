@@ -21,7 +21,7 @@ THE SOFTWARE.
 */
 #include "test_utils.h"
 
-namespace rocmtools {
+namespace rocprofiler {
 namespace tests {
 namespace utility {
 
@@ -84,4 +84,4 @@ bool is_installed_path() {
 
 }  // namespace utility
 }  // namespace tests
-}  // namespace rocmtools
+}  // namespace rocprofiler

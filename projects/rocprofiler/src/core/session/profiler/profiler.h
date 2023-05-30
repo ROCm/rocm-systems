@@ -40,14 +40,14 @@ typedef void (*rocprofiler_add_profiler_record_t)(rocprofiler_record_profiler_t&
 
 typedef rocprofiler_timestamp_t (*rocprofiler_get_timestamp_t)();
 
-namespace rocmtools {
+namespace rocprofiler {
 
 typedef struct {
   uint64_t kernel_descriptor;
   hsa_signal_t signal;
   rocprofiler_session_id_t session_id;
   rocprofiler_buffer_id_t buffer_id;
-  rocmtools::profiling_context_t* context;
+  rocprofiler::profiling_context_t* context;
   uint64_t counters_count;
   hsa_ven_amd_aqlprofile_profile_t* profile;
   rocprofiler_kernel_properties_t kernel_properties;
@@ -69,7 +69,7 @@ class Profiler {
   void AddPendingSignals(uint32_t writer_id, uint64_t kernel_object,
                            const hsa_signal_t& completion_signal, rocprofiler_session_id_t session_id,
                            rocprofiler_buffer_id_t buffer_id,
-                           rocmtools::profiling_context_t* context, uint64_t session_data_count,
+                           rocprofiler::profiling_context_t* context, uint64_t session_data_count,
                            hsa_ven_amd_aqlprofile_profile_t* profile,
                            rocprofiler_kernel_properties_t kernel_properties, uint32_t thread_id,
                            uint64_t queue_index, uint64_t correlation_id);
@@ -102,6 +102,6 @@ class Profiler {
 };
 
 }  // namespace profiler
-}  // namespace rocmtools
+}  // namespace rocprofiler
 
 #endif  // SRC_TOOLS_PROFILER_PROFILER_H_

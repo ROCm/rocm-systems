@@ -86,7 +86,7 @@ class file_plugin_t {
 
       fs::path output_prefix(output_dir);
       if (!fs::is_directory(fs::status(output_prefix))) {
-        if (!stream_.fail()) rocmtools::warning("Cannot open output directory '%s'", output_dir);
+        if (!stream_.fail()) rocprofiler::warning("Cannot open output directory '%s'", output_dir);
         stream_.setstate(std::ios_base::failbit);
         return;
       }
@@ -150,7 +150,7 @@ class file_plugin_t {
         &hsa_handles);
     assert(status == HSA_STATUS_SUCCESS && "failed to iterate HSA agents");
     if (hsa_handles.fail()) {
-      rocmtools::warning("Cannot write to '%s'", hsa_handles.name().c_str());
+      rocprofiler::warning("Cannot write to '%s'", hsa_handles.name().c_str());
       return;
     }
 
@@ -162,7 +162,7 @@ class file_plugin_t {
 
     begin_ts << std::dec << app_begin_timestamp.value << std::endl;
     if (begin_ts.fail()) {
-      rocmtools::warning("Cannot write to '%s'", begin_ts.name().c_str());
+      rocprofiler::warning("Cannot write to '%s'", begin_ts.name().c_str());
       return;
     }
 
@@ -207,7 +207,7 @@ class file_plugin_t {
     uint64_t roctx_id;
     if (tracer_record.name) {
       if (tracer_record.domain == ACTIVITY_DOMAIN_HIP_API)
-        kernel_name = rocmtools::cxx_demangle(tracer_record.name);
+        kernel_name = rocprofiler::cxx_demangle(tracer_record.name);
       if (tracer_record.domain == ACTIVITY_DOMAIN_ROCTX) roctx_message = tracer_record.name;
     }
     size_t function_name_size = 0;
@@ -315,7 +315,7 @@ class file_plugin_t {
                  << std::to_string(profiler_record->kernel_properties.signal_handle);
     std::string kernel_name = "";
     if (name_length > 1) {
-      kernel_name = rocmtools::truncate_name(rocmtools::cxx_demangle(kernel_name_c));
+      kernel_name = rocprofiler::truncate_name(rocprofiler::cxx_demangle(kernel_name_c));
     }
     *output_file << "), " << std::string("obj(")
                  << std::to_string(profiler_record->kernel_id.handle) << "), "

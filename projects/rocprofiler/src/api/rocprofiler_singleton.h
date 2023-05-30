@@ -18,8 +18,8 @@
  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  THE SOFTWARE. */
 
-#ifndef SRC_TOOLS_ROCMTOOL_H_
-#define SRC_TOOLS_ROCMTOOL_H_
+#ifndef SRC_TOOLS_ROCPROFILER_SINGLETON_H_
+#define SRC_TOOLS_ROCPROFILER_SINGLETON_H_
 
 #include <hsa/hsa_ven_amd_aqlprofile.h>
 
@@ -42,12 +42,12 @@
 #include "src/core/session/session.h"
 #include "src/core/session/device_profiling.h"
 
-namespace rocmtools {
+namespace rocprofiler {
 
-class rocmtool {
+class ROCProfiler_Singleton {
  public:
-  rocmtool();
-  ~rocmtool();
+  ROCProfiler_Singleton();
+  ~ROCProfiler_Singleton();
 
   bool FindAgent(rocprofiler_agent_id_t agent_id);
   size_t GetAgentInfoSize(rocprofiler_agent_info_kind_t kind, rocprofiler_agent_id_t agent_id);
@@ -98,7 +98,7 @@ class rocmtool {
    * identical if the same kernel is dispatched twice.  Currently, this
    * identifier is written to the `reserved2` field of the dispatch packet when
    * its launch is intercepted, but this could change: a future version of
-   * ROCmtools may instead attempt to identify a kernel by a key with high
+   * ROCProfiler may instead attempt to identify a kernel by a key with high
    * _probability_ of uniqueness: for example, a combination of the kernel's
    * name, the queue ID to which it was dispatched, and the offset of the queue
    * write pointer is likely sufficient to associate PC samples with a running
@@ -109,14 +109,14 @@ class rocmtool {
   std::atomic<uint64_t> kernel_dispatch_counter_{1};
 };
 
-void InitROCMToolObj();
-void ResetROCMToolObj();
-rocmtool* GetROCMToolObj();
+void InitROCProfilerSingleton();
+void ResetROCProfilerSingleton();
+ROCProfiler_Singleton* GetROCProfilerSingleton();
 
 rocprofiler_timestamp_t GetCurrentTimestamp();
 
 rocprofiler_status_t IterateCounters(rocprofiler_counters_info_callback_t counters_info_callback);
 
-}  // namespace rocmtools
+}  // namespace rocprofiler
 
-#endif  // SRC_TOOLS_ROCMTOOL_H_
+#endif  // SRC_TOOLS_ROCPROFILER_SINGLETON_H_

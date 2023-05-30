@@ -53,7 +53,7 @@ struct BackTraceInfo {
 
 void errorCallback(void* data, const char* message, int errnum) {
   BackTraceInfo* info = static_cast<BackTraceInfo*>(data);
-  info->sstream << "ROCMTools: error: " << message << '(' << errnum << ')';
+  info->sstream << "ROCProfiler: error: " << message << '(' << errnum << ')';
   info->error = 1;
 }
 
@@ -95,7 +95,7 @@ int fullCallback(void* data, uintptr_t pc, const char* filename, int lineno, con
 }  // namespace
 #endif  // defined (ENABLE_BACKTRACE)
 
-namespace rocmtools {
+namespace rocprofiler {
 
 std::string string_vprintf(const char* format, va_list va) {
   va_list copy;
@@ -142,7 +142,7 @@ std::string string_printf(const char* format, ...) {
   message += info.sstream.str();
 #endif /* defined (ENABLE_BACKTRACE) */
 
-  std::string errmsg("ROCMTools: fatal error: " + message);
+  std::string errmsg("ROCProfiler: fatal error: " + message);
   fputs(errmsg.c_str(), stderr);
 
   std::cerr << errmsg << std::endl;
@@ -236,4 +236,4 @@ std::string left_trim(const std::string& s) {
 }
 
 
-}  // namespace rocmtools
+}  // namespace rocprofiler

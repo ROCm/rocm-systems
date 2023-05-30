@@ -1,4 +1,4 @@
-ROCMTools: Collecting the following counters:
+ROCProfiler: Collecting the following counters:
 - GRBM_COUNT
 PASSED!
 dispatch[2], gpu-id(0), kernel-name("hip_helloworld"), time(7853273641921013,7853273641924568)

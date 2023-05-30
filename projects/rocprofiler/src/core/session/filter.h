@@ -29,7 +29,7 @@
 
 #define ASSERTM(exp, msg) assert(((void)msg, exp))
 
-namespace rocmtools {
+namespace rocprofiler {
 
 class Filter {
  public:
@@ -80,6 +80,6 @@ class Filter {
   rocprofiler_sync_callback_t callback_;
 };
 
-}  // namespace rocmtools
+}  // namespace rocprofiler
 
 #endif  // SRC_CORE_SESSION_FILTER_H_

@@ -22,7 +22,7 @@ THE SOFTWARE.
 
 #include "csv_parser.h"
 
-namespace rocmtools {
+namespace rocprofiler {
 namespace tests {
 namespace utility {
 
@@ -167,4 +167,4 @@ void CSVParser::ParseCSV(std::string buffer) {
 }
 }  // namespace utility
 }  // namespace tests
-}  // namespace rocmtools
+}  // namespace rocprofiler

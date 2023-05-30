@@ -29,7 +29,7 @@
 #include "rocprofiler.h"
 #include "src/pcsampler/gfxip/gfxip.h"
 
-namespace rocmtools::pc_sampler {
+namespace rocprofiler::pc_sampler {
 
 struct PCSampler {
   PCSampler(rocprofiler_buffer_id_t buffer_id, rocprofiler_filter_id_t filter_id,
@@ -55,6 +55,6 @@ private:
   std::thread sampler_thread_;
 };
 
-} // namespace rocmtools::pc_sampler
+} // namespace rocprofiler::pc_sampler
 
 #endif // SRC_PCSAMPLER_PC_SAMPLER_H_

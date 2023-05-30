@@ -33,7 +33,7 @@ file(GLOB ROCPROFILER_SRC_PROFILER_FILES ${PROJECT_SOURCE_DIR}/src/core/session/
 file(GLOB ROCPROFILER_TRACER_SRC_FILES ${PROJECT_SOURCE_DIR}/src/core/session/tracer/*.cpp)
 file(GLOB ROCPROFILER_ROCTRACER_SRC_FILES ${PROJECT_SOURCE_DIR}/src/core/session/tracer/src/*.cpp)
 file(GLOB ROCPROFILER_ATT_SRC_FILES ${PROJECT_SOURCE_DIR}/src/core/session/att/att.cpp)
-file(GLOB ROCPROFILER_SRC_CLASS_FILES ${CMAKE_CURRENT_SOURCE_DIR}/rocmtool.cpp)
+file(GLOB ROCPROFILER_SRC_CLASS_FILES ${CMAKE_CURRENT_SOURCE_DIR}/rocprofiler_singleton.cpp)
 file(GLOB ROCPROFILER_SPM_SRC_FILES ${PROJECT_SOURCE_DIR}/src/core/session/spm/spm.cpp)
 file(GLOB ROCPROFILER_SRC_API_FILES ${PROJECT_SOURCE_DIR}/src/api/*.cpp)
 
@@ -49,7 +49,7 @@ set(CORE_PC_SAMPLING_DIR ${PROJECT_SOURCE_DIR}/src/pcsampler)
 file(GLOB CORE_PC_SAMPLING_FILES ${CORE_PC_SAMPLING_DIR}/core/*.cpp ${CORE_PC_SAMPLING_DIR}/gfxip/*.cpp ${CORE_PC_SAMPLING_DIR}/session/*.cpp)
 
 # Compiling gtests
-file(GLOB ROCPROFILER_TOOL_SRC_FILES ${PROJECT_SOURCE_DIR}/src/rocmtools/tools/tool.cpp)
+file(GLOB ROCPROFILER_TOOL_SRC_FILES ${PROJECT_SOURCE_DIR}/src/tools/tool.cpp)
 
 file(GLOB CORE_COUNTERS_PARENT_SRC_FILES ${PROJECT_SOURCE_DIR}/src/core/counters/*.cpp)
 file(GLOB CORE_COUNTERS_METRICS_SRC_FILES ${PROJECT_SOURCE_DIR}/src/core/counters/metrics/*.cpp)

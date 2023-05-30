@@ -31,7 +31,7 @@ THE SOFTWARE.
 #include <atomic>
 #include <set>
 
-namespace rocmtools {
+namespace rocprofiler {
 
 typedef std::vector<double> xcc_results_t;
 
@@ -52,10 +52,10 @@ typedef struct {
   packet_t* start_packet;
   packet_t* stop_packet;
   packet_t* read_packet;
-  rocmtools::MetricsDict* metrics_dict;
-  std::vector<const rocmtools::Metric*> metrics_list;
-  std::map<std::string, rocmtools::results_t*> results_map;
-  std::vector<rocmtools::results_t*> results_list;
+  rocprofiler::MetricsDict* metrics_dict;
+  std::vector<const rocprofiler::Metric*> metrics_list;
+  std::map<std::string, rocprofiler::results_t*> results_map;
+  std::vector<rocprofiler::results_t*> results_list;
   std::vector<event_t> events_list;
   hsa_agent_t gpu_agent;
   hsa_signal_t begin_signal;
@@ -82,6 +82,6 @@ void GetCountersAndMetricResultsByXcc(uint32_t xcc_index, std::vector<results_t*
                                  std::vector<const Metric*>& metrics_list);
 
 }  // namespace metrics
-}  // namespace rocmtools
+}  // namespace rocprofiler
 
 #endif  // SRC_CORE_METRICS_EVALMETRICS_H_

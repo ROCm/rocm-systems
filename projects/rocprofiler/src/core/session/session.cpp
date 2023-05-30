@@ -38,7 +38,7 @@
 #include "src/utils/helper.h"
 #include "src/core/hsa/queues/queue.h"
 
-namespace rocmtools {
+namespace rocprofiler {
 
 Session::Session(rocprofiler_replay_mode_t replay_mode, rocprofiler_session_id_t session_id)
     : session_id_(session_id), is_active_(false), replay_mode_(replay_mode) {
@@ -49,7 +49,7 @@ Session::~Session() {
   while (GetCurrentActiveInterruptSignalsCount() > 0) {
   }
   if (profiler_started_.load(std::memory_order_release)) {
-    rocmtools::queue::ResetSessionID();
+    rocprofiler::queue::ResetSessionID();
     delete profiler_;
     profiler_started_.exchange(false, std::memory_order_release);
   }
@@ -176,7 +176,7 @@ void Session::Terminate() {
   if (is_active_) {
     while (GetCurrentActiveInterruptSignalsCount() > 0) {
     }
-    rocmtools::queue::ResetSessionID();
+    rocprofiler::queue::ResetSessionID();
     std::lock_guard<std::mutex> lock(session_lock_);
     if (FindFilterWithKind(ROCPROFILER_SPM_COLLECTION)) {
       {
@@ -390,4 +390,4 @@ uint64_t GenerateUniqueSessionId() {
   return SESSION_COUNTER.fetch_add(1, std::memory_order_release);
 }
 
-}  // namespace rocmtools
+}  // namespace rocprofiler

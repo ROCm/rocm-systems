@@ -1,10 +1,10 @@
-# ROCmtools PC sampling
+# ROCProfiler PC sampling
 
 ## Known issues
 
 * Abnormal process termination with running GPU kernels while PC sampling is
   active may leak resources, eventually necessitating a GPU reset or system
-  reboot.  This is a consequence of the current userspace PC sampling
+  reboot.  This is a consequence of the current user-space PC sampling
   implementation, which must coexist with AMD GPU driver activity in the Linux
   kernel.
 

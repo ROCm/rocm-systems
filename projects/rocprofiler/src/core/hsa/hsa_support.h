@@ -90,7 +90,7 @@ typedef struct {
 
 } hsa_evt_data_t;
 
-namespace rocmtools {
+namespace rocprofiler {
 
 namespace hsa_support {
 
@@ -101,7 +101,7 @@ void Finalize();
 bool IterateCounters(rocprofiler_counters_info_callback_t counters_info_callback);
 
 }  // namespace hsa_support
-}  // namespace rocmtools
+}  // namespace rocprofiler
 
 #include "src/core/session/tracer/src/roctracer.h"
 

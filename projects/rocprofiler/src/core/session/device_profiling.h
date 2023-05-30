@@ -29,7 +29,7 @@
 #include "src/core/counters/metrics/eval_metrics.h"
 
 
-namespace rocmtools {
+namespace rocprofiler {
 
 class DeviceProfileSession {
  public:
@@ -81,7 +81,7 @@ bool find_hsa_agent_cpu(uint64_t index, hsa_agent_t* agent);
 bool find_hsa_agent_gpu(uint64_t index, hsa_agent_t* agent);
 
 
-}  // namespace rocmtools
+}  // namespace rocprofiler
 
 
 #endif  // SRC_CORE_SESSION_DEVICE_PROFILING_H_

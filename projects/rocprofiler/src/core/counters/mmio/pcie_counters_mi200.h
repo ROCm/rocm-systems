@@ -4,7 +4,7 @@
 #include "mmio.h"
 #include "perfmon.h"
 
-namespace rocmtools {
+namespace rocprofiler {
 
 /*
   One perfmon per GPU.
@@ -20,7 +20,7 @@ class PciePerfMonMI200 : public PerfMon {
   void Stop() override;
   void Read(std::vector<rocprofiler_counters_sampler_counter_output_t>& values) override;
   mmio::mmap_type_t Type() override { return mmio::mmap_type_t::PCIE_PERFMON; }
-  
+
  private:
  // TODO : check google coding std
   void writeRegister(uint32_t reg_offset, uint32_t value);
@@ -38,6 +38,6 @@ class PciePerfMonMI200 : public PerfMon {
   int event_id_;
 };
 
-}  // namespace rocmtools
+}  // namespace rocprofiler
 
 #endif

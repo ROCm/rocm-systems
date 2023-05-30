@@ -44,7 +44,7 @@
 
 #define ASSERTM(exp, msg) assert(((void)msg, exp))
 
-namespace rocmtools {
+namespace rocprofiler {
 
 class Session {
  public:
@@ -135,6 +135,6 @@ class Session {
 
 uint64_t GenerateUniqueSessionId();
 
-}  // namespace rocmtools
+}  // namespace rocprofiler
 
 #endif  // SRC_CORE_SESSION_SESSION_H_

@@ -5,7 +5,7 @@
 #include "mmio.h"
 #include "perfmon.h"
 
-namespace rocmtools {
+namespace rocprofiler {
 
 /*
   One perfmon per GPU.
@@ -30,7 +30,7 @@ class DFPerfMonMI200 : public PerfMon {
   void SetFicaNodeOutboundBw(uint64_t node_instance, uint32_t& ficaa_in_val);
   uint64_t GetFicaNodeOutboundBw(uint32_t ficaa_val);
 
-  
+
 
  private:
   mmio::DFPerfmonMMIO* mmio_;
@@ -39,6 +39,6 @@ class DFPerfMonMI200 : public PerfMon {
   uint64_t instance_id_;
 };
 
-}  // namespace rocmtools
+}  // namespace rocprofiler
 
 #endif  // DF_COUNTERS_MI200_H

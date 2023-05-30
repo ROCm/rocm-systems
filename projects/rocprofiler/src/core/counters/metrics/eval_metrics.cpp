@@ -4,7 +4,7 @@
 #include <set>
 #include <math.h>
 
-using namespace rocmtools;
+using namespace rocprofiler;
 
 
 struct block_des_t {
@@ -93,16 +93,17 @@ bool metrics::ExtractMetricEvents(
       results_list holds the result objects for each event (which means, basic counters only)
   */
   try {
-    uint32_t xcc_count = rocmtools::hsa_support::GetAgentInfo(gpu_agent.handle).getXccCount();
+    uint32_t xcc_count = rocprofiler::hsa_support::GetAgentInfo(gpu_agent.handle).getXccCount();
     for (size_t i = 0; i < metric_names.size(); i++) {
       counters_vec_t counters_vec;
       // TODO: saurabh
       //   const Metric* metric = metrics_dict->GetMetricByName(metric_names[i]);
       const Metric* metric = metrics_dict->Get(metric_names[i]);
       if (metric == nullptr) {
-        Agent::AgentInfo& agentInfo = rocmtools::hsa_support::GetAgentInfo(gpu_agent.handle);
-        fatal("input metric'%s' not supported on this hardware: %s ", metric_names[i].c_str(),
-              agentInfo.getName().data());
+          Agent::AgentInfo& agentInfo = rocprofiler::hsa_support::GetAgentInfo(gpu_agent.handle);
+          fatal("input metric'%s' not supported on this hardware: %s ", metric_names[i].c_str(),
+          agentInfo.getName().data());
+
       }
 
       // adding result object for derived metric
@@ -113,7 +114,7 @@ bool metrics::ExtractMetricEvents(
 
       counters_vec = metric->GetCounters();
       if (counters_vec.empty())
-        rocmtools::fatal("bad metric '%s' is empty", metric_names[i].c_str());
+        rocprofiler::fatal("bad metric '%s' is empty", metric_names[i].c_str());
 
       for (const counter_t* counter : counters_vec) {
         results_t* result = nullptr;
@@ -163,7 +164,7 @@ bool metrics::ExtractMetricEvents(
         //           << ", Block Status Counter ID: " << block_status.counter_index << std::endl;
 
         if (block_status.counter_index >= block_status.max_counters) {
-          rocmtools::fatal("Metrics specified have exceeded HW limits!");
+          rocprofiler::fatal("Metrics specified have exceeded HW limits!");
           return false;
         }
         block_status.counter_index += 1;
@@ -187,7 +188,7 @@ bool metrics::ExtractMetricEvents(
 
 bool metrics::GetCounterData(hsa_ven_amd_aqlprofile_profile_t* profile, hsa_agent_t gpu_agent,
                              std::vector<results_t*>& results_list) {
-  uint32_t xcc_count = rocmtools::hsa_support::GetAgentInfo(gpu_agent.handle).getXccCount();
+  uint32_t xcc_count = rocprofiler::hsa_support::GetAgentInfo(gpu_agent.handle).getXccCount();
   uint32_t single_xcc_buff_size = profile->output_buffer.size / (sizeof(uint64_t) * xcc_count);
   callback_data_t callback_data{&results_list, 0, single_xcc_buff_size};
   hsa_status_t status = hsa_ven_amd_aqlprofile_iterate_data(profile, pmcCallback, &callback_data);
@@ -201,7 +202,7 @@ bool metrics::GetMetricsData(std::map<std::string, results_t*>& results_map,
     const xml::Expr* expr = metric->GetExpr();
     if (expr) {
       auto it = results_map.find(metric->GetName());
-      if (it == results_map.end()) rocmtools::fatal("metric results not found ");
+      if (it == results_map.end()) rocprofiler::fatal("metric results not found ");
       results_t* res = it->second;
       res->val_double = expr->Eval(args);
     }

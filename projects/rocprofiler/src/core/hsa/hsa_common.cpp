@@ -22,7 +22,7 @@
 
 #include "src/utils/exception.h"
 
-namespace rocmtools {
+namespace rocprofiler {
 
 namespace hsa_support {
 
@@ -122,4 +122,4 @@ rocprofiler_timestamp_t GetCurrentTimestampNS() {
 }
 
 }  // namespace hsa_support
-}  // namespace rocmtools
+}  // namespace rocprofiler

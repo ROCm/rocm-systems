@@ -40,7 +40,7 @@
 #include <string>
 #include <utility>
 
-namespace rocmtools {
+namespace rocprofiler {
 
 class Logger {
  public:
@@ -140,32 +140,32 @@ class Logger {
   std::map<uint32_t, std::string> message_;
 };
 
-}  // namespace rocmtools
+}  // namespace rocprofiler
 
 #define FATAL_LOGGING(stream)                                             \
   do {                                                                    \
-    rocmtools::Logger::Instance() << "fatal: " << rocmtools::Logger::begm \
-                                  << stream << rocmtools::Logger::endl;   \
+    rocprofiler::Logger::Instance() << "fatal: " << rocprofiler::Logger::begm \
+                                  << stream << rocprofiler::Logger::endl;   \
     throw(ROCPROFILER_STATUS_ERROR, "Error: " << stream);             \
   } while (false)
 
 #define ERR_LOGGING(stream)                                               \
   do {                                                                    \
-    rocmtools::Logger::Instance() << "error: " << rocmtools::Logger::begm \
-                                  << stream << rocmtools::Logger::endl;   \
+    rocprofiler::Logger::Instance() << "error: " << rocprofiler::Logger::begm \
+                                  << stream << rocprofiler::Logger::endl;   \
   } while (false)
 
 #define INFO_LOGGING(stream)                                             \
   do {                                                                   \
-    rocmtools::Logger::Instance() << "info: " << rocmtools::Logger::begm \
-                                  << stream << rocmtools::Logger::endl;  \
+    rocprofiler::Logger::Instance() << "info: " << rocprofiler::Logger::begm \
+                                  << stream << rocprofiler::Logger::endl;  \
   } while (false)
 
 #define WARN_LOGGING(stream)                                                \
   do {                                                                      \
-    std::cerr << "ROCmTools: " << stream << std::endl;                      \
-    rocmtools::Logger::Instance() << "warning: " << rocmtools::Logger::begm \
-                                  << stream << rocmtools::Logger::endl;     \
+    std::cerr << "ROCProfiler: " << stream << std::endl;                      \
+    rocprofiler::Logger::Instance() << "warning: " << rocprofiler::Logger::begm \
+                                  << stream << rocprofiler::Logger::endl;     \
   } while (false)
 
 #endif  // SRC_UTILS_LOGGER_H_

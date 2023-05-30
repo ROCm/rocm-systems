@@ -25,7 +25,7 @@
 #include "mmio.h"
 #include <vector>
 
-namespace rocmtools {
+namespace rocprofiler {
 
 class PerfMon {
  public:
@@ -42,6 +42,6 @@ class PerfMon {
   std::vector<std::string> counter_names_;
 };
 
-} // namespace rocmtools
+} // namespace rocprofiler
 
 #endif

@@ -45,7 +45,7 @@ THE SOFTWARE.
   do {                                                                                             \
     std::ostringstream oss;                                                                        \
     oss << __FUNCTION__ << "(), " << stream;                                                       \
-    throw rocmtools::util::exception(error, oss.str());                                            \
+    throw rocprofiler::util::exception(error, oss.str());                                            \
   } while (0)
 
 #define AQL_EXC_RAISING(error, stream)                                                             \
@@ -55,7 +55,7 @@ THE SOFTWARE.
     EXC_RAISING(error, stream << ", " << error_string);                                            \
   } while (0)
 
-namespace rocmtools {
+namespace rocprofiler {
 namespace util {
 
 class exception : public std::exception {
@@ -70,6 +70,6 @@ class exception : public std::exception {
 };
 
 }  // namespace util
-}  // namespace rocmtools
+}  // namespace rocprofiler
 
 #endif  // SRC_UTIL_EXCEPTION_H_

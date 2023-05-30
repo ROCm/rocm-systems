@@ -83,7 +83,7 @@ std::string get_kernel_name(rocprofiler_record_profiler_t& profiler_record) {
     CHECK_ROCPROFILER(rocprofiler_query_kernel_info(ROCPROFILER_KERNEL_NAME,
                                                     profiler_record.kernel_id, &kernel_name_c));
     if (kernel_name_c && strlen(kernel_name_c) > 1)
-      kernel_name = rocmtools::cxx_demangle(strdup(kernel_name_c));
+      kernel_name = rocprofiler::cxx_demangle(strdup(kernel_name_c));
   }
 #pragma GCC diagnostic pop
   return kernel_name;
@@ -106,7 +106,7 @@ class perfetto_plugin_t {
 
     output_prefix_ = output_dir;
     if (!fs::is_directory(fs::status(output_prefix_))) {
-      if (!stream_.fail()) rocmtools::warning("Cannot open output directory '%s'", output_dir);
+      if (!stream_.fail()) rocprofiler::warning("Cannot open output directory '%s'", output_dir);
       stream_.setstate(std::ios_base::failbit);
       return;
     }
@@ -145,7 +145,7 @@ class perfetto_plugin_t {
 
     output_prefix_.append(output_file_name + std::to_string(GetPid()) + "_output.pftrace");
     file_descriptor_ = open(output_prefix_.string().c_str(), O_RDWR | O_CREAT | O_TRUNC, 0600);
-    if (file_descriptor_ == -1) rocmtools::warning("Can't open output file\n");
+    if (file_descriptor_ == -1) rocprofiler::warning("Can't open output file\n");
 
     tracing_session_ = perfetto::Tracing::NewTrace();
     tracing_session_->Setup(trace_cfg, file_descriptor_);
@@ -166,7 +166,7 @@ class perfetto_plugin_t {
         }
       }
       std::string thread_track_str =
-          rocmtools::string_printf("Node: %s Process ID: %lu Thread ID:", hostname_, GetPid());
+          rocprofiler::string_printf("Node: %s Process ID: %lu Thread ID:", hostname_, GetPid());
       process_track_desc.mutable_process()->set_process_name(thread_track_str);
       perfetto::TrackEvent::SetTrackDescriptor(perfetto::ProcessTrack::Current(),
                                                process_track_desc);
@@ -215,7 +215,7 @@ class perfetto_plugin_t {
                           rocprofiler_session_id_t session_id) {
     std::lock_guard<std::mutex> lock(writing_lock);
     // ToDO: rename this variable?
-    if (!tracing_session_) rocmtools::warning("Tracing session is deleted!\n");
+    if (!tracing_session_) rocprofiler::warning("Tracing session is deleted!\n");
 
     int device_id = profiler_record.gpu_id.handle;
     std::unordered_map<int, perfetto::Track>::iterator device_track_it;
@@ -230,7 +230,7 @@ class perfetto_plugin_t {
                 .first;
         auto gpu_desc = device_track_it->second.Serialize();
         gpu_desc.mutable_process()->set_pid(device_id);
-        std::string gpu_str = rocmtools::string_printf("Node: %s Device:", hostname_);
+        std::string gpu_str = rocprofiler::string_printf("Node: %s Device:", hostname_);
         gpu_desc.mutable_process()->set_process_name(gpu_str);
         perfetto::TrackEvent::SetTrackDescriptor(device_track_it->second, gpu_desc);
         track_ids_used_.emplace_back(device_id + 1 + machine_id);
@@ -255,7 +255,7 @@ class perfetto_plugin_t {
 
         auto queue_desc = queue_track_it->second.Serialize();
         std::string queue_str =
-            rocmtools::string_printf("Process ID: %lu Queue %ld", GetPid(), gpu_queue_id.second);
+            rocprofiler::string_printf("Process ID: %lu Queue %ld", GetPid(), gpu_queue_id.second);
         queue_desc.set_name(queue_str);
         perfetto::TrackEvent::SetTrackDescriptor(queue_track_it->second, queue_desc);
       }
@@ -268,7 +268,7 @@ class perfetto_plugin_t {
     static const uint32_t lds_block_size = 128 * 4;
 
     std::string full_kernel_name = get_kernel_name(profiler_record);
-    // std::string truncated_kernel_name = rocmtools::truncate_name(full_kernel_name);
+    // std::string truncated_kernel_name = rocprofiler::truncate_name(full_kernel_name);
     // perfetto::StaticString kernel_name(truncated_kernel_name.c_str());
     TRACE_EVENT_BEGIN("KERNELS", perfetto::StaticString(full_kernel_name.c_str()), queue_track,
                       profiler_record.timestamps.begin.value, "Full Kernel Name",
@@ -343,7 +343,7 @@ class perfetto_plugin_t {
   int FlushTracerRecord(rocprofiler_record_tracer_t tracer_record,
                         rocprofiler_session_id_t session_id) {
     std::lock_guard<std::mutex> lock(writing_lock);
-    if (!tracing_session_) rocmtools::warning("Tracing session is deleted!\n");
+    if (!tracing_session_) rocprofiler::warning("Tracing session is deleted!\n");
     std::string kernel_name;
     const char* function_name;
     char* activity_name;
@@ -368,7 +368,7 @@ class perfetto_plugin_t {
                   .first;
           auto gpu_desc = device_track_it->second.Serialize();
           gpu_desc.mutable_process()->set_pid(device_id);
-          std::string gpu_str = rocmtools::string_printf("Node: %s Device:", hostname_);
+          std::string gpu_str = rocprofiler::string_printf("Node: %s Device:", hostname_);
           gpu_desc.mutable_process()->set_process_name(gpu_str);
           perfetto::TrackEvent::SetTrackDescriptor(device_track_it->second, gpu_desc);
           track_ids_used_.emplace_back(1 + machine_id + device_id);
@@ -390,7 +390,7 @@ class perfetto_plugin_t {
             thread_tracks_.emplace(thread_id, perfetto::ProcessTrack::Global(track_id)).first;
         auto thread_track_desc = thread_track_it->second.Serialize();
         std::string thread_track_str =
-            rocmtools::string_printf("Node: %s Process ID: %lu Thread ID:", hostname_, GetPid());
+            rocprofiler::string_printf("Node: %s Process ID: %lu Thread ID:", hostname_, GetPid());
         thread_track_desc.mutable_process()->set_pid(thread_id);
         thread_track_desc.mutable_process()->set_process_name(thread_track_str);
         perfetto::TrackEvent::SetTrackDescriptor(thread_track_it->second, thread_track_desc);
@@ -418,7 +418,7 @@ class perfetto_plugin_t {
                 roctx_tracks_.emplace(thread_id, perfetto::Track(track_id, thread_track)).first;
 
             auto roctx_track_desc = roctx_track_it->second.Serialize();
-            std::string roctx_track_str = rocmtools::string_printf("ROCTX Markers");
+            std::string roctx_track_str = rocprofiler::string_printf("ROCTX Markers");
             roctx_track_desc.set_name(roctx_track_str);
             perfetto::TrackEvent::SetTrackDescriptor(roctx_track_it->second, roctx_track_desc);
           }
@@ -457,7 +457,7 @@ class perfetto_plugin_t {
             hsa_track_it =
                 hsa_tracks_.emplace(thread_id, perfetto::Track(track_id, thread_track)).first;
             auto hsa_track_desc = hsa_track_it->second.Serialize();
-            std::string hsa_track_str = rocmtools::string_printf("HSA API");
+            std::string hsa_track_str = rocprofiler::string_printf("HSA API");
             hsa_track_desc.set_name(hsa_track_str);
             perfetto::TrackEvent::SetTrackDescriptor(hsa_track_it->second, hsa_track_desc);
           }
@@ -509,7 +509,7 @@ class perfetto_plugin_t {
                 hip_tracks_.emplace(thread_id, perfetto::Track(track_id, thread_track)).first;
 
             auto hip_track_desc = hip_track_it->second.Serialize();
-            std::string hip_track_str = rocmtools::string_printf("HIP API");
+            std::string hip_track_str = rocprofiler::string_printf("HIP API");
             hip_track_desc.set_name(hip_track_str);
             perfetto::TrackEvent::SetTrackDescriptor(hip_track_it->second, hip_track_desc);
           }
@@ -577,7 +577,7 @@ class perfetto_plugin_t {
 
             auto stream_desc = stream_track_it->second.Serialize();
             std::string stream_str =
-                rocmtools::string_printf("Process ID: %lu Stream %d", GetPid(), stream_id);
+                rocprofiler::string_printf("Process ID: %lu Stream %d", GetPid(), stream_id);
             stream_desc.set_name(stream_str);
             perfetto::TrackEvent::SetTrackDescriptor(stream_track_it->second, stream_desc);
             track_ids_used_.emplace_back(1 + machine_id + tracer_record.agent_id.handle);
@@ -587,11 +587,11 @@ class perfetto_plugin_t {
         rocprofiler_timestamp_t timestamp;
         rocprofiler_get_timestamp(&timestamp);
         if (tracer_record.api_data_handle.handle && tracer_record.api_data_handle.size > 1) {
-          kernel_name = rocmtools::cxx_demangle(
+          kernel_name = rocprofiler::cxx_demangle(
               strdup(reinterpret_cast<const char*>(tracer_record.api_data_handle.handle)));
           TRACE_EVENT_BEGIN(
               "HIP_OPS",
-              perfetto::StaticString(strdup(rocmtools::truncate_name(kernel_name).c_str())),
+              perfetto::StaticString(strdup(rocprofiler::truncate_name(kernel_name).c_str())),
               stream_track, tracer_record.timestamps.begin.value, "Agent ID",
               tracer_record.agent_id.handle, "Process ID", GetPid(), "Kernel Name", kernel_name,
               perfetto::Flow::ProcessScoped(tracer_record.correlation_id.value));
@@ -642,7 +642,7 @@ class perfetto_plugin_t {
                     .first;
 
             auto queue_desc = queue_track_it->second.Serialize();
-            std::string queue_str = rocmtools::string_printf("Process ID: %lu Queue %ld", GetPid(),
+            std::string queue_str = rocprofiler::string_printf("Process ID: %lu Queue %ld", GetPid(),
                                                              gpu_queue_id.second);
             queue_desc.set_name(queue_str);
             perfetto::TrackEvent::SetTrackDescriptor(queue_track_it->second, queue_desc);
@@ -670,7 +670,7 @@ class perfetto_plugin_t {
         break;
       }
       default: {
-        rocmtools::warning("ignored record for domain %d", tracer_record.domain);
+        rocprofiler::warning("ignored record for domain %d", tracer_record.domain);
         break;
       }
     }
@@ -680,7 +680,7 @@ class perfetto_plugin_t {
   int WriteBufferRecords(const rocprofiler_record_header_t* begin,
                          const rocprofiler_record_header_t* end,
                          rocprofiler_session_id_t session_id, rocprofiler_buffer_id_t buffer_id) {
-    if (!tracing_session_) rocmtools::warning("Tracing session is deleted!\n");
+    if (!tracing_session_) rocprofiler::warning("Tracing session is deleted!\n");
     while (begin < end) {
       if (!begin) return 0;
       switch (begin->kind) {

@@ -41,7 +41,7 @@
 #include "registration_table.h"
 #include "src/core/hsa/hsa_support.h"
 #include "src/utils/helper.h"
-#include "src/api/rocmtool.h"
+#include "src/api/rocprofiler_singleton.h"
 
 static inline uint32_t GetPid() {
   static auto pid = syscall(__NR_getpid);
@@ -236,18 +236,18 @@ template <activity_domain_t domain> struct ApiTracer {
   };
 
   static void Exit(OperationId operation_id, TraceData* trace_data) {
-    if (rocmtools::GetROCMToolObj()) {
+    if (rocprofiler::GetROCProfilerSingleton()) {
       if (auto pool = activity_table.Get(operation_id)) {
-        if (rocmtools::GetROCMToolObj() &&
-            rocmtools::GetROCMToolObj()->GetSession((*pool)->session_id) &&
-            rocmtools::GetROCMToolObj()
+        if (rocprofiler::GetROCProfilerSingleton() &&
+            rocprofiler::GetROCProfilerSingleton()->GetSession((*pool)->session_id) &&
+            rocprofiler::GetROCProfilerSingleton()
                 ->GetSession((*pool)->session_id)
                 ->GetBuffer((*pool)->buffer_id)) {
-          if (rocmtools::GetROCMToolObj()
+          if (rocprofiler::GetROCProfilerSingleton()
                   ->GetSession((*pool)->session_id)
                   ->GetBuffer((*pool)->buffer_id)
                   ->IsValid()) {
-            std::lock_guard<std::mutex> lock(rocmtools::GetROCMToolObj()
+            std::lock_guard<std::mutex> lock(rocprofiler::GetROCProfilerSingleton()
                                                  ->GetSession((*pool)->session_id)
                                                  ->GetBuffer((*pool)->buffer_id)
                                                  ->GetBufferLock());
@@ -255,7 +255,7 @@ template <activity_domain_t domain> struct ApiTracer {
             rocprofiler_record_tracer_t record{};
             record.header = rocprofiler_record_header_t{
                 ROCPROFILER_TRACER_RECORD,
-                rocprofiler_record_id_t{rocmtools::GetROCMToolObj()->GetUniqueRecordId()}};
+                rocprofiler_record_id_t{rocprofiler::GetROCProfilerSingleton()->GetUniqueRecordId()}};
             record.domain = domain;
             record.operation_id = rocprofiler_tracer_operation_id_t{operation_id};
             record.correlation_id =
@@ -270,7 +270,7 @@ template <activity_domain_t domain> struct ApiTracer {
               rocprofiler_record_tracer_t ext_record{};
               ext_record.header = rocprofiler_record_header_t{
                   ROCPROFILER_TRACER_RECORD,
-                  rocprofiler_record_id_t{rocmtools::GetROCMToolObj()->GetUniqueRecordId()}};
+                  rocprofiler_record_id_t{rocprofiler::GetROCProfilerSingleton()->GetUniqueRecordId()}};
               ext_record.domain = ACTIVITY_DOMAIN_EXT_API;
               ext_record.operation_id =
                   rocprofiler_tracer_operation_id_t{ACTIVITY_EXT_OP_EXTERN_ID};
@@ -280,13 +280,13 @@ template <activity_domain_t domain> struct ApiTracer {
               ext_record.phase = ROCPROFILER_PHASE_NONE;
               // Write the external correlation id record directly followed by the
               // activity record.
-              rocmtools::GetROCMToolObj()
+              rocprofiler::GetROCProfilerSingleton()
                   ->GetSession((*pool)->session_id)
                   ->GetBuffer((*pool)->buffer_id)
                   ->AddRecord(std::array<rocprofiler_record_tracer_t, 2>{ext_record, record});
             } else {
               // Write record to the buffer.
-              rocmtools::GetROCMToolObj()
+              rocprofiler::GetROCProfilerSingleton()
                   ->GetSession((*pool)->session_id)
                   ->GetBuffer((*pool)->buffer_id)
                   ->AddRecord(record);
@@ -336,7 +336,7 @@ template <activity_domain_t domain> struct ApiTracer {
       if (callback_enabled) {
         trace_data->phase_enter = Enter_UserCallback;
         trace_data->phase_exit = [](OperationId, TraceData*) {
-          rocmtools::fatal("should not reach here");
+          rocprofiler::fatal("should not reach here");
         };
       }
     }
@@ -377,20 +377,20 @@ int TracerCallback(activity_domain_t domain, uint32_t operation_id, void* data) 
           // If the record is for a kernel dispatch, write the kernel name in the pool's data,
           // and make the record point to it. Older HIP runtimes do not provide a kernel name,
           // so record.kernel_name might be null.
-          if (!rocmtools::GetROCMToolObj()) return 0;
-          if (rocmtools::GetROCMToolObj() &&
-              rocmtools::GetROCMToolObj()->GetSession((*pool)->session_id) &&
-              rocmtools::GetROCMToolObj()
+          if (!rocprofiler::GetROCProfilerSingleton()) return 0;
+          if (rocprofiler::GetROCProfilerSingleton() &&
+              rocprofiler::GetROCProfilerSingleton()->GetSession((*pool)->session_id) &&
+              rocprofiler::GetROCProfilerSingleton()
                   ->GetSession((*pool)->session_id)
                   ->GetBuffer((*pool)->buffer_id)) {
-            std::lock_guard<std::mutex> lock(rocmtools::GetROCMToolObj()
+            std::lock_guard<std::mutex> lock(rocprofiler::GetROCProfilerSingleton()
                                                  ->GetSession((*pool)->session_id)
                                                  ->GetBuffer((*pool)->buffer_id)
                                                  ->GetBufferLock());
             rocprofiler_record_tracer_t rocprofiler_record{};
             rocprofiler_record.header = rocprofiler_record_header_t{
                 ROCPROFILER_TRACER_RECORD,
-                rocprofiler_record_id_t{rocmtools::GetROCMToolObj()->GetUniqueRecordId()}};
+                rocprofiler_record_id_t{rocprofiler::GetROCProfilerSingleton()->GetUniqueRecordId()}};
             rocprofiler_record.domain = domain;
             rocprofiler_record.external_id = rocprofiler_tracer_external_id_t{};
             rocprofiler_record.operation_id = rocprofiler_tracer_operation_id_t{record->kind};
@@ -407,7 +407,7 @@ int TracerCallback(activity_domain_t domain, uint32_t operation_id, void* data) 
               rocprofiler_record.api_data_handle.handle = strdup(record->kernel_name);
               void* initial_handle = const_cast<void*>(rocprofiler_record.api_data_handle.handle);
               rocprofiler_record.api_data_handle.size = (strlen(record->kernel_name) + 1);
-              rocmtools::GetROCMToolObj()
+              rocprofiler::GetROCProfilerSingleton()
                   ->GetSession((*pool)->session_id)
                   ->GetBuffer((*pool)->buffer_id)
                   ->AddRecord(rocprofiler_record, rocprofiler_record.api_data_handle.handle,
@@ -421,7 +421,7 @@ int TracerCallback(activity_domain_t domain, uint32_t operation_id, void* data) 
                                     static_cast<const char*>(data);
                               });
             } else {
-              rocmtools::GetROCMToolObj()
+              rocprofiler::GetROCProfilerSingleton()
                   ->GetSession((*pool)->session_id)
                   ->GetBuffer((*pool)->buffer_id)
                   ->AddRecord(rocprofiler_record);
@@ -444,20 +444,20 @@ int TracerCallback(activity_domain_t domain, uint32_t operation_id, void* data) 
     case ACTIVITY_DOMAIN_HSA_OPS:
       if (auto pool = hsa_ops_activity_table.Get(operation_id)) {
         if (auto record = static_cast<activity_record_t*>(data)) {
-          if (!rocmtools::GetROCMToolObj()) return 0;
-          if (rocmtools::GetROCMToolObj() &&
-              rocmtools::GetROCMToolObj()->GetSession((*pool)->session_id) &&
-              rocmtools::GetROCMToolObj()
+          if (!rocprofiler::GetROCProfilerSingleton()) return 0;
+          if (rocprofiler::GetROCProfilerSingleton() &&
+              rocprofiler::GetROCProfilerSingleton()->GetSession((*pool)->session_id) &&
+              rocprofiler::GetROCProfilerSingleton()
                   ->GetSession((*pool)->session_id)
                   ->GetBuffer((*pool)->buffer_id)) {
-            std::lock_guard<std::mutex> lock(rocmtools::GetROCMToolObj()
+            std::lock_guard<std::mutex> lock(rocprofiler::GetROCProfilerSingleton()
                                                  ->GetSession((*pool)->session_id)
                                                  ->GetBuffer((*pool)->buffer_id)
                                                  ->GetBufferLock());
             rocprofiler_record_tracer_t rocprofiler_record{};
             rocprofiler_record.header = rocprofiler_record_header_t{
                 ROCPROFILER_TRACER_RECORD,
-                rocprofiler_record_id_t{rocmtools::GetROCMToolObj()->GetUniqueRecordId()}};
+                rocprofiler_record_id_t{rocprofiler::GetROCProfilerSingleton()->GetUniqueRecordId()}};
             rocprofiler_record.domain = domain;
             rocprofiler_record.external_id = rocprofiler_tracer_external_id_t{0};
             rocprofiler_record.operation_id = rocprofiler_tracer_operation_id_t{record->op};
@@ -474,7 +474,7 @@ int TracerCallback(activity_domain_t domain, uint32_t operation_id, void* data) 
               rocprofiler_record.api_data_handle.handle = strdup(record->kernel_name);
               void* initial_handle = const_cast<void*>(rocprofiler_record.api_data_handle.handle);
               rocprofiler_record.api_data_handle.size = strlen(record->kernel_name) + 1;
-              rocmtools::GetROCMToolObj()
+              rocprofiler::GetROCProfilerSingleton()
                   ->GetSession((*pool)->session_id)
                   ->GetBuffer((*pool)->buffer_id)
                   ->AddRecord(rocprofiler_record, rocprofiler_record.api_data_handle.handle,
@@ -488,7 +488,7 @@ int TracerCallback(activity_domain_t domain, uint32_t operation_id, void* data) 
                                     static_cast<const char*>(data);
                               });
             } else {
-              rocmtools::GetROCMToolObj()
+              rocprofiler::GetROCProfilerSingleton()
                   ->GetSession((*pool)->session_id)
                   ->GetBuffer((*pool)->buffer_id)
                   ->AddRecord(rocprofiler_record);

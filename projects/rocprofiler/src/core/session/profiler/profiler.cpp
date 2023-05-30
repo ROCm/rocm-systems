@@ -40,7 +40,7 @@
 
 #define ASSERTM(exp, msg) assert(((void)msg, exp))
 
-namespace rocmtools {
+namespace rocprofiler {
 namespace profiler {
 
 uint64_t GetCounterID(std::string& counter_name) {
@@ -127,7 +127,7 @@ bool Profiler::HasActivePass() {
 void Profiler::AddPendingSignals(
     uint32_t writer_id, uint64_t kernel_object, const hsa_signal_t& completion_signal,
     rocprofiler_session_id_t session_id, rocprofiler_buffer_id_t buffer_id,
-    rocmtools::profiling_context_t* context, uint64_t session_data_count,
+    rocprofiler::profiling_context_t* context, uint64_t session_data_count,
     hsa_ven_amd_aqlprofile_profile_t* profile, rocprofiler_kernel_properties_t kernel_properties,
     uint32_t thread_id, uint64_t queue_index, uint64_t correlation_id) {
   std::lock_guard<std::mutex> lock(sessions_pending_signals_lock_);
@@ -151,4 +151,4 @@ bool Profiler::CheckPendingSignalsIsEmpty() {
 }
 
 }  // namespace profiler
-}  // namespace rocmtools
+}  // namespace rocprofiler

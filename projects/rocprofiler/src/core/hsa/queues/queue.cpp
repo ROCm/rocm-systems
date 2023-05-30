@@ -29,7 +29,7 @@
 #include <numa.h>
 
 #include "rocprofiler.h"
-#include "src/api/rocmtool.h"
+#include "src/api/rocprofiler_singleton.h"
 #include "src/core/hsa/packets/packets_generator.h"
 #include "src/core/hsa/hsa_support.h"
 #include "src/utils/helper.h"
@@ -54,7 +54,7 @@
 
 std::mutex sessions_pending_signal_lock;
 
-namespace rocmtools {
+namespace rocprofiler {
 
 std::atomic<uint32_t> ACTIVE_INTERRUPT_SIGNAL_COUNT{0};
 
@@ -273,7 +273,7 @@ rocprofiler_kernel_properties_t set_kernel_properties(hsa_kernel_dispatch_packet
 
 namespace queue {
 
-using rocmtools::GetROCMToolObj;
+using rocprofiler::GetROCProfilerSingleton;
 
 hsa_status_t pmcCallback(hsa_ven_amd_aqlprofile_info_type_t info_type,
                          hsa_ven_amd_aqlprofile_info_data_t* info_data, void* data) {
@@ -314,7 +314,7 @@ void AddRecordCounters(rocprofiler_record_profiler_t* record, const pending_sign
   rocprofiler_record_counter_instance_t* counters =
       static_cast<rocprofiler_record_counter_instance_t*>(malloc(counters_list_size));
   for (size_t i = 0; i < pending->context->metrics_list.size(); i++) {
-    const rocmtools::Metric* metric = pending->context->metrics_list[i];
+    const rocprofiler::Metric* metric = pending->context->metrics_list[i];
     double value = 0;
     std::string metric_name = metric->GetName();
     auto it = pending->context->results_map.find(metric_name);
@@ -324,11 +324,11 @@ void AddRecordCounters(rocprofiler_record_profiler_t* record, const pending_sign
     counters[i] = (rocprofiler_record_counter_instance_t{
         // TODO(aelwazir): Moving to span once C++20 is adopted, strdup can be
         // removed after that
-        rocprofiler_counter_id_t{rocmtools::profiler::GetCounterID(metric_name)},
+        rocprofiler_counter_id_t{rocprofiler::profiler::GetCounterID(metric_name)},
         rocprofiler_record_counter_value_t{value}});
   }
   record->counters = counters;
-  rocmtools::Session* session = GetROCMToolObj()->GetSession(pending->session_id);
+  rocprofiler::Session* session = GetROCProfilerSingleton()->GetSession(pending->session_id);
   void* initial_handle = const_cast<rocprofiler_record_counter_instance_t*>(record->counters);
   if (session->FindBuffer(pending->buffer_id)) {
     Memory::GenericBuffer* buffer = session->GetBuffer(pending->buffer_id);
@@ -368,7 +368,7 @@ void AddAttRecord(rocprofiler_record_att_tracer_t* record, hsa_agent_t gpu_agent
       if (buffer == NULL) fatal("Trace data buffer allocation failed");
 
       auto status =
-          rocmtools::hsa_support::GetCoreApiTable().hsa_memory_copy_fn(buffer, data_ptr, data_size);
+          rocprofiler::hsa_support::GetCoreApiTable().hsa_memory_copy_fn(buffer, data_ptr, data_size);
       if (status != HSA_STATUS_SUCCESS) fatal("Trace data memcopy to host failed");
 
       record->shader_engine_data[se_index].buffer_ptr = buffer;
@@ -383,13 +383,13 @@ void AddAttRecord(rocprofiler_record_att_tracer_t* record, hsa_agent_t gpu_agent
 
 bool AsyncSignalHandler(hsa_signal_value_t signal_value, void* data) {
   auto queue_info_session = static_cast<queue_info_session_t*>(data);
-  if (!queue_info_session || !GetROCMToolObj() ||
-      !GetROCMToolObj()->GetSession(queue_info_session->session_id) ||
-      !GetROCMToolObj()->GetSession(queue_info_session->session_id)->GetProfiler())
+  if (!queue_info_session || !GetROCProfilerSingleton() ||
+      !GetROCProfilerSingleton()->GetSession(queue_info_session->session_id) ||
+      !GetROCProfilerSingleton()->GetSession(queue_info_session->session_id)->GetProfiler())
     return true;
-  rocmtools::Session* session = GetROCMToolObj()->GetSession(queue_info_session->session_id);
+  rocprofiler::Session* session = GetROCProfilerSingleton()->GetSession(queue_info_session->session_id);
   std::lock_guard<std::mutex> lock(session->GetSessionLock());
-  rocmtools::profiler::Profiler* profiler = session->GetProfiler();
+  rocprofiler::profiler::Profiler* profiler = session->GetProfiler();
   std::vector<pending_signal_t*> pending_signals = const_cast<std::vector<pending_signal_t*>&>(
       profiler->GetPendingSignals(queue_info_session->writer_id));
 
@@ -429,19 +429,19 @@ bool AsyncSignalHandler(hsa_signal_value_t signal_value, void* data) {
         record.correlation_id = rocprofiler_correlation_id_t{pending->correlation_id};
 
         if (pending->session_id.handle == 0) {
-          pending->session_id = GetROCMToolObj()->GetCurrentSessionId();
+          pending->session_id = GetROCProfilerSingleton()->GetCurrentSessionId();
         }
         if (pending->counters_count > 0 && pending->context->metrics_list.size() > 0 &&
             pending->profile) {
           if (xcc_id == 0)  // call to GetCounterData() is required only once for a dispatch
-            rocmtools::metrics::GetCounterData(pending->profile, queue_info_session->agent,
+            rocprofiler::metrics::GetCounterData(pending->profile, queue_info_session->agent,
                                                pending->context->results_list);
           if (is_individual_xcc_mode)
-            rocmtools::metrics::GetCountersAndMetricResultsByXcc(
+            rocprofiler::metrics::GetCountersAndMetricResultsByXcc(
                 xcc_id, pending->context->results_list, pending->context->results_map,
                 pending->context->metrics_list);
           else
-            rocmtools::metrics::GetMetricsData(pending->context->results_map,
+            rocprofiler::metrics::GetMetricsData(pending->context->results_map,
                                                pending->context->metrics_list);
           AddRecordCounters(&record, pending);
         } else {
@@ -455,12 +455,12 @@ bool AsyncSignalHandler(hsa_signal_value_t signal_value, void* data) {
         // TODO(aelwazir): we need a better way of distributing events and free them
         // if (pending->profile->output_buffer.ptr)
         //   numa_free(pending->profile->output_buffer.ptr, pending->profile->output_buffer.size);
-        hsa_status_t status = rocmtools::hsa_support::GetAmdExtTable().hsa_amd_memory_pool_free_fn(
+        hsa_status_t status = rocprofiler::hsa_support::GetAmdExtTable().hsa_amd_memory_pool_free_fn(
             (pending->profile->output_buffer.ptr));
         CHECK_HSA_STATUS("Error: Couldn't free output buffer memory", status);
         // if (pending->profile->command_buffer.ptr)
         //   numa_free(pending->profile->command_buffer.ptr, pending->profile->command_buffer.size);
-        status = rocmtools::hsa_support::GetAmdExtTable().hsa_amd_memory_pool_free_fn(
+        status = rocprofiler::hsa_support::GetAmdExtTable().hsa_amd_memory_pool_free_fn(
             (pending->profile->command_buffer.ptr));
         CHECK_HSA_STATUS("Error: Couldn't free command buffer memory", status);
         delete pending->profile;
@@ -481,16 +481,16 @@ bool AsyncSignalHandler(hsa_signal_value_t signal_value, void* data) {
 }
 
 bool AsyncSignalHandlerATT(hsa_signal_value_t /* signal */, void* data) {
-  // TODO: finish implementation to iterate trace data and add it to rocmtools record
+  // TODO: finish implementation to iterate trace data and add it to rocprofiler record
   // and generic buffer
 
   auto queue_info_session = static_cast<queue_info_session_t*>(data);
-  if (!queue_info_session || !GetROCMToolObj() ||
-      !GetROCMToolObj()->GetSession(queue_info_session->session_id) ||
-      !GetROCMToolObj()->GetSession(queue_info_session->session_id)->GetAttTracer())
+  if (!queue_info_session || !GetROCProfilerSingleton() ||
+      !GetROCProfilerSingleton()->GetSession(queue_info_session->session_id) ||
+      !GetROCProfilerSingleton()->GetSession(queue_info_session->session_id)->GetAttTracer())
     return true;
-  rocmtools::Session* session = GetROCMToolObj()->GetSession(queue_info_session->session_id);
-  rocmtools::att::AttTracer* att_tracer = session->GetAttTracer();
+  rocprofiler::Session* session = GetROCProfilerSingleton()->GetSession(queue_info_session->session_id);
+  rocprofiler::att::AttTracer* att_tracer = session->GetAttTracer();
   std::vector<att_pending_signal_t>& pending_signals =
       const_cast<std::vector<att_pending_signal_t>&>(
           att_tracer->GetPendingSignals(queue_info_session->writer_id));
@@ -517,16 +517,16 @@ bool AsyncSignalHandlerATT(hsa_signal_value_t /* signal */, void* data) {
                        rocprofiler_record_id_t{pending.kernel_descriptor}};
 
       if (pending.session_id.handle == 0) {
-        pending.session_id = GetROCMToolObj()->GetCurrentSessionId();
+        pending.session_id = GetROCProfilerSingleton()->GetCurrentSessionId();
       }
       if (session->FindBuffer(pending.buffer_id)) {
         Memory::GenericBuffer* buffer = session->GetBuffer(pending.buffer_id);
         buffer->AddRecord(record);
       }
-      hsa_status_t status = rocmtools::hsa_support::GetAmdExtTable().hsa_amd_memory_pool_free_fn(
+      hsa_status_t status = rocprofiler::hsa_support::GetAmdExtTable().hsa_amd_memory_pool_free_fn(
           (pending.profile->output_buffer.ptr));
       CHECK_HSA_STATUS("Error: Couldn't free output buffer memory", status);
-      status = rocmtools::hsa_support::GetAmdExtTable().hsa_amd_memory_pool_free_fn(
+      status = rocprofiler::hsa_support::GetAmdExtTable().hsa_amd_memory_pool_free_fn(
           (pending.profile->command_buffer.ptr));
       CHECK_HSA_STATUS("Error: Couldn't free command buffer memory", status);
       delete pending.profile;
@@ -601,27 +601,27 @@ uint32_t replay_mode_count = 0;
 std::vector<std::string> kernel_profile_names;
 std::vector<std::string> att_counters_names;
 
-rocmtools::Session* session = nullptr;
+rocprofiler::Session* session = nullptr;
 
 void ResetSessionID() { session_id = rocprofiler_session_id_t{0}; }
 
 void CheckNeededProfileConfigs() {
   rocprofiler_session_id_t internal_session_id;
-  if (GetROCMToolObj())
+  if (GetROCProfilerSingleton())
     // Getting Session ID
-    internal_session_id = GetROCMToolObj()->GetCurrentSessionId();
+    internal_session_id = GetROCProfilerSingleton()->GetCurrentSessionId();
   else
     internal_session_id = {0};
 
   if (session_id.handle == 0 || internal_session_id.handle != session_id.handle) {
     session_id = internal_session_id;
     // Getting Counters count from the Session
-    if (session_id.handle > 0 && GetROCMToolObj()) {
-      session = GetROCMToolObj()->GetSession(session_id);
+    if (session_id.handle > 0 && GetROCProfilerSingleton()) {
+      session = GetROCProfilerSingleton()->GetSession(session_id);
       if (session && session->FindFilterWithKind(ROCPROFILER_COUNTERS_COLLECTION)) {
         rocprofiler_filter_id_t filter_id =
             session->GetFilterIdWithKind(ROCPROFILER_COUNTERS_COLLECTION);
-        rocmtools::Filter* filter = session->GetFilter(filter_id);
+        rocprofiler::Filter* filter = session->GetFilter(filter_id);
         session_data = filter->GetCounterData();
         is_counter_collection_mode = true;
         session_data_count = session_data.size();
@@ -631,12 +631,12 @@ void CheckNeededProfileConfigs() {
         is_timestamp_collection_mode = true;
         rocprofiler_filter_id_t filter_id =
             session->GetFilterIdWithKind(ROCPROFILER_DISPATCH_TIMESTAMPS_COLLECTION);
-        rocmtools::Filter* filter = session->GetFilter(filter_id);
+        rocprofiler::Filter* filter = session->GetFilter(filter_id);
         buffer_id = filter->GetBufferId();
       } else if (session && session->FindFilterWithKind(ROCPROFILER_ATT_TRACE_COLLECTION)) {
         rocprofiler_filter_id_t filter_id =
             session->GetFilterIdWithKind(ROCPROFILER_ATT_TRACE_COLLECTION);
-        rocmtools::Filter* filter = session->GetFilter(filter_id);
+        rocprofiler::Filter* filter = session->GetFilter(filter_id);
         att_parameters_data = filter->GetAttParametersData();
         is_att_collection_mode = true;
         buffer_id =
@@ -679,7 +679,7 @@ void WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t user_pkt
 
 
     // hsa_ven_amd_aqlprofile_profile_t* profile;
-    std::vector<std::pair<rocmtools::profiling_context_t*, hsa_ven_amd_aqlprofile_profile_t*>>
+    std::vector<std::pair<rocprofiler::profiling_context_t*, hsa_ven_amd_aqlprofile_profile_t*>>
         profiles;
 
 
@@ -706,7 +706,7 @@ void WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t user_pkt
 
       uint32_t profile_id = 0;
       // do {
-      std::pair<rocmtools::profiling_context_t*, hsa_ven_amd_aqlprofile_profile_t*> profile;
+      std::pair<rocprofiler::profiling_context_t*, hsa_ven_amd_aqlprofile_profile_t*> profile;
       if (profiles.size() > 0 && replay_mode_count > 0) profile = profiles.at(profile_id);
 
       uint32_t writer_id = WRITER_ID.fetch_add(1, std::memory_order_release);
@@ -730,10 +730,9 @@ void WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t user_pkt
        * Only PC sampling relies on this right now, so it would be better to
        * only generate an ID if PC sampling is active to conserve IDs, but it's
        * unlikely 64 bits' worth of identifiers will be exhausted during the
-       * lifetime of the ROCMToolObj.
+       * lifetime of the ROCProfiler_Singleton.
        */
       uint64_t correlation_id = dispatch_packet.reserved2;
-      // dispatch_packet.reserved2 = GetROCMToolObj()->GetUniqueKernelDispatchId();
 
       CreateSignal(HSA_AMD_SIGNAL_AMD_GPU_ONLY, &packet.completion_signal);
       // Adding the dispatch packet newly created signal to the pending signals
@@ -741,7 +740,7 @@ void WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t user_pkt
       rocprofiler_kernel_properties_t kernel_properties =
           set_kernel_properties(dispatch_packet, queue_info.GetGPUAgent());
       if (session) {
-        uint64_t record_id = GetROCMToolObj()->GetUniqueRecordId();
+        uint64_t record_id = GetROCProfilerSingleton()->GetUniqueRecordId();
         AddKernelNameWithDispatchID(GetKernelNameFromKsymbols(dispatch_packet.kernel_object),
                                     record_id);
         if (profiles.size() > 0 && replay_mode_count > 0) {
@@ -793,7 +792,7 @@ void WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t user_pkt
         transformed_packets.emplace_back(*pkt);
       }
       Agent::AgentInfo& agentInfo =
-          rocmtools::hsa_support::GetAgentInfo(queue_info.GetGPUAgent().handle);
+          rocprofiler::hsa_support::GetAgentInfo(queue_info.GetGPUAgent().handle);
       //  Creating Async Handler to be called every time the interrupt signal is
       //  marked complete
       SignalAsyncHandler(
@@ -942,7 +941,7 @@ void WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t user_pkt
       // list to be processed by the signal interrupt
       rocprofiler_kernel_properties_t kernel_properties =
           set_kernel_properties(dispatch_packet, queue_info.GetGPUAgent());
-      uint64_t record_id = GetROCMToolObj()->GetUniqueRecordId();
+      uint64_t record_id = GetROCProfilerSingleton()->GetUniqueRecordId();
       AddKernelNameWithDispatchID(GetKernelNameFromKsymbols(dispatch_packet.kernel_object),
                                   record_id);
       if (session && profile) {
@@ -1049,4 +1048,4 @@ void CheckPacketReqiurements(std::vector<hsa_agent_t>& gpu_agents) {
 }
 
 }  // namespace queue
-}  // namespace rocmtools
+}  // namespace rocprofiler

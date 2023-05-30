@@ -13,7 +13,7 @@
 #include "rocprofiler.h"
 
 
-namespace rocmtools {
+namespace rocprofiler {
 
 namespace spm {
 
@@ -52,6 +52,6 @@ class SpmCounters {
 bool find_hsa_agent_cpu(uint64_t index, hsa_agent_t* agent);
 bool find_hsa_agent_gpu(uint64_t index, hsa_agent_t* agent);
 
-}  // namespace rocmtools
+}  // namespace rocprofiler
 
 #endif  // SRC_CORE_SESSION_SPM_H_

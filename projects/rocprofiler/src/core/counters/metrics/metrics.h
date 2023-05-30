@@ -41,7 +41,7 @@ THE SOFTWARE.
 #include <mutex>
 #include "src/core/hardware/hsa_info.h"
 
-namespace rocmtools {
+namespace rocprofiler {
 struct counter_t {
   std::string name;
   event_t event;
@@ -105,8 +105,8 @@ class MetricsDict {
       auto it = cache_->find(name);
       if (it != cache_->end()) {
         ret = true;
-        const rocmtools::ExprMetric* expr_metric =
-            dynamic_cast<const rocmtools::ExprMetric*>(it->second);
+        const rocprofiler::ExprMetric* expr_metric =
+            dynamic_cast<const rocprofiler::ExprMetric*>(it->second);
         if (expr_metric) result = expr_metric->GetExpr()->GetStr();
       }
       return ret;
@@ -369,6 +369,6 @@ class MetricsDict {
   static mutex_t mutex_;
 };
 
-}  // namespace rocmtools
+}  // namespace rocprofiler
 
 #endif  // SRC_CORE_COUNTERS_METRICS_METRICS_H_

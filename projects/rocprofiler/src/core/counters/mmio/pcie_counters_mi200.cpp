@@ -2,7 +2,7 @@
 #include "pcie_perfmon_registers_mi200.h"
 #include "perfmon.h"
 
-namespace rocmtools {
+namespace rocprofiler {
 
 PciePerfMonMI200::PciePerfMonMI200(const Agent::AgentInfo& info) : PerfMon(), mmio_(nullptr) {
   mmio_ =
@@ -75,7 +75,7 @@ void PciePerfMonMI200::Start_RX_TILE_TXCLK(uint32_t event){
 void PciePerfMonMI200::Read_RX_TILE_TXCLK(uint64_t& result){
   // Step 5: Performance counters read:
   uint32_t lo_val, hi_val;
-  readRegister(PCIE_MI200::PCIE_PERF_COUNT0_TXCLK3, lo_val); 
+  readRegister(PCIE_MI200::PCIE_PERF_COUNT0_TXCLK3, lo_val);
   readRegister(PCIE_MI200::PCIE_PERF_COUNT0_UPVAL_TXCLK3, hi_val);
 
   // Combine the lo and hi values and put them in result
@@ -102,7 +102,7 @@ void PciePerfMonMI200::Start_RX_TILE_SCLK(uint32_t event){
 void PciePerfMonMI200::Read_RX_TILE_SCLK(uint64_t& result){
   // Step 5: Performance counters read:
   uint32_t lo_val, hi_val;
-  readRegister(PCIE_MI200::PCIE_PERF_COUNT0_LCLK1, lo_val); 
+  readRegister(PCIE_MI200::PCIE_PERF_COUNT0_LCLK1, lo_val);
   readRegister(PCIE_MI200::PCIE_PERF_COUNT0_UPVAL_LCLK1, hi_val);
 
   // Combine the lo and hi values and put them in result
@@ -111,6 +111,6 @@ void PciePerfMonMI200::Read_RX_TILE_SCLK(uint64_t& result){
   result = val | lo_val;
 }
 
-} // namespace rocmtools
+} // namespace rocprofiler
 
 

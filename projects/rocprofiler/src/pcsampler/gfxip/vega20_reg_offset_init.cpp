@@ -21,7 +21,7 @@
 #include "gfxip.h"
 #include "vega20_ip_offset.h"
 
-namespace rocmtools::pc_sampler::gfxip {
+namespace rocprofiler::pc_sampler::gfxip {
 
 void vega20_reg_offset_init(device_t& dev) {
   for (int i = 0; i < MAX_INSTANCE; ++i) {
@@ -30,4 +30,4 @@ void vega20_reg_offset_init(device_t& dev) {
   }
 }
 
-}  // namespace rocmtools::pc_sampler::gfxip
+}  // namespace rocprofiler::pc_sampler::gfxip

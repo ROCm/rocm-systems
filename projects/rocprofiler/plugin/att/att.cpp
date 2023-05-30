@@ -79,7 +79,7 @@ class att_plugin_t {
     CHECK_ROCPROFILER(rocprofiler_query_kernel_info(ROCPROFILER_KERNEL_NAME,
                                                     att_tracer_record->kernel_id, &kernel_name_c));
 
-    std::string name_demangled = rocmtools::truncate_name(rocmtools::cxx_demangle(kernel_name_c));
+    std::string name_demangled = rocprofiler::truncate_name(rocprofiler::cxx_demangle(kernel_name_c));
 
     if (name_demangled.size() > ATT_FILENAME_MAXBYTES) { // Limit filename size
       name_demangled = name_demangled.substr(0, ATT_FILENAME_MAXBYTES);

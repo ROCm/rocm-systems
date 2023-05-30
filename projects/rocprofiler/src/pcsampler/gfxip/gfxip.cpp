@@ -37,12 +37,12 @@
 static const char DEBUG_DRI_PATH[] = "/sys/kernel/debug/dri/";
 static const char DEV_PFX[] = "dev=";
 
-namespace rocmtools::pc_sampler::gfxip {
+namespace rocprofiler::pc_sampler::gfxip {
 
 namespace {
 
 static int find_pci_instance(const std::string &pci_string) {
-  rocmtools::handle_t<DIR*, util::dir_closer> dir(opendir(DEBUG_DRI_PATH));
+  rocprofiler::handle_t<DIR*, util::dir_closer> dir(opendir(DEBUG_DRI_PATH));
   if (dir.get() == nullptr) {
     char *errstr = strerror(errno);
     warning("Can't open debugfs dri directory: %s\n", errstr);
@@ -206,4 +206,4 @@ device_t::~device_t() {
   }
 }
 
-} // namespace rocmtools::pc_sampler::gfxip
+} // namespace rocprofiler::pc_sampler::gfxip

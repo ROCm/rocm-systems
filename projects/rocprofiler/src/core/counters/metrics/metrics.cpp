@@ -22,7 +22,7 @@ THE SOFTWARE.
 
 #include "metrics.h"
 
-namespace rocmtools {
+namespace rocprofiler {
 MetricsDict::map_t* MetricsDict::map_ = NULL;
 MetricsDict::mutex_t MetricsDict::mutex_;
-}  // namespace rocmtools
+}  // namespace rocprofiler

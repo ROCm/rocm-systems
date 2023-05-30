@@ -28,7 +28,7 @@
 #include <mutex>
 #include <vector>
 
-namespace rocmtools {
+namespace rocprofiler {
 
 class CountersSampler {
  public:
@@ -52,11 +52,11 @@ class CountersSampler {
   bool pci_system_initialized_{false};
   rocprofiler_counters_sampler_parameters_t params_;
   std::vector<PerfMon*> perfmon_instances_;
-  
+
   std::atomic<bool> keep_running_{false};
   std::thread sampler_thread_;
 };
 
-}  // namespace rocmtools
+}  // namespace rocprofiler
 
 #endif

@@ -41,7 +41,7 @@
 #include "osssys/osssys_4_2_0_offset.h"
 #include "osssys/osssys_4_2_0_sh_mask.h"
 
-namespace rocmtools::pc_sampler::gfxip {
+namespace rocprofiler::pc_sampler::gfxip {
 
 namespace {
 
@@ -78,7 +78,7 @@ void fill_record(
    * XXX: Use of the reserved2 field in the HSA dispatch packet to uniquely
    * identify kernel dispatches for PC sampling is an internal implementation
    * detail which is subject to change.  See the comment associated with
-   * rocmtool::rocmtool::kernel_dispatch_counter_.
+   * rocprofiler::rocprofiler::kernel_dispatch_counter_.
    */
   record->pc_sample.dispatch_id =
     rocprofiler_kernel_dispatch_id_t{pkt->reserved2};
@@ -107,13 +107,13 @@ void fill_record(
 
   /*
    * XXX FIXME: For consistency, this is the same method as used by
-   * rocmtools::queue::AsyncSignalHandler in queue.cpp to fill
+   * rocprofiler::queue::AsyncSignalHandler in queue.cpp to fill
    * rocprofiler_record_profiler_t::gpu_id, but it should be changed; see the
-   * comment in rocmtools::hsa_support::Initialize about using KFD's gpu_id for
+   * comment in rocprofiler::hsa_support::Initialize about using KFD's gpu_id for
    * more information.
    */
   record->pc_sample.gpu_id = rocprofiler_agent_id_t{
-      (uint64_t)rocmtools::hsa_support::GetAgentInfo(hdl).getIndex()};
+      (uint64_t)rocprofiler::hsa_support::GetAgentInfo(hdl).getIndex()};
 }
 
 }  // namespace
@@ -296,4 +296,4 @@ void read_pc_samples_v9_ioctl(const device_t& dev, PCSampler *sampler) {
       }
 }
 
-}  // namespace rocmtools::pc_sampler::gfxip
+}  // namespace rocprofiler::pc_sampler::gfxip

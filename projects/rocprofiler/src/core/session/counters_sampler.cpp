@@ -20,11 +20,11 @@
 
 #include "counters_sampler.h"
 #include "src/core/hsa/hsa_support.h"
-#include "src/api/rocmtool.h"
+#include "src/api/rocprofiler_singleton.h"
 #include "src/core/counters/mmio/pcie_counters_mi200.h"
 #include "src/core/counters/mmio/df_counters_mi200.h"
 
-namespace rocmtools {
+namespace rocprofiler {
 
 CountersSampler::CountersSampler(rocprofiler_buffer_id_t buffer_id,
                                  rocprofiler_filter_id_t filter_id,
@@ -35,16 +35,16 @@ CountersSampler::CountersSampler(rocprofiler_buffer_id_t buffer_id,
       pci_system_initialized_(pci_system_init() == 0)
 
 {
-  params_ = rocmtools::GetROCMToolObj()
+  params_ = rocprofiler::GetROCProfilerSingleton()
                 ->GetSession(session_id_)
                 ->GetFilter(filter_id_)
                 ->GetCountersSamplerParameterData();
 
   std::vector<hsa_agent_t> agents;
-  rocmtools::hsa_support::GetCoreApiTable().hsa_iterate_agents_fn(
+  rocprofiler::hsa_support::GetCoreApiTable().hsa_iterate_agents_fn(
       [](hsa_agent_t agent, void* arg) {
         auto& agents = *reinterpret_cast<std::vector<hsa_agent_t>*>(arg);
-        const auto& ai = rocmtools::hsa_support::GetAgentInfo(agent.handle);
+        const auto& ai = rocprofiler::hsa_support::GetAgentInfo(agent.handle);
         if (ai.getType() == HSA_DEVICE_TYPE_GPU) {
           agents.emplace_back(agent);
         }
@@ -62,7 +62,7 @@ CountersSampler::CountersSampler(rocprofiler_buffer_id_t buffer_id,
   }
 
   if (pcie_counter_names.size() > 0) {
-    auto agentInfo = rocmtools::hsa_support::GetAgentInfo(agents[params_.gpu_agent_index].handle);
+    auto agentInfo = rocprofiler::hsa_support::GetAgentInfo(agents[params_.gpu_agent_index].handle);
     if (agentInfo.getName() == "gfx90a") {
       PciePerfMonMI200* perfmon = new PciePerfMonMI200(agentInfo);
       perfmon->SetCounterNames(pcie_counter_names);
@@ -77,7 +77,7 @@ CountersSampler::CountersSampler(rocprofiler_buffer_id_t buffer_id,
   }
 
   if (xgmi_counter_names.size() > 0) {
-    auto agentInfo = rocmtools::hsa_support::GetAgentInfo(agents[params_.gpu_agent_index].handle);
+    auto agentInfo = rocprofiler::hsa_support::GetAgentInfo(agents[params_.gpu_agent_index].handle);
     if (agentInfo.getName() == "gfx90a") {
       DFPerfMonMI200* perfmon = new DFPerfMonMI200(agentInfo);
       perfmon->SetCounterNames(xgmi_counter_names);
@@ -132,7 +132,7 @@ void CountersSampler::Stop() {
 }
 
 void CountersSampler::AddRecord(rocprofiler_record_counters_sampler_t& record) {
-  const auto tool = rocmtools::GetROCMToolObj();
+  const auto tool = rocprofiler::GetROCProfilerSingleton();
   const auto session = tool->GetSession(session_id_);
   const auto buffer = session->GetBuffer(buffer_id_);
 
@@ -179,4 +179,4 @@ void CountersSampler::SamplerLoop() {
   }
 }
 
-}  // namespace rocmtools
+}  // namespace rocprofiler

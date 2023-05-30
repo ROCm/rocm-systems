@@ -36,7 +36,7 @@ namespace Agent {
 
 static const uint32_t LDS_BLOCK_SIZE = 128 * 4;
 
-// XXX TODO: This should be merged into rocmtools::hsa_support::AgentInfo and
+// XXX TODO: This should be merged into rocprofiler::hsa_support::AgentInfo and
 // this file should be removed entirely, as it's completely redundant
 class AgentInfo {
  public:

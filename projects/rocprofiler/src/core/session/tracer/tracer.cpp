@@ -11,12 +11,12 @@
 #include <mutex>
 #include <utility>
 
-#include "src/api/rocmtool.h"
+#include "src/api/rocprofiler_singleton.h"
 #include "src/utils/helper.h"
 #include "src/core/hsa/hsa_support.h"
 #include "src/core/memory/generic_buffer.h"
 
-namespace rocmtools {
+namespace rocprofiler {
 namespace tracer {
 
 char* GetApiCallFunctionName(rocprofiler_tracer_activity_domain_t domain,
@@ -289,9 +289,9 @@ char* Tracer::GetHIPApiDataInfo(rocprofiler_tracer_hip_api_data_info_t kind,
 
 void api_callback(activity_domain_t domain, uint32_t cid, const void* callback_data, void* args) {
   api_callback_data_t* args_data = reinterpret_cast<api_callback_data_t*>(args);
-  if (args_data && rocmtools::GetROCMToolObj() &&
-      rocmtools::GetROCMToolObj()->GetSession(args_data->session_id) &&
-      rocmtools::GetROCMToolObj()->GetSession(args_data->session_id)->GetTracer()) {
+  if (args_data && rocprofiler::GetROCProfilerSingleton() &&
+      rocprofiler::GetROCProfilerSingleton()->GetSession(args_data->session_id) &&
+      rocprofiler::GetROCProfilerSingleton()->GetSession(args_data->session_id)->GetTracer()) {
     switch (domain) {
       case ACTIVITY_DOMAIN_ROCTX: {
         const roctx_api_data_t* data = reinterpret_cast<const roctx_api_data_t*>(callback_data);
@@ -299,7 +299,7 @@ void api_callback(activity_domain_t domain, uint32_t cid, const void* callback_d
             rocprofiler_record_tracer_t{
                 rocprofiler_record_header_t{
                     ROCPROFILER_TRACER_RECORD,
-                    rocprofiler_record_id_t{rocmtools::GetROCMToolObj()->GetUniqueRecordId()}},
+                    rocprofiler_record_id_t{rocprofiler::GetROCProfilerSingleton()->GetUniqueRecordId()}},
                 rocprofiler_tracer_external_id_t{0}, ACTIVITY_DOMAIN_ROCTX,
                 rocprofiler_tracer_operation_id_t{cid},
                 rocprofiler_tracer_api_data_handle_t{callback_data, sizeof(*data)},
@@ -318,7 +318,7 @@ void api_callback(activity_domain_t domain, uint32_t cid, const void* callback_d
               rocprofiler_record_tracer_t{
                   rocprofiler_record_header_t{
                       ROCPROFILER_TRACER_RECORD,
-                      rocprofiler_record_id_t{rocmtools::GetROCMToolObj()->GetUniqueRecordId()}},
+                      rocprofiler_record_id_t{rocprofiler::GetROCProfilerSingleton()->GetUniqueRecordId()}},
                   rocprofiler_tracer_external_id_t{0}, ACTIVITY_DOMAIN_HSA_API,
                   rocprofiler_tracer_operation_id_t{cid},
                   rocprofiler_tracer_api_data_handle_t{callback_data, sizeof(*data)},
@@ -332,7 +332,7 @@ void api_callback(activity_domain_t domain, uint32_t cid, const void* callback_d
               rocprofiler_record_tracer_t{
                   rocprofiler_record_header_t{
                       ROCPROFILER_TRACER_RECORD,
-                      rocprofiler_record_id_t{rocmtools::GetROCMToolObj()->GetUniqueRecordId()}},
+                      rocprofiler_record_id_t{rocprofiler::GetROCProfilerSingleton()->GetUniqueRecordId()}},
                   rocprofiler_tracer_external_id_t{0}, ACTIVITY_DOMAIN_HSA_API,
                   rocprofiler_tracer_operation_id_t{cid},
                   rocprofiler_tracer_api_data_handle_t{callback_data, sizeof(*data)},
@@ -352,7 +352,7 @@ void api_callback(activity_domain_t domain, uint32_t cid, const void* callback_d
               rocprofiler_record_tracer_t{
                   rocprofiler_record_header_t{
                       ROCPROFILER_TRACER_RECORD,
-                      rocprofiler_record_id_t{rocmtools::GetROCMToolObj()->GetUniqueRecordId()}},
+                      rocprofiler_record_id_t{rocprofiler::GetROCProfilerSingleton()->GetUniqueRecordId()}},
                   rocprofiler_tracer_external_id_t{0}, ACTIVITY_DOMAIN_HIP_API,
                   rocprofiler_tracer_operation_id_t{cid},
                   rocprofiler_tracer_api_data_handle_t{callback_data, sizeof(*data)},
@@ -389,7 +389,7 @@ void api_callback(activity_domain_t domain, uint32_t cid, const void* callback_d
               rocprofiler_record_tracer_t{
                   rocprofiler_record_header_t{
                       ROCPROFILER_TRACER_RECORD,
-                      rocprofiler_record_id_t{rocmtools::GetROCMToolObj()->GetUniqueRecordId()}},
+                      rocprofiler_record_id_t{rocprofiler::GetROCProfilerSingleton()->GetUniqueRecordId()}},
                   rocprofiler_tracer_external_id_t{0}, ACTIVITY_DOMAIN_HIP_API,
                   rocprofiler_tracer_operation_id_t{cid},
                   rocprofiler_tracer_api_data_handle_t{callback_data, sizeof(*data)},
@@ -478,4 +478,4 @@ void Tracer::InitRoctracer(
 }
 
 }  // namespace tracer
-}  // namespace rocmtools
+}  // namespace rocprofiler

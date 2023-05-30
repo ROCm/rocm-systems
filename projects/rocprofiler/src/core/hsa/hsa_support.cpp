@@ -48,7 +48,7 @@
 #include "src/utils/helper.h"
 
 #include "src/core/hsa/queues/queue.h"
-#include "src/api/rocmtool.h"
+#include "src/api/rocprofiler_singleton.h"
 
 #include <experimental/filesystem>
 namespace fs = std::experimental::filesystem;
@@ -58,11 +58,11 @@ namespace {
 hsa_status_t hsa_executable_iteration_callback(hsa_executable_t executable, hsa_agent_t agent,
                                                hsa_executable_symbol_t symbol, void* args) {
   hsa_symbol_kind_t type;
-  rocmtools::hsa_support::GetCoreApiTable().hsa_executable_symbol_get_info_fn(
+  rocprofiler::hsa_support::GetCoreApiTable().hsa_executable_symbol_get_info_fn(
       symbol, HSA_EXECUTABLE_SYMBOL_INFO_TYPE, &type);
   if (type == HSA_SYMBOL_KIND_KERNEL) {
     uint32_t name_length;
-    rocmtools::hsa_support::GetCoreApiTable().hsa_executable_symbol_get_info_fn(
+    rocprofiler::hsa_support::GetCoreApiTable().hsa_executable_symbol_get_info_fn(
         symbol, HSA_EXECUTABLE_SYMBOL_INFO_NAME_LENGTH, &name_length);
     // TODO(aelwazir): to be removed if the HSA fixed the issue of corrupted
     // names overflowing the length given
@@ -70,17 +70,17 @@ hsa_status_t hsa_executable_iteration_callback(hsa_executable_t executable, hsa_
       if (!(*static_cast<bool*>(args))) {
         char name[name_length + 1];
         uint64_t kernel_object;
-        rocmtools::hsa_support::GetCoreApiTable().hsa_executable_symbol_get_info_fn(
+        rocprofiler::hsa_support::GetCoreApiTable().hsa_executable_symbol_get_info_fn(
             symbol, HSA_EXECUTABLE_SYMBOL_INFO_NAME, name);
-        rocmtools::hsa_support::GetCoreApiTable().hsa_executable_symbol_get_info_fn(
+        rocprofiler::hsa_support::GetCoreApiTable().hsa_executable_symbol_get_info_fn(
             symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT, &kernel_object);
         std::string kernel_name = std::string(name).substr(0, name_length);
-        rocmtools::AddKernelName(kernel_object, kernel_name);
+        rocprofiler::AddKernelName(kernel_object, kernel_name);
       } else {
         uint64_t kernel_object;
-        rocmtools::hsa_support::GetCoreApiTable().hsa_executable_symbol_get_info_fn(
+        rocprofiler::hsa_support::GetCoreApiTable().hsa_executable_symbol_get_info_fn(
             symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT, &kernel_object);
-        rocmtools::RemoveKernelName(kernel_object);
+        rocprofiler::RemoveKernelName(kernel_object);
       }
     }
   }
@@ -167,17 +167,17 @@ class Tracker {
     entry->valid.store(ENTRY_INIT, std::memory_order_release);
 
     // Creating a proxy signal
-    status = rocmtools::hsa_support::GetCoreApiTable().hsa_signal_create_fn(1, 0, NULL,
+    status = rocprofiler::hsa_support::GetCoreApiTable().hsa_signal_create_fn(1, 0, NULL,
                                                                             &(entry->signal));
-    if (status != HSA_STATUS_SUCCESS) rocmtools::fatal("hsa_signal_create failed");
-    status = rocmtools::hsa_support::GetAmdExtTable().hsa_amd_signal_async_handler_fn(
+    if (status != HSA_STATUS_SUCCESS) rocprofiler::fatal("hsa_signal_create failed");
+    status = rocprofiler::hsa_support::GetAmdExtTable().hsa_amd_signal_async_handler_fn(
         entry->signal, HSA_SIGNAL_CONDITION_LT, 1, Handler, entry);
-    if (status != HSA_STATUS_SUCCESS) rocmtools::fatal("hsa_amd_signal_async_handler failed");
+    if (status != HSA_STATUS_SUCCESS) rocprofiler::fatal("hsa_amd_signal_async_handler failed");
   }
 
   // Delete tracker entry
   inline static void Disable(entry_t* entry) {
-    rocmtools::hsa_support::GetCoreApiTable().hsa_signal_destroy_fn(entry->signal);
+    rocprofiler::hsa_support::GetCoreApiTable().hsa_signal_destroy_fn(entry->signal);
     entry->valid.store(ENTRY_INV, std::memory_order_release);
   }
 
@@ -186,19 +186,19 @@ class Tracker {
   inline static void Complete(hsa_signal_value_t signal_value, entry_t* entry) {
     static roctracer_timestamp_t sysclock_period = []() {
       uint64_t sysclock_hz = 0;
-      hsa_status_t status = rocmtools::hsa_support::GetCoreApiTable().hsa_system_get_info_fn(
+      hsa_status_t status = rocprofiler::hsa_support::GetCoreApiTable().hsa_system_get_info_fn(
           HSA_SYSTEM_INFO_TIMESTAMP_FREQUENCY, &sysclock_hz);
-      if (status != HSA_STATUS_SUCCESS) rocmtools::fatal("hsa_system_get_info failed");
+      if (status != HSA_STATUS_SUCCESS) rocprofiler::fatal("hsa_system_get_info failed");
       return (uint64_t)1000000000 / sysclock_hz;
     }();
 
     if (entry->type == COPY_ENTRY_TYPE) {
       hsa_amd_profiling_async_copy_time_t async_copy_time{};
       hsa_status_t status =
-          rocmtools::hsa_support::GetAmdExtTable().hsa_amd_profiling_get_async_copy_time_fn(
+          rocprofiler::hsa_support::GetAmdExtTable().hsa_amd_profiling_get_async_copy_time_fn(
               entry->signal, &async_copy_time);
       if (status != HSA_STATUS_SUCCESS)
-        rocmtools::fatal("hsa_amd_profiling_get_async_copy_time failed");
+        rocprofiler::fatal("hsa_amd_profiling_get_async_copy_time failed");
       entry->begin = async_copy_time.start * sysclock_period;
       entry->end = async_copy_time.end * sysclock_period;
     } else {
@@ -222,11 +222,11 @@ class Tracker {
       orig_signal_ptr->end_ts = prof_signal_ptr->end_ts;
 
       [[maybe_unused]] const hsa_signal_value_t new_value =
-          rocmtools::hsa_support::GetCoreApiTable().hsa_signal_load_relaxed_fn(orig) - 1;
+          rocprofiler::hsa_support::GetCoreApiTable().hsa_signal_load_relaxed_fn(orig) - 1;
       assert(signal_value == new_value && "Tracker::Complete bad signal value");
-      rocmtools::hsa_support::GetCoreApiTable().hsa_signal_store_screlease_fn(orig, signal_value);
+      rocprofiler::hsa_support::GetCoreApiTable().hsa_signal_store_screlease_fn(orig, signal_value);
     }
-    rocmtools::hsa_support::GetCoreApiTable().hsa_signal_destroy_fn(signal);
+    rocprofiler::hsa_support::GetCoreApiTable().hsa_signal_destroy_fn(signal);
     delete entry;
   }
 
@@ -244,18 +244,18 @@ class Tracker {
 
 hsa_status_t HSA_API MemoryAllocateIntercept(hsa_region_t region, size_t size, void** ptr) {
   hsa_status_t status =
-      rocmtools::hsa_support::GetCoreApiTable().hsa_memory_allocate_fn(region, size, ptr);
+      rocprofiler::hsa_support::GetCoreApiTable().hsa_memory_allocate_fn(region, size, ptr);
   if (status != HSA_STATUS_SUCCESS) return status;
 
   if (IsEnabled(ACTIVITY_DOMAIN_HSA_EVT, HSA_EVT_ID_ALLOCATE)) {
     hsa_evt_data_t data{};
     data.allocate.ptr = *ptr;
     data.allocate.size = size;
-    if (rocmtools::hsa_support::GetCoreApiTable().hsa_region_get_info_fn(
+    if (rocprofiler::hsa_support::GetCoreApiTable().hsa_region_get_info_fn(
             region, HSA_REGION_INFO_SEGMENT, &data.allocate.segment) != HSA_STATUS_SUCCESS ||
-        rocmtools::hsa_support::GetCoreApiTable().hsa_region_get_info_fn(
+        rocprofiler::hsa_support::GetCoreApiTable().hsa_region_get_info_fn(
             region, HSA_REGION_INFO_GLOBAL_FLAGS, &data.allocate.global_flag) != HSA_STATUS_SUCCESS)
-      rocmtools::fatal("hsa_region_get_info failed");
+      rocprofiler::fatal("hsa_region_get_info failed");
 
     ReportActivity(ACTIVITY_DOMAIN_HSA_EVT, HSA_EVT_ID_ALLOCATE, &data);
   }
@@ -266,15 +266,15 @@ hsa_status_t HSA_API MemoryAllocateIntercept(hsa_region_t region, size_t size, v
 hsa_status_t MemoryAssignAgentIntercept(void* ptr, hsa_agent_t agent,
                                         hsa_access_permission_t access) {
   hsa_status_t status =
-      rocmtools::hsa_support::GetCoreApiTable().hsa_memory_assign_agent_fn(ptr, agent, access);
+      rocprofiler::hsa_support::GetCoreApiTable().hsa_memory_assign_agent_fn(ptr, agent, access);
   if (status != HSA_STATUS_SUCCESS) return status;
 
   if (IsEnabled(ACTIVITY_DOMAIN_HSA_EVT, HSA_EVT_ID_DEVICE)) {
     hsa_evt_data_t data{};
     data.device.ptr = ptr;
-    if (rocmtools::hsa_support::GetCoreApiTable().hsa_agent_get_info_fn(
+    if (rocprofiler::hsa_support::GetCoreApiTable().hsa_agent_get_info_fn(
             agent, HSA_AGENT_INFO_DEVICE, &data.device.type) != HSA_STATUS_SUCCESS)
-      rocmtools::fatal("hsa_agent_get_info failed");
+      rocprofiler::fatal("hsa_agent_get_info failed");
 
     ReportActivity(ACTIVITY_DOMAIN_HSA_EVT, HSA_EVT_ID_DEVICE, &data);
   }
@@ -284,7 +284,7 @@ hsa_status_t MemoryAssignAgentIntercept(void* ptr, hsa_agent_t agent,
 
 hsa_status_t MemoryCopyIntercept(void* dst, const void* src, size_t size) {
   hsa_status_t status =
-      rocmtools::hsa_support::GetCoreApiTable().hsa_memory_copy_fn(dst, src, size);
+      rocprofiler::hsa_support::GetCoreApiTable().hsa_memory_copy_fn(dst, src, size);
   if (status != HSA_STATUS_SUCCESS) return status;
 
   if (IsEnabled(ACTIVITY_DOMAIN_HSA_EVT, HSA_EVT_ID_MEMCOPY)) {
@@ -301,7 +301,7 @@ hsa_status_t MemoryCopyIntercept(void* dst, const void* src, size_t size) {
 
 hsa_status_t MemoryPoolAllocateIntercept(hsa_amd_memory_pool_t pool, size_t size, uint32_t flags,
                                          void** ptr) {
-  hsa_status_t status = rocmtools::hsa_support::GetAmdExtTable().hsa_amd_memory_pool_allocate_fn(
+  hsa_status_t status = rocprofiler::hsa_support::GetAmdExtTable().hsa_amd_memory_pool_allocate_fn(
       pool, size, flags, ptr);
   if (size == 0 || status != HSA_STATUS_SUCCESS) return status;
 
@@ -310,12 +310,12 @@ hsa_status_t MemoryPoolAllocateIntercept(hsa_amd_memory_pool_t pool, size_t size
     data.allocate.ptr = *ptr;
     data.allocate.size = size;
 
-    if (rocmtools::hsa_support::GetAmdExtTable().hsa_amd_memory_pool_get_info_fn(
+    if (rocprofiler::hsa_support::GetAmdExtTable().hsa_amd_memory_pool_get_info_fn(
             pool, HSA_AMD_MEMORY_POOL_INFO_SEGMENT, &data.allocate.segment) != HSA_STATUS_SUCCESS ||
-        rocmtools::hsa_support::GetAmdExtTable().hsa_amd_memory_pool_get_info_fn(
+        rocprofiler::hsa_support::GetAmdExtTable().hsa_amd_memory_pool_get_info_fn(
             pool, HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS, &data.allocate.global_flag) !=
             HSA_STATUS_SUCCESS)
-      rocmtools::fatal("hsa_region_get_info failed");
+      rocprofiler::fatal("hsa_region_get_info failed");
 
     ReportActivity(ACTIVITY_DOMAIN_HSA_EVT, HSA_EVT_ID_ALLOCATE, &data);
   }
@@ -326,13 +326,13 @@ hsa_status_t MemoryPoolAllocateIntercept(hsa_amd_memory_pool_t pool, size_t size
       auto [pool, ptr] = *reinterpret_cast<decltype(callback_data)*>(iterate_agent_callback_data);
 
       if (hsa_amd_memory_pool_access_t value;
-          rocmtools::hsa_support::GetAmdExtTable().hsa_amd_agent_memory_pool_get_info_fn(
+          rocprofiler::hsa_support::GetAmdExtTable().hsa_amd_agent_memory_pool_get_info_fn(
               agent, pool, HSA_AMD_AGENT_MEMORY_POOL_INFO_ACCESS, &value) != HSA_STATUS_SUCCESS ||
           value != HSA_AMD_MEMORY_POOL_ACCESS_ALLOWED_BY_DEFAULT)
         return HSA_STATUS_SUCCESS;
 
       auto it = agent_info_map.find(agent.handle);
-      if (it == agent_info_map.end()) rocmtools::fatal("agent was not found in the agent_info map");
+      if (it == agent_info_map.end()) rocprofiler::fatal("agent was not found in the agent_info map");
 
       hsa_evt_data_t data{};
       data.device.type = it->second.type;
@@ -343,7 +343,7 @@ hsa_status_t MemoryPoolAllocateIntercept(hsa_amd_memory_pool_t pool, size_t size
       ReportActivity(ACTIVITY_DOMAIN_HSA_EVT, HSA_EVT_ID_DEVICE, &data);
       return HSA_STATUS_SUCCESS;
     };
-    rocmtools::hsa_support::GetCoreApiTable().hsa_iterate_agents_fn(agent_callback, &callback_data);
+    rocprofiler::hsa_support::GetCoreApiTable().hsa_iterate_agents_fn(agent_callback, &callback_data);
   }
 
   return HSA_STATUS_SUCCESS;
@@ -358,7 +358,7 @@ hsa_status_t MemoryPoolFreeIntercept(void* ptr) {
   }
 
   if (ptr)
-    return rocmtools::hsa_support::GetAmdExtTable().hsa_amd_memory_pool_free_fn(ptr);
+    return rocprofiler::hsa_support::GetAmdExtTable().hsa_amd_memory_pool_free_fn(ptr);
   else
     return HSA_STATUS_SUCCESS;
 }
@@ -366,7 +366,7 @@ hsa_status_t MemoryPoolFreeIntercept(void* ptr) {
 // Agent allow access callback 'hsa_amd_agents_allow_access'
 hsa_status_t AgentsAllowAccessIntercept(uint32_t num_agents, const hsa_agent_t* agents,
                                         const uint32_t* flags, const void* ptr) {
-  hsa_status_t status = rocmtools::hsa_support::GetAmdExtTable().hsa_amd_agents_allow_access_fn(
+  hsa_status_t status = rocprofiler::hsa_support::GetAmdExtTable().hsa_amd_agents_allow_access_fn(
       num_agents, agents, flags, ptr);
   if (status != HSA_STATUS_SUCCESS) return status;
 
@@ -374,7 +374,7 @@ hsa_status_t AgentsAllowAccessIntercept(uint32_t num_agents, const hsa_agent_t* 
     while (num_agents--) {
       hsa_agent_t agent = *agents++;
       auto it = agent_info_map.find(agent.handle);
-      if (it == agent_info_map.end()) rocmtools::fatal("agent was not found in the agent_info map");
+      if (it == agent_info_map.end()) rocprofiler::fatal("agent was not found in the agent_info map");
 
       hsa_evt_data_t data{};
       data.device.type = it->second.type;
@@ -398,62 +398,62 @@ hsa_status_t CodeObjectCallback(hsa_executable_t executable,
                                 hsa_loaded_code_object_t loaded_code_object, void* arg) {
   hsa_evt_data_t data{};
 
-  if (rocmtools::hsa_support::GetHSALoaderApi().hsa_ven_amd_loader_loaded_code_object_get_info(
+  if (rocprofiler::hsa_support::GetHSALoaderApi().hsa_ven_amd_loader_loaded_code_object_get_info(
           loaded_code_object, HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_CODE_OBJECT_STORAGE_TYPE,
           &data.codeobj.storage_type) != HSA_STATUS_SUCCESS)
-    rocmtools::fatal("hsa_ven_amd_loader_loaded_code_object_get_info failed");
+    rocprofiler::fatal("hsa_ven_amd_loader_loaded_code_object_get_info failed");
 
   if (data.codeobj.storage_type == HSA_VEN_AMD_LOADER_CODE_OBJECT_STORAGE_TYPE_FILE) {
-    if (rocmtools::hsa_support::GetHSALoaderApi().hsa_ven_amd_loader_loaded_code_object_get_info(
+    if (rocprofiler::hsa_support::GetHSALoaderApi().hsa_ven_amd_loader_loaded_code_object_get_info(
             loaded_code_object, HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_CODE_OBJECT_STORAGE_FILE,
             &data.codeobj.storage_file) != HSA_STATUS_SUCCESS ||
         data.codeobj.storage_file == -1)
-      rocmtools::fatal("hsa_ven_amd_loader_loaded_code_object_get_info failed");
+      rocprofiler::fatal("hsa_ven_amd_loader_loaded_code_object_get_info failed");
     data.codeobj.memory_base = data.codeobj.memory_size = 0;
   } else if (data.codeobj.storage_type == HSA_VEN_AMD_LOADER_CODE_OBJECT_STORAGE_TYPE_MEMORY) {
-    if (rocmtools::hsa_support::GetHSALoaderApi().hsa_ven_amd_loader_loaded_code_object_get_info(
+    if (rocprofiler::hsa_support::GetHSALoaderApi().hsa_ven_amd_loader_loaded_code_object_get_info(
             loaded_code_object,
             HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_CODE_OBJECT_STORAGE_MEMORY_BASE,
             &data.codeobj.memory_base) != HSA_STATUS_SUCCESS ||
-        rocmtools::hsa_support::GetHSALoaderApi().hsa_ven_amd_loader_loaded_code_object_get_info(
+        rocprofiler::hsa_support::GetHSALoaderApi().hsa_ven_amd_loader_loaded_code_object_get_info(
             loaded_code_object,
             HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_CODE_OBJECT_STORAGE_MEMORY_SIZE,
             &data.codeobj.memory_size) != HSA_STATUS_SUCCESS)
-      rocmtools::fatal("hsa_ven_amd_loader_loaded_code_object_get_info failed");
+      rocprofiler::fatal("hsa_ven_amd_loader_loaded_code_object_get_info failed");
     data.codeobj.storage_file = -1;
   } else if (data.codeobj.storage_type == HSA_VEN_AMD_LOADER_CODE_OBJECT_STORAGE_TYPE_NONE) {
     return HSA_STATUS_SUCCESS;  // FIXME: do we really not care about these
                                 // code objects?
   } else {
-    rocmtools::fatal("unknown code object storage type: %d", data.codeobj.storage_type);
+    rocprofiler::fatal("unknown code object storage type: %d", data.codeobj.storage_type);
   }
 
-  if (rocmtools::hsa_support::GetHSALoaderApi().hsa_ven_amd_loader_loaded_code_object_get_info(
+  if (rocprofiler::hsa_support::GetHSALoaderApi().hsa_ven_amd_loader_loaded_code_object_get_info(
           loaded_code_object, HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_LOAD_BASE,
           &data.codeobj.load_base) != HSA_STATUS_SUCCESS ||
-      rocmtools::hsa_support::GetHSALoaderApi().hsa_ven_amd_loader_loaded_code_object_get_info(
+      rocprofiler::hsa_support::GetHSALoaderApi().hsa_ven_amd_loader_loaded_code_object_get_info(
           loaded_code_object, HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_LOAD_SIZE,
           &data.codeobj.load_size) != HSA_STATUS_SUCCESS ||
-      rocmtools::hsa_support::GetHSALoaderApi().hsa_ven_amd_loader_loaded_code_object_get_info(
+      rocprofiler::hsa_support::GetHSALoaderApi().hsa_ven_amd_loader_loaded_code_object_get_info(
           loaded_code_object, HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_LOAD_DELTA,
           &data.codeobj.load_delta) != HSA_STATUS_SUCCESS)
-    rocmtools::fatal("hsa_ven_amd_loader_loaded_code_object_get_info failed");
+    rocprofiler::fatal("hsa_ven_amd_loader_loaded_code_object_get_info failed");
 
-  if (rocmtools::hsa_support::GetHSALoaderApi().hsa_ven_amd_loader_loaded_code_object_get_info(
+  if (rocprofiler::hsa_support::GetHSALoaderApi().hsa_ven_amd_loader_loaded_code_object_get_info(
           loaded_code_object, HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_URI_LENGTH,
           &data.codeobj.uri_length) != HSA_STATUS_SUCCESS)
-    rocmtools::fatal("hsa_ven_amd_loader_loaded_code_object_get_info failed");
+    rocprofiler::fatal("hsa_ven_amd_loader_loaded_code_object_get_info failed");
 
   std::string uri_str(data.codeobj.uri_length, '\0');
-  if (rocmtools::hsa_support::GetHSALoaderApi().hsa_ven_amd_loader_loaded_code_object_get_info(
+  if (rocprofiler::hsa_support::GetHSALoaderApi().hsa_ven_amd_loader_loaded_code_object_get_info(
           loaded_code_object, HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_URI, uri_str.data()) !=
       HSA_STATUS_SUCCESS)
-    rocmtools::fatal("hsa_ven_amd_loader_loaded_code_object_get_info failed");
+    rocprofiler::fatal("hsa_ven_amd_loader_loaded_code_object_get_info failed");
 
-  if (rocmtools::hsa_support::GetHSALoaderApi().hsa_ven_amd_loader_loaded_code_object_get_info(
+  if (rocprofiler::hsa_support::GetHSALoaderApi().hsa_ven_amd_loader_loaded_code_object_get_info(
           loaded_code_object, HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_AGENT,
           &data.codeobj.agent) != HSA_STATUS_SUCCESS)
-    rocmtools::fatal("hsa_ven_amd_loader_loaded_code_object_get_info failed");
+    rocprofiler::fatal("hsa_ven_amd_loader_loaded_code_object_get_info failed");
 
   data.codeobj.uri = uri_str.c_str();
   data.codeobj.unload = *static_cast<bool*>(arg) ? 1 : 0;
@@ -467,12 +467,12 @@ hsa_status_t CodeObjectCallback(hsa_executable_t executable,
 
 hsa_status_t ExecutableFreezeIntercept(hsa_executable_t executable, const char* options) {
   hsa_status_t status =
-      rocmtools::hsa_support::GetCoreApiTable().hsa_executable_freeze_fn(executable, options);
+      rocprofiler::hsa_support::GetCoreApiTable().hsa_executable_freeze_fn(executable, options);
   if (status != HSA_STATUS_SUCCESS) return status;
 
   // if (IsEnabled(ACTIVITY_DOMAIN_HSA_EVT, HSA_EVT_ID_CODEOBJ)) {
   bool unload = false;
-  rocmtools::hsa_support::GetHSALoaderApi()
+  rocprofiler::hsa_support::GetHSALoaderApi()
       .hsa_ven_amd_loader_executable_iterate_loaded_code_objects(executable, CodeObjectCallback,
                                                                  &unload);
   // }
@@ -483,19 +483,19 @@ hsa_status_t ExecutableFreezeIntercept(hsa_executable_t executable, const char* 
 hsa_status_t ExecutableDestroyIntercept(hsa_executable_t executable) {
   // if (IsEnabled(ACTIVITY_DOMAIN_HSA_EVT, HSA_EVT_ID_CODEOBJ)) {
   bool unload = true;
-  rocmtools::hsa_support::GetHSALoaderApi()
+  rocprofiler::hsa_support::GetHSALoaderApi()
       .hsa_ven_amd_loader_executable_iterate_loaded_code_objects(executable, CodeObjectCallback,
                                                                  &unload);
   // }
 
-  return rocmtools::hsa_support::GetCoreApiTable().hsa_executable_destroy_fn(executable);
+  return rocprofiler::hsa_support::GetCoreApiTable().hsa_executable_destroy_fn(executable);
 }
 
 std::atomic<bool> profiling_async_copy_enable{false};
 
 hsa_status_t ProfilingAsyncCopyEnableIntercept(bool enable) {
   hsa_status_t status =
-      rocmtools::hsa_support::GetAmdExtTable().hsa_amd_profiling_async_copy_enable_fn(enable);
+      rocprofiler::hsa_support::GetAmdExtTable().hsa_amd_profiling_async_copy_enable_fn(enable);
   if (status == HSA_STATUS_SUCCESS) {
     profiling_async_copy_enable.exchange(enable, std::memory_order_release);
   }
@@ -521,12 +521,12 @@ hsa_status_t MemoryASyncCopyIntercept(void* dst, hsa_agent_t dst_agent, const vo
 
   // FIXME: what happens if the state changes before returning?
   [[maybe_unused]] hsa_status_t status =
-      rocmtools::hsa_support::GetAmdExtTable().hsa_amd_profiling_async_copy_enable_fn(
+      rocprofiler::hsa_support::GetAmdExtTable().hsa_amd_profiling_async_copy_enable_fn(
           profiling_async_copy_enable.load(std::memory_order_relaxed) || is_enabled);
   assert(status == HSA_STATUS_SUCCESS && "hsa_amd_profiling_async_copy_enable failed");
 
   if (!is_enabled) {
-    return rocmtools::hsa_support::GetAmdExtTable().hsa_amd_memory_async_copy_fn(
+    return rocprofiler::hsa_support::GetAmdExtTable().hsa_amd_memory_async_copy_fn(
         dst, dst_agent, src, src_agent, size, num_dep_signals, dep_signals, completion_signal);
   }
 
@@ -535,7 +535,7 @@ hsa_status_t MemoryASyncCopyIntercept(void* dst, hsa_agent_t dst_agent, const vo
   entry->correlation_id = CorrelationId();
   Tracker::Enable(Tracker::COPY_ENTRY_TYPE, hsa_agent_t{}, completion_signal, entry);
 
-  status = rocmtools::hsa_support::GetAmdExtTable().hsa_amd_memory_async_copy_fn(
+  status = rocprofiler::hsa_support::GetAmdExtTable().hsa_amd_memory_async_copy_fn(
       dst, dst_agent, src, src_agent, size, num_dep_signals, dep_signals, entry->signal);
   if (status != HSA_STATUS_SUCCESS) Tracker::Disable(entry);
 
@@ -553,12 +553,12 @@ hsa_status_t MemoryASyncCopyRectIntercept(const hsa_pitched_ptr_t* dst,
 
   // FIXME: what happens if the state changes before returning?
   [[maybe_unused]] hsa_status_t status =
-      rocmtools::hsa_support::GetAmdExtTable().hsa_amd_profiling_async_copy_enable_fn(
+      rocprofiler::hsa_support::GetAmdExtTable().hsa_amd_profiling_async_copy_enable_fn(
           profiling_async_copy_enable.load(std::memory_order_relaxed) || is_enabled);
   assert(status == HSA_STATUS_SUCCESS && "hsa_amd_profiling_async_copy_enable failed");
 
   if (!is_enabled) {
-    return rocmtools::hsa_support::GetAmdExtTable().hsa_amd_memory_async_copy_rect_fn(
+    return rocprofiler::hsa_support::GetAmdExtTable().hsa_amd_memory_async_copy_rect_fn(
         dst, dst_offset, src, src_offset, range, copy_agent, dir, num_dep_signals, dep_signals,
         completion_signal);
   }
@@ -568,7 +568,7 @@ hsa_status_t MemoryASyncCopyRectIntercept(const hsa_pitched_ptr_t* dst,
   entry->correlation_id = CorrelationId();
   Tracker::Enable(Tracker::COPY_ENTRY_TYPE, hsa_agent_t{}, completion_signal, entry);
 
-  status = rocmtools::hsa_support::GetAmdExtTable().hsa_amd_memory_async_copy_rect_fn(
+  status = rocprofiler::hsa_support::GetAmdExtTable().hsa_amd_memory_async_copy_rect_fn(
       dst, dst_offset, src, src_offset, range, copy_agent, dir, num_dep_signals, dep_signals,
       entry->signal);
   if (status != HSA_STATUS_SUCCESS) Tracker::Disable(entry);
@@ -612,7 +612,7 @@ rocprofiler_timestamp_t timestamp_ns() {
   // If the HSA intercept is installed, then use the "original"
   // 'hsa_system_get_info' function to avoid reporting calls for internal use
   // of the HSA API by the tracer.
-  auto hsa_system_get_info_fn = rocmtools::hsa_support::GetCoreApiTable().hsa_system_get_info_fn;
+  auto hsa_system_get_info_fn = rocprofiler::hsa_support::GetCoreApiTable().hsa_system_get_info_fn;
 
   // If the HSA intercept is not installed, use the default
   // 'hsa_system_get_info'.
@@ -623,14 +623,14 @@ rocprofiler_timestamp_t timestamp_ns() {
       status == HSA_STATUS_ERROR_NOT_INITIALIZED)
     return rocprofiler_timestamp_t{0};
   else if (status != HSA_STATUS_SUCCESS)
-    rocmtools::fatal("hsa_system_get_info failed");
+    rocprofiler::fatal("hsa_system_get_info failed");
 
   static uint64_t sysclock_period = [&]() {
     uint64_t sysclock_hz = 0;
     if (hsa_status_t status =
             hsa_system_get_info_fn(HSA_SYSTEM_INFO_TIMESTAMP_FREQUENCY, &sysclock_hz);
         status != HSA_STATUS_SUCCESS)
-      rocmtools::fatal("hsa_system_get_info failed");
+      rocprofiler::fatal("hsa_system_get_info failed");
 
     return (uint64_t)1000000000 / sysclock_hz;
   }();
@@ -640,17 +640,17 @@ rocprofiler_timestamp_t timestamp_ns() {
 
 void Initialize_roctracer(HsaApiTable* table) {
   // Save the HSA core api and amd_ext api.
-  saved_core_api = rocmtools::hsa_support::GetCoreApiTable();
-  saved_amd_ext_api = rocmtools::hsa_support::GetAmdExtTable();
-  hsa_loader_api = rocmtools::hsa_support::GetHSALoaderApi();
+  saved_core_api = rocprofiler::hsa_support::GetCoreApiTable();
+  saved_amd_ext_api = rocprofiler::hsa_support::GetAmdExtTable();
+  hsa_loader_api = rocprofiler::hsa_support::GetHSALoaderApi();
 
   // Enumerate the agents.
-  if (rocmtools::hsa_support::GetCoreApiTable().hsa_iterate_agents_fn(
+  if (rocprofiler::hsa_support::GetCoreApiTable().hsa_iterate_agents_fn(
           [](hsa_agent_t agent, void* data) {
             hsa_support::AgentInfo agent_info;
-            if (rocmtools::hsa_support::GetCoreApiTable().hsa_agent_get_info_fn(
+            if (rocprofiler::hsa_support::GetCoreApiTable().hsa_agent_get_info_fn(
                     agent, HSA_AGENT_INFO_DEVICE, &agent_info.type) != HSA_STATUS_SUCCESS)
-              rocmtools::fatal("hsa_agent_get_info failed");
+              rocprofiler::fatal("hsa_agent_get_info failed");
             switch (agent_info.type) {
               case HSA_DEVICE_TYPE_CPU:
                 static int cpu_agent_count = 0;
@@ -658,10 +658,10 @@ void Initialize_roctracer(HsaApiTable* table) {
                 break;
               case HSA_DEVICE_TYPE_GPU: {
                 uint32_t driver_node_id;
-                if (rocmtools::hsa_support::GetCoreApiTable().hsa_agent_get_info_fn(
+                if (rocprofiler::hsa_support::GetCoreApiTable().hsa_agent_get_info_fn(
                         agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_DRIVER_NODE_ID),
                         &driver_node_id) != HSA_STATUS_SUCCESS)
-                  rocmtools::fatal("hsa_agent_get_info failed");
+                  rocprofiler::fatal("hsa_agent_get_info failed");
 
                 agent_info.id = driver_node_id;
               } break;
@@ -674,7 +674,7 @@ void Initialize_roctracer(HsaApiTable* table) {
             return HSA_STATUS_SUCCESS;
           },
           nullptr) != HSA_STATUS_SUCCESS)
-    rocmtools::fatal("hsa_iterate_agents failed");
+    rocprofiler::fatal("hsa_iterate_agents failed");
 }
 
 const char* GetApiName(uint32_t id) { return detail::GetApiName(id); }
@@ -722,7 +722,7 @@ void RegisterTracerCallback(int (*function)(activity_domain_t domain, uint32_t o
 
 }  // namespace roctracer::hsa_support
 
-namespace rocmtools {
+namespace rocprofiler {
 
 namespace hsa_support {
 
@@ -845,11 +845,11 @@ void Initialize(HsaApiTable* table) {
               case HSA_DEVICE_TYPE_CPU:
                 agent_info.setIndex(cpu_agent_count++);
                 cpu_agent = agent;
-                rocmtools::queue::InitializePools(cpu_agent, &agent_info);
+                rocprofiler::queue::InitializePools(cpu_agent, &agent_info);
                 uint32_t cpu_numa_node_id;
                 if (GetCoreApiTable().hsa_agent_get_info_fn(
                         agent, HSA_AGENT_INFO_NODE, &cpu_numa_node_id) != HSA_STATUS_SUCCESS)
-                  rocmtools::fatal("hsa_agent_get_info(HSA_AGENT_INFO_NODE) failed");
+                  rocprofiler::fatal("hsa_agent_get_info(HSA_AGENT_INFO_NODE) failed");
                 agent_info.setNumaNode(cpu_numa_node_id);
                 numa_node_to_cpu_agent[cpu_numa_node_id] = agent;
                 break;
@@ -871,11 +871,11 @@ void Initialize(HsaApiTable* table) {
                 uint32_t gpu_cpu_numa_node_id;
                 if (GetCoreApiTable().hsa_agent_get_info_fn(
                         agent, HSA_AGENT_INFO_NODE, &gpu_cpu_numa_node_id) != HSA_STATUS_SUCCESS)
-                  rocmtools::fatal("hsa_agent_get_info(HSA_AGENT_INFO_NODE) failed");
+                  rocprofiler::fatal("hsa_agent_get_info(HSA_AGENT_INFO_NODE) failed");
                 agent_info.setNumaNode(gpu_cpu_numa_node_id);
                 agent_info.setNearCpuAgent(
                     numa_node_to_cpu_agent[gpu_numa_nodes_near_cpu[gpu_cpu_numa_node_id]]);
-                rocmtools::queue::InitializeGPUPool(agent, &agent_info);
+                rocprofiler::queue::InitializeGPUPool(agent, &agent_info);
                 gpu_agents.push_back(agent);
                 break;
               default:
@@ -886,7 +886,7 @@ void Initialize(HsaApiTable* table) {
             return HSA_STATUS_SUCCESS;
           },
           nullptr) != HSA_STATUS_SUCCESS)
-    rocmtools::fatal("hsa_iterate_agents failed");
+    rocprofiler::fatal("hsa_iterate_agents failed");
 
   for (auto& agent : gpu_agents) {
     GetAgentInfo(agent.handle).cpu_pool =
@@ -895,7 +895,7 @@ void Initialize(HsaApiTable* table) {
         GetAgentInfo(GetAgentInfo(agent.handle).getNearCpuAgent().handle).kernarg_pool;
   }
 
-  rocmtools::queue::CheckPacketReqiurements(gpu_agents);
+  rocprofiler::queue::CheckPacketReqiurements(gpu_agents);
 
   gpu_agents.clear();
   numa_node_to_cpu_agent.clear();
@@ -944,22 +944,22 @@ void Finalize() {
   ResetMaps();
 }
 
-static std::map<uint64_t, rocmtools::MetricsDict*> metricsDicts;
+static std::map<uint64_t, rocprofiler::MetricsDict*> metricsDicts;
 
 bool IterateCounters(rocprofiler_counters_info_callback_t counters_info_callback) {
   if (GetCoreApiTable().hsa_iterate_agents_fn(
           [](hsa_agent_t agent, void* data) {
             Agent::AgentInfo agent_info{agent, &GetCoreApiTable()};
             if (agent_info.getType() == HSA_DEVICE_TYPE_GPU) {
-              metricsDicts.emplace(agent.handle, rocmtools::MetricsDict::Create(&agent_info));
+              metricsDicts.emplace(agent.handle, rocprofiler::MetricsDict::Create(&agent_info));
             }
             return HSA_STATUS_SUCCESS;
           },
           nullptr) != HSA_STATUS_SUCCESS)
-    rocmtools::fatal("hsa_iterate_agents failed");
+    rocprofiler::fatal("hsa_iterate_agents failed");
   uint32_t gpu_counter = 0;
   for (auto metricsDictAgent : metricsDicts) {
-    rocmtools::MetricsDict* metricsDict = metricsDictAgent.second;
+    rocprofiler::MetricsDict* metricsDict = metricsDictAgent.second;
     std::string gpu_name = metricsDict->GetAgentName();
     auto nodes_vec = metricsDict->GetNodes();
 
@@ -1031,4 +1031,4 @@ bool IterateCounters(rocprofiler_counters_info_callback_t counters_info_callback
 }
 
 }  // namespace hsa_support
-}  // namespace rocmtools
+}  // namespace rocprofiler

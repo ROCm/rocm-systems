@@ -30,7 +30,7 @@
 
 #include "rocprofiler.h"
 
-namespace rocmtools {
+namespace rocprofiler {
 
 typedef struct {
   uint64_t kernel_descriptor;
@@ -70,7 +70,7 @@ class AttTracer {
 
 }  // namespace att
 
-}  // namespace rocmtools
+}  // namespace rocprofiler
 
 
 #endif  // SRC_CORE_SESSION_ATT_ATT_H_

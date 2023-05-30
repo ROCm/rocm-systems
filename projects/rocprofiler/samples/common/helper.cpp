@@ -37,7 +37,7 @@
     }                                                                                              \
   } while (false)
 
-namespace rocmtools {
+namespace rocprofiler {
 
 std::string string_vprintf(const char* format, va_list va) {
   va_list copy;
@@ -178,4 +178,4 @@ std::string left_trim(const std::string& s) {
 }
 
 
-}  // namespace rocmtools
+}  // namespace rocprofiler

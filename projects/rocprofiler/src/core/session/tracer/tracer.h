@@ -37,7 +37,7 @@ typedef struct {
   rocprofiler_session_id_t session_id;
 } api_callback_data_t;
 
-namespace rocmtools {
+namespace rocprofiler {
 namespace tracer {
 
 char* GetApiCallFunctionName(rocprofiler_tracer_activity_domain_t domain,
@@ -108,6 +108,6 @@ class Tracer {
 };
 
 }  // namespace tracer
-}  // namespace rocmtools
+}  // namespace rocprofiler
 
 #endif  // SRC_TOOLS_TRACER_TRACER_H_

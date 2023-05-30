@@ -37,7 +37,7 @@
 
 #include "src/core/session/profiler/profiler.h"
 
-namespace rocmtools {
+namespace rocprofiler {
 
 void InitKsymbols();
 void FinitKsymbols();
@@ -95,6 +95,6 @@ void CheckPacketReqiurements(std::vector<hsa_agent_t>& gpu_agents);
 void ResetSessionID();
 
 }  // namespace queue
-}  // namespace rocmtools
+}  // namespace rocprofiler
 
 #endif  // SRC_CORE_HSA_QUEUES_QUEUE_H_

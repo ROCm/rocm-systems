@@ -22,7 +22,7 @@
 
 #include <cassert>
 
-#include "src/api/rocmtool.h"
+#include "src/api/rocprofiler_singleton.h"
 
 namespace Counter {
 

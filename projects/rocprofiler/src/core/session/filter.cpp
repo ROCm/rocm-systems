@@ -24,7 +24,7 @@
 
 #include "src/utils/helper.h"
 
-namespace rocmtools {
+namespace rocprofiler {
 
 Filter::Filter(rocprofiler_filter_id_t id, rocprofiler_filter_kind_t filter_kind,
                rocprofiler_filter_data_t filter_data, uint64_t data_count)
@@ -64,7 +64,7 @@ Filter::Filter(rocprofiler_filter_id_t id, rocprofiler_filter_kind_t filter_kind
       tracer_apis_.clear();
       for (uint32_t j = 0; j < data_count; j++){
           tracer_apis_.emplace_back(filter_data.trace_apis[j]);
-      }     
+      }
       break;
     }
     case ROCPROFILER_COUNTERS_SAMPLER: {
@@ -133,7 +133,7 @@ rocprofiler_counters_sampler_parameters_t Filter::GetCountersSamplerParameterDat
     return counters_sampler_parameters_;
   }
   fatal(
-      "Error: ROCMtools filter specified is not supported for "
+      "Error: ROCProfiler filter specified is not supported for "
       "Counters sampler mode!\n");
 }
 
@@ -267,4 +267,4 @@ size_t Filter::GetPropertiesCount(rocprofiler_filter_property_kind_t kind) {
       "kind!");
 }
 
-}  // namespace rocmtools
+}  // namespace rocprofiler

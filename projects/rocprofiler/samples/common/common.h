@@ -44,7 +44,7 @@
 #define CHECK_ROCPROFILER(call)                                                                    \
   do {                                                                                             \
     if ((call) != ROCPROFILER_STATUS_SUCCESS)                                                      \
-      rocmtools::fatal("Error: ROCProfiler API Call Error!");                                      \
+      rocprofiler::fatal("Error: ROCProfiler API Call Error!");                                      \
   } while (false)
 
 // Device (Kernel) functions, it must be void
@@ -114,7 +114,7 @@ void FlushTracerRecord(rocprofiler_record_tracer_t tracer_record,
   if ((tracer_record.operation_id.id == 0 && tracer_record.domain == ACTIVITY_DOMAIN_HIP_OPS)) {
     if (tracer_record.api_data_handle.handle &&
         strlen(reinterpret_cast<const char*>(tracer_record.api_data_handle.handle)) > 1)
-      kernel_name = rocmtools::cxx_demangle(
+      kernel_name = rocprofiler::cxx_demangle(
           reinterpret_cast<const char*>(tracer_record.api_data_handle.handle));
   }
   if (tracer_record.domain == ACTIVITY_DOMAIN_HSA_API) {
@@ -151,7 +151,7 @@ void FlushTracerRecord(rocprofiler_record_tracer_t tracer_record,
       CHECK_ROCPROFILER(rocprofiler_query_hip_tracer_api_data_info(
           session_id, ROCPROFILER_HIP_KERNEL_NAME, tracer_record.api_data_handle,
           tracer_record.operation_id, &kernel_name_str));
-      if (kernel_name_str) kernel_name = rocmtools::cxx_demangle(std::string(kernel_name_str));
+      if (kernel_name_str) kernel_name = rocprofiler::cxx_demangle(std::string(kernel_name_str));
     }
   }
   if (tracer_record.domain == ACTIVITY_DOMAIN_ROCTX) {
@@ -166,7 +166,7 @@ void FlushTracerRecord(rocprofiler_record_tracer_t tracer_record,
           session_id, ROCPROFILER_ROCTX_MESSAGE, tracer_record.api_data_handle,
           tracer_record.operation_id, &roctx_message_str));
       if (roctx_message_str)
-        roctx_message = rocmtools::cxx_demangle(std::string(strdup(roctx_message_str)));
+        roctx_message = rocprofiler::cxx_demangle(std::string(strdup(roctx_message_str)));
     }
     size_t roctx_id_size = 0;
     CHECK_ROCPROFILER(rocprofiler_query_roctx_tracer_api_data_info_size(
@@ -250,7 +250,7 @@ void FlushProfilerRecord(const rocprofiler_record_profiler_t* profiler_record,
               << std::to_string(profiler_record->kernel_properties.wave_size) << "), "
               << std::string("sig(")
               << std::to_string(profiler_record->kernel_properties.signal_handle);
-  std::string kernel_name = rocmtools::cxx_demangle(kernel_name_c);
+  std::string kernel_name = rocprofiler::cxx_demangle(kernel_name_c);
   output_file << "), " << std::string("obj(") << std::to_string(profiler_record->kernel_id.handle)
               << "), " << std::string("kernel-name(\"") << kernel_name << "\")"
               << std::string(", time(") << std::to_string(profiler_record->timestamps.begin.value)

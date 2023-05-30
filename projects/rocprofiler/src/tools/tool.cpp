@@ -65,7 +65,7 @@ namespace fs = std::experimental::filesystem;
 #define CHECK_ROCPROFILER(call)                                                                    \
   do {                                                                                             \
     if ((call) != ROCPROFILER_STATUS_SUCCESS)                                                      \
-      rocmtools::fatal("Error: ROCProfiler API Call Error!");                                      \
+      rocprofiler::fatal("Error: ROCProfiler API Call Error!");                                      \
   } while (false)
 TRACE_BUFFER_INSTANTIATE();
 namespace {

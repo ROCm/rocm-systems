@@ -28,16 +28,16 @@
 // TODO(aelwazir): To be implemented
 
 // type for reference counter
-typedef std::atomic<uint64_t> RocmToolsRefCount;
+typedef std::atomic<uint64_t> ROCProfilerRefCount;
 
 // type for access/release control flag
-typedef std::atomic<bool> RocmToolsARControl;
+typedef std::atomic<bool> ROCProfilerARControl;
 
-namespace rocmtools {
+namespace rocprofiler {
 
 // the access/release control flag can be shared or exclusive
-static RocmToolsARControl kARShared = ATOMIC_VAR_INIT(0);
-static RocmToolsARControl kARExclusive = ATOMIC_VAR_INIT(1);
+static ROCProfilerARControl kARShared = ATOMIC_VAR_INIT(0);
+static ROCProfilerARControl kARExclusive = ATOMIC_VAR_INIT(1);
 
 /*-------------------------------------------------------------------------*/
 /**
@@ -49,25 +49,25 @@ static RocmToolsARControl kARExclusive = ATOMIC_VAR_INIT(1);
 class AccessControl {
  public:
   //!< constructor that defaults the RefCount and ARControl
-  AccessControl(RocmToolsRefCount rrc = ATOMIC_VAR_INIT(0),
-                RocmToolsARControl rac = ATOMIC_VAR_INIT(kARShared.load()));
+  AccessControl(ROCProfilerRefCount rrc = ATOMIC_VAR_INIT(0),
+                ROCProfilerARControl rac = ATOMIC_VAR_INIT(kARShared.load()));
 
   //!< naive destructor
   ~AccessControl();
 
-  bool Acquire(RocmToolsARControl access_mode);
-  void Release(RocmToolsARControl access_mode);
+  bool Acquire(ROCProfilerARControl access_mode);
+  void Release(ROCProfilerARControl access_mode);
 
  private:
-  RocmToolsRefCount rcount_;      //!< refernce count, every successful access
+  ROCProfilerRefCount rcount_;      //!< refernce count, every successful access
                                   //! increments it
-  RocmToolsARControl arcontrol_;  //!< shared access or exclusive?
+  ROCProfilerARControl arcontrol_;  //!< shared access or exclusive?
 
   std::mutex accessmutex_;
 };
 
 //<!
-// AccessControl::AccessControl(RocmToolsRefCount rrc, RocmToolsARControl rac)
+// AccessControl::AccessControl(ROCProfilerRefCount rrc, ROCProfilerARControl rac)
 // {
 //   rcount_ = rrc.load();
 //   arcontrol_ = rac.load();
@@ -76,7 +76,7 @@ class AccessControl {
 //<!
 AccessControl::~AccessControl() {
   // we cannot decrement reference count here, we can only hope it is 0
-#ifdef ROCMTOOL_DEBUG_PRINT
+#ifdef ROCPROFILER_DEBUG_PRINT
   int zero = 0;
   if (rcount_.compare_exchange_strong(zero&, 0, std::memory_order_acq_rel))
     cout << endl
@@ -90,11 +90,11 @@ AccessControl::~AccessControl() {
 #if 0
 //!< three steps, 1) get scoped lock, 2) check if it is shared to shared
 //!< acquire, and 3) if it is exclusive, check if refcount is 0
-bool AccessControl::Acquire(RocmToolsARControl rac) {
+bool AccessControl::Acquire(ROCProfilerARControl rac) {
   // first, ensure we have a lock_guard
   std::lock_guard<std::mutex> lg(accessmutex_);
   // we should always expect the current value to be shared
-  RocmToolsARControl rac_expected = kARShared.load();
+  ROCProfilerARControl rac_expected = kARShared.load();
   // if what we have is what we expect then we are done
   if (rac.load(std::memory_order_relaxed) == rac_expected.load()) {
     // rcount_.store(std::memory_order_acq_rel,
@@ -111,6 +111,6 @@ bool AccessControl::Acquire(RocmToolsARControl rac) {
 //!< always exchange to kARShared and reduce refcount
 // void AccessControl::Release(
 
-}  // namespace rocmtools
+}  // namespace rocprofiler
 
 #endif  // SRC_UTILS_ACCESS_CONTROL_H_

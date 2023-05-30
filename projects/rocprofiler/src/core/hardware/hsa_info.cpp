@@ -38,7 +38,7 @@ namespace Agent {
 AgentInfo::AgentInfo() {}
 AgentInfo::AgentInfo(const hsa_agent_t agent, ::CoreApiTable* table) : handle_(agent.handle) {
   if (table->hsa_agent_get_info_fn(agent, HSA_AGENT_INFO_DEVICE, &type_) != HSA_STATUS_SUCCESS)
-    rocmtools::fatal("hsa_agent_get_info failed");
+    rocprofiler::fatal("hsa_agent_get_info failed");
 
   table->hsa_agent_get_info_fn(agent, HSA_AGENT_INFO_NAME, name_);
 
@@ -62,22 +62,27 @@ AgentInfo::AgentInfo(const hsa_agent_t agent, ::CoreApiTable* table) : handle_(a
   table->hsa_agent_get_info_fn(
       agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_SHADER_ENGINES), &se_num_);
 
-  if (table->hsa_agent_get_info_fn(agent,
-                                   (hsa_agent_info_t)HSA_AMD_AGENT_INFO_NUM_SHADER_ARRAYS_PER_SE,
-                                   &shader_arrays_per_se_) != HSA_STATUS_SUCCESS ||
-      table->hsa_agent_get_info_fn(agent, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_MAX_WAVES_PER_CU,
-                                   &waves_per_cu_) != HSA_STATUS_SUCCESS) {
-    rocmtools::fatal("hsa_agent_get_info for gfxip hardware configuration failed");
+  if (table->hsa_agent_get_info_fn(
+        agent, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_NUM_SHADER_ARRAYS_PER_SE,
+        &shader_arrays_per_se_) != HSA_STATUS_SUCCESS ||
+      table->hsa_agent_get_info_fn(
+        agent, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_MAX_WAVES_PER_CU,
+        &waves_per_cu_) != HSA_STATUS_SUCCESS)
+  {
+      rocprofiler::fatal("hsa_agent_get_info for gfxip hardware configuration failed");
   }
 
   compute_units_per_sh_ = cu_num_ / (se_num_ * shader_arrays_per_se_);
   wave_slots_per_simd_ = waves_per_cu_ / simds_per_cu_;
 
-  if (table->hsa_agent_get_info_fn(agent, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_DOMAIN,
-                                   &pci_domain_) != HSA_STATUS_SUCCESS ||
-      table->hsa_agent_get_info_fn(agent, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_BDFID,
-                                   &pci_location_id_) != HSA_STATUS_SUCCESS) {
-    rocmtools::fatal("hsa_agent_get_info for PCI info failed");
+  if (table->hsa_agent_get_info_fn(
+        agent, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_DOMAIN,
+        &pci_domain_) != HSA_STATUS_SUCCESS ||
+      table->hsa_agent_get_info_fn(
+        agent, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_BDFID,
+        &pci_location_id_) != HSA_STATUS_SUCCESS)
+  {
+      rocprofiler::fatal("hsa_agent_get_info for PCI info failed");
   }
 
   // TODO: (sauverma) use hsa_agent_get_info_fn(HSA_AMD_AGENT_INFO_NUM_XCC)

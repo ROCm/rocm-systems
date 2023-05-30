@@ -27,7 +27,7 @@ THE SOFTWARE.
 
 #include <hsa/hsa_ven_amd_aqlprofile.h>
 
-namespace rocmtools {
+namespace rocprofiler {
 typedef hsa_ven_amd_aqlprofile_pfn_t pfn_t;
 typedef hsa_ven_amd_aqlprofile_event_t event_t;
 typedef hsa_ven_amd_aqlprofile_parameter_t parameter_t;
@@ -46,6 +46,6 @@ inline std::ostream& operator<<(std::ostream& out, const parameter_t& parameter)
   return out;
 }
 
-}  // namespace rocmtools
+}  // namespace rocprofiler
 
 #endif  // SRC_CORE_TYPES_H_
