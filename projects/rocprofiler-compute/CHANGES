@@ -9,12 +9,12 @@ Version 1.0.8 (30 May 2023)
   * enhanced readability for filtering dropdowns in standalone GUI (#102)
   * new logfile to capture rocprofiler output (#106)
   * roofline support for sles15 sp4 and future service packs (#109)
-  * adding dockerfiles for all supported Linux distos
+  * adding dockerfiles for all supported Linux distros
   * new examples for `--roof-only` and `--kernel` options added to documentation
   
   * enable cli analysis in Windows (#110)
   * optional random port number in standalone GUI (#111)
-  * limit length of visable kernel name in `--kernel-name` option (#115)
+  * limit length of visible kernelName in `--kernel-names` option (#115)
   * adjust metric definitions (#117, #130)
   * manually merge rocprof runs, overriding default rocprofiler implementation (#125)
   * fixed compatibility issues with Python 3.11 (#131)
@@ -25,7 +25,7 @@ Version 1.0.8-PR2 (17 Apr 2023)
   * enhanced readability for filtering dropdowns in standalone GUI (#102)
   * new logfile to capture rocprofiler output (#106)
   * roofline support for sles15 sp4 and future service packs (#109)
-  * adding dockerfiles for all supported Linux distos
+  * adding dockerfiles for all supported Linux distros
   * new examples for `--roof-only` and `--kernel` options added to documentation
 
 Version 1.0.8-PR1 (13 Mar 2023)
