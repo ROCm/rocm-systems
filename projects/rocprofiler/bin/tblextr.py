@@ -833,7 +833,7 @@ else:
   copy_statfile = re.sub(r'\.stats\.csv$', r'.copy_stats.csv', statfile)
   memcopy_info_file = re.sub(r'\.stats\.csv$', r'.memcopy_info.csv', statfile)
   sysinfo_file = re.sub(r'\.stats\.csv$', r'.sysinfo.txt', statfile)
-  metadata_gen(sysinfo_file, 'rocminfo')
+  metadata_gen(sysinfo_file, "@ROCMINFO_EXEC@")
 
   with open(dbfile, mode='w') as fd: fd.truncate()
   db = SQLiteDB(dbfile)

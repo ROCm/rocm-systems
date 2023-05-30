@@ -119,6 +119,14 @@ find_package(
 find_library(NUMA NAME numa REQUIRED)
 link_libraries(${NUMA})
 
+find_program(ROCMINFO_EXEC NAMES "rocminfo"
+PATHS ${ROCM_PATH}
+${CMAKE_INSTALL_PREFIX} "/usr/local" "/usr"
+PATH_SUFFIXES bin)
+set(ORIGINAL_SCRIPT_PATH ${CMAKE_CURRENT_SOURCE_DIR}/bin/tblextr.py)
+set(OUTPUT_SCRIPT_PATH ${CMAKE_CURRENT_BINARY_DIR}/bin/tblextr.py)
+configure_file(${ORIGINAL_SCRIPT_PATH} ${OUTPUT_SCRIPT_PATH} @ONLY)
+
 get_property(
   HSA_RUNTIME_INCLUDE_DIRECTORIES
   TARGET hsa-runtime64::hsa-runtime64
@@ -226,7 +234,7 @@ install(
   FILES ${CMAKE_CURRENT_SOURCE_DIR}/bin/txt2xml.sh
         ${CMAKE_CURRENT_SOURCE_DIR}/bin/merge_traces.sh
         ${CMAKE_CURRENT_SOURCE_DIR}/bin/txt2params.py
-        ${CMAKE_CURRENT_SOURCE_DIR}/bin/tblextr.py
+        ${CMAKE_CURRENT_BINARY_DIR}/bin/tblextr.py
         ${CMAKE_CURRENT_SOURCE_DIR}/bin/dform.py
         ${CMAKE_CURRENT_SOURCE_DIR}/bin/mem_manager.py
         ${CMAKE_CURRENT_SOURCE_DIR}/bin/sqlitedb.py
