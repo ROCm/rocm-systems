@@ -69,6 +69,7 @@ if [ -z "$PREFIX_PATH" ] ; then PREFIX_PATH=$PACKAGE_ROOT; fi
 if [ -z "$HIP_VDI" ] ; then HIP_VDI=0; fi
 if [ -n "$ROCM_RPATH" ] ; then LD_RUNPATH_FLAG=" -Wl,--enable-new-dtags -Wl,--rpath,${ROCM_RPATH}"; fi
 if [ -z "$TO_CLEAN" ] ; then TO_CLEAN=yes; fi
+if [ -z "$RUN_TEST" ] ; then RUN_TEST=no; fi
 if [ -z "$ASAN" ] ; then ASAN=False; fi
 if [ -z "$GPU_LIST" ] ; then GPU_LIST='gfx900 gfx906 gfx908 gfx90a gfx1030'; fi
 
@@ -97,10 +98,12 @@ popd
 MAKE_OPTS="-j -C $ROCPROFILER_ROOT/$BUILD_DIR"
 
 cmake --build "$BUILD_DIR" -- $MAKE_OPTS
-cmake --build "$BUILD_DIR" -- $MAKE_OPTS doc
-cmake --build "$BUILD_DIR" -- $MAKE_OPTS samples
 cmake --build "$BUILD_DIR" -- $MAKE_OPTS mytest
 cmake --build "$BUILD_DIR" -- $MAKE_OPTS tests
-cmake --build "$BUILD_DIR" -- $MAKE_OPTS package
+if [ "$RUN_TEST" = "no" ] ; then
+  cmake --build "$BUILD_DIR" -- $MAKE_OPTS doc
+  cmake --build "$BUILD_DIR" -- $MAKE_OPTS samples
+  cmake --build "$BUILD_DIR" -- $MAKE_OPTS package
+fi
 
 exit 0

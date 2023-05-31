@@ -42,16 +42,11 @@ __global__ void helloworld(char* in, char* out) {
 int main(int argc, char* argv[]) {
   hipDeviceProp_t devProp;
   HIP_RC(hipGetDeviceProperties(&devProp, 0));
-  std::cout << " System minor " << devProp.minor << std::endl;
-  std::cout << " System major " << devProp.major << std::endl;
-  std::cout << " agent prop name " << devProp.name << std::endl;
 
   /* Initial input,output for the host and create memory objects for the
    * kernel*/
   const char* input = "GdkknVnqkc";
   size_t strlength = strlen(input);
-  std::cout << "input string:" << std::endl;
-  std::cout << input << std::endl;
   char* output = reinterpret_cast<char*>(malloc(strlength + 1));
 
   char* inputBuffer;
@@ -68,13 +63,7 @@ int main(int argc, char* argv[]) {
   HIP_RC(hipFree(inputBuffer));
   HIP_RC(hipFree(outputBuffer));
 
-  output[strlength] = '\0';  // Add the terminal character to the end of output.
-  std::cout << "\noutput string:" << std::endl;
-  std::cout << output << std::endl;
-
   free(output);
-
-  std::cout << "Passed!\n";
 
   return SUCCESS;
 }

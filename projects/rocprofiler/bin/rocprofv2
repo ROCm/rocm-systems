@@ -68,7 +68,7 @@ while [ 1 ] ; do
   elif [[ "$1" = "-t" || "$1" = "--test" ]] ; then
     if [ $RUN_FROM_BUILD == 1 ]; then
       export ROCPROFILER_METRICS_PATH=$ROCM_DIR/build/counters/derived_counters.xml
-      TO_CLEAN=no $ROCM_DIR/build.sh
+      RUN_TEST=yes TO_CLEAN=no $ROCM_DIR/build.sh
       if [ "$CURRENT_DIR/build" -ef "./build" ] ; then
         ./run_tests.sh
       else
@@ -98,7 +98,7 @@ while [ 1 ] ; do
     if [ $RUN_FROM_BUILD == 1 ]; then
       TO_CLEAN=no $ROCM_DIR/build.sh
       pushd build
-      make install
+      make -j install
       exit 1
     fi
   elif [[ "$1" = "--clean-install" ]] ; then

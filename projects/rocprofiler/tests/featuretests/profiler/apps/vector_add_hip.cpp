@@ -60,11 +60,6 @@ int main() {
 
   hipDeviceProp_t devProp;
   HIP_RC(hipGetDeviceProperties(&devProp, 0));
-  std::cout << " System minor " << devProp.minor << std::endl;
-  std::cout << " System major " << devProp.major << std::endl;
-  std::cout << " agent prop name " << devProp.name << std::endl;
-
-  std::cout << "hip Device prop succeeded " << std::endl;
 
   int i;
   int errors;
@@ -102,8 +97,6 @@ int main() {
   }
   if (errors != 0) {
     printf("FAILED: %d errors\n", errors);
-  } else {
-    printf("PASSED!\n");
   }
 
   HIP_RC(hipFree(deviceA));

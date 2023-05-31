@@ -821,7 +821,6 @@ void __attribute__((constructor)) globalsetting() {
   std::string app_path = GetRunningPath(running_path);
   std::stringstream gfx_path;
   gfx_path << app_path << metrics_path;
-  std::cout << gfx_path.str() << std::endl;
   setenv("ROCPROFILER_METRICS_PATH", gfx_path.str().c_str(), true);
 }
 

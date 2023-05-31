@@ -41,9 +41,6 @@ std::string GetRunningPath(std::string string_to_erase) {
     path.clear();  // reset path
     path.append(real_path);
 
-    //std::cout << path << std::endl;
-
-
     size_t pos = path.find(to_erase);
     if (pos != std::string::npos) path.erase(pos, to_erase.length());
   } else {
