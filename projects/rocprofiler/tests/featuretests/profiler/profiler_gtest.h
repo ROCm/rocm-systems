@@ -116,16 +116,26 @@ class ProfilerTest : public ApplicationParser {
 /* --------------------------------------------------------------------------*/
 
 /*
-class FilePluginTest : public ::testing::Test {
+class PluginTests : public ::testing::Test {
  public:
   //!< Sets application environment by seting rocprofv2.
   void RunApplication(const char* app_name, const char* appParams);
-
-  //!< Checks wether a file beginning with "filename" exists in "directory"
-  static bool hasFileInDir(const std::string& filename, const char* directory);
  private:
   //!< Runs a given appllication with the hsa activity.
   void ProcessApplication(std::stringstream& ss);
-}; */
+};
+
+class FilePluginTest : public PluginTests {
+ public:
+  //!< Checks wether a file beginning with "filename" exists in "directory"
+  static bool hasFileInDir(const std::string& filename, const char* directory);
+};
+
+class PerfettoPluginTest : public PluginTests {
+ public:
+  //!< Checks wether a file beginning with "filename" and ending with "pftrace" exists in "directory"
+  static bool hasFileInDir(const std::string& filename, const char* directory);
+};
+*/
 
 #endif  // TESTS_FEATURETESTS_PROFILER_GTESTS_APPS_PROFILER_GTEST_H_

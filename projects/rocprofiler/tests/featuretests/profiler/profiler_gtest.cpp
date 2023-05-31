@@ -62,7 +62,6 @@ static void init_test_path() {
   }
 }
 
-
 /**
  * Sets application enviornment by seting HSA_TOOLS_LIB.
  */
@@ -1322,16 +1321,22 @@ TEST(ProfilerMPTest, WhenRunningMultiProcessTestItPasses) {
  */
 
 /*
-void FilePluginTest::RunApplication(const char* app_name, const char* appParams) {
+void PluginTests::RunApplication(const char* app_name, const char* appParams) {
   if (is_installed_path()) return; // Only run these tests from build
 
   init_test_path();
   unsetenv("OUTPUT_FOLDER");
 
   std::stringstream os;
-  os << binary_path << " --hsa-activity " << appParams << " ";
+  os << binary_path << appParams << " ";
   os << test_app_path << app_name;
   ProcessApplication(os);
+}
+
+void PluginTests::ProcessApplication(std::stringstream& ss) {
+  FILE* handle = popen(ss.str().c_str(), "r");
+  ASSERT_NE(handle, nullptr);
+  pclose(handle);
 }
 
 bool FilePluginTest::hasFileInDir(const std::string& filename, const char* directory) {
@@ -1344,12 +1349,6 @@ bool FilePluginTest::hasFileInDir(const std::string& filename, const char* direc
       return true;
   }
   return false;
-}
-
-void FilePluginTest::ProcessApplication(std::stringstream& ss) {
-  FILE* handle = popen(ss.str().c_str(), "r");
-  ASSERT_NE(handle, nullptr);
-  pclose(handle);
 }
 
 class VectorAddFileOnlyTest : public FilePluginTest {
@@ -1373,7 +1372,7 @@ TEST_F(VectorAddFileOnlyTest, WhenRunningProfilerWithFilePluginTest) {
 class VectorAddFolderOnlyTest : public FilePluginTest {
  protected:
   virtual void SetUp() {
-    RunApplication("hip_vectoradd", "-d ./plugin_test_folder_path");
+    RunApplication("hip_vectoradd", " --hsa-activity --hip-activity -d ./plugin_test_folder_path");
   }
   virtual void TearDown() { std::experimental::filesystem::remove_all("./plugin_test_folder_path"); }
   bool hasFile(){ return hasFileInDir("", "./plugin_test_folder_path"); }
@@ -1386,7 +1385,7 @@ TEST_F(VectorAddFolderOnlyTest, WhenRunningProfilerWithFilePluginTest) {
 class VectorAddFileAndFolderTest : public FilePluginTest {
  protected:
   virtual void SetUp() {
-    RunApplication("hip_vectoradd", "-d ./plugin_test_folder_path -o file_test_name");
+    RunApplication("hip_vectoradd", " --hip-activity -d ./plugin_test_folder_path -o file_test_name");
   }
   virtual void TearDown() { std::experimental::filesystem::remove_all("./plugin_test_folder_path"); }
   bool hasFile(){ return hasFileInDir("file_test_name", "./plugin_test_folder_path"); }
@@ -1400,7 +1399,7 @@ class VectorAddFilenameMPITest : public FilePluginTest {
  protected:
   virtual void SetUp() {
     setenv("MPI_RANK", "7", true);
-    RunApplication("hip_vectoradd", "-d ./plugin_test_folder_path -o test_%rank_");
+    RunApplication("hip_vectoradd", " --hip-activity -d ./plugin_test_folder_path -o test_%rank_");
   }
   virtual void TearDown() {
     std::experimental::filesystem::remove_all("./plugin_test_folder_path");
@@ -1410,6 +1409,36 @@ class VectorAddFilenameMPITest : public FilePluginTest {
 };
 
 TEST_F(VectorAddFilenameMPITest, WhenRunningProfilerWithFilePluginTest) {
+  EXPECT_EQ(hasFile(), true);
+}
+
+bool PerfettoPluginTest::hasFileInDir(const std::string& filename, const char* directory) {
+  if (is_installed_path()) return true;  // Only run these tests from build
+
+  for (const auto& entry : std::experimental::filesystem::directory_iterator(directory)) {
+    std::string entrypath = std::string(entry.path().filename());
+    if (entrypath.find(".pftrace") == std::string::npos)
+      continue;
+    if (entrypath.substr(0, filename.size()) == filename)
+      return true;
+  }
+  return false;
+}
+
+class VectorAddPerfettoMPITest : public PerfettoPluginTest {
+ protected:
+  virtual void SetUp() {
+    setenv("MPI_RANK", "7", true);
+    RunApplication("hip_vectoradd", " -d ./plugin_test_folder_path -o test_%rank_ --plugin perfetto");
+  }
+  virtual void TearDown() {
+    std::experimental::filesystem::remove_all("./plugin_test_folder_path");
+    unsetenv("MPI_RANK");
+  }
+  bool hasFile(){ return hasFileInDir("test_7_", "./plugin_test_folder_path"); }
+};
+
+TEST_F(VectorAddPerfettoMPITest, WhenRunningProfilerWithPerfettoTest) {
   EXPECT_EQ(hasFile(), true);
 }
 */

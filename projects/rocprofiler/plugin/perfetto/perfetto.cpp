@@ -97,12 +97,6 @@ class perfetto_plugin_t {
     const char* temp_file_name = getenv("OUT_FILE_NAME");
     output_file_name = temp_file_name ? std::string(temp_file_name) + "_" : "";
 
-    if (output_dir == nullptr && temp_file_name == nullptr) {
-      stream_.copyfmt(std::cout);
-      stream_.clear(std::cout.rdstate());
-      stream_.basic_ios<char>::rdbuf(std::cout.rdbuf());
-      return;
-    }
     if (output_dir == nullptr)
       output_dir = "./";
 
@@ -186,37 +180,39 @@ class perfetto_plugin_t {
   }
 
   std::string replace_MPI_macros(std::string output_file_name) {
-    std::unordered_map<const char*, const char*> MPI_BUILTINS = {
-      {"MPI_RANK", "%rank"},
-      {"OMPI_COMM_WORLD_RANK", "%rank"},
-      {"MV2_COMM_WORLD_RANK", "%rank"}
+    std::vector<const char*> MPI_BUILTINS = {
+      "MPI_RANK", "OMPI_COMM_WORLD_RANK", "MV2_COMM_WORLD_RANK"
     };
     bIsMPI = false;
 
-    for (const auto& [envvar, key] : MPI_BUILTINS) {
-      size_t key_find = output_file_name.rfind(key);
-      if (key_find == std::string::npos) continue; // Does not contain a %?rank var
+    for (const char* envvar : MPI_BUILTINS) {
+      const char* rank_env_var = getenv(envvar);
+      if (rank_env_var == nullptr) continue; // MPI var is does not exist
 
-      const char* env_var_set = getenv(envvar);
-      if (env_var_set == nullptr) continue; // MPI_COMM_WORLD_x var is does not exist
-
-      int rank = atoi(env_var_set);
-      output_file_name =  output_file_name.substr(0, key_find) + std::to_string(rank)
-                        + output_file_name.substr(key_find + std::string(key).size());
-      if (!bIsMPI)
-        MPI_rank = rank;
+      MPI_rank = atoi(rank_env_var);
       bIsMPI = true;
+      break;
     }
 
+    size_t key_find = output_file_name.rfind("%rank");
+    if (key_find != std::string::npos) { // Contains a %?rank string
+      output_file_name =  output_file_name.substr(0, key_find) + std::to_string(MPI_rank)
+                        + output_file_name.substr(key_find + std::string("%rank").size());
+    }
     return output_file_name;
   }
 
   std::string get_thread_track_str() {
-    return rocprofiler::string_printf("Node: %s Process ID: %lu Thread ID:", hostname_, GetPid());
+    if (!bIsMPI)
+      rocprofiler::string_printf("Node: %s Process ID: %lu Thread ID:", hostname_, GetPid());
+    std::stringstream thread_track_str;
+    thread_track_str  << "Rank: " << MPI_rank << " (" << hostname_
+                      << ") Process ID:" << GetPid() << " Thread ID:";
+    return thread_track_str.str();
   }
 
   std::string get_device_track_str() {
-      return rocprofiler::string_printf("Node: %s Device:", hostname_);
+    return rocprofiler::string_printf("Node: %s Device:", hostname_);
   }
 
   const char* GetDomainName(rocprofiler_tracer_activity_domain_t domain) {
