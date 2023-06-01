@@ -34,7 +34,8 @@ namespace rocprofiler {
 
 typedef struct {
   uint64_t kernel_descriptor;
-  hsa_signal_t signal;
+  hsa_signal_t original_signal;
+  hsa_signal_t new_signal;
   rocprofiler_session_id_t session_id;
   rocprofiler_buffer_id_t buffer_id;
   hsa_ven_amd_aqlprofile_profile_t* profile;
@@ -52,7 +53,7 @@ class AttTracer {
   ~AttTracer();
 
   void AddPendingSignals(uint32_t writer_id, uint64_t kernel_object,
-                         const hsa_signal_t& completion_signal, rocprofiler_session_id_t session_id,
+                         const hsa_signal_t& original_completion_signal, const hsa_signal_t& new_completion_signal, rocprofiler_session_id_t session_id,
                          rocprofiler_buffer_id_t buffer_id, hsa_ven_amd_aqlprofile_profile_t* profile,
                          rocprofiler_kernel_properties_t kernel_properties, uint32_t thread_id,
                          uint64_t queue_index);

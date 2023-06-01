@@ -397,10 +397,10 @@ bool AsyncSignalHandler(hsa_signal_value_t signal_value, void* data) {
     for (auto it = pending_signals.begin(); it != pending_signals.end();
          it = pending_signals.erase(it)) {
       auto& pending = *it;
-      if (hsa_support::GetCoreApiTable().hsa_signal_load_relaxed_fn(pending->signal)) return true;
+      if (hsa_support::GetCoreApiTable().hsa_signal_load_relaxed_fn(pending->new_signal)) return true;
       hsa_amd_profiling_dispatch_time_t time;
       hsa_support::GetAmdExtTable().hsa_amd_profiling_get_dispatch_time_fn(
-          queue_info_session->agent, pending->signal, &time);
+          queue_info_session->agent, pending->original_signal, &time);
       uint32_t record_count = 1;
       bool is_individual_xcc_mode = false;
       uint32_t xcc_count = queue_info_session->xcc_count;
@@ -469,8 +469,8 @@ bool AsyncSignalHandler(hsa_signal_value_t signal_value, void* data) {
         }
         delete pending->context;
       }
-      if (pending->signal.handle)
-        hsa_support::GetCoreApiTable().hsa_signal_destroy_fn(pending->signal);
+      if (pending->new_signal.handle)
+        hsa_support::GetCoreApiTable().hsa_signal_destroy_fn(pending->new_signal);
       if (queue_info_session->interrupt_signal.handle)
         hsa_support::GetCoreApiTable().hsa_signal_destroy_fn(queue_info_session->interrupt_signal);
     }
@@ -500,7 +500,7 @@ bool AsyncSignalHandlerATT(hsa_signal_value_t /* signal */, void* data) {
          it = pending_signals.erase(it)) {
       auto& pending = *it;
       std::lock_guard<std::mutex> lock(session->GetSessionLock());
-      if (hsa_support::GetCoreApiTable().hsa_signal_load_relaxed_fn(pending.signal)) return true;
+      if (hsa_support::GetCoreApiTable().hsa_signal_load_relaxed_fn(pending.new_signal)) return true;
       rocprofiler_record_att_tracer_t record{};
       record.kernel_id = rocprofiler_kernel_id_t{pending.kernel_descriptor};
       record.gpu_id = rocprofiler_agent_id_t{(uint64_t)queue_info_session->gpu_index};
@@ -725,13 +725,6 @@ void WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t user_pkt
 
       auto& packet = transformed_packets.emplace_back(packets_arr[i]);
       auto& dispatch_packet = reinterpret_cast<hsa_kernel_dispatch_packet_t&>(packet);
-
-      /*
-       * Only PC sampling relies on this right now, so it would be better to
-       * only generate an ID if PC sampling is active to conserve IDs, but it's
-       * unlikely 64 bits' worth of identifiers will be exhausted during the
-       * lifetime of the ROCProfiler_Singleton.
-       */
       uint64_t correlation_id = dispatch_packet.reserved2;
 
       CreateSignal(HSA_AMD_SIGNAL_AMD_GPU_ONLY, &packet.completion_signal);
@@ -745,12 +738,12 @@ void WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t user_pkt
                                     record_id);
         if (profiles.size() > 0 && replay_mode_count > 0) {
           session->GetProfiler()->AddPendingSignals(
-              writer_id, record_id, dispatch_packet.completion_signal, session_id, buffer_id,
+              writer_id, record_id, original_packet.completion_signal, dispatch_packet.completion_signal, session_id, buffer_id,
               profile.first, profile.first->metrics_list.size(), profile.second, kernel_properties,
               (uint32_t)syscall(__NR_gettid), user_pkt_index, correlation_id);
         } else {
           session->GetProfiler()->AddPendingSignals(
-              writer_id, record_id, dispatch_packet.completion_signal, session_id, buffer_id,
+              writer_id, record_id, original_packet.completion_signal, dispatch_packet.completion_signal, session_id, buffer_id,
               nullptr, 0, nullptr, kernel_properties, (uint32_t)syscall(__NR_gettid),
               user_pkt_index, correlation_id);
         }
@@ -946,11 +939,11 @@ void WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t user_pkt
                                   record_id);
       if (session && profile) {
         session->GetAttTracer()->AddPendingSignals(
-            writer_id, record_id, dispatch_packet.completion_signal, session_id, buffer_id, profile,
+            writer_id, record_id, original_packet.completion_signal, dispatch_packet.completion_signal, session_id, buffer_id, profile,
             kernel_properties, (uint32_t)syscall(__NR_gettid), user_pkt_index);
       } else {
         session->GetAttTracer()->AddPendingSignals(
-            writer_id, record_id, dispatch_packet.completion_signal, session_id, buffer_id, nullptr,
+            writer_id, record_id, original_packet.completion_signal, dispatch_packet.completion_signal, session_id, buffer_id, nullptr,
             kernel_properties, (uint32_t)syscall(__NR_gettid), user_pkt_index);
       }
 

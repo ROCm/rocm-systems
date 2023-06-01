@@ -31,7 +31,7 @@ AttTracer::AttTracer(rocprofiler_buffer_id_t buffer_id, rocprofiler_filter_id_t 
 AttTracer::~AttTracer() {}
 
 void AttTracer::AddPendingSignals(uint32_t writer_id, uint64_t kernel_object,
-                                   const hsa_signal_t& completion_signal,
+                                   const hsa_signal_t& original_completion_signal, const hsa_signal_t& new_completion_signal,
                                    rocprofiler_session_id_t session_id,
                                    rocprofiler_buffer_id_t buffer_id,
                                    hsa_ven_amd_aqlprofile_profile_t* profile,
@@ -41,7 +41,7 @@ void AttTracer::AddPendingSignals(uint32_t writer_id, uint64_t kernel_object,
   if (sessions_pending_signals_.find(writer_id) == sessions_pending_signals_.end())
     sessions_pending_signals_.emplace(writer_id, std::vector<att_pending_signal_t>());
   sessions_pending_signals_.at(writer_id).emplace_back(
-      att_pending_signal_t{kernel_object, completion_signal, session_id_, buffer_id, profile,
+      att_pending_signal_t{kernel_object, original_completion_signal, new_completion_signal, session_id_, buffer_id, profile,
                             kernel_properties, thread_id, queue_index});
 }
 
