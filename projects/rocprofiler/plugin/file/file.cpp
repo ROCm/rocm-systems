@@ -260,13 +260,14 @@ class file_plugin_t {
       }
     }
     if (tracer_record.domain == ACTIVITY_DOMAIN_ROCTX) {
-      *output_file << " timestamp(" << tracer_record.timestamps.begin.value << "),";
+      *output_file << " timestamp(" << tracer_record.timestamps.begin.value << ")";
     } else if (tracer_record.phase == ROCPROFILER_PHASE_EXIT ||
                tracer_record.phase == ROCPROFILER_PHASE_NONE) {
       *output_file << " Begin(" << tracer_record.timestamps.begin.value << "), End("
-                   << tracer_record.timestamps.end.value << "),";
+                   << tracer_record.timestamps.end.value << ")";
     }
-    *output_file << " Correlation_ID(" << tracer_record.correlation_id.value << ")";
+    if (tracer_record.domain != ACTIVITY_DOMAIN_ROCTX)
+      *output_file << ", Correlation_ID(" << tracer_record.correlation_id.value << ")";
     *output_file << std::endl;
   }
 

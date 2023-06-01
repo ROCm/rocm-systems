@@ -425,7 +425,7 @@ class perfetto_plugin_t {
         }
         auto& roctx_track = roctx_track_it->second;
         roctx_id = tracer_record.operation_id.id;
-        roctx_message = std::string(reinterpret_cast<const char*>(tracer_record.name));
+        roctx_message = tracer_record.name ? tracer_record.name : "";
         if (tracer_record.operation_id.id == 1) {
           perfetto::StaticString roctx_message_pft(
               (!roctx_message.empty() ? roctx_message.c_str() : ""));

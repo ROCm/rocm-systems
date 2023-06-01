@@ -136,9 +136,8 @@ class RocTxEventRecord final : public TracerEventRecord<barectf_roctx_ctx> {
   explicit RocTxEventRecord(const rocprofiler_record_tracer_t& record,
                             const rocprofiler_session_id_t session_id)
       : TracerEventRecord<barectf_roctx_ctx>{record, GetRecordBeginClockVal(record)},
-        id_{record.operation_id.id},
-        msg_{
-            rocprofiler::cxx_demangle(reinterpret_cast<const char*>(record.api_data_handle.handle))} {
+        id_{record.operation_id.id} {
+    msg_ = record.name ? record.name : "";
   }
 
   void Write(barectf_roctx_ctx& barectf_ctx) const override {

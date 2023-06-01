@@ -161,7 +161,7 @@ struct roctx_trace_entry_t {
       : valid(rocprofiler::TRACE_ENTRY_INIT) {
     record = tracer_record;
     record.name = roctx_message_str ? strdup(roctx_message_str) : nullptr;
-    record.api_data_handle.handle = roctx_message_str;
+    record.api_data_handle.handle = record.name;
   }
   ~roctx_trace_entry_t() {
     if (record.name != nullptr) free(const_cast<char*>(record.name));
