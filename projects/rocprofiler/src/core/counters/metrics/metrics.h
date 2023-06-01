@@ -26,6 +26,7 @@ THE SOFTWARE.
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <dlfcn.h>  // for dladdr
 
 #include <fstream>
 #include <iostream>
@@ -33,6 +34,8 @@ THE SOFTWARE.
 #include <list>
 #include <map>
 #include <vector>
+#include <mutex>
+#include <experimental/filesystem>
 
 #include "types.h"
 #include "exception.h"
@@ -42,6 +45,7 @@ THE SOFTWARE.
 #include <unordered_set>
 #include "src/core/hardware/hsa_info.h"
 
+namespace fs = std::experimental::filesystem;
 namespace rocprofiler {
 struct counter_t {
   std::string name;
@@ -192,36 +196,49 @@ class MetricsDict {
   }
 
   MetricsDict(const Agent::AgentInfo* agent_info) : xml_(NULL), agent_info_(agent_info) {
-    const char* xml_name = getenv("ROCPROFILER_METRICS_PATH");
-    if (xml_name != NULL) {
-      xml_ = xml::Xml::Create(xml_name);
-      if (xml_ == NULL)
-        EXC_RAISING(HSA_STATUS_ERROR, "metrics .xml open error '" << xml_name << "'");
-      xml_->AddConst("top.const.metric", "MAX_WAVE_SIZE", agent_info->getMaxQueueSize());
-      xml_->AddConst("top.const.metric", "CU_NUM", agent_info->getCUCount());
-      xml_->AddConst("top.const.metric", "SIMD_NUM",
-                     agent_info->getSimdCountPerCU() * agent_info->getCUCount());
-      xml_->AddConst("top.const.metric", "SE_NUM", agent_info->getShaderEngineCount());
-      ImportMetrics(agent_info, "const");
-      agent_name_ = agent_info->getName();
-
-      if (agent_name_.find(':') != std::string::npos) // Remove compiler flags from the agent_name
-        agent_name_ = agent_name_.substr(0, agent_name_.find(':'));
-
-      std::unordered_set<std::string> supported_agent_names = {
-          "gfx906", "gfx908" "gfx90a",      // Vega
-          "gfx940", "gfx941", "gfx942",     // Mi300
-          "gfx1030", "gfx1031", "gfx1032",  // Navi2x
-          "gfx1100", "gfx1101"   // Navi3x
-      };
-      if (supported_agent_names.find(agent_name_) != supported_agent_names.end()) {
-        ImportMetrics(agent_info, agent_name_);
-      } else {
-        agent_name_ = agent_info->getGfxip();
-        ImportMetrics(agent_info, agent_name_);
-      }
-      ImportMetrics(agent_info, "global");
+    std::string xml_name = []() {
+      if (const char* path = getenv("ROCPROFILER_METRICS_PATH"); path != nullptr) return path;
+      return "";
+    }();
+    if (xml_name.empty()) {
+      Dl_info dl_info;
+      if (dladdr(reinterpret_cast<const void*>(MetricsDict::Destroy), &dl_info) != 0)
+        xml_name = fs::path(dl_info.dli_fname).remove_filename() /
+            "../libexec/rocprofiler/counters/derived_counters.xml";
     }
+    xml_ = xml::Xml::Create(xml_name);
+    if (xml_ == NULL) EXC_RAISING(HSA_STATUS_ERROR, "metrics .xml open error '" << xml_name << "'");
+    xml_->AddConst("top.const.metric", "MAX_WAVE_SIZE", agent_info->getMaxQueueSize());
+    xml_->AddConst("top.const.metric", "CU_NUM", agent_info->getCUCount());
+    xml_->AddConst("top.const.metric", "SIMD_NUM",
+                   agent_info->getSimdCountPerCU() * agent_info->getCUCount());
+    xml_->AddConst("top.const.metric", "SE_NUM", agent_info->getShaderEngineCount());
+    ImportMetrics(agent_info, "const");
+    agent_name_ = agent_info->getName();
+
+    if (agent_name_.find(':') != std::string::npos)  // Remove compiler flags from the agent_name
+      agent_name_ = agent_name_.substr(0, agent_name_.find(':'));
+
+    std::unordered_set<std::string> supported_agent_names = {
+        "gfx906",
+        "gfx908"
+        "gfx90a",  // Vega
+        "gfx940",
+        "gfx941",
+        "gfx942",  // Mi300
+        "gfx1030",
+        "gfx1031",
+        "gfx1032",  // Navi2x
+        "gfx1100",
+        "gfx1101"  // Navi3x
+    };
+    if (supported_agent_names.find(agent_name_) != supported_agent_names.end()) {
+      ImportMetrics(agent_info, agent_name_);
+    } else {
+      agent_name_ = agent_info->getGfxip();
+      ImportMetrics(agent_info, agent_name_);
+    }
+    ImportMetrics(agent_info, "global");
   }
 
   ~MetricsDict() {
