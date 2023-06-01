@@ -230,7 +230,7 @@ The user has two options for building:
       see Plugin Support section for installation
 
       # 3. Run the following to view the trace
-      rocprofv2 --plugin att <app_relative_path_assembly_file> -i input.txt --mode <network, file, off> <app_relative_path>
+      rocprofv2 --plugin att <app_relative_path_assembly_file> --mode <network, file, off> -i input.txt  <app_relative_path>
 
       # app_assembly_file_relative_path is the assembly file with .s extension generated in 1st step
       # app_relative_path is the path for the application binary
