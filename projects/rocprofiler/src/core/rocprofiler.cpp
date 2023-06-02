@@ -739,7 +739,7 @@ PUBLIC_API hsa_status_t rocprofiler_iterate_info(
   rocprofiler::util::HsaRsrcFactory* hsa_rsrc = &rocprofiler::util::HsaRsrcFactory::Instance();
   rocprofiler_info_data_t info{};
   info.kind = kind;
-  uint32_t agent_idx = 0;
+  uint32_t agent_idx = hsa_rsrc->GetCountOfCpuAgents();
   uint32_t agent_max = 0;
   const rocprofiler::util::AgentInfo* agent_info = NULL;
 
