@@ -313,7 +313,8 @@ class perfetto_plugin_t {
                       profiler_record.kernel_properties.accum_vgpr_count, "SGPR",
                       profiler_record.kernel_properties.sgpr_count, "Wave Size",
                       profiler_record.kernel_properties.wave_size, "Signal",
-                      profiler_record.kernel_properties.signal_handle);
+                      profiler_record.kernel_properties.signal_handle,
+                      perfetto::Flow::ProcessScoped(profiler_record.correlation_id.value));
 
     TRACE_EVENT_END("KERNELS", queue_track, profiler_record.timestamps.end.value);
 
