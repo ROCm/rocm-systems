@@ -839,7 +839,6 @@ void Initialize(HsaApiTable* table) {
           [](hsa_agent_t agent, void* data) {
             Agent::AgentInfo agent_info{agent, &GetCoreApiTable()};
             static int cpu_agent_count = 0;
-            static int gpu_agent_count = 0;
             static int other_agent_count = 0;
             switch (agent_info.getType()) {
               case HSA_DEVICE_TYPE_CPU:
@@ -867,7 +866,12 @@ void Initialize(HsaApiTable* table) {
                 // that would be an improvement--it's what legacy roctracer
                 // is currently doing as well as the roctracer compatibility
                 // code earlier in this file.
-                agent_info.setIndex(gpu_agent_count++);
+                uint32_t driver_node_id;
+                if (rocprofiler::hsa_support::GetCoreApiTable().hsa_agent_get_info_fn(
+                        agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_DRIVER_NODE_ID),
+                        &driver_node_id) != HSA_STATUS_SUCCESS)
+                  rocprofiler::fatal("hsa_agent_get_info failed");
+                agent_info.setIndex(driver_node_id);
                 uint32_t gpu_cpu_numa_node_id;
                 if (GetCoreApiTable().hsa_agent_get_info_fn(
                         agent, HSA_AGENT_INFO_NODE, &gpu_cpu_numa_node_id) != HSA_STATUS_SUCCESS)
