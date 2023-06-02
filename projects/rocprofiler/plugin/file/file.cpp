@@ -296,7 +296,7 @@ class file_plugin_t {
     }
     if (tracer_record.domain != ACTIVITY_DOMAIN_ROCTX)
       *output_file << ", Correlation_ID(" << tracer_record.correlation_id.value << ")";
-    *output_file << std::endl;
+    *output_file << '\n';
   }
 
   void FlushProfilerRecord(const rocprofiler_record_profiler_t* profiler_record,
@@ -355,7 +355,7 @@ class file_plugin_t {
                  << std::to_string(profiler_record->timestamps.end.value) << ")";
 
     // For Counters
-    *output_file << std::endl;
+    *output_file << '\n';
     if (profiler_record->counters) {
       for (uint64_t i = 0; i < profiler_record->counters_count.value; i++) {
         if (profiler_record->counters[i].counter_handler.handle > 0) {
@@ -369,8 +369,7 @@ class file_plugin_t {
                 session_id, ROCPROFILER_COUNTER_NAME, profiler_record->counters[i].counter_handler,
                 &name_c));
             *output_file << ", " << name_c << " ("
-                         << std::to_string(profiler_record->counters[i].value.value) << ")"
-                         << std::endl;
+                         << std::to_string(profiler_record->counters[i].value.value) << ")\n";
           }
         }
       }
