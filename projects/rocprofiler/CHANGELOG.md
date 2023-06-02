@@ -209,18 +209,26 @@ The resulting `a.out` will depend on
 
 ### Optimized
 - Improved Test Suite
-### Changed
-- ATT analysis will not run by default. For ATT to have the same behaviour as 5.5, use --plugin att <as.s> --mode network
 ### Added
 - 'end_time' need to be disabled in roctx_trace.txt
 - support for hsa_amd_memory_async_copy_on_engine API function trace
+
 ### Fixed
 - rocprof in ROcm/5.4.0 gpu selector broken.
 - rocprof in ROCm/5.4.1 fails to generate kernel info.
 - rocprof clobbers LD_PRELOAD.
 
 ## ROCprofiler for rocm 5.7.0
+### Navi support
+Rocprofiler for ROCm 5.7 added support for counter collection (PMC) and advanced thread tracing (ATT) for Navi21 and Navi31 GPUs.
+- On Navi, specially Navi31, counter collection requires the GPU to be in a stable power state. See README.md for instructions.
+- Navi does not support streaming SQ counters and ATT at the same time, unlike GFX9.
+- On Navi ATT, "att: target_cu" indexes the WGP and the SIMD_MASK parameter is actually the SIMD_ID, in the range [0,3].
+- HIP RT in ATT not yet supported.
+### Changed
+- ATT analysis will not run by default. For ATT to have the same behaviour as 5.5, use --plugin att <as.s> --mode network
 ### Optimized
+- ATT json filesizes
 ### Added
 - Every API trace in V2 reported synchronously will have two records, one for Enter phase and for Exit phase
 - File Plugin now reports the HSA OPS operation kind as part of the output text
@@ -230,9 +238,17 @@ The resulting `a.out` will depend on
 - MI300 individual XCC counters dumped per-xcc as separate records but with same record-id and kernel dispatch info
 - Naming for MPI ranks. Filenames containing "%rank" are replaced by variables "MPI_RANK", "OMPI_COMM_WORLD_RANK" or "MV2_COMM_WORLD_RANK".
 - MPI Rank will appear in perfetto track names.
+- SE_MASK parameter in ATT, a binary mask specifying for which shader engines to run ATT.
+  On GFX9, SEs are masked out completely. On Navi only part of the data is masked.
+  The use of SE_MASK=0x1 is heavily encouraged to avoid packet lost events.
+- "--mode file" option in ATT, which allows for parsed files to be stored. Run python3 httpserver.py from within ./UI/ to view files locally.
+- "ROCPROFILER_MAX_ATT_PROFILES" environment variable can be set. Previously fixed at 16, now the default is 1.
+- Increased ATT buffer size per collection to 1GB.
 ### Fixed
 - Samples are fixed to show the new usage of phases.
 - Plugin option validates the plugin names.
 - Fixing rocsys, for rocsys options, rocsys -h can be called
 - "--output-file" option ignored when no output folder was specified.
 - Perfetto crash when using ROCTX and/or no output file specified.
+- Parsing of the getpc, setpc and swappc instructions with registers loaded from scratch space.
+- Some browsers caching ATT data from older kernels.

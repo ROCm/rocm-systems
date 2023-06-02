@@ -19,7 +19,7 @@ from io import BytesIO
 
 class FileBytesIO:
     def __init__(self, iobytes):
-        self.iobytes = iobytes
+        self.iobytes = deepcopy(iobytes)
         self.seek = 0
 
     def __len__(self):
@@ -27,9 +27,9 @@ class FileBytesIO:
 
     def read(self, length=0):
         if length<=0:
-            return bytes(self.getbuffer())
+            return bytes(self.iobytes.getbuffer())
         else:
-            if self.seek >= len(self):
+            if self.seek >= self.iobytes.getbuffer().nbytes:
                 self.seek = 0
                 return None
             response =  self.iobytes.getbuffer()[self.seek:self.seek+length]
@@ -382,14 +382,14 @@ def draw_wave_states(selections, normalize):
     if normalize:
         timelines = np.array(timelines) / np.maximum(np.sum(timelines,0)*1E-2,1E-7)
 
-    kernsize = maxtime//150+1
     trim = max(maxtime//5000,1)
-    cycles = np.arange(timelines[0].size)[::trim]
-
+    cycles = np.arange(0, timelines[0].size//trim, 1)*trim
+    timelines = [time[:trim*(time.size//trim)].reshape((-1, trim)).mean(-1) if len(time) > 0 else cycles*0 for time in timelines]
+    kernsize = 21
     kernel = np.asarray([np.exp(-abs(10*k/kernsize)) for k in range(-kernsize//2,kernsize//2+1)])
     kernel /= np.sum(kernel)
 
-    timelines = [np.convolve(time, kernel)[kernsize//2:-kernsize//2][::trim] if len(time) > 0 else cycles*0 for time in timelines]
+    timelines = [np.convolve(time, kernel)[kernsize//2:-kernsize//2] for time in timelines]
 
     [plt.plot(cycles, t, label='State '+s, linewidth=1.1, color=c)
         for t, s, c, sel in zip(timelines, STATES, colors, selections) if sel]
@@ -456,8 +456,6 @@ if __name__ == "__main__":
         for line in lines:
             if 'PERFCOUNTER=' in line:
                 EVENT_NAMES += [clean(line).split('SQ_')[1].lower()]
-    if len(EVENT_NAMES) == 0:
-        EVENT_NAMES = ['SPI', 'Vdata', 'Sdata', 'LDS']
     if args.target_cu is None:
         args.target_cu = 1
 
@@ -546,7 +544,7 @@ if __name__ == "__main__":
             tuples3 = [(0,df['begin_time'][T]-min_event_time)]+[(int(t[0]),int(t[1])) for t in tuples2]
 
             for state in tuples3:
-                if state[1] > 50E6:
+                if state[1] > 1E8:
                     print('Warning: Time limit reached for ',state[0], state[1])
                     break
                 if time_acc+state[1] > TIMELINES[state[0]].size:

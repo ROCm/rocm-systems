@@ -468,7 +468,7 @@ hsa_ven_amd_aqlprofile_profile_t* InitializeDeviceProfilingAqlPackets(
 }
 
 // ATT
-uint32_t g_output_buffer_size = 0x8000000;  // 128M x 16 = 2GB
+uint32_t g_output_buffer_size = 0x40000000;  // 1GB
 bool g_output_buffer_local = true;
 
 // Allocate system memory accessible by both CPU and GPU

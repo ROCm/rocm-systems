@@ -206,7 +206,7 @@
 		var current_WV = 0
 		var filename_data = {}
 
-		fetch("filenames.json").then(response => response.json()).then(data => {
+		fetch("filenames.json", {cache: "no-store"}).then(response => response.json()).then(data => {
 			filename_data = data.wave_filenames
 
 			wave_cu_index = {};
@@ -272,7 +272,7 @@
 			document.getElementById("minimap").innerHTML = HTML_MINI
 			document.getElementById("Images").innerHTML = HTML_IMAG
 
-			fetch("counters.json").then(response => response.json()).then(data => {
+			fetch("counters.json", {cache: "no-store"}).then(response => response.json()).then(data => {
 				var html_gh = '<input type="checkbox" id="btn_norm" onclick="UpdImageSrc()" checked=true>Normalize\t'
 				for(var key in data.counters) {
 					console.log(key, data.counters[key])
@@ -294,14 +294,14 @@
 			//document.getElementById('what').innerHTML = ""
 
 			d3.select('nav').style('visibility', 'hidden')
-			fetch(file_to_gather)
+			fetch(file_to_gather, {cache: "no-store"})
 				.then(response => response.json())
 				.then(data => {
 				code_data_file = file_to_gather.split('_sm')[0]+'_code.json'
 				console.log("Requestd:", file_to_gather)
 				console.log("Request code:", code_data_file)
 
-				fetch(code_data_file)
+				fetch(code_data_file, {cache: "no-store"})
 				.then(response => response.json())
 				.then(code_data => {
 					const SP = '\u00A0'

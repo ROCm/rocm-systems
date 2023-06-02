@@ -50,7 +50,6 @@
   } while (0)
 
 #define __NR_gettid 186
-#define MAX_ATT_PROFILES 16
 
 std::mutex sessions_pending_signal_lock;
 
@@ -664,6 +663,9 @@ std::atomic<uint32_t> WRITER_ID{0};
  */
 void WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t user_pkt_index, void* data,
                       hsa_amd_queue_intercept_packet_writer writer) {
+  static const char* env_MAX_ATT_PROFILES = getenv("ROCPROFILER_MAX_ATT_PROFILES");
+  static int MAX_ATT_PROFILES = env_MAX_ATT_PROFILES ? atoi(env_MAX_ATT_PROFILES) : 1;
+
   const Packet::packet_t* packets_arr = reinterpret_cast<const Packet::packet_t*>(packets);
   std::vector<Packet::packet_t> transformed_packets;
 

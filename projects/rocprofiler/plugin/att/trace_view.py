@@ -798,10 +798,7 @@ def view_trace(args, code, jumps, dbnames, att_filenames, bReturnLoc, pic_callba
             print("Exitting.")
     else:
         os.makedirs('ui', exist_ok=True)
+        os.system('cp ' + os.path.join(os.path.abspath(os.path.dirname(__file__)),'ui') + '/* ui/' )
         for k, v in JSON_GLOBAL_DICTIONARY.items():
-            if '.json' in k:
-                try:
-                    with open(os.path.join('ui',k), 'w') as f:
-                        f.write(v.read())
-                except:
-                    pass
+            with open(os.path.join('ui',k), 'w' if '.json' in k else 'wb') as f:
+                f.write(v.read())
