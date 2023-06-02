@@ -34,9 +34,14 @@ do_configureLogrotate() {
     size 1M
     copytruncate
     dateext
-    dateformat .%Y-%m-%d_%H:%M:%S
+    dateformat .%%Y-%%m-%%d_%H:%%M:%%S
 }
 EOF
+  # Fix for %S argument not found (now we escape with %%)
+  # issue was RPM build thought we were using macros
+  # https://gitlab.kitware.com/cmake/cmake/-/issues/22965
+  # https://rpm-software-management.github.io/rpm/manual/spec.html
+  sudo sed -i s/%%/%/g /etc/logrotate.d/rocm_smi.conf
   # workaround: remove extra 'OURCE' text
   # from rocm_smi.conf. Unsure if CMAKE,
   # bash, or here document
