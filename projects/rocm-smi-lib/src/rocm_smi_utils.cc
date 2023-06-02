@@ -50,7 +50,6 @@
 
 #include <fstream>
 #include <string>
-#include <cstring>
 #include <cstdint>
 #include <iostream>
 #include <sstream>

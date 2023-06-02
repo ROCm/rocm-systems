@@ -23,9 +23,6 @@ set(ROCM_SMI_COMPONENT "lib${ROCM_SMI}")
 set(ROCM_SMI_TARGET "${ROCM_SMI}64")
 set(ROCM_SMI_LIB_NAME "lib${ROCM_SMI_TARGET}")
 
-# Expose project info to IDEs
-option(CMAKE_EXPORT_COMPILE_COMMANDS "Export compile commands for linters and autocompleters" ON)
-
 # provide git to utilities
 find_program (GIT NAMES git)
 
@@ -57,6 +54,9 @@ project(${AMD_SMI_LIBS_TARGET})
 
 include(GNUInstallDirs)
 set(COMMON_PROJ_ROOT ${PROJECT_SOURCE_DIR})
+
+## Verbose output.
+set(CMAKE_VERBOSE_MAKEFILE on)
 
 if (CMAKE_COMPILER_IS_GNUCC AND
                          CMAKE_CXX_COMPILER_VERSION VERSION_LESS 5.4.0)
