@@ -170,10 +170,6 @@ struct RocmSMI_env_vars {
     // comma delimited values.
     std::unordered_set<uint32_t> enum_overrides;
 
-    // If RSMI_LOGGING is set, enables logging.
-    // Otherwise unset values, signify logging is turned off.
-    uint32_t logging_on;
-
     // Sysfs path overrides
 
     // Env. var. RSMI_DEBUG_DRM_ROOT_OVERRIDE

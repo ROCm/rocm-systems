@@ -2,24 +2,6 @@
 
 set -e
 
-rm_logFolder() {
-  sudo rm -rf /var/log/rocm_smi_lib
-}
-
-return_logrotateToOrigConfig() {
-  if [ -f /etc/logrotate.d/rocm_smi.conf ]; then
-    sudo rm -rf /etc/logrotate.d/rocm_smi.conf
-  fi
-  if [ -f /etc/cron.hourly/logrotate ]; then
-    sudo mv /etc/cron.hourly/logrotate /etc/cron.daily/logrotate
-  fi
-  if [ -f /lib/systemd/system/logrotate.timer.backup ]; then
-    sudo cp /lib/systemd/system/logrotate.timer.backup /lib/systemd/system/logrotate.timer
-    sudo rm -rf /lib/systemd/system/logrotate.timer.backup
-    sudo systemctl reenable --now logrotate.timer
-  fi
-}
-
 rm_ldconfig() {
   # left-hand term originates from ENABLE_LDCONFIG = ON/OFF at package build
   if [ "@ENABLE_LDCONFIG@" == "ON" ]; then
@@ -37,8 +19,6 @@ case "$1" in
   ( remove | upgrade)
     rm_ldconfig
     rm_pyc
-    rm_logFolder
-    return_logrotateToOrigConfig
   ;;
   ( purge )
   ;;

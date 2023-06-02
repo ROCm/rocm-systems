@@ -1,5 +1,3 @@
-#!/bin/bash
-
 # second term originates from ENABLE_LDCONFIG = ON/OFF at package build
 if [ $1 -le 1 ] && [ "@ENABLE_LDCONFIG@" == "ON" ]; then
     # perform the below actions for rpm remove($1=0) or upgrade($1=1) operations

@@ -19,50 +19,35 @@ In order to build the ROCm SMI library, the following components are required. N
 * g++ (5.4.0)
 
 In order to build the latest documentation, the following are required:
-* Python 3.8+
-* NPM (sass)
+* DOxygen (1.8.11)
+* latex (pdfTeX 3.14159265-2.6-1.40.16)
 
 The source code for ROCm SMI is available on [Github](https://github.com/RadeonOpenCompute/rocm_smi_lib).
 
 After the ROCm SMI library git repository has been cloned to a local Linux machine, building the library is achieved by following the typical CMake build sequence. Specifically,
-```shell
-mkdir -p build
-cd build
-cmake <location of root of ROCm SMI library CMakeLists.txt>
-make
-# Install library file and header; default location is /opt/rocm
-$ make install
-```
+##### ```$ mkdir -p build```
+##### ```$ cd build```
+##### ```$ cmake <location of root of ROCm SMI library CMakeLists.txt>```
+##### ```$ make```
+##### ```# Install library file and header; default location is /opt/rocm```
+##### ```$ make install```
 The built library will appear in the `build` folder.
 
 To build the rpm and deb packages follow the above steps with:
-```shell
-make package
-```
+##### ```$ make package```
 
 #### Documentation
-The following is an example of how to build the docs:
-```shell
-sudo apt install -y npm
-sudo npm install -g sass
-
-python3 -m venv .venv
-
-.venv/bin/python3 -m pip install -r docs/.sphinx/requirements.txt
-.venv/bin/python3 -m sphinx -T -E -b html -d docs/_build/doctrees -D language=en docs docs/_build/html
-```
+The reference manual, `refman.pdf` will be in the `latex` directory upon a successful build.
 
 #### Building the Tests
 In order to verify the build and capability of ROCm SMI on your system and to see an example of how ROCm SMI can be used, you may build and run the tests that are available in the repo. To build the tests, follow these steps:
 
-```shell
-# Set environment variables used in CMakeLists.txt file
-ROCM_DIR=<parent dir. to lib/ and inc/, containing RSMI library and header>
-mkdir <location for test build>
-cd <location for test build>
-cmake -DROCM_DIR=$ROCM_DIR <ROCm SMI source root>/tests/rocm_smi_test
-make
-```
+##### ```# Set environment variables used in CMakeLists.txt file```
+##### ```$ ROCM_DIR=<parent dir. to lib/ and inc/, containing RSMI library and header>```
+##### ```$ mkdir <location for test build>```
+##### ```$ cd <location for test build>```
+##### ```$ cmake -DROCM_DIR=$ROCM_DIR <ROCm SMI source root>/tests/rocm_smi_test```
+##### ```$ make```
 
 To run the test, execute the program `rsmitst` that is built from the steps above.
 
@@ -77,7 +62,7 @@ When ROCm-SMI is no longer being used, `rsmi_shut_down()` should be called. This
 
 A simple "Hello World" type program that displays the device ID of detected devices would look like this:
 
-```c
+```
 #include <stdint.h>
 #include "rocm_smi/rocm_smi.h"
 int main() {
@@ -101,3 +86,4 @@ int main() {
   return 0;
 }
 ```
+
