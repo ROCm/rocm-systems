@@ -42,6 +42,7 @@
 #include <vector>
 
 #include "core/hardware/hsa_info.h"
+#include "core/hsa/hsa_common.h"
 #include "src/core/session/tracer/src/correlation_id.h"
 #include "src/core/session/tracer/src/exception.h"
 #include "src/core/session/tracer/src/roctracer.h"
@@ -145,6 +146,7 @@ class Tracker {
     void (*handler)(const entry_t*);
     union {
       struct {
+        hsa_agent_t dst_agent;
       } copy;
       struct {
         const char* name;
@@ -168,7 +170,7 @@ class Tracker {
 
     // Creating a proxy signal
     status = rocprofiler::hsa_support::GetCoreApiTable().hsa_signal_create_fn(1, 0, NULL,
-                                                                            &(entry->signal));
+                                                                              &(entry->signal));
     if (status != HSA_STATUS_SUCCESS) rocprofiler::fatal("hsa_signal_create failed");
     status = rocprofiler::hsa_support::GetAmdExtTable().hsa_amd_signal_async_handler_fn(
         entry->signal, HSA_SIGNAL_CONDITION_LT, 1, Handler, entry);
@@ -332,7 +334,8 @@ hsa_status_t MemoryPoolAllocateIntercept(hsa_amd_memory_pool_t pool, size_t size
         return HSA_STATUS_SUCCESS;
 
       auto it = agent_info_map.find(agent.handle);
-      if (it == agent_info_map.end()) rocprofiler::fatal("agent was not found in the agent_info map");
+      if (it == agent_info_map.end())
+        rocprofiler::fatal("agent was not found in the agent_info map");
 
       hsa_evt_data_t data{};
       data.device.type = it->second.type;
@@ -343,7 +346,8 @@ hsa_status_t MemoryPoolAllocateIntercept(hsa_amd_memory_pool_t pool, size_t size
       ReportActivity(ACTIVITY_DOMAIN_HSA_EVT, HSA_EVT_ID_DEVICE, &data);
       return HSA_STATUS_SUCCESS;
     };
-    rocprofiler::hsa_support::GetCoreApiTable().hsa_iterate_agents_fn(agent_callback, &callback_data);
+    rocprofiler::hsa_support::GetCoreApiTable().hsa_iterate_agents_fn(agent_callback,
+                                                                      &callback_data);
   }
 
   return HSA_STATUS_SUCCESS;
@@ -374,7 +378,8 @@ hsa_status_t AgentsAllowAccessIntercept(uint32_t num_agents, const hsa_agent_t* 
     while (num_agents--) {
       hsa_agent_t agent = *agents++;
       auto it = agent_info_map.find(agent.handle);
-      if (it == agent_info_map.end()) rocprofiler::fatal("agent was not found in the agent_info map");
+      if (it == agent_info_map.end())
+        rocprofiler::fatal("agent was not found in the agent_info map");
 
       hsa_evt_data_t data{};
       data.device.type = it->second.type;
@@ -508,7 +513,11 @@ void MemoryASyncCopyHandler(const Tracker::entry_t* entry) {
   record.op = HSA_OP_ID_COPY;
   record.begin_ns = entry->begin;
   record.end_ns = entry->end;
-  record.device_id = 0;
+  record.device_id = (entry->agent.handle > 0)
+      ? rocprofiler::hsa_support::GetAgentInfo(entry->agent.handle).getIndex()
+      : (entry->copy.dst_agent.handle > 0)
+      ? rocprofiler::hsa_support::GetAgentInfo(entry->copy.dst_agent.handle).getIndex()
+      : 0;
   record.correlation_id = entry->correlation_id;
   ReportActivity(ACTIVITY_DOMAIN_HSA_OPS, HSA_OP_ID_COPY, &record);
 }
@@ -533,6 +542,8 @@ hsa_status_t MemoryASyncCopyIntercept(void* dst, hsa_agent_t dst_agent, const vo
   Tracker::entry_t* entry = new Tracker::entry_t();
   entry->handler = MemoryASyncCopyHandler;
   entry->correlation_id = CorrelationId();
+  entry->agent = src_agent;
+  entry->copy.dst_agent = dst_agent;
   Tracker::Enable(Tracker::COPY_ENTRY_TYPE, hsa_agent_t{}, completion_signal, entry);
 
   status = rocprofiler::hsa_support::GetAmdExtTable().hsa_amd_memory_async_copy_fn(
@@ -566,6 +577,7 @@ hsa_status_t MemoryASyncCopyRectIntercept(const hsa_pitched_ptr_t* dst,
   Tracker::entry_t* entry = new Tracker::entry_t();
   entry->handler = MemoryASyncCopyHandler;
   entry->correlation_id = CorrelationId();
+  entry->agent = copy_agent;
   Tracker::Enable(Tracker::COPY_ENTRY_TYPE, hsa_agent_t{}, completion_signal, entry);
 
   status = rocprofiler::hsa_support::GetAmdExtTable().hsa_amd_memory_async_copy_rect_fn(
@@ -596,6 +608,8 @@ hsa_status_t MemoryASyncCopyOnEngineIntercept(
   Tracker::entry_t* entry = new Tracker::entry_t();
   entry->handler = MemoryASyncCopyHandler;
   entry->correlation_id = CorrelationId();
+  entry->agent = src_agent;
+  entry->copy.dst_agent = dst_agent;
   Tracker::Enable(Tracker::COPY_ENTRY_TYPE, hsa_agent_t{}, completion_signal, entry);
 
   status = saved_amd_ext_api.hsa_amd_memory_async_copy_on_engine_fn(
@@ -846,6 +860,7 @@ void Initialize(HsaApiTable* table) {
                 cpu_agent = agent;
                 rocprofiler::queue::InitializePools(cpu_agent, &agent_info);
                 uint32_t cpu_numa_node_id;
+                // Change into KFD GPU ID
                 if (GetCoreApiTable().hsa_agent_get_info_fn(
                         agent, HSA_AGENT_INFO_NODE, &cpu_numa_node_id) != HSA_STATUS_SUCCESS)
                   rocprofiler::fatal("hsa_agent_get_info(HSA_AGENT_INFO_NODE) failed");

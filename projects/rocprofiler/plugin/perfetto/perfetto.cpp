@@ -18,6 +18,7 @@
  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  THE SOFTWARE. */
 
+#include "perfetto.h"
 #include "rocprofiler.h"
 
 #include <cassert>
@@ -60,6 +61,7 @@ PERFETTO_DEFINE_CATEGORIES(
     perfetto::Category("External_API").SetDescription("ACTIVITY_DOMAIN_EXT_API"),
     perfetto::Category("HIP_OPS").SetDescription("ACTIVITY_DOMAIN_HIP_OPS"),
     perfetto::Category("HSA_OPS").SetDescription("ACTIVITY_DOMAIN_HSA_OPS"),
+    perfetto::Category("MEM_COPIES").SetDescription("MEMORY_COPY_ASYNCHRONOUS_ACTIVITY"),
     perfetto::Category("KERNELS").SetDescription("KERNEL_DISPATCHES"),
     perfetto::Category("COUNTERS").SetDescription("PERFORMANCE_COUNTERS"));
 
@@ -97,8 +99,7 @@ class perfetto_plugin_t {
     const char* temp_file_name = getenv("OUT_FILE_NAME");
     output_file_name = temp_file_name ? std::string(temp_file_name) + "_" : "";
 
-    if (output_dir == nullptr)
-      output_dir = "./";
+    if (output_dir == nullptr) output_dir = "./";
 
     output_prefix_ = output_dir;
     if (!fs::is_directory(fs::status(output_prefix_))) {
@@ -107,9 +108,11 @@ class perfetto_plugin_t {
       return;
     }
 
+    machine_id_ = gethostid();
+    gethostname(hostname_, sizeof(hostname_));
+
     perfetto::TracingInitArgs args;
     args.backends |= perfetto::kInProcessBackend;
-
     perfetto::Tracing::Initialize(args);
     perfetto::TrackEvent::Register();
 
@@ -122,13 +125,14 @@ class perfetto_plugin_t {
     track_event_cfg.add_enabled_categories("External_API");
     track_event_cfg.add_enabled_categories("HIP_OPS");
     track_event_cfg.add_enabled_categories("HSA_OPS");
+    track_event_cfg.add_enabled_categories("MEM_COPIES");
     track_event_cfg.add_enabled_categories("KERNELS");
     track_event_cfg.add_enabled_categories("COUNTERS");
 
     perfetto::TraceConfig trace_cfg;
 
     auto buffer_cfg = trace_cfg.add_buffers();
-    uint32_t max_buffer_size = 10 * 1024 * 1024;  // Default max buffer size is 10 GB
+    uint32_t max_buffer_size = 1024 * 1024;  // Default max buffer size is 1 GB
     const char* max_buffer_size_str = getenv("rocprofiler_PERFETTO_MAX_BUFFER_SIZE_KIB");
     if (max_buffer_size_str && std::atol(max_buffer_size_str) > 0)
       max_buffer_size = std::atol(max_buffer_size_str);
@@ -148,26 +152,18 @@ class perfetto_plugin_t {
     tracing_session_->Setup(trace_cfg, file_descriptor_);
     tracing_session_->StartBlocking();
 
-    machine_id = gethostid();
-    {
-      std::lock_guard<std::mutex> lock(thread_tracks_lock_);
-      process_name =
-          perfetto::ProcessTrack::Current().Serialize().mutable_process()->process_name();
-      auto process_track_desc = perfetto::ProcessTrack::Current().Serialize();
-      uint64_t track_id =
-          track_counter_.fetch_add((1 + machine_id) * GetPid(), std::memory_order_acquire);
-      for (uint64_t tid : track_ids_used_) {
-        while (track_id == tid) {
-          track_id =
-              track_counter_.fetch_add((1 + machine_id) * GetPid(), std::memory_order_acquire);
-        }
-      }
-      process_track_desc.mutable_process()->set_process_name(get_thread_track_str());
-      perfetto::TrackEvent::SetTrackDescriptor(perfetto::ProcessTrack::Current(),
-                                               process_track_desc);
-      perfetto::ProcessTrack::Current().Serialize().set_uuid(track_id);
-      thread_tracks_.emplace(GetPid(), perfetto::ProcessTrack::Current());
-    }
+    // Give a custom name for the traced process.
+    perfetto::ProcessTrack process_track = perfetto::ProcessTrack::Current();
+    perfetto::protos::gen::TrackDescriptor desc = process_track.Serialize();
+    desc.mutable_process()->set_process_name("Node: " + std::string(hostname_) + " Rank " +
+                                             std::to_string(MPI_rank));
+    perfetto::TrackEvent::SetTrackDescriptor(process_track, desc);
+
+    mem_copies_track_.emplace(perfetto::Track::ThreadScoped("Memory Copies Operations"));
+    perfetto::protos::gen::TrackDescriptor mem_copies_track_desc = mem_copies_track_->Serialize();
+    mem_copies_track_desc.mutable_process()->set_process_name("Memory Copies Operations");
+    mem_copies_track_desc.mutable_process()->set_pid(GetPid() * QUEUE_CONSTANT);
+    perfetto::TrackEvent::SetTrackDescriptor(mem_copies_track_.value(), mem_copies_track_desc);
 
     is_valid_ = true;
   }
@@ -180,14 +176,13 @@ class perfetto_plugin_t {
   }
 
   std::string replace_MPI_macros(std::string output_file_name) {
-    std::vector<const char*> MPI_BUILTINS = {
-      "MPI_RANK", "OMPI_COMM_WORLD_RANK", "MV2_COMM_WORLD_RANK"
-    };
+    std::vector<const char*> MPI_BUILTINS = {"MPI_RANK", "OMPI_COMM_WORLD_RANK",
+                                             "MV2_COMM_WORLD_RANK"};
     bIsMPI = false;
 
     for (const char* envvar : MPI_BUILTINS) {
       const char* rank_env_var = getenv(envvar);
-      if (rank_env_var == nullptr) continue; // MPI var is does not exist
+      if (rank_env_var == nullptr) continue;  // MPI var is does not exist
 
       MPI_rank = atoi(rank_env_var);
       bIsMPI = true;
@@ -195,24 +190,11 @@ class perfetto_plugin_t {
     }
 
     size_t key_find = output_file_name.rfind("%rank");
-    if (key_find != std::string::npos) { // Contains a %?rank string
-      output_file_name =  output_file_name.substr(0, key_find) + std::to_string(MPI_rank)
-                        + output_file_name.substr(key_find + std::string("%rank").size());
+    if (key_find != std::string::npos) {  // Contains a %?rank string
+      output_file_name = output_file_name.substr(0, key_find) + std::to_string(MPI_rank) +
+          output_file_name.substr(key_find + std::string("%rank").size());
     }
     return output_file_name;
-  }
-
-  std::string get_thread_track_str() {
-    if (!bIsMPI)
-      rocprofiler::string_printf("Node: %s Process ID: %lu Thread ID:", hostname_, GetPid());
-    std::stringstream thread_track_str;
-    thread_track_str  << "Rank: " << MPI_rank << " (" << hostname_
-                      << ") Process ID:" << GetPid() << " Thread ID:";
-    return thread_track_str.str();
-  }
-
-  std::string get_device_track_str() {
-    return rocprofiler::string_printf("Node: %s Device:", hostname_);
   }
 
   const char* GetDomainName(rocprofiler_tracer_activity_domain_t domain) {
@@ -252,18 +234,20 @@ class perfetto_plugin_t {
     std::unordered_map<int, perfetto::Track>::iterator device_track_it;
     {
       std::lock_guard<std::mutex> lock(device_tracks_lock_);
-      device_track_it = device_tracks_.find(device_id);
+      uint64_t device_track_id = (device_id + 2) * (machine_id_ + 2);
+      device_track_it = device_tracks_.find(device_track_id);
       if (device_track_it == device_tracks_.end()) {
         /* Create a new perfetto::Track (Sub-Track) */
         device_track_it =
-            device_tracks_
-                .emplace(device_id, perfetto::ProcessTrack::Global(((device_id + 1) * machine_id)))
-                .first;
+            device_tracks_.emplace(device_track_id, perfetto::Track::Global(device_track_id)).first;
         auto gpu_desc = device_track_it->second.Serialize();
         gpu_desc.mutable_process()->set_pid(device_id);
-        gpu_desc.mutable_process()->set_process_name(get_device_track_str());
+        gpu_desc.mutable_process()->set_chrome_process_type(
+            perfetto::protos::gen::ProcessDescriptor::PROCESS_GPU);
+        gpu_desc.mutable_process()->set_process_name("Node: " + std::string(hostname_) +
+                                                     " Device: ");
         perfetto::TrackEvent::SetTrackDescriptor(device_track_it->second, gpu_desc);
-        track_ids_used_.emplace_back(device_id + 1 + machine_id);
+        track_ids_used_.emplace_back(device_track_id);
       }
     }
     auto& gpu_track = device_track_it->second;
@@ -272,25 +256,19 @@ class perfetto_plugin_t {
     auto queue_track_it = queue_tracks_.find(gpu_queue_id.first);
     {
       std::lock_guard<std::mutex> lock(queue_tracks_lock_);
-      queue_track_it = queue_tracks_.find(gpu_queue_id.first);
+      uint64_t queue_track_id = (gpu_queue_id.first + 2) * (device_id + 2) * (machine_id_ + 2);
+      queue_track_it = queue_tracks_.find(queue_track_id);
       if (queue_track_it == queue_tracks_.end()) {
         /* Create a new perfetto::Track */
-        queue_track_it = queue_tracks_
-                             .emplace(gpu_queue_id.first,
-                                      perfetto::Track((profiler_record.queue_id.handle + 1 +
-                                                       profiler_record.gpu_id.handle) *
-                                                          QUEUE_CONSTANT * machine_id * GetPid(),
-                                                      gpu_track))
-                             .first;
+        queue_track_it =
+            queue_tracks_.emplace(queue_track_id, perfetto::Track(queue_track_id, gpu_track)).first;
 
         auto queue_desc = queue_track_it->second.Serialize();
-        std::string queue_str =
-            rocprofiler::string_printf("Process ID: %lu Queue %ld", GetPid(), gpu_queue_id.second);
+        std::string queue_str = rocprofiler::string_printf("Queue %ld", gpu_queue_id.second);
         queue_desc.set_name(queue_str);
         perfetto::TrackEvent::SetTrackDescriptor(queue_track_it->second, queue_desc);
       }
-      track_ids_used_.emplace_back(profiler_record.queue_id.handle + machine_id + 1 +
-                                   profiler_record.gpu_id.handle);
+      track_ids_used_.emplace_back(queue_track_id);
     }
     auto& queue_track = queue_track_it->second;
 
@@ -319,8 +297,7 @@ class perfetto_plugin_t {
     TRACE_EVENT_END("KERNELS", queue_track, profiler_record.timestamps.end.value);
 
     auto get_counter_track_fn = [&](std::string counter_name) {
-      std ::string counter_track_id =
-          std::to_string(machine_id) + std::to_string(GetPid()) + counter_name;
+      std ::string counter_track_id = hostname_ + std::to_string(GetPid()) + counter_name;
       std::pair<int, std::string> gpu_counter_track_id = std::make_pair(device_id, counter_name);
       std::unordered_map<std::string, perfetto::CounterTrack>::iterator counters_track_it;
       {
@@ -335,8 +312,7 @@ class perfetto_plugin_t {
                   .first;
 
           auto counter_track_desc = counters_track_it->second.Serialize();
-          std::string counter_track_str = "Process ID " + std::to_string(GetPid()) + " - Counter " +
-              gpu_counter_track_id.second;
+          std::string counter_track_str = "Counter " + gpu_counter_track_id.second;
           counter_track_desc.set_name(counter_track_str);
           perfetto::TrackEvent::SetTrackDescriptor(counters_track_it->second, counter_track_desc);
         }
@@ -386,42 +362,39 @@ class perfetto_plugin_t {
     if (tracer_record.domain == ACTIVITY_DOMAIN_HIP_OPS ||
         tracer_record.domain == ACTIVITY_DOMAIN_HSA_OPS) {
       int device_id = tracer_record.agent_id.handle;
-      if (tracer_record.domain == ACTIVITY_DOMAIN_HIP_OPS && device_id > 0) device_id--;
-      {
-        std::lock_guard<std::mutex> lock(device_tracks_lock_);
-        device_track_it = device_tracks_.find(device_id);
-        if (device_track_it == device_tracks_.end()) {
-          /* Create a new perfetto::Track (Sub-Track) */
-          device_track_it =
-              device_tracks_
-                  .emplace(device_id,
-                           perfetto::ProcessTrack::Global(((device_id + 1) * machine_id)))
-                  .first;
-          auto gpu_desc = device_track_it->second.Serialize();
-          gpu_desc.mutable_process()->set_pid(device_id);
-          gpu_desc.mutable_process()->set_process_name(get_device_track_str());
-          perfetto::TrackEvent::SetTrackDescriptor(device_track_it->second, gpu_desc);
-          track_ids_used_.emplace_back(1 + machine_id + device_id);
-        }
+
+      std::lock_guard<std::mutex> lock(device_tracks_lock_);
+      uint64_t device_track_id = (device_id + 2) * (machine_id_ + 2);
+      device_track_it = device_tracks_.find(device_track_id);
+      if (device_track_it == device_tracks_.end()) {
+        /* Create a new perfetto::Track (Sub-Track) */
+        device_track_it =
+            device_tracks_.emplace(device_track_id, perfetto::ProcessTrack::Global(device_track_id))
+                .first;
+        auto gpu_desc = device_track_it->second.Serialize();
+        gpu_desc.mutable_process()->set_pid(device_id);
+        gpu_desc.mutable_process()->set_chrome_process_type(
+            perfetto::protos::gen::ProcessDescriptor::PROCESS_GPU);
+        gpu_desc.mutable_process()->set_process_name("Node: " + std::string(hostname_) +
+                                                     " Device: ");
+        perfetto::TrackEvent::SetTrackDescriptor(device_track_it->second, gpu_desc);
+        track_ids_used_.emplace_back(device_track_id);
       }
     } else {
       std::lock_guard<std::mutex> lock(thread_tracks_lock_);
-      thread_track_it = thread_tracks_.find(thread_id);
+      uint64_t thread_track_id = (thread_id + 2) * GetPid() * (machine_id_ + 2);
+      thread_track_it = thread_tracks_.find(thread_track_id);
       if (thread_track_it == thread_tracks_.end()) {
-        uint64_t track_id =
-            track_counter_.fetch_add((1 + machine_id) * GetPid(), std::memory_order_acquire);
-        for (uint64_t tid : track_ids_used_) {
-          while (track_id == tid) {
-            track_id =
-                track_counter_.fetch_add((1 + machine_id) * GetPid(), std::memory_order_acquire);
-          }
-        }
         thread_track_it =
-            thread_tracks_.emplace(thread_id, perfetto::ProcessTrack::Global(track_id)).first;
+            thread_tracks_
+                .emplace(thread_track_id,
+                         perfetto::Track(thread_track_id, perfetto::ProcessTrack::Current()))
+                .first;
         auto thread_track_desc = thread_track_it->second.Serialize();
         thread_track_desc.mutable_process()->set_pid(thread_id);
-        thread_track_desc.mutable_process()->set_process_name(get_thread_track_str());
+        thread_track_desc.mutable_process()->set_process_name("Thread: ");
         perfetto::TrackEvent::SetTrackDescriptor(thread_track_it->second, thread_track_desc);
+        track_ids_used_.emplace_back(thread_track_id);
       }
     }
     auto& thread_track = thread_track_it->second;
@@ -435,10 +408,10 @@ class perfetto_plugin_t {
           if (roctx_track_it == roctx_tracks_.end()) {
             /* Create a new perfetto::Track */
             uint64_t track_id =
-                track_counter_.fetch_add((1 + machine_id) * GetPid(), std::memory_order_acquire);
+                track_counter_.fetch_add((1 + machine_id_) * GetPid(), std::memory_order_acquire);
             for (uint64_t tid : track_ids_used_) {
               while (track_id == tid) {
-                track_id = track_counter_.fetch_add((1 + machine_id) * GetPid(),
+                track_id = track_counter_.fetch_add((1 + machine_id_) * GetPid(),
                                                     std::memory_order_acquire);
               }
             }
@@ -475,10 +448,10 @@ class perfetto_plugin_t {
           if (hsa_track_it == hsa_tracks_.end()) {
             /* Create a new perfetto::Track */
             uint64_t track_id =
-                track_counter_.fetch_add((1 + machine_id) * GetPid(), std::memory_order_acquire);
+                track_counter_.fetch_add((1 + machine_id_) * GetPid(), std::memory_order_acquire);
             for (uint64_t tid : track_ids_used_) {
               while (track_id == tid) {
-                track_id = track_counter_.fetch_add((1 + machine_id) * GetPid(),
+                track_id = track_counter_.fetch_add((1 + machine_id_) * GetPid(),
                                                     std::memory_order_acquire);
               }
             }
@@ -526,10 +499,10 @@ class perfetto_plugin_t {
           if (hip_track_it == hip_tracks_.end()) {
             /* Create a new perfetto::Track */
             uint64_t track_id =
-                track_counter_.fetch_add((1 + machine_id) * GetPid(), std::memory_order_acquire);
+                track_counter_.fetch_add((1 + machine_id_) * GetPid(), std::memory_order_acquire);
             for (uint64_t tid : track_ids_used_) {
               while (track_id == tid) {
-                track_id = track_counter_.fetch_add((1 + machine_id) * GetPid(),
+                track_id = track_counter_.fetch_add((1 + machine_id_) * GetPid(),
                                                     std::memory_order_acquire);
               }
             }
@@ -591,36 +564,38 @@ class perfetto_plugin_t {
       case ACTIVITY_DOMAIN_HIP_OPS: {
         // TODO(aelwazir): Stream ID is removed from the API processing.
         //        Waiting for better implementation to get the stream id.
-        uint64_t stream_id = 0;
-        std::unordered_map<int, perfetto::Track>::iterator stream_track_it;
-        {
-          std::lock_guard<std::mutex> lock(stream_tracks_lock_);
-          stream_track_it = stream_tracks_.find(stream_id);
-          if (stream_track_it == stream_tracks_.end()) {
-            /* Create a new perfetto::Track */
-            uint64_t track_id = ((1 + stream_id + tracer_record.agent_id.handle) * machine_id *
-                                 STREAM_CONSTANT * GetPid());
-            stream_track_it =
-                stream_tracks_.emplace(stream_id, perfetto::Track(track_id, gpu_track)).first;
+        // uint64_t stream_id = 0;
+        // std::unordered_map<int, perfetto::Track>::iterator stream_track_it;
+        // {
+        //   std::lock_guard<std::mutex> lock(stream_tracks_lock_);
+        //   uint64_t stream_track_id = (stream_id + STREAM_CONSTANT) *
+        //       (tracer_record.agent_id.handle + 2) * (machine_id_ + 2);
+        //   stream_track_it = stream_tracks_.find(stream_track_id);
+        //   if (stream_track_it == stream_tracks_.end()) {
+        //     /* Create a new perfetto::Track */
+        //     stream_track_it =
+        //         stream_tracks_.emplace(stream_track_id, perfetto::Track(stream_track_id,
+        //         gpu_track))
+        //             .first;
 
-            auto stream_desc = stream_track_it->second.Serialize();
-            std::string stream_str =
-                rocprofiler::string_printf("Process ID: %lu Stream %d", GetPid(), stream_id);
-            stream_desc.set_name(stream_str);
-            perfetto::TrackEvent::SetTrackDescriptor(stream_track_it->second, stream_desc);
-            track_ids_used_.emplace_back(1 + machine_id + tracer_record.agent_id.handle);
-          }
-        }
-        auto& stream_track = stream_track_it->second;
+        //     auto stream_desc = stream_track_it->second.Serialize();
+        //     std::string stream_str = rocprofiler::string_printf("Stream %d", stream_id);
+        //     stream_desc.set_name(stream_str);
+        //     perfetto::TrackEvent::SetTrackDescriptor(stream_track_it->second, stream_desc);
+        //     track_ids_used_.emplace_back(stream_track_id);
+        //   }
+        // }
+        // auto& stream_track = stream_track_it->second;
         rocprofiler_timestamp_t timestamp;
         rocprofiler_get_timestamp(&timestamp);
+        std::string::size_type pos = std::string::npos;
         if (tracer_record.api_data_handle.handle && tracer_record.api_data_handle.size > 1) {
           kernel_name = rocprofiler::cxx_demangle(
               strdup(reinterpret_cast<const char*>(tracer_record.api_data_handle.handle)));
           TRACE_EVENT_BEGIN(
               "HIP_OPS",
               perfetto::StaticString(strdup(rocprofiler::truncate_name(kernel_name).c_str())),
-              stream_track, tracer_record.timestamps.begin.value, "Agent ID",
+              gpu_track, tracer_record.timestamps.begin.value, "Agent ID",
               tracer_record.agent_id.handle, "Process ID", GetPid(), "Kernel Name", kernel_name,
               perfetto::Flow::ProcessScoped(tracer_record.correlation_id.value));
         } else {
@@ -636,49 +611,65 @@ class perfetto_plugin_t {
           } else {
             activity_name = const_cast<char*>(std::string("N/A").c_str());
           }
-          if (tracer_record.phase == ROCPROFILER_PHASE_NONE)
-            TRACE_EVENT_BEGIN("HIP_OPS", perfetto::StaticString(activity_name), stream_track,
-                              tracer_record.timestamps.begin.value, "Agent ID",
-                              tracer_record.agent_id.handle, "Process ID", GetPid(),
-                              perfetto::Flow::ProcessScoped(tracer_record.correlation_id.value));
-          else if (tracer_record.phase == ROCPROFILER_PHASE_ENTER)
-            TRACE_EVENT_BEGIN("HIP_OPS", perfetto::StaticString(activity_name), stream_track,
-                              timestamp.value, "Agent ID", tracer_record.agent_id.handle,
-                              "Process ID", GetPid(),
-                              perfetto::Flow::ProcessScoped(tracer_record.correlation_id.value));
+          pos = std::string(activity_name).find("Copy");
+          if (tracer_record.phase == ROCPROFILER_PHASE_NONE) {
+            if (std::string::npos == pos)
+              TRACE_EVENT_BEGIN("HIP_OPS", perfetto::StaticString(activity_name), gpu_track,
+                                tracer_record.timestamps.begin.value, "Process ID", GetPid(),
+                                perfetto::Flow::ProcessScoped(tracer_record.correlation_id.value));
+            else
+              TRACE_EVENT_BEGIN("MEM_COPIES", perfetto::StaticString(activity_name),
+                                mem_copies_track_.value(), tracer_record.timestamps.begin.value,
+                                "Process ID", GetPid(),
+                                perfetto::Flow::ProcessScoped(tracer_record.correlation_id.value));
+          } else if (tracer_record.phase == ROCPROFILER_PHASE_ENTER) {
+            if (std::string::npos == pos)
+              TRACE_EVENT_BEGIN("HIP_OPS", perfetto::StaticString(activity_name), gpu_track,
+                                timestamp.value, "Process ID", GetPid(),
+                                perfetto::Flow::ProcessScoped(tracer_record.correlation_id.value));
+            else
+              TRACE_EVENT_BEGIN("MEM_COPIES", perfetto::StaticString(activity_name),
+                                mem_copies_track_.value(), timestamp.value, "Process ID", GetPid(),
+                                perfetto::Flow::ProcessScoped(tracer_record.correlation_id.value));
+          }
         }
-        if (tracer_record.phase == ROCPROFILER_PHASE_NONE)
-          TRACE_EVENT_END("HIP_OPS", stream_track, tracer_record.timestamps.end.value);
-        else if (tracer_record.phase == ROCPROFILER_PHASE_EXIT)
-          TRACE_EVENT_END("HIP_OPS", stream_track, timestamp.value);
+        if (tracer_record.phase == ROCPROFILER_PHASE_NONE) {
+          if (std::string::npos == pos)
+            TRACE_EVENT_END("HIP_OPS", gpu_track, tracer_record.timestamps.end.value);
+          else
+            TRACE_EVENT_END("MEM_COPIES", mem_copies_track_.value(),
+                            tracer_record.timestamps.end.value);
+        } else if (tracer_record.phase == ROCPROFILER_PHASE_EXIT) {
+          if (std::string::npos == pos)
+            TRACE_EVENT_END("HIP_OPS", gpu_track, timestamp.value);
+          else
+            TRACE_EVENT_END("MEM_COPIES", mem_copies_track_.value(), timestamp.value);
+        }
         break;
       }
       case ACTIVITY_DOMAIN_HSA_OPS: {
-        std::pair<int, uint64_t> gpu_queue_id =
-            std::make_pair(tracer_record.agent_id.handle, tracer_record.queue_id.handle);
-        std::unordered_map<int, perfetto::Track>::iterator queue_track_it;
-        {
-          std::lock_guard<std::mutex> lock(queue_tracks_lock_);
-          queue_track_it = queue_tracks_.find(gpu_queue_id.first);
-          if (queue_track_it == queue_tracks_.end()) {
-            /* Create a new perfetto::Track */
-            uint64_t track_id =
-                ((1 + tracer_record.queue_id.handle + tracer_record.agent_id.handle) * machine_id *
-                 QUEUE_CONSTANT * GetPid());
-            queue_track_it =
-                queue_tracks_.emplace(gpu_queue_id.first, perfetto::Track(track_id, gpu_track))
-                    .first;
+        // std::pair<int, uint64_t> gpu_queue_id =
+        //     std::make_pair(tracer_record.agent_id.handle, tracer_record.queue_id.handle);
+        // std::unordered_map<int, perfetto::Track>::iterator queue_track_it;
+        // {
+        //   std::lock_guard<std::mutex> lock(queue_tracks_lock_);
+        //   uint64_t queue_track_id = (tracer_record.queue_id.handle + 2) *
+        //       (tracer_record.agent_id.handle + 2) * (machine_id_ + 2);
+        //   queue_track_it = queue_tracks_.find(queue_track_id);
+        //   if (queue_track_it == queue_tracks_.end()) {
+        //     /* Create a new perfetto::Track */
+        //     queue_track_it =
+        //         queue_tracks_.emplace(queue_track_id, perfetto::Track(queue_track_id, gpu_track))
+        //             .first;
 
-            auto queue_desc = queue_track_it->second.Serialize();
-            std::string queue_str = rocprofiler::string_printf("Process ID: %lu Queue %ld", GetPid(),
-                                                             gpu_queue_id.second);
-            queue_desc.set_name(queue_str);
-            perfetto::TrackEvent::SetTrackDescriptor(queue_track_it->second, queue_desc);
-          }
-          track_ids_used_.emplace_back(tracer_record.queue_id.handle + machine_id + 1 +
-                                       tracer_record.agent_id.handle);
-        }
-        auto& queue_track = queue_track_it->second;
+        //     auto queue_desc = queue_track_it->second.Serialize();
+        //     std::string queue_str = rocprofiler::string_printf("Queue %ld", gpu_queue_id.second);
+        //     queue_desc.set_name(queue_str);
+        //     perfetto::TrackEvent::SetTrackDescriptor(queue_track_it->second, queue_desc);
+        //   }
+        //   track_ids_used_.emplace_back(queue_track_id);
+        // }
+        // auto& queue_track = queue_track_it->second;
         size_t activity_name_size = 0;
         CHECK_ROCPROFILER(rocprofiler_query_hsa_tracer_api_data_info_size(
             session_id, ROCPROFILER_HSA_ACTIVITY_NAME, tracer_record.api_data_handle,
@@ -689,12 +680,12 @@ class perfetto_plugin_t {
               session_id, ROCPROFILER_HSA_ACTIVITY_NAME, tracer_record.api_data_handle,
               tracer_record.operation_id, &activity_name));
         }
-        TRACE_EVENT_BEGIN("HSA_OPS", perfetto::StaticString(activity_name), queue_track,
-                          tracer_record.timestamps.begin.value, "Agent ID",
-                          tracer_record.agent_id.handle, "Queue ID", tracer_record.queue_id.handle,
+        TRACE_EVENT_BEGIN("MEM_COPIES", perfetto::StaticString(activity_name),
+                          mem_copies_track_.value(), tracer_record.timestamps.begin.value,
                           "Process ID", GetPid(),
                           perfetto::Flow::ProcessScoped(tracer_record.correlation_id.value));
-        TRACE_EVENT_END("HSA_OPS", queue_track, tracer_record.timestamps.end.value);
+        TRACE_EVENT_END("MEM_COPIES", mem_copies_track_.value(),
+                        tracer_record.timestamps.end.value);
         break;
       }
       default: {
@@ -743,6 +734,7 @@ class perfetto_plugin_t {
   bool bIsMPI = false;
   int MPI_rank = 0;
   size_t roctx_track_entries_{0};
+  std::optional<perfetto::Track> mem_copies_track_;
 
   // Correlate stream id(s) with correlation id(s) to identify the stream id of every HIP activity
   std::unordered_map<uint64_t, uint64_t> stream_ids_;
@@ -766,7 +758,7 @@ class perfetto_plugin_t {
       stream_tracks_lock_, counter_tracks_lock_;
 
   char hostname_[1024];
-  uint64_t machine_id;
+  uint64_t machine_id_;
 
   std::ofstream stream_;
 };
