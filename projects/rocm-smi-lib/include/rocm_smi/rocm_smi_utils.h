@@ -68,6 +68,7 @@ namespace smi {
 pthread_mutex_t *GetMutex(uint32_t dv_ind);
 int SameFile(const std::string fileA, const std::string fileB);
 bool FileExists(char const *filename);
+std::vector<std::string> globFilesExist(const std::string& filePattern);
 int isRegularFile(std::string fname, bool *is_reg);
 int ReadSysfsStr(std::string path, std::string *retStr);
 int WriteSysfsStr(std::string path, std::string val);
@@ -91,6 +92,10 @@ rsmi_status_t
 GetDevBinaryBlob(amd::smi::DevInfoTypes type,
            uint32_t dv_ind, std::size_t b_size, void* p_binary_data);
 rsmi_status_t ErrnoToRsmiStatus(int err);
+std::string getRSMIStatusString(rsmi_status_t ret);
+std::tuple<bool, std::string, std::string, std::string, std::string,
+           std::string, std::string, std::string> getSystemDetails(void);
+void logSystemDetails(void);
 
 struct pthread_wrap {
  public:
