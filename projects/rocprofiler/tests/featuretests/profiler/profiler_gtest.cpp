@@ -1249,7 +1249,7 @@ class ProfilerMQTest : public ::testing::Test {
 };
 
 
-TEST_F(ProfilerMQTest, DISBALED_WhenRunningMultiProcessTestItPasses) {
+TEST_F(ProfilerMQTest, DISABLED_WhenRunningMultiProcessTestItPasses) {
   int test_status = -1;
   std::string profiler_output;
 
