@@ -136,7 +136,7 @@ function(generate_hsaco TARGET_ID INPUT_FILE OUTPUT_FILE)
   set(HSACO_TARGET_LIST ${HSACO_TARGET_LIST} ${PROJECT_BINARY_DIR}/tests/featuretests/profiler/${OUTPUT_FILE} PARENT_SCOPE)
 endfunction(generate_hsaco)
 
-set(GPU_LIST "gfx900" "gfx906" "gfx908" "gfx90a" "gfx1030")
+set(GPU_LIST "gfx900" "gfx906" "gfx908" "gfx90a" "gfx1030" "gfx1100")
 foreach(target_id ${GPU_LIST})
   ## generate kernel bitcodes
   generate_hsaco(${target_id} ${CMAKE_CURRENT_SOURCE_DIR}/apps/copy.cl ${target_id}_copy.hsaco)
