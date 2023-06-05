@@ -56,7 +56,10 @@ class file_plugin_t {
 
   class output_file_t {
    public:
-    output_file_t(std::string name) : name_(std::move(name)) {}
+    output_file_t(std::string name, bool bOpenOnInit = false)
+      : name_(std::move(name)) {
+      if (bOpenOnInit) open();
+    }
 
     std::string name() const { return name_; }
 
@@ -82,6 +85,7 @@ class file_plugin_t {
         stream_.copyfmt(std::cout);
         stream_.clear(std::cout.rdstate());
         stream_.basic_ios<char>::rdbuf(std::cout.rdbuf());
+        bPrintToStdout = true;
         return;
       }
       if (output_dir == nullptr)
@@ -103,6 +107,7 @@ class file_plugin_t {
 
     bool is_open() const { return stream_.is_open(); }
     bool fail() const { return stream_.fail(); }
+    bool isStdOut() const { return bPrintToStdout; }
 
     // Returns a string with the MPI %macro replaced with the corresponding envvar
     std::string replace_MPI_macros(std::string output_file_name) {
@@ -130,6 +135,7 @@ class file_plugin_t {
    private:
     const std::string name_;
     std::ofstream stream_;
+    bool bPrintToStdout = false;
   };
 
   output_file_t* get_output_file(output_type_t output_type, uint32_t domain = 0) {
@@ -161,7 +167,7 @@ class file_plugin_t {
 
  public:
   file_plugin_t() {
-    output_file_t hsa_handles("hsa_handles.txt");
+    output_file_t hsa_handles("hsa_handles.txt", true);
 
     [[maybe_unused]] hsa_status_t status = hsa_iterate_agents(
         [](hsa_agent_t agent, void* user_data) {
@@ -171,8 +177,9 @@ class file_plugin_t {
           if (hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &type) != HSA_STATUS_SUCCESS)
             return HSA_STATUS_ERROR;
 
-          *file << std::hex << std::showbase << agent.handle << " agent "
-                << ((type == HSA_DEVICE_TYPE_CPU) ? "cpu" : "gpu") << std::endl;
+          if (!file->isStdOut())
+            *file << std::hex << std::showbase << agent.handle << " agent "
+                  << ((type == HSA_DEVICE_TYPE_CPU) ? "cpu" : "gpu") << std::endl;
           return HSA_STATUS_SUCCESS;
         },
         &hsa_handles);
@@ -183,12 +190,14 @@ class file_plugin_t {
     }
 
     // App begin timestamp begin_ts_file.txt
-    output_file_t begin_ts("begin_ts_file.txt");
+    output_file_t begin_ts("begin_ts_file.txt", true);
 
     [[maybe_unused]] rocprofiler_timestamp_t app_begin_timestamp = {};
     CHECK_ROCPROFILER(rocprofiler_get_timestamp(&app_begin_timestamp));
 
-    begin_ts << std::dec << app_begin_timestamp.value << std::endl;
+    if (!begin_ts.isStdOut())
+      begin_ts << std::dec << app_begin_timestamp.value << std::endl;
+
     if (begin_ts.fail()) {
       rocprofiler::warning("Cannot write to '%s'", begin_ts.name().c_str());
       return;
