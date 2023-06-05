@@ -161,9 +161,10 @@ add_custom_target(hsaco_targets DEPENDS ${HSACO_TARGET_LIST})
 # target_link_libraries(profiler_multiqueue_test PRIVATE hsa-runtime64::hsa-runtime64 Threads::Threads dl stdc++fs amd_comgr)
 # add_dependencies(tests profiler_multiqueue_test)
 
-# Add test cpp file
-set_source_files_properties(profiler_gtest.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
-hip_add_executable(runFeatureTests  profiler_gtest.cpp
+set_source_files_properties(apps/hip_kernels.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+hip_add_executable(runFeatureTests  
+ profiler_gtest.cpp
+ apps/hip_kernels.cpp
  ${GTEST_MAIN_SRC_FILE}
  ${CORE_HSA_SRC_FILES}
  ${CORE_HW_SRC_FILES}
@@ -179,7 +180,7 @@ target_include_directories(runFeatureTests PRIVATE  ${TEST_DIR}
 
 # Link test executable against gtest & gtest_main
 target_link_libraries(runFeatureTests PRIVATE rocprofiler-v2 hsa-runtime64::hsa-runtime64
-                                              GTest::gtest GTest::gtest_main
+                                              GTest::gtest GTest::gtest_main 
                                               Threads::Threads dl stdc++fs amd_comgr)
 add_dependencies(tests runFeatureTests)
 target_link_options(runFeatureTests PRIVATE "-Wl,--build-id=md5")

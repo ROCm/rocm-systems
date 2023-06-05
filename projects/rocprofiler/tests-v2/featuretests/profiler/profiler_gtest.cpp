@@ -24,18 +24,19 @@ THE SOFTWARE.
 
 #include <gtest/gtest.h>
 #include <hsa/hsa.h>
-#include <hip/hip_runtime.h>
+
 #include "rocprofiler.h"
 #include <cstdlib>
 #include <string>
 #include <thread>
 #include <array>
-//#include <experimental/filesystem>
+#include <experimental/filesystem>
 
 #include "src/utils/helper.h"
 #include "utils/test_utils.h"
 #include "utils/csv_parser.h"
 #include "src/utils/logger.h"
+#include "apps/hip_kernels.h"
 
 std::string running_path;
 std::string lib_path;
@@ -91,6 +92,7 @@ void ApplicationParser::SetApplicationEnv(const char* app_name) {
 
   std::stringstream hsa_tools_lib_path;
   hsa_tools_lib_path << app_path << lib_path;
+
   setenv("LD_PRELOAD", hsa_tools_lib_path.str().c_str(), true);
 
   std::stringstream os;
@@ -607,21 +609,6 @@ TEST_F(LoadUnloadTest, WhenLoadingSecondTimeThenToolLoadsUnloadsSuccessfully) {
  * ###################################################
  */
 
-#ifdef NDEBUG
-#define HIP_ASSERT(x) x
-#else
-#define HIP_ASSERT(x) (assert((x) == hipSuccess))
-#endif
-
-#define WIDTH 1024
-#define HEIGHT 1024
-
-#define NUM (WIDTH * HEIGHT)
-
-#define THREADS_PER_BLOCK_X 16
-#define THREADS_PER_BLOCK_Y 16
-#define THREADS_PER_BLOCK_Z 1
-
 /** \mainpage ROC Profiler API Test
  *
  * \section introduction Introduction
@@ -631,20 +618,6 @@ TEST_F(LoadUnloadTest, WhenLoadingSecondTimeThenToolLoadsUnloadsSuccessfully) {
  * A simple vectoradd_float kernel is launched and the trace results are printed
  * as console output
  */
-
-
-__global__ void vectoradd_float(float* __restrict__ a, const float* __restrict__ b,
-                                const float* __restrict__ c, int width, int height)
-
-{
-  int x = hipBlockDim_x * hipBlockIdx_x + hipThreadIdx_x;
-  int y = hipBlockDim_y * hipBlockIdx_y + hipThreadIdx_y;
-
-  int i = y * width + x;
-  if (i < (width * height)) {
-    a[i] = b[i] + c[i];
-  }
-}
 
 class ATTCollection : public ::testing::Test {
  public:
@@ -689,73 +662,6 @@ class ATTCollection : public ::testing::Test {
       }
       rocprofiler_next_record(record, &record, session_id, buffer_id);
     }
-  }
-
-  int LaunchVectorAddKernel() {
-    float* hostA;
-    float* hostB;
-    float* hostC;
-
-    float* deviceA;
-    float* deviceB;
-    float* deviceC;
-
-    hipDeviceProp_t devProp;
-    hipGetDeviceProperties(&devProp, 0);
-
-    int i;
-    int errors;
-
-    hostA = (float*)malloc(NUM * sizeof(float));
-    hostB = (float*)malloc(NUM * sizeof(float));
-    hostC = (float*)malloc(NUM * sizeof(float));
-
-    // initialize the input data
-    for (i = 0; i < NUM; i++) {
-      hostB[i] = (float)i;
-      hostC[i] = (float)i * 100.0f;
-    }
-
-    HIP_ASSERT(hipMalloc((void**)&deviceA, NUM * sizeof(float)));
-    HIP_ASSERT(hipMalloc((void**)&deviceB, NUM * sizeof(float)));
-    HIP_ASSERT(hipMalloc((void**)&deviceC, NUM * sizeof(float)));
-
-    HIP_ASSERT(hipMemcpy(deviceB, hostB, NUM * sizeof(float), hipMemcpyHostToDevice));
-    HIP_ASSERT(hipMemcpy(deviceC, hostC, NUM * sizeof(float), hipMemcpyHostToDevice));
-
-
-    hipLaunchKernelGGL(vectoradd_float,
-                       dim3(WIDTH / THREADS_PER_BLOCK_X, HEIGHT / THREADS_PER_BLOCK_Y),
-                       dim3(THREADS_PER_BLOCK_X, THREADS_PER_BLOCK_Y), 0, 0, deviceA, deviceB,
-                       deviceC, WIDTH, HEIGHT);
-
-
-    HIP_ASSERT(hipMemcpy(hostA, deviceA, NUM * sizeof(float), hipMemcpyDeviceToHost));
-
-    // verify the results
-    errors = 0;
-    for (i = 0; i < NUM; i++) {
-      if (hostA[i] != (hostB[i] + hostC[i])) {
-        errors++;
-      }
-    }
-    if (errors != 0) {
-      printf("FAILED: %d errors\n", errors);
-    } else {
-      printf("PASSED!\n");
-    }
-
-    HIP_ASSERT(hipFree(deviceA));
-    HIP_ASSERT(hipFree(deviceB));
-    HIP_ASSERT(hipFree(deviceC));
-
-    free(hostA);
-    free(hostB);
-    free(hostC);
-
-    // hipResetDefaultAccelerator();
-
-    return errors;
   }
 };
 
@@ -826,9 +732,6 @@ TEST_F(ATTCollection, WhenRunningATTItCollectsTraceData) {
  * ###################################################
  */
 
-// empty kernel
-__global__ void kernel() {}
-
 void __attribute__((constructor)) globalsetting() {
   init_test_path();
   std::string app_path = GetRunningPath(running_path);
@@ -850,13 +753,6 @@ class ProfilerAPITest : public ::testing::Test {
     ASSERT_EQ(status, ROCPROFILER_STATUS_SUCCESS);
   };
 
-  // launches an empty kernel in profiler context
-  static void KernelLaunch() {
-    // run empty kernel
-    kernel<<<1, 1>>>();
-    hipDeviceSynchronize();
-  }
-
   // callback function to dump profiler data
   static void FlushCallback(const rocprofiler_record_header_t* record,
                             const rocprofiler_record_header_t* end_record,
@@ -873,9 +769,9 @@ class ProfilerAPITest : public ::testing::Test {
         const char* kernel_name_c = static_cast<const char*>(malloc(name_length * sizeof(char)));
         CheckApi(rocprofiler_query_kernel_info(ROCPROFILER_KERNEL_NAME, profiler_record->kernel_id,
                                                &kernel_name_c));
-        int gpu_index = profiler_record->gpu_id.handle;
-        uint64_t start_time = profiler_record->timestamps.begin.value;
-        uint64_t end_time = profiler_record->timestamps.end.value;
+        // int gpu_index = profiler_record->gpu_id.handle;
+        // uint64_t start_time = profiler_record->timestamps.begin.value;
+        // uint64_t end_time = profiler_record->timestamps.end.value;
         // printf(
         //     "Kernel Info:\n\tGPU Index: %d\n\tKernel Name: %s\n\tStart "
         //     "Time: "
@@ -950,19 +846,6 @@ TEST_F(ProfilerAPITest, WhenRunningMultipleThreadsProfilerAPIsWorkFine) {
  * ###################################################
  */
 
-#if 0
-__global__ void vectoradd_float(float* __restrict__ a, const float* __restrict__ b,
-                                const float* __restrict__ c, int width, int height) {
-  int x = hipBlockDim_x * hipBlockIdx_x + hipThreadIdx_x;
-  int y = hipBlockDim_y * hipBlockIdx_y + hipThreadIdx_y;
-
-  int i = y * width + x;
-  if (i < (width * height)) {
-    a[i] = b[i] + c[i];
-  }
-}
-#endif
-
 class ProfilerSPMTest : public ::testing::Test {
   // function to check spm tracing API status
  protected:
@@ -970,13 +853,6 @@ class ProfilerSPMTest : public ::testing::Test {
   static void CheckApi(rocprofiler_status_t status) {
     ASSERT_EQ(status, ROCPROFILER_STATUS_SUCCESS);
   };
-
-  // launches an empty kernel in profiler context
-  static void KernelLaunch() {
-    // run empty kernel
-    kernel<<<1, 1>>>();
-    hipDeviceSynchronize();
-  }
 
   static void FlushCallback(const rocprofiler_record_header_t* record,
                             const rocprofiler_record_header_t* end_record,
@@ -988,7 +864,6 @@ class ProfilerSPMTest : public ::testing::Test {
       else if (record->kind == ROCPROFILER_SPM_RECORD) {
         const rocprofiler_record_spm_t* spm_record =
             reinterpret_cast<const rocprofiler_record_spm_t*>(record);
-        size_t name_length;
         int se_num = 4;
         // iterate over each shader engine
         for (int i = 0; i < se_num; i++) {
@@ -1001,74 +876,6 @@ class ProfilerSPMTest : public ::testing::Test {
       }
       CheckApi(rocprofiler_next_record(record, &record, session_id, buffer_id));
     }
-  }
-
-  int LaunchVectorAddKernel() {
-    float* hostA;
-    float* hostB;
-    float* hostC;
-
-    float* deviceA;
-    float* deviceB;
-    float* deviceC;
-
-    hipDeviceProp_t devProp;
-    hipGetDeviceProperties(&devProp, 0);
-
-    int i;
-    int errors;
-
-    hostA = (float*)malloc(NUM * sizeof(float));
-    hostB = (float*)malloc(NUM * sizeof(float));
-    hostC = (float*)malloc(NUM * sizeof(float));
-
-    // initialize the input data
-    for (i = 0; i < NUM; i++) {
-      hostB[i] = (float)i;
-      hostC[i] = (float)i * 100.0f;
-    }
-
-    HIP_ASSERT(hipMalloc((void**)&deviceA, NUM * sizeof(float)));
-    HIP_ASSERT(hipMalloc((void**)&deviceB, NUM * sizeof(float)));
-    HIP_ASSERT(hipMalloc((void**)&deviceC, NUM * sizeof(float)));
-
-    HIP_ASSERT(hipMemcpy(deviceB, hostB, NUM * sizeof(float), hipMemcpyHostToDevice));
-    HIP_ASSERT(hipMemcpy(deviceC, hostC, NUM * sizeof(float), hipMemcpyHostToDevice));
-
-
-    for (int i = 0; i < 20; i++)
-      hipLaunchKernelGGL(vectoradd_float,
-                         dim3(WIDTH / THREADS_PER_BLOCK_X, HEIGHT / THREADS_PER_BLOCK_Y),
-                         dim3(THREADS_PER_BLOCK_X, THREADS_PER_BLOCK_Y), 0, 0, deviceA, deviceB,
-                         deviceC, WIDTH, HEIGHT);
-
-
-    HIP_ASSERT(hipMemcpy(hostA, deviceA, NUM * sizeof(float), hipMemcpyDeviceToHost));
-
-    // verify the results
-    errors = 0;
-    for (i = 0; i < NUM; i++) {
-      if (hostA[i] != (hostB[i] + hostC[i])) {
-        errors++;
-      }
-    }
-    if (errors != 0) {
-      printf("FAILED: %d errors\n", errors);
-    } else {
-      printf("PASSED!\n");
-    }
-
-    HIP_ASSERT(hipFree(deviceA));
-    HIP_ASSERT(hipFree(deviceB));
-    HIP_ASSERT(hipFree(deviceC));
-
-    free(hostA);
-    free(hostB);
-    free(hostC);
-
-    // hipResetDefaultAccelerator();
-
-    return errors;
   }
 };
 
@@ -1138,7 +945,7 @@ class MTBinaryTest : public ::testing::Test {
     countermap counter_map = parser.GetCounterMap();
 
     int dispatch_counter = 0;
-    for (auto i = 0; i < counter_map.size(); i++) {
+    for (size_t i = 0; i < counter_map.size(); i++) {
       std::string* dispatch_id = parser.ReadCounter(i, 1);
       if (dispatch_id != nullptr) {
         if (dispatch_id->find("dispatch") != std::string::npos) {
@@ -1280,12 +1087,6 @@ TEST_F(ProfilerMQTest, DISABLED_WhenRunningMultiProcessTestItPasses) {
  * ###################################################
  */
 
-void KernelLaunch() {
-  // run empty kernel
-  // kernel<<<1, 1>>>();  //TODO: Check the hang
-  // hipDeviceSynchronize();
-}
-
 TEST(ProfilerMPTest, WhenRunningMultiProcessTestItPasses) {
   // create as many threads as number of cores in system
   int num_cpu_cores = GetNumberOfCores();
@@ -1332,125 +1133,121 @@ TEST(ProfilerMPTest, WhenRunningMultiProcessTestItPasses) {
  * Sets application output dir.
  */
 
-/*
-void PluginTests::RunApplication(const char* app_name, const char* appParams) {
-  if (is_installed_path()) return; // Only run these tests from build
+// void PluginTests::RunApplication(const char* app_name, const char* appParams) {
+//   if (is_installed_path()) return;  // Only run these tests from build
 
-  init_test_path();
-  unsetenv("OUTPUT_FOLDER");
+//   init_test_path();
+//   unsetenv("OUTPUT_FOLDER");
 
-  std::stringstream os;
-  os << binary_path << appParams << " ";
-  os << test_app_path << app_name;
-  ProcessApplication(os);
-}
+//   std::stringstream os;
+//   os << binary_path << appParams << " ";
+//   os << test_app_path << app_name;
+//   ProcessApplication(os);
+// }
 
-void PluginTests::ProcessApplication(std::stringstream& ss) {
-  FILE* handle = popen(ss.str().c_str(), "r");
-  ASSERT_NE(handle, nullptr);
-  pclose(handle);
-}
+// void PluginTests::ProcessApplication(std::stringstream& ss) {
+//   FILE* handle = popen(ss.str().c_str(), "r");
+//   ASSERT_NE(handle, nullptr);
+//   pclose(handle);
+// }
 
-bool FilePluginTest::hasFileInDir(const std::string& filename, const char* directory) {
-  if (is_installed_path()) return true;  // Only run these tests from build
+// bool FilePluginTest::hasFileInDir(const std::string& filename, const char* directory) {
+//   if (is_installed_path()) return true;  // Only run these tests from build
 
-  for (const auto& entry : std::experimental::filesystem::directory_iterator(directory)) {
-    if (filename.size() == 0)
-      return true;
-    if (std::string(entry.path().filename()).substr(0, filename.size()) == filename)
-      return true;
-  }
-  return false;
-}
+//   for (const auto& entry : std::experimental::filesystem::directory_iterator(directory)) {
+//     if (filename.size() == 0) return true;
+//     if (std::string(entry.path().filename()).substr(0, filename.size()) == filename) return true;
+//   }
+//   return false;
+// }
 
-class VectorAddFileOnlyTest : public FilePluginTest {
- protected:
-  virtual void SetUp() {
-    RunApplication("hip_vectoradd", "-o file_test_name");
-  }
-  virtual void TearDown() {
-    std::string filename = "file_test_name";
-    for (const auto& entry : std::experimental::filesystem::directory_iterator("./"))
-      if (std::string(entry.path().filename()).substr(0, filename.size()) == filename)
-        std::experimental::filesystem::remove(entry);
-  }
-  bool hasFile(){ return hasFileInDir("file_test_name", "."); }
-};
+// class VectorAddFileOnlyTest : public FilePluginTest {
+//  protected:
+//   virtual void SetUp() { RunApplication("hip_vectoradd", " --hip-activity -o file_test_name "); }
+//   virtual void TearDown() {
+//     std::string filename = "file_test_name";
+//     for (const auto& entry : std::experimental::filesystem::directory_iterator("./"))
+//       if (std::string(entry.path().filename()).substr(0, filename.size()) == filename)
+//         std::experimental::filesystem::remove(entry);
+//   }
+//   bool hasFile() { return hasFileInDir("file_test_name", "."); }
+// };
 
-TEST_F(VectorAddFileOnlyTest, WhenRunningProfilerWithFilePluginTest) {
-  EXPECT_EQ(hasFile(), true);
-}
+// TEST_F(VectorAddFileOnlyTest, WhenRunningProfilerWithFilePluginTest) { EXPECT_EQ(hasFile(), true); }
 
-class VectorAddFolderOnlyTest : public FilePluginTest {
- protected:
-  virtual void SetUp() {
-    RunApplication("hip_vectoradd", " --hsa-activity --hip-activity -d ./plugin_test_folder_path");
-  }
-  virtual void TearDown() { std::experimental::filesystem::remove_all("./plugin_test_folder_path"); }
-  bool hasFile(){ return hasFileInDir("", "./plugin_test_folder_path"); }
-};
+// class VectorAddFolderOnlyTest : public FilePluginTest {
+//  protected:
+//   virtual void SetUp() {
+//     RunApplication("hip_vectoradd", " --hsa-activity --hip-activity -d ./plugin_test_folder_path");
+//   }
+//   virtual void TearDown() {
+//     std::experimental::filesystem::remove_all("./plugin_test_folder_path");
+//   }
+//   bool hasFile() { return hasFileInDir("", "./plugin_test_folder_path"); }
+// };
 
-TEST_F(VectorAddFolderOnlyTest, WhenRunningProfilerWithFilePluginTest) {
-  EXPECT_EQ(hasFile(), true);
-}
+// TEST_F(VectorAddFolderOnlyTest, WhenRunningProfilerWithFilePluginTest) {
+//   EXPECT_EQ(hasFile(), true);
+// }
 
-class VectorAddFileAndFolderTest : public FilePluginTest {
- protected:
-  virtual void SetUp() {
-    RunApplication("hip_vectoradd", " --hip-activity -d ./plugin_test_folder_path -o file_test_name");
-  }
-  virtual void TearDown() { std::experimental::filesystem::remove_all("./plugin_test_folder_path"); }
-  bool hasFile(){ return hasFileInDir("file_test_name", "./plugin_test_folder_path"); }
-};
+// class VectorAddFileAndFolderTest : public FilePluginTest {
+//  protected:
+//   virtual void SetUp() {
+//     RunApplication("hip_vectoradd",
+//                    " --hip-activity -d ./plugin_test_folder_path -o file_test_name");
+//   }
+//   virtual void TearDown() {
+//     std::experimental::filesystem::remove_all("./plugin_test_folder_path");
+//   }
+//   bool hasFile() { return hasFileInDir("file_test_name", "./plugin_test_folder_path"); }
+// };
 
-TEST_F(VectorAddFileAndFolderTest, WhenRunningProfilerWithFilePluginTest) {
-  EXPECT_EQ(hasFile(), true);
-}
+// TEST_F(VectorAddFileAndFolderTest, WhenRunningProfilerWithFilePluginTest) {
+//   EXPECT_EQ(hasFile(), true);
+// }
 
-class VectorAddFilenameMPITest : public FilePluginTest {
- protected:
-  virtual void SetUp() {
-    setenv("MPI_RANK", "7", true);
-    RunApplication("hip_vectoradd", " --hip-activity -d ./plugin_test_folder_path -o test_%rank_");
-  }
-  virtual void TearDown() {
-    std::experimental::filesystem::remove_all("./plugin_test_folder_path");
-    unsetenv("MPI_RANK");
-  }
-  bool hasFile(){ return hasFileInDir("test_7_", "./plugin_test_folder_path"); }
-};
+// class VectorAddFilenameMPITest : public FilePluginTest {
+//  protected:
+//   virtual void SetUp() {
+//     setenv("MPI_RANK", "7", true);
+//     RunApplication("hip_vectoradd", " --hip-activity -d ./plugin_test_folder_path -o test_%rank_");
+//   }
+//   virtual void TearDown() {
+//     std::experimental::filesystem::remove_all("./plugin_test_folder_path");
+//     unsetenv("MPI_RANK");
+//   }
+//   bool hasFile() { return hasFileInDir("test_7_", "./plugin_test_folder_path"); }
+// };
 
-TEST_F(VectorAddFilenameMPITest, WhenRunningProfilerWithFilePluginTest) {
-  EXPECT_EQ(hasFile(), true);
-}
+// TEST_F(VectorAddFilenameMPITest, WhenRunningProfilerWithFilePluginTest) {
+//   EXPECT_EQ(hasFile(), true);
+// }
 
-bool PerfettoPluginTest::hasFileInDir(const std::string& filename, const char* directory) {
-  if (is_installed_path()) return true;  // Only run these tests from build
+// bool PerfettoPluginTest::hasFileInDir(const std::string& filename, const char* directory) {
+//   if (is_installed_path()) return true;  // Only run these tests from build
 
-  for (const auto& entry : std::experimental::filesystem::directory_iterator(directory)) {
-    std::string entrypath = std::string(entry.path().filename());
-    if (entrypath.find(".pftrace") == std::string::npos)
-      continue;
-    if (entrypath.substr(0, filename.size()) == filename)
-      return true;
-  }
-  return false;
-}
+//   for (const auto& entry : std::experimental::filesystem::directory_iterator(directory)) {
+//     std::string entrypath = std::string(entry.path().filename());
+//     if (entrypath.find(".pftrace") == std::string::npos) continue;
+//     if (entrypath.substr(0, filename.size()) == filename) return true;
+//   }
+//   return false;
+// }
 
-class VectorAddPerfettoMPITest : public PerfettoPluginTest {
- protected:
-  virtual void SetUp() {
-    setenv("MPI_RANK", "7", true);
-    RunApplication("hip_vectoradd", " -d ./plugin_test_folder_path -o test_%rank_ --plugin perfetto");
-  }
-  virtual void TearDown() {
-    std::experimental::filesystem::remove_all("./plugin_test_folder_path");
-    unsetenv("MPI_RANK");
-  }
-  bool hasFile(){ return hasFileInDir("test_7_", "./plugin_test_folder_path"); }
-};
+// class VectorAddPerfettoMPITest : public PerfettoPluginTest {
+//  protected:
+//   virtual void SetUp() {
+//     setenv("MPI_RANK", "7", true);
+//     RunApplication("hip_vectoradd",
+//                    " -d ./plugin_test_folder_path -o test_%rank_ --plugin perfetto");
+//   }
+//   virtual void TearDown() {
+//     std::experimental::filesystem::remove_all("./plugin_test_folder_path");
+//     unsetenv("MPI_RANK");
+//   }
+//   bool hasFile() { return hasFileInDir("test_7_", "./plugin_test_folder_path"); }
+// };
 
-TEST_F(VectorAddPerfettoMPITest, WhenRunningProfilerWithPerfettoTest) {
-  EXPECT_EQ(hasFile(), true);
-}
-*/
+// TEST_F(VectorAddPerfettoMPITest, WhenRunningProfilerWithPerfettoTest) {
+//   EXPECT_EQ(hasFile(), true);
+// }
