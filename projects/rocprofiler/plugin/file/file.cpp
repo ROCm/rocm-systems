@@ -355,7 +355,6 @@ class file_plugin_t {
                  << std::to_string(profiler_record->timestamps.end.value) << ")";
 
     // For Counters
-    *output_file << '\n';
     if (profiler_record->counters) {
       for (uint64_t i = 0; i < profiler_record->counters_count.value; i++) {
         if (profiler_record->counters[i].counter_handler.handle > 0) {
@@ -369,11 +368,12 @@ class file_plugin_t {
                 session_id, ROCPROFILER_COUNTER_NAME, profiler_record->counters[i].counter_handler,
                 &name_c));
             *output_file << ", " << name_c << " ("
-                         << std::to_string(profiler_record->counters[i].value.value) << ")\n";
+                         << std::to_string(profiler_record->counters[i].value.value) << ')';
           }
         }
       }
     }
+    *output_file << '\n';
     if (kernel_name_c) {
       free(const_cast<char*>(kernel_name_c));
     }
