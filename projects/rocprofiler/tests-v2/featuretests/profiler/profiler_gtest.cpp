@@ -31,7 +31,6 @@ THE SOFTWARE.
 #include <string>
 #include <thread>
 #include <array>
-#include <experimental/filesystem>
 
 #include "src/utils/helper.h"
 #include "utils/csv_parser.h"
@@ -47,22 +46,20 @@ std::string binary_path;
 std::string profiler_api_lib_path = "";
 
 static void init_test_path() {
+  lib_path = "lib/rocprofiler/librocprofiler_tool.so";
+  metrics_path = "libexec/rocprofiler/counters/derived_counters.xml";
+  profiler_api_lib_path = "/lib";
   if (is_installed_path()) {
     INFO_LOGGING("operating from /opt/rocm");
     running_path = "share/rocprofiler/tests/runFeatureTests";
-    lib_path = "lib/rocprofiler/librocprofiler_tool.so";
     golden_trace_path = "share/rocprofiler/tests/featuretests/profiler/apps/goldentraces/";
     test_app_path = "share/rocprofiler/tests/featuretests/profiler/apps/";
-    metrics_path = "libexec/rocprofiler/counters/derived_counters.xml";
     binary_path = "bin/rocprofv2";
-    profiler_api_lib_path = "/lib";
   } else {
     INFO_LOGGING("operating from ./build/");
     running_path = "tests-v2/featuretests/profiler/runFeatureTests";
-    lib_path = "librocprofiler_tool.so";
     golden_trace_path = "tests-v2/featuretests/profiler/apps/goldentraces/";
     test_app_path = "tests-v2/featuretests/profiler/apps/";
-    metrics_path = "counters/derived_counters.xml";
     binary_path = "rocprofv2";
   }
 }
@@ -77,7 +74,7 @@ void __attribute__((constructor)) globalsetting() {
 }
 
 /**
- * Sets application enviornment by seting HSA_TOOLS_LIB.
+ * Sets application enviornment by setting COUNTERS_PATH,LD_PRELOAD,LD_LIBRARY_PATH.
  */
 void ApplicationParser::SetApplicationEnv(const char* app_name) {
   std::string app_path;
@@ -91,7 +88,7 @@ void ApplicationParser::SetApplicationEnv(const char* app_name) {
   ld_library_path << app_path << profiler_api_lib_path << []() {
     const char* path = getenv("LD_LIBRARY_PATH");
     if (path != nullptr) return ":" + std::string(path);
-    return std::string("");
+    return std::string();
   }();
   setenv("LD_LIBRARY_PATH", ld_library_path.str().c_str(), true);
 
@@ -103,6 +100,15 @@ void ApplicationParser::SetApplicationEnv(const char* app_name) {
   hsa_tools_lib_path << app_path << lib_path;
 
   setenv("LD_PRELOAD", hsa_tools_lib_path.str().c_str(), true);
+
+  std::stringstream ld_lib_path;
+  ld_lib_path << app_path << "lib" << []() {
+    const char* path = getenv("LD_LIBRARY_PATH");
+    if (path != nullptr)
+      return ":" + std::string(path);
+    return std::string("");
+  }();
+  setenv("LD_LIBRARY_PATH", ld_lib_path.str().c_str(), true);
 
   std::stringstream os;
   os << app_path << test_app_path << app_name;
@@ -1203,7 +1209,6 @@ TEST(ProfilerMPTest, WhenRunningMultiProcessTestItPasses) {
 // TEST_F(VectorAddFolderOnlyTest, WhenRunningProfilerWithFilePluginTest) {
 //   EXPECT_EQ(hasFile(), true);
 // }
-
 
 // class VectorAddFileAndFolderTest : public FilePluginTest {
 //  protected:

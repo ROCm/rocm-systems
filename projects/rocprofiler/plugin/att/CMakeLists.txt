@@ -33,7 +33,7 @@ set_target_properties(
   att_plugin
   PROPERTIES CXX_VISIBILITY_PRESET hidden
              LINK_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/../exportmap
-             LIBRARY_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR})
+             LIBRARY_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib/rocprofiler)
 
 target_compile_definitions(att_plugin PRIVATE HIP_PROF_HIP_API_STRING=1
                                               __HIP_PLATFORM_HCC__=1)

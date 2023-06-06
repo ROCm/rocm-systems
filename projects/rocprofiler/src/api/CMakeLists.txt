@@ -195,8 +195,10 @@ file(GLOB CORE_PC_SAMPLING_FILES ${CORE_PC_SAMPLING_DIR}/core/*.cpp ${CORE_PC_SA
 add_library(${ROCPROFILER_TARGET} SHARED ${OLD_LIB_SRC})
 set_target_properties(${ROCPROFILER_TARGET} PROPERTIES
   CXX_VISIBILITY_PRESET hidden
+  LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib
   VERSION 1.0.0
   SOVERSION 1)
+
 # As ROCR hsa_api_trace header file is not usable unless AMD_INTERNAL_BUILD is defined
 target_compile_definitions(${ROCPROFILER_TARGET} PUBLIC AMD_INTERNAL_BUILD)
 target_include_directories(${ROCPROFILER_TARGET}
@@ -206,10 +208,15 @@ target_include_directories(${ROCPROFILER_TARGET}
   ${LIB_DIR} ${ROOT_DIR}
   ${PROJECT_SOURCE_DIR}/include/rocprofiler)
 target_link_libraries(${ROCPROFILER_TARGET} PRIVATE ${AQLPROFILE_LIB} hsa-runtime64::hsa-runtime64 c stdc++)
+
+get_target_property(ROCPROFILER_LIBRARY_V1_NAME ${ROCPROFILER_TARGET} NAME)
+get_target_property(ROCPROFILER_LIBRARY_V1_VERSION ${ROCPROFILER_TARGET} VERSION)
+get_target_property(ROCPROFILER_LIBRARY_V1_SOVERSION ${ROCPROFILER_TARGET} SOVERSION)
+
 ## Install libraries: Non versioned lib file in dev package
-# install ( TARGETS ${ROCPROFILER_TARGET} LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT dev NAMELINK_COMPONENT runtime)
-install ( TARGETS ${ROCPROFILER_TARGET} LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT runtime NAMELINK_SKIP)
-install ( TARGETS ${ROCPROFILER_TARGET} LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT asan NAMELINK_SKIP)
+## Skipping NameLink as it will be installed using symlinks
+install ( TARGETS ${ROCPROFILER_TARGET} LIBRARY NAMELINK_SKIP DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT runtime)
+install ( TARGETS ${ROCPROFILER_TARGET} LIBRARY NAMELINK_SKIP DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT asan)
 
 #### V2 Library
 # Compiling/Installing ROCProfiler API
@@ -242,16 +249,9 @@ set_target_properties(rocprofiler-v2 PROPERTIES
   DEFINE_SYMBOL "ROCPROFILER_EXPORTS"
   LINK_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/exportmap
   OUTPUT_NAME rocprofiler64
-  LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/v2
+  LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib
   VERSION ${PROJECT_VERSION}
   SOVERSION ${PROJECT_VERSION_MAJOR})
-
-# Add custom command to copy the v2 library to buil-dir as well
-add_custom_command(TARGET rocprofiler-v2 POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_BINARY_DIR}/v2/librocprofiler64.so.2 ${CMAKE_BINARY_DIR}
-)
-# Add custom target to trigger the copy command
-add_custom_target(copy_v2_library DEPENDS rocprofiler-v2)
 
 target_compile_definitions(rocprofiler-v2
   # As ROCR hsa_api_trace header file is not usable unless AMD_INTERNAL_BUILD is defined
@@ -276,28 +276,50 @@ else()
   target_link_options(rocprofiler-v2 PRIVATE -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/exportmap -Wl,--no-undefined)
   target_link_libraries(rocprofiler-v2 PRIVATE ${AQLPROFILE_LIB} hsa-runtime64::hsa-runtime64 Threads::Threads atomic numa dl c stdc++ stdc++fs amd_comgr ${PCIACCESS_LIBRARIES})
 endif()
+
+get_target_property(ROCPROFILER_LIBRARY_V2_NAME rocprofiler-v2 OUTPUT_NAME)
+get_target_property(ROCPROFILER_LIBRARY_V2_VERSION rocprofiler-v2 VERSION)
+get_target_property(ROCPROFILER_LIBRARY_V2_SOVERSION rocprofiler-v2 SOVERSION)
+
+## Prepare Name Link SO files for V1 & V2 Libraries
+add_custom_command(TARGET rocprofiler-v2 POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E rm -f ${CMAKE_BINARY_DIR}/lib/lib${ROCPROFILER_LIBRARY_V1_NAME}.so
+    COMMAND ${CMAKE_COMMAND} -E create_symlink
+      lib${ROCPROFILER_LIBRARY_V1_NAME}.so.${ROCPROFILER_LIBRARY_V1_SOVERSION}
+      ${CMAKE_BINARY_DIR}/lib/lib${ROCPROFILER_LIBRARY_V1_NAME}.so
+    COMMAND ${CMAKE_COMMAND} -E create_symlink
+      lib${ROCPROFILER_LIBRARY_V2_NAME}.so.${ROCPROFILER_LIBRARY_V2_SOVERSION}
+      ${CMAKE_BINARY_DIR}/lib/lib${ROCPROFILER_LIBRARY_V2_NAME}v2.so
+)
+# Add custom target to trigger the create_symlink command
+add_custom_target(create_rocprofiler_lib DEPENDS rocprofiler-v2 ${ROCPROFILER_TARGET})
+
 ## Install libraries: Non versioned lib file in dev package
-# install(TARGETS rocprofiler-v2 LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT dev)
-install(TARGETS rocprofiler-v2 LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT runtime NAMELINK_SKIP)
-# install(TARGETS rocprofiler-v2 LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT asan)
+## Skipping NameLink as it will be installed using symlinks
+install(TARGETS rocprofiler-v2 LIBRARY NAMELINK_SKIP DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT runtime)
+install(TARGETS rocprofiler-v2 LIBRARY NAMELINK_SKIP DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT asan)
 
-file(CONFIGURE OUTPUT ${CMAKE_BINARY_DIR}/librocprofiler64.so
-  CONTENT "OUTPUT_FORMAT(elf64-x86-64)\nINPUT(librocprofiler64.so.1)")
-install(FILES ${CMAKE_BINARY_DIR}/librocprofiler64.so DESTINATION ${CMAKE_INSTALL_LIBDIR}
-  PERMISSIONS OWNER_READ OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
-  COMPONENT runtime)
+## Installing NameLinks for V1 & V2
+## librocprofiler64.so links to V1 library
+## librocprofiler64v2.so links to V2 library
+install(CODE "execute_process( \
+    COMMAND ${CMAKE_COMMAND} -E create_symlink \
+    lib${ROCPROFILER_LIBRARY_V1_NAME}.so.${ROCPROFILER_LIBRARY_V1_SOVERSION} \
+    ${CMAKE_INSTALL_PREFIX}/lib/lib${ROCPROFILER_LIBRARY_V1_NAME}.so \
+    )" COMPONENT dev
+)
+install(CODE "execute_process( \
+    COMMAND ${CMAKE_COMMAND} -E create_symlink \
+    lib${ROCPROFILER_LIBRARY_V2_NAME}.so.${ROCPROFILER_LIBRARY_V2_SOVERSION} \
+    ${CMAKE_INSTALL_PREFIX}/lib/lib${ROCPROFILER_LIBRARY_V2_NAME}v2.so \
+    )" COMPONENT dev
+)
 
-file(CONFIGURE OUTPUT ${CMAKE_BINARY_DIR}/librocprofiler64v2.so
-  CONTENT "OUTPUT_FORMAT(elf64-x86-64)\nINPUT(librocprofiler64.so.${PROJECT_VERSION_MAJOR})")
-install(FILES ${CMAKE_BINARY_DIR}/librocprofiler64v2.so DESTINATION ${CMAKE_INSTALL_LIBDIR}
-  PERMISSIONS OWNER_READ OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
-  COMPONENT runtime)
-
-configure_file(${PROJECT_SOURCE_DIR}/src/core/counters/metrics/basic_counters.xml ${PROJECT_BINARY_DIR}/counters/basic_counters.xml COPYONLY)
-configure_file(${PROJECT_SOURCE_DIR}/src/core/counters/metrics/derived_counters.xml ${PROJECT_BINARY_DIR}/counters/derived_counters.xml COPYONLY)
+configure_file(${PROJECT_SOURCE_DIR}/src/core/counters/metrics/basic_counters.xml ${PROJECT_BINARY_DIR}/libexec/rocprofiler/counters/basic_counters.xml COPYONLY)
+configure_file(${PROJECT_SOURCE_DIR}/src/core/counters/metrics/derived_counters.xml ${PROJECT_BINARY_DIR}/libexec/rocprofiler/counters/derived_counters.xml COPYONLY)
 
 install(DIRECTORY
-  ${PROJECT_BINARY_DIR}/counters
+  ${PROJECT_BINARY_DIR}/libexec/rocprofiler/counters
   DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
   USE_SOURCE_PERMISSIONS
   COMPONENT runtime)

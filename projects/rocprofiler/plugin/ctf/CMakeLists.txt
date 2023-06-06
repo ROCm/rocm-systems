@@ -31,7 +31,7 @@ add_library(ctf_plugin SHARED
 set_target_properties(ctf_plugin PROPERTIES
                       CXX_VISIBILITY_PRESET hidden
                       LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/../exportmap"
-                      LIBRARY_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}")
+                      LIBRARY_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/lib/rocprofiler")
 set(METADATA_STREAM_FILE_DIR "${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/plugin/ctf")
 target_compile_definitions(ctf_plugin PUBLIC AMD_INTERNAL_BUILD PRIVATE
                            HIP_PROF_HIP_API_STRING=1

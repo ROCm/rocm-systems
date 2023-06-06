@@ -13,6 +13,7 @@ add_library(rocprofiler_tool SHARED ${ROCPROFILER_TOOL_SRC_FILES} ${ROCPROFILER_
 
 set_target_properties(rocprofiler_tool PROPERTIES
   CXX_VISIBILITY_PRESET hidden
+  LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib/rocprofiler
   LINK_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/exportmap)
 
 target_include_directories(rocprofiler_tool

@@ -34,22 +34,20 @@ std::string binary_path;
 std::string profiler_api_lib_path = "";
 
 static void init_test_path() {
+  lib_path = "lib/rocprofiler/librocprofiler_tool.so";
+  metrics_path = "libexec/rocprofiler/counters/derived_counters.xml";
+  profiler_api_lib_path = "/lib";
   if (is_installed_path()) {
     INFO_LOGGING("operating from /opt/rocm");
     running_path = "share/rocprofiler/tests/runTracerFeatureTests";
-    lib_path = "lib/rocprofiler/librocprofiler_tool.so";
     golden_trace_path = "share/rocprofiler/tests/featuretests/tracer/apps/goldentraces/";
     test_app_path = "share/rocprofiler/tests/featuretests/tracer/apps/";
-    metrics_path = "libexec/rocprofiler/counters/derived_counters.xml";
     binary_path = "bin/rocprofv2";
-    profiler_api_lib_path = "/lib";
   } else {
     INFO_LOGGING("operating from ./build");
     running_path = "tests-v2/featuretests/tracer/runTracerFeatureTests";
-    lib_path = "librocprofiler_tool.so";
     golden_trace_path = "tests-v2/featuretests/tracer/apps/goldentraces/";
     test_app_path = "tests-v2/featuretests/tracer/apps/";
-    metrics_path = "counters/derived_counters.xml";
     binary_path = "rocprofv2";
   }
 }
@@ -66,7 +64,7 @@ void ApplicationParser::SetApplicationEnv(const char* app_name, const char* trac
   ld_library_path << app_path << profiler_api_lib_path << []() {
     const char* path = getenv("LD_LIBRARY_PATH");
     if (path != nullptr) return ":" + std::string(path);
-    return std::string("");
+    return std::string();
   }();
   setenv("LD_LIBRARY_PATH", ld_library_path.str().c_str(), true);
 

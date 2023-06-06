@@ -25,7 +25,7 @@ This filter could be for counters/traces/pc-samples etc.
 Now that the input is taken care of, one also needs to provide a "Buffer" which
 will store the output results generated during a session. This buffer will contain
 different records corresponding to the filter type chosen. A flush function can also
-be specified for the buffer, which will be used to flush the buffer records. 
+be specified for the buffer, which will be used to flush the buffer records.
 A filter and buffer are associated together.
 
 Once a Session, Buffer, Filter have all been created, the session can be started.
@@ -51,7 +51,7 @@ This code sample demonstrates how to use the APIs to collect counters and metric
 In order to get the samples to compile, make sure to copy rocprofiler binaries into /opt/rocm/lib
 Running 'make install' inside the rocprofiler/build folder will copy the binaries to /opt/rocm/lib
 
-Alternately, change the 'ROCPROFILER_LIBS_PATH' variable in the Makefile to point to the rocprofiler/build folder. 
+Alternately, change the 'ROCPROFILER_LIBS_PATH' variable in the Makefile to point to the rocprofiler/build folder.
 After modifications to Makefile are done, run:
 
   ```bash
@@ -72,9 +72,9 @@ then below command will work:
 export ROCPROFILER_METRICS_PATH=/opt/rocm/libexec/rocprofiler/counters/derived_counters.xml
 ```
 
-Otherwise, make it point to rocprofiler/build/counters/derived_counters.xml like below:
+Otherwise, make it point to rocprofiler/build/libexec/rocprofiler/counters/derived_counters.xml like below:
 ```bash
-export ROCPROFILER_METRICS_PATH=<path_to_rocprofiler>/rocprofiler/buid/counters/derived_counters.xml
+export ROCPROFILER_METRICS_PATH=<path_to_rocprofiler>/rocprofiler/build/libexec/rocprofiler/counters/derived_counters.xml
 ```
 
 Finally, run a sample:
