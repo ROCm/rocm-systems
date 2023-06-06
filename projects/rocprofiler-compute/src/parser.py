@@ -66,7 +66,7 @@ def parse(my_parser):
                                         \n\n-------------------------------------------------------------------------------
                                         \nExamples:
                                         \n\tomniperf profile -n vcopy_all -- ./vcopy 1048576 256
-                                        \n\tomniperf profile -n vcopy_SPI_TD -b SQ TCC -- ./vcopy 1048576 256
+                                        \n\tomniperf profile -n vcopy_SPI_TCC -b SQ TCC -- ./vcopy 1048576 256
                                         \n\tomniperf profile -n vcopy_kernel -k vecCopy -- ./vcopy 1048576 256
                                         \n\tomniperf profile -n vcopy_disp -d 0 -- ./vcopy 1048576 256
                                         \n\tomniperf profile -n vcopy_roof --roof-only -- ./vcopy 1048576 256

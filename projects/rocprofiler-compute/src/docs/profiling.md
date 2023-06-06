@@ -19,7 +19,7 @@ the MI200 platform.
 
 ## Workload Compilation
 **vcopy compilation:**
-```shell
+```shell-session
 $ hipcc vcopy.cpp -o vcopy
 $ ls
 vcopy   vcopy.cpp
@@ -40,7 +40,7 @@ Releasing CPU memory
 The *omniperf* script, availible through the [Omniperf](https://github.com/AMDResearch/omniperf) repository, is used to aquire all necessary perfmon data through analysis of compute workloads.
 
 **omniperf help:**
-```shell
+```shell-session
 $ omniperf profile --help
 ROC Profiler:  /usr/bin/rocprof
 
@@ -56,7 +56,7 @@ Examples:
 
         omniperf profile -n vcopy_all -- ./vcopy 1048576 256
 
-        omniperf profile -n vcopy_SPI_TD -b SQ TCC -- ./vcopy 1048576 256
+        omniperf profile -n vcopy_SPI_TCC -b SQ TCC -- ./vcopy 1048576 256
 
         omniperf profile -n vcopy_kernel -k vecCopy -- ./vcopy 1048576 256
 
@@ -111,7 +111,7 @@ Standalone Roofline Options:
 The following sample command profiles the *vcopy* workload.
 
 **vcopy profiling:**
-```shell
+```shell-session
 $ omniperf profile --name vcopy -- ./vcopy 1048576 256
 Resolving rocprof
 ROC Profiler:  /usr/bin/rocprof
@@ -206,7 +206,10 @@ Peak MFMA IOPs (I8), GPU ID: 1, workgroupSize:256, workgroups:16384, experiments
 ```
 You'll notice two stages in *default* Omniperf profiling. The first stage collects all the counters needed for Omniperf analysis (omitting any filters you've provided). The second stage collects data for the roofline analysis (this stage can be disabled using `--no-roof`)
 
-At the end of the profiling, all resulting csv files should be located in the SOC specific target directory, e.g., mi200.
+At the end of the profiling, all resulting csv files should be located in a SOC specific target directory, e.g.:
+  - "mi200" for the AMD Instinct (tm) MI-200 family of accelerators
+  - "mi100" for the AMD Instinct (tm) MI-100 family of accelerators
+etc.  The SOC names are generated as a part of Omniperf, and do not necessarily distinguish between different accelerators in the same family (e.g., an AMD Instinct (tm) MI-210 vs an MI-250)
 
 > Note: Additionally, you'll notice a few extra files. An SoC parameters file, *sysinfo.csv*, is created to reflect the target device settings. All profiling output is stored in *log.txt*. Roofline specific benchmark results are stored in *roofline.csv*.
 
@@ -316,7 +319,7 @@ ROCProfiler: input from "/tmp/rpl_data_230411_170300_29696/input0.xml"
 
 #### Dispatch Filtering
 The following example demonstrates profiling on selected dispatches:
-```shell
+```shell-session
 $ omniperf profile --name vcopy -d 0 -- ./vcopy 1048576 256
 Resolving rocprof
 ROC Profiler:  /usr/bin/rocprof

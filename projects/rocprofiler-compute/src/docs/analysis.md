@@ -26,7 +26,7 @@ Run `omniperf analyze -h` for more details.
 ### Recommended workflow
 
 1) Do a comprehensive analysis with Omniperf CLI at the beginning.
-```shell
+```shell-session
 $ omniperf analyze -p workloads/vcopy/mi200/
 
 --------
@@ -108,7 +108,7 @@ Analyze
 ....
 ```
  2. Use `--list-metrics` to generate a list of availible metrics for inspection
- ```shell
+ ```shell-session
 $ omniperf analyze -p workloads/vcopy/mi200/ --list-metrics gfx90a
 ╒═════════╤═════════════════════════════╕
 │         │ Metric                      │
@@ -172,7 +172,7 @@ $ omniperf analyze -p workloads/vcopy/mi200/ --list-metrics gfx90a
 ...
  ```
  2. Choose your own customized subset of metrics with `-b` (a.k.a. `--metric`), or build your own config following [config_template](https://github.com/AMDResearch/omniperf/blob/main/src/omniperf_analyze/configs/panel_config_template.yaml). Below we'll inspect block 2 (a.k.a. System Speed-of-Light).
-```shell
+```shell-session
 $ omniperf analyze -p workloads/vcopy/mi200/ -b 2
 --------
 Analyze
@@ -286,7 +286,7 @@ Analyze
 - Filter kernels
 
   First, list the top kernels in your application using `--list-kernels`.
-  ```shell
+  ```shell-session
   $ omniperf analyze -p workloads/vcopy/mi200/ --list-kernels
   
   --------
@@ -306,7 +306,7 @@ Analyze
 
   Second, select the index of the kernel you'd like to filter (i.e. __vecCopy(double*, double*, double*, int, int) [clone .kd]__ at index __0__). Then, use this index to apply the filter via `-k/--kernels`.
 
-  ```shell
+  ```shell-session
   $ omniperf -p workloads/vcopy/mi200/ -k 0
   
   --------
@@ -372,7 +372,7 @@ See [FAQ](https://amdresearch.github.io/omniperf/faq.html) for more details on S
 
 To launch the standalone GUI, include the `--gui` flag with your desired analysis command. For example:
 
-```bash
+```shell-session
 $ omniperf analyze -p workloads/vcopy/mi200/ --gui
 
 --------
@@ -499,7 +499,7 @@ e.g., omniperf_asw_vcopy_mi200.
 
 Below is the sample command to import the *vcopy* profiling data.
 
-```shell
+```shell-session
 $ omniperf database --help
 ROC Profiler:  /usr/bin/rocprof
 
@@ -544,7 +544,7 @@ Connection Options:
 ```
 
 **omniperf import for vcopy:**
-```shell
+```shell-session
 $ omniperf database --import -H pavii1 -u temp -t asw -w workloads/vcopy/mi200/
 ROC Profiler:  /usr/bin/rocprof
  
