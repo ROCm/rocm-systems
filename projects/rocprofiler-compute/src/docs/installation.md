@@ -109,7 +109,7 @@ ROC Profiler:   /opt/rocm-5.1.0/bin/rocprof
 omniperf (v{__VERSION__})
 ```
 
-```{tip} Sites relying on an Lmod Python module locally may wish to
+```{tip} Users relying on an Lmod Python module locally may wish to
 customize the resulting Omniperf modulefile post-installation to
 include additional module dependencies.
 ```
@@ -129,8 +129,9 @@ export PYTHONPATH=$INSTALL_DIR/python-libs
 
 Omniperf relies on a rocprof binary during the profiling
 process. Normally the path to this binary will be detected
-automatically, but it can also be overridden via the use of an
-optional `ROCPROF` environment variable.
+automatically, but it can also be overridden via the setting the
+optional `ROCPROF` environment variable to the path of the binary the user
+wishes to use instead.
 
 
 
@@ -162,9 +163,12 @@ Omniperf uses [mongoimport](https://www.mongodb.com/docs/database-tools/mongoimp
 $ wget https://fastdl.mongodb.org/tools/db/mongodb-database-tools-ubuntu2004-x86_64-100.6.1.deb
 $ sudo apt install ./mongodb-database-tools-ubuntu2004-x86_64-100.6.1.deb
 ```
-> Find install for alternative distros [here](https://www.mongodb.com/download-center/database-tools/releases/archive)
+> Installation instructions for alternative distributions can be found [here](https://www.mongodb.com/download-center/database-tools/releases/archive)
 
-### Persist Storage
+### Persistent Storage
+
+The user may also choose to bind MongoDB to a directory on the host OS to create a local backup in case of a crash or reset:
+
 ```bash
 $ sudo mkdir -p /usr/local/persist && cd /usr/local/persist/
 $ sudo mkdir -p grafana-storage mongodb

@@ -53,6 +53,10 @@ extensions = [
 ]
 
 myst_heading_anchors = 2
+# enable replacement of (tm) & friends
+myst_enable_extensions = [
+    "replacements"
+]
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ["_templates"]

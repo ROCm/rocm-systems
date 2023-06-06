@@ -10,17 +10,17 @@
 
 ## Scope
 
-MI Performance Profiler ([Omniperf](https://github.com/AMDResearch/omniperf)) is a system performance profiling tool for Machine Learning/HPC workloads running on AMD MI GPUs. It is currently built on top of the [ROC Profiler](https://github.com/ROCm-Developer-Tools/rocprofiler) to monitor hardware performance counters. The Omniperf tool primarily targets MI100 and MI200 silicon. Development is in progress to support MI300 and NAVI GPUs. 
+MI Performance Profiler ([Omniperf](https://github.com/AMDResearch/omniperf)) is a system performance profiling tool for Machine Learning/HPC workloads running on AMD Instinct (tm) Accelerators. It is currently built on top of the [ROC Profiler](https://github.com/ROCm-Developer-Tools/rocprofiler) to monitor hardware performance counters. The Omniperf tool primarily targets accelerators in the MI100 and MI200 families. Development is in progress to support MI300 and Radeon (tm) RDNA (tm) GPUs.
 
 ## Features
 
-The Omniperf tool performs system profiling based on all approved hardware counters for MI200. It provides high level performance analysis features including System Speed-of-Light, IP block Speed-of-Light, Memory Chart Analysis, Roofline Analysis, Baseline Comparisons, and more... 
+The Omniperf tool performs system profiling based on all available hardware counters for the target accelerator. It provides high level performance analysis features including System Speed-of-Light, IP block Speed-of-Light, Memory Chart Analysis, Roofline Analysis, Baseline Comparisons, and more...
   
 Both command line analysis and GUI analysis are supported. 
 
 Detailed Feature List:
-- MI200 support
 - MI100 support
+- MI200 support
 - Standalone GUI Analyzer
 - Grafana/MongoDB GUI Analyzer
 - Dispatch Filtering
@@ -50,8 +50,7 @@ Detailed Feature List:
 
 | Platform | Status         |
 | :------- | :------------- |
-| Vega 20  | No             |
-| MI50     | No             |
+| Vega 20 (MI-50/60)  | No  |
 | MI100    | Supported      |
 | MI200    | Supported      |
 | MI300    | In development |
