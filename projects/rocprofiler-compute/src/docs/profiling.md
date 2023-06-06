@@ -370,7 +370,7 @@ Standalone Roofline Options:
 
 #### Roofline Only
 The following example demonstrates profiling roofline data only:
-```shell
+```shell-session
 $ omniperf profile --name vcopy --roof-only -- ./vcopy 1048576 256
 Resolving rocprof
 ROC Profiler:  /usr/bin/rocprof
@@ -394,7 +394,8 @@ Checking for pmc_perf.csv in  /home/colramos/GitHub/omniperf-pub/workloads/mix/m
 Empirical Roofline PDFs saved!
 ```
 An inspection of our workload output folder shows .pdf plots were generated successfully
-```shell
+```shell-session
+$ ls workloads/vcopy/mi200/
 total 176
 drwxrwxr-x 3 colramos colramos  4096 Apr 11 17:18 .
 drwxrwxr-x 3 colramos colramos  4096 Apr 11 17:15 ..
