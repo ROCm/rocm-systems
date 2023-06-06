@@ -23,10 +23,15 @@ THE SOFTWARE.
 #include "ctrl/test_hsa.h"
 
 #include <atomic>
+#include <experimental/filesystem>
+
+#include <dlfcn.h>  // for dladdr
 
 #include "util/test_assert.h"
 #include "util/helper_funcs.h"
 #include "util/hsa_rsrc_factory.h"
+
+namespace fs = std::experimental::filesystem;
 
 HsaRsrcFactory* TestHsa::hsa_rsrc_ = NULL;
 
@@ -82,6 +87,9 @@ bool TestHsa::Initialize(int /*arg_cnt*/, char** /*arg_list*/) {
 
   // Obtain the code object file name
   std::string agentName(agent_info_->name);
+  Dl_info dl_info;
+    if (dladdr(reinterpret_cast<const void*>(TestHsa::HsaShutdown), &dl_info) != 0)
+      brig_path_obj_.append(fs::path(dl_info.dli_fname).remove_filename().remove_filename());
   brig_path_obj_.append(agentName);
   brig_path_obj_.append("_" + name_ + ".hsaco");
 

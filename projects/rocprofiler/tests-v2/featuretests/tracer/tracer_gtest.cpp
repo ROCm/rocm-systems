@@ -29,7 +29,7 @@ THE SOFTWARE.
  * Sets application enviornment by seting HSA_TOOLS_LIB.
  */
 void ApplicationParser::SetApplicationEnv(const char* app_name, const char* trace_option) {
-  std::string app_path = GetRunningPath("tests/featuretests/tracer/runTracerFeatureTests");
+  std::string app_path = GetRunningPath("tests-v2/featuretests/tracer/runTracerFeatureTests");
 
   std::stringstream hsa_tools_lib_path;
   hsa_tools_lib_path << app_path << "librocprofiler_tool.so";
@@ -50,7 +50,7 @@ void ApplicationParser::SetApplicationEnv(const char* app_name, const char* trac
 
 
   std::stringstream os;
-  os << app_path << "tests/featuretests/tracer/apps/" << app_name;
+  os << app_path << "tests-v2/featuretests/tracer/apps/" << app_name;
   ProcessApplication(os);
 }
 

@@ -1,6 +1,5 @@
 add_definitions(-DAMD_INTERNAL_BUILD=1)
 add_custom_target(tests)
-add_dependencies(tests ${ROCPROFILER_TARGET})
 add_dependencies(tests rocprofiler_tool)
 add_custom_target(check COMMAND ${PROJECT_BINARY_DIR}/run_tests.sh DEPENDS tests)
 add_subdirectory(unittests)

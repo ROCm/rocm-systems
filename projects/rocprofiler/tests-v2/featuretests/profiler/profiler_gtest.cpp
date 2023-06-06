@@ -53,10 +53,10 @@ static void init_test_path() {
     metrics_path = "lib/rocprofiler/gfx_metrics.xml";
     binary_path = "bin/rocprofv2";
   } else {
-    running_path = "tests/featuretests/profiler/runFeatureTests";
+    running_path = "tests-v2/featuretests/profiler/runFeatureTests";
     lib_path = "librocprofiler_tool.so";
-    golden_trace_path = "tests/featuretests/profiler/apps/goldentraces/";
-    test_app_path = "tests/featuretests/profiler/apps/";
+    golden_trace_path = "tests-v2/featuretests/profiler/apps/goldentraces/";
+    test_app_path = "tests-v2/featuretests/profiler/apps/";
     metrics_path = "gfx_metrics.xml";
     binary_path = "rocprofv2";
   }

@@ -176,7 +176,7 @@ if(${LIBRARY_TYPE} STREQUAL SHARED)
   add_subdirectory(samples)
 
   # Build tests
-  add_subdirectory(tests)
+  add_subdirectory(tests-v2)
 endif()
 
 # Build Plugins

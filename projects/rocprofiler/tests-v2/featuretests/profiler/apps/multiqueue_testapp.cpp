@@ -336,7 +336,7 @@ static void init_test_path() {
     test_app_path = "share/rocprofiler/tests/featuretests/profiler/apps/";
     hasco_path = "share/rocprofiler/tests/";
   } else {
-    test_app_path = "tests/featuretests/profiler/apps/";
-    hasco_path = "tests/featuretests/profiler/";
+    test_app_path = "tests-v2/featuretests/profiler/apps/";
+    hasco_path = "tests-v2/featuretests/profiler/";
   }
 }
