@@ -27,8 +27,8 @@ pinned = ['hipMallocHost', 'hipHostMalloc', 'hipHostAlloc']
 ondevice = ['hipMalloc', 'hipMallocPitch', 'hipMallocArray', 'hipMalloc3DArray', 'hsa_amd_memory_pool_allocate']
 
 mm_table_descr = [
-  ['BeginNs', 'EndNs', 'pid', 'tid', 'Name', 'Direction', 'SrcType', 'DstType', 'Size', 'BW', 'Async'],
-  {'BeginNs':'INTEGER', 'EndNs':'INTEGER', 'pid':'INTEGER', 'tid':'INTEGER', 'Name':'TEXT', 'Direction':'TEXT', 'SrcType':'TEXT', 'DstType':'TEXT', 'Size':'INTEGER', 'BW':'TEXT', 'Async':'TEXT'}
+  ['BeginNs', 'EndNs', 'pid', 'tid', 'Name', 'Direction', 'SrcType', 'DstType', 'Size', 'Async'],
+  {'BeginNs':'INTEGER', 'EndNs':'INTEGER', 'pid':'INTEGER', 'tid':'INTEGER', 'Name':'TEXT', 'Direction':'TEXT', 'SrcType':'TEXT', 'DstType':'TEXT', 'Size':'INTEGER', 'Async':'TEXT'}
 ]
 
 def fatal(msg):
@@ -92,7 +92,6 @@ class MemManager:
     procid = rec_vals[3]    # 'pid'
     recordid = rec_vals[5]  # 'Index'
     size_ptrn = re.compile(DELIM + 'Size=(\d+)' + DELIM)
-    filled_ptrn = re.compile('BW=')
     # query syncronous memcopy API record
     key = (recordid, procid, 0)
     if key in self.memcopies:
@@ -102,21 +101,12 @@ class MemManager:
     key = (recordid, procid, 1)
     if key in self.memcopies:
       if data != '': fatal('register_copy: corrupted record sync/async')
-      mf = filled_ptrn.search(self.memcopies[key])
-      if mf: return data #already filled, skip
       async_copy_start_time = rec_vals[0]
       async_copy_end_time = rec_vals[1]
 
-      duration = int(async_copy_end_time) - int(async_copy_start_time)
-      size = 0
-      m = size_ptrn.search(self.memcopies[key])
-      if m:
-        size = m.group(1)
-      bandwidth = round(float(size) * 1000 / duration, 2)
-
       tid = rec_vals[4]
       copy_line_header = str(async_copy_start_time) + DELIM + str(async_copy_end_time) + DELIM + str(procid) + DELIM + str(tid)
-      copy_line_footer = 'BW=' + str(bandwidth) + DELIM + 'Async=' + str(1)
+      copy_line_footer = 'Async=' + str(1)
       data = copy_line_header + self.memcopies[key] + copy_line_footer
       self.memcopies[key] = data
 
@@ -126,10 +116,8 @@ class MemManager:
   # rec_vals: ['BeginNs', 'EndNs', 'dev-id', 'queue-id', 'Name', 'pid', 'tid', 'Index', 'Data', ...
   def register_activity(self, rec_vals):
     data = ''
-    event = rec_vals[4]     # 'Name'
     procid = rec_vals[5]    # 'pid'
     recordid = rec_vals[7]  # 'Index'
-    size_ptrn = re.compile(DELIM + 'Size=(\d+)' + DELIM)
 
     # query syncronous memcopy API record
     key = (recordid, procid, 0)
@@ -144,16 +132,9 @@ class MemManager:
       async_copy_start_time = rec_vals[0]
       async_copy_end_time = rec_vals[1]
 
-      duration = int(async_copy_end_time) - int(async_copy_start_time)
-      size = 0
-      m = size_ptrn.search(self.memcopies[key])
-      if m:
-        size = m.group(1)
-      bandwidth = round(float(size) * 1000 / duration, 2)
-
       tid = rec_vals[6]
       copy_line_header = str(async_copy_start_time) + DELIM + str(async_copy_end_time) + DELIM + str(procid) + DELIM + str(tid)
-      copy_line_footer = 'BW=' + str(bandwidth) + DELIM + 'Async=' + str(1)
+      copy_line_footer = 'Async=' + str(1)
       data = copy_line_header + self.memcopies[key] + copy_line_footer
       self.memcopies[key] = data
 
@@ -269,15 +250,11 @@ class MemManager:
     m_2d = hip_memcpy_ptrn2.match(args)
     m_array = hip_memcpy_ptrn3.match(args)
     is_async = 1 if async_event_ptrn.search(event) else 0
-    async_copy_start_time = -1
-    async_copy_end_time = -1
     copy_line = ''
     size = 0
     dstptr_type = 'unknown'
     srcptr_type = 'unknown'
     direction = 'unknown'
-    bandwidth = 0
-    duration = 0
     kind_switcher = {
       '0': "HtoH",
       '1': "HtoD",
@@ -358,7 +335,6 @@ class MemManager:
       start_time = recvals[0] # sync time stamp
       end_time = recvals[1] # sync time stamp
       duration = (int(end_time) - int(start_time))
-      bandwidth = round(float(size) * 1000 / duration, 2)
 
 
     evt_switcher = {
@@ -387,7 +363,7 @@ class MemManager:
     copy_line_header = ''
     copy_line_footer = ''
     copy_line_header = str(start_time) + DELIM + str(end_time) + DELIM + str(pid) + DELIM + str(tid)
-    copy_line_footer = "BW=" + str(bandwidth) + DELIM + 'Async=' + str(is_async)
+    copy_line_footer = 'Async=' + str(is_async)
 
     copy_line = copy_line_header + DELIM + event + DELIM + 'Direction=' + direction + DELIM + 'SrcType=' + srcptr_type + DELIM + 'DstType=' + dstptr_type + DELIM + "Size=" + str(size) + DELIM + copy_line_footer
 

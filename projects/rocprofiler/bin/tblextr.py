@@ -25,7 +25,7 @@ from sqlitedb import SQLiteDB
 from mem_manager import MemManager
 import dform
 
-mcopy_data_enabled = 1 if 'ROCP_MCOPY_DATA' in os.environ else 0
+mcopy_data_enabled = 0
 
 EXT_PID = 0
 COPY_PID = 1
@@ -925,7 +925,7 @@ else:
 
   if any_trace_found:
     db.metadata_json(jsonfile, sysinfo_file)
-    db.close_json(jsonfile);
+    db.close_json(jsonfile)
 
   if mcopy_data_enabled:
     memory_manager.dump_data('MM', memcopy_info_file)
