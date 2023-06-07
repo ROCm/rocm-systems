@@ -1,0 +1,9 @@
+!.sphinx/
+!.doxygen/
+/_build/
+/_doxygen/
+/_images/
+/_static/
+/_templates/
+/html/
+/latex/
