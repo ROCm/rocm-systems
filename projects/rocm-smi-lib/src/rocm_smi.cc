@@ -2237,16 +2237,79 @@ rsmi_dev_vendor_name_get(uint32_t dv_ind, char *name, size_t len) {
 
 rsmi_status_t
 rsmi_dev_pci_bandwidth_get(uint32_t dv_ind, rsmi_pcie_bandwidth_t *b) {
+  rsmi_status_t ret;
   TRY
   std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
-  CHK_SUPPORT_NAME_ONLY(b)
 
+  GET_DEV_AND_KFDNODE_FROM_INDX
+  CHK_API_SUPPORT_ONLY((b), RSMI_DEFAULT_VARIANT, RSMI_DEFAULT_VARIANT)
   DEVICE_MUTEX
-
-  return get_frequencies(amd::smi::kDevPCIEClk, RSMI_CLK_TYPE_PCIE, dv_ind,
+  ret = get_frequencies(amd::smi::kDevPCIEClk, RSMI_CLK_TYPE_PCIE, dv_ind,
                                         &b->transfer_rate, b->lanes);
+  if (ret == RSMI_STATUS_SUCCESS) {
+    return ret;
+  }
+
+  // Only fallback to gpu_metric if connecting via PCIe
+  if (kfd_node->numa_node_type() != amd::smi::IOLINK_TYPE_PCIEXPRESS) {
+    return ret;
+  }
+
+  rsmi_gpu_metrics_t gpu_metrics;
+  ret = rsmi_dev_gpu_metrics_info_get(dv_ind, &gpu_metrics);
+  if (ret != RSMI_STATUS_SUCCESS) {
+    return ret;
+  }
+
+  // Hardcode based on PCIe specification: https://en.wikipedia.org/wiki/PCI_Express
+  const uint32_t link_width[] = {1, 2, 4, 8, 12, 16};
+  const uint32_t link_speed[] = {25, 50, 80, 160};  // 0.1 Ghz
+  const uint32_t WIDTH_DATA_LENGTH = sizeof(link_width)/sizeof(uint32_t);
+  const uint32_t SPEED_DATA_LENGTH = sizeof(link_speed)/sizeof(uint32_t);
+
+  // Calculate the index
+  int width_index = -1;
+  int speed_index = -1;
+  uint32_t cur_index = 0;
+  for (cur_index = 0; cur_index < WIDTH_DATA_LENGTH; cur_index++) {
+    if (link_width[cur_index] == gpu_metrics.pcie_link_width) {
+      width_index = cur_index;
+      break;
+    }
+  }
+  for (cur_index = 0;
+      cur_index < SPEED_DATA_LENGTH; cur_index++) {
+    if (link_speed[cur_index] == gpu_metrics.pcie_link_speed) {
+      speed_index = cur_index;
+      break;
+    }
+  }
+  if (width_index == -1 || speed_index == -1) {
+    return RSMI_STATUS_NOT_SUPPORTED;
+  }
+  // Set possible lanes and frequencies
+  b->transfer_rate.num_supported = WIDTH_DATA_LENGTH * SPEED_DATA_LENGTH;
+  b->transfer_rate.current = speed_index*WIDTH_DATA_LENGTH + width_index;
+  for (cur_index = 0;
+      cur_index < WIDTH_DATA_LENGTH * SPEED_DATA_LENGTH; cur_index++) {
+        b->transfer_rate.frequency[cur_index]
+              = link_speed[cur_index/WIDTH_DATA_LENGTH] * 100 * 1000000L;
+        b->lanes[cur_index] = link_width[cur_index % WIDTH_DATA_LENGTH];
+  }
+  /*
+  frequency = {2500, 2500, 2500, 2500, 2500, 2500,
+              5000, 5000, 5000, 5000, 5000, 5000,
+              8000, 8000, 8000, 8000, 8000, 8000,
+              16000, 16000, 16000, 16000, 16000, 16000};  // Mhz
+  lanes = {1, 2, 4, 8, 12, 16,
+              1, 2, 4, 8, 12, 16,
+              1, 2, 4, 8, 12, 16,
+              1, 2, 4, 8, 12, 16 };  // For each frequency
+  */
+
+  return RSMI_STATUS_SUCCESS;
 
   CATCH
 }
