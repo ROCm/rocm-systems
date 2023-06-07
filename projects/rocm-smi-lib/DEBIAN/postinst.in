@@ -38,7 +38,7 @@ do_configureLogrotate() {
     dateformat .%%Y-%%m-%%d_%H:%%M:%%S
 }
 EOF
-  # Fix for %S argument not found (now we escape with %%)
+  # Fix for % S argument not found (now we escape with %%)
   # issue was RPM build thought we were using macros
   # https://gitlab.kitware.com/cmake/cmake/-/issues/22965
   # https://rpm-software-management.github.io/rpm/manual/spec.html
