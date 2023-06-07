@@ -90,8 +90,8 @@ exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 pygments_style = None
 
 # options for latex output
-latex_engine = "lualatex"
-latex_show_urls = "footnote"
+latex_engine = 'lualatex'
+latex_show_urls = 'footnote'
 
 
 # -- Options for HTML output -------------------------------------------------
