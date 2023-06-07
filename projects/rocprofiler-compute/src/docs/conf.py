@@ -89,6 +89,10 @@ exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 # The name of the Pygments (syntax highlighting) style to use.
 pygments_style = None
 
+# options for latex output
+latex_engine = 'lualatex'
+latex_show_urls = 'footnote'
+
 
 # -- Options for HTML output -------------------------------------------------
 
