@@ -1,8 +1,8 @@
 #!/bin/bash
 
 stop_rdc() {
-    #stop RDC if running
-    if [ -d /run/systemd/system ]; then
+    #stop RDC service if systemd exists and service is running
+    if [ -d /run/systemd/system ] && $( systemctl is-active --quiet rdc ); then
         systemctl stop rdc
     fi
     return 0
