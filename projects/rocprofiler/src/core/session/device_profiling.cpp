@@ -42,8 +42,10 @@ bool createHsaQueue(hsa_queue_t** queue, hsa_agent_t gpu_agent) {
   hsa_status_t status;
   status = hsa_queue_create(gpu_agent, QUEUE_NUM_PACKETS, HSA_QUEUE_TYPE_SINGLE, NULL, NULL,
                             UINT32_MAX, UINT32_MAX, queue);
+  if (status != HSA_STATUS_SUCCESS) fatal("Queue creation failed");
 
-  if (status != HSA_STATUS_SUCCESS) fatal("queue creation failed");
+  status = hsa_amd_queue_set_priority(*queue, HSA_AMD_QUEUE_PRIORITY_HIGH);
+  if (status != HSA_STATUS_SUCCESS) warning("Device Profiling HSA Queue Priority Set Failed");
 
   return (status == HSA_STATUS_SUCCESS);
 }
