@@ -151,18 +151,24 @@ rdc_status_t RdcRasLib::rdc_diag_test_cases_query(rdc_diag_test_cases_t test_cas
 // Run a specific test case
 rdc_status_t RdcRasLib::rdc_test_case_run(rdc_diag_test_cases_t test_case,
                                           uint32_t gpu_index[RDC_MAX_NUM_DEVICES],
-                                          uint32_t gpu_count, rdc_diag_test_result_t* result) {
+                                          uint32_t gpu_count, const char* config,
+                                          size_t config_size, rdc_diag_test_result_t* result) {
   (void)test_case;
   (void)gpu_index;
   (void)result;
   (void)gpu_count;
+  (void)config;
+  (void)config_size;
   return RDC_ST_NOT_SUPPORTED;
 }
 
 rdc_status_t RdcRasLib::rdc_diagnostic_run(const rdc_group_info_t& gpus, rdc_diag_level_t level,
+                                           const char* config, size_t config_size,
                                            rdc_diag_response_t* response) {
   (void)gpus;
   (void)level;
+  (void)config;
+  (void)config_size;
   (void)response;
   return RDC_ST_NOT_SUPPORTED;
 }

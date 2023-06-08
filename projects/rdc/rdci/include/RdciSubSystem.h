@@ -51,6 +51,7 @@ class RdciSubSystem {
   std::string ip_port_;
 
   bool use_auth_;
+  std::string config_test_;
   std::string root_ca_;
   std::string client_cert_;
   std::string client_key_;

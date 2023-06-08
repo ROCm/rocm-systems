@@ -28,6 +28,7 @@ THE SOFTWARE.
 
 #include "rdc_lib/RdcLogger.h"
 #include "rdc_lib/RdcMetricFetcher.h"
+#include "rdc_lib/impl/RdcRVSLib.h"
 #include "rdc_lib/impl/RdcRasLib.h"
 #include "rdc_lib/impl/RdcRocrLib.h"
 #include "rdc_lib/impl/RdcSmiLib.h"
@@ -55,7 +56,8 @@ rdc_status_t RdcDiagnosticModule::rdc_diag_test_cases_query(
 
 rdc_status_t RdcDiagnosticModule::rdc_test_case_run(rdc_diag_test_cases_t test_case,
                                                     uint32_t gpu_index[RDC_MAX_NUM_DEVICES],
-                                                    uint32_t gpu_count,
+                                                    uint32_t gpu_count, const char* config,
+                                                    size_t config_size,
                                                     rdc_diag_test_result_t* result) {
   if (result == nullptr) {
     return RDC_ST_BAD_PARAMETER;
@@ -68,11 +70,13 @@ rdc_status_t RdcDiagnosticModule::rdc_test_case_run(rdc_diag_test_cases_t test_c
     strncpy_with_null(result->info, "Not implemented", MAX_DIAG_MSG_LENGTH);
     return RDC_ST_NOT_SUPPORTED;
   }
-  return ite->second->rdc_test_case_run(test_case, gpu_index, gpu_count, result);
+  return ite->second->rdc_test_case_run(test_case, gpu_index, gpu_count, config, config_size,
+                                        result);
 }
 
 rdc_status_t RdcDiagnosticModule::rdc_diagnostic_run(const rdc_group_info_t& gpus,
-                                                     rdc_diag_level_t level,
+                                                     rdc_diag_level_t level, const char* config,
+                                                     size_t config_size,
                                                      rdc_diag_response_t* response) {
   if (response == nullptr) {
     return RDC_ST_BAD_PARAMETER;
@@ -87,11 +91,15 @@ rdc_status_t RdcDiagnosticModule::rdc_diagnostic_run(const rdc_group_info_t& gpu
     rdc_runs.push_back(RDC_DIAG_SYS_MEM_CHECK);
   }
 
+  if (level >= RDC_DIAG_LVL_MED) {  // Medium run and above
+    rdc_runs.push_back(RDC_DIAG_RVS_TEST);
+  }
+
   response->results_count = 0;
   for (unsigned int i = 0; i < rdc_runs.size(); i++) {
     response->diag_info[i].test_case = rdc_runs[i];
-    rdc_test_case_run(rdc_runs[i], const_cast<uint32_t*>(gpus.entity_ids), gpus.count,
-                      &(response->diag_info[i]));
+    rdc_test_case_run(rdc_runs[i], const_cast<uint32_t*>(gpus.entity_ids), gpus.count, config,
+                      config_size, &(response->diag_info[i]));
     response->results_count++;
   }
 
@@ -116,8 +124,9 @@ rdc_status_t RdcDiagnosticModule::RdcDiagnosticModule::rdc_diag_destroy() {
 
 RdcDiagnosticModule::RdcDiagnosticModule(RdcMetricFetcherPtr& fetcher) {
   const RdcSmiLibPtr smi_module = std::make_shared<RdcSmiLib>(fetcher);
-  const RdcRasLibPtr ras_module = std::make_shared<RdcRasLib>();
   const RdcRocrLibPtr rocr_module = std::make_shared<RdcRocrLib>();
+  const RdcRasLibPtr ras_module = std::make_shared<RdcRasLib>();
+  const RdcRVSLibPtr rvs_module = std::make_shared<RdcRVSLib>();
   if (smi_module) {
     diagnostic_modules_.push_back(smi_module);
   }
@@ -126,6 +135,9 @@ RdcDiagnosticModule::RdcDiagnosticModule(RdcMetricFetcherPtr& fetcher) {
   }
   if (ras_module) {
     diagnostic_modules_.push_back(ras_module);
+  }
+  if (rvs_module) {
+    diagnostic_modules_.push_back(rvs_module);
   }
 
   auto ite = diagnostic_modules_.begin();

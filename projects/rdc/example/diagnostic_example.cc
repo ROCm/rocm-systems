@@ -36,6 +36,7 @@ static std::string get_test_name(rdc_diag_test_cases_t test_case) {
       {RDC_DIAG_COMPUTE_QUEUE, "Compute Queue ready"},
       {RDC_DIAG_SYS_MEM_CHECK, "System memory check"},
       {RDC_DIAG_NODE_TOPOLOGY, "Node topology check"},
+      {RDC_DIAG_RVS_TEST, "RVS check"},
       {RDC_DIAG_GPU_PARAMETERS, "GPU parameters check"},
       {RDC_DIAG_TEST_LAST, "Unknown"}};
 
@@ -102,7 +103,7 @@ int main(int, char**) {
 
   // (2) start to run short diagnostic.
   rdc_diag_response_t response;
-  result = rdc_diagnostic_run(rdc_handle, group_id, RDC_DIAG_LVL_SHORT, &response);
+  result = rdc_diagnostic_run(rdc_handle, group_id, RDC_DIAG_LVL_SHORT, nullptr, 0, &response);
 
   if (result != RDC_ST_OK) {
     std::cout << "Error run RDC_DIAG_LVL_SHORT diagnostic. Return: " << rdc_status_string(result);
@@ -135,7 +136,8 @@ int main(int, char**) {
   // (5) run one test case
   std::cout << " ============== Run individual diagnostic test ===========\n";
   rdc_diag_test_result_t test_result;
-  result = rdc_test_case_run(rdc_handle, group_id, RDC_DIAG_COMPUTE_PROCESS, &test_result);
+  result =
+      rdc_test_case_run(rdc_handle, group_id, RDC_DIAG_COMPUTE_PROCESS, nullptr, 0, &test_result);
 
   if (result != RDC_ST_OK) {
     std::cout << "Error run RDC_DIAG_COMPUTE_PROCESS diagnostic. Return: "

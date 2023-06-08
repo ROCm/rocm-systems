@@ -26,7 +26,6 @@ set(RDC_ROCR_LIB_INC_LIST
     "${INC_DIR}/base_rocr_utils.h"
     "${INC_DIR}/common.h"
     "${PROJECT_SOURCE_DIR}/include/rdc/rdc.h"
-    "${RDC_LIB_INC_DIR}/RdcDiagnosticLibInterface.h"
     "${RDC_LIB_INC_DIR}/RdcLogger.h"
     "${RDC_LIB_INC_DIR}/rdc_common.h")
 

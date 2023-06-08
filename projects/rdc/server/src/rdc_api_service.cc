@@ -556,9 +556,10 @@ bool RdcAPIServiceImpl::copy_gpu_usage_info(const rdc_gpu_usage_info_t& src,
   }
 
   rdc_diag_response_t diag_response;
-  rdc_status_t result =
-      rdc_diagnostic_run(rdc_handle_, request->group_id(),
-                         static_cast<rdc_diag_level_t>(request->level()), &diag_response);
+  rdc_status_t result = rdc_diagnostic_run(
+      rdc_handle_, request->group_id(), static_cast<rdc_diag_level_t>(request->level()),
+      const_cast<char*>(request->config().c_str()), static_cast<size_t>(request->config().length()),
+      &diag_response);
 
   reply->set_status(result);
   if (result != RDC_ST_OK) {
@@ -607,9 +608,10 @@ bool RdcAPIServiceImpl::copy_gpu_usage_info(const rdc_gpu_usage_info_t& src,
   }
 
   rdc_diag_test_result_t test_result;
-  rdc_status_t result =
-      rdc_test_case_run(rdc_handle_, request->group_id(),
-                        static_cast<rdc_diag_test_cases_t>(request->test_case()), &test_result);
+  rdc_status_t result = rdc_test_case_run(
+      rdc_handle_, request->group_id(), static_cast<rdc_diag_test_cases_t>(request->test_case()),
+      const_cast<char*>(request->config().c_str()), static_cast<size_t>(request->config().length()),
+      &test_result);
 
   reply->set_status(result);
   if (result != RDC_ST_OK) {

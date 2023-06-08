@@ -77,9 +77,11 @@ class RdcHandler {
 
   // Diagnostic API
   virtual rdc_status_t rdc_diagnostic_run(rdc_gpu_group_t group_id, rdc_diag_level_t level,
+                                          const char* config, size_t config_size,
                                           rdc_diag_response_t* response) = 0;
 
   virtual rdc_status_t rdc_test_case_run(rdc_gpu_group_t group_id, rdc_diag_test_cases_t test_case,
+                                         const char* config, size_t config_size,
                                          rdc_diag_test_result_t* result) = 0;
 
   // Control API

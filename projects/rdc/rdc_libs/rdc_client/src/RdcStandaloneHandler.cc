@@ -530,7 +530,8 @@ rdc_status_t RdcStandaloneHandler::rdc_field_unwatch(rdc_gpu_group_t group_id,
 
 // Diagnostic API
 rdc_status_t RdcStandaloneHandler::rdc_diagnostic_run(rdc_gpu_group_t group_id,
-                                                      rdc_diag_level_t level,
+                                                      rdc_diag_level_t level, const char* config,
+                                                      size_t config_size,
                                                       rdc_diag_response_t* response) {
   if (!response) {
     return RDC_ST_BAD_PARAMETER;
@@ -541,6 +542,8 @@ rdc_status_t RdcStandaloneHandler::rdc_diagnostic_run(rdc_gpu_group_t group_id,
 
   request.set_group_id(group_id);
   request.set_level(level);
+  request.set_config(config);
+  request.set_config_size(config_size);
 
   ::grpc::Status status = stub_->DiagnosticRun(&context, request, &reply);
   rdc_status_t err_status = error_handle(status, reply.status());
@@ -583,6 +586,7 @@ rdc_status_t RdcStandaloneHandler::rdc_diagnostic_run(rdc_gpu_group_t group_id,
 
 rdc_status_t RdcStandaloneHandler::rdc_test_case_run(rdc_gpu_group_t group_id,
                                                      rdc_diag_test_cases_t test_case,
+                                                     const char* config, size_t config_size,
                                                      rdc_diag_test_result_t* to_result) {
   if (!to_result) {
     return RDC_ST_BAD_PARAMETER;
@@ -592,6 +596,8 @@ rdc_status_t RdcStandaloneHandler::rdc_test_case_run(rdc_gpu_group_t group_id,
   ::grpc::ClientContext context;
 
   request.set_group_id(group_id);
+  request.set_config(config);
+  request.set_config_size(config_size);
   request.set_test_case(static_cast<::rdc::DiagnosticTestCaseRunRequest_TestCaseType>(test_case));
 
   ::grpc::Status status = stub_->DiagnosticTestCaseRun(&context, request, &reply);

@@ -25,7 +25,6 @@ THE SOFTWARE.
 #include <memory>
 
 #include "rdc/rdc.h"
-#include "rdc_lib/RdcDiagnosticLibInterface.h"
 
 namespace amd {
 namespace rdc {
@@ -39,10 +38,12 @@ class RdcDiagnostic {
   // Run a specific test case
   virtual rdc_status_t rdc_test_case_run(rdc_diag_test_cases_t test_case,
                                          uint32_t gpu_index[RDC_MAX_NUM_DEVICES],
-                                         uint32_t gpu_count, rdc_diag_test_result_t* result) = 0;
+                                         uint32_t gpu_count, const char* config, size_t config_size,
+                                         rdc_diag_test_result_t* result) = 0;
 
   // Run multiple test cases
   virtual rdc_status_t rdc_diagnostic_run(const rdc_group_info_t& gpus, rdc_diag_level_t level,
+                                          const char* config, size_t config_size,
                                           rdc_diag_response_t* response) = 0;
 
   virtual rdc_status_t rdc_diag_init(uint64_t flags) = 0;

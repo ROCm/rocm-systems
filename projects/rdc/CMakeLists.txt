@@ -26,6 +26,9 @@ cmake_minimum_required(VERSION 3.15)
 set(RDC "rdc" CACHE INTERNAL "")
 set(RDC_PACKAGE ${RDC} CACHE STRING "")
 
+# Default libdir to "lib", this skips GNUInstallDirs from trying to take a guess if it's unset:
+set(CMAKE_INSTALL_LIBDIR "lib" CACHE STRING "Library install directory")
+
 set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules/" CACHE INTERNAL "Default module path.")
 # Include common cmake modules
 include(utils)
@@ -53,16 +56,23 @@ option(BUILD_ROCRTEST "Build targets for librdc_rocr.so" ON)
 # which requires the Rocm profiler.
 option(BUILD_ROCPTEST "Build targets for librdc_rocp.so" OFF)
 
+# When cmake -DBUILD_RVS=off, it will not build the librdc_rvs.so
+# which requires the RocmValidationSuite
+option(BUILD_RVS "Build targets for librdc_rvs.so" OFF)
+
 # When cmake -DBUILD_TESTS=off, it will not build RDC tests.
 option(BUILD_TESTS "Build test suite" OFF)
 
 # Enable shared libraries for gtest
 option(BUILD_SHARED_LIBS "Build shared library (.so) or not." ON)
 
+# Enable address sanitizer
+option(ADDRESS_SANITIZER "Enable address sanitizer" OFF)
+
 # File reorganization enable/disable
 option(FILE_REORG_BACKWARD_COMPATIBILITY "Enable File Reorg with backward compatibility" OFF)
 
-option(CMAKE_VERBOSE_MAKEFILE "Enable verbose output" ON)
+option(CMAKE_VERBOSE_MAKEFILE "Enable verbose output" OFF)
 
 option(CMAKE_EXPORT_COMPILE_COMMANDS "Export compile commands for linters and autocompleters" ON)
 
@@ -77,7 +87,8 @@ include(GNUInstallDirs)
 
 # ROCM_DIR should be passed in via command line; it will be used
 # in sub-projects. Override with -DROCM_DIR=
-set(ROCM_DIR "/opt/rocm" CACHE STRING "ROCm directory.")
+set(ROCM_DIR "/opt/rocm" CACHE PATH "ROCm directory.")
+set(ROCM_PATH "${ROCM_DIR}" CACHE PATH "ROCm directory.")
 
 set(COMMON_DIR "${CMAKE_CURRENT_SOURCE_DIR}/common")
 
@@ -89,8 +100,7 @@ set(RDC_SHARE_INSTALL_PREFIX "share/${RDC}" CACHE INTERNAL "Tests and Example in
 set(CMAKE_INSTALL_PREFIX ${ROCM_DIR} CACHE STRING "Default installation directory.")
 
 # add package search paths
-set(CMAKE_PREFIX_PATH
-    ${CMAKE_PREFIX_PATH}
+list(APPEND CMAKE_PREFIX_PATH
     ${GRPC_ROOT}
     /usr/local
     )
@@ -213,7 +223,8 @@ if(BUILD_STANDALONE)
             --cpp_out=${PROTOB_OUT_DIR} ${file}
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
             RESULT_VARIABLE PROTOB_RESULT
-            OUTPUT_VARIABLE PROTOB_OUT_VAR)
+            OUTPUT_VARIABLE PROTOB_OUT_VAR
+            COMMAND_ERROR_IS_FATAL ANY)
         message("protoc command returned: ${PROTOB_RESULT}")
 
         message("GRPC_PLUGIN=${GRPC_PLUGIN})")

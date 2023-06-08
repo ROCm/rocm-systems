@@ -54,6 +54,7 @@ void RdciDiagSubSystem::parse_cmd_opts(int argc, char** argv) {
   const struct option long_options[] = {{"host", required_argument, nullptr, HOST_OPTIONS},
                                         {"help", optional_argument, nullptr, 'h'},
                                         {"unauth", optional_argument, nullptr, 'u'},
+                                        {"config-test", optional_argument, nullptr, 'c'},
                                         {"run-level", required_argument, nullptr, 'r'},
                                         {"group-id", required_argument, nullptr, 'g'},
                                         {nullptr, 0, nullptr, 0}};
@@ -62,7 +63,7 @@ void RdciDiagSubSystem::parse_cmd_opts(int argc, char** argv) {
   int option_index = 0;
   int opt = 0;
 
-  while ((opt = getopt_long(argc, argv, "hug:r:", long_options, &option_index)) != -1) {
+  while ((opt = getopt_long(argc, argv, "hug:r:c:", long_options, &option_index)) != -1) {
     switch (opt) {
       case HOST_OPTIONS:
         ip_port_ = optarg;
@@ -72,6 +73,11 @@ void RdciDiagSubSystem::parse_cmd_opts(int argc, char** argv) {
         return;
       case 'u':
         use_auth_ = false;
+        break;
+      case 'c':
+        config_test_ = optarg;
+        printf("config_test_ = %s\n", config_test_.c_str());
+        printf("config_test_.length = %zu\n", config_test_.length());
         break;
       case 'g':
         if (!IsNumber(optarg)) {
@@ -93,7 +99,6 @@ void RdciDiagSubSystem::parse_cmd_opts(int argc, char** argv) {
         throw RdcException(RDC_ST_BAD_PARAMETER, "Unknown command line options");
     }
   }
-
   if (!group_id_set) {
     show_help();
     throw RdcException(RDC_ST_BAD_PARAMETER, "Need to specify the GPU group id");
@@ -108,12 +113,13 @@ void RdciDiagSubSystem::show_help() const {
   //            ***** 20 Chars ****
   std::cout << " diag -- Used to run diagnostic for GPUs.\n\n";
   std::cout << "Usage\n";
-  std::cout << "    rdci diag [--host <IP/FQDN>:port] [-u] -g <groupId>"
+  std::cout << "    rdci diag [--host <IP/FQDN>:port] [-u] [-t] -g <groupId>"
             << " -r <runLevel>\n";
   std::cout << "\nFlags:\n";
   show_common_usage();
   std::cout << "  -g  --group-id                 The GPU group to diagnose"
             << " on the specified host.\n";
+  std::cout << "  -c  --config-test              Set custom test config (RVS)\n";
   std::cout << "  -r  --run-level   level        Integer representing test"
             << " run levels [default = 1].\n"
             << "                                 level 1: Tests take a "
@@ -130,6 +136,7 @@ std::string RdciDiagSubSystem::get_test_name(rdc_diag_test_cases_t test_case) co
       {RDC_DIAG_COMPUTE_QUEUE, "Compute Queue ready"},
       {RDC_DIAG_SYS_MEM_CHECK, "System memory check"},
       {RDC_DIAG_NODE_TOPOLOGY, "Node topology check"},
+      {RDC_DIAG_RVS_TEST, "Pre-defined config RVS check"},
       {RDC_DIAG_GPU_PARAMETERS, "GPU parameters check"},
       {RDC_DIAG_TEST_LAST, "Unknown"}};
 
@@ -148,7 +155,8 @@ void RdciDiagSubSystem::process() {
 
   rdc_status_t result;
   rdc_diag_response_t response;
-  result = rdc_diagnostic_run(rdc_handle_, group_id_, run_level_, &response);
+  result = rdc_diagnostic_run(rdc_handle_, group_id_, run_level_, config_test_.c_str(),
+                              config_test_.length(), &response);
 
   if (result != RDC_ST_OK) {
     std::string error_msg = rdc_status_string(result);

@@ -350,7 +350,8 @@ rdc_status_t RdcEmbeddedHandler::rdc_field_unwatch(rdc_gpu_group_t group_id,
 
 // Diagnostic API
 rdc_status_t RdcEmbeddedHandler::rdc_diagnostic_run(rdc_gpu_group_t group_id,
-                                                    rdc_diag_level_t level,
+                                                    rdc_diag_level_t level, const char* config,
+                                                    size_t config_size,
                                                     rdc_diag_response_t* response) {
   if (!response) {
     return RDC_ST_BAD_PARAMETER;
@@ -362,11 +363,12 @@ rdc_status_t RdcEmbeddedHandler::rdc_diagnostic_run(rdc_gpu_group_t group_id,
   if (status != RDC_ST_OK) return status;
 
   auto diag = rdc_module_mgr_->get_diagnostic_module();
-  return diag->rdc_diagnostic_run(rdc_group_info, level, response);
+  return diag->rdc_diagnostic_run(rdc_group_info, level, config, config_size, response);
 }
 
 rdc_status_t RdcEmbeddedHandler::rdc_test_case_run(rdc_gpu_group_t group_id,
                                                    rdc_diag_test_cases_t test_case,
+                                                   const char* config, size_t config_size,
                                                    rdc_diag_test_result_t* result) {
   if (!result) {
     return RDC_ST_BAD_PARAMETER;
@@ -377,8 +379,8 @@ rdc_status_t RdcEmbeddedHandler::rdc_test_case_run(rdc_gpu_group_t group_id,
   if (status != RDC_ST_OK) return status;
 
   auto diag = rdc_module_mgr_->get_diagnostic_module();
-  return diag->rdc_test_case_run(test_case, rdc_group_info.entity_ids, rdc_group_info.count,
-                                 result);
+  return diag->rdc_test_case_run(test_case, rdc_group_info.entity_ids, rdc_group_info.count, config,
+                                 config_size, result);
 }
 
 // Control API

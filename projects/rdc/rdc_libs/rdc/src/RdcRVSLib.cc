@@ -19,7 +19,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
-#include "rdc_lib/impl/RdcRocrLib.h"
+#include "rdc_lib/impl/RdcRVSLib.h"
 
 #include <functional>
 
@@ -29,14 +29,14 @@ THE SOFTWARE.
 namespace amd {
 namespace rdc {
 
-RdcRocrLib::RdcRocrLib()
+RdcRVSLib::RdcRVSLib()
     : test_case_run_(nullptr),
       diag_test_cases_query_(nullptr),
       diag_init_(nullptr),
       diag_destroy_(nullptr) {
-  rdc_status_t status = lib_loader_.load("librdc_rocr.so");
+  rdc_status_t status = lib_loader_.load("librdc_rvs.so");
   if (status != RDC_ST_OK) {
-    RDC_LOG(RDC_ERROR, "Rocr related function will not work.");
+    RDC_LOG(RDC_ERROR, "RVS related function will not work.");
     return;
   }
 
@@ -48,8 +48,8 @@ RdcRocrLib::RdcRocrLib()
 
   status = diag_init_(0);
   if (status != RDC_ST_OK) {
-    RDC_LOG(RDC_ERROR, "Fail to init librdc_rocr.so:" << rdc_status_string(status)
-                                                      << ". Rocr related function will not work.");
+    RDC_LOG(RDC_ERROR, "Fail to init librdc_rvs.so:" << rdc_status_string(status)
+                                                     << ". RVS related function will not work.");
     return;
   }
 
@@ -68,14 +68,14 @@ RdcRocrLib::RdcRocrLib()
   }
 }
 
-RdcRocrLib::~RdcRocrLib() {
+RdcRVSLib::~RdcRVSLib() {
   if (diag_destroy_) {
     diag_destroy_();
   }
 }
 
-rdc_status_t RdcRocrLib::rdc_diag_test_cases_query(rdc_diag_test_cases_t test_cases[MAX_TEST_CASES],
-                                                   uint32_t* test_case_count) {
+rdc_status_t RdcRVSLib::rdc_diag_test_cases_query(rdc_diag_test_cases_t test_cases[MAX_TEST_CASES],
+                                                  uint32_t* test_case_count) {
   if (test_case_count == nullptr) {
     return RDC_ST_BAD_PARAMETER;
   }
@@ -85,15 +85,15 @@ rdc_status_t RdcRocrLib::rdc_diag_test_cases_query(rdc_diag_test_cases_t test_ca
 
   rdc_status_t status = diag_test_cases_query_(test_cases, test_case_count);
   RDC_LOG(RDC_DEBUG,
-          "Query " << *test_case_count << " test cases from Rocr: " << rdc_status_string(status));
+          "Query " << *test_case_count << " test cases from RVS: " << rdc_status_string(status));
   return status;
 }
 
 // Run a specific test case
-rdc_status_t RdcRocrLib::rdc_test_case_run(rdc_diag_test_cases_t test_case,
-                                           uint32_t gpu_index[RDC_MAX_NUM_DEVICES],
-                                           uint32_t gpu_count, const char* config,
-                                           size_t config_size, rdc_diag_test_result_t* result) {
+rdc_status_t RdcRVSLib::rdc_test_case_run(rdc_diag_test_cases_t test_case,
+                                          uint32_t gpu_index[RDC_MAX_NUM_DEVICES],
+                                          uint32_t gpu_count, const char* config,
+                                          size_t config_size, rdc_diag_test_result_t* result) {
   if (result == nullptr) {
     return RDC_ST_BAD_PARAMETER;
   }
@@ -103,13 +103,14 @@ rdc_status_t RdcRocrLib::rdc_test_case_run(rdc_diag_test_cases_t test_case,
 
   rdc_status_t status =
       test_case_run_(test_case, gpu_index, gpu_count, config, config_size, result);
-  RDC_LOG(RDC_DEBUG, "Run " << test_case << " test case from Rocr: " << rdc_status_string(status));
+  RDC_LOG(RDC_DEBUG, "Run " << test_case << " test case from RVS: " << rdc_status_string(status)
+                            << " config[" << config_size << "]: " << config);
   return status;
 }
 
-rdc_status_t RdcRocrLib::rdc_diagnostic_run(const rdc_group_info_t& gpus, rdc_diag_level_t level,
-                                            const char* config, size_t config_size,
-                                            rdc_diag_response_t* response) {
+rdc_status_t RdcRVSLib::rdc_diagnostic_run(const rdc_group_info_t& gpus, rdc_diag_level_t level,
+                                           const char* config, size_t config_size,
+                                           rdc_diag_response_t* response) {
   (void)gpus;
   (void)level;
   (void)config;
@@ -118,14 +119,14 @@ rdc_status_t RdcRocrLib::rdc_diagnostic_run(const rdc_group_info_t& gpus, rdc_di
   return RDC_ST_NOT_SUPPORTED;
 }
 
-rdc_status_t RdcRocrLib::rdc_diag_init(uint64_t flags) {
+rdc_status_t RdcRVSLib::rdc_diag_init(uint64_t flags) {
   if (!diag_init_) {
     return RDC_ST_FAIL_LOAD_MODULE;
   }
 
   return diag_init_(flags);
 }
-rdc_status_t RdcRocrLib::rdc_diag_destroy() {
+rdc_status_t RdcRVSLib::rdc_diag_destroy() {
   if (!diag_destroy_) {
     return RDC_ST_FAIL_LOAD_MODULE;
   }

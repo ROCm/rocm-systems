@@ -81,8 +81,10 @@ class RdcEmbeddedHandler : public RdcHandler {
   rdc_status_t rdc_field_unwatch(rdc_gpu_group_t group_id, rdc_field_grp_t field_group_id) override;
   // Diagnostic API
   rdc_status_t rdc_diagnostic_run(rdc_gpu_group_t group_id, rdc_diag_level_t level,
+                                  const char* config, size_t config_size,
                                   rdc_diag_response_t* response) override;
   rdc_status_t rdc_test_case_run(rdc_gpu_group_t group_id, rdc_diag_test_cases_t test_case,
+                                 const char* config, size_t config_size,
                                  rdc_diag_test_result_t* result) override;
 
   // Control API

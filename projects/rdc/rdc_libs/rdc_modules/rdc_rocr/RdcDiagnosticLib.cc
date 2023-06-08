@@ -151,6 +151,7 @@ static rdc_status_t run_compute_queue_test(uint32_t gpu_index, rdc_diag_test_res
 
 rdc_status_t rdc_diag_test_case_run(rdc_diag_test_cases_t test_case,
                                     uint32_t gpu_index[RDC_MAX_NUM_DEVICES], uint32_t gpu_count,
+                                    const char* /*config*/, size_t /*config_size*/,
                                     rdc_diag_test_result_t* result) {
   if (result == nullptr || gpu_count == 0) {
     return RDC_ST_BAD_PARAMETER;
@@ -178,7 +179,7 @@ rdc_status_t rdc_diag_test_case_run(rdc_diag_test_cases_t test_case,
         break;
       default:
         result->status = RDC_DIAG_RESULT_SKIP;
-        strncpy_with_null(result->info, "Not support yet", MAX_DIAG_MSG_LENGTH);
+        strncpy_with_null(result->info, "Not supported yet", MAX_DIAG_MSG_LENGTH);
     }
   }
 

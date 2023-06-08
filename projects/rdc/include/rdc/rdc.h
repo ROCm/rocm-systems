@@ -28,10 +28,20 @@ extern "C" {
 #endif  // __cplusplus
 
 #ifdef __cplusplus
+
+// cstddef include causes issues on older GCC
+// use stddef.h instead
+#if __GNUC__ < 9
+#include <stddef.h>
+#else
+#include <cstddef>
+#endif  // __GNUC__
+
 #include <cstdint>
 #else
+#include <stddef.h>
 #include <stdint.h>
-#endif
+#endif  // __cplusplus
 
 /** \file rdc.h
  *  Main header file for the ROCm RDC library.
@@ -434,6 +444,7 @@ typedef enum {
   RDC_DIAG_COMPUTE_QUEUE,   //!< The Compute Queue is ready
   RDC_DIAG_SYS_MEM_CHECK,   //!< Check System memory
   RDC_DIAG_NODE_TOPOLOGY,   //!< Report node topology
+  RDC_DIAG_RVS_TEST,        //!< TODO: Replace with real RVS tests
   RDC_DIAG_GPU_PARAMETERS,  //!< GPU parameters in range
   RDC_DIAG_TEST_LAST = RDC_DIAG_GPU_PARAMETERS
 } rdc_diag_test_cases_t;
@@ -972,12 +983,17 @@ rdc_status_t rdc_field_unwatch(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_
  *  The RDC_DIAG_LVL_SHORT only take a few seconds, and the
  *  the RDC_DIAG_LVL_LONG may take up to 15 minutes.
  *
+ *  @param[in] config  Implementation specific configuration.
+ *
+ *  @param[in] config_size  Length of the configuration.
+ *
  *  @param[inout] response  The detail results of the tests run.
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
  */
 rdc_status_t rdc_diagnostic_run(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
-                                rdc_diag_level_t level, rdc_diag_response_t* response);
+                                rdc_diag_level_t level, const char* config, size_t config_size,
+                                rdc_diag_response_t* response);
 
 /**
  *  @brief Run one diagnostic test case
@@ -990,12 +1006,17 @@ rdc_status_t rdc_diagnostic_run(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group
  *
  *  @param[in] test_case  The test case to run.
  *
+ *  @param[in] config  Implementation specific configuration.
+ *
+ *  @param[in] config_size  Length of the configuration.
+ *
  *  @param[inout] result  The results of the test.
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
  */
 rdc_status_t rdc_test_case_run(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
-                               rdc_diag_test_cases_t test_case, rdc_diag_test_result_t* result);
+                               rdc_diag_test_cases_t test_case, const char* config,
+                               size_t config_size, rdc_diag_test_result_t* result);
 
 /**
  *  @brief Get a description of a provided RDC error status
