@@ -88,11 +88,11 @@ struct gpu_cmd_entry_t {
 };
 struct gpu_cmd_key_t {
   gpu_cmd_op_t op;
-  uint32_t chip_id;
+  uint32_t node_id;
 };
 struct gpu_cmd_fncomp_t {
   bool operator() (const gpu_cmd_key_t& a, const gpu_cmd_key_t& b) const {
-    return (a.op < b.op) || ((a.op == b.op) && (a.chip_id < b.chip_id));
+    return (a.op < b.op) || ((a.op == b.op) && (a.node_id < b.node_id));
   }
 };
 typedef std::map<gpu_cmd_key_t, gpu_cmd_entry_t, gpu_cmd_fncomp_t> gpu_cmd_map_t;
@@ -102,14 +102,14 @@ size_t GetGpuCommand(gpu_cmd_op_t op,
                        packet_t** command_out) {
   thread_local gpu_cmd_map_t map;
 
-  // Getting chip-id
-  uint32_t chip_id = 0;
-  hsa_agent_info_t attribute = static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_CHIP_ID);
-  hsa_status_t status = hsa_agent_get_info(agent_info->dev_id, attribute, &chip_id);
+  // Getting NUMA node id
+  uint32_t node_id = 0;
+  hsa_agent_info_t attribute = static_cast<hsa_agent_info_t>(HSA_AGENT_INFO_NODE);
+  hsa_status_t status = hsa_agent_get_info(agent_info->dev_id, attribute, &node_id);
   if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "hsa_agent_get_info failed");
 
   // Query/create a command
-  auto ret = map.insert({gpu_cmd_key_t{op, chip_id}, gpu_cmd_entry_t{}});
+  auto ret = map.insert({gpu_cmd_key_t{op, node_id}, gpu_cmd_entry_t{}});
   gpu_cmd_map_t::iterator it = ret.first;
   if (ret.second) {
     it->second.size = CreateGpuCommand(op, agent_info, it->second.command, Profile::LEGACY_SLOT_SIZE_PKT);
