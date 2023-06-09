@@ -559,7 +559,7 @@ def printLog(device, metricName, value=None, extraSpace=False):
     else:
         logstr = 'GPU[%s]\t\t: %s' % (device, metricName)
     if device is None:
-        logstr = logstr.split(':')[1][1:]
+        logstr = logstr.split(':', 1)[1][1:]
     # Force thread safe printing
     lock = multiprocessing.Lock()
     lock.acquire()
