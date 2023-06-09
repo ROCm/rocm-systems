@@ -43,6 +43,7 @@ std::string golden_trace_path;
 std::string test_app_path;
 std::string metrics_path;
 std::string binary_path;
+std::string profiler_api_lib_path = "";
 
 static void init_test_path() {
   if (is_installed_path()) {
@@ -52,6 +53,7 @@ static void init_test_path() {
     test_app_path = "share/rocprofiler/tests/featuretests/profiler/apps/";
     metrics_path = "lib/rocprofiler/gfx_metrics.xml";
     binary_path = "bin/rocprofv2";
+    profiler_api_lib_path = "/lib";
   } else {
     running_path = "tests-v2/featuretests/profiler/runFeatureTests";
     lib_path = "librocprofiler_tool.so";
@@ -72,6 +74,14 @@ void ApplicationParser::SetApplicationEnv(const char* app_name) {
   init_test_path();
 
   app_path = GetRunningPath(running_path);
+
+  std::stringstream ld_library_path;
+  ld_library_path << app_path << profiler_api_lib_path << []() {
+    const char* path = getenv("LD_LIBRARY_PATH");
+    if (path != nullptr) return ":" + std::string(path);
+    return std::string("");
+  }();
+  setenv("LD_LIBRARY_PATH", ld_library_path.str().c_str(), true);
 
   std::stringstream counter_path;
   counter_path << app_path << golden_trace_path << "input.txt";

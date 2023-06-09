@@ -31,6 +31,19 @@ THE SOFTWARE.
 void ApplicationParser::SetApplicationEnv(const char* app_name, const char* trace_option) {
   std::string app_path = GetRunningPath("tests-v2/featuretests/tracer/runTracerFeatureTests");
 
+  std::string profiler_api_lib_path = "";
+  if(is_installed_path()) {
+    profiler_api_lib_path = "/lib";
+  }
+
+  std::stringstream ld_library_path;
+  ld_library_path << app_path << profiler_api_lib_path << []() {
+    const char* path = getenv("LD_LIBRARY_PATH");
+    if (path != nullptr) return ":" + std::string(path);
+    return std::string("");
+  }();
+  setenv("LD_LIBRARY_PATH", ld_library_path.str().c_str(), true);
+
   std::stringstream hsa_tools_lib_path;
   hsa_tools_lib_path << app_path << "librocprofiler_tool.so";
   setenv("LD_PRELOAD", hsa_tools_lib_path.str().c_str(), true);
