@@ -127,11 +127,17 @@ def join_prof(workload_dir, join_type, log_file, verbose, out=None):
         "wgr": [col for col in df.columns if "wgr" in col],
         "lds": [col for col in df.columns if "lds" in col],
         "scr": [col for col in df.columns if "scr" in col],
-        "arch_vgpr": [col for col in df.columns if "arch_vgpr" in col],
-        "accum_vgpr": [col for col in df.columns if "accum_vgpr" in col],
         "spgr": [col for col in df.columns if "sgpr" in col],
     }
+    # Check for vgpr counter in ROCm < 5.3
+    if "vgpr" in df.columns:
+        duplicate_cols["vgpr"] = [col for col in df.columns if "vgpr" in col]
+    # Check for vgpr counter in ROCm >= 5.3
+    else:
+        duplicate_cols["arch_vgpr"] = [col for col in df.columns if "arch_vgpr" in col]
+        duplicate_cols["accum_vgpr"] =  [col for col in df.columns if "accum_vgpr" in col]
     for key, cols in duplicate_cols.items():
+        print("Key is ", key)
         _df = df[cols]
         if not test_df_column_equality(_df):
             msg = (
