@@ -135,7 +135,7 @@ def join_prof(workload_dir, join_type, log_file, verbose, out=None):
     # Check for vgpr counter in ROCm >= 5.3
     else:
         duplicate_cols["arch_vgpr"] = [col for col in df.columns if "arch_vgpr" in col]
-        duplicate_cols["accum_vgpr"] =  [col for col in df.columns if "accum_vgpr" in col]
+        duplicate_cols["accum_vgpr"] = [col for col in df.columns if "accum_vgpr" in col]
     for key, cols in duplicate_cols.items():
         print("Key is ", key)
         _df = df[cols]

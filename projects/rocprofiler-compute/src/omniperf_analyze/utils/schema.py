@@ -55,6 +55,7 @@ class ArchConfig:
     # [Metric name: Counters] pairs
     metric_counters: Dict[str, list] = field(default_factory=dict)
 
+
 @dataclass
 class Workload:
     sys_info: pd.DataFrame = None
