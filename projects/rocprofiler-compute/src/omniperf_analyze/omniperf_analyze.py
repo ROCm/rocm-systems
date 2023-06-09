@@ -47,35 +47,49 @@ from omniperf_analyze.utils import parser, file_io
 from omniperf_analyze.utils.gui_components.roofline import get_roofline
 
 
-def initialize_run(args, normalization_filter=None):
-    import pandas as pd
-    from collections import OrderedDict
+################################################
+# Helper Functions
+################################################
+def generate_configs(config_dir, list_kernels, filter_metrics):
     from omniperf_analyze.utils import schema
-    from tabulate import tabulate
 
-    # Fixme: cur_root.parent.joinpath('soc_params')
-    soc_params_dir = os.path.join(os.path.dirname(__file__), "..", "soc_params")
-    soc_spec_df = file_io.load_soc_params(soc_params_dir)
-
-    single_panel_config = file_io.is_single_panel_config(Path(args.config_dir))
+    single_panel_config = file_io.is_single_panel_config(Path(config_dir))
     global archConfigs
     archConfigs = {}
     for arch in file_io.supported_arch.keys():
         ac = schema.ArchConfig()
-        if args.list_kernels:
+        if list_kernels:
             ac.panel_configs = file_io.top_stats_build_in_config
         else:
             arch_panel_config = (
-                args.config_dir if single_panel_config else args.config_dir.joinpath(arch)
+                config_dir if single_panel_config else config_dir.joinpath(arch)
             )
             ac.panel_configs = file_io.load_panel_configs(arch_panel_config)
 
         # TODO: filter_metrics should/might be one per arch
         # print(ac)
 
-        parser.build_dfs(ac, args.filter_metrics)
+        parser.build_dfs(ac, filter_metrics)
 
         archConfigs[arch] = ac
+
+    return archConfigs # Note: This return comes in handy for rocScope which borrows generate_configs() in its rocomni plugin
+
+
+################################################
+# Core Functions
+################################################
+def initialize_run(args, normalization_filter=None):
+    import pandas as pd
+    from collections import OrderedDict
+    from tabulate import tabulate
+    from omniperf_analyze.utils import schema
+
+    # Fixme: cur_root.parent.joinpath('soc_params')
+    soc_params_dir = os.path.join(os.path.dirname(__file__), "..", "soc_params")
+    soc_spec_df = file_io.load_soc_params(soc_params_dir)
+
+    generate_configs(args.config_dir, args.list_kernels, args.filter_metrics)
 
     if args.list_metrics in file_io.supported_arch.keys():
         print(
