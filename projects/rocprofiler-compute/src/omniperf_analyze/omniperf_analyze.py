@@ -73,7 +73,7 @@ def generate_configs(config_dir, list_kernels, filter_metrics):
 
         archConfigs[arch] = ac
 
-    return archConfigs # Note: This return comes in handy for rocScope which borrows generate_configs() in its rocomni plugin
+    return archConfigs  # Note: This return comes in handy for rocScope which borrows generate_configs() in its rocomni plugin
 
 
 ################################################

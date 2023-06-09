@@ -320,26 +320,47 @@ def update_normUnit_string(equation, unit):
         str(equation),
     ).capitalize()
 
+
 def gen_counter_list(formula):
-    function_filter = {"MIN": None, "MAX": None, "AVG": None, "ROUND": None, "TO_INT": None, "GB": None, "STD": None, "GFLOP": None, "GOP": None, "OP": None, "CU": None, "NC": None, "UC": None, "CC": None, "RW": None, "GIOP": None}
+    function_filter = {
+        "MIN": None,
+        "MAX": None,
+        "AVG": None,
+        "ROUND": None,
+        "TO_INT": None,
+        "GB": None,
+        "STD": None,
+        "GFLOP": None,
+        "GOP": None,
+        "OP": None,
+        "CU": None,
+        "NC": None,
+        "UC": None,
+        "CC": None,
+        "RW": None,
+        "GIOP": None,
+    }
 
     counters = []
-    if not isinstance(formula,str):
+    if not isinstance(formula, str):
         return counters
     try:
         tree = ast.parse(
-            formula
-            .replace("$normUnit", "SQ_WAVES")
+            formula.replace("$normUnit", "SQ_WAVES")
             .replace("$denom", "SQ_WAVES")
-            .replace("$","")
+            .replace("$", "")
         )
         for node in ast.walk(tree):
-            if isinstance(node, ast.Name) and node.id.rstrip("_sum").isupper() and node.id not in function_filter:
+            if (
+                isinstance(node, ast.Name)
+                and node.id.rstrip("_sum").isupper()
+                and node.id not in function_filter
+            ):
                 counters.append(node.id.rstrip("_sum"))
     except:
         pass
     return counters
-            
+
 
 def build_dfs(archConfigs, filter_metrics):
     """
@@ -503,7 +524,11 @@ def eval_metric(dfs, dfs_type, sys_info, soc_spec, raw_pmc_df, debug):
     # confirm no illogical counter values (only consider non-roofline runs)
     roof_only_run = sys_info.ip_blocks == "roofline"
     rocscope_run = sys_info.ip_blocks == "rocscope"
-    if not rocscope_run and not roof_only_run and (raw_pmc_df["pmc_perf"]["GRBM_GUI_ACTIVE"] == 0).any():
+    if (
+        not rocscope_run
+        and not roof_only_run
+        and (raw_pmc_df["pmc_perf"]["GRBM_GUI_ACTIVE"] == 0).any()
+    ):
         print("WARNING: Dectected GRBM_GUI_ACTIVE == 0\nHaulting execution.")
         sys.exit(1)
 
