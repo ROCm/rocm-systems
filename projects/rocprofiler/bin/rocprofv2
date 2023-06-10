@@ -80,7 +80,7 @@ while [ 1 ] ; do
   elif [[ "$1" = "-mt" || "$1" = "--mem-test" ]] ; then
     if [ $RUN_FROM_BUILD == 1 ]; then
       ASAN=yes TO_CLEAN=yes ./build.sh
-      ./tests/memorytests/run_asan_tests.sh $ROCM_DIR/build/tests/featuretests/profiler/gtests/apps/hip_vectoradd $ROCM_DIR/build/memleaks.log
+      ./tests-v2/memorytests/run_asan_tests.sh $ROCM_DIR/build/tests-v2/featuretests/profiler/apps/hip_vectoradd $ROCM_DIR/build/memleaks.log
       exit 1
     fi
   elif [[ "$1" = "-ct" || "$1" = "--clean-build-test" ]] ; then

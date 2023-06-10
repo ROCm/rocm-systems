@@ -184,6 +184,7 @@ struct hip_api_trace_entry_t {
     api_data = *data;
     record.api_data_handle.handle = &api_data;
     record.name = kernel_name_str ? strdup(kernel_name_str) : nullptr;
+    free(const_cast<char*>(kernel_name_str));
   }
   ~hip_api_trace_entry_t() {
     if (record.name != nullptr) free(const_cast<char*>(record.name));
@@ -435,6 +436,7 @@ void sync_api_trace_callback(rocprofiler_record_tracer_t tracer_record,
     hip_api_trace_entry_t& entry = hip_api_buffer.Emplace(
         tracer_record, (const char*)kernel_name_c ? strdup(kernel_name_c) : nullptr, hip_api_data);
     entry.valid.store(rocprofiler::TRACE_ENTRY_COMPLETE, std::memory_order_release);
+    free(kernel_name_c);
   }
   if (tracer_record.domain == ACTIVITY_DOMAIN_HSA_API) {
     char* data = nullptr;

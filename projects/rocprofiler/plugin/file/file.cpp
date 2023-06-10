@@ -56,8 +56,7 @@ class file_plugin_t {
 
   class output_file_t {
    public:
-    output_file_t(std::string name, bool bOpenOnInit = false)
-      : name_(std::move(name)) {
+    output_file_t(std::string name, bool bOpenOnInit = false) : name_(std::move(name)) {
       if (bOpenOnInit) open();
     }
 
@@ -88,8 +87,7 @@ class file_plugin_t {
         bPrintToStdout = true;
         return;
       }
-      if (output_dir == nullptr)
-        output_dir = "./";
+      if (output_dir == nullptr) output_dir = "./";
 
       fs::path output_prefix(output_dir);
       if (!fs::is_directory(fs::status(output_prefix))) {
@@ -112,21 +110,20 @@ class file_plugin_t {
     // Returns a string with the MPI %macro replaced with the corresponding envvar
     std::string replace_MPI_macros(std::string output_file_name) {
       std::unordered_map<const char*, const char*> MPI_BUILTINS = {
-        {"MPI_RANK", "%rank"},
-        {"OMPI_COMM_WORLD_RANK", "%rank"},
-        {"MV2_COMM_WORLD_RANK", "%rank"}
-      };
+          {"MPI_RANK", "%rank"},
+          {"OMPI_COMM_WORLD_RANK", "%rank"},
+          {"MV2_COMM_WORLD_RANK", "%rank"}};
 
       for (const auto& [envvar, key] : MPI_BUILTINS) {
         size_t key_find = output_file_name.rfind(key);
-        if (key_find == std::string::npos) continue; // Does not contain a %?rank var
+        if (key_find == std::string::npos) continue;  // Does not contain a %?rank var
 
         const char* env_var_set = getenv(envvar);
-        if (env_var_set == nullptr) continue; // MPI_COMM_WORLD_x var is does not exist
+        if (env_var_set == nullptr) continue;  // MPI_COMM_WORLD_x var is does not exist
 
         int rank = atoi(env_var_set);
-        output_file_name =  output_file_name.substr(0, key_find) + std::to_string(rank)
-                          + output_file_name.substr(key_find + std::string(key).size());
+        output_file_name = output_file_name.substr(0, key_find) + std::to_string(rank) +
+            output_file_name.substr(key_find + std::string(key).size());
       }
 
       return output_file_name;
@@ -195,8 +192,7 @@ class file_plugin_t {
     [[maybe_unused]] rocprofiler_timestamp_t app_begin_timestamp = {};
     CHECK_ROCPROFILER(rocprofiler_get_timestamp(&app_begin_timestamp));
 
-    if (!begin_ts.isStdOut())
-      begin_ts << std::dec << app_begin_timestamp.value << std::endl;
+    if (!begin_ts.isStdOut()) begin_ts << std::dec << app_begin_timestamp.value << std::endl;
 
     if (begin_ts.fail()) {
       rocprofiler::warning("Cannot write to '%s'", begin_ts.name().c_str());
@@ -253,7 +249,6 @@ class file_plugin_t {
       CHECK_ROCPROFILER(rocprofiler_query_hsa_tracer_api_data_info_size(
           rocprofiler_session_id_t{0}, ROCPROFILER_HSA_FUNCTION_NAME, tracer_record.api_data_handle,
           tracer_record.operation_id, &function_name_size));
-      function_name_c = new char[function_name_size];
       if (function_name_size > 1) {
         CHECK_ROCPROFILER(rocprofiler_query_hsa_tracer_api_data_info(
             rocprofiler_session_id_t{0}, ROCPROFILER_HSA_FUNCTION_NAME,
