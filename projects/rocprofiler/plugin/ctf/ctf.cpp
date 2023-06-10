@@ -48,12 +48,9 @@ ROCPROFILER_EXPORT int rocprofiler_plugin_initialize(const uint32_t rocprofiler_
     return -1;
   }
 
-  const auto output_dir = getenv("OUTPUT_PATH");
-
-  if (!output_dir) {
-    std::cerr << "rocprofiler_plugin_initialize(): "
-              << "`OUTPUT_PATH` environment variable isn't set" << std::endl;
-    return -1;
+  auto output_dir = getenv("OUTPUT_PATH");
+  if (output_dir == nullptr) {
+      output_dir = "./";
   }
 
   // Create the plugin instance.
