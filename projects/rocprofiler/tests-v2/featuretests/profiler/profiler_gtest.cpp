@@ -35,7 +35,7 @@ THE SOFTWARE.
 #include "src/utils/helper.h"
 #include "utils/test_utils.h"
 #include "utils/csv_parser.h"
-
+#include "src/utils/logger.h"
 
 std::string running_path;
 std::string lib_path;
@@ -47,6 +47,7 @@ std::string profiler_api_lib_path = "";
 
 static void init_test_path() {
   if (is_installed_path()) {
+    INFO_LOGGING("operating from /opt/rocm");
     running_path = "share/rocprofiler/tests/runFeatureTests";
     lib_path = "lib/rocprofiler/librocprofiler_tool.so";
     golden_trace_path = "share/rocprofiler/tests/featuretests/profiler/apps/goldentraces/";
@@ -55,6 +56,7 @@ static void init_test_path() {
     binary_path = "bin/rocprofv2";
     profiler_api_lib_path = "/lib";
   } else {
+    INFO_LOGGING("operating from ./build/");
     running_path = "tests-v2/featuretests/profiler/runFeatureTests";
     lib_path = "librocprofiler_tool.so";
     golden_trace_path = "tests-v2/featuretests/profiler/apps/goldentraces/";

@@ -303,7 +303,12 @@ The user has two options for building:
     ```bash
     cd build && cmake --build . -- -j check
     ```
+## Logging
 
+To enable error messages logging to '/tmp/rocprofiler_log.txt':
+   ```bash
+   $ export ROCPROFILER_LOG=1
+   ```
 ## Documentation
 
 We make use of doxygen to automatically generate API documentation. Generated document can be found in the following path:

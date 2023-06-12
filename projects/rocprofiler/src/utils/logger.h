@@ -66,7 +66,7 @@ class Logger {
   static void endl() { Instance().ResetStreaming(false); }
 
   const std::string& LastMessage() {
-    std::lock_guard lock(mutex_);
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     return message_[GetTid()];
   }
 
@@ -94,7 +94,7 @@ class Logger {
   }
 
   void ResetStreaming(const bool messaging) {
-    std::lock_guard lock(mutex_);
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (messaging) {
       message_[GetTid()] = "";
     } else if (streaming_) {
@@ -106,7 +106,7 @@ class Logger {
   }
 
   void Put(const std::string& m) {
-    std::lock_guard lock(mutex_);
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (messaging_) {
       message_[GetTid()] += m;
     }
