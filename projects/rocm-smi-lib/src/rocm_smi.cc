@@ -3769,6 +3769,29 @@ rsmi_compute_process_info_by_pid_get(uint32_t pid,
 }
 
 rsmi_status_t
+rsmi_compute_process_info_by_device_get(uint32_t pid, uint32_t dv_ind,
+                                          rsmi_process_info_t *proc) {
+  TRY
+  if (proc == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+  // Check the device and kfdnode exist
+  GET_DEV_AND_KFDNODE_FROM_INDX
+
+  std::unordered_set<uint64_t> gpu_set;
+  gpu_set.insert(dev->kfd_gpu_id());
+  int err = amd::smi::GetProcessInfoForPID(pid, proc, &gpu_set);
+
+  if (err) {
+    return amd::smi::ErrnoToRsmiStatus(err);
+  }
+
+  return RSMI_STATUS_SUCCESS;
+
+  CATCH
+}
+
+rsmi_status_t
 rsmi_dev_xgmi_error_status(uint32_t dv_ind, rsmi_xgmi_status_t *status) {
   TRY
   std::ostringstream ss;

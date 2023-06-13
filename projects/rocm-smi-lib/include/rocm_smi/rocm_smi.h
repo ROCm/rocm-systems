@@ -3315,7 +3315,30 @@ rsmi_compute_process_info_by_pid_get(uint32_t pid, rsmi_process_info_t *proc);
  */
 rsmi_status_t
 rsmi_compute_process_gpus_get(uint32_t pid, uint32_t *dv_indices,
-                                                       uint32_t *num_devices);
+                                            uint32_t *num_devices);
+
+/**
+ *  @brief Get the info of a process on a specific device.
+ *
+ *  @details Given a process id @p pid, a @p dv_ind, this function will
+ *  write the process information for @p pid on the device, if available, to
+ *  the memory pointed to by @p proc.
+ *
+ *  @param[in] pid The process id of the process for which the gpu
+ *  currently being used is requested.
+ *
+ *  @param[in] dv_ind a device index where the process running on.
+ *
+ *  @param[inout] procs a pointer to memory provided by the caller to which
+ *  process information will be written.
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call
+ *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
+ *
+ */
+rsmi_status_t
+rsmi_compute_process_info_by_device_get(uint32_t pid, uint32_t dv_ind,
+                                                rsmi_process_info_t *proc);
 
 /** @} */  // end of SysInfo
 
