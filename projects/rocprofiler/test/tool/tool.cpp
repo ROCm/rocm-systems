@@ -670,7 +670,7 @@ static const kernel_descriptor_t* GetKernelCode(uint64_t kernel_object) {
 }
 
 static uint32_t arch_vgpr_count(const AgentInfo &info, const kernel_descriptor_t &kernel_code) {
-  if (strcmp(info.name, "gfx90a") == 0 || strcmp(info.name, "gfx940") == 0)
+  if (strcmp(info.name, "gfx90a") == 0 || strncmp(info.name, "gfx94", 5) == 0)
     return (AMD_HSA_BITS_GET(kernel_code.compute_pgm_rsrc3, AMD_COMPUTE_PGM_RSRC_THREE_ACCUM_OFFSET) + 1) * 4;
 
   return (AMD_HSA_BITS_GET(kernel_code.compute_pgm_rsrc1, AMD_COMPUTE_PGM_RSRC_ONE_GRANULATED_WORKITEM_VGPR_COUNT) + 1)
@@ -680,7 +680,7 @@ static uint32_t arch_vgpr_count(const AgentInfo &info, const kernel_descriptor_t
 static uint32_t accum_vgpr_count(const AgentInfo &info, const kernel_descriptor_t &kernel_code) {
   if (strcmp(info.name, "gfx908") == 0)
     return arch_vgpr_count(info, kernel_code);
-  if (strcmp(info.name, "gfx90a") == 0 || strcmp(info.name, "gfx940") == 0)
+  if (strcmp(info.name, "gfx90a") == 0 || strncmp(info.name, "gfx94", 5) == 0)
     return (AMD_HSA_BITS_GET(kernel_code.compute_pgm_rsrc1,
                              AMD_COMPUTE_PGM_RSRC_ONE_GRANULATED_WORKITEM_VGPR_COUNT) + 1) * 8
       - arch_vgpr_count(info, kernel_code);
@@ -737,6 +737,7 @@ void set_kernel_properties(const rocprofiler_callback_data_t* callback_data,
 // Kernel disoatch callback
 hsa_status_t dispatch_callback(const rocprofiler_callback_data_t* callback_data, void* user_data,
                                rocprofiler_group_t* group) {
+  // TODO: return success, make atomic flag
   // Passed tool data
   callbacks_data_t* tool_data = reinterpret_cast<callbacks_data_t*>(user_data);
   // HSA status

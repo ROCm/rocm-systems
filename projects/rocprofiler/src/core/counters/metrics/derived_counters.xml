@@ -505,6 +505,8 @@
 <gfx90a base="gfx90a_expr"></gfx90a>
 #Mi300
 <gfx940 base="gfx940_expr"></gfx940>
+<gfx941 base="gfx940_expr"></gfx941>
+<gfx942 base="gfx940_expr"></gfx942>
 #Navi21
 <gfx1030 base="gfx1030_expr"></gfx1030>
 <gfx1031 base="gfx1031_expr"></gfx1031>

@@ -85,13 +85,11 @@ AgentInfo::AgentInfo(const hsa_agent_t agent, ::CoreApiTable* table) : handle_(a
       rocprofiler::fatal("hsa_agent_get_info for PCI info failed");
   }
 
-  // TODO: (sauverma) use hsa_agent_get_info_fn(HSA_AMD_AGENT_INFO_NUM_XCC)
-  // to get xcc_num once hsa headers are updated from rocr/hsa
-  std::string gpu_name = std::string(name_).substr(0, 6);
-  if (gpu_name == "gfx940")
-    xcc_num_ = 6;
-  else
-    xcc_num_ = 1;
+  // TODO(saurabh, giovanni): Remove this in 5.7
+  if (table->hsa_agent_get_info_fn(agent, 
+    static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_XCC), &xcc_num_) != HSA_STATUS_SUCCESS) {
+      xcc_num_ = 1;
+  }
 }
 
 uint64_t AgentInfo::getIndex() const { return index_; }

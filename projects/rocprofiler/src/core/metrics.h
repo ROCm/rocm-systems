@@ -33,6 +33,7 @@ THE SOFTWARE.
 #include <list>
 #include <map>
 #include <vector>
+#include <unordered_set>
 
 #include "core/types.h"
 #include "util/exception.h"
@@ -201,14 +202,17 @@ class MetricsDict {
       xml_->AddConst("top.const.metric", "SE_NUM", agent_info->se_num);
       ImportMetrics(agent_info, "const");
       agent_name_ = agent_info->name;
-      if (agent_name_.substr(0, 6) == "gfx940")
-        agent_name_ =
-            "gfx940";  // To correct the agent_name from "gfx940:forcestoresc1+" -> "gfx940"
-      if (std::string("gfx906") == agent_name_ || std::string("gfx908") == agent_name_ ||
-          std::string("gfx90a") == agent_name_ || std::string("gfx940") == agent_name_ ||
-          std::string("gfx1032") == agent_name_ || std::string("gfx1031") == agent_name_ ||
-          std::string("gfx1030") == agent_name_ || std::string("gfx1100") == agent_name_ ||
-          std::string("gfx1101") == agent_name_) {
+  
+      if (agent_name_.find(':') != std::string::npos) // Remove compiler flags from the agent_name
+        agent_name_ = agent_name_.substr(0, agent_name_.find(':'));
+
+      std::unordered_set<std::string> supported_agent_names = {
+          "gfx906", "gfx908" "gfx90a",      // Vega
+          "gfx940", "gfx941", "gfx942",     // Mi300
+          "gfx1030", "gfx1031", "gfx1032",  // Navi2x
+          "gfx1100", "gfx1101"   // Navi3x
+      };
+      if (supported_agent_names.find(agent_name_) != supported_agent_names.end()) {
         ImportMetrics(agent_info, agent_name_);
       } else {
         agent_name_ = agent_info->gfxip;

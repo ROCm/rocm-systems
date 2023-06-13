@@ -386,6 +386,9 @@
     <metric name="WRITE_REQ_32B" expr="TCC_EA0_WRREQ_64B_sum*2+(TCC_EA0_WRREQ_sum-TCC_EA0_WRREQ_64B_sum)" descr="The total number of 32-byte effective memory writes."></metric>
   </gfx940>
 
+  <gfx941 base="gfx940"></gfx941>
+  <gfx942 base="gfx940"></gfx942>
+
   <gfx10>
     <metric name="GPUBusy" expr="100*GRBM_GUI_ACTIVE/GRBM_COUNT" descr="The percentage of time GPU was busy."></metric>
     <metric name="Wavefronts" expr="SQ_WAVES" descr="Total wavefronts."></metric>

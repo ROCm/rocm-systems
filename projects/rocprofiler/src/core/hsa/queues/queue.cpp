@@ -193,7 +193,7 @@ static const kernel_descriptor_t* GetKernelCode(uint64_t kernel_object) {
 static uint32_t arch_vgpr_count(Agent::AgentInfo& info, const kernel_descriptor_t& kernel_code) {
   const std::string_view& name = info.getName();
   std::string info_name(name.data(), name.size());
-  if (strcmp(name.data(), "gfx90a") == 0 || strcmp(name.data(), "gfx940") == 0)
+  if (strcmp(name.data(), "gfx90a") == 0 || strncmp(name.data(), "gfx94", 5) == 0)
     return (AMD_HSA_BITS_GET(kernel_code.compute_pgm_rsrc3,
                              AMD_COMPUTE_PGM_RSRC_THREE_ACCUM_OFFSET) +
             1) *
@@ -211,7 +211,7 @@ static uint32_t accum_vgpr_count(Agent::AgentInfo& info, const kernel_descriptor
   const std::string_view& name = info.getName();
   std::string info_name(name.data(), name.size());
   if (strcmp(info_name.c_str(), "gfx908") == 0) return arch_vgpr_count(info, kernel_code);
-  if (strcmp(info_name.c_str(), "gfx90a") == 0 || strcmp(info_name.c_str(), "gfx940") == 0)
+  if (strcmp(info_name.c_str(), "gfx90a") == 0 || strncmp(info_name.c_str(), "gfx94", 5) == 0)
     return (AMD_HSA_BITS_GET(kernel_code.compute_pgm_rsrc1,
                              AMD_COMPUTE_PGM_RSRC_ONE_GRANULATED_WORKITEM_VGPR_COUNT) +
             1) *
