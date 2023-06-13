@@ -2563,8 +2563,12 @@ def printTempGraph(deviceList, delay):
             if terminalWidth < originalTerminalWidth:
                 print('Terminal size cannot be decreased.\n\r')
                 return
+            if type(temp) == str:
+                tempString = temp
+            else:
+                tempString = str(int(temp))
             # Two spare Spaces
-            tempString = (str(int(temp)) + '°C').ljust(5)
+            tempString = (tempString + '°C').ljust(5)
             printStrings.append('\033[2;30;47mGPU[%d] Temp %s|%s%s\x1b[0m%s' % (device, tempString, color, paddingSpace[1:], remainderSpace))
             originalTerminalWidth = terminalWidth
             time.sleep((delay / 1000))
