@@ -48,10 +48,12 @@ ROCPROFILER_EXPORT int rocprofiler_plugin_initialize(const uint32_t rocprofiler_
     return -1;
   }
 
-  auto output_dir = getenv("OUTPUT_PATH");
-  if (output_dir == nullptr) {
-      output_dir = "./";
-  }
+  const char* output_dir = []() -> const char* {
+    if (const char* output_dir_internal = getenv("OUTPUT_PATH"); output_dir_internal != nullptr) {
+      return output_dir_internal;
+    }
+    return "./";
+  }();
 
   // Create the plugin instance.
   try {
