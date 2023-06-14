@@ -101,7 +101,7 @@ jobs:
           wget -q -O - https://repo.radeon.com/rocm/rocm.gpg.key | apt-key add -
           echo "deb [arch=amd64] https://repo.radeon.com/rocm/apt/${{ matrix.rocm-version }}/ jammy main" | tee /etc/apt/sources.list.d/rocm.list
           apt-get update
-          apt-get install -y {rocm-hip-sdk,roctracer-dev,rocprofiler-dev,rocm-smi-lib,rocminfo}${{ matrix.rocm-version }}.0
+          apt-get install -y {roctracer-dev,rocprofiler-dev,rocm-smi-lib,rocminfo}${{ matrix.rocm-version }}.0
           echo "/opt/rocm/bin" >> $GITHUB_PATH
           echo "ROCM_PATH=/opt/rocm" >> $GITHUB_ENV
           echo "LD_LIBRARY_PATH=/opt/rocm/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV

@@ -26,8 +26,8 @@ RUN if [ "${ROCM_VERSION}" != "0.0" ]; then \
         if [ "${OS_VERSION_MAJOR}" -eq 8 ]; then PERL_REPO=powertools; else PERL_REPO=crb; fi && \
         dnf -y --enablerepo=${PERL_REPO} install perl-File-BaseDir && \
         yum install -y https://repo.radeon.com/amdgpu-install/${AMDGPU_RPM} && \
-        amdgpu-install --usecase=rocm,hip,hiplibsdk --no-dkms --skip-broken -y && \
-        yum install -y rocm-hip-sdk rocm-smi-lib roctracer-dev rocprofiler-dev && \
+        amdgpu-install --usecase=rocm,hip --no-dkms --skip-broken -y && \
+        yum install -y rocm-smi-lib roctracer-dev rocprofiler-dev && \
         yum clean all; \
     fi
 
