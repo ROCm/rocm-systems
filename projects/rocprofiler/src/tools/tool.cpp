@@ -65,7 +65,7 @@ namespace fs = std::experimental::filesystem;
 #define CHECK_ROCPROFILER(call)                                                                    \
   do {                                                                                             \
     if ((call) != ROCPROFILER_STATUS_SUCCESS)                                                      \
-      rocprofiler::fatal("Error: ROCProfiler API Call Error!");                                      \
+      rocprofiler::fatal("Error: ROCProfiler API Call Error!");                                    \
   } while (false)
 TRACE_BUFFER_INSTANTIATE();
 namespace {
@@ -221,27 +221,7 @@ std::vector<std::string> GetCounterNames() {
   const char* line_c_str = getenv("ROCPROFILER_COUNTERS");
   if (line_c_str) {
     std::string line = line_c_str;
-    // skip commented lines
-    auto found = line.find_first_not_of(" \t");
-    if (found != std::string::npos) {
-      if (line[found] == '#') return {};
-    }
-    if (line.find("pmc") == std::string::npos) return counters;
-    char seperator = ' ';
-    std::string::size_type prev_pos = 0, pos = line.find(seperator, prev_pos);
-    prev_pos = ++pos;
-    if (pos != std::string::npos) {
-      while ((pos = line.find(seperator, pos)) != std::string::npos) {
-        std::string substring(line.substr(prev_pos, pos - prev_pos));
-        if (substring.length() > 0 && substring != ":") {
-          counters.push_back(substring);
-        }
-        prev_pos = ++pos;
-      }
-      if (!line.substr(prev_pos, pos - prev_pos).empty()) {
-        counters.push_back(line.substr(prev_pos, pos - prev_pos));
-      }
-    }
+    rocprofiler::validate_counters_format(counters, line);
   }
   return counters;
 }
@@ -302,13 +282,13 @@ att_parsed_input_t GetATTParams() {
     } else if (param_name == "PERFCOUNTER") {
       counters_names.push_back(line.substr(pos + 1));
       continue;
-    } else {                                                     // param_value is a number
+    } else {  // param_value is a number
       try {
-        auto hexa_pos = line.find("0x", pos);                    // Is it hex?
+        auto hexa_pos = line.find("0x", pos);  // Is it hex?
         if (hexa_pos != std::string::npos)
           param_value = stoi(line.substr(hexa_pos + 2), 0, 16);  // hexadecimal
         else
-          param_value = stoi(line.substr(pos + 1), 0, 10);       // decimal
+          param_value = stoi(line.substr(pos + 1), 0, 10);  // decimal
       } catch (...) {
         printf("Error: Invalid parameter value %s - (%s)\n",
                line.substr(pos + 1, line.size()).c_str(), line.c_str());
@@ -434,8 +414,7 @@ void sync_api_trace_callback(rocprofiler_record_tracer_t tracer_record,
       rocprofiler_timestamp_t timestamp;
       CHECK_ROCPROFILER(rocprofiler_get_timestamp(&timestamp));
       tracer_record.timestamps = rocprofiler_record_header_timestamp_t{
-          .begin = rocprofiler_timestamp_t{*hip_api_data->phase_data},
-          .end = timestamp};
+          .begin = rocprofiler_timestamp_t{*hip_api_data->phase_data}, .end = timestamp};
     }
     hip_api_trace_entry_t& entry = hip_api_buffer.Emplace(
         tracer_record, (const char*)kernel_name_c ? strdup(kernel_name_c) : nullptr, hip_api_data);
@@ -461,8 +440,7 @@ void sync_api_trace_callback(rocprofiler_record_tracer_t tracer_record,
       rocprofiler_timestamp_t timestamp;
       CHECK_ROCPROFILER(rocprofiler_get_timestamp(&timestamp));
       tracer_record.timestamps = rocprofiler_record_header_timestamp_t{
-          .begin = rocprofiler_timestamp_t{*hsa_api_data->phase_data},
-          .end = timestamp};
+          .begin = rocprofiler_timestamp_t{*hsa_api_data->phase_data}, .end = timestamp};
     }
     hsa_api_trace_entry_t& entry = hsa_api_buffer.Emplace(tracer_record, hsa_api_data);
     entry.valid.store(rocprofiler::TRACE_ENTRY_COMPLETE, std::memory_order_release);

@@ -26,6 +26,7 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <set>
 #include <amd_comgr/amd_comgr.h>
 
 #define amd_comgr_(call)                                                                           \
@@ -223,9 +224,8 @@ bool has_special_char(std::string const& str) {
 
 // check if string has correct counter format
 bool has_counter_format(std::string const& str) {
-  return std::find_if(str.begin(), str.end(), [](unsigned char ch) {
-           return (isalnum(ch) || ch == '_' || ch != ':');
-         }) != str.end();
+  return std::find_if(str.begin(), str.end(),
+                      [](unsigned char ch) { return (isalnum(ch) || ch == '_'); }) != str.end();
 }
 
 // trims the begining of the line for spaces
@@ -235,5 +235,48 @@ std::string left_trim(const std::string& s) {
   return (start == std::string::npos) ? "" : s.substr(start);
 }
 
+// trims begining and end of input line in place
+void trim(std::string& str) {
+  // Remove leading spaces.
+  str.erase(str.begin(), std::find_if(str.begin(), str.end(), [](unsigned char ch) {
+              return !std::isspace(ch);
+            }));
+  // Remove trailing spaces.
+  str.erase(
+      std::find_if(str.rbegin(), str.rend(), [](unsigned char ch) { return !std::isspace(ch); })
+          .base(),
+      str.end());
+}
+
+// replace unsuported specail chars with space
+static void handle_special_chars(std::string& str) {
+  std::set<char> specialChars = {'!', '@', '#', '$', '%', '&', '(', ')', ',', '*', '+', '-', '.',
+                                 '/', ';', '<', '=', '>', '?', '@', '{', '}', '^', '`', '~', '|'};
+
+  // Iterate over the string and replace any special characters with a space.
+  for (unsigned int i = 0; i < str.length(); i++) {
+    if (specialChars.find(str[i]) != specialChars.end()) {
+      str[i] = ' ';
+    }
+  }
+}
+
+// validate input coutners and correct format if needed
+void validate_counters_format(std::vector<std::string>& counters, std::string line) {
+  // trim line for any white spaces
+  trim(line);
+
+  if (!(line[0] == '#' || line.find("pmc") == std::string::npos)) {
+    handle_special_chars(line);
+
+    std::stringstream input_line(line);
+    std::string counter;
+    while (getline(input_line, counter, ' ')) {
+      if (counter.substr(0, 3) != "pmc" && has_counter_format(counter)) {
+        counters.push_back(counter);
+      }
+    }
+  }
+}
 
 }  // namespace rocprofiler

@@ -26,6 +26,7 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <vector>
 #include <algorithm>
 #include <cxxabi.h>
 #include "exception.h"
@@ -68,5 +69,8 @@ bool has_counter_format(std::string const& str);
 
 // trims the begining of the line for spaces
 std::string left_trim(const std::string& s);
+
+// validates pmc user input format
+void validate_counters_format(std::vector<std::string> &counters, std::string line);
 
 }  // namespace rocprofiler
