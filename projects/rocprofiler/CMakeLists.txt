@@ -582,6 +582,32 @@ if(DOXYGEN_FOUND)
     OPTIONAL
     COMPONENT docs)
 
-  add_dependencies(doc doc_tool)
+  # # Set input and output files for changelog document
+  set(DOXYGEN_IN ${CMAKE_CURRENT_SOURCE_DIR}/doc/Doxyfile_ChangeLog.in)
+  set(DOXYGEN_OUT ${CMAKE_CURRENT_BINARY_DIR}/doc/changelog/Doxyfile_ChangeLog)
+
+  # # Request to configure the file
+  configure_file(${DOXYGEN_IN} ${DOXYGEN_OUT} @ONLY)
+
+  add_custom_command(
+    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/doc/changelog/latex/refman.pdf
+    COMMAND ${DOXYGEN_EXECUTABLE} ${DOXYGEN_OUT}
+    COMMAND make -C ${CMAKE_CURRENT_BINARY_DIR}/doc/changelog/latex pdf
+    MAIN_DEPENDENCY ${DOXYGEN_OUT}
+    ${DOXYGEN_IN}
+    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/CHANGELOG.md
+    COMMENT "Generating changelog documentation")
+
+  add_custom_target(
+    doc_changelog DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/doc/changelog/latex/refman.pdf)
+
+  install(
+    FILES "${CMAKE_CURRENT_BINARY_DIR}/doc/changelog/latex/refman.pdf"
+    DESTINATION ${CMAKE_INSTALL_DOCDIR}
+    RENAME "${PROJECT_NAME}_ChangeLog.pdf"
+    OPTIONAL
+    COMPONENT docs)
+
+  add_dependencies(doc doc_changelog)
 endif()
 
