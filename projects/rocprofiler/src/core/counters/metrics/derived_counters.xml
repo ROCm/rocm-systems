@@ -103,6 +103,8 @@
 </gfx908_expr>
 
 <gfx90a_expr base="gfx9_expr">
+  <metric name="MeanOccupancyPerCU" expr=SQ_LEVEL_WAVES*0+SQ_ACCUM_PREV_HIRES/GRBM_GUI_ACTIVE/CU_NUM descr="Mean occupancy per compute unit."></metric>
+  <metric name="MeanOccupancyPerActiveCU" expr=SQ_LEVEL_WAVES*0+SQ_ACCUM_PREV_HIRES*4/SQ_BUSY_CYCLES/CU_NUM descr="Mean occupancy per active compute unit."></metric>
   <metric name="TA_BUSY_avr"                                            expr=avr(TA_TA_BUSY,16) descr="TA block is busy. Average over TA instances."></metric>
   <metric name="TA_BUSY_max"                                            expr=max(TA_TA_BUSY,16) descr="TA block is busy. Max over TA instances."></metric>
   <metric name="TA_BUSY_min"                                            expr=min(TA_TA_BUSY,16) descr="TA block is busy. Min over TA instances."></metric>
@@ -294,6 +296,8 @@
   <metric name="TCP_TCP_TA_DATA_STALL_CYCLES_sum" expr=sum(TCP_TCP_TA_DATA_STALL_CYCLES,16) descr="Total number of TCP stalls TA data interface."></metric>
   <metric name="TCP_TCP_TA_DATA_STALL_CYCLES_max" expr=max(TCP_TCP_TA_DATA_STALL_CYCLES,16) descr="Maximum number of TCP stalls TA data interface."></metric>
 
+  <metric name="MeanOccupancyPerCU" expr=SQ_LEVEL_WAVES*0+SQ_ACCUM_PREV_HIRES/GRBM_GUI_ACTIVE/CU_NUM descr="Mean occupancy per compute unit."></metric>
+  <metric name="MeanOccupancyPerActiveCU" expr=SQ_LEVEL_WAVES*0+SQ_ACCUM_PREV_HIRES*4/SQ_BUSY_CYCLES/CU_NUM descr="Mean occupancy per active compute unit."></metric>
   <metric name="VFetchInsts" expr=(SQ_INSTS_VMEM_RD-TA_FLAT_READ_WAVEFRONTS_sum)/SQ_WAVES descr="The average number of vector fetch instructions from the video memory executed per work-item (affected by flow control). Excludes FLAT instructions that fetch from video memory."></metric>
   <metric name="VWriteInsts" expr=(SQ_INSTS_VMEM_WR-TA_FLAT_WRITE_WAVEFRONTS_sum)/SQ_WAVES descr="The average number of vector write instructions to the video memory executed per work-item (affected by flow control). Excludes FLAT instructions that write to video memory."></metric>
   <metric name="VALUUtilization" expr=100*SQ_THREAD_CYCLES_VALU/(SQ_ACTIVE_INST_VALU*MAX_WAVE_SIZE) descr="The percentage of active vector ALU threads in a wave. A lower number can mean either more thread divergence in a wave or that the work-group size is not a multiple of 64. Value range: 0% (bad), 100% (ideal - no thread divergence)."></metric>
@@ -422,6 +426,9 @@
 </gfx940_expr>
 
 <gfx10_expr>
+  <metric name="MeanOccupancyPerCU" expr=GRBM_COUNT*0+SQ_LEVEL_WAVES*0+SQ_ACCUM_PREV/GRBM_GUI_ACTIVE/CU_NUM descr="Mean occupancy per compute unit."></metric>
+  <metric name="MeanOccupancyPerActiveCU" expr=GRBM_COUNT*0+SQ_LEVEL_WAVES*0+SQ_ACCUM_PREV*4/SQ_BUSY_CYCLES/CU_NUM descr="Mean occupancy per active compute unit."></metric>
+
   <metric name="GPU_UTIL" expr=100*GRBM_GUI_ACTIVE/GRBM_COUNT descr="Percentage of the time that GUI is active"></metric>
   <metric name="CP_UTIL" expr=100*GRBM_CP_BUSY/GRBM_GUI_ACTIVE descr="Percentage of the GRBM_GUI_ACTIVE time that any of the Command Processor (CPG/CPC/CPF) blocks are busy"></metric>
   <metric name="SPI_UTIL" expr=100*GRBM_SPI_BUSY/GRBM_GUI_ACTIVE descr="Percentage of the GRBM_GUI_ACTIVE time that any of the Shader Pipe Interpolators (SPI) are busy in the shader engine(s)"></metric>

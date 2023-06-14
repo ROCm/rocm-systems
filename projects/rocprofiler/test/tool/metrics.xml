@@ -101,6 +101,9 @@
 </gfx908_expr>
 
 <gfx90a_expr base="gfx9_expr">
+  <metric name="MeanOccupancyPerCU" expr=SQ_LEVEL_WAVES*0+SQ_ACCUM_PREV_HIRES/GRBM_GUI_ACTIVE/CU_NUM descr="Mean occupancy per compute unit."></metric>
+  <metric name="MeanOccupancyPerActiveCU" expr=SQ_LEVEL_WAVES*0+SQ_ACCUM_PREV_HIRES*4/SQ_BUSY_CYCLES/CU_NUM descr="Mean occupancy per active compute unit."></metric>
+
   <metric name="TA_TA_BUSY_sum"                                         expr=sum(TA_TA_BUSY,16) descr="TA block is busy. Perf_Windowing not supported for this counter. Sum over TA instances."></metric>
   <metric name="TA_TOTAL_WAVEFRONTS_sum"                                expr=sum(TA_TOTAL_WAVEFRONTS,16) descr="Total number of wavefronts processed by TA. Sum over TA instances."></metric>
   <metric name="TA_ADDR_STALLED_BY_TC_CYCLES_sum"                       expr=sum(TA_ADDR_STALLED_BY_TC_CYCLES,16) descr="Number of cycles addr path stalled by TC. Perf_Windowing not supported for this counter. Sum over TA instances."></metric>
@@ -211,6 +214,9 @@
 </gfx90a_expr>
 
 <gfx940_expr>
+  <metric name="MeanOccupancyPerCU" expr=SQ_LEVEL_WAVES*0+SQ_ACCUM_PREV_HIRES/GRBM_GUI_ACTIVE/CU_NUM descr="Mean occupancy per compute unit."></metric>
+  <metric name="MeanOccupancyPerActiveCU" expr=SQ_LEVEL_WAVES*0+SQ_ACCUM_PREV_HIRES*4/SQ_BUSY_CYCLES/CU_NUM descr="Mean occupancy per active compute unit."></metric>
+
   <metric name="TCP_TCP_TA_DATA_STALL_CYCLES_sum" expr=sum(TCP_TCP_TA_DATA_STALL_CYCLES,16) descr="Total number of TCP stalls TA data interface."></metric>
   <metric name="TCP_TCP_TA_DATA_STALL_CYCLES_max" expr=max(TCP_TCP_TA_DATA_STALL_CYCLES,16) descr="Maximum number of TCP stalls TA data interface."></metric>
 
@@ -342,6 +348,9 @@
 </gfx940_expr>
 
 <gfx10_expr>
+  <metric name="MeanOccupancyPerCU" expr=GRBM_COUNT*0+SQ_LEVEL_WAVES*0+SQ_ACCUM_PREV/GRBM_GUI_ACTIVE/CU_NUM descr="Mean occupancy per compute unit."></metric>
+  <metric name="MeanOccupancyPerActiveCU" expr=GRBM_COUNT*0+SQ_LEVEL_WAVES*0+SQ_ACCUM_PREV*4/SQ_BUSY_CYCLES/CU_NUM descr="Mean occupancy per active compute unit."></metric>
+
   <metric name="GPU_UTIL" expr=100*GRBM_GUI_ACTIVE/GRBM_COUNT descr="Percentage of the time that GUI is active"></metric>
   <metric name="CP_UTIL" expr=100*GRBM_CP_BUSY/GRBM_GUI_ACTIVE descr="Percentage of the GRBM_GUI_ACTIVE time that any of the Command Processor (CPG/CPC/CPF) blocks are busy"></metric>
   <metric name="SPI_UTIL" expr=100*GRBM_SPI_BUSY/GRBM_GUI_ACTIVE descr="Percentage of the GRBM_GUI_ACTIVE time that any of the Shader Pipe Interpolators (SPI) are busy in the shader engine(s)"></metric>

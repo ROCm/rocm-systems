@@ -654,7 +654,10 @@
   <metric name="GL2C_EA_RDREQ_96B" block=GL2C event=101 descr="Number of 96-byte GL2C/EA read requests"></metric>
   <metric name="GL2C_EA_RDREQ_128B" block=GL2C event=102 descr="Number of 128-byte GL2C/EA read requests"></metric>
 
+  <metric name="SQ_ACCUM_PREV" block=SQ event=1 descr="For counter N, increment by the value of counter N-1."></metric>
+  <metric name="SQ_BUSY_CYCLES" block=SQ event=3 descr="Clock cycles while SQ is reporting that it is busy. {nondeterministic, global, C2}"></metric>
   <metric name="SQ_WAVES" block=SQ event=4 descr="Count number of waves sent to SQs. {emulated, global, C1}"></metric>
+  <metric name="SQ_LEVEL_WAVES" block=SQ event=7 descr="Track the aggregated number of waves over certain period of time, Set next counter to ACCUM_PREV and divide by SQ_PERF_SEL_WAVES for average wave life."></metric>
   <metric name="SQ_WAVE_CYCLES" block=SQ event=26 descr="Number of clock cycles spent by waves in the SQs. Incremented by # of living (valid) waves each cycle. {nondeterministic, C1}"></metric>
   <metric name="SQ_WAIT_INST_ANY" block=SQ event=28 descr="Number of clock cycles spent waiting for any instruction issue. In units of cycles. {nondeterministic}"></metric>
   <metric name="SQ_WAIT_ANY" block=SQ event=37 descr="Number of clock cycles spent waiting for anything. {nondeterministic, C1}"></metric>
@@ -703,6 +706,8 @@
   <metric name="GL2C_EA_RDREQ_64B" block=GL2C event=100 descr="Number of 64-byte GL2C/EA read requests"></metric>
   <metric name="GL2C_EA_RDREQ_96B" block=GL2C event=101 descr="Number of 96-byte GL2C/EA read requests"></metric>
   <metric name="GL2C_EA_RDREQ_128B" block=GL2C event=102 descr="Number of 128-byte GL2C/EA read requests"></metric>
+  <metric name="SQ_ACCUM_PREV" block=SQ event=1 descr="For counter N, increment by the value of counter N-1."></metric>
+  <metric name="SQ_BUSY_CYCLES" block=SQ event=3 descr="Clock cycles while SQ is reporting that it is busy. {nondeterministic, global, C2}"></metric>
   <metric name="SQ_WAVES" block=SQ event=4 descr="Count number of waves sent to SQs. {emulated, global, C1}"></metric>
   <metric name="SQ_WAVE_CYCLES" block=SQ event=24 descr="Number of clock cycles spent by waves in the SQs. Incremented by number of living (valid) waves each cycle. {nondeterministic, C1}"></metric>
   <metric name="SQ_WAIT_INST_ANY" block=SQ event=26 descr="Number of clock-cycles spent waiting for any instruction issue. In units of cycles. (nondeterministic)"></metric>

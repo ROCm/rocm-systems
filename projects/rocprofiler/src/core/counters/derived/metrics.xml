@@ -129,6 +129,9 @@
   </gfx908>
 
   <gfx90a>
+    <metric name="MeanOccupancyPerCU" expr="SQ_LEVEL_WAVES*0+SQ_ACCUM_PREV_HIRES/GRBM_GUI_ACTIVE/CU_NUM" descr="Mean occupancy per compute unit."></metric>
+    <metric name="MeanOccupancyPerActiveCU" expr="SQ_LEVEL_WAVES*0+SQ_ACCUM_PREV_HIRES*4/SQ_BUSY_CYCLES/CU_NUM" descr="Mean occupancy per active compute unit."></metric>
+
     <metric name="GPUBusy" expr="100*GRBM_GUI_ACTIVE/GRBM_COUNT" descr="The percentage of time GPU was busy."></metric>
     <metric name="Wavefronts" expr="SQ_WAVES" descr="Total wavefronts."></metric>
     <metric name="VALUInsts" expr="SQ_INSTS_VALU/SQ_WAVES" descr="The average number of vector ALU instructions executed per work-item (affected by flow control)."></metric>
@@ -261,6 +264,9 @@
   </gfx90a>
 
   <gfx940>
+    <metric name="MeanOccupancyPerCU" expr="SQ_LEVEL_WAVES*0+SQ_ACCUM_PREV_HIRES/GRBM_GUI_ACTIVE/CU_NUM" descr="Mean occupancy per compute unit."></metric>
+    <metric name="MeanOccupancyPerActiveCU" expr="SQ_LEVEL_WAVES*0+SQ_ACCUM_PREV_HIRES*4/SQ_BUSY_CYCLES/CU_NUM" descr="Mean occupancy per active compute unit."></metric>
+
     <metric name="GPUBusy" expr="100*GRBM_GUI_ACTIVE/GRBM_COUNT" descr="The percentage of time GPU was busy."></metric>
     <metric name="Wavefronts" expr="SQ_WAVES" descr="Total wavefronts."></metric>
     <metric name="VALUInsts" expr="SQ_INSTS_VALU/SQ_WAVES" descr="The average number of vector ALU instructions executed per work-item (affected by flow control)."></metric>
@@ -390,6 +396,9 @@
   <gfx942 base="gfx940"></gfx942>
 
   <gfx10>
+    <metric name="MeanOccupancyPerCU" expr="GRBM_COUNT*0+SQ_LEVEL_WAVES*0+SQ_ACCUM_PREV/GRBM_GUI_ACTIVE/CU_NUM" descr="Mean occupancy per compute unit."></metric>
+    <metric name="MeanOccupancyPerActiveCU" expr="GRBM_COUNT*0+SQ_LEVEL_WAVES*0+SQ_ACCUM_PREV*4/SQ_BUSY_CYCLES/CU_NUM" descr="Mean occupancy per active compute unit."></metric>
+
     <metric name="GPUBusy" expr="100*GRBM_GUI_ACTIVE/GRBM_COUNT" descr="The percentage of time GPU was busy."></metric>
     <metric name="Wavefronts" expr="SQ_WAVES" descr="Total wavefronts."></metric>
     <metric name="VALUInsts" expr="SQ_INSTS_VALU/SQ_WAVES" descr="The average number of vector ALU instructions executed per work-item (affected by flow control)."></metric>
