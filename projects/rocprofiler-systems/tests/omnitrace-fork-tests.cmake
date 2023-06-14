@@ -14,10 +14,6 @@ omnitrace_add_test(
     SAMPLING_PASS_REGEX "fork.. called on PID"
     RUNTIME_PASS_REGEX "fork.. called on PID"
     REWRITE_RUN_PASS_REGEX "fork.. called on PID"
-    SAMPLING_FAIL_REGEX
-        "(terminate called after throwing an instance|calling abort.. in |Exit code: [1-9])"
-    RUNTIME_FAIL_REGEX
-        "(terminate called after throwing an instance|calling abort.. in |Exit code: [1-9])"
-    REWRITE_RUN_FAIL_REGEX
-        "(terminate called after throwing an instance|calling abort.. in |Exit code: [1-9])"
-    )
+    SAMPLING_FAIL_REGEX "(${OMNITRACE_ABORT_FAIL_REGEX})"
+    RUNTIME_FAIL_REGEX "(${OMNITRACE_ABORT_FAIL_REGEX})"
+    REWRITE_RUN_FAIL_REGEX "(${OMNITRACE_ABORT_FAIL_REGEX})")

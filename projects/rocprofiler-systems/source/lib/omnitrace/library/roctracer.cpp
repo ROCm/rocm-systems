@@ -358,8 +358,10 @@ hsa_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
 }
 
 void
-hsa_activity_callback(uint32_t op, const activity_record_t* record, void* arg)
+hsa_activity_callback(uint32_t op, const void* vrecord, void* arg)
 {
+    const auto* record = static_cast<const activity_record_t*>(vrecord);
+
     if(get_state() != State::Active || !trait::runtime_enabled<comp::roctracer>::get())
         return;
 

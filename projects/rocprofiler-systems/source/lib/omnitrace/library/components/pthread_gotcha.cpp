@@ -114,4 +114,10 @@ pthread_gotcha::stop()
 {
     get_bundle()->stop();
 }
+
+std::set<pthread_gotcha::native_handle_t>
+pthread_gotcha::get_native_handles()
+{
+    return ::omnitrace::component::pthread_create_gotcha::get_native_handles();
+}
 }  // namespace omnitrace

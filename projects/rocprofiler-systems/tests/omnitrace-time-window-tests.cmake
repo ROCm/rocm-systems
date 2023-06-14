@@ -24,7 +24,7 @@ omnitrace_add_validation_test(
     PERFETTO_METRIC "host"
     PERFETTO_FILE "perfetto-trace.proto"
     LABELS "time-window"
-    FAIL_REGEX "outer_d"
+    FAIL_REGEX "outer_d|OMNITRACE_ABORT_FAIL_REGEX"
     ARGS -l
          trace-time-window.inst
          outer_a
@@ -49,7 +49,7 @@ omnitrace_add_validation_test(
     PERFETTO_METRIC "host"
     PERFETTO_FILE "perfetto-trace.proto"
     LABELS "time-window"
-    FAIL_REGEX "outer_d"
+    FAIL_REGEX "outer_d|OMNITRACE_ABORT_FAIL_REGEX"
     ARGS -l
          trace-time-window
          outer_a

@@ -116,7 +116,7 @@ foreach(_VERSION ${OMNITRACE_PYTHON_VERSIONS})
             COMMAND ${OMNITRACE_CAT_COMMAND}
             PYTHON_VERSION ${_VERSION}
             FILE omnitrace-tests-output/python-external-exclude-inefficient/${_VERSION}/trip_count.txt
-            FAIL_REGEX "(\\\|_inefficient).*(\\\|_sum)"
+            FAIL_REGEX "(\\\|_inefficient).*(\\\|_sum)|OMNITRACE_ABORT_FAIL_REGEX"
             DEPENDS python-external-exclude-inefficient-${_VERSION}
             ENVIRONMENT "${_python_environment}")
 
@@ -135,7 +135,7 @@ foreach(_VERSION ${OMNITRACE_PYTHON_VERSIONS})
             PYTHON_VERSION ${_VERSION}
             FILE omnitrace-tests-output/python-builtin-noprofile/${_VERSION}/trip_count.txt
             PASS_REGEX ".(run)..(noprofile.py)."
-            FAIL_REGEX ".(fib|inefficient)..(noprofile.py)."
+            FAIL_REGEX ".(fib|inefficient)..(noprofile.py).|OMNITRACE_ABORT_FAIL_REGEX"
             DEPENDS python-builtin-noprofile-${_VERSION}
             ENVIRONMENT "${_python_environment}")
     else()

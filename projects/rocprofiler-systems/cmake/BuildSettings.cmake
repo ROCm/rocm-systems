@@ -15,6 +15,7 @@ include(MacroUtilities)
 omnitrace_add_option(
     OMNITRACE_BUILD_DEVELOPER "Extra build flags for development like -Werror"
     ${OMNITRACE_BUILD_CI})
+omnitrace_add_option(OMNITRACE_BUILD_RELEASE "Build with minimal debug line info" OFF)
 omnitrace_add_option(OMNITRACE_BUILD_EXTRA_OPTIMIZATIONS "Extra optimization flags" OFF)
 omnitrace_add_option(OMNITRACE_BUILD_LTO "Build with link-time optimization" OFF)
 omnitrace_add_option(OMNITRACE_USE_COMPILE_TIMING
@@ -243,6 +244,15 @@ if(OMNITRACE_BUILD_LINKER)
         omnitrace-compile-options INTERFACE
         $<$<C_COMPILER_ID:GNU>:-fuse-ld=${OMNITRACE_BUILD_LINKER}>
         $<$<CXX_COMPILER_ID:GNU>:-fuse-ld=${OMNITRACE_BUILD_LINKER}>)
+endif()
+
+# ----------------------------------------------------------------------------------------#
+# release build flags
+#
+if(OMNITRACE_BUILD_RELEASE AND NOT OMNITRACE_BUILD_DEBUG)
+    add_target_flag_if_avail(
+        omnitrace-compile-options "-g1" "-feliminate-unused-debug-symbols"
+        "-gno-column-info" "-gno-variable-location-views" "-gline-tables-only")
 endif()
 
 # ----------------------------------------------------------------------------------------#

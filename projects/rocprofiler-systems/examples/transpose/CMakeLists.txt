@@ -43,11 +43,13 @@ endif()
 
 option(TRANSPOSE_USE_MPI "Enable MPI support in transpose exe" ${TIMEMORY_USE_MPI})
 
+find_package(Threads REQUIRED)
 if(TRANSPOSE_USE_MPI)
     find_package(MPI REQUIRED)
 endif()
 
 add_executable(transpose transpose.cpp)
+target_link_libraries(transpose PRIVATE Threads::Threads)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang"
    AND NOT CMAKE_CXX_COMPILER_IS_HIPCC

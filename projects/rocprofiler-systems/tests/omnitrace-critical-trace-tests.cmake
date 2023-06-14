@@ -35,7 +35,9 @@ set(_parallel_overhead_critical_trace_environ
     "OMNITRACE_CRITICAL_TRACE_DEBUG=ON"
     "OMNITRACE_VERBOSE=4"
     "OMNITRACE_USE_PID=OFF"
-    "OMNITRACE_TIME_OUTPUT=OFF")
+    "OMNITRACE_TIME_OUTPUT=OFF"
+    "OMNITRACE_CI=ON"
+    "OMNITRACE_CI_TIMEOUT=300")
 
 set_tests_properties(
     parallel-overhead-process-critical-trace

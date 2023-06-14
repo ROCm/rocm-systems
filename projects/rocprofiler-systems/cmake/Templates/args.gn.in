@@ -15,7 +15,6 @@ enable_perfetto_fuzzers = false
 # enable_perfetto_stderr_crash_dump = false
 enable_perfetto_heapprofd = false
 enable_perfetto_tools = false
-enable_perfetto_tools_trace_to_text = false
 enable_perfetto_trace_processor = false
 enable_perfetto_trace_processor_httpd = false
 enable_perfetto_trace_processor_json = false

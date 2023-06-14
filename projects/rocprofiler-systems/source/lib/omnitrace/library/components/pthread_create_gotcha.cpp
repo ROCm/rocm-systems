@@ -138,6 +138,8 @@ stop_bundle(bundle_t& _bundle, int64_t _tid, Args&&... _args)
         tim::consume_parameters(_args...);
     }
 }
+
+std::set<pthread_create_gotcha::native_handle_t> native_handles = {};
 }  // namespace
 
 //--------------------------------------------------------------------------------------//
@@ -291,11 +293,19 @@ pthread_create_gotcha::wrapper::wrap(void* _arg)
 {
     if(_arg == nullptr) return nullptr;
 
+    auto _self = pthread_self();
+
     // convert the argument
     wrapper* _wrapper = static_cast<wrapper*>(_arg);
 
+    // store the handle
+    native_handles.emplace(_self);
+
     // execute the original function
     void* _ret = (*_wrapper)();
+
+    // remove the handle
+    if(::pthread_equal(_self, pthread_self()) == 0) native_handles.erase(_self);
 
     // eliminate memory leak
     if(_ret != _arg) delete _wrapper;
@@ -376,6 +386,13 @@ void
 pthread_create_gotcha::set_data(wrappee_t _v)
 {
     m_wrappee = _v;
+}
+
+std::set<pthread_create_gotcha::native_handle_t>
+pthread_create_gotcha::get_native_handles()
+{
+    auto _v = native_handles;
+    return _v;
 }
 
 // pthread_create

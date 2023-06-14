@@ -1215,7 +1215,7 @@ omnitrace_exit_action(int nsig)
 {
     tim::signals::block_signals(get_sampling_signals(),
                                 tim::signals::sigmask_scope::process);
-    OMNITRACE_BASIC_PRINT("Finalizing afer signal %i :: %s\n", nsig,
+    OMNITRACE_BASIC_PRINT("Finalizing after signal %i :: %s\n", nsig,
                           signal_settings::str(static_cast<sys_signal>(nsig)).c_str());
     auto _handler = get_signal_handler().load();
     if(_handler) (*_handler)();

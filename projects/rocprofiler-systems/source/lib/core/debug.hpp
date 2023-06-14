@@ -222,8 +222,8 @@ as_hex<void*>(void*, size_t);
 //--------------------------------------------------------------------------------------//
 
 #define OMNITRACE_CONDITIONAL_PRINT_COLOR(COLOR, COND, ...)                              \
-    if((COND) && ::omnitrace::config::get_debug_tid() &&                                 \
-       ::omnitrace::config::get_debug_pid())                                             \
+    if(OMNITRACE_UNLIKELY((COND) && ::omnitrace::config::get_debug_tid() &&              \
+                          ::omnitrace::config::get_debug_pid()))                         \
     {                                                                                    \
         ::omnitrace::debug::flush();                                                     \
         ::omnitrace::debug::lock _debug_lk{};                                            \
@@ -236,8 +236,8 @@ as_hex<void*>(void*, size_t);
     }
 
 #define OMNITRACE_CONDITIONAL_PRINT_COLOR_F(COLOR, COND, ...)                            \
-    if((COND) && ::omnitrace::config::get_debug_tid() &&                                 \
-       ::omnitrace::config::get_debug_pid())                                             \
+    if(OMNITRACE_UNLIKELY((COND) && ::omnitrace::config::get_debug_tid() &&              \
+                          ::omnitrace::config::get_debug_pid()))                         \
     {                                                                                    \
         ::omnitrace::debug::flush();                                                     \
         ::omnitrace::debug::lock _debug_lk{};                                            \
@@ -259,8 +259,8 @@ as_hex<void*>(void*, size_t);
 //--------------------------------------------------------------------------------------//
 
 #define OMNITRACE_CONDITIONAL_PRINT(COND, ...)                                           \
-    if((COND) && ::omnitrace::config::get_debug_tid() &&                                 \
-       ::omnitrace::config::get_debug_pid())                                             \
+    if(OMNITRACE_UNLIKELY((COND) && ::omnitrace::config::get_debug_tid() &&              \
+                          ::omnitrace::config::get_debug_pid()))                         \
     {                                                                                    \
         ::omnitrace::debug::flush();                                                     \
         ::omnitrace::debug::lock _debug_lk{};                                            \
@@ -273,8 +273,8 @@ as_hex<void*>(void*, size_t);
     }
 
 #define OMNITRACE_CONDITIONAL_BASIC_PRINT(COND, ...)                                     \
-    if((COND) && ::omnitrace::config::get_debug_tid() &&                                 \
-       ::omnitrace::config::get_debug_pid())                                             \
+    if(OMNITRACE_UNLIKELY((COND) && ::omnitrace::config::get_debug_tid() &&              \
+                          ::omnitrace::config::get_debug_pid()))                         \
     {                                                                                    \
         ::omnitrace::debug::flush();                                                     \
         ::omnitrace::debug::lock _debug_lk{};                                            \
@@ -287,8 +287,8 @@ as_hex<void*>(void*, size_t);
     }
 
 #define OMNITRACE_CONDITIONAL_PRINT_F(COND, ...)                                         \
-    if((COND) && ::omnitrace::config::get_debug_tid() &&                                 \
-       ::omnitrace::config::get_debug_pid())                                             \
+    if(OMNITRACE_UNLIKELY((COND) && ::omnitrace::config::get_debug_tid() &&              \
+                          ::omnitrace::config::get_debug_pid()))                         \
     {                                                                                    \
         ::omnitrace::debug::flush();                                                     \
         ::omnitrace::debug::lock _debug_lk{};                                            \
@@ -302,8 +302,8 @@ as_hex<void*>(void*, size_t);
     }
 
 #define OMNITRACE_CONDITIONAL_BASIC_PRINT_F(COND, ...)                                   \
-    if((COND) && ::omnitrace::config::get_debug_tid() &&                                 \
-       ::omnitrace::config::get_debug_pid())                                             \
+    if(OMNITRACE_UNLIKELY((COND) && ::omnitrace::config::get_debug_tid() &&              \
+                          ::omnitrace::config::get_debug_pid()))                         \
     {                                                                                    \
         ::omnitrace::debug::flush();                                                     \
         ::omnitrace::debug::lock _debug_lk{};                                            \
@@ -318,8 +318,8 @@ as_hex<void*>(void*, size_t);
 //--------------------------------------------------------------------------------------//
 
 #define OMNITRACE_CONDITIONAL_WARN(COND, ...)                                            \
-    if((COND) && ::omnitrace::config::get_debug_tid() &&                                 \
-       ::omnitrace::config::get_debug_pid())                                             \
+    if(OMNITRACE_UNLIKELY((COND) && ::omnitrace::config::get_debug_tid() &&              \
+                          ::omnitrace::config::get_debug_pid()))                         \
     {                                                                                    \
         ::omnitrace::debug::flush();                                                     \
         ::omnitrace::debug::lock _debug_lk{};                                            \
@@ -332,8 +332,8 @@ as_hex<void*>(void*, size_t);
     }
 
 #define OMNITRACE_CONDITIONAL_BASIC_WARN(COND, ...)                                      \
-    if((COND) && ::omnitrace::config::get_debug_tid() &&                                 \
-       ::omnitrace::config::get_debug_pid())                                             \
+    if(OMNITRACE_UNLIKELY((COND) && ::omnitrace::config::get_debug_tid() &&              \
+                          ::omnitrace::config::get_debug_pid()))                         \
     {                                                                                    \
         ::omnitrace::debug::flush();                                                     \
         ::omnitrace::debug::lock _debug_lk{};                                            \
@@ -346,8 +346,8 @@ as_hex<void*>(void*, size_t);
     }
 
 #define OMNITRACE_CONDITIONAL_WARN_F(COND, ...)                                          \
-    if((COND) && ::omnitrace::config::get_debug_tid() &&                                 \
-       ::omnitrace::config::get_debug_pid())                                             \
+    if(OMNITRACE_UNLIKELY((COND) && ::omnitrace::config::get_debug_tid() &&              \
+                          ::omnitrace::config::get_debug_pid()))                         \
     {                                                                                    \
         ::omnitrace::debug::flush();                                                     \
         ::omnitrace::debug::lock _debug_lk{};                                            \
@@ -361,8 +361,8 @@ as_hex<void*>(void*, size_t);
     }
 
 #define OMNITRACE_CONDITIONAL_BASIC_WARN_F(COND, ...)                                    \
-    if((COND) && ::omnitrace::config::get_debug_tid() &&                                 \
-       ::omnitrace::config::get_debug_pid())                                             \
+    if(OMNITRACE_UNLIKELY((COND) && ::omnitrace::config::get_debug_tid() &&              \
+                          ::omnitrace::config::get_debug_pid()))                         \
     {                                                                                    \
         ::omnitrace::debug::flush();                                                     \
         ::omnitrace::debug::lock _debug_lk{};                                            \
@@ -377,7 +377,7 @@ as_hex<void*>(void*, size_t);
 //--------------------------------------------------------------------------------------//
 
 #define OMNITRACE_CONDITIONAL_THROW_E(COND, TYPE, ...)                                   \
-    if(COND)                                                                             \
+    if(OMNITRACE_UNLIKELY((COND)))                                                       \
     {                                                                                    \
         char _msg_buffer[OMNITRACE_DEBUG_BUFFER_LEN];                                    \
         snprintf(_msg_buffer, OMNITRACE_DEBUG_BUFFER_LEN, "[omnitrace][%i][%li][%s]%s",  \
@@ -391,7 +391,7 @@ as_hex<void*>(void*, size_t);
     }
 
 #define OMNITRACE_CONDITIONAL_BASIC_THROW_E(COND, TYPE, ...)                             \
-    if(COND)                                                                             \
+    if(OMNITRACE_UNLIKELY((COND)))                                                       \
     {                                                                                    \
         char _msg_buffer[OMNITRACE_DEBUG_BUFFER_LEN];                                    \
         snprintf(_msg_buffer, OMNITRACE_DEBUG_BUFFER_LEN, "[omnitrace][%i][%s]%s",       \
@@ -428,7 +428,7 @@ as_hex<void*>(void*, size_t);
 //--------------------------------------------------------------------------------------//
 
 #define OMNITRACE_CONDITIONAL_FAILURE(COND, METHOD, ...)                                 \
-    if(COND)                                                                             \
+    if(OMNITRACE_UNLIKELY((COND)))                                                       \
     {                                                                                    \
         ::omnitrace::debug::flush();                                                     \
         OMNITRACE_FPRINTF_STDERR_COLOR(fatal);                                           \
@@ -443,7 +443,7 @@ as_hex<void*>(void*, size_t);
     }
 
 #define OMNITRACE_CONDITIONAL_BASIC_FAILURE(COND, METHOD, ...)                           \
-    if(COND)                                                                             \
+    if(OMNITRACE_UNLIKELY((COND)))                                                       \
     {                                                                                    \
         ::omnitrace::debug::flush();                                                     \
         OMNITRACE_FPRINTF_STDERR_COLOR(fatal);                                           \
@@ -458,7 +458,7 @@ as_hex<void*>(void*, size_t);
     }
 
 #define OMNITRACE_CONDITIONAL_FAILURE_F(COND, METHOD, ...)                               \
-    if(COND)                                                                             \
+    if(OMNITRACE_UNLIKELY((COND)))                                                       \
     {                                                                                    \
         ::omnitrace::debug::flush();                                                     \
         OMNITRACE_FPRINTF_STDERR_COLOR(fatal);                                           \
@@ -474,7 +474,7 @@ as_hex<void*>(void*, size_t);
     }
 
 #define OMNITRACE_CONDITIONAL_BASIC_FAILURE_F(COND, METHOD, ...)                         \
-    if(COND)                                                                             \
+    if(OMNITRACE_UNLIKELY((COND)))                                                       \
     {                                                                                    \
         ::omnitrace::debug::flush();                                                     \
         OMNITRACE_FPRINTF_STDERR_COLOR(fatal);                                           \
@@ -621,7 +621,7 @@ as_hex<void*>(void*, size_t);
 
 #define OMNITRACE_WARNING_OR_CI_THROW(LEVEL, ...)                                        \
     {                                                                                    \
-        if(::omnitrace::get_is_continuous_integration())                                 \
+        if(OMNITRACE_UNLIKELY(::omnitrace::get_is_continuous_integration()))             \
         {                                                                                \
             OMNITRACE_CI_THROW(true, __VA_ARGS__);                                       \
         }                                                                                \
@@ -635,7 +635,7 @@ as_hex<void*>(void*, size_t);
 
 #define OMNITRACE_REQUIRE(...) TIMEMORY_REQUIRE(__VA_ARGS__)
 #define OMNITRACE_PREFER(COND)                                                           \
-    (COND)                                           ? ::tim::log::base()                \
+    (OMNITRACE_LIKELY(COND))                         ? ::tim::log::base()                \
     : (::omnitrace::get_is_continuous_integration()) ? TIMEMORY_FATAL                    \
                                                      : TIMEMORY_WARNING
 

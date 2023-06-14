@@ -34,6 +34,7 @@
 #include "core/debug.hpp"
 #include "core/defines.hpp"
 #include "core/gpu.hpp"
+#include "core/locking.hpp"
 #include "core/perfetto_fwd.hpp"
 #include "core/timemory.hpp"
 #include "core/utility.hpp"
@@ -61,22 +62,28 @@
 #include "omnitrace/categories.h"  // in omnitrace-user
 
 #include <timemory/hash/types.hpp>
+#include <timemory/log/logger.hpp>
 #include <timemory/manager/manager.hpp>
 #include <timemory/mpl/type_traits.hpp>
 #include <timemory/operations/types/file_output_message.hpp>
+#include <timemory/process/process.hpp>
 #include <timemory/process/threading.hpp>
 #include <timemory/settings/types.hpp>
 #include <timemory/signals/signal_handlers.hpp>
 #include <timemory/signals/signal_mask.hpp>
 #include <timemory/signals/types.hpp>
+#include <timemory/units.hpp>
 #include <timemory/utility/backtrace.hpp>
 #include <timemory/utility/join.hpp>
 #include <timemory/utility/procfs/maps.hpp>
 
 #include <atomic>
+#include <chrono>
+#include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <mutex>
+#include <pthread.h>
 #include <stdexcept>
 #include <string_view>
 #include <utility>
@@ -84,6 +91,15 @@
 using namespace omnitrace;
 
 //======================================================================================//
+
+namespace omnitrace
+{
+namespace timeout
+{
+void
+setup() OMNITRACE_INTERNAL_API;
+}
+}  // namespace omnitrace
 
 namespace
 {
@@ -151,6 +167,8 @@ ensure_finalization(bool _static_init = false)
     }
 
     if(common::get_env("OMNITRACE_MONOCHROME", false)) tim::log::monochrome() = true;
+
+    timeout::setup();
 
     (void) tim::manager::instance();
     (void) tim::settings::shared_instance();
@@ -1001,6 +1019,7 @@ omnitrace_finalize_hidden(void)
 
         auto _cfg       = settings::compose_filename_config{};
         _cfg.use_suffix = config::get_use_pid();
+        _cfg.suffix     = settings::default_process_suffix();
         _timemory_manager->write_metadata(settings::get_global_output_prefix(),
                                           "omnitrace", _cfg);
     }

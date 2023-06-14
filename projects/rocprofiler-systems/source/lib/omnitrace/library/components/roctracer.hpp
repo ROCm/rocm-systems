@@ -54,11 +54,10 @@ struct roctracer
     OMNITRACE_DEFAULT_OBJECT(roctracer)
 
     static void preinit();
-    static void global_init() { setup(); }
     static void global_finalize() { shutdown(); }
 
     static bool is_setup();
-    static void setup();
+    static void setup(void* hsa_api_table, bool on_load_trace = false);
     static void shutdown();
     static void add_setup(const std::string&, std::function<void()>&&);
     static void add_shutdown(const std::string&, std::function<void()>&&);
@@ -75,7 +74,7 @@ struct roctracer
 
 #if !defined(OMNITRACE_USE_ROCTRACER)
 inline void
-roctracer::setup()
+roctracer::setup(void*, bool)
 {}
 
 inline void

@@ -25,6 +25,7 @@
 #include "core/common.hpp"
 #include "core/defines.hpp"
 #include "core/timemory.hpp"
+#include "library/thread_info.hpp"
 
 #include <cstdint>
 #include <future>
@@ -33,6 +34,8 @@ namespace omnitrace
 {
 struct pthread_gotcha : tim::component::base<pthread_gotcha, void>
 {
+    using native_handle_t = std::thread::native_handle_type;
+
     OMNITRACE_DEFAULT_OBJECT(pthread_gotcha)
 
     // string id for component
@@ -44,5 +47,7 @@ struct pthread_gotcha : tim::component::base<pthread_gotcha, void>
 
     static void start();
     static void stop();
+
+    static std::set<native_handle_t> get_native_handles();
 };
 }  // namespace omnitrace

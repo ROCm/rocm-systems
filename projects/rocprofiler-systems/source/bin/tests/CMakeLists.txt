@@ -1,8 +1,12 @@
+set(OMNITRACE_ABORT_FAIL_REGEX
+    "### ERROR ###|address of faulting memory reference|exiting with non-zero exit code|terminate called after throwing an instance|calling abort.. in |Exit code: [1-9]"
+    CACHE INTERNAL "Regex to catch abnormal exits when a PASS_REGULAR_EXPRESSION is set")
+
 # adds a ctest for executable
 function(OMNITRACE_ADD_BIN_TEST)
     cmake_parse_arguments(
         TEST
-        "ADD_INVERSE" # options
+        "" # options
         "NAME;TARGET;TIMEOUT;WORKING_DIRECTORY" # single value args
         "ARGS;ENVIRONMENT;LABELS;PROPERTIES;PASS_REGEX;FAIL_REGEX;SKIP_REGEX;DEPENDS;COMMAND" # multiple
         # value args
@@ -33,15 +37,36 @@ function(OMNITRACE_ADD_BIN_TEST)
     endif()
 
     # common
-    list(APPEND TEST_ENVIRONMENT "OMNITRACE_CI=ON" "OMNITRACE_CONFIG_FILE="
-         "OMNITRACE_OUTPUT_PATH=${PROJECT_BINARY_DIR}/omnitrace-tests-output"
-         "TWD=${TEST_WORKING_DIRECTORY}")
+    list(
+        APPEND
+        TEST_ENVIRONMENT
+        "OMNITRACE_CI=ON"
+        "OMNITRACE_CI_TIMEOUT=${TEST_TIMEOUT}"
+        "OMNITRACE_CONFIG_FILE="
+        "OMNITRACE_OUTPUT_PATH=${PROJECT_BINARY_DIR}/omnitrace-tests-output"
+        "TWD=${TEST_WORKING_DIRECTORY}")
     # copy for inverse
     set(TEST_ENVIRONMENT_INV "${TEST_ENVIRONMENT}")
 
     # different for regular test and inverse test
     list(APPEND TEST_ENVIRONMENT "OMNITRACE_OUTPUT_PREFIX=${TEST_NAME}/")
     list(APPEND TEST_ENVIRONMENT_INV "OMNITRACE_OUTPUT_PREFIX=${TEST_NAME}-inverse/")
+
+    if(NOT "${TEST_PASS_REGEX}" STREQUAL ""
+       AND NOT "${TEST_FAIL_REGEX}" STREQUAL ""
+       AND NOT "${TEST_FAIL_REGEX}" MATCHES "\\|OMNITRACE_ABORT_FAIL_REGEX")
+        omnitrace_message(
+            FATAL_ERROR
+            "${TEST_NAME} has set pass and fail regexes but fail regex does not include '|OMNITRACE_ABORT_FAIL_REGEX'"
+            )
+    endif()
+
+    if("${TEST_FAIL_REGEX}" STREQUAL "")
+        set(TEST_FAIL_REGEX "(${OMNITRACE_ABORT_FAIL_REGEX})")
+    else()
+        string(REPLACE "|OMNITRACE_ABORT_FAIL_REGEX" "|${OMNITRACE_ABORT_FAIL_REGEX}"
+                       TEST_FAIL_REGEX "${TEST_FAIL_REGEX}")
+    endif()
 
     if(TEST_COMMAND)
         add_test(
@@ -66,32 +91,6 @@ function(OMNITRACE_ADD_BIN_TEST)
                        SKIP_REGULAR_EXPRESSION
                        "${TEST_SKIP_REGEX}"
                        ${TEST_PROPERTIES})
-        if(TEST_ADD_INVERSE)
-            add_test(
-                NAME ${TEST_NAME}-inverse
-                COMMAND ${TEST_COMMAND} ${TEST_ARGS}
-                WORKING_DIRECTORY ${TEST_WORKING_DIRECTORY})
-
-            set_tests_properties(
-                ${TEST_NAME}-inverse
-                PROPERTIES ENVIRONMENT
-                           "${TEST_ENVIRONMENT_INV}"
-                           TIMEOUT
-                           ${TEST_TIMEOUT}
-                           DEPENDS
-                           "${TEST_DEPENDS}"
-                           LABELS
-                           "omnitrace-bin;${TEST_LABELS}"
-                           PASS_REGULAR_EXPRESSION
-                           "${TEST_FAIL_REGEX}"
-                           FAIL_REGULAR_EXPRESSION
-                           "${TEST_PASS_REGEX}"
-                           SKIP_REGULAR_EXPRESSION
-                           "${TEST_SKIP_REGEX}"
-                           WILL_FAIL
-                           ON
-                           ${TEST_PROPERTIES})
-        endif()
     elseif(TARGET ${TEST_TARGET})
         add_test(
             NAME ${TEST_NAME}
@@ -115,32 +114,6 @@ function(OMNITRACE_ADD_BIN_TEST)
                        SKIP_REGULAR_EXPRESSION
                        "${TEST_SKIP_REGEX}"
                        ${TEST_PROPERTIES})
-        if(TEST_ADD_INVERSE)
-            add_test(
-                NAME ${TEST_NAME}-inverse
-                COMMAND $<TARGET_FILE:${TEST_TARGET}> ${TEST_ARGS}
-                WORKING_DIRECTORY ${TEST_WORKING_DIRECTORY})
-
-            set_tests_properties(
-                ${TEST_NAME}-inverse
-                PROPERTIES ENVIRONMENT
-                           "${TEST_ENVIRONMENT_INV}"
-                           TIMEOUT
-                           ${TEST_TIMEOUT}
-                           DEPENDS
-                           "${TEST_DEPENDS}"
-                           LABELS
-                           "omnitrace-bin;${TEST_LABELS}"
-                           PASS_REGULAR_EXPRESSION
-                           "${TEST_FAIL_REGEX}"
-                           FAIL_REGULAR_EXPRESSION
-                           "${TEST_PASS_REGEX}"
-                           SKIP_REGULAR_EXPRESSION
-                           "${TEST_SKIP_REGEX}"
-                           WILL_FAIL
-                           ON
-                           ${TEST_PROPERTIES})
-        endif()
     elseif(OMNITRACE_BUILD_TESTING)
         message(FATAL_ERROR "Error! ${TEST_TARGET} does not exist")
     endif()
@@ -189,10 +162,9 @@ omnitrace_add_bin_test(
     TIMEOUT 60
     PASS_REGEX
         ".*available.json.*available.txt.*available.xml.*excluded.json.*excluded.txt.*excluded.xml.*instrumented.json.*instrumented.txt.*instrumented.xml.*overlapping.json.*overlapping.txt.*overlapping.xml.*"
-    FAIL_REGEX "No such file or directory|not found")
+    FAIL_REGEX "No such file or directory|not found|OMNITRACE_ABORT_FAIL_REGEX")
 
 omnitrace_add_bin_test(
-    ADD_INVERSE
     NAME omnitrace-instrument-simulate-lib
     TARGET omnitrace-instrument
     ARGS --print-available functions -v 2 -- $<TARGET_FILE:omnitrace-user-library>
@@ -243,7 +215,7 @@ omnitrace_add_bin_test(
     LABELS "log"
     TIMEOUT 60
     PASS_REGEX "user.log"
-    FAIL_REGEX "No such file or directory|not found")
+    FAIL_REGEX "No such file or directory|not found|OMNITRACE_ABORT_FAIL_REGEX")
 
 omnitrace_add_bin_test(
     NAME omnitrace-avail-help
@@ -268,7 +240,7 @@ omnitrace_add_bin_test(
     ARGS --all --expand-keys
     LABELS "omnitrace-avail"
     TIMEOUT 45
-    FAIL_REGEX "%[a-zA-Z_]%")
+    FAIL_REGEX "%[a-zA-Z_]%|OMNITRACE_ABORT_FAIL_REGEX")
 
 omnitrace_add_bin_test(
     NAME omnitrace-avail-all-only-available-alphabetical
@@ -309,7 +281,7 @@ omnitrace_add_bin_test(
     TIMEOUT 45
     PASS_REGEX "OMNITRACE_(SETTINGS_DESC|OUTPUT_FILE|OUTPUT_PREFIX)"
     FAIL_REGEX
-        "OMNITRACE_(ADD_SECONDARY|SCIENTIFIC|PRECISION|MEMORY_PRECISION|TIMING_PRECISION)"
+        "OMNITRACE_(ADD_SECONDARY|SCIENTIFIC|PRECISION|MEMORY_PRECISION|TIMING_PRECISION)|OMNITRACE_ABORT_FAIL_REGEX"
     )
 
 omnitrace_add_bin_test(
@@ -320,7 +292,7 @@ omnitrace_add_bin_test(
     TIMEOUT 45
     PASS_REGEX
         "OMNITRACE_(ADD_SECONDARY|SCIENTIFIC|PRECISION|MEMORY_PRECISION|TIMING_PRECISION)"
-    FAIL_REGEX "OMNITRACE_(SETTINGS_DESC|OUTPUT_FILE)")
+    FAIL_REGEX "OMNITRACE_(SETTINGS_DESC|OUTPUT_FILE)|OMNITRACE_ABORT_FAIL_REGEX")
 
 omnitrace_add_bin_test(
     NAME omnitrace-avail-regex-negation
@@ -341,7 +313,7 @@ omnitrace_add_bin_test(
     TIMEOUT 45
     PASS_REGEX
         "ENVIRONMENT VARIABLE,[ \n]+OMNITRACE_THREAD_POOL_SIZE,[ \n]+OMNITRACE_USE_PID,[ \n]+"
-    FAIL_REGEX "OMNITRACE_USE_PERFETTO")
+    FAIL_REGEX "OMNITRACE_USE_PERFETTO|OMNITRACE_ABORT_FAIL_REGEX")
 
 string(REPLACE "+" "\\\+" _AVAIL_CFG_PATH
                "${PROJECT_BINARY_DIR}/omnitrace-tests-output/omnitrace-avail/omnitrace-")

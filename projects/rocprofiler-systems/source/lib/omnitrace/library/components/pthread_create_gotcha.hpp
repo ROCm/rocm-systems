@@ -32,15 +32,18 @@
 
 namespace omnitrace
 {
+struct pthread_gotcha;
+
 namespace component
 {
 struct pthread_create_gotcha : tim::component::base<pthread_create_gotcha, void>
 {
     static constexpr size_t gotcha_capacity = 1;
 
-    using routine_t = void* (*) (void*);
-    using wrappee_t = int (*)(pthread_t*, const pthread_attr_t*, routine_t, void*);
-    using promise_t = std::shared_ptr<std::promise<void>>;
+    using routine_t       = void* (*) (void*);
+    using wrappee_t       = int (*)(pthread_t*, const pthread_attr_t*, routine_t, void*);
+    using promise_t       = std::shared_ptr<std::promise<void>>;
+    using native_handle_t = std::thread::native_handle_type;
 
     struct wrapper_config
     {
@@ -81,6 +84,10 @@ struct pthread_create_gotcha : tim::component::base<pthread_create_gotcha, void>
     void set_data(wrappee_t);
 
 private:
+    friend struct ::omnitrace::pthread_gotcha;
+
+    static std::set<native_handle_t> get_native_handles();
+
     wrappee_t m_wrappee = &pthread_create;
 };
 

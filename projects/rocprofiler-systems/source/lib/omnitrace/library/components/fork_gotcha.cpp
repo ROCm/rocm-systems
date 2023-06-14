@@ -155,7 +155,7 @@ fork_gotcha::operator()(const gotcha_data_t&, pid_t (*_real_fork)()) const
 
     if(_pid != 0)
     {
-        OMNITRACE_BASIC_VERBOSE(0, "fork() called on PID %i created PID %i\n", getppid(),
+        OMNITRACE_BASIC_VERBOSE(0, "fork() called on PID %i created PID %i\n", getpid(),
                                 _pid);
 
         postfork_parent();

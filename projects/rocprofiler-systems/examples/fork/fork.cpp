@@ -9,16 +9,22 @@
 #include <sys/wait.h>
 #include <thread>
 #include <unistd.h>
+#include <vector>
 
 void
 print_info(const char* _name)
 {
+    fflush(stdout);
+    fflush(stderr);
     printf("[%s] pid = %i, ppid = %i\n", _name, getpid(), getppid());
+    fflush(stdout);
+    fflush(stderr);
 }
 
 int
 run(const char* _name, int nchildren)
 {
+    auto _threads = std::vector<std::thread>{};
     for(int i = 0; i < nchildren; ++i)
     {
         omnitrace_user_push_region("launch_child");
@@ -35,7 +41,7 @@ run(const char* _name, int nchildren)
                 exit(EXIT_SUCCESS);
             }
         };
-        std::thread{ _run }.join();
+        _threads.emplace_back(_run);
         omnitrace_user_pop_region("launch_child");
     }
 
@@ -69,6 +75,9 @@ run(const char* _name, int nchildren)
             printf("unknown\n");
         }
     }
+
+    for(auto& itr : _threads)
+        itr.join();
 
     omnitrace_user_pop_region("wait_for_children");
     return _status;

@@ -75,21 +75,31 @@ init_index_data(int64_t _tid, bool _offset = false)
     if(!itr)
     {
         threading::offset_this_id(_offset);
-        itr       = thread_index_data{};
+        itr = thread_index_data{};
+
+        OMNITRACE_CONDITIONAL_THROW(itr->internal_value != _tid,
+                                    "Error! thread_info::init_index_data was called for "
+                                    "thread %zi on thread %zi\n",
+                                    _tid, itr->internal_value);
+
         int _verb = 2;
         // if thread created using finalization, bump up the minimum verbosity level
         if(get_state() >= State::Finalized && _offset) _verb += 2;
         if(!config::settings_are_configured())
         {
-            OMNITRACE_BASIC_VERBOSE_F(
-                _verb, "Thread %li on PID %i (rank: %i) assigned omnitrace TID %li\n",
-                itr->system_value, process::get_id(), dmp::rank(), itr->sequent_value);
+            OMNITRACE_BASIC_VERBOSE_F(_verb,
+                                      "Thread %li on PID %i (rank: %i) assigned "
+                                      "omnitrace TID %li (internal: %li)\n",
+                                      itr->system_value, process::get_id(), dmp::rank(),
+                                      itr->sequent_value, itr->internal_value);
         }
         else
         {
-            OMNITRACE_VERBOSE_F(
-                _verb, "Thread %li on PID %i (rank: %i) assigned omnitrace TID %li\n",
-                itr->system_value, process::get_id(), dmp::rank(), itr->sequent_value);
+            OMNITRACE_VERBOSE_F(_verb,
+                                "Thread %li on PID %i (rank: %i) assigned omnitrace TID "
+                                "%li (internal: %li)\n",
+                                itr->system_value, process::get_id(), dmp::rank(),
+                                itr->sequent_value, itr->internal_value);
         }
     }
     return itr;
@@ -192,6 +202,46 @@ thread_info::get()
 }
 
 const std::optional<thread_info>&
+thread_info::get(native_handle_t& _tid)
+{
+    return get(native_handle_t{ _tid });
+}
+
+const std::optional<thread_info>&
+thread_info::get(native_handle_t&& _tid)
+{
+    const auto& _v = get_info_data();
+    if(_v)
+    {
+        for(const auto& itr : *_v)
+        {
+            if(itr && itr->index_data &&
+               pthread_equal(itr->index_data->pthread_value, _tid) == 0)
+                return itr;
+        }
+    }
+
+    OMNITRACE_CI_THROW(unknown_thread, "Unknown thread has been assigned a value");
+    return unknown_thread;
+}
+
+const std::optional<thread_info>&
+thread_info::get(std::thread::id _tid)
+{
+    const auto& _v = get_info_data();
+    if(_v)
+    {
+        for(const auto& itr : *_v)
+        {
+            if(itr && itr->index_data && itr->index_data->stl_value == _tid) return itr;
+        }
+    }
+
+    OMNITRACE_CI_THROW(unknown_thread, "Unknown thread has been assigned a value");
+    return unknown_thread;
+}
+
+const std::optional<thread_info>&
 thread_info::get(int64_t _tid, ThreadIdType _type)
 {
     if(_type == ThreadIdType::InternalTID)
@@ -203,7 +253,8 @@ thread_info::get(int64_t _tid, ThreadIdType _type)
         {
             for(const auto& itr : *_v)
             {
-                if(itr && itr->index_data->system_value == _tid) return itr;
+                if(itr && itr->index_data && itr->index_data->system_value == _tid)
+                    return itr;
             }
         }
     }
@@ -214,9 +265,20 @@ thread_info::get(int64_t _tid, ThreadIdType _type)
         {
             for(const auto& itr : *_v)
             {
-                if(itr && itr->index_data->sequent_value == _tid) return itr;
+                if(itr && itr->index_data && itr->index_data->sequent_value == _tid)
+                    return itr;
             }
         }
+    }
+    else if(_type == ThreadIdType::PthreadID)
+    {
+        OMNITRACE_THROW("omnitrace does not support thread_info::get(int64_t, "
+                        "ThreadIdType) with ThreadIdType::PthreadID\n");
+    }
+    else if(_type == ThreadIdType::StlThreadID)
+    {
+        OMNITRACE_THROW("omnitrace does not support thread_info::get(int64_t, "
+                        "ThreadIdType) with ThreadIdType::StlThreadID\n");
     }
 
     OMNITRACE_CI_THROW(unknown_thread, "Unknown thread has been assigned a value");
@@ -302,8 +364,11 @@ thread_info::as_string() const
     std::stringstream _ss{};
     _ss << std::boolalpha << "is_offset=" << is_offset;
     if(index_data)
+    {
         _ss << ", index_data=(" << index_data->internal_value << ", "
-            << index_data->system_value << ", " << index_data->sequent_value << ")";
+            << index_data->system_value << ", " << index_data->sequent_value << ", "
+            << index_data->pthread_value << ", " << index_data->stl_value << ")";
+    }
     if(causal_count) _ss << ", causal count=" << *causal_count;
     _ss << ", lifetime=(" << lifetime.first << ":" << lifetime.second << ")";
     return _ss.str();

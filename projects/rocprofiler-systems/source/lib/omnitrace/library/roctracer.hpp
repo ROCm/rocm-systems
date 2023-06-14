@@ -28,8 +28,6 @@
 #include "library/components/roctracer.hpp"
 #include "library/ptl.hpp"
 
-#include <roctracer.h>
-
 #include <iostream>
 #include <memory>
 
@@ -57,7 +55,7 @@ void
 hsa_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void* arg);
 
 void
-hsa_activity_callback(uint32_t op, const activity_record_t* record, void* arg);
+hsa_activity_callback(uint32_t op, const void* record, void* arg);
 
 void
 hip_exec_activity_callbacks(int64_t _tid);

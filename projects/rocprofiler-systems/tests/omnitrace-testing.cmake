@@ -213,6 +213,40 @@ execute_process(
     RESULT_VARIABLE _mpiexec_oversubscribe
     OUTPUT_QUIET ERROR_QUIET)
 
+set(omnitrace_perf_event_paranoid "4")
+set(omnitrace_cap_sys_admin "1")
+set(omnitrace_cap_perfmon "1")
+
+if(EXISTS "/proc/sys/kernel/perf_event_paranoid")
+    file(STRINGS "/proc/sys/kernel/perf_event_paranoid" omnitrace_perf_event_paranoid
+         LIMIT_COUNT 1)
+endif()
+
+execute_process(
+    COMMAND ${CMAKE_CXX_COMPILER} -O2 -g -std=c++17
+            ${CMAKE_CURRENT_LIST_DIR}/omnitrace-capchk.cpp -o omnitrace-capchk
+    WORKING_DIRECTORY ${PROJECT_BINARY_DIR}/bin
+    RESULT_VARIABLE _capchk_compile
+    OUTPUT_QUIET ERROR_QUIET)
+
+if(_capchk_compile EQUAL 0)
+    execute_process(
+        COMMAND ${PROJECT_BINARY_DIR}/bin/omnitrace-capchk CAP_SYS_ADMIN effective
+        WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+        RESULT_VARIABLE omnitrace_cap_sys_admin
+        OUTPUT_QUIET ERROR_QUIET)
+
+    execute_process(
+        COMMAND ${PROJECT_BINARY_DIR}/bin/omnitrace-capchk CAP_PERFMON effective
+        WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+        RESULT_VARIABLE omnitrace_cap_perfmon
+        OUTPUT_QUIET ERROR_QUIET)
+endif()
+
+omnitrace_message(STATUS "perf_event_paranoid: ${omnitrace_perf_event_paranoid}")
+omnitrace_message(STATUS "CAP_SYS_ADMIN: ${omnitrace_cap_sys_admin}")
+omnitrace_message(STATUS "CAP_PERFMON: ${omnitrace_cap_perfmon}")
+
 if(_mpiexec_oversubscribe EQUAL 0)
     list(APPEND MPIEXEC_EXECUTABLE_ARGS --oversubscribe)
 endif()
@@ -255,9 +289,30 @@ endif()
 
 # -------------------------------------------------------------------------------------- #
 
+macro(OMNITRACE_CHECK_PASS_FAIL_REGEX NAME PASS FAIL)
+    if(NOT "${${PASS}}" STREQUAL ""
+       AND NOT "${${FAIL}}" STREQUAL ""
+       AND NOT "${${FAIL}}" MATCHES "\\|OMNITRACE_ABORT_FAIL_REGEX"
+       AND NOT "${${FAIL}}" MATCHES "${OMNITRACE_ABORT_FAIL_REGEX}")
+        omnitrace_message(
+            FATAL_ERROR
+            "${NAME} has set pass and fail regexes but fail regex does not include '|OMNITRACE_ABORT_FAIL_REGEX'"
+            )
+    endif()
+
+    if("${${FAIL}}" STREQUAL "")
+        set(${FAIL} "(${OMNITRACE_ABORT_FAIL_REGEX})")
+    else()
+        string(REPLACE "|OMNITRACE_ABORT_FAIL_REGEX" "|${OMNITRACE_ABORT_FAIL_REGEX}"
+                       ${FAIL} "${${FAIL}}")
+    endif()
+endmacro()
+
+# -------------------------------------------------------------------------------------- #
+
 function(OMNITRACE_WRITE_TEST_CONFIG _FILE _ENV)
     set(_ENV_ONLY
-        "OMNITRACE_(CI|MODE|USE_MPIP|DEBUG_SETTINGS|FORCE_ROCPROFILER_INIT|DEFAULT_MIN_INSTRUCTIONS|MONOCHROME|VERBOSE)="
+        "OMNITRACE_(CI|CI_TIMEOUT|MODE|USE_MPIP|DEBUG_[A-Z_]+|FORCE_ROCPROFILER_INIT|DEFAULT_MIN_INSTRUCTIONS|MONOCHROME|VERBOSE)="
         )
     set(_FILE_CONTENTS)
     set(_ENV_CONTENTS)
@@ -357,9 +412,7 @@ function(OMNITRACE_ADD_TEST)
 
     foreach(_PREFIX SAMPLING RUNTIME REWRITE REWRITE_RUN BASELINE)
         if("${${_PREFIX}_FAIL_REGEX}" STREQUAL "")
-            set(${_PREFIX}_FAIL_REGEX
-                "(### ERROR ###|address of faulting memory reference|exiting with non-zero exit code)"
-                )
+            set(${_PREFIX}_FAIL_REGEX "(${OMNITRACE_ABORT_FAIL_REGEX})")
         endif()
     endforeach()
 
@@ -552,6 +605,10 @@ function(OMNITRACE_ADD_TEST)
                 endif()
             endforeach()
 
+            list(APPEND _environ "OMNITRACE_CI_TIMEOUT=${_timeout}")
+
+            omnitrace_check_pass_fail_regex("${TEST_NAME}-${_TEST}" "${_PASS_REGEX}"
+                                            "${_FAIL_REGEX}")
             if(TEST ${TEST_NAME}-${_TEST})
                 omnitrace_write_test_config(${TEST_NAME}-${_TEST}.cfg _environ)
                 set_tests_properties(
@@ -604,9 +661,7 @@ function(OMNITRACE_ADD_CAUSAL_TEST)
     endif()
 
     if("${TEST_CAUSAL_FAIL_REGEX}" STREQUAL "")
-        set(TEST_CAUSAL_FAIL_REGEX
-            "(### ERROR ###|address of faulting memory reference|exiting with non-zero exit code)"
-            )
+        set(TEST_CAUSAL_FAIL_REGEX "(${OMNITRACE_ABORT_FAIL_REGEX})")
     endif()
 
     if(TARGET ${TEST_TARGET})
@@ -649,10 +704,16 @@ function(OMNITRACE_ADD_CAUSAL_TEST)
         foreach(_TEST baseline causal validate-causal)
 
             if(NOT TEST ${_TEST}-${TEST_NAME})
-                continue()
+                if(NOT TEST ${TEST_NAME}-${_TEST})
+                    continue()
+                else()
+                    set(_NAME "${TEST_NAME}-${_TEST}")
+                endif()
+            else()
+                set(_NAME "${_TEST}-${TEST_NAME}")
             endif()
 
-            set(_prefix "${_TEST}-${TEST_NAME}/")
+            set(_prefix "${_NAME}/")
             set(_labels "${_TEST}" "causal-profiling")
 
             if(TEST_TARGET)
@@ -701,9 +762,11 @@ function(OMNITRACE_ADD_CAUSAL_TEST)
                 endif()
             endforeach()
 
-            omnitrace_write_test_config(${_TEST}-${TEST_NAME}.cfg _environ)
+            list(APPEND _environ "OMNITRACE_CI_TIMEOUT=${_timeout}")
+            omnitrace_write_test_config(${_NAME}.cfg _environ)
+            omnitrace_check_pass_fail_regex("${_NAME}" "${_PASS_REGEX}" "${_FAIL_REGEX}")
             set_tests_properties(
-                ${_TEST}-${TEST_NAME}
+                ${_NAME}
                 PROPERTIES ENVIRONMENT
                            "${_environ}"
                            TIMEOUT
@@ -780,16 +843,10 @@ function(OMNITRACE_ADD_PYTHON_TEST)
             NAME ${TEST_NAME}-${TEST_PYTHON_VERSION}
             COMMAND ${TEST_COMMAND} ${TEST_FILE}
             WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
-        add_test(
-            NAME ${TEST_NAME}-${TEST_PYTHON_VERSION}-inverse
-            COMMAND ${TEST_COMMAND} ${TEST_FILE}
-            WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
     endif()
 
-    foreach(
-        _TEST
-        ${TEST_NAME}-${TEST_PYTHON_VERSION} ${TEST_NAME}-${TEST_PYTHON_VERSION}-inverse
-        ${TEST_NAME}-${TEST_PYTHON_VERSION}-annotated)
+    foreach(_TEST ${TEST_NAME}-${TEST_PYTHON_VERSION}
+                  ${TEST_NAME}-${TEST_PYTHON_VERSION}-annotated)
 
         if(NOT TEST "${_TEST}")
             continue()
@@ -797,24 +854,18 @@ function(OMNITRACE_ADD_PYTHON_TEST)
 
         string(REPLACE "${TEST_NAME}-${TEST_PYTHON_VERSION}" "${TEST_NAME}" _TEST_DIR
                        "${_TEST}")
-        set(_TEST_ENV "${TEST_ENVIRONMENT}"
-                      "OMNITRACE_OUTPUT_PREFIX=${_TEST_DIR}/${TEST_PYTHON_VERSION}/")
+        set(_TEST_ENV
+            "${TEST_ENVIRONMENT}"
+            "OMNITRACE_OUTPUT_PREFIX=${_TEST_DIR}/${TEST_PYTHON_VERSION}/"
+            "OMNITRACE_CI_TIMEOUT=${TEST_TIMEOUT}")
 
         set(_TEST_PROPERTIES "${TEST_PROPERTIES}")
-        if(NOT "${_TEST}" MATCHES "inverse")
-            # assign pass variable to pass regex
-            set(_PASS_REGEX TEST_PASS_REGEX)
-            # assign fail variable to fail regex
-            set(_FAIL_REGEX TEST_FAIL_REGEX)
-        else()
-            # assign pass variable to fail regex
-            set(_PASS_REGEX TEST_FAIL_REGEX)
-            # assign fail variable to pass regex
-            set(_FAIL_REGEX TEST_PASS_REGEX)
-            # set to will fail
-            list(APPEND _TEST_PROPERTIES WILL_FAIL ON)
-        endif()
+        # assign pass variable to pass regex
+        set(_PASS_REGEX TEST_PASS_REGEX)
+        # assign fail variable to fail regex
+        set(_FAIL_REGEX TEST_FAIL_REGEX)
 
+        omnitrace_check_pass_fail_regex("${_TEST}" "${_PASS_REGEX}" "${_FAIL_REGEX}")
         set_tests_properties(
             ${_TEST}
             PROPERTIES ENVIRONMENT
@@ -964,16 +1015,19 @@ function(OMNITRACE_ADD_VALIDATION_TEST)
             WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
     endif()
 
+    list(APPEND TEST_ENVIRONMENT "OMNITRACE_CI_TIMEOUT=${TEST_TIMEOUT}")
+
     foreach(_TEST validate-${TEST_NAME}-timemory validate-${TEST_NAME}-perfetto)
 
         if(NOT TEST "${_TEST}")
             continue()
         endif()
 
+        omnitrace_check_pass_fail_regex("${_TEST}" "TEST_PASS_REGEX" "TEST_FAIL_REGEX")
         set_tests_properties(
             ${_TEST}
             PROPERTIES ENVIRONMENT
-                       "${_TEST_ENV}"
+                       "${TEST_ENVIRONMENT}"
                        TIMEOUT
                        ${TEST_TIMEOUT}
                        LABELS
