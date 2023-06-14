@@ -61,7 +61,8 @@ FILTER[aqua_vanjaram]=\
 $BLACKLIST_ALL_ASICS\
 "rsmitstReadOnly.TestVoltCurvRead:"\
 "rsmitstReadOnly.TestFrequenciesRead:"\
-"rsmitstReadWrite.TestFrequenciesReadWrite"
+"rsmitstReadWrite.TestFrequenciesReadWrite:"\
+"rsmitstReadWrite.TestPowerReadWrite"
 
 # SWDEV-321166
 FILTER[virtualization]=\
