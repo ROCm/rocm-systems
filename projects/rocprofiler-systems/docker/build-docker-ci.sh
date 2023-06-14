@@ -139,9 +139,9 @@ verbose-run rm -rf ./dyninst-source/{build,install}*
 
 set -e
 
-if [ "${DISTRO}" = "opensuse" ]; then 
+if [ "${DISTRO}" = "opensuse" ]; then
     DISTRO_IMAGE="opensuse/leap"
-elif [ "${DISTRO}" = "rhel" ]; then 
+elif [ "${DISTRO}" = "rhel" ]; then
     DISTRO_IMAGE="rockylinux"
 else
     DISTRO_IMAGE=${DISTRO}

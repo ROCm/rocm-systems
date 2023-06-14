@@ -12,10 +12,9 @@ SHELL [ "/bin/bash", "-c" ]
 
 ENV PATH /usr/local/bin:${PATH}
 
-RUN yum update -y && \
-    yum groupinstall -y "Development Tools" && \
+RUN yum groupinstall -y "Development Tools" && \
     yum install -y epel-release && \
-    yum install -y --allowerasing curl dpkg-devel numactl-devel openmpi-devel papi-devel python3-pip wget zlib-devel && \
+    yum install -y --allowerasing curl dpkg-devel numactl-devel openmpi-devel papi-devel python3-pip wget zlib-devel which && \
     yum clean all && \
     python3 -m pip install 'cmake==3.21.4'
 
@@ -24,13 +23,11 @@ ARG AMDGPU_RPM=5.4/rhel/8.7/amdgpu-install-5.4.50400-1.el8.noarch.rpm
 
 RUN if [ "${ROCM_VERSION}" != "0.0" ]; then \
         OS_VERSION_MAJOR=$(cat /etc/os-release | grep 'VERSION_ID' | sed 's/=/ /1' | awk '{print $NF}' | sed 's/"//g' | sed 's/\./ /g' | awk '{print $1}') && \
-        yum update -y && \
         if [ "${OS_VERSION_MAJOR}" -eq 8 ]; then PERL_REPO=powertools; else PERL_REPO=crb; fi && \
         dnf -y --enablerepo=${PERL_REPO} install perl-File-BaseDir && \
         yum install -y https://repo.radeon.com/amdgpu-install/${AMDGPU_RPM} && \
         amdgpu-install --usecase=rocm,hip,hiplibsdk --no-dkms --skip-broken -y && \
         yum install -y rocm-hip-sdk rocm-smi-lib roctracer-dev rocprofiler-dev && \
-        yum update -y && \
         yum clean all; \
     fi
 

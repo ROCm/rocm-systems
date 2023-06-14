@@ -16,10 +16,9 @@ ARG EXTRA_PACKAGES=""
 ARG ELFUTILS_DOWNLOAD_VERSION="0.186"
 ARG NJOBS="12"
 
-RUN yum update -y && \
-    yum groupinstall -y "Development Tools" && \
+RUN yum groupinstall -y "Development Tools" && \
     yum install -y epel-release && \
-    yum install -y --allowerasing curl dpkg-devel numactl-devel openmpi-devel papi-devel python3-pip wget zlib-devel && \
+    yum install -y --allowerasing curl dpkg-devel numactl-devel openmpi-devel papi-devel python3-pip wget zlib-devel which && \
     yum clean all && \
     python3 -m pip install 'cmake==3.21.4'
 
