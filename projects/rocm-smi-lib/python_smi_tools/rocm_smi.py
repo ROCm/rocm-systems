@@ -410,7 +410,9 @@ def getVbiosVersion(device):
     """
     vbios = create_string_buffer(256)
     ret = rocmsmi.rsmi_dev_vbios_version_get(device, vbios, 256)
-    if rsmi_ret_ok(ret, device):
+    if ret == rsmi_status_t.RSMI_STATUS_NOT_SUPPORTED:
+        return "Unsupported"
+    elif rsmi_ret_ok(ret, device):
         return vbios.value.decode()
 
 
@@ -2288,8 +2290,12 @@ def showProductName(deviceList):
             # if rsmi_ret_ok(ret, device) and sku.value.decode():
             #     device_sku = sku.value.decode()
             # Retrieve the device SKU as a substring from VBIOS
+            device_sku = ""
             ret = rocmsmi.rsmi_dev_vbios_version_get(device, vbios, 256)
-            if rsmi_ret_ok(ret, device, 'get_vbios_version') and vbios.value.decode():
+            if ret == rsmi_status_t.RSMI_STATUS_NOT_SUPPORTED:
+                device_sku = "Unsupported"
+                printLog(device, 'Card SKU', '\t\t' + device_sku)
+            elif rsmi_ret_ok(ret, device, 'get_vbios_version') and vbios.value.decode():
                 # Device SKU is just the characters in between the two '-' in vbios_version
                 if vbios.value.decode().count('-') == 2 and len(str(vbios.value.decode().split('-')[1])) > 1:
                     device_sku = vbios.value.decode().split('-')[1]
