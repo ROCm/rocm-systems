@@ -12,10 +12,7 @@ PERMANENT_BLACKLIST_ALL_ASICS=
 
 # This is the temporary blacklist for all ASICs. This is to be used when a test
 # is failing consistently
-TEMPORARY_BLACKLIST_ALL_ASICS=\
-"rsmitstReadOnly.TestVoltCurvRead:"\
-"rsmitstReadOnly.TestFrequenciesRead:"\
-"rsmitstReadWrite.TestFrequenciesReadWrite"
+TEMPORARY_BLACKLIST_ALL_ASICS=
 
 
 if [ -z "$PERMANENT_BLACKLIST_ALL_ASICS" -a -z "$TEMPORARY_BLACKLIST_ALL_ASICS" ]; then
@@ -58,6 +55,13 @@ $BLACKLIST_ALL_ASICS\
 FILTER[sienna_cichlid]=\
 $BLACKLIST_ALL_ASICS\
 "rsmitstReadWrite.TestPerfLevelReadWrite"
+
+# SWDEV-391407
+FILTER[aqua_vanjaram]=\
+$BLACKLIST_ALL_ASICS\
+"rsmitstReadOnly.TestVoltCurvRead:"\
+"rsmitstReadOnly.TestFrequenciesRead:"\
+"rsmitstReadWrite.TestFrequenciesReadWrite"
 
 # SWDEV-321166
 FILTER[virtualization]=\
