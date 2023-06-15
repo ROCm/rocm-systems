@@ -88,9 +88,10 @@ setup_kernel_logger()
 namespace
 {
 bool                     _standalone_initialized = false;
-std::vector<std::string> _initialize_arguments   = {};
+bool                     _kp_deep_copy           = false;
 size_t                   _name_len_limit         = 0;
 std::string              _kp_prefix              = {};
+std::vector<std::string> _initialize_arguments   = {};
 
 template <typename Tp>
 void
@@ -273,6 +274,10 @@ extern "C"
         _kp_prefix =
             omnitrace::config::get_setting_value<std::string>("OMNITRACE_KOKKOSP_PREFIX")
                 .value_or(_kp_prefix);
+
+        _kp_deep_copy =
+            omnitrace::config::get_setting_value<bool>("OMNITRACE_KOKKOSP_DEEP_COPY")
+                .value_or(_kp_deep_copy);
     }
 
     void kokkosp_finalize_library()
@@ -490,8 +495,8 @@ extern "C"
                                  const void* dst_ptr, SpaceHandle src_handle,
                                  const char* src_name, const void* src_ptr, uint64_t size)
     {
+        if(!_kp_deep_copy || omnitrace::config::get_use_causal()) return;
         if(violates_name_rules(dst_name, src_name)) return;
-        if(omnitrace::config::get_use_causal()) return;
 
         OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
         kokkosp::logger_t{}.mark(1, __FUNCTION__, dst_handle.name, dst_name,
@@ -512,7 +517,8 @@ extern "C"
 
     void kokkosp_end_deep_copy()
     {
-        if(omnitrace::config::get_use_causal()) return;
+        if(!_kp_deep_copy || omnitrace::config::get_use_causal()) return;
+
         OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
         kokkosp::logger_t{}.mark(-1, __FUNCTION__);
         auto& _data = kokkosp::get_profiler_stack<kokkosp_region>();

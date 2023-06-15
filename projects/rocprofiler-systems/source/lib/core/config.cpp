@@ -344,6 +344,11 @@ configure_settings(bool _init)
                              "Set to [kokkos] to maintain old naming convention", "",
                              "kokkos", "debugging", "advanced");
 
+    OMNITRACE_CONFIG_SETTING(
+        bool, "OMNITRACE_KOKKOSP_DEEP_COPY",
+        "Enable tracking deep copies (warning: may corrupt flamegraph in perfetto)",
+        false, "kokkos", "advanced");
+
     OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_USE_OMPT",
                              "Enable support for OpenMP-Tools", false, "openmp", "ompt",
                              "backend");
