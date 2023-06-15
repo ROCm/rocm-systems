@@ -213,6 +213,7 @@ class MetricsDict {
     xml_->AddConst("top.const.metric", "SIMD_NUM",
                    agent_info->getSimdCountPerCU() * agent_info->getCUCount());
     xml_->AddConst("top.const.metric", "SE_NUM", agent_info->getShaderEngineCount());
+    xml_->AddConst("top.const.metric", "LDS_BANKS", 32);
     ImportMetrics(agent_info, "const");
     agent_name_ = agent_info->getName();
 

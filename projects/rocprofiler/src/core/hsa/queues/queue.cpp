@@ -432,18 +432,17 @@ bool AsyncSignalHandler(hsa_signal_value_t signal_value, void* data) {
         if (pending->session_id.handle == 0) {
           pending->session_id = GetROCProfilerSingleton()->GetCurrentSessionId();
         }
-        if (pending->counters_count > 0 && pending->context->metrics_list.size() > 0 &&
-            pending->profile) {
-          if (xcc_id == 0)  // call to GetCounterData() is required only once for a dispatch
+        if (pending->counters_count > 0) {
+          if (xcc_id == 0 && pending->context && pending->context->metrics_list.size() > 0 && pending->profile)  // call to GetCounterData() is required only once for a dispatch
             rocprofiler::metrics::GetCounterData(pending->profile, queue_info_session->agent,
                                                  pending->context->results_list);
           if (is_individual_xcc_mode)
             rocprofiler::metrics::GetCountersAndMetricResultsByXcc(
                 xcc_id, pending->context->results_list, pending->context->results_map,
-                pending->context->metrics_list);
+                pending->context->metrics_list, time.end-time.start);
           else
             rocprofiler::metrics::GetMetricsData(pending->context->results_map,
-                                                 pending->context->metrics_list);
+                                               pending->context->metrics_list, time.end-time.start);
           AddRecordCounters(&record, pending);
         } else {
           if (session->FindBuffer(pending->buffer_id)) {
@@ -721,7 +720,7 @@ void WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t user_pkt
       uint32_t writer_id = WRITER_ID.fetch_add(1, std::memory_order_release);
 
       if (session_data_count > 0 && is_counter_collection_mode && profiles.size() > 0 &&
-          replay_mode_count > 0) {
+          replay_mode_count > 0 && profile.first && profile.first->start_packet) {
         // Adding start packet and its barrier with a dummy signal
         hsa_signal_t dummy_signal{};
         dummy_signal.handle = 0;
@@ -745,18 +744,16 @@ void WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t user_pkt
         uint64_t record_id = GetROCProfilerSingleton()->GetUniqueRecordId();
         AddKernelNameWithDispatchID(GetKernelNameFromKsymbols(dispatch_packet.kernel_object),
                                     record_id);
-        if (profiles.size() > 0 && replay_mode_count > 0) {
+        if (session_data_count > 0 && profile.second) {
           session->GetProfiler()->AddPendingSignals(
-              writer_id, record_id, original_packet.completion_signal,
-              dispatch_packet.completion_signal, session_id_snapshot, buffer_id, profile.first,
-              profile.first->metrics_list.size(), profile.second, kernel_properties,
+              writer_id, record_id, original_packet.completion_signal, dispatch_packet.completion_signal, session_id, buffer_id,
+              profile.first, session_data_count, profile.second, kernel_properties,
               (uint32_t)syscall(__NR_gettid), user_pkt_index, correlation_id);
         } else {
           session->GetProfiler()->AddPendingSignals(
-              writer_id, record_id, original_packet.completion_signal,
-              dispatch_packet.completion_signal, session_id_snapshot, buffer_id, nullptr, 0,
-              nullptr, kernel_properties, (uint32_t)syscall(__NR_gettid), user_pkt_index,
-              correlation_id);
+              writer_id, record_id, original_packet.completion_signal, dispatch_packet.completion_signal, session_id, buffer_id,
+              nullptr, session_data_count, nullptr, kernel_properties, (uint32_t)syscall(__NR_gettid),
+              user_pkt_index, correlation_id);
         }
       }
 
@@ -776,7 +773,7 @@ void WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t user_pkt
       CreateSignal(0, &interrupt_signal);
 
       // Adding Stop and Read PM4 Packets
-      if (session_data_count > 0 && is_counter_collection_mode) {
+      if (session_data_count > 0 && is_counter_collection_mode && profiles.size() > 0 && profile.first && profile.first->stop_packet) {
         hsa_signal_t dummy_signal{};
         profile.first->stop_packet->header = HSA_PACKET_TYPE_VENDOR_SPECIFIC
             << HSA_PACKET_HEADER_TYPE;

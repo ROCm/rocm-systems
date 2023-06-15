@@ -1,6 +1,7 @@
 #include "basic_counters.xml"
 
 <gfx8_expr>
+  <metric name="KERNEL_DURATION" expr=1 descr="The duration of the kernel dispatch"></metric>
   <metric name="TA_BUSY_avr" expr=avr(TA_TA_BUSY,16) descr="TA block is busy. Average over TA instances."></metric>
   <metric name="TA_BUSY_max" expr=max(TA_TA_BUSY,16) descr="TA block is busy. Max over TA instances."></metric>
   <metric name="TA_BUSY_min" expr=min(TA_TA_BUSY,16) descr="TA block is busy. Min over TA instances."></metric>
@@ -35,6 +36,7 @@
 </gfx8_expr>
 
 <gfx9_expr>
+  <metric name="KERNEL_DURATION" expr=1 descr="The duration of the kernel dispatch"></metric>
   <metric name="TA_BUSY_avr" expr=avr(TA_TA_BUSY,16) descr="TA block is busy. Average over TA instances."></metric>
   <metric name="TA_BUSY_max" expr=max(TA_TA_BUSY,16) descr="TA block is busy. Max over TA instances."></metric>
   <metric name="TA_BUSY_min" expr=min(TA_TA_BUSY,16) descr="TA block is busy. Min over TA instances."></metric>
@@ -325,7 +327,7 @@
   <metric name="TA_BUFFER_ATOMIC_WAVEFRONTS_sum"                        expr=sum(TA_BUFFER_ATOMIC_WAVEFRONTS,16) descr="Number of buffer atomic wavefronts processed by TA. Sum over TA instances."></metric>
   <metric name="TA_BUFFER_TOTAL_CYCLES_sum"                             expr=sum(TA_BUFFER_TOTAL_CYCLES,16) descr="Number of buffer cycles issued to TC. Sum over TA instances."></metric>
   <metric name="TA_BUFFER_COALESCED_READ_CYCLES_sum"                    expr=sum(TA_BUFFER_COALESCED_READ_CYCLES,16) descr="Number of buffer coalesced read cycles issued to TC. Sum over TA instances."></metric>
-  <metric name="TA_BUFFER_COALESCED_WRITE_CYCLES_sum"                   expr=sum(TA_BUFFER_COALESCED_WRITE_CYCLES,16) descr="Number of buffer coalesced write cycles issued to TC. Sum over TA instances."></metric> 
+  <metric name="TA_BUFFER_COALESCED_WRITE_CYCLES_sum"                   expr=sum(TA_BUFFER_COALESCED_WRITE_CYCLES,16) descr="Number of buffer coalesced write cycles issued to TC. Sum over TA instances."></metric>
   <metric name="TD_TD_BUSY_sum"                                         expr=sum(TD_TD_BUSY,16) descr="TD is processing or waiting for data. Perf_Windowing not supported for this counter. Sum over TD instances."></metric>
   <metric name="TD_TC_STALL_sum"                                        expr=sum(TD_TC_STALL,16) descr="TD is stalled waiting for TC data. Sum over TD instances."></metric>
   <metric name="TD_LOAD_WAVEFRONT_sum"                                  expr=sum(TD_LOAD_WAVEFRONT,16) descr="Count the wavefronts with opcode = load, include atomics and store. Sum over TD instances."></metric>
@@ -426,6 +428,7 @@
 </gfx940_expr>
 
 <gfx10_expr>
+  <metric name="KERNEL_DURATION" expr=1 descr="The duration of the kernel dispatch"></metric>
   <metric name="MeanOccupancyPerCU" expr=GRBM_COUNT*0+SQ_LEVEL_WAVES*0+SQ_ACCUM_PREV/GRBM_GUI_ACTIVE/CU_NUM descr="Mean occupancy per compute unit."></metric>
   <metric name="MeanOccupancyPerActiveCU" expr=GRBM_COUNT*0+SQ_LEVEL_WAVES*0+SQ_ACCUM_PREV*4/SQ_BUSY_CYCLES/CU_NUM descr="Mean occupancy per active compute unit."></metric>
 
@@ -470,6 +473,7 @@
 </gfx1032_expr>
 
 <gfx11_expr>
+  <metric name="KERNEL_DURATION" expr=1 descr="The duration of the kernel dispatch"></metric>
   <metric name="GPU_UTIL" expr=100*GRBM_GUI_ACTIVE/GRBM_COUNT descr="Percentage of the time that GUI is active"></metric>
   <metric name="WAVE_DEP_WAIT" expr=100*SQ_WAIT_ANY/SQ_WAVE_CYCLES descr="Percentage of the SQ_WAVE_CYCLE time spent waiting for anything."></metric>
   <metric name="WAVE_ISSUE_WAIT" expr=100*SQ_WAIT_INST_ANY/SQ_WAVE_CYCLES descr="Percentage of the SQ_WAVE_CYCLE time spent waiting for any instruction issue."></metric>

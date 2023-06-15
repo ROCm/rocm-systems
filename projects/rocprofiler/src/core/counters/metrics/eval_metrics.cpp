@@ -108,6 +108,12 @@ bool metrics::ExtractMetricEvents(
       // adding result object for derived metric
       std::lock_guard<std::mutex> lock(extract_metric_events_lock);
 
+      if(metric_names[i].compare("KERNEL_DURATION")==0) {
+        if (results_map.find(metric_names[i]) == results_map.end()) {
+          results_map[metric_names[i]] = new results_t(metric_names[i], {}, xcc_count);
+        }
+        continue;
+      }
       counters_vec = metric->GetCounters();
       if (counters_vec.empty())
         rocprofiler::fatal("bad metric '%s' is empty", metric_names[i].c_str());
@@ -178,7 +184,7 @@ bool metrics::GetCounterData(hsa_ven_amd_aqlprofile_profile_t* profile, hsa_agen
 }
 
 bool metrics::GetMetricsData(std::map<std::string, results_t*>& results_map,
-                             std::vector<const Metric*>& metrics_list) {
+                             std::vector<const Metric*>& metrics_list, uint64_t kernel_duration) {
   MetricArgs<std::map<std::string, results_t*>> args(&results_map);
   for (auto& metric : metrics_list) {
     const xml::Expr* expr = metric->GetExpr();
@@ -186,6 +192,10 @@ bool metrics::GetMetricsData(std::map<std::string, results_t*>& results_map,
       auto it = results_map.find(metric->GetName());
       if (it == results_map.end()) rocprofiler::fatal("metric results not found ");
       results_t* res = it->second;
+      if(metric->GetName().compare("KERNEL_DURATION") == 0) {
+        res->val_double = kernel_duration;
+        continue;
+      }
       res->val_double = expr->Eval(args);
     }
   }
@@ -196,7 +206,7 @@ bool metrics::GetMetricsData(std::map<std::string, results_t*>& results_map,
 void metrics::GetCountersAndMetricResultsByXcc(uint32_t xcc_index,
                                                std::vector<results_t*>& results_list,
                                                std::map<std::string, results_t*>& results_map,
-                                               std::vector<const Metric*>& metrics_list) {
+                                               std::vector<const Metric*>& metrics_list, uint64_t kernel_duration) {
   for (auto it = results_list.begin(); it != results_list.end(); it++) {
     (*it)->val_double =
         (*it)->xcc_vals[xcc_index];  // set val_double to hold value for specific xcc
@@ -207,5 +217,5 @@ void metrics::GetCountersAndMetricResultsByXcc(uint32_t xcc_index,
         it->second->xcc_vals[xcc_index];  // set val_double to hold value for specific xcc
   }
 
-  GetMetricsData(results_map, metrics_list);
+  GetMetricsData(results_map, metrics_list, kernel_duration);
 }
