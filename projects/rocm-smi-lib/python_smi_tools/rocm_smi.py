@@ -559,7 +559,7 @@ def printLog(device, metricName, value=None, extraSpace=False):
     else:
         logstr = 'GPU[%s]\t\t: %s' % (device, metricName)
     if device is None:
-        logstr = logstr.split(':')[1][1:]
+        logstr = logstr.split(':', 1)[1][1:]
     # Force thread safe printing
     lock = multiprocessing.Lock()
     lock.acquire()
@@ -2582,8 +2582,12 @@ def printTempGraph(deviceList, delay):
             if terminalWidth < originalTerminalWidth:
                 print('Terminal size cannot be decreased.\n\r')
                 return
+            if type(temp) == str:
+                tempString = temp
+            else:
+                tempString = str(int(temp))
             # Two spare Spaces
-            tempString = (str(int(temp)) + '°C').ljust(5)
+            tempString = (tempString + '°C').ljust(5)
             printStrings.append('\033[2;30;47mGPU[%d] Temp %s|%s%s\x1b[0m%s' % (device, tempString, color, paddingSpace[1:], remainderSpace))
             originalTerminalWidth = terminalWidth
             time.sleep((delay / 1000))
