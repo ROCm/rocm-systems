@@ -266,3 +266,4 @@ Rocprofiler for ROCm 5.7 added support for counter collection (PMC) and advanced
 - Perfetto crash when using ROCTX and/or no output file specified.
 - Parsing of the getpc, setpc and swappc instructions with registers loaded from scratch space.
 - Some browsers caching ATT data from older kernels.
+- Navi2x GPUs required the first counter to be GRBM. This is fixed in 5.7.
