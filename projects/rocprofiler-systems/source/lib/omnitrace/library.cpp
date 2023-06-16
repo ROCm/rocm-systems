@@ -492,13 +492,6 @@ omnitrace_init_tooling_hidden()
 
     OMNITRACE_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
 
-    // perfetto initialization
-    if(get_use_perfetto())
-    {
-        OMNITRACE_VERBOSE_F(1, "Setting up Perfetto...\n");
-        omnitrace::perfetto::setup();
-    }
-
     // ideally these have already been started
     omnitrace_preinit_hidden();
 
@@ -506,6 +499,13 @@ omnitrace_init_tooling_hidden()
     if(get_init_bundle()) get_init_bundle()->start();
 
     if(get_use_sampling()) sampling::block_signals();
+
+    // perfetto initialization
+    if(get_use_perfetto())
+    {
+        OMNITRACE_VERBOSE_F(1, "Setting up Perfetto...\n");
+        omnitrace::perfetto::setup();
+    }
 
     tasking::setup();
 

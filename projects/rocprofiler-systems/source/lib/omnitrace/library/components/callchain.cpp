@@ -120,6 +120,9 @@ callchain::get() const
             itr.second.pop_back();
     }
 
+    std::sort(_v.begin(), _v.end(),
+              [](const auto& _lhs, const auto& _rhs) { return _lhs.first < _rhs.first; });
+
     return _v;
 }
 
@@ -193,9 +196,15 @@ callchain::sample(int signo)
             auto _data      = record{};
             _data.timestamp = itr.get_time();
             _data.data.emplace_back(_ip);
+            bool _skip_ip = true;
             for(auto ditr : itr.get_callchain())
             {
-                if(ditr != _ip) _data.data.emplace_back(ditr);
+                // skip the first instance of current IP but allow after that since this
+                // might be a recursive call
+                if(ditr == _ip && _skip_ip)
+                    _skip_ip = false;
+                else
+                    _data.data.emplace_back(ditr);
                 if(_data.data.size() == _data.data.capacity()) break;
             }
             if(!_data.data.empty()) m_data.emplace_back(_data);

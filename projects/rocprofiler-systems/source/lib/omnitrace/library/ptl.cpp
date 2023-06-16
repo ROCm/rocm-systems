@@ -96,8 +96,9 @@ get_thread_pool_state()
 PTL::ThreadPool&
 get_thread_pool()
 {
-    static auto* _v = (get_thread_pool_state() = State::Active,
-                       new PTL::ThreadPool{ _thread_pool_cfg() });
+    static auto  _cfg = _thread_pool_cfg();
+    static auto* _v =
+        (get_thread_pool_state() = State::Active, new PTL::ThreadPool{ _cfg });
     return *_v;
 }
 }  // namespace
@@ -145,6 +146,7 @@ void
 setup()
 {
     OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
+    OMNITRACE_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
     (void) get_thread_pool();
 }
 
