@@ -42,6 +42,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <cstdlib>
 #include <mutex>
 #include <tuple>
 
@@ -110,6 +111,8 @@ extern "C"
     {
         using ::rocprofiler::util::HsaRsrcFactory;
 
+        if(!config::get_use_rocprofiler() || config::get_rocm_events().empty()) return;
+
         OMNITRACE_BASIC_VERBOSE_F(2 || rocm::on_load_trace, "Loading...\n");
 
         rocm::lock_t _lk{ rocm::rocm_mutex, std::defer_lock };
@@ -153,6 +156,10 @@ extern "C"
         tim::consume_parameters(table, runtime_version, failed_tool_count,
                                 failed_tool_names);
 
+        static bool _once = false;
+        if(_once) return true;
+        _once = true;
+
         OMNITRACE_BASIC_VERBOSE_F(2 || rocm::on_load_trace, "Loading...\n");
         OMNITRACE_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
 
@@ -194,6 +201,7 @@ extern "C"
             (config::settings_are_configured() && config::get_rocm_events().empty());
         if(_force_rocprofiler_init || (get_use_rocprofiler() && !_is_empty))
         {
+#if OMNITRACE_HIP_VERSION < 50500
             auto _rocprof =
                 dynamic_library{ "OMNITRACE_ROCPROFILER_LIBRARY",
                                  find_library_path("librocprofiler64.so",
@@ -219,6 +227,7 @@ extern "C"
                                "Warning! Invoking rocprofiler's OnLoad "
                                "failed! OMNITRACE_ROCPROFILER_LIBRARY=%s\n",
                                _rocprof.filename.c_str());
+#endif
         }
         else
         {
