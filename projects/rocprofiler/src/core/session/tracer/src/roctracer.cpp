@@ -74,8 +74,8 @@ void roctracer_op_code(uint32_t domain, const char* str, uint32_t* op, uint32_t*
     case ACTIVITY_DOMAIN_HSA_API: {
       *op = hsa_support::GetApiCode(str);
       if (*op == HSA_API_ID_NUMBER) {
-        EXC_RAISING(ROCTRACER_STATUS_ERROR_INVALID_ARGUMENT,
-                    "Invalid API name \"" << str << "\", domain ID(" << domain << ")");
+        throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_INVALID_OPERATION_ID,
+                                     "Invalid API name, domain ID");
       }
       if (kind != nullptr) *kind = 0;
       break;
@@ -83,14 +83,15 @@ void roctracer_op_code(uint32_t domain, const char* str, uint32_t* op, uint32_t*
     case ACTIVITY_DOMAIN_HIP_API: {
       *op = hipApiIdByName(str);
       if (*op == HIP_API_ID_NONE) {
-        EXC_RAISING(ROCTRACER_STATUS_ERROR_INVALID_ARGUMENT,
-                    "Invalid API name \"" << str << "\", domain ID(" << domain << ")");
+        throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_INVALID_OPERATION_ID,
+                                     "Invalid API name, domain ID");
       }
       if (kind != nullptr) *kind = 0;
       break;
     }
     default:
-      EXC_RAISING(ROCTRACER_STATUS_ERROR_INVALID_DOMAIN_ID, "limited domain ID(" << domain << ")");
+      throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_INVALID_OPERATION_ID,
+                                   "Invalid API name, domain ID");
   }
 }
 
@@ -111,7 +112,8 @@ const char* roctracer_op_string(uint32_t domain, uint32_t op) {
     case ACTIVITY_DOMAIN_EXT_API:
       return "EXT_API";
     default:
-      throw roctracer::ApiError(ROCTRACER_STATUS_ERROR_INVALID_DOMAIN_ID, "invalid domain ID");
+      throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_INVALID_DOMAIN_ID,
+                                   "Invalid domain ID");
   }
 }
 
@@ -176,7 +178,8 @@ constexpr uint32_t get_op_begin(activity_domain_t domain) {
     case ACTIVITY_DOMAIN_EXT_API:
       return 0;
     default:
-      throw roctracer::ApiError(ROCTRACER_STATUS_ERROR_INVALID_DOMAIN_ID, "invalid domain ID");
+      throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_INVALID_DOMAIN_ID,
+                                   "Invalid domain ID");
   }
 }
 
@@ -197,7 +200,8 @@ constexpr uint32_t get_op_end(activity_domain_t domain) {
     case ACTIVITY_DOMAIN_EXT_API:
       return get_op_begin(ACTIVITY_DOMAIN_EXT_API);
     default:
-      throw roctracer::ApiError(ROCTRACER_STATUS_ERROR_INVALID_DOMAIN_ID, "invalid domain ID");
+      throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_INVALID_DOMAIN_ID,
+                                   "Invalid domain ID");
   }
 }
 
@@ -255,7 +259,8 @@ template <activity_domain_t domain> struct ApiTracer {
             rocprofiler_record_tracer_t record{};
             record.header = rocprofiler_record_header_t{
                 ROCPROFILER_TRACER_RECORD,
-                rocprofiler_record_id_t{rocprofiler::GetROCProfilerSingleton()->GetUniqueRecordId()}};
+                rocprofiler_record_id_t{
+                    rocprofiler::GetROCProfilerSingleton()->GetUniqueRecordId()}};
             record.domain = domain;
             record.operation_id = rocprofiler_tracer_operation_id_t{operation_id};
             record.correlation_id =
@@ -270,7 +275,8 @@ template <activity_domain_t domain> struct ApiTracer {
               rocprofiler_record_tracer_t ext_record{};
               ext_record.header = rocprofiler_record_header_t{
                   ROCPROFILER_TRACER_RECORD,
-                  rocprofiler_record_id_t{rocprofiler::GetROCProfilerSingleton()->GetUniqueRecordId()}};
+                  rocprofiler_record_id_t{
+                      rocprofiler::GetROCProfilerSingleton()->GetUniqueRecordId()}};
               ext_record.domain = ACTIVITY_DOMAIN_EXT_API;
               ext_record.operation_id =
                   rocprofiler_tracer_operation_id_t{ACTIVITY_EXT_OP_EXTERN_ID};
@@ -390,7 +396,8 @@ int TracerCallback(activity_domain_t domain, uint32_t operation_id, void* data) 
             rocprofiler_record_tracer_t rocprofiler_record{};
             rocprofiler_record.header = rocprofiler_record_header_t{
                 ROCPROFILER_TRACER_RECORD,
-                rocprofiler_record_id_t{rocprofiler::GetROCProfilerSingleton()->GetUniqueRecordId()}};
+                rocprofiler_record_id_t{
+                    rocprofiler::GetROCProfilerSingleton()->GetUniqueRecordId()}};
             rocprofiler_record.domain = domain;
             rocprofiler_record.external_id = rocprofiler_tracer_external_id_t{};
             rocprofiler_record.operation_id = rocprofiler_tracer_operation_id_t{record->kind};
@@ -457,7 +464,8 @@ int TracerCallback(activity_domain_t domain, uint32_t operation_id, void* data) 
             rocprofiler_record_tracer_t rocprofiler_record{};
             rocprofiler_record.header = rocprofiler_record_header_t{
                 ROCPROFILER_TRACER_RECORD,
-                rocprofiler_record_id_t{rocprofiler::GetROCProfilerSingleton()->GetUniqueRecordId()}};
+                rocprofiler_record_id_t{
+                    rocprofiler::GetROCProfilerSingleton()->GetUniqueRecordId()}};
             rocprofiler_record.domain = domain;
             rocprofiler_record.external_id = rocprofiler_tracer_external_id_t{0};
             rocprofiler_record.operation_id = rocprofiler_tracer_operation_id_t{record->op};
@@ -565,7 +573,7 @@ static void roctracer_enable_op_callback(activity_domain_t domain, uint32_t oper
   std::lock_guard lock(registration_mutex);
 
   if (operation_id >= get_op_end(domain) || callback == nullptr)
-    throw ApiError(ROCTRACER_STATUS_ERROR_INVALID_ARGUMENT, "invalid argument");
+    throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENTS, "Invalid argument");
 
   switch (domain) {
     case ACTIVITY_DOMAIN_HSA_EVT:
@@ -590,7 +598,8 @@ static void roctracer_enable_op_callback(activity_domain_t domain, uint32_t oper
                                           user_data);
       break;
     default:
-      EXC_RAISING(ROCTRACER_STATUS_ERROR_INVALID_DOMAIN_ID, "invalid domain ID(" << domain << ")");
+      throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_INVALID_DOMAIN_ID,
+                                   "Invalid domain ID");
   }
 }
 
@@ -606,7 +615,7 @@ void roctracer_disable_op_callback(activity_domain_t domain, uint32_t operation_
   std::lock_guard lock(registration_mutex);
 
   if (operation_id >= get_op_end(domain))
-    throw ApiError(ROCTRACER_STATUS_ERROR_INVALID_ARGUMENT, "invalid argument");
+    throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENTS, "Invalid argument");
 
   switch (domain) {
     case ACTIVITY_DOMAIN_HSA_EVT:
@@ -628,7 +637,8 @@ void roctracer_disable_op_callback(activity_domain_t domain, uint32_t operation_
         ROCTX_registration_group.Unregister(roctx_api_callback_table, operation_id);
       break;
     default:
-      EXC_RAISING(ROCTRACER_STATUS_ERROR_INVALID_DOMAIN_ID, "invalid domain ID(" << domain << ")");
+      throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_INVALID_DOMAIN_ID,
+                                   "Invalid domain ID");
   }
 }
 
@@ -649,7 +659,7 @@ void roctracer_enable_op_activity(activity_domain_t domain, uint32_t op,
   }
 
   if (op >= get_op_end(domain))
-    throw ApiError(ROCTRACER_STATUS_ERROR_INVALID_ARGUMENT, "invalid argument");
+    throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENTS, "Invalid argument");
 
   switch (domain) {
     case ACTIVITY_DOMAIN_HSA_EVT:
@@ -671,7 +681,8 @@ void roctracer_enable_op_activity(activity_domain_t domain, uint32_t op,
     case ACTIVITY_DOMAIN_ROCTX:
       break;
     default:
-      EXC_RAISING(ROCTRACER_STATUS_ERROR_INVALID_DOMAIN_ID, "invalid domain ID(" << domain << ")");
+      throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_INVALID_DOMAIN_ID,
+                                   "Invalid domain ID");
   }
 }
 
@@ -680,8 +691,8 @@ void roctracer_enable_domain_activity(activity_domain_t domain, roctracer_pool_t
   for (uint32_t op = get_op_begin(domain); op < op_end; ++op) {
     try {
       roctracer_enable_op_activity(domain, op, pool);
-    } catch (const ApiError& err) {
-      if (err.status() != ROCTRACER_STATUS_ERROR_NOT_IMPLEMENTED) throw;
+    } catch (const rocprofiler::Exception& err) {
+      if (err.status() != ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED) throw;
     }
   }
 }
@@ -691,7 +702,7 @@ void roctracer_disable_activity(activity_domain_t domain, uint32_t op) {
   std::lock_guard lock(registration_mutex);
 
   if (op >= get_op_end(domain))
-    throw ApiError(ROCTRACER_STATUS_ERROR_INVALID_ARGUMENT, "invalid argument");
+    throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENTS, "Invalid argument");
 
   switch (domain) {
     case ACTIVITY_DOMAIN_HSA_EVT:
@@ -713,7 +724,8 @@ void roctracer_disable_activity(activity_domain_t domain, uint32_t op) {
     case ACTIVITY_DOMAIN_ROCTX:
       break;
     default:
-      EXC_RAISING(ROCTRACER_STATUS_ERROR_INVALID_DOMAIN_ID, "invalid domain ID(" << domain << ")");
+      throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_INVALID_DOMAIN_ID,
+                                   "Invalid domain ID");
   }
 }
 
@@ -721,8 +733,8 @@ void roctracer_disable_domain_activity(activity_domain_t domain) {
   const uint32_t op_end = get_op_end(domain);
   for (uint32_t op = get_op_begin(domain); op < op_end; ++op) try {
       roctracer_disable_activity(domain, op);
-    } catch (const ApiError& err) {
-      if (err.status() != ROCTRACER_STATUS_ERROR_NOT_IMPLEMENTED) throw;
+    } catch (const rocprofiler::Exception& err) {
+      if (err.status() != ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED) throw;
     }
 }
 
@@ -739,8 +751,8 @@ void roctracer_activity_pop_external_correlation_id(activity_correlation_id_t* l
   auto external_id = ExternalCorrelationIdPop();
   if (!external_id) {
     if (last_id != nullptr) *last_id = 0;
-    EXC_RAISING(ROCTRACER_STATUS_ERROR_MISMATCHED_EXTERNAL_CORRELATION_ID,
-                "unbalanced external correlation id pop");
+    throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_MISMATCHED_EXTERNAL_CORRELATION_ID,
+                                 "Unbalanced external correlation id pop");
   }
 
   if (last_id != nullptr) *last_id = *external_id;
@@ -776,7 +788,8 @@ void roctracer_set_properties(activity_domain_t domain, void* properties) {
       break;
     }
     default:
-      EXC_RAISING(ROCTRACER_STATUS_ERROR_INVALID_DOMAIN_ID, "invalid domain ID(" << domain << ")");
+      throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_INVALID_DOMAIN_ID,
+                                   "Invalid domain ID");
   }
 }
 

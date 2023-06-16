@@ -80,7 +80,7 @@ THE SOFTWARE.
  *    - ::ROCPROFILER_APPLICATION_REPLAY_MODE
  *    - ::ROCPROFILER_USER_REPLAY_MODE
  *
- * 2. While setting filters, properties can mix up and may produce 
+ * 2. While setting filters, properties can mix up and may produce
  *    undesirable results.
  *
  * \section references References
@@ -423,7 +423,27 @@ typedef enum {
   /**
    * The required Filter is not supported
    */
-  ROCPROFILER_STATUS_ERROR_FILTER_NOT_SUPPORTED = -33
+  ROCPROFILER_STATUS_ERROR_FILTER_NOT_SUPPORTED = -33,
+  /**
+   * Invalid Arguments were given to the function
+   */
+  ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENTS = -34,
+  /**
+   * The given operation id is not valid.
+   */
+  ROCPROFILER_STATUS_ERROR_INVALID_OPERATION_ID = -35,
+  /**
+   * The given domain id is not valid.
+   */
+  ROCPROFILER_STATUS_ERROR_INVALID_DOMAIN_ID = -36,
+  /**
+   * The feature requested is not implemented.
+   */
+  ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED = -37,
+  /**
+   * External Correlation id pop called without matching push.
+   */
+  ROCPROFILER_STATUS_ERROR_MISMATCHED_EXTERNAL_CORRELATION_ID = -38,
 } rocprofiler_status_t;
 
 /**
