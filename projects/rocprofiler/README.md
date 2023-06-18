@@ -236,15 +236,19 @@ The user has two options for building:
       # app_relative_path is the path for the application binary
       # Mode:
         # - Network: opens the server with the browser UI.
-            # att needs 2 ports opened (8000, 18000), In case the browser is running on a different machine.
+            # att needs 2 ports available (e.g. 8000, 18000). There is an option (default: --ports "8000,18000") option to change these.
+            # In case the browser is running on a different machine, port forwarding can be done with ssh -L 8000:localhost:8000 <user@IP>.
         # - File: dumps the json files to disk, it can be used to quickly verify if there is anything wrong with the data.
-        # - Off runs collection but not analysis/parsing. So it can be later used on another system to be viewed.
+            # Run python3 httpserver.py from within the generated ui/ folder to view the trace. The folder can be copied to another machine, and will run without rocm.
+        # - Off runs collection but not analysis/parsing. So it can be later viewed another time and/or system.
       # input.txt gives flexibility to to target the compute unit and provide filters.
         # input.txt contents:
-            # TARGET_CU=1 // or some other CU [0,15]
-            # SE_MASK=0x1 // bitmask of shader engines. The fewer, the easier on the hardware. Default enables all 24 because SE_MASK code is recent.
-            # SIMD_MASK=0xF // bitmask of SIMDs, there are four in GFX9.
-        # samples/att.txt is having an example on how to right input file for ATT
+            # TARGET_CU=1 // or some other CU [0,15] - WGP for Navi
+            # SE_MASK=0x1 // bitmask of shader engines. The fewer, the easier on the hardware. Default enables all shader engines.
+            # SIMD_MASK=0xF // There are four SIMDs. GFX9: bitmask of SIMDs. Navi: SIMD Index [0-3].
+            # PERFCOUNTERS_COL_PERIOD=0x3 // Multiplier period for counter collection [0~31]. GFX9 only.
+            # PERFCOUNTER=<counter_name> // Add a SQ counter to be collected with ATT; period defined by PERFCOUNTERS_COL_PERIOD. GFX9 only.
+        # samples/att.txt is the simplest input file for ATT
       ```
 
   - Plugin Support: We have a template for adding new plugins. New plugins can be written on top of rocprofv2 to support the desired output format using include/rocprofiler/v2/rocprofiler_plugins.h header file. These plugins are modular in nature and can easily be decoupled from the code based on need. E.g.

@@ -221,10 +221,7 @@ The resulting `a.out` will depend on
 ## ROCprofiler for rocm 5.7.0
 ### Navi support
 Rocprofiler for ROCm 5.7 added support for counter collection (PMC) and advanced thread tracing (ATT) for Navi21 and Navi31 GPUs.
-- On Navi, specially Navi31, counter collection requires the GPU to be in a stable power state. See README.md for instructions.
-- Navi does not support streaming SQ counters and ATT at the same time, unlike GFX9.
-- On Navi ATT, "att: target_cu" indexes the WGP and the SIMD_MASK parameter is actually the SIMD_ID, in the range [0,3].
-- HIP RT in ATT not yet supported.
+- On Navi3x, counter collection requires the GPU to be in a stable power state. See README.md for instructions. HIP RT in ATT not yet supported.
 ### Changed
 - ATT analysis will not run by default. For ATT to have the same behaviour as 5.5, use --plugin att <as.s> --mode network
 ### Optimized
