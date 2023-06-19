@@ -274,3 +274,4 @@ Example for file plugin output:
 - Some browsers caching ATT data from older kernels.
 - Navi2x GPUs required the first counter to be GRBM. This is fixed in 5.7.
 - If ROCPROFILER_METRICS_PATH environment variable is not set, the counters xml path will be taken from the following path (../libexec/rocprofiler/counters/derived_counters.xml) which is relative to librocprofiler64.so.2.0.0
+- Repeated base metrics were not being properly reused by derived counters.

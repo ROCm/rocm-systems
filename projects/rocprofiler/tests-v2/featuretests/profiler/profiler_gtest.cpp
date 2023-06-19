@@ -53,7 +53,7 @@ static void init_test_path() {
     lib_path = "lib/rocprofiler/librocprofiler_tool.so";
     golden_trace_path = "share/rocprofiler/tests/featuretests/profiler/apps/goldentraces/";
     test_app_path = "share/rocprofiler/tests/featuretests/profiler/apps/";
-    metrics_path = "lib/rocprofiler/gfx_metrics.xml";
+    metrics_path = "libexec/rocprofiler/counters/derived_counters.xml";
     binary_path = "bin/rocprofv2";
     profiler_api_lib_path = "/lib";
   } else {
@@ -62,9 +62,18 @@ static void init_test_path() {
     lib_path = "librocprofiler_tool.so";
     golden_trace_path = "tests-v2/featuretests/profiler/apps/goldentraces/";
     test_app_path = "tests-v2/featuretests/profiler/apps/";
-    metrics_path = "gfx_metrics.xml";
+    metrics_path = "counters/derived_counters.xml";
     binary_path = "rocprofv2";
   }
+}
+
+
+void __attribute__((constructor)) globalsetting() {
+  init_test_path();
+  std::string app_path = GetRunningPath(running_path);
+  std::stringstream gfx_path;
+  gfx_path << app_path << metrics_path;
+  setenv("ROCPROFILER_METRICS_PATH", gfx_path.str().c_str(), true);
 }
 
 /**
@@ -672,14 +681,6 @@ TEST_F(ATTCollection, WhenRunningATTItCollectsTraceData) {
  * ###################################################
  */
 
-void __attribute__((constructor)) globalsetting() {
-  init_test_path();
-  std::string app_path = GetRunningPath(running_path);
-  std::stringstream gfx_path;
-  gfx_path << app_path << metrics_path;
-  setenv("ROCPROFILER_METRICS_PATH", gfx_path.str().c_str(), true);
-}
-
 class ProfilerAPITest : public ::testing::Test {
  protected:
   void SetUp() {
@@ -766,6 +767,78 @@ TEST_F(ProfilerAPITest, WhenRunningMultipleThreadsProfilerAPIsWorkFine) {
   for (int n = 0; n < num_cpu_cores; ++n) {
     threads[n].join();
   }
+
+  // deactivate session
+  CheckApi(rocprofiler_terminate_session(session_id));
+
+  // dump profiler data
+  CheckApi(rocprofiler_flush_data(session_id, buffer_id));
+
+  // destroy session
+  CheckApi(rocprofiler_destroy_session(session_id));
+
+  // finalize profiler by destroying rocprofiler object
+  CheckApi(rocprofiler_finalize());
+}
+
+/*
+ * ###################################################
+ * ############ Derived metrics tests ################
+ * ###################################################
+ */
+class DerivedMetricsReuseTest : public ::testing::Test {
+ protected:
+  void SetUp() {}
+  // function to check profiler API status
+  static void CheckApi(rocprofiler_status_t status) {
+    ASSERT_EQ(status, ROCPROFILER_STATUS_SUCCESS);
+  };
+
+  // callback function to dump profiler data
+  static void FlushCallback(const rocprofiler_record_header_t* record,
+                            const rocprofiler_record_header_t* end_record,
+                            rocprofiler_session_id_t session_id,
+                            rocprofiler_buffer_id_t buffer_id) {
+    while (record < end_record) {
+      if (!record) break;
+      CheckApi(rocprofiler_next_record(record, &record, session_id, buffer_id));
+    }
+  }
+};
+
+TEST_F(DerivedMetricsReuseTest, WhenRunningRepeatedBaseMetricsAPIsWorkFine) {
+  // set global path
+  init_test_path();
+
+  // initialize profiler by creating rocprofiler object
+  CheckApi(rocprofiler_initialize());
+
+  // Counter Collection with timestamps
+  rocprofiler_session_id_t session_id;
+  std::vector<const char*> counters;
+  counters.emplace_back("GRBM_COUNT");
+  counters.emplace_back("GPUBusy");
+  counters.emplace_back("GRBM_GUI_ACTIVE");
+  counters.emplace_back("ALUStalledByLDS");
+
+  CheckApi(rocprofiler_create_session(ROCPROFILER_KERNEL_REPLAY_MODE, &session_id));
+
+  rocprofiler_buffer_id_t buffer_id;
+  CheckApi(rocprofiler_create_buffer(session_id, FlushCallback, 0x9999, &buffer_id));
+
+  rocprofiler_filter_id_t filter_id;
+  rocprofiler_filter_property_t property = {};
+  CheckApi(rocprofiler_create_filter(session_id, ROCPROFILER_COUNTERS_COLLECTION,
+                                     rocprofiler_filter_data_t{.counters_names = &counters[0]},
+                                     counters.size(), &filter_id, property));
+
+  CheckApi(rocprofiler_set_filter_buffer(session_id, filter_id, buffer_id));
+
+  // activating profiler session
+  CheckApi(rocprofiler_start_session(session_id));
+
+  // launch kernel on each thread
+  KernelLaunch();
 
   // deactivate session
   CheckApi(rocprofiler_terminate_session(session_id));

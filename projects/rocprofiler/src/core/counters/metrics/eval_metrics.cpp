@@ -103,42 +103,28 @@ bool metrics::ExtractMetricEvents(
           Agent::AgentInfo& agentInfo = rocprofiler::hsa_support::GetAgentInfo(gpu_agent.handle);
           fatal("input metric'%s' not supported on this hardware: %s ", metric_names[i].c_str(),
           agentInfo.getName().data());
-
       }
 
       // adding result object for derived metric
       std::lock_guard<std::mutex> lock(extract_metric_events_lock);
-      if (results_map.find(metric_names[i]) == results_map.end()) {
-        results_map[metric_names[i]] = new results_t(metric_names[i], {}, xcc_count);
-      }
 
       counters_vec = metric->GetCounters();
       if (counters_vec.empty())
         rocprofiler::fatal("bad metric '%s' is empty", metric_names[i].c_str());
 
-      for (const counter_t* counter : counters_vec) {
-        results_t* result = nullptr;
-        if (metric->GetExpr()) {
+      if (metric->GetExpr() && results_map.find(metric_names[i]) == results_map.end()) {
+        results_map[metric_names[i]] = new results_t(metric_names[i], {}, xcc_count);
+        for (const counter_t* counter : counters_vec)
           metrics_counters[metric->GetName()].insert(counter->name);
-          // add this counter event only if it wasn't repeated before
-          if (results_map.find(counter->name) != results_map.end()) {
-            // std::cout << "Metric : " << metric->GetName() << " has " << counter->name
-            //           << " which is already part of the results map!" << std::endl;
-            // continue;
-            result = results_map.at(counter->name);
-          } else {
-            // result object for base metric
-            // std::cout << "Metric : " << metric->GetName() << " : " << counter->name << std::endl;
-            result =
-                new results_t(counter->name, {}, xcc_count);  // TODO: set correct initial value
-            results_map[counter->name] = result;
-          }
-        } else {
-          // std::cout << "Counter : " << metric->GetName() << " : " << counter->name << std::endl;
-          result = results_map.at(counter->name);
-        }
-        // std::cout << "General Counter : " << metric->GetName() << " : " << counter->name <<
-        // std::endl;
+      }
+
+      for (const counter_t* counter : counters_vec) {
+        if (results_map.find(counter->name) != results_map.end())
+          continue;
+
+        results_t* result = new results_t(counter->name, {}, xcc_count);
+        results_map[counter->name] = result;
+
         const event_t* event = &(counter->event);
         const block_des_t block_des = {event->block_name, event->block_index};
         auto ret = groups_map.insert({block_des, {}});
@@ -155,13 +141,6 @@ bool metrics::ExtractMetricEvents(
           if (status != HSA_STATUS_SUCCESS) fatal("get block_counters info failed");
           block_status.max_counters = max_block_counters;
         }
-
-        // std::cout << "Counter: " << result->name << ", Block Index: " <<
-        // counter->event.block_index
-        //           << ", Counter ID: " << counter->event.counter_id
-        //           << "\nBlock Status Group Index: " << block_status.group_index
-        //           << ", Block Max Counters: " << block_status.max_counters
-        //           << ", Block Status Counter ID: " << block_status.counter_index << std::endl;
 
         if (block_status.counter_index >= block_status.max_counters) {
           rocprofiler::fatal("Metrics specified have exceeded HW limits!");
