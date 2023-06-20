@@ -39,7 +39,7 @@ namespace tests {
 namespace utility {
 
 typedef struct {
-  std::string record_id;
+  std::string dispatch_id;
   std::string gpu_id;
   std::string queue_id;
   std::string queue_index;
@@ -60,7 +60,6 @@ typedef struct {
 } profiler_kernel_info_t;
 
 typedef struct {
-  std::string record_id;
   std::string domain;
   std::string function;
   std::string operation;

@@ -109,9 +109,9 @@ void ApplicationParser::GetKernelInfoForRunningApplication(
     std::vector<profiler_kernel_info_t>* kernel_info_output) {
   profiler_kernel_info_t kinfo;
   for (std::string line : output_lines) {
-    // Skip all the lines until  "Record_ID" is found
-    if (line.empty() || line.find("Record_ID") == std::string::npos) {
-      continue;  // Skip to the next line if "Record_ID" is found
+    // Skip all the lines until  "Dispatch_ID" is found
+    if (line.empty() || line.find("Dispatch_ID") == std::string::npos) {
+      continue;  // Skip to the next line if "Dispatch_ID" is found
     }
 
     // Parse individual values and store them in the dispatch struct
@@ -175,9 +175,9 @@ void ApplicationParser::ParseKernelInfoFields(
   std::ifstream golden_file(s);
   while (!golden_file.eof()) {
     getline(golden_file, line);
-    // Skip all the lines until  "Record_ID" is found
-    if (line.empty() || line.find("Record_ID") == std::string::npos) {
-      continue;  // Skip to the next line if "Record_ID" is found
+    // Skip all the lines until  "Dispatch_ID" is found
+    if (line.empty() || line.find("Dispatch_ID") == std::string::npos) {
+      continue;  // Skip to the next line if "Dispatch_ID" is found
     }
     // Parse individual values and store them in the dispatch struct
     tokenize_profiler_output(line, kinfo);

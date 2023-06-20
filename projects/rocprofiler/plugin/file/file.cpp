@@ -208,8 +208,7 @@ class file_plugin_t {
       case ACTIVITY_DOMAIN_HSA_API: {
         if (hsa_api_header_written_.load(std::memory_order_relaxed)) return;
         output_file = get_output_file(output_type_t::TRACER, ACTIVITY_DOMAIN_HSA_API);
-        *output_file << "Record_ID,Domain,Function,Start_Timestamp,End_Timestamp,Correlation_ID"
-                     << std::endl;
+        *output_file << "Domain,Function,Start_Timestamp,End_Timestamp,Correlation_ID" << std::endl;
         *output_file << std::endl;
         hsa_api_header_written_.exchange(true, std::memory_order_release);
         return;
@@ -217,9 +216,8 @@ class file_plugin_t {
       case ACTIVITY_DOMAIN_HIP_API: {
         if (hip_api_header_written_.load(std::memory_order_relaxed)) return;
         output_file = get_output_file(output_type_t::TRACER, ACTIVITY_DOMAIN_HIP_API);
-        *output_file
-            << "Record_ID,Domain,Function,Kernel_Name,Start_Timestamp,End_Timestamp,Correlation_ID"
-            << std::endl;
+        *output_file << "Domain,Function,Kernel_Name,Start_Timestamp,End_Timestamp,Correlation_ID"
+                     << std::endl;
         *output_file << std::endl;
         hip_api_header_written_.exchange(true, std::memory_order_release);
         return;
@@ -227,7 +225,7 @@ class file_plugin_t {
       case ACTIVITY_DOMAIN_ROCTX: {
         if (roctx_header_written_.load(std::memory_order_relaxed)) return;
         output_file = get_output_file(output_type_t::TRACER, ACTIVITY_DOMAIN_ROCTX);
-        *output_file << "Record_ID,Domain,ROCTX_ID,Message,Timestamp" << std::endl;
+        *output_file << "Domain,ROCTX_ID,Message,Timestamp" << std::endl;
         *output_file << std::endl;
         roctx_header_written_.exchange(true, std::memory_order_release);
         return;
@@ -235,7 +233,7 @@ class file_plugin_t {
       case ACTIVITY_DOMAIN_HSA_OPS: {
         if (hsa_async_copy_header_written_.load(std::memory_order_relaxed)) return;
         output_file = get_output_file(output_type_t::TRACER, ACTIVITY_DOMAIN_HSA_OPS);
-        *output_file << "Record_ID,Domain,Operation,Start_Timestamp,Stop_Timestamp,Correlation_ID"
+        *output_file << "Domain,Operation,Start_Timestamp,Stop_Timestamp,Correlation_ID"
                      << std::endl;
         *output_file << std::endl;
         hsa_async_copy_header_written_.exchange(true, std::memory_order_release);
@@ -244,7 +242,7 @@ class file_plugin_t {
       case ACTIVITY_DOMAIN_HIP_OPS: {
         if (hip_activity_header_written_.load(std::memory_order_relaxed)) return;
         output_file = get_output_file(output_type_t::TRACER, ACTIVITY_DOMAIN_HIP_OPS);
-        *output_file << "Record_ID,Domain,Operation,Kernel_Name,Start_Timestamp,Stop_Timestamp,"
+        *output_file << "Domain,Operation,Kernel_Name,Start_Timestamp,Stop_Timestamp,"
                         "Correlation_ID"
                      << std::endl;
         *output_file << std::endl;
@@ -258,7 +256,8 @@ class file_plugin_t {
 
           *output_file
               << "Dispatch_ID,GPU_ID,Queue_ID,Queue_Index,PID,TID,GRD,WGR,LDS,SCR,Arch_VGPR,"
-                 "ACCUM_VGPR,SGPR,Wave_Size,SIG,OBJ,Kernel_Name,Start_Timestamp,End_Timestamp";
+                 "ACCUM_VGPR,SGPR,Wave_Size,SIG,OBJ,Kernel_Name,Start_Timestamp,End_Timestamp,"
+                 "Correlation_ID";
           if (counter_names_.size() > 0) {
             for (uint32_t i = 0; i < counter_names_.size(); i++)
               *output_file << "," << counter_names_[i];
@@ -398,8 +397,7 @@ class file_plugin_t {
     }
     // return;
     output_file_t* output_file = get_output_file(output_type_t::TRACER, tracer_record.domain);
-    *output_file << "" << tracer_record.header.id.handle << ","
-                 << GetDomainName(tracer_record.domain);
+    *output_file << GetDomainName(tracer_record.domain);
     if (tracer_record.domain == ACTIVITY_DOMAIN_ROCTX && roctx_id >= 0)
       *output_file << "," << roctx_id;
     if (tracer_record.domain == ACTIVITY_DOMAIN_ROCTX) {
@@ -470,7 +468,8 @@ class file_plugin_t {
     }
     *output_file << "," << std::to_string(profiler_record->kernel_id.handle) << ",\"" << kernel_name
                  << "\"," << std::to_string(profiler_record->timestamps.begin.value) << ","
-                 << std::to_string(profiler_record->timestamps.end.value);
+                 << std::to_string(profiler_record->timestamps.end.value) << ","
+                 << std::to_string(profiler_record->correlation_id.value);
 
     // For Counters
     if (profiler_record->counters) {

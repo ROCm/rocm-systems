@@ -13,5 +13,5 @@ device count and rank is8: 2
 Rank Id: 1 | Device Id : 1 | Num Devices: 8
 Max error: 0.000000
 Max error: 0.000000
-Record_ID(1), GPU_ID(4), Queue_ID(1), Queue_Index(0), Process_ID(1879535), Thread_ID(1879535), Grid_Size(1048576), Workgroup_Size(256), LDS(0), Scratch_Size(0), Arch_VGPR(12), Accumulative_VGPR(4), SGPR(32), Wave_Size(64), Kernel_Name("add"), Begin_Timestamp(140358658822704), End_Timestamp(140358853089512), GRBM_COUNT(505731.000000)
-Record_ID(1), GPU_ID(5), Queue_ID(1), Queue_Index(0), Process_ID(1879536), Thread_ID(1879536), Grid_Size(1048576), Workgroup_Size(256), LDS(0), Scratch_Size(0), Arch_VGPR(12), Accumulative_VGPR(4), SGPR(32), Wave_Size(64), Kernel_Name("add"), Begin_Timestamp(140518780572208), End_Timestamp(140518958147816), GRBM_COUNT(496299.000000)
+Dispatch_ID(1), GPU_ID(5), Queue_ID(1), Queue_Index(0), Process_ID(2185441), Thread_ID(2185441), Grid_Size(1048576), Workgroup_Size(256), LDS(0), Scratch_Size(0), Arch_VGPR(12), Accumulative_VGPR(4), SGPR(32), Wave_Size(64), Kernel_Name("add"), Begin_Timestamp(139857691152944), End_Timestamp(139857835223272), Correlation_ID(0), GRBM_COUNT(499551.000000)
+Dispatch_ID(1), GPU_ID(4), Queue_ID(1), Queue_Index(0), Process_ID(2185436), Thread_ID(2185436), Grid_Size(1048576), Workgroup_Size(256), LDS(0), Scratch_Size(0), Arch_VGPR(12), Accumulative_VGPR(4), SGPR(32), Wave_Size(64), Kernel_Name("add"), Begin_Timestamp(140429257347632), End_Timestamp(140429483317480), Correlation_ID(0), GRBM_COUNT(499406.000000)

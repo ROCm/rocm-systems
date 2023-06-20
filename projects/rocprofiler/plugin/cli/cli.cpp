@@ -281,8 +281,7 @@ class file_plugin_t {
     }
 
     output_file_t* output_file = get_output_file(output_type_t::TRACER, tracer_record.domain);
-    *output_file << "Record_ID(" << tracer_record.header.id.handle << "), "
-                 << "Domain(" << GetDomainName(tracer_record.domain) << "), ";
+    *output_file << "Domain(" << GetDomainName(tracer_record.domain) << "), ";
     if (function_name.size() > 1) *output_file << "Function(" << function_name << "), ";
     if (activity_name) *output_file << "Operation_Name(" << activity_name << "), ";
     if (kernel_name.size() > 1) *output_file << "Kernel_Name(" << kernel_name.c_str() << "), ";
@@ -315,7 +314,7 @@ class file_plugin_t {
       CHECK_ROCPROFILER(rocprofiler_query_kernel_info(ROCPROFILER_KERNEL_NAME,
                                                       profiler_record->kernel_id, &kernel_name_c));
     }
-    *output_file << "Record_ID(" << std::to_string(profiler_record->header.id.handle) << "), "
+    *output_file << "Dispatch_ID(" << std::to_string(profiler_record->header.id.handle) << "), "
                  << "GPU_ID(" << std::to_string(profiler_record->gpu_id.handle) << "), "
                  << "Queue_ID(" << std::to_string(profiler_record->queue_id.handle) << "), "
                  << "Queue_Index(" << std::to_string(profiler_record->queue_idx.value) << "), "
@@ -354,6 +353,8 @@ class file_plugin_t {
                  << "Begin_Timestamp(" << std::to_string(profiler_record->timestamps.begin.value)
                  << "), "
                  << "End_Timestamp(" << std::to_string(profiler_record->timestamps.end.value)
+                 << "), "
+                 << "Correlation_ID(" << std::to_string(profiler_record->correlation_id.value)
                  << ")";
 
     // For Counters

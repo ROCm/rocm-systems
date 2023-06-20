@@ -32,7 +32,7 @@ void ApplicationParser::SetApplicationEnv(const char* app_name, const char* trac
   std::string app_path = GetRunningPath("tests-v2/featuretests/tracer/runTracerFeatureTests");
 
   std::string profiler_api_lib_path = "";
-  if(is_installed_path()) {
+  if (is_installed_path()) {
     profiler_api_lib_path = "/lib";
   }
 
@@ -83,7 +83,7 @@ void ApplicationParser::GetKernelInfoForRunningApplication(
     // Parse individual values and store them in the dispatch struct
     tokenize_tracer_output(line, kinfo);
 
-    if (kinfo.record_id != "") {
+    if (kinfo.domain != "") {
       kernel_info_output->push_back(kinfo);
     }
   }
@@ -152,7 +152,7 @@ void ApplicationParser::ParseKernelInfoFields(
     // Parse individual values and store them in the dispatch struct
     tokenize_tracer_output(line, kinfo);
 
-    if (kinfo.record_id != "") {
+    if (kinfo.domain != "") {
       kernel_info_output->push_back(kinfo);
     }
   }
@@ -245,10 +245,10 @@ TEST_F(AsyncCopyTest, WhenRunningTracerWithAppThenAsyncCorelationCountIsCorrect)
   GetKernelInfoForRunningApplication(&current_kernel_info);
   ASSERT_TRUE(current_kernel_info.size());
 
-  std::vector<std::pair<std::string, std::string>> corelation_pair{};
+  std::vector<std::string> corelation_pair{};
   for (const auto& itr : current_kernel_info) {
     if (itr.domain.find("HSA_OPS_DOMAIN") != std::string::npos) {
-      corelation_pair.push_back({itr.record_id, itr.corelation_id});
+      corelation_pair.push_back(itr.corelation_id);
       break;  // we just want first occurance to test
     }
   }
@@ -258,12 +258,14 @@ TEST_F(AsyncCopyTest, WhenRunningTracerWithAppThenAsyncCorelationCountIsCorrect)
   // check if same corelation id appears again but as a different ops record
   for (size_t i = 0; i < corelation_pair.size(); i++) {
     for (const auto& itr : current_kernel_info) {
-      if ((itr.corelation_id == corelation_pair[i].second) &&
-          (itr.record_id != corelation_pair[i].first)) {
+      if ((itr.corelation_id == corelation_pair[i])) {
         corelation_count++;
       }
     }
   }
+
+  // To remove the current record that we are checking with
+  corelation_count--;
 
   EXPECT_EQ(corelation_count, corelation_pair.size());
 }

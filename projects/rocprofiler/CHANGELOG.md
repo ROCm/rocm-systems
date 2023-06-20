@@ -242,19 +242,21 @@ Rocprofiler for ROCm 5.7 added support for counter collection (PMC) and advanced
 - "ROCPROFILER_MAX_ATT_PROFILES" environment variable can be set. Previously fixed at 16, now the default is 1.
 - Increased ATT buffer size per collection to 1GB.
 - File plugin is splitted to File & CLI plugins, CLI plugin is responsible for showing results on the terminal screen and will be automatically the choice if no -d option given in rocprof, File plugin on the other hand is responsible for writing the output results in files if -d option is given.
-- Structure of the results is different for both CLI & File plugin; File plugin will make sure every type of result is in a separate file, starting by specifying the header; CLI plugin will have header for kernel dispatches and counter collection and another header for tracing results; Example:
+- Structure of the results is different for both CLI & File plugin; File plugin will make sure every type of result is in a separate file, starting by specifying the header; CLI plugin will have the records in the old way.
+Example for file plugin output:
   ```
-  Dispatch_ID,GPU_ID,Queue_ID,Queue_Index,PID,TID,GRD,WGR,LDS,SCR,Arch_VGPR,ACCUM_VGPR,SGPR,Wave_Size,SIG,OBJ,Kernel_Name,Start_Timestamp,End_Timestamp,Counters
+  Dispatch_ID,GPU_ID,Queue_ID,Queue_Index,PID,TID,GRD,WGR,LDS,SCR,Arch_VGPR,ACCUM_VGPR,SGPR,Wave_Size,SIG,OBJ,Kernel_Name,Start_Timestamp,End_Timestamp,Correlation_ID,GRBM_COUNT
 
-  1,4,1,1,1584730,1584730,10,10,0,0,8,0,16,64,140464978048000,1,"helloworld(char*, char*) (.kd)",0,140469300947216,GRBM_COUNT,12637.000000
+  1,4,1,1,1584730,1584730,10,10,0,0,8,0,16,64,140464978048000,1,"helloworld(char*, char*) (.kd)",0,140469300947216,33,12637.000000
   ```
   ```
-  Record_ID,Domain,Function,Operation,Kernel_Name,Start_Timestamp,End_Timestamp,Correlation_ID,ROCTX_ID,ROCTX_Message
+  Domain,Function,Kernel_Name,Start_Timestamp,End_Timestamp,Correlation_ID
 
-  2,HIP_API_DOMAIN,hipGetDeviceProperties,,,316678074094190,316678074098929,1,,
-  4,HIP_API_DOMAIN,hipMalloc,,,316678074105702,316678074130851,2,,
-  6,HIP_API_DOMAIN,hipMalloc,,,316678074131382,316678074136111,3,,
+  HIP_API_DOMAIN,hipGetDeviceProperties,,316678074094190,316678074098929,1
+  HIP_API_DOMAIN,hipMalloc,,316678074105702,316678074130851,2
+  HIP_API_DOMAIN,hipMalloc,,316678074131382,316678074136111,3
   ```
+- Removing Record IDs from tracer records in CLI plugin.
 ### Fixed
 - Samples are fixed to show the new usage of phases.
 - Plugin option validates the plugin names.

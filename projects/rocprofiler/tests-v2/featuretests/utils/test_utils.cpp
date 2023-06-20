@@ -84,7 +84,7 @@ void tokenize_profiler_output(std::string line, profiler_kernel_info_t& kinfo) {
   std::stringstream tokenStream(line);
   std::string token;
   std::getline(tokenStream, token, ',');
-  kinfo.record_id = token;
+  kinfo.dispatch_id = token;
   std::getline(tokenStream, token, ',');
   kinfo.gpu_id = token;
   std::getline(tokenStream, token, ',');
@@ -125,8 +125,6 @@ void tokenize_profiler_output(std::string line, profiler_kernel_info_t& kinfo) {
 void tokenize_tracer_output(std::string line, tracer_kernel_info_t& kinfo) {
   std::stringstream tokenStream(line);
   std::string token;
-  std::getline(tokenStream, token, ',');
-  kinfo.record_id = token;
   std::getline(tokenStream, token, ',');
   kinfo.domain = token;
   std::getline(tokenStream, token, ',');
