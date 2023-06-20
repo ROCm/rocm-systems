@@ -1568,7 +1568,6 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_next_record(
  * @{
  */
 
-// TODO(aelwazir): Replay mode naming !!?? (If changed, reflect on start&stop)
 /**
  * Replay Profiling Modes.
  */
@@ -1578,18 +1577,6 @@ typedef enum {
    * sure that no replays will be done
    */
   ROCPROFILER_NONE_REPLAY_MODE = -1,
-  /**
-   * Replaying the whole application to get multi passes  (Not Yet Supported)
-   */
-  ROCPROFILER_APPLICATION_REPLAY_MODE = 0,
-  /**
-   * Replaying every kernel dispatch to get multi passes
-   */
-  ROCPROFILER_KERNEL_REPLAY_MODE = 1,
-  /**
-   * Replaying an user-specified range to get multi passes  (Not Yet Supported)
-   */
-  ROCPROFILER_USER_REPLAY_MODE = 2
 } rocprofiler_replay_mode_t;
 
 /**
@@ -2149,77 +2136,6 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_start_session(rocprofiler_sessi
 ROCPROFILER_API rocprofiler_status_t
 rocprofiler_terminate_session(rocprofiler_session_id_t session_id) ROCPROFILER_VERSION_9_0;
 
-/** \defgroup session_range_group Session Range Labeling
- * \ingroup sessions_handling_group
- * @{
- */
-
-/**
- * Setting a label to a block range
- * This can be used to label a range of code that is having active profiling
- * session or labeling a pass
- *
- * \param[in] label The label given for a certain block or pass to name/label.
- * \retval ::ROCPROFILER_STATUS_SUCCESS The function has been executed
- * successfully.
- * \retval ::ROCPROFILER_STATUS_ERROR_NOT_INITIALIZED, if rocprofiler_initialize
- * wasn't called before or if rocprofiler_finalize is called
- * \retval ::ROCPROFILER_STATUS_ERROR_CORRUPTED_LABEL_DATA \n may return if
- * the label pointer can't be read by the API
- */
-ROCPROFILER_API rocprofiler_status_t rocprofiler_push_range(const char* label)
-    ROCPROFILER_VERSION_9_0;
-
-/**
- * Setting an endpoint for a range
- * This function can be used to set an endpoint to range labeled by
- * ::rocprofiler_push_range
- *
- * \retval ::ROCPROFILER_STATUS_SUCCESS The function has been executed
- * successfully
- * \retval ::ROCPROFILER_STATUS_ERROR_NOT_INITIALIZED, if rocprofiler_initialize
- * wasn't called before or if rocprofiler_finalize is called
- * \retval ::ROCPROFILER_STATUS_ERROR_RANGE_STACK_IS_EMPTY may return if
- * ::rocprofiler_push_range wasn't called correctly
- */
-ROCPROFILER_API rocprofiler_status_t rocprofiler_pop_range() ROCPROFILER_VERSION_9_0;
-
-/** @} */
-
-/** \defgroup session_user_replay_pass_group Session User Replay Pass Mode
- * \ingroup sessions_handling_group
- * @{
- */
-
-/**
- * Create and Start a pass
- * A Pass is a block of code that can be replayed if required by the
- * profiling/tracing and it mainly depends on the profiling data given in the
- * ::rocprofiler_create_session
- *
- * \retval ::ROCPROFILER_STATUS_SUCCESS The function has been executed
- * successfully.
- * \retval ::ROCPROFILER_STATUS_ERROR_NOT_INITIALIZED, if rocprofiler_initialize
- * wasn't called before or if rocprofiler_finalize is called
- * \retval ::ROCPROFILER_STATUS_ERROR_SESSION_NOT_FOUND \n  If the no active session
- * found
- */
-ROCPROFILER_API rocprofiler_status_t rocprofiler_start_replay_pass() ROCPROFILER_VERSION_9_0;
-
-/**
- * End a pass
- * End a pass created and started by ::rocprofiler_start_pass
- *
- * \retval ::ROCPROFILER_STATUS_SUCCESS The function has been executed
- * successfully.
- * \retval ::ROCPROFILER_STATUS_ERROR_NOT_INITIALIZED, if rocprofiler_initialize
- * wasn't called before or if rocprofiler_finalize is called
- * \retval ::ROCPROFILER_STATUS_ERROR_PASS_NOT_STARTED \n if there is no pass
- * started before this call
- */
-ROCPROFILER_API rocprofiler_status_t rocprofiler_end_replay_pass() ROCPROFILER_VERSION_9_0;
-
-/** @} */
 /** @} */
 
 /** \defgroup device_profiling Device Profiling API

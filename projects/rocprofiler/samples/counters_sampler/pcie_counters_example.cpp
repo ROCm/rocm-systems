@@ -3,7 +3,7 @@
 int main(int argc, char** argv) {
   int* gpuMem;
   int counter_option = 0;
-  
+
   std::vector<std::string> pcie_counters = {
       "CI_PERF_slv_MemRd_Bandwidth0", "CI_PERF_slv_MemWr_Bandwidth0", "CI_PERF_slv_totalMemRdTx",
       "CI_PERF_slv_totalMemWrTx", "CI_PERF_slv_totalTx"};
@@ -26,7 +26,7 @@ int main(int argc, char** argv) {
 
   // Creating the session with given replay mode
   rocprofiler_session_id_t session_id;
-  CHECK_ROCPROFILER(rocprofiler_create_session(ROCPROFILER_KERNEL_REPLAY_MODE, &session_id));
+  CHECK_ROCPROFILER(rocprofiler_create_session(ROCPROFILER_NONE_REPLAY_MODE, &session_id));
 
   // Creating Output Buffer for the data
   rocprofiler_buffer_id_t buffer_id;
@@ -47,7 +47,7 @@ int main(int argc, char** argv) {
       {.name = const_cast<char*>(pcie_counters[counter_option].c_str()),
        .type = ROCPROFILER_COUNTERS_SAMPLER_PCIE_COUNTERS}};
 
-  uint32_t rate = 1000;    
+  uint32_t rate = 1000;
   uint32_t duration = 5000;
 
   rocprofiler_counters_sampler_parameters_t cs_parameters = {.counters = counters_input,

@@ -502,48 +502,6 @@ rocprofiler_terminate_session(rocprofiler_session_id_t session_id) {
   API_METHOD_SUFFIX
 }
 
-
-// API to push a custom label for defining a code section
-ROCPROFILER_API rocprofiler_status_t rocprofiler_push_range(rocprofiler_session_id_t session_id,
-                                                            const char* label) {
-  API_INIT_CHECKER
-  if (!label) throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_CORRUPTED_LABEL_DATA);
-  rocprofiler::GetROCProfilerSingleton()->GetSession(session_id)->PushRangeLabels(label);
-  API_METHOD_SUFFIX
-}
-
-// API to pop a custom label defined for a code section
-ROCPROFILER_API rocprofiler_status_t rocprofiler_pop_range(rocprofiler_session_id_t session_id) {
-  API_INIT_CHECKER
-  if (!rocprofiler::GetROCProfilerSingleton()->GetSession(session_id)->PopRangeLabels())
-    throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_RANGE_STACK_IS_EMPTY);
-  API_METHOD_SUFFIX
-}
-
-ROCPROFILER_API rocprofiler_status_t
-rocprofiler_start_replay_pass(rocprofiler_session_id_t session_id) {
-  API_INIT_CHECKER
-  if (!rocprofiler::GetROCProfilerSingleton()->FindSession(session_id))
-    throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_SESSION_NOT_FOUND);
-  rocprofiler::GetROCProfilerSingleton()
-      ->GetSession(session_id)
-      ->GetProfiler()
-      ->StartReplayPass(session_id);
-  API_METHOD_SUFFIX
-}
-
-ROCPROFILER_API rocprofiler_status_t
-rocprofiler_end_replay_pass(rocprofiler_session_id_t session_id) {
-  API_INIT_CHECKER
-  if (!rocprofiler::GetROCProfilerSingleton()
-           ->GetSession(session_id)
-           ->GetProfiler()
-           ->HasActivePass())
-    throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_PASS_NOT_STARTED);
-  rocprofiler::GetROCProfilerSingleton()->GetSession(session_id)->GetProfiler()->EndReplayPass();
-  API_METHOD_SUFFIX
-}
-
 ROCPROFILER_API rocprofiler_status_t rocprofiler_device_profiling_session_create(
     const char** counter_names, uint64_t num_counters, rocprofiler_session_id_t* session_id,
     int cpu_index, int gpu_index) {

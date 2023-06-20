@@ -630,7 +630,7 @@ TEST_F(ATTCollection, WhenRunningATTItCollectsTraceData) {
   parameters.emplace_back(rocprofiler_att_parameter_t{ROCPROFILER_ATT_TOKEN_MASK2, 0xFFFF});
 
   // create a session
-  result = rocprofiler_create_session(ROCPROFILER_KERNEL_REPLAY_MODE, &session_id);
+  result = rocprofiler_create_session(ROCPROFILER_NONE_REPLAY_MODE, &session_id);
   EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
 
   // create a buffer to hold att trace records for each kernel launch
@@ -742,7 +742,7 @@ TEST_F(ProfilerAPITest, WhenRunningMultipleThreadsProfilerAPIsWorkFine) {
   std::vector<const char*> counters;
   counters.emplace_back("SQ_WAVES");
 
-  CheckApi(rocprofiler_create_session(ROCPROFILER_KERNEL_REPLAY_MODE, &session_id));
+  CheckApi(rocprofiler_create_session(ROCPROFILER_NONE_REPLAY_MODE, &session_id));
 
   rocprofiler_buffer_id_t buffer_id;
   CheckApi(rocprofiler_create_buffer(session_id, FlushCallback, 0x9999, &buffer_id));
@@ -907,7 +907,7 @@ TEST_F(ProfilerSPMTest, WhenRunningSPMItCollectsSPMData) {
   // spm_parameters.cpu_agent_id = NULL;
   spm_parameters.sampling_rate = 10000;
   // create a session
-  CheckApi(rocprofiler_create_session(ROCPROFILER_KERNEL_REPLAY_MODE, &session_id));
+  CheckApi(rocprofiler_create_session(ROCPROFILER_NONE_REPLAY_MODE, &session_id));
 
   // create a buffer to hold spm trace records for each kernel launch
   rocprofiler_buffer_id_t buffer_id;

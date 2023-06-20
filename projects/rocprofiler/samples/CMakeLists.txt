@@ -48,24 +48,6 @@ file(GLOB ROCPROFILER_UTIL_SRC_FILES ${PROJECT_SOURCE_DIR}/src/utils/helper.cpp)
 # Profiler Samples
 # ############################################################################################################################################
 
-## Build Application Replay Sample
-set_source_files_properties(profiler/application_replay_sample.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
-hip_add_executable(profiler_application_replay profiler/application_replay_sample.cpp ${ROCPROFILER_UTIL_SRC_FILES})
-target_include_directories(profiler_application_replay PRIVATE ${PROJECT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/common)
-target_link_libraries(profiler_application_replay PRIVATE rocprofiler-v2 amd_comgr)
-target_link_options(profiler_application_replay PRIVATE "-Wl,--build-id=md5")
-add_dependencies(samples profiler_application_replay)
-install(TARGETS profiler_application_replay RUNTIME DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/samples COMPONENT samples)
-
-## Build Kernel Replay Sample
-set_source_files_properties(profiler/kernel_replay_sample.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
-hip_add_executable(profiler_kernel_replay profiler/kernel_replay_sample.cpp ${ROCPROFILER_UTIL_SRC_FILES})
-target_include_directories(profiler_kernel_replay PRIVATE ${PROJECT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/common)
-target_link_libraries(profiler_kernel_replay PRIVATE rocprofiler-v2 amd_comgr)
-target_link_options(profiler_kernel_replay PRIVATE "-Wl,--build-id=md5")
-add_dependencies(samples profiler_kernel_replay)
-install(TARGETS profiler_kernel_replay RUNTIME DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/samples COMPONENT samples)
-
 ## Build Kernel No Replay Sample
 set_source_files_properties(profiler/kernel_profiling_no_replay_sample.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
 hip_add_executable(profiler_kernel_no_replay profiler/kernel_profiling_no_replay_sample.cpp ${ROCPROFILER_UTIL_SRC_FILES})
@@ -74,15 +56,6 @@ target_link_libraries(profiler_kernel_no_replay PRIVATE rocprofiler-v2 amd_comgr
 target_link_options(profiler_kernel_no_replay PRIVATE "-Wl,--build-id=md5")
 add_dependencies(samples profiler_kernel_no_replay)
 install(TARGETS profiler_kernel_no_replay RUNTIME DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/samples COMPONENT samples)
-
-## Build User Replay Sample
-set_source_files_properties(profiler/user_replay_sample.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
-hip_add_executable(profiler_user_replay profiler/user_replay_sample.cpp ${ROCPROFILER_UTIL_SRC_FILES})
-target_include_directories(profiler_user_replay PRIVATE ${PROJECT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/common)
-target_link_options(profiler_user_replay PRIVATE "-Wl,--build-id=md5")
-target_link_libraries(profiler_user_replay PRIVATE rocprofiler-v2 amd_comgr)
-add_dependencies(samples profiler_user_replay)
-install(TARGETS profiler_user_replay RUNTIME DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/samples COMPONENT samples)
 
 ## Build Device Profiling Sample
 set_source_files_properties(profiler/device_profiling_sample.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)

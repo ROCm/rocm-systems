@@ -627,7 +627,7 @@ ROCPROFILER_EXPORT bool OnLoad(void* table, uint64_t runtime_version, uint64_t f
   getFlushIntervalFromEnv();
   getTracePeriodFromEnv();
 
-  CHECK_ROCPROFILER(rocprofiler_create_session(ROCPROFILER_KERNEL_REPLAY_MODE, &session_id));
+  CHECK_ROCPROFILER(rocprofiler_create_session(ROCPROFILER_NONE_REPLAY_MODE, &session_id));
 
   bool want_pc_sampling = getenv("ROCPROFILER_PC_SAMPLING");
 

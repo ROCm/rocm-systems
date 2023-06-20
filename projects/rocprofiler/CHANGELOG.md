@@ -226,6 +226,7 @@ Rocprofiler for ROCm 5.7 added support for counter collection (PMC) and advanced
 ### Changed
 - ATT analysis will not run by default. For ATT to have the same behaviour as 5.5, use --plugin att <as.s> --mode network
 - Kernel Names are now removed from HIP API records, users of the API can get the kernel names from the corresponding HIP Dispatch OPS using the correlation ID, this change was done to optimize and to manage the data copied.
+- Removing Replay modes as we discovered that some of them will corrupt the applications' behavior, we will re-add them once we implement the fix for them.
 
 ### Optimized
 - ATT json filesizes

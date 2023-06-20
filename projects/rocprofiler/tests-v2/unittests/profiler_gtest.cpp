@@ -320,29 +320,6 @@ TEST(WhenTestingTimeStampCollectionMode, TestSucceeds) {
   toolobj.DestroySession(session_id);
 }
 
-TEST(WhenTestingApplicationReplayMode, TestSucceeds) {
-  std::vector<const char*> counters;
-  counters.emplace_back("SQ_WAVES");
-  rocprofiler_session_id_t session_id;
-
-  rocprofiler::ROCProfiler_Singleton toolobj;
-  session_id = toolobj.CreateSession(ROCPROFILER_APPLICATION_REPLAY_MODE);
-
-  rocprofiler_filter_id_t filter_id =
-      toolobj.GetSession(session_id)
-          ->CreateFilter(ROCPROFILER_COUNTERS_COLLECTION,
-                         rocprofiler_filter_data_t{.counters_names = &counters[0]}, counters.size(),
-                         rocprofiler_filter_property_t{});
-  rocprofiler_buffer_id_t buffer_id =
-      toolobj.GetSession(session_id)->CreateBuffer(callback_fun, 0x8000);
-  toolobj.GetSession(session_id)->GetFilter(filter_id)->SetBufferId(buffer_id);
-
-  rocprofiler::Session* session = toolobj.GetSession(session_id);
-
-  EXPECT_TRUE(session->FindFilterWithKind(ROCPROFILER_COUNTERS_COLLECTION));
-  toolobj.DestroySession(session_id);
-}
-
 TEST(WhenTrucatingLongKernelNames, KernelNameGetsTruncatedProperly) {
   std::string long_kernel_name =
       "void kernel_7r_3d_pml<32, 8, 4>(long long, long long, long long, int, "

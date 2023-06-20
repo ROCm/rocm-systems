@@ -11,7 +11,7 @@ int main(int argc, char** argv) {
 
   // Creating the session with given replay mode
   rocprofiler_session_id_t session_id;
-  CHECK_ROCPROFILER(rocprofiler_create_session(ROCPROFILER_KERNEL_REPLAY_MODE, &session_id));
+  CHECK_ROCPROFILER(rocprofiler_create_session(ROCPROFILER_NONE_REPLAY_MODE, &session_id));
 
   // Creating Output Buffer for the data
   rocprofiler_buffer_id_t buffer_id;
