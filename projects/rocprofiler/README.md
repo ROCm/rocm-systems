@@ -273,6 +273,20 @@ The user has two options for building:
       ./rocprofv2 --plugin plugin_name -i samples/input.txt -d output_dir <app_relative_path> # -d is optional, but can be used to define the directory output for output results
       ```
 
+  - Flush Interval: Flush interval can be used to control the interval time in milliseconds between the buffers flush for the tool. However, if the buffers are full the flush will be called on its own. This can be used as in the next example:
+    ```bash
+    rocprofv2 --flush-interval <TIME_INTERVAL_IN_MILLISECONDS> <rest_of_rocprofv2_arguments> <app_relative_path>
+    ```
+
+  - Trace Period: Trace period can be used to control when the profiling or tracing is enabled using two arguments, the first one is the delay time, which is the time spent idle without tracing or profiling. The second argument is the profiling or the tracing time, which is the active time where the profiling and tracing are working, so basically, the session will work in the following timeline:
+    ```
+    # <DELAY_TIME> => <PROFILING_OR_TRACING_SESSION_START> => <ACTIVE_PROFILING_OR_TRACING_TIME> => <PROFILING_OR_TRACING_SESSION_STOP>
+    ```
+    This feature can be used using the following command:
+    ```bash
+    rocprofv2 --trace-period <DELAY_TIME>:<ACTIVE_PROFILING_OR_TRACING_TIME> <rest_of_rocprofv2_arguments> <app_relative_path>
+    ```
+
 - Device Profiling: A device profiling session allows the user to profile the GPU device for counters irrespective of the running applications on the GPU. This is different from application profiling. device profiling session doesn't care about the host running processes and threads. It directly provides low level profiling information.
 
 - Session Support: A session is a unique identifier for a profiling/tracing/pc-sampling task. A ROCProfilerV2 Session has enough information about what needs to be collected or traced and it allows the user to start/stop profiling/tracing whenever required. More details on the API can be found in the API specification documentation that can be installed using rocprofiler-doc package. Samples also can be found for how to use the API in samples directory.

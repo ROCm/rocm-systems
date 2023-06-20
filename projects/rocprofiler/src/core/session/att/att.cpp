@@ -28,7 +28,6 @@ namespace att {
 AttTracer::AttTracer(rocprofiler_buffer_id_t buffer_id, rocprofiler_filter_id_t filter_id,
                        rocprofiler_session_id_t session_id)
     : buffer_id_(buffer_id), filter_id_(filter_id), session_id_(session_id) {}
-AttTracer::~AttTracer() {}
 
 void AttTracer::AddPendingSignals(uint32_t writer_id, uint64_t kernel_object,
                                    const hsa_signal_t& original_completion_signal, const hsa_signal_t& new_completion_signal,

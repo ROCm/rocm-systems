@@ -39,7 +39,6 @@ class SpmCounters {
  public:
   SpmCounters(rocprofiler_buffer_id_t buffer_id, rocprofiler_filter_id_t filter_id,
               rocprofiler_spm_parameter_t* spmparameter, rocprofiler_session_id_t session_id);
-  ~SpmCounters(){};
 
   rocprofiler_status_t startSpm();
   rocprofiler_status_t stopSpm();

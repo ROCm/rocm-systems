@@ -57,34 +57,36 @@ ROCProfiler_Singleton::ROCProfiler_Singleton() : current_session_id_(rocprofiler
 // session map and clears them from the map. Pops labels from the range stack
 // and deletes the stack.
 ROCProfiler_Singleton::~ROCProfiler_Singleton() {
-  // {
-  //   std::lock_guard<std::mutex> lock(session_map_lock_);
-  //   if (!sessions_.empty()) {
-  //     // TODO(aelwazir): throw an exception user need to destroy all created
-  //     // session (document)
-  //     // fatal("Error: Sessions are not destroyed yet!");
-  //     sessions_.clear();
-  //   }
-  // }
+  {
+    std::lock_guard<std::mutex> lock(session_map_lock_);
+    if (!sessions_.empty()) {
+      for (auto& session : sessions_) {
+        if (session.second) delete session.second;
+      }
+      sessions_.clear();
+    }
+  }
   Counter::ClearBasicCounters();
 }
 
 bool ROCProfiler_Singleton::FindAgent(rocprofiler_agent_id_t agent_id) { return true; }
-size_t ROCProfiler_Singleton::GetAgentInfoSize(rocprofiler_agent_info_kind_t kind, rocprofiler_agent_id_t agent_id) {
+size_t ROCProfiler_Singleton::GetAgentInfoSize(rocprofiler_agent_info_kind_t kind,
+                                               rocprofiler_agent_id_t agent_id) {
   return 0;
 }
 const char* ROCProfiler_Singleton::GetAgentInfo(rocprofiler_agent_info_kind_t kind,
-                                   rocprofiler_agent_id_t agent_id) {
+                                                rocprofiler_agent_id_t agent_id) {
   return "";
 }
 
 // TODO(aelwazir): Implement Queue Query
 bool ROCProfiler_Singleton::FindQueue(rocprofiler_queue_id_t queue_id) { return true; }
-size_t ROCProfiler_Singleton::GetQueueInfoSize(rocprofiler_queue_info_kind_t kind, rocprofiler_queue_id_t queue_id) {
+size_t ROCProfiler_Singleton::GetQueueInfoSize(rocprofiler_queue_info_kind_t kind,
+                                               rocprofiler_queue_id_t queue_id) {
   return 0;
 }
 const char* ROCProfiler_Singleton::GetQueueInfo(rocprofiler_queue_info_kind_t kind,
-                                   rocprofiler_queue_id_t queue_id) {
+                                                rocprofiler_queue_id_t queue_id) {
   return "";
 }
 
@@ -93,7 +95,8 @@ bool ROCProfiler_Singleton::FindSession(rocprofiler_session_id_t session_id) {
   return sessions_.find(session_id.handle) != sessions_.end();
 }
 
-rocprofiler_session_id_t ROCProfiler_Singleton::CreateSession(rocprofiler_replay_mode_t replay_mode) {
+rocprofiler_session_id_t ROCProfiler_Singleton::CreateSession(
+    rocprofiler_replay_mode_t replay_mode) {
   rocprofiler_session_id_t session_id = rocprofiler_session_id_t{GenerateUniqueSessionId()};
   {
     std::lock_guard<std::mutex> lock(session_map_lock_);
@@ -105,22 +108,11 @@ rocprofiler_session_id_t ROCProfiler_Singleton::CreateSession(rocprofiler_replay
 void ROCProfiler_Singleton::DestroySession(rocprofiler_session_id_t session_id) {
   while (GetCurrentActiveInterruptSignalsCount() != 0) {
   }
-
-  // if (GetSession(session_id)->GetTracer()) {
-  //   GetSession(session_id)->GetTracer().reset();
-  //   GetSession(session_id)
-  //       ->GetBuffer(
-  //           GetSession(session_id)
-  //               ->GetFilter(GetSession(session_id)->GetFilterIdWithKind(ROCPROFILER_API_TRACE))
-  //               .GetBufferId())
-  //       .reset();
-  // }
-
   {
     std::lock_guard<std::mutex> lock(session_map_lock_);
     ASSERTM(sessions_.find(session_id.handle) != sessions_.end(),
             "Error: Couldn't find a created session with given id");
-    delete sessions_.at(session_id.handle);
+    if (sessions_.at(session_id.handle)) delete sessions_.at(session_id.handle);
     sessions_.erase(session_id.handle);
   }
 }
@@ -130,9 +122,8 @@ bool ROCProfiler_Singleton::FindDeviceProfilingSession(rocprofiler_session_id_t 
   return dev_profiling_sessions_.find(session_id.handle) != dev_profiling_sessions_.end();
 }
 
-rocprofiler_session_id_t ROCProfiler_Singleton::CreateDeviceProfilingSession(std::vector<std::string> counters,
-                                                              int cpu_agent_index,
-                                                              int gpu_agent_index) {
+rocprofiler_session_id_t ROCProfiler_Singleton::CreateDeviceProfilingSession(
+    std::vector<std::string> counters, int cpu_agent_index, int gpu_agent_index) {
   rocprofiler_session_id_t session_id;
   {
     std::lock_guard<std::mutex> lock(device_profiling_session_map_lock_);
@@ -159,7 +150,8 @@ void ROCProfiler_Singleton::DestroyDeviceProfilingSession(rocprofiler_session_id
   }
 }
 
-DeviceProfileSession* ROCProfiler_Singleton::GetDeviceProfilingSession(rocprofiler_session_id_t session_id) {
+DeviceProfileSession* ROCProfiler_Singleton::GetDeviceProfilingSession(
+    rocprofiler_session_id_t session_id) {
   std::lock_guard<std::mutex> lock(device_profiling_session_map_lock_);
   assert(dev_profiling_sessions_.find(session_id.handle) != dev_profiling_sessions_.end() &&
          "Error: Can't find the session!");
@@ -183,7 +175,9 @@ Session* ROCProfiler_Singleton::GetSession(rocprofiler_session_id_t session_id) 
 }
 
 // Get Current Session ID
-rocprofiler_session_id_t ROCProfiler_Singleton::GetCurrentSessionId() { return current_session_id_; }
+rocprofiler_session_id_t ROCProfiler_Singleton::GetCurrentSessionId() {
+  return current_session_id_;
+}
 
 void ROCProfiler_Singleton::SetCurrentActiveSession(rocprofiler_session_id_t session_id) {
   current_session_id_ = session_id;
@@ -196,7 +190,7 @@ uint64_t ROCProfiler_Singleton::GetUniqueKernelDispatchId() {
 }
 
 size_t ROCProfiler_Singleton::GetKernelInfoSize(rocprofiler_kernel_info_kind_t kind,
-                                   rocprofiler_kernel_id_t kernel_id) {
+                                                rocprofiler_kernel_id_t kernel_id) {
   switch (kind) {
     case ROCPROFILER_KERNEL_NAME:
       return GetKernelNameUsingDispatchID(kernel_id.handle).size();
@@ -206,7 +200,7 @@ size_t ROCProfiler_Singleton::GetKernelInfoSize(rocprofiler_kernel_info_kind_t k
   }
 }
 const char* ROCProfiler_Singleton::GetKernelInfo(rocprofiler_kernel_info_kind_t kind,
-                                    rocprofiler_kernel_id_t kernel_id) {
+                                                 rocprofiler_kernel_id_t kernel_id) {
   switch (kind) {
     case ROCPROFILER_KERNEL_NAME:
       return strdup(GetKernelNameUsingDispatchID(kernel_id.handle).c_str());
@@ -218,7 +212,7 @@ const char* ROCProfiler_Singleton::GetKernelInfo(rocprofiler_kernel_info_kind_t 
 
 // TODO(aelwazir): To be implemented
 bool ROCProfiler_Singleton::CheckFilterData(rocprofiler_filter_kind_t filter_kind,
-                               rocprofiler_filter_data_t filter_data) {
+                                            rocprofiler_filter_data_t filter_data) {
   return true;
 }
 

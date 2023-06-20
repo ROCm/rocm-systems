@@ -99,17 +99,17 @@ std::mutex processQueueLock;
 //   if (spm_buffer_params[idx].len) {
 //     uint32_t pidx = preIndex.load(std::memory_order_release);
 //     if (spm_buffer_params[idx].len == spm_buffer_params[pidx].size) {
-//       std::cout << "Buffer completely filled with bytes" << spm_buffer_params[idx].len << std::endl;
-//       fd = fopen("SPM_rocprofiler_data.txt", "wb");
-//       size_t retele = fwrite(spm_buffer_params[pidx].addr, 1, spm_buffer_params[idx].len, fd);
-//       if (retele <= 0) rocprofiler::warning("SPM Data is wrong!");
-//       fclose(fd);
+//       std::cout << "Buffer completely filled with bytes" << spm_buffer_params[idx].len <<
+//       std::endl; fd = fopen("SPM_rocprofiler_data.txt", "wb"); size_t retele =
+//       fwrite(spm_buffer_params[pidx].addr, 1, spm_buffer_params[idx].len, fd); if (retele <= 0)
+//       rocprofiler::warning("SPM Data is wrong!"); fclose(fd);
 //     } else {
 //       std::cout << "Buffer partially filled with %d bytes" << spm_buffer_params[idx].len
 //                 << std::endl;
 //     }
 //     if (timeout)
-//       if (spm_buffer_params[idx].timeout == timeout) std::cout << "Timeout occurred" << std::endl;
+//       if (spm_buffer_params[idx].timeout == timeout) std::cout << "Timeout occurred" <<
+//       std::endl;
 //     ret = ROCPROFILER_STATUS_SUCCESS;
 //   } else {
 //     std::cout << "Data collection failed" << std::endl;
@@ -188,7 +188,8 @@ std::mutex processQueueLock;
 //       }
 //       se++;
 //     }
-//     record.header.id = rocprofiler_record_id_t{rocprofiler::GetROCProfilerSingleton()->GetUniqueRecordId()};
+//     record.header.id =
+//     rocprofiler_record_id_t{rocprofiler::GetROCProfilerSingleton()->GetUniqueRecordId()};
 //     buffer->AddRecord(record);
 //     nSample++;
 //     index += 160;
@@ -240,10 +241,11 @@ uint64_t submitPacket(hsa_queue_t* queue, const void* packet) {
 
   // advance command queue
   const uint64_t write_idx =
-      rocprofiler::hsa_support::GetCoreApiTable().hsa_queue_add_write_index_scacq_screl_fn(queue, 1);
+      rocprofiler::hsa_support::GetCoreApiTable().hsa_queue_add_write_index_scacq_screl_fn(queue,
+                                                                                           1);
   while ((write_idx -
-          rocprofiler::hsa_support::GetCoreApiTable().hsa_queue_load_read_index_relaxed_fn(queue)) >=
-         queue->size) {
+          rocprofiler::hsa_support::GetCoreApiTable().hsa_queue_load_read_index_relaxed_fn(
+              queue)) >= queue->size) {
     sched_yield();  // TODO: remove
   }
 
@@ -262,7 +264,7 @@ uint64_t submitPacket(hsa_queue_t* queue, const void* packet) {
 
   // ringdoor bell
   rocprofiler::hsa_support::GetCoreApiTable().hsa_signal_store_relaxed_fn(queue->doorbell_signal,
-                                                                        write_idx);
+                                                                          write_idx);
 
   return write_idx;
 }
@@ -272,8 +274,8 @@ uint64_t submitPacket(hsa_queue_t* queue, const void* packet) {
 //   // TODO: check if API args are correct, especially UINT32_MAX
 //   hsa_status_t status;
 //   status = rocprofiler::hsa_support::GetCoreApiTable().hsa_queue_create_fn(
-//       gpu_agent, QUEUE_NUM_PACKETS, HSA_QUEUE_TYPE_SINGLE, nullptr, nullptr, UINT32_MAX, UINT32_MAX,
-//       queue);
+//       gpu_agent, QUEUE_NUM_PACKETS, HSA_QUEUE_TYPE_SINGLE, nullptr, nullptr, UINT32_MAX,
+//       UINT32_MAX, queue);
 
 //   if (status != HSA_STATUS_SUCCESS) rocprofiler::fatal("queue creation failed");
 
@@ -294,7 +296,7 @@ hsa_signal_value_t signalWait(const hsa_signal_t& signal, const hsa_signal_value
     if (ret_value == exp_value) break;
     if (ret_value != signal_value)
       rocprofiler::fatal("Error: signalWait: signal_value(%lu), ret_value(%lu)", signal_value,
-                       ret_value);
+                         ret_value);
   }
   return ret_value;
 }
@@ -315,6 +317,7 @@ spm::SpmCounters::SpmCounters(rocprofiler_buffer_id_t buffer_id, rocprofiler_fil
   get_hsa_agents_list(device_list_);
   defaultGpuNode_ = device_list_->gpu_devices[0];
   defaultCpuNode_ = device_list_->cpu_devices[0];
+  delete device_list_;
 
   // create signals
   hsa_status_t status =
@@ -333,9 +336,9 @@ rocprofiler_status_t spm::SpmCounters::startSpm() {
   else
     // else choose the default node to collect SPM
     preferredGpuNode_ = defaultGpuNode_;
-  // hsa_agent_t preferred_cpu_agent = defaultCpuNode_;
-  // int counter_count = spmparameter_->counters_count;
-  // Packet::packet_t start_packet;
+    // hsa_agent_t preferred_cpu_agent = defaultCpuNode_;
+    // int counter_count = spmparameter_->counters_count;
+    // Packet::packet_t start_packet;
 #if 0
   hsa_status_t hsa_status = hsa_support::GetAmdExtTable().hsa_amd_spm_acquire_fn(preferredGpuNode_);
   if (hsa_status == HSA_STATUS_SUCCESS) {
@@ -393,7 +396,7 @@ rocprofiler_status_t spm::SpmCounters::startSpm() {
     return ROCPROFILER_STATUS_ERROR;
   }
 #endif
-    return ROCPROFILER_STATUS_SUCCESS; //delete this line with if 0
+  return ROCPROFILER_STATUS_SUCCESS;  // delete this line with if 0
 }
 
 rocprofiler_status_t spm::SpmCounters::stopSpm() {

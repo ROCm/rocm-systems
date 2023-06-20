@@ -78,9 +78,13 @@ static const char* amd_sys_session_id;
 static int shm_fd_sn = -1;
 struct shmd_t* shmd;
 
-std::thread wait_for_start_shm;
+uint64_t flush_interval, trace_period, trace_delay;
+
+std::thread wait_for_start_shm, flush_thread, trace_period_thread;
 std::atomic<bool> amd_sys_handler{false};
 std::atomic<bool> session_created{false};
+std::atomic<bool> trace_period_thread_control{false};
+std::atomic<bool> flush_thread_control{false};
 
 [[maybe_unused]] static rocprofiler_session_id_t session_id;
 static std::vector<rocprofiler_filter_id_t> filter_ids;
@@ -202,10 +206,25 @@ rocprofiler::TraceBuffer<roctx_trace_entry_t> roctx_trace_buffer(
 
 }  // namespace
 
-uint64_t getFlushIntervalFromEnv() {
+void getFlushIntervalFromEnv() {
   const char* path = getenv("ROCPROFILER_FLUSH_INTERVAL");
-  if (path) return std::stoll(std::string(path), nullptr, 0);
-  return 0;
+  if (path)
+    flush_interval = std::stoll(std::string(path), nullptr, 0);
+  else
+    flush_interval = 0;
+}
+
+void getTracePeriodFromEnv() {
+  const char* path = getenv("ROCPROFILER_TRACE_PERIOD");
+  if (path) {
+    std::string str = path;
+    trace_period = std::stoll(str.substr(0, str.find(":")), nullptr, 0);
+    trace_delay = std::stoll(str.substr(str.find(":") + 1), nullptr, 0);
+    std::cout << "trace_period: " << trace_period << " trace_delay: " << trace_delay << std::endl;
+  } else {
+    trace_period = 0;
+    trace_delay = 0;
+  }
 }
 
 std::vector<std::string> GetCounterNames() {
@@ -338,6 +357,14 @@ att_parsed_input_t GetATTParams() {
 }
 
 void finish() {
+  if (trace_period_thread_control.load(std::memory_order_relaxed)) {
+    trace_period_thread_control.exchange(false, std::memory_order_release);
+    trace_period_thread.join();
+  }
+  if (flush_thread_control.load(std::memory_order_relaxed)) {
+    flush_thread_control.exchange(false, std::memory_order_release);
+    flush_thread.join();
+  }
   for ([[maybe_unused]] rocprofiler_buffer_id_t buffer_id : buffer_ids) {
     CHECK_ROCPROFILER(rocprofiler_flush_data(session_id, buffer_id));
   }
@@ -350,6 +377,9 @@ void finish() {
     session_created.exchange(false, std::memory_order_release);
     rocprofiler::TraceBufferBase::FlushAll();
     CHECK_ROCPROFILER(rocprofiler_terminate_session(session_id));
+  }
+  if (session_id.handle > 0) {
+    CHECK_ROCPROFILER(rocprofiler_destroy_session(session_id));
   }
 }
 
@@ -487,6 +517,31 @@ static int info_callback(const rocprofiler_counter_info_t info, const char* gpu_
   return 1;
 }
 
+void flush_interval_func() {
+  while (flush_thread_control.load(std::memory_order_relaxed)) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(flush_interval));
+    for ([[maybe_unused]] rocprofiler_buffer_id_t buffer_id : buffer_ids) {
+      CHECK_ROCPROFILER(rocprofiler_flush_data(session_id, buffer_id));
+    }
+    rocprofiler::TraceBufferBase::FlushAll();
+  }
+}
+
+void trace_period_func() {
+  while (trace_period_thread_control.load(std::memory_order_relaxed)) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(trace_delay));
+
+    CHECK_ROCPROFILER(rocprofiler_start_session(session_id));
+    session_created.exchange(true, std::memory_order_release);
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(trace_period));
+
+    session_created.exchange(false, std::memory_order_release);
+    rocprofiler::TraceBufferBase::FlushAll();
+    CHECK_ROCPROFILER(rocprofiler_terminate_session(session_id));
+  }
+}
+
 extern "C" {
 
 // The HSA_AMD_TOOL_PRIORITY variable must be a constant value type
@@ -568,6 +623,9 @@ ROCPROFILER_EXPORT bool OnLoad(void* table, uint64_t runtime_version, uint64_t f
     param.counter_name = name.c_str();
     parameters.emplace_back(param);
   }
+
+  getFlushIntervalFromEnv();
+  getTracePeriodFromEnv();
 
   CHECK_ROCPROFILER(rocprofiler_create_session(ROCPROFILER_KERNEL_REPLAY_MODE, &session_id));
 
@@ -705,7 +763,19 @@ ROCPROFILER_EXPORT bool OnLoad(void* table, uint64_t runtime_version, uint64_t f
     }
   }
 
-  if (getenv("ROCPROFILER_ENABLE_AMDSYS") == nullptr) {
+  // Flush buffers every given interval
+  if (flush_interval > 0) {
+    flush_thread = std::thread{flush_interval_func};
+    flush_thread_control.exchange(true, std::memory_order_release);
+  }
+
+  // Let session run for a given period of time
+  if (trace_period > 0) {
+    trace_period_thread = std::thread{trace_period_func};
+    trace_period_thread_control.exchange(true, std::memory_order_release);
+  }
+
+  if (amd_sys_session_id == nullptr && trace_period == 0) {
     CHECK_ROCPROFILER(rocprofiler_start_session(session_id));
     session_created.exchange(true, std::memory_order_release);
   }

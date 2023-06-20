@@ -152,17 +152,16 @@ void CheckPacketReqiurements(std::vector<hsa_agent_t>& gpu_agents) {
 // packets
 std::vector<std::pair<rocprofiler::profiling_context_t*, hsa_ven_amd_aqlprofile_profile_t*>>
 InitializeAqlPackets(hsa_agent_t cpu_agent, hsa_agent_t gpu_agent,
-                     std::vector<std::string>& counter_names, bool is_spm) {
+                     std::vector<std::string>& counter_names, rocprofiler_session_id_t session_id,
+                     bool is_spm) {
   hsa_status_t status = HSA_STATUS_SUCCESS;
 
   if (!counters_added.load(std::memory_order_acquire)) {
     for (auto& name : counter_names) {
-      if (rocprofiler::GetROCProfilerSingleton()->HasActiveSession()) {
-        rocprofiler::GetROCProfilerSingleton()
-            ->GetSession(rocprofiler::GetROCProfilerSingleton()->GetCurrentSessionId())
-            ->GetProfiler()
-            ->AddCounterName(name);
-      }
+      rocprofiler::GetROCProfilerSingleton()
+          ->GetSession(session_id)
+          ->GetProfiler()
+          ->AddCounterName(name);
     }
     counters_added.exchange(true, std::memory_order_release);
   }

@@ -41,7 +41,8 @@ typedef hsa_ext_amd_aql_pm4_packet_t packet_t;
 
 std::vector<std::pair<rocprofiler::profiling_context_t*, hsa_ven_amd_aqlprofile_profile_t*>>
 InitializeAqlPackets(hsa_agent_t cpu_agent, hsa_agent_t gpu_agent,
-                     std::vector<std::string>& counter_names, bool is_spm = false);
+                     std::vector<std::string>& counter_names, rocprofiler_session_id_t session_id,
+                     bool is_spm = false);
 uint8_t* AllocateSysMemory(hsa_agent_t gpu_agent, size_t size, hsa_amd_memory_pool_t* cpu_pool);
 void GetCommandBufferMap(std::map<size_t, uint8_t*>);
 void GetOutputBufferMap(std::map<size_t, uint8_t*>);

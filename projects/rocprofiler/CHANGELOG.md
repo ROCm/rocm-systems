@@ -222,12 +222,15 @@ The resulting `a.out` will depend on
 ### Navi support
 Rocprofiler for ROCm 5.7 added support for counter collection (PMC) and advanced thread tracing (ATT) for Navi21 and Navi31 GPUs.
 - On Navi3x, counter collection requires the GPU to be in a stable power state. See README.md for instructions. HIP RT in ATT not yet supported.
+
 ### Changed
 - ATT analysis will not run by default. For ATT to have the same behaviour as 5.5, use --plugin att <as.s> --mode network
 - Kernel Names are now removed from HIP API records, users of the API can get the kernel names from the corresponding HIP Dispatch OPS using the correlation ID, this change was done to optimize and to manage the data copied.
+
 ### Optimized
 - ATT json filesizes
 - Now profiler autocorrects user input errors for pmc and throws exception for wrong input with this message:"Bad input metric. usage --> pmc: [counter1] [counter2]"
+
 ### Added
 - Every API trace in V2 reported synchronously will have two records, one for Enter phase and for Exit phase
 - File Plugin now reports the HSA OPS operation kind as part of the output text
@@ -259,6 +262,8 @@ Example for file plugin output:
   HIP_API_DOMAIN,hipMalloc,,316678074131382,316678074136111,3
   ```
 - Removing Record IDs from tracer records in CLI plugin.
+- Added Flush Interval and Trace Period functionality, where --flush-interval <time_in_ms>, for flushing the buffers every given interval by the user, and --trace-period <delay>:<trace_time>, where delay is the time to wait before starting session, and trace_time is the time between every start and stop session. For more details please refer to the ROCProfV2 tool usage document.
+
 ### Fixed
 - Samples are fixed to show the new usage of phases.
 - Plugin option validates the plugin names.

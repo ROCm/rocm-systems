@@ -92,7 +92,7 @@ void InitializePools(hsa_agent_t cpu_agent, Agent::AgentInfo* agent_info);
 void InitializeGPUPool(hsa_agent_t gpu_agent, Agent::AgentInfo* agent_info);
 void CheckPacketReqiurements(std::vector<hsa_agent_t>& gpu_agents);
 
-void ResetSessionID();
+void ResetSessionID(rocprofiler_session_id_t id = rocprofiler_session_id_t{0});
 
 }  // namespace queue
 }  // namespace rocprofiler

@@ -49,12 +49,13 @@ namespace att {
 class AttTracer {
  public:
   AttTracer(rocprofiler_buffer_id_t buffer_id, rocprofiler_filter_id_t filter_id,
-             rocprofiler_session_id_t session_id);
-  ~AttTracer();
+            rocprofiler_session_id_t session_id);
 
   void AddPendingSignals(uint32_t writer_id, uint64_t kernel_object,
-                         const hsa_signal_t& original_completion_signal, const hsa_signal_t& new_completion_signal, rocprofiler_session_id_t session_id,
-                         rocprofiler_buffer_id_t buffer_id, hsa_ven_amd_aqlprofile_profile_t* profile,
+                         const hsa_signal_t& original_completion_signal,
+                         const hsa_signal_t& new_completion_signal,
+                         rocprofiler_session_id_t session_id, rocprofiler_buffer_id_t buffer_id,
+                         hsa_ven_amd_aqlprofile_profile_t* profile,
                          rocprofiler_kernel_properties_t kernel_properties, uint32_t thread_id,
                          uint64_t queue_index);
 
