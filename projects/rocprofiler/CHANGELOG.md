@@ -226,6 +226,7 @@ Rocprofiler for ROCm 5.7 added support for counter collection (PMC) and advanced
 - ATT analysis will not run by default. For ATT to have the same behaviour as 5.5, use --plugin att <as.s> --mode network
 ### Optimized
 - ATT json filesizes
+- Now profiler autocorrects user input errors for pmc and throws exception for wrong input with this message:"Bad input metric. usage --> pmc: [counter1] [counter2]"
 ### Added
 - Every API trace in V2 reported synchronously will have two records, one for Enter phase and for Exit phase
 - File Plugin now reports the HSA OPS operation kind as part of the output text

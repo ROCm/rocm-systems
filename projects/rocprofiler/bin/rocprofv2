@@ -256,6 +256,10 @@ PMC_LINES=()
 if [ -n "$COUNTERS_PATH" ]; then
   input=$COUNTERS_PATH
   while IFS= read -r line || [[ -n "$line" ]]; do
+    #skip empty lines
+    if [[ -z "$line" ]]; then
+         continue
+    fi
     # if in att mode, only add the first line
     if [[ ! -n "$PMC_LINES" ]] || [[ ! -n "$ATT_ARGV" ]]; then
     PMC_LINES+=( "$line" )

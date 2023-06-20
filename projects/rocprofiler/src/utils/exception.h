@@ -36,14 +36,16 @@ class Exception : public std::runtime_error {
   Exception() = delete;
 
   explicit Exception(rocprofiler_status_t status, const char* what_arg = "")
-      : std::runtime_error(std::string(rocprofiler_error_str(status)) + " " +
-                           what_arg),
+      : std::runtime_error(std::string(rocprofiler_error_str(status)) + " " + what_arg),
         status_(status) {}
-
   rocprofiler_status_t status() const noexcept { return status_; }
 
+  explicit Exception(const std::string& message) : std::runtime_error(message) { message_ = message; }
+  const char* what() const noexcept override { return message_.c_str(); }
+
  protected:
-  const rocprofiler_status_t status_;
+  rocprofiler_status_t status_;
+  std::string message_;
 };
 
 };  // namespace rocprofiler
