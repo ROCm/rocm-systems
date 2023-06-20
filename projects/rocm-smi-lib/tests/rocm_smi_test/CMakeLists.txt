@@ -35,17 +35,17 @@ set(CMAKE_INSTALL_RPATH
     ${RSMITST_RPATH})
 
 # Try to find googletest
-find_package(GTest 1.11.0)
+find_package(GTest 1.12.0)
 
 # GTest_FOUND is set to TRUE if ANY version is found
-# GTest_VERSION is set if 1.11.0 or newer version is found
+# GTest_VERSION is set if 1.12.0 or newer version is found
 if(NOT GTest_FOUND STREQUAL "TRUE" OR NOT DEFINED GTest_VERSION)
     # Google Test wasn't found. Download and compile ourselves
     include(FetchContent)
     FetchContent_Declare(
         googletest
         GIT_REPOSITORY https://github.com/google/googletest.git
-        GIT_TAG release-1.11.0)
+        GIT_TAG release-1.12.0)
     FetchContent_MakeAvailable(googletest)
 endif()
 
@@ -69,7 +69,7 @@ target_link_libraries(
     PUBLIC stdc++
     PUBLIC pthread)
 
-install(TARGETS ${RSMITST}
+install(TARGETS ${RSMITST} gtest gtest_main
     DESTINATION ${SHARE_INSTALL_PREFIX}/rsmitst_tests
     COMPONENT ${TESTS_COMPONENT})
 
