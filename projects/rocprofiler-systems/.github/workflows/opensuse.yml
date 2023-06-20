@@ -77,7 +77,7 @@ jobs:
           -DOMNITRACE_USE_PYTHON=ON
           -DOMNITRACE_USE_MPI_HEADERS=ON
           -DOMNITRACE_PYTHON_PREFIX=/opt/conda/envs
-          -DOMNITRACE_PYTHON_ENVS="py3.6;py3.7;py3.8;py3.9;py3.10"
+          -DOMNITRACE_PYTHON_ENVS="py3.6;py3.7;py3.8;py3.9;py3.10;py3.11"
           -DOMNITRACE_CI_MPI_RUN_AS_ROOT=ON
           -DOMNITRACE_MAX_THREADS=64
           -DOMNITRACE_DISABLE_EXAMPLES="transpose;rccl"
@@ -117,18 +117,20 @@ jobs:
         ./scripts/test-find-package.sh --install-dir /opt/omnitrace
 
     - name: CTest Artifacts
-      if: success() || failure()
+      if: failure()
+      continue-on-error: True
       uses: actions/upload-artifact@v3
       with:
-        name: ctest-${{ github.job }}-log
+        name: ctest-${{ github.job }}-${{ strategy.job-index }}-log
         path: |
           build/*.log
 
     - name: Data Artifacts
-      if: success() || failure()
+      if: failure()
+      continue-on-error: True
       uses: actions/upload-artifact@v3
       with:
-        name: data-${{ github.job }}-files
+        name: data-${{ github.job }}-${{ strategy.job-index }}-files
         path: |
           build/omnitrace-tests-config/*.cfg
           build/omnitrace-tests-output/**/*.txt

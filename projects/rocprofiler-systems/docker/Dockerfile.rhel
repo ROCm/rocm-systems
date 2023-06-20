@@ -11,6 +11,7 @@ WORKDIR /tmp
 SHELL [ "/bin/bash", "-c" ]
 
 ENV PATH /usr/local/bin:${PATH}
+ENV LIBRARY_PATH ${LIBRARY_PATH}:/opt/amdgpu/lib64
 
 RUN yum groupinstall -y "Development Tools" && \
     yum install -y epel-release && \
@@ -26,8 +27,7 @@ RUN if [ "${ROCM_VERSION}" != "0.0" ]; then \
         if [ "${OS_VERSION_MAJOR}" -eq 8 ]; then PERL_REPO=powertools; else PERL_REPO=crb; fi && \
         dnf -y --enablerepo=${PERL_REPO} install perl-File-BaseDir && \
         yum install -y https://repo.radeon.com/amdgpu-install/${AMDGPU_RPM} && \
-        amdgpu-install --usecase=rocm,hip --no-dkms --skip-broken -y && \
-        yum install -y rocm-smi-lib roctracer-dev rocprofiler-dev && \
+        yum install -y rocm-dev rocm-smi-lib roctracer-dev rocprofiler-dev libpciaccess && \
         yum clean all; \
     fi
 

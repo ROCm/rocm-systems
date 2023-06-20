@@ -62,6 +62,21 @@ jobs:
             static-libstdcxx: 'OFF'
             build-dyninst: 'OFF'
             rocm-version: '5.3'
+          - compiler: 'g++'
+            hip: 'ON'
+            mpi: 'OFF'
+            ompt: 'OFF'
+            papi: 'OFF'
+            python: 'ON'
+            lto: 'OFF'
+            strip: 'OFF'
+            hidden: 'ON'
+            build-type: 'Release'
+            mpi-headers: 'OFF'
+            static-libgcc: 'OFF'
+            static-libstdcxx: 'OFF'
+            build-dyninst: 'OFF'
+            rocm-version: 'latest'
 
     env:
       OMPI_ALLOW_RUN_AS_ROOT: 1
@@ -101,7 +116,8 @@ jobs:
           wget -q -O - https://repo.radeon.com/rocm/rocm.gpg.key | apt-key add -
           echo "deb [arch=amd64] https://repo.radeon.com/rocm/apt/${{ matrix.rocm-version }}/ jammy main" | tee /etc/apt/sources.list.d/rocm.list
           apt-get update
-          apt-get install -y {rocm-dev,hip-dev,roctracer-dev,rocprofiler-dev,rocm-smi-lib,rocminfo}${{ matrix.rocm-version }}.0
+          ROCM_VERSION=$(apt-cache search rocm-dev[0-9] | awk '{print $1}' | sed 's/rocm-dev//g')
+          apt-get install -y {rocm-dev,hip-dev,roctracer-dev,rocprofiler-dev,rocm-smi-lib,rocminfo}${ROCM_VERSION}
           echo "/opt/rocm/bin" >> $GITHUB_PATH
           echo "ROCM_PATH=/opt/rocm" >> $GITHUB_ENV
           echo "LD_LIBRARY_PATH=/opt/rocm/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
@@ -162,7 +178,7 @@ jobs:
           -DOMNITRACE_BUILD_STATIC_LIBGCC=${{ matrix.static-libgcc }}
           -DOMNITRACE_BUILD_STATIC_LIBSTDCXX=${{ matrix.static-libstdcxx }}
           -DOMNITRACE_PYTHON_PREFIX=/opt/conda/envs
-          -DOMNITRACE_PYTHON_ENVS="py3.7;py3.8;py3.9;py3.10"
+          -DOMNITRACE_PYTHON_ENVS="py3.7;py3.8;py3.9;py3.10;py3.11"
           -DOMNITRACE_STRIP_LIBRARIES=${{ matrix.strip }}
           -DOMNITRACE_MAX_THREADS=64
           -DOMNITRACE_DISABLE_EXAMPLES="transpose;rccl"
@@ -199,18 +215,20 @@ jobs:
         ./scripts/test-find-package.sh --install-dir /opt/omnitrace
 
     - name: CTest Artifacts
-      if: success() || failure()
+      if: failure()
+      continue-on-error: True
       uses: actions/upload-artifact@v3
       with:
-        name: ctest-${{ github.job }}-log
+        name: ctest-${{ github.job }}-${{ strategy.job-index }}-log
         path: |
           build/*.log
 
     - name: Data Artifacts
-      if: success() || failure()
+      if: failure()
+      continue-on-error: True
       uses: actions/upload-artifact@v3
       with:
-        name: data-${{ github.job }}-files
+        name: data-${{ github.job }}-${{ strategy.job-index }}-files
         path: |
           build/omnitrace-tests-config/*.cfg
           build/omnitrace-tests-output/**/*.txt

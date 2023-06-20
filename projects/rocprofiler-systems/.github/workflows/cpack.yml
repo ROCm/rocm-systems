@@ -10,6 +10,11 @@ on:
     paths-ignore:
       - '*.md'
       - 'source/docs/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/cpack.yml'
+      - 'docker/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -48,15 +53,6 @@ jobs:
             rocm-version: "0.0"
           - os-distro: "ubuntu"
             os-version: "20.04"
-            rocm-version: "4.5"
-          - os-distro: "ubuntu"
-            os-version: "20.04"
-            rocm-version: "5.0"
-          - os-distro: "ubuntu"
-            os-version: "20.04"
-            rocm-version: "5.1"
-          - os-distro: "ubuntu"
-            os-version: "20.04"
             rocm-version: "5.2"
           - os-distro: "ubuntu"
             os-version: "20.04"
@@ -64,6 +60,9 @@ jobs:
           - os-distro: "ubuntu"
             os-version: "20.04"
             rocm-version: "5.4"
+          - os-distro: "ubuntu"
+            os-version: "20.04"
+            rocm-version: "5.5"
           # ubuntu 22.04
           - os-distro: "ubuntu"
             os-version: "22.04"
@@ -74,21 +73,15 @@ jobs:
           - os-distro: "ubuntu"
             os-version: "22.04"
             rocm-version: "5.4"
+          - os-distro: "ubuntu"
+            os-version: "22.04"
+            rocm-version: "5.5"
           # opensuse 15.3
           - os-distro: "opensuse"
             os-version: "15.3"
             rocm-version: "0.0"
           - os-distro: "opensuse"
             os-version: "15.3"
-            rocm-version: "4.5"
-          - os-distro: "opensuse"
-            os-version: "15.3"
-            rocm-version: "5.0"
-          - os-distro: "opensuse"
-            os-version: "15.3"
-            rocm-version: "5.1"
-          - os-distro: "opensuse"
-            os-version: "15.3"
             rocm-version: "5.2"
           - os-distro: "opensuse"
             os-version: "15.3"
@@ -96,18 +89,15 @@ jobs:
           - os-distro: "opensuse"
             os-version: "15.3"
             rocm-version: "5.4"
+          - os-distro: "opensuse"
+            os-version: "15.3"
+            rocm-version: "5.5"
           # opensuse 15.4
           - os-distro: "opensuse"
             os-version: "15.4"
             rocm-version: "0.0"
           - os-distro: "opensuse"
             os-version: "15.4"
-            rocm-version: "5.0"
-          - os-distro: "opensuse"
-            os-version: "15.4"
-            rocm-version: "5.1"
-          - os-distro: "opensuse"
-            os-version: "15.4"
             rocm-version: "5.2"
           - os-distro: "opensuse"
             os-version: "15.4"
@@ -115,6 +105,9 @@ jobs:
           - os-distro: "opensuse"
             os-version: "15.4"
             rocm-version: "5.4"
+          - os-distro: "opensuse"
+            os-version: "15.4"
+            rocm-version: "5.5"
           # RHEL 8.7
           - os-distro: "rhel"
             os-version: "8.7"
@@ -125,6 +118,9 @@ jobs:
           - os-distro: "rhel"
             os-version: "8.7"
             rocm-version: "5.4"
+          - os-distro: "rhel"
+            os-version: "8.7"
+            rocm-version: "5.5"
           # RHEL 9.0
           - os-distro: "rhel"
             os-version: "9.0"
@@ -135,6 +131,9 @@ jobs:
           - os-distro: "rhel"
             os-version: "9.0"
             rocm-version: "5.4"
+          - os-distro: "rhel"
+            os-version: "9.0"
+            rocm-version: "5.5"
           # RHEL 9.1
           - os-distro: "rhel"
             os-version: "9.1"
@@ -145,6 +144,9 @@ jobs:
           - os-distro: "rhel"
             os-version: "9.1"
             rocm-version: "5.4"
+          - os-distro: "rhel"
+            os-version: "9.1"
+            rocm-version: "5.5"
 
     steps:
       - uses: actions/checkout@v3
