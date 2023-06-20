@@ -31,6 +31,7 @@
 #include "perfetto.hpp"
 #include "utility.hpp"
 
+#include <timemory/backends/capability.hpp>
 #include <timemory/backends/dmp.hpp>
 #include <timemory/backends/mpi.hpp>
 #include <timemory/backends/process.hpp>
@@ -40,6 +41,7 @@
 #include <timemory/log/color.hpp>
 #include <timemory/log/logger.hpp>
 #include <timemory/manager.hpp>
+#include <timemory/process/process.hpp>
 #include <timemory/sampling/allocator.hpp>
 #include <timemory/settings.hpp>
 #include <timemory/settings/types.hpp>
@@ -59,6 +61,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <limits>
+#include <linux/capability.h>
 #include <numeric>
 #include <ostream>
 #include <sstream>
@@ -944,7 +947,13 @@ configure_settings(bool _init)
         if(_fparanoid) _fparanoid >> _paranoid;
     }
 
-    if(_paranoid > 2)
+    auto  _cap_status        = timemory::linux::capability::cap_read(process::get_id());
+    auto* _cap_data          = &_cap_status.effective;
+    bool  _has_cap_sys_admin = false;
+    for(auto itr : timemory::linux::capability::cap_decode(*_cap_data))
+        if(itr == CAP_SYS_ADMIN) _has_cap_sys_admin = true;
+
+    if(_paranoid > 2 && !_has_cap_sys_admin)
     {
         OMNITRACE_BASIC_VERBOSE(0,
                                 "/proc/sys/kernel/perf_event_paranoid has a value of %i. "

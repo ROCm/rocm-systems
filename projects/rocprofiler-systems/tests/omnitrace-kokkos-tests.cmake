@@ -119,9 +119,8 @@ omnitrace_add_test(
         --dynamic-callsites
         -ME
         [==[libgomp]==]
-        -d
-        wall_clock
-        peak_rss
+        --env
+        OMNITRACE_TIMEMORY_COMPONENTS="wall_clock peak_rss"
     RUN_ARGS -i 10 -s 20 -p
     ENVIRONMENT
         "${_timemory_environment};OMNITRACE_CRITICAL_TRACE=OFF;OMNITRACE_USE_KOKKOSP=OFF"

@@ -995,22 +995,24 @@ function(OMNITRACE_ADD_VALIDATION_TEST)
             )
     endif()
 
-    add_test(
-        NAME validate-${TEST_NAME}-timemory
-        COMMAND
-            ${OMNITRACE_VALIDATION_PYTHON}
-            ${CMAKE_CURRENT_LIST_DIR}/validate-timemory-json.py -m ${TEST_TIMEMORY_METRIC}
-            ${TEST_ARGS} -i
-            ${PROJECT_BINARY_DIR}/omnitrace-tests-output/${TEST_NAME}/${TEST_TIMEMORY_FILE}
-        WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
+    if(TEST_TIMEMORY_FILE)
+        add_test(
+            NAME validate-${TEST_NAME}-timemory
+            COMMAND
+                ${OMNITRACE_VALIDATION_PYTHON}
+                ${CMAKE_CURRENT_LIST_DIR}/validate-timemory-json.py -m
+                "${TEST_TIMEMORY_METRIC}" ${TEST_ARGS} -i
+                ${PROJECT_BINARY_DIR}/omnitrace-tests-output/${TEST_NAME}/${TEST_TIMEMORY_FILE}
+            WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
+    endif()
 
-    if(OMNITRACE_VALIDATION_PYTHON_PERFETTO EQUAL 0)
+    if(OMNITRACE_VALIDATION_PYTHON_PERFETTO EQUAL 0 AND TEST_PERFETTO_FILE)
         add_test(
             NAME validate-${TEST_NAME}-perfetto
             COMMAND
                 ${OMNITRACE_VALIDATION_PYTHON}
                 ${CMAKE_CURRENT_LIST_DIR}/validate-perfetto-proto.py -m
-                ${TEST_PERFETTO_METRIC} ${TEST_ARGS} -i
+                "${TEST_PERFETTO_METRIC}" ${TEST_ARGS} -i
                 ${PROJECT_BINARY_DIR}/omnitrace-tests-output/${TEST_NAME}/${TEST_PERFETTO_FILE}
             WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
     endif()

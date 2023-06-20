@@ -71,6 +71,20 @@ if __name__ == "__main__":
         "-p", "--print", action="store_true", help="Print the processed perfetto data"
     )
     parser.add_argument("-i", "--input", type=str, help="Input file", required=True)
+    parser.add_argument(
+        "--key-names",
+        type=str,
+        help="Require debug args contain a specific key",
+        default=[],
+        nargs="*",
+    )
+    parser.add_argument(
+        "--key-counts",
+        type=int,
+        help="Required number of debug args",
+        default=[],
+        nargs="*",
+    )
 
     args = parser.parse_args()
 
@@ -128,6 +142,26 @@ if __name__ == "__main__":
     except RuntimeError as e:
         print(f"{e}")
         ret = 1
+
+    for key_name, key_count in zip(args.key_names, args.key_counts):
+        slice_args = tp.query(
+            f"select * from slice join args using (arg_set_id) where key='debug.{key_name}'"
+        )
+        count = 0
+        if args.print:
+            print(f"{key_name} (expected: {key_count}):")
+        for row in slice_args:
+            count += 1
+            if args.print:
+                for key, val in row.__dict__.items():
+                    print(f"  - {key:20} :: {val}")
+        print(f"Number of entries with {key_name} = {count} (expected: {key_count})")
+        if key_count != count:
+            ret = 1
+
     if ret == 0:
         print(f"{args.input} validated")
+    else:
+        print(f"Failure validating {args.input}")
+
     sys.exit(ret)

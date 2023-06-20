@@ -38,10 +38,17 @@
 #include "library/thread_data.hpp"
 #include "library/tracing/annotation.hpp"
 
+#include <timemory/components/io/components.hpp>
+#include <timemory/components/network/types.hpp>
+#include <timemory/components/papi/types.hpp>
+#include <timemory/components/rusage/components.hpp>
 #include <timemory/components/timing/backends.hpp>
+#include <timemory/components/timing/components.hpp>
+#include <timemory/enum.h>
 #include <timemory/hash/types.hpp>
 #include <timemory/mpl/concepts.hpp>
 #include <timemory/mpl/type_traits.hpp>
+#include <timemory/types.hpp>
 
 #include <atomic>
 #include <functional>
@@ -57,8 +64,15 @@ namespace omnitrace
 {
 namespace tracing
 {
-using interval_data_instances = thread_data<std::vector<bool>>;
-using hash_value_t            = tim::hash_value_t;
+using interval_data_instances           = thread_data<std::vector<bool>>;
+using hash_value_t                      = tim::hash_value_t;
+using perfetto_annotate_component_types = tim::mpl::available_t<type_list<
+    comp::cpu_clock, comp::cpu_util, comp::kernel_mode_time, comp::num_major_page_faults,
+    comp::num_minor_page_faults, comp::page_rss, comp::peak_rss, comp::papi_array_t,
+    comp::papi_vector, comp::priority_context_switch, comp::voluntary_context_switch,
+    comp::process_cpu_clock, comp::process_cpu_util, comp::system_clock,
+    comp::thread_cpu_clock, comp::thread_cpu_util, comp::user_clock, comp::user_mode_time,
+    comp::virtual_memory>>;
 
 //
 //  declarations
@@ -148,7 +162,7 @@ get_perfetto_track(CategoryT, FuncT&& _desc_generator, Args&&... _args)
     auto& _track_uuids = get_perfetto_track_uuids();
     if(_track_uuids.find(_uuid) == _track_uuids.end())
     {
-        const auto _track = TrackT(_uuid);
+        const auto _track = TrackT(_uuid, ::perfetto::ProcessTrack::Current());
         auto       _desc  = _track.Serialize();
 
         auto _name = std::forward<FuncT>(_desc_generator)(std::forward<Args>(_args)...);
@@ -172,7 +186,7 @@ get_perfetto_track(CategoryT, FuncT&& _desc_generator, Args&&... _args)
                        _uuid, _track_uuids.at(_uuid).c_str(), _name.c_str());
 #endif
 
-    return TrackT(_uuid);
+    return TrackT(_uuid, ::perfetto::ProcessTrack::Current());
 }
 
 template <typename Tp = uint64_t>
@@ -283,12 +297,13 @@ push_timemory(CategoryT, std::string_view name, Args&&... args)
     ++get_profile_stack<CategoryT>();
 }
 
-template <typename CategoryT, typename... Args>
-inline void
-pop_timemory(CategoryT, std::string_view name, Args&&... args)
+template <typename CategoryT>
+inline std::pair<instrumentation_bundle_t*, size_t>
+get_timemory(CategoryT, std::string_view name)
 {
+    using return_type = std::pair<instrumentation_bundle_t*, size_t>;
     // skip if category is disabled and not pushed on this thread
-    if(profile_pop_disabled<CategoryT>()) return;
+    if(profile_pop_disabled<CategoryT>()) return return_type{ nullptr, -1 };
 
     auto  _hash = tim::hash::get_hash_id(name);
     auto& _data = tracing::get_instrumentation_bundles();
@@ -296,18 +311,13 @@ pop_timemory(CategoryT, std::string_view name, Args&&... args)
     {
         OMNITRACE_DEBUG("[%s] skipped %s :: empty bundle stack\n", "omnitrace_pop_trace",
                         name.data());
-        return;
+        return return_type{ nullptr, -1 };
     }
 
     auto*& _v_back = _data.bundles.back();
     if(OMNITRACE_LIKELY(_v_back->get_hash() == _hash))
     {
-        // decrement the profile stack
-        --get_profile_stack<CategoryT>();
-        _v_back->stop(std::forward<Args>(args)...);
-        _data.allocator.destroy(_v_back);
-        _data.allocator.deallocate(_v_back, 1);
-        _data.bundles.erase(--_data.bundles.end());
+        return std::make_pair(_v_back, _data.bundles.size() - 1);
     }
     else if(_data.bundles.size() > 1)
     {
@@ -316,16 +326,52 @@ pop_timemory(CategoryT, std::string_view name, Args&&... args)
             auto*& _v = _data.bundles.at(i - 1);
             if(_v->get_hash() == _hash)
             {
-                // decrement the profile stack
-                --get_profile_stack<CategoryT>();
-                _v->stop(std::forward<Args>(args)...);
-                _data.allocator.destroy(_v);
-                _data.allocator.deallocate(_v, 1);
-                _data.bundles.erase(_data.bundles.begin() + (i - 1));
-                break;
+                return std::make_pair(_v, i - 1);
             }
         }
     }
+
+    return return_type{ nullptr, -1 };
+}
+
+template <typename CategoryT, typename... Args>
+inline auto
+stop_timemory(CategoryT, std::string_view name, Args&&... args)
+{
+    using return_type = std::pair<instrumentation_bundle_t*, size_t>;
+
+    // skip if category is disabled and not pushed on this thread
+    if(profile_pop_disabled<CategoryT>()) return return_type{ nullptr, -1 };
+
+    auto&& _data = get_timemory(CategoryT{}, name);
+    if(_data.first)
+    {
+        _data.first->stop(std::forward<Args>(args)...);
+    }
+    return _data;
+}
+
+inline void
+destroy_timemory(std::pair<instrumentation_bundle_t*, size_t> _data)
+{
+    if(_data.first)
+    {
+        auto& _bundles = tracing::get_instrumentation_bundles();
+        _bundles.allocator.destroy(_data.first);
+        _bundles.allocator.deallocate(_data.first, 1);
+        _bundles.bundles.erase(_bundles.bundles.begin() + _data.second);
+    }
+}
+
+template <typename CategoryT, typename... Args>
+inline void
+pop_timemory(CategoryT, std::string_view name, Args&&... args)
+{
+    // skip if category is disabled and not pushed on this thread
+    if(profile_pop_disabled<CategoryT>()) return;
+
+    auto _data = stop_timemory(CategoryT{}, name, std::forward<Args>(args)...);
+    if(_data.first) destroy_timemory(std::move(_data));
 }
 
 template <typename CategoryT, typename... Args>
@@ -384,6 +430,36 @@ push_perfetto(CategoryT, const char* name, Args&&... args)
     }
 }
 
+/// \brief This function is used to take an existing lambda accepting a
+/// perfetto::EventContext and append the timemory annotations. Examples
+/// are seen in the pop_perfetto* functions
+template <typename CategoryT, typename Arg>
+inline decltype(auto)
+perfetto_annotate_timemory_data(CategoryT, const char* name, Arg&& arg)
+{
+    if constexpr(std::is_invocable<Arg, ::perfetto::EventContext>::value)
+    {
+        return [&arg, name](::perfetto::EventContext _ctx) {
+            if(config::get_perfetto_annotations())
+            {
+                auto _timemory_data = get_timemory(CategoryT{}, name);
+                if(_timemory_data.first)
+                {
+                    _timemory_data.first->stop();
+                    _timemory_data.first
+                        ->template invoke_with<tim::operation::perfetto_annotate>(
+                            perfetto_annotate_component_types{}, _ctx);
+                }
+            }
+            std::forward<Arg>(arg)(std::move(_ctx));
+        };
+    }
+    else
+    {
+        return std::move(arg);
+    }
+}
+
 template <typename CategoryT, typename... Args>
 inline void
 pop_perfetto(CategoryT, const char* name, Args&&... args)
@@ -400,7 +476,8 @@ pop_perfetto(CategoryT, const char* name, Args&&... args)
         if(config::get_perfetto_annotations())
         {
             TRACE_EVENT_END(trait::name<CategoryT>::value, _ts, "end_ns", _ts,
-                            std::forward<Args>(args)...);
+                            perfetto_annotate_timemory_data(CategoryT{}, name,
+                                                            std::forward<Args>(args))...);
         }
         else
         {
@@ -428,14 +505,15 @@ pop_perfetto(CategoryT, const char* name, Args&&... args)
             // decrement tracing stack
             --get_tracing_stack<CategoryT>();
             uint64_t _ts = now();
-            TRACE_EVENT_END(trait::name<CategoryT>::value, _ts,
-                            std::forward<Args>(args)...,
-                            [&](::perfetto::EventContext ctx) {
-                                if(config::get_perfetto_annotations())
-                                {
-                                    tracing::add_perfetto_annotation(ctx, "end_ns", _ts);
-                                }
-                            });
+            TRACE_EVENT_END(
+                trait::name<CategoryT>::value, _ts, std::forward<Args>(args)...,
+                perfetto_annotate_timemory_data(
+                    CategoryT{}, name, [&](::perfetto::EventContext ctx) {
+                        if(config::get_perfetto_annotations())
+                        {
+                            tracing::add_perfetto_annotation(ctx, "end_ns", _ts);
+                        }
+                    }));
         }
     }
 
@@ -456,7 +534,7 @@ push_perfetto_ts(CategoryT, const char* name, uint64_t _ts, Args&&... args)
 
 template <typename CategoryT, typename... Args>
 inline void
-pop_perfetto_ts(CategoryT, const char*, uint64_t _ts, Args&&... args)
+pop_perfetto_ts(CategoryT, const char* name, uint64_t _ts, Args&&... args)
 {
     // skip if category is disabled and not pushed on this thread
     if(tracing_pop_disabled<CategoryT>()) return;
@@ -464,7 +542,9 @@ pop_perfetto_ts(CategoryT, const char*, uint64_t _ts, Args&&... args)
     // decrement tracing stack
     --get_tracing_stack<CategoryT>();
 
-    TRACE_EVENT_END(trait::name<CategoryT>::value, _ts, std::forward<Args>(args)...);
+    TRACE_EVENT_END(
+        trait::name<CategoryT>::value, _ts,
+        perfetto_annotate_timemory_data(CategoryT{}, name, std::forward<Args>(args))...);
 }
 
 template <typename CategoryT, typename... Args>
@@ -482,7 +562,7 @@ push_perfetto_track(CategoryT, const char* name, ::perfetto::Track _track, uint6
 
 template <typename CategoryT, typename... Args>
 inline void
-pop_perfetto_track(CategoryT, const char*, ::perfetto::Track _track, uint64_t _ts,
+pop_perfetto_track(CategoryT, const char* name, ::perfetto::Track _track, uint64_t _ts,
                    Args&&... args)
 {
     // skip if category is disabled and not pushed on this thread
@@ -491,8 +571,9 @@ pop_perfetto_track(CategoryT, const char*, ::perfetto::Track _track, uint64_t _t
     // decrement tracing stack
     --get_tracing_stack<CategoryT>();
 
-    TRACE_EVENT_END(trait::name<CategoryT>::value, _track, _ts,
-                    std::forward<Args>(args)...);
+    TRACE_EVENT_END(
+        trait::name<CategoryT>::value, _track, _ts,
+        perfetto_annotate_timemory_data(CategoryT{}, name, std::forward<Args>(args))...);
 }
 
 template <typename CategoryT, typename... Args>

@@ -32,6 +32,7 @@
 #include "omnitrace/categories.h"  // in omnitrace-user
 
 #include <timemory/mpl/concepts.hpp>
+#include <timemory/operations/types/get.hpp>
 
 #include <type_traits>
 
@@ -206,3 +207,90 @@ add_perfetto_annotation(perfetto_event_context_t&     ctx,
                         const omnitrace_annotation_t& _annotation);
 }  // namespace tracing
 }  // namespace omnitrace
+
+#include <timemory/operations/types/annotate.hpp>
+
+namespace tim
+{
+namespace operation
+{
+using perfetto_event_context_t = ::omnitrace::tracing::perfetto_event_context_t;
+
+template <typename Tp>
+struct annotate<perfetto_event_context_t, Tp>
+{
+    TIMEMORY_DEFAULT_OBJECT(annotate)
+
+    auto operator()(Tp& obj, perfetto_event_context_t& _ctx) const
+    {
+        return sfinae(obj, 0, _ctx);
+    }
+
+private:
+    //  If the component has a annotate(...) member function
+    template <typename T>
+    static auto sfinae(T& obj, int, perfetto_event_context_t& _ctx)
+        -> decltype(obj.annotate(_ctx))
+    {
+        static_assert(std::is_same<T, Tp>::value, "Error T != Tp");
+        return obj.annotate(_ctx);
+    }
+
+    //  If the component does not have a annotate(...) member function
+    template <typename T>
+    static void sfinae(T& obj, long, perfetto_event_context_t& _ctx)
+    {
+        static_assert(std::is_same<T, Tp>::value, "Error T != Tp");
+        using value_type = typename T::value_type;
+        if constexpr(!std::is_void<value_type>::value)
+        {
+            auto _obj_data = sfinae_data<Tp, decltype(obj.get())>(obj, 0);
+            for(size_t i = 0; i < std::get<0>(_obj_data); ++i)
+            {
+                auto&& _label = std::get<1>(_obj_data).at(i);
+                auto&& _value = std::get<2>(_obj_data).at(i);
+                ::omnitrace::tracing::add_perfetto_annotation(_ctx, _label, _value);
+            }
+        }
+        (void) _ctx;
+    }
+
+    template <typename T, typename DataT>
+    static auto sfinae_data(T& obj, int)
+        -> decltype(std::tuple<size_t, std::vector<std::string>, DataT>(obj.get().size(),
+                                                                        obj.label_array(),
+                                                                        obj.get()))
+    {
+        static_assert(std::is_same<T, Tp>::value, "Error T != Tp");
+        auto _labels = obj.label_array();
+        auto _data   = obj.get();
+        auto _size   = std::min<size_t>(_labels.size(), _data.size());
+        return std::make_tuple(_size, _labels, _data);
+    }
+
+    template <typename T, typename DataT>
+    static auto sfinae_data(T& obj, long)
+    {
+        using strvec_t    = std::vector<std::string>;
+        using datavec_t   = std::vector<DataT>;
+        size_t    _size   = 1;
+        strvec_t  _labels = { obj.get_label() };
+        datavec_t _data   = { obj.get() };
+        return std::tuple<size_t, strvec_t, datavec_t>{ _size, _labels, _data };
+    }
+};
+
+template <typename Tp>
+struct perfetto_annotate : annotate<perfetto_event_context_t, Tp>
+{
+    using base_type = annotate<perfetto_event_context_t, Tp>;
+
+    TIMEMORY_DEFAULT_OBJECT(perfetto_annotate)
+
+    auto operator()(Tp& obj, perfetto_event_context_t& _ctx) const
+    {
+        return base_type::operator()(obj, _ctx);
+    }
+};
+}  // namespace operation
+}  // namespace tim

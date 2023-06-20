@@ -180,19 +180,19 @@ category_region<CategoryT>::start(std::string_view name, Args&&... args)
         }
     }
 
-    if constexpr(_ct_use_perfetto)
-    {
-        if(get_use_perfetto())
-        {
-            tracing::push_perfetto(CategoryT{}, name.data(), std::forward<Args>(args)...);
-        }
-    }
-
     if constexpr(_ct_use_timemory)
     {
         if(get_use_timemory())
         {
             tracing::push_timemory(CategoryT{}, name, std::forward<Args>(args)...);
+        }
+    }
+
+    if constexpr(_ct_use_perfetto)
+    {
+        if(get_use_perfetto())
+        {
+            tracing::push_perfetto(CategoryT{}, name.data(), std::forward<Args>(args)...);
         }
     }
 
@@ -250,20 +250,20 @@ category_region<CategoryT>::stop(std::string_view name, Args&&... args)
             ++tracing::pop_count();
         }
 
-        if constexpr(_ct_use_timemory)
-        {
-            if(get_use_timemory())
-            {
-                tracing::pop_timemory(CategoryT{}, name, std::forward<Args>(args)...);
-            }
-        }
-
         if constexpr(_ct_use_perfetto)
         {
             if(get_use_perfetto())
             {
                 tracing::pop_perfetto(CategoryT{}, name.data(),
                                       std::forward<Args>(args)...);
+            }
+        }
+
+        if constexpr(_ct_use_timemory)
+        {
+            if(get_use_timemory())
+            {
+                tracing::pop_timemory(CategoryT{}, name, std::forward<Args>(args)...);
             }
         }
 

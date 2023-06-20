@@ -113,11 +113,10 @@ bool   include_internal_linked_libs = false;
 int    verbose_level   = tim::get_env<int>("OMNITRACE_VERBOSE_INSTRUMENT", 0);
 int    num_log_entries = tim::get_env<int>(
     "OMNITRACE_LOG_COUNT", tim::get_env<bool>("OMNITRACE_CI", false) ? 20 : 50);
-string_t main_fname         = "main";
-string_t argv0              = {};
-string_t cmdv0              = {};
-string_t default_components = "wall_clock";
-string_t prefer_library     = {};
+string_t main_fname     = "main";
+string_t argv0          = {};
+string_t cmdv0          = {};
+string_t prefer_library = {};
 //
 //  global variables
 //
@@ -875,33 +874,6 @@ main(int argc, char** argv)
         .min_count(1)
         .description("Read in a configuration file and encode these values as the "
                      "defaults in the executable");
-    parser.add_argument()
-        .names({ "-d", "--default-components" })
-        .dtype("string")
-        .description("Default components to instrument (only useful when timemory is "
-                     "enabled in omnitrace library)")
-        .action([](parser_t& p) {
-            auto _components   = p.get<strvec_t>("default-components");
-            default_components = {};
-            for(size_t i = 0; i < _components.size(); ++i)
-            {
-                if(_components.at(i) == "none")
-                {
-                    default_components = "none";
-                    break;
-                }
-                default_components += _components.at(i);
-                if(i + 1 < _components.size()) default_components += ",";
-            }
-            if(default_components == "none")
-                default_components = {};
-            else
-            {
-                auto _strcomp = p.get<std::string>("default-components");
-                if(!_strcomp.empty() && default_components.empty())
-                    default_components = _strcomp;
-            }
-        });
     parser.add_argument({ "--env" },
                         "Environment variables to add to the runtime in form "
                         "VARIABLE=VALUE. E.g. use '--env OMNITRACE_USE_TIMEMORY=ON' to "
@@ -1427,8 +1399,6 @@ main(int argc, char** argv)
         TIMEMORY_JOIN('=', "OMNITRACE_INSTRUMENT_MODE", instr_mode_v_int));
     env_vars.emplace_back(TIMEMORY_JOIN('=', "OMNITRACE_MPI_INIT", "OFF"));
     env_vars.emplace_back(TIMEMORY_JOIN('=', "OMNITRACE_MPI_FINALIZE", "OFF"));
-    env_vars.emplace_back(
-        TIMEMORY_JOIN('=', "OMNITRACE_TIMEMORY_COMPONENTS", default_components));
     env_vars.emplace_back(TIMEMORY_JOIN('=', "OMNITRACE_USE_CODE_COVERAGE",
                                         (coverage_mode != CODECOV_NONE) ? "ON" : "OFF"));
 
