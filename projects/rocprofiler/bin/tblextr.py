@@ -737,7 +737,9 @@ def fill_ops_db(kernel_table_name, mcopy_table_name, db, indir):
           if roctx_range == '': roctx_range = name
         else:
           if is_barrier: continue
-          else: fatal("hcc ops data not found: '" + record + "', " + str(corr_id) + ", " + str(proc_id))
+          else:
+            if "ROCP_CTRL_RATE" in os.environ: continue
+            else: fatal("hcc ops data not found: '" + record + "', " + str(corr_id) + ", " + str(proc_id))
 
         # activity record
         rec_vals[4] = name                       # Name

@@ -36,7 +36,7 @@ THE SOFTWARE.
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/syscall.h>   /* For SYS_xxx definitions */
+#include <sys/syscall.h> /* For SYS_xxx definitions */
 #include <sys/types.h>
 #include <unistd.h>
 
@@ -60,10 +60,12 @@ THE SOFTWARE.
 #define DESTRUCTOR_API __attribute__((destructor))
 #define KERNEL_NAME_LEN_MAX 128
 
-#define ONLOAD_TRACE(str) \
-  if (getenv("ROCP_ONLOAD_TRACE")) do { \
-    std::cout << "PID(" << GetPid() << "): PROF_TOOL_LIB::" << __FUNCTION__ << " " << str << std::endl << std::flush; \
-  } while(0);
+#define ONLOAD_TRACE(str)                                                                          \
+  if (getenv("ROCP_ONLOAD_TRACE")) do {                                                            \
+      std::cout << "PID(" << GetPid() << "): PROF_TOOL_LIB::" << __FUNCTION__ << " " << str        \
+                << std::endl                                                                       \
+                << std::flush;                                                                     \
+    } while (0);
 #define ONLOAD_TRACE_BEG() ONLOAD_TRACE("begin")
 #define ONLOAD_TRACE_END() ONLOAD_TRACE("end")
 
@@ -175,6 +177,30 @@ void check_status(hsa_status_t status) {
 }
 
 //////////////////////////////////////////////////////////////////////////////////////
+// Profiling control thread /////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////////////////////////////
+uint32_t control_delay_us = 0;
+uint32_t control_len_us = 0;
+uint32_t control_dist_us = 0;
+std::thread* trace_period_thread = nullptr;
+std::atomic<bool> trace_period_stop{false};
+std::atomic<bool> allow_profiling{false};
+void trace_period_fun() {
+  std::this_thread::sleep_for(std::chrono::milliseconds(control_delay_us));
+  do {
+    allow_profiling = true;
+    if (trace_period_stop) {
+      allow_profiling = false;
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(control_len_us));
+    allow_profiling = false;
+    if (trace_period_stop) break;
+    std::this_thread::sleep_for(std::chrono::milliseconds(control_dist_us));
+  } while (!trace_period_stop);
+}
+
+//////////////////////////////////////////////////////////////////////////////////////
 // Dispatch opt code /////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////////////////
 // Context callback arg
@@ -249,7 +275,9 @@ void* monitor_thr_fun(void*) {
     const uint32_t inflight = context_count - context_collected;
     std::cerr << std::flush;
     std::clog << std::flush;
-    std::cout << "ROCProfiler: count(" << context_count << "), outstanding(" << inflight << "/" << CTX_OUTSTANDING_MAX << ")" << std::endl << std::flush;
+    std::cout << "ROCProfiler: count(" << context_count << "), outstanding(" << inflight << "/"
+              << CTX_OUTSTANDING_MAX << ")" << std::endl
+              << std::flush;
     if (pthread_mutex_unlock(&mutex) != 0) {
       perror("pthread_mutex_unlock");
       abort();
@@ -275,7 +303,7 @@ uint32_t next_context_count() {
 // Allocate entry to store profiling context
 context_entry_t* alloc_context_entry() {
   if (CTX_OUTSTANDING_MAX != 0) {
-    while((context_count - context_collected) > CTX_OUTSTANDING_MAX) usleep(1000);
+    while ((context_count - context_collected) > CTX_OUTSTANDING_MAX) usleep(1000);
   }
 
   if (pthread_mutex_lock(&mutex) != 0) {
@@ -325,8 +353,10 @@ context_entry_t* ck_ctx_entry(hsa_agent_t agent, bool& found) {
   if (ctx_a_map == NULL) ctx_a_map = new ctx_a_map_t;
   auto ret = ctx_a_map->insert({agent.handle, NULL});
   found = !ret.second;
-  if (found) ctx_a_map->erase(agent.handle);
-  else ret.first->second = new context_entry_t{};
+  if (found)
+    ctx_a_map->erase(agent.handle);
+  else
+    ret.first->second = new context_entry_t{};
   return ret.first->second;
 }
 
@@ -398,32 +428,27 @@ bool dump_context_entry(context_entry_t* entry, bool to_clean = true) {
   const uint32_t index = entry->index;
   if (index != UINT32_MAX) {
     FILE* file_handle = entry->file_handle;
-    const std::string nik_name = (to_truncate_names == 0) ? entry->data.kernel_name : filtr_kernel_name(entry->data.kernel_name);
+    const std::string nik_name = (to_truncate_names == 0)
+        ? entry->data.kernel_name
+        : filtr_kernel_name(entry->data.kernel_name);
     const AgentInfo* agent_info = HsaRsrcFactory::Instance().GetAgentInfo(entry->agent);
 
-    fprintf(file_handle, "dispatch[%u], gpu-id(%u), queue-id(%u), queue-index(%lu), pid(%u), tid(%u), grd(%u), wgr(%u), lds(%u), scr(%u), arch_vgpr(%u), accum_vgpr(%u), sgpr(%u), wave_size(%u), sig(0x%lx), obj(0x%lx), kernel-name(\"%s\")",
-      index,
-      agent_info->dev_index,
-      entry->data.queue_id,
-      entry->data.queue_index,
-      my_pid,
-      entry->data.thread_id,
-      entry->kernel_properties.grid_size,
-      entry->kernel_properties.workgroup_size,
-      (entry->kernel_properties.lds_size + (AgentInfo::lds_block_size - 1)) & ~(AgentInfo::lds_block_size - 1),
-      entry->kernel_properties.scratch_size,
-      entry->kernel_properties.arch_vgpr_count,
-      entry->kernel_properties.accum_vgpr_count,
-      entry->kernel_properties.sgpr_count,
-      entry->kernel_properties.wave_size,
-      entry->kernel_properties.signal.handle,
-      entry->kernel_properties.object,
-      nik_name.c_str());
-    if (record) fprintf(file_handle, ", time(%lu,%lu,%lu,%lu)",
-      record->dispatch,
-      record->begin,
-      record->end,
-      record->complete);
+    fprintf(file_handle,
+            "dispatch[%u], gpu-id(%u), queue-id(%u), queue-index(%lu), pid(%u), tid(%u), grd(%u), "
+            "wgr(%u), lds(%u), scr(%u), arch_vgpr(%u), accum_vgpr(%u), sgpr(%u), wave_size(%u), "
+            "sig(0x%lx), obj(0x%lx), kernel-name(\"%s\")",
+            index, agent_info->dev_index, entry->data.queue_id, entry->data.queue_index, my_pid,
+            entry->data.thread_id, entry->kernel_properties.grid_size,
+            entry->kernel_properties.workgroup_size,
+            (entry->kernel_properties.lds_size + (AgentInfo::lds_block_size - 1)) &
+                ~(AgentInfo::lds_block_size - 1),
+            entry->kernel_properties.scratch_size, entry->kernel_properties.arch_vgpr_count,
+            entry->kernel_properties.accum_vgpr_count, entry->kernel_properties.sgpr_count,
+            entry->kernel_properties.wave_size, entry->kernel_properties.signal.handle,
+            entry->kernel_properties.object, nik_name.c_str());
+    if (record)
+      fprintf(file_handle, ", time(%lu,%lu,%lu,%lu)", record->dispatch, record->begin, record->end,
+              record->complete);
     fprintf(file_handle, "\n");
     fflush(file_handle);
   }
@@ -475,8 +500,10 @@ void dump_context_array(hsa_queue_t* queue) {
         while (valid->load() == false) sched_yield();
         if ((queue == NULL) || (entry->data.queue == queue)) {
           if (entry->active == true) {
-            if (dump_context_entry(&(cur->second)) == false) done = false;
-            else entry->active = false;
+            if (dump_context_entry(&(cur->second)) == false)
+              done = false;
+            else
+              entry->active = false;
           }
         }
       }
@@ -511,7 +538,8 @@ bool context_handler(rocprofiler_group_t group, void* arg) {
   if (ret) dealloc_context_entry(entry);
 
   if (trace_on) {
-    fprintf(stdout, "tool::handler: context_array %d tid %u\n", (int)(context_array->size()), GetTid());
+    fprintf(stdout, "tool::handler: context_array %d tid %u\n", (int)(context_array->size()),
+            GetTid());
     fflush(stdout);
   }
 
@@ -570,7 +598,8 @@ bool context_handler_con(rocprofiler_group_t group, void* arg) {
   }
 
   if (trace_on) {
-    fprintf(stdout, "tool::handler_con: context_map %d tid %u\n", (int)(ctx_a_map->size()), GetTid());
+    fprintf(stdout, "tool::handler_con: context_map %d tid %u\n", (int)(ctx_a_map->size()),
+            GetTid());
     fflush(stdout);
   }
 
@@ -582,7 +611,8 @@ bool context_handler_con(rocprofiler_group_t group, void* arg) {
   return false;
 }
 
-bool check_filter(const rocprofiler_callback_data_t* callback_data, const callbacks_data_t* tool_data) {
+bool check_filter(const rocprofiler_callback_data_t* callback_data,
+                  const callbacks_data_t* tool_data) {
   bool found = true;
 
   std::vector<uint32_t>* range_ptr = tool_data->range;
@@ -604,7 +634,7 @@ bool check_filter(const rocprofiler_callback_data_t* callback_data, const callba
       }
     }
   }
-  std::vector<std::string>* kernel_string  = tool_data->kernel_string;
+  std::vector<std::string>* kernel_string = tool_data->kernel_string;
   if (found && kernel_string) {
     found = false;
     for (const std::string& s : *kernel_string) {
@@ -643,8 +673,9 @@ enum amd_compute_gfx10_gfx11_pgm_rsrc_three_t {
 };
 
 // Kernel code properties.
-enum amd_kernel_code_property_t  {
-  AMD_HSA_BITS_CREATE_ENUM_ENTRIES(AMD_KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER, 0, 1),
+enum amd_kernel_code_property_t {
+  AMD_HSA_BITS_CREATE_ENUM_ENTRIES(AMD_KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER, 0,
+                                   1),
   AMD_HSA_BITS_CREATE_ENUM_ENTRIES(AMD_KERNEL_CODE_PROPERTY_ENABLE_SGPR_DISPATCH_PTR, 1, 1),
   AMD_HSA_BITS_CREATE_ENUM_ENTRIES(AMD_KERNEL_CODE_PROPERTY_ENABLE_SGPR_QUEUE_PTR, 2, 1),
   AMD_HSA_BITS_CREATE_ENUM_ENTRIES(AMD_KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 3, 1),
@@ -652,7 +683,8 @@ enum amd_kernel_code_property_t  {
   AMD_HSA_BITS_CREATE_ENUM_ENTRIES(AMD_KERNEL_CODE_PROPERTY_ENABLE_SGPR_FLAT_SCRATCH_INIT, 5, 1),
   AMD_HSA_BITS_CREATE_ENUM_ENTRIES(AMD_KERNEL_CODE_PROPERTY_ENABLE_SGPR_PRIVATE_SEGMENT_SIZE, 6, 1),
   AMD_HSA_BITS_CREATE_ENUM_ENTRIES(AMD_KERNEL_CODE_PROPERTY_RESERVED0, 7, 3),
-  AMD_HSA_BITS_CREATE_ENUM_ENTRIES(AMD_KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32, 10, 1), // GFX10+
+  AMD_HSA_BITS_CREATE_ENUM_ENTRIES(AMD_KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32, 10,
+                                   1),  // GFX10+
   AMD_HSA_BITS_CREATE_ENUM_ENTRIES(AMD_KERNEL_CODE_PROPERTY_USES_DYNAMIC_STACK, 11, 1),
   AMD_HSA_BITS_CREATE_ENUM_ENTRIES(AMD_KERNEL_CODE_PROPERTY_RESERVED1, 12, 4),
 };
@@ -669,38 +701,48 @@ static const kernel_descriptor_t* GetKernelCode(uint64_t kernel_object) {
   return kernel_code;
 }
 
-static uint32_t arch_vgpr_count(const AgentInfo &info, const kernel_descriptor_t &kernel_code) {
+static uint32_t arch_vgpr_count(const AgentInfo& info, const kernel_descriptor_t& kernel_code) {
   if (strcmp(info.name, "gfx90a") == 0 || strncmp(info.name, "gfx94", 5) == 0)
-    return (AMD_HSA_BITS_GET(kernel_code.compute_pgm_rsrc3, AMD_COMPUTE_PGM_RSRC_THREE_ACCUM_OFFSET) + 1) * 4;
+    return (AMD_HSA_BITS_GET(kernel_code.compute_pgm_rsrc3,
+                             AMD_COMPUTE_PGM_RSRC_THREE_ACCUM_OFFSET) +
+            1) *
+        4;
 
-  return (AMD_HSA_BITS_GET(kernel_code.compute_pgm_rsrc1, AMD_COMPUTE_PGM_RSRC_ONE_GRANULATED_WORKITEM_VGPR_COUNT) + 1)
-    * (AMD_HSA_BITS_GET(kernel_code.kernel_code_properties, AMD_KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32) ? 8 : 4);
+  return (AMD_HSA_BITS_GET(kernel_code.compute_pgm_rsrc1,
+                           AMD_COMPUTE_PGM_RSRC_ONE_GRANULATED_WORKITEM_VGPR_COUNT) +
+          1) *
+      (AMD_HSA_BITS_GET(kernel_code.kernel_code_properties,
+                        AMD_KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32)
+           ? 8
+           : 4);
 }
 
-static uint32_t accum_vgpr_count(const AgentInfo &info, const kernel_descriptor_t &kernel_code) {
-  if (strcmp(info.name, "gfx908") == 0)
-    return arch_vgpr_count(info, kernel_code);
+static uint32_t accum_vgpr_count(const AgentInfo& info, const kernel_descriptor_t& kernel_code) {
+  if (strcmp(info.name, "gfx908") == 0) return arch_vgpr_count(info, kernel_code);
   if (strcmp(info.name, "gfx90a") == 0 || strncmp(info.name, "gfx94", 5) == 0)
     return (AMD_HSA_BITS_GET(kernel_code.compute_pgm_rsrc1,
-                             AMD_COMPUTE_PGM_RSRC_ONE_GRANULATED_WORKITEM_VGPR_COUNT) + 1) * 8
-      - arch_vgpr_count(info, kernel_code);
+                             AMD_COMPUTE_PGM_RSRC_ONE_GRANULATED_WORKITEM_VGPR_COUNT) +
+            1) *
+        8 -
+        arch_vgpr_count(info, kernel_code);
 
   return 0;
 }
 
-static uint32_t sgpr_count(const AgentInfo &info, const kernel_descriptor_t &kernel_code) {
+static uint32_t sgpr_count(const AgentInfo& info, const kernel_descriptor_t& kernel_code) {
   // GFX10 and later always allocate 128 sgprs.
-  if (std::atoi(&info.gfxip[3]) >= 10)
-    return 128;
+  if (std::atoi(&info.gfxip[3]) >= 10) return 128;
 
   return (AMD_HSA_BITS_GET(kernel_code.compute_pgm_rsrc1,
-                           AMD_COMPUTE_PGM_RSRC_ONE_GRANULATED_WAVEFRONT_SGPR_COUNT) / 2 + 1) * 16;
+                           AMD_COMPUTE_PGM_RSRC_ONE_GRANULATED_WAVEFRONT_SGPR_COUNT) /
+              2 +
+          1) *
+      16;
 }
 
 // Setting kernel properties
 void set_kernel_properties(const rocprofiler_callback_data_t* callback_data,
-                           context_entry_t* entry)
-{
+                           context_entry_t* entry) {
   const hsa_kernel_dispatch_packet_t* packet = callback_data->packet;
   kernel_properties_t* kernel_properties_ptr = &(entry->kernel_properties);
   const kernel_descriptor_t* kernel_code = (kernel_descriptor_t*)callback_data->kernel_code;
@@ -718,18 +760,22 @@ void set_kernel_properties(const rocprofiler_callback_data_t* callback_data,
   uint64_t grid_size = packet->grid_size_x * packet->grid_size_y * packet->grid_size_z;
   if (grid_size > UINT32_MAX) abort();
   kernel_properties_ptr->grid_size = (uint32_t)grid_size;
-  uint64_t workgroup_size = packet->workgroup_size_x * packet->workgroup_size_y * packet->workgroup_size_z;
+  uint64_t workgroup_size =
+      packet->workgroup_size_x * packet->workgroup_size_y * packet->workgroup_size_z;
   if (workgroup_size > UINT32_MAX) abort();
   kernel_properties_ptr->workgroup_size = (uint32_t)workgroup_size;
   kernel_properties_ptr->lds_size = packet->group_segment_size;
   kernel_properties_ptr->scratch_size = packet->private_segment_size;
   const AgentInfo* agent_info = HsaRsrcFactory::Instance().GetAgentInfo(callback_data->agent);
-  assert (agent_info != nullptr);
+  assert(agent_info != nullptr);
   kernel_properties_ptr->arch_vgpr_count = arch_vgpr_count(*agent_info, *kernel_code);
   kernel_properties_ptr->accum_vgpr_count = accum_vgpr_count(*agent_info, *kernel_code);
   kernel_properties_ptr->sgpr_count = sgpr_count(*agent_info, *kernel_code);
-  kernel_properties_ptr->wave_size = AMD_HSA_BITS_GET(kernel_code->kernel_code_properties,
-                                                      AMD_KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32) ? 32 : 64;
+  kernel_properties_ptr->wave_size =
+      AMD_HSA_BITS_GET(kernel_code->kernel_code_properties,
+                       AMD_KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32)
+      ? 32
+      : 64;
   kernel_properties_ptr->signal = callback_data->completion_signal;
   kernel_properties_ptr->object = callback_data->packet->kernel_object;
 }
@@ -737,6 +783,7 @@ void set_kernel_properties(const rocprofiler_callback_data_t* callback_data,
 // Kernel disoatch callback
 hsa_status_t dispatch_callback(const rocprofiler_callback_data_t* callback_data, void* user_data,
                                rocprofiler_group_t* group) {
+  if(!allow_profiling) return HSA_STATUS_SUCCESS;
   // TODO: return success, make atomic flag
   // Passed tool data
   callbacks_data_t* tool_data = reinterpret_cast<callbacks_data_t*>(user_data);
@@ -781,8 +828,8 @@ hsa_status_t dispatch_callback(const rocprofiler_callback_data_t* callback_data,
 
   // Open profiling context
   rocprofiler_t* context = NULL;
-  status = rocprofiler_open(callback_data->agent, features, feature_count,
-                            &context, 0 /*ROCPROFILER_MODE_SINGLEGROUP*/, &properties);
+  status = rocprofiler_open(callback_data->agent, features, feature_count, &context,
+                            0 /*ROCPROFILER_MODE_SINGLEGROUP*/, &properties);
   check_status(status);
 
   // Check that we have only one profiling group
@@ -805,7 +852,8 @@ hsa_status_t dispatch_callback(const rocprofiler_callback_data_t* callback_data,
   reinterpret_cast<std::atomic<bool>*>(&entry->valid)->store(true);
 
   if (trace_on) {
-    fprintf(stdout, "tool::dispatch: context_array %d tid %u\n", (int)(context_array->size()), GetTid());
+    fprintf(stdout, "tool::dispatch: context_array %d tid %u\n", (int)(context_array->size()),
+            GetTid());
     fflush(stdout);
   }
 
@@ -813,8 +861,8 @@ hsa_status_t dispatch_callback(const rocprofiler_callback_data_t* callback_data,
 }
 
 // Kernel disoatch callback
-hsa_status_t dispatch_callback_opt(const rocprofiler_callback_data_t* callback_data, void* user_data,
-                               rocprofiler_group_t* group) {
+hsa_status_t dispatch_callback_opt(const rocprofiler_callback_data_t* callback_data,
+                                   void* user_data, rocprofiler_group_t* group) {
   hsa_status_t status = HSA_STATUS_ERROR;
   hsa_agent_t agent = callback_data->agent;
   const unsigned gpu_id = HsaRsrcFactory::Instance().GetAgentInfo(agent)->dev_index;
@@ -847,19 +895,20 @@ hsa_status_t destroy_callback(hsa_queue_t* queue, void*) {
   return HSA_STATUS_SUCCESS;
 }
 
-static hsa_status_t info_callback(const rocprofiler_info_data_t info, void * arg) {
+static hsa_status_t info_callback(const rocprofiler_info_data_t info, void* arg) {
   const char symb = *reinterpret_cast<const char*>(arg);
   if (((symb == 'b') && (info.metric.expr == NULL)) ||
-      ((symb == 'd') && (info.metric.expr != NULL)))
-  {
+      ((symb == 'd') && (info.metric.expr != NULL))) {
     if (info.metric.expr != NULL) {
-      fprintf(stdout, "\n  gpu-agent%d : %s : %s\n", info.agent_index, info.metric.name, info.metric.description);
+      fprintf(stdout, "\n  gpu-agent%d : %s : %s\n", info.agent_index, info.metric.name,
+              info.metric.description);
       fprintf(stdout, "      %s = %s\n", info.metric.name, info.metric.expr);
     } else {
       fprintf(stdout, "\n  gpu-agent%d : %s", info.agent_index, info.metric.name);
       if (info.metric.instances > 1) fprintf(stdout, "[0-%u]", info.metric.instances - 1);
       fprintf(stdout, " : %s\n", info.metric.description);
-      fprintf(stdout, "      block %s has %u counters\n", info.metric.block_name, info.metric.block_counters);
+      fprintf(stdout, "      block %s has %u counters\n", info.metric.block_name,
+              info.metric.block_counters);
     }
     fflush(stdout);
   }
@@ -873,11 +922,14 @@ std::string normalize_token(const std::string& token, bool not_empty, const std:
   std::string error_str = "none";
   if (first_pos != std::string::npos) {
     const size_t last_pos = token.find_last_not_of(space_chars_set);
-    if (last_pos == std::string::npos) error_str = "token string error: \"" + token + "\"";
+    if (last_pos == std::string::npos)
+      error_str = "token string error: \"" + token + "\"";
     else {
       const size_t end_pos = last_pos + 1;
-      if (end_pos <= first_pos) error_str = "token string error: \"" + token + "\"";
-      else norm_len = end_pos - first_pos;
+      if (end_pos <= first_pos)
+        error_str = "token string error: \"" + token + "\"";
+      else
+        norm_len = end_pos - first_pos;
     }
   }
   if (((first_pos != std::string::npos) && (norm_len == 0)) ||
@@ -887,7 +939,8 @@ std::string normalize_token(const std::string& token, bool not_empty, const std:
   return (norm_len != 0) ? token.substr(first_pos, norm_len) : std::string("");
 }
 
-int get_xml_array(const xml::Xml::level_t* node, const std::string& field, const std::string& delim, std::vector<std::string>* vec, const char* label = NULL) {
+int get_xml_array(const xml::Xml::level_t* node, const std::string& field, const std::string& delim,
+                  std::vector<std::string>* vec, const char* label = NULL) {
   int parse_iter = 0;
   const auto& opts = node->opts;
   auto it = opts.find(field);
@@ -911,7 +964,9 @@ int get_xml_array(const xml::Xml::level_t* node, const std::string& field, const
   return parse_iter;
 }
 
-int get_xml_array(xml::Xml* xml, const std::string& tag, const std::string& field, const std::string& delim, std::vector<std::string>* vec, const char* label = NULL) {
+int get_xml_array(xml::Xml* xml, const std::string& tag, const std::string& field,
+                  const std::string& delim, std::vector<std::string>* vec,
+                  const char* label = NULL) {
   int parse_iter = 0;
   const auto nodes = xml->GetNodes(tag);
   auto rit = nodes.rbegin();
@@ -923,12 +978,13 @@ int get_xml_array(xml::Xml* xml, const std::string& tag, const std::string& fiel
   }
   if (rit != rend) {
     parse_iter = get_xml_array(*rit, field, delim, vec, label);
-    //fatal("Tokens array parsing error, file '" + xml->GetName() + "', " + tag + "::" + field);
+    // fatal("Tokens array parsing error, file '" + xml->GetName() + "', " + tag + "::" + field);
   }
   return parse_iter;
 }
 
-int get_xml_array(xml::Xml* xml, const std::string& tag, const std::string& field, const std::string& delim, std::vector<uint32_t>* vec, const char* label = NULL) {
+int get_xml_array(xml::Xml* xml, const std::string& tag, const std::string& field,
+                  const std::string& delim, std::vector<uint32_t>* vec, const char* label = NULL) {
   std::vector<std::string> str_vec;
   const int parse_iter = get_xml_array(xml, tag, field, delim, &str_vec, label);
   for (const std::string& str : str_vec) vec->push_back(atoi(str.c_str()));
@@ -937,21 +993,18 @@ int get_xml_array(xml::Xml* xml, const std::string& tag, const std::string& fiel
 
 static inline void check_env_var(const char* var_name, uint32_t& val) {
   const char* str = getenv(var_name);
-  if (str != NULL ) val = atol(str);
+  if (str != NULL) val = atol(str);
 }
 static inline void check_env_var(const char* var_name, uint64_t& val) {
   const char* str = getenv(var_name);
-  if (str != NULL ) val = atoll(str);
+  if (str != NULL) val = atoll(str);
 }
 
 // HSA intercepting routines
 
 // HSA unified callback function
-hsa_status_t hsa_unified_callback(
-  rocprofiler_hsa_cb_id_t id,
-  const rocprofiler_hsa_callback_data_t* data,
-  void* arg)
-{
+hsa_status_t hsa_unified_callback(rocprofiler_hsa_cb_id_t id,
+                                  const rocprofiler_hsa_callback_data_t* data, void* arg) {
   printf("hsa_unified_callback(%d, %p, %p):\n", (int)id, data, arg);
   if (data == NULL) abort();
 
@@ -992,27 +1045,22 @@ hsa_status_t hsa_unified_callback(
 }
 
 // HSA callbacks structure
-rocprofiler_hsa_callbacks_t hsa_callbacks {
-  hsa_unified_callback,
-  hsa_unified_callback,
-  hsa_unified_callback,
-  hsa_unified_callback,
-  NULL,
-  NULL
-};
+rocprofiler_hsa_callbacks_t hsa_callbacks{hsa_unified_callback,
+                                          hsa_unified_callback,
+                                          hsa_unified_callback,
+                                          hsa_unified_callback,
+                                          NULL,
+                                          NULL};
 
 // HSA kernel symbol callback
-hsa_status_t hsa_ksymbol_cb(rocprofiler_hsa_cb_id_t id,
-                    const rocprofiler_hsa_callback_data_t* data,
-                    void* arg)
-{
+hsa_status_t hsa_ksymbol_cb(rocprofiler_hsa_cb_id_t id, const rocprofiler_hsa_callback_data_t* data,
+                            void* arg) {
   HsaRsrcFactory::SetKernelNameRef(data->ksymbol.object, data->ksymbol.name, data->ksymbol.unload);
   return HSA_STATUS_SUCCESS;
 }
 
 // Tool constructor
-extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings)
-{
+extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings) {
   ONLOAD_TRACE_BEG();
 
   if (pthread_mutex_lock(&mutex) != 0) {
@@ -1046,32 +1094,52 @@ extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings)
     for (auto* entry : defaults_list) {
       const auto& opts = entry->opts;
       auto it = opts.find("basenames");
-      if (it != opts.end()) { to_truncate_names = (it->second == "on") ? 1 : 0; }
+      if (it != opts.end()) {
+        to_truncate_names = (it->second == "on") ? 1 : 0;
+      }
       it = opts.find("timestamp");
-      if (it != opts.end()) { settings->timestamp_on = (it->second == "on") ? 1 : 0; }
+      if (it != opts.end()) {
+        settings->timestamp_on = (it->second == "on") ? 1 : 0;
+      }
       it = opts.find("ctx-wait");
-      if (it != opts.end()) { CTX_OUTSTANDING_WAIT = atol(it->second.c_str()); }
+      if (it != opts.end()) {
+        CTX_OUTSTANDING_WAIT = atol(it->second.c_str());
+      }
       it = opts.find("ctx-limit");
-      if (it != opts.end()) { CTX_OUTSTANDING_MAX = atol(it->second.c_str()); }
+      if (it != opts.end()) {
+        CTX_OUTSTANDING_MAX = atol(it->second.c_str());
+      }
       it = opts.find("heartbeat");
-      if (it != opts.end()) { CTX_OUTSTANDING_MON = atol(it->second.c_str()); }
+      if (it != opts.end()) {
+        CTX_OUTSTANDING_MON = atol(it->second.c_str());
+      }
       it = opts.find("trace-size");
       if (it != opts.end()) {
         std::string str = normalize_token(it->second, true, "option trace-size");
         uint32_t multiplier = 1;
         switch (str.back()) {
-          case 'K': multiplier = 1024; break;
-          case 'M': multiplier = 1024 * 1024; break;
+          case 'K':
+            multiplier = 1024;
+            break;
+          case 'M':
+            multiplier = 1024 * 1024;
+            break;
         }
         if (multiplier != 1) str = str.substr(0, str.length() - 1);
         settings->trace_size = strtoull(str.c_str(), NULL, 0) * multiplier;
       }
       it = opts.find("trace-local");
-      if (it != opts.end()) { settings->trace_local = (it->second == "on"); }
+      if (it != opts.end()) {
+        settings->trace_local = (it->second == "on");
+      }
       it = opts.find("obj-tracking");
-      if (it != opts.end()) { settings->code_obj_tracking = (it->second == "on"); }
+      if (it != opts.end()) {
+        settings->code_obj_tracking = (it->second == "on");
+      }
       it = opts.find("memcopies");
-      if (it != opts.end()) { settings->memcopy_tracking = (it->second == "on"); }
+      if (it != opts.end()) {
+        settings->memcopy_tracking = (it->second == "on");
+      }
     }
   }
   // Enable verbose mode
@@ -1110,9 +1178,12 @@ extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings)
     if (*info_symb != 'b' && *info_symb != 'd') {
       fprintf(stderr, "ROCProfiler: bad info symbol '%c', ROCP_INFO env", *info_symb);
     } else {
-      if (*info_symb == 'b') printf("Basic HW counters:\n");
-      else printf("Derived metrics:\n");
-      hsa_status_t status = rocprofiler_iterate_info(NULL, ROCPROFILER_INFO_KIND_METRIC, info_callback, info_symb);
+      if (*info_symb == 'b')
+        printf("Basic HW counters:\n");
+      else
+        printf("Derived metrics:\n");
+      hsa_status_t status =
+          rocprofiler_iterate_info(NULL, ROCPROFILER_INFO_KIND_METRIC, info_callback, info_symb);
       check_status(status);
     }
     exit(1);
@@ -1137,7 +1208,8 @@ extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings)
       perror(errmsg.str().c_str());
       abort();
     }
-  } else result_file_handle = stdout;
+  } else
+    result_file_handle = stdout;
 
   result_file_opened = (result_prefix != NULL) && (result_file_handle != NULL);
 
@@ -1173,8 +1245,7 @@ extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings)
 
   // Skipping cpu count to get to correct gpu index
   const uint32_t cpu_count = HsaRsrcFactory::Instance().GetCountOfCpuAgents();
-  std::transform(gpu_index_vec->begin(), gpu_index_vec->end(),
-                 gpu_index_vec->begin(),
+  std::transform(gpu_index_vec->begin(), gpu_index_vec->end(), gpu_index_vec->begin(),
                  [&](int count) { return count + cpu_count; });
 
   // Getting kernel names
@@ -1184,15 +1255,15 @@ extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings)
   // Getting profiling range
   range_vec = new std::vector<uint32_t>;
   const int range_parse_iter = get_xml_array(xml, "top.metric", "range", ":", range_vec, "  ");
-  if ((range_vec->size() > 2) || (range_parse_iter > 1))
-  {
+  if ((range_vec->size() > 2) || (range_parse_iter > 1)) {
     fatal("Bad range format, input file " + xml->GetName());
   }
   if ((range_vec->size() == 1) && (range_parse_iter == 0)) {
     range_vec->push_back(*(range_vec->begin()) + 1);
   }
 
-  const bool filter_disabled = (gpu_index_vec->empty() && kernel_string_vec->empty() && range_vec->empty());
+  const bool filter_disabled =
+      (gpu_index_vec->empty() && kernel_string_vec->empty() && range_vec->empty());
 
   // Getting traces
   const auto traces_list = xml->GetNodes("top.trace");
@@ -1214,12 +1285,37 @@ extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings)
 
   const uint32_t features_found = metrics_vec.size();
 
+  // Getting Trace Period
+  const char* ctrl_str = getenv("ROCP_CTRL_RATE");
+  if (ctrl_str != nullptr) {
+    uint32_t ctrl_delay = 0;
+    uint32_t ctrl_len = 0;
+    uint32_t ctrl_rate = 0;
+
+    if (sscanf(ctrl_str, "%d:%d:%d", &ctrl_delay, &ctrl_len, &ctrl_rate) != 3 ||
+        ctrl_len > ctrl_rate)
+      std::cerr << "Invalid ROCP_CTRL_RATE variable (ctrl_delay:ctrl_len:ctrl_rate)" << std::endl;
+
+    control_dist_us = ctrl_rate - ctrl_len;
+    control_len_us = ctrl_len;
+    control_delay_us = ctrl_delay;
+
+    if (ctrl_delay != UINT32_MAX) {
+      std::cout << "ROCProfiler: trace control: delay(" << ctrl_delay << "us), length(" << ctrl_len
+                << "us), rate(" << ctrl_rate << "us)" << std::endl;
+      trace_period_thread = new std::thread(trace_period_fun);
+    } else {
+      std::cout << "ROCProfiler: trace start disabled" << std::endl;
+    }
+  } else {
+    allow_profiling = true;
+  }
+
   // Context array aloocation
   context_array = new context_array_t;
 
-  bool opt_mode_cond = ((features_found != 0) &&
-                              (metrics_set->empty()) &&
-                              (filter_disabled == true));
+  bool opt_mode_cond =
+      ((features_found != 0) && (metrics_set->empty()) && (filter_disabled == true));
   if (settings->opt_mode == 0) opt_mode_cond = false;
   if (!opt_mode_cond) settings->opt_mode = 0;
   if (opt_mode_cond) {
@@ -1238,7 +1334,7 @@ extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings)
     // Available GPU agents
     const unsigned gpu_count = HsaRsrcFactory::Instance().GetCountOfGpuAgents();
     callbacks_arg_t* callbacks_arg = new callbacks_arg_t{};
-    callbacks_arg->pools = new rocprofiler_pool_t* [gpu_count];
+    callbacks_arg->pools = new rocprofiler_pool_t*[gpu_count];
     for (unsigned gpu_id = 0; gpu_id < gpu_count; gpu_id++) {
       // Getting GPU device info
       const AgentInfo* agent_info = NULL;
@@ -1281,11 +1377,12 @@ extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings)
     callbacks_data->file_handle = result_file_handle;
     callbacks_data->gpu_index = (gpu_index_vec->empty()) ? NULL : gpu_index_vec;
     callbacks_data->kernel_string = (kernel_string_vec->empty()) ? NULL : kernel_string_vec;
-    callbacks_data->range = (range_vec->empty()) ? NULL : range_vec;;
+    callbacks_data->range = (range_vec->empty()) ? NULL : range_vec;
+    ;
     callbacks_data->filter_on = (callbacks_data->gpu_index != NULL) ||
-                                (callbacks_data->kernel_string != NULL) ||
-                                (callbacks_data->range != NULL)
-                                ? 1 : 0;
+            (callbacks_data->kernel_string != NULL) || (callbacks_data->range != NULL)
+        ? 1
+        : 0;
 
     rocprofiler_set_queue_callbacks(callbacks_ptrs, callbacks_data);
   }
@@ -1296,7 +1393,11 @@ extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings)
     pthread_t thread;
     pthread_attr_t attr;
     int err = pthread_attr_init(&attr);
-    if (err) { errno = err; perror("pthread_attr_init"); abort(); }
+    if (err) {
+      errno = err;
+      perror("pthread_attr_init");
+      abort();
+    }
     err = pthread_create(&thread, &attr, monitor_thr_fun, NULL);
   }
 
@@ -1324,7 +1425,8 @@ void rocprofiler_unload(bool is_destr) {
   // Dump stored profiling output data
   fflush(stdout);
   if (result_file_opened) {
-    printf("\nROCPRofiler:"); fflush(stdout);
+    printf("\nROCPRofiler:");
+    fflush(stdout);
     if (CTX_OUTSTANDING_WAIT == 1) dump_context_array(NULL);
     fclose(result_file_handle);
     printf(" %u contexts collected, output directory %s\n", context_collected, result_prefix);

@@ -160,7 +160,7 @@ set ( TEST_LIB "rocprof-tool" )
 set ( TEST_LIB_SRC ${TEST_DIR}/tool/tool.cpp ${UTIL_SRC} )
 add_library ( ${TEST_LIB} SHARED ${TEST_LIB_SRC} )
 target_include_directories ( ${TEST_LIB} PRIVATE ${TEST_DIR} ${ROOT_DIR} ${PROJECT_SOURCE_DIR}/include )
-target_link_libraries ( ${TEST_LIB} ${ROCPROFILER_TARGET} hsa-runtime64::hsa-runtime64 Threads::Threads dl )
+target_link_libraries ( ${TEST_LIB} ${ROCPROFILER_TARGET} hsa-runtime64::hsa-runtime64 Threads::Threads atomic dl )
 ## TODO(aelwazir): Should be replaced by the current location in the main CMakeLists.txt
 install(TARGETS ${TEST_LIB} DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/tests-v1/test COMPONENT tests)
 
