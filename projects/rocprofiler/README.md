@@ -97,8 +97,12 @@ The first API library version for ROCProfiler v2 is 9.0.0
 
 - makecache
 - Gtest Development Package (Ubuntu: libgtest-dev)
-- libsystemd-dev, libelf-dev, libnuma-dev on ubuntu or their corresponding packages on any other OS
+- libsystemd-dev, libelf-dev, libnuma-dev, libpciaccess-dev on ubuntu or their corresponding packages on any other OS
 - Cppheaderparser, websockets, matplotlib, lxml, barectf Python3 Packages
+- Python packages can be installed using:
+  ```bash
+  pip3 install -r requirements.txt
+  ```
 
 ### Build
 

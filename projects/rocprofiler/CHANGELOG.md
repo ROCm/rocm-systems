@@ -264,6 +264,7 @@ Example for file plugin output:
   ```
 - Removing Record IDs from tracer records in CLI plugin.
 - Added Flush Interval and Trace Period functionality, where --flush-interval <time_in_ms>, for flushing the buffers every given interval by the user, and --trace-period <delay>:<trace_time>, where delay is the time to wait before starting session, and trace_time is the time between every start and stop session. For more details please refer to the ROCProfV2 tool usage document.
+- Added requirements.txt to be used to install all the necessary python3 packages.
 
 ### Fixed
 - Samples are fixed to show the new usage of phases.
