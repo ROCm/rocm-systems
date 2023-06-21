@@ -11,6 +11,7 @@ Panel Config:
   data source:
     - metric_table:
         id: 201
+        title: Speed-of-Light
         header:
           metric: Metric
           value: Value
