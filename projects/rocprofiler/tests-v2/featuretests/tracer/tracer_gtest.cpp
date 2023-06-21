@@ -24,17 +24,39 @@ THE SOFTWARE.
 #include <vector>
 #include "tracer_gtest.h"
 
+std::string running_path;
+std::string lib_path;
+std::string golden_trace_path;
+std::string test_app_path;
+std::string metrics_path;
+std::string binary_path;
+std::string profiler_api_lib_path = "";
+
+static void init_test_path() {
+  metrics_path = "libexec/rocprofiler/counters/derived_counters.xml";
+  if (is_installed_path()) {
+    running_path = "share/rocprofiler/tracer/runTracerFeatureTests";
+    lib_path = "lib/rocprofiler/librocprofiler_tool.so";
+    golden_trace_path = "share/rocprofiler/tests/featuretests/tracer/apps/goldentraces/";
+    test_app_path = "share/rocprofiler/tests/featuretests/tracer/apps/";
+    binary_path = "bin/rocprofv2";
+    profiler_api_lib_path = "/lib";
+  } else {
+    running_path = "tests-v2/featuretests/tracer/runTracerFeatureTests";
+    lib_path = "librocprofiler_tool.so";
+    golden_trace_path = "tests-v2/featuretests/tracer/apps/goldentraces/";
+    test_app_path = "tests-v2/featuretests/tracer/apps/";
+    binary_path = "rocprofv2";
+  }
+}
+
 
 /**
  * Sets application enviornment by seting HSA_TOOLS_LIB.
  */
 void ApplicationParser::SetApplicationEnv(const char* app_name, const char* trace_option) {
-  std::string app_path = GetRunningPath("tests-v2/featuretests/tracer/runTracerFeatureTests");
-
-  std::string profiler_api_lib_path = "";
-  if (is_installed_path()) {
-    profiler_api_lib_path = "/lib";
-  }
+  init_test_path();
+  std::string app_path = GetRunningPath(running_path);
 
   std::stringstream ld_library_path;
   ld_library_path << app_path << profiler_api_lib_path << []() {
@@ -45,7 +67,7 @@ void ApplicationParser::SetApplicationEnv(const char* app_name, const char* trac
   setenv("LD_LIBRARY_PATH", ld_library_path.str().c_str(), true);
 
   std::stringstream hsa_tools_lib_path;
-  hsa_tools_lib_path << app_path << "librocprofiler_tool.so";
+  hsa_tools_lib_path << app_path << lib_path;
   setenv("LD_PRELOAD", hsa_tools_lib_path.str().c_str(), true);
 
   std::string trace_type{trace_option};
@@ -63,7 +85,7 @@ void ApplicationParser::SetApplicationEnv(const char* app_name, const char* trac
 
 
   std::stringstream os;
-  os << app_path << "tests-v2/featuretests/tracer/apps/" << app_name;
+  os << app_path << test_app_path << app_name;
   ProcessApplication(os);
 }
 
@@ -163,6 +185,14 @@ void ApplicationParser::ParseKernelInfoFields(
  * ############ HelloWorld HIP Tests ################
  * ###################################################
  */
+
+void __attribute__((constructor)) globalsetting() {
+  init_test_path();
+  std::string app_path = GetRunningPath(running_path);
+  std::stringstream gfx_path;
+  gfx_path << app_path << metrics_path;
+  setenv("ROCPROFILER_METRICS_PATH", gfx_path.str().c_str(), true);
+}
 
 constexpr auto kGoldenOutputHelloworld = "hip_helloworld_golden_traces.txt";
 
