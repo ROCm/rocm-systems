@@ -3,16 +3,19 @@
 	<link href="data:image/x-icon;base64,AAABAAEAEBAQAAAAAAAoAQAAFgAAACgAAAAQAAAAIAAAAAEABAAAAAAAgAAAAAAAAAAAAAAAEAAAAAAAAADc6sMA////AG2nAAD4+vMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAERERERERERESIiIhERERMRIiIiIRERMhEiIiIiEREiESIiIiIhEiIRIiIREREiIhEiIhERESIiERIiERERIiIRESIREREiIhEREhERESIiERERERERIiIREREiIiIiIhEREiIiIiIiERAiIiIiIiIRAiIiIiIiIhEREREREREREAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" rel="icon" type="image/x-icon" />
 	<link rel="stylesheet" href="styles.css">
 	<head>
-		<title>MI Trace Viewer</title>
+		<title>ATT Analysis View</title>
 	</head>
 
 	<body>
-	<div id="Images"> 
+	<div id="Images">
 		<div id="padding" style="height:4px"></div>
 
-		<div><img src="logo.svg"/> </div>
-
 		<div style="order: 1px solid lightblue; overflow:auto; width: calc(min(100% - 350px, 1400px));">
+			<div class="tab">
+				<button class="tablinks" onclick="showImage('timeline.png')">Wave States</button>
+				<button class="tablinks" onclick="showImage('occupancy.png')">Occupancy</button>
+				<button class="tablinks" onclick="showImage('counters.png')" id="counterspng_button">Counters</button>
+			</div>
 			<img id="GraphImage" src=timeline.png width=100%>
 		</div>
 
@@ -26,13 +29,14 @@
 	</div>
 
 	<div id="padding" style="height: 10px"></div>
-	<div id="Buttons" style="overflow:auto; max-width: calc(100% - 370px); min-height: 120px; max-height: calc(480px - 20vw); z-index: 9999;">
+	<div id="Buttons" display="inline-block" style="overflow:scroll; max-width: calc(100% - 370px); height: 150px; z-index: 9999;">
 		<div id="GH_select"></div>
 		<div id="SE_select"></div>
 		<div id="SM_select"></div>
-		<div id="WV_select"></div>
+		<div id="WSL_select"></div>
+		<div id="WID_select"></div>
 	</div>
-	<div id="map" style="position: absolute; top:460px; width: 100%;">
+	<div id="map" style="position: absolute; top:570px; width: 100%;">
 		<div id="flexbox">
 			<div id="logo">
 				<div id="what"></div>
@@ -43,9 +47,9 @@
 	</div>
 	<div id="minimap"></div>
 	<div id="ma_code">
-		<ul id="code" style="position: absolute; top:610px; left:390px"></ul>
+		<ul id="code" style="position: absolute; top:720px; left:390px"></ul>
 	</div>
-	<canvas id="arrows" width="400px" height="500px" style="position: absolute; top:630px; left:1px;"></canvas>
+	<canvas id="arrows" width="400px" height="500px" style="position: absolute; top:740px; left:1px;"></canvas>
 
 	<script src="https://cdn.jsdelivr.net/npm/d3@7.0.0/dist/d3.min.js"></script>
 	<script>
@@ -159,21 +163,63 @@
 
 		setInterval(DrawCanvas, 200)
 
-		function WaveButtonHtml(index) {
-			return '<button class="btn" id="wv_button' + index + '" onclick="FetchNamesAndGather(' + index + ')">Wave'+index+'</button>\n'
+		var dropdowns_open = [[], [], [], []]
+		function closeAllDropDownsExcept(index) {
+			for (var i in dropdowns_open) {
+				if (i === index) continue;
+				for (var drop in dropdowns_open[i]) {
+					if (dropdowns_open[i][drop].classList.contains('show')) {
+						dropdowns_open[i][drop].classList.remove('show')
+					}
+				}
+			}
 		}
-		function SEButonHtml(index) {
-			return '<button class="btn" id="se_button' + index + '" onclick="OpenSIMDView(' + index + ')">Shader'+index+'</button>\n'
+		function dropDownSE() {
+			closeAllDropDownsExcept(0);
+			document.getElementById("SE_dropdown").classList.toggle("show");
 		}
-		function SIMDButonHtml(index) {
-			return '<button class="btn" id="sm_button' + index + '" onclick="OpenWaveView(' + index + ')">SIMD'+index+'</button>\n'
+		function dropDownSM() {
+			closeAllDropDownsExcept(1);
+			document.getElementById("SM_dropdown").classList.toggle("show");
 		}
-		function GraphButtonHtml(index, name) {
-			return '<input type="checkbox" id="gh_button' + index + '" onclick="UpdGraph(this, '+index+')" checked=true>'+name
+		function dropDownWSL() {
+			closeAllDropDownsExcept(2);
+			document.getElementById("WSL_dropdown").classList.toggle("show");
+		}
+		function dropDownWID() {
+			closeAllDropDownsExcept(3);
+			document.getElementById("WID_dropdown").classList.toggle("show");
 		}
 
+		function ButtonHtml(id, onc_func, name, index) {
+			var slot_name = ""
+			if (index <= 16)
+				slot_name = name + index
+			else
+				slot_name = index
+			return '<button class="btn" id="'+id+index+'" onclick="'+onc_func+'('+index+')">'+slot_name+'</button>'
+		}
+		function WaveButtonHtml(index) {
+			return ButtonHtml("wid_button", "FetchNamesAndGather", "ID", index)
+		}
+		function SEButonHtml(index) {
+			return ButtonHtml("se_button", "OpenSIMDView", "Shader", index)
+		}
+		function SIMDButonHtml(index) {
+			return ButtonHtml("sm_button", "OpenWSLView", "SIMD", index)
+		}
+		function WSLButonHtml(index) {
+			return ButtonHtml("wsl_button", "OpenWIDView", "Slot", index)
+		}
+		function GraphButtonHtml(index, name) {
+			return '\n<input type="checkbox" id="gh_button' + index + '" onclick="UpdGraph(this, '+index+')" checked=true>'+name
+		}
+
+		var global_imagename = "timeline.png"
 		var graph_selected_counters = {};
-		function UpdImageSrc() {
+		function UpdImageSrc(imgname) {
+			if (imgname != null)
+				global_imagename = imgname
 			var endstr = document.getElementById("btn_norm").checked ? "1" : "0"
 			for(var key in graph_selected_counters) {
 				if(graph_selected_counters[key])
@@ -181,16 +227,15 @@
 				else
 					endstr += "0"
 			}
-			console.log(graph_selected_counters)
-			console.log('Updated to', endstr)
-			document.getElementById("GraphImage").src = "timeline.png?" + endstr
+			console.log(graph_selected_counters, 'Updated to', endstr)
+			document.getElementById("GraphImage").src = global_imagename + "?" + endstr
 		}
 
 		function UpdGraph(checkbox, index) {
 			graph_selected_counters[index] = checkbox.checked
 			document.getElementById('gh_button'+index).style.backgroundColor
 				= graph_selected_counters[name] ? "white" : "#D7D7D7"
-			UpdImageSrc()
+			UpdImageSrc(global_imagename)
 		}
 
 		var HTML_MAC = document.getElementById("ma_code").innerHTML
@@ -198,12 +243,14 @@
 		var HTML_MINI = document.getElementById("minimap").innerHTML
 		var HTML_IMAG = document.getElementById("Images").innerHTML
 		var SE_BTN_HTML = ""
-		var WV_BTN_HTML = ""
 		var SM_BTN_HTML = ""
+		var WSL_BTN_HTML = ""
+		var WID_BTN_HTML = ""
 
 		var current_SE = 0
 		var current_SM = 0
-		var current_WV = 0
+		var current_WSL = 0
+		var current_WID = 0
 		var filename_data = {}
 		var clock_scale = 1
 
@@ -214,83 +261,182 @@
 			filename_data = data.wave_filenames
 
 			wave_cu_index = {};
+			SE_BTN_HTML = 	'<div class="dropdown">\
+							<button onclick="dropDownSE()" class="dropbtn" id="SE_BTN_DROP">Shader:</button>\
+							<div id="SE_dropdown" class="dropdown-content">'
 			for(var i in filename_data) {
 				SE_BTN_HTML = SE_BTN_HTML + SEButonHtml(i)
 			}
+			SE_BTN_HTML += '</div></div>'
 
 			document.getElementById("ma_code").innerHTML = ""
 			document.getElementById("map").innerHTML = ""
 			document.getElementById("minimap").innerHTML = ""
 			document.getElementById('SE_select').innerHTML = SE_BTN_HTML
 			document.getElementById('SM_select').innerHTML = ""
-			document.getElementById('WV_select').innerHTML = ""
+			document.getElementById('WSL_select').innerHTML = ""
+			document.getElementById('WID_select').innerHTML = ""
 
 			for(var se in filename_data)
 			for(var sm in filename_data[se])
-			for(var wv in filename_data[se][sm]) {
+			for(var wsl in filename_data[se][sm])
+			for(var wid in filename_data[se][sm][wsl]) {
 				OpenSIMDView(se)
-				OpenWaveView(sm)
-				FetchNamesAndGather(wv)
+				OpenWSLView(sm)
+				OpenWIDView(wsl)
+				FetchNamesAndGather(wid)
 				return
 			}
-			//FetchNamesAndGather(0)
 		})
 
 		function OpenSIMDView(se_index) {
 			if(document.getElementById('se_button'+current_SE) != null)
 				document.getElementById('se_button'+current_SE).style.backgroundColor = "#D7D7D7"
-			current_SE = se_index
 			document.getElementById('se_button'+se_index).style.backgroundColor = "white"
+			document.getElementById("SE_BTN_DROP").textContent = 'Shader: ' + se_index
+			current_SE = se_index
 
-			SM_BTN_HTML = ""
+			SM_BTN_HTML = 	'<div class="dropdown">\
+							<button onclick="dropDownSM()" class="dropbtn" id="SM_BTN_DROP">SIMD</button>\
+							<div id="SM_dropdown" class="dropdown-content">'
 			for(var i in filename_data[current_SE]) {
 				SM_BTN_HTML = SM_BTN_HTML + SIMDButonHtml(i)
 			}
+			SM_BTN_HTML += '</div></div>'
 
 			document.getElementById('SM_select').innerHTML = SM_BTN_HTML
-			document.getElementById('WV_select').innerHTML = ""
+			document.getElementById('WSL_select').innerHTML = ""
+			document.getElementById('WID_select').innerHTML = ""
 		}
-		function OpenWaveView(sm_index) {
+		function OpenWSLView(sm_index) {
 			if(document.getElementById('sm_button'+current_SM) != null)
 				document.getElementById('sm_button'+current_SM).style.backgroundColor = "#D7D7D7"
-			current_SM = sm_index
 			document.getElementById('sm_button'+sm_index).style.backgroundColor = "white"
+			document.getElementById("SM_BTN_DROP").textContent = 'SIMD: ' + sm_index
+			current_SM = sm_index
 
-			WV_BTN_HTML = ""
+			WSL_BTN_HTML = 	'<div class="dropdown">\
+							<button onclick="dropDownWSL()" class="dropbtn" id="WSL_BTN_DROP">WaveSlot</button>\
+							<div id="WSL_dropdown" class="dropdown-content">'
 			for(var i in filename_data[current_SE][current_SM]) {
-				WV_BTN_HTML = WV_BTN_HTML + WaveButtonHtml(i)
+				WSL_BTN_HTML = WSL_BTN_HTML + WSLButonHtml(i)
 			}
+			WSL_BTN_HTML += '</div></div>'
 
-			document.getElementById('WV_select').innerHTML = WV_BTN_HTML
+			document.getElementById('WSL_select').innerHTML = WSL_BTN_HTML
+			document.getElementById('WID_select').innerHTML = ""
+		}
+		function OpenWIDView(sl_index) {
+			if(document.getElementById('wsl_button'+current_WSL) != null)
+				document.getElementById('wsl_button'+current_WSL).style.backgroundColor = "#D7D7D7"
+			document.getElementById('wsl_button'+sl_index).style.backgroundColor = "white"
+			document.getElementById("WSL_BTN_DROP").textContent = 'WaveSlot: ' + sl_index
+			current_WSL = sl_index
+
+			WID_BTN_HTML = 	'<div class="dropdown">\
+							<button onclick="dropDownWID()" class="dropbtn" id="WID_BTN_DROP">WaveID</button>\
+							<div id="WID_dropdown" class="dropdown-content">'
+			for(var i in filename_data[current_SE][current_SM][current_WSL]) {
+				WID_BTN_HTML = WID_BTN_HTML + WaveButtonHtml(i)
+			}
+			WID_BTN_HTML += '</div></div>'
+
+			document.getElementById('WID_select').innerHTML = WID_BTN_HTML
+		}
+
+		function ApplyLiveImage() {
+			fetch("live.json", {cache: "no-store"}).then(response => response.json()).then(data => {
+				if (data.live === 1)
+					return;
+				document.getElementById("btn_norm").disabled = true;
+				try {
+					for (var index = 0; index < 99; index++)
+						document.getElementById("gh_button"+index).disabled = true;
+				} catch {}
+			})
+		}
+
+		function showImage(imgname) {
+			fetch("graph_options.json", {cache: "no-store"}).then(response => response.json()).then(data => {
+				var html_gh = '<input type="checkbox" id="btn_norm" onclick="UpdImageSrc(null)" checked=false>Normalize\t'
+				try {
+					if (data[imgname] === undefined) throw "invalid";
+				} catch {
+					console.log("Invalid data:", imgname)
+					return
+				}
+				for(var key in data[imgname]) {
+					graph_selected_counters[key] = true
+					html_gh += GraphButtonHtml(key, data[imgname][key])
+				}
+
+				document.getElementById("GH_select").innerHTML = html_gh
+				document.getElementById("btn_norm").checked = false
+
+				ApplyLiveImage()
+				UpdImageSrc(imgname)
+			})
 		}
 
 		function FetchNamesAndGather(wave_index) {
-			if(document.getElementById('wv_button'+current_WV) != null)
-				document.getElementById('wv_button'+current_WV).style.backgroundColor = "#D7D7D7"
-			current_WV = wave_index
-			document.getElementById('wv_button'+wave_index).style.backgroundColor = "white"
+			if(document.getElementById('wid_button'+current_WID) != null)
+				document.getElementById('wid_button'+current_WID).style.backgroundColor = "#D7D7D7"
+			document.getElementById("WID_BTN_DROP").textContent = 'WaveID: ' + wave_index
+			document.getElementById('wid_button'+wave_index).style.backgroundColor = "white"
+			current_WID = wave_index
 
 			document.getElementById("ma_code").innerHTML = HTML_MAC
 			document.getElementById("map").innerHTML = HTML_MAP
 			document.getElementById("minimap").innerHTML = HTML_MINI
 			document.getElementById("Images").innerHTML = HTML_IMAG
 
-			fetch("counters.json", {cache: "no-store"}).then(response => response.json()).then(data => {
-				var html_gh = '<input type="checkbox" id="btn_norm" onclick="UpdImageSrc()" checked=true>Normalize\t'
-				for(var key in data.counters) {
-					console.log(key, data.counters[key])
-					graph_selected_counters[key] = true
-					html_gh += GraphButtonHtml(key, data.counters[key])
-				}
+			showImage('timeline.png')
+			console.log('SE:',current_SE,' sm:', current_SM, 'wsl:', current_WSL, 'wid:',current_WID)
+			console.log('Fetch', filename_data[current_SE][current_SM][current_WSL][current_WID])
 
-				document.getElementById("GH_select").innerHTML = html_gh
-				UpdImageSrc()
+			//GatherData(filename_data[current_SE][current_SM][current_WV][0][0])
+
+			fetch("graph_options.json", {cache: "no-store"}).then(response => response.json()).then(data => {
+				try { if (data["counters.png"] === undefined) throw "disabled"; }
+				catch { document.getElementById("counterspng_button").disabled = true; }
 			})
 
-			console.log('SE:',current_SE,' sm:', current_SM, 'wv:', current_WV)
-			console.log('Fetch', filename_data[current_SE][current_SM][current_WV])
+			GatherCUWavesData(filename_data[current_SE][current_SM][current_WSL][current_WID])
+		}
 
-			GatherData(filename_data[current_SE][current_SM][current_WV])
+		var cuwaves_data = []
+		function GatherCUWavesData(wave_to_gather) {
+			shader = filename_data[current_SE]
+			file_to_gather = wave_to_gather[0]
+			wave_start = wave_to_gather[1]
+			wave_end = wave_to_gather[2]
+
+			wavelist = []
+			for (var sm in shader)
+			for (var wsl in shader[sm])
+			for (var wid in shader[sm][wsl]) {
+				wv = shader[sm][wsl][wid]
+				if (wv[1] < wave_end && wv[2] > wave_start)
+					wavelist.push([wv[0], wv[1], wv[2], sm, wsl, wid])
+			}
+			cuwaves_data = []
+			LoopOverList(file_to_gather, wavelist, 0)
+		}
+		function LoopOverList(file_to_gather, wavelist, index) {
+			if (index >= wavelist.length) {
+				GatherData(file_to_gather)
+			} else {
+				wave_sel = wavelist[index]
+				fetch(wave_sel[0]).then(response => response.json()).then(data => {
+					if (cuwaves_data.length == 0 || cuwaves_data[cuwaves_data.length-1][0] != wave_sel[3] || cuwaves_data[cuwaves_data.length-1][1] != wave_sel[4]) {
+						cuwaves_data.push([wave_sel[3], wave_sel[4], [wave_sel[5], wave_sel[1], wave_sel[2]], data.wave.instructions, data.wave.timeline])
+					} else {
+						cuwaves_data[cuwaves_data.length-1][3].concat(data.wave.instructions)
+						cuwaves_data[cuwaves_data.length-1][4].concat(data.wave.timeline)
+					}
+					LoopOverList(file_to_gather, wavelist, index+1)
+				})
+			}
 		}
 
 		function GatherData(file_to_gather) {
@@ -300,11 +446,9 @@
 			fetch(file_to_gather, {cache: "no-store"})
 				.then(response => response.json())
 				.then(data => {
-				code_data_file = file_to_gather.split('_sm')[0]+'_code.json'
 				console.log("Requestd:", file_to_gather)
-				console.log("Request code:", code_data_file)
 
-				fetch(code_data_file, {cache: "no-store"})
+				fetch('code.json', {cache: "no-store"})
 				.then(response => response.json())
 				.then(code_data => {
 					const SP = '\u00A0'
@@ -465,7 +609,7 @@
 							const CU = cu_waves_div.append('svg')
 								.attr('id', 'CU')
 								.attr('width', WIDTH)
-								.attr('height', code_data.cu_waves.length * CU_HEIGHT + MARGIN)
+								.attr('height', cuwaves_data.length * CU_HEIGHT + MARGIN)
 								.append('g')
 							CU.append('rect')
 								.attr('x', 0)
@@ -521,7 +665,7 @@
 					
 					d3.select('#top_n')
 						.selectAll("li")
-						.data(data.top_n)
+						.data(code_data.top_n)
 						.enter()
 						.append('li')
 						.datum((d) => { return {data:d} })
@@ -542,7 +686,6 @@
 								}, 800)
 								const inView = isInViewport(src_line)
 								if (!inView) {
-									//console.log('scrolling to source line', line_num)
 									src_line.scrollIntoView({behavior: "smooth", block: "start"})
 								}
 							}
@@ -637,32 +780,8 @@
 
 					canvas_waitcnt = data.wave.waitcnt
 
-					/*var all_nodes = d3.select("#code")
-						.selectAll("li")
-						.nodes()
-					
-					console.log(all_nodes.length)
-					console.log(all_nodes[0])
-					for(node in all_nodes) {
-						console.log(node.getBoundingClientRect().top)
-					}
-
-					d3.select("#code")
-						.selectAll("li")
-						.append('svg')
-						.attr('width', 10)
-						.attr('height', 10)
-						.append('rect')
-						.attr('x', 0)
-						.attr('y', 0)
-						.attr('rx', 2)
-						.attr('ry', 2)
-						.attr('width', 10)
-						.attr('height', 10)
-						.attr('fill', 'blue') */
-
 					const START_TIME = insts[0][0]
-					const DURATION = data.duration
+					const DURATION = data.duration * clock_scale
 					const END_TIME = START_TIME + DURATION
 
 					const NUM_BINS = 20
@@ -738,7 +857,7 @@
 					const MARGIN = 30
 					const PADDING = 3
 					const scaleX = d3.scaleLinear()
-						.domain([START_TIME, START_TIME + data.duration + MARGIN])
+						.domain([START_TIME, START_TIME + data.duration * clock_scale + MARGIN])
 						.range([MARGIN, WIDTH-MARGIN])
 					const toX = (x) => { return Math.ceil(scaleX(x)*clock_scale) }
 
@@ -915,13 +1034,13 @@
 					const show_simd = () => {
 						SIMD.append("rect")
 							.attr("width", WIDTH)
-							.attr("height", HEIGHT * code_data.simd_waves.length)
+							.attr("height", HEIGHT * wave_info_data.simd_waves.length)
 							.attr("x", 0)
 							.attr("y", HEIGHT)
 							.attr("fill", "black")
 							.attr("opacity", 0.3)
 						let current_height = HEIGHT
-						code_data.simd_waves.forEach((wave, i) => {
+						wave_info_data.simd_waves.forEach((wave, i) => {
 							// wave: (simd, slot, [(id, start, end)+], instructions, timeline)
 							let [simd, slot, waves] = [wave[0], wave[1], wave[2]]
 							let ins_in_range = wave[3].filter((x) => {
@@ -943,7 +1062,7 @@
 								.text(simd + '-' + slot)
 								.style("cursor", "pointer")
 								.append("svg:title")
-								.text(waves2str(waves))
+								.text(waves2str([waves]))
 
 							SLOT.selectAll("rect")
 								.data(ins_in_range)
@@ -961,7 +1080,7 @@
 									return INST_TYPE[d[1]][0] + ":" + d[0] + SP + "slot:" + slot
 								})
 							SLOT.selectAll("path")
-								.data(states2timeline(clamp_timeline(wave[4], wave[2][0][1])))
+								.data(states2timeline(clamp_timeline(wave[4], wave[2][1])))
 								.enter()
 								.append('path')
 								.style("cursor", "pointer")
@@ -981,7 +1100,7 @@
 					const show_cu = () => {
 						const CU = d3.select('#CU')
 						let current_height = 10
-						code_data.cu_waves.forEach((wave, i) => {
+						cuwaves_data.forEach((wave, i) => {
 							// wave: (simd, slot, [(id, start, end)+], instructions, timeline)
 							let [simd, slot, waves] = [wave[0], wave[1], wave[2]]
 							let ins_in_range = wave[3].filter((x) => {
@@ -1012,7 +1131,7 @@
 								.text(simd + '-' + slot)
 								.style("cursor", "pointer")
 								.append("svg:title")
-								.text(waves2str(waves))
+								.text(waves2str([waves]))
 
 							SLOT.selectAll("rect")
 								.data(ins_in_range)
@@ -1032,7 +1151,7 @@
 										"slot:" + simd + '-' + slot
 								})
 							SLOT.selectAll("path")
-								.data(states2timeline(clamp_timeline(wave[4], wave[2][0][1])))
+								.data(states2timeline(clamp_timeline(wave[4], wave[2][1])))
 								.enter()
 								.append('path')
 								.style("cursor", "pointer")
@@ -1044,7 +1163,6 @@
 								.attr("stroke-width", 4)
 								.append("svg:title")
 								.text((d) => { return STATE_COLOR[d[0]][0] + ":" + d[1]})
-
 							current_height += CU_HEIGHT
 						})
 
@@ -1056,10 +1174,8 @@
 							})
 						}
 					}
-
 				})
-				}
-			)
+			})
 		}
 	</script>
 	</body>

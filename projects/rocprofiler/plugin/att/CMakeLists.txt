@@ -57,6 +57,8 @@ install(TARGETS att_plugin
 
 configure_file(att.py att/att.py COPYONLY)
 configure_file(trace_view.py att/trace_view.py COPYONLY)
+configure_file(stitch.py att/stitch.py COPYONLY)
+configure_file(drawing.py att/drawing.py COPYONLY)
 configure_file(ui/index.html att/ui/index.html COPYONLY)
 configure_file(ui/logo.svg att/ui/logo.svg COPYONLY)
 configure_file(ui/styles.css att/ui/styles.css COPYONLY)

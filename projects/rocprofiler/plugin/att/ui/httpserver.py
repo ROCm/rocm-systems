@@ -20,8 +20,8 @@ class NoCacheHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         self.send_header("Expires", "0")
 
     def do_GET(self):
-        if 'timeline.png?' in self.path:
-            self.path = 'timeline.png'
+        if '.png?' in self.path:
+            self.path = self.path.split('.png?')[0]+'.png'
 
         http.server.SimpleHTTPRequestHandler.do_GET(self)
 

@@ -3,16 +3,12 @@ import sys
 if sys.version_info[0] < 3:
     raise Exception("Must be using Python 3")
 
-
 import os
 import sys
 import time
 import socket
 from pathlib import Path
-from struct import *
 from collections import defaultdict
-import json
-import time
 import http.server
 import socketserver
 import socket
@@ -20,426 +16,12 @@ import asyncio
 import websockets
 from multiprocessing import Process, Manager
 import numpy as np
-from copy import deepcopy
 from http import HTTPStatus
 from io import BytesIO
-
-
-class Readable:
-    def __init__(self, jsonstring):
-        self.jsonstr = json.dumps(jsonstring)
-        self.seek = 0
-
-    def read(self, length=0):
-        if length<=0:
-            return self.jsonstr
-        else:
-            if self.seek >= len(self):
-                self.seek = 0
-                return None
-            response =  self.jsonstr[self.seek:self.seek+length]
-            self.seek += length
-            return bytes(response, 'utf-8')
-
-    def __len__(self):
-        return len(self.jsonstr)
-
-
-MAX_STITCHED_TOKENS = 10000000
-MAX_FAILED_STITCHES = 256
-STACK_SIZE_LIMIT = 64
-
-UNKNOWN = 0
-SMEM = 1
-SALU = 2
-VMEM = 3
-FLAT = 4
-LDS = 5
-VALU = 6
-JUMP = 7
-NEXT = 8
-IMMED = 9
-BRANCH = 10
-GETPC = 11
-SETPC = 12
-SWAPPC = 13
-LANEIO = 14
-DONT_KNOW = 100
-
-WaveInstCategory = {
-    UNKNOWN: "UNKNOWN",
-    SMEM: "SMEM",
-    SALU: "SALU",
-    VMEM: "VMEM",
-    FLAT: "FLAT",
-    LDS: "LDS",
-    VALU: "VALU",
-    JUMP: "JUMP",
-    NEXT: "NEXT",
-    IMMED: "IMMED",
-    JUMP: "JUMP",
-    NEXT: "NEXT",
-    IMMED: "IMMED",
-    BRANCH: "BRANCH",
-    GETPC: "GETPC",
-    SETPC: "SETPC",
-    SWAPPC: "SWAPPC",
-    LANEIO: "LANEIO",
-    DONT_KNOW: "DONT_KNOW",
-}
+from drawing import Readable, GeneratePIC
+from copy import deepcopy
 
 JSON_GLOBAL_DICTIONARY = {}
-
-
-class RegisterWatchList:
-    def __init__(self, labels):
-        self.registers = {'v'+str(k): [[] for m in range(64)] for k in range(64)}
-        for k in range(64):
-            self.registers['s'+str(k)] = []
-        self.labels = labels
-
-    def try_translate(self, tok):
-        if tok[0] in ['s']:
-            return self.registers[self.range(tok)[0]]
-        elif '@' in tok:
-            return self.labels[tok.split('@')[0]]+1
-
-    def range(self, r):
-        reg = r.split(':')
-        if len(reg) == 1:
-            return reg
-        else:
-            r0 = reg[0].split('[')
-            return [r0[0]+str(k) for k in range(int(r0[1]), int(reg[1][:-1])+1)]
-
-    def tokenize(self, line):
-        return [u for u in [t.split(',')[0].strip() for t in line.split(' ')] if len(u) > 0]
-
-    def getpc(self, line, next_line):
-        #print('Get pc:', line)
-        try:
-            dst = line.split(' ')[1].strip()
-            label_dest = next_line.split(', ')[-1].split('@')[0]
-            for reg in self.range(dst):
-                self.registers[reg].append(deepcopy(self.labels[label_dest]))
-        except:
-            pass
-
-    def swappc(self, line, line_num):
-        try:
-            tokens = self.tokenize(line)
-            dst = tokens[1]
-            src = tokens[2]
-
-            popped = self.registers[self.range(src)[0]][-1]
-            self.registers[self.range(src)[0]] = self.registers[self.range(src)[0]][:-1]
-            self.registers[self.range(dst)[0]].append(line_num+1)
-            return popped
-        except:
-            return 0
-
-    def setpc(self, line):
-        try:
-            src = line.split(' ')[1].strip()
-            #print('Going to:', self.registers[self.range(src)[0]], src)
-            popped = self.registers[self.range(src)[0]][-1]
-            self.registers[self.range(src)[0]] = self.registers[self.range(src)[0]][:-1]
-            return popped
-        except:
-            return 0
-
-    def scratch(self, line):
-        try:
-            tokens = self.tokenize(line)
-            if '_load' in tokens[0]:
-                dst = tokens[1]
-                src = tokens[3]+tokens[4]
-            else:
-                src = tokens[2]
-                dst = tokens[3]+tokens[4]
-            self.registers[dst] = self.registers[src]
-        except:
-            pass
-
-    def move(self, line):
-        try:
-            tokens = self.tokenize(line)
-            if tokens[2][0] in ['s', 'd'] and tokens[1][0] in ['s', 'd']:
-                self.registers[self.range(tokens[1])[0]] = deepcopy(self.registers[self.range(tokens[2])[0]])
-        except:
-            pass
-
-    def updatelane(self, line):
-        tokens = self.tokenize(line)
-        try:
-            if 'v_readlane' in tokens[0]:
-                self.registers[tokens[1]].append(self.registers[tokens[2]][int(tokens[3])][-1])
-                self.registers[tokens[2]][int(tokens[3])] = self.registers[tokens[2]][int(tokens[3])][:-1]
-            elif 'v_writelane' in tokens[0]:
-                self.registers[tokens[1]][int(tokens[3])].append(self.registers[tokens[2]][-1])
-                self.registers[tokens[2]] = self.registers[tokens[2]][-STACK_SIZE_LIMIT:]
-        except Exception as e:
-            pass
-
-
-def try_match_swapped(insts, code, i, line):
-    return insts[i+1][1] == code[line][1] and insts[i][1] == code[line+1][1]
-
-
-def Match(inst_value, code_value):
-    if code_value == inst_value:
-        return True
-    if code_value in [GETPC, SWAPPC, SETPC] and inst_value in [SALU, JUMP]:
-        return True
-    if code_value == BRANCH and inst_value in [JUMP, NEXT]: # TODO: Maybe lets not reorder branches?
-        return True
-    return False
-
-
-def get_match_lookahead(insts, code, i, line):
-    if try_match_swapped(insts, code, i, line):
-        return [i+1, i]
-    new_inst_order = []
-
-    allowed_insts = list(range(i, min(i+4, len(insts))))
-    for l in range(line, min(line+10, len(code))):
-        bMatch = False
-        for j in allowed_insts:
-            if Match(insts[j][1], code[l][1]):
-                new_inst_order.append(j)
-                allowed_insts.remove(j)
-                bMatch = True
-                break
-        if bMatch == False:
-            break
-    if len(new_inst_order):
-        new_inst_order += [j for j in list(range(i, max(new_inst_order)+1)) if j not in new_inst_order]
-    return new_inst_order
-
-
-def stitch(insts, raw_code, jumps, gfxv):
-    bGFX9 = gfxv == 'vega'
-    result, i, line, loopCount, N = [], 0, 0, defaultdict(int), len(insts)
-
-    SMEM_INST = []  # scalar memory
-    VLMEM_INST = [] # vector memory load
-    VSMEM_INST = [] # vector memory store
-    FLAT_INST = []
-    NUM_SMEM = 0
-    NUM_VLMEM = 0
-    NUM_VSMEM = 0
-    NUM_FLAT = 0
-    skipped_immed = 0
-
-    mem_unroll = []
-    flight_count = []
-
-    labels = {}
-    jump_map = [0]
-    code = [raw_code[0]]
-    for c in raw_code[1:]:
-        c = list(c)
-        c[0] = c[0].split(';')[0].split('//')[0].strip()
-
-        if c[1] != 100:
-            code.append(c)
-        elif ':' in c[0]:
-            labels[c[0].split(':')[0]] = len(code)
-        jump_map.append(len(code)-1)
-
-    reverse_map = []
-    for k, v in enumerate(jump_map):
-        if v >= len(reverse_map):
-            reverse_map.append(k)
-
-    jumps = {jump_map[j]+1: j for j in jumps}
-
-    smem_ordering = 0
-    vlmem_ordering = 0
-    vsmem_ordering = 0
-    max_line = 0
-
-    watchlist = RegisterWatchList(labels=labels)
-
-    num_failed_stitches = 0
-    loops = 0
-    maxline = 0
-
-    while i < N:
-        #print('L', line)
-        loops += 1
-        if line >= len(code) or loops > MAX_STITCHED_TOKENS or num_failed_stitches > MAX_FAILED_STITCHES:
-            break
-
-        maxline = max(reverse_map[line], maxline)
-        inst = insts[i]
-
-        as_line = code[line]
-        max_line = max(max_line, reverse_map[line])
-
-        matched = True
-        next = line+1
-
-        if '_mov_' in as_line[0]:
-            watchlist.move(as_line[0])
-        elif 'scratch_' in as_line[0]:
-            watchlist.scratch(as_line[0])
-
-        if as_line[1] == GETPC: # TODO: @ can put you ahead of label!
-            watchlist.getpc(as_line[0], code[line+1][0])
-            matched = inst[1] in [SALU, JUMP]
-        elif as_line[1] == LANEIO:
-            watchlist.updatelane(as_line[0])
-            matched = inst[1] == VALU
-        elif as_line[1] == SETPC:
-            next = watchlist.setpc(as_line[0])
-            matched = inst[1] in [SALU, JUMP]
-        elif as_line[1] == SWAPPC:
-            next = watchlist.swappc(as_line[0], line)
-            #print('Next:', next, code[next])
-            matched = inst[1] in [SALU, JUMP]
-        elif inst[1] == as_line[1]:
-            if line in jumps:
-                loopCount[jumps[line]-1] += 1  # label is the previous line
-            num_inflight = NUM_FLAT + NUM_SMEM + NUM_VLMEM + NUM_VSMEM
-
-            if inst[1] == SMEM or inst[1] == LDS:
-                smem_ordering = 1 if inst[1] == SMEM else smem_ordering
-                SMEM_INST.append([reverse_map[line],  num_inflight])
-                NUM_SMEM += 1
-            elif inst[1] == VMEM or (inst[1] == FLAT and 'global_' in as_line[0]):
-                inc_ordering = False
-                if 'buffer_' in as_line[0] or 'flat_' in as_line[0]:
-                    inc_ordering = True
-
-                if bGFX9 or 'load' in as_line[0]:
-                    VLMEM_INST.append([reverse_map[line],  num_inflight])
-                    NUM_VLMEM += 1
-                    if inc_ordering:
-                        vlmem_ordering = 1
-                else:
-                    VSMEM_INST.append([reverse_map[line],  num_inflight])
-                    NUM_VSMEM += 1
-                    if inc_ordering:
-                        vsmem_ordering = 1
-            elif inst[1] == FLAT:
-                smem_ordering = 1
-                vlmem_ordering = 1
-                vsmem_ordering = 1
-                FLAT_INST.append([reverse_map[line],  num_inflight])
-                NUM_FLAT += 1
-            elif inst[1] == IMMED and 's_waitcnt ' in as_line[0]:
-                if 'lgkmcnt' in as_line[0]:
-                    wait_N = int(as_line[0].split('lgkmcnt(')[1].split(')')[0])
-                    flight_count.append([as_line[-1], num_inflight, wait_N])
-                    if wait_N == 0:
-                        smem_ordering = 0
-                    if smem_ordering == 0:
-                        offset = len(SMEM_INST)-wait_N
-                        mem_unroll.append( [reverse_map[line], SMEM_INST[:offset]+FLAT_INST] )
-                        SMEM_INST = SMEM_INST[offset:]
-                        NUM_SMEM = len(SMEM_INST)
-                        FLAT_INST = []
-                        NUM_FLAT = 0
-                    else:
-                        NUM_SMEM = min(max(wait_N-NUM_FLAT, 0), NUM_SMEM)
-                        NUM_FLAT = min(max(wait_N-NUM_SMEM, 0), NUM_FLAT)
-                    num_inflight = NUM_FLAT + NUM_SMEM + NUM_VLMEM + NUM_VSMEM
-
-                if 'vmcnt' in as_line[0]:
-                    wait_N = int(as_line[0].split('vmcnt(')[1].split(')')[0])
-                    flight_count.append([as_line[-1], num_inflight, wait_N])
-                    if wait_N == 0:
-                        vlmem_ordering = 0
-                    if vlmem_ordering == 0:
-                        offset = len(VLMEM_INST)-wait_N
-                        mem_unroll.append( [reverse_map[line], VLMEM_INST[:offset]+FLAT_INST] )
-                        VLMEM_INST = VLMEM_INST[offset:]
-                        NUM_VLMEM = len(VLMEM_INST)
-                        FLAT_INST = []
-                        NUM_FLAT = 0
-                    else:
-                        NUM_VLMEM = min(max(wait_N-NUM_FLAT, 0), NUM_VLMEM)
-                        NUM_FLAT = min(max(wait_N-NUM_VLMEM, 0), NUM_FLAT)
-                    num_inflight = NUM_FLAT + NUM_SMEM + NUM_VLMEM + NUM_VSMEM
-
-                if 'vscnt' in as_line[0] or (bGFX9 and 'vmcnt' in as_line[0]):
-                    try:
-                        wait_N = int(as_line[0].split('vscnt(')[1].split(')')[0])
-                    except:
-                        wait_N = int(as_line[0].split('vmcnt(')[1].split(')')[0])
-                    flight_count.append([as_line[-1], num_inflight, wait_N])
-                    if wait_N == 0:
-                        vsmem_ordering = 0
-                    if vsmem_ordering == 0:
-                        offset = len(VSMEM_INST)-wait_N
-                        mem_unroll.append( [reverse_map[line], VSMEM_INST[:offset]+FLAT_INST] )
-                        VSMEM_INST = VSMEM_INST[offset:]
-                        NUM_VSMEM = len(VSMEM_INST)
-                        FLAT_INST = []
-                        NUM_FLAT = 0
-                    else:
-                        NUM_VSMEM = min(max(wait_N-NUM_FLAT, 0), NUM_VSMEM)
-                        NUM_FLAT = min(max(wait_N-NUM_VSMEM, 0), NUM_FLAT)
-                    num_inflight = NUM_FLAT + NUM_SMEM + NUM_VLMEM + NUM_VSMEM
-
-        elif inst[1] == JUMP and as_line[1] == BRANCH:
-            next = jump_map[as_line[2]]
-            if next is None or next == 0:
-                print('Jump to unknown location!', as_line)
-                break
-        elif inst[1] == NEXT and as_line[1] == BRANCH:
-            next = line + 1
-        else:
-            matched = False
-            next = line + 1
-            if i+1 < N and line+1 < len(code):
-                #print('Swap:', try_match_swapped(insts, code, i, line))
-                if try_match_swapped(insts, code, i, line):
-                    temp = insts[i]
-                    insts[i] = insts[i+1]
-                    insts[i+1] = temp
-                    next = line
-                elif 's_waitcnt ' in as_line[0] or '_load_' in as_line[0]:
-                    if skipped_immed > 0 and 's_waitcnt ' in as_line[0]:
-                        matched = True
-                        skipped_immed -= 1
-                    else:
-                        print('Parsing terminated at:', as_line)
-                        break
-
-        #print(matched, WaveInstCategory[inst[1]], WaveInstCategory[as_line[1]], as_line, inst)
-        #print([WaveInstCategory[insts[i+k][1]] for k in range(20) if i+k < len(insts)])
-        if matched:
-            result.append(inst + (reverse_map[line],))
-            i += 1
-            num_failed_stitches = 0
-        elif not bGFX9 and inst[1] == IMMED and line != next:
-            skipped_immed += 1
-            result.append(inst + (reverse_map[line],))
-            next = line
-            i += 1
-        else:
-            num_failed_stitches += 1
-        line = next
-
-    N = max(N, 1)
-    if len(result) != N:
-        print('Warning - Stitching rate: '+str(len(result) * 100 / N)+'% matched')
-        print('Leftovers:', [WaveInstCategory[insts[i+k][1]] for k in range(20) if i+k < len(insts)])
-        try:
-            print(line, code[line])
-        except:
-            pass
-    else:
-        while line < len(code):
-            if 's_endpgm' in code[line]:
-                mem_unroll.append( [reverse_map[line], SMEM_INST+VLMEM_INST+VSMEM_INST+FLAT_INST] )
-                break
-            line += 1
-
-    return result, loopCount, mem_unroll, flight_count, maxline
-
 
 def get_ip():
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -459,28 +41,10 @@ PORT, WebSocketPort = 8000, 18000
 SP = '\u00A0'
 
 
-def extract_tuple(content, num):
-    vals = content.split(',')
-    assert (len(vals) == num)
-    last_val = vals[-1][:-1] if vals[-1].endswith(')') else vals[-1]
-    vals = [vals[0][1:]] + vals[1:-1] + [last_val]
-    return tuple(int(val) for val in vals)
-
-
-def get_top_n(stitched):
+def get_top_n(code):
     TOP_N = 10
-    by_line_num = defaultdict(lambda: [0, 0, 0])
-    for (_, _, s2i, run_time, line_num) in stitched:
-        entry = by_line_num[line_num]
-        entry[0] += 1
-        entry[1] += s2i
-        entry[2] += run_time
-    top_n = sorted(
-        [(line_num, v[0], v[1], v[2])
-         for (line_num, v) in by_line_num.items()],
-        key=lambda x: x[2] + x[3],
-        reverse=True)
-    return top_n[:TOP_N]
+    top_n = sorted(deepcopy(code), key=lambda x: x[-1], reverse=True)[:TOP_N]
+    return [(line_num, hitc, 0, run_time) for _, _, _, _, line_num, _, hitc, run_time in top_n]
 
 
 def wave_info(df, id):
@@ -498,74 +62,28 @@ def wave_info(df, id):
     return dic
 
 
-def extract_waves(waves):
-    result, slot2seq = [], {}
-    for id in waves['id']:
-        row = {key: waves[key][id] for key in waves.keys()}
-
-        insts, timeline = [], []
-        for x in row['instructions'].split('),'):
-            if len(x) > 0:
-                insts.append(extract_tuple(x, 4))
-        for x in row['timeline'].split('),'):
-            if len(x) > 0:
-                timeline.append(extract_tuple(x, 2))
-
-        # aggregate per wave slot
-        if (row['simd'], row['wave_slot']) in slot2seq:
-            slot = result[slot2seq[(row['simd'], row['wave_slot'])]]
-            last_end_time = slot[2][-1][-1]
-            slot[2] += (row['id'], row['begin_time'], row['end_time']),
-            slot[3] += insts
-            # filler between waves
-            slot[4] += (0, row['begin_time'] - last_end_time),
-            slot[4] += timeline
-        else:
-            slot2seq[row['simd'], row['wave_slot']] = len(result)
-            result.append([row['simd'], row['wave_slot'],
-                           [(row['id'], row['begin_time'], row['end_time'])],
-                           insts,
-                           timeline])
-
-    return result
-
-
-def extract_data(df, se_number, code, jumps, gfxv):
+def extract_data(df, se_number):
     if len(df['id']) == 0 or len(df['instructions']) == 0 or len(df['timeline']) == 0:
         return None
 
-    cu_waves = extract_waves(df)
     wave_filenames = []
     flight_count = []
-    maxgrade = [{df['wave_slot'][wave_id]: -1 for wave_id in df['id']} for k in range(4)]
-    non_stitched = [{df['wave_slot'][wave_id]: -1 for wave_id in df['id']} for k in range(4)]
-
+    wave_slot_count = [{df['wave_slot'][wave_id]: 0 for wave_id in df['id']} for k in range(4)]
+    
     print('Number of waves:', len(df['id']))
     allwaves_maxline = 0
 
     for wave_id in df['id']:
-        if non_stitched[df['simd'][wave_id]][df['wave_slot'][wave_id]] == 0:
-            continue
-        insts, timeline = [], []
-        if len(df['instructions'][wave_id]) == 0 or len(df['timeline'][wave_id]) == 0:
-            continue
+        stitched, loopCount, mem_unroll, count, maxline, num_insts = df['instructions'][wave_id]
+        timeline = df['timeline'][wave_id]
 
-        for x in df['instructions'][wave_id].split('),'):
-            insts.append(extract_tuple(x, 4))
-        for x in df['timeline'][wave_id].split('),'):
-            timeline.append(extract_tuple(x, 2))
-
-        stitched, loopCount, mem_unroll, count, maxline = stitch(insts, code, jumps, gfxv)
-        srate = len(stitched)**2 / max(len(insts), 1)
-        if srate <= maxgrade[df['simd'][wave_id]][df['wave_slot'][wave_id]]:
+        if len(stitched) == 0 or len(timeline) == 0 or len(stitched) != num_insts:
             continue
 
         allwaves_maxline = max(allwaves_maxline, maxline)
-        maxgrade[df['simd'][wave_id]][df['wave_slot'][wave_id]] = srate
-        non_stitched[df['simd'][wave_id]][df['wave_slot'][wave_id]] = len(insts) - len(stitched)
         flight_count.append(count)
-        
-        wave_entry = {  
+
+        wave_entry = {
             "id": int(df['id'][wave_id]),
             "simd": int(df['simd'][wave_id]),
             "slot": int(df['wave_slot'][wave_id]),
@@ -578,33 +96,36 @@ def extract_data(df, se_number, code, jumps, gfxv):
         }
         data_obj = {
             "name": 'SE'.format(se_number),
-            "kernel": code[0][0],
             "duration": sum(dur for (_, dur) in timeline),
             "wave": wave_entry,
             "loop_count": loopCount,
-            "top_n": get_top_n(stitched),
+            "top_n": [],
+            "num_stitched": len(stitched),
+            "num_insts": num_insts,
             "websocket_port": WebSocketPort,
             "generation_time": time.ctime()
         }
 
-        OUT = 'se'+str(se_number)+'_sm'+str(df['simd'][wave_id])+'_wv'+str(df['wave_slot'][wave_id])+'.json'
+        simd_id = df['simd'][wave_id]
+        slot_id = df['wave_slot'][wave_id]
+        slot_count = wave_slot_count[simd_id][slot_id]
+        wave_slot_count[simd_id][slot_id] += 1
+
+        OUT = 'se'+str(se_number)+'_sm'+str(simd_id)+'_sl'+str(slot_id)+'_wv'+str(slot_count)+'.json'
         JSON_GLOBAL_DICTIONARY[OUT] = Readable(data_obj)
-        wave_filenames.append(OUT)
+        wave_filenames.append((OUT, df['begin_time'][wave_id], df['end_time'][wave_id]))
 
     data_obj = {
         "name": 'SE'.format(se_number),
-        "kernel": code[0][0],
-        "simd_waves": [],
-        "cu_waves": cu_waves,
-        "code": code[:allwaves_maxline+16],
         "websocket_port": WebSocketPort,
         "generation_time": time.ctime()
     }
-    se_filename = 'se'+str(se_number)+'_code.json'
+    se_filename = None
     if len(wave_filenames) > 0:
+        se_filename = 'se'+str(se_number)+'_info.json'
         JSON_GLOBAL_DICTIONARY[se_filename] = Readable(data_obj)
 
-    return flight_count, wave_filenames, se_filename
+    return flight_count, wave_filenames, se_filename, allwaves_maxline
 
 
 class NoCacheHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
@@ -618,19 +139,18 @@ class NoCacheHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
         self.send_header("Expires", "0")
 
     def do_GET(self):
-        global PICTURE_CALLBACK
-        if 'timeline.png?' in self.path:
-            selections = [int(s)!=0 for s in self.path.split('timeline.png?')[1]]
-            counters_json, imagebytes, _, _ = PICTURE_CALLBACK(selections[1:], selections[0])
-            JSON_GLOBAL_DICTIONARY['counters.json'] = counters_json
-            JSON_GLOBAL_DICTIONARY[self.path.split('/')[-1]] = imagebytes
+        if '.png?' in self.path and self.path.split('/')[-1] not in JSON_GLOBAL_DICTIONARY.keys():
+            selections = [int(s)!=0 for s in self.path.split('.png?')[-1]]
+            counters_json, imagebytes = GeneratePIC(self.drawinfo, selections[1:], selections[0])
+            JSON_GLOBAL_DICTIONARY['graph_options.json'] = counters_json
+            JSON_GLOBAL_DICTIONARY[self.path.split('/')[-1]] = imagebytes[self.path.split('/')[-1].split('?')[0]]
 
-        if '.json' in self.path or 'timeline.png' in self.path or 'wstates' in self.path:
+        if '.json' in self.path or '.png' in self.path:
             try:
                 response_file = JSON_GLOBAL_DICTIONARY[self.path.split('/')[-1]]
-                #print(response_file)
             except:
                 print('Invalid json request:', self.path)
+                print(JSON_GLOBAL_DICTIONARY.keys())
                 self.send_error(HTTPStatus.NOT_FOUND, "File not found")
                 return
             self.send_response(HTTPStatus.OK)
@@ -658,9 +178,11 @@ class RocTCPServer(socketserver.TCPServer):
         self.socket.bind(self.server_address)
 
 
-def run_server():
+def run_server(drawinfo):
     Handler = NoCacheHTTPRequestHandler
-    os.chdir(os.path.join(os.path.dirname(os.path.abspath(__file__)),'ui'))
+    Handler.drawinfo = drawinfo
+    os.chdir(os.path.join(os.path.dirname(os.path.abspath(__file__)),'ui/'))
+    #os.chdir('ui/')
     try:
         with RocTCPServer((IPAddr, PORT), Handler) as httpd:
             httpd.serve_forever()
@@ -676,7 +198,6 @@ def fix_space(line):
 
 def WebSocketserver(websocket, path):
     data = websocket.recv()
-    print(354, data)
     cpp, ln, _ = data.split(':')
     ln = int(ln)
     HL, EMP = 'highlight', ''
@@ -713,68 +234,87 @@ def assign_ports(ports):
     PORT, WebSocketPort = ps[0], ps[1]
 
 
-def call_picture_callback(return_dict):
-    global PICTURE_CALLBACK
-    response, imagebytes, wstates, counter_events = PICTURE_CALLBACK()
-    return_dict['counters.json'] = response
-    return_dict['timeline.png'] = imagebytes
-    for n, m in enumerate(wstates):
+def call_picture_callback(return_dict, drawinfo):
+    response, imagebytes = GeneratePIC(drawinfo)
+    return_dict['graph_options.json'] = response
+    for k, v in imagebytes.items():
+        return_dict[k] = v
+
+    for n, m in enumerate(drawinfo['TIMELINES']):
         return_dict['wstates'+str(n)+'.json'] = Readable({"data": [int(n) for n in list(np.asarray(m))]})
-    for n, e in enumerate(counter_events):
+    for n, e in enumerate(drawinfo['EVENTS']):
         return_dict['se'+str(n)+'_perfcounter.json'] = Readable({"data": [v.toTuple() for v in e]})
 
 
-def view_trace(args, code, jumps, dbnames, att_filenames, bReturnLoc, pic_callback, OCCUPANCY, bDumpOnly, se_time_begin, gfxv):
-    global PICTURE_CALLBACK
-    PICTURE_CALLBACK = pic_callback
-    manager = Manager()
-    return_dict = manager.dict()
-    JSON_GLOBAL_DICTIONARY['occupancy.json'] = Readable({str(k): OCCUPANCY[k] for k in range(len(OCCUPANCY))})
+def view_trace(args, code, dbnames, att_filenames, bReturnLoc, OCCUPANCY, bDumpOnly, se_time_begin, gfxv, drawinfo, MPI_COMM, mpi_root):
+    global JSON_GLOBAL_DICTIONARY
+    pic_thread = None
+    if mpi_root:
+        manager = Manager()
+        return_dict = manager.dict()
+        JSON_GLOBAL_DICTIONARY['occupancy.json'] = Readable({str(k): OCCUPANCY[k] for k in range(len(OCCUPANCY))})
+        pic_thread = Process(target=call_picture_callback, args=(return_dict, drawinfo))
+        pic_thread.start()
 
-    pic_thread = Process(target=call_picture_callback, args=(return_dict,))
-    pic_thread.start()
-
-    assert(len(dbnames) > 0)
     att_filenames = [Path(f).name for f in att_filenames]
     se_numbers = [int(a.split('_se')[1].split('.att')[0]) for a in att_filenames]
     flight_count = []
     simd_wave_filenames = {}
     se_filenames = []
 
+    allse_maxline = 0
     for se_number, dbname in zip(se_numbers, dbnames):
         if len(dbname['id']) == 0:
             continue
 
-        count, wv_filenames, se_filename = extract_data(dbname, se_number, code, jumps, gfxv)
+        count, wv_filenames, se_filename, maxline = extract_data(dbname, se_number)
+        if se_filename is None:
+            continue
+        allse_maxline = max(allse_maxline, maxline)
         se_filenames.append(se_filename)
 
         if count is not None:
             flight_count.append(count)
             simd_wave_filenames[se_number] = wv_filenames
 
+    if mpi_root:
+        JSON_GLOBAL_DICTIONARY['code.json'] = Readable({"code": code[:allse_maxline+16], "top_n": get_top_n(code[:allse_maxline+16])})
+
     if bReturnLoc:
         return flight_count
 
     for key in simd_wave_filenames.keys():
         wv_array = [[
-            int(s.split('_sm')[1].split('_wv')[0]),
-            int(s.split('_wv')[1].split('.')[0]),
+            int(s[0].split('_sm')[1].split('_sl')[0]),
+            int(s[0].split('_sl')[1].split('_wv')[0]),
+            int(s[0].split('_wv')[1].split('.')[0]),
             s
         ] for s in simd_wave_filenames[key]]
 
         wv_dict = {}
         for wv in wv_array:
             try:
-                wv_dict[wv[0]][wv[1]] = wv[2]
+                wv_dict[wv[0]][wv[1]][wv[2]] = wv[3]
             except:
                 try:
-                    wv_dict[wv[0]] = {wv[1]: wv[2]}
+                    wv_dict[wv[0]][wv[1]] = {wv[2]: wv[3]}
                 except:
-                    exit(-1)
+                    try:
+                        wv_dict[wv[0]] = {wv[1]: {wv[2]: wv[3]}}
+                    except:
+                        pass
 
         simd_wave_filenames[key] = wv_dict
 
-    JSON_GLOBAL_DICTIONARY['filenames.json'] = Readable({"wave_filenames": simd_wave_filenames,
+    if MPI_COMM is not None:
+        se_filenames = MPI_COMM.gather(se_filenames, root=0)
+        simd_wave_filenames = MPI_COMM.gather(simd_wave_filenames, root=0)
+        if mpi_root:
+            se_filenames = [e for elem in se_filenames for e in elem]
+            simd_wave_filenames = {k:v for smf in simd_wave_filenames for k,v in smf.items()}
+
+    if mpi_root:
+        JSON_GLOBAL_DICTIONARY['filenames.json'] = Readable({"wave_filenames": simd_wave_filenames,
                                                         "se_filenames": se_filenames,
                                                         "global_begin_time": int(se_time_begin),
                                                         "gfxv": gfxv})
@@ -785,11 +325,18 @@ def view_trace(args, code, jumps, dbnames, att_filenames, bReturnLoc, pic_callba
             JSON_GLOBAL_DICTIONARY[k] = v
 
     if bDumpOnly == False:
+        if MPI_COMM is not None:
+            JSON_GLOBAL_DICTIONARY = MPI_COMM.gather(JSON_GLOBAL_DICTIONARY, root=0)
+            if not mpi_root:
+                quit()
+            JSON_GLOBAL_DICTIONARY = {k:v for smf in JSON_GLOBAL_DICTIONARY for k,v in smf.items()}
+
+        JSON_GLOBAL_DICTIONARY['live.json'] = Readable({'live': 1})
         if args.ports:
             assign_ports(args.ports)
         print('serving at ports: {0},{1}'.format(PORT, WebSocketPort))
         try:
-            PROCS = [Process(target=run_server), Process(target=run_websocket)]
+            PROCS = [Process(target=run_server, args=[drawinfo]), Process(target=run_websocket)]
             for p in PROCS:
                 p.start()
             for p in PROCS:
@@ -797,8 +344,10 @@ def view_trace(args, code, jumps, dbnames, att_filenames, bReturnLoc, pic_callba
         except KeyboardInterrupt:
             print("Exitting.")
     else:
-        os.makedirs('ui', exist_ok=True)
-        os.system('cp ' + os.path.join(os.path.abspath(os.path.dirname(__file__)),'ui') + '/* ui/' )
+        os.makedirs('ui/', exist_ok=True)
+        if mpi_root:
+            JSON_GLOBAL_DICTIONARY['live.json'] = Readable({'live': 0})
+            os.system('cp ' + os.path.join(os.path.abspath(os.path.dirname(__file__)),'ui') + '/* ui/' )
         for k, v in JSON_GLOBAL_DICTIONARY.items():
             with open(os.path.join('ui',k), 'w' if '.json' in k else 'wb') as f:
                 f.write(v.read())

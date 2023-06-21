@@ -6,38 +6,20 @@ if sys.version_info[0] < 3:
 import os
 import argparse
 from pathlib import Path
-from struct import *
 from ctypes import *
 import ctypes
 from copy import deepcopy
-from trace_view import view_trace, Readable
+from trace_view import view_trace
 import sys
 import glob
 import numpy as np
-import matplotlib.pyplot as plt
-from io import BytesIO
+from stitch import stitch
+import gc
 
-class FileBytesIO:
-    def __init__(self, iobytes):
-        self.iobytes = deepcopy(iobytes)
-        self.seek = 0
-
-    def __len__(self):
-        return self.iobytes.getbuffer().nbytes
-
-    def read(self, length=0):
-        if length<=0:
-            return bytes(self.iobytes.getbuffer())
-        else:
-            if self.seek >= self.iobytes.getbuffer().nbytes:
-                self.seek = 0
-                return None
-            response =  self.iobytes.getbuffer()[self.seek:self.seek+length]
-            self.seek += length
-            return bytes(response)
-
-
-COUNTERS_MAX_CAPTURES = 1<<12
+try:
+    from mpi4py import MPI
+except:
+    pass
 
 class PerfEvent(ctypes.Structure):
     _fields_ = [
@@ -114,8 +96,17 @@ class Wave(ctypes.Structure):
         ('num_branch_taken_instrs', ctypes.c_uint64),
         ('num_branch_stalls', ctypes.c_uint64),
 
-        ('timeline_string', ctypes.c_char_p),
-        ('instructions_string', ctypes.c_char_p)]
+        ('timeline_array', POINTER(ctypes.c_int64)),
+        ('instructions_array', POINTER(ctypes.c_int64)),
+        ('timeline_size', ctypes.c_uint64),
+        ('instructions_size', ctypes.c_uint64)]
+
+class PythonWave:
+    def __init__(self, source_wave):
+        for property, value in Wave._fields_:
+            setattr(self, property, getattr(source_wave, property))
+        self.timeline_array = None
+        self.instructions_array = None
 
 # Flags :
 #   IS_NAVI = 0x1
@@ -154,16 +145,14 @@ def parse_binary(filename, kernel=None):
     for k in range(info.code_len):
         code_entry = info.code[k]
 
-        # copy string memory from C++
         line = deepcopy(code_entry.line.decode("utf-8"))
         loc = deepcopy(code_entry.loc.decode("utf-8"))
 
-        # Transform empty entries back to python's None
         to_line = int(code_entry.to_line) if (code_entry.to_line >= 0) else None
         loc = loc if len(loc) > 0 else None
 
-        code.append((line, int(code_entry.value), to_line, loc,
-                    int(code_entry.index), int(code_entry.line_num)))
+        code.append([line, int(code_entry.value), to_line, loc,
+                    int(code_entry.index), int(code_entry.line_num), 0, 0]) # hitcount + cycles
 
     jumps = {}
     for k in range(info.jumps_len):
@@ -172,19 +161,35 @@ def parse_binary(filename, kernel=None):
     return code, jumps
 
 
-def getWaves(filename, target_cu, verbose):
-    filename = os.path.abspath(str(filename))
-    info = SO.AnalyseBinary(filename.encode('utf-8'), target_cu, verbose)
+def getWaves_binary(name, shader_engine_data_dict, target_cu, depth):
+    filename = os.path.abspath(str(name))
+    info = SO.AnalyseBinary(filename.encode('utf-8'), target_cu, False)
 
     waves = [info.wavedata[k] for k in range(info.num_waves)]
     events = [deepcopy(info.perfevents[k]) for k in range(info.num_events)]
     occupancy = [int(info.occupancy[k]) for k in range(int(info.num_occupancy))]
+    flags = 'navi' if (info.flags & 0x1) else 'vega'
 
+    wave_slot_count = [[0 for k in range(20)] for j in range(4)]
+    waves_python = []
     for wave in waves:
-        wave.timeline = deepcopy(wave.timeline_string.decode("utf-8"))
-        wave.instructions = deepcopy(wave.instructions_string.decode("utf-8"))
+        if wave_slot_count[wave.simd][wave.wave_id] >= depth:
+            continue
+        wave_slot_count[wave.simd][wave.wave_id] += 1
+        pwave = PythonWave(wave)
+        pwave.timeline = [(wave.timeline_array[2*k], wave.timeline_array[2*k+1]) for k in range(wave.timeline_size)]
+        pwave.instructions = [tuple([wave.instructions_array[4*k+m] for m in range(4)]) for k in range(wave.instructions_size)]
+        waves_python.append( pwave )
+    shader_engine_data_dict[name] = (waves_python, events, occupancy, flags)
 
-    return waves, events, occupancy, 'navi' if (info.flags & 0x1) else 'vega'
+
+def getWaves_stitch(SIMD, code, jumps, flags, latency_map, hitcount_map):
+    for pwave in SIMD:
+        pwave.instructions = stitch(pwave.instructions, code, jumps, flags)
+
+        for inst in pwave.instructions[0]:
+            hitcount_map[inst[-1]] += 1
+            latency_map[inst[-1]] += inst[3]
 
 
 def persist(trace_file, SIMD):
@@ -221,7 +226,6 @@ def persist(trace_file, SIMD):
         timeline.append(wave.timeline)
         instructions.append(wave.instructions)
 
-    #df = pd.DataFrame({
     df = {
         'name': [trace for _ in range(len(begin_time))],
         'id': [i for i in range(len(begin_time))],
@@ -248,8 +252,7 @@ def persist(trace_file, SIMD):
         'br_stalls': br_stalls,
         'timeline': timeline,
         'instructions': instructions,
-    }#)
-    #[print(d) for c, d in df.iterrows()]; quit()
+    }
     return df
 
 
@@ -299,128 +302,50 @@ def insert_waitcnt(flight_count, assembly_code):
     return assembly_code
 
 
-def get_delta_time(events):
-    try:
-        CUS = [[e.time for e in events if e.cu==k and e.bank==0] for k in range(16)]
-        CUS = [np.asarray(c).astype(np.int64) for c in CUS if len(c) > 2]
-        return np.min([np.min(abs(c[1:]-c[:-1])) for c in CUS])
-    except:
-        return 1
+def apply_min_event(min_event_time, OCCUPANCY, EVENTS, DBFILES, TIMELINES):
+    for n, occ in enumerate(OCCUPANCY):
+        OCCUPANCY[n] = [max(min(int((u>>16)-min_event_time)<<16,2**42),0) | (u&0xFFFFF) for u in occ]
+    for perf in EVENTS:
+        for p in perf:
+            p.time -= min_event_time
 
-def draw_wave_metrics(selections, normalize):
-    global TIMELINES
-    global EVENTS
-    global EVENT_NAMES
+    for df in DBFILES:
+        for T in range(len(df['timeline'])):
+            timeline = df['timeline'][T]
+            time_acc = 0
+            tuples3 = [(0,df['begin_time'][T]-min_event_time)]+[(int(t[0]),int(t[1])) for t in timeline]
 
-    response = Readable({"counters": EVENT_NAMES})
-
-    plt.figure(figsize=(15,3))
-
-    delta_step = 8
-    quad_delta_time = max(delta_step,int(0.5+np.min([get_delta_time(events) for events in EVENTS])))
-    maxtime = np.max([np.max([e.time for e in events]) for events in EVENTS])/quad_delta_time+1
-
-    if maxtime*delta_step >= COUNTERS_MAX_CAPTURES:
-        delta_step = 1
-    while maxtime >= COUNTERS_MAX_CAPTURES:
-        quad_delta_time *= 2
-        maxtime /= 2
-
-    maxtime = int(min(maxtime*delta_step, COUNTERS_MAX_CAPTURES))
-    event_timeline = np.zeros((16, maxtime), dtype=np.int32)
-    print('Delta:', quad_delta_time)
-    print('Max_cycles:', maxtime*quad_delta_time*4//delta_step)
-
-    cycles = 4*quad_delta_time//delta_step*np.arange(maxtime)
-    kernel = len(EVENTS)*quad_delta_time
-
-    for events in EVENTS:
-        for e in range(len(events)-1):
-            bk = events[e].bank*4
-            start = events[e].time // (quad_delta_time//delta_step)
-            end = start+delta_step
-            event_timeline[bk:bk+4, start:end] += np.asarray(events[e].toTuple()[1:5])[:, None]
-        start = events[-1].time
-        event_timeline[bk:bk+4, start:start+delta_step] += \
-            np.asarray(events[-1].toTuple()[1:5])[:, None]
-
-    event_timeline = [np.convolve(e, [kernel for k in range(3)])[1:-1] for e in event_timeline]
-    #event_timeline = [e/kernel for e in event_timeline]
-
-    if normalize:
-        event_timeline = [100*e/max(e.max(), 1E-5) for e in event_timeline]
-
-    colors = ['blue', 'green', 'gray', 'red', 'orange', 'cyan', 'black', 'darkviolet',
-                'yellow', 'darkred', 'pink', 'lime', 'gold', 'tan', 'aqua', 'olive']
-    [plt.plot(cycles, e, '-', label=n, color=c)
-        for e, n, c, sel in zip(event_timeline, EVENT_NAMES, colors, selections) if sel]
-
-    plt.legend()
-    if normalize:
-        plt.ylabel('As % of maximum')
-    else:
-        plt.ylabel('Value')
-    plt.subplots_adjust(left=0.05, right=1, top=1, bottom=0.07)
-
-    figure_bytes = BytesIO()
-    plt.savefig(figure_bytes, dpi=150)
-    return response, FileBytesIO(figure_bytes), TIMELINES, EVENTS
-
-
-def draw_wave_states(selections, normalize):
-    global TIMELINES
-    plot_indices = [1, 2, 3, 4]
-    STATES = [['Empty', 'Idle', 'Exec', 'Wait', 'Stall'][k] for k in plot_indices]
-    colors = [['gray', 'orange', 'green', 'red', 'blue'][k] for k in plot_indices]
-
-    plt.figure(figsize=(15,3))
-
-    maxtime = max([np.max((TIMELINES[k]!=0)*np.arange(0,TIMELINES[k].size)) for k in plot_indices])
-    timelines = [deepcopy(TIMELINES[k][:maxtime]) for k in plot_indices]
-    timelines = [np.pad(t, [0, maxtime-t.size]) for t in timelines]
-
-    if normalize:
-        timelines = np.array(timelines) / np.maximum(np.sum(timelines,0)*1E-2,1E-7)
-
-    trim = max(maxtime//5000,1)
-    cycles = np.arange(0, timelines[0].size//trim, 1)*trim
-    timelines = [time[:trim*(time.size//trim)].reshape((-1, trim)).mean(-1) if len(time) > 0 else cycles*0 for time in timelines]
-    kernsize = 21
-    kernel = np.asarray([np.exp(-abs(10*k/kernsize)) for k in range(-kernsize//2,kernsize//2+1)])
-    kernel /= np.sum(kernel)
-
-    timelines = [np.convolve(time, kernel)[kernsize//2:-kernsize//2] for time in timelines]
-
-    [plt.plot(cycles, t, label='State '+s, linewidth=1.1, color=c)
-        for t, s, c, sel in zip(timelines, STATES, colors, selections) if sel]
-
-    plt.legend()
-    if normalize:
-        plt.ylabel('Waves state %')
-    else:
-        plt.ylabel('Waves state total')
-    plt.ylim(-1)
-    plt.xlim(-maxtime//200, maxtime+maxtime//200+1)
-    plt.subplots_adjust(left=0.05, right=1, top=1, bottom=0.07)
-    figure_bytes = BytesIO()
-    plt.savefig(figure_bytes, dpi=150)
-    response = Readable({"counters": STATES})
-    return response, FileBytesIO(figure_bytes), TIMELINES, []
-
-
-def GeneratePIC(selections=[True for k in range(16)], normalize=True, bScounter=True):
-    if bScounter and len(EVENTS) > 0 and np.sum([len(e) for e in EVENTS]) > 32:
-        return draw_wave_metrics(selections, normalize)
-    else:
-        return draw_wave_states(selections, normalize)
-
+            for state in tuples3:
+                if state[1] > 1E8:
+                    print('Warning: Time limit reached for ',state[0], state[1])
+                    break
+                if time_acc+state[1] > TIMELINES[state[0]].size:
+                    TIMELINES[state[0]] = np.hstack([
+                        TIMELINES[state[0]],
+                        np.zeros_like(TIMELINES[state[0]])
+                    ])
+                TIMELINES[state[0]][time_acc:time_acc+state[1]] += 1
+                time_acc += state[1]
 
 if __name__ == "__main__":
+    comm = None
+    mpi_root = True
+    try:
+        comm = MPI.COMM_WORLD
+        if comm.Get_size() < 2:
+            comm = None
+        else:
+            mpi_root = comm.Get_rank() == 0
+    except:
+        print('Could not load MPI')
+        comm = None
+
     pathenv = os.getenv('OUTPUT_PATH')
     if pathenv is None:
         pathenv = "."
     parser = argparse.ArgumentParser()
     parser.add_argument("assembly_code", help="Path of the assembly code")
+    parser.add_argument("--depth", help="Maximum number of parsed waves per slot", default=100, type=int)
     parser.add_argument("--trace_file", help="Filter for trace files", default=None, type=str)
     parser.add_argument("--att_kernel", help="Kernel file",
                         type=str, default=pathenv+'/*_kernel.txt')
@@ -441,7 +366,6 @@ if __name__ == "__main__":
         print('Skipping analysis.')
         quit()
 
-    global EVENT_NAMES
     with open(os.getenv("COUNTERS_PATH"), 'r') as f:
         lines = [l.split('//')[0] for l in f.readlines()]
 
@@ -452,7 +376,6 @@ if __name__ == "__main__":
                 EVENT_NAMES += ['id: '+clean(line)]
             elif 'att: TARGET_CU' in line:
                 args.target_cu = int(clean(line))
-                print('Target CU set to:', args.target_cu)
         for line in lines:
             if 'PERFCOUNTER=' in line:
                 EVENT_NAMES += [clean(line).split('SQ_')[1].lower()]
@@ -471,45 +394,61 @@ if __name__ == "__main__":
         print('Could not find att output kernel:', args.att_kernel)
         exit(1)
     elif len(att_kernel) > 1:
-        print('Found multiple kernel matching given filters:')
-        for n, k in enumerate(att_kernel):
-            print('\t', n, '->', k)
+        if mpi_root:
+            print('Found multiple kernel matching given filters:')
+            for n, k in enumerate(att_kernel):
+                print('\t', n, '->', k)
 
-        bValid = False
-        while bValid == False:
-            try:
-                args.att_kernel = att_kernel[int(input("Please select number: "))]
-                bValid = True
-            except KeyboardInterrupt:
-                exit(0)
-            except:
-                print('Invalid option.')
+            bValid = False
+            while bValid == False:
+                try:
+                    args.att_kernel = att_kernel[int(input("Please select number: "))]
+                    bValid = True
+                except KeyboardInterrupt:
+                    exit(0)
+                except:
+                    print('Invalid option.')
+        if comm is not None:
+            args.att_kernel = comm.bcast(args.att_kernel, root=0)
     else:
         args.att_kernel = att_kernel[0]
-
-    print('Att kernel:', args.att_kernel)
-    code, jumps = parse_binary(args.assembly_code, args.att_kernel)
 
     # Trace Parsing
     if args.trace_file is None:
         filenames = glob.glob(args.att_kernel.split('_kernel.txt')[0]+'_*.att')
-        assert(len(filenames) > 0)
     else:
         filenames = glob.glob(args.trace_file)
+    assert(len(filenames) > 0)
 
-    print('Trace filenames:', filenames)
+    if comm is not None:
+        filenames = filenames[comm.Get_rank()::comm.Get_size()]
+
+    code = jumps = None
+    if mpi_root:
+        print('Att kernel:', args.att_kernel)
+        code, jumps = parse_binary(args.assembly_code, args.att_kernel)
 
     DBFILES = []
-    global TIMELINES
-    global EVENTS
     TIMELINES = [np.zeros(int(1E4),dtype=np.int16) for k in range(5)]
     EVENTS = []
     OCCUPANCY = []
-
+    GFXV = []
     analysed_filenames = []
-    SIMD_list = []
+
+    shader_engine_data_dict = {}
     for name in filenames:
-        SIMD, perfevents, occupancy, gfxv = getWaves(name, args.target_cu, False)
+        getWaves_binary(name, shader_engine_data_dict, args.target_cu, args.depth)
+
+    if comm is not None:
+        code = comm.bcast(code, root=0)
+        jumps = comm.bcast(jumps, root=0)
+
+    gc.collect()
+    latency_map = np.zeros((len(code)), dtype=np.int64)
+    hitcount_map = np.zeros((len(code)), dtype=np.int32)
+    for name in filenames:
+        SIMD, perfevents, occupancy, gfxv = shader_engine_data_dict[name]
+        getWaves_stitch(SIMD, code, jumps, gfxv, latency_map, hitcount_map)
         if len(SIMD) == 0:
             print("Error parsing ", name)
             continue
@@ -517,8 +456,9 @@ if __name__ == "__main__":
         EVENTS.append(perfevents)
         DBFILES.append( persist(name, SIMD) )
         OCCUPANCY.append( occupancy )
-        SIMD_list.append( SIMD )
+        GFXV.append(gfxv)
 
+    gc.collect()
     min_event_time = 2**62
     for df in DBFILES:
         if len(df['begin_time']) > 0:
@@ -528,36 +468,59 @@ if __name__ == "__main__":
             min_event_time = min(min_event_time, p.time)
     for occ in OCCUPANCY:
         min_event_time = min(min_event_time, np.min(np.array(occ)>>16))
+
+    gc.collect()
+    min_event_time = max(0, min_event_time-32)
+    if comm is not None:
+        min_event_time = comm.reduce(min_event_time, op=MPI.MIN)
+        min_event_time = comm.bcast(min_event_time, root=0)
+
+        apply_min_event(min_event_time, OCCUPANCY, EVENTS, DBFILES, TIMELINES)
+
+        GFXV = comm.gather(GFXV, root=0)
+        EVENTS = comm.gather(EVENTS, root=0)
+        OCCUPANCY = comm.gather(OCCUPANCY, root=0)
+        TIMELINES = comm.gather(TIMELINES, root=0)
+        gather_latency_map = comm.gather(latency_map, root=0)
+        gather_hitcount_map = comm.gather(hitcount_map, root=0)
+        gathered_filenames = comm.gather(analysed_filenames, root=0)
+
+        if mpi_root:
+            latency_map *= 0
+            hitcount_map *= 0
+            for hit, lat in zip(gather_hitcount_map, gather_latency_map):
+                hitcount_map += hit
+                latency_map += lat
+            EVENTS = [e for elem in EVENTS for e in elem]
+            OCCUPANCY = [e for elem in OCCUPANCY for e in elem]
+            gathered_filenames = [e for elem in gathered_filenames for e in elem]
+            gfxv = [e for elem in GFXV for e in elem][0]
+    
+            TIMELINES_GATHER = TIMELINES
+            TIMELINES = [np.zeros((np.max([len(tm[k]) for tm in TIMELINES])), np.int16) for k in range(5)]
+            for gather in TIMELINES_GATHER:
+                for t, m in zip(TIMELINES, gather):
+                    t[:len(m)] += m
+            del(TIMELINES_GATHER)
+        else: # free up memory
+            TIMELINES = []
+            OCCUPANCY = []
+            EVENTS = []
+    else:
+        apply_min_event(min_event_time, OCCUPANCY, EVENTS, DBFILES, TIMELINES)
+        gathered_filenames = analysed_filenames
+
+    if mpi_root:
+        for k in range(len(code)):
+            code[k][-2] = int(hitcount_map[k])
+            code[k][-1] = int(latency_map[k])
+
+    gc.collect()
     print("Min time:", min_event_time)
-    for perf in EVENTS:
-        for p in perf:
-            p.time -= min_event_time
 
-    OCCUPANCY = [[max(min(int((u>>16)-min_event_time)<<16,2**42),0) | (u&0xFFFFF) for u in occ] for occ in OCCUPANCY]
-
-    for df in DBFILES:
-        for T in range(len(df['timeline'])):
-            timeline = df['timeline'][T]
-            time_acc = 0
-            tuples1 = timeline.split('(')
-            tuples2 = [t.split(')')[0].split(',') for t in tuples1 if t != '']
-            tuples3 = [(0,df['begin_time'][T]-min_event_time)]+[(int(t[0]),int(t[1])) for t in tuples2]
-
-            for state in tuples3:
-                if state[1] > 1E8:
-                    print('Warning: Time limit reached for ',state[0], state[1])
-                    break
-                if time_acc+state[1] > TIMELINES[state[0]].size:
-                    TIMELINES[state[0]] = np.hstack([
-                        TIMELINES[state[0]],
-                        np.zeros_like(TIMELINES[state[0]])
-                    ])
-                TIMELINES[state[0]][time_acc:time_acc+state[1]] += 1
-                time_acc += state[1]
-
+    drawinfo = {'TIMELINES':TIMELINES, 'EVENTS':EVENTS, 'EVENT_NAMES':EVENT_NAMES, 'OCCUPANCY': OCCUPANCY, 'ShaderNames': gathered_filenames}
     if args.genasm and len(args.genasm) > 0:
-        flight_count = view_trace(args, code, jumps, DBFILES, analysed_filenames, True, None, OCCUPANCY, args.dumpfiles, min_event_time, gfxv)
-
+        flight_count = view_trace(args, code, DBFILES, analysed_filenames, True, OCCUPANCY, args.dumpfiles, min_event_time, gfxv, drawinfo, comm, mpi_root)
         with open(args.assembly_code, 'r') as file:
             lines = file.readlines()
         assembly_code = {l+1.0: lines[l][:-1] for l in range(len(lines))}
@@ -568,4 +531,4 @@ if __name__ == "__main__":
             for k in keys:
                 file.write(assembly_code[k]+'\n')
     else:
-        view_trace(args, code, jumps, DBFILES, analysed_filenames, False, GeneratePIC, OCCUPANCY, args.dumpfiles, min_event_time, gfxv)
+        view_trace(args, code, DBFILES, analysed_filenames, False, OCCUPANCY, args.dumpfiles, min_event_time, gfxv, drawinfo, comm, mpi_root)

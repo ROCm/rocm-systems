@@ -238,12 +238,17 @@ while [ 1 ] ; do
       shift
 
       ATT_OPTIONS="Not done"
+      ATT_PYTHON3_ARG="python3 "
       while [ "$ATT_OPTIONS" = "Not done" ]; do
         if [[ "$3" = "--trace_file" ]]; then
           ATT_ARGV="$ATT_ARGV $3 \"$4\""
           shift
           shift
-        elif [[ "$3" = "--mode" || "$3" = "--ports" || "$3" = "--genasm" || "$3" == "--att_kernel" ]]; then
+        elif [[ "$3" = "--mpi" ]]; then
+          ATT_PYTHON3_ARG="mpirun -np $4 python3 "
+          shift
+          shift
+        elif [[ "$3" = "--mode" || "$3" = "--ports" || "$3" = "--genasm" || "$3" == "--att_kernel"  || "$3" == "--depth" ]]; then
           ATT_ARGV="$ATT_ARGV $3 $4"
           shift
           shift
@@ -327,7 +332,7 @@ get_pmc_results_txt_path(){
 
 if [ -n "$ATT_PATH" ]; then
   if [ -n "$ATT_ARGV" ]; then
-    eval "python3 $ATT_PATH $ATT_ARGV"
+    eval "$ATT_PYTHON3_ARG $ATT_PATH $ATT_ARGV"
   elif [ ! -n "$PMC_LINES" ]; then
     echo "ATT File  is required!"
   fi
