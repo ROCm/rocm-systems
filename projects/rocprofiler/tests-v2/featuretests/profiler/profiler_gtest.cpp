@@ -821,7 +821,7 @@ TEST_F(DerivedMetricsReuseTest, WhenRunningRepeatedBaseMetricsAPIsWorkFine) {
   counters.emplace_back("GRBM_GUI_ACTIVE");
   counters.emplace_back("ALUStalledByLDS");
 
-  CheckApi(rocprofiler_create_session(ROCPROFILER_KERNEL_REPLAY_MODE, &session_id));
+  CheckApi(rocprofiler_create_session(ROCPROFILER_NONE_REPLAY_MODE, &session_id));
 
   rocprofiler_buffer_id_t buffer_id;
   CheckApi(rocprofiler_create_buffer(session_id, FlushCallback, 0x9999, &buffer_id));

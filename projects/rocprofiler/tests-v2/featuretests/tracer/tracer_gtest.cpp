@@ -33,12 +33,12 @@ std::string binary_path;
 std::string profiler_api_lib_path = "";
 
 static void init_test_path() {
-  metrics_path = "libexec/rocprofiler/counters/derived_counters.xml";
   if (is_installed_path()) {
     running_path = "share/rocprofiler/tracer/runTracerFeatureTests";
     lib_path = "lib/rocprofiler/librocprofiler_tool.so";
     golden_trace_path = "share/rocprofiler/tests/featuretests/tracer/apps/goldentraces/";
     test_app_path = "share/rocprofiler/tests/featuretests/tracer/apps/";
+    metrics_path = "libexec/rocprofiler/counters/derived_counters.xml";
     binary_path = "bin/rocprofv2";
     profiler_api_lib_path = "/lib";
   } else {
@@ -46,6 +46,7 @@ static void init_test_path() {
     lib_path = "librocprofiler_tool.so";
     golden_trace_path = "tests-v2/featuretests/tracer/apps/goldentraces/";
     test_app_path = "tests-v2/featuretests/tracer/apps/";
+    metrics_path = "counters/derived_counters.xml";
     binary_path = "rocprofv2";
   }
 }
