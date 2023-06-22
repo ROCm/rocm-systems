@@ -176,7 +176,6 @@ InitializeAqlPackets(hsa_agent_t cpu_agent, hsa_agent_t gpu_agent,
   if (!rocprofiler::metrics::ExtractMetricEvents(
           counter_names, gpu_agent, metricsDict[gpu_agent.handle], results_map, events_list,
           results_list, event_to_max_block_count, metrics_counters)) {
-    std::cerr << "Error: Failed to extract metric events" << std::endl;
     abort();
   }
 

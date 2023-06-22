@@ -100,9 +100,9 @@ bool metrics::ExtractMetricEvents(
       //   const Metric* metric = metrics_dict->GetMetricByName(metric_names[i]);
       const Metric* metric = metrics_dict->Get(metric_names[i]);
       if (metric == nullptr) {
-          Agent::AgentInfo& agentInfo = rocprofiler::hsa_support::GetAgentInfo(gpu_agent.handle);
-          fatal("input metric'%s' not supported on this hardware: %s ", metric_names[i].c_str(),
-          agentInfo.getName().data());
+        Agent::AgentInfo& agentInfo = rocprofiler::hsa_support::GetAgentInfo(gpu_agent.handle);
+        fatal("input metric '%s' not supported on this hardware: %s ", metric_names[i].c_str(),
+              agentInfo.getName().data());
       }
 
       // adding result object for derived metric
@@ -119,8 +119,7 @@ bool metrics::ExtractMetricEvents(
       }
 
       for (const counter_t* counter : counters_vec) {
-        if (results_map.find(counter->name) != results_map.end())
-          continue;
+        if (results_map.find(counter->name) != results_map.end()) continue;
 
         results_t* result = new results_t(counter->name, {}, xcc_count);
         results_map[counter->name] = result;
@@ -143,7 +142,11 @@ bool metrics::ExtractMetricEvents(
         }
 
         if (block_status.counter_index >= block_status.max_counters) {
-          rocprofiler::fatal("Metrics specified have exceeded HW limits!");
+          std::cerr << "Error: "
+                    << std::string_view(counter->name)
+                           .substr(0, std::string_view(counter->name).find("_"))
+                    << " exceeded hardware block counters limit (" << block_status.max_counters
+                    << ")" << std::endl;
           return false;
         }
         block_status.counter_index += 1;
