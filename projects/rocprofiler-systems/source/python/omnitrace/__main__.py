@@ -358,6 +358,7 @@ def main(main_args=sys.argv):
     sys.path.insert(0, os.path.dirname(script_file))
 
     _OMNITRACE_PYTHON_SCRIPT_FILE = script_file
+    os.environ["OMNITRACE_PYTHON_SCRIPT_FILE"] = script_file
 
     prof = Profiler()
     fake = FakeProfiler()
@@ -397,6 +398,11 @@ def main(main_args=sys.argv):
 
 if __name__ == "__main__":
     args = sys.argv
+    if _OMNITRACE_PYTHON_SCRIPT_FILE is None:
+        _OMNITRACE_PYTHON_SCRIPT_FILE = os.environ.get(
+            "OMNITRACE_PYTHON_SCRIPT_FILE", None
+        )
+
     if "--" not in args and _OMNITRACE_PYTHON_SCRIPT_FILE is not None:
         args = [args[0]] + ["--", _OMNITRACE_PYTHON_SCRIPT_FILE] + args[1:]
         os.environ["OMNITRACE_USE_PID"] = "ON"
