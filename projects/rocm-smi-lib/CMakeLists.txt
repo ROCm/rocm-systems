@@ -232,7 +232,7 @@ configure_package_config_file(
 
 write_basic_package_version_file(
     ${CMAKE_CURRENT_BINARY_DIR}/rocm_smi-config-version.cmake
-    VERSION "${AMD_SMI_LIBS_TARGET_VERSION_MAJOR}.${AMD_SMI_LIBS_TARGET_VERSION_MINOR}.${AMD_SMI_LIBS_TARGET_VERSION_PATCH}"
+    VERSION "${${AMD_SMI_LIBS_TARGET}_VERSION_MAJOR}.${${AMD_SMI_LIBS_TARGET}_VERSION_MINOR}.${${AMD_SMI_LIBS_TARGET}_VERSION_PATCH}"
     COMPATIBILITY SameMajorVersion
     )
 
@@ -247,7 +247,7 @@ install(
 # Create cmake target
 # Add all targets to the build-tree export set
 export(TARGETS ${ROCM_SMI_TARGET} ${OAM_TARGET}
-  FILE "${PROJECT_BINARY_DIR}/rcom_smi_target.cmake")
+  FILE "${PROJECT_BINARY_DIR}/rocm_smi_target.cmake")
 
 # Export the package for use from the build-tree
 # (this registers the build-tree with a global CMake-registry)
