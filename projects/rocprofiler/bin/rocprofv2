@@ -7,6 +7,7 @@ PLUGIN_LIST=("ctf" "perfetto" "file" "att")
 RUN_FROM_BUILD=0
 if [[ $ROCPROFV2_DIR == *"/build"* ]]; then
   RUN_FROM_BUILD=1
+  export ROCPROFILER_METRICS_PATH=$ROCM_DIR/build/counters/derived_counters.xml
 elif [[ $ROCPROFV2_DIR == *"/rocprofiler"* ]]; then
   RUN_FROM_BUILD=1
   ROCM_DIR=$ROCPROFV2_DIR
