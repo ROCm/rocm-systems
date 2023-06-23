@@ -23,6 +23,7 @@ THE SOFTWARE.
 #include <ostream>
 #include <vector>
 #include "tracer_gtest.h"
+#include "src/utils/logger.h"
 
 std::string running_path;
 std::string lib_path;
@@ -34,7 +35,8 @@ std::string profiler_api_lib_path = "";
 
 static void init_test_path() {
   if (is_installed_path()) {
-    running_path = "share/rocprofiler/tracer/runTracerFeatureTests";
+    INFO_LOGGING("operating from /opt/rocm");
+    running_path = "share/rocprofiler/tests/runTracerFeatureTests";
     lib_path = "lib/rocprofiler/librocprofiler_tool.so";
     golden_trace_path = "share/rocprofiler/tests/featuretests/tracer/apps/goldentraces/";
     test_app_path = "share/rocprofiler/tests/featuretests/tracer/apps/";
@@ -42,6 +44,7 @@ static void init_test_path() {
     binary_path = "bin/rocprofv2";
     profiler_api_lib_path = "/lib";
   } else {
+    INFO_LOGGING("operating from ./build");
     running_path = "tests-v2/featuretests/tracer/runTracerFeatureTests";
     lib_path = "librocprofiler_tool.so";
     golden_trace_path = "tests-v2/featuretests/tracer/apps/goldentraces/";
@@ -120,9 +123,8 @@ void ApplicationParser::GetKernelInfoForGoldenOutput(
     const char* app_name, std::string file_name,
     std::vector<tracer_kernel_info_t>* kernel_info_output) {
   std::string entry;
-  std::string path = GetRunningPath("runTracerFeatureTests");
-  entry = path.append("apps/goldentraces/") + file_name;
-
+  std::string path = GetRunningPath(running_path);
+  entry = path.append(golden_trace_path) + file_name;
   // parse kernel info fields for golden output
   ParseKernelInfoFields(entry, kernel_info_output);
 }
