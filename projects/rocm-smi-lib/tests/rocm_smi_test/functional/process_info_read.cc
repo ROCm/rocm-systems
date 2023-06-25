@@ -184,6 +184,21 @@ void TestProcInfoRead::Run(void) {
         std::cout << dev_inds[i];
       }
       std::cout << std::endl;
+
+      // Get details of the resource by the process on a specific device
+      // if any process running on devices
+      for (i = 0; i < amt_allocd; ++i) {
+        rsmi_process_info_t proc_info;
+        err = rsmi_compute_process_info_by_device_get(
+            procs[j].process_id, dev_inds[i], &proc_info);
+        CHK_ERR_ASRT(err)
+        ASSERT_EQ(proc_info.process_id, procs[j].process_id);
+        ASSERT_EQ(proc_info.pasid, procs[j].pasid);
+        std::cout << "\t** Process ID: " << procs[j].process_id
+              << " on device " << dev_inds[i] << " VRAM Usage: "
+              << proc_info.vram_usage << " SDMA Usage: " << proc_info.sdma_usage
+              << " Compute Unit Usage: " << proc_info.cu_occupancy << std::endl;
+      }
       // Reset amt_allocd back to the amount acutally allocated
       amt_allocd = num_devices;
     }

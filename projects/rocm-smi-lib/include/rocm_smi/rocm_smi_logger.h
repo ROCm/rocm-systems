@@ -214,7 +214,7 @@ class Logger {
 
   void logIntoFile(std::string& data);
   void logOnConsole(std::string& data);
-  void operator=(const Logger& obj) {}
+  void operator=(const Logger&) {}
   void initialize_resources();
   void destroy_resources();
 };

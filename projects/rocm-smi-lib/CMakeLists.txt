@@ -25,6 +25,10 @@ set(ROCM_SMI_LIB_NAME "lib${ROCM_SMI_TARGET}")
 
 # Expose project info to IDEs
 option(CMAKE_EXPORT_COMPILE_COMMANDS "Export compile commands for linters and autocompleters" ON)
+option(BUILD_TESTS "Build test suite" OFF)
+set(SHARE_INSTALL_PREFIX
+    "share/${ROCM_SMI}"
+    CACHE STRING "Tests and Example install directory")
 
 # provide git to utilities
 find_program (GIT NAMES git)
@@ -150,7 +154,7 @@ if(ENABLE_ASAN_PACKAGING)
   # ASAN Package requires only asan component with libraries and license file
   set(CPACK_COMPONENTS_ALL asan)
 else()
-  set(CPACK_COMPONENTS_ALL dev)
+  set(CPACK_COMPONENTS_ALL dev tests)
 endif()
 
 # Enable Component Mode & Install Settings
@@ -160,17 +164,23 @@ set(CPACK_RPM_COMPONENT_INSTALL ON)
 #Component Specific Configuration/Flags
 set(CPACK_DEBIAN_ASAN_PACKAGE_NAME ${ROCM_SMI_PACKAGE}-asan)
 set(CPACK_DEBIAN_DEV_PACKAGE_NAME ${ROCM_SMI_PACKAGE})
+set(CPACK_DEBIAN_TESTS_PACKAGE_NAME ${ROCM_SMI_PACKAGE}-tests)
 set(CPACK_RPM_ASAN_PACKAGE_NAME ${ROCM_SMI_PACKAGE}-asan)
 set(CPACK_RPM_DEV_PACKAGE_NAME ${ROCM_SMI_PACKAGE})
+set(CPACK_RPM_TESTS_PACKAGE_NAME ${ROCM_SMI_PACKAGE}-tests)
 
 set (CPACK_DEBIAN_ASAN_PACKAGE_PROVIDES "${ROCM_SMI_PACKAGE}-asan")
 set (CPACK_DEBIAN_ASAN_PACKAGE_DEPENDS "python3, rocm-core-asan")
 set (CPACK_DEBIAN_DEV_PACKAGE_PROVIDES "rocm-smi")
 set (CPACK_DEBIAN_DEV_PACKAGE_DEPENDS "python3, rocm-core")
+set (CPACK_DEBIAN_TESTS_PACKAGE_PROVIDES "${ROCM_SMI_PACKAGE}-tests")
+set (CPACK_DEBIAN_TESTS_PACKAGE_DEPENDS "python3, rocm-core")
 set (CPACK_RPM_ASAN_PACKAGE_PROVIDES "${ROCM_SMI_PACKAGE}-asan")
 set (CPACK_RPM_ASAN_PACKAGE_REQUIRES "python3, rocm-core-asan")
 set (CPACK_RPM_DEV_PACKAGE_PROVIDES "rocm-smi")
 set (CPACK_RPM_DEV_PACKAGE_REQUIRES "python3, rocm-core")
+set (CPACK_RPM_TESTS_PACKAGE_PROVIDES "${ROCM_SMI_PACKAGE}-tests")
+set (CPACK_RPM_TESTS_PACKAGE_REQUIRES "python3, rocm-core")
 
 
 add_subdirectory("rocm_smi")
@@ -179,6 +189,12 @@ add_subdirectory("oam")
 # Disable file reorg backward compatibility for ASAN packaging
 if(NOT ENABLE_ASAN_PACKAGING)
   option(FILE_REORG_BACKWARD_COMPATIBILITY "Enable File Reorg with backward compatibility" ON)
+endif()
+
+# Add tests
+if(BUILD_TESTS)
+    set(TESTS_COMPONENT "tests")
+    add_subdirectory("tests/rocm_smi_test")
 endif()
 
 if(FILE_REORG_BACKWARD_COMPATIBILITY)
@@ -347,3 +363,6 @@ cpack_add_component(
   DISPLAY_NAME "ASAN"
   DESCRIPTION "ASAN libraries for the ROCM-SMI"
   DEPENDS asan)
+
+cpack_add_component_group("tests")
+cpack_add_component(tests GROUP tests)

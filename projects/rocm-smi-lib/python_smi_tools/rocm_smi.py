@@ -2134,11 +2134,15 @@ def showPerformanceLevel(deviceList):
     printLogSpacer()
 
 
-def showPids():
+def showPids(verbose):
     """ Show Information for PIDs created in a KFD (Compute) context """
     printLogSpacer(' KFD Processes ')
     dataArray = []
-    dataArray.append(['PID', 'PROCESS NAME', 'GPU(s)', 'VRAM USED', 'SDMA USED', 'CU OCCUPANCY'])
+    if verbose == "details":
+        dataArray.append(['PID', 'PROCESS NAME', 'GPU', 'VRAM USED', 'SDMA USED', 'CU OCCUPANCY'])
+    else:
+        dataArray.append(['PID', 'PROCESS NAME', 'GPU(s)', 'VRAM USED', 'SDMA USED', 'CU OCCUPANCY'])
+
     pidList = getPidList()
     if not pidList:
         printLog(None, 'No KFD PIDs currently running', None)
@@ -2152,6 +2156,7 @@ def showPids():
         vramUsage = 'UNKNOWN'
         sdmaUsage = 'UNKNOWN'
         cuOccupancy = 'UNKNOWN'
+        dv_indices = (c_uint32 * num_devices.value)()
         ret = rocmsmi.rsmi_compute_process_gpus_get(int(pid), None, byref(num_devices))
         if rsmi_ret_ok(ret, metric='get_gpu_compute_process'):
             dv_indices = (c_uint32 * num_devices.value)()
@@ -2160,14 +2165,25 @@ def showPids():
                 gpuNumber = str(num_devices.value)
             else:
                 logging.debug('Unable to fetch GPU number by PID')
-        ret = rocmsmi.rsmi_compute_process_info_by_pid_get(int(pid), byref(proc))
-        if rsmi_ret_ok(ret, metric='get_compute_process_info_by_pid'):
-            vramUsage = proc.vram_usage
-            sdmaUsage = proc.sdma_usage
-            cuOccupancy = proc.cu_occupancy
+        if verbose == "details":
+            for dv_ind in dv_indices:
+                ret = rocmsmi.rsmi_compute_process_info_by_device_get(int(pid), dv_ind, byref(proc))
+                if rsmi_ret_ok(ret, metric='get_compute_process_info_by_pid'):
+                    vramUsage = proc.vram_usage
+                    sdmaUsage = proc.sdma_usage
+                    cuOccupancy = proc.cu_occupancy
+                else:
+                    logging.debug('Unable to fetch process info by PID')
+                dataArray.append([pid, getProcessName(pid), str(gpuNumber), str(vramUsage), str(sdmaUsage), str(cuOccupancy)])
         else:
-            logging.debug('Unable to fetch process info by PID')
-        dataArray.append([pid, getProcessName(pid), str(gpuNumber), str(vramUsage), str(sdmaUsage), str(cuOccupancy)])
+            ret = rocmsmi.rsmi_compute_process_info_by_pid_get(int(pid), byref(proc))
+            if rsmi_ret_ok(ret, metric='get_compute_process_info_by_pid'):
+                vramUsage = proc.vram_usage
+                sdmaUsage = proc.sdma_usage
+                cuOccupancy = proc.cu_occupancy
+            else:
+                logging.debug('Unable to fetch process info by PID')
+            dataArray.append([pid, getProcessName(pid), str(gpuNumber), str(vramUsage), str(sdmaUsage), str(cuOccupancy)])
     printLog(None, 'KFD process information:', None)
     print2DArray(dataArray)
     printLogSpacer()
@@ -3359,7 +3375,8 @@ if __name__ == '__main__':
     groupDisplay.add_argument('-s', '--showclkfrq', help='Show supported GPU and Memory Clock', action='store_true')
     groupDisplay.add_argument('--showmeminfo', help='Show Memory usage information for given block(s) TYPE',
                               metavar='TYPE', type=str, nargs='+')
-    groupDisplay.add_argument('--showpids', help='Show current running KFD PIDs', action='store_true')
+    groupDisplay.add_argument('--showpids', help='Show current running KFD PIDs (pass details to VERBOSE for detailed information)',
+                              metavar='VERBOSE', const="summary", type=str, nargs='?')
     groupDisplay.add_argument('--showpidgpus', help='Show GPUs used by specified KFD PIDs (all if no arg given)',
                               nargs='*')
     groupDisplay.add_argument('--showreplaycount', help='Show PCIe Replay Count', action='store_true')
@@ -3527,7 +3544,7 @@ if __name__ == '__main__':
         args.showmemoverdrive = True
         args.showoverdrive = True
         args.showperflevel = True
-        args.showpids = True
+        args.showpids = "summary"
         args.showpidgpus = []
         args.showreplaycount = True
         args.showvc = True
@@ -3606,8 +3623,8 @@ if __name__ == '__main__':
         showPcieReplayCount(deviceList)
     if args.showserial:
         showSerialNumber(deviceList)
-    if args.showpids:
-        showPids()
+    if args.showpids != None:
+        showPids(args.showpids)
     if args.showpidgpus or str(args.showpidgpus) == '[]':
         showGpusByPid(args.showpidgpus)
     if args.showclkvolt:
