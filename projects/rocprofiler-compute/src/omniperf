@@ -439,23 +439,7 @@ def characterize_app(args, VER):
         else:
             run_prof(fname, workload_dir, perfmon_dir, app_cmd, args.target, log, args.verbose)
     
-    
-
-    # run again with timestamps
-    success, output = capture_subprocess_output(
-        [
-            rocprof_cmd,
-            # "-i", fname,
-            # "-m", perfmon_dir + "/" + "metrics.xml",
-            "--timestamp",
-            "on",
-            "-o",
-            workload_dir + "/" + "timestamps.csv",
-            '"' + app_cmd + '"',
-        ]
-    )
-    log.write(output)
-    # Update pmc_perf.csv timestamps
+    # Update timestamps
     replace_timestamps(workload_dir, log)
 
     # Manually join each pmc_perf*.csv output
@@ -676,21 +660,7 @@ def omniperf_profile(args, VER):
             else:
                 run_prof(fname, workload_dir, perfmon_dir, args.remaining, args.target, log, args.verbose)
 
-        # run again with timestamps
-        success, output = capture_subprocess_output(
-            [
-                rocprof_cmd,
-                # "-i", fname,
-                # "-m", perfmon_dir + "/" + "metrics.xml",
-                "--timestamp",
-                "on",
-                "-o",
-                workload_dir + "/" + "timestamps.csv",
-                '"' + args.remaining + '"',
-            ]
-        )
-        log.write(output)
-        # Update pmc_perf.csv timestamps
+        # Update timestamps
         replace_timestamps(workload_dir, log)
         
         # Manually join each pmc_perf*.csv output
