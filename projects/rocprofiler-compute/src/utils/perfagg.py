@@ -345,7 +345,6 @@ def perfmon_coalesce(pmc_files_list, workload_dir, soc):
                             # initial counter in this channel
                             pmc_list["TCC2"][str(ch)] = [counter]
 
-
     # add a timestamp file
     fd = open(workload_perfmon_dir + "/timestamps.txt", "w")
     fd.write("pmc:\n\n")
@@ -353,7 +352,7 @@ def perfmon_coalesce(pmc_files_list, workload_dir, soc):
     fd.write("range:\n")
     fd.write("kernel:\n")
     fd.close()
-    
+
     # sort the per channel counter, so that same counter in all channels can be aligned
     for ch in range(perfmon_config[soc]["TCC_channels"]):
         pmc_list["TCC2"][str(ch)].sort()
