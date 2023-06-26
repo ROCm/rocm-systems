@@ -208,16 +208,20 @@ static hsa_status_t AsyncCpyTest(async_mem_cpy_agent* dst, async_mem_cpy_agent* 
   err = hsa_signal_create(1, 0, NULL, &copy_signal);
   RET_IF_HSA_ERR(err);
   // Do the copy...
-  err = hsa_amd_memory_async_copy(dst->ptr, dst->dev, src->ptr, src->dev, sz, 0, NULL, copy_signal);
-  RET_IF_HSA_ERR(err);
+  // err = hsa_amd_memory_async_copy(dst->ptr, dst->dev, src->ptr, src->dev, sz, 0, NULL,
+  // copy_signal); RET_IF_HSA_ERR(err);
 
   // call following APIs to make sure we intercept hsa_amd_memory_async_copy_on_engine
   uint32_t engine_ids_mask = 0;
   err = hsa_amd_memory_copy_engine_status(args->cpu.dev, args->gpu1.dev, &engine_ids_mask);
-  hsa_amd_sdma_engine_id_t engine_id = HSA_AMD_SDMA_ENGINE_0;
-  err = hsa_amd_memory_async_copy_on_engine(dst->ptr, dst->dev, src->ptr, src->dev, sz, 0, NULL,
-                                            copy_signal, engine_id, false);
+  RET_IF_HSA_ERR(err);
 
+  uint32_t engine_id = HSA_AMD_SDMA_ENGINE_0 & engine_ids_mask;
+  err = hsa_amd_memory_async_copy_on_engine(
+      dst->ptr, dst->dev, src->ptr, src->dev, sz, 0, NULL, copy_signal,
+      static_cast<hsa_amd_sdma_engine_id_t>(engine_id), false);
+  RET_IF_HSA_ERR(err);
+  
   // Here we do a blocking wait. Alternatively, we could also use a
   // non-blocking wait in a loop, and do other work while waiting.
   if (hsa_signal_wait_relaxed(copy_signal, HSA_SIGNAL_CONDITION_LT, 1, -1,
