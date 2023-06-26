@@ -341,7 +341,9 @@ static rsmi_status_t get_dev_mon_value(amd::smi::MonitorTypes type,
   }
   GET_DEV_FROM_INDX
 
-  assert(dev->monitor() != nullptr);
+  if (dev->monitor() == nullptr) {
+    return RSMI_STATUS_NOT_SUPPORTED;
+  }
 
   std::string val_str;
 
@@ -369,8 +371,9 @@ static rsmi_status_t get_dev_mon_value(amd::smi::MonitorTypes type,
   }
 
   GET_DEV_FROM_INDX
-  assert(dev->monitor() != nullptr);
-
+  if (dev->monitor() == nullptr) {
+    return RSMI_STATUS_NOT_SUPPORTED;
+  }
   std::string val_str;
 
   int ret = dev->monitor()->readMonitor(type, sensor_ind, &val_str);
@@ -394,8 +397,9 @@ static rsmi_status_t set_dev_mon_value(amd::smi::MonitorTypes type,
                                 uint32_t dv_ind, uint32_t sensor_ind, T val) {
   GET_DEV_FROM_INDX
 
-  assert(dev->monitor() != nullptr);
-
+  if (dev->monitor() == nullptr) {
+    return RSMI_STATUS_NOT_SUPPORTED;
+  }
   int ret = dev->monitor()->writeMonitor(type, sensor_ind,
                                                          std::to_string(val));
 
@@ -416,9 +420,9 @@ static rsmi_status_t get_power_mon_value(amd::smi::PowerMonTypes type,
   }
 
   std::shared_ptr<amd::smi::Device> dev = smi.devices()[dv_ind];
-  assert(dev != nullptr);
-  assert(dev->monitor() != nullptr);
-
+  if (dev == nullptr || dev->monitor() == nullptr) {
+    return RSMI_STATUS_NOT_SUPPORTED;
+  }
   ret = dev->power_monitor()->readPowerValue(type, val);
 
   return amd::smi::ErrnoToRsmiStatus(ret);
@@ -2503,7 +2507,9 @@ rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_type,
 
   GET_DEV_FROM_INDX
 
-  assert(dev->monitor() != nullptr);
+  if (dev->monitor() == nullptr) {
+    return RSMI_STATUS_NOT_SUPPORTED;
+  }
   std::shared_ptr<amd::smi::Monitor> m = dev->monitor();
 
   // getTempSensorIndex will throw an out of range exception if sensor_type is
@@ -2564,7 +2570,9 @@ rsmi_dev_volt_metric_get(uint32_t dv_ind, rsmi_voltage_type_t sensor_type,
 
   GET_DEV_FROM_INDX
 
-  assert(dev->monitor() != nullptr);
+  if (dev->monitor() == nullptr) {
+    return RSMI_STATUS_NOT_SUPPORTED;
+  }
   std::shared_ptr<amd::smi::Monitor> m = dev->monitor();
 
   // getVoltSensorIndex will throw an out of range exception if sensor_type is
