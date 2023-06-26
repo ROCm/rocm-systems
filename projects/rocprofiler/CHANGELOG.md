@@ -263,7 +263,7 @@ Example for file plugin output:
   HIP_API_DOMAIN,hipMalloc,,316678074131382,316678074136111,3
   ```
 - Removing Record IDs from tracer records in CLI plugin.
-- Added Flush Interval and Trace Period functionality, where --flush-interval <time_in_ms>, for flushing the buffers every given interval by the user, and --trace-period <delay>:<trace_time>, where delay is the time to wait before starting session, and trace_time is the time between every start and stop session. For more details please refer to the ROCProfV2 tool usage document.
+- Added Flush Interval and Trace Period functionality, where --flush-interval <time_in_ms>, for flushing the buffers every given interval by the user, and --trace-period <delay>:<trace_time>:<interval>, where delay is the time to wait before starting session, trace_time is the time between every start and stop session and interval the time between two consecutive sessions (ommiting interval = infinite). For more details please refer to the ROCProfV2 tool usage document.
 - Added requirements.txt to be used to install all the necessary python3 packages.
 
 ### Fixed
