@@ -126,6 +126,10 @@ foreach(target_id ${GPU_LIST})
 endforeach(target_id)
 add_custom_target(test DEPENDS ${HSACO_TARGET_LIST})
 add_custom_target(mytest DEPENDS ${HSACO_TARGET_LIST})
+add_custom_command(TARGET mytest POST_BUILD
+  DEPENDS mytest
+  COMMAND $<$<CONFIG:release>:${CMAKE_STRIP}>
+  ARGS ${HSACO_TARGET_LIST})
 
 ## Building standalone test executable
 add_executable ( ${ST_EXE_NAME} ${ST_TST_SRC} ${UTIL_SRC} ${KERN_SRC} )

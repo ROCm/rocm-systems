@@ -25,7 +25,7 @@
 SRC_DIR=$(dirname "$0")
 COMPONENT="rocprofiler"
 ROCM_PATH="${ROCM_PATH:=/opt/rocm}"
-LD_RUNPATH_FLAG=" -Wl,--enable-new-dtags -Wl,--rpath,$ROCM_PATH/lib:$ROCM_PATH/lib64"
+LD_RUNPATH_FLAG=" -Wl,--enable-new-dtags -Wl,--rpath,$ROCM_PATH/lib"
 
 usage() {
   echo -e "ROCProfiler Build Script Usage:"
@@ -79,18 +79,22 @@ if [ "$TO_CLEAN" = "yes" ] ; then rm -rf $BUILD_DIR; fi
 mkdir -p $BUILD_DIR
 pushd $BUILD_DIR
 
-cmake \
+cmake  \
     -DCMAKE_EXPORT_COMPILE_COMMANDS=TRUE \
     -DCMAKE_BUILD_TYPE=${BUILD_TYPE:-'RelWithDebInfo'} \
-    -DCMAKE_MODULE_PATH=$ROCM_PATH/hip/cmake \
-    -DCMAKE_PREFIX_PATH="$PREFIX_PATH" \
+    -DCMAKE_MODULE_PATH="${ROCM_PATH}/hip/cmake;${ROCM_PATH}/lib/cmake" \
+    -DCMAKE_PREFIX_PATH="${ROCM_INSTALL_PATH}/llvm;$PREFIX_PATH" \
     -DCMAKE_INSTALL_PREFIX="$PACKAGE_ROOT" \
     -DCMAKE_SHARED_LINKER_FLAGS="$LD_RUNPATH_FLAG" \
-    -DCPACK_PACKAGING_INSTALL_PREFIX=$PACKAGE_ROOT \
-    -DCPACK_GENERATOR=${CPACKGEN:-'DEB;RPM'} \
     -DCMAKE_INSTALL_RPATH=${ROCM_RPATH} \
     -DCMAKE_INSTALL_RPATH_USE_LINK_PATH=FALSE \
     -DGPU_TARGETS="$GPU_LIST" \
+    -DCPACK_PACKAGING_INSTALL_PREFIX=$PACKAGE_ROOT \
+    -DCPACK_GENERATOR=${CPACKGEN:-'DEB;RPM'} \
+    -DCPACK_OBJCOPY_EXECUTABLE="${PACKAGE_ROOT}/llvm/bin/llvm-objcopy" \
+    -DCPACK_READELF_EXECUTABLE="${PACKAGE_ROOT}/llvm/bin/llvm-readelf" \
+    -DCPACK_STRIP_EXECUTABLE="${PACKAGE_ROOT}/llvm/bin/llvm-strip" \
+    -DCPACK_OBJDUMP_EXECUTABLE="${PACKAGE_ROOT}/llvm/bin/llvm-objdump" \
     $ROCPROFILER_ROOT
 
 popd
