@@ -17,9 +17,9 @@
     if ((err) != HSA_STATUS_SUCCESS) {                                                             \
       const char* msg = 0;                                                                         \
       hsa_status_string(err, &msg);                                                                \
-      std::cout << "hsa api call failure at line " << __LINE__ << ", file: " << __FILE__           \
+      std::cerr << "hsa api call failure at line " << __LINE__ << ", file: " << __FILE__           \
                 << ". Call returned " << err << std::endl;                                         \
-      std::cout << msg << std::endl;                                                               \
+      std::cerr << msg << std::endl;                                                               \
       return (err);                                                                                \
     }                                                                                              \
   }
@@ -186,42 +186,39 @@ static hsa_status_t FindCPUDevice(hsa_agent_t agent, void* data) {
 // from the input parameters.
 static hsa_status_t AsyncCpyTest(async_mem_cpy_agent* dst, async_mem_cpy_agent* src,
                                  callback_args* args, size_t sz, uint32_t val) {
-  hsa_status_t err;
+  hsa_status_t err = HSA_STATUS_SUCCESS;
   hsa_signal_t copy_signal;
-  // Initialize the system and destination buffers with a value so we can later
-  // validate it has been overwritten
-  void* sysPtr = args->cpu.ptr;
-  err = hsa_amd_memory_fill(sysPtr, kTestInitValue, sz / sizeof(uint32_t));
-  RET_IF_HSA_ERR(err);
-  if (dst->ptr != sysPtr) {
-    err = hsa_amd_memory_fill(dst->ptr, kTestInitValue, sz / sizeof(uint32_t));
-    RET_IF_HSA_ERR(err);
-  }
-  // Fill the source buffer with the provided uint32_t value
-  err = hsa_amd_memory_fill(src->ptr, val, sz / sizeof(uint32_t));
-  RET_IF_HSA_ERR(err);
-  // Make sure the target and destination agents have access to the buffer.
-  hsa_agent_t ag_list[2] = {dst->dev, src->dev};
-  err = hsa_amd_agents_allow_access(2, ag_list, NULL, dst->ptr);
-  RET_IF_HSA_ERR(err);
   // Create a signal that will be used to inform us when the copy is done
   err = hsa_signal_create(1, 0, NULL, &copy_signal);
   RET_IF_HSA_ERR(err);
+
+  // Initialize the system and destination buffers with a value so we can later
+  // validate it has been overwritten
+  void* sysPtr = args->cpu.ptr;
+
+  *reinterpret_cast<uint32_t*>(src->ptr) = val;
+
+  // Make sure the target and destination agents have access to the buffer.
+  hsa_agent_t ag_list[3] = {dst->dev, src->dev, args->cpu.dev};
+  err = hsa_amd_agents_allow_access(3, ag_list, NULL, dst->ptr);
+  err = hsa_amd_agents_allow_access(3, ag_list, NULL, src->ptr);
+  RET_IF_HSA_ERR(err);
+
   // Do the copy...
-  // err = hsa_amd_memory_async_copy(dst->ptr, dst->dev, src->ptr, src->dev, sz, 0, NULL,
-  // copy_signal); RET_IF_HSA_ERR(err);
-
-  // call following APIs to make sure we intercept hsa_amd_memory_async_copy_on_engine
-  uint32_t engine_ids_mask = 0;
-  err = hsa_amd_memory_copy_engine_status(args->cpu.dev, args->gpu1.dev, &engine_ids_mask);
+  uint32_t engine_id_mask;
+  hsa_amd_memory_copy_engine_status(dst->dev, src->dev, &engine_id_mask);
+  uint32_t engine_id = HSA_AMD_SDMA_ENGINE_0 & engine_id_mask;
+  std::cout << "Using engine " << engine_id << " And Mask " << engine_id_mask << std::endl;
+  if(engine_id > 0)
+    err = hsa_amd_memory_async_copy_on_engine(dst->ptr, dst->dev, src->ptr, src->dev, sz, 0, NULL, copy_signal, static_cast<hsa_amd_sdma_engine_id_t>(engine_id), false);
+  else if (dst->dev.handle == args->cpu.dev.handle || src->dev.handle == args->cpu.dev.handle)
+    err = hsa_amd_memory_async_copy(dst->ptr, dst->dev, src->ptr, src->dev, sz, 0, NULL, copy_signal);
+  else {
+    err = hsa_memory_copy(dst->ptr, src->ptr, sz);
+    hsa_signal_store_release(copy_signal, 0);
+  }
   RET_IF_HSA_ERR(err);
 
-  uint32_t engine_id = HSA_AMD_SDMA_ENGINE_0 & engine_ids_mask;
-  err = hsa_amd_memory_async_copy_on_engine(
-      dst->ptr, dst->dev, src->ptr, src->dev, sz, 0, NULL, copy_signal,
-      static_cast<hsa_amd_sdma_engine_id_t>(engine_id), false);
-  RET_IF_HSA_ERR(err);
-  
   // Here we do a blocking wait. Alternatively, we could also use a
   // non-blocking wait in a loop, and do other work while waiting.
   if (hsa_signal_wait_relaxed(copy_signal, HSA_SIGNAL_CONDITION_LT, 1, -1,
@@ -229,35 +226,13 @@ static hsa_status_t AsyncCpyTest(async_mem_cpy_agent* dst, async_mem_cpy_agent* 
     printf("Async copy returned error value.\n");
     return HSA_STATUS_ERROR;
   }
-  // Verify the copy was successful; copy from the dst buffer to the sysBuf,
-  // (if the result is not already in sys. mem.) and check the sysBuf values
-  if (dst->ptr != sysPtr) {
-    if (src->ptr != sysPtr) {
-      // In this case, we need to give the gpu dev that owns dst->ptr access
-      // to the system memory we are going to copy to.
-      hsa_agent_t ag_list_ck[2] = {dst->dev, args->cpu.dev};
-      err = hsa_amd_agents_allow_access(2, ag_list_ck, NULL, sysPtr);
-      RET_IF_HSA_ERR(err);
-    }
-    // Reset signal to 1
-    hsa_signal_store_screlease(copy_signal, 1);
-    err = hsa_amd_memory_async_copy(sysPtr, args->cpu.dev, dst->ptr, dst->dev, sz, 0, NULL,
-                                    copy_signal);
-    RET_IF_HSA_ERR(err);
-    if (hsa_signal_wait_relaxed(copy_signal, HSA_SIGNAL_CONDITION_LT, 1, -1,
-                                HSA_WAIT_STATE_BLOCKED) != 0) {
-      printf("Async copy returned error value.\n");
-      return HSA_STATUS_ERROR;
-    }
-  }
+
   // Check that the contents of the buffer are what is expected.
-  for (uint32_t i = 0; i < sz / sizeof(uint32_t); ++i) {
-    if (reinterpret_cast<uint32_t*>(sysPtr)[i] != val) {
-      fprintf(stdout, "Expected 0x%x but got 0x%x in buffer at index %d.\n", val,
-              reinterpret_cast<uint32_t*>(sysPtr)[i], i);
+    if (*reinterpret_cast<uint32_t*>(dst->ptr) != *reinterpret_cast<uint32_t*>(src->ptr)) {
+      fprintf(stderr, "Expected 0x%x but got 0x%x in buffer when copying from %lu to %lu and CPU device is %lu.\n", *reinterpret_cast<uint32_t*>(src->ptr),
+              *reinterpret_cast<uint32_t*>(dst->ptr), src->dev.handle, dst->dev.handle, args->cpu.dev.handle);
       return HSA_STATUS_ERROR;
     }
-  }
   return HSA_STATUS_SUCCESS;
 }
 
@@ -292,15 +267,8 @@ int main() {
   }
   // We will use the smallest amount of allocatable memory that works for all
   // potential sources and destinations of the copy
-  size_t sz = lcm(args.cpu.granule, args.gpu1.granule);
+  size_t sz = sizeof(uint32_t);
   // Allocate memory on each source/destination
-  if (twoGPUs) {
-    sz = lcm(sz, args.gpu2.granule);
-    err = hsa_amd_memory_pool_allocate(args.gpu2.pool, sz, 0,
-                                       reinterpret_cast<void**>(&args.gpu2.ptr));
-    RET_IF_HSA_ERR(err);
-  }
-
   err = hsa_amd_memory_pool_allocate(args.cpu.pool, sz, 0, reinterpret_cast<void**>(&args.cpu.ptr));
   RET_IF_HSA_ERR(err);
   err =
@@ -325,8 +293,11 @@ int main() {
   fprintf(stdout, "Success!\n");
 
   if (twoGPUs) {
+    err = hsa_amd_memory_pool_allocate(args.gpu2.pool, sz, 0,
+                                       reinterpret_cast<void**>(&args.gpu2.ptr));
+    RET_IF_HSA_ERR(err);
     fprintf(stdout, "Copying %lu bytes from gpu1 memory to gpu2 memory...\n", sz);
-    err = AsyncCpyTest(&args.gpu2, &args.gpu1, &args, sz, kTestFillValue3);
+    err = AsyncCpyTest(&args.gpu1, &args.gpu2, &args, sz, kTestFillValue3);
     RET_IF_HSA_ERR(err);
     fprintf(stdout, "Success!\n");
   }
