@@ -35,7 +35,7 @@ find_program (GIT NAMES git)
 
 ## Setup the package version based on git tags.
 set(PKG_VERSION_GIT_TAG_PREFIX "rsmi_pkg_ver")
-get_package_version_number("1.0.0" ${PKG_VERSION_GIT_TAG_PREFIX} GIT)
+get_package_version_number("5.0.0" ${PKG_VERSION_GIT_TAG_PREFIX} GIT)
 message("Package version: ${PKG_VERSION_STR}")
 set(${AMD_SMI_LIBS_TARGET}_VERSION_MAJOR "${VERSION_MAJOR}")
 set(${AMD_SMI_LIBS_TARGET}_VERSION_MINOR "${VERSION_MINOR}")
