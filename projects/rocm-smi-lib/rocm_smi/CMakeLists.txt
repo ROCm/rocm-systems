@@ -134,12 +134,10 @@ install(FILES ${COMMON_SRC_ROOT}/include/rocm_smi/${ROCM_SMI_TARGET}Config.h
 install(FILES ${COMMON_SRC_ROOT}/include/rocm_smi/kfd_ioctl.h
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rocm_smi
         COMPONENT dev)
-install(FILES ${COMMON_SRC_ROOT}/python_smi_tools/rsmiBindings.py
+install(PROGRAMS ${COMMON_SRC_ROOT}/python_smi_tools/rsmiBindings.py
         DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${ROCM_SMI}
         COMPONENT dev)
-install(FILES ${COMMON_SRC_ROOT}/python_smi_tools/rocm_smi.py
-        PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ
-        GROUP_WRITE GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
+install(PROGRAMS ${COMMON_SRC_ROOT}/python_smi_tools/rocm_smi.py
         DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${ROCM_SMI}
         COMPONENT dev)
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/bin/rocm-smi

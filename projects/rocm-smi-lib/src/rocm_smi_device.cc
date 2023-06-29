@@ -1092,6 +1092,9 @@ void Device::fillSupportedFuncs(void) {
   if (supported_funcs_.size() != 0) {
     return;
   }
+  if (monitor() == nullptr) {
+    return;
+  }
 
   std::map<const char *, dev_depends_t>::const_iterator it =
                                                    kDevFuncDependsMap.begin();
