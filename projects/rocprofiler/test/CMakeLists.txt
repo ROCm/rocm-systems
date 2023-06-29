@@ -128,7 +128,7 @@ add_custom_target(test DEPENDS ${HSACO_TARGET_LIST})
 add_custom_target(mytest DEPENDS ${HSACO_TARGET_LIST})
 add_custom_command(TARGET mytest POST_BUILD
   DEPENDS mytest
-  COMMAND $<$<CONFIG:release>:${CMAKE_STRIP}>
+  COMMAND $<$<CONFIG:release>:${CPACK_STRIP_EXECUTABLE}>
   ARGS ${HSACO_TARGET_LIST})
 
 ## Building standalone test executable
