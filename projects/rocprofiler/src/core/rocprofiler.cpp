@@ -470,6 +470,10 @@ PUBLIC_API void OnUnload() {
   ONLOAD_TRACE_END();
 }
 
+// Returns library vesrion
+PUBLIC_API uint32_t rocprofiler_version_major() { return ROCPROFILER_VERSION_MAJOR; }
+PUBLIC_API uint32_t rocprofiler_version_minor() { return ROCPROFILER_VERSION_MINOR; }
+
 // Returns the last error message
 PUBLIC_API hsa_status_t rocprofiler_error_string(const char** str) {
   API_METHOD_PREFIX
