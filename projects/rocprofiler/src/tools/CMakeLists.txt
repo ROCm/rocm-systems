@@ -45,6 +45,8 @@ add_subdirectory(rocsys)
 add_subdirectory(rocprofv2)
 
 add_executable(ctrl ctrl.cpp)
+set_target_properties(ctrl PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/libexec/rocprofiler)
 target_link_options(rocprofiler_tool PRIVATE -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/exportmap -Wl,--no-undefined)
 target_link_libraries(ctrl PRIVATE rocprofiler-v2 hsa-runtime64::hsa-runtime64)
 install(TARGETS ctrl RUNTIME

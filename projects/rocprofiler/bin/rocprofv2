@@ -1,31 +1,24 @@
 #!/bin/bash
 CURRENT_DIR="$( dirname -- "$0"; )";
 ROCPROFV2_DIR=$(dirname -- $(realpath ${BASH_SOURCE[0]}));
-ROCM_DIR=$(dirname -- ${ROCPROFV2_DIR})
-ROCM_PATH="${ROCM_PATH:=/opt/rocm}"
+ROCM_DIR=$( dirname -- "$ROCPROFV2_DIR"; )
 PLUGIN_LIST=("ctf" "perfetto" "file" "att")
 RUN_FROM_BUILD=0
 if [[ $ROCPROFV2_DIR == *"/build"* ]]; then
   RUN_FROM_BUILD=1
-  export ROCPROFILER_METRICS_PATH=$ROCM_DIR/build/counters/derived_counters.xml
-elif [[ $ROCPROFV2_DIR == *"/rocprofiler"* ]]; then
-  RUN_FROM_BUILD=1
   ROCM_DIR=$ROCPROFV2_DIR
 fi
+
+export ROCPROFILER_METRICS_PATH=$ROCM_DIR/libexec/rocprofiler/counters/derived_counters.xml
+export LD_LIBRARY_PATH=$ROCM_DIR/lib:$LD_LIBRARY_PATH
 
 usage() {
   echo -e "ROCProfilerV2 Run Script Usage:"
   echo -e "-h   | --help               For showing this message"
   echo -e "--list-counters             For showing all available counters for the current GPUs"
   if [ $RUN_FROM_BUILD == 1 ]; then
-    echo -e "-b   | --build              For compiling"
-    echo -e "-cb  | --clean-build        For full clean build"
     echo -e "-t   | --test               For Running the tests"
-    echo -e "-ct  | --clean-build-test   For Running the tests after a clean build"
     echo -e "-mt  | --mem-test           For Running the Memory Leak tests. This run requires building using -acb | --asan-clean-build option"
-    echo -e "-acb | --asan-clean-build   For compiling with ASAN library attached"
-    echo -e "--install                   For installing ROCProfilerV2 without clean build in the default installation folder (review build.sh to know more about the default paths)"
-    echo -e "--clean-install             For installing ROCProfilerV2 with new clean build in the default installation folder (review build.sh to know more about the default paths)"
   fi
   echo -e "--hip-api                    For Collecting HIP API Traces"
   echo -e "--hip-activity | --hip-trace For Collecting HIP API Activities Traces"
@@ -52,86 +45,22 @@ while [ 1 ] ; do
   if [[ "$1" = "-h" || "$1" = "--help" ]] ; then
     usage
     exit 1
-  elif [[ "$1" = "-b" || "$1" = "--build" ]] ; then
-    if [ $RUN_FROM_BUILD == 1 ]; then
-      TO_CLEAN=no ./build.sh
-      exit 1
-    fi
-  elif [[ "$1" = "-acb" || "$1" = "--asan-clean-build" ]] ; then
-    if [ $RUN_FROM_BUILD == 1 ]; then
-      ASAN=yes TO_CLEAN=yes ./build.sh
-      exit 1
-    fi
-  elif [[ "$1" = "-cb" || "$1" = "--clean-build" ]] ; then
-    if [ $RUN_FROM_BUILD == 1 ]; then
-      TO_CLEAN=yes ./build.sh
-      exit 1
-    fi
   elif [[ "$1" = "-t" || "$1" = "--test" ]] ; then
     if [ $RUN_FROM_BUILD == 1 ]; then
-      export ROCPROFILER_METRICS_PATH=$ROCM_DIR/build/counters/derived_counters.xml
-      export LD_LIBRARY_PATH=$ROCPROFV2_DIR:$LD_LIBRARY_PATH
-      RUN_TEST=yes TO_CLEAN=no $ROCM_DIR/build.sh
-      if [ "$CURRENT_DIR/build" -ef "./build" ] ; then
-        ./run_tests.sh
-      else
-	      pushd build
-        ./run_tests.sh
-      fi
+      ./run_tests.sh
       exit 1
     fi
   elif [[ "$1" = "-mt" || "$1" = "--mem-test" ]] ; then
     if [ $RUN_FROM_BUILD == 1 ]; then
-      export LD_LIBRARY_PATH=$ROCPROFV2_DIR:$LD_LIBRARY_PATH
-      ASAN=yes TO_CLEAN=yes ./build.sh
-      ./tests-v2/memorytests/run_asan_tests.sh $ROCM_DIR/build/tests-v2/featuretests/profiler/apps/hip_vectoradd $ROCM_DIR/build/memleaks.log
-      exit 1
-    fi
-  elif [[ "$1" = "-ct" || "$1" = "--clean-build-test" ]] ; then
-    if [ $RUN_FROM_BUILD == 1 ]; then
-      TO_CLEAN=yes $ROCM_DIR/build.sh
-      if [ "$CURRENT_DIR/build" -ef "./build" ] ; then
-        ./run_tests.sh
-      else
-	      pushd build
-        ./run_tests.sh
-      fi
-      exit 1
-    fi
-  elif [[ "$1" = "--install" ]] ; then
-    if [ $RUN_FROM_BUILD == 1 ]; then
-      TO_CLEAN=no $ROCM_DIR/build.sh
-      pushd build
-      make -j install
-      exit 1
-    fi
-  elif [[ "$1" = "--clean-install" ]] ; then
-    if [ $RUN_FROM_BUILD == 1 ]; then
-      TO_CLEAN=yes $ROCM_DIR/build.sh
-      pushd build
-      make install
+      $ROCM_DIR/tests-v2/memorytests/run_asan_tests.sh $ROCM_DIR/tests-v2/featuretests/profiler/apps/hip_vectoradd $ROCM_DIR/memleaks.log
       exit 1
     fi
   elif [[ "$1" = "--list-counters" ]] ; then
-    if [ $RUN_FROM_BUILD == 1 ]; then
-      export ROCPROFILER_METRICS_PATH=$ROCM_DIR/build/counters/derived_counters.xml
-      export LD_LIBRARY_PATH=$ROCPROFV2_DIR:$LD_LIBRARY_PATH
-      eval $ROCM_DIR/build/src/tools/ctrl
-    else
-      export ROCPROFILER_METRICS_PATH=$ROCPROFV2_DIR/../libexec/rocprofiler/counters/derived_counters.xml
-      export LD_LIBRARY_PATH=$ROCPROFV2_DIR/../lib:$LD_LIBRARY_PATH
-      LD_PRELOAD=$LD_PRELOAD:$ROCM_DIR/lib/rocprofiler/librocprofiler_tool.so
-      eval $ROCPROFV2_DIR/../libexec/rocprofiler/ctrl
-    fi
+    export LD_PRELOAD=$LD_PRELOAD:$ROCM_DIR/lib/rocprofiler/librocprofiler_tool.so
+    eval $ROCM_DIR/libexec/rocprofiler/ctrl
     exit 1
   elif [[ "$1" = "-i" || "$1" = "--input"  ]] ; then
     if [ $2 ] && [ -n $2 ] && [ -r $2 ] ; then
-      if [ $RUN_FROM_BUILD == 1 ]; then
-        export ROCPROFILER_METRICS_PATH=$ROCM_DIR/build/counters/derived_counters.xml
-        export LD_LIBRARY_PATH=$ROCPROFV2_DIR:$LD_LIBRARY_PATH
-      else
-        export ROCPROFILER_METRICS_PATH=$ROCPROFV2_DIR/../libexec/rocprofiler/counters/derived_counters.xml
-      fi
       export COUNTERS_PATH=$2
     else
       echo -e "Error: \"$2\" doesn't exist!"
@@ -227,12 +156,11 @@ while [ 1 ] ; do
     fi
     if [ "$2" = "att" ] ; then
       if [ $RUN_FROM_BUILD == 1 ]; then
-        ATT_PATH=$ROCPROFV2_DIR/plugin/att/att/att.py
-        export ROCPROFV2_ATT_LIB_PATH=$ROCM_PATH/lib/hsa-amd-aqlprofile/librocprofv2_att.so
-        export LD_LIBRARY_PATH=$ROCPROFV2_DIR:$LD_LIBRARY_PATH
+        ATT_PATH=$ROCM_DIR/plugin/att/att/att.py
+        export ROCPROFV2_ATT_LIB_PATH=$ROCM_DIR/lib/hsa-amd-aqlprofile/librocprofv2_att.so
       else
-        ATT_PATH=$ROCPROFV2_DIR/../libexec/rocprofiler/att/att.py
-        export ROCPROFV2_ATT_LIB_PATH=$ROCPROFV2_DIR/../lib/hsa-amd-aqlprofile/librocprofv2_att.so
+        ATT_PATH=$ROCM_DIR/libexec/rocprofiler/att/att.py
+        export ROCPROFV2_ATT_LIB_PATH=$ROCM_DIR/lib/hsa-amd-aqlprofile/librocprofv2_att.so
       fi
       ATT_ARGV=$3
       shift
@@ -306,20 +234,10 @@ if [ -n "$PMC_LINES" ]; then
       export OUTPUT_PATH=$FINAL_PATH
       let COUNTER=COUNTER+1
     fi
-    if [ $RUN_FROM_BUILD == 1 ]; then
-      export LD_LIBRARY_PATH=$ROCPROFV2_DIR:$LD_LIBRARY_PATH
-      LD_PRELOAD=$LD_PRELOAD:$ROCM_DIR/build/librocprofiler_tool.so $*
-    else
-      LD_PRELOAD=$LD_PRELOAD:$ROCM_DIR/lib/rocprofiler/librocprofiler_tool.so $*
-    fi
+    LD_PRELOAD=$LD_PRELOAD:$ROCM_DIR/lib/rocprofiler/librocprofiler_tool.so $*
   done
 elif [ ! -n "$ATT_ARGV" ]; then
-  if [ $RUN_FROM_BUILD == 1 ]; then
-    export LD_LIBRARY_PATH=$ROCPROFV2_DIR:$LD_LIBRARY_PATH
-    LD_PRELOAD=$LD_PRELOAD:$ROCM_DIR/build/librocprofiler_tool.so $*
-  else
-    LD_PRELOAD=$LD_PRELOAD:$ROCM_DIR/lib/rocprofiler/librocprofiler_tool.so $*
-  fi
+  LD_PRELOAD=$LD_PRELOAD:$ROCM_DIR/lib/rocprofiler/librocprofiler_tool.so $*
 fi
 
 get_pmc_results_txt_path(){

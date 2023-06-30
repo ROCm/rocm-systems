@@ -20,6 +20,5 @@ static int info_callback(const rocprofiler_counter_info_t info, const char* gpu_
 
 int main(int argc, char** argv) {
   hsa_init();
-  rocprofiler_initialize();
   rocprofiler_iterate_counters(info_callback);
 }
