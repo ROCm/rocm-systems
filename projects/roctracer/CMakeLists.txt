@@ -154,6 +154,13 @@ message("CPACK_RPM_PACKAGE_RELEASE: ${CPACK_RPM_PACKAGE_RELEASE}")
 set(CPACK_RPM_ASAN_PACKAGE_NAME "${PROJECT_NAME}-asan" )
 set(CPACK_RPM_ASAN_PACKAGE_REQUIRES "rocm-core-asan" )
 
+#Disable build id for rocprofiler as its creating transaction error
+set ( CPACK_RPM_SPEC_MORE_DEFINE "%define _build_id_links none
+                                  %global __strip ${CPACK_STRIP_EXECUTABLE}
+                                  %global __objdump ${CPACK_OBJDUMP_EXECUTABLE}
+                                  %global __objcopy ${CPACK_OBJCOPY_EXECUTABLE}
+                                  %global __readelf ${CPACK_READELF_EXECUTABLE}")
+
 if(NOT ROCM_DEP_ROCMCORE)
   string(REGEX REPLACE ",? ?rocm-core" "" CPACK_RPM_RUNTIME_PACKAGE_REQUIRES ${CPACK_RPM_RUNTIME_PACKAGE_REQUIRES})
   string(REGEX REPLACE ",? ?rocm-core" "" CPACK_RPM_DEV_PACKAGE_REQUIRES ${CPACK_RPM_DEV_PACKAGE_REQUIRES})

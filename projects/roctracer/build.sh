@@ -45,6 +45,7 @@ if [ -z "$PACKAGE_PREFIX" ] ; then PACKAGE_PREFIX="$ROCM_PATH/$COMPONENT"; fi
 if [ -z "$PREFIX_PATH" ] ; then PREFIX_PATH=$PACKAGE_ROOT; fi
 if [ -z "$HIP_VDI" ] ; then HIP_VDI=0; fi
 if [ -n "$ROCM_RPATH" ] ; then LD_RUNPATH_FLAG=" -Wl,--enable-new-dtags -Wl,--rpath,${ROCM_RPATH}"; fi
+if [ -z "$GPU_LIST" ] ; then GPU_LIST="gfx900 gfx906 gfx908 gfx90a gfx940 gfx1030 gfx1100 gfx1101 gfx1102"; fi
 
 ROCTRACER_ROOT=$(cd $ROCTRACER_ROOT && echo $PWD)
 
@@ -60,7 +61,12 @@ cmake \
     -DCPACK_PACKAGING_INSTALL_PREFIX=$PACKAGE_PREFIX \
     -DCPACK_GENERATOR="${CPACKGEN:-"DEB;RPM"}" \
     -DCMAKE_SHARED_LINKER_FLAGS="$LD_RUNPATH_FLAG" \
-    $ROCTRACER_ROOT
+    -DGPU_TARGETS="$GPU_LIST" \
+    -DCPACK_OBJCOPY_EXECUTABLE="${PACKAGE_ROOT}/llvm/bin/llvm-objcopy" \
+    -DCPACK_READELF_EXECUTABLE="${PACKAGE_ROOT}/llvm/bin/llvm-readelf" \
+    -DCPACK_STRIP_EXECUTABLE="${PACKAGE_ROOT}/llvm/bin/llvm-strip" \
+    -DCPACK_OBJDUMP_EXECUTABLE="${PACKAGE_ROOT}/llvm/bin/llvm-objdump" \
+     $ROCTRACER_ROOT
 
 make
 make mytest
