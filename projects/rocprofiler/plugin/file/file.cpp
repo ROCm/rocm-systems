@@ -216,7 +216,7 @@ class file_plugin_t {
       case ACTIVITY_DOMAIN_HIP_API: {
         if (hip_api_header_written_.load(std::memory_order_relaxed)) return;
         output_file = get_output_file(output_type_t::TRACER, ACTIVITY_DOMAIN_HIP_API);
-        *output_file << "Record_ID,Domain,Function,Start_Timestamp,End_Timestamp,Correlation_ID"
+        *output_file << "Domain,Function,Start_Timestamp,End_Timestamp,Correlation_ID"
                      << std::endl;
         *output_file << std::endl;
         hip_api_header_written_.exchange(true, std::memory_order_release);
