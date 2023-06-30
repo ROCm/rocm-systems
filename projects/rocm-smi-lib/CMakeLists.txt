@@ -232,7 +232,7 @@ configure_package_config_file(
 
 write_basic_package_version_file(
     ${CMAKE_CURRENT_BINARY_DIR}/rocm_smi-config-version.cmake
-    VERSION "${${AMD_SMI_LIBS_TARGET}_VERSION_MAJOR}.${${AMD_SMI_LIBS_TARGET}_VERSION_MINOR}.${${AMD_SMI_LIBS_TARGET}_VERSION_PATCH}"
+    VERSION "${PKG_VERSION_STR}"
     COMPATIBILITY SameMajorVersion
     )
 
