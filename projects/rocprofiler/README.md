@@ -234,20 +234,25 @@ The user has two options for building:
       see Plugin Support section for installation
 
       # 3. Run the following to view the trace
-      rocprofv2 --plugin att <app_relative_path_assembly_file> --mode <network, file, off> -i input.txt  <app_relative_path>
+      rocprofv2 -i input.txt --plugin att <app_relative_path_assembly_file> --mode [network, file, off] <app_relative_path>
 
       # app_assembly_file_relative_path is the assembly file with .s extension generated in 1st step
       # app_relative_path is the path for the application binary
-      # Mode:
-        # - Network: opens the server with the browser UI.
-            # att needs 2 ports available (e.g. 8000, 18000). There is an option (default: --ports "8000,18000") option to change these.
-            # In case the browser is running on a different machine, port forwarding can be done with ssh -L 8000:localhost:8000 <user@IP>.
-        # - File: dumps the json files to disk, it can be used to quickly verify if there is anything wrong with the data.
-            # Run python3 httpserver.py from within the generated ui/ folder to view the trace. The folder can be copied to another machine, and will run without rocm.
-        # - Off runs collection but not analysis/parsing. So it can be later viewed another time and/or system.
+      # Parameters:
+        # --mode <mode>:
+          # - network: opens the server with the browser UI.
+              # att needs 2 ports available (e.g. 8000, 18000). There is an option (default: --ports "8000,18000") option to change these.
+              # In case the browser is running on a different machine, port forwarding can be done with ssh -L 8000:localhost:8000 <user@IP>.
+          # - file: dumps the json files to disk, it can be used to quickly verify if there is anything wrong with the data.
+              # Run python3 httpserver.py from within the generated ui/ folder to view the trace. The folder can be copied to another machine, and will run without rocm.
+          # - off runs collection but not analysis/parsing. So it can be later viewed another time and/or system.
+        # --depth <n>: How many waves per slot to parse (maximum).
+        # --mpi <nproc>: Parse with this many mpi processes, for performance improvements. Requires mpi4py.
+        # --att_kernel "filename": Kernel filename to use (instead of ATT asking which one to use).
+        # --trace_file "files": glob (wildcards allowed) of traces files to parse.
       # input.txt gives flexibility to to target the compute unit and provide filters.
         # input.txt contents:
-            # TARGET_CU=1 // or some other CU [0,15] - WGP for Navi
+            # att: TARGET_CU=1 // or some other CU [0,15] - WGP for Navi
             # SE_MASK=0x1 // bitmask of shader engines. The fewer, the easier on the hardware. Default enables all shader engines.
             # SIMD_MASK=0xF // There are four SIMDs. GFX9: bitmask of SIMDs. Navi: SIMD Index [0-3].
             # PERFCOUNTERS_COL_PERIOD=0x3 // Multiplier period for counter collection [0~31]. GFX9 only.

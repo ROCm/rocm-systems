@@ -18,8 +18,9 @@ import gc
 
 try:
     from mpi4py import MPI
+    MPI_IMPORTED = True
 except:
-    pass
+    MPI_IMPORTED = False
 
 class PerfEvent(ctypes.Structure):
     _fields_ = [
@@ -330,15 +331,16 @@ def apply_min_event(min_event_time, OCCUPANCY, EVENTS, DBFILES, TIMELINES):
 if __name__ == "__main__":
     comm = None
     mpi_root = True
-    try:
-        comm = MPI.COMM_WORLD
-        if comm.Get_size() < 2:
+    if MPI_IMPORTED:
+        try:
+            comm = MPI.COMM_WORLD
+            if comm.Get_size() < 2:
+                comm = None
+            else:
+                mpi_root = comm.Get_rank() == 0
+        except:
+            print('Could not load MPI')
             comm = None
-        else:
-            mpi_root = comm.Get_rank() == 0
-    except:
-        print('Could not load MPI')
-        comm = None
 
     pathenv = os.getenv('OUTPUT_PATH')
     if pathenv is None:
