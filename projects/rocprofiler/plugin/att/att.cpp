@@ -45,14 +45,24 @@
 #include "rocprofiler_plugin.h"
 #include "../utils.h"
 
-#define ATT_FILENAME_MAXBYTES 96
+#define ATT_FILENAME_MAXBYTES 90
 
 namespace {
 
 class att_plugin_t {
  public:
-  att_plugin_t() {}
+  att_plugin_t() {
+    std::vector<const char*> mpivars = {"MPI_RANK", "OMPI_COMM_WORLD_RANK", "MV2_COMM_WORLD_RANK"};
 
+    for (const char* envvar : mpivars) if (const char* env = getenv(envvar)) {
+      MPI_RANK = atoi(env);
+      MPI_ENABLE = true;
+      break;
+    }
+  }
+
+  bool MPI_ENABLE = false;
+  int MPI_RANK = 0;
   std::mutex writing_lock;
   bool is_valid_{true};
 
@@ -82,53 +92,47 @@ class att_plugin_t {
     std::string name_demangled =
         rocprofiler::truncate_name(rocprofiler::cxx_demangle(kernel_name_c));
 
-    if (name_demangled.size() > ATT_FILENAME_MAXBYTES) {  // Limit filename size
+    if (name_demangled.size() > ATT_FILENAME_MAXBYTES) // Limit filename size
       name_demangled = name_demangled.substr(0, ATT_FILENAME_MAXBYTES);
-    }
 
-    // Get the number of shader engine traces
-    int se_num = att_tracer_record->shader_engine_data_count;
-    std::string outpath;
-    if (getenv("OUTPUT_PATH") == nullptr) {
-      outpath = "";
-    } else {
-      outpath = std::string(getenv("OUTPUT_PATH")) + "/";
-    }
+    std::string outfilepath = ".";
+    if (const char* env = getenv("OUTPUT_PATH"))
+      outfilepath = std::string(env);
+
+    outfilepath.reserve(outfilepath.size()+128); // Max filename size
+    outfilepath += '/'+name_demangled;
+    if (MPI_ENABLE) outfilepath += "_rank"+std::to_string(MPI_RANK);
+    outfilepath += "_v";
+
     // Find if this filename already exists. If so, increment vname.
-    int file_iteration = -1;
-    bool bIncrementVersion = true;
-    while (bIncrementVersion) {
+    int file_iteration = 0;
+    while (att_file_exists(outfilepath + std::to_string(file_iteration) + "_kernel.txt"))
       file_iteration += 1;
-      std::string fss = name_demangled + "_v" + std::to_string(file_iteration);
-      bIncrementVersion = att_file_exists(outpath + fss + "_kernel.txt");
-    }
 
+    outfilepath += std::to_string(file_iteration);
     auto dispatch_id = att_tracer_record->header.id.handle;
-    std::string fname =
-        outpath + name_demangled + "_v" + std::to_string(file_iteration) + "_kernel.txt";
-    std::ofstream(fname.c_str()) << name_demangled << " [" << dispatch_id << "]: " << kernel_name_c
-                                 << '\n';
+
+    std::string fname = outfilepath + "_kernel.txt";
+    std::ofstream(fname.c_str()) << name_demangled << " dispatch[" << dispatch_id
+                                 << "] GPU[" << att_tracer_record->gpu_id.handle
+                                 << "]: " << kernel_name_c << '\n';
 
     // iterate over each shader engine att trace
+    int se_num = att_tracer_record->shader_engine_data_count;
     for (int i = 0; i < se_num; i++) {
       if (!att_tracer_record->shader_engine_data ||
           !att_tracer_record->shader_engine_data[i].buffer_ptr)
         continue;
       printf("--------------collecting data for shader_engine %d---------------\n", i);
       rocprofiler_record_se_att_data_t* se_att_trace = &att_tracer_record->shader_engine_data[i];
-      uint32_t size = se_att_trace->buffer_size;
       const char* data_buffer_ptr = reinterpret_cast<char*>(se_att_trace->buffer_ptr);
 
       // dump data in binary format
-      std::ostringstream oss;
-      oss << outpath + name_demangled << "_v" << file_iteration << "_se" << i << ".att";
-      std::ofstream out(oss.str().c_str(), std::ios::binary);
-      if (out.is_open()) {
-        out.write((char*)data_buffer_ptr, size);
-        out.close();
-      } else {
-        std::cerr << "\t" << __FUNCTION__ << " Failed to open file: " << oss.str().c_str() << '\n';
-      }
+      std::ofstream out(outfilepath + "_se" + std::to_string(i) + ".att", std::ios::binary);
+      if (out.is_open())
+        out.write((char*)data_buffer_ptr, se_att_trace->buffer_size);
+      else
+        std::cerr << "ATT Failed to open file: " << outfilepath << "_se" << i << ".att\n";
     }
   }
 

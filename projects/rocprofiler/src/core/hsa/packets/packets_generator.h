@@ -58,7 +58,7 @@ hsa_amd_memory_pool_t& GetOutputPool();
 hsa_ven_amd_aqlprofile_profile_t* GenerateATTPackets(
     hsa_agent_t cpu_agent, hsa_agent_t gpu_agent,
     std::vector<hsa_ven_amd_aqlprofile_parameter_t>& att_params, packet_t* start_packet,
-    packet_t* stop_packet);
+    packet_t* stop_packet, size_t att_buffer_size);
 
 
 uint8_t* AllocateSysMemory(hsa_agent_t gpu_agent, size_t size, hsa_amd_memory_pool_t* cpu_pool);

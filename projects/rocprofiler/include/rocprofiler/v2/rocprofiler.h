@@ -1690,9 +1690,13 @@ typedef enum {
    */
   ROCPROFILER_FILTER_RANGE = 4,
   /**
-   * Add Kernel names that will be only profiled or traced
+   * Add Kernel names that will be profiled or traced
    */
-  ROCPROFILER_FILTER_KERNEL_NAMES = 5
+  ROCPROFILER_FILTER_KERNEL_NAMES = 5,
+  /**
+   * Add Kernel correlation ids that will be profiled or traced for ATT
+   */
+  ROCPROFILER_FILTER_DISPATCH_IDS = 6
 } rocprofiler_filter_property_kind_t;
 
 // TODO(aelwazir): Another way to define this as needed
@@ -1700,7 +1704,7 @@ typedef const char* rocprofiler_hip_function_name_t;
 typedef const char* rocprofiler_hsa_function_name_t;
 
 /**
- * ATT parameters to be used by for colelction
+ * ATT parameters to be used by for collection
  */
 typedef enum {
   ROCPROFILER_ATT_COMPUTE_UNIT_TARGET = 0,
@@ -1710,12 +1714,14 @@ typedef enum {
   ROCPROFILER_ATT_TOKEN_MASK2 = 4,
   ROCPROFILER_ATT_SE_MASK = 5,
   ROCPROFILER_ATT_SAMPLE_RATE = 6,
+  ROCPROFILER_ATT_BUFFER_SIZE = 7,         //! ATT collection max data size.
   ROCPROFILER_ATT_PERF_MASK = 240,
   ROCPROFILER_ATT_PERF_CTRL = 241,
   ROCPROFILER_ATT_PERFCOUNTER = 242,
   ROCPROFILER_ATT_PERFCOUNTER_NAME = 243,
   ROCPROFILER_ATT_MAXVALUE
 } rocprofiler_att_parameter_name_t;
+
 
 // att tracing parameters object
 typedef struct {
@@ -1745,6 +1751,7 @@ typedef struct {
     rocprofiler_hip_function_name_t* hip_functions_names;
     rocprofiler_hsa_function_name_t* hsa_functions_names;
     uint32_t range[2];
+    uint64_t* dispatch_ids;
   };
   /**
    * Data array count

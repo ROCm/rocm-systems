@@ -164,27 +164,25 @@ The user has two options for building:
 
 ## Features & Usage
 
-### Tool
+  - ### rocsys
+    ##### A command line utility to control a session (launch/start/stop/exit), with the required application to be traced or profiled in a rocprofv2 context. Usage:
 
-- rocsys: This is a frontend command line utility to launch/start/stop/exit a session with the required application to be traced or profiled in rocprofv2 context. Usage:
+      ```bash
+      # Launch the application with the required profiling and tracing options with giving a session identifier to be used later
+      rocsys --session session_name launch mpiexec -n 2 ./rocprofv2 -i samples/input.txt Histogram
 
-    ```bash
-    # Launch the application with the required profiling and tracing options with giving a session identifier to be used later
-    rocsys --session session_name launch mpiexec -n 2 ./rocprofv2 -i samples/input.txt Histogram
+      # Start a session with a given identifier created at launch
+      rocsys --session session_name start
 
-    # Start a session with a given identifier created at launch
-    rocsys --session session_name start
+      # Stop a session with a given identifier created at launch
+      rocsys –session session_name stop
 
-    # Stop a session with a given identifier created at launch
-    rocsys –session session_name stop
+      # Exit a session with a given identifier created at launch
+      rocsys –session session_name exit
+      ```
 
-    # Exit a session with a given identifier created at launch
-    rocsys –session session_name exit
-    ```
-
-- rocprofv2:
-
-  - Counters and Metric Collection: HW counters and derived metrics can be collected using following option:
+  - ### Counters and Metric Collection
+    HW counters and derived metrics can be collected using following option:
 
       ```bash
       rocprofv2 -i samples/input.txt <app_relative_path>
@@ -197,7 +195,8 @@ The user has two options for building:
       pmc: SQ_WAVES GRBM_COUNT GRBM_GUI_ACTIVE SQ_INSTS_VALU
       ```
 
-  - Application Trace Support: Differnt trace options are available while profiling an app:
+  - ### Application Trace Support
+    Different trace options are available while profiling an app:
 
       ```bash
       # HIP API & asynchronous activity tracing
@@ -223,44 +222,13 @@ The user has two options for building:
       rocprofv2 --help
       ```
 
-  - (ATT) Advanced Thread Trace: It can collect kernel running time, granular hardware metrics per kernel dispatch and provide hotspot analysis at source code level via hardware tracing.
+  - ### Plugin Support
+    We have a template for adding new plugins. New plugins can be written on top of rocprofv2 to support the desired output format using include/rocprofiler/v2/rocprofiler_plugins.h header file. These plugins are modular in nature and can easily be decoupled from the code based on need. Installation files:
 
-      ```bash
-      # ATT(Advanced Thread Trace) needs few preconditions before running.
-      # 1. Make sure to generate the assembly file for application by executing the following before compiling your HIP Application
-      export HIPCC_COMPILE_FLAGS_APPEND="--save-temps -g"
-
-      # 2. Install plugin package
-      see Plugin Support section for installation
-
-      # 3. Run the following to view the trace
-      rocprofv2 -i input.txt --plugin att <app_relative_path_assembly_file> --mode [network, file, off] <app_relative_path>
-
-      # app_assembly_file_relative_path is the assembly file with .s extension generated in 1st step
-      # app_relative_path is the path for the application binary
-      # Parameters:
-        # --mode <mode>:
-          # - network: opens the server with the browser UI.
-              # att needs 2 ports available (e.g. 8000, 18000). There is an option (default: --ports "8000,18000") option to change these.
-              # In case the browser is running on a different machine, port forwarding can be done with ssh -L 8000:localhost:8000 <user@IP>.
-          # - file: dumps the json files to disk, it can be used to quickly verify if there is anything wrong with the data.
-              # Run python3 httpserver.py from within the generated ui/ folder to view the trace. The folder can be copied to another machine, and will run without rocm.
-          # - off runs collection but not analysis/parsing. So it can be later viewed another time and/or system.
-        # --depth <n>: How many waves per slot to parse (maximum).
-        # --mpi <nproc>: Parse with this many mpi processes, for performance improvements. Requires mpi4py.
-        # --att_kernel "filename": Kernel filename to use (instead of ATT asking which one to use).
-        # --trace_file "files": glob (wildcards allowed) of traces files to parse.
-      # input.txt gives flexibility to to target the compute unit and provide filters.
-        # input.txt contents:
-            # att: TARGET_CU=1 // or some other CU [0,15] - WGP for Navi
-            # SE_MASK=0x1 // bitmask of shader engines. The fewer, the easier on the hardware. Default enables all shader engines.
-            # SIMD_MASK=0xF // There are four SIMDs. GFX9: bitmask of SIMDs. Navi: SIMD Index [0-3].
-            # PERFCOUNTERS_COL_PERIOD=0x3 // Multiplier period for counter collection [0~31]. GFX9 only.
-            # PERFCOUNTER=<counter_name> // Add a SQ counter to be collected with ATT; period defined by PERFCOUNTERS_COL_PERIOD. GFX9 only.
-        # samples/att.txt is the simplest input file for ATT
-      ```
-
-  - Plugin Support: We have a template for adding new plugins. New plugins can be written on top of rocprofv2 to support the desired output format using include/rocprofiler/v2/rocprofiler_plugins.h header file. These plugins are modular in nature and can easily be decoupled from the code based on need. E.g.
+    ```bash
+    rocprofiler-plugins_9.0.0-local_amd64.deb
+    rocprofiler-plugins-9.0.0-local.x86_64.rpm
+    ```
     - file plugin: outputs the data in txt files.
     - Perfetto plugin: outputs the data in protobuf format.
       - Protobuf files can be viewed using ui.perfetto.dev or using trace_processor
@@ -268,33 +236,100 @@ The user has two options for building:
     - CTF plugin: Outputs the data in ctf format(a binary trace format)
       - CTF binary output can be viewed using TraceCompass or babeltrace.
 
-      installation:
+    Usage:
 
-      ```bash
-      rocprofiler-plugins_9.0.0-local_amd64.deb
-      rocprofiler-plugins-9.0.0-local.x86_64.rpm
-      ```
+    ```bash
+    # plugin_name can be file, perfetto , ctf
+    ./rocprofv2 --plugin plugin_name -i samples/input.txt -d output_dir <app_relative_path> # -d is optional, but can be used to define the directory output for output results
+    ```
 
-      usage:
+    - #### (ATT) Advanced Thread Trace
+      Tool used to collect fine-grained hardware metrics. Provides ISA-level instruction hotspot analysis via hardware tracing.
 
-      ```bash
-      # plugin_name can be file, perfetto , ctf
-      ./rocprofv2 --plugin plugin_name -i samples/input.txt -d output_dir <app_relative_path> # -d is optional, but can be used to define the directory output for output results
-      ```
+        ```bash
+        # ATT(Advanced Thread Trace) needs some preparation before running.
 
-  - Flush Interval: Flush interval can be used to control the interval time in milliseconds between the buffers flush for the tool. However, if the buffers are full the flush will be called on its own. This can be used as in the next example:
+        # 1. Make sure to generate the assembly file for application by executing the following before compiling your HIP Application
+        # This can be achieved globally by following environment variable
+        export HIPCC_COMPILE_FLAGS_APPEND="--save-temps -g"
+        # Similarly, the --save-temps -g flags can be added per file for better ISA generation control.
+
+        # 2. Install plugin package
+        # see Plugin Support section for installation
+
+        # 3. Run the following to view the trace
+        # Att-specific options must come right after the assembly file
+        rocprofv2 -i input.txt --plugin att <app_assembly_file> --mode network <app_relative_path>
+        ```
+        ```bash
+        # Example for vectoradd on navi31.
+        # Special attention to gfx1100.s==navi31 in the ISA file name. 
+        # Use gfx1030 for navi21, gfx90a for MI200 and gfx940 for MI300
+        hipcc -g --save-temps vectoradd_hip.cpp -o vectoradd_hip.exe
+        rocprofv2 -i input.txt --plugin att vectoradd_hip-hip-amdgcn-amd-amdhsa-gfx1100.s --mode network ./vectoradd_hip.exe
+        # Then open the browser at http://localhost:8000
+        # The ISA can also be obtained from llvm/roc objdump, however, annotations will be different
+        ```
+      - ##### app_assembly_file_relative_path
+        AMDGCN ISA file with .s extension generated in 1st step
+      - ##### app_relative_path
+        Path for the running application
+      - ##### ATT plugin optional parameters
+        - --depth [n]: How many waves per slot to parse (maximum).
+        - --mpi [proc]: Parse with this many mpi processes, for greater analysis speed. Does not change results. Requires mpi4py.
+        - --att_kernel "filename": Kernel filename to use (instead of ATT asking which one to use).
+        - --trace_file "files": glob (wildcards allowed) of traces files to parse. Requires quotes for use with wildcards.
+        - --mode [network, file, off (default)]
+          - ##### network
+            Opens the server with the browser UI.
+            att needs 2 ports available (e.g. 8000, 18000). There is an option (default: --ports "8000,18000") to change these.
+            In case rocprofv2 is running on a different machine, use port forwarding "ssh -L 8000:localhost:8000 <user@IP>" so the browser can be used locally. For docker, use --network=host --ipc=host -p8000:8000 -p18000:18000
+          - ##### file
+            Dumps the analyzed json files to disk for vieweing at a later time. Run python3 httpserver.py from within the generated ui/ folder to view the trace, similarly to network mode. The folder can be copied to another machine, and will run without rocm.
+          - ##### off
+            Runs trace collection but not analysis, so it can be analyzed at a later time. Run rocprofv2 ATT [network, file] with the same parameters, removing the application binary, to analyze previously generated traces.
+      - ##### input.txt 
+        Required. Used to select specific compute units and other trace parameters.
+        For first time users, we recommend compiling and running vectorAdd with
+        ```bash
+        att: TARGET_CU=1
+        SE_MASK=0x1
+        SIMD_MASK=0x3
+        ```
+        and histogram with
+        ```bash
+        att: TARGET_CU=0
+        SE_MASK=0xFF
+        SIMD_MASK=0xF // 0xF for GFX9, SIMD_MASK=0 for Navi
+        ```
+        Possible contents:
+        - att: TARGET_CU=1 //or some other CU [0,15] - WGP for Navi [0,8]
+        - SE_MASK=0x1 // bitmask of shader engines. The fewer, the easier on the hardware. Default enables 1 out of 4 shader engines.
+        - SIMD_MASK=0xF // GFX9: bitmask of SIMDs. Navi: SIMD Index [0-3].
+        - DISPATCH=ID,RN // collect trace only for the given dispatch_ID and MPI rank RN. RN ignored for single processes. Multiple lines with varying combinations of RN and ID can be added.
+        - KERNEL=kernname // Profile only kernels containing the string kernname (c++ mangled name). Multiple lines can be added.
+        - PERFCOUNTERS_COL_PERIOD=0x3 // Multiplier period for counter collection [0~31]. 0=fastest (usually once every 16 cycles). GFX9 only. Counters will be shown in a graph over time in the browser UI.
+        - PERFCOUNTER=counter_name // Add a SQ counter to be collected with ATT; period defined by PERFCOUNTERS_COL_PERIOD. GFX9 only.
+        - BUFFER_SIZE=[size] // Sets size of the ATT buffer collection, per dispatch, in megabytes (shared among all shader engines).
+  
+  - ### Flush Interval
+    Flush interval can be used to control the interval time in milliseconds between the buffers flush for the tool. However, if the buffers are full the flush will be called on its own. This can be used as in the next example:
     ```bash
     rocprofv2 --flush-interval <TIME_INTERVAL_IN_MILLISECONDS> <rest_of_rocprofv2_arguments> <app_relative_path>
     ```
 
-  - Trace Period: Trace period can be used to control when the profiling or tracing is enabled using two arguments, the first one is the delay time, which is the time spent idle without tracing or profiling. The second argument is the profiling or the tracing time, which is the active time where the profiling and tracing are working, so basically, the session will work in the following timeline:
+  - ### Trace Period
+    Trace period can be used to control when the profiling or tracing is enabled using two arguments, the first one is the delay time, which is the time spent idle without tracing or profiling. The second argument is the profiling or the tracing time, which is the active time where the profiling and tracing are working, so basically, the session will work in the following timeline:
     ```
     # <DELAY_TIME> => <PROFILING_OR_TRACING_SESSION_START> => <ACTIVE_PROFILING_OR_TRACING_TIME> => <PROFILING_OR_TRACING_SESSION_STOP>
     ```
     This feature can be used using the following command:
     ```bash
-    rocprofv2 --trace-period <DELAY_TIME>:<ACTIVE_PROFILING_OR_TRACING_TIME> <rest_of_rocprofv2_arguments> <app_relative_path>
+    rocprofv2 --trace-period <delay>:<active_time>:<interval> <rest_of_rocprofv2_arguments> <app_relative_path>
     ```
+    - delay: Time delay to start profiling (ms).
+    - active_time: How long to profile for (ms).
+    - interval: If set, profiling sessions will start (loop) every "interval", and run for "active_time", until the application ends. Must be higher than "active_time".
 
 - Device Profiling: A device profiling session allows the user to profile the GPU device for counters irrespective of the running applications on the GPU. This is different from application profiling. device profiling session doesn't care about the host running processes and threads. It directly provides low level profiling information.
 
@@ -413,7 +448,11 @@ samples can be run as independent executables once installed
 Please report in the Github Issues
 
 ## Limitations
-- Navi requires a stable power state for counter collection. Currently this state needs to be set by the user.
-  To do so, set "power_dpm_force_performance_level" to be writeable for non-root users with chmod, then:
+- ##### Navi3x requires a stable power state for counter collection.
+  Currently, this state needs to be set by the user.
+  To do so, set "power_dpm_force_performance_level" to be writeable for non-root users, then set performance level to profile_standard:
+  ```bash
+  sudo chmod 777 /sys/class/drm/card0/device/power_dpm_force_performance_level
   echo profile_standard >> /sys/class/drm/card0/device/power_dpm_force_performance_level
-  Recommended: "auto" or "high" for ATT and "profile_standard" for PMC. Use rocm-smi to verify the current power state.
+  ```
+  Recommended: "profile_standard" for counter collection and "auto" for all other profiling. Use rocm-smi to verify the current power state. For multiGPU systems (includes integrated graphics), replace "card0" by the desired card.

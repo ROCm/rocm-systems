@@ -479,7 +479,6 @@ hsa_ven_amd_aqlprofile_profile_t* InitializeDeviceProfilingAqlPackets(
 }
 
 // ATT
-uint32_t g_output_buffer_size = 0x40000000;  // 1GB
 bool g_output_buffer_local = true;
 
 // Allocate system memory accessible by both CPU and GPU
@@ -511,11 +510,11 @@ uint8_t* AllocateLocalMemory(size_t size, hsa_amd_memory_pool_t* gpu_pool) {
   return ptr;
 }
 
-hsa_status_t Allocate(hsa_agent_t gpu_agent, hsa_ven_amd_aqlprofile_profile_t* profile) {
+hsa_status_t Allocate(hsa_agent_t gpu_agent, hsa_ven_amd_aqlprofile_profile_t* profile, size_t att_buffer_size) {
   Agent::AgentInfo& agentInfo = rocprofiler::hsa_support::GetAgentInfo(gpu_agent.handle);
   profile->command_buffer.ptr =
       AllocateSysMemory(gpu_agent, profile->command_buffer.size, &agentInfo.cpu_pool);
-  profile->output_buffer.size = g_output_buffer_size;
+  profile->output_buffer.size = att_buffer_size;
   profile->output_buffer.ptr = (g_output_buffer_local)
       ? AllocateLocalMemory(profile->output_buffer.size, &agentInfo.gpu_pool)
       : AllocateSysMemory(gpu_agent, profile->output_buffer.size, &agentInfo.cpu_pool);
@@ -555,7 +554,7 @@ att_mem_pools_map_t* GetAttMemPoolsMap() {
 hsa_ven_amd_aqlprofile_profile_t* GenerateATTPackets(
     hsa_agent_t cpu_agent, hsa_agent_t gpu_agent,
     std::vector<hsa_ven_amd_aqlprofile_parameter_t>& att_params, packet_t* start_packet,
-    packet_t* stop_packet) {
+    packet_t* stop_packet, size_t att_buffer_size) {
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wconversion-null"
   // Preparing the profile structure to get the packets
@@ -576,7 +575,7 @@ hsa_ven_amd_aqlprofile_profile_t* GenerateATTPackets(
   // Allocate command and output buffers
   // command buffer -> from CPU memory pool
   // output buffer -> from GPU memory pool
-  status = Allocate(gpu_agent, profile);
+  status = Allocate(gpu_agent, profile, att_buffer_size);
   CHECK_HSA_STATUS("Error: Att Buffers Allocation", status);
 
   // Generate start/stop/read profiling packets

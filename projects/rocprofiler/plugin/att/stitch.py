@@ -310,19 +310,19 @@ def stitch(insts, raw_code, jumps, gfxv):
                 NUM_SMEM += 1
             elif inst[1] == VMEM or (inst[1] == FLAT and 'global_' in as_line[0]):
                 inc_ordering = False
-                if 'buffer_' in as_line[0] or 'flat_' in as_line[0]:
+                if 'flat_' in as_line[0]:
                     inc_ordering = True
 
-                if bGFX9 or 'load' in as_line[0]:
-                    VLMEM_INST.append([reverse_map[line],  num_inflight])
-                    NUM_VLMEM += 1
-                    if inc_ordering:
-                        vlmem_ordering = 1
-                else:
+                if not bGFX9 and 'store' in as_line[0]:
                     VSMEM_INST.append([reverse_map[line],  num_inflight])
                     NUM_VSMEM += 1
                     if inc_ordering:
                         vsmem_ordering = 1
+                else:
+                    VLMEM_INST.append([reverse_map[line],  num_inflight])
+                    NUM_VLMEM += 1
+                    if inc_ordering:
+                        vlmem_ordering = 1
             elif inst[1] == FLAT:
                 smem_ordering = 1
                 vlmem_ordering = 1

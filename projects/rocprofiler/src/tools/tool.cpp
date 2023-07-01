@@ -252,15 +252,28 @@ std::vector<std::string> GetCounterNames() {
   return counters;
 }
 
-typedef std::tuple<std::vector<std::pair<rocprofiler_att_parameter_name_t, uint32_t>>,
-                   std::vector<std::string>, std::vector<std::string>>
-    att_parsed_input_t;
+typedef std::tuple<
+  std::vector<std::pair<rocprofiler_att_parameter_name_t, uint32_t>>,
+  std::vector<std::string>,
+  std::vector<std::string>,
+  std::vector<uint64_t>
+> att_parsed_input_t;
+
+static int GetMpRank() {
+  std::vector<const char*> mpivars = {"MPI_RANK", "OMPI_COMM_WORLD_RANK", "MV2_COMM_WORLD_RANK"};
+  for (const char* envvar : mpivars)
+    if (const char* env = getenv(envvar))
+      return atoi(env);
+  return -1;
+}
 
 att_parsed_input_t GetATTParams() {
   std::vector<std::pair<rocprofiler_att_parameter_name_t, uint32_t>> parameters;
   std::vector<std::string> kernel_names;
   std::vector<std::string> counters_names;
+  std::vector<uint64_t> dispatch_ids;
   const char* path = getenv("COUNTERS_PATH");
+  if (!path) return {{}, {}, {}, {}};
 
   // List of parameters the user can set. Maxvalue is unused.
   std::unordered_map<std::string, rocprofiler_att_parameter_name_t> ATT_PARAM_NAMES{};
@@ -268,6 +281,7 @@ att_parsed_input_t GetATTParams() {
   ATT_PARAM_NAMES["att: TARGET_CU"] = ROCPROFILER_ATT_COMPUTE_UNIT_TARGET;
   ATT_PARAM_NAMES["SE_MASK"] = ROCPROFILER_ATT_SE_MASK;
   ATT_PARAM_NAMES["SIMD_MASK"] = ROCPROFILER_ATT_MAXVALUE;
+  ATT_PARAM_NAMES["BUFFER_SIZE"] = ROCPROFILER_ATT_BUFFER_SIZE;
   ATT_PARAM_NAMES["PERFCOUNTER_ID"] = ROCPROFILER_ATT_PERFCOUNTER;
   ATT_PARAM_NAMES["PERFCOUNTER"] = ROCPROFILER_ATT_PERFCOUNTER_NAME;
   ATT_PARAM_NAMES["PERFCOUNTERS_COL_PERIOD"] = ROCPROFILER_ATT_MAXVALUE;
@@ -276,50 +290,62 @@ att_parsed_input_t GetATTParams() {
 
   // Default values used for token generation.
   std::unordered_map<std::string, uint32_t> default_params = {
-      {"ATT_MASK", 0x3F01}, {"TOKEN_MASK", 0x344B}, {"TOKEN_MASK2", 0xFFFFFFF}};
+    {"ATT_MASK", 0x3F01}, {"TOKEN_MASK", 0x344B},
+    {"TOKEN_MASK2", 0xFFFFFFF}, {"SE_MASK", 0x111111}
+  };
 
-  bool started_att_counters = false;
-
-  if (!path) return {parameters, kernel_names, counters_names};
-
-  std::string line;
   std::ifstream trace_file(path);
   if (!trace_file.is_open()) {
     std::cout << "Unable to open att trace file." << std::endl;
-    return {parameters, kernel_names, counters_names};
+    return {{}, {}, {}, {}};
   }
 
+  int MPI_RANK = GetMpRank();
+
+  bool started_att_counters = false;
+  std::string line;
   while (getline(trace_file, line)) {
     if (line.find("//") != std::string::npos)
       line = line.substr(0, line.find("//"));  // Remove comments
 
-    auto pos = line.find('=');
-    if (pos == std::string::npos) continue;
+    std::string param_name;
+    {
+      auto pos = line.find('=');
+      if (pos == std::string::npos) continue;
 
-    std::string param_name = line.substr(0, pos);
-    uint32_t param_value;
+      param_name = line.substr(0, pos);
+      line = line.substr(pos+1);
+    }
 
     if (param_name == "att: TARGET_CU") started_att_counters = true;
     if (!started_att_counters) continue;
 
     if (param_name == "KERNEL") {
-      kernel_names.push_back(line.substr(pos + 1));
+      kernel_names.push_back(line);
       continue;
     } else if (param_name == "PERFCOUNTER") {
-      counters_names.push_back(line.substr(pos + 1));
+      counters_names.push_back(line);
       continue;
-    } else {  // param_value is a number
-      try {
-        auto hexa_pos = line.find("0x", pos);  // Is it hex?
-        if (hexa_pos != std::string::npos)
-          param_value = stoi(line.substr(hexa_pos + 2), 0, 16);  // hexadecimal
-        else
-          param_value = stoi(line.substr(pos + 1), 0, 10);  // decimal
-      } catch (...) {
-        printf("Error: Invalid parameter value %s - (%s)\n",
-               line.substr(pos + 1, line.size()).c_str(), line.c_str());
-        exit(1);
-      }
+    } else if (param_name == "DISPATCH") {
+      size_t comma = line.find(',');
+      int id = stoi(line.substr(0, comma));
+      int rank = (comma < line.size()-1) ? stoi(line.substr(comma+1)) : 0;
+
+      if (MPI_RANK < 0 || rank == MPI_RANK) // Only add ID if rank matches the one in input.txt
+        dispatch_ids.push_back(id);
+      continue;
+    }
+    // param_value is a number
+    uint32_t param_value;
+    try {
+      auto hexa_pos = line.find("0x");  // Is it hex?
+      if (hexa_pos != std::string::npos)
+        param_value = stoi(line.substr(hexa_pos + 2), 0, 16);  // hexadecimal
+      else
+        param_value = stoi(line, 0, 10);  // decimal
+    } catch (...) {
+      printf("Error: Invalid parameter value %s\n", line.c_str());
+      continue;
     }
 
     if (param_name == "PERFCOUNTERS_COL_PERIOD") {
@@ -355,7 +381,7 @@ att_parsed_input_t GetATTParams() {
   }
   trace_file.close();
 
-  if (!started_att_counters) return {parameters, kernel_names, counters_names};
+  if (!started_att_counters) return {{}, {}, {}, {}};
 
   ATT_PARAM_NAMES["ATT_MASK"] = ROCPROFILER_ATT_MASK;
   ATT_PARAM_NAMES["TOKEN_MASK"] = ROCPROFILER_ATT_TOKEN_MASK;
@@ -364,11 +390,7 @@ att_parsed_input_t GetATTParams() {
   for (auto& param : default_params)
     parameters.push_back(std::make_pair(ATT_PARAM_NAMES[param.first], param.second));
 
-  // If no kernel names were provided, collect them all.
-  // Empty string always returns true for "str.find()".
-  if (kernel_names.size() == 0) kernel_names.push_back("");
-
-  return {parameters, kernel_names, counters_names};
+  return {parameters, kernel_names, counters_names, dispatch_ids};
 }
 
 void finish() {
@@ -651,7 +673,8 @@ ROCPROFILER_EXPORT bool OnLoad(void* table, uint64_t runtime_version, uint64_t f
   std::vector<std::pair<rocprofiler_att_parameter_name_t, uint32_t>> params;
   std::vector<std::string> kernel_names;
   std::vector<std::string> att_counters_names;
-  std::tie(params, kernel_names, att_counters_names) = GetATTParams();
+  std::vector<uint64_t> dispatch_ids;
+  std::tie(params, kernel_names, att_counters_names, dispatch_ids) = GetATTParams();
 
   for (auto& kv_pair : params)
     parameters.emplace_back(rocprofiler_att_parameter_t{kv_pair.first, kv_pair.second});
@@ -756,20 +779,26 @@ ROCPROFILER_EXPORT bool OnLoad(void* table, uint64_t runtime_version, uint64_t f
             1 << 20, &buffer_id));
         buffer_ids.emplace_back(buffer_id);
         printf("Enabling ATT Tracing\n");
+
         rocprofiler_filter_id_t filter_id;
-
-        std::vector<const char*> kernel_names_c;
-        for (auto& name : kernel_names) kernel_names_c.push_back(name.data());
-
         rocprofiler_filter_property_t property = {};
-        property.kind = ROCPROFILER_FILTER_KERNEL_NAMES;
-        property.data_count = kernel_names_c.size();
-        property.name_regex = kernel_names_c.data();
+        std::vector<const char*> kernel_names_c;
 
+        if (dispatch_ids.size()) { // Correlation ID filter
+          property.kind = ROCPROFILER_FILTER_DISPATCH_IDS;
+          property.data_count = dispatch_ids.size();
+          property.dispatch_ids = dispatch_ids.data();
+        } else { // Kernel names filter
+          for (auto& name : kernel_names) kernel_names_c.push_back(name.data());
+
+          property.kind = ROCPROFILER_FILTER_KERNEL_NAMES;
+          property.data_count = kernel_names_c.size();
+          property.name_regex = kernel_names_c.data();
+        }
         CHECK_ROCPROFILER(
-            rocprofiler_create_filter(session_id, ROCPROFILER_ATT_TRACE_COLLECTION,
-                                      rocprofiler_filter_data_t{.att_parameters = &parameters[0]},
-                                      parameters.size(), &filter_id, property));
+              rocprofiler_create_filter(session_id, ROCPROFILER_ATT_TRACE_COLLECTION,
+                                        rocprofiler_filter_data_t{.att_parameters = &parameters[0]},
+                                        parameters.size(), &filter_id, property));
         CHECK_ROCPROFILER(rocprofiler_set_filter_buffer(session_id, filter_id, buffer_id));
         filter_ids.emplace_back(filter_id);
         break;

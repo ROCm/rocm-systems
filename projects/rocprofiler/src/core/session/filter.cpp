@@ -192,6 +192,11 @@ void Filter::SetProperty(rocprofiler_filter_property_t property) {
       }
       break;
     }
+    case ROCPROFILER_FILTER_DISPATCH_IDS:
+      dispatch_id_filter_.clear();
+      for (uint32_t j = 0; j < property.data_count; j++)
+          dispatch_id_filter_.emplace_back(property.dispatch_ids[j]);
+      break;
     default:
       break;
       // TODO(aelwazir): Check for empty property
@@ -200,9 +205,9 @@ void Filter::SetProperty(rocprofiler_filter_property_t property) {
       //     "profiler mode!\n");
   }
 }
-std::variant<std::vector<std::string>, uint32_t*> Filter::GetProperty(
+std::variant<std::vector<std::string>, uint32_t*, std::vector<uint64_t>> Filter::GetProperty(
     rocprofiler_filter_property_kind_t kind) {
-  std::variant<std::vector<std::string>, uint32_t*> property;
+  std::variant<std::vector<std::string>, uint32_t*, std::vector<uint64_t>> property;
   switch (kind) {
     case ROCPROFILER_FILTER_GPU_NAME: {
       property = agent_names_;
@@ -222,6 +227,10 @@ std::variant<std::vector<std::string>, uint32_t*> Filter::GetProperty(
     }
     case ROCPROFILER_FILTER_HIP_TRACER_API_FUNCTIONS: {
       property = hip_tracer_api_calls_;
+      break;
+    }
+    case ROCPROFILER_FILTER_DISPATCH_IDS: {
+      property = dispatch_id_filter_;
       break;
     }
     default:
@@ -260,6 +269,9 @@ size_t Filter::GetPropertiesCount(rocprofiler_filter_property_kind_t kind) {
     }
     case ROCPROFILER_FILTER_HIP_TRACER_API_FUNCTIONS: {
       return hip_tracer_api_calls_.size();
+    }
+    case ROCPROFILER_FILTER_DISPATCH_IDS: {
+      return dispatch_id_filter_.size();
     }
   }
   fatal(

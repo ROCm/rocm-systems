@@ -20,6 +20,7 @@
 
 #include "att.h"
 #include <cassert>
+#include <atomic>
 
 namespace rocprofiler {
 
@@ -42,9 +43,11 @@ void AttTracer::AddPendingSignals(uint32_t writer_id, uint64_t kernel_object,
   sessions_pending_signals_.at(writer_id).emplace_back(
       att_pending_signal_t{kernel_object, original_completion_signal, new_completion_signal, session_id_, buffer_id, profile,
                             kernel_properties, thread_id, queue_index});
+  std::atomic_thread_fence(std::memory_order_release);
 }
 
 const std::vector<att_pending_signal_t>& AttTracer::GetPendingSignals(uint32_t writer_id) {
+  std::atomic_thread_fence(std::memory_order_acquire);
   std::lock_guard<std::mutex> lock(sessions_pending_signals_lock_);
   assert(sessions_pending_signals_.find(writer_id) != sessions_pending_signals_.end() &&
          "writer_id is not found in the pending_signals");

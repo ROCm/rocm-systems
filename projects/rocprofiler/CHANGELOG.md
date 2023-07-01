@@ -265,7 +265,8 @@ Example for file plugin output:
     On GFX9, SEs are masked out completely. On Navi only part of the data is masked.
     The use of SE_MASK=0x1 is heavily encouraged to avoid packet lost events.
   - "ROCPROFILER_MAX_ATT_PROFILES" environment variable can be set. Previously fixed at 16, now the default is 1.
-  - Increased ATT buffer size per collection to 1GB.
+  - Increased default ATT buffer size per collection to 1GB. Added "BUFFER_SIZE=size" (in MB) parameter to set buffer size.
+  - Added "DISPATCH=id" or "DISPATCH=id,rank" to set which dispatch ids to profile for which MPI rank.
 
 ### Fixed
 - Samples are fixed to show the new usage of phases.
@@ -278,3 +279,4 @@ Example for file plugin output:
 - Navi2x GPUs required the first counter to be GRBM. This is fixed in 5.7.
 - If ROCPROFILER_METRICS_PATH environment variable is not set, the counters xml path will be taken from the following path (../libexec/rocprofiler/counters/derived_counters.xml) which is relative to librocprofiler64.so.2.0.0
 - Repeated base metrics were not being properly reused by derived counters.
+- Fixed wrong dispatch ID on kernel.txt
