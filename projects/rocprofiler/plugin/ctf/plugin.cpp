@@ -155,8 +155,10 @@ class HsaApiEventRecord : public TracerEventRecord<barectf_hsa_api_ctx> {
   explicit HsaApiEventRecord(const rocprofiler_record_tracer_t& record,
                              const rocprofiler_session_id_t session_id,
                              const std::uint64_t clock_val)
-      : TracerEventRecord<barectf_hsa_api_ctx>{record, clock_val},
-        api_data_{*(record.api_data.hsa)} {}
+      : TracerEventRecord<barectf_hsa_api_ctx>{record, clock_val} {
+          if(record.api_data.hsa)
+            api_data_ = *(record.api_data.hsa);
+        }
   explicit HsaApiEventRecord(const rocprofiler_record_tracer_t& record,
                              const std::uint64_t clock_val, hsa_api_data_t& api_data)
       : TracerEventRecord<barectf_hsa_api_ctx>{record, clock_val}, api_data_(api_data) {}
@@ -204,8 +206,8 @@ class HipApiEventRecord : public TracerEventRecord<barectf_hip_api_ctx> {
                              const rocprofiler_session_id_t session_id,
                              const std::uint64_t clock_val)
       : TracerEventRecord<barectf_hip_api_ctx>{record, clock_val},
-        api_data_{*(record.api_data.hip)},
-        kernel_name_{nullptr} {}
+        api_data_{record.api_data.hip? *(record.api_data.hip) : hip_api_data_t{}},
+        kernel_name_{record.name ? record.name : std::string{}} {}
   explicit HipApiEventRecord(const rocprofiler_record_tracer_t& record,
                              const std::uint64_t clock_val, hip_api_data_t& api_data,
                              std::string kernel_name)

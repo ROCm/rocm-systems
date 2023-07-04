@@ -741,8 +741,6 @@ ROCPROFILER_EXPORT bool OnLoad(void* table, uint64_t runtime_version, uint64_t f
                                                     rocprofiler_filter_data_t{&apis_requested[0]},
                                                     apis_requested.size(), &filter_id, property));
         CHECK_ROCPROFILER(rocprofiler_set_filter_buffer(session_id, filter_id, buffer_id));
-        CHECK_ROCPROFILER(rocprofiler_set_api_trace_sync_callback(session_id, filter_id,
-                                                                  sync_api_trace_callback));
         filter_ids.emplace_back(filter_id);
         break;
       }
