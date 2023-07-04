@@ -493,6 +493,7 @@ void wait_for_amdsys() {
             for ([[maybe_unused]] rocprofiler_buffer_id_t buffer_id : buffer_ids) {
               CHECK_ROCPROFILER(rocprofiler_flush_data(session_id, buffer_id));
             }
+            rocprofiler::TraceBufferBase::FlushAll();
           }
           break;
         }
@@ -506,6 +507,7 @@ void wait_for_amdsys() {
             for ([[maybe_unused]] rocprofiler_buffer_id_t buffer_id : buffer_ids) {
               CHECK_ROCPROFILER(rocprofiler_flush_data(session_id, buffer_id));
             }
+            rocprofiler::TraceBufferBase::FlushAll();
           }
           amd_sys_handler.exchange(false, std::memory_order_release);
           flag = true;
