@@ -557,7 +557,7 @@ class perfetto_plugin_t {
           kernel_name = rocprofiler::cxx_demangle(tracer_record.name);
           TRACE_EVENT_BEGIN(
               "HIP_OPS",
-              perfetto::StaticString(strdup(rocprofiler::truncate_name(kernel_name).c_str())),
+              perfetto::StaticString(rocprofiler::truncate_name(kernel_name).c_str()),
               gpu_track, tracer_record.timestamps.begin.value, "Agent ID",
               tracer_record.agent_id.handle, "Process ID", GetPid(), "Kernel Name", kernel_name,
               perfetto::Flow::ProcessScoped(tracer_record.correlation_id.value));
