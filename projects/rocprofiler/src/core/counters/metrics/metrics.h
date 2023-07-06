@@ -222,7 +222,7 @@ class MetricsDict {
 
     std::unordered_set<std::string> supported_agent_names = {
         "gfx906",
-        "gfx908"
+        "gfx908",
         "gfx90a",  // Vega
         "gfx940",
         "gfx941",
