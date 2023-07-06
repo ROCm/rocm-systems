@@ -1144,14 +1144,14 @@ post_process_perfetto(int64_t _tid, const std::vector<timer_sampling_data>& _tim
 
     if(!_thread_info) return;
 
-    uint64_t _beg_ns = _thread_info->get_start();
-    uint64_t _end_ns = _thread_info->get_stop();
-
     auto _overflow_event =
         get_setting_value<std::string>("OMNITRACE_SAMPLING_OVERFLOW_EVENT").value_or("");
 
-    if(!_overflow_event.empty())
+    if(!_overflow_event.empty() && !_overflow_data.empty())
     {
+        auto _beg_ns = std::max(_overflow_data.front().m_beg, _thread_info->get_start());
+        auto _end_ns = std::min(_overflow_data.back().m_end, _thread_info->get_stop());
+
         const auto _overflow_prefix = std::string_view{ "PERF_COUNT_" };
         const auto _overflow_pos    = _overflow_event.find(_overflow_prefix);
         if(_overflow_pos != std::string::npos)
@@ -1233,6 +1233,9 @@ post_process_perfetto(int64_t _tid, const std::vector<timer_sampling_data>& _tim
 
     if(!_timer_data.empty())
     {
+        auto _beg_ns = std::max(_timer_data.front().m_beg, _thread_info->get_start());
+        auto _end_ns = std::min(_timer_data.back().m_end, _thread_info->get_stop());
+
         auto _track = tracing::get_perfetto_track(
             category::timer_sampling{},
             [](auto _seq_id, auto _sys_id) {
