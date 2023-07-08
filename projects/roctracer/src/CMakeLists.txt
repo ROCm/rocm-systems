@@ -218,7 +218,8 @@ add_library(roctracer_tool SHARED ${TRACER_TOOL_SOURCES})
 
 set_target_properties(roctracer_tool PROPERTIES
                       CXX_VISIBILITY_PRESET hidden
-                      LINK_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/tracer_tool/exportmap)
+                      LINK_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/tracer_tool/exportmap
+                      INSTALL_RPATH "${ROCM_APPEND_PRIVLIB_RPATH}")
 
 target_compile_definitions(roctracer_tool
   PRIVATE HIP_PROF_HIP_API_STRING=1 __HIP_PLATFORM_HCC__=1)
@@ -235,6 +236,7 @@ install(TARGETS roctracer_tool LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/${PRO
 install(TARGETS roctracer_tool LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/${PROJECT_NAME} COMPONENT asan)
 
 add_library(hip_stats SHARED hip_stats/hip_stats.cpp)
+set_target_properties(hip_stats PROPERTIES  INSTALL_RPATH "${ROCM_APPEND_PRIVLIB_RPATH}")
 target_compile_definitions(hip_stats PRIVATE __HIP_PLATFORM_AMD__)
 target_link_libraries(hip_stats roctracer stdc++fs)
 install(TARGETS hip_stats LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/${PROJECT_NAME} COMPONENT runtime)
