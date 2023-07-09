@@ -36,7 +36,8 @@ set_target_properties(
     ctf_plugin
     PROPERTIES CXX_VISIBILITY_PRESET hidden
                LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/../exportmap"
-               LIBRARY_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/lib/rocprofiler")
+               LIBRARY_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/lib/rocprofiler"
+               INSTALL_RPATH "${ROCM_APPEND_PRIVLIB_RPATH}")
 set(METADATA_STREAM_FILE_DIR "${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/plugin/ctf")
 target_compile_definitions(
     ctf_plugin

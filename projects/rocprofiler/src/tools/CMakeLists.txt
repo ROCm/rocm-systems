@@ -16,7 +16,8 @@ set_target_properties(
     rocprofiler_tool
     PROPERTIES CXX_VISIBILITY_PRESET hidden
                LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib/rocprofiler
-               LINK_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/exportmap)
+               LINK_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/exportmap
+               INSTALL_RPATH "${ROCM_APPEND_PRIVLIB_RPATH}")
 
 target_include_directories(
     rocprofiler_tool PRIVATE ${PROJECT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}
@@ -70,7 +71,8 @@ add_subdirectory(rocprofv2)
 
 add_executable(ctrl ctrl.cpp)
 set_target_properties(ctrl PROPERTIES RUNTIME_OUTPUT_DIRECTORY
-                                      ${CMAKE_BINARY_DIR}/libexec/rocprofiler)
+                                      ${CMAKE_BINARY_DIR}/libexec/rocprofiler
+                                      INSTALL_RPATH "$ORIGIN/../../${CMAKE_INSTALL_LIBDIR}")
 target_link_options(
     rocprofiler_tool PRIVATE -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/exportmap
     -Wl,--no-undefined)

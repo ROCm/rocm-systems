@@ -178,6 +178,8 @@ install(
 
 # Building ctrl test executable
 add_executable(${EXE_NAME} ${CTRL_SRC} ${UTIL_SRC} ${KERN_SRC})
+set_target_properties( ${EXE_NAME} PROPERTIES
+    INSTALL_RPATH "${ROCM_APPEND_PRIVLIB_RPATH}")
 target_include_directories(${EXE_NAME} PRIVATE ${TEST_DIR} ${ROOT_DIR}
                                                ${PROJECT_SOURCE_DIR}/include)
 target_link_libraries(${EXE_NAME} hsa-runtime64::hsa-runtime64 hsakmt::hsakmt
@@ -190,11 +192,17 @@ install(
     TARGETS ${EXE_NAME}
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/tests-v1/test
     COMPONENT tests)
+install(
+    TARGETS ${EXE_NAME}
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/${ROCPROFILER_NAME}
+    COMPONENT runtime)
 
 # Build test library
 set(TEST_LIB "rocprof-tool")
 set(TEST_LIB_SRC ${TEST_DIR}/tool/tool.cpp ${UTIL_SRC})
 add_library(${TEST_LIB} SHARED ${TEST_LIB_SRC})
+set_target_properties( ${TEST_LIB} PROPERTIES
+    INSTALL_RPATH "${ROCM_APPEND_PRIVLIB_RPATH}")
 target_include_directories(${TEST_LIB} PRIVATE ${TEST_DIR} ${ROOT_DIR}
                                                ${PROJECT_SOURCE_DIR}/include)
 target_link_libraries(${TEST_LIB} ${ROCPROFILER_TARGET} hsa-runtime64::hsa-runtime64
@@ -204,6 +212,14 @@ install(
     TARGETS ${TEST_LIB}
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/tests-v1/test
     COMPONENT tests)
+install(
+    TARGETS ${TEST_LIB}
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/${ROCPROFILER_NAME}
+    COMPONENT runtime)
+install(
+    TARGETS ${TEST_LIB}
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/${ROCPROFILER_NAME}
+    COMPONENT asan)
 
 # Build memory test bench
 add_custom_target(
