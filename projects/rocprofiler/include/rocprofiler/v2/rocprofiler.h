@@ -1707,19 +1707,22 @@ typedef const char* rocprofiler_hsa_function_name_t;
  * ATT parameters to be used by for collection
  */
 typedef enum {
-  ROCPROFILER_ATT_COMPUTE_UNIT_TARGET = 0,
-  ROCPROFILER_ATT_VM_ID_MASK = 1,
-  ROCPROFILER_ATT_MASK = 2,
-  ROCPROFILER_ATT_TOKEN_MASK = 3,
-  ROCPROFILER_ATT_TOKEN_MASK2 = 4,
-  ROCPROFILER_ATT_SE_MASK = 5,
-  ROCPROFILER_ATT_SAMPLE_RATE = 6,
-  ROCPROFILER_ATT_BUFFER_SIZE = 7,  //! ATT collection max data size.
-  ROCPROFILER_ATT_PERF_MASK = 240,
-  ROCPROFILER_ATT_PERF_CTRL = 241,
-  ROCPROFILER_ATT_PERFCOUNTER = 242,
-  ROCPROFILER_ATT_PERFCOUNTER_NAME = 243,
-  ROCPROFILER_ATT_MAXVALUE
+  ROCPROFILER_ATT_COMPUTE_UNIT = 0,   //! Select the target compute unit (wgp) for profiling.
+  ROCPROFILER_ATT_VMID_MASK = 1,      //! VMID Mask.
+  ROCPROFILER_ATT_SE_MASK = 5,        //! Shader engine mask for selection.
+  ROCPROFILER_ATT_SIMD_SELECT = 8,    //! Set SIMD Mask (GFX9) or SIMD ID for collection (Navi)
+  ROCPROFILER_ATT_OCCUPANCY = 9,      //! Set true for occupancy collection only.
+  ROCPROFILER_ATT_BUFFER_SIZE = 10,   //! ATT collection max data size, in MB. Shared among shader engines.
+  ROCPROFILER_ATT_PERF_MASK = 240,    //! Mask of which compute units to generate perfcounters. GFX9 only.
+  ROCPROFILER_ATT_PERF_CTRL = 241,    //! Select collection period for perfcounters. GFX9 only.
+  ROCPROFILER_ATT_PERFCOUNTER = 242,  //! Select perfcounter ID (SQ block) for collection. GFX9 only.
+  ROCPROFILER_ATT_PERFCOUNTER_NAME = 243, //! Select perfcounter name (SQ block) for collection. GFX9 only.
+  ROCPROFILER_ATT_MAXVALUE,
+
+  ROCPROFILER_ATT_MASK = 2,           //! Deprecated
+  ROCPROFILER_ATT_TOKEN_MASK = 3,     //! Deprecated
+  ROCPROFILER_ATT_TOKEN_MASK2 = 4,    //! Deprecated
+  ROCPROFILER_ATT_SAMPLE_RATE = 6     //! Deprecated
 } rocprofiler_att_parameter_name_t;
 
 

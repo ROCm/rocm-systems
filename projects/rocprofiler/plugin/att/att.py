@@ -439,6 +439,7 @@ if __name__ == "__main__":
     OCCUPANCY = []
     GFXV = []
     analysed_filenames = []
+    occupancy_filenames = []
 
     shader_engine_data_dict = {}
     for name in filenames:
@@ -453,14 +454,17 @@ if __name__ == "__main__":
     hitcount_map = np.zeros((len(code)), dtype=np.int32)
     for name in filenames:
         SIMD, perfevents, occupancy, gfxv = shader_engine_data_dict[name]
-        getWaves_stitch(SIMD, code, jumps, gfxv, latency_map, hitcount_map)
-        if len(SIMD) == 0:
-            print("Error parsing ", name)
+        if len(occupancy) > 0:
+            OCCUPANCY.append( occupancy )
+            occupancy_filenames.append( name )
+        if np.sum([0]+[len(s.instructions) for s in SIMD]) == 0:
+            print("No waves from", name)
             continue
+        getWaves_stitch(SIMD, code, jumps, gfxv, latency_map, hitcount_map)
+
         analysed_filenames.append(name)
         EVENTS.append(perfevents)
         DBFILES.append( persist(name, SIMD) )
-        OCCUPANCY.append( occupancy )
         GFXV.append(gfxv)
 
     gc.collect()
@@ -488,7 +492,7 @@ if __name__ == "__main__":
         TIMELINES = comm.gather(TIMELINES, root=0)
         gather_latency_map = comm.gather(latency_map, root=0)
         gather_hitcount_map = comm.gather(hitcount_map, root=0)
-        gathered_filenames = comm.gather(analysed_filenames, root=0)
+        gathered_filenames = comm.gather(occupancy_filenames, root=0)
 
         if mpi_root:
             latency_map *= 0
@@ -513,7 +517,7 @@ if __name__ == "__main__":
             EVENTS = []
     else:
         apply_min_event(min_event_time, OCCUPANCY, EVENTS, DBFILES, TIMELINES)
-        gathered_filenames = analysed_filenames
+        gathered_filenames = occupancy_filenames
 
     if mpi_root:
         for k in range(len(code)):

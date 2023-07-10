@@ -155,6 +155,12 @@ def draw_wave_states(selections, normalize, TIMELINES):
 def draw_occupancy(selections, normalize, OCCUPANCY, shadernames):
     plt.figure(figsize=(15,4))
     names = []
+    if len(OCCUPANCY) == 1: # If single SE, do occupancy per CU/WGP
+        OCCUPANCY = [[u for u in OCCUPANCY[0] if u&0xFF==k] for k in range(16)]
+        shadernames = ['CU'+str(k) for k in range(16) if len(OCCUPANCY[k]) > 0]
+        OCCUPANCY = [occ for occ in OCCUPANCY if len(occ) > 0]
+
+    maxtime = 1
     for name, occ in zip(shadernames, OCCUPANCY):
         occ_values = [0]
         occ_times = [0]
@@ -166,10 +172,9 @@ def draw_occupancy(selections, normalize, OCCUPANCY, shadernames):
             occ_values.append(occ_values[-1] + value - current_occ[cu])
             current_occ[cu] = value
         try:
-            name = 'SE'+name.split('.att')[0].split('_se')[-1]
+            names.append('SE'+name.split('.att')[0].split('_se')[-1])
         except:
-            pass
-        names.append(name)
+            names.append(name)
 
         NUM_DOTS = 1500
         maxtime = np.max(occ_times)

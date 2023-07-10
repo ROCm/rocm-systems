@@ -274,21 +274,26 @@ att_parsed_input_t GetATTParams() {
   // List of parameters the user can set. Maxvalue is unused.
   std::unordered_map<std::string, rocprofiler_att_parameter_name_t> ATT_PARAM_NAMES{};
 
-  ATT_PARAM_NAMES["att: TARGET_CU"] = ROCPROFILER_ATT_COMPUTE_UNIT_TARGET;
+  ATT_PARAM_NAMES["TARGET_CU"] = ROCPROFILER_ATT_COMPUTE_UNIT;
   ATT_PARAM_NAMES["SE_MASK"] = ROCPROFILER_ATT_SE_MASK;
-  ATT_PARAM_NAMES["SIMD_MASK"] = ROCPROFILER_ATT_MAXVALUE;
-  ATT_PARAM_NAMES["BUFFER_SIZE"] = ROCPROFILER_ATT_BUFFER_SIZE;
+  ATT_PARAM_NAMES["VMID_MASK"] = ROCPROFILER_ATT_VMID_MASK;
+  ATT_PARAM_NAMES["SIMD_SELECT"] = ROCPROFILER_ATT_SIMD_SELECT;
+
   ATT_PARAM_NAMES["PERFCOUNTER_ID"] = ROCPROFILER_ATT_PERFCOUNTER;
   ATT_PARAM_NAMES["PERFCOUNTER"] = ROCPROFILER_ATT_PERFCOUNTER_NAME;
-  ATT_PARAM_NAMES["PERFCOUNTERS_COL_PERIOD"] = ROCPROFILER_ATT_MAXVALUE;
+  ATT_PARAM_NAMES["PERFCOUNTER_MASK"] = ROCPROFILER_ATT_PERF_MASK;
+  ATT_PARAM_NAMES["PERFCOUNTERS_CTRL"] = ROCPROFILER_ATT_PERF_CTRL;
+  ATT_PARAM_NAMES["OCCUPANCY"] = ROCPROFILER_ATT_OCCUPANCY;
+
   ATT_PARAM_NAMES["KERNEL"] = ROCPROFILER_ATT_MAXVALUE;
-  ATT_PARAM_NAMES["REDUCED_MEMORY"] = ROCPROFILER_ATT_MAXVALUE;
+  ATT_PARAM_NAMES["BUFFER_SIZE"] = ROCPROFILER_ATT_BUFFER_SIZE;
 
   // Default values used for token generation.
-  std::unordered_map<std::string, uint32_t> default_params = {{"ATT_MASK", 0x3F01},
-                                                              {"TOKEN_MASK", 0x344B},
-                                                              {"TOKEN_MASK2", 0xFFFFFFF},
-                                                              {"SE_MASK", 0x111111}};
+  std::unordered_map<std::string, uint32_t> default_params = {
+    {"SE_MASK", 0x111111}, // One every 4 SEs, by default
+    {"SIMD_SELECT", 0x3}, // 0x3 works for both gfx9 and Navi
+    {"BUFFER_SIZE", 0x40000000} // 2^30 == 1GB
+  };
 
   std::ifstream trace_file(path);
   if (!trace_file.is_open()) {
@@ -310,10 +315,15 @@ att_parsed_input_t GetATTParams() {
       if (pos == std::string::npos) continue;
 
       param_name = line.substr(0, pos);
-      line = line.substr(pos + 1);
+      for (auto& c : param_name) c = (char)toupper(c); // So we don't have to worry about lowercase inputs
+      line = line.substr(pos+1);
     }
 
-    if (param_name == "att: TARGET_CU") started_att_counters = true;
+    if (param_name.find("ATT") != std::string::npos &&
+        param_name.find("TARGET_CU") != std::string::npos) {
+      started_att_counters = true; // Means we'll do ATT
+      param_name = "TARGET_CU"; // To cover different variations
+    }
     if (!started_att_counters) continue;
 
     if (param_name == "KERNEL") {
@@ -344,25 +354,6 @@ att_parsed_input_t GetATTParams() {
       continue;
     }
 
-    if (param_name == "PERFCOUNTERS_COL_PERIOD") {
-      default_params["TOKEN_MASK"] |= 0x4000;
-      param_value = ((param_value & 0x1F) << 8) | 0xFFFF00FF;
-      parameters.push_back(std::make_pair(ROCPROFILER_ATT_PERF_CTRL, param_value));
-      continue;
-    } else if (param_name == "SIMD_MASK") {
-      default_params["ATT_MASK"] &= ~0xF00;
-      default_params["ATT_MASK"] |= (param_value << 8) & 0xF00;
-      continue;
-    } else if (param_name == "att: TARGET_CU") {
-      default_params["ATT_MASK"] &= ~0xF;
-      default_params["ATT_MASK"] |= param_value & 0xF;
-    } else if (param_name == "PERFCOUNTER_ID") {
-      param_value = param_value | (param_value ? (0xF << 24) : 0);
-    } else if (param_name == "REDUCED_MEMORY") {
-      default_params["TOKEN_MASK2"] = 0;
-      continue;
-    }
-
     if (ATT_PARAM_NAMES.find(param_name) != ATT_PARAM_NAMES.end()) {
       parameters.push_back(std::make_pair(ATT_PARAM_NAMES[param_name], param_value));
       try {
@@ -375,13 +366,8 @@ att_parsed_input_t GetATTParams() {
       for (auto& name : ATT_PARAM_NAMES) printf("%s\n", name.first.c_str());
     }
   }
-  trace_file.close();
 
   if (!started_att_counters) return {{}, {}, {}, {}};
-
-  ATT_PARAM_NAMES["ATT_MASK"] = ROCPROFILER_ATT_MASK;
-  ATT_PARAM_NAMES["TOKEN_MASK"] = ROCPROFILER_ATT_TOKEN_MASK;
-  ATT_PARAM_NAMES["TOKEN_MASK2"] = ROCPROFILER_ATT_TOKEN_MASK2;
 
   for (auto& param : default_params)
     parameters.push_back(std::make_pair(ATT_PARAM_NAMES[param.first], param.second));

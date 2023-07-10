@@ -567,7 +567,6 @@ TEST_F(LoadUnloadTest, WhenLoadingSecondTimeThenToolLoadsUnloadsSuccessfully) {
 
   EXPECT_EQ(HSA_STATUS_SUCCESS, status);
 }
-
 /*
  * ###################################################
  * ############ ATT Tests ################
@@ -634,7 +633,10 @@ TEST_F(ATTCollection, WhenRunningATTItCollectsTraceData) {
   // Att trace collection parameters
   rocprofiler_session_id_t session_id;
   std::vector<rocprofiler_att_parameter_t> parameters;
-  parameters.emplace_back(rocprofiler_att_parameter_t{ROCPROFILER_ATT_COMPUTE_UNIT_TARGET, 0});
+  parameters.emplace_back(rocprofiler_att_parameter_t{ROCPROFILER_ATT_COMPUTE_UNIT, 0});
+  parameters.emplace_back(rocprofiler_att_parameter_t{ROCPROFILER_ATT_SE_MASK, 0xF});
+  //parameters.emplace_back(rocprofiler_att_parameter_t{ROCPROFILER_ATT_SIMD_SELECT, 0x3}); // Replace below tests once aqlprofile passes
+  //parameters.emplace_back(rocprofiler_att_parameter_t{ROCPROFILER_ATT_BUFFER_SIZE, 0x1000000}); // Replace below tests once aqlprofile passes
   parameters.emplace_back(rocprofiler_att_parameter_t{ROCPROFILER_ATT_MASK, 0x0F00});
   parameters.emplace_back(rocprofiler_att_parameter_t{ROCPROFILER_ATT_TOKEN_MASK, 0x344B});
   parameters.emplace_back(rocprofiler_att_parameter_t{ROCPROFILER_ATT_TOKEN_MASK2, 0xFFFF});
