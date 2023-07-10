@@ -31,6 +31,7 @@ THE SOFTWARE.
 #include <string>
 #include <thread>
 #include <array>
+#include <experimental/filesystem>
 
 #include "src/utils/helper.h"
 #include "utils/csv_parser.h"
@@ -114,6 +115,10 @@ void ApplicationParser::SetApplicationEnv(const char* app_name) {
   os << app_path << test_app_path << app_name;
 
   ProcessApplication(os);
+
+  /*unsetenv("LD_LIBRARY_PATH");
+  unsetenv("LD_PRELOAD");
+  unsetenv("COUNTERS_PATH");*/
 }
 
 /**
@@ -457,6 +462,12 @@ class MPITest : public ProfilerTest {
     // run mpirun script
     // ProcessMPIApplication("mpi_run.sh");
   }
+
+  /*virtual void TearDown() override {
+    unsetenv("HWLOC_COMPONENTS");
+    unsetenv("LD_PRELOAD");
+    ProfilerTest::TearDown();
+  }*/
 };
 
 void MPITest::ProcessMPIApplication(const char* app_name) {
@@ -1141,133 +1152,153 @@ TEST(ProfilerMPTest, WhenRunningMultiProcessTestItPasses) {
     ASSERT_TRUE(1);
   }
 }
-
 /*
- * ###################################################
- * ############ File plugin tests ################
- * ###################################################
- */
+* ###################################################
+* ############ Plugin tests ################
+* ###################################################
+*/
 
-/**
- * Sets application output dir.
- */
+void PluginTests::RunApplication(const char* app_name, const char* appParams) {
+  init_test_path();
 
-// void PluginTests::RunApplication(const char* app_name, const char* appParams) {
-//   if (is_installed_path()) return;  // Only run these tests from build
+  unsetenv("LD_LIBRARY_PATH"); // Cleaning up envs from other tests
+  unsetenv("COUNTERS_PATH");
+  unsetenv("LD_PRELOAD");
+  unsetenv("HWLOC_COMPONENTS");
 
-//   init_test_path();
-//   unsetenv("OUTPUT_FOLDER");
+  std::string app_path = is_installed_path() ? GetRunningPath(running_path) : "";
+  std::stringstream os;
+  os << app_path << binary_path << appParams << " ";
+  os << app_path << test_app_path << app_name;
+  ProcessApplication(os);
+}
 
-//   std::stringstream os;
-//   os << binary_path << appParams << " ";
-//   os << test_app_path << app_name;
-//   ProcessApplication(os);
-// }
+void PluginTests::ProcessApplication(std::stringstream& ss) {
+  FILE* handle = popen(ss.str().c_str(), "w");
+  ASSERT_NE(handle, nullptr);
+  pclose(handle);
+}
 
-// void PluginTests::ProcessApplication(std::stringstream& ss) {
-//   FILE* handle = popen(ss.str().c_str(), "r");
-//   ASSERT_NE(handle, nullptr);
-//   pclose(handle);
-// }
+bool FilePluginTest::hasFileInDir(const std::string& filename, const char* directory) {
+  for (const auto& entry : std::experimental::filesystem::directory_iterator(directory)) {
+    if (filename.size() == 0) return true;
+    if (std::string(entry.path().filename()).find(filename) != std::string::npos) return true;
+  }
+  return false;
+}
 
-// bool FilePluginTest::hasFileInDir(const std::string& filename, const char* directory) {
-//   if (is_installed_path()) return true;  // Only run these tests from build
+class VectorAddFolderOnlyTest : public FilePluginTest {
+ protected:
+  virtual void SetUp() {
+    RunApplication( "hip_vectoradd",
+      " --hsa-activity --hip-activity -d /tmp/tests-v2/file/");
+  }
+  virtual void TearDown() {
+    std::experimental::filesystem::remove_all("/tmp/tests-v2/file/");
+  }
+  bool hasFile(){ return hasFileInDir(".csv", "/tmp/tests-v2/file/"); }
+};
 
-//   for (const auto& entry : std::experimental::filesystem::directory_iterator(directory)) {
-//     if (filename.size() == 0) return true;
-//     if (std::string(entry.path().filename()).substr(0, filename.size()) == filename) return true;
-//   }
-//   return false;
-// }
+TEST_F(VectorAddFolderOnlyTest, WhenRunningProfilerWithFilePluginTest) {
+  EXPECT_EQ(hasFile(), true);
+}
 
-// class VectorAddFileOnlyTest : public FilePluginTest {
-//  protected:
-//   virtual void SetUp() { RunApplication("hip_vectoradd", " --hip-activity -o file_test_name "); }
-//   virtual void TearDown() {
-//     std::string filename = "file_test_name";
-//     for (const auto& entry : std::experimental::filesystem::directory_iterator("./"))
-//       if (std::string(entry.path().filename()).substr(0, filename.size()) == filename)
-//         std::experimental::filesystem::remove(entry);
-//   }
-//   bool hasFile() { return hasFileInDir("file_test_name", "."); }
-// };
+class VectorAddFileAndFolderTest : public FilePluginTest {
+ protected:
+  virtual void SetUp() {
+    RunApplication( "hip_vectoradd",
+      " --hip-activity -d /tmp/tests-v2/file/ -o file_test");
+  }
+  virtual void TearDown() {
+    std::experimental::filesystem::remove_all("/tmp/tests-v2/file/");
+  }
+  bool hasFile(){ return hasFileInDir("file_test.csv", "/tmp/tests-v2/file/"); }
+};
 
-// TEST_F(VectorAddFileOnlyTest, WhenRunningProfilerWithFilePluginTest) { EXPECT_EQ(hasFile(),
-// true); }
+TEST_F(VectorAddFileAndFolderTest, WhenRunningProfilerWithFilePluginTest) {
+  EXPECT_EQ(hasFile(), true);
+}
 
-// class VectorAddFolderOnlyTest : public FilePluginTest {
-//  protected:
-//   virtual void SetUp() {
-//     RunApplication("hip_vectoradd", " --hsa-activity --hip-activity -d
-//     ./plugin_test_folder_path");
-//   }
-//   virtual void TearDown() {
-//   std::experimental::filesystem::remove_all("./plugin_test_folder_path");
-// } bool hasFile(){ return hasFileInDir("", "./plugin_test_folder_path"); }
-// };
+class VectorAddFilenameMPITest : public FilePluginTest {
+ protected:
+  virtual void SetUp() {
+    setenv("MPI_RANK", "7", true);
+    RunApplication("hip_vectoradd",
+      " --hip-activity -d /tmp/tests-v2/file/ -o test_%rank_");
+  }
+  virtual void TearDown() {
+    std::experimental::filesystem::remove_all("/tmp/tests-v2/file/");
+    unsetenv("MPI_RANK");
+  }
+  bool hasFile() { return hasFileInDir("test_7_", "/tmp/tests-v2/file/"); }
+};
 
-// TEST_F(VectorAddFolderOnlyTest, WhenRunningProfilerWithFilePluginTest) {
-//   EXPECT_EQ(hasFile(), true);
-// }
+TEST_F(VectorAddFilenameMPITest, WhenRunningProfilerWithFilePluginTest) {
+  EXPECT_EQ(hasFile(), true);
+}
 
-// class VectorAddFileAndFolderTest : public FilePluginTest {
-//  protected:
-//   virtual void SetUp() {
-//     RunApplication("hip_vectoradd", " --hip-activity -d ./plugin_test_folder_path -o
-// file_test_name");
-//   }
-//   virtual void TearDown() {
-//   std::experimental::filesystem::remove_all("./plugin_test_folder_path");
-// } bool hasFile(){ return hasFileInDir("file_test_name", "./plugin_test_folder_path"); }
-// };
+bool PerfettoPluginTest::hasFileInDir(const std::string& filename, const char* directory) {
+  for (const auto& entry : std::experimental::filesystem::directory_iterator(directory)) {
+    std::string entrypath = std::string(entry.path().filename());
+    if (entrypath.find(".pftrace") == std::string::npos) continue;
+    if (entrypath.substr(0, filename.size()) == filename) return true;
+  }
+  return false;
+}
 
-// TEST_F(VectorAddFileAndFolderTest, WhenRunningProfilerWithFilePluginTest) {
-//   EXPECT_EQ(hasFile(), true);
-// }
+class VectorAddPerfettoMPITest : public PerfettoPluginTest {
+ protected:
+  virtual void SetUp() {
+    setenv("MPI_RANK", "7", true);
+    RunApplication("hip_vectoradd",
+        " -d /tmp/tests-v2/perfetto/ -o test_%rank_ --plugin perfetto");
+  }
+  virtual void TearDown() {
+    std::experimental::filesystem::remove_all("/tmp/tests-v2/perfetto/");
+    unsetenv("MPI_RANK");
+  }
+  bool hasFile(){ return hasFileInDir("test_7_", "/tmp/tests-v2/perfetto/"); }
+};
 
-// class VectorAddFilenameMPITest : public FilePluginTest {
-//  protected:
-//   virtual void SetUp() {
-//     setenv("MPI_RANK", "7", true);
-//     RunApplication("hip_vectoradd", " --hip-activity -d ./plugin_test_folder_path -o
-//     test_%rank_");
-//   }
-//   virtual void TearDown() {
-//     std::experimental::filesystem::remove_all("./plugin_test_folder_path");
-//     unsetenv("MPI_RANK");
-//   }
-//   bool hasFile() { return hasFileInDir("test_7_", "./plugin_test_folder_path"); }
-// };
+TEST_F(VectorAddPerfettoMPITest, WhenRunningProfilerWithPerfettoTest) {
+  EXPECT_EQ(hasFile(), true);
+}
 
-// TEST_F(VectorAddFilenameMPITest, WhenRunningProfilerWithFilePluginTest) {
-//   EXPECT_EQ(hasFile(), true);
-// }
+bool CTFPluginTest::hasMetadataInDir(const char* directory) {
+  for (const auto& entry : std::experimental::filesystem::directory_iterator(directory))
+    if (std::string(entry.path().filename()) == "metadata") return true;
+  return false;
+}
 
-// bool PerfettoPluginTest::hasFileInDir(const std::string& filename, const char* directory) {
-//   if (is_installed_path()) return true;  // Only run these tests from build
+class VectorAddCTFTest : public CTFPluginTest {
+ protected:
+  virtual void SetUp() {
+    RunApplication("hip_vectoradd", " -d /tmp/tests-v2/ctf --plugin ctf");
+  }
+  virtual void TearDown() {
+    std::experimental::filesystem::remove_all("/tmp/tests-v2/");
+    unsetenv("MPI_RANK");
+  }
+  bool hasFile(){ return hasMetadataInDir("/tmp/tests-v2/ctf/trace/"); }
+};
 
-//   for (const auto& entry : std::experimental::filesystem::directory_iterator(directory)) {
-//     std::string entrypath = std::string(entry.path().filename());
-//     if (entrypath.find(".pftrace") == std::string::npos) continue;
-//     if (entrypath.substr(0, filename.size()) == filename) return true;
-//   }
-//   return false;
-// }
+TEST_F(VectorAddCTFTest, WhenRunningProfilerWithCTFTest) {
+  EXPECT_EQ(hasFile(), true);
+}
 
-// class VectorAddPerfettoMPITest : public PerfettoPluginTest {
-//  protected:
-//   virtual void SetUp() {
-//     setenv("MPI_RANK", "7", true);
-//     RunApplication("hip_vectoradd", " -d ./plugin_test_folder_path -o test_%rank_ --plugin
-// perfetto");
-//   }
-//   virtual void TearDown() {
-//     std::experimental::filesystem::remove_all("./plugin_test_folder_path");
-//     unsetenv("MPI_RANK");
-//   }
-//   bool hasFile(){ return hasFileInDir("test_7_", "./plugin_test_folder_path"); }
-// };
+class VectorAddCTFMPITest : public CTFPluginTest {
+ protected:
+  virtual void SetUp() {
+    setenv("MPI_RANK", "7", true);
+    RunApplication("hip_vectoradd", " -d /tmp/tests-v2/ctf_%rank --plugin ctf");
+  }
+  virtual void TearDown() {
+    std::experimental::filesystem::remove_all("/tmp/tests-v2/");
+    unsetenv("MPI_RANK");
+  }
+  bool hasFile(){ return hasMetadataInDir("/tmp/tests-v2/ctf_7/trace/"); }
+};
 
-// TEST_F(VectorAddPerfettoMPITest, WhenRunningProfilerWithPerfettoTest) {
-//   EXPECT_EQ(hasFile(), true);
-// }
+TEST_F(VectorAddCTFMPITest, WhenRunningProfilerWithCTFTest) {
+  EXPECT_EQ(hasFile(), true);
+}

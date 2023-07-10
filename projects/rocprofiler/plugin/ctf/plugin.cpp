@@ -757,6 +757,23 @@ std::uint64_t GetMetadataClkClsOffset() {
 
 }  // namespace
 
+
+static const char* LOOP_MPI_RANK(const std::vector<const char*>& mpivars) {
+  for (const char* env : mpivars)
+    if (const char* envvar = getenv(env))
+      return envvar;
+  return nullptr;
+}
+
+static void insert_meta_to_stream(
+  std::stringstream& stream,
+  const char* field,
+  const char* value
+) {
+  if (!field || !value) return;
+  stream << "\n\t" << std::string(field) << " = " << std::string(value) << ';';
+}
+
 void Plugin::CopyAdjustedMetadataStreamFile(const fs::path& metadata_stream_path,
                                             const fs::path& trace_dir) {
   // Load installed metadata stream file contents.
@@ -770,6 +787,24 @@ void Plugin::CopyAdjustedMetadataStreamFile(const fs::path& metadata_stream_path
 
     ss << "offset = " << GetMetadataClkClsOffset() << ';';
     metadata.replace(metadata.find(offset_term), std::strlen(offset_term), ss.str());
+  }
+
+  std::stringstream data_stream;
+  const char* rank = LOOP_MPI_RANK({"MPI_RANK", "OMPI_COMM_WORLD_RANK", "MV2_COMM_WORLD_RANK"});
+  // Add MPI information to metadata
+  if (rank) {
+    insert_meta_to_stream(data_stream, "rank", rank);
+    insert_meta_to_stream(data_stream, "node_rank", getenv("OMPI_COMM_WORLD_NODE_RANK"));
+
+    const char* local = LOOP_MPI_RANK({"OMPI_COMM_WORLD_LOCAL_RANK", "MV2_COMM_WORLD_LOCAL_RANK"});
+    insert_meta_to_stream(data_stream, "local_rank", local);
+
+    std::string data_ins = data_stream.str();
+    size_t env_pos = metadata.find("env {");
+    if (env_pos != std::string::npos)
+      metadata.insert(metadata.begin()+env_pos+5, data_ins.begin(), data_ins.end());
+    else
+      std::cerr << "Failed to insert MPI metadata!" << std::endl;
   }
 
   // Write adjusted metadata stream to trace directory.

@@ -80,9 +80,21 @@ while [ 1 ] ; do
     shift
   elif [[ "$1" = "-d" || "$1" = "--output-directory"  ]] ; then
     if [ $2 ] ; then
-      mkdir -p $2
-      export OUTPUT_PATH=$2
       OUTPUT_PATH_INTERNAL=$2
+      MPI_RANK_INTERNAL=""
+      if [ -n "$MPI_RANK" ]; then
+        MPI_RANK_INTERNAL=$MPI_RANK
+      elif [ -n "$OMPI_COMM_WORLD_RANK" ]; then
+        MPI_RANK_INTERNAL=$OMPI_COMM_WORLD_RANK
+      elif [ -n "$MV2_COMM_WORLD_RANK" ]; then
+        MPI_RANK_INTERNAL=$MV2_COMM_WORLD_RANK
+      fi
+      if [ -n "$MPI_RANK_INTERNAL" ]; then
+        OUTPUT_PATH_INTERNAL=${OUTPUT_PATH_INTERNAL//"%rank"/$MPI_RANK_INTERNAL}
+      fi
+
+      mkdir -p $OUTPUT_PATH_INTERNAL
+      export OUTPUT_PATH=$OUTPUT_PATH_INTERNAL
     else
       usage
       exit 1

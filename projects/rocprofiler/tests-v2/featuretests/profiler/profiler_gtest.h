@@ -98,32 +98,35 @@ class ProfilerTest : public ApplicationParser {
 
 // /* --------------------------------------------------------------------------*/
 // /**
-//  * @Synopsis Base class for file plugin tests.
+//  * @Synopsis Base class for plugin tests.
 //  * The file test will check wether certain filenames are created.
 //  * Currently, file plugin tests only from build as they need to create files.
 //  */
 // /* --------------------------------------------------------------------------*/
 
-// class PluginTests : public ::testing::Test {
-//  public:
-//   //!< Sets application environment by seting rocprofv2.
-//   void RunApplication(const char* app_name, const char* appParams);
-//  private:
-//   //!< Runs a given appllication with the hsa activity.
-//   void ProcessApplication(std::stringstream& ss);
-// };
+class PluginTests : public ::testing::Test {
+ public:
+  //!< Sets application environment by seting rocprofv2.
+  void RunApplication(const char* app_name, const char* appParams);
+ private:
+  //!< Runs a given appllication with the hsa activity.
+  void ProcessApplication(std::stringstream& ss);
+};
+class FilePluginTest : public PluginTests {
+ public:
+  //!< Checks wether a file beginning with "filename" exists in "directory"
+  static bool hasFileInDir(const std::string& filename, const char* directory);
+};
 
-// class FilePluginTest : public PluginTests {
-//  public:
-//   //!< Checks wether a file beginning with "filename" exists in "directory"
-//   static bool hasFileInDir(const std::string& filename, const char* directory);
-// };
+class PerfettoPluginTest : public PluginTests {
+ public:
+  //!< Checks wether a file beginning with "filename" and ending with "pftrace" exists in "directory"
+  static bool hasFileInDir(const std::string& filename, const char* directory);
+};
 
-// class PerfettoPluginTest : public PluginTests {
-//  public:
-//   //!< Checks wether a file beginning with "filename" and ending with "pftrace" exists in "directory" 
-//   static bool hasFileInDir(const std::string& filename, const char* directory);
-// };
-
+class CTFPluginTest : public FilePluginTest {
+public:
+  static bool hasMetadataInDir(const char* directory);
+};
 
 #endif  // TESTS_FEATURETESTS_PROFILER_GTESTS_APPS_PROFILER_GTEST_H_
