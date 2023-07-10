@@ -361,7 +361,7 @@ Panel Config:
             mean: AVG((TCP_UTCL1_REQUEST_sum / $denom))
             min: MIN((TCP_UTCL1_REQUEST_sum / $denom))
             max: MAX((TCP_UTCL1_REQUEST_sum / $denom))
-            units: ( + $normUnit)
+            units: (Req + $normUnit)
             tips: 
           Hit Ratio:
             mean: AVG((((100 * TCP_UTCL1_TRANSLATION_HIT_sum) / TCP_UTCL1_REQUEST_sum) if
@@ -376,17 +376,17 @@ Panel Config:
             mean: AVG((TCP_UTCL1_TRANSLATION_HIT_sum / $denom))
             min: MIN((TCP_UTCL1_TRANSLATION_HIT_sum / $denom))
             max: MAX((TCP_UTCL1_TRANSLATION_HIT_sum / $denom))
-            units: ( + $normUnit)
+            units: (Hits + $normUnit)
             tips: 
           Misses (Translation):
             mean: AVG((TCP_UTCL1_TRANSLATION_MISS_sum / $denom))
             min: MIN((TCP_UTCL1_TRANSLATION_MISS_sum / $denom))
             max: MAX((TCP_UTCL1_TRANSLATION_MISS_sum / $denom))
-            units: ( + $normUnit)
+            units: (Misses + $normUnit)
             tips: 
           Misses (Permission):
             mean: AVG((TCP_UTCL1_PERMISSION_MISS_sum / $denom))
             min: MIN((TCP_UTCL1_PERMISSION_MISS_sum / $denom))
             max: MAX((TCP_UTCL1_PERMISSION_MISS_sum / $denom))
-            units: ( + $normUnit)
+            units: (Misses + $normUnit)
             tips: 

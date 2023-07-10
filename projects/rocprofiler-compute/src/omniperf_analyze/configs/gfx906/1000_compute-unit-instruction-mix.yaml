@@ -34,7 +34,7 @@ Panel Config:
             avg: AVG((SQ_INSTS_LDS / $denom))
             min: MIN((SQ_INSTS_LDS / $denom))
             max: MAX((SQ_INSTS_LDS / $denom))
-            unit: $normUnit
+            unit: (instr + $normUnit)
             tips: 
           VALU - MFMA:
             avg: None # No HW module
@@ -78,7 +78,7 @@ Panel Config:
         metric:
           INT-32:
             count: None # No perf counter
-            unit: $normUnit
+            unit: (instr + $normUnit)
             tips:
           INT-64:
             count: None # No perf counter
