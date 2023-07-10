@@ -35,7 +35,7 @@ find_program (GIT NAMES git)
 
 ## Setup the package version based on git tags.
 set(PKG_VERSION_GIT_TAG_PREFIX "rsmi_pkg_ver")
-get_package_version_number("1.0.0" ${PKG_VERSION_GIT_TAG_PREFIX} GIT)
+get_package_version_number("5.0.0" ${PKG_VERSION_GIT_TAG_PREFIX} GIT)
 message("Package version: ${PKG_VERSION_STR}")
 set(${AMD_SMI_LIBS_TARGET}_VERSION_MAJOR "${VERSION_MAJOR}")
 set(${AMD_SMI_LIBS_TARGET}_VERSION_MINOR "${VERSION_MINOR}")
@@ -232,7 +232,7 @@ configure_package_config_file(
 
 write_basic_package_version_file(
     ${CMAKE_CURRENT_BINARY_DIR}/rocm_smi-config-version.cmake
-    VERSION "${AMD_SMI_LIBS_TARGET_VERSION_MAJOR}.${AMD_SMI_LIBS_TARGET_VERSION_MINOR}.${AMD_SMI_LIBS_TARGET_VERSION_PATCH}"
+    VERSION "${PKG_VERSION_STR}"
     COMPATIBILITY SameMajorVersion
     )
 
@@ -247,7 +247,7 @@ install(
 # Create cmake target
 # Add all targets to the build-tree export set
 export(TARGETS ${ROCM_SMI_TARGET} ${OAM_TARGET}
-  FILE "${PROJECT_BINARY_DIR}/rcom_smi_target.cmake")
+  FILE "${PROJECT_BINARY_DIR}/rocm_smi_target.cmake")
 
 # Export the package for use from the build-tree
 # (this registers the build-tree with a global CMake-registry)
@@ -262,9 +262,11 @@ install(EXPORT rocm_smiTargets
 #License file
 set(CPACK_RPM_PACKAGE_LICENSE "NCSA")
 # install license file in share/doc/rocm_smi-asan folder
-install(FILES ${CPACK_RESOURCE_FILE_LICENSE}
+if( ENABLE_ASAN_PACKAGING )
+  install(FILES ${CPACK_RESOURCE_FILE_LICENSE}
         DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/${ROCM_SMI}-asan RENAME LICENSE.txt
         COMPONENT asan)
+endif()
 install( FILES ${CPACK_RESOURCE_FILE_LICENSE}
         DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/${ROCM_SMI} RENAME LICENSE.txt
         COMPONENT dev)

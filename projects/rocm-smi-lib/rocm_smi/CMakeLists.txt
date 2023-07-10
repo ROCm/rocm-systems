@@ -39,7 +39,7 @@ message("Package version: ${PKG_VERSION_STR}")
 
 # Debian package specific variables
 # Set a default value for the package version
-get_version_from_tag("1.0.0.0" ${SO_VERSION_GIT_TAG_PREFIX} GIT)
+get_version_from_tag("5.0.0.0" ${SO_VERSION_GIT_TAG_PREFIX} GIT)
 
 # VERSION_* variables should be set by get_version_from_tag
 if ( ${ROCM_PATCH_VERSION} )
@@ -54,6 +54,10 @@ set(${ROCM_SMI}_VERSION_PATCH "0")
 set(${ROCM_SMI}_VERSION_BUILD "0")
 message("SOVERSION: ${SO_VERSION_STRING}")
 
+# Configure rsmiBindings.py.in with SO major version:
+configure_file(
+  "${COMMON_SRC_ROOT}/python_smi_tools/rsmiBindings.py.in"
+  "${COMMON_SRC_ROOT}/python_smi_tools/rsmiBindings.py")
 
 # Create a configure file to get version info from within library
 configure_file(

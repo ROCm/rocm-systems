@@ -345,8 +345,9 @@ RocmSMI::Initialize(uint64_t flags) {
     if (ConstructBDFID(devices_[i]->path(), &bdfid) != 0) {
       std::cerr << "Failed to construct BDFID." << std::endl;
       ret = 1;
+    } else {
+      devices_[i]->set_bdfid(bdfid);
     }
-    devices_[i]->set_bdfid(bdfid);
   }
   if (ret != 0) {
     throw amd::smi::rsmi_exception(RSMI_INITIALIZATION_ERROR,

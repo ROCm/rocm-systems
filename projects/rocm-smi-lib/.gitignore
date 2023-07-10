@@ -117,10 +117,10 @@ CTestTestfile.cmake
 _deps
 
 #
-# ROCm files
-# Removes generated config headers like rocmsmi64Config.h & oamConfig.h
+# below files are generated via CMake
 #
 *Config.h
+python_smi_tools/rsmiBindings.py
 
 #
 # Fake SYSFS files
