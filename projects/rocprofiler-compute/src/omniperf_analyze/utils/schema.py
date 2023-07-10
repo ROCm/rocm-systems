@@ -52,6 +52,9 @@ class ArchConfig:
     # [Index: Metric name] pairs
     metric_list: Dict[str, str] = field(default_factory=dict)
 
+    # [Metric name: Counters] pairs
+    metric_counters: Dict[str, list] = field(default_factory=dict)
+
 
 @dataclass
 class Workload:

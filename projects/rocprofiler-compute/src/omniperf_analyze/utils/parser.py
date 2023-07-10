@@ -321,6 +321,47 @@ def update_normUnit_string(equation, unit):
     ).capitalize()
 
 
+def gen_counter_list(formula):
+    function_filter = {
+        "MIN": None,
+        "MAX": None,
+        "AVG": None,
+        "ROUND": None,
+        "TO_INT": None,
+        "GB": None,
+        "STD": None,
+        "GFLOP": None,
+        "GOP": None,
+        "OP": None,
+        "CU": None,
+        "NC": None,
+        "UC": None,
+        "CC": None,
+        "RW": None,
+        "GIOP": None,
+    }
+
+    counters = []
+    if not isinstance(formula, str):
+        return counters
+    try:
+        tree = ast.parse(
+            formula.replace("$normUnit", "SQ_WAVES")
+            .replace("$denom", "SQ_WAVES")
+            .replace("$", "")
+        )
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Name)
+                and node.id.rstrip("_sum").isupper()
+                and node.id not in function_filter
+            ):
+                counters.append(node.id.rstrip("_sum"))
+    except:
+        pass
+    return counters
+
+
 def build_dfs(archConfigs, filter_metrics):
     """
     - Build dataframe for each type of data source within each panel.
@@ -338,6 +379,7 @@ def build_dfs(archConfigs, filter_metrics):
     d = {}
     metric_list = {}
     dfs_type = {}
+    metric_counters = {}
     for panel_id, panel in archConfigs.panel_configs.items():
         for data_source in panel["data source"]:
             for type, data_cofig in data_source.items():
@@ -362,6 +404,7 @@ def build_dfs(archConfigs, filter_metrics):
                         )
                         metric_idx = data_source_idx + "." + str(i)
                         values = []
+                        eqn_content = []
 
                         if (
                             (not filter_metrics)
@@ -378,6 +421,7 @@ def build_dfs(archConfigs, filter_metrics):
                             for k, v in entries.items():
                                 if k != "tips" and k != "coll_level" and k != "alias":
                                     values.append(v)
+                                    eqn_content.append(v)
 
                             if "alias" in entries.keys():
                                 values.append(entries["alias"])
@@ -396,6 +440,15 @@ def build_dfs(archConfigs, filter_metrics):
 
                         # collect metric_list
                         metric_list[metric_idx] = key.replace(" ", "_")
+                        # generate mapping of counters and metrics
+                        filter = {}
+                        for formula in eqn_content:
+                            if formula is not None and formula != "None":
+                                for k in gen_counter_list(formula):
+                                    filter[k] = None
+                        if len(filter) > 0:
+                            metric_counters[key] = list(filter)
+
                         i += 1
 
                     df.set_index("Index", inplace=True)
@@ -431,6 +484,7 @@ def build_dfs(archConfigs, filter_metrics):
     setattr(archConfigs, "dfs", d)
     setattr(archConfigs, "metric_list", metric_list)
     setattr(archConfigs, "dfs_type", dfs_type)
+    setattr(archConfigs, "metric_counters", metric_counters)
 
 
 def build_metric_value_string(dfs, dfs_type, normal_unit):
@@ -469,7 +523,12 @@ def eval_metric(dfs, dfs_type, sys_info, soc_spec, raw_pmc_df, debug):
 
     # confirm no illogical counter values (only consider non-roofline runs)
     roof_only_run = sys_info.ip_blocks == "roofline"
-    if not roof_only_run and (raw_pmc_df["pmc_perf"]["GRBM_GUI_ACTIVE"] == 0).any():
+    rocscope_run = sys_info.ip_blocks == "rocscope"
+    if (
+        not rocscope_run
+        and not roof_only_run
+        and (raw_pmc_df["pmc_perf"]["GRBM_GUI_ACTIVE"] == 0).any()
+    ):
         print("WARNING: Dectected GRBM_GUI_ACTIVE == 0\nHaulting execution.")
         sys.exit(1)
 
@@ -711,12 +770,13 @@ def load_kernel_top(workload, dir):
     workload.dfs.update(tmp)
 
 
-def load_table_data(workload, dir, is_gui, debug, verbose):
+def load_table_data(workload, dir, is_gui, debug, verbose, skipKernelTop=False):
     """
     Load data for all "raw_csv_table".
     Calculate mertric value for all "metric_table".
     """
-    load_kernel_top(workload, dir)
+    if not skipKernelTop:
+        load_kernel_top(workload, dir)
 
     eval_metric(
         workload.dfs,
