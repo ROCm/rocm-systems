@@ -342,7 +342,7 @@ def gen_counter_list(formula):
         "GFLOPs": None,
     }
 
-    built_in_counter=[
+    built_in_counter = [
         "lds",
         "grd",
         "wgr",
@@ -351,7 +351,7 @@ def gen_counter_list(formula):
         "sgpr",
         "scr",
         "BeginNs",
-        "EndNs"
+        "EndNs",
     ]
 
     visited = False
@@ -367,7 +367,7 @@ def gen_counter_list(formula):
         for node in ast.walk(tree):
             if isinstance(node, ast.Name):
                 val = str(node.id)[:-4] if str(node.id).endswith("_sum") else str(node.id)
-                if (val.isupper() and val not in function_filter):
+                if val.isupper() and val not in function_filter:
                     counters.append(val)
                     visited = True
                 if val in built_in_counter:
@@ -404,7 +404,7 @@ def build_dfs(archConfigs, filter_metrics):
                     metric_list[panel_idx] = panel["title"]
                     table_idx = panel_idx + "." + str(data_cofig["id"] % 100)
                     metric_list[table_idx] = data_cofig["title"]
-                    
+
                     headers = ["Index"]
                     for key, tile in data_cofig["header"].items():
                         if key != "tips":

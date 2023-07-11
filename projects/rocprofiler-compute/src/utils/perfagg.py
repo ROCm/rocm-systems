@@ -257,19 +257,16 @@ def pmc_perf_split(workload_dir):
 
 
 def update_pmc_bucket(
-        counters, 
-        save_file,
-        soc,
-        pmc_list=None,
-        stext=None, 
-        workload_perfmon_dir=None
-    ):
+    counters, save_file, soc, pmc_list=None, stext=None, workload_perfmon_dir=None
+):
     # Verify inputs.
     # If save_file is True, we're being called internally, from perfmon_coalesce
     # Else we're being called externally, from rocomni
     detected_extermal_call = False
     if save_file and (stext is None or workload_perfmon_dir is None):
-        raise ValueError("stext and workload_perfmon_dir must be specified if save_file is True")
+        raise ValueError(
+            "stext and workload_perfmon_dir must be specified if save_file is True"
+        )
     if pmc_list is None:
         detected_extermal_call = True
         pmc_list = dict(
@@ -289,7 +286,7 @@ def update_pmc_bucket(
         )
         for ch in range(perfmon_config[soc]["TCC_channels"]):
             pmc_list["TCC2"][str(ch)] = []
-    
+
     if "SQ_ACCUM_PREV_HIRES" in counters:
         # save  all level counters separately
         nindex = counters.index("SQ_ACCUM_PREV_HIRES")
@@ -305,7 +302,7 @@ def update_pmc_bucket(
             fd.close()
 
         return pmc_list
-    
+
     # save normal pmc counters in matching buckets
     for counter in counters:
         IP_block = counter.split(sep="_")[0].upper()
@@ -386,11 +383,13 @@ def perfmon_coalesce(pmc_files_list, workload_dir, soc):
 
             # we have found all the counters, store them in buckets
             counters = m.group(1).split()
-            
+
             # Utilitze helper function once a list of counters has be extracted
             save_file = True
-            pmc_list = update_pmc_bucket(counters, save_file, soc, pmc_list, stext, workload_perfmon_dir)
-    
+            pmc_list = update_pmc_bucket(
+                counters, save_file, soc, pmc_list, stext, workload_perfmon_dir
+            )
+
     # add a timestamp file
     fd = open(workload_perfmon_dir + "/timestamps.txt", "w")
     fd.write("pmc:\n\n")
@@ -433,7 +432,6 @@ def perfmon_emit(pmc_list, soc, save_file=True, workload_dir=None):
         fd = open(workload_perfmon_dir + "/pmc_perf.txt", "w")
     else:
         batches = []
-
 
     tcc2_index = 0
     for iter in range(niter):
