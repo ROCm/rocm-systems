@@ -100,6 +100,7 @@ std::tuple<bool, std::string, std::string, std::string, std::string,
            std::string, std::string, std::string, std::string>
            getSystemDetails(void);
 void logSystemDetails(void);
+rsmi_status_t getBDFString(uint64_t bdf_id, std::string& bfd_str);
 void logHexDump(const char *desc, const void *addr, const size_t len,
              size_t perLine);
 bool isSystemBigEndian();

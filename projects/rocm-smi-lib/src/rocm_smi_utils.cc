@@ -52,6 +52,7 @@
 #include <string>
 #include <cstring>
 #include <cstdint>
+#include <iomanip>
 #include <iostream>
 #include <sstream>
 #include <algorithm>
@@ -747,6 +748,28 @@ bool isSystemBigEndian() {
   }
   return isBigEndian;
 }
+
+rsmi_status_t getBDFString(uint64_t bdf_id, std::string& bfd_str)
+{
+  auto result = rsmi_status_t::RSMI_STATUS_SUCCESS;
+  auto bus_id = static_cast<uint8_t>((bdf_id & 0x0000FF00) >> 8);
+  auto dev_id = static_cast<uint8_t>((bdf_id & 0x000000F8) >> 3);
+  auto func_id = static_cast<uint8_t>(bdf_id & 0x00000003);
+
+  bfd_str = std::string();
+  if (!(bus_id > 0)) {
+    result = rsmi_status_t::RSMI_STATUS_NO_DATA;
+    return result;
+  }
+
+  std::stringstream bdf_sstream;
+  bdf_sstream << std::hex << std::setfill('0') << std::setw(sizeof(uint8_t) * 2) << +bus_id << ":";
+  bdf_sstream << std::hex << std::setfill('0') << std::setw(sizeof(uint8_t) * 2) << +dev_id << ".";
+  bdf_sstream << std::hex << std::setfill('0') << +func_id;
+  bfd_str = bdf_sstream.str();
+  return result;
+}
+
 
 }  // namespace smi
 }  // namespace amd

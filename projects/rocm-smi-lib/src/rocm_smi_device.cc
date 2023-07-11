@@ -59,6 +59,7 @@
 #include <algorithm>
 #include <iterator>
 #include <cstring>
+#include <type_traits>
 
 #include "rocm_smi/rocm_smi_main.h"
 #include "rocm_smi/rocm_smi_device.h"
@@ -1384,6 +1385,7 @@ std::string Device::readBootPartitionState<rsmi_nps_mode_type_t>(
   std::tie(std::ignore, boot_state) = readTmpFile(dv_ind, "boot", "nps_mode");
   return boot_state;
 }
+
 
 #undef RET_IF_NONZERO
 }  // namespace smi

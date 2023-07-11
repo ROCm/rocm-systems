@@ -52,12 +52,14 @@
 #include <vector>
 #include <unordered_set>
 #include <map>
+#include <type_traits>
 
 #include "rocm_smi/rocm_smi_monitor.h"
 #include "rocm_smi/rocm_smi_power_mon.h"
 #include "rocm_smi/rocm_smi_common.h"
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_counters.h"
+#include "rocm_smi/rocm_smi_properties.h"
 #include "shared_mutex.h"   //NOLINT
 
 namespace amd {
@@ -173,6 +175,7 @@ typedef struct {
     std::vector<DevInfoTypes> variants;
 } dev_depends_t;
 
+
 class Device {
  public:
     explicit Device(std::string path, RocmSMI_env_vars const *e);
@@ -213,7 +216,7 @@ class Device {
     void set_evt_notif_anon_fd(uint32_t fd) {
                                    evt_notif_anon_fd_ = static_cast<int>(fd);}
     int evt_notif_anon_fd(void) const {return evt_notif_anon_fd_;}
-    metrics_table_header_t & gpu_metrics_ver(void) {return gpu_metrics_ver_;}
+    metrics_table_header_t &gpu_metrics_ver(void) {return gpu_metrics_ver_;}
     void fillSupportedFuncs(void);
     void DumpSupportedFunctions(void);
     bool DeviceAPISupported(std::string name, uint64_t variant,
@@ -221,6 +224,8 @@ class Device {
     rsmi_status_t restartAMDGpuDriver(void);
     rsmi_status_t storeDevicePartitions(uint32_t dv_ind);
     template <typename T> std::string readBootPartitionState(uint32_t dv_ind);
+    rsmi_status_t check_amdgpu_property_reinforcement_query(uint32_t dev_idx, AMDGpuVerbTypes_t verb_type);
+
 
  private:
     std::shared_ptr<Monitor> monitor_;
@@ -241,6 +246,7 @@ class Device {
     int readDevInfoBinary(DevInfoTypes type, std::size_t b_size,
                                             void *p_binary_data);
     int writeDevInfoStr(DevInfoTypes type, std::string valStr);
+    rsmi_status_t run_amdgpu_property_reinforcement_query(const AMDGpuPropertyQuery_t& amdgpu_property_query);
     uint64_t bdfid_;
     uint64_t kfd_gpu_id_;
     std::unordered_set<rsmi_event_group_t,
@@ -252,6 +258,7 @@ class Device {
     FILE *evt_notif_anon_file_ptr_;
     struct metrics_table_header_t gpu_metrics_ver_;
 };
+
 
 }  // namespace smi
 }  // namespace amd

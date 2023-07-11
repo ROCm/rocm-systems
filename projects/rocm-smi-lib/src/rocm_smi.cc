@@ -2957,6 +2957,7 @@ rsmi_dev_power_profile_presets_get(uint32_t dv_ind, uint32_t reserved,
 
   DEVICE_MUTEX
   rsmi_status_t ret = get_power_profiles(dv_ind, status, nullptr);
+
   return ret;
   CATCH
 }
@@ -2973,6 +2974,7 @@ rsmi_dev_power_profile_set(uint32_t dv_ind, uint32_t dummy,
   (void)dummy;
   DEVICE_MUTEX
   rsmi_status_t ret = set_power_profile(dv_ind, profile);
+
   return ret;
   CATCH
 }
