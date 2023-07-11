@@ -27,7 +27,7 @@ Panel Config:
             tips: 
           LDS:
             count: AVG((SQ_INSTS_LDS / $denom))
-            unit: $normUnit
+            unit: (instr + $normUnit)
             tips: 
           VALU - MFMA:
             count: None # No HW module
@@ -61,7 +61,7 @@ Panel Config:
         metric:
           INT-32:
             count: None # No perf counter
-            unit: $normUnit
+            unit: (instr + $normUnit)
             tips:
           INT-64:
             count: None # No perf counter
