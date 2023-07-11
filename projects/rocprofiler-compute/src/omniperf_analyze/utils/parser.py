@@ -339,11 +339,25 @@ def gen_counter_list(formula):
         "CC": None,
         "RW": None,
         "GIOP": None,
+        "GFLOPs": None,
     }
 
+    built_in_counter=[
+        "lds",
+        "grd",
+        "wgr",
+        "arch_vgpr",
+        "accum_vgpr",
+        "sgpr",
+        "scr",
+        "BeginNs",
+        "EndNs"
+    ]
+
+    visited = False
     counters = []
     if not isinstance(formula, str):
-        return counters
+        return visited, counters
     try:
         tree = ast.parse(
             formula.replace("$normUnit", "SQ_WAVES")
@@ -351,15 +365,17 @@ def gen_counter_list(formula):
             .replace("$", "")
         )
         for node in ast.walk(tree):
-            if (
-                isinstance(node, ast.Name)
-                and node.id.rstrip("_sum").isupper()
-                and node.id not in function_filter
-            ):
-                counters.append(node.id.rstrip("_sum"))
+            if isinstance(node, ast.Name):
+                val = str(node.id)[:-4] if str(node.id).endswith("_sum") else str(node.id)
+                if (val.isupper() and val not in function_filter):
+                    counters.append(val)
+                    visited = True
+                if val in built_in_counter:
+                    visited = True
     except:
         pass
-    return counters
+
+    return visited, counters
 
 
 def build_dfs(archConfigs, filter_metrics):
@@ -381,9 +397,14 @@ def build_dfs(archConfigs, filter_metrics):
     dfs_type = {}
     metric_counters = {}
     for panel_id, panel in archConfigs.panel_configs.items():
+        panel_idx = str(panel_id // 100)
         for data_source in panel["data source"]:
             for type, data_cofig in data_source.items():
                 if type == "metric_table":
+                    metric_list[panel_idx] = panel["title"]
+                    table_idx = panel_idx + "." + str(data_cofig["id"] % 100)
+                    metric_list[table_idx] = data_cofig["title"]
+                    
                     headers = ["Index"]
                     for key, tile in data_cofig["header"].items():
                         if key != "tips":
@@ -397,12 +418,7 @@ def build_dfs(archConfigs, filter_metrics):
 
                     i = 0
                     for key, entries in data_cofig["metric"].items():
-                        data_source_idx = (
-                            str(data_cofig["id"] // 100)
-                            + "."
-                            + str(data_cofig["id"] % 100)
-                        )
-                        metric_idx = data_source_idx + "." + str(i)
+                        metric_idx = table_idx + "." + str(i)
                         values = []
                         eqn_content = []
 
@@ -411,7 +427,7 @@ def build_dfs(archConfigs, filter_metrics):
                             or (metric_idx in filter_metrics)  # no filter
                             or  # metric in filter
                             # the whole table in filter
-                            (data_source_idx in filter_metrics)
+                            (table_idx in filter_metrics)
                             or
                             # the whole IP block in filter
                             (str(panel_id // 100) in filter_metrics)
@@ -439,14 +455,19 @@ def build_dfs(archConfigs, filter_metrics):
                             df = pd.concat([df, df_new_row])
 
                         # collect metric_list
-                        metric_list[metric_idx] = key.replace(" ", "_")
+                        metric_list[metric_idx] = key
                         # generate mapping of counters and metrics
                         filter = {}
+                        _visited = False
                         for formula in eqn_content:
                             if formula is not None and formula != "None":
-                                for k in gen_counter_list(formula):
+                                visited, counters = gen_counter_list(formula)
+                                if visited:
+                                    _visited = True
+                                for k in counters:
                                     filter[k] = None
-                        if len(filter) > 0:
+
+                        if len(filter) > 0 or _visited:
                             metric_counters[key] = list(filter)
 
                         i += 1
