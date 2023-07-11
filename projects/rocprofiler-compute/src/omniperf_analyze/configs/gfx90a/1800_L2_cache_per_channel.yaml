@@ -247,7 +247,7 @@ Panel Config:
               + TO_INT(TCC_READ[24])) + TO_INT(TCC_READ[25])) + TO_INT(TCC_READ[26])) +
               TO_INT(TCC_READ[27])) + TO_INT(TCC_READ[28])) + TO_INT(TCC_READ[29])) + TO_INT(TCC_READ[30]))
               + TO_INT(TCC_READ[31])) / 32) / $denom))
-            units: (req + $normUnit)
+            units: (Req + $normUnit)
             tips: 
           L1 - L2 Write Req:
             mean: AVG((((((((((((((((((((((((((((((((((TO_INT(TCC_WRITE[0]) + TO_INT(TCC_WRITE[1]))
@@ -345,7 +345,7 @@ Panel Config:
               + TO_INT(TCC_ATOMIC[26])) + TO_INT(TCC_ATOMIC[27])) + TO_INT(TCC_ATOMIC[28]))
               + TO_INT(TCC_ATOMIC[29])) + TO_INT(TCC_ATOMIC[30])) + TO_INT(TCC_ATOMIC[31]))
               / 32) / $denom))
-            units: (req + $normUnit)
+            units: (Req + $normUnit)
             tips: 
           L2 - EA Read Req:
             mean: AVG((((((((((((((((((((((((((((((((((TO_INT(TCC_EA_RDREQ[0]) + TO_INT(TCC_EA_RDREQ[1]))
