@@ -280,9 +280,6 @@ def view_trace(args, code, dbnames, att_filenames, bReturnLoc, OCCUPANCY, bDumpO
     if mpi_root:
         JSON_GLOBAL_DICTIONARY['code.json'] = Readable({"code": code[:allse_maxline+16], "top_n": get_top_n(code[:allse_maxline+16])})
 
-    if bReturnLoc:
-        return flight_count
-
     for key in simd_wave_filenames.keys():
         wv_array = [[
             int(s[0].split('_sm')[1].split('_sl')[0]),
@@ -323,6 +320,9 @@ def view_trace(args, code, dbnames, att_filenames, bReturnLoc, OCCUPANCY, bDumpO
         pic_thread.join()
         for k, v in return_dict.items():
             JSON_GLOBAL_DICTIONARY[k] = v
+
+    if bReturnLoc:
+        return flight_count
 
     if bDumpOnly == False:
         if MPI_COMM is not None:

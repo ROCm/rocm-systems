@@ -348,7 +348,14 @@ void AddAttRecord(rocprofiler_record_att_tracer_t* record, hsa_agent_t gpu_agent
                   att_pending_signal_t& pending) {
   Agent::AgentInfo agent_info = hsa_support::GetAgentInfo(gpu_agent.handle);
   att_trace_callback_data_t data;
-  hsa_ven_amd_aqlprofile_iterate_data(pending.profile, attTraceDataCallback, &data);
+  hsa_status_t status = hsa_ven_amd_aqlprofile_iterate_data(pending.profile, attTraceDataCallback, &data);
+
+  if ((status & HSA_STATUS_ERROR_OUT_OF_RESOURCES) == HSA_STATUS_ERROR_OUT_OF_RESOURCES)
+    rocprofiler::warning("Warning: ATT buffer full!\n");
+  if ((status & HSA_STATUS_ERROR_EXCEPTION) == HSA_STATUS_ERROR_EXCEPTION)
+    rocprofiler::warning("Warning: ATT received a UTC memory error!\n");
+  if (status == HSA_STATUS_ERROR)
+    fatal("Thread Trace Error!");
 
   // Allocate memory for shader_engine_data
   record->shader_engine_data = static_cast<rocprofiler_record_se_att_data_t*>(
@@ -702,7 +709,7 @@ std::pair<std::vector<bool>, bool> GetAllowedProfilesList(const void* packets, i
         for (const std::string& kernel_matches : kernel_profile_names)
           if (kernel_name.find(kernel_matches) != std::string::npos) b_profile_this_object = true;
       } catch (...) {
-        printf("Warning: Unknown name for object %lu\n", kdispatch.kernel_object);
+        rocprofiler::warning("Warning: Unknown name for object %lu\n", kdispatch.kernel_object);
       }
       current_writer_id += 1;
     }
@@ -745,20 +752,18 @@ hsa_ven_amd_aqlprofile_profile_t* ProcessATTParams(Packet::packet_t& start_packe
     for (const std::string& counter_name : att_counters_names) {
       const Metric* metric = metrics_dict_->Get(counter_name);
       const BaseMetric* base = dynamic_cast<const BaseMetric*>(metric);
-      if (!base) {
-        printf("Invalid base metric value: %s\n", counter_name.c_str());
-        exit(1);
-      }
+      if (!base) rocprofiler::fatal("Invalid base metric value: %s\n", counter_name.c_str());
+
       std::vector<const counter_t*> counters;
       base->GetCounters(counters);
       hsa_ven_amd_aqlprofile_event_t event = counters[0]->event;
-      if (event.block_name != HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ) {
-        printf("Only events from the SQ block can be selected for ATT.");
-        exit(1);
-      }
-      att_params.push_back(
-          {static_cast<hsa_ven_amd_aqlprofile_parameter_name_t>(int(ROCPROFILER_ATT_PERFCOUNTER)),
-           event.counter_id | (event.counter_id ? (0xF << 24) : 0)});
+      if (event.block_name != HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ)
+            rocprofiler::fatal("Only events from the SQ block can be selected for ATT.\n");
+
+      att_params.push_back({
+                static_cast<hsa_ven_amd_aqlprofile_parameter_name_t>(int(ROCPROFILER_ATT_PERFCOUNTER)),
+                event.counter_id | (event.counter_id ? (0xF << 24) : 0)
+      });
       num_att_counters += 1;
     }
 

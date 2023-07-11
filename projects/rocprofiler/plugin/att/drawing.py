@@ -133,7 +133,7 @@ def draw_wave_states(selections, normalize, TIMELINES):
     kernel = np.asarray([np.exp(-abs(10*k/kernsize)) for k in range(-kernsize//2,kernsize//2+1)])
     kernel /= np.sum(kernel)
 
-    timelines = [np.convolve(time, kernel)[kernsize//2:-kernsize//2] for time in timelines]
+    timelines = [np.convolve(time, kernel)[kernsize//2:-kernsize//2] for time in timelines if len(time) > 0]
 
     [plt.plot(cycles, t, label='State '+s, linewidth=1.1, color=c)
         for t, s, c, sel in zip(timelines, STATES, colors, selections) if sel]
