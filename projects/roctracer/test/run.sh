@@ -25,6 +25,10 @@
 # cd to build directory
 BIN_NAME=`basename $0`
 BIN_DIR=`dirname $0`
+
+#To enable symbol lookup in .dynsyn section after llvm-strip
+export LOADER_USE_DYNSYM=1
+
 cd $BIN_DIR
 
 if [ -z "$ROCTRACER_LIB_PATH" ] ; then
