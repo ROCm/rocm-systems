@@ -25,6 +25,9 @@
 BIN_NAME=`basename $0`
 BIN_DIR=`dirname $0`
 
+#To enable symbol lookup in .dynsyn section after llvm-strip
+export LOADER_USE_DYNSYM=1
+
 # test filter input
 test_filter=-1
 if [ -n "$1" ] ; then
