@@ -88,8 +88,6 @@ int LaunchVectorAddKernel() {
   }
   if (errors != 0) {
     printf("FAILED: %d errors\n", errors);
-  } else {
-    printf("PASSED!\n");
   }
 
   HIP_ASSERT(hipFree(deviceA));

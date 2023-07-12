@@ -587,8 +587,9 @@ TEST_F(LoadUnloadTest, WhenLoadingSecondTimeThenToolLoadsUnloadsSuccessfully) {
 
 class ATTCollection : public ::testing::Test {
  public:
-  virtual void SetUp(){};
+  virtual void SetUp(){bCollected = false;};
   virtual void TearDown(){};
+  static bool bCollected;
 
   static void FlushCallback(const rocprofiler_record_header_t* record,
                             const rocprofiler_record_header_t* end_record,
@@ -606,30 +607,25 @@ class ATTCollection : public ::testing::Test {
         const char* kernel_name_c = static_cast<const char*>(malloc(name_length * sizeof(char)));
         rocprofiler_query_kernel_info(ROCPROFILER_KERNEL_NAME, att_tracer_record->kernel_id,
                                       &kernel_name_c);
-        int gpu_index = att_tracer_record->gpu_id.handle;
-        printf("Kernel Info:\n\tGPU Index: %d\n\tKernel Name: %s\n", gpu_index, kernel_name_c);
 
         // Get the number of shader engine traces
         int se_num = att_tracer_record->shader_engine_data_count;
 
         // iterate over each shader engine att trace
         for (int i = 0; i < se_num; i++) {
-          printf("\n\n-------------- shader_engine %d --------------\n\n", i);
-          rocprofiler_record_se_att_data_t* se_att_trace =
-              &att_tracer_record->shader_engine_data[i];
-          uint32_t size = se_att_trace->buffer_size;
-          const unsigned short* data_buffer_ptr =
-              reinterpret_cast<const unsigned short*>(se_att_trace->buffer_ptr);
-
-          // Print the buffer in terms of shorts (16 bits)
-          for (uint32_t j = 0; j < (size / sizeof(short)); j++)
-            printf("%04x\n", data_buffer_ptr[j]);
+          if (!att_tracer_record->shader_engine_data)
+            continue;
+          auto se_att_trace = att_tracer_record->shader_engine_data[i];
+          if (!se_att_trace.buffer_ptr || !se_att_trace.buffer_size)
+            continue;
+          bCollected = true;
         }
       }
       rocprofiler_next_record(record, &record, session_id, buffer_id);
     }
   }
 };
+bool ATTCollection::bCollected = false;
 
 TEST_F(ATTCollection, WhenRunningATTItCollectsTraceData) {
   int result = ROCPROFILER_STATUS_ERROR;
@@ -690,6 +686,9 @@ TEST_F(ATTCollection, WhenRunningATTItCollectsTraceData) {
   // finalize att tracing by destroying rocprofiler object
   result = rocprofiler_finalize();
   EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
+
+  //check if we got data from any shader engine
+  EXPECT_EQ(bCollected, true);
 }
 
 /*
