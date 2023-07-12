@@ -121,6 +121,9 @@ class ReturnInfo(ctypes.Structure):
                 ('flags', ctypes.c_uint64)]
 
 rocprofv2_att_lib = os.getenv('ROCPROFV2_ATT_LIB_PATH')
+if rocprofv2_att_lib is None:
+    print("ATT Lib path not set. Use export ROCPROFV2_ATT_LIB_PATH=/path/to/librocprofv2_att.so")
+    quit()
 path_to_parser = os.path.abspath(rocprofv2_att_lib)
 SO = CDLL(path_to_parser)
 
@@ -346,7 +349,7 @@ if __name__ == "__main__":
     if pathenv is None:
         pathenv = "."
     parser = argparse.ArgumentParser()
-    parser.add_argument("assembly_code", help="Path of the assembly code")
+    parser.add_argument("assembly_code", help="Path to the assembly code. Must be the first parameter.")
     parser.add_argument("--depth", help="Maximum number of parsed waves per slot", default=100, type=int)
     parser.add_argument("--trace_file", help="Filter for trace files", default=None, type=str)
     parser.add_argument("--att_kernel", help="Kernel file",

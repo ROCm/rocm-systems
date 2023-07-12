@@ -28,11 +28,13 @@ usage() {
   echo -e "--kernel-trace               For Collecting Kernel dispatch Traces"
   echo -e "--sys-trace                  For Collecting HIP and HSA APIs and their Activities Traces along ROCTX and Kernel Dispatch traces"
   echo -e "--plugin PLUGIN_NAME         For enabling a plugin (file/perfetto/att/ctf)"
+  echo -e "\t# ATT plugin usage: rocprofv2 <rocprofv2_params> --plugin att <ISA_file> <att_parameters> <executable>"
+  echo -e "\t# Use \"rocprofv2 --plugin att --help\" for ATT-specific parameters help."
   echo -e "-i   | --input               For adding counters file path (every line in the text file represents a counter)"
   echo -e "-o   | --output-file         For the output file name"
   echo -e "-d   | --output-directory    For adding output path where the output files will be saved"
   echo -e "-fi  | --flush-interval      For adding a flush interval in milliseconds, every \"flush interval\" the buffers will be flushed"
-  echo -e "-tp  | --trace-period        For adding a trace period in milliseconds, in the following format \"-tp <DELAY_TIME>:<TIME_BETWEEN_START_AND_STOP>\"."
+  echo -e "-tp  | --trace-period        Specifies a trace period in milliseconds, with format \"-tp <DELAY>:<ACTIVE_TIME>:<LOOP_INTERVAL_TIME>\"."
   exit 1
 }
 
@@ -169,7 +171,6 @@ while [ 1 ] ; do
     if [ "$2" = "att" ] ; then
       if [ $RUN_FROM_BUILD == 1 ]; then
         ATT_PATH=$ROCM_DIR/plugin/att/att/att.py
-        export ROCPROFV2_ATT_LIB_PATH=$ROCM_DIR/lib/hsa-amd-aqlprofile/librocprofv2_att.so
       else
         ATT_PATH=$ROCM_DIR/libexec/rocprofiler/att/att.py
         export ROCPROFV2_ATT_LIB_PATH=$ROCM_DIR/lib/hsa-amd-aqlprofile/librocprofv2_att.so
