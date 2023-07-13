@@ -278,7 +278,8 @@ def view_trace(args, code, dbnames, att_filenames, bReturnLoc, OCCUPANCY, bDumpO
             simd_wave_filenames[se_number] = wv_filenames
 
     if mpi_root:
-        JSON_GLOBAL_DICTIONARY['code.json'] = Readable({"code": code[:allse_maxline+16], "top_n": get_top_n(code[:allse_maxline+16])})
+        code_sel = [c[:-3]+c[-2:] for c in code[:allse_maxline+16]]
+        JSON_GLOBAL_DICTIONARY['code.json'] = Readable({"code": code_sel, "top_n": get_top_n(code_sel)})
 
     for key in simd_wave_filenames.keys():
         wv_array = [[

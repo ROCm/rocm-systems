@@ -1150,6 +1150,146 @@ TEST(ProfilerMPTest, WhenRunningMultiProcessTestItPasses) {
     ASSERT_TRUE(1);
   }
 }
+
+/*
+ * ###################################################
+ * ############ Codeobj capture tests ################
+ * ###################################################
+ */
+
+class CodeobjTest : public ::testing::Test {
+public:
+  virtual void SetUp(const char* app_name) {};
+  virtual void TearDown(){};
+  static void FlushCallback(const rocprofiler_record_header_t* record,
+                            const rocprofiler_record_header_t* end_record,
+                            rocprofiler_session_id_t session_id,
+                            rocprofiler_buffer_id_t buffer_id) {};
+
+  void SetupRocprofiler() {
+    int result = ROCPROFILER_STATUS_ERROR;
+
+    result = rocprofiler_initialize();
+    EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
+    result = rocprofiler_create_session(ROCPROFILER_NONE_REPLAY_MODE, &session_id);
+    EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
+
+    result = rocprofiler_codeobj_capture_create(&id, ROCPROFILER_CAPTURE_SYMBOLS_ONLY, 0);
+    EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
+  }
+
+  void TearDownRocprofiler() {
+    int result = ROCPROFILER_STATUS_ERROR;
+
+    result = rocprofiler_codeobj_capture_free(id);
+    EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
+
+    result = rocprofiler_destroy_session(session_id);
+    EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
+    result = rocprofiler_finalize();
+    EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
+  }
+
+  rocprofiler_session_id_t session_id;
+  rocprofiler_record_id_t id;
+};
+
+TEST_F(CodeobjTest, WhenRunningProfilerWithCodeobjCapture) {
+  int result = ROCPROFILER_STATUS_ERROR;
+  SetupRocprofiler();
+
+  result = rocprofiler_codeobj_capture_start(id);
+  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
+
+  // Launch a kernel
+  LaunchVectorAddKernel();
+
+  result = rocprofiler_codeobj_capture_stop(id);
+  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
+
+  rocprofiler_codeobj_symbols_t capture;
+
+  rocprofiler_codeobj_capture_get(id, &capture);
+  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
+
+  EXPECT_GE(capture.count, 1);
+  bool bCaptured_itself = false;
+
+  for (int i=0; i<(int)capture.count; i++) {
+    const char* path = capture.symbols[i].filepath;
+    if (!path) continue;
+    std::string fpath(path);
+    size_t pos = fpath.find("runFeatureTests#offset=");
+    if (pos != std::string::npos && fpath.find("&size=", pos) != std::string::npos)
+      bCaptured_itself = true;
+  }
+  EXPECT_EQ(bCaptured_itself, true);
+
+  TearDownRocprofiler();
+}
+
+
+TEST_F(CodeobjTest, WhenRunningProfilerWithMultipleCaptureAndCopy) {
+  int result = ROCPROFILER_STATUS_ERROR;
+
+  SetupRocprofiler();
+
+  rocprofiler_record_id_t id2;
+  rocprofiler_record_id_t id3;
+
+  result = rocprofiler_codeobj_capture_create(&id2, ROCPROFILER_CAPTURE_COPY_FILE_AND_MEMORY, 0);
+  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
+
+  result = rocprofiler_codeobj_capture_start(id);
+  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
+
+  result = rocprofiler_codeobj_capture_start(id2);
+  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
+
+  result = rocprofiler_codeobj_capture_create(&id3, ROCPROFILER_CAPTURE_COPY_MEMORY, 0);
+  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
+
+  result = rocprofiler_codeobj_capture_start(id3);
+  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
+
+  // Launch a kernel
+  LaunchVectorAddKernel();
+
+  result = rocprofiler_codeobj_capture_stop(id2);
+  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
+
+  result = rocprofiler_codeobj_capture_stop(id3);
+  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
+
+  result = rocprofiler_codeobj_capture_free(id3);
+  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
+
+  rocprofiler_codeobj_symbols_t capture;
+  rocprofiler_codeobj_capture_get(id2, &capture);
+  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
+
+  EXPECT_GE(capture.count, 1);
+
+  for (int i=0; i<(int)capture.count; i++) {
+    EXPECT_NE(capture.symbols[i].base_address, 0);
+    EXPECT_NE(capture.symbols[i].clock_start.value, 0);
+    EXPECT_NE(capture.symbols[i].data, nullptr);
+    EXPECT_NE(capture.symbols[i].size, 0);
+  }
+
+  result = rocprofiler_codeobj_capture_stop(id);
+  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
+
+  result = rocprofiler_codeobj_capture_free(id2);
+  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
+
+  // Expect to return error when running get() after free()
+  result = rocprofiler_codeobj_capture_get(id3, &capture);
+  EXPECT_NE(ROCPROFILER_STATUS_SUCCESS, result);
+
+  TearDownRocprofiler();
+}
+
 /*
  * ###################################################
  * ############ Plugin tests ################

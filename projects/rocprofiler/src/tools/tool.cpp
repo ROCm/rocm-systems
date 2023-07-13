@@ -287,12 +287,14 @@ att_parsed_input_t GetATTParams() {
 
   ATT_PARAM_NAMES["KERNEL"] = ROCPROFILER_ATT_MAXVALUE;
   ATT_PARAM_NAMES["BUFFER_SIZE"] = ROCPROFILER_ATT_BUFFER_SIZE;
+  ATT_PARAM_NAMES["ISA_CAPTURE_MODE"] = ROCPROFILER_ATT_CAPTURE_MODE;
 
   // Default values used for token generation.
   std::unordered_map<std::string, uint32_t> default_params = {
     {"SE_MASK", 0x111111}, // One every 4 SEs, by default
     {"SIMD_SELECT", 0x3}, // 0x3 works for both gfx9 and Navi
-    {"BUFFER_SIZE", 0x40000000} // 2^30 == 1GB
+    {"BUFFER_SIZE", 0x40000000}, // 2^30 == 1GB
+    {"ISA_CAPTURE_MODE", static_cast<uint32_t>(ROCPROFILER_CAPTURE_SYMBOLS_ONLY)}
   };
 
   std::ifstream trace_file(path);

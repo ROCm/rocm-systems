@@ -33,6 +33,7 @@
 #include "src/core/hsa/packets/packets_generator.h"
 #include "src/core/hsa/hsa_support.h"
 #include "src/utils/helper.h"
+#include "src/core/isa_capture/code_object_track.hpp"
 
 #define CHECK_HSA_STATUS(msg, status)                                                              \
   do {                                                                                             \
@@ -493,17 +494,20 @@ bool AsyncSignalHandler(hsa_signal_value_t signal_value, void* data) {
 }
 
 bool AsyncSignalHandlerATT(hsa_signal_value_t /* signal */, void* data) {
-  // TODO: finish implementation to iterate trace data and add it to rocprofiler record
-  // and generic buffer
 
   auto queue_info_session = static_cast<queue_info_session_t*>(data);
-  if (!queue_info_session || !GetROCProfilerSingleton() ||
-      !GetROCProfilerSingleton()->GetSession(queue_info_session->session_id) ||
-      !GetROCProfilerSingleton()->GetSession(queue_info_session->session_id)->GetAttTracer())
+  if (!queue_info_session || !GetROCProfilerSingleton())
     return true;
+
   rocprofiler::Session* session =
       GetROCProfilerSingleton()->GetSession(queue_info_session->session_id);
+  if (!session) return true;
+
+  std::lock_guard<std::mutex> lock(session->GetSessionLock());
+
   rocprofiler::att::AttTracer* att_tracer = session->GetAttTracer();
+  if (!session->GetAttTracer()) return true;
+
   std::vector<att_pending_signal_t>& pending_signals =
       const_cast<std::vector<att_pending_signal_t>&>(
           att_tracer->GetPendingSignals(queue_info_session->writer_id));
@@ -512,9 +516,9 @@ bool AsyncSignalHandlerATT(hsa_signal_value_t /* signal */, void* data) {
     for (auto it = pending_signals.begin(); it != pending_signals.end();
          it = pending_signals.erase(it)) {
       auto& pending = *it;
-      std::lock_guard<std::mutex> lock(session->GetSessionLock());
       if (hsa_support::GetCoreApiTable().hsa_signal_load_relaxed_fn(pending.new_signal))
         return true;
+
       rocprofiler_record_att_tracer_t record{};
       record.kernel_id = rocprofiler_kernel_id_t{pending.kernel_descriptor};
       record.gpu_id = rocprofiler_agent_id_t{(uint64_t)queue_info_session->gpu_index};
@@ -522,13 +526,18 @@ bool AsyncSignalHandlerATT(hsa_signal_value_t /* signal */, void* data) {
       record.thread_id = rocprofiler_thread_id_t{pending.thread_id};
       record.queue_idx = rocprofiler_queue_index_t{pending.queue_index};
       record.queue_id = rocprofiler_queue_id_t{queue_info_session->queue_id};
+      record.writer_id = queue_info_session->writer_id;
+
       if (/*pending.counters_count > 0 && */ pending.profile) {
         AddAttRecord(&record, queue_info_session->agent, pending);
       }
-      // July/01/2023 -> Changed this to writer ID so we can correlate to dispatches
-      // kernel_id already has the descriptor.
+      // July/01/2023 -> Changed this to queue_info_session->writer_id
+      // so we can correlate to dispatches. kernel_id already has the descriptor.
       record.header = {ROCPROFILER_ATT_TRACER_RECORD,
-                       rocprofiler_record_id_t{queue_info_session->writer_id}};
+                       rocprofiler_record_id_t{pending.kernel_descriptor}};
+
+      record.intercept_list = codeobj_record::get_capture(record.header.id);
+      std::atomic_thread_fence(std::memory_order_release);
 
       if (pending.session_id.handle == 0) {
         pending.session_id = GetROCProfilerSingleton()->GetCurrentSessionId();
@@ -536,7 +545,10 @@ bool AsyncSignalHandlerATT(hsa_signal_value_t /* signal */, void* data) {
       if (session->FindBuffer(pending.buffer_id)) {
         Memory::GenericBuffer* buffer = session->GetBuffer(pending.buffer_id);
         buffer->AddRecord(record);
+        buffer->Flush();
       }
+      codeobj_record::free_capture(record.header.id);
+
       hsa_status_t status = rocprofiler::hsa_support::GetAmdExtTable().hsa_amd_memory_pool_free_fn(
           (pending.profile->output_buffer.ptr));
       CHECK_HSA_STATUS("Error: Couldn't free output buffer memory", status);
@@ -548,6 +560,7 @@ bool AsyncSignalHandlerATT(hsa_signal_value_t /* signal */, void* data) {
   }
   delete queue_info_session;
 
+  std::atomic_thread_fence(std::memory_order_seq_cst);
   return false;
 }
 
@@ -721,16 +734,24 @@ std::pair<std::vector<bool>, bool> GetAllowedProfilesList(const void* packets, i
   return {can_profile_packet, b_can_profile_anypacket};
 }
 
-hsa_ven_amd_aqlprofile_profile_t* ProcessATTParams(Packet::packet_t& start_packet,
-                                                   Packet::packet_t& stop_packet, Queue& queue_info,
-                                                   Agent::AgentInfo& agentInfo) {
+std::pair<hsa_ven_amd_aqlprofile_profile_t*, rocprofiler_codeobj_capture_mode_t>
+ProcessATTParams(
+  Packet::packet_t& start_packet,
+  Packet::packet_t& stop_packet,
+  Queue& queue_info,
+  Agent::AgentInfo& agentInfo
+) {
   std::vector<hsa_ven_amd_aqlprofile_parameter_t> att_params;
   int num_att_counters = 0;
   uint32_t att_buffer_size = DEFAULT_ATT_BUFFER_SIZE;
+  rocprofiler_codeobj_capture_mode_t capture_mode = ROCPROFILER_CAPTURE_SYMBOLS_ONLY;
 
   for (rocprofiler_att_parameter_t& param : att_parameters_data) {
     switch (param.parameter_name) {
       case ROCPROFILER_ATT_PERFCOUNTER_NAME:
+        break;
+      case ROCPROFILER_ATT_CAPTURE_MODE:
+        capture_mode = static_cast<rocprofiler_codeobj_capture_mode_t>(param.value);
         break;
       case ROCPROFILER_ATT_BUFFER_SIZE:
         att_buffer_size =
@@ -773,8 +794,8 @@ hsa_ven_amd_aqlprofile_profile_t* ProcessATTParams(Packet::packet_t& start_packe
     for (; num_att_counters < 16; num_att_counters++) att_params.push_back(zero_perf);
   }
   // Get the PM4 Packets using packets_generator
-  return Packet::GenerateATTPackets(queue_info.GetCPUAgent(), queue_info.GetGPUAgent(), att_params,
-                                    &start_packet, &stop_packet, att_buffer_size);
+  return {Packet::GenerateATTPackets(queue_info.GetCPUAgent(), queue_info.GetGPUAgent(),
+          att_params, &start_packet, &stop_packet, att_buffer_size), capture_mode};
 }
 
 /**
@@ -786,6 +807,7 @@ hsa_ven_amd_aqlprofile_profile_t* ProcessATTParams(Packet::packet_t& start_packe
  */
 void WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t user_pkt_index, void* data,
                       hsa_amd_queue_intercept_packet_writer writer) {
+
   static const char* env_MAX_ATT_PROFILES = getenv("ROCPROFILER_MAX_ATT_PROFILES");
   static int MAX_ATT_PROFILES = env_MAX_ATT_PROFILES ? atoi(env_MAX_ATT_PROFILES) : 1;
 
@@ -952,9 +974,15 @@ void WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t user_pkt
     Packet::packet_t start_packet{};
     Packet::packet_t stop_packet{};
     hsa_ven_amd_aqlprofile_profile_t* profile = nullptr;
+    rocprofiler_codeobj_capture_mode_t capture_mode = ROCPROFILER_CAPTURE_SYMBOLS_ONLY;
 
-    if (att_parameters_data.size() > 0 && is_att_collection_mode)
-      profile = ProcessATTParams(start_packet, stop_packet, queue_info, agentInfo);
+    if (att_parameters_data.size() > 0) {
+      std::tie(profile, capture_mode) = ProcessATTParams(start_packet,
+                                                         stop_packet,
+                                                         queue_info,
+                                                         agentInfo
+                                                       );
+    }
 
     // Searching across all the packets given during this write
     for (size_t i = 0; i < pkt_count; ++i) {
@@ -976,7 +1004,7 @@ void WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t user_pkt
       KernelInterceptCount += 1;
       writer_id = WRITER_ID.fetch_add(1, std::memory_order_release);
 
-      if (att_parameters_data.size() > 0 && is_att_collection_mode && profile) {
+      if (att_parameters_data.size() > 0 && profile) {
         // Adding start packet and its barrier with a dummy signal
         hsa_signal_t dummy_signal{};
         dummy_signal.handle = 0;
@@ -996,17 +1024,17 @@ void WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t user_pkt
       uint64_t record_id = GetROCProfilerSingleton()->GetUniqueRecordId();
       AddKernelNameWithDispatchID(GetKernelNameFromKsymbols(dispatch_packet.kernel_object),
                                   record_id);
-      if (session && profile) {
-        session->GetAttTracer()->AddPendingSignals(
-            writer_id, record_id, original_packet.completion_signal,
-            dispatch_packet.completion_signal, session_id_snapshot, buffer_id, profile,
-            kernel_properties, (uint32_t)syscall(__NR_gettid), user_pkt_index);
-      } else {
-        session->GetAttTracer()->AddPendingSignals(
-            writer_id, record_id, original_packet.completion_signal,
-            dispatch_packet.completion_signal, session_id_snapshot, buffer_id, nullptr,
-            kernel_properties, (uint32_t)syscall(__NR_gettid), user_pkt_index);
-      }
+
+      session->GetAttTracer()->AddPendingSignals(
+          writer_id, record_id, original_packet.completion_signal,
+          dispatch_packet.completion_signal, session_id_snapshot, buffer_id, profile,
+          kernel_properties, (uint32_t)syscall(__NR_gettid), user_pkt_index);
+
+      uint64_t off = dispatch_packet.kernel_object +
+                    GetKernelCode(dispatch_packet.kernel_object)->kernel_code_entry_byte_offset;
+      codeobj_record::make_capture(rocprofiler_record_id_t{record_id}, capture_mode, off);
+      codeobj_record::start_capture(rocprofiler_record_id_t{record_id});
+      codeobj_record::stop_capture(rocprofiler_record_id_t{record_id});
 
       // Make a copy of the original packet, adding its signal to a barrier packet
       if (original_packet.completion_signal.handle) {

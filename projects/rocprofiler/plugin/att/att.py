@@ -40,25 +40,26 @@ class PerfEvent(ctypes.Structure):
 class CodeWrapped(ctypes.Structure):
     """ Matches CodeWrapped on the python side """
     _fields_ = [('line', ctypes.c_char_p),
-                            ('loc', ctypes.c_char_p),
-                            ('value', ctypes.c_int),
-                            ('to_line', ctypes.c_int),
-                            ('index', ctypes.c_int),
-                            ('line_num', ctypes.c_int)]
+                ('loc', ctypes.c_char_p),
+                ('to_line', ctypes.c_int),
+                ('value', ctypes.c_int),
+                ('index', ctypes.c_int),
+                ('line_num', ctypes.c_int),
+                ('addr', ctypes.c_int64)]
 
 
 class KvPair(ctypes.Structure):
     """ Matches pair<int, int> = (key, value) on the python side """
     _fields_ = [('key', ctypes.c_int),
-                            ('value', ctypes.c_int)]
+               ('value', ctypes.c_int)]
 
 
 class ReturnAssemblyInfo(ctypes.Structure):
     """ Matches ReturnAssemblyInfo on the python side """
     _fields_ = [('code', POINTER(CodeWrapped)),
-                            ('jumps', POINTER(KvPair)),
-                            ('code_len', ctypes.c_int),
-                            ('jumps_len', ctypes.c_int)]
+                ('jumps', POINTER(KvPair)),
+                ('code_len', ctypes.c_int),
+                ('jumps_len', ctypes.c_int)]
 
 
 class Wave(ctypes.Structure):
@@ -155,8 +156,9 @@ def parse_binary(filename, kernel=None):
         to_line = int(code_entry.to_line) if (code_entry.to_line >= 0) else None
         loc = loc if len(loc) > 0 else None
 
-        code.append([line, int(code_entry.value), to_line, loc,
-                    int(code_entry.index), int(code_entry.line_num), 0, 0]) # hitcount + cycles
+        # asm, inst_type, addr, loc, index, line_num, hitcount, cycles
+        code.append([line, int(code_entry.value), to_line, loc, int(code_entry.index),
+                    int(code_entry.line_num), int(code_entry.addr), 0, 0])
 
     jumps = {}
     for k in range(info.jumps_len):
@@ -187,9 +189,9 @@ def getWaves_binary(name, shader_engine_data_dict, target_cu, depth):
     shader_engine_data_dict[name] = (waves_python, events, occupancy, flags)
 
 
-def getWaves_stitch(SIMD, code, jumps, flags, latency_map, hitcount_map):
+def getWaves_stitch(SIMD, code, jumps, flags, latency_map, hitcount_map, bIsAuto):
     for pwave in SIMD:
-        pwave.instructions = stitch(pwave.instructions, code, jumps, flags)
+        pwave.instructions = stitch(pwave.instructions, code, jumps, flags, bIsAuto)
 
         for inst in pwave.instructions[0]:
             hitcount_map[inst[-1]] += 1
@@ -363,7 +365,10 @@ if __name__ == "__main__":
                         network: Open att server over the network.''', type=str, default="off")
     args = parser.parse_args()
 
-    if args.mode.lower() == 'file':
+    CSV_MODE = False
+    if args.mode.lower() == 'csv':
+        CSV_MODE = True
+    elif args.mode.lower() == 'file':
         args.dumpfiles = True
     elif args.mode.lower() == 'network':
         args.dumpfiles = False
@@ -386,12 +391,6 @@ if __name__ == "__main__":
                 EVENT_NAMES += [clean(line).split('SQ_')[1].lower()]
     if args.target_cu is None:
         args.target_cu = 1
-
-    # Assembly parsing
-    path = Path(args.assembly_code)
-    if not path.is_file():
-        print("Invalid assembly_code('{0}')!".format(args.assembly_code))
-        sys.exit(1)
 
     att_kernel = glob.glob(args.att_kernel)
 
@@ -418,6 +417,16 @@ if __name__ == "__main__":
     else:
         args.att_kernel = att_kernel[0]
 
+    # Assembly parsing
+    bIsAuto = False
+    if args.assembly_code.lower().strip() == 'auto':
+        args.assembly_code = args.att_kernel.split('_kernel.txt')[0]+'_isa.s'
+        bIsAuto = True
+    path = Path(args.assembly_code)
+    if not path.is_file():
+        print("Invalid assembly_code('{0}')!".format(args.assembly_code))
+        sys.exit(1)
+
     # Trace Parsing
     if args.trace_file is None:
         filenames = glob.glob(args.att_kernel.split('_kernel.txt')[0]+'_*.att')
@@ -431,7 +440,7 @@ if __name__ == "__main__":
     code = jumps = None
     if mpi_root:
         print('Att kernel:', args.att_kernel)
-        code, jumps = parse_binary(args.assembly_code, args.att_kernel)
+        code, jumps = parse_binary(args.assembly_code, None if bIsAuto else args.att_kernel)
 
     DBFILES = []
     TIMELINES = [np.zeros(int(1E4),dtype=np.int16) for k in range(5)]
@@ -460,7 +469,7 @@ if __name__ == "__main__":
         if np.sum([0]+[len(s.instructions) for s in SIMD]) == 0:
             print("No waves from", name)
             continue
-        getWaves_stitch(SIMD, code, jumps, gfxv, latency_map, hitcount_map)
+        getWaves_stitch(SIMD, code, jumps, gfxv, latency_map, hitcount_map, bIsAuto)
 
         analysed_filenames.append(name)
         EVENTS.append(perfevents)
@@ -523,6 +532,12 @@ if __name__ == "__main__":
         for k in range(len(code)):
             code[k][-2] = int(hitcount_map[k])
             code[k][-1] = int(latency_map[k])
+
+    if CSV_MODE:
+        if mpi_root:
+            from att_to_csv import dump_csv
+            dump_csv(code)
+        quit()
 
     gc.collect()
     print("Min time:", min_event_time)

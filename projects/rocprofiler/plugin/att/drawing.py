@@ -120,6 +120,7 @@ def draw_wave_states(selections, normalize, TIMELINES):
     plt.figure(figsize=(15,4))
 
     maxtime = max([np.max((TIMELINES[k]!=0)*np.arange(0,TIMELINES[k].size)) for k in plot_indices])
+    maxtime = max(maxtime, 1)
     timelines = [deepcopy(TIMELINES[k][:maxtime]) for k in plot_indices]
     timelines = [np.pad(t, [0, maxtime-t.size]) for t in timelines]
 
@@ -161,6 +162,7 @@ def draw_occupancy(selections, normalize, OCCUPANCY, shadernames):
         OCCUPANCY = [occ for occ in OCCUPANCY if len(occ) > 0]
 
     maxtime = 1
+    delta = 1
     for name, occ in zip(shadernames, OCCUPANCY):
         occ_values = [0]
         occ_times = [0]

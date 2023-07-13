@@ -184,10 +184,14 @@ file(GLOB ROCPROFILER_TRACER_SRC_FILES
      ${PROJECT_SOURCE_DIR}/src/core/session/tracer/*.cpp)
 file(GLOB ROCPROFILER_ROCTRACER_SRC_FILES
      ${PROJECT_SOURCE_DIR}/src/core/session/tracer/src/*.cpp)
-file(GLOB ROCPROFILER_ATT_SRC_FILES ${PROJECT_SOURCE_DIR}/src/core/session/att/att.cpp)
+set(ROCPROFILER_ATT_SRC_FILES
+    ${PROJECT_SOURCE_DIR}/src/core/session/att/att.cpp)
 file(GLOB ROCPROFILER_CLASS_SRC_FILES
      ${CMAKE_CURRENT_SOURCE_DIR}/rocprofiler_singleton.cpp)
 file(GLOB ROCPROFILER_SPM_SRC_FILES ${PROJECT_SOURCE_DIR}/src/core/session/spm/spm.cpp)
+
+set(CORE_ISA_CAPTURE_DIR ${PROJECT_SOURCE_DIR}/src/core/isa_capture)
+file(GLOB CORE_ISA_CAPTURE_SRC_FILES ${CORE_ISA_CAPTURE_DIR}/*.cpp)
 
 set(CORE_HARDWARE_DIR ${PROJECT_SOURCE_DIR}/src/core/hardware)
 file(GLOB CORE_HARDWARE_SRC_FILES ${CORE_HARDWARE_DIR}/*.cpp)
@@ -265,6 +269,7 @@ add_library(
     ${ROCPROFILER_CLASS_SRC_FILES}
     ${ROCPROFILER_PROFILER_SRC_FILES}
     ${ROCPROFILER_ATT_SRC_FILES}
+    ${CORE_ISA_CAPTURE_SRC_FILES}
     ${CORE_HARDWARE_SRC_FILES}
     ${CORE_HSA_SRC_FILES}
     ${ROCPROFILER_SPM_SRC_FILES}
@@ -326,6 +331,8 @@ if(ASAN)
                 stdc++
                 stdc++fs
                 amd_comgr
+                dw
+                elf
                 ${PCIACCESS_LIBRARIES})
 else()
     target_link_options(
@@ -343,6 +350,8 @@ else()
                 stdc++
                 stdc++fs
                 amd_comgr
+                dw
+                elf
                 ${PCIACCESS_LIBRARIES})
 endif()
 

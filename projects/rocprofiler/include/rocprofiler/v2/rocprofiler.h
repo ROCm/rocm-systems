@@ -1174,6 +1174,75 @@ typedef struct {
 } rocprofiler_record_se_att_data_t;
 
 /**
+ * struct to store the filepaths and their addresses for intercepted code objects
+*/
+typedef struct {
+  /**
+   * File path (file://, memory://) of the code object
+  */
+  const char* filepath;
+  /**
+   * Addr where codeobj is loaded
+  */
+  uint64_t base_address;
+  /**
+   * If a copy of the codeobj is made, contains the data. Nullptr otherwise.
+  */
+  const char* data;
+  /**
+   * If a copy of the codeobj is made, contains the size of the data. 0 otherwise.
+  */
+  uint64_t size;
+  /**
+   * Timestamp for the time point this codeobj was loaded.
+  */
+  rocprofiler_timestamp_t clock_start;
+  /**
+   * Timestamp for the time point this codeobj was unloaded.
+   * If the obj is still loaded by the time the record was generated, this value is 0
+  */
+  rocprofiler_timestamp_t clock_end;
+} rocprofiler_intercepted_codeobj_t;
+
+/**
+ * Enum defines how code object is captured for ATT and PC Sampling
+*/
+typedef enum {
+  /**
+   * Capture file and memory paths for the loaded code object
+  */
+  ROCPROFILER_CAPTURE_SYMBOLS_ONLY = 0,
+  /**
+   * Capture symbols for file:// and memory:// type objects,
+   * and generate a copy of all kernel code for objects under memory://
+  */
+  ROCPROFILER_CAPTURE_COPY_MEMORY = 1,
+  /**
+   * Capture symbols and all kernel code for file:// and memory:// type objects
+  */
+  ROCPROFILER_CAPTURE_COPY_FILE_AND_MEMORY = 2
+} rocprofiler_codeobj_capture_mode_t;
+
+/**
+ * struct to store the filepaths and their addresses for intercepted code objects
+*/
+typedef struct {
+  /**
+   * List of symbols
+  */
+  const rocprofiler_intercepted_codeobj_t* symbols;
+  /**
+   * Number of symbols
+  */
+  uint64_t count;
+  /**
+   * Userdata space for custom capture.
+   * For ATT records, it is the address of the kernel being launched.
+  */
+  uint64_t userdata;
+} rocprofiler_codeobj_symbols_t;
+
+/**
  * ATT tracing record structure.
  * This will represent all the information reported by the
  * ATT tracer such as the kernel and its thread trace data.
@@ -1215,6 +1284,10 @@ typedef struct {
    */
   rocprofiler_queue_index_t queue_idx;
   /**
+   * Writer ID for counting how many kernels
+   */
+  uint64_t writer_id;
+  /**
    * ATT data output from each shader engine.
    */
   rocprofiler_record_se_att_data_t* shader_engine_data;
@@ -1222,6 +1295,10 @@ typedef struct {
    * The count of the shader engine ATT data
    */
   uint64_t shader_engine_data_count;
+  /**
+   * Filepaths for the intercepted code objects at the time of kernel dispatch
+  */
+  rocprofiler_codeobj_symbols_t intercept_list;
 } rocprofiler_record_att_tracer_t;
 
 
@@ -1650,7 +1727,7 @@ typedef enum {
    */
   ROCPROFILER_PC_SAMPLING_COLLECTION = 3,
   /**
-   * ATT Tracing. (Not Yet Supported)
+   * ATT Tracing.
    */
   ROCPROFILER_ATT_TRACE_COLLECTION = 4,
   /**
@@ -1707,16 +1784,50 @@ typedef const char* rocprofiler_hsa_function_name_t;
  * ATT parameters to be used by for collection
  */
 typedef enum {
-  ROCPROFILER_ATT_COMPUTE_UNIT = 0,   //! Select the target compute unit (wgp) for profiling.
-  ROCPROFILER_ATT_VMID_MASK = 1,      //! VMID Mask.
-  ROCPROFILER_ATT_SE_MASK = 5,        //! Shader engine mask for selection.
-  ROCPROFILER_ATT_SIMD_SELECT = 8,    //! Set SIMD Mask (GFX9) or SIMD ID for collection (Navi)
-  ROCPROFILER_ATT_OCCUPANCY = 9,      //! Set true for occupancy collection only.
-  ROCPROFILER_ATT_BUFFER_SIZE = 10,   //! ATT collection max data size, in MB. Shared among shader engines.
-  ROCPROFILER_ATT_PERF_MASK = 240,    //! Mask of which compute units to generate perfcounters. GFX9 only.
-  ROCPROFILER_ATT_PERF_CTRL = 241,    //! Select collection period for perfcounters. GFX9 only.
-  ROCPROFILER_ATT_PERFCOUNTER = 242,  //! Select perfcounter ID (SQ block) for collection. GFX9 only.
-  ROCPROFILER_ATT_PERFCOUNTER_NAME = 243, //! Select perfcounter name (SQ block) for collection. GFX9 only.
+  /**
+   * Select the target compute unit (wgp) for profiling.
+  */
+  ROCPROFILER_ATT_COMPUTE_UNIT = 0,
+  /**
+   * VMID Mask
+  */
+  ROCPROFILER_ATT_VMID_MASK = 1,
+  /**
+   * Shader engine mask for selection.
+  */
+  ROCPROFILER_ATT_SE_MASK = 5,
+  /**
+   * Set SIMD Mask (GFX9) or SIMD ID for collection (Navi)
+  */
+  ROCPROFILER_ATT_SIMD_SELECT = 8,
+  /**
+   * Set true for occupancy collection only.
+  */
+  ROCPROFILER_ATT_OCCUPANCY = 9,
+  /**
+   * ATT collection max data size, in MB. Shared among shader engines.
+  */
+  ROCPROFILER_ATT_BUFFER_SIZE = 10,
+  /**
+   * Set ISA capture during ATT collection (rocprofiler_codeobj_capture_mode_t)
+  */
+  ROCPROFILER_ATT_CAPTURE_MODE = 11,
+  /**
+   * Mask of which compute units to generate perfcounters. GFX9 only.
+  */
+  ROCPROFILER_ATT_PERF_MASK = 240,
+  /**
+   * Select collection period for perfcounters. GFX9 only.
+  */
+  ROCPROFILER_ATT_PERF_CTRL = 241,
+  /**
+   * Select perfcounter ID (SQ block) for collection. GFX9 only.
+  */
+  ROCPROFILER_ATT_PERFCOUNTER = 242,
+  /**
+   * Select perfcounter name (SQ block) for collection. GFX9 only.
+  */
+  ROCPROFILER_ATT_PERFCOUNTER_NAME = 243,
   ROCPROFILER_ATT_MAXVALUE,
 
   ROCPROFILER_ATT_MASK = 2,           //! Deprecated
@@ -2229,6 +2340,62 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_device_profiling_session_stop(
  */
 ROCPROFILER_API rocprofiler_status_t rocprofiler_device_profiling_session_destroy(
     rocprofiler_session_id_t session_id) ROCPROFILER_VERSION_9_0;
+
+/**
+ * Creates a codeobj capture record, returned in ID.
+ * \param[out] id contains a handle for the created record.
+ * \param[in] mode Set to capture symbols only,
+ *                  make a copy of codeobj under memory://
+ *                  or copy all codeobj.
+ * \param[in] userdata userdata to be returned in the record. For ATT records, is the kernel addr.
+ * \retval ::ROCPROFILER_STATUS_SUCCESS The function has been executed successfully.
+ */
+ROCPROFILER_API rocprofiler_status_t
+rocprofiler_codeobj_capture_create(
+  rocprofiler_record_id_t* id,
+  rocprofiler_codeobj_capture_mode_t mode,
+  uint64_t userdata
+);
+
+/**
+ * API to get the captured codeobj.
+ * Each call invalidates the previous pointer for the same ID.
+ * \param[in] id record handle.
+ * \param[out] capture captured code objects.
+ * \retval ::ROCPROFILER_STATUS_SUCCESS The function has been executed successfully.
+ * \retval ::ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENTS invalid ID.
+ */
+ROCPROFILER_API rocprofiler_status_t
+rocprofiler_codeobj_capture_get(rocprofiler_record_id_t id,
+                                rocprofiler_codeobj_symbols_t* capture);
+
+/**
+ * API to delete a record.
+ * Invalidates the pointer returned from rocprofiler_codeobj_capture_get.
+ * \param[in] id record handle.
+ * \retval ::ROCPROFILER_STATUS_SUCCESS The function has been executed successfully.
+ */
+ROCPROFILER_API rocprofiler_status_t
+rocprofiler_codeobj_capture_free(rocprofiler_record_id_t id);
+
+/**
+ * Records the current loaded codeobjs and any following loads until stop() is called.
+ * \param[in] id record handle.
+ * \retval ::ROCPROFILER_STATUS_SUCCESS The function has been executed successfully.
+ * \retval ::ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENTS invalid ID.
+ */
+ROCPROFILER_API rocprofiler_status_t
+rocprofiler_codeobj_capture_start(rocprofiler_record_id_t id);
+
+/**
+ * Stops recording of future codeobjs, until start() is called again.
+ * Calling stop() immediately after a start() snapshots the current state of loaded codeobjs.
+ * \param[in] id record handle.
+ * \retval ::ROCPROFILER_STATUS_SUCCESS The function has been executed successfully.
+ * \retval ::ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENTS invalid ID.
+ */
+ROCPROFILER_API rocprofiler_status_t
+rocprofiler_codeobj_capture_stop(rocprofiler_record_id_t id);
 
 /** @} */
 

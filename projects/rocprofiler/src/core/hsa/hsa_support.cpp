@@ -50,6 +50,7 @@
 
 #include "src/core/hsa/queues/queue.h"
 #include "src/api/rocprofiler_singleton.h"
+#include "src/core/isa_capture/code_object_track.hpp"
 
 #include <experimental/filesystem>
 namespace fs = std::experimental::filesystem;
@@ -463,6 +464,16 @@ hsa_status_t CodeObjectCallback(hsa_executable_t executable,
   data.codeobj.uri = uri_str.c_str();
   data.codeobj.unload = *static_cast<bool*>(arg) ? 1 : 0;
   ReportActivity(ACTIVITY_DOMAIN_HSA_EVT, HSA_EVT_ID_CODEOBJ, &data);
+
+  if (data.codeobj.unload)
+    codeobj_capture_instance::Unload(data.codeobj.load_base);
+  else
+    codeobj_capture_instance::Load(
+      data.codeobj.load_base,
+      uri_str,
+      data.codeobj.memory_base,
+      data.codeobj.memory_size
+    );
 
   hsa_executable_iterate_agent_symbols(executable, data.codeobj.agent,
                                        hsa_executable_iteration_callback, &(data.codeobj.unload));

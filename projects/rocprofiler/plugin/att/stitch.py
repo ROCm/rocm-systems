@@ -6,7 +6,7 @@ if sys.version_info[0] < 3:
 from collections import defaultdict
 from copy import deepcopy
 
-MAX_STITCHED_TOKENS = 10000000
+MAX_STITCHED_TOKENS = 100000000
 MAX_FAILED_STITCHES = 256
 STACK_SIZE_LIMIT = 64
 
@@ -25,6 +25,7 @@ GETPC = 11
 SETPC = 12
 SWAPPC = 13
 LANEIO = 14
+PCINFO = 15
 DONT_KNOW = 100
 
 WaveInstCategory = {
@@ -46,10 +47,11 @@ WaveInstCategory = {
     SETPC: "SETPC",
     SWAPPC: "SWAPPC",
     LANEIO: "LANEIO",
+    PCINFO: "PCINFO",
     DONT_KNOW: "DONT_KNOW",
 }
 
-
+# Keeps track of register states for hipcc-generated assembly
 class RegisterWatchList:
     def __init__(self, labels):
         self.registers = {'v'+str(k): [[] for m in range(64)] for k in range(64)}
@@ -84,7 +86,7 @@ class RegisterWatchList:
         except:
             pass
 
-    def swappc(self, line, line_num):
+    def swappc(self, line, line_num, inst_num):
         try:
             tokens = self.tokenize(line)
             dst = tokens[1]
@@ -97,10 +99,9 @@ class RegisterWatchList:
         except:
             return 0
 
-    def setpc(self, line):
+    def setpc(self, line, inst_num):
         try:
             src = line.split(' ')[1].strip()
-            #print('Going to:', self.registers[self.range(src)[0]], src)
             popped = self.registers[self.range(src)[0]][-1]
             self.registers[self.range(src)[0]] = self.registers[self.range(src)[0]][:-1]
             return popped
@@ -140,16 +141,57 @@ class RegisterWatchList:
         except Exception as e:
             pass
 
+# Translates PC values to instructions, for auto captured ISA
+class PCTranslator:
+    def __init__(self, code, insts):
+        self.code = code
+        self.insts = insts
+        self.addrmap = {code[m][-3] : m for m in range(len(code))}
+
+    def try_translate(self, tok):
+        pass
+    def range(self, r):
+        pass
+    def tokenize(self, line):
+        pass
+    def getpc(self, line, next_line):
+        pass
+    def swappc(self, line, line_num, inst_index):
+        try:
+            loc = self.addrmap[self.insts[inst_index+1][2]]
+            #print('Jumping to:', loc, self.code[loc])
+            return loc
+        except:
+            print('SWAPPC: Could not find addr', self.insts[inst_index+1][2], 'for', line)
+            return -1
+    def setpc(self, line, inst_index):
+        try:
+            loc = self.addrmap[self.insts[inst_index+1][2]]
+            #print('Jumping to:', loc, self.code[loc])
+            return loc
+        except:
+            print('SETPC: Could not find addr', self.insts[inst_index+1][2], 'for', line)
+            return -1
+    def scratch(self, line):
+        pass
+    def move(self, line):
+        pass
+    def updatelane(self, line):
+        pass
+
+# Matches tokens in reverse order
 def try_match_swapped(insts, code, i, line):
     return insts[i+1][1] == code[line][1] and insts[i][1] == code[line+1][1]
 
 FORK_NAMES = 1
+# A successful parsed instruction
 class CachedInst:
     def __init__(self, inst, as_line):
         self.inst_type = inst
         self.as_line = as_line
         self.forks = None
 
+# A branch of the parsing tree
 class Fork:
     def __init__(self):
         global FORK_NAMES
@@ -159,19 +201,21 @@ class Fork:
         FORK_NAMES += 1
         #print('Created new fork: ', self.name)
 
-def move_down_fork(fork, insts, i): #def move_down_fork(fork : Fork, insts : list, i : int):
+# Try to match sequence "insts" with the branch "fork", starting at position "i"
+def move_down_fork(fork, insts, i): #(fork : Fork, insts : list, i : int):
     N = min(len(insts), len(fork.insts))
 
     while i < N:
         if insts[i][1] == fork.insts[i].inst_type:
             i += 1
-        elif i<N-1 and insts[i+1][1] == fork.insts[i].inst_type and insts[i][1] == fork.insts[i+1].inst_type:
+        elif i<N-1  and insts[i+1][1] == fork.insts[i].inst_type \
+                    and insts[i][1] == fork.insts[i+1].inst_type:
             i += 2
         else:
             #print('Failed at', i, insts[i])
             return False, i
 
-    if len(fork.insts) < len(insts):
+    if len(fork.insts) != len(insts):
         #print('Failed at the end at', i, insts[i])
         return False, i
 
@@ -180,11 +224,11 @@ def move_down_fork(fork, insts, i): #def move_down_fork(fork : Fork, insts : lis
 
 FORK_TREE = Fork()
 
+# Check if there exists a previous wave with the same sequence of instructions executed
 def fromDict(insts):
     i = 0
     N = len(insts)
     cur_fork = FORK_TREE
-    #print('Getting from dict')
     while i < N:
         tillEnd, final_pos = move_down_fork(cur_fork, insts, i)
         if tillEnd:
@@ -192,7 +236,6 @@ def fromDict(insts):
             return True, cur_fork
 
         i += final_pos
-        #print('Got fpos:', i, 'of', len(insts))
 
         if i >= len(cur_fork.insts):
             return False, cur_fork
@@ -204,7 +247,6 @@ def fromDict(insts):
         bMatchFork = False
         for fork in last_inst.forks:
             if fork.insts[0].inst_type == insts[0][1]:
-                #print('Found match fork', fork.name)
                 cur_fork = fork
                 bMatchFork = True
                 break
@@ -217,9 +259,29 @@ def fromDict(insts):
     return False, cur_fork
 
 
-def stitch(insts, raw_code, jumps, gfxv):
+def stitch(insts, raw_code, jumps, gfxv, bIsAuto):
     bGFX9 = gfxv == 'vega'
+
+    # Try from cached result from a previous wave that have already been parsed
+    dict_sucess, current_fork = fromDict(insts)
+    if dict_sucess:
+        result, loopCount, mem_unroll, flight_count, maxline, pcsequence = current_fork.data
+        # Check if the sequence of measured PC values are equal for cached and new wave
+        if len(pcsequence) > 0:
+            pcs = [r[2] for r in insts if r[1] == PCINFO]
+            if len(pcs) != len(pcsequence):
+                dict_sucess = False
+            for pc1, pc2 in zip(pcs, pcsequence):
+                if pc1 != pc2:
+                    dict_sucess = False
+
+    # If successful, use resulting assembly from cache
+    if dict_sucess:
+        result = [r+(asm[-1],) for r, asm in zip(insts, result)]
+        return result, loopCount, mem_unroll, flight_count, maxline, len(result)
+
     result, i, line, loopCount, N = [], 0, 0, defaultdict(int), len(insts)
+
 
     SMEM_INST = []  # scalar memory
     VLMEM_INST = [] # vector memory load
@@ -236,8 +298,14 @@ def stitch(insts, raw_code, jumps, gfxv):
 
     labels = {}
     jump_map = [0]
+
+    # Clean the code and remove comments
     code = [raw_code[0]]
     for c in raw_code[1:]:
+        if bIsAuto and '; Begin ' == c[0][:len('; Begin ')]:
+            if '; Begin <Kernel>' in c[0]:
+                line = len(code)
+                print('Begin at:', line, c)
         c = list(c)
         c[0] = c[0].split(';')[0].split('//')[0].strip()
 
@@ -254,25 +322,22 @@ def stitch(insts, raw_code, jumps, gfxv):
 
     jumps = {jump_map[j]+1: j for j in jumps}
 
+    # Checks if we have guaranteed ordering in memory operations
     smem_ordering = 0
     vlmem_ordering = 0
     vsmem_ordering = 0
-
-    watchlist = RegisterWatchList(labels=labels)
 
     num_failed_stitches = 0
     loops = 0
     maxline = 0
 
-    dict_sucess, current_fork = fromDict(insts)
-    if dict_sucess:
-        result, loopCount, mem_unroll, flight_count, maxline = current_fork.data
-        result = [r+(asm[-1],) for r, asm in zip(insts, result)]
-        return result, loopCount, mem_unroll, flight_count, maxline, len(insts)
+    watchlist = RegisterWatchList(labels=labels) if not bIsAuto else PCTranslator(code, insts)
 
+    pcsequence = []
     while i < N:
         loops += 1
-        if line >= len(code) or loops > MAX_STITCHED_TOKENS or num_failed_stitches > MAX_FAILED_STITCHES:
+        if line >= len(code) or loops > MAX_STITCHED_TOKENS \
+            or num_failed_stitches > MAX_FAILED_STITCHES:
             break
 
         maxline = max(reverse_map[line], maxline)
@@ -282,23 +347,37 @@ def stitch(insts, raw_code, jumps, gfxv):
         matched = True
         next = line+1
 
-        if '_mov_' in as_line[0]:
-            watchlist.move(as_line[0])
-        elif 'scratch_' in as_line[0]:
-            watchlist.scratch(as_line[0])
+        if not bIsAuto:
+            if '_mov_' in as_line[0]:
+                watchlist.move(as_line[0])
+            elif 'scratch_' in as_line[0]:
+                watchlist.scratch(as_line[0])
 
         if as_line[1] == GETPC:
-            watchlist.getpc(as_line[0], code[line+1][0])
-            matched = inst[1] in [SALU, JUMP]
+            try:
+                watchlist.getpc(as_line[0], code[line+1][0])
+                matched = inst[1] in [SALU, JUMP]
+            except:
+                matched = False
         elif as_line[1] == LANEIO:
             watchlist.updatelane(as_line[0])
             matched = inst[1] == VALU
         elif as_line[1] == SETPC:
-            next = watchlist.setpc(as_line[0])
+            next = watchlist.setpc(as_line[0], i)
             matched = inst[1] in [SALU, JUMP]
+            if bIsAuto:
+                matched = next >= 0
+                i += 1
+                result.append((insts[i][0], PCINFO, 0, 0, 0))
+                pcsequence.append(insts[i][2])
         elif as_line[1] == SWAPPC:
-            next = watchlist.swappc(as_line[0], line)
+            next = watchlist.swappc(as_line[0], line, i)
             matched = inst[1] in [SALU, JUMP]
+            if bIsAuto:
+                matched = next >= 0
+                i += 1
+                result.append((insts[i][0], PCINFO, 0, 0, 0))
+                pcsequence.append(insts[i][2])
         elif inst[1] == as_line[1]:
             if line in jumps:
                 loopCount[jumps[line]-1] += 1
@@ -366,10 +445,10 @@ def stitch(insts, raw_code, jumps, gfxv):
 
                 if 'vscnt' in as_line[0] or (bGFX9 and 'vmcnt' in as_line[0]):
                     try:
-                        wait_N = int(as_line[0].split('vmcnt(')[1].split(')')[0])
+                        wait_N = int(as_line[0].split('vscnt(')[1].split(')')[0])
                     except:
                         try:
-                            wait_N = int(as_line[0].split('vscnt(')[1].split(')')[0])
+                            wait_N = int(as_line[0].split('vmcnt(')[1].split(')')[0])
                         except:
                             wait_N = 0
                     flight_count.append([as_line[5], num_inflight, wait_N])
@@ -407,9 +486,12 @@ def stitch(insts, raw_code, jumps, gfxv):
                     if skipped_immed > 0 and 's_waitcnt ' in as_line[0]:
                         matched = True
                         skipped_immed -= 1
-                    else:
+                    elif 'scratch_' not in as_line[0]:
                         print('Parsing terminated at:', as_line)
                         break
+
+        #print(matched, as_line)
+        #print([WaveInstCategory[insts[i+k][1]] for k in range(10) if i+k < len(insts)])
 
         if matched:
             result.append(inst + (reverse_map[line],))
@@ -425,8 +507,8 @@ def stitch(insts, raw_code, jumps, gfxv):
         line = next
 
     N = max(N, 1)
-    if len(result) != N:
-        print('Warning - Stitching rate: '+str(len(result) * 100 / N)+'% matched')
+    if i != N:
+        print('Warning - Stitching rate: '+str(i * 100 / N)+'% matched')
         print('Leftovers:', [WaveInstCategory[insts[i+k][1]] for k in range(20) if i+k < len(insts)])
         try:
             print(line, code[line])
@@ -440,5 +522,6 @@ def stitch(insts, raw_code, jumps, gfxv):
             line += 1
 
     current_fork.insts = [CachedInst(inst[1], inst[-1]) for inst in result]
-    current_fork.data = result, loopCount, mem_unroll, flight_count, maxline
-    return result, loopCount, mem_unroll, flight_count, maxline, len(insts)
+    current_fork.data = result, loopCount, mem_unroll, flight_count, maxline, pcsequence
+    result = [r for r in result if r[1] != PCINFO]
+    return result, loopCount, mem_unroll, flight_count, maxline, len(result) if i == N else N

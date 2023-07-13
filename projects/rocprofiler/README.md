@@ -306,56 +306,32 @@ Usage:
 - ATT (Advanced thread tracer) plugin: advanced hardware traces data in binary format. Please refer ATT section.
 Tool used to collect fine-grained hardware metrics. Provides ISA-level instruction hotspot analysis via hardware tracing.
 
-***
-Note: ATT(Advanced Thread Trace) needs some preparation before running.
-***
+  - Install plugin package. See Plugin Support section for installation
+  - Run the following to view the trace. Att-specific options must come right after the assembly file
 
-- Make sure to generate the assembly file for application by executing the following before compiling your HIP Application. This can be achieved globally by following environment variable
+    ```bash
+    rocprofv2 -i input.txt --plugin att <app_assembly_file> --mode network <app_relative_path>
+    ```
 
-  ```bash
-  export HIPCC_COMPILE_FLAGS_APPEND="--save-temps -g"
-  ```
-
-  Similarly, the --save-temps -g flags can be added per file for better ISA generation control.
-
-- Install plugin package. See Plugin Support section for installation
-- Run the following to view the trace. Att-specific options must come right after the assembly file
-
-  ```bash
-  rocprofv2 -i input.txt --plugin att <app_assembly_file> --mode network <app_relative_path>
-  ```
-
-- Example for vectoradd on navi31.
-
-  ***
-  Note: Special attention to gfx1100.s==navi31 in the ISA file name.
-  Use gfx1030 for navi21, gfx90a for MI200 and gfx940 for MI300
-  ***
-
-  ```bash
-  hipcc -g --save-temps vectoradd_hip.cpp -o vectoradd_hip.exe
-  rocprofv2 -i input.txt --plugin att vectoradd_hip-hip-amdgcn-amd-amdhsa-gfx1100.s --mode network ./vectoradd_hip.exe
-  ```
-
-  Then open the browser at `http://localhost:8000`
-  The ISA can also be obtained from llvm/roc objdump, however, annotations will be different
-
-  - app_assembly_file_relative_path
-      AMDGCN ISA file with .s extension generated in 1st step
+  - app_assembly_file: 
+    On ROCm 6.0, ATT enables automatic capture of the ISA during kernel execution, and does not require recompiling. It is recommeneded to leave at "auto".
   - app_relative_path
-      Path for the running application
+    Path for the running application
   - ATT plugin optional parameters
     - --depth [n]: How many waves per slot to parse (maximum).
     - --mpi [proc]: Parse with this many mpi processes, for greater analysis speed. Does not change results. Requires mpi4py.
     - --att_kernel "filename": Kernel filename to use (instead of ATT asking which one to use).
     - --trace_file "files": glob (wildcards allowed) of traces files to parse. Requires quotes for use with wildcards.
-    - --mode [network, file, off (default)]
+    - --mode [network, file, csv, off (default)]
       - network
           Opens the server with the browser UI.
           att needs 2 ports available (e.g. 8000, 18000). There is an option (default: --ports "8000,18000") to change these.
           In case rocprofv2 is running on a different machine, use port forwarding `ssh -L 8000:localhost:8000 <user@IP>` so the browser can be used locally. For docker, use --network=host --ipc=host -p8000:8000 -p18000:18000
       - file
           Dumps the analyzed json files to disk for vieweing at a later time. Run python3 httpserver.py from within the generated ui/ folder to view the trace, similarly to network mode. The folder can be copied to another machine, and will run without rocm.
+      - csv
+          Dumps the analyzed assembly into a CSV format, with the hitcount and total cycles cost.
+          Use rocprofv2's -o option to specify output file name (default "att_output.csv").
       - off
           Runs trace collection but not analysis, so it can be analyzed at a later time. Run rocprofv2 ATT [network, file] with the same parameters, removing the application binary, to analyze previously generated traces.
   - input.txt
@@ -385,23 +361,47 @@ Note: ATT(Advanced Thread Trace) needs some preparation before running.
     - PERFCOUNTERS_COL_PERIOD=0x3 // Multiplier period for counter collection [0~31]. 0=fastest (usually once every 16 cycles). GFX9 only. Counters will be shown in a graph over time in the browser UI.
     - PERFCOUNTER=counter_name // Add a SQ counter to be collected with ATT; period defined by PERFCOUNTERS_COL_PERIOD. GFX9 only.
     - BUFFER_SIZE=[size] // Sets size of the ATT buffer collection, per dispatch, in megabytes (shared among all shader engines).
+    - ISA_CAPTURE_MODE=[0,1,2] // Set capture mode during kernel dispatch.
+        - 0 = capture symbols only.
+        - 1 = capture symbols for file:// and make a copy of memory://
+        - 2 = Copy file:// and memory://
+
+  - Example for vectoradd.
+
+    ```bash
+    # -g add debugging symbols to the binary. Required only for tracking disassembly back to c++.
+    hipcc -g --save-temps vectoradd_hip.cpp -o vectoradd_hip.exe
+    # "auto" means to use the automatically captured ISA. "csv" dumps result to "my.csv".
+    rocprofv2 -i input.txt -o my.csv --plugin att auto --mode csv ./vectoradd_hip.exe
+    ```
+    Instruction latencies will be in my.csv
+
+  - Example with symbolic ISA (as in ROCm 5.7 or previous).
+    ```bash
+    hipcc -g --save-temps vectoradd_hip.cpp -o vectoradd_hip.exe
+    # A custom ISA can be used such as vectoradd_hip-hip-amdgcn-amd-amdhsa-gfx1100.s
+    # Special attention to the correct architecture for the ISA, such as "gfx1100" (navi31).
+    rocprofv2 -i input.txt --plugin att vectoradd_hip-hip-amdgcn-amd-amdhsa-gfx1100.s --mode network ./vectoradd_hip.exe
+    ```
+
+    Then open the browser at `http://localhost:8000`
 
   ***
   Note: For MPI or long running applications, we recommend to run collection, and later run the parser with already collected data:
-   Run only collection: The assembly file is not used. Use mpirun [...] rocprofv2 [...] if needed.
+  Run only collection: The assembly file is not used. Use mpirun [...] rocprofv2 [...] if needed.
 
   ```bash
-   rocprofv2 -i input.txt --plugin att none ./vectoradd_hip.exe
+  # Run only data collection, not the parser
+  rocprofv2 -i input.txt --plugin att auto --mode off ./vectoradd_hip.exe
   ```
-
-  Remove the binary/application: Only runs the parser.
-  
+  Remove the binary/application from the command line.
   ```bash
-  rocprofv2 -i input.txt --plugin att vectoradd_hip-hip-amdgcn-amd-amdhsa-gfx1100.s --mode network
+  # Only runs the parser on previously collected data.
+  rocprofv2 -i input.txt --plugin att auto --mode network
   ```
 
   ***
-  
+
 ### Flush Interval
 
 Flush interval can be used to control the interval time in milliseconds between the buffers flush for the tool. However, if the buffers are full the flush will be called on its own. This can be used as in the next example:

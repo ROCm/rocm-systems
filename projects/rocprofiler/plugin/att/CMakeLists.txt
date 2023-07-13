@@ -26,7 +26,7 @@ set(ENV{ROCPROFV2_ATT_LIB_PATH} $ROCPROFV2_ATT)
 
 # Building att plugin library
 file(GLOB ROCPROFILER_UTIL_SRC_FILES ${PROJECT_SOURCE_DIR}/src/utils/helper.cpp)
-file(GLOB FILE_SOURCES att.cpp)
+file(GLOB FILE_SOURCES att.cpp disassembly.cpp code_printing.cpp)
 add_library(att_plugin SHARED ${FILE_SOURCES} ${ROCPROFILER_UTIL_SRC_FILES})
 
 set_target_properties(
@@ -44,8 +44,7 @@ target_include_directories(att_plugin PRIVATE ${PROJECT_SOURCE_DIR}
 target_link_options(
     att_plugin PRIVATE -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/../exportmap
     -Wl,--no-undefined)
-target_link_libraries(att_plugin PRIVATE rocprofiler-v2 hsa-runtime64::hsa-runtime64
-                                         stdc++fs)
+target_link_libraries(att_plugin PRIVATE rocprofiler-v2 hsa-runtime64::hsa-runtime64 stdc++fs dw elf amd_comgr)
 
 install(TARGETS att_plugin LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/${PROJECT_NAME}
                                    COMPONENT asan)
@@ -56,6 +55,7 @@ configure_file(att.py att/att.py COPYONLY)
 configure_file(trace_view.py att/trace_view.py COPYONLY)
 configure_file(stitch.py att/stitch.py COPYONLY)
 configure_file(drawing.py att/drawing.py COPYONLY)
+configure_file(att_to_csv.py att/att_to_csv.py COPYONLY)
 configure_file(ui/index.html att/ui/index.html COPYONLY)
 configure_file(ui/logo.svg att/ui/logo.svg COPYONLY)
 configure_file(ui/styles.css att/ui/styles.css COPYONLY)

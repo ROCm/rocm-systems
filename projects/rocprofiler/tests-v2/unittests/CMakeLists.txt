@@ -5,6 +5,8 @@ find_library(PCIACCESS_LIBRARIES pciaccess REQUIRED)
 enable_testing()
 find_package(GTest REQUIRED)
 
+find_library(GDB rocm-dbgapi PATHS ${ROCM_PATH} REQUIRED)
+
 # Getting Source files for ROCProfiler, Hardware, HSA, Memory, Session, Counters, Utils
 set(CORE_MEMORY_DIR ${PROJECT_SOURCE_DIR}/src/core/memory)
 file(GLOB CORE_MEMORY_SRC_FILES ${CORE_MEMORY_DIR}/*.cpp)
@@ -35,14 +37,15 @@ file(GLOB ROCPROFILER_TRACER_SRC_FILES
      ${PROJECT_SOURCE_DIR}/src/core/session/tracer/*.cpp)
 file(GLOB ROCPROFILER_ROCTRACER_SRC_FILES
      ${PROJECT_SOURCE_DIR}/src/core/session/tracer/src/*.cpp)
-file(GLOB ROCPROFILER_ATT_SRC_FILES ${PROJECT_SOURCE_DIR}/src/core/session/att/att.cpp)
+file(GLOB ROCPROFILER_ATT_SRC_FILES ${PROJECT_SOURCE_DIR}/src/core/session/att/*.cpp)
 file(GLOB ROCPROFILER_SRC_CLASS_FILES
      ${CMAKE_CURRENT_SOURCE_DIR}/rocprofiler_singleton.cpp)
+file(GLOB ROCPROFILER_ISA_SRC_FILES ${PROJECT_SOURCE_DIR}/src/core/isa_capture/*.cpp)
 file(GLOB ROCPROFILER_SPM_SRC_FILES ${PROJECT_SOURCE_DIR}/src/core/session/spm/spm.cpp)
 file(GLOB ROCPROFILER_SRC_API_FILES ${PROJECT_SOURCE_DIR}/src/api/*.cpp)
 
-set(ROCPROFILER_SRC_FILES ${ROCPROFILER_SRC_API_FILES} ${ROCPROFILER_SRC_CLASS_FILES}
-                          ${ROCPROFILER_SRC_PROFILER_FILES} ${ROCPROFILER_ATT_SRC_FILES})
+set(ROCPROFILER_SRC_FILES ${ROCPROFILER_SRC_API_FILES} ${ROCPROFILER_ATT_SRC_FILES}
+     ${ROCPROFILER_ISA_SRC_FILES} ${ROCPROFILER_SRC_PROFILER_FILES} ${ROCPROFILER_ATT_SRC_FILES})
 
 set(CORE_HSA_DIR ${PROJECT_SOURCE_DIR}/src/core/hsa)
 file(GLOB CORE_HSA_SRC_FILES ${CORE_HSA_DIR}/*.cpp)
@@ -98,7 +101,7 @@ target_compile_definitions(
 
 target_link_libraries(
     runUnitTests PRIVATE rocprofiler_tool ${AQLPROFILE_LIB} hsa-runtime64::hsa-runtime64
-                         GTest::gtest GTest::gtest_main stdc++fs ${PCIACCESS_LIBRARIES})
+          GTest::gtest GTest::gtest_main stdc++fs ${PCIACCESS_LIBRARIES} ${GDB} dw elf c dl)
 
 add_dependencies(tests runUnitTests)
 install(TARGETS runUnitTests

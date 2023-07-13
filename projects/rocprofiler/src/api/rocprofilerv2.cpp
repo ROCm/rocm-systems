@@ -8,6 +8,7 @@
 #include "src/core/hsa/hsa_support.h"
 #include "src/api/rocprofiler_singleton.h"
 #include "src/utils/helper.h"
+#include "src/core/isa_capture/code_object_track.hpp"
 
 // TODO(aelwazir): change that to adapt with our own Exception
 // What about outside exceptions and callbacks exceptions!!
@@ -540,6 +541,59 @@ ROCPROFILER_API rocprofiler_status_t
 rocprofiler_device_profiling_session_destroy(rocprofiler_session_id_t session_id) {
   API_METHOD_PREFIX
   rocprofiler::GetROCProfilerSingleton()->DestroyDeviceProfilingSession(session_id);
+  API_METHOD_SUFFIX
+}
+
+ROCPROFILER_API rocprofiler_status_t
+rocprofiler_codeobj_capture_get(rocprofiler_record_id_t id,
+                                rocprofiler_codeobj_symbols_t* symbols) {
+  API_METHOD_PREFIX
+  try {
+    *symbols = codeobj_record::get_capture(id);
+  } catch(const std::out_of_range& e) {
+    return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENTS;
+  }
+  API_METHOD_SUFFIX
+}
+
+ROCPROFILER_API rocprofiler_status_t
+rocprofiler_codeobj_capture_create(
+  rocprofiler_record_id_t* id,
+  rocprofiler_codeobj_capture_mode_t mode,
+  uint64_t userdata
+) {
+  API_METHOD_PREFIX
+  id->handle = rocprofiler::GetROCProfilerSingleton()->GetUniqueRecordId();
+  codeobj_record::make_capture(*id, mode, userdata);
+  API_METHOD_SUFFIX
+}
+
+ROCPROFILER_API rocprofiler_status_t
+rocprofiler_codeobj_capture_free(rocprofiler_record_id_t id) {
+  API_METHOD_PREFIX
+  codeobj_record::free_capture(id);
+  API_METHOD_SUFFIX
+}
+
+ROCPROFILER_API rocprofiler_status_t
+rocprofiler_codeobj_capture_start(rocprofiler_record_id_t id) {
+  API_METHOD_PREFIX
+  try {
+    codeobj_record::start_capture(id);
+  } catch(const std::out_of_range& e) {
+    return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENTS;
+  }
+  API_METHOD_SUFFIX
+}
+
+ROCPROFILER_API rocprofiler_status_t
+rocprofiler_codeobj_capture_stop(rocprofiler_record_id_t id) {
+  API_METHOD_PREFIX
+  try {
+    codeobj_record::stop_capture(id);
+  } catch(const std::out_of_range& e) {
+    return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENTS;
+  }
   API_METHOD_SUFFIX
 }
 
