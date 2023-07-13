@@ -104,11 +104,10 @@ MAKE_OPTS="-j -C $ROCPROFILER_ROOT/$BUILD_DIR"
 
 cmake --build "$BUILD_DIR" -- $MAKE_OPTS
 cmake --build "$BUILD_DIR" -- $MAKE_OPTS mytest
-cmake --build "$BUILD_DIR" -- $MAKE_OPTS tests
 if [ "$RUN_TEST" = "no" ] ; then
-  cmake --build "$BUILD_DIR" -- $MAKE_OPTS doc
-  cmake --build "$BUILD_DIR" -- $MAKE_OPTS samples
-  cmake --build "$BUILD_DIR" -- $MAKE_OPTS package
+  cmake --build "$BUILD_DIR" -- $MAKE_OPTS tests samples doc package
+else
+  cmake --build "$BUILD_DIR" -- $MAKE_OPTS tests
 fi
 
 exit 0

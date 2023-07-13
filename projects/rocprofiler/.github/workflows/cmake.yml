@@ -1,0 +1,539 @@
+name: CMake
+
+on:
+  push:
+    branches: [ "amd-staging" ]
+  pull_request:
+    branches: [ "amd-staging" ]
+
+env:
+  # Customize the CMake build type here (Release, Debug, RelWithDebInfo, etc.)
+  BUILD_TYPE: RelWithDebInfo
+  PREFIX_PATH: "/opt/rocm"
+  ROCM_PATH: "/opt/rocm"
+  LD_RUNPATH_FLAG: " -Wl,--enable-new-dtags -Wl,--rpath,/opt/rocm/lib"
+  GPU_LIST: "gfx900 gfx906 gfx908 gfx90a gfx940 gfx941 gfx942 gfx1030 gfx1100 gfx1101 gfx1102"
+
+jobs:
+  build_run_on_mi200:
+    runs-on: mi200
+    steps:
+      - name: Run on MI200
+        run: echo "Running on MI200"
+
+  build_run_on_mi200_ubuntu_22_04:
+    # The CMake configure and build commands are platform agnostic and should work equally well on Windows or Mac.
+    # You can convert this to a matrix build if you need cross-platform coverage.
+    # See: https://docs.github.com/en/free-pro-team@latest/actions/learn-github-actions/managing-complex-workflows#using-a-build-matrix
+    runs-on: mi200
+    needs: build_run_on_mi200
+    container:
+      image: localhost:5000/mainline-ubuntu-22.04-stg1
+      options: --privileged --ipc=host --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --cap-add CAP_SYS_PTRACE --cap-add CAP_SYS_ADMIN --security-opt seccomp=unconfined
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Restore cached Build
+      id: cache-build-restore
+      uses: actions/cache/restore@v3
+      with:
+        path: |
+          ${{github.workspace}}/build
+        key: mi200_ubuntu_22_04
+
+    - name: Configure CMake
+      if: steps.cache-build-restore.outputs.cache-hit != 'false'
+      # Configure CMake in a 'build' subdirectory. `CMAKE_BUILD_TYPE` is only required if you are using a single-configuration generator such as make.
+      # See https://cmake.org/cmake/help/latest/variable/CMAKE_BUILD_TYPE.html?highlight=cmake_build_type
+      run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DCMAKE_EXPORT_COMPILE_COMMANDS=TRUE -DCMAKE_MODULE_PATH="${{env.ROCM_PATH}}/hip/cmake;${{env.ROCM_PATH}}/lib/cmake" -DCMAKE_PREFIX_PATH="${{env.PREFIX_PATH}}" -DCMAKE_INSTALL_PREFIX="${{env.ROCM_PATH}}" -DCMAKE_SHARED_LINKER_FLAGS="${{env.LD_RUNPATH_FLAG}}" -DCMAKE_INSTALL_RPATH=${{env.ROCM_RPATH}} -DCMAKE_INSTALL_RPATH_USE_LINK_PATH=FALSE -DGPU_TARGETS="${{env.GPU_LIST}}" -DCPACK_PACKAGING_INSTALL_PREFIX=${{env.ROCM_PATH}} -DCPACK_GENERATOR='DEB;RPM;TGZ' -DCPACK_OBJCOPY_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-objcopy" -DCPACK_READELF_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-readelf" -DCPACK_STRIP_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-strip" -DCPACK_OBJDUMP_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-objdump"
+
+    - name: Build
+      # Build your program with the given configuration
+      run: cmake --build ${{github.workspace}}/build --parallel 16 --config ${{env.BUILD_TYPE}}
+    - name: Preparing Test Build
+      run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} -- -j 16 mytest
+    - name: Build Tests, Samples, Documentation, Packages
+      run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} -- -j 16 tests samples doc package
+
+    - name: Save Build
+      id: cache-build-save
+      uses: actions/cache/save@v3
+      with:
+        path: |
+          ${{github.workspace}}/build
+        key: mi200_ubuntu_22_04
+
+    - name: Testing V1
+      run: |
+        cd ${{github.workspace}}/build
+        ./run.sh
+      # TODO(aelwazir): Enable this once ctest is fixed
+      # working-directory: ${{github.workspace}}/build/tests-v2
+      # Execute tests defined by the CMake configuration.
+      # See https://cmake.org/cmake/help/latest/manual/ctest.1.html for more detail
+      # TODO(aelwazir): Enable this once ctest is fixed
+      # run: ctest --parallel 16 -C ${{env.BUILD_TYPE}}
+
+    - name: Testing V2
+      run: |
+        cd ${{github.workspace}}/build
+        ./run_tests.sh
+
+    - name: Archive production artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: artifacts
+        path: |
+          ${{github.workspace}}/build/*.deb
+          ${{github.workspace}}/build/*.rpm
+          ${{github.workspace}}/build/*.tgz
+
+  build_run_on_mi200_ubuntu_20_04:
+    # The CMake configure and build commands are platform agnostic and should work equally well on Windows or Mac.
+    # You can convert this to a matrix build if you need cross-platform coverage.
+    # See: https://docs.github.com/en/free-pro-team@latest/actions/learn-github-actions/managing-complex-workflows#using-a-build-matrix
+    runs-on: mi200
+    needs: build_run_on_mi200
+    container:
+      image: localhost:5000/mainline-ubuntu-20.04-stg1
+      options: --privileged --ipc=host --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --cap-add CAP_SYS_PTRACE --cap-add CAP_SYS_ADMIN --security-opt seccomp=unconfined
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Restore cached Build
+      id: cache-build-restore
+      uses: actions/cache/restore@v3
+      with:
+        path: |
+          ${{github.workspace}}/build
+        key: mi200_ubuntu_20_04
+
+    - name: Configure CMake
+      if: steps.cache-build-restore.outputs.cache-hit != 'false'
+      # Configure CMake in a 'build' subdirectory. `CMAKE_BUILD_TYPE` is only required if you are using a single-configuration generator such as make.
+      # See https://cmake.org/cmake/help/latest/variable/CMAKE_BUILD_TYPE.html?highlight=cmake_build_type
+      run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DCMAKE_EXPORT_COMPILE_COMMANDS=TRUE -DCMAKE_MODULE_PATH="${{env.ROCM_PATH}}/hip/cmake;${{env.ROCM_PATH}}/lib/cmake" -DCMAKE_PREFIX_PATH="${{env.PREFIX_PATH}}" -DCMAKE_INSTALL_PREFIX="${{env.ROCM_PATH}}" -DCMAKE_SHARED_LINKER_FLAGS="${{env.LD_RUNPATH_FLAG}}" -DCMAKE_INSTALL_RPATH=${{env.ROCM_RPATH}} -DCMAKE_INSTALL_RPATH_USE_LINK_PATH=FALSE -DGPU_TARGETS="${{env.GPU_LIST}}" -DCPACK_PACKAGING_INSTALL_PREFIX=${{env.ROCM_PATH}} -DCPACK_GENERATOR='DEB;RPM;TGZ' -DCPACK_OBJCOPY_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-objcopy" -DCPACK_READELF_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-readelf" -DCPACK_STRIP_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-strip" -DCPACK_OBJDUMP_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-objdump"
+
+    - name: Build
+      # Build your program with the given configuration
+      run: cmake --build ${{github.workspace}}/build --parallel 16 --config ${{env.BUILD_TYPE}}
+    - name: Preparing Test Build
+      run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} -- -j 16 mytest
+    - name: Build Tests
+      run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} -- -j 16 tests
+
+    - name: Testing V1
+      run: |
+        cd ${{github.workspace}}/build
+        ./run.sh
+      # TODO(aelwazir): Enable this once ctest is fixed
+      # working-directory: ${{github.workspace}}/build/tests-v2
+      # Execute tests defined by the CMake configuration.
+      # See https://cmake.org/cmake/help/latest/manual/ctest.1.html for more detail
+      # TODO(aelwazir): Enable this once ctest is fixed
+      # run: ctest --parallel 16 -C ${{env.BUILD_TYPE}}
+
+    - name: Testing V2
+      run: |
+        cd ${{github.workspace}}/build
+        make -j check
+
+  build_run_on_mi200_sles:
+    # The CMake configure and build commands are platform agnostic and should work equally well on Windows or Mac.
+    # You can convert this to a matrix build if you need cross-platform coverage.
+    # See: https://docs.github.com/en/free-pro-team@latest/actions/learn-github-actions/managing-complex-workflows#using-a-build-matrix
+    runs-on: mi200
+    needs: build_run_on_mi200
+    container:
+      image: localhost:5000/mainline-sles-stg1
+      options: --privileged --ipc=host --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --cap-add CAP_SYS_PTRACE --cap-add CAP_SYS_ADMIN --security-opt seccomp=unconfined
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Restore cached Build
+      id: cache-build-restore
+      uses: actions/cache/restore@v3
+      with:
+        path: |
+          ${{github.workspace}}/build
+        key: mi200_sles
+
+    - name: Configure CMake
+      if: steps.cache-build-restore.outputs.cache-hit != 'false'
+      # Configure CMake in a 'build' subdirectory. `CMAKE_BUILD_TYPE` is only required if you are using a single-configuration generator such as make.
+      # See https://cmake.org/cmake/help/latest/variable/CMAKE_BUILD_TYPE.html?highlight=cmake_build_type
+      run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DCMAKE_EXPORT_COMPILE_COMMANDS=TRUE -DCMAKE_MODULE_PATH="${{env.ROCM_PATH}}/hip/cmake;${{env.ROCM_PATH}}/lib/cmake" -DCMAKE_PREFIX_PATH="${{env.PREFIX_PATH}}" -DCMAKE_INSTALL_PREFIX="${{env.ROCM_PATH}}" -DCMAKE_SHARED_LINKER_FLAGS="${{env.LD_RUNPATH_FLAG}}" -DCMAKE_INSTALL_RPATH=${{env.ROCM_RPATH}} -DCMAKE_INSTALL_RPATH_USE_LINK_PATH=FALSE -DGPU_TARGETS="${{env.GPU_LIST}}" -DCPACK_PACKAGING_INSTALL_PREFIX=${{env.ROCM_PATH}} -DCPACK_GENERATOR='DEB;RPM;TGZ' -DCPACK_OBJCOPY_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-objcopy" -DCPACK_READELF_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-readelf" -DCPACK_STRIP_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-strip" -DCPACK_OBJDUMP_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-objdump"
+
+    - name: Build
+      # Build your program with the given configuration
+      run: cmake --build ${{github.workspace}}/build --parallel 16 --config ${{env.BUILD_TYPE}}
+    - name: Preparing Test Build
+      run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} -- -j 16 mytest
+    - name: Build Tests
+      run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} -- -j 16 tests
+
+    - name: Save Build
+      id: cache-build-save
+      uses: actions/cache/save@v3
+      with:
+        path: |
+          ${{github.workspace}}/build
+        key: mi200_sles
+
+    - name: Testing V1
+      run: |
+        cd ${{github.workspace}}/build
+        ./run.sh
+      # TODO(aelwazir): Enable this once ctest is fixed
+      # working-directory: ${{github.workspace}}/build/tests-v2
+      # Execute tests defined by the CMake configuration.
+      # See https://cmake.org/cmake/help/latest/manual/ctest.1.html for more detail
+      # TODO(aelwazir): Enable this once ctest is fixed
+      # run: ctest --parallel 16 -C ${{env.BUILD_TYPE}}
+
+    - name: Testing V2
+      run: |
+        cd ${{github.workspace}}/build
+        make -j check
+
+  build_run_on_mi200_rhel_8:
+    # The CMake configure and build commands are platform agnostic and should work equally well on Windows or Mac.
+    # You can convert this to a matrix build if you need cross-platform coverage.
+    # See: https://docs.github.com/en/free-pro-team@latest/actions/learn-github-actions/managing-complex-workflows#using-a-build-matrix
+    runs-on: mi200
+    needs: build_run_on_mi200
+    container:
+      image: localhost:5000/mainline-rhel-8.x-stg1
+      options: --privileged --ipc=host --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --cap-add CAP_SYS_PTRACE --cap-add CAP_SYS_ADMIN --security-opt seccomp=unconfined
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Restore cached Build
+      id: cache-build-restore
+      uses: actions/cache/restore@v3
+      with:
+        path: |
+          ${{github.workspace}}/build
+        key: mi200_rhel_8
+
+    - name: Configure CMake
+      if: steps.cache-build-restore.outputs.cache-hit != 'false'
+      # Configure CMake in a 'build' subdirectory. `CMAKE_BUILD_TYPE` is only required if you are using a single-configuration generator such as make.
+      # See https://cmake.org/cmake/help/latest/variable/CMAKE_BUILD_TYPE.html?highlight=cmake_build_type
+      run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DCMAKE_EXPORT_COMPILE_COMMANDS=TRUE -DCMAKE_MODULE_PATH="${{env.ROCM_PATH}}/hip/cmake;${{env.ROCM_PATH}}/lib/cmake" -DCMAKE_PREFIX_PATH="${{env.PREFIX_PATH}}" -DCMAKE_INSTALL_PREFIX="${{env.ROCM_PATH}}" -DCMAKE_SHARED_LINKER_FLAGS="${{env.LD_RUNPATH_FLAG}}" -DCMAKE_INSTALL_RPATH=${{env.ROCM_RPATH}} -DCMAKE_INSTALL_RPATH_USE_LINK_PATH=FALSE -DGPU_TARGETS="${{env.GPU_LIST}}" -DCPACK_PACKAGING_INSTALL_PREFIX=${{env.ROCM_PATH}} -DCPACK_GENERATOR='DEB;RPM;TGZ' -DCPACK_OBJCOPY_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-objcopy" -DCPACK_READELF_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-readelf" -DCPACK_STRIP_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-strip" -DCPACK_OBJDUMP_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-objdump"
+
+    - name: Build
+      # Build your program with the given configuration
+      run: cmake --build ${{github.workspace}}/build --parallel 16 --config ${{env.BUILD_TYPE}}
+    - name: Preparing Test Build
+      run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} -- -j 16 mytest
+    - name: Build Tests
+      run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} -- -j 16 tests
+
+    - name: Save Build
+      id: cache-build-save
+      uses: actions/cache/save@v3
+      with:
+        path: |
+          ${{github.workspace}}/build
+        key: mi200_rhel_8
+
+    - name: Testing V1
+      run: |
+        cd ${{github.workspace}}/build
+        ./run.sh
+      # TODO(aelwazir): Enable this once ctest is fixed
+      # working-directory: ${{github.workspace}}/build/tests-v2
+      # Execute tests defined by the CMake configuration.
+      # See https://cmake.org/cmake/help/latest/manual/ctest.1.html for more detail
+      # TODO(aelwazir): Enable this once ctest is fixed
+      # run: ctest --parallel 16 -C ${{env.BUILD_TYPE}}
+
+    - name: Testing V2
+      run: |
+        cd ${{github.workspace}}/build
+        make -j check
+
+  build_run_on_mi200_rhel_9:
+    # The CMake configure and build commands are platform agnostic and should work equally well on Windows or Mac.
+    # You can convert this to a matrix build if you need cross-platform coverage.
+    # See: https://docs.github.com/en/free-pro-team@latest/actions/learn-github-actions/managing-complex-workflows#using-a-build-matrix
+    runs-on: mi200
+    needs: build_run_on_mi200
+    container:
+      image: localhost:5000/mainline-rhel-9.x-stg1
+      options: --privileged --ipc=host --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --cap-add CAP_SYS_PTRACE --cap-add CAP_SYS_ADMIN --security-opt seccomp=unconfined
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Restore cached Build
+      id: cache-build-restore
+      uses: actions/cache/restore@v3
+      with:
+        path: |
+          ${{github.workspace}}/build
+        key: mi200_rhel_9
+
+    - name: Configure CMake
+      if: steps.cache-build-restore.outputs.cache-hit != 'false'
+      # Configure CMake in a 'build' subdirectory. `CMAKE_BUILD_TYPE` is only required if you are using a single-configuration generator such as make.
+      # See https://cmake.org/cmake/help/latest/variable/CMAKE_BUILD_TYPE.html?highlight=cmake_build_type
+      run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DCMAKE_EXPORT_COMPILE_COMMANDS=TRUE -DCMAKE_MODULE_PATH="${{env.ROCM_PATH}}/hip/cmake;${{env.ROCM_PATH}}/lib/cmake" -DCMAKE_PREFIX_PATH="${{env.PREFIX_PATH}}" -DCMAKE_INSTALL_PREFIX="${{env.ROCM_PATH}}" -DCMAKE_SHARED_LINKER_FLAGS="${{env.LD_RUNPATH_FLAG}}" -DCMAKE_INSTALL_RPATH=${{env.ROCM_RPATH}} -DCMAKE_INSTALL_RPATH_USE_LINK_PATH=FALSE -DGPU_TARGETS="${{env.GPU_LIST}}" -DCPACK_PACKAGING_INSTALL_PREFIX=${{env.ROCM_PATH}} -DCPACK_GENERATOR='DEB;RPM;TGZ' -DCPACK_OBJCOPY_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-objcopy" -DCPACK_READELF_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-readelf" -DCPACK_STRIP_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-strip" -DCPACK_OBJDUMP_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-objdump"
+
+    - name: Build
+      # Build your program with the given configuration
+      run: cmake --build ${{github.workspace}}/build --parallel 16 --config ${{env.BUILD_TYPE}}
+    - name: Preparing Test Build
+      run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} -- -j 16 mytest
+    - name: Build Tests
+      run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} -- -j 16 tests
+
+    - name: Save Build
+      id: cache-build-save
+      uses: actions/cache/save@v3
+      with:
+        path: |
+          ${{github.workspace}}/build
+        key: mi200_rhel_9
+
+    - name: Testing V1
+      run: |
+        cd ${{github.workspace}}/build
+        ./run.sh
+      # TODO(aelwazir): Enable this once ctest is fixed
+      # working-directory: ${{github.workspace}}/build/tests-v2
+      # Execute tests defined by the CMake configuration.
+      # See https://cmake.org/cmake/help/latest/manual/ctest.1.html for more detail
+      # TODO(aelwazir): Enable this once ctest is fixed
+      # run: ctest --parallel 16 -C ${{env.BUILD_TYPE}}
+
+    - name: Testing V2
+      run: |
+        cd ${{github.workspace}}/build
+        make -j check
+
+  build_run_on_vega20:
+    # The CMake configure and build commands are platform agnostic and should work equally well on Windows or Mac.
+    # You can convert this to a matrix build if you need cross-platform coverage.
+    # See: https://docs.github.com/en/free-pro-team@latest/actions/learn-github-actions/managing-complex-workflows#using-a-build-matrix
+    runs-on: vega20
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Restore cached Build
+      id: cache-build-restore
+      uses: actions/cache/restore@v3
+      with:
+        path: |
+          ${{github.workspace}}/build
+        key: vega20
+
+    - name: Configure CMake
+      if: steps.cache-build-restore.outputs.cache-hit != 'false'
+      # Configure CMake in a 'build' subdirectory. `CMAKE_BUILD_TYPE` is only required if you are using a single-configuration generator such as make.
+      # See https://cmake.org/cmake/help/latest/variable/CMAKE_BUILD_TYPE.html?highlight=cmake_build_type
+      run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DCMAKE_EXPORT_COMPILE_COMMANDS=TRUE -DCMAKE_MODULE_PATH="${{env.ROCM_PATH}}/hip/cmake;${{env.ROCM_PATH}}/lib/cmake" -DCMAKE_PREFIX_PATH="${{env.PREFIX_PATH}}" -DCMAKE_INSTALL_PREFIX="${{env.ROCM_PATH}}" -DCMAKE_SHARED_LINKER_FLAGS="${{env.LD_RUNPATH_FLAG}}" -DCMAKE_INSTALL_RPATH=${{env.ROCM_RPATH}} -DCMAKE_INSTALL_RPATH_USE_LINK_PATH=FALSE -DGPU_TARGETS="${{env.GPU_LIST}}" -DCPACK_PACKAGING_INSTALL_PREFIX=${{env.ROCM_PATH}} -DCPACK_GENERATOR='DEB;RPM;TGZ' -DCPACK_OBJCOPY_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-objcopy" -DCPACK_READELF_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-readelf" -DCPACK_STRIP_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-strip" -DCPACK_OBJDUMP_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-objdump"
+
+    - name: Build
+      # Build your program with the given configuration
+      run: cmake --build ${{github.workspace}}/build --parallel 16 --config ${{env.BUILD_TYPE}}
+    - name: Preparing Test Build
+      run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} -- -j 16 mytest
+    - name: Build Tests
+      run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} -- -j 16 tests
+
+    - name: Save Build
+      id: cache-build-save
+      uses: actions/cache/save@v3
+      with:
+        path: |
+          ${{github.workspace}}/build
+        key: vega20
+
+    - name: Testing V1
+      run: |
+        cd ${{github.workspace}}/build
+        ./run.sh
+      # TODO(aelwazir): Enable this once ctest is fixed
+      # working-directory: ${{github.workspace}}/build/tests-v2
+      # Execute tests defined by the CMake configuration.
+      # See https://cmake.org/cmake/help/latest/manual/ctest.1.html for more detail
+      # TODO(aelwazir): Enable this once ctest is fixed
+      # run: ctest --parallel 16 -C ${{env.BUILD_TYPE}}
+
+    - name: Testing V2
+      run: |
+        cd ${{github.workspace}}/build
+        make -j check
+
+  build_run_on_navi32:
+    # The CMake configure and build commands are platform agnostic and should work equally well on Windows or Mac.
+    # You can convert this to a matrix build if you need cross-platform coverage.
+    # See: https://docs.github.com/en/free-pro-team@latest/actions/learn-github-actions/managing-complex-workflows#using-a-build-matrix
+    runs-on: navi32
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Restore cached Build
+      id: cache-build-restore
+      uses: actions/cache/restore@v3
+      with:
+        path: |
+          ${{github.workspace}}/build
+        key: navi32
+
+    - name: Configure CMake
+      if: steps.cache-build-restore.outputs.cache-hit != 'false'
+      # Configure CMake in a 'build' subdirectory. `CMAKE_BUILD_TYPE` is only required if you are using a single-configuration generator such as make.
+      # See https://cmake.org/cmake/help/latest/variable/CMAKE_BUILD_TYPE.html?highlight=cmake_build_type
+      run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DCMAKE_EXPORT_COMPILE_COMMANDS=TRUE -DCMAKE_MODULE_PATH="${{env.ROCM_PATH}}/hip/cmake;${{env.ROCM_PATH}}/lib/cmake" -DCMAKE_PREFIX_PATH="${{env.PREFIX_PATH}}" -DCMAKE_INSTALL_PREFIX="${{env.ROCM_PATH}}" -DCMAKE_SHARED_LINKER_FLAGS="${{env.LD_RUNPATH_FLAG}}" -DCMAKE_INSTALL_RPATH=${{env.ROCM_RPATH}} -DCMAKE_INSTALL_RPATH_USE_LINK_PATH=FALSE -DGPU_TARGETS="${{env.GPU_LIST}}" -DCPACK_PACKAGING_INSTALL_PREFIX=${{env.ROCM_PATH}} -DCPACK_GENERATOR='DEB;RPM;TGZ' -DCPACK_OBJCOPY_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-objcopy" -DCPACK_READELF_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-readelf" -DCPACK_STRIP_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-strip" -DCPACK_OBJDUMP_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-objdump"
+
+    - name: Build
+      # Build your program with the given configuration
+      run: cmake --build ${{github.workspace}}/build --parallel 16 --config ${{env.BUILD_TYPE}}
+    - name: Preparing Test Build
+      run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} -- -j 16 mytest
+    - name: Build Tests
+      run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} -- -j 16 tests
+
+    - name: Save Build
+      id: cache-build-save
+      uses: actions/cache/save@v3
+      with:
+        path: |
+          ${{github.workspace}}/build
+        key: navi32
+
+    - name: Testing V1
+      run: |
+        cd ${{github.workspace}}/build
+        ./run.sh
+      # TODO(aelwazir): Enable this once ctest is fixed
+      # working-directory: ${{github.workspace}}/build/tests-v2
+      # Execute tests defined by the CMake configuration.
+      # See https://cmake.org/cmake/help/latest/manual/ctest.1.html for more detail
+      # TODO(aelwazir): Enable this once ctest is fixed
+      # run: ctest --parallel 16 -C ${{env.BUILD_TYPE}}
+
+    - name: Testing V2
+      run: |
+        cd ${{github.workspace}}/build
+        make -j check
+
+  build_run_on_mi100:
+    # The CMake configure and build commands are platform agnostic and should work equally well on Windows or Mac.
+    # You can convert this to a matrix build if you need cross-platform coverage.
+    # See: https://docs.github.com/en/free-pro-team@latest/actions/learn-github-actions/managing-complex-workflows#using-a-build-matrix
+    runs-on: mi100
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Restore cached Build
+      id: cache-build-restore
+      uses: actions/cache/restore@v3
+      with:
+        path: |
+          ${{github.workspace}}/build
+        key: mi100
+
+    - name: Configure CMake
+      if: steps.cache-build-restore.outputs.cache-hit != 'false'
+      # Configure CMake in a 'build' subdirectory. `CMAKE_BUILD_TYPE` is only required if you are using a single-configuration generator such as make.
+      # See https://cmake.org/cmake/help/latest/variable/CMAKE_BUILD_TYPE.html?highlight=cmake_build_type
+      run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DCMAKE_EXPORT_COMPILE_COMMANDS=TRUE -DCMAKE_MODULE_PATH="${{env.ROCM_PATH}}/hip/cmake;${{env.ROCM_PATH}}/lib/cmake" -DCMAKE_PREFIX_PATH="${{env.PREFIX_PATH}}" -DCMAKE_INSTALL_PREFIX="${{env.ROCM_PATH}}" -DCMAKE_SHARED_LINKER_FLAGS="${{env.LD_RUNPATH_FLAG}}" -DCMAKE_INSTALL_RPATH=${{env.ROCM_RPATH}} -DCMAKE_INSTALL_RPATH_USE_LINK_PATH=FALSE -DGPU_TARGETS="${{env.GPU_LIST}}" -DCPACK_PACKAGING_INSTALL_PREFIX=${{env.ROCM_PATH}} -DCPACK_GENERATOR='DEB;RPM;TGZ' -DCPACK_OBJCOPY_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-objcopy" -DCPACK_READELF_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-readelf" -DCPACK_STRIP_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-strip" -DCPACK_OBJDUMP_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-objdump"
+
+    - name: Build
+      # Build your program with the given configuration
+      run: cmake --build ${{github.workspace}}/build --parallel 16 --config ${{env.BUILD_TYPE}}
+    - name: Preparing Test Build
+      run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} -- -j 16 mytest
+    - name: Build Tests
+      run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} -- -j 16 tests
+
+    - name: Save Build
+      id: cache-build-save
+      uses: actions/cache/save@v3
+      with:
+        path: |
+          ${{github.workspace}}/build
+        key: mi100
+
+    - name: Testing V1
+      run: |
+        cd ${{github.workspace}}/build
+        ./run.sh
+      # TODO(aelwazir): Enable this once ctest is fixed
+      # working-directory: ${{github.workspace}}/build/tests-v2
+      # Execute tests defined by the CMake configuration.
+      # See https://cmake.org/cmake/help/latest/manual/ctest.1.html for more detail
+      # TODO(aelwazir): Enable this once ctest is fixed
+      # run: ctest --parallel 16 -C ${{env.BUILD_TYPE}}
+
+    - name: Testing V2
+      run: |
+        cd ${{github.workspace}}/build
+        make -j check
+
+  # To be enabled once we have access to navi21
+  # build_run_on_navi21:
+  #   # The CMake configure and build commands are platform agnostic and should work equally well on Windows or Mac.
+  #   # You can convert this to a matrix build if you need cross-platform coverage.
+  #   # See: https://docs.github.com/en/free-pro-team@latest/actions/learn-github-actions/managing-complex-workflows#using-a-build-matrix
+  #   runs-on: navi21
+
+  #   steps:
+  #   - uses: actions/checkout@v3
+
+  #   - name: Restore cached Build
+  #     id: cache-build-restore
+  #     uses: actions/cache/restore@v3
+  #     with:
+  #       path: |
+  #         ${{github.workspace}}/build
+  #       key: navi21
+
+  #   - name: Configure CMake
+  #     if: steps.cache-build-restore.outputs.cache-hit != 'false'
+  #     # Configure CMake in a 'build' subdirectory. `CMAKE_BUILD_TYPE` is only required if you are using a single-configuration generator such as make.
+  #     # See https://cmake.org/cmake/help/latest/variable/CMAKE_BUILD_TYPE.html?highlight=cmake_build_type
+  #     run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DCMAKE_EXPORT_COMPILE_COMMANDS=TRUE -DCMAKE_MODULE_PATH="${{env.ROCM_PATH}}/hip/cmake;${{env.ROCM_PATH}}/lib/cmake" -DCMAKE_PREFIX_PATH="${{env.PREFIX_PATH}}" -DCMAKE_INSTALL_PREFIX="${{env.ROCM_PATH}}" -DCMAKE_SHARED_LINKER_FLAGS="${{env.LD_RUNPATH_FLAG}}" -DCMAKE_INSTALL_RPATH=${{env.ROCM_RPATH}} -DCMAKE_INSTALL_RPATH_USE_LINK_PATH=FALSE -DGPU_TARGETS="${{env.GPU_LIST}}" -DCPACK_PACKAGING_INSTALL_PREFIX=${{env.ROCM_PATH}} -DCPACK_GENERATOR='DEB;RPM;TGZ' -DCPACK_OBJCOPY_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-objcopy" -DCPACK_READELF_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-readelf" -DCPACK_STRIP_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-strip" -DCPACK_OBJDUMP_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-objdump"
+
+  #   - name: Build
+  #     # Build your program with the given configuration
+  #     run: cmake --build ${{github.workspace}}/build --parallel 16 --config ${{env.BUILD_TYPE}}
+  #   - name: Preparing Test Build
+  #     run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} -- -j 16 mytest
+  #   - name: Build Tests
+  #     run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} -- -j 16 tests
+
+  #   - name: Save Build
+  #     id: cache-build-save
+  #     uses: actions/cache/save@v3
+  #     with:
+  #       path: |
+  #         ${{github.workspace}}/build
+  #       key: navi21
+
+      # - name: Testing V1
+      #   run: |
+      #     cd ${{github.workspace}}/build
+      #     ./run.sh
+      #   # TODO(aelwazir): Enable this once ctest is fixed
+      #   # working-directory: ${{github.workspace}}/build/tests-v2
+      #   # Execute tests defined by the CMake configuration.
+      #   # See https://cmake.org/cmake/help/latest/manual/ctest.1.html for more detail
+      #   # TODO(aelwazir): Enable this once ctest is fixed
+      #   # run: ctest --parallel 16 -C ${{env.BUILD_TYPE}}
+
+      # - name: Testing V2
+      #   run: |
+      #     cd ${{github.workspace}}/build
+      #     make -j check
