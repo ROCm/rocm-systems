@@ -1,128 +1,14 @@
-#
-# NOTE! Don't add files that are generated in specific
-# subdirectories here. Add them in the ".gitignore" file
-# in that subdirectory instead.
-#
 # NOTE! Please use 'git ls-files -i --exclude-standard'
 # command after changing this file, to see if there are
 # any tracked files which get ignored after the change.
-#
-# Normal rules
-#
-.*
-*.o
-*.o.*
-*.a
-*.s
-*.ko
-*.so
-*.so.dbg
-*.mod.c
-*.i
-*.lst
-*.symtypes
-*.order
-modules.builtin
-*.elf
-*.bin
-*.gz
-*.bz2
-*.lzma
-*.xz
-*.lzo
-*.patch
-*.gcno
-*.pyc
 
-#
-# Top-level generic files/folders
-#
-/[Bb][Ui][Ll][Dd]
-*/[Bb][Ui][Ll][Dd]
-/build
-*/build
-/[Gg][Tt][Ee][Ss][Tt][Ss]
-*/[Gg][Tt][Ee][Ss][Tt][Ss]
-/tags
-/TAGS
-/linux
-/vmlinux
-/vmlinuz
-/System.map
-/Module.markers
-Module.symvers
+# VisualStudioCode
+.vscode/
 
-#
-# Debian directory (make deb-pkg)
-#
-/debian/
-
-#
-# git files that we don't want to ignore even it they are dot-files
-#
-!.gitignore
-!.mailmap
-
-### VisualStudioCode ###
-!.vscode/settings.json
-
-#
-# Generated include files
-#
-include/config
-include/linux/version.h
-include/generated
-arch/*/include/generated
-
-# git generated dirs
-patches-*
-
-# quilt's files
-patches
-series
-
-# cscope files
-cscope.*
-ncscope.*
-
-# gnu global files
-GPATH
-GRTAGS
-GSYMS
-GTAGS
-
-*.orig
-*~
-\#*#
-
-#
-# Leavings from module signing
-#
-extra_certificates
-signing_key.priv
-signing_key.x509
-x509.genkey
-
-#cmake files
-CMakeLists.txt.user
-CMakeCache.txt
-CMakeFiles
-CMakeScripts
-Testing
-Makefile
-cmake_install.cmake
-install_manifest.txt
-compile_commands.json
-CTestTestfile.cmake
-_deps
-
-#
 # below files are generated via CMake
-#
-*Config.h
+include/rocm_smi/rocm_smi64Config.h
+oam/include/oam/oamConfig.h
 python_smi_tools/rsmiBindings.py
 
-#
-# Fake SYSFS files
-#
-/device/*
+# Build directory
+build/
