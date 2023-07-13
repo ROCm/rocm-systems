@@ -58,7 +58,7 @@ class CSVParser {
    *
    * @return Returns 0 on success and -1 on error.
    */
-  void ParseCSV(const char *path);
+  void ParseCSV(const char* path);
 
   /**
    * Parses profiler output buffer and saves result in a map
@@ -82,7 +82,7 @@ class CSVParser {
    * @return If found, returns counter value as a string pointer, nullptr
    * otherwise.
    */
-  std::string *ReadCounter(uint32_t row, uint32_t col);
+  std::string* ReadCounter(uint32_t row, uint32_t col);
 
   /**
    * Tokenize a comma separated string and saves result in vector
@@ -95,15 +95,14 @@ class CSVParser {
    *
    * @return returns vector size of delimitd values
    */
-  int GetTockenizedString(std::string str, std::vector<std::string> &csvtable,
-                          char delim = ',');
+  int GetTockenizedString(std::string str, std::vector<std::string>& csvtable, char delim = ',');
 
   /**
    * A getter for a map of collected counters
    * *
    * @return Returns a map of collected counters.
    */
-  countermap &GetCounterMap();
+  countermap& GetCounterMap();
 
  private:
   // map for counter collection

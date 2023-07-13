@@ -52,14 +52,18 @@ namespace gfxip {
 namespace util {
 
 struct dir_closer {
-  void operator()(DIR *dir) { if (dir != nullptr) closedir(dir); }
+  void operator()(DIR* dir) {
+    if (dir != nullptr) closedir(dir);
+  }
 };
 
 struct fd_closer {
-  void operator()(int fd) { if (fd >= 0) close(fd); }
+  void operator()(int fd) {
+    if (fd >= 0) close(fd);
+  }
 };
 
-} // namespace rocprofiler::pc_sampler::gfxip::util
+}  // namespace util
 
 struct amdgpu_debugfs_regs2_iocdata {
   __u32 use_srbm, use_grbm, pg_lock;
@@ -71,11 +75,10 @@ struct amdgpu_debugfs_regs2_iocdata {
   } srbm;
 };
 
-enum AMDGPU_DEBUGFS_REGS2_CMDS {
-  AMDGPU_DEBUGFS_REGS2_CMD_SET_STATE = 0
-};
+enum AMDGPU_DEBUGFS_REGS2_CMDS { AMDGPU_DEBUGFS_REGS2_CMD_SET_STATE = 0 };
 
-#define AMDGPU_DEBUGFS_REGS2_IOC_SET_STATE _IOWR(0x20, AMDGPU_DEBUGFS_REGS2_CMD_SET_STATE, struct amdgpu_debugfs_regs2_iocdata)
+#define AMDGPU_DEBUGFS_REGS2_IOC_SET_STATE                                                         \
+  _IOWR(0x20, AMDGPU_DEBUGFS_REGS2_CMD_SET_STATE, struct amdgpu_debugfs_regs2_iocdata)
 
 enum {
   GC_HWIP = 1,  // Graphics Core IP
@@ -96,14 +99,14 @@ static constexpr int HWIP_MAX_INSTANCE = 11;
    (REG_FIELD_MASK(reg, field) & ((field_val) << REG_FIELD_SHIFT(reg, field))))
 
 struct device_t {
-  device_t(const bool pci_inited, const Agent::AgentInfo &agent_info);
+  device_t(const bool pci_inited, const Agent::AgentInfo& agent_info);
   ~device_t();
 
   device_t(const device_t&) = delete;
   device_t& operator=(const device_t&) = delete;
   device_t(device_t&&) = default;
 
-  const Agent::AgentInfo &agent_info_;
+  const Agent::AgentInfo& agent_info_;
 
   struct pci_device* pci_device_;
   size_t pci_memory_size_;
@@ -120,19 +123,23 @@ struct device_t {
 
 uint32_t pasid();
 
-int debugfs_ioctl_set_state(const device_t& dev, const struct amdgpu_debugfs_regs2_iocdata &ioc);
-int debugfs_ioctl_write_register(const device_t &dev, const struct amdgpu_debugfs_regs2_iocdata &ioc, const uint64_t addr, const uint32_t value);
-uint32_t debugfs_ioctl_read_register(const device_t& dev, const struct amdgpu_debugfs_regs2_iocdata &ioc, const uint64_t addr);
+int debugfs_ioctl_set_state(const device_t& dev, const struct amdgpu_debugfs_regs2_iocdata& ioc);
+int debugfs_ioctl_write_register(const device_t& dev,
+                                 const struct amdgpu_debugfs_regs2_iocdata& ioc,
+                                 const uint64_t addr, const uint32_t value);
+uint32_t debugfs_ioctl_read_register(const device_t& dev,
+                                     const struct amdgpu_debugfs_regs2_iocdata& ioc,
+                                     const uint64_t addr);
 
 void vega10_reg_offset_init(device_t& dev);
 void vega20_reg_offset_init(device_t& dev);
 void arct_reg_offset_init(device_t& dev);
 void aldebaran_reg_offset_init(device_t& dev);
 
-void read_pc_samples_v9(const device_t& dev, PCSampler *sampler);
-void read_pc_samples_v9_ioctl(const device_t& dev, PCSampler *sampler);
+void read_pc_samples_v9(const device_t& dev, PCSampler* sampler);
+void read_pc_samples_v9_ioctl(const device_t& dev, PCSampler* sampler);
 
-} // namespace rocprofiler::pc_sampler::gfxip
+}  // namespace gfxip
 
-} // namespace rocprofiler::pc_sampler
+}  // namespace rocprofiler::pc_sampler
 #endif  // SRC_PCSAMPLER_GFXIP_GFXIP_H_

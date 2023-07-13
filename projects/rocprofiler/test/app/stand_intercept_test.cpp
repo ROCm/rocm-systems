@@ -73,13 +73,12 @@ void dump_context_entry(context_entry_t* entry) {
   const rocprofiler_dispatch_record_t* record = entry->data.record;
 
   fflush(stdout);
-  fprintf(stdout, "kernel-object(0x%lx) name(\"%s\")", entry->data.kernel_object, kernel_name.c_str());
-  if (record) fprintf(stdout, ", gpu-id(%u), time(%lu,%lu,%lu,%lu)",
-    HsaRsrcFactory::Instance().GetAgentInfo(entry->agent)->dev_index,
-    record->dispatch,
-    record->begin,
-    record->end,
-    record->complete);
+  fprintf(stdout, "kernel-object(0x%lx) name(\"%s\")", entry->data.kernel_object,
+          kernel_name.c_str());
+  if (record)
+    fprintf(stdout, ", gpu-id(%u), time(%lu,%lu,%lu,%lu)",
+            HsaRsrcFactory::Instance().GetAgentInfo(entry->agent)->dev_index, record->dispatch,
+            record->begin, record->end, record->complete);
   fprintf(stdout, "\n");
   fflush(stdout);
 
@@ -115,8 +114,8 @@ bool context_handler(rocprofiler_group_t group, void* arg) {
 }
 
 // Kernel disoatch callback
-hsa_status_t dispatch_callback(const rocprofiler_callback_data_t* callback_data, void* /*user_data*/,
-                               rocprofiler_group_t* group) {
+hsa_status_t dispatch_callback(const rocprofiler_callback_data_t* callback_data,
+                               void* /*user_data*/, rocprofiler_group_t* group) {
   // HSA status
   hsa_status_t status = HSA_STATUS_ERROR;
 
@@ -132,8 +131,8 @@ hsa_status_t dispatch_callback(const rocprofiler_callback_data_t* callback_data,
   properties.handler_arg = (void*)entry;
 
   // Open profiling context
-  status = rocprofiler_open(callback_data->agent, NULL, 0,
-                            &context, 0 /*ROCPROFILER_MODE_SINGLEGROUP*/, &properties);
+  status = rocprofiler_open(callback_data->agent, NULL, 0, &context,
+                            0 /*ROCPROFILER_MODE_SINGLEGROUP*/, &properties);
   check_status(status);
 
   // Get group[0]
@@ -178,8 +177,10 @@ int main() {
 
   for (unsigned ind = 0; ind < kiter; ++ind) {
     printf("Iteration %u:\n", ind);
-    if ((ind & 1) == 0) rocprofiler_start_queue_callbacks();
-    else rocprofiler_stop_queue_callbacks();
+    if ((ind & 1) == 0)
+      rocprofiler_start_queue_callbacks();
+    else
+      rocprofiler_stop_queue_callbacks();
     ret_val = RunKernel<DummyKernel, TestAql>(0, NULL, agent_info, queue, diter);
     if (ret_val) ret_val = RunKernel<SimpleConvolution, TestAql>(0, NULL, agent_info, queue, diter);
   }

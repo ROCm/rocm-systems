@@ -34,16 +34,7 @@ jobs:
     steps:
     - uses: actions/checkout@v3
 
-    - name: Restore cached Build
-      id: cache-build-restore
-      uses: actions/cache/restore@v3
-      with:
-        path: |
-          ${{github.workspace}}/build
-        key: mi200_ubuntu_22_04
-
     - name: Configure CMake
-      if: steps.cache-build-restore.outputs.cache-hit != 'false'
       # Configure CMake in a 'build' subdirectory. `CMAKE_BUILD_TYPE` is only required if you are using a single-configuration generator such as make.
       # See https://cmake.org/cmake/help/latest/variable/CMAKE_BUILD_TYPE.html?highlight=cmake_build_type
       run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DCMAKE_EXPORT_COMPILE_COMMANDS=TRUE -DCMAKE_MODULE_PATH="${{env.ROCM_PATH}}/hip/cmake;${{env.ROCM_PATH}}/lib/cmake" -DCMAKE_PREFIX_PATH="${{env.PREFIX_PATH}}" -DCMAKE_INSTALL_PREFIX="${{env.ROCM_PATH}}" -DCMAKE_SHARED_LINKER_FLAGS="${{env.LD_RUNPATH_FLAG}}" -DCMAKE_INSTALL_RPATH=${{env.ROCM_RPATH}} -DCMAKE_INSTALL_RPATH_USE_LINK_PATH=FALSE -DGPU_TARGETS="${{env.GPU_LIST}}" -DCPACK_PACKAGING_INSTALL_PREFIX=${{env.ROCM_PATH}} -DCPACK_GENERATOR='DEB;RPM;TGZ' -DCPACK_OBJCOPY_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-objcopy" -DCPACK_READELF_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-readelf" -DCPACK_STRIP_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-strip" -DCPACK_OBJDUMP_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-objdump"
@@ -55,14 +46,6 @@ jobs:
       run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} -- -j 16 mytest
     - name: Build Tests, Samples, Documentation, Packages
       run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} -- -j 16 tests samples doc package
-
-    - name: Save Build
-      id: cache-build-save
-      uses: actions/cache/save@v3
-      with:
-        path: |
-          ${{github.workspace}}/build
-        key: mi200_ubuntu_22_04
 
     - name: Testing V1
       run: |
@@ -102,16 +85,7 @@ jobs:
     steps:
     - uses: actions/checkout@v3
 
-    - name: Restore cached Build
-      id: cache-build-restore
-      uses: actions/cache/restore@v3
-      with:
-        path: |
-          ${{github.workspace}}/build
-        key: mi200_ubuntu_20_04
-
     - name: Configure CMake
-      if: steps.cache-build-restore.outputs.cache-hit != 'false'
       # Configure CMake in a 'build' subdirectory. `CMAKE_BUILD_TYPE` is only required if you are using a single-configuration generator such as make.
       # See https://cmake.org/cmake/help/latest/variable/CMAKE_BUILD_TYPE.html?highlight=cmake_build_type
       run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DCMAKE_EXPORT_COMPILE_COMMANDS=TRUE -DCMAKE_MODULE_PATH="${{env.ROCM_PATH}}/hip/cmake;${{env.ROCM_PATH}}/lib/cmake" -DCMAKE_PREFIX_PATH="${{env.PREFIX_PATH}}" -DCMAKE_INSTALL_PREFIX="${{env.ROCM_PATH}}" -DCMAKE_SHARED_LINKER_FLAGS="${{env.LD_RUNPATH_FLAG}}" -DCMAKE_INSTALL_RPATH=${{env.ROCM_RPATH}} -DCMAKE_INSTALL_RPATH_USE_LINK_PATH=FALSE -DGPU_TARGETS="${{env.GPU_LIST}}" -DCPACK_PACKAGING_INSTALL_PREFIX=${{env.ROCM_PATH}} -DCPACK_GENERATOR='DEB;RPM;TGZ' -DCPACK_OBJCOPY_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-objcopy" -DCPACK_READELF_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-readelf" -DCPACK_STRIP_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-strip" -DCPACK_OBJDUMP_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-objdump"
@@ -153,16 +127,7 @@ jobs:
     steps:
     - uses: actions/checkout@v3
 
-    - name: Restore cached Build
-      id: cache-build-restore
-      uses: actions/cache/restore@v3
-      with:
-        path: |
-          ${{github.workspace}}/build
-        key: mi200_sles
-
     - name: Configure CMake
-      if: steps.cache-build-restore.outputs.cache-hit != 'false'
       # Configure CMake in a 'build' subdirectory. `CMAKE_BUILD_TYPE` is only required if you are using a single-configuration generator such as make.
       # See https://cmake.org/cmake/help/latest/variable/CMAKE_BUILD_TYPE.html?highlight=cmake_build_type
       run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DCMAKE_EXPORT_COMPILE_COMMANDS=TRUE -DCMAKE_MODULE_PATH="${{env.ROCM_PATH}}/hip/cmake;${{env.ROCM_PATH}}/lib/cmake" -DCMAKE_PREFIX_PATH="${{env.PREFIX_PATH}}" -DCMAKE_INSTALL_PREFIX="${{env.ROCM_PATH}}" -DCMAKE_SHARED_LINKER_FLAGS="${{env.LD_RUNPATH_FLAG}}" -DCMAKE_INSTALL_RPATH=${{env.ROCM_RPATH}} -DCMAKE_INSTALL_RPATH_USE_LINK_PATH=FALSE -DGPU_TARGETS="${{env.GPU_LIST}}" -DCPACK_PACKAGING_INSTALL_PREFIX=${{env.ROCM_PATH}} -DCPACK_GENERATOR='DEB;RPM;TGZ' -DCPACK_OBJCOPY_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-objcopy" -DCPACK_READELF_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-readelf" -DCPACK_STRIP_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-strip" -DCPACK_OBJDUMP_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-objdump"
@@ -174,14 +139,6 @@ jobs:
       run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} -- -j 16 mytest
     - name: Build Tests
       run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} -- -j 16 tests
-
-    - name: Save Build
-      id: cache-build-save
-      uses: actions/cache/save@v3
-      with:
-        path: |
-          ${{github.workspace}}/build
-        key: mi200_sles
 
     - name: Testing V1
       run: |
@@ -212,16 +169,7 @@ jobs:
     steps:
     - uses: actions/checkout@v3
 
-    - name: Restore cached Build
-      id: cache-build-restore
-      uses: actions/cache/restore@v3
-      with:
-        path: |
-          ${{github.workspace}}/build
-        key: mi200_rhel_8
-
     - name: Configure CMake
-      if: steps.cache-build-restore.outputs.cache-hit != 'false'
       # Configure CMake in a 'build' subdirectory. `CMAKE_BUILD_TYPE` is only required if you are using a single-configuration generator such as make.
       # See https://cmake.org/cmake/help/latest/variable/CMAKE_BUILD_TYPE.html?highlight=cmake_build_type
       run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DCMAKE_EXPORT_COMPILE_COMMANDS=TRUE -DCMAKE_MODULE_PATH="${{env.ROCM_PATH}}/hip/cmake;${{env.ROCM_PATH}}/lib/cmake" -DCMAKE_PREFIX_PATH="${{env.PREFIX_PATH}}" -DCMAKE_INSTALL_PREFIX="${{env.ROCM_PATH}}" -DCMAKE_SHARED_LINKER_FLAGS="${{env.LD_RUNPATH_FLAG}}" -DCMAKE_INSTALL_RPATH=${{env.ROCM_RPATH}} -DCMAKE_INSTALL_RPATH_USE_LINK_PATH=FALSE -DGPU_TARGETS="${{env.GPU_LIST}}" -DCPACK_PACKAGING_INSTALL_PREFIX=${{env.ROCM_PATH}} -DCPACK_GENERATOR='DEB;RPM;TGZ' -DCPACK_OBJCOPY_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-objcopy" -DCPACK_READELF_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-readelf" -DCPACK_STRIP_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-strip" -DCPACK_OBJDUMP_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-objdump"
@@ -233,14 +181,6 @@ jobs:
       run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} -- -j 16 mytest
     - name: Build Tests
       run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} -- -j 16 tests
-
-    - name: Save Build
-      id: cache-build-save
-      uses: actions/cache/save@v3
-      with:
-        path: |
-          ${{github.workspace}}/build
-        key: mi200_rhel_8
 
     - name: Testing V1
       run: |
@@ -271,16 +211,7 @@ jobs:
     steps:
     - uses: actions/checkout@v3
 
-    - name: Restore cached Build
-      id: cache-build-restore
-      uses: actions/cache/restore@v3
-      with:
-        path: |
-          ${{github.workspace}}/build
-        key: mi200_rhel_9
-
     - name: Configure CMake
-      if: steps.cache-build-restore.outputs.cache-hit != 'false'
       # Configure CMake in a 'build' subdirectory. `CMAKE_BUILD_TYPE` is only required if you are using a single-configuration generator such as make.
       # See https://cmake.org/cmake/help/latest/variable/CMAKE_BUILD_TYPE.html?highlight=cmake_build_type
       run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DCMAKE_EXPORT_COMPILE_COMMANDS=TRUE -DCMAKE_MODULE_PATH="${{env.ROCM_PATH}}/hip/cmake;${{env.ROCM_PATH}}/lib/cmake" -DCMAKE_PREFIX_PATH="${{env.PREFIX_PATH}}" -DCMAKE_INSTALL_PREFIX="${{env.ROCM_PATH}}" -DCMAKE_SHARED_LINKER_FLAGS="${{env.LD_RUNPATH_FLAG}}" -DCMAKE_INSTALL_RPATH=${{env.ROCM_RPATH}} -DCMAKE_INSTALL_RPATH_USE_LINK_PATH=FALSE -DGPU_TARGETS="${{env.GPU_LIST}}" -DCPACK_PACKAGING_INSTALL_PREFIX=${{env.ROCM_PATH}} -DCPACK_GENERATOR='DEB;RPM;TGZ' -DCPACK_OBJCOPY_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-objcopy" -DCPACK_READELF_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-readelf" -DCPACK_STRIP_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-strip" -DCPACK_OBJDUMP_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-objdump"
@@ -292,14 +223,6 @@ jobs:
       run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} -- -j 16 mytest
     - name: Build Tests
       run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} -- -j 16 tests
-
-    - name: Save Build
-      id: cache-build-save
-      uses: actions/cache/save@v3
-      with:
-        path: |
-          ${{github.workspace}}/build
-        key: mi200_rhel_9
 
     - name: Testing V1
       run: |
@@ -326,16 +249,7 @@ jobs:
     steps:
     - uses: actions/checkout@v3
 
-    - name: Restore cached Build
-      id: cache-build-restore
-      uses: actions/cache/restore@v3
-      with:
-        path: |
-          ${{github.workspace}}/build
-        key: vega20
-
     - name: Configure CMake
-      if: steps.cache-build-restore.outputs.cache-hit != 'false'
       # Configure CMake in a 'build' subdirectory. `CMAKE_BUILD_TYPE` is only required if you are using a single-configuration generator such as make.
       # See https://cmake.org/cmake/help/latest/variable/CMAKE_BUILD_TYPE.html?highlight=cmake_build_type
       run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DCMAKE_EXPORT_COMPILE_COMMANDS=TRUE -DCMAKE_MODULE_PATH="${{env.ROCM_PATH}}/hip/cmake;${{env.ROCM_PATH}}/lib/cmake" -DCMAKE_PREFIX_PATH="${{env.PREFIX_PATH}}" -DCMAKE_INSTALL_PREFIX="${{env.ROCM_PATH}}" -DCMAKE_SHARED_LINKER_FLAGS="${{env.LD_RUNPATH_FLAG}}" -DCMAKE_INSTALL_RPATH=${{env.ROCM_RPATH}} -DCMAKE_INSTALL_RPATH_USE_LINK_PATH=FALSE -DGPU_TARGETS="${{env.GPU_LIST}}" -DCPACK_PACKAGING_INSTALL_PREFIX=${{env.ROCM_PATH}} -DCPACK_GENERATOR='DEB;RPM;TGZ' -DCPACK_OBJCOPY_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-objcopy" -DCPACK_READELF_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-readelf" -DCPACK_STRIP_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-strip" -DCPACK_OBJDUMP_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-objdump"
@@ -347,14 +261,6 @@ jobs:
       run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} -- -j 16 mytest
     - name: Build Tests
       run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} -- -j 16 tests
-
-    - name: Save Build
-      id: cache-build-save
-      uses: actions/cache/save@v3
-      with:
-        path: |
-          ${{github.workspace}}/build
-        key: vega20
 
     - name: Testing V1
       run: |
@@ -381,16 +287,7 @@ jobs:
     steps:
     - uses: actions/checkout@v3
 
-    - name: Restore cached Build
-      id: cache-build-restore
-      uses: actions/cache/restore@v3
-      with:
-        path: |
-          ${{github.workspace}}/build
-        key: navi32
-
     - name: Configure CMake
-      if: steps.cache-build-restore.outputs.cache-hit != 'false'
       # Configure CMake in a 'build' subdirectory. `CMAKE_BUILD_TYPE` is only required if you are using a single-configuration generator such as make.
       # See https://cmake.org/cmake/help/latest/variable/CMAKE_BUILD_TYPE.html?highlight=cmake_build_type
       run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DCMAKE_EXPORT_COMPILE_COMMANDS=TRUE -DCMAKE_MODULE_PATH="${{env.ROCM_PATH}}/hip/cmake;${{env.ROCM_PATH}}/lib/cmake" -DCMAKE_PREFIX_PATH="${{env.PREFIX_PATH}}" -DCMAKE_INSTALL_PREFIX="${{env.ROCM_PATH}}" -DCMAKE_SHARED_LINKER_FLAGS="${{env.LD_RUNPATH_FLAG}}" -DCMAKE_INSTALL_RPATH=${{env.ROCM_RPATH}} -DCMAKE_INSTALL_RPATH_USE_LINK_PATH=FALSE -DGPU_TARGETS="${{env.GPU_LIST}}" -DCPACK_PACKAGING_INSTALL_PREFIX=${{env.ROCM_PATH}} -DCPACK_GENERATOR='DEB;RPM;TGZ' -DCPACK_OBJCOPY_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-objcopy" -DCPACK_READELF_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-readelf" -DCPACK_STRIP_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-strip" -DCPACK_OBJDUMP_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-objdump"
@@ -402,14 +299,6 @@ jobs:
       run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} -- -j 16 mytest
     - name: Build Tests
       run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} -- -j 16 tests
-
-    - name: Save Build
-      id: cache-build-save
-      uses: actions/cache/save@v3
-      with:
-        path: |
-          ${{github.workspace}}/build
-        key: navi32
 
     - name: Testing V1
       run: |
@@ -436,16 +325,7 @@ jobs:
     steps:
     - uses: actions/checkout@v3
 
-    - name: Restore cached Build
-      id: cache-build-restore
-      uses: actions/cache/restore@v3
-      with:
-        path: |
-          ${{github.workspace}}/build
-        key: mi100
-
     - name: Configure CMake
-      if: steps.cache-build-restore.outputs.cache-hit != 'false'
       # Configure CMake in a 'build' subdirectory. `CMAKE_BUILD_TYPE` is only required if you are using a single-configuration generator such as make.
       # See https://cmake.org/cmake/help/latest/variable/CMAKE_BUILD_TYPE.html?highlight=cmake_build_type
       run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DCMAKE_EXPORT_COMPILE_COMMANDS=TRUE -DCMAKE_MODULE_PATH="${{env.ROCM_PATH}}/hip/cmake;${{env.ROCM_PATH}}/lib/cmake" -DCMAKE_PREFIX_PATH="${{env.PREFIX_PATH}}" -DCMAKE_INSTALL_PREFIX="${{env.ROCM_PATH}}" -DCMAKE_SHARED_LINKER_FLAGS="${{env.LD_RUNPATH_FLAG}}" -DCMAKE_INSTALL_RPATH=${{env.ROCM_RPATH}} -DCMAKE_INSTALL_RPATH_USE_LINK_PATH=FALSE -DGPU_TARGETS="${{env.GPU_LIST}}" -DCPACK_PACKAGING_INSTALL_PREFIX=${{env.ROCM_PATH}} -DCPACK_GENERATOR='DEB;RPM;TGZ' -DCPACK_OBJCOPY_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-objcopy" -DCPACK_READELF_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-readelf" -DCPACK_STRIP_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-strip" -DCPACK_OBJDUMP_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-objdump"
@@ -457,14 +337,6 @@ jobs:
       run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} -- -j 16 mytest
     - name: Build Tests
       run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} -- -j 16 tests
-
-    - name: Save Build
-      id: cache-build-save
-      uses: actions/cache/save@v3
-      with:
-        path: |
-          ${{github.workspace}}/build
-        key: mi100
 
     - name: Testing V1
       run: |
@@ -492,16 +364,7 @@ jobs:
   #   steps:
   #   - uses: actions/checkout@v3
 
-  #   - name: Restore cached Build
-  #     id: cache-build-restore
-  #     uses: actions/cache/restore@v3
-  #     with:
-  #       path: |
-  #         ${{github.workspace}}/build
-  #       key: navi21
-
   #   - name: Configure CMake
-  #     if: steps.cache-build-restore.outputs.cache-hit != 'false'
   #     # Configure CMake in a 'build' subdirectory. `CMAKE_BUILD_TYPE` is only required if you are using a single-configuration generator such as make.
   #     # See https://cmake.org/cmake/help/latest/variable/CMAKE_BUILD_TYPE.html?highlight=cmake_build_type
   #     run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DCMAKE_EXPORT_COMPILE_COMMANDS=TRUE -DCMAKE_MODULE_PATH="${{env.ROCM_PATH}}/hip/cmake;${{env.ROCM_PATH}}/lib/cmake" -DCMAKE_PREFIX_PATH="${{env.PREFIX_PATH}}" -DCMAKE_INSTALL_PREFIX="${{env.ROCM_PATH}}" -DCMAKE_SHARED_LINKER_FLAGS="${{env.LD_RUNPATH_FLAG}}" -DCMAKE_INSTALL_RPATH=${{env.ROCM_RPATH}} -DCMAKE_INSTALL_RPATH_USE_LINK_PATH=FALSE -DGPU_TARGETS="${{env.GPU_LIST}}" -DCPACK_PACKAGING_INSTALL_PREFIX=${{env.ROCM_PATH}} -DCPACK_GENERATOR='DEB;RPM;TGZ' -DCPACK_OBJCOPY_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-objcopy" -DCPACK_READELF_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-readelf" -DCPACK_STRIP_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-strip" -DCPACK_OBJDUMP_EXECUTABLE="${{env.ROCM_PATH}}/llvm/bin/llvm-objdump"
@@ -514,26 +377,18 @@ jobs:
   #   - name: Build Tests
   #     run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} -- -j 16 tests
 
-  #   - name: Save Build
-  #     id: cache-build-save
-  #     uses: actions/cache/save@v3
-  #     with:
-  #       path: |
-  #         ${{github.workspace}}/build
-  #       key: navi21
+    # - name: Testing V1
+    #   run: |
+    #     cd ${{github.workspace}}/build
+    #     ./run.sh
+    #   # TODO(aelwazir): Enable this once ctest is fixed
+    #   # working-directory: ${{github.workspace}}/build/tests-v2
+    #   # Execute tests defined by the CMake configuration.
+    #   # See https://cmake.org/cmake/help/latest/manual/ctest.1.html for more detail
+    #   # TODO(aelwazir): Enable this once ctest is fixed
+    #   # run: ctest --parallel 16 -C ${{env.BUILD_TYPE}}
 
-      # - name: Testing V1
-      #   run: |
-      #     cd ${{github.workspace}}/build
-      #     ./run.sh
-      #   # TODO(aelwazir): Enable this once ctest is fixed
-      #   # working-directory: ${{github.workspace}}/build/tests-v2
-      #   # Execute tests defined by the CMake configuration.
-      #   # See https://cmake.org/cmake/help/latest/manual/ctest.1.html for more detail
-      #   # TODO(aelwazir): Enable this once ctest is fixed
-      #   # run: ctest --parallel 16 -C ${{env.BUILD_TYPE}}
-
-      # - name: Testing V2
-      #   run: |
-      #     cd ${{github.workspace}}/build
-      #     make -j check
+    # - name: Testing V2
+    #   run: |
+    #     cd ${{github.workspace}}/build
+    #     make -j check

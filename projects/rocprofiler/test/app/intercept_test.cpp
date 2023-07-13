@@ -42,8 +42,8 @@ pthread_mutex_t mutex = PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP;
 // Tool is unloaded
 volatile bool is_loaded = false;
 // Profiling features
-//rocprofiler_feature_t* features = NULL;
-//unsigned feature_count = 0;
+// rocprofiler_feature_t* features = NULL;
+// unsigned feature_count = 0;
 
 // Error handler
 void fatal(const std::string msg) {
@@ -83,7 +83,8 @@ struct handler_arg_t {
 };
 
 // Dump stored context entry
-void dump_context_entry(context_entry_t* entry, rocprofiler_feature_t* features, unsigned feature_count) {
+void dump_context_entry(context_entry_t* entry, rocprofiler_feature_t* features,
+                        unsigned feature_count) {
   volatile std::atomic<bool>* valid = reinterpret_cast<std::atomic<bool>*>(&entry->valid);
   while (valid->load() == false) sched_yield();
 
@@ -92,16 +93,11 @@ void dump_context_entry(context_entry_t* entry, rocprofiler_feature_t* features,
 
   fflush(stdout);
   fprintf(stdout, "kernel symbol(0x%lx) name(\"%s\") tid(%u) queue-id(%u) gpu-id(%u) ",
-    entry->data.kernel_object,
-    kernel_name.c_str(),
-    entry->data.thread_id,
-    entry->data.queue_id,
-    HsaRsrcFactory::Instance().GetAgentInfo(entry->agent)->dev_index);
-  if (record) fprintf(stdout, "time(%lu,%lu,%lu,%lu)",
-    record->dispatch,
-    record->begin,
-    record->end,
-    record->complete);
+          entry->data.kernel_object, kernel_name.c_str(), entry->data.thread_id,
+          entry->data.queue_id, HsaRsrcFactory::Instance().GetAgentInfo(entry->agent)->dev_index);
+  if (record)
+    fprintf(stdout, "time(%lu,%lu,%lu,%lu)", record->dispatch, record->begin, record->end,
+            record->complete);
   fprintf(stdout, "\n");
   fflush(stdout);
 
@@ -125,8 +121,8 @@ void dump_context_entry(context_entry_t* entry, rocprofiler_feature_t* features,
         fprintf(stdout, "= (%lu)\n", p->data.result_int64);
         break;
       case ROCPROFILER_DATA_KIND_DOUBLE:
-	fprintf(stdout, "= (%lf)\n", p->data.result_double);
-	break;
+        fprintf(stdout, "= (%lf)\n", p->data.result_double);
+        break;
       default:
         fprintf(stderr, "Undefined data kind(%u)\n", p->data.kind);
         abort();
@@ -205,8 +201,8 @@ hsa_status_t dispatch_callback(const rocprofiler_callback_data_t* callback_data,
   rocprofiler_properties_t properties{};
   properties.handler = context_handler1;
   properties.handler_arg = (void*)entry;
-  status = rocprofiler_open(agent, features, feature_count,
-                            &context, 0 /*ROCPROFILER_MODE_SINGLEGROUP*/, &properties);
+  status = rocprofiler_open(agent, features, feature_count, &context,
+                            0 /*ROCPROFILER_MODE_SINGLEGROUP*/, &properties);
   check_status(status);
 #endif
   // Get group[0]
@@ -242,12 +238,12 @@ unsigned metrics_input(rocprofiler_feature_t** ret) {
   features[4].name = "SQ_INSTS_VALU";
   features[5].kind = ROCPROFILER_FEATURE_KIND_METRIC;
   features[5].name = "VALUInsts";
-//  features[6].kind = ROCPROFILER_FEATURE_KIND_METRIC;
-//  features[6].name = "TCC_HIT_sum";
-//  features[7].kind = ROCPROFILER_FEATURE_KIND_METRIC;
-//  features[7].name = "TCC_MISS_sum";
-//  features[8].kind = ROCPROFILER_FEATURE_KIND_METRIC;
-//  features[8].name = "WRITE_SIZE";
+  //  features[6].kind = ROCPROFILER_FEATURE_KIND_METRIC;
+  //  features[6].name = "TCC_HIT_sum";
+  //  features[7].kind = ROCPROFILER_FEATURE_KIND_METRIC;
+  //  features[7].name = "TCC_MISS_sum";
+  //  features[8].kind = ROCPROFILER_FEATURE_KIND_METRIC;
+  //  features[8].name = "WRITE_SIZE";
 
   *ret = features;
   return feature_count;
@@ -275,7 +271,7 @@ void initialize() {
 
   // Adding dispatch observer
   callbacks_arg_t* callbacks_arg = new callbacks_arg_t{};
-  callbacks_arg->pools = new rocprofiler_pool_t* [gpu_count];
+  callbacks_arg->pools = new rocprofiler_pool_t*[gpu_count];
   for (unsigned gpu_id = 0; gpu_id < gpu_count; gpu_id++) {
     // Getting GPU device info
     const AgentInfo* agent_info = NULL;
@@ -286,8 +282,8 @@ void initialize() {
 
     // Open profiling pool
     rocprofiler_pool_t* pool = NULL;
-    hsa_status_t status = rocprofiler_pool_open(agent_info->dev_id, features, feature_count,
-                                                &pool, 0/*ROCPROFILER_MODE_SINGLEGROUP*/, &properties);
+    hsa_status_t status = rocprofiler_pool_open(agent_info->dev_id, features, feature_count, &pool,
+                                                0 /*ROCPROFILER_MODE_SINGLEGROUP*/, &properties);
     check_status(status);
     callbacks_arg->pools[gpu_id] = pool;
   }
@@ -310,8 +306,7 @@ void cleanup() {
 }
 
 // Tool constructor
-extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings)
-{
+extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings) {
   if (pthread_mutex_lock(&mutex) != 0) {
     perror("pthread_mutex_lock");
     abort();
@@ -348,7 +343,8 @@ extern "C" PUBLIC_API void OnUnloadTool() {
 }
 
 extern "C" CONSTRUCTOR_API void constructor() {
-  printf("INTT constructor\n"); fflush(stdout);
+  printf("INTT constructor\n");
+  fflush(stdout);
 }
 
 extern "C" DESTRUCTOR_API void destructor() {

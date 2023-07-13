@@ -45,7 +45,7 @@ THE SOFTWARE.
   do {                                                                                             \
     std::ostringstream oss;                                                                        \
     oss << __FUNCTION__ << "(), " << stream;                                                       \
-    throw rocprofiler::util::exception(error, oss.str());                                            \
+    throw rocprofiler::util::exception(error, oss.str());                                          \
   } while (0)
 
 #define AQL_EXC_RAISING(error, stream)                                                             \

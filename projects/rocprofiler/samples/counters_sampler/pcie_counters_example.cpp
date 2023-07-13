@@ -8,15 +8,14 @@ int main(int argc, char** argv) {
       "CI_PERF_slv_MemRd_Bandwidth0", "CI_PERF_slv_MemWr_Bandwidth0", "CI_PERF_slv_totalMemRdTx",
       "CI_PERF_slv_totalMemWrTx", "CI_PERF_slv_totalTx"};
 
-  if(argc > 1) {
+  if (argc > 1) {
     counter_option = atoi(argv[1]);
-  }
-  else{
-    std::cout<< "Please provide one of the counter index options as argument:\n";
-    for(int i = 0; i < pcie_counters.size(); i++){
-      std::cout<< "[" << i << "]: " << pcie_counters[i] << std::endl;
+  } else {
+    std::cout << "Please provide one of the counter index options as argument:\n";
+    for (int i = 0; i < pcie_counters.size(); i++) {
+      std::cout << "[" << i << "]: " << pcie_counters[i] << std::endl;
     }
-    std::cout<< "Example:\n ./pcie_counters_sampler 1\n";
+    std::cout << "Example:\n ./pcie_counters_sampler 1\n";
     exit(0);
   }
 
@@ -55,10 +54,10 @@ int main(int argc, char** argv) {
                                                              .sampling_rate = rate,
                                                              .sampling_duration = duration,
                                                              .gpu_agent_index = 0};
-  CHECK_ROCPROFILER(
-      rocprofiler_create_filter(session_id, ROCPROFILER_COUNTERS_SAMPLER,
-                              rocprofiler_filter_data_t{.counters_sampler_parameters = cs_parameters},
-                              0, &filter_id, property));
+  CHECK_ROCPROFILER(rocprofiler_create_filter(
+      session_id, ROCPROFILER_COUNTERS_SAMPLER,
+      rocprofiler_filter_data_t{.counters_sampler_parameters = cs_parameters}, 0, &filter_id,
+      property));
   CHECK_ROCPROFILER(rocprofiler_set_filter_buffer(session_id, filter_id, buffer_id));
 
   // Normal HIP Calls

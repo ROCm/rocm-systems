@@ -54,12 +54,10 @@ uint32_t read_sq_register(const device_t& dev, uint32_t simd, uint32_t wave_id,
   return dev.pci_memory_[REG_OFFSET(GC, 0, mmSQ_IND_DATA)];
 }
 
-uint32_t debugfs_ioctl_read_sq_register(
-  const device_t &dev,
-  const struct amdgpu_debugfs_regs2_iocdata &ioc,
-  const uint32_t simd,
-  const uint32_t wave_id,
-  const uint32_t register_address) {
+uint32_t debugfs_ioctl_read_sq_register(const device_t& dev,
+                                        const struct amdgpu_debugfs_regs2_iocdata& ioc,
+                                        const uint32_t simd, const uint32_t wave_id,
+                                        const uint32_t register_address) {
   uint32_t data = REG_SET_FIELD(0, SQ_IND_INDEX, WAVE_ID, wave_id);
   data = REG_SET_FIELD(data, SQ_IND_INDEX, SIMD_ID, simd);
   data = REG_SET_FIELD(data, SQ_IND_INDEX, INDEX, register_address);
@@ -67,21 +65,15 @@ uint32_t debugfs_ioctl_read_sq_register(
   return debugfs_ioctl_read_register(dev, ioc, REG_OFFSET(GC, 0, mmSQ_IND_DATA));
 }
 
-void fill_record(
-  const device_t &dev,
-  rocprofiler_record_pc_sample_t *record,
-  uint32_t se,
-  uint64_t pc,
-  hsa_kernel_dispatch_packet_t *pkt) {
-
+void fill_record(const device_t& dev, rocprofiler_record_pc_sample_t* record, uint32_t se,
+                 uint64_t pc, hsa_kernel_dispatch_packet_t* pkt) {
   /*
    * XXX: Use of the reserved2 field in the HSA dispatch packet to uniquely
    * identify kernel dispatches for PC sampling is an internal implementation
    * detail which is subject to change.  See the comment associated with
    * rocprofiler::rocprofiler::kernel_dispatch_counter_.
    */
-  record->pc_sample.dispatch_id =
-    rocprofiler_kernel_dispatch_id_t{pkt->reserved2};
+  record->pc_sample.dispatch_id = rocprofiler_kernel_dispatch_id_t{pkt->reserved2};
 
   /*
    * TODO: Fill this with gpu_clock_counter via AMDKFD_IOC_GET_CLOCK_COUNTERS,
@@ -98,12 +90,12 @@ void fill_record(
    * Future sampling methods may fill this in automatically from the GPU's
    * real-time counter.
    */
-  //record->pc_sample.cycle = 0;
+  // record->pc_sample.cycle = 0;
   rocprofiler_get_timestamp(&record->pc_sample.timestamp);
 
   record->pc_sample.pc = pc;
   record->pc_sample.se = se;
-  const auto &hdl = dev.agent_info_.getHandle();
+  const auto& hdl = dev.agent_info_.getHandle();
 
   /*
    * XXX FIXME: For consistency, this is the same method as used by
@@ -112,17 +104,16 @@ void fill_record(
    * comment in rocprofiler::hsa_support::Initialize about using KFD's gpu_id for
    * more information.
    */
-  record->pc_sample.gpu_id = rocprofiler_agent_id_t{
-      (uint64_t)rocprofiler::hsa_support::GetAgentInfo(hdl).getIndex()};
+  record->pc_sample.gpu_id =
+      rocprofiler_agent_id_t{(uint64_t)rocprofiler::hsa_support::GetAgentInfo(hdl).getIndex()};
 }
 
 }  // namespace
 
-void read_pc_samples_v9(const device_t& dev, PCSampler *sampler) {
+void read_pc_samples_v9(const device_t& dev, PCSampler* sampler) {
   assert(sampler);
 
-  uint32_t saved_grbm_gfx_index =
-    dev.pci_memory_[REG_OFFSET(GC, 0, mmGRBM_GFX_INDEX)];
+  uint32_t saved_grbm_gfx_index = dev.pci_memory_[REG_OFFSET(GC, 0, mmGRBM_GFX_INDEX)];
   uint32_t data;
 
   for (uint32_t se = 0; se < dev.agent_info_.getShaderEngineCount(); ++se)
@@ -174,19 +165,16 @@ void read_pc_samples_v9(const device_t& dev, PCSampler *sampler) {
               data = REG_SET_FIELD(data, GRBM_GFX_CNTL, VMID, vm_id);
               dev.pci_memory_[REG_OFFSET(GC, 0, mmGRBM_GFX_CNTL)] = data;
 
-              uint32_t pq_base_lo =
-                dev.pci_memory_[REG_OFFSET(GC, 0, mmCP_HQD_PQ_BASE)];
-              uint32_t pq_base_hi =
-                dev.pci_memory_[REG_OFFSET(GC, 0, mmCP_HQD_PQ_BASE_HI)] & 0xff;
+              uint32_t pq_base_lo = dev.pci_memory_[REG_OFFSET(GC, 0, mmCP_HQD_PQ_BASE)];
+              uint32_t pq_base_hi = dev.pci_memory_[REG_OFFSET(GC, 0, mmCP_HQD_PQ_BASE_HI)] & 0xff;
               uint64_t pq_base = (uint64_t)pq_base_hi << 40 | (uint64_t)pq_base_lo << 8;
               uint32_t cp_hqd_pq_control_queue_size =
-                dev.pci_memory_[REG_OFFSET(GC, 0, mmCP_HQD_PQ_CONTROL)] & 0x3f;
+                  dev.pci_memory_[REG_OFFSET(GC, 0, mmCP_HQD_PQ_CONTROL)] & 0x3f;
               uint32_t queue_size = 1 << (cp_hqd_pq_control_queue_size + 1);
 
-              auto pkt = (hsa_kernel_dispatch_packet_t*)(
-               pq_base + disp_idx % queue_size *
-               sizeof(hsa_kernel_dispatch_packet_t)
-              );
+              auto pkt = (hsa_kernel_dispatch_packet_t*)(pq_base +
+                                                         disp_idx % queue_size *
+                                                             sizeof(hsa_kernel_dispatch_packet_t));
               fill_record(dev, &record, se, *pc, pkt);
             }
 
@@ -208,10 +196,10 @@ void read_pc_samples_v9(const device_t& dev, PCSampler *sampler) {
   dev.pci_memory_[REG_OFFSET(GC, 0, mmGRBM_GFX_INDEX)] = saved_grbm_gfx_index;
 }
 
-void read_pc_samples_v9_ioctl(const device_t& dev, PCSampler *sampler) {
+void read_pc_samples_v9_ioctl(const device_t& dev, PCSampler* sampler) {
   assert(sampler);
 
-  struct amdgpu_debugfs_regs2_iocdata ioc{};
+  struct amdgpu_debugfs_regs2_iocdata ioc {};
   ioc.use_grbm = 1;
 
   uint32_t data;
@@ -236,11 +224,13 @@ void read_pc_samples_v9_ioctl(const device_t& dev, PCSampler *sampler) {
 
             // Skip this slot if the wave is not valid.
             debugfs_ioctl_set_state(dev, ioc);
-            uint32_t status = debugfs_ioctl_read_sq_register(dev, ioc, simd, wave_id, ixSQ_WAVE_STATUS);
+            uint32_t status =
+                debugfs_ioctl_read_sq_register(dev, ioc, simd, wave_id, ixSQ_WAVE_STATUS);
             if (!REG_GET_FIELD(status, SQ_WAVE_STATUS, VALID)) continue;
 
             debugfs_ioctl_set_state(dev, ioc);
-            uint32_t hw_id = debugfs_ioctl_read_sq_register(dev, ioc, simd, wave_id, ixSQ_WAVE_HW_ID);
+            uint32_t hw_id =
+                debugfs_ioctl_read_sq_register(dev, ioc, simd, wave_id, ixSQ_WAVE_HW_ID);
             uint32_t vm_id = REG_GET_FIELD(hw_id, SQ_WAVE_HW_ID, VM_ID);
 
             rocprofiler_record_pc_sample_t record;
@@ -248,12 +238,16 @@ void read_pc_samples_v9_ioctl(const device_t& dev, PCSampler *sampler) {
             // If the wave's PASID matches the process', read and report the PC
             // and dispatch packet for the wave.
             std::optional<uint64_t> pc;
-            if (debugfs_ioctl_read_register(dev, ioc, REG_OFFSET(OSSSYS, 0, mmIH_VMID_0_LUT) + vm_id) == pasid()) {
-              pc = (uint64_t)debugfs_ioctl_read_sq_register(dev, ioc, simd, wave_id, ixSQ_WAVE_PC_HI) << 32 |
+            if (debugfs_ioctl_read_register(
+                    dev, ioc, REG_OFFSET(OSSSYS, 0, mmIH_VMID_0_LUT) + vm_id) == pasid()) {
+              pc =
+                  (uint64_t)debugfs_ioctl_read_sq_register(dev, ioc, simd, wave_id, ixSQ_WAVE_PC_HI)
+                      << 32 |
                   debugfs_ioctl_read_sq_register(dev, ioc, simd, wave_id, ixSQ_WAVE_PC_LO);
 
               // The dispatch index into the queue
-              uint32_t disp_idx = debugfs_ioctl_read_sq_register(dev, ioc, simd, wave_id, ixSQ_WAVE_TTMP6);
+              uint32_t disp_idx =
+                  debugfs_ioctl_read_sq_register(dev, ioc, simd, wave_id, ixSQ_WAVE_TTMP6);
 
               // Set up reading CP_HQD_PQ_BASE and CP_HQD_PQ_BASE_HI
               uint32_t pipe_id = REG_GET_FIELD(hw_id, SQ_WAVE_HW_ID, PIPE_ID);
@@ -266,18 +260,19 @@ void read_pc_samples_v9_ioctl(const device_t& dev, PCSampler *sampler) {
               debugfs_ioctl_write_register(dev, ioc, REG_OFFSET(GC, 0, mmGRBM_GFX_CNTL), data);
 
               uint32_t pq_base_lo =
-                debugfs_ioctl_read_register(dev, ioc, REG_OFFSET(GC, 0, mmCP_HQD_PQ_BASE));
+                  debugfs_ioctl_read_register(dev, ioc, REG_OFFSET(GC, 0, mmCP_HQD_PQ_BASE));
               uint32_t pq_base_hi =
-                debugfs_ioctl_read_register(dev, ioc, REG_OFFSET(GC, 0, mmCP_HQD_PQ_BASE_HI)) & 0xff;
+                  debugfs_ioctl_read_register(dev, ioc, REG_OFFSET(GC, 0, mmCP_HQD_PQ_BASE_HI)) &
+                  0xff;
               uint64_t pq_base = (uint64_t)pq_base_hi << 40 | (uint64_t)pq_base_lo << 8;
               uint32_t cp_hqd_pq_control_queue_size =
-                debugfs_ioctl_read_register(dev, ioc, REG_OFFSET(GC, 0, mmCP_HQD_PQ_CONTROL)) & 0x3f;
+                  debugfs_ioctl_read_register(dev, ioc, REG_OFFSET(GC, 0, mmCP_HQD_PQ_CONTROL)) &
+                  0x3f;
               uint32_t queue_size = 1 << (cp_hqd_pq_control_queue_size + 1);
 
-              auto pkt = (hsa_kernel_dispatch_packet_t*)(
-               pq_base + disp_idx % queue_size *
-               sizeof(hsa_kernel_dispatch_packet_t)
-              );
+              auto pkt = (hsa_kernel_dispatch_packet_t*)(pq_base +
+                                                         disp_idx % queue_size *
+                                                             sizeof(hsa_kernel_dispatch_packet_t));
               fill_record(dev, &record, se, *pc, pkt);
             }
 

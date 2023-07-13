@@ -40,7 +40,7 @@ Filter::Filter(rocprofiler_filter_id_t id, rocprofiler_filter_kind_t filter_kind
       }
       break;
     }
-    case ROCPROFILER_PC_SAMPLING_COLLECTION:{
+    case ROCPROFILER_PC_SAMPLING_COLLECTION: {
       break;
     }
     case ROCPROFILER_ATT_TRACE_COLLECTION: {
@@ -62,8 +62,8 @@ Filter::Filter(rocprofiler_filter_id_t id, rocprofiler_filter_kind_t filter_kind
     }
     case ROCPROFILER_API_TRACE: {
       tracer_apis_.clear();
-      for (uint32_t j = 0; j < data_count; j++){
-          tracer_apis_.emplace_back(filter_data.trace_apis[j]);
+      for (uint32_t j = 0; j < data_count; j++) {
+        tracer_apis_.emplace_back(filter_data.trace_apis[j]);
       }
       break;
     }
@@ -195,7 +195,7 @@ void Filter::SetProperty(rocprofiler_filter_property_t property) {
     case ROCPROFILER_FILTER_DISPATCH_IDS:
       dispatch_id_filter_.clear();
       for (uint32_t j = 0; j < property.data_count; j++)
-          dispatch_id_filter_.emplace_back(property.dispatch_ids[j]);
+        dispatch_id_filter_.emplace_back(property.dispatch_ids[j]);
       break;
     default:
       break;
@@ -249,9 +249,7 @@ void Filter::SetCallback(rocprofiler_sync_callback_t& callback) {
 
 bool Filter::HasCallback() { return has_sync_callback_; }
 
-rocprofiler_sync_callback_t& Filter::GetCallback() {
-  return callback_;
-}
+rocprofiler_sync_callback_t& Filter::GetCallback() { return callback_; }
 
 size_t Filter::GetPropertiesCount(rocprofiler_filter_property_kind_t kind) {
   switch (kind) {

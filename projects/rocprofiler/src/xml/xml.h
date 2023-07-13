@@ -219,14 +219,16 @@ class Xml {
       buf[size - 1] = '\0';
 
       if (strncmp(buf, "#include \"", 10) == 0) {
-        for (ind = 0; (ind < size) && (buf[ind] != '\n'); ++ind) {}
+        for (ind = 0; (ind < size) && (buf[ind] != '\n'); ++ind) {
+        }
         if (ind < size) {
           buf[ind] = '\0';
           size = ind;
           lseek(fd_, pos + ind + 1, SEEK_SET);
         }
 
-        for (ind = 10; (ind < size) && (buf[ind] != '"'); ++ind) {}
+        for (ind = 10; (ind < size) && (buf[ind] != '"'); ++ind) {
+        }
         if (ind == size) {
           error = true;
           break;
@@ -481,9 +483,7 @@ class Xml {
     return global_tag;
   }
 
-  void AddOption(const std::string& key, const std::string& value) {
-    level_->opts[key] = value;
-  }
+  void AddOption(const std::string& key, const std::string& value) { level_->opts[key] = value; }
   std::string GetOption(const std::string& key, const level_t* level = NULL) {
     level = (level != NULL) ? level : level_;
     auto it = level->opts.find(key);

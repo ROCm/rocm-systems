@@ -35,10 +35,10 @@ namespace rocprofiler {
 
 typedef std::vector<double> xcc_results_t;
 
- class results_t{
-  public:
-  results_t(std::string in_name, event_t in_event, uint32_t xcc_count):
-  name(in_name), val_double(0), event(in_event) {
+class results_t {
+ public:
+  results_t(std::string in_name, event_t in_event, uint32_t xcc_count)
+      : name(in_name), val_double(0), event(in_event) {
     xcc_vals.resize(xcc_count);
     std::fill(xcc_vals.begin(), xcc_vals.end(), 0);
   }
@@ -78,8 +78,9 @@ bool GetMetricsData(std::map<std::string, results_t*>& results_map,
                     std::vector<const Metric*>& metrics_list, uint64_t kernel_duration = 0);
 
 void GetCountersAndMetricResultsByXcc(uint32_t xcc_index, std::vector<results_t*>& results_list,
-                                 std::map<std::string, results_t*>& results_map,
-                                 std::vector<const Metric*>& metrics_list, uint64_t kernel_duration = 0);
+                                      std::map<std::string, results_t*>& results_map,
+                                      std::vector<const Metric*>& metrics_list,
+                                      uint64_t kernel_duration = 0);
 
 }  // namespace metrics
 }  // namespace rocprofiler

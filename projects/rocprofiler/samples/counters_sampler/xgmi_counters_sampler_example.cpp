@@ -40,14 +40,14 @@ int main(int argc, char** argv) {
   uint32_t duration = 5000;
 
   rocprofiler_counters_sampler_parameters_t cs_parameters = {.counters = counters_input,
-                                                           .counters_num = 1,
-                                                           .sampling_rate = rate,
-                                                           .sampling_duration = duration,
-                                                           .gpu_agent_index = 0};
-  CHECK_ROCPROFILER(
-      rocprofiler_create_filter(session_id, ROCPROFILER_COUNTERS_SAMPLER,
-                              rocprofiler_filter_data_t{.counters_sampler_parameters = cs_parameters},
-                              0, &filter_id, property));
+                                                             .counters_num = 1,
+                                                             .sampling_rate = rate,
+                                                             .sampling_duration = duration,
+                                                             .gpu_agent_index = 0};
+  CHECK_ROCPROFILER(rocprofiler_create_filter(
+      session_id, ROCPROFILER_COUNTERS_SAMPLER,
+      rocprofiler_filter_data_t{.counters_sampler_parameters = cs_parameters}, 0, &filter_id,
+      property));
   CHECK_ROCPROFILER(rocprofiler_set_filter_buffer(session_id, filter_id, buffer_id));
 
   // Normal HIP Calls

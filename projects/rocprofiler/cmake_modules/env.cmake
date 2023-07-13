@@ -20,60 +20,75 @@
 # THE SOFTWARE.
 ################################################################################
 
-## Linux Compiler options
+# Linux Compiler options
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fms-extensions")
 
-add_definitions ( -DNEW_TRACE_API=1 )
+add_definitions(-DNEW_TRACE_API=1)
 
-## CLANG options
+# CLANG options
 if("$ENV{CXX}" STREQUAL "/usr/bin/clang++")
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -ferror-limit=1000000")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -ferror-limit=1000000")
 endif()
 
-## Enable debug trace
-if ( DEFINED ENV{CMAKE_DEBUG_TRACE} )
-  add_definitions ( -DDEBUG_TRACE=1 )
+# Enable debug trace
+if(DEFINED ENV{CMAKE_DEBUG_TRACE})
+    add_definitions(-DDEBUG_TRACE=1)
 endif()
 
-## Enable AQL-profile new API
-if ( NOT DEFINED ENV{CMAKE_CURR_API} )
-  add_definitions ( -DAQLPROF_NEW_API=1 )
+# Enable AQL-profile new API
+if(NOT DEFINED ENV{CMAKE_CURR_API})
+    add_definitions(-DAQLPROF_NEW_API=1)
 endif()
 
-## Enable direct loading of AQL-profile HSA extension
-if ( DEFINED ENV{CMAKE_LD_AQLPROFILE} )
-  add_definitions ( -DROCP_LD_AQLPROFILE=1 )
+# Enable direct loading of AQL-profile HSA extension
+if(DEFINED ENV{CMAKE_LD_AQLPROFILE})
+    add_definitions(-DROCP_LD_AQLPROFILE=1)
 endif()
 
-## Find hsa-runtime
-find_package(hsa-runtime64 CONFIG REQUIRED HINTS ${CMAKE_PREFIX_PATH} PATHS /opt/rocm PATH_SUFFIXES lib/cmake/hsa-runtime64 )
+# Find hsa-runtime
+find_package(
+    hsa-runtime64 CONFIG REQUIRED
+    HINTS ${CMAKE_PREFIX_PATH}
+    PATHS /opt/rocm
+    PATH_SUFFIXES lib/cmake/hsa-runtime64)
 
 # find KFD thunk
-find_package(hsakmt CONFIG REQUIRED HINTS ${CMAKE_PREFIX_PATH} PATHS /opt/rocm PATH_SUFFIXES lib/cmake/hsakmt )
+find_package(
+    hsakmt CONFIG REQUIRED
+    HINTS ${CMAKE_PREFIX_PATH}
+    PATHS /opt/rocm
+    PATH_SUFFIXES lib/cmake/hsakmt)
 
-## Find ROCm
-## TODO: Need a better method to find the ROCm path
-find_path ( HSA_KMT_INC_PATH "hsakmt/hsakmt.h" HINTS ${CMAKE_PREFIX_PATH} PATHS /opt/rocm PATH_SUFFIXES include )
-if ( "${HSA_KMT_INC_PATH}" STREQUAL "" )
-  get_target_property(HSA_KMT_INC_PATH hsakmt::hsakmt INTERFACE_INCLUDE_DIRECTORIES)
+# Find ROCm TODO: Need a better method to find the ROCm path
+find_path(
+    HSA_KMT_INC_PATH "hsakmt/hsakmt.h"
+    HINTS ${CMAKE_PREFIX_PATH}
+    PATHS /opt/rocm
+    PATH_SUFFIXES include)
+if("${HSA_KMT_INC_PATH}" STREQUAL "")
+    get_target_property(HSA_KMT_INC_PATH hsakmt::hsakmt INTERFACE_INCLUDE_DIRECTORIES)
 endif()
-## Include path: /opt/rocm-ver/include. Go up one level to get ROCm  path
-get_filename_component ( ROCM_ROOT_DIR "${HSA_KMT_INC_PATH}" DIRECTORY )
+# Include path: /opt/rocm-ver/include. Go up one level to get ROCm  path
+get_filename_component(ROCM_ROOT_DIR "${HSA_KMT_INC_PATH}" DIRECTORY)
 
-## Basic Tool Chain Information
-message ( "----------Build-Type: ${CMAKE_BUILD_TYPE}" )
-message ( "------------Compiler: ${CMAKE_CXX_COMPILER}" )
-message ( "----Compiler-Version: ${CMAKE_CXX_COMPILER_VERSION}" )
-message ( "-------ROCM_ROOT_DIR: ${ROCM_ROOT_DIR}" )
-message ( "-----CMAKE_CXX_FLAGS: ${CMAKE_CXX_FLAGS}" )
-message ( "---CMAKE_PREFIX_PATH: ${CMAKE_PREFIX_PATH}" )
-message ( "---------GPU_TARGETS: ${GPU_TARGETS}" )
+# Basic Tool Chain Information
+message("----------Build-Type: ${CMAKE_BUILD_TYPE}")
+message("------------Compiler: ${CMAKE_CXX_COMPILER}")
+message("----Compiler-Version: ${CMAKE_CXX_COMPILER_VERSION}")
+message("-------ROCM_ROOT_DIR: ${ROCM_ROOT_DIR}")
+message("-----CMAKE_CXX_FLAGS: ${CMAKE_CXX_FLAGS}")
+message("---CMAKE_PREFIX_PATH: ${CMAKE_PREFIX_PATH}")
+message("---------GPU_TARGETS: ${GPU_TARGETS}")
 
-if ( "${ROCM_ROOT_DIR}" STREQUAL "" )
-  message ( FATAL_ERROR "ROCM_ROOT_DIR is not found." )
-endif ()
+if("${ROCM_ROOT_DIR}" STREQUAL "")
+    message(FATAL_ERROR "ROCM_ROOT_DIR is not found.")
+endif()
 
-find_library(FIND_AQL_PROFILE_LIB "libhsa-amd-aqlprofile64.so" HINTS ${CMAKE_PREFIX_PATH} PATHS ${ROCM_ROOT_DIR} PATH_SUFFIXES lib REQUIRED)
+find_library(
+    FIND_AQL_PROFILE_LIB "libhsa-amd-aqlprofile64.so"
+    HINTS ${CMAKE_PREFIX_PATH}
+    PATHS ${ROCM_ROOT_DIR}
+    PATH_SUFFIXES lib REQUIRED)
 if(NOT FIND_AQL_PROFILE_LIB)
-  message("AQL_PROFILE not installed. Please install AQL_PROFILE")
+    message("AQL_PROFILE not installed. Please install AQL_PROFILE")
 endif()

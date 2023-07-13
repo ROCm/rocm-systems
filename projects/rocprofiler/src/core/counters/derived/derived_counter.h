@@ -39,8 +39,7 @@ namespace Counter {
 class DerivedCounter : Counter {
  public:
   std::function<uint64_t()> evaluate_metric;
-  DerivedCounter(std::string name, std::string description,
-                 std::string gpu_name);
+  DerivedCounter(std::string name, std::string description, std::string gpu_name);
   ~DerivedCounter();
 
   uint64_t getMetricId();

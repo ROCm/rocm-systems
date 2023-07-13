@@ -435,16 +435,18 @@ bool AsyncSignalHandler(hsa_signal_value_t signal_value, void* data) {
           pending->session_id = GetROCProfilerSingleton()->GetCurrentSessionId();
         }
         if (pending->counters_count > 0) {
-          if (xcc_id == 0 && pending->context && pending->context->metrics_list.size() > 0 && pending->profile)  // call to GetCounterData() is required only once for a dispatch
+          if (xcc_id == 0 && pending->context && pending->context->metrics_list.size() > 0 &&
+              pending->profile)  // call to GetCounterData() is required only once for a dispatch
             rocprofiler::metrics::GetCounterData(pending->profile, queue_info_session->agent,
                                                  pending->context->results_list);
           if (is_individual_xcc_mode)
             rocprofiler::metrics::GetCountersAndMetricResultsByXcc(
                 xcc_id, pending->context->results_list, pending->context->results_map,
-                pending->context->metrics_list, time.end-time.start);
+                pending->context->metrics_list, time.end - time.start);
           else
             rocprofiler::metrics::GetMetricsData(pending->context->results_map,
-                                               pending->context->metrics_list, time.end-time.start);
+                                                 pending->context->metrics_list,
+                                                 time.end - time.start);
           AddRecordCounters(&record, pending);
         } else {
           if (session->FindBuffer(pending->buffer_id)) {
@@ -652,8 +654,8 @@ void CheckNeededProfileConfigs() {
         att_counters_names = filter->GetCounterData();
         kernel_profile_names = std::get<std::vector<std::string>>(
             filter->GetProperty(ROCPROFILER_FILTER_KERNEL_NAMES));
-        kernel_profile_dispatch_ids = std::get<std::vector<uint64_t>>(
-            filter->GetProperty(ROCPROFILER_FILTER_DISPATCH_IDS));
+        kernel_profile_dispatch_ids =
+            std::get<std::vector<uint64_t>>(filter->GetProperty(ROCPROFILER_FILTER_DISPATCH_IDS));
       } else if (session && session->FindFilterWithKind(ROCPROFILER_PC_SAMPLING_COLLECTION)) {
         is_pc_sampling_collection_mode = true;
       }
@@ -685,23 +687,20 @@ std::pair<std::vector<bool>, bool> GetAllowedProfilesList(const void* packets, i
       auto& kdispatch = static_cast<const hsa_kernel_dispatch_packet_s*>(packets)[i];
 
       // If Dispatch IDs specified, profile based on dispatch ID
-      for (auto id : kernel_profile_dispatch_ids)
-        b_profile_this_object |= id == current_writer_id;
+      for (auto id : kernel_profile_dispatch_ids) b_profile_this_object |= id == current_writer_id;
       try {
         // Can throw
         const std::string& kernel_name = ksymbols->at(kdispatch.kernel_object);
 
         // If no filters specified, auto profile this kernel
-        if (kernel_profile_names.size() == 0 &&
-            kernel_profile_dispatch_ids.size() == 0 &&
+        if (kernel_profile_names.size() == 0 && kernel_profile_dispatch_ids.size() == 0 &&
             kernel_name.find("__amd_rocclr_") == std::string::npos)
-            b_profile_this_object = true;
+          b_profile_this_object = true;
 
         // Try to match the mangled kernel name with given matches in input.txt
         // We want to initiate att profiling if a match exists
         for (const std::string& kernel_matches : kernel_profile_names)
-          if (kernel_name.find(kernel_matches) != std::string::npos)
-            b_profile_this_object = true;
+          if (kernel_name.find(kernel_matches) != std::string::npos) b_profile_this_object = true;
       } catch (...) {
         printf("Warning: Unknown name for object %lu\n", kdispatch.kernel_object);
       }
@@ -711,17 +710,13 @@ std::pair<std::vector<bool>, bool> GetAllowedProfilesList(const void* packets, i
     can_profile_packet.push_back(b_profile_this_object);
   }
   // If we're going to skip all packets, need to update writer ID
-  if (!b_can_profile_anypacket)
-    WRITER_ID.store(current_writer_id, std::memory_order_release);
+  if (!b_can_profile_anypacket) WRITER_ID.store(current_writer_id, std::memory_order_release);
   return {can_profile_packet, b_can_profile_anypacket};
 }
 
-hsa_ven_amd_aqlprofile_profile_t* ProcessATTParams(
-  Packet::packet_t& start_packet,
-  Packet::packet_t& stop_packet,
-  Queue& queue_info,
-  Agent::AgentInfo& agentInfo
-) {
+hsa_ven_amd_aqlprofile_profile_t* ProcessATTParams(Packet::packet_t& start_packet,
+                                                   Packet::packet_t& stop_packet, Queue& queue_info,
+                                                   Agent::AgentInfo& agentInfo) {
   std::vector<hsa_ven_amd_aqlprofile_parameter_t> att_params;
   int num_att_counters = 0;
   uint32_t att_buffer_size = DEFAULT_ATT_BUFFER_SIZE;
@@ -731,15 +726,16 @@ hsa_ven_amd_aqlprofile_profile_t* ProcessATTParams(
       case ROCPROFILER_ATT_PERFCOUNTER_NAME:
         break;
       case ROCPROFILER_ATT_BUFFER_SIZE:
-        att_buffer_size = std::max(96l<<10l, std::min(int64_t(param.value)<<20l, (1l<<32l)-(3l<<20)));
-        break; // Clip to [96KB, 4GB)
+        att_buffer_size =
+            std::max(96l << 10l, std::min(int64_t(param.value) << 20l, (1l << 32l) - (3l << 20)));
+        break;  // Clip to [96KB, 4GB)
       case ROCPROFILER_ATT_PERFCOUNTER:
         num_att_counters += 1;
         break;
       default:
         att_params.push_back(
-        {static_cast<hsa_ven_amd_aqlprofile_parameter_name_t>(int(param.parameter_name)),
-        param.value});
+            {static_cast<hsa_ven_amd_aqlprofile_parameter_name_t>(int(param.parameter_name)),
+             param.value});
     }
   }
 
@@ -760,22 +756,21 @@ hsa_ven_amd_aqlprofile_profile_t* ProcessATTParams(
         printf("Only events from the SQ block can be selected for ATT.");
         exit(1);
       }
-      att_params.push_back({static_cast<hsa_ven_amd_aqlprofile_parameter_name_t>(
-                                int(ROCPROFILER_ATT_PERFCOUNTER)),
-                            event.counter_id | (event.counter_id ? (0xF << 24) : 0)});
+      att_params.push_back(
+          {static_cast<hsa_ven_amd_aqlprofile_parameter_name_t>(int(ROCPROFILER_ATT_PERFCOUNTER)),
+           event.counter_id | (event.counter_id ? (0xF << 24) : 0)});
       num_att_counters += 1;
     }
 
     hsa_ven_amd_aqlprofile_parameter_t zero_perf = {
-        static_cast<hsa_ven_amd_aqlprofile_parameter_name_t>(int(ROCPROFILER_ATT_PERFCOUNTER)),
-        0};
+        static_cast<hsa_ven_amd_aqlprofile_parameter_name_t>(int(ROCPROFILER_ATT_PERFCOUNTER)), 0};
 
     // Fill other perfcounters with 0's
     for (; num_att_counters < 16; num_att_counters++) att_params.push_back(zero_perf);
   }
   // Get the PM4 Packets using packets_generator
-  return Packet::GenerateATTPackets(queue_info.GetCPUAgent(), queue_info.GetGPUAgent(),
-                                      att_params, &start_packet, &stop_packet, att_buffer_size);
+  return Packet::GenerateATTPackets(queue_info.GetCPUAgent(), queue_info.GetGPUAgent(), att_params,
+                                    &start_packet, &stop_packet, att_buffer_size);
 }
 
 /**
@@ -866,14 +861,16 @@ void WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t user_pkt
                                     record_id);
         if (session_data_count > 0 && profile.second) {
           session->GetProfiler()->AddPendingSignals(
-              writer_id, record_id, original_packet.completion_signal, dispatch_packet.completion_signal, session_id, buffer_id,
-              profile.first, session_data_count, profile.second, kernel_properties,
-              (uint32_t)syscall(__NR_gettid), user_pkt_index, correlation_id);
+              writer_id, record_id, original_packet.completion_signal,
+              dispatch_packet.completion_signal, session_id, buffer_id, profile.first,
+              session_data_count, profile.second, kernel_properties, (uint32_t)syscall(__NR_gettid),
+              user_pkt_index, correlation_id);
         } else {
           session->GetProfiler()->AddPendingSignals(
-              writer_id, record_id, original_packet.completion_signal, dispatch_packet.completion_signal, session_id, buffer_id,
-              nullptr, session_data_count, nullptr, kernel_properties, (uint32_t)syscall(__NR_gettid),
-              user_pkt_index, correlation_id);
+              writer_id, record_id, original_packet.completion_signal,
+              dispatch_packet.completion_signal, session_id, buffer_id, nullptr, session_data_count,
+              nullptr, kernel_properties, (uint32_t)syscall(__NR_gettid), user_pkt_index,
+              correlation_id);
         }
       }
 
@@ -893,7 +890,8 @@ void WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t user_pkt
       CreateSignal(0, &interrupt_signal);
 
       // Adding Stop and Read PM4 Packets
-      if (session_data_count > 0 && is_counter_collection_mode && profiles.size() > 0 && profile.first && profile.first->stop_packet) {
+      if (session_data_count > 0 && is_counter_collection_mode && profiles.size() > 0 &&
+          profile.first && profile.first->stop_packet) {
         hsa_signal_t dummy_signal{};
         profile.first->stop_packet->header = HSA_PACKET_TYPE_VENDOR_SPECIFIC
             << HSA_PACKET_HEADER_TYPE;
@@ -937,7 +935,8 @@ void WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t user_pkt
 
     bool can_profile_anypacket = false;
     std::vector<bool> can_profile_packet;
-    std::tie(can_profile_packet, can_profile_anypacket) = GetAllowedProfilesList(packets, pkt_count);
+    std::tie(can_profile_packet, can_profile_anypacket) =
+        GetAllowedProfilesList(packets, pkt_count);
 
     if (!can_profile_anypacket) {
       /* Write the original packets to the hardware if no patch will be profiled */
@@ -964,8 +963,9 @@ void WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t user_pkt
 
         // increment writer ID for every packet
         if (bit_extract(original_packet.header, HSA_PACKET_HEADER_TYPE,
-          HSA_PACKET_HEADER_TYPE+HSA_PACKET_HEADER_WIDTH_TYPE-1) == HSA_PACKET_TYPE_KERNEL_DISPATCH)
-            writer_id = WRITER_ID.fetch_add(1, std::memory_order_release);
+                        HSA_PACKET_HEADER_TYPE + HSA_PACKET_HEADER_WIDTH_TYPE - 1) ==
+            HSA_PACKET_TYPE_KERNEL_DISPATCH)
+          writer_id = WRITER_ID.fetch_add(1, std::memory_order_release);
 
         continue;
       }

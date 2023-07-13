@@ -25,23 +25,25 @@ file(GLOB ROCPROFILER_UTIL_SRC_FILES ${PROJECT_SOURCE_DIR}/src/utils/helper.cpp)
 file(GLOB FILE_SOURCES "*.cpp")
 add_library(file_plugin SHARED ${FILE_SOURCES} ${ROCPROFILER_UTIL_SRC_FILES})
 
-set_target_properties(file_plugin PROPERTIES
-  CXX_VISIBILITY_PRESET hidden
-  LINK_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/../exportmap
-  LIBRARY_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib/rocprofiler)
+set_target_properties(
+    file_plugin
+    PROPERTIES CXX_VISIBILITY_PRESET hidden
+               LINK_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/../exportmap
+               LIBRARY_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib/rocprofiler)
 
-target_compile_definitions(file_plugin
-  PRIVATE HIP_PROF_HIP_API_STRING=1 __HIP_PLATFORM_HCC__=1)
+target_compile_definitions(file_plugin PRIVATE HIP_PROF_HIP_API_STRING=1
+                                               __HIP_PLATFORM_HCC__=1)
 
 target_include_directories(file_plugin PRIVATE ${PROJECT_SOURCE_DIR})
 
-target_link_options(file_plugin PRIVATE -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/../exportmap -Wl,--no-undefined)
+target_link_options(
+    file_plugin PRIVATE -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/../exportmap
+    -Wl,--no-undefined)
 
-target_link_libraries(file_plugin PRIVATE rocprofiler-v2 hsa-runtime64::hsa-runtime64 stdc++fs amd_comgr dl)
+target_link_libraries(file_plugin PRIVATE rocprofiler-v2 hsa-runtime64::hsa-runtime64
+                                          stdc++fs amd_comgr dl)
 
-install(TARGETS file_plugin LIBRARY
-  DESTINATION ${CMAKE_INSTALL_LIBDIR}/${PROJECT_NAME}
-  COMPONENT asan)
-install(TARGETS file_plugin LIBRARY
-  DESTINATION ${CMAKE_INSTALL_LIBDIR}/${PROJECT_NAME}
-  COMPONENT runtime)
+install(TARGETS file_plugin LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/${PROJECT_NAME}
+                                    COMPONENT asan)
+install(TARGETS file_plugin LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/${PROJECT_NAME}
+                                    COMPONENT runtime)

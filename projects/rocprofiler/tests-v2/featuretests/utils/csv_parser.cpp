@@ -27,10 +27,9 @@ namespace tests {
 namespace utility {
 
 // Tokenize a comma separated string and saves result in vector
-int CSVParser::GetTockenizedString(std::string str,
-                                   std::vector<std::string> &stringVec,
+int CSVParser::GetTockenizedString(std::string str, std::vector<std::string>& stringVec,
                                    char delim) {
-  char *token = strtok(const_cast<char *>(str.c_str()), &delim);
+  char* token = strtok(const_cast<char*>(str.c_str()), &delim);
   while (token) {
     std::string temp = token;
     stringVec.push_back(temp);
@@ -41,14 +40,14 @@ int CSVParser::GetTockenizedString(std::string str,
 }
 
 // Get map for collected counters
-countermap &CSVParser::GetCounterMap() { return counter_map_; }
+countermap& CSVParser::GetCounterMap() { return counter_map_; }
 
 // Read counter value based on row-column
-std::string *CSVParser::ReadCounter(uint32_t row, uint32_t col) {
+std::string* CSVParser::ReadCounter(uint32_t row, uint32_t col) {
   auto itr = counter_map_.find(row);
 
   if (itr != counter_map_.end()) {
-    std::map<uint32_t, std::string> &rowmap = itr->second;
+    std::map<uint32_t, std::string>& rowmap = itr->second;
     auto it = rowmap.find(col);
     if (it != rowmap.end()) {
       return &(it->second);
@@ -61,8 +60,8 @@ std::string *CSVParser::ReadCounter(uint32_t row, uint32_t col) {
 }
 
 // Parses CSV file and saves result in a map
-void CSVParser::ParseCSV(const char *path) {
-  FILE *pFile = fopen(path, "r");
+void CSVParser::ParseCSV(const char* path) {
+  FILE* pFile = fopen(path, "r");
 
   if (pFile) {
     // Relocate the file pointer on the stream.
@@ -74,15 +73,15 @@ void CSVParser::ParseCSV(const char *path) {
     // to the beginning of the file
     rewind(pFile);
 
-    char *fileBuffer = new char[uSize];
+    char* fileBuffer = new char[uSize];
     size_t size = fread(fileBuffer, 1, uSize, pFile);
     if (size < 0) std::cerr << "Incorrect File!" << std::endl;
 
     std::map<uint32_t, std::string> rowmap;
     uint32_t uiIndex = 1;
 
-    char *pBegin = fileBuffer;
-    char *pEnd = strchr(pBegin, '\n');
+    char* pBegin = fileBuffer;
+    char* pEnd = strchr(pBegin, '\n');
 
     // The beginning of the second line, discarding the first line
     pBegin = pEnd + 1;
@@ -126,8 +125,8 @@ void CSVParser::ParseCSV(const char *path) {
 //  Parses profiler output buffer and saves result in a map
 void CSVParser::ParseCSV(std::string buffer) {
   std::vector<char> buff(buffer.begin(), buffer.end());
-  char *pBegin = &buff[0];
-  char *pEnd = strchr(pBegin, '\n');
+  char* pBegin = &buff[0];
+  char* pEnd = strchr(pBegin, '\n');
 
   // The beginning of the second line, discarding the first line
   pBegin = pEnd + 1;

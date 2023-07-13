@@ -23,10 +23,8 @@
 
 #include <amd-dbgapi/amd-dbgapi.h>
 
-void
-disassembly_disassemble_kernels(bool const);
+void disassembly_disassemble_kernels(bool const);
 
-void
-disassembly_print_pc_sample_context(amd_dbgapi_global_address_t const);
+void disassembly_print_pc_sample_context(amd_dbgapi_global_address_t const);
 
-#endif // SAMPLES_PCSAMPLER_CODE_PRINTING_SAMPLE_DISASSEMBLY_HPP_
+#endif  // SAMPLES_PCSAMPLER_CODE_PRINTING_SAMPLE_DISASSEMBLY_HPP_

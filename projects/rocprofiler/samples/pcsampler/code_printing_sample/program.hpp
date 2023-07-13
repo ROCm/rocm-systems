@@ -23,32 +23,30 @@
 
 #define PROGNAME "code_printing_sample"
 
-#define HIP_ERROR(code)                                                 \
-    do {                                                                \
-        fprintf(stderr,                                                 \
-                PROGNAME ": Assertion failed at %s:%d, HIP error: %s\n", \
-                __FILE__, __LINE__, hipGetErrorString((code)));         \
-        fflush(stderr);                                                 \
-    } while (false);
+#define HIP_ERROR(code)                                                                            \
+  do {                                                                                             \
+    fprintf(stderr, PROGNAME ": Assertion failed at %s:%d, HIP error: %s\n", __FILE__, __LINE__,   \
+            hipGetErrorString((code)));                                                            \
+    fflush(stderr);                                                                                \
+  } while (false);
 
-#define HIP_CHECK_BREAK(expr, var)                                      \
-    if (auto const code = (expr); hipSuccess != code) {                 \
-        HIP_ERROR(code);                                                \
-        (var) = code;                                                   \
-        break;                                                          \
-    }
+#define HIP_CHECK_BREAK(expr, var)                                                                 \
+  if (auto const code = (expr); hipSuccess != code) {                                              \
+    HIP_ERROR(code);                                                                               \
+    (var) = code;                                                                                  \
+    break;                                                                                         \
+  }
 
-#define ROCPROFILER_ERROR(code)                                           \
-    do {                                                                \
-        fprintf(stderr,                                                 \
-                PROGNAME ": Assertion failed at %s:%d, ROCProfiler error: %s\n", \
-                __FILE__, __LINE__, rocprofiler_error_str(code));      \
-        fflush(stderr);                                                 \
-    } while (false);
+#define ROCPROFILER_ERROR(code)                                                                    \
+  do {                                                                                             \
+    fprintf(stderr, PROGNAME ": Assertion failed at %s:%d, ROCProfiler error: %s\n", __FILE__,     \
+            __LINE__, rocprofiler_error_str(code));                                                \
+    fflush(stderr);                                                                                \
+  } while (false);
 
-#define ROCPROFILER_CHECK(expr, var)                                      \
-    if ((var) = (expr); ROCPROFILER_STATUS_SUCCESS != (var)) {            \
-        ROCPROFILER_ERROR((var));                                         \
-    }
+#define ROCPROFILER_CHECK(expr, var)                                                               \
+  if ((var) = (expr); ROCPROFILER_STATUS_SUCCESS != (var)) {                                       \
+    ROCPROFILER_ERROR((var));                                                                      \
+  }
 
-#endif // SAMPLES_PCSAMPLER_CODE_PRINTING_SAMPLE_PROGRAM_HPP_
+#endif  // SAMPLES_PCSAMPLER_CODE_PRINTING_SAMPLE_PROGRAM_HPP_

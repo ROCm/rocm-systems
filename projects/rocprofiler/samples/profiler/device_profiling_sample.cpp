@@ -23,8 +23,8 @@ int main(int argc, char** argv) {
 
   int gpu_agent = 0;
   int cpu_agent = 0;
-  CHECK_ROCPROFILER(rocprofiler_device_profiling_session_create(&counters[0], counters.size(),
-                                                            &dp_session_id, gpu_agent, cpu_agent));
+  CHECK_ROCPROFILER(rocprofiler_device_profiling_session_create(
+      &counters[0], counters.size(), &dp_session_id, gpu_agent, cpu_agent));
 
   printf("session start \n");
   // start GPU device profiling

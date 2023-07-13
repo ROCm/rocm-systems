@@ -42,6 +42,6 @@ class PerfMon {
   std::vector<std::string> counter_names_;
 };
 
-} // namespace rocprofiler
+}  // namespace rocprofiler
 
 #endif

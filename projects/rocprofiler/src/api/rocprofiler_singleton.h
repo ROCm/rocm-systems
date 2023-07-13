@@ -74,13 +74,14 @@ class ROCProfiler_Singleton {
   // Device Profiling Session
   bool FindDeviceProfilingSession(rocprofiler_session_id_t session_id);
   rocprofiler_session_id_t CreateDeviceProfilingSession(std::vector<std::string> counters,
-                                                      int cpu_agent_index, int gpu_agent_index);
+                                                        int cpu_agent_index, int gpu_agent_index);
   void DestroyDeviceProfilingSession(rocprofiler_session_id_t session_id);
   DeviceProfileSession* GetDeviceProfilingSession(rocprofiler_session_id_t session_id);
 
 
   // Generic
-  bool CheckFilterData(rocprofiler_filter_kind_t filter_kind, rocprofiler_filter_data_t filter_data);
+  bool CheckFilterData(rocprofiler_filter_kind_t filter_kind,
+                       rocprofiler_filter_data_t filter_data);
   uint64_t GetUniqueRecordId();
   uint64_t GetUniqueKernelDispatchId();
 

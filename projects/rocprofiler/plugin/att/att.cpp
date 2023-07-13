@@ -54,11 +54,12 @@ class att_plugin_t {
   att_plugin_t() {
     std::vector<const char*> mpivars = {"MPI_RANK", "OMPI_COMM_WORLD_RANK", "MV2_COMM_WORLD_RANK"};
 
-    for (const char* envvar : mpivars) if (const char* env = getenv(envvar)) {
-      MPI_RANK = atoi(env);
-      MPI_ENABLE = true;
-      break;
-    }
+    for (const char* envvar : mpivars)
+      if (const char* env = getenv(envvar)) {
+        MPI_RANK = atoi(env);
+        MPI_ENABLE = true;
+        break;
+      }
   }
 
   bool MPI_ENABLE = false;
@@ -92,16 +93,15 @@ class att_plugin_t {
     std::string name_demangled =
         rocprofiler::truncate_name(rocprofiler::cxx_demangle(kernel_name_c));
 
-    if (name_demangled.size() > ATT_FILENAME_MAXBYTES) // Limit filename size
+    if (name_demangled.size() > ATT_FILENAME_MAXBYTES)  // Limit filename size
       name_demangled = name_demangled.substr(0, ATT_FILENAME_MAXBYTES);
 
     std::string outfilepath = ".";
-    if (const char* env = getenv("OUTPUT_PATH"))
-      outfilepath = std::string(env);
+    if (const char* env = getenv("OUTPUT_PATH")) outfilepath = std::string(env);
 
-    outfilepath.reserve(outfilepath.size()+128); // Max filename size
-    outfilepath += '/'+name_demangled;
-    if (MPI_ENABLE) outfilepath += "_rank"+std::to_string(MPI_RANK);
+    outfilepath.reserve(outfilepath.size() + 128);  // Max filename size
+    outfilepath += '/' + name_demangled;
+    if (MPI_ENABLE) outfilepath += "_rank" + std::to_string(MPI_RANK);
     outfilepath += "_v";
 
     // Find if this filename already exists. If so, increment vname.
@@ -113,9 +113,9 @@ class att_plugin_t {
     auto dispatch_id = att_tracer_record->header.id.handle;
 
     std::string fname = outfilepath + "_kernel.txt";
-    std::ofstream(fname.c_str()) << name_demangled << " dispatch[" << dispatch_id
-                                 << "] GPU[" << att_tracer_record->gpu_id.handle
-                                 << "]: " << kernel_name_c << '\n';
+    std::ofstream(fname.c_str()) << name_demangled << " dispatch[" << dispatch_id << "] GPU["
+                                 << att_tracer_record->gpu_id.handle << "]: " << kernel_name_c
+                                 << '\n';
 
     // iterate over each shader engine att trace
     int se_num = att_tracer_record->shader_engine_data_count;

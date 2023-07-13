@@ -67,8 +67,8 @@ class Session {
 
   // Filter
   rocprofiler_filter_id_t CreateFilter(rocprofiler_filter_kind_t filter_kind,
-                                     rocprofiler_filter_data_t filter_data, uint64_t data_count,
-                                     rocprofiler_filter_property_t property);
+                                       rocprofiler_filter_data_t filter_data, uint64_t data_count,
+                                       rocprofiler_filter_property_t property);
   bool FindFilter(rocprofiler_filter_id_t filter_id);
   void DestroyFilter(rocprofiler_filter_id_t filter_id);
   Filter* GetFilter(rocprofiler_filter_id_t filter_id);
@@ -83,7 +83,7 @@ class Session {
 
   // Buffer
   rocprofiler_buffer_id_t CreateBuffer(rocprofiler_buffer_callback_t buffer_callback,
-                                     size_t buffer_size);
+                                       size_t buffer_size);
   bool FindBuffer(rocprofiler_buffer_id_t buffer_id);
   void DestroyBuffer(rocprofiler_buffer_id_t buffer_id);
   Memory::GenericBuffer* GetBuffer(rocprofiler_buffer_id_t buffer_id);

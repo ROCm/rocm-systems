@@ -25,4 +25,4 @@ THE SOFTWARE.
 namespace rocprofiler {
 MetricsDict::map_t* MetricsDict::map_ = NULL;
 MetricsDict::mutex_t MetricsDict::mutex_;
-}
+}  // namespace rocprofiler

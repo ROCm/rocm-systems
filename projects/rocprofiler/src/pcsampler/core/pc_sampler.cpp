@@ -35,15 +35,12 @@
 
 namespace rocprofiler::pc_sampler {
 
-PCSampler::PCSampler(
- rocprofiler_buffer_id_t buffer_id,
- rocprofiler_filter_id_t filter_id,
- rocprofiler_session_id_t session_id)
-: buffer_id_(buffer_id)
-, filter_id_(filter_id)
-, session_id_(session_id)
-, pci_system_initialized_(pci_system_init() == 0)
-{}
+PCSampler::PCSampler(rocprofiler_buffer_id_t buffer_id, rocprofiler_filter_id_t filter_id,
+                     rocprofiler_session_id_t session_id)
+    : buffer_id_(buffer_id),
+      filter_id_(filter_id),
+      session_id_(session_id),
+      pci_system_initialized_(pci_system_init() == 0) {}
 
 PCSampler::~PCSampler() {
   if (pci_system_initialized_) {
@@ -53,7 +50,9 @@ PCSampler::~PCSampler() {
 }
 
 void PCSampler::Start() {
-  if (sampler_thread_.joinable()) { return; }
+  if (sampler_thread_.joinable()) {
+    return;
+  }
 
   devices_.clear();
 
@@ -61,15 +60,15 @@ void PCSampler::Start() {
 
   agents_t agents;
   rocprofiler::hsa_support::GetCoreApiTable().hsa_iterate_agents_fn(
-   [](hsa_agent_t agent, void *arg){
-     auto &agents = *reinterpret_cast<agents_t *>(arg);
-     agents.emplace_back(agent);
-     return HSA_STATUS_SUCCESS;
-   },
-   &agents);
+      [](hsa_agent_t agent, void* arg) {
+        auto& agents = *reinterpret_cast<agents_t*>(arg);
+        agents.emplace_back(agent);
+        return HSA_STATUS_SUCCESS;
+      },
+      &agents);
 
-  for (const auto &agent : agents) {
-    const auto &ai = rocprofiler::hsa_support::GetAgentInfo(agent.handle);
+  for (const auto& agent : agents) {
+    const auto& ai = rocprofiler::hsa_support::GetAgentInfo(agent.handle);
     if (ai.getType() != HSA_DEVICE_TYPE_GPU) {
       continue;
     }
@@ -81,31 +80,30 @@ void PCSampler::Start() {
 }
 
 void PCSampler::Stop() {
-  if (!sampler_thread_.joinable()) { return; }
+  if (!sampler_thread_.joinable()) {
+    return;
+  }
 
   keep_running_ = false;
   sampler_thread_.join();
 }
 
-void PCSampler::AddRecord(rocprofiler_record_pc_sample_t &record) {
+void PCSampler::AddRecord(rocprofiler_record_pc_sample_t& record) {
   const auto tool = rocprofiler::GetROCProfilerSingleton();
   const auto session = tool->GetSession(session_id_);
   const auto buffer = session->GetBuffer(buffer_id_);
 
   std::lock_guard<std::mutex> lk(session->GetSessionLock());
 
-  record.header = {
-    ROCPROFILER_PC_SAMPLING_RECORD,
-    { tool->GetUniqueRecordId() }
-  };
+  record.header = {ROCPROFILER_PC_SAMPLING_RECORD, {tool->GetUniqueRecordId()}};
   buffer->AddRecord(record);
 }
 
 void PCSampler::SamplerLoop() {
   while (keep_running_) {
     auto next_tick = std::chrono::steady_clock::now() + std::chrono::milliseconds(10);
-    for (auto &agent : devices_) {
-      auto &device = agent.second;
+    for (auto& agent : devices_) {
+      auto& device = agent.second;
       if (device.fd_.mmio2.get() >= 0) {
         gfxip::read_pc_samples_v9_ioctl(device, this);
       } else {
@@ -116,4 +114,4 @@ void PCSampler::SamplerLoop() {
   }
 }
 
-} // namespace rocprofiler::pc_sampler
+}  // namespace rocprofiler::pc_sampler

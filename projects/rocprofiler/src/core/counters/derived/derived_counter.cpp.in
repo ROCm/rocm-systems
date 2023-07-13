@@ -27,8 +27,7 @@ namespace Counter {
 
 static std::atomic<uint64_t> COUNTER_COUNTER{0};
 
-DerivedCounter::DerivedCounter(std::string name, std::string description,
-                               std::string gpu_name)
+DerivedCounter::DerivedCounter(std::string name, std::string description, std::string gpu_name)
     : Counter(name, description, gpu_name) {
   metric_id_ = COUNTER_COUNTER.fetch_add(1, std::memory_order_release);
   addCounterToCounterMap();
@@ -41,20 +40,17 @@ DerivedCounter::~DerivedCounter() {
 
 uint64_t DerivedCounter::getMetricId() { return metric_id_; }
 
-std::map<uint64_t, BasicCounter*> *DerivedCounter::getAllCounters() {
-  return &counters_;
-}
+std::map<uint64_t, BasicCounter*>* DerivedCounter::getAllCounters() { return &counters_; }
 
-BasicCounter *DerivedCounter::getBasicCounterFromDerived(uint64_t counter_id) {
+BasicCounter* DerivedCounter::getBasicCounterFromDerived(uint64_t counter_id) {
   return counters_[counter_id];
 }
 
-void DerivedCounter::addBasicCounter(uint64_t counter_id,
-                                     BasicCounter *counter) {
+void DerivedCounter::addBasicCounter(uint64_t counter_id, BasicCounter* counter) {
   counters_.emplace(counter_id, counter);
 }
 
-@DERIVED_XML_PARSE_RESULT@
+@DERIVED_XML_PARSE_RESULT @
 
 }  // namespace Counter
 

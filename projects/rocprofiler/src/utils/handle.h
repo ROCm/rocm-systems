@@ -27,30 +27,22 @@
 
 namespace rocprofiler {
 
-template <typename T, typename D>
-class handle_t {
+template <typename T, typename D> class handle_t {
   T value_;
   bool will_delete_;
-public:
-  handle_t() noexcept
-  : will_delete_(false)
-  {}
 
-  template
-    < typename U
-    , std::enable_if_t<std::is_same<T, U>::value, bool> = true
-    >
-  handle_t(U &&v, bool const will_delete = true) noexcept
-  : value_(std::move(v))
-  , will_delete_(will_delete)
-  {}
+ public:
+  handle_t() noexcept : will_delete_(false) {}
+
+  template <typename U, std::enable_if_t<std::is_same<T, U>::value, bool> = true>
+  handle_t(U&& v, bool const will_delete = true) noexcept
+      : value_(std::move(v)), will_delete_(will_delete) {}
 
   // No copy construction or copy assignment of handles
-  handle_t(handle_t const &) = delete;
-  handle_t& operator=(handle_t const &) = delete;
+  handle_t(handle_t const&) = delete;
+  handle_t& operator=(handle_t const&) = delete;
 
-  handle_t& operator=(handle_t &&h) noexcept
-  {
+  handle_t& operator=(handle_t&& h) noexcept {
     reset();
     value_ = std::move(h.value_);
     will_delete_ = h.will_delete_;
@@ -58,57 +50,38 @@ public:
     return *this;
   }
 
-  handle_t(handle_t &&h) noexcept
-  : value_(std::move(h.value_))
-  {
-    h.release();
-  }
+  handle_t(handle_t&& h) noexcept : value_(std::move(h.value_)) { h.release(); }
 
-  ~handle_t() noexcept
-  {
-    reset();
-  }
+  ~handle_t() noexcept { reset(); }
 
-  T const& get() const noexcept
-  {
-    return value_;
-  }
+  T const& get() const noexcept { return value_; }
 
-  typename std::add_lvalue_reference
-    < typename std::remove_pointer<T>::type
-    >::type
-  operator*() const noexcept
-  {
+  typename std::add_lvalue_reference<typename std::remove_pointer<T>::type>::type operator*()
+      const noexcept {
     return *value_;
   }
 
-  T operator->() const noexcept
-  {
-    return value_;
-  }
+  T operator->() const noexcept { return value_; }
 
-  T const& release() noexcept
-  {
+  T const& release() noexcept {
     will_delete_ = false;
     return get();
   }
 
-  void reset() noexcept
-  {
+  void reset() noexcept {
     if (will_delete_) {
       will_delete_ = false;
       D{}(value_);
     }
   }
 
-  void reset(T &&v) noexcept
-  {
+  void reset(T&& v) noexcept {
     reset();
     value_ = std::move(v);
     will_delete_ = true;
   }
 };
 
-} // namespace rocprofiler
+}  // namespace rocprofiler
 
-#endif // UTILS_HANDLE_H_
+#endif  // UTILS_HANDLE_H_

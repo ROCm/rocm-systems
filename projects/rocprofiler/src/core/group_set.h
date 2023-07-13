@@ -55,31 +55,30 @@ struct block_status_t {
 
 // Metrics set class
 class MetricsGroup {
-  public:
+ public:
   // Info map type
   typedef std::map<std::string, const Metric*> info_map_t;
   // Blocks map type
   typedef std::map<block_des_t, block_status_t, lt_block_des> blocks_map_t;
 
-  MetricsGroup(const util::AgentInfo* agent_info) :
-    agent_info_(agent_info)
-  {
+  MetricsGroup(const util::AgentInfo* agent_info) : agent_info_(agent_info) {
     metrics_ = MetricsDict::Create(agent_info);
     if (metrics_ == NULL) EXC_RAISING(HSA_STATUS_ERROR, "MetricsDict create failed");
   }
 
   void Print(FILE* file) const {
     for (const Metric* metric : metrics_vec_) {
-      fprintf(file, " %s", metric->GetName().c_str()); fflush(stdout);
+      fprintf(file, " %s", metric->GetName().c_str());
+      fflush(stdout);
     }
-    fprintf(file, "\n"); fflush(stdout);
+    fprintf(file, "\n");
+    fflush(stdout);
   }
 
   static const Metric* GetMetric(const MetricsDict* metrics, const std::string& name) {
     // Metric object
     const Metric* metric = metrics->Get(name);
-    if (metric == NULL)
-      EXC_RAISING(HSA_STATUS_ERROR, "input metric '" << name << "' is not found");
+    if (metric == NULL) EXC_RAISING(HSA_STATUS_ERROR, "input metric '" << name << "' is not found");
     return metric;
   }
 
@@ -95,9 +94,7 @@ class MetricsGroup {
   }
 
   // Add metric
-  bool AddMetric(const rocprofiler_feature_t* info) {
-    return AddMetric(GetMetric(metrics_, info));
-  }
+  bool AddMetric(const rocprofiler_feature_t* info) { return AddMetric(GetMetric(metrics_, info)); }
 
   bool AddMetric(const Metric* metric) {
     // Blocks utilization delta
@@ -125,8 +122,9 @@ class MetricsGroup {
         query.events = event;
 
         uint32_t block_counters;
-        hsa_status_t status = util::HsaRsrcFactory::Instance().AqlProfileApi()->hsa_ven_amd_aqlprofile_get_info(
-            &query, HSA_VEN_AMD_AQLPROFILE_INFO_BLOCK_COUNTERS, &block_counters);
+        hsa_status_t status =
+            util::HsaRsrcFactory::Instance().AqlProfileApi()->hsa_ven_amd_aqlprofile_get_info(
+                &query, HSA_VEN_AMD_AQLPROFILE_INFO_BLOCK_COUNTERS, &block_counters);
         if (status != HSA_STATUS_SUCCESS) AQL_EXC_RAISING(status, "get block_counters info");
         block_status.max_counters = block_counters;
       }
@@ -141,7 +139,8 @@ class MetricsGroup {
     metrics_vec_.push_back(metric);
     info_map_[metric->GetName()] = metric;
     for (const counter_t* counter : counters_vec) {
-      if (info_map_.find(counter->name) == info_map_.end()) info_map_[counter->name] = NewCounterInfo(counter->name);
+      if (info_map_.find(counter->name) == info_map_.end())
+        info_map_[counter->name] = NewCounterInfo(counter->name);
     }
     for (const auto& entry : blocks_delta) {
       blocks_map_[entry.first] = entry.second;
@@ -150,10 +149,8 @@ class MetricsGroup {
     return true;
   }
 
-  private:
-  const Metric* NewCounterInfo(const std::string& name) const {
-    return GetMetric(metrics_, name);
-  }
+ private:
+  const Metric* NewCounterInfo(const std::string& name) const { return GetMetric(metrics_, name); }
 
   // Agent info
   const util::AgentInfo* const agent_info_;
@@ -169,10 +166,10 @@ class MetricsGroup {
 
 // Metrics groups class
 class MetricsGroupSet {
-  public:
-  MetricsGroupSet(const util::AgentInfo* agent_info, const rocprofiler_feature_t* info_array, const uint32_t info_count) :
-    agent_info_(agent_info)
-  {
+ public:
+  MetricsGroupSet(const util::AgentInfo* agent_info, const rocprofiler_feature_t* info_array,
+                  const uint32_t info_count)
+      : agent_info_(agent_info) {
     metrics_ = MetricsDict::Create(agent_info);
     if (metrics_ == NULL) EXC_RAISING(HSA_STATUS_ERROR, "MetricsDict create failed");
     Initialize(info_array, info_count);
@@ -186,12 +183,13 @@ class MetricsGroupSet {
 
   void Print(FILE* file) const {
     for (const auto* group : groups_) {
-      fprintf(stdout, " pmc : "); fflush(stdout);
+      fprintf(stdout, " pmc : ");
+      fflush(stdout);
       group->Print(file);
     }
   }
 
-  private:
+ private:
   void Initialize(const rocprofiler_feature_t* info_array, const uint32_t info_count) {
     std::multimap<uint32_t, const Metric*, std::greater<uint32_t> > input_metrics;
     for (unsigned i = 0; i < info_count; ++i) {
@@ -202,7 +200,8 @@ class MetricsGroupSet {
       input_metrics.insert({counters_num, metric});
 
       if (MetricsGroup(agent_info_).AddMetric(metric) == false) {
-        AQL_EXC_RAISING(HSA_STATUS_ERROR, "Metric '" << metric->GetName() << "' doesn't fit in one group");
+        AQL_EXC_RAISING(HSA_STATUS_ERROR,
+                        "Metric '" << metric->GetName() << "' doesn't fit in one group");
       }
     }
 #if 0
@@ -239,4 +238,4 @@ class MetricsGroupSet {
 
 }  // namespace rocprofiler
 
-#endif // SRC_CORE_GROUP_SET_H_
+#endif  // SRC_CORE_GROUP_SET_H_

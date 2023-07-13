@@ -59,10 +59,10 @@ void buffer_callback_fun(const rocprofiler_record_header_t* begin,
 }
 
 /*
-*  ###############################################
-*  ################TESTING BUFFERS###############
-*  ###############################################
-*/
+ *  ###############################################
+ *  ################TESTING BUFFERS###############
+ *  ###############################################
+ */
 
 // A lot have changed in the class, since this test was written
 // Need to rewrite all the test cases again.
@@ -163,8 +163,9 @@ class TestingMultipleSessions : public ::testing::Test {
   uint64_t number_of_sessions = 5;
   void SetUp() {
     for (uint64_t id = 0; id < number_of_sessions; id++) {
-      std::unique_ptr<rocprofiler::Session> timestamp_session = std::make_unique<rocprofiler::Session>(
-          ROCPROFILER_NONE_REPLAY_MODE, rocprofiler_session_id_t{id});
+      std::unique_ptr<rocprofiler::Session> timestamp_session =
+          std::make_unique<rocprofiler::Session>(ROCPROFILER_NONE_REPLAY_MODE,
+                                                 rocprofiler_session_id_t{id});
 
       rocprofiler_filter_id_t filter_id = timestamp_session->CreateFilter(
           ROCPROFILER_DISPATCH_TIMESTAMPS_COLLECTION, rocprofiler_filter_data_t{}, 0,
@@ -224,10 +225,10 @@ TEST_F(TestingMultipleSessions, DeactivatingAnActivatedSessionPasses) {
 }
 
 /*
-*  ###############################################
-*  ################TESTING ROCProfiler##############
-*  ###############################################
-*/
+ *  ###############################################
+ *  ################TESTING ROCProfiler##############
+ *  ###############################################
+ */
 
 
 // Createing sessions with 2 different profiling mode

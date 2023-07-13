@@ -17,10 +17,10 @@
 # ##############################################################################
 
 find_library(
-  ROCPROFV2_ATT rocprofv2_att
-  HINTS ${CMAKE_INSTALL_PREFIX}
-  PATHS ${ROCM_PATH}
-  PATH_SUFFIXES hsa-amd-aqlprofile)
+    ROCPROFV2_ATT rocprofv2_att
+    HINTS ${CMAKE_INSTALL_PREFIX}
+    PATHS ${ROCM_PATH}
+    PATH_SUFFIXES hsa-amd-aqlprofile)
 
 set(ENV{ROCPROFV2_ATT_LIB_PATH} $ROCPROFV2_ATT)
 
@@ -30,30 +30,26 @@ file(GLOB FILE_SOURCES att.cpp)
 add_library(att_plugin SHARED ${FILE_SOURCES} ${ROCPROFILER_UTIL_SRC_FILES})
 
 set_target_properties(
-  att_plugin
-  PROPERTIES CXX_VISIBILITY_PRESET hidden
-             LINK_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/../exportmap
-             LIBRARY_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib/rocprofiler)
+    att_plugin
+    PROPERTIES CXX_VISIBILITY_PRESET hidden
+               LINK_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/../exportmap
+               LIBRARY_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib/rocprofiler)
 
 target_compile_definitions(att_plugin PRIVATE HIP_PROF_HIP_API_STRING=1
                                               __HIP_PLATFORM_HCC__=1)
 
-target_include_directories(
-  att_plugin PRIVATE ${PROJECT_SOURCE_DIR}
-                     ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(att_plugin PRIVATE ${PROJECT_SOURCE_DIR}
+                                              ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_options(
-  att_plugin PRIVATE
-  -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/../exportmap
-  -Wl,--no-undefined)
-target_link_libraries(att_plugin PRIVATE rocprofiler-v2
-                                         hsa-runtime64::hsa-runtime64 stdc++fs)
+    att_plugin PRIVATE -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/../exportmap
+    -Wl,--no-undefined)
+target_link_libraries(att_plugin PRIVATE rocprofiler-v2 hsa-runtime64::hsa-runtime64
+                                         stdc++fs)
 
-install(TARGETS att_plugin
-        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/${PROJECT_NAME}
-                COMPONENT asan)
-install(TARGETS att_plugin
-        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/${PROJECT_NAME}
-                COMPONENT runtime)
+install(TARGETS att_plugin LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/${PROJECT_NAME}
+                                   COMPONENT asan)
+install(TARGETS att_plugin LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/${PROJECT_NAME}
+                                   COMPONENT runtime)
 
 configure_file(att.py att/att.py COPYONLY)
 configure_file(trace_view.py att/trace_view.py COPYONLY)
@@ -64,7 +60,7 @@ configure_file(ui/logo.svg att/ui/logo.svg COPYONLY)
 configure_file(ui/styles.css att/ui/styles.css COPYONLY)
 configure_file(ui/httpserver.py att/ui/httpserver.py COPYONLY)
 install(
-  DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/att
-  DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/rocprofiler
-  USE_SOURCE_PERMISSIONS
-  COMPONENT runtime)
+    DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/att
+    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/rocprofiler
+    USE_SOURCE_PERMISSIONS
+    COMPONENT runtime)

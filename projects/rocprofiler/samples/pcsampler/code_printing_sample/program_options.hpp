@@ -25,25 +25,24 @@
 #include <cstdint>
 
 struct program_options {
-    program_options()
-    : device(0)
-    , no_gpu(false)
-    , hip_memset(false)
-    , rands_len(1024 * 1024 * 4)
-    , gt(0)
-    , seed(std::chrono::steady_clock::now().time_since_epoch().count())
-    , disassemble(false)
-    , pc_sampling(false)
-    {}
+  program_options()
+      : device(0),
+        no_gpu(false),
+        hip_memset(false),
+        rands_len(1024 * 1024 * 4),
+        gt(0),
+        seed(std::chrono::steady_clock::now().time_since_epoch().count()),
+        disassemble(false),
+        pc_sampling(false) {}
 
-    int device;
-    bool no_gpu;
-    bool hip_memset;
-    size_t rands_len;
-    uint64_t gt;
-    uint64_t seed;
-    bool disassemble;
-    bool pc_sampling;
+  int device;
+  bool no_gpu;
+  bool hip_memset;
+  size_t rands_len;
+  uint64_t gt;
+  uint64_t seed;
+  bool disassemble;
+  bool pc_sampling;
 };
 
-#endif // SAMPLES_PCSAMPLER_CODE_PRINTING_SAMPLE_PROGRAM_OPTIONS_HPP_
+#endif  // SAMPLES_PCSAMPLER_CODE_PRINTING_SAMPLE_PROGRAM_OPTIONS_HPP_

@@ -156,9 +156,8 @@ class HsaApiEventRecord : public TracerEventRecord<barectf_hsa_api_ctx> {
                              const rocprofiler_session_id_t session_id,
                              const std::uint64_t clock_val)
       : TracerEventRecord<barectf_hsa_api_ctx>{record, clock_val} {
-          if(record.api_data.hsa)
-            api_data_ = *(record.api_data.hsa);
-        }
+    if (record.api_data.hsa) api_data_ = *(record.api_data.hsa);
+  }
   explicit HsaApiEventRecord(const rocprofiler_record_tracer_t& record,
                              const std::uint64_t clock_val, hsa_api_data_t& api_data)
       : TracerEventRecord<barectf_hsa_api_ctx>{record, clock_val}, api_data_(api_data) {}
@@ -206,7 +205,7 @@ class HipApiEventRecord : public TracerEventRecord<barectf_hip_api_ctx> {
                              const rocprofiler_session_id_t session_id,
                              const std::uint64_t clock_val)
       : TracerEventRecord<barectf_hip_api_ctx>{record, clock_val},
-        api_data_{record.api_data.hip? *(record.api_data.hip) : hip_api_data_t{}},
+        api_data_{record.api_data.hip ? *(record.api_data.hip) : hip_api_data_t{}},
         kernel_name_{record.name ? record.name : std::string{}} {}
   explicit HipApiEventRecord(const rocprofiler_record_tracer_t& record,
                              const std::uint64_t clock_val, hip_api_data_t& api_data,
@@ -760,16 +759,11 @@ std::uint64_t GetMetadataClkClsOffset() {
 
 static const char* LOOP_MPI_RANK(const std::vector<const char*>& mpivars) {
   for (const char* env : mpivars)
-    if (const char* envvar = getenv(env))
-      return envvar;
+    if (const char* envvar = getenv(env)) return envvar;
   return nullptr;
 }
 
-static void insert_meta_to_stream(
-  std::stringstream& stream,
-  const char* field,
-  const char* value
-) {
+static void insert_meta_to_stream(std::stringstream& stream, const char* field, const char* value) {
   if (!field || !value) return;
   stream << "\n\t" << std::string(field) << " = " << std::string(value) << ';';
 }
@@ -802,7 +796,7 @@ void Plugin::CopyAdjustedMetadataStreamFile(const fs::path& metadata_stream_path
     std::string data_ins = data_stream.str();
     size_t env_pos = metadata.find("env {");
     if (env_pos != std::string::npos)
-      metadata.insert(metadata.begin()+env_pos+5, data_ins.begin(), data_ins.end());
+      metadata.insert(metadata.begin() + env_pos + 5, data_ins.begin(), data_ins.end());
     else
       std::cerr << "Failed to insert MPI metadata!" << std::endl;
   }

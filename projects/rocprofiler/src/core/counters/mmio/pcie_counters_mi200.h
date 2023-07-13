@@ -22,7 +22,7 @@ class PciePerfMonMI200 : public PerfMon {
   mmio::mmap_type_t Type() override { return mmio::mmap_type_t::PCIE_PERFMON; }
 
  private:
- // TODO : check google coding std
+  // TODO : check google coding std
   void writeRegister(uint32_t reg_offset, uint32_t value);
   void readRegister(uint32_t reg_offset, uint32_t& value);
 

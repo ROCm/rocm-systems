@@ -61,11 +61,11 @@ void check_status(hsa_status_t status) {
 namespace activity_prim {
 // PC sampling callback data
 struct pcsmp_callback_data_t {
-  const char* kernel_name;     // sampled kernel name
-  void* data_buffer;           // host buffer for tracing data
-  uint64_t id;                 // sample id
-  uint64_t cycle;              // sample cycle
-  uint64_t pc;                 // sample PC
+  const char* kernel_name;  // sampled kernel name
+  void* data_buffer;        // host buffer for tracing data
+  uint64_t id;              // sample id
+  uint64_t cycle;           // sample cycle
+  uint64_t pc;              // sample PC
 };
 
 uint32_t activity_op = UINT32_MAX;
@@ -74,9 +74,8 @@ std::atomic<activity_async_callback_t> activity_callback{NULL};
 rocprofiler_t* context = NULL;
 
 hsa_status_t trace_data_cb(hsa_ven_amd_aqlprofile_info_type_t info_type,
-                           hsa_ven_amd_aqlprofile_info_data_t* info_data,
-                           void* data) {
-  const pcsmp_callback_data_t* pcsmp_data = (pcsmp_callback_data_t*) data;
+                           hsa_ven_amd_aqlprofile_info_data_t* info_data, void* data) {
+  const pcsmp_callback_data_t* pcsmp_data = (pcsmp_callback_data_t*)data;
 
   activity_record_t record{};
   record.op = activity_op;
@@ -96,11 +95,13 @@ bool context_handler(rocprofiler_group_t group, void* arg) {
   hsa_agent_t agent{};
   hsa_status_t status = rocprofiler_get_agent(group.context, &agent);
   check_status(status);
-  const rocprofiler::util::AgentInfo* agent_info = rocprofiler::util::HsaRsrcFactory::Instance().GetAgentInfo(agent);
+  const rocprofiler::util::AgentInfo* agent_info =
+      rocprofiler::util::HsaRsrcFactory::Instance().GetAgentInfo(agent);
 
   pcsmp_callback_data_t pcsmp_data{};
   pcsmp_data.kernel_name = (const char*)arg;
-  pcsmp_data.data_buffer = rocprofiler::util::HsaRsrcFactory::Instance().AllocateSysMemory(agent_info, rocprofiler::TraceProfile::GetSize());
+  pcsmp_data.data_buffer = rocprofiler::util::HsaRsrcFactory::Instance().AllocateSysMemory(
+      agent_info, rocprofiler::TraceProfile::GetSize());
   status = rocprofiler_iterate_trace_data(group.context, trace_data_cb, &pcsmp_data);
   check_status(status);
   return false;
@@ -110,8 +111,8 @@ bool context_handler(rocprofiler_group_t group, void* arg) {
 hsa_status_t dispatch_callback(const rocprofiler_callback_data_t* callback_data, void* user_data,
                                rocprofiler_group_t* group) {
   // context features
-  const rocprofiler_feature_kind_t trace_kind =
-    (rocprofiler_feature_kind_t)(ROCPROFILER_FEATURE_KIND_TRACE | ROCPROFILER_FEATURE_KIND_PCSMP_MOD);
+  const rocprofiler_feature_kind_t trace_kind = (rocprofiler_feature_kind_t)(
+      ROCPROFILER_FEATURE_KIND_TRACE | ROCPROFILER_FEATURE_KIND_PCSMP_MOD);
   const uint32_t feature_count = 1;
   const uint32_t parameter_count = 1;
   rocprofiler_feature_t* features = new rocprofiler_feature_t[feature_count];
@@ -131,8 +132,8 @@ hsa_status_t dispatch_callback(const rocprofiler_callback_data_t* callback_data,
   properties.handler_arg = (void*)strdup(callback_data->kernel_name);
 
   // Open profiling context
-  hsa_status_t status = rocprofiler_open(callback_data->agent, features, feature_count,
-                                         &context, 0 /*ROCPROFILER_MODE_SINGLEGROUP*/, &properties);
+  hsa_status_t status = rocprofiler_open(callback_data->agent, features, feature_count, &context,
+                                         0 /*ROCPROFILER_MODE_SINGLEGROUP*/, &properties);
   check_status(status);
 
   // Get group[0]
@@ -141,7 +142,7 @@ hsa_status_t dispatch_callback(const rocprofiler_callback_data_t* callback_data,
 
   return status;
 }
-} // namespace activity_prim
+}  // namespace activity_prim
 
 extern "C" {
 PUBLIC_API const char* GetOpName(uint32_t op) { return strdup("PCSAMPLE"); }
@@ -152,7 +153,8 @@ PUBLIC_API bool RemoveApiCallback(uint32_t op) { return true; }
 
 PUBLIC_API bool InitActivityCallback(void* callback, void* arg) {
   activity_prim::activity_arg = arg;
-  activity_prim::activity_callback.store((activity_async_callback_t)callback, std::memory_order_release);
+  activity_prim::activity_callback.store((activity_async_callback_t)callback,
+                                         std::memory_order_release);
 
   rocprofiler_queue_callbacks_t queue_callbacks{};
   queue_callbacks.dispatch = activity_prim::dispatch_callback;
@@ -191,11 +193,8 @@ struct evt_cb_entry_t {
 };
 evt_cb_entry_t evt_cb_table[HSA_EVT_ID_NUMBER];
 
-hsa_status_t codeobj_evt_callback(
-  rocprofiler_hsa_cb_id_t id,
-  const rocprofiler_hsa_callback_data_t* cb_data,
-  void* arg)
-{
+hsa_status_t codeobj_evt_callback(rocprofiler_hsa_cb_id_t id,
+                                  const rocprofiler_hsa_callback_data_t* cb_data, void* arg) {
   const auto evt = evt_cb_table[id].get();
   activity_rtapi_callback_t evt_callback = (activity_rtapi_callback_t)evt.first;
   if (evt_callback != NULL) evt_callback(ACTIVITY_DOMAIN_HSA_EVT, id, cb_data, evt.second);

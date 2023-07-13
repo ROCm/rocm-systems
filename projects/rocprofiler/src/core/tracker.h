@@ -40,7 +40,7 @@ THE SOFTWARE.
 namespace rocprofiler {
 
 class Tracker {
-  public:
+ public:
   typedef std::mutex mutex_t;
   typedef util::HsaRsrcFactory::timestamp_t timestamp_t;
   typedef rocprofiler_dispatch_record_t record_t;
@@ -89,7 +89,7 @@ class Tracker {
   }
 
   // Add tracker entry
-  entry_t* Alloc(const hsa_agent_t& agent, const hsa_signal_t& orig, bool proxy=true) {
+  entry_t* Alloc(const hsa_agent_t& agent, const hsa_signal_t& orig, bool proxy = true) {
     hsa_status_t status = HSA_STATUS_ERROR;
 
     // Creating a new tracker entry
@@ -108,10 +108,12 @@ class Tracker {
     // Creating a proxy signal
     if (proxy) {
       entry->is_proxy = true;
-      const hsa_signal_value_t signal_value = (orig.handle) ? hsa_api_.hsa_signal_load_relaxed(orig) : 1;
+      const hsa_signal_value_t signal_value =
+          (orig.handle) ? hsa_api_.hsa_signal_load_relaxed(orig) : 1;
       status = hsa_api_.hsa_signal_create(signal_value, 0, NULL, &(entry->signal));
       if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "hsa_signal_create");
-      status = hsa_api_.hsa_amd_signal_async_handler(entry->signal, HSA_SIGNAL_CONDITION_LT, signal_value, Handler, entry);
+      status = hsa_api_.hsa_amd_signal_async_handler(entry->signal, HSA_SIGNAL_CONDITION_LT,
+                                                     signal_value, Handler, entry);
       if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "hsa_amd_signal_async_handler");
     }
 
@@ -128,7 +130,8 @@ class Tracker {
     hsa_signal_t& dispatch_signal = group->GetDispatchSignal();
     hsa_signal_t& handler_signal = group->GetBarrierSignal();
     entry->signal = dispatch_signal;
-    hsa_status_t status = hsa_api_.hsa_amd_signal_async_handler(handler_signal, HSA_SIGNAL_CONDITION_LT, 1, Handler, entry);
+    hsa_status_t status = hsa_api_.hsa_amd_signal_async_handler(
+        handler_signal, HSA_SIGNAL_CONDITION_LT, 1, Handler, entry);
     if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "hsa_amd_signal_async_handler");
   }
 
@@ -150,7 +153,8 @@ class Tracker {
     // Debug trace
     if (trace_on_) {
       auto outstanding = outstanding_.fetch_add(1);
-      fprintf(stdout, "Tracker::Enable: entry %p, record %p, outst %lu\n", entry, entry->record, outstanding);
+      fprintf(stdout, "Tracker::Enable: entry %p, record %p, outst %lu\n", entry, entry->record,
+              outstanding);
       fflush(stdout);
     }
   }
@@ -173,12 +177,14 @@ class Tracker {
     group->GetRecord()->dispatch = util::HsaRsrcFactory::Instance().TimestampNs();
 
     // Creating a proxy signal
-    const hsa_signal_value_t signal_value = (orig_signal.handle) ?
-      util::HsaRsrcFactory::Instance().HsaApi()->hsa_signal_load_relaxed(orig_signal) : 1;
+    const hsa_signal_value_t signal_value = (orig_signal.handle)
+        ? util::HsaRsrcFactory::Instance().HsaApi()->hsa_signal_load_relaxed(orig_signal)
+        : 1;
     hsa_signal_t& dispatch_signal = group->GetDispatchSignal();
-    util::HsaRsrcFactory::Instance().HsaApi()->hsa_signal_store_screlease(dispatch_signal, signal_value);
-    hsa_status_t status =
-      util::HsaRsrcFactory::Instance().HsaApi()->hsa_amd_signal_async_handler(dispatch_signal, HSA_SIGNAL_CONDITION_LT, signal_value, Handler_opt, group);
+    util::HsaRsrcFactory::Instance().HsaApi()->hsa_signal_store_screlease(dispatch_signal,
+                                                                          signal_value);
+    hsa_status_t status = util::HsaRsrcFactory::Instance().HsaApi()->hsa_amd_signal_async_handler(
+        dispatch_signal, HSA_SIGNAL_CONDITION_LT, signal_value, Handler_opt, group);
     if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "hsa_amd_signal_async_handler");
   }
 
@@ -190,7 +196,8 @@ class Tracker {
     record_t* record = group->GetRecord();
     hsa_amd_profiling_dispatch_time_t dispatch_time{};
     hsa_status_t status =
-      util::HsaRsrcFactory::Instance().HsaApi()->hsa_amd_profiling_get_dispatch_time(context->GetAgent(), dispatch_signal, &dispatch_time);
+        util::HsaRsrcFactory::Instance().HsaApi()->hsa_amd_profiling_get_dispatch_time(
+            context->GetAgent(), dispatch_signal, &dispatch_time);
     if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "hsa_amd_profiling_get_dispatch_time");
     record->begin = util::HsaRsrcFactory::Instance().SysclockToNs(dispatch_time.start);
     record->end = util::HsaRsrcFactory::Instance().SysclockToNs(dispatch_time.end);
@@ -203,22 +210,23 @@ class Tracker {
       amd_signal_t* prof_signal_ptr = reinterpret_cast<amd_signal_t*>(dispatch_signal.handle);
       orig_signal_ptr->start_ts = prof_signal_ptr->start_ts;
       orig_signal_ptr->end_ts = prof_signal_ptr->end_ts;
-      util::HsaRsrcFactory::Instance().HsaApi()->hsa_signal_store_screlease(orig_signal, signal_value);
+      util::HsaRsrcFactory::Instance().HsaApi()->hsa_signal_store_screlease(orig_signal,
+                                                                            signal_value);
     }
 
     return Context::Handler(signal_value, arg);
   }
 
-  private:
-  Tracker() :
-    outstanding_(0),
-    hsa_rsrc_(&(util::HsaRsrcFactory::Instance())),
-    hsa_api_(*(hsa_rsrc_->HsaApi()))
-  {}
+ private:
+  Tracker()
+      : outstanding_(0),
+        hsa_rsrc_(&(util::HsaRsrcFactory::Instance())),
+        hsa_api_(*(hsa_rsrc_->HsaApi())) {}
 
   ~Tracker() {
     if (trace_on_) {
-      fprintf(stdout, "Tracker::DESTR: sig list %d, outst %lu\n", (int)(sig_list_.size()), outstanding_.load());
+      fprintf(stdout, "Tracker::DESTR: sig list %d, outst %lu\n", (int)(sig_list_.size()),
+              outstanding_.load());
       fflush(stdout);
     }
 
@@ -226,8 +234,8 @@ class Tracker {
     auto end = sig_list_.end();
     while (it != end) {
       auto cur = it++;
-// The wait should be optiona as there possible some inter kernel dependencies and it possible to wait for
-// the kernels will never be lunched as the application was finished by some reason.
+// The wait should be optiona as there possible some inter kernel dependencies and it possible to
+// wait for the kernels will never be lunched as the application was finished by some reason.
 #if 0
       // FIXME: currently the signal value for tracking signals are taken from original application signal
       hsa_rsrc_->SignalWait((*cur)->signal, 1);
@@ -246,20 +254,24 @@ class Tracker {
     // Debug trace
     if (trace_on_) {
       auto outstanding = outstanding_.fetch_sub(1);
-      fprintf(stdout, "Tracker::Complete: entry %p, record %p, outst %lu\n", entry, entry->record, outstanding);
+      fprintf(stdout, "Tracker::Complete: entry %p, record %p, outst %lu\n", entry, entry->record,
+              outstanding);
       fflush(stdout);
     }
 
     // Query begin/end and complete timestamps
     if (entry->is_memcopy) {
       hsa_amd_profiling_async_copy_time_t async_copy_time{};
-      hsa_status_t status = hsa_api_.hsa_amd_profiling_get_async_copy_time(entry->signal, &async_copy_time);
-      if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "hsa_amd_profiling_get_async_copy_time");
+      hsa_status_t status =
+          hsa_api_.hsa_amd_profiling_get_async_copy_time(entry->signal, &async_copy_time);
+      if (status != HSA_STATUS_SUCCESS)
+        EXC_RAISING(status, "hsa_amd_profiling_get_async_copy_time");
       record->begin = hsa_rsrc_->SysclockToNs(async_copy_time.start);
       record->end = hsa_rsrc_->SysclockToNs(async_copy_time.end);
     } else {
       hsa_amd_profiling_dispatch_time_t dispatch_time{};
-      hsa_status_t status = hsa_api_.hsa_amd_profiling_get_dispatch_time(entry->agent, entry->signal, &dispatch_time);
+      hsa_status_t status =
+          hsa_api_.hsa_amd_profiling_get_dispatch_time(entry->agent, entry->signal, &dispatch_time);
       if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "hsa_amd_profiling_get_dispatch_time");
       record->begin = hsa_rsrc_->SysclockToNs(dispatch_time.start);
       record->end = hsa_rsrc_->SysclockToNs(dispatch_time.end);
@@ -349,6 +361,6 @@ class Tracker {
   static const bool trace_on_ = false;
 };
 
-} // namespace rocprofiler
+}  // namespace rocprofiler
 
-#endif // SRC_CORE_TRACKER_H_
+#endif  // SRC_CORE_TRACKER_H_

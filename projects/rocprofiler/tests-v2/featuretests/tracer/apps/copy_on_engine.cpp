@@ -209,10 +209,13 @@ static hsa_status_t AsyncCpyTest(async_mem_cpy_agent* dst, async_mem_cpy_agent* 
   hsa_amd_memory_copy_engine_status(dst->dev, src->dev, &engine_id_mask);
   uint32_t engine_id = HSA_AMD_SDMA_ENGINE_0 & engine_id_mask;
   std::cout << "Using engine " << engine_id << " And Mask " << engine_id_mask << std::endl;
-  if(engine_id > 0)
-    err = hsa_amd_memory_async_copy_on_engine(dst->ptr, dst->dev, src->ptr, src->dev, sz, 0, NULL, copy_signal, static_cast<hsa_amd_sdma_engine_id_t>(engine_id), false);
+  if (engine_id > 0)
+    err = hsa_amd_memory_async_copy_on_engine(
+        dst->ptr, dst->dev, src->ptr, src->dev, sz, 0, NULL, copy_signal,
+        static_cast<hsa_amd_sdma_engine_id_t>(engine_id), false);
   else if (dst->dev.handle == args->cpu.dev.handle || src->dev.handle == args->cpu.dev.handle)
-    err = hsa_amd_memory_async_copy(dst->ptr, dst->dev, src->ptr, src->dev, sz, 0, NULL, copy_signal);
+    err =
+        hsa_amd_memory_async_copy(dst->ptr, dst->dev, src->ptr, src->dev, sz, 0, NULL, copy_signal);
   else {
     err = hsa_memory_copy(dst->ptr, src->ptr, sz);
     hsa_signal_store_release(copy_signal, 0);
@@ -228,11 +231,14 @@ static hsa_status_t AsyncCpyTest(async_mem_cpy_agent* dst, async_mem_cpy_agent* 
   }
 
   // Check that the contents of the buffer are what is expected.
-    if (*reinterpret_cast<uint32_t*>(dst->ptr) != *reinterpret_cast<uint32_t*>(src->ptr)) {
-      fprintf(stderr, "Expected 0x%x but got 0x%x in buffer when copying from %lu to %lu and CPU device is %lu.\n", *reinterpret_cast<uint32_t*>(src->ptr),
-              *reinterpret_cast<uint32_t*>(dst->ptr), src->dev.handle, dst->dev.handle, args->cpu.dev.handle);
-      return HSA_STATUS_ERROR;
-    }
+  if (*reinterpret_cast<uint32_t*>(dst->ptr) != *reinterpret_cast<uint32_t*>(src->ptr)) {
+    fprintf(stderr,
+            "Expected 0x%x but got 0x%x in buffer when copying from %lu to %lu and CPU device is "
+            "%lu.\n",
+            *reinterpret_cast<uint32_t*>(src->ptr), *reinterpret_cast<uint32_t*>(dst->ptr),
+            src->dev.handle, dst->dev.handle, args->cpu.dev.handle);
+    return HSA_STATUS_ERROR;
+  }
   return HSA_STATUS_SUCCESS;
 }
 

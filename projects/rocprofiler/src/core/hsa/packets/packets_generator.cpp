@@ -181,7 +181,7 @@ InitializeAqlPackets(hsa_agent_t cpu_agent, hsa_agent_t gpu_agent,
 
   // TODO: validate needs to be called on each events_list[i]
   // Validating the events array for the specified gpu agent
-  if(events_list.size() > 0) {
+  if (events_list.size() > 0) {
     bool validate_event_result;
     status =
         hsa_ven_amd_aqlprofile_validate_event(gpu_agent, &events_list[0], &validate_event_result);
@@ -234,9 +234,10 @@ InitializeAqlPackets(hsa_agent_t cpu_agent, hsa_agent_t gpu_agent,
     }
   }
 
-  for(auto& cname : counter_names) {
-    if(cname.compare("KERNEL_DURATION")==0) {
-      rocprofiler::Metric* metric = const_cast<rocprofiler::Metric*>(metricsDict[gpu_agent.handle]->Get(cname));
+  for (auto& cname : counter_names) {
+    if (cname.compare("KERNEL_DURATION") == 0) {
+      rocprofiler::Metric* metric =
+          const_cast<rocprofiler::Metric*>(metricsDict[gpu_agent.handle]->Get(cname));
       if (metric == nullptr) std::cout << cname << " not found in metricsDict\n";
       context->metrics_list.push_back(metric);
     }
@@ -315,7 +316,7 @@ InitializeAqlPackets(hsa_agent_t cpu_agent, hsa_agent_t gpu_agent,
   hsa_agent_t ag_list[ag_list_count];
   ag_list[0] = gpu_agent;
 
-  if(context->events_list.size() > 0) {
+  if (context->events_list.size() > 0) {
     // Preparing an Getting the size of the command and output buffers
     status = hsa_ven_amd_aqlprofile_start(profile, NULL);
     // CHECK_HSA_STATUS("Error: Getting Buffers Size", status);
@@ -510,7 +511,8 @@ uint8_t* AllocateLocalMemory(size_t size, hsa_amd_memory_pool_t* gpu_pool) {
   return ptr;
 }
 
-hsa_status_t Allocate(hsa_agent_t gpu_agent, hsa_ven_amd_aqlprofile_profile_t* profile, size_t att_buffer_size) {
+hsa_status_t Allocate(hsa_agent_t gpu_agent, hsa_ven_amd_aqlprofile_profile_t* profile,
+                      size_t att_buffer_size) {
   Agent::AgentInfo& agentInfo = rocprofiler::hsa_support::GetAgentInfo(gpu_agent.handle);
   profile->command_buffer.ptr =
       AllocateSysMemory(gpu_agent, profile->command_buffer.size, &agentInfo.cpu_pool);

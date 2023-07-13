@@ -19,4 +19,4 @@ enum hsa_evt_id_t {
 // HSA EVT callback data type
 typedef rocprofiler_hsa_callback_data_t hsa_evt_data_t;
 
-#endif // _SRC_CORE_ACTIVITY_H
+#endif  // _SRC_CORE_ACTIVITY_H

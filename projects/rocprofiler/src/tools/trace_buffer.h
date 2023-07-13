@@ -282,7 +282,7 @@ class TraceBuffer : protected TraceBufferBase {
 }  // namespace rocprofiler
 
 #define TRACE_BUFFER_INSTANTIATE()                                                                 \
-  rocprofiler::TraceBufferBase* rocprofiler::TraceBufferBase::head_ = nullptr;                         \
+  rocprofiler::TraceBufferBase* rocprofiler::TraceBufferBase::head_ = nullptr;                     \
   std::mutex rocprofiler::TraceBufferBase::mutex_;
 
 #endif  // TOOL_TRACE_BUFFER_H_

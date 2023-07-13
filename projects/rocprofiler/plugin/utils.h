@@ -36,9 +36,10 @@
 #include "src/utils/helper.h"
 
 // Macro to check ROCProfiler calls status
-#define CHECK_ROCPROFILER(call)                                                                      \
+#define CHECK_ROCPROFILER(call)                                                                    \
   do {                                                                                             \
-    if ((call) != ROCPROFILER_STATUS_SUCCESS) rocprofiler::fatal("Error: ROCProfiler API Call Error!");  \
+    if ((call) != ROCPROFILER_STATUS_SUCCESS)                                                      \
+      rocprofiler::fatal("Error: ROCProfiler API Call Error!");                                    \
   } while (false)
 
 namespace {
@@ -48,8 +49,6 @@ namespace {
   return pid;
 }
 
-[[maybe_unused]] uint64_t GetMachineID() {
-  return gethostid();
-}
+[[maybe_unused]] uint64_t GetMachineID() { return gethostid(); }
 
 }  // namespace

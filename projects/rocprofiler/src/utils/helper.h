@@ -71,6 +71,6 @@ bool has_counter_format(std::string const& str);
 std::string left_trim(const std::string& s);
 
 // validates pmc user input format
-void validate_counters_format(std::vector<std::string> &counters, std::string line);
+void validate_counters_format(std::vector<std::string>& counters, std::string line);
 
 }  // namespace rocprofiler

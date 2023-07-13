@@ -70,7 +70,8 @@ bool TestHsa::Initialize(int /*arg_cnt*/, char** /*arg_list*/) {
       return false;
     }
   }
-  std::clog << "> Using agent[" << agent_info_->dev_index << "] : " << agent_info_->name << std::endl;
+  std::clog << "> Using agent[" << agent_info_->dev_index << "] : " << agent_info_->name
+            << std::endl;
 
   // Create an instance of Aql Queue
   if (hsa_queue_ == NULL) {
@@ -88,8 +89,8 @@ bool TestHsa::Initialize(int /*arg_cnt*/, char** /*arg_list*/) {
   // Obtain the code object file name
   std::string agentName(agent_info_->name);
   Dl_info dl_info;
-    if (dladdr(reinterpret_cast<const void*>(TestHsa::HsaShutdown), &dl_info) != 0)
-      brig_path_obj_.append(fs::path(dl_info.dli_fname).remove_filename().remove_filename());
+  if (dladdr(reinterpret_cast<const void*>(TestHsa::HsaShutdown), &dl_info) != 0)
+    brig_path_obj_.append(fs::path(dl_info.dli_fname).remove_filename().remove_filename());
   brig_path_obj_.append(agentName);
   brig_path_obj_.append("_" + name_ + ".hsaco");
 
@@ -219,7 +220,8 @@ bool TestHsa::Run() {
   // Submit AQL packet to the queue
   const uint64_t que_idx = hsa_rsrc_->Submit(hsa_queue_, &aql);
 
-  std::clog << "> Waiting on kernel dispatch signal, que_idx=" << que_idx << std::endl << std::flush;
+  std::clog << "> Waiting on kernel dispatch signal, que_idx=" << que_idx << std::endl
+            << std::flush;
 
   // Wait on the dispatch signal until the kernel is finished.
   // Update wait condition to HSA_WAIT_STATE_ACTIVE for Polling

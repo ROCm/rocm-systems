@@ -81,7 +81,8 @@ class ApplicationParser : public ::testing::Test {
 
   //!< Parses kernel info fields from given input
   // i.e: kernel_names, kernel_duration
-  void ParseKernelInfoFields(const std::string& s, std::vector<profiler_kernel_info_t>* kernel_info_output);
+  void ParseKernelInfoFields(const std::string& s,
+                             std::vector<profiler_kernel_info_t>* kernel_info_output);
 };
 
 /* --------------------------------------------------------------------------*/
@@ -108,6 +109,7 @@ class PluginTests : public ::testing::Test {
  public:
   //!< Sets application environment by seting rocprofv2.
   void RunApplication(const char* app_name, const char* appParams);
+
  private:
   //!< Runs a given appllication with the hsa activity.
   void ProcessApplication(std::stringstream& ss);
@@ -120,12 +122,13 @@ class FilePluginTest : public PluginTests {
 
 class PerfettoPluginTest : public PluginTests {
  public:
-  //!< Checks wether a file beginning with "filename" and ending with "pftrace" exists in "directory"
+  //!< Checks wether a file beginning with "filename" and ending with "pftrace" exists in
+  //!< "directory"
   static bool hasFileInDir(const std::string& filename, const char* directory);
 };
 
 class CTFPluginTest : public FilePluginTest {
-public:
+ public:
   static bool hasMetadataInDir(const char* directory);
 };
 

@@ -31,10 +31,8 @@ THE SOFTWARE.
 #include "util/hsa_rsrc_factory.h"
 
 namespace rocprofiler {
-size_t CreateGpuCommand(gpu_cmd_op_t op,
-                        const rocprofiler::util::AgentInfo* agent_info,
-                        packet_t* command,
-                        const size_t& slot_count) {
+size_t CreateGpuCommand(gpu_cmd_op_t op, const rocprofiler::util::AgentInfo* agent_info,
+                        packet_t* command, const size_t& slot_count) {
   if (op >= NUMBER_GPU_CMD_OP) EXC_RAISING(HSA_STATUS_ERROR, "bad op value (" << op << ")");
 
   const bool is_legacy = (strncmp(agent_info->name, "gfx8", 4) == 0);
@@ -49,14 +47,15 @@ size_t CreateGpuCommand(gpu_cmd_op_t op,
   profile.agent = agent_info->dev_id;
   // Query for cmd buffer size
   hsa_ven_amd_aqlprofile_info_type_t info_type =
-    (hsa_ven_amd_aqlprofile_info_type_t)((int)HSA_VEN_AMD_AQLPROFILE_INFO_ENABLE_CMD + (int)op);
-  hsa_status_t status = hsa_rsrc->AqlProfileApi()->hsa_ven_amd_aqlprofile_get_info(&profile, info_type, NULL);
-  if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "get_info(ENABLE_CMD ).size exc, op(" << int(op) << ")");
+      (hsa_ven_amd_aqlprofile_info_type_t)((int)HSA_VEN_AMD_AQLPROFILE_INFO_ENABLE_CMD + (int)op);
+  hsa_status_t status =
+      hsa_rsrc->AqlProfileApi()->hsa_ven_amd_aqlprofile_get_info(&profile, info_type, NULL);
+  if (status != HSA_STATUS_SUCCESS)
+    EXC_RAISING(status, "get_info(ENABLE_CMD ).size exc, op(" << int(op) << ")");
   if (profile.command_buffer.size == 0) EXC_RAISING(status, "get_info(ENABLE_CMD).size == 0");
   // Allocate cmd buffer
   const size_t aligment_mask = 0x100 - 1;
-  profile.command_buffer.ptr =
-    hsa_rsrc->AllocateSysMemory(agent_info, profile.command_buffer.size);
+  profile.command_buffer.ptr = hsa_rsrc->AllocateSysMemory(agent_info, profile.command_buffer.size);
   if ((reinterpret_cast<uintptr_t>(profile.command_buffer.ptr) & aligment_mask) != 0) {
     EXC_RAISING(status, "profile.command_buffer.ptr bad alignment");
   }
@@ -66,15 +65,18 @@ size_t CreateGpuCommand(gpu_cmd_op_t op,
     packet_t packet{};
 
     // Query for cmd buffer data
-    status = hsa_rsrc->AqlProfileApi()->hsa_ven_amd_aqlprofile_get_info(&profile, info_type, &packet);
+    status =
+        hsa_rsrc->AqlProfileApi()->hsa_ven_amd_aqlprofile_get_info(&profile, info_type, &packet);
     if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "get_info(ENABLE_CMD).data exc");
 
     // Check for legacy GFXIP
     status = hsa_rsrc->AqlProfileApi()->hsa_ven_amd_aqlprofile_legacy_get_pm4(&packet, command);
-    if (status != HSA_STATUS_SUCCESS) AQL_EXC_RAISING(status, "hsa_ven_amd_aqlprofile_legacy_get_pm4");
+    if (status != HSA_STATUS_SUCCESS)
+      AQL_EXC_RAISING(status, "hsa_ven_amd_aqlprofile_legacy_get_pm4");
   } else {
     // Query for cmd buffer data
-    status = hsa_rsrc->AqlProfileApi()->hsa_ven_amd_aqlprofile_get_info(&profile, info_type, command);
+    status =
+        hsa_rsrc->AqlProfileApi()->hsa_ven_amd_aqlprofile_get_info(&profile, info_type, command);
     if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "get_info(ENABLE_CMD).data exc");
   }
 
@@ -91,15 +93,14 @@ struct gpu_cmd_key_t {
   uint32_t node_id;
 };
 struct gpu_cmd_fncomp_t {
-  bool operator() (const gpu_cmd_key_t& a, const gpu_cmd_key_t& b) const {
+  bool operator()(const gpu_cmd_key_t& a, const gpu_cmd_key_t& b) const {
     return (a.op < b.op) || ((a.op == b.op) && (a.node_id < b.node_id));
   }
 };
 typedef std::map<gpu_cmd_key_t, gpu_cmd_entry_t, gpu_cmd_fncomp_t> gpu_cmd_map_t;
 
-size_t GetGpuCommand(gpu_cmd_op_t op,
-                       const rocprofiler::util::AgentInfo* agent_info,
-                       packet_t** command_out) {
+size_t GetGpuCommand(gpu_cmd_op_t op, const rocprofiler::util::AgentInfo* agent_info,
+                     packet_t** command_out) {
   thread_local gpu_cmd_map_t map;
 
   // Getting NUMA node id
@@ -112,7 +113,8 @@ size_t GetGpuCommand(gpu_cmd_op_t op,
   auto ret = map.insert({gpu_cmd_key_t{op, node_id}, gpu_cmd_entry_t{}});
   gpu_cmd_map_t::iterator it = ret.first;
   if (ret.second) {
-    it->second.size = CreateGpuCommand(op, agent_info, it->second.command, Profile::LEGACY_SLOT_SIZE_PKT);
+    it->second.size =
+        CreateGpuCommand(op, agent_info, it->second.command, Profile::LEGACY_SLOT_SIZE_PKT);
   }
 
   *command_out = it->second.command;

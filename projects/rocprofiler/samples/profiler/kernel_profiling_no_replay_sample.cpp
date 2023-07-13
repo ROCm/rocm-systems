@@ -25,9 +25,10 @@ int main(int argc, char** argv) {
   counters.emplace_back("GRBM_COUNT");
   rocprofiler_filter_id_t filter_id;
   [[maybe_unused]] rocprofiler_filter_property_t property = {};
-  CHECK_ROCPROFILER(rocprofiler_create_filter(session_id, ROCPROFILER_COUNTERS_COLLECTION,
-                                          rocprofiler_filter_data_t{.counters_names = &counters[0]},
-                                          counters.size(), &filter_id, property));
+  CHECK_ROCPROFILER(
+      rocprofiler_create_filter(session_id, ROCPROFILER_COUNTERS_COLLECTION,
+                                rocprofiler_filter_data_t{.counters_names = &counters[0]},
+                                counters.size(), &filter_id, property));
   CHECK_ROCPROFILER(rocprofiler_set_filter_buffer(session_id, filter_id, buffer_id));
 
   // Normal HIP Calls

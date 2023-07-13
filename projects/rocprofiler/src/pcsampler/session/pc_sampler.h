@@ -41,9 +41,9 @@ struct PCSampler {
 
   void Start();
   void Stop();
-  void AddRecord(rocprofiler_record_pc_sample_t &record);
+  void AddRecord(rocprofiler_record_pc_sample_t& record);
 
-private:
+ private:
   void SamplerLoop();
 
   rocprofiler_buffer_id_t buffer_id_;
@@ -55,6 +55,6 @@ private:
   std::thread sampler_thread_;
 };
 
-} // namespace rocprofiler::pc_sampler
+}  // namespace rocprofiler::pc_sampler
 
-#endif // SRC_PCSAMPLER_PC_SAMPLER_H_
+#endif  // SRC_PCSAMPLER_PC_SAMPLER_H_

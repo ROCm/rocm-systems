@@ -51,7 +51,8 @@ void print_sys_time(clockid_t clock_id, rocprofiler_time_id_t time_id) {
   HsaTimer::timestamp_t timestamp1 = timestamp;
   HsaTimer::timestamp_t value_ns1 = value_ns;
 
-  printf("time-id(%d) ts_ns(%lu) orig_ns(%lu) time_ns(%lu) err_ns(%lu)\n", (int)time_id, timestamp, tm_val_ns, value_ns, error_ns);
+  printf("time-id(%d) ts_ns(%lu) orig_ns(%lu) time_ns(%lu) err_ns(%lu)\n", (int)time_id, timestamp,
+         tm_val_ns, value_ns, error_ns);
 
   sleep(1);
 
@@ -66,51 +67,53 @@ void print_sys_time(clockid_t clock_id, rocprofiler_time_id_t time_id) {
   HsaTimer::timestamp_t timestamp2 = timestamp;
   HsaTimer::timestamp_t value_ns2 = value_ns;
 
-  printf("time-id(%d) ts_ns(%lu) orig_ns(%lu) time_ns(%lu) err_ns(%lu)\n", (int)time_id, timestamp, tm_val_ns, value_ns, error_ns);
+  printf("time-id(%d) ts_ns(%lu) orig_ns(%lu) time_ns(%lu) err_ns(%lu)\n", (int)time_id, timestamp,
+         tm_val_ns, value_ns, error_ns);
   printf("ts-diff(%lu) tm-diff(%lu)\n", timestamp2 - timestamp1, value_ns2 - value_ns1);
 }
 
 // print profiler features
 void print_features(rocprofiler_feature_t* feature, uint32_t feature_count) {
-    for (rocprofiler_feature_t* p = feature; p < feature + feature_count; ++p) {
-      std::cout << (p - feature) << ": " << p->name;
-      switch (p->data.kind) {
-        case ROCPROFILER_DATA_KIND_INT64:
-          std::cout << std::dec << " result64 (" << p->data.result_int64 << ")" << std::endl;
-          break;
-        case ROCPROFILER_DATA_KIND_DOUBLE:
-          std::cout << " result64 (" << p->data.result_double << ")" << std::endl;
-          break;
-        case ROCPROFILER_DATA_KIND_BYTES: {
-          const char* ptr = reinterpret_cast<const char*>(p->data.result_bytes.ptr);
-          uint64_t size = 0;
-          for (unsigned i = 0; i < p->data.result_bytes.instance_count; ++i) {
-            size = *reinterpret_cast<const uint64_t*>(ptr);
-            const char* data = ptr + sizeof(size);
-            std::cout << std::endl;
-            std::cout << std::hex << "  data (" << (void*)data << ")" << std::endl;
-            std::cout << std::dec << "  size (" << size << ")" << std::endl;
-            ptr = data + size;
-          }
-          break;
+  for (rocprofiler_feature_t* p = feature; p < feature + feature_count; ++p) {
+    std::cout << (p - feature) << ": " << p->name;
+    switch (p->data.kind) {
+      case ROCPROFILER_DATA_KIND_INT64:
+        std::cout << std::dec << " result64 (" << p->data.result_int64 << ")" << std::endl;
+        break;
+      case ROCPROFILER_DATA_KIND_DOUBLE:
+        std::cout << " result64 (" << p->data.result_double << ")" << std::endl;
+        break;
+      case ROCPROFILER_DATA_KIND_BYTES: {
+        const char* ptr = reinterpret_cast<const char*>(p->data.result_bytes.ptr);
+        uint64_t size = 0;
+        for (unsigned i = 0; i < p->data.result_bytes.instance_count; ++i) {
+          size = *reinterpret_cast<const uint64_t*>(ptr);
+          const char* data = ptr + sizeof(size);
+          std::cout << std::endl;
+          std::cout << std::hex << "  data (" << (void*)data << ")" << std::endl;
+          std::cout << std::dec << "  size (" << size << ")" << std::endl;
+          ptr = data + size;
         }
-        default:
-          std::cout << "result kind (" << p->data.kind << ")" << std::endl;
-          TEST_ASSERT(false);
+        break;
       }
+      default:
+        std::cout << "result kind (" << p->data.kind << ")" << std::endl;
+        TEST_ASSERT(false);
     }
+  }
 }
 
-void read_features(uint32_t n, rocprofiler_t* context, rocprofiler_feature_t* feature, const unsigned feature_count) {
-    std::cout << "read features" << std::endl;
-    hsa_status_t status = rocprofiler_read(context, n);
-    TEST_STATUS(status == HSA_STATUS_SUCCESS);
-    std::cout << "read issue" << std::endl;
-    status = rocprofiler_get_data(context, n);
-    TEST_STATUS(status == HSA_STATUS_SUCCESS);
-    status = rocprofiler_get_metrics(context);
-    TEST_STATUS(status == HSA_STATUS_SUCCESS);
-    print_features(feature, feature_count);
+void read_features(uint32_t n, rocprofiler_t* context, rocprofiler_feature_t* feature,
+                   const unsigned feature_count) {
+  std::cout << "read features" << std::endl;
+  hsa_status_t status = rocprofiler_read(context, n);
+  TEST_STATUS(status == HSA_STATUS_SUCCESS);
+  std::cout << "read issue" << std::endl;
+  status = rocprofiler_get_data(context, n);
+  TEST_STATUS(status == HSA_STATUS_SUCCESS);
+  status = rocprofiler_get_metrics(context);
+  TEST_STATUS(status == HSA_STATUS_SUCCESS);
+  print_features(feature, feature_count);
 }
 
 int main() {
@@ -174,7 +177,8 @@ int main() {
   const unsigned queue_count = 16;
   hsa_queue_t* queue[queue_count];
   for (unsigned queue_ind = 0; queue_ind < queue_count; ++queue_ind) {
-    if (HsaRsrcFactory::Instance().CreateQueue(agent_info, 128, &queue[queue_ind]) == false) abort();
+    if (HsaRsrcFactory::Instance().CreateQueue(agent_info, 128, &queue[queue_ind]) == false)
+      abort();
   }
   hsa_queue_t* prof_queue = queue[0];
 
@@ -198,7 +202,7 @@ int main() {
 #if 1
     const unsigned queue_ind = ind % queue_count;
     hsa_queue_t* prof_queue = queue[queue_ind];
-    //ret_val = RunKernel<DummyKernel, TestAql>(0, NULL, NULL, prof_queue);
+    // ret_val = RunKernel<DummyKernel, TestAql>(0, NULL, NULL, prof_queue);
     ret_val = RunKernel<SimpleConvolution, TestAql>(0, NULL, NULL, prof_queue);
     std::cout << "run kernel, queue " << queue_ind << std::endl;
 #else

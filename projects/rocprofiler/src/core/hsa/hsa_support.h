@@ -95,7 +95,7 @@ namespace rocprofiler {
 namespace hsa_support {
 
 void Initialize(HsaApiTable* Table);
-hsa_status_t hsa_iterate_agents_cb(hsa_agent_t agent, void *data);
+hsa_status_t hsa_iterate_agents_cb(hsa_agent_t agent, void* data);
 void Finalize();
 
 bool IterateCounters(rocprofiler_counters_info_callback_t counters_info_callback);

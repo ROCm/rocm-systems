@@ -33,8 +33,8 @@ Agent::AgentInfo& GetAgentInfo(decltype(hsa_agent_t::handle) handle) {
   if (agent_info_map.find(handle) != agent_info_map.end()) {
     return agent_info_map.at(handle);
   } else {
-    std::cerr << std::string("Error: Can't find Agent with handle(") << std::to_string(handle) <<
-          ") in this system" << std::endl;
+    std::cerr << std::string("Error: Can't find Agent with handle(") << std::to_string(handle)
+              << ") in this system" << std::endl;
     abort();
   }
 }
@@ -49,9 +49,7 @@ void SetAgentInfo(decltype(hsa_agent_t::handle) handle, const Agent::AgentInfo& 
   }
 }
 
-std::vector<hsa_agent_t>& GetCPUAgentList() {
-  return cpu_agents_list;
-}
+std::vector<hsa_agent_t>& GetCPUAgentList() { return cpu_agents_list; }
 
 hsa_agent_t GetAgentByIndex(uint64_t agent_index) {
   std::lock_guard<std::mutex> lock(agents_map_lock);
@@ -60,8 +58,8 @@ hsa_agent_t GetAgentByIndex(uint64_t agent_index) {
       return hsa_agent_t{agent_info.second.getHandle()};
     }
   }
-  std::cerr << std::string("Error: Can't find Agent with Index(") << std::to_string(agent_index) <<
-        ") in this system" << std::endl;
+  std::cerr << std::string("Error: Can't find Agent with Index(") << std::to_string(agent_index)
+            << ") in this system" << std::endl;
   abort();
 }
 

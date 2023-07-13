@@ -40,9 +40,9 @@ int main(int argc, char** argv) {
 
   // Kernel Tracing
   rocprofiler_filter_id_t kernel_tracing_filter_id;
-  CHECK_ROCPROFILER(rocprofiler_create_filter(session_id, ROCPROFILER_DISPATCH_TIMESTAMPS_COLLECTION,
-                                          rocprofiler_filter_data_t{}, 0, &kernel_tracing_filter_id,
-                                          rocprofiler_filter_property_t{}));
+  CHECK_ROCPROFILER(rocprofiler_create_filter(
+      session_id, ROCPROFILER_DISPATCH_TIMESTAMPS_COLLECTION, rocprofiler_filter_data_t{}, 0,
+      &kernel_tracing_filter_id, rocprofiler_filter_property_t{}));
   CHECK_ROCPROFILER(rocprofiler_set_filter_buffer(session_id, kernel_tracing_filter_id, buffer_id));
 
   // Normal HIP Calls won't be traced

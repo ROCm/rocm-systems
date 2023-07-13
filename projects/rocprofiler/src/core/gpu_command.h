@@ -37,9 +37,8 @@ enum gpu_cmd_op_t {
   NUMBER_GPU_CMD_OP
 };
 
-size_t GetGpuCommand(gpu_cmd_op_t op,
-                       const rocprofiler::util::AgentInfo* agent_info,
-                       packet_t** command_out);
+size_t GetGpuCommand(gpu_cmd_op_t op, const rocprofiler::util::AgentInfo* agent_info,
+                     packet_t** command_out);
 
 static inline size_t IssueGpuCommand(gpu_cmd_op_t op,
                                      const rocprofiler::util::AgentInfo* agent_info,
@@ -55,9 +54,7 @@ static inline size_t IssueGpuCommand(gpu_cmd_op_t op,
   return HSA_STATUS_SUCCESS;
 }
 
-static inline size_t IssueGpuCommand(gpu_cmd_op_t op,
-                                     hsa_agent_t agent,
-                                     hsa_queue_t* queue) {
+static inline size_t IssueGpuCommand(gpu_cmd_op_t op, hsa_agent_t agent, hsa_queue_t* queue) {
   rocprofiler::util::HsaRsrcFactory* hsa_rsrc = &rocprofiler::util::HsaRsrcFactory::Instance();
   const rocprofiler::util::AgentInfo* agent_info = hsa_rsrc->GetAgentInfo(agent);
   return IssueGpuCommand(op, agent_info, queue);

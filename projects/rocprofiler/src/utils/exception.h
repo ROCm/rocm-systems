@@ -40,7 +40,9 @@ class Exception : public std::runtime_error {
         status_(status) {}
   rocprofiler_status_t status() const noexcept { return status_; }
 
-  explicit Exception(const std::string& message) : std::runtime_error(message) { message_ = message; }
+  explicit Exception(const std::string& message) : std::runtime_error(message) {
+    message_ = message;
+  }
   const char* what() const noexcept override { return message_.c_str(); }
 
  protected:

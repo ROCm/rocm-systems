@@ -48,69 +48,71 @@ POSSIBILITY OF SUCH DAMAGE.
 #define HSA_QUEUE_ALIGN_BYTES 64
 #define HSA_PACKET_ALIGN_BYTES 64
 
-#define CHECK_STATUS(msg, status) do {                                                             \
-  if ((status) != HSA_STATUS_SUCCESS) {                                                            \
-    const char* emsg = 0;                                                                          \
-    hsa_status_string(status, &emsg);                                                              \
-    printf("%s: %s\n", msg, emsg ? emsg : "<unknown error>");                                      \
-    abort();                                                                                       \
-  }                                                                                                \
-} while (0)
+#define CHECK_STATUS(msg, status)                                                                  \
+  do {                                                                                             \
+    if ((status) != HSA_STATUS_SUCCESS) {                                                          \
+      const char* emsg = 0;                                                                        \
+      hsa_status_string(status, &emsg);                                                            \
+      printf("%s: %s\n", msg, emsg ? emsg : "<unknown error>");                                    \
+      abort();                                                                                     \
+    }                                                                                              \
+  } while (0)
 
-#define CHECK_ITER_STATUS(msg, status) do {                                                        \
-  if ((status) != HSA_STATUS_INFO_BREAK) {                                                         \
-    const char* emsg = 0;                                                                          \
-    hsa_status_string(status, &emsg);                                                              \
-    printf("%s: %s\n", msg, emsg ? emsg : "<unknown error>");                                      \
-    abort();                                                                                       \
-  }                                                                                                \
-} while (0)
+#define CHECK_ITER_STATUS(msg, status)                                                             \
+  do {                                                                                             \
+    if ((status) != HSA_STATUS_INFO_BREAK) {                                                       \
+      const char* emsg = 0;                                                                        \
+      hsa_status_string(status, &emsg);                                                            \
+      printf("%s: %s\n", msg, emsg ? emsg : "<unknown error>");                                    \
+      abort();                                                                                     \
+    }                                                                                              \
+  } while (0)
 
 static const size_t MEM_PAGE_BYTES = 0x1000;
 static const size_t MEM_PAGE_MASK = MEM_PAGE_BYTES - 1;
 typedef decltype(hsa_agent_t::handle) hsa_agent_handle_t;
 
 struct hsa_pfn_t {
-  decltype(hsa_init)* hsa_init;
-  decltype(hsa_shut_down)* hsa_shut_down;
-  decltype(hsa_agent_get_info)* hsa_agent_get_info;
-  decltype(hsa_iterate_agents)* hsa_iterate_agents;
+  decltype(::hsa_init)* hsa_init;
+  decltype(::hsa_shut_down)* hsa_shut_down;
+  decltype(::hsa_agent_get_info)* hsa_agent_get_info;
+  decltype(::hsa_iterate_agents)* hsa_iterate_agents;
 
-  decltype(hsa_queue_create)* hsa_queue_create;
-  decltype(hsa_queue_destroy)* hsa_queue_destroy;
-  decltype(hsa_queue_load_read_index_relaxed)* hsa_queue_load_read_index_relaxed;
-  decltype(hsa_queue_load_write_index_relaxed)* hsa_queue_load_write_index_relaxed;
-  decltype(hsa_queue_add_write_index_scacq_screl)* hsa_queue_add_write_index_scacq_screl;
+  decltype(::hsa_queue_create)* hsa_queue_create;
+  decltype(::hsa_queue_destroy)* hsa_queue_destroy;
+  decltype(::hsa_queue_load_read_index_relaxed)* hsa_queue_load_read_index_relaxed;
+  decltype(::hsa_queue_load_write_index_relaxed)* hsa_queue_load_write_index_relaxed;
+  decltype(::hsa_queue_add_write_index_scacq_screl)* hsa_queue_add_write_index_scacq_screl;
 
-  decltype(hsa_signal_create)* hsa_signal_create;
-  decltype(hsa_signal_destroy)* hsa_signal_destroy;
-  decltype(hsa_signal_load_relaxed)* hsa_signal_load_relaxed;
-  decltype(hsa_signal_store_relaxed)* hsa_signal_store_relaxed;
-  decltype(hsa_signal_wait_scacquire)* hsa_signal_wait_scacquire;
-  decltype(hsa_signal_store_screlease)* hsa_signal_store_screlease;
+  decltype(::hsa_signal_create)* hsa_signal_create;
+  decltype(::hsa_signal_destroy)* hsa_signal_destroy;
+  decltype(::hsa_signal_load_relaxed)* hsa_signal_load_relaxed;
+  decltype(::hsa_signal_store_relaxed)* hsa_signal_store_relaxed;
+  decltype(::hsa_signal_wait_scacquire)* hsa_signal_wait_scacquire;
+  decltype(::hsa_signal_store_screlease)* hsa_signal_store_screlease;
 
-  decltype(hsa_code_object_reader_create_from_file)* hsa_code_object_reader_create_from_file;
-  decltype(hsa_executable_create_alt)* hsa_executable_create_alt;
-  decltype(hsa_executable_load_agent_code_object)* hsa_executable_load_agent_code_object;
-  decltype(hsa_executable_freeze)* hsa_executable_freeze;
-  decltype(hsa_executable_destroy)* hsa_executable_destroy;
-  decltype(hsa_executable_get_symbol)* hsa_executable_get_symbol;
-  decltype(hsa_executable_symbol_get_info)* hsa_executable_symbol_get_info;
-  decltype(hsa_executable_iterate_symbols)* hsa_executable_iterate_symbols;
+  decltype(::hsa_code_object_reader_create_from_file)* hsa_code_object_reader_create_from_file;
+  decltype(::hsa_executable_create_alt)* hsa_executable_create_alt;
+  decltype(::hsa_executable_load_agent_code_object)* hsa_executable_load_agent_code_object;
+  decltype(::hsa_executable_freeze)* hsa_executable_freeze;
+  decltype(::hsa_executable_destroy)* hsa_executable_destroy;
+  decltype(::hsa_executable_get_symbol)* hsa_executable_get_symbol;
+  decltype(::hsa_executable_symbol_get_info)* hsa_executable_symbol_get_info;
+  decltype(::hsa_executable_iterate_symbols)* hsa_executable_iterate_symbols;
 
-  decltype(hsa_system_get_info)* hsa_system_get_info;
-  decltype(hsa_system_get_major_extension_table)* hsa_system_get_major_extension_table;
+  decltype(::hsa_system_get_info)* hsa_system_get_info;
+  decltype(::hsa_system_get_major_extension_table)* hsa_system_get_major_extension_table;
 
-  decltype(hsa_amd_agent_iterate_memory_pools)* hsa_amd_agent_iterate_memory_pools;
-  decltype(hsa_amd_memory_pool_get_info)* hsa_amd_memory_pool_get_info;
-  decltype(hsa_amd_memory_pool_allocate)* hsa_amd_memory_pool_allocate;
-  decltype(hsa_amd_agents_allow_access)* hsa_amd_agents_allow_access;
-  decltype(hsa_amd_memory_async_copy)* hsa_amd_memory_async_copy;
+  decltype(::hsa_amd_agent_iterate_memory_pools)* hsa_amd_agent_iterate_memory_pools;
+  decltype(::hsa_amd_memory_pool_get_info)* hsa_amd_memory_pool_get_info;
+  decltype(::hsa_amd_memory_pool_allocate)* hsa_amd_memory_pool_allocate;
+  decltype(::hsa_amd_agents_allow_access)* hsa_amd_agents_allow_access;
+  decltype(::hsa_amd_memory_async_copy)* hsa_amd_memory_async_copy;
 
-  decltype(hsa_amd_signal_async_handler)* hsa_amd_signal_async_handler;
-  decltype(hsa_amd_profiling_set_profiler_enabled)* hsa_amd_profiling_set_profiler_enabled;
-  decltype(hsa_amd_profiling_get_async_copy_time)* hsa_amd_profiling_get_async_copy_time;
-  decltype(hsa_amd_profiling_get_dispatch_time)* hsa_amd_profiling_get_dispatch_time;
+  decltype(::hsa_amd_signal_async_handler)* hsa_amd_signal_async_handler;
+  decltype(::hsa_amd_profiling_set_profiler_enabled)* hsa_amd_profiling_set_profiler_enabled;
+  decltype(::hsa_amd_profiling_get_async_copy_time)* hsa_amd_profiling_get_async_copy_time;
+  decltype(::hsa_amd_profiling_get_dispatch_time)* hsa_amd_profiling_get_dispatch_time;
 };
 
 // Encapsulates information about a Hsa Agent such as its
@@ -185,7 +187,8 @@ class HsaTimer {
 
   HsaTimer(const hsa_pfn_t* hsa_api) : hsa_api_(hsa_api) {
     timestamp_t sysclock_hz = 0;
-    hsa_status_t status = hsa_api_->hsa_system_get_info(HSA_SYSTEM_INFO_TIMESTAMP_FREQUENCY, &sysclock_hz);
+    hsa_status_t status =
+        hsa_api_->hsa_system_get_info(HSA_SYSTEM_INFO_TIMESTAMP_FREQUENCY, &sysclock_hz);
     CHECK_STATUS("hsa_system_get_info(HSA_SYSTEM_INFO_TIMESTAMP_FREQUENCY)", status);
     sysclock_factor_ = (freq_t)1000000000 / (freq_t)sysclock_hz;
   }
@@ -220,8 +223,8 @@ class HsaTimer {
 
   // Return pair of correlated values of profiling timestamp and time with
   // correlation error for a given time ID and number of iterations
-  void correlated_pair_ns(time_id_t time_id, uint32_t iters,
-                          timestamp_t* timestamp_v, timestamp_t* time_v, timestamp_t* error_v) {
+  void correlated_pair_ns(time_id_t time_id, uint32_t iters, timestamp_t* timestamp_v,
+                          timestamp_t* time_v, timestamp_t* error_v) {
     clockid_t clock_id = 0;
     switch (time_id) {
       case TIME_ID_CLOCK_REALTIME:
@@ -376,7 +379,8 @@ class HsaRsrcFactory {
   uint8_t* AllocateCmdMemory(const AgentInfo* agent_info, size_t size);
 
   // Wait signal
-  hsa_signal_value_t SignalWait(const hsa_signal_t& signal, const hsa_signal_value_t& signal_value) const;
+  hsa_signal_value_t SignalWait(const hsa_signal_t& signal,
+                                const hsa_signal_value_t& signal_value) const;
 
   // Wait signal with signal value restore
   void SignalWaitRestore(const hsa_signal_t& signal, const hsa_signal_value_t& signal_value) const;
@@ -444,7 +448,7 @@ class HsaRsrcFactory {
     }
 
     std::atomic<uint64_t>* atomic_ptr =
-      reinterpret_cast<std::atomic<uint64_t>*>(&(it->second.refs_count));
+        reinterpret_cast<std::atomic<uint64_t>*>(&(it->second.refs_count));
     atomic_ptr->fetch_add(1, std::memory_order_relaxed);
 
     return it;
@@ -452,7 +456,7 @@ class HsaRsrcFactory {
 
   static inline void ReleaseKernelNameRef(const symbols_map_it_t& it) {
     std::atomic<uint64_t>* atomic_ptr =
-      reinterpret_cast<std::atomic<uint64_t>*>(&(it->second.refs_count));
+        reinterpret_cast<std::atomic<uint64_t>*>(&(it->second.refs_count));
     atomic_ptr->fetch_sub(1, std::memory_order_relaxed);
   }
 
@@ -465,7 +469,7 @@ class HsaRsrcFactory {
     auto it = symbols_map_->find(addr);
     if (it != symbols_map_->end()) {
       while (1) {
-        while(it->second.refs_count != 0) sched_yield();
+        while (it->second.refs_count != 0) sched_yield();
         mutex_.lock();
         if (it->second.refs_count == 0) break;
         mutex_.unlock();
@@ -477,14 +481,16 @@ class HsaRsrcFactory {
       if (free == 1) {
         symbols_map_->erase(it);
       } else {
-        fprintf(stderr, "HsaRsrcFactory::SetKernelNameRef: to set kernel addr (0x%lx) conflict\n", addr);
+        fprintf(stderr, "HsaRsrcFactory::SetKernelNameRef: to set kernel addr (0x%lx) conflict\n",
+                addr);
         abort();
       }
     } else {
       if (free == 0) {
         symbols_map_->insert({addr, symbols_map_data_t{name, 0}});
       } else {
-        fprintf(stderr, "HsaRsrcFactory::SetKernelNameRef: to free kernel addr (0x%lx) not found\n", addr);
+        fprintf(stderr, "HsaRsrcFactory::SetKernelNameRef: to free kernel addr (0x%lx) not found\n",
+                addr);
         abort();
       }
     }
@@ -504,7 +510,9 @@ class HsaRsrcFactory {
   const hsa_ven_amd_loader_1_00_pfn_t* LoaderApi() const { return &loader_api_; }
 
   // Methods for system-clock/ns conversion and timestamp in 'ns'
-  timestamp_t SysclockToNs(const timestamp_t& sysclock) const { return timer_->sysclock_to_ns(sysclock); }
+  timestamp_t SysclockToNs(const timestamp_t& sysclock) const {
+    return timer_->sysclock_to_ns(sysclock);
+  }
   timestamp_t NsToSysclock(const timestamp_t& time) const { return timer_->ns_to_sysclock(time); }
   timestamp_t TimestampNs() const { return timer_->timestamp_ns(); }
 
@@ -578,9 +586,11 @@ class HsaRsrcFactory {
 
   static symbols_map_t* symbols_map_;
   static bool executable_tracking_on_;
-  static hsa_status_t hsa_executable_freeze_interceptor(hsa_executable_t executable, const char *options);
+  static hsa_status_t hsa_executable_freeze_interceptor(hsa_executable_t executable,
+                                                        const char* options);
   static hsa_status_t hsa_executable_destroy_interceptor(hsa_executable_t executable);
-  static hsa_status_t executable_symbols_cb(hsa_executable_t exec, hsa_executable_symbol_t symbol, void *data);
+  static hsa_status_t executable_symbols_cb(hsa_executable_t exec, hsa_executable_symbol_t symbol,
+                                            void* data);
 
   // HSA runtime API table
   static hsa_pfn_t hsa_api_;
@@ -604,8 +614,8 @@ class HsaRsrcFactory {
   timestamp_t time_error_[HsaTimer::TIME_ID_NUMBER];
 
   // CPU/kern-arg memory pools
-  hsa_amd_memory_pool_t *cpu_pool_;
-  hsa_amd_memory_pool_t *kern_arg_pool_;
+  hsa_amd_memory_pool_t* cpu_pool_;
+  hsa_amd_memory_pool_t* kern_arg_pool_;
 };
 
 

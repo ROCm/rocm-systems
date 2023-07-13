@@ -112,8 +112,7 @@ const char* roctracer_op_string(uint32_t domain, uint32_t op) {
     case ACTIVITY_DOMAIN_EXT_API:
       return "EXT_API";
     default:
-      throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_INVALID_DOMAIN_ID,
-                                   "Invalid domain ID");
+      throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_INVALID_DOMAIN_ID, "Invalid domain ID");
   }
 }
 
@@ -178,8 +177,7 @@ constexpr uint32_t get_op_begin(activity_domain_t domain) {
     case ACTIVITY_DOMAIN_EXT_API:
       return 0;
     default:
-      throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_INVALID_DOMAIN_ID,
-                                   "Invalid domain ID");
+      throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_INVALID_DOMAIN_ID, "Invalid domain ID");
   }
 }
 
@@ -200,8 +198,7 @@ constexpr uint32_t get_op_end(activity_domain_t domain) {
     case ACTIVITY_DOMAIN_EXT_API:
       return get_op_begin(ACTIVITY_DOMAIN_EXT_API);
     default:
-      throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_INVALID_DOMAIN_ID,
-                                   "Invalid domain ID");
+      throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_INVALID_DOMAIN_ID, "Invalid domain ID");
   }
 }
 
@@ -476,11 +473,10 @@ int TracerCallback(activity_domain_t domain, uint32_t operation_id, void* data) 
               rocprofiler::GetROCProfilerSingleton()
                   ->GetSession((*pool)->session_id)
                   ->GetBuffer((*pool)->buffer_id)
-                  ->AddRecord(
-                      rocprofiler_record, record->kernel_name, kernel_name_size,
-                      [](auto& rocprofiler_record, const void* data) {
-                        rocprofiler_record.name = static_cast<const char*>(data);
-                      });
+                  ->AddRecord(rocprofiler_record, record->kernel_name, kernel_name_size,
+                              [](auto& rocprofiler_record, const void* data) {
+                                rocprofiler_record.name = static_cast<const char*>(data);
+                              });
             } else {
               rocprofiler::GetROCProfilerSingleton()
                   ->GetSession((*pool)->session_id)
@@ -584,8 +580,7 @@ static void roctracer_enable_op_callback(activity_domain_t domain, uint32_t oper
                                           user_data);
       break;
     default:
-      throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_INVALID_DOMAIN_ID,
-                                   "Invalid domain ID");
+      throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_INVALID_DOMAIN_ID, "Invalid domain ID");
   }
 }
 
@@ -623,8 +618,7 @@ void roctracer_disable_op_callback(activity_domain_t domain, uint32_t operation_
         ROCTX_registration_group.Unregister(roctx_api_callback_table, operation_id);
       break;
     default:
-      throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_INVALID_DOMAIN_ID,
-                                   "Invalid domain ID");
+      throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_INVALID_DOMAIN_ID, "Invalid domain ID");
   }
 }
 
@@ -667,8 +661,7 @@ void roctracer_enable_op_activity(activity_domain_t domain, uint32_t op,
     case ACTIVITY_DOMAIN_ROCTX:
       break;
     default:
-      throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_INVALID_DOMAIN_ID,
-                                   "Invalid domain ID");
+      throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_INVALID_DOMAIN_ID, "Invalid domain ID");
   }
 }
 
@@ -710,8 +703,7 @@ void roctracer_disable_activity(activity_domain_t domain, uint32_t op) {
     case ACTIVITY_DOMAIN_ROCTX:
       break;
     default:
-      throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_INVALID_DOMAIN_ID,
-                                   "Invalid domain ID");
+      throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_INVALID_DOMAIN_ID, "Invalid domain ID");
   }
 }
 
@@ -774,8 +766,7 @@ void roctracer_set_properties(activity_domain_t domain, void* properties) {
       break;
     }
     default:
-      throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_INVALID_DOMAIN_ID,
-                                   "Invalid domain ID");
+      throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_INVALID_DOMAIN_ID, "Invalid domain ID");
   }
 }
 
@@ -791,9 +782,7 @@ static std::string getKernelNameMultiKernelMultiDevice(hipLaunchParams* launchPa
   return name_str.str();
 }
 
-template <typename... Ts> struct Overloaded : Ts... {
-  using Ts::operator()...;
-};
+template <typename... Ts> struct Overloaded : Ts... { using Ts::operator()...; };
 template <class... Ts> Overloaded(Ts...) -> Overloaded<Ts...>;
 
 std::optional<std::string> GetHipKernelName(uint32_t cid, hip_api_data_t* data) {

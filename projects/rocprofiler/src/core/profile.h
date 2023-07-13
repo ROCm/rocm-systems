@@ -140,7 +140,7 @@ class Profile {
   static void SetConcurrent(profile_t* profile) {
     // Check whether conconcurrent has been set
     for (const parameter_t* p = profile->parameters;
-            p < (profile->parameters + profile->parameter_count); ++p) {
+         p < (profile->parameters + profile->parameter_count); ++p) {
       // If yes, stop here
       if (p->parameter_name == HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_K_CONCURRENT) {
         return;
@@ -148,7 +148,7 @@ class Profile {
     }
 
     // Otherwise, try to set
-    parameter_t* parameters = new parameter_t[profile->parameter_count+1];
+    parameter_t* parameters = new parameter_t[profile->parameter_count + 1];
     for (unsigned i = 0; i < profile->parameter_count; ++i) {
       parameters[i].parameter_name = profile->parameters[i].parameter_name;
       parameters[i].value = profile->parameters[i].value;
@@ -162,15 +162,16 @@ class Profile {
   }
 
   void BarrierPacket(packet_t* packet, const hsa_signal_t& prior_signal) {
-    hsa_barrier_and_packet_t* barrier =
-        reinterpret_cast<hsa_barrier_and_packet_t*>(packet);
+    hsa_barrier_and_packet_t* barrier = reinterpret_cast<hsa_barrier_and_packet_t*>(packet);
     barrier->header = HSA_PACKET_TYPE_BARRIER_AND;
-    if (prior_signal.handle) barrier->dep_signal[0] = prior_signal; // set packet dependency
-    else barrier->header |= 1 << HSA_PACKET_HEADER_BARRIER;         // set barrier bit
+    if (prior_signal.handle)
+      barrier->dep_signal[0] = prior_signal;  // set packet dependency
+    else
+      barrier->header |= 1 << HSA_PACKET_HEADER_BARRIER;  // set barrier bit
   }
 
   hsa_status_t Finalize(pkt_vector_t& start_vector, pkt_vector_t& stop_vector,
-          pkt_vector_t& read_vector, bool is_concurrent = false) {
+                        pkt_vector_t& read_vector, bool is_concurrent = false) {
     if (is_concurrent) SetConcurrent(&profile_);
 
     hsa_status_t status = HSA_STATUS_SUCCESS;
@@ -180,8 +181,8 @@ class Profile {
       const pfn_t* api = rsrc->AqlProfileApi();
       packet_t start{};
       packet_t stop{};
-      packet_t read{};      // read at kernel start
-      packet_t read2{};     // read at kernel end
+      packet_t read{};   // read at kernel start
+      packet_t read2{};  // read at kernel end
 
       // Check the profile buffer sizes
       status = api->hsa_ven_amd_aqlprofile_start(&profile_, NULL);
@@ -200,12 +201,12 @@ class Profile {
 #ifdef AQLPROF_NEW_API
       if (profile_.type == HSA_VEN_AMD_AQLPROFILE_EVENT_TYPE_PMC) {
         rd_status = api->hsa_ven_amd_aqlprofile_read(&profile_, &read);
-        if (is_concurrent){         // concurrent: one more read
+        if (is_concurrent) {  // concurrent: one more read
           if (rd_status != HSA_STATUS_SUCCESS) AQL_EXC_RAISING(status, "aqlprofile_read");
           rd_status = api->hsa_ven_amd_aqlprofile_read(&profile_, &read2);
         }
       }
-#if 0 // Read API returns error if disabled
+#if 0  // Read API returns error if disabled
       if (rd_status != HSA_STATUS_SUCCESS) AQL_EXC_RAISING(status, "aqlprofile_read");
 #endif
 #endif
@@ -220,7 +221,8 @@ class Profile {
       if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "signal_create " << std::hex << status);
       if (is_concurrent) {
         status = hsa_signal_create(1, 0, NULL, &read_signal_);
-        if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "signal_create " << std::hex << status);
+        if (status != HSA_STATUS_SUCCESS)
+          EXC_RAISING(status, "signal_create " << std::hex << status);
         read.completion_signal = read_signal_;
         read2.completion_signal = completion_signal_;
       } else {
@@ -239,7 +241,8 @@ class Profile {
         BarrierPacket(&barrier_rd, read.completion_signal);
         BarrierPacket(&barrier_rd2, dispatch_signal_);
         status = hsa_signal_create(1, 0, NULL, &(barrier_signal_));
-        if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "signal_create " << std::hex << status);
+        if (status != HSA_STATUS_SUCCESS)
+          EXC_RAISING(status, "signal_create " << std::hex << status);
         barrier_rd2.completion_signal = barrier_signal_;
       }
 
@@ -297,8 +300,8 @@ class Profile {
 
   void GetProfiles(profile_vector_t& vec) {
     if (!info_vector_.empty()) {
-      vec.push_back(profile_tuple_t{&profile_, &info_vector_, completion_signal_,
-              dispatch_signal_, barrier_signal_, read_signal_});
+      vec.push_back(profile_tuple_t{&profile_, &info_vector_, completion_signal_, dispatch_signal_,
+                                    barrier_signal_, read_signal_});
     }
   }
 
@@ -330,11 +333,12 @@ class PmcProfile : public Profile {
 
   hsa_status_t Allocate(util::HsaRsrcFactory* rsrc) {
     profile_.command_buffer.ptr =
-      rsrc->AllocateSysMemory(agent_info_, profile_.command_buffer.size);
+        rsrc->AllocateSysMemory(agent_info_, profile_.command_buffer.size);
     // Allocate profile output buffer from kernarg memory pool since kernarg
     // memory buffer is uncached. So when GPU copies performance counter values
     // to this buffer they are guaranteed to be visible to CPU.
-    profile_.output_buffer.ptr = rsrc->AllocateKernArgMemory(agent_info_, profile_.output_buffer.size);
+    profile_.output_buffer.ptr =
+        rsrc->AllocateKernArgMemory(agent_info_, profile_.output_buffer.size);
     return (profile_.command_buffer.ptr && profile_.output_buffer.ptr) ? HSA_STATUS_SUCCESS
                                                                        : HSA_STATUS_ERROR;
   }
@@ -366,11 +370,11 @@ class TraceProfile : public Profile {
 
   hsa_status_t Allocate(util::HsaRsrcFactory* rsrc) {
     profile_.command_buffer.ptr =
-      rsrc->AllocateSysMemory(agent_info_, profile_.command_buffer.size);
+        rsrc->AllocateSysMemory(agent_info_, profile_.command_buffer.size);
     profile_.output_buffer.size = output_buffer_size_;
-    profile_.output_buffer.ptr = (output_buffer_local_) ?
-      rsrc->AllocateLocalMemory(agent_info_, profile_.output_buffer.size) :
-      rsrc->AllocateSysMemory(agent_info_, profile_.output_buffer.size);
+    profile_.output_buffer.ptr = (output_buffer_local_)
+        ? rsrc->AllocateLocalMemory(agent_info_, profile_.output_buffer.size)
+        : rsrc->AllocateSysMemory(agent_info_, profile_.output_buffer.size);
     return (profile_.command_buffer.ptr && profile_.output_buffer.ptr) ? HSA_STATUS_SUCCESS
                                                                        : HSA_STATUS_ERROR;
   }

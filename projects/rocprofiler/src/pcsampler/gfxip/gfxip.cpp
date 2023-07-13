@@ -41,18 +41,17 @@ namespace rocprofiler::pc_sampler::gfxip {
 
 namespace {
 
-static int find_pci_instance(const std::string &pci_string) {
+static int find_pci_instance(const std::string& pci_string) {
   rocprofiler::handle_t<DIR*, util::dir_closer> dir(opendir(DEBUG_DRI_PATH));
   if (dir.get() == nullptr) {
-    char *errstr = strerror(errno);
+    char* errstr = strerror(errno);
     warning("Can't open debugfs dri directory: %s\n", errstr);
     goto fail;
   }
 
-  struct dirent *dent;
+  struct dirent* dent;
   while ((dent = readdir(dir.get())) != nullptr) {
-    if (strcmp(dent->d_name, ".") == 0 || strcmp(dent->d_name, "..") == 0)
-      continue;
+    if (strcmp(dent->d_name, ".") == 0 || strcmp(dent->d_name, "..") == 0) continue;
 
     std::string name(DEBUG_DRI_PATH);
     name += dent->d_name;
@@ -66,8 +65,7 @@ static int find_pci_instance(const std::string &pci_string) {
       ifs >> device;
     }
     if (device.empty()) continue;
-    if (auto p = device.find(DEV_PFX); p != device.npos)
-      device.erase(p, strlen(DEV_PFX));
+    if (auto p = device.find(DEV_PFX); p != device.npos) device.erase(p, strlen(DEV_PFX));
     if (pci_string == device) return std::stoi(dent->d_name);
   }
 
@@ -75,7 +73,7 @@ fail:
   return -1;
 }
 
-} // namespace
+}  // namespace
 
 uint32_t pasid() {
   static std::optional<uint32_t> pasid;
@@ -89,9 +87,7 @@ uint32_t pasid() {
   return *pasid;
 }
 
-int debugfs_ioctl_set_state(
-  const device_t& dev,
-  const struct amdgpu_debugfs_regs2_iocdata &ioc) {
+int debugfs_ioctl_set_state(const device_t& dev, const struct amdgpu_debugfs_regs2_iocdata& ioc) {
   int ret = ioctl(dev.fd_.mmio2.get(), AMDGPU_DEBUGFS_REGS2_IOC_SET_STATE, &ioc);
   if (ret < 0) {
     fatal("Couldn't set register ioctl state\n");
@@ -99,11 +95,9 @@ int debugfs_ioctl_set_state(
   return ret;
 }
 
-int debugfs_ioctl_write_register(
-  const device_t &dev,
-  const struct amdgpu_debugfs_regs2_iocdata &ioc,
-  const uint64_t addr,
-  const uint32_t value) {
+int debugfs_ioctl_write_register(const device_t& dev,
+                                 const struct amdgpu_debugfs_regs2_iocdata& ioc,
+                                 const uint64_t addr, const uint32_t value) {
   debugfs_ioctl_set_state(dev, ioc);
   if (lseek(dev.fd_.mmio2.get(), addr * 4, SEEK_SET) < 0) {
     fatal("Cannot seek to MMIO address for write\n");
@@ -115,10 +109,9 @@ int debugfs_ioctl_write_register(
   return r;
 }
 
-uint32_t debugfs_ioctl_read_register(
-  const device_t& dev,
-  const struct amdgpu_debugfs_regs2_iocdata &ioc,
-  const uint64_t addr) {
+uint32_t debugfs_ioctl_read_register(const device_t& dev,
+                                     const struct amdgpu_debugfs_regs2_iocdata& ioc,
+                                     const uint64_t addr) {
   // Select the SE, SH, and CU.
   debugfs_ioctl_set_state(dev, ioc);
 
@@ -134,20 +127,17 @@ uint32_t debugfs_ioctl_read_register(
   return value;
 }
 
-device_t::device_t(const bool pci_inited, const Agent::AgentInfo &info)
-: agent_info_(info)
-, pci_memory_(nullptr)
-{
+device_t::device_t(const bool pci_inited, const Agent::AgentInfo& info)
+    : agent_info_(info), pci_memory_(nullptr) {
   const auto pci_domain = agent_info_.getPCIDomain();
   const auto pci_location_id = agent_info_.getPCILocationID();
 
   std::string name([pci_domain, pci_location_id]() {
     std::ostringstream out;
     out.fill('0');
-    out << std::hex << std::setw(4) << pci_domain << ':'
-        << std::hex << std::setw(2) << (pci_location_id >> 8) << ':'
-        << std::hex << std::setw(2) << (pci_location_id & 0xFF) << '.'
-        << 0;
+    out << std::hex << std::setw(4) << pci_domain << ':' << std::hex << std::setw(2)
+        << (pci_location_id >> 8) << ':' << std::hex << std::setw(2) << (pci_location_id & 0xFF)
+        << '.' << 0;
     return out.str();
   }());
 
@@ -162,8 +152,7 @@ device_t::device_t(const bool pci_inited, const Agent::AgentInfo &info)
     if (fd_.mmio2.get() < 0) {
       warning("Couldn't open amdgpu_regs2 debugfs file\n");
       if (!pci_inited) {
-        constexpr char msg[] =
-         "PCI system uninitialized; no PC sampling methods available\n";
+        constexpr char msg[] = "PCI system uninitialized; no PC sampling methods available\n";
         fatal(msg);
       }
     } else {
@@ -173,8 +162,7 @@ device_t::device_t(const bool pci_inited, const Agent::AgentInfo &info)
 
   pci_device_ =
       pci_device_find_by_slot(pci_domain, pci_location_id >> 8, pci_location_id & 0xFF, 0);
-  if (!pci_device_ || pci_device_probe(pci_device_))
-    fatal("failed to probe the GPU device\n");
+  if (!pci_device_ || pci_device_probe(pci_device_)) fatal("failed to probe the GPU device\n");
 
   // Look for a region between 256KB and 4096KB, 32-bit, non IO, and non prefetchable.
   for (size_t region = 0; region < sizeof(pci_device::regions) / sizeof(pci_device::regions[0]);
@@ -199,11 +187,9 @@ device_specific_init:
 }
 
 device_t::~device_t() {
-  if (pci_memory_ &&
-      pci_device_unmap_range(pci_device_, pci_memory_, pci_memory_size_))
-  {
+  if (pci_memory_ && pci_device_unmap_range(pci_device_, pci_memory_, pci_memory_size_)) {
     warning("failed to unmap the pci memory\n");
   }
 }
 
-} // namespace rocprofiler::pc_sampler::gfxip
+}  // namespace rocprofiler::pc_sampler::gfxip

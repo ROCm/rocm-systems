@@ -11,8 +11,7 @@
 
 // TODO(aelwazir): change that to adapt with our own Exception
 // What about outside exceptions and callbacks exceptions!!
-#define API_METHOD_PREFIX                                                                          \
-  try {
+#define API_METHOD_PREFIX try {
 #define API_METHOD_SUFFIX                                                                          \
   }                                                                                                \
   catch (rocprofiler::Exception & e) {                                                             \

@@ -125,17 +125,19 @@ bool Profiler::HasActivePass() {
 }
 
 void Profiler::AddPendingSignals(
-    uint32_t writer_id, uint64_t kernel_object, const hsa_signal_t& original_completion_signal, const hsa_signal_t& new_completion_signal,
-    rocprofiler_session_id_t session_id, rocprofiler_buffer_id_t buffer_id,
-    rocprofiler::profiling_context_t* context, uint64_t session_data_count,
-    hsa_ven_amd_aqlprofile_profile_t* profile, rocprofiler_kernel_properties_t kernel_properties,
-    uint32_t thread_id, uint64_t queue_index, uint64_t correlation_id) {
+    uint32_t writer_id, uint64_t kernel_object, const hsa_signal_t& original_completion_signal,
+    const hsa_signal_t& new_completion_signal, rocprofiler_session_id_t session_id,
+    rocprofiler_buffer_id_t buffer_id, rocprofiler::profiling_context_t* context,
+    uint64_t session_data_count, hsa_ven_amd_aqlprofile_profile_t* profile,
+    rocprofiler_kernel_properties_t kernel_properties, uint32_t thread_id, uint64_t queue_index,
+    uint64_t correlation_id) {
   std::lock_guard<std::mutex> lock(sessions_pending_signals_lock_);
   if (sessions_pending_signals_->find(writer_id) == sessions_pending_signals_->end())
     sessions_pending_signals_->emplace(writer_id, std::vector<pending_signal_t*>());
-    sessions_pending_signals_->at(writer_id).emplace_back(new pending_signal_t{
-      kernel_object, original_completion_signal, new_completion_signal, session_id_, buffer_id, context, session_data_count,
-      profile, kernel_properties, thread_id, queue_index, correlation_id});
+  sessions_pending_signals_->at(writer_id).emplace_back(
+      new pending_signal_t{kernel_object, original_completion_signal, new_completion_signal,
+                           session_id_, buffer_id, context, session_data_count, profile,
+                           kernel_properties, thread_id, queue_index, correlation_id});
 }
 
 const std::vector<pending_signal_t*>& Profiler::GetPendingSignals(uint32_t writer_id) {

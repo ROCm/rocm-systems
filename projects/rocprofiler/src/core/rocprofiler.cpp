@@ -75,34 +75,34 @@ hsa_status_t CreateQueuePro(hsa_agent_t agent, uint32_t size, hsa_queue_type32_t
                             void* data, uint32_t private_segment_size, uint32_t group_segment_size,
                             hsa_queue_t** queue);
 
-decltype(hsa_queue_create)* hsa_queue_create_fn;
-decltype(hsa_queue_destroy)* hsa_queue_destroy_fn;
+decltype(::hsa_queue_create)* hsa_queue_create_fn;
+decltype(::hsa_queue_destroy)* hsa_queue_destroy_fn;
 
-decltype(hsa_signal_store_relaxed)* hsa_signal_store_relaxed_fn;
-decltype(hsa_signal_store_relaxed)* hsa_signal_store_screlease_fn;
+decltype(::hsa_signal_store_relaxed)* hsa_signal_store_relaxed_fn;
+decltype(::hsa_signal_store_relaxed)* hsa_signal_store_screlease_fn;
 
-decltype(hsa_queue_load_write_index_relaxed)* hsa_queue_load_write_index_relaxed_fn;
-decltype(hsa_queue_store_write_index_relaxed)* hsa_queue_store_write_index_relaxed_fn;
-decltype(hsa_queue_load_read_index_relaxed)* hsa_queue_load_read_index_relaxed_fn;
-decltype(hsa_queue_add_write_index_scacq_screl)* hsa_queue_add_write_index_scacq_screl_fn;
+decltype(::hsa_queue_load_write_index_relaxed)* hsa_queue_load_write_index_relaxed_fn;
+decltype(::hsa_queue_store_write_index_relaxed)* hsa_queue_store_write_index_relaxed_fn;
+decltype(::hsa_queue_load_read_index_relaxed)* hsa_queue_load_read_index_relaxed_fn;
+decltype(::hsa_queue_add_write_index_scacq_screl)* hsa_queue_add_write_index_scacq_screl_fn;
 
-decltype(hsa_queue_load_write_index_scacquire)* hsa_queue_load_write_index_scacquire_fn;
-decltype(hsa_queue_store_write_index_screlease)* hsa_queue_store_write_index_screlease_fn;
-decltype(hsa_queue_load_read_index_scacquire)* hsa_queue_load_read_index_scacquire_fn;
+decltype(::hsa_queue_load_write_index_scacquire)* hsa_queue_load_write_index_scacquire_fn;
+decltype(::hsa_queue_store_write_index_screlease)* hsa_queue_store_write_index_screlease_fn;
+decltype(::hsa_queue_load_read_index_scacquire)* hsa_queue_load_read_index_scacquire_fn;
 
-decltype(hsa_amd_queue_intercept_create)* hsa_amd_queue_intercept_create_fn;
-decltype(hsa_amd_queue_intercept_register)* hsa_amd_queue_intercept_register_fn;
+decltype(::hsa_amd_queue_intercept_create)* hsa_amd_queue_intercept_create_fn;
+decltype(::hsa_amd_queue_intercept_register)* hsa_amd_queue_intercept_register_fn;
 
-decltype(hsa_memory_allocate)* hsa_memory_allocate_fn;
-decltype(hsa_memory_assign_agent)* hsa_memory_assign_agent_fn;
-decltype(hsa_memory_copy)* hsa_memory_copy_fn;
-decltype(hsa_amd_memory_pool_allocate)* hsa_amd_memory_pool_allocate_fn;
-decltype(hsa_amd_memory_pool_free)* hsa_amd_memory_pool_free_fn;
-decltype(hsa_amd_agents_allow_access)* hsa_amd_agents_allow_access_fn;
-decltype(hsa_amd_memory_async_copy)* hsa_amd_memory_async_copy_fn;
-decltype(hsa_amd_memory_async_copy_rect)* hsa_amd_memory_async_copy_rect_fn;
-decltype(hsa_executable_freeze)* hsa_executable_freeze_fn;
-decltype(hsa_executable_destroy)* hsa_executable_destroy_fn;
+decltype(::hsa_memory_allocate)* hsa_memory_allocate_fn;
+decltype(::hsa_memory_assign_agent)* hsa_memory_assign_agent_fn;
+decltype(::hsa_memory_copy)* hsa_memory_copy_fn;
+decltype(::hsa_amd_memory_pool_allocate)* hsa_amd_memory_pool_allocate_fn;
+decltype(::hsa_amd_memory_pool_free)* hsa_amd_memory_pool_free_fn;
+decltype(::hsa_amd_agents_allow_access)* hsa_amd_agents_allow_access_fn;
+decltype(::hsa_amd_memory_async_copy)* hsa_amd_memory_async_copy_fn;
+decltype(::hsa_amd_memory_async_copy_rect)* hsa_amd_memory_async_copy_rect_fn;
+decltype(::hsa_executable_freeze)* hsa_executable_freeze_fn;
+decltype(::hsa_executable_destroy)* hsa_executable_destroy_fn;
 
 ::HsaApiTable* kHsaApiTable;
 
@@ -393,80 +393,80 @@ ROCPROFILER_EXPORT extern const uint32_t HSA_AMD_TOOL_PRIORITY = 25;
 PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t failed_tool_count,
                        const char* const* failed_tool_names) {
   ONLOAD_TRACE_BEG();
-    rocprofiler::SaveHsaApi(table);
-    rocprofiler::ProxyQueue::InitFactory();
+  rocprofiler::SaveHsaApi(table);
+  rocprofiler::ProxyQueue::InitFactory();
 
-    // Checking environment to enable intercept mode
-    const char* intercept_env = getenv("ROCP_HSA_INTERCEPT");
+  // Checking environment to enable intercept mode
+  const char* intercept_env = getenv("ROCP_HSA_INTERCEPT");
 
-    int intercept_env_value = 0;
-    if (intercept_env != NULL) {
-      intercept_env_value = atoi(intercept_env);
+  int intercept_env_value = 0;
+  if (intercept_env != NULL) {
+    intercept_env_value = atoi(intercept_env);
 
-      switch (intercept_env_value) {
-        case 0:
-        case 1:
-          // 0: Intercepting disabled
-          // 1: Intercepting enabled without timestamping
-          rocprofiler::InterceptQueue::TrackerOn(false);
-          break;
-        case 2:
-          // Intercepting enabled with timestamping
-          rocprofiler::InterceptQueue::TrackerOn(true);
-          break;
-        default:
-          ERR_LOGGING("Bad ROCP_HSA_INTERCEPT env var value ("
-                      << intercept_env << "): "
-                      << "valid values are 0 (standalone), 1 (intercepting without timestamp), 2 "
-                         "(intercepting with timestamp)");
-          return false;
-      }
+    switch (intercept_env_value) {
+      case 0:
+      case 1:
+        // 0: Intercepting disabled
+        // 1: Intercepting enabled without timestamping
+        rocprofiler::InterceptQueue::TrackerOn(false);
+        break;
+      case 2:
+        // Intercepting enabled with timestamping
+        rocprofiler::InterceptQueue::TrackerOn(true);
+        break;
+      default:
+        ERR_LOGGING("Bad ROCP_HSA_INTERCEPT env var value ("
+                    << intercept_env << "): "
+                    << "valid values are 0 (standalone), 1 (intercepting without timestamp), 2 "
+                       "(intercepting with timestamp)");
+        return false;
     }
+  }
 
-    // always enable excutable tracking
-    rocprofiler::util::HsaRsrcFactory::EnableExecutableTracking(table);
+  // always enable excutable tracking
+  rocprofiler::util::HsaRsrcFactory::EnableExecutableTracking(table);
 
-    // Loading a tool lib and setting of intercept mode
-    const uint32_t intercept_mode_mask = rocprofiler::LoadTool();
+  // Loading a tool lib and setting of intercept mode
+  const uint32_t intercept_mode_mask = rocprofiler::LoadTool();
 
+  if (intercept_mode_mask & rocprofiler::MEMCOPY_INTERCEPT_MODE) {
+    hsa_status_t status = hsa_amd_profiling_async_copy_enable(true);
+    if (status != HSA_STATUS_SUCCESS) EXC_ABORT(status, "hsa_amd_profiling_async_copy_enable");
+    rocprofiler::hsa_amd_memory_async_copy_fn = table->amd_ext_->hsa_amd_memory_async_copy_fn;
+    rocprofiler::hsa_amd_memory_async_copy_rect_fn =
+        table->amd_ext_->hsa_amd_memory_async_copy_rect_fn;
+    table->amd_ext_->hsa_amd_memory_async_copy_fn =
+        rocprofiler::hsa_amd_memory_async_copy_interceptor;
+    table->amd_ext_->hsa_amd_memory_async_copy_rect_fn =
+        rocprofiler::hsa_amd_memory_async_copy_rect_interceptor;
+  }
+  if (intercept_mode_mask & rocprofiler::HSA_INTERCEPT_MODE) {
     if (intercept_mode_mask & rocprofiler::MEMCOPY_INTERCEPT_MODE) {
-      hsa_status_t status = hsa_amd_profiling_async_copy_enable(true);
-      if (status != HSA_STATUS_SUCCESS) EXC_ABORT(status, "hsa_amd_profiling_async_copy_enable");
-      rocprofiler::hsa_amd_memory_async_copy_fn = table->amd_ext_->hsa_amd_memory_async_copy_fn;
-      rocprofiler::hsa_amd_memory_async_copy_rect_fn =
-          table->amd_ext_->hsa_amd_memory_async_copy_rect_fn;
-      table->amd_ext_->hsa_amd_memory_async_copy_fn =
-          rocprofiler::hsa_amd_memory_async_copy_interceptor;
-      table->amd_ext_->hsa_amd_memory_async_copy_rect_fn =
-          rocprofiler::hsa_amd_memory_async_copy_rect_interceptor;
+      EXC_ABORT(HSA_STATUS_ERROR, "HSA_INTERCEPT and MEMCOPY_INTERCEPT conflict");
     }
-    if (intercept_mode_mask & rocprofiler::HSA_INTERCEPT_MODE) {
-      if (intercept_mode_mask & rocprofiler::MEMCOPY_INTERCEPT_MODE) {
-        EXC_ABORT(HSA_STATUS_ERROR, "HSA_INTERCEPT and MEMCOPY_INTERCEPT conflict");
-      }
-      rocprofiler::HsaInterceptor::Enable(true);
-      rocprofiler::HsaInterceptor::HsaIntercept(table);
-    }
+    rocprofiler::HsaInterceptor::Enable(true);
+    rocprofiler::HsaInterceptor::HsaIntercept(table);
+  }
 
-    // HSA intercepting
-    if (intercept_env_value != 0) {
-      rocprofiler::ProxyQueue::HsaIntercept(table);
-      rocprofiler::InterceptQueue::HsaIntercept(table);
-    } else {
-      rocprofiler::StandaloneIntercept();
-    }
+  // HSA intercepting
+  if (intercept_env_value != 0) {
+    rocprofiler::ProxyQueue::HsaIntercept(table);
+    rocprofiler::InterceptQueue::HsaIntercept(table);
+  } else {
+    rocprofiler::StandaloneIntercept();
+  }
 
-    ONLOAD_TRACE("end intercept_mode(" << std::hex << intercept_env_value << ")"
-                                       << " intercept_mode_mask(" << std::hex << intercept_mode_mask
-                                       << ")" << std::dec);
+  ONLOAD_TRACE("end intercept_mode(" << std::hex << intercept_env_value << ")"
+                                     << " intercept_mode_mask(" << std::hex << intercept_mode_mask
+                                     << ")" << std::dec);
   return true;
 }
 
 // HSA-runtime tool on-unload method
 PUBLIC_API void OnUnload() {
   ONLOAD_TRACE_BEG();
-    rocprofiler::UnloadTool();
-    rocprofiler::RestoreHsaApi();
+  rocprofiler::UnloadTool();
+  rocprofiler::RestoreHsaApi();
   ONLOAD_TRACE_END();
 }
 

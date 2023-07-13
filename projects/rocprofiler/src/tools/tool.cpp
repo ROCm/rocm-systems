@@ -226,12 +226,12 @@ void getTracePeriodFromEnv() {
       std::string str = path;
       size_t first_pos = str.find(':');
       size_t second_pos = str.rfind(':');
-      if (first_pos == second_pos)
-        second_pos = std::string::npos; // Second ':' does not exists
+      if (first_pos == second_pos) second_pos = std::string::npos;  // Second ':' does not exists
 
       trace_delay = std::stoll(str.substr(0, first_pos), nullptr, 0);
-      trace_time_length = std::stoll(str.substr(first_pos + 1, second_pos), nullptr, 0); // can throw
-      if (second_pos < str.size()-1)
+      trace_time_length =
+          std::stoll(str.substr(first_pos + 1, second_pos), nullptr, 0);  // can throw
+      if (second_pos < str.size() - 1)
         trace_interval = std::stoll(str.substr(second_pos + 1), nullptr, 0);
       if (trace_interval < trace_time_length) throw std::exception();
     } catch (std::exception& e) {
@@ -252,18 +252,14 @@ std::vector<std::string> GetCounterNames() {
   return counters;
 }
 
-typedef std::tuple<
-  std::vector<std::pair<rocprofiler_att_parameter_name_t, uint32_t>>,
-  std::vector<std::string>,
-  std::vector<std::string>,
-  std::vector<uint64_t>
-> att_parsed_input_t;
+typedef std::tuple<std::vector<std::pair<rocprofiler_att_parameter_name_t, uint32_t>>,
+                   std::vector<std::string>, std::vector<std::string>, std::vector<uint64_t>>
+    att_parsed_input_t;
 
 static int GetMpRank() {
   std::vector<const char*> mpivars = {"MPI_RANK", "OMPI_COMM_WORLD_RANK", "MV2_COMM_WORLD_RANK"};
   for (const char* envvar : mpivars)
-    if (const char* env = getenv(envvar))
-      return atoi(env);
+    if (const char* env = getenv(envvar)) return atoi(env);
   return -1;
 }
 
@@ -289,10 +285,10 @@ att_parsed_input_t GetATTParams() {
   ATT_PARAM_NAMES["REDUCED_MEMORY"] = ROCPROFILER_ATT_MAXVALUE;
 
   // Default values used for token generation.
-  std::unordered_map<std::string, uint32_t> default_params = {
-    {"ATT_MASK", 0x3F01}, {"TOKEN_MASK", 0x344B},
-    {"TOKEN_MASK2", 0xFFFFFFF}, {"SE_MASK", 0x111111}
-  };
+  std::unordered_map<std::string, uint32_t> default_params = {{"ATT_MASK", 0x3F01},
+                                                              {"TOKEN_MASK", 0x344B},
+                                                              {"TOKEN_MASK2", 0xFFFFFFF},
+                                                              {"SE_MASK", 0x111111}};
 
   std::ifstream trace_file(path);
   if (!trace_file.is_open()) {
@@ -314,7 +310,7 @@ att_parsed_input_t GetATTParams() {
       if (pos == std::string::npos) continue;
 
       param_name = line.substr(0, pos);
-      line = line.substr(pos+1);
+      line = line.substr(pos + 1);
     }
 
     if (param_name == "att: TARGET_CU") started_att_counters = true;
@@ -329,9 +325,9 @@ att_parsed_input_t GetATTParams() {
     } else if (param_name == "DISPATCH") {
       size_t comma = line.find(',');
       int id = stoi(line.substr(0, comma));
-      int rank = (comma < line.size()-1) ? stoi(line.substr(comma+1)) : 0;
+      int rank = (comma < line.size() - 1) ? stoi(line.substr(comma + 1)) : 0;
 
-      if (MPI_RANK < 0 || rank == MPI_RANK) // Only add ID if rank matches the one in input.txt
+      if (MPI_RANK < 0 || rank == MPI_RANK)  // Only add ID if rank matches the one in input.txt
         dispatch_ids.push_back(id);
       continue;
     }
@@ -560,7 +556,7 @@ static int info_callback(const rocprofiler_counter_info_t info, const char* gpu_
 void sleep_while_condition(int64_t time_length, std::atomic<bool>& condition) {
   int64_t time_slept = 0;
   while (time_slept < time_length && condition.load(std::memory_order_relaxed)) {
-    int64_t sleep_amount = std::min(SLEEP_CYCLE_LENGTH, time_length-time_slept);
+    int64_t sleep_amount = std::min(SLEEP_CYCLE_LENGTH, time_length - time_slept);
     time_slept += sleep_amount;
     std::this_thread::sleep_for(std::chrono::milliseconds(sleep_amount));
   }
@@ -598,7 +594,7 @@ void trace_period_func() {
     if (trace_interval >= INT_MAX) break;
 
     auto miliElapsed = duration_cast<milliseconds>(system_clock::now() - start_time).count();
-    sleep_while_condition(num_sleeps*trace_interval - miliElapsed, trace_period_thread_control);
+    sleep_while_condition(num_sleeps * trace_interval - miliElapsed, trace_period_thread_control);
   }
 }
 
@@ -784,11 +780,11 @@ ROCPROFILER_EXPORT bool OnLoad(void* table, uint64_t runtime_version, uint64_t f
         rocprofiler_filter_property_t property = {};
         std::vector<const char*> kernel_names_c;
 
-        if (dispatch_ids.size()) { // Correlation ID filter
+        if (dispatch_ids.size()) {  // Correlation ID filter
           property.kind = ROCPROFILER_FILTER_DISPATCH_IDS;
           property.data_count = dispatch_ids.size();
           property.dispatch_ids = dispatch_ids.data();
-        } else { // Kernel names filter
+        } else {  // Kernel names filter
           for (auto& name : kernel_names) kernel_names_c.push_back(name.data());
 
           property.kind = ROCPROFILER_FILTER_KERNEL_NAMES;
@@ -796,9 +792,9 @@ ROCPROFILER_EXPORT bool OnLoad(void* table, uint64_t runtime_version, uint64_t f
           property.name_regex = kernel_names_c.data();
         }
         CHECK_ROCPROFILER(
-              rocprofiler_create_filter(session_id, ROCPROFILER_ATT_TRACE_COLLECTION,
-                                        rocprofiler_filter_data_t{.att_parameters = &parameters[0]},
-                                        parameters.size(), &filter_id, property));
+            rocprofiler_create_filter(session_id, ROCPROFILER_ATT_TRACE_COLLECTION,
+                                      rocprofiler_filter_data_t{.att_parameters = &parameters[0]},
+                                      parameters.size(), &filter_id, property));
         CHECK_ROCPROFILER(rocprofiler_set_filter_buffer(session_id, filter_id, buffer_id));
         filter_ids.emplace_back(filter_id);
         break;

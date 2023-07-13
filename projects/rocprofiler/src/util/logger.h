@@ -104,7 +104,13 @@ class Logger {
   static uint32_t GetPid() { return syscall(__NR_getpid); }
   static uint32_t GetTid() { return syscall(__NR_gettid); }
 
-  Logger() : file_(NULL), session_file_(NULL), dirty_(false), streaming_(false), messaging_(false), error_(false) {
+  Logger()
+      : file_(NULL),
+        session_file_(NULL),
+        dirty_(false),
+        streaming_(false),
+        messaging_(false),
+        error_(false) {
     const char* var = getenv("ROCPROFILER_LOG");
     if (var != NULL) file_ = fopen("/tmp/rocprofiler_log.txt", "a");
 
@@ -114,8 +120,11 @@ class Logger {
       if (dir.back() != '/') dir.push_back('/');
       std::string name = dir + "log.txt";
       session_file_ = fopen(name.c_str(), "a");
-      if (session_file_ != NULL) session_dir_ = dir;
-      else std::cerr << "ROCProfiler: cannot create session log '" << name << "'" << std::endl << std::flush;
+      if (session_file_ != NULL)
+        session_dir_ = dir;
+      else
+        std::cerr << "ROCProfiler: cannot create session log '" << name << "'" << std::endl
+                  << std::flush;
     }
 
     ResetStreaming(false);
@@ -176,7 +185,8 @@ class Logger {
     if (error_ == false) {
       error_ = true;
       if (session_dir_.empty() == false) {
-        auto x = fopen(std::string(session_dir_ + "error").c_str(), "w"); (void)x;
+        auto x = fopen(std::string(session_dir_ + "error").c_str(), "w");
+        (void)x;
       }
     }
   }
@@ -199,32 +209,32 @@ class Logger {
 
 #define ERR_LOGGING(stream)                                                                        \
   do {                                                                                             \
-    rocprofiler::util::Logger::Instance() << rocprofiler::util::Logger::errm                       \
-                                          << "error: " << rocprofiler::util::Logger::begm          \
-                                          << stream << rocprofiler::util::Logger::endl;            \
-  } while(0)
+    rocprofiler::util::Logger::Instance()                                                          \
+        << rocprofiler::util::Logger::errm << "error: " << rocprofiler::util::Logger::begm         \
+        << stream << rocprofiler::util::Logger::endl;                                              \
+  } while (0)
 
 #define INFO_LOGGING(stream)                                                                       \
   do {                                                                                             \
     rocprofiler::util::Logger::Instance() << "info: " << rocprofiler::util::Logger::begm << stream \
                                           << rocprofiler::util::Logger::endl;                      \
-  } while(0)
+  } while (0)
 
 #define WARN_LOGGING(stream)                                                                       \
   do {                                                                                             \
     std::cerr << "ROCProfiler: " << stream << std::endl;                                           \
-    rocprofiler::util::Logger::Instance() << "warning: " << rocprofiler::util::Logger::begm << stream \
-                                          << rocprofiler::util::Logger::endl;                      \
-  } while(0)
+    rocprofiler::util::Logger::Instance() << "warning: " << rocprofiler::util::Logger::begm        \
+                                          << stream << rocprofiler::util::Logger::endl;            \
+  } while (0)
 
 #ifdef DEBUG
 #define DBG_LOGGING(stream)                                                                        \
   do {                                                                                             \
-    rocprofiler::util::Logger::Instance() << rocprofiler::util::Logger::begm << "debug: \""        \
-                                          << stream << "\"" < < < <                                \
+    rocprofiler::util::Logger::Instance()                                                          \
+            << rocprofiler::util::Logger::begm << "debug: \"" << stream << "\"" < < < <            \
         " in " << __FUNCTION__ << " at " << __FILE__ << " line " << __LINE__                       \
                << rocprofiler::util::Logger::endl;                                                 \
-  } while(0)
+  } while (0)
 #endif
 
 #endif  // SRC_UTIL_LOGGER_H_

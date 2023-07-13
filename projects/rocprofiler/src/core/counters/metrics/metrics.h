@@ -221,14 +221,11 @@ class MetricsDict {
       agent_name_ = agent_name_.substr(0, agent_name_.find(':'));
 
     std::unordered_set<std::string> supported_agent_names = {
-        "gfx906",
-        "gfx908",
+        "gfx906",  "gfx908",
         "gfx90a",  // Vega
-        "gfx940",
-        "gfx941",
+        "gfx940",  "gfx941",
         "gfx942",  // Mi300
-        "gfx1030",
-        "gfx1031",
+        "gfx1030", "gfx1031",
         "gfx1032",  // Navi2x
         "gfx1100",
         "gfx1101"  // Navi3x

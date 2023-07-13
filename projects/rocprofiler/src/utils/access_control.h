@@ -60,7 +60,7 @@ class AccessControl {
 
  private:
   ROCProfilerRefCount rcount_;      //!< refernce count, every successful access
-                                  //! increments it
+                                    //! increments it
   ROCProfilerARControl arcontrol_;  //!< shared access or exclusive?
 
   std::mutex accessmutex_;

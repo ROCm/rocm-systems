@@ -105,8 +105,7 @@ void ApplicationParser::SetApplicationEnv(const char* app_name) {
   std::stringstream ld_lib_path;
   ld_lib_path << app_path << "lib" << []() {
     const char* path = getenv("LD_LIBRARY_PATH");
-    if (path != nullptr)
-      return ":" + std::string(path);
+    if (path != nullptr) return ":" + std::string(path);
     return std::string("");
   }();
   setenv("LD_LIBRARY_PATH", ld_lib_path.str().c_str(), true);
@@ -587,7 +586,7 @@ TEST_F(LoadUnloadTest, WhenLoadingSecondTimeThenToolLoadsUnloadsSuccessfully) {
 
 class ATTCollection : public ::testing::Test {
  public:
-  virtual void SetUp(){bCollected = false;};
+  virtual void SetUp() { bCollected = false; };
   virtual void TearDown(){};
   static bool bCollected;
 
@@ -613,11 +612,9 @@ class ATTCollection : public ::testing::Test {
 
         // iterate over each shader engine att trace
         for (int i = 0; i < se_num; i++) {
-          if (!att_tracer_record->shader_engine_data)
-            continue;
+          if (!att_tracer_record->shader_engine_data) continue;
           auto se_att_trace = att_tracer_record->shader_engine_data[i];
-          if (!se_att_trace.buffer_ptr || !se_att_trace.buffer_size)
-            continue;
+          if (!se_att_trace.buffer_ptr || !se_att_trace.buffer_size) continue;
           bCollected = true;
         }
       }
@@ -687,7 +684,7 @@ TEST_F(ATTCollection, WhenRunningATTItCollectsTraceData) {
   result = rocprofiler_finalize();
   EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
 
-  //check if we got data from any shader engine
+  // check if we got data from any shader engine
   EXPECT_EQ(bCollected, true);
 }
 
@@ -1152,15 +1149,15 @@ TEST(ProfilerMPTest, WhenRunningMultiProcessTestItPasses) {
   }
 }
 /*
-* ###################################################
-* ############ Plugin tests ################
-* ###################################################
-*/
+ * ###################################################
+ * ############ Plugin tests ################
+ * ###################################################
+ */
 
 void PluginTests::RunApplication(const char* app_name, const char* appParams) {
   init_test_path();
 
-  unsetenv("LD_LIBRARY_PATH"); // Cleaning up envs from other tests
+  unsetenv("LD_LIBRARY_PATH");  // Cleaning up envs from other tests
   unsetenv("COUNTERS_PATH");
   unsetenv("LD_PRELOAD");
   unsetenv("HWLOC_COMPONENTS");
@@ -1189,13 +1186,10 @@ bool FilePluginTest::hasFileInDir(const std::string& filename, const char* direc
 class VectorAddFolderOnlyTest : public FilePluginTest {
  protected:
   virtual void SetUp() {
-    RunApplication( "hip_vectoradd",
-      " --hsa-activity --hip-activity -d /tmp/tests-v2/file/");
+    RunApplication("hip_vectoradd", " --hsa-activity --hip-activity -d /tmp/tests-v2/file/");
   }
-  virtual void TearDown() {
-    std::experimental::filesystem::remove_all("/tmp/tests-v2/file/");
-  }
-  bool hasFile(){ return hasFileInDir(".csv", "/tmp/tests-v2/file/"); }
+  virtual void TearDown() { std::experimental::filesystem::remove_all("/tmp/tests-v2/file/"); }
+  bool hasFile() { return hasFileInDir(".csv", "/tmp/tests-v2/file/"); }
 };
 
 TEST_F(VectorAddFolderOnlyTest, WhenRunningProfilerWithFilePluginTest) {
@@ -1205,13 +1199,10 @@ TEST_F(VectorAddFolderOnlyTest, WhenRunningProfilerWithFilePluginTest) {
 class VectorAddFileAndFolderTest : public FilePluginTest {
  protected:
   virtual void SetUp() {
-    RunApplication( "hip_vectoradd",
-      " --hip-activity -d /tmp/tests-v2/file/ -o file_test");
+    RunApplication("hip_vectoradd", " --hip-activity -d /tmp/tests-v2/file/ -o file_test");
   }
-  virtual void TearDown() {
-    std::experimental::filesystem::remove_all("/tmp/tests-v2/file/");
-  }
-  bool hasFile(){ return hasFileInDir("file_test.csv", "/tmp/tests-v2/file/"); }
+  virtual void TearDown() { std::experimental::filesystem::remove_all("/tmp/tests-v2/file/"); }
+  bool hasFile() { return hasFileInDir("file_test.csv", "/tmp/tests-v2/file/"); }
 };
 
 TEST_F(VectorAddFileAndFolderTest, WhenRunningProfilerWithFilePluginTest) {
@@ -1222,8 +1213,7 @@ class VectorAddFilenameMPITest : public FilePluginTest {
  protected:
   virtual void SetUp() {
     setenv("MPI_RANK", "7", true);
-    RunApplication("hip_vectoradd",
-      " --hip-activity -d /tmp/tests-v2/file/ -o test_%rank_");
+    RunApplication("hip_vectoradd", " --hip-activity -d /tmp/tests-v2/file/ -o test_%rank_");
   }
   virtual void TearDown() {
     std::experimental::filesystem::remove_all("/tmp/tests-v2/file/");
@@ -1249,14 +1239,13 @@ class VectorAddPerfettoMPITest : public PerfettoPluginTest {
  protected:
   virtual void SetUp() {
     setenv("MPI_RANK", "7", true);
-    RunApplication("hip_vectoradd",
-        " -d /tmp/tests-v2/perfetto/ -o test_%rank_ --plugin perfetto");
+    RunApplication("hip_vectoradd", " -d /tmp/tests-v2/perfetto/ -o test_%rank_ --plugin perfetto");
   }
   virtual void TearDown() {
     std::experimental::filesystem::remove_all("/tmp/tests-v2/perfetto/");
     unsetenv("MPI_RANK");
   }
-  bool hasFile(){ return hasFileInDir("test_7_", "/tmp/tests-v2/perfetto/"); }
+  bool hasFile() { return hasFileInDir("test_7_", "/tmp/tests-v2/perfetto/"); }
 };
 
 TEST_F(VectorAddPerfettoMPITest, WhenRunningProfilerWithPerfettoTest) {
@@ -1271,19 +1260,15 @@ bool CTFPluginTest::hasMetadataInDir(const char* directory) {
 
 class VectorAddCTFTest : public CTFPluginTest {
  protected:
-  virtual void SetUp() {
-    RunApplication("hip_vectoradd", " -d /tmp/tests-v2/ctf --plugin ctf");
-  }
+  virtual void SetUp() { RunApplication("hip_vectoradd", " -d /tmp/tests-v2/ctf --plugin ctf"); }
   virtual void TearDown() {
     std::experimental::filesystem::remove_all("/tmp/tests-v2/");
     unsetenv("MPI_RANK");
   }
-  bool hasFile(){ return hasMetadataInDir("/tmp/tests-v2/ctf/trace/"); }
+  bool hasFile() { return hasMetadataInDir("/tmp/tests-v2/ctf/trace/"); }
 };
 
-TEST_F(VectorAddCTFTest, WhenRunningProfilerWithCTFTest) {
-  EXPECT_EQ(hasFile(), true);
-}
+TEST_F(VectorAddCTFTest, WhenRunningProfilerWithCTFTest) { EXPECT_EQ(hasFile(), true); }
 
 class VectorAddCTFMPITest : public CTFPluginTest {
  protected:
@@ -1295,9 +1280,7 @@ class VectorAddCTFMPITest : public CTFPluginTest {
     std::experimental::filesystem::remove_all("/tmp/tests-v2/");
     unsetenv("MPI_RANK");
   }
-  bool hasFile(){ return hasMetadataInDir("/tmp/tests-v2/ctf_7/trace/"); }
+  bool hasFile() { return hasMetadataInDir("/tmp/tests-v2/ctf_7/trace/"); }
 };
 
-TEST_F(VectorAddCTFMPITest, WhenRunningProfilerWithCTFTest) {
-  EXPECT_EQ(hasFile(), true);
-}
+TEST_F(VectorAddCTFMPITest, WhenRunningProfilerWithCTFTest) { EXPECT_EQ(hasFile(), true); }

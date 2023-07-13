@@ -43,7 +43,8 @@ class exception_t : public std::exception {
 
 class div_zero_exception_t : public exception_t {
  public:
-  explicit div_zero_exception_t(const std::string& msg) : exception_t("Divide by zero exception " + msg) {}
+  explicit div_zero_exception_t(const std::string& msg)
+      : exception_t("Divide by zero exception " + msg) {}
 };
 
 typedef double args_t;
@@ -93,8 +94,7 @@ class bin_expr_t {
 class Expr {
  public:
   explicit Expr(const std::string& expr, const expr_cache_t* cache)
-      : expr_(expr), pos_(0), sub_count_(0), cache_(cache), is_sub_expr_(false)
-  {
+      : expr_(expr), pos_(0), sub_count_(0), cache_(cache), is_sub_expr_(false) {
     sub_vec_ = new std::vector<const Expr*>;
     var_vec_ = new std::vector<std::string>;
     tree_ = ParseExpr();
@@ -107,8 +107,7 @@ class Expr {
         cache_(obj->cache_),
         sub_vec_(obj->sub_vec_),
         var_vec_(obj->var_vec_),
-        is_sub_expr_(true)
-  {
+        is_sub_expr_(true) {
     sub_vec_->push_back(this);
     tree_ = ParseExpr();
     if (!SubCheck()) throw exception_t("expr '" + expr_ + "', bad parenthesis count");
@@ -133,7 +132,8 @@ class Expr {
     try {
       result = tree_->Eval(args);
     } catch (const div_zero_exception_t& e) {
-      if (div_zero_exc_on) std::cout << "Expr::Eval() exc(" << e.what() << ") : " << String() << std::endl;
+      if (div_zero_exc_on)
+        std::cout << "Expr::Eval() exc(" << e.what() << ") : " << String() << std::endl;
     } catch (const exception_t& e) {
       throw e;
     }
@@ -307,7 +307,8 @@ class var_expr_t : public bin_expr_t {
 class fun_expr_t : public bin_expr_t {
  public:
   typedef std::vector<var_expr_t> vvect_t;
-  fun_expr_t(const std::string& fname, const std::string& vname, const uint32_t& vnum) : fname_(fname) {
+  fun_expr_t(const std::string& fname, const std::string& vname, const uint32_t& vnum)
+      : fname_(fname) {
     for (uint32_t i = 0; i < vnum; ++i) {
       std::ostringstream var_full_name;
       var_full_name << vname << "[" << i << "]";
@@ -420,7 +421,8 @@ inline const bin_expr_t* bin_expr_t::CreateArg(Expr* obj, const std::string str)
         } else if (fun_name == "max") {
           farg = new max_expr_t(vname, vnum);
         }
-        if (farg) for (const auto& var : farg->GetVars()) obj->AddVar(var.Symbol());
+        if (farg)
+          for (const auto& var : farg->GetVars()) obj->AddVar(var.Symbol());
         arg = farg;
       }
       free(fname);

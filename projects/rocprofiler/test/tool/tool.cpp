@@ -783,7 +783,7 @@ void set_kernel_properties(const rocprofiler_callback_data_t* callback_data,
 // Kernel disoatch callback
 hsa_status_t dispatch_callback(const rocprofiler_callback_data_t* callback_data, void* user_data,
                                rocprofiler_group_t* group) {
-  if(!allow_profiling) return HSA_STATUS_SUCCESS;
+  if (!allow_profiling) return HSA_STATUS_SUCCESS;
   // TODO: return success, make atomic flag
   // Passed tool data
   callbacks_data_t* tool_data = reinterpret_cast<callbacks_data_t*>(user_data);

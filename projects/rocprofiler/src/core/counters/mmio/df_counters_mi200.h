@@ -17,8 +17,8 @@ class DFPerfMonMI200 : public PerfMon {
   DFPerfMonMI200(const Agent::AgentInfo& info);
   ~DFPerfMonMI200();
   void Start() override;
-  void Stop() {};
-  void Read(std::vector<rocprofiler_counters_sampler_counter_output_t>& values) {};
+  void Stop(){};
+  void Read(std::vector<rocprofiler_counters_sampler_counter_output_t>& values){};
   void SetCounterNames(std::vector<std::string>& counter_names);
   mmio::mmap_type_t Type() override { return mmio::mmap_type_t::DF_PERFMON; }
 
@@ -29,7 +29,6 @@ class DFPerfMonMI200 : public PerfMon {
   // outboud bandwidth for xgmi nodes
   void SetFicaNodeOutboundBw(uint64_t node_instance, uint32_t& ficaa_in_val);
   uint64_t GetFicaNodeOutboundBw(uint32_t ficaa_val);
-
 
 
  private:

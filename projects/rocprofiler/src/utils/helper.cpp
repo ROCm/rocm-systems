@@ -249,8 +249,9 @@ void trim(std::string& str) {
 
 // replace unsuported specail chars with space
 static void handle_special_chars(std::string& str) {
-  std::set<char> specialChars = {'!', '@', '#', '$', '%', '&', '(', ')', ',', '*', '+', '-', '.',
-                                 '/', ';', '<', '=', '>', '?', '@', '{', '}', '^', '`', '~', '|', ':'};
+  std::set<char> specialChars = {'!', '@', '#', '$', '%', '&', '(', ')', ',',
+                                 '*', '+', '-', '.', '/', ';', '<', '=', '>',
+                                 '?', '@', '{', '}', '^', '`', '~', '|', ':'};
 
   // Iterate over the string and replace any special characters with a space.
   for (unsigned int i = 0; i < str.length(); i++) {
@@ -277,12 +278,11 @@ void validate_counters_format(std::vector<std::string>& counters, std::string li
     }
   }
 
- // raise exception with correct usage if user still managed to corrupt input
-  for(const auto &itr: counters)
-  {
-    if(!has_counter_format(itr)){
+  // raise exception with correct usage if user still managed to corrupt input
+  for (const auto& itr : counters) {
+    if (!has_counter_format(itr)) {
       rocprofiler::fatal("Bad input metric. usage --> pmc: <counter1> <counter2>");
-    } 
+    }
   }
 }
 

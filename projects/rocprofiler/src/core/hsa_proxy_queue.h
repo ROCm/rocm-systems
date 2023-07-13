@@ -33,9 +33,9 @@ THE SOFTWARE.
 #include "util/hsa_rsrc_factory.h"
 
 namespace rocprofiler {
-extern decltype(hsa_queue_destroy)* hsa_queue_destroy_fn;
-extern decltype(hsa_amd_queue_intercept_create)* hsa_amd_queue_intercept_create_fn;
-extern decltype(hsa_amd_queue_intercept_register)* hsa_amd_queue_intercept_register_fn;
+extern decltype(::hsa_queue_destroy)* hsa_queue_destroy_fn;
+extern decltype(::hsa_amd_queue_intercept_create)* hsa_amd_queue_intercept_create_fn;
+extern decltype(::hsa_amd_queue_intercept_register)* hsa_amd_queue_intercept_register_fn;
 
 class HsaProxyQueue : public ProxyQueue {
  public:

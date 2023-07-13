@@ -36,7 +36,7 @@
 #include "src/core/counters/metrics/eval_metrics.h"
 
 typedef void (*rocprofiler_add_profiler_record_t)(rocprofiler_record_profiler_t&& record,
-                                                rocprofiler_session_id_t session_id);
+                                                  rocprofiler_session_id_t session_id);
 
 typedef rocprofiler_timestamp_t (*rocprofiler_get_timestamp_t)();
 
@@ -68,12 +68,13 @@ class Profiler {
   ~Profiler();
 
   void AddPendingSignals(uint32_t writer_id, uint64_t kernel_object,
-                           const hsa_signal_t& original_completion_signal, const hsa_signal_t& new_completion_signal, rocprofiler_session_id_t session_id,
-                           rocprofiler_buffer_id_t buffer_id,
-                           rocprofiler::profiling_context_t* context, uint64_t session_data_count,
-                           hsa_ven_amd_aqlprofile_profile_t* profile,
-                           rocprofiler_kernel_properties_t kernel_properties, uint32_t thread_id,
-                           uint64_t queue_index, uint64_t correlation_id);
+                         const hsa_signal_t& original_completion_signal,
+                         const hsa_signal_t& new_completion_signal,
+                         rocprofiler_session_id_t session_id, rocprofiler_buffer_id_t buffer_id,
+                         rocprofiler::profiling_context_t* context, uint64_t session_data_count,
+                         hsa_ven_amd_aqlprofile_profile_t* profile,
+                         rocprofiler_kernel_properties_t kernel_properties, uint32_t thread_id,
+                         uint64_t queue_index, uint64_t correlation_id);
 
   const std::vector<pending_signal_t*>& GetPendingSignals(uint32_t writer_id);
   bool CheckPendingSignalsIsEmpty();
@@ -83,8 +84,10 @@ class Profiler {
   std::string& GetCounterName(rocprofiler_counter_id_t handler);
 
   bool FindCounter(rocprofiler_counter_id_t counter_id);
-  size_t GetCounterInfoSize(rocprofiler_counter_info_kind_t kind, rocprofiler_counter_id_t counter_id);
-  const char* GetCounterInfo(rocprofiler_counter_info_kind_t kind, rocprofiler_counter_id_t counter_id);
+  size_t GetCounterInfoSize(rocprofiler_counter_info_kind_t kind,
+                            rocprofiler_counter_id_t counter_id);
+  const char* GetCounterInfo(rocprofiler_counter_info_kind_t kind,
+                             rocprofiler_counter_id_t counter_id);
 
   void StartReplayPass(rocprofiler_session_id_t session_id);
   void EndReplayPass();
