@@ -223,7 +223,7 @@ bool TestHsa::Run() {
 
   // Wait on the dispatch signal until the kernel is finished.
   // Update wait condition to HSA_WAIT_STATE_ACTIVE for Polling
-  if (hsa_signal_wait_scacquire(hsa_signal_, HSA_SIGNAL_CONDITION_LT, 1, UINT64_MAX,
+  if (hsa_signal_wait_relaxed(hsa_signal_, HSA_SIGNAL_CONDITION_LT, 1, UINT64_MAX,
                                 HSA_WAIT_STATE_BLOCKED) != 0) {
     TEST_ASSERT("signal_wait failed");
   }
@@ -283,5 +283,5 @@ bool TestHsa::Cleanup() {
   if (my_queue_) hsa_queue_destroy(hsa_queue_);
   hsa_queue_ = NULL;
   agent_info_ = NULL;
-  return true;
+   return true;
 }
