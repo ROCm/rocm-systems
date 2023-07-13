@@ -537,7 +537,7 @@ def printEventList(device, delay, eventList):
         data = rsmi_evt_notification_data_t(1)
         rocmsmi.rsmi_event_notification_get(delay, byref(num_elements), byref(data))
         if len(data.message) > 0:
-            print2DArray([['\rGPU[%d]:\t' % (device), ctime().split()[3], notification_type_names[data.event.value - 1],
+            print2DArray([['\rGPU[%d]:\t' % (data.dv_ind), ctime().split()[3], notification_type_names[data.event.value - 1],
                            data.message.decode('utf8') + '\r']])
 
 def printLog(device, metricName, value=None, extraSpace=False):
