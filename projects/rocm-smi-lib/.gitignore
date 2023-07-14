@@ -12,3 +12,6 @@ python_smi_tools/rsmiBindings.py
 
 # Build directory
 build/
+
+# CMake cache
+.cache/
