@@ -105,7 +105,7 @@ void TestSysInfoRead::Run(void) {
     err = rsmi_dev_vbios_version_get(i, buffer, 80);
 
     if (err != RSMI_STATUS_SUCCESS) {
-      if (err == RSMI_STATUS_FILE_ERROR) {
+      if ((err == RSMI_STATUS_FILE_ERROR) || (err == RSMI_STATUS_NOT_SUPPORTED)) {
         IF_VERB(STANDARD) {
           std::cout << "\t**VBIOS read: Not supported on this machine"
                                                                 << std::endl;
