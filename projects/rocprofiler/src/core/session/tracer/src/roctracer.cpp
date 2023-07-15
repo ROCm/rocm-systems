@@ -429,14 +429,69 @@ int TracerCallback(activity_domain_t domain, uint32_t operation_id, void* data) 
       }
       break;
 
-    case ACTIVITY_DOMAIN_ROCTX:
-      if (auto user_callback = roctx_api_callback_table.Get(operation_id)) {
-        if (auto api_data = static_cast<DomainTraits<ACTIVITY_DOMAIN_ROCTX>::ApiData*>(data))
-          user_callback->first(ACTIVITY_DOMAIN_ROCTX, operation_id, api_data,
-                               user_callback->second);
-        return 0;
+    case ACTIVITY_DOMAIN_ROCTX: {
+      auto user_callback = roctx_api_callback_table.Get(operation_id);
+      if (user_callback) {
+        if (user_callback->first) {
+          if (auto api_data = static_cast<DomainTraits<ACTIVITY_DOMAIN_ROCTX>::ApiData*>(data))
+            user_callback->first(ACTIVITY_DOMAIN_ROCTX, operation_id, api_data,
+                                 user_callback->second);
+          return 0;
+        } else {
+          if (!rocprofiler::GetROCProfilerSingleton()) return 0;
+          if (rocprofiler::GetROCProfilerSingleton() &&
+              rocprofiler::GetROCProfilerSingleton()->GetSession(
+                  reinterpret_cast<session_buffer_id_t*>(user_callback->second)->session_id) &&
+              rocprofiler::GetROCProfilerSingleton()
+                  ->GetSession(
+                      reinterpret_cast<session_buffer_id_t*>(user_callback->second)->session_id)
+                  ->GetBuffer(
+                      reinterpret_cast<session_buffer_id_t*>(user_callback->second)->buffer_id)) {
+            if (auto api_data = static_cast<DomainTraits<ACTIVITY_DOMAIN_ROCTX>::ApiData*>(data)) {
+              std::lock_guard<std::mutex> lock(
+                  rocprofiler::GetROCProfilerSingleton()
+                      ->GetSession(
+                          reinterpret_cast<session_buffer_id_t*>(user_callback->second)->session_id)
+                      ->GetBuffer(
+                          reinterpret_cast<session_buffer_id_t*>(user_callback->second)->buffer_id)
+                      ->GetBufferLock());
+              rocprofiler_tracer_api_data_t tracer_api_data{};
+              rocprofiler_record_tracer_t rocprofiler_record{
+                  rocprofiler_record_header_t{
+                      ROCPROFILER_TRACER_RECORD,
+                      rocprofiler_record_id_t{
+                          rocprofiler::GetROCProfilerSingleton()->GetUniqueRecordId()}},
+                  rocprofiler_tracer_external_id_t{api_data ? api_data->args.id : 0},
+                  ACTIVITY_DOMAIN_ROCTX,
+                  rocprofiler_tracer_operation_id_t{operation_id},
+                  tracer_api_data,
+                  rocprofiler_tracer_activity_correlation_id_t{0},
+                  rocprofiler_record_header_timestamp_t{roctracer::hsa_support::timestamp_ns(),
+                                                        rocprofiler_timestamp_t{0}},
+                  0,
+                  0,
+                  GetTid(),
+                  ROCPROFILER_PHASE_ENTER,
+                  api_data ? (api_data->args.message ? api_data->args.message : nullptr) : nullptr};
+              size_t message_size = 0;
+              if (api_data && api_data->args.message) {
+                message_size = strlen(api_data->args.message) + 1;
+              }
+              rocprofiler::GetROCProfilerSingleton()
+                  ->GetSession(
+                      reinterpret_cast<session_buffer_id_t*>(user_callback->second)->session_id)
+                  ->GetBuffer(
+                      reinterpret_cast<session_buffer_id_t*>(user_callback->second)->buffer_id)
+                  ->AddRecord(rocprofiler_record, rocprofiler_record.name, message_size,
+                              [](auto& rocprofiler_record, const void* data) {
+                                rocprofiler_record.name = static_cast<const char*>(data);
+                              });
+            }
+          }
+        }
       }
       break;
+    }
 
     case ACTIVITY_DOMAIN_HSA_OPS:
       if (auto pool = hsa_ops_activity_table.Get(operation_id)) {
@@ -659,6 +714,9 @@ void roctracer_enable_op_activity(activity_domain_t domain, uint32_t op,
         HIP_registration_group.Register(hip_ops_activity_table, op, &session_buffer_id);
       break;
     case ACTIVITY_DOMAIN_ROCTX:
+      if (RocTxLoader::Instance().IsEnabled())
+        ROCTX_registration_group.Register(roctx_api_callback_table, op, nullptr,
+                                          &session_buffer_id);
       break;
     default:
       throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_INVALID_DOMAIN_ID, "Invalid domain ID");
@@ -701,6 +759,8 @@ void roctracer_disable_activity(activity_domain_t domain, uint32_t op) {
         HIP_registration_group.Unregister(hip_ops_activity_table, op);
       break;
     case ACTIVITY_DOMAIN_ROCTX:
+      if (RocTxLoader::Instance().IsEnabled())
+        ROCTX_registration_group.Unregister(roctx_api_callback_table, op);
       break;
     default:
       throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_INVALID_DOMAIN_ID, "Invalid domain ID");
@@ -782,7 +842,9 @@ static std::string getKernelNameMultiKernelMultiDevice(hipLaunchParams* launchPa
   return name_str.str();
 }
 
-template <typename... Ts> struct Overloaded : Ts... { using Ts::operator()...; };
+template <typename... Ts> struct Overloaded : Ts... {
+  using Ts::operator()...;
+};
 template <class... Ts> Overloaded(Ts...) -> Overloaded<Ts...>;
 
 std::optional<std::string> GetHipKernelName(uint32_t cid, hip_api_data_t* data) {
