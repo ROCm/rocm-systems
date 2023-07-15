@@ -329,7 +329,7 @@ def stitch(insts, raw_code, jumps, gfxv):
                 vsmem_ordering = 1
                 FLAT_INST.append([reverse_map[line],  num_inflight])
                 NUM_FLAT += 1
-            elif inst[1] == IMMED and 's_waitcnt ' in as_line[0]:
+            elif inst[1] == IMMED and 's_waitcnt' in as_line[0]:
                 if 'lgkmcnt' in as_line[0]:
                     wait_N = int(as_line[0].split('lgkmcnt(')[1].split(')')[0])
                     flight_count.append([as_line[5], num_inflight, wait_N])
@@ -366,9 +366,12 @@ def stitch(insts, raw_code, jumps, gfxv):
 
                 if 'vscnt' in as_line[0] or (bGFX9 and 'vmcnt' in as_line[0]):
                     try:
-                        wait_N = int(as_line[0].split('vscnt(')[1].split(')')[0])
-                    except:
                         wait_N = int(as_line[0].split('vmcnt(')[1].split(')')[0])
+                    except:
+                        try:
+                            wait_N = int(as_line[0].split('vscnt(')[1].split(')')[0])
+                        except:
+                            wait_N = 0
                     flight_count.append([as_line[5], num_inflight, wait_N])
                     if wait_N == 0:
                         vsmem_ordering = 0
