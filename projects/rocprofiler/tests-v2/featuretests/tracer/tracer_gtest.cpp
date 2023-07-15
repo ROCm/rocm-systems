@@ -76,13 +76,26 @@ void ApplicationParser::SetApplicationEnv(const char* app_name, const char* trac
 
   if (trace_type.find("hip") != std::string::npos) {
     // set --hip-api option
+    unsetenv("ROCPROFILER_HSA_API_TRACE");
+    unsetenv("ROCPROFILER_HSA_ACTIVITY_TRACE");
+    unsetenv("ROCPROFILER_ROCTX_TRACE");
     setenv("ROCPROFILER_HIP_API_TRACE", "1", true);
   }
 
   if (trace_type.find("hsa") != std::string::npos) {
     // set --hsa-api and --hsa-activity
+    unsetenv("ROCPROFILER_HIP_API_TRACE");
+    unsetenv("ROCPROFILER_ROCTX_TRACE");
     setenv("ROCPROFILER_HSA_API_TRACE", "1", true);
     setenv("ROCPROFILER_HSA_ACTIVITY_TRACE", "1", true);
+  }
+
+  if (trace_type.find("roctx") != std::string::npos) {
+    // set --roctx-trace option
+    unsetenv("ROCPROFILER_HIP_API_TRACE");
+    unsetenv("ROCPROFILER_HSA_API_TRACE");
+    unsetenv("ROCPROFILER_HSA_ACTIVITY_TRACE");
+    setenv("ROCPROFILER_ROCTX_TRACE", "1", true);
   }
 
 
@@ -248,7 +261,7 @@ TEST_F(HelloWorldTest, WhenRunningTracerWithAppThenKernelDurationShouldBePositiv
 
 /*
  * ###################################################
- * ############ Async COopy HSA Tests ################
+ * ############ Async Copy HSA Tests ################
  * ###################################################
  */
 
@@ -299,4 +312,79 @@ TEST_F(AsyncCopyTest, DISABLED_WhenRunningTracerWithAppThenAsyncCorelationCountI
   corelation_count--;
 
   EXPECT_EQ(corelation_count, corelation_pair.size());
+}
+
+/*
+ * ###################################################
+ * ######### Matrix Transpose ROCTX Tests ############
+ * ###################################################
+ */
+
+constexpr auto GoldenOutputMatrixTranspose = "matrix_transpose_golden_trace.txt";
+
+class ROCTXTest : public Tracertest {
+ protected:
+  void SetUp() { Tracertest::SetUp("tracer_matrix_transpose", "roctx"); }
+  void TearDown() {}
+};
+
+TEST_F(ROCTXTest, WhenRunningTracerWithAppThenROCTxOutputIsgenerated) {
+  std::string golden_file_path =
+      GetRunningPath(running_path).append(golden_trace_path).append(GoldenOutputMatrixTranspose);
+  std::ifstream golden_file(golden_file_path);
+  std::string golden_output_line;
+  std::vector<std::string> roctx_output;
+  for (auto& itr : output_lines) {
+    if (itr.find("ROCTX") != std::string::npos) roctx_output.push_back(itr);
+  }
+  uint32_t i = 0;
+  while (!golden_file.eof()) {
+    ASSERT_TRUE(i < roctx_output.size())
+        << "Current Output number of records is less than golden output number of records"
+        << std::endl;
+    std::string roctx_output_line = roctx_output[i];
+    getline(golden_file, golden_output_line);
+    std::vector<std::string> golden_output_split;
+    std::vector<std::string> roctx_output_split;
+    std::string temp = "";
+    for (int j = 0; j < (int)roctx_output_line.size(); j++) {
+      if (roctx_output_line[j] != ',') {
+        if (roctx_output_line[j] == ' ') continue;
+        temp += roctx_output_line[j];
+      } else {
+        roctx_output_split.push_back(temp);
+        temp = "";
+      }
+    }
+    roctx_output_split.push_back(temp);
+    temp = "";
+    for (int j = 0; j < (int)golden_output_line.size(); j++) {
+      if (golden_output_line[j] != ',') {
+        if (golden_output_line[j] == ' ') continue;
+        temp += golden_output_line[j];
+      } else {
+        golden_output_split.push_back(temp);
+        temp = "";
+      }
+    }
+    golden_output_split.push_back(temp);
+    ASSERT_TRUE(roctx_output_split.size() == golden_output_split.size())
+        << "Current Output number of records(" << roctx_output_split.size()
+        << ") is not equal to golden output number of records (" << golden_output_split.size()
+        << ")" << std::endl;
+    uint32_t j = 0;
+    for (auto& roctx_record : roctx_output_split) {
+      ASSERT_TRUE(j < golden_output_split.size())
+          << "ROCTX record not found: " << roctx_record << std::endl;
+      std::string golden_output_record = golden_output_split[j++];
+      if (roctx_record.find("Timestamp") == std::string::npos)
+        EXPECT_EQ(roctx_record, golden_output_record) << "ROCTX record mismatch" << std::endl;
+      else
+        continue;
+    }
+    i++;
+  }
+  EXPECT_EQ(roctx_output.size(), i)
+      << "Current Output number of records is greater than golden output number of records"
+      << std::endl;
 }
