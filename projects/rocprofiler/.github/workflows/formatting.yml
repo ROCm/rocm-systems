@@ -5,6 +5,8 @@ run-name: formatting
 on:
   pull_request:
     branches: [ amd-staging ]
+    paths-ignore:
+      - '.github/workflows/pull_*.yml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

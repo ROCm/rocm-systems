@@ -3,8 +3,16 @@ name: CMake
 on:
   push:
     branches: [ "amd-staging" ]
+    paths-ignore:
+      - '.github/workflows/pull_*.yml'
   pull_request:
     branches: [ "amd-staging" ]
+    paths-ignore:
+      - '.github/workflows/pull_*.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   # Customize the CMake build type here (Release, Debug, RelWithDebInfo, etc.)

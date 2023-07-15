@@ -84,9 +84,8 @@ set(ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 set(LIB_DIR "${ROOT_DIR}/src")
 set(TEST_DIR "${ROOT_DIR}/test")
 
-# To set additional RUNPATH in libraries
-# installed in /opt/rocm-ver/lib/roctracer
-set(ROCM_APPEND_PRIVLIB_RPATH "$ORIGIN/..")
+# To set additional RUNPATH in libraries installed in /opt/rocm-ver/lib/roctracer
+set(ROCM_APPEND_PRIVLIB_RPATH "\$ORIGIN/..")
 
 find_package(
     amd_comgr REQUIRED CONFIG
@@ -235,6 +234,24 @@ install(
     FILES ${CMAKE_CURRENT_SOURCE_DIR}/test/tool/metrics.xml
           ${CMAKE_CURRENT_SOURCE_DIR}/test/tool/gfx_metrics.xml
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/${ROCPROFILER_NAME}
+    COMPONENT runtime)
+
+# librocprof-tool.so
+install(
+    FILES ${PROJECT_BINARY_DIR}/test/librocprof-tool.so
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/${ROCPROFILER_NAME}
+    COMPONENT runtime)
+
+install(
+    FILES ${PROJECT_BINARY_DIR}/test/librocprof-tool.so
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/${ROCPROFILER_NAME}
+    COMPONENT asan)
+
+install(
+    FILES ${PROJECT_BINARY_DIR}/test/rocprof-ctrl
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/${ROCPROFILER_NAME}
+    PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ
+                WORLD_EXECUTE
     COMPONENT runtime)
 
 # File reorg backward compatibility for non ASAN packaging

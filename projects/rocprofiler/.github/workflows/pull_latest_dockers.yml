@@ -1,137 +1,38 @@
 name: Get Latest Dockers
 
 on:
+  # allow triggering manually
+  workflow_dispatch:
+  # run when updated
+  push:
+    branches: '*'
+    paths:
+      - '.github/workflows/pull_latest_dockers.yml'
+  # run when updated
   schedule:
-  - cron: "* */23 * * *"
+  - cron: "0 */23 * * *"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  getting_latest_docker_mi200:
-    runs-on: mi200
+  update-runner-mainline:
+
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: ['mi200', 'mi100', 'vega20', 'navi32']
+        os: ['ubuntu-22.04', 'ubuntu-20.04', 'sles', 'rhel-9.x', 'rhel-8.x']
+
+    runs-on: ${{ matrix.runner }}
 
     steps:
-    - uses: actions/checkout@v3
-    - name: pull_the_latest_images
+    - name: pull-image
       run: |
-        docker pull compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:$(wget -qO- "http://rocm-ci.amd.com/job/compute-rocm-dkms-no-npi-hipclang/lastSuccessfulBuild/buildNumber")-ubuntu-22.04-stg1
-        docker pull compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:$(wget -qO- "http://rocm-ci.amd.com/job/compute-rocm-dkms-no-npi-hipclang/lastSuccessfulBuild/buildNumber")-ubuntu-20.04-stg1
-        docker pull compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:$(wget -qO- "http://rocm-ci.amd.com/job/compute-rocm-dkms-no-npi-hipclang/lastSuccessfulBuild/buildNumber")-sles-stg1
-        docker pull compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:$(wget -qO- "http://rocm-ci.amd.com/job/compute-rocm-dkms-no-npi-hipclang/lastSuccessfulBuild/buildNumber")-rhel-9.x-stg1
-        docker pull compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:$(wget -qO- "http://rocm-ci.amd.com/job/compute-rocm-dkms-no-npi-hipclang/lastSuccessfulBuild/buildNumber")-rhel-8.x-stg1
+        docker pull compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:$(wget -qO- "http://rocm-ci.amd.com/job/compute-rocm-dkms-no-npi-hipclang/lastSuccessfulBuild/buildNumber")-${{ matrix.os }}-stg1
 
-    - name: tag_the_latest_docker
+    - name: tag-image
       run: |
-        docker tag compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:$(wget -qO- "http://rocm-ci.amd.com/job/compute-rocm-dkms-no-npi-hipclang/lastSuccessfulBuild/buildNumber")-ubuntu-22.04-stg1 localhost:5000/mainline-ubuntu-22.04-stg1:latest
-        docker push localhost:5000/mainline-ubuntu-22.04-stg1:latest
-        docker tag compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:$(wget -qO- "http://rocm-ci.amd.com/job/compute-rocm-dkms-no-npi-hipclang/lastSuccessfulBuild/buildNumber")-ubuntu-20.04-stg1 localhost:5000/mainline-ubuntu-20.04-stg1:latest
-        docker push localhost:5000/mainline-ubuntu-20.04-stg1:latest
-        docker tag compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:$(wget -qO- "http://rocm-ci.amd.com/job/compute-rocm-dkms-no-npi-hipclang/lastSuccessfulBuild/buildNumber")-sles-stg1 localhost:5000/mainline-sles-stg1:latest
-        docker push localhost:5000/mainline-sles-stg1:latest
-        docker tag compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:$(wget -qO- "http://rocm-ci.amd.com/job/compute-rocm-dkms-no-npi-hipclang/lastSuccessfulBuild/buildNumber")-rhel-9.x-stg1 localhost:5000/mainline-rhel-9.x-stg1:latest
-        docker push localhost:5000/mainline-rhel-9.x-stg1:latest
-        docker tag compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:$(wget -qO- "http://rocm-ci.amd.com/job/compute-rocm-dkms-no-npi-hipclang/lastSuccessfulBuild/buildNumber")-rhel-8.x-stg1 localhost:5000/mainline-rhel-8.x-stg1:latest
-        docker push localhost:5000/mainline-rhel-8.x-stg1:latest
-
-  getting_latest_docker_mi100:
-    runs-on: mi100
-
-    steps:
-    - uses: actions/checkout@v3
-    - name: pull_the_latest_images
-      run: |
-        docker pull compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:$(wget -qO- "http://rocm-ci.amd.com/job/compute-rocm-dkms-no-npi-hipclang/lastSuccessfulBuild/buildNumber")-ubuntu-22.04-stg1
-        docker pull compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:$(wget -qO- "http://rocm-ci.amd.com/job/compute-rocm-dkms-no-npi-hipclang/lastSuccessfulBuild/buildNumber")-ubuntu-20.04-stg1
-        docker pull compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:$(wget -qO- "http://rocm-ci.amd.com/job/compute-rocm-dkms-no-npi-hipclang/lastSuccessfulBuild/buildNumber")-sles-stg1
-        docker pull compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:$(wget -qO- "http://rocm-ci.amd.com/job/compute-rocm-dkms-no-npi-hipclang/lastSuccessfulBuild/buildNumber")-rhel-9.x-stg1
-        docker pull compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:$(wget -qO- "http://rocm-ci.amd.com/job/compute-rocm-dkms-no-npi-hipclang/lastSuccessfulBuild/buildNumber")-rhel-8.x-stg1
-
-    - name: tag_the_latest_docker
-      run: |
-        docker tag compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:$(wget -qO- "http://rocm-ci.amd.com/job/compute-rocm-dkms-no-npi-hipclang/lastSuccessfulBuild/buildNumber")-ubuntu-22.04-stg1 localhost:5000/mainline-ubuntu-22.04-stg1:latest
-        docker push localhost:5000/mainline-ubuntu-22.04-stg1:latest
-        docker tag compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:$(wget -qO- "http://rocm-ci.amd.com/job/compute-rocm-dkms-no-npi-hipclang/lastSuccessfulBuild/buildNumber")-ubuntu-20.04-stg1 localhost:5000/mainline-ubuntu-20.04-stg1:latest
-        docker push localhost:5000/mainline-ubuntu-20.04-stg1:latest
-        docker tag compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:$(wget -qO- "http://rocm-ci.amd.com/job/compute-rocm-dkms-no-npi-hipclang/lastSuccessfulBuild/buildNumber")-sles-stg1 localhost:5000/mainline-sles-stg1:latest
-        docker push localhost:5000/mainline-sles-stg1:latest
-        docker tag compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:$(wget -qO- "http://rocm-ci.amd.com/job/compute-rocm-dkms-no-npi-hipclang/lastSuccessfulBuild/buildNumber")-rhel-9.x-stg1 localhost:5000/mainline-rhel-9.x-stg1:latest
-        docker push localhost:5000/mainline-rhel-9.x-stg1:latest
-        docker tag compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:$(wget -qO- "http://rocm-ci.amd.com/job/compute-rocm-dkms-no-npi-hipclang/lastSuccessfulBuild/buildNumber")-rhel-8.x-stg1 localhost:5000/mainline-rhel-8.x-stg1:latest
-        docker push localhost:5000/mainline-rhel-8.x-stg1:latest
-
-  getting_latest_docker_vega20:
-    runs-on: vega20
-
-    steps:
-    - uses: actions/checkout@v3
-    - name: pull_the_latest_images
-      run: |
-        docker pull compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:$(wget -qO- "http://rocm-ci.amd.com/job/compute-rocm-dkms-no-npi-hipclang/lastSuccessfulBuild/buildNumber")-ubuntu-22.04-stg1
-        docker pull compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:$(wget -qO- "http://rocm-ci.amd.com/job/compute-rocm-dkms-no-npi-hipclang/lastSuccessfulBuild/buildNumber")-ubuntu-20.04-stg1
-        docker pull compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:$(wget -qO- "http://rocm-ci.amd.com/job/compute-rocm-dkms-no-npi-hipclang/lastSuccessfulBuild/buildNumber")-sles-stg1
-        docker pull compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:$(wget -qO- "http://rocm-ci.amd.com/job/compute-rocm-dkms-no-npi-hipclang/lastSuccessfulBuild/buildNumber")-rhel-9.x-stg1
-        docker pull compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:$(wget -qO- "http://rocm-ci.amd.com/job/compute-rocm-dkms-no-npi-hipclang/lastSuccessfulBuild/buildNumber")-rhel-8.x-stg1
-
-    - name: tag_the_latest_docker
-      run: |
-        docker tag compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:$(wget -qO- "http://rocm-ci.amd.com/job/compute-rocm-dkms-no-npi-hipclang/lastSuccessfulBuild/buildNumber")-ubuntu-22.04-stg1 localhost:5000/mainline-ubuntu-22.04-stg1:latest
-        docker push localhost:5000/mainline-ubuntu-22.04-stg1:latest
-        docker tag compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:$(wget -qO- "http://rocm-ci.amd.com/job/compute-rocm-dkms-no-npi-hipclang/lastSuccessfulBuild/buildNumber")-ubuntu-20.04-stg1 localhost:5000/mainline-ubuntu-20.04-stg1:latest
-        docker push localhost:5000/mainline-ubuntu-20.04-stg1:latest
-        docker tag compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:$(wget -qO- "http://rocm-ci.amd.com/job/compute-rocm-dkms-no-npi-hipclang/lastSuccessfulBuild/buildNumber")-sles-stg1 localhost:5000/mainline-sles-stg1:latest
-        docker push localhost:5000/mainline-sles-stg1:latest
-        docker tag compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:$(wget -qO- "http://rocm-ci.amd.com/job/compute-rocm-dkms-no-npi-hipclang/lastSuccessfulBuild/buildNumber")-rhel-9.x-stg1 localhost:5000/mainline-rhel-9.x-stg1:latest
-        docker push localhost:5000/mainline-rhel-9.x-stg1:latest
-        docker tag compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:$(wget -qO- "http://rocm-ci.amd.com/job/compute-rocm-dkms-no-npi-hipclang/lastSuccessfulBuild/buildNumber")-rhel-8.x-stg1 localhost:5000/mainline-rhel-8.x-stg1:latest
-        docker push localhost:5000/mainline-rhel-8.x-stg1:latest
-
-
-  getting_latest_docker_navi32:
-    runs-on: navi32
-
-    steps:
-    - uses: actions/checkout@v3
-    - name: pull_the_latest_images
-      run: |
-        docker pull compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:$(wget -qO- "http://rocm-ci.amd.com/job/compute-rocm-dkms-no-npi-hipclang/lastSuccessfulBuild/buildNumber")-ubuntu-22.04-stg1
-        docker pull compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:$(wget -qO- "http://rocm-ci.amd.com/job/compute-rocm-dkms-no-npi-hipclang/lastSuccessfulBuild/buildNumber")-ubuntu-20.04-stg1
-        docker pull compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:$(wget -qO- "http://rocm-ci.amd.com/job/compute-rocm-dkms-no-npi-hipclang/lastSuccessfulBuild/buildNumber")-sles-stg1
-        docker pull compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:$(wget -qO- "http://rocm-ci.amd.com/job/compute-rocm-dkms-no-npi-hipclang/lastSuccessfulBuild/buildNumber")-rhel-9.x-stg1
-        docker pull compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:$(wget -qO- "http://rocm-ci.amd.com/job/compute-rocm-dkms-no-npi-hipclang/lastSuccessfulBuild/buildNumber")-rhel-8.x-stg1
-
-    - name: tag_the_latest_docker
-      run: |
-        docker tag compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:$(wget -qO- "http://rocm-ci.amd.com/job/compute-rocm-dkms-no-npi-hipclang/lastSuccessfulBuild/buildNumber")-ubuntu-22.04-stg1 localhost:5000/mainline-ubuntu-22.04-stg1:latest
-        docker push localhost:5000/mainline-ubuntu-22.04-stg1:latest
-        docker tag compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:$(wget -qO- "http://rocm-ci.amd.com/job/compute-rocm-dkms-no-npi-hipclang/lastSuccessfulBuild/buildNumber")-ubuntu-20.04-stg1 localhost:5000/mainline-ubuntu-20.04-stg1:latest
-        docker push localhost:5000/mainline-ubuntu-20.04-stg1:latest
-        docker tag compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:$(wget -qO- "http://rocm-ci.amd.com/job/compute-rocm-dkms-no-npi-hipclang/lastSuccessfulBuild/buildNumber")-sles-stg1 localhost:5000/mainline-sles-stg1:latest
-        docker push localhost:5000/mainline-sles-stg1:latest
-        docker tag compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:$(wget -qO- "http://rocm-ci.amd.com/job/compute-rocm-dkms-no-npi-hipclang/lastSuccessfulBuild/buildNumber")-rhel-9.x-stg1 localhost:5000/mainline-rhel-9.x-stg1:latest
-        docker push localhost:5000/mainline-rhel-9.x-stg1:latest
-        docker tag compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:$(wget -qO- "http://rocm-ci.amd.com/job/compute-rocm-dkms-no-npi-hipclang/lastSuccessfulBuild/buildNumber")-rhel-8.x-stg1 localhost:5000/mainline-rhel-8.x-stg1:latest
-        docker push localhost:5000/mainline-rhel-8.x-stg1:latest
-
-  # getting_latest_docker_navi21:
-  #   runs-on: navi21
-
-  #   steps:
-  #   - uses: actions/checkout@v3
-  #   - name: pull_the_latest_images
-  #     run: |
-  #       docker pull compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:$(wget -qO- "http://rocm-ci.amd.com/job/compute-rocm-dkms-no-npi-hipclang/lastSuccessfulBuild/buildNumber")-ubuntu-22.04-stg1
-  #       docker pull compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:$(wget -qO- "http://rocm-ci.amd.com/job/compute-rocm-dkms-no-npi-hipclang/lastSuccessfulBuild/buildNumber")-ubuntu-20.04-stg1
-  #       docker pull compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:$(wget -qO- "http://rocm-ci.amd.com/job/compute-rocm-dkms-no-npi-hipclang/lastSuccessfulBuild/buildNumber")-sles-stg1
-  #       docker pull compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:$(wget -qO- "http://rocm-ci.amd.com/job/compute-rocm-dkms-no-npi-hipclang/lastSuccessfulBuild/buildNumber")-rhel-9.x-stg1
-  #       docker pull compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:$(wget -qO- "http://rocm-ci.amd.com/job/compute-rocm-dkms-no-npi-hipclang/lastSuccessfulBuild/buildNumber")-rhel-8.x-stg1
-
-  #   - name: tag_the_latest_docker
-  #     run: |
-  #       docker tag compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:$(wget -qO- "http://rocm-ci.amd.com/job/compute-rocm-dkms-no-npi-hipclang/lastSuccessfulBuild/buildNumber")-ubuntu-22.04-stg1 localhost:5000/mainline-ubuntu-22.04-stg1:latest
-  #       docker push localhost:5000/mainline-ubuntu-22.04-stg1:latest
-  #       docker tag compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:$(wget -qO- "http://rocm-ci.amd.com/job/compute-rocm-dkms-no-npi-hipclang/lastSuccessfulBuild/buildNumber")-ubuntu-20.04-stg1 localhost:5000/mainline-ubuntu-20.04-stg1:latest
-  #       docker push localhost:5000/mainline-ubuntu-20.04-stg1:latest
-  #       docker tag compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:$(wget -qO- "http://rocm-ci.amd.com/job/compute-rocm-dkms-no-npi-hipclang/lastSuccessfulBuild/buildNumber")-sles-stg1 localhost:5000/mainline-sles-stg1:latest
-  #       docker push localhost:5000/mainline-sles-stg1:latest
-  #       docker tag compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:$(wget -qO- "http://rocm-ci.amd.com/job/compute-rocm-dkms-no-npi-hipclang/lastSuccessfulBuild/buildNumber")-rhel-9.x-stg1 localhost:5000/mainline-rhel-9.x-stg1:latest
-  #       docker push localhost:5000/mainline-rhel-9.x-stg1:latest
-  #       docker tag compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:$(wget -qO- "http://rocm-ci.amd.com/job/compute-rocm-dkms-no-npi-hipclang/lastSuccessfulBuild/buildNumber")-rhel-8.x-stg1 localhost:5000/mainline-rhel-8.x-stg1:latest
-  #       docker push localhost:5000/mainline-rhel-8.x-stg1:latest
+        docker tag compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:$(wget -qO- "http://rocm-ci.amd.com/job/compute-rocm-dkms-no-npi-hipclang/lastSuccessfulBuild/buildNumber")-${{ matrix.os }}-stg1 localhost:5000/mainline-${{ matrix.os }}-stg1:latest
+        docker push localhost:5000/mainline-${{ matrix.os }}-stg1:latest

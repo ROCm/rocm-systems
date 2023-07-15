@@ -348,14 +348,14 @@ void AddAttRecord(rocprofiler_record_att_tracer_t* record, hsa_agent_t gpu_agent
                   att_pending_signal_t& pending) {
   Agent::AgentInfo agent_info = hsa_support::GetAgentInfo(gpu_agent.handle);
   att_trace_callback_data_t data;
-  hsa_status_t status = hsa_ven_amd_aqlprofile_iterate_data(pending.profile, attTraceDataCallback, &data);
+  hsa_status_t status =
+      hsa_ven_amd_aqlprofile_iterate_data(pending.profile, attTraceDataCallback, &data);
 
   if ((status & HSA_STATUS_ERROR_OUT_OF_RESOURCES) == HSA_STATUS_ERROR_OUT_OF_RESOURCES)
     rocprofiler::warning("Warning: ATT buffer full!\n");
   if ((status & HSA_STATUS_ERROR_EXCEPTION) == HSA_STATUS_ERROR_EXCEPTION)
     rocprofiler::warning("Warning: ATT received a UTC memory error!\n");
-  if (status == HSA_STATUS_ERROR)
-    fatal("Thread Trace Error!");
+  if (status == HSA_STATUS_ERROR) fatal("Thread Trace Error!");
 
   // Allocate memory for shader_engine_data
   record->shader_engine_data = static_cast<rocprofiler_record_se_att_data_t*>(
@@ -758,12 +758,11 @@ hsa_ven_amd_aqlprofile_profile_t* ProcessATTParams(Packet::packet_t& start_packe
       base->GetCounters(counters);
       hsa_ven_amd_aqlprofile_event_t event = counters[0]->event;
       if (event.block_name != HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ)
-            rocprofiler::fatal("Only events from the SQ block can be selected for ATT.\n");
+        rocprofiler::fatal("Only events from the SQ block can be selected for ATT.\n");
 
-      att_params.push_back({
-                static_cast<hsa_ven_amd_aqlprofile_parameter_name_t>(int(ROCPROFILER_ATT_PERFCOUNTER)),
-                event.counter_id | (event.counter_id ? (0xF << 24) : 0)
-      });
+      att_params.push_back(
+          {static_cast<hsa_ven_amd_aqlprofile_parameter_name_t>(int(ROCPROFILER_ATT_PERFCOUNTER)),
+           event.counter_id | (event.counter_id ? (0xF << 24) : 0)});
       num_att_counters += 1;
     }
 
