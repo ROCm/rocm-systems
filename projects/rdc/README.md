@@ -7,10 +7,10 @@ The ROCm™ Data Center Tool simplifies the administration and addresses key inf
 - Integration with third-party tools
 - Open source
 
-For up-to-date document and how to start using RDC from pre-built packages, please refer to the [**ROCm DataCenter Tool User Guide**](https://docs.amd.com/bundle?name_filter.field=title&name_filter.value=ROCm%20DataCenter%20Tool%20User%20Guide&rpp=10&sort.field=title&sort.value=desc)
+For up-to-date document and how to start using RDC from pre-built packages, please refer to the [**ROCm DataCenter Tool User Guide**](https://rocm.docs.amd.com/projects/rdc/en/latest/)
 
 # Supported platforms
-RDC can run on AMD ROCm supported platforms, please refer to the **List of Supported Operating Systems** under [ROCm Release Notes](https://docs.amd.com/bundle?name_filter.field=title&name_filter.value=ROCm%20Release%20Notes&rpp=10&sort.field=title&sort.value=desc)
+RDC can run on AMD ROCm supported platforms, please refer to the [List of Supported Operating Systems](https://rocm.docs.amd.com/en/latest/release/gpu_os_support.html)
 
 # Building RDC from source
 
