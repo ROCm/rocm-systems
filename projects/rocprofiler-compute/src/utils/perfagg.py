@@ -95,13 +95,19 @@ def test_df_column_equality(df):
 # joins disparate runs less dumbly than rocprof
 def join_prof(workload_dir, join_type, log_file, verbose, out=None):
     # Set default output directory if not specified
-    if out == None:
-        out = workload_dir + "/pmc_perf.csv"
-    files = glob.glob(workload_dir + "/" + "pmc_perf_*.csv")
-    df = None
+    if type(workload_dir) == str:
+        if out is None:
+            out = workload_dir + "/pmc_perf.csv"
+        files = glob.glob(workload_dir + "/" + "pmc_perf_*.csv")
+    elif type(workload_dir) == list:
+        files = workload_dir
+    else:
+        print("ERROR: Invalid workload_dir")
+        sys.exit(1)
 
+    df = None
     for i, file in enumerate(files):
-        _df = pd.read_csv(file)
+        _df = pd.read_csv(file) if type(workload_dir) == str else file
         if join_type == "kernel":
             key = _df.groupby("KernelName").cumcount()
             _df["key"] = _df.KernelName + " - " + key.astype(str)
@@ -137,7 +143,6 @@ def join_prof(workload_dir, join_type, log_file, verbose, out=None):
         duplicate_cols["arch_vgpr"] = [col for col in df.columns if "arch_vgpr" in col]
         duplicate_cols["accum_vgpr"] = [col for col in df.columns if "accum_vgpr" in col]
     for key, cols in duplicate_cols.items():
-        print("Key is ", key)
         _df = df[cols]
         if not test_df_column_equality(_df):
             msg = (
@@ -146,10 +151,12 @@ def join_prof(workload_dir, join_type, log_file, verbose, out=None):
                 )
             )
             warnings.warn(msg)
-            log_file.write(msg + "\n")
+            if log_file:
+                log_file.write(msg + "\n")
         else:
             msg = "Successfully joined {} in pmc_perf.csv".format(key)
-            log_file.write(msg + "\n")
+            if log_file:
+                log_file.write(msg + "\n")
         if test_df_column_equality(_df) and verbose:
             print(msg)
 
@@ -179,6 +186,8 @@ def join_prof(workload_dir, join_type, log_file, verbose, out=None):
                     "fbar",
                     "sig",
                     "obj",
+                    # rocscope specific merged counters, keep original
+                    "dispatch_",
                 ]
             )
         ]
@@ -189,7 +198,15 @@ def join_prof(workload_dir, join_type, log_file, verbose, out=None):
         [
             k
             for k in df.keys()
-            if not any(check in k for check in ["DispatchNs", "CompleteNs"])
+            if not any(
+                check in k
+                for check in [
+                    "DispatchNs",
+                    "CompleteNs",
+                    # rocscope specific timestamp
+                    "HostDuration",
+                ]
+            )
         ]
     ]
     #   C) sanity check the name and key
@@ -216,12 +233,14 @@ def join_prof(workload_dir, join_type, log_file, verbose, out=None):
     df["EndNs"] = endNs
     # finally, join the drop key
     df = df.drop(columns=["key"])
-    # and save to file
-    df.to_csv(out, index=False)
-    # and delete old file(s)
-    if not verbose:
-        for file in files:
-            os.remove(file)
+    # save to file and delete old file(s), skip if we're being called outside of Omniperf
+    if type(workload_dir) == str:
+        df.to_csv(out, index=False)
+        if not verbose:
+            for file in files:
+                os.remove(file)
+    else:
+        return df
 
 
 def pmc_perf_split(workload_dir):
@@ -262,13 +281,13 @@ def update_pmc_bucket(
     # Verify inputs.
     # If save_file is True, we're being called internally, from perfmon_coalesce
     # Else we're being called externally, from rocomni
-    detected_extermal_call = False
+    detected_external_call = False
     if save_file and (stext is None or workload_perfmon_dir is None):
         raise ValueError(
             "stext and workload_perfmon_dir must be specified if save_file is True"
         )
     if pmc_list is None:
-        detected_extermal_call = True
+        detected_external_call = True
         pmc_list = dict(
             [
                 ("SQ", []),
@@ -287,7 +306,7 @@ def update_pmc_bucket(
         for ch in range(perfmon_config[soc]["TCC_channels"]):
             pmc_list["TCC2"][str(ch)] = []
 
-    if "SQ_ACCUM_PREV_HIRES" in counters:
+    if "SQ_ACCUM_PREV_HIRES" in counters and not detected_external_call:
         # save  all level counters separately
         nindex = counters.index("SQ_ACCUM_PREV_HIRES")
         level_counter = counters[nindex - 1]
@@ -336,7 +355,7 @@ def update_pmc_bucket(
                     # initial counter in this channel
                     pmc_list["TCC2"][str(ch)] = [counter]
 
-    if detected_extermal_call:
+    if detected_external_call:
         # sort the per channel counter, so that same counter in all channels can be aligned
         for ch in range(perfmon_config[soc]["TCC_channels"]):
             pmc_list["TCC2"][str(ch)].sort()
