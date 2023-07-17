@@ -340,6 +340,8 @@ def gen_counter_list(formula):
         "RW": None,
         "GIOP": None,
         "GFLOPs": None,
+        "CONCAT": None,
+        "MOD": None,
     }
 
     built_in_counter = [
@@ -362,6 +364,12 @@ def gen_counter_list(formula):
         tree = ast.parse(
             formula.replace("$normUnit", "SQ_WAVES")
             .replace("$denom", "SQ_WAVES")
+            .replace(
+                "$numActiveCUs",
+                "TO_INT(MIN((((ROUND(AVG(((4 * SQ_BUSY_CU_CYCLES) / GRBM_GUI_ACTIVE)), \
+              0) / $maxWavesPerCU) * 8) + MIN(MOD(ROUND(AVG(((4 * SQ_BUSY_CU_CYCLES) \
+              / GRBM_GUI_ACTIVE)), 0), $maxWavesPerCU), 8)), $numCU))",
+            )
             .replace("$", "")
         )
         for node in ast.walk(tree):
