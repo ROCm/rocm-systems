@@ -15,6 +15,11 @@ Panel Config:
           metric: Metric
           value: Value
           tips: Tips
+        style:
+          type: simple_bar
+          range_color: [1, 100]
+          label_txt: (%)
+          xrange: [0, 110]
         metric:
           Buffer Coalescing:
             value: AVG(((((TA_TOTAL_WAVEFRONTS_sum * 64) * 100) / (TCP_TOTAL_ACCESSES_sum
@@ -248,6 +253,8 @@ Panel Config:
           max: Max
           unit: Unit
           tips: Tips
+        style: 
+          type: simple_multi_bar
         metric:
           NC - Read:
             xfer: Read

@@ -17,6 +17,11 @@ Panel Config:
           min: Min
           max: Max
           tips: Tips
+        style:
+          type: simple_bar
+          range_color: [1, 100]
+          label_txt: (%)
+          xrange: [0, 110]
         metric:
           valu_flops_pop:
             avg: ((100 * AVG(((((64 * (((SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16)

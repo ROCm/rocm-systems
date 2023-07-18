@@ -15,6 +15,11 @@ Panel Config:
           mertic: Metric
           value: Value
           tips: Tips
+        style:
+          type: simple_bar
+          range_color: [1, 100]
+          label_txt: (%)
+          xrange: [0, 110]
         metric:
           Bandwidth:
             value: AVG(((SQC_DCACHE_REQ * 100000) / (($sclk * $numSQC)
