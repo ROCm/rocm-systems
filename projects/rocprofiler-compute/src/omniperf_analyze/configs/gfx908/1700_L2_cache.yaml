@@ -16,6 +16,8 @@ Panel Config:
           value: Value
           unit: Unit
           tips: Tips
+        style:
+          type: simple_bar
         metric:
           L2 Util:
             value: AVG(((TCC_BUSY_sum * 100) / (TO_INT($L2Banks) * GRBM_GUI_ACTIVE)))
@@ -301,6 +303,8 @@ Panel Config:
           max: Max
           unit: Unit
           tips: Tips
+        style:
+          type: simple_multi_bar
         metric:
           Read - Remote Socket Stall:
             type: Remote Socket Stall

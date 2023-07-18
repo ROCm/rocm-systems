@@ -15,6 +15,11 @@ Panel Config:
           metric: Metric
           value: Value
           tips: Tips
+        style:
+          type: simple_bar
+          range_color: [1, 100]
+          label_txt: (%)
+          xrange: [0, 110]
         metric:
           Utilization:
             value: AVG(((100 * SQ_LDS_IDX_ACTIVE) / (GRBM_GUI_ACTIVE * $numCU)))
