@@ -278,6 +278,7 @@ void DumpMonitorInfo(const TestBase *test) {
     };
 
     print_val_str(amd::smi::kDevDevID, "Device ID: ");
+    print_val_str(amd::smi::kDevDevRevID, "Dev.Rev.ID: ");
     print_val_str(amd::smi::kDevPerfLevel, "Performance Level: ");
     print_val_str(amd::smi::kDevOverDriveLevel, "OverDrive Level: ");
     print_vector(amd::smi::kDevGPUMClk,

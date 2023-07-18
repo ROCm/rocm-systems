@@ -84,6 +84,7 @@ amd::smi::RocmSMI::devInfoTypesStrings = {
   {amd::smi::kDevOverDriveLevel, amdSMI + "kDevOverDriveLevel"},
   {amd::smi::kDevMemOverDriveLevel, amdSMI + "kDevMemOverDriveLevel"},
   {amd::smi::kDevDevID, amdSMI + "kDevDevID"},
+  {amd::smi::kDevDevRevID, amdSMI + "kDevDevRevID"},
   {amd::smi::kDevDevProdName, amdSMI + "kDevDevProdName"},
   {amd::smi::kDevDevProdNum, amdSMI + "kDevDevProdNum"},
   {amd::smi::kDevVendorID, amdSMI + "kDevVendorID"},
