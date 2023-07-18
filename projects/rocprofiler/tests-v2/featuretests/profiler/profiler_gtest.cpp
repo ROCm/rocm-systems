@@ -1162,7 +1162,7 @@ void PluginTests::RunApplication(const char* app_name, const char* appParams) {
   unsetenv("LD_PRELOAD");
   unsetenv("HWLOC_COMPONENTS");
 
-  std::string app_path = is_installed_path() ? GetRunningPath(running_path) : "";
+  std::string app_path = GetRunningPath(running_path);
   std::stringstream os;
   os << app_path << binary_path << appParams << " ";
   os << app_path << test_app_path << app_name;
