@@ -795,6 +795,7 @@ void Initialize(HsaApiTable* table) {
   // TODO(aelwazir): FIXME, this is a workaround for the issue of allocating buffers on KernArg
   // Pools that are nearest to the GPU which is not NUMA local to the CPU. This should be remove
   // once ROCR provides such API.
+
   std::string path = "/sys/class/kfd/kfd/topology/nodes";
   for (const auto& entry : fs::directory_iterator(path)) {
     long long node_id = std::stoll(entry.path().filename().c_str());
@@ -805,11 +806,14 @@ void Initialize(HsaApiTable* table) {
     std::string gpu_id_str;
     if (gpu_id_file.is_open()) {
       gpu_id_file >> gpu_id_str;
-      long long gpu_id = std::stoll(gpu_id_str);
-      if (gpu_id > 0) {
-        gpu_numa_nodes_start = (gpu_numa_nodes_start > node_id || gpu_numa_nodes_start == 0)
-            ? node_id
-            : gpu_numa_nodes_start;
+
+      if (!gpu_id_str.empty()) {
+        long long gpu_id = std::stoll(gpu_id_str);
+        if (gpu_id > 0) {
+          gpu_numa_nodes_start = (gpu_numa_nodes_start > node_id || gpu_numa_nodes_start == 0)
+              ? node_id
+              : gpu_numa_nodes_start;
+        }
       }
     }
     gpu_id_file.close();
