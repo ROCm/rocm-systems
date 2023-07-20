@@ -8,7 +8,7 @@ The ROCm System Management Interface Library, or ROCm SMI library, is part of th
 
 The information contained herein is for informational purposes only, and is subject to change without notice. In addition, any stated support is planned and is also subject to change. While every precaution has been taken in the preparation of this document, it may contain technical inaccuracies, omissions and typographical errors, and AMD is under no obligation to update or otherwise correct this information. Advanced Micro Devices, Inc. makes no representations or warranties with respect to the accuracy or completeness of the contents of this document, and assumes no liability of any kind, including the implied warranties of noninfringement, merchantability or fitness for particular purposes, with respect to the operation or use of AMD hardware, software or other products described herein.
 
-© 2022 Advanced Micro Devices, Inc. All Rights Reserved.
+© 2022-2023 Advanced Micro Devices, Inc. All Rights Reserved.
 
 
 # Building ROCm SMI
@@ -28,8 +28,8 @@ After the ROCm SMI library git repository has been cloned to a local Linux machi
 ```shell
 mkdir -p build
 cd build
-cmake <location of root of ROCm SMI library CMakeLists.txt>
-make
+cmake ..
+make -j $(nproc)
 # Install library file and header; default location is /opt/rocm
 $ make install
 ```
@@ -57,11 +57,10 @@ In order to verify the build and capability of ROCm SMI on your system and to se
 
 ```shell
 # Set environment variables used in CMakeLists.txt file
-ROCM_DIR=<parent dir. to lib/ and inc/, containing RSMI library and header>
-mkdir <location for test build>
-cd <location for test build>
-cmake -DROCM_DIR=$ROCM_DIR <ROCm SMI source root>/tests/rocm_smi_test
-make
+mkdir build
+cd build
+cmake -DBUILD_TESTS=ON ..
+make -j $(nproc)
 ```
 
 To run the test, execute the program `rsmitst` that is built from the steps above.

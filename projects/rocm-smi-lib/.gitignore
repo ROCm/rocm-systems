@@ -15,3 +15,6 @@ build/
 
 # CMake cache
 .cache/
+
+# Simulated SYSFS - for early development or debug
+device/
