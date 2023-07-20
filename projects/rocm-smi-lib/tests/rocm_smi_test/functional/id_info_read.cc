@@ -162,7 +162,7 @@ void TestIdInfoRead::Run(void) {
       IF_VERB(STANDARD) {
         std::cout << "\t**Device Vram Vendor name: " << buffer << std::endl;
       }
-      err = rsmi_dev_brand_get(i, nullptr, kBufferLen);
+      err = rsmi_dev_vram_vendor_get(i, nullptr, kBufferLen);
       ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
     }
     err = rsmi_dev_vendor_id_get(i, &id);
