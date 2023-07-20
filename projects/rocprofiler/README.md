@@ -270,6 +270,13 @@ The user has two options for building:
         # Then open the browser at http://localhost:8000
         # The ISA can also be obtained from llvm/roc objdump, however, annotations will be different
         ```
+        For MPI or very long applications, we recommend to run collection, and later run the parser with already collected data:
+        ```bash
+        # Run only collection: The assembly file is not used. Use mpirun [...] rocprofv2 [...] if needed.
+        rocprofv2 -i input.txt --plugin att none ./vectoradd_hip.exe
+        # Remove the binary/application: Only runs the parser.
+        rocprofv2 -i input.txt --plugin att vectoradd_hip-hip-amdgcn-amd-amdhsa-gfx1100.s --mode network
+        ```
       - ##### app_assembly_file_relative_path
         AMDGCN ISA file with .s extension generated in 1st step
       - ##### app_relative_path
@@ -287,8 +294,8 @@ The user has two options for building:
           - ##### file
             Dumps the analyzed json files to disk for vieweing at a later time. Run python3 httpserver.py from within the generated ui/ folder to view the trace, similarly to network mode. The folder can be copied to another machine, and will run without rocm.
           - ##### off
-            Runs trace collection but not analysis, so it can be analyzed at a later time. Run rocprofv2 ATT [network, file] with the same parameters, removing the application binary, to analyze previously generated traces.
-      - ##### input.txt 
+            Runs trace collection but not analysis, so it can be analyzed at a later time. Run rocprofv2 ATT [network, file] with the same parameters, removing the application binary, to analyze previously generated traces. We recommend not setting the mode when collecting for MPI applications.
+      - ##### input.txt
         Required. Used to select specific compute units and other trace parameters.
         For first time users, we recommend compiling and running vectorAdd with
         ```bash
@@ -306,7 +313,7 @@ The user has two options for building:
         - att: TARGET_CU=1 //or some other CU [0,15] - WGP for Navi [0,8]
         - SE_MASK=0x1 // bitmask of shader engines. The fewer, the easier on the hardware. Default enables 1 out of 4 shader engines.
         - SIMD_MASK=0xF // GFX9: bitmask of SIMDs. Navi: SIMD Index [0-3].
-        - DISPATCH=ID,RN // collect trace only for the given dispatch_ID and MPI rank RN. RN ignored for single processes. Multiple lines with varying combinations of RN and ID can be added.
+        - DISPATCH=ID,RN // collect trace only for the given dispatch_ID and MPI rank RN. RN is optional and ignored for single processes. Multiple lines with varying combinations of RN and ID can be added.
         - KERNEL=kernname // Profile only kernels containing the string kernname (c++ mangled name). Multiple lines can be added.
         - PERFCOUNTERS_COL_PERIOD=0x3 // Multiplier period for counter collection [0~31]. 0=fastest (usually once every 16 cycles). GFX9 only. Counters will be shown in a graph over time in the browser UI.
         - PERFCOUNTER=counter_name // Add a SQ counter to be collected with ATT; period defined by PERFCOUNTERS_COL_PERIOD. GFX9 only.
