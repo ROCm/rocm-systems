@@ -332,3 +332,24 @@ TEST(WhenTrucatingLongKernelNames, KernelNameGetsTruncatedProperly) {
 
   EXPECT_EQ("kernel_7r_3d_pml", trunkated_name);
 }
+
+TEST(WhenTrucatingKokkossKernelNames, KernelNameGetsTruncatedProperly) {
+  std::string long_kernel_name =
+      "void "
+      "Kokkos::Experimental::Impl::hip_parallel_launch_local_memory<Kokkos::Impl::ParallelFor<"
+      "Kokkos::"
+      "Impl::ViewValueFunctor<Kokkos::Device<Kokkos::Experimental::HIP, "
+      "Kokkos::Experimental::HIPSpace>, "
+      "LAMMPS_NS::PairReaxFFKokkos<Kokkos::Experimental::HIP>::params_sing, false>, "
+      "Kokkos::RangePolicy<Kokkos::Experimental::HIP, Kokkos::IndexType<long> >, "
+      "Kokkos::Experimental::HIP>, 1024u, "
+      "1u>(Kokkos::Impl::ParallelFor<Kokkos::Impl::ViewValueFunctor<Kokkos::Device<Kokkos::"
+      "Experimental::"
+      "HIP, Kokkos::Experimental::HIPSpace>, "
+      "LAMMPS_NS::PairReaxFFKokkos<Kokkos::Experimental::HIP>::params_sing, false>, "
+      "Kokkos::RangePolicy<Kokkos::Experimental::HIP, Kokkos::IndexType<long> >, "
+      "Kokkos::Experimental::HIP> const*)";
+
+  std::string trunkated_name = rocprofiler::truncate_name(long_kernel_name);
+  EXPECT_EQ("hip_parallel_launch_local_memory", trunkated_name);
+}
