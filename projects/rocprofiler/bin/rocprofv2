@@ -12,38 +12,43 @@ fi
 export ROCPROFILER_METRICS_PATH=$ROCM_DIR/libexec/rocprofiler/counters/derived_counters.xml
 export LD_LIBRARY_PATH=$ROCM_DIR/lib:$LD_LIBRARY_PATH
 
+# Define color code
+GREEN='\033[0;32m'
+GREY='\033[0;90m'
+RESET='\033[0m'
+
 usage() {
   echo -e "ROCProfilerV2 Run Script Usage:"
-  echo -e "-h   | --help                For showing this message"
-  echo -e "--list-counters              For showing all available counters for the current GPUs"
+  echo -e "${GREEN}-h   | --help ${RESET}                For showing this message"
+  echo -e "${GREEN}--list-counters ${RESET}              For showing all available counters for the current GPUs"
   if [ $RUN_FROM_BUILD == 1 ]; then
-    echo -e "-t   | --test                For Running the tests"
-    echo -e "-mt  | --mem-test            For Running the Memory Leak tests. This run requires building using -acb | --asan-clean-build option"
+    echo -e "${GREEN}-t   | --test ${RESET}                For Running the tests"
+    echo -e "${GREEN}-mt  | --mem-test ${RESET}            For Running the Memory Leak tests. This run requires building using -acb | --asan-clean-build option"
   fi
-  echo -e "--hip-api                    For Collecting HIP API Traces"
-  echo -e "--hip-activity | --hip-trace For Collecting HIP API Activities Traces"
-  echo -e "--hsa-api                    For Collecting HSA API Traces"
-  echo -e "--hsa-activity | --hsa-trace For Collecting HSA API Activities Traces"
-  echo -e "--roctx-trace                For Collecting ROCTx Traces"
-  echo -e "--kernel-trace               For Collecting Kernel dispatch Traces"
-  echo -e "--sys-trace                  For Collecting HIP and HSA APIs and their Activities Traces along ROCTX and Kernel Dispatch traces\n"
-                                        echo -e "\t# usage e.g: rocprofv2 --[hip-trace|hsa-trace|roctx-trace|kernel-trace|sys-trace]  <executable>\n"
+  echo -e "${GREEN}--hip-api ${RESET}                    For Collecting HIP API Traces"
+  echo -e "${GREEN}--hip-activity | --hip-trace ${RESET} For Collecting HIP API Activities Traces"
+  echo -e "${GREEN}--hsa-api ${RESET}                    For Collecting HSA API Traces"
+  echo -e "${GREEN}--hsa-activity | --hsa-trace ${RESET} For Collecting HSA API Activities Traces"
+  echo -e "${GREEN}--roctx-trace ${RESET}                For Collecting ROCTx Traces"
+  echo -e "${GREEN}--kernel-trace ${RESET}               For Collecting Kernel dispatch Traces"
+  echo -e "${GREEN}--sys-trace ${RESET}                  For Collecting HIP and HSA APIs and their Activities Traces along ROCTX and Kernel Dispatch traces\n"
+                                        echo -e "\t#${GREY}usage e.g: rocprofv2 --[hip-trace|hsa-trace|roctx-trace|kernel-trace|sys-trace]  <executable>\n"${RESET}
 
-  echo -e "--plugin PLUGIN_NAME         For enabling a plugin (file/perfetto/att/ctf)"
-                                        echo -e "\t# usage(file/perfetto/ctf) e.g: rocprofv2 -i pmc.txt --plugin [file/perfetto/ctf] -d out_dir <executable>"
+  echo -e "${GREEN}--plugin ${RESET} PLUGIN_NAME         For enabling a plugin (file/perfetto/att/ctf)"
+                                        echo -e "\t#${GREY} usage(file/perfetto/ctf) e.g: rocprofv2 -i pmc.txt --plugin [file/perfetto/ctf] -d out_dir <executable>"
                                         echo -e "\t# usage(att): rocprofv2 <rocprofv2_params> --plugin att <ISA_file> <att_parameters> <executable>"
-                                        echo -e "\t# use \"rocprofv2 --plugin att --help\" for ATT-specific parameters help.\n"
-  echo -e "-i   | --input               For adding counters file path (every line in the text file represents a counter)"
-                                        echo -e "\t# usage: rocprofv2 -i pmc.txt -d <executable>\n"
-  echo -e "-o   | --output-file         For the output file name"
-                                        echo -e "\t# usage e.g:(with current dir): rocprofv2 --hip-trace -o <file_name> <executable>"
-                                        echo -e "\t# usage e.g:(with custom dir):  rocprofv2 --hip-trace -d <out_dir> -o <file_name> <executable>\n"
-  echo -e "-d   | --output-directory    For adding output path where the output files will be saved"
-                                        echo -e "\t# usage e.g:(with custom dir):  rocprofv2 --hip-trace -d <out_dir> <executable>\n"
-  echo -e "-fi  | --flush-interval      For adding a flush interval in milliseconds, every \"flush interval\" the buffers will be flushed"
-                                        echo -e "\t# usage e.g:  rocprofv2 --hip-trace -fi 1000 <executable>\n"  
-  echo -e "-tp  | --trace-period        Specifies a trace period in milliseconds, with format \"-tp <DELAY>:<ACTIVE_TIME>:<LOOP_RESET_TIME>\"."
-                                        echo -e "\t# usage e.g:  rocprofv2 --hip-trace -tp 1000:2000:4000 <executable>\n"  
+                                        echo -e "\t# use \"rocprofv2 --plugin att --help\" for ATT-specific parameters help.${RESET}\n"
+  echo -e "${GREEN}-i   | --input ${RESET}               For adding counters file path (every line in the text file represents a counter)"
+                                        echo -e "\t#${GREY} usage: rocprofv2 -i pmc.txt -d <executable>${RESET}\n"
+  echo -e "${GREEN}-o   | --output-file ${RESET}         For the output file name"
+                                        echo -e "\t#${GREY} usage e.g:(with current dir): rocprofv2 --hip-trace -o <file_name> <executable>"
+                                        echo -e "\t#${GREY} usage e.g:(with custom dir):  rocprofv2 --hip-trace -d <out_dir> -o <file_name> <executable>${RESET}\n"
+  echo -e "${GREEN}-d   | --output-directory ${RESET}    For adding output path where the output files will be saved"
+                                        echo -e "\t#${GREY} usage e.g:(with custom dir):  rocprofv2 --hip-trace -d <out_dir> <executable>${RESET}\n"
+  echo -e "${GREEN}-fi  | --flush-interval ${RESET}      For adding a flush interval in milliseconds, every \"flush interval\" the buffers will be flushed"
+                                        echo -e "\t#${GREY} usage e.g:  rocprofv2 --hip-trace -fi 1000 <executable>${RESET}\n"  
+  echo -e "${GREEN}-tp  | --trace-period ${RESET}       Specifies a trace period in milliseconds, with format \"-tp <DELAY>:<ACTIVE_TIME>:<LOOP_RESET_TIME>\"."
+                                        echo -e "\t#${GREY} usage e.g:  rocprofv2 --hip-trace -tp 1000:2000:4000 <executable>${RESET}\n"  
   exit 1
 }
 
