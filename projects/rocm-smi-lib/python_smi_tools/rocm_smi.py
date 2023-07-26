@@ -112,19 +112,10 @@ def formatCsv(deviceList):
     if outputType == 'system':
         jsonobj = json.loads(jsondata)
         keylist = header
-        for record in jsonobj:
-            my_string += str(record)
-            for key in keylist:
-                if key == 'system':
-                    tempstr = str(jsonobj[record])
-                    tempstr = tempstr[tempstr.find('\'')+1:]
-                    tempstr = tempstr[:tempstr.find('\'')]
-                    # Force output device type to 'system'
-                    my_string += ',%s\nsystem,%s' % (tempstr, jsonobj[record][tempstr])
-            my_string += '\n'
-        # Force output device type to 'system'
-        if my_string.startswith('system'):
-            my_string = 'device' + my_string[6:]
+        for record in jsonobj['system']:
+            my_string += "\"%s\", \"%s\"\n" % (record, jsonobj['system'][record])
+        # add header
+        my_string = "name, value\n" + my_string
         return my_string
     headerkeys = []
     # Separate device-specific information from system-level information
