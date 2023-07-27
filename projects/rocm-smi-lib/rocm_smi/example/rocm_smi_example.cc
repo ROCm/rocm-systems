@@ -718,6 +718,9 @@ int main() {
     ret = rsmi_dev_id_get(i, &val_ui16);
     CHK_RSMI_RET_I(ret)
     std::cout << "\t**Device ID: 0x" << std::hex << val_ui16 << std::endl;
+    ret = rsmi_dev_revision_get(i, &val_ui16);
+    CHK_RSMI_RET_I(ret)
+    std::cout << "\t**Dev.Rev.ID: 0x" << std::hex << val_ui16 << std::endl;
 
     char current_compute_partition[256];
     current_compute_partition[0] = '\0';

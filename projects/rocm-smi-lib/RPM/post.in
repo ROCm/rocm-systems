@@ -1,31 +1,37 @@
 #!/bin/bash
 #set -x
 
+packageName="rocm-smi-lib"
+logPath=/var/log/rocm_smi_lib
+logName=ROCm-SMI-lib.log
+logFile="${logPath}/${logName}"
+logrotateConfFile=/etc/logrotate.d/rocm_smi.conf
+
 do_addLogFolder() {
-  sudo mkdir -p /var/log/rocm_smi_lib
-  sudo touch /var/log/rocm_smi_lib/ROCm-SMI-lib.log
-  sudo chmod -R a+rw /var/log/rocm_smi_lib
-  sudo chmod a+rw /var/log/rocm_smi_lib/ROCm-SMI-lib.log
+  sudo mkdir -p "${logPath}"
+  sudo touch "${logFile}"
+  sudo chmod -R a+rw "${logPath}"
+  sudo chmod a+rw "${logFile}"
 }
 
 do_configureLogrotate() {
   logrotate --version &>/dev/null
   if [ $? -ne 0 ]; then
     echo "[WARNING] Detected logrotate is not installed."\
-    "ROCm-smi logs (when turned on) will not rotate properly."
+    "$packageName logs (when turned on) will not rotate properly."
     return
   fi
 
-  if [ ! -f /etc/logrotate.d/rocm_smi.conf ]; then
-    sudo touch /etc/logrotate.d/rocm_smi.conf
-    sudo chmod 644 /etc/logrotate.d/rocm_smi.conf # root r/w, all others read
+  if [ ! -f $logrotateConfFile ]; then
+    sudo touch "${logrotateConfFile}"
+    sudo chmod 644 "${logrotateConfFile}" # root r/w, all others read
     # ROCm SMI logging rotation, rotates files using root user/group
     # Hourly logrotation check
     # Only rotates if size grew larger than 1MB
     # Max of 4 rotation files, oldest will be removed
     # Rotated files use date extention of ex. ROCm-SMI-lib.log.2023-05-09_16:51:42
-    cat <<'EOF' | sudo tee /etc/logrotate.d/rocm_smi.conf >/dev/null
-/var/log/rocm_smi_lib/ROCm-SMI-lib.log {
+    cat << EOF | sudo tee "${logrotateConfFile}" >/dev/null
+${logFile} {
     su root root
     hourly
     missingok
@@ -41,12 +47,12 @@ EOF
   # issue was RPM build thought we were using macros
   # https://gitlab.kitware.com/cmake/cmake/-/issues/22965
   # https://rpm-software-management.github.io/rpm/manual/spec.html
-  sudo sed -i s/%%/%/g /etc/logrotate.d/rocm_smi.conf
+  sudo sed -i s/%%/%/g "${logrotateConfFile}"
   # workaround: remove extra 'OURCE' text
   # from rocm_smi.conf. Unsure if CMAKE,
   # bash, or here document
   # issue (only seen on RHEL 8.7)
-  sudo sed -i s/OURCE//g /etc/logrotate.d/rocm_smi.conf
+  sudo sed -i s/OURCE//g "${logrotateConfFile}"
   fi
   # check if logrotate uses system timers, Ubuntu/modern OS's do
   # Several older OS's like RHEL 8.7, do not. Instead defaults
@@ -59,16 +65,16 @@ EOF
       if [ -f /etc/cron.hourly/logrotate ]; then
         sudo mv /etc/cron.daily/logrotate /etc/cron.hourly/logrotate
       else
-        echo "[WARNING] Could find and configure hourly cron for ROCm-smi's"\
-        " logrotate. ROCm-smi logs (when turned on) will not rotate properly."
+        echo "[WARNING] Could find and configure hourly cron for $packageName's"\
+        " logrotate. $packageName logs (when turned on) will not rotate properly."
         return
       fi
     else
       # confirm that it's already been moved to hourly
       sudo find /etc/cron.* -iname logrotate -print -quit |grep -iq hourly
       if [ $? -ne 0 ]; then
-        echo "[WARNING] Could not configure an hourly cron for ROCm-smi's logrotate."\
-        "ROCm-smi logs (when turned on) may not rotate properly."
+        echo "[WARNING] Could not configure an hourly cron for $packageName's logrotate."\
+        "$packageName logs (when turned on) may not rotate properly."
       fi
     fi
   else
@@ -93,9 +99,17 @@ WantedBy=timers.target
 EOF
       sudo systemctl reenable --now logrotate.timer
     else
-      echo "[WARNING] Could not configure systemd timer for ROCm's logrotate."\
-      "ROCm-smi logs (when turned on) will not rotate properly."
+      echo "[WARNING] Could not configure systemd timer for $packageName's logrotate."\
+      "$packageName logs (when turned on) will not rotate properly."
     fi
+  fi
+}
+
+do_ldconfig() {
+  # left-hand term originates from ENABLE_LDCONFIG = ON/OFF at package build
+  if [ "@ENABLE_LDCONFIG@" == "ON" ]; then
+    echo @CPACK_PACKAGING_INSTALL_PREFIX@/@CMAKE_INSTALL_LIBDIR@ > /etc/ld.so.conf.d/x86_64-librocm_smi_lib.conf
+    ldconfig
   fi
 }
 

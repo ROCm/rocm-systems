@@ -121,6 +121,24 @@ void TestIdInfoRead::Run(void) {
       err = rsmi_dev_id_get(i, nullptr);
       ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
     }
+    // Get device Revision
+    err = rsmi_dev_revision_get(i, &id);
+    if (err == RSMI_STATUS_NOT_SUPPORTED) {
+      rsmi_status_t ret;
+      // Verify api support checking functionality is working
+      ret = rsmi_dev_revision_get(i, nullptr);
+      ASSERT_EQ(ret, RSMI_STATUS_NOT_SUPPORTED);
+    } else {
+      CHK_ERR_ASRT(err)
+
+      IF_VERB(STANDARD) {
+        std::cout << "\t**Dev.Rev.ID: 0x" << std::hex << id << std::endl;
+      }
+      // Verify api support checking functionality is working
+      err = rsmi_dev_revision_get(i, nullptr);
+      ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
+    }
+
     err = rsmi_dev_name_get(i, buffer, kBufferLen);
     if (err == RSMI_STATUS_NOT_SUPPORTED) {
       std::cout << "\t**Device Marketing name not found on this system." <<

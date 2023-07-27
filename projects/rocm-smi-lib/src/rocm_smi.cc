@@ -632,7 +632,7 @@ rsmi_status_t
 rsmi_dev_ecc_count_get(uint32_t dv_ind, rsmi_gpu_block_t block,
                                                      rsmi_error_count_t *ec) {
   std::vector<std::string> val_vec;
-  rsmi_status_t ret;
+  rsmi_status_t ret(RSMI_STATUS_NOT_SUPPORTED);
   std::ostringstream ss;
 
   TRY
@@ -817,6 +817,21 @@ rsmi_dev_id_get(uint32_t dv_ind, uint16_t *id) {
   ss << __PRETTY_FUNCTION__ << " | ======= end ======="
      << ", reporting " << amd::smi::getRSMIStatusString(ret);
   LOG_TRACE(ss);
+  return ret;
+}
+
+rsmi_status_t
+rsmi_dev_revision_get(uint32_t dv_ind, uint16_t *revision) {
+  std::ostringstream outss;
+  rsmi_status_t ret;
+  outss << __PRETTY_FUNCTION__ << "| ======= start =======";
+  LOG_TRACE(outss);
+  CHK_SUPPORT_NAME_ONLY(revision)
+
+  ret = get_id(dv_ind, amd::smi::kDevDevRevID, revision);
+  outss << __PRETTY_FUNCTION__ << " | ======= end ======="
+     << ", reporting " << amd::smi::getRSMIStatusString(ret);
+  LOG_TRACE(outss);
   return ret;
 }
 

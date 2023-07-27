@@ -132,6 +132,12 @@ void TestBase::PrintDeviceHeader(uint32_t dv_ind) {
   IF_VERB(STANDARD) {
     std::cout << "\t**Device ID: 0x" << std::hex << val_ui16 << std::endl;
   }
+  err = rsmi_dev_revision_get(dv_ind, &val_ui16);
+  CHK_ERR_ASRT(err)
+  IF_VERB(STANDARD) {
+    std::cout << "\t**Dev.Rev.ID: 0x" << std::hex << val_ui16 << std::endl;
+  }
+
   char name[128];
   err = rsmi_dev_name_get(dv_ind, name, 128);
   CHK_ERR_ASRT(err)

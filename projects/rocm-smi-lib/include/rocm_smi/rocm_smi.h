@@ -1088,6 +1088,21 @@ rsmi_status_t rsmi_num_monitor_devices(uint32_t *num_devices);
  */
 rsmi_status_t rsmi_dev_id_get(uint32_t dv_ind, uint16_t *id);
 
+/**
+ *  @brief Get the device revision associated with the device
+ *
+ *  @details Given a device index @p dv_ind and a pointer to a uint32_t to
+ *  which the revision will be written
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[inout] revision a pointer to uint32_t to which the device revision
+ *  will be written
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ *
+ */
+rsmi_status_t rsmi_dev_revision_get(uint32_t dv_ind, uint16_t *revision);
 
 /**
  *  @brief Get the SKU for a desired device associated with the device with

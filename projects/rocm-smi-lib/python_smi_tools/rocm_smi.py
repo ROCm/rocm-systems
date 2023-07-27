@@ -249,6 +249,17 @@ def getId(device):
         return hex(dv_id.value)
 
 
+def getRev(device):
+    """ Return the hexadecimal value of a device's Revision
+
+    @param device: DRM device identifier
+    """
+    dv_rev = c_short()
+    ret = rocmsmi.rsmi_dev_revision_get(device, byref(dv_rev))
+    if rsmi_ret_ok(ret, device, 'get_device_rev'):
+        return hex(dv_rev.value)
+
+
 def getMaxPower(device):
     """ Return the maximum power cap of a given device
 
@@ -1620,19 +1631,23 @@ def showAllConciseHw(deviceList):
         print('ERROR: Cannot print JSON/CSV output for concise hardware output')
         sys.exit(1)
     printLogSpacer(' Concise Hardware Info ')
-    header = ['GPU', 'DID', 'GFX RAS', 'SDMA RAS', 'UMC RAS', 'VBIOS', 'BUS']
+    header = ['GPU', 'DID', 'DREV', 'GFX RAS', 'SDMA RAS', 'UMC RAS', 'VBIOS', 'BUS']
     head_widths = [len(head) + 2 for head in header]
     values = {}
     for device in deviceList:
         gpuid = getId(device)
         if str(gpuid).startswith('0x'):
             gpuid = str(gpuid)[2:]
+        gpurev = getRev(device)
+        if str(gpurev).startswith('0x'):
+            gpurev = str(gpurev)[2:]
+
         gfxRas = getRasEnablement(device, 'GFX')
         sdmaRas = getRasEnablement(device, 'SDMA')
         umcRas = getRasEnablement(device, 'UMC')
         vbios = getVbiosVersion(device)
         bus = getBus(device)
-        values['card%s' % (str(device))] = [device, gpuid, gfxRas, sdmaRas, umcRas, vbios, bus]
+        values['card%s' % (str(device))] = [device, gpuid, gpurev, gfxRas, sdmaRas, umcRas, vbios, bus]
     val_widths = {}
     for device in deviceList:
         val_widths[device] = [len(str(val)) + 2 for val in values['card%s' % (str(device))]]
@@ -1971,6 +1986,7 @@ def showId(deviceList):
     printLogSpacer(' ID ')
     for device in deviceList:
         printLog(device, 'GPU ID', getId(device))
+        printLog(device, 'GPU Rev', getRev(device))
     printLogSpacer()
 
 

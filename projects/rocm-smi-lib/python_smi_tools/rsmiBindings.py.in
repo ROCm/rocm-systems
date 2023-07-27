@@ -11,8 +11,16 @@ import os
 
 # Use ROCm installation path if running from standard installation
 # With File Reorg rsmiBindings.py will be installed in  /opt/rocm/libexec/rocm_smi.
-# relative path changed accordingly
-path_librocm = os.path.dirname(os.path.realpath(__file__)) + '/../../@CMAKE_INSTALL_LIBDIR@/librocm_smi64.so.@VERSION_MAJOR@'
+# relative path changed accordingly.
+# if ROCM_SMI_LIB_PATH is set, we can load 'librocm_smi64.so' from that location
+#
+path_librocm = str()
+rocm_smi_lib_path = os.getenv('ROCM_SMI_LIB_PATH')
+if (rocm_smi_lib_path != None):
+    path_librocm = rocm_smi_lib_path
+else:
+    path_librocm = os.path.dirname(os.path.realpath(__file__)) + '/../../@CMAKE_INSTALL_LIBDIR@/librocm_smi64.so.@VERSION_MAJOR@'
+
 if not os.path.isfile(path_librocm):
     print('Unable to find %s . Trying /opt/rocm*' % path_librocm)
     for root, dirs, files in os.walk('/opt', followlinks=True):
@@ -22,9 +30,10 @@ if not os.path.isfile(path_librocm):
         print('Using lib from %s' % path_librocm)
     else:
         print('Unable to find librocm_smi64.so.@VERSION_MAJOR@')
+else:
+    print('Library loaded from: %s ' % path_librocm)
 
 # ----------> TODO: Support static libs as well as SO
-
 try:
     cdll.LoadLibrary(path_librocm)
     rocmsmi = CDLL(path_librocm)
@@ -35,7 +44,6 @@ except OSError:
           'RadeonOpenCompute/rocm_smi_lib for the installation guide.{1}'\
           .format('\33[33m', '\033[0m'))
     exit()
-
 
 # Device ID
 dv_id = c_uint64()

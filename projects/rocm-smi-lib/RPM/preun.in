@@ -1,13 +1,19 @@
 #!/bin/bash
 #set -x
 
+packageName="rocm-smi-lib"
+logPath=/var/log/rocm_smi_lib
+logName=ROCm-SMI-lib.log
+logFile="${logPath}/${logName}"
+logrotateConfFile=/etc/logrotate.d/rocm_smi.conf
+
 rm_logFolder() {
-  sudo rm -rf /var/log/rocm_smi_lib
+  sudo rm -rf "$logPath"
 }
 
 return_logrotateToOrigConfig() {
-  if [ -f /etc/logrotate.d/rocm_smi.conf ]; then
-    sudo rm -rf /etc/logrotate.d/rocm_smi.conf
+  if [ -f $logrotateConfFile ]; then
+    sudo rm -rf "${logrotateConfFile}"
   fi
   if [ -f /etc/cron.hourly/logrotate ]; then
     sudo mv /etc/cron.hourly/logrotate /etc/cron.daily/logrotate
