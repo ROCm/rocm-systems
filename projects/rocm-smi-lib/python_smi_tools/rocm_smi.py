@@ -1357,7 +1357,7 @@ def setPowerOverDrive(deviceList, value, autoRespond):
             RETCODE = 1
             continue
         if new_power_cap.value == current_power_cap.value:
-            printErrLog(device,'Max power was already at: {}W'.format(new_power_cap.value / 1000000))
+            printLog(device,'Max power was already at: {}W'.format(new_power_cap.value / 1000000))
 
         if current_power_cap.value < default_power_cap.value:
             current_power_cap.value = default_power_cap.value
