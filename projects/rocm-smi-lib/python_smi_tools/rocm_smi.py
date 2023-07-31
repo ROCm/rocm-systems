@@ -112,19 +112,10 @@ def formatCsv(deviceList):
     if outputType == 'system':
         jsonobj = json.loads(jsondata)
         keylist = header
-        for record in jsonobj:
-            my_string += str(record)
-            for key in keylist:
-                if key == 'system':
-                    tempstr = str(jsonobj[record])
-                    tempstr = tempstr[tempstr.find('\'')+1:]
-                    tempstr = tempstr[:tempstr.find('\'')]
-                    # Force output device type to 'system'
-                    my_string += ',%s\nsystem,%s' % (tempstr, jsonobj[record][tempstr])
-            my_string += '\n'
-        # Force output device type to 'system'
-        if my_string.startswith('system'):
-            my_string = 'device' + my_string[6:]
+        for record in jsonobj['system']:
+            my_string += "\"%s\", \"%s\"\n" % (record, jsonobj['system'][record])
+        # add header
+        my_string = "name, value\n" + my_string
         return my_string
     headerkeys = []
     # Separate device-specific information from system-level information
@@ -410,7 +401,9 @@ def getVbiosVersion(device):
     """
     vbios = create_string_buffer(256)
     ret = rocmsmi.rsmi_dev_vbios_version_get(device, vbios, 256)
-    if rsmi_ret_ok(ret, device):
+    if ret == rsmi_status_t.RSMI_STATUS_NOT_SUPPORTED:
+        return "Unsupported"
+    elif rsmi_ret_ok(ret, device):
         return vbios.value.decode()
 
 
@@ -1383,7 +1376,7 @@ def setPowerOverDrive(deviceList, value, autoRespond):
             RETCODE = 1
             continue
         if new_power_cap.value == current_power_cap.value:
-            printErrLog(device,'Max power was already at: {}W'.format(new_power_cap.value / 1000000))
+            printLog(device,'Max power was already at: {}W'.format(new_power_cap.value / 1000000))
 
         if current_power_cap.value < default_power_cap.value:
             current_power_cap.value = default_power_cap.value
@@ -2307,8 +2300,12 @@ def showProductName(deviceList):
             # if rsmi_ret_ok(ret, device) and sku.value.decode():
             #     device_sku = sku.value.decode()
             # Retrieve the device SKU as a substring from VBIOS
+            device_sku = ""
             ret = rocmsmi.rsmi_dev_vbios_version_get(device, vbios, 256)
-            if rsmi_ret_ok(ret, device, 'get_vbios_version') and vbios.value.decode():
+            if ret == rsmi_status_t.RSMI_STATUS_NOT_SUPPORTED:
+                device_sku = "Unsupported"
+                printLog(device, 'Card SKU', '\t\t' + device_sku)
+            elif rsmi_ret_ok(ret, device, 'get_vbios_version') and vbios.value.decode():
                 # Device SKU is just the characters in between the two '-' in vbios_version
                 if vbios.value.decode().count('-') == 2 and len(str(vbios.value.decode().split('-')[1])) > 1:
                     device_sku = vbios.value.decode().split('-')[1]
