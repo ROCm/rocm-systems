@@ -32,6 +32,7 @@ import getpass
 from pymongo import MongoClient
 from tqdm import tqdm
 import shutil
+import subprocess
 
 cache = dict()
 supported_arch = {"gfx906": "mi50", "gfx908": "mi100", "gfx90a": "mi200"}
@@ -54,6 +55,13 @@ def kernel_name_shortener(df, cache, level):
             original_name = df.loc[index, columnName]
             if original_name in cache:
                 continue
+            
+            cmd = ["llvm-cxxfilt", original_name]
+            
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+            demangled_name, e = proc.communicate()
+            demangled_name = str(demangled_name, 'UTF-8').strip()
 
             # cache miss, add the shortened name to the dictionary
             new_name = ""
@@ -62,14 +70,14 @@ def kernel_name_shortener(df, cache, level):
             names_and_args = re.compile(r"(?P<name>[( )A-Za-z0-9_]+)([ ,*<>()]+)(::)?")
 
             # works for name Kokkos::namespace::init_lock_array_kernel_threadid(int) [clone .kd]
-            if names_and_args.search(original_name):
-                matches = names_and_args.findall(original_name)
+            if names_and_args.search(demangled_name):
+                matches = names_and_args.findall(demangled_name)
             else:
                 # Works for first case  '__amd_rocclr_fillBuffer.kd'
                 # remove .kd and then parse through original regex
                 first_case = re.compile(r"([^\s]+)(.kd)")
                 Mod_name_and_args = re.compile(r"(?P<name>[( )A-Za-z0-9_]+)([ ,*<>()]*)")
-                interim_name = first_case.search(original_name).group(1)
+                interim_name = first_case.search(demangled_name).group(1)
                 matches = Mod_name_and_args.findall(interim_name)
 
             current_level = 0
@@ -103,7 +111,7 @@ def kernel_name_shortener(df, cache, level):
 
             cache[original_name] = new_name
             if new_name == None or new_name == "":
-                cache[original_name] = original_name
+                cache[original_name] = demangled_name
 
         df[columnName] = df[columnName].map(cache)
 
