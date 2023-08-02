@@ -213,6 +213,15 @@ ul#nav li {
    font-size: 14px;
    text-align: left;
 }
+
+.dash-dropdown input{
+   color: black;
+}
+
+.dash-dropdown .Select-placeholder{
+   color: black;
+}
+
 .VirtualizedSelectOption {
    overflow: hidden;
 }

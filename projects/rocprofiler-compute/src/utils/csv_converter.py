@@ -74,11 +74,10 @@ def kernel_name_shortener(df, cache, level):
                 matches = names_and_args.findall(demangled_name)
             else:
                 # Works for first case  '__amd_rocclr_fillBuffer.kd'
-                # remove .kd and then parse through original regex
-                first_case = re.compile(r"([^\s]+)(.kd)")
-                Mod_name_and_args = re.compile(r"(?P<name>[( )A-Za-z0-9_]+)([ ,*<>()]*)")
-                interim_name = first_case.search(demangled_name).group(1)
-                matches = Mod_name_and_args.findall(interim_name)
+                cache[original_name] = new_name
+                if new_name == None or new_name == "":
+                    cache[original_name] = demangled_name
+                continue
 
             current_level = 0
             for name in matches:
