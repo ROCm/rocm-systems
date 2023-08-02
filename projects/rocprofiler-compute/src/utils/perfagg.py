@@ -362,7 +362,7 @@ def update_pmc_bucket(
     return pmc_list
 
 
-def perfmon_coalesce(pmc_files_list, workload_dir, soc):
+def perfmon_coalesce(pmc_files_list, soc, workload_dir):
     workload_perfmon_dir = workload_dir + "/perfmon"
 
     # match pattern for pmc counters
@@ -424,7 +424,7 @@ def perfmon_coalesce(pmc_files_list, workload_dir, soc):
     return pmc_list
 
 
-def perfmon_emit(pmc_list, soc, save_file=True, workload_dir=None):
+def perfmon_emit(pmc_list, soc, workload_dir=None):
     # Calculate the minimum number of iteration to save the pmc counters
     # non-TCC counters
     pmc_cnt = [
@@ -446,7 +446,7 @@ def perfmon_emit(pmc_list, soc, save_file=True, workload_dir=None):
     niter = max(math.ceil(max(pmc_cnt)), math.ceil(tcc_cnt) + math.ceil(max(tcc2_cnt)))
 
     # Emit PMC counters into pmc config file
-    if save_file:
+    if workload_dir:
         workload_perfmon_dir = workload_dir + "/perfmon"
         fd = open(workload_perfmon_dir + "/pmc_perf.txt", "w")
     else:
@@ -480,14 +480,14 @@ def perfmon_emit(pmc_list, soc, save_file=True, workload_dir=None):
 
         # TCC aggregated counters
         line = line + " " + " ".join(tcc_counters)
-        if save_file:
+        if workload_dir:
             fd.write(line + "\n")
         else:
             b = line.split()
             b.remove("pmc:")
             batches.append(b)
 
-    if save_file:
+    if workload_dir:
         fd.write("\ngpu:\n")
         fd.write("range:\n")
         fd.write("kernel:\n")
@@ -533,8 +533,8 @@ def perfmon_filter(workload_dir, perfmon_dir, args):
         pmc_files_list = ref_pmc_files_list
 
     # Coalesce and writeback workload specific perfmon
-    pmc_list = perfmon_coalesce(pmc_files_list, workload_dir, soc)
-    perfmon_emit(pmc_list, workload_dir, soc)
+    pmc_list = perfmon_coalesce(pmc_files_list, soc, workload_dir)
+    perfmon_emit(pmc_list, soc, workload_dir)
 
 
 def pmc_filter(workload_dir, perfmon_dir, soc):
@@ -551,5 +551,5 @@ def pmc_filter(workload_dir, perfmon_dir, soc):
     pmc_files_list = ref_pmc_files_list
 
     # Coalesce and writeback workload specific perfmon
-    pmc_list = perfmon_coalesce(pmc_files_list, workload_dir, soc)
-    perfmon_emit(pmc_list, workload_dir, soc)
+    pmc_list = perfmon_coalesce(pmc_files_list, soc, workload_dir)
+    perfmon_emit(pmc_list, soc, workload_dir)
