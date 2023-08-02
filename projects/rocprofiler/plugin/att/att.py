@@ -177,7 +177,7 @@ def getWaves_binary(name, shader_engine_data_dict, target_cu, depth):
     wave_slot_count = [[0 for k in range(20)] for j in range(4)]
     waves_python = []
     for wave in waves:
-        if wave_slot_count[wave.simd][wave.wave_id] >= depth:
+        if wave_slot_count[wave.simd][wave.wave_id] >= depth or wave.instructions_size == 0:
             continue
         wave_slot_count[wave.simd][wave.wave_id] += 1
         pwave = PythonWave(wave)
