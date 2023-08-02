@@ -55,13 +55,13 @@ def kernel_name_shortener(df, cache, level):
             original_name = df.loc[index, columnName]
             if original_name in cache:
                 continue
-            
+
             cmd = ["llvm-cxxfilt", original_name]
-            
+
             proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
             demangled_name, e = proc.communicate()
-            demangled_name = str(demangled_name, 'UTF-8').strip()
+            demangled_name = str(demangled_name, "UTF-8").strip()
 
             # cache miss, add the shortened name to the dictionary
             new_name = ""
