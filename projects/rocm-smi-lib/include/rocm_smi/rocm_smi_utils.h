@@ -48,6 +48,9 @@
 #include <string>
 #include <cstdint>
 #include <vector>
+#include <sstream>
+#include <iomanip>
+#include <type_traits>
 
 #include "rocm_smi/rocm_smi_device.h"
 
@@ -94,8 +97,52 @@ GetDevBinaryBlob(amd::smi::DevInfoTypes type,
 rsmi_status_t ErrnoToRsmiStatus(int err);
 std::string getRSMIStatusString(rsmi_status_t ret);
 std::tuple<bool, std::string, std::string, std::string, std::string,
-           std::string, std::string, std::string> getSystemDetails(void);
+           std::string, std::string, std::string, std::string>
+           getSystemDetails(void);
 void logSystemDetails(void);
+void logHexDump(const char *desc, const void *addr, const size_t len,
+             size_t perLine);
+bool isSystemBigEndian();
+template <typename T>
+std::string print_int_as_hex(T i, bool showHexNotation=true) {
+  std::stringstream ss;
+  if (showHexNotation) {
+    ss << "0x" << std::setfill('0') << std::setw(sizeof(T) * 2) << std::hex;
+  } else {
+    ss << std::setfill('0') << std::setw(sizeof(T) * 2) << std::hex;
+  }
+
+  if (std::is_same<std::uint8_t, T>::value) {
+    ss << static_cast<unsigned int>(i|0);
+  } else if (std::is_same<std::int8_t, T>::value) {
+    ss << static_cast<int>(static_cast<uint8_t>(i|0));
+  } else if (std::is_signed<T>::value) {
+    ss << static_cast<long long int>(i | 0);
+  } else {
+    ss << static_cast<unsigned long long int>(i | 0);
+  }
+  ss << std::dec;
+  return ss.str();
+};
+
+template <typename T>
+std::string print_unsigned_int(T i) {
+  std::stringstream ss;
+  ss << static_cast<unsigned long long int>(i | 0);
+  return ss.str();
+}
+
+template <typename T>
+std::string print_unsigned_hex_and_int(T i, std::string heading="") {
+  std::stringstream ss;
+  if (heading.empty() == false) {
+    ss << "\n" << heading << " = ";
+  }
+  ss << "Hex (MSB): " << print_int_as_hex(i) << ", "
+     << "Unsigned int: " << print_unsigned_int(i) << ", "
+     << "Byte Size: " << sizeof(T);
+  return ss.str();
+}
 
 struct pthread_wrap {
  public:

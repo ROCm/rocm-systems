@@ -458,17 +458,21 @@ static uint32_t GetEnvVarUInteger(const char *ev_str) {
 
 // provides a way to get env variable detail in both debug & release
 // helps enable full logging
-static bool getRSMIEnvVar_LoggingEnabled(const char *ev_str) {
-  bool isLoggingEnabled = false;
+// RSMI_LOGGING = 1, output to logs only
+// RSMI_LOGGING = 2, output to console only
+// RSMI_LOGGING = 3, output to logs and console
+static uint32_t getRSMIEnvVar_LoggingEnabled(const char *ev_str) {
+  uint32_t ret = 0;
   ev_str = getenv(ev_str);
-
   if (ev_str != nullptr) {
-    isLoggingEnabled = true;
+    int ev_ret = atoi(ev_str);
+    ret = static_cast<uint32_t>(ev_ret);
   }
-  return isLoggingEnabled;
+  return ret;
 }
 
-static std::unordered_set<uint32_t> GetEnvVarUIntegerSets(const char *ev_str) {
+static inline std::unordered_set<uint32_t> GetEnvVarUIntegerSets(
+  const char *ev_str) {
   std::unordered_set<uint32_t> returnSet;
 #ifndef DEBUG
   (void)ev_str;
@@ -519,7 +523,16 @@ const RocmSMI_env_vars& RocmSMI::getEnv(void) {
 }
 
 bool RocmSMI::isLoggingOn(void) {
+  bool isLoggingOn = false;
   GetEnvVariables();
+  if (this->env_vars_.logging_on > 0
+      && this->env_vars_.logging_on <= 3) {
+    isLoggingOn = true;
+  }
+  return isLoggingOn;
+}
+
+uint32_t RocmSMI::getLogSetting() {
   return this->env_vars_.logging_on;
 }
 
@@ -544,7 +557,9 @@ void RocmSMI::printEnvVarInfo(void) {
             << ((env_vars_.debug_inf_loop == 0) ? "<undefined>"
                 : std::to_string(env_vars_.debug_inf_loop))
             << std::endl;
-  bool isLoggingOn = (env_vars_.logging_on) ? true : false;
+  std::cout << __PRETTY_FUNCTION__ << " | env_vars_.logging_on = "
+            << getLogSetting() << std::endl;
+  bool isLoggingOn = RocmSMI::isLoggingOn() ? true : false;
   std::cout << __PRETTY_FUNCTION__ << " | env_vars_.logging_on = "
             << (isLoggingOn ? "true" : "false") << std::endl;
   std::cout << __PRETTY_FUNCTION__ << " | env_vars_.enum_overrides = {";

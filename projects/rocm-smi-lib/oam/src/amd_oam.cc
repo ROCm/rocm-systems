@@ -166,8 +166,11 @@ TRY
     rsmi_dev_name_get(dev_inx, dev->device_name, DEVICE_NAME_LEN);
     rsmi_dev_vbios_version_get(dev_inx, buf, buf_size);
     if (std::strlen(buf) > 0) {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wstringop-truncation"
       std::strncpy(dev->sku_name, &buf[4], 6);
       std::strncpy(dev->board_name, buf, 12);
+#pragma GCC diagnostic pop
     }
     rsmi_dev_serial_number_get(dev_inx, dev->board_serial_number,
                              BOARD_SERIAL_NUM_LEN);

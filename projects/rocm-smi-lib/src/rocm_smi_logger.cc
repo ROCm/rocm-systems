@@ -177,6 +177,9 @@ void Logger::error(const char* text) throw() {
     logIntoFile(data);
   } else if (m_LogType == CONSOLE) {
     logOnConsole(data);
+  } else if (m_LogType == BOTH_FILE_AND_CONSOLE) {
+    logOnConsole(data);
+    logIntoFile(data);
   }
 }
 
@@ -208,6 +211,9 @@ void Logger::alarm(const char* text) throw() {
     logIntoFile(data);
   } else if (m_LogType == CONSOLE) {
     logOnConsole(data);
+  } else if (m_LogType == BOTH_FILE_AND_CONSOLE) {
+    logOnConsole(data);
+    logIntoFile(data);
   }
 }
 
@@ -239,6 +245,9 @@ void Logger::always(const char* text) throw() {
     logIntoFile(data);
   } else if (m_LogType == CONSOLE) {
     logOnConsole(data);
+  } else if (m_LogType == BOTH_FILE_AND_CONSOLE) {
+    logOnConsole(data);
+    logIntoFile(data);
   }
 }
 
@@ -303,6 +312,10 @@ void Logger::info(const char* text) throw() {
     logIntoFile(data);
   } else if ((m_LogType == CONSOLE) && (m_LogLevel >= LOG_LEVEL_INFO)) {
     logOnConsole(data);
+  } else if ((m_LogType == BOTH_FILE_AND_CONSOLE)
+             && (m_LogLevel >= LOG_LEVEL_INFO)) {
+    logOnConsole(data);
+    logIntoFile(data);
   }
 }
 
@@ -333,6 +346,10 @@ void Logger::trace(const char* text) throw() {
     logIntoFile(data);
   } else if ((m_LogType == CONSOLE) && (m_LogLevel >= LOG_LEVEL_TRACE)) {
     logOnConsole(data);
+  } else if ((m_LogType == BOTH_FILE_AND_CONSOLE)
+             && (m_LogLevel >= LOG_LEVEL_TRACE)) {
+    logOnConsole(data);
+    logIntoFile(data);
   }
 }
 
@@ -363,6 +380,10 @@ void Logger::debug(const char* text) throw() {
     logIntoFile(data);
   } else if ((m_LogType == CONSOLE) && (m_LogLevel >= LOG_LEVEL_DEBUG)) {
     logOnConsole(data);
+  } else if ((m_LogType == BOTH_FILE_AND_CONSOLE)
+             && (m_LogLevel >= LOG_LEVEL_DEBUG)) {
+    logOnConsole(data);
+    logIntoFile(data);
   }
 }
 
@@ -424,6 +445,9 @@ std::string Logger::getLogSettings() {
     case CONSOLE:
       logSettings += "LogType = CONSOLE";
       break;
+    case BOTH_FILE_AND_CONSOLE:
+      logSettings += "LogType = BOTH_FILE_AND_CONSOLE";
+      break;
     default:
       logSettings += "LogType = <undefined>";
   }
@@ -471,7 +495,26 @@ void Logger::initialize_resources() {
   }
   m_File.open(logFileName.c_str(), std::ios::out | std::ios::app);
   m_LogLevel = LOG_LEVEL_TRACE;
-  m_LogType = FILE_LOG;
+  // RSMI_LOGGING = 1, output to logs only
+  // RSMI_LOGGING = 2, output to console only
+  // RSMI_LOGGING = 3, output to logs and console
+  switch (amd::smi::RocmSMI::getInstance().getLogSetting()) {
+    case 0:
+      m_LogType = NO_LOG;
+      break;
+    case 1:
+      m_LogType = FILE_LOG;
+      break;
+    case 2:
+      m_LogType = CONSOLE;
+      break;
+    case 3:
+      m_LogType = BOTH_FILE_AND_CONSOLE;
+      break;
+    default:
+      m_LogType = NO_LOG;
+      break;
+  }
   if (!m_File.is_open()) {
     std::cout << "WARNING: Issue opening log file (" << logFileName
               << ") to write." << std::endl;
