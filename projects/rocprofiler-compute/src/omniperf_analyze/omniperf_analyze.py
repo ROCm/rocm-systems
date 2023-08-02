@@ -46,52 +46,45 @@ from pathlib import Path
 from omniperf_analyze.utils import parser, file_io
 from omniperf_analyze.utils.gui_components.roofline import get_roofline
 
+archConfigs = {}
+
 
 ################################################
 # Helper Functions
 ################################################
-def generate_configs(config_dir, list_kernels, filter_metrics):
+def generate_config(arch, config_dir, list_kernels, filter_metrics):
     from omniperf_analyze.utils import schema
 
     single_panel_config = file_io.is_single_panel_config(Path(config_dir))
     global archConfigs
-    archConfigs = {}
-    for arch in file_io.supported_arch.keys():
-        ac = schema.ArchConfig()
-        if list_kernels:
-            ac.panel_configs = file_io.top_stats_build_in_config
-        else:
-            arch_panel_config = (
-                config_dir if single_panel_config else config_dir.joinpath(arch)
-            )
-            ac.panel_configs = file_io.load_panel_configs(arch_panel_config)
 
-        # TODO: filter_metrics should/might be one per arch
-        # print(ac)
+    ac = schema.ArchConfig()
+    if list_kernels:
+        ac.panel_configs = file_io.top_stats_build_in_config
+    else:
+        arch_panel_config = (
+            config_dir if single_panel_config else config_dir.joinpath(arch)
+        )
+        ac.panel_configs = file_io.load_panel_configs(arch_panel_config)
 
-        parser.build_dfs(ac, filter_metrics)
+    # TODO: filter_metrics should/might be one per arch
+    # print(ac)
 
-        archConfigs[arch] = ac
+    parser.build_dfs(ac, filter_metrics)
+
+    archConfigs[arch] = ac
 
     return archConfigs  # Note: This return comes in handy for rocScope which borrows generate_configs() in its rocomni plugin
 
 
-################################################
-# Core Functions
-################################################
-def initialize_run(args, normalization_filter=None):
+def list_metrics(args):
     import pandas as pd
-    from collections import OrderedDict
     from tabulate import tabulate
-    from omniperf_analyze.utils import schema
-
-    # Fixme: cur_root.parent.joinpath('soc_params')
-    soc_params_dir = os.path.join(os.path.dirname(__file__), "..", "soc_params")
-    soc_spec_df = file_io.load_soc_params(soc_params_dir)
-
-    generate_configs(args.config_dir, args.list_kernels, args.filter_metrics)
 
     if args.list_metrics in file_io.supported_arch.keys():
+        arch = args.list_metrics
+        if arch not in archConfigs.keys():
+            generate_config(arch, args.config_dir, args.list_kernels, args.filter_metrics)
         print(
             tabulate(
                 pd.DataFrame.from_dict(
@@ -105,7 +98,12 @@ def initialize_run(args, normalization_filter=None):
             file=output,
         )
         sys.exit(0)
+    else:
+        print("Error: Unsupported arch")
+        sys.exit(-1)
 
+
+def load_options(args, normalization_filter):
     # Use original normalization or user input from GUI
     if not normalization_filter:
         for k, v in archConfigs.items():
@@ -114,10 +112,7 @@ def initialize_run(args, normalization_filter=None):
         for k, v in archConfigs.items():
             parser.build_metric_value_string(v.dfs, v.dfs_type, normalization_filter)
 
-    runs = OrderedDict()
-
     # err checking for multiple runs and multiple gpu_kernel filter
-    # TODO: move it to util
     if args.gpu_kernel and (len(args.path) != len(args.gpu_kernel)):
         if len(args.gpu_kernel) == 1:
             for i in range(len(args.path) - 1):
@@ -128,6 +123,31 @@ def initialize_run(args, normalization_filter=None):
                 file=output,
             )
             sys.exit(-1)
+
+
+################################################
+# Core Functions
+################################################
+def initialize_run(args, normalization_filter=None):
+    from collections import OrderedDict
+    from omniperf_analyze.utils import schema
+
+    # Fixme: cur_root.parent.joinpath('soc_params')
+    soc_params_dir = os.path.join(os.path.dirname(__file__), "..", "soc_params")
+    soc_spec_df = file_io.load_soc_params(soc_params_dir)
+
+    if args.list_metrics:
+        list_metrics(args)
+
+    # Load required configs
+    for d in args.path:
+        sys_info = file_io.load_sys_info(Path(d[0], "sysinfo.csv"))
+        arch = sys_info.iloc[0]["gpu_soc"]
+        generate_config(arch, args.config_dir, args.list_kernels, args.filter_metrics)
+
+    load_options(args, normalization_filter)
+
+    runs = OrderedDict()
 
     # Todo: warning single -d with multiple dirs
     for d in args.path:
@@ -215,10 +235,21 @@ def run_cli(args, runs):
         parser.load_table_data(
             runs[d[0]], d[0], is_gui, args.g, args.verbose
         )  # create the loaded table
+    # TODO: In show_* functions always assume newest architecture. This way newest configs/figures are loaded
     if args.list_kernels:
-        tty.show_kernels(args, runs, archConfigs["gfx90a"], output)
+        tty.show_kernels(
+            args,
+            runs,
+            archConfigs[runs[args.path[0][0]].sys_info.iloc[0]["gpu_soc"]],
+            output,
+        )
     else:
-        tty.show_all(args, runs, archConfigs["gfx90a"], output)
+        tty.show_all(
+            args,
+            runs,
+            archConfigs[runs[args.path[0][0]].sys_info.iloc[0]["gpu_soc"]],
+            output,
+        )
 
 
 def roofline_only(path_to_dir, dev_id, sort_type, mem_level, kernel_names, verbose):
