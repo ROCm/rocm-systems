@@ -76,14 +76,14 @@ namespace {
 struct shmd_t {
   int command;
 };
-static const char* amd_sys_session_id;
+static const char* roc_sys_session_id;
 static int shm_fd_sn = -1;
 struct shmd_t* shmd;
 
 uint64_t flush_interval, trace_time_length, trace_delay, trace_interval;
 
 std::thread wait_for_start_shm, flush_thread, trace_period_thread;
-std::atomic<bool> amd_sys_handler{false};
+std::atomic<bool> roc_sys_handler{false};
 std::atomic<bool> session_created{false};
 std::atomic<bool> trace_period_thread_control{false};
 std::atomic<bool> flush_thread_control{false};
@@ -401,10 +401,10 @@ void finish() {
   for ([[maybe_unused]] rocprofiler_buffer_id_t buffer_id : buffer_ids) {
     CHECK_ROCPROFILER(rocprofiler_flush_data(session_id, buffer_id));
   }
-  if (amd_sys_handler.load(std::memory_order_acquire)) {
-    amd_sys_handler.exchange(false, std::memory_order_release);
+  if (roc_sys_handler.load(std::memory_order_acquire)) {
+    roc_sys_handler.exchange(false, std::memory_order_release);
     wait_for_start_shm.join();
-    shm_unlink(std::to_string(*amd_sys_session_id).c_str());
+    shm_unlink(std::to_string(*roc_sys_session_id).c_str());
   }
   if (session_created.load(std::memory_order_acquire)) {
     session_created.exchange(false, std::memory_order_release);
@@ -527,9 +527,9 @@ void sync_api_trace_callback(rocprofiler_record_tracer_t tracer_record,
   }
 }
 
-void wait_for_amdsys() {
-  while (amd_sys_handler.load(std::memory_order_acquire)) {
-    shm_fd_sn = shm_open(amd_sys_session_id, O_RDONLY, 0666);
+void wait_for_rocsys() {
+  while (roc_sys_handler.load(std::memory_order_acquire)) {
+    shm_fd_sn = shm_open(roc_sys_session_id, O_RDONLY, 0666);
     if (shm_fd_sn < 0) {
       continue;
     }
@@ -539,15 +539,15 @@ void wait_for_amdsys() {
       switch (shmd->command) {
         // Start
         case 4: {
-          printf("AMDSYS:: Starting Tools Session...\n");
+          printf("ROCSYS:: Starting Tools Session...\n");
           CHECK_ROCPROFILER(rocprofiler_start_session(session_id));
           session_created.exchange(true, std::memory_order_release);
           break;
         }
         // Stop
         case 5: {
+          printf("ROCSYS:: Stopping Tools Session...\n");
           if (session_created.load(std::memory_order_acquire)) {
-            printf("AMDSYS:: Stopping Tools Session...\n");
             session_created.exchange(false, std::memory_order_release);
             CHECK_ROCPROFILER(rocprofiler_terminate_session(session_id));
             for ([[maybe_unused]] rocprofiler_buffer_id_t buffer_id : buffer_ids) {
@@ -559,9 +559,8 @@ void wait_for_amdsys() {
         }
         // Exit
         case 6: {
-          printf("AMDSYS:: Exiting the Application..\n");
+          printf("ROCSYS:: Exiting Tools Session...Application might still be finishng up..\n");
           if (session_created.load(std::memory_order_acquire)) {
-            printf("AMDSYS:: Stopping Tools Session...\n");
             session_created.exchange(false, std::memory_order_release);
             CHECK_ROCPROFILER(rocprofiler_terminate_session(session_id));
             for ([[maybe_unused]] rocprofiler_buffer_id_t buffer_id : buffer_ids) {
@@ -569,12 +568,12 @@ void wait_for_amdsys() {
             }
             rocprofiler::TraceBufferBase::FlushAll();
           }
-          amd_sys_handler.exchange(false, std::memory_order_release);
+          roc_sys_handler.exchange(false, std::memory_order_release);
           flag = true;
         }
       }
     }
-    shm_unlink(amd_sys_session_id);
+    shm_unlink(roc_sys_session_id);
     if (flag) break;
   }
 }
@@ -662,11 +661,11 @@ ROCPROFILER_EXPORT bool OnLoad(void* table, uint64_t runtime_version, uint64_t f
 
   std::atexit(finish);
 
-  amd_sys_session_id = getenv("ROCPROFILER_ENABLE_AMDSYS");
-  if (amd_sys_session_id != nullptr) {
-    printf("AMDSYS Session Started!\n");
-    wait_for_start_shm = std::thread{wait_for_amdsys};
-    amd_sys_handler.exchange(true, std::memory_order_release);
+  roc_sys_session_id = getenv("ROCPROFILER_ENABLE_ROCSYS");
+  if (roc_sys_session_id != nullptr) {
+    printf("ROCSYS Session Created!\n");
+    wait_for_start_shm = std::thread{wait_for_rocsys};
+    roc_sys_handler.exchange(true, std::memory_order_release);
   }
 
   CHECK_ROCPROFILER(rocprofiler_initialize());
@@ -876,7 +875,7 @@ ROCPROFILER_EXPORT bool OnLoad(void* table, uint64_t runtime_version, uint64_t f
   if (trace_time_length > 0) {
     trace_period_thread_control.exchange(true, std::memory_order_release);
     trace_period_thread = std::thread{trace_period_func};
-  } else if (amd_sys_session_id == nullptr) {
+  } else if (roc_sys_session_id == nullptr) {
     CHECK_ROCPROFILER(rocprofiler_start_session(session_id));
     session_created.exchange(true, std::memory_order_release);
   }

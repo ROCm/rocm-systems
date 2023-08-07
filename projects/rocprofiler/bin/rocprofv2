@@ -155,7 +155,7 @@ while [ 1 ]; do
     export ROCPROFILER_ROCTX_TRACE=1
     shift
   elif [ "$1" = "--roc-sys" ]; then
-    export ROCPROFILER_ENABLE_AMDSYS=$2
+    export ROCPROFILER_ENABLE_ROCSYS=$2
     shift
     shift
   elif [ "$1" = "--plugin" ]; then

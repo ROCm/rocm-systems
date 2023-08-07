@@ -36,8 +36,8 @@
 #include <experimental/filesystem>
 
 /*
-mpiexec -n 16 amdsys --session-new test launch python app.py
-amdsys
+mpiexec -n 16 rocsys --session-new test launch python app.py
+rocsys
 */
 
 namespace {
@@ -84,13 +84,16 @@ int main(int argc, char* argv[]) {
 
   if (argc < 4) {
     perror(
+        "rocsys: launch must be preceeded by --session <name>\n"
+        "e.g. rocsys --session <SESSION_NAME> launch <MPI_COMMAND> <MPI_ARGUMENTS> rocprofv2\n\t "
+        "<ROCPROFV2_OPTIONS> <APP_EXEC>\n"
+        "where all mpiexec options must come before rocsys\n"
         "rocsys: start must be preceeded by --session <name>\n\t"
         "rocsys --session <name> start \n"
         "rocsys: stop must be preceeded by --session <name>\n \t"
         "rocsys --session <name> stop \n"
-        "rocsys: launch must be preceeded by --session-new <name>\n \t"
-        "e.g. mpiexec -np 16 rocsys --session-new <name> launch py app.py\n"
-        "where all mpiexec options must come before rocsys");
+        "rocsys: exit must be preceeded by --session <name>\n \t"
+        "rocsys --session <name> exit \n");
     exit(1);
   }
 
@@ -117,7 +120,7 @@ int main(int argc, char* argv[]) {
     break;
   }
 
-  const char* shared_memory_key = "AMD_SYS_KEY";
+  const char* shared_memory_key = "ROC_SYS_KEY";
 
   const int SIZE = sizeof(int);
 
@@ -152,14 +155,16 @@ int main(int argc, char* argv[]) {
       break;
     } else {
       report(
+          "rocsys: launch must be preceeded by --session <name>\n"
+          "e.g. rocsys --session <SESSION_NAME> launch <MPI_COMMAND> <MPI_ARGUMENTS> rocprofv2\n\t "
+          "<ROCPROFV2_OPTIONS> <APP_EXEC>\n"
+          "where all mpiexec options must come before rocsys\n"
           "rocsys: start must be preceeded by --session <name>\n\t"
           "rocsys --session <name> start \n"
           "rocsys: stop must be preceeded by --session <name>\n \t"
           "rocsys --session <name> stop \n"
-          "rocsys: launch must be preceeded by --session <name>\n \t"
-          "e.g. rocsys --session <SESSION_NAME> launch <MPI_COMMAND> <MPI_ARGUMENTS> rocprofv2 "
-          "<ROCPROFV2_OPTIONS> <APP_EXEC>\n"
-          "where all mpiexec options must come before rocsys\n",
+          "rocsys: exit must be preceeded by --session <name>\n \t"
+          "rocsys --session <name> exit \n",
           1);
     }
   }
