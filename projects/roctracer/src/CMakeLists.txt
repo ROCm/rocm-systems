@@ -244,9 +244,7 @@ install(TARGETS hip_stats LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/${PROJECT_
 
 endif()
 
-if(NOT ENABLE_ASAN_PACKAGING)
-  option(FILE_REORG_BACKWARD_COMPATIBILITY "Enable File Reorg with backward compatibility" ON)
-endif()
+option(FILE_REORG_BACKWARD_COMPATIBILITY "Enable File Reorg with backward compatibility" OFF)
 
 if(FILE_REORG_BACKWARD_COMPATIBILITY)
 ## To enable/disable #error in wrapper header files
