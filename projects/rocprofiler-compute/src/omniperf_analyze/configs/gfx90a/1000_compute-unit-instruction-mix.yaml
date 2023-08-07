@@ -29,9 +29,9 @@ Panel Config:
             unit: (instr + $normUnit)
             tips: 
           VMEM:
-            avg: AVG(((SQ_INSTS_VMEM - SQ_INSTS_FLAT_LDS_ONLY) / $denom)))
-            min: MIN(((SQ_INSTS_VMEM - SQ_INSTS_FLAT_LDS_ONLY) / $denom)))
-            max: MAX(((SQ_INSTS_VMEM - SQ_INSTS_FLAT_LDS_ONLY) / $denom)))
+            avg: AVG(((SQ_INSTS_VMEM - SQ_INSTS_FLAT_LDS_ONLY) / $denom))
+            min: MIN(((SQ_INSTS_VMEM - SQ_INSTS_FLAT_LDS_ONLY) / $denom))
+            max: MAX(((SQ_INSTS_VMEM - SQ_INSTS_FLAT_LDS_ONLY) / $denom))
             unit: (instr + $normUnit)
             tips: 
           LDS:
