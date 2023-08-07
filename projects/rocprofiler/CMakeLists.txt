@@ -254,12 +254,9 @@ install(
                 WORLD_EXECUTE
     COMPONENT runtime)
 
-# File reorg backward compatibility for non ASAN packaging
-if(NOT ENABLE_ASAN_PACKAGING)
-    # File reorg Backward compatibility
-    option(FILE_REORG_BACKWARD_COMPATIBILITY
-           "Enable File Reorg with backward compatibility" ON)
-endif()
+# File reorg Backward compatibility
+option(FILE_REORG_BACKWARD_COMPATIBILITY
+       "Enable File Reorg with backward compatibility" OFF)
 
 if(FILE_REORG_BACKWARD_COMPATIBILITY)
     # To enabe/disable #error in wrapper header files
