@@ -1586,18 +1586,24 @@ def showAllConcise(deviceList):
 
     @param deviceList: List of DRM devices (can be a single-item list)
     """
-    global PRINT_JSON
+    global PRINT_JSON, appWidth
     if PRINT_JSON:
         print('ERROR: Cannot print JSON/CSV output for concise output')
         sys.exit(1)
+
+    """ Place holder for the actual max size """
+    MAX_ALL_CONCISE_WIDTH = 100
+    appWidth_temp = appWidth
+    appWidth = MAX_ALL_CONCISE_WIDTH
+
     printLogSpacer(' Concise Info ')
     deviceList.sort()
     (temp_type, _) = findFirstAvailableTemp(deviceList[0])
     available_temp_type = temp_type.lower()
     available_temp_type = available_temp_type.replace('(', '')
     available_temp_type = available_temp_type.replace(')', '')
-    header = ['GPU', 'Temp', 'AvgPwr', 'Partitions', 'SCLK', 'MCLK', 'Fan', 'Perf', 'PwrCap', 'VRAM%', 'GPU%']
-    subheader = ['', temp_type, '', '(Mem, Compute)', '', '', '', '', '', '', '']
+    header = ['GPU', '[Model : Revision]', 'Temp', 'AvgPwr', 'Partitions', 'SCLK', 'MCLK', 'Fan', 'Perf', 'PwrCap', 'VRAM%', 'GPU%']
+    subheader = ['', 'Name (20 chars)', temp_type, '', '(Mem, Compute)', '', '', '', '', '', '', '']
     # add additional spaces to match header
     for idx, item in enumerate(subheader):
         header_size = len(header[idx])
@@ -1614,6 +1620,8 @@ def showAllConcise(deviceList):
     values = {}
     degree_sign = u'\N{DEGREE SIGN}'
     for device in deviceList:
+        gpu_dev_product_info = getDevProductInfo(device)
+        gpu_dev_product_info_names = list(gpu_dev_product_info[device])
         temp_val = str(getTemp(device, available_temp_type))
         if temp_val != 'N/A':
             temp_val += degree_sign + 'C'
@@ -1647,10 +1655,19 @@ def showAllConcise(deviceList):
             mem_use_pct='Unsupported'
         if vram_used != None and vram_total != None and float(vram_total) != 0:
             mem_use_pct = '% 3.0f%%' % (100 * (float(vram_used) / float(vram_total)))
-        values['card%s' % (str(device))] = [device, temp_val, avgPwr,
+
+        gpu_dev_product_info_top_name = gpu_dev_product_info_names[0]
+        if (len(gpu_dev_product_info_names) > 1):
+            values['card%s_Info' % (str(device))] = ['', gpu_dev_product_info_names[0], '', '', '',
+                                                    '', '', '',
+                                                    '', '', '', '']
+            gpu_dev_product_info_top_name = gpu_dev_product_info_names[1]
+
+        values['card%s' % (str(device))] = [device, gpu_dev_product_info_top_name, temp_val, avgPwr,
                                             combined_partition, sclk, mclk,
                                             fan, str(perf).lower(), pwrCap,
                                             mem_use_pct, gpu_busy]
+
     val_widths = {}
     for device in deviceList:
         val_widths[device] = [len(str(val)) + 2 for val in values['card%s' % (str(device))]]
@@ -1662,10 +1679,19 @@ def showAllConcise(deviceList):
     printLog(None, "".join(word.ljust(max_widths[col]) for col, word in zip(range(len(max_widths)), subheader)),
              None, useItalics=True)
     printLogSpacer(fill='=')
+
     for device in deviceList:
         printLog(None, "".join(str(word).ljust(max_widths[col]) for col, word in
                                zip(range(len(max_widths)), values['card%s' % (str(device))])), None)
+        gpu_dev_product_info = getDevProductInfo(device)
+        gpu_dev_product_info_names = list(gpu_dev_product_info[device])
+        if (len(gpu_dev_product_info_names) > 1):
+            printLog(None, "".join(str(word).ljust(max_widths[col]) for col, word in
+                                zip(range(len(max_widths)), values['card%s_Info' % (str(device))])), None)
+
     printLogSpacer()
+    """ Restore original max size """
+    appWidth = appWidth_temp
 
 
 def showAllConciseHw(deviceList):
@@ -2376,6 +2402,58 @@ def showProductName(deviceList):
                              'GPU[%s]\t\t: Expected vendor name: Advanced Micro Devices, Inc. [AMD/ATI]\n' \
                              'GPU[%s]\t\t: Actual vendor name' % (device, device), vendor.value.decode())
     printLogSpacer()
+
+
+def getDevProductInfo(device):
+    """ Show the requested product name for the device requested
+
+    @param device: Device we want to get the info for
+    """
+
+    # Retrieve card vendor
+    MAX_BUFF_SIZE = 256
+    MAX_DESC_SIZE = 20
+    device_info = "N/A"
+    device_list = {}
+    vendor = create_string_buffer(MAX_BUFF_SIZE)
+    ret = rocmsmi.rsmi_dev_vendor_name_get(device, vendor, MAX_BUFF_SIZE)
+    # Only continue if GPU vendor is AMD
+    if rsmi_ret_ok(ret, device, 'get_vendor_name') and isAmdDevice(device):
+        # Retrieve the device series
+        series = create_string_buffer(MAX_BUFF_SIZE)
+        ret = rocmsmi.rsmi_dev_name_get(device, series, MAX_BUFF_SIZE)
+        if rsmi_ret_ok(ret, device, 'get_name'):
+            try:
+                device_series = series.value.decode()
+            except UnicodeDecodeError:
+                device_series = "N/A"
+                printErrLog(device, "Unable to read card series")
+
+        # Retrieve the device model
+        model = create_string_buffer(MAX_BUFF_SIZE)
+        ret = rocmsmi.rsmi_dev_subsystem_name_get(device, model, MAX_BUFF_SIZE)
+        if rsmi_ret_ok(ret, device, 'get_subsystem_name'):
+            try:
+                device_model = model.value.decode()
+                device_model = padHexValue(device_model, 4)
+            except UnicodeDecodeError:
+                device_model = "N/A"
+                printErrLog(device, "Unable to read device model")
+
+            try:
+                gpu_revision = padHexValue(getRev(device), 2)
+            except Exception as exc:
+                gpu_revision = "N/A"
+                printErrLog(device, "Unable to read card revision %s" % (exc))
+
+        device_series_str = str(device_series[:MAX_DESC_SIZE])
+        device_series_str = device_series_str.ljust(MAX_DESC_SIZE, ' ')
+        device_model_str  = str(('[' + device_model + ' : ' + gpu_revision + ']'))
+        device_model_str  = str(device_model_str[:MAX_DESC_SIZE])
+        device_model_str  = device_model_str.ljust(MAX_DESC_SIZE, ' ')
+        device_list = {device : [device_series_str, device_model_str]}
+
+    return device_list
 
 
 def showProfile(deviceList):
