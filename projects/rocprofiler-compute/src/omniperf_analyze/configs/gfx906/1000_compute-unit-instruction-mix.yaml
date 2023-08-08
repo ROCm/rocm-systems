@@ -12,6 +12,7 @@ Panel Config:
         id: 1001
         title: Instruction Mix
         header:
+          metric: Metric
           avg: Avg
           min: Min
           max: Max
@@ -35,8 +36,8 @@ Panel Config:
             tips: 
           LDS:
             avg: AVG((SQ_INSTS_LDS / $denom))
-            min: MIN((SQ_INSTS_LDS / $denom))
-            max: MAX((SQ_INSTS_LDS / $denom))
+            min: AVG((SQ_INSTS_LDS / $denom))
+            max: AVG((SQ_INSTS_LDS / $denom))
             unit: (instr + $normUnit)
             tips: 
           VALU - MFMA:
@@ -47,26 +48,26 @@ Panel Config:
             tips: 
           SALU:
             avg: AVG((SQ_INSTS_SALU / $denom))
-            min: MIN((SQ_INSTS_SALU / $denom))
-            max: MAX((SQ_INSTS_SALU / $denom))
+            min: AVG((SQ_INSTS_SALU / $denom))
+            max: AVG((SQ_INSTS_SALU / $denom))
             unit: (instr + $normUnit)
             tips: 
           SMEM:
             avg: AVG((SQ_INSTS_SMEM / $denom))
-            min: MIN((SQ_INSTS_SMEM / $denom))
-            max: MAX((SQ_INSTS_SMEM / $denom))
+            min: AVG((SQ_INSTS_SMEM / $denom))
+            max: AVG((SQ_INSTS_SMEM / $denom))
             unit: (instr + $normUnit)
             tips: 
           Branch:
             avg: AVG((SQ_INSTS_BRANCH / $denom))
-            min: MIN((SQ_INSTS_BRANCH / $denom))
-            max: MAX((SQ_INSTS_BRANCH / $denom))
+            min: AVG((SQ_INSTS_BRANCH / $denom))
+            max: AVG((SQ_INSTS_BRANCH / $denom))
             unit: (instr + $normUnit)
             tips: 
           GDS:
             avg: AVG((SQ_INSTS_GDS / $denom))
-            min: MIN((SQ_INSTS_GDS / $denom))
-            max: MAX((SQ_INSTS_GDS / $denom))
+            min: AVG((SQ_INSTS_GDS / $denom))
+            max: AVG((SQ_INSTS_GDS / $denom))
             unit: (instr + $normUnit)
             tips: 
 
