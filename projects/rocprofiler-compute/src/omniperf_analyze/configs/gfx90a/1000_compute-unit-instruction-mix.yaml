@@ -16,6 +16,9 @@ Panel Config:
           count: Count
           unit: Unit
           tips: Tips
+        style: 
+          type: simple_bar
+          label_txt: (# of instr + $normUnit)
         metric:
           VALU - Vector:
             count: AVG(((SQ_INSTS_VALU - SQ_INSTS_MFMA) / $denom))
@@ -58,6 +61,9 @@ Panel Config:
           count: Count
           unit: Unit
           tips: Tips
+        style: 
+          type: simple_bar
+          label_txt: (# of instr + $normUnit)
         metric:
           INT32:
             count: AVG((SQ_INSTS_VALU_INT32 / $denom))
