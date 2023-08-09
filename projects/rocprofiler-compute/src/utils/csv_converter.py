@@ -33,81 +33,81 @@ from pymongo import MongoClient
 from tqdm import tqdm
 import shutil
 
-# cache = dict()
+cache = dict()
 supported_arch = {"gfx906": "mi50", "gfx908": "mi100", "gfx90a": "mi200"}
 MAX_SERVER_SEL_DELAY = 5000  # 5 sec connection timeout
 
 
-# def kernel_name_shortener(df, cache, level):
-#     if level >= 5:
-#         return df
+def kernel_name_shortener(df, cache, level):
+    if level >= 5:
+        return df
 
-#     columnName = ""
-#     if "KernelName" in df:
-#         columnName = "KernelName"
-#     if "Name" in df:
-#         columnName = "Name"
+    columnName = ""
+    if "KernelName" in df:
+        columnName = "KernelName"
+    if "Name" in df:
+        columnName = "Name"
 
-#     if columnName == "KernelName" or columnName == "Name":
-#         # loop through all indices
-#         for index in df.index:
-#             original_name = df.loc[index, columnName]
-#             if original_name in cache:
-#                 continue
+    if columnName == "KernelName" or columnName == "Name":
+        # loop through all indices
+        for index in df.index:
+            original_name = df.loc[index, columnName]
+            if original_name in cache:
+                continue
 
-#             # cache miss, add the shortened name to the dictionary
-#             new_name = ""
-#             matches = ""
+            # cache miss, add the shortened name to the dictionary
+            new_name = ""
+            matches = ""
 
-#             names_and_args = re.compile(r"(?P<name>[( )A-Za-z0-9_]+)([ ,*<>()]+)(::)?")
+            names_and_args = re.compile(r"(?P<name>[( )A-Za-z0-9_]+)([ ,*<>()]+)(::)?")
 
-#             # works for name Kokkos::namespace::init_lock_array_kernel_threadid(int) [clone .kd]
-#             if names_and_args.search(original_name):
-#                 matches = names_and_args.findall(original_name)
-#             else:
-#                 # Works for first case  '__amd_rocclr_fillBuffer.kd'
-#                 # remove .kd and then parse through original regex
-#                 first_case = re.compile(r"([^\s]+)(.kd)")
-#                 Mod_name_and_args = re.compile(r"(?P<name>[( )A-Za-z0-9_]+)([ ,*<>()]*)")
-#                 interim_name = first_case.search(original_name).group(1)
-#                 matches = Mod_name_and_args.findall(interim_name)
+            # works for name Kokkos::namespace::init_lock_array_kernel_threadid(int) [clone .kd]
+            if names_and_args.search(original_name):
+                matches = names_and_args.findall(original_name)
+            else:
+                # Works for first case  '__amd_rocclr_fillBuffer.kd'
+                # remove .kd and then parse through original regex
+                first_case = re.compile(r"([^\s]+)(.kd)")
+                Mod_name_and_args = re.compile(r"(?P<name>[( )A-Za-z0-9_]+)([ ,*<>()]*)")
+                interim_name = first_case.search(original_name).group(1)
+                matches = Mod_name_and_args.findall(interim_name)
 
-#             current_level = 0
-#             for name in matches:
-#                 ##can cause errors if a function name or argument is equal to 'clone'
-#                 if name[0] == "clone":
-#                     continue
-#                 if len(name) == 3:
-#                     if name[2] == "::":
-#                         continue
+            current_level = 0
+            for name in matches:
+                ##can cause errors if a function name or argument is equal to 'clone'
+                if name[0] == "clone":
+                    continue
+                if len(name) == 3:
+                    if name[2] == "::":
+                        continue
 
-#                 if current_level < level:
-#                     new_name += name[0]
-#                 # closing '>' is to be taken account by the while loop
-#                 if name[1].count(">") == 0:
-#                     if current_level < level:
-#                         if not (current_level == level - 1 and name[1].count("<") > 0):
-#                             new_name += name[1]
-#                     current_level += name[1].count("<")
+                if current_level < level:
+                    new_name += name[0]
+                # closing '>' is to be taken account by the while loop
+                if name[1].count(">") == 0:
+                    if current_level < level:
+                        if not (current_level == level - 1 and name[1].count("<") > 0):
+                            new_name += name[1]
+                    current_level += name[1].count("<")
 
-#                 curr_index = 0
-#                 # cases include '>'  '> >, ' have to go in depth here to not lose account of commas and current level
-#                 while name[1].count(">") > 0 and curr_index < len(name[1]):
-#                     if current_level < level:
-#                         new_name += name[1][curr_index:]
-#                         current_level -= name[1][curr_index:].count(">")
-#                         curr_index = len(name[1])
-#                     elif name[1][curr_index] == (">"):
-#                         current_level -= 1
-#                     curr_index += 1
+                curr_index = 0
+                # cases include '>'  '> >, ' have to go in depth here to not lose account of commas and current level
+                while name[1].count(">") > 0 and curr_index < len(name[1]):
+                    if current_level < level:
+                        new_name += name[1][curr_index:]
+                        current_level -= name[1][curr_index:].count(">")
+                        curr_index = len(name[1])
+                    elif name[1][curr_index] == (">"):
+                        current_level -= 1
+                    curr_index += 1
 
-#             cache[original_name] = new_name
-#             if new_name == None or new_name == "":
-#                 cache[original_name] = original_name
+            cache[original_name] = new_name
+            if new_name == None or new_name == "":
+                cache[original_name] = original_name
 
-#         df[columnName] = df[columnName].map(cache)
+        df[columnName] = df[columnName].map(cache)
 
-#     return df
+    return df
 
 
 # Verify target directory and setup connection
