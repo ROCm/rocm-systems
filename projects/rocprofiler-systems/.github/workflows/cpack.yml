@@ -63,6 +63,9 @@ jobs:
           - os-distro: "ubuntu"
             os-version: "20.04"
             rocm-version: "5.5"
+          - os-distro: "ubuntu"
+            os-version: "20.04"
+            rocm-version: "5.6"
           # ubuntu 22.04
           - os-distro: "ubuntu"
             os-version: "22.04"
@@ -76,6 +79,9 @@ jobs:
           - os-distro: "ubuntu"
             os-version: "22.04"
             rocm-version: "5.5"
+          - os-distro: "ubuntu"
+            os-version: "22.04"
+            rocm-version: "5.6"
           # opensuse 15.3
           - os-distro: "opensuse"
             os-version: "15.3"
@@ -108,6 +114,9 @@ jobs:
           - os-distro: "opensuse"
             os-version: "15.4"
             rocm-version: "5.5"
+          - os-distro: "opensuse"
+            os-version: "15.4"
+            rocm-version: "5.6"
           # RHEL 8.7
           - os-distro: "rhel"
             os-version: "8.7"
@@ -121,6 +130,9 @@ jobs:
           - os-distro: "rhel"
             os-version: "8.7"
             rocm-version: "5.5"
+          - os-distro: "rhel"
+            os-version: "8.7"
+            rocm-version: "5.6"
           # RHEL 9.0
           - os-distro: "rhel"
             os-version: "9.0"
@@ -147,6 +159,9 @@ jobs:
           - os-distro: "rhel"
             os-version: "9.1"
             rocm-version: "5.5"
+          - os-distro: "rhel"
+            os-version: "9.1"
+            rocm-version: "5.6"
 
     steps:
       - uses: actions/checkout@v3
