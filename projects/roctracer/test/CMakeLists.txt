@@ -71,7 +71,7 @@ add_custom_command(OUTPUT MatrixTranspose.c
 hip_add_executable(MatrixTranspose_ctest MatrixTranspose.c)
 ## Adding generated build-id as hip_add_executable doesn't generate automatically
 target_link_options(MatrixTranspose_ctest PRIVATE "-Wl,--build-id=md5")
-target_compile_definitions(MatrixTranspose_ctest PRIVATE HIP_TEST=0 __HIP_PLATFORM_HCC__)
+target_compile_definitions(MatrixTranspose_ctest PRIVATE HIP_TEST=0 __HIP_PLATFORM_AMD__)
 target_include_directories(MatrixTranspose_ctest PRIVATE ${PROJECT_SOURCE_DIR}/inc)
 target_link_libraries(MatrixTranspose_ctest PRIVATE roctracer roctx)
 add_dependencies(mytest MatrixTranspose_ctest)

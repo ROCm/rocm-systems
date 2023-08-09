@@ -38,7 +38,7 @@ set_target_properties(file_plugin PROPERTIES
                       INSTALL_RPATH "${ROCM_APPEND_PRIVLIB_RPATH}")
 
 target_compile_definitions(file_plugin
-  PRIVATE HIP_PROF_HIP_API_STRING=1 __HIP_PLATFORM_HCC__=1)
+  PRIVATE HIP_PROF_HIP_API_STRING=1 __HIP_PLATFORM_AMD__=1)
 
 target_include_directories(file_plugin PRIVATE ${PROJECT_SOURCE_DIR}/inc)
 

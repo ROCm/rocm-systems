@@ -145,7 +145,7 @@ Tracing control API:
 ### 3.2. Tracing Domains
 ```
 Various tracing domains are supported. Each domain is assigned with
-a domain ID. The domains include HSA, HIP, and HCC runtime levels. 
+a domain ID. The domains include HSA, HIP runtime levels.
 
 Traced API domains:
 typedef enum {
@@ -277,11 +277,11 @@ typedef struct {
    uint32_t mode;                                    // roctracer mode
    size_t buffer_size;                               // buffer size
                                                      // power of 2
-   roctracer_allocator_t alloc_fun;                  // memory allocator 
+   roctracer_allocator_t alloc_fun;                  // memory allocator
                                                      // function pointer
    void* alloc_arg;                                  // memory allocator
                                                      // function pointer
-   roctracer_buffer_callback_t buffer_callback_fun;  // tracer record 
+   roctracer_buffer_callback_t buffer_callback_fun;  // tracer record
                                                      // callback function
    void* buffer_callback_arg;                        // tracer record
                                                      // callback arg
@@ -296,12 +296,12 @@ roctracer_status_t roctracer_open_pool(
 
 roctracer_status_t roctracer_open_pool_expl(
    const roctracer_properties_t* properties, // tracer pool properties
-   roctracer_pool_t** pool);                 // [out] returns tracer pool if 
+   roctracer_pool_t** pool);                 // [out] returns tracer pool if
                                              // not NULL, otherwise sets the
                                              // default one if it is not set
-                                             // yet; otherwise the error is 
+                                             // yet; otherwise the error is
                                              // generated
-                                                          				
+
 Close tracer memory pool:
 roctracer_status_t roctracer_close_pool();
 
@@ -374,7 +374,7 @@ roctracer_status_t roctracer_activity_push_external_correlation_id(
 
 Notifies that the calling thread is leaving an external API region.
 Pop an external correlation id for the calling thread.
-roctracer_status_t roctracer_activity_pop_external_correlation_id( 
+roctracer_status_t roctracer_activity_pop_external_correlation_id(
     activity_correlation_id_t* last_id);  // returns the last external correlation id
                                           // if not NULL
 ```
@@ -387,7 +387,7 @@ Tracing stop:
 void roctracer_stop();
 ```
 ## 4. rocTracer Usage Code Examples
-### 4.1. HIP API and HCC ops, GPU Activity Tracing
+### 4.1. HIP API ops, GPU Activity Tracing
 ```
 #include <roctracer_hip.h>
 
@@ -399,7 +399,7 @@ void hip_api_callback(
     void* arg)
 {
    (void)arg;
-   const hip_api_data_t* data = reinterpret_cast <const hip_api_data_t*> 
+   const hip_api_data_t* data = reinterpret_cast <const hip_api_data_t*>
      (callback_data);
    fprintf(stdout, "<%s id(%u)\tcorrelation_id(%lu) %s> ",
          roctracer_id_string(ACTIVITY_DOMAIN_HIP_API, cid),
@@ -411,15 +411,15 @@ void hip_api_callback(
 
 // Activity tracing callback
 void activity_callback(const char* begin, const char* end, void* arg) {
-   const roctracer_record_t* record = reinterpret_cast<const 
+   const roctracer_record_t* record = reinterpret_cast<const
                                       roctracer_record_t*>(begin);
-   const roctracer_record_t* end_record = reinterpret_cast<const 
+   const roctracer_record_t* end_record = reinterpret_cast<const
                                           roctracer_record_t*>(end);
    fprintf(stdout, "\tActivity records:\n");
    while (record < end_record) {
-      const char * name = roctracer_op_string(record->domain, 
+      const char * name = roctracer_op_string(record->domain,
                                               record->activity_id, 0);
-      fprintf(stdout, "\t%s\tcorrelation_id(%lu) time_ns(%lu:%lu) 
+      fprintf(stdout, "\t%s\tcorrelation_id(%lu) time_ns(%lu:%lu)
               device_id(%d) stream_id(%lu)\n",
               name,
               record->correlation_id,
@@ -439,8 +439,8 @@ int main() {
    properties.buffer_size = 12;
    properties.buffer_callback_fun = activity_callback;
    ROCTRACER_CALL(roctracer_open_pool(&properties));
-   
-   // Enable HIP API callbacks. HIP_API_ID_ANY can be used to trace all HIP 
+
+   // Enable HIP API callbacks. HIP_API_ID_ANY can be used to trace all HIP
    // API calls.
    ROCTRACER_CALL(roctracer_enable_op_callback(ACTIVITY_DOMAIN_HIP_API,
                                      HIP_API_ID_hipModuleLaunchKernel,
@@ -505,7 +505,7 @@ THE SOFTWARE.
 
 // Device (Kernel) function, it must be void
 // hipLaunchParm provides the execution configuration
-__global__ void matrixTranspose(hipLaunchParm lp, float* out, float* in, 
+__global__ void matrixTranspose(hipLaunchParm lp, float* out, float* in,
                                 const int width) {
    int x = hipBlockDim_x * hipBlockIdx_x + hipThreadIdx_x;
    int y = hipBlockDim_y * hipBlockIdx_y + hipThreadIdx_y;
@@ -514,7 +514,7 @@ __global__ void matrixTranspose(hipLaunchParm lp, float* out, float* in,
 }
 
 // CPU implementation of matrix transpose
-void matrixTransposeCPUReference(float* output, float* input, const unsigned 
+void matrixTransposeCPUReference(float* output, float* input, const unsigned
                                  int width) {
    for (unsigned int j = 0; j < width; j++) {
       for (unsigned int i = 0; i < width; i++) {
@@ -549,34 +549,34 @@ int main() {
       Matrix = (float*)malloc(NUM * sizeof(float));
       TransposeMatrix = (float*)malloc(NUM * sizeof(float));
       cpuTransposeMatrix = (float*)malloc(NUM * sizeof(float));
-    
+
       // initialize the input data
       for (i = 0; i < NUM; i++) {
          Matrix[i] = (float)i * 10.0f;
       }
-    
+
       // allocate the memory on the device side
       hipMalloc((void**)&gpuMatrix, NUM * sizeof(float));
       hipMalloc((void**)&gpuTransposeMatrix, NUM * sizeof(float));
-    
+
       // Memory transfer from host to device
-      hipMemcpy(gpuMatrix, Matrix, NUM * sizeof(float), 
+      hipMemcpy(gpuMatrix, Matrix, NUM * sizeof(float),
                 hipMemcpyHostToDevice);
-    
+
       // Lauching kernel from host
-      hipLaunchKernel(matrixTranspose, 
-                      dim3(WIDTH / THREADS_PER_BLOCK_X, WIDTH / 
+      hipLaunchKernel(matrixTranspose,
+                      dim3(WIDTH / THREADS_PER_BLOCK_X, WIDTH /
                            THREADS_PER_BLOCK_Y),
-                      dim3(THREADS_PER_BLOCK_X, THREADS_PER_BLOCK_Y), 0, 0, 
+                      dim3(THREADS_PER_BLOCK_X, THREADS_PER_BLOCK_Y), 0, 0,
                       gpuTransposeMatrix, gpuMatrix, WIDTH);
-    
+
       // Memory transfer from device to host
-      hipMemcpy(TransposeMatrix, gpuTransposeMatrix, NUM * sizeof(float), 
+      hipMemcpy(TransposeMatrix, gpuTransposeMatrix, NUM * sizeof(float),
                 hipMemcpyDeviceToHost);
-    
+
       // CPU MatrixTranspose computation
       matrixTransposeCPUReference(cpuTransposeMatrix, Matrix, WIDTH);
-    
+
       // verify the results
       errors = 0;
       double eps = 1.0E-6;
@@ -590,11 +590,11 @@ int main() {
       } else {
          printf("PASSED!\n");
       }
-    
+
       // free the resources on device side
       hipFree(gpuMatrix);
       hipFree(gpuTransposeMatrix);
-    
+
       // free the resources on host side
       free(Matrix);
       free(TransposeMatrix);
@@ -607,7 +607,7 @@ int main() {
 }
 
 /////////////////////////////////////////////////////////////////////////////
-// HIP/HCC Callbacks/Activity tracing
+// HIP Callbacks/Activity tracing
 /////////////////////////////////////////////////////////////////////////////
 #include <roctracer_hip.h>
 
@@ -629,7 +629,7 @@ void hip_api_callback(
    void* arg)
 {
    (void)arg;
-   const hip_api_data_t* data = reinterpret_cast<const hip_api_data_t*>                   
+   const hip_api_data_t* data = reinterpret_cast<const hip_api_data_t*>
                                 (callback_data);
    fprintf(stdout, "<%s id(%u)\tcorrelation_id(%lu) %s> ",
         roctracer_op_string(ACTIVITY_DOMAIN_HIP_API, cid, 0),
@@ -651,7 +651,7 @@ void hip_api_callback(
                   (uint32_t)(data->args.hipMalloc.size));
             break;
          case HIP_API_ID_hipFree:
-            fprintf(stdout, "ptr(%p), 
+            fprintf(stdout, "ptr(%p),
                   data->args.hipFree.ptr);
             break;
          case HIP_API_ID_hipModuleLaunchKernel:
@@ -676,18 +676,18 @@ void hip_api_callback(
 }
 
 // Activity tracing callback
-//   hipMalloc id(3) correlation_id(1): 
+//   hipMalloc id(3) correlation_id(1):
 //   begin_ns(1525888652762640464) end_ns(1525888652762877067)
 void activity_callback(const char* begin, const char* end, void* arg) {
-   const roctracer_record_t* record = reinterpret_cast 
+   const roctracer_record_t* record = reinterpret_cast
                                       <const roctracer_record_t*>(begin);
    const roctracer_record_t* end_record = reinterpret_cast
                                       <const roctracer_record_t*>(end);
    fprintf(stdout, "\tActivity records:\n"); fflush(stdout);
    while (record < end_record) {
-      const char * name = roctracer_op_string(record->domain, 
+      const char * name = roctracer_op_string(record->domain,
                                               record->activity_id, 0);
-      fprintf(stdout, "\t%s\tcorrelation_id(%lu) time_ns(%lu:%lu) \ 
+      fprintf(stdout, "\t%s\tcorrelation_id(%lu) time_ns(%lu:%lu) \
                       device_id(%d) stream_id(%lu)",
               name,
               record->correlation_id,
@@ -696,7 +696,7 @@ void activity_callback(const char* begin, const char* end, void* arg) {
               record->device_id,
               record->stream_id
               );
-      if (record->kind == hc::HSA_OP_ID_COPY) 
+      if (record->kind == hc::HSA_OP_ID_COPY)
          fprintf(stdout, " bytes(0x%zx)", record->bytes);
       fprintf(stdout, "\n");
       fflush(stdout);
@@ -724,7 +724,7 @@ void stop_tracing() {
    ROCTRACER_CALL(roctracer_disable_api_callback());
    ROCTRACER_CALL(roctracer_disable_api_activity());
    ROCTRACER_CALL(roctracer_close_pool());
-   std::cout << "# STOP  #############################" << std::endl 
+   std::cout << "# STOP  #############################" << std::endl
              << std::flush;
 }
 /////////////////////////////////////////////////////////////////////////////
