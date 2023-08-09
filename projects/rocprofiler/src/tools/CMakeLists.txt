@@ -26,7 +26,7 @@ target_include_directories(
 target_compile_definitions(
     rocprofiler_tool
     PUBLIC AMD_INTERNAL_BUILD
-    PRIVATE HIP_PROF_HIP_API_STRING=1 __HIP_PLATFORM_HCC__=1)
+    PRIVATE HIP_PROF_HIP_API_STRING=1 __HIP_PLATFORM_AMD__=1)
 
 if(ASAN)
     target_compile_options(rocprofiler_tool PRIVATE -fsanitize=address)

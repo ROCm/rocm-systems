@@ -142,7 +142,7 @@ add_custom_command(
     COMMAND
         ${CMAKE_C_COMPILER}
         "$<$<BOOL:${HIP_INCLUDE_DIRECTORIES}>:-I$<JOIN:${HIP_INCLUDE_DIRECTORIES},$<SEMICOLON>-I>>"
-        -E "${HIP_RUNTIME_API_H}" -D__HIP_PLATFORM_HCC__=1 -D__HIP_ROCclr__=1 -o
+        -E "${HIP_RUNTIME_API_H}" -D__HIP_PLATFORM_AMD__=1 -D__HIP_ROCclr__=1 -o
         hip_runtime_api.h.i
     BYPRODUCTS hip_runtime_api.h.i
     COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/script/gen_ostream_ops.py -in

@@ -44,7 +44,7 @@ target_compile_definitions(
     PUBLIC AMD_INTERNAL_BUILD
     PRIVATE
         HIP_PROF_HIP_API_STRING=1
-        __HIP_PLATFORM_HCC__=1
+        __HIP_PLATFORM_AMD__=1
         CTF_PLUGIN_METADATA_FILE_PATH="${CMAKE_INSTALL_PREFIX}/${METADATA_STREAM_FILE_DIR}/metadata"
     )
 target_include_directories(
@@ -131,7 +131,7 @@ list(TRANSFORM HIP_INCLUDE_DIRS PREPEND -I)
 add_custom_command(
     OUTPUT hip_erts.yaml hip_begin.cpp.i hip_end.cpp.i
     COMMAND ${CMAKE_C_COMPILER} ${HIP_INCLUDE_DIRS} -E "${HIP_RUNTIME_API_H}"
-            -D__HIP_PLATFORM_HCC__=1 -D__HIP_ROCclr__=1 -o hip_runtime_api.h.i
+            -D__HIP_PLATFORM_AMD__=1 -D__HIP_ROCclr__=1 -o hip_runtime_api.h.i
     COMMAND cat hip_runtime_api.h.i "${HIP_PROF_STR_H}" > hip_input.h
     BYPRODUCTS hip_runtime_api.h.i hip_input.h
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/gen_api_files.py" hip
