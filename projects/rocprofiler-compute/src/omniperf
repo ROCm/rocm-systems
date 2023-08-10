@@ -446,6 +446,21 @@ def characterize_app(args, VER):
     # Manually join each pmc_perf*.csv output
     if args.use_rocscope == False:
         join_prof(workload_dir, args.join_type, log, args.verbose)
+        #demangle
+        for filename in os.listdir(workload_dir):
+                try:
+                    # fileName = file[0 : file.find(".")]
+                    # Only shorten KernelNames if instructed to
+                    if args.kernelVerbose < 5:
+                        t1 = pd.read_csv(
+                            os.path.join(workload_dir, filename),
+                            on_bad_lines="skip",
+                            engine="python",
+                        )
+                        t2 = csv_converter.kernel_name_shortener(t1, cache, level=args.kernelVerbose)
+                        t2.to_csv(fname, index=False)
+                except pd.errors.EmptyDataError:
+                    print("Skipping empty csv " + filename)
 
     # Close log
     log.close()
@@ -660,6 +675,7 @@ def omniperf_profile(args, VER):
                 run_rocscope(args, fname)
             else:
                 run_prof(fname, workload_dir, perfmon_dir, args.remaining, args.target, log, args.verbose)
+                
 
         # Update timestamps
         replace_timestamps(workload_dir, log)
@@ -667,6 +683,22 @@ def omniperf_profile(args, VER):
         # Manually join each pmc_perf*.csv output
         if args.use_rocscope == False:
             join_prof(workload_dir, args.join_type, log, args.verbose)
+            #demangle
+            for filename in os.listdir(workload_dir):
+                if filename.endswith('.csv'):
+                    try:
+                        # fileName = file[0 : file.find(".")]
+                        # Only shorten KernelNames if instructed to
+                        if args.kernelVerbose < 5:
+                            t1 = pd.read_csv(
+                                os.path.join(workload_dir, filename),
+                                on_bad_lines="skip",
+                                engine="python",
+                            )
+                            t2 = csv_converter.kernel_name_shortener(t1, cache, level=args.kernelVerbose)
+                            t2.to_csv(os.path.join(workload_dir, filename), index=False)
+                    except pd.errors.EmptyDataError:
+                        print("Skipping empty csv " + filename)
 
     # Generate sysinfo
     gen_sysinfo(args.name, workload_dir, args.ipblocks, args.remaining, args.no_roof)
@@ -739,7 +771,7 @@ def main():
     # PROFILE MODE
     ##############
     if args.mode == "profile":
-        Extractionlvl = 3 #args.extraction_level
+        Extractionlvl = args.kernelVerbose
         print("Resolving rocprof")
         resolve_rocprof()
         # Cannot access parent directories
@@ -777,43 +809,28 @@ def main():
             roof_setup(args, my_parser, VER)
             # Generate roofline
             roofline_only(args.path, args.device, args.sort, args.mem_level, args.kernel_names, args.verbose)
-            #demangle
-            for file in os.listdir(args.path):
-                if file.endswith(".csv"):
-                    try:
-                        fileName = file[0 : file.find(".")]
-                        # Only shorten KernelNames if instructed to
-                        if Extractionlvl < 5:
-                            t1 = pd.read_csv(
-                                os.listdir(args.path) + "/" + file,
-                                on_bad_lines="skip",
-                                engine="python",
-                            )
-
-                            t2 = csv_converter.kernel_name_shortener(t1, cache, level=Extractionlvl)
-                    except pd.errors.EmptyDataError:
-                        print("Skipping empty csv " + file)
 
         # Profile only
         else:
             print("\n-------------\nProfile only\n-------------\n")
             omniperf_profile(args, VER)
+            workload_dir = args.path
             #demangle
-            for file in os.listdir(args.path):
-                if file.endswith(".csv"):
+            for filename in os.listdir(workload_dir):
+                if filename.endswith('.csv'):
                     try:
-                        fileName = file[0 : file.find(".")]
+                        # fileName = file[0 : file.find(".")]
                         # Only shorten KernelNames if instructed to
-                        if Extractionlvl < 5:
+                        if args.kernelVerbose < 5:
                             t1 = pd.read_csv(
-                                os.listdir(args.path) + "/" + file,
+                                os.path.join(workload_dir, filename),
                                 on_bad_lines="skip",
                                 engine="python",
                             )
-
-                            t2 = csv_converter.kernel_name_shortener(t1, cache, level=Extractionlvl)
+                            t2 = csv_converter.kernel_name_shortener(t1, cache, level=args.kernelVerbose)
+                            t2.to_csv(os.path.join(workload_dir, filename), index=False)
                     except pd.errors.EmptyDataError:
-                        print("Skipping empty csv " + file)
+                        print("Skipping empty csv " + filename)
 
     ##############
     # DATABASE MODE

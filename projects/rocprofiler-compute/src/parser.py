@@ -204,6 +204,15 @@ def parse(my_parser):
         nargs=argparse.REMAINDER,
         help="\t\t\tProvide command for profiling after double dash.",
     )
+    profile_group.add_argument(
+        "-f",
+        "--kernelVerbose",
+        required=False,
+        metavar="",
+        help="\t\t\t\tSpecify Kernel Name verbose level 1-5. Lower the level, shorter the kernel name. (DEFAULT: 2) (DISABLE: 5)",
+        default=2,
+        type=int,
+    )
 
     ## Roofline Command Line Options
     roofline_group.add_argument(
@@ -513,4 +522,13 @@ def parse(my_parser):
         "--random-port",
         action="store_true",
         help="\t\tRandomly generate a port to launch GUI application.\n\t\tRegistered Ports range inclusive (1024-49151).",
+    )
+    analyze_group.add_argument(
+        "-f",
+        "--kernelVerbose",
+        required=False,
+        metavar="",
+        help="\t\t\t\tSpecify Kernel Name verbose level 1-5. Lower the level, shorter the kernel name. (DEFAULT: 2) (DISABLE: 5)",
+        default=2,
+        type=int,
     )
