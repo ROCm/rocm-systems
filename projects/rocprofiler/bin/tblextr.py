@@ -479,6 +479,7 @@ def fill_api_db(table_name, db, indir, api_name, api_pid, dep_pid, dep_list, dep
           if (proc_id,stream_id) in last_hip_api_map:
             (last_hip_api_corr_id, last_hip_api_from_pid) = last_hip_api_map[(proc_id,stream_id)][-1]
             sync_api_beg_us = int((int(rec_vals[0]) - START_NS) / 1000)
+            if not proc_id in dep_dict: dep_dict[proc_id] = {}
             if HIP_PID not in dep_dict[proc_id]:
               dep_dict[proc_id][HIP_PID] = { 'pid': last_hip_api_from_pid, 'from': [], 'to': {}, 'id': [] }
             dep_dict[proc_id][HIP_PID]['from'].append((-1, stream_id, thread_id))
