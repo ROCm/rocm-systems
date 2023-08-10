@@ -826,7 +826,12 @@ int Device::readDevInfoBinary(DevInfoTypes type, std::size_t b_size,
   }
   ss << "Successfully read DevInfoBinary for DevInfoType ("
      << RocmSMI::devInfoTypesStrings.at(type) << ") - SYSFS ("
-     << sysfs_path << "), returning binaryData = " << p_binary_data;
+     << sysfs_path << "), returning binaryData = " << p_binary_data
+     << "; byte_size = " << std::dec << static_cast<int>(b_size);
+
+  std::string metricDescription = "AMD SMI GPU METRICS (16-byte width), "
+                                  + sysfs_path;
+  logHexDump(metricDescription.c_str(), p_binary_data, b_size, 16);
   LOG_INFO(ss);
   return 0;
 }

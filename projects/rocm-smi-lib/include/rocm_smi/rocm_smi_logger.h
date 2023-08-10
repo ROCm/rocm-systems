@@ -100,6 +100,7 @@ typedef enum LOG_TYPE {
   NO_LOG = 1,
   CONSOLE = 2,
   FILE_LOG = 3,
+  BOTH_FILE_AND_CONSOLE = 4
 } LogType;
 
 class Logger {

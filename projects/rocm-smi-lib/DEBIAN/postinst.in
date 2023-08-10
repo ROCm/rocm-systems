@@ -62,12 +62,11 @@ EOF
     # confirm logrotate file exists in daily
     if [ -f /etc/cron.daily/logrotate ]; then
       # move logrotate daily to hourly
-      if [ -f /etc/cron.hourly/logrotate ]; then
+      if [ -d /etc/cron.hourly ]; then
         sudo mv /etc/cron.daily/logrotate /etc/cron.hourly/logrotate
       else
         echo "[WARNING] Could find and configure hourly cron for $packageName's"\
         " logrotate. $packageName logs (when turned on) will not rotate properly."
-        return
       fi
     else
       # confirm that it's already been moved to hourly
@@ -77,6 +76,7 @@ EOF
         "$packageName logs (when turned on) may not rotate properly."
       fi
     fi
+    return #done configuring for non-systemd timers
   else
     # Configure systemd timers - the typical setup for modern Linux logrotation setups
     if [ -f /lib/systemd/system/logrotate.timer ]; then
@@ -102,6 +102,7 @@ EOF
       echo "[WARNING] Could not configure systemd timer for $packageName's logrotate."\
       "$packageName logs (when turned on) will not rotate properly."
     fi
+    return #done configuring for systemd timers
   fi
 }
 

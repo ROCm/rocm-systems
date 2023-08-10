@@ -186,10 +186,7 @@ set (CPACK_RPM_TESTS_PACKAGE_REQUIRES "python3, rocm-core")
 add_subdirectory("rocm_smi")
 add_subdirectory("oam")
 
-# Disable file reorg backward compatibility for ASAN packaging
-if(NOT ENABLE_ASAN_PACKAGING)
-  option(FILE_REORG_BACKWARD_COMPATIBILITY "Enable File Reorg with backward compatibility" ON)
-endif()
+option(FILE_REORG_BACKWARD_COMPATIBILITY "Enable File Reorg with backward compatibility" OFF)
 
 # Add tests
 if(BUILD_TESTS)

@@ -57,6 +57,8 @@
 #include <algorithm>
 #include <vector>
 #include <regex>
+#include <iomanip>
+#include <type_traits>
 
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_utils.h"
@@ -103,7 +105,7 @@ bool FileExists(char const *filename) {
   return (stat(filename, &buf) == 0);
 }
 
-static void debugFilesDiscovered(std::vector<std::string> files) {
+static inline void debugFilesDiscovered(std::vector<std::string> files) {
   std::ostringstream ss;
   int numberOfFilesFound = static_cast<int>(files.size());
   ss << "fileName.size() = " << numberOfFilesFound
@@ -435,9 +437,13 @@ rsmi_status_t storeTmpFile(uint32_t dv_ind, std::string parameterName,
   }
 
   chmod(fileName, S_IRUSR|S_IRGRP|S_IROTH);
-  write(fd, storageData.c_str(), storageData.size());
+  ssize_t rc_write = write(fd, storageData.c_str(), storageData.size());
   close(fd);
-  return RSMI_STATUS_SUCCESS;
+  if (rc_write == -1) {
+    return RSMI_STATUS_FILE_ERROR;
+  } else {
+    return RSMI_STATUS_SUCCESS;
+  }
 }
 
 std::vector<std::string> getListOfAppTmpFiles() {
@@ -573,14 +579,20 @@ std::string getRSMIStatusString(rsmi_status_t ret) {
 // string domainName = domain name of the the system's node on the network
 // string os_distribution = pretty name of os distribution
 // (typically found in /etc/*-release file)
+// string endianness = system's endianness.
+// Expressed as big endian or little endian.
+// Big Endian (BE), multi-bit symbols encoded as big endian (MSB first)
+// Little Endian (LE), multi-bit symbols encoded as little endian (LSB first)
 std::tuple<bool, std::string, std::string, std::string, std::string,
-           std::string, std::string, std::string> getSystemDetails(void) {
+           std::string, std::string, std::string, std::string>
+           getSystemDetails(void) {
   struct utsname buf;
   bool errorDetected = false;
   std::string temp_data;
   std::string sysname, nodename, release, version, machine;
   std::string domainName = "<undefined>";
   std::string os_distribution = "<undefined>";
+  std::string endianness = "<undefined>";
 
   if (uname(&buf) < 0) {
     errorDetected = true;
@@ -608,8 +620,16 @@ std::tuple<bool, std::string, std::string, std::string, std::string,
       }
     }
   }
+  if (isSystemBigEndian()) {
+    endianness = "Big Endian, multi-bit symbols encoded as"
+                 " big endian (MSB first)";
+  } else {
+    endianness = "Little Endian, multi-bit symbols encoded as"
+                 " little endian (LSB first)";
+  }
   return std::make_tuple(errorDetected, sysname, nodename, release,
-                         version, machine, domainName, os_distribution);
+                         version, machine, domainName, os_distribution,
+                         endianness);
 }
 
 // If logging is enabled through RSMI_LOGGING environment variable.
@@ -617,9 +637,10 @@ std::tuple<bool, std::string, std::string, std::string, std::string,
 void logSystemDetails(void) {
   std::ostringstream ss;
   bool errorDetected;
-  std::string sysname, node, release, version, machine, domain, distName;
+  std::string sysname, node, release, version, machine, domain, distName,
+              endianness;
   std::tie(errorDetected, sysname, node, release, version, machine, domain,
-           distName) = getSystemDetails();
+           distName, endianness) = getSystemDetails();
   if (errorDetected == false) {
     ss << "====== Gathered system details ============\n"
        << "SYSTEM NAME: " << sysname << "\n"
@@ -628,13 +649,103 @@ void logSystemDetails(void) {
        << "RELEASE: " << release << "\n"
        << "VERSION: " << version << "\n"
        << "MACHINE TYPE: " << machine << "\n"
-       << "DOMAIN: " << domain << "\n";
+       << "DOMAIN: " << domain << "\n"
+       << "ENDIANNESS: " << endianness << "\n";
     LOG_INFO(ss);
   } else {
     ss << "====== Gathered system details ============\n"
        << "Could not retrieve system details";
     LOG_ERROR(ss);
   }
+}
+
+// Usage:
+//     logHexDump(desc, addr, len, bytesPerLine);
+//         desc:    if non-NULL, printed as a description before hex dump.
+//         addr:    the address to start dumping from.
+//         len:     the number of bytes to dump.
+//         bytesPerLine: number of bytes on each output line.
+void logHexDump(
+  const char *desc, const void *addr, const size_t len, size_t bytesPerLine) {
+  // UNCOMMENT: printf lines if you want to see directly to stdout
+  std::ostringstream ss;
+  // Silently ignore per-line values.
+  if (bytesPerLine < 4 || bytesPerLine > 64) bytesPerLine = 16;
+
+  size_t i;
+  unsigned char buff[bytesPerLine + 1];
+  const unsigned char *pc           // ptr to data (char, 1 byte sized data)
+                          = (const unsigned char *) addr;
+
+  // Output description if given.
+  // if (desc != NULL) printf("%s:\n", desc);
+  if (desc != NULL) ss << "\n" << desc << "\n";
+
+  // Length checks.
+  if (len == 0) {
+    // printf("  ZERO LENGTH\n");
+    ss << "  ZERO LENGTH\n";
+    LOG_ERROR(ss);
+    return;
+  }
+  std::string endianness = "<undefined>";
+  if (isSystemBigEndian()) {
+    endianness = "** System is Big Endian, multi-bit symbols encoded as"
+                 " big endian (MSB first) **";
+  } else {
+    endianness = "** System is Little Endian, multi-bit symbols encoded as"
+                 " little endian (LSB first) **";
+  }
+  ss << "\t" << endianness << "\n";
+
+  // Process every byte in the data.
+  for (i = 0; i < len; i++) {
+    // Multiple of bytesPerLine means new or first line (with line offset).
+    if ((i % bytesPerLine) == 0) {
+      // Only print previous-line ASCII buffer for lines beyond first.
+      // if (i != 0) printf("  %s\n", buff);
+      if (i != 0) ss << "  " << buff << "\n";
+      // Output the offset of current line.
+      // printf("  %08lx ", i);
+      ss << "  " << std::setw(8) << std::setfill('0') << std::hex << i << " ";
+    }
+
+    // Now the hex code for the specific character.
+    // printf(" %02x", pc[i]);
+
+    ss << " " << std::setw(2) << std::setfill('0') << std::hex
+       << static_cast<unsigned>(pc[i]);
+
+    // And buffer a printable ASCII character for later.
+    // x20 = 32 || x7e = 126 (ascii table range)
+    if ((pc[i] < 0x20) || (pc[i] > 0x7e)) { // isprint() may be better.
+      buff[i % bytesPerLine] = '.';
+    } else {
+      buff[i % bytesPerLine] = pc[i];
+    }
+    buff[(i % bytesPerLine) + 1] = '\0';
+  }
+
+  // Pad out last line if not exactly bytesPerLine characters.
+  while ((i % bytesPerLine) != 0) {
+    // printf("   ");
+    ss << "   ";
+    i++;
+  }
+
+  // And print the final ASCII buffer.
+  // printf("  %s\n", buff);
+  ss << "  " << buff << "\n";
+  LOG_DEBUG(ss);
+}
+
+bool isSystemBigEndian() {
+  int n = 1;
+  bool isBigEndian = true;
+  if (*(char *)&n == 1) {
+    isBigEndian = false;
+  }
+  return isBigEndian;
 }
 
 }  // namespace smi

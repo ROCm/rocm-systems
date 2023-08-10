@@ -115,6 +115,7 @@ class RocmSMI {
     const RocmSMI_env_vars& getEnv(void);
     void printEnvVarInfo(void);
     bool isLoggingOn(void);
+    uint32_t getLogSetting(void);
     static const std::map<amd::smi::DevInfoTypes, std::string> devInfoTypesStrings;
 
  private:

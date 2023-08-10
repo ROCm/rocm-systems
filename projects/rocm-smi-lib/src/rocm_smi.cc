@@ -673,8 +673,8 @@ rsmi_dev_ecc_count_get(uint32_t dv_ind, rsmi_gpu_block_t block,
 
     default:
       ss << __PRETTY_FUNCTION__ << " | ======= end ======="
-         << ", default case -> reporting RSMI_STATUS_NOT_SUPPORTED"
-         << amd::smi::getRSMIStatusString(ret);
+         << ", default case -> reporting "
+         << amd::smi::getRSMIStatusString(RSMI_STATUS_NOT_SUPPORTED);
       LOG_ERROR(ss);
       return RSMI_STATUS_NOT_SUPPORTED;
   }
