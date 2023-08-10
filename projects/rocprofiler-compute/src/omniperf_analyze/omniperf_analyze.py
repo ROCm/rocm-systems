@@ -222,15 +222,17 @@ def run_cli(args, runs):
     # If we assume the panel layout for all archs are similar, it doesn't matter
     # which archConfig passed into show_all function.
     # After decide to how to manage kernels display patterns, we can revisit it.
-    cache =dict()
+    cache = dict()
     for d in args.path:
-        #demangle
+        # demangle
         for filename in os.listdir(d[0]):
-            if filename.endswith('.csv'):
-                df = pd.read_csv(os.path.join(d[0],filename))
-                new_df = csv_converter.kernel_name_shortener(df, cache, args.kernelVerbose)
-                new_df.to_csv(os.path.join(d[0],filename), index=False)
-            
+            if filename.endswith(".csv"):
+                df = pd.read_csv(os.path.join(d[0], filename))
+                new_df = csv_converter.kernel_name_shortener(
+                    df, cache, args.kernelVerbose
+                )
+                new_df.to_csv(os.path.join(d[0], filename), index=False)
+
         file_io.create_df_kernel_top_stats(
             d[0],
             runs[d[0]].filter_gpu_ids,

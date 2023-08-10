@@ -39,6 +39,7 @@ cache = dict()
 supported_arch = {"gfx906": "mi50", "gfx908": "mi100", "gfx90a": "mi200"}
 MAX_SERVER_SEL_DELAY = 5000  # 5 sec connection timeout
 
+
 def kernel_name_shortener(df, cache, level):
     if level >= 5:
         return df
@@ -115,6 +116,7 @@ def kernel_name_shortener(df, cache, level):
         df[columnName] = df[columnName].map(cache)
 
     return df
+
 
 # Verify target directory and setup connection
 def parse(args, profileAndExport):
@@ -243,16 +245,16 @@ def convert_folder(connectionInfo, Extractionlvl):
                 #     os.system(cmd)
                 # else:
                 cmd = (
-                        "mongoimport --quiet --uri mongodb://{}:{}@{}:{}/{}?authSource=admin --file {} -c {} --drop --type csv --headerline"
-                    ).format(
-                        connectionInfo["username"],
-                        connectionInfo["password"],
-                        connectionInfo["host"],
-                        connectionInfo["port"],
-                        connectionInfo["db"],
-                        connectionInfo["workload"] + "/" + file,
-                        fileName,
-                    )
+                    "mongoimport --quiet --uri mongodb://{}:{}@{}:{}/{}?authSource=admin --file {} -c {} --drop --type csv --headerline"
+                ).format(
+                    connectionInfo["username"],
+                    connectionInfo["password"],
+                    connectionInfo["host"],
+                    connectionInfo["port"],
+                    connectionInfo["db"],
+                    connectionInfo["workload"] + "/" + file,
+                    fileName,
+                )
                 os.system(cmd)
                 i += 1
             except pd.errors.EmptyDataError:
