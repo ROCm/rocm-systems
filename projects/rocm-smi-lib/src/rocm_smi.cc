@@ -78,6 +78,7 @@
 #include "rocm_smi/rocm_smi_logger.h"
 
 using namespace ROCmLogging;
+using namespace amd::smi;
 
 static const uint32_t kMaxOverdriveLevel = 20;
 static const float kEnergyCounterResolution = 15.3f;
@@ -2475,7 +2476,16 @@ rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_type,
   }
 
   if (temperature == nullptr) {
-      return RSMI_STATUS_INVALID_ARGS;
+    ss << __PRETTY_FUNCTION__
+       << " | ======= end ======= "
+       << " | Fail "
+       << " | Device #: " << dv_ind
+       << " | Type: " << monitorTypesToString.at(mon_type)
+       << " | Cause: temperature was a null ptr reference"
+       << " | Returning = "
+       << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS) << " |";
+    LOG_ERROR(ss);
+    return RSMI_STATUS_INVALID_ARGS;
   }
 
   // The HBM temperature is retreived from the gpu_metrics
@@ -2484,12 +2494,32 @@ rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_type,
      || sensor_type == RSMI_TEMP_TYPE_HBM_2
      || sensor_type == RSMI_TEMP_TYPE_HBM_3) {
        if (metric != RSMI_TEMP_CURRENT) {   // only support RSMI_TEMP_CURRENT
+          ss << __PRETTY_FUNCTION__
+             << " | ======= end ======= "
+             << " | Fail "
+             << " | Device #: " << dv_ind
+             << " | Type: " << monitorTypesToString.at(mon_type)
+             << " | Cause: To retreive HBM temp, we only support metric = "
+             << "RSMI_TEMP_CURRENT"
+             << " | Returning = "
+             << getRSMIStatusString(RSMI_STATUS_NOT_SUPPORTED) << " |";
+          LOG_ERROR(ss);
           return RSMI_STATUS_NOT_SUPPORTED;
        }
 
        rsmi_gpu_metrics_t gpu_metrics;
        ret = rsmi_dev_gpu_metrics_info_get(dv_ind, &gpu_metrics);
        if (ret != RSMI_STATUS_SUCCESS) {
+        ss << __PRETTY_FUNCTION__
+           << " | ======= end ======= "
+           << " | Fail "
+           << " | Device #: " << dv_ind
+           << " | Type: " << monitorTypesToString.at(mon_type)
+           << " | Cause: rsmi_dev_gpu_metrics_info_get returned "
+           << getRSMIStatusString(ret)
+           << " | Returning = "
+           << getRSMIStatusString(ret) << " |";
+         LOG_ERROR(ss);
          return ret;
        }
 
@@ -2509,11 +2539,28 @@ rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_type,
          default:
            return RSMI_STATUS_INVALID_ARGS;
        }
-       if (val_ui16 == UINT16_MAX)
+       if (val_ui16 == UINT16_MAX) {
+          ss << __PRETTY_FUNCTION__
+             << " | ======= end ======= "
+             << " | Fail "
+             << " | Device #: " << dv_ind
+             << " | Type: " << monitorTypesToString.at(mon_type)
+             << " | Cause: Reached UINT16 max value, overflow"
+             << " | Returning = "
+             << getRSMIStatusString(RSMI_STATUS_NOT_SUPPORTED) << " |";
+          LOG_ERROR(ss);
           return RSMI_STATUS_NOT_SUPPORTED;
-       else
+       } else
           *temperature = val_ui16 * CENTRIGRADE_TO_MILLI_CENTIGRADE;
 
+       ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
+          << " | Success "
+          << " | Device #: " << dv_ind
+          << " | Type: " << monitorTypesToString.at(mon_type)
+          << " | Data: " << *temperature
+          << " | Returning = "
+          << getRSMIStatusString(RSMI_STATUS_SUCCESS) << " | ";
+       LOG_INFO(ss);
        return RSMI_STATUS_SUCCESS;
   }  // end HBM temperature
 
@@ -2522,6 +2569,15 @@ rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_type,
   GET_DEV_FROM_INDX
 
   if (dev->monitor() == nullptr) {
+    ss << __PRETTY_FUNCTION__
+       << " | ======= end ======= "
+       << " | Fail "
+       << " | Device #: " << dv_ind
+       << " | Type: " << monitorTypesToString.at(mon_type)
+       << " | Cause: monitor returned nullptr"
+       << " | Returning = "
+       << getRSMIStatusString(RSMI_STATUS_NOT_SUPPORTED) << " |";
+    LOG_ERROR(ss);
     return RSMI_STATUS_NOT_SUPPORTED;
   }
   std::shared_ptr<amd::smi::Monitor> m = dev->monitor();
@@ -2535,6 +2591,15 @@ rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_type,
   CHK_API_SUPPORT_ONLY(temperature, metric, sensor_index)
 
   ret = get_dev_mon_value(mon_type, dv_ind, sensor_index, temperature);
+  ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
+     << " | Success "
+     << " | Device #: " << dv_ind
+     << " | Sensor_index: " << sensor_index
+     << " | Type: " << monitorTypesToString.at(mon_type)
+     << " | Data: " << *temperature
+     << " | Returning = "
+     << getRSMIStatusString(ret) << " | ";
+  LOG_INFO(ss);
 
   return ret;
   CATCH

@@ -170,6 +170,7 @@ static uint32_t GetDeviceIndex(const std::string s) {
 // computed for cardX.
 // On success, return drm_minor which is >= 128 otherwise return 0
 static uint32_t  GetDrmRenderMinor(const std::string s) {
+  std::ostringstream ss;
   std::string drm_path = s;
   int drm_minor = 0;
   const std::string render_file_prefix = "renderD";
@@ -195,6 +196,10 @@ static uint32_t  GetDrmRenderMinor(const std::string s) {
   if (closedir(drm_dir)) {
     return 0;
   }
+
+  ss << __PRETTY_FUNCTION__ << " | Discovered drmRenderMinor = "
+     << std::to_string(drm_minor) << " | For drm_path = " << drm_path << " | ";
+  LOG_DEBUG(ss);
   return static_cast<uint32_t>(drm_minor);
 }
 
@@ -377,11 +382,15 @@ RocmSMI::Initialize(uint64_t flags) {
 
   // Remove any drm nodes that don't have  a corresponding readable kfd node.
   // kfd nodes will not be added if their properties file is not readable.
+  std::ostringstream ss;
   auto dev_iter = devices_.begin();
   while (dev_iter != devices_.end()) {
     uint64_t bdfid = (*dev_iter)->bdfid();
     if (tmp_map.find(bdfid) == tmp_map.end()) {
+      ss << __PRETTY_FUNCTION__ << " | removing device = "
+         << (*dev_iter)->path();
       dev_iter = devices_.erase(dev_iter);
+      LOG_DEBUG(ss);
       continue;
     }
     dev_iter++;
@@ -411,6 +420,9 @@ RocmSMI::Initialize(uint64_t flags) {
   }
   // Leaving below to help debug temp file issues
   // displayAppTmpFilesContent();
+  std::string amdGPUDeviceList = displayAllDevicePaths(devices_);
+  ss << __PRETTY_FUNCTION__ << " | current device paths = " << amdGPUDeviceList;
+  LOG_DEBUG(ss);
 }
 
 void
@@ -646,6 +658,9 @@ RocmSMI::FindMonitor(std::string monitor_path) {
 }
 void
 RocmSMI::AddToDeviceList(std::string dev_name) {
+  std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << " | ======= start =======";
+  LOG_TRACE(ss);
   auto dev_path = std::string(kPathDRMRoot);
   dev_path += "/";
   dev_path += dev_name;
@@ -662,6 +677,10 @@ RocmSMI::AddToDeviceList(std::string dev_name) {
   GetSupportedEventGroups(card_indx, dev->supported_event_groups());
 
   devices_.push_back(dev);
+  ss << __PRETTY_FUNCTION__ << " | Adding to device list dev_name = "
+     << dev_name << " | path = " << dev_path
+     << " | card index = " << std::to_string(card_indx) << " | ";
+  LOG_DEBUG(ss);
 
   return;
 }
@@ -669,16 +688,26 @@ RocmSMI::AddToDeviceList(std::string dev_name) {
 static const uint32_t kAmdGpuId = 0x1002;
 
 static bool isAMDGPU(std::string dev_path) {
+  bool isAmdGpu = false;
+  std::ostringstream ss;
   std::string vend_path = dev_path + "/device/vendor";
   if (!FileExists(vend_path.c_str())) {
-    return false;
+    ss << __PRETTY_FUNCTION__ << " | device_path = " << dev_path
+       << " is " << (isAmdGpu ? "is an amdgpu device - TRUE":
+                     "is an amdgpu device - FALSE");
+    LOG_DEBUG(ss);
+    return isAmdGpu;
   }
 
   std::ifstream fs;
   fs.open(vend_path);
 
   if (!fs.is_open()) {
-      return false;
+    ss << __PRETTY_FUNCTION__ << " | device_path = " << dev_path
+       << " is " << (isAmdGpu ? "is an amdgpu device - TRUE":
+                     "is an amdgpu device - FALSE");
+    LOG_DEBUG(ss);
+    return isAmdGpu;
   }
 
   uint32_t vendor_id;
@@ -688,9 +717,13 @@ static bool isAMDGPU(std::string dev_path) {
   fs.close();
 
   if (vendor_id == kAmdGpuId) {
-    return true;
+    isAmdGpu = true;
   }
-  return false;
+  ss << __PRETTY_FUNCTION__ << " | device_path = " << dev_path
+     << " is " << (isAmdGpu ? "is an amdgpu device - TRUE":
+                   "is an amdgpu device - FALSE");
+  LOG_DEBUG(ss);
+  return isAmdGpu;
 }
 
 uint32_t RocmSMI::DiscoverAmdgpuDevices(void) {

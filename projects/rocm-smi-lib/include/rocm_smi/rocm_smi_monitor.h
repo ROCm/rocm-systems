@@ -94,6 +94,44 @@ enum MonitorTypes {
   kMonInvalid = 0xFFFFFFFF,
 };
 
+const std::map<MonitorTypes,std::string> monitorTypesToString {
+   {MonitorTypes::kMonName, "amd::smi::kMonName"},
+   {MonitorTypes::kMonTemp, "amd::smi::kMonName"},
+   {MonitorTypes::kMonFanSpeed, "amd::smi::kMonName"},
+   {MonitorTypes::kMonMaxFanSpeed, "amd::smi::kMonName"},
+   {MonitorTypes::kMonFanRPMs, "amd::smi::kMonName"},
+   {MonitorTypes::kMonFanCntrlEnable, "amd::smi::kMonName"},
+   {MonitorTypes::kMonPowerCap, "amd::smi::kMonName"},
+   {MonitorTypes::kMonPowerCapDefault, "amd::smi::kMonName"},
+   {MonitorTypes::kMonPowerCapMax, "amd::smi::kMonName"},
+   {MonitorTypes::kMonPowerCapMin, "amd::smi::kMonName"},
+   {MonitorTypes::kMonPowerAve, "amd::smi::kMonName"},
+   {MonitorTypes::kMonTempMax, "amd::smi::kMonName"},
+   {MonitorTypes::kMonTempMin, "amd::smi::kMonName"},
+   {MonitorTypes::kMonTempMaxHyst, "amd::smi::kMonName"},
+   {MonitorTypes::kMonTempMinHyst, "amd::smi::kMonName"},
+   {MonitorTypes::kMonTempCritical, "amd::smi::kMonName"},
+   {MonitorTypes::kMonTempCriticalHyst, "amd::smi::kMonName"},
+   {MonitorTypes::kMonTempEmergency, "amd::smi::kMonName"},
+   {MonitorTypes::kMonTempEmergencyHyst, "amd::smi::kMonName"},
+   {MonitorTypes::kMonTempCritMin, "amd::smi::kMonName"},
+   {MonitorTypes::kMonTempCritMinHyst, "amd::smi::kMonName"},
+   {MonitorTypes::kMonTempOffset, "amd::smi::kMonName"},
+   {MonitorTypes::kMonTempLowest, "amd::smi::kMonName"},
+   {MonitorTypes::kMonTempHighest, "amd::smi::kMonName"},
+   {MonitorTypes::kMonTempLabel, "amd::smi::kMonName"},
+   {MonitorTypes::kMonVolt, "amd::smi::kMonName"},
+   {MonitorTypes::kMonVoltMax, "amd::smi::kMonName"},
+   {MonitorTypes::kMonVoltMinCrit, "amd::smi::kMonName"},
+   {MonitorTypes::kMonVoltMin, "amd::smi::kMonName"},
+   {MonitorTypes::kMonVoltMaxCrit, "amd::smi::kMonName"},
+   {MonitorTypes::kMonVoltAverage, "amd::smi::kMonName"},
+   {MonitorTypes::kMonVoltLowest, "amd::smi::kMonName"},
+   {MonitorTypes::kMonVoltHighest, "amd::smi::kMonName"},
+   {MonitorTypes::kMonVoltLabel, "amd::smi::kMonName"},
+   {MonitorTypes::kMonInvalid, "amd::smi::kMonName"},
+};
+
 
 class Monitor {
  public:

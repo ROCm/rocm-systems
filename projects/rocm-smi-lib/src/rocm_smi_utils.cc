@@ -204,9 +204,10 @@ int ReadSysfsStr(std::string path, std::string *retStr) {
   if (!fs.is_open()) {
     ret = errno;
     errno = 0;
-    oss << "Could not read SYSFS file (" << path << ")"
-        << ", returning " << std::to_string(ret) << " ("
-        << std::strerror(ret) << ")";
+    oss << __PRETTY_FUNCTION__
+      << " | Fail | Cause: file does not exist or permissions issue"
+      << " | SYSFS file: " << path
+      << " | Returning: " <<  std::strerror(ret) << " |";
     LOG_ERROR(oss);
     return ret;
   }
@@ -516,19 +517,39 @@ void displayAppTmpFilesContent() {
 }
 
 // Used to debug vector string list and their content
-void displayVectorContent(std::vector<std::string> v) {
-  std::cout << "Vector = {";
+std::string debugVectorContent(std::vector<std::string> v) {
+  std::ostringstream ss;
+  ss << "Vector = {";
   if (v.size() > 0) {
     for (auto it=v.begin(); it < v.end(); it++) {
-      std::cout << *it;
+      ss << *it;
       auto temp_it = it;
       if(++temp_it != v.end()) {
-        std::cout << ", ";
+        ss << ", ";
       }
     }
-  } else {
-    std::cout << "}" << std::endl;
   }
+  ss << "}" << std::endl;
+
+  return ss.str();
+}
+
+// Used to debug vector string list and their content
+std::string displayAllDevicePaths(std::vector<std::shared_ptr<Device>> v) {
+  std::ostringstream ss;
+  ss << "Vector = {";
+  if (v.size() > 0) {
+    for (auto it=v.begin(); it < v.end(); it++) {
+      ss << (*it)->path();
+      auto temp_it = it;
+      if(++temp_it != v.end()) {
+        ss << ", ";
+      }
+    }
+  }
+  ss << "}" << std::endl;
+
+  return ss.str();
 }
 
 // Attempts to read application specific temporary file

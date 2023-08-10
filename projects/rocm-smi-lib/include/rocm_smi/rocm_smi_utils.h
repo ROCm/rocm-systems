@@ -87,6 +87,8 @@ std::tuple<bool, std::string> readTmpFile(
                                           std::string stateName,
                                           std::string parameterName);
 void displayAppTmpFilesContent(void);
+std::string debugVectorContent(std::vector<std::string> v);
+std::string displayAllDevicePaths(std::vector<std::shared_ptr<Device>> v);
 rsmi_status_t handleException();
 rsmi_status_t
 GetDevValueVec(amd::smi::DevInfoTypes type,
