@@ -57,7 +57,7 @@ def kernel_name_shortener(df, cache, level):
             if original_name in cache:
                 continue
 
-            cmd = ["llvm-cxxfilt", original_name]
+            cmd = ["/opt/rocm/llvm/bin/llvm-cxxfilt", original_name]
 
             proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
