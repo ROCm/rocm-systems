@@ -57,7 +57,7 @@ option(BUILD_ROCPTEST "Build targets for librdc_rocp.so" OFF)
 option(BUILD_TESTS "Build test suite" OFF)
 
 # File reorganization enable/disable
-option(FILE_REORG_BACKWARD_COMPATIBILITY "Enable File Reorg with backward compatibility" ON)
+option(FILE_REORG_BACKWARD_COMPATIBILITY "Enable File Reorg with backward compatibility" OFF)
 
 option(CMAKE_VERBOSE_MAKEFILE "Enable verbose output" ON)
 
