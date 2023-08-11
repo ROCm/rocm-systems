@@ -76,7 +76,9 @@ Panel Config:
         title: VALU Arithmetic Instr Mix
         header:
           metric: Metric
-          count: Count
+          avg: Avg
+          min: Min
+          max: Max
           unit: Unit
           tips: Tips
         style: 
@@ -84,63 +86,93 @@ Panel Config:
           label_txt: (# of instr + $normUnit)
         metric:
           INT-32:
-            count: None # No perf counter
+            avg: None # No HW module
+            min: None # No HW module
+            max: None # No HW module
             unit: (instr + $normUnit)
             tips:
           INT-64:
-            count: None # No perf counter
+            avg: None # No HW module
+            min: None # No HW module
+            max: None # No HW module
             unit: (instr + $normUnit)
             tips:
           F16-ADD:
-            count: None # No perf counter
+            avg: None # No HW module
+            min: None # No HW module
+            max: None # No HW module
             unit: (instr + $normUnit)
             tips:
           F16-Mult:
-            count: None # No perf counter
+            avg: None # No HW module
+            min: None # No HW module
+            max: None # No HW module
             unit: (instr + $normUnit)
             tips:
           F16-FMA:
-            count: None # No perf counter
+            avg: None # No HW module
+            min: None # No HW module
+            max: None # No HW module
             unit: (instr + $normUnit)
             tips:
           F16-Trans:
-            count: None # No perf counter
+            avg: None # No HW module
+            min: None # No HW module
+            max: None # No HW module
             unit: (instr + $normUnit)
             tips:
           F32-ADD:
-            count: None # No perf counter
+            avg: None # No HW module
+            min: None # No HW module
+            max: None # No HW module
             unit: (instr + $normUnit)
             tips:
           F32-Mult:
-            count: None # No perf counter
+            avg: None # No HW module
+            min: None # No HW module
+            max: None # No HW module
             unit: (instr + $normUnit)
             tips:
           F32-FMA:
-            count: None # No perf counter
+            avg: None # No HW module
+            min: None # No HW module
+            max: None # No HW module
             unit: (instr + $normUnit)
             tips:
           F32-Trans:
-            count: None # No perf counter
+            avg: None # No HW module
+            min: None # No HW module
+            max: None # No HW module
             unit: (instr + $normUnit)
             tips:
           F64-ADD:
-            count: None # No perf counter
+            avg: None # No HW module
+            min: None # No HW module
+            max: None # No HW module
             unit: (instr + $normUnit)
             tips:
           F64-Mult:
-            count: None # No perf counter
+            avg: None # No HW module
+            min: None # No HW module
+            max: None # No HW module
             unit: (instr + $normUnit)
             tips:
           F64-FMA:
-            count: None # No perf counter
+            avg: None # No HW module
+            min: None # No HW module
+            max: None # No HW module
             unit: (instr + $normUnit)
             tips:
           F64-Trans:
-            count: None # No perf counter
+            avg: None # No HW module
+            min: None # No HW module
+            max: None # No HW module
             unit: (instr + $normUnit)
             tips:
           Conversion:
-            count: None # No perf counter
+            avg: None # No HW module
+            min: None # No HW module
+            max: None # No HW module
             unit: (instr + $normUnit)
             tips:
 

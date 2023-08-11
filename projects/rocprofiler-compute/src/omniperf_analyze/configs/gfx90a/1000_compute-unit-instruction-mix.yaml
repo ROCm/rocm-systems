@@ -76,7 +76,9 @@ Panel Config:
         title: VALU Arithmetic Instr Mix
         header:
           metric: Metric
-          count: Count
+          avg: Avg
+          min: Min
+          max: Max
           unit: Unit
           tips: Tips
         style: 
@@ -84,63 +86,93 @@ Panel Config:
           label_txt: (# of instr + $normUnit)
         metric:
           INT32:
-            count: AVG((SQ_INSTS_VALU_INT32 / $denom))
+            avg: AVG((SQ_INSTS_VALU_INT32 / $denom))
+            min: MIN((SQ_INSTS_VALU_INT32 / $denom))
+            max: MAX((SQ_INSTS_VALU_INT32 / $denom))
             unit: (instr + $normUnit)
             tips: 
           INT64:
-            count: AVG((SQ_INSTS_VALU_INT64 / $denom))
+            avg: AVG((SQ_INSTS_VALU_INT64 / $denom))
+            min: MIN((SQ_INSTS_VALU_INT64 / $denom))
+            max: MAX((SQ_INSTS_VALU_INT64 / $denom))
             unit: (instr + $normUnit)
             tips: 
           F16-ADD:
-            count: AVG((SQ_INSTS_VALU_ADD_F16 / $denom))
+            avg: AVG((SQ_INSTS_VALU_ADD_F16 / $denom))
+            min: MIN((SQ_INSTS_VALU_ADD_F16 / $denom))
+            max: MAX((SQ_INSTS_VALU_ADD_F16 / $denom))
             unit: (instr + $normUnit)
             tips: 
           F16-MUL:
-            count: AVG((SQ_INSTS_VALU_MUL_F16 / $denom))
+            avg: AVG((SQ_INSTS_VALU_MUL_F16 / $denom))
+            min: MIN((SQ_INSTS_VALU_MUL_F16 / $denom))
+            max: MAX((SQ_INSTS_VALU_MUL_F16 / $denom))
             unit: (instr + $normUnit)
             tips: 
           F16-FMA:
-            count: AVG((SQ_INSTS_VALU_FMA_F16 / $denom))
+            avg: AVG((SQ_INSTS_VALU_FMA_F16 / $denom))
+            min: MIN((SQ_INSTS_VALU_FMA_F16 / $denom))
+            max: MAX((SQ_INSTS_VALU_FMA_F16 / $denom))
             unit: (instr + $normUnit)
             tips: 
           F16-Trans:
-            count: AVG((SQ_INSTS_VALU_TRANS_F16 / $denom))
+            avg: AVG((SQ_INSTS_VALU_TRANS_F16 / $denom))
+            min: MIN((SQ_INSTS_VALU_TRANS_F16 / $denom))
+            max: MAX((SQ_INSTS_VALU_TRANS_F16 / $denom))
             unit: (instr + $normUnit)
             tips: 
           F32-ADD:
-            count: AVG((SQ_INSTS_VALU_ADD_F32 / $denom))
+            avg: AVG((SQ_INSTS_VALU_ADD_F32 / $denom))
+            min: MIN((SQ_INSTS_VALU_ADD_F32 / $denom))
+            max: MAX((SQ_INSTS_VALU_ADD_F32 / $denom))
             unit: (instr + $normUnit)
             tips: 
           F32-MUL:
-            count: AVG((SQ_INSTS_VALU_MUL_F32 / $denom))
+            avg: AVG((SQ_INSTS_VALU_MUL_F32 / $denom))
+            min: MIN((SQ_INSTS_VALU_MUL_F32 / $denom))
+            max: MAX((SQ_INSTS_VALU_MUL_F32 / $denom))
             unit: (instr + $normUnit)
             tips: 
           F32-FMA:
-            count: AVG((SQ_INSTS_VALU_FMA_F32 / $denom))
+            avg: AVG((SQ_INSTS_VALU_FMA_F32 / $denom))
+            min: MIN((SQ_INSTS_VALU_FMA_F32 / $denom))
+            max: MAX((SQ_INSTS_VALU_FMA_F32 / $denom))
             unit: (instr + $normUnit)
             tips: 
           F32-Trans:
-            count: AVG((SQ_INSTS_VALU_TRANS_F32 / $denom))
+            avg: AVG((SQ_INSTS_VALU_TRANS_F32 / $denom))
+            min: MIN((SQ_INSTS_VALU_TRANS_F32 / $denom))
+            max: MAX((SQ_INSTS_VALU_TRANS_F32 / $denom))
             unit: (instr + $normUnit)
             tips: 
           F64-ADD:
-            count: AVG((SQ_INSTS_VALU_ADD_F64 / $denom))
+            avg: AVG((SQ_INSTS_VALU_ADD_F64 / $denom))
+            min: MIN((SQ_INSTS_VALU_ADD_F64 / $denom))
+            max: MAX((SQ_INSTS_VALU_ADD_F64 / $denom))
             unit: (instr + $normUnit)
             tips: 
           F64-MUL:
-            count: AVG((SQ_INSTS_VALU_MUL_F64 / $denom))
+            avg: AVG((SQ_INSTS_VALU_MUL_F64 / $denom))
+            min: MIN((SQ_INSTS_VALU_MUL_F64 / $denom))
+            max: MAX((SQ_INSTS_VALU_MUL_F64 / $denom))
             unit: (instr + $normUnit)
             tips: 
           F64-FMA:
-            count: AVG((SQ_INSTS_VALU_FMA_F64 / $denom))
+            avg: AVG((SQ_INSTS_VALU_FMA_F64 / $denom))
+            min: MIN((SQ_INSTS_VALU_FMA_F64 / $denom))
+            max: MAX((SQ_INSTS_VALU_FMA_F64 / $denom))
             unit: (instr + $normUnit)
             tips: 
           F64-Trans:
-            count: AVG((SQ_INSTS_VALU_TRANS_F64 / $denom))
+            avg: AVG((SQ_INSTS_VALU_TRANS_F64 / $denom))
+            min: MIN((SQ_INSTS_VALU_TRANS_F64 / $denom))
+            max: MAX((SQ_INSTS_VALU_TRANS_F64 / $denom))
             unit: (instr + $normUnit)
             tips: 
           Conversion:
-            count: AVG((SQ_INSTS_VALU_CVT / $denom))
+            avg: AVG((SQ_INSTS_VALU_CVT / $denom))
+            min: MIN((SQ_INSTS_VALU_CVT / $denom))
+            max: MAX((SQ_INSTS_VALU_CVT / $denom))
             unit: (instr + $normUnit)
             tips: 
 
