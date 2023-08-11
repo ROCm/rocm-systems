@@ -23,7 +23,7 @@ The ROCm Profiler Tool that uses `rocprofilerV1` can be invoked using the
 following command:
 
 ```sh
-$ rocprof …
+rocprof …
 ```
 
 To write a custom tool based on the `rocprofilerV1` API do the following:
@@ -40,7 +40,7 @@ int main() {
 This can be built in the following manner:
 
 ```sh
-$ gcc main.c -I/opt/rocm-5.4.4/include -L/opt/rocm-5.4.4/lib -lrocprofiler64
+gcc main.c -I/opt/rocm-5.4.4/include -L/opt/rocm-5.4.4/lib -lrocprofiler64
 ```
 
 The resulting `a.out` will depend on
@@ -50,7 +50,7 @@ The ROCm Profiler that uses `rocprofilerV2` API can be invoked using the
 following command:
 
 ```sh
-$ rocsight …
+rocsight …
 ```
 
 To write a custom tool based on the `rocmtools` API do the following:
@@ -67,7 +67,7 @@ int main() {
 This can be built in the following manner:
 
 ```sh
-$ gcc main.c -I/opt/rocm-5.4.4/include -L/opt/rocm-5.4.4/lib -lrocmtools
+gcc main.c -I/opt/rocm-5.4.4/include -L/opt/rocm-5.4.4/lib -lrocmtools
 ```
 
 The resulting `a.out` will depend on `/opt/rocm-5.4.4/lib/librocmtools.so.1`.
@@ -84,12 +84,11 @@ available in ROCm 5.5 but is deprecated and will be removed in a future release.
   | **API include** | `include/rocprofiler/rocprofiler.h` | `include/rocprofiler/rocprofiler.h` | `include/rocmtools/rocmtools.h` |
   | **API library** | `lib/librocprofiler64.so.1`         | `lib/librocprofiler64.so.1`         | `lib/librocmtools.so.1`         |
 
-
 The ROCm Profiler Tool that uses `rocprofilerV1` can be invoked using the
 following command:
 
 ```sh
-$ rocprof …
+rocprof …
 ```
 
 To write a custom tool based on the `rocprofilerV1` API it is necessary to
@@ -108,7 +107,7 @@ int main() {
 This can be built in the following manner:
 
 ```sh
-$ gcc main.c -I/opt/rocm-5.5.0/include -L/opt/rocm-5.5.0/lib -lrocprofiler64
+gcc main.c -I/opt/rocm-5.5.0/include -L/opt/rocm-5.5.0/lib -lrocprofiler64
 ```
 
 The resulting `a.out` will depend on
@@ -118,7 +117,7 @@ The ROCm Profiler that uses `rocprofilerV2` API can be invoked using the
 following command:
 
 ```sh
-$ rocprofv2 …
+rocprofv2 …
 ```
 
 To write a custom tool based on the `rocprofilerV2` API do the following:
@@ -135,7 +134,7 @@ int main() {
 This can be built in the following manner:
 
 ```sh
-$ gcc main.c -I/opt/rocm-5.5.0/include -L/opt/rocm-5.5.0/lib -lrocprofiler64
+gcc main.c -I/opt/rocm-5.5.0/include -L/opt/rocm-5.5.0/lib -lrocprofiler64
 ```
 
 The resulting `a.out` will depend on
@@ -157,7 +156,7 @@ The ROCm Profiler Tool that uses `rocprofilerV1` can be invoked using the
 following command:
 
 ```sh
-$ rocprof …
+rocprof …
 ```
 
 To write a custom tool based on the `rocprofilerV1` API do the following:
@@ -174,7 +173,7 @@ int main() {
 This can be built in the following manner:
 
 ```sh
-$ gcc main.c -I/opt/rocm-5.6.0/include -L/opt/rocm-5.6.0/lib -lrocprofiler64
+gcc main.c -I/opt/rocm-5.6.0/include -L/opt/rocm-5.6.0/lib -lrocprofiler64
 ```
 
 The resulting `a.out` will depend on
@@ -184,7 +183,7 @@ The ROCm Profiler that uses `rocprofilerV2` API can be invoked using the
 following command:
 
 ```sh
-$ rocprofv2 …
+rocprofv2 …
 ```
 
 To write a custom tool based on the `rocprofilerV2` API do the following:
@@ -201,38 +200,48 @@ int main() {
 This can be built in the following manner:
 
 ```sh
-$ gcc main.c -I/opt/rocm-5.6.0/include -L/opt/rocm-5.6.0/lib -lrocprofiler64v2
+gcc main.c -I/opt/rocm-5.6.0/include -L/opt/rocm-5.6.0/lib -lrocprofiler64v2
 ```
 
 The resulting `a.out` will depend on
 `/opt/rocm-5.6.0/lib/librocprofiler64.so.2`.
 
 ### Optimized
+
 - Improved Test Suite
+
 ### Added
+
 - 'end_time' need to be disabled in roctx_trace.txt
 - support for hsa_amd_memory_async_copy_on_engine API function trace
 
 ### Fixed
+
 - rocprof in ROcm/5.4.0 gpu selector broken.
 - rocprof in ROCm/5.4.1 fails to generate kernel info.
 - rocprof clobbers LD_PRELOAD.
 
 ## ROCprofiler for rocm 5.7.0
+
 ### Navi support
+
 Rocprofiler for ROCm 5.7 added support for counter collection (PMC) and advanced thread tracing (ATT) for Navi21 and Navi31 GPUs.
+
 - On Navi3x, counter collection requires the GPU to be in a stable power state. See README.md for instructions. HIP RT in ATT not yet supported.
 
 ### Changed
+
 - ATT analysis will not run by default. For ATT to have the same behaviour as 5.5, use --plugin att <as.s> --mode network
 - Kernel Names are now removed from HIP API records, users of the API can get the kernel names from the corresponding HIP Dispatch OPS using the correlation ID, this change was done to optimize and to manage the data copied.
 - Removing Replay modes as we discovered that some of them will corrupt the applications' behavior, we will re-add them once we implement the fix for them.
 
 ### Optimized
+
 - Improved ATT parser performance and filesizes.
 - Now profiler autocorrects user input errors for pmc and throws exception for wrong input with this message:"Bad input metric. usage --> pmc: [counter1] [counter2]"
 
 ### Added
+
 - Every API trace in V2 reported synchronously will have two records, one for Enter phase and for Exit phase
 - File Plugin now reports the HSA OPS operation kind as part of the output text
 - MI300 counters support for rocprof v1 and v2.
@@ -243,20 +252,23 @@ Rocprofiler for ROCm 5.7 added support for counter collection (PMC) and advanced
 - File plugin is splitted to File & CLI plugins, CLI plugin is responsible for showing results on the terminal screen and will be automatically the choice if no -d option given in rocprof, File plugin on the other hand is responsible for writing the output results in files if -d option is given.
 - Structure of the results is different for both CLI & File plugin; File plugin will make sure every type of result is in a separate file, starting by specifying the header; CLI plugin will have the records in the old way.
 Example for file plugin output:
-  ```
+
+  ```string
   Dispatch_ID,GPU_ID,Queue_ID,Queue_Index,PID,TID,GRD,WGR,LDS,SCR,Arch_VGPR,ACCUM_VGPR,SGPR,Wave_Size,SIG,OBJ,Kernel_Name,Start_Timestamp,End_Timestamp,Correlation_ID,GRBM_COUNT
 
   1,4,1,1,1584730,1584730,10,10,0,0,8,0,16,64,140464978048000,1,"helloworld(char*, char*) (.kd)",0,140469300947216,33,12637.000000
   ```
-  ```
+
+  ```string
   Domain,Function,Kernel_Name,Start_Timestamp,End_Timestamp,Correlation_ID
 
   HIP_API_DOMAIN,hipGetDeviceProperties,,316678074094190,316678074098929,1
   HIP_API_DOMAIN,hipMalloc,,316678074105702,316678074130851,2
   HIP_API_DOMAIN,hipMalloc,,316678074131382,316678074136111,3
   ```
+
 - Removing Record IDs from tracer records in CLI plugin.
-- Added Flush Interval and Trace Period functionality, where --flush-interval <time_in_ms>, for flushing the buffers every given interval by the user, and --trace-period <delay>:<trace_time>:<interval>, where delay is the time to wait before starting session, trace_time is the time between every start and stop session and interval the time between two consecutive sessions (ommiting interval = infinite). For more details please refer to the ROCProfV2 tool usage document.
+- Added Flush Interval and Trace Period functionality, where --flush-interval [time_in_ms], for flushing the buffers every given interval by the user, and --trace-period [delay]:[trace_time]:[interval], where delay is the time to wait before starting session, trace_time is the time between every start and stop session and interval the time between two consecutive sessions (ommiting interval = infinite). For more details please refer to the ROCProfV2 tool usage document.
 - Added requirements.txt to be used to install all the necessary python3 packages.
 - ATT plugin:
   - Added --mode, --mpi and --depth parameters.
@@ -269,6 +281,7 @@ Example for file plugin output:
   - Added "DISPATCH=id" or "DISPATCH=id,rank" to set which dispatch ids to profile for which MPI rank.
 
 ### Fixed
+
 - Samples are fixed to show the new usage of phases.
 - Plugin option validates the plugin names.
 - Fixing rocsys, for rocsys options, rocsys -h can be called
@@ -280,3 +293,9 @@ Example for file plugin output:
 - If ROCPROFILER_METRICS_PATH environment variable is not set, the counters xml path will be taken from the following path (../libexec/rocprofiler/counters/derived_counters.xml) which is relative to librocprofiler64.so.2.0.0
 - Repeated base metrics were not being properly reused by derived counters.
 - Fixed wrong dispatch ID on kernel.txt
+
+## ROCprofiler for rocm 6.0
+
+### Added
+
+- Updated supported GPU architectures in README with profiler versions
