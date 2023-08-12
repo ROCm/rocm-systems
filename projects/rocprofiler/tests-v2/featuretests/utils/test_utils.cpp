@@ -91,8 +91,6 @@ void tokenize_profiler_output(std::string line, profiler_kernel_info_t& kinfo) {
   std::getline(tokenStream, token, ',');
   kinfo.queue_id = token;
   std::getline(tokenStream, token, ',');
-  kinfo.queue_index = token;
-  std::getline(tokenStream, token, ',');
   kinfo.process_id = token;
   std::getline(tokenStream, token, ',');
   kinfo.thread_id = token;
@@ -101,9 +99,9 @@ void tokenize_profiler_output(std::string line, profiler_kernel_info_t& kinfo) {
   std::getline(tokenStream, token, ',');
   kinfo.workgroup_size = token;
   std::getline(tokenStream, token, ',');
-  kinfo.lds = token;
+  kinfo.lds_per_workgroup = token;
   std::getline(tokenStream, token, ',');
-  kinfo.scratch_size = token;
+  kinfo.scratch_per_workitem = token;
   std::getline(tokenStream, token, ',');
   kinfo.arch_vgpr = token;
   std::getline(tokenStream, token, ',');
@@ -118,6 +116,8 @@ void tokenize_profiler_output(std::string line, profiler_kernel_info_t& kinfo) {
   kinfo.begin_time = token;
   std::getline(tokenStream, token, ',');
   kinfo.end_time = token;
+  std::getline(tokenStream, token, ',');
+  kinfo.correlation_id = token;
   std::getline(tokenStream, token, ',');
   kinfo.counter = token;
 }

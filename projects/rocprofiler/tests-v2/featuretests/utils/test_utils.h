@@ -43,13 +43,12 @@ typedef struct {
   std::string dispatch_id;
   std::string gpu_id;
   std::string queue_id;
-  std::string queue_index;
   std::string process_id;
   std::string thread_id;
   std::string grid_size;
   std::string workgroup_size;
-  std::string lds;
-  std::string scratch_size;
+  std::string lds_per_workgroup;
+  std::string scratch_per_workitem;
   std::string arch_vgpr;
   std::string accum_vgpr;
   std::string sgpr;
@@ -57,6 +56,7 @@ typedef struct {
   std::string kernel_name;
   std::string begin_time;
   std::string end_time;
+  std::string correlation_id;
   std::string counter;
 } profiler_kernel_info_t;
 

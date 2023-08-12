@@ -223,23 +223,22 @@ class file_plugin_t {
     *output_file << "Dispatch_ID(" << std::to_string(profiler_record->header.id.handle) << "), "
                  << "GPU_ID(" << std::to_string(profiler_record->gpu_id.handle) << "), "
                  << "Queue_ID(" << std::to_string(profiler_record->queue_id.handle) << "), "
-                 << "Queue_Index(" << std::to_string(profiler_record->queue_idx.value) << "), "
                  << "Process_ID(" << std::to_string(GetPid()) << "), "
                  << "Thread_ID(" << std::to_string(profiler_record->thread_id.value) << "), "
                  << "Grid_Size(" << std::to_string(profiler_record->kernel_properties.grid_size)
                  << "), "
                  << "Workgroup_Size("
                  << std::to_string(profiler_record->kernel_properties.workgroup_size) << "), "
-                 << "LDS("
+                 << "LDS_Per_Workgroup("
                  << std::to_string(
                         ((profiler_record->kernel_properties.lds_size + (lds_block_size - 1)) &
                          ~(lds_block_size - 1)))
                  << "), "
-                 << "Scratch_Size("
+                 << "Scratch_Per_Workitem("
                  << std::to_string(profiler_record->kernel_properties.scratch_size) << "), "
                  << "Arch_VGPR("
                  << std::to_string(profiler_record->kernel_properties.arch_vgpr_count) << "), "
-                 << "Accumulative_VGPR("
+                 << "Accum_VGPR("
                  << std::to_string(profiler_record->kernel_properties.accum_vgpr_count) << "), "
                  << "SGPR(" << std::to_string(profiler_record->kernel_properties.sgpr_count)
                  << "), "

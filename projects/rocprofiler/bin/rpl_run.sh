@@ -22,6 +22,7 @@
 # THE SOFTWARE.
 ################################################################################
 
+ROCPROF_ARGS="$*"
 time_stamp=`date +%y%m%d_%H%M%S`
 BIN_DIR=$(dirname $(realpath ${BASH_SOURCE[0]}))
 ROOT_DIR=$(dirname $BIN_DIR)
@@ -110,6 +111,9 @@ usage() {
   echo ""
   echo "Options:"
   echo "  -h - this help"
+  echo "  --tool-version <1|2> - to use specific version of rocprof tool, by default v1 is used"
+  echo "            1 - rocprofiler tool v1"
+  echo "            2 - rocprofiler tool v2"
   echo "  --verbose - verbose mode, dumping all base counters used in the input metrics"
   echo "  --list-basic - to print the list of basic HW counters"
   echo "  --list-derived - to print the list of derived metrics with formulas"
@@ -367,7 +371,17 @@ ARG_IN=""
 while [ 1 ] ; do
   ARG_IN=$1
   ARG_VAL=1
-  if [ "$1" = "-h" ] ; then
+  if [ "$1" = "--tool-version" ] ; then
+    if [ $2 = 1 ] ; then
+      :
+    elif [ $2 = 2 ] ; then
+      eval $BIN_DIR/rocprofv2 $ROCPROF_ARGS
+      exit 0
+    else
+      echo "Wrong option '$1 $2'"
+      usage
+    fi
+  elif [ "$1" = "-h" ] ; then
     usage
   elif [ "$1" = "-i" ] ; then
     INPUT_FILE="$2"

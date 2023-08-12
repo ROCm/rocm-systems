@@ -24,7 +24,7 @@ GREY='\033[0;90m'
 RESET='\033[0m'
 
 usage() {
-  echo -e "ROCProfilerV2 Run Script Usage:"
+  echo -e "${RESET}ROCProfilerV2 Run Script Usage:"
   echo -e "${GREEN}-h   | --help ${RESET}                For showing this message"
   echo -e "${GREEN}--list-counters ${RESET}              For showing all available counters for the current GPUs"
   if [ $RUN_FROM_BUILD == 1 ]; then
@@ -41,11 +41,12 @@ usage() {
   echo -e "${GREEN}--kernel-trace ${RESET}               For Collecting Kernel dispatch Traces"
   echo -e "${GREEN}--sys-trace ${RESET}                  For Collecting HIP and HSA APIs and their Activities Traces along ROCTX and Kernel Dispatch traces\n"
   echo -e "\t#${GREY}usage e.g: rocprofv2 --[hip-trace|hsa-trace|roctx-trace|kernel-trace|sys-trace]  <executable>\n"${RESET}
-
   echo -e "${GREEN}--plugin ${RESET} PLUGIN_NAME         For enabling a plugin (file/perfetto/att/ctf)"
   echo -e "\t#${GREY} usage(file/perfetto/ctf) e.g: rocprofv2 -i pmc.txt --plugin [file/perfetto/ctf] -d out_dir <executable>"
   echo -e "\t# usage(att): rocprofv2 <rocprofv2_params> --plugin att <ISA_file> <att_parameters> <executable>"
   echo -e "\t# use \"rocprofv2 --plugin att --help\" for ATT-specific parameters help.${RESET}\n"
+  echo -e "${GREEN}--plugin-version ${RESET} <1|2>       For selecting the version for the plugin (1/2)"
+  echo -e "\t#${GREY} 1 - Legacy output format, 2 - New output format (default)${RESET}\n"
   echo -e "${GREEN}-i   | --input ${RESET}               For adding counters file path (every line in the text file represents a counter)"
   echo -e "\t#${GREY} usage: rocprofv2 -i pmc.txt -d <executable>${RESET}\n"
   echo -e "${GREEN}-o   | --output-file ${RESET}         For the output file name"
@@ -177,6 +178,12 @@ while [ 1 ]; do
     shift
   elif [ "$1" = "--basenames" ]; then
     export ROCPROFILER_TRUNCATE_KERNEL_PATH=1
+  elif [ "$1" = "--version" ]; then
+    shift
+    shift
+  elif [ "$1" = "--plugin-version" ]; then
+    export ROCPROFILER_PLUGIN_LIB=$ROCPROFILER_PLUGIN_LIB.$2
+    shift
     shift
   elif [ "$1" = "--plugin" ]; then
     if [ -n $2 ]; then
@@ -186,7 +193,7 @@ while [ 1 ]; do
         usage
         exit 1
       fi
-      export ROCPROFILER_PLUGIN_LIB=lib${PLUGIN}_plugin.so
+      export ROCPROFILER_PLUGIN_LIB=lib${PLUGIN}_plugin.so$ROCPROFILER_PLUGIN_LIB
     else
       echo -e "Wrong input \"$2\" for plugin!"
       usage

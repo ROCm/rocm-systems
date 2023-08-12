@@ -111,7 +111,7 @@ class file_plugin_t {
       const char* output_dir = getenv("OUTPUT_PATH");
       output_file_name = getenv("OUT_FILE_NAME") ? std::string(getenv("OUT_FILE_NAME")) : "";
 
-      if (output_dir == nullptr && output_file_name.size() == 0) {
+      if (output_dir == nullptr && getenv("OUT_FILE_NAME") == nullptr) {
         stream_.copyfmt(std::cout);
         stream_.clear(std::cout.rdstate());
         stream_.basic_ios<char>::rdbuf(std::cout.rdbuf());
@@ -127,6 +127,8 @@ class file_plugin_t {
         return;
       }
 
+      output_file_name = replace_MPI_macros(output_file_name);
+
       std::stringstream ss;
       ss << name_ << "_" << ((output_file_name.empty()) ? std::to_string(GetPid()) : "")
          << output_file_name << ".csv";
@@ -137,6 +139,28 @@ class file_plugin_t {
     bool is_open() const { return stream_.is_open(); }
     bool fail() const { return stream_.fail(); }
     bool isStdOut() const { return bPrintToStdout; }
+
+    // Returns a string with the MPI %macro replaced with the corresponding envvar
+    std::string replace_MPI_macros(std::string output_file_name) {
+      std::unordered_map<const char*, const char*> MPI_BUILTINS = {
+          {"MPI_RANK", "%rank"},
+          {"OMPI_COMM_WORLD_RANK", "%rank"},
+          {"MV2_COMM_WORLD_RANK", "%rank"}};
+
+      for (const auto& [envvar, key] : MPI_BUILTINS) {
+        size_t key_find = output_file_name.rfind(key);
+        if (key_find == std::string::npos) continue;  // Does not contain a %?rank var
+
+        const char* env_var_set = getenv(envvar);
+        if (env_var_set == nullptr) continue;  // MPI_COMM_WORLD_x var is does not exist
+
+        int rank = atoi(env_var_set);
+        output_file_name = output_file_name.substr(0, key_find) + std::to_string(rank) +
+            output_file_name.substr(key_find + std::string(key).size());
+      }
+
+      return output_file_name;
+    }
 
    private:
     const std::string name_;
@@ -228,10 +252,16 @@ class file_plugin_t {
         if (type == output_type_t::COUNTER) {
           if (kernel_dispatches_header_written_.load(std::memory_order_relaxed)) return;
           output_file = get_output_file(output_type_t::COUNTER);
-          *output_file
-              << "Dispatch_ID,GPU_ID,Queue_ID,PID,TID,Grid_Size,Workgroup_Size,LDS_Per_Workgroup,Scratch_Per_Workitem,Arch_VGPR,"
-                 "Accum_VGPR,SGPR,Wave_Size,Kernel_Name,Start_Timestamp,End_Timestamp,"
-                 "Correlation_ID";
+
+          *output_file << "Index,KernelName,gpu-id,queue-id,queue-index,pid,tid,grd,wgr,lds,scr,"
+                          "arch_vgpr,accum_vgpr,sgpr,wave_size,sig,obj";
+          if (counter_names_.size() > 0) {
+            for (uint32_t i = 0; i < counter_names_.size(); i++)
+              *output_file << "," << counter_names_[i];
+          }
+          *output_file << ",DispatchNs,BeginNs,EndNs,CompleteNs";
+          *output_file << std::endl;
+          *output_file << std::endl;
           kernel_dispatches_header_written_.exchange(true, std::memory_order_release);
           return;
         } else if (type == output_type_t::PC_SAMPLING) {
@@ -322,63 +352,21 @@ class file_plugin_t {
 
   void FlushProfilerRecord(const rocprofiler_record_profiler_t* profiler_record,
                            rocprofiler_session_id_t session_id, rocprofiler_buffer_id_t buffer_id) {
-   
     std::lock_guard<std::mutex> lock(writing_lock);
     WriteHeader(output_type_t::COUNTER, ACTIVITY_DOMAIN_NUMBER);
     size_t name_length = 0;
     output_file_t* output_file{nullptr};
     output_file = get_output_file(output_type_t::COUNTER);
-    CHECK_ROCPROFILER(rocprofiler_query_kernel_info_size(
-        ROCPROFILER_KERNEL_NAME, profiler_record->kernel_id, &name_length));
+    CHECK_ROCPROFILER(rocprofiler_query_kernel_info_size(ROCPROFILER_KERNEL_NAME,
+                                                         profiler_record->kernel_id, &name_length));
     // Taken from rocprofiler: The size hasn't changed in  recent past
     static const uint32_t lds_block_size = 128 * 4;
     const char* kernel_name_c = nullptr;
     if (name_length > 1) {
-      CHECK_ROCPROFILER(rocprofiler_query_kernel_info(
-          ROCPROFILER_KERNEL_NAME, profiler_record->kernel_id, &kernel_name_c));
+      CHECK_ROCPROFILER(rocprofiler_query_kernel_info(ROCPROFILER_KERNEL_NAME,
+                                                      profiler_record->kernel_id, &kernel_name_c));
     }
-    
-    if (!counter_header_written_) {
-      if(profiler_record->counters){
-          for (uint64_t i = 0; i < profiler_record->counters_count.value; i++) {
-        auto counter_handler = profiler_record->counters[i].counter_handler;
-        if (!counter_handler.handle) continue;
-
-        size_t counter_name_length = 0;
-        const char* name_c = nullptr;
-
-        CHECK_ROCPROFILER(rocprofiler_query_counter_info_size(
-            session_id, ROCPROFILER_COUNTER_NAME, counter_handler, &counter_name_length
-        ));
-
-        if (counter_name_length == 0) continue;
-
-        CHECK_ROCPROFILER(rocprofiler_query_counter_info(
-            session_id, ROCPROFILER_COUNTER_NAME, counter_handler, &name_c
-        ));
-        *output_file << ',' << name_c;
-      }
-      *output_file << '\n';
-    }
-      counter_header_written_ = true;
-      *output_file << '\n';
-    }
-
-    *output_file << std::to_string(profiler_record->header.id.handle) << ","
-                 << std::to_string(profiler_record->gpu_id.handle) << ","
-                 << std::to_string(profiler_record->queue_id.handle) << ","
-                 << std::to_string(GetPid()) << ","
-                 << std::to_string(profiler_record->thread_id.value);
-    *output_file << "," << std::to_string(profiler_record->kernel_properties.grid_size) << ","
-                 << std::to_string(profiler_record->kernel_properties.workgroup_size) << ","
-                 << std::to_string(
-                        ((profiler_record->kernel_properties.lds_size + (lds_block_size - 1)) &
-                         ~(lds_block_size - 1)))
-                 << "," << std::to_string(profiler_record->kernel_properties.scratch_size) << ","
-                 << std::to_string(profiler_record->kernel_properties.arch_vgpr_count) << ","
-                 << std::to_string(profiler_record->kernel_properties.accum_vgpr_count) << ","
-                 << std::to_string(profiler_record->kernel_properties.sgpr_count) << ","
-                 << std::to_string(profiler_record->kernel_properties.wave_size);
+    *output_file << std::to_string(profiler_record->header.id.handle) << ",";
     std::string kernel_name = "";
     if (name_length > 1) {
       kernel_name = rocprofiler::cxx_demangle(kernel_name_c);
@@ -389,10 +377,22 @@ class file_plugin_t {
         found = kernel_name.rfind(key, found - 1);
       }
     }
-    *output_file << "," << std::to_string(profiler_record->kernel_id.handle) << ",\"" << kernel_name
-                 << "\"," << std::to_string(profiler_record->timestamps.begin.value) << ","
-                 << std::to_string(profiler_record->timestamps.end.value) << ","
-                 << std::to_string(profiler_record->correlation_id.value);
+    *output_file << "\"" << kernel_name << "\",";
+    *output_file << std::to_string(profiler_record->gpu_id.handle) << ","
+                 << std::to_string(profiler_record->queue_id.handle) << ","
+                 << std::to_string(profiler_record->queue_idx.value) << ","
+                 << std::to_string(GetPid()) << ","
+                 << std::to_string(profiler_record->thread_id.value) << ","
+                 << std::to_string(profiler_record->kernel_properties.grid_size) << ","
+                 << std::to_string(profiler_record->kernel_properties.workgroup_size) << ","
+                 << std::to_string(
+                        ((profiler_record->kernel_properties.lds_size + (lds_block_size - 1)) &
+                         ~(lds_block_size - 1)))
+                 << "," << std::to_string(profiler_record->kernel_properties.scratch_size) << ","
+                 << std::to_string(profiler_record->kernel_properties.arch_vgpr_count) << ","
+                 << std::to_string(profiler_record->kernel_properties.accum_vgpr_count) << ","
+                 << std::to_string(profiler_record->kernel_properties.sgpr_count) << ","
+                 << std::to_string(profiler_record->kernel_properties.wave_size);
 
     // For Counters
     if (profiler_record->counters) {
@@ -402,6 +402,9 @@ class file_plugin_t {
         }
       }
     }
+    *output_file << ",0,"
+                 << std::to_string(profiler_record->timestamps.begin.value) << ","
+                 << std::to_string(profiler_record->timestamps.end.value) << ",0";
     *output_file << '\n';
     if (kernel_name_c) {
       free(const_cast<char*>(kernel_name_c));
@@ -456,7 +459,6 @@ class file_plugin_t {
 
  private:
   bool valid_{false};
-  bool counter_header_written_ = false;
   std::vector<std::string> counter_names_;
 
   std::atomic<bool> roctx_header_written_{false}, hsa_api_header_written_{false},

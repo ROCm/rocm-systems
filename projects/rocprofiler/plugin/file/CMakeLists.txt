@@ -22,15 +22,58 @@
 
 file(GLOB ROCPROFILER_UTIL_SRC_FILES ${PROJECT_SOURCE_DIR}/src/utils/helper.cpp)
 
-file(GLOB FILE_SOURCES "*.cpp")
+file(GLOB FILE_SOURCES_V1 "file_v1.cpp")
+add_library(file_plugin_v1 SHARED ${FILE_SOURCES_V1} ${ROCPROFILER_UTIL_SRC_FILES})
+
+set_target_properties(
+    file_plugin_v1
+    PROPERTIES CXX_VISIBILITY_PRESET hidden
+               DEFINE_SYMBOL "ROCPROFILER_EXPORTS"
+               LINK_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/../exportmap
+               LIBRARY_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib/rocprofiler/v1
+               INSTALL_RPATH "${ROCM_APPEND_PRIVLIB_RPATH}"
+               OUTPUT_NAME file_plugin
+               VERSION 1.0.0
+               SOVERSION 1)
+
+target_compile_definitions(file_plugin_v1 PRIVATE HIP_PROF_HIP_API_STRING=1
+                                               __HIP_PLATFORM_HCC__=1)
+
+target_include_directories(file_plugin_v1 PRIVATE ${PROJECT_SOURCE_DIR})
+
+target_link_options(
+    file_plugin_v1 PRIVATE -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/../exportmap
+    -Wl,--no-undefined)
+
+target_link_libraries(file_plugin_v1 PRIVATE rocprofiler-v2 hsa-runtime64::hsa-runtime64
+                                          stdc++fs amd_comgr dl)
+
+# Prepare Name Link SO files for V1 file plugin Library
+add_custom_command(
+    TARGET file_plugin_v1
+    POST_BUILD
+    COMMAND
+        ${CMAKE_COMMAND} -E copy
+        ${PROJECT_BINARY_DIR}/lib/rocprofiler/v1/libfile_plugin.so.1*
+        ${PROJECT_BINARY_DIR}/lib/rocprofiler/.)
+
+install(TARGETS file_plugin_v1 LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/${PROJECT_NAME}
+                                    COMPONENT asan NAMELINK_SKIP)
+install(TARGETS file_plugin_v1 LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/${PROJECT_NAME}
+                                    COMPONENT runtime NAMELINK_SKIP)
+
+file(GLOB FILE_SOURCES "file.cpp")
 add_library(file_plugin SHARED ${FILE_SOURCES} ${ROCPROFILER_UTIL_SRC_FILES})
 
 set_target_properties(
     file_plugin
     PROPERTIES CXX_VISIBILITY_PRESET hidden
+               DEFINE_SYMBOL "ROCPROFILER_EXPORTS"
                LINK_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/../exportmap
                LIBRARY_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib/rocprofiler
-               INSTALL_RPATH "${ROCM_APPEND_PRIVLIB_RPATH}")
+               INSTALL_RPATH "${ROCM_APPEND_PRIVLIB_RPATH}"
+               VERSION 2.0.0
+               SOVERSION 2)
 
 target_compile_definitions(file_plugin PRIVATE HIP_PROF_HIP_API_STRING=1
                                                __HIP_PLATFORM_AMD__=1)
