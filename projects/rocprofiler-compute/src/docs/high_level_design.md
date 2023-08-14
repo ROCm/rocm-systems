@@ -15,5 +15,7 @@ The [Omniperf](https://github.com/AMDResearch/omniperf) Tool is architecturally 
   - *Grafana GUI Analyzer*: A Grafana dashboard is designed to retrieve the raw counters info from the backend database. It also creates the relevant performance metrics and visualization.
 - **Omniperf Standalone GUI Analyzer**: A standalone GUI is provided to enable performance analysis without importing data into the backend database.
 
-![Omniperf Architectual Diagram](images/omniperf_architecture.png)
+![Omniperf Architectual Diagram](images/omniperf_server_vs_client_install.png)
+
+> Note: To learn more about the client vs. server model of Omniperf and our install process please see the [Deployment section](./installation.md) of the docs.
 
