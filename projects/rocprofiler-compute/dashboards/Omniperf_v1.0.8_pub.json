@@ -24,8 +24,8 @@
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
-  "id": 43,
-  "iteration": 1684189070197,
+  "id": 2,
+  "iteration": 1692036465764,
   "links": [],
   "liveNow": false,
   "panels": [
@@ -58,7 +58,8 @@
                 "mode": "absolute",
                 "steps": [
                   {
-                    "color": "green"
+                    "color": "green",
+                    "value": null
                   },
                   {
                     "color": "red",
@@ -339,7 +340,7 @@
               "hide": false,
               "rawQuery": true,
               "refId": "A",
-              "target": "${Workload1}.pmc_perf.aggregate([\n    {\"$match\": {\n        \"Index\": { \"$in\": [${DispatchIDFilter:raw}] },\n        \"gpu-id\": { \"$in\": [${gpuFilter:raw}] },\n        \"KernelName\": { \"$in\": ${KernelNameFilter:json}}\n      }},\n      {\"$group\": {\n          \"_id\": null,\n          \"valu_flops_val\": {\n            \"$avg\": { \"$divide\": [ { \"$add\": [\n              { \"$multiply\": [64, { \"$add\": [\"&SQ_INSTS_VALU_ADD_F16\", \"&SQ_INSTS_VALU_MUL_F16\", \"&SQ_INSTS_VALU_TRANS_F16\", { \"$multiply\": [2, \"&SQ_INSTS_VALU_FMA_F16\"] }] }] },\n              { \"$multiply\": [64, { \"$add\": [\"&SQ_INSTS_VALU_ADD_F32\", \"&SQ_INSTS_VALU_MUL_F32\", \"&SQ_INSTS_VALU_TRANS_F32\", { \"$multiply\": [2, \"&SQ_INSTS_VALU_FMA_F32\"] }] }] },\n              { \"$multiply\": [64, { \"$add\": [\"&SQ_INSTS_VALU_ADD_F64\", \"&SQ_INSTS_VALU_MUL_F64\", \"&SQ_INSTS_VALU_TRANS_F64\", { \"$multiply\": [2, \"&SQ_INSTS_VALU_FMA_F64\"] }] }] }\n            ]}\n            ,{ \"$subtract\": [\"&EndNs\", \"&BeginNs\"] }]\n          }},\n    \n          \"valu_intOps_val\": {\n            \"$avg\": { \"$divide\": [{ \"$multiply\": [64, { \"$add\": [\"&SQ_INSTS_VALU_INT32\", \"&SQ_INSTS_VALU_INT64\"] }] }, { \"$subtract\": [\"&EndNs\", \"&BeginNs\"] }] }\n          },\n    \n          \"mfma_flops_f16_val\": { \"$avg\": { \"$divide\": [{ \"$multiply\": [\"&SQ_INSTS_VALU_MFMA_MOPS_F16\", 512] }, { \"$subtract\": [\"&EndNs\", \"&BeginNs\"] }] }  },\n          \"mfma_flops_bf16_val\": { \"$avg\": { \"$divide\": [{ \"$multiply\": [\"&SQ_INSTS_VALU_MFMA_MOPS_BF16\", 512] }, { \"$subtract\": [\"&EndNs\", \"&BeginNs\"] }] }  },\n          \"mfma_flops_f32_val\": { \"$avg\": { \"$divide\": [{ \"$multiply\": [\"&SQ_INSTS_VALU_MFMA_MOPS_F32\", 512] }, { \"$subtract\": [\"&EndNs\", \"&BeginNs\"] }] }  },\n          \"mfma_flops_f64_val\": { \"$avg\": { \"$divide\": [{ \"$multiply\": [\"&SQ_INSTS_VALU_MFMA_MOPS_F64\", 512] }, { \"$subtract\": [\"&EndNs\", \"&BeginNs\"] }] }  },\n          \"mfma_flops_i8_val\": { \"$avg\": { \"$divide\": [{ \"$multiply\": [\"&SQ_INSTS_VALU_MFMA_MOPS_I8\", 512] }, { \"$subtract\": [\"&EndNs\", \"&BeginNs\"] }] }  },\n    \n    \n          \"salu_val\": {\n              \"$avg\": { \"$divide\": [{ \"$multiply\": [100, \"&SQ_ACTIVE_INST_SCA\"] }, { \"$multiply\": [\"&GRBM_GUI_ACTIVE\", $numCU] }] }\n          },\n    \n          \"valu_val\": {\n              \"$avg\": { \"$divide\": [{ \"$multiply\": [100, \"&SQ_ACTIVE_INST_VALU\"] }, { \"$multiply\": [\"&GRBM_GUI_ACTIVE\", $numCU] }] }\n          },\n    \n          \"mfma_val\": {\n              \"$avg\": { \"$divide\": [{ \"$multiply\": [100, \"&SQ_VALU_MFMA_BUSY_CYCLES\"] }, { \"$multiply\": [\"&GRBM_GUI_ACTIVE\", $numCU, 4] }] }\n          },\n\n    \n          \"lds_bconf\": {\n            \"$avg\": {\"$cond\": [ {\"$ne\": [{\"$subtract\": [\"&SQ_LDS_IDX_ACTIVE\", \"&SQ_LDS_BANK_CONFLICT\"]}, 0]},\n                                {\"$divide\": [\n                                    \"&SQ_LDS_BANK_CONFLICT\",\n                                    {\"$subtract\": [\"&SQ_LDS_IDX_ACTIVE\", \"&SQ_LDS_BANK_CONFLICT\"]}\n                                ]},\n                                null\n                              ]\n                    }     \n          },\n    \n   \n          \"lds_bw\":  {\n            \"$avg\": {\"$divide\":[ \n                        { \"$multiply\": [ { \"$subtract\": [\"&SQ_LDS_IDX_ACTIVE\", \"&SQ_LDS_BANK_CONFLICT\"]},  \n                                            4,  \n                                            {\"$toInt\": \"$L2Banks\"}\n                                        ]}, \n                        {\"$subtract\": [\"&EndNs\", \"&BeginNs\"]}\n                    ]}\n         },\n    \n          \"lds_bw_pop\":  {\n            \"$avg\":     {\"$divide\": [\n                            {\"$divide\":[ \n                                { \"$multiply\": [ { \"$subtract\": [\"&SQ_LDS_IDX_ACTIVE\", \"&SQ_LDS_BANK_CONFLICT\"]},  \n                                                    4,  \n                                                    {\"$toInt\": \"$L2Banks\"}\n                                                ]}, \n                                {\"$subtract\": [\"&EndNs\", \"&BeginNs\"]}\n                            ]},            \n                             {\"$multiply\": [$sclk, $numCU, 0.00128]}\n                         ]}\n         },\n    \n          \"unpredthreads_val\": {\n              \"$avg\": {\n                  \"$cond\": [\n                      {\"$ne\":[\"&SQ_ACTIVE_INST_VALU\" , 0]},\n                      { \"$divide\": [\"&SQ_THREAD_CYCLES_VALU\", \"&SQ_ACTIVE_INST_VALU\"] },\n                      null\n                  ]\n              }\n          },\n    \n          \"ipcIssue_val\": {\n              \"$avg\": { \"$divide\": [{ \"$add\": [\"&SQ_INSTS_VALU\", \"&SQ_INSTS_VMEM\", \"&SQ_INSTS_SALU\", \"&SQ_INSTS_SMEM\", \"&SQ_INSTS_GDS\", \"&SQ_INSTS_BRANCH\", \"&SQ_INSTS_SENDMSG\", \"&SQ_INSTS_VSKIPPED\"] }, \"&SQ_ACTIVE_INST_ANY\"] }\n          },\n          \"eaWriteLat_val\": {\n            \"$avg\": {\n                \"$cond\": [\n                  {\"$ne\": [\"&TCC_EA_WRREQ_sum\" , 0]},\n                  { \"$divide\": [\"&TCC_EA_WRREQ_LEVEL_sum\", \"&TCC_EA_WRREQ_sum\"] },\n                  null                        \n                ]\n            }\n            },\n            \"eaReadLat_val\": {\n                \"$avg\": {\n                    \"$cond\": [\n                      {\"$ne\": [\"&TCC_EA_RDREQ_sum\" , 0]},\n                      { \"$divide\": [\"&TCC_EA_RDREQ_LEVEL_sum\", \"&TCC_EA_RDREQ_sum\"] },\n                      null                        \n                    ]\n                }\n            },\n            \"eaWriteBW_val\": {\n                \"$avg\": { \"$divide\": [{ \"$add\": [{ \"$multiply\": [\"&TCC_EA_WRREQ_64B_sum\", 64] }, { \"$multiply\": [{ \"$subtract\": [\"&TCC_EA_WRREQ_sum\", \"&TCC_EA_WRREQ_64B_sum\"] }, 32] }] }, { \"$subtract\": [\"&EndNs\", \"&BeginNs\"] }] }\n            }, \n            \"eaReadBW_val\": {\n                \"$avg\": { \"$divide\": [{ \"$add\": [{ \"$multiply\": [\"&TCC_EA_RDREQ_32B_sum\", 32] }, { \"$multiply\": [{ \"$subtract\": [\"&TCC_EA_RDREQ_sum\", \"&TCC_EA_RDREQ_32B_sum\"] }, 64] }] }, { \"$subtract\": [\"&EndNs\", \"&BeginNs\"] }] }\n            },\n            \"l2_cacheHits_val\": {\n                \"$avg\": {\n                    \"$cond\": [\n                        {\"$ne\": [{ \"$add\": [\"&TCC_HIT_sum\", \"&TCC_MISS_sum\"] }, 0]},\n                        { \"$divide\": [{ \"$multiply\": [100, \"&TCC_HIT_sum\"] }, { \"$add\": [\"&TCC_HIT_sum\", \"&TCC_MISS_sum\"] }] },\n                        null                          \n                    ]\n                }\n            },\n            \"vecl1_cacheHits_val\": {\n                \"$avg\":  {\n                    \"$cond\": [\n                        {\"$ne\": [\"&TCP_TOTAL_CACHE_ACCESSES_sum\", 0]},\n                        { \"$subtract\": [100, { \"$divide\": [{ \"$multiply\": [100, { \"$add\": [\"&TCP_TCC_READ_REQ_sum\", \"&TCP_TCC_WRITE_REQ_sum\", \"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"] }]  }, \"&TCP_TOTAL_CACHE_ACCESSES_sum\"] }] },\n                        null\n                    ]\n                }\n            },\n            \"vecl1_BW_val\": {\n                \"$avg\": { \"$divide\": [{ \"$multiply\": [\"&TCP_TOTAL_CACHE_ACCESSES_sum\", 64 ] }, { \"$subtract\": [\"&EndNs\", \"&BeginNs\"] } ] }\n            },\n            \"l1k_cacheHits_val\": {\n                \"$avg\": {\n                    \"$cond\": [\n                        {\"$ne\": [{ \"$add\": [\"&SQC_DCACHE_HITS\", \"&SQC_DCACHE_MISSES\"]} , 0]},\n                        { \"$divide\": [{ \"$multiply\": [100, \"&SQC_DCACHE_HITS\"] }, { \"$add\": [\"&SQC_DCACHE_HITS\", \"&SQC_DCACHE_MISSES\"]}] },\n                        null\n                    ]\n                }\n            },\n            \"l1i_hitRate_val\": {\n                \"$avg\": { \"$divide\": [{ \"$multiply\": [100, \"&SQC_ICACHE_HITS\"] }, { \"$add\": [\"&SQC_ICACHE_HITS\", \"&SQC_ICACHE_MISSES\"]}] }\n            },\n            \"l1i_BW_val\": {\n                \"$avg\": { \"$multiply\": [{ \"$divide\": [\"&SQC_ICACHE_REQ\",{ \"$subtract\": [\"&EndNs\", \"&BeginNs\"] } ] }, 64] }\n            },\n            \"l1k_BW_val\": {\n                \"$avg\": { \"$multiply\": [{ \"$divide\": [\"&SQC_DCACHE_REQ\", { \"$subtract\": [\"&EndNs\", \"&BeginNs\"] } ] }, 64] }\n            }\n            \n        }},\n      {\"$set\": {\n        \"array\": [\n            {\n              \"Metric\": \"VALU FLOPs\",\n              \"Value\": \"&valu_flops_val\",\n              \"Unit\": \"GFLOP\",\n              \"peak\": { \"$divide\": [{ \"$multiply\": [$sclk, $numCU, 64, 2 ]}, 1000] },\n              \"Percent of Peak - PoP\": {\n                \"$divide\": [{ \"$multiply\": [100, \"&valu_flops_val\"] }, { \"$divide\": [{ \"$multiply\": [$sclk, $numCU, 64, 2 ]}, 1000] }]\n              }\n            },\n            {\n              \"Metric\": \"VALU IOPs\",\n              \"Value\": \"&valu_intOps_val\",\n              \"Unit\": \"GIOP\",\n              \"peak\": { \"$divide\": [{ \"$multiply\": [$sclk, $numCU, 64, 2 ]}, 1000] },\n              \"Percent of Peak - PoP\": {\n                \"$divide\": [{ \"$multiply\": [100, \"&valu_intOps_val\"] }, { \"$divide\": [{ \"$multiply\": [$sclk, $numCU, 64, 2 ]}, 1000] }]\n              }\n            },\n            {\n              \"Metric\": \"MFMA FLOPs (BF16)\",\n              \"Value\": \"&mfma_flops_bf16_val\",\n              \"Unit\": \"GFLOP\",\n              \"peak\": { \"$divide\": [{ \"$multiply\": [$sclk, $numCU, 1024 ]}, 1000] },\n              \"Percent of Peak - PoP\": {\n                \"$divide\": [{ \"$multiply\": [100, \"&mfma_flops_bf16_val\"] }, { \"$divide\": [{ \"$multiply\": [$sclk, $numCU, 1024 ]}, 1000] }]\n              }\n            },\n            {\n              \"Metric\": \"MFMA FLOPs (F16)\",\n              \"Value\": \"&mfma_flops_f16_val\",\n              \"Unit\": \"GFLOP\",\n              \"peak\": { \"$divide\": [{ \"$multiply\": [$sclk, $numCU, 1024 ]}, 1000] },\n              \"Percent of Peak - PoP\": {\n                \"$divide\": [{ \"$multiply\": [100, \"&mfma_flops_f16_val\"] }, { \"$divide\": [{ \"$multiply\": [$sclk, $numCU, 1024 ]}, 1000] }]\n              }\n            },\n            {\n              \"Metric\": \"MFMA FLOPs (F32)\",\n              \"Value\": \"&mfma_flops_f32_val\",\n              \"Unit\": \"GFLOP\",\n              \"peak\": { \"$divide\": [{ \"$multiply\": [$sclk, $numCU, 256 ]}, 1000] },\n              \"Percent of Peak - PoP\": {\n                \"$divide\": [{ \"$multiply\": [100, \"&mfma_flops_f32_val\"] }, { \"$divide\": [{ \"$multiply\": [$sclk, $numCU, 256 ]}, 1000] }]\n              }\n            },\n            {\n              \"Metric\": \"MFMA FLOPs (F64)\",\n              \"Value\": \"&mfma_flops_f64_val\",\n              \"Unit\": \"GFLOP\",\n              \"peak\": { \"$divide\": [{ \"$multiply\": [$sclk, $numCU, 256 ]}, 1000] },\n              \"Percent of Peak - PoP\": {\n                \"$divide\": [{ \"$multiply\": [100, \"&mfma_flops_f64_val\"] }, { \"$divide\": [{ \"$multiply\": [$sclk, $numCU, 256 ]}, 1000] }]\n              }\n            },\n            {\n              \"Metric\": \"MFMA IOPs (Int8)\",\n              \"Value\": \"&mfma_flops_i8_val\",\n              \"Unit\": \"GIOP\",\n              \"peak\": { \"$divide\": [{ \"$multiply\": [$sclk, $numCU, 1024 ]}, 1000] },\n              \"Percent of Peak - PoP\": {\n                \"$divide\": [{ \"$multiply\": [100, \"&mfma_flops_i8_val\"] }, { \"$divide\": [{ \"$multiply\": [$sclk, $numCU, 1024 ]}, 1000] }]\n              }\n            },\n            {\n              \"Metric\": \"Active CUs\",\n              \"Value\": $numActiveCUs,\n              \"Unit\": \"CUs\",\n              \"peak\": $numCU,\n              \"Percent of Peak - PoP\": { \"$divide\": [{ \"$multiply\": [100, $numActiveCUs] }, $numCU]}\n            },\n    \n            {\n              \"Metric\": \"SALU Util\",\n              \"Value\": \"&salu_val\",\n              \"Unit\": \"pct\",\n              \"peak\": 100,\n              \"Percent of Peak - PoP\": \"&salu_val\"\n            },\n            {\n              \"Metric\": \"VALU Util\",\n              \"Value\": \"&valu_val\",\n              \"Unit\": \"pct\",\n              \"peak\": 100,\n              \"Percent of Peak - PoP\": \"&valu_val\"\n            },\n            {\n              \"Metric\": \"MFMA Util\",\n              \"Value\": \"&mfma_val\",\n              \"Unit\": \"pct\",\n              \"peak\": 100,\n              \"Percent of Peak - PoP\": \"&mfma_val\"\n            },\n            {\n              \"Metric\": \"VALU Active Threads/Wave\",\n              \"Value\": \"&unpredthreads_val\",\n              \"Unit\": \"Threads\",\n              \"peak\": 64,\n              \"Percent of Peak - PoP\": { \"$multiply\": [\"&unpredthreads_val\", 1.5625]}\n            },\n            {\n              \"Metric\": \"IPC - Issue\",\n              \"Value\": \"&ipcIssue_val\",\n              \"Unit\": \"Instr/cycle\",\n              \"peak\": 5,\n              \"Percent of Peak - PoP\": {\"$divide\": [{ \"$multiply\": [100, \"&ipcIssue_val\"] }, 5] }\n            },\n            {\n              \"Metric\": \"LDS BW\",\n              \"Value\": \"&lds_bw\",\n              \"Unit\": \"GB/sec\",\n              \"peak\": {\"$multiply\": [$sclk, $numCU, 0.128]},\n              \"Percent of Peak - PoP\": \"&lds_bw_pop\"\n            },\n            {\n              \"Metric\": \"LDS Bank Conflict\",\n              \"Value\": \"&lds_bconf\",\n              \"Unit\": \"Conflicts/access\",\n              \"peak\": \"32\",\n              \"Percent of Peak - PoP\": {\"$divide\": [{ \"$multiply\": [100, \"&lds_bconf\"] }, 32] }\n            },\n            {\n                \"Metric\": \"Instr Cache Hit Rate\",\n                \"Value\": \"&l1i_hitRate_val\",\n                \"Unit\": \"pct\",\n                \"peak\": \"100\",\n                \"Percent of Peak - PoP\": \"&l1i_hitRate_val\"\n            }, \n            {\n                \"Metric\": \"Instr Cache BW\",\n                \"Value\": \"&l1i_BW_val\",\n                \"Unit\": \"GB/s\",\n                \"peak\": { \"$multiply\": [ { \"$multiply\": [{ \"$divide\": [$sclk, 1000] }, 64] }, $numSQC]},\n                \"Percent of Peak - PoP\": { \"$divide\": [{ \"$multiply\": [100, \"&l1i_BW_val\"] }, { \"$multiply\": [ { \"$multiply\": [{ \"$divide\": [$sclk, 1000] }, 64] }, $numSQC]}] }\n            },\n            {\n                \"Metric\": \"Scalar L1D Cache Hit Rate\",\n                \"Value\": \"&l1k_cacheHits_val\",\n                \"Unit\": \"pct\",\n                \"peak\": \"100\",\n                \"Percent of Peak - PoP\": \"&l1k_cacheHits_val\"\n            },\n            {\n                \"Metric\": \"Scalar L1D Cache BW\",\n                \"Value\": \"&l1k_BW_val\",\n                \"Unit\": \"GB/s\",\n                \"peak\": { \"$multiply\": [ { \"$multiply\": [{ \"$divide\": [$sclk, 1000] }, 64] }, $numSQC]},\n                \"Percent of Peak - PoP\":  { \"$divide\": [{ \"$multiply\": [100, \"&l1k_BW_val\"] }, { \"$multiply\": [ { \"$multiply\": [{ \"$divide\": [$sclk, 1000] }, 64] }, $numSQC]}] }\n            },\n\n            {\n                \"Metric\": \"Vector L1D Cache Hit Rate\",\n                \"Value\": \"&vecl1_cacheHits_val\",\n                \"Unit\": \"pct\",\n                \"peak\": \"100\",\n                \"Percent of Peak - PoP\": \"&vecl1_cacheHits_val\"\n            },\n            {\n                \"Metric\": \"Vector L1D Cache BW\",\n                \"Value\": \"&vecl1_BW_val\",\n                \"Unit\": \"GB/s\",\n                \"peak\": { \"$multiply\": [ { \"$multiply\": [{ \"$divide\": [$sclk, 1000] }, 64] }, $numCU]},\n                \"Percent of Peak - PoP\": { \"$divide\": [{ \"$multiply\": [100, \"&vecl1_BW_val\"] }, { \"$multiply\": [ { \"$multiply\": [{ \"$divide\": [$sclk, 1000] }, 64] }, $numCU]}] }\n            },\n            {\n                \"Metric\": \"L2 Cache Hit Rate\",\n                \"Value\": \"&l2_cacheHits_val\",\n                \"Unit\": \"pct\",\n                \"peak\": \"100\",\n                \"Percent of Peak - PoP\": \"&l2_cacheHits_val\"\n            },\n            {\n                \"Metric\": \"L2-Fabric Read BW\",\n                \"Value\": \"&eaReadBW_val\",\n                \"Unit\": \"GB/s\",\n                \"peak\": \"$hbmBW\",\n                \"Percent of Peak - PoP\": { \"$divide\": [{ \"$multiply\": [100, \"&eaReadBW_val\"] }, $hbmBW] }\n            },\n            {\n                \"Metric\": \"L2-Fabric Write BW\",\n                \"Value\": \"&eaWriteBW_val\",\n                \"Unit\": \"GB/s\",\n                \"peak\": \"$hbmBW\",\n                \"Percent of Peak - PoP\": { \"$divide\": [{ \"$multiply\": [100, \"&eaWriteBW_val\"] }, $hbmBW] }\n            },\n            {\n                \"Metric\": \"L2-Fabric Read Latency\",\n                \"Value\": \"&eaReadLat_val\",\n                \"Unit\": \"Cycles\",\n                \"peak\": \"\",\n                \"Percent of Peak - PoP\": \"\"\n            },\n            {\n                \"Metric\": \"L2-Fabric Write Latency\",\n                \"Value\": \"&eaWriteLat_val\",\n                \"Unit\": \"Cycles\",\n                \"peak\": \"\",\n                \"Percent of Peak - PoP\": \"\"\n            }\n\n          ]\n      }},\n      {\"$unwind\": {\n        \"path\": \"&array\"\n      }},\n      {\"$replaceRoot\": {\n        \"newRoot\": \"&array\"\n      }},\n      {\"$unionWith\": {\n            \"coll\": \"SQ_LEVEL_WAVES\",\n            \"pipeline\": [\n                {\"$match\": {\n                    \"Index\": { \"$in\": [${DispatchIDFilter:raw}] },\n                    \"gpu-id\": { \"$in\": [${gpuFilter:raw}] },\n                    \"KernelName\": { \"$in\": ${KernelNameFilter:json}}\n                }},\n    \n                {\"$group\": {\n                    \"_id\": null,\n                    \"waveOcc_val\": {\n                        \"$avg\": { \"$divide\": [\"&SQ_ACCUM_PREV_HIRES\", \"&GRBM_GUI_ACTIVE\"] }\n                    },\n                    \"waveOcc_pop\": {\n                        \"$avg\": { \"$divide\": [{ \"$divide\": [\"&SQ_ACCUM_PREV_HIRES\", \"&GRBM_GUI_ACTIVE\"] },{ \"$multiply\": [$maxWavesPerCU, $numCU] }] }\n                    }\n\n                }},\n                {\"$set\": {\n                    \"array\": [\n                        {\n                            \"Metric\": \"Wave Occupancy\",\n                            \"Value\": \"&waveOcc_val\",\n                            \"Unit\": \"Wavefronts\",\n                            \"peak\": { \"$multiply\": [$maxWavesPerCU, $numCU] },\n                            \"Percent of Peak - PoP\": { \"$multiply\": [100, \"&waveOcc_pop\"] }\n                        }\n                    ]\n                }},\n                {\"$unwind\": {\n                    \"path\": \"&array\"\n                }},\n                {\"$replaceRoot\": {\n                    \"newRoot\": \"&array\"\n                }}\n\n            ]\n        }},\n        {\"$unionWith\": {\n            \"coll\": \"SQ_IFETCH_LEVEL\",\n            \"pipeline\": [\n                {\"$match\": {\n                    \"Index\": { \"$in\": [${DispatchIDFilter:raw}] },\n                    \"gpu-id\": { \"$in\": [${gpuFilter:raw}] },\n                    \"KernelName\": { \"$in\": ${KernelNameFilter:json}}\n                }},\n    \n                {\"$group\": {\n                    \"_id\": null,\n                    \"instrFetchBW_val\": {\n                        \"$avg\": { \"$multiply\": [{ \"$divide\": [\"&SQ_IFETCH\", { \"$subtract\": [\"&EndNs\", \"&BeginNs\"] }] }, 32] }\n                    },\n                    \"instrFetchLat_val\": {\n                        \"$avg\": { \"$divide\": [\"&SQ_ACCUM_PREV_HIRES\", \"&SQ_IFETCH\"] }\n                    }\n                }},\n\n                {\"$set\": {\n                    \"array\": [\n                        {\n                            \"Metric\": \"Instr Fetch BW\",\n                            \"Value\": \"&instrFetchBW_val\",\n                            \"Unit\": \"GB/s\",\n                            \"peak\": { \"$multiply\": [ { \"$multiply\": [{ \"$divide\": [$sclk, 1000] }, 32] }, $numSQC]},\n                            \"Percent of Peak - PoP\": { \"$divide\": [{ \"$multiply\": [100, \"&instrFetchBW_val\"]}, { \"$multiply\": [$numSQC, { \"$multiply\": [{ \"$divide\": [$sclk, 1000] }, 32] }] }] }\n                        },\n                        {\n                            \"Metric\": \"Instr Fetch Latency\",\n                            \"Value\": \"&instrFetchLat_val\",\n                            \"Unit\": \"Cycles\",\n                            \"peak\": \"\",\n                            \"Percent of Peak - PoP\": \"\"\n\n                        }\n\n                    ]\n                }},\n                {\"$unwind\": {\n                    \"path\": \"&array\"\n                }},\n                {\"$replaceRoot\": {\n                    \"newRoot\": \"&array\"\n                }}\n\n            ]\n        }}\n\n    ]);",
+              "target": "${Workload1}.pmc_perf.aggregate([\n    {\"$match\": {\n        \"Index\": { \"$in\": [${DispatchIDFilter:raw}] },\n        \"gpu-id\": { \"$in\": [${gpuFilter:raw}] },\n        \"KernelName\": { \"$in\": ${KernelNameFilter:json}}\n      }},\n      {\"$group\": {\n          \"_id\": null,\n          \"valu_flops_val\": {\n            \"$avg\": { \"$divide\": [ { \"$add\": [\n              { \"$multiply\": [64, { \"$add\": [\"&SQ_INSTS_VALU_ADD_F16\", \"&SQ_INSTS_VALU_MUL_F16\", \"&SQ_INSTS_VALU_TRANS_F16\", { \"$multiply\": [2, \"&SQ_INSTS_VALU_FMA_F16\"] }] }] },\n              { \"$multiply\": [64, { \"$add\": [\"&SQ_INSTS_VALU_ADD_F32\", \"&SQ_INSTS_VALU_MUL_F32\", \"&SQ_INSTS_VALU_TRANS_F32\", { \"$multiply\": [2, \"&SQ_INSTS_VALU_FMA_F32\"] }] }] },\n              { \"$multiply\": [64, { \"$add\": [\"&SQ_INSTS_VALU_ADD_F64\", \"&SQ_INSTS_VALU_MUL_F64\", \"&SQ_INSTS_VALU_TRANS_F64\", { \"$multiply\": [2, \"&SQ_INSTS_VALU_FMA_F64\"] }] }] }\n            ]}\n            ,{ \"$subtract\": [\"&EndNs\", \"&BeginNs\"] }]\n          }},\n    \n          \"valu_intOps_val\": {\n            \"$avg\": { \"$divide\": [{ \"$multiply\": [64, { \"$add\": [\"&SQ_INSTS_VALU_INT32\", \"&SQ_INSTS_VALU_INT64\"] }] }, { \"$subtract\": [\"&EndNs\", \"&BeginNs\"] }] }\n          },\n    \n          \"mfma_flops_f16_val\": { \"$avg\": { \"$divide\": [{ \"$multiply\": [\"&SQ_INSTS_VALU_MFMA_MOPS_F16\", 512] }, { \"$subtract\": [\"&EndNs\", \"&BeginNs\"] }] }  },\n          \"mfma_flops_bf16_val\": { \"$avg\": { \"$divide\": [{ \"$multiply\": [\"&SQ_INSTS_VALU_MFMA_MOPS_BF16\", 512] }, { \"$subtract\": [\"&EndNs\", \"&BeginNs\"] }] }  },\n          \"mfma_flops_f32_val\": { \"$avg\": { \"$divide\": [{ \"$multiply\": [\"&SQ_INSTS_VALU_MFMA_MOPS_F32\", 512] }, { \"$subtract\": [\"&EndNs\", \"&BeginNs\"] }] }  },\n          \"mfma_flops_f64_val\": { \"$avg\": { \"$divide\": [{ \"$multiply\": [\"&SQ_INSTS_VALU_MFMA_MOPS_F64\", 512] }, { \"$subtract\": [\"&EndNs\", \"&BeginNs\"] }] }  },\n          \"mfma_flops_i8_val\": { \"$avg\": { \"$divide\": [{ \"$multiply\": [\"&SQ_INSTS_VALU_MFMA_MOPS_I8\", 512] }, { \"$subtract\": [\"&EndNs\", \"&BeginNs\"] }] }  },\n    \n    \n          \"salu_val\": {\n              \"$avg\": { \"$divide\": [{ \"$multiply\": [100, \"&SQ_ACTIVE_INST_SCA\"] }, { \"$multiply\": [\"&GRBM_GUI_ACTIVE\", $numCU] }] }\n          },\n    \n          \"valu_val\": {\n              \"$avg\": { \"$divide\": [{ \"$multiply\": [100, \"&SQ_ACTIVE_INST_VALU\"] }, { \"$multiply\": [\"&GRBM_GUI_ACTIVE\", $numCU] }] }\n          },\n    \n          \"mfma_val\": {\n              \"$avg\": { \"$divide\": [{ \"$multiply\": [100, \"&SQ_VALU_MFMA_BUSY_CYCLES\"] }, { \"$multiply\": [\"&GRBM_GUI_ACTIVE\", $numCU, 4] }] }\n          },\n\n    \n          \"lds_bconf\": {\n            \"$avg\": {\"$cond\": [ {\"$ne\": [{\"$subtract\": [\"&SQ_LDS_IDX_ACTIVE\", \"&SQ_LDS_BANK_CONFLICT\"]}, 0]},\n                                {\"$divide\": [\n                                    \"&SQ_LDS_BANK_CONFLICT\",\n                                    {\"$subtract\": [\"&SQ_LDS_IDX_ACTIVE\", \"&SQ_LDS_BANK_CONFLICT\"]}\n                                ]},\n                                null\n                              ]\n                    }     \n          },\n    \n   \n          \"lds_bw\":  {\n            \"$avg\": {\"$divide\":[ \n                        { \"$multiply\": [ { \"$subtract\": [\"&SQ_LDS_IDX_ACTIVE\", \"&SQ_LDS_BANK_CONFLICT\"]},  \n                                            4,  \n                                            {\"$toInt\": \"$L2Banks\"}\n                                        ]}, \n                        {\"$subtract\": [\"&EndNs\", \"&BeginNs\"]}\n                    ]}\n         },\n    \n          \"lds_bw_pop\":  {\n            \"$avg\":     {\"$divide\": [\n                            {\"$divide\":[ \n                                { \"$multiply\": [ { \"$subtract\": [\"&SQ_LDS_IDX_ACTIVE\", \"&SQ_LDS_BANK_CONFLICT\"]},  \n                                                    4,  \n                                                    {\"$toInt\": \"$L2Banks\"}\n                                                ]}, \n                                {\"$subtract\": [\"&EndNs\", \"&BeginNs\"]}\n                            ]},            \n                             {\"$multiply\": [$sclk, $numCU, 0.00128]}\n                         ]}\n         },\n    \n          \"unpredthreads_val\": {\n              \"$avg\": {\n                  \"$cond\": [\n                      {\"$ne\":[\"&SQ_ACTIVE_INST_VALU\" , 0]},\n                      { \"$divide\": [\"&SQ_THREAD_CYCLES_VALU\", \"&SQ_ACTIVE_INST_VALU\"] },\n                      null\n                  ]\n              }\n          },\n    \n          \"ipcIssue_val\": {\n              \"$avg\": { \"$divide\": [{ \"$add\": [\"&SQ_INSTS_VALU\", \"&SQ_INSTS_VMEM\", \"&SQ_INSTS_SALU\", \"&SQ_INSTS_SMEM\", \"&SQ_INSTS_GDS\", \"&SQ_INSTS_BRANCH\", \"&SQ_INSTS_SENDMSG\", \"&SQ_INSTS_VSKIPPED\"] }, \"&SQ_ACTIVE_INST_ANY\"] }\n          },\n          \"eaWriteLat_val\": {\n            \"$avg\": {\n                \"$cond\": [\n                  {\"$ne\": [\"&TCC_EA_WRREQ_sum\" , 0]},\n                  { \"$divide\": [\"&TCC_EA_WRREQ_LEVEL_sum\", \"&TCC_EA_WRREQ_sum\"] },\n                  null                        \n                ]\n            }\n            },\n            \"eaReadLat_val\": {\n                \"$avg\": {\n                    \"$cond\": [\n                      {\"$ne\": [\"&TCC_EA_RDREQ_sum\" , 0]},\n                      { \"$divide\": [\"&TCC_EA_RDREQ_LEVEL_sum\", \"&TCC_EA_RDREQ_sum\"] },\n                      null                        \n                    ]\n                }\n            },\n            \"eaWriteBW_val\": {\n                \"$avg\": { \"$divide\": [{ \"$add\": [{ \"$multiply\": [\"&TCC_EA_WRREQ_64B_sum\", 64] }, { \"$multiply\": [{ \"$subtract\": [\"&TCC_EA_WRREQ_sum\", \"&TCC_EA_WRREQ_64B_sum\"] }, 32] }] }, { \"$subtract\": [\"&EndNs\", \"&BeginNs\"] }] }\n            }, \n            \"eaReadBW_val\": {\n                \"$avg\": { \"$divide\": [{ \"$add\": [{ \"$multiply\": [\"&TCC_EA_RDREQ_32B_sum\", 32] }, { \"$multiply\": [{ \"$subtract\": [\"&TCC_EA_RDREQ_sum\", \"&TCC_EA_RDREQ_32B_sum\"] }, 64] }] }, { \"$subtract\": [\"&EndNs\", \"&BeginNs\"] }] }\n            },\n            \"l2_cacheHits_val\": {\n                \"$avg\": {\n                    \"$cond\": [\n                        {\"$ne\": [{ \"$add\": [\"&TCC_HIT_sum\", \"&TCC_MISS_sum\"] }, 0]},\n                        { \"$divide\": [{ \"$multiply\": [100, \"&TCC_HIT_sum\"] }, { \"$add\": [\"&TCC_HIT_sum\", \"&TCC_MISS_sum\"] }] },\n                        null                          \n                    ]\n                }\n            },\n            \"vecl1_cacheHits_val\": {\n                \"$avg\":  {\n                    \"$cond\": [\n                        {\"$ne\": [\"&TCP_TOTAL_CACHE_ACCESSES_sum\", 0]},\n                        { \"$subtract\": [100, { \"$divide\": [{ \"$multiply\": [100, { \"$add\": [\"&TCP_TCC_READ_REQ_sum\", \"&TCP_TCC_WRITE_REQ_sum\", \"&TCP_TCC_ATOMIC_WITH_RET_REQ_sum\", \"&TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum\"] }]  }, \"&TCP_TOTAL_CACHE_ACCESSES_sum\"] }] },\n                        null\n                    ]\n                }\n            },\n            \"vecl1_BW_val\": {\n                \"$avg\": { \"$divide\": [{ \"$multiply\": [\"&TCP_TOTAL_CACHE_ACCESSES_sum\", 64 ] }, { \"$subtract\": [\"&EndNs\", \"&BeginNs\"] } ] }\n            },\n            \"l1k_cacheHits_val\": {\n                \"$avg\": {\n                    \"$cond\": [\n                        {\"$ne\": [{ \"$add\": [\"&SQC_DCACHE_HITS\", \"&SQC_DCACHE_MISSES\"]} , 0]},\n                        { \"$divide\": [{ \"$multiply\": [100, \"&SQC_DCACHE_HITS\"] }, { \"$add\": [\"&SQC_DCACHE_HITS\", \"&SQC_DCACHE_MISSES\"]}] },\n                        null\n                    ]\n                }\n            },\n            \"l1i_hitRate_val\": {\n                \"$avg\": { \"$divide\": [{ \"$multiply\": [100, \"&SQC_ICACHE_HITS\"] }, { \"$add\": [\"&SQC_ICACHE_HITS\", \"&SQC_ICACHE_MISSES\"]}] }\n            },\n            \"l1i_BW_val\": {\n                \"$avg\": { \"$multiply\": [{ \"$divide\": [\"&SQC_ICACHE_REQ\",{ \"$subtract\": [\"&EndNs\", \"&BeginNs\"] } ] }, 64] }\n            },\n            \"l1k_BW_val\": {\n                \"$avg\": { \"$multiply\": [{ \"$divide\": [\"&SQC_DCACHE_REQ\", { \"$subtract\": [\"&EndNs\", \"&BeginNs\"] } ] }, 64] }\n            }\n            \n        }},\n      {\"$set\": {\n        \"array\": [\n            {\n              \"Metric\": \"VALU FLOPs\",\n              \"Value\": \"&valu_flops_val\",\n              \"Unit\": \"GFLOP\",\n              \"peak\": { \"$divide\": [{ \"$multiply\": [$sclk, $numCU, 64, 2 ]}, 1000] },\n              \"Percent of Peak - PoP\": {\n                \"$divide\": [{ \"$multiply\": [100, \"&valu_flops_val\"] }, { \"$divide\": [{ \"$multiply\": [$sclk, $numCU, 64, 2 ]}, 1000] }]\n              }\n            },\n            {\n              \"Metric\": \"VALU IOPs\",\n              \"Value\": \"&valu_intOps_val\",\n              \"Unit\": \"GIOP\",\n              \"peak\": { \"$divide\": [{ \"$multiply\": [$sclk, $numCU, 64, 2 ]}, 1000] },\n              \"Percent of Peak - PoP\": {\n                \"$divide\": [{ \"$multiply\": [100, \"&valu_intOps_val\"] }, { \"$divide\": [{ \"$multiply\": [$sclk, $numCU, 64, 2 ]}, 1000] }]\n              }\n            },\n            {\n              \"Metric\": \"MFMA FLOPs (BF16)\",\n              \"Value\": \"&mfma_flops_bf16_val\",\n              \"Unit\": \"GFLOP\",\n              \"peak\": { \"$divide\": [{ \"$multiply\": [$sclk, $numCU, 512 ]}, 1000] },\n              \"Percent of Peak - PoP\": {\n                \"$divide\": [{ \"$multiply\": [100, \"&mfma_flops_bf16_val\"] }, { \"$divide\": [{ \"$multiply\": [$sclk, $numCU, 512 ]}, 1000] }]\n              }\n            },\n            {\n              \"Metric\": \"MFMA FLOPs (F16)\",\n              \"Value\": \"&mfma_flops_f16_val\",\n              \"Unit\": \"GFLOP\",\n              \"peak\": { \"$divide\": [{ \"$multiply\": [$sclk, $numCU, 1024 ]}, 1000] },\n              \"Percent of Peak - PoP\": {\n                \"$divide\": [{ \"$multiply\": [100, \"&mfma_flops_f16_val\"] }, { \"$divide\": [{ \"$multiply\": [$sclk, $numCU, 1024 ]}, 1000] }]\n              }\n            },\n            {\n              \"Metric\": \"MFMA FLOPs (F32)\",\n              \"Value\": \"&mfma_flops_f32_val\",\n              \"Unit\": \"GFLOP\",\n              \"peak\": { \"$divide\": [{ \"$multiply\": [$sclk, $numCU, 256 ]}, 1000] },\n              \"Percent of Peak - PoP\": {\n                \"$divide\": [{ \"$multiply\": [100, \"&mfma_flops_f32_val\"] }, { \"$divide\": [{ \"$multiply\": [$sclk, $numCU, 256 ]}, 1000] }]\n              }\n            },\n            {\n              \"Metric\": \"MFMA FLOPs (F64)\",\n              \"Value\": \"&mfma_flops_f64_val\",\n              \"Unit\": \"GFLOP\",\n              \"peak\": { \"$divide\": [{ \"$multiply\": [$sclk, $numCU, 256 ]}, 1000] },\n              \"Percent of Peak - PoP\": {\n                \"$divide\": [{ \"$multiply\": [100, \"&mfma_flops_f64_val\"] }, { \"$divide\": [{ \"$multiply\": [$sclk, $numCU, 256 ]}, 1000] }]\n              }\n            },\n            {\n              \"Metric\": \"MFMA IOPs (Int8)\",\n              \"Value\": \"&mfma_flops_i8_val\",\n              \"Unit\": \"GIOP\",\n              \"peak\": { \"$divide\": [{ \"$multiply\": [$sclk, $numCU, 1024 ]}, 1000] },\n              \"Percent of Peak - PoP\": {\n                \"$divide\": [{ \"$multiply\": [100, \"&mfma_flops_i8_val\"] }, { \"$divide\": [{ \"$multiply\": [$sclk, $numCU, 1024 ]}, 1000] }]\n              }\n            },\n            {\n              \"Metric\": \"Active CUs\",\n              \"Value\": $numActiveCUs,\n              \"Unit\": \"CUs\",\n              \"peak\": $numCU,\n              \"Percent of Peak - PoP\": { \"$divide\": [{ \"$multiply\": [100, $numActiveCUs] }, $numCU]}\n            },\n    \n            {\n              \"Metric\": \"SALU Util\",\n              \"Value\": \"&salu_val\",\n              \"Unit\": \"pct\",\n              \"peak\": 100,\n              \"Percent of Peak - PoP\": \"&salu_val\"\n            },\n            {\n              \"Metric\": \"VALU Util\",\n              \"Value\": \"&valu_val\",\n              \"Unit\": \"pct\",\n              \"peak\": 100,\n              \"Percent of Peak - PoP\": \"&valu_val\"\n            },\n            {\n              \"Metric\": \"MFMA Util\",\n              \"Value\": \"&mfma_val\",\n              \"Unit\": \"pct\",\n              \"peak\": 100,\n              \"Percent of Peak - PoP\": \"&mfma_val\"\n            },\n            {\n              \"Metric\": \"VALU Active Threads/Wave\",\n              \"Value\": \"&unpredthreads_val\",\n              \"Unit\": \"Threads\",\n              \"peak\": 64,\n              \"Percent of Peak - PoP\": { \"$multiply\": [\"&unpredthreads_val\", 1.5625]}\n            },\n            {\n              \"Metric\": \"IPC - Issue\",\n              \"Value\": \"&ipcIssue_val\",\n              \"Unit\": \"Instr/cycle\",\n              \"peak\": 5,\n              \"Percent of Peak - PoP\": {\"$divide\": [{ \"$multiply\": [100, \"&ipcIssue_val\"] }, 5] }\n            },\n            {\n              \"Metric\": \"LDS BW\",\n              \"Value\": \"&lds_bw\",\n              \"Unit\": \"GB/sec\",\n              \"peak\": {\"$multiply\": [$sclk, $numCU, 0.128]},\n              \"Percent of Peak - PoP\": \"&lds_bw_pop\"\n            },\n            {\n              \"Metric\": \"LDS Bank Conflict\",\n              \"Value\": \"&lds_bconf\",\n              \"Unit\": \"Conflicts/access\",\n              \"peak\": \"32\",\n              \"Percent of Peak - PoP\": {\"$divide\": [{ \"$multiply\": [100, \"&lds_bconf\"] }, 32] }\n            },\n            {\n                \"Metric\": \"Instr Cache Hit Rate\",\n                \"Value\": \"&l1i_hitRate_val\",\n                \"Unit\": \"pct\",\n                \"peak\": \"100\",\n                \"Percent of Peak - PoP\": \"&l1i_hitRate_val\"\n            }, \n            {\n                \"Metric\": \"Instr Cache BW\",\n                \"Value\": \"&l1i_BW_val\",\n                \"Unit\": \"GB/s\",\n                \"peak\": { \"$multiply\": [ { \"$multiply\": [{ \"$divide\": [$sclk, 1000] }, 64] }, $numSQC]},\n                \"Percent of Peak - PoP\": { \"$divide\": [{ \"$multiply\": [100, \"&l1i_BW_val\"] }, { \"$multiply\": [ { \"$multiply\": [{ \"$divide\": [$sclk, 1000] }, 64] }, $numSQC]}] }\n            },\n            {\n                \"Metric\": \"Scalar L1D Cache Hit Rate\",\n                \"Value\": \"&l1k_cacheHits_val\",\n                \"Unit\": \"pct\",\n                \"peak\": \"100\",\n                \"Percent of Peak - PoP\": \"&l1k_cacheHits_val\"\n            },\n            {\n                \"Metric\": \"Scalar L1D Cache BW\",\n                \"Value\": \"&l1k_BW_val\",\n                \"Unit\": \"GB/s\",\n                \"peak\": { \"$multiply\": [ { \"$multiply\": [{ \"$divide\": [$sclk, 1000] }, 64] }, $numSQC]},\n                \"Percent of Peak - PoP\":  { \"$divide\": [{ \"$multiply\": [100, \"&l1k_BW_val\"] }, { \"$multiply\": [ { \"$multiply\": [{ \"$divide\": [$sclk, 1000] }, 64] }, $numSQC]}] }\n            },\n\n            {\n                \"Metric\": \"Vector L1D Cache Hit Rate\",\n                \"Value\": \"&vecl1_cacheHits_val\",\n                \"Unit\": \"pct\",\n                \"peak\": \"100\",\n                \"Percent of Peak - PoP\": \"&vecl1_cacheHits_val\"\n            },\n            {\n                \"Metric\": \"Vector L1D Cache BW\",\n                \"Value\": \"&vecl1_BW_val\",\n                \"Unit\": \"GB/s\",\n                \"peak\": { \"$multiply\": [ { \"$multiply\": [{ \"$divide\": [$sclk, 1000] }, 64] }, $numCU]},\n                \"Percent of Peak - PoP\": { \"$divide\": [{ \"$multiply\": [100, \"&vecl1_BW_val\"] }, { \"$multiply\": [ { \"$multiply\": [{ \"$divide\": [$sclk, 1000] }, 64] }, $numCU]}] }\n            },\n            {\n                \"Metric\": \"L2 Cache Hit Rate\",\n                \"Value\": \"&l2_cacheHits_val\",\n                \"Unit\": \"pct\",\n                \"peak\": \"100\",\n                \"Percent of Peak - PoP\": \"&l2_cacheHits_val\"\n            },\n            {\n                \"Metric\": \"L2-Fabric Read BW\",\n                \"Value\": \"&eaReadBW_val\",\n                \"Unit\": \"GB/s\",\n                \"peak\": \"$hbmBW\",\n                \"Percent of Peak - PoP\": { \"$divide\": [{ \"$multiply\": [100, \"&eaReadBW_val\"] }, $hbmBW] }\n            },\n            {\n                \"Metric\": \"L2-Fabric Write BW\",\n                \"Value\": \"&eaWriteBW_val\",\n                \"Unit\": \"GB/s\",\n                \"peak\": \"$hbmBW\",\n                \"Percent of Peak - PoP\": { \"$divide\": [{ \"$multiply\": [100, \"&eaWriteBW_val\"] }, $hbmBW] }\n            },\n            {\n                \"Metric\": \"L2-Fabric Read Latency\",\n                \"Value\": \"&eaReadLat_val\",\n                \"Unit\": \"Cycles\",\n                \"peak\": \"\",\n                \"Percent of Peak - PoP\": \"\"\n            },\n            {\n                \"Metric\": \"L2-Fabric Write Latency\",\n                \"Value\": \"&eaWriteLat_val\",\n                \"Unit\": \"Cycles\",\n                \"peak\": \"\",\n                \"Percent of Peak - PoP\": \"\"\n            }\n\n          ]\n      }},\n      {\"$unwind\": {\n        \"path\": \"&array\"\n      }},\n      {\"$replaceRoot\": {\n        \"newRoot\": \"&array\"\n      }},\n      {\"$unionWith\": {\n            \"coll\": \"SQ_LEVEL_WAVES\",\n            \"pipeline\": [\n                {\"$match\": {\n                    \"Index\": { \"$in\": [${DispatchIDFilter:raw}] },\n                    \"gpu-id\": { \"$in\": [${gpuFilter:raw}] },\n                    \"KernelName\": { \"$in\": ${KernelNameFilter:json}}\n                }},\n    \n                {\"$group\": {\n                    \"_id\": null,\n                    \"waveOcc_val\": {\n                        \"$avg\": { \"$divide\": [\"&SQ_ACCUM_PREV_HIRES\", \"&GRBM_GUI_ACTIVE\"] }\n                    },\n                    \"waveOcc_pop\": {\n                        \"$avg\": { \"$divide\": [{ \"$divide\": [\"&SQ_ACCUM_PREV_HIRES\", \"&GRBM_GUI_ACTIVE\"] },{ \"$multiply\": [$maxWavesPerCU, $numCU] }] }\n                    }\n\n                }},\n                {\"$set\": {\n                    \"array\": [\n                        {\n                            \"Metric\": \"Wave Occupancy\",\n                            \"Value\": \"&waveOcc_val\",\n                            \"Unit\": \"Wavefronts\",\n                            \"peak\": { \"$multiply\": [$maxWavesPerCU, $numCU] },\n                            \"Percent of Peak - PoP\": { \"$multiply\": [100, \"&waveOcc_pop\"] }\n                        }\n                    ]\n                }},\n                {\"$unwind\": {\n                    \"path\": \"&array\"\n                }},\n                {\"$replaceRoot\": {\n                    \"newRoot\": \"&array\"\n                }}\n\n            ]\n        }},\n        {\"$unionWith\": {\n            \"coll\": \"SQ_IFETCH_LEVEL\",\n            \"pipeline\": [\n                {\"$match\": {\n                    \"Index\": { \"$in\": [${DispatchIDFilter:raw}] },\n                    \"gpu-id\": { \"$in\": [${gpuFilter:raw}] },\n                    \"KernelName\": { \"$in\": ${KernelNameFilter:json}}\n                }},\n    \n                {\"$group\": {\n                    \"_id\": null,\n                    \"instrFetchBW_val\": {\n                        \"$avg\": { \"$multiply\": [{ \"$divide\": [\"&SQ_IFETCH\", { \"$subtract\": [\"&EndNs\", \"&BeginNs\"] }] }, 32] }\n                    },\n                    \"instrFetchLat_val\": {\n                        \"$avg\": { \"$divide\": [\"&SQ_ACCUM_PREV_HIRES\", \"&SQ_IFETCH\"] }\n                    }\n                }},\n\n                {\"$set\": {\n                    \"array\": [\n                        {\n                            \"Metric\": \"Instr Fetch BW\",\n                            \"Value\": \"&instrFetchBW_val\",\n                            \"Unit\": \"GB/s\",\n                            \"peak\": { \"$multiply\": [ { \"$multiply\": [{ \"$divide\": [$sclk, 1000] }, 32] }, $numSQC]},\n                            \"Percent of Peak - PoP\": { \"$divide\": [{ \"$multiply\": [100, \"&instrFetchBW_val\"]}, { \"$multiply\": [$numSQC, { \"$multiply\": [{ \"$divide\": [$sclk, 1000] }, 32] }] }] }\n                        },\n                        {\n                            \"Metric\": \"Instr Fetch Latency\",\n                            \"Value\": \"&instrFetchLat_val\",\n                            \"Unit\": \"Cycles\",\n                            \"peak\": \"\",\n                            \"Percent of Peak - PoP\": \"\"\n\n                        }\n\n                    ]\n                }},\n                {\"$unwind\": {\n                    \"path\": \"&array\"\n                }},\n                {\"$replaceRoot\": {\n                    \"newRoot\": \"&array\"\n                }}\n\n            ]\n        }}\n\n    ]);",
               "type": "table"
             },
             {
@@ -1539,8 +1540,7 @@
                 "mode": "absolute",
                 "steps": [
                   {
-                    "color": "green",
-                    "value": null
+                    "color": "green"
                   },
                   {
                     "color": "red",
@@ -3699,7 +3699,8 @@
                 "mode": "absolute",
                 "steps": [
                   {
-                    "color": "green"
+                    "color": "green",
+                    "value": null
                   },
                   {
                     "color": "red",
@@ -3906,7 +3907,8 @@
                 "mode": "absolute",
                 "steps": [
                   {
-                    "color": "green"
+                    "color": "green",
+                    "value": null
                   },
                   {
                     "color": "red",
@@ -4592,7 +4594,6 @@
       "id": 209,
       "panels": [
         {
-          "datasource": {},
           "fieldConfig": {
             "defaults": {
               "color": {
@@ -4604,7 +4605,8 @@
                 "mode": "absolute",
                 "steps": [
                   {
-                    "color": "green"
+                    "color": "green",
+                    "value": null
                   },
                   {
                     "color": "red",
@@ -4649,7 +4651,7 @@
               },
               "rawQuery": true,
               "refId": "A",
-              "target": "$Workload1.pmc_perf.aggregate([\n    {\"$match\": {\n          \"Index\": { \"$in\": [${DispatchIDFilter:raw}] },\n          \"gpu-id\": { \"$in\": [${gpuFilter:raw}] },\n          \"KernelName\": { \"$in\": ${KernelNameFilter:json}}\n        }},\n        {\"$addFields\": {\n            \"denom\": {\n                   \"$switch\" : {\n                      \"branches\": [\n                         {\n                              \"case\":  { \"$eq\": [ $normUnit, \"per Wave\"]} ,\n                              \"then\":  \"&SQ_WAVES\"\n                         },\n                         {\n                              \"case\":  { \"$eq\": [ $normUnit, \"per Cycle\"]} ,\n                              \"then\":  \"&GRBM_GUI_ACTIVE\"\n                         },\n                         {\n                              \"case\":  { \"$eq\": [ $normUnit, \"per Sec\"]} ,\n                              \"then\":  {\"$divide\":[{\"$subtract\": [\"&EndNs\", \"&BeginNs\" ]}, 1000000000]}\n                         }\n                      ],\n                     \"default\": 1\n                   }         \n            } \n        }},\n        {\"$group\": {\n            \"_id\": null,\n            \"valu\": {\n              \"$avg\": { \"$divide\": [ { \"$subtract\": [\"&SQ_INSTS_VALU\", \"&SQ_INSTS_MFMA\"]}, \"&denom\" ] }\n            },\n            \"mfma\": {\n                \"$avg\": { \"$divide\": [ \"&SQ_INSTS_MFMA\", \"&denom\" ] }\n            },\n            \"vmem\": {\n              \"$avg\": { \"$divide\": [ { \"$subtract\": [\"&SQ_INSTS_VMEM\", \"&SQ_INSTS_FLAT_LDS_ONLY\"]}, \"&denom\" ] }\n            },\n            \"lds\": {\n              \"$avg\": { \"$divide\": [ \"&SQ_INSTS_LDS\", \"&denom\" ] }\n            },\n            \"salu\": {\n              \"$avg\": { \"$divide\": [ \"&SQ_INSTS_SALU\", \"&denom\" ] }\n            },\n            \"smem\": {\n              \"$avg\": { \"$divide\": [ \"&SQ_INSTS_SMEM\", \"&denom\" ] }\n            },\n            \"branch\": {\n              \"$avg\": { \"$divide\": [ \"&SQ_INSTS_BRANCH\", \"&denom\" ] }\n            },\n            \"gds\": {\n              \"$avg\": { \"$divide\": [ \"&SQ_INSTS_GDS\", \"&denom\" ] }\n            }\n          }\n        },\n        {\"$set\": {\n          \"array\": [\n              {\n                \"metric\": \"VALU - Vector\",\n                \"count\": \"&valu\"\n              },\n              {\n                \"metric\": \"VMEM\",\n                \"count\": \"&vmem\"\n              },\n              {\n                \"metric\": \"LDS\",\n                \"count\": \"&lds\"\n              },\n              {\n                \"metric\": \"VALU - MFMA\",\n                \"count\": \"&mfma\"\n              },\n              {\n                \"metric\": \"SALU\",\n                \"count\": \"&salu\"\n              },\n              {\n                \"metric\": \"SMEM\",\n                \"count\": \"&smem\"\n              },\n              {\n                \"metric\": \"Branch\",\n                \"count\": \"&branch\"\n              },\n              {\n                \"metric\": \"GDS\",\n                \"count\": \"&gds\"\n              }\n            ]\n        }},\n        {\"$unwind\": {\n          \"path\": \"&array\"\n        }},\n        {\"$replaceRoot\": {\n          \"newRoot\": \"&array\"\n        }}\n      ]);",
+              "target": "$Workload1.pmc_perf.aggregate([\n    {\"$match\": {\n          \"Index\": { \"$in\": [${DispatchIDFilter:raw}] },\n          \"gpu-id\": { \"$in\": [${gpuFilter:raw}] },\n          \"KernelName\": { \"$in\": ${KernelNameFilter:json}}\n        }},\n        {\"$addFields\": {\n            \"denom\": {\n                   \"$switch\" : {\n                      \"branches\": [\n                         {\n                              \"case\":  { \"$eq\": [ $normUnit, \"per Wave\"]} ,\n                              \"then\":  \"&SQ_WAVES\"\n                         },\n                         {\n                              \"case\":  { \"$eq\": [ $normUnit, \"per Cycle\"]} ,\n                              \"then\":  \"&GRBM_GUI_ACTIVE\"\n                         },\n                         {\n                              \"case\":  { \"$eq\": [ $normUnit, \"per Sec\"]} ,\n                              \"then\":  {\"$divide\":[{\"$subtract\": [\"&EndNs\", \"&BeginNs\" ]}, 1000000000]}\n                         }\n                      ],\n                     \"default\": 1\n                   }         \n            } \n        }},\n        {\"$group\": {\n            \"_id\": null,\n            \"valu_avg\": {\n              \"$avg\": { \"$divide\": [ { \"$subtract\": [\"&SQ_INSTS_VALU\", \"&SQ_INSTS_MFMA\"]}, \"&denom\" ] }\n            },\n            \"mfma_avg\": {\n                \"$avg\": { \"$divide\": [ \"&SQ_INSTS_MFMA\", \"&denom\" ] }\n            },\n            \"vmem_avg\": {\n              \"$avg\": { \"$divide\": [ { \"$subtract\": [\"&SQ_INSTS_VMEM\", \"&SQ_INSTS_FLAT_LDS_ONLY\"]}, \"&denom\" ] }\n            },\n            \"lds_avg\": {\n              \"$avg\": { \"$divide\": [ \"&SQ_INSTS_LDS\", \"&denom\" ] }\n            },\n            \"salu_avg\": {\n              \"$avg\": { \"$divide\": [ \"&SQ_INSTS_SALU\", \"&denom\" ] }\n            },\n            \"smem_avg\": {\n              \"$avg\": { \"$divide\": [ \"&SQ_INSTS_SMEM\", \"&denom\" ] }\n            },\n            \"branch_avg\": {\n              \"$avg\": { \"$divide\": [ \"&SQ_INSTS_BRANCH\", \"&denom\" ] }\n            },\n            \"gds_avg\": {\n              \"$avg\": { \"$divide\": [ \"&SQ_INSTS_GDS\", \"&denom\" ] }\n            },\n            \"valu_min\": {\n                \"$min\": { \"$divide\": [ { \"$subtract\": [\"&SQ_INSTS_VALU\", \"&SQ_INSTS_MFMA\"]}, \"&denom\" ] }\n              },\n              \"mfma_min\": {\n                  \"$min\": { \"$divide\": [ \"&SQ_INSTS_MFMA\", \"&denom\" ] }\n              },\n              \"vmem_min\": {\n                \"$min\": { \"$divide\": [ { \"$subtract\": [\"&SQ_INSTS_VMEM\", \"&SQ_INSTS_FLAT_LDS_ONLY\"]}, \"&denom\" ] }\n              },\n              \"lds_min\": {\n                \"$min\": { \"$divide\": [ \"&SQ_INSTS_LDS\", \"&denom\" ] }\n              },\n              \"salu_min\": {\n                \"$min\": { \"$divide\": [ \"&SQ_INSTS_SALU\", \"&denom\" ] }\n              },\n              \"smem_min\": {\n                \"$min\": { \"$divide\": [ \"&SQ_INSTS_SMEM\", \"&denom\" ] }\n              },\n              \"branch_min\": {\n                \"$min\": { \"$divide\": [ \"&SQ_INSTS_BRANCH\", \"&denom\" ] }\n              },\n              \"gds_min\": {\n                \"$min\": { \"$divide\": [ \"&SQ_INSTS_GDS\", \"&denom\" ] }\n              },\n              \"valu_max\": {\n                \"$max\": { \"$divide\": [ { \"$subtract\": [\"&SQ_INSTS_VALU\", \"&SQ_INSTS_MFMA\"]}, \"&denom\" ] }\n              },\n              \"mfma_max\": {\n                  \"$max\": { \"$divide\": [ \"&SQ_INSTS_MFMA\", \"&denom\" ] }\n              },\n              \"vmem_max\": {\n                \"$max\": { \"$divide\": [ { \"$subtract\": [\"&SQ_INSTS_VMEM\", \"&SQ_INSTS_FLAT_LDS_ONLY\"]}, \"&denom\" ] }\n              },\n              \"lds_max\": {\n                \"$max\": { \"$divide\": [ \"&SQ_INSTS_LDS\", \"&denom\" ] }\n              },\n              \"salu_max\": {\n                \"$max\": { \"$divide\": [ \"&SQ_INSTS_SALU\", \"&denom\" ] }\n              },\n              \"smem_max\": {\n                \"$max\": { \"$divide\": [ \"&SQ_INSTS_SMEM\", \"&denom\" ] }\n              },\n              \"branch_max\": {\n                \"$max\": { \"$divide\": [ \"&SQ_INSTS_BRANCH\", \"&denom\" ] }\n              },\n              \"gds_max\": {\n                \"$max\": { \"$divide\": [ \"&SQ_INSTS_GDS\", \"&denom\" ] }\n              }\n\n          }\n        },\n        {\"$set\": {\n          \"array\": [\n              {\n                \"metric\": \"VALU - Vector\",\n                \"avg\": \"&valu_avg\",\n                \"min\": \"&valu_min\",\n                \"max\": \"&valu_max\"\n              },\n              {\n                \"metric\": \"VMEM\",\n                \"avg\": \"&vmem_avg\",\n                \"min\": \"&vmem_min\",\n                \"max\": \"&vmem_max\"\n              },\n              {\n                \"metric\": \"LDS\",\n                \"avg\": \"&lds_avg\",\n                \"min\": \"&lds_min\",\n                \"max\": \"&lds_max\"\n              },\n              {\n                \"metric\": \"VALU - MFMA\",\n                \"avg\": \"&mfma_avg\",\n                \"min\": \"&mfma_min\",\n                \"max\": \"&mfma_max\"\n              },\n              {\n                \"metric\": \"SALU\",\n                \"avg\": \"&salu_avg\",\n                \"min\": \"&salu_min\",\n                \"max\": \"&salu_max\"\n              },\n              {\n                \"metric\": \"SMEM\",\n                \"avg\": \"&smem_avg\",\n                \"min\": \"&smem_min\",\n                \"max\": \"&smem_max\"\n              },\n              {\n                \"metric\": \"Branch\",\n                \"avg\": \"&branch_avg\",\n                \"min\": \"&branch_min\",\n                \"max\": \"&branch_max\"\n              },\n              {\n                \"metric\": \"GDS\",\n                \"avg\": \"&gds_avg\",\n                \"min\": \"&gds_min\",\n                \"max\": \"&gds_max\"\n              }\n            ]\n        }},\n        {\"$unwind\": {\n          \"path\": \"&array\"\n        }},\n        {\"$replaceRoot\": {\n          \"newRoot\": \"&array\"\n        }}\n      ]);",
               "type": "table"
             },
             {
@@ -4660,7 +4662,7 @@
               "hide": false,
               "rawQuery": true,
               "refId": "B",
-              "target": "$Workload2.pmc_perf.aggregate([\n    {\"$match\": {\n      \"Index\": { \"$in\": [${DispatchIDFilter2:raw}] },\n      \"gpu-id\": { \"$in\": [${gpuFilter2:raw}] },\n      \"KernelName\": { \"$in\": ${KernelNameFilter2:json}},\n      \"$expr\":{\"$regexMatch\": {\"input\":\"${select}\",\"regex\":\"(Instruction Mix)\"}}\n    }},\n    {\"$addFields\": {\n      \"denom\": {\n             \"$switch\" : {\n                \"branches\": [\n                   {\n                        \"case\":  { \"$eq\": [ $normUnit, \"per Wave\"]} ,\n                        \"then\":  \"&SQ_WAVES\"\n                   },\n                   {\n                        \"case\":  { \"$eq\": [ $normUnit, \"per Cycle\"]} ,\n                        \"then\":  \"&GRBM_GUI_ACTIVE\"\n                   },\n                   {\n                        \"case\":  { \"$eq\": [ $normUnit, \"per Sec\"]} ,\n                        \"then\":  {\"$divide\":[{\"$subtract\": [\"&EndNs\", \"&BeginNs\" ]}, 1000000000]}\n                   }\n                ],\n               \"default\": 1\n             }         \n      } \n  }},\n  \n    {\"$group\": {\n        \"_id\": null,\n        \"valu\": {\n        \"$avg\": { \"$divide\": [ { \"$subtract\": [\"&SQ_INSTS_VALU\", \"&SQ_INSTS_MFMA\"]}, \"&denom\" ] }\n        },\n        \"mfma\": {\n            \"$avg\": { \"$divide\": [ \"&SQ_INSTS_MFMA\", \"&denom\" ] }\n        },\n        \"vmem\": {\n        \"$avg\": { \"$divide\": [ { \"$subtract\": [\"&SQ_INSTS_VMEM\", \"&SQ_INSTS_FLAT_LDS_ONLY\"]}, \"&denom\" ] }\n        },\n        \"lds\": {\n        \"$avg\": { \"$divide\": [ \"&SQ_INSTS_LDS\", \"&denom\" ] }\n        },\n        \"salu\": {\n        \"$avg\": { \"$divide\": [ \"&SQ_INSTS_SALU\", \"&denom\" ] }\n        },\n        \"smem\": {\n        \"$avg\": { \"$divide\": [ \"&SQ_INSTS_SMEM\", \"&denom\" ] }\n        },\n        \"branch\": {\n        \"$avg\": { \"$divide\": [ \"&SQ_INSTS_BRANCH\", \"&denom\" ] }\n        },\n        \"gds\": {\n        \"$avg\": { \"$divide\": [ \"&SQ_INSTS_GDS\", \"&denom\" ] }\n        }\n    }},\n      {\"$set\": {\n        \"array\": [\n            {\n              \"metric\": \"VALU - Vector (Baseline)\",\n              \"count\": \"&valu\"\n            },\n            {\n              \"metric\": \"VMEM (Baseline)\",\n              \"count\": \"&vmem\"\n            },\n            {\n              \"metric\": \"LDS (Baseline)\",\n              \"count\": \"&lds\"\n            },\n            {\n              \"metric\": \"VALU - MFMA (Baseline)\",\n              \"count\": \"&mfma\"\n            },\n            {\n              \"metric\": \"SALU (Baseline)\",\n              \"count\": \"&salu\"\n            },\n            {\n              \"metric\": \"SMEM (Baseline)\",\n              \"count\": \"&smem\"\n            },\n            {\n              \"metric\": \"Branch (Baseline)\",\n              \"count\": \"&branch\"\n            },\n            {\n              \"metric\": \"GDS (Baseline)\",\n              \"count\": \"&gds\"\n            }\n          ]\n      }},\n      {\"$unwind\": {\n        \"path\": \"&array\"\n      }},\n      {\"$replaceRoot\": {\n        \"newRoot\": \"&array\"\n      }}\n    ]);",
+              "target": "$Workload2.pmc_perf.aggregate([\n    {\"$match\": {\n      \"Index\": { \"$in\": [${DispatchIDFilter2:raw}] },\n      \"gpu-id\": { \"$in\": [${gpuFilter2:raw}] },\n      \"KernelName\": { \"$in\": ${KernelNameFilter2:json}},\n      \"$expr\":{\"$regexMatch\": {\"input\":\"${select}\",\"regex\":\"(Instruction Mix)\"}}\n    }},\n        {\"$addFields\": {\n            \"denom\": {\n                   \"$switch\" : {\n                      \"branches\": [\n                         {\n                              \"case\":  { \"$eq\": [ $normUnit, \"per Wave\"]} ,\n                              \"then\":  \"&SQ_WAVES\"\n                         },\n                         {\n                              \"case\":  { \"$eq\": [ $normUnit, \"per Cycle\"]} ,\n                              \"then\":  \"&GRBM_GUI_ACTIVE\"\n                         },\n                         {\n                              \"case\":  { \"$eq\": [ $normUnit, \"per Sec\"]} ,\n                              \"then\":  {\"$divide\":[{\"$subtract\": [\"&EndNs\", \"&BeginNs\" ]}, 1000000000]}\n                         }\n                      ],\n                     \"default\": 1\n                   }         \n            } \n        }},\n        {\"$group\": {\n            \"_id\": null,\n            \"valu_avg\": {\n              \"$avg\": { \"$divide\": [ { \"$subtract\": [\"&SQ_INSTS_VALU\", \"&SQ_INSTS_MFMA\"]}, \"&denom\" ] }\n            },\n            \"mfma_avg\": {\n                \"$avg\": { \"$divide\": [ \"&SQ_INSTS_MFMA\", \"&denom\" ] }\n            },\n            \"vmem_avg\": {\n              \"$avg\": { \"$divide\": [ { \"$subtract\": [\"&SQ_INSTS_VMEM\", \"&SQ_INSTS_FLAT_LDS_ONLY\"]}, \"&denom\" ] }\n            },\n            \"lds_avg\": {\n              \"$avg\": { \"$divide\": [ \"&SQ_INSTS_LDS\", \"&denom\" ] }\n            },\n            \"salu_avg\": {\n              \"$avg\": { \"$divide\": [ \"&SQ_INSTS_SALU\", \"&denom\" ] }\n            },\n            \"smem_avg\": {\n              \"$avg\": { \"$divide\": [ \"&SQ_INSTS_SMEM\", \"&denom\" ] }\n            },\n            \"branch_avg\": {\n              \"$avg\": { \"$divide\": [ \"&SQ_INSTS_BRANCH\", \"&denom\" ] }\n            },\n            \"gds_avg\": {\n              \"$avg\": { \"$divide\": [ \"&SQ_INSTS_GDS\", \"&denom\" ] }\n            },\n            \"valu_min\": {\n                \"$min\": { \"$divide\": [ { \"$subtract\": [\"&SQ_INSTS_VALU\", \"&SQ_INSTS_MFMA\"]}, \"&denom\" ] }\n              },\n              \"mfma_min\": {\n                  \"$min\": { \"$divide\": [ \"&SQ_INSTS_MFMA\", \"&denom\" ] }\n              },\n              \"vmem_min\": {\n                \"$min\": { \"$divide\": [ { \"$subtract\": [\"&SQ_INSTS_VMEM\", \"&SQ_INSTS_FLAT_LDS_ONLY\"]}, \"&denom\" ] }\n              },\n              \"lds_min\": {\n                \"$min\": { \"$divide\": [ \"&SQ_INSTS_LDS\", \"&denom\" ] }\n              },\n              \"salu_min\": {\n                \"$min\": { \"$divide\": [ \"&SQ_INSTS_SALU\", \"&denom\" ] }\n              },\n              \"smem_min\": {\n                \"$min\": { \"$divide\": [ \"&SQ_INSTS_SMEM\", \"&denom\" ] }\n              },\n              \"branch_min\": {\n                \"$min\": { \"$divide\": [ \"&SQ_INSTS_BRANCH\", \"&denom\" ] }\n              },\n              \"gds_min\": {\n                \"$min\": { \"$divide\": [ \"&SQ_INSTS_GDS\", \"&denom\" ] }\n              },\n              \"valu_max\": {\n                \"$max\": { \"$divide\": [ { \"$subtract\": [\"&SQ_INSTS_VALU\", \"&SQ_INSTS_MFMA\"]}, \"&denom\" ] }\n              },\n              \"mfma_max\": {\n                  \"$max\": { \"$divide\": [ \"&SQ_INSTS_MFMA\", \"&denom\" ] }\n              },\n              \"vmem_max\": {\n                \"$max\": { \"$divide\": [ { \"$subtract\": [\"&SQ_INSTS_VMEM\", \"&SQ_INSTS_FLAT_LDS_ONLY\"]}, \"&denom\" ] }\n              },\n              \"lds_max\": {\n                \"$max\": { \"$divide\": [ \"&SQ_INSTS_LDS\", \"&denom\" ] }\n              },\n              \"salu_max\": {\n                \"$max\": { \"$divide\": [ \"&SQ_INSTS_SALU\", \"&denom\" ] }\n              },\n              \"smem_max\": {\n                \"$max\": { \"$divide\": [ \"&SQ_INSTS_SMEM\", \"&denom\" ] }\n              },\n              \"branch_max\": {\n                \"$max\": { \"$divide\": [ \"&SQ_INSTS_BRANCH\", \"&denom\" ] }\n              },\n              \"gds_max\": {\n                \"$max\": { \"$divide\": [ \"&SQ_INSTS_GDS\", \"&denom\" ] }\n              }\n\n          }\n        },\n        {\"$set\": {\n          \"array\": [\n              {\n                \"metric\": \"VALU - Vector (Baseline)\",\n                \"avg\": \"&valu_avg\",\n                \"min\": \"&valu_min\",\n                \"max\": \"&valu_max\"\n              },\n              {\n                \"metric\": \"VMEM (Baseline)\",\n                \"avg\": \"&vmem_avg\",\n                \"min\": \"&vmem_min\",\n                \"max\": \"&vmem_max\"\n              },\n              {\n                \"metric\": \"LDS (Baseline)\",\n                \"avg\": \"&lds_avg\",\n                \"min\": \"&lds_min\",\n                \"max\": \"&lds_max\"\n              },\n              {\n                \"metric\": \"VALU - MFMA (Baseline)\",\n                \"avg\": \"&mfma_avg\",\n                \"min\": \"&mfma_min\",\n                \"max\": \"&mfma_max\"\n              },\n              {\n                \"metric\": \"SALU (Baseline)\",\n                \"avg\": \"&salu_avg\",\n                \"min\": \"&salu_min\",\n                \"max\": \"&salu_max\"\n              },\n              {\n                \"metric\": \"SMEM (Baseline)\",\n                \"avg\": \"&smem_avg\",\n                \"min\": \"&smem_min\",\n                \"max\": \"&smem_max\"\n              },\n              {\n                \"metric\": \"Branch (Baseline)\",\n                \"avg\": \"&branch_avg\",\n                \"min\": \"&branch_min\",\n                \"max\": \"&branch_max\"\n              },\n              {\n                \"metric\": \"GDS (Baseline)\",\n                \"avg\": \"&gds_avg\",\n                \"min\": \"&gds_min\",\n                \"max\": \"&gds_max\"\n              }\n            ]\n        }},\n        {\"$unwind\": {\n          \"path\": \"&array\"\n        }},\n        {\"$replaceRoot\": {\n          \"newRoot\": \"&array\"\n        }}\n      ]);",
               "type": "table"
             }
           ],
@@ -4680,6 +4682,19 @@
                   }
                 ]
               }
+            },
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "max": true,
+                  "min": true
+                },
+                "indexByName": {},
+                "renameByName": {
+                  "avg": ""
+                }
+              }
             }
           ],
           "transparent": true,
@@ -4697,7 +4712,8 @@
                 "mode": "percentage",
                 "steps": [
                   {
-                    "color": "green"
+                    "color": "green",
+                    "value": null
                   },
                   {
                     "color": "red",
@@ -4792,7 +4808,8 @@
                 "mode": "absolute",
                 "steps": [
                   {
-                    "color": "green"
+                    "color": "green",
+                    "value": null
                   },
                   {
                     "color": "red",
@@ -4885,7 +4902,8 @@
                 "mode": "absolute",
                 "steps": [
                   {
-                    "color": "green"
+                    "color": "green",
+                    "value": null
                   },
                   {
                     "color": "red",
@@ -5608,7 +5626,7 @@
       "type": "row"
     },
     {
-      "collapsed": false,
+      "collapsed": true,
       "datasource": {
         "type": "amd-miperf-data-plugin",
         "uid": "oVK0I__nk"
@@ -5620,7 +5638,321 @@
         "y": 10
       },
       "id": 98,
-      "panels": [],
+      "panels": [
+        {
+          "datasource": {},
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "decimals": 1,
+              "mappings": [],
+              "max": 100,
+              "min": 0,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green"
+                  },
+                  {
+                    "color": "#EAB839",
+                    "value": 50
+                  },
+                  {
+                    "color": "red",
+                    "value": 90
+                  }
+                ]
+              },
+              "unit": "percent"
+            },
+            "overrides": []
+          },
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 45
+          },
+          "id": 205,
+          "options": {
+            "displayMode": "gradient",
+            "minVizHeight": 10,
+            "minVizWidth": 0,
+            "orientation": "horizontal",
+            "reduceOptions": {
+              "calcs": [
+                "mean"
+              ],
+              "fields": "/.*/",
+              "values": true
+            },
+            "showUnfilled": true,
+            "text": {
+              "titleSize": 14,
+              "valueSize": 16
+            }
+          },
+          "pluginVersion": "8.3.4",
+          "targets": [
+            {
+              "datasource": {
+                "type": "amd-miperf-data-plugin",
+                "uid": "Zzw1yR27k"
+              },
+              "rawQuery": true,
+              "refId": "A",
+              "target": "${Workload1}.pmc_perf.aggregate([\n    {\"$match\": {\n        \"Index\": { \"$in\": [${DispatchIDFilter:raw}] },\n        \"gpu-id\": { \"$in\": [${gpuFilter:raw}] },\n        \"KernelName\": { \"$in\": ${KernelNameFilter:json}}\n      }},\n      {\"$group\": {\n          \"_id\": null,\n    \n          \"bconf_rate\": {\n            \"$avg\": {\"$cond\": [ {\"$ne\": [{\"$subtract\": [\"&SQ_LDS_IDX_ACTIVE\", \"&SQ_LDS_BANK_CONFLICT\"]}, 0]},\n                                {\"$divide\": [\n                                    {\"$multiply\": [\"&SQ_LDS_BANK_CONFLICT\", 3.125]},\n                                    {\"$subtract\": [\"&SQ_LDS_IDX_ACTIVE\", \"&SQ_LDS_BANK_CONFLICT\"]}\n                                ]},\n                               null\n                              ]\n                    }     \n          },\n    \n          \"bw_pop\":  {\n            \"$avg\":     {\"$divide\": [\n                            {\"$divide\":[ \n                                { \"$multiply\": [ { \"$subtract\": [\"&SQ_LDS_IDX_ACTIVE\", \"&SQ_LDS_BANK_CONFLICT\"]},  \n                                                 4,  \n                                                 {\"$toInt\": \"$L2Banks\"}\n                                               ]}, \n                                {\"$subtract\": [\"&EndNs\", \"&BeginNs\"]}\n                            ]},\n     \n                            {\"$multiply\": [$sclk, $numCU, 0.00128]}\n                         ]}\n         },\n\n         \"lds_util\":  {\n            \"$avg\":    {\"$divide\":[ \n                            { \"$multiply\": [ 100,  \"&SQ_LDS_IDX_ACTIVE\" ]}, \n                            {\"$multiply\": [\"&GRBM_GUI_ACTIVE\", $numCU]}\n                       ]}\n         },\n\n         \"lds_access_rate\":  {\n            \"$avg\":    {\"$divide\":[ \n                            { \"$multiply\": [200,  \"&SQ_ACTIVE_INST_LDS\" ]}, \n                            {\"$multiply\": [\"&GRBM_GUI_ACTIVE\", $numCU]}\n                       ]}\n         }\n    \n      }},\n    \n      {\"$set\": {\n        \"array\": [\n            {\n              \"Utilization\": \"&lds_util\",\n              \"Access Rate\": \"&lds_access_rate\",\n              \"Bandwith (Pct-of-Peak)\": \"&bw_pop\",\n              \"Bank Conflict Rate\": \"&bconf_rate\"\n            }\n    \n          ]\n      }},\n    \n      {\"$unwind\": {\n        \"path\": \"&array\"\n      }},\n      \n      {\"$replaceRoot\": {\n        \"newRoot\": \"&array\"\n      }}\n    \n    ]);",
+              "type": "table"
+            },
+            {
+              "datasource": {
+                "type": "amd-miperf-data-plugin",
+                "uid": "Zzw1yR27k"
+              },
+              "hide": false,
+              "rawQuery": true,
+              "refId": "B",
+              "target": "${Workload2}.pmc_perf.aggregate([\n    {\"$match\": {\n        \"Index\": { \"$in\": [${DispatchIDFilter2:raw}] },\n        \"gpu-id\": { \"$in\": [${gpuFilter2:raw}] },\n        \"KernelName\": { \"$in\": ${KernelNameFilter2:json}},\n        \"$expr\":{\"$regexMatch\": {\"input\":\"${select}\",\"regex\":\"(Local Data Share)\"}}\n    }},\n  {\"$group\": {\n      \"_id\": null,\n\n      \"bconf_rate\": {\n        \"$avg\": {\"$cond\": [ {\"$ne\": [{\"$subtract\": [\"&SQ_LDS_IDX_ACTIVE\", \"&SQ_LDS_BANK_CONFLICT\"]}, 0]},\n                            {\"$divide\": [\n                                {\"$multiply\": [\"&SQ_LDS_BANK_CONFLICT\", 3.125]},\n                                {\"$subtract\": [\"&SQ_LDS_IDX_ACTIVE\", \"&SQ_LDS_BANK_CONFLICT\"]}\n                            ]},\n                           null\n                          ]\n                }     \n      },\n\n      \"bw_pop\":  {\n        \"$avg\":     {\"$divide\": [\n                        {\"$divide\":[ \n                            { \"$multiply\": [ { \"$subtract\": [\"&SQ_LDS_IDX_ACTIVE\", \"&SQ_LDS_BANK_CONFLICT\"]},  \n                                             4,  \n                                             {\"$toInt\": \"$L2Banks2\"}\n                                           ]}, \n                            {\"$subtract\": [\"&EndNs\", \"&BeginNs\"]}\n                        ]},\n \n                        {\"$multiply\": [$sclk2, $numCU2, 0.00128]}\n                     ]}\n     },\n     \"lds_util\":  {\n        \"$avg\":    {\"$divide\":[ \n                        { \"$multiply\": [ 100,  \"&SQ_LDS_IDX_ACTIVE\" ]}, \n                        {\"$multiply\": [\"&GRBM_GUI_ACTIVE\", $numCU2]}\n                   ]}\n     },\n\n     \"lds_access_rate\":  {\n        \"$avg\":    {\"$divide\":[ \n                        { \"$multiply\": [200,  \"&SQ_ACTIVE_INST_LDS\" ]}, \n                        {\"$multiply\": [\"&GRBM_GUI_ACTIVE\", $numCU2]}\n                   ]}\n     }\n\n\n  }},\n\n  {\"$set\": {\n    \"array\": [\n        {\n          \"Utilization\": \"&lds_util\",\n          \"Access Rate\": \"&lds_access_rate\",\n          \"Bandwith (Pct-of-Peak)\": \"&bw_pop\",\n          \"Bank Conflict Rate\": \"&bconf_rate\"\n        }\n\n      ]\n  }},\n\n  {\"$unwind\": {\n    \"path\": \"&array\"\n  }},\n  \n  {\"$replaceRoot\": {\n    \"newRoot\": \"&array\"\n  }}\n\n]);",
+              "type": "table"
+            }
+          ],
+          "title": "Speed-of-Light: LDS",
+          "transformations": [
+            {
+              "id": "concatenate",
+              "options": {}
+            },
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {},
+                "indexByName": {
+                  "Access Rate 1": 6,
+                  "Access Rate 2": 7,
+                  "Bandwith (Pct-of-Peak) 1": 0,
+                  "Bandwith (Pct-of-Peak) 2": 1,
+                  "Bank Conflict Rate 1": 2,
+                  "Bank Conflict Rate 2": 3,
+                  "Utilization 1": 4,
+                  "Utilization 2": 5
+                },
+                "renameByName": {
+                  "Access Rate 1": "Access Rate (Current)",
+                  "Access Rate 2": "Access Rate (Baseline)",
+                  "BW (Pct-of-Peak) 1": "BW Pct-of-Peak (Current)",
+                  "BW (Pct-of-Peak) 2": "BW Pct-of-Peak (Baseline)",
+                  "Bandwith (Pct-of-Peak)": "",
+                  "Bandwith (Pct-of-Peak) 1": "BW Pct-of-Peak (Current)",
+                  "Bandwith (Pct-of-Peak) 2": "BW Pct-of-Peak (Baseline) ",
+                  "Bank Conflict Rate 1": "Bank Conflict Rate (Current)",
+                  "Bank Conflict Rate 2": "Bank Conflict Rate (Baseline)",
+                  "Cache Hit 1": "Cache Hit (Current)",
+                  "Cache Hit 2": "Cache Hit (Baseline)",
+                  "Latency (Cycles) 1": "Latency  (Current) [Cycles]",
+                  "Latency (Cycles) 2": "Latency (Baseline) [Cycles]",
+                  "Stall 1": "Stall (Current)",
+                  "Stall 2": "Stall (Baseline)",
+                  "Util 1": "Util (Current)",
+                  "Util 2": "Util (Baseline)",
+                  "Utilization 1": "Util (Current)",
+                  "Utilization 2": "Util (Baseline)"
+                }
+              }
+            }
+          ],
+          "transparent": true,
+          "type": "bargauge"
+        },
+        {
+          "fieldConfig": {
+            "defaults": {
+              "color": {
+                "mode": "thresholds"
+              },
+              "custom": {
+                "align": "auto",
+                "displayMode": "auto"
+              },
+              "decimals": 0,
+              "mappings": [],
+              "min": -100000000000000000000,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green"
+                  },
+                  {
+                    "color": "red",
+                    "value": 80
+                  }
+                ]
+              },
+              "unit": "locale"
+            },
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Avg (Current)"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 114
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Min (Current)"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 107
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Min (Baseline)"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 128
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Max (Current)"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 115
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Unit"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 138
+                  }
+                ]
+              },
+              {
+                "matcher": {
+                  "id": "byName",
+                  "options": "Avg (Baseline)"
+                },
+                "properties": [
+                  {
+                    "id": "custom.width",
+                    "value": 141
+                  }
+                ]
+              }
+            ]
+          },
+          "gridPos": {
+            "h": 12,
+            "w": 12,
+            "x": 12,
+            "y": 45
+          },
+          "id": 100,
+          "options": {
+            "footer": {
+              "fields": "",
+              "reducer": [
+                "sum"
+              ],
+              "show": false
+            },
+            "showHeader": true,
+            "sortBy": []
+          },
+          "pluginVersion": "8.3.4",
+          "targets": [
+            {
+              "datasource": {
+                "type": "amd-miperf-data-plugin",
+                "uid": "Zzw1yR27k"
+              },
+              "hide": false,
+              "rawQuery": true,
+              "refId": "A",
+              "target": "${Workload1}.pmc_perf.aggregate([\n    {\"$match\": {\n      \"Index\": { \"$in\": [${DispatchIDFilter:raw}] },\n      \"gpu-id\": { \"$in\": [${gpuFilter:raw}] },\n      \"KernelName\": { \"$in\": ${KernelNameFilter:json}}\n    }},\n    {\"$addFields\": {\n        \"denom\": {\n               \"$switch\" : {\n                  \"branches\": [\n                     {\n                          \"case\":  { \"$eq\": [ $normUnit, \"per Wave\"]} ,\n                          \"then\":  \"&SQ_WAVES\"\n                     },\n                     {\n                          \"case\":  { \"$eq\": [ $normUnit, \"per Cycle\"]} ,\n                          \"then\":  \"&GRBM_GUI_ACTIVE\"\n                     },\n                     {\n                          \"case\":  { \"$eq\": [ $normUnit, \"per Sec\"]} ,\n                          \"then\":  {\"$divide\":[{\"$subtract\": [\"&EndNs\", \"&BeginNs\" ]}, 1000000000]}\n                     }\n                  ],\n                 \"default\": 1\n               }         \n        } \n    }},\n    {\"$group\": {\n        \"_id\": null,\n            \"avg_ldsInstrs\": {\n              \"$avg\": { \"$divide\": [\"&SQ_INSTS_LDS\" ,  \"&denom\"] }\n            },\n            \"min_ldsInstrs\": {\n              \"$min\": { \"$divide\": [\"&SQ_INSTS_LDS\" ,  \"&denom\"] }\n            },\n            \"max_ldsInstrs\": {\n              \"$max\": { \"$divide\": [\"&SQ_INSTS_LDS\" ,  \"&denom\"] }\n            },\n  \n            \"avg_indexAccesses\": {\n              \"$avg\": { \"$divide\": [\"&SQ_LDS_IDX_ACTIVE\" ,  \"&denom\"] }\n            },\n            \"min_indexAccesses\": {\n              \"$min\": { \"$divide\": [\"&SQ_LDS_IDX_ACTIVE\" ,  \"&denom\"] }\n            },\n            \"max_indexAccesses\": {\n              \"$max\": { \"$divide\": [\"&SQ_LDS_IDX_ACTIVE\" ,  \"&denom\"] }\n            },\n  \n            \"avg_atomicCycles\": {\n              \"$avg\": { \"$divide\": [\"&SQ_LDS_ATOMIC_RETURN\" , \"&denom\" ] }\n            },\n            \"min_atomicCycles\": {\n              \"$min\": { \"$divide\": [\"&SQ_LDS_ATOMIC_RETURN\" , \"&denom\" ] }\n            },\n            \"max_atomicCycles\": {\n              \"$max\": { \"$divide\": [\"&SQ_LDS_ATOMIC_RETURN\" , \"&denom\" ] }\n            },\n  \n            \"avg_bankConflicts\": {\n              \"$avg\": { \"$divide\": [\"&SQ_LDS_BANK_CONFLICT\" , \"&denom\" ] }\n            },\n            \"min_bankConflicts\": {\n              \"$min\": { \"$divide\": [\"&SQ_LDS_BANK_CONFLICT\" , \"&denom\" ] }\n            },\n            \"max_bankConflicts\": {\n              \"$max\": { \"$divide\": [\"&SQ_LDS_BANK_CONFLICT\" , \"&denom\" ] }\n            },\n  \n            \"avg_addrConflicts\": {\n              \"$avg\": { \"$divide\": [\"&SQ_LDS_ADDR_CONFLICT\" , \"&denom\" ] }\n            },\n            \"min_addrConflicts\": {\n              \"$min\": { \"$divide\": [\"&SQ_LDS_ADDR_CONFLICT\" , \"&denom\" ] }\n            },\n            \"max_addrConflicts\": {\n              \"$max\": { \"$divide\": [\"&SQ_LDS_ADDR_CONFLICT\" , \"&denom\" ] }\n            },\n  \n  \n            \"avg_unalignedStall\": {\n              \"$avg\": { \"$divide\": [\"&SQ_LDS_UNALIGNED_STALL\" , \"&denom\" ] }\n            },\n            \"min_unalignedStall\": {\n              \"$min\": { \"$divide\": [\"&SQ_LDS_UNALIGNED_STALL\" , \"&denom\" ] }\n            },\n            \"max_unalignedStall\": {\n              \"$max\": { \"$divide\": [\"&SQ_LDS_UNALIGNED_STALL\" , \"&denom\" ] }\n            },\n  \n            \"avg_memViolations\": {\n              \"$avg\": { \"$divide\": [\"&SQ_LDS_MEM_VIOLATIONS\" , \"&denom\" ] }\n            },\n            \"min_memViolations\": {\n              \"$min\": { \"$divide\": [\"&SQ_LDS_MEM_VIOLATIONS\" , \"&denom\" ] }\n            },\n            \"max_memViolations\": {\n              \"$max\": { \"$divide\": [\"&SQ_LDS_MEM_VIOLATIONS\" , \"&denom\" ] }\n            },\n  \n            \"avg_bconf_per_op\": {\n              \"$avg\": {\n                \"$cond\": [ {\"$ne\": [{\"$subtract\": [\"&SQ_LDS_IDX_ACTIVE\", \"&SQ_LDS_BANK_CONFLICT\"]}, 0]},\n                                    {\"$divide\": [\n                                        \"&SQ_LDS_BANK_CONFLICT\",\n                                        {\"$subtract\": [\"&SQ_LDS_IDX_ACTIVE\", \"&SQ_LDS_BANK_CONFLICT\"]}\n                                    ]},\n                                    null\n                          ]\n              }\n            },\n            \"min_bconf_per_op\": {\n              \"$min\": {\n                \"$cond\": [ {\"$ne\": [{\"$subtract\": [\"&SQ_LDS_IDX_ACTIVE\", \"&SQ_LDS_BANK_CONFLICT\"]}, 0]},\n                                    {\"$divide\": [\n                                        \"&SQ_LDS_BANK_CONFLICT\",\n                                        {\"$subtract\": [\"&SQ_LDS_IDX_ACTIVE\", \"&SQ_LDS_BANK_CONFLICT\"]}\n                                    ]},\n                                    null\n                          ]\n              }\n            },\n            \"max_bconf_per_op\": {\n              \"$max\": {\n                \"$cond\": [ {\"$ne\": [{\"$subtract\": [\"&SQ_LDS_IDX_ACTIVE\", \"&SQ_LDS_BANK_CONFLICT\"]}, 0]},\n                                    {\"$divide\": [\n                                        \"&SQ_LDS_BANK_CONFLICT\",\n                                        {\"$subtract\": [\"&SQ_LDS_IDX_ACTIVE\", \"&SQ_LDS_BANK_CONFLICT\"]}\n                                    ]},\n                                    null\n                          ]\n              }\n            },\n  \n            \"avg_bw\":  {\n              \"$avg\": {\n                \"$divide\":\n                  [ { \"$multiply\": [{ \"$multiply\":  [ { \"$subtract\": [\"&SQ_LDS_IDX_ACTIVE\", \"&SQ_LDS_BANK_CONFLICT\"]} ,  4]},  {\"$toInt\": \"$L2Banks\"}]}, \n                    \"&denom\"\n                  ]\n              }\n            },\n            \"min_bw\":  {\n              \"$min\": {\n                \"$divide\":\n                  [ { \"$multiply\": [{ \"$multiply\":  [ { \"$subtract\": [\"&SQ_LDS_IDX_ACTIVE\", \"&SQ_LDS_BANK_CONFLICT\"]} ,  4]},  {\"$toInt\": \"$L2Banks\"}]}, \n                    \"&denom\"\n                  ]\n              }\n            },\n            \"max_bw\":  {\n              \"$max\": {\n                \"$divide\":\n                  [ { \"$multiply\": [{ \"$multiply\":  [ { \"$subtract\": [\"&SQ_LDS_IDX_ACTIVE\", \"&SQ_LDS_BANK_CONFLICT\"]} ,  4]},  {\"$toInt\": \"$L2Banks\"}]}, \n                    \"&denom\"\n                  ]\n              }\n            }\n    }},\n    {\"$set\": {\n      \"array\": [\n          {\n            \"metric\": \"LDS Instrs\",\n            \"avg\": \"&avg_ldsInstrs\",\n            \"min\": \"&min_ldsInstrs\",\n            \"max\": \"&max_ldsInstrs\",\n            \"Unit\":{\"$concat\": [\"Instr \", $normUnit]}  \n          },\n          {\n            \"metric\": \"Bandwidth\",\n            \"avg\": \"&avg_bw\",\n            \"min\": \"&min_bw\",\n            \"max\": \"&max_bw\",\n            \"Unit\": {\"$concat\": [\"Bytes \", $normUnit]}\n          },\n          {\n            \"metric\": \"Bank Conficts/Access\",\n            \"avg\": \"&avg_bconf_per_op\",\n            \"min\": \"&min_bconf_per_op\",\n            \"max\": \"&max_bconf_per_op\",\n            \"Unit\": \"Conflicts/Access\"\n          },\n          {\n            \"metric\": \"Index Accesses\",\n            \"avg\": \"&avg_indexAccesses\",\n            \"min\": \"&min_indexAccesses\",\n            \"max\": \"&max_indexAccesses\",\n            \"Unit\": {\"$concat\": [\"Cycles \", $normUnit]}\n          },\n          {\n            \"metric\": \"Atomic Cycles\",\n            \"avg\": \"&avg_atomicCycles\",\n            \"min\": \"&min_atomicCycles\",\n            \"max\": \"&max_atomicCycles\",\n            \"Unit\": {\"$concat\": [\"Cycles \", $normUnit]}\n          },\n          {\n            \"metric\": \"Bank Conflict\",\n            \"avg\": \"&avg_bankConflicts\",\n            \"min\": \"&min_bankConflicts\",\n            \"max\": \"&max_bankConflicts\",\n            \"Unit\": {\"$concat\": [\"Cycles \", $normUnit]}\n          },\n          {\n            \"metric\": \"Addr Conflict\",\n            \"avg\": \"&avg_addrConflicts\",\n            \"min\": \"&min_addrConflicts\",\n            \"max\": \"&max_addrConflicts\",\n            \"Unit\": {\"$concat\": [\"Cycles \", $normUnit]}\n          },\n          {\n            \"metric\": \"Unaligned Stall\",\n            \"avg\": \"&avg_unalignedStall\",\n            \"min\": \"&min_unalignedStall\",\n            \"max\": \"&max_unalignedStall\",\n            \"Unit\": {\"$concat\": [\"Cycles \", $normUnit]}\n          },\n          {\n            \"metric\": \"Mem Violations\",\n            \"avg\": \"&avg_memViolations\",\n            \"min\": \"&min_memViolations\",\n            \"max\": \"&max_memViolations\",\n            \"Unit\": {\"$concat\": [\"\", $normUnit]}\n          }\n        ]\n    }},\n    {\"$unwind\": {\n      \"path\": \"&array\"\n    }},\n    {\"$replaceRoot\": {\n      \"newRoot\": \"&array\"\n    }},\n    {\"$unionWith\": {\n          \"coll\": \"SQ_INST_LEVEL_LDS\",\n          \"pipeline\": [\n              {\"$match\": {\n                  \"Index\": { \"$in\": [${DispatchIDFilter:raw}] },\n                  \"gpu-id\": { \"$in\": [${gpuFilter:raw}] },\n                  \"KernelName\": { \"$in\": ${KernelNameFilter:json}}\n              }},\n  \n            {\"$group\": {\n                \"_id\": null,\n                \"avg_ldsLatency\": {\n                  \"$avg\": { \n                    \"$cond\": [\n                    {\"$ne\": [\"&SQ_INSTS_LDS\", 0]},\n                    {\"$divide\": [ \"&SQ_ACCUM_PREV_HIRES\", \"&SQ_INSTS_LDS\" ]},\n                     null\n                    ] \n                  }\n                },\n                \"min_ldsLatency\": {\n                  \"$min\": { \n                    \"$cond\": [\n                    {\"$ne\": [\"&SQ_INSTS_LDS\", 0]},\n                    {\"$divide\": [ \"&SQ_ACCUM_PREV_HIRES\", \"&SQ_INSTS_LDS\" ]},\n                     null\n                    ] \n                  }\n                },\n                \"max_ldsLatency\": {\n                  \"$max\": { \n                    \"$cond\": [\n                    {\"$ne\": [\"&SQ_INSTS_LDS\", 0]},\n                    {\"$divide\": [ \"&SQ_ACCUM_PREV_HIRES\", \"&SQ_INSTS_LDS\" ]},\n                     null\n                    ] \n                  }\n                }\n            }},\n            {\"$project\": {\n                \"_id\": 0,\n                \"metric\": \"LDS Latency\",\n                \"avg\": \"&avg_ldsLatency\",\n                \"min\": \"&min_ldsLatency\",\n                \"max\": \"&max_ldsLatency\",\n                \"Unit\": \"Cycles\"\n            }}\n          ]\n      }}\n  ]);",
+              "type": "table"
+            },
+            {
+              "datasource": {
+                "type": "amd-miperf-data-plugin",
+                "uid": "Zzw1yR27k"
+              },
+              "hide": false,
+              "rawQuery": true,
+              "refId": "B",
+              "target": "${Workload2}.pmc_perf.aggregate([\n    {\"$match\": {\n      \"Index\": { \"$in\": [${DispatchIDFilter2:raw}] },\n      \"gpu-id\": { \"$in\": [${gpuFilter2:raw}] },\n      \"KernelName\": { \"$in\": ${KernelNameFilter2:json}},        \n     \"$expr\":{\"$regexMatch\": {\"input\":\"${select}\",\"regex\":\"(Local Data Share)\"}}\n  \n    }},\n    {\"$addFields\": {\n        \"denom\": {\n               \"$switch\" : {\n                  \"branches\": [\n                     {\n                          \"case\":  { \"$eq\": [ $normUnit, \"per Wave\"]} ,\n                          \"then\":  \"&SQ_WAVES\"\n                     },\n                     {\n                          \"case\":  { \"$eq\": [ $normUnit, \"per Cycle\"]} ,\n                          \"then\":  \"&GRBM_GUI_ACTIVE\"\n                     },\n                     {\n                          \"case\":  { \"$eq\": [ $normUnit, \"per Sec\"]} ,\n                          \"then\":  {\"$divide\":[{\"$subtract\": [\"&EndNs\", \"&BeginNs\" ]}, 1000000000]}\n                     }\n                  ],\n                 \"default\": 1\n               }         \n        } \n    }},\n    {\"$group\": {\n        \"_id\": null,\n            \"avg_ldsInstrs\": {\n              \"$avg\": { \"$divide\": [\"&SQ_INSTS_LDS\" ,  \"&denom\"] }\n            },\n            \"min_ldsInstrs\": {\n              \"$min\": { \"$divide\": [\"&SQ_INSTS_LDS\" ,  \"&denom\"] }\n            },\n            \"max_ldsInstrs\": {\n              \"$max\": { \"$divide\": [\"&SQ_INSTS_LDS\" ,  \"&denom\"] }\n            },\n  \n            \"avg_indexAccesses\": {\n              \"$avg\": { \"$divide\": [\"&SQ_LDS_IDX_ACTIVE\" ,  \"&denom\"] }\n            },\n            \"min_indexAccesses\": {\n              \"$min\": { \"$divide\": [\"&SQ_LDS_IDX_ACTIVE\" ,  \"&denom\"] }\n            },\n            \"max_indexAccesses\": {\n              \"$max\": { \"$divide\": [\"&SQ_LDS_IDX_ACTIVE\" ,  \"&denom\"] }\n            },\n  \n            \"avg_atomicCycles\": {\n              \"$avg\": { \"$divide\": [\"&SQ_LDS_ATOMIC_RETURN\" , \"&denom\" ] }\n            },\n            \"min_atomicCycles\": {\n              \"$min\": { \"$divide\": [\"&SQ_LDS_ATOMIC_RETURN\" , \"&denom\" ] }\n            },\n            \"max_atomicCycles\": {\n              \"$max\": { \"$divide\": [\"&SQ_LDS_ATOMIC_RETURN\" , \"&denom\" ] }\n            },\n  \n            \"avg_bankConflicts\": {\n              \"$avg\": { \"$divide\": [\"&SQ_LDS_BANK_CONFLICT\" , \"&denom\" ] }\n            },\n            \"min_bankConflicts\": {\n              \"$min\": { \"$divide\": [\"&SQ_LDS_BANK_CONFLICT\" , \"&denom\" ] }\n            },\n            \"max_bankConflicts\": {\n              \"$max\": { \"$divide\": [\"&SQ_LDS_BANK_CONFLICT\" , \"&denom\" ] }\n            },\n  \n            \"avg_addrConflicts\": {\n              \"$avg\": { \"$divide\": [\"&SQ_LDS_ADDR_CONFLICT\" , \"&denom\" ] }\n            },\n            \"min_addrConflicts\": {\n              \"$min\": { \"$divide\": [\"&SQ_LDS_ADDR_CONFLICT\" , \"&denom\" ] }\n            },\n            \"max_addrConflicts\": {\n              \"$max\": { \"$divide\": [\"&SQ_LDS_ADDR_CONFLICT\" , \"&denom\" ] }\n            },\n            \"avg_unalignedStall\": {\n              \"$avg\": { \"$divide\": [\"&SQ_LDS_UNALIGNED_STALL\" , \"&denom\" ] }\n            },\n            \"min_unalignedStall\": {\n              \"$min\": { \"$divide\": [\"&SQ_LDS_UNALIGNED_STALL\" , \"&denom\" ] }\n            },\n            \"max_unalignedStall\": {\n              \"$max\": { \"$divide\": [\"&SQ_LDS_UNALIGNED_STALL\" , \"&denom\" ] }\n            },\n  \n            \"avg_memViolations\": {\n              \"$avg\": { \"$divide\": [\"&SQ_LDS_MEM_VIOLATIONS\" , \"&denom\" ] }\n            },\n            \"min_memViolations\": {\n              \"$min\": { \"$divide\": [\"&SQ_LDS_MEM_VIOLATIONS\" , \"&denom\" ] }\n            },\n            \"max_memViolations\": {\n              \"$max\": { \"$divide\": [\"&SQ_LDS_MEM_VIOLATIONS\" , \"&denom\" ] }\n            },\n  \n \n            \"avg_bconf_per_op\": {\n              \"$avg\": {\n                \"$cond\": [ {\"$ne\": [{\"$subtract\": [\"&SQ_LDS_IDX_ACTIVE\", \"&SQ_LDS_BANK_CONFLICT\"]}, 0]},\n                                    {\"$divide\": [\n                                        \"&SQ_LDS_BANK_CONFLICT\",\n                                        {\"$subtract\": [\"&SQ_LDS_IDX_ACTIVE\", \"&SQ_LDS_BANK_CONFLICT\"]}\n                                    ]},\n                                    null\n                          ]\n              }\n            },\n            \"min_bconf_per_op\": {\n              \"$min\": {\n                \"$cond\": [ {\"$ne\": [{\"$subtract\": [\"&SQ_LDS_IDX_ACTIVE\", \"&SQ_LDS_BANK_CONFLICT\"]}, 0]},\n                                    {\"$divide\": [\n                                        \"&SQ_LDS_BANK_CONFLICT\",\n                                        {\"$subtract\": [\"&SQ_LDS_IDX_ACTIVE\", \"&SQ_LDS_BANK_CONFLICT\"]}\n                                    ]},\n                                    null\n                          ]\n              }\n            },\n            \"max_bconf_per_op\": {\n              \"$max\": {\n                \"$cond\": [ {\"$ne\": [{\"$subtract\": [\"&SQ_LDS_IDX_ACTIVE\", \"&SQ_LDS_BANK_CONFLICT\"]}, 0]},\n                                    {\"$divide\": [\n                                        \"&SQ_LDS_BANK_CONFLICT\",\n                                        {\"$subtract\": [\"&SQ_LDS_IDX_ACTIVE\", \"&SQ_LDS_BANK_CONFLICT\"]}\n                                    ]},\n                                    null\n                          ]\n              }\n            },\n  \n            \"avg_bw\":  {\n              \"$avg\": {\n                \"$divide\":\n                  [ { \"$multiply\": [{ \"$multiply\":  [ { \"$subtract\": [\"&SQ_LDS_IDX_ACTIVE\", \"&SQ_LDS_BANK_CONFLICT\"]} ,  4]},  {\"$toInt\": \"$L2Banks\"}]}, \n                    \"&denom\"\n                  ]\n              }\n            },\n            \"min_bw\":  {\n              \"$min\": {\n                \"$divide\":\n                  [ { \"$multiply\": [{ \"$multiply\":  [ { \"$subtract\": [\"&SQ_LDS_IDX_ACTIVE\", \"&SQ_LDS_BANK_CONFLICT\"]} ,  4]},  {\"$toInt\": \"$L2Banks\"}]}, \n                    \"&denom\"\n                  ]\n              }\n            },\n            \"max_bw\":  {\n              \"$max\": {\n                \"$divide\":\n                  [ { \"$multiply\": [{ \"$multiply\":  [ { \"$subtract\": [\"&SQ_LDS_IDX_ACTIVE\", \"&SQ_LDS_BANK_CONFLICT\"]} ,  4]},  {\"$toInt\": \"$L2Banks\"}]}, \n                    \"&denom\"\n                  ]\n              }\n            }\n    }},\n    {\"$set\": {\n      \"array\": [\n          {\n            \"metric\": \"LDS Instrs\",\n            \"avg\": \"&avg_ldsInstrs\",\n            \"min\": \"&min_ldsInstrs\",\n            \"max\": \"&max_ldsInstrs\",\n            \"Unit\":{\"$concat\": [\"Instr \", $normUnit]}  \n          },\n          {\n            \"metric\": \"Bandwidth\",\n            \"avg\": \"&avg_bw\",\n            \"min\": \"&min_bw\",\n            \"max\": \"&max_bw\",\n            \"Unit\": {\"$concat\": [\"Bytes \", $normUnit]}\n          },\n          {\n            \"metric\": \"Bank Conficts/Access\",\n            \"avg\": \"&avg_bconf_per_op\",\n            \"min\": \"&min_bconf_per_op\",\n            \"max\": \"&max_bconf_per_op\",\n            \"Unit\": \"Conflicts/Access\"\n          },\n          {\n            \"metric\": \"Index Accesses\",\n            \"avg\": \"&avg_indexAccesses\",\n            \"min\": \"&min_indexAccesses\",\n            \"max\": \"&max_indexAccesses\",\n            \"Unit\": {\"$concat\": [\"Cycles \", $normUnit]}\n          },\n          {\n            \"metric\": \"Atomic Cycles\",\n            \"avg\": \"&avg_atomicCycles\",\n            \"min\": \"&min_atomicCycles\",\n            \"max\": \"&max_atomicCycles\",\n            \"Unit\": {\"$concat\": [\"Cycles \", $normUnit]}\n          },\n          {\n            \"metric\": \"Bank Conflict\",\n            \"avg\": \"&avg_bankConflicts\",\n            \"min\": \"&min_bankConflicts\",\n            \"max\": \"&max_bankConflicts\",\n            \"Unit\": {\"$concat\": [\"Cycles \", $normUnit]}\n          },\n          {\n            \"metric\": \"Addr Conflict\",\n            \"avg\": \"&avg_addrConflicts\",\n            \"min\": \"&min_addrConflicts\",\n            \"max\": \"&max_addrConflicts\",\n            \"Unit\": {\"$concat\": [\"Cycles \", $normUnit]}\n          },\n          {\n            \"metric\": \"Unaligned Stall\",\n            \"avg\": \"&avg_unalignedStall\",\n            \"min\": \"&min_unalignedStall\",\n            \"max\": \"&max_unalignedStall\",\n            \"Unit\": {\"$concat\": [\"Cycles \", $normUnit]}\n          },\n          {\n            \"metric\": \"Mem Violations\",\n            \"avg\": \"&avg_memViolations\",\n            \"min\": \"&min_memViolations\",\n            \"max\": \"&max_memViolations\",\n            \"Unit\": {\"$concat\": [\"\", $normUnit]}\n          }\n        ]\n    }},\n    {\"$unwind\": {\n      \"path\": \"&array\"\n    }},\n    {\"$replaceRoot\": {\n      \"newRoot\": \"&array\"\n    }},\n    {\"$unionWith\": {\n          \"coll\": \"SQ_INST_LEVEL_LDS\",\n          \"pipeline\": [\n              {\"$match\": {\n                  \"Index\": { \"$in\": [${DispatchIDFilter2:raw}] },\n                  \"gpu-id\": { \"$in\": [${gpuFilter2:raw}] },\n                  \"KernelName\": { \"$in\": ${KernelNameFilter2:json}},\n                  \"$expr\":{\"$regexMatch\": {\"input\":\"${select}\",\"regex\":\"(Local Data Share)\"}}\n              }},\n  \n            {\"$group\": {\n                \"_id\": null,\n                \"avg_ldsLatency\": {\n                  \"$avg\": { \n                    \"$cond\": [\n                    {\"$ne\": [\"&SQ_INSTS_LDS\", 0]},\n                    {\"$divide\": [ \"&SQ_ACCUM_PREV_HIRES\", \"&SQ_INSTS_LDS\" ]},\n                     null\n                    ] \n                  }\n                },\n                \"min_ldsLatency\": {\n                  \"$min\": { \n                    \"$cond\": [\n                    {\"$ne\": [\"&SQ_INSTS_LDS\", 0]},\n                    {\"$divide\": [ \"&SQ_ACCUM_PREV_HIRES\", \"&SQ_INSTS_LDS\" ]},\n                     null\n                    ] \n                  }\n                },\n                \"max_ldsLatency\": {\n                  \"$max\": { \n                    \"$cond\": [\n                    {\"$ne\": [\"&SQ_INSTS_LDS\", 0]},\n                    {\"$divide\": [ \"&SQ_ACCUM_PREV_HIRES\", \"&SQ_INSTS_LDS\" ]},\n                     null\n                    ] \n                  }\n                }\n            }},\n            {\"$project\": {\n                \"_id\": 0,\n                \"metric\": \"LDS Latency\",\n                \"avg\": \"&avg_ldsLatency\",\n                \"min\": \"&min_ldsLatency\",\n                \"max\": \"&max_ldsLatency\",\n                \"Unit\": \"Cycles\"\n            }}\n          ]\n      }}\n  ]);",
+              "type": "table"
+            }
+          ],
+          "title": "LDS Stats",
+          "transformations": [
+            {
+              "id": "concatenate",
+              "options": {
+                "frameNameLabel": "frame",
+                "frameNameMode": "field"
+              }
+            },
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Unit 2": true,
+                  "metric 2": true
+                },
+                "indexByName": {
+                  "Unit 1": 9,
+                  "Unit 2": 8,
+                  "avg 1": 1,
+                  "avg 2": 2,
+                  "max 1": 5,
+                  "max 2": 6,
+                  "metric 1": 0,
+                  "metric 2": 7,
+                  "min 1": 3,
+                  "min 2": 4
+                },
+                "renameByName": {
+                  "avg 1": "Avg (Current)",
+                  "avg 2": "Avg (Baseline)",
+                  "max 1": "Max (Current)",
+                  "max 2": "Max (Baseline)",
+                  "min 1": "Min (Current)",
+                  "min 2": "Min (Baseline)"
+                }
+              }
+            }
+          ],
+          "type": "table"
+        }
+      ],
       "targets": [
         {
           "datasource": {
@@ -5634,321 +5966,6 @@
       "type": "row"
     },
     {
-      "datasource": {},
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "decimals": 1,
-          "mappings": [],
-          "max": 100,
-          "min": 0,
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "#EAB839",
-                "value": 50
-              },
-              {
-                "color": "red",
-                "value": 90
-              }
-            ]
-          },
-          "unit": "percent"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 11
-      },
-      "id": 205,
-      "options": {
-        "displayMode": "gradient",
-        "minVizHeight": 10,
-        "minVizWidth": 0,
-        "orientation": "horizontal",
-        "reduceOptions": {
-          "calcs": [
-            "mean"
-          ],
-          "fields": "/.*/",
-          "values": true
-        },
-        "showUnfilled": true,
-        "text": {
-          "titleSize": 14,
-          "valueSize": 16
-        }
-      },
-      "pluginVersion": "8.3.4",
-      "targets": [
-        {
-          "datasource": {
-            "type": "amd-miperf-data-plugin",
-            "uid": "Zzw1yR27k"
-          },
-          "rawQuery": true,
-          "refId": "A",
-          "target": "${Workload1}.pmc_perf.aggregate([\n    {\"$match\": {\n        \"Index\": { \"$in\": [${DispatchIDFilter:raw}] },\n        \"gpu-id\": { \"$in\": [${gpuFilter:raw}] },\n        \"KernelName\": { \"$in\": ${KernelNameFilter:json}}\n      }},\n      {\"$group\": {\n          \"_id\": null,\n    \n          \"bconf_rate\": {\n            \"$avg\": {\"$cond\": [ {\"$ne\": [{\"$subtract\": [\"&SQ_LDS_IDX_ACTIVE\", \"&SQ_LDS_BANK_CONFLICT\"]}, 0]},\n                                {\"$divide\": [\n                                    {\"$multiply\": [\"&SQ_LDS_BANK_CONFLICT\", 3.125]},\n                                    {\"$subtract\": [\"&SQ_LDS_IDX_ACTIVE\", \"&SQ_LDS_BANK_CONFLICT\"]}\n                                ]},\n                               null\n                              ]\n                    }     \n          },\n    \n          \"bw_pop\":  {\n            \"$avg\":     {\"$divide\": [\n                            {\"$divide\":[ \n                                { \"$multiply\": [ { \"$subtract\": [\"&SQ_LDS_IDX_ACTIVE\", \"&SQ_LDS_BANK_CONFLICT\"]},  \n                                                 4,  \n                                                 {\"$toInt\": \"$L2Banks\"}\n                                               ]}, \n                                {\"$subtract\": [\"&EndNs\", \"&BeginNs\"]}\n                            ]},\n     \n                            {\"$multiply\": [$sclk, $numCU, 0.00128]}\n                         ]}\n         },\n\n         \"lds_util\":  {\n            \"$avg\":    {\"$divide\":[ \n                            { \"$multiply\": [ 100,  \"&SQ_LDS_IDX_ACTIVE\" ]}, \n                            {\"$multiply\": [\"&GRBM_GUI_ACTIVE\", $numCU]}\n                       ]}\n         },\n\n         \"lds_access_rate\":  {\n            \"$avg\":    {\"$divide\":[ \n                            { \"$multiply\": [200,  \"&SQ_ACTIVE_INST_LDS\" ]}, \n                            {\"$multiply\": [\"&GRBM_GUI_ACTIVE\", $numCU]}\n                       ]}\n         }\n    \n      }},\n    \n      {\"$set\": {\n        \"array\": [\n            {\n              \"Utilization\": \"&lds_util\",\n              \"Access Rate\": \"&lds_access_rate\",\n              \"Bandwith (Pct-of-Peak)\": \"&bw_pop\",\n              \"Bank Conflict Rate\": \"&bconf_rate\"\n            }\n    \n          ]\n      }},\n    \n      {\"$unwind\": {\n        \"path\": \"&array\"\n      }},\n      \n      {\"$replaceRoot\": {\n        \"newRoot\": \"&array\"\n      }}\n    \n    ]);",
-          "type": "table"
-        },
-        {
-          "datasource": {
-            "type": "amd-miperf-data-plugin",
-            "uid": "Zzw1yR27k"
-          },
-          "hide": false,
-          "rawQuery": true,
-          "refId": "B",
-          "target": "${Workload2}.pmc_perf.aggregate([\n    {\"$match\": {\n        \"Index\": { \"$in\": [${DispatchIDFilter2:raw}] },\n        \"gpu-id\": { \"$in\": [${gpuFilter2:raw}] },\n        \"KernelName\": { \"$in\": ${KernelNameFilter2:json}},\n        \"$expr\":{\"$regexMatch\": {\"input\":\"${select}\",\"regex\":\"(Local Data Share)\"}}\n    }},\n  {\"$group\": {\n      \"_id\": null,\n\n      \"bconf_rate\": {\n        \"$avg\": {\"$cond\": [ {\"$ne\": [{\"$subtract\": [\"&SQ_LDS_IDX_ACTIVE\", \"&SQ_LDS_BANK_CONFLICT\"]}, 0]},\n                            {\"$divide\": [\n                                {\"$multiply\": [\"&SQ_LDS_BANK_CONFLICT\", 3.125]},\n                                {\"$subtract\": [\"&SQ_LDS_IDX_ACTIVE\", \"&SQ_LDS_BANK_CONFLICT\"]}\n                            ]},\n                           null\n                          ]\n                }     \n      },\n\n      \"bw_pop\":  {\n        \"$avg\":     {\"$divide\": [\n                        {\"$divide\":[ \n                            { \"$multiply\": [ { \"$subtract\": [\"&SQ_LDS_IDX_ACTIVE\", \"&SQ_LDS_BANK_CONFLICT\"]},  \n                                             4,  \n                                             {\"$toInt\": \"$L2Banks2\"}\n                                           ]}, \n                            {\"$subtract\": [\"&EndNs\", \"&BeginNs\"]}\n                        ]},\n \n                        {\"$multiply\": [$sclk2, $numCU2, 0.00128]}\n                     ]}\n     },\n     \"lds_util\":  {\n        \"$avg\":    {\"$divide\":[ \n                        { \"$multiply\": [ 100,  \"&SQ_LDS_IDX_ACTIVE\" ]}, \n                        {\"$multiply\": [\"&GRBM_GUI_ACTIVE\", $numCU2]}\n                   ]}\n     },\n\n     \"lds_access_rate\":  {\n        \"$avg\":    {\"$divide\":[ \n                        { \"$multiply\": [200,  \"&SQ_ACTIVE_INST_LDS\" ]}, \n                        {\"$multiply\": [\"&GRBM_GUI_ACTIVE\", $numCU2]}\n                   ]}\n     }\n\n\n  }},\n\n  {\"$set\": {\n    \"array\": [\n        {\n          \"Utilization\": \"&lds_util\",\n          \"Access Rate\": \"&lds_access_rate\",\n          \"Bandwith (Pct-of-Peak)\": \"&bw_pop\",\n          \"Bank Conflict Rate\": \"&bconf_rate\"\n        }\n\n      ]\n  }},\n\n  {\"$unwind\": {\n    \"path\": \"&array\"\n  }},\n  \n  {\"$replaceRoot\": {\n    \"newRoot\": \"&array\"\n  }}\n\n]);",
-          "type": "table"
-        }
-      ],
-      "title": "Speed-of-Light: LDS",
-      "transformations": [
-        {
-          "id": "concatenate",
-          "options": {}
-        },
-        {
-          "id": "organize",
-          "options": {
-            "excludeByName": {},
-            "indexByName": {
-              "Access Rate 1": 6,
-              "Access Rate 2": 7,
-              "Bandwith (Pct-of-Peak) 1": 0,
-              "Bandwith (Pct-of-Peak) 2": 1,
-              "Bank Conflict Rate 1": 2,
-              "Bank Conflict Rate 2": 3,
-              "Utilization 1": 4,
-              "Utilization 2": 5
-            },
-            "renameByName": {
-              "Access Rate 1": "Access Rate (Current)",
-              "Access Rate 2": "Access Rate (Baseline)",
-              "BW (Pct-of-Peak) 1": "BW Pct-of-Peak (Current)",
-              "BW (Pct-of-Peak) 2": "BW Pct-of-Peak (Baseline)",
-              "Bandwith (Pct-of-Peak)": "",
-              "Bandwith (Pct-of-Peak) 1": "BW Pct-of-Peak (Current)",
-              "Bandwith (Pct-of-Peak) 2": "BW Pct-of-Peak (Baseline) ",
-              "Bank Conflict Rate 1": "Bank Conflict Rate (Current)",
-              "Bank Conflict Rate 2": "Bank Conflict Rate (Baseline)",
-              "Cache Hit 1": "Cache Hit (Current)",
-              "Cache Hit 2": "Cache Hit (Baseline)",
-              "Latency (Cycles) 1": "Latency  (Current) [Cycles]",
-              "Latency (Cycles) 2": "Latency (Baseline) [Cycles]",
-              "Stall 1": "Stall (Current)",
-              "Stall 2": "Stall (Baseline)",
-              "Util 1": "Util (Current)",
-              "Util 2": "Util (Baseline)",
-              "Utilization 1": "Util (Current)",
-              "Utilization 2": "Util (Baseline)"
-            }
-          }
-        }
-      ],
-      "transparent": true,
-      "type": "bargauge"
-    },
-    {
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "custom": {
-            "align": "auto",
-            "displayMode": "auto"
-          },
-          "decimals": 0,
-          "mappings": [],
-          "min": -100000000000000000000,
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "locale"
-        },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Avg (Current)"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 114
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Min (Current)"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 107
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Min (Baseline)"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 128
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Max (Current)"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 115
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Unit"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 138
-              }
-            ]
-          },
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Avg (Baseline)"
-            },
-            "properties": [
-              {
-                "id": "custom.width",
-                "value": 141
-              }
-            ]
-          }
-        ]
-      },
-      "gridPos": {
-        "h": 12,
-        "w": 12,
-        "x": 12,
-        "y": 11
-      },
-      "id": 100,
-      "options": {
-        "footer": {
-          "fields": "",
-          "reducer": [
-            "sum"
-          ],
-          "show": false
-        },
-        "showHeader": true,
-        "sortBy": []
-      },
-      "pluginVersion": "8.3.4",
-      "targets": [
-        {
-          "datasource": {
-            "type": "amd-miperf-data-plugin",
-            "uid": "Zzw1yR27k"
-          },
-          "hide": false,
-          "rawQuery": true,
-          "refId": "A",
-          "target": "${Workload1}.pmc_perf.aggregate([\n    {\"$match\": {\n      \"Index\": { \"$in\": [${DispatchIDFilter:raw}] },\n      \"gpu-id\": { \"$in\": [${gpuFilter:raw}] },\n      \"KernelName\": { \"$in\": ${KernelNameFilter:json}}\n    }},\n    {\"$addFields\": {\n        \"denom\": {\n               \"$switch\" : {\n                  \"branches\": [\n                     {\n                          \"case\":  { \"$eq\": [ $normUnit, \"per Wave\"]} ,\n                          \"then\":  \"&SQ_WAVES\"\n                     },\n                     {\n                          \"case\":  { \"$eq\": [ $normUnit, \"per Cycle\"]} ,\n                          \"then\":  \"&GRBM_GUI_ACTIVE\"\n                     },\n                     {\n                          \"case\":  { \"$eq\": [ $normUnit, \"per Sec\"]} ,\n                          \"then\":  {\"$divide\":[{\"$subtract\": [\"&EndNs\", \"&BeginNs\" ]}, 1000000000]}\n                     }\n                  ],\n                 \"default\": 1\n               }         \n        } \n    }},\n    {\"$group\": {\n        \"_id\": null,\n            \"avg_ldsInstrs\": {\n              \"$avg\": { \"$divide\": [\"&SQ_INSTS_LDS\" ,  \"&denom\"] }\n            },\n            \"min_ldsInstrs\": {\n              \"$min\": { \"$divide\": [\"&SQ_INSTS_LDS\" ,  \"&denom\"] }\n            },\n            \"max_ldsInstrs\": {\n              \"$max\": { \"$divide\": [\"&SQ_INSTS_LDS\" ,  \"&denom\"] }\n            },\n  \n            \"avg_indexAccesses\": {\n              \"$avg\": { \"$divide\": [\"&SQ_LDS_IDX_ACTIVE\" ,  \"&denom\"] }\n            },\n            \"min_indexAccesses\": {\n              \"$min\": { \"$divide\": [\"&SQ_LDS_IDX_ACTIVE\" ,  \"&denom\"] }\n            },\n            \"max_indexAccesses\": {\n              \"$max\": { \"$divide\": [\"&SQ_LDS_IDX_ACTIVE\" ,  \"&denom\"] }\n            },\n  \n            \"avg_atomicCycles\": {\n              \"$avg\": { \"$divide\": [\"&SQ_LDS_ATOMIC_RETURN\" , \"&denom\" ] }\n            },\n            \"min_atomicCycles\": {\n              \"$min\": { \"$divide\": [\"&SQ_LDS_ATOMIC_RETURN\" , \"&denom\" ] }\n            },\n            \"max_atomicCycles\": {\n              \"$max\": { \"$divide\": [\"&SQ_LDS_ATOMIC_RETURN\" , \"&denom\" ] }\n            },\n  \n            \"avg_bankConflicts\": {\n              \"$avg\": { \"$divide\": [\"&SQ_LDS_BANK_CONFLICT\" , \"&denom\" ] }\n            },\n            \"min_bankConflicts\": {\n              \"$min\": { \"$divide\": [\"&SQ_LDS_BANK_CONFLICT\" , \"&denom\" ] }\n            },\n            \"max_bankConflicts\": {\n              \"$max\": { \"$divide\": [\"&SQ_LDS_BANK_CONFLICT\" , \"&denom\" ] }\n            },\n  \n            \"avg_addrConflicts\": {\n              \"$avg\": { \"$divide\": [\"&SQ_LDS_ADDR_CONFLICT\" , \"&denom\" ] }\n            },\n            \"min_addrConflicts\": {\n              \"$min\": { \"$divide\": [\"&SQ_LDS_ADDR_CONFLICT\" , \"&denom\" ] }\n            },\n            \"max_addrConflicts\": {\n              \"$max\": { \"$divide\": [\"&SQ_LDS_ADDR_CONFLICT\" , \"&denom\" ] }\n            },\n  \n  \n            \"avg_unalignedStall\": {\n              \"$avg\": { \"$divide\": [\"&SQ_LDS_UNALIGNED_STALL\" , \"&denom\" ] }\n            },\n            \"min_unalignedStall\": {\n              \"$min\": { \"$divide\": [\"&SQ_LDS_UNALIGNED_STALL\" , \"&denom\" ] }\n            },\n            \"max_unalignedStall\": {\n              \"$max\": { \"$divide\": [\"&SQ_LDS_UNALIGNED_STALL\" , \"&denom\" ] }\n            },\n  \n            \"avg_memViolations\": {\n              \"$avg\": { \"$divide\": [\"&SQ_LDS_MEM_VIOLATIONS\" , \"&denom\" ] }\n            },\n            \"min_memViolations\": {\n              \"$min\": { \"$divide\": [\"&SQ_LDS_MEM_VIOLATIONS\" , \"&denom\" ] }\n            },\n            \"max_memViolations\": {\n              \"$max\": { \"$divide\": [\"&SQ_LDS_MEM_VIOLATIONS\" , \"&denom\" ] }\n            },\n  \n            \"avg_bconf_per_op\": {\n              \"$avg\": {\n                \"$cond\": [ {\"$ne\": [{\"$subtract\": [\"&SQ_LDS_IDX_ACTIVE\", \"&SQ_LDS_BANK_CONFLICT\"]}, 0]},\n                                    {\"$divide\": [\n                                        \"&SQ_LDS_BANK_CONFLICT\",\n                                        {\"$subtract\": [\"&SQ_LDS_IDX_ACTIVE\", \"&SQ_LDS_BANK_CONFLICT\"]}\n                                    ]},\n                                    null\n                          ]\n              }\n            },\n            \"min_bconf_per_op\": {\n              \"$min\": {\n                \"$cond\": [ {\"$ne\": [{\"$subtract\": [\"&SQ_LDS_IDX_ACTIVE\", \"&SQ_LDS_BANK_CONFLICT\"]}, 0]},\n                                    {\"$divide\": [\n                                        \"&SQ_LDS_BANK_CONFLICT\",\n                                        {\"$subtract\": [\"&SQ_LDS_IDX_ACTIVE\", \"&SQ_LDS_BANK_CONFLICT\"]}\n                                    ]},\n                                    null\n                          ]\n              }\n            },\n            \"max_bconf_per_op\": {\n              \"$max\": {\n                \"$cond\": [ {\"$ne\": [{\"$subtract\": [\"&SQ_LDS_IDX_ACTIVE\", \"&SQ_LDS_BANK_CONFLICT\"]}, 0]},\n                                    {\"$divide\": [\n                                        \"&SQ_LDS_BANK_CONFLICT\",\n                                        {\"$subtract\": [\"&SQ_LDS_IDX_ACTIVE\", \"&SQ_LDS_BANK_CONFLICT\"]}\n                                    ]},\n                                    null\n                          ]\n              }\n            },\n  \n            \"avg_bw\":  {\n              \"$avg\": {\n                \"$divide\":\n                  [ { \"$multiply\": [{ \"$multiply\":  [ { \"$subtract\": [\"&SQ_LDS_IDX_ACTIVE\", \"&SQ_LDS_BANK_CONFLICT\"]} ,  4]},  {\"$toInt\": \"$L2Banks\"}]}, \n                    \"&denom\"\n                  ]\n              }\n            },\n            \"min_bw\":  {\n              \"$min\": {\n                \"$divide\":\n                  [ { \"$multiply\": [{ \"$multiply\":  [ { \"$subtract\": [\"&SQ_LDS_IDX_ACTIVE\", \"&SQ_LDS_BANK_CONFLICT\"]} ,  4]},  {\"$toInt\": \"$L2Banks\"}]}, \n                    \"&denom\"\n                  ]\n              }\n            },\n            \"max_bw\":  {\n              \"$max\": {\n                \"$divide\":\n                  [ { \"$multiply\": [{ \"$multiply\":  [ { \"$subtract\": [\"&SQ_LDS_IDX_ACTIVE\", \"&SQ_LDS_BANK_CONFLICT\"]} ,  4]},  {\"$toInt\": \"$L2Banks\"}]}, \n                    \"&denom\"\n                  ]\n              }\n            }\n    }},\n    {\"$set\": {\n      \"array\": [\n          {\n            \"metric\": \"LDS Instrs\",\n            \"avg\": \"&avg_ldsInstrs\",\n            \"min\": \"&min_ldsInstrs\",\n            \"max\": \"&max_ldsInstrs\",\n            \"Unit\":{\"$concat\": [\"Instr \", $normUnit]}  \n          },\n          {\n            \"metric\": \"Bandwidth\",\n            \"avg\": \"&avg_bw\",\n            \"min\": \"&min_bw\",\n            \"max\": \"&max_bw\",\n            \"Unit\": {\"$concat\": [\"Bytes \", $normUnit]}\n          },\n          {\n            \"metric\": \"Bank Conficts/Access\",\n            \"avg\": \"&avg_bconf_per_op\",\n            \"min\": \"&min_bconf_per_op\",\n            \"max\": \"&max_bconf_per_op\",\n            \"Unit\": \"Conflicts/Access\"\n          },\n          {\n            \"metric\": \"Index Accesses\",\n            \"avg\": \"&avg_indexAccesses\",\n            \"min\": \"&min_indexAccesses\",\n            \"max\": \"&max_indexAccesses\",\n            \"Unit\": {\"$concat\": [\"Cycles \", $normUnit]}\n          },\n          {\n            \"metric\": \"Atomic Cycles\",\n            \"avg\": \"&avg_atomicCycles\",\n            \"min\": \"&min_atomicCycles\",\n            \"max\": \"&max_atomicCycles\",\n            \"Unit\": {\"$concat\": [\"Cycles \", $normUnit]}\n          },\n          {\n            \"metric\": \"Bank Conflict\",\n            \"avg\": \"&avg_bankConflicts\",\n            \"min\": \"&min_bankConflicts\",\n            \"max\": \"&max_bankConflicts\",\n            \"Unit\": {\"$concat\": [\"Cycles \", $normUnit]}\n          },\n          {\n            \"metric\": \"Addr Conflict\",\n            \"avg\": \"&avg_addrConflicts\",\n            \"min\": \"&min_addrConflicts\",\n            \"max\": \"&max_addrConflicts\",\n            \"Unit\": {\"$concat\": [\"Cycles \", $normUnit]}\n          },\n          {\n            \"metric\": \"Unaligned Stall\",\n            \"avg\": \"&avg_unalignedStall\",\n            \"min\": \"&min_unalignedStall\",\n            \"max\": \"&max_unalignedStall\",\n            \"Unit\": {\"$concat\": [\"Cycles \", $normUnit]}\n          },\n          {\n            \"metric\": \"Mem Violations\",\n            \"avg\": \"&avg_memViolations\",\n            \"min\": \"&min_memViolations\",\n            \"max\": \"&max_memViolations\",\n            \"Unit\": {\"$concat\": [\"\", $normUnit]}\n          }\n        ]\n    }},\n    {\"$unwind\": {\n      \"path\": \"&array\"\n    }},\n    {\"$replaceRoot\": {\n      \"newRoot\": \"&array\"\n    }},\n    {\"$unionWith\": {\n          \"coll\": \"SQ_INST_LEVEL_LDS\",\n          \"pipeline\": [\n              {\"$match\": {\n                  \"Index\": { \"$in\": [${DispatchIDFilter:raw}] },\n                  \"gpu-id\": { \"$in\": [${gpuFilter:raw}] },\n                  \"KernelName\": { \"$in\": ${KernelNameFilter:json}}\n              }},\n  \n            {\"$group\": {\n                \"_id\": null,\n                \"avg_ldsLatency\": {\n                  \"$avg\": { \n                    \"$cond\": [\n                    {\"$ne\": [\"&SQ_INSTS_LDS\", 0]},\n                    {\"$divide\": [ \"&SQ_ACCUM_PREV_HIRES\", \"&SQ_INSTS_LDS\" ]},\n                     null\n                    ] \n                  }\n                },\n                \"min_ldsLatency\": {\n                  \"$min\": { \n                    \"$cond\": [\n                    {\"$ne\": [\"&SQ_INSTS_LDS\", 0]},\n                    {\"$divide\": [ \"&SQ_ACCUM_PREV_HIRES\", \"&SQ_INSTS_LDS\" ]},\n                     null\n                    ] \n                  }\n                },\n                \"max_ldsLatency\": {\n                  \"$max\": { \n                    \"$cond\": [\n                    {\"$ne\": [\"&SQ_INSTS_LDS\", 0]},\n                    {\"$divide\": [ \"&SQ_ACCUM_PREV_HIRES\", \"&SQ_INSTS_LDS\" ]},\n                     null\n                    ] \n                  }\n                }\n            }},\n            {\"$project\": {\n                \"_id\": 0,\n                \"metric\": \"LDS Latency\",\n                \"avg\": \"&avg_ldsLatency\",\n                \"min\": \"&min_ldsLatency\",\n                \"max\": \"&max_ldsLatency\",\n                \"Unit\": \"Cycles\"\n            }}\n          ]\n      }}\n  ]);",
-          "type": "table"
-        },
-        {
-          "datasource": {
-            "type": "amd-miperf-data-plugin",
-            "uid": "Zzw1yR27k"
-          },
-          "hide": false,
-          "rawQuery": true,
-          "refId": "B",
-          "target": "${Workload2}.pmc_perf.aggregate([\n    {\"$match\": {\n      \"Index\": { \"$in\": [${DispatchIDFilter2:raw}] },\n      \"gpu-id\": { \"$in\": [${gpuFilter2:raw}] },\n      \"KernelName\": { \"$in\": ${KernelNameFilter2:json}},        \n     \"$expr\":{\"$regexMatch\": {\"input\":\"${select}\",\"regex\":\"(Local Data Share)\"}}\n  \n    }},\n    {\"$addFields\": {\n        \"denom\": {\n               \"$switch\" : {\n                  \"branches\": [\n                     {\n                          \"case\":  { \"$eq\": [ $normUnit, \"per Wave\"]} ,\n                          \"then\":  \"&SQ_WAVES\"\n                     },\n                     {\n                          \"case\":  { \"$eq\": [ $normUnit, \"per Cycle\"]} ,\n                          \"then\":  \"&GRBM_GUI_ACTIVE\"\n                     },\n                     {\n                          \"case\":  { \"$eq\": [ $normUnit, \"per Sec\"]} ,\n                          \"then\":  {\"$divide\":[{\"$subtract\": [\"&EndNs\", \"&BeginNs\" ]}, 1000000000]}\n                     }\n                  ],\n                 \"default\": 1\n               }         \n        } \n    }},\n    {\"$group\": {\n        \"_id\": null,\n            \"avg_ldsInstrs\": {\n              \"$avg\": { \"$divide\": [\"&SQ_INSTS_LDS\" ,  \"&denom\"] }\n            },\n            \"min_ldsInstrs\": {\n              \"$min\": { \"$divide\": [\"&SQ_INSTS_LDS\" ,  \"&denom\"] }\n            },\n            \"max_ldsInstrs\": {\n              \"$max\": { \"$divide\": [\"&SQ_INSTS_LDS\" ,  \"&denom\"] }\n            },\n  \n            \"avg_indexAccesses\": {\n              \"$avg\": { \"$divide\": [\"&SQ_LDS_IDX_ACTIVE\" ,  \"&denom\"] }\n            },\n            \"min_indexAccesses\": {\n              \"$min\": { \"$divide\": [\"&SQ_LDS_IDX_ACTIVE\" ,  \"&denom\"] }\n            },\n            \"max_indexAccesses\": {\n              \"$max\": { \"$divide\": [\"&SQ_LDS_IDX_ACTIVE\" ,  \"&denom\"] }\n            },\n  \n            \"avg_atomicCycles\": {\n              \"$avg\": { \"$divide\": [\"&SQ_LDS_ATOMIC_RETURN\" , \"&denom\" ] }\n            },\n            \"min_atomicCycles\": {\n              \"$min\": { \"$divide\": [\"&SQ_LDS_ATOMIC_RETURN\" , \"&denom\" ] }\n            },\n            \"max_atomicCycles\": {\n              \"$max\": { \"$divide\": [\"&SQ_LDS_ATOMIC_RETURN\" , \"&denom\" ] }\n            },\n  \n            \"avg_bankConflicts\": {\n              \"$avg\": { \"$divide\": [\"&SQ_LDS_BANK_CONFLICT\" , \"&denom\" ] }\n            },\n            \"min_bankConflicts\": {\n              \"$min\": { \"$divide\": [\"&SQ_LDS_BANK_CONFLICT\" , \"&denom\" ] }\n            },\n            \"max_bankConflicts\": {\n              \"$max\": { \"$divide\": [\"&SQ_LDS_BANK_CONFLICT\" , \"&denom\" ] }\n            },\n  \n            \"avg_addrConflicts\": {\n              \"$avg\": { \"$divide\": [\"&SQ_LDS_ADDR_CONFLICT\" , \"&denom\" ] }\n            },\n            \"min_addrConflicts\": {\n              \"$min\": { \"$divide\": [\"&SQ_LDS_ADDR_CONFLICT\" , \"&denom\" ] }\n            },\n            \"max_addrConflicts\": {\n              \"$max\": { \"$divide\": [\"&SQ_LDS_ADDR_CONFLICT\" , \"&denom\" ] }\n            },\n            \"avg_unalignedStall\": {\n              \"$avg\": { \"$divide\": [\"&SQ_LDS_UNALIGNED_STALL\" , \"&denom\" ] }\n            },\n            \"min_unalignedStall\": {\n              \"$min\": { \"$divide\": [\"&SQ_LDS_UNALIGNED_STALL\" , \"&denom\" ] }\n            },\n            \"max_unalignedStall\": {\n              \"$max\": { \"$divide\": [\"&SQ_LDS_UNALIGNED_STALL\" , \"&denom\" ] }\n            },\n  \n            \"avg_memViolations\": {\n              \"$avg\": { \"$divide\": [\"&SQ_LDS_MEM_VIOLATIONS\" , \"&denom\" ] }\n            },\n            \"min_memViolations\": {\n              \"$min\": { \"$divide\": [\"&SQ_LDS_MEM_VIOLATIONS\" , \"&denom\" ] }\n            },\n            \"max_memViolations\": {\n              \"$max\": { \"$divide\": [\"&SQ_LDS_MEM_VIOLATIONS\" , \"&denom\" ] }\n            },\n  \n \n            \"avg_bconf_per_op\": {\n              \"$avg\": {\n                \"$cond\": [ {\"$ne\": [{\"$subtract\": [\"&SQ_LDS_IDX_ACTIVE\", \"&SQ_LDS_BANK_CONFLICT\"]}, 0]},\n                                    {\"$divide\": [\n                                        \"&SQ_LDS_BANK_CONFLICT\",\n                                        {\"$subtract\": [\"&SQ_LDS_IDX_ACTIVE\", \"&SQ_LDS_BANK_CONFLICT\"]}\n                                    ]},\n                                    null\n                          ]\n              }\n            },\n            \"min_bconf_per_op\": {\n              \"$min\": {\n                \"$cond\": [ {\"$ne\": [{\"$subtract\": [\"&SQ_LDS_IDX_ACTIVE\", \"&SQ_LDS_BANK_CONFLICT\"]}, 0]},\n                                    {\"$divide\": [\n                                        \"&SQ_LDS_BANK_CONFLICT\",\n                                        {\"$subtract\": [\"&SQ_LDS_IDX_ACTIVE\", \"&SQ_LDS_BANK_CONFLICT\"]}\n                                    ]},\n                                    null\n                          ]\n              }\n            },\n            \"max_bconf_per_op\": {\n              \"$max\": {\n                \"$cond\": [ {\"$ne\": [{\"$subtract\": [\"&SQ_LDS_IDX_ACTIVE\", \"&SQ_LDS_BANK_CONFLICT\"]}, 0]},\n                                    {\"$divide\": [\n                                        \"&SQ_LDS_BANK_CONFLICT\",\n                                        {\"$subtract\": [\"&SQ_LDS_IDX_ACTIVE\", \"&SQ_LDS_BANK_CONFLICT\"]}\n                                    ]},\n                                    null\n                          ]\n              }\n            },\n  \n            \"avg_bw\":  {\n              \"$avg\": {\n                \"$divide\":\n                  [ { \"$multiply\": [{ \"$multiply\":  [ { \"$subtract\": [\"&SQ_LDS_IDX_ACTIVE\", \"&SQ_LDS_BANK_CONFLICT\"]} ,  4]},  {\"$toInt\": \"$L2Banks\"}]}, \n                    \"&denom\"\n                  ]\n              }\n            },\n            \"min_bw\":  {\n              \"$min\": {\n                \"$divide\":\n                  [ { \"$multiply\": [{ \"$multiply\":  [ { \"$subtract\": [\"&SQ_LDS_IDX_ACTIVE\", \"&SQ_LDS_BANK_CONFLICT\"]} ,  4]},  {\"$toInt\": \"$L2Banks\"}]}, \n                    \"&denom\"\n                  ]\n              }\n            },\n            \"max_bw\":  {\n              \"$max\": {\n                \"$divide\":\n                  [ { \"$multiply\": [{ \"$multiply\":  [ { \"$subtract\": [\"&SQ_LDS_IDX_ACTIVE\", \"&SQ_LDS_BANK_CONFLICT\"]} ,  4]},  {\"$toInt\": \"$L2Banks\"}]}, \n                    \"&denom\"\n                  ]\n              }\n            }\n    }},\n    {\"$set\": {\n      \"array\": [\n          {\n            \"metric\": \"LDS Instrs\",\n            \"avg\": \"&avg_ldsInstrs\",\n            \"min\": \"&min_ldsInstrs\",\n            \"max\": \"&max_ldsInstrs\",\n            \"Unit\":{\"$concat\": [\"Instr \", $normUnit]}  \n          },\n          {\n            \"metric\": \"Bandwidth\",\n            \"avg\": \"&avg_bw\",\n            \"min\": \"&min_bw\",\n            \"max\": \"&max_bw\",\n            \"Unit\": {\"$concat\": [\"Bytes \", $normUnit]}\n          },\n          {\n            \"metric\": \"Bank Conficts/Access\",\n            \"avg\": \"&avg_bconf_per_op\",\n            \"min\": \"&min_bconf_per_op\",\n            \"max\": \"&max_bconf_per_op\",\n            \"Unit\": \"Conflicts/Access\"\n          },\n          {\n            \"metric\": \"Index Accesses\",\n            \"avg\": \"&avg_indexAccesses\",\n            \"min\": \"&min_indexAccesses\",\n            \"max\": \"&max_indexAccesses\",\n            \"Unit\": {\"$concat\": [\"Cycles \", $normUnit]}\n          },\n          {\n            \"metric\": \"Atomic Cycles\",\n            \"avg\": \"&avg_atomicCycles\",\n            \"min\": \"&min_atomicCycles\",\n            \"max\": \"&max_atomicCycles\",\n            \"Unit\": {\"$concat\": [\"Cycles \", $normUnit]}\n          },\n          {\n            \"metric\": \"Bank Conflict\",\n            \"avg\": \"&avg_bankConflicts\",\n            \"min\": \"&min_bankConflicts\",\n            \"max\": \"&max_bankConflicts\",\n            \"Unit\": {\"$concat\": [\"Cycles \", $normUnit]}\n          },\n          {\n            \"metric\": \"Addr Conflict\",\n            \"avg\": \"&avg_addrConflicts\",\n            \"min\": \"&min_addrConflicts\",\n            \"max\": \"&max_addrConflicts\",\n            \"Unit\": {\"$concat\": [\"Cycles \", $normUnit]}\n          },\n          {\n            \"metric\": \"Unaligned Stall\",\n            \"avg\": \"&avg_unalignedStall\",\n            \"min\": \"&min_unalignedStall\",\n            \"max\": \"&max_unalignedStall\",\n            \"Unit\": {\"$concat\": [\"Cycles \", $normUnit]}\n          },\n          {\n            \"metric\": \"Mem Violations\",\n            \"avg\": \"&avg_memViolations\",\n            \"min\": \"&min_memViolations\",\n            \"max\": \"&max_memViolations\",\n            \"Unit\": {\"$concat\": [\"\", $normUnit]}\n          }\n        ]\n    }},\n    {\"$unwind\": {\n      \"path\": \"&array\"\n    }},\n    {\"$replaceRoot\": {\n      \"newRoot\": \"&array\"\n    }},\n    {\"$unionWith\": {\n          \"coll\": \"SQ_INST_LEVEL_LDS\",\n          \"pipeline\": [\n              {\"$match\": {\n                  \"Index\": { \"$in\": [${DispatchIDFilter2:raw}] },\n                  \"gpu-id\": { \"$in\": [${gpuFilter2:raw}] },\n                  \"KernelName\": { \"$in\": ${KernelNameFilter2:json}},\n                  \"$expr\":{\"$regexMatch\": {\"input\":\"${select}\",\"regex\":\"(Local Data Share)\"}}\n              }},\n  \n            {\"$group\": {\n                \"_id\": null,\n                \"avg_ldsLatency\": {\n                  \"$avg\": { \n                    \"$cond\": [\n                    {\"$ne\": [\"&SQ_INSTS_LDS\", 0]},\n                    {\"$divide\": [ \"&SQ_ACCUM_PREV_HIRES\", \"&SQ_INSTS_LDS\" ]},\n                     null\n                    ] \n                  }\n                },\n                \"min_ldsLatency\": {\n                  \"$min\": { \n                    \"$cond\": [\n                    {\"$ne\": [\"&SQ_INSTS_LDS\", 0]},\n                    {\"$divide\": [ \"&SQ_ACCUM_PREV_HIRES\", \"&SQ_INSTS_LDS\" ]},\n                     null\n                    ] \n                  }\n                },\n                \"max_ldsLatency\": {\n                  \"$max\": { \n                    \"$cond\": [\n                    {\"$ne\": [\"&SQ_INSTS_LDS\", 0]},\n                    {\"$divide\": [ \"&SQ_ACCUM_PREV_HIRES\", \"&SQ_INSTS_LDS\" ]},\n                     null\n                    ] \n                  }\n                }\n            }},\n            {\"$project\": {\n                \"_id\": 0,\n                \"metric\": \"LDS Latency\",\n                \"avg\": \"&avg_ldsLatency\",\n                \"min\": \"&min_ldsLatency\",\n                \"max\": \"&max_ldsLatency\",\n                \"Unit\": \"Cycles\"\n            }}\n          ]\n      }}\n  ]);",
-          "type": "table"
-        }
-      ],
-      "title": "LDS Stats",
-      "transformations": [
-        {
-          "id": "concatenate",
-          "options": {
-            "frameNameLabel": "frame",
-            "frameNameMode": "field"
-          }
-        },
-        {
-          "id": "organize",
-          "options": {
-            "excludeByName": {
-              "Unit 2": true,
-              "metric 2": true
-            },
-            "indexByName": {
-              "Unit 1": 9,
-              "Unit 2": 8,
-              "avg 1": 1,
-              "avg 2": 2,
-              "max 1": 5,
-              "max 2": 6,
-              "metric 1": 0,
-              "metric 2": 7,
-              "min 1": 3,
-              "min 2": 4
-            },
-            "renameByName": {
-              "avg 1": "Avg (Current)",
-              "avg 2": "Avg (Baseline)",
-              "max 1": "Max (Current)",
-              "max 2": "Max (Baseline)",
-              "min 1": "Min (Current)",
-              "min 2": "Min (Baseline)"
-            }
-          }
-        }
-      ],
-      "type": "table"
-    },
-    {
       "collapsed": true,
       "datasource": {
         "type": "amd-miperf-data-plugin",
@@ -5958,7 +5975,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 23
+        "y": 11
       },
       "id": 44,
       "panels": [
@@ -6206,7 +6223,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 24
+        "y": 12
       },
       "id": 203,
       "panels": [
@@ -6627,7 +6644,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 25
+        "y": 13
       },
       "id": 130,
       "panels": [
@@ -6970,7 +6987,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 26
+        "y": 14
       },
       "id": 112,
       "panels": [
@@ -7713,7 +7730,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 27
+        "y": 15
       },
       "id": 56,
       "panels": [
@@ -8435,7 +8452,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 28
+        "y": 16
       },
       "id": 66,
       "panels": [
@@ -12791,9 +12808,9 @@
       },
       {
         "current": {
-          "selected": false,
-          "text": "omniperf_gfxWL_test_gemm_BF16_profile10k_mi200",
-          "value": "omniperf_gfxWL_test_gemm_BF16_profile10k_mi200"
+          "selected": true,
+          "text": "omniperf_asw_mixbench_mi200",
+          "value": "omniperf_asw_mixbench_mi200"
         },
         "definition": "workload_names.names.aggregate([\n  {\"$group\": {\n    \"_id\": \"&name\"\n  }}\n]);",
         "hide": 0,
@@ -12812,8 +12829,8 @@
       {
         "current": {
           "selected": false,
-          "text": "148579",
-          "value": "148579"
+          "text": "435646",
+          "value": "435646"
         },
         "definition": "$Workload1.pmc_perf.aggregate([\n{\"$match\": {\n    \"Index\": { \"$in\": [${DispatchIDFilter:raw}] },\n    \"gpu-id\": { \"$in\": [${gpuFilter:raw}] },\n    \"KernelName\": { \"$in\": ${KernelNameFilter:json}}\n  }},\n\n  {\"$group\": {\n      \"_id\": null,\n      \"myAvg\": {\n        \"$avg\": { \"$multiply\": [{ \"$divide\": [{ \"$subtract\": [\"&EndNs\", \"&BeginNs\"] }, 1000] }, $sclk] }\n      }\n  }},\n  {\"$set\": {\n    \"array\": [\n        {\n          \"_id\": { \"$round\": [\"&myAvg\", 0] }\n        }\n      ]\n  }},\n  {\"$unwind\": {\n    \"path\": \"&array\"\n  }},\n  {\"$replaceRoot\": {\n    \"newRoot\": \"&array\"\n  }}\n]);",
         "hide": 2,
@@ -12832,8 +12849,8 @@
       {
         "current": {
           "selected": false,
-          "text": "63",
-          "value": "63"
+          "text": "103",
+          "value": "103"
         },
         "definition": "$Workload1.pmc_perf.aggregate([\n  {\"$match\": {\n    \"Index\": { \"$in\": [${DispatchIDFilter:raw}] },\n    \"gpu-id\": { \"$in\": [${gpuFilter:raw}] },\n    \"KernelName\": { \"$in\": ${KernelNameFilter:json}}\n  }},\n  {\"$group\": {\n    \"_id\": null,\n    \"theAvg\": {\n      \"$avg\": {\n        \"$cond\":[\n          {\"$ne\": [\"&GRBM_GUI_ACTIVE\", 0]},\n          {\"$divide\": [{ \"$multiply\": [4, \"&SQ_BUSY_CU_CYCLES\"] }, \"&GRBM_GUI_ACTIVE\"]},\n          \"\"\n        ]\n      }\n    }\n  }},\n  {\"$set\": {\n    \"array\": [\n        {\n          \"_id\": {\"$toInt\": { \"$min\": [{ \"$add\": [{ \"$multiply\": [{ \"$divide\": [{ \"$round\": [\"$theAvg\", 0] }, $maxWavesPerCU] },8] }, { \"$min\": [{ \"$mod\": [{ \"$round\": [\"$theAvg\", 0] }, $maxWavesPerCU] }, 8] }] }, $numCU] }}\n        }\n    ]\n  }},\n  {\"$unwind\": {\n    \"path\": \"$array\"\n  }},\n  {\"$replaceRoot\": {\n    \"newRoot\": \"$array\"\n  }}\n]);",
         "hide": 2,
@@ -12937,9 +12954,9 @@
       },
       {
         "current": {
-          "selected": false,
-          "text": "miperf_asw_vcopy_mi200",
-          "value": "miperf_asw_vcopy_mi200"
+          "selected": true,
+          "text": "omniperf_asw_mixbench_mi200",
+          "value": "omniperf_asw_mixbench_mi200"
         },
         "definition": "workload_names.names.aggregate([\n  {\"$group\": {\n    \"_id\": \"&name\"\n  }}\n]);",
         "hide": 0,
@@ -12958,8 +12975,8 @@
       {
         "current": {
           "selected": false,
-          "text": "84",
-          "value": "84"
+          "text": "103",
+          "value": "103"
         },
         "definition": "$Workload2.pmc_perf.aggregate([\n{\"$match\": {\n    \"Index\": { \"$in\": [${DispatchIDFilter2:raw}] },\n    \"gpu-id\": { \"$in\": [${gpuFilter2:raw}] },\n    \"KernelName\": { \"$in\": ${KernelNameFilter2:json}}\n  }},\n\n  {\"$group\": {\n    \"_id\": null,\n    \"theAvg\": {\n      \"$avg\": {\n        \"$cond\":[\n          {\"$ne\": [\"&GRBM_GUI_ACTIVE\", 0]},\n          {\"$divide\": [{ \"$multiply\": [4, \"&SQ_BUSY_CU_CYCLES\"] }, \"&GRBM_GUI_ACTIVE\"]},\n          \"\"\n        ]\n      }\n    }\n  }},\n  {\"$set\": {\n    \"array\": [\n        {\n          \"_id\": {\"$toInt\": { \"$min\": [{ \"$add\": [{ \"$multiply\": [{ \"$divide\": [{ \"$round\": [\"$theAvg\", 0] }, $maxWavesPerCU2] },8] }, { \"$min\": [{ \"$mod\": [{ \"$round\": [\"$theAvg\", 0] }, $maxWavesPerCU2] }, 8] }] }, $numCU2] }}\n        }\n    ]\n  }},\n  {\"$unwind\": {\n    \"path\": \"&array\"\n  }},\n  {\"$replaceRoot\": {\n    \"newRoot\": \"&array\"\n  }}\n]);",
         "hide": 2,
@@ -13046,10 +13063,6 @@
           "value": [
             "$__all"
           ]
-        },
-        "datasource": {
-          "type": "amd-miperf-data-plugin",
-          "uid": "oVK0I__nk"
         },
         "definition": "$Workload2.pmc_perf.aggregate([\n  {\"$group\": {\n    \"_id\": \"&KernelName\"\n  }}\n]);",
         "hide": 0,
@@ -13200,8 +13213,8 @@
       {
         "current": {
           "selected": false,
-          "text": "110",
-          "value": "110"
+          "text": "104",
+          "value": "104"
         },
         "definition": "$Workload2.sysinfo.aggregate([\n    {\"$group\": {\n      \"_id\": \"&numCU\"\n    }}\n]);",
         "hide": 2,
@@ -13378,7 +13391,7 @@
   "timepicker": {},
   "timezone": "",
   "title": "Omniperf_v1.0.8_pub",
-  "uid": "MIPerf_v1_0_063020221121",
-  "version": 12,
+  "uid": "MIPerf_v1_0_0630202211210",
+  "version": 4,
   "weekStart": ""
 }
