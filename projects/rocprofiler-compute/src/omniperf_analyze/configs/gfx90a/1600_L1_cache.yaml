@@ -14,6 +14,7 @@ Panel Config:
         header:
           metric: Metric
           value: Value
+          unit: Unit
           tips: Tips
         style:
           type: simple_bar
@@ -24,20 +25,24 @@ Panel Config:
           Buffer Coalescing:
             value: AVG(((((TA_TOTAL_WAVEFRONTS_sum * 64) * 100) / (TCP_TOTAL_ACCESSES_sum
               * 4)) if (TCP_TOTAL_ACCESSES_sum != 0) else None))
+            unit: Pct of Peak
             tips: 
           Cache Util:
             value: AVG((((TCP_GATE_EN2_sum * 100) / TCP_GATE_EN1_sum) if (TCP_GATE_EN1_sum
               != 0) else None))
+            unit: Pct of Peak
             tips: 
           Cache BW:
             value: ((100 * AVG(((TCP_TOTAL_CACHE_ACCESSES_sum * 64) / (EndNs - BeginNs))))
               / ((($sclk / 1000) * 64) * $numCU))
+            unit: Pct of Peak
             tips: 
           Cache Hit:
             value: AVG(((100 - ((100 * (((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum)
               + TCP_TCC_ATOMIC_WITH_RET_REQ_sum) + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum))
               / TCP_TOTAL_CACHE_ACCESSES_sum)) if (TCP_TOTAL_CACHE_ACCESSES_sum != 0) else
                None))
+            unit: Pct of Peak
             tips: 
 
     - metric_table:
