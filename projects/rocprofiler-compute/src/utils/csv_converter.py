@@ -41,7 +41,6 @@ MAX_SERVER_SEL_DELAY = 5000  # 5 sec connection timeout
 
 
 def kernel_name_shortener(workload_dir, level):
-
     def shorten_file(df, level):
         global cache
 
@@ -60,7 +59,9 @@ def kernel_name_shortener(workload_dir, level):
 
                 cmd = ["/opt/rocm/llvm/bin/llvm-cxxfilt", original_name]
 
-                proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                proc = subprocess.Popen(
+                    cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+                )
 
                 demangled_name, e = proc.communicate()
                 demangled_name = str(demangled_name, "UTF-8").strip()
@@ -69,7 +70,9 @@ def kernel_name_shortener(workload_dir, level):
                 new_name = ""
                 matches = ""
 
-                names_and_args = re.compile(r"(?P<name>[( )A-Za-z0-9_]+)([ ,*<>()]+)(::)?")
+                names_and_args = re.compile(
+                    r"(?P<name>[( )A-Za-z0-9_]+)([ ,*<>()]+)(::)?"
+                )
 
                 # works for name Kokkos::namespace::init_lock_array_kernel_threadid(int) [clone .kd]
                 if names_and_args.search(demangled_name):
@@ -95,7 +98,9 @@ def kernel_name_shortener(workload_dir, level):
                     # closing '>' is to be taken account by the while loop
                     if name[1].count(">") == 0:
                         if current_level < level:
-                            if not (current_level == level - 1 and name[1].count("<") > 0):
+                            if not (
+                                current_level == level - 1 and name[1].count("<") > 0
+                            ):
                                 new_name += name[1]
                         current_level += name[1].count("<")
 
@@ -117,7 +122,7 @@ def kernel_name_shortener(workload_dir, level):
             df[columnName] = df[columnName].map(cache)
 
         return df
-    
+
     # Only shorten if valid shortening level
     if level < 5:
         for fpath in glob.glob(workload_dir + "/*.csv"):
