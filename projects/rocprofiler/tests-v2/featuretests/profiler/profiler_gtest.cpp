@@ -1213,7 +1213,7 @@ class VectorAddFilenameMPITest : public FilePluginTest {
  protected:
   virtual void SetUp() {
     setenv("MPI_RANK", "7", true);
-    RunApplication("hip_vectoradd", " --hip-activity -d /tmp/tests-v2/file/ -o test_%rank_");
+    RunApplication("hip_vectoradd", " --hip-activity -d /tmp/tests-v2/file/ -o test_%q{MPI_RANK}_");
   }
   virtual void TearDown() {
     std::experimental::filesystem::remove_all("/tmp/tests-v2/file/");
@@ -1239,7 +1239,7 @@ class VectorAddPerfettoMPITest : public PerfettoPluginTest {
  protected:
   virtual void SetUp() {
     setenv("MPI_RANK", "7", true);
-    RunApplication("hip_vectoradd", " -d /tmp/tests-v2/perfetto/ -o test_%rank_ --plugin perfetto");
+    RunApplication("hip_vectoradd", " -d /tmp/tests-v2/perfetto/ -o test_%q{MPI_RANK}_ --plugin perfetto");
   }
   virtual void TearDown() {
     std::experimental::filesystem::remove_all("/tmp/tests-v2/perfetto/");
@@ -1274,7 +1274,7 @@ class VectorAddCTFMPITest : public CTFPluginTest {
  protected:
   virtual void SetUp() {
     setenv("MPI_RANK", "7", true);
-    RunApplication("hip_vectoradd", " -d /tmp/tests-v2/ctf_%rank --plugin ctf");
+    RunApplication("hip_vectoradd", " -d /tmp/tests-v2/ctf_%q{MPI_RANK} --plugin ctf");
   }
   virtual void TearDown() {
     std::experimental::filesystem::remove_all("/tmp/tests-v2/");

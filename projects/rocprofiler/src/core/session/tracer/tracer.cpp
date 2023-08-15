@@ -46,14 +46,14 @@ Tracer::Tracer(rocprofiler_session_id_t session_id, rocprofiler_sync_callback_t 
                rocprofiler_buffer_id_t buffer_id,
                std::vector<rocprofiler_tracer_activity_domain_t> domains)
     : domains_(domains), callback_(callback), buffer_id_(buffer_id), session_id_(session_id) {
-  assert(!is_active_.load(std::memory_order_release) && "Error: The tracer was initialized!");
+  assert(!is_active_.load(std::memory_order_acquire) && "Error: The tracer was initialized!");
   std::lock_guard<std::mutex> lock(tracer_lock_);
   callback_data_ = api_callback_data_t{callback, session_id};
   is_active_.exchange(true, std::memory_order_release);
 }
 
 void Tracer::StartRoctracer() {
-  if (!roctracer_initiated_.load(std::memory_order_release)) {
+  if (!roctracer_initiated_.load(std::memory_order_acquire)) {
     std::map<rocprofiler_tracer_activity_domain_t, is_filtered_domain_t> domains_filteration_map;
     // TODO(aelwazir): get filter property and parse it here
     for (auto& domain : domains_) {
@@ -68,7 +68,7 @@ void Tracer::StartRoctracer() {
 }
 
 void Tracer::StopRoctracer() {
-  if (roctracer_initiated_.load(std::memory_order_release)) roctracer_stop();
+  if (roctracer_initiated_.load(std::memory_order_acquire)) roctracer_stop();
 }
 
 void Tracer::DisableRoctracer() {
@@ -105,7 +105,7 @@ void Tracer::DisableRoctracer() {
 }
 
 Tracer::~Tracer() {
-  assert(is_active_.load(std::memory_order_release) && "Error: The tracer was not initialized!");
+  assert(is_active_.load(std::memory_order_acquire) && "Error: The tracer was not initialized!");
   std::lock_guard<std::mutex> lock(tracer_lock_);
 
   is_active_.exchange(false, std::memory_order_release);

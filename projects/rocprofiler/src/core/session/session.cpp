@@ -51,34 +51,34 @@ Session::~Session() {
   {
     std::lock_guard<std::mutex> lock(session_lock_);
     if (FindFilterWithKind(ROCPROFILER_SPM_COLLECTION) && spmcounter_ &&
-        spm_started_.load(std::memory_order_release)) {
+        spm_started_.load(std::memory_order_acquire)) {
       delete spmcounter_;
     }
     if (FindFilterWithKind(ROCPROFILER_API_TRACE) && tracer_ &&
-        tracer_started_.load(std::memory_order_release)) {
+        tracer_started_.load(std::memory_order_acquire)) {
       delete tracer_;
       tracer_started_.exchange(false, std::memory_order_release);
     }
     if (FindFilterWithKind(ROCPROFILER_PC_SAMPLING_COLLECTION) && pc_sampler_ &&
-        pc_sampler_started_.load(std::memory_order_release)) {
+        pc_sampler_started_.load(std::memory_order_acquire)) {
       delete pc_sampler_;
       pc_sampler_started_.exchange(false, std::memory_order_release);
     }
 
     if (FindFilterWithKind(ROCPROFILER_COUNTERS_SAMPLER) && counters_sampler_ &&
-        counters_sampler_started_.load(std::memory_order_release)) {
+        counters_sampler_started_.load(std::memory_order_acquire)) {
       delete counters_sampler_;
       counters_sampler_started_.exchange(false, std::memory_order_release);
     }
     if ((FindFilterWithKind(ROCPROFILER_DISPATCH_TIMESTAMPS_COLLECTION) ||
          FindFilterWithKind(ROCPROFILER_COUNTERS_COLLECTION)) &&
-        profiler_ && profiler_started_.load(std::memory_order_release)) {
+        profiler_ && profiler_started_.load(std::memory_order_acquire)) {
       rocprofiler::queue::ResetSessionID();
       delete profiler_;
       profiler_started_.exchange(false, std::memory_order_release);
     }
     if (FindFilterWithKind(ROCPROFILER_ATT_TRACE_COLLECTION) && att_tracer_ &&
-        att_tracer_started_.load(std::memory_order_release)) {
+        att_tracer_started_.load(std::memory_order_acquire)) {
       delete att_tracer_;
       att_tracer_started_.exchange(false, std::memory_order_release);
     }
@@ -107,7 +107,7 @@ void Session::DisableTools(rocprofiler_buffer_id_t buffer_id) {
   if (FindFilterWithKind(ROCPROFILER_API_TRACE) &&
       GetFilter(GetFilterIdWithKind(ROCPROFILER_API_TRACE))->GetBufferId().value ==
           buffer_id.value) {
-    if (tracer_started_.load(std::memory_order_release)) {
+    if (tracer_started_.load(std::memory_order_acquire)) {
       tracer_->DisableRoctracer();
     }
   }
@@ -116,7 +116,7 @@ void Session::DisableTools(rocprofiler_buffer_id_t buffer_id) {
 void Session::Start() {
   std::lock_guard<std::mutex> lock(session_lock_);
   if (!is_active_) {
-    if (!profiler_started_.load(std::memory_order_release)) {
+    if (!profiler_started_.load(std::memory_order_acquire)) {
       if (FindFilterWithKind(ROCPROFILER_DISPATCH_TIMESTAMPS_COLLECTION)) {
         profiler_ = new profiler::Profiler(
             GetFilter(GetFilterIdWithKind(ROCPROFILER_DISPATCH_TIMESTAMPS_COLLECTION))
@@ -136,7 +136,7 @@ void Session::Start() {
       rocprofiler::queue::ResetSessionID(session_id_);
     }
     if (FindFilterWithKind(ROCPROFILER_ATT_TRACE_COLLECTION)) {
-      if (!att_tracer_started_.load(std::memory_order_release)) {
+      if (!att_tracer_started_.load(std::memory_order_acquire)) {
         att_tracer_ = new att::AttTracer(
             GetFilter(GetFilterIdWithKind(ROCPROFILER_ATT_TRACE_COLLECTION))->GetBufferId(),
             GetFilter(GetFilterIdWithKind(ROCPROFILER_ATT_TRACE_COLLECTION))->GetId(), session_id_);
@@ -145,7 +145,7 @@ void Session::Start() {
     }
 
     if (FindFilterWithKind(ROCPROFILER_SPM_COLLECTION)) {
-      if (!spm_started_.load(std::memory_order_release)) {
+      if (!spm_started_.load(std::memory_order_acquire)) {
         rocprofiler_spm_parameter_t* spmparameter =
             GetFilter(GetFilterIdWithKind(ROCPROFILER_SPM_COLLECTION))->GetSpmParameterData();
         spmcounter_ = new spm::SpmCounters(
@@ -153,7 +153,7 @@ void Session::Start() {
             GetFilter(GetFilterIdWithKind(ROCPROFILER_SPM_COLLECTION))->GetId(), spmparameter,
             session_id_);
       }
-      if (!profiler_started_.load(std::memory_order_release)) {
+      if (!profiler_started_.load(std::memory_order_acquire)) {
         profiler_ = new profiler::Profiler(
             GetFilter(GetFilterIdWithKind(ROCPROFILER_SPM_COLLECTION))->GetBufferId(),
             GetFilter(GetFilterIdWithKind(ROCPROFILER_SPM_COLLECTION))->GetId(), session_id_);
@@ -165,7 +165,7 @@ void Session::Start() {
     if (FindFilterWithKind(ROCPROFILER_API_TRACE)) {
       std::vector<rocprofiler_tracer_activity_domain_t> domains =
           GetFilter(GetFilterIdWithKind(ROCPROFILER_API_TRACE))->GetTraceData();
-      if (!tracer_started_.load(std::memory_order_release)) {
+      if (!tracer_started_.load(std::memory_order_acquire)) {
         tracer_ = new tracer::Tracer(
             session_id_,
             (GetFilter(GetFilterIdWithKind(ROCPROFILER_API_TRACE))->HasCallback()
@@ -178,7 +178,7 @@ void Session::Start() {
     }
 
     if (FindFilterWithKind(ROCPROFILER_PC_SAMPLING_COLLECTION)) {
-      if (!pc_sampler_started_.load(std::memory_order_release)) {
+      if (!pc_sampler_started_.load(std::memory_order_acquire)) {
         pc_sampler_ = new pc_sampler::PCSampler(
             GetFilter(GetFilterIdWithKind(ROCPROFILER_PC_SAMPLING_COLLECTION))->GetBufferId(),
             GetFilter(GetFilterIdWithKind(ROCPROFILER_PC_SAMPLING_COLLECTION))->GetId(),
@@ -189,7 +189,7 @@ void Session::Start() {
     }
 
     if (FindFilterWithKind(ROCPROFILER_COUNTERS_SAMPLER)) {
-      if (!counters_sampler_started_.load(std::memory_order_release)) {
+      if (!counters_sampler_started_.load(std::memory_order_acquire)) {
         counters_sampler_ = new CountersSampler(
             GetFilter(GetFilterIdWithKind(ROCPROFILER_COUNTERS_SAMPLER))->GetBufferId(),
             GetFilter(GetFilterIdWithKind(ROCPROFILER_COUNTERS_SAMPLER))->GetId(), session_id_);
@@ -214,18 +214,18 @@ void Session::Terminate() {
     if (FindFilterWithKind(ROCPROFILER_API_TRACE)) {
       std::vector<rocprofiler_tracer_activity_domain_t> domains =
           GetFilter(GetFilterIdWithKind(ROCPROFILER_API_TRACE))->GetTraceData();
-      if (tracer_started_.load(std::memory_order_release)) {
+      if (tracer_started_.load(std::memory_order_acquire)) {
         tracer_->StopRoctracer();
       }
     }
     if (FindFilterWithKind(ROCPROFILER_PC_SAMPLING_COLLECTION)) {
-      if (pc_sampler_started_.load(std::memory_order_release)) {
+      if (pc_sampler_started_.load(std::memory_order_acquire)) {
         pc_sampler_->Stop();
       }
     }
 
     if (FindFilterWithKind(ROCPROFILER_COUNTERS_SAMPLER)) {
-      if (counters_sampler_started_.load(std::memory_order_release)) {
+      if (counters_sampler_started_.load(std::memory_order_acquire)) {
         counters_sampler_->Stop();
       }
     }

@@ -328,7 +328,7 @@ att_parsed_input_t GetATTParams() {
       int rank = (comma < line.size() - 1) ? stoi(line.substr(comma + 1)) : 0;
 
       if (MPI_RANK < 0 || rank == MPI_RANK)  // Only add ID if rank matches the one in input.txt
-        dispatch_ids.push_back(id);
+        dispatch_ids.push_back(std::max(id-1,0)); // off by 1 in relation to kernel-trace
       continue;
     }
     // param_value is a number
@@ -416,17 +416,59 @@ void finish() {
   }
 }
 
+static bool env_var_search(std::string& s) {
+  std::smatch m;
+  std::regex e ("(.*)\\%\\q\\{([^}]+)\\}(.*)");
+  std::regex_match(s, m, e);
+
+  if (m.size() != 4) return false;
+
+  while (m.size() == 4) {
+    const char* envvar = getenv(m[2].str().c_str());
+    if (!envvar) envvar = "";
+    s = m[1].str()+envvar+m[3].str();
+    std::regex_match(s, m, e);
+  };
+
+  return true;
+}
+
+static void env_var_replace(const char* env_name) {
+  if (!env_name) return;
+  const char* env = getenv(env_name);
+  if (!env) return;
+
+  std::string new_env(env);
+  if (env_var_search(new_env)) setenv(env_name, new_env.c_str(), 1);
+}
+
 // load plugins
 void plugins_load() {
   // Load output plugin
   if (Dl_info dl_info; dladdr((void*)plugins_load, &dl_info) != 0) {
     const char* plugin_name = getenv("ROCPROFILER_PLUGIN_LIB");
     if (plugin_name == nullptr) {
-      if (getenv("OUTPUT_PATH"))
+      if (getenv("OUTPUT_PATH") || getenv("OUT_FILE_NAME"))
         plugin_name = "libfile_plugin.so";
       else
         plugin_name = "libcli_plugin.so";
     }
+    env_var_replace("OUTPUT_PATH");
+    env_var_replace("OUT_FILE_NAME");
+
+    std::string out_path = getenv("OUTPUT_PATH") ? getenv("OUTPUT_PATH") : "";
+
+    if (out_path.size()) {
+      try {
+        std::experimental::filesystem::create_directories(out_path);
+      } catch (...) {}
+      out_path = out_path + '/';
+    }
+    if (getenv("ROCPROFILER_COUNTERS")) {
+      std::ofstream(out_path+"pmc.txt", std::ios::app)
+        << std::string(getenv("ROCPROFILER_COUNTERS")) << '\n';
+    }
+
     if (!plugin.emplace(fs::path(dl_info.dli_fname).replace_filename(plugin_name)).is_valid()) {
       plugin.reset();
     }

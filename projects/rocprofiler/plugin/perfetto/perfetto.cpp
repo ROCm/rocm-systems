@@ -144,7 +144,6 @@ class perfetto_plugin_t {
     data_source_cfg->set_name("track_event");
     data_source_cfg->set_track_event_config_raw(track_event_cfg.SerializeAsString());
 
-    output_file_name = replace_MPI_macros(output_file_name);
     output_prefix_.append(output_file_name + std::to_string(GetPid()) + "_output.pftrace");
     file_descriptor_ = open(output_prefix_.string().c_str(), O_RDWR | O_CREAT | O_TRUNC, 0600);
     if (file_descriptor_ == -1) rocprofiler::warning("Can't open output file\n");
@@ -156,8 +155,7 @@ class perfetto_plugin_t {
     // Give a custom name for the traced process.
     perfetto::ProcessTrack process_track = perfetto::ProcessTrack::Current();
     perfetto::protos::gen::TrackDescriptor desc = process_track.Serialize();
-    desc.mutable_process()->set_process_name("Node: " + std::string(hostname_) + " Rank " +
-                                             std::to_string(MPI_rank));
+    desc.mutable_process()->set_process_name("Node: " + std::string(hostname_));
     perfetto::TrackEvent::SetTrackDescriptor(process_track, desc);
 
     is_valid_ = true;
@@ -168,28 +166,6 @@ class perfetto_plugin_t {
       tracing_session_->StopBlocking();
       close(file_descriptor_);
     }
-  }
-
-  std::string replace_MPI_macros(std::string output_file_name) {
-    std::vector<const char*> MPI_BUILTINS = {"MPI_RANK", "OMPI_COMM_WORLD_RANK",
-                                             "MV2_COMM_WORLD_RANK"};
-    bIsMPI = false;
-
-    for (const char* envvar : MPI_BUILTINS) {
-      const char* rank_env_var = getenv(envvar);
-      if (rank_env_var == nullptr) continue;  // MPI var is does not exist
-
-      MPI_rank = atoi(rank_env_var);
-      bIsMPI = true;
-      break;
-    }
-
-    size_t key_find = output_file_name.rfind("%rank");
-    if (key_find != std::string::npos) {  // Contains a %?rank string
-      output_file_name = output_file_name.substr(0, key_find) + std::to_string(MPI_rank) +
-          output_file_name.substr(key_find + std::string("%rank").size());
-    }
-    return output_file_name;
   }
 
   const char* GetDomainName(rocprofiler_tracer_activity_domain_t domain) {
@@ -631,8 +607,6 @@ class perfetto_plugin_t {
   std::unique_ptr<perfetto::TracingSession> tracing_session_;
   int file_descriptor_;
   bool is_valid_{false};
-  bool bIsMPI = false;
-  int MPI_rank = 0;
   size_t roctx_track_entries_{0};
 
   // Correlate stream id(s) with correlation id(s) to identify the stream id of every HIP activity

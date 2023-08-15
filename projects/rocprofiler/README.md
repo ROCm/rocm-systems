@@ -243,6 +243,13 @@ The user has two options for building:
     ./rocprofv2 --plugin plugin_name -i samples/input.txt -d output_dir <app_relative_path> # -d is optional, but can be used to define the directory output for output results
     ```
 
+    Both the output directory and filenames allow for simple environment variable substitution via a special syntax %q{var} -> $var, e.g.:
+    ```bash
+    export var="FOO"
+    rocprofv2 --plugin perfetto -o file_%q{var}_name
+    # Generates file names: file_FOO_name[...].pftrace
+    ```
+
     - #### (ATT) Advanced Thread Trace
       Tool used to collect fine-grained hardware metrics. Provides ISA-level instruction hotspot analysis via hardware tracing.
 
@@ -313,7 +320,7 @@ The user has two options for building:
         - att: TARGET_CU=1 //or some other CU [0,15] - WGP for Navi [0,8]
         - SE_MASK=0x1 // bitmask of shader engines. The fewer, the easier on the hardware. Default enables 1 out of 4 shader engines.
         - SIMD_MASK=0xF // GFX9: bitmask of SIMDs. Navi: SIMD Index [0-3].
-        - DISPATCH=ID,RN // collect trace only for the given dispatch_ID and MPI rank RN. RN is optional and ignored for single processes. Multiple lines with varying combinations of RN and ID can be added.
+        - DISPATCH=ID,RN // collect trace only for the given dispatch_ID (from --kernel-trace) and MPI rank RN. RN is optional and ignored for single processes. Multiple lines with varying combinations of RN and ID can be added.
         - KERNEL=kernname // Profile only kernels containing the string kernname (c++ mangled name). Multiple lines can be added.
         - PERFCOUNTERS_COL_PERIOD=0x3 // Multiplier period for counter collection [0~31]. 0=fastest (usually once every 16 cycles). GFX9 only. Counters will be shown in a graph over time in the browser UI.
         - PERFCOUNTER=counter_name // Add a SQ counter to be collected with ATT; period defined by PERFCOUNTERS_COL_PERIOD. GFX9 only.

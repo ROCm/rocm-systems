@@ -67,7 +67,7 @@ std::mutex processQueueLock;
 
 // rocprofiler_status_t SetDestBuffer(hsa_agent_t GPUNode, uint32_t size, uint32_t timeout) {
 //   rocprofiler_status_t ret;
-//   uint32_t idx = currIndex.load(std::memory_order_release);
+//   uint32_t idx = currIndex.load(std::memory_order_acquire);
 //   if (size) {
 //     // Check if user buffer in using
 //     if (spm_buffer_params[idx].addr != NULL) {
@@ -97,7 +97,7 @@ std::mutex processQueueLock;
 //   }
 //   if (spm_buffer_params[idx].data_loss) std::cout << "Data Loss" << std::endl;
 //   if (spm_buffer_params[idx].len) {
-//     uint32_t pidx = preIndex.load(std::memory_order_release);
+//     uint32_t pidx = preIndex.load(std::memory_order_acquire);
 //     if (spm_buffer_params[idx].len == spm_buffer_params[pidx].size) {
 //       std::cout << "Buffer completely filled with bytes" << spm_buffer_params[idx].len <<
 //       std::endl; fd = fopen("SPM_rocprofiler_data.txt", "wb"); size_t retele =
@@ -121,8 +121,8 @@ std::mutex processQueueLock;
 
 // void spmBufferSetup(hsa_agent_t GPUNode) {
 //   rocprofiler_status_t ret;
-//   if (is_started.load(std::memory_order_release)) {
-//     uint32_t idx = currIndex.load(std::memory_order_release);
+//   if (is_started.load(std::memory_order_acquire)) {
+//     uint32_t idx = currIndex.load(std::memory_order_acquire);
 //     ret = SetDestBuffer(GPUNode, spm_buffer_params[idx].size, spm_buffer_params[idx].timeout);
 //     if (ret != ROCPROFILER_STATUS_SUCCESS) {
 //       std::cout << "Fail to set Dest Buf 2 "

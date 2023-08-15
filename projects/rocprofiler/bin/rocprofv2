@@ -58,6 +58,8 @@ if [ -z "$1" ]; then
   exit 1
 fi
 
+OUTPUT_PATH_INTERNAL="."
+
 while [ 1 ]; do
   if [[ "$1" = "-h" || "$1" = "--help" ]]; then
     usage
@@ -98,19 +100,6 @@ while [ 1 ]; do
   elif [[ "$1" = "-d" || "$1" = "--output-directory" ]]; then
     if [ $2 ]; then
       OUTPUT_PATH_INTERNAL=$2
-      MPI_RANK_INTERNAL=""
-      if [ -n "$MPI_RANK" ]; then
-        MPI_RANK_INTERNAL=$MPI_RANK
-      elif [ -n "$OMPI_COMM_WORLD_RANK" ]; then
-        MPI_RANK_INTERNAL=$OMPI_COMM_WORLD_RANK
-      elif [ -n "$MV2_COMM_WORLD_RANK" ]; then
-        MPI_RANK_INTERNAL=$MV2_COMM_WORLD_RANK
-      fi
-      if [ -n "$MPI_RANK_INTERNAL" ]; then
-        OUTPUT_PATH_INTERNAL=${OUTPUT_PATH_INTERNAL//"%rank"/$MPI_RANK_INTERNAL}
-      fi
-
-      mkdir -p $OUTPUT_PATH_INTERNAL
       export OUTPUT_PATH=$OUTPUT_PATH_INTERNAL
     else
       usage
@@ -239,32 +228,22 @@ if [ -n "$COUNTERS_PATH" ]; then
   done <$input
 fi
 
-COUNTERS_PMC_DIRS=""
-if [ -n "$PMC_LINES" ]; then
+if [ -n "$PMC_LINES" ] && [ ! -n "$ATT_ARGV" ]; then
   COUNTER=1
   for i in ${!PMC_LINES[@]}; do
     export ROCPROFILER_COUNTERS="${PMC_LINES[$i]}"
     #Skipping lines without pmc when not in att mode
-    if [[ ! ${PMC_LINES[$i]} =~ "pmc" && ! ${PMC_LINES[$i]} =~ "att" ]]; then
+    if [[ ! ${PMC_LINES[$i]} =~ "pmc" ]]; then
       continue
     fi
 
-    if [ -n "$OUTPUT_PATH" ]; then
-      if [ ! -n "$ATT_ARGV" ]; then
-        FINAL_PATH="$OUTPUT_PATH_INTERNAL/pmc_$COUNTER"
-        COUNTERS_PMC_DIRS="$COUNTERS_PMC_DIRS $FINAL_PATH"
-      else
-        FINAL_PATH="$OUTPUT_PATH"
-      fi
-      echo -e "\nThe output path for the following counters: $FINAL_PATH"
-      mkdir -p $FINAL_PATH
-      echo $ROCPROFILER_COUNTERS >$FINAL_PATH/pmc.txt
-      export OUTPUT_PATH=$FINAL_PATH
-      let COUNTER=COUNTER+1
-    fi
+    FINAL_PATH="$OUTPUT_PATH_INTERNAL/pmc_$COUNTER"
+    export OUTPUT_PATH=$FINAL_PATH
+    let COUNTER=COUNTER+1
     LD_PRELOAD=$LD_PRELOAD:$ROCM_DIR/lib/rocprofiler/librocprofiler_tool.so $*
+    echo -e "\nThe output path for the following counters: $OUTPUT_PATH"
   done
-elif [ ! -n "$ATT_ARGV" ]; then
+else
   LD_PRELOAD=$LD_PRELOAD:$ROCM_DIR/lib/rocprofiler/librocprofiler_tool.so $*
 fi
 

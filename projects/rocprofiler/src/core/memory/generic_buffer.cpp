@@ -37,7 +37,7 @@ GenericBuffer::GenericBuffer(rocprofiler_session_id_t session_id, rocprofiler_bu
       id_(id),
       flush_function_(flush_function),
       session_id_(session_id) {
-  if (!is_valid_.load(std::memory_order_release)) {
+  if (!is_valid_.load(std::memory_order_acquire)) {
     // Pool definition: The memory pool is split in 2 buffers of equal size. When
     // first initialized, the write pointer points to the first element of the
     // first buffer. When a buffer is full,  or when Flush() is called, the write
@@ -67,7 +67,7 @@ GenericBuffer::GenericBuffer(rocprofiler_session_id_t session_id, rocprofiler_bu
 }
 
 GenericBuffer::~GenericBuffer() {
-  if (is_valid_.load(std::memory_order_release)) {
+  if (is_valid_.load(std::memory_order_acquire)) {
     std::lock_guard lock(buffer_lock_);
     // if (rocprofiler::GetROCProfiler_Singleton()->GetSession(session_id_))
     //   rocprofiler::GetROCProfiler_Singleton()->GetSession(session_id_)->DisableTools(id_);
@@ -175,7 +175,7 @@ rocprofiler_session_id_t GenericBuffer::GetSessionId() {
   return rocprofiler_session_id_t{0};
 }
 
-bool GenericBuffer::IsValid() { return is_valid_.load(std::memory_order_release); }
+bool GenericBuffer::IsValid() { return is_valid_.load(std::memory_order_acquire); }
 
 rocprofiler_buffer_id_t GenericBuffer::GetId() {
   if (is_valid_) return id_;
