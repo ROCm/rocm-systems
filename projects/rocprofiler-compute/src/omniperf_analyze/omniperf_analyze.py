@@ -196,7 +196,7 @@ def run_gui(args, runs):
         gui.build_layout(
             app,
             runs,
-            archConfigs["gfx90a"],
+            archConfigs[runs[args.path[0][0]].sys_info.iloc[0]["gpu_soc"]],
             input_filters,
             args.decimal,
             args.time_unit,

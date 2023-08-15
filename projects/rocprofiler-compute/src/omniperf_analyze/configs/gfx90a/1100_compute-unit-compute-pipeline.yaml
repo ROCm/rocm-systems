@@ -193,4 +193,3 @@ Panel Config:
               + (SQ_INSTS_VALU_FMA_F64 * 2))) + (512 * SQ_INSTS_VALU_MFMA_MOPS_F64)) / $denom))
             unit: (OPs  + $normUnit)
             tips: 
-
