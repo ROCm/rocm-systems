@@ -25,89 +25,118 @@
 import argparse
 import collections
 import os
+import subprocess
 import sys
 import re
 import pandas as pd
 import getpass
 from pymongo import MongoClient
 from tqdm import tqdm
-import shutil
+import glob
 
 cache = dict()
+
 supported_arch = {"gfx906": "mi50", "gfx908": "mi100", "gfx90a": "mi200"}
 MAX_SERVER_SEL_DELAY = 5000  # 5 sec connection timeout
 
 
-def kernel_name_shortener(df, cache, level):
-    if level >= 5:
+def kernel_name_shortener(workload_dir, level):
+    def shorten_file(df, level):
+        global cache
+
+        columnName = ""
+        if "KernelName" in df:
+            columnName = "KernelName"
+        if "Name" in df:
+            columnName = "Name"
+
+        if columnName == "KernelName" or columnName == "Name":
+            # loop through all indices
+            for index in df.index:
+                original_name = df.loc[index, columnName]
+                if original_name in cache:
+                    continue
+
+                cmd = ["/opt/rocm/llvm/bin/llvm-cxxfilt", original_name]
+
+                proc = subprocess.Popen(
+                    cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+                )
+
+                demangled_name, e = proc.communicate()
+                demangled_name = str(demangled_name, "UTF-8").strip()
+
+                # cache miss, add the shortened name to the dictionary
+                new_name = ""
+                matches = ""
+
+                names_and_args = re.compile(
+                    r"(?P<name>[( )A-Za-z0-9_]+)([ ,*<>()]+)(::)?"
+                )
+
+                # works for name Kokkos::namespace::init_lock_array_kernel_threadid(int) [clone .kd]
+                if names_and_args.search(demangled_name):
+                    matches = names_and_args.findall(demangled_name)
+                else:
+                    # Works for first case  '__amd_rocclr_fillBuffer.kd'
+                    cache[original_name] = new_name
+                    if new_name == None or new_name == "":
+                        cache[original_name] = demangled_name
+                    continue
+
+                current_level = 0
+                for name in matches:
+                    ##can cause errors if a function name or argument is equal to 'clone'
+                    if name[0] == "clone":
+                        continue
+                    if len(name) == 3:
+                        if name[2] == "::":
+                            continue
+
+                    if current_level < level:
+                        new_name += name[0]
+                    # closing '>' is to be taken account by the while loop
+                    if name[1].count(">") == 0:
+                        if current_level < level:
+                            if not (
+                                current_level == level - 1 and name[1].count("<") > 0
+                            ):
+                                new_name += name[1]
+                        current_level += name[1].count("<")
+
+                    curr_index = 0
+                    # cases include '>'  '> >, ' have to go in depth here to not lose account of commas and current level
+                    while name[1].count(">") > 0 and curr_index < len(name[1]):
+                        if current_level < level:
+                            new_name += name[1][curr_index:]
+                            current_level -= name[1][curr_index:].count(">")
+                            curr_index = len(name[1])
+                        elif name[1][curr_index] == (">"):
+                            current_level -= 1
+                        curr_index += 1
+
+                cache[original_name] = new_name
+                if new_name == None or new_name == "":
+                    cache[original_name] = demangled_name
+
+            df[columnName] = df[columnName].map(cache)
+
         return df
 
-    columnName = ""
-    if "KernelName" in df:
-        columnName = "KernelName"
-    if "Name" in df:
-        columnName = "Name"
-
-    if columnName == "KernelName" or columnName == "Name":
-        # loop through all indices
-        for index in df.index:
-            original_name = df.loc[index, columnName]
-            if original_name in cache:
-                continue
-
-            # cache miss, add the shortened name to the dictionary
-            new_name = ""
-            matches = ""
-
-            names_and_args = re.compile(r"(?P<name>[( )A-Za-z0-9_]+)([ ,*<>()]+)(::)?")
-
-            # works for name Kokkos::namespace::init_lock_array_kernel_threadid(int) [clone .kd]
-            if names_and_args.search(original_name):
-                matches = names_and_args.findall(original_name)
-            else:
-                # Works for first case  '__amd_rocclr_fillBuffer.kd'
-                # remove .kd and then parse through original regex
-                first_case = re.compile(r"([^\s]+)(.kd)")
-                Mod_name_and_args = re.compile(r"(?P<name>[( )A-Za-z0-9_]+)([ ,*<>()]*)")
-                interim_name = first_case.search(original_name).group(1)
-                matches = Mod_name_and_args.findall(interim_name)
-
-            current_level = 0
-            for name in matches:
-                ##can cause errors if a function name or argument is equal to 'clone'
-                if name[0] == "clone":
-                    continue
-                if len(name) == 3:
-                    if name[2] == "::":
-                        continue
-
-                if current_level < level:
-                    new_name += name[0]
-                # closing '>' is to be taken account by the while loop
-                if name[1].count(">") == 0:
-                    if current_level < level:
-                        if not (current_level == level - 1 and name[1].count("<") > 0):
-                            new_name += name[1]
-                    current_level += name[1].count("<")
-
-                curr_index = 0
-                # cases include '>'  '> >, ' have to go in depth here to not lose account of commas and current level
-                while name[1].count(">") > 0 and curr_index < len(name[1]):
-                    if current_level < level:
-                        new_name += name[1][curr_index:]
-                        current_level -= name[1][curr_index:].count(">")
-                        curr_index = len(name[1])
-                    elif name[1][curr_index] == (">"):
-                        current_level -= 1
-                    curr_index += 1
-
-            cache[original_name] = new_name
-            if new_name == None or new_name == "":
-                cache[original_name] = original_name
-
-        df[columnName] = df[columnName].map(cache)
-
-    return df
+    # Only shorten if valid shortening level
+    if level < 5:
+        for fpath in glob.glob(workload_dir + "/*.csv"):
+            try:
+                orig_df = pd.read_csv(
+                    fpath,
+                    on_bad_lines="skip",
+                    engine="python",
+                )
+                modified_df = shorten_file(orig_df, level)
+                modified_df.to_csv(fpath, index=False)
+            except pd.errors.EmptyDataError:
+                print("Skipping empty csv " + str(fpath))
+            print("hi")
 
 
 # Verify target directory and setup connection
@@ -143,13 +172,6 @@ def parse(args, profileAndExport):
         sys.exit(1)
 
     db = "omniperf_" + str(args.team) + "_" + str(name) + "_" + soc
-
-    if Extractionlvl >= 5:
-        print("KernelName shortening disabled")
-    else:
-        print("KernelName shortening enabled")
-
-    print("Kernel name verbose level:", Extractionlvl)
 
     if args.password == "":
         try:
@@ -195,16 +217,7 @@ def convert_folder(connectionInfo, Extractionlvl):
     except:
         print("ERROR: Unable to connect to the server")
         sys.exit(1)
-    # Set up directories
-    if Extractionlvl < 5:
-        newfilepath = connectionInfo["workload"]
-        newfilepath_h = newfilepath + "/renamedFiles/"
-        if not os.path.exists(newfilepath_h):
-            os.mkdir(newfilepath_h)
-        newfilepath = newfilepath_h + connectionInfo["db"] + "/"
-        if not os.path.exists(newfilepath):
-            os.mkdir(newfilepath)
-    # Upload files
+
     i = 0
     file = "blank"
     for file in tqdm(os.listdir(connectionInfo["workload"])):
@@ -212,42 +225,18 @@ def convert_folder(connectionInfo, Extractionlvl):
             print(connectionInfo["workload"] + "/" + file)
             try:
                 fileName = file[0 : file.find(".")]
-                # Only shorten KernelNames if instructed to
-                if Extractionlvl < 5:
-                    t1 = pd.read_csv(
-                        connectionInfo["workload"] + "/" + file,
-                        on_bad_lines="skip",
-                        engine="python",
-                    )
-
-                    t2 = kernel_name_shortener(t1, cache, level=Extractionlvl)
-                    df_saved_file = t2.to_csv(newfilepath + file)
-
-                    cmd = (
-                        "mongoimport --quiet --uri mongodb://{}:{}@{}:{}/{}?authSource=admin --file {} -c {} --drop --type csv --headerline"
-                    ).format(
-                        connectionInfo["username"],
-                        connectionInfo["password"],
-                        connectionInfo["host"],
-                        connectionInfo["port"],
-                        connectionInfo["db"],
-                        newfilepath + file,
-                        fileName,
-                    )
-                    os.system(cmd)
-                else:
-                    cmd = (
-                        "mongoimport --quiet --uri mongodb://{}:{}@{}:{}/{}?authSource=admin --file {} -c {} --drop --type csv --headerline"
-                    ).format(
-                        connectionInfo["username"],
-                        connectionInfo["password"],
-                        connectionInfo["host"],
-                        connectionInfo["port"],
-                        connectionInfo["db"],
-                        connectionInfo["workload"] + "/" + file,
-                        fileName,
-                    )
-                    os.system(cmd)
+                cmd = (
+                    "mongoimport --quiet --uri mongodb://{}:{}@{}:{}/{}?authSource=admin --file {} -c {} --drop --type csv --headerline"
+                ).format(
+                    connectionInfo["username"],
+                    connectionInfo["password"],
+                    connectionInfo["host"],
+                    connectionInfo["port"],
+                    connectionInfo["db"],
+                    connectionInfo["workload"] + "/" + file,
+                    fileName,
+                )
+                os.system(cmd)
                 i += 1
             except pd.errors.EmptyDataError:
                 print("Skipping empty csv " + file)
@@ -257,8 +246,5 @@ def convert_folder(connectionInfo, Extractionlvl):
     value = {"name": connectionInfo["db"]}
     newValue = {"name": connectionInfo["db"]}
     mycol.replace_one(value, newValue, upsert=True)
-    # Remove tmp directory if we shortened KernelNames
-    if Extractionlvl < 5:
-        shutil.rmtree(newfilepath_h)
     print("{} collections added.".format(i))
     print("Workload name uploaded")

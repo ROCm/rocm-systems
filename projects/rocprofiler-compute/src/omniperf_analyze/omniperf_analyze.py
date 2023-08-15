@@ -45,6 +45,7 @@ import os.path
 from pathlib import Path
 from omniperf_analyze.utils import parser, file_io
 from omniperf_analyze.utils.gui_components.roofline import get_roofline
+from utils import csv_converter
 
 archConfigs = {}
 
@@ -221,6 +222,9 @@ def run_cli(args, runs):
     # which archConfig passed into show_all function.
     # After decide to how to manage kernels display patterns, we can revisit it.
     for d in args.path:
+        # Demangle and overwrite original KernelNames
+        csv_converter.kernel_name_shortener(d[0], args.kernelVerbose)
+
         file_io.create_df_kernel_top_stats(
             d[0],
             runs[d[0]].filter_gpu_ids,

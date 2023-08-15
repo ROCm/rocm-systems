@@ -260,7 +260,6 @@ def mongo_import(args, profileAndImport):
     csv_converter.convert_folder(connectionInfo, Extractionlvl)
     print("-- Complete! --")
 
-
 ################################################
 # Roofline Helpers
 ################################################
@@ -442,11 +441,12 @@ def characterize_app(args, VER):
     # Update timestamps
     replace_timestamps(workload_dir, log)
 
-    # Manually join each pmc_perf*.csv output
     if args.use_rocscope == False:
+        # Manually join each pmc_perf*.csv output
         join_prof(workload_dir, args.join_type, log, args.verbose)
-
-    # Close log
+        # Demangle and overwrite original KernelNames
+        csv_converter.kernel_name_shortener(workload_dir, args.kernelVerbose)
+        
     log.close()
 
 
@@ -543,6 +543,10 @@ def omniperf_profile(args, VER):
         print("IP Blocks: All")
     else:
         print("IP Blocks: ", args.ipblocks)
+    if args.kernelVerbose > 5:
+        print("KernelName verbose level: DISABLED")
+    else:
+        print("KernelName verbose level: ", str(args.kernelVerbose))
 
     # Set up directories
     workload_dir = args.path + "/" + args.name + "/" + args.target
@@ -659,13 +663,16 @@ def omniperf_profile(args, VER):
                 run_rocscope(args, fname)
             else:
                 run_prof(fname, workload_dir, perfmon_dir, args.remaining, args.target, log, args.verbose)
+                
 
         # Update timestamps
         replace_timestamps(workload_dir, log)
         
-        # Manually join each pmc_perf*.csv output
         if args.use_rocscope == False:
+            # Manually join each pmc_perf*.csv output
             join_prof(workload_dir, args.join_type, log, args.verbose)
+            # Demangle and overwrite original KernelNames
+            csv_converter.kernel_name_shortener(workload_dir, args.kernelVerbose)
 
     # Generate sysinfo
     gen_sysinfo(args.name, workload_dir, args.ipblocks, args.remaining, args.no_roof)
@@ -738,6 +745,7 @@ def main():
     # PROFILE MODE
     ##############
     if args.mode == "profile":
+        Extractionlvl = args.kernelVerbose
         print("Resolving rocprof")
         resolve_rocprof()
         # Cannot access parent directories
