@@ -46,10 +46,8 @@ from pathlib import Path
 from omniperf_analyze.utils import parser, file_io
 from omniperf_analyze.utils.gui_components.roofline import get_roofline
 from utils import csv_converter
-import pandas as pd
 
 archConfigs = {}
-
 
 ################################################
 # Helper Functions
@@ -222,16 +220,9 @@ def run_cli(args, runs):
     # If we assume the panel layout for all archs are similar, it doesn't matter
     # which archConfig passed into show_all function.
     # After decide to how to manage kernels display patterns, we can revisit it.
-    cache = dict()
     for d in args.path:
-        # demangle
-        for filename in os.listdir(d[0]):
-            if filename.endswith(".csv"):
-                df = pd.read_csv(os.path.join(d[0], filename))
-                new_df = csv_converter.kernel_name_shortener(
-                    df, cache, args.kernelVerbose
-                )
-                new_df.to_csv(os.path.join(d[0], filename), index=False)
+        # Demangle and overwrite original KernelNames
+        csv_converter.kernel_name_shortener(d[0], args.kernelVerbose)
 
         file_io.create_df_kernel_top_stats(
             d[0],
