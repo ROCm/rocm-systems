@@ -856,6 +856,20 @@ def main():
                         my_parser,
                         "Access denied. Cannot access parent directories in path ../",
                     )
+                if args.filter_metrics and args.gui:
+                    throw_parse_error(
+                        my_parser,
+                        """
+                        omniperf analyze --path <workload_path> [analyze options]
+                        \n\n-------------------------------------------------------------------------------
+                        \nExamples:
+                        \n\tomniperf analyze -p workloads/vcopy/mi200/ --list-metrics gfx90a
+                        \n\tomniperf analyze -p workloads/mixbench/mi200/ --filter-dispatch-ids 12 34 --decimal 3
+                        \n\tomniperf analyze -p workloads/mixbench/mi200/ --gui
+                        \n-------------------------------------------------------------------------------\n
+                        \ntool: error: --gui cannot be used in combination with: -b/--metric
+                        """
+                    )
                 print("\n--------\nAnalyze\n--------\n")
                 # Ensure absolute path
                 for dir in args.path:
@@ -877,15 +891,15 @@ def main():
                 throw_parse_error(
                     my_parser,
                     """
-                                        omniperf analyze --path <workload_path> [analyze options]
-                                        \n\n-------------------------------------------------------------------------------
-                                        \nExamples:
-                                        \n\tomniperf analyze -p workloads/vcopy/mi200/ --list-metrics gfx90a
-                                        \n\tomniperf analyze -p workloads/mixbench/mi200/ --filter-dispatch-ids 12 34 --decimal 3
-                                        \n\tomniperf analyze -p workloads/mixbench/mi200/ --gui
-                                        \n-------------------------------------------------------------------------------\n
-                                        \ntool: error: the following arguments are required: -p/--path
-                                        """,
+                    omniperf analyze --path <workload_path> [analyze options]
+                    \n\n-------------------------------------------------------------------------------
+                    \nExamples:
+                    \n\tomniperf analyze -p workloads/vcopy/mi200/ --list-metrics gfx90a
+                    \n\tomniperf analyze -p workloads/mixbench/mi200/ --filter-dispatch-ids 12 34 --decimal 3
+                    \n\tomniperf analyze -p workloads/mixbench/mi200/ --gui
+                    \n-------------------------------------------------------------------------------\n
+                    \ntool: error: the following arguments are required: -p/--path
+                    """,
                 )
 
     sys.exit(0)  # Indicate successful on exit

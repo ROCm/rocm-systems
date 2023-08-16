@@ -268,7 +268,7 @@ def roofline_only(path_to_dir, dev_id, sort_type, mem_level, kernel_names, verbo
     app_path = path_to_dir + "/pmc_perf.csv"
     roofline_exists = os.path.isfile(app_path)
     if not roofline_exists:
-        print("Error: {} does not exist")
+        print("Error: {} does not exist".format(app_path))
         sys.exit(0)
     t_df = OrderedDict()
     t_df["pmc_perf"] = pd.read_csv(app_path)
