@@ -136,7 +136,6 @@ def kernel_name_shortener(workload_dir, level):
                 modified_df.to_csv(fpath, index=False)
             except pd.errors.EmptyDataError:
                 print("Skipping empty csv " + str(fpath))
-            print("hi")
 
 
 # Verify target directory and setup connection
