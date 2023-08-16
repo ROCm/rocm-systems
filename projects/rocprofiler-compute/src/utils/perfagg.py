@@ -95,13 +95,19 @@ def test_df_column_equality(df):
 # joins disparate runs less dumbly than rocprof
 def join_prof(workload_dir, join_type, log_file, verbose, out=None):
     # Set default output directory if not specified
-    if out == None:
-        out = workload_dir + "/pmc_perf.csv"
-    files = glob.glob(workload_dir + "/" + "pmc_perf_*.csv")
-    df = None
+    if type(workload_dir) == str:
+        if out is None:
+            out = workload_dir + "/pmc_perf.csv"
+        files = glob.glob(workload_dir + "/" + "pmc_perf_*.csv")
+    elif type(workload_dir) == list:
+        files = workload_dir
+    else:
+        print("ERROR: Invalid workload_dir")
+        sys.exit(1)
 
+    df = None
     for i, file in enumerate(files):
-        _df = pd.read_csv(file)
+        _df = pd.read_csv(file) if type(workload_dir) == str else file
         if join_type == "kernel":
             key = _df.groupby("KernelName").cumcount()
             _df["key"] = _df.KernelName + " - " + key.astype(str)
@@ -127,10 +133,15 @@ def join_prof(workload_dir, join_type, log_file, verbose, out=None):
         "wgr": [col for col in df.columns if "wgr" in col],
         "lds": [col for col in df.columns if "lds" in col],
         "scr": [col for col in df.columns if "scr" in col],
-        "arch_vgpr": [col for col in df.columns if "arch_vgpr" in col],
-        "accum_vgpr": [col for col in df.columns if "accum_vgpr" in col],
         "spgr": [col for col in df.columns if "sgpr" in col],
     }
+    # Check for vgpr counter in ROCm < 5.3
+    if "vgpr" in df.columns:
+        duplicate_cols["vgpr"] = [col for col in df.columns if "vgpr" in col]
+    # Check for vgpr counter in ROCm >= 5.3
+    else:
+        duplicate_cols["arch_vgpr"] = [col for col in df.columns if "arch_vgpr" in col]
+        duplicate_cols["accum_vgpr"] = [col for col in df.columns if "accum_vgpr" in col]
     for key, cols in duplicate_cols.items():
         _df = df[cols]
         if not test_df_column_equality(_df):
@@ -140,10 +151,12 @@ def join_prof(workload_dir, join_type, log_file, verbose, out=None):
                 )
             )
             warnings.warn(msg)
-            log_file.write(msg + "\n")
+            if log_file:
+                log_file.write(msg + "\n")
         else:
             msg = "Successfully joined {} in pmc_perf.csv".format(key)
-            log_file.write(msg + "\n")
+            if log_file:
+                log_file.write(msg + "\n")
         if test_df_column_equality(_df) and verbose:
             print(msg)
 
@@ -173,6 +186,8 @@ def join_prof(workload_dir, join_type, log_file, verbose, out=None):
                     "fbar",
                     "sig",
                     "obj",
+                    # rocscope specific merged counters, keep original
+                    "dispatch_",
                 ]
             )
         ]
@@ -183,7 +198,15 @@ def join_prof(workload_dir, join_type, log_file, verbose, out=None):
         [
             k
             for k in df.keys()
-            if not any(check in k for check in ["DispatchNs", "CompleteNs"])
+            if not any(
+                check in k
+                for check in [
+                    "DispatchNs",
+                    "CompleteNs",
+                    # rocscope specific timestamp
+                    "HostDuration",
+                ]
+            )
         ]
     ]
     #   C) sanity check the name and key
@@ -210,12 +233,14 @@ def join_prof(workload_dir, join_type, log_file, verbose, out=None):
     df["EndNs"] = endNs
     # finally, join the drop key
     df = df.drop(columns=["key"])
-    # and save to file
-    df.to_csv(out, index=False)
-    # and delete old file(s)
-    if not verbose:
-        for file in files:
-            os.remove(file)
+    # save to file and delete old file(s), skip if we're being called outside of Omniperf
+    if type(workload_dir) == str:
+        df.to_csv(out, index=False)
+        if not verbose:
+            for file in files:
+                os.remove(file)
+    else:
+        return df
 
 
 def pmc_perf_split(workload_dir):
@@ -250,7 +275,94 @@ def pmc_perf_split(workload_dir):
     os.remove(workload_perfmon_dir + "/pmc_perf.txt")
 
 
-def perfmon_coalesce(pmc_files_list, workload_dir, soc):
+def update_pmc_bucket(
+    counters, save_file, soc, pmc_list=None, stext=None, workload_perfmon_dir=None
+):
+    # Verify inputs.
+    # If save_file is True, we're being called internally, from perfmon_coalesce
+    # Else we're being called externally, from rocomni
+    detected_external_call = False
+    if save_file and (stext is None or workload_perfmon_dir is None):
+        raise ValueError(
+            "stext and workload_perfmon_dir must be specified if save_file is True"
+        )
+    if pmc_list is None:
+        detected_external_call = True
+        pmc_list = dict(
+            [
+                ("SQ", []),
+                ("GRBM", []),
+                ("TCP", []),
+                ("TA", []),
+                ("TD", []),
+                ("TCC", []),
+                ("SPI", []),
+                ("CPC", []),
+                ("CPF", []),
+                ("GDS", []),
+                ("TCC2", {}),  # per-channel TCC perfmon
+            ]
+        )
+        for ch in range(perfmon_config[soc]["TCC_channels"]):
+            pmc_list["TCC2"][str(ch)] = []
+
+    if "SQ_ACCUM_PREV_HIRES" in counters and not detected_external_call:
+        # save  all level counters separately
+        nindex = counters.index("SQ_ACCUM_PREV_HIRES")
+        level_counter = counters[nindex - 1]
+
+        if save_file:
+            # Save to level counter file, file name = level counter name
+            fd = open(workload_perfmon_dir + "/" + level_counter + ".txt", "w")
+            fd.write(stext + "\n\n")
+            fd.write("gpu:\n")
+            fd.write("range:\n")
+            fd.write("kernel:\n")
+            fd.close()
+
+        return pmc_list
+
+    # save normal pmc counters in matching buckets
+    for counter in counters:
+        IP_block = counter.split(sep="_")[0].upper()
+        # SQC and SQ belong to the IP block, coalesce them
+        if IP_block == "SQC":
+            IP_block = "SQ"
+
+        if IP_block != "TCC":
+            # Insert unique pmc counters into its bucket
+            if counter not in pmc_list[IP_block]:
+                pmc_list[IP_block].append(counter)
+
+        else:
+            # TCC counters processing
+            m = re.match(r"[\s\S]+\[(\d+)\]", counter)
+            if m is None:
+                # Aggregated TCC counters
+                if counter not in pmc_list[IP_block]:
+                    pmc_list[IP_block].append(counter)
+
+            else:
+                # TCC channel ID
+                ch = m.group(1)
+
+                # fake IP block for per channel TCC
+                if str(ch) in pmc_list["TCC2"]:
+                    # append unique counter into the channel
+                    if counter not in pmc_list["TCC2"][str(ch)]:
+                        pmc_list["TCC2"][str(ch)].append(counter)
+                else:
+                    # initial counter in this channel
+                    pmc_list["TCC2"][str(ch)] = [counter]
+
+    if detected_external_call:
+        # sort the per channel counter, so that same counter in all channels can be aligned
+        for ch in range(perfmon_config[soc]["TCC_channels"]):
+            pmc_list["TCC2"][str(ch)].sort()
+    return pmc_list
+
+
+def perfmon_coalesce(pmc_files_list, soc, workload_dir):
     workload_perfmon_dir = workload_dir + "/perfmon"
 
     # match pattern for pmc counters
@@ -290,54 +402,20 @@ def perfmon_coalesce(pmc_files_list, workload_dir, soc):
 
             # we have found all the counters, store them in buckets
             counters = m.group(1).split()
-            if "SQ_ACCUM_PREV_HIRES" in counters:
-                # save  all level counters separately
 
-                nindex = counters.index("SQ_ACCUM_PREV_HIRES")
-                level_counter = counters[nindex - 1]
+            # Utilitze helper function once a list of counters has be extracted
+            save_file = True
+            pmc_list = update_pmc_bucket(
+                counters, save_file, soc, pmc_list, stext, workload_perfmon_dir
+            )
 
-                # Save to level counter file, file name = level counter name
-                fd = open(workload_perfmon_dir + "/" + level_counter + ".txt", "w")
-                fd.write(stext + "\n\n")
-                fd.write("gpu:\n")
-                fd.write("range:\n")
-                fd.write("kernel:\n")
-                fd.close()
-
-                continue
-
-            # save normal pmc counters in matching buckets
-            for counter in counters:
-                IP_block = counter.split(sep="_")[0].upper()
-                # SQC and SQ belong to the IP block, coalesce them
-                if IP_block == "SQC":
-                    IP_block = "SQ"
-
-                if IP_block != "TCC":
-                    # Insert unique pmc counters into its bucket
-                    if counter not in pmc_list[IP_block]:
-                        pmc_list[IP_block].append(counter)
-
-                else:
-                    # TCC counters processing
-                    m = re.match(r"[\s\S]+\[(\d+)\]", counter)
-                    if m is None:
-                        # Aggregated TCC counters
-                        if counter not in pmc_list[IP_block]:
-                            pmc_list[IP_block].append(counter)
-
-                    else:
-                        # TCC channel ID
-                        ch = m.group(1)
-
-                        # fake IP block for per channel TCC
-                        if str(ch) in pmc_list["TCC2"]:
-                            # append unique counter into the channel
-                            if counter not in pmc_list["TCC2"][str(ch)]:
-                                pmc_list["TCC2"][str(ch)].append(counter)
-                        else:
-                            # initial counter in this channel
-                            pmc_list["TCC2"][str(ch)] = [counter]
+    # add a timestamp file
+    fd = open(workload_perfmon_dir + "/timestamps.txt", "w")
+    fd.write("pmc:\n\n")
+    fd.write("gpu:\n")
+    fd.write("range:\n")
+    fd.write("kernel:\n")
+    fd.close()
 
     # sort the per channel counter, so that same counter in all channels can be aligned
     for ch in range(perfmon_config[soc]["TCC_channels"]):
@@ -346,9 +424,7 @@ def perfmon_coalesce(pmc_files_list, workload_dir, soc):
     return pmc_list
 
 
-def perfmon_emit(pmc_list, workload_dir, soc):
-    workload_perfmon_dir = workload_dir + "/perfmon"
-
+def perfmon_emit(pmc_list, soc, workload_dir=None):
     # Calculate the minimum number of iteration to save the pmc counters
     # non-TCC counters
     pmc_cnt = [
@@ -370,7 +446,11 @@ def perfmon_emit(pmc_list, workload_dir, soc):
     niter = max(math.ceil(max(pmc_cnt)), math.ceil(tcc_cnt) + math.ceil(max(tcc2_cnt)))
 
     # Emit PMC counters into pmc config file
-    fd = open(workload_perfmon_dir + "/pmc_perf.txt", "w")
+    if workload_dir:
+        workload_perfmon_dir = workload_dir + "/perfmon"
+        fd = open(workload_perfmon_dir + "/pmc_perf.txt", "w")
+    else:
+        batches = []
 
     tcc2_index = 0
     for iter in range(niter):
@@ -400,12 +480,20 @@ def perfmon_emit(pmc_list, workload_dir, soc):
 
         # TCC aggregated counters
         line = line + " " + " ".join(tcc_counters)
-        fd.write(line + "\n")
+        if workload_dir:
+            fd.write(line + "\n")
+        else:
+            b = line.split()
+            b.remove("pmc:")
+            batches.append(b)
 
-    fd.write("\ngpu:\n")
-    fd.write("range:\n")
-    fd.write("kernel:\n")
-    fd.close()
+    if workload_dir:
+        fd.write("\ngpu:\n")
+        fd.write("range:\n")
+        fd.write("kernel:\n")
+        fd.close()
+    else:
+        return batches
 
 
 def perfmon_filter(workload_dir, perfmon_dir, args):
@@ -445,8 +533,8 @@ def perfmon_filter(workload_dir, perfmon_dir, args):
         pmc_files_list = ref_pmc_files_list
 
     # Coalesce and writeback workload specific perfmon
-    pmc_list = perfmon_coalesce(pmc_files_list, workload_dir, soc)
-    perfmon_emit(pmc_list, workload_dir, soc)
+    pmc_list = perfmon_coalesce(pmc_files_list, soc, workload_dir)
+    perfmon_emit(pmc_list, soc, workload_dir)
 
 
 def pmc_filter(workload_dir, perfmon_dir, soc):
@@ -463,5 +551,5 @@ def pmc_filter(workload_dir, perfmon_dir, soc):
     pmc_files_list = ref_pmc_files_list
 
     # Coalesce and writeback workload specific perfmon
-    pmc_list = perfmon_coalesce(pmc_files_list, workload_dir, soc)
-    perfmon_emit(pmc_list, workload_dir, soc)
+    pmc_list = perfmon_coalesce(pmc_files_list, soc, workload_dir)
+    perfmon_emit(pmc_list, soc, workload_dir)

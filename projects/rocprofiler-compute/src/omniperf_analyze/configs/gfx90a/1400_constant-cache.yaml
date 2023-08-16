@@ -14,16 +14,24 @@ Panel Config:
         header:
           mertic: Metric
           value: Value
+          unit: Unit
           tips: Tips
+        style:
+          type: simple_bar
+          range_color: [1, 100]
+          label_txt: (%)
+          xrange: [0, 110]
         metric:
           Bandwidth:
             value: AVG(((SQC_DCACHE_REQ * 100000) / (($sclk * $numSQC)
               * (EndNs - BeginNs))))
+            unit: Pct of Peak
             tips:
           Cache Hit:
             value:
               AVG((((SQC_DCACHE_HITS * 100) / (SQC_DCACHE_HITS + SQC_DCACHE_MISSES + SQC_DCACHE_MISSES_DUPLICATE))
               if ((SQC_DCACHE_HITS + SQC_DCACHE_MISSES + SQC_DCACHE_MISSES_DUPLICATE) != 0) else None))
+            unit: Pct of Peak
             tips:
 
     - metric_table:

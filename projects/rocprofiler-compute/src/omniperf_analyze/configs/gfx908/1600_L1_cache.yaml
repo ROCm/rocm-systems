@@ -14,25 +14,35 @@ Panel Config:
         header:
           metric: Metric
           value: Value
+          unit: Unit
           tips: Tips
+        style:
+          type: simple_bar
+          range_color: [1, 100]
+          label_txt: (%)
+          xrange: [0, 110]
         metric:
           Buffer Coalescing:
             value: AVG(((((TA_TOTAL_WAVEFRONTS_sum * 64) * 100) / (TCP_TOTAL_ACCESSES_sum
               * 4)) if (TCP_TOTAL_ACCESSES_sum != 0) else None))
+            unit: Pct of Peak
             tips: 
           Cache Util:
             value: AVG((((TCP_GATE_EN2_sum * 100) / TCP_GATE_EN1_sum) if (TCP_GATE_EN1_sum
               != 0) else None))
+            unit: Pct of Peak
             tips: 
           Cache BW:
             value: ((100 * AVG(((TCP_TOTAL_CACHE_ACCESSES_sum * 64) / (EndNs - BeginNs))))
               / ((($sclk / 1000) * 64) * $numCU))
+            unit: Pct of Peak
             tips: 
           Cache Hit:
             value: AVG(((100 - ((100 * (((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum)
               + TCP_TCC_ATOMIC_WITH_RET_REQ_sum) + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum))
               / TCP_TOTAL_CACHE_ACCESSES_sum)) if (TCP_TOTAL_CACHE_ACCESSES_sum != 0) else
               None))
+            unit: Pct of Peak
             tips: 
 
     - metric_table:
@@ -248,6 +258,8 @@ Panel Config:
           max: Max
           unit: Unit
           tips: Tips
+        style: 
+          type: simple_multi_bar
         metric:
           NC - Read:
             xfer: Read
@@ -361,7 +373,7 @@ Panel Config:
             mean: AVG((TCP_UTCL1_REQUEST_sum / $denom))
             min: MIN((TCP_UTCL1_REQUEST_sum / $denom))
             max: MAX((TCP_UTCL1_REQUEST_sum / $denom))
-            units: ( + $normUnit)
+            units: (Req + $normUnit)
             tips: 
           Hit Ratio:
             mean: AVG((((100 * TCP_UTCL1_TRANSLATION_HIT_sum) / TCP_UTCL1_REQUEST_sum) if
@@ -376,17 +388,17 @@ Panel Config:
             mean: AVG((TCP_UTCL1_TRANSLATION_HIT_sum / $denom))
             min: MIN((TCP_UTCL1_TRANSLATION_HIT_sum / $denom))
             max: MAX((TCP_UTCL1_TRANSLATION_HIT_sum / $denom))
-            units: ( + $normUnit)
+            units: (Hits + $normUnit)
             tips: 
           Misses (Translation):
             mean: AVG((TCP_UTCL1_TRANSLATION_MISS_sum / $denom))
             min: MIN((TCP_UTCL1_TRANSLATION_MISS_sum / $denom))
             max: MAX((TCP_UTCL1_TRANSLATION_MISS_sum / $denom))
-            units: ( + $normUnit)
+            units: (Misses + $normUnit)
             tips: 
           Misses (Permission):
             mean: AVG((TCP_UTCL1_PERMISSION_MISS_sum / $denom))
             min: MIN((TCP_UTCL1_PERMISSION_MISS_sum / $denom))
             max: MAX((TCP_UTCL1_PERMISSION_MISS_sum / $denom))
-            units: ( + $normUnit)
+            units: (Misses + $normUnit)
             tips: 

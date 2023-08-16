@@ -204,6 +204,14 @@ def parse(my_parser):
         nargs=argparse.REMAINDER,
         help="\t\t\tProvide command for profiling after double dash.",
     )
+    profile_group.add_argument(
+        "--kernelVerbose",
+        required=False,
+        metavar="",
+        help="\t\t\tSpecify Kernel Name verbose level 1-5. Lower the level, shorter the kernel name. (DEFAULT: 2) (DISABLE: 5)",
+        default=2,
+        type=int,
+    )
 
     ## Roofline Command Line Options
     roofline_group.add_argument(
@@ -342,15 +350,6 @@ def parse(my_parser):
         dest="workload",
         help="\t\t\t\tSpecify name of workload (to remove) or path to workload (to import)",
     )
-    connection_group.add_argument(
-        "-k",
-        "--kernelVerbose",
-        required=False,
-        metavar="",
-        help="\t\t\t\tSpecify Kernel Name verbose level 1-5. Lower the level, shorter the kernel name. (DEFAULT: 2) (DISABLE: 5)",
-        default=2,
-        type=int,
-    )
 
     ## Analyze Command Line Options
     ## ----------------------------
@@ -430,6 +429,7 @@ def parse(my_parser):
         help="\t\tSpecify kernel id(s) from --list-kernels for filtering.",
     )
     analyze_group.add_argument(
+        "-d",
         "--dispatch",
         dest="gpu_dispatch_id",
         metavar="",
@@ -513,4 +513,12 @@ def parse(my_parser):
         "--random-port",
         action="store_true",
         help="\t\tRandomly generate a port to launch GUI application.\n\t\tRegistered Ports range inclusive (1024-49151).",
+    )
+    analyze_group.add_argument(
+        "--kernelVerbose",
+        required=False,
+        metavar="",
+        help="\t\tSpecify Kernel Name verbose level 1-5. Lower the level, shorter the kernel name. (DEFAULT: 5) (DISABLE: 5)",
+        default=5,
+        type=int,
     )

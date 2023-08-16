@@ -321,6 +321,71 @@ def update_normUnit_string(equation, unit):
     ).capitalize()
 
 
+def gen_counter_list(formula):
+    function_filter = {
+        "MIN": None,
+        "MAX": None,
+        "AVG": None,
+        "ROUND": None,
+        "TO_INT": None,
+        "GB": None,
+        "STD": None,
+        "GFLOP": None,
+        "GOP": None,
+        "OP": None,
+        "CU": None,
+        "NC": None,
+        "UC": None,
+        "CC": None,
+        "RW": None,
+        "GIOP": None,
+        "GFLOPs": None,
+        "CONCAT": None,
+        "MOD": None,
+    }
+
+    built_in_counter = [
+        "lds",
+        "grd",
+        "wgr",
+        "arch_vgpr",
+        "accum_vgpr",
+        "sgpr",
+        "scr",
+        "BeginNs",
+        "EndNs",
+    ]
+
+    visited = False
+    counters = []
+    if not isinstance(formula, str):
+        return visited, counters
+    try:
+        tree = ast.parse(
+            formula.replace("$normUnit", "SQ_WAVES")
+            .replace("$denom", "SQ_WAVES")
+            .replace(
+                "$numActiveCUs",
+                "TO_INT(MIN((((ROUND(AVG(((4 * SQ_BUSY_CU_CYCLES) / GRBM_GUI_ACTIVE)), \
+              0) / $maxWavesPerCU) * 8) + MIN(MOD(ROUND(AVG(((4 * SQ_BUSY_CU_CYCLES) \
+              / GRBM_GUI_ACTIVE)), 0), $maxWavesPerCU), 8)), $numCU))",
+            )
+            .replace("$", "")
+        )
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Name):
+                val = str(node.id)[:-4] if str(node.id).endswith("_sum") else str(node.id)
+                if val.isupper() and val not in function_filter:
+                    counters.append(val)
+                    visited = True
+                if val in built_in_counter:
+                    visited = True
+    except:
+        pass
+
+    return visited, counters
+
+
 def build_dfs(archConfigs, filter_metrics):
     """
     - Build dataframe for each type of data source within each panel.
@@ -338,10 +403,16 @@ def build_dfs(archConfigs, filter_metrics):
     d = {}
     metric_list = {}
     dfs_type = {}
+    metric_counters = {}
     for panel_id, panel in archConfigs.panel_configs.items():
+        panel_idx = str(panel_id // 100)
         for data_source in panel["data source"]:
             for type, data_cofig in data_source.items():
                 if type == "metric_table":
+                    metric_list[panel_idx] = panel["title"]
+                    table_idx = panel_idx + "." + str(data_cofig["id"] % 100)
+                    metric_list[table_idx] = data_cofig["title"]
+
                     headers = ["Index"]
                     for key, tile in data_cofig["header"].items():
                         if key != "tips":
@@ -355,20 +426,16 @@ def build_dfs(archConfigs, filter_metrics):
 
                     i = 0
                     for key, entries in data_cofig["metric"].items():
-                        data_source_idx = (
-                            str(data_cofig["id"] // 100)
-                            + "."
-                            + str(data_cofig["id"] % 100)
-                        )
-                        metric_idx = data_source_idx + "." + str(i)
+                        metric_idx = table_idx + "." + str(i)
                         values = []
+                        eqn_content = []
 
                         if (
                             (not filter_metrics)
                             or (metric_idx in filter_metrics)  # no filter
                             or  # metric in filter
                             # the whole table in filter
-                            (data_source_idx in filter_metrics)
+                            (table_idx in filter_metrics)
                             or
                             # the whole IP block in filter
                             (str(panel_id // 100) in filter_metrics)
@@ -378,6 +445,7 @@ def build_dfs(archConfigs, filter_metrics):
                             for k, v in entries.items():
                                 if k != "tips" and k != "coll_level" and k != "alias":
                                     values.append(v)
+                                    eqn_content.append(v)
 
                             if "alias" in entries.keys():
                                 values.append(entries["alias"])
@@ -395,7 +463,21 @@ def build_dfs(archConfigs, filter_metrics):
                             df = pd.concat([df, df_new_row])
 
                         # collect metric_list
-                        metric_list[metric_idx] = key.replace(" ", "_")
+                        metric_list[metric_idx] = key
+                        # generate mapping of counters and metrics
+                        filter = {}
+                        _visited = False
+                        for formula in eqn_content:
+                            if formula is not None and formula != "None":
+                                visited, counters = gen_counter_list(formula)
+                                if visited:
+                                    _visited = True
+                                for k in counters:
+                                    filter[k] = None
+
+                        if len(filter) > 0 or _visited:
+                            metric_counters[key] = list(filter)
+
                         i += 1
 
                     df.set_index("Index", inplace=True)
@@ -431,6 +513,7 @@ def build_dfs(archConfigs, filter_metrics):
     setattr(archConfigs, "dfs", d)
     setattr(archConfigs, "metric_list", metric_list)
     setattr(archConfigs, "dfs_type", dfs_type)
+    setattr(archConfigs, "metric_counters", metric_counters)
 
 
 def build_metric_value_string(dfs, dfs_type, normal_unit):
@@ -469,7 +552,12 @@ def eval_metric(dfs, dfs_type, sys_info, soc_spec, raw_pmc_df, debug):
 
     # confirm no illogical counter values (only consider non-roofline runs)
     roof_only_run = sys_info.ip_blocks == "roofline"
-    if not roof_only_run and (raw_pmc_df["pmc_perf"]["GRBM_GUI_ACTIVE"] == 0).any():
+    rocscope_run = sys_info.ip_blocks == "rocscope"
+    if (
+        not rocscope_run
+        and not roof_only_run
+        and (raw_pmc_df["pmc_perf"]["GRBM_GUI_ACTIVE"] == 0).any()
+    ):
         print("WARNING: Dectected GRBM_GUI_ACTIVE == 0\nHaulting execution.")
         sys.exit(1)
 
@@ -711,12 +799,13 @@ def load_kernel_top(workload, dir):
     workload.dfs.update(tmp)
 
 
-def load_table_data(workload, dir, is_gui, debug, verbose):
+def load_table_data(workload, dir, is_gui, debug, verbose, skipKernelTop=False):
     """
     Load data for all "raw_csv_table".
     Calculate mertric value for all "metric_table".
     """
-    load_kernel_top(workload, dir)
+    if not skipKernelTop:
+        load_kernel_top(workload, dir)
 
     eval_metric(
         workload.dfs,

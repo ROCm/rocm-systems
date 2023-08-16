@@ -13,40 +13,61 @@ Panel Config:
         title: Instruction Mix
         header:
           metric: Metric
-          count: Count
+          avg: Avg
+          min: Min
+          max: Max
           unit: Unit
           tips: Tips
+        style: 
+          type: simple_bar
+          label_txt: (# of instr + $normUnit)
         metric:
           VALU - Vector:
-            count: None # No HW module
+            avg: None # No HW module
+            min: None # No HW module
+            max: None # No HW module
             unit: (instr + $normUnit)
             tips: 
           VMEM:
-            count: None # No HW module
+            avg: None # No HW module
+            min: None # No HW module
+            max: None # No HW module
             unit: (instr + $normUnit)
             tips: 
           LDS:
-            count: AVG((SQ_INSTS_LDS / $denom))
-            unit: $normUnit
+            avg: AVG((SQ_INSTS_LDS / $denom))
+            min: MIN((SQ_INSTS_LDS / $denom))
+            max: MAX((SQ_INSTS_LDS / $denom))
+            unit: (instr + $normUnit)
             tips: 
           VALU - MFMA:
-            count: None # No HW module
+            avg: None # No HW module
+            min: None # No HW module
+            max: None # No HW module
             unit: (instr + $normUnit)
             tips: 
           SALU:
-            count: AVG((SQ_INSTS_SALU / $denom))
+            avg: AVG((SQ_INSTS_SALU / $denom))
+            min: MIN((SQ_INSTS_SALU / $denom))
+            max: MAX((SQ_INSTS_SALU / $denom))
             unit: (instr + $normUnit)
             tips: 
           SMEM:
-            count: AVG((SQ_INSTS_SMEM / $denom))
+            avg: AVG((SQ_INSTS_SMEM / $denom))
+            min: MIN((SQ_INSTS_SMEM / $denom))
+            max: MAX((SQ_INSTS_SMEM / $denom))
             unit: (instr + $normUnit)
             tips: 
           Branch:
-            count: AVG((SQ_INSTS_BRANCH / $denom))
+            avg: AVG((SQ_INSTS_BRANCH / $denom))
+            min: MIN((SQ_INSTS_BRANCH / $denom))
+            max: MAX((SQ_INSTS_BRANCH / $denom))
             unit: (instr + $normUnit)
             tips: 
           GDS:
-            count: AVG((SQ_INSTS_GDS / $denom))
+            avg: AVG((SQ_INSTS_GDS / $denom))
+            min: MIN((SQ_INSTS_GDS / $denom))
+            max: MAX((SQ_INSTS_GDS / $denom))
             unit: (instr + $normUnit)
             tips: 
 
@@ -55,68 +76,103 @@ Panel Config:
         title: VALU Arithmetic Instr Mix
         header:
           metric: Metric
-          count: Count
+          avg: Avg
+          min: Min
+          max: Max
           unit: Unit
           tips: Tips
+        style: 
+          type: simple_bar
+          label_txt: (# of instr + $normUnit)
         metric:
           INT-32:
-            count: None # No perf counter
-            unit: $normUnit
+            avg: None # No HW module
+            min: None # No HW module
+            max: None # No HW module
+            unit: (instr + $normUnit)
             tips:
           INT-64:
-            count: None # No perf counter
+            avg: None # No HW module
+            min: None # No HW module
+            max: None # No HW module
             unit: (instr + $normUnit)
             tips:
           F16-ADD:
-            count: None # No perf counter
+            avg: None # No HW module
+            min: None # No HW module
+            max: None # No HW module
             unit: (instr + $normUnit)
             tips:
           F16-Mult:
-            count: None # No perf counter
+            avg: None # No HW module
+            min: None # No HW module
+            max: None # No HW module
             unit: (instr + $normUnit)
             tips:
           F16-FMA:
-            count: None # No perf counter
+            avg: None # No HW module
+            min: None # No HW module
+            max: None # No HW module
             unit: (instr + $normUnit)
             tips:
           F16-Trans:
-            count: None # No perf counter
+            avg: None # No HW module
+            min: None # No HW module
+            max: None # No HW module
             unit: (instr + $normUnit)
             tips:
           F32-ADD:
-            count: None # No perf counter
+            avg: None # No HW module
+            min: None # No HW module
+            max: None # No HW module
             unit: (instr + $normUnit)
             tips:
           F32-Mult:
-            count: None # No perf counter
+            avg: None # No HW module
+            min: None # No HW module
+            max: None # No HW module
             unit: (instr + $normUnit)
             tips:
           F32-FMA:
-            count: None # No perf counter
+            avg: None # No HW module
+            min: None # No HW module
+            max: None # No HW module
             unit: (instr + $normUnit)
             tips:
           F32-Trans:
-            count: None # No perf counter
+            avg: None # No HW module
+            min: None # No HW module
+            max: None # No HW module
             unit: (instr + $normUnit)
             tips:
           F64-ADD:
-            count: None # No perf counter
+            avg: None # No HW module
+            min: None # No HW module
+            max: None # No HW module
             unit: (instr + $normUnit)
             tips:
           F64-Mult:
-            count: None # No perf counter
+            avg: None # No HW module
+            min: None # No HW module
+            max: None # No HW module
             unit: (instr + $normUnit)
             tips:
           F64-FMA:
-            count: None # No perf counter
+            avg: None # No HW module
+            min: None # No HW module
+            max: None # No HW module
             unit: (instr + $normUnit)
             tips:
           F64-Trans:
-            count: None # No perf counter
+            avg: None # No HW module
+            min: None # No HW module
+            max: None # No HW module
             unit: (instr + $normUnit)
             tips:
           Conversion:
-            count: None # No perf counter
+            avg: None # No HW module
+            min: None # No HW module
+            max: None # No HW module
             unit: (instr + $normUnit)
             tips:
 
