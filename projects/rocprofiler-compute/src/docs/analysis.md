@@ -497,7 +497,7 @@ Each workload is imported to a separate database with the following naming conve
 
 e.g., omniperf_asw_vcopy_mi200.
 
-Below is the sample command to import the *vcopy* profiling data.
+When using database mode, be sure to tailor the connection options to the machine hosting your [sever-side instance](./installation.md). Below is the sample command to import the *vcopy* profiling data, lets assuming our host machine is called "dummybox".
 
 ```shell-session
 $ omniperf database --help
@@ -545,7 +545,7 @@ Connection Options:
 
 **omniperf import for vcopy:**
 ```shell-session
-$ omniperf database --import -H pavii1 -u temp -t asw -w workloads/vcopy/mi200/
+$ omniperf database --import -H dummybox -u temp -t asw -w workloads/vcopy/mi200/
 ROC Profiler:  /usr/bin/rocprof
  
 --------

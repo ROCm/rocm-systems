@@ -232,20 +232,28 @@ drwxrwxr-x 2 colramos colramos  4096 Apr 11 16:42 perfmon
 ```
 
 ### Filtering
-To reduce profiling time and the counters collected one may use profiling filters.
+To reduce profiling time and the counters collected one may use profiling filters. Profiling filters and their functionality depend on the underlying profiler being used. While Omniperf is profiler agnostic, we've provided a detailed description of profiling filters available when using Omniperf with [rocProfiler](https://rocm.docs.amd.com/projects/rocprofiler/en/latest/rocprof.html) below.
+
+
 
 Filtering Options:
 
-- The `-k` \<kernel> flag allows for kernel filtering, which is compatible with the current rocprof utility.
+- The `-k` \<kernel> flag allows for kernel filtering. Useage is equivalent with the current rocprof utility (see details below).
 
-- The `-d` \<dispatch> flag allows for dispatch ID filtering,  which is compatible with the current rocprof utility. 
+- The `-d` \<dispatch> flag allows for dispatch ID filtering. Useage is equivalent with the current rocprof utility (see details below).
 
 - The `-b` \<ipblocks> allows system profiling on one or more selected IP blocks to speed up the profiling process. One can gradually incorporate more IP blocks, without overwriting performance data acquired on other IP blocks.
+
+```{note}
+Be cautious while combining different profiling filters in the same call. Conflicting filters may result in error.
+
+i.e. filtering dispatch X, but dispatch X does not match your kernel name filter
+```
 
 #### IP Block Filtering
 One can profile a selected IP Block to speed up the profiling process. All profiling results are accumulated in the same target directory, without overwriting those for other IP blocks, hence enabling the incremental profiling and analysis.
 
-The following example only profiles SQ and TCC, skipping all other IP Blocks.
+The following example only gathers hardware counters for SQ and TCC, skipping all other IP Blocks:
 ```shell
 $ omniperf profile --name vcopy -b SQ TCC -- ./sample/vcopy 1048576 256
 Resolving rocprof
@@ -283,7 +291,9 @@ Log:  /home/colramos/GitHub/omniperf-pub/workloads/vcopy/mi200/log.txt
 ```
 
 #### Kernel Filtering
-The following example demonstrates profiling on selected kernels:
+Kernel filtering is based on the name of the kernel(s) you'd like to isolate. Use a kernel name substring list to isolate desired kernels.
+
+The following example demonstrates profiling isolating the kernel matching substring "vecCopy":
 ```shell
 $ omniperf profile --name vcopy -k vecCopy -- ./vcopy 1048576 256
 Resolving rocprof
@@ -318,7 +328,9 @@ ROCProfiler: input from "/tmp/rpl_data_230411_170300_29696/input0.xml"
 ```
 
 #### Dispatch Filtering
-The following example demonstrates profiling on selected dispatches:
+Dispatch filtering is based on the *global* dispatch index of kernels in a run. 
+
+The following example profiles only the 0th dispatched kernel:
 ```shell-session
 $ omniperf profile --name vcopy -d 0 -- ./vcopy 1048576 256
 Resolving rocprof

@@ -16,11 +16,15 @@ Omniperf is broken into two installation components:
 2. **Omniperf Server-side (_Optional_)**
    - Mongo DB backend + Grafana instance
 
+Determine what you need to install based on how you'd like to interact with Omniperf. See the decision tree below to help determine what installation is right for you.
+
+![Omniperf Installtion Decision Tree](images/install_decision_tree.png)
+
 ---
 
 ## Client-side Installation
 
-Omniperf requires the following basic software dependencies prior to usage:
+Omniperf client-side requires the following basic software dependencies prior to usage:
 
 * Python (>=3.7)
 * CMake (>= 3.19)
@@ -149,25 +153,28 @@ wishes to use instead.
 
 ## Server-side Setup
 
-Note: Server-side setup is not required to profile or analyze
-performance data from the CLI. It is provided as an additional mechanism to import performance
-data for examination within a detailed [Grafana](https://github.com/grafana/grafana) GUI.
+> Note: Server-side setup is not required to profile or analyze performance data from the CLI. It is provided as an additional mechanism to import performance data for examination within a detailed [Grafana](https://github.com/grafana/grafana) GUI.
 
-The recommended process for enabling the server-side of Omniperf is to
-use the provided Docker file to build the Grafana and MongoDB
-instance.
+Omniperf server-side requires the following basic software dependencies prior to usage:
 
-### Install MongoDB Utils
+* [Docker Engine](https://docs.docker.com/engine/install/)
+
+The recommended process for enabling the server-side of Omniperf is to use the provided Docker file to build the Grafana and MongoDB instance.
+
+Once you've decided which machine you'd like to use to host the Grafana and MongoDB instance, please follow the set up instructions below.
+
+### 1) Install MongoDB Utils
 Omniperf uses [mongoimport](https://www.mongodb.com/docs/database-tools/mongoimport/) to upload data to Grafana's backend database. Install for Ubuntu 20.04 is as follows:
+
 ```bash 
 $ wget https://fastdl.mongodb.org/tools/db/mongodb-database-tools-ubuntu2004-x86_64-100.6.1.deb
 $ sudo apt install ./mongodb-database-tools-ubuntu2004-x86_64-100.6.1.deb
 ```
 > Installation instructions for alternative distributions can be found [here](https://www.mongodb.com/download-center/database-tools/releases/archive)
 
-### Persistent Storage
+### 2) Persistent Storage
 
-The user may also choose to bind MongoDB to a directory on the host OS to create a local backup in case of a crash or reset:
+The user will also bind MongoDB to a directory on the host OS to create a local backup in case of a crash or reset. In the Docker world, this is known as "creating a persistent volume":
 
 ```bash
 $ sudo mkdir -p /usr/local/persist && cd /usr/local/persist/
@@ -176,14 +183,16 @@ $ sudo docker volume create --driver local --opt type=none --opt device=/usr/loc
 $ sudo docker volume create --driver local --opt type=none --opt device=/usr/local/persist/mongodb --opt o=bind grafana-mongo-db
 ```
 
-### Build and Launch
+### 3) Build and Launch
+
+We're now ready to build our Docker file. Navigate to your Omniperf install directory to begin.
 ```bash
 $ sudo docker-compose build
 $ sudo docker-compose up -d
 ```
 > Note that TCP ports for Grafana (4000) and MongoDB (27017) in the docker container are mapped to 14000 and 27018, respectively, on the host side.
 
-### Setup Grafana Instance
+### 4) Setup Grafana Instance
 Once you've launced your docker container you should be able to reach Grafana at **http://\<host-ip>:14000**. The default login credentials for the first-time Grafana setup are:
 
 - Username: **admin**
@@ -193,26 +202,41 @@ Once you've launced your docker container you should be able to reach Grafana at
 
 MongoDB Datasource Configuration
 
-The MongoDB Datasource shall be configured prior to the first-time use. Navigate to Grafana's Configuration page (shown below) to add the **Omniperf Data** connection.
+The MongoDB Datasource must be configured prior to the first-time use. Navigate to Grafana's Configuration page (shown below) to add the **Omniperf Data** connection.
 
-![Omniperf Datasource Config](images/datasource_config.png)
+![Omniperf Datasource Config](images/datasource_config.jpg)
 
-Configure the following fields in the datasource:
+Configure the following fields in the datasource settings:
 
 - HTTP URL: set to *http://localhost:3333*
 - MongoDB URL: set to *mongodb://temp:temp123@\<host-ip>:27018/admin?authSource=admin*
 - Database Name: set to *admin*
 
-After properly configuring these fields click **Save & Test** to make sure your connection is successful.
+After properly configuring these fields click **Save & Test** (as shown below) to make sure your connection is successful.
 
 > Note to avoid potential DNS issue, one may need to use the actual IP address for the host node in the MongoDB URL.
 
-![Datasource Settings](images/datasource_settings.png)
+![Datasource Settings](images/datasource_settings.jpg)
 
 Omniperf Dashboard Import
 
-From *Create* → *Import*, (as seen below) upload the dashboard file, `/dashboards/Omniperf_v{__VERSION__}_pub.json`, from the Omniperf tarball.
+From *Create* → *Import*, (as shown below) upload the dashboard file, `/dashboards/Omniperf_v{__VERSION__}_pub.json`, from the Omniperf tarball.
 
 Edit both the Dashboard Name and the Unique Identifier (UID) to uniquely identify the dashboard he/she will use. Click Import to finish the process.
 
 ![Import Dashboard](images/import_dashboard.png)
+
+Using your dashboard
+
+Once you've imported a dashboard you're ready to begin! Start by browsing availible dashboards and selecting the dashboard you've just imported.
+
+![Opening your dashboard](images/opening_dashboard.png)
+
+Remeber, you'll need to upload workload data to the DB backend before analyzing in your Grafana interface. We provide a detailed example of this in our [Analysis section](./analysis.md#grafana-gui-import).
+
+After a workload has been successfully uploaded, you should be able to select it from the workload dropdown located at the top of your Grafana dashboard.
+
+![Selecting Grafana workload](images/grafana_workload_selection.png)
+
+For more information on how to use the Grafana interface for anlysis please see the [Grafana section](./analysis.md#grafana-based-gui) in the Analyze Mode tab.
+
