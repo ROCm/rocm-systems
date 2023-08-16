@@ -429,6 +429,7 @@ def parse(my_parser):
         help="\t\tSpecify kernel id(s) from --list-kernels for filtering.",
     )
     analyze_group.add_argument(
+        "-d",
         "--dispatch",
         dest="gpu_dispatch_id",
         metavar="",
