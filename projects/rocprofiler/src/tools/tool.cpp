@@ -309,11 +309,10 @@ att_parsed_input_t GetATTParams() {
 
   // Default values used for token generation.
   std::unordered_map<std::string, uint32_t> default_params = {
-    {"SE_MASK", 0x111111}, // One every 4 SEs, by default
-    {"SIMD_SELECT", 0x3}, // 0x3 works for both gfx9 and Navi
-    {"BUFFER_SIZE", 0x40000000}, // 2^30 == 1GB
-    {"ISA_CAPTURE_MODE", static_cast<uint32_t>(ROCPROFILER_CAPTURE_SYMBOLS_ONLY)}
-  };
+      {"SE_MASK", 0x111111},        // One every 4 SEs, by default
+      {"SIMD_SELECT", 0x3},         // 0x3 works for both gfx9 and Navi
+      {"BUFFER_SIZE", 0x40000000},  // 2^30 == 1GB
+      {"ISA_CAPTURE_MODE", static_cast<uint32_t>(ROCPROFILER_CAPTURE_SYMBOLS_ONLY)}};
 
   std::ifstream trace_file(path);
   if (!trace_file.is_open()) {
@@ -338,14 +337,15 @@ att_parsed_input_t GetATTParams() {
       if (pos == std::string::npos) continue;
 
       param_name = line.substr(0, pos);
-      for (auto& c : param_name) c = (char)toupper(c); // So we don't have to worry about lowercase inputs
-      line = line.substr(pos+1);
+      for (auto& c : param_name)
+        c = (char)toupper(c);  // So we don't have to worry about lowercase inputs
+      line = line.substr(pos + 1);
     }
 
     if (param_name.find("ATT") != std::string::npos &&
         param_name.find("TARGET_CU") != std::string::npos) {
-      started_att_counters = true; // Means we'll do ATT
-      param_name = "TARGET_CU"; // To cover different variations
+      started_att_counters = true;  // Means we'll do ATT
+      param_name = "TARGET_CU";     // To cover different variations
     }
     if (!started_att_counters) continue;
 
@@ -364,7 +364,7 @@ att_parsed_input_t GetATTParams() {
       int rank = (comma < line.size() - 1) ? stoi(line.substr(comma + 1)) : 0;
 
       if (MPI_RANK < 0 || rank == MPI_RANK)  // Only add ID if rank matches the one in input.txt
-        dispatch_ids.push_back(std::max(id-1,0)); // off by 1 in relation to kernel-trace
+        dispatch_ids.push_back(std::max(id - 1, 0));  // off by 1 in relation to kernel-trace
       continue;
     }
     // param_value is a number
@@ -439,7 +439,7 @@ void finish() {
 
 static bool env_var_search(std::string& s) {
   std::smatch m;
-  std::regex e ("(.*)\\%\\q\\{([^}]+)\\}(.*)");
+  std::regex e("(.*)\\%\\q\\{([^}]+)\\}(.*)");
   std::regex_match(s, m, e);
 
   if (m.size() != 4) return false;
@@ -447,7 +447,7 @@ static bool env_var_search(std::string& s) {
   while (m.size() == 4) {
     const char* envvar = getenv(m[2].str().c_str());
     if (!envvar) envvar = "";
-    s = m[1].str()+envvar+m[3].str();
+    s = m[1].str() + envvar + m[3].str();
     std::regex_match(s, m, e);
   };
 
@@ -482,12 +482,13 @@ void plugins_load(void* userdata) {
     if (out_path.size()) {
       try {
         std::experimental::filesystem::create_directories(out_path);
-      } catch (...) {}
+      } catch (...) {
+      }
       out_path = out_path + '/';
     }
     if (out_path.size() && getenv("ROCPROFILER_COUNTERS")) {
-      std::ofstream(out_path+"pmc.txt", std::ios::app)
-        << std::string(getenv("ROCPROFILER_COUNTERS")) << '\n';
+      std::ofstream(out_path + "pmc.txt", std::ios::app)
+          << std::string(getenv("ROCPROFILER_COUNTERS")) << '\n';
     }
 
     PluginHeaderPacket header{
