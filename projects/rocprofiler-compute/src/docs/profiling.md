@@ -238,9 +238,9 @@ To reduce profiling time and the counters collected one may use profiling filter
 
 Filtering Options:
 
-- The `-k` \<kernel> flag allows for kernel filtering. Useage is equivalent with the current rocprof utility (see details below).
+- The `-k` \<kernel> flag allows for kernel filtering. Useage is equivalent with the current rocprof utility ([see details below](#kernel-filtering)).
 
-- The `-d` \<dispatch> flag allows for dispatch ID filtering. Useage is equivalent with the current rocprof utility (see details below).
+- The `-d` \<dispatch> flag allows for dispatch ID filtering. Useage is equivalent with the current rocprof utility ([see details below](#dispatch-filtering)).
 
 - The `-b` \<ipblocks> allows system profiling on one or more selected IP blocks to speed up the profiling process. One can gradually incorporate more IP blocks, without overwriting performance data acquired on other IP blocks.
 
@@ -330,7 +330,7 @@ ROCProfiler: input from "/tmp/rpl_data_230411_170300_29696/input0.xml"
 #### Dispatch Filtering
 Dispatch filtering is based on the *global* dispatch index of kernels in a run. 
 
-The following example profiles only the 0th dispatched kernel:
+The following example profiles only the 0th dispatched kernel in execution of the application:
 ```shell-session
 $ omniperf profile --name vcopy -d 0 -- ./vcopy 1048576 256
 Resolving rocprof

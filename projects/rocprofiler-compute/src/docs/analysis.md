@@ -25,7 +25,7 @@ Run `omniperf analyze -h` for more details.
 
 ### Recommended workflow
 
-1) Do a comprehensive analysis with Omniperf CLI at the beginning.
+1) To begin, generate a comprehensive analysis report with Omniperf CLI.
 ```shell-session
 $ omniperf analyze -p workloads/vcopy/mi200/
 
@@ -171,7 +171,7 @@ $ omniperf analyze -p workloads/vcopy/mi200/ --list-metrics gfx90a
 ├─────────┼─────────────────────────────┤
 ...
  ```
- 2. Choose your own customized subset of metrics with `-b` (a.k.a. `--metric`), or build your own config following [config_template](https://github.com/AMDResearch/omniperf/blob/main/src/omniperf_analyze/configs/panel_config_template.yaml). Below we'll inspect block 2 (a.k.a. System Speed-of-Light).
+ 2. Choose your own customized subset of metrics with `-b` (a.k.a. `--metric`), or build your own config following [config_template](https://github.com/AMDResearch/omniperf/blob/main/src/omniperf_analyze/configs/panel_config_template.yaml). Below shows how to generate a report containing only metric 2 (a.k.a. System Speed-of-Light).
 ```shell-session
 $ omniperf analyze -p workloads/vcopy/mi200/ -b 2
 --------
@@ -252,9 +252,9 @@ Analyze
 │ 2.1.28  │ Instr Fetch Latency       │ 21.729248046875       │ Cycles           │                    │                        │
 ╘═════════╧═══════════════════════════╧═══════════════════════╧══════════════════╧════════════════════╧════════════════════════╛
 ```
-> **Note:** Some cells may be blank indicating a missing/unavailible hardware counter or NULL value
+> **Note:** Some cells may be blank indicating a missing/unavailable hardware counter or NULL value
 
-3. Quick optimization iterations and profiling with customized metrics.
+3. Optimizatize application, iterate, and re-profile to inspect performance changes.
 4. Redo a comprehensive analysis with Omniperf CLI at any milestone or at the end.
 
 ### Demo

@@ -771,7 +771,7 @@ def main():
         else:
             throw_parse_error(
                 my_parser,
-                "Profiling command required. Pass this after -- at the end of your options.\n\ti.e. omniperf profile -n vcopy -- ./vcopy 1048576 256",
+                "Profiling command required. Pass application executable after -- at the end of options.\n\ti.e. omniperf profile -n vcopy -- ./vcopy 1048576 256",
             )
         # Name cannot exceed MongoDB max len
         if len(args.name) > 35:
