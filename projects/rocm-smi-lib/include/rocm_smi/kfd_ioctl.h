@@ -36,6 +36,12 @@ struct kfd_ioctl_get_version_args {
   __u32 minor_version;  /* from KFD */
 };
 
+struct kfd_ioctl_get_available_memory_args {
+    __u64 available;    /* from KFD */
+    __u32 gpu_id;       /* to KFD */
+    __u32 pad;
+};
+
 /* For kfd_ioctl_create_queue_args.queue_type. */
 #define KFD_IOC_QUEUE_TYPE_COMPUTE    0x0
 #define KFD_IOC_QUEUE_TYPE_SDMA      0x1
@@ -725,6 +731,10 @@ struct kfd_ioctl_cross_memory_copy_args {
 
 #define AMDKFD_IOC_CROSS_MEMORY_COPY    \
     AMDKFD_IOWR(0x22, struct kfd_ioctl_cross_memory_copy_args)
+
+
+#define AMDKFD_IOC_AVAILABLE_MEMORY     \
+        AMDKFD_IOWR(0x23, struct kfd_ioctl_get_available_memory_args)
 
 #define AMDKFD_COMMAND_START    0x01
 #undef AMDKFD_COMMAND_END
