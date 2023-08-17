@@ -24,6 +24,11 @@ cmake_minimum_required(VERSION 3.18.0)
 
 project(roctracer VERSION 4.1.0)
 
+if(${ROCM_PATCH_VERSION})
+   set(PROJECT_VERSION_PATCH ${ROCM_PATCH_VERSION})
+   set(PROJECT_VERSION "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH}")
+endif()
+
 include(GNUInstallDirs)
 # set default ROCM_PATH
 if(NOT DEFINED ROCM_PATH)
