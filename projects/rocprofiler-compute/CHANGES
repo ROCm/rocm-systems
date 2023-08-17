@@ -1,3 +1,15 @@
+Version 1.0.9 (17 Aug 2023)
+
+  * add units to L2 per-channel panel (#133)
+  * new quickstart guide for Grafana setup in docs (#135)
+  * more detail on kernel and dispatch filtering in docs (#136, #137)
+  * patch manual join utility for ROCm >5.2.x (#139)
+  * add % of peak values to low level speed-of-light panels (#140)
+  * patch critical bug in Grafana by removing a deprecated plugin (#141)
+  * enhancements to KernelName demangeler (#142)
+  * general metric updates and enhancements (#144, #155, #159)
+  * add min/max/avg breakdown to instruction mix panel (#154)
+
 Version 1.0.8 (30 May 2023)
 
   * add `--kernel-names` option to toggle kernelName overlay in standalone roofline plot (#93)
