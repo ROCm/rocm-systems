@@ -229,7 +229,7 @@ set_target_properties(
     ${ROCPROFILER_TARGET}
     PROPERTIES CXX_VISIBILITY_PRESET hidden
                LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib
-               VERSION 1.0.0
+               VERSION 1.0.${PROJECT_VERSION_PATCH}
                SOVERSION 1)
 
 # As ROCR hsa_api_trace header file is not usable unless AMD_INTERNAL_BUILD is defined
