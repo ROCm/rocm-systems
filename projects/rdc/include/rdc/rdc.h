@@ -256,9 +256,9 @@ typedef enum {
    * Data beats sent to neighbor 0; Each beat represents 32 bytes.<br><br>
    *
    * XGMI throughput can be calculated by multiplying a BEATs event
-   * such as ::RSMI_EVNT_XGMI_0_BEATS_TX by 32 and dividing by
+   * such as ::RDC_EVNT_XGMI_0_BEATS_TX by 32 and dividing by
    * the time for which event collection occurred,
-   * ::rsmi_counter_value_t.time_running (which is in nanoseconds). To get
+   * ::rdc_gpu_usage_info_t.start_time (which is in nanoseconds). To get
    * bytes per second, multiply this value by 10<sup>9</sup>.<br>
    * <br>
    * Throughput = BEATS/time_running * 10<sup>9</sup>  (bytes/second)<br>
