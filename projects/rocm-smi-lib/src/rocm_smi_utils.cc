@@ -52,6 +52,7 @@
 #include <string>
 #include <cstring>
 #include <cstdint>
+#include <iomanip>
 #include <iostream>
 #include <sstream>
 #include <algorithm>
@@ -203,9 +204,10 @@ int ReadSysfsStr(std::string path, std::string *retStr) {
   if (!fs.is_open()) {
     ret = errno;
     errno = 0;
-    oss << "Could not read SYSFS file (" << path << ")"
-        << ", returning " << std::to_string(ret) << " ("
-        << std::strerror(ret) << ")";
+    oss << __PRETTY_FUNCTION__
+      << " | Fail | Cause: file does not exist or permissions issue"
+      << " | SYSFS file: " << path
+      << " | Returning: " <<  std::strerror(ret) << " |";
     LOG_ERROR(oss);
     return ret;
   }
@@ -515,19 +517,39 @@ void displayAppTmpFilesContent() {
 }
 
 // Used to debug vector string list and their content
-void displayVectorContent(std::vector<std::string> v) {
-  std::cout << "Vector = {";
+std::string debugVectorContent(std::vector<std::string> v) {
+  std::ostringstream ss;
+  ss << "Vector = {";
   if (v.size() > 0) {
     for (auto it=v.begin(); it < v.end(); it++) {
-      std::cout << *it;
+      ss << *it;
       auto temp_it = it;
       if(++temp_it != v.end()) {
-        std::cout << ", ";
+        ss << ", ";
       }
     }
-  } else {
-    std::cout << "}" << std::endl;
   }
+  ss << "}" << std::endl;
+
+  return ss.str();
+}
+
+// Used to debug vector string list and their content
+std::string displayAllDevicePaths(std::vector<std::shared_ptr<Device>> v) {
+  std::ostringstream ss;
+  ss << "Vector = {";
+  if (v.size() > 0) {
+    for (auto it=v.begin(); it < v.end(); it++) {
+      ss << (*it)->path();
+      auto temp_it = it;
+      if(++temp_it != v.end()) {
+        ss << ", ";
+      }
+    }
+  }
+  ss << "}" << std::endl;
+
+  return ss.str();
 }
 
 // Attempts to read application specific temporary file
@@ -747,6 +769,28 @@ bool isSystemBigEndian() {
   }
   return isBigEndian;
 }
+
+rsmi_status_t getBDFString(uint64_t bdf_id, std::string& bfd_str)
+{
+  auto result = rsmi_status_t::RSMI_STATUS_SUCCESS;
+  auto bus_id = static_cast<uint8_t>((bdf_id & 0x0000FF00) >> 8);
+  auto dev_id = static_cast<uint8_t>((bdf_id & 0x000000F8) >> 3);
+  auto func_id = static_cast<uint8_t>(bdf_id & 0x00000003);
+
+  bfd_str = std::string();
+  if (!(bus_id > 0)) {
+    result = rsmi_status_t::RSMI_STATUS_NO_DATA;
+    return result;
+  }
+
+  std::stringstream bdf_sstream;
+  bdf_sstream << std::hex << std::setfill('0') << std::setw(sizeof(uint8_t) * 2) << +bus_id << ":";
+  bdf_sstream << std::hex << std::setfill('0') << std::setw(sizeof(uint8_t) * 2) << +dev_id << ".";
+  bdf_sstream << std::hex << std::setfill('0') << +func_id;
+  bfd_str = bdf_sstream.str();
+  return result;
+}
+
 
 }  // namespace smi
 }  // namespace amd

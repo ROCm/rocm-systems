@@ -87,6 +87,8 @@ std::tuple<bool, std::string> readTmpFile(
                                           std::string stateName,
                                           std::string parameterName);
 void displayAppTmpFilesContent(void);
+std::string debugVectorContent(std::vector<std::string> v);
+std::string displayAllDevicePaths(std::vector<std::shared_ptr<Device>> v);
 rsmi_status_t handleException();
 rsmi_status_t
 GetDevValueVec(amd::smi::DevInfoTypes type,
@@ -100,6 +102,7 @@ std::tuple<bool, std::string, std::string, std::string, std::string,
            std::string, std::string, std::string, std::string>
            getSystemDetails(void);
 void logSystemDetails(void);
+rsmi_status_t getBDFString(uint64_t bdf_id, std::string& bfd_str);
 void logHexDump(const char *desc, const void *addr, const size_t len,
              size_t perLine);
 bool isSystemBigEndian();

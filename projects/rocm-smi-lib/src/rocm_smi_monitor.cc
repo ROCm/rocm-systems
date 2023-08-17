@@ -313,6 +313,7 @@ int Monitor::writeMonitor(MonitorTypes type, uint32_t sensor_id,
 // This string version should work for all valid monitor types
 int Monitor::readMonitor(MonitorTypes type, uint32_t sensor_id,
                                                            std::string *val) {
+  std::ostringstream ss;
   assert(val != nullptr);
 
   std::string temp_str;
@@ -320,11 +321,21 @@ int Monitor::readMonitor(MonitorTypes type, uint32_t sensor_id,
 
   DBG_FILE_ERROR(sysfs_path, (std::string *)nullptr)
   int ret = ReadSysfsStr(sysfs_path, val);
+  ss << __PRETTY_FUNCTION__
+     << " | Success | Read hwmon file: " << sysfs_path
+     << " | Type: " << monitorTypesToString.at(type)
+     << " | Sensor id: " << std::to_string(sensor_id)
+     << " | Data: " << *val
+     << " | Returning: " << std::to_string(ret) << " |";
+  LOG_INFO(ss);
   return ret;
 }
 
 int32_t
 Monitor::setTempSensorLabelMap(void) {
+  std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << " | ======= start =======";
+  LOG_TRACE(ss);
   std::string type_str;
   int ret;
 
