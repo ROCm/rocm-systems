@@ -47,12 +47,13 @@ style reference is provided below for convenience:
                   Karl W. Schulz and
                   Jose Santos and
                   Keith Lowery and
+                  Nicholas Curtis and
                   Cristian Di Pietrantonio},
-  title        = {AMDResearch/omniperf: v1.0.8 (30 May 2023)},
-  month        = may,
+  title        = {AMDResearch/omniperf: v1.0.9 (17 Aug 2023)},
+  month        = aug,
   year         = 2023,
   publisher    = {Zenodo},
-  version      = {v1.0.8},
+  version      = {v1.0.9},
   doi          = {10.5281/zenodo.7314631},
   url          = {https://doi.org/10.5281/zenodo.7314631}
 }
