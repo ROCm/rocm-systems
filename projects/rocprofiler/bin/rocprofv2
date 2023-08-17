@@ -232,16 +232,19 @@ if [ -n "$PMC_LINES" ] && [ ! -n "$ATT_ARGV" ]; then
   COUNTER=1
   for i in ${!PMC_LINES[@]}; do
     export ROCPROFILER_COUNTERS="${PMC_LINES[$i]}"
-    #Skipping lines without pmc when not in att mode
     if [[ ! ${PMC_LINES[$i]} =~ "pmc" ]]; then
       continue
     fi
 
     FINAL_PATH="$OUTPUT_PATH_INTERNAL/pmc_$COUNTER"
-    export OUTPUT_PATH=$FINAL_PATH
+    if [ -n "$OUT_FILE_NAME" ] || [ -n "$OUTPUT_PATH" ]; then
+      export OUTPUT_PATH=$FINAL_PATH
+    fi
     let COUNTER=COUNTER+1
     LD_PRELOAD=$LD_PRELOAD:$ROCM_DIR/lib/rocprofiler/librocprofiler_tool.so $*
-    echo -e "\nThe output path for the following counters: $OUTPUT_PATH"
+    if [ -n "$OUTPUT_PATH" ]; then
+      echo -e "\nThe output path for the following counters: $OUTPUT_PATH"
+    fi
   done
 else
   LD_PRELOAD=$LD_PRELOAD:$ROCM_DIR/lib/rocprofiler/librocprofiler_tool.so $*

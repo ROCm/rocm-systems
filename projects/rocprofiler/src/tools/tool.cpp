@@ -452,7 +452,7 @@ void plugins_load() {
       } catch (...) {}
       out_path = out_path + '/';
     }
-    if (getenv("ROCPROFILER_COUNTERS")) {
+    if (out_path.size() && getenv("ROCPROFILER_COUNTERS")) {
       std::ofstream(out_path+"pmc.txt", std::ios::app)
         << std::string(getenv("ROCPROFILER_COUNTERS")) << '\n';
     }
