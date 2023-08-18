@@ -20,8 +20,9 @@ target_include_directories(
 target_link_libraries(
     rocprofiler-register
     PUBLIC rocprofiler-register::headers
-    PRIVATE rocprofiler-register::build-flags rocprofiler-register::memcheck
-            rocprofiler-register::stdcxxfs rocprofiler-register::dl)
+    PRIVATE fmt::fmt-header-only glog::glog rocprofiler-register::build-flags
+            rocprofiler-register::memcheck rocprofiler-register::stdcxxfs
+            rocprofiler-register::dl)
 
 set_target_properties(
     rocprofiler-register

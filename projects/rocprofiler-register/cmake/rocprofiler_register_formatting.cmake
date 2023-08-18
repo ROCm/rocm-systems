@@ -35,7 +35,8 @@ if(ROCPROFILER_REGISTER_CLANG_FORMAT_EXE
     set(rocp_source_files)
     set(rocp_header_files)
     set(rocp_python_files)
-    set(rocp_cmake_files ${PROJECT_SOURCE_DIR}/CMakeLists.txt)
+    set(rocp_cmake_files ${PROJECT_SOURCE_DIR}/CMakeLists.txt
+                         ${PROJECT_SOURCE_DIR}/external/CMakeLists.txt)
 
     foreach(_DIR cmake samples source tests)
         foreach(_TYPE header_files source_files cmake_files python_files)
@@ -96,7 +97,7 @@ if(ROCPROFILER_REGISTER_CLANG_FORMAT_EXE
         endif()
     endforeach()
 
-    foreach(_TYPE source python)
+    foreach(_TYPE source python cmake)
         if(TARGET format-rocprofiler-register-${_TYPE})
             add_dependencies(format format-rocprofiler-register-${_TYPE})
         endif()

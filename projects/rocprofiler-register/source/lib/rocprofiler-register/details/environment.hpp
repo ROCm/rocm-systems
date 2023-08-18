@@ -20,7 +20,8 @@
 
 #pragma once
 
-#include "log.hpp"
+#include "fmt/core.h"
+#include "glog/logging.h"
 
 #include <unistd.h>
 #include <cstdio>
@@ -30,52 +31,6 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
-
-#if !defined(ROCPROFILER_REGISTER_ENVIRON_LOG_NAME)
-#    if defined(ROCPROFILER_REGISTER_COMMON_LIBRARY_NAME)
-#        define ROCPROFILER_REGISTER_ENVIRON_LOG_NAME                                    \
-            "[" ROCPROFILER_REGISTER_COMMON_LIBRARY_NAME "]"
-#    else
-#        define ROCPROFILER_REGISTER_ENVIRON_LOG_NAME "[environ]"
-#    endif
-#endif
-
-#if !defined(ROCPROFILER_REGISTER_ENVIRON_LOG_START)
-#    if defined(ROCPROFILER_REGISTER_COMMON_LIBRARY_LOG_START)
-#        define ROCPROFILER_REGISTER_ENVIRON_LOG_START                                   \
-            ROCPROFILER_REGISTER_COMMON_LIBRARY_LOG_START
-#    elif defined(ROCPROFILER_REGISTER_LOG_COLORS_AVAILABLE)
-#        define ROCPROFILER_REGISTER_ENVIRON_LOG_START                                   \
-            fprintf(stderr, "%s", ::rocprofiler_register::log::color::dmesg());
-#    else
-#        define ROCPROFILER_REGISTER_ENVIRON_LOG_START
-#    endif
-#endif
-
-#if !defined(ROCPROFILER_REGISTER_ENVIRON_LOG_END)
-#    if defined(ROCPROFILER_REGISTER_COMMON_LIBRARY_LOG_END)
-#        define ROCPROFILER_REGISTER_ENVIRON_LOG_END                                     \
-            ROCPROFILER_REGISTER_COMMON_LIBRARY_LOG_END
-#    elif defined(ROCPROFILER_REGISTER_LOG_COLORS_AVAILABLE)
-#        define ROCPROFILER_REGISTER_ENVIRON_LOG_END                                     \
-            fprintf(stderr, "%s", ::rocprofiler_register::log::color::end());
-#    else
-#        define ROCPROFILER_REGISTER_ENVIRON_LOG_END
-#    endif
-#endif
-
-#define ROCPROFILER_REGISTER_ENVIRON_LOG(CONDITION, ...)                                 \
-    if(CONDITION)                                                                        \
-    {                                                                                    \
-        fflush(stderr);                                                                  \
-        ROCPROFILER_REGISTER_ENVIRON_LOG_START                                           \
-        fprintf(stderr,                                                                  \
-                "[rocprofiler-register]" ROCPROFILER_REGISTER_ENVIRON_LOG_NAME "[%i] ",  \
-                getpid());                                                               \
-        fprintf(stderr, __VA_ARGS__);                                                    \
-        ROCPROFILER_REGISTER_ENVIRON_LOG_END                                             \
-        fflush(stderr);                                                                  \
-    }
 
 namespace rocprofiler_register
 {
@@ -110,14 +65,13 @@ get_env_impl(std::string_view env_id, int _default)
             return std::stoi(env_var);
         } catch(std::exception& _e)
         {
-            fprintf(stderr,
-                    "[rocprofiler_register][get_env] Exception thrown converting "
-                    "getenv(\"%s\") = "
-                    "%s to integer :: %s. Using default value of %i\n",
-                    env_id.data(),
-                    env_var,
-                    _e.what(),
-                    _default);
+            LOG(ERROR) << fmt::format(
+                "[rocprofiler_register][get_env] Exception thrown converting getenv({}) "
+                "= {} to integer :: {}. Using default value of {}",
+                env_id.data(),
+                env_var,
+                _e.what(),
+                _default);
         }
         return _default;
     }
@@ -176,14 +130,11 @@ struct env_config
     std::string env_value = {};
     int         override  = 0;
 
-    auto operator()(bool _verbose = false) const
+    auto operator()() const
     {
         if(env_name.empty()) return -1;
-        ROCPROFILER_REGISTER_ENVIRON_LOG(_verbose,
-                                         "setenv(\"%s\", \"%s\", %i)\n",
-                                         env_name.c_str(),
-                                         env_value.c_str(),
-                                         override);
+        LOG(INFO) << fmt::format(
+            "setenv({}, {}, {})", env_name.c_str(), env_value.c_str(), override);
         return setenv(env_name.c_str(), env_value.c_str(), override);
     }
 };

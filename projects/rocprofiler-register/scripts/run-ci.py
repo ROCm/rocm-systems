@@ -91,7 +91,7 @@ def generate_custom(args, cmake_args, ctest_args):
         set(CTEST_UPDATE_TYPE git)
         set(CTEST_UPDATE_VERSION_ONLY TRUE)
         set(CTEST_GIT_COMMAND {GIT_CMD})
-        set(CTEST_GIT_INIT_SUBMODULES FALSE)
+        set(CTEST_GIT_INIT_SUBMODULES TRUE)
 
         set(CTEST_OUTPUT_ON_FAILURE TRUE)
         set(CTEST_USE_LAUNCHERS TRUE)

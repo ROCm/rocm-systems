@@ -23,7 +23,6 @@
 #define GNU_SOURCE 1
 
 #include "dl.hpp"
-#include "join.hpp"
 #include "utility.hpp"
 
 #include <filesystem>
@@ -34,6 +33,7 @@
 
 #include <dlfcn.h>
 #include <elf.h>
+#include <fmt/core.h>
 #include <link.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -54,7 +54,7 @@ std::vector<segment_address_ranges>
 get_segment_addresses(pid_t _pid)
 {
     auto _data  = std::vector<segment_address_ranges>{};
-    auto _fname = common::join('/', "/proc", _pid, "maps");
+    auto _fname = fmt::format("/{}/{}/{}", "proc", _pid, "maps");
     auto ifs    = std::ifstream{ _fname };
     if(!ifs)
     {

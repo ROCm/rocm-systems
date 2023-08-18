@@ -93,6 +93,7 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_BINDIR
 enable_testing()
 include(CTest)
 
+add_subdirectory(external)
 add_subdirectory(source)
 
 if(ROCPROFILER_REGISTER_BUILD_TESTS)

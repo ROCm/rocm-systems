@@ -27,8 +27,10 @@ macro(ROCPROFILER_REGISTER_ACTIVATE_CLANG_TIDY)
                 )
         endif()
 
-        set(CMAKE_CXX_CLANG_TIDY ${ROCPROFILER_REGISTER_CLANG_TIDY_COMMAND}
-                                 -header-filter=${PROJECT_SOURCE_DIR}/.*)
+        set(CMAKE_CXX_CLANG_TIDY
+            ${ROCPROFILER_REGISTER_CLANG_TIDY_COMMAND}
+            -header-filter=${PROJECT_SOURCE_DIR}/source/.*
+            --warnings-as-errors=*,-misc-header-include-cycle)
 
         # Create a preprocessor definition that depends on .clang-tidy content so the
         # compile command will change when .clang-tidy changes.  This ensures that a

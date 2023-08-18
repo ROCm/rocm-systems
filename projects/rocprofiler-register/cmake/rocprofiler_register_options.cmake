@@ -29,6 +29,8 @@ rocprofiler_register_add_option(ROCPROFILER_REGISTER_ENABLE_CLANG_TIDY
 rocprofiler_register_add_option(
     ROCPROFILER_REGISTER_BUILD_DEVELOPER "Extra build flags for development like -Werror"
     ${ROCPROFILER_REGISTER_BUILD_CI} ADVANCED)
+rocprofiler_register_add_option(ROCPROFILER_REGISTER_BUILD_GLOG "Build GLOG" ON)
+rocprofiler_register_add_option(ROCPROFILER_REGISTER_BUILD_FMT "Build FMT" ON)
 
 # In the future, we will do this even with clang-tidy enabled
 if(ROCPROFILER_REGISTER_BUILD_CI AND NOT ROCPROFILER_REGISTER_ENABLE_CLANG_TIDY)

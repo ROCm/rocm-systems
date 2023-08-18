@@ -92,9 +92,9 @@ delimit(const std::string& line, std::string_view delimiters)
         size_t _nmax = 0;
         for(char itr : line)
         {
-            for(size_t j = 0; j < delimiters.length(); ++j)
+            for(char delimiter : delimiters)
             {
-                if(itr == delimiters.at(j)) ++_nmax;
+                if(itr == delimiter) ++_nmax;
             }
         }
         reserve(_result, _nmax);

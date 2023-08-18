@@ -24,7 +24,7 @@
 
 #include "details/dl.hpp"
 #include "details/environment.hpp"
-#include "details/log.hpp"
+#include "glog/logging.h"
 
 #include <array>
 #include <atomic>
@@ -140,7 +140,7 @@ get_this_library_path()
 {
     auto _this_lib_path = binary::get_linked_path(rocprofiler_register_lib_name,
                                                   { RTLD_NOLOAD | RTLD_LAZY });
-    ROCPROFILER_REGISTER_REQUIRE(_this_lib_path)
+    LOG_IF(FATAL, !_this_lib_path)
         << rocprofiler_register_lib_name
         << " could not locate itself in the list of loaded libraries";
     return fs::path{ *_this_lib_path }.parent_path().string();
@@ -223,16 +223,15 @@ rocp_reg_scan_for_tools()
         }
 
         if(rocprofiler_register_verbose >= rocprofiler_register_info_level)
-            ROCPROFILER_REGISTER_INFO << "loaded " << _rocp_reg_lib_path_fname.string()
-                                      << " library at " << _rocp_reg_lib_path.string();
+            LOG(INFO) << "loaded " << _rocp_reg_lib_path_fname.string() << " library at "
+                      << _rocp_reg_lib_path.string();
 
-        ROCPROFILER_REGISTER_REQUIRE(rocprofiler_lib_handle)
-            << _rocp_reg_lib << " failed to load\n";
+        LOG_IF(FATAL, !rocprofiler_lib_handle) << _rocp_reg_lib << " failed to load\n";
 
         *(void**) (&rocprofiler_lib_config_fn) =
             dlsym(rocprofiler_lib_handle, rocprofiler_lib_register_entrypoint);
 
-        ROCPROFILER_REGISTER_REQUIRE(rocprofiler_lib_config_fn)
+        LOG_IF(FATAL, !rocprofiler_lib_config_fn)
             << _rocp_reg_lib << " did not contain '"
             << rocprofiler_lib_register_entrypoint << "' symbol\n";
     }
