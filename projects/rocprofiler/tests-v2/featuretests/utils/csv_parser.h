@@ -26,6 +26,7 @@ THE SOFTWARE.
 #include <assert.h>
 #include <stdio.h>
 
+#include <cstdint>
 #include <cstring>
 #include <iostream>
 #include <map>

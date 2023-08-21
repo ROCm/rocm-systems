@@ -18,10 +18,18 @@
  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  THE SOFTWARE. */
 
+#include <dlfcn.h>
 #include <cassert>
 #include <stdexcept>
 #include <iostream>
+#include <string>
+#include <thread>
+#include <link.h>
+#include <chrono>
+#include <regex>
+#include <unistd.h>
 #include <experimental/filesystem>
+#include <type_traits>
 
 #include "rocprofiler.h"
 #include "rocprofiler_plugin.h"
@@ -49,17 +57,53 @@ ROCPROFILER_EXPORT int rocprofiler_plugin_initialize(const uint32_t rocprofiler_
     return -1;
   }
 
-  const char* output_dir = []() -> const char* {
+  auto output_dir = []() -> std::string {
     if (const char* output_dir_internal = getenv("OUTPUT_PATH"); output_dir_internal != nullptr) {
       return output_dir_internal;
     }
     return "./";
   }();
 
+  auto output_file = []() -> std::string {
+    auto _v = getenv("OUTPUT_FILE");
+    return (_v) ? _v : "trace-{PID}";
+  }();
+
+  auto _replace = [&output_dir, &output_file](const char* _key, auto _value) {
+    using value_type = std::remove_cv_t<std::remove_reference_t<std::decay_t<decltype(_value)>>>;
+    auto _value_str = std::to_string(_value);
+
+    const auto _re = std::regex{_key, std::regex_constants::icase};
+    output_dir = std::regex_replace(output_dir, _re, _value_str);
+    output_file = std::regex_replace(output_file, _re, _value_str);
+  };
+
+  _replace("\\{PID\\}", getpid());
+  _replace("\\$ENV\\{PID\\}", getpid());
+  _replace("\\{PPID\\}", getppid());
+  _replace("\\$ENV\\{PPID\\}", getppid());
+
   // Create the plugin instance.
+  auto* this_plugin_handle = dlopen("libctf_plugin.so", RTLD_LAZY | RTLD_NOLOAD);
+  auto* librocprofiler_handle = dlopen("librocprofiler64.so", RTLD_LAZY | RTLD_NOLOAD);
+  auto metadata_path = std::string{CTF_PLUGIN_METADATA_FILE_PATH};
+  struct link_map* _link_map = nullptr;
+  if (this_plugin_handle && dlinfo(this_plugin_handle, RTLD_DI_LINKMAP, &_link_map) == 0) {
+    metadata_path = fs::path{_link_map->l_name}.parent_path() / fs::path{"../.."} /
+        CTF_PLUGIN_METADATA_FILE_PATH;
+  } else if (librocprofiler_handle &&
+             dlinfo(librocprofiler_handle, RTLD_DI_LINKMAP, &_link_map) == 0) {
+    metadata_path =
+        fs::path{_link_map->l_name}.parent_path() / ".." / CTF_PLUGIN_METADATA_FILE_PATH;
+  }
+
+  if (!fs::exists(metadata_path)) {
+    metadata_path = fs::path{CTF_PLUGIN_INSTALL_PREFIX} / CTF_PLUGIN_METADATA_FILE_PATH;
+  }
+
   try {
-    the_plugin = new rocm_ctf::Plugin{256 * 1024, fs::path{output_dir} / "trace",
-                                      CTF_PLUGIN_METADATA_FILE_PATH};
+    the_plugin = new rocm_ctf::Plugin{256 * 1024, fs::path{output_dir} / output_file,
+                                      fs::absolute(metadata_path)};
   } catch (const std::exception& exc) {
     std::cerr << "rocprofiler_plugin_initialize(): " << exc.what() << std::endl;
     return -1;

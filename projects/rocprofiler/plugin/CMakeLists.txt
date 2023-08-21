@@ -20,8 +20,22 @@
 # IN THE SOFTWARE.
 ################################################################################
 
-add_subdirectory(file)
-add_subdirectory(perfetto)
-add_subdirectory(ctf)
-add_subdirectory(att)
+if(ROCPROFILER_BUILD_CODECOV)
+    set(CMAKE_BUILD_TYPE "Coverage")
+endif()
+
+# these two "native" plugins are always built
 add_subdirectory(cli)
+add_subdirectory(file)
+
+if(ROCPROFILER_BUILD_PLUGIN_PERFETTO)
+    add_subdirectory(perfetto)
+endif()
+
+if(ROCPROFILER_BUILD_PLUGIN_CTF)
+    add_subdirectory(ctf)
+endif()
+
+if(ROCPROFILER_BUILD_PLUGIN_ATT)
+    add_subdirectory(att)
+endif()

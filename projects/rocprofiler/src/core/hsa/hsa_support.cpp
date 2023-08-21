@@ -41,6 +41,7 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+#include <linux/limits.h>
 
 #include "core/hardware/hsa_info.h"
 #include "src/core/session/tracer/src/correlation_id.h"
@@ -68,15 +69,16 @@ hsa_status_t hsa_executable_iteration_callback(hsa_executable_t executable, hsa_
         symbol, HSA_EXECUTABLE_SYMBOL_INFO_NAME_LENGTH, &name_length);
     // TODO(aelwazir): to be removed if the HSA fixed the issue of corrupted
     // names overflowing the length given
+    name_length = std::min<size_t>(name_length, PATH_MAX);
     if (name_length > 1) {
       if (!(*static_cast<bool*>(args))) {
-        char name[name_length + 1];
+        auto name = std::vector<char>(name_length + 1, '\0');
         uint64_t kernel_object;
         hsasupport_singleton.GetCoreApiTable().hsa_executable_symbol_get_info_fn(
-            symbol, HSA_EXECUTABLE_SYMBOL_INFO_NAME, name);
+            symbol, HSA_EXECUTABLE_SYMBOL_INFO_NAME, name.data());
         hsasupport_singleton.GetCoreApiTable().hsa_executable_symbol_get_info_fn(
             symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT, &kernel_object);
-        std::string kernel_name = std::string(name).substr(0, name_length);
+        auto kernel_name = std::string{name.data()}.substr(0, name_length);
         rocprofiler::AddKernelName(kernel_object, kernel_name);
       } else {
         uint64_t kernel_object;
@@ -751,8 +753,9 @@ void HSASupport_Singleton::SetHSALoaderApi() {
 
 
 const Agent::DeviceInfo& HSAAgentInfo::GetDeviceInfo() const {
-  if (type_ == HSA_DEVICE_TYPE_GPU)
+  if (type_ == HSA_DEVICE_TYPE_GPU) {
     return device_info_;
+  }
   assert("Attempting to read deviceInfo for a CPU agent");
 }
 

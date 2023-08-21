@@ -262,6 +262,7 @@ run() {
   MY_LD_PRELOAD=""
   if [ "$ROCTX_TRACE" = 1 ] ; then
     API_TRACE=${API_TRACE}":roctx"
+    MY_LD_PRELOAD="$TTLIB_PATH/libroctx64.so"
   fi
   if [ "$HIP_TRACE" = 1 ] ; then
     API_TRACE=${API_TRACE}":hip"
@@ -273,18 +274,18 @@ run() {
   if [ "$HSA_TRACE" = 1 ] ; then
     export ROCTRACER_DOMAIN=$API_TRACE":hsa"
     MY_HSA_TOOLS_LIB="$MY_HSA_TOOLS_LIB $ROCM_LIB_PATH/libroctracer64.so.4"
-    MY_LD_PRELOAD="$TTLIB_PATH/libroctracer_tool.so"
+    MY_LD_PRELOAD="$MY_LD_PRELOAD:$TTLIB_PATH/libroctracer_tool.so"
   elif [ -n "$API_TRACE" ] ; then
     export ROCTRACER_DOMAIN=$API_TRACE
     OUTPUT_LIST="$ROCP_OUTPUT_DIR/"
     MY_HSA_TOOLS_LIB="$ROCM_LIB_PATH/libroctracer64.so.4"
-    MY_LD_PRELOAD="$TTLIB_PATH/libroctracer_tool.so"
+    MY_LD_PRELOAD="$MY_LD_PRELOAD:$TTLIB_PATH/libroctracer_tool.so"
   fi
 
   if [ "$ROCP_STATS_OPT" = 1 ] ; then
     if [ "$ROCTRACER_DOMAIN" = ":hip" ] ; then
       MY_HSA_TOOLS_LIB="$ROCM_LIB_PATH/libroctracer64.so.4"
-      MY_LD_PRELOAD="$TTLIB_PATH/libhip_stats.so"
+      MY_LD_PRELOAD="$MY_LD_PRELOAD:$TTLIB_PATH/libhip_stats.so"
     else
       error_message="ROCP_STATS_OPT is only available with --hip-trace option"
       echo $error_message

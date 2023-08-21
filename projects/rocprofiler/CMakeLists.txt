@@ -20,7 +20,21 @@
 # SOFTWARE.
 # ##############################################################################
 
-cmake_minimum_required(VERSION 3.18.0)
+cmake_minimum_required(VERSION 3.18.0 FATAL_ERROR)
+
+set(CMAKE_C_FLAGS_COVERAGE_INIT
+    "-Og -g3 -fno-omit-frame-pointer -fprofile-abs-path -fprofile-arcs -ftest-coverage --coverage"
+    CACHE STRING "C flags for code coverage builds")
+set(CMAKE_CXX_FLAGS_COVERAGE_INIT
+    "-Og -g3 -fno-omit-frame-pointer -fprofile-abs-path -fprofile-arcs -ftest-coverage --coverage"
+    CACHE STRING "C++ flags for code coverage builds")
+
+set(CMAKE_C_FLAGS_COVERAGE
+    "${CMAKE_C_FLAGS_COVERAGE_INIT}"
+    CACHE STRING "C flags for code coverage builds")
+set(CMAKE_CXX_FLAGS_COVERAGE
+    "${CMAKE_CXX_FLAGS_COVERAGE_INIT}"
+    CACHE STRING "C++ flags for code coverage builds")
 
 # Build is not supported on Windows plaform
 if(WIN32)
@@ -49,18 +63,24 @@ endif()
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-add_compile_options(-Wall)
-
 set(THREADS_PREFER_PTHREAD_FLAG ON)
+set(CMAKE_BUILD_RPATH
+    "${PROJECT_BINARY_DIR}:${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}")
+set(CMAKE_BUILD_RPATH_USE_ORIGIN ON)
+set(CMAKE_SKIP_BUILD_RPATH OFF)
 
 # Adding default path cmake modules
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules")
+list(INSERT CMAKE_MODULE_PATH 0 "${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules")
+
 # Set build environment
-include(utils)
-include(env)
+include(rocprofiler_options)
+include(rocprofiler_utils)
+include(rocprofiler_env)
+include(rocprofiler_formatting)
+include(rocprofiler_linting)
 
 # Setup the package version.
-get_version("1.0.0")
+rocprofiler_get_version("1.0.0")
 message("-- LIB-VERSION: ${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH}")
 
 set(BUILD_VERSION_MAJOR ${VERSION_MAJOR})
@@ -162,22 +182,32 @@ if(USE_PROF_API EQUAL 1)
     endif()
 endif()
 
+enable_testing()
+
+# Temporarily for CI to work
+set(ROCPROFILER_BUILD_TESTS ON)
+set(ROCPROFILER_BUILD_CI ON)
+
+if(ROCPROFILER_BUILD_CI)
+    include(CTest)
+endif()
+
 # Build libraries
 add_subdirectory(src)
-
-if(${LIBRARY_TYPE} STREQUAL SHARED)
-    # Build samples
-    add_subdirectory(samples)
-
-    # Build tests
-    add_subdirectory(tests-v2)
-endif()
 
 # Build Plugins
 add_subdirectory(plugin)
 
-# Build tests
-add_subdirectory(${TEST_DIR} ${PROJECT_BINARY_DIR}/test)
+if(ROCPROFILER_BUILD_SAMPLES)
+    # Build samples
+    add_subdirectory(samples)
+endif()
+
+if(ROCPROFILER_BUILD_TESTS)
+    # Build tests
+    add_subdirectory(test)
+    add_subdirectory(tests-v2)
+endif()
 
 # Installation and packaging
 set(DEST_NAME ${ROCPROFILER_NAME})
@@ -241,27 +271,12 @@ install(
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/${ROCPROFILER_NAME}
     COMPONENT runtime)
 
-# librocprof-tool.so
-install(
-    FILES ${PROJECT_BINARY_DIR}/test/librocprof-tool.so
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}/${ROCPROFILER_NAME}
-    COMPONENT runtime)
-
-install(
-    FILES ${PROJECT_BINARY_DIR}/test/librocprof-tool.so
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}/${ROCPROFILER_NAME}
-    COMPONENT asan)
-
-install(
-    FILES ${PROJECT_BINARY_DIR}/test/rocprof-ctrl
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}/${ROCPROFILER_NAME}
-    PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ
-                WORLD_EXECUTE
-    COMPONENT runtime)
-
-# File reorg Backward compatibility
-option(FILE_REORG_BACKWARD_COMPATIBILITY
-       "Enable File Reorg with backward compatibility" OFF)
+# File reorg backward compatibility for non ASAN packaging
+if(NOT ENABLE_ASAN_PACKAGING)
+    # File reorg Backward compatibility
+    option(FILE_REORG_BACKWARD_COMPATIBILITY
+           "Enable File Reorg with backward compatibility" ON)
+endif()
 
 if(FILE_REORG_BACKWARD_COMPATIBILITY)
     # To enabe/disable #error in wrapper header files

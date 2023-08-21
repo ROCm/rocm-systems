@@ -242,8 +242,9 @@ target_include_directories(
     ${ROCPROFILER_TARGET}
     PUBLIC $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include/rocprofiler>
     PRIVATE ${LIB_DIR} ${ROOT_DIR} ${PROJECT_SOURCE_DIR}/include/rocprofiler)
-target_link_libraries(${ROCPROFILER_TARGET} PRIVATE ${AQLPROFILE_LIB}
-                                                    hsa-runtime64::hsa-runtime64 c stdc++)
+target_link_libraries(
+    ${ROCPROFILER_TARGET} PRIVATE ${AQLPROFILE_LIB} hsa-runtime64::hsa-runtime64 c stdc++
+                                  dl rocprofiler::build-flags rocprofiler::memcheck)
 
 get_target_property(ROCPROFILER_LIBRARY_V1_NAME ${ROCPROFILER_TARGET} NAME)
 get_target_property(ROCPROFILER_LIBRARY_V1_VERSION ${ROCPROFILER_TARGET} VERSION)
@@ -313,47 +314,26 @@ target_include_directories(
            $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
     PRIVATE ${LIB_DIR} ${ROOT_DIR} ${CMAKE_CURRENT_BINARY_DIR} ${PROJECT_SOURCE_DIR}
             ${PROJECT_SOURCE_DIR}/tools)
-if(ASAN)
-    target_compile_options(rocprofiler-v2 PRIVATE -fsanitize=address)
-    target_link_options(
-        rocprofiler-v2 PRIVATE -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/exportmap
-        -Wl,--no-undefined,-fsanitize=address)
-    target_link_libraries(
-        rocprofiler-v2
-        PRIVATE ${AQLPROFILE_LIB}
-                hsa-runtime64::hsa-runtime64
-                Threads::Threads
-                atomic
-                numa
-                asan
-                dl
-                c
-                stdc++
-                stdc++fs
-                amd_comgr
-                dw
-                elf
-                ${PCIACCESS_LIBRARIES})
-else()
-    target_link_options(
-        rocprofiler-v2 PRIVATE -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/exportmap
-        -Wl,--no-undefined)
-    target_link_libraries(
-        rocprofiler-v2
-        PRIVATE ${AQLPROFILE_LIB}
-                hsa-runtime64::hsa-runtime64
-                Threads::Threads
-                atomic
-                numa
-                dl
-                c
-                stdc++
-                stdc++fs
-                amd_comgr
-                dw
-                elf
-                ${PCIACCESS_LIBRARIES})
-endif()
+target_link_libraries(rocprofiler-v2 PRIVATE rocprofiler::build-flags)
+target_link_options(
+    rocprofiler-v2 PRIVATE -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/exportmap
+    -Wl,--no-undefined)
+target_link_libraries(
+    rocprofiler-v2
+    PRIVATE ${AQLPROFILE_LIB}
+            hsa-runtime64::hsa-runtime64
+            Threads::Threads
+            atomic
+            numa
+            dl
+            c
+            stdc++
+            stdc++fs
+            amd_comgr
+            dw
+            elf
+            ${PCIACCESS_LIBRARIES}
+            rocprofiler::memcheck)
 
 get_target_property(ROCPROFILER_LIBRARY_V2_NAME rocprofiler-v2 OUTPUT_NAME)
 get_target_property(ROCPROFILER_LIBRARY_V2_VERSION rocprofiler-v2 VERSION)
@@ -372,7 +352,12 @@ add_custom_command(
     COMMAND
         ${CMAKE_COMMAND} -E create_symlink
         lib${ROCPROFILER_LIBRARY_V2_NAME}.so.${ROCPROFILER_LIBRARY_V2_SOVERSION}
-        ${CMAKE_BINARY_DIR}/lib/lib${ROCPROFILER_LIBRARY_V2_NAME}v2.so)
+        ${CMAKE_BINARY_DIR}/lib/lib${ROCPROFILER_LIBRARY_V2_NAME}v2.so
+    # Temporarily up till Jenkins side is fixed
+    COMMAND
+        ${CMAKE_COMMAND} -E create_symlink
+        lib/lib${ROCPROFILER_LIBRARY_V1_NAME}.so
+        ${CMAKE_BINARY_DIR}/lib${ROCPROFILER_LIBRARY_V1_NAME}.so)
 # Add custom target to trigger the create_symlink command
 add_custom_target(create_rocprofiler_lib DEPENDS rocprofiler-v2 ${ROCPROFILER_TARGET})
 

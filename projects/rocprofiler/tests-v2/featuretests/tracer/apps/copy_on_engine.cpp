@@ -195,8 +195,8 @@ static hsa_status_t AsyncCpyTest(async_mem_cpy_agent* dst, async_mem_cpy_agent* 
   // Initialize the system and destination buffers with a value so we can later
   // validate it has been overwritten
   void* sysPtr = args->cpu.ptr;
-
-  *reinterpret_cast<uint32_t*>(src->ptr) = val;
+  err = hsa_amd_memory_fill(src->ptr, val, sz / sizeof(uint32_t));
+  RET_IF_HSA_ERR(err);
 
   // Make sure the target and destination agents have access to the buffer.
   hsa_agent_t ag_list[3] = {dst->dev, src->dev, args->cpu.dev};
@@ -231,14 +231,14 @@ static hsa_status_t AsyncCpyTest(async_mem_cpy_agent* dst, async_mem_cpy_agent* 
   }
 
   // Check that the contents of the buffer are what is expected.
-  if (*reinterpret_cast<uint32_t*>(dst->ptr) != *reinterpret_cast<uint32_t*>(src->ptr)) {
-    fprintf(stderr,
-            "Expected 0x%x but got 0x%x in buffer when copying from %lu to %lu and CPU device is "
-            "%lu.\n",
-            *reinterpret_cast<uint32_t*>(src->ptr), *reinterpret_cast<uint32_t*>(dst->ptr),
-            src->dev.handle, dst->dev.handle, args->cpu.dev.handle);
-    return HSA_STATUS_ERROR;
+  for (uint32_t i = 0; i < sz / sizeof(uint32_t); ++i) {
+    if (reinterpret_cast<uint32_t*>(sysPtr)[i] != val) {
+      fprintf(stderr, "Expected 0x%x but got 0x%x in buffer at index %d.\n", val,
+              reinterpret_cast<uint32_t*>(sysPtr)[i], i);
+      return HSA_STATUS_ERROR;
+    }
   }
+
   return HSA_STATUS_SUCCESS;
 }
 

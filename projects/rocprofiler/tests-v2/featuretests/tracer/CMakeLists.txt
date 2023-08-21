@@ -6,7 +6,31 @@ set(CMAKE_EXECUTABLE_RPATH_LINK_HIP_FLAG ${CMAKE_SHARED_LIBRARY_RPATH_LINK_CXX_F
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${ROCM_PATH}/lib/cmake/hip")
 set(CMAKE_HIP_ARCHITECTURES OFF)
+if(DEFINED ROCM_PATH)
+    set(HIP_ROOT_DIR "${ROCM_PATH}/bin")
+endif()
 find_package(HIP REQUIRED MODULE)
+
+# ########################################################################################
+function(rocprofiler_featuretests_tracer_add_test _TARGET)
+    if(TARGET ${_TARGET})
+        if(NOT TEST ${_TARGET})
+            add_test(
+                NAME ${_TARGET}
+                COMMAND $<TARGET_FILE:${_TARGET}>
+                WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
+        endif()
+
+        set_tests_properties(
+            ${_TARGET} PROPERTIES LABELS "featuretests;tracer" ENVIRONMENT
+                                  "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}" ${ARGN})
+    endif()
+endfunction()
+
+function(rocprofiler_featuretests_tracer_add_executable _TARGET)
+    hip_add_executable(${_TARGET} ${ARGN})
+    rocprofiler_featuretests_tracer_add_test(${_TARGET})
+endfunction()
 
 # Setup testing
 enable_testing()
@@ -29,7 +53,7 @@ file(GLOB GTEST_MAIN_SRC_FILE ${GTEST_MAIN_DIR}/*.cpp)
 
 # Compile Applications hip_helloworld
 set_source_files_properties(apps/hello_world.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
-hip_add_executable(tracer_hip_helloworld apps/hello_world.cpp)
+rocprofiler_featuretests_tracer_add_executable(tracer_hip_helloworld apps/hello_world.cpp)
 set_target_properties(
     tracer_hip_helloworld
     PROPERTIES RUNTIME_OUTPUT_DIRECTORY
@@ -45,7 +69,7 @@ install(
 # hsa-mem_async_copy and async_copy_on_engine
 set_source_files_properties(apps/copy_on_engine.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT
                                                                1)
-hip_add_executable(copy_on_engine apps/copy_on_engine.cpp)
+rocprofiler_featuretests_tracer_add_executable(copy_on_engine apps/copy_on_engine.cpp)
 set_target_properties(
     copy_on_engine PROPERTIES RUNTIME_OUTPUT_DIRECTORY
                               "${PROJECT_BINARY_DIR}/tests-v2/featuretests/tracer/apps")
@@ -60,24 +84,27 @@ target_link_libraries(copy_on_engine hsa-runtime64::hsa-runtime64 Threads::Threa
                       stdc++fs)
 
 # Compile MatrixTranspose App with ROCTX
-find_library(ROCTX_LIBRARY NAMES roctx64 HINTS ${ROCM_PATH}/lib)
+find_library(
+    ROCTX_LIBRARY
+    NAMES roctx64
+    HINTS ${ROCM_PATH}/lib)
 if(ROCTX_LIBRARY)
-  set_source_files_properties(apps/MatrixTranspose.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
-  hip_add_executable(tracer_matrix_transpose apps/MatrixTranspose.cpp)
-  set_target_properties(
-      tracer_matrix_transpose
-      PROPERTIES RUNTIME_OUTPUT_DIRECTORY
-                 "${PROJECT_BINARY_DIR}/tests-v2/featuretests/tracer/apps")
-  target_link_options(tracer_matrix_transpose PRIVATE "-Wl,--build-id=md5")
-  target_include_directories(
-      tracer_matrix_transpose PRIVATE ${ROCM_PATH})
-  target_link_libraries(tracer_matrix_transpose ${ROCTX_LIBRARY})
-  install(
-      TARGETS tracer_matrix_transpose
-      RUNTIME
-          DESTINATION
-              ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/tests/featuretests/tracer/apps
-          COMPONENT tests)
+    set_source_files_properties(apps/MatrixTranspose.cpp
+                                PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+    hip_add_executable(tracer_matrix_transpose apps/MatrixTranspose.cpp)
+    set_target_properties(
+        tracer_matrix_transpose
+        PROPERTIES RUNTIME_OUTPUT_DIRECTORY
+                   "${PROJECT_BINARY_DIR}/tests-v2/featuretests/tracer/apps")
+    target_link_options(tracer_matrix_transpose PRIVATE "-Wl,--build-id=md5")
+    target_include_directories(tracer_matrix_transpose PRIVATE ${ROCM_PATH})
+    target_link_libraries(tracer_matrix_transpose ${ROCTX_LIBRARY})
+    install(
+        TARGETS tracer_matrix_transpose
+        RUNTIME
+            DESTINATION
+                ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/tests/featuretests/tracer/apps
+            COMPONENT tests)
 endif()
 
 # Add test cpp file
@@ -102,3 +129,11 @@ install(
     DESTINATION
         ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/tests/featuretests/tracer/apps/goldentraces
     COMPONENT tests)
+
+find_package(
+    Python3
+    COMPONENTS Interpreter
+    REQUIRED)
+
+# cmake based tests
+include(${CMAKE_CURRENT_LIST_DIR}/hiptrace_validation_tests.cmake)

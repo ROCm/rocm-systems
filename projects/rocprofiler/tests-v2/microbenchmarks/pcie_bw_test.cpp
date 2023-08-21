@@ -18,11 +18,17 @@
  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  THE SOFTWARE. */
 
+// make sure assert works
+#ifdef NDEBUG
+#undef NDEBUG
+#endif
+
 #include <stdint.h>
 #include <stddef.h>
 #include <hip/hip_runtime.h>
 #include <unistd.h>
 
+#include <array>
 #include <iomanip>
 #include <iostream>
 #include <string>
@@ -31,6 +37,7 @@
 #include <chrono>
 #include <thread>
 #include <future>
+#include <csignal>
 
 #include "rocm_smi/rocm_smi.h"
 
@@ -71,22 +78,22 @@
 #define HANDLE_ERROR CHK_ERR_ASRT(ret);
 #define HIP_ASSERT(x) (assert((x) == hipSuccess))
 
-#define SEND_DATA()                                                                                \
-  HIP_ASSERT(hipMemcpyAsync(dst, src, SIZE * sizeof(int), hipMemcpyDefault, stream));
-
-static float burn_hip(int dev, int* dst, int* src, size_t SIZE,
-                      std::atomic<bool>* transfer_started) {
+static float burn_hip(int dev, int* dst, int* src, size_t sz, std::atomic<bool>* transfer_started) {
   hipSetDevice(dev);
   hipStream_t stream;
   hipStreamCreate(&stream);
-  hipEvent_t events[3];
+  auto events = std::array<hipEvent_t, 3>{};
 
-  for (int i = 0; i < 3; i++) {
-    hipEventCreate(events + i);
-    SEND_DATA();
-    hipEventRecord(events[i], stream);
+  auto send_data = [dst, src, sz, stream]() {
+    HIP_ASSERT(hipMemcpyAsync(dst, src, sz * sizeof(int), hipMemcpyDefault, stream));
+  };
+
+  for (auto& event : events) {
+    hipEventCreate(&event);
+    send_data();
+    hipEventRecord(event, stream);
   }
-  SEND_DATA();
+  send_data();
   hipEventSynchronize(events[0]);
   transfer_started->store(true);
 
@@ -95,23 +102,30 @@ static float burn_hip(int dev, int* dst, int* src, size_t SIZE,
   while (elapsed < 1500.0f) {  // Transfer data for 1.5 seconds = 1500 ms
     float out;
 
-    hipEventSynchronize(events[(counter + 1) % 3]);
-    hipEventElapsedTime(&out, events[counter % 3], events[(counter + 1) % 3]);
+    hipEventSynchronize(events[(counter + 1) % events.size()]);
+    hipEventElapsedTime(&out, events[counter % events.size()],
+                        events[(counter + 1) % events.size()]);
     elapsed += out;
 
-    hipEventRecord(events[counter % 3], stream);
-    SEND_DATA();
+    hipEventRecord(events[counter % events.size()], stream);
+    send_data();
     counter += 1;
   }
   hipStreamSynchronize(stream);
 
-  for (int i = 0; i < 3; i++) hipEventDestroy(events[i]);
+  for (auto& event : events) hipEventDestroy(event);
   hipStreamDestroy(stream);
 
-  return float(SIZE * sizeof(int) * counter) / elapsed / 1E6;
+  return float(sz * sizeof(int) * counter) / elapsed / 1E6;
 }
 
+namespace {
+void signal_handler(int _sig);
+void activate_signal_handler();
+}  // namespace
+
 int main() {
+  activate_signal_handler();
   const size_t SIZE = 3 << 28;
   rsmi_status_t ret;
   uint16_t dev_id;
@@ -132,9 +146,10 @@ int main() {
     int* d_ptr;
     HIP_ASSERT(hipMalloc((void**)&d_ptr, SIZE * sizeof(int)));
 
-    std::cout << ">>> Device " << dev << std::endl;
+    std::cout << ">>> Device " << dev << std::flush;
     ret = rsmi_dev_id_get(dev, &dev_id);
     HANDLE_ERROR;
+    std::cout << " (rsmi device id: " << dev_id << ")" << std::endl;
 
     rsmi_pcie_bandwidth_t bandwidth;
     ret = rsmi_dev_pci_bandwidth_get(dev, &bandwidth);
@@ -147,7 +162,9 @@ int main() {
     std::cout << "Current: " << bandwidth.transfer_rate.frequency[bandwidth.transfer_rate.current]
               << '\n';
 
-    uint64_t sent = 0, received = 0, max_pkt_sz = 0;
+    uint64_t sent = 0;
+    uint64_t received = 0;
+    uint64_t max_pkt_sz = 0;
     std::atomic<bool> transfer_started;
     transfer_started.store(false);
     auto thread =
@@ -185,3 +202,22 @@ int main() {
   ret = rsmi_shut_down();
   return 0;
 }
+
+namespace {
+// activate a signal handler to catch a SIGBUS on navi32 and
+// emit a message that we can use to skip the test in CTest
+void activate_signal_handler() {
+  struct sigaction _action = {};
+  sigemptyset(&_action.sa_mask);
+  _action.sa_flags = SA_RESTART;
+  _action.sa_handler = signal_handler;
+  sigaction(SIGBUS, &_action, nullptr);
+}
+
+void signal_handler(int _sig) {
+  if (_sig == SIGBUS) {
+    std::cerr << "SIGBUS error. Aborting test" << std::endl;
+  }
+  ::quick_exit(_sig);
+}
+}  // namespace

@@ -28,38 +28,17 @@ target_compile_definitions(
     PUBLIC AMD_INTERNAL_BUILD
     PRIVATE HIP_PROF_HIP_API_STRING=1 __HIP_PLATFORM_AMD__=1)
 
-if(ASAN)
-    target_compile_options(rocprofiler_tool PRIVATE -fsanitize=address)
-    target_link_libraries(
-        rocprofiler_tool
-        rocprofiler-v2
-        hsa-runtime64::hsa-runtime64
-        Threads::Threads
-        atomic
-        asan
-        dl
-        rt
-        stdc++fs
-        amd_comgr)
-    target_link_options(
-        rocprofiler_tool PRIVATE
-        -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/exportmap
-        -Wl,--no-undefined,-fsanitize=address)
-else()
-    target_link_libraries(
-        rocprofiler_tool
-        rocprofiler-v2
-        hsa-runtime64::hsa-runtime64
-        Threads::Threads
-        atomic
-        dl
-        rt
-        stdc++fs
-        amd_comgr)
-    target_link_options(
-        rocprofiler_tool PRIVATE
-        -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/exportmap -Wl,--no-undefined)
-endif()
+target_link_libraries(rocprofiler_tool
+                      PRIVATE $<BUILD_INTERFACE:rocprofiler::build-flags>)
+
+target_link_libraries(
+    rocprofiler_tool
+    PUBLIC rocprofiler-v2 hsa-runtime64::hsa-runtime64 Threads::Threads atomic dl rt
+           stdc++fs amd_comgr
+    PRIVATE rocprofiler::memcheck)
+target_link_options(
+    rocprofiler_tool PRIVATE -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/exportmap
+    -Wl,--no-undefined)
 
 install(TARGETS rocprofiler_tool LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/rocprofiler
                                          COMPONENT runtime)

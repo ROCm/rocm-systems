@@ -28,6 +28,9 @@ set(CMAKE_EXECUTABLE_RPATH_LINK_HIP_FLAG ${CMAKE_SHARED_LIBRARY_RPATH_LINK_CXX_F
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${ROCM_PATH}/lib/cmake/hip")
 set(CMAKE_HIP_ARCHITECTURES OFF)
+if(NOT DEFINED HIP_ROOT_DIR)
+    set(HIP_ROOT_DIR "${CMAKE_INSTALL_PREFIX}")
+endif()
 find_package(HIP REQUIRED MODULE)
 
 # Enable CLANG-TIDY for static analysis search for clang-tidy
@@ -36,6 +39,28 @@ if(CLANG_TIDY_EXE)
     set(CMAKE_CXX_CLANG_TIDY ${CLANG_TIDY_EXE}; -format-style='file';
                              -header-filter=${CMAKE_CURRENT_SOURCE_DIR};)
 endif()
+
+# ########################################################################################
+
+function(rocprofiler_featuretests_profiler_add_test _TARGET)
+    if(TARGET ${_TARGET})
+        if(NOT TEST ${_TARGET})
+            add_test(
+                NAME ${_TARGET}
+                COMMAND $<TARGET_FILE:${_TARGET}>
+                WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
+        endif()
+        set_tests_properties(
+            ${_TARGET} PROPERTIES LABELS "featuretests;profiler" ENVIRONMENT
+                                  "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}" ${ARGN})
+    endif()
+endfunction()
+
+function(rocprofiler_featuretests_profiler_add_executable _TARGET)
+    hip_add_executable(${_TARGET} ${ARGN})
+    rocprofiler_featuretests_profiler_add_test(${_TARGET})
+endfunction()
+
 # ########################################################################################
 # App Based FeatureTests
 # ########################################################################################
@@ -53,7 +78,7 @@ endforeach()
 # Compile Applications hip_helloworld
 set_source_files_properties(apps/hello_world_hip.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT
                                                                 1)
-hip_add_executable(hip_helloworld apps/hello_world_hip.cpp)
+rocprofiler_featuretests_profiler_add_executable(hip_helloworld apps/hello_world_hip.cpp)
 set_target_properties(
     hip_helloworld PROPERTIES RUNTIME_OUTPUT_DIRECTORY
                               "${PROJECT_BINARY_DIR}/tests-v2/featuretests/profiler/apps")
@@ -68,7 +93,7 @@ install(
 # hip_vectoradd
 set_source_files_properties(apps/vector_add_hip.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT
                                                                1)
-hip_add_executable(hip_vectoradd apps/vector_add_hip.cpp)
+rocprofiler_featuretests_profiler_add_executable(hip_vectoradd apps/vector_add_hip.cpp)
 set_target_properties(
     hip_vectoradd PROPERTIES RUNTIME_OUTPUT_DIRECTORY
                              "${PROJECT_BINARY_DIR}/tests-v2/featuretests/profiler/apps")
@@ -81,12 +106,22 @@ install(
         COMPONENT tests)
 
 # mpi_vectoradd
+add_library(rocprofiler-tests-mpi INTERFACE)
+add_library(rocprofiler::tests-mpi ALIAS rocprofiler-tests-mpi)
+
 find_package(MPI)
 if(MPI_CXX_FOUND)
-    include_directories(SYSTEM ${MPI_INCLUDE_PATH})
+    set(USE_MPI 1)
+    target_compile_definitions(rocprofiler-tests-mpi INTERFACE USE_MPI=1)
+    target_link_libraries(rocprofiler-tests-mpi INTERFACE stdc++fs ${MPI_C_LIBRARIES})
+    target_include_directories(rocprofiler-tests-mpi INTERFACE ${MPI_INCLUDE_PATH})
+endif()
+
+if(USE_MPI)
     set_source_files_properties(apps/vector_add_mpi.cpp
                                 PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
-    hip_add_executable(mpi_vectoradd apps/vector_add_mpi.cpp)
+    rocprofiler_featuretests_profiler_add_executable(mpi_vectoradd
+                                                     apps/vector_add_mpi.cpp)
     set_target_properties(
         mpi_vectoradd
         PROPERTIES RUNTIME_OUTPUT_DIRECTORY
@@ -98,24 +133,50 @@ if(MPI_CXX_FOUND)
             DESTINATION
                 ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/tests/featuretests/profiler/apps
             COMPONENT tests)
-    target_link_libraries(mpi_vectoradd ${MPI_C_LIBRARIES} stdc++fs)
+    target_link_libraries(mpi_vectoradd PRIVATE rocprofiler::tests-mpi)
 endif()
 
-# openmp_helloworld find_package(hip REQUIRED) find_package(OpenMP) if(OpenMP_CXX_FOUND) #
-# Source files. set_source_files_properties(gtests/apps/openmp/hello_world.cpp PROPERTIES
-# HIP_SOURCE_PROPERTY_FORMAT 1) hip_add_executable(openmp_helloworld
-# gtests/apps/openmp/hello_world.cpp) set_target_properties(openmp_helloworld PROPERTIES
-# RUNTIME_OUTPUT_DIRECTORY
-# "${PROJECT_BINARY_DIR}/tests-v2/featuretests/profiler/gtests/apps")
+# openmp_helloworld
+add_library(rocprofiler-tests-openmp INTERFACE)
+add_library(rocprofiler::tests-openmp ALIAS rocprofiler-tests-openmp)
 
-# # Link Libraries - HIP Device and OpenMP. target_compile_options(openmp_helloworld
-# PRIVATE ${OpenMP_CXX_FLAGS}) target_link_libraries(openmp_helloworld PRIVATE hip::device
-# ${OpenMP_CXX_FLAGS}) endif()
+find_package(OpenMP)
+if(OpenMP_CXX_FOUND)
+    set(USE_OpenMP 1)
+    target_compile_definitions(rocprofiler-tests-openmp INTERFACE USE_OpenMP=1)
+    target_link_libraries(rocprofiler-tests-openmp INTERFACE OpenMP::OpenMP_CXX
+                                                             hip::device)
+elseif()
+    message(WARNING "OpenMP not found")
+    unset(USE_OpenMP)
+endif()
+
+# if(USE_OpenMP)
+#     set_source_files_properties(apps/hello_world_omp.cpp
+#                                 PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+#     rocprofiler_featuretests_profiler_add_executable(openmp_helloworld
+#                                                      apps/hello_world_omp.cpp)
+#     set_target_properties(
+#         openmp_helloworld
+#         PROPERTIES RUNTIME_OUTPUT_DIRECTORY
+#                    "${PROJECT_BINARY_DIR}/tests-v2/featuretests/profiler/apps")
+
+#     target_link_options(openmp_helloworld PRIVATE "-Wl,--build-id=md5")
+#     target_link_libraries(openmp_helloworld PRIVATE rocprofiler::tests-openmp)
+
+#     install(
+#         TARGETS openmp_helloworld
+#         RUNTIME
+#             DESTINATION
+#                 ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/tests/featuretests/profiler/apps
+#             COMPONENT tests)
+# endif()
 
 # hsa-mem_async_copy -- Not Enabled for Now
 set_source_files_properties(apps/async_mem_copy.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT
                                                                1)
-hip_add_executable(hsa_async_mem_copy apps/async_mem_copy.cpp)
+rocprofiler_featuretests_profiler_add_executable(hsa_async_mem_copy
+                                                 apps/async_mem_copy.cpp)
 set_target_properties(
     hsa_async_mem_copy
     PROPERTIES RUNTIME_OUTPUT_DIRECTORY
@@ -147,8 +208,8 @@ file(GLOB GTEST_MAIN_SRC_FILE ${GTEST_MAIN_DIR}/gtests_main.cpp)
 
 set_source_files_properties(apps/multithreaded_testapp.cpp
                             PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
-hip_add_executable(multithreaded_testapp apps/multithreaded_testapp.cpp
-                   ../utils/test_utils.cpp)
+rocprofiler_featuretests_profiler_add_executable(
+    multithreaded_testapp apps/multithreaded_testapp.cpp ../utils/test_utils.cpp)
 target_include_directories(
     multithreaded_testapp
     PRIVATE ${PROJECT_SOURCE_DIR}
@@ -226,18 +287,20 @@ install(
             ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/tests/featuretests/profiler/apps
         COMPONENT tests)
 
-# add_executable(profiler_multiqueue_test discretetests/binary/multiqueue_test.cpp
-# utils/csv_parser.cpp  utils/test_utils.cpp)
-# target_include_directories(profiler_multiqueue_test PRIVATE ${PROJECT_SOURCE_DIR}
-# ${PROJECT_SOURCE_DIR}/tests-v2/featuretests/profiler)
-# target_link_libraries(profiler_multiqueue_test PRIVATE hsa-runtime64::hsa-runtime64
-# Threads::Threads dl stdc++fs amd_comgr) add_dependencies(tests profiler_multiqueue_test)
+set(runFeatureTests_SOURCES
+    profiler_gtest.cpp apps/hip_kernels.cpp ${GTEST_MAIN_SRC_FILE} ${CORE_HSA_SRC_FILES}
+    ${CORE_HW_SRC_FILES} ${CORE_UTILS_SRC_FILES} ${TEST_UTILS_SRC_FILES})
 
 set_source_files_properties(apps/hip_kernels.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
-hip_add_executable(
-    runFeatureTests profiler_gtest.cpp apps/hip_kernels.cpp ${GTEST_MAIN_SRC_FILE}
-    ${CORE_HSA_SRC_FILES} ${CORE_HW_SRC_FILES} ${CORE_UTILS_SRC_FILES}
-    ${TEST_UTILS_SRC_FILES})
+hip_add_executable(runFeatureTests ${runFeatureTests_SOURCES})
+
+# link MPI and OpenMP to runFeatureTests for visibility
+if(USE_MPI)
+    target_compile_definitions(runFeatureTests PRIVATE USE_MPI=1)
+endif()
+if(USE_OpenMP)
+    target_compile_definitions(runFeatureTests PRIVATE USE_OpenMP=1)
+endif()
 
 target_include_directories(
     runFeatureTests
@@ -253,7 +316,40 @@ target_link_options(runFeatureTests PRIVATE "-Wl,--build-id=md5")
 install(TARGETS runFeatureTests
         RUNTIME DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/tests
                 COMPONENT tests)
-add_test(AllTests runFeatureTests)
+
+# add_test(AllTests runFeatureTests)
+include(GoogleTest)
+
+set(GTEST_DISCOVER_TESTS_TARGET runFeatureTests)
+set(GTEST_DISCOVER_TESTS_LABELS "v2" "featuretests")
+set(GTEST_DISCOVER_TESTS_ENVIRONMENT ${ROCPROFILER_MEMCHECK_PRELOAD_ENV})
+configure_file(
+    ${PROJECT_SOURCE_DIR}/cmake_modules/Templates/gtest_discover_tests_properties.cmake.in
+    ${CMAKE_CURRENT_BINARY_DIR}/runFeatureTests_TestProperties.cmake @ONLY)
+
+# we cannot do LD_PRELOAD during test discovery but test discovery displays disabled tests
+# in CDash so below is the work-around
+# Commenting the first temporarily up till is fixed on Jenkins dockers
+# if(NOT ROCPROFILER_MEMCHECK MATCHES "(Thread|Address)Sanitizer")
+#     gtest_discover_tests(runFeatureTests)
+
+#     set_property(
+#         DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
+#         APPEND
+#         PROPERTY TEST_INCLUDE_FILES
+#                  ${CMAKE_CURRENT_BINARY_DIR}/runFeatureTests_TestProperties.cmake)
+# else()
+    gtest_add_tests(
+        TARGET runFeatureTests
+        SOURCES "${runFeatureTests_SOURCES}"
+        TEST_LIST runFeatureTests_TESTS)
+    include(${CMAKE_CURRENT_BINARY_DIR}/runFeatureTests_TestProperties.cmake)
+# endif()
+
+# for the *_FilePlugin tests
+if(NOT EXISTS "${PROJECT_BINARY_DIR}/test-output")
+    file(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}/test-output")
+endif()
 
 # Copy scripts, input files to samples folder
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/apps/goldentraces/basic_metrics.txt
@@ -268,3 +364,21 @@ install(
     DESTINATION
         ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/tests/featuretests/profiler/apps/goldentraces
     COMPONENT tests)
+
+find_package(
+    Python3
+    COMPONENTS Interpreter
+    REQUIRED)
+
+    execute_process(
+        COMMAND ${Python3_EXECUTABLE} -c "import pandas"
+        RESULT_VARIABLE PANDAS_HEADER_PARSER
+        OUTPUT_QUIET)
+    if(NOT ${PANDAS_HEADER_PARSER} EQUAL 0)
+        message(
+                "The \"pandas\" Python3 package is not installed. \
+                Please install it using the following command: \"${Python3_EXECUTABLE} -m pip install pandas\".")
+    else()
+        # cmake based tests
+        include(${CMAKE_CURRENT_LIST_DIR}/counter_validation_tests.cmake)
+    endif()

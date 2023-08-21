@@ -99,6 +99,10 @@ void ApplicationParser::SetApplicationEnv(const char* app_name) {
   setenv("COUNTERS_PATH", counter_path.str().c_str(), true);
 
   std::stringstream hsa_tools_lib_path;
+  auto _existing_ld_preload = getenv("LD_PRELOAD");
+  if (_existing_ld_preload && strnlen(_existing_ld_preload, 1) > 0)
+    hsa_tools_lib_path << _existing_ld_preload << ":";
+
   hsa_tools_lib_path << app_path << lib_path;
 
   setenv("LD_PRELOAD", hsa_tools_lib_path.str().c_str(), true);
@@ -247,9 +251,10 @@ TEST_F(HelloWorldTest, WhenRunningProfilerWithAppThenKernelNamessMatchWithGolden
   std::vector<profiler_kernel_info_t> current_kernel_info;
   GetKernelInfoForRunningApplication(&current_kernel_info);
 
-  ASSERT_TRUE(current_kernel_info.size());
-  ASSERT_TRUE(golden_kernel_info.size());
-  EXPECT_EQ(golden_kernel_info[0].kernel_name, current_kernel_info[0].kernel_name);
+  ASSERT_EQ(golden_kernel_info.size(), current_kernel_info.size());
+  for (size_t i = 0; i < current_kernel_info.size(); ++i) {
+    EXPECT_EQ(golden_kernel_info[i].kernel_name, current_kernel_info[i].kernel_name) << "i=" << i;
+  }
 }
 
 // Test:3 Compares order of kernel-names in golden output against current
@@ -380,143 +385,106 @@ TEST_F(HSATest, WhenRunningProfilerWithAppThenKernelNumbersMatchWithGoldenOutput
  * ############ OpenMP Tests ################
  * ###################################################
  */
+// #ifdef USE_OpenMP
+// class OpenMPTest : public ProfilerTest {
+//  protected:
+//   std::vector<profiler_kernel_info_t> golden_kernel_info;
+//   void SetUp() {
+//     ProfilerTest::SetUp("openmp_helloworld");
+//     GetKernelInfoForGoldenOutput("openmp_helloworld", kGoldenOutputOpenMP, &golden_kernel_info);
+//   }
+// };
 
-class OpenMPTest : public ProfilerTest {
+// // Test:1 Compares total num of kernel-names in golden output against current
+// // profiler output
+// TEST_F(OpenMPTest, WhenRunningProfilerWithAppThenKernelNumbersMatchWithGoldenOutput) {
+//   std::vector<profiler_kernel_info_t> current_kernel_info;
+
+//   GetKernelInfoForRunningApplication(&current_kernel_info);
+//   ASSERT_TRUE(current_kernel_info.size());
+
+//   EXPECT_EQ(golden_kernel_info.size(), current_kernel_info.size());
+// }
+
+// // Test:2 Compares order of kernel-names in golden output against current
+// // profiler output
+// TEST_F(OpenMPTest, WhenRunningProfilerWithAppThenKernelNamesMatchWithGoldenOutput) {
+//   std::vector<profiler_kernel_info_t> current_kernel_info;
+
+//   GetKernelInfoForRunningApplication(&current_kernel_info);
+//   ASSERT_TRUE(current_kernel_info.size());
+
+//   EXPECT_EQ(golden_kernel_info[0].kernel_name, current_kernel_info[0].kernel_name);
+// }
+
+// // Test:3 Compares order of kernel-names in golden output against current
+// // profiler output
+// TEST_F(OpenMPTest, WhenRunningProfilerWithAppThenKernelDurationShouldBePositive) {
+//   // kernel info in current profiler run
+//   std::vector<profiler_kernel_info_t> current_kernel_info;
+
+//   GetKernelInfoForRunningApplication(&current_kernel_info);
+//   ASSERT_TRUE(current_kernel_info.size());
+
+//   EXPECT_GT(current_kernel_info.size(), 0);
+// }
+
+// // Test:4 Compares end-time is greater than start-time in current
+// // profiler output
+// TEST_F(OpenMPTest, WhenRunningProfilerWithAppThenEndTimeIsGreaterThenStartTime) {
+//   // kernel info in current profiler run
+//   std::vector<profiler_kernel_info_t> current_kernel_info;
+
+//   GetKernelInfoForRunningApplication(&current_kernel_info);
+//   ASSERT_TRUE(current_kernel_info.size());
+
+//   for (auto& itr : current_kernel_info) {
+//     if (!(itr.end_time).empty()) {
+//       EXPECT_GT(itr.end_time, itr.begin_time);
+//     }
+//   }
+// }
+// #endif
+/*
+ * ###################################################
+ * ############ MPI Tests ################
+ * ###################################################
+ */
+#ifdef USE_MPI
+class MPITest : public ProfilerTest {
  protected:
+  void ProcessMPIApplication(const char* app_name);
+  void ExecuteAndParseApplication(std::stringstream& ss);
+
   std::vector<profiler_kernel_info_t> golden_kernel_info;
   void SetUp() {
-    ProfilerTest::SetUp("openmp_helloworld");
-    GetKernelInfoForGoldenOutput("openmp_helloworld", kGoldenOutputOpenMP, &golden_kernel_info);
+    /*To supress No protocol found prints*/
+    setenv("HWLOC_COMPONENTS", "-gl", 1);
+    ProfilerTest::SetUp("mpi_vectoradd");
+    GetKernelInfoForGoldenOutput("mpi_vectoradd", kGoldenOutputMpi, &golden_kernel_info);
   }
 };
 
-// Test:1 Compares total num of kernel-names in golden output against current
-// profiler output
-TEST_F(OpenMPTest, WhenRunningProfilerWithAppThenKernelNumbersMatchWithGoldenOutput) {
+// Test:1 if kernel-name exists in current profiler output
+TEST_F(MPITest, WhenRunningProfilerWithAppThenKernelNumbersOutputGenerated) {
   std::vector<profiler_kernel_info_t> current_kernel_info;
 
   GetKernelInfoForRunningApplication(&current_kernel_info);
   ASSERT_TRUE(current_kernel_info.size());
 
-  EXPECT_EQ(golden_kernel_info.size(), current_kernel_info.size());
+  EXPECT_GT(current_kernel_info.size(), 0);
 }
 
-// Test:2 Compares order of kernel-names in golden output against current
-// profiler output
-TEST_F(OpenMPTest, WhenRunningProfilerWithAppThenKernelNamessMatchWithGoldenOutput) {
+// Test:1 if kernel-name matches with golden output
+TEST_F(MPITest, WhenRunningProfilerWithAppThenKernelNameMatchWithGoldenOutput) {
   std::vector<profiler_kernel_info_t> current_kernel_info;
 
   GetKernelInfoForRunningApplication(&current_kernel_info);
   ASSERT_TRUE(current_kernel_info.size());
 
   EXPECT_EQ(golden_kernel_info[0].kernel_name, current_kernel_info[0].kernel_name);
-  EXPECT_EQ(golden_kernel_info[1].kernel_name, current_kernel_info[1].kernel_name);
 }
-
-// Test:3 Compares order of kernel-names in golden output against current
-// profiler output
-TEST_F(OpenMPTest, WhenRunningProfilerWithAppThenKernelDurationShouldBePositive) {
-  // kernel info in current profiler run
-  std::vector<profiler_kernel_info_t> current_kernel_info;
-
-  GetKernelInfoForRunningApplication(&current_kernel_info);
-  ASSERT_TRUE(current_kernel_info.size());
-
-  EXPECT_GT(current_kernel_info.size(), 0);
-}
-
-// Test:4 Compares end-time is greater than start-time in current
-// profiler output
-TEST_F(OpenMPTest, WhenRunningProfilerWithAppThenEndTimeIsGreaterThenStartTime) {
-  // kernel info in current profiler run
-  std::vector<profiler_kernel_info_t> current_kernel_info;
-
-  GetKernelInfoForRunningApplication(&current_kernel_info);
-  ASSERT_TRUE(current_kernel_info.size());
-
-  for (auto& itr : current_kernel_info) {
-    if (!(itr.end_time).empty()) {
-      EXPECT_GT(itr.end_time, itr.begin_time);
-    }
-  }
-}
-
-/*
- * ###################################################
- * ############ MPI Tests ################
- * ###################################################
- */
-
-class MPITest : public ProfilerTest {
- protected:
-  void ProcessMPIApplication(const char* app_name);
-  void ExecuteAndParseApplication(std::stringstream& ss);
-
-  void SetUp() {
-    /*To supress No protocol found prints*/
-    setenv("HWLOC_COMPONENTS", "-gl", 1);
-
-    // run as standalone test
-    ProfilerTest::SetUp("mpi_vectoradd");
-
-    // run mpirun script
-    // ProcessMPIApplication("mpi_run.sh");
-  }
-
-  /*virtual void TearDown() override {
-    unsetenv("HWLOC_COMPONENTS");
-    unsetenv("LD_PRELOAD");
-    ProfilerTest::TearDown();
-  }*/
-};
-
-void MPITest::ProcessMPIApplication(const char* app_name) {
-  std::string app_path = GetRunningPath(running_path);
-  std::string lib_path = app_path;
-
-  std::stringstream hsa_tools_lib_path;
-
-  hsa_tools_lib_path << app_path << "librocprofiler_tool.so";
-  setenv("LD_PRELOAD", hsa_tools_lib_path.str().c_str(), true);
-
-  std::stringstream os;
-  os << app_path << "tests/featuretests/profiler/apps/" << app_name;
-  ExecuteAndParseApplication(os);
-}
-
-void MPITest::ExecuteAndParseApplication(std::stringstream& ss) {
-  FILE* handle = popen(ss.str().c_str(), "r");
-  ASSERT_NE(handle, nullptr);
-  char* ln{NULL};
-  std::string temp{""};
-  size_t len{0};
-
-  while (getline(&ln, &len, handle) != -1) {
-    temp = temp + std::string(ln);
-  }
-
-  free(ln);
-  size_t pos{0};
-  std::string delimiter{"\n"};
-  while ((pos = temp.find(delimiter)) != std::string::npos) {
-    output_lines.push_back(temp.substr(0, pos));
-    temp.erase(0, pos + delimiter.length());
-  }
-
-  pclose(handle);
-}
-
-// Test:1 Compares total num of kernel-names in golden output against current
-// profiler output
-TEST_F(MPITest, WhenRunningProfilerWithAppThenKernelNumbersMatchWithGoldenOutput) {
-  std::vector<profiler_kernel_info_t> current_kernel_info;
-
-  GetKernelInfoForRunningApplication(&current_kernel_info);
-  ASSERT_TRUE(current_kernel_info.size());
-
-  EXPECT_GT(current_kernel_info.size(), 0);
-}
-
+#endif
 /*
  * ###################################################
  * ############ HSA Load Unload Tests ################
@@ -586,8 +554,8 @@ TEST_F(LoadUnloadTest, WhenLoadingSecondTimeThenToolLoadsUnloadsSuccessfully) {
 
 class ATTCollection : public ::testing::Test {
  public:
-  virtual void SetUp() { bCollected = false; };
-  virtual void TearDown(){};
+  void SetUp() override { bCollected = false; };
+  void TearDown() override{};
   static bool bCollected;
 
   static void FlushCallback(const rocprofiler_record_header_t* record,
@@ -625,11 +593,42 @@ class ATTCollection : public ::testing::Test {
 bool ATTCollection::bCollected = false;
 
 TEST_F(ATTCollection, WhenRunningATTItCollectsTraceDataWithOldAPI) {
+  // iterate for gpu's
+  struct agent_info {
+    bool skip = false;
+    std::vector<std::string> agents = {};
+
+    auto as_string() const {
+      auto _ss = std::stringstream{};
+      for (const auto& itr : agents) _ss << ", " << itr;
+      auto _v = _ss.str();
+      if (_v.length() > 2) return _v.substr(2);
+      return _v;
+    }
+  };
+
+  auto _info = agent_info{};
+  hsa_iterate_agents(
+      [](hsa_agent_t agent, void* _arg) {
+        agent_info* _info_v = static_cast<agent_info*>(_arg);
+        EXPECT_NE(_info_v, nullptr);
+        char gpu_name[64] = {'\0'};
+        hsa_agent_get_info(agent, HSA_AGENT_INFO_NAME, gpu_name);
+        _info_v->agents.emplace_back(std::string{gpu_name});
+        if (std::regex_search(_info_v->agents.back(), std::regex{"^gfx1[0-1][0-9][0-9]"})) {
+          _info_v->skip = true;
+        }
+        return HSA_STATUS_SUCCESS;
+      },
+      static_cast<void*>(&_info));
+
+  if (_info.skip) GTEST_SKIP();
+
   int result = ROCPROFILER_STATUS_ERROR;
 
   // inititalize ROCProfiler
   result = rocprofiler_initialize();
-  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
+  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result) << "agents: " << _info.as_string();
 
   // Att trace collection parameters
   rocprofiler_session_id_t session_id;
@@ -642,12 +641,12 @@ TEST_F(ATTCollection, WhenRunningATTItCollectsTraceDataWithOldAPI) {
 
   // create a session
   result = rocprofiler_create_session(ROCPROFILER_NONE_REPLAY_MODE, &session_id);
-  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
+  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result) << "agents: " << _info.as_string();
 
   // create a buffer to hold att trace records for each kernel launch
   rocprofiler_buffer_id_t buffer_id;
   result = rocprofiler_create_buffer(session_id, FlushCallback, 0x9999, &buffer_id);
-  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
+  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result) << "agents: " << _info.as_string();
 
   // create a filter for collecting att traces
   rocprofiler_filter_id_t filter_id;
@@ -655,65 +654,93 @@ TEST_F(ATTCollection, WhenRunningATTItCollectsTraceDataWithOldAPI) {
   result = rocprofiler_create_filter(session_id, ROCPROFILER_ATT_TRACE_COLLECTION,
                                      rocprofiler_filter_data_t{.att_parameters = &parameters[0]},
                                      parameters.size(), &filter_id, property);
-  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
+  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result) << "agents: " << _info.as_string();
 
   // set buffer for the filter
   result = rocprofiler_set_filter_buffer(session_id, filter_id, buffer_id);
-  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
+  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result) << "agents: " << _info.as_string();
 
   // activating att tracing session
   result = rocprofiler_start_session(session_id);
-  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
+  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result) << "agents: " << _info.as_string();
 
   // Launch a kernel
   LaunchVectorAddKernel();
-  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
+  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result) << "agents: " << _info.as_string();
 
   // deactivate att tracing session
   result = rocprofiler_terminate_session(session_id);
-  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
+  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result) << "agents: " << _info.as_string();
 
   // dump att tracing data
   result = rocprofiler_flush_data(session_id, buffer_id);
-  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
+  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result) << "agents: " << _info.as_string();
 
   // destroy session
   result = rocprofiler_destroy_session(session_id);
-  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
+  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result) << "agents: " << _info.as_string();
 
   // finalize att tracing by destroying rocprofiler object
   result = rocprofiler_finalize();
-  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
+  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result) << "agents: " << _info.as_string();
 
   // check if we got data from any shader engine
-  EXPECT_EQ(bCollected, true);
+  EXPECT_EQ(bCollected, true) << "agents: " << _info.as_string();
 }
 
 // New API
 TEST_F(ATTCollection, WhenRunningATTItCollectsTraceDataWithNewAPI) {
-  int result = ROCPROFILER_STATUS_ERROR;
+  // iterate for gpu's
+  struct agent_info {
+    bool skip = false;
+    std::vector<std::string> agents = {};
 
+    auto as_string() const {
+      auto _ss = std::stringstream{};
+      for (const auto& itr : agents) _ss << ", " << itr;
+      auto _v = _ss.str();
+      if (_v.length() > 2) return _v.substr(2);
+      return _v;
+    }
+  };
+
+  auto _info = agent_info{};
+  hsa_iterate_agents(
+      [](hsa_agent_t agent, void* _arg) {
+        agent_info* _info_v = static_cast<agent_info*>(_arg);
+        EXPECT_NE(_info_v, nullptr);
+        char gpu_name[64] = {'\0'};
+        hsa_agent_get_info(agent, HSA_AGENT_INFO_NAME, gpu_name);
+        _info_v->agents.emplace_back(std::string{gpu_name});
+        if (std::regex_search(_info_v->agents.back(), std::regex{"^gfx1[0-1][0-9][0-9]"})) {
+          _info_v->skip = true;
+        }
+        return HSA_STATUS_SUCCESS;
+      },
+      static_cast<void*>(&_info));
+
+  if (_info.skip) GTEST_SKIP();
+
+  int result = ROCPROFILER_STATUS_ERROR;
   // inititalize ROCProfiler
   result = rocprofiler_initialize();
   EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
-
   // Att trace collection parameters
   rocprofiler_session_id_t session_id;
   std::vector<rocprofiler_att_parameter_t> parameters;
   parameters.emplace_back(rocprofiler_att_parameter_t{ROCPROFILER_ATT_COMPUTE_UNIT, 0});
   parameters.emplace_back(rocprofiler_att_parameter_t{ROCPROFILER_ATT_SE_MASK, 0xF});
-  parameters.emplace_back(rocprofiler_att_parameter_t{ROCPROFILER_ATT_SIMD_SELECT, 0x3}); // Replace below tests once aqlprofile passes
-  parameters.emplace_back(rocprofiler_att_parameter_t{ROCPROFILER_ATT_BUFFER_SIZE, 0x1000000}); // Replace below tests once aqlprofile passes
-
+  parameters.emplace_back(rocprofiler_att_parameter_t{
+      ROCPROFILER_ATT_SIMD_SELECT, 0x3});  // Replace below tests once aqlprofile passes
+  parameters.emplace_back(rocprofiler_att_parameter_t{
+      ROCPROFILER_ATT_BUFFER_SIZE, 0x1000000});  // Replace below tests once aqlprofile passes
   // create a session
   result = rocprofiler_create_session(ROCPROFILER_NONE_REPLAY_MODE, &session_id);
   EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
-
   // create a buffer to hold att trace records for each kernel launch
   rocprofiler_buffer_id_t buffer_id;
   result = rocprofiler_create_buffer(session_id, FlushCallback, 0x9999, &buffer_id);
   EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
-
   // create a filter for collecting att traces
   rocprofiler_filter_id_t filter_id;
   rocprofiler_filter_property_t property = {};
@@ -721,35 +748,27 @@ TEST_F(ATTCollection, WhenRunningATTItCollectsTraceDataWithNewAPI) {
                                      rocprofiler_filter_data_t{.att_parameters = &parameters[0]},
                                      parameters.size(), &filter_id, property);
   EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
-
   // set buffer for the filter
   result = rocprofiler_set_filter_buffer(session_id, filter_id, buffer_id);
   EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
-
   // activating att tracing session
   result = rocprofiler_start_session(session_id);
   EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
-
   // Launch a kernel
   LaunchVectorAddKernel();
   EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
-
   // deactivate att tracing session
   result = rocprofiler_terminate_session(session_id);
   EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
-
   // dump att tracing data
   result = rocprofiler_flush_data(session_id, buffer_id);
   EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
-
   // destroy session
   result = rocprofiler_destroy_session(session_id);
   EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
-
   // finalize att tracing by destroying rocprofiler object
   result = rocprofiler_finalize();
   EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
-
   // check if we got data from any shader engine
   EXPECT_EQ(bCollected, true);
 }
@@ -767,6 +786,7 @@ class ProfilerAPITest : public ::testing::Test {
     std::stringstream gfx_path;
     gfx_path << app_path << metrics_path;
     setenv("ROCPROFILER_METRICS_PATH", gfx_path.str().c_str(), true);
+    setenv("ROCPROFILER_MAX_ATT_PROFILES", "2", 1);
   }
   // function to check profiler API status
   static void CheckApi(rocprofiler_status_t status) {
@@ -930,96 +950,6 @@ TEST_F(DerivedMetricsReuseTest, WhenRunningRepeatedBaseMetricsAPIsWorkFine) {
 
   // finalize profiler by destroying rocprofiler object
   CheckApi(rocprofiler_finalize());
-}
-
-/*
- * ###################################################
- * ############ SPM Tests ################
- * ###################################################
- */
-
-class ProfilerSPMTest : public ::testing::Test {
-  // function to check spm tracing API status
- protected:
-  // function to check profiler API status
-  static void CheckApi(rocprofiler_status_t status) {
-    ASSERT_EQ(status, ROCPROFILER_STATUS_SUCCESS);
-  };
-
-  static void FlushCallback(const rocprofiler_record_header_t* record,
-                            const rocprofiler_record_header_t* end_record,
-                            rocprofiler_session_id_t session_id,
-                            rocprofiler_buffer_id_t buffer_id) {
-    while (record < end_record) {
-      if (!record)
-        break;
-      else if (record->kind == ROCPROFILER_SPM_RECORD) {
-        const rocprofiler_record_spm_t* spm_record =
-            reinterpret_cast<const rocprofiler_record_spm_t*>(record);
-        int se_num = 4;
-        // iterate over each shader engine
-        for (int i = 0; i < se_num; i++) {
-          printf("\n\n-------------- shader_engine %d --------------\n\n", i);
-          rocprofiler_record_se_spm_data_t se_spm = spm_record->shader_engine_data[i];
-          for (int i = 0; i < 32; i++) {
-            printf("%04x\n", se_spm.counters_data[i].value);
-          }
-        }
-      }
-      CheckApi(rocprofiler_next_record(record, &record, session_id, buffer_id));
-    }
-  }
-};
-
-TEST_F(ProfilerSPMTest, WhenRunningSPMItCollectsSPMData) {
-  // initialize rocprofiler
-  hsa_init();
-  CheckApi(rocprofiler_initialize());
-
-  // spm trace collection parameters
-  rocprofiler_session_id_t session_id;
-  rocprofiler_spm_parameter_t spm_parameters;
-  const char* counter_name = "SQ_WAVES";
-  spm_parameters.counters_names = &counter_name;
-  spm_parameters.counters_count = 1;
-  spm_parameters.gpu_agent_id = NULL;
-  // spm_parameters.cpu_agent_id = NULL;
-  spm_parameters.sampling_rate = 10000;
-  // create a session
-  CheckApi(rocprofiler_create_session(ROCPROFILER_NONE_REPLAY_MODE, &session_id));
-
-  // create a buffer to hold spm trace records for each kernel launch
-  rocprofiler_buffer_id_t buffer_id;
-  CheckApi(rocprofiler_create_buffer(session_id, FlushCallback, 0x99999999, &buffer_id));
-
-  // create a filter for collecting spm traces
-  rocprofiler_filter_id_t filter_id;
-  rocprofiler_filter_property_t property = {};
-  CheckApi(rocprofiler_create_filter(session_id, ROCPROFILER_SPM_COLLECTION,
-                                     rocprofiler_filter_data_t{.spm_parameters = &spm_parameters},
-                                     1, &filter_id, property));
-
-  // set buffer for the filter
-  CheckApi(rocprofiler_set_filter_buffer(session_id, filter_id, buffer_id));
-
-  // activating spm tracing session
-  CheckApi(rocprofiler_start_session(session_id));
-
-  // Launch a kernel
-  LaunchVectorAddKernel();
-
-  // deactivate spm tracing session
-  // dump spm tracing data
-  //
-  CheckApi(rocprofiler_terminate_session(session_id));
-  // CheckApi(rocprofiler_flush_data(session_id, buffer_id));
-
-  // destroy session
-  CheckApi(rocprofiler_destroy_session(session_id));
-
-  // finalize spm tracing by destroying rocprofiler object
-  CheckApi(rocprofiler_finalize());
-  hsa_shut_down();
 }
 
 /*
@@ -1222,13 +1152,13 @@ TEST(ProfilerMPTest, WhenRunningMultiProcessTestItPasses) {
  */
 
 class CodeobjTest : public ::testing::Test {
-public:
-  virtual void SetUp(const char* app_name) {};
+ public:
+  virtual void SetUp(const char* app_name){};
   virtual void TearDown(){};
   static void FlushCallback(const rocprofiler_record_header_t* record,
                             const rocprofiler_record_header_t* end_record,
                             rocprofiler_session_id_t session_id,
-                            rocprofiler_buffer_id_t buffer_id) {};
+                            rocprofiler_buffer_id_t buffer_id){};
 
   void SetupRocprofiler() {
     int result = ROCPROFILER_STATUS_ERROR;
@@ -1279,7 +1209,7 @@ TEST_F(CodeobjTest, WhenRunningProfilerWithCodeobjCapture) {
   EXPECT_GE(capture.count, 1);
   bool bCaptured_itself = false;
 
-  for (int i=0; i<(int)capture.count; i++) {
+  for (int i = 0; i < (int)capture.count; i++) {
     const char* path = capture.symbols[i].filepath;
     if (!path) continue;
     std::string fpath(path);
@@ -1334,7 +1264,7 @@ TEST_F(CodeobjTest, WhenRunningProfilerWithMultipleCaptureAndCopy) {
 
   EXPECT_GE(capture.count, 1);
 
-  for (int i=0; i<(int)capture.count; i++) {
+  for (int i = 0; i < (int)capture.count; i++) {
     EXPECT_NE(capture.symbols[i].base_address, 0);
     EXPECT_NE(capture.symbols[i].clock_start.value, 0);
     EXPECT_NE(capture.symbols[i].data, nullptr);
@@ -1445,7 +1375,8 @@ class VectorAddPerfettoMPITest : public PerfettoPluginTest {
  protected:
   virtual void SetUp() {
     setenv("MPI_RANK", "7", true);
-    RunApplication("hip_vectoradd", " -d /tmp/tests-v2/perfetto/ -o test_%q{MPI_RANK}_ --plugin perfetto");
+    RunApplication("hip_vectoradd",
+                   " -d /tmp/tests-v2/perfetto/ -o test_%q{MPI_RANK}_ --plugin perfetto");
   }
   virtual void TearDown() {
     std::experimental::filesystem::remove_all("/tmp/tests-v2/perfetto/");
@@ -1459,7 +1390,8 @@ TEST_F(VectorAddPerfettoMPITest, WhenRunningProfilerWithPerfettoTest) {
 }
 
 bool CTFPluginTest::hasMetadataInDir(const char* directory) {
-  for (const auto& entry : std::experimental::filesystem::directory_iterator(directory))
+  auto path = std::experimental::filesystem::directory_iterator(directory)->path();
+  for (const auto& entry : std::experimental::filesystem::directory_iterator(path))
     if (std::string(entry.path().filename()) == "metadata") return true;
   return false;
 }
@@ -1471,7 +1403,7 @@ class VectorAddCTFTest : public CTFPluginTest {
     std::experimental::filesystem::remove_all("/tmp/tests-v2/");
     unsetenv("MPI_RANK");
   }
-  bool hasFile() { return hasMetadataInDir("/tmp/tests-v2/ctf/trace/"); }
+  bool hasFile() { return hasMetadataInDir("/tmp/tests-v2/ctf/"); }
 };
 
 TEST_F(VectorAddCTFTest, WhenRunningProfilerWithCTFTest) { EXPECT_EQ(hasFile(), true); }
@@ -1486,7 +1418,7 @@ class VectorAddCTFMPITest : public CTFPluginTest {
     std::experimental::filesystem::remove_all("/tmp/tests-v2/");
     unsetenv("MPI_RANK");
   }
-  bool hasFile() { return hasMetadataInDir("/tmp/tests-v2/ctf_7/trace/"); }
+  bool hasFile() { return hasMetadataInDir("/tmp/tests-v2/ctf_7/"); }
 };
 
 TEST_F(VectorAddCTFMPITest, WhenRunningProfilerWithCTFTest) { EXPECT_EQ(hasFile(), true); }

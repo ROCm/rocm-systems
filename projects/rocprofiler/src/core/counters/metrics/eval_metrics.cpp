@@ -46,7 +46,7 @@ hsa_status_t pmcCallback(hsa_ven_amd_aqlprofile_info_type_t info_type,
     if (info_type == HSA_VEN_AMD_AQLPROFILE_INFO_PMC_DATA) {
       if (IsEventMatch(info_data->pmc_data.event, (*data_it)->event)) {
         uint32_t xcc_index = floor(passed_data->index / passed_data->single_xcc_buff_size);
-        (*data_it)->xcc_vals[xcc_index] +=
+        (*data_it)->xcc_vals.at(xcc_index) +=
             info_data->pmc_data.result;  // stores event result from each xcc separately
         (*data_it)->val_double +=
             info_data->pmc_data.result;  // stores accumulated event result from all xccs

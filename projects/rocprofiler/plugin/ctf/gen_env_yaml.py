@@ -24,10 +24,14 @@ import sys
 import yaml
 
 
-if __name__ == '__main__':
-    with open('env.yaml', 'w') as f:
-        f.write(yaml.dump({
-            'environment': {
-                'rocprofiler_version': sys.argv[1],
-            }
-        }))
+if __name__ == "__main__":
+    with open("env.yaml", "w") as f:
+        f.write(
+            yaml.dump(
+                {
+                    "environment": {
+                        "rocprofiler_version": sys.argv[1],
+                    }
+                }
+            )
+        )

@@ -20,6 +20,30 @@
 # SOFTWARE.
 # ##############################################################################
 
+# ##############################################################################
+# Copyright (c) 2018 Advanced Micro Devices, Inc. All rights reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+# ##############################################################################
+
+# Setup unit testing env
+
 find_library(PCIACCESS_LIBRARIES pciaccess REQUIRED)
 
 enable_testing()
@@ -55,14 +79,14 @@ file(GLOB ROCPROFILER_TRACER_SRC_FILES
      ${PROJECT_SOURCE_DIR}/src/core/session/tracer/*.cpp)
 file(GLOB ROCPROFILER_ROCTRACER_SRC_FILES
      ${PROJECT_SOURCE_DIR}/src/core/session/tracer/src/*.cpp)
-     file(GLOB ROCPROFILER_ATT_SRC_FILES ${PROJECT_SOURCE_DIR}/src/core/session/att/*.cpp)
-     file(GLOB ROCPROFILER_SRC_CLASS_FILES
-          ${CMAKE_CURRENT_SOURCE_DIR}/rocprofiler_singleton.cpp)
-     file(GLOB ROCPROFILER_ISA_SRC_FILES ${PROJECT_SOURCE_DIR}/src/core/isa_capture/*.cpp)
-     file(GLOB ROCPROFILER_SPM_SRC_FILES ${PROJECT_SOURCE_DIR}/src/core/session/spm/spm.cpp)
-     file(GLOB ROCPROFILER_SRC_API_FILES ${PROJECT_SOURCE_DIR}/src/api/*.cpp)
-     set(ROCPROFILER_SRC_FILES ${ROCPROFILER_SRC_API_FILES} ${ROCPROFILER_ATT_SRC_FILES}
-          ${ROCPROFILER_ISA_SRC_FILES} ${ROCPROFILER_SRC_PROFILER_FILES} ${ROCPROFILER_ATT_SRC_FILES})
+file(GLOB ROCPROFILER_ATT_SRC_FILES ${PROJECT_SOURCE_DIR}/src/core/session/att/*.cpp)
+file(GLOB ROCPROFILER_SRC_CLASS_FILES
+     ${CMAKE_CURRENT_SOURCE_DIR}/rocprofiler_singleton.cpp)
+file(GLOB ROCPROFILER_ISA_SRC_FILES ${PROJECT_SOURCE_DIR}/src/core/isa_capture/*.cpp)
+file(GLOB ROCPROFILER_SPM_SRC_FILES ${PROJECT_SOURCE_DIR}/src/core/session/spm/spm.cpp)
+file(GLOB ROCPROFILER_SRC_API_FILES ${PROJECT_SOURCE_DIR}/src/api/*.cpp)
+set(ROCPROFILER_SRC_FILES ${ROCPROFILER_SRC_API_FILES} ${ROCPROFILER_ATT_SRC_FILES}
+     ${ROCPROFILER_ISA_SRC_FILES} ${ROCPROFILER_SRC_PROFILER_FILES} ${ROCPROFILER_ATT_SRC_FILES})
 
 set(CORE_HSA_DIR ${PROJECT_SOURCE_DIR}/src/core/hsa)
 file(GLOB CORE_HSA_SRC_FILES ${CORE_HSA_DIR}/*.cpp)
@@ -81,10 +105,14 @@ file(GLOB CORE_COUNTERS_PARENT_SRC_FILES ${PROJECT_SOURCE_DIR}/src/core/counters
 file(GLOB CORE_COUNTERS_METRICS_SRC_FILES
      ${PROJECT_SOURCE_DIR}/src/core/counters/metrics/*.cpp)
 file(GLOB CORE_COUNTERS_MMIO_SRC_FILES ${PROJECT_SOURCE_DIR}/src/core/counters/mmio/*.cpp)
-set(GTEST_MAIN_DIR ${PROJECT_SOURCE_DIR}/tests-v2/unittests/core)
-file(GLOB GTEST_MAIN_SRC_FILE ${GTEST_MAIN_DIR}/gtests_main.cpp)
-add_executable(
-    runCoreUnitTests
+file(GLOB HSASingleton_TEST_SRC_FILES ${CMAKE_CURRENT_SOURCE_DIR}/HSASingleton/*.cpp)
+file(GLOB ROCProfiler_Singleton_TEST_SRC_FILES ${CMAKE_CURRENT_SOURCE_DIR}/ROCProfiler_Singleton/*.cpp)
+file(GLOB GTEST_SRC_FILES ${CMAKE_CURRENT_SOURCE_DIR}/*.cpp)
+
+set(runCoreUnitTests_SOURCES
+    ${GTEST_SRC_FILES}
+    ${HSASingleton_TEST_SRC_FILES}
+    ${ROCProfiler_Singleton_TEST_SRC_FILES}
     ${CORE_MEMORY_SRC_FILES}
     ${CORE_SESSION_SRC_FILES}
     ${CORE_FILTER_SRC_FILES}
@@ -103,31 +131,56 @@ add_executable(
     ${CORE_COUNTERS_METRICS_SRC_FILES}
     ${CORE_COUNTERS_MMIO_SRC_FILES}
     ${CORE_COUNTERS_PARENT_SRC_FILES}
-    ${CORE_PC_SAMPLING_FILES}
-    ${GTEST_MAIN_SRC_FILE}
-    ${CMAKE_CURRENT_SOURCE_DIR}/ROCProfiler_Singleton/ROCProfiler_Singleton_unittests.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/HSASingleton/HSASingleton_unittests.cpp
-   )
+    ${CORE_PC_SAMPLING_FILES})
+
+add_executable(runCoreUnitTests ${runCoreUnitTests_SOURCES})
 
 target_include_directories(
-    runCoreUnitTests
-    PRIVATE ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/src ${PROJECT_SOURCE_DIR}/inc
+     runCoreUnitTests
+     PRIVATE ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/src ${PROJECT_SOURCE_DIR}/inc
             ${CMAKE_CURRENT_SOURCE_DIR} ${PROJECT_BINARY_DIR}
             ${PROJECT_BINARY_DIR}/rocprofiler)
 
 target_compile_definitions(
-    runCoreUnitTests
-    PUBLIC AMD_INTERNAL_BUILD
-    PRIVATE PROF_API_IMPL HIP_PROF_HIP_API_STRING=1 __HIP_PLATFORM_AMD__=1)
-
+     runCoreUnitTests
+     PUBLIC AMD_INTERNAL_BUILD
+     PRIVATE PROF_API_IMPL HIP_PROF_HIP_API_STRING=1 __HIP_PLATFORM_AMD__=1)
 
 target_link_libraries(
-    runCoreUnitTests PRIVATE  rocprofiler_tool test_hsatool_library ${AQLPROFILE_LIB} hsa-runtime64::hsa-runtime64
+     runCoreUnitTests PRIVATE rocprofiler_tool test_hsatool_library ${AQLPROFILE_LIB} hsa-runtime64::hsa-runtime64
                          GTest::gtest GTest::gtest_main stdc++fs ${PCIACCESS_LIBRARIES})
-
 
 add_dependencies(tests runCoreUnitTests)
 install(TARGETS runCoreUnitTests
         RUNTIME DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/tests
                 COMPONENT tests)
-add_test(AllTests runCoreUnitTests)
+
+# add_test(AllTests runCoreUnitTests)
+include(GoogleTest)
+
+set(GTEST_DISCOVER_TESTS_TARGET runCoreUnitTests)
+set(GTEST_DISCOVER_TESTS_LABELS "v2" "unittests")
+set(GTEST_DISCOVER_TESTS_ENVIRONMENT ${ROCPROFILER_MEMCHECK_PRELOAD_ENV})
+configure_file(
+    ${PROJECT_SOURCE_DIR}/cmake_modules/Templates/gtest_discover_tests_properties.cmake.in
+    ${CMAKE_CURRENT_BINARY_DIR}/runUnitTests_TestProperties.cmake @ONLY)
+
+if(NOT ROCPROFILER_MEMCHECK MATCHES "(Thread|Address)Sanitizer")
+    gtest_discover_tests(runCoreUnitTests)
+    set_property(
+        DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
+        APPEND
+        PROPERTY TEST_INCLUDE_FILES
+                 ${CMAKE_CURRENT_BINARY_DIR}/runUnitTests_TestProperties.cmake)
+else()
+    gtest_add_tests(
+        TARGET runCoreUnitTests
+        SOURCES "${runUnitTests_SOURCES}"
+        TEST_LIST runUnitTests_TESTS)
+    include(${CMAKE_CURRENT_BINARY_DIR}/runUnitTests_TestProperties.cmake)
+endif()
+
+# for the *_FilePlugin tests
+if(NOT EXISTS "${PROJECT_BINARY_DIR}/test-output")
+    file(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}/test-output")
+endif()

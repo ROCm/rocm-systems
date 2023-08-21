@@ -1,8 +1,13 @@
-#!/bin/bash
+#!/bin/bash -e
+
 set -eo pipefail
-CURRENT_DIR="$(dirname -- "$0")"
-ROCPROFV2_DIR=$(dirname -- $(realpath ${BASH_SOURCE[0]}))
-ROCM_DIR=$(dirname -- "$ROCPROFV2_DIR")
+
+# LD_PRELOAD on script will not get propagated
+if [ -n "${ROCP_PRELOAD}" ]; then LD_PRELOAD="${ROCP_PRELOAD}"; fi
+
+CURRENT_DIR="$( dirname -- "$0"; )";
+ROCPROFV2_DIR=$(dirname -- $(realpath ${BASH_SOURCE[0]}));
+ROCM_DIR=$( dirname -- "$ROCPROFV2_DIR"; )
 PLUGIN_LIST=("ctf" "perfetto" "file" "att")
 RUN_FROM_BUILD=0
 if [[ $ROCPROFV2_DIR == *"/build"* ]]; then

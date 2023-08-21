@@ -22,7 +22,7 @@
 
 # Parses the VERSION_STRING variable and places the first, second and third number values
 # in the major, minor and patch variables.
-function(parse_version VERSION_STRING)
+function(rocprofiler_parse_version VERSION_STRING)
 
     string(FIND ${VERSION_STRING} "-" STRING_INDEX)
 
@@ -72,9 +72,9 @@ endfunction()
 
 # Gets the current version of the repository using versioning tags and git describe.
 # Passes back a packaging version string and a library version string.
-function(get_version DEFAULT_VERSION_STRING)
+function(rocprofiler_get_version DEFAULT_VERSION_STRING)
 
-    parse_version(${DEFAULT_VERSION_STRING})
+    rocprofiler_parse_version(${DEFAULT_VERSION_STRING})
 
     find_program(GIT NAMES git)
 
@@ -89,7 +89,7 @@ function(get_version DEFAULT_VERSION_STRING)
 
         if(${RESULT} EQUAL 0)
 
-            parse_version(${GIT_TAG_STRING})
+            rocprofiler_parse_version(${GIT_TAG_STRING})
 
         endif()
 

@@ -198,7 +198,6 @@ class Profile {
       status = api->hsa_ven_amd_aqlprofile_stop(&profile_, &stop);
       if (status != HSA_STATUS_SUCCESS) AQL_EXC_RAISING(status, "aqlprofile_stop");
       hsa_status_t rd_status = HSA_STATUS_ERROR;
-#ifdef AQLPROF_NEW_API
       if (profile_.type == HSA_VEN_AMD_AQLPROFILE_EVENT_TYPE_PMC) {
         rd_status = api->hsa_ven_amd_aqlprofile_read(&profile_, &read);
         if (is_concurrent) {  // concurrent: one more read
@@ -208,7 +207,6 @@ class Profile {
       }
 #if 0  // Read API returns error if disabled
       if (rd_status != HSA_STATUS_SUCCESS) AQL_EXC_RAISING(status, "aqlprofile_read");
-#endif
 #endif
 
       // Set completion signal of start

@@ -33,12 +33,12 @@ class _NumericFt:
     # Returns the C++ expression to cast the expression `expr` to the C
     # type of this field type.
     def cast(self, expr):
-        return f'static_cast<{self.c_type}>({expr})'
+        return f"static_cast<{self.c_type}>({expr})"
 
 
 # Integer field type (abstract).
 class _IntFt(_NumericFt):
-    def __init__(self, size, pref_disp_base='dec'):
+    def __init__(self, size, pref_disp_base="dec"):
         self._size = size
         self._pref_disp_base = pref_disp_base
 
@@ -56,8 +56,8 @@ class _IntFt(_NumericFt):
     @property
     def barectf_yaml(self):
         return {
-            'size': self._size,
-            'preferred-display-base': self._pref_disp_base,
+            "size": self._size,
+            "preferred-display-base": self._pref_disp_base,
         }
 
 
@@ -67,13 +67,13 @@ class _SIntFt(_IntFt):
     @property
     def barectf_yaml(self):
         ret = super().barectf_yaml
-        ret['class'] = 'sint'
+        ret["class"] = "sint"
         return ret
 
     # Equivalent C type
     @property
     def c_type(self):
-        return f'std::int{self._size}_t'
+        return f"std::int{self._size}_t"
 
 
 # Unsigned integer field type.
@@ -82,24 +82,24 @@ class _UIntFt(_IntFt):
     @property
     def barectf_yaml(self):
         ret = super().barectf_yaml
-        ret['class'] = 'uint'
+        ret["class"] = "uint"
         return ret
 
     # Equivalent C type.
     @property
     def c_type(self):
-        return f'std::uint{self._size}_t'
+        return f"std::uint{self._size}_t"
 
 
 # Pointer field type.
 class _PointerFt(_UIntFt):
     def __init__(self):
-        super().__init__(64, 'hex')
+        super().__init__(64, "hex")
 
     # Returns the C++ expression to cast the expression `expr` to the C
     # type of this field type.
     def cast(self, expr):
-        return f'static_cast<{self.c_type}>(reinterpret_cast<std::uintptr_t>({expr}))'
+        return f"static_cast<{self.c_type}>(reinterpret_cast<std::uintptr_t>({expr}))"
 
 
 # Enumeration field type (abstract).
@@ -122,7 +122,7 @@ class _EnumFt(_IntFt):
         for name, val in self._mappings.items():
             mappings[name] = [val]
 
-        ret['mappings'] = mappings
+        ret["mappings"] = mappings
         return ret
 
 
@@ -132,7 +132,7 @@ class _UEnumFt(_EnumFt, _UIntFt):
     @property
     def barectf_yaml(self):
         ret = super().barectf_yaml
-        ret['class'] = 'uenum'
+        ret["class"] = "uenum"
         return ret
 
 
@@ -142,7 +142,7 @@ class _SEnumFt(_EnumFt, _UIntFt):
     @property
     def barectf_yaml(self):
         ret = super().barectf_yaml
-        ret['class'] = 'senum'
+        ret["class"] = "senum"
         return ret
 
 
@@ -152,7 +152,7 @@ class _OptStrFt:
     @property
     def barectf_yaml(self):
         return {
-            'class': 'str',
+            "class": "str",
         }
 
 
@@ -175,18 +175,18 @@ class _FloatFt(_NumericFt):
     @property
     def barectf_yaml(self):
         return {
-            'class': 'real',
-            'size': self._size,
+            "class": "real",
+            "size": self._size,
         }
 
     # Equivalent C type.
     @property
     def c_type(self):
         if self._size == 32:
-            return 'float'
+            return "float"
         else:
             assert self._size == 64
-            return 'double'
+            return "double"
 
 
 # Event record type.
@@ -210,16 +210,16 @@ class _Ert:
 class _BeginErt(_Ert):
     # Name of event record type depending on the API prefix.
     def name(self, api_prefix):
-        suffix = '_begin' if api_prefix == 'hsa' else 'Begin'
-        return f'{self._api_func_name}{suffix}'
+        suffix = "_begin" if api_prefix == "hsa" else "Begin"
+        return f"{self._api_func_name}{suffix}"
 
 
 # End event record type.
 class _EndErt(_Ert):
     # Name of event record type depending on the API prefix.
     def name(self, api_prefix):
-        suffix = '_end' if api_prefix == 'hsa' else 'End'
-        return f'{self._api_func_name}{suffix}'
+        suffix = "_end" if api_prefix == "hsa" else "End"
+        return f"{self._api_func_name}{suffix}"
 
 
 # Event record type member.
@@ -251,20 +251,20 @@ class _ErtMember:
 # This is an unconditional assertion.
 def _make_sure(cond, error_msg):
     if not cond:
-        print(f'Error: {error_msg}', file=sys.stderr)
+        print(f"Error: {error_msg}", file=sys.stderr)
         sys.exit(1)
 
 
 def _enumerator_effective_val(enum_val):
     # Try the value, but this value may be a string (an
     # enumerator/definition).
-    val = enum_val.get('value')
+    val = enum_val.get("value")
 
     if type(val) is int:
         return val
 
     # Try the raw value.
-    val = enum_val.get('raw_value')
+    val = enum_val.get("raw_value")
 
     if val is not None:
         if type(val) is int:
@@ -277,58 +277,61 @@ def _enumerator_effective_val(enum_val):
             except:
                 pass
 
-    _make_sure(False,
-               f'Cannot get the integral value of enumerator `{enum_val["name"]}`')
+    _make_sure(False, f'Cannot get the integral value of enumerator `{enum_val["name"]}`')
 
 
 # Returns the equivalent field type of the C type `c_type`.
 def _number_ft_from_c_type(cpp_header, c_type):
     # Check for known enumeration.
-    m = re.match(r'(?:enum\s+)?(\w+)', c_type)
+    m = re.match(r"(?:enum\s+)?(\w+)", c_type)
 
     if m:
         size = 32
 
         for enum_info in cpp_header.enums:
-            if m.group(1) == enum_info.get('name'):
+            if m.group(1) == enum_info.get("name"):
                 # Fill enumeration field type mappings.
                 mappings = {
-                    str(v['name']): _enumerator_effective_val(v)
-                    for v in enum_info['values']
+                    str(v["name"]): _enumerator_effective_val(v)
+                    for v in enum_info["values"]
                 }
 
                 if len(mappings) == 0:
                     return _SIntFt(64)
 
-                if max(mappings.values()) >= 2**31 or min(mappings.values()) < -2**31:
+                if max(mappings.values()) >= 2**31 or min(mappings.values()) < -(
+                    2**31
+                ):
                     size = 64
 
-                _make_sure(len(mappings) > 0, f'Enumeration `{enum_info["name"]}` is empty')
+                _make_sure(
+                    len(mappings) > 0, f'Enumeration `{enum_info["name"]}` is empty'
+                )
 
                 # Create corresponding enumeration field type.
                 return _SEnumFt(size, mappings)
 
     # Find corresponding basic field type.
-    is_unsigned = 'unsigned' in c_type
+    is_unsigned = "unsigned" in c_type
 
-    if 'long' in c_type:
+    if "long" in c_type:
         if is_unsigned:
             return _UIntFt(64)
         else:
             return _SIntFt(64)
-    elif 'short' in c_type:
+    elif "short" in c_type:
         if is_unsigned:
             return _UIntFt(16)
         else:
             return _SIntFt(16)
-    elif 'char' in c_type:
+    elif "char" in c_type:
         if is_unsigned:
             return _UIntFt(8)
         else:
             return _SIntFt(8)
-    elif 'float' in c_type:
+    elif "float" in c_type:
         return _FloatFt(32)
-    elif 'double' in c_type:
+    elif "double" in c_type:
         return _FloatFt(64)
     else:
         # Assume `int` (often an unresolved C enumeration).
@@ -340,23 +343,23 @@ def _number_ft_from_c_type(cpp_header, c_type):
 
 # Returns whether or not a property has a pointer type.
 def _prop_is_pointer(prop, c_type):
-    if prop['pointer'] or prop['function_pointer']:
+    if prop["pointer"] or prop["function_pointer"]:
         return True
 
-    if prop['array'] and 'array_size' in prop:
+    if prop["array"] and "array_size" in prop:
         return True
 
-    if prop['unresolved']:
+    if prop["unresolved"]:
         # HSA API function pointers.
-        if prop['name'] in ('callback', 'handler'):
+        if prop["name"] in ("callback", "handler"):
             return True
 
         # HIP API function pointers.
-        if c_type.endswith('Fn_t'):
+        if c_type.endswith("Fn_t"):
             return True
 
     # Check the C type itself.
-    if '*' in c_type or '*' in prop.get('raw_type', ''):
+    if "*" in c_type or "*" in prop.get("raw_type", ""):
         return True
 
     return False
@@ -369,24 +372,24 @@ def _get_ert_members_for_struct(cpp_header, struct, access, member_names):
     members = []
     member_names = member_names.copy()
     member_names.append(None)
-    props = struct['properties']['public']
+    props = struct["properties"]["public"]
 
     for index, prop in enumerate(props):
         # Property name.
-        name = prop['name']
+        name = prop["name"]
 
         # Member names, access, and C type.
         member_names[-1] = str(name)
-        this_access = f'{access}.{name}'
-        c_type = prop['type']
-        aliases = prop['aliases']
+        this_access = f"{access}.{name}"
+        c_type = prop["type"]
+        aliases = prop["aliases"]
 
         # Skip no type.
-        if c_type == '':
+        if c_type == "":
             continue
 
         # Skip unnamed or union.
-        if name == '' or 'union' in name or re.match(r'\bunion\b', c_type):
+        if name == "" or "union" in name or re.match(r"\bunion\b", c_type):
             continue
 
         # Check for known C type alias.
@@ -399,8 +402,7 @@ def _get_ert_members_for_struct(cpp_header, struct, access, member_names):
             c_type = c_type_alias
 
         # Check for C string.
-        if re.match(r'^((const\s+char)|(char\s+const)|char)\s*\*$',
-                    c_type.strip()):
+        if re.match(r"^((const\s+char)|(char\s+const)|char)\s*\*$", c_type.strip()):
             members.append(_ErtMember(this_access, member_names, _OptStrFt()))
             continue
 
@@ -417,13 +419,17 @@ def _get_ert_members_for_struct(cpp_header, struct, access, member_names):
             sub_struct = cpp_header.classes.get(aliases[0])
 
         if sub_struct is not None:
-            members += _get_ert_members_for_struct(cpp_header, sub_struct,
-                                                   this_access, member_names)
+            members += _get_ert_members_for_struct(
+                cpp_header, sub_struct, this_access, member_names
+            )
             continue
 
         # Use a basic field type.
-        members.append(_ErtMember(this_access, member_names,
-                                  _number_ft_from_c_type(cpp_header, c_type)))
+        members.append(
+            _ErtMember(
+                this_access, member_names, _number_ft_from_c_type(cpp_header, c_type)
+            )
+        )
 
     return members
 
@@ -439,40 +445,48 @@ def _erts_from_cb_data_struct(api_prefix, cpp_header, retval_info, struct):
     if retval_info is not None:
         args_nested_cls_index = 1
         retval_members = {}
-        nested_classes = struct['nested_classes']
-        _make_sure(len(nested_classes) >= 1,
-                   f"Return value union doesn't exist in `{struct['name']}`")
+        nested_classes = struct["nested_classes"]
+        _make_sure(
+            len(nested_classes) >= 1,
+            f"Return value union doesn't exist in `{struct['name']}`",
+        )
         retval_union = nested_classes[0]
 
-        for prop in retval_union['properties']['public']:
-            name = str(prop['name'])
-            member = _ErtMember(f'GetApiData().{name}', ['retval'],
-                                _number_ft_from_c_type(cpp_header, prop['type']))
-            retval_members[prop['name']] = member
+        for prop in retval_union["properties"]["public"]:
+            name = str(prop["name"])
+            member = _ErtMember(
+                f"GetApiData().{name}",
+                ["retval"],
+                _number_ft_from_c_type(cpp_header, prop["type"]),
+            )
+            retval_members[prop["name"]] = member
 
         # Make sure we have everything we need.
         for api_func_name, retval_name in retval_info.items():
             if retval_name is not None:
-                _make_sure(retval_name in retval_members,
-                           f"Return value union member `{retval_name}` doesn't exist (function {api_func_name}())")
+                _make_sure(
+                    retval_name in retval_members,
+                    f"Return value union member `{retval_name}` doesn't exist (function {api_func_name}())",
+                )
 
     # Create beginning/end event record type objects.
     begin_erts = []
     end_erts = []
-    nested_classes = struct['nested_classes'][args_nested_cls_index]['nested_classes']
-    props = struct['nested_classes'][args_nested_cls_index]['properties']['public']
-    _make_sure(len(nested_classes) == len(props),
-               f'Mismatch between nested structure and member count in `{struct["name"]}`')
+    nested_classes = struct["nested_classes"][args_nested_cls_index]["nested_classes"]
+    props = struct["nested_classes"][args_nested_cls_index]["properties"]["public"]
+    _make_sure(
+        len(nested_classes) == len(props),
+        f'Mismatch between nested structure and member count in `{struct["name"]}`',
+    )
 
     for index, prop in enumerate(props):
         # API function name is the name of the member.
-        api_func_name = str(prop['name'])
+        api_func_name = str(prop["name"])
 
         # Get the parameters.
-        members = _get_ert_members_for_struct(cpp_header,
-                                              nested_classes[index],
-                                              f'GetApiData().args.{api_func_name}',
-                                              [])
+        members = _get_ert_members_for_struct(
+            cpp_header, nested_classes[index], f"GetApiData().args.{api_func_name}", []
+        )
 
         # Append new beginning event record type object.
         begin_erts.append(_BeginErt(api_func_name, members))
@@ -499,7 +513,7 @@ def _erts_from_cb_data_struct(api_prefix, cpp_header, retval_info, struct):
 # This only applies to the HSA API: for other APIs, this function
 # returns `None`.
 def _get_retval_info(path):
-    if 'hsa' not in os.path.basename(path):
+    if "hsa" not in os.path.basename(path):
         return
 
     retval_info = {}
@@ -508,7 +522,7 @@ def _get_retval_info(path):
     with open(path) as f:
         for line in f:
             if 'out << ")' in line and cur_api_func_name is not None:
-                m = re.search(r'api_data.(\w+_retval)', line)
+                m = re.search(r"api_data.(\w+_retval)", line)
                 retval_info[cur_api_func_name] = m.group(1) if m else None
             else:
                 m = re.search(r'out << "(hsa_\w+)\(";', line)
@@ -525,7 +539,7 @@ def _yaml_dst_from_erts(api_prefix, erts):
     # Base.
     yaml_erts = {}
     yaml_dst = {
-        'event-record-types': yaml_erts,
+        "event-record-types": yaml_erts,
     }
 
     # Create one event record type per API function.
@@ -533,9 +547,9 @@ def _yaml_dst_from_erts(api_prefix, erts):
         # Base.
         yaml_members = []
         yaml_ert = {
-            'payload-field-type': {
-                'class': 'struct',
-                'members': yaml_members,
+            "payload-field-type": {
+                "class": "struct",
+                "members": yaml_members,
             },
         }
 
@@ -543,11 +557,14 @@ def _yaml_dst_from_erts(api_prefix, erts):
         for member in ert.members:
             # barectf doesn't support nested CTF structures, so join
             # individual member names with `__` to flatten.
-            yaml_members.append({
-                '_' + '__'.join(member.member_names): {
-                    'field-type': member.ft.barectf_yaml,
-                },
-            })
+            yaml_members.append(
+                {
+                    "_"
+                    + "__".join(member.member_names): {
+                        "field-type": member.ft.barectf_yaml,
+                    },
+                }
+            )
 
         # Add event record type.
         yaml_erts[ert.name(api_prefix)] = yaml_ert
@@ -560,23 +577,23 @@ def _yaml_dst_from_erts(api_prefix, erts):
 # tracing function depending on the API function operation ID.
 def _cpp_switch_statement_from_erts(api_prefix, erts):
     lines = []
-    lines.append('switch (GetOp()) {')
+    lines.append("switch (GetOp()) {")
 
     for ert in erts:
-        lines.append(f'  case {api_prefix.upper()}_API_ID_{ert.api_func_name}:')
-        lines.append(f'    barectf_{api_prefix}_api_trace_{ert.name(api_prefix)}(')
-        lines.append(f'      &barectf_ctx,')
-        lines.append(f'      GetThreadId(),')
-        lines.append(f'      GetQueueId(),')
-        lines.append(f'      GetAgentId(),')
-        lines.append(f'      GetCorrelationId(),')
+        lines.append(f"  case {api_prefix.upper()}_API_ID_{ert.api_func_name}:")
+        lines.append(f"    barectf_{api_prefix}_api_trace_{ert.name(api_prefix)}(")
+        lines.append(f"      &barectf_ctx,")
+        lines.append(f"      GetThreadId(),")
+        lines.append(f"      GetQueueId(),")
+        lines.append(f"      GetAgentId(),")
+        lines.append(f"      GetCorrelationId(),")
 
-        if api_prefix == 'hip':
-            lines.append(f'      GetKernelName().c_str(),')
+        if api_prefix == "hip":
+            lines.append(f"      GetKernelName().c_str(),")
 
         if len(ert.members) == 0:
             # Remove last comma.
-            lines[-1] = lines[-1].replace(',', '')
+            lines[-1] = lines[-1].replace(",", "")
 
         for index, member in enumerate(ert.members):
             if type(member.ft) is _OptStrFt:
@@ -584,17 +601,17 @@ def _cpp_switch_statement_from_erts(api_prefix, erts):
                 # an empty string.
                 lines.append(f'      {member.access} ? {member.access} : ""')
             elif type(member.ft) is _StrFt:
-                lines.append(f'      {member.access}')
+                lines.append(f"      {member.access}")
             else:
-                lines.append(f'      {member.ft.cast(member.access)}')
+                lines.append(f"      {member.ft.cast(member.access)}")
 
             if index + 1 < len(ert.members):
-                lines[-1] += ','
+                lines[-1] += ","
 
-        lines.append('    );')
-        lines.append('    break;')
+        lines.append("    );")
+        lines.append("    break;")
 
-    lines.append('}')
+    lines.append("}")
     return lines
 
 
@@ -612,29 +629,28 @@ def _process_file(api_prefix, path):
 
     # Find callback data structure.
     for struct_name, struct in cpp_header.classes.items():
-        if re.match(r'^' + api_prefix + r'_api_data\w+$', struct_name):
+        if re.match(r"^" + api_prefix + r"_api_data\w+$", struct_name):
             # Process callback data structure.
-            begin_erts, end_erts = _erts_from_cb_data_struct(api_prefix,
-                                                             cpp_header,
-                                                             retval_info,
-                                                             struct)
+            begin_erts, end_erts = _erts_from_cb_data_struct(
+                api_prefix, cpp_header, retval_info, struct
+            )
 
             # Write barectf YAML file.
-            with open(f'{api_prefix}_erts.yaml', 'w') as f:
+            with open(f"{api_prefix}_erts.yaml", "w") as f:
                 f.write(_yaml_dst_from_erts(api_prefix, begin_erts + end_erts))
 
             # Write C++ code (beginning event record).
-            with open(f'{api_prefix}_begin.cpp.i', 'w') as f:
-                f.write('\n'.join(_cpp_switch_statement_from_erts(api_prefix,
-                                                                  begin_erts)))
+            with open(f"{api_prefix}_begin.cpp.i", "w") as f:
+                f.write(
+                    "\n".join(_cpp_switch_statement_from_erts(api_prefix, begin_erts))
+                )
 
             # Write C++ code (end event record).
-            with open(f'{api_prefix}_end.cpp.i', 'w') as f:
-                f.write('\n'.join(_cpp_switch_statement_from_erts(api_prefix,
-                                                                  end_erts)))
+            with open(f"{api_prefix}_end.cpp.i", "w") as f:
+                f.write("\n".join(_cpp_switch_statement_from_erts(api_prefix, end_erts)))
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     # Disable `CppHeaderParser` printing to standard output.
     CppHeaderParser.CppHeaderParser.print_warnings = 0
     CppHeaderParser.CppHeaderParser.print_errors = 0

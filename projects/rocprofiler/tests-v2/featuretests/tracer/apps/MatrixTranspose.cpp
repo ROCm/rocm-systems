@@ -39,52 +39,52 @@ THE SOFTWARE.
 
 // Device (Kernel) function, it must be void
 __global__ void matrixTranspose(float* out, float* in, const int width) {
-    int x = hipBlockDim_x * hipBlockIdx_x + hipThreadIdx_x;
-    int y = hipBlockDim_y * hipBlockIdx_y + hipThreadIdx_y;
+  int x = hipBlockDim_x * hipBlockIdx_x + hipThreadIdx_x;
+  int y = hipBlockDim_y * hipBlockIdx_y + hipThreadIdx_y;
 
-    out[y * width + x] = in[x * width + y];
+  out[y * width + x] = in[x * width + y];
 }
 
 // CPU implementation of matrix transpose
 void matrixTransposeCPUReference(float* output, float* input, const unsigned int width) {
-    for (unsigned int j = 0; j < width; j++) {
-        for (unsigned int i = 0; i < width; i++) {
-            output[i * width + j] = input[j * width + i];
-        }
+  for (unsigned int j = 0; j < width; j++) {
+    for (unsigned int i = 0; i < width; i++) {
+      output[i * width + j] = input[j * width + i];
     }
+  }
 }
 
 int main() {
-    float* Matrix;
-    float* TransposeMatrix;
-    float* cpuTransposeMatrix;
+  float* Matrix;
+  float* TransposeMatrix;
+  float* cpuTransposeMatrix;
 
-    float* gpuMatrix;
-    float* gpuTransposeMatrix;
+  float* gpuMatrix;
+  float* gpuTransposeMatrix;
 
-    hipDeviceProp_t devProp;
-    hipGetDeviceProperties(&devProp, 0);
+  hipDeviceProp_t devProp;
+  hipGetDeviceProperties(&devProp, 0);
 
-    std::cout << "Device name " << devProp.name << std::endl;
+  std::cout << "Device name " << devProp.name << std::endl;
 
-    int i;
-    int errors;
+  int i;
+  int errors;
 
-    Matrix = (float*)malloc(NUM * sizeof(float));
-    TransposeMatrix = (float*)malloc(NUM * sizeof(float));
-    cpuTransposeMatrix = (float*)malloc(NUM * sizeof(float));
+  Matrix = (float*)malloc(NUM * sizeof(float));
+  TransposeMatrix = (float*)malloc(NUM * sizeof(float));
+  cpuTransposeMatrix = (float*)malloc(NUM * sizeof(float));
 
-    // initialize the input data
-    for (i = 0; i < NUM; i++) {
-        Matrix[i] = (float)i * 10.0f;
-    }
+  // initialize the input data
+  for (i = 0; i < NUM; i++) {
+    Matrix[i] = (float)i * 10.0f;
+  }
 
-    // allocate the memory on the device side
-    hipMalloc((void**)&gpuMatrix, NUM * sizeof(float));
-    hipMalloc((void**)&gpuTransposeMatrix, NUM * sizeof(float));
+  // allocate the memory on the device side
+  hipMalloc((void**)&gpuMatrix, NUM * sizeof(float));
+  hipMalloc((void**)&gpuTransposeMatrix, NUM * sizeof(float));
 
-    uint32_t iterations = 10;
-    while (iterations-- > 0) {
+  uint32_t iterations = 10;
+  while (iterations-- > 0) {
     std::cout << "## Iteration (" << iterations << ") #################" << std::endl;
 
     // Memory transfer from host to device
@@ -96,11 +96,11 @@ int main() {
     roctx_range_id_t roctx_id = roctxRangeStartA("roctx_range with id");
 
     // Lauching kernel from host
-    hipLaunchKernelGGL(matrixTranspose, dim3(WIDTH / THREADS_PER_BLOCK_X, WIDTH / THREADS_PER_BLOCK_Y),
-                    dim3(THREADS_PER_BLOCK_X, THREADS_PER_BLOCK_Y), 0, 0, gpuTransposeMatrix,
-                    gpuMatrix, WIDTH);
+    hipLaunchKernelGGL(
+        matrixTranspose, dim3(WIDTH / THREADS_PER_BLOCK_X, WIDTH / THREADS_PER_BLOCK_Y),
+        dim3(THREADS_PER_BLOCK_X, THREADS_PER_BLOCK_Y), 0, 0, gpuTransposeMatrix, gpuMatrix, WIDTH);
 
-    roctxRangeStop(roctx_id);    
+    roctxRangeStop(roctx_id);
     roctxMark("ROCTX-MARK: after hipLaunchKernel");
 
     // Memory transfer from device to host
@@ -108,8 +108,8 @@ int main() {
 
     hipMemcpy(TransposeMatrix, gpuTransposeMatrix, NUM * sizeof(float), hipMemcpyDeviceToHost);
 
-    roctxRangePop(); // for "hipMemcpy"
-    roctxRangePop(); // for "hipLaunchKernel"
+    roctxRangePop();  // for "hipMemcpy"
+    roctxRangePop();  // for "hipLaunchKernel"
 
     // CPU MatrixTranspose computation
     matrixTransposeCPUReference(cpuTransposeMatrix, Matrix, WIDTH);
@@ -118,26 +118,25 @@ int main() {
     errors = 0;
     double eps = 1.0E-6;
     for (i = 0; i < NUM; i++) {
-        if (std::abs(TransposeMatrix[i] - cpuTransposeMatrix[i]) > eps) {
-            errors++;
-        }
+      if (std::abs(TransposeMatrix[i] - cpuTransposeMatrix[i]) > eps) {
+        errors++;
+      }
     }
     if (errors != 0) {
-        printf("FAILED: %d errors\n", errors);
+      printf("FAILED: %d errors\n", errors);
     } else {
-        printf("PASSED!\n");
+      printf("PASSED!\n");
     }
+  }
 
-    }
+  // free the resources on device side
+  hipFree(gpuMatrix);
+  hipFree(gpuTransposeMatrix);
 
-    // free the resources on device side
-    hipFree(gpuMatrix);
-    hipFree(gpuTransposeMatrix);
+  // free the resources on host side
+  free(Matrix);
+  free(TransposeMatrix);
+  free(cpuTransposeMatrix);
 
-    // free the resources on host side
-    free(Matrix);
-    free(TransposeMatrix);
-    free(cpuTransposeMatrix);
-
-    return errors;
+  return errors;
 }

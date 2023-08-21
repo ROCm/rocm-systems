@@ -50,7 +50,11 @@ while [ 1 ] ; do
   elif [[ "$1" = "-cb" || "$1" = "--clean-build" ]] ; then
     TO_CLEAN=yes
     shift
-  elif [[ "$1" = "-"* || "$1" = "--"* ]] ; then
+  elif [ "$1" = "--" ] ; then
+    shift
+    EXTRA_BUILD_ARGS=$@
+    break
+  elif [[ "$1" = "-"* ]] ; then
     echo -e "Wrong option \"$1\", Please use the following options:\n"
     usage
     exit 1
@@ -73,14 +77,14 @@ if [ -z "$RUN_TEST" ] ; then RUN_TEST=no; fi
 if [ -z "$ASAN" ] ; then ASAN=False; fi
 if [ -z "$GPU_LIST" ] ; then GPU_LIST="gfx900 gfx906 gfx908 gfx90a gfx940 gfx941 gfx942 gfx1030 gfx1100 gfx1101 gfx1102"; fi
 
-
 ROCPROFILER_ROOT=$(cd $ROCPROFILER_ROOT && echo $PWD)
 
 if [ "$TO_CLEAN" = "yes" ] ; then rm -rf $BUILD_DIR; fi
-mkdir -p $BUILD_DIR
-pushd $BUILD_DIR
 
-cmake  \
+cmake -B ${BUILD_DIR} ${ROCPROFILER_ROOT} \
+    -DROCPROFILER_BUILD_CI=1 \
+    -DROCPROFILER_BUILD_TESTS=1 \
+    -DROCPROFILER_BUILD_SAMPLES=1 \
     -DCMAKE_EXPORT_COMPILE_COMMANDS=TRUE \
     -DCMAKE_BUILD_TYPE=${BUILD_TYPE:-'RelWithDebInfo'} \
     -DCMAKE_MODULE_PATH="${ROCM_PATH}/hip/cmake;${ROCM_PATH}/lib/cmake" \
@@ -96,19 +100,9 @@ cmake  \
     -DCPACK_READELF_EXECUTABLE="${PACKAGE_ROOT}/llvm/bin/llvm-readelf" \
     -DCPACK_STRIP_EXECUTABLE="${PACKAGE_ROOT}/llvm/bin/llvm-strip" \
     -DCPACK_OBJDUMP_EXECUTABLE="${PACKAGE_ROOT}/llvm/bin/llvm-objdump" \
-    -DHIP_ROOT_DIR=${ROCM_PATH} \
-    $ROCPROFILER_ROOT
+    ${EXTRA_BUILD_ARGS}
 
-popd
-
-MAKE_OPTS="-j -C $ROCPROFILER_ROOT/$BUILD_DIR"
-
-cmake --build "$BUILD_DIR" -- $MAKE_OPTS
-cmake --build "$BUILD_DIR" -- $MAKE_OPTS mytest
-if [ "$RUN_TEST" = "no" ] ; then
-  cmake --build "$BUILD_DIR" -- $MAKE_OPTS tests samples doc package
-else
-  cmake --build "$BUILD_DIR" -- $MAKE_OPTS tests
-fi
+cmake --build "$BUILD_DIR" --target all --parallel $(nproc)
+cmake --build "$BUILD_DIR" --target package --parallel $(nproc)
 
 exit 0

@@ -19,14 +19,29 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 ################################################################################
-cmake_minimum_required(VERSION 3.16.0)
+cmake_minimum_required(VERSION 3.18.0 FATAL_ERROR)
 set(EXE_NAME "rocprof-ctrl")
 
+# Temporary up till we remove independant build of tests exists in the Jenkins side
 if(NOT DEFINED TEST_DIR)
     set(TEST_DIR ${CMAKE_CURRENT_SOURCE_DIR})
     project(${EXE_NAME} C CXX)
     # Set build environment
-    include(env)
+    list(INSERT CMAKE_MODULE_PATH 0 "${CMAKE_CURRENT_SOURCE_DIR}/../cmake_modules")
+    include(rocprofiler_options)
+    include(rocprofiler_utils)
+    include(rocprofiler_env)
+    include(rocprofiler_formatting)
+    include(rocprofiler_linting)
+    find_package(Threads REQUIRED)
+    find_package(
+      hsa-runtime64 REQUIRED CONFIG
+      HINTS ${CMAKE_INSTALL_PREFIX}
+      PATHS ${ROCM_PATH})
+    find_package(
+      HIP REQUIRED CONFIG
+      HINTS ${CMAKE_INSTALL_PREFIX}
+      PATHS ${ROCM_PATH})
 endif()
 
 set(THREADS_PREFER_PTHREAD_FLAG ON)
@@ -136,8 +151,12 @@ foreach(target_id ${GPU_LIST})
     generate_hsaco(${target_id} ${TEST_DIR}/${DUMMY_NAME}/${DUMMY_NAME}.cl
                    ${target_id}_DummyKernel.hsaco)
 endforeach(target_id)
-add_custom_target(test DEPENDS ${HSACO_TARGET_LIST})
-add_custom_target(mytest DEPENDS ${HSACO_TARGET_LIST})
+#
+# NOTE (jomadsen): cannot create target named test because this is a reserved target name
+# -- cmake provides "test" target to run tests
+#
+# add_custom_target(test DEPENDS ${HSACO_TARGET_LIST})
+add_custom_target(mytest ALL DEPENDS ${HSACO_TARGET_LIST})
 add_custom_command(
     TARGET mytest
     POST_BUILD DEPENDS mytest
@@ -183,9 +202,11 @@ target_include_directories(${EXE_NAME} PRIVATE ${TEST_DIR} ${ROOT_DIR}
                                                ${PROJECT_SOURCE_DIR}/include)
 target_link_libraries(${EXE_NAME} hsa-runtime64::hsa-runtime64 hsakmt::hsakmt
                       Threads::Threads stdc++fs dl)
-execute_process(COMMAND sh -xc "cp ${TEST_DIR}/run.sh ${PROJECT_BINARY_DIR}")
-execute_process(COMMAND sh -xc "cp ${TEST_DIR}/tool/*.xml ${PROJECT_BINARY_DIR}")
-execute_process(COMMAND sh -xc "mkdir -p ${PROJECT_BINARY_DIR}/RESULTS")
+
+file(GLOB XML_FILES "${TEST_DIR}/tool/*.xml")
+configure_file(${TEST_DIR}/run.sh ${PROJECT_BINARY_DIR}/run.sh COPYONLY)
+execute_process(COMMAND ${CMAKE_COMMAND} -E copy ${XML_FILES} ${PROJECT_BINARY_DIR}/)
+
 # TODO(aelwazir): Should be replaced by the current location in the main CMakeLists.txt
 install(
     TARGETS ${EXE_NAME}
@@ -219,14 +240,14 @@ install(
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/${ROCPROFILER_NAME}
     COMPONENT asan)
 
-# Build memory test bench
-add_custom_target(
-    mbench
-    COMMAND sh -xc "cp -r ${TEST_DIR}/memory_validation ${PROJECT_BINARY_DIR}/test/."
-    COMMAND make -C "${PROJECT_BINARY_DIR}/test/memory_validation")
+add_test(NAME v1-tests COMMAND ${PROJECT_BINARY_DIR}/run.sh)
+set_tests_properties(
+    v1-tests PROPERTIES LABELS "v1" ENVIRONMENT "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
+                        RUN_SERIAL TRUE)
 
 # Copy OCL test
-execute_process(COMMAND sh -xc "cp -r ${TEST_DIR}/ocl ${PROJECT_BINARY_DIR}/test/.")
+execute_process(COMMAND ${CMAKE_COMMAND} -E copy_directory ${TEST_DIR}/ocl
+                        ${PROJECT_BINARY_DIR}/test/ocl)
 install(
     DIRECTORY ${TEST_DIR}/ocl
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/tests-v1/test

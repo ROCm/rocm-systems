@@ -53,8 +53,8 @@ namespace util {
 static const char* cpp_demangle(const char* symname) {
   size_t size = 0;
   int status;
-  const char* ret = abi::__cxa_demangle(symname, NULL, &size, &status);
-  return (ret != 0) ? ret : strdup(symname);
+  const char* ret = abi::__cxa_demangle(symname, nullptr, &size, &status);
+  return (ret != nullptr) ? ret : strdup(symname);
 }
 
 // Callback function to get available in the system agents
@@ -62,7 +62,7 @@ hsa_status_t HsaRsrcFactory::GetHsaAgentsCallback(hsa_agent_t agent, void* data)
   hsa_status_t status = HSA_STATUS_ERROR;
   HsaRsrcFactory* hsa_rsrc = reinterpret_cast<HsaRsrcFactory*>(data);
   const AgentInfo* agent_info = hsa_rsrc->AddAgentInfo(agent);
-  if (agent_info != NULL) status = HSA_STATUS_SUCCESS;
+  if (agent_info != nullptr) status = HSA_STATUS_SUCCESS;
   return status;
 }
 
@@ -123,10 +123,10 @@ hsa_status_t FindKernArgPool(hsa_amd_memory_pool_t pool, void* data) {
 HsaRsrcFactory::HsaRsrcFactory(bool initialize_hsa) : initialize_hsa_(initialize_hsa) {
   hsa_status_t status;
 
-  cpu_pool_ = NULL;
-  kern_arg_pool_ = NULL;
+  cpu_pool_ = nullptr;
+  kern_arg_pool_ = nullptr;
 
-  InitHsaApiTable(NULL);
+  InitHsaApiTable(nullptr);
 
   // Initialize the Hsa Runtime
   if (initialize_hsa_) {
@@ -137,11 +137,12 @@ HsaRsrcFactory::HsaRsrcFactory(bool initialize_hsa) : initialize_hsa_(initialize
   // Discover the set of Gpu devices available on the platform
   status = hsa_api_.hsa_iterate_agents(GetHsaAgentsCallback, this);
   CHECK_STATUS("Error Calling hsa_iterate_agents", status);
-  if (cpu_pool_ == NULL) CHECK_STATUS("CPU memory pool is not found", HSA_STATUS_ERROR);
-  if (kern_arg_pool_ == NULL) CHECK_STATUS("Kern-arg memory pool is not found", HSA_STATUS_ERROR);
+  if (cpu_pool_ == nullptr) CHECK_STATUS("CPU memory pool is not found", HSA_STATUS_ERROR);
+  if (kern_arg_pool_ == nullptr)
+    CHECK_STATUS("Kern-arg memory pool is not found", HSA_STATUS_ERROR);
 
   // Get AqlProfile API table
-  aqlprofile_api_ = {0};
+  aqlprofile_api_ = {};
 #ifdef ROCP_LD_AQLPROFILE
   status = LoadAqlProfileLib(&aqlprofile_api_);
 #else
@@ -152,7 +153,7 @@ HsaRsrcFactory::HsaRsrcFactory(bool initialize_hsa) : initialize_hsa_(initialize
   CHECK_STATUS("aqlprofile API table load failed", status);
 
   // Get Loader API table
-  loader_api_ = {0};
+  loader_api_ = {};
   status = hsa_api_.hsa_system_get_major_extension_table(HSA_EXTENSION_AMD_LOADER, 1,
                                                          sizeof(loader_api_), &loader_api_);
   CHECK_STATUS("loader API table query failed", status);
@@ -160,7 +161,7 @@ HsaRsrcFactory::HsaRsrcFactory(bool initialize_hsa) : initialize_hsa_(initialize
   // Instantiate HSA timer
   timer_ = new HsaTimer(&hsa_api_);
   CHECK_STATUS("HSA timer allocation failed",
-               (timer_ == NULL) ? HSA_STATUS_ERROR : HSA_STATUS_SUCCESS);
+               (timer_ == nullptr) ? HSA_STATUS_ERROR : HSA_STATUS_SUCCESS);
 
   // Time correlation
   const uint32_t corr_iters = 1000;
@@ -179,8 +180,8 @@ HsaRsrcFactory::HsaRsrcFactory(bool initialize_hsa) : initialize_hsa_(initialize
 // Destructor of the class
 HsaRsrcFactory::~HsaRsrcFactory() {
   delete timer_;
-  for (auto p : cpu_list_) delete p;
-  for (auto p : gpu_list_) delete p;
+  for (const auto* p : cpu_list_) delete p;
+  for (const auto* p : gpu_list_) delete p;
   if (initialize_hsa_) {
     hsa_status_t status = hsa_api_.hsa_shut_down();
     CHECK_STATUS("Error in hsa_shut_down", status);
@@ -190,8 +191,8 @@ HsaRsrcFactory::~HsaRsrcFactory() {
 void HsaRsrcFactory::InitHsaApiTable(HsaApiTable* table) {
   std::lock_guard<mutex_t> lck(mutex_);
 
-  if (hsa_api_.hsa_init == NULL) {
-    if (table != NULL) {
+  if (hsa_api_.hsa_init == nullptr) {
+    if (table != nullptr) {
       hsa_api_.hsa_init = table->core_->hsa_init_fn;
       hsa_api_.hsa_shut_down = table->core_->hsa_shut_down_fn;
       hsa_api_.hsa_agent_get_info = table->core_->hsa_agent_get_info_fn;
@@ -289,7 +290,7 @@ void HsaRsrcFactory::InitHsaApiTable(HsaApiTable* table) {
 
 hsa_status_t HsaRsrcFactory::LoadAqlProfileLib(aqlprofile_pfn_t* api) {
   void* handle = dlopen(kAqlProfileLib, RTLD_NOW);
-  if (handle == NULL) {
+  if (handle == nullptr) {
     fprintf(stderr, "Loading '%s' failed, %s\n", kAqlProfileLib, dlerror());
     return HSA_STATUS_ERROR;
   }
@@ -305,10 +306,8 @@ hsa_status_t HsaRsrcFactory::LoadAqlProfileLib(aqlprofile_pfn_t* api) {
       (decltype(::hsa_ven_amd_aqlprofile_start)*)dlsym(handle, "hsa_ven_amd_aqlprofile_start");
   api->hsa_ven_amd_aqlprofile_stop =
       (decltype(::hsa_ven_amd_aqlprofile_stop)*)dlsym(handle, "hsa_ven_amd_aqlprofile_stop");
-#ifdef AQLPROF_NEW_API
   api->hsa_ven_amd_aqlprofile_read =
       (decltype(::hsa_ven_amd_aqlprofile_read)*)dlsym(handle, "hsa_ven_amd_aqlprofile_read");
-#endif
   api->hsa_ven_amd_aqlprofile_legacy_get_pm4 =
       (decltype(::hsa_ven_amd_aqlprofile_legacy_get_pm4)*)dlsym(
           handle, "hsa_ven_amd_aqlprofile_legacy_get_pm4");
@@ -325,7 +324,7 @@ hsa_status_t HsaRsrcFactory::LoadAqlProfileLib(aqlprofile_pfn_t* api) {
 const AgentInfo* HsaRsrcFactory::AddAgentInfo(const hsa_agent_t agent) {
   // Determine if device is a Gpu agent
   hsa_status_t status;
-  AgentInfo* agent_info = NULL;
+  AgentInfo* agent_info = nullptr;
 
   hsa_device_type_t type;
   status = hsa_api_.hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &type);
@@ -339,10 +338,11 @@ const AgentInfo* HsaRsrcFactory::AddAgentInfo(const hsa_agent_t agent) {
 
     status =
         hsa_api_.hsa_amd_agent_iterate_memory_pools(agent, FindStandardPool, &agent_info->cpu_pool);
-    if ((status == HSA_STATUS_INFO_BREAK) && (cpu_pool_ == NULL)) cpu_pool_ = &agent_info->cpu_pool;
+    if ((status == HSA_STATUS_INFO_BREAK) && (cpu_pool_ == nullptr))
+      cpu_pool_ = &agent_info->cpu_pool;
     status = hsa_api_.hsa_amd_agent_iterate_memory_pools(agent, FindKernArgPool,
                                                          &agent_info->kern_arg_pool);
-    if ((status == HSA_STATUS_INFO_BREAK) && (kern_arg_pool_ == NULL))
+    if ((status == HSA_STATUS_INFO_BREAK) && (kern_arg_pool_ == nullptr))
       kern_arg_pool_ = &agent_info->kern_arg_pool;
     agent_info->gpu_pool = {};
 
@@ -362,7 +362,7 @@ const AgentInfo* HsaRsrcFactory::AddAgentInfo(const hsa_agent_t agent) {
     hsa_api_.hsa_agent_get_info(agent, HSA_AGENT_INFO_WAVEFRONT_SIZE, &agent_info->max_wave_size);
     hsa_api_.hsa_agent_get_info(agent, HSA_AGENT_INFO_QUEUE_MAX_SIZE, &agent_info->max_queue_size);
     hsa_api_.hsa_agent_get_info(agent, HSA_AGENT_INFO_PROFILE, &agent_info->profile);
-    agent_info->is_apu = (agent_info->profile == HSA_PROFILE_FULL) ? true : false;
+    agent_info->is_apu = agent_info->profile == HSA_PROFILE_FULL;
     hsa_api_.hsa_agent_get_info(
         agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_COMPUTE_UNIT_COUNT),
         &agent_info->cu_num);
@@ -407,7 +407,7 @@ const AgentInfo* HsaRsrcFactory::AddAgentInfo(const hsa_agent_t agent) {
 
 // Return systen agent info
 const AgentInfo* HsaRsrcFactory::GetAgentInfo(const hsa_agent_t agent) {
-  const AgentInfo* agent_info = NULL;
+  const AgentInfo* agent_info = nullptr;
   auto it = agent_map_.find(agent.handle);
   if (it != agent_map_.end()) {
     agent_info = it->second;
@@ -482,8 +482,8 @@ bool HsaRsrcFactory::GetCpuAgentInfo(uint32_t idx, const AgentInfo** agent_info)
 bool HsaRsrcFactory::CreateQueue(const AgentInfo* agent_info, uint32_t num_pkts,
                                  hsa_queue_t** queue) {
   hsa_status_t status;
-  status = hsa_api_.hsa_queue_create(agent_info->dev_id, num_pkts, HSA_QUEUE_TYPE_MULTI, NULL, NULL,
-                                     UINT32_MAX, UINT32_MAX, queue);
+  status = hsa_api_.hsa_queue_create(agent_info->dev_id, num_pkts, HSA_QUEUE_TYPE_MULTI, nullptr,
+                                     nullptr, UINT32_MAX, UINT32_MAX, queue);
   return (status == HSA_STATUS_SUCCESS);
 }
 
@@ -493,7 +493,7 @@ bool HsaRsrcFactory::CreateQueue(const AgentInfo* agent_info, uint32_t num_pkts,
 // @return bool true if successful, false otherwise
 bool HsaRsrcFactory::CreateSignal(uint32_t value, hsa_signal_t* signal) {
   hsa_status_t status;
-  status = hsa_api_.hsa_signal_create(value, 0, NULL, signal);
+  status = hsa_api_.hsa_signal_create(value, 0, nullptr, signal);
   return (status == HSA_STATUS_SUCCESS);
 }
 
@@ -504,11 +504,11 @@ bool HsaRsrcFactory::CreateSignal(uint32_t value, hsa_signal_t* signal) {
 // @return uint8_t* Pointer to buffer, null if allocation fails.
 uint8_t* HsaRsrcFactory::AllocateLocalMemory(const AgentInfo* agent_info, size_t size) {
   hsa_status_t status = HSA_STATUS_ERROR;
-  uint8_t* buffer = NULL;
+  uint8_t* buffer = nullptr;
   size = (size + MEM_PAGE_MASK) & ~MEM_PAGE_MASK;
   status = hsa_api_.hsa_amd_memory_pool_allocate(agent_info->gpu_pool, size, 0,
                                                  reinterpret_cast<void**>(&buffer));
-  uint8_t* ptr = (status == HSA_STATUS_SUCCESS) ? buffer : NULL;
+  uint8_t* ptr = (status == HSA_STATUS_SUCCESS) ? buffer : nullptr;
   return ptr;
 }
 
@@ -519,7 +519,7 @@ uint8_t* HsaRsrcFactory::AllocateLocalMemory(const AgentInfo* agent_info, size_t
 // @return uint8_t* Pointer to buffer, null if allocation fails.
 uint8_t* HsaRsrcFactory::AllocateKernArgMemory(const AgentInfo* agent_info, size_t size) {
   hsa_status_t status = HSA_STATUS_ERROR;
-  uint8_t* buffer = NULL;
+  uint8_t* buffer = nullptr;
   if (!cpu_agents_.empty()) {
     size = (size + MEM_PAGE_MASK) & ~MEM_PAGE_MASK;
     status = hsa_api_.hsa_amd_memory_pool_allocate(*kern_arg_pool_, size, 0,
@@ -527,10 +527,10 @@ uint8_t* HsaRsrcFactory::AllocateKernArgMemory(const AgentInfo* agent_info, size
     // Both the CPU and GPU can access the kernel arguments
     if (status == HSA_STATUS_SUCCESS) {
       hsa_agent_t ag_list[1] = {agent_info->dev_id};
-      status = hsa_api_.hsa_amd_agents_allow_access(1, ag_list, NULL, buffer);
+      status = hsa_api_.hsa_amd_agents_allow_access(1, ag_list, nullptr, buffer);
     }
   }
-  uint8_t* ptr = (status == HSA_STATUS_SUCCESS) ? buffer : NULL;
+  uint8_t* ptr = (status == HSA_STATUS_SUCCESS) ? buffer : nullptr;
   return ptr;
 }
 
@@ -540,7 +540,7 @@ uint8_t* HsaRsrcFactory::AllocateKernArgMemory(const AgentInfo* agent_info, size
 // @return uint8_t* Pointer to buffer, null if allocation fails.
 uint8_t* HsaRsrcFactory::AllocateSysMemory(const AgentInfo* agent_info, size_t size) {
   hsa_status_t status = HSA_STATUS_ERROR;
-  uint8_t* buffer = NULL;
+  uint8_t* buffer = nullptr;
   size = (size + MEM_PAGE_MASK) & ~MEM_PAGE_MASK;
   if (!cpu_agents_.empty()) {
     status = hsa_api_.hsa_amd_memory_pool_allocate(*cpu_pool_, size, 0,
@@ -548,10 +548,10 @@ uint8_t* HsaRsrcFactory::AllocateSysMemory(const AgentInfo* agent_info, size_t s
     // Both the CPU and GPU can access the memory
     if (status == HSA_STATUS_SUCCESS) {
       hsa_agent_t ag_list[1] = {agent_info->dev_id};
-      status = hsa_api_.hsa_amd_agents_allow_access(1, ag_list, NULL, buffer);
+      status = hsa_api_.hsa_amd_agents_allow_access(1, ag_list, nullptr, buffer);
     }
   }
-  uint8_t* ptr = (status == HSA_STATUS_SUCCESS) ? buffer : NULL;
+  uint8_t* ptr = (status == HSA_STATUS_SUCCESS) ? buffer : nullptr;
   return ptr;
 }
 
@@ -562,8 +562,8 @@ uint8_t* HsaRsrcFactory::AllocateSysMemory(const AgentInfo* agent_info, size_t s
 uint8_t* HsaRsrcFactory::AllocateCmdMemory(const AgentInfo* agent_info, size_t size) {
   size = (size + MEM_PAGE_MASK) & ~MEM_PAGE_MASK;
   uint8_t* ptr = (agent_info->is_apu && CMD_MEMORY_MMAP)
-      ? reinterpret_cast<uint8_t*>(
-            mmap(NULL, size, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_SHARED | MAP_ANONYMOUS, 0, 0))
+      ? reinterpret_cast<uint8_t*>(mmap(nullptr, size, PROT_READ | PROT_WRITE | PROT_EXEC,
+                                        MAP_SHARED | MAP_ANONYMOUS, 0, 0))
       : AllocateSysMemory(agent_info, size);
   return ptr;
 }
@@ -573,7 +573,7 @@ hsa_signal_value_t HsaRsrcFactory::SignalWait(const hsa_signal_t& signal,
                                               const hsa_signal_value_t& signal_value) const {
   const hsa_signal_value_t exp_value = signal_value - 1;
   hsa_signal_value_t ret_value = signal_value;
-  while (1) {
+  while (true) {
     ret_value = hsa_api_.hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, signal_value,
                                                    timeout_, HSA_WAIT_STATE_BLOCKED);
     if (ret_value == exp_value) break;
@@ -599,9 +599,10 @@ bool HsaRsrcFactory::Memcpy(const hsa_agent_t& agent, void* dst, const void* src
   hsa_status_t status = HSA_STATUS_ERROR;
   if (!cpu_agents_.empty()) {
     hsa_signal_t s = {};
-    status = hsa_api_.hsa_signal_create(1, 0, NULL, &s);
+    status = hsa_api_.hsa_signal_create(1, 0, nullptr, &s);
     CHECK_STATUS("hsa_signal_create()", status);
-    status = hsa_api_.hsa_amd_memory_async_copy(dst, cpu_agents_[0], src, agent, size, 0, NULL, s);
+    status =
+        hsa_api_.hsa_amd_memory_async_copy(dst, cpu_agents_[0], src, agent, size, 0, nullptr, s);
     CHECK_STATUS("hsa_amd_memory_async_copy()", status);
     SignalWait(s, 1);
     status = hsa_api_.hsa_signal_destroy(s);
@@ -654,12 +655,12 @@ bool HsaRsrcFactory::LoadAndFinalize(const AgentInfo* agent_info, const char* br
 
   // Create executable.
   status = hsa_api_.hsa_executable_create_alt(
-      HSA_PROFILE_FULL, HSA_DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT, NULL, executable);
+      HSA_PROFILE_FULL, HSA_DEFAULT_FLOAT_ROUNDING_MODE_DEFAULT, nullptr, executable);
   CHECK_STATUS("Error in creating executable object", status);
 
   // Load code object.
   status = hsa_api_.hsa_executable_load_agent_code_object(*executable, agent_info->dev_id,
-                                                          code_obj_rdr, NULL, NULL);
+                                                          code_obj_rdr, nullptr, nullptr);
   CHECK_STATUS("Error in loading executable object", status);
 
   // Freeze executable.
@@ -668,8 +669,8 @@ bool HsaRsrcFactory::LoadAndFinalize(const AgentInfo* agent_info, const char* br
 
   // Get symbol handle.
   hsa_executable_symbol_t kernelSymbol;
-  status = hsa_api_.hsa_executable_get_symbol(*executable, NULL, kernel_name, agent_info->dev_id, 0,
-                                              &kernelSymbol);
+  status = hsa_api_.hsa_executable_get_symbol(*executable, nullptr, kernel_name, agent_info->dev_id,
+                                              0, &kernelSymbol);
   CHECK_STATUS("Error in looking up kernel symbol", status);
 
   close(file_handle);
@@ -799,7 +800,7 @@ hsa_status_t HsaRsrcFactory::executable_symbols_cb(hsa_executable_t exec,
         hsa_api_.hsa_executable_symbol_get_info(symbol, HSA_EXECUTABLE_SYMBOL_INFO_NAME, symname);
     CHECK_STATUS("Error in getting kernel name", status);
     symname[len] = 0;
-    if (data == NULL) {
+    if (data == nullptr) {
       const char* name = cpp_demangle(symname);
       auto ret = symbols_map_->insert({addr, name});
       if (ret.second == false) {
@@ -816,16 +817,16 @@ hsa_status_t HsaRsrcFactory::executable_symbols_cb(hsa_executable_t exec,
 hsa_status_t HsaRsrcFactory::hsa_executable_freeze_interceptor(hsa_executable_t executable,
                                                                const char* options) {
   std::lock_guard<mutex_t> lck(mutex_);
-  if (symbols_map_ == NULL) symbols_map_ = new symbols_map_t;
+  if (symbols_map_ == nullptr) symbols_map_ = new symbols_map_t;
   hsa_status_t status =
-      hsa_api_.hsa_executable_iterate_symbols(executable, executable_symbols_cb, NULL);
+      hsa_api_.hsa_executable_iterate_symbols(executable, executable_symbols_cb, nullptr);
   CHECK_STATUS("Error in iterating executable symbols", status);
   return hsa_api_.hsa_executable_freeze(executable, options);
 }
 
 hsa_status_t HsaRsrcFactory::hsa_executable_destroy_interceptor(hsa_executable_t executable) {
   std::lock_guard<mutex_t> lck(mutex_);
-  if (symbols_map_ != NULL) {
+  if (symbols_map_ != nullptr) {
     hsa_status_t status =
         hsa_api_.hsa_executable_iterate_symbols(executable, executable_symbols_cb, (void*)1);
     CHECK_STATUS("Error in iterating executable symbols", status);
@@ -838,8 +839,8 @@ HsaRsrcFactory::mutex_t HsaRsrcFactory::mutex_;
 HsaRsrcFactory::timestamp_t HsaRsrcFactory::timeout_ns_ = HsaTimer::TIMESTAMP_MAX;
 hsa_pfn_t HsaRsrcFactory::hsa_api_{};
 bool HsaRsrcFactory::executable_tracking_on_ = false;
-HsaRsrcFactory::symbols_map_t* HsaRsrcFactory::symbols_map_ = NULL;
-void* HsaRsrcFactory::to_dump_code_obj_ = NULL;
+HsaRsrcFactory::symbols_map_t* HsaRsrcFactory::symbols_map_ = nullptr;
+void* HsaRsrcFactory::to_dump_code_obj_ = nullptr;
 
 }  // namespace util
 }  // namespace rocprofiler

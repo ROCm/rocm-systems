@@ -20,5 +20,9 @@
 # THE SOFTWARE.
 ################################################################################
 
+if(ROCPROFILER_BUILD_CODECOV)
+    set(CMAKE_BUILD_TYPE "Coverage")
+endif()
+
 add_subdirectory(api)
 add_subdirectory(tools)

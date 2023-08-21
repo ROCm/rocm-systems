@@ -20,29 +20,25 @@
 # THE SOFTWARE.
 ################################################################################
 
-# Linux Compiler options
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fms-extensions")
+add_library(rocprofiler-build-flags INTERFACE)
+add_library(rocprofiler::build-flags ALIAS rocprofiler-build-flags)
 
-add_definitions(-DNEW_TRACE_API=1)
-
-# CLANG options
-if("$ENV{CXX}" STREQUAL "/usr/bin/clang++")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -ferror-limit=1000000")
-endif()
+target_compile_options(
+    rocprofiler-build-flags
+    INTERFACE $<$<COMPILE_LANGUAGE:C,CXX>:-W -Wall -Wextra -Wno-unused-parameter>
+              $<$<COMPILE_LANGUAGE:CXX>:-fms-extensions>
+              $<$<COMPILE_LANGUAGE:CXX>:$<$<CXX_COMPILER_ID:Clang>:-ferror-limit=1000000>>
+    )
+target_compile_definitions(rocprofiler-build-flags INTERFACE NEW_TRACE_API=1)
 
 # Enable debug trace
-if(DEFINED ENV{CMAKE_DEBUG_TRACE})
-    add_definitions(-DDEBUG_TRACE=1)
-endif()
-
-# Enable AQL-profile new API
-if(NOT DEFINED ENV{CMAKE_CURR_API})
-    add_definitions(-DAQLPROF_NEW_API=1)
+if(ROCPROFILER_DEBUG_TRACE)
+    target_compile_definitions(rocprofiler-build-flags INTERFACE DEBUG_TRACE=1)
 endif()
 
 # Enable direct loading of AQL-profile HSA extension
-if(DEFINED ENV{CMAKE_LD_AQLPROFILE})
-    add_definitions(-DROCP_LD_AQLPROFILE=1)
+if(ROCPROFILER_LD_AQLPROFILE)
+    target_compile_definitions(rocprofiler-build-flags INTERFACE ROCP_LD_AQLPROFILE=1)
 endif()
 
 # Find hsa-runtime
@@ -85,10 +81,8 @@ if("${ROCM_ROOT_DIR}" STREQUAL "")
 endif()
 
 find_library(
-    FIND_AQL_PROFILE_LIB "libhsa-amd-aqlprofile64.so"
+    HSA_AMD_AQLPROFILE_LIBRARY
+    NAMES hsa-amd-aqlprofile64
     HINTS ${CMAKE_PREFIX_PATH}
     PATHS ${ROCM_ROOT_DIR}
     PATH_SUFFIXES lib REQUIRED)
-if(NOT FIND_AQL_PROFILE_LIB)
-    message("AQL_PROFILE not installed. Please install AQL_PROFILE")
-endif()

@@ -833,9 +833,7 @@ static std::string getKernelNameMultiKernelMultiDevice(hipLaunchParams* launchPa
   return name_str.str();
 }
 
-template <typename... Ts> struct Overloaded : Ts... {
-  using Ts::operator()...;
-};
+template <typename... Ts> struct Overloaded : Ts... { using Ts::operator()...; };
 template <class... Ts> Overloaded(Ts...) -> Overloaded<Ts...>;
 
 std::optional<std::string> GetHipKernelName(uint32_t cid, hip_api_data_t* data) {

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import sys
+
 if sys.version_info[0] < 3:
     raise Exception("Must be using Python 3")
 
@@ -54,33 +55,35 @@ WaveInstCategory = {
 # Keeps track of register states for hipcc-generated assembly
 class RegisterWatchList:
     def __init__(self, labels):
-        self.registers = {'v'+str(k): [[] for m in range(64)] for k in range(64)}
+        self.registers = {"v" + str(k): [[] for m in range(64)] for k in range(64)}
         for k in range(64):
-            self.registers['s'+str(k)] = []
+            self.registers["s" + str(k)] = []
         self.labels = labels
 
     def try_translate(self, tok):
-        if tok[0] in ['s']:
+        if tok[0] in ["s"]:
             return self.registers[self.range(tok)[0]]
-        elif '@' in tok:
-            return self.labels[tok.split('@')[0]]+1
+        elif "@" in tok:
+            return self.labels[tok.split("@")[0]] + 1
 
     def range(self, r):
-        reg = r.split(':')
+        reg = r.split(":")
         if len(reg) == 1:
             return reg
         else:
-            r0 = reg[0].split('[')
-            return [r0[0]+str(k) for k in range(int(r0[1]), int(reg[1][:-1])+1)]
+            r0 = reg[0].split("[")
+            return [r0[0] + str(k) for k in range(int(r0[1]), int(reg[1][:-1]) + 1)]
 
     def tokenize(self, line):
-        return [u for u in [t.split(',')[0].strip() for t in line.split(' ')] if len(u) > 0]
+        return [
+            u for u in [t.split(",")[0].strip() for t in line.split(" ")] if len(u) > 0
+        ]
 
     def getpc(self, line, next_line):
-        #print('Get pc:', line)
+        # print('Get pc:', line)
         try:
-            dst = line.split(' ')[1].strip()
-            label_dest = next_line.split(', ')[-1].split('@')[0]
+            dst = line.split(" ")[1].strip()
+            label_dest = next_line.split(", ")[-1].split("@")[0]
             for reg in self.range(dst):
                 self.registers[reg].append(deepcopy(self.labels[label_dest]))
         except:
@@ -94,7 +97,7 @@ class RegisterWatchList:
 
             popped = self.registers[self.range(src)[0]][-1]
             self.registers[self.range(src)[0]] = self.registers[self.range(src)[0]][:-1]
-            self.registers[self.range(dst)[0]].append(line_num+1)
+            self.registers[self.range(dst)[0]].append(line_num + 1)
             return popped
         except:
             return 0
@@ -111,12 +114,12 @@ class RegisterWatchList:
     def scratch(self, line):
         try:
             tokens = self.tokenize(line)
-            if '_load' in tokens[0]:
+            if "_load" in tokens[0]:
                 dst = tokens[1]
-                src = tokens[3]+tokens[4]
+                src = tokens[3] + tokens[4]
             else:
                 src = tokens[2]
-                dst = tokens[3]+tokens[4]
+                dst = tokens[3] + tokens[4]
             self.registers[dst] = self.registers[src]
         except:
             pass
@@ -124,19 +127,27 @@ class RegisterWatchList:
     def move(self, line):
         try:
             tokens = self.tokenize(line)
-            if tokens[2][0] in ['s', 'd'] and tokens[1][0] in ['s', 'd']:
-                self.registers[self.range(tokens[1])[0]] = deepcopy(self.registers[self.range(tokens[2])[0]])
+            if tokens[2][0] in ["s", "d"] and tokens[1][0] in ["s", "d"]:
+                self.registers[self.range(tokens[1])[0]] = deepcopy(
+                    self.registers[self.range(tokens[2])[0]]
+                )
         except:
             pass
 
     def updatelane(self, line):
         tokens = self.tokenize(line)
         try:
-            if 'v_readlane' in tokens[0]:
-                self.registers[tokens[1]].append(self.registers[tokens[2]][int(tokens[3])][-1])
-                self.registers[tokens[2]][int(tokens[3])] = self.registers[tokens[2]][int(tokens[3])][:-1]
-            elif 'v_writelane' in tokens[0]:
-                self.registers[tokens[1]][int(tokens[3])].append(self.registers[tokens[2]][-1])
+            if "v_readlane" in tokens[0]:
+                self.registers[tokens[1]].append(
+                    self.registers[tokens[2]][int(tokens[3])][-1]
+                )
+                self.registers[tokens[2]][int(tokens[3])] = self.registers[tokens[2]][
+                    int(tokens[3])
+                ][:-1]
+            elif "v_writelane" in tokens[0]:
+                self.registers[tokens[1]][int(tokens[3])].append(
+                    self.registers[tokens[2]][-1]
+                )
                 self.registers[tokens[2]] = self.registers[tokens[2]][-STACK_SIZE_LIMIT:]
         except Exception as e:
             pass
@@ -179,7 +190,8 @@ class PCTranslator:
 
 # Matches tokens in reverse order
 def try_match_swapped(insts, code, i, line):
-    return insts[i+1][1] == code[line][1] and insts[i][1] == code[line+1][1]
+    return insts[i + 1][1] == code[line][1] and insts[i][1] == code[line + 1][1]
+
 
 FORK_NAMES = 1
 # A successful parsed instruction
@@ -197,7 +209,7 @@ class Fork:
         self.data = None
         self.name = FORK_NAMES
         FORK_NAMES += 1
-        #print('Created new fork: ', self.name)
+        # print('Created new fork: ', self.name)
 
 # Try to match sequence "insts" with the branch "fork", starting at position "i"
 def move_down_fork(fork, insts, i): #(fork : Fork, insts : list, i : int):
@@ -217,6 +229,7 @@ def move_down_fork(fork, insts, i): #(fork : Fork, insts : list, i : int):
 
     return True, i
 
+
 FORK_TREE = Fork()
 
 # Check if there exists a previous wave with the same sequence of instructions executed
@@ -227,7 +240,7 @@ def fromDict(insts):
     while i < N:
         tillEnd, final_pos = move_down_fork(cur_fork, insts, i)
         if tillEnd:
-            #print('Reached end')
+            # print('Reached end')
             return True, cur_fork
 
         i += final_pos
@@ -250,7 +263,7 @@ def fromDict(insts):
             last_inst.forks.append(cur_fork)
             return False, cur_fork
 
-    print('Warning: Reached end of loop!')
+    print("Warning: Reached end of loop!")
     return False, cur_fork
 
 
@@ -279,8 +292,8 @@ def stitch(insts, raw_code, jumps, gfxv, bIsAuto):
 
 
     SMEM_INST = []  # scalar memory
-    VLMEM_INST = [] # vector memory load
-    VSMEM_INST = [] # vector memory store
+    VLMEM_INST = []  # vector memory load
+    VSMEM_INST = []  # vector memory store
     FLAT_INST = []
     NUM_SMEM = 0
     NUM_VLMEM = 0
@@ -302,20 +315,20 @@ def stitch(insts, raw_code, jumps, gfxv, bIsAuto):
                 line = len(code)
                 print('Begin at:', line, c)
         c = list(c)
-        c[0] = c[0].split(';')[0].split('//')[0].strip()
+        c[0] = c[0].split(";")[0].split("//")[0].strip()
 
         if c[1] != 100:
             code.append(c)
-        elif ':' in c[0]:
-            labels[c[0].split(':')[0]] = len(code)
-        jump_map.append(len(code)-1)
+        elif ":" in c[0]:
+            labels[c[0].split(":")[0]] = len(code)
+        jump_map.append(len(code) - 1)
 
     reverse_map = []
     for k, v in enumerate(jump_map):
         if v >= len(reverse_map):
             reverse_map.append(k)
 
-    jumps = {jump_map[j]+1: j for j in jumps}
+    jumps = {jump_map[j] + 1: j for j in jumps}
 
     # Checks if we have guaranteed ordering in memory operations
     smem_ordering = 0
@@ -340,7 +353,7 @@ def stitch(insts, raw_code, jumps, gfxv, bIsAuto):
         as_line = code[line]
 
         matched = True
-        next = line+1
+        next = line + 1
 
         if not bIsAuto:
             if '_mov_' in as_line[0]:
@@ -375,25 +388,25 @@ def stitch(insts, raw_code, jumps, gfxv, bIsAuto):
                 pcsequence.append(insts[i][2])
         elif inst[1] == as_line[1]:
             if line in jumps:
-                loopCount[jumps[line]-1] += 1
+                loopCount[jumps[line] - 1] += 1
             num_inflight = NUM_FLAT + NUM_SMEM + NUM_VLMEM + NUM_VSMEM
 
             if inst[1] == SMEM or inst[1] == LDS:
                 smem_ordering = 1 if inst[1] == SMEM else smem_ordering
-                SMEM_INST.append([reverse_map[line],  num_inflight])
+                SMEM_INST.append([reverse_map[line], num_inflight])
                 NUM_SMEM += 1
-            elif inst[1] == VMEM or (inst[1] == FLAT and 'global_' in as_line[0]):
+            elif inst[1] == VMEM or (inst[1] == FLAT and "global_" in as_line[0]):
                 inc_ordering = False
-                if 'flat_' in as_line[0]:
+                if "flat_" in as_line[0]:
                     inc_ordering = True
 
-                if not bGFX9 and 'store' in as_line[0]:
-                    VSMEM_INST.append([reverse_map[line],  num_inflight])
+                if not bGFX9 and "store" in as_line[0]:
+                    VSMEM_INST.append([reverse_map[line], num_inflight])
                     NUM_VSMEM += 1
                     if inc_ordering:
                         vsmem_ordering = 1
                 else:
-                    VLMEM_INST.append([reverse_map[line],  num_inflight])
+                    VLMEM_INST.append([reverse_map[line], num_inflight])
                     NUM_VLMEM += 1
                     if inc_ordering:
                         vlmem_ordering = 1
@@ -401,44 +414,48 @@ def stitch(insts, raw_code, jumps, gfxv, bIsAuto):
                 smem_ordering = 1
                 vlmem_ordering = 1
                 vsmem_ordering = 1
-                FLAT_INST.append([reverse_map[line],  num_inflight])
+                FLAT_INST.append([reverse_map[line], num_inflight])
                 NUM_FLAT += 1
-            elif inst[1] == IMMED and 's_waitcnt' in as_line[0]:
-                if 'lgkmcnt' in as_line[0]:
-                    wait_N = int(as_line[0].split('lgkmcnt(')[1].split(')')[0])
+            elif inst[1] == IMMED and "s_waitcnt" in as_line[0]:
+                if "lgkmcnt" in as_line[0]:
+                    wait_N = int(as_line[0].split("lgkmcnt(")[1].split(")")[0])
                     flight_count.append([as_line[5], num_inflight, wait_N])
                     if wait_N == 0:
                         smem_ordering = 0
                     if smem_ordering == 0:
-                        offset = len(SMEM_INST)-wait_N
-                        mem_unroll.append( [reverse_map[line], SMEM_INST[:offset]+FLAT_INST] )
+                        offset = len(SMEM_INST) - wait_N
+                        mem_unroll.append(
+                            [reverse_map[line], SMEM_INST[:offset] + FLAT_INST]
+                        )
                         SMEM_INST = SMEM_INST[offset:]
                         NUM_SMEM = len(SMEM_INST)
                         FLAT_INST = []
                         NUM_FLAT = 0
                     else:
-                        NUM_SMEM = min(max(wait_N-NUM_FLAT, 0), NUM_SMEM)
-                        NUM_FLAT = min(max(wait_N-NUM_SMEM, 0), NUM_FLAT)
+                        NUM_SMEM = min(max(wait_N - NUM_FLAT, 0), NUM_SMEM)
+                        NUM_FLAT = min(max(wait_N - NUM_SMEM, 0), NUM_FLAT)
                     num_inflight = NUM_FLAT + NUM_SMEM + NUM_VLMEM + NUM_VSMEM
 
-                if 'vmcnt' in as_line[0]:
-                    wait_N = int(as_line[0].split('vmcnt(')[1].split(')')[0])
+                if "vmcnt" in as_line[0]:
+                    wait_N = int(as_line[0].split("vmcnt(")[1].split(")")[0])
                     flight_count.append([as_line[5], num_inflight, wait_N])
                     if wait_N == 0:
                         vlmem_ordering = 0
                     if vlmem_ordering == 0:
-                        offset = len(VLMEM_INST)-wait_N
-                        mem_unroll.append( [reverse_map[line], VLMEM_INST[:offset]+FLAT_INST] )
+                        offset = len(VLMEM_INST) - wait_N
+                        mem_unroll.append(
+                            [reverse_map[line], VLMEM_INST[:offset] + FLAT_INST]
+                        )
                         VLMEM_INST = VLMEM_INST[offset:]
                         NUM_VLMEM = len(VLMEM_INST)
                         FLAT_INST = []
                         NUM_FLAT = 0
                     else:
-                        NUM_VLMEM = min(max(wait_N-NUM_FLAT, 0), NUM_VLMEM)
-                        NUM_FLAT = min(max(wait_N-NUM_VLMEM, 0), NUM_FLAT)
+                        NUM_VLMEM = min(max(wait_N - NUM_FLAT, 0), NUM_VLMEM)
+                        NUM_FLAT = min(max(wait_N - NUM_VLMEM, 0), NUM_FLAT)
                     num_inflight = NUM_FLAT + NUM_SMEM + NUM_VLMEM + NUM_VSMEM
 
-                if 'vscnt' in as_line[0] or (bGFX9 and 'vmcnt' in as_line[0]):
+                if "vscnt" in as_line[0] or (bGFX9 and "vmcnt" in as_line[0]):
                     try:
                         wait_N = int(as_line[0].split('vscnt(')[1].split(')')[0])
                     except:
@@ -450,35 +467,37 @@ def stitch(insts, raw_code, jumps, gfxv, bIsAuto):
                     if wait_N == 0:
                         vsmem_ordering = 0
                     if vsmem_ordering == 0:
-                        offset = len(VSMEM_INST)-wait_N
-                        mem_unroll.append( [reverse_map[line], VSMEM_INST[:offset]+FLAT_INST] )
+                        offset = len(VSMEM_INST) - wait_N
+                        mem_unroll.append(
+                            [reverse_map[line], VSMEM_INST[:offset] + FLAT_INST]
+                        )
                         VSMEM_INST = VSMEM_INST[offset:]
                         NUM_VSMEM = len(VSMEM_INST)
                         FLAT_INST = []
                         NUM_FLAT = 0
                     else:
-                        NUM_VSMEM = min(max(wait_N-NUM_FLAT, 0), NUM_VSMEM)
-                        NUM_FLAT = min(max(wait_N-NUM_VSMEM, 0), NUM_FLAT)
+                        NUM_VSMEM = min(max(wait_N - NUM_FLAT, 0), NUM_VSMEM)
+                        NUM_FLAT = min(max(wait_N - NUM_VSMEM, 0), NUM_FLAT)
                     num_inflight = NUM_FLAT + NUM_SMEM + NUM_VLMEM + NUM_VSMEM
 
         elif inst[1] == JUMP and as_line[1] == BRANCH:
             next = jump_map[as_line[2]]
             if next is None or next == 0:
-                print('Jump to unknown location!', as_line)
+                print("Jump to unknown location!", as_line)
                 break
         elif inst[1] == NEXT and as_line[1] == BRANCH:
             next = line + 1
         else:
             matched = False
             next = line + 1
-            if i+1 < N and line+1 < len(code):
+            if i + 1 < N and line + 1 < len(code):
                 if try_match_swapped(insts, code, i, line):
                     temp = insts[i]
-                    insts[i] = insts[i+1]
-                    insts[i+1] = temp
+                    insts[i] = insts[i + 1]
+                    insts[i + 1] = temp
                     next = line
-                elif 's_waitcnt ' in as_line[0] or '_load_' in as_line[0]:
-                    if skipped_immed > 0 and 's_waitcnt ' in as_line[0]:
+                elif "s_waitcnt " in as_line[0] or "_load_" in as_line[0]:
+                    if skipped_immed > 0 and "s_waitcnt " in as_line[0]:
                         matched = True
                         skipped_immed -= 1
                     elif 'scratch_' not in as_line[0]:
@@ -508,8 +527,10 @@ def stitch(insts, raw_code, jumps, gfxv, bIsAuto):
             pass
     else:
         while line < len(code):
-            if 's_endpgm' in code[line]:
-                mem_unroll.append( [reverse_map[line], SMEM_INST+VLMEM_INST+VSMEM_INST+FLAT_INST] )
+            if "s_endpgm" in code[line]:
+                mem_unroll.append(
+                    [reverse_map[line], SMEM_INST + VLMEM_INST + VSMEM_INST + FLAT_INST]
+                )
                 break
             line += 1
 

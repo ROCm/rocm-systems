@@ -9,10 +9,7 @@ file(GLOB ROCPROFILER_ROCSYS_SRC_FILES ${CMAKE_CURRENT_SOURCE_DIR}/*.cpp)
 # Compiling/Installing ROCProfiler API
 add_executable(rocprofiler_rocsys_fe ${ROCPROFILER_ROCSYS_SRC_FILES})
 
-set_target_properties(
-    rocprofiler_rocsys_fe
-    PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_OUTPUT_DIRECTORY} OUTPUT_NAME
-                                                                         "rocsys")
+set_target_properties(rocprofiler_rocsys_fe PROPERTIES OUTPUT_NAME "rocsys")
 
 target_include_directories(
     rocprofiler_rocsys_fe PRIVATE ${PROJECT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}

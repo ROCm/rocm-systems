@@ -23,6 +23,7 @@
 #include <vector>
 #include <mutex>
 #include <memory>
+#include <string_view>
 
 #include "api/rocprofiler_singleton.h"
 #include "core/memory/generic_buffer.h"
@@ -36,12 +37,9 @@
  *  ###############################################
  */
 
-
 void buffer_callback_fun(const rocprofiler_record_header_t* begin,
                          const rocprofiler_record_header_t* end,
-                         rocprofiler_session_id_t session_id, rocprofiler_buffer_id_t buffer_id) {
-  std::cout << "buffer callback" << std::endl;
-}
+                         rocprofiler_session_id_t session_id, rocprofiler_buffer_id_t buffer_id) {}
 
 /*
  *  ###############################################
@@ -51,7 +49,7 @@ void buffer_callback_fun(const rocprofiler_record_header_t* begin,
 
 // A lot have changed in the class, since this test was written
 // Need to rewrite all the test cases again.
-TEST(WhenAddingARecordToBuffer,   DISABLED_RecordGetsAddedSuccefully) {
+TEST(WhenAddingARecordToBuffer, RecordGetsAddedSuccefully) {
   Memory::GenericBuffer* buffer = new Memory::GenericBuffer(
       rocprofiler_session_id_t{0}, rocprofiler_buffer_id_t{0}, 0x8000, buffer_callback_fun);
 

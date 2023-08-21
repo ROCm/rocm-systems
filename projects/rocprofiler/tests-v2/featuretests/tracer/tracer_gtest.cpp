@@ -69,6 +69,10 @@ void ApplicationParser::SetApplicationEnv(const char* app_name, const char* trac
   setenv("LD_LIBRARY_PATH", ld_library_path.str().c_str(), true);
 
   std::stringstream hsa_tools_lib_path;
+  auto _existing_ld_preload = getenv("LD_PRELOAD");
+  if (_existing_ld_preload && strnlen(_existing_ld_preload, 1) > 0)
+    hsa_tools_lib_path << _existing_ld_preload << ":";
+
   hsa_tools_lib_path << app_path << lib_path;
   setenv("LD_PRELOAD", hsa_tools_lib_path.str().c_str(), true);
 
@@ -273,7 +277,7 @@ class AsyncCopyTest : public Tracertest {
 
 // Test:1 Compares total num of kernel-names in golden output against current
 // tracer output
-TEST_F(AsyncCopyTest, DISABLED_WhenRunningTracerWithAppThenAsyncCopyOutputIsgenerated) {
+TEST_F(AsyncCopyTest, WhenRunningTracerWithAppThenAsyncCopyOutputIsGenerated) {
   // kernel info in current profler run
   std::vector<tracer_kernel_info_t> current_kernel_info;
 
@@ -282,7 +286,7 @@ TEST_F(AsyncCopyTest, DISABLED_WhenRunningTracerWithAppThenAsyncCopyOutputIsgene
 }
 
 // Test:2 Matches coelation Ids
-TEST_F(AsyncCopyTest, DISABLED_WhenRunningTracerWithAppThenAsyncCorelationCountIsCorrect) {
+TEST_F(AsyncCopyTest, WhenRunningTracerWithAppThenAsyncCorelationCountIsCorrect) {
   // kernel info in current profler run
   std::vector<tracer_kernel_info_t> current_kernel_info;
 
