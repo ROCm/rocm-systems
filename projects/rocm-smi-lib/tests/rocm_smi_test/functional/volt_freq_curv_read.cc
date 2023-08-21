@@ -171,7 +171,7 @@ void TestVoltCurvRead::Run(void) {
       CHK_ERR_ASRT(err)
       // Verify api support checking functionality is working
       err = rsmi_dev_od_volt_info_get(i, nullptr);
-      ASSERT_EQ(err, RSMI_STATUS_NOT_SUPPORTED);
+      ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
     }
 
     if (err == RSMI_STATUS_SUCCESS) {
