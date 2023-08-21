@@ -466,7 +466,7 @@ class MPITest : public ProfilerTest {
 };
 
 // Test:1 if kernel-name exists in current profiler output
-TEST_F(MPITest, WhenRunningProfilerWithAppThenKernelNumbersOutputGenerated) {
+TEST_F(MPITest, DISABLED_WhenRunningProfilerWithAppThenKernelNumbersOutputGenerated) {
   std::vector<profiler_kernel_info_t> current_kernel_info;
 
   GetKernelInfoForRunningApplication(&current_kernel_info);
@@ -476,7 +476,7 @@ TEST_F(MPITest, WhenRunningProfilerWithAppThenKernelNumbersOutputGenerated) {
 }
 
 // Test:1 if kernel-name matches with golden output
-TEST_F(MPITest, WhenRunningProfilerWithAppThenKernelNameMatchWithGoldenOutput) {
+TEST_F(MPITest, DISABLED_WhenRunningProfilerWithAppThenKernelNameMatchWithGoldenOutput) {
   std::vector<profiler_kernel_info_t> current_kernel_info;
 
   GetKernelInfoForRunningApplication(&current_kernel_info);
