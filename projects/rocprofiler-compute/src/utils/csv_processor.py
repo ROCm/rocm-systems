@@ -33,6 +33,7 @@ import getpass
 from pymongo import MongoClient
 from tqdm import tqdm
 import glob
+from common import resolve_rocprof
 
 cache = dict()
 
@@ -40,6 +41,7 @@ supported_arch = {"gfx906": "mi50", "gfx908": "mi100", "gfx90a": "mi200"}
 MAX_SERVER_SEL_DELAY = 5000  # 5 sec connection timeout
 
 
+# Note: shortener is now dependent on a rocprof install with llvm
 def kernel_name_shortener(workload_dir, level):
     def shorten_file(df, level):
         global cache
@@ -57,7 +59,7 @@ def kernel_name_shortener(workload_dir, level):
                 if original_name in cache:
                     continue
 
-                cmd = ["/opt/rocm/llvm/bin/llvm-cxxfilt", original_name]
+                cmd = [llvm_filt, original_name]
 
                 proc = subprocess.Popen(
                     cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE
@@ -125,6 +127,19 @@ def kernel_name_shortener(workload_dir, level):
 
     # Only shorten if valid shortening level
     if level < 5:
+        returnPath = True
+        rocprof_path = resolve_rocprof(returnPath)
+        # Given expected rocprof dir format (ie '/opt/rocm-x.x.x/bin/rocprof') navigate to llvm in parent
+        rocm_dir = os.path.abspath(os.path.join(rocprof_path, os.pardir, os.pardir))
+        llvm_filt = os.path.join(rocm_dir, "llvm", "bin", "llvm-cxxfilt")
+        if not os.path.isfile(llvm_filt):
+            print(
+                "Error: Could not resolve llvm-cxxfilt in rocm install: {}".format(
+                    llvm_filt
+                )
+            )
+            sys.exit(0)
+
         for fpath in glob.glob(workload_dir + "/*.csv"):
             try:
                 orig_df = pd.read_csv(
@@ -136,6 +151,8 @@ def kernel_name_shortener(workload_dir, level):
                 modified_df.to_csv(fpath, index=False)
             except pd.errors.EmptyDataError:
                 print("Skipping empty csv " + str(fpath))
+
+        print("KernelName shortening complete!")
 
 
 # Verify target directory and setup connection

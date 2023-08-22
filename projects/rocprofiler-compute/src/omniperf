@@ -43,6 +43,7 @@ from utils import remove_workload
 from utils import csv_processor  # Import workload
 from omniperf_analyze.omniperf_analyze import roofline_only  # Standalone roofline
 from omniperf_analyze.omniperf_analyze import analyze  # CLI analysis
+from common import resolve_rocprof
 
 from common import (
     OMNIPERF_HOME,
@@ -101,26 +102,6 @@ def capture_subprocess_output(subprocess_args):
     buf.close()
 
     return (success, output)
-
-def resolve_rocprof():
-    # ROCPROF INFO
-    global rocprof_cmd
-    if not "ROCPROF" in os.environ.keys():
-        rocprof_cmd = "rocprof"
-    else:
-        rocprof_cmd = os.environ["ROCPROF"]
-
-    rocprof_path = subprocess.run(
-        ["which", rocprof_cmd], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
-    )
-    if rocprof_path.returncode != 0:
-        print("\nError: Unable to resolve path to %s binary" % rocprof_cmd)
-        print(
-            "Please verify installation or set ROCPROF environment variable with full path."
-        )
-        sys.exit(1)
-
-    print("ROC Profiler: ", rocprof_path.stdout.decode("utf-8"))
 
 
 def get_soc():
@@ -747,7 +728,8 @@ def main():
     if args.mode == "profile":
         Extractionlvl = args.kernelVerbose
         print("Resolving rocprof")
-        resolve_rocprof()
+        global rocprof_cmd
+        rocprof_cmd = resolve_rocprof()
         # Cannot access parent directories
         if ".." in str(args.path):
             throw_parse_error(
