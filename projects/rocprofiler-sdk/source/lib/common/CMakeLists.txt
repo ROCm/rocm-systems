@@ -17,10 +17,15 @@ target_include_directories(rocprofiler-common-library
 
 target_link_libraries(
     rocprofiler-common-library
-    PUBLIC rocprofiler::rocprofiler-amd-comgr
-           $<BUILD_INTERFACE:rocprofiler::rocprofiler-build-flags>
+    PUBLIC $<BUILD_INTERFACE:rocprofiler::rocprofiler-build-flags>
+           $<BUILD_INTERFACE:rocprofiler::rocprofiler-threading>
            $<BUILD_INTERFACE:rocprofiler::rocprofiler-memcheck>
            $<BUILD_INTERFACE:rocprofiler::rocprofiler-stdcxxfs>
-           $<BUILD_INTERFACE:rocprofiler::rocprofiler-dl>)
+           $<BUILD_INTERFACE:rocprofiler::rocprofiler-glog>
+           $<BUILD_INTERFACE:rocprofiler::rocprofiler-fmt>
+           $<BUILD_INTERFACE:rocprofiler::rocprofiler-dl>
+           $<BUILD_INTERFACE:rocprofiler::rocprofiler-hip>
+           $<BUILD_INTERFACE:rocprofiler::rocprofiler-amd-comgr>
+           $<BUILD_INTERFACE:rocprofiler::rocprofiler-hsa-runtime>)
 set_target_properties(rocprofiler-common-library PROPERTIES OUTPUT_NAME
                                                             rocprofiler-common)

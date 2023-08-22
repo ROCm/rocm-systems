@@ -9,12 +9,16 @@ include_guard(DIRECTORY)
 
 target_include_directories(
     rocprofiler-headers
-    INTERFACE $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/source/include>
+    INTERFACE $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/source/include>
+              $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/source/include>
               $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/source>
               $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 
-# include threading because of rooflines
-target_link_libraries(rocprofiler-headers INTERFACE rocprofiler::rocprofiler-threading)
+target_compile_definitions(
+    rocprofiler-headers
+    INTERFACE $<BUILD_INTERFACE:AMD_INTERNAL_BUILD=1> $<BUILD_INTERFACE:PROF_API_IMPL=1>
+              $<BUILD_INTERFACE:HIP_PROF_HIP_API_STRING=1>
+              $<BUILD_INTERFACE:__HIP_PLATFORM_AMD__=1>)
 
 # ensure the env overrides the appending /opt/rocm later
 string(REPLACE ":" ";" CMAKE_PREFIX_PATH "$ENV{CMAKE_PREFIX_PATH};${CMAKE_PREFIX_PATH}")

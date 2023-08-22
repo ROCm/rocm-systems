@@ -20,10 +20,9 @@
 
 #pragma once
 
-#define ROCPROFILER_ATTRIBUTE(...)    __attribute__((__VA_ARGS__))
+#include <rocprofiler/defines.h>
+
 #define ROCPROFILER_VISIBILITY(MODE)  ROCPROFILER_ATTRIBUTE(visibility(MODE))
-#define ROCPROFILER_PUBLIC_API        ROCPROFILER_VISIBILITY("default")
-#define ROCPROFILER_HIDDEN_API        ROCPROFILER_VISIBILITY("hidden")
 #define ROCPROFILER_INTERNAL_API      ROCPROFILER_VISIBILITY("internal")
 #define ROCPROFILER_INLINE            ROCPROFILER_ATTRIBUTE(always_inline) inline
 #define ROCPROFILER_NOINLINE          ROCPROFILER_ATTRIBUTE(noinline)

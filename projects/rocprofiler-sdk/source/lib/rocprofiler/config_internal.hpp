@@ -30,7 +30,7 @@ struct correlation_config
 
 struct domain_config
 {
-    ::rocprofiler_sync_callback_t     user_sync_callback = nullptr;
+    ::rocprofiler_tracer_callback_t   user_sync_callback = nullptr;
     int64_t                           domains            = 0;
     std::bitset<reserved_domain_size> opcodes            = {};
 
@@ -57,7 +57,7 @@ struct config
     size_t              size           = 0;        // = sizeof(rocprofiler_config)
     uint32_t            compat_version = 0;        // set by user
     uint32_t            api_version    = 0;        // set by rocprofiler
-    uint64_t            session_idx    = 0;        // session id index
+    uint64_t            context_idx    = 0;        // context id index
     void*               user_data      = nullptr;  // user data passed to callbacks
     correlation_config* correlation_id = nullptr;  // &my_cid_config (optional)
     buffer_config*      buffer         = nullptr;  // = &my_buffer_config (required)

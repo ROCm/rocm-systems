@@ -3,23 +3,41 @@
 #
 #   Configure miscellaneous settings
 #
-# standard cmake options
-rocprofiler_add_option(BUILD_SHARED_LIBS "Build shared libraries" ON)
-rocprofiler_add_option(BUILD_STATIC_LIBS "Build static libraries" OFF)
-rocprofiler_add_option(CMAKE_POSITION_INDEPENDENT_CODE "Build position independent code"
-                       ON)
+include_guard(GLOBAL)
 
-# export compile commands in the project
+# export compile commands of the project. Many IDEs want the compile_commands.json in root
+# directory so run ln -s <build>/compile_commands.json
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+# C settings
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_EXTENSIONS OFF)
 set(CMAKE_C_STANDARD_REQUIRED ON)
+set(CMAKE_C_VISIBILITY_PRESET "hidden")
+# C++ settings
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_VISIBILITY_PRESET "hidden")
+# general settings affecting build
+set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
+set(CMAKE_UNITY_BUILD OFF)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-rocprofiler_add_option(ROCPROFILER_BUILD_TESTS "Enable building the tests" OFF)
-rocprofiler_add_option(ROCPROFILER_BUILD_SAMPLES "Enable building the code samples" OFF)
+rocprofiler_add_feature(CMAKE_BUILD_TYPE "Build type")
+rocprofiler_add_feature(CMAKE_INSTALL_PREFIX "Install prefix")
+
+# standard cmake options
+rocprofiler_add_option(BUILD_SHARED_LIBS "Build shared libraries" ON)
+# rocprofiler_add_option(BUILD_STATIC_LIBS "Build static libraries" OFF)
+
+rocprofiler_add_option(
+    ROCPROFILER_BUILD_CI "Enable continuous integration default values for options" OFF
+    ADVANCED)
+
+rocprofiler_add_option(ROCPROFILER_BUILD_TESTS "Enable building the tests"
+                       ${ROCPROFILER_BUILD_CI})
+rocprofiler_add_option(ROCPROFILER_BUILD_SAMPLES "Enable building the code samples"
+                       ${ROCPROFILER_BUILD_CI})
 
 # CLI and FILE plugins are always built
 foreach(_PLUGIN "ATT" "CTF" "PERFETTO")
@@ -27,19 +45,26 @@ foreach(_PLUGIN "ATT" "CTF" "PERFETTO")
                            "Enable building the ${_PLUGIN} plugin" ON)
 endforeach()
 
+rocprofiler_add_option(ROCPROFILER_BUILD_FMT "Enable building fmt library internally" ON)
+rocprofiler_add_option(ROCPROFILER_BUILD_GLOG
+                       "Enable building glog (Google logging) library internally" ON)
+if(ROCPROFILER_BUILD_TESTS)
+    rocprofiler_add_option(
+        ROCPROFILER_BUILD_GTEST
+        "Enable building gtest (Google testing) library internally" ON ADVANCED)
+endif()
+
 rocprofiler_add_option(ROCPROFILER_DEBUG_TRACE "Enable debug tracing" OFF ADVANCED)
 rocprofiler_add_option(ROCPROFILER_LD_AQLPROFILE
                        "Enable direct loading of AQL-profile HSA extension" OFF ADVANCED)
-rocprofiler_add_option(ROCPROFILER_BUILD_CI "Enable continuous integration additions" OFF
-                       ADVANCED)
 rocprofiler_add_option(ROCPROFILER_ENABLE_CLANG_TIDY "Enable clang-tidy checks" OFF
-                       ADVANCED)
-rocprofiler_add_option(ROCPROFILER_BUILD_WERROR "Any compiler warnings are errors" OFF
                        ADVANCED)
 
 rocprofiler_add_option(
     ROCPROFILER_BUILD_DEVELOPER "Extra build flags for development like -Werror"
     ${ROCPROFILER_BUILD_CI} ADVANCED)
+rocprofiler_add_option(ROCPROFILER_BUILD_WERROR "Any compiler warnings are errors"
+                       ${ROCPROFILER_BUILD_CI} ADVANCED)
 rocprofiler_add_option(ROCPROFILER_BUILD_RELEASE "Build with minimal debug info" OFF
                        ADVANCED)
 rocprofiler_add_option(ROCPROFILER_BUILD_DEBUG "Build with extra debug info" OFF ADVANCED)
@@ -48,10 +73,10 @@ rocprofiler_add_option(ROCPROFILER_BUILD_STATIC_LIBGCC
 rocprofiler_add_option(ROCPROFILER_BUILD_STATIC_LIBSTDCXX
                        "Build with -static-libstdc++ if possible" OFF ADVANCED)
 rocprofiler_add_option(ROCPROFILER_BUILD_STACK_PROTECTOR "Build with -fstack-protector"
-                       OFF ADVANCED)
+                       ON ADVANCED)
 
 # In the future, we will do this even with clang-tidy enabled
-if(ROCPROFILER_BUILD_CI AND NOT ROCPROFILER_ENABLE_CLANG_TIDY)
+if(ROCPROFILER_BUILD_CI AND NOT ROCPROFILER_BUILD_WERROR)
     message(STATUS "Forcing ROCPROFILER_BUILD_WERROR=ON because ROCPROFILER_BUILD_CI=ON")
     set(ROCPROFILER_BUILD_WERROR
         ON

@@ -174,11 +174,18 @@
                                                                                                    \
         static auto get_functor() { return get_functor(get_table_func()); }                        \
                                                                                                    \
-        static std::string as_string(hsa_trace_data_t) { return std::string{name} + "()"; }        \
+        static std::string as_string(rocprofiler_hsa_trace_data_t)                                 \
+        {                                                                                          \
+            return std::string{name} + "()";                                                       \
+        }                                                                                          \
                                                                                                    \
-        static std::string as_named_string(hsa_trace_data_t) { return std::string{name} + "()"; }  \
+        static std::string as_named_string(rocprofiler_hsa_trace_data_t)                           \
+        {                                                                                          \
+            return std::string{name} + "()";                                                       \
+        }                                                                                          \
                                                                                                    \
-        static std::vector<std::pair<std::string, std::string>> as_arg_list(hsa_trace_data_t)      \
+        static std::vector<std::pair<std::string, std::string>> as_arg_list(                       \
+            rocprofiler_hsa_trace_data_t)                                                          \
         {                                                                                          \
             return {};                                                                             \
         }                                                                                          \
@@ -243,24 +250,39 @@
                                                                                                    \
         static auto get_functor() { return get_functor(get_table_func()); }                        \
                                                                                                    \
-        static std::string as_string(hsa_trace_data_t trace_data)                                  \
+        static std::string as_string(rocprofiler_hsa_trace_data_t trace_data)                      \
         {                                                                                          \
             return utils::join(utils::join_args{std::string{name} + "(", ")", ", "},               \
                                GET_MEMBER_FIELDS(get_api_data_args(trace_data), __VA_ARGS__));     \
         }                                                                                          \
                                                                                                    \
-        static std::string as_named_string(hsa_trace_data_t trace_data)                            \
+        static std::string as_named_string(rocprofiler_hsa_trace_data_t trace_data)                \
         {                                                                                          \
             return utils::join(                                                                    \
                 utils::join_args{std::string{name} + "(", ")", ", "},                              \
                 GET_NAMED_MEMBER_FIELDS(get_api_data_args(trace_data), __VA_ARGS__));              \
         }                                                                                          \
                                                                                                    \
-        static auto as_arg_list(hsa_trace_data_t trace_data)                                       \
+        static auto as_arg_list(rocprofiler_hsa_trace_data_t trace_data)                           \
         {                                                                                          \
             return utils::stringize(                                                               \
                 GET_NAMED_MEMBER_FIELDS(get_api_data_args(trace_data), __VA_ARGS__));              \
         }                                                                                          \
+    };                                                                                             \
+    }                                                                                              \
+    }
+
+#define HSA_API_TABLE_LOOKUP_DEFINITION(TABLE_ID, MEMBER)                                          \
+    namespace rocprofiler                                                                          \
+    {                                                                                              \
+    namespace hsa                                                                                  \
+    {                                                                                              \
+    template <>                                                                                    \
+    struct hsa_table_lookup<TABLE_ID>                                                              \
+    {                                                                                              \
+        auto& operator()(hsa_api_table_t& _v) const { return _v.MEMBER; }                          \
+        auto& operator()(hsa_api_table_t* _v) const { return _v->MEMBER; }                         \
+        auto& operator()() const { return (*this)(get_table()); }                                  \
     };                                                                                             \
     }                                                                                              \
     }

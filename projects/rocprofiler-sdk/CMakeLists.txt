@@ -59,6 +59,7 @@ set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake ${PROJECT_SOURCE_DIR}/cmake/Mo
                       ${CMAKE_MODULE_PATH})
 
 include(GNUInstallDirs) # install directories
+set(CMAKE_INSTALL_LIBDIR "lib") # rocm doesn't use lib64
 
 include(rocprofiler_utilities) # various functions/macros
 include(rocprofiler_interfaces) # interface libraries
@@ -72,6 +73,9 @@ include(rocprofiler_config_interfaces) # configure interface libraries
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}")
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}")
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}")
+
+enable_testing()
+include(CTest)
 
 add_subdirectory(external)
 add_subdirectory(source)
@@ -87,3 +91,5 @@ endif()
 #
 include(rocprofiler_config_install)
 include(rocprofiler_config_packaging)
+
+rocprofiler_print_features()

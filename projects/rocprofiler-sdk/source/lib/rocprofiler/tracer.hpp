@@ -27,16 +27,14 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <optional>
-#include <string>
 
 typedef struct
 {
-    rocprofiler_session_id_t session_id;
+    rocprofiler_context_id_t context_id;
     rocprofiler_buffer_id_t  buffer_id;
-} session_buffer_id_t;
+} context_buffer_id_t;
 
-typedef session_buffer_id_t roctracer_pool_t;
+typedef context_buffer_id_t roctracer_pool_t;
 
 /* Correlation id */
 typedef uint64_t activity_correlation_id_t;

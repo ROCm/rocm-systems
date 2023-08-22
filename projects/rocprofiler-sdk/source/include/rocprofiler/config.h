@@ -1,3 +1,24 @@
+// MIT License
+//
+// Copyright (c) 2023 ROCm Developer Tools
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
 
 #pragma once
 
@@ -8,9 +29,10 @@
 extern "C" {
 #endif
 
-#define ROCPROFILER_API_VERSION_ID      1
-#define ROCPROFILER_DOMAIN_OPS_MAX      512
-#define ROCPROFILER_DOMAIN_OPS_RESERVED ((ROCPROFILER_DOMAIN_OPS_MAX * ACTIVITY_DOMAIN_NUMBER / 8))
+#define ROCPROFILER_API_VERSION_ID 1
+#define ROCPROFILER_DOMAIN_OPS_MAX 512
+#define ROCPROFILER_DOMAIN_OPS_RESERVED                                                            \
+    ((ROCPROFILER_DOMAIN_OPS_MAX * ROCPROFILER_TRACER_ACTIVITY_DOMAIN_LAST / 8))
 
 typedef uint64_t (*rocprofiler_external_cid_cb_t)(rocprofiler_tracer_activity_domain_t,
                                                   uint32_t,
@@ -31,9 +53,9 @@ struct rocprofiler_correlation_config
 /// domain they want to trace
 struct rocprofiler_domain_config
 {
-    rocprofiler_sync_callback_t callback;
-    char                        reserved0[sizeof(uint64_t)];
-    char                        reserved1[ROCPROFILER_DOMAIN_OPS_RESERVED];
+    rocprofiler_tracer_callback_t callback;
+    char                          reserved0[sizeof(uint64_t)];
+    char                          reserved1[ROCPROFILER_DOMAIN_OPS_RESERVED];
 };
 
 /// for buffered callbacks, the tool provides a callback to create a buffer and the size
@@ -147,16 +169,16 @@ rocprofiler_allocate_config(struct rocprofiler_config* cfg);
 rocprofiler_status_t
 rocprofiler_validate_config(const struct rocprofiler_config* cfg);
 
-/// \brief rocprofiler activates configuration and provides a session identifier
+/// \brief rocprofiler activates configuration and provides a context identifier
 /// \param [in] cfg may adjust config or assign values within structs. If error
 ///                 occurs, could nullptr valid sub-configs and leave the pointers to
 ///                 invalid configs
-/// \param [out] id the session identifier for this config.
+/// \param [out] id the context identifier for this config.
 rocprofiler_status_t
-rocprofiler_start_config(struct rocprofiler_config*, rocprofiler_session_id_t* id);
+rocprofiler_start_config(struct rocprofiler_config*, rocprofiler_context_id_t* id);
 
 /// \brief disable the configuration.
-rocprofiler_status_t rocprofiler_stop_config(rocprofiler_session_id_t);
+rocprofiler_status_t rocprofiler_stop_config(rocprofiler_context_id_t);
 
 ///
 ///

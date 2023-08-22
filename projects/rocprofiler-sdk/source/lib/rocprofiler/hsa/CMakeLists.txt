@@ -1,5 +1,5 @@
 set(ROCPROFILER_LIB_HSA_SOURCES hsa.cpp)
-set(ROCPROFILER_LIB_HSA_HEADERS hsa.hpp hsa-defines.hpp hsa-types.h hsa-utils.hpp)
+set(ROCPROFILER_LIB_HSA_HEADERS hsa.hpp defines.hpp ostream.hpp types.hpp utils.hpp)
 target_sources(rocprofiler-library PRIVATE ${ROCPROFILER_LIB_HSA_SOURCES}
                                            ${ROCPROFILER_LIB_HSA_HEADERS})
 

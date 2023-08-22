@@ -20,16 +20,10 @@
 
 #pragma once
 
-#include "lib/common/defines.hpp"
-#include "lib/rocprofiler/hsa/hsa-defines.hpp"
-#include "lib/rocprofiler/hsa/hsa-ostream.hpp"
-#include "lib/rocprofiler/hsa/hsa-types.h"
-#include "lib/rocprofiler/hsa/hsa-utils.hpp"
-
-#include <hsa/hsa_api_trace.h>
 #include <rocprofiler/rocprofiler.h>
 
 #include <cstdint>
+#include <vector>
 
 namespace rocprofiler
 {
@@ -41,27 +35,8 @@ using activity_functor_t = int (*)(rocprofiler_tracer_activity_domain_t domain,
 
 using hsa_api_table_t = HsaApiTable;
 
-struct hsa_trace_data_t
-{
-    hsa_api_data_t api_data;
-    uint64_t       phase_enter_timestamp;
-    uint64_t       phase_data;
-
-    void (*phase_enter)(hsa_api_id_t operation_id, hsa_trace_data_t* data);
-    void (*phase_exit)(hsa_api_id_t operation_id, hsa_trace_data_t* data);
-};
-
-enum hsa_table_api_id_t
-{
-    HSA_API_TABLE_ID_CoreApi,
-    HSA_API_TABLE_ID_AmdExt,
-    HSA_API_TABLE_ID_ImageExt,
-    HSA_API_TABLE_ID_NUMBER,
-};
-
-template <typename DataT, typename Tp>
-void
-set_data_retval(DataT&, Tp);
+hsa_api_table_t&
+get_table();
 
 template <size_t Idx>
 struct hsa_table_lookup;
@@ -92,14 +67,14 @@ uint32_t
 hsa_api_id_by_name(const char* name);
 
 std::string
-hsa_api_data_string(uint32_t id, const hsa_trace_data_t& _data);
+hsa_api_data_string(uint32_t id, const rocprofiler_hsa_trace_data_t& _data);
 
 std::string
-hsa_api_named_data_string(uint32_t id, const hsa_trace_data_t& _data);
+hsa_api_named_data_string(uint32_t id, const rocprofiler_hsa_trace_data_t& _data);
 
 void
-hsa_api_iterate_args(uint32_t                id,
-                     const hsa_trace_data_t& _data,
+hsa_api_iterate_args(uint32_t                            id,
+                     const rocprofiler_hsa_trace_data_t& _data,
                      int (*_func)(const char*, const char*));
 
 std::vector<const char*>

@@ -204,11 +204,6 @@ function(ROCPROFILER_CHECKOUT_GIT_SUBMODULE)
         set(CHECKOUT_TEST_FILE "CMakeLists.txt")
     endif()
 
-    # default assumption
-    if(NOT CHECKOUT_REPO_BRANCH)
-        set(CHECKOUT_REPO_BRANCH "master")
-    endif()
-
     find_package(Git)
     set(_DIR "${CHECKOUT_WORKING_DIRECTORY}/${CHECKOUT_RELATIVE_PATH}")
     # ensure the (possibly empty) directory exists
@@ -267,7 +262,9 @@ function(ROCPROFILER_CHECKOUT_GIT_SUBMODULE)
 
     if(NOT _TEST_FILE_EXISTS AND _HAS_REPO_URL)
         message(
-            STATUS "Checking out '${CHECKOUT_REPO_URL}' @ '${CHECKOUT_REPO_BRANCH}'...")
+            STATUS
+                "Cloning '${CHECKOUT_REPO_URL}' into ${CHECKOUT_WORKING_DIRECTORY}/${CHECKOUT_RELATIVE_PATH}..."
+            )
 
         # remove the existing directory
         if(EXISTS "${_DIR}")
@@ -276,11 +273,33 @@ function(ROCPROFILER_CHECKOUT_GIT_SUBMODULE)
 
         # perform the checkout
         execute_process(
-            COMMAND
-                ${GIT_EXECUTABLE} clone -b ${CHECKOUT_REPO_BRANCH}
-                ${CHECKOUT_ADDITIONAL_CMDS} ${CHECKOUT_REPO_URL} ${CHECKOUT_RELATIVE_PATH}
+            COMMAND ${GIT_EXECUTABLE} clone ${CHECKOUT_ADDITIONAL_CMDS}
+                    ${CHECKOUT_REPO_URL} ${CHECKOUT_RELATIVE_PATH}
             WORKING_DIRECTORY ${CHECKOUT_WORKING_DIRECTORY}
-            RESULT_VARIABLE RET)
+            RESULT_VARIABLE RET_CLONE)
+
+        if(NOT RET_CLONE EQUAL 0)
+            message(
+                SEND_ERROR
+                    "Failed to clone ${CHECKOUT_REPO_URL} into ${CHECKOUT_WORKING_DIRECTORY}/${CHECKOUT_RELATIVE_PATH}"
+                )
+            return()
+        endif()
+
+        if(CHECKOUT_REPO_BRANCH)
+            execute_process(
+                COMMAND ${GIT_EXECUTABLE} checkout ${CHECKOUT_REPO_BRANCH}
+                WORKING_DIRECTORY ${CHECKOUT_WORKING_DIRECTORY}/${CHECKOUT_RELATIVE_PATH}
+                RESULT_VARIABLE RET_BRANCH)
+
+            if(NOT RET_BRANCH EQUAL 0)
+                message(
+                    SEND_ERROR
+                        "Failed to checkout '${CHECKOUT_REPO_BRANCH}' for ${CHECKOUT_REPO_URL} in ${CHECKOUT_WORKING_DIRECTORY}/${CHECKOUT_RELATIVE_PATH}"
+                    )
+                return()
+            endif()
+        endif()
 
         # perform the submodule update
         if(CHECKOUT_RECURSIVE
@@ -289,20 +308,17 @@ function(ROCPROFILER_CHECKOUT_GIT_SUBMODULE)
             execute_process(
                 COMMAND ${GIT_EXECUTABLE} submodule update --init ${_RECURSE}
                 WORKING_DIRECTORY ${_DIR}
-                RESULT_VARIABLE RET)
+                RESULT_VARIABLE RET_RECURSIVE)
+            if(NOT RET_RECURSIVE EQUAL 0)
+                message(
+                    SEND_ERROR
+                        "Failed to update submodules for ${CHECKOUT_REPO_URL} in ${CHECKOUT_WORKING_DIRECTORY}/${CHECKOUT_RELATIVE_PATH}"
+                    )
+                return()
+            endif()
         endif()
 
-        # check the return code
-        if(RET GREATER 0)
-            set(_CMD
-                "${GIT_EXECUTABLE} clone -b ${CHECKOUT_REPO_BRANCH}
-                ${CHECKOUT_ADDITIONAL_CMDS} ${CHECKOUT_REPO_URL} ${CHECKOUT_RELATIVE_PATH}"
-                )
-            message(STATUS "function(rocprofiler_checkout_git_submodule) failed.")
-            message(FATAL_ERROR "Command: \"${_CMD}\"")
-        else()
-            set(_TEST_FILE_EXISTS ON)
-        endif()
+        set(_TEST_FILE_EXISTS ON)
     endif()
 
     if(NOT EXISTS "${_TEST_FILE}" OR NOT _TEST_FILE_EXISTS)
@@ -310,7 +326,6 @@ function(ROCPROFILER_CHECKOUT_GIT_SUBMODULE)
             FATAL_ERROR
                 "Error checking out submodule: '${CHECKOUT_RELATIVE_PATH}' to '${_DIR}'")
     endif()
-
 endfunction()
 
 # ----------------------------------------------------------------------------------------#

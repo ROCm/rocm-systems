@@ -32,4 +32,7 @@
 *.app
 
 # Build directories
+/compile_commands.json
 /build*
+/.cache
+/.vscode

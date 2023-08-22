@@ -42,12 +42,14 @@ if(ROCPROFILER_CLANG_FORMAT_EXE
             set(${_TYPE})
         endforeach()
         file(GLOB_RECURSE header_files ${PROJECT_SOURCE_DIR}/${_DIR}/*.h
-             ${PROJECT_SOURCE_DIR}/${_DIR}/*.hpp)
+             ${PROJECT_SOURCE_DIR}/${_DIR}/*.hpp ${PROJECT_SOURCE_DIR}/${_DIR}/*.h.in
+             ${PROJECT_SOURCE_DIR}/${_DIR}/*.hpp.in)
         file(GLOB_RECURSE source_files ${PROJECT_SOURCE_DIR}/${_DIR}/*.c
              ${PROJECT_SOURCE_DIR}/${_DIR}/*.cpp)
         file(GLOB_RECURSE cmake_files ${PROJECT_SOURCE_DIR}/${_DIR}/*CMakeLists.txt
              ${PROJECT_SOURCE_DIR}/${_DIR}/*.cmake)
-        file(GLOB_RECURSE python_files ${PROJECT_SOURCE_DIR}/${_DIR}/*.py)
+        file(GLOB_RECURSE python_files ${PROJECT_SOURCE_DIR}/${_DIR}/*.py
+             ${PROJECT_SOURCE_DIR}/${_DIR}/*.py.in)
         foreach(_TYPE header_files source_files cmake_files python_files)
             list(APPEND rocp_${_TYPE} ${${_TYPE}})
         endforeach()
@@ -69,12 +71,12 @@ if(ROCPROFILER_CLANG_FORMAT_EXE
             )
     endif()
 
-    if(ROCPROFILER_BLACK_FORMAT_EXE)
+    if(ROCPROFILER_BLACK_FORMAT_EXE AND rocp_python_files)
         add_custom_target(
             format-rocprofiler-python
             ${ROCPROFILER_BLACK_FORMAT_EXE} -q ${rocp_python_files}
             COMMENT
-                "[rocprofiler] Running Python formatter ${ROCPROFILER_BLACK_FORMAT_EXE}..."
+                "[rocprofiler] Running python formatter ${ROCPROFILER_BLACK_FORMAT_EXE}..."
             )
     endif()
 
@@ -83,7 +85,7 @@ if(ROCPROFILER_CLANG_FORMAT_EXE
             format-rocprofiler-cmake
             ${ROCPROFILER_CMAKE_FORMAT_EXE} -i ${rocp_cmake_files}
             COMMENT
-                "[rocprofiler] Running CMake formatter ${ROCPROFILER_CMAKE_FORMAT_EXE}..."
+                "[rocprofiler] Running cmake formatter ${ROCPROFILER_CMAKE_FORMAT_EXE}..."
             )
     endif()
 
@@ -94,7 +96,7 @@ if(ROCPROFILER_CLANG_FORMAT_EXE
         endif()
     endforeach()
 
-    foreach(_TYPE source python)
+    foreach(_TYPE source python cmake)
         if(TARGET format-rocprofiler-${_TYPE})
             add_dependencies(format format-rocprofiler-${_TYPE})
         endif()

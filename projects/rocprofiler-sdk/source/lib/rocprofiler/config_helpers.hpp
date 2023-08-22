@@ -1,7 +1,7 @@
 
 #pragma once
 
-#include <rocprofiler/rocprofiler.h>
+#include "rocprofiler/rocprofiler.h"
 
 #include <array>
 #include <atomic>
@@ -15,16 +15,16 @@ get_domain_max_op(rocprofiler_tracer_activity_domain_t _domain)
 {
     switch(_domain)
     {
-        case ACTIVITY_DOMAIN_NONE: return -1;
-        case ACTIVITY_DOMAIN_HSA_API: return 0;
-        case ACTIVITY_DOMAIN_HSA_OPS: return 0;
-        case ACTIVITY_DOMAIN_HIP_OPS: return 0;
-        case ACTIVITY_DOMAIN_HIP_API: return 0;
-        case ACTIVITY_DOMAIN_KFD_API: return -1;
-        case ACTIVITY_DOMAIN_EXT_API: return -1;
-        case ACTIVITY_DOMAIN_ROCTX: return 0;
-        case ACTIVITY_DOMAIN_HSA_EVT: return 0;
-        case ACTIVITY_DOMAIN_NUMBER: return -1;
+        case ROCPROFILER_TRACER_ACTIVITY_DOMAIN_NONE: return -1;
+        case ROCPROFILER_TRACER_ACTIVITY_DOMAIN_HSA_API: return 0;
+        case ROCPROFILER_TRACER_ACTIVITY_DOMAIN_HIP_API: return 0;
+        case ROCPROFILER_TRACER_ACTIVITY_DOMAIN_MARKER_API: return 0;
+        case ROCPROFILER_TRACER_ACTIVITY_DOMAIN_KFD_API: return -1;
+        case ROCPROFILER_TRACER_ACTIVITY_DOMAIN_EXT_API: return -1;
+        case ROCPROFILER_TRACER_ACTIVITY_DOMAIN_HSA_OPS: return 0;
+        case ROCPROFILER_TRACER_ACTIVITY_DOMAIN_HIP_OPS: return 0;
+        case ROCPROFILER_TRACER_ACTIVITY_DOMAIN_HSA_EVT: return 0;
+        case ROCPROFILER_TRACER_ACTIVITY_DOMAIN_LAST: return -1;
     }
     return -1;
 }
