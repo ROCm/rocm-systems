@@ -248,8 +248,7 @@ class perfetto_plugin_t {
 
     std::string full_kernel_name = get_kernel_name(profiler_record);
     // std::string truncated_kernel_name = rocprofiler::truncate_name(full_kernel_name);
-    // perfetto::StaticString kernel_name(truncated_kernel_name.c_str());
-    TRACE_EVENT_BEGIN("KERNELS", perfetto::StaticString(full_kernel_name.c_str()), queue_track,
+    TRACE_EVENT_BEGIN("KERNELS", perfetto::DynamicString(full_kernel_name.c_str()), queue_track,
                       profiler_record.timestamps.begin.value, "Full Kernel Name",
                       full_kernel_name.c_str(), "Agent ID", device_id, "Queue ID",
                       profiler_record.queue_id.handle, "GRD",
@@ -434,7 +433,7 @@ class perfetto_plugin_t {
         roctx_id = tracer_record.external_id.id;
         roctx_message = tracer_record.name ? tracer_record.name : "";
         if (tracer_record.operation_id.id == 1) {
-          perfetto::StaticString roctx_message_pft(
+          perfetto::DynamicString roctx_message_pft(
               (!roctx_message.empty() ? roctx_message.c_str() : ""));
           TRACE_EVENT_BEGIN("ROCTX_API", roctx_message_pft, roctx_track,
                             tracer_record.timestamps.begin.value, "Timestamp(ns)",
@@ -471,13 +470,13 @@ class perfetto_plugin_t {
         }
         auto& hsa_track = hsa_track_it->second;
         if (tracer_record.phase == ROCPROFILER_PHASE_ENTER)
-          TRACE_EVENT_BEGIN("HSA_API", perfetto::StaticString(operation_name_c), hsa_track,
+          TRACE_EVENT_BEGIN("HSA_API", perfetto::DynamicString(operation_name_c), hsa_track,
                             tracer_record.timestamps.begin.value,
                             perfetto::Flow::ProcessScoped(tracer_record.correlation_id.value));
         if (tracer_record.phase == ROCPROFILER_PHASE_EXIT)
           TRACE_EVENT_END("HSA_API", hsa_track, tracer_record.timestamps.end.value);
         if (tracer_record.phase == ROCPROFILER_PHASE_NONE) {
-          TRACE_EVENT_BEGIN("HSA_API", perfetto::StaticString(operation_name_c), hsa_track,
+          TRACE_EVENT_BEGIN("HSA_API", perfetto::DynamicString(operation_name_c), hsa_track,
                             tracer_record.timestamps.begin.value,
                             perfetto::Flow::ProcessScoped(tracer_record.correlation_id.value));
           TRACE_EVENT_END("HSA_API", hsa_track, tracer_record.timestamps.end.value);
@@ -510,13 +509,13 @@ class perfetto_plugin_t {
         }
         auto& hip_track = hip_track_it->second;
         if (tracer_record.phase == ROCPROFILER_PHASE_ENTER)
-          TRACE_EVENT_BEGIN("HIP_API", perfetto::StaticString(operation_name_c), hip_track,
+          TRACE_EVENT_BEGIN("HIP_API", perfetto::DynamicString(operation_name_c), hip_track,
                             tracer_record.timestamps.begin.value,
                             perfetto::Flow::ProcessScoped(tracer_record.correlation_id.value));
         if (tracer_record.phase == ROCPROFILER_PHASE_EXIT)
           TRACE_EVENT_END("HIP_API", hip_track, tracer_record.timestamps.end.value);
         if (tracer_record.phase == ROCPROFILER_PHASE_NONE) {
-          TRACE_EVENT_BEGIN("HIP_API", perfetto::StaticString(operation_name_c), hip_track,
+          TRACE_EVENT_BEGIN("HIP_API", perfetto::DynamicString(operation_name_c), hip_track,
                             tracer_record.timestamps.begin.value,
                             perfetto::Flow::ProcessScoped(tracer_record.correlation_id.value));
           TRACE_EVENT_END("HIP_API", hip_track, tracer_record.timestamps.end.value);
@@ -532,7 +531,7 @@ class perfetto_plugin_t {
         if (tracer_record.name) {
           kernel_name = rocprofiler::cxx_demangle(tracer_record.name);
           TRACE_EVENT_BEGIN(
-              "HIP_OPS", perfetto::StaticString(rocprofiler::truncate_name(kernel_name).c_str()),
+              "HIP_OPS", perfetto::DynamicString(rocprofiler::truncate_name(kernel_name).c_str()),
               gpu_track, tracer_record.timestamps.begin.value, "Agent ID",
               tracer_record.agent_id.handle, "Process ID", GetPid(), "Kernel Name", kernel_name,
               perfetto::Flow::ProcessScoped(tracer_record.correlation_id.value));
@@ -542,11 +541,11 @@ class perfetto_plugin_t {
                                  : std::string::npos;
 
           if (std::string::npos == pos)
-            TRACE_EVENT_BEGIN("HIP_OPS", perfetto::StaticString(operation_name_c), gpu_track,
+            TRACE_EVENT_BEGIN("HIP_OPS", perfetto::DynamicString(operation_name_c), gpu_track,
                               tracer_record.timestamps.begin.value, "Process ID", GetPid(),
                               perfetto::Flow::ProcessScoped(tracer_record.correlation_id.value));
           else
-            TRACE_EVENT_BEGIN("MEM_COPIES", perfetto::StaticString(operation_name_c),
+            TRACE_EVENT_BEGIN("MEM_COPIES", perfetto::DynamicString(operation_name_c),
                               mem_copies_track, tracer_record.timestamps.begin.value, "Process ID",
                               GetPid(),
                               perfetto::Flow::ProcessScoped(tracer_record.correlation_id.value));
@@ -558,7 +557,7 @@ class perfetto_plugin_t {
         break;
       }
       case ACTIVITY_DOMAIN_HSA_OPS: {
-        TRACE_EVENT_BEGIN("MEM_COPIES", perfetto::StaticString(operation_name_c), mem_copies_track,
+        TRACE_EVENT_BEGIN("MEM_COPIES", perfetto::DynamicString(operation_name_c), mem_copies_track,
                           tracer_record.timestamps.begin.value, "Process ID", GetPid(),
                           perfetto::Flow::ProcessScoped(tracer_record.correlation_id.value));
         TRACE_EVENT_END("MEM_COPIES", mem_copies_track, tracer_record.timestamps.end.value);
