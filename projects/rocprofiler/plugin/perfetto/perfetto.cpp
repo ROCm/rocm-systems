@@ -258,7 +258,7 @@ class perfetto_plugin_t {
                       (((profiler_record.kernel_properties.lds_size + (lds_block_size - 1)) &
                         ~(lds_block_size - 1))),
                       "SCR", profiler_record.kernel_properties.scratch_size, "Arch. VGPR",
-                      profiler_record.kernel_properties.arch_vgpr_count, "Accumilative Vgpr",
+                      profiler_record.kernel_properties.arch_vgpr_count, "Accumulation Vgpr",
                       profiler_record.kernel_properties.accum_vgpr_count, "SGPR",
                       profiler_record.kernel_properties.sgpr_count, "Wave Size",
                       profiler_record.kernel_properties.wave_size, "Signal",
