@@ -190,7 +190,8 @@ class Context {
     if (obj == NULL) EXC_RAISING(HSA_STATUS_ERROR, "allocation error");
     try {
       obj->Construct(agent_info, queue, info, info_count, handler, handler_arg);
-    } catch (...) {
+    } catch (std::exception& e) {
+      std::cerr << e.what() << std::endl;
       delete obj;
       obj = NULL;
       std::cerr << "Error: Context Create failed" << std::endl;
