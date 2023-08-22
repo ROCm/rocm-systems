@@ -1,3 +1,7 @@
+Version 1.0.10 (22 Aug 2023)
+
+  * critical patch for detection of llvm in rocm installs on SLURM systems
+
 Version 1.0.9 (17 Aug 2023)
 
   * add units to L2 per-channel panel (#133)
