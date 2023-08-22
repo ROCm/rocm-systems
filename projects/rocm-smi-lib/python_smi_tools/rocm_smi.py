@@ -205,16 +205,31 @@ def getFanSpeed(device):
     fl = 0
     fm = 0
 
+    """ If ret = 2; (No such file or directory)
+    /sys/class/drm/cardX/device/hwmon/hwmonX/pwmX
+    """
     ret = rocmsmi.rsmi_dev_fan_speed_get(device, sensor_ind, byref(fanLevel))
     if rsmi_ret_ok(ret, device, 'get_fan_speed', True):
         fl = fanLevel.value
+    last_ret = ret
+
+    """ If ret = 2; (No such file or directory)
+    /sys/class/drm/cardX/device/hwmon/hwmonX/pwmX
+    """
     ret = rocmsmi.rsmi_dev_fan_speed_max_get(device, sensor_ind, byref(fanMax))
     if rsmi_ret_ok(ret, device, 'get_fan_max_speed', True):
         fm = fanMax.value
-    if fl == 0 or fm == 0:
-        return (fl, 0)  # to prevent division by zero crash
 
-    return (fl, round((float(fl) / float(fm)) * 100, 2))
+    """ In case we had an error before, we don't overwrite it with a
+        possible success now. Otherwise, we get the next error.
+    """
+    if (last_ret == rsmi_status_t.RSMI_STATUS_SUCCESS):
+        last_ret = ret
+
+    if fl == 0 or fm == 0:
+        return (last_ret, fl, 0)  # to prevent division by zero crash
+
+    return (last_ret, fl, round((float(fl) / float(fm)) * 100, 2))
 
 
 def getGpuUse(device):
@@ -1608,7 +1623,7 @@ def showAllConcise(deviceList):
         concise = True
         sclk = showCurrentClocks([device], 'sclk', concise)
         mclk = showCurrentClocks([device], 'mclk', concise)
-        (fanLevel, fanSpeed) = getFanSpeed(device)
+        (retCode, fanLevel, fanSpeed) = getFanSpeed(device)
         fan = str(fanSpeed) + '%'
         if getPerfLevel(device) != -1:
             perf = getPerfLevel(device)
@@ -1816,22 +1831,25 @@ def showCurrentFans(deviceList):
     sensor_ind = c_uint32(0)
 
     for device in deviceList:
-        (fanLevel, fanSpeed) = getFanSpeed(device)
-        fanSpeed = round(fanSpeed)
-        if fanLevel == 0 or fanSpeed == 0:
-            printLog(device, 'Unable to detect fan speed for GPU %d' % (device), None)
-            logging.debug('Current fan speed is: %d\n' % (fanSpeed) + \
-                          '       Current fan level is: %d\n' % (fanLevel) + \
-                          '       (GPU might be cooled with a non-PWM fan)')
-            continue
-        if PRINT_JSON:
-            printLog(device, 'Fan speed (level)', str(fanLevel))
-            printLog(device, 'Fan speed (%)', str(fanSpeed))
+        (retCode, fanLevel, fanSpeed) = getFanSpeed(device)
+        if (retCode == rsmi_status_t.RSMI_STATUS_NOT_SUPPORTED):
+            printLog(device, 'Not supported', None)
         else:
-            printLog(device, 'Fan Level', str(fanLevel) + ' (%s%%)' % (str(fanSpeed)))
-        ret = rocmsmi.rsmi_dev_fan_rpms_get(device, sensor_ind, byref(rpmSpeed))
-        if rsmi_ret_ok(ret, device, 'get_fan_rpms'):
-            printLog(device, 'Fan RPM', rpmSpeed.value)
+            fanSpeed = round(fanSpeed)
+            if fanLevel == 0 or fanSpeed == 0:
+                printLog(device, 'Unable to detect fan speed for GPU %d' % (device), None)
+                logging.debug('Current fan speed is: %d\n' % (fanSpeed) + \
+                            '       Current fan level is: %d\n' % (fanLevel) + \
+                            '       (GPU might be cooled with a non-PWM fan)')
+                continue
+            if PRINT_JSON:
+                printLog(device, 'Fan speed (level)', str(fanLevel))
+                printLog(device, 'Fan speed (%)', str(fanSpeed))
+            else:
+                printLog(device, 'Fan Level', str(fanLevel) + ' (%s%%)' % (str(fanSpeed)))
+            ret = rocmsmi.rsmi_dev_fan_rpms_get(device, sensor_ind, byref(rpmSpeed))
+            if rsmi_ret_ok(ret, device, 'get_fan_rpms'):
+                printLog(device, 'Fan RPM', rpmSpeed.value)
     printLogSpacer()
 
 
@@ -3337,7 +3355,7 @@ def save(deviceList, savefilepath):
                 clocks[device][clk_type] = str(freq.current)
             else:
                 clocks[device][clk_type] = '0'
-        fanSpeeds[device] = getFanSpeed(device)[0]
+        fanSpeeds[device] = getFanSpeed(device)[1]
         od = c_uint32()
         ret = rocmsmi.rsmi_dev_overdrive_level_get(device, byref(od))
         if rsmi_ret_ok(ret, device, 'get_overdrive_level'):
