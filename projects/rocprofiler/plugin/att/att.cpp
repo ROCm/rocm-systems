@@ -83,7 +83,7 @@ class att_plugin_t {
 
     if (!att_tracer_record) return ROCPROFILER_STATUS_ERROR;
 
-    std::string kernel_name_mangled{};
+    std::string kernel_name_mangled;
     // Found problem with rocprofiler API for invalid kernel_ids;
     if (att_tracer_record->kernel_id.handle != TEST_INVALID_KERNEL) {
       size_t name_length;

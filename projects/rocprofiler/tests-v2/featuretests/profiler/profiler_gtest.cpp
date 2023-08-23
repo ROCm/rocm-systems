@@ -72,6 +72,7 @@ void __attribute__((constructor)) globalsetting() {
   std::stringstream gfx_path;
   gfx_path << app_path << metrics_path;
   setenv("ROCPROFILER_METRICS_PATH", gfx_path.str().c_str(), true);
+  setenv("ROCPROFILER_MAX_ATT_PROFILES", "2", 1);
 }
 
 /**
@@ -613,7 +614,7 @@ class ATTCollection : public ::testing::Test {
         for (int i = 0; i < se_num; i++) {
           if (!att_tracer_record->shader_engine_data) continue;
           auto se_att_trace = att_tracer_record->shader_engine_data[i];
-          if (!se_att_trace.buffer_ptr || !se_att_trace.buffer_size) continue;
+          if (!se_att_trace.buffer_ptr || se_att_trace.buffer_size < 8192) continue;
           bCollected = true;
         }
       }
@@ -623,7 +624,7 @@ class ATTCollection : public ::testing::Test {
 };
 bool ATTCollection::bCollected = false;
 
-TEST_F(ATTCollection, WhenRunningATTItCollectsTraceData) {
+TEST_F(ATTCollection, WhenRunningATTItCollectsTraceDataWithOldAPI) {
   int result = ROCPROFILER_STATUS_ERROR;
 
   // inititalize ROCProfiler
@@ -635,11 +636,74 @@ TEST_F(ATTCollection, WhenRunningATTItCollectsTraceData) {
   std::vector<rocprofiler_att_parameter_t> parameters;
   parameters.emplace_back(rocprofiler_att_parameter_t{ROCPROFILER_ATT_COMPUTE_UNIT, 0});
   parameters.emplace_back(rocprofiler_att_parameter_t{ROCPROFILER_ATT_SE_MASK, 0xF});
-  //parameters.emplace_back(rocprofiler_att_parameter_t{ROCPROFILER_ATT_SIMD_SELECT, 0x3}); // Replace below tests once aqlprofile passes
-  //parameters.emplace_back(rocprofiler_att_parameter_t{ROCPROFILER_ATT_BUFFER_SIZE, 0x1000000}); // Replace below tests once aqlprofile passes
   parameters.emplace_back(rocprofiler_att_parameter_t{ROCPROFILER_ATT_MASK, 0x0F00});
   parameters.emplace_back(rocprofiler_att_parameter_t{ROCPROFILER_ATT_TOKEN_MASK, 0x344B});
   parameters.emplace_back(rocprofiler_att_parameter_t{ROCPROFILER_ATT_TOKEN_MASK2, 0xFFFF});
+
+  // create a session
+  result = rocprofiler_create_session(ROCPROFILER_NONE_REPLAY_MODE, &session_id);
+  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
+
+  // create a buffer to hold att trace records for each kernel launch
+  rocprofiler_buffer_id_t buffer_id;
+  result = rocprofiler_create_buffer(session_id, FlushCallback, 0x9999, &buffer_id);
+  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
+
+  // create a filter for collecting att traces
+  rocprofiler_filter_id_t filter_id;
+  rocprofiler_filter_property_t property = {};
+  result = rocprofiler_create_filter(session_id, ROCPROFILER_ATT_TRACE_COLLECTION,
+                                     rocprofiler_filter_data_t{.att_parameters = &parameters[0]},
+                                     parameters.size(), &filter_id, property);
+  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
+
+  // set buffer for the filter
+  result = rocprofiler_set_filter_buffer(session_id, filter_id, buffer_id);
+  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
+
+  // activating att tracing session
+  result = rocprofiler_start_session(session_id);
+  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
+
+  // Launch a kernel
+  LaunchVectorAddKernel();
+  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
+
+  // deactivate att tracing session
+  result = rocprofiler_terminate_session(session_id);
+  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
+
+  // dump att tracing data
+  result = rocprofiler_flush_data(session_id, buffer_id);
+  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
+
+  // destroy session
+  result = rocprofiler_destroy_session(session_id);
+  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
+
+  // finalize att tracing by destroying rocprofiler object
+  result = rocprofiler_finalize();
+  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
+
+  // check if we got data from any shader engine
+  EXPECT_EQ(bCollected, true);
+}
+
+// New API
+TEST_F(ATTCollection, WhenRunningATTItCollectsTraceDataWithNewAPI) {
+  int result = ROCPROFILER_STATUS_ERROR;
+
+  // inititalize ROCProfiler
+  result = rocprofiler_initialize();
+  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
+
+  // Att trace collection parameters
+  rocprofiler_session_id_t session_id;
+  std::vector<rocprofiler_att_parameter_t> parameters;
+  parameters.emplace_back(rocprofiler_att_parameter_t{ROCPROFILER_ATT_COMPUTE_UNIT, 0});
+  parameters.emplace_back(rocprofiler_att_parameter_t{ROCPROFILER_ATT_SE_MASK, 0xF});
+  parameters.emplace_back(rocprofiler_att_parameter_t{ROCPROFILER_ATT_SIMD_SELECT, 0x3}); // Replace below tests once aqlprofile passes
+  parameters.emplace_back(rocprofiler_att_parameter_t{ROCPROFILER_ATT_BUFFER_SIZE, 0x1000000}); // Replace below tests once aqlprofile passes
 
   // create a session
   result = rocprofiler_create_session(ROCPROFILER_NONE_REPLAY_MODE, &session_id);

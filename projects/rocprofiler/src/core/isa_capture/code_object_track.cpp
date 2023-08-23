@@ -242,7 +242,7 @@ void codeobj_record::stop_capture(rocprofiler_record_id_t id) {
 }
 
 rocprofiler_codeobj_symbols_t codeobj_record::get_capture(rocprofiler_record_id_t id) {
-  std::atomic_thread_fence(std::memory_order_acquire);  // Fencing the state of the map
+  std::lock_guard<std::mutex> lock(mutex);  // Fencing the state of the map
   auto& pair = record_id_map.at(id.handle);
   return pair.second->get(pair.first);
 }

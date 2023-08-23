@@ -15,4 +15,3 @@ def dump_csv(code):
         writer = csv.writer(f)
         writer.writerow(['Line', 'Instruction', 'Hitcount', 'Cycles', 'Addr', 'C++ Reference'])
         [writer.writerow([m[5], m[0], m[7], m[8], hex(m[6]), m[3]]) for m in code]
-        #[writer.writerow(m) for m in code]

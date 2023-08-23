@@ -299,5 +299,5 @@ Example for file plugin output:
 ### Added
 
 - Updated supported GPU architectures in README with profiler versions
-- Automatic ISA dumping for ATT
-- CSV mode for ATT
+- Automatic ISA dumping for ATT. See README.
+- CSV mode for ATT. See README.

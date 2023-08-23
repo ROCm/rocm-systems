@@ -159,7 +159,6 @@ class PCTranslator:
     def swappc(self, line, line_num, inst_index):
         try:
             loc = self.addrmap[self.insts[inst_index+1][2]]
-            #print('Jumping to:', loc, self.code[loc])
             return loc
         except:
             print('SWAPPC: Could not find addr', self.insts[inst_index+1][2], 'for', line)
@@ -167,7 +166,6 @@ class PCTranslator:
     def setpc(self, line, inst_index):
         try:
             loc = self.addrmap[self.insts[inst_index+1][2]]
-            #print('Jumping to:', loc, self.code[loc])
             return loc
         except:
             print('SETPC: Could not find addr', self.insts[inst_index+1][2], 'for', line)
@@ -212,14 +210,11 @@ def move_down_fork(fork, insts, i): #(fork : Fork, insts : list, i : int):
                     and insts[i][1] == fork.insts[i+1].inst_type:
             i += 2
         else:
-            #print('Failed at', i, insts[i])
             return False, i
 
     if len(fork.insts) != len(insts):
-        #print('Failed at the end at', i, insts[i])
         return False, i
 
-    #print('Reached end of ', fork.name)
     return True, i
 
 FORK_TREE = Fork()
@@ -489,9 +484,6 @@ def stitch(insts, raw_code, jumps, gfxv, bIsAuto):
                     elif 'scratch_' not in as_line[0]:
                         print('Parsing terminated at:', as_line)
                         break
-
-        #print(matched, as_line)
-        #print([WaveInstCategory[insts[i+k][1]] for k in range(10) if i+k < len(insts)])
 
         if matched:
             result.append(inst + (reverse_map[line],))
