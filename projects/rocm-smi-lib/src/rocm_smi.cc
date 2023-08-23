@@ -1065,6 +1065,8 @@ static rsmi_status_t get_frequencies(amd::smi::DevInfoTypes type, rsmi_clk_type_
   if (f == nullptr) {
     return RSMI_STATUS_INVALID_ARGS;
   }
+  memset(f, 0, sizeof(rsmi_frequencies_t));
+  f->current=0;
 
   ret = GetDevValueVec(type, dv_ind, &val_vec);
   if (ret != RSMI_STATUS_SUCCESS) {
@@ -1114,6 +1116,7 @@ static rsmi_status_t get_frequencies(amd::smi::DevInfoTypes type, rsmi_clk_type_
   // assert(f->current < f->num_supported);
   if (f->current >= f->num_supported) {
       f->current = -1;
+      return RSMI_STATUS_UNEXPECTED_DATA;
   }
 
   return RSMI_STATUS_SUCCESS;
@@ -1748,7 +1751,7 @@ rsmi_dev_gpu_clk_freq_set(uint32_t dv_ind,
 
   TRY
   std::ostringstream ss;
-  ss << __PRETTY_FUNCTION__ << "| ======= start =======";
+  ss << __PRETTY_FUNCTION__ << " | ======= start =======";
   LOG_TRACE(ss);
   REQUIRE_ROOT_ACCESS
   DEVICE_MUTEX
@@ -3250,8 +3253,9 @@ rsmi_status_string(rsmi_status_t status, const char **status_string) {
       break;
 
     case RSMI_STATUS_UNEXPECTED_DATA:
-      *status_string = "RSMI_STATUS_UNEXPECTED_DATA: Data (usually from reading"
-                       " a file) was not of the type that was expected";
+      *status_string = "RSMI_STATUS_UNEXPECTED_DATA: Data read (usually from "
+                       "a file) or provided to function is "
+                       "not what was expected";
       break;
 
     case RSMI_STATUS_BUSY:
