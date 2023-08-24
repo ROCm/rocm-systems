@@ -160,7 +160,6 @@ def parse(args, profileAndExport):
     host = args.host
     port = str(args.port)
     username = args.username
-    Extractionlvl = args.kernelVerbose
 
     if profileAndExport:
         workload = args.workload + "/" + args.target + "/"
@@ -211,10 +210,10 @@ def parse(args, profileAndExport):
         "db": db,
     }
 
-    return connectionInfo, Extractionlvl
+    return connectionInfo
 
 
-def convert_folder(connectionInfo, Extractionlvl):
+def convert_folder(connectionInfo):
     # Test connection
     connection_str = (
         "mongodb://"

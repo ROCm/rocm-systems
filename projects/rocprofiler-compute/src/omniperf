@@ -236,10 +236,10 @@ def gen_sysinfo(workload_name, workload_dir, ip_blocks, app_cmd, skip_roof):
 
 def mongo_import(args, profileAndImport):
     # Validate target directory
-    connectionInfo, Extractionlvl = csv_processor.parse(args, profileAndImport)
+    connectionInfo = csv_processor.parse(args, profileAndImport)
     # Convert and upload data
     print("-- Conversion & Upload in Progress --")
-    csv_processor.convert_folder(connectionInfo, Extractionlvl)
+    csv_processor.convert_folder(connectionInfo)
     print("-- Complete! --")
 
 ################################################
