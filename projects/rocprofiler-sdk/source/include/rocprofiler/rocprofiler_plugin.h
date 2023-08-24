@@ -1,22 +1,24 @@
-/* Copyright (c) 2022 Advanced Micro Devices, Inc.
-
- Permission is hereby granted, free of charge, to any person obtaining a copy
- of this software and associated documentation files (the "Software"), to deal
- in the Software without restriction, including without limitation the rights
- to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- copies of the Software, and to permit persons to whom the Software is
- furnished to do so, subject to the following conditions:
-
- The above copyright notice and this permission notice shall be included in
- all copies or substantial portions of the Software.
-
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- THE SOFTWARE. */
+// MIT License
+//
+// Copyright (c) 2023 ROCm Developer Tools
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
 
 /** \section rocprofiler_plugin_api ROCProfiler Plugin API
  *
@@ -39,12 +41,11 @@
  * ROCProfiler Tool Plugin API interface.
  */
 
-#ifndef ROCPROFILER_PLUGIN_H_
-#define ROCPROFILER_PLUGIN_H_
+#pragma once
+
+#include "rocprofiler/rocprofiler.h"
 
 #include <stdint.h>
-
-#include "rocprofiler.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -109,15 +110,15 @@ rocprofiler_plugin_finalize();
  *
  * @param[in] begin Pointer to the first record.
  * @param[in] end Pointer to one past the last record.
- * @param[in] session_id Session ID
+ * @param[in] context_id context ID
  * @param[in] buffer_id Buffer ID
  * @return Returns 0 on success and -1 on error.
  */
 ROCPROFILER_EXPORT int
-rocprofiler_plugin_write_buffer_records(const rocprofiler_record_header_t* begin,
-                                        const rocprofiler_record_header_t* end,
-                                        rocprofiler_session_id_t           session_id,
-                                        rocprofiler_buffer_id_t            buffer_id);
+rocprofiler_plugin_write_buffer_records(rocprofiler_context_id_t      context_id,
+                                        rocprofiler_buffer_id_t       buffer_id,
+                                        rocprofiler_record_header_t** headers,
+                                        size_t                        num_headers);
 
 /**
  * Report Synchronous Record.
@@ -138,5 +139,3 @@ rocprofiler_plugin_write_record(rocprofiler_record_tracer_t record);
 #ifdef __cplusplus
 } /* extern "C" */
 #endif /* __cplusplus */
-
-#endif /* ROCPROFILER_PLUGIN_H_ */

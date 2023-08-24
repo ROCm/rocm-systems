@@ -1,0 +1,2167 @@
+// Copyright (c) 2018-2023 Advanced Micro Devices, Inc.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
+
+#pragma once
+
+#include <hip/hip_runtime.h>
+
+typedef union rocprofiler_hip_api_args_u
+{
+    struct
+    {
+        dim3*        gridDim;
+        dim3*        blockDim;
+        size_t*      sharedMem;
+        hipStream_t* stream;
+    } __hipPopCallConfiguration;
+    struct
+    {
+        dim3        gridDim;
+        dim3        blockDim;
+        size_t      sharedMem;
+        hipStream_t stream;
+    } __hipPushCallConfiguration;
+    struct
+    {
+        hipArray**                    array;
+        const HIP_ARRAY3D_DESCRIPTOR* pAllocateArray;
+    } hipArray3DCreate;
+    struct
+    {
+        HIP_ARRAY3D_DESCRIPTOR* pArrayDescriptor;
+        hipArray*               array;
+    } hipArray3DGetDescriptor;
+    struct
+    {
+        hipArray**                  pHandle;
+        const HIP_ARRAY_DESCRIPTOR* pAllocateArray;
+    } hipArrayCreate;
+    struct
+    {
+        hipArray* array;
+    } hipArrayDestroy;
+    struct
+    {
+        HIP_ARRAY_DESCRIPTOR* pArrayDescriptor;
+        hipArray*             array;
+    } hipArrayGetDescriptor;
+    struct
+    {
+        hipChannelFormatDesc* desc;
+        hipExtent*            extent;
+        unsigned int*         flags;
+        hipArray*             array;
+    } hipArrayGetInfo;
+    struct
+    {
+        int*                   device;
+        const hipDeviceProp_t* prop;
+    } hipChooseDevice;
+    struct
+    {
+        dim3        gridDim;
+        dim3        blockDim;
+        size_t      sharedMem;
+        hipStream_t stream;
+    } hipConfigureCall;
+    struct
+    {
+        hipSurfaceObject_t*    pSurfObject;
+        const hipResourceDesc* pResDesc;
+    } hipCreateSurfaceObject;
+    struct
+    {
+        hipCtx_t*    ctx;
+        unsigned int flags;
+        hipDevice_t  device;
+    } hipCtxCreate;
+    struct
+    {
+        hipCtx_t ctx;
+    } hipCtxDestroy;
+    struct
+    {
+        hipCtx_t peerCtx;
+    } hipCtxDisablePeerAccess;
+    struct
+    {
+        hipCtx_t     peerCtx;
+        unsigned int flags;
+    } hipCtxEnablePeerAccess;
+    struct
+    {
+        hipCtx_t ctx;
+        int*     apiVersion;
+    } hipCtxGetApiVersion;
+    struct
+    {
+        hipFuncCache_t* cacheConfig;
+    } hipCtxGetCacheConfig;
+    struct
+    {
+        hipCtx_t* ctx;
+    } hipCtxGetCurrent;
+    struct
+    {
+        hipDevice_t* device;
+    } hipCtxGetDevice;
+    struct
+    {
+        unsigned int* flags;
+    } hipCtxGetFlags;
+    struct
+    {
+        hipSharedMemConfig* pConfig;
+    } hipCtxGetSharedMemConfig;
+    struct
+    {
+        hipCtx_t* ctx;
+    } hipCtxPopCurrent;
+    struct
+    {
+        hipCtx_t ctx;
+    } hipCtxPushCurrent;
+    struct
+    {
+        hipFuncCache_t cacheConfig;
+    } hipCtxSetCacheConfig;
+    struct
+    {
+        hipCtx_t ctx;
+    } hipCtxSetCurrent;
+    struct
+    {
+        hipSharedMemConfig config;
+    } hipCtxSetSharedMemConfig;
+    struct
+    {
+        hipExternalMemory_t extMem;
+    } hipDestroyExternalMemory;
+    struct
+    {
+        hipExternalSemaphore_t extSem;
+    } hipDestroyExternalSemaphore;
+    struct
+    {
+        hipSurfaceObject_t surfaceObject;
+    } hipDestroySurfaceObject;
+    struct
+    {
+        int* canAccessPeer;
+        int  deviceId;
+        int  peerDeviceId;
+    } hipDeviceCanAccessPeer;
+    struct
+    {
+        int*        major;
+        int*        minor;
+        hipDevice_t device;
+    } hipDeviceComputeCapability;
+    struct
+    {
+        int peerDeviceId;
+    } hipDeviceDisablePeerAccess;
+    struct
+    {
+        int          peerDeviceId;
+        unsigned int flags;
+    } hipDeviceEnablePeerAccess;
+    struct
+    {
+        hipDevice_t* device;
+        int          ordinal;
+    } hipDeviceGet;
+    struct
+    {
+        int*                 pi;
+        hipDeviceAttribute_t attr;
+        int                  deviceId;
+    } hipDeviceGetAttribute;
+    struct
+    {
+        int*        device;
+        const char* pciBusId;
+    } hipDeviceGetByPCIBusId;
+    struct
+    {
+        hipFuncCache_t* cacheConfig;
+    } hipDeviceGetCacheConfig;
+    struct
+    {
+        hipMemPool_t* mem_pool;
+        int           device;
+    } hipDeviceGetDefaultMemPool;
+    struct
+    {
+        int                      device;
+        hipGraphMemAttributeType attr;
+        void*                    value;
+    } hipDeviceGetGraphMemAttribute;
+    struct
+    {
+        size_t*         pValue;
+        enum hipLimit_t limit;
+    } hipDeviceGetLimit;
+    struct
+    {
+        hipMemPool_t* mem_pool;
+        int           device;
+    } hipDeviceGetMemPool;
+    struct
+    {
+        char*       name;
+        int         len;
+        hipDevice_t device;
+    } hipDeviceGetName;
+    struct
+    {
+        int*             value;
+        hipDeviceP2PAttr attr;
+        int              srcDevice;
+        int              dstDevice;
+    } hipDeviceGetP2PAttribute;
+    struct
+    {
+        char* pciBusId;
+        int   len;
+        int   device;
+    } hipDeviceGetPCIBusId;
+    struct
+    {
+        hipSharedMemConfig* pConfig;
+    } hipDeviceGetSharedMemConfig;
+    struct
+    {
+        int* leastPriority;
+        int* greatestPriority;
+    } hipDeviceGetStreamPriorityRange;
+    struct
+    {
+        hipUUID*    uuid;
+        hipDevice_t device;
+    } hipDeviceGetUuid;
+    struct
+    {
+        int device;
+    } hipDeviceGraphMemTrim;
+    struct
+    {
+        hipDevice_t   dev;
+        unsigned int* flags;
+        int*          active;
+    } hipDevicePrimaryCtxGetState;
+    struct
+    {
+        hipDevice_t dev;
+    } hipDevicePrimaryCtxRelease;
+    struct
+    {
+        hipDevice_t dev;
+    } hipDevicePrimaryCtxReset;
+    struct
+    {
+        hipCtx_t*   pctx;
+        hipDevice_t dev;
+    } hipDevicePrimaryCtxRetain;
+    struct
+    {
+        hipDevice_t  dev;
+        unsigned int flags;
+    } hipDevicePrimaryCtxSetFlags;
+    struct
+    {
+        hipFuncCache_t cacheConfig;
+    } hipDeviceSetCacheConfig;
+    struct
+    {
+        int                      device;
+        hipGraphMemAttributeType attr;
+        void*                    value;
+    } hipDeviceSetGraphMemAttribute;
+    struct
+    {
+        enum hipLimit_t limit;
+        size_t          value;
+    } hipDeviceSetLimit;
+    struct
+    {
+        int          device;
+        hipMemPool_t mem_pool;
+    } hipDeviceSetMemPool;
+    struct
+    {
+        hipSharedMemConfig config;
+    } hipDeviceSetSharedMemConfig;
+    struct
+    {
+        size_t*     bytes;
+        hipDevice_t device;
+    } hipDeviceTotalMem;
+    struct
+    {
+        int* driverVersion;
+    } hipDriverGetVersion;
+    struct
+    {
+        const hip_Memcpy2D* pCopy;
+    } hipDrvMemcpy2DUnaligned;
+    struct
+    {
+        const HIP_MEMCPY3D* pCopy;
+    } hipDrvMemcpy3D;
+    struct
+    {
+        const HIP_MEMCPY3D* pCopy;
+        hipStream_t         stream;
+    } hipDrvMemcpy3DAsync;
+    struct
+    {
+        unsigned int          numAttributes;
+        hipPointer_attribute* attributes;
+        void**                data;
+        hipDeviceptr_t        ptr;
+    } hipDrvPointerGetAttributes;
+    struct
+    {
+        hipEvent_t* event;
+    } hipEventCreate;
+    struct
+    {
+        hipEvent_t*  event;
+        unsigned int flags;
+    } hipEventCreateWithFlags;
+    struct
+    {
+        hipEvent_t event;
+    } hipEventDestroy;
+    struct
+    {
+        float*     ms;
+        hipEvent_t start;
+        hipEvent_t stop;
+    } hipEventElapsedTime;
+    struct
+    {
+        hipEvent_t event;
+    } hipEventQuery;
+    struct
+    {
+        hipEvent_t  event;
+        hipStream_t stream;
+    } hipEventRecord;
+    struct
+    {
+        hipEvent_t event;
+    } hipEventSynchronize;
+    struct
+    {
+        int           device1;
+        int           device2;
+        unsigned int* linktype;
+        unsigned int* hopcount;
+    } hipExtGetLinkTypeAndHopCount;
+    struct
+    {
+        const void* function_address;
+        dim3        numBlocks;
+        dim3        dimBlocks;
+        void**      args;
+        size_t      sharedMemBytes;
+        hipStream_t stream;
+        hipEvent_t  startEvent;
+        hipEvent_t  stopEvent;
+        int         flags;
+    } hipExtLaunchKernel;
+    struct
+    {
+        hipLaunchParams* launchParamsList;
+        int              numDevices;
+        unsigned int     flags;
+    } hipExtLaunchMultiKernelMultiDevice;
+    struct
+    {
+        void**       ptr;
+        size_t       sizeBytes;
+        unsigned int flags;
+    } hipExtMallocWithFlags;
+    struct
+    {
+        hipFunction_t f;
+        unsigned int  globalWorkSizeX;
+        unsigned int  globalWorkSizeY;
+        unsigned int  globalWorkSizeZ;
+        unsigned int  localWorkSizeX;
+        unsigned int  localWorkSizeY;
+        unsigned int  localWorkSizeZ;
+        size_t        sharedMemBytes;
+        hipStream_t   hStream;
+        void**        kernelParams;
+        void**        extra;
+        hipEvent_t    startEvent;
+        hipEvent_t    stopEvent;
+        unsigned int  flags;
+    } hipExtModuleLaunchKernel;
+    struct
+    {
+        hipStream_t*        stream;
+        unsigned int        cuMaskSize;
+        const unsigned int* cuMask;
+    } hipExtStreamCreateWithCUMask;
+    struct
+    {
+        hipStream_t   stream;
+        unsigned int  cuMaskSize;
+        unsigned int* cuMask;
+    } hipExtStreamGetCUMask;
+    struct
+    {
+        void**                             devPtr;
+        hipExternalMemory_t                extMem;
+        const hipExternalMemoryBufferDesc* bufferDesc;
+    } hipExternalMemoryGetMappedBuffer;
+    struct
+    {
+        void* ptr;
+    } hipFree;
+    struct
+    {
+        hipArray* array;
+    } hipFreeArray;
+    struct
+    {
+        void*       dev_ptr;
+        hipStream_t stream;
+    } hipFreeAsync;
+    struct
+    {
+        void* ptr;
+    } hipFreeHost;
+    struct
+    {
+        hipMipmappedArray_t mipmappedArray;
+    } hipFreeMipmappedArray;
+    struct
+    {
+        int*                  value;
+        hipFunction_attribute attrib;
+        hipFunction_t         hfunc;
+    } hipFuncGetAttribute;
+    struct
+    {
+        hipFuncAttributes* attr;
+        const void*        func;
+    } hipFuncGetAttributes;
+    struct
+    {
+        const void*      func;
+        hipFuncAttribute attr;
+        int              value;
+    } hipFuncSetAttribute;
+    struct
+    {
+        const void*    func;
+        hipFuncCache_t config;
+    } hipFuncSetCacheConfig;
+    struct
+    {
+        const void*        func;
+        hipSharedMemConfig config;
+    } hipFuncSetSharedMemConfig;
+    struct
+    {
+        unsigned int*   pHipDeviceCount;
+        int*            pHipDevices;
+        unsigned int    hipDeviceCount;
+        hipGLDeviceList deviceList;
+    } hipGLGetDevices;
+    struct
+    {
+        hipChannelFormatDesc* desc;
+        hipArray_const_t      array;
+    } hipGetChannelDesc;
+    struct
+    {
+        int* deviceId;
+    } hipGetDevice;
+    struct
+    {
+        int* count;
+    } hipGetDeviceCount;
+    struct
+    {
+        unsigned int* flags;
+    } hipGetDeviceFlags;
+    struct
+    {
+        hipDeviceProp_t* props;
+        hipDevice_t      device;
+    } hipGetDeviceProperties;
+    struct
+    {
+        hipArray_t*               levelArray;
+        hipMipmappedArray_const_t mipmappedArray;
+        unsigned int              level;
+    } hipGetMipmappedArrayLevel;
+    struct
+    {
+        void**      devPtr;
+        const void* symbol;
+    } hipGetSymbolAddress;
+    struct
+    {
+        size_t*     size;
+        const void* symbol;
+    } hipGetSymbolSize;
+    struct
+    {
+        hipGraphNode_t*       pGraphNode;
+        hipGraph_t            graph;
+        const hipGraphNode_t* pDependencies;
+        size_t                numDependencies;
+        hipGraph_t            childGraph;
+    } hipGraphAddChildGraphNode;
+    struct
+    {
+        hipGraph_t            graph;
+        const hipGraphNode_t* from;
+        const hipGraphNode_t* to;
+        size_t                numDependencies;
+    } hipGraphAddDependencies;
+    struct
+    {
+        hipGraphNode_t*       pGraphNode;
+        hipGraph_t            graph;
+        const hipGraphNode_t* pDependencies;
+        size_t                numDependencies;
+    } hipGraphAddEmptyNode;
+    struct
+    {
+        hipGraphNode_t*       pGraphNode;
+        hipGraph_t            graph;
+        const hipGraphNode_t* pDependencies;
+        size_t                numDependencies;
+        hipEvent_t            event;
+    } hipGraphAddEventRecordNode;
+    struct
+    {
+        hipGraphNode_t*       pGraphNode;
+        hipGraph_t            graph;
+        const hipGraphNode_t* pDependencies;
+        size_t                numDependencies;
+        hipEvent_t            event;
+    } hipGraphAddEventWaitNode;
+    struct
+    {
+        hipGraphNode_t*          pGraphNode;
+        hipGraph_t               graph;
+        const hipGraphNode_t*    pDependencies;
+        size_t                   numDependencies;
+        const hipHostNodeParams* pNodeParams;
+    } hipGraphAddHostNode;
+    struct
+    {
+        hipGraphNode_t*            pGraphNode;
+        hipGraph_t                 graph;
+        const hipGraphNode_t*      pDependencies;
+        size_t                     numDependencies;
+        const hipKernelNodeParams* pNodeParams;
+    } hipGraphAddKernelNode;
+    struct
+    {
+        hipGraphNode_t*        pGraphNode;
+        hipGraph_t             graph;
+        const hipGraphNode_t*  pDependencies;
+        size_t                 numDependencies;
+        hipMemAllocNodeParams* pNodeParams;
+    } hipGraphAddMemAllocNode;
+    struct
+    {
+        hipGraphNode_t*       pGraphNode;
+        hipGraph_t            graph;
+        const hipGraphNode_t* pDependencies;
+        size_t                numDependencies;
+        void*                 dev_ptr;
+    } hipGraphAddMemFreeNode;
+    struct
+    {
+        hipGraphNode_t*         pGraphNode;
+        hipGraph_t              graph;
+        const hipGraphNode_t*   pDependencies;
+        size_t                  numDependencies;
+        const hipMemcpy3DParms* pCopyParams;
+    } hipGraphAddMemcpyNode;
+    struct
+    {
+        hipGraphNode_t*       pGraphNode;
+        hipGraph_t            graph;
+        const hipGraphNode_t* pDependencies;
+        size_t                numDependencies;
+        void*                 dst;
+        const void*           src;
+        size_t                count;
+        hipMemcpyKind         kind;
+    } hipGraphAddMemcpyNode1D;
+    struct
+    {
+        hipGraphNode_t*       pGraphNode;
+        hipGraph_t            graph;
+        const hipGraphNode_t* pDependencies;
+        size_t                numDependencies;
+        void*                 dst;
+        const void*           symbol;
+        size_t                count;
+        size_t                offset;
+        hipMemcpyKind         kind;
+    } hipGraphAddMemcpyNodeFromSymbol;
+    struct
+    {
+        hipGraphNode_t*       pGraphNode;
+        hipGraph_t            graph;
+        const hipGraphNode_t* pDependencies;
+        size_t                numDependencies;
+        const void*           symbol;
+        const void*           src;
+        size_t                count;
+        size_t                offset;
+        hipMemcpyKind         kind;
+    } hipGraphAddMemcpyNodeToSymbol;
+    struct
+    {
+        hipGraphNode_t*        pGraphNode;
+        hipGraph_t             graph;
+        const hipGraphNode_t*  pDependencies;
+        size_t                 numDependencies;
+        const hipMemsetParams* pMemsetParams;
+    } hipGraphAddMemsetNode;
+    struct
+    {
+        hipGraphNode_t node;
+        hipGraph_t*    pGraph;
+    } hipGraphChildGraphNodeGetGraph;
+    struct
+    {
+        hipGraph_t* pGraphClone;
+        hipGraph_t  originalGraph;
+    } hipGraphClone;
+    struct
+    {
+        hipGraph_t*  pGraph;
+        unsigned int flags;
+    } hipGraphCreate;
+    struct
+    {
+        hipGraph_t   graph;
+        const char*  path;
+        unsigned int flags;
+    } hipGraphDebugDotPrint;
+    struct
+    {
+        hipGraph_t graph;
+    } hipGraphDestroy;
+    struct
+    {
+        hipGraphNode_t node;
+    } hipGraphDestroyNode;
+    struct
+    {
+        hipGraphNode_t node;
+        hipEvent_t*    event_out;
+    } hipGraphEventRecordNodeGetEvent;
+    struct
+    {
+        hipGraphNode_t node;
+        hipEvent_t     event;
+    } hipGraphEventRecordNodeSetEvent;
+    struct
+    {
+        hipGraphNode_t node;
+        hipEvent_t*    event_out;
+    } hipGraphEventWaitNodeGetEvent;
+    struct
+    {
+        hipGraphNode_t node;
+        hipEvent_t     event;
+    } hipGraphEventWaitNodeSetEvent;
+    struct
+    {
+        hipGraphExec_t hGraphExec;
+        hipGraphNode_t node;
+        hipGraph_t     childGraph;
+    } hipGraphExecChildGraphNodeSetParams;
+    struct
+    {
+        hipGraphExec_t graphExec;
+    } hipGraphExecDestroy;
+    struct
+    {
+        hipGraphExec_t hGraphExec;
+        hipGraphNode_t hNode;
+        hipEvent_t     event;
+    } hipGraphExecEventRecordNodeSetEvent;
+    struct
+    {
+        hipGraphExec_t hGraphExec;
+        hipGraphNode_t hNode;
+        hipEvent_t     event;
+    } hipGraphExecEventWaitNodeSetEvent;
+    struct
+    {
+        hipGraphExec_t           hGraphExec;
+        hipGraphNode_t           node;
+        const hipHostNodeParams* pNodeParams;
+    } hipGraphExecHostNodeSetParams;
+    struct
+    {
+        hipGraphExec_t             hGraphExec;
+        hipGraphNode_t             node;
+        const hipKernelNodeParams* pNodeParams;
+    } hipGraphExecKernelNodeSetParams;
+    struct
+    {
+        hipGraphExec_t    hGraphExec;
+        hipGraphNode_t    node;
+        hipMemcpy3DParms* pNodeParams;
+    } hipGraphExecMemcpyNodeSetParams;
+    struct
+    {
+        hipGraphExec_t hGraphExec;
+        hipGraphNode_t node;
+        void*          dst;
+        const void*    src;
+        size_t         count;
+        hipMemcpyKind  kind;
+    } hipGraphExecMemcpyNodeSetParams1D;
+    struct
+    {
+        hipGraphExec_t hGraphExec;
+        hipGraphNode_t node;
+        void*          dst;
+        const void*    symbol;
+        size_t         count;
+        size_t         offset;
+        hipMemcpyKind  kind;
+    } hipGraphExecMemcpyNodeSetParamsFromSymbol;
+    struct
+    {
+        hipGraphExec_t hGraphExec;
+        hipGraphNode_t node;
+        const void*    symbol;
+        const void*    src;
+        size_t         count;
+        size_t         offset;
+        hipMemcpyKind  kind;
+    } hipGraphExecMemcpyNodeSetParamsToSymbol;
+    struct
+    {
+        hipGraphExec_t         hGraphExec;
+        hipGraphNode_t         node;
+        const hipMemsetParams* pNodeParams;
+    } hipGraphExecMemsetNodeSetParams;
+    struct
+    {
+        hipGraphExec_t            hGraphExec;
+        hipGraph_t                hGraph;
+        hipGraphNode_t*           hErrorNode_out;
+        hipGraphExecUpdateResult* updateResult_out;
+    } hipGraphExecUpdate;
+    struct
+    {
+        hipGraph_t      graph;
+        hipGraphNode_t* from;
+        hipGraphNode_t* to;
+        size_t*         numEdges;
+    } hipGraphGetEdges;
+    struct
+    {
+        hipGraph_t      graph;
+        hipGraphNode_t* nodes;
+        size_t*         numNodes;
+    } hipGraphGetNodes;
+    struct
+    {
+        hipGraph_t      graph;
+        hipGraphNode_t* pRootNodes;
+        size_t*         pNumRootNodes;
+    } hipGraphGetRootNodes;
+    struct
+    {
+        hipGraphNode_t     node;
+        hipHostNodeParams* pNodeParams;
+    } hipGraphHostNodeGetParams;
+    struct
+    {
+        hipGraphNode_t           node;
+        const hipHostNodeParams* pNodeParams;
+    } hipGraphHostNodeSetParams;
+    struct
+    {
+        hipGraphExec_t* pGraphExec;
+        hipGraph_t      graph;
+        hipGraphNode_t* pErrorNode;
+        char*           pLogBuffer;
+        size_t          bufferSize;
+    } hipGraphInstantiate;
+    struct
+    {
+        hipGraphExec_t*    pGraphExec;
+        hipGraph_t         graph;
+        unsigned long long flags;
+    } hipGraphInstantiateWithFlags;
+    struct
+    {
+        hipGraphNode_t hSrc;
+        hipGraphNode_t hDst;
+    } hipGraphKernelNodeCopyAttributes;
+    struct
+    {
+        hipGraphNode_t          hNode;
+        hipKernelNodeAttrID     attr;
+        hipKernelNodeAttrValue* value;
+    } hipGraphKernelNodeGetAttribute;
+    struct
+    {
+        hipGraphNode_t       node;
+        hipKernelNodeParams* pNodeParams;
+    } hipGraphKernelNodeGetParams;
+    struct
+    {
+        hipGraphNode_t                hNode;
+        hipKernelNodeAttrID           attr;
+        const hipKernelNodeAttrValue* value;
+    } hipGraphKernelNodeSetAttribute;
+    struct
+    {
+        hipGraphNode_t             node;
+        const hipKernelNodeParams* pNodeParams;
+    } hipGraphKernelNodeSetParams;
+    struct
+    {
+        hipGraphExec_t graphExec;
+        hipStream_t    stream;
+    } hipGraphLaunch;
+    struct
+    {
+        hipGraphNode_t         node;
+        hipMemAllocNodeParams* pNodeParams;
+    } hipGraphMemAllocNodeGetParams;
+    struct
+    {
+        hipGraphNode_t node;
+        void*          dev_ptr;
+    } hipGraphMemFreeNodeGetParams;
+    struct
+    {
+        hipGraphNode_t    node;
+        hipMemcpy3DParms* pNodeParams;
+    } hipGraphMemcpyNodeGetParams;
+    struct
+    {
+        hipGraphNode_t          node;
+        const hipMemcpy3DParms* pNodeParams;
+    } hipGraphMemcpyNodeSetParams;
+    struct
+    {
+        hipGraphNode_t node;
+        void*          dst;
+        const void*    src;
+        size_t         count;
+        hipMemcpyKind  kind;
+    } hipGraphMemcpyNodeSetParams1D;
+    struct
+    {
+        hipGraphNode_t node;
+        void*          dst;
+        const void*    symbol;
+        size_t         count;
+        size_t         offset;
+        hipMemcpyKind  kind;
+    } hipGraphMemcpyNodeSetParamsFromSymbol;
+    struct
+    {
+        hipGraphNode_t node;
+        const void*    symbol;
+        const void*    src;
+        size_t         count;
+        size_t         offset;
+        hipMemcpyKind  kind;
+    } hipGraphMemcpyNodeSetParamsToSymbol;
+    struct
+    {
+        hipGraphNode_t   node;
+        hipMemsetParams* pNodeParams;
+    } hipGraphMemsetNodeGetParams;
+    struct
+    {
+        hipGraphNode_t         node;
+        const hipMemsetParams* pNodeParams;
+    } hipGraphMemsetNodeSetParams;
+    struct
+    {
+        hipGraphNode_t* pNode;
+        hipGraphNode_t  originalNode;
+        hipGraph_t      clonedGraph;
+    } hipGraphNodeFindInClone;
+    struct
+    {
+        hipGraphNode_t  node;
+        hipGraphNode_t* pDependencies;
+        size_t*         pNumDependencies;
+    } hipGraphNodeGetDependencies;
+    struct
+    {
+        hipGraphNode_t  node;
+        hipGraphNode_t* pDependentNodes;
+        size_t*         pNumDependentNodes;
+    } hipGraphNodeGetDependentNodes;
+    struct
+    {
+        hipGraphExec_t hGraphExec;
+        hipGraphNode_t hNode;
+        unsigned int*  isEnabled;
+    } hipGraphNodeGetEnabled;
+    struct
+    {
+        hipGraphNode_t    node;
+        hipGraphNodeType* pType;
+    } hipGraphNodeGetType;
+    struct
+    {
+        hipGraphExec_t hGraphExec;
+        hipGraphNode_t hNode;
+        unsigned int   isEnabled;
+    } hipGraphNodeSetEnabled;
+    struct
+    {
+        hipGraph_t      graph;
+        hipUserObject_t object;
+        unsigned int    count;
+    } hipGraphReleaseUserObject;
+    struct
+    {
+        hipGraph_t            graph;
+        const hipGraphNode_t* from;
+        const hipGraphNode_t* to;
+        size_t                numDependencies;
+    } hipGraphRemoveDependencies;
+    struct
+    {
+        hipGraph_t      graph;
+        hipUserObject_t object;
+        unsigned int    count;
+        unsigned int    flags;
+    } hipGraphRetainUserObject;
+    struct
+    {
+        hipGraphExec_t graphExec;
+        hipStream_t    stream;
+    } hipGraphUpload;
+    struct
+    {
+        hipGraphicsResource** resource;
+        GLuint                buffer;
+        unsigned int          flags;
+    } hipGraphicsGLRegisterBuffer;
+    struct
+    {
+        hipGraphicsResource** resource;
+        GLuint                image;
+        GLenum                target;
+        unsigned int          flags;
+    } hipGraphicsGLRegisterImage;
+    struct
+    {
+        int                    count;
+        hipGraphicsResource_t* resources;
+        hipStream_t            stream;
+    } hipGraphicsMapResources;
+    struct
+    {
+        void**                devPtr;
+        size_t*               size;
+        hipGraphicsResource_t resource;
+    } hipGraphicsResourceGetMappedPointer;
+    struct
+    {
+        hipArray_t*           array;
+        hipGraphicsResource_t resource;
+        unsigned int          arrayIndex;
+        unsigned int          mipLevel;
+    } hipGraphicsSubResourceGetMappedArray;
+    struct
+    {
+        int                    count;
+        hipGraphicsResource_t* resources;
+        hipStream_t            stream;
+    } hipGraphicsUnmapResources;
+    struct
+    {
+        hipGraphicsResource_t resource;
+    } hipGraphicsUnregisterResource;
+    struct
+    {
+        hipFunction_t f;
+        unsigned int  globalWorkSizeX;
+        unsigned int  globalWorkSizeY;
+        unsigned int  globalWorkSizeZ;
+        unsigned int  blockDimX;
+        unsigned int  blockDimY;
+        unsigned int  blockDimZ;
+        size_t        sharedMemBytes;
+        hipStream_t   hStream;
+        void**        kernelParams;
+        void**        extra;
+        hipEvent_t    startEvent;
+        hipEvent_t    stopEvent;
+    } hipHccModuleLaunchKernel;
+    struct
+    {
+        void**       ptr;
+        size_t       size;
+        unsigned int flags;
+    } hipHostAlloc;
+    struct
+    {
+        void* ptr;
+    } hipHostFree;
+    struct
+    {
+        void**       devPtr;
+        void*        hstPtr;
+        unsigned int flags;
+    } hipHostGetDevicePointer;
+    struct
+    {
+        unsigned int* flagsPtr;
+        void*         hostPtr;
+    } hipHostGetFlags;
+    struct
+    {
+        void**       ptr;
+        size_t       size;
+        unsigned int flags;
+    } hipHostMalloc;
+    struct
+    {
+        void*        hostPtr;
+        size_t       sizeBytes;
+        unsigned int flags;
+    } hipHostRegister;
+    struct
+    {
+        void* hostPtr;
+    } hipHostUnregister;
+    struct
+    {
+        hipExternalMemory_t*               extMem_out;
+        const hipExternalMemoryHandleDesc* memHandleDesc;
+    } hipImportExternalMemory;
+    struct
+    {
+        hipExternalSemaphore_t*               extSem_out;
+        const hipExternalSemaphoreHandleDesc* semHandleDesc;
+    } hipImportExternalSemaphore;
+    struct
+    {
+        unsigned int flags;
+    } hipInit;
+    struct
+    {
+        void* devPtr;
+    } hipIpcCloseMemHandle;
+    struct
+    {
+        hipIpcEventHandle_t* handle;
+        hipEvent_t           event;
+    } hipIpcGetEventHandle;
+    struct
+    {
+        hipIpcMemHandle_t* handle;
+        void*              devPtr;
+    } hipIpcGetMemHandle;
+    struct
+    {
+        hipEvent_t*         event;
+        hipIpcEventHandle_t handle;
+    } hipIpcOpenEventHandle;
+    struct
+    {
+        void**            devPtr;
+        hipIpcMemHandle_t handle;
+        unsigned int      flags;
+    } hipIpcOpenMemHandle;
+    struct
+    {
+        const void* hostFunction;
+    } hipLaunchByPtr;
+    struct
+    {
+        const void*  f;
+        dim3         gridDim;
+        dim3         blockDimX;
+        void**       kernelParams;
+        unsigned int sharedMemBytes;
+        hipStream_t  stream;
+    } hipLaunchCooperativeKernel;
+    struct
+    {
+        hipLaunchParams* launchParamsList;
+        int              numDevices;
+        unsigned int     flags;
+    } hipLaunchCooperativeKernelMultiDevice;
+    struct
+    {
+        hipStream_t stream;
+        hipHostFn_t fn;
+        void*       userData;
+    } hipLaunchHostFunc;
+    struct
+    {
+        const void* function_address;
+        dim3        numBlocks;
+        dim3        dimBlocks;
+        void**      args;
+        size_t      sharedMemBytes;
+        hipStream_t stream;
+    } hipLaunchKernel;
+    struct
+    {
+        void** ptr;
+        size_t size;
+    } hipMalloc;
+    struct
+    {
+        hipPitchedPtr* pitchedDevPtr;
+        hipExtent      extent;
+    } hipMalloc3D;
+    struct
+    {
+        hipArray_t*                 array;
+        const hipChannelFormatDesc* desc;
+        hipExtent                   extent;
+        unsigned int                flags;
+    } hipMalloc3DArray;
+    struct
+    {
+        hipArray**                  array;
+        const hipChannelFormatDesc* desc;
+        size_t                      width;
+        size_t                      height;
+        unsigned int                flags;
+    } hipMallocArray;
+    struct
+    {
+        void**      dev_ptr;
+        size_t      size;
+        hipStream_t stream;
+    } hipMallocAsync;
+    struct
+    {
+        void**       dev_ptr;
+        size_t       size;
+        hipMemPool_t mem_pool;
+        hipStream_t  stream;
+    } hipMallocFromPoolAsync;
+    struct
+    {
+        void** ptr;
+        size_t size;
+    } hipMallocHost;
+    struct
+    {
+        void**       dev_ptr;
+        size_t       size;
+        unsigned int flags;
+    } hipMallocManaged;
+    struct
+    {
+        hipMipmappedArray_t*        mipmappedArray;
+        const hipChannelFormatDesc* desc;
+        hipExtent                   extent;
+        unsigned int                numLevels;
+        unsigned int                flags;
+    } hipMallocMipmappedArray;
+    struct
+    {
+        void**  ptr;
+        size_t* pitch;
+        size_t  width;
+        size_t  height;
+    } hipMallocPitch;
+    struct
+    {
+        void*  devPtr;
+        size_t size;
+    } hipMemAddressFree;
+    struct
+    {
+        void**             ptr;
+        size_t             size;
+        size_t             alignment;
+        void*              addr;
+        unsigned long long flags;
+    } hipMemAddressReserve;
+    struct
+    {
+        const void*     dev_ptr;
+        size_t          count;
+        hipMemoryAdvise advice;
+        int             device;
+    } hipMemAdvise;
+    struct
+    {
+        void** ptr;
+        size_t size;
+    } hipMemAllocHost;
+    struct
+    {
+        hipDeviceptr_t* dptr;
+        size_t*         pitch;
+        size_t          widthInBytes;
+        size_t          height;
+        unsigned int    elementSizeBytes;
+    } hipMemAllocPitch;
+    struct
+    {
+        hipMemGenericAllocationHandle_t* handle;
+        size_t                           size;
+        const hipMemAllocationProp*      prop;
+        unsigned long long               flags;
+    } hipMemCreate;
+    struct
+    {
+        void*                           shareableHandle;
+        hipMemGenericAllocationHandle_t handle;
+        hipMemAllocationHandleType      handleType;
+        unsigned long long              flags;
+    } hipMemExportToShareableHandle;
+    struct
+    {
+        unsigned long long*   flags;
+        const hipMemLocation* location;
+        void*                 ptr;
+    } hipMemGetAccess;
+    struct
+    {
+        hipDeviceptr_t* pbase;
+        size_t*         psize;
+        hipDeviceptr_t  dptr;
+    } hipMemGetAddressRange;
+    struct
+    {
+        size_t*                           granularity;
+        const hipMemAllocationProp*       prop;
+        hipMemAllocationGranularity_flags option;
+    } hipMemGetAllocationGranularity;
+    struct
+    {
+        hipMemAllocationProp*           prop;
+        hipMemGenericAllocationHandle_t handle;
+    } hipMemGetAllocationPropertiesFromHandle;
+    struct
+    {
+        size_t* free;
+        size_t* total;
+    } hipMemGetInfo;
+    struct
+    {
+        hipMemGenericAllocationHandle_t* handle;
+        void*                            osHandle;
+        hipMemAllocationHandleType       shHandleType;
+    } hipMemImportFromShareableHandle;
+    struct
+    {
+        void*                           ptr;
+        size_t                          size;
+        size_t                          offset;
+        hipMemGenericAllocationHandle_t handle;
+        unsigned long long              flags;
+    } hipMemMap;
+    struct
+    {
+        hipArrayMapInfo* mapInfoList;
+        unsigned int     count;
+        hipStream_t      stream;
+    } hipMemMapArrayAsync;
+    struct
+    {
+        hipMemPool_t*          mem_pool;
+        const hipMemPoolProps* pool_props;
+    } hipMemPoolCreate;
+    struct
+    {
+        hipMemPool_t mem_pool;
+    } hipMemPoolDestroy;
+    struct
+    {
+        hipMemPoolPtrExportData* export_data;
+        void*                    dev_ptr;
+    } hipMemPoolExportPointer;
+    struct
+    {
+        void*                      shared_handle;
+        hipMemPool_t               mem_pool;
+        hipMemAllocationHandleType handle_type;
+        unsigned int               flags;
+    } hipMemPoolExportToShareableHandle;
+    struct
+    {
+        hipMemAccessFlags* flags;
+        hipMemPool_t       mem_pool;
+        hipMemLocation*    location;
+    } hipMemPoolGetAccess;
+    struct
+    {
+        hipMemPool_t   mem_pool;
+        hipMemPoolAttr attr;
+        void*          value;
+    } hipMemPoolGetAttribute;
+    struct
+    {
+        hipMemPool_t*              mem_pool;
+        void*                      shared_handle;
+        hipMemAllocationHandleType handle_type;
+        unsigned int               flags;
+    } hipMemPoolImportFromShareableHandle;
+    struct
+    {
+        void**                   dev_ptr;
+        hipMemPool_t             mem_pool;
+        hipMemPoolPtrExportData* export_data;
+    } hipMemPoolImportPointer;
+    struct
+    {
+        hipMemPool_t            mem_pool;
+        const hipMemAccessDesc* desc_list;
+        size_t                  count;
+    } hipMemPoolSetAccess;
+    struct
+    {
+        hipMemPool_t   mem_pool;
+        hipMemPoolAttr attr;
+        void*          value;
+    } hipMemPoolSetAttribute;
+    struct
+    {
+        hipMemPool_t mem_pool;
+        size_t       min_bytes_to_hold;
+    } hipMemPoolTrimTo;
+    struct
+    {
+        const void* dev_ptr;
+        size_t      count;
+        int         device;
+        hipStream_t stream;
+    } hipMemPrefetchAsync;
+    struct
+    {
+        void*   ptr;
+        size_t* size;
+    } hipMemPtrGetInfo;
+    struct
+    {
+        void*                data;
+        size_t               data_size;
+        hipMemRangeAttribute attribute;
+        const void*          dev_ptr;
+        size_t               count;
+    } hipMemRangeGetAttribute;
+    struct
+    {
+        void**                data;
+        size_t*               data_sizes;
+        hipMemRangeAttribute* attributes;
+        size_t                num_attributes;
+        const void*           dev_ptr;
+        size_t                count;
+    } hipMemRangeGetAttributes;
+    struct
+    {
+        hipMemGenericAllocationHandle_t handle;
+    } hipMemRelease;
+    struct
+    {
+        hipMemGenericAllocationHandle_t* handle;
+        void*                            addr;
+    } hipMemRetainAllocationHandle;
+    struct
+    {
+        void*                   ptr;
+        size_t                  size;
+        const hipMemAccessDesc* desc;
+        size_t                  count;
+    } hipMemSetAccess;
+    struct
+    {
+        void*  ptr;
+        size_t size;
+    } hipMemUnmap;
+    struct
+    {
+        void*         dst;
+        const void*   src;
+        size_t        sizeBytes;
+        hipMemcpyKind kind;
+    } hipMemcpy;
+    struct
+    {
+        void*         dst;
+        size_t        dpitch;
+        const void*   src;
+        size_t        spitch;
+        size_t        width;
+        size_t        height;
+        hipMemcpyKind kind;
+    } hipMemcpy2D;
+    struct
+    {
+        void*         dst;
+        size_t        dpitch;
+        const void*   src;
+        size_t        spitch;
+        size_t        width;
+        size_t        height;
+        hipMemcpyKind kind;
+        hipStream_t   stream;
+    } hipMemcpy2DAsync;
+    struct
+    {
+        void*            dst;
+        size_t           dpitch;
+        hipArray_const_t src;
+        size_t           wOffset;
+        size_t           hOffset;
+        size_t           width;
+        size_t           height;
+        hipMemcpyKind    kind;
+    } hipMemcpy2DFromArray;
+    struct
+    {
+        void*            dst;
+        size_t           dpitch;
+        hipArray_const_t src;
+        size_t           wOffset;
+        size_t           hOffset;
+        size_t           width;
+        size_t           height;
+        hipMemcpyKind    kind;
+        hipStream_t      stream;
+    } hipMemcpy2DFromArrayAsync;
+    struct
+    {
+        hipArray*     dst;
+        size_t        wOffset;
+        size_t        hOffset;
+        const void*   src;
+        size_t        spitch;
+        size_t        width;
+        size_t        height;
+        hipMemcpyKind kind;
+    } hipMemcpy2DToArray;
+    struct
+    {
+        hipArray*     dst;
+        size_t        wOffset;
+        size_t        hOffset;
+        const void*   src;
+        size_t        spitch;
+        size_t        width;
+        size_t        height;
+        hipMemcpyKind kind;
+        hipStream_t   stream;
+    } hipMemcpy2DToArrayAsync;
+    struct
+    {
+        const hipMemcpy3DParms* p;
+    } hipMemcpy3D;
+    struct
+    {
+        const hipMemcpy3DParms* p;
+        hipStream_t             stream;
+    } hipMemcpy3DAsync;
+    struct
+    {
+        void*         dst;
+        const void*   src;
+        size_t        sizeBytes;
+        hipMemcpyKind kind;
+        hipStream_t   stream;
+    } hipMemcpyAsync;
+    struct
+    {
+        void*     dst;
+        hipArray* srcArray;
+        size_t    srcOffset;
+        size_t    count;
+    } hipMemcpyAtoH;
+    struct
+    {
+        hipDeviceptr_t dst;
+        hipDeviceptr_t src;
+        size_t         sizeBytes;
+    } hipMemcpyDtoD;
+    struct
+    {
+        hipDeviceptr_t dst;
+        hipDeviceptr_t src;
+        size_t         sizeBytes;
+        hipStream_t    stream;
+    } hipMemcpyDtoDAsync;
+    struct
+    {
+        void*          dst;
+        hipDeviceptr_t src;
+        size_t         sizeBytes;
+    } hipMemcpyDtoH;
+    struct
+    {
+        void*          dst;
+        hipDeviceptr_t src;
+        size_t         sizeBytes;
+        hipStream_t    stream;
+    } hipMemcpyDtoHAsync;
+    struct
+    {
+        void*            dst;
+        hipArray_const_t srcArray;
+        size_t           wOffset;
+        size_t           hOffset;
+        size_t           count;
+        hipMemcpyKind    kind;
+    } hipMemcpyFromArray;
+    struct
+    {
+        void*         dst;
+        const void*   symbol;
+        size_t        sizeBytes;
+        size_t        offset;
+        hipMemcpyKind kind;
+    } hipMemcpyFromSymbol;
+    struct
+    {
+        void*         dst;
+        const void*   symbol;
+        size_t        sizeBytes;
+        size_t        offset;
+        hipMemcpyKind kind;
+        hipStream_t   stream;
+    } hipMemcpyFromSymbolAsync;
+    struct
+    {
+        hipArray*   dstArray;
+        size_t      dstOffset;
+        const void* srcHost;
+        size_t      count;
+    } hipMemcpyHtoA;
+    struct
+    {
+        hipDeviceptr_t dst;
+        void*          src;
+        size_t         sizeBytes;
+    } hipMemcpyHtoD;
+    struct
+    {
+        hipDeviceptr_t dst;
+        void*          src;
+        size_t         sizeBytes;
+        hipStream_t    stream;
+    } hipMemcpyHtoDAsync;
+    struct
+    {
+        const hip_Memcpy2D* pCopy;
+    } hipMemcpyParam2D;
+    struct
+    {
+        const hip_Memcpy2D* pCopy;
+        hipStream_t         stream;
+    } hipMemcpyParam2DAsync;
+    struct
+    {
+        void*       dst;
+        int         dstDeviceId;
+        const void* src;
+        int         srcDeviceId;
+        size_t      sizeBytes;
+    } hipMemcpyPeer;
+    struct
+    {
+        void*       dst;
+        int         dstDeviceId;
+        const void* src;
+        int         srcDevice;
+        size_t      sizeBytes;
+        hipStream_t stream;
+    } hipMemcpyPeerAsync;
+    struct
+    {
+        hipArray*     dst;
+        size_t        wOffset;
+        size_t        hOffset;
+        const void*   src;
+        size_t        count;
+        hipMemcpyKind kind;
+    } hipMemcpyToArray;
+    struct
+    {
+        const void*   symbol;
+        const void*   src;
+        size_t        sizeBytes;
+        size_t        offset;
+        hipMemcpyKind kind;
+    } hipMemcpyToSymbol;
+    struct
+    {
+        const void*   symbol;
+        const void*   src;
+        size_t        sizeBytes;
+        size_t        offset;
+        hipMemcpyKind kind;
+        hipStream_t   stream;
+    } hipMemcpyToSymbolAsync;
+    struct
+    {
+        void*         dst;
+        const void*   src;
+        size_t        sizeBytes;
+        hipMemcpyKind kind;
+        hipStream_t   stream;
+    } hipMemcpyWithStream;
+    struct
+    {
+        void*  dst;
+        int    value;
+        size_t sizeBytes;
+    } hipMemset;
+    struct
+    {
+        void*  dst;
+        size_t pitch;
+        int    value;
+        size_t width;
+        size_t height;
+    } hipMemset2D;
+    struct
+    {
+        void*       dst;
+        size_t      pitch;
+        int         value;
+        size_t      width;
+        size_t      height;
+        hipStream_t stream;
+    } hipMemset2DAsync;
+    struct
+    {
+        hipPitchedPtr pitchedDevPtr;
+        int           value;
+        hipExtent     extent;
+    } hipMemset3D;
+    struct
+    {
+        hipPitchedPtr pitchedDevPtr;
+        int           value;
+        hipExtent     extent;
+        hipStream_t   stream;
+    } hipMemset3DAsync;
+    struct
+    {
+        void*       dst;
+        int         value;
+        size_t      sizeBytes;
+        hipStream_t stream;
+    } hipMemsetAsync;
+    struct
+    {
+        hipDeviceptr_t dest;
+        unsigned short value;
+        size_t         count;
+    } hipMemsetD16;
+    struct
+    {
+        hipDeviceptr_t dest;
+        unsigned short value;
+        size_t         count;
+        hipStream_t    stream;
+    } hipMemsetD16Async;
+    struct
+    {
+        hipDeviceptr_t dest;
+        int            value;
+        size_t         count;
+    } hipMemsetD32;
+    struct
+    {
+        hipDeviceptr_t dst;
+        int            value;
+        size_t         count;
+        hipStream_t    stream;
+    } hipMemsetD32Async;
+    struct
+    {
+        hipDeviceptr_t dest;
+        unsigned char  value;
+        size_t         count;
+    } hipMemsetD8;
+    struct
+    {
+        hipDeviceptr_t dest;
+        unsigned char  value;
+        size_t         count;
+        hipStream_t    stream;
+    } hipMemsetD8Async;
+    struct
+    {
+        hipMipmappedArray_t*    pHandle;
+        HIP_ARRAY3D_DESCRIPTOR* pMipmappedArrayDesc;
+        unsigned int            numMipmapLevels;
+    } hipMipmappedArrayCreate;
+    struct
+    {
+        hipMipmappedArray_t hMipmappedArray;
+    } hipMipmappedArrayDestroy;
+    struct
+    {
+        hipArray_t*         pLevelArray;
+        hipMipmappedArray_t hMipMappedArray;
+        unsigned int        level;
+    } hipMipmappedArrayGetLevel;
+    struct
+    {
+        hipFunction_t* function;
+        hipModule_t    module;
+        const char*    kname;
+    } hipModuleGetFunction;
+    struct
+    {
+        hipDeviceptr_t* dptr;
+        size_t*         bytes;
+        hipModule_t     hmod;
+        const char*     name;
+    } hipModuleGetGlobal;
+    struct
+    {
+        textureReference** texRef;
+        hipModule_t        hmod;
+        const char*        name;
+    } hipModuleGetTexRef;
+    struct
+    {
+        hipFunction_t f;
+        unsigned int  gridDimX;
+        unsigned int  gridDimY;
+        unsigned int  gridDimZ;
+        unsigned int  blockDimX;
+        unsigned int  blockDimY;
+        unsigned int  blockDimZ;
+        unsigned int  sharedMemBytes;
+        hipStream_t   stream;
+        void**        kernelParams;
+    } hipModuleLaunchCooperativeKernel;
+    struct
+    {
+        hipFunctionLaunchParams* launchParamsList;
+        unsigned int             numDevices;
+        unsigned int             flags;
+    } hipModuleLaunchCooperativeKernelMultiDevice;
+    struct
+    {
+        hipFunction_t f;
+        unsigned int  gridDimX;
+        unsigned int  gridDimY;
+        unsigned int  gridDimZ;
+        unsigned int  blockDimX;
+        unsigned int  blockDimY;
+        unsigned int  blockDimZ;
+        unsigned int  sharedMemBytes;
+        hipStream_t   stream;
+        void**        kernelParams;
+        void**        extra;
+    } hipModuleLaunchKernel;
+    struct
+    {
+        hipModule_t* module;
+        const char*  fname;
+    } hipModuleLoad;
+    struct
+    {
+        hipModule_t* module;
+        const void*  image;
+    } hipModuleLoadData;
+    struct
+    {
+        hipModule_t*  module;
+        const void*   image;
+        unsigned int  numOptions;
+        hipJitOption* options;
+        void**        optionsValues;
+    } hipModuleLoadDataEx;
+    struct
+    {
+        int*          numBlocks;
+        hipFunction_t f;
+        int           blockSize;
+        size_t        dynSharedMemPerBlk;
+    } hipModuleOccupancyMaxActiveBlocksPerMultiprocessor;
+    struct
+    {
+        int*          numBlocks;
+        hipFunction_t f;
+        int           blockSize;
+        size_t        dynSharedMemPerBlk;
+        unsigned int  flags;
+    } hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags;
+    struct
+    {
+        int*          gridSize;
+        int*          blockSize;
+        hipFunction_t f;
+        size_t        dynSharedMemPerBlk;
+        int           blockSizeLimit;
+    } hipModuleOccupancyMaxPotentialBlockSize;
+    struct
+    {
+        int*          gridSize;
+        int*          blockSize;
+        hipFunction_t f;
+        size_t        dynSharedMemPerBlk;
+        int           blockSizeLimit;
+        unsigned int  flags;
+    } hipModuleOccupancyMaxPotentialBlockSizeWithFlags;
+    struct
+    {
+        hipModule_t module;
+    } hipModuleUnload;
+    struct
+    {
+        int*        numBlocks;
+        const void* f;
+        int         blockSize;
+        size_t      dynamicSMemSize;
+    } hipOccupancyMaxActiveBlocksPerMultiprocessor;
+    struct
+    {
+        int*         numBlocks;
+        const void*  f;
+        int          blockSize;
+        size_t       dynamicSMemSize;
+        unsigned int flags;
+    } hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags;
+    struct
+    {
+        int*        gridSize;
+        int*        blockSize;
+        const void* f;
+        size_t      dynSharedMemPerBlk;
+        int         blockSizeLimit;
+    } hipOccupancyMaxPotentialBlockSize;
+    struct
+    {
+        void*                data;
+        hipPointer_attribute attribute;
+        hipDeviceptr_t       ptr;
+    } hipPointerGetAttribute;
+    struct
+    {
+        hipPointerAttribute_t* attributes;
+        const void*            ptr;
+    } hipPointerGetAttributes;
+    struct
+    {
+        const void*          value;
+        hipPointer_attribute attribute;
+        hipDeviceptr_t       ptr;
+    } hipPointerSetAttribute;
+    struct
+    {
+        int* runtimeVersion;
+    } hipRuntimeGetVersion;
+    struct
+    {
+        int deviceId;
+    } hipSetDevice;
+    struct
+    {
+        unsigned int flags;
+    } hipSetDeviceFlags;
+    struct
+    {
+        const void* arg;
+        size_t      size;
+        size_t      offset;
+    } hipSetupArgument;
+    struct
+    {
+        const hipExternalSemaphore_t*           extSemArray;
+        const hipExternalSemaphoreSignalParams* paramsArray;
+        unsigned int                            numExtSems;
+        hipStream_t                             stream;
+    } hipSignalExternalSemaphoresAsync;
+    struct
+    {
+        hipStream_t         stream;
+        hipStreamCallback_t callback;
+        void*               userData;
+        unsigned int        flags;
+    } hipStreamAddCallback;
+    struct
+    {
+        hipStream_t  stream;
+        void*        dev_ptr;
+        size_t       length;
+        unsigned int flags;
+    } hipStreamAttachMemAsync;
+    struct
+    {
+        hipStream_t          stream;
+        hipStreamCaptureMode mode;
+    } hipStreamBeginCapture;
+    struct
+    {
+        hipStream_t* stream;
+    } hipStreamCreate;
+    struct
+    {
+        hipStream_t* stream;
+        unsigned int flags;
+    } hipStreamCreateWithFlags;
+    struct
+    {
+        hipStream_t* stream;
+        unsigned int flags;
+        int          priority;
+    } hipStreamCreateWithPriority;
+    struct
+    {
+        hipStream_t stream;
+    } hipStreamDestroy;
+    struct
+    {
+        hipStream_t stream;
+        hipGraph_t* pGraph;
+    } hipStreamEndCapture;
+    struct
+    {
+        hipStream_t             stream;
+        hipStreamCaptureStatus* pCaptureStatus;
+        unsigned long long*     pId;
+    } hipStreamGetCaptureInfo;
+    struct
+    {
+        hipStream_t             stream;
+        hipStreamCaptureStatus* captureStatus_out;
+        unsigned long long*     id_out;
+        hipGraph_t*             graph_out;
+        const hipGraphNode_t**  dependencies_out;
+        size_t*                 numDependencies_out;
+    } hipStreamGetCaptureInfo_v2;
+    struct
+    {
+        hipStream_t  stream;
+        hipDevice_t* device;
+    } hipStreamGetDevice;
+    struct
+    {
+        hipStream_t   stream;
+        unsigned int* flags;
+    } hipStreamGetFlags;
+    struct
+    {
+        hipStream_t stream;
+        int*        priority;
+    } hipStreamGetPriority;
+    struct
+    {
+        hipStream_t             stream;
+        hipStreamCaptureStatus* pCaptureStatus;
+    } hipStreamIsCapturing;
+    struct
+    {
+        hipStream_t stream;
+    } hipStreamQuery;
+    struct
+    {
+        hipStream_t stream;
+    } hipStreamSynchronize;
+    struct
+    {
+        hipStream_t     stream;
+        hipGraphNode_t* dependencies;
+        size_t          numDependencies;
+        unsigned int    flags;
+    } hipStreamUpdateCaptureDependencies;
+    struct
+    {
+        hipStream_t  stream;
+        hipEvent_t   event;
+        unsigned int flags;
+    } hipStreamWaitEvent;
+    struct
+    {
+        hipStream_t  stream;
+        void*        ptr;
+        unsigned int value;
+        unsigned int flags;
+        unsigned int mask;
+    } hipStreamWaitValue32;
+    struct
+    {
+        hipStream_t  stream;
+        void*        ptr;
+        uint64_t     value;
+        unsigned int flags;
+        uint64_t     mask;
+    } hipStreamWaitValue64;
+    struct
+    {
+        hipStream_t  stream;
+        void*        ptr;
+        unsigned int value;
+        unsigned int flags;
+    } hipStreamWriteValue32;
+    struct
+    {
+        hipStream_t  stream;
+        void*        ptr;
+        uint64_t     value;
+        unsigned int flags;
+    } hipStreamWriteValue64;
+    struct
+    {
+        hipDeviceptr_t*         dev_ptr;
+        const textureReference* texRef;
+    } hipTexRefGetAddress;
+    struct
+    {
+        unsigned int*           pFlags;
+        const textureReference* texRef;
+    } hipTexRefGetFlags;
+    struct
+    {
+        hipArray_Format*        pFormat;
+        int*                    pNumChannels;
+        const textureReference* texRef;
+    } hipTexRefGetFormat;
+    struct
+    {
+        int*                    pmaxAnsio;
+        const textureReference* texRef;
+    } hipTexRefGetMaxAnisotropy;
+    struct
+    {
+        hipMipmappedArray_t*    pArray;
+        const textureReference* texRef;
+    } hipTexRefGetMipMappedArray;
+    struct
+    {
+        float*                  pbias;
+        const textureReference* texRef;
+    } hipTexRefGetMipmapLevelBias;
+    struct
+    {
+        float*                  pminMipmapLevelClamp;
+        float*                  pmaxMipmapLevelClamp;
+        const textureReference* texRef;
+    } hipTexRefGetMipmapLevelClamp;
+    struct
+    {
+        size_t*           ByteOffset;
+        textureReference* texRef;
+        hipDeviceptr_t    dptr;
+        size_t            bytes;
+    } hipTexRefSetAddress;
+    struct
+    {
+        textureReference*           texRef;
+        const HIP_ARRAY_DESCRIPTOR* desc;
+        hipDeviceptr_t              dptr;
+        size_t                      Pitch;
+    } hipTexRefSetAddress2D;
+    struct
+    {
+        textureReference* tex;
+        hipArray_const_t  array;
+        unsigned int      flags;
+    } hipTexRefSetArray;
+    struct
+    {
+        textureReference* texRef;
+        float*            pBorderColor;
+    } hipTexRefSetBorderColor;
+    struct
+    {
+        textureReference* texRef;
+        unsigned int      Flags;
+    } hipTexRefSetFlags;
+    struct
+    {
+        textureReference* texRef;
+        hipArray_Format   fmt;
+        int               NumPackedComponents;
+    } hipTexRefSetFormat;
+    struct
+    {
+        textureReference* texRef;
+        unsigned int      maxAniso;
+    } hipTexRefSetMaxAnisotropy;
+    struct
+    {
+        textureReference* texRef;
+        float             bias;
+    } hipTexRefSetMipmapLevelBias;
+    struct
+    {
+        textureReference* texRef;
+        float             minMipMapLevelClamp;
+        float             maxMipMapLevelClamp;
+    } hipTexRefSetMipmapLevelClamp;
+    struct
+    {
+        textureReference*  texRef;
+        hipMipmappedArray* mipmappedArray;
+        unsigned int       Flags;
+    } hipTexRefSetMipmappedArray;
+    struct
+    {
+        hipStreamCaptureMode* mode;
+    } hipThreadExchangeStreamCaptureMode;
+    struct
+    {
+        hipUserObject_t* object_out;
+        void*            ptr;
+        hipHostFn_t      destroy;
+        unsigned int     initialRefcount;
+        unsigned int     flags;
+    } hipUserObjectCreate;
+    struct
+    {
+        hipUserObject_t object;
+        unsigned int    count;
+    } hipUserObjectRelease;
+    struct
+    {
+        hipUserObject_t object;
+        unsigned int    count;
+    } hipUserObjectRetain;
+    struct
+    {
+        const hipExternalSemaphore_t*         extSemArray;
+        const hipExternalSemaphoreWaitParams* paramsArray;
+        unsigned int                          numExtSems;
+        hipStream_t                           stream;
+    } hipWaitExternalSemaphoresAsync;
+} rocprofiler_hip_api_args_t;

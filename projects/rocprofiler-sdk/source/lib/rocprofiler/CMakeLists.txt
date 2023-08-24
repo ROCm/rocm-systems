@@ -24,4 +24,5 @@ set_target_properties(
     rocprofiler-library
     PROPERTIES OUTPUT_NAME rocprofiler64
                SOVERSION ${PROJECT_VERSION_MAJOR}
-               VERSION ${PROJECT_VERSION})
+               VERSION ${PROJECT_VERSION}
+               DEFINE_SYMBOL rocprofiler_EXPORTS)
