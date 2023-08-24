@@ -126,7 +126,7 @@ class MetricsDict {
   static MetricsDict* Create(const rocprofiler::HSAAgentInfo* agent_info) {
     std::lock_guard<mutex_t> lck(mutex_);
     if (map_ == NULL) map_ = new map_t;
-    std::string name = agent_info->GetDeviceInfo().getGfxip();
+    std::string name = std::string(agent_info->GetDeviceInfo().getName());
     auto ret = map_->insert({name, NULL});
     if (ret.second) ret.first->second = new MetricsDict(agent_info);
     return ret.first->second;

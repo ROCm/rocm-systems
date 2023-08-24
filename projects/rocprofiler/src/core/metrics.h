@@ -120,7 +120,7 @@ class MetricsDict {
   static MetricsDict* Create(const util::AgentInfo* agent_info) {
     std::lock_guard<mutex_t> lck(mutex_);
     if (map_ == NULL) map_ = new map_t;
-    auto ret = map_->insert({agent_info->gfxip, NULL});
+    auto ret = map_->insert({agent_info->name, NULL});
     if (ret.second) ret.first->second = new MetricsDict(agent_info);
     return ret.first->second;
   }
