@@ -22,6 +22,8 @@
 
 #include <atomic>
 #include <map>
+#include <mutex>
+#include <optional>
 #include <string>
 #include <vector>
 #include <utility>
@@ -460,10 +462,16 @@ bool AsyncSignalHandler(hsa_signal_value_t signal_value, void* data) {
          it = pending_signals.erase(it)) {
       auto& pending = *it;
       if (hsasupport_singleton.GetCoreApiTable().hsa_signal_load_relaxed_fn(pending->new_signal))
-        return true;
+       return true;
       hsa_amd_profiling_dispatch_time_t time;
       hsasupport_singleton.GetAmdExtTable().hsa_amd_profiling_get_dispatch_time_fn(
-          queue_info_session->agent, pending->original_signal, &time);
+          queue_info_session->agent, pending->new_signal, &time);
+      {
+        std::lock_guard<std::mutex> lock(hsasupport_singleton.signals_timestamps_map_lock);
+        hsasupport_singleton.signals_timestamps[pending->original_signal.handle].time =
+            std::make_optional(time);
+      }
+      //hsasupport_singleton.GetCoreApiTable().hsa_signal_destroy_fn(pending->new_signal);
       uint32_t record_count = 1;
       bool is_individual_xcc_mode = false;
       uint32_t xcc_count = queue_info_session->xcc_count;
@@ -532,14 +540,13 @@ bool AsyncSignalHandler(hsa_signal_value_t signal_value, void* data) {
           delete it.second;
         }
         delete pending->context;
-      }
-
-      /*
+          /*
       Check if the dispatch ready is empty, If so, there is no more
       dispatches to be launched and we return. Else, dispatch the
       kernel of the queue in the front of the dispatch_ready.
       */
-      profiler_serializer_t& serializer =
+
+        profiler_serializer_t& serializer =
           rocprofiler::ROCProfiler_Singleton::GetInstance().GetSerializer();
       std::lock_guard<std::mutex> serializer_lock(serializer.serializer_mutex);
       assert(serializer.dispatch_queue != nullptr);
@@ -550,8 +557,13 @@ bool AsyncSignalHandler(hsa_signal_value_t signal_value, void* data) {
       Queue* queue = serializer.dispatch_ready.front();
       serializer.dispatch_ready.erase(serializer.dispatch_ready.begin());
       enable_dispatch(queue);
+
+      }
+
+    
+
       if (pending->new_signal.handle)
-        hsasupport_singleton.GetCoreApiTable().hsa_signal_destroy_fn(pending->new_signal);
+       hsasupport_singleton.GetCoreApiTable().hsa_signal_destroy_fn(pending->new_signal);
       if (queue_info_session->interrupt_signal.handle)
         hsasupport_singleton.GetCoreApiTable().hsa_signal_destroy_fn(
             queue_info_session->interrupt_signal);
@@ -645,7 +657,10 @@ void CreateBarrierPacket(std::vector<Packet::packet_t>* transformed_packets,
                          const hsa_signal_t* packet_completion_signal
                          ) {
   hsa_barrier_and_packet_t barrier{0};
-  barrier.header = HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE;
+  barrier.header = HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE |
+      (1 << HSA_PACKET_HEADER_BARRIER) |
+      (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE) |
+      (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE);
   if (packet_completion_signal != nullptr) barrier.completion_signal = *packet_completion_signal;
   if (packet_dependency_signal != nullptr) barrier.dep_signal[0] = *packet_dependency_signal;
   void* barrier_ptr = &barrier;
@@ -928,16 +943,17 @@ void Queue::WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t u
         profiles = Packet::InitializeAqlPackets(queue_info.GetCPUAgent(), queue_info.GetGPUAgent(),
                                                 session_data, session_id_snapshot);
         replay_mode_count = profiles.size();
+
       }
 
       uint32_t profile_id = 0;
       // do {
 
       std::pair<rocprofiler::profiling_context_t*, hsa_ven_amd_aqlprofile_profile_t*> profile;
-      if (profiles.size() > 0 && replay_mode_count > 0) profile = profiles.at(profile_id);
-
-      hsa_signal_t ready_signal = queue_info.GetReadySignal();
-      hsa_signal_t block_signal = queue_info.GetBlockSignal();
+      if (profiles.size() > 0 && replay_mode_count > 0) {
+         profile = profiles.at(profile_id);
+        hsa_signal_t ready_signal = queue_info.GetReadySignal();
+        hsa_signal_t block_signal = queue_info.GetBlockSignal();
 
       /*
        Creates a barrier packet with its completion signal as the
@@ -950,6 +966,8 @@ void Queue::WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t u
       packet waiting on it to be 0 will be blocked
       */
       CreateBarrierPacket(&transformed_packets, &block_signal, &block_signal);
+      }
+
 
       uint32_t writer_id = WRITER_ID.fetch_add(1, std::memory_order_release);
 
@@ -971,6 +989,7 @@ void Queue::WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t u
       uint64_t correlation_id = dispatch_packet.reserved2;
 
       CreateSignal(HSA_AMD_SIGNAL_AMD_GPU_ONLY, &packet.completion_signal);
+
       // Adding the dispatch packet newly created signal to the pending signals
       // list to be processed by the signal interrupt
       rocprofiler_kernel_properties_t kernel_properties =
@@ -981,16 +1000,14 @@ void Queue::WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t u
                                     record_id);
         if (session_data_count > 0 && profile.second) {
           session->GetProfiler()->AddPendingSignals(
-              writer_id, record_id, original_packet.completion_signal,
-              dispatch_packet.completion_signal, session_id, buffer_id, profile.first,
-              session_data_count, profile.second, kernel_properties, (uint32_t)syscall(__NR_gettid),
-              user_pkt_index, correlation_id);
+              writer_id, record_id, original_packet.completion_signal, packet.completion_signal,
+              session_id, buffer_id, profile.first, session_data_count, profile.second,
+              kernel_properties, (uint32_t)syscall(__NR_gettid), user_pkt_index, correlation_id);
         } else {
           session->GetProfiler()->AddPendingSignals(
-              writer_id, record_id, original_packet.completion_signal,
-              dispatch_packet.completion_signal, session_id, buffer_id, nullptr, session_data_count,
-              nullptr, kernel_properties, (uint32_t)syscall(__NR_gettid), user_pkt_index,
-              correlation_id);
+              writer_id, record_id, original_packet.completion_signal, packet.completion_signal,
+              session_id, buffer_id, nullptr, session_data_count, nullptr, kernel_properties,
+              (uint32_t)syscall(__NR_gettid), user_pkt_index, correlation_id);
         }
       }
 
@@ -998,11 +1015,22 @@ void Queue::WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t u
       // packet and create a new signal for it to get timestamps
       if (original_packet.completion_signal.handle) {
         hsa_barrier_and_packet_t barrier{};
-        barrier.header = HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE;
+        barrier.header = (HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE) |
+            (1 << HSA_PACKET_HEADER_BARRIER) |
+            (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE) |
+            (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE);
         Packet::packet_t* __attribute__((__may_alias__)) pkt =
             (reinterpret_cast<Packet::packet_t*>(&barrier));
         transformed_packets.emplace_back(*pkt).completion_signal =
             original_packet.completion_signal;
+
+        {
+          std::lock_guard<std::mutex> lock(
+              HSASupport_Singleton::GetInstance().signals_timestamps_map_lock);
+          HSASupport_Singleton::GetInstance()
+              .signals_timestamps[original_packet.completion_signal.handle] =
+              new_signal_timestamp_t{packet.completion_signal, std::nullopt};
+        }
       }
 
       hsa_signal_t interrupt_signal{};
@@ -1022,17 +1050,14 @@ void Queue::WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t u
 
         // Added Interrupt Signal with barrier and provided handler for it
         CreateBarrierPacket( &transformed_packets, &interrupt_signal, nullptr);
-      } else {
-        hsa_barrier_and_packet_t barrier{};
-        barrier.header = HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE;
-        barrier.completion_signal = interrupt_signal;
-        Packet::packet_t* __attribute__((__may_alias__)) pkt =
-            (reinterpret_cast<Packet::packet_t*>(&barrier));
-        transformed_packets.emplace_back(*pkt);
+
+
       }
+      else
+        CreateBarrierPacket( &transformed_packets, nullptr, &interrupt_signal);
       rocprofiler::HSAAgentInfo& agentInfo =
-          rocprofiler::HSASupport_Singleton::GetInstance().GetHSAAgentInfo(
-              queue_info.GetGPUAgent().handle);
+       rocprofiler::HSASupport_Singleton::GetInstance().GetHSAAgentInfo(
+         queue_info.GetGPUAgent().handle);
       //  Creating Async Handler to be called every time the interrupt signal is
       //  marked complete
       SignalAsyncHandler(
@@ -1044,8 +1069,8 @@ void Queue::WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t u
       ACTIVE_INTERRUPT_SIGNAL_COUNT.fetch_add(1, std::memory_order_relaxed);
       // profile_id++;
       // } while (replay_mode_count > 0 && profile_id < replay_mode_count);  // Profiles loop end
-    }
 
+  }
     /* Write the transformed packets to the hardware queue.  */
     writer(&transformed_packets[0], transformed_packets.size());
   } else if (session_id_snapshot.handle > 0 && pkt_count > 0 && is_att_collection_mode && session &&
@@ -1113,6 +1138,7 @@ void Queue::WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t u
       auto& dispatch_packet = reinterpret_cast<hsa_kernel_dispatch_packet_t&>(packet);
 
       CreateSignal(HSA_AMD_SIGNAL_AMD_GPU_ONLY, &packet.completion_signal);
+
       // Adding the dispatch packet newly created signal to the pending signals
       // list to be processed by the signal interrupt
       rocprofiler_kernel_properties_t kernel_properties =
@@ -1122,9 +1148,9 @@ void Queue::WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t u
                                   record_id);
 
       session->GetAttTracer()->AddPendingSignals(
-          writer_id, record_id, original_packet.completion_signal,
-          dispatch_packet.completion_signal, session_id_snapshot, buffer_id, profile,
-          kernel_properties, (uint32_t)syscall(__NR_gettid), user_pkt_index);
+          writer_id, record_id, original_packet.completion_signal, packet.completion_signal,
+          session_id_snapshot, buffer_id, profile, kernel_properties,
+          (uint32_t)syscall(__NR_gettid), user_pkt_index);
 
       uint64_t userdata = HSASupport_Singleton::GetInstance()
                           .GetHSAAgentInfo(queue_info.GetGPUAgent().handle)
@@ -1139,6 +1165,7 @@ void Queue::WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t u
       if (original_packet.completion_signal.handle != 0U) {
         hsa_barrier_and_packet_t barrier{};
         barrier.header = HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE;
+        barrier.dep_signal[0] = packet.completion_signal;
         Packet::packet_t* __attribute__((__may_alias__)) pkt =
             (reinterpret_cast<Packet::packet_t*>(&barrier));
         transformed_packets.emplace_back(*pkt).completion_signal =

@@ -27,6 +27,7 @@ THE SOFTWARE.
 #include <execinfo.h>  // for backtrace
 
 #include <algorithm>
+#include <cstdint>
 #include <cstdlib>
 #include <fstream>
 #include <sstream>
@@ -86,6 +87,9 @@ void tokenize_profiler_output(std::string line, profiler_kernel_info_t& kinfo);
 // tokenize tracer output
 void tokenize_tracer_output(std::string line, tracer_kernel_info_t& kinfo);
 
+// get numeric value of timestamp token
+uint64_t get_timestamp_value(const std::string& str);
+
 }  // namespace utility
 }  // namespace tests
 }  // namespace rocprofiler
@@ -94,6 +98,7 @@ void tokenize_tracer_output(std::string line, tracer_kernel_info_t& kinfo);
 // path for executable
 int main(int argc, char** argv);
 
+using rocprofiler::tests::utility::get_timestamp_value;
 using rocprofiler::tests::utility::GetNumberOfCores;
 using rocprofiler::tests::utility::GetRunningPath;
 using rocprofiler::tests::utility::is_installed_path;

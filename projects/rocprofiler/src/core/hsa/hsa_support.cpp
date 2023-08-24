@@ -53,7 +53,6 @@
 #include "src/core/isa_capture/code_object_track.hpp"
 
 
-
 namespace {
 
 hsa_status_t hsa_executable_iteration_callback(hsa_executable_t executable, hsa_agent_t agent,
@@ -487,12 +486,8 @@ hsa_status_t CodeObjectCallback(hsa_executable_t executable,
   if (data.codeobj.unload)
     codeobj_capture_instance::Unload(data.codeobj.load_base);
   else
-    codeobj_capture_instance::Load(
-      data.codeobj.load_base,
-      uri_str,
-      data.codeobj.memory_base,
-      data.codeobj.memory_size
-    );
+    codeobj_capture_instance::Load(data.codeobj.load_base, uri_str, data.codeobj.memory_base,
+                                   data.codeobj.memory_size);
 
   hsa_executable_iterate_agent_symbols(executable, data.codeobj.agent,
                                        hsa_executable_iteration_callback, &(data.codeobj.unload));
@@ -528,6 +523,37 @@ hsa_status_t ExecutableDestroyIntercept(hsa_executable_t executable) {
   return hsasupport_singleton.GetCoreApiTable().hsa_executable_destroy_fn(executable);
 }
 
+hsa_status_t GetDispatchTimestamps(hsa_agent_t agent, hsa_signal_t signal,
+                                   hsa_amd_profiling_dispatch_time_t* time) {
+  rocprofiler::HSASupport_Singleton& hsasupport_singleton =
+      rocprofiler::HSASupport_Singleton::GetInstance();
+  {
+    std::lock_guard<std::mutex> lock(hsasupport_singleton.signals_timestamps_map_lock);
+    auto entry = hsasupport_singleton.signals_timestamps.find(signal.handle);
+    if (entry == hsasupport_singleton.signals_timestamps.end()) {
+      return hsasupport_singleton.GetAmdExtTable().hsa_amd_profiling_get_dispatch_time_fn(
+          agent, signal, time);
+    }
+    if (entry->second.time.has_value()) {
+      *time = entry->second.time.value();
+      return HSA_STATUS_SUCCESS;
+    }
+    return hsasupport_singleton.GetAmdExtTable().hsa_amd_profiling_get_dispatch_time_fn(
+        agent, entry->second.new_signal, time);
+  }
+}
+
+hsa_status_t DestroySignal(hsa_signal_t signal) {
+  rocprofiler::HSASupport_Singleton& hsasupport_singleton =
+      rocprofiler::HSASupport_Singleton::GetInstance();
+  std::lock_guard<std::mutex> lock(hsasupport_singleton.signals_timestamps_map_lock);
+  auto entry = hsasupport_singleton.signals_timestamps.find(signal.handle);
+  if (entry != hsasupport_singleton.signals_timestamps.end()) {
+    hsasupport_singleton.signals_timestamps.erase(entry);
+  }
+  return hsasupport_singleton.GetCoreApiTable().hsa_signal_destroy_fn(signal);
+}
+
 std::atomic<bool> profiling_async_copy_enable{false};
 
 hsa_status_t ProfilingAsyncCopyEnableIntercept(bool enable) {
@@ -550,7 +576,7 @@ void MemoryASyncCopyHandler(const Tracker::entry_t* entry) {
   record.begin_ns = entry->begin;
   record.end_ns = entry->end;
   if (entry->agent.handle > 0) {
-    //FIXME: Not a unique id across GPU and CPU
+    // FIXME: Not a unique id across GPU and CPU
     rocprofiler::HSAAgentInfo& agent_info =
         hsasupport_singleton.GetHSAAgentInfo(entry->agent.handle);
     if (agent_info.GetType() == HSA_DEVICE_TYPE_GPU)
@@ -735,15 +761,15 @@ HSASupport_Singleton& HSASupport_Singleton::GetInstance() {
   return *instance;
 }
 
-CoreApiTable& HSASupport_Singleton::GetCoreApiTable()  { return saved_core_api; }
+CoreApiTable& HSASupport_Singleton::GetCoreApiTable() { return saved_core_api; }
 
 void HSASupport_Singleton::SetCoreApiTable(CoreApiTable& table) { saved_core_api = table; }
 
-AmdExtTable& HSASupport_Singleton::GetAmdExtTable()  { return saved_amd_ext_api; }
+AmdExtTable& HSASupport_Singleton::GetAmdExtTable() { return saved_amd_ext_api; }
 
 void HSASupport_Singleton::SetAmdExtTable(AmdExtTable& table) { saved_amd_ext_api = table; }
 
-hsa_ven_amd_loader_1_01_pfn_t& HSASupport_Singleton::GetHSALoaderApi()  { return hsa_loader_api; }
+hsa_ven_amd_loader_1_01_pfn_t& HSASupport_Singleton::GetHSALoaderApi() { return hsa_loader_api; }
 
 void HSASupport_Singleton::SetHSALoaderApi() {
   hsa_status_t status = GetCoreApiTable().hsa_system_get_major_extension_table_fn(
@@ -822,11 +848,11 @@ void HSASupport_Singleton::FinitKsymbols() {
 }
 
 
-
 void queues_deleter ::operator()(void* queue) const { delete static_cast<queue::Queue*>(queue); }
 
 
- void HSASupport_Singleton::AddQueue(hsa_queue_t* queue, std::unique_ptr<void, queues_deleter&>rocprofiler_queue) {
+void HSASupport_Singleton::AddQueue(hsa_queue_t* queue,
+                                    std::unique_ptr<void, queues_deleter&> rocprofiler_queue) {
   std::lock_guard<std::mutex> queues_mutex_lock(queues_mutex_);
   queues.emplace(queue, std::move(rocprofiler_queue));
 }
@@ -887,12 +913,12 @@ hsa_status_t QueueDestroyInterceptor(hsa_queue_t* hsa_queue) {
   return HSA_STATUS_SUCCESS;
 }
 bool hsa_support_IterateCounters(rocprofiler_counters_info_callback_t counters_info_callback) {
-
   static std::map<uint64_t, MetricsDict*> metricsDicts;
-  HSASupport_Singleton& hsasupport_singleton =  HSASupport_Singleton::GetInstance();
-  for(auto it = hsasupport_singleton.gpu_agents.begin(); it != hsasupport_singleton.gpu_agents.end(); it++) {
-        HSAAgentInfo& agent_Info = hsasupport_singleton.GetHSAAgentInfo(it->handle);
-              metricsDicts.emplace(agent_Info.getHandle(), rocprofiler::MetricsDict::Create(&agent_Info)) ;
+  HSASupport_Singleton& hsasupport_singleton = HSASupport_Singleton::GetInstance();
+  for (auto it = hsasupport_singleton.gpu_agents.begin();
+       it != hsasupport_singleton.gpu_agents.end(); it++) {
+    HSAAgentInfo& agent_Info = hsasupport_singleton.GetHSAAgentInfo(it->handle);
+    metricsDicts.emplace(agent_Info.getHandle(), rocprofiler::MetricsDict::Create(&agent_Info));
   }
   uint32_t gpu_counter = 0;
   for (auto metricsDictAgent : metricsDicts) {
@@ -964,10 +990,8 @@ bool hsa_support_IterateCounters(rocprofiler_counters_info_callback_t counters_i
     // }
   }
 
- return true;
+  return true;
 }
-
-
 
 
 void HSASupport_Singleton::HSAInitialize(HsaApiTable* table) {
@@ -1045,6 +1069,13 @@ void HSASupport_Singleton::HSAInitialize(HsaApiTable* table) {
     agent_info.kernarg_pool_ = near_cpu_agent_info.kernarg_pool_;
   }
 
+  {
+    std::lock_guard<std::mutex> lock(
+        HSASupport_Singleton::GetInstance().signals_timestamps_map_lock);
+    HSASupport_Singleton::GetInstance().signals_timestamps =
+        std::map<uint64_t, new_signal_timestamp_t>();
+  }
+
   rocprofiler::queue::CheckPacketReqiurements();
   SetHSALoaderApi();
 
@@ -1072,6 +1103,10 @@ void HSASupport_Singleton::HSAInitialize(HsaApiTable* table) {
       roctracer::hsa_support::AgentsAllowAccessIntercept;
   table->core_->hsa_executable_freeze_fn = roctracer::hsa_support::ExecutableFreezeIntercept;
   table->core_->hsa_executable_destroy_fn = roctracer::hsa_support::ExecutableDestroyIntercept;
+
+  table->amd_ext_->hsa_amd_profiling_get_dispatch_time_fn =
+      roctracer::hsa_support::GetDispatchTimestamps;
+  table->core_->hsa_signal_destroy_fn = roctracer::hsa_support::DestroySignal;
 
   // Install the HSA_API wrappers
   roctracer::hsa_support::detail::InstallCoreApiWrappers(table->core_);

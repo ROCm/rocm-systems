@@ -262,6 +262,22 @@ TEST_F(HelloWorldTest, WhenRunningTracerWithAppThenKernelDurationShouldBePositiv
   EXPECT_GT(current_kernel_info.size(), 0);
 }
 
+// Test:4 Compares end-time is greater than start-time in current
+// tracer output
+TEST_F(HelloWorldTest, WhenRunningTracerWithAppThenEndTimeIsGreaterThenStartTime) {
+  // kernel info in current profiler run
+  std::vector<tracer_kernel_info_t> current_kernel_info;
+
+  GetKernelInfoForRunningApplication(&current_kernel_info);
+  ASSERT_TRUE(current_kernel_info.size());
+
+  for (auto& itr : current_kernel_info) {
+    if (!(itr.begin_time).empty() && !(itr.end_time).empty()) {
+      EXPECT_GT(get_timestamp_value(itr.end_time), get_timestamp_value(itr.begin_time));
+    }
+  }
+}
+
 
 /*
  * ###################################################

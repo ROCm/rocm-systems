@@ -20,6 +20,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 #include "test_utils.h"
+#include <regex>
 
 namespace rocprofiler {
 namespace tests {
@@ -130,10 +131,6 @@ void tokenize_tracer_output(std::string line, tracer_kernel_info_t& kinfo) {
   std::getline(tokenStream, token, ',');
   kinfo.function = token;
   std::getline(tokenStream, token, ',');
-  kinfo.operation = token;
-  std::getline(tokenStream, token, ',');
-  kinfo.kernel_name = token;
-  std::getline(tokenStream, token, ',');
   kinfo.begin_time = token;
   std::getline(tokenStream, token, ',');
   kinfo.end_time = token;
@@ -144,6 +141,19 @@ void tokenize_tracer_output(std::string line, tracer_kernel_info_t& kinfo) {
   std::getline(tokenStream, token, ',');
   kinfo.roxtx_msg = token;
 }
+
+// get numeric value of timestamp token
+uint64_t get_timestamp_value(const std::string& str) {
+  std::regex pattern("(\\d+)");
+  std::smatch match;
+
+  if (regex_search(str, match, pattern)) {
+    return stoul(match[1]);
+  } else {
+    return -1;
+  }
+}
+
 
 }  // namespace utility
 }  // namespace tests

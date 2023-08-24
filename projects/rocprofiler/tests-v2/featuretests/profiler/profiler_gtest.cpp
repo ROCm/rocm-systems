@@ -281,7 +281,7 @@ TEST_F(HelloWorldTest, WhenRunningProfilerWithAppThenEndTimeIsGreaterThenStartTi
 
   for (auto& itr : current_kernel_info) {
     if (!(itr.begin_time).empty() && !(itr.end_time).empty()) {
-      EXPECT_GT(itr.end_time, itr.begin_time);
+      EXPECT_GT(get_timestamp_value(itr.end_time), get_timestamp_value(itr.begin_time));
     }
   }
 }
@@ -347,7 +347,7 @@ TEST_F(VectorAddTest, WhenRunningProfilerWithAppThenEndTimeIsGreaterThenStartTim
 
   for (auto& itr : current_kernel_info) {
     if (!(itr.begin_time).empty() && !(itr.end_time).empty()) {
-      EXPECT_GT(itr.end_time, itr.begin_time);
+      EXPECT_GT(get_timestamp_value(itr.end_time), get_timestamp_value(itr.begin_time));
     }
   }
 }

@@ -28,9 +28,11 @@
 #include <hsa/hsa_ven_amd_loader.h>
 
 #include <atomic>
+#include <cstdint>
 #include <string>
 #include <unordered_map>
 #include <memory>
+#include <optional>
 
 #include "rocprofiler.h"
 #include "src/core/hardware/hsa_info.h"
@@ -118,15 +120,20 @@ class HSAAgentInfo {
 
 
 struct queues_deleter {
-  queues_deleter() {};
-  queues_deleter(queues_deleter&) { };
-  void operator() (void * queue) const;
+  queues_deleter(){};
+  queues_deleter(queues_deleter&){};
+  void operator()(void* queue) const;
+};
+
+struct new_signal_timestamp_t {
+  hsa_signal_t new_signal;
+  std::optional<hsa_amd_profiling_dispatch_time_t> time;
 };
 
 class HSASupport_Singleton {
  private:
-  HSASupport_Singleton() {};
- ~HSASupport_Singleton() = delete;
+  HSASupport_Singleton(){};
+  ~HSASupport_Singleton() = delete;
   CoreApiTable saved_core_api;
   AmdExtTable saved_amd_ext_api;
   hsa_ven_amd_loader_1_01_pfn_t hsa_loader_api;
@@ -141,28 +148,29 @@ class HSASupport_Singleton {
   void SetHSALoaderApi();
 
  public:
- std::vector<hsa_agent_t> gpu_agents;
- HSAAgentInfo& GetHSAAgentInfo(uint64_t agent_handle);
- HSAAgentInfo& GetHSAAgentInfo(Agent::DeviceInfo device_info);
- Agent::DeviceInfo& GetDeviceInfo(HSAAgentInfo* agent_info);
- std::mutex kernel_names_map_lock;
- std::map<std::string, std::vector<uint64_t>>* kernel_names;
- std::mutex ksymbol_map_lock;
- std::map<uint64_t, std::string>* ksymbols;
- void SetHSAAgentInfo(hsa_agent_t agent, HSAAgentInfo hsa_agent_info);
- static HSASupport_Singleton& GetInstance();
- CoreApiTable& GetCoreApiTable();
- AmdExtTable& GetAmdExtTable();
- hsa_ven_amd_loader_1_01_pfn_t& GetHSALoaderApi();
- void AddQueue(hsa_queue_t* queue, std::unique_ptr<void, queues_deleter&>);
- void RemoveQueue(hsa_queue_t* queue);
- void HSAInitialize(HsaApiTable* Table);
- void HSAFinalize();
- void InitKsymbols();
- void FinitKsymbols();
- HSASupport_Singleton(const  HSASupport_Singleton&) = delete;
- HSASupport_Singleton& operator=(const  HSASupport_Singleton&) = delete;
-
+  std::vector<hsa_agent_t> gpu_agents;
+  HSAAgentInfo& GetHSAAgentInfo(uint64_t agent_handle);
+  HSAAgentInfo& GetHSAAgentInfo(Agent::DeviceInfo device_info);
+  Agent::DeviceInfo& GetDeviceInfo(HSAAgentInfo* agent_info);
+  std::mutex kernel_names_map_lock;
+  std::map<std::string, std::vector<uint64_t>>* kernel_names;
+  std::mutex ksymbol_map_lock;
+  std::map<uint64_t, std::string>* ksymbols;
+  std::mutex signals_timestamps_map_lock;
+  std::map<uint64_t, new_signal_timestamp_t> signals_timestamps;
+  void SetHSAAgentInfo(hsa_agent_t agent, HSAAgentInfo hsa_agent_info);
+  static HSASupport_Singleton& GetInstance();
+  CoreApiTable& GetCoreApiTable();
+  AmdExtTable& GetAmdExtTable();
+  hsa_ven_amd_loader_1_01_pfn_t& GetHSALoaderApi();
+  void AddQueue(hsa_queue_t* queue, std::unique_ptr<void, queues_deleter&>);
+  void RemoveQueue(hsa_queue_t* queue);
+  void HSAInitialize(HsaApiTable* Table);
+  void HSAFinalize();
+  void InitKsymbols();
+  void FinitKsymbols();
+  HSASupport_Singleton(const HSASupport_Singleton&) = delete;
+  HSASupport_Singleton& operator=(const HSASupport_Singleton&) = delete;
 };
 
 bool hsa_support_IterateCounters(rocprofiler_counters_info_callback_t counters_info_callback);
