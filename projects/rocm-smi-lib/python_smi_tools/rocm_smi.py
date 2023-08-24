@@ -785,8 +785,12 @@ def resetFans(deviceList):
     for device in deviceList:
         sensor_ind = c_uint32(0)
         ret = rocmsmi.rsmi_dev_fan_reset(device, sensor_ind)
-        if rsmi_ret_ok(ret, device, 'reset_fan'):
-            printLog(device, 'Successfully reset fan speed to driver control', None)
+        if (ret == rsmi_status_t.RSMI_STATUS_NOT_SUPPORTED) or (ret == rsmi_status_t.RSMI_STATUS_PERMISSION):
+            if not rsmi_ret_ok(rsmi_status_t.RSMI_STATUS_NOT_SUPPORTED, device, 'reset_fan'):
+                continue
+        else:
+            if rsmi_ret_ok(ret, device, 'reset_fan'):
+                printLog(device, 'Successfully reset fan speed to driver control', None)
     printLogSpacer()
 
 
