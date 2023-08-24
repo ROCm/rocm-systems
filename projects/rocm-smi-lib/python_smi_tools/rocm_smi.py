@@ -3077,7 +3077,7 @@ def showNumaTopology(deviceList):
     @param deviceList: List of DRM devices (can be a single-item list)
     """
     printLogSpacer(' Numa Nodes ')
-    numa_numbers = c_uint32()
+    numa_numbers = c_int32()
     for device in deviceList:
         ret = rocmsmi.rsmi_topo_get_numa_node_number(device, byref(numa_numbers))
         if rsmi_ret_ok(ret, device, 'get_numa_node_number'):

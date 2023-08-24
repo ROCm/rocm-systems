@@ -756,7 +756,7 @@ rsmi_dev_pci_id_get(uint32_t dv_ind, uint64_t *bdfid) {
 }
 
 rsmi_status_t
-rsmi_topo_numa_affinity_get(uint32_t dv_ind, uint32_t *numa_node) {
+rsmi_topo_numa_affinity_get(uint32_t dv_ind, int32_t *numa_node) {
   TRY
   rsmi_status_t ret;
   uint64_t val = 0;
@@ -764,9 +764,10 @@ rsmi_topo_numa_affinity_get(uint32_t dv_ind, uint32_t *numa_node) {
   CHK_SUPPORT_NAME_ONLY(numa_node)
 
   DEVICE_MUTEX
-  ret = get_dev_value_int(amd::smi::kDevNumaNode, dv_ind, &val);
+  std::string str_val;
+  ret = get_dev_value_str(amd::smi::kDevNumaNode, dv_ind, &str_val);
+  *numa_node = std::stol(str_val, 0);
 
-  *numa_node = static_cast<uint32_t>(val);
   return ret;
   CATCH
 }

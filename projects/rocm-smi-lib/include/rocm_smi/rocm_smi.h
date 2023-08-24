@@ -1534,7 +1534,7 @@ rsmi_status_t rsmi_dev_pci_id_get(uint32_t dv_ind, uint64_t *bdfid);
  *  support this function with the given arguments
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  */
-rsmi_status_t rsmi_topo_numa_affinity_get(uint32_t dv_ind, uint32_t *numa_node);
+rsmi_status_t rsmi_topo_numa_affinity_get(uint32_t dv_ind, int32_t *numa_node);
 
 /**
  *  @brief Get PCIe traffic information
