@@ -35,6 +35,7 @@ import pandas as pd
 from datetime import datetime
 from pathlib import Path as path
 import warnings
+import shutil
 
 from parser import parse
 from utils import specs
@@ -438,10 +439,8 @@ def characterize_app(args, VER):
 def run_rocscope(args, fname):
     # profile the app
     if args.use_rocscope == True:
-        result = subprocess.run(
-            ["which", "rocscope"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
-        )
-        if result.returncode == 0:
+        result = shutil.which("rocscope")
+        if result:
             rs_cmd = [
                 result.stdout.decode("ascii").strip(),
                 "metrics",
@@ -553,10 +552,8 @@ def omniperf_profile(args, VER):
             print(e)
             sys.exit(1)
 
-        result = subprocess.run(
-            ["which", "rocscope"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
-        )
-        if result.returncode == 0:
+        result = shutil.which("rocscope")
+        if result:
             rs_cmd = [
                 result.stdout.decode("ascii").strip(),
                 "top10",
@@ -587,10 +584,8 @@ def omniperf_profile(args, VER):
             print(e)
             sys.exit(1)
 
-        result = subprocess.run(
-            ["which", "rocscope"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
-        )
-        if result.returncode == 0:
+        result = shutil.which("rocscope")
+        if result:
             rs_cmd = [
                 result.stdout.decode("ascii").strip(),
                 "summary",

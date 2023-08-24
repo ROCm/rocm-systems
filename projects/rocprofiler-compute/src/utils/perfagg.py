@@ -22,7 +22,7 @@
 # SOFTWARE.
 ##############################################################################el
 
-import sys, os, pathlib, shutil, subprocess, argparse, glob, re
+import sys, os, shutil, glob, re
 import numpy as np
 import math
 import warnings

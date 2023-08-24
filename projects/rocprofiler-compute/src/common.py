@@ -44,10 +44,9 @@ def resolve_rocprof(returnPath=False):
     else:
         rocprof_cmd = os.environ["ROCPROF"]
 
-    rocprof_path = subprocess.run(
-        ["which", rocprof_cmd], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
-    )
-    if rocprof_path.returncode != 0:
+    rocprof_path = shutil.which(rocprof_cmd)
+
+    if not rocprof_path:
         print("\nError: Unable to resolve path to %s binary" % rocprof_cmd)
         print(
             "Please verify installation or set ROCPROF environment variable with full path."
@@ -55,7 +54,7 @@ def resolve_rocprof(returnPath=False):
         sys.exit(1)
     else:
         # Resolve any sym links in file path
-        rocprof_path = os.path.realpath(rocprof_path.stdout.decode("utf-8").rstrip("\n"))
+        rocprof_path = os.path.realpath(rocprof_path.rstrip("\n"))
         print("ROC Profiler: ", rocprof_path)
         if returnPath:
             return rocprof_path
