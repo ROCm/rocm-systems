@@ -1,22 +1,22 @@
 
-#include <rocprofiler/rocprofiler.h>
 #include <rocprofiler/config.h>
+#include <rocprofiler/rocprofiler.h>
 
 #include "config_helpers.hpp"
 #include "config_internal.hpp"
 
-#include <atomic>
-#include <cstddef>
 #include <roctracer/roctx.h>
 #include <sys/syscall.h>
 #include <unistd.h>
-#include <mutex>
+#include <atomic>
+#include <cstddef>
 #include <iostream>
+#include <mutex>
 
 #include <hsa/hsa.h>
+#include <hsa/hsa_api_trace.h>
 #include <hsa/hsa_ext_amd.h>
 #include <hsa/hsa_ext_image.h>
-#include <hsa/hsa_api_trace.h>
 
 typedef enum
 {

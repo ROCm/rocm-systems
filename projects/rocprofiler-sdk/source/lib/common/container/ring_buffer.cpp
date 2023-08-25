@@ -22,11 +22,11 @@
 
 #include "ring_buffer.hpp"
 
+#include <sys/mman.h>
 #include <cerrno>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <sys/mman.h>
 
 namespace rocprofiler
 {

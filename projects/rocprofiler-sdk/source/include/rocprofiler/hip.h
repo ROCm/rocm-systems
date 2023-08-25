@@ -22,8 +22,8 @@
 
 #pragma once
 
-#include <rocprofiler/hip/api_id.h>
 #include <rocprofiler/hip/api_args.h>
+#include <rocprofiler/hip/api_id.h>
 
 #include <stdint.h>
 

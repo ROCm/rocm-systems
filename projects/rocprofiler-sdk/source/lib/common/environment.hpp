@@ -22,6 +22,7 @@
 
 #include "lib/common/log.hpp"
 
+#include <unistd.h>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -30,7 +31,6 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
-#include <unistd.h>
 
 #if !defined(ROCPROFILER_ENVIRON_LOG_NAME)
 #    if defined(ROCPROFILER_COMMON_LIBRARY_NAME)

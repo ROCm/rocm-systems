@@ -24,6 +24,7 @@
 
 #include "lib/common/environment.hpp"
 
+#include <unistd.h>
 #include <cctype>
 #include <cstdint>
 #include <cstdlib>
@@ -31,7 +32,6 @@
 #include <string>
 #include <tuple>
 #include <unordered_set>
-#include <unistd.h>
 
 namespace rocprofiler
 {

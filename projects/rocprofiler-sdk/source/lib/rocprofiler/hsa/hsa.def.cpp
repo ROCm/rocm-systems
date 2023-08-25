@@ -20,8 +20,8 @@
 
 #include <rocprofiler/hsa.h>
 
-#include "hsa.hpp"
 #include "defines.hpp"
+#include "hsa.hpp"
 
 // clang-format off
 HSA_API_TABLE_LOOKUP_DEFINITION(ROCPROFILER_HSA_API_TABLE_ID_CoreApi, core_)

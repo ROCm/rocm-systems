@@ -21,16 +21,16 @@
 // SOFTWARE.
 
 #include "atomic_ring_buffer.hpp"
-#include "lib/common/units.hpp"
 #include "lib/common/environment.hpp"
+#include "lib/common/units.hpp"
 
+#include <sys/mman.h>
 #include <cerrno>
+#include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <cstdint>
-#include <cstddef>
-#include <sys/mman.h>
 
 namespace rocprofiler
 {

@@ -22,8 +22,8 @@
 
 #include <rocprofiler/rocprofiler.h>
 
-#include <vector>
 #include <algorithm>
+#include <vector>
 
 namespace
 {

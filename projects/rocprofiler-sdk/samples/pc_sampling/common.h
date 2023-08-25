@@ -3,10 +3,10 @@
 
 #include <rocprofiler/rocprofiler.h>
 
-#include <cstdio>
-#include <cstdlib>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 
 constexpr size_t BUFFER_SIZE_BYTES = 4096;
 constexpr size_t WATERMARK         = (BUFFER_SIZE_BYTES / 2);

@@ -22,9 +22,9 @@
 
 #pragma once
 
+#include <rocprofiler/hsa/api_args.h>
 #include <rocprofiler/hsa/api_id.h>
 #include <rocprofiler/hsa/table_api_id.h>
-#include <rocprofiler/hsa/api_args.h>
 
 #include <hsa/hsa.h>
 

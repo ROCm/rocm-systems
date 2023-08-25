@@ -21,20 +21,20 @@
 
 #include "lib/common/config.hpp"
 #include "lib/common/environment.hpp"
+#include "lib/common/helper.hpp"
 #include "lib/common/join.hpp"
 #include "lib/common/log.hpp"
-#include "lib/common/helper.hpp"
 
 #include <unistd.h>
+#include <algorithm>
 #include <cstring>
+#include <ctime>
+#include <filesystem>
+#include <fstream>
+#include <regex>
+#include <sstream>
 #include <string>
 #include <vector>
-#include <ctime>
-#include <sstream>
-#include <fstream>
-#include <algorithm>
-#include <regex>
-#include <filesystem>
 
 namespace rocprofiler
 {

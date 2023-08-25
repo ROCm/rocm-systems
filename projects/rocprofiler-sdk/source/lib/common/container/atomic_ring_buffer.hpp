@@ -22,12 +22,14 @@
 
 #pragma once
 
-#include "lib/common/units.hpp"
 #include "lib/common/environment.hpp"
+#include "lib/common/units.hpp"
 
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <cstddef>
+#include <cstdlib>
 #include <fstream>
 #include <functional>
 #include <iomanip>
@@ -36,8 +38,6 @@
 #include <stdexcept>
 #include <utility>
 #include <vector>
-#include <cstddef>
-#include <cstdlib>
 
 namespace rocprofiler
 {

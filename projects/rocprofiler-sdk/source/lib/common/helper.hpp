@@ -20,15 +20,15 @@
 
 #pragma once
 
-#include <cstdio>
+#include <cxxabi.h>
+#include <algorithm>
 #include <cstdarg>
+#include <cstdio>
 #include <iomanip>
 #include <iostream>
 #include <sstream>
 #include <string>
 #include <vector>
-#include <algorithm>
-#include <cxxabi.h>
 
 namespace rocprofiler
 {
