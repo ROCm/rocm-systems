@@ -57,7 +57,13 @@ $BLACKLIST_ALL_ASICS\
 "rsmitstReadWrite.TestPerfLevelReadWrite"
 
 # SWDEV-391407
-FILTER[aqua_vanjaram]=\
+FILTER[90400]=\
+$BLACKLIST_ALL_ASICS\
+"rsmitstReadOnly.TestVoltCurvRead:"\
+"rsmitstReadOnly.TestFrequenciesRead:"\
+"rsmitstReadWrite.TestFrequenciesReadWrite:"\
+"rsmitstReadWrite.TestPowerReadWrite"
+FILTER[90401]=\
 $BLACKLIST_ALL_ASICS\
 "rsmitstReadOnly.TestVoltCurvRead:"\
 "rsmitstReadOnly.TestFrequenciesRead:"\

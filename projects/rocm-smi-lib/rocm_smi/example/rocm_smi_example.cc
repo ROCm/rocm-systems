@@ -577,7 +577,7 @@ static rsmi_status_t test_set_freq(uint32_t dv_ind) {
 static void print_frequencies(rsmi_frequencies_t *f) {
   assert(f != nullptr);
   for (uint32_t j = 0; j < f->num_supported; ++j) {
-    std::cout << "\t**  " << j << ": " << f->frequency[j];
+    std::cout << "\t**  " << j << ": " << std::to_string(f->frequency[j]);
     if (j == f->current) {
       std::cout << " *";
     }
@@ -775,6 +775,14 @@ int main() {
     CHK_AND_PRINT_RSMI_ERR_RET(ret)
     std::cout << "\t**Supported GPU clock frequencies: ";
     std::cout << f.num_supported << std::endl;
+    print_frequencies(&f);
+
+    ret = rsmi_dev_gpu_clk_freq_get(i, RSMI_CLK_TYPE_SOC, &f);
+    CHK_RSMI_NOT_SUPPORTED_OR_UNEXPECTED_DATA_RET(ret)
+    std::cout << "\t**Supported GPU clock frequencies (SOC clk): ";
+    std::cout << f.num_supported << std::endl;
+    std::cout << "\t**Current value (SOC clk): ";
+    std::cout << f.current << std::endl;
     print_frequencies(&f);
 
     std::cout << "\t**Monitor name: ";

@@ -1065,6 +1065,8 @@ static rsmi_status_t get_frequencies(amd::smi::DevInfoTypes type, rsmi_clk_type_
   if (f == nullptr) {
     return RSMI_STATUS_INVALID_ARGS;
   }
+  memset(f, 0, sizeof(rsmi_frequencies_t));
+  f->current=0;
 
   ret = GetDevValueVec(type, dv_ind, &val_vec);
   if (ret != RSMI_STATUS_SUCCESS) {
@@ -1114,6 +1116,7 @@ static rsmi_status_t get_frequencies(amd::smi::DevInfoTypes type, rsmi_clk_type_
   // assert(f->current < f->num_supported);
   if (f->current >= f->num_supported) {
       f->current = -1;
+      return RSMI_STATUS_UNEXPECTED_DATA;
   }
 
   return RSMI_STATUS_SUCCESS;
@@ -1748,7 +1751,7 @@ rsmi_dev_gpu_clk_freq_set(uint32_t dv_ind,
 
   TRY
   std::ostringstream ss;
-  ss << __PRETTY_FUNCTION__ << "| ======= start =======";
+  ss << __PRETTY_FUNCTION__ << " | ======= start =======";
   LOG_TRACE(ss);
   REQUIRE_ROOT_ACCESS
   DEVICE_MUTEX
@@ -3077,6 +3080,14 @@ rsmi_dev_memory_total_get(uint32_t dv_ind, rsmi_memory_type_t mem_type,
   DEVICE_MUTEX
   ret = get_dev_value_int(mem_type_file, dv_ind, total);
 
+  // Fallback to KFD reported memory if VRAM total is 0
+  if (mem_type == RSMI_MEM_TYPE_VRAM && *total == 0) {
+    GET_DEV_AND_KFDNODE_FROM_INDX
+    if (kfd_node->get_total_memory(total) == 0 && *total > 0) {
+      return RSMI_STATUS_SUCCESS;
+    }
+  }
+
   return ret;
   CATCH
 }
@@ -3112,6 +3123,17 @@ rsmi_dev_memory_usage_get(uint32_t dv_ind, rsmi_memory_type_t mem_type,
 
   DEVICE_MUTEX
   ret = get_dev_value_int(mem_type_file, dv_ind, used);
+
+  // Fallback to KFD reported memory if no VRAM
+  if (mem_type == RSMI_MEM_TYPE_VRAM && *used == 0) {
+    GET_DEV_AND_KFDNODE_FROM_INDX
+    uint64_t total = 0;
+    ret = get_dev_value_int(amd::smi::kDevMemTotVRAM, dv_ind, &total);
+    if (total != 0) return ret;  // do not need to fallback
+    if ( kfd_node->get_used_memory(used) == 0 ) {
+      return RSMI_STATUS_SUCCESS;
+    }
+  }
 
   return ret;
   CATCH
@@ -3231,8 +3253,9 @@ rsmi_status_string(rsmi_status_t status, const char **status_string) {
       break;
 
     case RSMI_STATUS_UNEXPECTED_DATA:
-      *status_string = "RSMI_STATUS_UNEXPECTED_DATA: Data (usually from reading"
-                       " a file) was not of the type that was expected";
+      *status_string = "RSMI_STATUS_UNEXPECTED_DATA: Data read (usually from "
+                       "a file) or provided to function is "
+                       "not what was expected";
       break;
 
     case RSMI_STATUS_BUSY:

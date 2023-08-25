@@ -43,6 +43,9 @@
 
 #include <assert.h>
 #include <sys/stat.h>
+#include <sys/ioctl.h>
+#include <unistd.h>
+#include <fcntl.h>
 #include <dirent.h>
 
 #include <algorithm>
@@ -769,6 +772,95 @@ KFDNode::get_io_link_bandwidth(uint32_t node_to, uint64_t *max_bandwidth,
   *min_bandwidth = io_link_min_bandwidth_[node_to];
 
   return 0;
+}
+// /sys/class/kfd/kfd/topology/nodes/*/mem_banks/*/properties
+// size_in_bytes 68702699520
+int KFDNode::get_total_memory(uint64_t* total) {
+  if (total == nullptr) return EINVAL;
+  *total = 0;
+
+  std::string f_path  = kKFDNodesPathRoot;
+  f_path += "/";
+  f_path += std::to_string(node_indx_);
+  f_path += "/mem_banks";
+
+  auto kfd_node_dir = opendir(f_path.c_str());
+  if (kfd_node_dir == nullptr) {
+    return errno;
+  }
+  auto dentry = readdir(kfd_node_dir);
+  while (dentry != nullptr) {
+    if (dentry->d_name[0] == '.') {
+      dentry = readdir(kfd_node_dir);
+      continue;
+    }
+
+    if (!is_number(dentry->d_name)) {
+      dentry = readdir(kfd_node_dir);
+      continue;
+    }
+
+    // read "size_in_bytes 68702699520" line
+    const std::string size_in_bytes_property = "size_in_bytes ";
+    std::string memory_bank_file = f_path + "/"
+                  + dentry->d_name + "/properties";
+    std::ifstream fs(memory_bank_file);
+    if (!fs) {
+      dentry = readdir(kfd_node_dir);
+      continue;
+    }
+    std::string line;
+    while (std::getline(fs, line)) {
+      if (line.substr(0, size_in_bytes_property.length())
+           == size_in_bytes_property) {
+          auto bytes = line.substr(size_in_bytes_property.length());
+          try {
+            *total += std::stol(bytes);
+            break;
+          } catch(...) {
+            dentry = readdir(kfd_node_dir);
+            continue;
+          }
+      }
+    }  // end loop for lines in property file
+  }  // end loop for mem_bank directory
+
+  if (closedir(kfd_node_dir)) {
+    std::string err_str = "Failed to close KFD node directory ";
+    err_str += f_path;
+    err_str += ".";
+    perror(err_str.c_str());
+    return 1;
+  }
+  return 0;
+}
+
+// ioctl on kfd node device
+int KFDNode::get_used_memory(uint64_t* used) {
+  if (used == nullptr) return EINVAL;
+  static const char *kPathKFDIoctl = "/dev/kfd";
+
+  int kfd_fd = open(kPathKFDIoctl, O_RDWR | O_CLOEXEC);
+  if (kfd_fd <= 0) {
+      return 1;
+  }
+  struct kfd_ioctl_get_available_memory_args mem = {0, 0, 0};
+  mem.gpu_id = gpu_id_;
+  if (ioctl(kfd_fd, AMDKFD_IOC_AVAILABLE_MEMORY , &mem) != 0) {
+    close(kfd_fd);
+    return 1;
+  }
+  close(kfd_fd);
+
+  // used = total - available
+  uint64_t total = 0;
+  int ret = get_total_memory(&total);
+  if (ret == 0 && total > 0 && mem.available < total) {
+    *used = total - mem.available;
+    return 0;
+  }
+
+  return 1;
 }
 
 }  // namespace smi

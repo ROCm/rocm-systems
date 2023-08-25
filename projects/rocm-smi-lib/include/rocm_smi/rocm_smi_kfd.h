@@ -80,6 +80,10 @@ class KFDNode {
     uint32_t amdgpu_dev_index(void) const {return amdgpu_dev_index_;}
     void set_amdgpu_dev_index(uint32_t val) {amdgpu_dev_index_ = val;}
 
+    // Get memory from kfd
+    int get_total_memory(uint64_t* total);
+    int get_used_memory(uint64_t* used);
+
  private:
     uint32_t node_indx_;
     uint32_t amdgpu_dev_index_;
