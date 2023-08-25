@@ -595,7 +595,6 @@ bool ATTCollection::bCollected = false;
 TEST_F(ATTCollection, WhenRunningATTItCollectsTraceDataWithOldAPI) {
   // iterate for gpu's
   struct agent_info {
-    bool skip = false;
     std::vector<std::string> agents = {};
 
     auto as_string() const {
@@ -615,14 +614,9 @@ TEST_F(ATTCollection, WhenRunningATTItCollectsTraceDataWithOldAPI) {
         char gpu_name[64] = {'\0'};
         hsa_agent_get_info(agent, HSA_AGENT_INFO_NAME, gpu_name);
         _info_v->agents.emplace_back(std::string{gpu_name});
-        if (std::regex_search(_info_v->agents.back(), std::regex{"^gfx1[0-1][0-9][0-9]"})) {
-          _info_v->skip = true;
-        }
         return HSA_STATUS_SUCCESS;
       },
       static_cast<void*>(&_info));
-
-  if (_info.skip) GTEST_SKIP();
 
   int result = ROCPROFILER_STATUS_ERROR;
 
@@ -692,7 +686,6 @@ TEST_F(ATTCollection, WhenRunningATTItCollectsTraceDataWithOldAPI) {
 TEST_F(ATTCollection, WhenRunningATTItCollectsTraceDataWithNewAPI) {
   // iterate for gpu's
   struct agent_info {
-    bool skip = false;
     std::vector<std::string> agents = {};
 
     auto as_string() const {
@@ -712,14 +705,9 @@ TEST_F(ATTCollection, WhenRunningATTItCollectsTraceDataWithNewAPI) {
         char gpu_name[64] = {'\0'};
         hsa_agent_get_info(agent, HSA_AGENT_INFO_NAME, gpu_name);
         _info_v->agents.emplace_back(std::string{gpu_name});
-        if (std::regex_search(_info_v->agents.back(), std::regex{"^gfx1[0-1][0-9][0-9]"})) {
-          _info_v->skip = true;
-        }
         return HSA_STATUS_SUCCESS;
       },
       static_cast<void*>(&_info));
-
-  if (_info.skip) GTEST_SKIP();
 
   int result = ROCPROFILER_STATUS_ERROR;
   // inititalize ROCProfiler
