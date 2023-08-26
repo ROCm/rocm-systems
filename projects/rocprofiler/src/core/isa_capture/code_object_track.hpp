@@ -50,8 +50,6 @@ class codeobj_capture_instance {
   static void Load(uint64_t addr, const std::string& URI, uint64_t mem_addr, uint64_t mem_size);
   static void Unload(uint64_t addr);
 
-  static std::unordered_map<uint64_t, std::shared_ptr<codeobj_capture_instance>> codeobjs;
-
  private:
   void reset(rocprofiler_codeobj_capture_mode_t mode);
 
@@ -68,10 +66,7 @@ class codeobj_capture_instance {
   uint64_t mem_addr;
   uint64_t mem_size;
   uint64_t end_time = 0;
-  rocprofiler_codeobj_capture_mode_t capture_mode;
-
-  // Address -> codeobj
-  static std::mutex mutex;
+  int capture_mode = -1;
 };
 
 typedef std::shared_ptr<codeobj_capture_instance> CodeobjPtr;
@@ -112,6 +107,7 @@ class codeobj_record {
 
   static std::unordered_set<codeobj_record*> listeners;
   static std::mutex mutex;
+  static std::unordered_map<uint64_t, CodeobjPtr> codeobjs;
 
  private:
   rocprofiler_codeobj_symbols_t get(uint64_t userdata) {
