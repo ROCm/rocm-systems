@@ -1594,7 +1594,9 @@ def showAllConcise(deviceList):
 
     printLogSpacer(' Concise Info ')
     deviceList.sort()
-    (temp_type, _) = findFirstAvailableTemp(deviceList[0])
+    temp_type = '(' + temp_type_lst[0] + ')'
+    if len(deviceList) >= 1:
+        (temp_type, _) = findFirstAvailableTemp(deviceList[0])
     available_temp_type = temp_type.lower()
     available_temp_type = available_temp_type.replace('(', '')
     available_temp_type = available_temp_type.replace(')', '')
@@ -1843,7 +1845,8 @@ def showCurrentClocks(deviceList, clk_defined=None, concise=False):
                     printLog(device, 'pcie clock level', '{} ({})'.format(current_f, fr))
             else:
                 logging.debug('PCIe clock is unsupported on device[{}]'.format(device))
-    printLogSpacer()
+    if not concise:
+        printLogSpacer()
 
 
 def showCurrentFans(deviceList):
@@ -2786,7 +2789,9 @@ def getGraphColor(percentage):
 
 def showTempGraph(deviceList):
     deviceList.sort()
-    (temp_type, temp_value) = findFirstAvailableTemp(deviceList[0])
+    temp_type = '(' + temp_type_lst[0] + ')'
+    if len(deviceList) >= 1:
+        (temp_type, _) = findFirstAvailableTemp(deviceList[0])
     printLogSpacer(' Temperature Graph ' + temp_type + ' ')
     temp_type = temp_type.lower()
     temp_type = temp_type.replace('(', '')

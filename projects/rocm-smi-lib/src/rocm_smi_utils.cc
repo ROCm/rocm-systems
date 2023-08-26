@@ -40,12 +40,17 @@
  * DEALINGS WITH THE SOFTWARE.
  *
  */
-
+#define _GNU_SOURCE 1 // REQUIRED: to utilize some GNU features/functions, see
+                      // _GNU_SOURCE functions which check
+#include <assert.h>
+#include <errno.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #include <dirent.h>
 #include <glob.h>
 #include <sys/stat.h>
 #include <sys/utsname.h>
-#include <unistd.h>
+#include <dlfcn.h>
 
 #include <algorithm>
 #include <cassert>
@@ -612,7 +617,8 @@ std::string getRSMIStatusString(rsmi_status_t ret) {
 // Big Endian (BE), multi-bit symbols encoded as big endian (MSB first)
 // Little Endian (LE), multi-bit symbols encoded as little endian (LSB first)
 std::tuple<bool, std::string, std::string, std::string, std::string,
-           std::string, std::string, std::string, std::string>
+           std::string, std::string, std::string, std::string,
+           std::string, std::string, std::string>
            getSystemDetails(void) {
   struct utsname buf;
   bool errorDetected = false;
@@ -625,6 +631,9 @@ std::tuple<bool, std::string, std::string, std::string, std::string,
   std::string domainName = "<undefined>";
   std::string os_distribution = "<undefined>";
   std::string endianness = "<undefined>";
+  std::string rocm_lib_path = "<undefined>";
+  std::string rocm_build_type = "<undefined>";
+  std::string rocm_env_variables = "<undefined>";
 
   if (uname(&buf) < 0) {
     errorDetected = true;
@@ -659,9 +668,13 @@ std::tuple<bool, std::string, std::string, std::string, std::string,
     endianness = "Little Endian, multi-bit symbols encoded as"
                  " little endian (LSB first)";
   }
+  rocm_build_type = getBuildType();
+  rocm_lib_path = getMyLibPath();
+  rocm_env_variables = RocmSMI::getInstance().getRSMIEnvVarInfo();
   return std::make_tuple(errorDetected, sysname, nodename, release,
                          version, machine, domainName, os_distribution,
-                         endianness);
+                         endianness, rocm_build_type, rocm_lib_path,
+                         rocm_env_variables);
 }
 
 // If logging is enabled through RSMI_LOGGING environment variable.
@@ -669,17 +682,12 @@ std::tuple<bool, std::string, std::string, std::string, std::string,
 void logSystemDetails(void) {
   std::ostringstream ss;
   bool errorDetected;
-  std::string sysname;
-  std::string node;
-  std::string release;
-  std::string version;
-  std::string machine;
-  std::string domain;
-  std::string distName;
-  std::string endianness;
+  std::string sysname, node, release, version, machine, domain, distName,
+              endianness, rocm_build_type, lib_path, rocm_env_vars;
   std::tie(errorDetected, sysname, node, release, version, machine, domain,
-           distName, endianness) = getSystemDetails();
-  if (!errorDetected) {
+           distName, endianness, rocm_build_type, lib_path,
+           rocm_env_vars) = getSystemDetails();
+  if (errorDetected == false) {
     ss << "====== Gathered system details ============\n"
        << "SYSTEM NAME: " << sysname << "\n"
        << "OS DISTRIBUTION: " << distName << "\n"
@@ -688,7 +696,10 @@ void logSystemDetails(void) {
        << "VERSION: " << version << "\n"
        << "MACHINE TYPE: " << machine << "\n"
        << "DOMAIN: " << domain << "\n"
-       << "ENDIANNESS: " << endianness << "\n";
+       << "ENDIANNESS: " << endianness << "\n"
+       << "ROCM BUILD TYPE: " << rocm_build_type << "\n"
+       << "ROCM-SMI-LIB PATH: " << lib_path << "\n"
+       << "ROCM ENV VARIABLES: " << rocm_env_vars << "\n";
     LOG_INFO(ss);
   } else {
     ss << "====== Gathered system details ============\n"
@@ -786,6 +797,36 @@ bool isSystemBigEndian() {
   return isBigEndian;
 }
 
+std::string getBuildType() {
+  std::string build = "<unknown>";
+#ifndef DEBUG
+  build = "release";
+#else
+  build = "debug";
+#endif
+  return build;
+}
+
+const char *my_fname(void) {
+std::string emptyRet="";
+#ifdef _GNU_SOURCE
+  Dl_info dl_info;
+  dladdr((void *)my_fname, &dl_info);
+  return (dl_info.dli_fname);
+#else
+  return emptyRet.c_str();
+#endif
+}
+
+std::string getMyLibPath(void) {
+  std::string libName = "rocm-smi-lib";
+  std::string path = std::string(my_fname());
+  if (path.empty()) {
+    path = "Could not find library path for " + libName;
+  }
+  return path;
+}
+
 rsmi_status_t getBDFString(uint64_t bdf_id, std::string& bfd_str)
 {
   auto result = rsmi_status_t::RSMI_STATUS_SUCCESS;
@@ -807,6 +848,35 @@ rsmi_status_t getBDFString(uint64_t bdf_id, std::string& bfd_str)
   return result;
 }
 
+int subDirectoryCountInPath(const std::string path) {
+  int dir_count = 0;
+  struct dirent *dent;
+  DIR *srcdir = opendir(path.c_str());
+
+  if (srcdir == NULL) {
+    perror("opendir");
+    return -1;
+  }
+
+  while ((dent = readdir(srcdir)) != NULL) {
+    struct stat st;
+
+    if (strcmp(dent->d_name, ".") == 0 || strcmp(dent->d_name, "..") == 0) {
+      continue;
+    }
+
+    if (fstatat(dirfd(srcdir), dent->d_name, &st, 0) < 0) {
+      perror(dent->d_name);
+      continue;
+    }
+
+    if (S_ISDIR(st.st_mode)) {
+      dir_count++;
+    }
+  }
+  closedir(srcdir);
+  return dir_count;
+}
 
 }  // namespace smi
 }  // namespace amd

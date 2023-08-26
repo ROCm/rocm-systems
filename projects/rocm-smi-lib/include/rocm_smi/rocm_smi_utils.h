@@ -99,13 +99,17 @@ GetDevBinaryBlob(amd::smi::DevInfoTypes type,
 rsmi_status_t ErrnoToRsmiStatus(int err);
 std::string getRSMIStatusString(rsmi_status_t ret);
 std::tuple<bool, std::string, std::string, std::string, std::string,
-           std::string, std::string, std::string, std::string>
+           std::string, std::string, std::string, std::string,
+           std::string, std::string, std::string>
            getSystemDetails(void);
 void logSystemDetails(void);
 rsmi_status_t getBDFString(uint64_t bdf_id, std::string& bfd_str);
 void logHexDump(const char *desc, const void *addr, const size_t len,
              size_t perLine);
 bool isSystemBigEndian();
+std::string getBuildType();
+std::string getMyLibPath();
+int subDirectoryCountInPath(const std::string path);
 template <typename T>
 std::string print_int_as_hex(T i, bool showHexNotation=true) {
   std::stringstream ss;

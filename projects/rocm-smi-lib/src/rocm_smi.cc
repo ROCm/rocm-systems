@@ -2991,10 +2991,24 @@ rsmi_dev_memory_total_get(uint32_t dv_ind, rsmi_memory_type_t mem_type,
   if (mem_type == RSMI_MEM_TYPE_VRAM && *total == 0) {
     GET_DEV_AND_KFDNODE_FROM_INDX
     if (kfd_node->get_total_memory(total) == 0 && *total > 0) {
+      ss << __PRETTY_FUNCTION__
+         << " | inside success fallback... "
+         << " | Device #: " << std::to_string(dv_ind)
+         << " | Type = " << RocmSMI::devInfoTypesStrings.at(mem_type_file)
+         << " | Data: total = " << std::to_string(*total)
+         << " | ret = " << getRSMIStatusString(RSMI_STATUS_SUCCESS);
+      LOG_DEBUG(ss);
       return RSMI_STATUS_SUCCESS;
     }
   }
 
+  ss << __PRETTY_FUNCTION__
+     << " | after fallback... "
+     << " | Device #: " << std::to_string(dv_ind)
+     << " | Type = " << RocmSMI::devInfoTypesStrings.at(mem_type_file)
+     << " | Data: total = " << std::to_string(*total)
+     << " | ret = " << getRSMIStatusString(ret);
+  LOG_DEBUG(ss);
   return ret;
   CATCH
 }
@@ -3036,11 +3050,36 @@ rsmi_dev_memory_usage_get(uint32_t dv_ind, rsmi_memory_type_t mem_type,
     GET_DEV_AND_KFDNODE_FROM_INDX
     uint64_t total = 0;
     ret = get_dev_value_int(amd::smi::kDevMemTotVRAM, dv_ind, &total);
-    if (total != 0) return ret;  // do not need to fallback
+    if (total != 0) {
+      ss << __PRETTY_FUNCTION__
+         << " no fallback needed! - "
+         << " | Device #: " << std::to_string(dv_ind)
+         << " | Type = " << RocmSMI::devInfoTypesStrings.at(mem_type_file)
+         << " | Data: Used = " << std::to_string(*used)
+         << " | Data: total = " << std::to_string(total)
+         << " | ret = " << getRSMIStatusString(ret);
+    LOG_DEBUG(ss);
+      return ret;  // do not need to fallback
+    }
     if ( kfd_node->get_used_memory(used) == 0 ) {
+      ss << __PRETTY_FUNCTION__
+         << " | in fallback == success ..."
+         << " | Device #: " << std::to_string(dv_ind)
+         << " | Type = " << RocmSMI::devInfoTypesStrings.at(mem_type_file)
+         << " | Data: Used = " << std::to_string(*used)
+         << " | Data: total = " << std::to_string(total)
+         << " | ret = " << getRSMIStatusString(RSMI_STATUS_SUCCESS);
+      LOG_DEBUG(ss);
       return RSMI_STATUS_SUCCESS;
     }
   }
+  ss << __PRETTY_FUNCTION__
+     << " | at end!!!! after fallback ..."
+     << " | Device #: " << std::to_string(dv_ind)
+     << " | Type = " << RocmSMI::devInfoTypesStrings.at(mem_type_file)
+     << " | Data: Used = " << std::to_string(*used)
+     << " | ret = " << getRSMIStatusString(ret);
+  LOG_DEBUG(ss);
 
   return ret;
   CATCH

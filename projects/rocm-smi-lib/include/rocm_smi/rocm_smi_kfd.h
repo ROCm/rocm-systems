@@ -118,6 +118,10 @@ GetProcessGPUs(uint32_t pid, std::unordered_set<uint64_t> *gpu_count);
 int
 ReadKFDDeviceProperties(uint32_t dev_id, std::vector<std::string> *retVec);
 
+int read_node_properties(uint32_t node, std::string property_name,
+                         uint64_t *val);
+int get_gpu_id(uint32_t node, uint64_t *gpu_id);
+
 }  // namespace smi
 }  // namespace amd
 

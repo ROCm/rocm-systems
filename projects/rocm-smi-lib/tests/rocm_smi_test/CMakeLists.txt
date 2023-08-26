@@ -67,7 +67,8 @@ target_link_libraries(
     PUBLIC GTest::gtest_main
     PUBLIC c
     PUBLIC stdc++
-    PUBLIC pthread)
+    PUBLIC pthread
+    PUBLIC dl)
 
 install(TARGETS ${RSMITST} gtest gtest_main
     DESTINATION ${SHARE_INSTALL_PREFIX}/rsmitst_tests
