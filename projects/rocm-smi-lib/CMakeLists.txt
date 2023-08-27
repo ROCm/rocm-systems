@@ -110,7 +110,7 @@ else ()
     set(CMAKE_CXX_FLAGS
       "${CMAKE_CXX_FLAGS} -Wl,-z,noexecstack -Wl,-znoexecheap -Wl,-z,relro ")
     set(CMAKE_CXX_FLAGS
-      "${CMAKE_CXX_FLAGS} -Wtrampolines -Wl,-z,now -fPIE")
+      "${CMAKE_CXX_FLAGS} -Wtrampolines -Wl,-z,now")
 endif ()
 
 # Use this instead of above for 32 bit
