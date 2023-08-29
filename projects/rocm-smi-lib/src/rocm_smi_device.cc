@@ -593,7 +593,6 @@ int Device::openSysfsFileStream(DevInfoTypes type, T *fs, const char *str) {
   bool reg_file;
 
   int ret = isRegularFile(sysfs_path, &reg_file);
-
   if (ret != 0) {
     ss << "File did not exist - SYSFS file (" << sysfs_path
        << ") for DevInfoInfoType (" << RocmSMI::devInfoTypesStrings.at(type)
@@ -804,7 +803,8 @@ int Device::readDevInfoBinary(DevInfoTypes type, std::size_t b_size,
   FILE *ptr;
   sysfs_path += "/device/";
   sysfs_path += kDevAttribNameMap.at(type);
-  ptr  = fopen(sysfs_path.c_str(), "rb");
+
+  ptr = fopen(sysfs_path.c_str(), "rb");
   if (!ptr) {
     ss << "Could not read DevInfoBinary for DevInfoType ("
        << RocmSMI::devInfoTypesStrings.at(type) << ")"

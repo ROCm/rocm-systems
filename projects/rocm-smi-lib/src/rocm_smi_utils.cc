@@ -158,13 +158,15 @@ int isRegularFile(std::string fname, bool *is_reg) {
   struct stat file_stat;
   int ret;
 
-  assert(is_reg != nullptr);
-
   ret = stat(fname.c_str(), &file_stat);
   if (ret) {
     return errno;
   }
-  *is_reg = S_ISREG(file_stat.st_mode);
+
+  if (is_reg != nullptr) {
+    *is_reg = S_ISREG(file_stat.st_mode);
+  }
+
   return 0;
 }
 
@@ -192,6 +194,13 @@ int WriteSysfsStr(std::string path, std::string val) {
 }
 
 int ReadSysfsStr(std::string path, std::string *retStr) {
+  //  On success, zero is returned.  On error, -1 is returned, and
+  //  errno is set to indicate the error.
+  auto is_regular_file_result = isRegularFile(path, nullptr);
+  if (is_regular_file_result != 0) {
+    return ENOENT;
+  }
+
   std::stringstream ss;
   int ret = 0;
   std::ostringstream oss;
