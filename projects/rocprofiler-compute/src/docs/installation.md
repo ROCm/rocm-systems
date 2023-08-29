@@ -15,6 +15,7 @@ Omniperf is broken into two installation components:
    - Stand alone web interface for importing analysis metrics
 2. **Omniperf Server-side (_Optional_)**
    - Mongo DB backend + Grafana instance
+   - Packaged in a Docker container for easy setup
 
 Determine what you need to install based on how you'd like to interact with Omniperf. See the decision tree below to help determine what installation is right for you.
 
