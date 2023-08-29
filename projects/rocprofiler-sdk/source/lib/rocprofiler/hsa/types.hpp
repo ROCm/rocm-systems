@@ -50,7 +50,7 @@ static_assert(HSA_AQLPROFILE_API_TABLE_STEP_VERSION == 0x00,
 // step numbers
 static_assert(sizeof(FinalizerExtTable) == 64, "HSA finalizer API table size changed");
 static_assert(sizeof(ImageExtTable) == 120, "HSA image-extended API table size changed");
-static_assert(sizeof(AmdExtTable) == 456, "HSA amd-extended API table size changed");
+static_assert(sizeof(AmdExtTable) == 552, "HSA amd-extended API table size changed");
 static_assert(sizeof(CoreApiTable) == 1016, "HSA core API table size changed");
 #    else
 #        error "HSA_API_TABLE_MAJOR_VERSION not supported"

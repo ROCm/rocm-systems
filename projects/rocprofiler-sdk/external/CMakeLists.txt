@@ -3,6 +3,8 @@
 #   External dependencies
 #
 #
+include(rocprofiler_utilities)
+
 set(BUILD_TESTING OFF)
 
 if(ROCPROFILER_BUILD_TESTS)
@@ -13,6 +15,13 @@ if(ROCPROFILER_BUILD_TESTS)
         set(BUILD_GMOCK
             OFF
             CACHE BOOL "")
+
+        rocprofiler_checkout_git_submodule(
+            RECURSIVE
+            RELATIVE_PATH external/googletest
+            WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+            REPO_URL https://github.com/google/googletest.git
+            REPO_BRANCH "main")
 
         add_subdirectory(googletest EXCLUDE_FROM_ALL)
 
