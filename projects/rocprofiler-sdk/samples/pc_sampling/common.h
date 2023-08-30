@@ -7,9 +7,12 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <string>
+#include <string_view>
 
-constexpr size_t BUFFER_SIZE_BYTES = 4096;
-constexpr size_t WATERMARK         = (BUFFER_SIZE_BYTES / 2);
+constexpr size_t       BUFFER_SIZE_BYTES = 4096;
+constexpr size_t       WATERMARK         = (BUFFER_SIZE_BYTES / 2);
+const std::string_view MI200_NAME        = "gfx90a";
 
 #define ROCPROFILER_CALL(result, msg)                                                              \
     {                                                                                              \
