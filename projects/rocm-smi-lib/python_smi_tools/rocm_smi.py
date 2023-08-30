@@ -205,16 +205,31 @@ def getFanSpeed(device):
     fl = 0
     fm = 0
 
+    """ If ret = 2; (No such file or directory)
+    /sys/class/drm/cardX/device/hwmon/hwmonX/pwmX
+    """
     ret = rocmsmi.rsmi_dev_fan_speed_get(device, sensor_ind, byref(fanLevel))
     if rsmi_ret_ok(ret, device, 'get_fan_speed', True):
         fl = fanLevel.value
+    last_ret = ret
+
+    """ If ret = 2; (No such file or directory)
+    /sys/class/drm/cardX/device/hwmon/hwmonX/pwmX
+    """
     ret = rocmsmi.rsmi_dev_fan_speed_max_get(device, sensor_ind, byref(fanMax))
     if rsmi_ret_ok(ret, device, 'get_fan_max_speed', True):
         fm = fanMax.value
-    if fl == 0 or fm == 0:
-        return (fl, 0)  # to prevent division by zero crash
 
-    return (fl, round((float(fl) / float(fm)) * 100, 2))
+    """ In case we had an error before, we don't overwrite it with a
+        possible success now. Otherwise, we get the next error.
+    """
+    if (last_ret == rsmi_status_t.RSMI_STATUS_SUCCESS):
+        last_ret = ret
+
+    if fl == 0 or fm == 0:
+        return (last_ret, fl, 0)  # to prevent division by zero crash
+
+    return (last_ret, fl, round((float(fl) / float(fm)) * 100, 2))
 
 
 def getGpuUse(device):
@@ -789,8 +804,12 @@ def resetFans(deviceList):
     for device in deviceList:
         sensor_ind = c_uint32(0)
         ret = rocmsmi.rsmi_dev_fan_reset(device, sensor_ind)
-        if rsmi_ret_ok(ret, device, 'reset_fan'):
-            printLog(device, 'Successfully reset fan speed to driver control', None)
+        if (ret == rsmi_status_t.RSMI_STATUS_NOT_SUPPORTED) or (ret == rsmi_status_t.RSMI_STATUS_PERMISSION):
+            if not rsmi_ret_ok(rsmi_status_t.RSMI_STATUS_NOT_SUPPORTED, device, 'reset_fan'):
+                continue
+        else:
+            if rsmi_ret_ok(ret, device, 'reset_fan'):
+                printLog(device, 'Successfully reset fan speed to driver control', None)
     printLogSpacer()
 
 
@@ -1586,18 +1605,24 @@ def showAllConcise(deviceList):
 
     @param deviceList: List of DRM devices (can be a single-item list)
     """
-    global PRINT_JSON
+    global PRINT_JSON, appWidth
     if PRINT_JSON:
         print('ERROR: Cannot print JSON/CSV output for concise output')
         sys.exit(1)
+
+    """ Place holder for the actual max size """
+    MAX_ALL_CONCISE_WIDTH = 100
+    appWidth_temp = appWidth
+    appWidth = MAX_ALL_CONCISE_WIDTH
+
     printLogSpacer(' Concise Info ')
     deviceList.sort()
     (temp_type, _) = findFirstAvailableTemp(deviceList[0])
     available_temp_type = temp_type.lower()
     available_temp_type = available_temp_type.replace('(', '')
     available_temp_type = available_temp_type.replace(')', '')
-    header = ['GPU', 'Temp', 'AvgPwr', 'Partitions', 'SCLK', 'MCLK', 'Fan', 'Perf', 'PwrCap', 'VRAM%', 'GPU%']
-    subheader = ['', temp_type, '', '(Mem, Compute)', '', '', '', '', '', '', '']
+    header = ['GPU', '[Model : Revision]', 'Temp', 'AvgPwr', 'Partitions', 'SCLK', 'MCLK', 'Fan', 'Perf', 'PwrCap', 'VRAM%', 'GPU%']
+    subheader = ['', 'Name (20 chars)', temp_type, '', '(Mem, Compute)', '', '', '', '', '', '', '']
     # add additional spaces to match header
     for idx, item in enumerate(subheader):
         header_size = len(header[idx])
@@ -1614,6 +1639,8 @@ def showAllConcise(deviceList):
     values = {}
     degree_sign = u'\N{DEGREE SIGN}'
     for device in deviceList:
+        gpu_dev_product_info = getDevProductInfo(device)
+        gpu_dev_product_info_names = list(gpu_dev_product_info[device])
         temp_val = str(getTemp(device, available_temp_type))
         if temp_val != 'N/A':
             temp_val += degree_sign + 'C'
@@ -1627,7 +1654,7 @@ def showAllConcise(deviceList):
         concise = True
         sclk = showCurrentClocks([device], 'sclk', concise)
         mclk = showCurrentClocks([device], 'mclk', concise)
-        (fanLevel, fanSpeed) = getFanSpeed(device)
+        (retCode, fanLevel, fanSpeed) = getFanSpeed(device)
         fan = str(fanSpeed) + '%'
         if getPerfLevel(device) != -1:
             perf = getPerfLevel(device)
@@ -1647,10 +1674,19 @@ def showAllConcise(deviceList):
             mem_use_pct='Unsupported'
         if vram_used != None and vram_total != None and float(vram_total) != 0:
             mem_use_pct = '% 3.0f%%' % (100 * (float(vram_used) / float(vram_total)))
-        values['card%s' % (str(device))] = [device, temp_val, avgPwr,
+
+        gpu_dev_product_info_top_name = gpu_dev_product_info_names[0]
+        if (len(gpu_dev_product_info_names) > 1):
+            values['card%s_Info' % (str(device))] = ['', gpu_dev_product_info_names[0], '', '', '',
+                                                    '', '', '',
+                                                    '', '', '', '']
+            gpu_dev_product_info_top_name = gpu_dev_product_info_names[1]
+
+        values['card%s' % (str(device))] = [device, gpu_dev_product_info_top_name, temp_val, avgPwr,
                                             combined_partition, sclk, mclk,
                                             fan, str(perf).lower(), pwrCap,
                                             mem_use_pct, gpu_busy]
+
     val_widths = {}
     for device in deviceList:
         val_widths[device] = [len(str(val)) + 2 for val in values['card%s' % (str(device))]]
@@ -1662,10 +1698,19 @@ def showAllConcise(deviceList):
     printLog(None, "".join(word.ljust(max_widths[col]) for col, word in zip(range(len(max_widths)), subheader)),
              None, useItalics=True)
     printLogSpacer(fill='=')
+
     for device in deviceList:
         printLog(None, "".join(str(word).ljust(max_widths[col]) for col, word in
                                zip(range(len(max_widths)), values['card%s' % (str(device))])), None)
+        gpu_dev_product_info = getDevProductInfo(device)
+        gpu_dev_product_info_names = list(gpu_dev_product_info[device])
+        if (len(gpu_dev_product_info_names) > 1):
+            printLog(None, "".join(str(word).ljust(max_widths[col]) for col, word in
+                                zip(range(len(max_widths)), values['card%s_Info' % (str(device))])), None)
+
     printLogSpacer()
+    """ Restore original max size """
+    appWidth = appWidth_temp
 
 
 def showAllConciseHw(deviceList):
@@ -1835,22 +1880,25 @@ def showCurrentFans(deviceList):
     sensor_ind = c_uint32(0)
 
     for device in deviceList:
-        (fanLevel, fanSpeed) = getFanSpeed(device)
-        fanSpeed = round(fanSpeed)
-        if fanLevel == 0 or fanSpeed == 0:
-            printLog(device, 'Unable to detect fan speed for GPU %d' % (device), None)
-            logging.debug('Current fan speed is: %d\n' % (fanSpeed) + \
-                          '       Current fan level is: %d\n' % (fanLevel) + \
-                          '       (GPU might be cooled with a non-PWM fan)')
-            continue
-        if PRINT_JSON:
-            printLog(device, 'Fan speed (level)', str(fanLevel))
-            printLog(device, 'Fan speed (%)', str(fanSpeed))
+        (retCode, fanLevel, fanSpeed) = getFanSpeed(device)
+        if (retCode == rsmi_status_t.RSMI_STATUS_NOT_SUPPORTED):
+            printLog(device, 'Not supported', None)
         else:
-            printLog(device, 'Fan Level', str(fanLevel) + ' (%s%%)' % (str(fanSpeed)))
-        ret = rocmsmi.rsmi_dev_fan_rpms_get(device, sensor_ind, byref(rpmSpeed))
-        if rsmi_ret_ok(ret, device, 'get_fan_rpms'):
-            printLog(device, 'Fan RPM', rpmSpeed.value)
+            fanSpeed = round(fanSpeed)
+            if fanLevel == 0 or fanSpeed == 0:
+                printLog(device, 'Unable to detect fan speed for GPU %d' % (device), None)
+                logging.debug('Current fan speed is: %d\n' % (fanSpeed) + \
+                            '       Current fan level is: %d\n' % (fanLevel) + \
+                            '       (GPU might be cooled with a non-PWM fan)')
+                continue
+            if PRINT_JSON:
+                printLog(device, 'Fan speed (level)', str(fanLevel))
+                printLog(device, 'Fan speed (%)', str(fanSpeed))
+            else:
+                printLog(device, 'Fan Level', str(fanLevel) + ' (%s%%)' % (str(fanSpeed)))
+            ret = rocmsmi.rsmi_dev_fan_rpms_get(device, sensor_ind, byref(rpmSpeed))
+            if rsmi_ret_ok(ret, device, 'get_fan_rpms'):
+                printLog(device, 'Fan RPM', rpmSpeed.value)
     printLogSpacer()
 
 
@@ -2373,6 +2421,58 @@ def showProductName(deviceList):
                              'GPU[%s]\t\t: Expected vendor name: Advanced Micro Devices, Inc. [AMD/ATI]\n' \
                              'GPU[%s]\t\t: Actual vendor name' % (device, device), vendor.value.decode())
     printLogSpacer()
+
+
+def getDevProductInfo(device):
+    """ Show the requested product name for the device requested
+
+    @param device: Device we want to get the info for
+    """
+
+    # Retrieve card vendor
+    MAX_BUFF_SIZE = 256
+    MAX_DESC_SIZE = 20
+    device_info = "N/A"
+    device_list = {}
+    vendor = create_string_buffer(MAX_BUFF_SIZE)
+    ret = rocmsmi.rsmi_dev_vendor_name_get(device, vendor, MAX_BUFF_SIZE)
+    # Only continue if GPU vendor is AMD
+    if rsmi_ret_ok(ret, device, 'get_vendor_name') and isAmdDevice(device):
+        # Retrieve the device series
+        series = create_string_buffer(MAX_BUFF_SIZE)
+        ret = rocmsmi.rsmi_dev_name_get(device, series, MAX_BUFF_SIZE)
+        if rsmi_ret_ok(ret, device, 'get_name'):
+            try:
+                device_series = series.value.decode()
+            except UnicodeDecodeError:
+                device_series = "N/A"
+                printErrLog(device, "Unable to read card series")
+
+        # Retrieve the device model
+        model = create_string_buffer(MAX_BUFF_SIZE)
+        ret = rocmsmi.rsmi_dev_subsystem_name_get(device, model, MAX_BUFF_SIZE)
+        if rsmi_ret_ok(ret, device, 'get_subsystem_name'):
+            try:
+                device_model = model.value.decode()
+                device_model = padHexValue(device_model, 4)
+            except UnicodeDecodeError:
+                device_model = "N/A"
+                printErrLog(device, "Unable to read device model")
+
+            try:
+                gpu_revision = padHexValue(getRev(device), 2)
+            except Exception as exc:
+                gpu_revision = "N/A"
+                printErrLog(device, "Unable to read card revision %s" % (exc))
+
+        device_series_str = str(device_series[:MAX_DESC_SIZE])
+        device_series_str = device_series_str.ljust(MAX_DESC_SIZE, ' ')
+        device_model_str  = str(('[' + device_model + ' : ' + gpu_revision + ']'))
+        device_model_str  = str(device_model_str[:MAX_DESC_SIZE])
+        device_model_str  = device_model_str.ljust(MAX_DESC_SIZE, ' ')
+        device_list = {device : [device_series_str, device_model_str]}
+
+    return device_list
 
 
 def showProfile(deviceList):
@@ -2996,7 +3096,7 @@ def showNumaTopology(deviceList):
     @param deviceList: List of DRM devices (can be a single-item list)
     """
     printLogSpacer(' Numa Nodes ')
-    numa_numbers = c_uint32()
+    numa_numbers = c_int32()
     for device in deviceList:
         ret = rocmsmi.rsmi_topo_get_numa_node_number(device, byref(numa_numbers))
         if rsmi_ret_ok(ret, device, 'get_numa_node_number'):
@@ -3356,7 +3456,7 @@ def save(deviceList, savefilepath):
                 clocks[device][clk_type] = str(freq.current)
             else:
                 clocks[device][clk_type] = '0'
-        fanSpeeds[device] = getFanSpeed(device)[0]
+        fanSpeeds[device] = getFanSpeed(device)[1]
         od = c_uint32()
         ret = rocmsmi.rsmi_dev_overdrive_level_get(device, byref(od))
         if rsmi_ret_ok(ret, device, 'get_overdrive_level'):

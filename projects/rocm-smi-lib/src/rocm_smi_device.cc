@@ -928,7 +928,6 @@ int Device::readDevInfo(DevInfoTypes type, uint64_t *val) {
     case kDevDFCountersAvailable:
     case kDevMemBusyPercent:
     case kDevXGMIError:
-    case kDevNumaNode:
       ret = readDevInfoStr(type, &tempStr);
       RET_IF_NONZERO(ret);
       if (tempStr == "") {
@@ -1046,6 +1045,7 @@ int Device::readDevInfo(DevInfoTypes type, std::string *val) {
     case kDevAvailableComputePartition:
     case kDevComputePartition:
     case kDevMemoryPartition:
+    case kDevNumaNode:
       return readDevInfoStr(type, val);
       break;
 
