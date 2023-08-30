@@ -50,14 +50,14 @@ Panel Config:
         title: L1D Cache Stalls
         header:
           metric: Metric
-          mean: Mean
+          avg: Avg
           min: Min
           max: Max
           unit: Unit
           tips: Tips
         metric:
           Stalled on L2 Data:
-            mean: AVG((((100 * TCP_PENDING_STALL_CYCLES_sum) / TCP_GATE_EN1_sum) if (TCP_GATE_EN1_sum
+            avg: AVG((((100 * TCP_PENDING_STALL_CYCLES_sum) / TCP_GATE_EN1_sum) if (TCP_GATE_EN1_sum
               != 0) else None))
             min: MIN((((100 * TCP_PENDING_STALL_CYCLES_sum) / TCP_GATE_EN1_sum) if (TCP_GATE_EN1_sum
               != 0) else None))
@@ -66,7 +66,7 @@ Panel Config:
             unit: pct
             tips: 
           Stalled on L2 Req:
-            mean: AVG((((100 * TCP_TCR_TCP_STALL_CYCLES_sum) / TCP_GATE_EN1_sum) if (TCP_GATE_EN1_sum
+            avg: AVG((((100 * TCP_TCR_TCP_STALL_CYCLES_sum) / TCP_GATE_EN1_sum) if (TCP_GATE_EN1_sum
               != 0) else None))
             min: MIN((((100 * TCP_TCR_TCP_STALL_CYCLES_sum) / TCP_GATE_EN1_sum) if (TCP_GATE_EN1_sum
               != 0) else None))
@@ -75,7 +75,7 @@ Panel Config:
             unit: pct
             tips: 
           Tag RAM Stall (Read):
-            mean: AVG((((100 * TCP_READ_TAGCONFLICT_STALL_CYCLES_sum) / TCP_GATE_EN1_sum)
+            avg: AVG((((100 * TCP_READ_TAGCONFLICT_STALL_CYCLES_sum) / TCP_GATE_EN1_sum)
               if (TCP_GATE_EN1_sum != 0) else None))
             min: MIN((((100 * TCP_READ_TAGCONFLICT_STALL_CYCLES_sum) / TCP_GATE_EN1_sum)
               if (TCP_GATE_EN1_sum != 0) else None))
@@ -84,7 +84,7 @@ Panel Config:
             unit: pct
             tips: 
           Tag RAM Stall (Write):
-            mean: AVG((((100 * TCP_WRITE_TAGCONFLICT_STALL_CYCLES_sum) / TCP_GATE_EN1_sum)
+            avg: AVG((((100 * TCP_WRITE_TAGCONFLICT_STALL_CYCLES_sum) / TCP_GATE_EN1_sum)
               if (TCP_GATE_EN1_sum != 0) else None))
             min: MIN((((100 * TCP_WRITE_TAGCONFLICT_STALL_CYCLES_sum) / TCP_GATE_EN1_sum)
               if (TCP_GATE_EN1_sum != 0) else None))
@@ -93,7 +93,7 @@ Panel Config:
             unit: pct
             tips: 
           Tag RAM Stall (Atomic):
-            mean: AVG((((100 * TCP_ATOMIC_TAGCONFLICT_STALL_CYCLES_sum) / TCP_GATE_EN1_sum)
+            avg: AVG((((100 * TCP_ATOMIC_TAGCONFLICT_STALL_CYCLES_sum) / TCP_GATE_EN1_sum)
               if (TCP_GATE_EN1_sum != 0) else None))
             min: MIN((((100 * TCP_ATOMIC_TAGCONFLICT_STALL_CYCLES_sum) / TCP_GATE_EN1_sum)
               if (TCP_GATE_EN1_sum != 0) else None))
@@ -363,20 +363,20 @@ Panel Config:
         title: L1D Addr Translation
         header:
           metric: Metric
-          mean: Mean
+          avg: Avg
           min: Min
           max: Max
           units: Units
           tips: Tips
         metric:
           Req:
-            mean: AVG((TCP_UTCL1_REQUEST_sum / $denom))
+            avg: AVG((TCP_UTCL1_REQUEST_sum / $denom))
             min: MIN((TCP_UTCL1_REQUEST_sum / $denom))
             max: MAX((TCP_UTCL1_REQUEST_sum / $denom))
             units: (Req + $normUnit)
             tips: 
           Hit Ratio:
-            mean: AVG((((100 * TCP_UTCL1_TRANSLATION_HIT_sum) / TCP_UTCL1_REQUEST_sum) if
+            avg: AVG((((100 * TCP_UTCL1_TRANSLATION_HIT_sum) / TCP_UTCL1_REQUEST_sum) if
               (TCP_UTCL1_REQUEST_sum != 0) else None))
             min: MIN((((100 * TCP_UTCL1_TRANSLATION_HIT_sum) / TCP_UTCL1_REQUEST_sum) if
               (TCP_UTCL1_REQUEST_sum != 0) else None))
@@ -385,19 +385,19 @@ Panel Config:
             units: pct
             tips: 
           Hits:
-            mean: AVG((TCP_UTCL1_TRANSLATION_HIT_sum / $denom))
+            avg: AVG((TCP_UTCL1_TRANSLATION_HIT_sum / $denom))
             min: MIN((TCP_UTCL1_TRANSLATION_HIT_sum / $denom))
             max: MAX((TCP_UTCL1_TRANSLATION_HIT_sum / $denom))
             units: (Hits + $normUnit)
             tips: 
           Misses (Translation):
-            mean: AVG((TCP_UTCL1_TRANSLATION_MISS_sum / $denom))
+            avg: AVG((TCP_UTCL1_TRANSLATION_MISS_sum / $denom))
             min: MIN((TCP_UTCL1_TRANSLATION_MISS_sum / $denom))
             max: MAX((TCP_UTCL1_TRANSLATION_MISS_sum / $denom))
             units: (Misses + $normUnit)
             tips: 
           Misses (Permission):
-            mean: AVG((TCP_UTCL1_PERMISSION_MISS_sum / $denom))
+            avg: AVG((TCP_UTCL1_PERMISSION_MISS_sum / $denom))
             min: MIN((TCP_UTCL1_PERMISSION_MISS_sum / $denom))
             max: MAX((TCP_UTCL1_PERMISSION_MISS_sum / $denom))
             units: (Misses + $normUnit)

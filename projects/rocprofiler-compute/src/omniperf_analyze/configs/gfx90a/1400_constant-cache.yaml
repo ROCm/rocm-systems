@@ -39,38 +39,38 @@ Panel Config:
         title: Scalar L1D Cache Accesses
         header:
           metric: Metric
-          mean: Mean
+          avg: Avg
           min: Min
           max: Max
           unit: Unit
           tips: Tips
         metric:
           Req:
-            mean: AVG((SQC_DCACHE_REQ / $denom))
+            avg: AVG((SQC_DCACHE_REQ / $denom))
             min: MIN((SQC_DCACHE_REQ / $denom))
             max: MAX((SQC_DCACHE_REQ / $denom))
             unit: (Req  + $normUnit)
             tips: 
           Hits:
-            mean: AVG((SQC_DCACHE_HITS / $denom))
+            avg: AVG((SQC_DCACHE_HITS / $denom))
             min: MIN((SQC_DCACHE_HITS / $denom))
             max: MAX((SQC_DCACHE_HITS / $denom))
             unit: (Req  + $normUnit)
             tips: 
           Misses - Non Duplicated:
-            mean: AVG((SQC_DCACHE_MISSES / $denom))
+            avg: AVG((SQC_DCACHE_MISSES / $denom))
             min: MIN((SQC_DCACHE_MISSES / $denom))
             max: MAX((SQC_DCACHE_MISSES / $denom))
             unit: (Req  + $normUnit)
             tips: 
           Misses- Duplicated:
-            mean: AVG((SQC_DCACHE_MISSES_DUPLICATE / $denom))
+            avg: AVG((SQC_DCACHE_MISSES_DUPLICATE / $denom))
             min: MIN((SQC_DCACHE_MISSES_DUPLICATE / $denom))
             max: MAX((SQC_DCACHE_MISSES_DUPLICATE / $denom))
             unit: (Req  + $normUnit)
             tips: 
           Cache Hit:
-            mean: AVG((((100 * SQC_DCACHE_HITS) / ((SQC_DCACHE_HITS + SQC_DCACHE_MISSES)
+            avg: AVG((((100 * SQC_DCACHE_HITS) / ((SQC_DCACHE_HITS + SQC_DCACHE_MISSES)
               + SQC_DCACHE_MISSES_DUPLICATE)) if (((SQC_DCACHE_HITS + SQC_DCACHE_MISSES)
               + SQC_DCACHE_MISSES_DUPLICATE) != 0) else None))
             min: MIN((((100 * SQC_DCACHE_HITS) / ((SQC_DCACHE_HITS + SQC_DCACHE_MISSES)
@@ -82,7 +82,7 @@ Panel Config:
             unit: pct
             tips: 
           Read Req (Total):
-            mean: AVG((((((SQC_DCACHE_REQ_READ_1 + SQC_DCACHE_REQ_READ_2) + SQC_DCACHE_REQ_READ_4)
+            avg: AVG((((((SQC_DCACHE_REQ_READ_1 + SQC_DCACHE_REQ_READ_2) + SQC_DCACHE_REQ_READ_4)
               + SQC_DCACHE_REQ_READ_8) + SQC_DCACHE_REQ_READ_16) / $denom))
             min: MIN((((((SQC_DCACHE_REQ_READ_1 + SQC_DCACHE_REQ_READ_2) + SQC_DCACHE_REQ_READ_4)
               + SQC_DCACHE_REQ_READ_8) + SQC_DCACHE_REQ_READ_16) / $denom))
@@ -91,37 +91,37 @@ Panel Config:
             unit: (Req  + $normUnit)
             tips: 
           Atomic Req:
-            mean: AVG((SQC_DCACHE_ATOMIC / $denom))
+            avg: AVG((SQC_DCACHE_ATOMIC / $denom))
             min: MIN((SQC_DCACHE_ATOMIC / $denom))
             max: MAX((SQC_DCACHE_ATOMIC / $denom))
             unit: (Req  + $normUnit)
             tips: 
           Read Req (1 DWord):
-            mean: AVG((SQC_DCACHE_REQ_READ_1 / $denom))
+            avg: AVG((SQC_DCACHE_REQ_READ_1 / $denom))
             min: MIN((SQC_DCACHE_REQ_READ_1 / $denom))
             max: MAX((SQC_DCACHE_REQ_READ_1 / $denom))
             unit: (Req  + $normUnit)
             tips: 
           Read Req (2 DWord):
-            mean: AVG((SQC_DCACHE_REQ_READ_2 / $denom))
+            avg: AVG((SQC_DCACHE_REQ_READ_2 / $denom))
             min: MIN((SQC_DCACHE_REQ_READ_2 / $denom))
             max: MAX((SQC_DCACHE_REQ_READ_2 / $denom))
             unit: (Req  + $normUnit)
             tips: 
           Read Req (4 DWord):
-            mean: AVG((SQC_DCACHE_REQ_READ_4 / $denom))
+            avg: AVG((SQC_DCACHE_REQ_READ_4 / $denom))
             min: MIN((SQC_DCACHE_REQ_READ_4 / $denom))
             max: MAX((SQC_DCACHE_REQ_READ_4 / $denom))
             unit: (Req  + $normUnit)
             tips: 
           Read Req (8 DWord):
-            mean: AVG((SQC_DCACHE_REQ_READ_8 / $denom))
+            avg: AVG((SQC_DCACHE_REQ_READ_8 / $denom))
             min: MIN((SQC_DCACHE_REQ_READ_8 / $denom))
             max: MAX((SQC_DCACHE_REQ_READ_8 / $denom))
             unit: (Req  + $normUnit)
             tips: 
           Read Req (16 DWord):
-            mean: AVG((SQC_DCACHE_REQ_READ_16 / $denom))
+            avg: AVG((SQC_DCACHE_REQ_READ_16 / $denom))
             min: MIN((SQC_DCACHE_REQ_READ_16 / $denom))
             max: MAX((SQC_DCACHE_REQ_READ_16 / $denom))
             unit: (Req  + $normUnit)
@@ -132,32 +132,32 @@ Panel Config:
         title: Scalar L1D Cache - L2 Interface
         header:
           metric: Metric
-          mean: Mean
+          avg: Avg
           min: Min
           max: Max
           unit: Unit
           tips: Tips
         metric:
           Read Req:
-            mean: AVG((SQC_TC_DATA_READ_REQ / $denom))
+            avg: AVG((SQC_TC_DATA_READ_REQ / $denom))
             min: MIN((SQC_TC_DATA_READ_REQ / $denom))
             max: MAX((SQC_TC_DATA_READ_REQ / $denom))
             unit: (Req  + $normUnit)
             tips: 
           Write Req:
-            mean: AVG((SQC_TC_DATA_WRITE_REQ / $denom))
+            avg: AVG((SQC_TC_DATA_WRITE_REQ / $denom))
             min: MIN((SQC_TC_DATA_WRITE_REQ / $denom))
             max: MAX((SQC_TC_DATA_WRITE_REQ / $denom))
             unit: (Req  + $normUnit)
             tips: 
           Atomic Req:
-            mean: AVG((SQC_TC_DATA_ATOMIC_REQ / $denom))
+            avg: AVG((SQC_TC_DATA_ATOMIC_REQ / $denom))
             min: MIN((SQC_TC_DATA_ATOMIC_REQ / $denom))
             max: MAX((SQC_TC_DATA_ATOMIC_REQ / $denom))
             unit: (Req  + $normUnit)
             tips: 
           Stall:
-            mean: AVG((SQC_TC_STALL / $denom))
+            avg: AVG((SQC_TC_STALL / $denom))
             min: MIN((SQC_TC_STALL / $denom))
             max: MAX((SQC_TC_STALL / $denom))
             unit: (Cycles  + $normUnit)
