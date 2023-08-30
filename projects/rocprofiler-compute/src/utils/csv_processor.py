@@ -130,7 +130,7 @@ def kernel_name_shortener(workload_dir, level):
         cpp_filt = os.path.join("/usr", "bin", "c++filt")
         if not os.path.isfile(cpp_filt):
             print(
-                "Error: Could not resolve llvm-cxxfilt in rocm install: {}".format(
+                "Error: Could not resolve c++filt in expected directory: {}".format(
                     cpp_filt
                 )
             )
