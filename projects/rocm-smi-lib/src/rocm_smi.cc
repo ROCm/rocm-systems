@@ -3740,6 +3740,10 @@ rsmi_dev_memory_reserved_pages_get(uint32_t dv_ind, uint32_t *num_pages,
 
   ret = GetDevValueVec(amd::smi::kDevMemPageBad, dv_ind, &val_vec);
 
+  // file is empty, which is valid for no errors
+  if (ret == RSMI_STATUS_UNEXPECTED_DATA) {
+    ret = RSMI_STATUS_SUCCESS;
+  }
   if (ret == RSMI_STATUS_FILE_ERROR) {
     return RSMI_STATUS_NOT_SUPPORTED;
   }

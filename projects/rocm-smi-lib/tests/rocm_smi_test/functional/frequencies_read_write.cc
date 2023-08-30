@@ -114,14 +114,20 @@ void TestFrequenciesReadWrite::Run(void) {
           std::cout << "\t**Set " << FreqEnumToStr(rsmi_clk) <<
                                ": Not supported on this machine" << std::endl;
           return false;
-        } else {
-         //   CHK_ERR_ASRT(ret)
-          IF_VERB(STANDARD) {
-            std::cout << "Initial frequency for clock " <<
-                FreqEnumToStr(rsmi_clk) << " is " << f.current << std::endl;
-          }
-          return true;
         }
+
+        // special driver issue, shouldn't normally occur
+        if (ret == RSMI_STATUS_UNEXPECTED_DATA) {
+          std::cerr << "WARN: Clock file [" << FreqEnumToStr(rsmi_clk) << "] exists on device [" << dv_ind << "] but empty!" << std::endl;
+          std::cerr << "      Likely a driver issue!" << std::endl;
+        }
+
+        // CHK_ERR_ASRT(ret)
+        IF_VERB(STANDARD) {
+          std::cout << "Initial frequency for clock " <<
+              FreqEnumToStr(rsmi_clk) << " is " << f.current << std::endl;
+        }
+        return true;
       };
 
       auto freq_write = [&]() {
@@ -177,44 +183,6 @@ void TestFrequenciesReadWrite::Run(void) {
       }
       freq_write();
       CHK_ERR_ASRT(ret)
-#if 0
-      ret = rsmi_dev_gpu_clk_freq_get(dv_ind, rsmi_clk, &f);
-      CHK_ERR_ASRT(ret)
-
-      IF_VERB(STANDARD) {
-        std::cout << "Initial frequency for clock " << rsmi_clk << " is " <<
-                                                        f.current << std::endl;
-      }
-      // Set clocks to something other than the usual default of the lowest
-      // frequency.
-      freq_bitmask = 0b01100;  // Try the 3rd and 4th clocks
-
-      std::string freq_bm_str =
-              std::bitset<RSMI_MAX_NUM_FREQUENCIES>(freq_bitmask).to_string();
-
-      freq_bm_str.erase(0, std::min(freq_bm_str.find_first_not_of('0'),
-                                                       freq_bm_str.size()-1));
-
-      IF_VERB(STANDARD) {
-      std::cout << "Setting frequency mask for clock " << rsmi_clk <<
-          " to 0b" << freq_bm_str << " ..." << std::endl;
-      }
-      ret = rsmi_dev_gpu_clk_freq_set(dv_ind, rsmi_clk, freq_bitmask);
-      CHK_ERR_ASRT(ret)
-
-      ret = rsmi_dev_gpu_clk_freq_get(dv_ind, rsmi_clk, &f);
-      CHK_ERR_ASRT(ret)
-
-      IF_VERB(STANDARD) {
-        std::cout << "Frequency is now index " << f.current << std::endl;
-        std::cout << "Resetting mask to all frequencies." << std::endl;
-      }
-      ret = rsmi_dev_gpu_clk_freq_set(dv_ind, rsmi_clk, 0xFFFFFFFF);
-      CHK_ERR_ASRT(ret)
-
-      ret = rsmi_dev_perf_level_set(dv_ind, RSMI_DEV_PERF_LEVEL_AUTO);
-      CHK_ERR_ASRT(ret)
-#endif
     }
   }
 }

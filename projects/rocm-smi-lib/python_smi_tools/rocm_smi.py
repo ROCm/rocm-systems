@@ -1791,15 +1791,19 @@ def showClocks(deviceList):
         for clk_type in sorted(rsmi_clk_names_dict):
             if rocmsmi.rsmi_dev_gpu_clk_freq_get(device, rsmi_clk_names_dict[clk_type], None) == 1:
                 ret = rocmsmi.rsmi_dev_gpu_clk_freq_get(device, rsmi_clk_names_dict[clk_type], byref(freq))
-                if rsmi_ret_ok(ret, device, 'get_clk_freq_' + clk_type, True):
-                    printLog(device, 'Supported %s frequencies on GPU%s' % (clk_type, str(device)), None)
-                    for x in range(freq.num_supported):
-                        fr = '{:>.0f}Mhz'.format(freq.frequency[x] / 1000000)
-                        if x == freq.current:
-                            printLog(device, str(x), str(fr) + ' *')
-                        else:
-                            printLog(device, str(x), str(fr))
-                    printLog(device, '', None)
+                if ret == rsmi_status_t.RSMI_STATUS_UNEXPECTED_DATA:
+                    printLog(device, 'Clock [%s] on device [%s] exists but EMPTY! Likely driver error!' % (clk_type, str(device)))
+                    continue
+                if not rsmi_ret_ok(ret, device, 'get_clk_freq_' + clk_type, True):
+                    continue
+                printLog(device, 'Supported %s frequencies on GPU%s' % (clk_type, str(device)), None)
+                for x in range(freq.num_supported):
+                    fr = '{:>.0f}Mhz'.format(freq.frequency[x] / 1000000)
+                    if x == freq.current:
+                        printLog(device, str(x), str(fr) + ' *')
+                    else:
+                        printLog(device, str(x), str(fr))
+                printLog(device, '', None)
             else:
                 logging.debug('{} frequency is unsupported on device[{}]'.format(clk_type, device))
                 printLog(device, '', None)
