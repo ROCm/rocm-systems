@@ -22,7 +22,6 @@
 
 #pragma once
 
-#include <hip/hip_runtime.h>
 #include <rocprofiler/rocprofiler.h>
 
 #ifdef __cplusplus

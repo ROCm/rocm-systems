@@ -21,12 +21,18 @@
 // SOFTWARE.
 
 #include "ring_buffer.hpp"
+#include "lib/common/environment.hpp"
+#include "lib/common/units.hpp"
 
 #include <sys/mman.h>
+#include <atomic>
 #include <cerrno>
+#include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <new>
 
 namespace rocprofiler
 {
@@ -36,42 +42,16 @@ namespace container
 {
 namespace base
 {
-ring_buffer::ring_buffer(size_t _size, bool _use_mmap)
-{
-    set_use_mmap(_use_mmap);
-    init(_size);
-}
-
 ring_buffer::~ring_buffer() { destroy(); }
-
-ring_buffer::ring_buffer(const ring_buffer& rhs)
-: m_use_mmap{rhs.m_use_mmap}
-, m_use_mmap_explicit{rhs.m_use_mmap_explicit}
-{
-    init(rhs.m_size);
-}
 
 ring_buffer::ring_buffer(ring_buffer&& rhs) noexcept
 : m_init{rhs.m_init}
-, m_use_mmap{rhs.m_use_mmap}
-, m_use_mmap_explicit{rhs.m_use_mmap_explicit}
 , m_ptr{rhs.m_ptr}
 , m_size{rhs.m_size}
-, m_read_count{rhs.m_read_count}
-, m_write_count{rhs.m_write_count}
+, m_read_count{rhs.m_read_count.load()}
+, m_write_count{rhs.m_write_count.load()}
 {
     rhs.reset();
-}
-
-ring_buffer&
-ring_buffer::operator=(const ring_buffer& rhs)
-{
-    if(this == &rhs) return *this;
-    destroy();
-    m_use_mmap          = rhs.m_use_mmap;
-    m_use_mmap_explicit = rhs.m_use_mmap_explicit;
-    init(rhs.m_size);
-    return *this;
 }
 
 ring_buffer&
@@ -79,13 +59,11 @@ ring_buffer::operator=(ring_buffer&& rhs) noexcept
 {
     if(this == &rhs) return *this;
     destroy();
-    m_init              = rhs.m_init;
-    m_use_mmap          = rhs.m_use_mmap;
-    m_use_mmap_explicit = rhs.m_use_mmap_explicit;
-    m_ptr               = rhs.m_ptr;
-    m_size              = rhs.m_size;
-    m_read_count        = rhs.m_read_count;
-    m_write_count       = rhs.m_write_count;
+    m_init        = rhs.m_init;
+    m_ptr         = rhs.m_ptr;
+    m_size        = rhs.m_size;
+    m_read_count  = rhs.m_read_count.load();
+    m_write_count = rhs.m_write_count.load();
     rhs.reset();
     return *this;
 }
@@ -94,7 +72,8 @@ void
 ring_buffer::init(size_t _size)
 {
     if(m_init)
-        throw std::runtime_error("tim::base::ring_buffer::init(size_t) :: already initialized");
+        throw std::runtime_error("rocprofiler::common::container::base::ring_buffer::init(size_t) "
+                                 ":: already initialized");
 
     m_init = true;
 
@@ -115,14 +94,6 @@ ring_buffer::init(size_t _size)
     m_read_count  = 0;
     m_write_count = 0;
 
-    if(!m_use_mmap_explicit) m_use_mmap = get_env("ROCPROFILER_USE_MMAP", m_use_mmap);
-
-    if(!m_use_mmap)
-    {
-        m_ptr = malloc(m_size * sizeof(char));
-        return;
-    }
-
     // Map twice the buffer size.
     if((m_ptr =
             mmap(nullptr, m_size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0)) ==
@@ -130,7 +101,6 @@ ring_buffer::init(size_t _size)
     {
         destroy();
         auto _err = errno;
-        // TIMEMORY_PRINTF_FATAL(stderr, "Error using mmap: %s\n", strerror(_err));
         throw std::runtime_error(strerror(_err));
     }
 }
@@ -140,37 +110,15 @@ ring_buffer::destroy()
 {
     if(m_ptr && m_init)
     {
-        if(!m_use_mmap)
-        {
-            ::free(m_ptr);
-        }
-        else
-        {
-            // Unmap the mapped virtual memmory.
-            auto ret = munmap(m_ptr, m_size);
-            if(ret != 0) perror("munmap");
-        }
+        // Unmap the mapped virtual memmory.
+        auto ret = munmap(m_ptr, m_size);
+        if(ret != 0) perror("ring_buffer: munmap failed");
     }
     m_init        = false;
     m_size        = 0;
     m_read_count  = 0;
     m_write_count = 0;
     m_ptr         = nullptr;
-}
-
-void
-ring_buffer::set_use_mmap(bool _v)
-{
-    if(!m_init)
-    {
-        m_use_mmap          = _v;
-        m_use_mmap_explicit = true;
-    }
-    else
-    {
-        throw std::runtime_error("tim::base::ring_buffer::set_use_mmap(bool) cannot be "
-                                 "called after initialization");
-    }
 }
 
 std::string
@@ -186,81 +134,82 @@ ring_buffer::as_string() const
 //
 
 void*
-ring_buffer::request(size_t _length)
+ring_buffer::request(size_t _length, bool _wrap)
 {
-    if(m_ptr == nullptr) return nullptr;
+    if(m_ptr == nullptr || m_size == 0) return nullptr;
 
-    // Make sure we don't put in more than there's room for, by writing no
-    // more than there is free.
-    if(_length > free())
-        throw std::runtime_error("heap-buffer-overflow :: ring buffer is full. read data "
-                                 "to avoid data corruption");
+    if(is_full()) return (_wrap) ? retrieve(_length) : nullptr;
 
     // if write count is at the tail of buffer, bump to the end of buffer
-    auto _modulo = m_size - (m_write_count % m_size);
-    if(_modulo < _length) m_write_count += _modulo;
+    size_t _write_count = 0;
+    size_t _offset      = 0;
+    do
+    {
+        // Make sure we don't put in more than there's room for, by writing no
+        // more than there is free.
+        if(_length > free()) return nullptr;
+
+        _offset      = 0;
+        _write_count = m_write_count.load(std::memory_order_acquire);
+        auto _modulo = m_size - (_write_count % m_size);
+        if(_modulo < _length) _offset = _modulo;
+    } while(!m_write_count.compare_exchange_strong(
+        _write_count, _write_count + _length + _offset, std::memory_order_seq_cst));
 
     // pointer in buffer
-    void* _out = write_ptr();
-
-    // Update write count
-    m_write_count += _length;
+    void* _out = write_ptr(_write_count);
 
     return _out;
 }
 //
 
 void*
-ring_buffer::retrieve(size_t _length)
+ring_buffer::retrieve(size_t _length) const
 {
-    if(m_ptr == nullptr) return nullptr;
+    if(m_ptr == nullptr || m_size == 0) return nullptr;
 
     // Make sure we don't put in more than there's room for, by writing no
     // more than there is free.
-    if(_length > count()) throw std::runtime_error("ring buffer is empty");
 
     // if read count is at the tail of buffer, bump to the end of buffer
-    auto _modulo = m_size - (m_read_count % m_size);
-    if(_modulo < _length) m_read_count += _modulo;
+    size_t _read_count = 0;
+    size_t _offset     = 0;
+    do
+    {
+        if(_length > count()) return nullptr;
+        _offset      = 0;
+        _read_count  = m_read_count.load(std::memory_order_acquire);
+        auto _modulo = m_size - (_read_count % m_size);
+        if(_modulo < _length) _offset = _modulo;
+    } while(!m_read_count.compare_exchange_strong(
+        _read_count, _read_count + _length + _offset, std::memory_order_seq_cst));
 
     // pointer in buffer
-    void* _out = read_ptr();
-
-    // Update write count
-    m_read_count += _length;
+    void* _out = read_ptr(_read_count);
 
     return _out;
-}
-//
-
-size_t
-ring_buffer::rewind(size_t n) const
-{
-    if(n > m_read_count) n = m_read_count;
-    m_read_count -= n;
-    return n;
 }
 //
 
 void
 ring_buffer::reset()
 {
-    m_init        = false;
-    m_ptr         = nullptr;
-    m_size        = 0;
-    m_read_count  = 0;
-    m_write_count = 0;
+    m_init = false;
+    m_size = 0;
+    m_ptr  = nullptr;
+    m_read_count.store(0);
+    m_write_count.store(0);
 }
 //
 
 void
 ring_buffer::save(std::fstream& _fs)
 {
-    _fs.write(reinterpret_cast<char*>(&m_use_mmap), sizeof(m_use_mmap));
-    _fs.write(reinterpret_cast<char*>(&m_use_mmap_explicit), sizeof(m_use_mmap_explicit));
+    auto _read_count  = m_read_count.load();
+    auto _write_count = m_write_count.load();
     _fs.write(reinterpret_cast<char*>(&m_size), sizeof(m_size));
-    _fs.write(reinterpret_cast<char*>(&m_read_count), sizeof(m_read_count));
-    _fs.write(reinterpret_cast<char*>(&m_write_count), sizeof(m_write_count));
+    _fs.write(reinterpret_cast<char*>(&_read_count), sizeof(_read_count));
+    _fs.write(reinterpret_cast<char*>(&_write_count), sizeof(_write_count));
     _fs.write(reinterpret_cast<char*>(m_ptr), m_size * sizeof(char));
 }
 //
@@ -270,16 +219,49 @@ ring_buffer::load(std::fstream& _fs)
 {
     destroy();
 
-    _fs.read(reinterpret_cast<char*>(&m_use_mmap), sizeof(m_use_mmap));
-    _fs.read(reinterpret_cast<char*>(&m_use_mmap_explicit), sizeof(m_use_mmap_explicit));
-    _fs.read(reinterpret_cast<char*>(&m_size), sizeof(m_size));
+    size_t _read_count  = 0;
+    size_t _write_count = 0;
+    size_t _size        = 0;
 
-    init(m_size);
-    if(!m_ptr) m_ptr = malloc(m_size);
+    _fs.read(reinterpret_cast<char*>(&_size), sizeof(_size));
 
-    _fs.read(reinterpret_cast<char*>(&m_read_count), sizeof(m_read_count));
-    _fs.read(reinterpret_cast<char*>(&m_write_count), sizeof(m_write_count));
+    init(_size);
+
+    if(!m_ptr) throw std::bad_alloc{};
+
+    _fs.read(reinterpret_cast<char*>(&_read_count), sizeof(_read_count));
+    _fs.read(reinterpret_cast<char*>(&_write_count), sizeof(_write_count));
     _fs.read(reinterpret_cast<char*>(m_ptr), m_size * sizeof(char));
+
+    m_read_count.store(_read_count, std::memory_order_release);
+    m_write_count.store(_write_count, std::memory_order_release);
+}
+
+bool
+ring_buffer::can_clear() const
+{
+    auto _read_count = m_read_count.load(std::memory_order_acquire);
+    return (_read_count == 0);
+}
+
+bool
+ring_buffer::clear()
+{
+    if(!can_clear())
+        throw std::runtime_error(
+            "ring_buffer does not permit invoking clear() member function when the read "
+            "pointer is non-zero because this introduces thread-safety issues");
+
+    m_write_count.store(0, std::memory_order_release);
+    return true;
+}
+
+bool ring_buffer::clear(std::nothrow_t)
+{
+    if(!can_clear()) return false;
+
+    m_write_count.store(0, std::memory_order_release);
+    return true;
 }
 }  // namespace base
 }  // namespace container

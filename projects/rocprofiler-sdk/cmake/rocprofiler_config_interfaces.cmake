@@ -15,10 +15,8 @@ target_include_directories(
               $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 
 target_compile_definitions(
-    rocprofiler-headers
-    INTERFACE $<BUILD_INTERFACE:AMD_INTERNAL_BUILD=1> $<BUILD_INTERFACE:PROF_API_IMPL=1>
-              $<BUILD_INTERFACE:HIP_PROF_HIP_API_STRING=1>
-              $<BUILD_INTERFACE:__HIP_PLATFORM_AMD__=1>)
+    rocprofiler-headers INTERFACE $<BUILD_INTERFACE:AMD_INTERNAL_BUILD=1>
+                                  $<BUILD_INTERFACE:__HIP_PLATFORM_AMD__=1>)
 
 # ensure the env overrides the appending /opt/rocm later
 string(REPLACE ":" ";" CMAKE_PREFIX_PATH "$ENV{CMAKE_PREFIX_PATH};${CMAKE_PREFIX_PATH}")

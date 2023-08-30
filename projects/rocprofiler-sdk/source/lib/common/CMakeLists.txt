@@ -1,10 +1,9 @@
-set(common_sources ${CMAKE_CURRENT_LIST_DIR}/config.cpp
-                   ${CMAKE_CURRENT_LIST_DIR}/helper.cpp)
-
-set(common_headers
-    ${CMAKE_CURRENT_LIST_DIR}/config.hpp ${CMAKE_CURRENT_LIST_DIR}/defines.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/environment.hpp ${CMAKE_CURRENT_LIST_DIR}/join.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/log.hpp ${CMAKE_CURRENT_LIST_DIR}/helper.hpp)
+#
+#   Builds common utilities into a static library
+#
+set(common_sources config.cpp helper.cpp)
+set(common_headers config.hpp defines.hpp environment.hpp join.hpp log.hpp helper.hpp
+                   mpl.hpp)
 
 add_library(rocprofiler-common-library STATIC)
 add_library(rocprofiler::rocprofiler-common-library ALIAS rocprofiler-common-library)
@@ -17,7 +16,8 @@ target_include_directories(rocprofiler-common-library
 
 target_link_libraries(
     rocprofiler-common-library
-    PUBLIC $<BUILD_INTERFACE:rocprofiler::rocprofiler-build-flags>
+    PUBLIC $<BUILD_INTERFACE:rocprofiler::rocprofiler-headers>
+           $<BUILD_INTERFACE:rocprofiler::rocprofiler-build-flags>
            $<BUILD_INTERFACE:rocprofiler::rocprofiler-threading>
            $<BUILD_INTERFACE:rocprofiler::rocprofiler-memcheck>
            $<BUILD_INTERFACE:rocprofiler::rocprofiler-stdcxxfs>

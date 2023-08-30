@@ -1,0 +1,23 @@
+#
+#
+#
+project(rocprofiler-tests-buffering LANGUAGES C CXX)
+
+include(GoogleTest)
+
+set(buffering_sources buffering-serial.cpp buffering-parallel.cpp buffering-save-load.cpp)
+
+add_executable(buffering-test)
+target_sources(buffering-test PRIVATE ${buffering_sources})
+target_link_libraries(
+    buffering-test
+    PRIVATE rocprofiler::rocprofiler-headers rocprofiler::rocprofiler-common-library
+            GTest::gtest GTest::gtest_main)
+
+gtest_add_tests(
+    TARGET buffering-test
+    SOURCES ${buffering_sources}
+    TEST_LIST buffering-test_TESTS
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+
+set_tests_properties(${buffering-tests_TESTS} PROPERTIES TIMEOUT 45 LABELS "unittests")

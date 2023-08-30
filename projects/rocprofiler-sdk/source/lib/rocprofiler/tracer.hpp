@@ -20,9 +20,6 @@
 
 #pragma once
 
-#include <hip/hip_runtime.h>
-#include <hsa/hsa.h>
-#include <hsa/hsa_ext_amd.h>
 #include <rocprofiler/rocprofiler.h>
 
 #include <cstddef>

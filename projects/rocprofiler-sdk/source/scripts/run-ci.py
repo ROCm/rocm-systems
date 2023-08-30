@@ -62,9 +62,13 @@ def generate_custom(args, cmake_args, ctest_args):
 
     if MEMCHECK_TYPE == "AddressSanitizer":
         MEMCHECK_SANITIZER_OPTIONS = "detect_leaks=0 use_sigaltstack=0"
-        MEMCHECK_SUPPRESSION_FILE = f"{SOURCE_DIR}/script/address-sanitizer-suppr.txt"
+        MEMCHECK_SUPPRESSION_FILE = (
+            f"{SOURCE_DIR}/source/scripts/address-sanitizer-suppr.txt"
+        )
     elif MEMCHECK_TYPE == "LeakSanitizer":
-        MEMCHECK_SUPPRESSION_FILE = f"{SOURCE_DIR}/script/leak-sanitizer-suppr.txt"
+        MEMCHECK_SUPPRESSION_FILE = (
+            f"{SOURCE_DIR}/source/scripts/leak-sanitizer-suppr.txt"
+        )
     elif MEMCHECK_TYPE == "ThreadSanitizer":
         external_symbolizer_path = ""
         for version in range(8, 20):
@@ -75,7 +79,7 @@ def generate_custom(args, cmake_args, ctest_args):
             [
                 "history_size=5",
                 "second_deadlock_stack=1",
-                f"suppressions={SOURCE_DIR}/script/thread-sanitizer-suppr.txt",
+                f"suppressions={SOURCE_DIR}/source/scripts/thread-sanitizer-suppr.txt",
                 external_symbolizer_path,
                 os.environ.get("TSAN_OPTIONS", ""),
             ]
@@ -101,7 +105,7 @@ def generate_custom(args, cmake_args, ctest_args):
         set(CTEST_CUSTOM_MAXIMUM_NUMBER_OF_ERRORS "100")
         set(CTEST_CUSTOM_MAXIMUM_NUMBER_OF_WARNINGS "100")
         set(CTEST_CUSTOM_MAXIMUM_PASSED_TEST_OUTPUT_SIZE "51200")
-        set(CTEST_CUSTOM_COVERAGE_EXCLUDE "/usr/.*;/opt/.*;.*external/.*;.*samples/.*;.*test/.*;.*tests-v2/.*;.*perfetto/perfetto_sdk/.*;.*ctf/barectf.*")
+        set(CTEST_CUSTOM_COVERAGE_EXCLUDE "/usr/.*;/opt/.*;.*external/.*;.*samples/.*;.*tests/.*")
 
         set(CTEST_MEMORYCHECK_TYPE "{MEMCHECK_TYPE}")
         set(CTEST_MEMORYCHECK_SUPPRESSIONS_FILE "{MEMCHECK_SUPPRESSION_FILE}")
@@ -426,29 +430,31 @@ if __name__ == "__main__":
         )
     finally:
         if "-VV" not in ctest_args and not args.quiet:
+            tag = None
+            tagfpath = os.path.join(args.binary_dir, "Testing/TAG")
+            with open(tagfpath, "r") as f:
+                tag = f.readline().strip()
+
             for file in glob.glob(
-                os.path.join(args.binary_dir, "Testing/Temporary/**"),
+                os.path.join(args.binary_dir, "Testing", tag, "**"),
                 recursive=True,
             ):
                 if not os.path.isfile(file):
                     continue
-                if (
-                    re.match(
-                        r"Last(Start|Update|Configure|Build|Test).*\.log$",
-                        os.path.basename(file),
-                    )
-                    is None
-                ):
+                if "CoverageLog-" in os.path.basename(file):
                     continue
-
+                print(f"\n\n###### Reading {file}... ######\n\n")
+                with open(file, "r") as inpf:
+                    fdata = inpf.read()
+                    print(fdata)
+            # print out memory checker files
+            for file in glob.glob(
+                os.path.join(args.binary_dir, "Testing/Temporary/MemoryChecker.*"),
+                recursive=True,
+            ):
+                if not os.path.isfile(file):
+                    continue
                 print(f"\n\n\n###### Reading {file}... ######\n\n\n")
                 with open(file, "r") as inpf:
                     fdata = inpf.read()
-                    if "LastTest" not in file and "Coverage" not in file:
-                        print(fdata)
-                    oname = os.path.basename(file)
-                    if oname.endswith(".log"):
-                        oname += ".log"
-                    with open(os.path.join(args.binary_dir, oname), "w") as outf:
-                        print(f"\n\n###### Writing {oname}... ######\n\n")
-                        outf.write(fdata)
+                    print(fdata)
