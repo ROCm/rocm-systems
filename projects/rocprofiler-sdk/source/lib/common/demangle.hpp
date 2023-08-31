@@ -37,32 +37,15 @@ namespace common
 [[nodiscard]] std::string
 cxa_demangle(std::string_view _mangled_name, int* _status) __attribute__((nonnull(2)));
 
-/* The function extracts the kernel name from
-input string. By using the iterators it finds the
-window in the string which contains only the kernel name.
-For example 'Foo<int, float>::foo(a[], int (int))' -> 'foo'*/
-std::string
-truncate_name(std::string_view name);
-
 // C++ symbol demangle
 std::string
 cxx_demangle(std::string_view symbol);
 
-// check if string has special char
-bool
-has_special_char(std::string_view str);
-
-// check if string has correct counter format
-bool
-has_counter_format(std::string_view str);
-
-// trims the begining of the line for spaces
+// The function extracts the kernel name from
+// input string. By using the iterators it finds the
+// window in the string which contains only the kernel name.
+// For example 'Foo<int, float>::foo(a[], int (int))' -> 'foo'
 std::string
-left_trim(std::string_view s);
-
-// validates pmc user input format
-void
-validate_counters_format(std::vector<std::string>& counters, std::string line);
-
+truncate_name(std::string_view name);
 }  // namespace common
 }  // namespace rocprofiler

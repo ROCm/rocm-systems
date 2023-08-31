@@ -20,133 +20,30 @@
 
 #pragma once
 
-#include "lib/common/log.hpp"
+#include <glog/logging.h>
 
 #include <unistd.h>
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
-#include <iostream>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <type_traits>
-
-#if !defined(ROCPROFILER_ENVIRON_LOG_NAME)
-#    if defined(ROCPROFILER_COMMON_LIBRARY_NAME)
-#        define ROCPROFILER_ENVIRON_LOG_NAME "[" ROCPROFILER_COMMON_LIBRARY_NAME "]"
-#    else
-#        define ROCPROFILER_ENVIRON_LOG_NAME "[environ]"
-#    endif
-#endif
-
-#if !defined(ROCPROFILER_ENVIRON_LOG_START)
-#    if defined(ROCPROFILER_COMMON_LIBRARY_LOG_START)
-#        define ROCPROFILER_ENVIRON_LOG_START ROCPROFILER_COMMON_LIBRARY_LOG_START
-#    elif defined(ROCPROFILER_LOG_COLORS_AVAILABLE)
-#        define ROCPROFILER_ENVIRON_LOG_START                                                      \
-            fprintf(stderr, "%s", ::rocprofiler::common::log::color::dmesg());
-#    else
-#        define ROCPROFILER_ENVIRON_LOG_START
-#    endif
-#endif
-
-#if !defined(ROCPROFILER_ENVIRON_LOG_END)
-#    if defined(ROCPROFILER_COMMON_LIBRARY_LOG_END)
-#        define ROCPROFILER_ENVIRON_LOG_END ROCPROFILER_COMMON_LIBRARY_LOG_END
-#    elif defined(ROCPROFILER_LOG_COLORS_AVAILABLE)
-#        define ROCPROFILER_ENVIRON_LOG_END                                                        \
-            fprintf(stderr, "%s", ::rocprofiler::common::log::color::dmesg());
-#    else
-#        define ROCPROFILER_ENVIRON_LOG_END
-#    endif
-#endif
-
-#define ROCPROFILER_ENVIRON_LOG(CONDITION, ...)                                                    \
-    if(CONDITION)                                                                                  \
-    {                                                                                              \
-        fflush(stderr);                                                                            \
-        ROCPROFILER_ENVIRON_LOG_START                                                              \
-        fprintf(stderr, "[rocprofiler]" ROCPROFILER_ENVIRON_LOG_NAME "[%i] ", getpid());           \
-        fprintf(stderr, __VA_ARGS__);                                                              \
-        ROCPROFILER_ENVIRON_LOG_END                                                                \
-        fflush(stderr);                                                                            \
-    }
 
 namespace rocprofiler
 {
 namespace common
 {
-namespace
+namespace impl
 {
-inline std::string
-get_env_impl(std::string_view env_id, std::string_view _default)
-{
-    if(env_id.empty()) return std::string{_default};
-    char* env_var = ::std::getenv(env_id.data());
-    if(env_var) return std::string{env_var};
-    return std::string{_default};
-}
+std::string get_env(std::string_view, std::string_view);
 
-inline std::string
-get_env_impl(std::string_view env_id, const char* _default)
-{
-    return get_env_impl(env_id, std::string_view{_default});
-}
+std::string
+get_env(std::string_view, const char*);
 
-inline int
-get_env_impl(std::string_view env_id, int _default)
-{
-    if(env_id.empty()) return _default;
-    char* env_var = ::std::getenv(env_id.data());
-    if(env_var)
-    {
-        try
-        {
-            return std::stoi(env_var);
-        } catch(std::exception& _e)
-        {
-            fprintf(stderr,
-                    "[rocprofiler][get_env] Exception thrown converting getenv(\"%s\") = "
-                    "%s to integer :: %s. Using default value of %i\n",
-                    env_id.data(),
-                    env_var,
-                    _e.what(),
-                    _default);
-        }
-        return _default;
-    }
-    return _default;
-}
+int
+get_env(std::string_view, int);
 
-inline bool
-get_env_impl(std::string_view env_id, bool _default)
-{
-    if(env_id.empty()) return _default;
-    char* env_var = ::std::getenv(env_id.data());
-    if(env_var)
-    {
-        if(std::string_view{env_var}.empty())
-        {
-            throw std::runtime_error(std::string{"No boolean value provided for "} +
-                                     std::string{env_id});
-        }
-
-        if(std::string_view{env_var}.find_first_not_of("0123456789") == std::string_view::npos)
-        {
-            return static_cast<bool>(std::stoi(env_var));
-        }
-
-        for(size_t i = 0; i < strlen(env_var); ++i)
-            env_var[i] = tolower(env_var[i]);
-        for(const auto& itr : {"off", "false", "no", "n", "f", "0"})
-            if(strcmp(env_var, itr) == 0) return false;
-
-        return true;
-    }
-    return _default;
-}
-}  // namespace
+bool
+get_env(std::string_view, bool);
+}  // namespace impl
 
 template <typename Tp>
 inline auto
@@ -156,11 +53,11 @@ get_env(std::string_view env_id, Tp&& _default)
     {
         using Up = std::underlying_type_t<Tp>;
         // cast to underlying type -> get_env -> cast to enum type
-        return static_cast<Tp>(get_env_impl(env_id, static_cast<Up>(_default)));
+        return static_cast<Tp>(impl::get_env(env_id, static_cast<Up>(_default)));
     }
     else
     {
-        return get_env_impl(env_id, std::forward<Tp>(_default));
+        return impl::get_env(env_id, std::forward<Tp>(_default));
     }
 }
 
@@ -168,17 +65,14 @@ struct env_config
 {
     std::string env_name  = {};
     std::string env_value = {};
-    int         override  = 0;
+    int         overwrite = 0;
 
     auto operator()(bool _verbose = false) const
     {
         if(env_name.empty()) return -1;
-        ROCPROFILER_ENVIRON_LOG(_verbose,
-                                "setenv(\"%s\", \"%s\", %i)\n",
-                                env_name.c_str(),
-                                env_value.c_str(),
-                                override);
-        return setenv(env_name.c_str(), env_value.c_str(), override);
+        LOG_IF(INFO, _verbose) << "[rocprofiler][set_env] setenv(\"" << env_name << "\", \""
+                               << env_value << "\", " << overwrite << ")\n";
+        return setenv(env_name.c_str(), env_value.c_str(), overwrite);
     }
 };
 }  // namespace common

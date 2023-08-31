@@ -18,7 +18,7 @@
  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  THE SOFTWARE. */
 
-#include "lib/common/helper.hpp"
+#include "lib/common/demangle.hpp"
 
 #include <amd_comgr/amd_comgr.h>
 
@@ -31,11 +31,6 @@
 #include <set>
 #include <sstream>
 #include <string>
-
-#define ENABLE_BACKTRACE
-#if defined(ENABLE_BACKTRACE)
-#    include <backtrace.h>
-#endif
 
 #define amd_comgr_(call)                                                                           \
     do                                                                                             \
@@ -127,79 +122,39 @@ cxa_demangle(std::string_view _mangled_name, int* _status)
     return _demangled_name;
 }
 
-namespace
+// C++ symbol demangle
+std::string
+cxx_demangle(std::string_view symbol)
 {
-#if defined(ENABLE_BACKTRACE)
+    int  _status       = 0;
+    auto demangled_str = cxa_demangle(symbol, &_status);
+    if(_status == 0)
+    {
+        return demangled_str;
+    }
 
-// struct BackTraceInfo
-// {
-//     struct ::backtrace_state* state = nullptr;
-//     std::stringstream         sstream{};
-//     int                       depth = 0;
-//     int                       error = 0;
-// };
+    amd_comgr_data_t mangled_data;
+    amd_comgr_(create_data(AMD_COMGR_DATA_KIND_BYTES, &mangled_data));
+    amd_comgr_(set_data(mangled_data, symbol.size(), symbol.data()));
 
-// void
-// errorCallback(void* data, const char* message, int errnum)
-// {
-//     BackTraceInfo* info = static_cast<BackTraceInfo*>(data);
-//     info->sstream << "ROCProfiler: error: " << message << '(' << errnum << ')';
-//     info->error = 1;
-// }
+    amd_comgr_data_t demangled_data;
+    amd_comgr_(demangle_symbol_name(mangled_data, &demangled_data));
 
-// void
-// syminfoCallback(void* data,
-//                 uintptr_t /* pc  */,
-//                 const char* symname,
-//                 uintptr_t /* symval  */,
-//                 uintptr_t /* symsize  */)
-// {
-//     BackTraceInfo* info = static_cast<BackTraceInfo*>(data);
+    size_t demangled_size = 0;
+    amd_comgr_(get_data(demangled_data, &demangled_size, nullptr));
 
-//     if(symname == nullptr) return;
+    demangled_str.resize(demangled_size);
+    amd_comgr_(get_data(demangled_data, &demangled_size, demangled_str.data()));
 
-//     int    status     = 0;
-//     auto&& _demangled = cxa_demangle(symname, &status);
-//     info->sstream << ' '
-//                   << (status == 0 ? std::string_view{_demangled} : std::string_view{symname});
-// }
+    amd_comgr_(release_data(mangled_data));
+    amd_comgr_(release_data(demangled_data));
+    return demangled_str;
+}
 
-// int
-// fullCallback(void* data, uintptr_t pc, const char* filename, int lineno, const char* function)
-// {
-//     BackTraceInfo* info = static_cast<BackTraceInfo*>(data);
-
-//     info->sstream << std::endl
-//                   << "    #" << std::dec << info->depth++ << ' ' << "0x" << std::noshowbase
-//                   << std::hex << std::setfill('0') << std::setw(sizeof(pc) * 2) << pc;
-//     if(function == nullptr)
-//     {
-//         backtrace_syminfo(info->state, pc, syminfoCallback, errorCallback, data);
-//     }
-//     else
-//     {
-//         int    status     = 0;
-//         auto&& _demangled = cxa_demangle(function, &status);
-//         info->sstream << ' '
-//                       << (status == 0 ? std::string_view{_demangled} :
-//                       std::string_view{function});
-
-//         if(filename != nullptr)
-//         {
-//             info->sstream << " in " << filename;
-//             if(lineno != 0) info->sstream << ':' << std::dec << lineno;
-//         }
-//     }
-
-//     return info->error;
-// }
-#endif  // defined (ENABLE_BACKTRACE)
-}  // namespace
-
-/* The function extracts the kernel name from
-input string. By using the iterators it finds the
-window in the string which contains only the kernel name.
-For example 'Foo<int, float>::foo(a[], int (int))' -> 'foo'*/
+// The function extracts the kernel name from
+// input string. By using the iterators it finds the
+// window in the string which contains only the kernel name.
+// For example 'Foo<int, float>::foo(a[], int (int))' -> 'foo'
 std::string
 truncate_name(std::string_view name)
 {
@@ -245,129 +200,5 @@ truncate_name(std::string_view name)
         rit++;
     return std::string{name.substr(rend - rit, rit - rbeg)};
 }
-
-// C++ symbol demangle
-std::string
-cxx_demangle(std::string_view symbol)
-{
-    int  _status       = 0;
-    auto demangled_str = cxa_demangle(symbol, &_status);
-    if(_status == 0)
-    {
-        return demangled_str;
-    }
-
-    amd_comgr_data_t mangled_data;
-    amd_comgr_(create_data(AMD_COMGR_DATA_KIND_BYTES, &mangled_data));
-    amd_comgr_(set_data(mangled_data, symbol.size(), symbol.data()));
-
-    amd_comgr_data_t demangled_data;
-    amd_comgr_(demangle_symbol_name(mangled_data, &demangled_data));
-
-    size_t demangled_size = 0;
-    amd_comgr_(get_data(demangled_data, &demangled_size, nullptr));
-
-    demangled_str.resize(demangled_size);
-    amd_comgr_(get_data(demangled_data, &demangled_size, demangled_str.data()));
-
-    amd_comgr_(release_data(mangled_data));
-    amd_comgr_(release_data(demangled_data));
-    return demangled_str;
-}
-
-// check if string has special char
-bool
-has_special_char(std::string_view str)
-{
-    return std::find_if(str.begin(), str.end(), [](unsigned char ch) {
-               return !((isalnum(ch) != 0) || ch == '_' || ch == ':' || ch == ' ');
-           }) != str.end();
-}
-
-// check if string has correct counter format
-bool
-has_counter_format(std::string_view str)
-{
-    return std::find_if(str.begin(), str.end(), [](unsigned char ch) {
-               return ((isalnum(ch) != 0) || ch == '_');
-           }) != str.end();
-}
-
-// trims the begining of the line for spaces
-std::string
-left_trim(std::string_view s)
-{
-    constexpr std::string_view WHITESPACE = " \n\r\t\f\v";
-    size_t                     start      = s.find_first_not_of(WHITESPACE);
-    if(start == std::string_view::npos) return std::string{};
-    return std::string{s.substr(start)};
-}
-
-// trims begining and end of input line in place
-void
-trim(std::string& str)
-{
-    // Remove leading spaces.
-    str.erase(str.begin(), std::find_if(str.begin(), str.end(), [](unsigned char ch) {
-                  return std::isspace(ch) == 0;
-              }));
-    // Remove trailing spaces.
-    str.erase(std::find_if(
-                  str.rbegin(), str.rend(), [](unsigned char ch) { return std::isspace(ch) == 0; })
-                  .base(),
-              str.end());
-}
-
-// replace unsuported specail chars with space
-static void
-handle_special_chars(std::string& str)
-{
-    std::set<char> specialChars = {'!', '@', '#', '$', '%', '&', '(', ')', ',',
-                                   '*', '+', '-', '.', '/', ';', '<', '=', '>',
-                                   '?', '@', '{', '}', '^', '`', '~', '|', ':'};
-
-    // Iterate over the string and replace any special characters with a space.
-    for(char& i : str)
-    {
-        if(specialChars.find(i) != specialChars.end())
-        {
-            i = ' ';
-        }
-    }
-}
-
-// validate input coutners and correct format if needed
-void
-validate_counters_format(std::vector<std::string>& counters, std::string line)
-{
-    // trim line for any white spaces
-    trim(line);
-
-    if(!(line[0] == '#' || line.find("pmc") == std::string::npos))
-    {
-        handle_special_chars(line);
-
-        std::stringstream input_line(line);
-        std::string       counter;
-        while(getline(input_line, counter, ' '))
-        {
-            if(counter.substr(0, 3) != "pmc" && has_counter_format(counter))
-            {
-                counters.push_back(counter);
-            }
-        }
-    }
-
-    // raise exception with correct usage if user still managed to corrupt input
-    for(const auto& itr : counters)
-    {
-        if(!has_counter_format(itr))
-        {
-            fprintf(stderr,
-                    "[rocprofiler] Bad input metric. usage --> pmc: <counter1> <counter2>\n");
-        }
-    }
-}
-
 }  // namespace common
 }  // namespace rocprofiler

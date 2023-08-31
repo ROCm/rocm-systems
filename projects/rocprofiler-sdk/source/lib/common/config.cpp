@@ -20,10 +20,10 @@
 //
 
 #include "lib/common/config.hpp"
+#include "lib/common/demangle.hpp"
 #include "lib/common/environment.hpp"
-#include "lib/common/helper.hpp"
-#include "lib/common/join.hpp"
-#include "lib/common/log.hpp"
+
+#include <fmt/core.h>
 
 #include <unistd.h>
 #include <algorithm>
@@ -210,13 +210,13 @@ output_keys(std::string _tag)
     auto _mpi_size = get_env<int>("OMPI_COMM_WORLD_SIZE", get_env<int>("MV2_COMM_WORLD_SIZE", 0));
     auto _mpi_rank = get_env<int>("OMPI_COMM_WORLD_RANK", get_env<int>("MV2_COMM_WORLD_RANK", -1));
 
-    auto _dmp_size      = join("", (_mpi_size) > 0 ? _mpi_size : 1);
-    auto _dmp_rank      = join("", (_mpi_rank) > 0 ? _mpi_rank : 0);
-    auto _proc_id       = join("", getpid());
-    auto _parent_id     = join("", getppid());
-    auto _pgroup_id     = join("", getpgid(getpid()));
-    auto _session_id    = join("", getsid(getpid()));
-    auto _proc_size     = join("", get_num_siblings());
+    auto _dmp_size      = fmt::format("{}", (_mpi_size) > 0 ? _mpi_size : 1);
+    auto _dmp_rank      = fmt::format("{}", (_mpi_rank) > 0 ? _mpi_rank : 0);
+    auto _proc_id       = fmt::format("{}", getpid());
+    auto _parent_id     = fmt::format("{}", getppid());
+    auto _pgroup_id     = fmt::format("{}", getpgid(getpid()));
+    auto _session_id    = fmt::format("{}", getsid(getpid()));
+    auto _proc_size     = fmt::format("{}", get_num_siblings());
     auto _pwd_string    = get_env<std::string>("PWD", ".");
     auto _slurm_job_id  = get_env<std::string>("SLURM_JOB_ID", "0");
     auto _slurm_proc_id = get_env("SLURM_PROCID", _dmp_rank);
@@ -248,7 +248,7 @@ output_keys(std::string _tag)
         for(size_t i = 0; i < _cmdline.size(); ++i)
         {
             auto _v = _cmdline.at(i);
-            _options.emplace_back(join("", "%arg", i, "%"), _v, join("", "Argument #", i));
+            _options.emplace_back(fmt::format("%arg{}%", i), _v, fmt::format("Argument #{}", i));
         }
     }
 
@@ -317,19 +317,13 @@ format(std::string _fpath, const std::string& _tag)
                 }
                 auto _beg = std::regex_replace(_fpath, _re, "$1");
                 auto _end = std::regex_replace(_fpath, _re, "$4");
-                _fpath    = join("", _beg, _val, _end);
+                _fpath    = fmt::format("{}{}{}", _beg, _val, _end);
             }
         }
     } catch(std::exception& _e)
     {
-        fprintf(stderr,
-                "%s[rocprofiler][%s:%i] %s threw exception :: %s\n%s",
-                log::color::dmesg(),
-                __FILE__,
-                __LINE__,
-                __FUNCTION__,
-                _e.what(),
-                log::color::end());
+        LOG(WARNING) << "[rocprofiler] " << __FUNCTION__ << " threw an exception :: " << _e.what()
+                     << "\n";
     }
 
     // remove %arg<N>% where N >= argc
@@ -340,14 +334,8 @@ format(std::string _fpath, const std::string& _tag)
             _fpath = std::regex_replace(_fpath, _re, "$1$4");
     } catch(std::exception& _e)
     {
-        fprintf(stderr,
-                "%s[rocprofiler][%s:%i] %s threw exception :: %s\n%s",
-                log::color::dmesg(),
-                __FILE__,
-                __LINE__,
-                __FUNCTION__,
-                _e.what(),
-                log::color::end());
+        LOG(WARNING) << "[rocprofiler] " << __FUNCTION__ << " threw an exception :: " << _e.what()
+                     << "\n";
     }
 
     return _fpath;
@@ -365,11 +353,11 @@ compose_filename(const config& _cfg)
     {
         if(_cfg.mpi_rank >= 0)
         {
-            _output_file = join('.', _output_file, _cfg.mpi_rank);
+            _output_file = fmt::format("{}.{}", _output_file, _cfg.mpi_rank);
         }
         else
         {
-            _output_file = join('.', _output_file, getpid());
+            _output_file = fmt::format("{}.{}", _output_file, getpid());
         }
     }
     if(!_output_ext.empty())
