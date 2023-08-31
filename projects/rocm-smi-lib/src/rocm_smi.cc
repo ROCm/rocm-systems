@@ -41,29 +41,29 @@
  *
  */
 
-#include <assert.h>
-#include <errno.h>
-#include <sys/utsname.h>
-#include <pthread.h>
-#include <ctype.h>
-#include <string>
-#include <unistd.h>
-#include <poll.h>
 #include <fcntl.h>
+#include <poll.h>
+#include <pthread.h>
+#include <cstddef>
+#include <string>
 #include <sys/ioctl.h>
-#include <cstring>
+#include <sys/utsname.h>
+#include <unistd.h>
 
-#include <sstream>
 #include <algorithm>
-#include <cerrno>
 #include <bitset>
+#include <cassert>
+#include <cctype>
+#include <cerrno>
 #include <cstdint>
-#include <unordered_map>
-#include <unordered_set>
-#include <map>
+#include <cstring>
 #include <fstream>
 #include <iostream>
+#include <map>
+#include <sstream>
 #include <tuple>
+#include <unordered_map>
+#include <unordered_set>
 
 #include "rocm_smi/rocm_smi_common.h"  // Should go before rocm_smi.h
 #include "rocm_smi/rocm_smi.h"
@@ -81,16 +81,24 @@ using namespace ROCmLogging;
 using namespace amd::smi;
 
 static const uint32_t kMaxOverdriveLevel = 20;
-static const float kEnergyCounterResolution = 15.3f;
+static const float kEnergyCounterResolution = 15.3F;
 
-std::map<rsmi_clk_type_t, std::string> ClkStateMap = {
-    {RSMI_CLK_TYPE_SYS, "SCLK"},
-    {RSMI_CLK_TYPE_DF, "DFCLK"},
-    {RSMI_CLK_TYPE_DCEF, "DCEFCLK"},
-    {RSMI_CLK_TYPE_SOC, "SOCCLK"},
-    {RSMI_CLK_TYPE_MEM, "MCLK"},
-    {RSMI_CLK_TYPE_PCIE, "PCIECLK"},
-  };
+static const std::map<rsmi_clk_type_t, std::string> kClkStateMap = {
+  { RSMI_CLK_TYPE_SYS, "SCLK" },
+  { RSMI_CLK_TYPE_DF, "DFCLK" },
+  { RSMI_CLK_TYPE_DCEF, "DCEFCLK" },
+  { RSMI_CLK_TYPE_SOC, "SOCCLK" },
+  { RSMI_CLK_TYPE_MEM, "MCLK" },
+  { RSMI_CLK_TYPE_PCIE, "PCIECLK" },
+};
+
+static const std::map<rsmi_clk_type_t, amd::smi::DevInfoTypes> kClkTypeMap = {
+  { RSMI_CLK_TYPE_SYS, amd::smi::kDevGPUSClk },
+  { RSMI_CLK_TYPE_MEM, amd::smi::kDevGPUMClk },
+  { RSMI_CLK_TYPE_DF, amd::smi::kDevFClk },
+  { RSMI_CLK_TYPE_DCEF, amd::smi::kDevDCEFClk },
+  { RSMI_CLK_TYPE_SOC, amd::smi::kDevSOCClk },
+};
 
 #define TRY try {
 #define CATCH } catch (...) {return amd::smi::handleException();}
@@ -156,7 +164,7 @@ static uint64_t freq_string_to_int(const std::vector<std::string> &freq_lines,
   }
 
   if (is_curr != nullptr) {
-    if (freq_lines[i].find("*") != std::string::npos) {
+    if (freq_lines[i].find('*') != std::string::npos) {
       *is_curr = true;
     } else {
       *is_curr = false;
@@ -167,7 +175,7 @@ static uint64_t freq_string_to_int(const std::vector<std::string> &freq_lines,
   if (star_str[0] == 'x') {
     assert(lanes != nullptr && "Lanes are provided but null lanes pointer");
     if (lanes) {
-      if (star_str.substr(1) == "") {
+      if (star_str.substr(1).empty()) {
         throw amd::smi::rsmi_exception(RSMI_STATUS_NO_DATA, __FUNCTION__);
       }
 
@@ -209,8 +217,6 @@ static void freq_volt_string_to_point(std::string in_line,
 
   multiplier = get_multiplier_from_str(volts_units_str[0]);
   pt->voltage = static_cast<uint64_t>(volts*multiplier);
-
-  return;
 }
 
 static void od_value_pair_str_to_range(std::string in_line, rsmi_range_t *rg) {
@@ -237,8 +243,6 @@ static void od_value_pair_str_to_range(std::string in_line, rsmi_range_t *rg) {
 
   multiplier = get_multiplier_from_str(hi_units_str[0]);
   rg->upper_bound = static_cast<uint64_t>(hi*multiplier);
-
-  return;
 }
 
 /**
@@ -258,7 +262,7 @@ power_prof_string_to_int(std::string pow_prof_line, bool *is_curr,
   fs >> *prof_ind;
   fs >> mode;
 
-  while (1) {
+  while (true) {
     tmp = mode.find_last_of("* :");
     if (tmp == std::string::npos) {
       break;
@@ -267,7 +271,7 @@ power_prof_string_to_int(std::string pow_prof_line, bool *is_curr,
   }
 
   if (is_curr != nullptr) {
-    if (pow_prof_line.find("*") != std::string::npos) {
+    if (pow_prof_line.find('*') != std::string::npos) {
       *is_curr = true;
     } else {
       *is_curr = false;
@@ -759,14 +763,13 @@ rsmi_status_t
 rsmi_topo_numa_affinity_get(uint32_t dv_ind, int32_t *numa_node) {
   TRY
   rsmi_status_t ret;
-  uint64_t val = 0;
 
   CHK_SUPPORT_NAME_ONLY(numa_node)
 
   DEVICE_MUTEX
   std::string str_val;
   ret = get_dev_value_str(amd::smi::kDevNumaNode, dv_ind, &str_val);
-  *numa_node = std::stol(str_val, 0);
+  *numa_node = std::stoi(str_val, nullptr);
 
   return ret;
   CATCH
@@ -1005,13 +1008,10 @@ rsmi_dev_mem_overdrive_level_get(uint32_t dv_ind, uint32_t *od) {
 }
 
 rsmi_status_t
-rsmi_dev_overdrive_level_set(int32_t dv_ind, uint32_t od) {
+rsmi_dev_overdrive_level_set(uint32_t dv_ind, uint32_t od) {
   std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
-  if (dv_ind < 0) {
-    return RSMI_STATUS_INVALID_ARGS;
-  }
   return rsmi_dev_overdrive_level_set_v1(static_cast<uint32_t>(dv_ind), od);
 }
 
@@ -1032,11 +1032,11 @@ rsmi_dev_overdrive_level_set_v1(uint32_t dv_ind, uint32_t od) {
 }
 
 rsmi_status_t
-rsmi_dev_perf_level_set(int32_t dv_ind, rsmi_dev_perf_level_t perf_level) {
+rsmi_dev_perf_level_set(uint32_t dv_ind, rsmi_dev_perf_level_t perf_level) {
   std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
-  return rsmi_dev_perf_level_set_v1(static_cast<uint32_t>(dv_ind), perf_level);
+  return rsmi_dev_perf_level_set_v1(dv_ind, perf_level);
 }
 
 rsmi_status_t
@@ -1075,7 +1075,7 @@ static rsmi_status_t get_frequencies(amd::smi::DevInfoTypes type, rsmi_clk_type_
   }
   assert(val_vec.size() <= RSMI_MAX_NUM_FREQUENCIES);
 
-  if (val_vec.size() == 0) {
+  if (val_vec.empty()) {
     return RSMI_STATUS_NOT_YET_IMPLEMENTED;
   }
 
@@ -1090,7 +1090,8 @@ static rsmi_status_t get_frequencies(amd::smi::DevInfoTypes type, rsmi_clk_type_
     // Check that that is true.
     if (i > 0) {
       if (f->frequency[i] < f->frequency[i-1]) {
-        std::string sysvalue = ClkStateMap[clk_type];
+        std::string sysvalue;
+        sysvalue += kClkStateMap.find(clk_type)->second;
         sysvalue += " Current Value";
         sysvalue += ' ' + std::to_string(f->frequency[i]);
         sysvalue += " Previous Value";
@@ -1101,7 +1102,8 @@ static rsmi_status_t get_frequencies(amd::smi::DevInfoTypes type, rsmi_clk_type_
     if (current) {
       // set the current frequency
       if (f->current != RSMI_MAX_NUM_FREQUENCIES + 1) {
-        std::string sysvalue = ClkStateMap[clk_type];
+        std::string sysvalue;
+        sysvalue += kClkStateMap.find(clk_type)->second;
         sysvalue += " Current Value";
         sysvalue += ' ' + std::to_string(f->frequency[i]);
         sysvalue += " Previous Value";
@@ -1140,7 +1142,7 @@ static rsmi_status_t get_power_profiles(uint32_t dv_ind,
     return ret;
   }
   assert(val_vec.size() <= RSMI_MAX_NUM_POWER_PROFILES);
-  if (val_vec.size() > RSMI_MAX_NUM_POWER_PROFILES + 1 || val_vec.size() < 1) {
+  if (val_vec.size() > RSMI_MAX_NUM_POWER_PROFILES + 1 || val_vec.empty()) {
     return RSMI_STATUS_UNEXPECTED_SIZE;
   }
   // -1 for the header line, below
@@ -1326,8 +1328,9 @@ rsmi_status_t rsmi_dev_clk_range_set(uint32_t dv_ind, uint64_t minclkvalue,
   LOG_TRACE(ss);
 
   assert(minclkvalue < maxclkvalue);
-  std::string min_sysvalue, max_sysvalue;
-  std::map<rsmi_clk_type_t, std::string> ClkStateMap = {
+  std::string min_sysvalue;
+  std::string max_sysvalue;
+  std::map<rsmi_clk_type_t, std::string> clk_char_map = {
     {RSMI_CLK_TYPE_SYS, "s"},
     {RSMI_CLK_TYPE_MEM, "m"},
   };
@@ -1345,11 +1348,11 @@ rsmi_status_t rsmi_dev_clk_range_set(uint32_t dv_ind, uint64_t minclkvalue,
   // minimum clock. And 1 if to set maximum clock. E.g., "s 0 500" will update
   // minimum sclk to be 500 MHz. "m 1 800" will update maximum mclk to 800Mhz.
 
-  min_sysvalue = ClkStateMap[clkType];
+  min_sysvalue = clk_char_map[clkType];
   min_sysvalue += ' ' + std::to_string(RSMI_FREQ_IND_MIN);
   min_sysvalue += ' ' + std::to_string(minclkvalue);
   min_sysvalue += '\n';
-  max_sysvalue = ClkStateMap[clkType];
+  max_sysvalue = clk_char_map[clkType];
   max_sysvalue += ' ' + std::to_string(RSMI_FREQ_IND_MAX);
   max_sysvalue += ' ' + std::to_string(maxclkvalue);
   max_sysvalue += '\n';
@@ -1381,7 +1384,7 @@ rsmi_status_t rsmi_dev_od_clk_info_set(uint32_t dv_ind, rsmi_freq_ind_t level,
   LOG_TRACE(ss);
 
   std::string sysvalue;
-  std::map<rsmi_clk_type_t, std::string> ClkStateMap = {
+  std::map<rsmi_clk_type_t, std::string> clk_char_map = {
     {RSMI_CLK_TYPE_SYS, "s"},
     {RSMI_CLK_TYPE_MEM, "m"},
   };
@@ -1400,14 +1403,8 @@ rsmi_status_t rsmi_dev_od_clk_info_set(uint32_t dv_ind, rsmi_freq_ind_t level,
 
   switch (clkType) {
     case RSMI_CLK_TYPE_SYS:
-      sysvalue = ClkStateMap[clkType];
-      sysvalue += ' ' + std::to_string(level);
-      sysvalue += ' ' + std::to_string(clkvalue);
-      sysvalue += '\n';
-      break;
-
     case RSMI_CLK_TYPE_MEM:
-      sysvalue = ClkStateMap[clkType];
+      sysvalue = clk_char_map[clkType];
       sysvalue += ' ' + std::to_string(level);
       sysvalue += ' ' + std::to_string(clkvalue);
       sysvalue += '\n';
@@ -1487,7 +1484,6 @@ static void get_vc_region(uint32_t start_ind,
   }
   od_value_pair_str_to_range((*val_vec)[start_ind], &p->freq_range);
   od_value_pair_str_to_range((*val_vec)[start_ind + 1], &p->volt_range);
-  return;
 }
 
 /*
@@ -1614,24 +1610,11 @@ rsmi_dev_gpu_clk_freq_get(uint32_t dv_ind, rsmi_clk_type_t clk_type,
 
   CHK_SUPPORT_VAR(f, clk_type)
 
-  switch (clk_type) {
-    case RSMI_CLK_TYPE_SYS:
-      dev_type = amd::smi::kDevGPUSClk;
-      break;
-    case RSMI_CLK_TYPE_MEM:
-      dev_type = amd::smi::kDevGPUMClk;
-      break;
-    case RSMI_CLK_TYPE_DF:
-      dev_type = amd::smi::kDevFClk;
-      break;
-    case RSMI_CLK_TYPE_DCEF:
-      dev_type = amd::smi::kDevDCEFClk;
-      break;
-    case RSMI_CLK_TYPE_SOC:
-      dev_type = amd::smi::kDevSOCClk;
-      break;
-    default:
-      return RSMI_STATUS_INVALID_ARGS;
+  const auto & clk_type_it = kClkTypeMap.find(clk_type);
+  if (clk_type_it != kClkTypeMap.end()) {
+    dev_type = clk_type_it->second;
+  } else {
+    return RSMI_STATUS_INVALID_ARGS;
   }
 
   DEVICE_MUTEX
@@ -1653,72 +1636,35 @@ rsmi_dev_firmware_version_get(uint32_t dv_ind, rsmi_fw_block_t block,
   std::string val_str;
   amd::smi::DevInfoTypes dev_type;
 
-  switch (block) {
-    case RSMI_FW_BLOCK_ASD:
-      dev_type = amd::smi::kDevFwVersionAsd;
-      break;
-    case RSMI_FW_BLOCK_CE:
-      dev_type = amd::smi::kDevFwVersionCe;
-      break;
-    case RSMI_FW_BLOCK_DMCU:
-      dev_type = amd::smi::kDevFwVersionDmcu;
-      break;
-    case RSMI_FW_BLOCK_MC:
-      dev_type = amd::smi::kDevFwVersionMc;
-      break;
-    case RSMI_FW_BLOCK_ME:
-      dev_type = amd::smi::kDevFwVersionMe;
-      break;
-    case RSMI_FW_BLOCK_MEC:
-      dev_type = amd::smi::kDevFwVersionMec;
-      break;
-    case RSMI_FW_BLOCK_MEC2:
-      dev_type = amd::smi::kDevFwVersionMec2;
-      break;
-    case RSMI_FW_BLOCK_PFP:
-      dev_type = amd::smi::kDevFwVersionPfp;
-      break;
-    case RSMI_FW_BLOCK_RLC:
-      dev_type = amd::smi::kDevFwVersionRlc;
-      break;
-    case RSMI_FW_BLOCK_RLC_SRLC:
-      dev_type = amd::smi::kDevFwVersionRlcSrlc;
-      break;
-    case RSMI_FW_BLOCK_RLC_SRLG:
-      dev_type = amd::smi::kDevFwVersionRlcSrlg;
-      break;
-    case RSMI_FW_BLOCK_RLC_SRLS:
-      dev_type = amd::smi::kDevFwVersionRlcSrls;
-      break;
-    case RSMI_FW_BLOCK_SDMA:
-      dev_type = amd::smi::kDevFwVersionSdma;
-      break;
-    case RSMI_FW_BLOCK_SDMA2:
-      dev_type = amd::smi::kDevFwVersionSdma2;
-      break;
-    case RSMI_FW_BLOCK_SMC:
-      dev_type = amd::smi::kDevFwVersionSmc;
-      break;
-    case RSMI_FW_BLOCK_SOS:
-      dev_type = amd::smi::kDevFwVersionSos;
-      break;
-    case RSMI_FW_BLOCK_TA_RAS:
-      dev_type = amd::smi::kDevFwVersionTaRas;
-      break;
-    case RSMI_FW_BLOCK_TA_XGMI:
-      dev_type = amd::smi::kDevFwVersionTaXgmi;
-      break;
-    case RSMI_FW_BLOCK_UVD:
-      dev_type = amd::smi::kDevFwVersionUvd;
-      break;
-    case RSMI_FW_BLOCK_VCE:
-      dev_type = amd::smi::kDevFwVersionVce;
-      break;
-    case RSMI_FW_BLOCK_VCN:
-      dev_type = amd::smi::kDevFwVersionVcn;
-      break;
-    default:
-      return RSMI_STATUS_INVALID_ARGS;
+  static const std::map<rsmi_fw_block_t, amd::smi::DevInfoTypes> kFWBlockTypeMap = {
+    { RSMI_FW_BLOCK_ASD, amd::smi::kDevFwVersionAsd },
+    { RSMI_FW_BLOCK_CE, amd::smi::kDevFwVersionCe },
+    { RSMI_FW_BLOCK_DMCU, amd::smi::kDevFwVersionDmcu },
+    { RSMI_FW_BLOCK_MC, amd::smi::kDevFwVersionMc },
+    { RSMI_FW_BLOCK_ME, amd::smi::kDevFwVersionMe },
+    { RSMI_FW_BLOCK_MEC, amd::smi::kDevFwVersionMec },
+    { RSMI_FW_BLOCK_MEC2, amd::smi::kDevFwVersionMec2 },
+    { RSMI_FW_BLOCK_PFP, amd::smi::kDevFwVersionPfp },
+    { RSMI_FW_BLOCK_RLC, amd::smi::kDevFwVersionRlc },
+    { RSMI_FW_BLOCK_RLC_SRLC, amd::smi::kDevFwVersionRlcSrlc },
+    { RSMI_FW_BLOCK_RLC_SRLG, amd::smi::kDevFwVersionRlcSrlg },
+    { RSMI_FW_BLOCK_RLC_SRLS, amd::smi::kDevFwVersionRlcSrls },
+    { RSMI_FW_BLOCK_SDMA, amd::smi::kDevFwVersionSdma },
+    { RSMI_FW_BLOCK_SDMA2, amd::smi::kDevFwVersionSdma2 },
+    { RSMI_FW_BLOCK_SMC, amd::smi::kDevFwVersionSmc },
+    { RSMI_FW_BLOCK_SOS, amd::smi::kDevFwVersionSos },
+    { RSMI_FW_BLOCK_TA_RAS, amd::smi::kDevFwVersionTaRas },
+    { RSMI_FW_BLOCK_TA_XGMI, amd::smi::kDevFwVersionTaXgmi },
+    { RSMI_FW_BLOCK_UVD, amd::smi::kDevFwVersionUvd },
+    { RSMI_FW_BLOCK_VCE, amd::smi::kDevFwVersionVce },
+    { RSMI_FW_BLOCK_VCN, amd::smi::kDevFwVersionVcn },
+  };
+
+  const auto & dev_type_it = kFWBlockTypeMap.find(block);
+  if (dev_type_it != kFWBlockTypeMap.end()) {
+    dev_type = dev_type_it->second;
+  } else {
+    return RSMI_STATUS_INVALID_ARGS;
   }
 
   DEVICE_MUTEX
@@ -1728,7 +1674,7 @@ rsmi_dev_firmware_version_get(uint32_t dv_ind, rsmi_fw_block_t block,
 
 static std::string bitfield_to_freq_string(uint64_t bitf,
                                                      uint32_t num_supported) {
-  std::string bf_str("");
+  std::string bf_str;
   std::bitset<RSMI_MAX_NUM_FREQUENCIES> bs(bitf);
 
   if (num_supported > RSMI_MAX_NUM_FREQUENCIES) {
@@ -1793,24 +1739,11 @@ rsmi_dev_gpu_clk_freq_set(uint32_t dv_ind,
   int ret_i;
   amd::smi::DevInfoTypes dev_type;
 
-  switch (clk_type) {
-    case RSMI_CLK_TYPE_SYS:
-      dev_type = amd::smi::kDevGPUSClk;
-      break;
-    case RSMI_CLK_TYPE_MEM:
-      dev_type = amd::smi::kDevGPUMClk;
-      break;
-    case RSMI_CLK_TYPE_DF:
-      dev_type = amd::smi::kDevFClk;
-      break;
-    case RSMI_CLK_TYPE_SOC:
-      dev_type = amd::smi::kDevSOCClk;
-      break;
-    case RSMI_CLK_TYPE_DCEF:
-      dev_type = amd::smi::kDevDCEFClk;
-      break;
-    default:
-      return RSMI_STATUS_INVALID_ARGS;
+  const auto & clk_type_it = kClkTypeMap.find(clk_type);
+  if (clk_type_it != kClkTypeMap.end()) {
+    dev_type = clk_type_it->second;
+  } else {
+    return RSMI_STATUS_INVALID_ARGS;
   }
 
   ret_i = dev->writeDevInfo(dev_type, freq_enable_str);
@@ -1878,7 +1811,7 @@ get_id_name_str_from_line(uint64_t id, std::string ln,
 
   *ln_str >> token1;
 
-  if (token1 == "") {
+  if (token1.empty()) {
     throw amd::smi::rsmi_exception(RSMI_STATUS_NO_DATA, __FUNCTION__);
   }
 
@@ -1991,13 +1924,13 @@ static rsmi_status_t get_dev_name_from_id(uint32_t dv_ind, char *name,
     }
   }
 
-  for (auto fl : pci_name_files) {
+  for (const auto& fl : pci_name_files) {
     std::ifstream id_file_strm(fl);
 
     while (std::getline(id_file_strm, ln)) {
       std::istringstream ln_str(ln);
       // parse line
-      if (ln[0] == '#' || ln.size() == 0) {
+      if (ln[0] == '#' || ln.empty()) {
         continue;
       }
 
@@ -2008,29 +1941,28 @@ static rsmi_status_t get_dev_name_from_id(uint32_t dv_ind, char *name,
             if (typ == NAME_STR_SUBSYS && found_device_id_for_subsys) {
               val_str = get_id_name_str_from_line(subsys_vend_id, ln, &ln_str);
 
-              if (val_str.size() > 0) {
+              if (!val_str.empty()) {
                 // We've chopped the subsys_vend ID, now we need to get the
                 // subsys description
                 val_str = get_id_name_str_from_line(subsys_id, ln, &ln_str);
 
-                if (val_str.size() > 0) {
+                if (!val_str.empty()) {
                   break;
-                } else {
-                  val_str.clear();
                 }
+                val_str.clear();
               }
             }
           } else if (typ == NAME_STR_DEVICE) {  // ln[1] != '\t'
             // This is a device line
             val_str = get_id_name_str_from_line(device_id, ln, &ln_str);
 
-            if (val_str.size() > 0) {
+            if (!val_str.empty()) {
               break;
             }
           } else if (typ == NAME_STR_SUBSYS) {
             // match the device id line
             val_str = get_id_name_str_from_line(device_id, ln, &ln_str);
-            if (val_str.size() > 0) {
+            if (!val_str.empty()) {
               found_device_id_for_subsys = true;
             }
           }
@@ -2048,22 +1980,21 @@ static rsmi_status_t get_dev_name_from_id(uint32_t dv_ind, char *name,
 
         val_str = get_id_name_str_from_line(vendor_id, ln, &ln_str);
 
-        if (val_str.size() > 0) {
+        if (!val_str.empty()) {
           if (typ == NAME_STR_VENDOR) {
             break;
-          } else {
-            val_str.clear();
-            found_device_vendor = true;
           }
+          val_str.clear();
+          found_device_vendor = true;
         }
       }
     }
-    if (val_str.size() > 0) {
+    if (!val_str.empty()) {
       break;
     }
   }
 
-  if (val_str.size() == 0) {
+  if (val_str.empty()) {
     return get_backup_name(vendor_id, name, len);
   }
   size_t ct = val_str.copy(name, len);
@@ -2293,8 +2224,8 @@ rsmi_dev_pci_bandwidth_get(uint32_t dv_ind, rsmi_pcie_bandwidth_t *b) {
   const uint32_t SPEED_DATA_LENGTH = sizeof(link_speed)/sizeof(uint32_t);
 
   // Calculate the index
-  int width_index = -1;
-  int speed_index = -1;
+  uint32_t width_index = -1;
+  uint32_t speed_index = -1;
   uint32_t cur_index = 0;
   for (cur_index = 0; cur_index < WIDTH_DATA_LENGTH; cur_index++) {
     if (link_width[cur_index] == gpu_metrics.pcie_link_width) {
@@ -2302,8 +2233,7 @@ rsmi_dev_pci_bandwidth_get(uint32_t dv_ind, rsmi_pcie_bandwidth_t *b) {
       break;
     }
   }
-  for (cur_index = 0;
-      cur_index < SPEED_DATA_LENGTH; cur_index++) {
+  for (cur_index = 0; cur_index < SPEED_DATA_LENGTH; cur_index++) {
     if (link_speed[cur_index] == gpu_metrics.pcie_link_speed) {
       speed_index = cur_index;
       break;
@@ -2315,11 +2245,10 @@ rsmi_dev_pci_bandwidth_get(uint32_t dv_ind, rsmi_pcie_bandwidth_t *b) {
   // Set possible lanes and frequencies
   b->transfer_rate.num_supported = WIDTH_DATA_LENGTH * SPEED_DATA_LENGTH;
   b->transfer_rate.current = speed_index*WIDTH_DATA_LENGTH + width_index;
-  for (cur_index = 0;
-      cur_index < WIDTH_DATA_LENGTH * SPEED_DATA_LENGTH; cur_index++) {
-        b->transfer_rate.frequency[cur_index]
-              = link_speed[cur_index/WIDTH_DATA_LENGTH] * 100 * 1000000L;
-        b->lanes[cur_index] = link_width[cur_index % WIDTH_DATA_LENGTH];
+  for (cur_index = 0; cur_index < WIDTH_DATA_LENGTH * SPEED_DATA_LENGTH; cur_index++) {
+    b->transfer_rate.frequency[cur_index] =
+      static_cast<long>(link_speed[cur_index/WIDTH_DATA_LENGTH]) * 100 * 1000000L;
+    b->lanes[cur_index] = link_width[cur_index % WIDTH_DATA_LENGTH];
   }
   /*
   frequency = {2500, 2500, 2500, 2500, 2500, 2500,
@@ -2429,54 +2358,29 @@ rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_type,
   LOG_TRACE(ss);
 
   rsmi_status_t ret;
-  amd::smi::MonitorTypes mon_type;
+  amd::smi::MonitorTypes mon_type = amd::smi::kMonInvalid;
   uint16_t val_ui16;
 
-  switch (metric) {
-    case RSMI_TEMP_CURRENT:
-      mon_type = amd::smi::kMonTemp;
-      break;
-    case RSMI_TEMP_MAX:
-      mon_type = amd::smi::kMonTempMax;
-      break;
-    case RSMI_TEMP_MIN:
-      mon_type = amd::smi::kMonTempMin;
-      break;
-    case RSMI_TEMP_MAX_HYST:
-      mon_type = amd::smi::kMonTempMaxHyst;
-      break;
-    case RSMI_TEMP_MIN_HYST:
-      mon_type = amd::smi::kMonTempMinHyst;
-      break;
-    case RSMI_TEMP_CRITICAL:
-      mon_type = amd::smi::kMonTempCritical;
-      break;
-    case RSMI_TEMP_CRITICAL_HYST:
-      mon_type = amd::smi::kMonTempCriticalHyst;
-      break;
-    case RSMI_TEMP_EMERGENCY:
-      mon_type = amd::smi::kMonTempEmergency;
-      break;
-    case RSMI_TEMP_EMERGENCY_HYST:
-      mon_type = amd::smi::kMonTempEmergencyHyst;
-      break;
-    case RSMI_TEMP_CRIT_MIN:
-      mon_type = amd::smi::kMonTempCritMin;
-      break;
-    case RSMI_TEMP_CRIT_MIN_HYST:
-      mon_type = amd::smi::kMonTempCritMinHyst;
-      break;
-    case RSMI_TEMP_OFFSET:
-      mon_type = amd::smi::kMonTempOffset;
-      break;
-    case RSMI_TEMP_LOWEST:
-      mon_type = amd::smi::kMonTempLowest;
-      break;
-    case RSMI_TEMP_HIGHEST:
-      mon_type = amd::smi::kMonTempHighest;
-      break;
-    default:
-      mon_type = amd::smi::kMonInvalid;
+  static const std::map<rsmi_temperature_metric_t, amd::smi::MonitorTypes> kMetricTypeMap = {
+    { RSMI_TEMP_CURRENT, amd::smi::kMonTemp },
+    { RSMI_TEMP_MAX, amd::smi::kMonTempMax },
+    { RSMI_TEMP_MIN, amd::smi::kMonTempMin },
+    { RSMI_TEMP_MAX_HYST, amd::smi::kMonTempMaxHyst },
+    { RSMI_TEMP_MIN_HYST, amd::smi::kMonTempMinHyst },
+    { RSMI_TEMP_CRITICAL, amd::smi::kMonTempCritical },
+    { RSMI_TEMP_CRITICAL_HYST, amd::smi::kMonTempCriticalHyst },
+    { RSMI_TEMP_EMERGENCY, amd::smi::kMonTempEmergency },
+    { RSMI_TEMP_EMERGENCY_HYST, amd::smi::kMonTempEmergencyHyst },
+    { RSMI_TEMP_CRIT_MIN, amd::smi::kMonTempCritMin },
+    { RSMI_TEMP_CRIT_MIN_HYST, amd::smi::kMonTempCritMinHyst },
+    { RSMI_TEMP_OFFSET, amd::smi::kMonTempOffset },
+    { RSMI_TEMP_LOWEST, amd::smi::kMonTempLowest },
+    { RSMI_TEMP_HIGHEST, amd::smi::kMonTempHighest },
+  };
+
+  const auto mon_type_it = kMetricTypeMap.find(metric);
+  if (mon_type_it != kMetricTypeMap.end()) {
+    mon_type = mon_type_it->second;
   }
 
   if (temperature == nullptr) {
@@ -2492,80 +2396,81 @@ rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_type,
     return RSMI_STATUS_INVALID_ARGS;
   }
 
-  // The HBM temperature is retreived from the gpu_metrics
-  if (sensor_type == RSMI_TEMP_TYPE_HBM_0
-     || sensor_type == RSMI_TEMP_TYPE_HBM_1
-     || sensor_type == RSMI_TEMP_TYPE_HBM_2
-     || sensor_type == RSMI_TEMP_TYPE_HBM_3) {
-       if (metric != RSMI_TEMP_CURRENT) {   // only support RSMI_TEMP_CURRENT
-          ss << __PRETTY_FUNCTION__
-             << " | ======= end ======= "
-             << " | Fail "
-             << " | Device #: " << dv_ind
-             << " | Type: " << monitorTypesToString.at(mon_type)
-             << " | Cause: To retreive HBM temp, we only support metric = "
-             << "RSMI_TEMP_CURRENT"
-             << " | Returning = "
-             << getRSMIStatusString(RSMI_STATUS_NOT_SUPPORTED) << " |";
-          LOG_ERROR(ss);
-          return RSMI_STATUS_NOT_SUPPORTED;
-       }
+  // The HBM temperature is retrieved from the gpu_metrics
+  if (sensor_type == RSMI_TEMP_TYPE_HBM_0 ||
+      sensor_type == RSMI_TEMP_TYPE_HBM_1 ||
+      sensor_type == RSMI_TEMP_TYPE_HBM_2 ||
+      sensor_type == RSMI_TEMP_TYPE_HBM_3) {
+    if (metric != RSMI_TEMP_CURRENT) {   // only support RSMI_TEMP_CURRENT
+      ss << __PRETTY_FUNCTION__
+         << " | ======= end ======= "
+         << " | Fail "
+         << " | Device #: " << dv_ind
+         << " | Type: " << monitorTypesToString.at(mon_type)
+         << " | Cause: To retrieve HBM temp, we only support metric = "
+         << "RSMI_TEMP_CURRENT"
+         << " | Returning = "
+         << getRSMIStatusString(RSMI_STATUS_NOT_SUPPORTED) << " |";
+      LOG_ERROR(ss);
+      return RSMI_STATUS_NOT_SUPPORTED;
+    }
 
-       rsmi_gpu_metrics_t gpu_metrics;
-       ret = rsmi_dev_gpu_metrics_info_get(dv_ind, &gpu_metrics);
-       if (ret != RSMI_STATUS_SUCCESS) {
-        ss << __PRETTY_FUNCTION__
-           << " | ======= end ======= "
-           << " | Fail "
-           << " | Device #: " << dv_ind
-           << " | Type: " << monitorTypesToString.at(mon_type)
-           << " | Cause: rsmi_dev_gpu_metrics_info_get returned "
-           << getRSMIStatusString(ret)
-           << " | Returning = "
-           << getRSMIStatusString(ret) << " |";
-         LOG_ERROR(ss);
-         return ret;
-       }
+    rsmi_gpu_metrics_t gpu_metrics;
+    ret = rsmi_dev_gpu_metrics_info_get(dv_ind, &gpu_metrics);
+    if (ret != RSMI_STATUS_SUCCESS) {
+      ss << __PRETTY_FUNCTION__
+         << " | ======= end ======= "
+         << " | Fail "
+         << " | Device #: " << dv_ind
+         << " | Type: " << monitorTypesToString.at(mon_type)
+         << " | Cause: rsmi_dev_gpu_metrics_info_get returned "
+         << getRSMIStatusString(ret)
+         << " | Returning = "
+         << getRSMIStatusString(ret) << " |";
+      LOG_ERROR(ss);
+      return ret;
+    }
 
-       switch (sensor_type) {
-         case RSMI_TEMP_TYPE_HBM_0:
-           val_ui16 = gpu_metrics.temperature_hbm[0];
-           break;
-         case RSMI_TEMP_TYPE_HBM_1:
-           val_ui16 = gpu_metrics.temperature_hbm[1];
-           break;
-         case RSMI_TEMP_TYPE_HBM_2:
-           val_ui16 = gpu_metrics.temperature_hbm[2];
-           break;
-         case RSMI_TEMP_TYPE_HBM_3:
-           val_ui16 = gpu_metrics.temperature_hbm[3];
-           break;
-         default:
-           return RSMI_STATUS_INVALID_ARGS;
-       }
-       if (val_ui16 == UINT16_MAX) {
-          ss << __PRETTY_FUNCTION__
-             << " | ======= end ======= "
-             << " | Fail "
-             << " | Device #: " << dv_ind
-             << " | Type: " << monitorTypesToString.at(mon_type)
-             << " | Cause: Reached UINT16 max value, overflow"
-             << " | Returning = "
-             << getRSMIStatusString(RSMI_STATUS_NOT_SUPPORTED) << " |";
-          LOG_ERROR(ss);
-          return RSMI_STATUS_NOT_SUPPORTED;
-       } else
-          *temperature = val_ui16 * CENTRIGRADE_TO_MILLI_CENTIGRADE;
+    switch (sensor_type) {
+      case RSMI_TEMP_TYPE_HBM_0:
+        val_ui16 = gpu_metrics.temperature_hbm[0];
+        break;
+      case RSMI_TEMP_TYPE_HBM_1:
+        val_ui16 = gpu_metrics.temperature_hbm[1];
+        break;
+      case RSMI_TEMP_TYPE_HBM_2:
+        val_ui16 = gpu_metrics.temperature_hbm[2];
+        break;
+      case RSMI_TEMP_TYPE_HBM_3:
+        val_ui16 = gpu_metrics.temperature_hbm[3];
+        break;
+      default:
+        return RSMI_STATUS_INVALID_ARGS;
+    }
+    if (val_ui16 == UINT16_MAX) {
+      ss << __PRETTY_FUNCTION__
+         << " | ======= end ======= "
+         << " | Fail "
+         << " | Device #: " << dv_ind
+         << " | Type: " << monitorTypesToString.at(mon_type)
+         << " | Cause: Reached UINT16 max value, overflow"
+         << " | Returning = "
+         << getRSMIStatusString(RSMI_STATUS_NOT_SUPPORTED) << " |";
+      LOG_ERROR(ss);
+      return RSMI_STATUS_NOT_SUPPORTED;
+    }
 
-       ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
-          << " | Success "
-          << " | Device #: " << dv_ind
-          << " | Type: " << monitorTypesToString.at(mon_type)
-          << " | Data: " << *temperature
-          << " | Returning = "
-          << getRSMIStatusString(RSMI_STATUS_SUCCESS) << " | ";
-       LOG_INFO(ss);
-       return RSMI_STATUS_SUCCESS;
+    *temperature = static_cast<int64_t>(val_ui16) * CENTRIGRADE_TO_MILLI_CENTIGRADE;
+
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
+       << " | Success "
+       << " | Device #: " << dv_ind
+       << " | Type: " << monitorTypesToString.at(mon_type)
+       << " | Data: " << *temperature
+       << " | Returning = "
+       << getRSMIStatusString(RSMI_STATUS_SUCCESS) << " | ";
+    LOG_INFO(ss);
+    return RSMI_STATUS_SUCCESS;
   }  // end HBM temperature
 
   DEVICE_MUTEX
@@ -2811,7 +2716,7 @@ rsmi_dev_od_volt_info_get(uint32_t dv_ind, rsmi_od_volt_freq_data_t *odv) {
 }
 
 rsmi_status_t
-rsmi_dev_gpu_reset(int32_t dv_ind) {
+rsmi_dev_gpu_reset(uint32_t dv_ind) {
   TRY
   std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
@@ -2985,7 +2890,8 @@ rsmi_status_t
 rsmi_dev_power_cap_set(uint32_t dv_ind, uint32_t sensor_ind, uint64_t cap) {
   TRY
   rsmi_status_t ret;
-  uint64_t min, max;
+  uint64_t min;
+  uint64_t max;
   std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
@@ -3354,10 +3260,10 @@ rsmi_utilization_count_get(uint32_t dv_ind,
       default:
         return RSMI_STATUS_INVALID_ARGS;
     }
-    if (val_ui32 == UINT32_MAX)
+    if (val_ui32 == UINT32_MAX) {
       return RSMI_STATUS_NOT_SUPPORTED;
-    else
-      utilization_counters[index].value = val_ui32;
+    }
+    utilization_counters[index].value = val_ui32;
   }
 
   *timestamp = gpu_metrics.system_clock_counter;
@@ -3583,7 +3489,7 @@ rsmi_dev_counter_destroy(rsmi_event_handle_t evnt_handle) {
 
 rsmi_status_t
 rsmi_counter_control(rsmi_event_handle_t evt_handle,
-                                 rsmi_counter_command_t cmd, void *) {
+                                 rsmi_counter_command_t cmd, void * /*unused*/) {
   TRY
 
   amd::smi::evt::Event *evt =
@@ -3644,9 +3550,9 @@ rsmi_counter_read(rsmi_event_handle_t evt_handle,
   }
   if (ret == 0) {
     return RSMI_STATUS_SUCCESS;
-  } else {
-    return RSMI_STATUS_UNEXPECTED_SIZE;
   }
+
+  return RSMI_STATUS_UNEXPECTED_SIZE;
   CATCH
 }
 
@@ -3689,9 +3595,9 @@ rsmi_dev_counter_group_supported(uint32_t dv_ind, rsmi_event_group_t group) {
 
   if (grp->find(group) == grp->end()) {
     return RSMI_STATUS_NOT_SUPPORTED;
-  } else {
-    return RSMI_STATUS_SUCCESS;
   }
+
+  return RSMI_STATUS_SUCCESS;
   CATCH
 }
 
@@ -4183,7 +4089,8 @@ rsmi_is_P2P_accessible(uint32_t dv_ind_src, uint32_t dv_ind_dst,
     return RSMI_STATUS_INVALID_ARGS;
   }
 
-  uint32_t node_ind_src, node_ind_dst;
+  uint32_t node_ind_src;
+  uint32_t node_ind_dst;
   // Fetch the source and destination GPU node index
   if (smi.get_node_index(dv_ind_src, &node_ind_src) ||
       smi.get_node_index(dv_ind_dst, &node_ind_dst)) {
@@ -4241,19 +4148,13 @@ get_compute_partition(uint32_t dv_ind, std::string &compute_partition) {
   }
 
   switch (mapStringToRSMIComputePartitionTypes[compute_partition_str]) {
-    case RSMI_COMPUTE_PARTITION_INVALID:
-      // Retrieved an unknown compute partition
-      return RSMI_STATUS_UNEXPECTED_DATA;
     case RSMI_COMPUTE_PARTITION_CPX:
-      break;
     case RSMI_COMPUTE_PARTITION_SPX:
-      break;
     case RSMI_COMPUTE_PARTITION_DPX:
-      break;
     case RSMI_COMPUTE_PARTITION_TPX:
-      break;
     case RSMI_COMPUTE_PARTITION_QPX:
       break;
+    case RSMI_COMPUTE_PARTITION_INVALID:
     default:
       // Retrieved an unknown compute partition
       return RSMI_STATUS_UNEXPECTED_DATA;
@@ -4326,19 +4227,13 @@ rsmi_dev_compute_partition_set(uint32_t dv_ind,
   std::string currentComputePartition;
 
   switch (compute_partition) {
-    case RSMI_COMPUTE_PARTITION_INVALID:
-      // Retrieved an unknown compute partition
-      return RSMI_STATUS_INVALID_ARGS;
     case RSMI_COMPUTE_PARTITION_CPX:
-      break;
     case RSMI_COMPUTE_PARTITION_SPX:
-      break;
     case RSMI_COMPUTE_PARTITION_DPX:
-      break;
     case RSMI_COMPUTE_PARTITION_TPX:
-      break;
     case RSMI_COMPUTE_PARTITION_QPX:
       break;
+    case RSMI_COMPUTE_PARTITION_INVALID:
     default:
       return RSMI_STATUS_INVALID_ARGS;
   }
@@ -4385,17 +4280,12 @@ static rsmi_status_t get_nps_mode(uint32_t dv_ind, std::string &nps_mode) {
   }
 
   switch (mapStringToNPSModeTypes[val_str]) {
-    case RSMI_MEMORY_PARTITION_UNKNOWN:
-      // Retrieved an unknown NPS mode
-      return RSMI_STATUS_UNEXPECTED_DATA;
     case RSMI_MEMORY_PARTITION_NPS1:
-      break;
     case RSMI_MEMORY_PARTITION_NPS2:
-      break;
     case RSMI_MEMORY_PARTITION_NPS4:
-      break;
     case RSMI_MEMORY_PARTITION_NPS8:
       break;
+    case RSMI_MEMORY_PARTITION_UNKNOWN:
     default:
       // Retrieved an unknown NPS mode
       return RSMI_STATUS_UNEXPECTED_DATA;
@@ -4429,7 +4319,7 @@ rsmi_dev_nps_mode_set(uint32_t dv_ind, rsmi_nps_mode_type_t nps_mode) {
     }
   }
 
-  if (isCorrectDevice == false) {
+  if (!isCorrectDevice) {
     return RSMI_STATUS_NOT_SUPPORTED;
   }
 
@@ -4438,17 +4328,12 @@ rsmi_dev_nps_mode_set(uint32_t dv_ind, rsmi_nps_mode_type_t nps_mode) {
   std::string currentNPSMode;
 
   switch (nps_mode) {
-    case RSMI_MEMORY_PARTITION_UNKNOWN:
-      // Retrieved an unknown NPS mode
-      return RSMI_STATUS_INVALID_ARGS;
     case RSMI_MEMORY_PARTITION_NPS1:
-      break;
     case RSMI_MEMORY_PARTITION_NPS2:
-      break;
     case RSMI_MEMORY_PARTITION_NPS4:
-      break;
     case RSMI_MEMORY_PARTITION_NPS8:
       break;
+    case RSMI_MEMORY_PARTITION_UNKNOWN:
     default:
       return RSMI_STATUS_INVALID_ARGS;
   }
@@ -4584,18 +4469,18 @@ rsmi_dev_supported_func_iterator_open(uint32_t dv_ind,
   if (dev->supported_funcs()->begin() == dev->supported_funcs()->end()) {
     delete *handle;
     return RSMI_STATUS_NO_DATA;
-  } else {
-    SupportedFuncMapIt *supp_func_iter = new SupportedFuncMapIt;
-
-    if (supp_func_iter == nullptr) {
-      return RSMI_STATUS_OUT_OF_RESOURCES;
-    }
-    *supp_func_iter = dev->supported_funcs()->begin();
-
-    (*handle)->func_id_iter = reinterpret_cast<uintptr_t>(supp_func_iter);
-    (*handle)->container_ptr =
-                          reinterpret_cast<uintptr_t>(dev->supported_funcs());
   }
+
+  SupportedFuncMapIt *supp_func_iter = new SupportedFuncMapIt;
+
+  if (supp_func_iter == nullptr) {
+    return RSMI_STATUS_OUT_OF_RESOURCES;
+  }
+  *supp_func_iter = dev->supported_funcs()->begin();
+
+  (*handle)->func_id_iter = reinterpret_cast<uintptr_t>(supp_func_iter);
+  (*handle)->container_ptr =
+                        reinterpret_cast<uintptr_t>(dev->supported_funcs());
 
   return RSMI_STATUS_SUCCESS;
 
@@ -4963,7 +4848,8 @@ rsmi_event_notification_get(int timeout_ms,
 
   if (*num_elem < buffer_size && errno != EAGAIN) {
     return amd::smi::ErrnoToRsmiStatus(errno);
-  } else if (*num_elem >= buffer_size) {
+  }
+  if (*num_elem >= buffer_size) {
     return RSMI_STATUS_SUCCESS;
   }
 
@@ -5039,7 +4925,7 @@ rsmi_test_refcount(uint64_t refcnt_type) {
   amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
   std::lock_guard<std::mutex> guard(*smi.bootstrap_mutex());
 
-  if (smi.ref_count() == 0 && smi.devices().size() != 0) {
+  if (smi.ref_count() == 0 && !smi.devices().empty()) {
     return -1;
   }
 

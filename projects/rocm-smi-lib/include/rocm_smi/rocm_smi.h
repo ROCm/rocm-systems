@@ -2406,7 +2406,7 @@ rsmi_status_t rsmi_dev_gpu_clk_freq_get(uint32_t dv_ind,
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  *
  */
-rsmi_status_t rsmi_dev_gpu_reset(int32_t dv_ind);
+rsmi_status_t rsmi_dev_gpu_reset(uint32_t dv_ind);
 
 /**
  *  @brief This function retrieves the voltage/frequency curve information
@@ -2640,7 +2640,7 @@ rsmi_dev_power_profile_presets_get(uint32_t dv_ind, uint32_t sensor_ind,
  *
  */
 rsmi_status_t
-rsmi_dev_perf_level_set(int32_t dv_ind, rsmi_dev_perf_level_t perf_lvl);
+rsmi_dev_perf_level_set(uint32_t dv_ind, rsmi_dev_perf_level_t perf_lvl);
 
 /**
  *  @brief Set the PowerPlay performance level associated with the device with
@@ -2706,7 +2706,7 @@ rsmi_dev_perf_level_set_v1(uint32_t dv_ind, rsmi_dev_perf_level_t perf_lvl);
  *  @retval ::RSMI_STATUS_PERMISSION function requires root access
  *
  */
-rsmi_status_t rsmi_dev_overdrive_level_set(int32_t dv_ind, uint32_t od);
+rsmi_status_t rsmi_dev_overdrive_level_set(uint32_t dv_ind, uint32_t od);
 
 /**
  *  @brief Set the overdrive percent associated with the device with provided

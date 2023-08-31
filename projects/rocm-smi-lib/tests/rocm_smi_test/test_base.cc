@@ -43,7 +43,7 @@
  *
  */
 
-#include <assert.h>
+#include <cassert>
 
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi_test/test_base.h"
@@ -61,10 +61,9 @@ static const char kResultsLabel[] = "TEST RESULTS";
 // This one is used outside this file
 const char kSetupLabel[] = "TEST SETUP";
 
-TestBase::TestBase() : setup_failed_(false), description_("") {
+TestBase::TestBase() : setup_failed_(false) {
 }
-TestBase::~TestBase() {
-}
+TestBase::~TestBase() = default;
 
 void TestBase::MakeHeaderStr(const char *inStr,
                                    std::string *outStr) const {
@@ -116,8 +115,6 @@ void TestBase::SetUp(uint64_t init_flags) {
       std::cout << "No ROCm SMI tests can be run." << std::endl;
     }
   }
-
-  return;
 }
 
 void TestBase::PrintDeviceHeader(uint32_t dv_ind) {
@@ -213,7 +210,7 @@ void TestBase::set_description(std::string d) {
   size_t endlptr;
 
   for (size_t i = le; i < description_.size(); i += le) {
-    endlptr = description_.find_last_of(" ", i);
+    endlptr = description_.find_last_of(' ', i);
     description_.replace(endlptr, 1, "\n");
     i = endlptr;
   }

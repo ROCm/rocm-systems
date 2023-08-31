@@ -43,30 +43,28 @@
 
 #include <pthread.h>
 #include <unistd.h>
-#include <sys/types.h>
-#include <assert.h>
 #include <sys/stat.h>
-#include <stdint.h>
+#include <sys/types.h>
 
-#include <string>
-#include <map>
-#include <fstream>
-#include <cstdint>
-#include <iostream>
-#include <sstream>
-#include <vector>
-#include <memory>
 #include <algorithm>
-#include <iterator>
+#include <cassert>
+#include <cstdint>
 #include <cstring>
+#include <fstream>
+#include <iostream>
+#include <iterator>
+#include <map>
+#include <memory>
+#include <sstream>
+#include <string>
 #include <type_traits>
+#include <vector>
 
 #include "rocm_smi/rocm_smi_main.h"
 #include "rocm_smi/rocm_smi_device.h"
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_exception.h"
 #include "rocm_smi/rocm_smi_utils.h"
-#include "rocm_smi/rocm_smi_kfd.h"
 #include "rocm_smi/rocm_smi_logger.h"
 #include "shared_mutex.h"  // NOLINT
 
@@ -689,7 +687,7 @@ int Device::writeDevInfoStr(DevInfoTypes type, std::string valStr) {
   int ret;
   std::ostringstream ss;
 
-  fs.rdbuf()->pubsetbuf(0,0);
+  fs.rdbuf()->pubsetbuf(nullptr,0);
   ret = openSysfsFileStream(type, &fs, valStr.c_str());
   if (ret != 0) {
     ss << "Could not write device info string (" << valStr
@@ -856,7 +854,7 @@ int Device::readDevInfoMultiLineStr(DevInfoTypes type,
     retVec->push_back(line);
   }
 
-  if (retVec->size() == 0) {
+  if (retVec->empty()) {
     ss << "Read devInfoMultiLineStr for DevInfoType ("
        << RocmSMI::devInfoTypesStrings.at(type) << ")"
        << ", but contained no string lines";
@@ -864,13 +862,13 @@ int Device::readDevInfoMultiLineStr(DevInfoTypes type,
     return 0;
   }
   // Remove any *trailing* empty (whitespace) lines
-  while (retVec->size() != 0 &&
+  while (!retVec->empty() &&
         retVec->back().find_first_not_of(" \t\n\v\f\r") == std::string::npos) {
     retVec->pop_back();
   }
 
   // allow logging output of multiline strings
-  for (auto l: *retVec) {
+  for (const auto& l: *retVec) {
     allLines += "\n" + l;
   }
 
@@ -905,10 +903,10 @@ int Device::readDevInfo(DevInfoTypes type, uint64_t *val) {
       ret = readDevInfoStr(type, &tempStr);
       RET_IF_NONZERO(ret);
 
-      if (tempStr == "") {
+      if (tempStr.empty()) {
         return EINVAL;
       }
-      tmp_val = std::stoi(tempStr, 0, 16);
+      tmp_val = std::stoi(tempStr, nullptr, 16);
       if (tmp_val < 0) {
         return EINVAL;
       }
@@ -930,10 +928,10 @@ int Device::readDevInfo(DevInfoTypes type, uint64_t *val) {
     case kDevXGMIError:
       ret = readDevInfoStr(type, &tempStr);
       RET_IF_NONZERO(ret);
-      if (tempStr == "") {
+      if (tempStr.empty()) {
         return EINVAL;
       }
-      *val = std::stoul(tempStr, 0);
+      *val = std::stoul(tempStr, nullptr);
       break;
 
     case kDevUniqueId:
@@ -960,10 +958,10 @@ int Device::readDevInfo(DevInfoTypes type, uint64_t *val) {
     case kDevFwVersionVcn:
       ret = readDevInfoStr(type, &tempStr);
       RET_IF_NONZERO(ret);
-      if (tempStr == "") {
+      if (tempStr.empty()) {
         return EINVAL;
       }
-      *val = std::stoul(tempStr, 0, 16);
+      *val = std::stoul(tempStr, nullptr, 16);
       break;
 
     case kDevGpuReset:
@@ -1100,7 +1098,7 @@ void Device::DumpSupportedFunctions(void) {
 }
 
 void Device::fillSupportedFuncs(void) {
-  if (supported_funcs_.size() != 0) {
+  if (!supported_funcs_.empty()) {
     return;
   }
   if (monitor() == nullptr) {
@@ -1140,7 +1138,7 @@ void Device::fillSupportedFuncs(void) {
     std::vector<DevInfoTypes>::const_iterator var =
                                                   it->second.variants.begin();
 
-    if (it->second.variants.size() == 0) {
+    if (it->second.variants.empty()) {
       supported_funcs_[it->first] = nullptr;
       it++;
       continue;
@@ -1156,7 +1154,7 @@ void Device::fillSupportedFuncs(void) {
       (*supported_variants)[kDevInfoVarTypeToRSMIVariant.at(*var)] = nullptr;
     }
 
-    if ((*supported_variants).size() > 0) {
+    if (!(*supported_variants).empty()) {
       supported_funcs_[it->first] = supported_variants;
     }
 
@@ -1202,35 +1200,32 @@ bool Device::DeviceAPISupported(std::string name, uint64_t variant,
 
     if (sub_variant == RSMI_DEFAULT_VARIANT) {
       return true;
-    } else {  // sub_variant != RSMI_DEFAULT_VARIANT
-      // if variant is != RSMI_DEFAULT_VARIANT, we should not have a nullptr
-      assert(var_it->second != nullptr);
+    }
+    // sub_variant != RSMI_DEFAULT_VARIANT
+    // if variant is != RSMI_DEFAULT_VARIANT, we should not have a nullptr
+    assert(var_it->second != nullptr);
 
-      return subvariant_match(&(var_it->second), sub_variant);
-    }
-  } else {  // variant == RSMI_DEFAULT_VARIANT
-    if (func_it->second != nullptr) {
-      var_it = func_it->second->find(variant);
-    }
-    if (sub_variant == RSMI_DEFAULT_VARIANT) {
-      return true;
-    } else {  // sub_variant != RSMI_DEFAULT_VARIANT
-      if (func_it->second == nullptr) {
-        return false;
-      }
-      return subvariant_match(&(var_it->second), sub_variant);
-    }
+    return subvariant_match(&(var_it->second), sub_variant);
   }
-  assert(false);  // We should not reach here
-
-  return false;
+  // variant == RSMI_DEFAULT_VARIANT
+  if (func_it->second != nullptr) {
+    var_it = func_it->second->find(variant);
+  }
+  if (sub_variant == RSMI_DEFAULT_VARIANT) {
+    return true;
+  }
+  // sub_variant != RSMI_DEFAULT_VARIANT
+  if (func_it->second == nullptr) {
+    return false;
+  }
+  return subvariant_match(&(var_it->second), sub_variant);
 }
 
 rsmi_status_t Device::restartAMDGpuDriver(void) {
   REQUIRE_ROOT_ACCESS
   bool restartSuccessful = true;
   bool success = false;
-  std::string out = "";
+  std::string out;
   bool wasGdmServiceActive = false;
 
   // sudo systemctl is-active gdm

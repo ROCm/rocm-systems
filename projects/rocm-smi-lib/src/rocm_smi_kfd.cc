@@ -41,27 +41,27 @@
  *
  */
 
-#include <assert.h>
-#include <sys/stat.h>
-#include <sys/ioctl.h>
-#include <unistd.h>
-#include <fcntl.h>
 #include <dirent.h>
+#include <fcntl.h>
+#include <sys/ioctl.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include <algorithm>
+#include <cassert>
+#include <cstdint>
+#include <fstream>
+#include <iostream>
+#include <memory>
+#include <sstream>
 #include <string>
 #include <unordered_set>
-#include <fstream>
-#include <cstdint>
-#include <iostream>
-#include <sstream>
 
 #include "rocm_smi/rocm_smi_io_link.h"
 #include "rocm_smi/rocm_smi_kfd.h"
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_exception.h"
 #include "rocm_smi/rocm_smi_utils.h"
-#include "rocm_smi/rocm_smi_device.h"
 #include "rocm_smi/rocm_smi_main.h"
 
 namespace amd {
@@ -195,7 +195,7 @@ int ReadKFDDeviceProperties(uint32_t kfd_node_id,
     retVec->push_back(line);
   }
 
-  if (retVec->size() == 0) {
+  if (retVec->empty()) {
     fs.close();
     return ENOENT;
   }
@@ -517,7 +517,7 @@ int DiscoverKFDNodes(std::map<uint64_t, std::shared_ptr<KFDNode>> *nodes) {
   if (nodes == nullptr) {
     return EINVAL;
   }
-  assert(nodes->size() == 0);
+  assert(nodes->empty());
 
   nodes->clear();
 
@@ -548,7 +548,7 @@ int DiscoverKFDNodes(std::map<uint64_t, std::shared_ptr<KFDNode>> *nodes) {
       continue;
     }
 
-    node = std::shared_ptr<KFDNode>(new KFDNode(node_indx));
+    node = std::make_shared<KFDNode>(node_indx);
 
     node->Initialize();
 
@@ -596,16 +596,15 @@ int DiscoverKFDNodes(std::map<uint64_t, std::shared_ptr<KFDNode>> *nodes) {
   return 0;
 }
 
-KFDNode::~KFDNode() {
-}
+KFDNode::~KFDNode() = default;
 
 int KFDNode::ReadProperties(void) {
   int ret;
 
   std::vector<std::string> propVec;
 
-  assert(properties_.size() == 0);
-  if (properties_.size() > 0) {
+  assert(properties_.empty());
+  if (!properties_.empty()) {
     return 0;
   }
 
@@ -620,8 +619,8 @@ int KFDNode::ReadProperties(void) {
   uint64_t val_int;  // Assume all properties are unsigned integers for now
   std::istringstream fs;
 
-  for (uint32_t i = 0; i < propVec.size(); ++i) {
-    fs.str(propVec[i]);
+  for (const auto & i : propVec) {
+    fs.str(i);
     fs >> key_str;
     fs >> val_int;
 

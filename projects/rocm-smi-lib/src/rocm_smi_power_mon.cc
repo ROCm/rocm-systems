@@ -41,17 +41,14 @@
  *
  */
 
-#include <assert.h>
-
-#include <fstream>
-#include <string>
+#include <cassert>
 #include <cstdint>
-#include <map>
+#include <fstream>
 #include <iostream>
+#include <map>
 #include <sstream>
+#include <string>
 
-#include "rocm_smi/rocm_smi_main.h"
-#include "rocm_smi/rocm_smi_monitor.h"
 #include "rocm_smi/rocm_smi_utils.h"
 #include "rocm_smi/rocm_smi_common.h"
 #include "rocm_smi/rocm_smi_exception.h"
@@ -70,8 +67,7 @@ static const std::map<PowerMonTypes, const char *> kMonitorNameMap = {
 PowerMon::PowerMon(std::string path, RocmSMI_env_vars const *e) :
                                                         path_(path), env_(e) {
 }
-PowerMon::~PowerMon(void) {
-}
+PowerMon::~PowerMon(void) = default;
 
 static int parse_power_str(std::string s, PowerMonTypes type, uint64_t *val) {
   std::stringstream ss(s);

@@ -90,7 +90,7 @@
 /* This group of macros is used to facilitate checking of support for rsmi_dev*
  * "getter" functions. When the return buffer is set to nullptr, the macro will
  * check the previously gathered device support data to see if the function,
- * with possible variants (e.g., memory types, firware types,...) and
+ * with possible variants (e.g., memory types, firmware types,...) and
  * subvariants (e.g. monitors/sensors) are supported.
  */
 // This macro assumes dev already available

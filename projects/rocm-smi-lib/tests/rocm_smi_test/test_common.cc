@@ -43,13 +43,13 @@
  *
  */
 
-#include <assert.h>
-#include <stdint.h>
 #include <getopt.h>
 
+#include <cassert>
+#include <cstdint>
 #include <iostream>
-#include <string>
 #include <map>
+#include <string>
 
 #include "rocm_smi_test/test_base.h"
 #include "rocm_smi_test/test_common.h"

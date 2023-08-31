@@ -41,20 +41,20 @@
  *
  */
 
-#include <assert.h>
-#include <string.h>
-#include <linux/perf_event.h>
-#include <unistd.h>
 #include <asm/unistd.h>
+#include <linux/perf_event.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
-#include <stdio.h>
+#include <unistd.h>
 
+#include <algorithm>
+#include <cassert>
+#include <cstdio>
+#include <cstring>
+#include <fstream>
+#include <iostream>
 #include <map>
 #include <sstream>
-#include <algorithm>
-#include <iostream>
-#include <fstream>
 #include <unordered_set>
 
 #include "rocm_smi/rocm_smi.h"
@@ -164,8 +164,7 @@ GetSupportedEventGroups(uint32_t dev_num, dev_evt_grp_set_t *supported_grps) {
 }
 //  /sys/bus/event_source/devices/<hw block>_<instance>/type
 Event::Event(rsmi_event_type_t event, uint32_t dev_ind)  :
-                                       event_type_(event), prev_cntr_val_(0) {
-  fd_ = -1;
+                                       event_type_(event), fd_(-1), prev_cntr_val_(0) {
   rsmi_event_group_t grp = EvtGrpFromEvtID(event);
   assert(grp != RSMI_EVNT_GRP_INVALID);  // This should have failed before now
 
@@ -398,10 +397,11 @@ readn(int fd, void *buf, size_t n) {
       return static_cast<ssize_t>(n - left);
     }
     if (bytes < 0) {
-      if (errno == EINTR) /* read got interrupted */
+      if (errno == EINTR) {
+        /* read got interrupted */
         continue;
-      else
-        return -errno;
+      }
+      return -errno;
     }
 
     left -= static_cast<size_t>(bytes);

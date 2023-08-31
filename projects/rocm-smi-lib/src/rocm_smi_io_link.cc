@@ -41,20 +41,19 @@
  *
  */
 
-#include <assert.h>
-#include <sys/stat.h>
 #include <dirent.h>
+#include <sys/stat.h>
 
 #include <algorithm>
+#include <cassert>
+#include <cstdint>
+#include <fstream>
+#include <iostream>
+#include <memory>
+#include <sstream>
 #include <string>
 #include <unordered_set>
-#include <fstream>
-#include <cstdint>
-#include <iostream>
-#include <sstream>
 
-#include "rocm_smi/rocm_smi.h"
-#include "rocm_smi/rocm_smi_exception.h"
 #include "rocm_smi/rocm_smi_utils.h"
 #include "rocm_smi/rocm_smi_io_link.h"
 
@@ -161,7 +160,7 @@ static int ReadLinkProperties(uint32_t node_indx, uint32_t link_indx,
     retVec->push_back(line);
   }
 
-  if (retVec->size() == 0) {
+  if (retVec->empty()) {
     fs.close();
     return 0;
   }
@@ -182,7 +181,7 @@ static int DiscoverLinks(std::map<std::pair<uint32_t, uint32_t>,
   if (links == nullptr) {
     return EINVAL;
   }
-  assert(links->size() == 0);
+  assert(links->empty());
 
   links->clear();
 
@@ -229,8 +228,8 @@ static int DiscoverLinks(std::map<std::pair<uint32_t, uint32_t>,
       }
 
       link_indx = static_cast<uint32_t>(std::stoi(dentry_io_link->d_name));
-      link = std::shared_ptr<IOLink>(new IOLink(node_indx, link_indx,
-                                                directory));
+      link = std::make_shared<IOLink>(node_indx, link_indx,
+                                                directory);
 
       link->Initialize();
 
@@ -273,7 +272,7 @@ static int DiscoverLinksPerNode(uint32_t node_indx, std::map<uint32_t,
   if (links == nullptr) {
     return EINVAL;
   }
-  assert(links->size() == 0);
+  assert(links->empty());
 
   links->clear();
 
@@ -297,8 +296,8 @@ static int DiscoverLinksPerNode(uint32_t node_indx, std::map<uint32_t,
     }
 
     link_indx = static_cast<uint32_t>(std::stoi(dentry->d_name));
-    link = std::shared_ptr<IOLink>(new IOLink(node_indx, link_indx,
-                                              directory));
+    link = std::make_shared<IOLink>(node_indx, link_indx,
+                                              directory);
 
     link->Initialize();
 
@@ -323,16 +322,15 @@ int DiscoverP2PLinksPerNode(uint32_t node_indx, std::map<uint32_t,
   return DiscoverLinksPerNode(node_indx, links, P2P_LINK_DIRECTORY);
 }
 
-IOLink::~IOLink() {
-}
+IOLink::~IOLink() = default;
 
 int IOLink::ReadProperties(void) {
   int ret;
 
   std::vector<std::string> propVec;
 
-  assert(properties_.size() == 0);
-  if (properties_.size() > 0) {
+  assert(properties_.empty());
+  if (!properties_.empty()) {
     return 0;
   }
 
@@ -347,8 +345,8 @@ int IOLink::ReadProperties(void) {
   uint64_t val_int;  // Assume all properties are unsigned integers for now
   std::istringstream fs;
 
-  for (uint32_t i = 0; i < propVec.size(); ++i) {
-    fs.str(propVec[i]);
+  for (const auto & i : propVec) {
+    fs.str(i);
     fs >> key_str;
     fs >> val_int;
 

@@ -39,25 +39,26 @@
  * DEALINGS WITH THE SOFTWARE.
  *
  */
-#include <dirent.h>
-#include <assert.h>
-#include <string.h>
-#include <unistd.h>
-#include <sys/types.h>
-#include <stdlib.h>
 
-#include <string>
-#include <cstdint>
-#include <memory>
-#include <fstream>
-#include <vector>
-#include <set>
-#include <utility>
-#include <functional>
+#include <dirent.h>
+#include <sys/types.h>
+#include <unistd.h>
+
+#include <cassert>
 #include <cerrno>
-#include <unordered_map>
+#include <cstdint>
+#include <cstdlib>
+#include <cstring>
+#include <fstream>
+#include <functional>
 #include <iostream>
+#include <memory>
+#include <set>
 #include <sstream>
+#include <string>
+#include <unordered_map>
+#include <utility>
+#include <vector>
 
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_device.h"
@@ -284,7 +285,8 @@ static uint32_t ConstructBDFID(std::string path, uint64_t *bdfid) {
 
   // We are looking for the last element in the path that has the form
   //  XXXX:XX:XX.X, where X is a hex integer (lower case is expected)
-  std::size_t slash_i, end_i;
+  std::size_t slash_i;
+  std::size_t end_i;
   std::string tmp;
 
   std::string tpath_str(tpath);
@@ -333,7 +335,7 @@ RocmSMI::Initialize(uint64_t flags) {
   // To help debug env variable issues
   // printEnvVarInfo();
 
-  while (std::string(kAMDMonitorTypes[i]) != "") {
+  while (!std::string(kAMDMonitorTypes[i]).empty()) {
       amd_monitor_types_.insert(kAMDMonitorTypes[i]);
       ++i;
   }
@@ -347,12 +349,12 @@ RocmSMI::Initialize(uint64_t flags) {
   }
 
   uint64_t bdfid;
-  for (uint32_t i = 0; i < devices_.size(); ++i) {
-    if (ConstructBDFID(devices_[i]->path(), &bdfid) != 0) {
+  for (auto & device : devices_) {
+    if (ConstructBDFID(device->path(), &bdfid) != 0) {
       std::cerr << "Failed to construct BDFID." << std::endl;
       ret = 1;
     } else {
-      devices_[i]->set_bdfid(bdfid);
+      device->set_bdfid(bdfid);
     }
   }
   if (ret != 0) {
@@ -443,8 +445,7 @@ RocmSMI::RocmSMI(uint64_t flags) : init_options_(flags),
                           kfd_notif_evt_fh_(-1), kfd_notif_evt_fh_refcnt_(0) {
 }
 
-RocmSMI::~RocmSMI() {
-}
+RocmSMI::~RocmSMI() = default;
 
 RocmSMI& RocmSMI::getInstance(uint64_t flags) {
   // Assume c++11 or greater. static objects will be created by only 1 thread
@@ -493,7 +494,7 @@ static inline std::unordered_set<uint32_t> GetEnvVarUIntegerSets(
   if(ev_str == nullptr) { return returnSet; }
   std::string stringEnv = ev_str;
 
-  if (stringEnv.empty() == false) {
+  if (!stringEnv.empty()) {
     // parse out values by commas
     std::string parsedVal;
     std::istringstream ev_str_ss(stringEnv);
@@ -571,7 +572,7 @@ void RocmSMI::printEnvVarInfo(void) {
             << std::endl;
   std::cout << __PRETTY_FUNCTION__ << " | env_vars_.logging_on = "
             << getLogSetting() << std::endl;
-  bool isLoggingOn = RocmSMI::isLoggingOn() ? true : false;
+  bool isLoggingOn = RocmSMI::isLoggingOn();
   std::cout << __PRETTY_FUNCTION__ << " | env_vars_.logging_on = "
             << (isLoggingOn ? "true" : "false") << std::endl;
   std::cout << __PRETTY_FUNCTION__ << " | env_vars_.enum_overrides = {";
@@ -637,7 +638,7 @@ RocmSMI::FindMonitor(std::string monitor_path) {
       fs.close();
 
       if (amd_monitor_types_.find(mon_type) != amd_monitor_types_.end()) {
-        m = std::shared_ptr<Monitor>(new Monitor(mon_name, &env_vars_));
+        m = std::make_shared<Monitor>(mon_name, &env_vars_);
         m->setTempSensorLabelMap();
         m->setVoltSensorLabelMap();
         break;
@@ -665,12 +666,12 @@ RocmSMI::AddToDeviceList(std::string dev_name) {
   dev_path += "/";
   dev_path += dev_name;
 
-  auto dev = std::shared_ptr<Device>(new Device(dev_path, &env_vars_));
+  auto dev = std::make_shared<Device>(dev_path, &env_vars_);
 
   std::shared_ptr<Monitor> m = FindMonitor(dev_path + "/device/hwmon");
   dev->set_monitor(m);
 
-  std::string d_name = dev_name;
+  const std::string& d_name = dev_name;
   uint32_t card_indx = GetDeviceIndex(d_name);
   dev->set_drm_render_minor(GetDrmRenderMinor(dev_path));
   dev->set_card_index(card_indx);
@@ -681,8 +682,6 @@ RocmSMI::AddToDeviceList(std::string dev_name) {
      << dev_name << " | path = " << dev_path
      << " | card index = " << std::to_string(card_indx) << " | ";
   LOG_DEBUG(ss);
-
-  return;
 }
 
 static const uint32_t kAmdGpuId = 0x1002;
@@ -789,7 +788,7 @@ int RocmSMI::DiscoverAMDPowerMonitors(bool force_update) {
     power_mons_.clear();
   }
 
-  if (power_mons_.size() != 0) {
+  if (!power_mons_.empty()) {
     return 0;
   }
 
@@ -817,7 +816,7 @@ int RocmSMI::DiscoverAMDPowerMonitors(bool force_update) {
 
     if (FileExists(tmp.c_str())) {
       std::shared_ptr<PowerMon> mon =
-                std::shared_ptr<PowerMon>(new PowerMon(mon_name, &env_vars_));
+                std::make_shared<PowerMon>(mon_name, &env_vars_);
       power_mons_.push_back(mon);
       mon->set_dev_index(GetDeviceIndex(dentry->d_name));
     }
@@ -830,8 +829,8 @@ int RocmSMI::DiscoverAMDPowerMonitors(bool force_update) {
     return errno;
   }
 
-  for (auto m : power_mons_) {
-    for (auto d : devices_) {
+  for (const auto& m : power_mons_) {
+    for (const auto& d : devices_) {
       if (m->dev_index() == d->index()) {
         d->set_power_monitor(m);
         break;
