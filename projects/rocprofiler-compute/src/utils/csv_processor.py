@@ -59,7 +59,7 @@ def kernel_name_shortener(workload_dir, level):
                 if original_name in cache:
                     continue
 
-                cmd = [llvm_filt, original_name]
+                cmd = [cpp_filt, original_name]
 
                 proc = subprocess.Popen(
                     cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE
@@ -127,15 +127,11 @@ def kernel_name_shortener(workload_dir, level):
 
     # Only shorten if valid shortening level
     if level < 5:
-        returnPath = True
-        rocprof_path = resolve_rocprof(returnPath)
-        # Given expected rocprof dir format (ie '/opt/rocm-x.x.x/bin/rocprof') navigate to llvm in parent
-        rocm_dir = os.path.abspath(os.path.join(rocprof_path, os.pardir, os.pardir))
-        llvm_filt = os.path.join(rocm_dir, "llvm", "bin", "llvm-cxxfilt")
-        if not os.path.isfile(llvm_filt):
+        cpp_filt = os.path.join("/usr", "bin", "c++filt")
+        if not os.path.isfile(cpp_filt):
             print(
-                "Error: Could not resolve llvm-cxxfilt in rocm install: {}".format(
-                    llvm_filt
+                "Error: Could not resolve c++filt in expected directory: {}".format(
+                    cpp_filt
                 )
             )
             sys.exit(0)
