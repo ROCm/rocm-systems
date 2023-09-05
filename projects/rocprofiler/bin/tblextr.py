@@ -20,7 +20,11 @@
 # THE SOFTWARE.
 ################################################################################
 
-import os, sys, re, subprocess, bisect
+import os
+import sys
+import re
+import subprocess
+import bisect
 from sqlitedb import SQLiteDB
 from mem_manager import MemManager
 import dform
@@ -203,7 +207,7 @@ def parse_res(infile):
                     var_table[(var_table_pid, dispatch_number)]["EndNs"] = m.group(3)
                     var_table[(var_table_pid, dispatch_number)]["CompleteNs"] = m.group(4)
 
-                    ## filling dependenciws
+                    # filling dependenciws
                     from_ns = int(m.group(1))
                     to_ns = int(m.group(2))
                     from_us = int((from_ns - START_NS) / 1000)
@@ -357,8 +361,8 @@ def fill_ext_db(table_name, db, indir, trace_name, api_pid):
                     rec_vals.append(tid)
                     rec_vals.append(msg)
                     rec_vals.append(record_id)
-                    rec_vals.append(api_pid)  # __section
-                    rec_vals.append(tid)  # __lane
+                    rec_vals.append(api_pid)    # __section
+                    rec_vals.append(tid)        # __lane
 
                 if cid == 1:
                     if not pid in range_stack:
@@ -394,15 +398,14 @@ def fill_ext_db(table_name, db, indir, trace_name, api_pid):
                 # range stop
                 if cid == 4:
                     if rid in range_map:
-                        (tms, msg) = range_map[
-                            rid
-                        ]  # querying start timestamp if rid exists
+                        # querying start timestamp if rid exists
+                        (tms, msg) = range_map[rid]
                         del range_map[rid]
                     else:
                         fatal("range id(" + str(rid) + ") is not found")
-                    rec_vals[0] = tms  # begin timestamp
-                    rec_vals[4] = msg  # range message
-                    rec_vals[7] = 0  # 0 lane for ranges
+                    rec_vals[0] = tms   # begin timestamp
+                    rec_vals[4] = msg   # range message
+                    rec_vals[7] = 0     # 0 lane for ranges
 
                 db.insert_entry(table_handle, rec_vals)
                 record_id += 1
@@ -530,81 +533,8 @@ def fill_api_db(
 
             record = line[:-1]
 
-      corr_id = 0
-      m = ptrn_corr_id.search(record)
-      if m:
-        corr_id = int(m.group(1))
-        record = ptrn_corr_id.sub('', record)
-
-      kernel_arg = ''
-      m = ptrn_fixkernel.search(record)
-      if m:
-        kernel_arg = 'kernel(' + m.group(1) + ') '
-        record = ptrn_fixkernel.sub('', record)
-
-      mfixformat = ptrn_fixformat.match(record)
-      if mfixformat: #replace '=' in args with parentheses
-        reformated_args = kernel_arg + mfixformat.group(2).replace('=','(').replace(',',')') \
-                                         .replace('\\', "\\\\").replace('\"', "\\\"")+')'
-        record = mfixformat.group(1) + '( ' + reformated_args + ')'
-
-      m = ptrn_val.match(record)
-      if not m: fatal(api_name + " bad record: '" + record + "'")
-      else:
-        rec_vals = []
-        rec_len = len(api_table_descr[0]) - 3
-        for ind in range(1, rec_len):
-          rec_vals.append(m.group(ind))
-        proc_id = int(rec_vals[2])
-        thread_id = int(rec_vals[3])
-        record_name = rec_vals[4]
-        record_args = rec_vals[5]
-
-        # incrementing per-process record id/correlation id
-        if not proc_id in record_id_dict: record_id_dict[proc_id] = 0
-        record_id_dict[proc_id] += 1
-        record_id = record_id_dict[proc_id]
-
-        # setting correlationid to record id if correlation id is not defined
-        if corr_id == 0: corr_id = record_id
-
-        rec_vals.append(corr_id)
-        # extracting/converting stream id
-        (stream_id, stream_found) = get_field(record_args, 'stream')
-        if stream_found:
-              stream_id = get_stream_index(stream_id)
-              (rec_vals[5], found) = set_field(record_args, 'stream', stream_id)
-              if found == 0: fatal('set_field() failed for "stream", args: "' + record_args + '"')
-        else:
-              (stream_id, stream_found) = get_field(record_args, 'hStream')
-              if stream_found:
-                stream_id = get_stream_index(stream_id)
-                (rec_vals[5], found) = set_field(record_args, 'hStream', stream_id)
-                if found == 0: fatal('set_field() failed for "stream", args: "' + record_args + '"')
-              else :
-                stream_id = 0
-
-        if hip_strm_cr_event_ptrn.match(record_name):
-          hip_streams.append(stream_id)
-
-        if hip_sync_event_ptrn.match(record_name):
-          if (proc_id,stream_id) in last_hip_api_map:
-            (last_hip_api_corr_id, last_hip_api_from_pid) = last_hip_api_map[(proc_id,stream_id)][-1]
-            sync_api_beg_us = int((int(rec_vals[0]) - START_NS) / 1000)
-            if not proc_id in dep_dict: dep_dict[proc_id] = {}
-            if HIP_PID not in dep_dict[proc_id]:
-              dep_dict[proc_id][HIP_PID] = { 'pid': last_hip_api_from_pid, 'from': [], 'to': {}, 'id': [] }
-            dep_dict[proc_id][HIP_PID]['from'].append((-1, stream_id, thread_id))
-            dep_dict[proc_id][HIP_PID]['id'].append(last_hip_api_corr_id)
-            dep_dict[proc_id][HIP_PID]['to'][last_hip_api_corr_id] = sync_api_beg_us
-            from_ids[(last_hip_api_corr_id, proc_id)] = len(dep_dict[proc_id][HIP_PID]['from']) - 1
-
-        m = beg_pattern.match(record)
-        gpu_id = 0
-        if m:
-          kernel_properties = m.group(2)
-          for prop in kernel_properties.split(', '):
-            m = prop_pattern.match(prop)
+            corr_id = 0
+            m = ptrn_corr_id.search(record)
             if m:
                 corr_id = int(m.group(1))
                 record = ptrn_corr_id.sub("", record)
@@ -686,6 +616,8 @@ def fill_api_db(
                             (proc_id, stream_id)
                         ][-1]
                         sync_api_beg_us = int((int(rec_vals[0]) - START_NS) / 1000)
+                        if not proc_id in dep_dict:
+                            dep_dict[proc_id] = {}
                         if HIP_PID not in dep_dict[proc_id]:
                             dep_dict[proc_id][HIP_PID] = {
                                 "pid": last_hip_api_from_pid,
@@ -824,7 +756,7 @@ def fill_api_db(
                 rec_vals.append(api_data)
 
                 # setting section and lane
-                rec_vals.append(api_pid)  # __section
+                rec_vals.append(api_pid)    # __section
                 rec_vals.append(thread_id)  # __lane
 
                 # inserting an API record to DB
@@ -911,9 +843,9 @@ def fill_copy_db(table_name, db, indir):
                     thread_id = -1
 
                 # completing record
-                rec_vals.append(proc_id)  # tid
+                rec_vals.append(proc_id)    # tid
                 rec_vals.append(thread_id)  # tid
-                rec_vals.append(corr_id)  # Index
+                rec_vals.append(corr_id)    # Index
 
                 # registering memcopy information
                 activity_data = (
@@ -922,7 +854,7 @@ def fill_copy_db(table_name, db, indir):
                 rec_vals.append(activity_data)
 
                 # appending straem ID and section ID
-                rec_vals.append(COPY_PID)  # __section
+                rec_vals.append(COPY_PID)   # __section
                 rec_vals.append(thread_id)  # __lane
 
                 # inserting DB activity entry
@@ -1073,12 +1005,12 @@ def fill_ops_db(kernel_table_name, mcopy_table_name, db, indir):
                             )
 
                 # activity record
-                rec_vals[4] = name  # Name
-                rec_vals.append(proc_id)  # pid
-                rec_vals.append(thread_id)  # tid
-                rec_vals.append(roctx_range)  # roctx-range
-                rec_vals.append(stream_id)  # StreamId
-                rec_vals.append(corr_id)  # Index
+                rec_vals[4] = name              # Name
+                rec_vals.append(proc_id)        # pid
+                rec_vals.append(thread_id)      # tid
+                rec_vals.append(roctx_range)    # roctx-range
+                rec_vals.append(stream_id)      # StreamId
+                rec_vals.append(corr_id)        # Index
 
                 # registering memcopy information
                 activity_data = (
@@ -1089,7 +1021,7 @@ def fill_ops_db(kernel_table_name, mcopy_table_name, db, indir):
                 rec_vals.append(activity_data)
 
                 # activity record data for stream ID and sction ID
-                rec_vals.append(sect_id)  # __section
+                rec_vals.append(sect_id)    # __section
                 rec_vals.append(stream_id)  # __lane
 
                 # inserting DB activity entry
