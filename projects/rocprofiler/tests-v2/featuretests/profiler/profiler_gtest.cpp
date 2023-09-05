@@ -536,6 +536,146 @@ TEST_F(LoadUnloadTest, WhenLoadingSecondTimeThenToolLoadsUnloadsSuccessfully) {
 
   EXPECT_EQ(HSA_STATUS_SUCCESS, status);
 }
+
+/*
+ * ###################################################
+ * ############ Codeobj capture tests ################
+ * ###################################################
+ */
+
+class CodeobjTest : public ::testing::Test {
+ public:
+  virtual void SetUp(const char* app_name){};
+  virtual void TearDown(){};
+  static void FlushCallback(const rocprofiler_record_header_t* record,
+                            const rocprofiler_record_header_t* end_record,
+                            rocprofiler_session_id_t session_id,
+                            rocprofiler_buffer_id_t buffer_id){};
+
+  void SetupRocprofiler() {
+    int result = ROCPROFILER_STATUS_ERROR;
+
+    result = rocprofiler_initialize();
+    EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
+    result = rocprofiler_create_session(ROCPROFILER_NONE_REPLAY_MODE, &session_id);
+    EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
+
+    result = rocprofiler_codeobj_capture_create(&id, ROCPROFILER_CAPTURE_SYMBOLS_ONLY, 0);
+    EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
+  }
+
+  void TearDownRocprofiler() {
+    int result = ROCPROFILER_STATUS_ERROR;
+
+    result = rocprofiler_codeobj_capture_free(id);
+    EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
+
+    result = rocprofiler_destroy_session(session_id);
+    EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
+    result = rocprofiler_finalize();
+    EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
+  }
+
+  rocprofiler_session_id_t session_id;
+  rocprofiler_record_id_t id;
+};
+
+TEST_F(CodeobjTest, WhenRunningProfilerWithCodeobjCapture) {
+  int result = ROCPROFILER_STATUS_ERROR;
+  SetupRocprofiler();
+
+  result = rocprofiler_codeobj_capture_start(id);
+  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
+
+  // Launch a kernel
+  LaunchVectorAddKernel();
+
+  result = rocprofiler_codeobj_capture_stop(id);
+  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
+
+  rocprofiler_codeobj_symbols_t capture;
+
+  rocprofiler_codeobj_capture_get(id, &capture);
+  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
+
+  EXPECT_GE(capture.count, 1);
+  bool bCaptured_itself = false;
+
+  for (int i = 0; i < (int)capture.count; i++) {
+    const char* path = capture.symbols[i].filepath;
+    if (!path) continue;
+    std::string fpath(path);
+    size_t pos = fpath.find("runFeatureTests#offset=");
+    if (pos != std::string::npos && fpath.find("&size=", pos) != std::string::npos)
+      bCaptured_itself = true;
+  }
+  EXPECT_EQ(bCaptured_itself, true);
+
+  TearDownRocprofiler();
+}
+
+
+TEST_F(CodeobjTest, WhenRunningProfilerWithMultipleCaptureAndCopy) {
+  int result = ROCPROFILER_STATUS_ERROR;
+
+  SetupRocprofiler();
+
+  rocprofiler_record_id_t id2;
+  rocprofiler_record_id_t id3;
+
+  result = rocprofiler_codeobj_capture_create(&id2, ROCPROFILER_CAPTURE_COPY_FILE_AND_MEMORY, 0);
+  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
+
+  result = rocprofiler_codeobj_capture_start(id);
+  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
+
+  result = rocprofiler_codeobj_capture_start(id2);
+  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
+
+  result = rocprofiler_codeobj_capture_create(&id3, ROCPROFILER_CAPTURE_COPY_MEMORY, 0);
+  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
+
+  result = rocprofiler_codeobj_capture_start(id3);
+  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
+
+  // Launch a kernel
+  LaunchVectorAddKernel();
+
+  result = rocprofiler_codeobj_capture_stop(id2);
+  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
+
+  result = rocprofiler_codeobj_capture_stop(id3);
+  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
+
+  result = rocprofiler_codeobj_capture_free(id3);
+  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
+
+  rocprofiler_codeobj_symbols_t capture;
+  rocprofiler_codeobj_capture_get(id2, &capture);
+  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
+
+  EXPECT_GE(capture.count, 1);
+
+  for (int i = 0; i < (int)capture.count; i++) {
+    EXPECT_NE(capture.symbols[i].base_address, 0);
+    EXPECT_NE(capture.symbols[i].clock_start.value, 0);
+    EXPECT_NE(capture.symbols[i].data, nullptr);
+    EXPECT_NE(capture.symbols[i].size, 0);
+  }
+
+  result = rocprofiler_codeobj_capture_stop(id);
+  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
+
+  result = rocprofiler_codeobj_capture_free(id2);
+  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
+
+  // Expect to return error when running get() after free()
+  result = rocprofiler_codeobj_capture_get(id3, &capture);
+  EXPECT_NE(ROCPROFILER_STATUS_SUCCESS, result);
+
+  TearDownRocprofiler();
+}
+
 /*
  * ###################################################
  * ############ ATT Tests ################
@@ -593,36 +733,11 @@ class ATTCollection : public ::testing::Test {
 bool ATTCollection::bCollected = false;
 
 TEST_F(ATTCollection, WhenRunningATTItCollectsTraceDataWithOldAPI) {
-  // iterate for gpu's
-  struct agent_info {
-    std::vector<std::string> agents = {};
-
-    auto as_string() const {
-      auto _ss = std::stringstream{};
-      for (const auto& itr : agents) _ss << ", " << itr;
-      auto _v = _ss.str();
-      if (_v.length() > 2) return _v.substr(2);
-      return _v;
-    }
-  };
-
-  auto _info = agent_info{};
-  hsa_iterate_agents(
-      [](hsa_agent_t agent, void* _arg) {
-        agent_info* _info_v = static_cast<agent_info*>(_arg);
-        EXPECT_NE(_info_v, nullptr);
-        char gpu_name[64] = {'\0'};
-        hsa_agent_get_info(agent, HSA_AGENT_INFO_NAME, gpu_name);
-        _info_v->agents.emplace_back(std::string{gpu_name});
-        return HSA_STATUS_SUCCESS;
-      },
-      static_cast<void*>(&_info));
-
   int result = ROCPROFILER_STATUS_ERROR;
 
   // inititalize ROCProfiler
   result = rocprofiler_initialize();
-  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result) << "agents: " << _info.as_string();
+  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
 
   // Att trace collection parameters
   rocprofiler_session_id_t session_id;
@@ -635,12 +750,12 @@ TEST_F(ATTCollection, WhenRunningATTItCollectsTraceDataWithOldAPI) {
 
   // create a session
   result = rocprofiler_create_session(ROCPROFILER_NONE_REPLAY_MODE, &session_id);
-  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result) << "agents: " << _info.as_string();
+  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
 
   // create a buffer to hold att trace records for each kernel launch
   rocprofiler_buffer_id_t buffer_id;
   result = rocprofiler_create_buffer(session_id, FlushCallback, 0x9999, &buffer_id);
-  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result) << "agents: " << _info.as_string();
+  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
 
   // create a filter for collecting att traces
   rocprofiler_filter_id_t filter_id;
@@ -648,67 +763,42 @@ TEST_F(ATTCollection, WhenRunningATTItCollectsTraceDataWithOldAPI) {
   result = rocprofiler_create_filter(session_id, ROCPROFILER_ATT_TRACE_COLLECTION,
                                      rocprofiler_filter_data_t{.att_parameters = &parameters[0]},
                                      parameters.size(), &filter_id, property);
-  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result) << "agents: " << _info.as_string();
+  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
 
   // set buffer for the filter
   result = rocprofiler_set_filter_buffer(session_id, filter_id, buffer_id);
-  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result) << "agents: " << _info.as_string();
+  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
 
   // activating att tracing session
   result = rocprofiler_start_session(session_id);
-  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result) << "agents: " << _info.as_string();
+  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
 
   // Launch a kernel
   LaunchVectorAddKernel();
-  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result) << "agents: " << _info.as_string();
+  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
 
   // deactivate att tracing session
   result = rocprofiler_terminate_session(session_id);
-  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result) << "agents: " << _info.as_string();
+  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
 
   // dump att tracing data
   result = rocprofiler_flush_data(session_id, buffer_id);
-  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result) << "agents: " << _info.as_string();
+  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
 
   // destroy session
   result = rocprofiler_destroy_session(session_id);
-  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result) << "agents: " << _info.as_string();
+  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
 
   // finalize att tracing by destroying rocprofiler object
   result = rocprofiler_finalize();
-  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result) << "agents: " << _info.as_string();
+  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
 
   // check if we got data from any shader engine
-  EXPECT_EQ(bCollected, true) << "agents: " << _info.as_string();
+  EXPECT_EQ(bCollected, true);
 }
 
 // New API
 TEST_F(ATTCollection, WhenRunningATTItCollectsTraceDataWithNewAPI) {
-  // iterate for gpu's
-  struct agent_info {
-    std::vector<std::string> agents = {};
-
-    auto as_string() const {
-      auto _ss = std::stringstream{};
-      for (const auto& itr : agents) _ss << ", " << itr;
-      auto _v = _ss.str();
-      if (_v.length() > 2) return _v.substr(2);
-      return _v;
-    }
-  };
-
-  auto _info = agent_info{};
-  hsa_iterate_agents(
-      [](hsa_agent_t agent, void* _arg) {
-        agent_info* _info_v = static_cast<agent_info*>(_arg);
-        EXPECT_NE(_info_v, nullptr);
-        char gpu_name[64] = {'\0'};
-        hsa_agent_get_info(agent, HSA_AGENT_INFO_NAME, gpu_name);
-        _info_v->agents.emplace_back(std::string{gpu_name});
-        return HSA_STATUS_SUCCESS;
-      },
-      static_cast<void*>(&_info));
-
   int result = ROCPROFILER_STATUS_ERROR;
   // inititalize ROCProfiler
   result = rocprofiler_initialize();
@@ -1096,180 +1186,18 @@ TEST_F(ProfilerMQTest, DISABLED_WhenRunningMultiProcessTestItPasses) {
  * ############ Multi Process Tests ################
  * ###################################################
  */
-
 TEST(ProfilerMPTest, WhenRunningMultiProcessTestItPasses) {
-  // create as many threads as number of cores in system
-  int num_cpu_cores = GetNumberOfCores();
+  int num_threads = 3; // Create 3 threads
 
   pid_t childpid = fork();
 
-  if (childpid > 0) {  // Parent
-    // create a pool of thrads
-    std::vector<std::thread> threads(num_cpu_cores);
-    for (int n = 0; n < num_cpu_cores / 2; ++n) {
-      threads[n] = std::thread(KernelLaunch);
-    }
-    for (int n = 0; n < num_cpu_cores / 2; ++n) {
-      threads[n].join();
-    }
-    //  wait for child exit
-    wait(NULL);
-    exit(0);
+  if (childpid != 0) wait(NULL); // Need to wait for child.
 
-
-  } else if (!childpid) {  // child
-                           // create a pool of thrads
-    std::vector<std::thread> threads(num_cpu_cores);
-    for (int n = 0; n < num_cpu_cores / 2; ++n) {
-      threads[n] = std::thread(KernelLaunch);
-    }
-
-    for (int n = 0; n < num_cpu_cores / 2; ++n) {
-      threads[n].join();
-      exit(0);
-    }
-  } else {  // failure
-    ASSERT_TRUE(1);
-  }
-}
-
-/*
- * ###################################################
- * ############ Codeobj capture tests ################
- * ###################################################
- */
-
-class CodeobjTest : public ::testing::Test {
- public:
-  virtual void SetUp(const char* app_name){};
-  virtual void TearDown(){};
-  static void FlushCallback(const rocprofiler_record_header_t* record,
-                            const rocprofiler_record_header_t* end_record,
-                            rocprofiler_session_id_t session_id,
-                            rocprofiler_buffer_id_t buffer_id){};
-
-  void SetupRocprofiler() {
-    int result = ROCPROFILER_STATUS_ERROR;
-
-    result = rocprofiler_initialize();
-    EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
-    result = rocprofiler_create_session(ROCPROFILER_NONE_REPLAY_MODE, &session_id);
-    EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
-
-    result = rocprofiler_codeobj_capture_create(&id, ROCPROFILER_CAPTURE_SYMBOLS_ONLY, 0);
-    EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
-  }
-
-  void TearDownRocprofiler() {
-    int result = ROCPROFILER_STATUS_ERROR;
-
-    result = rocprofiler_codeobj_capture_free(id);
-    EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
-
-    result = rocprofiler_destroy_session(session_id);
-    EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
-    result = rocprofiler_finalize();
-    EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
-  }
-
-  rocprofiler_session_id_t session_id;
-  rocprofiler_record_id_t id;
-};
-
-TEST_F(CodeobjTest, WhenRunningProfilerWithCodeobjCapture) {
-  int result = ROCPROFILER_STATUS_ERROR;
-  SetupRocprofiler();
-
-  result = rocprofiler_codeobj_capture_start(id);
-  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
-
-  // Launch a kernel
-  LaunchVectorAddKernel();
-
-  result = rocprofiler_codeobj_capture_stop(id);
-  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
-
-  rocprofiler_codeobj_symbols_t capture;
-
-  rocprofiler_codeobj_capture_get(id, &capture);
-  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
-
-  EXPECT_GE(capture.count, 1);
-  bool bCaptured_itself = false;
-
-  for (int i = 0; i < (int)capture.count; i++) {
-    const char* path = capture.symbols[i].filepath;
-    if (!path) continue;
-    std::string fpath(path);
-    size_t pos = fpath.find("runFeatureTests#offset=");
-    if (pos != std::string::npos && fpath.find("&size=", pos) != std::string::npos)
-      bCaptured_itself = true;
-  }
-  EXPECT_EQ(bCaptured_itself, true);
-
-  TearDownRocprofiler();
-}
-
-
-TEST_F(CodeobjTest, WhenRunningProfilerWithMultipleCaptureAndCopy) {
-  int result = ROCPROFILER_STATUS_ERROR;
-
-  SetupRocprofiler();
-
-  rocprofiler_record_id_t id2;
-  rocprofiler_record_id_t id3;
-
-  result = rocprofiler_codeobj_capture_create(&id2, ROCPROFILER_CAPTURE_COPY_FILE_AND_MEMORY, 0);
-  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
-
-  result = rocprofiler_codeobj_capture_start(id);
-  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
-
-  result = rocprofiler_codeobj_capture_start(id2);
-  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
-
-  result = rocprofiler_codeobj_capture_create(&id3, ROCPROFILER_CAPTURE_COPY_MEMORY, 0);
-  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
-
-  result = rocprofiler_codeobj_capture_start(id3);
-  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
-
-  // Launch a kernel
-  LaunchVectorAddKernel();
-
-  result = rocprofiler_codeobj_capture_stop(id2);
-  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
-
-  result = rocprofiler_codeobj_capture_stop(id3);
-  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
-
-  result = rocprofiler_codeobj_capture_free(id3);
-  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
-
-  rocprofiler_codeobj_symbols_t capture;
-  rocprofiler_codeobj_capture_get(id2, &capture);
-  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
-
-  EXPECT_GE(capture.count, 1);
-
-  for (int i = 0; i < (int)capture.count; i++) {
-    EXPECT_NE(capture.symbols[i].base_address, 0);
-    EXPECT_NE(capture.symbols[i].clock_start.value, 0);
-    EXPECT_NE(capture.symbols[i].data, nullptr);
-    EXPECT_NE(capture.symbols[i].size, 0);
-  }
-
-  result = rocprofiler_codeobj_capture_stop(id);
-  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
-
-  result = rocprofiler_codeobj_capture_free(id2);
-  EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
-
-  // Expect to return error when running get() after free()
-  result = rocprofiler_codeobj_capture_get(id3, &capture);
-  EXPECT_NE(ROCPROFILER_STATUS_SUCCESS, result);
-
-  TearDownRocprofiler();
+  std::vector<std::thread> threads(num_threads);
+  for (auto& thread : threads)
+    thread = std::move(std::thread(KernelLaunch));
+  for (auto& thread : threads)
+    thread.join();
 }
 
 /*
