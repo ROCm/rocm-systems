@@ -884,14 +884,28 @@ struct metrics_table_header_t {
 #define RSMI_GPU_METRICS_API_FORMAT_VER 1
 // The content version increments when gpu_metrics is extended with new and/or
 // existing field sizes are changed.
+
+/**
+ * @brief The GPU metrics version 1
+ */
 #define RSMI_GPU_METRICS_API_CONTENT_VER_1 1
+/**
+ * @brief The GPU metrics version 2
+ */
 #define RSMI_GPU_METRICS_API_CONTENT_VER_2 2
+/**
+ * @brief The GPU metrics version 3
+ */
 #define RSMI_GPU_METRICS_API_CONTENT_VER_3 3
 
-// This should match NUM_HBM_INSTANCES
+/**
+ * @brief This should match NUM_HBM_INSTANCES
+ */
 #define RSMI_NUM_HBM_INSTANCES 4
 
-// Unit conversion factor for HBM temperatures
+/**
+ * @brief Unit conversion factor for HBM temperatures
+ */
 #define CENTRIGRADE_TO_MILLI_CENTIGRADE 1000
 
 typedef struct {
@@ -2230,7 +2244,7 @@ rsmi_dev_busy_percent_get(uint32_t dv_ind, uint32_t *busy_percent);
  *  If the function reutrns RSMI_STATUS_SUCCESS, the counter will be set in the value field of
  *  the rsmi_utilization_counter_t.
  *
- *  @param[in] count The size of @utilization_counters array.
+ *  @param[in] count The size of utilization_counters array.
  *
  *  @param[inout] timestamp The timestamp when the counter is retreived. Resolution: 1 ns.
  *  @retval ::RSMI_STATUS_SUCCESS call was successful
@@ -3340,7 +3354,7 @@ rsmi_compute_process_gpus_get(uint32_t pid, uint32_t *dv_indices,
  *  @brief Get the info of a process on a specific device.
  *
  *  @details Given a process id @p pid, a @p dv_ind, this function will
- *  write the process information for @p pid on the device, if available, to
+ *  write the process information for pid on the device, if available, to
  *  the memory pointed to by @p proc.
  *
  *  @param[in] pid The process id of the process for which the gpu
@@ -3348,7 +3362,7 @@ rsmi_compute_process_gpus_get(uint32_t pid, uint32_t *dv_indices,
  *
  *  @param[in] dv_ind a device index where the process running on.
  *
- *  @param[inout] procs a pointer to memory provided by the caller to which
+ *  @param[inout] proc a pointer to memory provided by the caller to which
  *  process information will be written.
  *
  *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call
@@ -3540,7 +3554,7 @@ rsmi_topo_get_link_type(uint32_t dv_ind_src, uint32_t dv_ind_dst,
  *
  *  @details Given a source device index @p dv_ind_src and
  *  a destination device index @p dv_ind_dst, and a pointer to a
- *  bool @accessible, this function will write the P2P connection status
+ *  bool @p accessible, this function will write the P2P connection status
  *  between the device @p dv_ind_src and @p dv_ind_dst to the memory
  *  pointed to by @p accessible.
  *
