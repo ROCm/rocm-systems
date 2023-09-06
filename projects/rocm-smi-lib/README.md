@@ -1,5 +1,3 @@
-
-
 # ROCm System Management Interface (ROCm SMI) Library
 
 The ROCm System Management Interface Library, or ROCm SMI library, is part of the Radeon Open Compute [ROCm](https://github.com/RadeonOpenCompute) software stack . It is a C library for Linux that provides a user space interface for applications to monitor and control GPU applications.
@@ -12,22 +10,25 @@ The information contained herein is for informational purposes only, and is subj
 
 © 2022-2023 Advanced Micro Devices, Inc. All Rights Reserved.
 
+## Building ROCm SMI
 
-# Building ROCm SMI
+### Additional Required software for building
 
-#### Additional Required software for building
 In order to build the ROCm SMI library, the following components are required. Note that the software versions listed are what was used in development. Earlier versions are not guaranteed to work:
+
 * CMake (v3.5.0)
 * g++ (5.4.0)
 
 In order to build the latest documentation, the following are required:
+
 * Python 3.8+
 * NPM (sass)
 
 The source code for ROCm SMI is available on [Github](https://github.com/RadeonOpenCompute/rocm_smi_lib).
 
 After the ROCm SMI library git repository has been cloned to a local Linux machine, building the library is achieved by following the typical CMake build sequence. Specifically,
-```bash
+
+```shell
 mkdir -p build
 cd build
 cmake ..
@@ -35,26 +36,27 @@ make -j $(nproc)
 # Install library file and header; default location is /opt/rocm
 make install
 ```
+
 The built library will appear in the `build` folder.
 
 To build the rpm and deb packages follow the above steps with:
-```bash
+
+```shell
 make package
 ```
 
 #### Documentation
+
 The following is an example of how to build the docs:
-```bash
-sudo apt install -y npm
-sudo npm install -g sass
 
+```shell
 python3 -m venv .venv
-
 .venv/bin/python3 -m pip install -r docs/.sphinx/requirements.txt
 .venv/bin/python3 -m sphinx -T -E -b html -d docs/_build/doctrees -D language=en docs docs/_build/html
 ```
 
 #### Building the Tests
+
 In order to verify the build and capability of ROCm SMI on your system and to see an example of how ROCm SMI can be used, you may build and run the tests that are available in the repo. To build the tests, follow these steps:
 
 ```bash
@@ -66,11 +68,14 @@ make -j $(nproc)
 
 To run the test, execute the program `rsmitst` that is built from the steps above.
 
-# Usage Basics
-## Device Indices
+## Usage Basics
+
+### Device Indices
+
 Many of the functions in the library take a "device index". The device index is a number greater than or equal to 0, and less than the number of devices detected, as determined by `rsmi_num_monitor_devices()`. The index is used to distinguish the detected devices from one another. It is important to note that a device may end up with a different index after a reboot, so an index should not be relied upon to be constant over reboots.
 
-# Hello ROCm SMI
+## Hello ROCm SMI
+
 The only required ROCm-SMI call for any program that wants to use ROCm-SMI is the `rsmi_init()` call. This call initializes some internal data structures that will be used by subsequent ROCm-SMI calls. 
 
 When ROCm-SMI is no longer being used, `rsmi_shut_down()` should be called. This provides a way to do any releasing of resources that ROCm-SMI may have held. In many cases, this may have no effect, but may be necessary in future versions of the library.
