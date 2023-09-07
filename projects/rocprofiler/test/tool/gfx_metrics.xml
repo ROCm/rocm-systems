@@ -742,9 +742,7 @@
 
 </gfx11>
 
-<gfx1100 base="gfx11">
-</gfx1100>
-
-<gfx1101 base="gfx11">
-</gfx1101>
+<gfx1100 base="gfx11"></gfx1100>
+<gfx1101 base="gfx11"></gfx1101>
+<gfx1102 base="gfx11"></gfx1102>
 

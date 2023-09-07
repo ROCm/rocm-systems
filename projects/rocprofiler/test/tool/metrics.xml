@@ -409,11 +409,9 @@
   <metric name="LDSBankConflict" expr=100*SQC_LDS_BANK_CONFLICT/SQC_LDS_IDX_ACTIVE descr="The percentage of GPUTime LDS is stalled by bank conflicts. Value range: 0% (optimal) to 100% (bad)."></metric>
 </gfx11_expr>
 
-<gfx1100_expr base="gfx11_expr">
-</gfx1100_expr>
-
-<gfx1101_expr base="gfx11_expr">
-</gfx1101_expr>
+<gfx1100_expr base="gfx11_expr"></gfx1100_expr>
+<gfx1101_expr base="gfx11_expr"></gfx1101_expr>
+<gfx1102_expr base="gfx11_expr"></gfx1102_expr>
 
 <gfx1030_expr base="gfx10_expr">
 </gfx1030_expr>
@@ -445,8 +443,8 @@
 <gfx1032 base="gfx1032_expr"></gfx1032>
 
 <gfx1100 base="gfx1100_expr"></gfx1100>
-
 <gfx1101 base="gfx1101_expr"></gfx1101>
+<gfx1102 base="gfx1102_expr"></gfx1102>
 
 <global>
   # GPUBusy         The percentage of time GPU was busy.

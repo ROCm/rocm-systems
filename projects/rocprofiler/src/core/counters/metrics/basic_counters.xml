@@ -736,9 +736,7 @@
   <metric name="TA_BUFFER_STORE_WAVEFRONTS" block=TA event=46 descr="Number of buffer store vec32 packets processed by TA"></metric>
 </gfx11>
 
-<gfx1100 base="gfx11">
-</gfx1100>
-
-<gfx1101 base="gfx11">
-</gfx1101>
+<gfx1100 base="gfx11"></gfx1100>
+<gfx1101 base="gfx11"></gfx1101>
+<gfx1102 base="gfx11"></gfx1102>
 

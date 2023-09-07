@@ -498,11 +498,9 @@
   <metric name="LDSBankConflict" expr=100*SQC_LDS_BANK_CONFLICT/SQC_LDS_IDX_ACTIVE descr="The percentage of GPUTime LDS is stalled by bank conflicts. Value range: 0% (optimal) to 100% (bad)."></metric>
 </gfx11_expr>
 
-<gfx1100_expr base="gfx11_expr">
-</gfx1100_expr>
-
-<gfx1101_expr base="gfx11_expr">
-</gfx1101_expr>
+<gfx1100_expr base="gfx11_expr"></gfx1100_expr>
+<gfx1101_expr base="gfx11_expr"></gfx1101_expr>
+<gfx1102_expr base="gfx11_expr"></gfx1102_expr>
 
 <gfx8 base="gfx8_expr"></gfx8>
 <gfx9 base="gfx9_expr"></gfx9>
@@ -518,13 +516,14 @@
 <gfx940 base="gfx940_expr"></gfx940>
 <gfx941 base="gfx940_expr"></gfx941>
 <gfx942 base="gfx940_expr"></gfx942>
-#Navi21
+#Navi2x
 <gfx1030 base="gfx1030_expr"></gfx1030>
 <gfx1031 base="gfx1031_expr"></gfx1031>
 <gfx1032 base="gfx1032_expr"></gfx1032>
-#Navi31
+#Navi3x
 <gfx1100 base="gfx1100_expr"></gfx1100>
 <gfx1101 base="gfx1101_expr"></gfx1101>
+<gfx1102 base="gfx1102_expr"></gfx1102>
 
 
 <global>
