@@ -22,8 +22,9 @@
 
 #include "rocprofiler/hsa.h"
 
-#if defined(ROCPROFILER_CI) && ROCPROFILER_CI > 0
-#    if HSA_API_TABLE_MAJOR_VERSION <= 0x01
+#ifndef ROCPROFILER_UNSAFE_NO_VERSION_CHECK
+#    if defined(ROCPROFILER_CI) && ROCPROFILER_CI > 0
+#        if HSA_API_TABLE_MAJOR_VERSION <= 0x01
 static_assert(HSA_CORE_API_TABLE_MAJOR_VERSION == 0x01,
               "Change in the major version of HSA core API table");
 static_assert(HSA_AMD_EXT_API_TABLE_MAJOR_VERSION == 0x01,
@@ -52,7 +53,8 @@ static_assert(sizeof(FinalizerExtTable) == 64, "HSA finalizer API table size cha
 static_assert(sizeof(ImageExtTable) == 120, "HSA image-extended API table size changed");
 static_assert(sizeof(AmdExtTable) == 552, "HSA amd-extended API table size changed");
 static_assert(sizeof(CoreApiTable) == 1016, "HSA core API table size changed");
-#    else
-#        error "HSA_API_TABLE_MAJOR_VERSION not supported"
+#        else
+#            error "HSA_API_TABLE_MAJOR_VERSION not supported"
+#        endif
 #    endif
 #endif

@@ -16,8 +16,8 @@ const std::string_view MI200_NAME        = "gfx90a";
 
 #define ROCPROFILER_CALL(result, msg)                                                              \
     {                                                                                              \
-        rocprofiler_status_t status = result;                                                      \
-        if(status != ROCPROFILER_STATUS_SUCCESS)                                                   \
+        rocprofiler_status_t CHECKSTATUS = result;                                                 \
+        if(CHECKSTATUS != ROCPROFILER_STATUS_SUCCESS)                                              \
         {                                                                                          \
             puts(#result " failed");                                                               \
         }                                                                                          \
@@ -28,8 +28,8 @@ const std::string_view MI200_NAME        = "gfx90a";
 // after previous initialization.
 #define ROCPROFILER_CALL_FAILS(result, msg)                                                        \
     {                                                                                              \
-        rocprofiler_status_t status = result;                                                      \
-        if(status == ROCPROFILER_STATUS_SUCCESS)                                                   \
+        rocprofiler_status_t CHECKSTATUS = result;                                                 \
+        if(CHECKSTATUS == ROCPROFILER_STATUS_SUCCESS)                                              \
         {                                                                                          \
             puts(#result " succeeded");                                                            \
         }                                                                                          \
@@ -80,7 +80,7 @@ find_first_gpu_agent()
     ROCPROFILER_CALL(rocprofiler_query_available_agents(&find_first_gpu_agent_impl,
                                                         sizeof(rocprofiler_agent_t),
                                                         static_cast<void*>(&gpu_agent)),
-                     "Failed to find GPU agents");
+                     "Could not query GPU agents");
 
     return gpu_agent;
 }

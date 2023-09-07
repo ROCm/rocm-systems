@@ -10,6 +10,7 @@
 #include "common.h"
 
 #include <cassert>
+#include <vector>
 
 #define HOST_TRAP_INTERVAL 1000
 
@@ -53,11 +54,11 @@ second_user()
 
     // After failure, the second user queries available configuration and observes the one chosen by
     // the first user.
-    rocprofiler_pc_sampling_configuration_t* configs;
-    size_t                                   config_count;
-    ROCPROFILER_CALL(
-        rocprofiler_query_pc_sampling_agent_configurations(gpu_agent, configs, &config_count),
-        "The second user cannot query available configurations");
+    size_t                                               config_count = 10;
+    std::vector<rocprofiler_pc_sampling_configuration_t> configs(config_count);
+    ROCPROFILER_CALL(rocprofiler_query_pc_sampling_agent_configurations(
+                         gpu_agent, configs.data(), &config_count),
+                     "The second user cannot query available configurations");
 
     // Only one configuration should be listed, and its parameters should match the parameters set
     // by the first user. Vladimir: Is it ok to use assertions? In the release mode, they might be
@@ -70,9 +71,6 @@ second_user()
     // sampling is alredy configured)??
     assert(first_user_config.min_interval == host_trap_interval &&
            first_user_config.min_interval == first_user_config.max_interval);
-
-    // Vladimir: Do we need to explicitly free queried configurations?
-    free(configs);
 
     // Reuse the same configuration set by the first user.
     // The second user is satisfied with the configuration chosen by the first user, so it
@@ -106,8 +104,6 @@ second_user()
 int
 main(int /*argc*/, char** /*argv*/)
 {
-    rocprofiler_status_t status;
-
     // creating a context
     rocprofiler_context_id_t context_id;
     ROCPROFILER_CALL(rocprofiler_create_context(&context_id), "Cannot create context\n");
@@ -127,11 +123,10 @@ main(int /*argc*/, char** /*argv*/)
                      "Cannot create pc sampling buffer");
 
     // PC sampling service configuration
-    rocprofiler_pc_sampling_method_t host_trap_sampling_method =
-        ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP;
-    rocprofiler_pc_sampling_unit_t host_trap_sampling_unit_time = ROCPROFILER_PC_SAMPLING_UNIT_TIME;
+    host_trap_sampling_method    = ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP;
+    host_trap_sampling_unit_time = ROCPROFILER_PC_SAMPLING_UNIT_TIME;
     // Vladimir: What units are we using for time? ms, micro secs, ns?
-    uint64_t host_trap_interval = HOST_TRAP_INTERVAL;
+    host_trap_interval = HOST_TRAP_INTERVAL;
     // Instantiating the first PC sampling service succeeds.
     ROCPROFILER_CALL(rocprofiler_configure_pc_sampling_service(context_id,
                                                                gpu_agent,

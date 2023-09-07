@@ -7,8 +7,6 @@
 int
 main(int /*argc*/, char** /*argv*/)
 {
-    rocprofiler_status_t status;
-
     // creating a context
     rocprofiler_context_id_t context_id;
     ROCPROFILER_CALL(rocprofiler_create_context(&context_id), "Cannot create context\n");

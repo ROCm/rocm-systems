@@ -172,6 +172,11 @@ if(ROCPROFILER_BUILD_STATIC_LIBSTDCXX)
                           INTERFACE rocprofiler::rocprofiler-static-libstdcxx)
 endif()
 
+if(ROCPROFILER_UNSAFE_NO_VERSION_CHECK)
+    rocprofiler_target_compile_definitions(rocprofiler-build-flags
+                                           INTERFACE ROCPROFILER_UNSAFE_NO_VERSION_CHECK)
+endif()
+
 # ----------------------------------------------------------------------------------------#
 # user customization
 #

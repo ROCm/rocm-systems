@@ -74,6 +74,8 @@ rocprofiler_add_option(ROCPROFILER_BUILD_STATIC_LIBSTDCXX
                        "Build with -static-libstdc++ if possible" OFF ADVANCED)
 rocprofiler_add_option(ROCPROFILER_BUILD_STACK_PROTECTOR "Build with -fstack-protector"
                        ON ADVANCED)
+rocprofiler_add_option(ROCPROFILER_UNSAFE_NO_VERSION_CHECK
+                       "Disable HSA version checking (for development only)" OFF ADVANCED)
 
 # In the future, we will do this even with clang-tidy enabled
 if(ROCPROFILER_BUILD_CI AND NOT ROCPROFILER_BUILD_WERROR)
