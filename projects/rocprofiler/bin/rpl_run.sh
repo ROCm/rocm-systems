@@ -262,7 +262,7 @@ run() {
   MY_LD_PRELOAD=""
   if [ "$ROCTX_TRACE" = 1 ] ; then
     API_TRACE=${API_TRACE}":roctx"
-    MY_LD_PRELOAD="$TTLIB_PATH/libroctx64.so"
+    MY_LD_PRELOAD="$ROCM_LIB_PATH/libroctx64.so"
   fi
   if [ "$HIP_TRACE" = 1 ] ; then
     API_TRACE=${API_TRACE}":hip"
