@@ -233,12 +233,6 @@ class file_plugin_t {
               << "Dispatch_ID,GPU_ID,Queue_ID,Queue_Index,PID,TID,GRD,WGR,LDS,SCR,Arch_VGPR,"
                  "ACCUM_VGPR,SGPR,Wave_Size,SIG,OBJ,Kernel_Name,Start_Timestamp,End_Timestamp,"
                  "Correlation_ID";
-          if (counter_names_.size() > 0) {
-            for (uint32_t i = 0; i < counter_names_.size(); i++)
-              *output_file << "," << counter_names_[i];
-          }
-          *output_file << std::endl;
-          *output_file << std::endl;
           kernel_dispatches_header_written_.exchange(true, std::memory_order_release);
           return;
         } else if (type == output_type_t::PC_SAMPLING) {
@@ -334,15 +328,39 @@ class file_plugin_t {
     size_t name_length = 0;
     output_file_t* output_file{nullptr};
     output_file = get_output_file(output_type_t::COUNTER);
-    CHECK_ROCPROFILER(rocprofiler_query_kernel_info_size(ROCPROFILER_KERNEL_NAME,
-                                                         profiler_record->kernel_id, &name_length));
+    CHECK_ROCPROFILER(rocprofiler_query_kernel_info_size(
+        ROCPROFILER_KERNEL_NAME, profiler_record->kernel_id, &name_length));
     // Taken from rocprofiler: The size hasn't changed in  recent past
     static const uint32_t lds_block_size = 128 * 4;
     const char* kernel_name_c = nullptr;
     if (name_length > 1) {
-      CHECK_ROCPROFILER(rocprofiler_query_kernel_info(ROCPROFILER_KERNEL_NAME,
-                                                      profiler_record->kernel_id, &kernel_name_c));
+      CHECK_ROCPROFILER(rocprofiler_query_kernel_info(
+          ROCPROFILER_KERNEL_NAME, profiler_record->kernel_id, &kernel_name_c));
     }
+    if (!counter_header_written_ && profiler_record->counters) {
+      counter_header_written_ = true;
+
+      for (uint64_t i = 0; i < profiler_record->counters_count.value; i++) {
+        auto counter_handler = profiler_record->counters[i].counter_handler;
+        if (!counter_handler.handle) continue;
+
+        size_t counter_name_length = 0;
+        const char* name_c = nullptr;
+
+        CHECK_ROCPROFILER(rocprofiler_query_counter_info_size(
+            session_id, ROCPROFILER_COUNTER_NAME, counter_handler, &counter_name_length
+        ));
+
+        if (counter_name_length == 0) continue;
+
+        CHECK_ROCPROFILER(rocprofiler_query_counter_info(
+            session_id, ROCPROFILER_COUNTER_NAME, counter_handler, &name_c
+        ));
+        *output_file << ',' << name_c;
+      }
+      *output_file << '\n';
+    }
+
     *output_file << std::to_string(profiler_record->header.id.handle) << ","
                  << std::to_string(profiler_record->gpu_id.handle) << ","
                  << std::to_string(profiler_record->queue_id.handle) << ","
@@ -437,6 +455,7 @@ class file_plugin_t {
 
  private:
   bool valid_{false};
+  bool counter_header_written_ = false;
   std::vector<std::string> counter_names_;
 
   std::atomic<bool> roctx_header_written_{false}, hsa_api_header_written_{false},
