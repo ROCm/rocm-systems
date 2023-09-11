@@ -77,6 +77,7 @@ TEST(WhenTestingDeviceInfo, DeviceInfoReadSuccessfully) {
   long long topology_id = 0;
   uint32_t waves_per_cu = 0;
   uint32_t wave_slots_per_simd = 0;
+
   rocprofiler::ROCProfiler_Singleton& rocprofiler_instance =
       rocprofiler::ROCProfiler_Singleton::GetInstance();
   for (auto const& dirp_entry : fs::directory_iterator{dirp}) {
@@ -122,7 +123,7 @@ TEST(WhenTestingDeviceInfo, DeviceInfoReadSuccessfully) {
           }
           se_num = array_count / shader_arrays_per_se;
           cu_num = cu_per_simd_array * array_count;
-          waves_per_cu = 8 * simd_per_cu;
+          waves_per_cu = max_waves_per_simd * simd_per_cu;
           compute_units_per_sh = cu_num / (se_num * shader_arrays_per_se);
           wave_slots_per_simd = waves_per_cu / simd_per_cu;
 
