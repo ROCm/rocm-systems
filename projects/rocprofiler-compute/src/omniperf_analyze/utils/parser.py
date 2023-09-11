@@ -763,11 +763,8 @@ def apply_filters(workload, is_gui, debug):
                 ret_df[schema.pmc_perf_file_prefix]["Index"] > int(m.group(1))
             ]
         else:
-            ret_df = ret_df.loc[
-                ret_df[schema.pmc_perf_file_prefix]["Index"]
-                .astype(str)
-                .isin(workload.filter_dispatch_ids)
-            ]
+            dispatches = [int(x) for x in workload.filter_dispatch_ids]
+            ret_df = ret_df.loc[dispatches]
     if debug:
         print("~" * 40, "\nraw pmc df info:\n")
         print(workload.raw_pmc.info())
