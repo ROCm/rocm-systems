@@ -1,0 +1,5 @@
+/build*
+/_build
+/_doxygen
+/.gitinfo
+/rocprofiler.dox

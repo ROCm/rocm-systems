@@ -186,9 +186,9 @@ typedef struct
  */
 typedef enum
 {
-    ROCPROFILER_AGENT_TYPE_NONE = 0,  /// agent is unknown type
-    ROCPROFILER_AGENT_TYPE_CPU,       /// agent is CPU
-    ROCPROFILER_AGENT_TYPE_GPU,       /// agent is GPU
+    ROCPROFILER_AGENT_TYPE_NONE = 0,  ///< agent is unknown type
+    ROCPROFILER_AGENT_TYPE_CPU,       ///< agent is CPU
+    ROCPROFILER_AGENT_TYPE_GPU,       ///< agent is GPU
     ROCPROFILER_AGENT_TYPE_LAST,
 } rocprofiler_agent_type_t;
 
@@ -487,12 +487,12 @@ typedef struct
  * @brief API Tracing callback data.
  *
  * This can be casted to:
- *  ::rocprofiler_hsa_callback_data_t if the record kind is
- * ROCPROFILER_SERVICE_CALLBACK_TRACING_HSA_API
- *  ::rocprofiler_hip_callback_data_t if the record kind is
- * ROCPROFILER_SERVICE_CALLBACK_TRACING_HIP_API
- *  ::rocprofiler_marker_callback_data_t if the record kind is
- * ROCPROFILER_SERVICE_CALLBACK_TRACING_MARKER
+ *  rocprofiler_hsa_callback_data_t if the record kind is
+ * @ref ROCPROFILER_SERVICE_CALLBACK_TRACING_HSA_API
+ *  rocprofiler_hip_callback_data_t if the record kind is
+ * @ref ROCPROFILER_SERVICE_CALLBACK_TRACING_HIP_API
+ *  rocprofiler_marker_callback_data_t if the record kind is
+ * @ref ROCPROFILER_SERVICE_CALLBACK_TRACING_MARKER
  *
  */
 typedef void* rocprofiler_tracer_callback_data_t;
@@ -502,10 +502,10 @@ typedef void* rocprofiler_tracer_callback_data_t;
  *
  * Depending on the ::rocprofiler_service_callback_tracing_kind_t
  * the operation kind can be determined from the following:
- *  ::rocprofiler_marker_trace_record_operation_t for Markers
- *  ::rocprofiler_hsa_trace_record_operation_t for HSA API
- *  ::rocprofiler_hip_trace_record_operation_t for HIP API
- *  ::rocprofiler_code_object_record_operation_t for Code object tracing
+ *  rocprofiler_marker_trace_record_operation_t for Markers
+ *  rocprofiler_hsa_trace_record_operation_t for HSA API
+ *  rocprofiler_hip_trace_record_operation_t for HIP API
+ *  rocprofiler_code_object_record_operation_t for Code object tracing
  *
  */
 typedef uint32_t rocprofiler_tracer_callback_operation_t;
@@ -566,7 +566,7 @@ typedef uint32_t rocprofiler_trace_record_operation_kind_t;
  * @brief Query callback kind operation name.
  *
  * @param [in] kind
- * @param [in] api_trace_operation_id
+ * @param [in] api_trace_operation
  * @param [out] name if nullptr, size will be returned
  * @param [out] size
  * @return ::rocprofiler_status_t
@@ -971,24 +971,16 @@ typedef struct
  * @param [out] queue_id
  * @param [out] agent_id
  * @param [out] correlation_id
- * @param [out] dispatch_packet
+ * @param [out] dispatch_packet It can be used to get the kernel descriptor and then using
+ * code_object tracing, we can get the kernel name. `dispatch_packet->reserved2` is the
+ * correlation_id used to correlate the dispatch packet with the corresponding API call.
  * @param [out] callback_data_args
  * @param [in] config
  */
 typedef void (*rocprofiler_profile_counting_dispatch_callback_t)(
-    rocprofiler_queue_id_t       queue_id,
-    rocprofiler_agent_t          agent_id,
-    rocprofiler_correlation_id_t correlation_id,
-    /**
-     * @brief Kernel Dispatch Packet
-     *
-     * It can be used to get the kernel descriptor and then using code_object
-     * tracing, we can get the kernel name.
-     *
-     * dispatch_packet->reserved2 is the correlation_id used to correlate the
-     * dispatch packet with the corresponding API call.
-     *
-     */
+    rocprofiler_queue_id_t              queue_id,
+    rocprofiler_agent_t                 agent_id,
+    rocprofiler_correlation_id_t        correlation_id,
     const hsa_kernel_dispatch_packet_t* dispatch_packet,
     void*                               callback_data_args,
     rocprofiler_profile_config_id_t*    config);
@@ -997,6 +989,7 @@ typedef void (*rocprofiler_profile_counting_dispatch_callback_t)(
  * @brief Configure Dispatch Profile Counting Service.
  *
  * @param [in] context_id
+ * @param [in] agent_id
  * @param [in] buffer_id
  * @param [in] callback
  * @param [in] callback_data_args
@@ -1144,7 +1137,7 @@ typedef enum
  * @brief Create PC Sampling Service.
  *
  * @param [in] context_id
- * @param [in] agent_id
+ * @param [in] agent
  * @param [in] method
  * @param [in] unit
  * @param [in] interval
@@ -1172,7 +1165,7 @@ struct rocprofiler_pc_sampling_configuration_s
 /**
  * @brief Query PC Sampling Configuration.
  *
- * @param [in] agent_id
+ * @param [in] agent
  * @param [out] config
  * @param [out] config_count
  * @return ::rocprofiler_status_t
@@ -1291,6 +1284,7 @@ typedef enum
  * to 0 then the callback will be called on every record
  * @param [in] policy Behavior policy when buffer is full
  * @param [in] callback Callback to invoke when buffer is flushed/full
+ * @param [in] callback_data Data to provide in callback function
  * @param [out] buffer_id Identification handle for buffer
  * @return ::rocprofiler_status_t
  */

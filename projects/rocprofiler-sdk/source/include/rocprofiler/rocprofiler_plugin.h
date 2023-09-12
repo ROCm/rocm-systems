@@ -90,7 +90,7 @@ rocprofiler_plugin_initialize(uint32_t rocprofiler_major_version,
  * Finalize plugin.
  * This must be called after ::rocprofiler_plugin_initialize and after all
  * profiling data has been reported by
- * ::rocprofiler_plugin_write_kernel_records
+ * rocprofiler_plugin_write_kernel_records
  */
 ROCPROFILER_EXPORT void
 rocprofiler_plugin_finalize();
@@ -108,10 +108,10 @@ rocprofiler_plugin_finalize();
 /**
  * Report Buffer Records.
  *
- * @param[in] begin Pointer to the first record.
- * @param[in] end Pointer to one past the last record.
  * @param[in] context_id context ID
  * @param[in] buffer_id Buffer ID
+ * @param[in] headers Array of ::rocprofiler_record_header_t
+ * @param[in] num_headers Number of ::rocprofiler_record_header_t entries in array
  * @return Returns 0 on success and -1 on error.
  */
 ROCPROFILER_EXPORT int
@@ -124,8 +124,6 @@ rocprofiler_plugin_write_buffer_records(rocprofiler_context_id_t      context_id
  * Report Synchronous Record.
  *
  * @param[in] record Synchronous Tracer record.
- * @param[in] data : api_data
- * @param[in] tracer_data :Tracer record extra data such as function name and kernel name
  * @return Returns 0 on success and -1 on error.
  */
 
