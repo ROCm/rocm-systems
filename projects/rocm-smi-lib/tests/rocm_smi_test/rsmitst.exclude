@@ -65,8 +65,6 @@ $BLACKLIST_ALL_ASICS\
 FILTER[90400]=\
 $BLACKLIST_ALL_ASICS\
 "rsmitstReadOnly.TestVoltCurvRead:"\
-"rsmitstReadOnly.TestFrequenciesRead:"\
-"rsmitstReadWrite.TestFrequenciesReadWrite:"\
 "rsmitstReadWrite.TestPowerReadWrite"
 FILTER[90401]=${FILTER[90400]}
 FILTER[90402]=${FILTER[90400]}
