@@ -166,6 +166,7 @@ const AMDGpuVerbList_t amdgpu_verb_check_list {
   { AMDGpuVerbTypes_t::kGetGpuOdVoltCurveRegions, "amdsmi_get_gpu_od_volt_curve_regions" }
 };
 
+const uint16_t kDevIDAll(0xFFFF);
 const uint16_t kDevRevIDAll(0xFFFF);
 const AMDGpuPropertyList_t amdgpu_property_reinforcement_list {
   //
@@ -175,6 +176,14 @@ const AMDGpuPropertyList_t amdgpu_property_reinforcement_list {
   // DevInfoTypes::kDevPowerProfileMode =
   // rsmi_dev_perf_level::RSMI_DEV_PERF_LEVEL_MANUAL = rsmi_dev_clk_range_set;
   //
+
+  // AMD All Families
+  {kDevIDAll, {kDevRevIDAll,
+            make_unique_property_id(AMDGpuPropertyTypesOffset_t::kMonitorTypes,
+                                    MonitorTypes::kMonFanCntrlEnable),
+            AMDGpuVerbTypes_t::kResetGpuFan,
+            AMDGpuPropertyOpModeTypes_t::kBoth, false }
+  },
 
   // AMD Instinct MI210
   {0x740F, {0x02,
@@ -238,12 +247,6 @@ const AMDGpuPropertyList_t amdgpu_property_reinforcement_list {
                                     DevInfoTypes::kDevPowerProfileMode),
             AMDGpuVerbTypes_t::kGetGpuPowerProfilePresets,
             AMDGpuPropertyOpModeTypes_t::kBoth, false }
-  },
-  {0x74A1, {kDevRevIDAll,
-            make_unique_property_id(AMDGpuPropertyTypesOffset_t::kDevInfoTypes,
-                                    DevInfoTypes::kDevGpuReset),
-            AMDGpuVerbTypes_t::kResetGpu,
-            AMDGpuPropertyOpModeTypes_t::kSrIov, false }
   },
   {0x74A1, {kDevRevIDAll,
             make_unique_property_id(AMDGpuPropertyTypesOffset_t::kPerfTypes,
@@ -350,7 +353,7 @@ rsmi_status_t validate_property_reinforcement_query(uint32_t dv_ind, AMDGpuVerbT
   //      likely the reinforcement table does not contain any entries/rules for the
   //      dev_id in question.
   //
-  auto amdgpu_property_query_result_hdlr = [](rsmi_status_t query_result) {
+  auto amdgpu_property_query_result_hdlr = [&](const rsmi_status_t query_result) {
     switch (query_result) {
       case (rsmi_status_t::RSMI_STATUS_UNKNOWN_ERROR):
       case (rsmi_status_t::RSMI_STATUS_NO_DATA):
@@ -363,7 +366,7 @@ rsmi_status_t validate_property_reinforcement_query(uint32_t dv_ind, AMDGpuVerbT
         break;
 
       default:
-        return rsmi_status_t::RSMI_STATUS_NOT_FOUND;
+        return actual_error_code;
         break;
     }
   };
@@ -415,7 +418,7 @@ rsmi_status_t Device::check_amdgpu_property_reinforcement_query(uint32_t dev_idx
   std::ostringstream osstream;
   auto rsmi_status(rsmi_status_t::RSMI_STATUS_UNKNOWN_ERROR);
 
-  AMDGpuPropertyQuery_t amdgpu_property_query = [&]() {
+  auto amdgpu_property_query = [&]() {
     AMDGpuPropertyQuery_t amdgpu_property_query_init{};
     amdgpu_property_query_init.m_asic_id = 0;
     amdgpu_property_query_init.m_pci_rev_id = 0;
@@ -445,6 +448,18 @@ rsmi_status_t Device::check_amdgpu_property_reinforcement_query(uint32_t dev_idx
   LOG_TRACE(osstream);
 
   bool is_proper_query(false);
+
+  // Generic filter for checking properties for all asics and revisions.
+  auto amdgpu_property_query_all_asics = amdgpu_property_query;
+  amdgpu_property_query_all_asics.m_asic_id = kDevIDAll;
+  amdgpu_property_query_all_asics.m_pci_rev_id = kDevRevIDAll;
+  auto amdgpu_property_query_result = run_amdgpu_property_reinforcement_query(amdgpu_property_query_all_asics);
+  // We found a generic entry for all asics and revisions
+  if (amdgpu_property_query_result != rsmi_status_t::RSMI_STATUS_UNKNOWN_ERROR) {
+    return amdgpu_property_query_result;
+  }
+
+  // If no generic entry, then we query for specific asic and revision ids.
   amdgpu_property_query = build_asic_id_filters(amdgpu_property_query, is_proper_query);
   if (!is_proper_query) {
     rsmi_status = rsmi_status_t::RSMI_STATUS_NO_DATA;
@@ -487,7 +502,7 @@ rsmi_status_t Device::run_amdgpu_property_reinforcement_query(const AMDGpuProper
         osstream << __PRETTY_FUNCTION__ << "  asic id found: " << itr_begin->first << "\n";
         // Pci_rev_id matches the filter or ALL Revisions
         if ((itr_begin->second.m_pci_rev_id == amdgpu_property_query.m_pci_rev_id) ||
-            (itr_begin->second.m_pci_rev_id == kDevRevIDAll))  {
+            (itr_begin->second.m_pci_rev_id == kDevRevIDAll)) {
           osstream << __PRETTY_FUNCTION__ << "  asic rev.id found: " << itr_begin->second.m_pci_rev_id << "\n";
           // Do we have the property we are looking for?
           if (((amdgpu_property_query.m_property != 0) &&

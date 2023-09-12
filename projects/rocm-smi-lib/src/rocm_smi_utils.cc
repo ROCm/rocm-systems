@@ -176,6 +176,13 @@ int isRegularFile(std::string fname, bool *is_reg) {
 }
 
 int WriteSysfsStr(std::string path, std::string val) {
+  //  On success, zero is returned.  On error, -1 is returned, and
+  //  errno is set to indicate the error.
+  auto is_regular_file_result = isRegularFile(path, nullptr);
+  if (is_regular_file_result != 0) {
+    return ENOENT;
+  }
+
   std::ofstream fs;
   int ret = 0;
   std::ostringstream ss;
