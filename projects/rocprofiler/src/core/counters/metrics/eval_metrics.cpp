@@ -39,20 +39,22 @@ hsa_status_t pmcCallback(hsa_ven_amd_aqlprofile_info_type_t info_type,
                          hsa_ven_amd_aqlprofile_info_data_t* info_data, void* data) {
   hsa_status_t status = HSA_STATUS_SUCCESS;
   callback_data_t* passed_data = reinterpret_cast<callback_data_t*>(data);
+
+  for (auto data_it = passed_data->results->begin(); data_it != passed_data->results->end(); ++data_it) {
+    if (info_type != HSA_VEN_AMD_AQLPROFILE_INFO_PMC_DATA)
+      continue;
+    if (!IsEventMatch(info_data->pmc_data.event, (*data_it)->event))
+      continue;
+
+    uint32_t xcc_index = floor(passed_data->index / passed_data->single_xcc_buff_size);
+    // stores event result from each xcc separately
+    (*data_it)->xcc_vals.at(xcc_index) += info_data->pmc_data.result;
+    // stores accumulated event result from all xccs
+    (*data_it)->val_double += info_data->pmc_data.result;
+  }
+
   passed_data->index += 1;
 
-  for (auto data_it = passed_data->results->begin(); data_it != passed_data->results->end();
-       ++data_it) {
-    if (info_type == HSA_VEN_AMD_AQLPROFILE_INFO_PMC_DATA) {
-      if (IsEventMatch(info_data->pmc_data.event, (*data_it)->event)) {
-        uint32_t xcc_index = floor(passed_data->index / passed_data->single_xcc_buff_size);
-        (*data_it)->xcc_vals.at(xcc_index) +=
-            info_data->pmc_data.result;  // stores event result from each xcc separately
-        (*data_it)->val_double +=
-            info_data->pmc_data.result;  // stores accumulated event result from all xccs
-      }
-    }
-  }
   return status;
 }
 
