@@ -62,3 +62,5 @@
 #        define ROCPROFILER_FOLD_EXPRESSION(...) ((__VA_ARGS__), ...)
 #    endif
 #endif
+
+#define ROCPROFILER_COMPUTE_VERSION(MAJOR, MINOR, PATCH) ((10000 * MAJOR) + (100 * MINOR) + (PATCH))

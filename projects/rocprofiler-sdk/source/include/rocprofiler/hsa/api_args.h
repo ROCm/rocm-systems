@@ -24,6 +24,7 @@
 #include <hsa/hsa_api_trace.h>
 #include <hsa/hsa_ext_amd.h>
 #include <hsa/hsa_ext_image.h>
+#include <rocprofiler/version.h>
 
 typedef union rocprofiler_hsa_api_args_u
 {
@@ -1221,4 +1222,78 @@ typedef union rocprofiler_hsa_api_args_u
         size_t                            image_data_slice_pitch;
         hsa_ext_image_t*                  image;
     } hsa_ext_image_create_with_layout;
+#if HSA_AMD_EXT_API_TABLE_MAJOR_VERSION >= 0x02
+    struct
+    {
+        void**   ptr;
+        size_t   size;
+        uint64_t address;
+        uint64_t flags;
+    } hsa_amd_vmem_address_reserve;
+    struct
+    {
+        void*  ptr;
+        size_t size;
+    } hsa_amd_vmem_address_free;
+    struct
+    {
+        hsa_amd_memory_pool_t        pool;
+        size_t                       size;
+        hsa_amd_memory_type_t        type;
+        uint64_t                     flags;
+        hsa_amd_vmem_alloc_handle_t* memory_handle;
+    } hsa_amd_vmem_handle_create;
+    struct
+    {
+        hsa_amd_vmem_alloc_handle_t memory_handle;
+    } hsa_amd_vmem_handle_release;
+    struct
+    {
+        void*                       va;
+        size_t                      size;
+        size_t                      in_offset;
+        hsa_amd_vmem_alloc_handle_t memory_handle;
+        uint64_t                    flags;
+    } hsa_amd_vmem_map;
+    struct
+    {
+        void*  va;
+        size_t size;
+    } hsa_amd_vmem_unmap;
+    struct
+    {
+        void*                               va;
+        size_t                              size;
+        const hsa_amd_memory_access_desc_t* desc;
+        size_t                              desc_cnt;
+    } hsa_amd_vmem_set_access;
+    struct
+    {
+        void*                    va;
+        hsa_access_permission_t* perms;
+        hsa_agent_t              agent_handle;
+    } hsa_amd_vmem_get_access;
+    struct
+    {
+        int*                        dmabuf_fd;
+        hsa_amd_vmem_alloc_handle_t handle;
+        uint64_t                    flags;
+    } hsa_amd_vmem_export_shareable_handle;
+    struct
+    {
+        int                          dmabuf_fd;
+        hsa_amd_vmem_alloc_handle_t* handle;
+    } hsa_amd_vmem_import_shareable_handle;
+    struct
+    {
+        hsa_amd_vmem_alloc_handle_t* handle;
+        void*                        addr;
+    } hsa_amd_vmem_retain_alloc_handle;
+    struct
+    {
+        hsa_amd_vmem_alloc_handle_t alloc_handle;
+        hsa_amd_memory_pool_t*      pool;
+        hsa_amd_memory_type_t*      type;
+    } hsa_amd_vmem_get_alloc_properties_from_handle;
+#endif
 } rocprofiler_hsa_api_args_t;

@@ -119,6 +119,11 @@ find_package(
     ${rocm_version_DIR}
     ${ROCM_PATH})
 
+string(REPLACE "." ";" HSA_RUNTIME_VERSION "${hsa-runtime64_VERSION}")
+# the following values are encoded into version.h
+list(GET HSA_RUNTIME_VERSION 0 HSA_RUNTIME_VERSION_MAJOR)
+list(GET HSA_RUNTIME_VERSION 1 HSA_RUNTIME_VERSION_MINOR)
+
 target_link_libraries(rocprofiler-hsa-runtime INTERFACE hsa-runtime64::hsa-runtime64)
 
 # ----------------------------------------------------------------------------------------#

@@ -52,6 +52,9 @@
 // compiler information
 #define ROCPROFILER_COMPILER_ID      "@CMAKE_CXX_COMPILER_ID@"
 #define ROCPROFILER_COMPILER_VERSION "@CMAKE_CXX_COMPILER_VERSION@"
+
+#define ROCPROFILER_HSA_RUNTIME_VERSION_MAJOR @HSA_RUNTIME_VERSION_MAJOR@
+#define ROCPROFILER_HSA_RUNTIME_VERSION_MINOR @HSA_RUNTIME_VERSION_MINOR@
 // clang-format on
 
 #define ROCPROFILER_COMPILER_STRING ROCPROFILER_COMPILER_ID " v" ROCPROFILER_COMPILER_VERSION
@@ -59,3 +62,8 @@
 #define ROCPROFILER_VERSION                                                                        \
     ((10000 * ROCPROFILER_VERSION_MAJOR) + (100 * ROCPROFILER_VERSION_MINOR) +                     \
      ROCPROFILER_VERSION_PATCH)
+
+// latest hsa-runtime version supported
+#define ROCPROFILER_HSA_RUNTIME_VERSION                                                            \
+    ((10000 * ROCPROFILER_HSA_RUNTIME_VERSION_MAJOR) +                                             \
+     (100 * ROCPROFILER_HSA_RUNTIME_VERSION_MINOR))

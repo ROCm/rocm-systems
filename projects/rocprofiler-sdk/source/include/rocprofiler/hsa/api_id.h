@@ -20,6 +20,8 @@
 
 #pragma once
 
+#include <rocprofiler/version.h>
+
 // NOLINTNEXTLINE(performance-enum-size)
 typedef enum
 {
@@ -222,6 +224,21 @@ typedef enum
     ROCPROFILER_HSA_API_ID_hsa_ext_image_get_capability_with_layout,
     ROCPROFILER_HSA_API_ID_hsa_ext_image_data_get_info_with_layout,
     ROCPROFILER_HSA_API_ID_hsa_ext_image_create_with_layout,
+
+#if HSA_AMD_EXT_API_TABLE_MAJOR_VERSION >= 0x02
+    ROCPROFILER_HSA_API_ID_hsa_amd_vmem_address_reserve,
+    ROCPROFILER_HSA_API_ID_hsa_amd_vmem_address_free,
+    ROCPROFILER_HSA_API_ID_hsa_amd_vmem_handle_create,
+    ROCPROFILER_HSA_API_ID_hsa_amd_vmem_handle_release,
+    ROCPROFILER_HSA_API_ID_hsa_amd_vmem_map,
+    ROCPROFILER_HSA_API_ID_hsa_amd_vmem_unmap,
+    ROCPROFILER_HSA_API_ID_hsa_amd_vmem_set_access,
+    ROCPROFILER_HSA_API_ID_hsa_amd_vmem_get_access,
+    ROCPROFILER_HSA_API_ID_hsa_amd_vmem_export_shareable_handle,
+    ROCPROFILER_HSA_API_ID_hsa_amd_vmem_import_shareable_handle,
+    ROCPROFILER_HSA_API_ID_hsa_amd_vmem_retain_alloc_handle,
+    ROCPROFILER_HSA_API_ID_hsa_amd_vmem_get_alloc_properties_from_handle,
+#endif
 
     ROCPROFILER_HSA_API_ID_LAST,
 } rocprofiler_hsa_api_id_t;
