@@ -377,19 +377,13 @@ install(
 # Installing NameLinks for V1 & V2 librocprofiler64.so links to V1 library
 # librocprofiler64v2.so links to V2 library
 install(
-    CODE "execute_process( \
-    COMMAND ${CMAKE_COMMAND} -E create_symlink \
-    lib${ROCPROFILER_LIBRARY_V1_NAME}.so.${ROCPROFILER_LIBRARY_V1_SOVERSION} \
-    ${CMAKE_INSTALL_PREFIX}/lib/lib${ROCPROFILER_LIBRARY_V1_NAME}.so \
-    )"
-    COMPONENT dev)
+    PROGRAMS ${CMAKE_BINARY_DIR}/lib/lib${ROCPROFILER_LIBRARY_V2_NAME}v2.so
+    TYPE LIB COMPONENT dev)
 install(
-    CODE "execute_process( \
-    COMMAND ${CMAKE_COMMAND} -E create_symlink \
-    lib${ROCPROFILER_LIBRARY_V2_NAME}.so.${ROCPROFILER_LIBRARY_V2_SOVERSION} \
-    ${CMAKE_INSTALL_PREFIX}/lib/lib${ROCPROFILER_LIBRARY_V2_NAME}v2.so \
-    )"
-    COMPONENT dev)
+    PROGRAMS ${CMAKE_BINARY_DIR}/lib/lib${ROCPROFILER_LIBRARY_V1_NAME}.so
+    TYPE LIB COMPONENT dev)
+
+
 
 configure_file(
     ${PROJECT_SOURCE_DIR}/src/core/counters/metrics/basic_counters.xml
