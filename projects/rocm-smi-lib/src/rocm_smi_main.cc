@@ -129,6 +129,8 @@ amd::smi::RocmSMI::devInfoTypesStrings = {
   {amd::smi::kDevFwVersionMe, amdSMI + "kDevFwVersionMe"},
   {amd::smi::kDevFwVersionMec, amdSMI + "kDevFwVersionMec"},
   {amd::smi::kDevFwVersionMec2, amdSMI + "kDevFwVersionMec2"},
+  {amd::smi::kDevFwVersionMes, amdSMI + "kDevFwVersionMes"},
+  {amd::smi::kDevFwVersionMesKiq, amdSMI + "kDevFwVersionMesKiq"},
   {amd::smi::kDevFwVersionPfp, amdSMI + "kDevFwVersionPfp"},
   {amd::smi::kDevFwVersionRlc, amdSMI + "kDevFwVersionRlc"},
   {amd::smi::kDevFwVersionRlcSrlc, amdSMI + "kDevFwVersionRlcSrlc"},

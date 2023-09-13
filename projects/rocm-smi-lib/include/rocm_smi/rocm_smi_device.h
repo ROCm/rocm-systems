@@ -146,6 +146,8 @@ enum DevInfoTypes {
   kDevFwVersionMe,
   kDevFwVersionMec,
   kDevFwVersionMec2,
+  kDevFwVersionMes,
+  kDevFwVersionMesKiq,
   kDevFwVersionPfp,
   kDevFwVersionRlc,
   kDevFwVersionRlcSrlc,

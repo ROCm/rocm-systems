@@ -56,6 +56,8 @@ static const std::map<rsmi_fw_block_t, const char *> kDevFWNameMap = {
     {RSMI_FW_BLOCK_ME, "me"},
     {RSMI_FW_BLOCK_MEC, "mec"},
     {RSMI_FW_BLOCK_MEC2, "mec2"},
+    {RSMI_FW_BLOCK_MES, "mes"},
+    {RSMI_FW_BLOCK_MES_KIQ, "mes_kiq"},
     {RSMI_FW_BLOCK_PFP, "pfp"},
     {RSMI_FW_BLOCK_RLC, "rlc"},
     {RSMI_FW_BLOCK_RLC_SRLC, "rlc_srlc"},
