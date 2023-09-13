@@ -51,7 +51,8 @@ mark_as_advanced(rocprofiler_hsa_INCLUDE_DIR)
 
 find_library(
     rocprofiler_LIBRARY
-    NAMES rocprofiler64 rocprofiler
+    NAMES ${CMAKE_SHARED_LIBRARY_PREFIX}rocprofiler64${CMAKE_SHARED_LIBRARY_SUFFIX}.1
+          rocprofiler64 rocprofiler
     HINTS ${rocprofiler_ROOT_DIR}/rocprofiler ${rocprofiler_ROOT_DIR}
           ${_ROCM_ROCPROFILER_PATHS}
     PATHS ${rocprofiler_ROOT_DIR}/rocprofiler ${rocprofiler_ROOT_DIR}
@@ -73,6 +74,14 @@ endif()
 mark_as_advanced(rocprofiler_LIBRARY rocprofiler_hsa-runtime_LIBRARY)
 unset(_ROCM_ROCPROFILER_PATHS)
 
+if(ROCmVersion_NUMERIC_VERSION EQUAL 50500)
+    find_library(
+        rocprofiler_pciaccess_LIBRARY
+        NAMES pciaccess
+        PATH_SUFFIXES lib lib64)
+    mark_as_advanced(rocprofiler_pciaccess_LIBRARY)
+endif()
+
 # ----------------------------------------------------------------------------------------#
 
 find_package_handle_standard_args(
@@ -86,8 +95,11 @@ if(rocprofiler_FOUND)
     add_library(rocprofiler::roctx INTERFACE IMPORTED)
     set(rocprofiler_INCLUDE_DIRS ${rocprofiler_INCLUDE_DIR}
                                  ${rocprofiler_hsa_INCLUDE_DIR})
-    set(rocprofiler_LIBRARIES ${rocprofiler_LIBRARY} ${rocprofiler_hsa-runtime_LIBRARY})
     set(rocprofiler_LIBRARY_DIRS ${rocprofiler_LIBRARY_DIR})
+    set(rocprofiler_LIBRARIES ${rocprofiler_LIBRARY} ${rocprofiler_hsa-runtime_LIBRARY})
+    if(rocprofiler_pciaccess_LIBRARY)
+        list(APPEND rocprofiler_LIBRARIES ${rocprofiler_pciaccess_LIBRARY})
+    endif()
 
     target_include_directories(
         rocprofiler::rocprofiler INTERFACE ${rocprofiler_INCLUDE_DIR}

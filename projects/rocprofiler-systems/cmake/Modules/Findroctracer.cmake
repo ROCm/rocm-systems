@@ -98,8 +98,8 @@ if(hsakmt_FOUND)
         find_library(
             hsakmt_${_LIB}_LIBRARY
             NAMES ${_LIB_NAMES}
-            HINTS ${_ROCM_ROCTRACER_PATHS}
-            PATHS ${_ROCM_ROCTRACER_PATHS}
+            HINTS ${_ROCM_ROCTRACER_PATHS} /opt/amdgpu
+            PATHS ${_ROCM_ROCTRACER_PATHS} /opt/amdgpu
             PATH_SUFFIXES ${CMAKE_INSTALL_LIBDIR} lib lib64)
         if(NOT hsakmt_${_LIB}_LIBRARY)
             set(hsakmt_FOUND_LIBS OFF)
