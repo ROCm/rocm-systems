@@ -33,9 +33,9 @@
 #define ROCPROFILER_OPERATOR_TEMPLATE2(template_name2)                                             \
     ROCPROFILER_IMPORT_TEMPLATE2(template_name2)                                                   \
     template <typename T, typename U, typename B>                                                  \
-    struct is_chained_base<::rocprofiler::container::template_name2<T, U, B>>                      \
+    struct is_chained_base<::rocprofiler::common::container::template_name2<T, U, B>>              \
     {                                                                                              \
-        using value = ::rocprofiler::container::true_t;                                            \
+        using value = ::rocprofiler::common::container::true_t;                                    \
     };
 
 // Import a 1-type-argument operator template into boost (if necessary) and
@@ -43,9 +43,9 @@
 #define ROCPROFILER_OPERATOR_TEMPLATE1(template_name1)                                             \
     ROCPROFILER_IMPORT_TEMPLATE1(template_name1)                                                   \
     template <typename T, typename B>                                                              \
-    struct is_chained_base<::rocprofiler::container::template_name1<T, B>>                         \
+    struct is_chained_base<::rocprofiler::common::container::template_name1<T, B>>                 \
     {                                                                                              \
-        using value = ::rocprofiler::container::true_t;                                            \
+        using value = ::rocprofiler::common::container::true_t;                                    \
     };
 
 #define ROCPROFILER_OPERATOR_TEMPLATE(template_name)                                               \
@@ -74,7 +74,7 @@
     template <typename T, typename U, typename B, typename O>                                      \
     struct is_chained_base<template_name<T, U, B, O>>                                              \
     {                                                                                              \
-        using value = ::rocprofiler::container::true_t;                                            \
+        using value = ::rocprofiler::common::container::true_t;                                    \
     };                                                                                             \
                                                                                                    \
     ROCPROFILER_OPERATOR_TEMPLATE2(template_name##2)                                               \

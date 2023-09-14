@@ -24,6 +24,7 @@
 
 #include "lib/common/container/operators.hpp"
 #include "lib/common/container/static_vector.hpp"
+#include "lib/common/defines.hpp"
 
 #include <algorithm>
 #include <initializer_list>
@@ -359,8 +360,8 @@ stable_vector<Tp, ChunkSizeV>::at(size_type i)
 {
     if(ROCPROFILER_UNLIKELY(i >= size()))
     {
-        throw ::rocprofiler::exception<std::out_of_range>("stable_vector::at(" + std::to_string(i) +
-                                                          "). size is " + std::to_string(size()));
+        throw std::out_of_range("stable_vector::at(" + std::to_string(i) + "). size is " +
+                                std::to_string(size()));
     }
 
     return operator[](i);

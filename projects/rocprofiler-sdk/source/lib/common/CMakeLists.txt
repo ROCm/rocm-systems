@@ -2,7 +2,8 @@
 #   Builds common utilities into a static library
 #
 set(common_sources config.cpp environment.cpp demangle.cpp)
-set(common_headers config.hpp defines.hpp environment.hpp demangle.hpp mpl.hpp)
+set(common_headers config.hpp defines.hpp environment.hpp demangle.hpp mpl.hpp
+                   utility.hpp)
 
 add_library(rocprofiler-common-library STATIC)
 add_library(rocprofiler::rocprofiler-common-library ALIAS rocprofiler-common-library)

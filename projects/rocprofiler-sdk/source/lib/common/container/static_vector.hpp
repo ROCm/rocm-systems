@@ -23,6 +23,7 @@
 #pragma once
 
 #include "lib/common/container/c_array.hpp"
+#include "lib/common/defines.hpp"
 
 #include <array>
 #include <atomic>
@@ -141,8 +142,8 @@ static_vector<Tp, N, AtomicSizeV>::operator=(std::initializer_list<Tp>&& _v)
 {
     if(ROCPROFILER_UNLIKELY(_v.size() > N))
     {
-        throw exception<std::out_of_range>(
-            std::string{"static_vector::operator=(initializer_list) size > "} + std::to_string(N));
+        throw std::out_of_range(std::string{"static_vector::operator=(initializer_list) size > "} +
+                                std::to_string(N));
     }
 
     clear();
@@ -196,14 +197,21 @@ static_vector<Tp, N, AtomicSizeV>::emplace_back(Args&&... _v)
     auto _idx = m_size++;
     if(_idx >= N)
     {
-        throw exception<std::out_of_range>(
-            std::string{"static_vector::emplace_back - reached capacity "} + std::to_string(N));
+        throw std::out_of_range(std::string{"static_vector::emplace_back - reached capacity "} +
+                                std::to_string(N));
     }
 
-    if constexpr(std::is_assignable<Tp, decltype(std::forward<Args>(_v))...>::value)
-        m_data[_idx] = {std::forward<Args>(_v)...};
+    if constexpr(sizeof...(Args) > 0)
+    {
+        if constexpr(std::is_assignable<Tp, decltype(std::forward<Args>(_v))...>::value)
+            m_data[_idx] = {std::forward<Args>(_v)...};
+        else
+            m_data[_idx] = Tp{std::forward<Args>(_v)...};
+    }
     else
-        m_data[_idx] = Tp{std::forward<Args>(_v)...};
+    {
+        m_data[_idx] = {};
+    }
     return m_data[_idx];
 }
 
