@@ -3507,8 +3507,7 @@ def save(deviceList, savefilepath):
 # The code below is for when this script is run as an executable instead of when imported as a module
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
-        description='AMD ROCm System Management Interface  |  ROCM-SMI version: %s  |  Kernel version: %s' % (
-            __version__, getVersion(None, rsmi_sw_component_t.RSMI_SW_COMP_DRIVER)),
+        description=f'AMD ROCm System Management Interface  |  ROCM-SMI version: {__version__}',
         formatter_class=lambda prog: argparse.HelpFormatter(prog, max_help_position=90, width=120))
     groupDev = parser.add_argument_group()
     groupDisplayOpt = parser.add_argument_group('Display Options')
@@ -3668,6 +3667,11 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
+    # Must set PRINT_JSON early so the prints can be silenced
+    if args.json or args.csv:
+        PRINT_JSON = True
+    # Initialize rsmiBindings
+    rocmsmi = initRsmiBindings(silent=PRINT_JSON)
     # Initialize the rocm SMI library
     initializeRsmi()
 
@@ -3703,8 +3707,7 @@ if __name__ == '__main__':
         sys.exit(1)
 
     # If we want JSON/CSV output, initialize the keys (devices)
-    if args.json or args.csv:
-        PRINT_JSON = True
+    if PRINT_JSON:
         for device in deviceList:
             JSON_DATA['card' + str(device)] = {}
 

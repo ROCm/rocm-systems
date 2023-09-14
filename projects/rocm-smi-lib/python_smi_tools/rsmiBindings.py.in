@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """ROCm_SMI_LIB CLI Tool Python Bindings"""
+# NOTE: You MUST call rsmiBindings.initRsmiBindings() when using this library!
 # TODO: Get most (or all) of these from rocm_smi.h to avoid mismatches and redundancy
 
 from __future__ import print_function
@@ -14,36 +15,42 @@ import os
 # relative path changed accordingly.
 # if ROCM_SMI_LIB_PATH is set, we can load 'librocm_smi64.so' from that location
 #
+# Library load is wrapped in a function so prints can be hidden for PRINT_JSON mode.
 path_librocm = str()
-rocm_smi_lib_path = os.getenv('ROCM_SMI_LIB_PATH')
-if (rocm_smi_lib_path != None):
-    path_librocm = rocm_smi_lib_path
-else:
-    path_librocm = os.path.dirname(os.path.realpath(__file__)) + '/../../@CMAKE_INSTALL_LIBDIR@/librocm_smi64.so.@VERSION_MAJOR@'
+def initRsmiBindings(silent=False):
+    def print_silent(*args):
+        if not silent:
+            print(args)
 
-if not os.path.isfile(path_librocm):
-    print('Unable to find %s . Trying /opt/rocm*' % path_librocm)
-    for root, dirs, files in os.walk('/opt', followlinks=True):
-        if 'librocm_smi64.so.@VERSION_MAJOR@' in files:
-            path_librocm = os.path.join(os.path.realpath(root), 'librocm_smi64.so.@VERSION_MAJOR@')
-    if os.path.isfile(path_librocm):
-        print('Using lib from %s' % path_librocm)
+    rocm_smi_lib_path = os.getenv('ROCM_SMI_LIB_PATH')
+    if (rocm_smi_lib_path != None):
+        path_librocm = rocm_smi_lib_path
     else:
-        print('Unable to find librocm_smi64.so.@VERSION_MAJOR@')
-else:
-    print('Library loaded from: %s ' % path_librocm)
+        path_librocm = os.path.dirname(os.path.realpath(__file__)) + '/../../@CMAKE_INSTALL_LIBDIR@/librocm_smi64.so.@VERSION_MAJOR@'
 
-# ----------> TODO: Support static libs as well as SO
-try:
-    cdll.LoadLibrary(path_librocm)
-    rocmsmi = CDLL(path_librocm)
-except OSError:
-    print('Unable to load the rocm_smi library.\n'\
-          'Set LD_LIBRARY_PATH to the folder containing librocm_smi64.so.@VERSION_MAJOR@\n'\
-          '{0}Please refer to https://github.com/'\
-          'RadeonOpenCompute/rocm_smi_lib for the installation guide.{1}'\
-          .format('\33[33m', '\033[0m'))
-    exit()
+    if not os.path.isfile(path_librocm):
+        print_silent('Unable to find %s . Trying /opt/rocm*' % path_librocm)
+        for root, dirs, files in os.walk('/opt', followlinks=True):
+            if 'librocm_smi64.so.@VERSION_MAJOR@' in files:
+                path_librocm = os.path.join(os.path.realpath(root), 'librocm_smi64.so.@VERSION_MAJOR@')
+        if os.path.isfile(path_librocm):
+            print_silent('Using lib from %s' % path_librocm)
+        else:
+            print('Unable to find librocm_smi64.so.@VERSION_MAJOR@')
+    else:
+        print_silent('Library loaded from: %s ' % path_librocm)
+
+    # ----------> TODO: Support static libs as well as SO
+    try:
+        cdll.LoadLibrary(path_librocm)
+        return CDLL(path_librocm)
+    except OSError:
+        print('Unable to load the rocm_smi library.\n'\
+              'Set LD_LIBRARY_PATH to the folder containing librocm_smi64.so.@VERSION_MAJOR@\n'\
+              '{0}Please refer to https://github.com/'\
+              'RadeonOpenCompute/rocm_smi_lib for the installation guide.{1}'\
+              .format('\33[33m', '\033[0m'))
+        exit()
 
 # Device ID
 dv_id = c_uint64()
