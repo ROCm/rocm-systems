@@ -20,8 +20,6 @@
 # SOFTWARE.
 # ##############################################################################
 
-
-
 # Setup unit testing env
 # Handle HSA Interception Tool Tests
 find_package(hsa-runtime64 REQUIRED CONFIG PATHS ${ROCM_PATH})
@@ -40,13 +38,13 @@ target_include_directories(test_hsatool_library PRIVATE ${PROJECT_SOURCE_DIR} ${
 set_target_properties(
     test_hsatool_library
     PROPERTIES CXX_VISIBILITY_PRESET hidden
-               DEFINE_SYMBOL  TEST_HSA_TOOL_EXPORTS
-               LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib/tests-v2
-               INSTALL_RPATH "${ROCM_APPEND_PRIVLIB_RPATH}")
+    DEFINE_SYMBOL TEST_HSA_TOOL_EXPORTS
+    LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/tests-v2
+    INSTALL_RPATH "${ROCM_APPEND_PRIVLIB_RPATH}")
 
 install(
     TARGETS test_hsatool_library LIBRARY
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}/${ROCPROFILER_NAME}
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/tests
     COMPONENT tests)
 
 target_link_libraries(test_hsatool_library PRIVATE hsa-runtime64::hsa-runtime64)

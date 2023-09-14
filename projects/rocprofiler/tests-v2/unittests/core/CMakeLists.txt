@@ -110,36 +110,38 @@ file(GLOB ROCProfiler_Singleton_TEST_SRC_FILES ${CMAKE_CURRENT_SOURCE_DIR}/ROCPr
 file(GLOB GTEST_SRC_FILES ${CMAKE_CURRENT_SOURCE_DIR}/*.cpp)
 
 set(runCoreUnitTests_SOURCES
-    ${GTEST_SRC_FILES}
-    ${HSASingleton_TEST_SRC_FILES}
-    ${ROCProfiler_Singleton_TEST_SRC_FILES}
-    ${CORE_MEMORY_SRC_FILES}
-    ${CORE_SESSION_SRC_FILES}
-    ${CORE_FILTER_SRC_FILES}
-    ${CORE_DEVICE_PROFILING_SRC_FILES}
-    ${CORE_COUNTERS_SAMPLER_SRC_FILES}
-    ${CORE_HW_SRC_FILES}
-    ${CORE_UTILS_SRC_FILES}
-    ${ROCPROFILER_SPM_SRC_FILES}
-    ${ROCPROFILER_SRC_FILES}
-    ${CORE_HSA_SRC_FILES}
-    ${CORE_HSA_PACKETS_SRC_FILES}
-    ${CORE_COUNTERS_SRC_FILES}
-    ${CORE_HSA_QUEUES_SRC_FILES}
-    ${ROCPROFILER_TRACER_SRC_FILES}
-    ${ROCPROFILER_ROCTRACER_SRC_FILES}
-    ${CORE_COUNTERS_METRICS_SRC_FILES}
-    ${CORE_COUNTERS_MMIO_SRC_FILES}
-    ${CORE_COUNTERS_PARENT_SRC_FILES}
-    ${CORE_PC_SAMPLING_FILES})
+     ${GTEST_SRC_FILES}
+     ${HSASingleton_TEST_SRC_FILES}
+     ${ROCProfiler_Singleton_TEST_SRC_FILES}
+     ${CORE_MEMORY_SRC_FILES}
+     ${CORE_SESSION_SRC_FILES}
+     ${CORE_FILTER_SRC_FILES}
+     ${CORE_DEVICE_PROFILING_SRC_FILES}
+     ${CORE_COUNTERS_SAMPLER_SRC_FILES}
+     ${CORE_HW_SRC_FILES}
+     ${CORE_UTILS_SRC_FILES}
+     ${ROCPROFILER_SPM_SRC_FILES}
+     ${ROCPROFILER_SRC_FILES}
+     ${CORE_HSA_SRC_FILES}
+     ${CORE_HSA_PACKETS_SRC_FILES}
+     ${CORE_COUNTERS_SRC_FILES}
+     ${CORE_HSA_QUEUES_SRC_FILES}
+     ${ROCPROFILER_TRACER_SRC_FILES}
+     ${ROCPROFILER_ROCTRACER_SRC_FILES}
+     ${CORE_COUNTERS_METRICS_SRC_FILES}
+     ${CORE_COUNTERS_MMIO_SRC_FILES}
+     ${CORE_COUNTERS_PARENT_SRC_FILES}
+     ${CORE_PC_SAMPLING_FILES})
 
 add_executable(runCoreUnitTests ${runCoreUnitTests_SOURCES})
+
+set_target_properties(runCoreUnitTests PROPERTIES INSTALL_RPATH "\$ORIGIN")
 
 target_include_directories(
      runCoreUnitTests
      PRIVATE ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/src ${PROJECT_SOURCE_DIR}/inc
-            ${CMAKE_CURRENT_SOURCE_DIR} ${PROJECT_BINARY_DIR}
-            ${PROJECT_BINARY_DIR}/rocprofiler)
+     ${CMAKE_CURRENT_SOURCE_DIR} ${PROJECT_BINARY_DIR}
+     ${PROJECT_BINARY_DIR}/rocprofiler)
 
 target_compile_definitions(
      runCoreUnitTests
@@ -148,12 +150,12 @@ target_compile_definitions(
 
 target_link_libraries(
      runCoreUnitTests PRIVATE rocprofiler_tool test_hsatool_library ${AQLPROFILE_LIB} hsa-runtime64::hsa-runtime64
-                         GTest::gtest GTest::gtest_main stdc++fs ${PCIACCESS_LIBRARIES})
+     GTest::gtest GTest::gtest_main stdc++fs ${PCIACCESS_LIBRARIES})
 
 add_dependencies(tests runCoreUnitTests)
 install(TARGETS runCoreUnitTests
-        RUNTIME DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/tests
-                COMPONENT tests)
+     RUNTIME DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/tests
+     COMPONENT tests)
 
 # add_test(AllTests runCoreUnitTests)
 include(GoogleTest)
@@ -162,25 +164,25 @@ set(GTEST_DISCOVER_TESTS_TARGET runCoreUnitTests)
 set(GTEST_DISCOVER_TESTS_LABELS "v2" "unittests")
 set(GTEST_DISCOVER_TESTS_ENVIRONMENT ${ROCPROFILER_MEMCHECK_PRELOAD_ENV})
 configure_file(
-    ${PROJECT_SOURCE_DIR}/cmake_modules/Templates/gtest_discover_tests_properties.cmake.in
-    ${CMAKE_CURRENT_BINARY_DIR}/runUnitTests_TestProperties.cmake @ONLY)
+     ${PROJECT_SOURCE_DIR}/cmake_modules/Templates/gtest_discover_tests_properties.cmake.in
+     ${CMAKE_CURRENT_BINARY_DIR}/runUnitTests_TestProperties.cmake @ONLY)
 
 if(NOT ROCPROFILER_MEMCHECK MATCHES "(Thread|Address)Sanitizer")
-    gtest_discover_tests(runCoreUnitTests)
-    set_property(
-        DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
-        APPEND
-        PROPERTY TEST_INCLUDE_FILES
-                 ${CMAKE_CURRENT_BINARY_DIR}/runUnitTests_TestProperties.cmake)
+     gtest_discover_tests(runCoreUnitTests)
+     set_property(
+          DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
+          APPEND
+          PROPERTY TEST_INCLUDE_FILES
+          ${CMAKE_CURRENT_BINARY_DIR}/runUnitTests_TestProperties.cmake)
 else()
-    gtest_add_tests(
-        TARGET runCoreUnitTests
-        SOURCES "${runUnitTests_SOURCES}"
-        TEST_LIST runUnitTests_TESTS)
-    include(${CMAKE_CURRENT_BINARY_DIR}/runUnitTests_TestProperties.cmake)
+     gtest_add_tests(
+          TARGET runCoreUnitTests
+          SOURCES "${runUnitTests_SOURCES}"
+          TEST_LIST runUnitTests_TESTS)
+     include(${CMAKE_CURRENT_BINARY_DIR}/runUnitTests_TestProperties.cmake)
 endif()
 
 # for the *_FilePlugin tests
 if(NOT EXISTS "${PROJECT_BINARY_DIR}/test-output")
-    file(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}/test-output")
+     file(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}/test-output")
 endif()
