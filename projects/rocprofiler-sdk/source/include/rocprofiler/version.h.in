@@ -32,14 +32,64 @@
  * @brief The minor version of the interface as a macro so it can be used
  * by the preprocessor.
  * @addtogroup VERSIONING_GROUP
+ *
+ * @def ROCPROFILER_VERSION_PATCH
+ * @brief The patch version of the interface as a macro so it can be used
+ * by the preprocessor.
+ * @addtogroup VERSIONING_GROUP
+ *
+ * @def ROCPROFILER_VERSION
+ * @brief Numerically increasing version number encoding major, minor, and patch via
+          computing `((10000 * <MAJOR>) + (100 * <MINOR>) + <PATCH>)`.
+ * @addtogroup VERSIONING_GROUP
+ *
+ * @def ROCPROFILER_SOVERSION
+ * @brief Shared object versioning value whose value is at least `(10000 * <MAJOR>)`.
+ * @addtogroup VERSIONING_GROUP
+ *
+ * @def ROCPROFILER_VERSION_STRING
+ * @brief Version string in form: `<MAJOR>.<MINOR>.<PATCH>`.
+ * @addtogroup VERSIONING_GROUP
+ *
+ * @def ROCPROFILER_GIT_DESCRIBE
+ * @brief String encoding of `git describe --tags` when rocprofiler was built.
+ * @addtogroup VERSIONING_GROUP
+ *
+ * @def ROCPROFILER_GIT_REVISION
+ * @brief String encoding of `git rev-parse HEAD` when rocprofiler was built.
+ * @addtogroup VERSIONING_GROUP
+ *
+ * @def ROCPROFILER_LIBRARY_ARCH
+ * @brief Architecture triplet of rocprofiler build.
+ * @addtogroup VERSIONING_GROUP
+ *
+ * @def ROCPROFILER_SYSTEM_NAME
+ * @brief Target operating system for rocprofiler build, e.g. Linux.
+ * @addtogroup VERSIONING_GROUP
+ *
+ * @def ROCPROFILER_SYSTEM_PROCESSOR
+ * @brief Target architecture for rocprofiler build.
+ * @addtogroup VERSIONING_GROUP
+ *
+ * @def ROCPROFILER_SYSTEM_VERSION
+ * @brief Version of the operating system which built rocprofiler
+ * @addtogroup VERSIONING_GROUP
+ *
+ * @def ROCPROFILER_COMPILER_ID
+ * @brief C++ compiler identifier which built rocprofiler, e.g., GNU
+ * @addtogroup VERSIONING_GROUP
+ *
+ * @def ROCPROFILER_COMPILER_VERSION
+ * @brief C++ compiler version which built rocprofiler
+ * @addtogroup VERSIONING_GROUP
  */
 
 // clang-format off
 #define ROCPROFILER_VERSION_MAJOR   @PROJECT_VERSION_MAJOR@
 #define ROCPROFILER_VERSION_MINOR   @PROJECT_VERSION_MINOR@
 #define ROCPROFILER_VERSION_PATCH   @PROJECT_VERSION_PATCH@
+#define ROCPROFILER_SOVERSION       (10000 * @PROJECT_VERSION_MAJOR@)
 #define ROCPROFILER_VERSION_STRING "@FULL_VERSION_STRING@"
-#define ROCPROFILER_SOVERSION      "@PROJECT_VERSION_MAJOR@"
 #define ROCPROFILER_GIT_DESCRIBE   "@ROCPROFILER_GIT_DESCRIBE@"
 #define ROCPROFILER_GIT_REVISION   "@ROCPROFILER_GIT_REVISION@"
 
@@ -56,8 +106,6 @@
 #define ROCPROFILER_HSA_RUNTIME_VERSION_MAJOR @HSA_RUNTIME_VERSION_MAJOR@
 #define ROCPROFILER_HSA_RUNTIME_VERSION_MINOR @HSA_RUNTIME_VERSION_MINOR@
 // clang-format on
-
-#define ROCPROFILER_COMPILER_STRING ROCPROFILER_COMPILER_ID " v" ROCPROFILER_COMPILER_VERSION
 
 #define ROCPROFILER_VERSION                                                                        \
     ((10000 * ROCPROFILER_VERSION_MAJOR) + (100 * ROCPROFILER_VERSION_MINOR) +                     \

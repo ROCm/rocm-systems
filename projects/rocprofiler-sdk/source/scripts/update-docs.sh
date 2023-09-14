@@ -11,6 +11,12 @@ SOURCE_DIR=$(cd ${WORK_DIR}/../.. &> /dev/null && pwd)
 message "Working directory is ${WORK_DIR}"
 message "Source directory is ${SOURCE_DIR}"
 
+message "Changing directory to ${SOURCE_DIR}"
+cd ${SOURCE_DIR}
+
+message "Configurating cmake..."
+cmake -B build-docs ${SOURCE_DIR} -DROCPROFILER_INTERNAL_BUILD_DOCS=ON
+
 message "Changing directory to ${WORK_DIR}"
 cd ${WORK_DIR}
 

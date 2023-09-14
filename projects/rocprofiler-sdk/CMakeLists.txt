@@ -70,6 +70,14 @@ set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake ${PROJECT_SOURCE_DIR}/cmake/Mo
 include(GNUInstallDirs) # install directories
 set(CMAKE_INSTALL_LIBDIR "lib") # rocm doesn't use lib64
 
+set(ROCPROFILER_INTERNAL_BUILD_DOCS
+    OFF
+    CACHE INTERNAL "Generates rocprofiler/version.h and exits (no build targets)")
+if(ROCPROFILER_INTERNAL_BUILD_DOCS)
+    add_subdirectory(source/include)
+    return()
+endif()
+
 include(rocprofiler_utilities) # various functions/macros
 include(rocprofiler_interfaces) # interface libraries
 include(rocprofiler_compilers) # compiler identification
