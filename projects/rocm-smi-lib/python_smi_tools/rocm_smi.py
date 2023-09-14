@@ -638,10 +638,21 @@ def printLog(device, metricName, value=None, extraSpace=False, useItalics=False)
     lock.acquire()
     if useItalics:
         logstr = italics + logstr + end
-    if extraSpace:
-        print('\n' + logstr + '\n', end='', flush=True)
-    else:
-        print(logstr + '\n', end='', flush=True)
+    try:
+        if extraSpace:
+            print('\n', end='')
+        print(logstr + '\n', end='')
+        sys.stdout.flush()
+    # when piped into programs like 'head' - print throws an error.
+    # silently ignore instead
+    except(BrokenPipeError, IOError):
+        # https://docs.python.org/3/library/signal.html#note-on-sigpipe
+        # Python flushes standard streams on exit; redirect remaining output
+        # to devnull to avoid another BrokenPipeError at shutdown
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull, sys.stdout.fileno())
+        sys.exit(1)  # Python exits with error code 1 on EPIPE
+
     lock.release()
 
 
