@@ -839,7 +839,7 @@ int main() {
     }
     CHK_RSMI_NOT_SUPPORTED_RET(ret)
 
-    std::cout << "\t**Averge Power Usage: ";
+    std::cout << "\t**Average Power Usage: ";
     ret = rsmi_dev_power_ave_get(i, 0, &val_ui64);
     if (ret == RSMI_STATUS_SUCCESS) {
       std::cout << static_cast<float>(val_ui64)/1000 << " W" << std::endl;
