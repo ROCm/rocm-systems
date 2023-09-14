@@ -4,6 +4,8 @@
 
 The ROCm System Management Interface Library, or ROCm SMI library, is part of the Radeon Open Compute [ROCm](https://github.com/RadeonOpenCompute) software stack . It is a C library for Linux that provides a user space interface for applications to monitor and control GPU applications.
 
+For additional information refer to [ROCm Documentation](https://rocm.docs.amd.com/projects/rocm_smi_lib/en/latest/)
+
 ## DISCLAIMER
 
 The information contained herein is for informational purposes only, and is subject to change without notice. In addition, any stated support is planned and is also subject to change. While every precaution has been taken in the preparation of this document, it may contain technical inaccuracies, omissions and typographical errors, and AMD is under no obligation to update or otherwise correct this information. Advanced Micro Devices, Inc. makes no representations or warranties with respect to the accuracy or completeness of the contents of this document, and assumes no liability of any kind, including the implied warranties of noninfringement, merchantability or fitness for particular purposes, with respect to the operation or use of AMD hardware, software or other products described herein.
@@ -56,7 +58,6 @@ python3 -m venv .venv
 In order to verify the build and capability of ROCm SMI on your system and to see an example of how ROCm SMI can be used, you may build and run the tests that are available in the repo. To build the tests, follow these steps:
 
 ```shell
-# Set environment variables used in CMakeLists.txt file
 mkdir build
 cd build
 cmake -DBUILD_TESTS=ON ..
