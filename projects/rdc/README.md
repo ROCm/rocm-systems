@@ -25,7 +25,7 @@ RDC can run on AMD ROCm supported platforms, please refer to the [List of Suppor
 
     AMD ROCm platform (https://github.com/RadeonOpenCompute/ROCm)
         * It is recommended to install the complete AMD ROCm platform.
-          For installation instruction see https://docs.amd.com/category/Release%20Documentation
+          For installation instruction see https://rocm.docs.amd.com/en/latest/deploy/linux/quick_start.html
         * At the minimum, these two components are required
             (i)  AMD ROCm SMI Library (https://github.com/RadeonOpenCompute/rocm_smi_lib)
             (ii) AMD ROCk Kernel driver (https://github.com/RadeonOpenCompute/ROCK-Kernel-Driver)
@@ -102,7 +102,7 @@ ldconfig
 
 # Running RDC
 RDC supports encrypted communications between clients and servers. The
-communication can be configured to be *authenticated* or *not authenticated*. The [**user guide**](https://docs.amd.com/bundle/ROCm-Data-Center-Tool-User-Guide-v5.3/page/Developer_Handbook.html) has information on how to generate and install SSL keys and certificates for authentication. By default, authentication is enabled.
+communication can be configured to be *authenticated* or *not authenticated*. The [**user guide**](https://rocm.docs.amd.com/projects/rdc/en/latest/) has information on how to generate and install SSL keys and certificates for authentication. By default, authentication is enabled.
 
 ## Starting ROCm™ Data Center Daemon (RDCD)
 For an RDC client application to monitor and/or control a remote system, the RDC server daemon, *rdcd*, must be running on the remote system. *rdcd* can be configured to run with (a) full-capabilities which includes ability to set or change GPU configuration or (b) monitor-only capabilities which limits to monitoring GPU metrics.
@@ -139,7 +139,7 @@ systemctl start rdc         ## start rdc as systemd service
 ```
 
 ## Invoke RDC using ROCm™ Data Center Interface (RDCI)
-RDCI provides command-line interface to all RDC features. This CLI can be run locally or remotely. Refer to [**user guide**](https://docs.amd.com/bundle/ROCm-Data-Center-Tool-User-Guide-v5.3/page/Feature_Overview.html) for the current list of features.
+RDCI provides command-line interface to all RDC features. This CLI can be run locally or remotely. Refer to [**user guide**](https://rocm.docs.amd.com/projects/rdc/en/latest/user_guide/features.html) for the current list of features.
 
 ```bash
 ## sample rdci commands to test RDC functionality
