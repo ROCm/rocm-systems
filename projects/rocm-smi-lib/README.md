@@ -27,24 +27,24 @@ In order to build the latest documentation, the following are required:
 The source code for ROCm SMI is available on [Github](https://github.com/RadeonOpenCompute/rocm_smi_lib).
 
 After the ROCm SMI library git repository has been cloned to a local Linux machine, building the library is achieved by following the typical CMake build sequence. Specifically,
-```shell
+```bash
 mkdir -p build
 cd build
 cmake ..
 make -j $(nproc)
 # Install library file and header; default location is /opt/rocm
-$ make install
+make install
 ```
 The built library will appear in the `build` folder.
 
 To build the rpm and deb packages follow the above steps with:
-```shell
+```bash
 make package
 ```
 
 #### Documentation
 The following is an example of how to build the docs:
-```shell
+```bash
 sudo apt install -y npm
 sudo npm install -g sass
 
@@ -57,7 +57,7 @@ python3 -m venv .venv
 #### Building the Tests
 In order to verify the build and capability of ROCm SMI on your system and to see an example of how ROCm SMI can be used, you may build and run the tests that are available in the repo. To build the tests, follow these steps:
 
-```shell
+```bash
 mkdir build
 cd build
 cmake -DBUILD_TESTS=ON ..
