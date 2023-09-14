@@ -104,8 +104,7 @@ void TestFrequenciesReadWrite::Run(void) {
   for (uint32_t dv_ind = 0; dv_ind < num_monitor_devs(); ++dv_ind) {
     PrintDeviceHeader(dv_ind);
 
-    for (uint32_t clk = (uint32_t)RSMI_CLK_TYPE_FIRST;
-                                           clk <= RSMI_CLK_TYPE_LAST; ++clk) {
+    for (uint32_t clk = RSMI_CLK_TYPE_FIRST; clk <= RSMI_CLK_TYPE_LAST; ++clk) {
       rsmi_clk = (rsmi_clk_type)clk;
 
       auto freq_read = [&]() -> bool {
@@ -147,14 +146,18 @@ void TestFrequenciesReadWrite::Run(void) {
                                                                     std::endl;
         }
         ret = rsmi_dev_gpu_clk_freq_set(dv_ind, rsmi_clk, freq_bitmask);
-        //Certain ASICs does not allow to set particular clocks. If set function for a clock returns
-        //permission error despite root access, manually set ret value to success and return
-        if (ret == RSMI_STATUS_PERMISSION && geteuid() == 0) {
+        // Certain ASICs does not allow to set particular clocks. If set function for a clock returns
+        // permission error despite root access, manually set ret value to success and return
+        //
+        // Sometimes setting clock frequencies is completely not supported
+        if ((ret == RSMI_STATUS_PERMISSION && geteuid() == 0) ||
+            (ret == RSMI_STATUS_NOT_SUPPORTED)) {
           std::cout << "\t**Set " << FreqEnumToStr(rsmi_clk) <<
                               ": Not supported on this machine. Skipping..." << std::endl;
           ret = RSMI_STATUS_SUCCESS;
           return;
         }
+
         CHK_ERR_ASRT(ret)
         ret = rsmi_dev_gpu_clk_freq_get(dv_ind, rsmi_clk, &f);
         if (ret != RSMI_STATUS_SUCCESS) {
@@ -166,12 +169,20 @@ void TestFrequenciesReadWrite::Run(void) {
           std::cout << "Resetting mask to all frequencies." << std::endl;
         }
         ret = rsmi_dev_gpu_clk_freq_set(dv_ind, rsmi_clk, 0xFFFFFFFF);
+        if (ret == RSMI_STATUS_NOT_SUPPORTED) {
+          std::cout << "\t**Set " << FreqEnumToStr(rsmi_clk)
+                           << ": Not supported on this machine. Skipping..." << std::endl;
+          ret = RSMI_STATUS_SUCCESS;
+          return;
+        }
         if (ret != RSMI_STATUS_SUCCESS) {
           return;
         }
 
         ret = rsmi_dev_perf_level_set(dv_ind, RSMI_DEV_PERF_LEVEL_AUTO);
-        if (ret != RSMI_STATUS_SUCCESS) {
+        if (ret == RSMI_STATUS_NOT_SUPPORTED) {
+          std::cout << "\t**Setting performance level is not supported on this machine. Skipping..." << std::endl;
+          ret = RSMI_STATUS_SUCCESS;
           return;
         }
       };
