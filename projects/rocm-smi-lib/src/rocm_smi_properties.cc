@@ -90,7 +90,6 @@ AMDGpuPropertyId_t unmake_unique_property_id(AMDGpuPropertyId_t property_id) {
       static_cast<AMDGpuPropertyOffsetType>(AMDGpuPropertyTypesOffset_t::kClkTypes)  |
       static_cast<AMDGpuPropertyOffsetType>(AMDGpuPropertyTypesOffset_t::kVoltMetricTypes);
 
-  auto property_type_offset = (static_cast<AMDGpuPropertyOffsetType>(property_type_offset_mask) & (property_id));
   auto property_type_id = (static_cast<AMDGpuPropertyOffsetType>(property_id) & ~(property_type_offset_mask));
 
   return property_type_id;
@@ -435,7 +434,7 @@ rsmi_status_t Device::check_amdgpu_property_reinforcement_query(uint32_t dev_idx
         id_filter_result = rsmi_dev_revision_get(dev_idx, &tmp_amdgpu_query.m_pci_rev_id);
       }
     }
-    is_filter_good = (id_filter_result == rsmi_status_t::RSMI_STATUS_SUCCESS) ? true : false;
+    is_filter_good = (id_filter_result == rsmi_status_t::RSMI_STATUS_SUCCESS);
     return tmp_amdgpu_query;
   };
 
@@ -473,13 +472,6 @@ rsmi_status_t Device::run_amdgpu_property_reinforcement_query(const AMDGpuProper
 
   auto contains = [](const uint16_t asic_id) {
     return (amdgpu_property_reinforcement_list.find(asic_id) != amdgpu_property_reinforcement_list.end());
-  };
-
-  auto ends_with = [](const std::string& value, const std::string& ending) {
-    if (value.size() < ending.size()) {
-      return false;
-    }
-    return std::equal(ending.rbegin(), ending.rend(), value.rbegin());
   };
 
   // Traverse through all values for a given key

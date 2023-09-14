@@ -45,6 +45,7 @@
 #ifndef TESTS_ROCM_SMI_TEST_TEST_BASE_H_
 #define TESTS_ROCM_SMI_TEST_TEST_BASE_H_
 
+#include <cstdint>
 #include <string>
 
 class TestBase {
@@ -142,9 +143,8 @@ class TestBase {
          "\t===> Abort is over-ridden due to dont_fail command line option." \
                                                                << std::endl; \
         return; \
-    } else { \
-      ASSERT_EQ(RSMI_STATUS_SUCCESS, (RET)); \
     } \
+    ASSERT_EQ(RSMI_STATUS_SUCCESS, (RET)); \
 }
 
 void MakeHeaderStr(const char *inStr, std::string *outStr);

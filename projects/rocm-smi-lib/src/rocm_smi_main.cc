@@ -39,25 +39,26 @@
  * DEALINGS WITH THE SOFTWARE.
  *
  */
-#include <dirent.h>
-#include <assert.h>
-#include <string.h>
-#include <unistd.h>
-#include <sys/types.h>
-#include <stdlib.h>
 
-#include <string>
-#include <cstdint>
-#include <memory>
-#include <fstream>
-#include <vector>
-#include <set>
-#include <utility>
-#include <functional>
+#include <dirent.h>
+#include <sys/types.h>
+#include <unistd.h>
+
+#include <cassert>
 #include <cerrno>
-#include <unordered_map>
+#include <cstdint>
+#include <cstdlib>
+#include <cstring>
+#include <fstream>
+#include <functional>
 #include <iostream>
+#include <memory>
+#include <set>
 #include <sstream>
+#include <string>
+#include <unordered_map>
+#include <utility>
+#include <vector>
 
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_device.h"
@@ -284,7 +285,8 @@ static uint32_t ConstructBDFID(std::string path, uint64_t *bdfid) {
 
   // We are looking for the last element in the path that has the form
   //  XXXX:XX:XX.X, where X is a hex integer (lower case is expected)
-  std::size_t slash_i, end_i;
+  std::size_t slash_i;
+  std::size_t end_i;
   std::string tmp;
 
   std::string tpath_str(tpath);
@@ -331,9 +333,9 @@ RocmSMI::Initialize(uint64_t flags) {
 
   GetEnvVariables();
   // To help debug env variable issues
-  // printEnvVarInfo();
+  // debugRSMIEnvVarInfo();
 
-  while (std::string(kAMDMonitorTypes[i]) != "") {
+  while (!std::string(kAMDMonitorTypes[i]).empty()) {
       amd_monitor_types_.insert(kAMDMonitorTypes[i]);
       ++i;
   }
@@ -347,12 +349,12 @@ RocmSMI::Initialize(uint64_t flags) {
   }
 
   uint64_t bdfid;
-  for (uint32_t i = 0; i < devices_.size(); ++i) {
-    if (ConstructBDFID(devices_[i]->path(), &bdfid) != 0) {
+  for (auto & device : devices_) {
+    if (ConstructBDFID(device->path(), &bdfid) != 0) {
       std::cerr << "Failed to construct BDFID." << std::endl;
       ret = 1;
     } else {
-      devices_[i]->set_bdfid(bdfid);
+      device->set_bdfid(bdfid);
     }
   }
   if (ret != 0) {
@@ -388,7 +390,7 @@ RocmSMI::Initialize(uint64_t flags) {
     uint64_t bdfid = (*dev_iter)->bdfid();
     if (tmp_map.find(bdfid) == tmp_map.end()) {
       ss << __PRETTY_FUNCTION__ << " | removing device = "
-         << (*dev_iter)->path();
+         << (*dev_iter)->path() << "; bdfid = " << std::to_string(bdfid);
       dev_iter = devices_.erase(dev_iter);
       LOG_DEBUG(ss);
       continue;
@@ -443,8 +445,7 @@ RocmSMI::RocmSMI(uint64_t flags) : init_options_(flags),
                           kfd_notif_evt_fh_(-1), kfd_notif_evt_fh_refcnt_(0) {
 }
 
-RocmSMI::~RocmSMI() {
-}
+RocmSMI::~RocmSMI() = default;
 
 RocmSMI& RocmSMI::getInstance(uint64_t flags) {
   // Assume c++11 or greater. static objects will be created by only 1 thread
@@ -493,7 +494,7 @@ static inline std::unordered_set<uint32_t> GetEnvVarUIntegerSets(
   if(ev_str == nullptr) { return returnSet; }
   std::string stringEnv = ev_str;
 
-  if (stringEnv.empty() == false) {
+  if (!stringEnv.empty()) {
     // parse out values by commas
     std::string parsedVal;
     std::istringstream ev_str_ss(stringEnv);
@@ -548,48 +549,54 @@ uint32_t RocmSMI::getLogSetting() {
   return this->env_vars_.logging_on;
 }
 
-void RocmSMI::printEnvVarInfo(void) {
-  std::cout << __PRETTY_FUNCTION__ << " | env_vars_.debug_output_bitfield = "
-            << ((env_vars_.debug_output_bitfield == 0) ? "<undefined>"
-                : std::to_string(env_vars_.debug_output_bitfield))
-            << std::endl;
-  std::cout << __PRETTY_FUNCTION__ << " | env_vars_.path_DRM_root_override = "
-            << ((env_vars_.path_DRM_root_override == nullptr)
-                ? "<undefined>" : env_vars_.path_DRM_root_override)
-            << std::endl;
-  std::cout << __PRETTY_FUNCTION__ << " | env_vars_.path_HWMon_root_override = "
-            << ((env_vars_.path_HWMon_root_override == nullptr)
-                ? "<undefined>" : env_vars_.path_HWMon_root_override)
-            << std::endl;
-  std::cout << __PRETTY_FUNCTION__ << " | env_vars_.path_power_root_override = "
-            << ((env_vars_.path_power_root_override == nullptr)
-                ? "<undefined>" : env_vars_.path_power_root_override)
-            << std::endl;
-  std::cout << __PRETTY_FUNCTION__ << " | env_vars_.debug_inf_loop = "
-            << ((env_vars_.debug_inf_loop == 0) ? "<undefined>"
-                : std::to_string(env_vars_.debug_inf_loop))
-            << std::endl;
-  std::cout << __PRETTY_FUNCTION__ << " | env_vars_.logging_on = "
+void RocmSMI::debugRSMIEnvVarInfo(void) {
+  std::cout << __PRETTY_FUNCTION__
+            << RocmSMI::getInstance().getRSMIEnvVarInfo();
+}
+
+std::string RocmSMI::getRSMIEnvVarInfo(void) {
+  std::ostringstream ss;
+  ss << "\n\tRSMI_DEBUG_BITFIELD = "
+     << ((env_vars_.debug_output_bitfield == 0) ? "<undefined>"
+          : std::to_string(env_vars_.debug_output_bitfield))
+     << std::endl;
+  ss << "\tRSMI_DEBUG_DRM_ROOT_OVERRIDE = "
+     << ((env_vars_.path_DRM_root_override == nullptr)
+         ? "<undefined>" : env_vars_.path_DRM_root_override)
+     << std::endl;
+  ss << "\tRSMI_DEBUG_HWMON_ROOT_OVERRIDE = "
+     << ((env_vars_.path_HWMon_root_override == nullptr)
+          ? "<undefined>" : env_vars_.path_HWMon_root_override)
+     << std::endl;
+  ss << "\tRSMI_DEBUG_PP_ROOT_OVERRIDE = "
+     << ((env_vars_.path_power_root_override == nullptr)
+          ? "<undefined>" : env_vars_.path_power_root_override)
+     << std::endl;
+  ss << "\tRSMI_DEBUG_INFINITE_LOOP = "
+     << ((env_vars_.debug_inf_loop == 0) ? "<undefined>"
+          : std::to_string(env_vars_.debug_inf_loop))
+     << std::endl;
+  ss << "\tRSMI_LOGGING = "
             << getLogSetting() << std::endl;
   bool isLoggingOn = RocmSMI::isLoggingOn() ? true : false;
-  std::cout << __PRETTY_FUNCTION__ << " | env_vars_.logging_on = "
-            << (isLoggingOn ? "true" : "false") << std::endl;
-  std::cout << __PRETTY_FUNCTION__ << " | env_vars_.enum_overrides = {";
+  ss << "\tRSMI_LOGGING (are logs on) = "
+            << (isLoggingOn ? "TRUE" : "FALSE") << std::endl;
+  ss << "\tRSMI_DEBUG_ENUM_OVERRIDE = {";
   if (env_vars_.enum_overrides.empty()) {
-    std::cout << "}" << std::endl;
-    return;
+    ss << "}" << std::endl;
+    return ss.str();
   }
   for (auto it=env_vars_.enum_overrides.begin();
        it != env_vars_.enum_overrides.end(); ++it) {
     DevInfoTypes type = static_cast<DevInfoTypes>(*it);
-    std::cout << (std::to_string(*it) + " (" + devInfoTypesStrings.at(type)
-                  + ")");
+    ss << (std::to_string(*it) + " (" + devInfoTypesStrings.at(type) + ")");
     auto temp_it = it;
     if(++temp_it != env_vars_.enum_overrides.end()) {
-      std::cout << ", ";
+      ss << ", ";
     }
   }
-  std::cout << "}" << std::endl;
+  ss << "}" << std::endl;
+  return ss.str();
 }
 
 std::shared_ptr<Monitor>
@@ -637,7 +644,7 @@ RocmSMI::FindMonitor(std::string monitor_path) {
       fs.close();
 
       if (amd_monitor_types_.find(mon_type) != amd_monitor_types_.end()) {
-        m = std::shared_ptr<Monitor>(new Monitor(mon_name, &env_vars_));
+        m = std::make_shared<Monitor>(mon_name, &env_vars_);
         m->setTempSensorLabelMap();
         m->setVoltSensorLabelMap();
         break;
@@ -665,12 +672,12 @@ RocmSMI::AddToDeviceList(std::string dev_name) {
   dev_path += "/";
   dev_path += dev_name;
 
-  auto dev = std::shared_ptr<Device>(new Device(dev_path, &env_vars_));
+  auto dev = std::make_shared<Device>(dev_path, &env_vars_);
 
   std::shared_ptr<Monitor> m = FindMonitor(dev_path + "/device/hwmon");
   dev->set_monitor(m);
 
-  std::string d_name = dev_name;
+  const std::string& d_name = dev_name;
   uint32_t card_indx = GetDeviceIndex(d_name);
   dev->set_drm_render_minor(GetDrmRenderMinor(dev_path));
   dev->set_card_index(card_indx);
@@ -681,8 +688,6 @@ RocmSMI::AddToDeviceList(std::string dev_name) {
      << dev_name << " | path = " << dev_path
      << " | card index = " << std::to_string(card_indx) << " | ";
   LOG_DEBUG(ss);
-
-  return;
 }
 
 static const uint32_t kAmdGpuId = 0x1002;
@@ -693,8 +698,7 @@ static bool isAMDGPU(std::string dev_path) {
   std::string vend_path = dev_path + "/device/vendor";
   if (!FileExists(vend_path.c_str())) {
     ss << __PRETTY_FUNCTION__ << " | device_path = " << dev_path
-       << " is " << (isAmdGpu ? "is an amdgpu device - TRUE":
-                     "is an amdgpu device - FALSE");
+       << " is an amdgpu device - " << (isAmdGpu ? "TRUE": " FALSE");
     LOG_DEBUG(ss);
     return isAmdGpu;
   }
@@ -704,8 +708,7 @@ static bool isAMDGPU(std::string dev_path) {
 
   if (!fs.is_open()) {
     ss << __PRETTY_FUNCTION__ << " | device_path = " << dev_path
-       << " is " << (isAmdGpu ? "is an amdgpu device - TRUE":
-                     "is an amdgpu device - FALSE");
+       << " is an amdgpu device - " << (isAmdGpu ? "TRUE": " FALSE");
     LOG_DEBUG(ss);
     return isAmdGpu;
   }
@@ -720,8 +723,7 @@ static bool isAMDGPU(std::string dev_path) {
     isAmdGpu = true;
   }
   ss << __PRETTY_FUNCTION__ << " | device_path = " << dev_path
-     << " is " << (isAmdGpu ? "is an amdgpu device - TRUE":
-                   "is an amdgpu device - FALSE");
+     << " is an amdgpu device - " << (isAmdGpu ? "TRUE": " FALSE");
   LOG_DEBUG(ss);
   return isAmdGpu;
 }
@@ -729,6 +731,7 @@ static bool isAMDGPU(std::string dev_path) {
 uint32_t RocmSMI::DiscoverAmdgpuDevices(void) {
   std::string err_msg;
   uint32_t count = 0;
+  std::ostringstream ss;
 
   // If this gets called more than once, clear previous findings.
   devices_.clear();
@@ -755,17 +758,125 @@ uint32_t RocmSMI::DiscoverAmdgpuDevices(void) {
     }
     dentry = readdir(drm_dir);
   }
+  ss << __PRETTY_FUNCTION__ << " | Discovered a potential of "
+     << std::to_string(count) << " cards" << " | ";
+  LOG_DEBUG(ss);
 
+  struct systemNode {
+    uint32_t s_node_id = 0;
+    uint64_t s_gpu_id = 0;
+    uint64_t s_unique_id = 0;
+  };
+  // allSystemNodes[key = unique_id] => {node_id, gpu_id, unique_id}
+  std::multimap<uint64_t, systemNode> allSystemNodes;
+  uint32_t node_id = 0;
+  while (true) {
+    uint64_t gpu_id = 0, unique_id = 0;
+    int ret_gpu_id = get_gpu_id(node_id, &gpu_id);
+    int ret_unique_id = read_node_properties(node_id, "unique_id", &unique_id);
+    if (ret_gpu_id == 0 || ret_unique_id == 0) {
+      systemNode myNode;
+      myNode.s_node_id = node_id;
+      myNode.s_gpu_id = gpu_id;
+      myNode.s_unique_id = unique_id;
+      if(gpu_id != 0) { // only add gpu nodes, 0 = CPU
+        allSystemNodes.emplace(unique_id, myNode);
+      }
+    } else {
+      break;
+    }
+    node_id++;
+  }
+
+  ss << __PRETTY_FUNCTION__ << " | Ordered system nodes found = {";
+  for(auto i: allSystemNodes) {
+    ss << "\n[node_id = " << std::to_string(i.second.s_node_id)
+       << "; gpu_id = " << std::to_string(i.second.s_gpu_id)
+       << "; unique_id = " << std::to_string(i.second.s_unique_id)
+       << "], "
+    ;
+  }
+  ss << "}";
+  LOG_DEBUG(ss);
+
+  // Discover all root cards & gpu partitions associated with each
   for (uint32_t node_id = 0; node_id < count; node_id++) {
     std::string path = kPathDRMRoot;
     path += "/card";
     path += std::to_string(node_id);
+    uint64_t primary_unique_id = 0;
+
+    // each identified gpu card node is a primary node for
+    // potential matching unique ids
     if (isAMDGPU(path) ||
        (init_options_ & RSMI_INIT_FLAG_ALL_GPUS)) {
           std::string d_name = "card";
           d_name += std::to_string(node_id);
           AddToDeviceList(d_name);
-      }
+
+          ss << __PRETTY_FUNCTION__
+             << " | Ordered system nodes seen in lookup = {";
+          for (auto i : allSystemNodes) {
+            ss << "\n[node_id = " << std::to_string(i.second.s_node_id)
+               << "; gpu_id = " << std::to_string(i.second.s_gpu_id)
+               << "; unique_id = " << std::to_string(i.second.s_unique_id)
+               << "], ";
+          }
+          ss << "}";
+          LOG_DEBUG(ss);
+
+          uint64_t temp_primary_unique_id = 0;
+          if (allSystemNodes.empty()) {
+            continue;
+          }
+
+          // get lowest key 1st to keep order of nodes matching card
+          uint32_t lowest_NodeId = 0;
+          uint32_t curr_NodeId = 0;
+
+          for (auto it = allSystemNodes.begin(), end = allSystemNodes.end();
+               it != end; it = allSystemNodes.upper_bound(it->first)) {
+            curr_NodeId = it->second.s_node_id;
+            if (it == allSystemNodes.begin()) {
+              lowest_NodeId = it->second.s_node_id;
+            }
+            if (curr_NodeId <= lowest_NodeId) {
+              lowest_NodeId = curr_NodeId;
+              temp_primary_unique_id = it->second.s_unique_id;
+            }
+          }
+          ss << __PRETTY_FUNCTION__
+             << " | lowest_NodeId = " << std::to_string(lowest_NodeId)
+             << " | curr_NodeId = " << std::to_string(curr_NodeId)
+             << " | temp_primary_unique_id = "
+             << std::to_string(temp_primary_unique_id);
+          LOG_DEBUG(ss);
+
+          if (temp_primary_unique_id != 0) {
+            primary_unique_id = temp_primary_unique_id;
+          } else {
+            allSystemNodes.erase(primary_unique_id);
+            continue;
+          }
+
+          auto numb_nodes = allSystemNodes.count(primary_unique_id);
+          ss << __PRETTY_FUNCTION__ << " | REFRESH - primary_unique_id = "
+             << std::to_string(primary_unique_id) << " has "
+             << std::to_string(numb_nodes) << " known gpu nodes";
+          LOG_DEBUG(ss);
+          while (numb_nodes > 1) {
+            std::string secNode = "card";
+            secNode += std::to_string(node_id); // add the primary node id
+            AddToDeviceList(secNode);
+            numb_nodes--;
+          }
+          // remove already added nodes associated with current card
+          auto erasedNodes = allSystemNodes.erase(primary_unique_id);
+          ss << __PRETTY_FUNCTION__ << " | After finding primary_unique_id = "
+             << std::to_string(primary_unique_id) << " erased "
+             << std::to_string(erasedNodes) << " nodes";
+          LOG_DEBUG(ss);
+    }
   }
 
   if (closedir(drm_dir)) {
@@ -789,7 +900,7 @@ int RocmSMI::DiscoverAMDPowerMonitors(bool force_update) {
     power_mons_.clear();
   }
 
-  if (power_mons_.size() != 0) {
+  if (!power_mons_.empty()) {
     return 0;
   }
 
@@ -817,7 +928,7 @@ int RocmSMI::DiscoverAMDPowerMonitors(bool force_update) {
 
     if (FileExists(tmp.c_str())) {
       std::shared_ptr<PowerMon> mon =
-                std::shared_ptr<PowerMon>(new PowerMon(mon_name, &env_vars_));
+                std::make_shared<PowerMon>(mon_name, &env_vars_);
       power_mons_.push_back(mon);
       mon->set_dev_index(GetDeviceIndex(dentry->d_name));
     }
@@ -830,8 +941,8 @@ int RocmSMI::DiscoverAMDPowerMonitors(bool force_update) {
     return errno;
   }
 
-  for (auto m : power_mons_) {
-    for (auto d : devices_) {
+  for (const auto& m : power_mons_) {
+    for (const auto& d : devices_) {
       if (m->dev_index() == d->index()) {
         d->set_power_monitor(m);
         break;

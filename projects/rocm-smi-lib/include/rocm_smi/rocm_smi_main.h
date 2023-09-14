@@ -113,7 +113,8 @@ class RocmSMI {
                            uint64_t *weight);
     int get_node_index(uint32_t dv_ind, uint32_t *node_ind);
     const RocmSMI_env_vars& getEnv(void);
-    void printEnvVarInfo(void);
+    std::string getRSMIEnvVarInfo(void);
+    void debugRSMIEnvVarInfo();
     bool isLoggingOn(void);
     uint32_t getLogSetting(void);
     static const std::map<amd::smi::DevInfoTypes, std::string> devInfoTypesStrings;

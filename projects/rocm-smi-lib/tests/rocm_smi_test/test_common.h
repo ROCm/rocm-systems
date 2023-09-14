@@ -74,7 +74,7 @@ void DumpMonitorInfo(const TestBase *test);
 #endif
 
 #define DISPLAY_RSMI_ERR(RET) { \
-  if (RET != RSMI_STATUS_SUCCESS) { \
+  if ((RET) != RSMI_STATUS_SUCCESS) { \
     const char *err_str; \
     std::cout << "\t===> ERROR: RSMI call returned " << (RET) << std::endl; \
     rsmi_status_string((RET), &err_str); \
@@ -91,7 +91,7 @@ void DumpMonitorInfo(const TestBase *test);
   } \
 }
 #define CHK_RSMI_PERM_ERR(RET) { \
-    if (RET == RSMI_STATUS_PERMISSION) { \
+    if ((RET) == RSMI_STATUS_PERMISSION) { \
       std::cout << "This command requires root access." << std::endl; \
     } else { \
       DISPLAY_RSMI_ERR(RET) \

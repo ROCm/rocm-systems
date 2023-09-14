@@ -41,28 +41,29 @@
  *
  */
 
-#include <assert.h>
-#include <sys/stat.h>
-#include <sys/ioctl.h>
-#include <unistd.h>
-#include <fcntl.h>
 #include <dirent.h>
+#include <fcntl.h>
+#include <sys/ioctl.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include <algorithm>
+#include <cassert>
+#include <cstdint>
+#include <fstream>
+#include <iostream>
+#include <memory>
+#include <sstream>
 #include <string>
 #include <unordered_set>
-#include <fstream>
-#include <cstdint>
-#include <iostream>
-#include <sstream>
 
 #include "rocm_smi/rocm_smi_io_link.h"
 #include "rocm_smi/rocm_smi_kfd.h"
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_exception.h"
 #include "rocm_smi/rocm_smi_utils.h"
-#include "rocm_smi/rocm_smi_device.h"
 #include "rocm_smi/rocm_smi_main.h"
+#include "rocm_smi/rocm_smi_logger.h"
 
 namespace amd {
 namespace smi {
@@ -195,7 +196,7 @@ int ReadKFDDeviceProperties(uint32_t kfd_node_id,
     retVec->push_back(line);
   }
 
-  if (retVec->size() == 0) {
+  if (retVec->empty()) {
     fs.close();
     return ENOENT;
   }
@@ -517,7 +518,7 @@ int DiscoverKFDNodes(std::map<uint64_t, std::shared_ptr<KFDNode>> *nodes) {
   if (nodes == nullptr) {
     return EINVAL;
   }
-  assert(nodes->size() == 0);
+  assert(nodes->empty());
 
   nodes->clear();
 
@@ -548,7 +549,7 @@ int DiscoverKFDNodes(std::map<uint64_t, std::shared_ptr<KFDNode>> *nodes) {
       continue;
     }
 
-    node = std::shared_ptr<KFDNode>(new KFDNode(node_indx));
+    node = std::make_shared<KFDNode>(node_indx);
 
     node->Initialize();
 
@@ -596,16 +597,15 @@ int DiscoverKFDNodes(std::map<uint64_t, std::shared_ptr<KFDNode>> *nodes) {
   return 0;
 }
 
-KFDNode::~KFDNode() {
-}
+KFDNode::~KFDNode() = default;
 
 int KFDNode::ReadProperties(void) {
   int ret;
 
   std::vector<std::string> propVec;
 
-  assert(properties_.size() == 0);
-  if (properties_.size() > 0) {
+  assert(properties_.empty());
+  if (!properties_.empty()) {
     return 0;
   }
 
@@ -620,8 +620,8 @@ int KFDNode::ReadProperties(void) {
   uint64_t val_int;  // Assume all properties are unsigned integers for now
   std::istringstream fs;
 
-  for (uint32_t i = 0; i < propVec.size(); ++i) {
-    fs.str(propVec[i]);
+  for (const auto & i : propVec) {
+    fs.str(i);
     fs >> key_str;
     fs >> val_int;
 
@@ -776,20 +776,30 @@ KFDNode::get_io_link_bandwidth(uint32_t node_to, uint64_t *max_bandwidth,
 // /sys/class/kfd/kfd/topology/nodes/*/mem_banks/*/properties
 // size_in_bytes 68702699520
 int KFDNode::get_total_memory(uint64_t* total) {
-  if (total == nullptr) return EINVAL;
+  std::ostringstream ss;
+  if (total == nullptr) {
+    return EINVAL;
+  }
   *total = 0;
 
   std::string f_path  = kKFDNodesPathRoot;
   f_path += "/";
   f_path += std::to_string(node_indx_);
   f_path += "/mem_banks";
+  int subDirCount = subDirectoryCountInPath(f_path);
+  ss << __PRETTY_FUNCTION__ << " | [before loop] Within " << f_path
+     << " has subdirectory count = " << std::to_string(subDirCount);
+  LOG_DEBUG(ss);
 
   auto kfd_node_dir = opendir(f_path.c_str());
   if (kfd_node_dir == nullptr) {
     return errno;
   }
   auto dentry = readdir(kfd_node_dir);
-  while (dentry != nullptr) {
+  while (dentry != nullptr && subDirCount > 0) {
+    ss << __PRETTY_FUNCTION__ << " | [inside loop] Within " << f_path
+       << " has subdirectory count = " << std::to_string(subDirCount);
+    LOG_DEBUG(ss);
     if (dentry->d_name[0] == '.') {
       dentry = readdir(kfd_node_dir);
       continue;
@@ -823,6 +833,7 @@ int KFDNode::get_total_memory(uint64_t* total) {
           }
       }
     }  // end loop for lines in property file
+    subDirCount--;
   }  // end loop for mem_bank directory
 
   if (closedir(kfd_node_dir)) {
@@ -861,6 +872,81 @@ int KFDNode::get_used_memory(uint64_t* used) {
   }
 
   return 1;
+}
+
+// /sys/class/kfd/kfd/topology/nodes/*/properties
+int read_node_properties(uint32_t node, std::string property_name,
+                         uint64_t *val) {
+  std::ostringstream ss;
+  int retVal = EINVAL;
+  if (property_name.empty() || val == nullptr) {
+    ss << __PRETTY_FUNCTION__
+       << " | Issue: Could not read node #" << std::to_string(node)
+       << ", property_name is empty or *val is nullptr "
+       << " | return = " << std::to_string(retVal)
+       << " | ";
+    LOG_DEBUG(ss);
+    return retVal;
+  }
+  std::shared_ptr<KFDNode> myNode = std::shared_ptr<KFDNode>(new KFDNode(node));
+  myNode->Initialize();
+  if (KFDNodeSupported(node)) {
+    retVal = myNode->get_property_value(property_name, val);
+    ss << __PRETTY_FUNCTION__
+       << " | Successfully read node #" << std::to_string(node)
+       << " for property_name = " << property_name
+       << " | Data (" << property_name << ") * val = "
+       << std::to_string(*val)
+       << " | return = " << std::to_string(retVal)
+       << " | ";
+    LOG_DEBUG(ss);
+  } else {
+    retVal = 1;
+    ss << __PRETTY_FUNCTION__
+       << " | Issue: Could not read node #" << std::to_string(node)
+       << ", KFD node was an unsupported node."
+       << " | return = " << std::to_string(retVal)
+       << " | ";
+    LOG_ERROR(ss);
+  }
+  return retVal;
+}
+
+// /sys/class/kfd/kfd/topology/nodes/*/gpu_id
+int get_gpu_id(uint32_t node, uint64_t *gpu_id) {
+  std::ostringstream ss;
+  int retVal = EINVAL;
+  if (gpu_id == nullptr) {
+    ss << __PRETTY_FUNCTION__
+       << " | Issue: Could not read node #" << std::to_string(node)
+       << ", gpu_id is a nullptr "
+       << " | return = " << std::to_string(retVal)
+       << " | ";
+    LOG_DEBUG(ss);
+    return retVal;
+  }
+  std::shared_ptr<KFDNode> myNode = std::shared_ptr<KFDNode>(new KFDNode(node));
+  myNode->Initialize();
+  if (KFDNodeSupported(node)) {
+    retVal = ReadKFDGpuId(node, gpu_id);
+    ss << __PRETTY_FUNCTION__
+       << " | Successfully read node #" << std::to_string(node)
+       << " for gpu_id"
+       << " | Data (gpu_id) *gpu_id = "
+       << std::to_string(*gpu_id)
+       << " | return = " << std::to_string(retVal)
+       << " | ";
+    LOG_DEBUG(ss);
+  } else {
+    retVal = 1;
+    ss << __PRETTY_FUNCTION__
+       << " | Issue: Could not read node #" << std::to_string(node)
+       << ", KFD node was an unsupported node."
+       << " | return = " << std::to_string(retVal)
+       << " | ";
+    LOG_ERROR(ss);
+  }
+  return retVal;
 }
 
 }  // namespace smi

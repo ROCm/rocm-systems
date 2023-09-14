@@ -41,19 +41,18 @@
  *
  */
 
-#include <assert.h>
 #include <dirent.h>
 
-#include <fstream>
-#include <string>
-#include <cstdint>
-#include <map>
-#include <iostream>
 #include <algorithm>
+#include <cassert>
+#include <cstdint>
+#include <fstream>
+#include <iostream>
+#include <map>
 #include <regex>  // NOLINT
+#include <string>
 #include <vector>
 
-#include "rocm_smi/rocm_smi_main.h"
 #include "rocm_smi/rocm_smi_monitor.h"
 #include "rocm_smi/rocm_smi_utils.h"
 #include "rocm_smi/rocm_smi_exception.h"
@@ -286,8 +285,7 @@ static const std::map<const char *, monitor_depends_t> kMonFuncDependsMap = {
     env_ = nullptr;
 #endif
 }
-Monitor::~Monitor(void) {
-}
+Monitor::~Monitor(void) = default;
 
 std::string
 Monitor::MakeMonitorPath(MonitorTypes type, uint32_t sensor_id) {
@@ -339,7 +337,7 @@ Monitor::setTempSensorLabelMap(void) {
   std::string type_str;
   int ret;
 
-  if (temp_type_index_map_.size() > 0) {
+  if (!temp_type_index_map_.empty()) {
     return 0;  // We've already filled in the map
   }
   auto add_temp_sensor_entry = [&](uint32_t file_index) {
@@ -377,7 +375,7 @@ Monitor::setVoltSensorLabelMap(void) {
   std::string type_str;
   int ret;
 
-  if (volt_type_index_map_.size() > 0) {
+  if (!volt_type_index_map_.empty()) {
     return 0;  // We've already filled in the map
   }
   auto add_volt_sensor_entry = [&](uint32_t file_index) {
@@ -510,10 +508,10 @@ typedef enum {
 static monitor_types getFuncType(std::string f_name) {
   monitor_types ret = eDefaultMonitor;
 
-  if (f_name.compare("rsmi_dev_temp_metric_get") == 0) {
+  if (f_name == "rsmi_dev_temp_metric_get") {
     ret = eTempMonitor;
   }
-  if (f_name.compare("rsmi_dev_volt_metric_get") == 0) {
+  if (f_name == "rsmi_dev_volt_metric_get") {
     ret = eVoltMonitor;
   }
   return ret;
@@ -614,22 +612,22 @@ void Monitor::fillSupportedFuncs(SupportedFuncMap *supported_funcs) {
       } else {
         supported_monitors = intersect;
       }
-      if (supported_monitors.size() > 0) {
-        for (uint32_t i = 0; i < supported_monitors.size(); ++i) {
+      if (!supported_monitors.empty()) {
+        for (unsigned long & supported_monitor : supported_monitors) {
           if (m_type == eDefaultMonitor) {
-            assert(supported_monitors[i] > 0);
-            supported_monitors[i] |=
-                    (supported_monitors[i] - 1) << MONITOR_TYPE_BIT_POSITION;
+            assert(supported_monitor > 0);
+            supported_monitor |=
+                    (supported_monitor - 1) << MONITOR_TYPE_BIT_POSITION;
           } else if (m_type == eTempMonitor) {
             // Temp sensor file names are 1-based
-            assert(supported_monitors[i] > 0);
-            supported_monitors[i] |=
-                 static_cast<uint64_t>(getTempSensorEnum(supported_monitors[i]))
+            assert(supported_monitor > 0);
+            supported_monitor |=
+                 static_cast<uint64_t>(getTempSensorEnum(supported_monitor))
                                                 << MONITOR_TYPE_BIT_POSITION;
           } else if (m_type == eVoltMonitor) {
             // Voltage sensor file names are 0-based
-            supported_monitors[i] |=
-                 static_cast<uint64_t>(getVoltSensorEnum(supported_monitors[i]))
+            supported_monitor |=
+                 static_cast<uint64_t>(getVoltSensorEnum(supported_monitor))
                                                 << MONITOR_TYPE_BIT_POSITION;
           } else {
             assert(false);  // Unexpected monitor type
@@ -640,10 +638,10 @@ void Monitor::fillSupportedFuncs(SupportedFuncMap *supported_funcs) {
       }
     }
 
-    if (it->second.variants.size() == 0) {
+    if (it->second.variants.empty()) {
       (*supported_funcs)[it->first] = nullptr;
       supported_variants = nullptr;  // Invoke destructor
-    } else if ((*supported_variants).size() > 0) {
+    } else if (!(*supported_variants).empty()) {
       (*supported_funcs)[it->first] = supported_variants;
     }
 

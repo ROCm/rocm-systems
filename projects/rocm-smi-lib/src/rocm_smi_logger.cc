@@ -55,7 +55,7 @@
  * be printed, unless RSMI_LOGGING is enabled.
  *
  * BUFFER log type should be use while logging raw buffer or raw messages
- * Having direct interface as well as C++ Singleton inface. Can use
+ * Having direct interface as well as C++ Singleton iface. Can use
  * whatever interface fits your needs.
  */
 
@@ -70,7 +70,6 @@
 // Code Specific Header Files(s)
 #include "rocm_smi/rocm_smi_logger.h"
 #include "rocm_smi/rocm_smi_main.h"
-#include "rocm_smi/rocm_smi_utils.h"
 
 using namespace ROCmLogging;
 
@@ -117,7 +116,7 @@ void Logger::logIntoFile(std::string& data) {
   if(!m_File.is_open()) {
     initialize_resources();
     if (!m_File.is_open()) {
-      std::cout << "WARNING: re-initializing resources was unsuccessfull."
+      std::cout << "WARNING: re-initializing resources was unsuccessful."
                 <<" Unable to print the following message." << std::endl;
       logOnConsole(data);
       unlock();
@@ -164,7 +163,7 @@ void Logger::error(const char* text) throw() {
   // By default, logging is disabled
   // The check below allows us to toggle logging through RSMI_LOGGING
   // set or unset
-  if (m_loggingIsOn == false) {
+  if (!m_loggingIsOn) {
     return;
   }
 
@@ -198,7 +197,7 @@ void Logger::alarm(const char* text) throw() {
   // By default, logging is disabled (ie. no RSMI_LOGGING)
   // The check below allows us to toggle logging through RSMI_LOGGING
   // set or unset
-  if (m_loggingIsOn == false) {
+  if (!m_loggingIsOn) {
     return;
   }
 
@@ -232,7 +231,7 @@ void Logger::always(const char* text) throw() {
   // By default, logging is disabled (ie. no RSMI_LOGGING)
   // The check below allows us to toggle logging through RSMI_LOGGING
   // set or unset
-  if (m_loggingIsOn == false) {
+  if (!m_loggingIsOn) {
     return;
   }
 
@@ -270,7 +269,7 @@ void Logger::buffer(const char* text) throw() {
     if(!m_File.is_open()) {
       initialize_resources();
       if (!m_File.is_open()) {
-        std::cout << "WARNING: re-initializing resources was unsuccessfull."
+        std::cout << "WARNING: re-initializing resources was unsuccessful."
                   <<" Unable to print the following message." << std::endl;
         std::string txtStr(text);
         std::cout << txtStr << std::endl;
@@ -300,7 +299,7 @@ void Logger::info(const char* text) throw() {
   // By default, logging is disabled (ie. no RSMI_LOGGING)
   // The check below allows us to toggle logging through RSMI_LOGGING
   // set or unset
-  if (m_loggingIsOn == false) {
+  if (!m_loggingIsOn) {
     return;
   }
 
@@ -334,7 +333,7 @@ void Logger::trace(const char* text) throw() {
   // By default, logging is disabled (ie. no RSMI_LOGGING)
   // The check below allows us to toggle logging through RSMI_LOGGING
   // set or unset
-  if (m_loggingIsOn == false) {
+  if (!m_loggingIsOn) {
     return;
   }
 
@@ -368,7 +367,7 @@ void Logger::debug(const char* text) throw() {
   // By default, logging is disabled (ie. no RSMI_LOGGING)
   // The check below allows us to toggle logging through RSMI_LOGGING
   // set or unset
-  if (m_loggingIsOn == false) {
+  if (!m_loggingIsOn) {
     return;
   }
 
@@ -426,7 +425,7 @@ void Logger::enableFileLogging() {
 
 // Returns a string of details on current log settings
 std::string Logger::getLogSettings() {
-  std::string logSettings = "";
+  std::string logSettings;
 
   if (m_File.is_open()) {
     logSettings += "OpenStatus = File (" + logFileName + ") is open";
@@ -490,7 +489,7 @@ void Logger::initialize_resources() {
   // The check below allows us to toggle logging through RSMI_LOGGING
   // set or unset
   m_loggingIsOn = amd::smi::RocmSMI::getInstance().isLoggingOn();
-  if (m_loggingIsOn == false) {
+  if (!m_loggingIsOn) {
     return;
   }
   m_File.open(logFileName.c_str(), std::ios::out | std::ios::app);
