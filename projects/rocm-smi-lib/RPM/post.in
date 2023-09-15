@@ -1,21 +1,18 @@
 #!/bin/bash
-#set -x
-
-packageName="rocm-smi-lib"
-logPath=/var/log/rocm_smi_lib
-logName=ROCm-SMI-lib.log
-logFile="${logPath}/${logName}"
-logrotateConfFile=/etc/logrotate.d/rocm_smi.conf
-
-do_addLogFolder() {
-  sudo mkdir -p "${logPath}"
-  sudo touch "${logFile}"
-  sudo chmod -R a+rw "${logPath}"
-  sudo chmod a+rw "${logFile}"
-}
 
 do_configureLogrotate() {
-  logrotate --version &>/dev/null
+  local IS_SYSTEMD=0
+  local packageName="rocm-smi-lib"
+  local logPath=/var/log/rocm_smi_lib
+  local logFile="${logPath}/ROCm-SMI-lib.log"
+  local logrotateConfFile=/etc/logrotate.d/rocm_smi.conf
+
+  mkdir -p "${logPath}"
+  touch "${logFile}"
+  chmod -R a+rw "${logPath}"
+  chmod a+rw "${logFile}"
+
+  command -v logrotate &>/dev/null
   if [ $? -ne 0 ]; then
     echo "[WARNING] Detected logrotate is not installed."\
     "$packageName logs (when turned on) will not rotate properly."
@@ -23,14 +20,14 @@ do_configureLogrotate() {
   fi
 
   if [ ! -f $logrotateConfFile ]; then
-    sudo touch "${logrotateConfFile}"
-    sudo chmod 644 "${logrotateConfFile}" # root r/w, all others read
+    touch "${logrotateConfFile}"
+    chmod 644 "${logrotateConfFile}" # root r/w, all others read
     # ROCm SMI logging rotation, rotates files using root user/group
     # Hourly logrotation check
     # Only rotates if size grew larger than 1MB
     # Max of 4 rotation files, oldest will be removed
     # Rotated files use date extention of ex. ROCm-SMI-lib.log.2023-05-09_16:51:42
-    cat << EOF | sudo tee "${logrotateConfFile}" >/dev/null
+    cat << EOF > "${logrotateConfFile}"
 ${logFile} {
     su root root
     hourly
@@ -47,43 +44,29 @@ EOF
   # issue was RPM build thought we were using macros
   # https://gitlab.kitware.com/cmake/cmake/-/issues/22965
   # https://rpm-software-management.github.io/rpm/manual/spec.html
-  sudo sed -i s/%%/%/g "${logrotateConfFile}"
+  sed -i s/%%/%/g "${logrotateConfFile}"
   # workaround: remove extra 'OURCE' text
   # from rocm_smi.conf. Unsure if CMAKE,
   # bash, or here document
   # issue (only seen on RHEL 8.7)
-  sudo sed -i s/OURCE//g "${logrotateConfFile}"
+  sed -i s/OURCE//g "${logrotateConfFile}"
   fi
   # check if logrotate uses system timers, Ubuntu/modern OS's do
   # Several older OS's like RHEL 8.7, do not. Instead defaults
   # to use daily cron jobs - see https://stackoverflow.com/a/69465677
-  sudo systemctl list-timers|grep -iq logrotate
-  if [ $? -ne 0 ]; then
-    # confirm logrotate file exists in daily
-    if [ -f /etc/cron.daily/logrotate ]; then
-      # move logrotate daily to hourly
-      if [ -d /etc/cron.hourly ]; then
-        sudo mv /etc/cron.daily/logrotate /etc/cron.hourly/logrotate
-      else
-        echo "[WARNING] Could find and configure hourly cron for $packageName's"\
-        " logrotate. $packageName logs (when turned on) will not rotate properly."
-      fi
-    else
-      # confirm that it's already been moved to hourly
-      sudo find /etc/cron.* -iname logrotate -print -quit |grep -iq hourly
-      if [ $? -ne 0 ]; then
-        echo "[WARNING] Could not configure an hourly cron for $packageName's logrotate."\
-        "$packageName logs (when turned on) may not rotate properly."
-      fi
+  if [ -d /run/systemd/system ]; then
+    systemctl list-timers | grep -iq logrotate
+    if [ $? -ne 0 ]; then
+      IS_SYSTEMD=1
     fi
-    return #done configuring for non-systemd timers
-  else
+  fi
+  if [ "$IS_SYSTEMD" -eq 1 ]; then
     # Configure systemd timers - the typical setup for modern Linux logrotation setups
     if [ -f /lib/systemd/system/logrotate.timer ]; then
       if [ ! -f /lib/systemd/system/logrotate.timer.backup ]; then
-        sudo cp /lib/systemd/system/logrotate.timer /lib/systemd/system/logrotate.timer.backup
+        cp /lib/systemd/system/logrotate.timer /lib/systemd/system/logrotate.timer.backup
       fi
-      cat <<'EOF' | sudo tee /lib/systemd/system/logrotate.timer >/dev/null
+      cat << EOF > /lib/systemd/system/logrotate.timer
 [Unit]
 Description=Hourly rotation of log files
 Documentation=man:logrotate(8) man:logrotate.conf(5)
@@ -97,12 +80,19 @@ Persistent=true
 [Install]
 WantedBy=timers.target
 EOF
-      sudo systemctl reenable --now logrotate.timer
+      systemctl reenable --now logrotate.timer
     else
       echo "[WARNING] Could not configure systemd timer for $packageName's logrotate."\
       "$packageName logs (when turned on) will not rotate properly."
     fi
-    return #done configuring for systemd timers
+  else
+    # $IS_SYSTEMD -eq 0
+    if [ -f /etc/cron.daily/logrotate ]; then
+      # move logrotate daily to hourly
+      if [ -d /etc/cron.hourly ]; then
+        mv /etc/cron.daily/logrotate /etc/cron.hourly/logrotate
+      fi
+    fi
   fi
 }
 
@@ -114,14 +104,8 @@ do_ldconfig() {
   fi
 }
 
-# left-hand term originates from ENABLE_LDCONFIG = ON/OFF at package build
-if [ "@ENABLE_LDCONFIG@" == "ON" ]; then
-  echo -e "@CPACK_PACKAGING_INSTALL_PREFIX@/@CMAKE_INSTALL_LIBDIR@" > /etc/ld.so.conf.d/x86_64-librocm_smi_lib.conf
-  ldconfig
-fi
-
 # post install or upgrade, $i is 1 or 2 -> do these actions
-if [ $1 -ge 1 ]; then
-  do_addLogFolder
+if [ "$1" -ge 1 ]; then
+  do_ldconfig
   do_configureLogrotate
 fi
