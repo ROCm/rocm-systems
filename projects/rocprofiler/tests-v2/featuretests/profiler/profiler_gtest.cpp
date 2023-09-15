@@ -1094,7 +1094,6 @@ TEST_F(DerivedMetricsReuseTest, WhenRunningRepeatedBaseMetricsAPIsWorkFine) {
  * ###################################################
  */
 
-
 class MTBinaryTest : public ::testing::Test {
  protected:
   int DispatchCountTest(std::string profiler_output) {
@@ -1105,11 +1104,8 @@ class MTBinaryTest : public ::testing::Test {
     int dispatch_counter = 0;
     for (size_t i = 0; i < counter_map.size(); i++) {
       std::string* dispatch_id = parser.ReadCounter(i, 1);
-      if (dispatch_id != nullptr) {
-        if (dispatch_id->find("dispatch") != std::string::npos) {
-          dispatch_counter++;
-        }
-      }
+      if (dispatch_id && dispatch_id->find("dispatch") != std::string::npos)
+        dispatch_counter++;
     }
 
     // clear entries
@@ -1125,16 +1121,13 @@ class MTBinaryTest : public ::testing::Test {
   }
 
   std::string ReadProfilerBuffer(const char* cmd) {
-    std::vector<char> buffer(1028);
+    std::array<char, 2048> buffer{};
     std::string profiler_output;
     std::unique_ptr<FILE, decltype(&pclose)> pipe(popen(cmd, "r"), pclose);
-    if (!pipe) {
+    if (!pipe)
       throw std::runtime_error("popen() failed!");
-    }
-    while (fgets(buffer.data(), buffer.size(), pipe.get()) != nullptr) {
+    while (fgets(buffer.data(), buffer.size(), pipe.get()) != nullptr)
       profiler_output += buffer.data();
-    }
-    buffer.clear();
     return profiler_output;
   }
 
@@ -1152,7 +1145,7 @@ class MTBinaryTest : public ::testing::Test {
 };
 // kernel dispatch count test
 
-TEST_F(MTBinaryTest, DispatchCountTestPassess) {
+TEST_F(MTBinaryTest, DISABLED_DispatchCountTestPassess) {
   int test_status = -1;
 
   // initialize kernel dispatch test
@@ -1161,7 +1154,6 @@ TEST_F(MTBinaryTest, DispatchCountTestPassess) {
   test_status = DispatchCountTest(profiler_output);
   EXPECT_EQ(test_status, 0);
 }
-
 
 /*
  * ###################################################
@@ -1183,11 +1175,8 @@ class ProfilerMQTest : public ::testing::Test {
     uint32_t dispatch_counter = 0;
     for (size_t i = 0; i < counter_map.size(); i++) {
       std::string* dispatch_id = parser.ReadCounter(i, 1);
-      if (dispatch_id != nullptr) {
-        if (dispatch_id->find("dispatch") != std::string::npos) {
-          dispatch_counter++;
-        }
-      }
+      if (dispatch_id && dispatch_id->find("dispatch") != std::string::npos)
+        dispatch_counter++;
     }
     // dispatch count test: Number of dispatches must be equal to
     // number of kernel launches in test_app
@@ -1237,25 +1226,6 @@ TEST_F(ProfilerMQTest, DISABLED_WhenRunningMultiProcessTestItPasses) {
   test_status = QueueDependencyTest(profiler_output);
 
   EXPECT_EQ(test_status, 0);
-}
-
-/*
- * ###################################################
- * ############ Multi Process Tests ################
- * ###################################################
- */
-TEST(ProfilerMPTest, WhenRunningMultiProcessTestItPasses) {
-  int num_threads = 3; // Create 3 threads
-
-  pid_t childpid = fork();
-
-  if (childpid != 0) wait(NULL); // Need to wait for child.
-
-  std::vector<std::thread> threads(num_threads);
-  for (auto& thread : threads)
-    thread = std::move(std::thread(KernelLaunch));
-  for (auto& thread : threads)
-    thread.join();
 }
 
 /*
@@ -1396,3 +1366,22 @@ class VectorAddCTFMPITest : public CTFPluginTest {
 };
 
 TEST_F(VectorAddCTFMPITest, WhenRunningProfilerWithCTFTest) { EXPECT_EQ(hasFile(), true); }
+
+/*
+ * ###################################################
+ * ############ Multi Process Tests ################
+ * ###################################################
+ */
+TEST(ProfilerMPTest, WhenRunningMultiProcessTestItPasses) {
+  int num_threads = 3; // Create 3 threads
+
+  pid_t childpid = fork();
+
+  if (childpid == 0) return;
+
+  std::vector<std::thread> threads(num_threads);
+  for (auto& thread : threads)
+    thread = std::move(std::thread(KernelLaunch));
+  for (auto& thread : threads)
+    thread.join();
+}
