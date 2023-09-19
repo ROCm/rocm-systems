@@ -228,7 +228,6 @@ class file_plugin_t {
         if (type == output_type_t::COUNTER) {
           if (kernel_dispatches_header_written_.load(std::memory_order_relaxed)) return;
           output_file = get_output_file(output_type_t::COUNTER);
-
           *output_file
               << "Dispatch_ID,GPU_ID,Queue_ID,Queue_Index,PID,TID,GRD,WGR,LDS,SCR,Arch_VGPR,"
                  "ACCUM_VGPR,SGPR,Wave_Size,SIG,OBJ,Kernel_Name,Start_Timestamp,End_Timestamp,"
@@ -323,6 +322,7 @@ class file_plugin_t {
 
   void FlushProfilerRecord(const rocprofiler_record_profiler_t* profiler_record,
                            rocprofiler_session_id_t session_id, rocprofiler_buffer_id_t buffer_id) {
+   
     std::lock_guard<std::mutex> lock(writing_lock);
     WriteHeader(output_type_t::COUNTER, ACTIVITY_DOMAIN_NUMBER);
     size_t name_length = 0;
@@ -358,6 +358,9 @@ class file_plugin_t {
         ));
         *output_file << ',' << name_c;
       }
+      *output_file << '\n';
+    }
+    else{ //kernel trace condition
       *output_file << '\n';
     }
 
