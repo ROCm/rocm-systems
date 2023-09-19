@@ -177,8 +177,8 @@ void TestGpuMetricsRead::Run(void) {
           << std::to_string(smu.pcie_link_speed) << '\n';
           std::cout << "gfx_activity_acc="
           << std::dec << smu.gfx_activity_acc << '\n';
-          std::cout << "mem_actvity_acc="
-          << std::dec << smu.mem_actvity_acc  << '\n';
+          std::cout << "mem_activity_acc="
+          << std::dec << smu.mem_activity_acc  << '\n';
 
           for (int i = 0; i < RSMI_NUM_HBM_INSTANCES; ++i) {
             std::cout << "temperature_hbm[" << i << "]=" << std::dec <<

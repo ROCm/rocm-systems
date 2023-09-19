@@ -2160,6 +2160,7 @@ def showMemUse(deviceList):
     @param deviceList: List of DRM devices (can be a single-item list)
     """
     memoryUse = c_uint64()
+    avgMemBandwidth = c_uint16()
     printLogSpacer(' Current Memory Use ')
     for device in deviceList:
         ret = rocmsmi.rsmi_dev_memory_busy_percent_get(device, byref(memoryUse))
@@ -2171,6 +2172,12 @@ def showMemUse(deviceList):
                 printLog(device, utilization_counter_name[ut_counter.type], ut_counter.val)
         else:
             printLog(device, 'Memory Activity', 'N/A')
+
+        ret = rocmsmi.rsmi_dev_activity_avg_mm_get(device, byref(avgMemBandwidth))
+        if rsmi_ret_ok(ret, device, silent=True):
+            printLog(device, 'Avg. Memory Bandwidth', avgMemBandwidth.value)
+        else:
+            printLog(device, 'Not supported on the given system', None)
     printLogSpacer()
 
 
