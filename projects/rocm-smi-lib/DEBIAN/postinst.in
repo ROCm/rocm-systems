@@ -56,7 +56,7 @@ EOF
   # to use daily cron jobs - see https://stackoverflow.com/a/69465677
   if [ -d /run/systemd/system ]; then
     systemctl list-timers | grep -iq logrotate
-    if [ $? -ne 0 ]; then
+    if [ $? -eq 0 ]; then
       IS_SYSTEMD=1
     fi
   fi
@@ -107,7 +107,7 @@ do_ldconfig() {
 case "$1" in
   ( configure )
     do_ldconfig
-    do_configureLogrotate
+    do_configureLogrotate || return 0
   ;;
   ( abort-upgrade | abort-remove | abort-deconfigure )
     echo "$1"
