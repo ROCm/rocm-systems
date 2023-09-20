@@ -466,7 +466,7 @@ def build_layout(
             print("disp-filter is ", disp_filt)
             print("kernel-filter is ", kernel_filter)
             print("gpu-filter is ", gcd_filter)
-            print("top-n kernel filter is ", top_n_filter, "\n")
+            print("top-n kernel filter is ", top_n_filt, "\n")
         base_data[base_run].filter_kernel_ids = kernel_filter
         base_data[base_run].filter_gpu_ids = gcd_filter
         base_data[base_run].filter_dispatch_ids = disp_filt
