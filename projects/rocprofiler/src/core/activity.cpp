@@ -40,7 +40,7 @@ THE SOFTWARE.
 #define PUBLIC_API __attribute__((visibility("default")))
 
 // Error handler
-void fatal(const std::string msg) {
+void fatal(const std::string msg) [[noreturn]] {
   fflush(stdout);
   fprintf(stderr, "%s\n\n", msg.c_str());
   fflush(stderr);

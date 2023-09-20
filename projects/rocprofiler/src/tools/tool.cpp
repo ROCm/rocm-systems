@@ -686,11 +686,11 @@ ROCPROFILER_EXPORT bool OnLoad(void* table, uint64_t runtime_version, uint64_t f
   std::vector<rocprofiler_tracer_activity_domain_t> apis_requested;
 
   if (getenv("ROCPROFILER_HIP_API_TRACE")) apis_requested.emplace_back(ACTIVITY_DOMAIN_HIP_API);
-  if (getenv("ROCPROFILER_HIP_ACTIVITY_TRACE"))
-    apis_requested.emplace_back(ACTIVITY_DOMAIN_HIP_OPS);
   if (getenv("ROCPROFILER_HSA_API_TRACE")) apis_requested.emplace_back(ACTIVITY_DOMAIN_HSA_API);
   if (getenv("ROCPROFILER_HSA_ACTIVITY_TRACE"))
     apis_requested.emplace_back(ACTIVITY_DOMAIN_HSA_OPS);
+  else if (getenv("ROCPROFILER_HIP_ACTIVITY_TRACE"))
+    apis_requested.emplace_back(ACTIVITY_DOMAIN_HIP_OPS);
   if (getenv("ROCPROFILER_ROCTX_TRACE")) apis_requested.emplace_back(ACTIVITY_DOMAIN_ROCTX);
 
   // ATT Parameters

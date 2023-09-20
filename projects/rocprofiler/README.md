@@ -676,6 +676,8 @@ Please report in the Github Issues.
   ```
 
   Recommended: "profile_standard" for counter collection and "auto" for all other profiling. Use rocm-smi to verify the current power state. For multiGPU systems (includes integrated graphics), replace "card0" by the desired card.
+- Timestamps may be incorrect with HIP_OPS when the system has been in sleep state.
+- HIP_OPS are mutually exclusive with HSA_OPS.
 
 ## Supported AMD GPU Architectures (V2)
 
