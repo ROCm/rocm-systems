@@ -27,7 +27,10 @@
 
 ROCPROFILER_EXTERN_C_INIT
 
-/** @defgroup BUFFER_HANDLING Buffer
+/**
+ * @defgroup BUFFER_HANDLING Buffer Handling
+ * @brief Creation, destruction, and flushing of buffers populated with data from rocprofiler
+ *
  * @{
  *
  * Every Buffer is associated with a specific service kind.

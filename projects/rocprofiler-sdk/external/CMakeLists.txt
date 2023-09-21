@@ -96,9 +96,10 @@ if(NOT TARGET PTL::ptl-static)
         REPO_URL https://github.com/jrmadsen/PTL.git
         REPO_BRANCH rocprofiler)
 
-    set(PTL_BUILD_EXAMPLES OFF)
     set(PTL_USE_TBB OFF)
     set(PTL_USE_GPU OFF)
+    set(PTL_USE_LOCKS ON)
+    set(PTL_BUILD_EXAMPLES OFF)
     set(PTL_DEVELOPER_INSTALL OFF)
 
     if(NOT DEFINED BUILD_OBJECT_LIBS)

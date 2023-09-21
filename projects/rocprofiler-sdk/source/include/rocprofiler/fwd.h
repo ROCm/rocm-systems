@@ -37,8 +37,8 @@ ROCPROFILER_EXTERN_C_INIT
 
 /**
  * @defgroup BASIC_DATA_TYPES Basic data types
+ * @brief Basic data types and typedefs
  *
- * Basic data types and typedefs
  * @{
  */
 
@@ -290,8 +290,8 @@ typedef struct
 } rocprofiler_external_correlation_id_t;
 
 /**
+ * @struct rocprofiler_buffer_id_t
  * @brief Buffer ID.
- * @addtogroup BUFFER_HANDLING
  */
 typedef struct
 {

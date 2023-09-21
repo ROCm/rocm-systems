@@ -27,9 +27,9 @@
 
 ROCPROFILER_EXTERN_C_INIT
 
-/** @defgroup BUFFER_TRACING_SERVICE Asynchronous Tracing Service
- *
- *  Receive callbacks for batches of records from an internal (background) thread
+/**
+ * @defgroup BUFFER_TRACING_SERVICE Asynchronous Tracing Service
+ * @brief Receive callbacks for batches of records from an internal (background) thread
  *
  * @{
  */

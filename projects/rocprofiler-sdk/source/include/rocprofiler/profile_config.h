@@ -28,7 +28,9 @@
 
 ROCPROFILER_EXTERN_C_INIT
 
-/** @defgroup PROFILE_CONFIG Profile Configurations
+/**
+ * @defgroup PROFILE_CONFIG Profile Configurations
+ * @brief Group one or more hardware counters into a unique handle
  *
  * @{
  */

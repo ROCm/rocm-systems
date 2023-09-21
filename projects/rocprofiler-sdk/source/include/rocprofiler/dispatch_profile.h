@@ -30,8 +30,10 @@
 
 ROCPROFILER_EXTERN_C_INIT
 
-/** @defgroup DISPATCH_PROFILE_COUNTING_SERVICE Dispatch Profile Counting
- * Service
+/**
+ * @defgroup DISPATCH_PROFILE_COUNTING_SERVICE Dispatch Profile Counting Service
+ * @brief Per-dispatch hardware counter collection service
+ *
  * @{
  */
 

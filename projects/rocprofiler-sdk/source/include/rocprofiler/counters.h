@@ -28,7 +28,9 @@
 
 ROCPROFILER_EXTERN_C_INIT
 
-/** @defgroup COUNTERS Hardware counters
+/**
+ * @defgroup COUNTERS Hardware counters Information
+ * @brief Query functions related to hardware counters
  * @{
  */
 

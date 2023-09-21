@@ -28,7 +28,10 @@
 ROCPROFILER_EXTERN_C_INIT
 
 /**
- * @defgroup CONTEXT_OPERATIONS Context
+ * @defgroup CONTEXT_OPERATIONS Context Handling
+ * @brief Associate services with a handle. This handle is used to activate/deactivate the services
+ * during the application runtime.
+ *
  * @{
  */
 

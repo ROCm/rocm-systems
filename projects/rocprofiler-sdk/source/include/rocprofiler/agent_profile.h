@@ -27,7 +27,10 @@
 
 ROCPROFILER_EXTERN_C_INIT
 
-/** @defgroup AGENT_PROFILE_COUNTING_SERVICE Agent Profile Counting Service
+/**
+ * @defgroup AGENT_PROFILE_COUNTING_SERVICE Agent Profile Counting Service
+ * @brief needs brief description
+ *
  * @{
  */
 

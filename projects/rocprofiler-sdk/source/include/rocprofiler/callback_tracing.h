@@ -28,9 +28,9 @@
 
 ROCPROFILER_EXTERN_C_INIT
 
-/** @defgroup CALLBACK_TRACING_SERVICE Synchronous Tracing Services
- *
- *  Receive immediate callbacks on the calling thread
+/**
+ * @defgroup CALLBACK_TRACING_SERVICE Synchronous Tracing Services
+ * @brief Receive immediate callbacks on the calling thread
  *
  * @{
  */

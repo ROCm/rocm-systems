@@ -27,7 +27,10 @@
 
 ROCPROFILER_EXTERN_C_INIT
 
-/** @defgroup SPM_SERVICE SPM Service
+/**
+ * @defgroup SPM_SERVICE SPM Service
+ * @brief Streaming Performance Monitoring
+ *
  * @{
  */
 

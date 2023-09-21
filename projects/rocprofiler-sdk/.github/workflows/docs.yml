@@ -22,7 +22,7 @@ on:
       - '.github/workflows/docs.yml'
 
 concurrency:
-  group: "pages"
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:

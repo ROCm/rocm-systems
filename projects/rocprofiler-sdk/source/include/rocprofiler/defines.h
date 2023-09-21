@@ -22,9 +22,10 @@
 
 #pragma once
 
-/** @defgroup SYMBOL_VERSIONING_GROUP Symbol Versions
+/**
+ * @defgroup SYMBOL_VERSIONING_GROUP Symbol Versions
  *
- * The names used for the shared library versioned symbols.
+ * @brief The names used for the shared library versioned symbols.
  *
  * Every function is annotated with one of the version macros defined in this
  * section.  Each macro specifies a corresponding symbol version string.  After

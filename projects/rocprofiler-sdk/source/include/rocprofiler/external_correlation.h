@@ -29,8 +29,7 @@ ROCPROFILER_EXTERN_C_INIT
 
 /**
  * @defgroup EXTERNAL_CORRELATION External Correlation IDs
- *
- *  User-defined correlation identifiers to supplement rocprofiler generated correlation ids
+ * @brief User-defined correlation identifiers to supplement rocprofiler generated correlation ids
  *
  * @{
  */

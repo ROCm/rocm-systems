@@ -28,7 +28,9 @@
 
 ROCPROFILER_EXTERN_C_INIT
 
-/** @defgroup PC_SAMPLING_SERVICE PC Sampling Service
+/**
+ * @defgroup PC_SAMPLING_SERVICE PC Sampling
+ * @brief Enabling PC (Program Counter) Sampling for GPU Activity
  * @{
  */
 

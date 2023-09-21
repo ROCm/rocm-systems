@@ -27,7 +27,10 @@
 
 ROCPROFILER_EXTERN_C_INIT
 
-/** @defgroup AGENTS Agent Information
+/**
+ * @defgroup AGENTS Agent Information
+ * @brief needs brief description
+ *
  * @{
  */
 

@@ -27,9 +27,9 @@
 
 ROCPROFILER_EXTERN_C_INIT
 
-/** @defgroup INTERNAL_THREADING Internal thread handling
- *
- * Callbacks before and after threads created internally by libraries
+/**
+ * @defgroup INTERNAL_THREADING Internal Thread Handling
+ * @brief Callbacks before and after threads created internally by libraries
  *
  * @{
  */

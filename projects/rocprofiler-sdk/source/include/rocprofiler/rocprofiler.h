@@ -26,17 +26,43 @@
 #include <stdint.h>
 
 #include "rocprofiler/defines.h"
+#include "rocprofiler/fwd.h"
 
-/** @defgroup VERSIONING_GROUP Library Versioning
- *
- * Version information about the interface and the associated installed
- * library.
+/**
+ * @defgroup VERSIONING_GROUP Library Versioning
+ * @brief Version information about the interface and the associated installed library.
  *
  * The semantic version of the interface following semver.org rules. A context
  * that uses this interface is only compatible with the installed library if
  * the major version numbers match and the interface minor version number is
  * less than or equal to the installed library minor version number.
+ *
+ * @{
  */
+
+#include "rocprofiler/version.h"
+
+ROCPROFILER_EXTERN_C_INIT
+
+/**
+ * @fn rocprofiler_status_t rocprofiler_get_version(uint32_t* major, uint32_t* minor, uint32_t*
+ * patch)
+ * @brief Query the version of the installed library.
+ *
+ * Return the version of the installed library.  This can be used to check if
+ * it is compatible with this interface version.  This function can be used
+ * even when the library is not initialized.
+ *
+ * @param [out] major The major version number is stored if non-NULL.
+ * @param [out] minor The minor version number is stored if non-NULL.
+ * @param [out] patch The patch version number is stored if non-NULL.
+ */
+rocprofiler_status_t
+rocprofiler_get_version(uint32_t* major, uint32_t* minor, uint32_t* patch) ROCPROFILER_API;
+
+ROCPROFILER_EXTERN_C_FINI
+
+/** @} */
 
 #include "rocprofiler/agent.h"
 #include "rocprofiler/agent_profile.h"
@@ -47,42 +73,29 @@
 #include "rocprofiler/counters.h"
 #include "rocprofiler/dispatch_profile.h"
 #include "rocprofiler/external_correlation.h"
-#include "rocprofiler/fwd.h"
 #include "rocprofiler/hip.h"
 #include "rocprofiler/hsa.h"
 #include "rocprofiler/marker.h"
 #include "rocprofiler/pc_sampling.h"
 #include "rocprofiler/profile_config.h"
 #include "rocprofiler/spm.h"
-#include "rocprofiler/version.h"
 
 ROCPROFILER_EXTERN_C_INIT
 
 /**
- * @brief Query the version of the installed library.
+ * @defgroup MISCELLANEOUS_GROUP Miscellaneous Utility Functions
  *
- * Return the version of the installed library.  This can be used to check if
- * it is compatible with this interface version.  This function can be used
- * even when the library is not initialized.
- *
- * @param [out] major The major version number is stored if non-NULL.
- * @param [out] minor The minor version number is stored if non-NULL.
- * @param [out] patch The patch version number is stored if non-NULL.
- * @addtogroup VERSIONING_GROUP
- */
-rocprofiler_status_t
-rocprofiler_get_version(uint32_t* major, uint32_t* minor, uint32_t* patch) ROCPROFILER_API;
-
-/**
- * @defgroup MISCELLANEOUS_GROUP Miscellaneous utility functions
+ * @{
  */
 
 /**
+ * @fn rocprofiler_status_t rocprofiler_get_timestamp(rocprofiler_timestamp_t* ts)
  * @brief Get the timestamp value that rocprofiler uses
  * @param [out] ts Output address of the rocprofiler timestamp value
- * @addtogroup MISCELLANEOUS_GROUP
  */
 rocprofiler_status_t
 rocprofiler_get_timestamp(rocprofiler_timestamp_t* ts) ROCPROFILER_API ROCPROFILER_NONNULL(1);
+
+/** @} */
 
 ROCPROFILER_EXTERN_C_FINI
