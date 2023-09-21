@@ -43,7 +43,7 @@ jobs:
       - name: Install Conda
         uses: s-weigand/setup-conda@v1
       - name: Setup Pages
-        uses: actions/configure-pages@v2
+        uses: actions/configure-pages@v3
       - name: Create Docs Directory
         run:
           mkdir -p docs

@@ -6,7 +6,7 @@
 thread:libhsa-runtime64.so
 
 # data race in operator delete(void*)
-race_top:libamdhip64.so
+race:libamdhip64.so
 
 # unlock of an unlocked mutex (or by a wrong thread)
 mutex:librocm_smi64.so
