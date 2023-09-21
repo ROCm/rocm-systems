@@ -58,9 +58,9 @@
   if (RET != RSMI_STATUS_SUCCESS) { \
     const char *err_str; \
     std::cout << "[ERROR] RSMI call returned " << (RET) \
-      << " at line " << __LINE__ << std::endl; \
+      << " at line " << __LINE__ << "\n"; \
       rsmi_status_string((RET), &err_str); \
-      std::cout << err_str << std::endl; \
+      std::cout << err_str << "\n"; \
   } \
 }
 
@@ -100,10 +100,10 @@
       } \
     } else if ((RET) == RSMI_STATUS_NOT_SUPPORTED) { \
       std::cout << "Not Supported." \
-      << std::endl; \
+      << "\n"; \
     } else if ((RET) == RSMI_STATUS_NOT_YET_IMPLEMENTED) { \
       std::cout << "Not Yet Implemented." \
-      << std::endl; \
+      << "\n"; \
     } else { \
       CHK_RSMI_RET(RET) \
     } \
@@ -112,7 +112,7 @@
 #define CHK_RSMI_NOT_SUPPORTED_RET(RET) { \
     if ((RET) == RSMI_STATUS_NOT_SUPPORTED) { \
       std::cout << "Not Supported." \
-      << std::endl; \
+      << "\n"; \
     } else { \
       CHK_RSMI_RET(RET) \
     } \
@@ -121,10 +121,10 @@
 #define CHK_RSMI_NOT_SUPPORTED_OR_UNEXPECTED_DATA_RET(RET) { \
     if ((RET) == RSMI_STATUS_NOT_SUPPORTED) { \
       std::cout << "Not Supported." \
-      << std::endl; \
+      << "\n"; \
     } else if ((RET) == RSMI_STATUS_UNEXPECTED_DATA) { \
       std::cout << "[ERROR] RSMI_STATUS_UNEXPECTED_DATA retrieved." \
-      << std::endl; \
+      << "\n"; \
     } else { \
       CHK_RSMI_RET(RET) \
     } \
@@ -133,10 +133,10 @@
 #define CHK_RSMI_NOT_SUPPORTED_OR_SETTING_UNAVAILABLE_RET(RET) {\
     if ((RET) == RSMI_STATUS_NOT_SUPPORTED) { \
       std::cout << "Not Supported."\
-      << std::endl; \
+      << "\n"; \
     } else if ((RET) == RSMI_STATUS_SETTING_UNAVAILABLE) { \
       std::cout << "[WARN] RSMI_STATUS_SETTING_UNAVAILABLE retrieved." \
-      << std::endl; \
+      << "\n"; \
     } else { \
       CHK_RSMI_RET(RET) \
     } \
@@ -145,27 +145,27 @@
 #define CHK_NOT_SUPPORTED_OR_UNEXPECTED_DATA_OR_INSUFFICIENT_SIZE_RET(RET) { \
     if ((RET) == RSMI_STATUS_NOT_SUPPORTED) { \
       std::cout << "Not Supported." \
-      << std::endl; \
+      << "\n"; \
     } else if ((RET) == RSMI_STATUS_UNEXPECTED_DATA) { \
       std::cout << "[WARN] RSMI_STATUS_UNEXPECTED_DATA retrieved." \
-      << std::endl; \
+      << "\n"; \
     } else if ((RET) == RSMI_STATUS_INSUFFICIENT_SIZE) { \
       std::cout << "[WARN] RSMI_STATUS_INSUFFICIENT_SIZE retrieved." \
-      << std::endl; \
+      << "\n"; \
     } else { \
       CHK_RSMI_RET(RET) \
     } \
 }
 
 static void print_test_header(const char *str, uint32_t dv_ind) {
-  std::cout << "********************************" << std::endl;
-  std::cout << "*** " << str << std::endl;
-  std::cout << "********************************" << std::endl;
-  std::cout << "Device index: " << dv_ind << std::endl;
+  std::cout << "********************************" << "\n";
+  std::cout << "*** " << str << "\n";
+  std::cout << "********************************" << "\n";
+  std::cout << "Device index: " << dv_ind << "\n";
 }
 
 static void print_mini_header(const char *str) {
-  std::cout << "\n>> " << str << " <<" << std::endl;
+  std::cout << "\n>> " << str << " <<" << "\n";
 }
 
 static const char *
@@ -189,7 +189,7 @@ power_profile_string(rsmi_power_profile_preset_masks_t profile) {
 }
 
 static const std::string
-compute_partition_string(rsmi_compute_partition_type partition) {
+compute_partition_string(rsmi_compute_partition_type_t partition) {
   switch (partition) {
     case RSMI_COMPUTE_PARTITION_CPX:
       return "CPX";
@@ -216,7 +216,7 @@ mapStringToRSMIComputePartitionTypes {
 };
 
 static const std::string
-nps_mode_string(rsmi_nps_mode_type_t partition) {
+memory_partition_string(rsmi_memory_partition_type_t partition) {
   switch (partition) {
     case RSMI_MEMORY_PARTITION_NPS1:
       return "NPS1";
@@ -231,8 +231,8 @@ nps_mode_string(rsmi_nps_mode_type_t partition) {
   }
 }
 
-static std::map<std::string, rsmi_nps_mode_type_t>
-mapStringToRSMINpsModeTypes {
+static std::map<std::string, rsmi_memory_partition_type_t>
+mapStringToRSMIMemoryPartitionTypes {
   {"NPS1", RSMI_MEMORY_PARTITION_NPS1},
   {"NPS2", RSMI_MEMORY_PARTITION_NPS2},
   {"NPS4", RSMI_MEMORY_PARTITION_NPS4},
@@ -274,7 +274,7 @@ static bool isFileWritable(rsmi_status_t response) {
   bool fileWritable = true;
   if (isUserRunningAsSudo() && (response == RSMI_STATUS_PERMISSION)) {
       std::cout << "[WARN] User is running with sudo "
-                << "permissions, file is not writable." << std::endl;
+                << "permissions, file is not writable." << "\n";
       fileWritable = false;
   } else {
       CHK_AND_PRINT_RSMI_ERR_RET(response)
@@ -292,23 +292,23 @@ static rsmi_status_t test_power_profile(uint32_t dv_ind) {
   ret = rsmi_dev_power_profile_presets_get(dv_ind, 0, &status);
   CHK_RSMI_NOT_SUPPORTED_RET(ret)
   if (ret != RSMI_STATUS_SUCCESS) {
-    std::cout << "***Skipping Power Profile test." << std::endl;
+    std::cout << "***Skipping Power Profile test." << "\n";
     return RSMI_STATUS_SUCCESS;
   }
   CHK_RSMI_RET(ret)
 
-  std::cout << "The available power profiles are:" << std::endl;
+  std::cout << "The available power profiles are:" << "\n";
   uint64_t tmp = 1;
 
   while (tmp <= RSMI_PWR_PROF_PRST_LAST) {
     if ((tmp & status.available_profiles) == tmp) {
       std::cout << "\t" <<
-      power_profile_string((rsmi_power_profile_preset_masks_t)tmp) << std::endl;
+      power_profile_string((rsmi_power_profile_preset_masks_t)tmp) << "\n";
     }
     tmp = tmp << 1;
   }
   std::cout << "The current power profile is: " <<
-                            power_profile_string(status.current) << std::endl;
+                            power_profile_string(status.current) << "\n";
 
   // Try setting the profile to a different power profile
   rsmi_bit_field_t diff_profiles;
@@ -326,40 +326,40 @@ static rsmi_status_t test_power_profile(uint32_t dv_ind) {
   } else if (diff_profiles & RSMI_PWR_PROF_PRST_3D_FULL_SCR_MASK) {
     new_prof = RSMI_PWR_PROF_PRST_3D_FULL_SCR_MASK;
   } else {
-    std::cout << "No other non-custom power profiles to set to" << std::endl;
+    std::cout << "No other non-custom power profiles to set to" << "\n";
     return ret;
   }
 
   std::cout << "Setting power profile to " << power_profile_string(new_prof)
-                                                        << "..." << std::endl;
+                                                        << "..." << "\n";
   ret = rsmi_dev_power_profile_set(dv_ind, 0, new_prof);
   CHK_RSMI_RET(ret)
-  std::cout << "Done." << std::endl;
+  std::cout << "Done." << "\n";
   rsmi_dev_perf_level_t pfl;
   ret = rsmi_dev_perf_level_get(dv_ind, &pfl);
   CHK_RSMI_RET(ret)
   std::cout << "Performance Level is now " <<
-                                          perf_level_string(pfl) << std::endl;
+                                          perf_level_string(pfl) << "\n";
 
   ret = rsmi_dev_power_profile_presets_get(dv_ind, 0, &status);
   CHK_RSMI_RET(ret)
   std::cout << "The current power profile is: " <<
-                            power_profile_string(status.current) << std::endl;
-  std::cout << "Resetting perf level to auto..." << std::endl;
+                            power_profile_string(status.current) << "\n";
+  std::cout << "Resetting perf level to auto..." << "\n";
 
   ret = rsmi_dev_perf_level_set_v1(dv_ind, RSMI_DEV_PERF_LEVEL_AUTO);
   CHK_RSMI_RET(ret)
-  std::cout << "Done." << std::endl;
+  std::cout << "Done." << "\n";
 
   ret = rsmi_dev_perf_level_get(dv_ind, &pfl);
   CHK_RSMI_RET(ret)
   std::cout << "Performance Level is now " <<
-                                          perf_level_string(pfl) << std::endl;
+                                          perf_level_string(pfl) << "\n";
 
   ret = rsmi_dev_power_profile_presets_get(dv_ind, 0, &status);
   CHK_RSMI_RET(ret)
   std::cout << "The current power profile is: " <<
-                            power_profile_string(status.current) << std::endl;
+                            power_profile_string(status.current) << "\n";
 
   return ret;
 }
@@ -376,12 +376,12 @@ static rsmi_status_t test_power_cap(uint32_t dv_ind) {
   ret = rsmi_dev_power_cap_get(dv_ind, 0, &orig);
   CHK_RSMI_RET(ret)
 
-  std::cout << "Original Power Cap: " << orig << " uW" << std::endl;
+  std::cout << "Original Power Cap: " << orig << " uW" << "\n";
   std::cout << "Power Cap Range: " << max << " uW to " << min <<
-                                                           " uW" << std::endl;
+                                                           " uW" << "\n";
   new_cap = (max + min)/2;
 
-  std::cout << "Setting new cap to " << new_cap << "..." << std::endl;
+  std::cout << "Setting new cap to " << new_cap << "..." << "\n";
 
   ret = rsmi_dev_power_cap_set(dv_ind, 0, new_cap);
   CHK_RSMI_RET(ret)
@@ -389,15 +389,15 @@ static rsmi_status_t test_power_cap(uint32_t dv_ind) {
   ret = rsmi_dev_power_cap_get(dv_ind, 0, &new_cap);
   CHK_RSMI_RET(ret)
 
-  std::cout << "New Power Cap: " << new_cap << " uW" << std::endl;
-  std::cout << "Resetting cap to " << orig << "..." << std::endl;
+  std::cout << "New Power Cap: " << new_cap << " uW" << "\n";
+  std::cout << "Resetting cap to " << orig << "..." << "\n";
 
   ret = rsmi_dev_power_cap_set(dv_ind, 0, orig);
   CHK_RSMI_RET(ret)
 
   ret = rsmi_dev_power_cap_get(dv_ind, 0, &new_cap);
   CHK_RSMI_RET(ret)
-  std::cout << "Current Power Cap: " << new_cap << " uW" << std::endl;
+  std::cout << "Current Power Cap: " << new_cap << " uW" << "\n";
 
   return ret;
 }
@@ -407,21 +407,21 @@ static rsmi_status_t test_set_overdrive(uint32_t dv_ind) {
   uint32_t val;
 
   print_test_header("Overdrive Control", dv_ind);
-  std::cout << "Set Overdrive level to 0%..." << std::endl;
+  std::cout << "Set Overdrive level to 0%..." << "\n";
   ret = rsmi_dev_overdrive_level_set_v1(dv_ind, 0);
   CHK_RSMI_RET(ret)
-  std::cout << "Set Overdrive level to 10%..." << std::endl;
+  std::cout << "Set Overdrive level to 10%..." << "\n";
   ret = rsmi_dev_overdrive_level_set_v1(dv_ind, 10);
   CHK_RSMI_RET(ret)
   ret = rsmi_dev_overdrive_level_get(dv_ind, &val);
   CHK_RSMI_RET(ret)
-  std::cout << "\t**New OverDrive Level:" << std::dec << val << std::endl;
-  std::cout << "Reset Overdrive level to 0%..." << std::endl;
+  std::cout << "\t**New OverDrive Level:" << std::dec << val << "\n";
+  std::cout << "Reset Overdrive level to 0%..." << "\n";
   ret = rsmi_dev_overdrive_level_set_v1(dv_ind, 0);
   CHK_RSMI_RET(ret)
   ret = rsmi_dev_overdrive_level_get(dv_ind, &val);
   CHK_RSMI_RET(ret)
-  std::cout << "\t**New OverDrive Level:" << std::dec << val << std::endl;
+  std::cout << "\t**New OverDrive Level:" << std::dec << val << "\n";
 
   return ret;
 }
@@ -437,21 +437,21 @@ static rsmi_status_t test_set_fan_speed(uint32_t dv_ind) {
   std::cout << "Original fan speed: ";
   ret = rsmi_dev_fan_speed_get(dv_ind, 0, &orig_speed);
   if (ret == RSMI_STATUS_SUCCESS) {
-    std::cout << orig_speed << std::endl;
+    std::cout << orig_speed << "\n";
   } else {
     CHK_RSMI_NOT_SUPPORTED_RET(ret)
-    std::cout << "***Skipping Fan Speed Control test." << std::endl;
+    std::cout << "***Skipping Fan Speed Control test." << "\n";
     return RSMI_STATUS_SUCCESS;
   }
 
   if (orig_speed == 0) {
-    std::cout << "***System fan speed value is 0. Skip fan test." << std::endl;
+    std::cout << "***System fan speed value is 0. Skip fan test." << "\n";
     return RSMI_STATUS_SUCCESS;
   }
 
   new_speed = 1.1 * static_cast<double>(orig_speed);
 
-  std::cout << "Setting fan speed to " << new_speed << std::endl;
+  std::cout << "Setting fan speed to " << new_speed << "\n";
 
   ret = rsmi_dev_fan_speed_set(dv_ind, 0, static_cast<uint64_t>(new_speed));
   CHK_RSMI_RET(ret)
@@ -461,7 +461,7 @@ static rsmi_status_t test_set_fan_speed(uint32_t dv_ind) {
   ret = rsmi_dev_fan_speed_get(dv_ind, 0, &cur_spd);
   CHK_RSMI_RET(ret)
 
-  std::cout << "New fan speed: " << cur_spd << std::endl;
+  std::cout << "New fan speed: " << cur_spd << "\n";
 
   assert(
       (cur_spd > static_cast<int64_t>(0.95 * static_cast<double>(new_speed)) &&
@@ -469,7 +469,7 @@ static rsmi_status_t test_set_fan_speed(uint32_t dv_ind) {
        (cur_spd >
        static_cast<int64_t>(0.95 * static_cast<double>(RSMI_MAX_FAN_SPEED))));
 
-  std::cout << "Resetting fan control to auto..." << std::endl;
+  std::cout << "Resetting fan control to auto..." << "\n";
 
   ret = rsmi_dev_fan_reset(dv_ind, 0);
   CHK_RSMI_RET(ret)
@@ -479,7 +479,7 @@ static rsmi_status_t test_set_fan_speed(uint32_t dv_ind) {
   ret = rsmi_dev_fan_speed_get(dv_ind, 0, &cur_spd);
   CHK_RSMI_RET(ret)
 
-  std::cout << "End fan speed: " << cur_spd << std::endl;
+  std::cout << "End fan speed: " << cur_spd << "\n";
 
   return ret;
 }
@@ -494,29 +494,29 @@ static rsmi_status_t test_set_perf_level(uint32_t dv_ind) {
   ret = rsmi_dev_perf_level_get(dv_ind, &orig_pfl);
   CHK_RSMI_RET(ret)
   std::cout << "\t**Original Perf Level:" << perf_level_string(orig_pfl) <<
-                                                                    std::endl;
+                                                                    "\n";
 
   pfl =
      (rsmi_dev_perf_level_t)((orig_pfl + 1) % (RSMI_DEV_PERF_LEVEL_LAST + 1));
 
   std::cout << "Set Performance Level to " << (uint32_t)pfl << " ..." <<
-                                                                   std::endl;
+                                                                   "\n";
   ret = rsmi_dev_perf_level_set_v1(dv_ind, pfl);
   if (ret != RSMI_STATUS_SUCCESS) {
     CHK_RSMI_NOT_SUPPORTED_RET(ret)
-    std::cout << "***Skipping Performance Level Control test." << std::endl;
+    std::cout << "***Skipping Performance Level Control test." << "\n";
     return RSMI_STATUS_SUCCESS;
   }
   CHK_RSMI_RET(ret)
   ret = rsmi_dev_perf_level_get(dv_ind, &pfl);
   CHK_RSMI_RET(ret)
-  std::cout << "\t**New Perf Level:" << perf_level_string(pfl) << std::endl;
-  std::cout << "Reset Perf level to " << orig_pfl << " ..." << std::endl;
+  std::cout << "\t**New Perf Level:" << perf_level_string(pfl) << "\n";
+  std::cout << "Reset Perf level to " << orig_pfl << " ..." << "\n";
   ret = rsmi_dev_perf_level_set_v1(dv_ind, orig_pfl);
   CHK_RSMI_RET(ret)
   ret = rsmi_dev_perf_level_get(dv_ind, &pfl);
   CHK_RSMI_RET(ret)
-  std::cout << "\t**New Perf Level:" << perf_level_string(pfl) << std::endl;
+  std::cout << "\t**New Perf Level:" << perf_level_string(pfl) << "\n";
   return ret;
 }
 
@@ -541,7 +541,7 @@ static rsmi_status_t test_set_freq(uint32_t dv_ind) {
     CHK_FILE_PERMISSIONS_AND_NOT_SUPPORTED_OR_UNIMPLEMENTED(ret)
 
     std::cout << "Initial frequency for clock" << rsmi_clk << " is " <<
-                                                      f.current << std::endl;
+                                                      f.current << "\n";
 
     // Set clocks to something other than the usual default of the lowest
     // frequency.
@@ -554,7 +554,7 @@ static rsmi_status_t test_set_freq(uint32_t dv_ind) {
                                                        freq_bm_str.size()-1));
 
     std::cout << "Setting frequency mask for clock " << rsmi_clk <<
-        " to 0b" << freq_bm_str << " ..." << std::endl;
+        " to 0b" << freq_bm_str << " ..." << "\n";
 
     ret = rsmi_dev_gpu_clk_freq_set(dv_ind, rsmi_clk, freq_bitmask);
     CHK_FILE_PERMISSIONS_AND_NOT_SUPPORTED_OR_UNIMPLEMENTED(ret)
@@ -562,15 +562,15 @@ static rsmi_status_t test_set_freq(uint32_t dv_ind) {
     ret = rsmi_dev_gpu_clk_freq_get(dv_ind, rsmi_clk, &f);
     CHK_FILE_PERMISSIONS_AND_NOT_SUPPORTED_OR_UNIMPLEMENTED(ret)
 
-    std::cout << "Frequency is now index " << f.current << std::endl;
-    std::cout << "Resetting mask to all frequencies." << std::endl;
+    std::cout << "Frequency is now index " << f.current << "\n";
+    std::cout << "Resetting mask to all frequencies." << "\n";
     ret = rsmi_dev_gpu_clk_freq_set(dv_ind, rsmi_clk, 0xFFFFFFFF);
     CHK_FILE_PERMISSIONS_AND_NOT_SUPPORTED_OR_UNIMPLEMENTED(ret)
 
     ret = rsmi_dev_perf_level_set_v1(dv_ind, RSMI_DEV_PERF_LEVEL_AUTO);
     CHK_FILE_PERMISSIONS(ret)
   }
-  std::cout << std::endl;
+  std::cout << "\n";
   return RSMI_STATUS_SUCCESS;
 }
 
@@ -581,19 +581,19 @@ static void print_frequencies(rsmi_frequencies_t *f) {
     if (j == f->current) {
       std::cout << " *";
     }
-    std::cout << std::endl;
+    std::cout << "\n";
   }
 }
 
 static rsmi_status_t test_set_compute_partitioning(uint32_t dv_ind) {
   rsmi_status_t ret;
-  uint32_t buffer_len = 10;
-  char originalComputePartition[buffer_len];
+  const uint32_t kLength = 10;
+  char originalComputePartition[kLength];
   originalComputePartition[0] = '\0';
   print_test_header("Compute Partitioning Control", dv_ind);
 
   ret = rsmi_dev_compute_partition_get(dv_ind, originalComputePartition,
-                                       buffer_len);
+                                       kLength);
   CHK_RSMI_NOT_SUPPORTED_OR_UNEXPECTED_DATA_RET(ret)
   if (ret == RSMI_STATUS_NOT_SUPPORTED) {
     return RSMI_STATUS_SUCCESS;
@@ -604,95 +604,94 @@ static rsmi_status_t test_set_compute_partitioning(uint32_t dv_ind) {
                 || ((originalComputePartition != nullptr)
                 && (originalComputePartition[0] == '\0')))
                 ? "UNKNOWN" : originalComputePartition)
-            << std::endl << std::endl;
+            << "\n" << "\n";
 
   for (int newComputePartition = RSMI_COMPUTE_PARTITION_CPX;
        newComputePartition <= RSMI_COMPUTE_PARTITION_QPX;
        newComputePartition++) {
-    rsmi_compute_partition_type newPartition
-      = static_cast<rsmi_compute_partition_type>(newComputePartition);
+    rsmi_compute_partition_type_t newPartition
+      = static_cast<rsmi_compute_partition_type_t>(newComputePartition);
     std::cout << "Attempting to set compute partition to "
               << compute_partition_string(newPartition) << "..."
-              << std::endl;
+              << "\n";
     ret = rsmi_dev_compute_partition_set(dv_ind, newPartition);
     CHK_RSMI_NOT_SUPPORTED_OR_SETTING_UNAVAILABLE_RET(ret)
     std::cout << "Done setting compute partition to "
-              << compute_partition_string(newPartition) << "." << std::endl;
-    std::cout << std::endl << std::endl;
+              << compute_partition_string(newPartition) << "." << "\n";
+    std::cout << "\n" << "\n";
   }
 
-  std::cout << "About to initate compute partition reset..." << std::endl;
+  std::cout << "About to initate compute partition reset..." << "\n";
   ret = rsmi_dev_compute_partition_reset(dv_ind);
   CHK_RSMI_NOT_SUPPORTED_RET(ret)
-  std::cout << "Done resetting compute partition." << std::endl;
+  std::cout << "Done resetting compute partition." << "\n";
 
   std::string myComputePartition = originalComputePartition;
   if (myComputePartition.empty() == false) {
     std::cout << "Resetting back to original compute partition to "
-              << originalComputePartition << "... " << std::endl;
+              << originalComputePartition << "... " << "\n";
     rsmi_compute_partition_type origComputePartitionType
       = mapStringToRSMIComputePartitionTypes[originalComputePartition];
     ret = rsmi_dev_compute_partition_set(dv_ind, origComputePartitionType);
     CHK_RSMI_NOT_SUPPORTED_OR_SETTING_UNAVAILABLE_RET(ret)
-    std::cout << "Done" << std::endl;
+    std::cout << "Done" << "\n";
   }
   return RSMI_STATUS_SUCCESS;
 }
 
-static rsmi_status_t test_set_nps_mode(uint32_t dv_ind) {
+static rsmi_status_t test_set_memory_partition(uint32_t dv_ind) {
   rsmi_status_t ret;
-  uint32_t buffer_len = 10;
-  char originalNpsMode[buffer_len];
-  originalNpsMode[0] = '\0';
-  print_test_header("NPS Mode Control", dv_ind);
+  const uint32_t kLength = 10;
+  char originalMemoryPartition[kLength];
+  originalMemoryPartition[0] = '\0';
+  print_test_header("Memory Partition Control", dv_ind);
 
-  ret = rsmi_dev_nps_mode_get(dv_ind, originalNpsMode, buffer_len);
+  ret = rsmi_dev_memory_partition_get(dv_ind, originalMemoryPartition, kLength);
   CHK_RSMI_NOT_SUPPORTED_OR_UNEXPECTED_DATA_RET(ret)
   if (ret == RSMI_STATUS_NOT_SUPPORTED) {
     return RSMI_STATUS_SUCCESS;
   }
 
-  std::cout << "Original NPS Mode: "
-            << (((originalNpsMode == nullptr)
-                || ((originalNpsMode != nullptr)
-                && (originalNpsMode[0] == '\0')))
-                ? "UNKNOWN" : originalNpsMode)
-            << std::endl << std::endl;
+  std::cout << "Original Memory Partition: "
+            << (((originalMemoryPartition == nullptr)
+                || ((originalMemoryPartition != nullptr)
+                && (originalMemoryPartition[0] == '\0')))
+                ? "UNKNOWN" : originalMemoryPartition)
+            << "\n\n";
 
-  for (int newNpsMode = RSMI_MEMORY_PARTITION_NPS1;
-       newNpsMode <= RSMI_MEMORY_PARTITION_NPS8;
-       newNpsMode++) {
-    rsmi_nps_mode_type_t newMemoryPartition
-      = static_cast<rsmi_nps_mode_type_t>(newNpsMode);
-    std::cout << "Attempting to set NPS mode to "
-              << nps_mode_string(newMemoryPartition) << "..."
-              << std::endl;
-    ret = rsmi_dev_nps_mode_set(dv_ind, newMemoryPartition);
+  for (int newMemPartition = RSMI_MEMORY_PARTITION_NPS1;
+       newMemPartition <= RSMI_MEMORY_PARTITION_NPS8;
+       newMemPartition++) {
+    rsmi_memory_partition_type_t newMemoryPartition
+      = static_cast<rsmi_memory_partition_type_t>(newMemPartition);
+    std::cout << "Attempting to set memory partition to "
+              << memory_partition_string(newMemoryPartition) << "..."
+              << "\n";
+    ret = rsmi_dev_memory_partition_set(dv_ind, newMemoryPartition);
     CHK_RSMI_NOT_SUPPORTED_RET(ret)
     if (ret == RSMI_STATUS_NOT_SUPPORTED) {
       // do not continue attempting to set, device does not support setting
       return RSMI_STATUS_SUCCESS;
     }
-    std::cout << "Done setting NPS mode to "
-              << nps_mode_string(newMemoryPartition)
-              << "." << std::endl;
-    std::cout << std::endl << std::endl;
+    std::cout << "Done setting memory partition to "
+              << memory_partition_string(newMemoryPartition)
+              << "." << "\n\n\n";
   }
 
-  std::cout << "About to initate nps mode reset..." << std::endl;
-  ret = rsmi_dev_nps_mode_reset(dv_ind);
+  std::cout << "About to initate memory partition reset...\n";
+  ret = rsmi_dev_memory_partition_reset(dv_ind);
   CHK_RSMI_NOT_SUPPORTED_RET(ret)
-  std::cout << "Done resetting nps mode." << std::endl;
+  std::cout << "Done resetting memory partition.\n";
 
-  std::string myNpsMode = originalNpsMode;
-  if (myNpsMode.empty() == false) {
-    std::cout << "Resetting compute partition to " << originalNpsMode
-              << "... " << std::endl;
-    rsmi_nps_mode_type_t origNpsModeType
-      = mapStringToRSMINpsModeTypes[originalNpsMode];
-    ret = rsmi_dev_nps_mode_set(dv_ind, origNpsModeType);
+  std::string myMemPart = originalMemoryPartition;
+  if (myMemPart.empty() == false) {
+    std::cout << "Resetting memory partition to " << originalMemoryPartition
+              << "...\n";
+    rsmi_memory_partition_type_t origMemoryPartitionType
+      = mapStringToRSMIMemoryPartitionTypes[originalMemoryPartition];
+    ret = rsmi_dev_memory_partition_set(dv_ind, origMemoryPartitionType);
     CHK_RSMI_NOT_SUPPORTED_RET(ret)
-    std::cout << "Done" << std::endl;
+    std::cout << "Done\n";
   }
   return RSMI_STATUS_SUCCESS;
 }
@@ -717,10 +716,10 @@ int main() {
   for (uint32_t i = 0; i < num_monitor_devs; ++i) {
     ret = rsmi_dev_id_get(i, &val_ui16);
     CHK_RSMI_RET_I(ret)
-    std::cout << "\t**Device ID: 0x" << std::hex << val_ui16 << std::endl;
+    std::cout << "\t**Device ID: 0x" << std::hex << val_ui16 << "\n";
     ret = rsmi_dev_revision_get(i, &val_ui16);
     CHK_RSMI_RET_I(ret)
-    std::cout << "\t**Dev.Rev.ID: 0x" << std::hex << val_ui16 << std::endl;
+    std::cout << "\t**Dev.Rev.ID: 0x" << std::hex << val_ui16 << "\n";
 
     char current_compute_partition[256];
     current_compute_partition[0] = '\0';
@@ -732,69 +731,92 @@ int main() {
                   ? "UNKNOWN" : current_compute_partition);
     if (ret != RSMI_STATUS_SUCCESS) {
       std::cout << ", RSMI_STATUS = ";
-    } else {
-      std::cout << std::endl;
+} else {
+      std::cout << "\n";
     }
     CHK_RSMI_NOT_SUPPORTED_OR_UNEXPECTED_DATA_RET(ret)
 
-    uint32_t len = 5;
-    char nps_mode[len];
-    nps_mode[0] = '\0';
-    ret = rsmi_dev_nps_mode_get(i, nps_mode, len);
-    std::cout << "\t**NPS Mode: "
-              << (((nps_mode == nullptr)
-                  || ((nps_mode != nullptr)
-                  && (nps_mode[0] == '\0')))
-                  ? "UNKNOWN" : nps_mode);
+    const uint32_t kLength = 5;
+    char memory_partition[kLength];
+    memory_partition[0] = '\0';
+    ret = rsmi_dev_memory_partition_get(i, memory_partition, kLength);
+    std::cout << "\t**Current Memory Partition: "
+              << (((memory_partition == nullptr)
+                  || ((memory_partition != nullptr)
+                  && (memory_partition[0] == '\0')))
+                  ? "UNKNOWN" : memory_partition);
     if (ret != RSMI_STATUS_SUCCESS) {
       std::cout << ", RSMI_STATUS = ";
     } else {
-      std::cout << std::endl;
+      std::cout << "\n";
     }
     CHK_NOT_SUPPORTED_OR_UNEXPECTED_DATA_OR_INSUFFICIENT_SIZE_RET(ret)
 
+    std::cout << "\t**rsmi_minmax_bandwidth_get(0, " << i << ", ...): ";
+    ret = rsmi_dev_pci_id_get(0, &val_ui64);
+    ret = rsmi_dev_pci_id_get(i, &val2_ui64);
+    if (i > 0 && val_ui64 != val2_ui64) {
+      uint64_t min_bandwidth = 0;
+      uint64_t max_bandwidth = 0;
+      ret = rsmi_minmax_bandwidth_get(0, i, &min_bandwidth, &max_bandwidth);
+      CHK_RSMI_NOT_SUPPORTED_OR_UNEXPECTED_DATA_RET(ret)
+      std::cout << "\nMinimum Bandwidth: " << min_bandwidth
+                << "\nMaximum Bandwidth: " << max_bandwidth;
+    } else {
+      std::cout << "Not Supported\n";
+    }
+
     ret = rsmi_dev_gpu_metrics_info_get(i, &p);
     CHK_AND_PRINT_RSMI_ERR_RET(ret)
-    std::cout << "\t**GPU METRICS" << std::endl;
+    std::cout << "\t**GPU METRICS" << "\n";
 
     ret = rsmi_dev_perf_level_get(i, &pfl);
     CHK_AND_PRINT_RSMI_ERR_RET(ret)
     std::cout << "\t**Performance Level:" <<
-                                          perf_level_string(pfl) << std::endl;
+                                          perf_level_string(pfl) << "\n";
     ret = rsmi_dev_overdrive_level_get(i, &val_ui32);
     CHK_AND_PRINT_RSMI_ERR_RET(ret)
-    std::cout << "\t**OverDrive Level:" << val_ui32 << std::endl;
+    std::cout << "\t**OverDrive Level:" << val_ui32 << "\n";
 
     ret = rsmi_dev_gpu_clk_freq_get(i, RSMI_CLK_TYPE_MEM, &f);
     CHK_AND_PRINT_RSMI_ERR_RET(ret)
     std::cout << "\t**Supported GPU Memory clock frequencies: ";
-    std::cout << f.num_supported << std::endl;
+    std::cout << f.num_supported << "\n";
     print_frequencies(&f);
 
     ret = rsmi_dev_gpu_clk_freq_get(i, RSMI_CLK_TYPE_SYS, &f);
     CHK_AND_PRINT_RSMI_ERR_RET(ret)
     std::cout << "\t**Supported GPU clock frequencies: ";
-    std::cout << f.num_supported << std::endl;
+    std::cout << f.num_supported << "\n";
     print_frequencies(&f);
 
     ret = rsmi_dev_gpu_clk_freq_get(i, RSMI_CLK_TYPE_SOC, &f);
     CHK_RSMI_NOT_SUPPORTED_OR_UNEXPECTED_DATA_RET(ret)
     std::cout << "\t**Supported GPU clock frequencies (SOC clk): ";
-    std::cout << f.num_supported << std::endl;
+    std::cout << f.num_supported << "\n";
     std::cout << "\t**Current value (SOC clk): ";
-    std::cout << f.current << std::endl;
+    std::cout << f.current << "\n";
     print_frequencies(&f);
 
     std::cout << "\t**Monitor name: ";
     char name[128];
     ret = rsmi_dev_name_get(i, name, 128);
     CHK_AND_PRINT_RSMI_ERR_RET(ret)
-    std::cout << name << std::endl;
+    std::cout << name << "\n";
 
-    std::cout << "\t**Temperature: ";
-    ret = rsmi_dev_temp_metric_get(i, 0, RSMI_TEMP_CURRENT, &val_i64);
+    std::cout << "\t**Temperature (edge): ";
+    ret = rsmi_dev_temp_metric_get(i, RSMI_TEMP_TYPE_EDGE,
+      rsmi_temperature_metric_t::RSMI_TEMP_CURRENT, &val_i64);
     if (ret == RSMI_STATUS_SUCCESS) {
-      std::cout << val_i64/1000 << "C" << std::endl;
+      std::cout << val_i64/1000 << "C" << "\n";
+    }
+    CHK_RSMI_NOT_SUPPORTED_RET(ret)
+
+    std::cout << "\t**Temperature (junction): ";
+    ret = rsmi_dev_temp_metric_get(i, RSMI_TEMP_TYPE_JUNCTION,
+      rsmi_temperature_metric_t::RSMI_TEMP_CURRENT, &val_i64);
+    if (ret == RSMI_STATUS_SUCCESS) {
+      std::cout << val_i64/1000 << "C" << "\n";
     }
     CHK_RSMI_NOT_SUPPORTED_RET(ret)
 
@@ -802,7 +824,7 @@ int main() {
     ret = rsmi_dev_volt_metric_get(i, RSMI_VOLT_TYPE_VDDGFX,
                                                RSMI_VOLT_CURRENT, &val_i64);
     if (ret == RSMI_STATUS_SUCCESS) {
-      std::cout << val_i64 << "mV" << std::endl;
+      std::cout << val_i64 << "mV" << "\n";
     }
     CHK_RSMI_NOT_SUPPORTED_RET(ret)
 
@@ -813,21 +835,21 @@ int main() {
       CHK_AND_PRINT_RSMI_ERR_RET(ret)
       std::cout << (static_cast<float>(val_i64)/val_ui64) * 100;
       std::cout << "% (" << std::dec << val_i64 << "/"
-                << std::dec << val_ui64 << ")" << std::endl;
+                << std::dec << val_ui64 << ")" << "\n";
     }
     CHK_RSMI_NOT_SUPPORTED_RET(ret)
 
     std::cout << "\t**Current fan RPMs: ";
     ret = rsmi_dev_fan_rpms_get(i, 0, &val_i64);
     if (ret == RSMI_STATUS_SUCCESS) {
-      std::cout << std::dec << val_i64 << std::endl;
+      std::cout << std::dec << val_i64 << "\n";
     }
     CHK_RSMI_NOT_SUPPORTED_RET(ret)
 
     std::cout << "\t**Current Power Cap: ";
     ret = rsmi_dev_power_cap_get(i, 0, &val_ui64);
     if (ret == RSMI_STATUS_SUCCESS) {
-      std::cout << std::dec << val_ui64 << "uW" <<std::endl;
+      std::cout << std::dec << val_ui64 << "uW" <<"\n";
     }
     CHK_RSMI_NOT_SUPPORTED_RET(ret)
 
@@ -835,23 +857,23 @@ int main() {
     ret = rsmi_dev_power_cap_range_get(i, 0, &val_ui64, &val2_ui64);
     if (ret == RSMI_STATUS_SUCCESS) {
       std::cout << std::dec << val2_ui64 << " to "
-                << std::dec << val_ui64 << " uW" << std::endl;
+                << std::dec << val_ui64 << " uW" << "\n";
     }
     CHK_RSMI_NOT_SUPPORTED_RET(ret)
 
     std::cout << "\t**Average Power Usage: ";
     ret = rsmi_dev_power_ave_get(i, 0, &val_ui64);
     if (ret == RSMI_STATUS_SUCCESS) {
-      std::cout << static_cast<float>(val_ui64)/1000 << " W" << std::endl;
+      std::cout << static_cast<float>(val_ui64)/1000 << " W" << "\n";
     }
     CHK_RSMI_NOT_SUPPORTED_RET(ret)
-    std::cout << "\t=======" << std::endl;
+    std::cout << "\t=======" << "\n";
   }
 
-  std::cout << "***** Testing write api's" << std::endl;
+  std::cout << "***** Testing write api's" << "\n";
   if (isUserRunningAsSudo() == false) {
     std::cout << "Write APIs require users to execute with sudo. "
-              << "Cannot proceed." << std::endl;
+              << "Cannot proceed." << "\n";
     return 0;
   }
 
@@ -877,7 +899,7 @@ int main() {
     ret = test_set_freq(i);
     CHK_AND_PRINT_RSMI_ERR_RET(ret)
 
-    ret = test_set_nps_mode(i);
+    ret = test_set_memory_partition(i);
     CHK_AND_PRINT_RSMI_ERR_RET(ret)
   }
 

@@ -634,27 +634,27 @@ rsmi_compute_partition_type = rsmi_compute_partition_type_t
 # will return string 'CPX'
 compute_partition_type_l = ['CPX', 'SPX', 'DPX', 'TPX', 'QPX']
 
-class rsmi_nps_mode_type_t(c_int):
+class rsmi_memory_partition_type_t(c_int):
     RSMI_MEMORY_PARTITION_UNKNOWN = 0
     RSMI_MEMORY_PARTITION_NPS1 = 1
     RSMI_MEMORY_PARTITION_NPS2 = 2
     RSMI_MEMORY_PARTITION_NPS4 = 3
     RSMI_MEMORY_PARTITION_NPS8 = 4
 
-rsmi_nps_mode_type_dict = {
+rsmi_memory_partition_type_dict = {
     'NPS1': 1,
     'NPS2': 2,
     'NPS4': 3,
     'NPS8': 4
 }
 
-rsmi_nps_mode_type = rsmi_nps_mode_type_t
+rsmi_memory_partition_type = rsmi_memory_partition_type_t
 
-# nps_mode_type_l includes string names for the rsmi_compute_partition_type_t
+# memory_partition_type_l includes string names for the rsmi_compute_partition_type_t
 # Usage example to get corresponding names:
-# nps_mode_type_l[rsmi_nps_mode_type_t.RSMI_MEMORY_PARTITION_NPS2]
+# memory_partition_type_l[rsmi_memory_partition_type_t.RSMI_MEMORY_PARTITION_NPS2]
 # will return string 'NPS2'
-nps_mode_type_l = ['NPS1', 'NPS2', 'NPS4', 'NPS8']
+memory_partition_type_l = ['NPS1', 'NPS2', 'NPS4', 'NPS8']
 
 class rsmi_power_label(str, Enum):
     AVG_POWER = '(Avg)'

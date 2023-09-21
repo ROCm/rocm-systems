@@ -417,7 +417,6 @@ static rsmi_status_t set_dev_mon_value(amd::smi::MonitorTypes type,
   if (ret == ENOENT) {
     return rsmi_status_t::RSMI_STATUS_NOT_SUPPORTED;
   }
-
   return amd::smi::ErrnoToRsmiStatus(ret);
 }
 
@@ -1823,8 +1822,8 @@ mapRSMIToStringComputePartitionTypes {
   {RSMI_COMPUTE_PARTITION_QPX, "QPX"}
 };
 
-std::map<rsmi_nps_mode_type_t, std::string>
-mapRSMIToStringNPSModeTypes {
+std::map<rsmi_memory_partition_type_t, std::string>
+mapRSMIToStringMemoryPartitionTypes {
   {RSMI_MEMORY_PARTITION_UNKNOWN, "UNKNOWN"},
   {RSMI_MEMORY_PARTITION_NPS1, "NPS1"},
   {RSMI_MEMORY_PARTITION_NPS2, "NPS2"},
@@ -1832,8 +1831,8 @@ mapRSMIToStringNPSModeTypes {
   {RSMI_MEMORY_PARTITION_NPS8, "NPS8"}
 };
 
-std::map<std::string, rsmi_nps_mode_type_t>
-mapStringToNPSModeTypes {
+std::map<std::string, rsmi_memory_partition_type_t>
+mapStringToMemoryPartitionTypes {
   {"NPS1", RSMI_MEMORY_PARTITION_NPS1},
   {"NPS2", RSMI_MEMORY_PARTITION_NPS2},
   {"NPS4", RSMI_MEMORY_PARTITION_NPS4},
@@ -4240,7 +4239,7 @@ rsmi_topo_get_link_weight(uint32_t dv_ind_src, uint32_t dv_ind_dst,
 
  rsmi_status_t
  rsmi_minmax_bandwidth_get(uint32_t dv_ind_src, uint32_t dv_ind_dst,
-                           uint64_t *min_bandwidth, uint64_t *max_bandwidth){
+                           uint64_t *min_bandwidth, uint64_t *max_bandwidth) {
   TRY
 
   uint32_t dv_ind = dv_ind_src;
@@ -4438,9 +4437,20 @@ rsmi_dev_compute_partition_get(uint32_t dv_ind, char *compute_partition,
                                uint32_t len) {
   TRY
   std::ostringstream ss;
-  ss << __PRETTY_FUNCTION__ << "| ======= start =======";
+  ss << __PRETTY_FUNCTION__ << "| ======= start =======, dv_ind = "
+     << dv_ind;
   LOG_TRACE(ss);
   if ((len == 0) || (compute_partition == nullptr)) {
+    ss << __PRETTY_FUNCTION__
+       << " | ======= end ======= "
+       << " | Fail "
+       << " | Device #: " << dv_ind
+       << " | Type: "
+       << RocmSMI::devInfoTypesStrings.at(amd::smi::kDevComputePartition)
+       << " | Cause: len was 0 or compute_partition variable was null"
+       << " | Returning = "
+       << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS) << " |";
+    LOG_ERROR(ss);
     return RSMI_STATUS_INVALID_ARGS;
   }
   CHK_SUPPORT_NAME_ONLY(compute_partition)
@@ -4449,14 +4459,46 @@ rsmi_dev_compute_partition_get(uint32_t dv_ind, char *compute_partition,
   rsmi_status_t ret = get_compute_partition(dv_ind,
                                returning_compute_partition);
 
-  if (ret != RSMI_STATUS_SUCCESS) { return ret; }
+  if (ret != RSMI_STATUS_SUCCESS) {
+    ss << __PRETTY_FUNCTION__
+       << " | ======= end ======= "
+       << " | Fail "
+       << " | Device #: " << dv_ind
+       << " | Type: "
+       << RocmSMI::devInfoTypesStrings.at(amd::smi::kDevComputePartition)
+       << " | Cause: could not retrieve current compute partition"
+       << " | Returning = "
+       << getRSMIStatusString(ret) << " |";
+    LOG_ERROR(ss);
+    return ret;
+  }
 
   std::size_t length = returning_compute_partition.copy(compute_partition, len);
   compute_partition[length]='\0';
 
   if (len < (returning_compute_partition.size() + 1)) {
+    ss << __PRETTY_FUNCTION__
+       << " | ======= end ======= "
+       << " | Fail "
+       << " | Device #: " << dv_ind
+       << " | Type: "
+       << RocmSMI::devInfoTypesStrings.at(amd::smi::kDevComputePartition)
+       << " | Cause: requested size was insufficient"
+       << " | Returning = "
+       << getRSMIStatusString(RSMI_STATUS_INSUFFICIENT_SIZE) << " |";
+    LOG_ERROR(ss);
     return RSMI_STATUS_INSUFFICIENT_SIZE;
   }
+  ss << __PRETTY_FUNCTION__
+     << " | ======= end ======= "
+     << " | Success "
+     << " | Device #: " << dv_ind
+     << " | Type: "
+     << RocmSMI::devInfoTypesStrings.at(amd::smi::kDevComputePartition)
+     << " | Data: " << compute_partition
+     << " | Returning = "
+     << getRSMIStatusString(ret) << " |";
+  LOG_TRACE(ss);
   return ret;
   CATCH
 }
@@ -4504,6 +4546,16 @@ rsmi_dev_compute_partition_set(uint32_t dv_ind,
       break;
     case RSMI_COMPUTE_PARTITION_INVALID:
     default:
+      ss << __PRETTY_FUNCTION__
+         << " | ======= end ======= "
+         << " | Fail "
+         << " | Device #: " << dv_ind
+         << " | Type: "
+         << RocmSMI::devInfoTypesStrings.at(amd::smi::kDevComputePartition)
+         << " | Cause: requested setting was invalid"
+         << " | Returning = "
+         << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS) << " |";
+      LOG_ERROR(ss);
       return RSMI_STATUS_INVALID_ARGS;
   }
 
@@ -4512,32 +4564,78 @@ rsmi_dev_compute_partition_set(uint32_t dv_ind,
   rsmi_status_t available_ret =
       is_available_compute_partition(dv_ind, newComputePartitionStr);
   if (available_ret != RSMI_STATUS_SUCCESS) {
+    ss << __PRETTY_FUNCTION__
+       << " | ======= end ======= "
+       << " | Fail "
+       << " | Device #: " << dv_ind
+       << " | Type: "
+       << RocmSMI::devInfoTypesStrings.at(amd::smi::kDevComputePartition)
+       << " | Cause: not an available compute partition setting"
+       << " | Returning = "
+       << getRSMIStatusString(available_ret) << " |";
+    LOG_ERROR(ss);
     return available_ret;
   }
 
   // do nothing if compute_partition is the current compute partition
-  rsmi_status_t ret_get = get_compute_partition(dv_ind, currentComputePartition);
+  rsmi_status_t ret_get =
+                        get_compute_partition(dv_ind, currentComputePartition);
   // we can try to set, even if we get unexpected data
   if (ret_get != RSMI_STATUS_SUCCESS
       && ret_get != RSMI_STATUS_UNEXPECTED_DATA) {
+    ss << __PRETTY_FUNCTION__
+       << " | ======= end ======= "
+       << " | Fail "
+       << " | Device #: " << dv_ind
+       << " | Type: "
+       << RocmSMI::devInfoTypesStrings.at(amd::smi::kDevComputePartition)
+       << " | Cause: could retrieve current compute partition or retrieved"
+       << " unexpected data"
+       << " | Returning = "
+       << getRSMIStatusString(ret_get) << " |";
+    LOG_ERROR(ss);
     return ret_get;
   }
   rsmi_compute_partition_type_t currRSMIComputePartition
     = mapStringToRSMIComputePartitionTypes[currentComputePartition];
   if (currRSMIComputePartition == compute_partition) {
+    ss << __PRETTY_FUNCTION__
+       << " | ======= end ======= "
+       << " | Success - compute partition was already set at requested value"
+       << " | Device #: " << dv_ind
+       << " | Type: "
+       << RocmSMI::devInfoTypesStrings.at(amd::smi::kDevComputePartition)
+       << " | Data: " << newComputePartitionStr
+       << " | Returning = "
+       << getRSMIStatusString(RSMI_STATUS_SUCCESS) << " |";
+    LOG_TRACE(ss);
     return RSMI_STATUS_SUCCESS;
   }
 
   GET_DEV_FROM_INDX
   int ret = dev->writeDevInfo(amd::smi::kDevComputePartition,
                               newComputePartitionStr);
-  return amd::smi::ErrnoToRsmiStatus(ret);
+  rsmi_status_t returnResponse = amd::smi::ErrnoToRsmiStatus(ret);
+  ss << __PRETTY_FUNCTION__
+     << " | ======= end ======= "
+     << " | Success "
+     << " | Device #: " << dv_ind
+     << " | Type: "
+     << RocmSMI::devInfoTypesStrings.at(amd::smi::kDevComputePartition)
+     << " | Data: " << newComputePartitionStr
+     << " | Returning = "
+     << getRSMIStatusString(returnResponse) << " |";
+  LOG_TRACE(ss);
+
+  // TODO(charpoag): investigate providing GPU busy state occured with
+  return returnResponse;
   CATCH
 }
 
-static rsmi_status_t get_nps_mode(uint32_t dv_ind, std::string &nps_mode) {
+static rsmi_status_t get_memory_partition(uint32_t dv_ind,
+                                          std::string &memory_partition) {
   TRY
-  CHK_SUPPORT_NAME_ONLY(nps_mode.c_str())
+  CHK_SUPPORT_NAME_ONLY(memory_partition.c_str())
   std::string val_str;
 
   DEVICE_MUTEX
@@ -4548,7 +4646,7 @@ static rsmi_status_t get_nps_mode(uint32_t dv_ind, std::string &nps_mode) {
     return ret;
   }
 
-  switch (mapStringToNPSModeTypes[val_str]) {
+  switch (mapStringToMemoryPartitionTypes[val_str]) {
     case RSMI_MEMORY_PARTITION_NPS1:
     case RSMI_MEMORY_PARTITION_NPS2:
     case RSMI_MEMORY_PARTITION_NPS4:
@@ -4556,16 +4654,17 @@ static rsmi_status_t get_nps_mode(uint32_t dv_ind, std::string &nps_mode) {
       break;
     case RSMI_MEMORY_PARTITION_UNKNOWN:
     default:
-      // Retrieved an unknown NPS mode
+      // Retrieved an unknown memory partition
       return RSMI_STATUS_UNEXPECTED_DATA;
   }
-  nps_mode = val_str;
+  memory_partition = val_str;
   return RSMI_STATUS_SUCCESS;
   CATCH
 }
 
 rsmi_status_t
-rsmi_dev_nps_mode_set(uint32_t dv_ind, rsmi_nps_mode_type_t nps_mode) {
+rsmi_dev_memory_partition_set(uint32_t dv_ind,
+                              rsmi_memory_partition_type_t memory_partition) {
   TRY
   std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
@@ -4575,7 +4674,7 @@ rsmi_dev_nps_mode_set(uint32_t dv_ind, rsmi_nps_mode_type_t nps_mode) {
   bool isCorrectDevice = false;
   char boardName[128];
   boardName[0] = '\0';
-  // rsmi_dev_nps_mode_set is only available for for discrete variant,
+  // rsmi_dev_memory_partition_set is only available for for discrete variant,
   // others are required to update through bios settings
   rsmi_dev_name_get(dv_ind, boardName, 128);
   std::string myBoardName = boardName;
@@ -4589,14 +4688,24 @@ rsmi_dev_nps_mode_set(uint32_t dv_ind, rsmi_nps_mode_type_t nps_mode) {
   }
 
   if (!isCorrectDevice) {
+    ss << __PRETTY_FUNCTION__
+         << " | ======= end ======= "
+         << " | Fail "
+         << " | Device #: " << dv_ind
+         << " | Type: "
+         << RocmSMI::devInfoTypesStrings.at(amd::smi::kDevMemoryPartition)
+         << " | Cause: device board name does not support this action"
+         << " | Returning = "
+         << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS) << " |";
+      LOG_ERROR(ss);
     return RSMI_STATUS_NOT_SUPPORTED;
   }
 
-  std::string newNPSMode
-              = mapRSMIToStringNPSModeTypes[nps_mode];
-  std::string currentNPSMode;
+  std::string newMemoryPartition
+              = mapRSMIToStringMemoryPartitionTypes[memory_partition];
+  std::string currentMemoryPartition;
 
-  switch (nps_mode) {
+  switch (memory_partition) {
     case RSMI_MEMORY_PARTITION_NPS1:
     case RSMI_MEMORY_PARTITION_NPS2:
     case RSMI_MEMORY_PARTITION_NPS4:
@@ -4604,57 +4713,156 @@ rsmi_dev_nps_mode_set(uint32_t dv_ind, rsmi_nps_mode_type_t nps_mode) {
       break;
     case RSMI_MEMORY_PARTITION_UNKNOWN:
     default:
+      ss << __PRETTY_FUNCTION__
+         << " | ======= end ======= "
+         << " | Fail "
+         << " | Device #: " << dv_ind
+         << " | Type: "
+         << RocmSMI::devInfoTypesStrings.at(amd::smi::kDevMemoryPartition)
+         << " | Cause: requested setting was invalid"
+         << " | Returning = "
+         << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS) << " |";
+      LOG_ERROR(ss);
       return RSMI_STATUS_INVALID_ARGS;
   }
 
-  // do nothing if nps_mode is the current NPS mode
-  rsmi_status_t ret_get = get_nps_mode(dv_ind, currentNPSMode);
+  // do nothing if memory_partition is the current mode
+  rsmi_status_t ret_get = get_memory_partition(dv_ind, currentMemoryPartition);
   // we can try to set, even if we get unexpected data
   if (ret_get != RSMI_STATUS_SUCCESS
       && ret_get != RSMI_STATUS_UNEXPECTED_DATA) {
+    ss << __PRETTY_FUNCTION__
+       << " | ======= end ======= "
+       << " | Fail "
+       << " | Device #: " << dv_ind
+       << " | Type: "
+       << RocmSMI::devInfoTypesStrings.at(amd::smi::kDevMemoryPartition)
+       << " | Cause: could retrieve current memory partition or retrieved"
+       << " unexpected data"
+       << " | Returning = "
+       << getRSMIStatusString(ret_get) << " |";
+    LOG_ERROR(ss);
     return ret_get;
   }
-  rsmi_nps_mode_type_t currRSMINpsMode
-    = mapStringToNPSModeTypes[currentNPSMode];
-  if (currRSMINpsMode == nps_mode) {
+  rsmi_memory_partition_type_t currRSMIMemoryPartition
+    = mapStringToMemoryPartitionTypes[currentMemoryPartition];
+  if (currRSMIMemoryPartition == memory_partition) {
+    ss << __PRETTY_FUNCTION__
+     << " | ======= end ======= "
+     << " | Success - no change, current memory partition was already requested"
+     << " setting"
+     << " | Device #: " << dv_ind
+     << " | Type: "
+     << RocmSMI::devInfoTypesStrings.at(amd::smi::kDevMemoryPartition)
+     << " | Data: " << newMemoryPartition
+     << " | Returning = "
+     << getRSMIStatusString(RSMI_STATUS_SUCCESS) << " |";
+    LOG_TRACE(ss);
     return RSMI_STATUS_SUCCESS;
   }
 
   GET_DEV_FROM_INDX
-  int ret = dev->writeDevInfo(amd::smi::kDevMemoryPartition, newNPSMode);
+  int ret = dev->writeDevInfo(amd::smi::kDevMemoryPartition,
+                              newMemoryPartition);
 
   if (amd::smi::ErrnoToRsmiStatus(ret) != RSMI_STATUS_SUCCESS) {
-    return amd::smi::ErrnoToRsmiStatus(ret);
+    rsmi_status_t err = amd::smi::ErrnoToRsmiStatus(ret);
+    ss << __PRETTY_FUNCTION__
+       << " | ======= end ======= "
+       << " | Fail "
+       << " | Device #: " << dv_ind
+       << " | Type: "
+       << RocmSMI::devInfoTypesStrings.at(amd::smi::kDevMemoryPartition)
+       << " | Cause: issue writing reqested setting of " + newMemoryPartition
+       << " | Returning = "
+       << getRSMIStatusString(err) << " |";
+    LOG_ERROR(ss);
+    return err;
   }
 
-  return dev->restartAMDGpuDriver();
+  rsmi_status_t restartRet = dev->restartAMDGpuDriver();
+  ss << __PRETTY_FUNCTION__
+     << " | ======= end ======= "
+     << " | Success - if restart completed successfully"
+     << " | Device #: " << dv_ind
+     << " | Type: "
+     << RocmSMI::devInfoTypesStrings.at(amd::smi::kDevMemoryPartition)
+     << " | Data: " << newMemoryPartition
+     << " | Returning = "
+     << getRSMIStatusString(restartRet) << " |";
+  LOG_TRACE(ss);
+  return restartRet;
   CATCH
 }
 
 rsmi_status_t
-rsmi_dev_nps_mode_get(uint32_t dv_ind, char *nps_mode,
+rsmi_dev_memory_partition_get(uint32_t dv_ind, char *memory_partition,
                                uint32_t len) {
   TRY
   std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
-  if ((len == 0) || (nps_mode == nullptr)) {
+  if ((len == 0) || (memory_partition == nullptr)) {
+    ss << __PRETTY_FUNCTION__
+       << " | ======= end ======= "
+       << " | Fail "
+       << " | Device #: " << dv_ind
+       << " | Type: "
+       << RocmSMI::devInfoTypesStrings.at(amd::smi::kDevMemoryPartition)
+       << " | Cause: user sent invalid arguments, len = 0 or memory partition"
+       << " was a null ptr"
+       << " | Returning = "
+       << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS) << " |";
+    LOG_ERROR(ss);
     return RSMI_STATUS_INVALID_ARGS;
   }
-  CHK_SUPPORT_NAME_ONLY(nps_mode)
+  CHK_SUPPORT_NAME_ONLY(memory_partition)
 
-  std::string returning_nps_mode;
-  rsmi_status_t ret = get_nps_mode(dv_ind,
-                               returning_nps_mode);
+  std::string returning_memory_partition;
+  rsmi_status_t ret = get_memory_partition(dv_ind,
+                               returning_memory_partition);
 
-  if (ret != RSMI_STATUS_SUCCESS) { return ret; }
+  if (ret != RSMI_STATUS_SUCCESS) {
+    ss << __PRETTY_FUNCTION__
+       << " | ======= end ======= "
+       << " | Fail "
+       << " | Device #: " << dv_ind
+       << " | Type: "
+       << RocmSMI::devInfoTypesStrings.at(amd::smi::kDevMemoryPartition)
+       << " | Cause: could not successfully retrieve current memory partition "
+       << " | Returning = "
+       << getRSMIStatusString(ret) << " |";
+    LOG_ERROR(ss);
+    return ret;
+  }
 
-  std::size_t length = returning_nps_mode.copy(nps_mode, len);
-  nps_mode[length]='\0';
+  std::size_t buff_size =
+      returning_memory_partition.copy(memory_partition, len);
+  memory_partition[buff_size] = '\0';
 
-  if (len < (returning_nps_mode.size() + 1)) {
+  if (len < (returning_memory_partition.size() + 1)) {
+    ss << __PRETTY_FUNCTION__
+       << " | ======= end ======= "
+       << " | Fail "
+       << " | Device #: " << dv_ind
+       << " | Type: "
+       << RocmSMI::devInfoTypesStrings.at(amd::smi::kDevMemoryPartition)
+       << " | Cause: could not successfully retrieve current memory partition "
+       << " | Returning = "
+       << getRSMIStatusString(ret) << " |";
+    LOG_ERROR(ss);
     return RSMI_STATUS_INSUFFICIENT_SIZE;
   }
+  ss << __PRETTY_FUNCTION__
+     << " | ======= end ======= "
+     << " | Success "
+     << " | Device #: " << dv_ind
+     << " | Type: "
+     << RocmSMI::devInfoTypesStrings.at(amd::smi::kDevMemoryPartition)
+     << " | Data: " << memory_partition
+     << " | Returning = "
+     << getRSMIStatusString(ret) << " |";
+  LOG_TRACE(ss);
   return ret;
   CATCH
 }
@@ -4668,22 +4876,37 @@ rsmi_status_t rsmi_dev_compute_partition_reset(uint32_t dv_ind) {
   DEVICE_MUTEX
   GET_DEV_FROM_INDX
   rsmi_status_t ret = RSMI_STATUS_NOT_SUPPORTED;
-  // read temp file
+
+  // Only use 1st index, rest are there in-case of future issues
+  // NOTE: Partitions sets cause rocm-smi indexes to fluctuate
+  // since the nodes are grouped in respect to primary node - why we only use
+  // 1st node/device id to reset
   std::string bootState =
-          dev->readBootPartitionState<rsmi_compute_partition_type_t>(dv_ind);
+          dev->readBootPartitionState<rsmi_compute_partition_type_t>(0);
+
   // Initiate reset
   // If bootState is UNKNOWN, we cannot reset - return RSMI_STATUS_NOT_SUPPORTED
   // Likely due to device not supporting it
   if (bootState != "UNKNOWN") {
     rsmi_compute_partition_type_t compute_partition =
-                              mapStringToRSMIComputePartitionTypes[bootState];
+      mapStringToRSMIComputePartitionTypes[bootState];
     ret = rsmi_dev_compute_partition_set(dv_ind, compute_partition);
   }
+  ss << __PRETTY_FUNCTION__
+     << " | ======= end ======= "
+     << " | Success - if original boot state was not unknown or valid setting"
+     << " | Device #: " << dv_ind
+     << " | Type: "
+     << RocmSMI::devInfoTypesStrings.at(amd::smi::kDevComputePartition)
+     << " | Data: " << bootState
+     << " | Returning = "
+     << getRSMIStatusString(ret) << " |";
+  LOG_TRACE(ss);
   return ret;
   CATCH
 }
 
-rsmi_status_t rsmi_dev_nps_mode_reset(uint32_t dv_ind) {
+rsmi_status_t rsmi_dev_memory_partition_reset(uint32_t dv_ind) {
   TRY
   std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
@@ -4692,16 +4915,32 @@ rsmi_status_t rsmi_dev_nps_mode_reset(uint32_t dv_ind) {
   DEVICE_MUTEX
   GET_DEV_FROM_INDX
   rsmi_status_t ret = RSMI_STATUS_NOT_SUPPORTED;
-  // read temp file
+
+  // Only use 1st index, rest are there in-case of future issues
+  // NOTE: Partitions sets cause rocm-smi indexes to fluctuate.
+  // Since the nodes are grouped in respect to primary node - why we only use
+  // 1st node/device id to reset
   std::string bootState =
-          dev->readBootPartitionState<rsmi_nps_mode_type_t>(dv_ind);
+          dev->readBootPartitionState<rsmi_memory_partition_type_t>(0);
+
   // Initiate reset
   // If bootState is UNKNOWN, we cannot reset - return RSMI_STATUS_NOT_SUPPORTED
   // Likely due to device not supporting it
   if (bootState != "UNKNOWN") {
-    rsmi_nps_mode_type_t nps_mode = mapStringToNPSModeTypes[bootState];
-    ret = rsmi_dev_nps_mode_set(dv_ind, nps_mode);
+    rsmi_memory_partition_type_t memory_partition =
+      mapStringToMemoryPartitionTypes[bootState];
+    ret = rsmi_dev_memory_partition_set(dv_ind, memory_partition);
   }
+  ss << __PRETTY_FUNCTION__
+     << " | ======= end ======= "
+     << " | Success - if original boot state was not unknown or valid setting"
+     << " | Device #: " << dv_ind
+     << " | Type: "
+     << RocmSMI::devInfoTypesStrings.at(amd::smi::kDevMemoryPartition)
+     << " | Data: " << bootState
+     << " | Returning = "
+     << getRSMIStatusString(ret) << " |";
+  LOG_TRACE(ss);
   return ret;
   CATCH
 }

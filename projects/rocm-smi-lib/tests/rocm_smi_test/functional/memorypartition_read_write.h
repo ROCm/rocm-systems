@@ -42,17 +42,17 @@
  * DEALINGS WITH THE SOFTWARE.
  *
  */
-#ifndef TESTS_ROCM_SMI_TEST_FUNCTIONAL_NPSMODE_READ_WRITE_H_
-#define TESTS_ROCM_SMI_TEST_FUNCTIONAL_NPSMODE_READ_WRITE_H_
+#ifndef TESTS_ROCM_SMI_TEST_FUNCTIONAL_MEMORYPARTITION_READ_WRITE_H_
+#define TESTS_ROCM_SMI_TEST_FUNCTIONAL_MEMORYPARTITION_READ_WRITE_H_
 
 #include "rocm_smi_test/test_base.h"
 
-class TestNPSModeReadWrite : public TestBase {
+class TestMemoryPartitionReadWrite : public TestBase {
  public:
-    TestNPSModeReadWrite();
+    TestMemoryPartitionReadWrite();
 
-  // @Brief: Destructor for test case of TestNPSModeReadWrite
-  virtual ~TestNPSModeReadWrite();
+  // @Brief: Destructor for test case of TestMemoryPartitionReadWrite
+  virtual ~TestMemoryPartitionReadWrite();
 
   // @Brief: Setup the environment for measurement
   virtual void SetUp();
@@ -70,4 +70,4 @@ class TestNPSModeReadWrite : public TestBase {
   virtual void DisplayTestInfo(void);
 };
 
-#endif  // TESTS_ROCM_SMI_TEST_FUNCTIONAL_NPSMODE_READ_WRITE_H_
+#endif  // TESTS_ROCM_SMI_TEST_FUNCTIONAL_MEMORYPARTITION_READ_WRITE_H_

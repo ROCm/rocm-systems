@@ -45,8 +45,12 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <unistd.h>
 
 #include <iostream>
+#include <chrono>   // NOLINT [build]
+#include <map>
+#include <string>
 
 #include "gtest/gtest.h"
 #include "rocm_smi/rocm_smi.h"
@@ -134,6 +138,26 @@ void TestComputePartitionReadWrite::Run(void) {
     return;
   }
 
+  // Confirm system supports compute partition, before executing wait
+  ret = rsmi_dev_compute_partition_get(0, orig_char_computePartition, 255);
+  if (ret == RSMI_STATUS_SUCCESS) {
+    // Adding a delay - since changing partitions depends on gpus not
+    // being in an active state, we'll wait a few seconds before starting
+    // full testing
+    auto start = std::chrono::high_resolution_clock::now();
+    int waitTime = 20;
+    std::cout << "** Waiting for "
+              << std::dec << waitTime
+              << " seconds, for any GPU"
+              << " activity to clear up. **" << std::endl;
+    sleep(waitTime);
+    auto stop = std::chrono::high_resolution_clock::now();
+    auto duration =
+        std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
+    std::cout << "** Waiting took " << duration.count() / 1000000
+              << " seconds **" << std::endl;
+  }
+
   for (uint32_t dv_ind = 0; dv_ind < num_monitor_devs(); ++dv_ind) {
     if (dv_ind != 0) {
       IF_VERB(STANDARD) {
@@ -142,7 +166,7 @@ void TestComputePartitionReadWrite::Run(void) {
     }
     PrintDeviceHeader(dv_ind);
 
-    //Standard checks to see if API is supported, before running full tests
+    // Standard checks to see if API is supported, before running full tests
     ret = rsmi_dev_compute_partition_get(dv_ind, orig_char_computePartition,
                                           255);
     if (ret == RSMI_STATUS_NOT_SUPPORTED) {
@@ -169,12 +193,12 @@ void TestComputePartitionReadWrite::Run(void) {
     ASSERT_EQ(RSMI_STATUS_SUCCESS, ret);
 
     // Verify api support checking functionality is working
-    uint32_t length = 2;
-    char smallBuffer[length];
-    err = rsmi_dev_compute_partition_get(dv_ind, smallBuffer, length);
+    uint32_t kLength = 2;
+    char smallBuffer[kLength];
+    err = rsmi_dev_compute_partition_get(dv_ind, smallBuffer, kLength);
     size_t size = sizeof(smallBuffer)/sizeof(*smallBuffer);
     ASSERT_EQ(err, RSMI_STATUS_INSUFFICIENT_SIZE);
-    ASSERT_EQ((size_t)length, size);
+    ASSERT_EQ((size_t)kLength, size);
     IF_VERB(STANDARD) {
       if (err == RSMI_STATUS_INSUFFICIENT_SIZE) {
         std::cout << "\t**"
@@ -207,9 +231,9 @@ void TestComputePartitionReadWrite::Run(void) {
     }
 
     // Verify api support checking functionality is working
-    rsmi_compute_partition_type new_computePartition
-      = rsmi_compute_partition_type::RSMI_COMPUTE_PARTITION_INVALID;
-    err = rsmi_dev_compute_partition_set(dv_ind, new_computePartition);
+    rsmi_compute_partition_type_t newPartition
+      = rsmi_compute_partition_type_t::RSMI_COMPUTE_PARTITION_INVALID;
+    err = rsmi_dev_compute_partition_set(dv_ind, newPartition);
     ASSERT_TRUE((err == RSMI_STATUS_INVALID_ARGS) ||
                 (err == RSMI_STATUS_NOT_SUPPORTED) ||
                 (err == RSMI_STATUS_PERMISSION));
@@ -246,24 +270,24 @@ void TestComputePartitionReadWrite::Run(void) {
      *                                  //!< work together with shared memory
      */
 
-    for (int partition = RSMI_COMPUTE_PARTITION_CPX;
-         partition <= RSMI_COMPUTE_PARTITION_QPX;
+    for (int partition =
+         rsmi_compute_partition_type_t::RSMI_COMPUTE_PARTITION_CPX;
+         partition <= rsmi_compute_partition_type_t::RSMI_COMPUTE_PARTITION_QPX;
          partition++) {
-      new_computePartition
-        = static_cast<rsmi_compute_partition_type>(partition);
+      newPartition = static_cast<rsmi_compute_partition_type_t>(partition);
       IF_VERB(STANDARD) {
         std::cout << std::endl;
         std::cout << "\t**"
                   << "======== TEST RSMI_COMPUTE_PARTITION_"
-                  << computePartitionString(new_computePartition)
+                  << computePartitionString(newPartition)
                   << " ===============" << std::endl;
       }
       IF_VERB(STANDARD) {
         std::cout << "\t**"
                   << "Attempting to set compute partition to: "
-                  << computePartitionString(new_computePartition) << std::endl;
+                  << computePartitionString(newPartition) << std::endl;
       }
-      ret = rsmi_dev_compute_partition_set(dv_ind, new_computePartition);
+      ret = rsmi_dev_compute_partition_set(dv_ind, newPartition);
       bool isSettingUnavailable = false;
       ASSERT_TRUE((ret == RSMI_STATUS_SUCCESS) ||
                   (ret == RSMI_STATUS_SETTING_UNAVAILABLE));
@@ -282,7 +306,7 @@ void TestComputePartitionReadWrite::Run(void) {
       }
       if (isSettingUnavailable) {
         ASSERT_EQ(RSMI_STATUS_SETTING_UNAVAILABLE, ret);
-        ASSERT_STRNE(computePartitionString(new_computePartition).c_str(),
+        ASSERT_STRNE(computePartitionString(newPartition).c_str(),
                      current_char_computePartition);
         IF_VERB(STANDARD) {
           std::cout << "\t**"
@@ -290,19 +314,19 @@ void TestComputePartitionReadWrite::Run(void) {
                     << "RSMI_STATUS_SETTING_UNAVAILABLE,\n\t  current compute "
                     << "partition (" << current_char_computePartition
                     << ") did not update to ("
-                    << computePartitionString(new_computePartition) << ")"
+                    << computePartitionString(newPartition) << ")"
                     << std::endl;
         }
       } else {
         ASSERT_EQ(RSMI_STATUS_SUCCESS, ret);
-        ASSERT_STREQ(computePartitionString(new_computePartition).c_str(),
+        ASSERT_STREQ(computePartitionString(newPartition).c_str(),
                      current_char_computePartition);
         IF_VERB(STANDARD) {
           std::cout << "\t**"
                     << "Confirmed current compute partition ("
                     << current_char_computePartition << ") matches"
                     << "\n\t  requested compute partition ("
-                    << computePartitionString(new_computePartition) << ")"
+                    << computePartitionString(newPartition) << ")"
                     << std::endl;
         }
       }
@@ -355,26 +379,27 @@ void TestComputePartitionReadWrite::Run(void) {
                 << "=========== TEST RETURN TO ORIGINAL COMPUTE PARTITION "
                 << "SETTING ========" << std::endl;
     }
-    new_computePartition
-      = mapStringToRSMIComputePartitionTypes.at(orig_char_computePartition);
-    ret = rsmi_dev_compute_partition_set(dv_ind, new_computePartition);
+    newPartition
+      = mapStringToRSMIComputePartitionTypes.at(
+                                      std::string(orig_char_computePartition));
+    ret = rsmi_dev_compute_partition_set(dv_ind, newPartition);
     CHK_ERR_ASRT(ret)
     IF_VERB(STANDARD) {
       std::cout << "\t**" << "Returning compute partition to: "
-                << computePartitionString(new_computePartition) << std::endl;
+                << computePartitionString(newPartition) << std::endl;
     }
     ret = rsmi_dev_compute_partition_get(dv_ind, current_char_computePartition,
                                           255);
     CHK_ERR_ASRT(ret)
     IF_VERB(STANDARD) {
       std::cout << "\t**" << "Attempted to set compute partition: "
-                << computePartitionString(new_computePartition) << std::endl
+                << computePartitionString(newPartition) << std::endl
                 << "\t**" << "Current compute partition: "
                 << current_char_computePartition
                 << std::endl;
     }
     ASSERT_EQ(RSMI_STATUS_SUCCESS, ret);
-    ASSERT_STREQ(computePartitionString(new_computePartition).c_str(),
+    ASSERT_STREQ(computePartitionString(newPartition).c_str(),
                  current_char_computePartition);
   }
 }
