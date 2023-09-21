@@ -42,8 +42,8 @@ rocprofiler_add_interface_library(rocprofiler-dl
                                   "Build flags for dynamic linking library" INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-rt "Build flags for runtime library"
                                   INTERNAL)
-rocprofiler_add_interface_library(rocprofiler-hip "HIP library" INTERNAL)
-rocprofiler_add_interface_library(rocprofiler-hsa-runtime "HSA runtime library" INTERNAL)
+rocprofiler_add_interface_library(rocprofiler-hip "HIP library")
+rocprofiler_add_interface_library(rocprofiler-hsa-runtime "HSA runtime library")
 rocprofiler_add_interface_library(rocprofiler-amd-comgr "AMD comgr library" INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-gtest "Google Test library" INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-glog "Google Log library" INTERNAL)

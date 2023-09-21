@@ -28,6 +28,7 @@ set(ROCPROFILER_HEADER_FILES
     marker.h
     pc_sampling.h
     profile_config.h
+    registration.h
     spm.h
     ${CMAKE_CURRENT_BINARY_DIR}/version.h)
 

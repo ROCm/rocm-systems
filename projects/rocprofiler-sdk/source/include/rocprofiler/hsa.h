@@ -22,11 +22,25 @@
 
 #pragma once
 
+// without AMD_INTERNAL_BUILD defined, including the hsa/hsa.h looks for headers in inc/ folder
+// so we always want it defined but we set ROCPROFILER_DEFINED_AMD_INTERNAL_BUILD to 1 to tell
+// us that after this include, we should undefine it
+#ifndef AMD_INTERNAL_BUILD
+#    define AMD_INTERNAL_BUILD
+#    ifndef ROCPROFILER_DEFINED_AMD_INTERNAL_BUILD
+#        define ROCPROFILER_DEFINED_AMD_INTERNAL_BUILD 1
+#    endif
+#endif
+
 #include <rocprofiler/hsa/api_args.h>
 #include <rocprofiler/hsa/api_id.h>
 #include <rocprofiler/hsa/table_api_id.h>
 
 #include <hsa/hsa.h>
+
+#if defined(ROCPROFILER_DEFINED_AMD_INTERNAL_BUILD) && ROCPROFILER_DEFINED_AMD_INTERNAL_BUILD > 0
+#    undef AMD_INTERNAL_BUILD
+#endif
 
 #include <stdint.h>
 

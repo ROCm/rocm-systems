@@ -1,7 +1,13 @@
 #
 #
 #
+cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
+
 project(rocprofiler-samples-pc-sampling LANGUAGES C CXX)
+
+if(NOT TARGET rocprofiler::rocprofiler-library)
+    find_package(rocprofiler REQUIRED)
+endif()
 
 add_executable(pc_sampling_single-user-host-trap)
 target_sources(pc_sampling_single-user-host-trap PRIVATE common.h

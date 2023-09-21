@@ -25,6 +25,10 @@ foreach(_TYPE DEBUG MINSIZEREL RELEASE RELWITHDEBINFO)
     endif()
 endforeach()
 
+if(NOT TARGET rocprofiler::rocprofiler-library)
+    find_package(rocprofiler REQUIRED)
+endif()
+
 add_library(buffered-api-tracing-client SHARED)
 target_sources(buffered-api-tracing-client PRIVATE client.cpp client.hpp)
 target_link_libraries(buffered-api-tracing-client

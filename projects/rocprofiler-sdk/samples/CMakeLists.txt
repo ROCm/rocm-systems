@@ -1,6 +1,8 @@
 #
 #
 #
+cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
+
 project(rocprofiler-samples LANGUAGES C CXX)
 
 # add_subdirectory(api_tracing)

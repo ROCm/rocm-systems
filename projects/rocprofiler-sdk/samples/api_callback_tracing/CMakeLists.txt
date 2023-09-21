@@ -25,6 +25,10 @@ foreach(_TYPE DEBUG MINSIZEREL RELEASE RELWITHDEBINFO)
     endif()
 endforeach()
 
+if(NOT TARGET rocprofiler::rocprofiler-library)
+    find_package(rocprofiler REQUIRED)
+endif()
+
 add_library(callback-api-tracing-client SHARED)
 target_sources(callback-api-tracing-client PRIVATE client.cpp client.hpp)
 target_link_libraries(callback-api-tracing-client

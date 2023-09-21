@@ -100,7 +100,7 @@ jobs:
           ${{ matrix.ci-flags }}
           --
           -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
-          -DCMAKE_INSTALL_PREFIX="${{ env.ROCM_PATH }}"
+          -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler/v2
           -DCPACK_GENERATOR='DEB;RPM;TGZ'
           -DPython3_EXECUTABLE=$(which python3)
 
@@ -108,6 +108,13 @@ jobs:
       timeout-minutes: 10
       run:
         cmake --build build --target install --parallel 8
+
+    - name: Test Install Build
+      timeout-minutes: 10
+      shell: bash
+      run: |
+        CMAKE_PREFIX_PATH=/opt/rocprofiler/v2 cmake -B build-samples samples
+        cmake --build build-samples --target all --parallel 8
 
     - name: Build Packaging
       timeout-minutes: 10

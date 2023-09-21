@@ -28,4 +28,11 @@ set_target_properties(
     PROPERTIES OUTPUT_NAME rocprofiler64
                SOVERSION ${PROJECT_VERSION_MAJOR}
                VERSION ${PROJECT_VERSION}
+               INSTALL_RPATH "\$ORIGIN"
                DEFINE_SYMBOL rocprofiler_EXPORTS)
+
+install(
+    TARGETS rocprofiler-library
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    COMPONENT core
+    EXPORT ${PROJECT_NAME}-library-targets)
