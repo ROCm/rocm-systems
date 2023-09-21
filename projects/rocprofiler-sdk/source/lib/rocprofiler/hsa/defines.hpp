@@ -32,30 +32,27 @@
 #define IMPL_DETAIL_FOR_EACH(MACRO, PREFIX, ...)                                                   \
     IMPL_DETAIL_FOR_EACH_(IMPL_DETAIL_FOR_EACH_NARG(__VA_ARGS__), MACRO, PREFIX, __VA_ARGS__)
 
-#define MEMBER_0(...)
-#define MEMBER_1(PREFIX, FIELD)            PREFIX.FIELD
-#define MEMBER_2(PREFIX, A, B)             MEMBER_1(PREFIX, A), MEMBER_1(PREFIX, B)
-#define MEMBER_3(PREFIX, A, B, C)          MEMBER_2(PREFIX, A, B), MEMBER_1(PREFIX, C)
-#define MEMBER_4(PREFIX, A, B, C, D)       MEMBER_3(PREFIX, A, B, C), MEMBER_1(PREFIX, D)
-#define MEMBER_5(PREFIX, A, B, C, D, E)    MEMBER_4(PREFIX, A, B, C, D), MEMBER_1(PREFIX, E)
-#define MEMBER_6(PREFIX, A, B, C, D, E, F) MEMBER_5(PREFIX, A, B, C, D, E), MEMBER_1(PREFIX, F)
-#define MEMBER_7(PREFIX, A, B, C, D, E, F, G)                                                      \
-    MEMBER_6(PREFIX, A, B, C, D, E, F), MEMBER_1(PREFIX, G)
-
-#define MEMBER_8(PREFIX, A, B, C, D, E, F, G, H)                                                   \
-    MEMBER_7(PREFIX, A, B, C, D, E, F, G), MEMBER_1(PREFIX, H)
-
-#define MEMBER_9(PREFIX, A, B, C, D, E, F, G, H, I)                                                \
-    MEMBER_8(PREFIX, A, B, C, D, E, F, G, H), MEMBER_1(PREFIX, I)
-
-#define MEMBER_10(PREFIX, A, B, C, D, E, F, G, H, I, J)                                            \
-    MEMBER_9(PREFIX, A, B, C, D, E, F, G, H, I), MEMBER_1(PREFIX, J)
-
-#define MEMBER_11(PREFIX, A, B, C, D, E, F, G, H, I, J, K)                                         \
-    MEMBER_10(PREFIX, A, B, C, D, E, F, G, H, I, J), MEMBER_1(PREFIX, K)
-
-#define MEMBER_12(PREFIX, A, B, C, D, E, F, G, H, I, J, K, L)                                      \
-    MEMBER_11(PREFIX, A, B, C, D, E, F, G, H, I, J, K), MEMBER_1(PREFIX, L)
+#define ADDR_MEMBER_0(...)
+#define ADDR_MEMBER_1(PREFIX, FIELD)      static_cast<void*>(&PREFIX.FIELD)
+#define ADDR_MEMBER_2(PREFIX, A, B)       ADDR_MEMBER_1(PREFIX, A), ADDR_MEMBER_1(PREFIX, B)
+#define ADDR_MEMBER_3(PREFIX, A, B, C)    ADDR_MEMBER_2(PREFIX, A, B), ADDR_MEMBER_1(PREFIX, C)
+#define ADDR_MEMBER_4(PREFIX, A, B, C, D) ADDR_MEMBER_3(PREFIX, A, B, C), ADDR_MEMBER_1(PREFIX, D)
+#define ADDR_MEMBER_5(PREFIX, A, B, C, D, E)                                                       \
+    ADDR_MEMBER_4(PREFIX, A, B, C, D), ADDR_MEMBER_1(PREFIX, E)
+#define ADDR_MEMBER_6(PREFIX, A, B, C, D, E, F)                                                    \
+    ADDR_MEMBER_5(PREFIX, A, B, C, D, E), ADDR_MEMBER_1(PREFIX, F)
+#define ADDR_MEMBER_7(PREFIX, A, B, C, D, E, F, G)                                                 \
+    ADDR_MEMBER_6(PREFIX, A, B, C, D, E, F), ADDR_MEMBER_1(PREFIX, G)
+#define ADDR_MEMBER_8(PREFIX, A, B, C, D, E, F, G, H)                                              \
+    ADDR_MEMBER_7(PREFIX, A, B, C, D, E, F, G), ADDR_MEMBER_1(PREFIX, H)
+#define ADDR_MEMBER_9(PREFIX, A, B, C, D, E, F, G, H, I)                                           \
+    ADDR_MEMBER_8(PREFIX, A, B, C, D, E, F, G, H), ADDR_MEMBER_1(PREFIX, I)
+#define ADDR_MEMBER_10(PREFIX, A, B, C, D, E, F, G, H, I, J)                                       \
+    ADDR_MEMBER_9(PREFIX, A, B, C, D, E, F, G, H, I), ADDR_MEMBER_1(PREFIX, J)
+#define ADDR_MEMBER_11(PREFIX, A, B, C, D, E, F, G, H, I, J, K)                                    \
+    ADDR_MEMBER_10(PREFIX, A, B, C, D, E, F, G, H, I, J), ADDR_MEMBER_1(PREFIX, K)
+#define ADDR_MEMBER_12(PREFIX, A, B, C, D, E, F, G, H, I, J, K, L)                                 \
+    ADDR_MEMBER_11(PREFIX, A, B, C, D, E, F, G, H, I, J, K), ADDR_MEMBER_1(PREFIX, L)
 
 #define NAMED_MEMBER_0(...)
 #define NAMED_MEMBER_1(PREFIX, FIELD)   std::make_pair(#FIELD, PREFIX.FIELD)
@@ -80,44 +77,10 @@
 #define NAMED_MEMBER_12(PREFIX, A, B, C, D, E, F, G, H, I, J, K, L)                                \
     NAMED_MEMBER_11(PREFIX, A, B, C, D, E, F, G, H, I, J, K), NAMED_MEMBER_1(PREFIX, L)
 
-/// @def GET_MEMBER_FIELDS
-/// @param VAR some struct instance
-/// @param ... The member fields of the struct
-///
-/// @brief this macro is used to expand one variable (VAR) + one or more member fields (FIELDS)
-/// into a sequence of something like: `(VAR.FIELD, ...)`
-/// For example, `GET_MEMBER_FIELDS(foo, a, b, c)` would transform into `foo.a, foo.b, foo.c`:
-///
-/// @code{.cpp}
-///
-///     struct Foo
-///     {
-///         int    a;
-///         float  b;
-///         double c;
-///     };
-///
-///     // some function taking int, float, and double
-///     void some_function(int, float, double);
-///
-///     // overload to some_function accepting Foo instance and using
-///     // the args to invoke "real" function
-///     void some_function(Foo _foo_v)
-///     {
-///         some_function(GET_MEMBER_FIELDS(_foo_v, a, b, c));
-///     }
-///
-///     int main()
-///     {
-///         Foo _foo_v = {-1, 0.5f, 2.0};
-///         invoke_some_function(_foo_v);
-///     }
-///
-/// @code
-#define GET_MEMBER_FIELDS(VAR, ...)       IMPL_DETAIL_FOR_EACH(MEMBER_, VAR, __VA_ARGS__)
+#define GET_ADDR_MEMBER_FIELDS(VAR, ...)  IMPL_DETAIL_FOR_EACH(ADDR_MEMBER_, VAR, __VA_ARGS__)
 #define GET_NAMED_MEMBER_FIELDS(VAR, ...) IMPL_DETAIL_FOR_EACH(NAMED_MEMBER_, VAR, __VA_ARGS__)
 
-#define HSA_API_INFO_DEFINITION_0(HSA_DOMAIN, HSA_TABLE, HSA_API_ID, HSA_FUNC, HSA_FUNC_PTR)       \
+#define HSA_API_INFO_DEFINITION_0(HSA_TABLE, HSA_API_ID, HSA_FUNC, HSA_FUNC_PTR)                   \
     namespace rocprofiler                                                                          \
     {                                                                                              \
     namespace hsa                                                                                  \
@@ -125,10 +88,11 @@
     template <>                                                                                    \
     struct hsa_api_info<HSA_API_ID>                                                                \
     {                                                                                              \
-        static constexpr auto domain_idx    = HSA_DOMAIN;                                          \
-        static constexpr auto table_idx     = HSA_TABLE;                                           \
-        static constexpr auto operation_idx = HSA_API_ID;                                          \
-        static constexpr auto name          = #HSA_FUNC;                                           \
+        static constexpr auto callback_domain_idx = ROCPROFILER_SERVICE_CALLBACK_TRACING_HSA_API;  \
+        static constexpr auto buffered_domain_idx = ROCPROFILER_SERVICE_BUFFER_TRACING_HSA_API;    \
+        static constexpr auto table_idx           = HSA_TABLE;                                     \
+        static constexpr auto operation_idx       = HSA_API_ID;                                    \
+        static constexpr auto name                = #HSA_FUNC;                                     \
                                                                                                    \
         using this_type = hsa_api_info<operation_idx>;                                             \
         using base_type = hsa_api_impl<operation_idx>;                                             \
@@ -160,7 +124,7 @@
         template <typename DataT>                                                                  \
         static auto& get_api_data_args(DataT& _data)                                               \
         {                                                                                          \
-            return _data.api_data.args.HSA_FUNC;                                                   \
+            return _data.HSA_FUNC;                                                                 \
         }                                                                                          \
                                                                                                    \
         template <typename RetT, typename... Args>                                                 \
@@ -174,18 +138,13 @@
                                                                                                    \
         static auto get_functor() { return get_functor(get_table_func()); }                        \
                                                                                                    \
-        static std::string as_string(rocprofiler_hsa_trace_data_t)                                 \
+        static std::vector<void*> as_arg_addr(rocprofiler_hsa_api_callback_tracer_data_t)          \
         {                                                                                          \
-            return std::string{name} + "()";                                                       \
-        }                                                                                          \
-                                                                                                   \
-        static std::string as_named_string(rocprofiler_hsa_trace_data_t)                           \
-        {                                                                                          \
-            return std::string{name} + "()";                                                       \
+            return std::vector<void*>{};                                                           \
         }                                                                                          \
                                                                                                    \
         static std::vector<std::pair<std::string, std::string>> as_arg_list(                       \
-            rocprofiler_hsa_trace_data_t)                                                          \
+            rocprofiler_hsa_api_callback_tracer_data_t)                                            \
         {                                                                                          \
             return {};                                                                             \
         }                                                                                          \
@@ -193,7 +152,7 @@
     }                                                                                              \
     }
 
-#define HSA_API_INFO_DEFINITION_V(HSA_DOMAIN, HSA_TABLE, HSA_API_ID, HSA_FUNC, HSA_FUNC_PTR, ...)  \
+#define HSA_API_INFO_DEFINITION_V(HSA_TABLE, HSA_API_ID, HSA_FUNC, HSA_FUNC_PTR, ...)              \
     namespace rocprofiler                                                                          \
     {                                                                                              \
     namespace hsa                                                                                  \
@@ -201,10 +160,11 @@
     template <>                                                                                    \
     struct hsa_api_info<HSA_API_ID>                                                                \
     {                                                                                              \
-        static constexpr auto domain_idx    = HSA_DOMAIN;                                          \
-        static constexpr auto table_idx     = HSA_TABLE;                                           \
-        static constexpr auto operation_idx = HSA_API_ID;                                          \
-        static constexpr auto name          = #HSA_FUNC;                                           \
+        static constexpr auto callback_domain_idx = ROCPROFILER_SERVICE_CALLBACK_TRACING_HSA_API;  \
+        static constexpr auto buffered_domain_idx = ROCPROFILER_SERVICE_BUFFER_TRACING_HSA_API;    \
+        static constexpr auto table_idx           = HSA_TABLE;                                     \
+        static constexpr auto operation_idx       = HSA_API_ID;                                    \
+        static constexpr auto name                = #HSA_FUNC;                                     \
                                                                                                    \
         using this_type = hsa_api_info<operation_idx>;                                             \
         using base_type = hsa_api_impl<operation_idx>;                                             \
@@ -236,7 +196,7 @@
         template <typename DataT>                                                                  \
         static auto& get_api_data_args(DataT& _data)                                               \
         {                                                                                          \
-            return _data.api_data.args.HSA_FUNC;                                                   \
+            return _data.HSA_FUNC;                                                                 \
         }                                                                                          \
                                                                                                    \
         template <typename RetT, typename... Args>                                                 \
@@ -250,23 +210,17 @@
                                                                                                    \
         static auto get_functor() { return get_functor(get_table_func()); }                        \
                                                                                                    \
-        static std::string as_string(rocprofiler_hsa_trace_data_t trace_data)                      \
+        static std::vector<void*> as_arg_addr(                                                     \
+            rocprofiler_hsa_api_callback_tracer_data_t trace_data)                                 \
         {                                                                                          \
-            return utils::join(utils::join_args{std::string{name} + "(", ")", ", "},               \
-                               GET_MEMBER_FIELDS(get_api_data_args(trace_data), __VA_ARGS__));     \
+            return std::vector<void*>{                                                             \
+                GET_ADDR_MEMBER_FIELDS(get_api_data_args(trace_data.args), __VA_ARGS__)};          \
         }                                                                                          \
                                                                                                    \
-        static std::string as_named_string(rocprofiler_hsa_trace_data_t trace_data)                \
-        {                                                                                          \
-            return utils::join(                                                                    \
-                utils::join_args{std::string{name} + "(", ")", ", "},                              \
-                GET_NAMED_MEMBER_FIELDS(get_api_data_args(trace_data), __VA_ARGS__));              \
-        }                                                                                          \
-                                                                                                   \
-        static auto as_arg_list(rocprofiler_hsa_trace_data_t trace_data)                           \
+        static auto as_arg_list(rocprofiler_hsa_api_callback_tracer_data_t trace_data)             \
         {                                                                                          \
             return utils::stringize(                                                               \
-                GET_NAMED_MEMBER_FIELDS(get_api_data_args(trace_data), __VA_ARGS__));              \
+                GET_NAMED_MEMBER_FIELDS(get_api_data_args(trace_data.args), __VA_ARGS__));         \
         }                                                                                          \
     };                                                                                             \
     }                                                                                              \

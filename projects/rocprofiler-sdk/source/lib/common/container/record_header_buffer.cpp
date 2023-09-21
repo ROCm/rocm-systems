@@ -59,7 +59,7 @@ record_header_buffer::operator=(record_header_buffer&& _rhs) noexcept
     if(this != &_rhs)
     {
         auto _lk  = rhb_raii_lock{_rhs};
-        m_index   = _rhs.m_index.load(std::memory_order_relaxed);
+        m_index   = _rhs.m_index.load(std::memory_order_acquire);
         m_buffer  = std::move(_rhs.m_buffer);
         m_headers = std::move(_rhs.m_headers);
         _rhs.reset();
@@ -74,7 +74,8 @@ record_header_buffer::allocate(size_t num_bytes)
 
     auto _lk = rhb_raii_lock{*this};
     m_buffer.init(num_bytes);
-    m_headers.resize(m_buffer.capacity(), rocprofiler_record_header_t{0, nullptr});
+    m_headers.resize(m_buffer.capacity(),
+                     rocprofiler_record_header_t{.hash = 0, .payload = nullptr});
     return true;
 }
 
@@ -83,13 +84,13 @@ record_header_buffer::get_record_headers(size_t _n)
 {
     auto _lk = rhb_raii_lock{*this};
 
-    auto _sz = m_index.load(std::memory_order_relaxed);
+    auto _sz = m_index.load(std::memory_order_acquire);
     if(_n > _sz) _n = _sz;
     auto _ret = record_ptr_vec_t{};
     _ret.reserve(_n);
     for(size_t i = 0; i < _n; ++i)
     {
-        if(auto& itr = m_headers.at(i); itr.kind > 0 && itr.payload != nullptr)
+        if(auto& itr = m_headers.at(i); itr.hash > 0 && itr.payload != nullptr)
             _ret.emplace_back(&itr);
     }
     return _ret;
@@ -105,9 +106,9 @@ record_header_buffer::clear()
         auto _sz = m_buffer.capacity();
         if(!m_buffer.clear(std::nothrow_t{})) return 0;
         std::for_each(m_headers.begin(), m_headers.end(), [](auto& itr) {
-            itr = rocprofiler_record_header_t{0, nullptr};
+            itr = rocprofiler_record_header_t{.hash = 0, .payload = nullptr};
         });
-        m_headers.resize(_sz, rocprofiler_record_header_t{0, nullptr});
+        m_headers.resize(_sz, rocprofiler_record_header_t{.hash = 0, .payload = nullptr});
         m_index.store(0, std::memory_order_release);
     }
 

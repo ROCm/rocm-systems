@@ -29,9 +29,9 @@ namespace rocprofiler
 {
 namespace hsa
 {
-using activity_functor_t = int (*)(rocprofiler_tracer_activity_domain_t domain,
-                                   uint32_t                             operation_id,
-                                   void*                                data);
+using activity_functor_t = int (*)(rocprofiler_service_callback_tracing_kind_t domain,
+                                   uint32_t                                    operation_id,
+                                   void*                                       data);
 
 using hsa_api_table_t = HsaApiTable;
 
@@ -44,14 +44,11 @@ struct hsa_table_lookup;
 template <size_t Idx>
 struct hsa_api_impl
 {
-    template <typename DataT, typename DataArgsT, typename... Args>
-    static auto phase_enter(DataT& _data, DataArgsT&, Args... args);
+    template <typename DataArgsT, typename... Args>
+    static auto set_data_args(DataArgsT&, Args... args);
 
-    template <typename DataT, typename... Args>
-    static auto phase_exit(DataT& _data);
-
-    template <typename DataT, typename FuncT, typename... Args>
-    static auto exec(DataT& _data, FuncT&&, Args&&... args);
+    template <typename FuncT, typename... Args>
+    static auto exec(FuncT&&, Args&&... args);
 
     template <typename... Args>
     static auto functor(Args&&... args);
@@ -61,39 +58,27 @@ template <size_t Idx>
 struct hsa_api_info;
 
 const char*
-hsa_api_name(uint32_t id);
+name_by_id(uint32_t id);
 
 uint32_t
-hsa_api_id_by_name(const char* name);
-
-std::string
-hsa_api_data_string(uint32_t id, const rocprofiler_hsa_trace_data_t& _data);
-
-std::string
-hsa_api_named_data_string(uint32_t id, const rocprofiler_hsa_trace_data_t& _data);
+id_by_name(const char* name);
 
 void
-hsa_api_iterate_args(uint32_t                            id,
-                     const rocprofiler_hsa_trace_data_t& _data,
-                     int (*_func)(const char*, const char*));
+iterate_args(uint32_t                                          id,
+             const rocprofiler_hsa_api_callback_tracer_data_t& data,
+             rocprofiler_callback_tracing_operation_args_cb_t  callback,
+             void*                                             user_data);
 
 std::vector<const char*>
-hsa_api_get_names();
+get_names();
 
 std::vector<uint32_t>
-hsa_api_get_ids();
+get_ids();
 
 void
-hsa_api_set_callback(activity_functor_t _func);
+set_callback(activity_functor_t _func);
+
+void
+update_table(hsa_api_table_t* _orig);
 }  // namespace hsa
 }  // namespace rocprofiler
-
-extern "C" {
-using on_load_t = bool (*)(HsaApiTable*, uint64_t, uint64_t, const char* const*);
-
-bool
-OnLoad(HsaApiTable*       table,
-       uint64_t           runtime_version,
-       uint64_t           failed_tool_count,
-       const char* const* failed_tool_names) ROCPROFILER_PUBLIC_API;
-}

@@ -49,3 +49,4 @@ rocprofiler_add_interface_library(rocprofiler-gtest "Google Test library" INTERN
 rocprofiler_add_interface_library(rocprofiler-glog "Google Log library" INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-fmt "C++ format string library" INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-stdcxxfs "C++ filesystem library" INTERNAL)
+rocprofiler_add_interface_library(rocprofiler-ptl "Parallel Tasking Library" INTERNAL)

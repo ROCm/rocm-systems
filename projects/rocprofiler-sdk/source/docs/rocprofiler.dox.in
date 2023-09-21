@@ -142,14 +142,22 @@ RECURSIVE              = YES
 EXCLUDE                =
 EXCLUDE_SYMLINKS       = YES
 EXCLUDE_PATTERNS       = */.git/* \
-                         @SOURCE_DIR@/samples/* \
                          @SOURCE_DIR@/**/tests/* \
-                         @SOURCE_DIR@/source/include/rocprofiler/defines.h \
-                         @SOURCE_DIR@/source/include/rocprofiler/config.h
+                         @SOURCE_DIR@/**/scripts/* \
+                         @SOURCE_DIR@/**/docs/*
 EXCLUDE_SYMBOLS        = "std::*" \
                          "ROCPROFILER_ATTRIBUTE" \
                          "ROCPROFILER_API" \
-                         "ROCPROFILER_NONNULL"
+                         "ROCPROFILER_NONNULL" \
+                         "ROCPROFILER_PUBLIC_API" \
+                         "ROCPROFILER_HIDDEN_API" \
+                         "ROCPROFILER_EXPORT_DECORATOR" \
+                         "ROCPROFILER_IMPORT_DECORATOR" \
+                         "ROCPROFILER_EXPORT" \
+                         "ROCPROFILER_IMPORT" \
+                         "ROCPROFILER_HANDLE_LITERAL" \
+                         "ROCPROFILER_EXTERN_C_INIT" \
+                         "ROCPROFILER_EXTERN_C_FINI"
 EXAMPLE_PATH           = @SOURCE_DIR@/samples
 EXAMPLE_PATTERNS       = *.h \
                          *.hh \
@@ -157,7 +165,6 @@ EXAMPLE_PATTERNS       = *.h \
                          *.c \
                          *.cc \
                          *.cpp \
-                         conf.py \
                          *.txt
 EXAMPLE_RECURSIVE      = YES
 IMAGE_PATH             =
@@ -330,6 +337,13 @@ PREDEFINED             = "ROCPROFILER_API=" \
                          "ROCPROFILER_EXPORT=" \
                          "ROCPROFILER_IMPORT=" \
                          "ROCPROFILER_NONNULL(...)=" \
+                         "ROCPROFILER_PUBLIC_API=" \
+                         "ROCPROFILER_HIDDEN_API=" \
+                         "ROCPROFILER_EXPORT_DECORATOR=" \
+                         "ROCPROFILER_IMPORT_DECORATOR=" \
+                         "ROCPROFILER_HANDLE_LITERAL=" \
+                         "ROCPROFILER_EXTERN_C_INIT=" \
+                         "ROCPROFILER_EXTERN_C_FINI=" \
                          "__attribute__(x)=" \
                          "__declspec(x)=" \
                          "size_t=unsigned long" \

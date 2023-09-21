@@ -45,70 +45,47 @@ namespace hsa
 {
 namespace utils
 {
-template <typename Tp, typename Up = Tp, std::enable_if_t<fmt::is_formattable<Tp>::value, int> = 0>
-std::string
-stringize_impl(Tp _v, int)
-{
-    return fmt::format("{}", _v);
-}
-
 template <typename Tp>
-std::string
-stringize_impl(Tp _v, long)
+struct is_pair_impl
 {
-    auto _ss = std::stringstream{};
-    _ss << _v;
-    return _ss.str();
-}
+    static constexpr auto value = false;
+};
 
 template <typename LhsT, typename RhsT>
-auto
-stringize_impl(const std::pair<LhsT, RhsT>& _v, int)
+struct is_pair_impl<std::pair<LhsT, RhsT>>
 {
-    return std::make_pair(stringize_impl(_v.first, 0), stringize_impl(_v.second, 0));
-}
-
-struct join_args
-{
-    std::string_view prefix    = {};
-    std::string_view suffix    = {};
-    std::string_view separator = {};
+    static constexpr auto value = true;
 };
 
 template <typename Tp>
-std::string
-join_impl(const Tp& _v)
-{
-    return stringize_impl(_v, 0);
-}
+struct is_pair : is_pair_impl<std::remove_cv_t<std::remove_reference_t<std::decay_t<Tp>>>>
+{};
 
-template <typename LhsT, typename RhsT>
-std::string
-join_impl(const std::pair<LhsT, RhsT>& _v)
-{
-    return fmt::format("{}={}", join_impl(_v.first), join_impl(_v.second));
-}
-
-template <typename... Args>
+template <typename Tp>
 auto
-join(join_args ja, Args... args)
+stringize_impl(const Tp& _v)
 {
-    auto _content = std::string{};
+    if constexpr(is_pair<Tp>::value)
+    {
+        return std::make_pair(stringize_impl(_v.first), stringize_impl(_v.second));
+    }
+    else if constexpr(fmt::is_formattable<Tp>::value && !std::is_pointer<Tp>::value)
+    {
+        return fmt::format("{}", _v);
+    }
+    else
     {
         auto _ss = std::stringstream{};
-        ((_ss << ja.separator << join_impl(args)), ...);
-        auto _v = _ss.str();
-        if(_v.length() > ja.separator.length()) _content = _v.substr(2);
+        _ss << _v;
+        return _ss.str();
     }
-
-    return (std::stringstream{} << ja.prefix << _content << ja.suffix).str();
 }
 
 template <typename... Args>
 auto
 stringize(Args... args)
 {
-    return std::vector<std::pair<std::string, std::string>>{stringize_impl(args, 0)...};
+    return std::vector<std::pair<std::string, std::string>>{stringize_impl(args)...};
 }
 
 template <typename Tp>

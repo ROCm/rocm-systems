@@ -1,36 +1,38 @@
+// MIT License
+//
+// Copyright (c) 2023 ROCm Developer Tools
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
 
 #pragma once
-
-#include "rocprofiler/rocprofiler.h"
 
 #include <array>
 #include <atomic>
 #include <cstddef>
 #include <utility>
 
-namespace
+namespace rocprofiler
 {
-inline size_t  // NOLINTNEXTLINE
-get_domain_max_op(rocprofiler_tracer_activity_domain_t _domain)
+namespace context
 {
-    switch(_domain)
-    {
-        case ROCPROFILER_TRACER_ACTIVITY_DOMAIN_NONE: return -1;
-        case ROCPROFILER_TRACER_ACTIVITY_DOMAIN_HSA_API: return 0;
-        case ROCPROFILER_TRACER_ACTIVITY_DOMAIN_HIP_API: return 0;
-        case ROCPROFILER_TRACER_ACTIVITY_DOMAIN_MARKER_API: return 0;
-        case ROCPROFILER_TRACER_ACTIVITY_DOMAIN_KFD_API: return -1;
-        case ROCPROFILER_TRACER_ACTIVITY_DOMAIN_EXT_API: return -1;
-        case ROCPROFILER_TRACER_ACTIVITY_DOMAIN_HSA_OPS: return 0;
-        case ROCPROFILER_TRACER_ACTIVITY_DOMAIN_HIP_OPS: return 0;
-        case ROCPROFILER_TRACER_ACTIVITY_DOMAIN_HSA_EVT: return 0;
-        case ROCPROFILER_TRACER_ACTIVITY_DOMAIN_LAST: return -1;
-    }
-    return -1;
-}
-
 template <typename Tp, size_t N = 8>
-struct allocator
+struct locality_allocator
 {
     void construct(Tp* const _p, const Tp& _v) const { ::new((void*) _p) Tp{_v}; }
     void construct(Tp* const _p, Tp&& _v) const { ::new((void*) _p) Tp{std::move(_v)}; }
@@ -103,5 +105,5 @@ struct allocator
 
     void reserve(const size_t) {}
 };
-
-}  // namespace
+}  // namespace context
+}  // namespace rocprofiler

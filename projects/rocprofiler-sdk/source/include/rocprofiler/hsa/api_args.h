@@ -26,6 +26,14 @@
 #include <hsa/hsa_ext_image.h>
 #include <rocprofiler/version.h>
 
+typedef union rocprofiler_hsa_api_retval_u
+{
+    uint64_t           uint64_t_retval;
+    uint32_t           uint32_t_retval;
+    hsa_signal_value_t hsa_signal_value_t_retval;
+    hsa_status_t       hsa_status_t_retval;
+} rocprofiler_hsa_api_retval_t;
+
 typedef union rocprofiler_hsa_api_args_u
 {
     // block: CoreApi API

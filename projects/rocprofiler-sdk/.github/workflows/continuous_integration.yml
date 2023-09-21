@@ -72,7 +72,7 @@ jobs:
     needs: get_latest_mainline_build_number
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v4
 
     - name: List Files
       shell: bash
@@ -161,7 +161,9 @@ jobs:
     needs: get_latest_mainline_build_number
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v4
+      with:
+        submodules: true
 
     - name: List Files
       shell: bash
@@ -174,7 +176,7 @@ jobs:
       shell: bash
       run: |
         pip3 install -r requirements.txt
-        apt install -y cmake libgtest-dev
+        apt install -y cmake libgtest-dev libasan8 libtsan2
         git config --global --add safe.directory '*'
 
     - name: Configure, Build, and Test

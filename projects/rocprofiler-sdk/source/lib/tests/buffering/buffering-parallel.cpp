@@ -154,7 +154,7 @@ validate(const std::vector<rocprofiler_record_header_t*>& _headers)
     auto& _ref_data = get_generated_array<Tp, N>();
     for(auto* itr : _headers)
     {
-        if(itr->kind == typeid(data_type).hash_code())
+        if(itr->hash == typeid(data_type).hash_code())
         {
             auto* _data = static_cast<data_type*>(itr->payload);
             EXPECT_EQ(_ref_data, *_data);

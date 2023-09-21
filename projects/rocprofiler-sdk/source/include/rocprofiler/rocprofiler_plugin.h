@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-/** \section rocprofiler_plugin_api ROCProfiler Plugin API
+/** @section rocprofiler_plugin_api ROCProfiler Plugin API
  *
  * The ROCProfiler Plugin API is used by the ROCProfiler Tool to output all
  * profiling information. Different implementations of the ROCProfiler Plugin
@@ -37,7 +37,7 @@
  */
 
 /**
- * \file
+ * @file
  * ROCProfiler Tool Plugin API interface.
  */
 
@@ -47,44 +47,42 @@
 
 #include <stdint.h>
 
-#ifdef __cplusplus
-extern "C" {
-#endif /* __cplusplus */
+ROCPROFILER_EXTERN_C_INIT /* __cplusplus */
 
-/** \defgroup rocprofiler_plugins ROCProfiler Plugin API Specification
- * @{
- */
+    /** @defgroup rocprofiler_plugins ROCProfiler Plugin API Specification
+     * @{
+     */
 
-/** \defgroup initialization_group Initialization and Finalization
- * \ingroup rocprofiler_plugins
- *
- * The ROCProfiler Plugin API must be initialized before using any of the
- * operations to report trace data, and finalized after the last trace data has
- * been reported.
- *
- * @{
- */
+    /** @defgroup initialization_group Initialization and Finalization
+     * @ingroup rocprofiler_plugins
+     *
+     * The ROCProfiler Plugin API must be initialized before using any of the
+     * operations to report trace data, and finalized after the last trace data has
+     * been reported.
+     *
+     * @{
+     */
 
-/**
- * Initialize plugin.
- * Must be called before any other operation.
- *
- * @param[in] rocprofiler_major_version The major version of the ROCProfiler API
- * being used by the ROCProfiler Tool. An error is reported if this does not
- * match the major version of the ROCProfiler API used to build the plugin
- * library. This ensures compatibility of the trace data format.
- * @param[in] rocprofiler_minor_version The minor version of the ROCProfiler API
- * being used by the ROCProfiler Tool. An error is reported if the
- * \p rocprofiler_major_version matches and this is greater than the minor
- * version of the ROCProfiler API used to build the plugin library. This ensures
- * compatibility of the trace data format.
- * @param[in] data Pointer to the data passed to the ROCProfiler Plugin by the tool
- * @return Returns 0 on success and -1 on error.
- */
-ROCPROFILER_EXPORT int
-rocprofiler_plugin_initialize(uint32_t rocprofiler_major_version,
-                              uint32_t rocprofiler_minor_version,
-                              void*    data);
+    /**
+     * Initialize plugin.
+     * Must be called before any other operation.
+     *
+     * @param[in] rocprofiler_major_version The major version of the ROCProfiler API
+     * being used by the ROCProfiler Tool. An error is reported if this does not
+     * match the major version of the ROCProfiler API used to build the plugin
+     * library. This ensures compatibility of the trace data format.
+     * @param[in] rocprofiler_minor_version The minor version of the ROCProfiler API
+     * being used by the ROCProfiler Tool. An error is reported if the
+     * @p rocprofiler_major_version matches and this is greater than the minor
+     * version of the ROCProfiler API used to build the plugin library. This ensures
+     * compatibility of the trace data format.
+     * @param[in] data Pointer to the data passed to the ROCProfiler Plugin by the tool
+     * @return Returns 0 on success and -1 on error.
+     */
+    ROCPROFILER_EXPORT int
+    rocprofiler_plugin_initialize(uint32_t rocprofiler_major_version,
+                                  uint32_t rocprofiler_minor_version,
+                                  void*    data);
 
 /**
  * Finalize plugin.
@@ -97,8 +95,8 @@ rocprofiler_plugin_finalize();
 
 /** @} */
 
-/** \defgroup profiling_record_write_functions Profiling data reporting
- * \ingroup rocprofiler_plugins
+/** @defgroup profiling_record_write_functions Profiling data reporting
+ * @ingroup rocprofiler_plugins
  * Operations to output profiling data.
  * @{
  */
@@ -128,12 +126,10 @@ rocprofiler_plugin_write_buffer_records(rocprofiler_context_id_t      context_id
  */
 
 ROCPROFILER_EXPORT int
-rocprofiler_plugin_write_record(rocprofiler_record_tracer_t record);
+rocprofiler_plugin_write_record(rocprofiler_record_header_t record);
 
 /** @} */
 
 /** @} */
 
-#ifdef __cplusplus
-} /* extern "C" */
-#endif /* __cplusplus */
+ROCPROFILER_EXTERN_C_FINI

@@ -22,6 +22,29 @@
 
 #pragma once
 
+/** @defgroup SYMBOL_VERSIONING_GROUP Symbol Versions
+ *
+ * The names used for the shared library versioned symbols.
+ *
+ * Every function is annotated with one of the version macros defined in this
+ * section.  Each macro specifies a corresponding symbol version string.  After
+ * dynamically loading the shared library with @p dlopen, the address of each
+ * function can be obtained using @p dlsym with the name of the function and
+ * its corresponding symbol version string.  An error will be reported by @p
+ * dlvsym if the installed library does not support the version for the
+ * function specified in this version of the interface.
+ *
+ * @{
+ */
+
+/**
+ * @brief The function was introduced in version 10.0 of the interface and has the
+ * symbol version string of ``"ROCPROFILER_10.0"``.
+ */
+#define ROCPROFILER_VERSION_10_0
+
+/** @} */
+
 #if !defined(ROCPROFILER_ATTRIBUTE)
 #    if defined(_MSC_VER)
 #        define ROCPROFILER_ATTRIBUTE(...) __declspec(__VA_ARGS__)
@@ -94,4 +117,12 @@
         {                                                                                          \
             value                                                                                  \
         }
+#endif
+
+#ifdef __cplusplus
+#    define ROCPROFILER_EXTERN_C_INIT extern "C" {
+#    define ROCPROFILER_EXTERN_C_FINI }
+#else
+#    define ROCPROFILER_EXTERN_C_INIT
+#    define ROCPROFILER_EXTERN_C_FINI
 #endif

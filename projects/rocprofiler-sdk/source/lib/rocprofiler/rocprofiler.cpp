@@ -20,9 +20,16 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include <rocprofiler/fwd.h>
 #include <rocprofiler/rocprofiler.h>
 
-#include <algorithm>
+#include "lib/common/utility.hpp"
+#include "lib/rocprofiler/context/context.hpp"
+#include "lib/rocprofiler/context/domain.hpp"
+#include "lib/rocprofiler/hsa/hsa.hpp"
+#include "lib/rocprofiler/registration.hpp"
+
+#include <atomic>
 #include <vector>
 
 namespace
@@ -34,6 +41,22 @@ consume_args(Tp&&...)
 }  // namespace
 
 extern "C" {
+rocprofiler_status_t
+rocprofiler_get_version(uint32_t* major, uint32_t* minor, uint32_t* patch)
+{
+    if(major) *major = ROCPROFILER_VERSION_MAJOR;
+    if(minor) *minor = ROCPROFILER_VERSION_MINOR;
+    if(patch) *patch = ROCPROFILER_VERSION_PATCH;
+    return ROCPROFILER_STATUS_SUCCESS;
+}
+
+rocprofiler_status_t
+rocprofiler_get_timestamp(rocprofiler_timestamp_t* ts)
+{
+    *ts = rocprofiler::common::timestamp_ns();
+    return ROCPROFILER_STATUS_SUCCESS;
+}
+
 rocprofiler_status_t
 rocprofiler_query_available_agents(rocprofiler_available_agents_cb_t callback,
                                    size_t                            agent_size,
@@ -77,54 +100,6 @@ rocprofiler_query_available_agents(rocprofiler_available_agents_cb_t callback,
 }
 
 rocprofiler_status_t
-rocprofiler_create_context(rocprofiler_context_id_t* context_id)
-{
-    consume_args(context_id);
-    return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
-}
-
-rocprofiler_status_t
-rocprofiler_start_context(rocprofiler_context_id_t context_id)
-{
-    consume_args(context_id);
-    return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
-}
-
-rocprofiler_status_t
-rocprofiler_stop_context(rocprofiler_context_id_t context_id)
-{
-    consume_args(context_id);
-    return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
-}
-
-rocprofiler_status_t
-rocprofiler_flush_buffer(rocprofiler_buffer_id_t buffer_id)
-{
-    consume_args(buffer_id);
-    return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
-}
-
-rocprofiler_status_t
-rocprofiler_destroy_buffer(rocprofiler_buffer_id_t buffer_id)
-{
-    consume_args(buffer_id);
-    return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
-}
-
-rocprofiler_status_t
-rocprofiler_create_buffer(rocprofiler_context_id_t      context,
-                          size_t                        size,
-                          size_t                        watermark,
-                          rocprofiler_buffer_policy_t   action,
-                          rocprofiler_buffer_callback_t callback,
-                          void*                         callback_data,
-                          rocprofiler_buffer_id_t*      buffer_id)
-{
-    consume_args(context, size, watermark, action, callback, callback_data, buffer_id);
-    return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
-}
-
-rocprofiler_status_t
 rocprofiler_configure_pc_sampling_service(rocprofiler_context_id_t         context_id,
                                           rocprofiler_agent_t              agent,
                                           rocprofiler_pc_sampling_method_t method,
@@ -132,6 +107,9 @@ rocprofiler_configure_pc_sampling_service(rocprofiler_context_id_t         conte
                                           uint64_t                         interval,
                                           rocprofiler_buffer_id_t          buffer_id)
 {
+    if(rocprofiler::registration::get_init_status() > 0)
+        return ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED;
+
     consume_args(context_id, agent, method, unit, interval, buffer_id);
     return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
 }

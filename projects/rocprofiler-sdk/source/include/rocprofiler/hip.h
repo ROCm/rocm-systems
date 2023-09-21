@@ -27,7 +27,6 @@
 
 #include <stdint.h>
 
-typedef uint32_t                            rocprofiler_trace_record_hip_operation_kind_t;
 typedef struct rocprofiler_hip_trace_data_s rocprofiler_hip_trace_data_t;
 typedef struct rocprofiler_hip_api_data_s   rocprofiler_hip_api_data_t;
 

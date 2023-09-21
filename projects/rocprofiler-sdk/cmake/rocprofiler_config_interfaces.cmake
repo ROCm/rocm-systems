@@ -146,3 +146,11 @@ find_package(
     lib/cmake/amd_comgr)
 
 target_link_libraries(rocprofiler-amd-comgr INTERFACE amd_comgr)
+
+# ----------------------------------------------------------------------------------------#
+#
+# PTL (Parallel Tasking Library)
+#
+# ----------------------------------------------------------------------------------------#
+
+target_link_libraries(rocprofiler-ptl INTERFACE PTL::ptl-static)

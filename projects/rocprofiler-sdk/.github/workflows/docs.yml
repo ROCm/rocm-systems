@@ -6,18 +6,20 @@ on:
     branches: [main]
     paths:
       - '*.md'
+      - 'VERSION'
       - 'source/docs/**'
       - 'source/scripts/update-docs.sh'
+      - 'source/include/rocprofiler/*'
       - '.github/workflows/docs.yml'
-      - 'VERSION'
   pull_request:
     branches: [main]
     paths:
       - '*.md'
+      - 'VERSION'
       - 'source/docs/**'
       - 'source/scripts/update-docs.sh'
+      - 'source/include/rocprofiler/*'
       - '.github/workflows/docs.yml'
-      - 'VERSION'
 
 concurrency:
   group: "pages"
@@ -35,7 +37,7 @@ jobs:
       id-token: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
             submodules: true
       - name: Install Conda

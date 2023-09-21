@@ -26,6 +26,7 @@ target_link_libraries(
            $<BUILD_INTERFACE:rocprofiler::rocprofiler-dl>
            $<BUILD_INTERFACE:rocprofiler::rocprofiler-hip>
            $<BUILD_INTERFACE:rocprofiler::rocprofiler-amd-comgr>
-           $<BUILD_INTERFACE:rocprofiler::rocprofiler-hsa-runtime>)
+           $<BUILD_INTERFACE:rocprofiler::rocprofiler-hsa-runtime>
+           $<BUILD_INTERFACE:rocprofiler::rocprofiler-ptl>)
 set_target_properties(rocprofiler-common-library PROPERTIES OUTPUT_NAME
                                                             rocprofiler-common)

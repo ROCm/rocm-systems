@@ -54,7 +54,7 @@ template <typename Tp>
 void
 extract_header(std::vector<Tp>& _arr, rocprofiler_record_header_t* _hdr)
 {
-    if(_hdr->kind == typeid(Tp).hash_code())
+    if(_hdr->hash == typeid(Tp).hash_code())
     {
         auto* _v = reinterpret_cast<Tp*>(_hdr->payload);
         _arr.emplace_back(*_v);
@@ -129,17 +129,17 @@ TEST(buffering, serial)
     {
         ASSERT_TRUE(itr->payload) << "nullptr to payload not expected";
 
-        if(itr->kind == typeid(uint_raw_array_t).hash_code())
+        if(itr->hash == typeid(uint_raw_array_t).hash_code())
         {
             extract_header(_ui_result, itr);
         }
-        else if(itr->kind == typeid(flt_raw_array_t).hash_code())
+        else if(itr->hash == typeid(flt_raw_array_t).hash_code())
         {
             extract_header(_fp_result, itr);
         }
         else
         {
-            GTEST_FAIL() << "unknown type id hash code: " << std::to_string(itr->kind);
+            GTEST_FAIL() << "unknown type id hash code: " << std::to_string(itr->hash);
         }
     }
 

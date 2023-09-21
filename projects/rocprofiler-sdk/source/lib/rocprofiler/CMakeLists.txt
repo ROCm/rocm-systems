@@ -1,8 +1,10 @@
 #
 #
 #
-set(ROCPROFILER_LIB_HEADERS config_helpers.hpp config_internal.hpp tracer.hpp)
-set(ROCPROFILER_LIB_SOURCES config_internal.cpp rocprofiler_config.cpp rocprofiler.cpp)
+set(ROCPROFILER_LIB_HEADERS buffer.hpp internal_threading.hpp registration.hpp)
+set(ROCPROFILER_LIB_SOURCES
+    buffer.cpp buffer_tracing.cpp callback_tracing.cpp context.cpp internal_threading.cpp
+    rocprofiler.cpp registration.cpp)
 
 add_library(rocprofiler-library SHARED)
 add_library(rocprofiler::rocprofiler-library ALIAS rocprofiler-library)
@@ -11,6 +13,7 @@ target_sources(rocprofiler-library PRIVATE ${ROCPROFILER_LIB_SOURCES}
                                            ${ROCPROFILER_LIB_HEADERS})
 
 add_subdirectory(hsa)
+add_subdirectory(context)
 
 target_link_libraries(
     rocprofiler-library

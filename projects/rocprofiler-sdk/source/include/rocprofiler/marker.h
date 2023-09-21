@@ -24,9 +24,6 @@
 
 #include <rocprofiler/marker/api_args.h>
 
-#include <stdint.h>
-
-typedef uint32_t                            rocprofiler_trace_record_marker_operation_kind_t;
 typedef struct rocprofiler_roctx_api_data_s rocprofiler_roctx_api_data_t;
 
 struct rocprofiler_roctx_api_data_s

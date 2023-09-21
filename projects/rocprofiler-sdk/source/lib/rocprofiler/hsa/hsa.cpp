@@ -19,11 +19,19 @@
 // THE SOFTWARE.
 
 #include "lib/rocprofiler/hsa/hsa.hpp"
-
 #include "lib/common/defines.hpp"
-#include "lib/rocprofiler/hsa/ostream.hpp"
+#include "lib/common/utility.hpp"
+#include "lib/rocprofiler/buffer.hpp"
+#include "lib/rocprofiler/context/context.hpp"
+#include "lib/rocprofiler/hsa/details/ostream.hpp"
 #include "lib/rocprofiler/hsa/types.hpp"
 #include "lib/rocprofiler/hsa/utils.hpp"
+
+#include <rocprofiler/buffer.h>
+#include <rocprofiler/callback_tracing.h>
+#include <rocprofiler/fwd.h>
+
+#include <glog/logging.h>
 
 #include <atomic>
 #include <cstddef>
@@ -46,7 +54,12 @@ template <typename DataT, typename Tp>
 void
 set_data_retval(DataT& _data, Tp _val)
 {
-    if constexpr(std::is_same<Tp, hsa_signal_value_t>::value)
+    if constexpr(std::is_same<Tp, null_type>::value)
+    {
+        (void) _data;
+        (void) _val;
+    }
+    else if constexpr(std::is_same<Tp, hsa_signal_value_t>::value)
     {
         _data.hsa_signal_value_t_retval = _val;
     }
@@ -100,65 +113,35 @@ get_table()
 }
 
 template <size_t Idx>
-template <typename DataT, typename DataArgsT, typename... Args>
+template <typename DataArgsT, typename... Args>
 auto
-hsa_api_impl<Idx>::phase_enter(DataT& _data, DataArgsT& _data_args, Args... args)
+hsa_api_impl<Idx>::set_data_args(DataArgsT& _data_args, Args... args)
 {
-    using info_type = hsa_api_info<Idx>;
-
-    activity_functor_t _func = report_activity.load(std::memory_order_relaxed);
-    if(_func)
+    if constexpr(Idx == ROCPROFILER_HSA_API_ID_hsa_amd_memory_async_copy_rect)
     {
-        if constexpr(Idx == ROCPROFILER_HSA_API_ID_hsa_amd_memory_async_copy_rect)
-        {
-            auto _tuple                                            = std::make_tuple(args...);
-            _data.api_data.args.hsa_amd_memory_async_copy_rect.dst = std::get<0>(_tuple);
-            _data.api_data.args.hsa_amd_memory_async_copy_rect.dst_offset = std::get<1>(_tuple);
-            _data.api_data.args.hsa_amd_memory_async_copy_rect.src        = std::get<2>(_tuple);
-            _data.api_data.args.hsa_amd_memory_async_copy_rect.src_offset = std::get<3>(_tuple);
-            _data.api_data.args.hsa_amd_memory_async_copy_rect.range      = std::get<4>(_tuple);
-            _data.api_data.args.hsa_amd_memory_async_copy_rect.range__val = *(std::get<4>(_tuple));
-            _data.api_data.args.hsa_amd_memory_async_copy_rect.copy_agent = std::get<5>(_tuple);
-            _data.api_data.args.hsa_amd_memory_async_copy_rect.dir        = std::get<6>(_tuple);
-            _data.api_data.args.hsa_amd_memory_async_copy_rect.num_dep_signals =
-                std::get<7>(_tuple);
-            _data.api_data.args.hsa_amd_memory_async_copy_rect.dep_signals = std::get<8>(_tuple);
-            _data.api_data.args.hsa_amd_memory_async_copy_rect.completion_signal =
-                std::get<9>(_tuple);
-        }
-        else
-        {
-            _data_args = DataArgsT{args...};
-        }
-        if(_func(info_type::domain_idx, info_type::operation_idx, &_data) == 0)
-        {
-            if(_data.phase_enter != nullptr) _data.phase_enter(info_type::operation_idx, &_data);
-            return true;
-        }
-        return false;
+        auto _tuple                  = std::make_tuple(args...);
+        _data_args.dst               = std::get<0>(_tuple);
+        _data_args.dst_offset        = std::get<1>(_tuple);
+        _data_args.src               = std::get<2>(_tuple);
+        _data_args.src_offset        = std::get<3>(_tuple);
+        _data_args.range             = std::get<4>(_tuple);
+        _data_args.range__val        = *(std::get<4>(_tuple));
+        _data_args.copy_agent        = std::get<5>(_tuple);
+        _data_args.dir               = std::get<6>(_tuple);
+        _data_args.num_dep_signals   = std::get<7>(_tuple);
+        _data_args.dep_signals       = std::get<8>(_tuple);
+        _data_args.completion_signal = std::get<9>(_tuple);
     }
-    return false;
+    else
+    {
+        _data_args = DataArgsT{args...};
+    }
 }
 
 template <size_t Idx>
-template <typename DataT, typename... Args>
+template <typename FuncT, typename... Args>
 auto
-hsa_api_impl<Idx>::phase_exit(DataT& _data)
-{
-    using info_type = hsa_api_info<Idx>;
-
-    if(_data.phase_exit != nullptr)
-    {
-        _data.phase_exit(info_type::operation_idx, &_data);
-        return true;
-    }
-    return false;
-}
-
-template <size_t Idx>
-template <typename DataT, typename FuncT, typename... Args>
-auto
-hsa_api_impl<Idx>::exec(DataT& _data, FuncT&& _func, Args&&... args)
+hsa_api_impl<Idx>::exec(FuncT&& _func, Args&&... args)
 {
     using return_type = std::decay_t<std::invoke_result_t<FuncT, Args...>>;
 
@@ -175,9 +158,7 @@ hsa_api_impl<Idx>::exec(DataT& _data, FuncT&& _func, Args&&... args)
         }
         else
         {
-            auto _ret = _func(std::forward<Args>(args)...);
-            set_data_retval(_data.api_data, _ret);
-            return _ret;
+            return _func(std::forward<Args>(args)...);
         }
     }
 
@@ -194,14 +175,161 @@ hsa_api_impl<Idx>::functor(Args&&... args)
 {
     using info_type = hsa_api_info<Idx>;
 
-    auto trace_data = rocprofiler_hsa_trace_data_t{};
+    LOG(INFO) << __PRETTY_FUNCTION__;
 
-    auto _enabled = phase_enter(
-        trace_data, info_type::get_api_data_args(trace_data), std::forward<Args>(args)...);
+    struct callback_context_data
+    {
+        context::context*                     ctx    = nullptr;
+        rocprofiler_callback_tracing_record_t record = {};
+    };
 
-    auto _ret = exec(trace_data, info_type::get_table_func(), std::forward<Args>(args)...);
+    struct buffered_context_data
+    {
+        context::context* ctx = nullptr;
+    };
 
-    if(_enabled) phase_exit(trace_data);
+    auto callback_contexts = std::vector<callback_context_data>{};
+    auto buffered_contexts = std::vector<buffered_context_data>{};
+    for(const auto& aitr : context::get_active_contexts())
+    {
+        auto* itr = aitr.load();
+        if(!itr) continue;
+
+        if(itr->callback_tracer)
+        {
+            // if the given domain + op is not enabled, skip this context
+            if(!itr->callback_tracer->domains(info_type::callback_domain_idx,
+                                              info_type::operation_idx))
+                continue;
+
+            callback_contexts.emplace_back(
+                callback_context_data{itr, rocprofiler_callback_tracing_record_t{}});
+        }
+
+        if(itr->buffered_tracer)
+        {
+            // if the given domain + op is not enabled, skip this context
+            if(!itr->buffered_tracer->domains(info_type::buffered_domain_idx,
+                                              info_type::operation_idx))
+                continue;
+
+            buffered_contexts.emplace_back(buffered_context_data{itr});
+        }
+    }
+
+    if(callback_contexts.empty() && buffered_contexts.empty())
+    {
+        auto _ret = exec(info_type::get_table_func(), std::forward<Args>(args)...);
+        if constexpr(!std::is_same<decltype(_ret), null_type>::value)
+            return _ret;
+        else
+            return HSA_STATUS_SUCCESS;
+    }
+
+    auto buffer_record = rocprofiler_buffer_tracing_hsa_api_record_t{};
+    auto tracer_data   = rocprofiler_hsa_api_callback_tracer_data_t{};
+    auto corr_id       = context::correlation_tracing_service::get_unique_record_id();
+    auto thr_id        = common::get_tid();
+
+    // construct the buffered info before the callback so the callbacks are as closely wrapped
+    // around the function call as possible
+    if(!buffered_contexts.empty())
+    {
+        buffer_record.kind           = info_type::buffered_domain_idx;
+        buffer_record.correlation_id = rocprofiler_correlation_id_t{corr_id};
+        buffer_record.operation      = info_type::operation_idx;
+        buffer_record.thread_id      = thr_id;
+    }
+
+    // invoke the callbacks
+    if(!callback_contexts.empty())
+    {
+        tracer_data.size = sizeof(rocprofiler_hsa_api_callback_tracer_data_t);
+        set_data_args(info_type::get_api_data_args(tracer_data.args), std::forward<Args>(args)...);
+
+        for(auto& itr : callback_contexts)
+        {
+            auto& ctx    = itr.ctx;
+            auto& record = itr.record;
+
+            uint64_t extern_corr_id = 0;
+            auto&    _correlation   = ctx->correlation_tracer;
+            if(_correlation.external_id_callback)
+            {
+                _correlation.external_id = _correlation.external_id_callback(
+                    info_type::callback_domain_idx, info_type::operation_idx, corr_id);
+                extern_corr_id = _correlation.external_id;
+            }
+            auto user_data = rocprofiler_user_data_t{.value = 0};
+
+            record = rocprofiler_callback_tracing_record_t{
+                thr_id,
+                rocprofiler_correlation_id_t{corr_id},
+                rocprofiler_external_correlation_id_t{extern_corr_id},
+                info_type::callback_domain_idx,
+                info_type::operation_idx,
+                ROCPROFILER_SERVICE_CALLBACK_PHASE_ENTER,
+                user_data,
+                static_cast<void*>(&tracer_data)};
+
+            auto& callback_info =
+                ctx->callback_tracer->callback_data.at(info_type::callback_domain_idx);
+            callback_info.callback(record, callback_info.data);
+        }
+    }
+
+    // record the start timestamp as close to the function call as possible
+    if(!buffered_contexts.empty())
+    {
+        buffer_record.start_timestamp = common::timestamp_ns();
+    }
+
+    auto _ret = exec(info_type::get_table_func(), std::forward<Args>(args)...);
+
+    // record the end timestamp as close to the function call as possible
+    if(!buffered_contexts.empty())
+    {
+        buffer_record.end_timestamp = common::timestamp_ns();
+    }
+
+    if(!callback_contexts.empty())
+    {
+        set_data_retval(tracer_data.retval, _ret);
+
+        for(auto& itr : callback_contexts)
+        {
+            auto& ctx    = itr.ctx;
+            auto& record = itr.record;
+
+            record.phase   = ROCPROFILER_SERVICE_CALLBACK_PHASE_EXIT;
+            record.payload = static_cast<void*>(&tracer_data);
+
+            auto& callback_info =
+                ctx->callback_tracer->callback_data.at(info_type::callback_domain_idx);
+            callback_info.callback(record, callback_info.data);
+        }
+    }
+
+    if(!buffered_contexts.empty())
+    {
+        for(auto& itr : buffered_contexts)
+        {
+            assert(itr.ctx->buffered_tracer);
+            auto buffer_id =
+                itr.ctx->buffered_tracer->buffer_data.at(info_type::buffered_domain_idx);
+            for(auto& bitr : buffer::get_buffers())
+            {
+                if(bitr && bitr->context_id == itr.ctx->context_idx &&
+                   bitr->buffer_id == buffer_id.handle)
+                {
+                    bitr->emplace(ROCPROFILER_BUFFER_CATEGORY_TRACING,
+                                  info_type::buffered_domain_idx,
+                                  buffer_record);
+                    break;
+                }
+            }
+        }
+    }
 
     if constexpr(!std::is_same<decltype(_ret), null_type>::value)
         return _ret;
@@ -222,74 +350,59 @@ namespace
 {
 template <size_t Idx, size_t... IdxTail>
 const char*
-hsa_api_name(const uint32_t id, std::index_sequence<Idx, IdxTail...>)
+name_by_id(const uint32_t id, std::index_sequence<Idx, IdxTail...>)
 {
     if(Idx == id) return hsa_api_info<Idx>::name;
     if constexpr(sizeof...(IdxTail) > 0)
-        return hsa_api_name(id, std::index_sequence<IdxTail...>{});
+        return name_by_id(id, std::index_sequence<IdxTail...>{});
     else
         return nullptr;
 }
 
 template <size_t Idx, size_t... IdxTail>
 uint32_t
-hsa_api_id_by_name(const char* name, std::index_sequence<Idx, IdxTail...>)
+id_by_name(const char* name, std::index_sequence<Idx, IdxTail...>)
 {
     if(std::string_view{hsa_api_info<Idx>::name} == std::string_view{name})
         return hsa_api_info<Idx>::operation_idx;
     if constexpr(sizeof...(IdxTail) > 0)
-        return hsa_api_id_by_name(name, std::index_sequence<IdxTail...>{});
+        return id_by_name(name, std::index_sequence<IdxTail...>{});
     else
         return ROCPROFILER_HSA_API_ID_NONE;
 }
 
 template <size_t Idx, size_t... IdxTail>
-std::string
-hsa_api_data_string(const uint32_t                      id,
-                    const rocprofiler_hsa_trace_data_t& _data,
-                    std::index_sequence<Idx, IdxTail...>)
-{
-    if(Idx == id) return hsa_api_info<Idx>::as_string(_data);
-    if constexpr(sizeof...(IdxTail) > 0)
-        return hsa_api_data_string(id, _data, std::index_sequence<IdxTail...>{});
-    else
-        return std::string{};
-}
-
-template <size_t Idx, size_t... IdxTail>
-std::string
-hsa_api_named_data_string(const uint32_t                      id,
-                          const rocprofiler_hsa_trace_data_t& _data,
-                          std::index_sequence<Idx, IdxTail...>)
-{
-    if(Idx == id) return hsa_api_info<Idx>::as_named_string(_data);
-    if constexpr(sizeof...(IdxTail) > 0)
-        return hsa_api_named_data_string(id, _data, std::index_sequence<IdxTail...>{});
-    else
-        return std::string{};
-}
-
-template <size_t Idx, size_t... IdxTail>
 void
-hsa_api_iterate_args(const uint32_t                      id,
-                     const rocprofiler_hsa_trace_data_t& _data,
-                     int (*_func)(const char*, const char*),
-                     std::index_sequence<Idx, IdxTail...>)
+iterate_args(const uint32_t                                    id,
+             const rocprofiler_hsa_api_callback_tracer_data_t& data,
+             rocprofiler_callback_tracing_operation_args_cb_t  func,
+             void*                                             user_data,
+             std::index_sequence<Idx, IdxTail...>)
 {
     if(Idx == id)
     {
-        for(auto&& itr : hsa_api_info<Idx>::as_arg_list(_data))
+        using info_type = hsa_api_info<Idx>;
+        auto&& arg_list = info_type::as_arg_list(data);
+        auto&& arg_addr = info_type::as_arg_addr(data);
+        for(size_t i = 0; i < std::min(arg_list.size(), arg_addr.size()); ++i)
         {
-            _func(itr.first.c_str(), itr.second.c_str());
+            auto ret = func(info_type::callback_domain_idx,  // kind
+                            id,                              // operation
+                            i,                               // arg_number
+                            arg_list.at(i).first.c_str(),    // arg_name
+                            arg_list.at(i).second.c_str(),   // arg_value_str
+                            arg_addr.at(i),                  // arg_value_addr
+                            user_data);
+            if(ret != 0) break;
         }
     }
     if constexpr(sizeof...(IdxTail) > 0)
-        hsa_api_iterate_args(id, _data, _func, std::index_sequence<IdxTail...>{});
+        iterate_args(id, data, func, user_data, std::index_sequence<IdxTail...>{});
 }
 
 template <size_t... Idx>
 void
-hsa_api_get_ids(std::vector<uint32_t>& _id_list, std::index_sequence<Idx...>)
+get_ids(std::vector<uint32_t>& _id_list, std::index_sequence<Idx...>)
 {
     auto _emplace = [](auto& _vec, uint32_t _v) {
         if(_v < ROCPROFILER_HSA_API_ID_LAST) _vec.emplace_back(_v);
@@ -300,7 +413,7 @@ hsa_api_get_ids(std::vector<uint32_t>& _id_list, std::index_sequence<Idx...>)
 
 template <size_t... Idx>
 void
-hsa_api_get_names(std::vector<const char*>& _name_list, std::index_sequence<Idx...>)
+get_names(std::vector<const char*>& _name_list, std::index_sequence<Idx...>)
 {
     auto _emplace = [](auto& _vec, const char* _v) {
         if(_v != nullptr && strnlen(_v, 1) > 0) _vec.emplace_back(_v);
@@ -311,9 +424,42 @@ hsa_api_get_names(std::vector<const char*>& _name_list, std::index_sequence<Idx.
 
 template <size_t... Idx>
 void
-hsa_api_update_table(hsa_api_table_t* _orig, std::index_sequence<Idx...>)
+update_table(hsa_api_table_t* _orig, std::index_sequence<Idx...>)
 {
+    static auto _should_wrap_functor =
+        [](auto _callback_domain, auto _buffered_domain, auto _operation) {
+            for(const auto& itr : context::get_registered_contexts())
+            {
+                if(!itr) continue;
+
+                if(itr->callback_tracer)
+                {
+                    // domain not enabled so skip to next callback_tracer
+                    if(!itr->callback_tracer->domains(_callback_domain)) continue;
+
+                    // if the given domain + op is enabled, we need to wrap
+                    if(itr->callback_tracer->domains(_callback_domain, _operation)) return true;
+                }
+
+                if(itr->buffered_tracer)
+                {
+                    // domain not enabled so skip to next callback_tracer
+                    if(!itr->buffered_tracer->domains(_buffered_domain)) continue;
+
+                    // if the given domain + op is enabled, we need to wrap
+                    if(itr->buffered_tracer->domains(_buffered_domain, _operation)) return true;
+                }
+            }
+            return false;
+        };
+    (void) _should_wrap_functor;
+
     auto _update = [](hsa_api_table_t* _orig_v, auto _info) {
+        // check to see if there are any contexts which enable this operation in the HSA API domain
+        if(!_should_wrap_functor(
+               _info.callback_domain_idx, _info.buffered_domain_idx, _info.operation_idx))
+            return;
+
         // 1. get the sub-table containing the function pointer
         // 2. get reference to function pointer in sub-table
         // 3. update function pointer with functor
@@ -328,140 +474,57 @@ hsa_api_update_table(hsa_api_table_t* _orig, std::index_sequence<Idx...>)
 
 // check out the assembly here... this compiles to a switch statement
 const char*
-hsa_api_name(uint32_t id)
+name_by_id(uint32_t id)
 {
-    return hsa_api_name(id, std::make_index_sequence<ROCPROFILER_HSA_API_ID_LAST>{});
+    return name_by_id(id, std::make_index_sequence<ROCPROFILER_HSA_API_ID_LAST>{});
 }
 
 uint32_t
-hsa_api_id_by_name(const char* name)
+id_by_name(const char* name)
 {
-    return hsa_api_id_by_name(name, std::make_index_sequence<ROCPROFILER_HSA_API_ID_LAST>{});
-}
-
-std::string
-hsa_api_data_string(uint32_t id, const rocprofiler_hsa_trace_data_t& _data)
-{
-    return hsa_api_data_string(id, _data, std::make_index_sequence<ROCPROFILER_HSA_API_ID_LAST>{});
-}
-
-std::string
-hsa_api_named_data_string(uint32_t id, const rocprofiler_hsa_trace_data_t& _data)
-{
-    return hsa_api_named_data_string(
-        id, _data, std::make_index_sequence<ROCPROFILER_HSA_API_ID_LAST>{});
+    return id_by_name(name, std::make_index_sequence<ROCPROFILER_HSA_API_ID_LAST>{});
 }
 
 void
-hsa_api_iterate_args(uint32_t                            id,
-                     const rocprofiler_hsa_trace_data_t& _data,
-                     int (*_func)(const char*, const char*))
+iterate_args(uint32_t                                          id,
+             const rocprofiler_hsa_api_callback_tracer_data_t& data,
+             rocprofiler_callback_tracing_operation_args_cb_t  callback,
+             void*                                             user_data)
 {
-    if(_func)
-        hsa_api_iterate_args(
-            id, _data, _func, std::make_index_sequence<ROCPROFILER_HSA_API_ID_LAST>{});
+    if(callback)
+        iterate_args(
+            id, data, callback, user_data, std::make_index_sequence<ROCPROFILER_HSA_API_ID_LAST>{});
 }
 
 std::vector<uint32_t>
-hsa_api_get_ids()
+get_ids()
 {
     auto _data = std::vector<uint32_t>{};
     _data.reserve(ROCPROFILER_HSA_API_ID_LAST);
-    hsa_api_get_ids(_data, std::make_index_sequence<ROCPROFILER_HSA_API_ID_LAST>{});
+    get_ids(_data, std::make_index_sequence<ROCPROFILER_HSA_API_ID_LAST>{});
     return _data;
 }
 
 std::vector<const char*>
-hsa_api_get_names()
+get_names()
 {
     auto _data = std::vector<const char*>{};
     _data.reserve(ROCPROFILER_HSA_API_ID_LAST);
-    hsa_api_get_names(_data, std::make_index_sequence<ROCPROFILER_HSA_API_ID_LAST>{});
+    get_names(_data, std::make_index_sequence<ROCPROFILER_HSA_API_ID_LAST>{});
     return _data;
 }
 
 void
-hsa_api_set_callback(activity_functor_t _func)
+set_callback(activity_functor_t _func)
 {
     auto&& _v = report_activity.load();
     report_activity.compare_exchange_strong(_v, _func);
 }
 
 void
-hsa_api_update_table(hsa_api_table_t* _orig)
+update_table(hsa_api_table_t* _orig)
 {
-    if(_orig) hsa_api_update_table(_orig, std::make_index_sequence<ROCPROFILER_HSA_API_ID_LAST>{});
+    if(_orig) update_table(_orig, std::make_index_sequence<ROCPROFILER_HSA_API_ID_LAST>{});
 }
 }  // namespace hsa
 }  // namespace rocprofiler
-
-extern "C" {
-bool
-OnLoad(HsaApiTable*       table,
-       uint64_t           runtime_version,
-       uint64_t           failed_tool_count,
-       const char* const* failed_tool_names)
-{
-    (void) runtime_version;
-    (void) failed_tool_count;
-    (void) failed_tool_names;
-
-    fprintf(stderr, "[%s:%i] %s\n", __FILE__, __LINE__, __FUNCTION__);
-
-    auto& _saved = rocprofiler::hsa::get_table();
-    ::copyTables(table, &_saved);
-
-    rocprofiler::hsa::hsa_api_update_table(table);
-
-    return true;
-}
-}
-
-/*
-#include <iomanip>
-
-int
-main()
-{
-    rocprofiler::hsa::activity_functor_t _cb =
-        [](rocprofiler_tracer_activity_domain_t domain, uint32_t operation_id, void* data) {
-            const auto* _name    = rocprofiler::hsa::hsa_api_name(operation_id);
-            auto        _name_id = rocprofiler::hsa::hsa_api_id_by_name(_name);
-            auto&       _data    = *static_cast<rocprofiler::hsa::hsa_trace_data_t*>(data);
-            std::cout << "[cb] domain=" << domain << ", op_id=" << operation_id << ", data=" << data
-                      << ", name=" << _name << ", name_id=" << _name_id << ", named_string='"
-                      << rocprofiler::hsa::hsa_api_named_data_string(operation_id, _data) << "'"
-                      << "\n";
-            auto _func = [](const char* name, const char* value) {
-                std::cout << "    " << std::setw(20) << name << " = " << value << "\n";
-                return 0;
-            };
-            rocprofiler::hsa::hsa_api_iterate_args(operation_id, _data, _func);
-            return 0;
-        };
-
-    rocprofiler::hsa::report_activity.store(_cb);
-
-    {
-        double                 val         = 40;
-        hsa_code_object_t      code_object = {};
-        hsa_code_object_info_t attribute   = HSA_CODE_OBJECT_INFO_TYPE;
-        void*                  value       = &val;
-
-        auto _func =
-            rocprofiler::hsa::hsa_api_info<HSA_API_ID_hsa_code_object_get_info>::get_functor();
-        _func(code_object, attribute, value);
-    }
-
-    {
-        bool     result = false;
-        uint16_t ext    = 1;
-        uint16_t major  = 4;
-        uint16_t minor  = 2;
-
-        auto _func = rocprofiler::hsa::hsa_api_info<
-            HSA_API_ID_hsa_system_extension_supported>::get_functor();
-        _func(ext, major, minor, &result);
-    }
-}
-*/

@@ -29,6 +29,7 @@
 #include <algorithm>
 #include <initializer_list>
 #include <iterator>
+#include <limits>
 #include <memory>
 #include <numeric>
 #include <type_traits>
@@ -40,6 +41,15 @@ namespace common
 {
 namespace container
 {
+struct reserve_size
+{
+    explicit reserve_size(size_t _v)
+    : value{_v}
+    {}
+
+    size_t value;
+};
+
 template <typename Tp, size_t ChunkSizeV = 64>
 class stable_vector
 {
@@ -155,6 +165,7 @@ public:
     stable_vector() = default;
     explicit stable_vector(size_type count, const Tp& value);
     explicit stable_vector(size_type count);
+    explicit stable_vector(reserve_size&& reserve_count);
 
     template <typename InputItrT,
               typename = std::enable_if_t<
@@ -245,6 +256,12 @@ stable_vector<Tp, ChunkSizeV>::stable_vector(size_type count)
     {
         emplace_back();
     }
+}
+
+template <typename Tp, size_t ChunkSizeV>
+stable_vector<Tp, ChunkSizeV>::stable_vector(reserve_size&& reserve_count)
+{
+    reserve(reserve_count.value);
 }
 
 template <typename Tp, size_t ChunkSizeV>

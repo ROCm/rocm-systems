@@ -30,33 +30,14 @@
 
 #include <stdint.h>
 
-typedef uint32_t                            rocprofiler_trace_record_hsa_operation_kind_t;
 typedef struct hsa_kernel_dispatch_packet_s hsa_kernel_dispatch_packet_t;
-typedef struct rocprofiler_hsa_trace_data_s rocprofiler_hsa_trace_data_t;
 typedef struct rocprofiler_hsa_api_data_s   rocprofiler_hsa_api_data_t;
 
 struct rocprofiler_hsa_api_data_s
 {
-    uint64_t correlation_id;
-    uint32_t phase;
-    union
-    {
-        uint64_t           uint64_t_retval;
-        uint32_t           uint32_t_retval;
-        hsa_signal_value_t hsa_signal_value_t_retval;
-        hsa_status_t       hsa_status_t_retval;
-    };
-    rocprofiler_hsa_api_args_t args;
-    uint64_t*                  phase_data;
-};
-
-struct rocprofiler_hsa_trace_data_s
-{
-    rocprofiler_hsa_api_data_t api_data;
-    uint64_t                   phase_enter_timestamp;
-    uint64_t                   phase_exit_timestamp;
-    uint64_t                   phase_data;
-
-    void (*phase_enter)(rocprofiler_hsa_api_id_t operation_id, rocprofiler_hsa_trace_data_t* data);
-    void (*phase_exit)(rocprofiler_hsa_api_id_t operation_id, rocprofiler_hsa_trace_data_t* data);
+    uint64_t                     correlation_id;
+    uint32_t                     phase;
+    rocprofiler_hsa_api_args_t   args;
+    rocprofiler_hsa_api_retval_t retval;
+    uint64_t*                    phase_data;
 };

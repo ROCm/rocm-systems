@@ -88,3 +88,45 @@ else()
     find_package(fmt REQUIRED)
     target_link_libraries(rocprofiler-fmt INTERFACE fmt::fmt)
 endif()
+
+if(NOT TARGET PTL::ptl-static)
+    rocprofiler_checkout_git_submodule(
+        RELATIVE_PATH external/ptl
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+        REPO_URL https://github.com/jrmadsen/PTL.git
+        REPO_BRANCH rocprofiler)
+
+    set(PTL_BUILD_EXAMPLES OFF)
+    set(PTL_USE_TBB OFF)
+    set(PTL_USE_GPU OFF)
+    set(PTL_DEVELOPER_INSTALL OFF)
+
+    if(NOT DEFINED BUILD_OBJECT_LIBS)
+        set(BUILD_OBJECT_LIBS OFF)
+    endif()
+
+    if(NOT DEFINED BUILD_STATIC_LIBS)
+        set(BUILD_STATIC_LIBS OFF)
+    endif()
+
+    rocprofiler_save_variables(
+        BUILD_CONFIG
+        VARIABLES BUILD_SHARED_LIBS BUILD_STATIC_LIBS BUILD_OBJECT_LIBS
+                  CMAKE_POSITION_INDEPENDENT_CODE CMAKE_CXX_VISIBILITY_PRESET
+                  CMAKE_VISIBILITY_INLINES_HIDDEN)
+
+    set(BUILD_SHARED_LIBS OFF)
+    set(BUILD_STATIC_LIBS ON)
+    set(BUILD_OBJECT_LIBS OFF)
+    set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+    set(CMAKE_CXX_VISIBILITY_PRESET "hidden")
+    set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
+
+    add_subdirectory(ptl EXCLUDE_FROM_ALL)
+
+    rocprofiler_restore_variables(
+        BUILD_CONFIG
+        VARIABLES BUILD_SHARED_LIBS BUILD_STATIC_LIBS BUILD_OBJECT_LIBS
+                  CMAKE_POSITION_INDEPENDENT_CODE CMAKE_CXX_VISIBILITY_PRESET
+                  CMAKE_VISIBILITY_INLINES_HIDDEN)
+endif()

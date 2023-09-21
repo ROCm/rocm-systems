@@ -102,7 +102,7 @@ rocprofiler_pc_sampling_callback(rocprofiler_context_id_t /*context_id*/,
     for(size_t i = 0; i < num_headers; i++)
     {
         auto* cur_header = headers[i];
-        if(cur_header->kind == 0)
+        if(cur_header->category == ROCPROFILER_BUFFER_CATEGORY_PC_SAMPLING)
         {
             auto* pc_sample = static_cast<rocprofiler_pc_sampling_record_t*>(cur_header->payload);
             printf("--- pc: %lx, dispatch_id: %lx, timestamp: %lu, hardware_id: %lu\n",
