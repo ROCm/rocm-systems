@@ -25,7 +25,7 @@ foreach(_TYPE DEBUG MINSIZEREL RELEASE RELWITHDEBINFO)
     endif()
 endforeach()
 
-if(NOT TARGET rocprofiler::rocprofiler-library)
+if(NOT TARGET rocprofiler::rocprofiler)
     find_package(rocprofiler REQUIRED)
 endif()
 
@@ -33,7 +33,7 @@ add_library(callback-api-tracing-client SHARED)
 target_sources(callback-api-tracing-client PRIVATE client.cpp client.hpp)
 target_link_libraries(
     callback-api-tracing-client
-    PRIVATE rocprofiler::rocprofiler-library
+    PRIVATE rocprofiler::rocprofiler
             $<TARGET_NAME_IF_EXISTS:rocprofiler::samples-build-flags>)
 
 set_source_files_properties(main.cpp PROPERTIES LANGUAGE HIP)
@@ -56,5 +56,5 @@ set_tests_properties(
         LABELS
         "samples"
         ENVIRONMENT
-        "${ROCPROFILER_MEMCHECK_PRELOAD_ENV};HSA_TOOLS_LIB=$<TARGET_FILE:rocprofiler::rocprofiler-library>"
+        "${ROCPROFILER_MEMCHECK_PRELOAD_ENV};HSA_TOOLS_LIB=$<TARGET_FILE:rocprofiler::rocprofiler>"
     )

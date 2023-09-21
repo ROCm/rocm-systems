@@ -38,6 +38,8 @@ rocprofiler_add_option(ROCPROFILER_BUILD_TESTS "Enable building the tests"
                        ${ROCPROFILER_BUILD_CI})
 rocprofiler_add_option(ROCPROFILER_BUILD_SAMPLES "Enable building the code samples"
                        ${ROCPROFILER_BUILD_CI})
+rocprofiler_add_option(ROCPROFILER_BUILD_CODECOV
+                       "Enable building for code coverage analysis" OFF)
 
 # CLI and FILE plugins are always built
 foreach(_PLUGIN "ATT" "CTF" "PERFETTO")
