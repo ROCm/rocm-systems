@@ -31,16 +31,20 @@ endif()
 
 add_library(buffered-api-tracing-client SHARED)
 target_sources(buffered-api-tracing-client PRIVATE client.cpp client.hpp)
-target_link_libraries(buffered-api-tracing-client
-                      PRIVATE rocprofiler::rocprofiler-library)
+target_link_libraries(
+    buffered-api-tracing-client
+    PRIVATE rocprofiler::rocprofiler-library
+            $<TARGET_NAME_IF_EXISTS:rocprofiler::samples-build-flags>)
 
 set_source_files_properties(main.cpp PROPERTIES LANGUAGE HIP)
 find_package(Threads REQUIRED)
 
 add_executable(buffered-api-tracing)
 target_sources(buffered-api-tracing PRIVATE main.cpp)
-target_link_libraries(buffered-api-tracing PRIVATE buffered-api-tracing-client
-                                                   Threads::Threads)
+target_link_libraries(
+    buffered-api-tracing
+    PRIVATE buffered-api-tracing-client Threads::Threads
+            $<TARGET_NAME_IF_EXISTS:rocprofiler::samples-build-flags>)
 
 add_test(NAME buffered-api-tracing COMMAND $<TARGET_FILE:buffered-api-tracing>)
 

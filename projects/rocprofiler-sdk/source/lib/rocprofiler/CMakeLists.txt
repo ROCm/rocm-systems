@@ -1,6 +1,8 @@
 #
 #
 #
+rocprofiler_activate_clang_tidy()
+
 set(ROCPROFILER_LIB_HEADERS buffer.hpp internal_threading.hpp registration.hpp)
 set(ROCPROFILER_LIB_SOURCES
     buffer.cpp buffer_tracing.cpp callback_tracing.cpp context.cpp internal_threading.cpp

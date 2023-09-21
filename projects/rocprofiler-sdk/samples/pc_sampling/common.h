@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -69,7 +70,7 @@ find_first_gpu_agent_impl(rocprofiler_agent_t** agents, size_t num_agents, void*
     return ROCPROFILER_STATUS_ERROR;
 }
 
-static rocprofiler_agent_t
+static std::optional<rocprofiler_agent_t>
 find_first_gpu_agent()
 {
     // This function returns the first gpu agent it encounters.
@@ -77,10 +78,10 @@ find_first_gpu_agent()
     //   and return if the agent is MI200.
     rocprofiler_agent_t gpu_agent;
 
-    ROCPROFILER_CALL(rocprofiler_query_available_agents(&find_first_gpu_agent_impl,
-                                                        sizeof(rocprofiler_agent_t),
-                                                        static_cast<void*>(&gpu_agent)),
-                     "Could not query GPU agents");
+    auto status = rocprofiler_query_available_agents(
+        &find_first_gpu_agent_impl, sizeof(rocprofiler_agent_t), static_cast<void*>(&gpu_agent));
+
+    if(status != ROCPROFILER_STATUS_SUCCESS) return std::nullopt;
 
     return gpu_agent;
 }

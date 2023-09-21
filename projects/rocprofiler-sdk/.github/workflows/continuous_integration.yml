@@ -5,17 +5,13 @@ on:
   push:
     branches: [ "main" ]
     paths-ignore:
-      - '.github/workflows/pull_*.yml'
-      - '.github/workflows/linting.yml'
-      - '.github/workflows/markdown_lint.yml'
       - '*.md'
+      - 'source/docs/**'
   pull_request:
     branches: [ "main" ]
     paths-ignore:
-      - '.github/workflows/pull_*.yml'
-      - '.github/workflows/linting.yml'
-      - '.github/workflows/markdown_lint.yml'
       - '*.md'
+      - 'source/docs/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

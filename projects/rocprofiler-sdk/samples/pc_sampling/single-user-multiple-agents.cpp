@@ -64,7 +64,6 @@ void
 find_all_gpu_agents_supporting_pc_sampling()
 {
     // This function returns the all gpu agents supporting some kind of PC sampling
-    std::vector<rocprofiler_agent_t> gpu_agents;
     ROCPROFILER_CALL(
         rocprofiler_query_available_agents(&find_all_gpu_agents_supporting_pc_sampling_impl,
                                            sizeof(rocprofiler_agent_t),
@@ -101,7 +100,7 @@ extract_stochastic_config(rocprofiler_pc_sampling_config_array_t* configs)
 {
     // Iterate over an array of configurations and return the first one
     // with stochasting method.
-    for(int i = 0; i < configs->size; i++)
+    for(size_t i = 0; i < configs->size; i++)
     {
         if(configs->data[i].method == ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC)
         {
@@ -136,7 +135,11 @@ configure_stochastic_sampling(rocprofiler_context_id_t context_id,
 int
 main(int /*argc*/, char** /*argv*/)
 {
-    rocprofiler_status_t status;
+    if(!find_first_gpu_agent())
+    {
+        fprintf(stderr, "no gpu agents were found\n");
+        return EXIT_FAILURE;
+    }
 
     find_all_gpu_agents_supporting_pc_sampling();
 
@@ -185,7 +188,7 @@ main(int /*argc*/, char** /*argv*/)
     // Running the applicaiton
     run_HIP_app();
 
-    for(int i = 0; i < gpu_agents.size(); i++)
+    for(size_t i = 0; i < gpu_agents.size(); i++)
     {
         // Stop the context that should stop PC sampling?
         ROCPROFILER_CALL(rocprofiler_stop_context(contexts[i]), "Cannot start PC sampling context");

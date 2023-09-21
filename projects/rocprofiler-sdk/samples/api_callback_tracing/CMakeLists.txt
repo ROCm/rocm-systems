@@ -31,16 +31,20 @@ endif()
 
 add_library(callback-api-tracing-client SHARED)
 target_sources(callback-api-tracing-client PRIVATE client.cpp client.hpp)
-target_link_libraries(callback-api-tracing-client
-                      PRIVATE rocprofiler::rocprofiler-library)
+target_link_libraries(
+    callback-api-tracing-client
+    PRIVATE rocprofiler::rocprofiler-library
+            $<TARGET_NAME_IF_EXISTS:rocprofiler::samples-build-flags>)
 
 set_source_files_properties(main.cpp PROPERTIES LANGUAGE HIP)
 find_package(Threads REQUIRED)
 
 add_executable(callback-api-tracing)
 target_sources(callback-api-tracing PRIVATE main.cpp)
-target_link_libraries(callback-api-tracing PRIVATE callback-api-tracing-client
-                                                   Threads::Threads)
+target_link_libraries(
+    callback-api-tracing
+    PRIVATE callback-api-tracing-client Threads::Threads
+            $<TARGET_NAME_IF_EXISTS:rocprofiler::samples-build-flags>)
 
 add_test(NAME callback-api-tracing COMMAND $<TARGET_FILE:callback-api-tracing>)
 

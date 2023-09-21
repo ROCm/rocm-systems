@@ -2,6 +2,7 @@
 // If any of the rocprofiler calls returns status fail, we simply stop the application.
 
 #include <rocprofiler/rocprofiler.h>
+#include <cstdlib>
 #include "common.h"
 
 int
@@ -11,7 +12,12 @@ main(int /*argc*/, char** /*argv*/)
     rocprofiler_context_id_t context_id;
     ROCPROFILER_CALL(rocprofiler_create_context(&context_id), "Cannot create context\n");
 
-    rocprofiler_agent_t gpu_agent = find_first_gpu_agent();
+    auto gpu_agent = find_first_gpu_agent();
+    if(!gpu_agent)
+    {
+        fprintf(stderr, "no gpu agents were found\n");
+        return EXIT_FAILURE;
+    }
 
     // creating a buffer that will hold pc sampling information
     rocprofiler_buffer_policy_t drop_buffer_action = ROCPROFILER_BUFFER_POLICY_DISCARD;
@@ -33,7 +39,7 @@ main(int /*argc*/, char** /*argv*/)
     // Instantiating the PC sampling service
     ROCPROFILER_CALL(
         rocprofiler_configure_pc_sampling_service(
-            context_id, gpu_agent, sampling_method, sampling_unit, interval, buffer_id),
+            context_id, *gpu_agent, sampling_method, sampling_unit, interval, buffer_id),
         "Cannot create PC sampling service");
 
     // Vladimir: Is this the place of retrying if someone already created the

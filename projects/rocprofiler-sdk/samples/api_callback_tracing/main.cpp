@@ -76,7 +76,6 @@ main(int argc, char** argv)
     // client::start(); // currently will fail
 
     int rank = 0;
-    int size = 1;
     for(int i = 1; i < argc; ++i)
     {
         auto _arg = std::string{argv[i]};

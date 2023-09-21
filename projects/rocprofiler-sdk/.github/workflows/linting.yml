@@ -1,0 +1,86 @@
+name: Linting
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "main" ]
+    paths-ignore:
+      - '*.md'
+      - 'source/docs/**'
+  pull_request:
+    branches: [ "main" ]
+    paths-ignore:
+      - '*.md'
+      - 'source/docs/**'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # TODO(jrmadsen): replace LD_RUNPATH_FLAG, GPU_LIST, etc. with internal handling in cmake
+  ROCM_PATH: "/opt/rocm"
+  GPU_LIST: "gfx900 gfx906 gfx908 gfx90a gfx940 gfx941 gfx942 gfx1030 gfx1100 gfx1101 gfx1102"
+  PATH: "/usr/bin:$PATH"
+
+jobs:
+  get-latest-mainline-build-number:
+    runs-on: mi200
+
+    outputs:
+      LATEST_BUILD_NUMBER: ${{ steps.get_build_number.outputs.LATEST_BUILD_NUMBER }}
+
+    steps:
+      - id: get_build_number
+        run: echo "LATEST_BUILD_NUMBER=$(wget -qO- 'http://rocm-ci.amd.com/job/compute-rocm-dkms-no-npi-hipclang/lastSuccessfulBuild/buildNumber')" >> $GITHUB_OUTPUT
+
+  clang-tidy:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ['ubuntu-22.04']
+        runner: ['renderD131']
+        device: ['/renderD131']
+        linter: ['clang-tidy']
+
+    runs-on: ${{ matrix.runner }}
+
+    # define this for containers
+    env:
+      GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
+
+    container:
+      image: compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:${{ needs.get-latest-mainline-build-number.outputs.LATEST_BUILD_NUMBER }}-${{ matrix.os }}-stg1
+      options: --privileged --ipc=host --device=/dev/kfd --device=/dev/dri${{ matrix.device }} --group-add video --cap-add=SYS_PTRACE --cap-add CAP_SYS_PTRACE --cap-add CAP_SYS_ADMIN --security-opt seccomp=unconfined
+
+    if: ${{ always() }}
+    needs: get-latest-mainline-build-number
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: true
+
+    - name: Update container
+      run: |
+        apt-get update
+        apt-get install -y cmake clang-tidy-11 g++-11 g++-12
+        update-alternatives --install /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-11 10
+        update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 10 --slave /usr/bin/g++ g++ /usr/bin/g++-11
+        update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 20 --slave /usr/bin/g++ g++ /usr/bin/g++-12
+    - name: Configure, Build, and Test
+      timeout-minutes: 30
+      shell: bash
+      run:
+        python3 ./source/scripts/run-ci.py -B build
+          --name ${{ github.repository }}-${{ github.ref_name }}-mi200-${{ matrix.linter }}
+          --build-jobs 8
+          --site mi200
+          --gpu-targets ${{ env.GPU_LIST }}
+          --linter ${{ matrix.linter }}
+          --
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_INSTALL_PREFIX="${{ env.ROCM_PATH }}"
+          -DPython3_EXECUTABLE=$(which python3)
+          --
+          -VV

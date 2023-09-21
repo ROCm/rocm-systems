@@ -10,6 +10,8 @@
 #include "common.h"
 
 #include <cassert>
+#include <cstdlib>
+#include <stdexcept>
 #include <vector>
 
 #define HOST_TRAP_INTERVAL 1000
@@ -26,7 +28,8 @@ second_user()
     ROCPROFILER_CALL(rocprofiler_create_context(&context_id2),
                      "Cannot create context for the second user\n");
 
-    rocprofiler_agent_t gpu_agent = find_first_gpu_agent();
+    auto gpu_agent = find_first_gpu_agent();
+    if(!gpu_agent) throw std::runtime_error{"no gpu agents were found"};
 
     // creating a buffer that will hold pc sampling information
     rocprofiler_buffer_policy_t lossless_buffer_action = ROCPROFILER_BUFFER_POLICY_LOSSLESS;
@@ -49,7 +52,7 @@ second_user()
     // configured.
     ROCPROFILER_CALL_FAILS(
         rocprofiler_configure_pc_sampling_service(
-            context_id2, gpu_agent, sampling_method2, sampling_unit2, interval2, buffer_id2),
+            context_id2, *gpu_agent, sampling_method2, sampling_unit2, interval2, buffer_id2),
         "Instantiation of the PC sampling service should fail");
 
     // After failure, the second user queries available configuration and observes the one chosen by
@@ -57,7 +60,7 @@ second_user()
     size_t                                               config_count = 10;
     std::vector<rocprofiler_pc_sampling_configuration_t> configs(config_count);
     ROCPROFILER_CALL(rocprofiler_query_pc_sampling_agent_configurations(
-                         gpu_agent, configs.data(), &config_count),
+                         *gpu_agent, configs.data(), &config_count),
                      "The second user cannot query available configurations");
 
     // Only one configuration should be listed, and its parameters should match the parameters set
@@ -76,7 +79,7 @@ second_user()
     // The second user is satisfied with the configuration chosen by the first user, so it
     // starts PC sampling.
     ROCPROFILER_CALL(rocprofiler_configure_pc_sampling_service(context_id2,
-                                                               gpu_agent,
+                                                               *gpu_agent,
                                                                first_user_config.method,
                                                                first_user_config.unit,
                                                                first_user_config.min_interval,
@@ -108,7 +111,12 @@ main(int /*argc*/, char** /*argv*/)
     rocprofiler_context_id_t context_id;
     ROCPROFILER_CALL(rocprofiler_create_context(&context_id), "Cannot create context\n");
 
-    rocprofiler_agent_t gpu_agent = find_first_gpu_agent();
+    auto gpu_agent = find_first_gpu_agent();
+    if(!gpu_agent)
+    {
+        fprintf(stderr, "no gpu agents were found\n");
+        return EXIT_FAILURE;
+    }
 
     // creating a buffer that will hold pc sampling information
     rocprofiler_buffer_policy_t drop_buffer_action = ROCPROFILER_BUFFER_POLICY_DISCARD;
@@ -129,7 +137,7 @@ main(int /*argc*/, char** /*argv*/)
     host_trap_interval = HOST_TRAP_INTERVAL;
     // Instantiating the first PC sampling service succeeds.
     ROCPROFILER_CALL(rocprofiler_configure_pc_sampling_service(context_id,
-                                                               gpu_agent,
+                                                               *gpu_agent,
                                                                host_trap_sampling_method,
                                                                host_trap_sampling_unit_time,
                                                                host_trap_interval,

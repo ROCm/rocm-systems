@@ -37,7 +37,7 @@ foreach(_TYPE dl rt)
             rocprofiler_target_compile_definitions(rocprofiler-${_TYPE}
                                                    INTERFACE ROCPROFILER_${_TYPE_UC}=1)
             target_link_libraries(rocprofiler-${_TYPE} INTERFACE ${${_TYPE}_LIBRARY})
-            if("${_TYPE}" STREQUAL "dl")
+            if("${_TYPE}" STREQUAL "dl" AND NOT ROCPROFILER_ENABLE_CLANG_TIDY)
                 # This instructs the linker to add all symbols, not only used ones, to the
                 # dynamic symbol table. This option is needed for some uses of dlopen or
                 # to allow obtaining backtraces from within a program.
@@ -120,9 +120,7 @@ endif()
 rocprofiler_target_compile_options(
     rocprofiler-developer-flags
     LANGUAGES C CXX
-    INTERFACE "-Werror" "-Wdouble-promotion" "-Wshadow" "-Wextra"
-              "-Wstack-usage=524288" # 512 KB
-    )
+    INTERFACE "-Werror" "-Wdouble-promotion" "-Wshadow" "-Wextra")
 
 if(ROCPROFILER_BUILD_DEVELOPER)
     target_link_libraries(rocprofiler-build-flags

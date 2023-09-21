@@ -24,6 +24,7 @@ modernize-*,\
 -modernize-macro-to-enum,\
 -modernize-type-traits,\
 performance-*,\
+-performance-enum-size,\
 readability-*,\
 -readability-function-size,\
 -readability-identifier-naming,\

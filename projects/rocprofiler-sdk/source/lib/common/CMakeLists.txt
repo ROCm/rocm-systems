@@ -1,6 +1,8 @@
 #
 #   Builds common utilities into a static library
 #
+rocprofiler_activate_clang_tidy()
+
 set(common_sources config.cpp environment.cpp demangle.cpp)
 set(common_headers config.hpp defines.hpp environment.hpp demangle.hpp mpl.hpp
                    utility.hpp)
