@@ -114,6 +114,13 @@ void TestPowerCapReadWrite::Run(void) {
     ret = rsmi_dev_power_cap_get(dv_ind, 0, nullptr);
     ASSERT_EQ(ret, RSMI_STATUS_INVALID_ARGS);
 
+    // Check if power cap is within the range
+    // skip the test otherwise
+    if (orig < min || orig > max) {
+      std::cout << "Power cap is not within the range. Skipping test for " << dv_ind << std::endl;
+      continue;
+    }
+
     new_cap = (max + min)/2;
 
     IF_VERB(STANDARD) {

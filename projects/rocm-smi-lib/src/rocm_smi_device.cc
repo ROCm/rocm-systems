@@ -858,8 +858,8 @@ int Device::readDevInfoMultiLineStr(DevInfoTypes type,
     ss << "Read devInfoMultiLineStr for DevInfoType ("
        << RocmSMI::devInfoTypesStrings.at(type) << ")"
        << ", but contained no string lines";
-    LOG_INFO(ss);
-    return 0;
+    LOG_ERROR(ss);
+    return ENXIO;
   }
   // Remove any *trailing* empty (whitespace) lines
   while (!retVec->empty() &&
@@ -882,6 +882,7 @@ int Device::readDevInfoMultiLineStr(DevInfoTypes type,
        << RocmSMI::devInfoTypesStrings.at(type) << ")"
        << ", but lines were empty";
     LOG_INFO(ss);
+    return ENXIO;
   }
   return 0;
 }

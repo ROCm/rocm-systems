@@ -638,10 +638,21 @@ def printLog(device, metricName, value=None, extraSpace=False, useItalics=False)
     lock.acquire()
     if useItalics:
         logstr = italics + logstr + end
-    if extraSpace:
-        print('\n' + logstr + '\n', end='', flush=True)
-    else:
-        print(logstr + '\n', end='', flush=True)
+    try:
+        if extraSpace:
+            print('\n', end='')
+        print(logstr + '\n', end='')
+        sys.stdout.flush()
+    # when piped into programs like 'head' - print throws an error.
+    # silently ignore instead
+    except(BrokenPipeError, IOError):
+        # https://docs.python.org/3/library/signal.html#note-on-sigpipe
+        # Python flushes standard streams on exit; redirect remaining output
+        # to devnull to avoid another BrokenPipeError at shutdown
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull, sys.stdout.fileno())
+        sys.exit(1)  # Python exits with error code 1 on EPIPE
+
     lock.release()
 
 
@@ -832,8 +843,10 @@ def resetFans(deviceList):
     for device in deviceList:
         sensor_ind = c_uint32(0)
         ret = rocmsmi.rsmi_dev_fan_reset(device, sensor_ind)
-        if rsmi_ret_ok(ret, device, 'reset_fan'):
+        if rsmi_ret_ok(ret, device, silent=True):
             printLog(device, 'Successfully reset fan speed to driver control', None)
+        else:
+            printLog(device, 'Not supported on the given system', None)
     printLogSpacer()
 
 
@@ -1354,8 +1367,10 @@ def setFanSpeed(deviceList, fan):
             else:
                 fanLevel = int(str(fan))
             ret = rocmsmi.rsmi_dev_fan_speed_set(device, 0, int(fanLevel))
-            if rsmi_ret_ok(ret, device, 'set_fan_speed'):
+            if rsmi_ret_ok(ret, device, silent=True):
                 printLog(device, 'Successfully set fan speed to level %s' % (str(int(fanLevel))), None)
+            else:
+                printLog(device, 'Not supported on the given system', None)
     printLogSpacer()
 
 
@@ -1806,15 +1821,19 @@ def showClocks(deviceList):
         for clk_type in sorted(rsmi_clk_names_dict):
             if rocmsmi.rsmi_dev_gpu_clk_freq_get(device, rsmi_clk_names_dict[clk_type], None) == 1:
                 ret = rocmsmi.rsmi_dev_gpu_clk_freq_get(device, rsmi_clk_names_dict[clk_type], byref(freq))
-                if rsmi_ret_ok(ret, device, 'get_clk_freq_' + clk_type, True):
-                    printLog(device, 'Supported %s frequencies on GPU%s' % (clk_type, str(device)), None)
-                    for x in range(freq.num_supported):
-                        fr = '{:>.0f}Mhz'.format(freq.frequency[x] / 1000000)
-                        if x == freq.current:
-                            printLog(device, str(x), str(fr) + ' *')
-                        else:
-                            printLog(device, str(x), str(fr))
-                    printLog(device, '', None)
+                if ret == rsmi_status_t.RSMI_STATUS_UNEXPECTED_DATA:
+                    printLog(device, 'Clock [%s] on device [%s] exists but EMPTY! Likely driver error!' % (clk_type, str(device)))
+                    continue
+                if not rsmi_ret_ok(ret, device, 'get_clk_freq_' + clk_type, True):
+                    continue
+                printLog(device, 'Supported %s frequencies on GPU%s' % (clk_type, str(device)), None)
+                for x in range(freq.num_supported):
+                    fr = '{:>.0f}Mhz'.format(freq.frequency[x] / 1000000)
+                    if x == freq.current:
+                        printLog(device, str(x), str(fr) + ' *')
+                    else:
+                        printLog(device, str(x), str(fr))
+                printLog(device, '', None)
             else:
                 logging.debug('{} frequency is unsupported on device[{}]'.format(clk_type, device))
                 printLog(device, '', None)
@@ -3518,8 +3537,7 @@ def save(deviceList, savefilepath):
 # The code below is for when this script is run as an executable instead of when imported as a module
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
-        description='AMD ROCm System Management Interface  |  ROCM-SMI version: %s  |  Kernel version: %s' % (
-            __version__, getVersion(None, rsmi_sw_component_t.RSMI_SW_COMP_DRIVER)),
+        description=f'AMD ROCm System Management Interface  |  ROCM-SMI version: {__version__}',
         formatter_class=lambda prog: argparse.HelpFormatter(prog, max_help_position=90, width=120))
     groupDev = parser.add_argument_group()
     groupDisplayOpt = parser.add_argument_group('Display Options')
@@ -3679,6 +3697,11 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
+    # Must set PRINT_JSON early so the prints can be silenced
+    if args.json or args.csv:
+        PRINT_JSON = True
+    # Initialize rsmiBindings
+    rocmsmi = initRsmiBindings(silent=PRINT_JSON)
     # Initialize the rocm SMI library
     initializeRsmi()
 
@@ -3714,8 +3737,7 @@ if __name__ == '__main__':
         sys.exit(1)
 
     # If we want JSON/CSV output, initialize the keys (devices)
-    if args.json or args.csv:
-        PRINT_JSON = True
+    if PRINT_JSON:
         for device in deviceList:
             JSON_DATA['card' + str(device)] = {}
 

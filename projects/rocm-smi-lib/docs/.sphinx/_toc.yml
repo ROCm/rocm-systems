@@ -2,5 +2,6 @@ defaults:
   numbered: False
   maxdepth: 6
 root: index
-entries:
-  - file: html/index
+subtrees:
+  - entries:
+    - file: .doxygen/docBin/html/index

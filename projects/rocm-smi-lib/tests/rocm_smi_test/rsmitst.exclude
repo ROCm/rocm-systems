@@ -64,8 +64,7 @@ $BLACKLIST_ALL_ASICS\
 # /sys/class/kfd/kfd/topology/nodes/*/properties
 FILTER[90400]=\
 $BLACKLIST_ALL_ASICS\
-"rsmitstReadOnly.TestVoltCurvRead:"\
-"rsmitstReadWrite.TestPowerReadWrite"
+"rsmitstReadOnly.TestVoltCurvRead"
 FILTER[90401]=${FILTER[90400]}
 FILTER[90402]=${FILTER[90400]}
 

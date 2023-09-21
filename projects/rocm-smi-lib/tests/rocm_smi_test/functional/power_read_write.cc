@@ -123,6 +123,15 @@ void TestPowerReadWrite::Run(void) {
     PrintDeviceHeader(dv_ind);
 
     ret = rsmi_dev_power_profile_presets_get(dv_ind, 0, &status);
+    if (ret == RSMI_STATUS_NOT_SUPPORTED) {
+      std::cout <<
+          "\t**Power profile presets are not supported for this device"
+                                                                 << std::endl;
+      // Verify api support checking functionality is working
+      ret = rsmi_dev_power_profile_presets_get(dv_ind, 0, nullptr);
+      ASSERT_EQ(ret, RSMI_STATUS_NOT_SUPPORTED);
+      continue;
+    }
     CHK_ERR_ASRT(ret)
 
     // Verify api support checking functionality is working

@@ -123,16 +123,22 @@ void TestFrequenciesRead::Run(void) {
           // Verify api support checking functionality is working
           err = rsmi_dev_gpu_clk_freq_get(i, t, nullptr);
           ASSERT_EQ(err, RSMI_STATUS_NOT_SUPPORTED);
-        } else {
-            CHK_ERR_ASRT(err)
-            IF_VERB(STANDARD) {
-              std::cout << "\t**Supported " << name << " clock frequencies: ";
-              std::cout << f.num_supported << std::endl;
-              print_frequencies(&f);
-              // Verify api support checking functionality is working
-              err = rsmi_dev_gpu_clk_freq_get(i, t, nullptr);
-              ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
-            }
+        }
+
+        // special driver issue, shouldn't normally occur
+        if (err == RSMI_STATUS_UNEXPECTED_DATA) {
+          std::cerr << "WARN: Clock file [" << FreqEnumToStr(t) << "] exists on device [" << i << "] but empty!" << std::endl;
+          std::cerr << "      Likely a driver issue!" << std::endl;
+        }
+
+        CHK_ERR_ASRT(err)
+        IF_VERB(STANDARD) {
+          std::cout << "\t**Supported " << name << " clock frequencies: ";
+          std::cout << f.num_supported << std::endl;
+          print_frequencies(&f);
+          // Verify api support checking functionality is working
+          err = rsmi_dev_gpu_clk_freq_get(i, t, nullptr);
+          ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
         }
       };
 

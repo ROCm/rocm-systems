@@ -18,3 +18,6 @@ build/
 
 # Simulated SYSFS - for early development or debug
 device/
+
+# Misc
+__pycache__

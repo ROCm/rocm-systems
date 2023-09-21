@@ -407,6 +407,10 @@ static rsmi_status_t set_dev_mon_value(amd::smi::MonitorTypes type,
   }
   int ret = dev->monitor()->writeMonitor(type, sensor_ind,
                                                          std::to_string(val));
+  /// If the sysfs file doesn't exist, it is not supported.
+  if (ret == ENOENT) {
+    return rsmi_status_t::RSMI_STATUS_NOT_SUPPORTED;
+  }
 
   return amd::smi::ErrnoToRsmiStatus(ret);
 }
@@ -2631,9 +2635,8 @@ rsmi_dev_fan_reset(uint32_t dv_ind, uint32_t sensor_ind) {
   LOG_TRACE(ss);
 
   ++sensor_ind;  // fan sysfs files have 1-based indices
-
+  REQUIRE_ROOT_ACCESS
   DEVICE_MUTEX
-
   ret = set_dev_mon_value<uint64_t>(amd::smi::kMonFanCntrlEnable,
                                                        dv_ind, sensor_ind, 2);
   return ret;
@@ -2669,14 +2672,12 @@ rsmi_dev_fan_speed_set(uint32_t dv_ind, uint32_t sensor_ind, uint64_t speed) {
   // First need to set fan mode (pwm1_enable) to 1 (aka, "manual")
   ret = set_dev_mon_value<uint64_t>(amd::smi::kMonFanCntrlEnable, dv_ind,
                                                                sensor_ind, 1);
-
   if (ret != RSMI_STATUS_SUCCESS) {
     return ret;
   }
 
   ret = set_dev_mon_value<uint64_t>(amd::smi::kMonFanSpeed, dv_ind,
                                                            sensor_ind, speed);
-
   return ret;
 
   CATCH
@@ -3739,6 +3740,10 @@ rsmi_dev_memory_reserved_pages_get(uint32_t dv_ind, uint32_t *num_pages,
 
   ret = GetDevValueVec(amd::smi::kDevMemPageBad, dv_ind, &val_vec);
 
+  // file is empty, which is valid for no errors
+  if (ret == RSMI_STATUS_UNEXPECTED_DATA) {
+    ret = RSMI_STATUS_SUCCESS;
+  }
   if (ret == RSMI_STATUS_FILE_ERROR) {
     return RSMI_STATUS_NOT_SUPPORTED;
   }

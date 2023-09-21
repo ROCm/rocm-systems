@@ -117,8 +117,18 @@ void TestPowerRead::Run(void) {
       }
 
       err = rsmi_dev_power_ave_get(i, 0, &val_ui64);
+      if (err == RSMI_STATUS_NOT_SUPPORTED) {
+        std::cout <<
+            "\t**Power average information is not supported for this device"
+                                                                   << std::endl;
+
+        // Verify api support checking functionality is working
+        err = rsmi_dev_power_ave_get(i, 0, nullptr);
+        ASSERT_EQ(err, RSMI_STATUS_NOT_SUPPORTED);
+        continue;
+      }
       IF_VERB(STANDARD) {
-        std::cout << "\t**Averge Power Usage: ";
+        std::cout << "\t**Average Power Usage: ";
         CHK_RSMI_PERM_ERR(err)
         if (err == RSMI_STATUS_SUCCESS) {
           std::cout << static_cast<float>(val_ui64)/1000 << " mW" << std::endl;
