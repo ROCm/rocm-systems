@@ -69,7 +69,7 @@ Display Options:
   -a, --showallinfo                                     Show Temperature, Fan and Clock values
 
 Topology:
-  -i, --showid                                          Show GPU ID
+  -i, --showid                                          Show DEVICE ID
   -v, --showvbios                                       Show VBIOS version
   --showdriverversion                                   Show kernel driver version
   --showfwinfo [BLOCK [BLOCK ...]]                      Show FW information

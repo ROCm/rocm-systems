@@ -2108,8 +2108,8 @@ def showId(deviceList):
     """
     printLogSpacer(' ID ')
     for device in deviceList:
-        printLog(device, 'GPU ID', getId(device))
-        printLog(device, 'GPU Rev', getRev(device))
+        printLog(device, 'Device ID', getId(device))
+        printLog(device, 'Device Rev', getRev(device))
     printLogSpacer()
 
 
@@ -3545,7 +3545,7 @@ if __name__ == '__main__':
     groupDisplayOpt.add_argument('--showhw', help='Show Hardware details', action='store_true')
     groupDisplayOpt.add_argument('-a', '--showallinfo', help='Show Temperature, Fan and Clock values',
                                  action='store_true')
-    groupDisplayTop.add_argument('-i', '--showid', help='Show GPU ID', action='store_true')
+    groupDisplayTop.add_argument('-i', '--showid', help='Show DEVICE ID', action='store_true')
     groupDisplayTop.add_argument('-v', '--showvbios', help='Show VBIOS version', action='store_true')
     groupDisplayTop.add_argument('-e', '--showevents', help='Show event list', metavar='EVENT', type=str, nargs='*')
     groupDisplayTop.add_argument('--showdriverversion', help='Show kernel driver version', action='store_true')
