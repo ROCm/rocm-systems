@@ -1262,6 +1262,11 @@ static rsmi_status_t get_od_clk_volt_info(uint32_t dv_ind,
     return RSMI_STATUS_UNEXPECTED_DATA;
   }
 
+  // find last_item but skip empty lines
+  int last_item = val_vec.size()-1;
+  while (val_vec[last_item].empty() || val_vec[last_item][0] == 0)
+      last_item--;
+
   p->curr_sclk_range.lower_bound = freq_string_to_int(val_vec, nullptr,
                                      nullptr, kOD_SCLK_label_array_index + 1);
   p->curr_sclk_range.upper_bound = freq_string_to_int(val_vec, nullptr,
@@ -1275,16 +1280,18 @@ static rsmi_status_t get_od_clk_volt_info(uint32_t dv_ind,
   } else if (val_vec[kOD_MCLK_label_array_index] == "MCLK:") {
         p->curr_mclk_range.lower_bound = freq_string_to_int(val_vec, nullptr,
                                      nullptr, kOD_MCLK_label_array_index + 1);
+        // the upper memory frequency is the last
         p->curr_mclk_range.upper_bound = freq_string_to_int(val_vec, nullptr,
-                                     nullptr, kOD_MCLK_label_array_index + 4);
+                                     nullptr, last_item);
         return RSMI_STATUS_SUCCESS;
   } else if (val_vec[kOD_MCLK_label_array_index + 1] == "MCLK:") {
         p->curr_sclk_range.upper_bound = freq_string_to_int(val_vec, nullptr,
                                      nullptr, kOD_SCLK_label_array_index + 3);
         p->curr_mclk_range.lower_bound = freq_string_to_int(val_vec, nullptr,
                                      nullptr, kOD_MCLK_label_array_index + 2);
+        // the upper memory frequency is the last
         p->curr_mclk_range.upper_bound = freq_string_to_int(val_vec, nullptr,
-                                     nullptr, kOD_MCLK_label_array_index + 5);
+                                     nullptr, last_item);
         return RSMI_STATUS_SUCCESS;
   } else {
     return RSMI_STATUS_NOT_YET_IMPLEMENTED;
