@@ -154,3 +154,17 @@ target_link_libraries(rocprofiler-amd-comgr INTERFACE amd_comgr)
 # ----------------------------------------------------------------------------------------#
 
 target_link_libraries(rocprofiler-ptl INTERFACE PTL::ptl-static)
+
+# ----------------------------------------------------------------------------------------#
+#
+# amd aql
+#
+# ----------------------------------------------------------------------------------------#
+
+find_library(
+    hsa-amd-aqlprofile64_library
+    NAMES hsa-amd-aqlprofile64 hsa-amd-aqlprofile
+    HINTS ${rocm_version_DIR} ${ROCM_PATH}
+    PATHS ${rocm_version_DIR} ${ROCM_PATH})
+
+target_link_libraries(rocprofiler-hsa-aql INTERFACE ${hsa-amd-aqlprofile64_library})

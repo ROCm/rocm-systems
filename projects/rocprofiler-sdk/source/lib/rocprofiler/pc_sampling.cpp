@@ -21,17 +21,9 @@
 // SOFTWARE.
 
 #include <rocprofiler/fwd.h>
-#include <rocprofiler/rocprofiler.h>
+#include <rocprofiler/pc_sampling.h>
 
-#include "lib/common/utility.hpp"
-#include "lib/rocprofiler/context/context.hpp"
-#include "lib/rocprofiler/context/domain.hpp"
-#include "lib/rocprofiler/hsa/agent.hpp"
-#include "lib/rocprofiler/hsa/hsa.hpp"
 #include "lib/rocprofiler/registration.hpp"
-
-#include <atomic>
-#include <vector>
 
 namespace
 {
@@ -43,18 +35,26 @@ consume_args(Tp&&...)
 
 extern "C" {
 rocprofiler_status_t
-rocprofiler_get_version(uint32_t* major, uint32_t* minor, uint32_t* patch)
+rocprofiler_configure_pc_sampling_service(rocprofiler_context_id_t         context_id,
+                                          rocprofiler_agent_t              agent,
+                                          rocprofiler_pc_sampling_method_t method,
+                                          rocprofiler_pc_sampling_unit_t   unit,
+                                          uint64_t                         interval,
+                                          rocprofiler_buffer_id_t          buffer_id)
 {
-    if(major) *major = ROCPROFILER_VERSION_MAJOR;
-    if(minor) *minor = ROCPROFILER_VERSION_MINOR;
-    if(patch) *patch = ROCPROFILER_VERSION_PATCH;
-    return ROCPROFILER_STATUS_SUCCESS;
+    if(rocprofiler::registration::get_init_status() > 0)
+        return ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED;
+
+    consume_args(context_id, agent, method, unit, interval, buffer_id);
+    return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
 }
 
 rocprofiler_status_t
-rocprofiler_get_timestamp(rocprofiler_timestamp_t* ts)
+rocprofiler_query_pc_sampling_agent_configurations(rocprofiler_agent_t                      agent,
+                                                   rocprofiler_pc_sampling_configuration_t* config,
+                                                   size_t* config_count)
 {
-    *ts = rocprofiler::common::timestamp_ns();
-    return ROCPROFILER_STATUS_SUCCESS;
+    consume_args(agent, config, config_count);
+    return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
 }
 }

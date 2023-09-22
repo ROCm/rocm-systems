@@ -120,7 +120,8 @@ endif()
 rocprofiler_target_compile_options(
     rocprofiler-developer-flags
     LANGUAGES C CXX
-    INTERFACE "-Werror" "-Wdouble-promotion" "-Wshadow" "-Wextra")
+    INTERFACE "-Werror" "-Wdouble-promotion" "-Wshadow" "-Wextra"
+              "-Wno-missing-field-initializers")
 
 if(ROCPROFILER_BUILD_DEVELOPER)
     target_link_libraries(rocprofiler-build-flags

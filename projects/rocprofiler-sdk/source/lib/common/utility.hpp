@@ -45,5 +45,21 @@ timestamp_ns()
     // TODO(jrmadsen): this should be updated to the HSA method
     return std::chrono::steady_clock::now().time_since_epoch().count();
 }
+
+template <class Container, typename Key = typename Container::key_type>
+const auto*
+get_val(const Container& map, const Key& key)
+{
+    auto pos = map.find(key);
+    return (pos != map.end() ? &pos->second : nullptr);
+}
+
+template <class Container, typename Key = typename Container::key_type>
+auto*
+get_val(Container& map, const Key& key)
+{
+    auto pos = map.find(key);
+    return (pos != map.end() ? &pos->second : nullptr);
+}
 }  // namespace common
 }  // namespace rocprofiler
