@@ -3525,7 +3525,7 @@ def save(deviceList, savefilepath):
 # The code below is for when this script is run as an executable instead of when imported as a module
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
-        description=f'AMD ROCm System Management Interface  |  ROCM-SMI version: {__version__}',
+        description='AMD ROCm System Management Interface  |  ROCM-SMI version: %s' % __version__,
         formatter_class=lambda prog: argparse.HelpFormatter(prog, max_help_position=90, width=120))
     groupDev = parser.add_argument_group()
     groupDisplayOpt = parser.add_argument_group('Display Options')
