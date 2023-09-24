@@ -130,18 +130,18 @@ class Logger {
         break;
     }
     return *getInstance();
-  };
+  }
 
   Logger &operator<<(const char* s) {
     return operator<<(std::string(s));
-  };
+  }
 
   template <class T> Logger &operator<<(const T &v) {
     std::ostringstream s;
     s << v;
     std::string str = s.str();
     return operator<<(str);
-  };
+  }
 
   // Interface for Error Log
   void error(const char* text) throw();

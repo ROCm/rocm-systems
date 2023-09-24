@@ -5,7 +5,7 @@
  * The University of Illinois/NCSA
  * Open Source License (NCSA)
  *
- * Copyright (c) 2017, Advanced Micro Devices, Inc.
+ * Copyright (c) 2017-2023, Advanced Micro Devices, Inc.
  * All rights reserved.
  *
  * Developed by:
@@ -67,6 +67,8 @@ enum MonitorTypes {
   kMonPowerCapMax,
   kMonPowerCapMin,
   kMonPowerAve,
+  kMonPowerInput,
+  kMonPowerLabel,
   kMonTempMax,
   kMonTempMin,
   kMonTempMaxHyst,
@@ -94,44 +96,46 @@ enum MonitorTypes {
   kMonInvalid = 0xFFFFFFFF,
 };
 
-const std::map<MonitorTypes,std::string> monitorTypesToString {
-   {MonitorTypes::kMonName, "amd::smi::kMonName"},
-   {MonitorTypes::kMonTemp, "amd::smi::kMonName"},
-   {MonitorTypes::kMonFanSpeed, "amd::smi::kMonName"},
-   {MonitorTypes::kMonMaxFanSpeed, "amd::smi::kMonName"},
-   {MonitorTypes::kMonFanRPMs, "amd::smi::kMonName"},
-   {MonitorTypes::kMonFanCntrlEnable, "amd::smi::kMonName"},
-   {MonitorTypes::kMonPowerCap, "amd::smi::kMonName"},
-   {MonitorTypes::kMonPowerCapDefault, "amd::smi::kMonName"},
-   {MonitorTypes::kMonPowerCapMax, "amd::smi::kMonName"},
-   {MonitorTypes::kMonPowerCapMin, "amd::smi::kMonName"},
-   {MonitorTypes::kMonPowerAve, "amd::smi::kMonName"},
-   {MonitorTypes::kMonTempMax, "amd::smi::kMonName"},
-   {MonitorTypes::kMonTempMin, "amd::smi::kMonName"},
-   {MonitorTypes::kMonTempMaxHyst, "amd::smi::kMonName"},
-   {MonitorTypes::kMonTempMinHyst, "amd::smi::kMonName"},
-   {MonitorTypes::kMonTempCritical, "amd::smi::kMonName"},
-   {MonitorTypes::kMonTempCriticalHyst, "amd::smi::kMonName"},
-   {MonitorTypes::kMonTempEmergency, "amd::smi::kMonName"},
-   {MonitorTypes::kMonTempEmergencyHyst, "amd::smi::kMonName"},
-   {MonitorTypes::kMonTempCritMin, "amd::smi::kMonName"},
-   {MonitorTypes::kMonTempCritMinHyst, "amd::smi::kMonName"},
-   {MonitorTypes::kMonTempOffset, "amd::smi::kMonName"},
-   {MonitorTypes::kMonTempLowest, "amd::smi::kMonName"},
-   {MonitorTypes::kMonTempHighest, "amd::smi::kMonName"},
-   {MonitorTypes::kMonTempLabel, "amd::smi::kMonName"},
-   {MonitorTypes::kMonVolt, "amd::smi::kMonName"},
-   {MonitorTypes::kMonVoltMax, "amd::smi::kMonName"},
-   {MonitorTypes::kMonVoltMinCrit, "amd::smi::kMonName"},
-   {MonitorTypes::kMonVoltMin, "amd::smi::kMonName"},
-   {MonitorTypes::kMonVoltMaxCrit, "amd::smi::kMonName"},
-   {MonitorTypes::kMonVoltAverage, "amd::smi::kMonName"},
-   {MonitorTypes::kMonVoltLowest, "amd::smi::kMonName"},
-   {MonitorTypes::kMonVoltHighest, "amd::smi::kMonName"},
-   {MonitorTypes::kMonVoltLabel, "amd::smi::kMonName"},
-   {MonitorTypes::kMonInvalid, "amd::smi::kMonName"},
+const std::map<MonitorTypes, std::string> monitorTypesToString{
+    {MonitorTypes::kMonName, "MonitorTypes::kMonName"},
+    {MonitorTypes::kMonTemp, "MonitorTypes::kMonTemp"},
+    {MonitorTypes::kMonFanSpeed, "MonitorTypes::kMonFanSpeed"},
+    {MonitorTypes::kMonMaxFanSpeed, "MonitorTypes::kMonMaxFanSpeed"},
+    {MonitorTypes::kMonFanRPMs, "MonitorTypes::kMonFanRPMs"},
+    {MonitorTypes::kMonFanCntrlEnable, "MonitorTypes::kMonFanCntrlEnable"},
+    {MonitorTypes::kMonPowerCap, "MonitorTypes::kMonPowerCap"},
+    {MonitorTypes::kMonPowerCapDefault, "MonitorTypes::kMonPowerCapDefault"},
+    {MonitorTypes::kMonPowerCapMax, "MonitorTypes::kMonPowerCapMax"},
+    {MonitorTypes::kMonPowerCapMin, "MonitorTypes::kMonPowerCapMin"},
+    {MonitorTypes::kMonPowerAve, "MonitorTypes::kMonPowerAve"},
+    {MonitorTypes::kMonPowerInput, "MonitorTypes::kMonPowerInput"},
+    {MonitorTypes::kMonPowerLabel, "MonitorTypes::kMonPowerLabel"},
+    {MonitorTypes::kMonTempMax, "MonitorTypes::kMonTempMax"},
+    {MonitorTypes::kMonTempMin, "MonitorTypes::kMonTempMin"},
+    {MonitorTypes::kMonTempMaxHyst, "MonitorTypes::kMonTempMaxHyst"},
+    {MonitorTypes::kMonTempMinHyst, "MonitorTypes::kMonTempMinHyst"},
+    {MonitorTypes::kMonTempCritical, "MonitorTypes::kMonTempCritical"},
+    {MonitorTypes::kMonTempCriticalHyst, "MonitorTypes::kMonTempCriticalHyst"},
+    {MonitorTypes::kMonTempEmergency, "MonitorTypes::kMonTempEmergency"},
+    {MonitorTypes::kMonTempEmergencyHyst,
+                                        "MonitorTypes::kMonTempEmergencyHyst"},
+    {MonitorTypes::kMonTempCritMin, "MonitorTypes::kMonTempCritMin"},
+    {MonitorTypes::kMonTempCritMinHyst, "MonitorTypes::kMonTempCritMinHyst"},
+    {MonitorTypes::kMonTempOffset, "MonitorTypes::kMonTempOffset"},
+    {MonitorTypes::kMonTempLowest, "MonitorTypes::kMonTempLowest"},
+    {MonitorTypes::kMonTempHighest, "MonitorTypes::kMonTempHighest"},
+    {MonitorTypes::kMonTempLabel, "MonitorTypes::kMonTempLabel"},
+    {MonitorTypes::kMonVolt, "MonitorTypes::kMonVolt"},
+    {MonitorTypes::kMonVoltMax, "MonitorTypes::kMonVoltMax"},
+    {MonitorTypes::kMonVoltMinCrit, "MonitorTypes::kMonVoltMinCrit"},
+    {MonitorTypes::kMonVoltMin, "MonitorTypes::kMonVoltMin"},
+    {MonitorTypes::kMonVoltMaxCrit, "MonitorTypes::kMonVoltMaxCrit"},
+    {MonitorTypes::kMonVoltAverage, "MonitorTypes::kMonVoltAverage"},
+    {MonitorTypes::kMonVoltLowest, "MonitorTypes::kMonVoltLowest"},
+    {MonitorTypes::kMonVoltHighest, "MonitorTypes::kMonVoltHighest"},
+    {MonitorTypes::kMonVoltLabel, "MonitorTypes::kMonVoltLabel"},
+    {MonitorTypes::kMonInvalid, "MonitorTypes::kMonInvalid"},
 };
-
 
 class Monitor {
  public:

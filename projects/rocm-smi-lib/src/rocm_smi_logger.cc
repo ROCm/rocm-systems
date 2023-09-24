@@ -71,9 +71,8 @@
 #include "rocm_smi/rocm_smi_logger.h"
 #include "rocm_smi/rocm_smi_main.h"
 
-using namespace ROCmLogging;
 
-Logger* Logger::m_Instance = nullptr;
+ROCmLogging::Logger *ROCmLogging::Logger::m_Instance = nullptr;
 
 // Log file name
 // WARNING: File name should be changed here and
@@ -81,39 +80,39 @@ Logger* Logger::m_Instance = nullptr;
 // in one place will cause a mismatch in these scripts,
 // files may not have proper permissions, and logrotate
 // would not function properly.
-const std::string logPath = "/var/log/rocm_smi_lib/";
-const std::string logBaseFName = "ROCm-SMI-lib";
-const std::string logExtension = ".log";
-const std::string logFileName = logPath + logBaseFName + logExtension;
+#define LOGPATH "/var/log/rocm_smi_lib/"
+#define LOGBASE_FNAME "ROCm-SMI-lib"
+#define LOGEXTENSION ".log"
+const char *logFileName = LOGPATH LOGBASE_FNAME LOGEXTENSION;
 
-Logger::Logger() {
+ROCmLogging::Logger::Logger() {
   initialize_resources();
 }
 
-Logger::~Logger() {
+ROCmLogging::Logger::~Logger() {
   if (m_loggingIsOn) {
     destroy_resources();
   }
 }
 
-Logger* Logger::getInstance() throw() {
+ROCmLogging::Logger* ROCmLogging::Logger::getInstance() throw() {
   if (m_Instance == nullptr) {
-    m_Instance = new Logger();
+    m_Instance = new ROCmLogging::Logger();
   }
   return m_Instance;
 }
 
-void Logger::lock() {
+void ROCmLogging::Logger::lock() {
   m_Lock.lock();
 }
 
-void Logger::unlock() {
+void ROCmLogging::Logger::unlock() {
   m_Lock.unlock();
 }
 
-void Logger::logIntoFile(std::string& data) {
+void ROCmLogging::Logger::logIntoFile(std::string& data) {
   lock();
-  if(!m_File.is_open()) {
+  if (!m_File.is_open()) {
     initialize_resources();
     if (!m_File.is_open()) {
       std::cout << "WARNING: re-initializing resources was unsuccessful."
@@ -127,24 +126,24 @@ void Logger::logIntoFile(std::string& data) {
   unlock();
 }
 
-void Logger::logOnConsole(std::string& data) {
+void ROCmLogging::Logger::logOnConsole(std::string& data) {
   std::cout << getCurrentTime() << "  " << data << std::endl;
 }
 
 // Returns: In string format, YY-MM-DD HH:MM:SS.microseconds
-std::string Logger::getCurrentTime(void) {
-  using namespace std::chrono;
+std::string ROCmLogging::Logger::getCurrentTime(void) {
   std::string currentTime;
 
   // get current time
-  auto now = system_clock::now();
+  auto now = std::chrono::system_clock::now();
 
   // get number of milliseconds for the current second
   // (remainder after division into seconds)
-  auto ms = duration_cast<microseconds>(now.time_since_epoch()) % 1000000;
+  auto ms = std::chrono::duration_cast<std::chrono::microseconds>(
+    now.time_since_epoch()) % 1000000;
 
   // convert to std::time_t in order to convert to std::tm (broken time)
-  auto timer = system_clock::to_time_t(now);
+  auto timer = std::chrono::system_clock::to_time_t(now);
 
   // convert to broken time
   std::tm bt = *std::localtime(&timer);
@@ -159,7 +158,7 @@ std::string Logger::getCurrentTime(void) {
 }
 
 // Interface for Error Log
-void Logger::error(const char* text) throw() {
+void ROCmLogging::Logger::error(const char* text) throw() {
   // By default, logging is disabled
   // The check below allows us to toggle logging through RSMI_LOGGING
   // set or unset
@@ -182,18 +181,18 @@ void Logger::error(const char* text) throw() {
   }
 }
 
-void Logger::error(std::string& text) throw() {
+void ROCmLogging::Logger::error(std::string& text) throw() {
   error(text.data());
 }
 
-void Logger::error(std::ostringstream& stream) throw() {
+void ROCmLogging::Logger::error(std::ostringstream& stream) throw() {
   std::string text = stream.str();
   error(text.data());
   stream.str("");
 }
 
 // Interface for Alarm Log
-void Logger::alarm(const char* text) throw() {
+void ROCmLogging::Logger::alarm(const char* text) throw() {
   // By default, logging is disabled (ie. no RSMI_LOGGING)
   // The check below allows us to toggle logging through RSMI_LOGGING
   // set or unset
@@ -216,18 +215,18 @@ void Logger::alarm(const char* text) throw() {
   }
 }
 
-void Logger::alarm(std::string& text) throw() {
+void ROCmLogging::Logger::alarm(std::string& text) throw() {
   alarm(text.data());
 }
 
-void Logger::alarm(std::ostringstream& stream) throw() {
+void ROCmLogging::Logger::alarm(std::ostringstream& stream) throw() {
   std::string text = stream.str();
   alarm(text.data());
   stream.str("");
 }
 
 // Interface for Always Log
-void Logger::always(const char* text) throw() {
+void ROCmLogging::Logger::always(const char* text) throw() {
   // By default, logging is disabled (ie. no RSMI_LOGGING)
   // The check below allows us to toggle logging through RSMI_LOGGING
   // set or unset
@@ -250,18 +249,18 @@ void Logger::always(const char* text) throw() {
   }
 }
 
-void Logger::always(std::string& text) throw() {
+void ROCmLogging::Logger::always(std::string& text) throw() {
   always(text.data());
 }
 
-void Logger::always(std::ostringstream& stream) throw() {
+void ROCmLogging::Logger::always(std::ostringstream& stream) throw() {
   std::string text = stream.str();
   always(text.data());
   stream.str("");
 }
 
 // Interface for Buffer Log
-void Logger::buffer(const char* text) throw() {
+void ROCmLogging::Logger::buffer(const char* text) throw() {
   // Buffer is the special case. So don't add log level
   // and timestamp in the buffer message. Just log the raw bytes.
   if ((m_LogType == FILE_LOG) && (m_LogLevel >= LOG_LEVEL_BUFFER)) {
@@ -284,18 +283,18 @@ void Logger::buffer(const char* text) throw() {
   }
 }
 
-void Logger::buffer(std::string& text) throw() {
+void ROCmLogging::Logger::buffer(std::string& text) throw() {
   buffer(text.data());
 }
 
-void Logger::buffer(std::ostringstream& stream) throw() {
+void ROCmLogging::Logger::buffer(std::ostringstream& stream) throw() {
   std::string text = stream.str();
   buffer(text.data());
   stream.str("");
 }
 
 // Interface for Info Log
-void Logger::info(const char* text) throw() {
+void ROCmLogging::Logger::info(const char* text) throw() {
   // By default, logging is disabled (ie. no RSMI_LOGGING)
   // The check below allows us to toggle logging through RSMI_LOGGING
   // set or unset
@@ -318,18 +317,18 @@ void Logger::info(const char* text) throw() {
   }
 }
 
-void Logger::info(std::string& text) throw() {
+void ROCmLogging::Logger::info(std::string& text) throw() {
   info(text.data());
 }
 
-void Logger::info(std::ostringstream& stream) throw() {
+void ROCmLogging::Logger::info(std::ostringstream& stream) throw() {
   std::string text = stream.str();
   info(text.data());
   stream.str("");
 }
 
 // Interface for Trace Log
-void Logger::trace(const char* text) throw() {
+void ROCmLogging::Logger::trace(const char* text) throw() {
   // By default, logging is disabled (ie. no RSMI_LOGGING)
   // The check below allows us to toggle logging through RSMI_LOGGING
   // set or unset
@@ -352,18 +351,18 @@ void Logger::trace(const char* text) throw() {
   }
 }
 
-void Logger::trace(std::string& text) throw() {
+void ROCmLogging::Logger::trace(std::string& text) throw() {
   trace(text.data());
 }
 
-void Logger::trace(std::ostringstream& stream) throw() {
+void ROCmLogging::Logger::trace(std::ostringstream& stream) throw() {
   std::string text = stream.str();
   trace(text.data());
   stream.str("");
 }
 
 // Interface for Debug Log
-void Logger::debug(const char* text) throw() {
+void ROCmLogging::Logger::debug(const char* text) throw() {
   // By default, logging is disabled (ie. no RSMI_LOGGING)
   // The check below allows us to toggle logging through RSMI_LOGGING
   // set or unset
@@ -386,51 +385,53 @@ void Logger::debug(const char* text) throw() {
   }
 }
 
-void Logger::debug(std::string& text) throw() {
+void ROCmLogging::Logger::debug(std::string& text) throw() {
   debug(text.data());
 }
 
-void Logger::debug(std::ostringstream& stream) throw() {
+void ROCmLogging::Logger::debug(std::ostringstream& stream) throw() {
   std::string text = stream.str();
   debug(text.data());
   stream.str("");
 }
 
 // Interfaces to control log levels
-void Logger::updateLogLevel(LogLevel logLevel) {
+void ROCmLogging::Logger::updateLogLevel(LogLevel logLevel) {
   m_LogLevel = logLevel;
 }
 
-void Logger::enableAllLogLevels() {
+void ROCmLogging::Logger::enableAllLogLevels() {
   m_LogLevel = ENABLE_LOG;
 }
 
 // Disable all log levels, except error and alarm
-void Logger::disableLog() {
+void ROCmLogging::Logger::disableLog() {
   m_LogLevel = DISABLE_LOG;
 }
 
 // Interfaces to control log Types
-void Logger::updateLogType(LogType logType) {
+void ROCmLogging::Logger::updateLogType(LogType logType) {
   m_LogType = logType;
 }
 
-void Logger::enableConsoleLogging() {
+void ROCmLogging::Logger::enableConsoleLogging() {
   m_LogType = CONSOLE;
 }
 
-void Logger::enableFileLogging() {
+void ROCmLogging::Logger::enableFileLogging() {
   m_LogType = FILE_LOG;
 }
 
 // Returns a string of details on current log settings
-std::string Logger::getLogSettings() {
+std::string ROCmLogging::Logger::getLogSettings() {
   std::string logSettings;
 
   if (m_File.is_open()) {
-    logSettings += "OpenStatus = File (" + logFileName + ") is open";
+    logSettings += "OpenStatus = File (" + std::string(logFileName)
+                   + ") is open";
   } else {
-    logSettings += "OpenStatus = File (" + logFileName + ") is not open";
+    logSettings += "OpenStatus = File (" + std::string(logFileName)
+                   + ") is not open";
   }
   logSettings += ", ";
 
@@ -480,11 +481,11 @@ std::string Logger::getLogSettings() {
 
 // Returns current reported enabled logging state. State is controlled by
 // user's environment variable RSMI_LOGGING.
-bool Logger::isLoggerEnabled() {
+bool ROCmLogging::Logger::isLoggerEnabled() {
   return m_loggingIsOn;
 }
 
-void Logger::initialize_resources() {
+void ROCmLogging::Logger::initialize_resources() {
   // By default, logging is disabled (ie. no RSMI_LOGGING)
   // The check below allows us to toggle logging through RSMI_LOGGING
   // set or unset
@@ -492,7 +493,7 @@ void Logger::initialize_resources() {
   if (!m_loggingIsOn) {
     return;
   }
-  m_File.open(logFileName.c_str(), std::ios::out | std::ios::app);
+  m_File.open(logFileName, std::ios::out | std::ios::app);
   m_LogLevel = LOG_LEVEL_TRACE;
   // RSMI_LOGGING = 1, output to logs only
   // RSMI_LOGGING = 2, output to console only
@@ -521,9 +522,9 @@ void Logger::initialize_resources() {
   if (m_File.fail()) {
     std::cout << "WARNING: Failed opening log file." << std::endl;
   }
-  chmod(logFileName.c_str(), S_IRUSR|S_IRGRP|S_IROTH|S_IWUSR|S_IWGRP|S_IWOTH);
+  chmod(logFileName, S_IRUSR|S_IRGRP|S_IROTH|S_IWUSR|S_IWGRP|S_IWOTH);
 }
 
-void Logger::destroy_resources() {
+void ROCmLogging::Logger::destroy_resources() {
   m_File.close();
 }

@@ -3,7 +3,7 @@
  * The University of Illinois/NCSA
  * Open Source License (NCSA)
  *
- * Copyright (c) 2017, Advanced Micro Devices, Inc.
+ * Copyright (c) 2017-2023, Advanced Micro Devices, Inc.
  * All rights reserved.
  *
  * Developed by:
@@ -58,8 +58,6 @@
 #include "rocm_smi/rocm_smi_exception.h"
 #include "rocm_smi/rocm_smi_logger.h"
 
-using namespace ROCmLogging;
-
 namespace amd {
 namespace smi {
 
@@ -80,6 +78,8 @@ static const char *kMonPowerCapName = "power#_cap";
 static const char *kMonPowerCapMaxName = "power#_cap_max";
 static const char *kMonPowerCapMinName = "power#_cap_min";
 static const char *kMonPowerAveName = "power#_average";
+static const char *kMonPowerInputName = "power#_input";
+static const char *kMonPowerLabelName = "power#_label";
 static const char *kMonTempMaxName = "temp#_max";
 static const char *kMonTempMinName = "temp#_min";
 static const char *kMonTempMaxHystName = "temp#_max_hyst";
@@ -135,6 +135,8 @@ static const std::map<MonitorTypes, const char *> kMonitorNameMap = {
     {kMonPowerCapMax, kMonPowerCapMaxName},
     {kMonPowerCapMin, kMonPowerCapMinName},
     {kMonPowerAve, kMonPowerAveName},
+    {kMonPowerInput, kMonPowerInputName},
+    {kMonPowerLabel, kMonPowerLabelName},
     {kMonTempMax, kMonTempMaxName},
     {kMonTempMin, kMonTempMinName},
     {kMonTempMaxHyst, kMonTempMaxHystName},
@@ -202,7 +204,8 @@ static const std::map<const char *, monitor_depends_t> kMonFuncDependsMap = {
                                       .variants = {kMonInvalid},
                                     }
   },
-  {"rsmi_dev_power_cap_default_get",        { .mandatory_depends = {kMonPowerCapDefaultName},
+  {"rsmi_dev_power_cap_default_get", { .mandatory_depends =
+                                      {kMonPowerCapDefaultName},
                                       .variants = {kMonInvalid},
                                     }
   },
@@ -613,7 +616,7 @@ void Monitor::fillSupportedFuncs(SupportedFuncMap *supported_funcs) {
         supported_monitors = intersect;
       }
       if (!supported_monitors.empty()) {
-        for (unsigned long & supported_monitor : supported_monitors) {
+        for (uint64_t &supported_monitor : supported_monitors) {
           if (m_type == eDefaultMonitor) {
             assert(supported_monitor > 0);
             supported_monitor |=

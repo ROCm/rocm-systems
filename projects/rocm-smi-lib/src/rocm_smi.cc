@@ -77,7 +77,6 @@
 #include "rocm_smi/rocm_smi64Config.h"
 #include "rocm_smi/rocm_smi_logger.h"
 
-using namespace ROCmLogging;
 using namespace amd::smi;
 
 static const uint32_t kMaxOverdriveLevel = 20;
@@ -2386,21 +2385,22 @@ rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_type,
   amd::smi::MonitorTypes mon_type = amd::smi::kMonInvalid;
   uint16_t val_ui16;
 
-  static const std::map<rsmi_temperature_metric_t, amd::smi::MonitorTypes> kMetricTypeMap = {
-    { RSMI_TEMP_CURRENT, amd::smi::kMonTemp },
-    { RSMI_TEMP_MAX, amd::smi::kMonTempMax },
-    { RSMI_TEMP_MIN, amd::smi::kMonTempMin },
-    { RSMI_TEMP_MAX_HYST, amd::smi::kMonTempMaxHyst },
-    { RSMI_TEMP_MIN_HYST, amd::smi::kMonTempMinHyst },
-    { RSMI_TEMP_CRITICAL, amd::smi::kMonTempCritical },
-    { RSMI_TEMP_CRITICAL_HYST, amd::smi::kMonTempCriticalHyst },
-    { RSMI_TEMP_EMERGENCY, amd::smi::kMonTempEmergency },
-    { RSMI_TEMP_EMERGENCY_HYST, amd::smi::kMonTempEmergencyHyst },
-    { RSMI_TEMP_CRIT_MIN, amd::smi::kMonTempCritMin },
-    { RSMI_TEMP_CRIT_MIN_HYST, amd::smi::kMonTempCritMinHyst },
-    { RSMI_TEMP_OFFSET, amd::smi::kMonTempOffset },
-    { RSMI_TEMP_LOWEST, amd::smi::kMonTempLowest },
-    { RSMI_TEMP_HIGHEST, amd::smi::kMonTempHighest },
+  static const std::map<rsmi_temperature_metric_t, amd::smi::MonitorTypes>
+    kMetricTypeMap = {
+      { RSMI_TEMP_CURRENT, amd::smi::kMonTemp },
+      { RSMI_TEMP_MAX, amd::smi::kMonTempMax },
+      { RSMI_TEMP_MIN, amd::smi::kMonTempMin },
+      { RSMI_TEMP_MAX_HYST, amd::smi::kMonTempMaxHyst },
+      { RSMI_TEMP_MIN_HYST, amd::smi::kMonTempMinHyst },
+      { RSMI_TEMP_CRITICAL, amd::smi::kMonTempCritical },
+      { RSMI_TEMP_CRITICAL_HYST, amd::smi::kMonTempCriticalHyst },
+      { RSMI_TEMP_EMERGENCY, amd::smi::kMonTempEmergency },
+      { RSMI_TEMP_EMERGENCY_HYST, amd::smi::kMonTempEmergencyHyst },
+      { RSMI_TEMP_CRIT_MIN, amd::smi::kMonTempCritMin },
+      { RSMI_TEMP_CRIT_MIN_HYST, amd::smi::kMonTempCritMinHyst },
+      { RSMI_TEMP_OFFSET, amd::smi::kMonTempOffset },
+      { RSMI_TEMP_LOWEST, amd::smi::kMonTempLowest },
+      { RSMI_TEMP_HIGHEST, amd::smi::kMonTempHighest },
   };
 
   const auto mon_type_it = kMetricTypeMap.find(metric);
@@ -2485,7 +2485,8 @@ rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_type,
       return RSMI_STATUS_NOT_SUPPORTED;
     }
 
-    *temperature = static_cast<int64_t>(val_ui16) * CENTRIGRADE_TO_MILLI_CENTIGRADE;
+    *temperature =
+      static_cast<int64_t>(val_ui16) * CENTRIGRADE_TO_MILLI_CENTIGRADE;
 
     ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
        << " | Success "
@@ -2812,6 +2813,80 @@ rsmi_dev_power_ave_get(uint32_t dv_ind, uint32_t sensor_ind, uint64_t *power) {
   ret = get_dev_mon_value(amd::smi::kMonPowerAve, dv_ind, sensor_ind, power);
 
   return ret;
+  CATCH
+}
+
+rsmi_status_t
+rsmi_dev_current_socket_power_get(uint32_t dv_ind, uint64_t *socket_power) {
+  TRY
+  std::ostringstream ss;
+  rsmi_status_t rsmiReturn = RSMI_STATUS_NOT_SUPPORTED;
+  std::string val_str;
+  uint32_t sensor_ind = 1;  // socket_power sysfs files have 1-based indices
+  MonitorTypes mon_type = amd::smi::kMonPowerInput;
+  ss << __PRETTY_FUNCTION__ << " | ======= start =======, dv_ind="
+     << std::to_string(dv_ind);
+  LOG_TRACE(ss);
+  if (socket_power == nullptr) {
+    rsmiReturn = RSMI_STATUS_INVALID_ARGS;
+    ss << __PRETTY_FUNCTION__
+       << " | ======= end ======= "
+       << " | Fail "
+       << " | Device #: " << dv_ind
+       << " | Type: " << monitorTypesToString.at(mon_type)
+       << " | Cause: socket_power was a null ptr reference"
+       << " | Returning = "
+       << getRSMIStatusString(rsmiReturn) << " |";
+    LOG_ERROR(ss);
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+  CHK_SUPPORT_SUBVAR_ONLY(socket_power, sensor_ind)
+  DEVICE_MUTEX
+
+  if (dev->monitor() == nullptr) {
+    ss << __PRETTY_FUNCTION__
+       << " | ======= end ======= "
+       << " | Fail "
+       << " | Device #: " << dv_ind
+       << " | Type: " << monitorTypesToString.at(mon_type)
+       << " | Cause: hwmon monitor was a null ptr reference"
+       << " | Returning = "
+       << getRSMIStatusString(rsmiReturn) << " |";
+    LOG_ERROR(ss);
+    return rsmiReturn;
+  }
+
+  int ret = dev->monitor()->readMonitor(amd::smi::kMonPowerLabel,
+                                        sensor_ind, &val_str);
+  if (ret || val_str != "PPT" || val_str.size() != 3) {
+    if (ret != 0) {
+      rsmiReturn = amd::smi::ErrnoToRsmiStatus(ret);
+    }
+    ss << __PRETTY_FUNCTION__
+       << " | ======= end ======= "
+       << " | Fail "
+       << " | Device #: " << dv_ind
+       << " | Type: " << monitorTypesToString.at(mon_type)
+       << " | Cause: readMonitor() returned an error status"
+       << " or Socket Power label did not show PPT or size of label data was"
+       << " unexpected"
+       << " | Returning = "
+       << getRSMIStatusString(rsmiReturn) << " |";
+    LOG_ERROR(ss);
+    return rsmiReturn;
+  }
+  rsmiReturn = get_dev_mon_value(mon_type, dv_ind, sensor_ind,
+                                 socket_power);
+  ss << __PRETTY_FUNCTION__
+     << " | ======= end ======= "
+     << " | Success "
+     << " | Device #: " << dv_ind
+     << " | Type: " << monitorTypesToString.at(mon_type)
+     << " | Data: " << *socket_power
+     << " | Returning = "
+     << getRSMIStatusString(rsmiReturn) << " |";
+  LOG_TRACE(ss);
+  return rsmiReturn;
   CATCH
 }
 

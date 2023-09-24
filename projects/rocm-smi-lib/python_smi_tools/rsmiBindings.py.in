@@ -655,3 +655,8 @@ rsmi_nps_mode_type = rsmi_nps_mode_type_t
 # nps_mode_type_l[rsmi_nps_mode_type_t.RSMI_MEMORY_PARTITION_NPS2]
 # will return string 'NPS2'
 nps_mode_type_l = ['NPS1', 'NPS2', 'NPS4', 'NPS8']
+
+class rsmi_power_label(str, Enum):
+    AVG_POWER = '(Avg)'
+    CURRENT_SOCKET_POWER = '(Socket)'
+

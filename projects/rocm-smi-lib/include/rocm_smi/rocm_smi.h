@@ -1708,6 +1708,30 @@ rsmi_status_t
 rsmi_dev_power_ave_get(uint32_t dv_ind, uint32_t sensor_ind, uint64_t *power);
 
 /**
+ *  @brief Get the current socket power (also known as instant
+ *  power) of the device index provided.
+ *
+ *  @details Given a device index @p dv_ind and a pointer to a uint64_t
+ *  @p socket_power, this function will write the current socket power
+ *  (in microwatts) to the uint64_t pointed to by @p socket_power.
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[inout] socket_power a pointer to uint64_t to which the current
+ *  socket power will be written to. If this parameter is nullptr,
+ *  this function will return ::RSMI_STATUS_INVALID_ARGS if the function is
+ *  supported with the provided, arguments and ::RSMI_STATUS_NOT_SUPPORTED
+ *  if it is not supported with the provided arguments.
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful
+ *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
+ *  support this function with the given arguments
+ *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
+ */
+rsmi_status_t
+rsmi_dev_current_socket_power_get(uint32_t dv_ind, uint64_t *socket_power);
+
+/**
  *  @brief Get the energy accumulator counter of the device with provided
  *  device index.
  *

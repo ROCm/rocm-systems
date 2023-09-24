@@ -61,7 +61,6 @@
 #include "rocm_smi/rocm_smi_exception.h"
 #include "rocm_smi/rocm_smi_logger.h"
 
-using namespace ROCmLogging;
 using namespace amd::smi;
 
 #define TRY try {

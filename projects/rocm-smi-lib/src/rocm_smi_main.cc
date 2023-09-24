@@ -68,7 +68,6 @@
 #include "rocm_smi/rocm_smi_kfd.h"
 #include "rocm_smi/rocm_smi_logger.h"
 
-using namespace ROCmLogging;
 
 static const char *kPathDRMRoot = "/sys/class/drm";
 static const char *kPathHWMonRoot = "/sys/class/hwmon";
@@ -314,12 +313,12 @@ RocmSMI::Initialize(uint64_t flags) {
   int i_ret;
 
   LOG_ALWAYS("=============== ROCM SMI initialize ================");
-  Logger::getInstance()->enableAllLogLevels();
+  ROCmLogging::Logger::getInstance()->enableAllLogLevels();
   // Leaving below to allow developers to check current log settings
   // std::string logSettings = Logger::getInstance()->getLogSettings();
   // std::cout << "Current log settings:\n" << logSettings << std::endl;
 
-  if (Logger::getInstance()->isLoggerEnabled()) {
+  if (ROCmLogging::Logger::getInstance()->isLoggerEnabled()) {
     logSystemDetails();
   }
 

@@ -68,8 +68,6 @@
 #include "rocm_smi/rocm_smi_logger.h"
 #include "shared_mutex.h"  // NOLINT
 
-using namespace ROCmLogging;
-
 namespace amd {
 namespace smi {
 
