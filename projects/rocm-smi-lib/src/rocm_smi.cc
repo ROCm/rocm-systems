@@ -147,14 +147,21 @@ static uint64_t freq_string_to_int(const std::vector<std::string> &freq_lines,
 
   std::istringstream fs(freq_lines[i]);
 
-  uint32_t ind;
+  char junk_ch;
+  int ind;
   float freq;
-  std::string junk;
+  std::string junk_str;
   std::string units_str;
   std::string star_str;
 
-  fs >> ind;
-  fs >> junk;  // colon
+  if (fs.peek() == 'S') {
+    // Deep Sleep frequency is only supported by some GPUs
+    fs >> junk_ch;
+  } else {
+    // All other frequency indices are numbers
+    fs >> ind;
+  }
+  fs >> junk_str;  // colon
   fs >> freq;
   fs >> units_str;
   fs >> star_str;
@@ -1084,8 +1091,13 @@ static rsmi_status_t get_frequencies(amd::smi::DevInfoTypes type, rsmi_clk_type_
   }
 
   f->num_supported = static_cast<uint32_t>(val_vec.size());
-  bool current = false;
   f->current = RSMI_MAX_NUM_FREQUENCIES + 1;  // init to an invalid value
+
+  // Deep Sleep frequency is only supported by some GPUs
+  // It is indicated by letter 'S' instead of the index number
+  f->has_deep_sleep = (val_vec[0][0] == 'S');
+
+  bool current = false;
 
   for (uint32_t i = 0; i < f->num_supported; ++i) {
     f->frequency[i] = freq_string_to_int(val_vec, &current, lanes, i);
@@ -1113,9 +1125,9 @@ static rsmi_status_t get_frequencies(amd::smi::DevInfoTypes type, rsmi_clk_type_
         sysvalue += " Previous Value";
         sysvalue += ' ' + std::to_string(f->frequency[f->current]);
         DEBUG_LOG("More than one current clock. ", sysvalue);
-      }
-      else
+      } else {
           f->current = i;
+      }
     }
   }
 

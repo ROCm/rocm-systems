@@ -1808,12 +1808,21 @@ def showClocks(deviceList):
                 if not rsmi_ret_ok(ret, device, 'get_clk_freq_' + clk_type, True):
                     continue
                 printLog(device, 'Supported %s frequencies on GPU%s' % (clk_type, str(device)), None)
-                for x in range(freq.num_supported):
-                    fr = '{:>.0f}Mhz'.format(freq.frequency[x] / 1000000)
-                    if x == freq.current:
-                        printLog(device, str(x), str(fr) + ' *')
-                    else:
-                        printLog(device, str(x), str(fr))
+                for i in range(freq.num_supported):
+                    freq_string = '{:>.0f}Mhz'.format(freq.frequency[i] / 1000000)
+                    if i == freq.current:
+                        freq_string += ' *'
+                    freq_index = i
+                    # Deep Sleep frequency is only supported by some GPUs
+                    # It is indicated by letter 'S' instead of the index number
+                    if freq.has_deep_sleep:
+                        # sleep state
+                        if i == 0:
+                            freq_index = 'S'
+                        # all indices are offset by 1 because Deep Sleep occupies index 0
+                        else:
+                            freq_index = i - 1
+                    printLog(device, str(freq_index), freq_string)
                 printLog(device, '', None)
             else:
                 logging.debug('{} frequency is unsupported on device[{}]'.format(clk_type, device))
@@ -1822,12 +1831,11 @@ def showClocks(deviceList):
             ret = rocmsmi.rsmi_dev_pci_bandwidth_get(device, byref(bw))
             if rsmi_ret_ok(ret, device, 'get_PCIe_bandwidth', True):
                 printLog(device, 'Supported %s frequencies on GPU%s' % ('PCIe', str(device)), None)
-                for x in range(bw.transfer_rate.num_supported):
-                    fr = '{:>.1f}GT/s x{}'.format(bw.transfer_rate.frequency[x] / 1000000000, bw.lanes[x])
-                    if x == bw.transfer_rate.current:
-                        printLog(device, str(x), str(fr) + ' *')
-                    else:
-                        printLog(device, str(x), str(fr))
+                for i in range(bw.transfer_rate.num_supported):
+                    freq_string = '{:>.1f}GT/s x{}'.format(bw.transfer_rate.frequency[i] / 1000000000, bw.lanes[i])
+                    if i == bw.transfer_rate.current:
+                        freq_string += ' *'
+                    printLog(device, str(i), str(freq_string))
                 printLog(device, '', None)
         else:
             logging.debug('PCIe frequency is unsupported on device [{}]'.format(device))
@@ -1857,9 +1865,17 @@ def showCurrentClocks(deviceList, clk_defined=None, concise=False):
                         printLog(device, '%s current clock frequency not found' % (clk_defined), None)
                         continue
                     fr = freq.frequency[levl] / 1000000
+                    freq_index = levl
+                    if freq.has_deep_sleep:
+                        # sleep state
+                        if levl == 0:
+                            freq_index = 'S'
+                        # all indices are offset by 1 because Deep Sleep occupies index 0
+                        else:
+                            freq_index = levl - 1
                     if concise:  # in case function is used for concise output, no need to print.
                         return '{:.0f}Mhz'.format(fr)
-                    printLog(device, '{} clock level'.format(clk_defined), '{} ({:.0f}Mhz)'.format(levl, fr))
+                    printLog(device, '{} clock level'.format(clk_defined), '{} ({:.0f}Mhz)'.format(freq_index, fr))
             elif not concise:
                 logging.debug('{} clock is unsupported on device[{}]'.format(clk_defined, device))
 
@@ -1872,12 +1888,20 @@ def showCurrentClocks(deviceList, clk_defined=None, concise=False):
                         if levl >= freq.num_supported:
                             printLog(device, '%s current clock frequency not found' % (clk_type), None)
                             continue
+                        freq_index = levl
+                        if freq.has_deep_sleep:
+                            # sleep state
+                            if levl == 0:
+                                freq_index = 'S'
+                            # all indices are offset by 1 because Deep Sleep occupies index 0
+                            else:
+                                freq_index = levl - 1
                         fr = freq.frequency[levl] / 1000000
                         if PRINT_JSON:
                             printLog(device, '%s clock speed:' % (clk_type), '(%sMhz)' % (str(fr)[:-2]))
-                            printLog(device, '%s clock level:' % (clk_type), levl)
+                            printLog(device, '%s clock level:' % (clk_type), freq_index)
                         else:
-                            printLog(device, '%s clock level: %s' % (clk_type, levl), '(%sMhz)' % (str(fr)[:-2]))
+                            printLog(device, '%s clock level: %s' % (clk_type, freq_index), '(%sMhz)' % (str(fr)[:-2]))
                 elif not concise:
                     logging.debug('{} clock is unsupported on device[{}]'.format(clk_type, device))
             # pcie clocks

@@ -70,7 +70,8 @@ extern "C" {
  */
 
 //! Guaranteed maximum possible number of supported frequencies
-#define RSMI_MAX_NUM_FREQUENCIES 32
+//! (32 normal + 1 sleep frequency)
+#define RSMI_MAX_NUM_FREQUENCIES 33
 
 //! Maximum possible value for fan speed. Should be used as the denominator
 //! when determining fan speed percentage.
@@ -747,6 +748,11 @@ typedef rsmi_power_profile_status_t rsmi_power_profile_status;
  * @brief This structure holds information about clock frequencies.
  */
 typedef struct {
+    /**
+     * Deep Sleep frequency is only supported by some GPUs
+     */
+    bool has_deep_sleep;
+
     /**
      * The number of supported frequencies
      */
