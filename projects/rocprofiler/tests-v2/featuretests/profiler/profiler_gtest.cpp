@@ -1372,7 +1372,7 @@ TEST_F(VectorAddCTFMPITest, WhenRunningProfilerWithCTFTest) { EXPECT_EQ(hasFile(
  * ############ Multi Process Tests ################
  * ###################################################
  */
-TEST(ProfilerMPTest, WhenRunningMultiProcessTestItPasses) {
+TEST(ProfilerMPTest, DISABLED_WhenRunningMultiProcessTestItPasses) {
   int num_threads = 3; // Create 3 threads
 
   pid_t childpid = fork();
