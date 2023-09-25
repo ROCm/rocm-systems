@@ -288,8 +288,8 @@ void log_gpu_metrics(const metrics_table_header_t *gpu_metrics_table_header,
         rsmi_gpu_metrics->gfx_activity_acc,
         "rsmi_gpu_metrics->gfx_activity_acc")
     << print_unsigned_hex_and_int(
-        rsmi_gpu_metrics->mem_actvity_acc,
-        "rsmi_gpu_metrics->mem_actvity_acc");
+        rsmi_gpu_metrics->mem_activity_acc,
+        "rsmi_gpu_metrics->mem_activity_acc");
     for (int i=0; i < RSMI_NUM_HBM_INSTANCES; i++) {
       ss << print_unsigned_hex_and_int(
         rsmi_gpu_metrics->temperature_hbm[i],
@@ -414,7 +414,7 @@ static rsmi_status_t GetGPUMetricsFormat1(uint32_t dv_ind,
 
     // These fields didn't exist in v0
     data->gfx_activity_acc = 0;
-    data->mem_actvity_acc  = 0;
+    data->mem_activity_acc  = 0;
     (void)memset(data->temperature_hbm, 0,
                                    RSMI_NUM_HBM_INSTANCES * sizeof(uint16_t));
   }  // else handle other conversions to format 1

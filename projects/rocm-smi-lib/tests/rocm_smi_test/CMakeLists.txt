@@ -26,16 +26,19 @@ set(SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 set(RSMITST "rsmitst")
 
 # Hack to find libraries after installation
+# $ORIGIN is needed for libgtest.so
 # /opt/rocm/share/rocm-smi/rsmitst_tests/../../../ = /opt/rocm
 set(RSMITST_RPATH
-    "\$ORIGIN/../../../lib")
+    "\$ORIGIN/../../../lib"
+    "\$ORIGIN")
 # combine lists
 set(CMAKE_INSTALL_RPATH
     ${CMAKE_INSTALL_RPATH}
     ${RSMITST_RPATH})
 
-# Try to find googletest
-find_package(GTest 1.12.0)
+# TODO: Try to find googletest
+# DISABLED because we want to install gtest with rocm_smi_lib ourselves
+#find_package(GTest 1.12.0)
 
 # GTest_FOUND is set to TRUE if ANY version is found
 # GTest_VERSION is set if 1.12.0 or newer version is found
@@ -47,6 +50,9 @@ if(NOT GTest_FOUND STREQUAL "TRUE" OR NOT DEFINED GTest_VERSION)
         GIT_REPOSITORY https://github.com/google/googletest.git
         GIT_TAG release-1.12.0)
     FetchContent_MakeAvailable(googletest)
+    install(TARGETS gtest gtest_main
+        DESTINATION ${SHARE_INSTALL_PREFIX}/rsmitst_tests
+        COMPONENT ${TESTS_COMPONENT})
 endif()
 
 # Other source directories
@@ -64,13 +70,14 @@ target_include_directories(${RSMITST} PUBLIC ${SRC_DIR}/..)
 target_link_libraries(
     ${RSMITST}
     PUBLIC ${ROCM_SMI_TARGET}
-    PUBLIC GTest::gtest_main
+    PUBLIC gtest
+    PUBLIC gtest_main
     PUBLIC c
     PUBLIC stdc++
     PUBLIC pthread
     PUBLIC dl)
 
-install(TARGETS ${RSMITST} gtest gtest_main
+install(TARGETS ${RSMITST}
     DESTINATION ${SHARE_INSTALL_PREFIX}/rsmitst_tests
     COMPONENT ${TESTS_COMPONENT})
 

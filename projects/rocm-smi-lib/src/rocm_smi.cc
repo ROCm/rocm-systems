@@ -3295,7 +3295,7 @@ rsmi_utilization_count_get(uint32_t dv_ind,
         val_ui32 = gpu_metrics.gfx_activity_acc;
         break;
       case RSMI_COARSE_GRAIN_MEM_ACTIVITY:
-        val_ui32 = gpu_metrics.mem_actvity_acc;
+        val_ui32 = gpu_metrics.mem_activity_acc;
         break;
       default:
         return RSMI_STATUS_INVALID_ARGS;
@@ -3311,6 +3311,119 @@ rsmi_utilization_count_get(uint32_t dv_ind,
   return ret;
   CATCH
 }
+
+rsmi_status_t
+rsmi_dev_activity_metric_get(uint32_t dv_ind,
+                             rsmi_activity_metric_t activity_metric_type,
+                             rsmi_activity_metric_counter_t* activity_metric_counter) {
+
+  TRY
+  std::ostringstream ostrstream;
+  ostrstream << __PRETTY_FUNCTION__ << "| ======= start =======";
+  LOG_TRACE(ostrstream);
+
+  if (!activity_metric_counter) {
+    ostrstream << __PRETTY_FUNCTION__
+               << " | ======= end ======= "
+               << " | Fail "
+               << " | Device #: " << dv_ind
+               << " | Metric Type: " << activity_metric_type
+               << " | Cause: rsmi_activity_metric_counter_t was a null ptr reference"
+               << " | Returning = "
+               << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS) << " |";
+    LOG_ERROR(ostrstream);
+    return rsmi_status_t::RSMI_STATUS_INVALID_ARGS;
+  }
+
+  auto status_code(rsmi_status_t::RSMI_STATUS_SUCCESS);
+  rsmi_gpu_metrics_t gpu_metrics;
+  status_code = rsmi_dev_gpu_metrics_info_get(dv_ind, &gpu_metrics);
+  if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) {
+    ostrstream << __PRETTY_FUNCTION__
+               << " | ======= end ======= "
+               << " | Fail "
+               << " | Device #: " << dv_ind
+               << " | Metric Type: " << activity_metric_type
+               << " | Cause: rsmi_dev_gpu_metrics_info_get returned "
+               << getRSMIStatusString(status_code)
+               << " | Returning = "
+               << status_code << " |";
+    LOG_ERROR(ostrstream);
+    return status_code;
+  }
+
+  if (activity_metric_type & rsmi_activity_metric_t::RSMI_ACTIVITY_GFX) {
+    activity_metric_counter->average_gfx_activity = gpu_metrics.average_gfx_activity;
+    ostrstream << __PRETTY_FUNCTION__
+               << " | For GFX: " << activity_metric_counter->average_gfx_activity;
+    LOG_INFO(ostrstream);
+  }
+  if (activity_metric_type & rsmi_activity_metric_t::RSMI_ACTIVITY_UMC) {
+    activity_metric_counter->average_umc_activity = gpu_metrics.average_umc_activity;
+    ostrstream << __PRETTY_FUNCTION__
+               << " | For UMC: " << activity_metric_counter->average_umc_activity;
+    LOG_INFO(ostrstream);
+  }
+  if (activity_metric_type & rsmi_activity_metric_t::RSMI_ACTIVITY_MM) {
+    activity_metric_counter->average_mm_activity  = gpu_metrics.average_mm_activity;
+    ostrstream << __PRETTY_FUNCTION__
+               << " | For MM: " << activity_metric_counter->average_mm_activity;
+    LOG_INFO(ostrstream);
+  }
+
+  ostrstream << __PRETTY_FUNCTION__
+             << " | ======= end ======= "
+             << " | Success "
+             << " | Device #: " << dv_ind
+             << " | Metric Type: " << activity_metric_type
+             << " | Returning = "
+             << getRSMIStatusString(status_code) << " |";
+  LOG_INFO(ostrstream);
+
+  return status_code;
+  CATCH
+}
+
+rsmi_status_t
+rsmi_dev_activity_avg_mm_get(uint32_t dv_ind, uint16_t* avg_activity) {
+
+  TRY
+  std::ostringstream ostrstream;
+  ostrstream << __PRETTY_FUNCTION__ << "| ======= start =======";
+  LOG_TRACE(ostrstream);
+
+  if (!avg_activity) {
+    ostrstream << __PRETTY_FUNCTION__
+               << " | ======= end ======= "
+               << " | Fail "
+               << " | Device #: " << dv_ind
+               << " | Metric Type: " << rsmi_activity_metric_t::RSMI_ACTIVITY_MM
+               << " | Cause: avg_activity was a null ptr reference"
+               << " | Returning = "
+               << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS) << " |";
+    LOG_ERROR(ostrstream);
+    return rsmi_status_t::RSMI_STATUS_INVALID_ARGS;
+  }
+
+  auto status_code(rsmi_status_t::RSMI_STATUS_SUCCESS);
+  auto avg_mm_activity(uint16_t(0));
+  rsmi_activity_metric_counter_t activity_metric_counter;
+  status_code = rsmi_dev_activity_metric_get(dv_ind, rsmi_activity_metric_t::RSMI_ACTIVITY_MM, &activity_metric_counter);
+  avg_activity = &activity_metric_counter.average_mm_activity;
+
+  ostrstream << __PRETTY_FUNCTION__
+             << " | ======= end ======= "
+             << " | Success "
+             << " | Device #: " << dv_ind
+             << " | Metric Type: " << rsmi_activity_metric_t::RSMI_ACTIVITY_MM
+             << " | Returning = "
+             << getRSMIStatusString(status_code) << " |";
+  LOG_INFO(ostrstream);
+
+  return status_code;
+  CATCH
+}
+
 
 rsmi_status_t
 rsmi_dev_vbios_version_get(uint32_t dv_ind, char *vbios, uint32_t len) {

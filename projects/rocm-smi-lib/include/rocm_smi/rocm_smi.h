@@ -467,6 +467,19 @@ typedef enum {
 } rsmi_temperature_type_t;
 
 /**
+ * @brief Activity (Utilization) Metrics.  This enum is used to identify
+ * various activity metrics.
+ *
+ */
+typedef enum {
+  /* Utilization */
+  RSMI_ACTIVITY_GFX = (0x1 << 0),
+  RSMI_ACTIVITY_UMC = (0x1 << 1),   //!< memory controller
+  RSMI_ACTIVITY_MM  = (0x1 << 2)    //!< UVD or VCN
+} rsmi_activity_metric_t;
+
+
+/**
  * @brief Voltage Metrics.  This enum is used to identify various
  * Volatge metrics. Corresponding values will be in millivolt.
  *
@@ -775,6 +788,17 @@ typedef rsmi_pcie_bandwidth_t rsmi_pcie_bandwidth;
 /// \endcond
 
 /**
+ * @brief This structure holds information about the possible activity
+ * averages. Specifically, the utilization counters.
+ */
+typedef struct {
+  /* Utilization */
+  uint16_t average_gfx_activity;
+  uint16_t average_umc_activity;  //!< memory controller
+  uint16_t average_mm_activity;   //!< UVD or VCN
+} rsmi_activity_metric_counter_t;
+
+/**
  * @brief This structure holds version information.
  */
 typedef struct {
@@ -964,7 +988,7 @@ typedef struct {
   uint16_t       padding;          // new in v1
 
   uint32_t       gfx_activity_acc;   // new in v1
-  uint32_t       mem_actvity_acc;     // new in v1
+  uint32_t       mem_activity_acc;     // new in v1
   uint16_t       temperature_hbm[RSMI_NUM_HBM_INSTANCES];  // new in v1
   /// \endcond
 } rsmi_gpu_metrics_t;
@@ -2258,6 +2282,57 @@ rsmi_utilization_count_get(uint32_t dv_ind,
                 rsmi_utilization_counter_t utilization_counters[],
                 uint32_t count,
                 uint64_t *timestamp);
+
+/**
+ *  @brief Get activity metric average utilization counter of the specified device
+ *
+ *  @details Given a device index @p dv_ind, the activity metric type,
+ *  this function returns the requested utilization counters
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[in] activity_metric_type a metric type
+ *
+ *  @param[inout] activity_metric_counter Multiple utilization counters can be retrieved with a single
+ *  call. The caller must allocate enough space to the rsmi_activity_metric_counter_t structure.
+ *
+ *  If the function returns RSMI_STATUS_SUCCESS, the requested type will be set in the corresponding
+ *  field of the counter will be set in the value field of
+ *  the activity_metric_counter_t.
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful
+ *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
+ *  support this function with the given arguments
+ *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
+ *
+ */
+rsmi_status_t
+rsmi_dev_activity_metric_get(uint32_t dv_ind,
+                             rsmi_activity_metric_t activity_metric_type,
+                             rsmi_activity_metric_counter_t* activity_metric_counter);
+
+/**
+ *  @brief Get activity metric bandwidth average utilization counter of the specified device
+ *
+ *  @details Given a device index @p dv_ind, the activity metric type,
+ *  this function returns the requested utilization counters
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[inout] avg_activity average bandwidth utilization counters can be retrieved
+ *
+ *  If the function returns RSMI_STATUS_SUCCESS, the requested type will be set in the corresponding
+ *  field of the counter will be set in the value field of
+ *  the activity_metric_counter_t.
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful
+ *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
+ *  support this function with the given arguments
+ *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
+ *
+ */
+rsmi_status_t
+rsmi_dev_activity_avg_mm_get(uint32_t dv_ind, uint16_t* avg_activity);
 
 /**
  *  @brief Get the performance level of the device with provided
