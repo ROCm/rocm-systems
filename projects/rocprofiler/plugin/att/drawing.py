@@ -153,6 +153,7 @@ def draw_wave_states(selections, normalize, TIMELINES):
 
     plt.figure(figsize=(15, 4))
 
+
     maxtime = max([np.max((TIMELINES[k]!=0)*np.arange(0,TIMELINES[k].size)) for k in plot_indices])
     maxtime = max(maxtime, 1)
     timelines = [deepcopy(TIMELINES[k][:maxtime]) for k in plot_indices]
@@ -169,21 +170,18 @@ def draw_wave_states(selections, normalize, TIMELINES):
         else cycles * 0
         for time in timelines
     ]
-    kernsize = 21
-    kernel = np.asarray(
-        [
-            np.exp(-abs(10 * k / kernsize))
-            for k in range(-kernsize // 2, kernsize // 2 + 1)
-        ]
-    )
+    kernsize = 15
+    kernel = np.asarray([
+        np.exp(-abs(10 * k / kernsize)) for k in range(-kernsize // 2, kernsize // 2 + 1)
+    ])
     kernel /= np.sum(kernel)
 
     timelines = [
         np.convolve(time, kernel)[kernsize // 2 : -kernsize // 2]
-        for time in timelines
-        if len(time) > 0
+        for time in timelines if len(time) > 0
     ]
-
+    maxtime *= 16
+    cycles *= 16
     [
         plt.plot(cycles, t, label="State " + s, linewidth=1.1, color=c)
         for t, s, c, sel in zip(timelines, STATES, colors, selections)
@@ -204,48 +202,113 @@ def draw_wave_states(selections, normalize, TIMELINES):
     return STATES, FileBytesIO(figure_bytes)
 
 
-def draw_occupancy(selections, normalize, OCCUPANCY, shadernames):
+def draw_occupancy_per_dispatch(selections, normalize, OCCUPANCY, dispatchnames):
+    plt.figure(figsize=(15, 4))
+    maxtime = 1
+    delta = 1
+
+    for k in range(len(OCCUPANCY)):
+        if len(OCCUPANCY[k]) <= 16:
+            continue
+        OCCUPANCY[k] = [(16*int(u>>23), (u>>12) & 0x7F, (u>>19) & 0xF, u&0xFFF) for u in OCCUPANCY[k]]
+        maxtime = max(maxtime, OCCUPANCY[k][-1][0])
+
+    NUM_DOTS = 1600
+    delta = max(1, maxtime // NUM_DOTS)
+    chart = np.zeros((len(dispatchnames), maxtime // delta + 2), dtype=np.float32)
+
+    for occ in OCCUPANCY:
+        if len(occ) <= 16:
+            continue
+        small_chart = np.zeros_like(chart)
+        norm_fact = np.zeros_like(chart)
+        norm_fact += 1E-6
+
+        current_occ = [[0 for m in range(16)] for k in range(len(dispatchnames))]
+        current_occ[0] = [m[1] for m in occ[:16]]
+        current_time = [0 for k in range(len(dispatchnames))]
+        total_value = [0 for k in range(len(dispatchnames))]
+        total_value[0] = np.sum(current_occ[0])
+
+        for time, value, cu, kid in occ:
+            b = current_time[kid]
+            e = max(b + 1, time // delta)
+            small_chart[kid][b:e] += total_value[kid]
+            norm_fact[kid][b:e] += 1
+
+            total_value[kid] += value - current_occ[kid][cu]
+            current_occ[kid][cu] = value
+            current_time[kid] = time // delta
+        for small, norm, time, value in zip(small_chart, norm_fact, current_time, total_value):
+            small[time] += value
+            norm[time] += value
+
+        chart += small_chart/norm_fact
+
+    for (id, name), occ in zip(dispatchnames.items(), chart):
+        plt.plot(np.arange(occ.size) * delta, occ, label=str(id)+'#'+name, linewidth=1.1)
+
+    plt.legend()
+    if normalize:
+        plt.ylabel("Occupancy %")
+    else:
+        plt.ylabel("Occupancy total")
+    plt.xlabel("Cycle")
+    plt.ylim(-1)
+    plt.xlim(-maxtime // 200, maxtime + maxtime // 200 + delta + 1)
+    plt.subplots_adjust(left=0.04, right=1, top=1, bottom=0.1)
+    figure_bytes = BytesIO()
+    plt.savefig(figure_bytes, dpi=150)
+    return dispatchnames, FileBytesIO(figure_bytes)
+
+
+def draw_occupancy(selections, normalize, OCCUPANCY, shadernames, numdispatchid):
     plt.figure(figsize=(15, 4))
     names = []
     if len(OCCUPANCY) == 1: # If single SE, do occupancy per CU/WGP
-        OCCUPANCY = [[u for u in OCCUPANCY[0] if u&0xFF==k] for k in range(16)]
-        shadernames = ['CU'+str(k) for k in range(16) if len(OCCUPANCY[k]) > 0]
-        OCCUPANCY = [occ for occ in OCCUPANCY if len(occ) > 0]
+        percu = [[u for u in OCCUPANCY[0] if (u>>19) & 0xF == k] for k in range(16)]
+        shadernames = shadernames + [['CU'+str(k),''] for k in range(16) if len(percu[k]) > 0]
+        OCCUPANCY = OCCUPANCY + [occ for occ in percu if len(occ) > 0]
 
-    maxtime = 1
-    delta = 1
     for name, occ in zip(shadernames, OCCUPANCY):
-        occ_values = [0]
-        occ_times = [0]
-        occ = [(int(u >> 16), (u >> 8) & 0xFF, u & 0xFF) for u in occ]
-        current_occ = [0 for k in range(16)]
+        if len(occ) <= 16:
+            continue
+        maxtime = 1
+        delta = 1
+        occ = [(16*int(u >> 23), (u >> 12) & 0x7F, (u>>19) & 0xF, u&0xFFF) for u in occ]
+        current_occ = [[0 for m in range(16)] for k in range(numdispatchid)]
+        current_occ[0] = [m[1] for m in occ[:16]]
 
-        for time, value, cu in occ:
+        occ_values = [np.sum(current_occ[0])]
+        occ_times = [0]
+
+        for time, value, cu, kid in occ:
             occ_times.append(time)
-            occ_values.append(occ_values[-1] + value - current_occ[cu])
-            current_occ[cu] = value
+            occ_values.append(occ_values[-1] + value - current_occ[kid][cu])
+            current_occ[kid][cu] = value
         try:
-            names.append('SE'+name.split('.att')[0].split('_se')[-1])
+            names.append('SE'+name.split('_se')[1].split('.att')[0])
         except:
             names.append(name)
 
         NUM_DOTS = 1500
-        maxtime = np.max(occ_times)
+        maxtime = occ_times[-1]+1
         delta = max(1, maxtime // NUM_DOTS)
         chart = np.zeros((maxtime // delta + 1), dtype=np.float32)
         norm_fact = np.zeros_like(chart)
+        norm_fact += 1E-6
 
-        for i, t in enumerate(occ_times[:-1]):
-            b = t // delta
+        for i in range(len(occ_times)-1):
+            b = occ_times[i] // delta
             e = max(b + 1, occ_times[i + 1] // delta)
             chart[b:e] += occ_values[i]
             norm_fact[b:e] += 1
 
-        chart /= np.maximum(norm_fact, 1)
+        chart /= norm_fact
         if normalize:
             chart /= max(chart.max(), 1e-6)
 
-        plt.plot(np.arange(chart.size) * delta, chart, label=name, linewidth=1.1)
+        plt.plot(np.arange(chart.size) * delta, chart, label=names[-1], linewidth=1.1)
 
     plt.legend()
     if normalize:
@@ -267,11 +330,13 @@ def GeneratePIC(drawinfo, selections=[True for k in range(16)], normalize=False)
     response = {}
     figures = {}
 
-    states, figure = draw_occupancy(
-        selections, normalize, drawinfo["OCCUPANCY"], drawinfo["ShaderNames"]
-    )
+    states, figure = draw_occupancy(selections, normalize, drawinfo["OCCUPANCY"], drawinfo["ShaderNames"], len(drawinfo["DispatchNames"]))
     response["occupancy.png"] = states
     figures["occupancy.png"] = figure
+
+    states, figure = draw_occupancy_per_dispatch(selections, normalize, drawinfo["OCCUPANCY"], drawinfo["DispatchNames"])
+    response["dispatches.png"] = states
+    figures["dispatches.png"] = figure
 
     states, figure = draw_wave_states(selections, normalize, drawinfo["TIMELINES"])
     response["timeline.png"] = states

@@ -16,14 +16,7 @@ import glob
 import numpy as np
 from stitch import stitch
 import gc
-
-try:
-    from mpi4py import MPI
-
-    MPI_IMPORTED = True
-except:
-    MPI_IMPORTED = False
-
+from collections import defaultdict
 
 class PerfEvent(ctypes.Structure):
     _fields_ = [
@@ -130,6 +123,8 @@ class ReturnInfo(ctypes.Structure):
         ("occupancy", POINTER(ctypes.c_uint64)),
         ("num_occupancy", ctypes.c_uint64),
         ("flags", ctypes.c_uint64),
+        ("kernel_id_addr", POINTER(ctypes.c_uint64)),
+        ("num_kernel_ids", ctypes.c_uint64),
     ]
 
 
@@ -162,10 +157,15 @@ def parse_binary(filename, kernel=None):
     info = SO.wrapped_parse_binary(str(filename).encode("utf-8"), kernel)
 
     code = []
+    kernel_addr = defaultdict(lambda : "Unknown")
+    last_known_function = "Unknown"
     for k in range(info.code_len):
         code_entry = info.code[k]
 
         line = deepcopy(code_entry.line.decode("utf-8"))
+        if "; Begin " in line:
+            last_known_function = line.split("; Begin ")[1]
+
         loc = deepcopy(code_entry.loc.decode("utf-8"))
 
         to_line = int(code_entry.to_line) if (code_entry.to_line >= 0) else None
@@ -175,31 +175,31 @@ def parse_binary(filename, kernel=None):
         code.append([line, int(code_entry.value), to_line, loc, int(code_entry.index),
                     int(code_entry.line_num), int(code_entry.addr), 0, 0])
 
+        if code[-1][-3] != 0 and len(code) > 1:
+            kernel_addr[code[-1][-3]] = last_known_function
+
     jumps = {}
     for k in range(info.jumps_len):
         jumps[info.jumps[k].key] = info.jumps[k].value
 
-    return code, jumps
+    return code, jumps, kernel_addr
 
 
-def getWaves_binary(name, shader_engine_data_dict, target_cu, depth):
+def getWaves_binary(name, shader_engine_data_dict, target_cu):
     filename = os.path.abspath(str(name))
     info = SO.AnalyseBinary(filename.encode("utf-8"), target_cu, False)
+
+    kernel_addr = [int(info.kernel_id_addr[k]) for k in range(info.num_kernel_ids)]
 
     waves = [info.wavedata[k] for k in range(info.num_waves)]
     events = [deepcopy(info.perfevents[k]) for k in range(info.num_events)]
     occupancy = [int(info.occupancy[k]) for k in range(int(info.num_occupancy))]
     flags = "navi" if (info.flags & 0x1) else "vega"
 
-    wave_slot_count = [[0 for k in range(20)] for j in range(4)]
     waves_python = []
     for wave in waves:
-        if (
-            wave_slot_count[wave.simd][wave.wave_id] >= depth
-            or wave.instructions_size == 0
-        ):
+        if wave.instructions_size < 2:
             continue
-        wave_slot_count[wave.simd][wave.wave_id] += 1
         pwave = PythonWave(wave)
         pwave.timeline = [
             (wave.timeline_array[2 * k], wave.timeline_array[2 * k + 1])
@@ -210,16 +210,16 @@ def getWaves_binary(name, shader_engine_data_dict, target_cu, depth):
             for k in range(wave.instructions_size)
         ]
         waves_python.append(pwave)
-    shader_engine_data_dict[name] = (waves_python, events, occupancy, flags)
+    shader_engine_data_dict[name] = (waves_python, events, occupancy, flags, kernel_addr)
 
 
 def getWaves_stitch(SIMD, code, jumps, flags, latency_map, hitcount_map, bIsAuto):
     for pwave in SIMD:
         pwave.instructions = stitch(pwave.instructions, code, jumps, flags, bIsAuto)
-
-        for inst in pwave.instructions[0]:
-            hitcount_map[inst[-1]] += 1
-            latency_map[inst[-1]] += inst[3]
+        if pwave.instructions is not None:
+            for inst in pwave.instructions[0]:
+                hitcount_map[inst[-1]] += 1
+                latency_map[inst[-1]] += inst[3]
 
 
 def persist(trace_file, SIMD):
@@ -232,6 +232,8 @@ def persist(trace_file, SIMD):
     smem_ins, smem_stalls, br_ins, br_taken_ins, br_stalls = [], [], [], [], []
 
     for wave in SIMD:
+        if wave.instructions is None:
+            continue
         simds.append(wave.simd)
         waves.append(wave.wave_id)
         begin_time.append(wave.begin_time)
@@ -344,50 +346,30 @@ def insert_waitcnt(flight_count, assembly_code):
     return assembly_code
 
 
-def apply_min_event(min_event_time, OCCUPANCY, EVENTS, DBFILES, TIMELINES):
-    for n, occ in enumerate(OCCUPANCY):
-        OCCUPANCY[n] = [
-            max(min(int((u >> 16) - min_event_time) << 16, 2**42), 0) | (u & 0xFFFFF)
-            for u in occ
-        ]
-    for perf in EVENTS:
-        for p in perf:
-            p.time -= min_event_time
-
+def gen_timelines(DBFILES):
+    TIMELINES = [np.zeros(int(1E6), dtype=np.float32) for k in range(5)]
+    TIME_RESOLUTION = 16
     for df in DBFILES:
         for T in range(len(df["timeline"])):
             timeline = df["timeline"][T]
             time_acc = 0
-            tuples3 = [(0, df["begin_time"][T] - min_event_time)] + [
-                (int(t[0]), int(t[1])) for t in timeline
-            ]
+            tuples3 = [(0, df["begin_time"][T])] + [(int(t[0]), int(t[1])) for t in timeline]
 
             for state in tuples3:
-                if state[1] > 1e8:
+                t_end = (time_acc + state[1])//TIME_RESOLUTION
+                if t_end > 1E8:
                     print("Warning: Time limit reached for ", state[0], state[1])
                     break
-                if time_acc + state[1] > TIMELINES[state[0]].size:
+                elif t_end > TIMELINES[state[0]].size:
                     TIMELINES[state[0]] = np.hstack(
                         [TIMELINES[state[0]], np.zeros_like(TIMELINES[state[0]])]
                     )
-                TIMELINES[state[0]][time_acc : time_acc + state[1]] += 1
+                TIMELINES[state[0]][time_acc//TIME_RESOLUTION : t_end] += 1
                 time_acc += state[1]
+    return TIMELINES
 
 
 if __name__ == "__main__":
-    comm = None
-    mpi_root = True
-    if MPI_IMPORTED:
-        try:
-            comm = MPI.COMM_WORLD
-            if comm.Get_size() < 2:
-                comm = None
-            else:
-                mpi_root = comm.Get_rank() == 0
-        except:
-            print("Could not load MPI")
-            comm = None
-
     pathenv = os.getenv("OUTPUT_PATH")
     if pathenv is None:
         pathenv = "."
@@ -396,21 +378,12 @@ if __name__ == "__main__":
         "assembly_code", help="Path to the assembly code. Must be the first parameter."
     )
     parser.add_argument(
-        "--depth", help="Maximum number of parsed waves per slot", default=100, type=int
-    )
-    parser.add_argument(
         "--trace_file", help="Filter for trace files", default=None, type=str
     )
     parser.add_argument(
         "--att_kernel", help="Kernel file", type=str, default=pathenv + "/*_kernel.txt"
     )
     parser.add_argument("--ports", help="Server and websocket ports, default: 8000,18000")
-    parser.add_argument(
-        "--genasm",
-        help="Generate post-processed asm file at this path",
-        type=str,
-        default="",
-    )
     parser.add_argument(
         "--mode",
         help="""ATT analysis modes:\n
@@ -455,22 +428,19 @@ if __name__ == "__main__":
         print("Could not find att output kernel:", args.att_kernel)
         exit(1)
     elif len(att_kernel) > 1:
-        if mpi_root:
-            print("Found multiple kernel matching given filters:")
-            for n, k in enumerate(att_kernel):
-                print("\t", n, "->", k)
+        print("Found multiple kernel matching given filters:")
+        for n, k in enumerate(att_kernel):
+            print("\t", n, "->", k)
 
-            bValid = False
-            while bValid == False:
-                try:
-                    args.att_kernel = att_kernel[int(input("Please select number: "))]
-                    bValid = True
-                except KeyboardInterrupt:
-                    exit(0)
-                except:
-                    print("Invalid option.")
-        if comm is not None:
-            args.att_kernel = comm.bcast(args.att_kernel, root=0)
+        bValid = False
+        while bValid == False:
+            try:
+                args.att_kernel = att_kernel[int(input("Please select number: "))]
+                bValid = True
+            except KeyboardInterrupt:
+                exit(0)
+            except:
+                print("Invalid option.")
     else:
         args.att_kernel = att_kernel[0]
 
@@ -491,38 +461,31 @@ if __name__ == "__main__":
         filenames = glob.glob(args.trace_file)
     assert len(filenames) > 0
 
-    if comm is not None:
-        filenames = filenames[comm.Get_rank() :: comm.Get_size()]
-
-    code = jumps = None
-    if mpi_root:
-        print('Att kernel:', args.att_kernel)
-        code, jumps = parse_binary(args.assembly_code, None if bIsAuto else args.att_kernel)
+    print('Att kernel:', args.att_kernel)
+    code, jumps, kern_addr = parse_binary(args.assembly_code, None if bIsAuto else args.att_kernel)
 
     DBFILES = []
-    TIMELINES = [np.zeros(int(1e4), dtype=np.int16) for k in range(5)]
     EVENTS = []
     OCCUPANCY = []
     GFXV = []
     analysed_filenames = []
     occupancy_filenames = []
-
+    dispatch_kernel_names = {}
     shader_engine_data_dict = {}
     for name in filenames:
-        getWaves_binary(name, shader_engine_data_dict, args.target_cu, args.depth)
-
-    if comm is not None:
-        code = comm.bcast(code, root=0)
-        jumps = comm.bcast(jumps, root=0)
+        getWaves_binary(name, shader_engine_data_dict, args.target_cu)
 
     gc.collect()
     latency_map = np.zeros((len(code)), dtype=np.int64)
     hitcount_map = np.zeros((len(code)), dtype=np.int32)
     for name in filenames:
-        SIMD, perfevents, occupancy, gfxv = shader_engine_data_dict[name]
-        if len(occupancy) > 0:
+        SIMD, perfevents, occupancy, gfxv, addrs = shader_engine_data_dict[name]
+
+        for id, addr in enumerate(addrs):
+            dispatch_kernel_names[id] = kern_addr[addr]
+        if len(occupancy) > 16:
             OCCUPANCY.append( occupancy )
-            occupancy_filenames.append( name )
+            occupancy_filenames.append(name)
         if np.sum([0]+[len(s.instructions) for s in SIMD]) == 0:
             print("No waves from", name)
             continue
@@ -534,117 +497,33 @@ if __name__ == "__main__":
         GFXV.append(gfxv)
 
     gc.collect()
-    min_event_time = 2**62
-    for df in DBFILES:
-        if len(df["begin_time"]) > 0:
-            min_event_time = min(min_event_time, np.min(df["begin_time"]))
-    for perf in EVENTS:
-        for p in perf:
-            min_event_time = min(min_event_time, p.time)
-    for occ in OCCUPANCY:
-        min_event_time = min(min_event_time, np.min(np.array(occ) >> 16))
-
-    gc.collect()
-    min_event_time = max(0, min_event_time - 32)
-    if comm is not None:
-        min_event_time = comm.reduce(min_event_time, op=MPI.MIN)
-        min_event_time = comm.bcast(min_event_time, root=0)
-
-        apply_min_event(min_event_time, OCCUPANCY, EVENTS, DBFILES, TIMELINES)
-
-        GFXV = comm.gather(GFXV, root=0)
-        EVENTS = comm.gather(EVENTS, root=0)
-        OCCUPANCY = comm.gather(OCCUPANCY, root=0)
-        TIMELINES = comm.gather(TIMELINES, root=0)
-        gather_latency_map = comm.gather(latency_map, root=0)
-        gather_hitcount_map = comm.gather(hitcount_map, root=0)
-        gathered_filenames = comm.gather(occupancy_filenames, root=0)
-
-        if mpi_root:
-            latency_map *= 0
-            hitcount_map *= 0
-            for hit, lat in zip(gather_hitcount_map, gather_latency_map):
-                hitcount_map += hit
-                latency_map += lat
-            EVENTS = [e for elem in EVENTS for e in elem]
-            OCCUPANCY = [e for elem in OCCUPANCY for e in elem]
-            gathered_filenames = [e for elem in gathered_filenames for e in elem]
-            gfxv = [e for elem in GFXV for e in elem][0]
-
-            TIMELINES_GATHER = TIMELINES
-            TIMELINES = [
-                np.zeros((np.max([len(tm[k]) for tm in TIMELINES])), np.int16)
-                for k in range(5)
-            ]
-            for gather in TIMELINES_GATHER:
-                for t, m in zip(TIMELINES, gather):
-                    t[: len(m)] += m
-            del TIMELINES_GATHER
-        else:  # free up memory
-            TIMELINES = []
-            OCCUPANCY = []
-            EVENTS = []
-    else:
-        apply_min_event(min_event_time, OCCUPANCY, EVENTS, DBFILES, TIMELINES)
-        gathered_filenames = occupancy_filenames
-
-    if mpi_root:
-        for k in range(len(code)):
-            code[k][-2] = int(hitcount_map[k])
-            code[k][-1] = int(latency_map[k])
+    for k in range(len(code)):
+        code[k][-2] = int(hitcount_map[k])
+        code[k][-1] = int(latency_map[k])
 
     if CSV_MODE:
-        if mpi_root:
-            from att_to_csv import dump_csv
-            dump_csv(code)
+        from att_to_csv import dump_csv
+        dump_csv(code)
         quit()
 
+
     gc.collect()
-    print("Min time:", min_event_time)
 
     drawinfo = {
-        "TIMELINES": TIMELINES,
+        "TIMELINES": gen_timelines(DBFILES),
         "EVENTS": EVENTS,
         "EVENT_NAMES": EVENT_NAMES,
         "OCCUPANCY": OCCUPANCY,
-        "ShaderNames": gathered_filenames,
+        "ShaderNames": occupancy_filenames,
+        "DispatchNames": dispatch_kernel_names,
     }
-    if args.genasm and len(args.genasm) > 0:
-        flight_count = view_trace(
-            args,
-            code,
-            DBFILES,
-            analysed_filenames,
-            True,
-            OCCUPANCY,
-            args.dumpfiles,
-            min_event_time,
-            gfxv,
-            drawinfo,
-            comm,
-            mpi_root,
-        )
-        with open(args.assembly_code, "r") as file:
-            lines = file.readlines()
-        assembly_code = {l + 1.0: lines[l][:-1] for l in range(len(lines))}
-        assembly_code = insert_waitcnt(flight_count, assembly_code)
-
-        with open(args.genasm, "w") as file:
-            keys = sorted(assembly_code.keys())
-            for k in keys:
-                file.write(assembly_code[k] + "\n")
-    else:
-        view_trace(
-            args,
-            code,
-            DBFILES,
-            analysed_filenames,
-            False,
-            OCCUPANCY,
-            args.dumpfiles,
-            min_event_time,
-            gfxv,
-            drawinfo,
-            comm,
-            mpi_root,
-        )
+    view_trace(
+        args,
+        code,
+        DBFILES,
+        analysed_filenames,
+        args.dumpfiles,
+        0,
+        gfxv,
+        drawinfo
+    )

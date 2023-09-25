@@ -136,55 +136,6 @@ std::optional<code_object_decoder_t::symbol_info_t> code_object_decoder_t::find_
   return {};
 }
 
-/*
-void code_object_decoder_t::load_symbol_map() {
-  std::unique_ptr<Elf, void (*)(Elf *)> elf (
-      elf_begin(m_fd, ELF_C_READ, nullptr),
-      [](Elf *elf){ elf_end(elf); });
-
-  if (!elf) {
-    rocprofiler::warning("Error opening ELF!\n");
-    return;
-  }
-
-  Elf64_Ehdr *ehdr = elf64_getehdr(elf.get());
-  if (!ehdr) {
-    printf("elf64_getehdr failed\n");
-    return;
-  }
-
-  // Slurp the symbol table.
-  Elf_Scn *scn = nullptr;
-  while ((scn = elf_nextscn(elf.get(), scn)) != nullptr) {
-    GElf_Shdr shdr_mem;
-    GElf_Shdr *shdr = gelf_getshdr(scn, &shdr_mem);
-    if (shdr->sh_type != SHT_SYMTAB && shdr->sh_type != SHT_DYNSYM) {
-      continue;
-    }
-
-    Elf_Data *data = elf_getdata(scn, nullptr);
-    if (!data) continue;
-
-    size_t symbol_count = data->d_size / gelf_fsize(elf.get(), ELF_T_SYM, 1, EV_CURRENT);
-    for (size_t j = 0; j < symbol_count; ++j) {
-      GElf_Sym sym_mem;
-      GElf_Sym *sym = gelf_getsym(data, j, &sym_mem);
-
-      if (GELF_ST_TYPE(sym->st_info) != STT_FUNC || sym->st_shndx == SHN_UNDEF) continue;
-
-      std::string symbol_name{ elf_strptr(elf.get(), shdr->sh_link, sym->st_name) };
-      auto symbol_pair = std::make_pair(symbol_name, sym->st_size);
-
-      auto [it, success] = m_symbol_map.emplace(sym->st_value, symbol_pair);
-
-      // If there already was a symbol defined at this address, but this
-      // new symbol covers a larger address range, replace the old symbol
-      //         with this new one.
-      if (!success && sym->st_size > it->second.second) it->second = symbol_pair;
-    }
-  }
-} */
-
 void code_object_decoder_t::disassemble_kernel(uint64_t addr) {
   auto symbol = find_symbol(addr);
 
@@ -192,9 +143,6 @@ void code_object_decoder_t::disassemble_kernel(uint64_t addr) {
     std::cerr << "No symbol found at address 0x" << std::hex << addr << std::endl;
     return;
   }
-
-  // if (symbol->m_name.find("__amd_rocclr_") == 0)
-  //  return;
 
   std::cout << "Dumping ISA for " << symbol->m_name << std::endl;
 
@@ -218,8 +166,6 @@ void code_object_decoder_t::disassemble_kernel(uint64_t addr) {
 
 void code_object_decoder_t::disassemble_kernels() {
   disassembly = std::make_unique<DisassemblyInstance>(*this);
-
-  // if (m_symbol_map.begin() == m_symbol_map.end())
   m_symbol_map = disassembly->GetKernelMap();
 
   for (auto& [k, v] : m_symbol_map) disassemble_kernel(k);

@@ -57,8 +57,9 @@
   if (amd_comgr_status_s status = call) {                                                          \
     const char* reason = "";                                                                       \
     amd_comgr_status_string(status, &reason);                                                      \
+    std::cerr << __LINE__ << " code: " << status << std::endl;                                     \
     std::cerr << __LINE__ << " failed: " << reason << std::endl;                                   \
-    return;                                                                                        \
+    exit(1);                                                                                       \
   }
 
 CodeObjectBinary::CodeObjectBinary(const std::string& uri) : m_uri(uri) {
@@ -156,12 +157,12 @@ DisassemblyInstance::DisassemblyInstance(code_object_decoder_t& decoder)
     : buffer(reinterpret_cast<int64_t>(decoder.buffer.data())),
       size(decoder.buffer.size()),
       instructions(decoder.instructions) {
-  amd_comgr_create_data(AMD_COMGR_DATA_KIND_RELOCATABLE, &data);
-  amd_comgr_set_data(data, size, decoder.buffer.data());
+  CHECK_COMGR(amd_comgr_create_data(AMD_COMGR_DATA_KIND_RELOCATABLE, &data));
+  CHECK_COMGR(amd_comgr_set_data(data, size, decoder.buffer.data()));
 
   char isa_name[128];
   size_t isa_size = sizeof(isa_name);
-  amd_comgr_get_data_isa_name(data, &isa_size, isa_name);
+  CHECK_COMGR(amd_comgr_get_data_isa_name(data, &isa_size, isa_name));
 
   CHECK_COMGR(amd_comgr_create_disassembly_info(
       isa_name,  //"amdgcn-amd-amdhsa--gfx1100",
@@ -172,24 +173,24 @@ DisassemblyInstance::DisassemblyInstance(code_object_decoder_t& decoder)
 amd_comgr_status_t DisassemblyInstance::symbol_callback(amd_comgr_symbol_t symbol,
                                                         void* user_data) {
   amd_comgr_symbol_type_t type;
-  amd_comgr_symbol_get_info(symbol, AMD_COMGR_SYMBOL_INFO_TYPE, &type);
+  CHECK_COMGR(amd_comgr_symbol_get_info(symbol, AMD_COMGR_SYMBOL_INFO_TYPE, &type));
 
   if (type != AMD_COMGR_SYMBOL_TYPE_FUNC && type != AMD_COMGR_SYMBOL_TYPE_AMDGPU_HSA_KERNEL)
     return AMD_COMGR_STATUS_SUCCESS;
 
   uint64_t addr;
-  amd_comgr_symbol_get_info(symbol, AMD_COMGR_SYMBOL_INFO_VALUE, &addr);
+  CHECK_COMGR(amd_comgr_symbol_get_info(symbol, AMD_COMGR_SYMBOL_INFO_VALUE, &addr));
 
   uint64_t mem_size;
-  amd_comgr_symbol_get_info(symbol, AMD_COMGR_SYMBOL_INFO_SIZE, &mem_size);
+  CHECK_COMGR(amd_comgr_symbol_get_info(symbol, AMD_COMGR_SYMBOL_INFO_SIZE, &mem_size));
 
   uint64_t name_size;
-  amd_comgr_symbol_get_info(symbol, AMD_COMGR_SYMBOL_INFO_NAME_LENGTH, &name_size);
+  CHECK_COMGR(amd_comgr_symbol_get_info(symbol, AMD_COMGR_SYMBOL_INFO_NAME_LENGTH, &name_size));
 
   std::string name;
   name.resize(name_size);
 
-  amd_comgr_symbol_get_info(symbol, AMD_COMGR_SYMBOL_INFO_NAME, name.data());
+  CHECK_COMGR(amd_comgr_symbol_get_info(symbol, AMD_COMGR_SYMBOL_INFO_NAME, name.data()));
 
   static_cast<DisassemblyInstance*>(user_data)->symbol_map[addr] = {name, mem_size};
   return AMD_COMGR_STATUS_SUCCESS;
@@ -197,18 +198,19 @@ amd_comgr_status_t DisassemblyInstance::symbol_callback(amd_comgr_symbol_t symbo
 
 std::map<uint64_t, std::pair<std::string, uint64_t>>& DisassemblyInstance::GetKernelMap() {
   symbol_map = std::map<uint64_t, std::pair<std::string, uint64_t>>{};
-  amd_comgr_iterate_symbols(data, &DisassemblyInstance::symbol_callback, this);
+  CHECK_COMGR(amd_comgr_iterate_symbols(data, &DisassemblyInstance::symbol_callback, this));
   return symbol_map;
 }
 
 DisassemblyInstance::~DisassemblyInstance() {
-  amd_comgr_release_data(data);
+  CHECK_COMGR(amd_comgr_release_data(data));
   CHECK_COMGR(amd_comgr_destroy_disassembly_info(info));
 }
 
 uint64_t DisassemblyInstance::ReadInstruction(uint64_t addr, const char* cpp_line) {
   uint64_t size_read;
-  amd_comgr_disassemble_instruction(info, buffer + addr, (void*)this, &size_read);
+  CHECK_COMGR(amd_comgr_disassemble_instruction(info, buffer + addr, (void*)this, &size_read));
+  assert(instructions.size() != 0);
   instructions.back().address = addr;
   instructions.back().cpp_reference = cpp_line;
   return size_read;

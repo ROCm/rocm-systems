@@ -296,25 +296,25 @@ def view_trace(
     code,
     dbnames,
     att_filenames,
-    bReturnLoc,
-    OCCUPANCY,
     bDumpOnly,
     se_time_begin,
     gfxv,
-    drawinfo,
-    MPI_COMM,
-    mpi_root,
+    drawinfo
 ):
     global JSON_GLOBAL_DICTIONARY
     pic_thread = None
-    if mpi_root:
-        manager = Manager()
-        return_dict = manager.dict()
-        JSON_GLOBAL_DICTIONARY["occupancy.json"] = Readable(
-            {str(k): OCCUPANCY[k] for k in range(len(OCCUPANCY))}
-        )
-        pic_thread = Process(target=call_picture_callback, args=(return_dict, drawinfo))
-        pic_thread.start()
+
+    manager = Manager()
+    return_dict = manager.dict()
+    occ_dict = {str(k): drawinfo["OCCUPANCY"][k] for k in range(len(drawinfo["OCCUPANCY"]))}
+    occ_dict['dispatches'] = {}
+    for id, name in drawinfo['DispatchNames'].items():
+        occ_dict['dispatches'][id] = name
+    occ_dict['names'] = drawinfo['ShaderNames']
+
+    JSON_GLOBAL_DICTIONARY["occupancy.json"] = Readable(occ_dict)
+    pic_thread = Process(target=call_picture_callback, args=(return_dict, drawinfo))
+    pic_thread.start()
 
     att_filenames = [Path(f).name for f in att_filenames]
     se_numbers = [int(a.split("_se")[1].split(".att")[0]) for a in att_filenames]
@@ -337,9 +337,8 @@ def view_trace(
             flight_count.append(count)
             simd_wave_filenames[se_number] = wv_filenames
 
-    if mpi_root:
-        code_sel = [c[:-3]+c[-2:] for c in code[:allse_maxline+16]]
-        JSON_GLOBAL_DICTIONARY['code.json'] = Readable({"code": code_sel, "top_n": get_top_n(code_sel)})
+    code_sel = [c[:-3]+c[-2:] for c in code[:allse_maxline+16]]
+    JSON_GLOBAL_DICTIONARY['code.json'] = Readable({"code": code_sel, "top_n": get_top_n(code_sel)})
 
     for key in simd_wave_filenames.keys():
         wv_array = [
@@ -367,42 +366,21 @@ def view_trace(
 
         simd_wave_filenames[key] = wv_dict
 
-    if MPI_COMM is not None:
-        se_filenames = MPI_COMM.gather(se_filenames, root=0)
-        simd_wave_filenames = MPI_COMM.gather(simd_wave_filenames, root=0)
-        if mpi_root:
-            se_filenames = [e for elem in se_filenames for e in elem]
-            simd_wave_filenames = {
-                k: v for smf in simd_wave_filenames for k, v in smf.items()
-            }
-
-    if mpi_root:
-        JSON_GLOBAL_DICTIONARY["filenames.json"] = Readable(
-            {
-                "wave_filenames": simd_wave_filenames,
-                "se_filenames": se_filenames,
-                "global_begin_time": int(se_time_begin),
-                "gfxv": gfxv,
-            }
-        )
+    JSON_GLOBAL_DICTIONARY["filenames.json"] = Readable(
+        {
+            "wave_filenames": simd_wave_filenames,
+            "se_filenames": se_filenames,
+            "global_begin_time": int(se_time_begin),
+            "gfxv": gfxv,
+        }
+    )
 
     if pic_thread is not None:
         pic_thread.join()
         for k, v in return_dict.items():
             JSON_GLOBAL_DICTIONARY[k] = v
 
-    if bReturnLoc:
-        return flight_count
-
     if bDumpOnly == False:
-        if MPI_COMM is not None:
-            JSON_GLOBAL_DICTIONARY = MPI_COMM.gather(JSON_GLOBAL_DICTIONARY, root=0)
-            if not mpi_root:
-                quit()
-            JSON_GLOBAL_DICTIONARY = {
-                k: v for smf in JSON_GLOBAL_DICTIONARY for k, v in smf.items()
-            }
-
         JSON_GLOBAL_DICTIONARY["live.json"] = Readable({"live": 1})
         if args.ports:
             assign_ports(args.ports)
@@ -420,13 +398,12 @@ def view_trace(
             print("Exitting.")
     else:
         os.makedirs("ui/", exist_ok=True)
-        if mpi_root:
-            JSON_GLOBAL_DICTIONARY["live.json"] = Readable({"live": 0})
-            os.system(
-                "cp "
-                + os.path.join(os.path.abspath(os.path.dirname(__file__)), "ui")
-                + "/* ui/"
-            )
+        JSON_GLOBAL_DICTIONARY["live.json"] = Readable({"live": 0})
+        os.system(
+            "cp "
+            + os.path.join(os.path.abspath(os.path.dirname(__file__)), "ui")
+            + "/* ui/"
+        )
         for k, v in JSON_GLOBAL_DICTIONARY.items():
             with open(os.path.join("ui", k), "w" if ".json" in k else "wb") as f:
                 f.write(v.read())
