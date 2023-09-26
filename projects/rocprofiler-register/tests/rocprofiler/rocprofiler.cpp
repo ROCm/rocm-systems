@@ -42,26 +42,40 @@ roctx_range_pop(const char* name)
 }  // namespace rocprofiler
 
 extern "C" {
-struct rocprofiler_configure_result_t
+typedef struct
 {
-    int (*initialize)(void*) = nullptr;
-    int (*finalize)(void*)   = nullptr;
-    void* data               = nullptr;
-};
+    const char*    name;    ///< clients should set this value for debugging
+    const uint32_t handle;  ///< internal handle
+} rocprofiler_client_id_t;
 
-rocprofiler_configure_result_t*
-rocprofiler_configure(uint32_t, const char*, uint32_t, uint32_t)
+typedef void (*rocprofiler_client_finalize_t)(rocprofiler_client_id_t);
+
+typedef int (*rocprofiler_tool_initialize_t)(rocprofiler_client_finalize_t finalize_func,
+                                             void*                         tool_data);
+
+typedef void (*rocprofiler_tool_finalize_t)(void* tool_data);
+
+typedef struct
+{
+    size_t                        size;        ///< in case of future extensions
+    rocprofiler_tool_initialize_t initialize;  ///< context creation
+    rocprofiler_tool_finalize_t   finalize;    ///< cleanup
+    void* tool_data;  ///< data to provide to init and fini callbacks
+} rocprofiler_tool_configure_result_t;
+
+rocprofiler_tool_configure_result_t*
+rocprofiler_configure(uint32_t, const char*, uint32_t, rocprofiler_client_id_t*)
     __attribute__((visibility("default")));
 
 int
 rocprofiler_set_api_table(const char*, uint64_t, uint64_t, void**, uint64_t)
     __attribute__((visibility("default")));
 
-rocprofiler_configure_result_t*
-rocprofiler_configure(uint32_t    version,
-                      const char* runtime_version,
-                      uint32_t    priority,
-                      uint32_t    tool_id)
+rocprofiler_tool_configure_result_t*
+rocprofiler_configure(uint32_t                 version,
+                      const char*              runtime_version,
+                      uint32_t                 priority,
+                      rocprofiler_client_id_t* tool_id)
 {
     (void) version;
     (void) runtime_version;

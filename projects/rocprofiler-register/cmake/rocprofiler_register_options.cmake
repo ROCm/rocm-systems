@@ -20,8 +20,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 rocprofiler_register_add_option(ROCPROFILER_REGISTER_BUILD_TESTS
                                 "Enable building the tests" OFF)
-rocprofiler_register_add_option(ROCPROFILER_REGISTER_BUILD_SAMPLES "Enable building the
- code samples" OFF)
+rocprofiler_register_add_option(ROCPROFILER_REGISTER_BUILD_SAMPLES
+                                "Enable building the code samples" OFF)
 rocprofiler_register_add_option(ROCPROFILER_REGISTER_BUILD_CI
                                 "Enable continuous integration additions" OFF ADVANCED)
 rocprofiler_register_add_option(ROCPROFILER_REGISTER_ENABLE_CLANG_TIDY

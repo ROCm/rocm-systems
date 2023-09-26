@@ -22,20 +22,33 @@
 
 #include <rocprofiler-register/version.h>
 
+#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-typedef int (*rocprofiler_configure_callback_t)(void*);
+typedef struct
+{
+    const char*    name;    ///< clients should set this value for debugging
+    const uint32_t handle;  ///< internal handle
+} rocprofiler_client_id_t;
+
+typedef void (*rocprofiler_client_finalize_t)(rocprofiler_client_id_t);
+
+typedef int (*rocprofiler_tool_initialize_t)(rocprofiler_client_finalize_t finalize_func,
+                                             void*                         tool_data);
+
+typedef void (*rocprofiler_tool_finalize_t)(void* tool_data);
 
 typedef struct
 {
-    rocprofiler_configure_callback_t initialize;
-    rocprofiler_configure_callback_t finalize;
-    void*                            user_data;
-} rocprofiler_configure_result_t;
+    size_t                        size;        ///< in case of future extensions
+    rocprofiler_tool_initialize_t initialize;  ///< context creation
+    rocprofiler_tool_finalize_t   finalize;    ///< cleanup
+    void* tool_data;  ///< data to provide to init and fini callbacks
+} rocprofiler_tool_configure_result_t;
 
 typedef uint32_t (*rocprofiler_register_import_func_t)(void);
 

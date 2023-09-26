@@ -34,3 +34,4 @@
 # Build directories
 /build*
 /.cache
+/compile_commands.json

@@ -48,8 +48,8 @@ extern "C" {
 #pragma weak rocprofiler_register_import_roctx
 #pragma weak rocprofiler_register_import_roctx_static
 
-extern rocprofiler_configure_result_t*
-rocprofiler_configure(uint32_t, const char*, uint32_t, uint32_t);
+extern rocprofiler_tool_configure_result_t*
+rocprofiler_configure(uint32_t, const char*, uint32_t, rocprofiler_client_id_t*);
 
 extern int
 rocprofiler_set_api_table(const char*, uint64_t, uint64_t, void**, uint64_t);
@@ -226,12 +226,13 @@ rocp_reg_scan_for_tools()
             LOG(INFO) << "loaded " << _rocp_reg_lib_path_fname.string() << " library at "
                       << _rocp_reg_lib_path.string();
 
-        LOG_IF(FATAL, !rocprofiler_lib_handle) << _rocp_reg_lib << " failed to load\n";
+        LOG_IF(FATAL, rocprofiler_lib_handle == nullptr)
+            << _rocp_reg_lib << " failed to load\n";
 
         *(void**) (&rocprofiler_lib_config_fn) =
             dlsym(rocprofiler_lib_handle, rocprofiler_lib_register_entrypoint);
 
-        LOG_IF(FATAL, !rocprofiler_lib_config_fn)
+        LOG_IF(FATAL, rocprofiler_lib_config_fn == nullptr)
             << _rocp_reg_lib << " did not contain '"
             << rocprofiler_lib_register_entrypoint << "' symbol\n";
     }
