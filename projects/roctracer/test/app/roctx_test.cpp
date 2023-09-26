@@ -22,6 +22,8 @@
 
 #include "roctx.h"
 
+#include <thread>
+
 #define HIP_CALL(call)                                                                             \
   do {                                                                                             \
     hipError_t err = call;                                                                         \
