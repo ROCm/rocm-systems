@@ -37,8 +37,6 @@ def initRsmiBindings(silent=False):
             print_silent('Using lib from %s' % path_librocm)
         else:
             print('Unable to find librocm_smi64.so.@VERSION_MAJOR@')
-    else:
-        print_silent('Library loaded from: %s ' % path_librocm)
 
     # ----------> TODO: Support static libs as well as SO
     try:
