@@ -45,9 +45,8 @@ CLOCK_JSON_VERSION = 1
 
 headerString = ' ROCm System Management Interface '
 footerString = ' End of ROCm SMI Log '
-
 # Output formatting
-appWidth = 100
+appWidth = 90
 deviceList = []
 
 # Enable or disable serialized format
@@ -383,8 +382,8 @@ def getPidList():
     return
 
 
-def getPower(device, silent=False):
-    """ Return the current power level of a given device
+def getAvgPower(device, silent=False):
+    """ Return the average power level of a given device
 
     @param device: DRM device identifier
     @param silent=Turn on to silence error output
@@ -393,7 +392,21 @@ def getPower(device, silent=False):
     power = c_uint32()
     ret = rocmsmi.rsmi_dev_power_ave_get(device, 0, byref(power))
     if rsmi_ret_ok(ret, device, 'get_power_avg', silent):
-        return power.value / 1000000
+        return str(power.value / 1000000)
+    return 'N/A'
+
+def getCurrentSocketPower(device, silent=False):
+    """ Return the current (also known as instant)
+    socket power of a given device
+
+    @param device: DRM device identifier
+    @param silent=Turn on to silence error output
+    (you plan to handle manually). Default is off.
+    """
+    power = c_uint32()
+    ret = rocmsmi.rsmi_dev_current_socket_power_get(device, byref(power))
+    if rsmi_ret_ok(ret, device, 'get_socket_power', silent):
+        return str(power.value / 1000000)
     return 'N/A'
 
 
@@ -437,7 +450,7 @@ def findFirstAvailableTemp(device):
     temp = c_int64(0)
     metric = rsmi_temperature_metric_t.RSMI_TEMP_CURRENT
     ret_temp = "N/A"
-    ret_temp_type = "(Unknown)"
+    ret_temp_type = temp_type_lst[0]
     for i, templist_val in enumerate(temp_type_lst):
         ret = rocmsmi.rsmi_dev_temp_metric_get(c_uint32(device), i, metric, byref(temp))
         if rsmi_ret_ok(ret, device, 'get_temp_metric_' + templist_val, silent=True):
@@ -447,6 +460,37 @@ def findFirstAvailableTemp(device):
         else:
             continue
     return (ret_temp_type, ret_temp)
+
+def getTemperatureLabel(deviceList):
+    """ Discovers the the first identified power label
+
+    Returns a string label value
+    @param device: DRM device identifier
+    """
+    # Default label is Edge
+    tempLabel = temp_type_lst[0].lower()
+    if len(deviceList) < 1:
+        return tempLabel
+    (temp_type, _) = findFirstAvailableTemp(deviceList[0])
+    tempLabel = temp_type.lower().replace('(', '').replace(')', '')
+    return tempLabel
+
+def getPowerLabel(deviceList):
+    """ Discovers the the first identified power label
+
+    Returns a string label value
+    @param device: DRM device identifier
+    """
+    power = c_int64(0)
+    # Default label is AvgPower
+    powerLabel = rsmi_power_label.AVG_POWER
+    if len(deviceList) < 1:
+        return powerLabel
+    device=deviceList[0]
+    power = getCurrentSocketPower(device, True)
+    if power != '0.0' and power != 'N/A':
+        powerLabel = rsmi_power_label.CURRENT_SOCKET_POWER
+    return powerLabel
 
 def getVbiosVersion(device, silent=False):
     """ Returns the VBIOS version for a given device
@@ -679,23 +723,35 @@ def printListLog(metricName, valuesList):
         print(listStr + line)
 
 
-def printLogSpacer(displayString=None, fill='='):
+def printLogSpacer(displayString=None, fill='=', contentSizeToFit=0):
     """ Prints [name of the option]/[name of the program] in the spacer to explain data below
 
     If no parameters are given, a default fill of the '=' string is used in the spacer
 
     @param displayString: name of item to be displayed inside of the log spacer
     @param fill: padding string which surrounds the given display string
+    @param contentSizeToFit: providing an integer > 0 allows
+    ability to dynamically change output padding/fill based on this value
+    instead of appWidth. Handy for concise info output.
     """
     global appWidth, PRINT_JSON
+    resizeValue = appWidth
+    if contentSizeToFit != 0:
+        resizeValue = contentSizeToFit
+    if resizeValue % 2: # if odd -> make even
+        resizeValue += 1
+    # leaving below to check if resizing works properly
+    # print("resizeVal=" +str(resizeValue) + "; appWidth=" + str(appWidth) +
+    #       "; contentSizeToFit=" + str(contentSizeToFit) + "; fill=" + fill)
+
     if not PRINT_JSON:
         if displayString:
             if len(displayString) % 2:
                 displayString += fill
-            logSpacer = fill * int((appWidth - (len(displayString))) / 2) + displayString + fill * int(
-                (appWidth - (len(displayString))) / 2)
+            logSpacer = fill * int((resizeValue - (len(displayString))) / 2) + displayString + fill * int(
+                    (resizeValue - (len(displayString))) / 2)
         else:
-            logSpacer = fill * appWidth
+            logSpacer = fill * resizeValue
         print(logSpacer)
 
 
@@ -1649,22 +1705,15 @@ def showAllConcise(deviceList):
         print('ERROR: Cannot print JSON/CSV output for concise output')
         sys.exit(1)
 
-    """ Place holder for the actual max size """
-    MAX_ALL_CONCISE_WIDTH = 100
-    appWidth_temp = appWidth
-    appWidth = MAX_ALL_CONCISE_WIDTH
     silent = True
 
-    printLogSpacer(' Concise Info ')
     deviceList.sort()
-    temp_type = '(' + temp_type_lst[0] + ')'
-    if len(deviceList) >= 1:
-        (temp_type, _) = findFirstAvailableTemp(deviceList[0])
-    available_temp_type = temp_type.lower()
-    available_temp_type = available_temp_type.replace('(', '')
-    available_temp_type = available_temp_type.replace(')', '')
-    header = ['GPU', '[Model : Revision]', 'Temp', 'AvgPwr', 'Partitions', 'SCLK', 'MCLK', 'Fan', 'Perf', 'PwrCap', 'VRAM%', 'GPU%']
-    subheader = ['', 'Name (20 chars)', temp_type, '', '(Mem, Compute)', '', '', '', '', '', '', '']
+    available_temp_type = getTemperatureLabel(deviceList)
+    temp_type = "(" + available_temp_type.capitalize() + ")"
+    header=['Device', '[Model : Revision]', 'Temp', 'Power', 'Partitions',
+            'SCLK', 'MCLK', 'Fan', 'Perf', 'PwrCap', 'VRAM%', 'GPU%']
+    subheader = ['', 'Name (20 chars)', temp_type, getPowerLabel(deviceList),
+                 '(Mem, Compute)', '', '', '', '', '', '', '']
     # add additional spaces to match header
     for idx, item in enumerate(subheader):
         header_size = len(header[idx])
@@ -1686,11 +1735,17 @@ def showAllConcise(deviceList):
         temp_val = str(getTemp(device, available_temp_type, silent))
         if temp_val != 'N/A':
             temp_val += degree_sign + 'C'
-        avgPwr = str(getPower(device))
-        if avgPwr != '0.0' and avgPwr != 'N/A':
+        socketPwr = getCurrentSocketPower(device, True)
+        avgPwr = getAvgPower(device, True)
+        powerVal = 'N/A'
+        if socketPwr != '0.0' and socketPwr != 'N/A':
+            socketPwr += 'W'
+            powerVal=socketPwr
+        elif avgPwr != '0.0' and avgPwr != 'N/A':
             avgPwr += 'W'
+            powerVal=avgPwr
         else:
-            avgPwr = 'N/A'
+            powerVal = 'N/A'
         combined_partition = (getMemoryPartition(device, silent) + ", "
                              + getComputePartition(device, silent))
         sclk = showCurrentClocks([device], 'sclk', concise=silent)
@@ -1723,10 +1778,10 @@ def showAllConcise(deviceList):
                                                     '', '', '', '']
             gpu_dev_product_info_top_name = gpu_dev_product_info_names[1]
 
-        values['card%s' % (str(device))] = [device, gpu_dev_product_info_top_name, temp_val, avgPwr,
-                                            combined_partition, sclk, mclk,
-                                            fan, str(perf).lower(), pwrCap,
-                                            mem_use_pct, gpu_busy]
+        values['card%s' % (str(device))] = [device, gpu_dev_product_info_top_name, temp_val,
+                                            powerVal, combined_partition, sclk, mclk,
+                                            fan, str(perf).lower(), pwrCap, mem_use_pct,
+                                            gpu_busy]
 
     val_widths = {}
     for device in deviceList:
@@ -1735,10 +1790,17 @@ def showAllConcise(deviceList):
     for device in deviceList:
         for col in range(len(val_widths[device])):
             max_widths[col] = max(max_widths[col], val_widths[device][col])
-    printLog(None, "".join(word.ljust(max_widths[col]) for col, word in zip(range(len(max_widths)), header)), None)
-    printLog(None, "".join(word.ljust(max_widths[col]) for col, word in zip(range(len(max_widths)), subheader)),
-             None, useItalics=True)
-    printLogSpacer(fill='=')
+
+    ########################
+    # Display concise info #
+    ########################
+    header_output = "".join(word.ljust(max_widths[col]) for col, word in zip(range(len(max_widths)), header))
+    subheader_output = "".join(word.ljust(max_widths[col]) for col, word in zip(range(len(max_widths)), subheader))
+    printLogSpacer(headerString, contentSizeToFit=len(header_output))
+    printLogSpacer(' Concise Info ', contentSizeToFit=len(header_output))
+    printLog(None, header_output, None)
+    printLog(None, subheader_output, None, useItalics=True)
+    printLogSpacer(fill='=', contentSizeToFit=len(header_output))
 
     for device in deviceList:
         printLog(None, "".join(str(word).ljust(max_widths[col]) for col, word in
@@ -1749,9 +1811,8 @@ def showAllConcise(deviceList):
             printLog(None, "".join(str(word).ljust(max_widths[col]) for col, word in
                                 zip(range(len(max_widths)), values['card%s_Info' % (str(device))])), None)
 
-    printLogSpacer()
-    """ Restore original max size """
-    appWidth = appWidth_temp
+    printLogSpacer(contentSizeToFit=len(header_output))
+    printLogSpacer(footerString, contentSizeToFit=len(header_output))
 
 
 def showAllConciseHw(deviceList):
@@ -1827,12 +1888,21 @@ def showClocks(deviceList):
                 if not rsmi_ret_ok(ret, device, 'get_clk_freq_' + clk_type, True):
                     continue
                 printLog(device, 'Supported %s frequencies on GPU%s' % (clk_type, str(device)), None)
-                for x in range(freq.num_supported):
-                    fr = '{:>.0f}Mhz'.format(freq.frequency[x] / 1000000)
-                    if x == freq.current:
-                        printLog(device, str(x), str(fr) + ' *')
-                    else:
-                        printLog(device, str(x), str(fr))
+                for i in range(freq.num_supported):
+                    freq_string = '{:>.0f}Mhz'.format(freq.frequency[i] / 1000000)
+                    if i == freq.current:
+                        freq_string += ' *'
+                    freq_index = i
+                    # Deep Sleep frequency is only supported by some GPUs
+                    # It is indicated by letter 'S' instead of the index number
+                    if freq.has_deep_sleep:
+                        # sleep state
+                        if i == 0:
+                            freq_index = 'S'
+                        # all indices are offset by 1 because Deep Sleep occupies index 0
+                        else:
+                            freq_index = i - 1
+                    printLog(device, str(freq_index), freq_string)
                 printLog(device, '', None)
             else:
                 logging.debug('{} frequency is unsupported on device[{}]'.format(clk_type, device))
@@ -1841,12 +1911,11 @@ def showClocks(deviceList):
             ret = rocmsmi.rsmi_dev_pci_bandwidth_get(device, byref(bw))
             if rsmi_ret_ok(ret, device, 'get_PCIe_bandwidth', True):
                 printLog(device, 'Supported %s frequencies on GPU%s' % ('PCIe', str(device)), None)
-                for x in range(bw.transfer_rate.num_supported):
-                    fr = '{:>.1f}GT/s x{}'.format(bw.transfer_rate.frequency[x] / 1000000000, bw.lanes[x])
-                    if x == bw.transfer_rate.current:
-                        printLog(device, str(x), str(fr) + ' *')
-                    else:
-                        printLog(device, str(x), str(fr))
+                for i in range(bw.transfer_rate.num_supported):
+                    freq_string = '{:>.1f}GT/s x{}'.format(bw.transfer_rate.frequency[i] / 1000000000, bw.lanes[i])
+                    if i == bw.transfer_rate.current:
+                        freq_string += ' *'
+                    printLog(device, str(i), str(freq_string))
                 printLog(device, '', None)
         else:
             logging.debug('PCIe frequency is unsupported on device [{}]'.format(device))
@@ -1876,9 +1945,17 @@ def showCurrentClocks(deviceList, clk_defined=None, concise=False):
                         printLog(device, '%s current clock frequency not found' % (clk_defined), None)
                         continue
                     fr = freq.frequency[levl] / 1000000
+                    freq_index = levl
+                    if freq.has_deep_sleep:
+                        # sleep state
+                        if levl == 0:
+                            freq_index = 'S'
+                        # all indices are offset by 1 because Deep Sleep occupies index 0
+                        else:
+                            freq_index = levl - 1
                     if concise:  # in case function is used for concise output, no need to print.
                         return '{:.0f}Mhz'.format(fr)
-                    printLog(device, '{} clock level'.format(clk_defined), '{} ({:.0f}Mhz)'.format(levl, fr))
+                    printLog(device, '{} clock level'.format(clk_defined), '{} ({:.0f}Mhz)'.format(freq_index, fr))
             elif not concise:
                 logging.debug('{} clock is unsupported on device[{}]'.format(clk_defined, device))
 
@@ -1891,12 +1968,20 @@ def showCurrentClocks(deviceList, clk_defined=None, concise=False):
                         if levl >= freq.num_supported:
                             printLog(device, '%s current clock frequency not found' % (clk_type), None)
                             continue
+                        freq_index = levl
+                        if freq.has_deep_sleep:
+                            # sleep state
+                            if levl == 0:
+                                freq_index = 'S'
+                            # all indices are offset by 1 because Deep Sleep occupies index 0
+                            else:
+                                freq_index = levl - 1
                         fr = freq.frequency[levl] / 1000000
                         if PRINT_JSON:
                             printLog(device, '%s clock speed:' % (clk_type), '(%sMhz)' % (str(fr)[:-2]))
-                            printLog(device, '%s clock level:' % (clk_type), levl)
+                            printLog(device, '%s clock level:' % (clk_type), freq_index)
                         else:
-                            printLog(device, '%s clock level: %s' % (clk_type, levl), '(%sMhz)' % (str(fr)[:-2]))
+                            printLog(device, '%s clock level: %s' % (clk_type, freq_index), '(%sMhz)' % (str(fr)[:-2]))
                 elif not concise:
                     logging.debug('{} clock is unsupported on device[{}]'.format(clk_type, device))
             # pcie clocks
@@ -2127,8 +2212,8 @@ def showId(deviceList):
     """
     printLogSpacer(' ID ')
     for device in deviceList:
-        printLog(device, 'GPU ID', getId(device))
-        printLog(device, 'GPU Rev', getRev(device))
+        printLog(device, 'Device ID', getId(device))
+        printLog(device, 'Device Rev', getRev(device))
     printLogSpacer()
 
 
@@ -2355,23 +2440,25 @@ def showPids(verbose):
 
 
 def showPower(deviceList):
-    """ Display current Average Graphics Package Power Consumption for a list of devices
+    """ Display Current (also known as instant) Socket or Average
+    Graphics Package Power Consumption for a list of devices
 
     @param deviceList: List of DRM devices (can be a single-item list)
     """
     secondaryPresent=False
     printLogSpacer(' Power Consumption ')
     for device in deviceList:
-        if checkIfSecondaryDie(device):
+        if str(getCurrentSocketPower(device, True)) != 'N/A':
+            printLog(device, 'Current Socket Graphics Package Power (W)', getCurrentSocketPower(device))
+        elif checkIfSecondaryDie(device):
             printLog(device, 'Average Graphics Package Power (W)', "N/A (Secondary die)")
             secondaryPresent=True
-        elif str(getPower(device)) != '0.0':
-            printLog(device, 'Average Graphics Package Power (W)', getPower(device))
+        elif str(getAvgPower(device)) != '0.0':
+            printLog(device, 'Average Graphics Package Power (W)', getAvgPower(device))
         else:
-            printErrLog(device, 'Unable to get Average Graphics Package Power Consumption')
+            printErrLog(device, 'Unable to get Average or Current Socket Graphics Package Power Consumption')
     if secondaryPresent:
         printLog(None, "\n\t\tPrimary die (usually one above or below the secondary) shows total (primary + secondary) socket power information", None)
-
     printLogSpacer()
 
 
@@ -2867,13 +2954,8 @@ def getGraphColor(percentage):
 
 def showTempGraph(deviceList):
     deviceList.sort()
-    temp_type = '(' + temp_type_lst[0] + ')'
-    if len(deviceList) >= 1:
-        (temp_type, _) = findFirstAvailableTemp(deviceList[0])
-    printLogSpacer(' Temperature Graph ' + temp_type + ' ')
-    temp_type = temp_type.lower()
-    temp_type = temp_type.replace('(', '')
-    temp_type = temp_type.replace(')', '')
+    temp_type = getTemperatureLabel(deviceList)
+    printLogSpacer(' Temperature Graph ' + temp_type.capitalize() + ' ')
     # Start a thread for constantly printing
     try:
         # Create a thread (call print function, devices, delay in ms)
@@ -3542,6 +3624,11 @@ def save(deviceList, savefilepath):
 
 
 # The code below is for when this script is run as an executable instead of when imported as a module
+def isConciseInfoRequested(args):
+    return len(sys.argv) == 1 or \
+            len(sys.argv) == 2 and (args.alldevices or (args.json or args.csv)) or \
+            len(sys.argv) == 3 and (args.alldevices and (args.json or args.csv))
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         description='AMD ROCm System Management Interface  |  ROCM-SMI version: %s' % __version__,
@@ -3564,7 +3651,7 @@ if __name__ == '__main__':
     groupDisplayOpt.add_argument('--showhw', help='Show Hardware details', action='store_true')
     groupDisplayOpt.add_argument('-a', '--showallinfo', help='Show Temperature, Fan and Clock values',
                                  action='store_true')
-    groupDisplayTop.add_argument('-i', '--showid', help='Show GPU ID', action='store_true')
+    groupDisplayTop.add_argument('-i', '--showid', help='Show DEVICE ID', action='store_true')
     groupDisplayTop.add_argument('-v', '--showvbios', help='Show VBIOS version', action='store_true')
     groupDisplayTop.add_argument('-e', '--showevents', help='Show event list', metavar='EVENT', type=str, nargs='*')
     groupDisplayTop.add_argument('--showdriverversion', help='Show kernel driver version', action='store_true')
@@ -3750,7 +3837,8 @@ if __name__ == '__main__':
 
     if not PRINT_JSON:
         print('\n')
-    printLogSpacer(headerString)
+    if not isConciseInfoRequested(args):
+        printLogSpacer(headerString)
 
     if args.showallinfo:
         args.list = True
@@ -3804,9 +3892,7 @@ if __name__ == '__main__':
     if not checkAmdGpus(deviceList):
         logging.warning('No AMD GPUs specified')
 
-    if len(sys.argv) == 1 or \
-            len(sys.argv) == 2 and (args.alldevices or (args.json or args.csv)) or \
-            len(sys.argv) == 3 and (args.alldevices and (args.json or args.csv)):
+    if isConciseInfoRequested(args):
         showAllConcise(deviceList)
     if args.showhw:
         showAllConciseHw(deviceList)
@@ -4013,7 +4099,8 @@ if __name__ == '__main__':
                 devCsv = formatCsv(deviceList)
                 print(devCsv)
 
-    printLogSpacer(footerString)
+    if not isConciseInfoRequested(args):
+        printLogSpacer(footerString)
 
     rsmi_ret_ok(rocmsmi.rsmi_shut_down())
     exit(RETCODE)

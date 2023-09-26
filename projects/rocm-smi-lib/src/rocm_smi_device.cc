@@ -68,8 +68,6 @@
 #include "rocm_smi/rocm_smi_logger.h"
 #include "shared_mutex.h"  // NOLINT
 
-using namespace ROCmLogging;
-
 namespace amd {
 namespace smi {
 
@@ -138,6 +136,8 @@ static const char *kDevFwVersionMcFName = "fw_version/mc_fw_version";
 static const char *kDevFwVersionMeFName = "fw_version/me_fw_version";
 static const char *kDevFwVersionMecFName = "fw_version/mec_fw_version";
 static const char *kDevFwVersionMec2FName = "fw_version/mec2_fw_version";
+static const char *kDevFwVersionMesFName = "fw_version/mes_fw_version";
+static const char *kDevFwVersionMesKiqFName = "fw_version/mes_kiq_fw_version";
 static const char *kDevFwVersionPfpFName = "fw_version/pfp_fw_version";
 static const char *kDevFwVersionRlcFName = "fw_version/rlc_fw_version";
 static const char *kDevFwVersionRlcSrlcFName = "fw_version/rlc_srlc_fw_version";
@@ -280,6 +280,8 @@ static const std::map<DevInfoTypes, const char *> kDevAttribNameMap = {
     {kDevFwVersionMe, kDevFwVersionMeFName},
     {kDevFwVersionMec, kDevFwVersionMecFName},
     {kDevFwVersionMec2, kDevFwVersionMec2FName},
+    {kDevFwVersionMes, kDevFwVersionMesFName},
+    {kDevFwVersionMesKiq, kDevFwVersionMesKiqFName},
     {kDevFwVersionPfp, kDevFwVersionPfpFName},
     {kDevFwVersionRlc, kDevFwVersionRlcFName},
     {kDevFwVersionRlcSrlc, kDevFwVersionRlcSrlcFName},
@@ -343,6 +345,8 @@ static  std::map<DevInfoTypes, uint8_t> kDevInfoVarTypeToRSMIVariant = {
     {kDevFwVersionMe, RSMI_FW_BLOCK_ME},
     {kDevFwVersionMec, RSMI_FW_BLOCK_MEC},
     {kDevFwVersionMec2, RSMI_FW_BLOCK_MEC2},
+    {kDevFwVersionMes, RSMI_FW_BLOCK_MES},
+    {kDevFwVersionMesKiq, RSMI_FW_BLOCK_MES_KIQ},
     {kDevFwVersionPfp, RSMI_FW_BLOCK_PFP},
     {kDevFwVersionRlc, RSMI_FW_BLOCK_RLC},
     {kDevFwVersionRlcSrlc, RSMI_FW_BLOCK_RLC_SRLC},
@@ -478,6 +482,8 @@ static const std::map<const char *, dev_depends_t> kDevFuncDependsMap = {
                                         kDevFwVersionMe,
                                         kDevFwVersionMec,
                                         kDevFwVersionMec2,
+                                        kDevFwVersionMes,
+                                        kDevFwVersionMesKiq,
                                         kDevFwVersionPfp,
                                         kDevFwVersionRlc,
                                         kDevFwVersionRlcSrlc,
@@ -943,6 +949,8 @@ int Device::readDevInfo(DevInfoTypes type, uint64_t *val) {
     case kDevFwVersionMe:
     case kDevFwVersionMec:
     case kDevFwVersionMec2:
+    case kDevFwVersionMes:
+    case kDevFwVersionMesKiq:
     case kDevFwVersionPfp:
     case kDevFwVersionRlc:
     case kDevFwVersionRlcSrlc:

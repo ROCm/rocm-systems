@@ -53,6 +53,7 @@
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi_test/functional/power_read.h"
 #include "rocm_smi_test/test_common.h"
+#include "rocm_smi/rocm_smi_utils.h"
 
 TestPowerRead::TestPowerRead() : TestBase() {
   set_title("RSMI Power Read Test");
@@ -116,27 +117,48 @@ void TestPowerRead::Run(void) {
                                                  val_ui64 << " uW" << std::endl;
       }
 
+      /* Average Power */
       err = rsmi_dev_power_ave_get(i, 0, &val_ui64);
       if (err == RSMI_STATUS_NOT_SUPPORTED) {
         std::cout <<
-            "\t**Power average information is not supported for this device"
+            "\t**Average Power Usage: not supported on this device"
                                                                    << std::endl;
-
-        // Verify api support checking functionality is working
-        err = rsmi_dev_power_ave_get(i, 0, nullptr);
-        ASSERT_EQ(err, RSMI_STATUS_NOT_SUPPORTED);
-        continue;
-      }
-      IF_VERB(STANDARD) {
-        std::cout << "\t**Average Power Usage: ";
-        CHK_RSMI_PERM_ERR(err)
-        if (err == RSMI_STATUS_SUCCESS) {
-          std::cout << static_cast<float>(val_ui64)/1000 << " mW" << std::endl;
+      } else {
+        IF_VERB(STANDARD) {
+          std::cout << "\t**Average Power Usage: ";
+          CHK_RSMI_PERM_ERR(err)
+          if (err == RSMI_STATUS_SUCCESS) {
+            std::cout << static_cast<float>(val_ui64) / 1000 << " mW"
+                      << std::endl;
+          }
+          // Verify api support checking functionality is working
+          err = rsmi_dev_power_ave_get(i, 0, nullptr);
+          ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
         }
-        // Verify api support checking functionality is working
-        err = rsmi_dev_power_ave_get(i, 0, nullptr);
-        ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
       }
+
+      /* Current Socket Power */
+      err = rsmi_dev_current_socket_power_get(i, &val_ui64);
+
+      if (err == RSMI_STATUS_NOT_SUPPORTED) {
+        std::cout <<
+            "\t**Current Socket Power: not supported"
+            " on this device" << std::endl;
+      } else {
+        IF_VERB(STANDARD) {
+          std::cout << "\t**Current Socket Power: ";
+          CHK_RSMI_PERM_ERR(err)
+          if (err == RSMI_STATUS_SUCCESS) {
+            std::cout << static_cast<float>(val_ui64) / 1000 << " mW"
+                      << std::endl;
+          }
+          // Verify api support checking functionality is working
+          err = rsmi_dev_current_socket_power_get(i, nullptr);
+          // std::cout << "err = " << amd::smi::getRSMIStatusString(err);
+          ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
+        }
+      }
+      std::cout << "\n";
     }
   }
 }

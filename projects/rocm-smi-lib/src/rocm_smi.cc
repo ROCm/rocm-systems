@@ -77,7 +77,6 @@
 #include "rocm_smi/rocm_smi64Config.h"
 #include "rocm_smi/rocm_smi_logger.h"
 
-using namespace ROCmLogging;
 using namespace amd::smi;
 
 static const uint32_t kMaxOverdriveLevel = 20;
@@ -147,14 +146,21 @@ static uint64_t freq_string_to_int(const std::vector<std::string> &freq_lines,
 
   std::istringstream fs(freq_lines[i]);
 
-  uint32_t ind;
+  char junk_ch;
+  int ind;
   float freq;
-  std::string junk;
+  std::string junk_str;
   std::string units_str;
   std::string star_str;
 
-  fs >> ind;
-  fs >> junk;  // colon
+  if (fs.peek() == 'S') {
+    // Deep Sleep frequency is only supported by some GPUs
+    fs >> junk_ch;
+  } else {
+    // All other frequency indices are numbers
+    fs >> ind;
+  }
+  fs >> junk_str;  // colon
   fs >> freq;
   fs >> units_str;
   fs >> star_str;
@@ -1084,8 +1090,13 @@ static rsmi_status_t get_frequencies(amd::smi::DevInfoTypes type, rsmi_clk_type_
   }
 
   f->num_supported = static_cast<uint32_t>(val_vec.size());
-  bool current = false;
   f->current = RSMI_MAX_NUM_FREQUENCIES + 1;  // init to an invalid value
+
+  // Deep Sleep frequency is only supported by some GPUs
+  // It is indicated by letter 'S' instead of the index number
+  f->has_deep_sleep = (val_vec[0][0] == 'S');
+
+  bool current = false;
 
   for (uint32_t i = 0; i < f->num_supported; ++i) {
     f->frequency[i] = freq_string_to_int(val_vec, &current, lanes, i);
@@ -1113,9 +1124,9 @@ static rsmi_status_t get_frequencies(amd::smi::DevInfoTypes type, rsmi_clk_type_
         sysvalue += " Previous Value";
         sysvalue += ' ' + std::to_string(f->frequency[f->current]);
         DEBUG_LOG("More than one current clock. ", sysvalue);
-      }
-      else
+      } else {
           f->current = i;
+      }
     }
   }
 
@@ -1262,6 +1273,11 @@ static rsmi_status_t get_od_clk_volt_info(uint32_t dv_ind,
     return RSMI_STATUS_UNEXPECTED_DATA;
   }
 
+  // find last_item but skip empty lines
+  int last_item = val_vec.size()-1;
+  while (val_vec[last_item].empty() || val_vec[last_item][0] == 0)
+      last_item--;
+
   p->curr_sclk_range.lower_bound = freq_string_to_int(val_vec, nullptr,
                                      nullptr, kOD_SCLK_label_array_index + 1);
   p->curr_sclk_range.upper_bound = freq_string_to_int(val_vec, nullptr,
@@ -1275,16 +1291,18 @@ static rsmi_status_t get_od_clk_volt_info(uint32_t dv_ind,
   } else if (val_vec[kOD_MCLK_label_array_index] == "MCLK:") {
         p->curr_mclk_range.lower_bound = freq_string_to_int(val_vec, nullptr,
                                      nullptr, kOD_MCLK_label_array_index + 1);
+        // the upper memory frequency is the last
         p->curr_mclk_range.upper_bound = freq_string_to_int(val_vec, nullptr,
-                                     nullptr, kOD_MCLK_label_array_index + 4);
+                                     nullptr, last_item);
         return RSMI_STATUS_SUCCESS;
   } else if (val_vec[kOD_MCLK_label_array_index + 1] == "MCLK:") {
         p->curr_sclk_range.upper_bound = freq_string_to_int(val_vec, nullptr,
                                      nullptr, kOD_SCLK_label_array_index + 3);
         p->curr_mclk_range.lower_bound = freq_string_to_int(val_vec, nullptr,
                                      nullptr, kOD_MCLK_label_array_index + 2);
+        // the upper memory frequency is the last
         p->curr_mclk_range.upper_bound = freq_string_to_int(val_vec, nullptr,
-                                     nullptr, kOD_MCLK_label_array_index + 5);
+                                     nullptr, last_item);
         return RSMI_STATUS_SUCCESS;
   } else {
     return RSMI_STATUS_NOT_YET_IMPLEMENTED;
@@ -1648,6 +1666,8 @@ rsmi_dev_firmware_version_get(uint32_t dv_ind, rsmi_fw_block_t block,
     { RSMI_FW_BLOCK_ME, amd::smi::kDevFwVersionMe },
     { RSMI_FW_BLOCK_MEC, amd::smi::kDevFwVersionMec },
     { RSMI_FW_BLOCK_MEC2, amd::smi::kDevFwVersionMec2 },
+    { RSMI_FW_BLOCK_MES, amd::smi::kDevFwVersionMes },
+    { RSMI_FW_BLOCK_MES_KIQ, amd::smi::kDevFwVersionMesKiq },
     { RSMI_FW_BLOCK_PFP, amd::smi::kDevFwVersionPfp },
     { RSMI_FW_BLOCK_RLC, amd::smi::kDevFwVersionRlc },
     { RSMI_FW_BLOCK_RLC_SRLC, amd::smi::kDevFwVersionRlcSrlc },
@@ -2365,21 +2385,22 @@ rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_type,
   amd::smi::MonitorTypes mon_type = amd::smi::kMonInvalid;
   uint16_t val_ui16;
 
-  static const std::map<rsmi_temperature_metric_t, amd::smi::MonitorTypes> kMetricTypeMap = {
-    { RSMI_TEMP_CURRENT, amd::smi::kMonTemp },
-    { RSMI_TEMP_MAX, amd::smi::kMonTempMax },
-    { RSMI_TEMP_MIN, amd::smi::kMonTempMin },
-    { RSMI_TEMP_MAX_HYST, amd::smi::kMonTempMaxHyst },
-    { RSMI_TEMP_MIN_HYST, amd::smi::kMonTempMinHyst },
-    { RSMI_TEMP_CRITICAL, amd::smi::kMonTempCritical },
-    { RSMI_TEMP_CRITICAL_HYST, amd::smi::kMonTempCriticalHyst },
-    { RSMI_TEMP_EMERGENCY, amd::smi::kMonTempEmergency },
-    { RSMI_TEMP_EMERGENCY_HYST, amd::smi::kMonTempEmergencyHyst },
-    { RSMI_TEMP_CRIT_MIN, amd::smi::kMonTempCritMin },
-    { RSMI_TEMP_CRIT_MIN_HYST, amd::smi::kMonTempCritMinHyst },
-    { RSMI_TEMP_OFFSET, amd::smi::kMonTempOffset },
-    { RSMI_TEMP_LOWEST, amd::smi::kMonTempLowest },
-    { RSMI_TEMP_HIGHEST, amd::smi::kMonTempHighest },
+  static const std::map<rsmi_temperature_metric_t, amd::smi::MonitorTypes>
+    kMetricTypeMap = {
+      { RSMI_TEMP_CURRENT, amd::smi::kMonTemp },
+      { RSMI_TEMP_MAX, amd::smi::kMonTempMax },
+      { RSMI_TEMP_MIN, amd::smi::kMonTempMin },
+      { RSMI_TEMP_MAX_HYST, amd::smi::kMonTempMaxHyst },
+      { RSMI_TEMP_MIN_HYST, amd::smi::kMonTempMinHyst },
+      { RSMI_TEMP_CRITICAL, amd::smi::kMonTempCritical },
+      { RSMI_TEMP_CRITICAL_HYST, amd::smi::kMonTempCriticalHyst },
+      { RSMI_TEMP_EMERGENCY, amd::smi::kMonTempEmergency },
+      { RSMI_TEMP_EMERGENCY_HYST, amd::smi::kMonTempEmergencyHyst },
+      { RSMI_TEMP_CRIT_MIN, amd::smi::kMonTempCritMin },
+      { RSMI_TEMP_CRIT_MIN_HYST, amd::smi::kMonTempCritMinHyst },
+      { RSMI_TEMP_OFFSET, amd::smi::kMonTempOffset },
+      { RSMI_TEMP_LOWEST, amd::smi::kMonTempLowest },
+      { RSMI_TEMP_HIGHEST, amd::smi::kMonTempHighest },
   };
 
   const auto mon_type_it = kMetricTypeMap.find(metric);
@@ -2464,7 +2485,8 @@ rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_type,
       return RSMI_STATUS_NOT_SUPPORTED;
     }
 
-    *temperature = static_cast<int64_t>(val_ui16) * CENTRIGRADE_TO_MILLI_CENTIGRADE;
+    *temperature =
+      static_cast<int64_t>(val_ui16) * CENTRIGRADE_TO_MILLI_CENTIGRADE;
 
     ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
        << " | Success "
@@ -2791,6 +2813,80 @@ rsmi_dev_power_ave_get(uint32_t dv_ind, uint32_t sensor_ind, uint64_t *power) {
   ret = get_dev_mon_value(amd::smi::kMonPowerAve, dv_ind, sensor_ind, power);
 
   return ret;
+  CATCH
+}
+
+rsmi_status_t
+rsmi_dev_current_socket_power_get(uint32_t dv_ind, uint64_t *socket_power) {
+  TRY
+  std::ostringstream ss;
+  rsmi_status_t rsmiReturn = RSMI_STATUS_NOT_SUPPORTED;
+  std::string val_str;
+  uint32_t sensor_ind = 1;  // socket_power sysfs files have 1-based indices
+  MonitorTypes mon_type = amd::smi::kMonPowerInput;
+  ss << __PRETTY_FUNCTION__ << " | ======= start =======, dv_ind="
+     << std::to_string(dv_ind);
+  LOG_TRACE(ss);
+  if (socket_power == nullptr) {
+    rsmiReturn = RSMI_STATUS_INVALID_ARGS;
+    ss << __PRETTY_FUNCTION__
+       << " | ======= end ======= "
+       << " | Fail "
+       << " | Device #: " << dv_ind
+       << " | Type: " << monitorTypesToString.at(mon_type)
+       << " | Cause: socket_power was a null ptr reference"
+       << " | Returning = "
+       << getRSMIStatusString(rsmiReturn) << " |";
+    LOG_ERROR(ss);
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+  CHK_SUPPORT_SUBVAR_ONLY(socket_power, sensor_ind)
+  DEVICE_MUTEX
+
+  if (dev->monitor() == nullptr) {
+    ss << __PRETTY_FUNCTION__
+       << " | ======= end ======= "
+       << " | Fail "
+       << " | Device #: " << dv_ind
+       << " | Type: " << monitorTypesToString.at(mon_type)
+       << " | Cause: hwmon monitor was a null ptr reference"
+       << " | Returning = "
+       << getRSMIStatusString(rsmiReturn) << " |";
+    LOG_ERROR(ss);
+    return rsmiReturn;
+  }
+
+  int ret = dev->monitor()->readMonitor(amd::smi::kMonPowerLabel,
+                                        sensor_ind, &val_str);
+  if (ret || val_str != "PPT" || val_str.size() != 3) {
+    if (ret != 0) {
+      rsmiReturn = amd::smi::ErrnoToRsmiStatus(ret);
+    }
+    ss << __PRETTY_FUNCTION__
+       << " | ======= end ======= "
+       << " | Fail "
+       << " | Device #: " << dv_ind
+       << " | Type: " << monitorTypesToString.at(mon_type)
+       << " | Cause: readMonitor() returned an error status"
+       << " or Socket Power label did not show PPT or size of label data was"
+       << " unexpected"
+       << " | Returning = "
+       << getRSMIStatusString(rsmiReturn) << " |";
+    LOG_ERROR(ss);
+    return rsmiReturn;
+  }
+  rsmiReturn = get_dev_mon_value(mon_type, dv_ind, sensor_ind,
+                                 socket_power);
+  ss << __PRETTY_FUNCTION__
+     << " | ======= end ======= "
+     << " | Success "
+     << " | Device #: " << dv_ind
+     << " | Type: " << monitorTypesToString.at(mon_type)
+     << " | Data: " << *socket_power
+     << " | Returning = "
+     << getRSMIStatusString(rsmiReturn) << " |";
+  LOG_TRACE(ss);
+  return rsmiReturn;
   CATCH
 }
 

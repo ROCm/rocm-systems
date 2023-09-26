@@ -59,7 +59,7 @@ gpu_id = c_uint32(0)
 
 
 # Policy enums
-RSMI_MAX_NUM_FREQUENCIES = 32
+RSMI_MAX_NUM_FREQUENCIES = 33
 RSMI_MAX_FAN_SPEED = 255
 RSMI_NUM_VOLTAGE_CURVE_POINTS = 3
 
@@ -492,7 +492,8 @@ rsmi_power_profile_status = rsmi_power_profile_status_t
 
 
 class rsmi_frequencies_t(Structure):
-    _fields_ = [('num_supported', c_int32),
+    _fields_ = [('has_deep_sleep', c_bool),
+                ('num_supported', c_int32),
                 ('current', c_uint32),
                 ('frequency', c_uint64 * RSMI_MAX_NUM_FREQUENCIES)]
 
@@ -654,3 +655,8 @@ rsmi_nps_mode_type = rsmi_nps_mode_type_t
 # nps_mode_type_l[rsmi_nps_mode_type_t.RSMI_MEMORY_PARTITION_NPS2]
 # will return string 'NPS2'
 nps_mode_type_l = ['NPS1', 'NPS2', 'NPS4', 'NPS8']
+
+class rsmi_power_label(str, Enum):
+    AVG_POWER = '(Avg)'
+    CURRENT_SOCKET_POWER = '(Socket)'
+

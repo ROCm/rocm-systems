@@ -73,7 +73,6 @@
 #include "rocm_smi/rocm_smi_device.h"
 #include "rocm_smi/rocm_smi_logger.h"
 
-using namespace ROCmLogging;
 
 namespace amd {
 namespace smi {
