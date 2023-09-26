@@ -30,6 +30,7 @@ target_sources(rocprofiler-object-library PRIVATE ${ROCPROFILER_LIB_SOURCES}
 
 add_subdirectory(hsa)
 add_subdirectory(context)
+add_subdirectory(counters)
 
 target_link_libraries(
     rocprofiler-object-library
@@ -96,9 +97,7 @@ target_link_libraries(
     rocprofiler-static-library
     PUBLIC rocprofiler::rocprofiler-headers rocprofiler::rocprofiler-hsa-runtime
            rocprofiler::rocprofiler-hip
-    PRIVATE rocprofiler::rocprofiler-build-flags rocprofiler::rocprofiler-memcheck
-            rocprofiler::rocprofiler-common-library rocprofiler::rocprofiler-stdcxxfs
-            rocprofiler::rocprofiler-dl rocprofiler::rocprofiler-amd-comgr)
+    PRIVATE rocprofiler::rocprofiler-common-library)
 
 set_target_properties(
     rocprofiler-static-library PROPERTIES OUTPUT_NAME rocprofiler64 DEFINE_SYMBOL

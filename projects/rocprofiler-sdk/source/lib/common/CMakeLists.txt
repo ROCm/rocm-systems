@@ -5,7 +5,7 @@ rocprofiler_activate_clang_tidy()
 
 set(common_sources config.cpp environment.cpp demangle.cpp)
 set(common_headers config.hpp defines.hpp environment.hpp demangle.hpp mpl.hpp
-                   utility.hpp)
+                   utility.hpp xml.hpp)
 
 add_library(rocprofiler-common-library STATIC)
 add_library(rocprofiler::rocprofiler-common-library ALIAS rocprofiler-common-library)
