@@ -86,7 +86,11 @@ jobs:
           python3 -m pip install numpy &&
           python3 -m pip install perfetto &&
           python3 -m pip install 'cmake==3.16.3' &&
-          for i in 6 7 8 9 10; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy perfetto dataclasses; done
+          for i in 6 7 8 9 10; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy perfetto dataclasses; done &&
+          apt-get -y --purge autoremove &&
+          apt-get -y clean &&
+          /opt/conda/bin/conda clean -y -a
+
 
     - name: Test Environment Modules
       timeout-minutes: 15
@@ -269,7 +273,11 @@ jobs:
           apt-get install -y build-essential m4 autoconf libtool python3-pip clang libomp-dev ${{ matrix.compiler }} libudev1 libnuma1 rocm-dev rocm-utils rocm-smi-lib roctracer-dev rocprofiler-dev rccl-dev hip-base hsa-amd-aqlprofile hsa-rocr-dev hsakmt-roct-dev libpapi-dev curl libopenmpi-dev openmpi-bin libfabric-dev &&
           python3 -m pip install --upgrade pip &&
           python3 -m pip install 'cmake==3.21.4' &&
-          for i in 6 7 8 9 10; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy perfetto dataclasses; done
+          for i in 6 7 8 9 10; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy perfetto dataclasses; done &&
+          apt-get -y --purge autoremove &&
+          apt-get -y clean &&
+          /opt/conda/bin/conda clean -y -a
+
 
     - name: Configure Env
       run: |
@@ -427,7 +435,10 @@ jobs:
           python3 -m pip install --upgrade pip &&
           python3 -m pip install numpy &&
           python3 -m pip install perfetto &&
-          python3 -m pip install 'cmake==3.16.3'
+          python3 -m pip install 'cmake==3.16.3' &&
+          sudo apt-get -y --purge autoremove &&
+          sudo apt-get -y clean
+
 
     - name: Test Environment Modules
       timeout-minutes: 15
@@ -577,7 +588,10 @@ jobs:
           python3 -m pip install numpy &&
           python3 -m pip install perfetto &&
           python3 -m pip install 'cmake==3.24.1' &&
-          for i in 6 7 8 9 10; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy perfetto dataclasses; done
+          for i in 6 7 8 9 10; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy perfetto dataclasses; done &&
+          apt-get -y --purge autoremove &&
+          apt-get -y clean &&
+          /opt/conda/bin/conda clean -y -a
 
     - name: Configure Env
       run:
@@ -599,7 +613,7 @@ jobs:
           -DOMNITRACE_BUILD_CI=OFF
           -DOMNITRACE_BUILD_TESTING=ON
           -DOMNITRACE_BUILD_DYNINST=OFF
-          -DOMNITRACE_BUILD_DEBUG=ON
+          -DOMNITRACE_BUILD_DEBUG=OFF
           -DOMNITRACE_BUILD_HIDDEN_VISIBILITY=OFF
           -DOMNITRACE_USE_MPI=ON
           -DOMNITRACE_USE_PYTHON=ON
