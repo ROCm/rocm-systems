@@ -85,6 +85,19 @@ def generate_custom(args, cmake_args, ctest_args):
             ]
         )
 
+    codecov_exclude = [
+        "/usr/.*",
+        "/opt/.*",
+        "external/.*",
+        "samples/.*",
+        "tests/.*",
+        ".*/details/.*",
+    ]
+    if args.coverage == "samples":
+        codecov_exclude += [".*/lib/common/.*"]
+
+    COVERAGE_EXCLUDE = ";".join(codecov_exclude)
+
     return f"""
         set(CTEST_PROJECT_NAME "{_PROJECT_NAME}")
         set(CTEST_NIGHTLY_START_TIME "05:00:00 UTC")
@@ -105,7 +118,7 @@ def generate_custom(args, cmake_args, ctest_args):
         set(CTEST_CUSTOM_MAXIMUM_NUMBER_OF_ERRORS "100")
         set(CTEST_CUSTOM_MAXIMUM_NUMBER_OF_WARNINGS "100")
         set(CTEST_CUSTOM_MAXIMUM_PASSED_TEST_OUTPUT_SIZE "51200")
-        set(CTEST_CUSTOM_COVERAGE_EXCLUDE "/usr/.*;/opt/.*;.*external/.*;.*samples/.*;.*tests/.*;.*/details/.*")
+        set(CTEST_CUSTOM_COVERAGE_EXCLUDE "{COVERAGE_EXCLUDE}")
 
         set(CTEST_MEMORYCHECK_TYPE "{MEMCHECK_TYPE}")
         set(CTEST_MEMORYCHECK_SUPPRESSIONS_FILE "{MEMCHECK_SUPPRESSION_FILE}")
@@ -224,7 +237,12 @@ def parse_cdash_args(args):
         "-q", "--quiet", help="Disable printing logs", action="store_true"
     )
     parser.add_argument(
-        "-c", "--coverage", help="Enable code coverage", action="store_true"
+        "-c",
+        "--coverage",
+        help="Enable code coverage",
+        choices=("all", "unittests", "samples"),
+        type=str,
+        default=None,
     )
     parser.add_argument(
         "-j",
@@ -355,6 +373,10 @@ def parse_args(args=None):
 
     if cdash_args.coverage:
         cmake_args += ["-DROCPROFILER_BUILD_CODECOV=ON"]
+        if cdash_args.coverage == "samples":
+            ctest_args += ["-L", "samples"]
+        elif cdash_args.coverage == "unittests":
+            ctest_args += ["-L", "unittests"]
 
     if cdash_args.linter == "clang-tidy":
         cmake_args += ["-DROCPROFILER_ENABLE_CLANG_TIDY=ON"]

@@ -178,7 +178,7 @@ jobs:
           --build-jobs 8
           --site mi200
           --gpu-targets ${{ env.GPU_LIST }}
-          --coverage
+          --coverage all
           --
           -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
           -DPython3_EXECUTABLE=$(which python3)
@@ -193,12 +193,10 @@ jobs:
           --build-jobs 8
           --site mi200
           --gpu-targets ${{ env.GPU_LIST }}
-          --coverage
+          --coverage unittests
           --
           -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
           -DPython3_EXECUTABLE=$(which python3)
-          --
-          -L unittests
 
     - name: Configure, Build, and Test (Samples Code Coverage)
       timeout-minutes: 30
@@ -210,12 +208,10 @@ jobs:
           --build-jobs 8
           --site mi200
           --gpu-targets ${{ env.GPU_LIST }}
-          --coverage
+          --coverage samples
           --
           -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
           -DPython3_EXECUTABLE=$(which python3)
-          --
-          -L samples
 
   sanitizers:
     strategy:

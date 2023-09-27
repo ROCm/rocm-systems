@@ -18,7 +18,7 @@ target_link_libraries(
 gtest_add_tests(
     TARGET counter-test
     SOURCES ${ROCPROFILER_LIB_COUNTER_TEST_SOURCES}
-    TEST_LIST counter-test_TESTS
+    TEST_LIST counter-tests_TESTS
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 
 set_tests_properties(${counter-tests_TESTS} PROPERTIES TIMEOUT 45 LABELS "unittests")

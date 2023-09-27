@@ -437,9 +437,9 @@ set_fini_status(int v)
 void
 initialize()
 {
-    static auto _once  = std::once_flag{};
-    static auto _ready = std::atomic<bool>{false};
+    if(get_init_status() != 0) return;
 
+    static auto _once = std::once_flag{};
     std::call_once(_once, []() {
         // initialization is in process
         set_init_status(-1);
@@ -450,19 +450,14 @@ initialize()
         internal_threading::initialize();
         // initialization is no longer available
         set_init_status(1);
-        _ready.store(true, std::memory_order_release);
     });
-
-    if(!_ready.load(std::memory_order_acquire))
-    {
-        while(!_ready.load(std::memory_order_acquire))
-            std::this_thread::yield();
-    }
 }
 
 void
 finalize()
 {
+    if(get_fini_status() != 0) return;
+
     static auto _once = std::once_flag{};
     std::call_once(_once, []() {
         set_fini_status(-1);

@@ -76,20 +76,33 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record, void* client
 
     auto* cb_data = static_cast<callback_data*>(client_data);
 
-    static auto name_map = [&record]() {
-        rocprofiler_callback_tracing_operation_name_cb_t cb =
-            [](rocprofiler_service_callback_tracing_kind_t kind,
-               uint32_t                                    operation,
-               const char*                                 operation_name,
-               void*                                       data) {
-                auto mdata = *static_cast<name_map_t*>(data);
-                (*static_cast<name_map_t*>(data))[kind][operation] = operation_name;
+    static auto name_map = []() {
+        auto outer_cb = [](rocprofiler_service_callback_tracing_kind_t kind_v,
+                           const char* /*kind_name*/,
+                           void* data_v) {
+            auto inner_cb = [](rocprofiler_service_callback_tracing_kind_t kind,
+                               uint32_t                                    operation,
+                               const char*                                 operation_name,
+                               void*                                       data) {
+                auto& mdata            = *static_cast<name_map_t*>(data);
+                mdata[kind][operation] = operation_name;
                 return 0;
             };
 
+            auto& mdata_v = *static_cast<name_map_t*>(data_v);
+            mdata_v.emplace(kind_v, std::unordered_map<uint32_t, const char*>{});
+
+            rocprofiler_iterate_callback_tracing_kind_operation_names(kind_v, inner_cb, data_v);
+            return 0;
+        };
+
         auto tmp = name_map_t{};
-        rocprofiler_iterate_callback_tracing_kind_operation_names(
-            record.kind, cb, static_cast<void*>(&tmp));
+        rocprofiler_iterate_callback_tracing_kind_names(outer_cb, static_cast<void*>(&tmp));
+
+        EXPECT_EQ(tmp.size(), ROCPROFILER_SERVICE_CALLBACK_TRACING_LAST - 1);
+        EXPECT_EQ(tmp.at(ROCPROFILER_SERVICE_CALLBACK_TRACING_HSA_API).size(),
+                  ROCPROFILER_HSA_API_ID_LAST);
+
         return tmp;
     }();
 
@@ -139,8 +152,13 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record, void* client
     ROCPROFILER_CALL(rocprofiler_iterate_callback_tracing_operation_args(
                          record, info_data_cb, static_cast<void*>(&info_data_v)),
                      "Failure iterating trace operation args");
-    EXPECT_GT(info_data_v.num_args, 0)
-        << name_map[record.kind][record.operation] << info_data_v.arg_ss.str();
+    if(record.kind == ROCPROFILER_SERVICE_CALLBACK_TRACING_HSA_API &&
+       !(record.operation == ROCPROFILER_HSA_API_ID_hsa_init ||
+         record.operation == ROCPROFILER_HSA_API_ID_hsa_shut_down))
+    {
+        EXPECT_GT(info_data_v.num_args, 0)
+            << name_map[record.kind][record.operation] << info_data_v.arg_ss.str();
+    }
 }
 
 void

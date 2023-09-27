@@ -42,6 +42,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
+#include <functional>
 #include <iostream>
 #include <mutex>
 #include <string>
@@ -81,17 +83,44 @@ print_call_stack(const call_stack_t& _call_stack)
 {
     namespace fs = ::std::filesystem;
 
+    auto ofname = std::string{"api_callback_trace.log"};
+    if(auto* eofname = getenv("ROCPROFILER_SAMPLE_OUTPUT_FILE")) ofname = eofname;
+
+    std::ostream* ofs     = nullptr;
+    auto          cleanup = std::function<void(std::ostream*&)>{};
+
+    if(ofname == "stdout")
+        ofs = &std::cout;
+    else if(ofname == "stderr")
+        ofs = &std::cerr;
+    else
+    {
+        ofs = new std::ofstream{ofname};
+        if(ofs && *ofs)
+            cleanup = [](std::ostream*& _os) { delete _os; };
+        else
+        {
+            std::cerr << "Error outputting to " << ofname << ". Redirecting to stderr...\n";
+            ofname = "stderr";
+            ofs    = &std::cerr;
+        }
+    }
+
+    std::cout << "Outputting collected data to " << ofname << "...\n" << std::flush;
+
     size_t n = 0;
     for(const auto& itr : _call_stack)
     {
-        std::clog << std::setw(2) << ++n << "/" << std::setw(2) << _call_stack.size() << " ";
-        std::clog << "[" << fs::path{itr.file}.filename() << ":" << itr.line << "] "
-                  << std::setw(20) << std::left << itr.function;
-        if(!itr.context.empty()) std::clog << " :: " << itr.context;
-        std::clog << "\n";
+        *ofs << std::setw(2) << ++n << "/" << std::setw(2) << _call_stack.size() << " ";
+        *ofs << "[" << fs::path{itr.file}.filename() << ":" << itr.line << "] " << std::setw(20)
+             << std::left << itr.function;
+        if(!itr.context.empty()) *ofs << " :: " << itr.context;
+        *ofs << "\n";
     }
 
-    std::clog << std::flush;
+    *ofs << std::flush;
+
+    if(cleanup) cleanup(ofs);
 }
 
 void

@@ -17,7 +17,7 @@ target_link_libraries(
 gtest_add_tests(
     TARGET buffering-test
     SOURCES ${buffering_sources}
-    TEST_LIST buffering-test_TESTS
+    TEST_LIST buffering-tests_TESTS
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 
 set_tests_properties(${buffering-tests_TESTS} PROPERTIES TIMEOUT 45 LABELS "unittests")
