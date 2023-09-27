@@ -43,6 +43,7 @@
 #include <sys/syscall.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <cassert>
 
 // Macro to check ROCtracer calls status
 #define CHECK_ROCTRACER(call)                                                                      \
