@@ -22,6 +22,8 @@ Consider the following C++ code executing `foo` and `bar` concurrently in two di
 where `foo` is 30% faster than `bar` (ideally):
 
 ```cpp
+#include <cstddef>
+#include <thread>
 constexpr size_t FOO_N =  7 * 1000000000UL;
 constexpr size_t BAR_N = 10 * 1000000000UL;
 
@@ -37,7 +39,7 @@ void bar()
 
 int main()
 {
-    auto _threads = { std::thread{ foo },
+    std::thread _threads[] = { std::thread{ foo },
                       std::thread{ bar } };
 
     for(auto& itr : _threads)

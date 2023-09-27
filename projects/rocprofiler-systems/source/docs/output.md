@@ -314,7 +314,7 @@ settings will be ignored. Visit [ui.perfetto.dev](https://ui.perfetto.dev) and o
 Use `omnitrace-avail --components --filename` to view the base filename for each component. E.g.
 
 ```shell
-$ ./omnitrace-avail wall_clock -C -f
+$ omnitrace-avail wall_clock -C -f
 |---------------------------------|---------------|------------------------|
 |            COMPONENT            |   AVAILABLE   |        FILENAME        |
 |---------------------------------|---------------|------------------------|

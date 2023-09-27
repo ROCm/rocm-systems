@@ -13,7 +13,7 @@ The steps for generating a critical trace are:
 
 1. Enable the `OMNITRACE_CRITICAL_TRACE` setting
 2. Configure any other relevant critical-trace settings, as needed
-   - `omnitrace-avail --categories settings::critical-trace`
+   - `omnitrace-avail --categories settings::critical_trace`
 3. Execute application
 4. Locate the JSON files with `call-chain` in their name
 5. Provide these files to the `omnitrace-critical-trace` executable
