@@ -24,6 +24,7 @@
 #include <rocprofiler/rocprofiler.h>
 
 #include "lib/common/container/stable_vector.hpp"
+#include "lib/rocprofiler/buffer.hpp"
 #include "lib/rocprofiler/context/context.hpp"
 
 #include <glog/logging.h>
@@ -225,6 +226,35 @@ stop_context(rocprofiler_context_id_t idx)
     }
 
     return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;  // compare exchange failed
+}
+
+void
+deactivate_client_contexts(rocprofiler_client_id_t client_id)
+{
+    for(auto& itr : get_active_contexts())
+    {
+        auto* itr_v = itr.load();
+        if(itr_v->client_idx == client_id.handle)
+        {
+            itr.store(nullptr);
+        }
+    }
+}
+
+void
+deregister_client_contexts(rocprofiler_client_id_t client_id)
+{
+    for(auto& itr : get_registered_contexts())
+    {
+        if(itr->client_idx == client_id.handle)
+        {
+            for(auto& bitr : buffer::get_buffers())
+            {
+                if(bitr->context_id == itr->context_idx) bitr.reset();
+            }
+            itr.reset();
+        }
+    }
 }
 }  // namespace context
 }  // namespace rocprofiler

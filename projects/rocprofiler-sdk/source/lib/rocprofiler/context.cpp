@@ -20,6 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include <rocprofiler/context.h>
 #include <rocprofiler/rocprofiler.h>
 
 #include "lib/rocprofiler/context/context.hpp"
@@ -34,7 +35,10 @@ extern "C" {
 rocprofiler_status_t
 rocprofiler_create_context(rocprofiler_context_id_t* context_id)
 {
-    if(rocprofiler::registration::get_init_status() > 0)
+    // always set to none first
+    *context_id = ROCPROFILER_CONTEXT_NONE;
+
+    if(rocprofiler::registration::get_init_status() > -1)
         return ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED;
 
     auto cfg_id = rocprofiler::context::allocate_context();

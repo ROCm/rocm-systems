@@ -48,7 +48,7 @@ rocprofiler_configure_buffer_tracing_service(rocprofiler_context_id_t           
                                              size_t                  operations_count,
                                              rocprofiler_buffer_id_t buffer_id)
 {
-    if(rocprofiler::registration::get_init_status() > 0)
+    if(rocprofiler::registration::get_init_status() > -1)
         return ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED;
 
     if(context_id.handle >= rocprofiler::context::get_registered_contexts().size())

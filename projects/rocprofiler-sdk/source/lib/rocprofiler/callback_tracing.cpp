@@ -47,7 +47,7 @@ rocprofiler_configure_callback_tracing_service(rocprofiler_context_id_t context_
                                                rocprofiler_callback_tracing_cb_t callback,
                                                void*                             callback_args)
 {
-    if(rocprofiler::registration::get_init_status() > 0)
+    if(rocprofiler::registration::get_init_status() > -1)
         return ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED;
 
     if(context_id.handle >= rocprofiler::context::get_registered_contexts().size())

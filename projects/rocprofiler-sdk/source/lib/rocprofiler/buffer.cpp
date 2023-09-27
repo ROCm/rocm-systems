@@ -34,6 +34,7 @@
 
 #include <atomic>
 #include <exception>
+#include <mutex>
 #include <vector>
 
 namespace rocprofiler
@@ -59,9 +60,23 @@ get_buffers()
     return _v;
 }
 
+instance*
+get_buffer(rocprofiler_buffer_id_t buffer_id)
+{
+    for(auto& itr : get_buffers())
+    {
+        if(itr && itr->buffer_id == buffer_id.handle) return itr.get();
+    }
+    return nullptr;
+}
+
 std::optional<rocprofiler_buffer_id_t>
 allocate_buffer()
 {
+    // ensure buffer has thread to handle flushing it
+    static auto _init_threads_once = std::once_flag{};
+    std::call_once(_init_threads_once, []() { internal_threading::initialize(); });
+
     // ... allocate any internal space needed to handle another context ...
     auto _lk = std::unique_lock<std::mutex>{get_buffers_mutex()};
 
@@ -84,51 +99,62 @@ allocate_buffer()
 rocprofiler_status_t
 flush(rocprofiler_buffer_id_t buffer_id, bool wait)
 {
+    LOG(ERROR) << "flushing...";
+
     if(buffer_id.handle >= get_buffers().size()) return ROCPROFILER_STATUS_ERROR_BUFFER_NOT_FOUND;
 
     auto& buff = get_buffers().at(buffer_id.handle);
 
-    auto* task_group = rocprofiler::internal_threading::get_task_group(
-        rocprofiler_callback_thread_t{buff->task_group_id});
+    auto* task_group =
+        internal_threading::get_task_group(rocprofiler_callback_thread_t{buff->task_group_id});
 
-    if(task_group) task_group->wait();
+    if(wait && task_group) task_group->wait();
 
     // buffer is currently being flushed or destroyed
     if(buff->syncer.test_and_set()) return ROCPROFILER_STATUS_ERROR_BUFFER_BUSY;
 
-    auto buff_idx = buff->buffer_idx++;
+    auto idx = buff->buffer_idx++;
 
-    auto _task = [buff_idx, buffer_id]() {
-        auto& _buff  = get_buffers().at(buffer_id.handle);
-        auto& buff_v = _buff->buffers.at(buff_idx % _buff->buffers.size());
+    auto _task = [buffer_id, idx]() {
+        LOG(ERROR) << "executing task...";
+        auto& buff_v          = get_buffers().at(buffer_id.handle);
+        auto& buff_internal_v = buff_v->get_internal_buffer(idx);
 
-        if(!buff_v.is_empty())
+        if(!buff_internal_v.is_empty())
         {
             // get the array of record headers
-            auto buff_data = buff_v.get_record_headers();
+            auto buff_data = buff_internal_v.get_record_headers();
 
             // invoke buffer callback
             try
             {
-                _buff->callback(rocprofiler_context_id_t{_buff->context_id},
-                                rocprofiler_buffer_id_t{_buff->buffer_id},
-                                buff_data.data(),
-                                buff_data.size(),
-                                _buff->callback_data,
-                                _buff->drop_count);
+                if(buff_v->callback)
+                {
+                    buff_v->callback(rocprofiler_context_id_t{buff_v->context_id},
+                                     rocprofiler_buffer_id_t{buff_v->buffer_id},
+                                     buff_data.data(),
+                                     buff_data.size(),
+                                     buff_v->callback_data,
+                                     buff_v->drop_count);
+                }
             } catch(std::exception& e)
             {
                 LOG(ERROR) << "buffer callback threw an exception: " << e.what();
             }
             // clear the buffer
-            buff_v.clear();
+            buff_internal_v.clear();
+        }
+        else
+        {
+            LOG(ERROR) << "buffer at " << buffer_id.handle << " is empty...";
         }
 
-        _buff->syncer.clear();
+        buff_v->syncer.clear();
     };
 
     if(task_group)
     {
+        LOG(ERROR) << "executing task...";
         task_group->exec(_task);
         if(wait) task_group->wait();
     }
@@ -152,7 +178,7 @@ rocprofiler_create_buffer(rocprofiler_context_id_t        context,
                           void*                           callback_data,
                           rocprofiler_buffer_id_t*        buffer_id)
 {
-    if(rocprofiler::registration::get_init_status() > 0)
+    if(rocprofiler::registration::get_init_status() > -1)
         return ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED;
 
     auto opt_buff_id = rocprofiler::buffer::allocate_buffer();

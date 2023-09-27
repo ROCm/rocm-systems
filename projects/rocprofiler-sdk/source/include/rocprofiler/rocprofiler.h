@@ -75,6 +75,7 @@ ROCPROFILER_EXTERN_C_FINI
 #include "rocprofiler/external_correlation.h"
 #include "rocprofiler/hip.h"
 #include "rocprofiler/hsa.h"
+#include "rocprofiler/internal_threading.h"
 #include "rocprofiler/marker.h"
 #include "rocprofiler/pc_sampling.h"
 #include "rocprofiler/profile_config.h"

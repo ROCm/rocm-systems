@@ -38,12 +38,10 @@ namespace rocprofiler
 {
 namespace internal_threading
 {
-using thread_pool_t        = PTL::ThreadPool;
-using task_group_t         = PTL::TaskGroup<void>;
-using unique_thread_pool_t = std::unique_ptr<thread_pool_t, void (*)(thread_pool_t*)>;
-using unique_task_group_t  = std::unique_ptr<task_group_t>;
-using thread_pool_vec_t    = std::vector<unique_thread_pool_t>;
-using task_group_vec_t     = std::vector<unique_task_group_t>;
+using thread_pool_t     = PTL::ThreadPool;
+using task_group_t      = PTL::TaskGroup<void>;
+using thread_pool_vec_t = std::vector<std::unique_ptr<thread_pool_t>>;
+using task_group_vec_t  = std::vector<std::unique_ptr<task_group_t>>;
 
 void notify_pre_internal_thread_create(rocprofiler_internal_thread_library_t);
 void notify_post_internal_thread_create(rocprofiler_internal_thread_library_t);

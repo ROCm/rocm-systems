@@ -14,3 +14,7 @@ mutex:librocm_smi64.so
 # google logging
 race:google::LogMessageTime::CalcGmtOffset
 race:tzset_internal
+
+# bug in libtsan.so.0 which thinks there is a
+# double mutex lock (there isn't one)
+mutex:external/ptl/source/PTL/TaskGroup.hh

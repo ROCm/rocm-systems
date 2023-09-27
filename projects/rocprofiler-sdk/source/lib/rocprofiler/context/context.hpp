@@ -23,6 +23,7 @@
 #pragma once
 
 #include <rocprofiler/fwd.h>
+#include <rocprofiler/registration.h>
 #include <rocprofiler/rocprofiler.h>
 
 #include "lib/common/container/stable_vector.hpp"
@@ -126,5 +127,10 @@ get_registered_contexts();
 
 active_context_vec_t&
 get_active_contexts();
+
+void deactivate_client_contexts(rocprofiler_client_id_t);
+
+// should only be called if the client failed to initialize
+void deregister_client_contexts(rocprofiler_client_id_t);
 }  // namespace context
 }  // namespace rocprofiler

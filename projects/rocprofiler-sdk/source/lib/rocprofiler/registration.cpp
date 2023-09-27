@@ -40,8 +40,10 @@
 #include <cstdint>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <mutex>
+#include <random>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -62,6 +64,21 @@ namespace registration
 {
 namespace
 {
+// invoke all rocprofiler_configure symbols
+bool
+invoke_client_configures();
+
+// invoke initialize functions returned from rocprofiler_configure
+bool
+invoke_client_initializers();
+
+// invoke finalize functions returned from rocprofiler_configure
+bool
+invoke_client_finalizers();
+
+// explicitly invoke the finalize function of a specific client
+void invoke_client_finalizer(rocprofiler_client_id_t);
+
 auto&
 get_status()
 {
@@ -143,11 +160,19 @@ struct client_library
 std::vector<client_library>
 find_clients()
 {
-    auto data = std::vector<client_library>{};
+    auto data            = std::vector<client_library>{};
+    auto priority_offset = get_client_offset();
 
     if(get_forced_configure())
     {
-        data.emplace_back(client_library{"(forced)", nullptr, get_forced_configure()});
+        LOG(ERROR) << "adding forced configure";
+        uint32_t _prio = priority_offset + data.size();
+        data.emplace_back(client_library{"(forced)",
+                                         nullptr,
+                                         get_forced_configure(),
+                                         nullptr,
+                                         rocprofiler_client_id_t{nullptr, _prio},
+                                         rocprofiler_client_id_t{nullptr, _prio}});
     }
 
     if(!rocprofiler_configure && !get_forced_configure())
@@ -159,8 +184,16 @@ find_clients()
     if(rocprofiler_configure != &rocprofiler_configure)
         throw std::runtime_error("rocprofiler_configure != &rocprofiler_configure");
 
-    if(&rocprofiler_configure != get_forced_configure())
-        data.emplace_back(client_library{"unknown", nullptr, &rocprofiler_configure});
+    if(rocprofiler_configure && rocprofiler_configure != get_forced_configure())
+    {
+        uint32_t _prio = priority_offset + data.size();
+        data.emplace_back(client_library{"unknown",
+                                         nullptr,
+                                         rocprofiler_configure,
+                                         nullptr,
+                                         rocprofiler_client_id_t{nullptr, _prio},
+                                         rocprofiler_client_id_t{nullptr, _prio}});
+    }
 
     for(const auto& itr : get_link_map())
     {
@@ -195,7 +228,7 @@ find_clients()
         }
         else
         {
-            uint32_t _prio = data.size();
+            uint32_t _prio = priority_offset + data.size();
             auto&    entry =
                 data.emplace_back(client_library{itr,
                                                  handle,
@@ -228,31 +261,6 @@ get_registration_mutex()
     static auto _v = mutex_t{};
     return _v;
 }
-}  // namespace
-
-int
-get_init_status()
-{
-    return get_status().first.load(std::memory_order_acquire);
-}
-
-int
-get_fini_status()
-{
-    return get_status().second.load(std::memory_order_acquire);
-}
-
-void
-set_init_status(int v)
-{
-    get_status().first.store(v, std::memory_order_release);
-}
-
-void
-set_fini_status(int v)
-{
-    get_status().second.store(v, std::memory_order_release);
-}
 
 bool
 invoke_client_configures()
@@ -265,9 +273,16 @@ invoke_client_configures()
 
     LOG(ERROR) << __FUNCTION__;
 
-    size_t prio = 0;
     for(auto& itr : get_clients())
     {
+        if(!itr.configure_func)
+        {
+            LOG(ERROR) << "rocprofiler::registration::invoke_client_configures() attempted to "
+                          "invoke configure function from "
+                       << itr.name << " that had no configuration function";
+            continue;
+        }
+
         if(get_invoked_configures().find(itr.configure_func) != get_invoked_configures().end())
         {
             LOG(ERROR) << "rocprofiler::registration::invoke_client_configures() attempted to "
@@ -286,10 +301,20 @@ invoke_client_configures()
                       << ")";
         }
 
-        auto* _result = itr.configure_func(
-            ROCPROFILER_VERSION, ROCPROFILER_VERSION_STRING, prio++, &itr.mutable_client_id);
+        auto* _result = itr.configure_func(ROCPROFILER_VERSION,
+                                           ROCPROFILER_VERSION_STRING,
+                                           itr.internal_client_id.handle - get_client_offset(),
+                                           &itr.mutable_client_id);
+
         if(_result)
+        {
             itr.configure_result = std::make_unique<rocprofiler_tool_configure_result_t>(*_result);
+        }
+        else
+        {
+            context::deactivate_client_contexts(itr.internal_client_id);
+            context::deregister_client_contexts(itr.internal_client_id);
+        }
 
         get_invoked_configures().emplace(itr.configure_func);
     }
@@ -308,7 +333,6 @@ invoke_client_initializers()
 
     LOG(ERROR) << __FUNCTION__;
 
-    set_init_status(-1);
     for(auto& itr : get_clients())
     {
         if(itr.configure_result && itr.configure_result->initialize)
@@ -322,22 +346,21 @@ invoke_client_initializers()
         }
     }
 
-    // initialization is no longer available
-    set_init_status(1);
-
     return true;
 }
 
 bool
 invoke_client_finalizers()
 {
-    if(get_fini_status() > 0) return false;
+    // NOTE: this function is expected to only be invoked from the finalize function (which sets the
+    // fini status)
+
+    if(get_init_status() < 1 || get_fini_status() > 0) return false;
 
     auto _lk = scoped_lock_t{get_registration_mutex(), std::defer_lock};
     if(_lk.owns_lock()) return false;
     _lk.lock();
 
-    set_fini_status(-1);
     for(auto& itr : get_clients())
     {
         if(itr.configure_result && itr.configure_result->finalize)
@@ -347,44 +370,6 @@ invoke_client_finalizers()
             itr.configure_result->finalize = nullptr;
         }
     }
-
-    set_fini_status(1);
-
-    return true;
-}
-
-bool
-invoke_client_initializer(rocprofiler_client_id_t client_id)
-{
-    if(get_init_status() > 0) return false;
-
-    auto _lk = scoped_lock_t{get_registration_mutex(), std::defer_lock};
-    if(_lk.owns_lock()) return false;
-    _lk.lock();
-
-    // save the original status
-    auto _restore_status = get_init_status();
-    set_init_status(-1);
-    for(auto& itr : get_clients())
-    {
-        if(itr.internal_client_id.handle == client_id.handle &&
-           itr.mutable_client_id.handle == client_id.handle)
-        {
-            if(itr.configure_result && itr.configure_result->initialize)
-            {
-                context::push_client(itr.internal_client_id.handle);
-                itr.configure_result->initialize(&invoke_client_finalizer,
-                                                 itr.configure_result->tool_data);
-                context::pop_client(itr.internal_client_id.handle);
-                // set to nullptr so initialize only gets called once
-                itr.configure_result->initialize = nullptr;
-            }
-        }
-    }
-
-    // we don't want the explicit client initialization to set the init status to 1
-    // we just want to restore what it previously was
-    set_init_status(_restore_status);
 
     return true;
 }
@@ -410,6 +395,44 @@ invoke_client_finalizer(rocprofiler_client_id_t client_id)
         }
     }
 }
+}  // namespace
+
+uint32_t
+get_client_offset()
+{
+    static uint32_t _v = []() {
+        auto gen = std::mt19937{std::random_device{}()};
+        auto rng = std::uniform_int_distribution<uint32_t>{
+            std::numeric_limits<uint8_t>::max(),
+            std::numeric_limits<uint32_t>::max() - std::numeric_limits<uint8_t>::max()};
+        return rng(gen);
+    }();
+    return _v;
+}
+
+int
+get_init_status()
+{
+    return get_status().first.load(std::memory_order_acquire);
+}
+
+int
+get_fini_status()
+{
+    return get_status().second.load(std::memory_order_acquire);
+}
+
+void
+set_init_status(int v)
+{
+    get_status().first.store(v, std::memory_order_release);
+}
+
+void
+set_fini_status(int v)
+{
+    get_status().second.store(v, std::memory_order_release);
+}
 
 void
 initialize()
@@ -418,11 +441,15 @@ initialize()
     static auto _ready = std::atomic<bool>{false};
 
     std::call_once(_once, []() {
+        // initialization is in process
+        set_init_status(-1);
+        std::atexit(&finalize);
         init_logging();
         invoke_client_configures();
         invoke_client_initializers();
         internal_threading::initialize();
-        std::atexit(&finalize);
+        // initialization is no longer available
+        set_init_status(1);
         _ready.store(true, std::memory_order_release);
     });
 
@@ -436,11 +463,19 @@ initialize()
 void
 finalize()
 {
-    hsa_shut_down();
-    invoke_client_finalizers();
-    for(auto& itr : rocprofiler::context::get_active_contexts())
-        itr.store(nullptr, std::memory_order_seq_cst);
-    internal_threading::finalize();
+    static auto _once = std::once_flag{};
+    std::call_once(_once, []() {
+        set_fini_status(-1);
+        hsa_shut_down();
+        if(get_init_status() > 0)
+        {
+            invoke_client_finalizers();
+            for(auto& itr : rocprofiler::context::get_active_contexts())
+                itr.store(nullptr, std::memory_order_seq_cst);
+        }
+        internal_threading::finalize();
+        set_fini_status(1);
+    });
 }
 }  // namespace registration
 }  // namespace rocprofiler

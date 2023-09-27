@@ -102,3 +102,13 @@ target_link_libraries(
 set_target_properties(
     rocprofiler-static-library PROPERTIES OUTPUT_NAME rocprofiler64 DEFINE_SYMBOL
                                                                     rocprofiler_EXPORTS)
+
+# ----------------------------------------------------------------------------------------#
+#
+# testing
+#
+# ----------------------------------------------------------------------------------------#
+
+if(ROCPROFILER_BUILD_TESTS)
+    add_subdirectory(tests)
+endif()

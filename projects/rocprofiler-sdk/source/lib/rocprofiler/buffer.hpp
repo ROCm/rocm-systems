@@ -22,7 +22,6 @@
 
 #pragma once
 
-#include <bits/stdint-uintn.h>
 #include <rocprofiler/buffer.h>
 #include <rocprofiler/fwd.h>
 
@@ -43,20 +42,23 @@ struct instance
 {
     using buffer_t = common::container::record_header_buffer;
 
-    mutable std::array<buffer_t, 2>     buffers       = {};
-    mutable std::atomic<unsigned short> buffer_idx    = {};
-    mutable std::atomic_flag            syncer        = ATOMIC_FLAG_INIT;
-    mutable std::atomic<uint64_t>       drop_count    = {};
-    uint64_t                            watermark     = 0;
-    uint64_t                            context_id    = 0;
-    uint64_t                            buffer_id     = 0;
-    uint64_t                            task_group_id = 0;
-    rocprofiler_buffer_tracing_cb_t     callback      = nullptr;
-    void*                               callback_data = nullptr;
-    rocprofiler_buffer_policy_t         policy        = ROCPROFILER_BUFFER_POLICY_NONE;
+    mutable std::array<buffer_t, 2> buffers       = {};
+    mutable std::atomic_flag        syncer        = ATOMIC_FLAG_INIT;
+    mutable std::atomic<uint32_t>   buffer_idx    = {};
+    mutable std::atomic<uint64_t>   drop_count    = {};
+    uint64_t                        watermark     = 0;
+    uint64_t                        context_id    = 0;
+    uint64_t                        buffer_id     = 0;
+    uint64_t                        task_group_id = 0;
+    rocprofiler_buffer_tracing_cb_t callback      = nullptr;
+    void*                           callback_data = nullptr;
+    rocprofiler_buffer_policy_t     policy        = ROCPROFILER_BUFFER_POLICY_NONE;
 
     template <typename Tp>
     void emplace(uint32_t, uint32_t, Tp&);
+
+    buffer_t& get_internal_buffer();
+    buffer_t& get_internal_buffer(size_t);
 };
 
 using unique_buffer_vec_t = common::container::stable_vector<std::unique_ptr<instance>, 4>;
@@ -67,16 +69,44 @@ allocate_buffer();
 unique_buffer_vec_t&
 get_buffers();
 
+instance*
+get_buffer(rocprofiler_buffer_id_t buffer_id);
+
+instance*
+get_buffer(uint64_t buffer_idx);
+
 rocprofiler_status_t
 flush(rocprofiler_buffer_id_t buffer_id, bool wait);
 
+rocprofiler_status_t
+flush(uint64_t buffer_idx, bool wait);
+}  // namespace buffer
+}  // namespace rocprofiler
+
+inline rocprofiler::buffer::instance::buffer_t&
+rocprofiler::buffer::instance::get_internal_buffer()
+{
+    auto idx = buffer_idx.load() % buffers.size();
+    return buffers.at(idx);
+}
+
+inline rocprofiler::buffer::instance::buffer_t&
+rocprofiler::buffer::instance::get_internal_buffer(size_t idx)
+{
+    return buffers.at(idx % buffers.size());
+}
+
+inline rocprofiler::buffer::instance*
+rocprofiler::buffer::get_buffer(uint64_t buffer_idx)
+{
+    return get_buffer(rocprofiler_buffer_id_t{buffer_idx});
+}
+
 inline rocprofiler_status_t
-flush(uint64_t buffer_idx, bool wait)
+rocprofiler::buffer::flush(uint64_t buffer_idx, bool wait)
 {
     return flush(rocprofiler_buffer_id_t{buffer_idx}, wait);
 }
-}  // namespace buffer
-}  // namespace rocprofiler
 
 template <typename Tp>
 inline void
@@ -88,10 +118,10 @@ rocprofiler::buffer::instance::emplace(uint32_t category, uint32_t kind, Tp& val
     auto idx = get_idx();
     if(!buffers.at(idx).emplace(category, kind, value))
     {
-        if(buffers.at(idx).size() < sizeof(value))
+        if(buffers.at(idx).capacity() < sizeof(value))
         {
             auto msg = std::stringstream{};
-            msg << "buffer " << buffer_id << " to small (size=" << buffers.at(idx).size()
+            msg << "buffer " << buffer_id << " to small (size=" << buffers.at(idx).capacity()
                 << ") to hold an object of type " << common::cxx_demangle(typeid(value).name())
                 << " with size " << sizeof(value);
             throw std::runtime_error(msg.str());

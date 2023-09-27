@@ -26,6 +26,8 @@
 #include <unistd.h>
 #include <chrono>
 #include <cstdint>
+#include <string>
+#include <vector>
 
 namespace rocprofiler
 {
@@ -45,6 +47,9 @@ timestamp_ns()
     // TODO(jrmadsen): this should be updated to the HSA method
     return std::chrono::steady_clock::now().time_since_epoch().count();
 }
+
+std::vector<std::string>
+read_command_line(pid_t _pid);
 
 template <class Container, typename Key = typename Container::key_type>
 const auto*

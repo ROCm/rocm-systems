@@ -62,23 +62,9 @@ initialize();
 void
 finalize();
 
-// invoke all rocprofiler_configure symbols
-bool
-invoke_client_configures();
-
-// invoke initialize functions returned from rocprofiler_configure
-bool
-invoke_client_initializers();
-
-// invoke finalize functions returned from rocprofiler_configure
-bool
-invoke_client_finalizers();
-
-// explicitly invoke the initialize function of a specific client
-bool invoke_client_initializer(rocprofiler_client_id_t);
-
-// explicitly invoke the finalize function of a specific client
-void invoke_client_finalizer(rocprofiler_client_id_t);
+// get the randomly generated client offset number
+uint32_t
+get_client_offset();
 
 int
 get_init_status();

@@ -41,18 +41,12 @@ jobs:
       max-parallel: 4
       matrix:
         include:
-            - os: 'ubuntu-22.04'
-              runner: 'renderD131'
-              device: '/renderD131'
-              build-type: 'RelWithDebInfo'
-              ci-flags: ''
-              name-tag: ''
-            - os: 'ubuntu-22.04'
-              runner: 'renderD131'
-              device: '/renderD131'
-              build-type: 'Release'
-              ci-flags: '--coverage'
-              name-tag: '-codecov'
+          - os: 'ubuntu-22.04'
+            runner: 'renderD131'
+            device: '/renderD131'
+            build-type: 'RelWithDebInfo'
+            ci-flags: '--linter clang-tidy'
+            name-tag: ''
 
     runs-on: ${{ matrix.runner }}
 
@@ -69,6 +63,19 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+      with:
+        submodules: true
+
+    - name: Install requirements
+      shell: bash
+      run: |
+        git config --global --add safe.directory '*'
+        apt-get update
+        apt-get install -y cmake clang-tidy-11 g++-11 g++-12 libgtest-dev python3-pip
+        update-alternatives --install /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-11 10
+        update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 10 --slave /usr/bin/g++ g++ /usr/bin/g++-11
+        update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 20 --slave /usr/bin/g++ g++ /usr/bin/g++-12
+        python3 -m pip install -r requirements.txt
 
     - name: List Files
       shell: bash
@@ -76,13 +83,6 @@ jobs:
         which-realpath() { echo "$1 resolves to $(realpath $(which $1))"; }
         for i in python python3 git cmake ctest; do which-realpath $i; done
         ls -la
-
-    - name: Install requirements
-      shell: bash
-      run: |
-        pip3 install -r requirements.txt
-        apt install -y cmake libgtest-dev
-        git config --global --add safe.directory '*'
 
     - name: Configure, Build, and Test
       timeout-minutes: 30
@@ -126,11 +126,108 @@ jobs:
           ${{github.workspace}}/build/*.rpm
           ${{github.workspace}}/build/*.tgz
 
+  code-coverage:
+    strategy:
+      fail-fast: true
+      max-parallel: 4
+      matrix:
+        include:
+            - os: 'ubuntu-22.04'
+              runner: 'renderD131'
+              device: '/renderD131'
+              build-type: 'Release'
+
+    runs-on: ${{ matrix.runner }}
+
+    # define this for containers
+    env:
+      GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
+
+    container:
+      image: compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:${{ needs.get_latest_mainline_build_number.outputs.LATEST_BUILD_NUMBER }}-${{ matrix.os }}-stg1
+      options: --memory=128g --cpus=32 --ipc=host --device=/dev/kfd --device=/dev/dri${{ matrix.device }} --group-add video --cap-add=SYS_PTRACE --cap-add CAP_SYS_PTRACE --cap-add CAP_SYS_ADMIN --security-opt seccomp=unconfined
+
+    if: ${{ always() }}
+    needs: get_latest_mainline_build_number
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: true
+
+    - name: List Files
+      shell: bash
+      run: |
+        which-realpath() { echo "$1 resolves to $(realpath $(which $1))"; }
+        for i in python python3 git cmake ctest; do which-realpath $i; done
+        ls -la
+
+    - name: Install requirements
+      shell: bash
+      run: |
+        pip3 install -r requirements.txt
+        apt install -y cmake libgtest-dev
+        git config --global --add safe.directory '*'
+
+    - name: Configure, Build, and Test (Total Code Coverage)
+      timeout-minutes: 30
+      shell: bash
+      run:
+        python3 ./source/scripts/run-ci.py -B build
+          --name ${{ github.repository }}-${{ github.ref_name }}-mi200-${{ matrix.os }}-codecov
+          --build-jobs 8
+          --site mi200
+          --gpu-targets ${{ env.GPU_LIST }}
+          --coverage
+          --
+          -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
+          -DPython3_EXECUTABLE=$(which python3)
+
+    - name: Configure, Build, and Test (Unit Tests Code Coverage)
+      timeout-minutes: 30
+      shell: bash
+      run:
+        find build -type f | egrep '\.gcda$' | xargs rm &&
+        python3 ./source/scripts/run-ci.py -B build
+          --name ${{ github.repository }}-${{ github.ref_name }}-mi200-${{ matrix.os }}-codecov-unittests
+          --build-jobs 8
+          --site mi200
+          --gpu-targets ${{ env.GPU_LIST }}
+          --coverage
+          --
+          -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
+          -DPython3_EXECUTABLE=$(which python3)
+          --
+          -L unittests
+
+    - name: Configure, Build, and Test (Samples Code Coverage)
+      timeout-minutes: 30
+      shell: bash
+      run:
+        find build -type f | egrep '\.gcda$' | xargs rm &&
+        python3 ./source/scripts/run-ci.py -B build
+          --name ${{ github.repository }}-${{ github.ref_name }}-mi200-${{ matrix.os }}-codecov-samples
+          --build-jobs 8
+          --site mi200
+          --gpu-targets ${{ env.GPU_LIST }}
+          --coverage
+          --
+          -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
+          -DPython3_EXECUTABLE=$(which python3)
+          --
+          -L samples
+
   sanitizers:
     strategy:
       fail-fast: false
       matrix:
         include:
+          - os: 'ubuntu-22.04'
+            runner: 'renderD131'
+            device: '/renderD131'
+            build-type: 'RelWithDebInfo'
+            ci-flags: ''
+            sanitizer: 'AddressSanitizer'
           - os: 'ubuntu-22.04'
             runner: 'renderD131'
             device: '/renderD131'
@@ -143,12 +240,6 @@ jobs:
             build-type: 'RelWithDebInfo'
             ci-flags: ''
             sanitizer: 'LeakSanitizer'
-          - os: 'ubuntu-22.04'
-            runner: 'renderD131'
-            device: '/renderD131'
-            build-type: 'RelWithDebInfo'
-            ci-flags: ''
-            sanitizer: 'AddressSanitizer'
 
     runs-on: ${{ matrix.runner }}
 

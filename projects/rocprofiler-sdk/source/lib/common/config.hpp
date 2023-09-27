@@ -42,6 +42,7 @@ enum class config_context
 
 int
 get_mpi_size();
+
 int
 get_mpi_rank();
 
@@ -86,10 +87,13 @@ struct output_key
 
 std::vector<output_key>
 output_keys(std::string _tag = {});
+
 std::string
 compose_filename(const config&);
+
 std::string
 format(std::string _fpath, const std::string& _tag = {});
+
 std::string
 format_name(std::string_view _name, const config& = get_config<>());
 

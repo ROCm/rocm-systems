@@ -28,9 +28,11 @@
 #include "lib/rocprofiler/buffer.hpp"
 #include "lib/rocprofiler/context/context.hpp"
 #include "lib/rocprofiler/internal_threading.hpp"
+#include "lib/rocprofiler/registration.hpp"
 
 #include <cstdint>
 #include <mutex>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -139,17 +141,21 @@ execute_creation_notifiers(rocprofiler_internal_thread_library_t libs,
     (execute(get_creation_notifier<Idx>()), ...);
 }
 
-auto&
+auto*&
 get_thread_pools()
 {
-    static auto _v = thread_pool_vec_t{};
+    // use raw pointers here because of the access to this variable via atexit function call.
+    // if not a raw pointer, this may be destroyed automatically when the atexit handler is invoked
+    static auto* _v = new thread_pool_vec_t{};
     return _v;
 }
 
-auto&
+auto*&
 get_task_groups()
 {
-    static auto _v = task_group_vec_t{};
+    // use raw pointers here because of the access to this variable via atexit function call.
+    // if not a raw pointer, this may be destroyed automatically when the atexit handler is invoked
+    static auto* _v = new task_group_vec_t{};
     return _v;
 }
 }  // namespace
@@ -159,28 +165,34 @@ void
 initialize()
 {
     static auto _once = std::once_flag{};
-    std::call_once(_once, create_callback_thread);
+    std::call_once(_once, []() {
+        atexit(&registration::finalize);
+        create_callback_thread();
+    });
 }
 
 // sync all the task groups and destroy the thread pools
 void
 finalize()
 {
-    for(auto& itr : get_task_groups())
+    if(get_task_groups())
     {
-        if(itr) itr->join();
+        for(auto& itr : *get_task_groups())
+            if(itr) itr->join();
+        get_task_groups()->clear();
     }
 
-    for(auto& itr : get_thread_pools())
+    if(get_thread_pools())
     {
-        if(itr) itr->destroy_threadpool();
+        for(auto& itr : *get_thread_pools())
+            if(itr) itr->destroy_threadpool();
+        get_thread_pools()->clear();
     }
 
-    for(auto& itr : get_task_groups())
-        itr.reset();
-
-    for(auto& itr : get_thread_pools())
-        itr.reset();
+    delete get_task_groups();
+    delete get_thread_pools();
+    get_task_groups()  = nullptr;
+    get_thread_pools() = nullptr;
 }
 
 void
@@ -198,20 +210,20 @@ notify_post_internal_thread_create(rocprofiler_internal_thread_library_t libs)
 rocprofiler_callback_thread_t
 create_callback_thread()
 {
+    if(!get_thread_pools()) throw std::runtime_error{"thread pools already deleted"};
+    if(!get_task_groups()) throw std::runtime_error{"task groups already deleted"};
+
     // notify that rocprofiler library is about to create an inernal thread
     notify_pre_internal_thread_create(ROCPROFILER_LIBRARY);
 
     // this will be index after emplace_back
-    auto idx = get_thread_pools().size();
+    auto idx = get_thread_pools()->size();
 
-    auto& thr_pool = get_thread_pools().emplace_back(
-        new thread_pool_t{thread_pool_config_t{.pool_size = 1}}, [](thread_pool_t* v) {
-            v->destroy_threadpool();
-            delete v;
-        });
+    auto& thr_pool =
+        get_thread_pools()->emplace_back(new thread_pool_t{thread_pool_config_t{.pool_size = 1}});
 
     // construct the task group to use the newly created thread pool
-    get_task_groups().emplace_back(new task_group_t{thr_pool.get()});
+    get_task_groups()->emplace_back(new task_group_t{thr_pool.get()});
 
     // notify that rocprofiler library finished creating an internal thread
     notify_post_internal_thread_create(ROCPROFILER_LIBRARY);
@@ -223,7 +235,7 @@ create_callback_thread()
 task_group_t*
 get_task_group(rocprofiler_callback_thread_t cb_tid)
 {
-    return get_task_groups().at(cb_tid.handle).get();
+    return (get_task_groups()) ? get_task_groups()->at(cb_tid.handle).get() : nullptr;
 }
 }  // namespace internal_threading
 }  // namespace rocprofiler
@@ -263,7 +275,8 @@ rocprofiler_status_t ROCPROFILER_API
 rocprofiler_assign_callback_thread(rocprofiler_buffer_id_t       buffer_id,
                                    rocprofiler_callback_thread_t cb_thread_id)
 {
-    if(cb_thread_id.handle >= rocprofiler::internal_threading::get_task_groups().size())
+    if(!rocprofiler::internal_threading::get_task_groups() ||
+       cb_thread_id.handle >= rocprofiler::internal_threading::get_task_groups()->size())
         return ROCPROFILER_STATUS_ERROR_THREAD_NOT_FOUND;
 
     for(auto& bitr : rocprofiler::buffer::get_buffers())

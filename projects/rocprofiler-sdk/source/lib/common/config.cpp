@@ -22,6 +22,7 @@
 #include "lib/common/config.hpp"
 #include "lib/common/demangle.hpp"
 #include "lib/common/environment.hpp"
+#include "lib/common/utility.hpp"
 
 #include <fmt/core.h>
 
@@ -43,39 +44,6 @@ namespace common
 namespace
 {
 std::time_t* launch_time = new std::time_t{std::time(nullptr)};
-
-std::vector<std::string>
-read_command_line(pid_t _pid)
-{
-    auto _cmdline = std::vector<std::string>{};
-    auto fcmdline = std::stringstream{};
-    fcmdline << "/proc/" << _pid << "/cmdline";
-    auto ifs = std::ifstream{fcmdline.str().c_str()};
-    if(ifs)
-    {
-        char        cstr;
-        std::string sarg;
-        while(!ifs.eof())
-        {
-            ifs >> cstr;
-            if(!ifs.eof())
-            {
-                if(cstr != '\0')
-                {
-                    sarg += cstr;
-                }
-                else
-                {
-                    _cmdline.push_back(sarg);
-                    sarg = "";
-                }
-            }
-        }
-        ifs.close();
-    }
-
-    return _cmdline;
-}
 
 std::string
 get_local_datetime(const char* dt_format, std::time_t* dt_curr)
