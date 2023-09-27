@@ -69,12 +69,12 @@ namespace omnitrace
 {
 namespace
 {
-template <typename Tp, typename CategoryT = category::roctracer>
+template <typename Tp>
 auto&
-roctracer_type_mutex(uint64_t _n = threading::get_id())
+roctracer_type_mutex()
 {
-    return tim::type_mutex<Tp, CategoryT, max_supported_threads, locking::atomic_mutex>(
-        _n % max_supported_threads);
+    return tim::type_mutex<Tp, category::roctracer, max_supported_threads,
+                           locking::atomic_mutex>();
 }
 
 std::string
@@ -173,7 +173,9 @@ using key_data_mutex_t     = std::decay_t<decltype(get_roctracer_key_data())>;
 auto&
 get_hip_activity_mutex(int64_t _tid = threading::get_id())
 {
-    return roctracer_type_mutex<hip_activity_mutex_t, category::roctracer>(_tid);
+    return tim::type_mutex<hip_activity_mutex_t, category::roctracer,
+                           max_supported_threads, locking::atomic_mutex>(
+        _tid % max_supported_threads);
 }
 }  // namespace
 
