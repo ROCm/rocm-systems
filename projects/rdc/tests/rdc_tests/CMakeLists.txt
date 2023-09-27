@@ -49,20 +49,13 @@ set(SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 
 set(RDCTST "rdctst")
 
-# Try to find googletest
-find_package(GTest 1.11.0)
-
-# GTest_FOUND is set to TRUE if ANY version is found
-# GTest_VERSION is set if 1.11.0 or newer version is found
-if(NOT GTest_FOUND STREQUAL "TRUE" OR NOT DEFINED GTest_VERSION)
-    # Google Test wasn't found. Download and compile ourselves
-    include(FetchContent)
-    FetchContent_Declare(
-        googletest
-        GIT_REPOSITORY https://github.com/google/googletest.git
-        GIT_TAG release-1.11.0)
-    FetchContent_MakeAvailable(googletest)
-endif()
+# Download and compile googletest
+include(FetchContent)
+FetchContent_Declare(
+    googletest
+    GIT_REPOSITORY https://github.com/google/googletest.git
+    GIT_TAG v1.14.0)
+FetchContent_MakeAvailable(googletest)
 
 # Source files
 aux_source_directory(${SRC_DIR} rdctstSources)
@@ -83,15 +76,15 @@ target_include_directories(
     PUBLIC ${SRC_DIR}/..)
 
 target_link_libraries(${RDCTST}
-    PUBLIC GTest::gtest_main
     PUBLIC rdc_bootstrap
     PUBLIC rdc
     PUBLIC rdc_ras
+    PUBLIC GTest::gtest_main
     PUBLIC c
     PUBLIC stdc++
     PUBLIC pthread)
 
-install(TARGETS ${RDCTST}
+install(TARGETS ${RDCTST} gtest gtest_main
     DESTINATION ${RDC_SHARE_INSTALL_PREFIX}/rdctst_tests
     COMPONENT ${TESTS_COMPONENT})
 

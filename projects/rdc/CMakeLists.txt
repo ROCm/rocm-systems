@@ -56,6 +56,9 @@ option(BUILD_ROCPTEST "Build targets for librdc_rocp.so" OFF)
 # When cmake -DBUILD_TESTS=off, it will not build RDC tests.
 option(BUILD_TESTS "Build test suite" OFF)
 
+# Enable shared libraries for gtest
+option(BUILD_SHARED_LIBS "Build shared library (.so) or not." ON)
+
 # File reorganization enable/disable
 option(FILE_REORG_BACKWARD_COMPATIBILITY "Enable File Reorg with backward compatibility" OFF)
 
@@ -159,7 +162,7 @@ set(${RDC}_VERSION_PATCH "0")
 set(${RDC}_VERSION_BUILD "0")
 set(CPACK_PACKAGE_VERSION ${VERSION_STRING})
 
-set(CMAKE_CXX_STANDARD 11 CACHE STRING "The C++ standard to use")
+set(CMAKE_CXX_STANDARD 17 CACHE STRING "The C++ standard to use")
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
