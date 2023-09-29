@@ -929,12 +929,10 @@ struct metrics_table_header_t {
  * @brief The GPU metrics version 3
  */
 #define RSMI_GPU_METRICS_API_CONTENT_VER_3 3
-
 /**
  * @brief This should match NUM_HBM_INSTANCES
  */
 #define RSMI_NUM_HBM_INSTANCES 4
-
 /**
  * @brief Unit conversion factor for HBM temperatures
  */

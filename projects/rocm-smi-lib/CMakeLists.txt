@@ -73,6 +73,7 @@ endif()
 ## Compiler flags
 set(CMAKE_CXX_FLAGS
  "${CMAKE_CXX_FLAGS} -Wall -Wextra -fno-rtti -m64 -msse -msse2 ")
+
 # Security options
 set(CMAKE_CXX_FLAGS
  "${CMAKE_CXX_FLAGS} -Wconversion -Wcast-align ")
@@ -148,6 +149,7 @@ set(CMN_INC_LIST ${CMN_INC_LIST} "${COMMON_INC_DIR}/rocm_smi_exception.h")
 set(CMN_INC_LIST ${CMN_INC_LIST} "${COMMON_INC_DIR}/rocm_smi_counters.h")
 set(CMN_INC_LIST ${CMN_INC_LIST} "${COMMON_INC_DIR}/rocm_smi_kfd.h")
 set(CMN_INC_LIST ${CMN_INC_LIST} "${COMMON_INC_DIR}/rocm_smi_io_link.h")
+set(CMN_INC_LIST ${CMN_INC_LIST} "${COMMON_INC_DIR}/rocm_smi_gpu_metrics.h")
 set(CMN_INC_LIST ${CMN_INC_LIST} "${COMMON_INC_DIR}/rocm_smi.h")
 set(CMN_INC_LIST ${CMN_INC_LIST} "${COMMON_INC_DIR}/rocm_smi_logger.h")
 set(CMN_INC_LIST ${CMN_INC_LIST} "${COMMON_INC_DIR}/rocm_smi_properties.h")
