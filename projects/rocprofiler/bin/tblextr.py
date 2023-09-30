@@ -275,7 +275,7 @@ def dump_csv(file_name):
             dispatch_number = entry["Index"]
             if ind != dispatch_number:
                 fatal("Dispatch #" + ind + " index mismatch (" + dispatch_number + ")\n")
-            val_list = [entry[var] for var in var_list]
+            val_list = [entry[var] if (var in entry) else 'None' for var in var_list]
             fd.write(",".join(val_list) + "\n")
 
     print("File '" + file_name + "' is generating")
