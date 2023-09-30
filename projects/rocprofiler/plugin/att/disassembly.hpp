@@ -38,22 +38,30 @@ class CodeObjectBinary {
   std::vector<char> buffer;
 };
 
+struct SymbolInfo
+{
+  std::string name;
+  uint64_t faddr;
+  uint64_t mem_size;
+};
+
 class DisassemblyInstance {
  public:
   DisassemblyInstance(class code_object_decoder_t& decoder);
   ~DisassemblyInstance();
 
-  uint64_t ReadInstruction(uint64_t addr, const char* cpp_line);
-  std::map<uint64_t, std::pair<std::string, uint64_t>>& GetKernelMap();
+  uint64_t ReadInstruction(uint64_t faddr, uint64_t vaddr, const char* cpp_line);
+  std::map<uint64_t, SymbolInfo>& GetKernelMap();
 
   static uint64_t memory_callback(uint64_t from, char* to, uint64_t size, void* user_data);
   static void inst_callback(const char* instruction, void* user_data);
   static amd_comgr_status_t symbol_callback(amd_comgr_symbol_t symbol, void* user_data);
+  static std::optional<uint64_t> va2fo(void *mem, uint64_t va);
 
-  int64_t buffer;
+  void* buffer;
   int64_t size;
   std::vector<instruction_instance_t>& instructions;
   amd_comgr_disassembly_info_t info;
   amd_comgr_data_t data;
-  std::map<uint64_t, std::pair<std::string, uint64_t>> symbol_map;
+  std::map<uint64_t, SymbolInfo> symbol_map;
 };

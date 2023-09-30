@@ -99,12 +99,11 @@ code_object_decoder_t::code_object_decoder_t(const char* codeobj_data, uint64_t 
       for (size_t i = 0; i < line_count; ++i) {
         Dwarf_Addr addr;
         int line_number;
+        Dwarf_Line* line = dwarf_onesrcline(lines, i);
+        if (!line) continue;
 
-        if (Dwarf_Line* line = dwarf_onesrcline(lines, i))
-          if (!dwarf_lineaddr(line, &addr) && !dwarf_lineno(line, &line_number) && line_number) {
-            m_line_number_map.emplace(
-                addr, std::make_pair(dwarf_linesrc(line, nullptr, nullptr), line_number));
-          }
+        if (!dwarf_lineaddr(line, &addr) && !dwarf_lineno(line, &line_number) && line_number)
+          m_line_number_map[addr] = {dwarf_linesrc(line, nullptr, nullptr), line_number};
       }
       cu_offset = next_offset;
     }
@@ -118,38 +117,43 @@ code_object_decoder_t::~code_object_decoder_t() {
   if (m_fd) ::close(m_fd);
 }
 
-std::optional<code_object_decoder_t::symbol_info_t> code_object_decoder_t::find_symbol(
-    uint64_t address) {
+std::optional<SymbolInfo> code_object_decoder_t::find_symbol(uint64_t vaddr) {
   /* Load the symbol table.  */
-  if (auto it = m_symbol_map.upper_bound(address); it != m_symbol_map.begin()) {
-    if (auto&& [symbol_value, symbol] = *std::prev(it); address < (symbol_value + symbol.second)) {
-      std::string symbol_name = symbol.first;
+  auto it = m_symbol_map.upper_bound(vaddr);
+  if (it == m_symbol_map.begin())
+    return std::nullopt;
 
-      if (int status; auto* demangled_name =
-                          abi::__cxa_demangle(symbol_name.c_str(), nullptr, nullptr, &status)) {
-        symbol_name = demangled_name;
-        free(demangled_name);
-      }
-      return symbol_info_t{std::move(symbol_name), symbol_value, symbol.second};
-    }
+  auto&& [symbol_vaddr, symbol] = *std::prev(it);
+  if (vaddr >= symbol_vaddr + symbol.mem_size)
+    return std::nullopt;
+
+  std::string symbol_name = symbol.name;
+
+  int status = 0;
+  auto* demangled_name = abi::__cxa_demangle(symbol_name.c_str(), nullptr, nullptr, &status);
+  if (status == 0 && demangled_name)
+  {
+    symbol_name = demangled_name;
+    free(demangled_name);
   }
-  return {};
+  return SymbolInfo{symbol_name, symbol.faddr, symbol.mem_size};
 }
 
-void code_object_decoder_t::disassemble_kernel(uint64_t addr) {
-  auto symbol = find_symbol(addr);
+void code_object_decoder_t::disassemble_kernel(uint64_t faddr, uint64_t vaddr) {
+  auto symbol = find_symbol(vaddr);
 
-  if (!symbol) {
-    std::cerr << "No symbol found at address 0x" << std::hex << addr << std::endl;
+  if (!symbol)
+  {
+    std::cerr << "No symbol found at address 0x" << std::hex << faddr << std::endl;
     return;
   }
 
-  std::cout << "Dumping ISA for " << symbol->m_name << std::endl;
+  std::cout << "Dumping ISA for " << symbol->name << std::endl;
 
-  uint64_t end_addr = addr + symbol->m_size;
-  while (addr < end_addr) {
+  uint64_t end_addr = faddr + symbol->mem_size;
+  while (faddr < end_addr) {
     char* cpp_line = nullptr;
-    auto it = m_line_number_map.find(addr);
+    auto it = m_line_number_map.find(vaddr);
     if (it != m_line_number_map.end()) {
       const std::string& file_name = it->second.first;
       size_t line_number = it->second.second;
@@ -159,8 +163,9 @@ void code_object_decoder_t::disassemble_kernel(uint64_t addr) {
       std::memcpy(cpp_line, cpp.data(), cpp.size() * sizeof(char));
     }
 
-    size_t size = disassembly->ReadInstruction(addr, cpp_line);
-    addr += size;
+    size_t size = disassembly->ReadInstruction(faddr, vaddr, cpp_line);
+    faddr += size;
+    vaddr += size;
   }
 }
 
@@ -168,5 +173,5 @@ void code_object_decoder_t::disassemble_kernels() {
   disassembly = std::make_unique<DisassemblyInstance>(*this);
   m_symbol_map = disassembly->GetKernelMap();
 
-  for (auto& [k, v] : m_symbol_map) disassemble_kernel(k);
+  for (auto& [vaddr, v] : m_symbol_map) disassemble_kernel(v.faddr, vaddr);
 }

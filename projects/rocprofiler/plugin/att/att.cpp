@@ -176,10 +176,8 @@ class att_plugin_t {
       for (auto& instance : decoder->instructions) {
         uint64_t addr = instance.address + symbol.base_address;
 
-        if (kernel_begin_addr == addr)
-          isafile << "; Begin <Kernel> " << kernel_name_mangled << '\n';
-        else if (decoder->m_symbol_map.find(instance.address) != decoder->m_symbol_map.end())
-          isafile << "; Begin " << decoder->m_symbol_map[instance.address].first << '\n';
+        if (decoder->m_symbol_map.find(instance.address) != decoder->m_symbol_map.end())
+          isafile << "; Begin " << decoder->m_symbol_map[instance.address].name << '\n';
         if (instance.cpp_reference) isafile << "; " << instance.cpp_reference << '\n';
         isafile << instance.instruction << " // " << std::hex << addr << '\n';
       }

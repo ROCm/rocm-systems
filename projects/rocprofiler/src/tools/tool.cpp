@@ -289,6 +289,10 @@ att_parsed_input_t GetATTParams() {
   ATT_PARAM_NAMES["BUFFER_SIZE"] = ROCPROFILER_ATT_BUFFER_SIZE;
   ATT_PARAM_NAMES["ISA_CAPTURE_MODE"] = ROCPROFILER_ATT_CAPTURE_MODE;
 
+  ATT_PARAM_NAMES["LEGACY_ATT_MASK"] = ROCPROFILER_ATT_MASK;
+  ATT_PARAM_NAMES["LEGACY_TOKEN_MASK"] = ROCPROFILER_ATT_TOKEN_MASK;
+  ATT_PARAM_NAMES["LEGACY_TOKEN_MASK2"] = ROCPROFILER_ATT_TOKEN_MASK2;
+
   // Default values used for token generation.
   std::unordered_map<std::string, uint32_t> default_params = {
     {"SE_MASK", 0x111111}, // One every 4 SEs, by default

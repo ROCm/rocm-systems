@@ -196,7 +196,7 @@ def try_match_swapped(insts, code, i, line):
 def stitch(insts, raw_code, jumps, gfxv, bIsAuto):
     bGFX9 = gfxv == 'vega'
 
-    result, i, line, loopCount, N = [], 0, 0, defaultdict(int), len(insts)
+    result, i, line, loopCount = [], 0, 0, defaultdict(int)
 
     SMEM_INST = []  # scalar memory
     VLMEM_INST = []  # vector memory load
@@ -246,15 +246,22 @@ def stitch(insts, raw_code, jumps, gfxv, bIsAuto):
         try:
             watchlist = PCTranslator(code, insts)
             line = watchlist.addrmap[insts[0][2]]
-            result.append((insts[0][0], PCINFO, 0, 0, 0))
-            i = 1
         except:
             return None
     else:
         watchlist = RegisterWatchList(labels=labels)
 
+    if len(insts) and insts[0][1] == PCINFO:
+        insts = insts[1:]
+    N = len(insts)
+
     pcsequence = []
     while i < N:
+        if insts[i][1] == PCINFO:
+            i += 1
+            N -= 1
+            continue
+
         loops += 1
         if line >= len(code) or loops > MAX_STITCHED_TOKENS \
             or num_failed_stitches > MAX_FAILED_STITCHES:
@@ -288,7 +295,7 @@ def stitch(insts, raw_code, jumps, gfxv, bIsAuto):
             if bIsAuto:
                 matched = next >= 0
                 i += 1
-                result.append((insts[i][0], PCINFO, 0, 0, 0))
+                N -= 1
                 pcsequence.append(insts[i][2])
         elif as_line[1] == SWAPPC:
             next = watchlist.swappc(as_line[0], line, i)
@@ -296,7 +303,7 @@ def stitch(insts, raw_code, jumps, gfxv, bIsAuto):
             if bIsAuto:
                 matched = next >= 0
                 i += 1
-                result.append((insts[i][0], PCINFO, 0, 0, 0))
+                N -= 1
                 pcsequence.append(insts[i][2])
         elif inst[1] == as_line[1]:
             if line in jumps:
@@ -446,5 +453,4 @@ def stitch(insts, raw_code, jumps, gfxv, bIsAuto):
                 break
             line += 1
 
-    result = [r for r in result if r[1] != PCINFO]
-    return result, loopCount, mem_unroll, flight_count, maxline, len(result) if i == N else N
+    return result, loopCount, mem_unroll, flight_count, maxline, len(result)

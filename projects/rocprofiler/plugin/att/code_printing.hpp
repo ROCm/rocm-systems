@@ -29,25 +29,19 @@
 #include "disassembly.hpp"
 
 class code_object_decoder_t {
-  struct symbol_info_t {
-    const std::string m_name;
-    uint64_t m_value;
-    uint64_t m_size;
-  };
-
  public:
   // void load_symbol_map();
-  std::optional<symbol_info_t> find_symbol(uint64_t address);
+  std::optional<SymbolInfo> find_symbol(uint64_t address);
 
   code_object_decoder_t(const char* codeobj_data, uint64_t codeobj_size);
   ~code_object_decoder_t();
 
-  void disassemble_kernel(uint64_t addr);
+  void disassemble_kernel(uint64_t faddr, uint64_t vaddr);
   void disassemble_kernels();
   int m_fd;
 
   std::map<uint64_t, std::pair<std::string, size_t>> m_line_number_map;
-  std::map<uint64_t, std::pair<std::string, uint64_t>> m_symbol_map;
+  std::map<uint64_t, SymbolInfo> m_symbol_map;
 
   std::string m_uri;
   std::vector<char> buffer;
