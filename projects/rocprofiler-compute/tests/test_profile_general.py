@@ -4,22 +4,75 @@ from unittest.mock import patch
 import pytest
 from importlib.machinery import SourceFileLoader
 import pandas as pd
+import subprocess
+import re
 
 omniperf = SourceFileLoader("omniperf", "src/omniperf").load_module()
 workload_1 = os.path.realpath("workload")
-app = ["./sample/vcopy", "1048576", "256"]
+kernel_name_1 = "vecCopy(double*, double*, double*, int, int) [clone .kd]"
+app_1 = ["./sample/vcopy", "1048576", "256"]
 ALL_CSVS = [
-    "pmc_dispatch_info.csv",
-    "pmc_kernel_top.csv",
-    "roofline.csv",
     "SQ_IFETCH_LEVEL.csv",
     "SQ_INST_LEVEL_LDS.csv",
     "SQ_INST_LEVEL_SMEM.csv",
     "SQ_INST_LEVEL_VMEM.csv",
     "SQ_LEVEL_WAVES.csv",
+    "pmc_perf.csv",
+    "pmc_perf_0.csv",
+    "pmc_perf_1.csv",
+    "pmc_perf_10.csv",
+    "pmc_perf_11.csv",
+    "pmc_perf_12.csv",
+    "pmc_perf_13.csv",
+    "pmc_perf_14.csv",
+    "pmc_perf_15.csv",
+    "pmc_perf_16.csv",
+    "pmc_perf_2.csv",
+    "pmc_perf_3.csv",
+    "pmc_perf_4.csv",
+    "pmc_perf_5.csv",
+    "pmc_perf_6.csv",
+    "pmc_perf_7.csv",
+    "pmc_perf_8.csv",
+    "pmc_perf_9.csv",
     "sysinfo.csv",
     "timestamps.csv",
 ]
+
+
+def run(cmd):
+    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if cmd[0] == "rocm-smi" and p.returncode == 8:
+        print("ERROR: No GPU detected. Unable to load rocm-smi")
+        assert 0
+    return p.stdout.decode("ascii")
+
+
+def gpu_soc():
+    rocminfo = str(
+        subprocess.run(
+            ["rocminfo"], stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        ).stdout.decode("ascii")
+    )
+    rocminfo = rocminfo.split("\n")
+    soc_regex = re.compile(r"^\s*Name\s*:\s+ ([a-zA-Z0-9]+)\s*$", re.MULTILINE)
+    gpu_id = list(filter(soc_regex.match, rocminfo))[0].split()[1]
+
+    print("gpu_id", gpu_id)
+    if gpu_id == "gfx906":
+        return "mi50"
+    elif gpu_id == "gfx908":
+        return "mi100"
+    elif gpu_id == "gfx90a":
+        return "mi200"
+    elif gpu_id == "gfx900":
+        return "vega10"
+    else:
+        print("Invalid SoC")
+        assert 0
+
+
+soc = gpu_soc()
 
 
 def test_path():
@@ -30,27 +83,29 @@ def test_path():
                 "omniperf",
                 "profile",
                 "-n",
-                "app",
+                "app_1",
                 "-VVV",
                 "--path",
                 workload_1,
                 "--",
             ]
-            + app,
+            + app_1,
         ):
             omniperf.main()
     # assert successful run
     assert e.value.code == 0
-    files_in_workload = os.listdir(workload_1)
+    workload_1_dir = workload_1 + "/app_1/" + soc
+    files_in_workload = os.listdir(workload_1_dir)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(file)
+            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
+            print("length is: ", len(file_dict[file].index))
+            print(file_dict[file])
             assert len(file_dict[file].index)
-
-    assert file_dict.keys() == ALL_CSVS
+    assert sorted(list(file_dict.keys())) == ALL_CSVS
 
 
 def test_kernel():
@@ -61,30 +116,31 @@ def test_kernel():
                 "omniperf",
                 "profile",
                 "-n",
-                "app",
+                "app_1",
                 "-VVV",
                 "--path",
                 workload_1,
                 "--kernel",
+                kernel_name_1,
                 "kernel_name",
                 "--",
             ]
-            + app,
+            + app_1,
         ):
             omniperf.main()
 
     # assert successful run
     assert e.value.code == 0
-    files_in_workload = os.listdir(workload_1)
+    workload_1_dir = workload_1 + "/app_1/" + soc
+    files_in_workload = os.listdir(workload_1_dir)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(file)
+            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
             assert len(file_dict[file].index)
-
-    assert file_dict.keys() == ALL_CSVS
+    assert sorted(list(file_dict.keys())) == ALL_CSVS
 
 
 def test_kernel_summaries():
@@ -95,62 +151,30 @@ def test_kernel_summaries():
                 "omniperf",
                 "profile",
                 "-n",
-                "app",
+                "app_1",
                 "-VVV",
                 "--path",
                 workload_1,
                 "--kernel-summaries",
+                "vcopy",
                 "--",
             ]
-            + app,
+            + app_1,
         ):
             omniperf.main()
 
     # assert successful run
     assert e.value.code == 0
-    files_in_workload = os.listdir(workload_1)
+    workload_1_dir = workload_1 + "/app_1/" + soc
+    files_in_workload = os.listdir(workload_1_dir)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(file)
+            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
             assert len(file_dict[file].index)
-
-    assert file_dict.keys() == ALL_CSVS
-
-
-def test_kernel_summaries():
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            [
-                "omniperf",
-                "profile",
-                "-n",
-                "app",
-                "-VVV",
-                "--path",
-                workload_1,
-                "--kernel-summaries",
-                "--",
-            ]
-            + app,
-        ):
-            omniperf.main()
-
-    # assert successful run
-    assert e.value.code == 0
-    files_in_workload = os.listdir(workload_1)
-
-    # Check if csvs have data
-    file_dict = {}
-    for file in files_in_workload:
-        if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(file)
-            assert len(file_dict[file].index)
-
-    assert file_dict.keys() == ALL_CSVS
+    assert sorted(list(file_dict.keys())) == ALL_CSVS
 
 
 def test_ipblocks_SQ():
@@ -161,7 +185,7 @@ def test_ipblocks_SQ():
                 "omniperf",
                 "profile",
                 "-n",
-                "app",
+                "app_1",
                 "-VVV",
                 "--path",
                 workload_1,
@@ -169,22 +193,41 @@ def test_ipblocks_SQ():
                 "SQ",
                 "--",
             ]
-            + app,
+            + app_1,
         ):
             omniperf.main()
 
     # assert successful run
     assert e.value.code == 0
-    files_in_workload = os.listdir(workload_1)
+    workload_1_dir = workload_1 + "/app_1/" + soc
+    files_in_workload = os.listdir(workload_1_dir)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(file)
+            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
             assert len(file_dict[file].index)
-
-    assert file_dict.keys() == ALL_CSVS
+    print(sorted(list(file_dict.keys())))
+    assert sorted(list(file_dict.keys())) == [
+        "SQ_IFETCH_LEVEL.csv",
+        "SQ_INST_LEVEL_LDS.csv",
+        "SQ_INST_LEVEL_SMEM.csv",
+        "SQ_INST_LEVEL_VMEM.csv",
+        "SQ_LEVEL_WAVES.csv",
+        "pmc_perf.csv",
+        "pmc_perf_0.csv",
+        "pmc_perf_1.csv",
+        "pmc_perf_2.csv",
+        "pmc_perf_3.csv",
+        "pmc_perf_4.csv",
+        "pmc_perf_5.csv",
+        "pmc_perf_6.csv",
+        "pmc_perf_7.csv",
+        "pmc_perf_8.csv",
+        "sysinfo.csv",
+        "timestamps.csv",
+    ]
 
 
 def test_ipblocks_SQC():
@@ -195,7 +238,7 @@ def test_ipblocks_SQC():
                 "omniperf",
                 "profile",
                 "-n",
-                "app",
+                "app_1",
                 "-VVV",
                 "--path",
                 workload_1,
@@ -203,22 +246,31 @@ def test_ipblocks_SQC():
                 "SQC",
                 "--",
             ]
-            + app,
+            + app_1,
         ):
             omniperf.main()
 
     # assert successful run
     assert e.value.code == 0
-    files_in_workload = os.listdir(workload_1)
+    workload_1_dir = workload_1 + "/app_1/" + soc
+    files_in_workload = os.listdir(workload_1_dir)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(file)
+            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
             assert len(file_dict[file].index)
-
-    assert file_dict.keys() == ALL_CSVS
+    print(sorted(list(file_dict.keys())))
+    assert sorted(list(file_dict.keys())) == [
+        "pmc_perf.csv",
+        "pmc_perf_0.csv",
+        "pmc_perf_1.csv",
+        "pmc_perf_2.csv",
+        "pmc_perf_3.csv",
+        "sysinfo.csv",
+        "timestamps.csv",
+    ]
 
 
 def test_ipblocks_TA():
@@ -229,7 +281,7 @@ def test_ipblocks_TA():
                 "omniperf",
                 "profile",
                 "-n",
-                "app",
+                "app_1",
                 "-VVV",
                 "--path",
                 workload_1,
@@ -237,22 +289,36 @@ def test_ipblocks_TA():
                 "TA",
                 "--",
             ]
-            + app,
+            + app_1,
         ):
             omniperf.main()
 
     # assert successful run
     assert e.value.code == 0
-    files_in_workload = os.listdir(workload_1)
+    workload_1_dir = workload_1 + "/app_1/" + soc
+    files_in_workload = os.listdir(workload_1_dir)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(file)
+            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
             assert len(file_dict[file].index)
 
-    assert file_dict.keys() == ALL_CSVS
+    print(sorted(list(file_dict.keys())))
+    assert sorted(list(file_dict.keys())) == [
+        "pmc_perf.csv",
+        "pmc_perf_0.csv",
+        "pmc_perf_1.csv",
+        "pmc_perf_2.csv",
+        "pmc_perf_3.csv",
+        "pmc_perf_4.csv",
+        "pmc_perf_5.csv",
+        "pmc_perf_6.csv",
+        "pmc_perf_7.csv",
+        "sysinfo.csv",
+        "timestamps.csv",
+    ]
 
 
 def test_ipblocks_TD():
@@ -263,7 +329,7 @@ def test_ipblocks_TD():
                 "omniperf",
                 "profile",
                 "-n",
-                "app",
+                "app_1",
                 "-VVV",
                 "--path",
                 workload_1,
@@ -271,22 +337,31 @@ def test_ipblocks_TD():
                 "TD",
                 "--",
             ]
-            + app,
+            + app_1,
         ):
             omniperf.main()
 
     # assert successful run
     assert e.value.code == 0
-    files_in_workload = os.listdir(workload_1)
+    workload_1_dir = workload_1 + "/app_1/" + soc
+    files_in_workload = os.listdir(workload_1_dir)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(file)
+            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
             assert len(file_dict[file].index)
 
-    assert file_dict.keys() == ALL_CSVS
+    print(sorted(list(file_dict.keys())))
+    assert sorted(list(file_dict.keys())) == [
+        "pmc_perf.csv",
+        "pmc_perf_0.csv",
+        "pmc_perf_1.csv",
+        "pmc_perf_2.csv",
+        "sysinfo.csv",
+        "timestamps.csv",
+    ]
 
 
 def test_ipblocks_TCP():
@@ -297,7 +372,7 @@ def test_ipblocks_TCP():
                 "omniperf",
                 "profile",
                 "-n",
-                "app",
+                "app_1",
                 "-VVV",
                 "--path",
                 workload_1,
@@ -305,22 +380,37 @@ def test_ipblocks_TCP():
                 "TCP",
                 "--",
             ]
-            + app,
+            + app_1,
         ):
             omniperf.main()
 
     # assert successful run
     assert e.value.code == 0
-    files_in_workload = os.listdir(workload_1)
+    workload_1_dir = workload_1 + "/app_1/" + soc
+    files_in_workload = os.listdir(workload_1_dir)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(file)
+            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
             assert len(file_dict[file].index)
-
-    assert file_dict.keys() == ALL_CSVS
+    print(sorted(list(file_dict.keys())))
+    assert sorted(list(file_dict.keys())) == [
+        "pmc_perf.csv",
+        "pmc_perf_0.csv",
+        "pmc_perf_1.csv",
+        "pmc_perf_2.csv",
+        "pmc_perf_3.csv",
+        "pmc_perf_4.csv",
+        "pmc_perf_5.csv",
+        "pmc_perf_6.csv",
+        "pmc_perf_7.csv",
+        "pmc_perf_8.csv",
+        "pmc_perf_9.csv",
+        "sysinfo.csv",
+        "timestamps.csv",
+    ]
 
 
 def test_ipblocks_TCC():
@@ -331,7 +421,7 @@ def test_ipblocks_TCC():
                 "omniperf",
                 "profile",
                 "-n",
-                "app",
+                "app_1",
                 "-VVV",
                 "--path",
                 workload_1,
@@ -339,22 +429,39 @@ def test_ipblocks_TCC():
                 "TCC",
                 "--",
             ]
-            + app,
+            + app_1,
         ):
             omniperf.main()
 
     # assert successful run
     assert e.value.code == 0
-    files_in_workload = os.listdir(workload_1)
+    workload_1_dir = workload_1 + "/app_1/" + soc
+    files_in_workload = os.listdir(workload_1_dir)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(file)
+            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
             assert len(file_dict[file].index)
 
-    assert file_dict.keys() == ALL_CSVS
+    print(sorted(list(file_dict.keys())))
+    assert sorted(list(file_dict.keys())) == [
+        "pmc_perf.csv",
+        "pmc_perf_0.csv",
+        "pmc_perf_1.csv",
+        "pmc_perf_10.csv",
+        "pmc_perf_2.csv",
+        "pmc_perf_3.csv",
+        "pmc_perf_4.csv",
+        "pmc_perf_5.csv",
+        "pmc_perf_6.csv",
+        "pmc_perf_7.csv",
+        "pmc_perf_8.csv",
+        "pmc_perf_9.csv",
+        "sysinfo.csv",
+        "timestamps.csv",
+    ]
 
 
 def test_ipblocks_SPI():
@@ -365,7 +472,7 @@ def test_ipblocks_SPI():
                 "omniperf",
                 "profile",
                 "-n",
-                "app",
+                "app_1",
                 "-VVV",
                 "--path",
                 workload_1,
@@ -373,22 +480,36 @@ def test_ipblocks_SPI():
                 "SPI",
                 "--",
             ]
-            + app,
+            + app_1,
         ):
             omniperf.main()
 
     # assert successful run
     assert e.value.code == 0
-    files_in_workload = os.listdir(workload_1)
+    workload_1_dir = workload_1 + "/app_1/" + soc
+    files_in_workload = os.listdir(workload_1_dir)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(file)
+            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
             assert len(file_dict[file].index)
-
-    assert file_dict.keys() == ALL_CSVS
+    print(sorted(list(file_dict.keys())))
+    assert sorted(list(file_dict.keys())) == [
+        "pmc_perf.csv",
+        "pmc_perf_0.csv",
+        "pmc_perf_1.csv",
+        "pmc_perf_2.csv",
+        "pmc_perf_3.csv",
+        "pmc_perf_4.csv",
+        "pmc_perf_5.csv",
+        "pmc_perf_6.csv",
+        "pmc_perf_7.csv",
+        "pmc_perf_8.csv",
+        "sysinfo.csv",
+        "timestamps.csv",
+    ]
 
 
 def test_ipblocks_CPC():
@@ -399,7 +520,7 @@ def test_ipblocks_CPC():
                 "omniperf",
                 "profile",
                 "-n",
-                "app",
+                "app_1",
                 "-VVV",
                 "--path",
                 workload_1,
@@ -407,22 +528,33 @@ def test_ipblocks_CPC():
                 "CPC",
                 "--",
             ]
-            + app,
+            + app_1,
         ):
             omniperf.main()
 
     # assert successful run
     assert e.value.code == 0
-    files_in_workload = os.listdir(workload_1)
+    workload_1_dir = workload_1 + "/app_1/" + soc
+    files_in_workload = os.listdir(workload_1_dir)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(file)
+            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
             assert len(file_dict[file].index)
-
-    assert file_dict.keys() == ALL_CSVS
+    print(sorted(list(file_dict.keys())))
+    assert sorted(list(file_dict.keys())) == [
+        "pmc_perf.csv",
+        "pmc_perf_0.csv",
+        "pmc_perf_1.csv",
+        "pmc_perf_2.csv",
+        "pmc_perf_3.csv",
+        "pmc_perf_4.csv",
+        "pmc_perf_5.csv",
+        "sysinfo.csv",
+        "timestamps.csv",
+    ]
 
 
 def test_ipblocks_CPF():
@@ -433,7 +565,7 @@ def test_ipblocks_CPF():
                 "omniperf",
                 "profile",
                 "-n",
-                "app",
+                "app_1",
                 "-VVV",
                 "--path",
                 workload_1,
@@ -441,22 +573,31 @@ def test_ipblocks_CPF():
                 "CPF",
                 "--",
             ]
-            + app,
+            + app_1,
         ):
             omniperf.main()
 
     # assert successful run
     assert e.value.code == 0
-    files_in_workload = os.listdir(workload_1)
+    workload_1_dir = workload_1 + "/app_1/" + soc
+    files_in_workload = os.listdir(workload_1_dir)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(file)
+            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
             assert len(file_dict[file].index)
-
-    assert file_dict.keys() == ALL_CSVS
+    print(sorted(list(file_dict.keys())))
+    assert sorted(list(file_dict.keys())) == [
+        "pmc_perf.csv",
+        "pmc_perf_0.csv",
+        "pmc_perf_1.csv",
+        "pmc_perf_2.csv",
+        "pmc_perf_3.csv",
+        "sysinfo.csv",
+        "timestamps.csv",
+    ]
 
 
 def test_ipblocks_SQ_CPC():
@@ -467,7 +608,7 @@ def test_ipblocks_SQ_CPC():
                 "omniperf",
                 "profile",
                 "-n",
-                "app",
+                "app_1",
                 "-VVV",
                 "--path",
                 workload_1,
@@ -476,22 +617,42 @@ def test_ipblocks_SQ_CPC():
                 "CPC",
                 "--",
             ]
-            + app,
+            + app_1,
         ):
             omniperf.main()
 
     # assert successful run
     assert e.value.code == 0
-    files_in_workload = os.listdir(workload_1)
+    workload_1_dir = workload_1 + "/app_1/" + soc
+    files_in_workload = os.listdir(workload_1_dir)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(file)
+            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
             assert len(file_dict[file].index)
 
-    assert file_dict.keys() == ALL_CSVS
+    print(sorted(list(file_dict.keys())))
+    assert sorted(list(file_dict.keys())) == [
+        "SQ_IFETCH_LEVEL.csv",
+        "SQ_INST_LEVEL_LDS.csv",
+        "SQ_INST_LEVEL_SMEM.csv",
+        "SQ_INST_LEVEL_VMEM.csv",
+        "SQ_LEVEL_WAVES.csv",
+        "pmc_perf.csv",
+        "pmc_perf_0.csv",
+        "pmc_perf_1.csv",
+        "pmc_perf_2.csv",
+        "pmc_perf_3.csv",
+        "pmc_perf_4.csv",
+        "pmc_perf_5.csv",
+        "pmc_perf_6.csv",
+        "pmc_perf_7.csv",
+        "pmc_perf_8.csv",
+        "sysinfo.csv",
+        "timestamps.csv",
+    ]
 
 
 def test_ipblocks_SQ_TA():
@@ -502,7 +663,7 @@ def test_ipblocks_SQ_TA():
                 "omniperf",
                 "profile",
                 "-n",
-                "app",
+                "app_1",
                 "-VVV",
                 "--path",
                 workload_1,
@@ -511,22 +672,42 @@ def test_ipblocks_SQ_TA():
                 "TA",
                 "--",
             ]
-            + app,
+            + app_1,
         ):
             omniperf.main()
 
     # assert successful run
     assert e.value.code == 0
-    files_in_workload = os.listdir(workload_1)
+    workload_1_dir = workload_1 + "/app_1/" + soc
+    files_in_workload = os.listdir(workload_1_dir)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(file)
+            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
             assert len(file_dict[file].index)
 
-    assert file_dict.keys() == ALL_CSVS
+    print(sorted(list(file_dict.keys())))
+    assert sorted(list(file_dict.keys())) == [
+        "SQ_IFETCH_LEVEL.csv",
+        "SQ_INST_LEVEL_LDS.csv",
+        "SQ_INST_LEVEL_SMEM.csv",
+        "SQ_INST_LEVEL_VMEM.csv",
+        "SQ_LEVEL_WAVES.csv",
+        "pmc_perf.csv",
+        "pmc_perf_0.csv",
+        "pmc_perf_1.csv",
+        "pmc_perf_2.csv",
+        "pmc_perf_3.csv",
+        "pmc_perf_4.csv",
+        "pmc_perf_5.csv",
+        "pmc_perf_6.csv",
+        "pmc_perf_7.csv",
+        "pmc_perf_8.csv",
+        "sysinfo.csv",
+        "timestamps.csv",
+    ]
 
 
 def test_ipblocks_SQ_SPI():
@@ -537,7 +718,7 @@ def test_ipblocks_SQ_SPI():
                 "omniperf",
                 "profile",
                 "-n",
-                "app",
+                "app_1",
                 "-VVV",
                 "--path",
                 workload_1,
@@ -546,22 +727,42 @@ def test_ipblocks_SQ_SPI():
                 "SPI",
                 "--",
             ]
-            + app,
+            + app_1,
         ):
             omniperf.main()
 
     # assert successful run
     assert e.value.code == 0
-    files_in_workload = os.listdir(workload_1)
+    workload_1_dir = workload_1 + "/app_1/" + soc
+    files_in_workload = os.listdir(workload_1_dir)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(file)
+            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
             assert len(file_dict[file].index)
 
-    assert file_dict.keys() == ALL_CSVS
+    print(sorted(list(file_dict.keys())))
+    assert sorted(list(file_dict.keys())) == [
+        "SQ_IFETCH_LEVEL.csv",
+        "SQ_INST_LEVEL_LDS.csv",
+        "SQ_INST_LEVEL_SMEM.csv",
+        "SQ_INST_LEVEL_VMEM.csv",
+        "SQ_LEVEL_WAVES.csv",
+        "pmc_perf.csv",
+        "pmc_perf_0.csv",
+        "pmc_perf_1.csv",
+        "pmc_perf_2.csv",
+        "pmc_perf_3.csv",
+        "pmc_perf_4.csv",
+        "pmc_perf_5.csv",
+        "pmc_perf_6.csv",
+        "pmc_perf_7.csv",
+        "pmc_perf_8.csv",
+        "sysinfo.csv",
+        "timestamps.csv",
+    ]
 
 
 def test_ipblocks_SQ_SQC_TCP_CPC():
@@ -572,7 +773,7 @@ def test_ipblocks_SQ_SQC_TCP_CPC():
                 "omniperf",
                 "profile",
                 "-n",
-                "app",
+                "app_1",
                 "-VVV",
                 "--path",
                 workload_1,
@@ -583,22 +784,43 @@ def test_ipblocks_SQ_SQC_TCP_CPC():
                 "CPC",
                 "--",
             ]
-            + app,
+            + app_1,
         ):
             omniperf.main()
 
     # assert successful run
     assert e.value.code == 0
-    files_in_workload = os.listdir(workload_1)
+    workload_1_dir = workload_1 + "/app_1/" + soc
+    files_in_workload = os.listdir(workload_1_dir)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(file)
+            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
             assert len(file_dict[file].index)
 
-    assert file_dict.keys() == ALL_CSVS
+    print(sorted(list(file_dict.keys())))
+    assert sorted(list(file_dict.keys())) == [
+        "SQ_IFETCH_LEVEL.csv",
+        "SQ_INST_LEVEL_LDS.csv",
+        "SQ_INST_LEVEL_SMEM.csv",
+        "SQ_INST_LEVEL_VMEM.csv",
+        "SQ_LEVEL_WAVES.csv",
+        "pmc_perf.csv",
+        "pmc_perf_0.csv",
+        "pmc_perf_1.csv",
+        "pmc_perf_2.csv",
+        "pmc_perf_3.csv",
+        "pmc_perf_4.csv",
+        "pmc_perf_5.csv",
+        "pmc_perf_6.csv",
+        "pmc_perf_7.csv",
+        "pmc_perf_8.csv",
+        "pmc_perf_9.csv",
+        "sysinfo.csv",
+        "timestamps.csv",
+    ]
 
 
 def test_ipblocks_SQ_SPI_TA_TCC_CPF():
@@ -609,7 +831,7 @@ def test_ipblocks_SQ_SPI_TA_TCC_CPF():
                 "omniperf",
                 "profile",
                 "-n",
-                "app",
+                "app_1",
                 "-VVV",
                 "--path",
                 workload_1,
@@ -621,22 +843,44 @@ def test_ipblocks_SQ_SPI_TA_TCC_CPF():
                 "CPF",
                 "--",
             ]
-            + app,
+            + app_1,
         ):
             omniperf.main()
 
     # assert successful run
     assert e.value.code == 0
-    files_in_workload = os.listdir(workload_1)
+    workload_1_dir = workload_1 + "/app_1/" + soc
+    files_in_workload = os.listdir(workload_1_dir)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(file)
+            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
             assert len(file_dict[file].index)
 
-    assert file_dict.keys() == ALL_CSVS
+    print(sorted(list(file_dict.keys())))
+    assert sorted(list(file_dict.keys())) == [
+        "SQ_IFETCH_LEVEL.csv",
+        "SQ_INST_LEVEL_LDS.csv",
+        "SQ_INST_LEVEL_SMEM.csv",
+        "SQ_INST_LEVEL_VMEM.csv",
+        "SQ_LEVEL_WAVES.csv",
+        "pmc_perf.csv",
+        "pmc_perf_0.csv",
+        "pmc_perf_1.csv",
+        "pmc_perf_10.csv",
+        "pmc_perf_2.csv",
+        "pmc_perf_3.csv",
+        "pmc_perf_4.csv",
+        "pmc_perf_5.csv",
+        "pmc_perf_6.csv",
+        "pmc_perf_7.csv",
+        "pmc_perf_8.csv",
+        "pmc_perf_9.csv",
+        "sysinfo.csv",
+        "timestamps.csv",
+    ]
 
 
 def test_dispatch_0():
@@ -647,7 +891,7 @@ def test_dispatch_0():
                 "omniperf",
                 "profile",
                 "-n",
-                "app",
+                "app_1",
                 "-VVV",
                 "--path",
                 workload_1,
@@ -655,22 +899,22 @@ def test_dispatch_0():
                 "0",
                 "--",
             ]
-            + app,
+            + app_1,
         ):
             omniperf.main()
 
     # assert successful run
     assert e.value.code == 0
-    files_in_workload = os.listdir(workload_1)
+    workload_1_dir = workload_1 + "/app_1/" + soc
+    files_in_workload = os.listdir(workload_1_dir)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(file)
+            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
             assert len(file_dict[file].index)
-
-    assert file_dict.keys() == ALL_CSVS
+    assert sorted(list(file_dict.keys())) == ALL_CSVS
 
 
 def test_dispatch_0_1():
@@ -681,7 +925,7 @@ def test_dispatch_0_1():
                 "omniperf",
                 "profile",
                 "-n",
-                "app",
+                "app_1",
                 "-VVV",
                 "--path",
                 workload_1,
@@ -690,22 +934,22 @@ def test_dispatch_0_1():
                 "1",
                 "--",
             ]
-            + app,
+            + app_1,
         ):
             omniperf.main()
 
     # assert successful run
     assert e.value.code == 0
-    files_in_workload = os.listdir(workload_1)
+    workload_1_dir = workload_1 + "/app_1/" + soc
+    files_in_workload = os.listdir(workload_1_dir)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(file)
+            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
             assert len(file_dict[file].index)
-
-    assert file_dict.keys() == ALL_CSVS
+    assert sorted(list(file_dict.keys())) == ALL_CSVS
 
 
 def test_dispatch_2():
@@ -716,7 +960,7 @@ def test_dispatch_2():
                 "omniperf",
                 "profile",
                 "-n",
-                "app",
+                "app_1",
                 "-VVV",
                 "--path",
                 workload_1,
@@ -724,22 +968,22 @@ def test_dispatch_2():
                 "2",
                 "--",
             ]
-            + app,
+            + app_1,
         ):
             omniperf.main()
 
     # assert successful run
     assert e.value.code == 0
-    files_in_workload = os.listdir(workload_1)
+    workload_1_dir = workload_1 + "/app_1/" + soc
+    files_in_workload = os.listdir(workload_1_dir)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(file)
+            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
             assert len(file_dict[file].index)
-
-    assert file_dict.keys() == ALL_CSVS
+    assert sorted(list(file_dict.keys())) == ALL_CSVS
 
 
 def test_kernel_verbose_0():
@@ -750,7 +994,7 @@ def test_kernel_verbose_0():
                 "omniperf",
                 "profile",
                 "-n",
-                "app",
+                "app_1",
                 "-VVV",
                 "--path",
                 workload_1,
@@ -758,22 +1002,22 @@ def test_kernel_verbose_0():
                 "0",
                 "--",
             ]
-            + app,
+            + app_1,
         ):
             omniperf.main()
 
     # assert successful run
     assert e.value.code == 0
-    files_in_workload = os.listdir(workload_1)
+    workload_1_dir = workload_1 + "/app_1/" + soc
+    files_in_workload = os.listdir(workload_1_dir)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(file)
+            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
             assert len(file_dict[file].index)
-
-    assert file_dict.keys() == ALL_CSVS
+    assert sorted(list(file_dict.keys())) == ALL_CSVS
 
 
 def test_kernel_verbose_1():
@@ -784,7 +1028,7 @@ def test_kernel_verbose_1():
                 "omniperf",
                 "profile",
                 "-n",
-                "app",
+                "app_1",
                 "-VVV",
                 "--path",
                 workload_1,
@@ -792,22 +1036,22 @@ def test_kernel_verbose_1():
                 "1",
                 "--",
             ]
-            + app,
+            + app_1,
         ):
             omniperf.main()
 
     # assert successful run
     assert e.value.code == 0
-    files_in_workload = os.listdir(workload_1)
+    workload_1_dir = workload_1 + "/app_1/" + soc
+    files_in_workload = os.listdir(workload_1_dir)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(file)
+            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
             assert len(file_dict[file].index)
-
-    assert file_dict.keys() == ALL_CSVS
+    assert sorted(list(file_dict.keys())) == ALL_CSVS
 
 
 def test_kernel_verbose_2():
@@ -818,7 +1062,7 @@ def test_kernel_verbose_2():
                 "omniperf",
                 "profile",
                 "-n",
-                "app",
+                "app_1",
                 "-VVV",
                 "--path",
                 workload_1,
@@ -826,22 +1070,22 @@ def test_kernel_verbose_2():
                 "2",
                 "--",
             ]
-            + app,
+            + app_1,
         ):
             omniperf.main()
 
     # assert successful run
     assert e.value.code == 0
-    files_in_workload = os.listdir(workload_1)
+    workload_1_dir = workload_1 + "/app_1/" + soc
+    files_in_workload = os.listdir(workload_1_dir)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(file)
+            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
             assert len(file_dict[file].index)
-
-    assert file_dict.keys() == ALL_CSVS
+    assert sorted(list(file_dict.keys())) == ALL_CSVS
 
 
 def test_kernel_verbose_3():
@@ -852,7 +1096,7 @@ def test_kernel_verbose_3():
                 "omniperf",
                 "profile",
                 "-n",
-                "app",
+                "app_1",
                 "-VVV",
                 "--path",
                 workload_1,
@@ -860,22 +1104,22 @@ def test_kernel_verbose_3():
                 "3",
                 "--",
             ]
-            + app,
+            + app_1,
         ):
             omniperf.main()
 
     # assert successful run
     assert e.value.code == 0
-    files_in_workload = os.listdir(workload_1)
+    workload_1_dir = workload_1 + "/app_1/" + soc
+    files_in_workload = os.listdir(workload_1_dir)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(file)
+            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
             assert len(file_dict[file].index)
-
-    assert file_dict.keys() == ALL_CSVS
+    assert sorted(list(file_dict.keys())) == ALL_CSVS
 
 
 def test_kernel_verbose_4():
@@ -886,7 +1130,7 @@ def test_kernel_verbose_4():
                 "omniperf",
                 "profile",
                 "-n",
-                "app",
+                "app_1",
                 "-VVV",
                 "--path",
                 workload_1,
@@ -894,22 +1138,22 @@ def test_kernel_verbose_4():
                 "4",
                 "--",
             ]
-            + app,
+            + app_1,
         ):
             omniperf.main()
 
     # assert successful run
     assert e.value.code == 0
-    files_in_workload = os.listdir(workload_1)
+    workload_1_dir = workload_1 + "/app_1/" + soc
+    files_in_workload = os.listdir(workload_1_dir)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(file)
+            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
             assert len(file_dict[file].index)
-
-    assert file_dict.keys() == ALL_CSVS
+    assert sorted(list(file_dict.keys())) == ALL_CSVS
 
 
 def test_kernel_verbose_5():
@@ -920,7 +1164,7 @@ def test_kernel_verbose_5():
                 "omniperf",
                 "profile",
                 "-n",
-                "app",
+                "app_1",
                 "-VVV",
                 "--path",
                 workload_1,
@@ -928,22 +1172,22 @@ def test_kernel_verbose_5():
                 "5",
                 "--",
             ]
-            + app,
+            + app_1,
         ):
             omniperf.main()
 
     # assert successful run
     assert e.value.code == 0
-    files_in_workload = os.listdir(workload_1)
+    workload_1_dir = workload_1 + "/app_1/" + soc
+    files_in_workload = os.listdir(workload_1_dir)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(file)
+            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
             assert len(file_dict[file].index)
-
-    assert file_dict.keys() == ALL_CSVS
+    assert sorted(list(file_dict.keys())) == ALL_CSVS
 
 
 def test_join_type_grid():
@@ -954,7 +1198,7 @@ def test_join_type_grid():
                 "omniperf",
                 "profile",
                 "-n",
-                "app",
+                "app_1",
                 "-VVV",
                 "--path",
                 workload_1,
@@ -962,22 +1206,22 @@ def test_join_type_grid():
                 "grid",
                 "--",
             ]
-            + app,
+            + app_1,
         ):
             omniperf.main()
 
     # assert successful run
     assert e.value.code == 0
-    files_in_workload = os.listdir(workload_1)
+    workload_1_dir = workload_1 + "/app_1/" + soc
+    files_in_workload = os.listdir(workload_1_dir)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(file)
+            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
             assert len(file_dict[file].index)
-
-    assert file_dict.keys() == ALL_CSVS
+    assert sorted(list(file_dict.keys())) == ALL_CSVS
 
 
 def test_join_type_kernel():
@@ -988,7 +1232,7 @@ def test_join_type_kernel():
                 "omniperf",
                 "profile",
                 "-n",
-                "app",
+                "app_1",
                 "-VVV",
                 "--path",
                 workload_1,
@@ -996,22 +1240,22 @@ def test_join_type_kernel():
                 "kernel",
                 "--",
             ]
-            + app,
+            + app_1,
         ):
             omniperf.main()
 
     # assert successful run
     assert e.value.code == 0
-    files_in_workload = os.listdir(workload_1)
+    workload_1_dir = workload_1 + "/app_1/" + soc
+    files_in_workload = os.listdir(workload_1_dir)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(file)
+            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
             assert len(file_dict[file].index)
-
-    assert file_dict.keys() == ALL_CSVS
+    assert sorted(list(file_dict.keys())) == ALL_CSVS
 
 
 def test_device_0():
@@ -1022,7 +1266,7 @@ def test_device_0():
                 "omniperf",
                 "profile",
                 "-n",
-                "app",
+                "app_1",
                 "-VVV",
                 "--path",
                 workload_1,
@@ -1030,22 +1274,22 @@ def test_device_0():
                 "0",
                 "--",
             ]
-            + app,
+            + app_1,
         ):
             omniperf.main()
 
     # assert successful run
     assert e.value.code == 0
-    files_in_workload = os.listdir(workload_1)
+    workload_1_dir = workload_1 + "/app_1/" + soc
+    files_in_workload = os.listdir(workload_1_dir)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(file)
+            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
             assert len(file_dict[file].index)
-
-    assert file_dict.keys() == ALL_CSVS
+    assert sorted(list(file_dict.keys())) == ALL_CSVS
 
 
 def test_no_roof():
@@ -1056,29 +1300,29 @@ def test_no_roof():
                 "omniperf",
                 "profile",
                 "-n",
-                "app",
+                "app_1",
                 "-VVV",
                 "--path",
                 workload_1,
                 "--no-roof",
                 "--",
             ]
-            + app,
+            + app_1,
         ):
             omniperf.main()
 
     # assert successful run
     assert e.value.code == 0
-    files_in_workload = os.listdir(workload_1)
+    workload_1_dir = workload_1 + "/app_1/" + soc
+    files_in_workload = os.listdir(workload_1_dir)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(file)
+            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
             assert len(file_dict[file].index)
-
-    assert file_dict.keys() == ALL_CSVS
+    assert sorted(list(file_dict.keys())) == ALL_CSVS
 
 
 def test_sort_dispatches():
@@ -1089,29 +1333,37 @@ def test_sort_dispatches():
                 "omniperf",
                 "profile",
                 "-n",
-                "app",
+                "app_1",
                 "-VVV",
                 "--path",
                 workload_1,
+                "--roof-only",
                 "--sort",
-                "dispatches," "--",
+                "dispatches",
+                "--",
             ]
-            + app,
+            + app_1,
         ):
             omniperf.main()
 
+    if soc == "mi100":
+        # assert that it did not run
+        assert e.value.code == 2
+        # Do not continue testing
+        return
+
     # assert successful run
     assert e.value.code == 0
-    files_in_workload = os.listdir(workload_1)
+    workload_1_dir = workload_1 + "/app_1/" + soc
+    files_in_workload = os.listdir(workload_1_dir)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(file)
+            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
             assert len(file_dict[file].index)
-
-    assert file_dict.keys() == ALL_CSVS
+    assert sorted(list(file_dict.keys())) == ALL_CSVS
 
 
 def test_sort_kernels():
@@ -1122,29 +1374,36 @@ def test_sort_kernels():
                 "omniperf",
                 "profile",
                 "-n",
-                "app",
+                "app_1",
                 "-VVV",
                 "--path",
                 workload_1,
+                "--roof-only",
                 "--sort",
-                "kernels," "--",
+                "kernels",
+                "--",
             ]
-            + app,
+            + app_1,
         ):
             omniperf.main()
+    if soc == "mi100":
+        # assert that it did not run
+        assert e.value.code == 2
+        # Do not continue testing
+        return
 
     # assert successful run
     assert e.value.code == 0
-    files_in_workload = os.listdir(workload_1)
+    workload_1_dir = workload_1 + "/app_1/" + soc
+    files_in_workload = os.listdir(workload_1_dir)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(file)
+            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
             assert len(file_dict[file].index)
-
-    assert file_dict.keys() == ALL_CSVS
+    assert sorted(list(file_dict.keys())) == ALL_CSVS
 
 
 def test_mem_levels_HBM():
@@ -1155,29 +1414,37 @@ def test_mem_levels_HBM():
                 "omniperf",
                 "profile",
                 "-n",
-                "app",
+                "app_1",
                 "-VVV",
                 "--path",
                 workload_1,
-                "--mem-levels",
-                "HBM," "--",
+                "--roof-only",
+                "--mem-level",
+                "HBM",
+                "--",
             ]
-            + app,
+            + app_1,
         ):
             omniperf.main()
 
+    if soc == "mi100":
+        # assert that it did not run
+        assert e.value.code == 2
+        # Do not continue testing
+        return
+
     # assert successful run
     assert e.value.code == 0
-    files_in_workload = os.listdir(workload_1)
+    workload_1_dir = workload_1 + "/app_1/" + soc
+    files_in_workload = os.listdir(workload_1_dir)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(file)
+            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
             assert len(file_dict[file].index)
-
-    assert file_dict.keys() == ALL_CSVS
+    assert sorted(list(file_dict.keys())) == ALL_CSVS
 
 
 def test_mem_levels_L2():
@@ -1188,29 +1455,37 @@ def test_mem_levels_L2():
                 "omniperf",
                 "profile",
                 "-n",
-                "app",
+                "app_1",
                 "-VVV",
                 "--path",
                 workload_1,
-                "--mem-levels",
-                "L2," "--",
+                "--roof-only",
+                "--mem-level",
+                "L2",
+                "--",
             ]
-            + app,
+            + app_1,
         ):
             omniperf.main()
 
+    if soc == "mi100":
+        # assert that it did not run
+        assert e.value.code == 2
+        # Do not continue testing
+        return
+
     # assert successful run
     assert e.value.code == 0
-    files_in_workload = os.listdir(workload_1)
+    workload_1_dir = workload_1 + "/app_1/" + soc
+    files_in_workload = os.listdir(workload_1_dir)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(file)
+            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
             assert len(file_dict[file].index)
-
-    assert file_dict.keys() == ALL_CSVS
+    assert sorted(list(file_dict.keys())) == ALL_CSVS
 
 
 def test_mem_levels_vL1D():
@@ -1221,29 +1496,36 @@ def test_mem_levels_vL1D():
                 "omniperf",
                 "profile",
                 "-n",
-                "app",
+                "app_1",
                 "-VVV",
                 "--path",
                 workload_1,
-                "--mem-levels",
-                "vL1D," "--",
+                "--roof-only",
+                "--mem-level",
+                "vL1D",
+                "--",
             ]
-            + app,
+            + app_1,
         ):
             omniperf.main()
+    if soc == "mi100":
+        # assert that it did not run
+        assert e.value.code == 2
+        # Do not continue testing
+        return
 
     # assert successful run
     assert e.value.code == 0
-    files_in_workload = os.listdir(workload_1)
+    workload_1_dir = workload_1 + "/app_1/" + soc
+    files_in_workload = os.listdir(workload_1_dir)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(file)
+            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
             assert len(file_dict[file].index)
-
-    assert file_dict.keys() == ALL_CSVS
+    assert sorted(list(file_dict.keys())) == ALL_CSVS
 
 
 def test_mem_levels_LDS():
@@ -1254,29 +1536,36 @@ def test_mem_levels_LDS():
                 "omniperf",
                 "profile",
                 "-n",
-                "app",
+                "app_1",
                 "-VVV",
                 "--path",
                 workload_1,
-                "--mem-levels",
-                "LDS," "--",
+                "--roof-only",
+                "--mem-level",
+                "LDS",
+                "--",
             ]
-            + app,
+            + app_1,
         ):
             omniperf.main()
+    if soc == "mi100":
+        # assert that it did not run
+        assert e.value.code == 2
+        # Do not continue testing
+        return
 
     # assert successful run
     assert e.value.code == 0
-    files_in_workload = os.listdir(workload_1)
+    workload_1_dir = workload_1 + "/app_1/" + soc
+    files_in_workload = os.listdir(workload_1_dir)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(file)
+            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
             assert len(file_dict[file].index)
-
-    assert file_dict.keys() == ALL_CSVS
+    assert sorted(list(file_dict.keys())) == ALL_CSVS
 
 
 def test_mem_levels_HBM_LDS():
@@ -1287,30 +1576,37 @@ def test_mem_levels_HBM_LDS():
                 "omniperf",
                 "profile",
                 "-n",
-                "app",
+                "app_1",
                 "-VVV",
                 "--path",
                 workload_1,
-                "--mem-levels",
+                "--roof-only",
+                "--mem-level",
                 "HBM",
-                "LDS," "--",
+                "LDS",
+                "--",
             ]
-            + app,
+            + app_1,
         ):
             omniperf.main()
+    if soc == "mi100":
+        # assert that it did not run
+        assert e.value.code == 2
+        # Do not continue testing
+        return
 
     # assert successful run
     assert e.value.code == 0
-    files_in_workload = os.listdir(workload_1)
+    workload_1_dir = workload_1 + "/app_1/" + soc
+    files_in_workload = os.listdir(workload_1_dir)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(file)
+            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
             assert len(file_dict[file].index)
-
-    assert file_dict.keys() == ALL_CSVS
+    assert sorted(list(file_dict.keys())) == ALL_CSVS
 
 
 def test_mem_levels_vL1D_LDS():
@@ -1321,30 +1617,37 @@ def test_mem_levels_vL1D_LDS():
                 "omniperf",
                 "profile",
                 "-n",
-                "app",
+                "app_1",
                 "-VVV",
                 "--path",
                 workload_1,
-                "--mem-levels",
+                "--roof-only",
+                "--mem-level",
                 "vL1D",
-                "LDS," "--",
+                "LDS",
+                "--",
             ]
-            + app,
+            + app_1,
         ):
             omniperf.main()
+    if soc == "mi100":
+        # assert that it did not run
+        assert e.value.code == 2
+        # Do not continue testing
+        return
 
     # assert successful run
     assert e.value.code == 0
-    files_in_workload = os.listdir(workload_1)
+    workload_1_dir = workload_1 + "/app_1/" + soc
+    files_in_workload = os.listdir(workload_1_dir)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(file)
+            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
             assert len(file_dict[file].index)
-
-    assert file_dict.keys() == ALL_CSVS
+    assert sorted(list(file_dict.keys())) == ALL_CSVS
 
 
 def test_mem_levels_L2_vL1D_LDS():
@@ -1355,28 +1658,73 @@ def test_mem_levels_L2_vL1D_LDS():
                 "omniperf",
                 "profile",
                 "-n",
-                "app",
+                "app_1",
                 "-VVV",
                 "--path",
                 workload_1,
-                "--mem-levels",
+                "--roof-only",
+                "--mem-level",
                 "L2",
                 "vL1D",
-                "LDS," "--",
+                "LDS",
+                "--",
             ]
-            + app,
+            + app_1,
         ):
             omniperf.main()
-
+    if soc == "mi100":
+        # assert that it did not run
+        assert e.value.code == 2
+        # Do not continue testing
+        return
     # assert successful run
     assert e.value.code == 0
-    files_in_workload = os.listdir(workload_1)
+    workload_1_dir = workload_1 + "/app_1/" + soc
+    files_in_workload = os.listdir(workload_1_dir)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(file)
+            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
             assert len(file_dict[file].index)
+    assert sorted(list(file_dict.keys())) == ALL_CSVS
 
-    assert file_dict.keys() == ALL_CSVS
+
+def test_kernel_names():
+    with pytest.raises(SystemExit) as e:
+        with patch(
+            "sys.argv",
+            [
+                "omniperf",
+                "profile",
+                "-n",
+                "app_1",
+                "-VVV",
+                "--path",
+                workload_1,
+                "--roof-only",
+                "--kernel-names",
+                "--",
+            ]
+            + app_1,
+        ):
+            omniperf.main()
+
+    if soc == "mi100":
+        # assert that it did not run
+        assert e.value.code == 2
+        # Do not continue testing
+        return
+    # assert successful run
+    assert e.value.code == 0
+    workload_1_dir = workload_1 + "/app_1/" + soc
+    files_in_workload = os.listdir(workload_1_dir)
+
+    # Check if csvs have data
+    file_dict = {}
+    for file in files_in_workload:
+        if file.endswith(".csv"):
+            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
+            assert len(file_dict[file].index)
+    assert sorted(list(file_dict.keys())) == ALL_CSVS
