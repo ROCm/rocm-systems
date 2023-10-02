@@ -154,43 +154,49 @@ input string. By using the iterators it finds the
 window in the string which contains only the kernel name.
 For example 'Foo<int, float>::foo(a[], int (int))' -> 'foo'*/
 std::string truncate_name(const std::string& name) {
-  auto rit = name.rbegin();
-  auto rend = name.rend();
-  uint32_t counter = 0;
-  char open_token = 0;
-  char close_token = 0;
-  while (rit != rend) {
-    if (counter == 0) {
-      switch (*rit) {
-        case ')':
-          counter = 1;
-          open_token = ')';
-          close_token = '(';
-          break;
-        case '>':
-          counter = 1;
-          open_token = '>';
-          close_token = '<';
-          break;
-        case ']':
-          counter = 1;
-          open_token = ']';
-          close_token = '[';
-          break;
-        case ' ':
-          ++rit;
-          continue;
+
+  const char* path = getenv("ROCPROFILER_TRUNCATE_KERNEL_PATH");
+  if(path != nullptr) {
+      auto rit = name.rbegin();
+      auto rend = name.rend();
+      uint32_t counter = 0;
+      char open_token = 0;
+      char close_token = 0;
+      while (rit != rend) {
+        if (counter == 0) {
+          switch (*rit) {
+            case ')':
+              counter = 1;
+              open_token = ')';
+              close_token = '(';
+              break;
+            case '>':
+              counter = 1;
+              open_token = '>';
+              close_token = '<';
+              break;
+            case ']':
+              counter = 1;
+              open_token = ']';
+              close_token = '[';
+              break;
+            case ' ':
+              ++rit;
+              continue;
+          }
+          if (counter == 0) break;
+        } else {
+          if (*rit == open_token) counter++;
+          if (*rit == close_token) counter--;
+        }
+        ++rit;
       }
-      if (counter == 0) break;
-    } else {
-      if (*rit == open_token) counter++;
-      if (*rit == close_token) counter--;
-    }
-    ++rit;
+      auto rbeg = rit;
+      while ((rit != rend) && (*rit != ' ') && (*rit != ':')) rit++;
+      return name.substr(rend - rit, rit - rbeg);
   }
-  auto rbeg = rit;
-  while ((rit != rend) && (*rit != ' ') && (*rit != ':')) rit++;
-  return name.substr(rend - rit, rit - rbeg);
+  else
+    return name;
 }
 
 // C++ symbol demangle

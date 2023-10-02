@@ -199,6 +199,7 @@ class MetricsDict {
 
   MetricsDict(const rocprofiler::HSAAgentInfo* agent_info) : xml_(NULL), agent_info_(agent_info) {
     std::string xml_name = []() {
+
       if (const char* path = getenv("ROCPROFILER_METRICS_PATH"); path != nullptr) return path;
       return "";
     }();

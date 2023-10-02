@@ -73,6 +73,7 @@ void __attribute__((constructor)) globalsetting() {
   gfx_path << app_path << metrics_path;
   setenv("ROCPROFILER_METRICS_PATH", gfx_path.str().c_str(), true);
   setenv("ROCPROFILER_MAX_ATT_PROFILES", "2", 1);
+  setenv("ROCPROFILER_TRUNCATE_KERNEL_PATH", "1", true);
 }
 
 /**

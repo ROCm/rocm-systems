@@ -31,6 +31,8 @@ usage() {
     echo -e "${GREEN}-t   | --test ${RESET}                For Running the tests"
     echo -e "${GREEN}-mt  | --mem-test ${RESET}            For Running the Memory Leak tests. This run requires building using -acb | --asan-clean-build option"
   fi
+  echo -e "${GREEN}-m ${RESET}                           For providing an absolute path of a custom metrics file"
+  echo -e "${GREEN}--basenames ${RESET}                  For Truncating the kernel names"
   echo -e "${GREEN}--hip-api ${RESET}                    For Collecting HIP API Traces"
   echo -e "${GREEN}--hip-activity | --hip-trace ${RESET} For Collecting HIP API Activities Traces"
   echo -e "${GREEN}--hsa-api ${RESET}                    For Collecting HSA API Traces"
@@ -162,6 +164,19 @@ while [ 1 ]; do
   elif [ "$1" = "--roc-sys" ]; then
     export ROCPROFILER_ENABLE_ROCSYS=$2
     shift
+    shift
+  elif [ "$1" = "-m" ]; then
+    if [ $2 ] && [ -n $2 ] && [ -r $2 ]; then
+     export ROCPROFILER_METRICS_PATH=$2
+    else
+     echo -e "Error: \"$2\" path doesn't exist!"
+     usage
+     exit 1
+    fi
+    shift
+    shift
+  elif [ "$1" = "--basenames" ]; then
+    export ROCPROFILER_TRUNCATE_KERNEL_PATH=1
     shift
   elif [ "$1" = "--plugin" ]; then
     if [ -n $2 ]; then
