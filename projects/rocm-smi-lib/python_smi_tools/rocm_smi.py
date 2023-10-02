@@ -30,8 +30,8 @@ from rsmiBindings import *
 # Minor version - Increment when adding a new feature, set to 0 when major is incremented
 # Patch version - Increment when adding a fix, set to 0 when minor is incremented
 SMI_MAJ = 1
-SMI_MIN = 4
-SMI_PAT = 1
+SMI_MIN = 5
+SMI_PAT = 0
 __version__ = '%s.%s.%s' % (SMI_MAJ, SMI_MIN, SMI_PAT)
 
 # Set to 1 if an error occurs
@@ -1675,6 +1675,32 @@ def setNPSMode(deviceList, npsMode):
             printErrLog(device, 'Failed to retrieve NPS mode, even though device supports it.')
     printLogSpacer()
 
+def showVersion(isCSV=False):
+    values = { 'ROCM-SMI version': __version__ }
+
+    version = rsmi_version_t()
+    status = rocmsmi.rsmi_version_get(byref(version))
+    if status == 0:
+        version_string = "%u.%u.%u" % (version.major, version.minor, version.patch)
+        values['ROCM-SMI-LIB version'] = version_string
+
+    if isCSV:
+        print('name, value')
+        for k in values.keys():
+            print('%s, %s' % (k, values[k]))
+        return
+    if PRINT_JSON:
+        temp_str = '{\n'
+        for k in values.keys():
+            temp_str += '  "%s": "%s",\n' % (k, values[k])
+        if len(values.keys()) > 1:
+            # replace ',\n' with '\n}'
+            temp_str = temp_str[:-2]
+        temp_str += '\n}'
+        print(temp_str)
+        return
+    for k in values.keys():
+        print('%s: %s' % (k, values[k]))
 
 def showAllConcise(deviceList):
     """ Display critical info for all devices in a concise format
@@ -2955,7 +2981,7 @@ def showTempGraph(deviceList):
     printLogSpacer()
 
 
-def showVersion(deviceList, component):
+def showDriverVersion(deviceList, component):
     """ Display the software version for the specified component
 
     @param deviceList: List of DRM devices (can be a single-item list)
@@ -3614,6 +3640,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         description='AMD ROCm System Management Interface  |  ROCM-SMI version: %s' % __version__,
         formatter_class=lambda prog: argparse.HelpFormatter(prog, max_help_position=90, width=120))
+    groupVersion = parser.add_argument_group()
     groupDev = parser.add_argument_group()
     groupDisplayOpt = parser.add_argument_group('Display Options')
     groupDisplayTop = parser.add_argument_group('Topology')
@@ -3627,6 +3654,7 @@ if __name__ == '__main__':
     groupResponse = parser.add_argument_group('Auto-response options')
     groupActionOutput = parser.add_argument_group('Output options')
 
+    groupVersion.add_argument('-V', '--version', help='Show version information', action='store_true')
     groupDev.add_argument('-d', '--device', help='Execute command on specified device', type=int, nargs='+')
     groupDisplayOpt.add_argument('--alldevices', action='store_true')  # ------------- function deprecated, no help menu
     groupDisplayOpt.add_argument('--showhw', help='Show Hardware details', action='store_true')
@@ -3775,10 +3803,15 @@ if __name__ == '__main__':
     # Must set PRINT_JSON early so the prints can be silenced
     if args.json or args.csv:
         PRINT_JSON = True
+
     # Initialize rsmiBindings
     rocmsmi = initRsmiBindings(silent=PRINT_JSON)
     # Initialize the rocm SMI library
     initializeRsmi()
+
+    if args.version:
+        showVersion(isCSV=args.csv)
+        sys.exit()
 
     logging.basicConfig(format='%(levelname)s: %(message)s', level=logging.WARNING)
     if args.loglevel is not None:
@@ -3878,7 +3911,7 @@ if __name__ == '__main__':
     if args.showhw:
         showAllConciseHw(deviceList)
     if args.showdriverversion:
-        showVersion(deviceList, rsmi_sw_component_t.RSMI_SW_COMP_DRIVER)
+        showDriverVersion(deviceList, rsmi_sw_component_t.RSMI_SW_COMP_DRIVER)
     if args.showtempgraph:
         showTempGraph(deviceList)
     if args.showid:
