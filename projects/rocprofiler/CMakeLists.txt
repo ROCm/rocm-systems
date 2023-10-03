@@ -60,7 +60,7 @@ if(NOT DEFINED ROCM_PATH)
         "/opt/rocm"
         CACHE STRING "Default ROCM installation directory")
 endif()
-
+set(CMAKE_INSTALL_LIBDIR "lib" CACHE STRING "Library install directory")
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(THREADS_PREFER_PTHREAD_FLAG ON)

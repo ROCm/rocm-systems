@@ -109,55 +109,151 @@ file(GLOB HSASingleton_TEST_SRC_FILES ${CMAKE_CURRENT_SOURCE_DIR}/HSASingleton/*
 file(GLOB ROCProfiler_Singleton_TEST_SRC_FILES ${CMAKE_CURRENT_SOURCE_DIR}/ROCProfiler_Singleton/*.cpp)
 file(GLOB GTEST_SRC_FILES ${CMAKE_CURRENT_SOURCE_DIR}/*.cpp)
 
+# Getting HSA Include Directory
+get_property(
+    HSA_RUNTIME_INCLUDE_DIRECTORIES
+    TARGET hsa-runtime64::hsa-runtime64
+    PROPERTY INTERFACE_INCLUDE_DIRECTORIES)
+find_file(
+    HSA_H hsa.h
+    PATHS ${HSA_RUNTIME_INCLUDE_DIRECTORIES}
+    PATH_SUFFIXES hsa
+    NO_DEFAULT_PATH REQUIRED)
+get_filename_component(HSA_RUNTIME_INC_PATH ${HSA_H} DIRECTORY)
+# ########################################################################################
+# ROCProfiler Tracer HIP/HSA Parsing
+# ########################################################################################
+get_property(
+    HIP_INCLUDE_DIRECTORIES
+    TARGET hip::amdhip64
+    PROPERTY INTERFACE_INCLUDE_DIRECTORIES)
+find_file(
+    HIP_RUNTIME_API_H hip_runtime_api.h
+    PATHS ${HIP_INCLUDE_DIRECTORIES}
+    PATH_SUFFIXES hip
+    NO_DEFAULT_PATH REQUIRED)
+
+# # Generate the HSA wrapper functions header
+add_custom_command(
+    OUTPUT hsa_prof_str.h hsa_prof_str.inline.h
+    COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/script/hsaap.py
+            ${CMAKE_CURRENT_BINARY_DIR} "${HSA_RUNTIME_INC_PATH}" > /dev/null
+    DEPENDS ${PROJECT_SOURCE_DIR}/script/hsaap.py
+            "${HSA_RUNTIME_INC_PATH}/hsa.h"
+            "${HSA_RUNTIME_INC_PATH}/hsa_ext_amd.h"
+            "${HSA_RUNTIME_INC_PATH}/hsa_ext_image.h"
+            "${HSA_RUNTIME_INC_PATH}/hsa_api_trace.h"
+    COMMENT "Generating hsa_prof_str.h,hsa_prof_str.inline.h...")
+
+# # Generate the HSA pretty printers
+add_custom_command(
+    OUTPUT hsa_ostream_ops.h
+    COMMAND ${CMAKE_C_COMPILER} -E "${HSA_RUNTIME_INC_PATH}/hsa.h" -o hsa.h.i
+    COMMAND ${CMAKE_C_COMPILER} -E "${HSA_RUNTIME_INC_PATH}/hsa_ext_amd.h" -o
+            hsa_ext_amd.h.i
+    BYPRODUCTS hsa.h.i hsa_ext_amd.h.i
+    COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/script/gen_ostream_ops.py -in
+            hsa.h.i,hsa_ext_amd.h.i -out hsa_ostream_ops.h > /dev/null
+    DEPENDS ${PROJECT_SOURCE_DIR}/script/gen_ostream_ops.py
+            "${HSA_RUNTIME_INC_PATH}/hsa.h" "${HSA_RUNTIME_INC_PATH}/hsa_ext_amd.h"
+    COMMENT "Generating hsa_ostream_ops.h...")
+
+get_property(
+    HIP_INCLUDE_DIRECTORIES
+    TARGET hip::amdhip64
+    PROPERTY INTERFACE_INCLUDE_DIRECTORIES)
+find_file(
+    HIP_RUNTIME_API_H hip_runtime_api.h
+    PATHS ${HIP_INCLUDE_DIRECTORIES}
+    PATH_SUFFIXES hip
+    NO_DEFAULT_PATH REQUIRED)
+
+# Generate the HIP pretty printers
+add_custom_command(
+    OUTPUT hip_ostream_ops.h
+    COMMAND
+        ${CMAKE_C_COMPILER}
+        "$<$<BOOL:${HIP_INCLUDE_DIRECTORIES}>:-I$<JOIN:${HIP_INCLUDE_DIRECTORIES},$<SEMICOLON>-I>>"
+        -E "${HIP_RUNTIME_API_H}" -D__HIP_PLATFORM_AMD__=1 -D__HIP_ROCclr__=1 -o
+        hip_runtime_api.h.i
+    BYPRODUCTS hip_runtime_api.h.i
+    COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/script/gen_ostream_ops.py -in
+            hip_runtime_api.h.i -out hip_ostream_ops.h > /dev/null
+    DEPENDS ${PROJECT_SOURCE_DIR}/script/gen_ostream_ops.py "${HIP_RUNTIME_API_H}"
+    COMMENT "Generating hip_ostream_ops.h..."
+    COMMAND_EXPAND_LISTS)
+
+set(GENERATED_SOURCES hip_ostream_ops.h hsa_prof_str.h hsa_ostream_ops.h
+                      hsa_prof_str.inline.h)
+
 set(runCoreUnitTests_SOURCES
-     ${GTEST_SRC_FILES}
-     ${HSASingleton_TEST_SRC_FILES}
-     ${ROCProfiler_Singleton_TEST_SRC_FILES}
-     ${CORE_MEMORY_SRC_FILES}
-     ${CORE_SESSION_SRC_FILES}
-     ${CORE_FILTER_SRC_FILES}
-     ${CORE_DEVICE_PROFILING_SRC_FILES}
-     ${CORE_COUNTERS_SAMPLER_SRC_FILES}
-     ${CORE_HW_SRC_FILES}
-     ${CORE_UTILS_SRC_FILES}
-     ${ROCPROFILER_SPM_SRC_FILES}
-     ${ROCPROFILER_SRC_FILES}
-     ${CORE_HSA_SRC_FILES}
-     ${CORE_HSA_PACKETS_SRC_FILES}
-     ${CORE_COUNTERS_SRC_FILES}
-     ${CORE_HSA_QUEUES_SRC_FILES}
-     ${ROCPROFILER_TRACER_SRC_FILES}
-     ${ROCPROFILER_ROCTRACER_SRC_FILES}
-     ${CORE_COUNTERS_METRICS_SRC_FILES}
-     ${CORE_COUNTERS_MMIO_SRC_FILES}
-     ${CORE_COUNTERS_PARENT_SRC_FILES}
-     ${CORE_PC_SAMPLING_FILES})
+    ${GTEST_SRC_FILES}
+    ${GENERATED_SOURCES}
+    ${HSASingleton_TEST_SRC_FILES}
+    ${ROCProfiler_Singleton_TEST_SRC_FILES}
+    ${CORE_MEMORY_SRC_FILES}
+    ${CORE_SESSION_SRC_FILES}
+    ${CORE_FILTER_SRC_FILES}
+    ${CORE_DEVICE_PROFILING_SRC_FILES}
+    ${CORE_COUNTERS_SAMPLER_SRC_FILES}
+    ${CORE_HW_SRC_FILES}
+    ${CORE_UTILS_SRC_FILES}
+    ${ROCPROFILER_SPM_SRC_FILES}
+    ${ROCPROFILER_SRC_FILES}
+    ${CORE_HSA_SRC_FILES}
+    ${CORE_HSA_PACKETS_SRC_FILES}
+    ${CORE_COUNTERS_SRC_FILES}
+    ${CORE_HSA_QUEUES_SRC_FILES}
+    ${ROCPROFILER_TRACER_SRC_FILES}
+    ${ROCPROFILER_ROCTRACER_SRC_FILES}
+    ${CORE_COUNTERS_METRICS_SRC_FILES}
+    ${CORE_COUNTERS_MMIO_SRC_FILES}
+    ${CORE_COUNTERS_PARENT_SRC_FILES}
+    ${CORE_PC_SAMPLING_FILES})
+
 
 add_executable(runCoreUnitTests ${runCoreUnitTests_SOURCES})
-
-set_target_properties(runCoreUnitTests PROPERTIES INSTALL_RPATH "\$ORIGIN")
-
 target_include_directories(
      runCoreUnitTests
-     PRIVATE ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/src ${PROJECT_SOURCE_DIR}/inc
-     ${CMAKE_CURRENT_SOURCE_DIR} ${PROJECT_BINARY_DIR}
-     ${PROJECT_BINARY_DIR}/rocprofiler)
+     PUBLIC ${HIP_INCLUDE_DIRECTORIES}
+           ${HSA_RUNTIME_INCLUDE_DIRECTORIES}
+           $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
+           $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include/rocprofiler/v2>
+           $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+    PRIVATE ${LIB_DIR} ${ROOT_DIR} ${CMAKE_CURRENT_BINARY_DIR} ${PROJECT_SOURCE_DIR})
+
 
 target_compile_definitions(
      runCoreUnitTests
      PUBLIC AMD_INTERNAL_BUILD
      PRIVATE PROF_API_IMPL HIP_PROF_HIP_API_STRING=1 __HIP_PLATFORM_AMD__=1)
+target_link_libraries(runCoreUnitTests PRIVATE rocprofiler::build-flags)
 
 target_link_libraries(
-     runCoreUnitTests PRIVATE rocprofiler_tool test_hsatool_library ${AQLPROFILE_LIB} hsa-runtime64::hsa-runtime64
-     GTest::gtest GTest::gtest_main stdc++fs ${PCIACCESS_LIBRARIES})
+    runCoreUnitTests
+    PRIVATE ${AQLPROFILE_LIB}
+            test_hsatool_library
+            hsa-runtime64::hsa-runtime64
+            Threads::Threads
+            GTest::gtest GTest::gtest_main
+            atomic
+            numa
+            dl
+            c
+            stdc++
+            stdc++fs
+            amd_comgr
+            dw
+            elf
+            ${PCIACCESS_LIBRARIES}
+            rocprofiler::memcheck)
 
 add_dependencies(tests runCoreUnitTests)
 install(TARGETS runCoreUnitTests
      RUNTIME DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/tests
      COMPONENT tests)
 
-# add_test(AllTests runCoreUnitTests)
+
 include(GoogleTest)
 
 set(GTEST_DISCOVER_TESTS_TARGET runCoreUnitTests)
