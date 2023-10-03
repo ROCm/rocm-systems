@@ -337,10 +337,10 @@ class file_plugin_t {
       CHECK_ROCPROFILER(rocprofiler_query_kernel_info(
           ROCPROFILER_KERNEL_NAME, profiler_record->kernel_id, &kernel_name_c));
     }
-    if (!counter_header_written_ && profiler_record->counters) {
-      counter_header_written_ = true;
-
-      for (uint64_t i = 0; i < profiler_record->counters_count.value; i++) {
+    
+    if (!counter_header_written_) {
+      if(profiler_record->counters){
+          for (uint64_t i = 0; i < profiler_record->counters_count.value; i++) {
         auto counter_handler = profiler_record->counters[i].counter_handler;
         if (!counter_handler.handle) continue;
 
@@ -360,7 +360,7 @@ class file_plugin_t {
       }
       *output_file << '\n';
     }
-    else{ //kernel trace condition
+      counter_header_written_ = true;
       *output_file << '\n';
     }
 
