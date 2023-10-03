@@ -133,15 +133,6 @@ find_package(
 find_library(NUMA NAME numa REQUIRED)
 link_libraries(${NUMA})
 
-find_program(
-    ROCMINFO_EXEC
-    NAMES "rocminfo"
-    PATHS ${ROCM_PATH} ${CMAKE_INSTALL_PREFIX} "/usr/local" "/usr"
-    PATH_SUFFIXES bin)
-set(ORIGINAL_SCRIPT_PATH ${CMAKE_CURRENT_SOURCE_DIR}/bin/tblextr.py)
-set(OUTPUT_SCRIPT_PATH ${CMAKE_CURRENT_BINARY_DIR}/bin/tblextr.py)
-configure_file(${ORIGINAL_SCRIPT_PATH} ${OUTPUT_SCRIPT_PATH} @ONLY)
-
 get_property(
     HSA_RUNTIME_INCLUDE_DIRECTORIES
     TARGET hsa-runtime64::hsa-runtime64
@@ -227,6 +218,11 @@ if(DEFINED CPACK_PACKAGING_INSTALL_PREFIX)
 else()
     set(CPACK_PACKAGING_INSTALL_PREFIX ${CMAKE_INSTALL_PREFIX})
 endif()
+
+set(ORIGINAL_SCRIPT_PATH ${CMAKE_CURRENT_SOURCE_DIR}/bin/tblextr.py)
+set(OUTPUT_SCRIPT_PATH ${CMAKE_CURRENT_BINARY_DIR}/bin/tblextr.py)
+configure_file(${ORIGINAL_SCRIPT_PATH} ${OUTPUT_SCRIPT_PATH} @ONLY)
+
 message("CMake-install-prefix: ${CMAKE_INSTALL_PREFIX}")
 message("CPack-install-prefix: ${CPACK_PACKAGING_INSTALL_PREFIX}")
 message("-----------Dest-name: ${DEST_NAME}")
