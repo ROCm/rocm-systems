@@ -382,8 +382,12 @@ install(
 install(
     PROGRAMS ${CMAKE_BINARY_DIR}/lib/lib${ROCPROFILER_LIBRARY_V1_NAME}.so
     TYPE LIB COMPONENT dev)
-
-
+install(
+    PROGRAMS ${CMAKE_BINARY_DIR}/lib/lib${ROCPROFILER_LIBRARY_V2_NAME}v2.so
+    TYPE LIB COMPONENT asan)
+install(
+    PROGRAMS ${CMAKE_BINARY_DIR}/lib/lib${ROCPROFILER_LIBRARY_V1_NAME}.so
+    TYPE LIB COMPONENT asan)
 
 configure_file(
     ${PROJECT_SOURCE_DIR}/src/core/counters/metrics/basic_counters.xml
