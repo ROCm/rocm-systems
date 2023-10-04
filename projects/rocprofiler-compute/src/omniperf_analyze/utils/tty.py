@@ -25,6 +25,7 @@
 import pandas as pd
 from pathlib import Path
 from tabulate import tabulate
+import sys
 
 from omniperf_analyze.utils import schema, parser
 
@@ -110,20 +111,23 @@ def show_all(args, runs, archConfigs, output):
                                             float(x) if x != "" else float(0)
                                             for x in cur_df[header]
                                         ]
-                                        t_df = (
-                                            pd.concat(
-                                                [
-                                                    base_df[header],
-                                                    cur_df[header],
-                                                ],
-                                                axis=1,
-                                            )
-                                            .pct_change(axis="columns")
-                                            .iloc[:, 1]
+                                        t_df = pd.concat(
+                                            [
+                                                base_df[header],
+                                                cur_df[header],
+                                            ],
+                                            axis=1,
                                         )
+                                        diff = t_df.iloc[:, 1] - t_df.iloc[:, 0]
+                                        t_df = diff / t_df.iloc[:, 0].replace(0, 1)
                                         if args.verbose >= 2:
                                             print("---------", header, t_df)
 
+                                        t_df_pretty = (
+                                            t_df.astype(float)
+                                            .mul(100)
+                                            .round(args.decimal)
+                                        )
                                         # show value + percentage
                                         # TODO: better alignment
                                         t_df = (
@@ -132,12 +136,23 @@ def show_all(args, runs, archConfigs, output):
                                             .round(args.decimal)
                                             .map(str)
                                             + " ("
-                                            + t_df.astype(float)
-                                            .mul(100)
-                                            .round(args.decimal)
-                                            .map(str)
+                                            + t_df_pretty.map(str)
                                             + "%)"
                                         )
+                                        # DEBUG: When in a CI setting and flag is set,
+                                        #       then verify metrics meet threshold requirement
+                                        if args.report_diff:
+                                            if (
+                                                t_df_pretty.abs()
+                                                .gt(args.report_diff)
+                                                .any()
+                                            ):
+                                                print(
+                                                    "DEBUG ERROR: Dataframe diff exceeds {} threshold requirement".format(
+                                                        str(args.report_diff) + "%"
+                                                    )
+                                                )
+                                                sys.exit(1)
 
                                         df = pd.concat([df, t_df], axis=1)
                                     else:

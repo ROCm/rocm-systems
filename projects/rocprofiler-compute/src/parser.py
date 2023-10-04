@@ -522,3 +522,6 @@ def parse(my_parser):
         default=5,
         type=int,
     )
+    analyze_group.add_argument(
+        "--report-diff", default=0, nargs="?", type=int, help=argparse.SUPPRESS
+    )
