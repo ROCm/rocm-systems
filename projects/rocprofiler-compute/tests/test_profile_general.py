@@ -6,6 +6,7 @@ from importlib.machinery import SourceFileLoader
 import pandas as pd
 import subprocess
 import re
+import shutil
 
 omniperf = SourceFileLoader("omniperf", "src/omniperf").load_module()
 workload_1 = os.path.realpath("workload")
@@ -38,6 +39,36 @@ ALL_CSVS = [
     "sysinfo.csv",
     "timestamps.csv",
 ]
+ALL_CSVS_MI200 = [
+    "SQ_IFETCH_LEVEL.csv",
+    "SQ_INST_LEVEL_LDS.csv",
+    "SQ_INST_LEVEL_SMEM.csv",
+    "SQ_INST_LEVEL_VMEM.csv",
+    "SQ_LEVEL_WAVES.csv",
+    "pmc_perf.csv",
+    "pmc_perf_0.csv",
+    "pmc_perf_1.csv",
+    "pmc_perf_10.csv",
+    "pmc_perf_11.csv",
+    "pmc_perf_12.csv",
+    "pmc_perf_13.csv",
+    "pmc_perf_14.csv",
+    "pmc_perf_15.csv",
+    "pmc_perf_16.csv",
+    "pmc_perf_2.csv",
+    "pmc_perf_3.csv",
+    "pmc_perf_4.csv",
+    "pmc_perf_5.csv",
+    "pmc_perf_6.csv",
+    "pmc_perf_7.csv",
+    "pmc_perf_8.csv",
+    "pmc_perf_9.csv",
+    "roofline.csv",
+    "sysinfo.csv",
+    "timestamps.csv",
+]
+
+ROOF_ONLY_CSVS = ['pmc_perf.csv', 'pmc_perf_0.csv', 'pmc_perf_1.csv', 'pmc_perf_2.csv', 'roofline.csv', 'sysinfo.csv', 'timestamps.csv']
 
 
 def run(cmd):
@@ -76,6 +107,8 @@ soc = gpu_soc()
 
 
 def test_path():
+    if os.path.exists(workload_1):
+        shutil.rmtree(workload_1)
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
@@ -94,21 +127,28 @@ def test_path():
             omniperf.main()
     # assert successful run
     assert e.value.code == 0
-    workload_1_dir = workload_1 + "/app_1/" + soc
-    files_in_workload = os.listdir(workload_1_dir)
+    
+    files_in_workload = os.listdir(workload_1)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
+            file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             print("length is: ", len(file_dict[file].index))
             print(file_dict[file])
             assert len(file_dict[file].index)
-    assert sorted(list(file_dict.keys())) == ALL_CSVS
+    print(sorted(list(file_dict.keys())))
+    if soc == "mi200":
+        print(sorted(list(file_dict.keys())))
+        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
+    else:
+        assert sorted(list(file_dict.keys())) == ALL_CSVS
 
 
 def test_kernel():
+    if os.path.exists(workload_1):
+        shutil.rmtree(workload_1)
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
@@ -131,19 +171,25 @@ def test_kernel():
 
     # assert successful run
     assert e.value.code == 0
-    workload_1_dir = workload_1 + "/app_1/" + soc
-    files_in_workload = os.listdir(workload_1_dir)
+    
+    files_in_workload = os.listdir(workload_1)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
+            file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             assert len(file_dict[file].index)
-    assert sorted(list(file_dict.keys())) == ALL_CSVS
+    if soc == "mi200":
+        print(sorted(list(file_dict.keys())))
+        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
+    else:
+        assert sorted(list(file_dict.keys())) == ALL_CSVS
 
 
 def test_kernel_summaries():
+    if os.path.exists(workload_1):
+        shutil.rmtree(workload_1)
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
@@ -165,19 +211,25 @@ def test_kernel_summaries():
 
     # assert successful run
     assert e.value.code == 0
-    workload_1_dir = workload_1 + "/app_1/" + soc
-    files_in_workload = os.listdir(workload_1_dir)
+    
+    files_in_workload = os.listdir(workload_1)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
+            file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             assert len(file_dict[file].index)
-    assert sorted(list(file_dict.keys())) == ALL_CSVS
+    if soc == "mi200":
+        print(sorted(list(file_dict.keys())))
+        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
+    else:
+        assert sorted(list(file_dict.keys())) == ALL_CSVS
 
 
 def test_ipblocks_SQ():
+    if os.path.exists(workload_1):
+        shutil.rmtree(workload_1)
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
@@ -199,17 +251,17 @@ def test_ipblocks_SQ():
 
     # assert successful run
     assert e.value.code == 0
-    workload_1_dir = workload_1 + "/app_1/" + soc
-    files_in_workload = os.listdir(workload_1_dir)
+    
+    files_in_workload = os.listdir(workload_1)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
+            file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             assert len(file_dict[file].index)
     print(sorted(list(file_dict.keys())))
-    assert sorted(list(file_dict.keys())) == [
+    expected_csvs = [
         "SQ_IFETCH_LEVEL.csv",
         "SQ_INST_LEVEL_LDS.csv",
         "SQ_INST_LEVEL_SMEM.csv",
@@ -228,9 +280,38 @@ def test_ipblocks_SQ():
         "sysinfo.csv",
         "timestamps.csv",
     ]
+    if soc == "mi200":
+        expected_csvs = [
+            "SQ_IFETCH_LEVEL.csv",
+            "SQ_INST_LEVEL_LDS.csv",
+            "SQ_INST_LEVEL_SMEM.csv",
+            "SQ_INST_LEVEL_VMEM.csv",
+            "SQ_LEVEL_WAVES.csv",
+            "pmc_perf.csv",
+            "pmc_perf_0.csv",
+            "pmc_perf_1.csv",
+            "pmc_perf_10.csv",
+            "pmc_perf_11.csv",
+            "pmc_perf_12.csv",
+            "pmc_perf_2.csv",
+            "pmc_perf_3.csv",
+            "pmc_perf_4.csv",
+            "pmc_perf_5.csv",
+            "pmc_perf_6.csv",
+            "pmc_perf_7.csv",
+            "pmc_perf_8.csv",
+            "pmc_perf_9.csv",
+            "roofline.csv",
+            "sysinfo.csv",
+            "timestamps.csv",
+        ]
+
+    assert sorted(list(file_dict.keys())) == expected_csvs
 
 
 def test_ipblocks_SQC():
+    if os.path.exists(workload_1):
+        shutil.rmtree(workload_1)
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
@@ -252,17 +333,17 @@ def test_ipblocks_SQC():
 
     # assert successful run
     assert e.value.code == 0
-    workload_1_dir = workload_1 + "/app_1/" + soc
-    files_in_workload = os.listdir(workload_1_dir)
+    
+    files_in_workload = os.listdir(workload_1)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
+            file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             assert len(file_dict[file].index)
     print(sorted(list(file_dict.keys())))
-    assert sorted(list(file_dict.keys())) == [
+    expected_csvs = [
         "pmc_perf.csv",
         "pmc_perf_0.csv",
         "pmc_perf_1.csv",
@@ -271,9 +352,15 @@ def test_ipblocks_SQC():
         "sysinfo.csv",
         "timestamps.csv",
     ]
+    if soc == "mi200":
+        expected_csvs.insert(5, "roofline.csv")
+
+    assert sorted(list(file_dict.keys())) == expected_csvs
 
 
 def test_ipblocks_TA():
+    if os.path.exists(workload_1):
+        shutil.rmtree(workload_1)
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
@@ -295,18 +382,19 @@ def test_ipblocks_TA():
 
     # assert successful run
     assert e.value.code == 0
-    workload_1_dir = workload_1 + "/app_1/" + soc
-    files_in_workload = os.listdir(workload_1_dir)
+    
+    files_in_workload = os.listdir(workload_1)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
+            file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             assert len(file_dict[file].index)
 
     print(sorted(list(file_dict.keys())))
-    assert sorted(list(file_dict.keys())) == [
+
+    expected_csvs = [
         "pmc_perf.csv",
         "pmc_perf_0.csv",
         "pmc_perf_1.csv",
@@ -319,9 +407,15 @@ def test_ipblocks_TA():
         "sysinfo.csv",
         "timestamps.csv",
     ]
+    if soc == "mi200":
+        expected_csvs.insert(9, "roofline.csv")
+
+    assert sorted(list(file_dict.keys())) == expected_csvs
 
 
 def test_ipblocks_TD():
+    if os.path.exists(workload_1):
+        shutil.rmtree(workload_1)
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
@@ -343,18 +437,19 @@ def test_ipblocks_TD():
 
     # assert successful run
     assert e.value.code == 0
-    workload_1_dir = workload_1 + "/app_1/" + soc
-    files_in_workload = os.listdir(workload_1_dir)
+    
+    files_in_workload = os.listdir(workload_1)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
+            file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             assert len(file_dict[file].index)
 
     print(sorted(list(file_dict.keys())))
-    assert sorted(list(file_dict.keys())) == [
+
+    expected_csvs = [
         "pmc_perf.csv",
         "pmc_perf_0.csv",
         "pmc_perf_1.csv",
@@ -362,9 +457,24 @@ def test_ipblocks_TD():
         "sysinfo.csv",
         "timestamps.csv",
     ]
+    if soc == "mi200":
+        expected_csvs = [
+            "pmc_perf.csv",
+            "pmc_perf_0.csv",
+            "pmc_perf_1.csv",
+            "pmc_perf_2.csv",
+            "pmc_perf_3.csv",
+            "roofline.csv",
+            "sysinfo.csv",
+            "timestamps.csv",
+        ]
+
+    assert sorted(list(file_dict.keys())) == expected_csvs
 
 
 def test_ipblocks_TCP():
+    if os.path.exists(workload_1):
+        shutil.rmtree(workload_1)
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
@@ -386,17 +496,18 @@ def test_ipblocks_TCP():
 
     # assert successful run
     assert e.value.code == 0
-    workload_1_dir = workload_1 + "/app_1/" + soc
-    files_in_workload = os.listdir(workload_1_dir)
+    
+    files_in_workload = os.listdir(workload_1)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
+            file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             assert len(file_dict[file].index)
     print(sorted(list(file_dict.keys())))
-    assert sorted(list(file_dict.keys())) == [
+
+    expected_csvs = [
         "pmc_perf.csv",
         "pmc_perf_0.csv",
         "pmc_perf_1.csv",
@@ -411,9 +522,15 @@ def test_ipblocks_TCP():
         "sysinfo.csv",
         "timestamps.csv",
     ]
+    if soc == "mi200":
+        expected_csvs.insert(11, "roofline.csv")
+
+    assert sorted(list(file_dict.keys())) == expected_csvs
 
 
 def test_ipblocks_TCC():
+    if os.path.exists(workload_1):
+        shutil.rmtree(workload_1)
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
@@ -435,18 +552,18 @@ def test_ipblocks_TCC():
 
     # assert successful run
     assert e.value.code == 0
-    workload_1_dir = workload_1 + "/app_1/" + soc
-    files_in_workload = os.listdir(workload_1_dir)
+    
+    files_in_workload = os.listdir(workload_1)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
+            file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             assert len(file_dict[file].index)
 
     print(sorted(list(file_dict.keys())))
-    assert sorted(list(file_dict.keys())) == [
+    expected_csvs = [
         "pmc_perf.csv",
         "pmc_perf_0.csv",
         "pmc_perf_1.csv",
@@ -462,9 +579,15 @@ def test_ipblocks_TCC():
         "sysinfo.csv",
         "timestamps.csv",
     ]
+    if soc == "mi200":
+        expected_csvs.insert(12, "roofline.csv")
+
+    assert sorted(list(file_dict.keys())) == expected_csvs
 
 
 def test_ipblocks_SPI():
+    if os.path.exists(workload_1):
+        shutil.rmtree(workload_1)
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
@@ -486,17 +609,18 @@ def test_ipblocks_SPI():
 
     # assert successful run
     assert e.value.code == 0
-    workload_1_dir = workload_1 + "/app_1/" + soc
-    files_in_workload = os.listdir(workload_1_dir)
+    
+    files_in_workload = os.listdir(workload_1)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
+            file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             assert len(file_dict[file].index)
     print(sorted(list(file_dict.keys())))
-    assert sorted(list(file_dict.keys())) == [
+
+    expected_csvs = [
         "pmc_perf.csv",
         "pmc_perf_0.csv",
         "pmc_perf_1.csv",
@@ -510,9 +634,15 @@ def test_ipblocks_SPI():
         "sysinfo.csv",
         "timestamps.csv",
     ]
+    if soc == "mi200":
+        expected_csvs.insert(10, "roofline.csv")
+
+    assert sorted(list(file_dict.keys())) == expected_csvs
 
 
 def test_ipblocks_CPC():
+    if os.path.exists(workload_1):
+        shutil.rmtree(workload_1)
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
@@ -534,17 +664,17 @@ def test_ipblocks_CPC():
 
     # assert successful run
     assert e.value.code == 0
-    workload_1_dir = workload_1 + "/app_1/" + soc
-    files_in_workload = os.listdir(workload_1_dir)
+    
+    files_in_workload = os.listdir(workload_1)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
+            file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             assert len(file_dict[file].index)
     print(sorted(list(file_dict.keys())))
-    assert sorted(list(file_dict.keys())) == [
+    expected_csvs = [
         "pmc_perf.csv",
         "pmc_perf_0.csv",
         "pmc_perf_1.csv",
@@ -555,9 +685,14 @@ def test_ipblocks_CPC():
         "sysinfo.csv",
         "timestamps.csv",
     ]
+    if soc == "mi200":
+        expected_csvs.insert(7, "roofline.csv")
+    assert sorted(list(file_dict.keys())) == expected_csvs
 
 
 def test_ipblocks_CPF():
+    if os.path.exists(workload_1):
+        shutil.rmtree(workload_1)
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
@@ -579,17 +714,17 @@ def test_ipblocks_CPF():
 
     # assert successful run
     assert e.value.code == 0
-    workload_1_dir = workload_1 + "/app_1/" + soc
-    files_in_workload = os.listdir(workload_1_dir)
+    
+    files_in_workload = os.listdir(workload_1)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
+            file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             assert len(file_dict[file].index)
     print(sorted(list(file_dict.keys())))
-    assert sorted(list(file_dict.keys())) == [
+    expected_csvs = [
         "pmc_perf.csv",
         "pmc_perf_0.csv",
         "pmc_perf_1.csv",
@@ -598,9 +733,14 @@ def test_ipblocks_CPF():
         "sysinfo.csv",
         "timestamps.csv",
     ]
+    if soc == "mi200":
+        expected_csvs.insert(5, "roofline.csv")
+    assert sorted(list(file_dict.keys())) == expected_csvs
 
 
 def test_ipblocks_SQ_CPC():
+    if os.path.exists(workload_1):
+        shutil.rmtree(workload_1)
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
@@ -623,18 +763,18 @@ def test_ipblocks_SQ_CPC():
 
     # assert successful run
     assert e.value.code == 0
-    workload_1_dir = workload_1 + "/app_1/" + soc
-    files_in_workload = os.listdir(workload_1_dir)
+    
+    files_in_workload = os.listdir(workload_1)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
+            file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             assert len(file_dict[file].index)
 
     print(sorted(list(file_dict.keys())))
-    assert sorted(list(file_dict.keys())) == [
+    expected_csvs = [
         "SQ_IFETCH_LEVEL.csv",
         "SQ_INST_LEVEL_LDS.csv",
         "SQ_INST_LEVEL_SMEM.csv",
@@ -653,9 +793,38 @@ def test_ipblocks_SQ_CPC():
         "sysinfo.csv",
         "timestamps.csv",
     ]
+    if soc == "mi200":
+        expected_csvs = [
+            "SQ_IFETCH_LEVEL.csv",
+            "SQ_INST_LEVEL_LDS.csv",
+            "SQ_INST_LEVEL_SMEM.csv",
+            "SQ_INST_LEVEL_VMEM.csv",
+            "SQ_LEVEL_WAVES.csv",
+            "pmc_perf.csv",
+            "pmc_perf_0.csv",
+            "pmc_perf_1.csv",
+            "pmc_perf_10.csv",
+            "pmc_perf_11.csv",
+            "pmc_perf_12.csv",
+            "pmc_perf_2.csv",
+            "pmc_perf_3.csv",
+            "pmc_perf_4.csv",
+            "pmc_perf_5.csv",
+            "pmc_perf_6.csv",
+            "pmc_perf_7.csv",
+            "pmc_perf_8.csv",
+            "pmc_perf_9.csv",
+            "roofline.csv",
+            "sysinfo.csv",
+            "timestamps.csv",
+        ]
+
+    assert sorted(list(file_dict.keys())) == expected_csvs
 
 
 def test_ipblocks_SQ_TA():
+    if os.path.exists(workload_1):
+        shutil.rmtree(workload_1)
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
@@ -678,18 +847,18 @@ def test_ipblocks_SQ_TA():
 
     # assert successful run
     assert e.value.code == 0
-    workload_1_dir = workload_1 + "/app_1/" + soc
-    files_in_workload = os.listdir(workload_1_dir)
+    
+    files_in_workload = os.listdir(workload_1)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
+            file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             assert len(file_dict[file].index)
 
     print(sorted(list(file_dict.keys())))
-    assert sorted(list(file_dict.keys())) == [
+    expected_csvs = [
         "SQ_IFETCH_LEVEL.csv",
         "SQ_INST_LEVEL_LDS.csv",
         "SQ_INST_LEVEL_SMEM.csv",
@@ -708,9 +877,37 @@ def test_ipblocks_SQ_TA():
         "sysinfo.csv",
         "timestamps.csv",
     ]
+    if soc == "mi200":
+        expected_csvs = [
+            "SQ_IFETCH_LEVEL.csv",
+            "SQ_INST_LEVEL_LDS.csv",
+            "SQ_INST_LEVEL_SMEM.csv",
+            "SQ_INST_LEVEL_VMEM.csv",
+            "SQ_LEVEL_WAVES.csv",
+            "pmc_perf.csv",
+            "pmc_perf_0.csv",
+            "pmc_perf_1.csv",
+            "pmc_perf_10.csv",
+            "pmc_perf_11.csv",
+            "pmc_perf_12.csv",
+            "pmc_perf_2.csv",
+            "pmc_perf_3.csv",
+            "pmc_perf_4.csv",
+            "pmc_perf_5.csv",
+            "pmc_perf_6.csv",
+            "pmc_perf_7.csv",
+            "pmc_perf_8.csv",
+            "pmc_perf_9.csv",
+            "roofline.csv",
+            "sysinfo.csv",
+            "timestamps.csv",
+        ]
+    assert sorted(list(file_dict.keys())) == expected_csvs
 
 
 def test_ipblocks_SQ_SPI():
+    if os.path.exists(workload_1):
+        shutil.rmtree(workload_1)
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
@@ -733,18 +930,18 @@ def test_ipblocks_SQ_SPI():
 
     # assert successful run
     assert e.value.code == 0
-    workload_1_dir = workload_1 + "/app_1/" + soc
-    files_in_workload = os.listdir(workload_1_dir)
+    
+    files_in_workload = os.listdir(workload_1)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
+            file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             assert len(file_dict[file].index)
 
     print(sorted(list(file_dict.keys())))
-    assert sorted(list(file_dict.keys())) == [
+    expected_csvs = [
         "SQ_IFETCH_LEVEL.csv",
         "SQ_INST_LEVEL_LDS.csv",
         "SQ_INST_LEVEL_SMEM.csv",
@@ -763,9 +960,37 @@ def test_ipblocks_SQ_SPI():
         "sysinfo.csv",
         "timestamps.csv",
     ]
+    if soc == "mi200":
+        expected_csvs = [
+            "SQ_IFETCH_LEVEL.csv",
+            "SQ_INST_LEVEL_LDS.csv",
+            "SQ_INST_LEVEL_SMEM.csv",
+            "SQ_INST_LEVEL_VMEM.csv",
+            "SQ_LEVEL_WAVES.csv",
+            "pmc_perf.csv",
+            "pmc_perf_0.csv",
+            "pmc_perf_1.csv",
+            "pmc_perf_10.csv",
+            "pmc_perf_11.csv",
+            "pmc_perf_12.csv",
+            "pmc_perf_2.csv",
+            "pmc_perf_3.csv",
+            "pmc_perf_4.csv",
+            "pmc_perf_5.csv",
+            "pmc_perf_6.csv",
+            "pmc_perf_7.csv",
+            "pmc_perf_8.csv",
+            "pmc_perf_9.csv",
+            "roofline.csv",
+            "sysinfo.csv",
+            "timestamps.csv",
+        ]
+    assert sorted(list(file_dict.keys())) == expected_csvs
 
 
 def test_ipblocks_SQ_SQC_TCP_CPC():
+    if os.path.exists(workload_1):
+        shutil.rmtree(workload_1)
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
@@ -790,18 +1015,18 @@ def test_ipblocks_SQ_SQC_TCP_CPC():
 
     # assert successful run
     assert e.value.code == 0
-    workload_1_dir = workload_1 + "/app_1/" + soc
-    files_in_workload = os.listdir(workload_1_dir)
+    
+    files_in_workload = os.listdir(workload_1)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
+            file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             assert len(file_dict[file].index)
 
     print(sorted(list(file_dict.keys())))
-    assert sorted(list(file_dict.keys())) == [
+    expected_csvs = [
         "SQ_IFETCH_LEVEL.csv",
         "SQ_INST_LEVEL_LDS.csv",
         "SQ_INST_LEVEL_SMEM.csv",
@@ -821,9 +1046,37 @@ def test_ipblocks_SQ_SQC_TCP_CPC():
         "sysinfo.csv",
         "timestamps.csv",
     ]
+    if soc == "mi200":
+        expected_csvs = [
+            "SQ_IFETCH_LEVEL.csv",
+            "SQ_INST_LEVEL_LDS.csv",
+            "SQ_INST_LEVEL_SMEM.csv",
+            "SQ_INST_LEVEL_VMEM.csv",
+            "SQ_LEVEL_WAVES.csv",
+            "pmc_perf.csv",
+            "pmc_perf_0.csv",
+            "pmc_perf_1.csv",
+            "pmc_perf_10.csv",
+            "pmc_perf_11.csv",
+            "pmc_perf_12.csv",
+            "pmc_perf_2.csv",
+            "pmc_perf_3.csv",
+            "pmc_perf_4.csv",
+            "pmc_perf_5.csv",
+            "pmc_perf_6.csv",
+            "pmc_perf_7.csv",
+            "pmc_perf_8.csv",
+            "pmc_perf_9.csv",
+            "roofline.csv",
+            "sysinfo.csv",
+            "timestamps.csv",
+        ]
+    assert sorted(list(file_dict.keys())) == expected_csvs
 
 
 def test_ipblocks_SQ_SPI_TA_TCC_CPF():
+    if os.path.exists(workload_1):
+        shutil.rmtree(workload_1)
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
@@ -849,18 +1102,18 @@ def test_ipblocks_SQ_SPI_TA_TCC_CPF():
 
     # assert successful run
     assert e.value.code == 0
-    workload_1_dir = workload_1 + "/app_1/" + soc
-    files_in_workload = os.listdir(workload_1_dir)
+    
+    files_in_workload = os.listdir(workload_1)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
+            file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             assert len(file_dict[file].index)
 
     print(sorted(list(file_dict.keys())))
-    assert sorted(list(file_dict.keys())) == [
+    expected_csvs = [
         "SQ_IFETCH_LEVEL.csv",
         "SQ_INST_LEVEL_LDS.csv",
         "SQ_INST_LEVEL_SMEM.csv",
@@ -881,9 +1134,37 @@ def test_ipblocks_SQ_SPI_TA_TCC_CPF():
         "sysinfo.csv",
         "timestamps.csv",
     ]
+    if soc == "mi200":
+        expected_csvs = [
+            "SQ_IFETCH_LEVEL.csv",
+            "SQ_INST_LEVEL_LDS.csv",
+            "SQ_INST_LEVEL_SMEM.csv",
+            "SQ_INST_LEVEL_VMEM.csv",
+            "SQ_LEVEL_WAVES.csv",
+            "pmc_perf.csv",
+            "pmc_perf_0.csv",
+            "pmc_perf_1.csv",
+            "pmc_perf_10.csv",
+            "pmc_perf_11.csv",
+            "pmc_perf_12.csv",
+            "pmc_perf_2.csv",
+            "pmc_perf_3.csv",
+            "pmc_perf_4.csv",
+            "pmc_perf_5.csv",
+            "pmc_perf_6.csv",
+            "pmc_perf_7.csv",
+            "pmc_perf_8.csv",
+            "pmc_perf_9.csv",
+            "roofline.csv",
+            "sysinfo.csv",
+            "timestamps.csv",
+        ]
+    assert sorted(list(file_dict.keys())) == expected_csvs
 
 
 def test_dispatch_0():
+    if os.path.exists(workload_1):
+        shutil.rmtree(workload_1)
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
@@ -905,19 +1186,25 @@ def test_dispatch_0():
 
     # assert successful run
     assert e.value.code == 0
-    workload_1_dir = workload_1 + "/app_1/" + soc
-    files_in_workload = os.listdir(workload_1_dir)
+    
+    files_in_workload = os.listdir(workload_1)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
+            file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             assert len(file_dict[file].index)
-    assert sorted(list(file_dict.keys())) == ALL_CSVS
+    if soc == "mi200":
+        print(sorted(list(file_dict.keys())))
+        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
+    else:
+        assert sorted(list(file_dict.keys())) == ALL_CSVS
 
 
 def test_dispatch_0_1():
+    if os.path.exists(workload_1):
+        shutil.rmtree(workload_1)
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
@@ -940,19 +1227,25 @@ def test_dispatch_0_1():
 
     # assert successful run
     assert e.value.code == 0
-    workload_1_dir = workload_1 + "/app_1/" + soc
-    files_in_workload = os.listdir(workload_1_dir)
+    
+    files_in_workload = os.listdir(workload_1)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
+            file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             assert len(file_dict[file].index)
-    assert sorted(list(file_dict.keys())) == ALL_CSVS
+    if soc == "mi200":
+        print(sorted(list(file_dict.keys())))
+        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
+    else:
+        assert sorted(list(file_dict.keys())) == ALL_CSVS
 
 
 def test_dispatch_2():
+    if os.path.exists(workload_1):
+        shutil.rmtree(workload_1)
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
@@ -974,19 +1267,25 @@ def test_dispatch_2():
 
     # assert successful run
     assert e.value.code == 0
-    workload_1_dir = workload_1 + "/app_1/" + soc
-    files_in_workload = os.listdir(workload_1_dir)
+    
+    files_in_workload = os.listdir(workload_1)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
+            file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             assert len(file_dict[file].index)
-    assert sorted(list(file_dict.keys())) == ALL_CSVS
+    if soc == "mi200":
+        print(sorted(list(file_dict.keys())))
+        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
+    else:
+        assert sorted(list(file_dict.keys())) == ALL_CSVS
 
 
 def test_kernel_verbose_0():
+    if os.path.exists(workload_1):
+        shutil.rmtree(workload_1)
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
@@ -1008,19 +1307,25 @@ def test_kernel_verbose_0():
 
     # assert successful run
     assert e.value.code == 0
-    workload_1_dir = workload_1 + "/app_1/" + soc
-    files_in_workload = os.listdir(workload_1_dir)
+    
+    files_in_workload = os.listdir(workload_1)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
+            file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             assert len(file_dict[file].index)
-    assert sorted(list(file_dict.keys())) == ALL_CSVS
+    if soc == "mi200":
+        print(sorted(list(file_dict.keys())))
+        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
+    else:
+        assert sorted(list(file_dict.keys())) == ALL_CSVS
 
 
 def test_kernel_verbose_1():
+    if os.path.exists(workload_1):
+        shutil.rmtree(workload_1)
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
@@ -1042,19 +1347,25 @@ def test_kernel_verbose_1():
 
     # assert successful run
     assert e.value.code == 0
-    workload_1_dir = workload_1 + "/app_1/" + soc
-    files_in_workload = os.listdir(workload_1_dir)
+    
+    files_in_workload = os.listdir(workload_1)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
+            file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             assert len(file_dict[file].index)
-    assert sorted(list(file_dict.keys())) == ALL_CSVS
+    if soc == "mi200":
+        print(sorted(list(file_dict.keys())))
+        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
+    else:
+        assert sorted(list(file_dict.keys())) == ALL_CSVS
 
 
 def test_kernel_verbose_2():
+    if os.path.exists(workload_1):
+        shutil.rmtree(workload_1)
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
@@ -1076,19 +1387,25 @@ def test_kernel_verbose_2():
 
     # assert successful run
     assert e.value.code == 0
-    workload_1_dir = workload_1 + "/app_1/" + soc
-    files_in_workload = os.listdir(workload_1_dir)
+    
+    files_in_workload = os.listdir(workload_1)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
+            file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             assert len(file_dict[file].index)
-    assert sorted(list(file_dict.keys())) == ALL_CSVS
+    if soc == "mi200":
+        print(sorted(list(file_dict.keys())))
+        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
+    else:
+        assert sorted(list(file_dict.keys())) == ALL_CSVS
 
 
 def test_kernel_verbose_3():
+    if os.path.exists(workload_1):
+        shutil.rmtree(workload_1)
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
@@ -1110,19 +1427,25 @@ def test_kernel_verbose_3():
 
     # assert successful run
     assert e.value.code == 0
-    workload_1_dir = workload_1 + "/app_1/" + soc
-    files_in_workload = os.listdir(workload_1_dir)
+    
+    files_in_workload = os.listdir(workload_1)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
+            file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             assert len(file_dict[file].index)
-    assert sorted(list(file_dict.keys())) == ALL_CSVS
+    if soc == "mi200":
+        print(sorted(list(file_dict.keys())))
+        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
+    else:
+        assert sorted(list(file_dict.keys())) == ALL_CSVS
 
 
 def test_kernel_verbose_4():
+    if os.path.exists(workload_1):
+        shutil.rmtree(workload_1)
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
@@ -1144,19 +1467,25 @@ def test_kernel_verbose_4():
 
     # assert successful run
     assert e.value.code == 0
-    workload_1_dir = workload_1 + "/app_1/" + soc
-    files_in_workload = os.listdir(workload_1_dir)
+    
+    files_in_workload = os.listdir(workload_1)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
+            file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             assert len(file_dict[file].index)
-    assert sorted(list(file_dict.keys())) == ALL_CSVS
+    if soc == "mi200":
+        print(sorted(list(file_dict.keys())))
+        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
+    else:
+        assert sorted(list(file_dict.keys())) == ALL_CSVS
 
 
 def test_kernel_verbose_5():
+    if os.path.exists(workload_1):
+        shutil.rmtree(workload_1)
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
@@ -1178,19 +1507,25 @@ def test_kernel_verbose_5():
 
     # assert successful run
     assert e.value.code == 0
-    workload_1_dir = workload_1 + "/app_1/" + soc
-    files_in_workload = os.listdir(workload_1_dir)
+    
+    files_in_workload = os.listdir(workload_1)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
+            file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             assert len(file_dict[file].index)
-    assert sorted(list(file_dict.keys())) == ALL_CSVS
+    if soc == "mi200":
+        print(sorted(list(file_dict.keys())))
+        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
+    else:
+        assert sorted(list(file_dict.keys())) == ALL_CSVS
 
 
 def test_join_type_grid():
+    if os.path.exists(workload_1):
+        shutil.rmtree(workload_1)
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
@@ -1212,19 +1547,25 @@ def test_join_type_grid():
 
     # assert successful run
     assert e.value.code == 0
-    workload_1_dir = workload_1 + "/app_1/" + soc
-    files_in_workload = os.listdir(workload_1_dir)
+    
+    files_in_workload = os.listdir(workload_1)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
+            file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             assert len(file_dict[file].index)
-    assert sorted(list(file_dict.keys())) == ALL_CSVS
+    if soc == "mi200":
+        print(sorted(list(file_dict.keys())))
+        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
+    else:
+        assert sorted(list(file_dict.keys())) == ALL_CSVS
 
 
 def test_join_type_kernel():
+    if os.path.exists(workload_1):
+        shutil.rmtree(workload_1)
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
@@ -1246,19 +1587,25 @@ def test_join_type_kernel():
 
     # assert successful run
     assert e.value.code == 0
-    workload_1_dir = workload_1 + "/app_1/" + soc
-    files_in_workload = os.listdir(workload_1_dir)
+    
+    files_in_workload = os.listdir(workload_1)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
+            file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             assert len(file_dict[file].index)
-    assert sorted(list(file_dict.keys())) == ALL_CSVS
+    if soc == "mi200":
+        print(sorted(list(file_dict.keys())))
+        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
+    else:
+        assert sorted(list(file_dict.keys())) == ALL_CSVS
 
 
 def test_device_0():
+    if os.path.exists(workload_1):
+        shutil.rmtree(workload_1)
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
@@ -1280,19 +1627,25 @@ def test_device_0():
 
     # assert successful run
     assert e.value.code == 0
-    workload_1_dir = workload_1 + "/app_1/" + soc
-    files_in_workload = os.listdir(workload_1_dir)
+    
+    files_in_workload = os.listdir(workload_1)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
+            file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             assert len(file_dict[file].index)
-    assert sorted(list(file_dict.keys())) == ALL_CSVS
+    if soc == "mi200":
+        print(sorted(list(file_dict.keys())))
+        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
+    else:
+        assert sorted(list(file_dict.keys())) == ALL_CSVS
 
 
 def test_no_roof():
+    if os.path.exists(workload_1):
+        shutil.rmtree(workload_1)
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
@@ -1313,19 +1666,51 @@ def test_no_roof():
 
     # assert successful run
     assert e.value.code == 0
-    workload_1_dir = workload_1 + "/app_1/" + soc
-    files_in_workload = os.listdir(workload_1_dir)
+    
+    files_in_workload = os.listdir(workload_1)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
+            file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             assert len(file_dict[file].index)
-    assert sorted(list(file_dict.keys())) == ALL_CSVS
+    if soc == "mi200":
+        print(sorted(list(file_dict.keys())))
+        assert sorted(list(file_dict.keys())) == [
+            "SQ_IFETCH_LEVEL.csv",
+            "SQ_INST_LEVEL_LDS.csv",
+            "SQ_INST_LEVEL_SMEM.csv",
+            "SQ_INST_LEVEL_VMEM.csv",
+            "SQ_LEVEL_WAVES.csv",
+            "pmc_perf.csv",
+            "pmc_perf_0.csv",
+            "pmc_perf_1.csv",
+            "pmc_perf_10.csv",
+            "pmc_perf_11.csv",
+            "pmc_perf_12.csv",
+            "pmc_perf_13.csv",
+            "pmc_perf_14.csv",
+            "pmc_perf_15.csv",
+            "pmc_perf_16.csv",
+            "pmc_perf_2.csv",
+            "pmc_perf_3.csv",
+            "pmc_perf_4.csv",
+            "pmc_perf_5.csv",
+            "pmc_perf_6.csv",
+            "pmc_perf_7.csv",
+            "pmc_perf_8.csv",
+            "pmc_perf_9.csv",
+            "sysinfo.csv",
+            "timestamps.csv",
+        ]
+    else:
+        assert sorted(list(file_dict.keys())) == ALL_CSVS
 
 
 def test_sort_dispatches():
+    if os.path.exists(workload_1):
+        shutil.rmtree(workload_1)
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
@@ -1354,19 +1739,25 @@ def test_sort_dispatches():
 
     # assert successful run
     assert e.value.code == 0
-    workload_1_dir = workload_1 + "/app_1/" + soc
-    files_in_workload = os.listdir(workload_1_dir)
+    
+    files_in_workload = os.listdir(workload_1)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
+            file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             assert len(file_dict[file].index)
-    assert sorted(list(file_dict.keys())) == ALL_CSVS
+    if soc == "mi200":
+        print(sorted(list(file_dict.keys())))
+        assert sorted(list(file_dict.keys())) == ROOF_ONLY_CSVS
+    else:
+        assert sorted(list(file_dict.keys())) == ALL_CSVS
 
 
 def test_sort_kernels():
+    if os.path.exists(workload_1):
+        shutil.rmtree(workload_1)
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
@@ -1394,19 +1785,25 @@ def test_sort_kernels():
 
     # assert successful run
     assert e.value.code == 0
-    workload_1_dir = workload_1 + "/app_1/" + soc
-    files_in_workload = os.listdir(workload_1_dir)
+    
+    files_in_workload = os.listdir(workload_1)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
+            file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             assert len(file_dict[file].index)
-    assert sorted(list(file_dict.keys())) == ALL_CSVS
+    if soc == "mi200":
+        print(sorted(list(file_dict.keys())))
+        assert sorted(list(file_dict.keys())) == ROOF_ONLY_CSVS
+    else:
+        assert sorted(list(file_dict.keys())) == ALL_CSVS
 
 
 def test_mem_levels_HBM():
+    if os.path.exists(workload_1):
+        shutil.rmtree(workload_1)
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
@@ -1435,19 +1832,25 @@ def test_mem_levels_HBM():
 
     # assert successful run
     assert e.value.code == 0
-    workload_1_dir = workload_1 + "/app_1/" + soc
-    files_in_workload = os.listdir(workload_1_dir)
+    
+    files_in_workload = os.listdir(workload_1)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
+            file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             assert len(file_dict[file].index)
-    assert sorted(list(file_dict.keys())) == ALL_CSVS
+    if soc == "mi200":
+        print(sorted(list(file_dict.keys())))
+        assert sorted(list(file_dict.keys())) == ROOF_ONLY_CSVS
+    else:
+        assert sorted(list(file_dict.keys())) == ALL_CSVS
 
 
 def test_mem_levels_L2():
+    if os.path.exists(workload_1):
+        shutil.rmtree(workload_1)
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
@@ -1476,19 +1879,25 @@ def test_mem_levels_L2():
 
     # assert successful run
     assert e.value.code == 0
-    workload_1_dir = workload_1 + "/app_1/" + soc
-    files_in_workload = os.listdir(workload_1_dir)
+    
+    files_in_workload = os.listdir(workload_1)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
+            file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             assert len(file_dict[file].index)
-    assert sorted(list(file_dict.keys())) == ALL_CSVS
+    if soc == "mi200":
+        print(sorted(list(file_dict.keys())))
+        assert sorted(list(file_dict.keys())) == ROOF_ONLY_CSVS
+    else:
+        assert sorted(list(file_dict.keys())) == ALL_CSVS
 
 
 def test_mem_levels_vL1D():
+    if os.path.exists(workload_1):
+        shutil.rmtree(workload_1)
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
@@ -1516,19 +1925,25 @@ def test_mem_levels_vL1D():
 
     # assert successful run
     assert e.value.code == 0
-    workload_1_dir = workload_1 + "/app_1/" + soc
-    files_in_workload = os.listdir(workload_1_dir)
+    
+    files_in_workload = os.listdir(workload_1)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
+            file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             assert len(file_dict[file].index)
-    assert sorted(list(file_dict.keys())) == ALL_CSVS
+    if soc == "mi200":
+        print(sorted(list(file_dict.keys())))
+        assert sorted(list(file_dict.keys())) == ROOF_ONLY_CSVS
+    else:
+        assert sorted(list(file_dict.keys())) == ALL_CSVS
 
 
 def test_mem_levels_LDS():
+    if os.path.exists(workload_1):
+        shutil.rmtree(workload_1)
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
@@ -1556,19 +1971,25 @@ def test_mem_levels_LDS():
 
     # assert successful run
     assert e.value.code == 0
-    workload_1_dir = workload_1 + "/app_1/" + soc
-    files_in_workload = os.listdir(workload_1_dir)
+    
+    files_in_workload = os.listdir(workload_1)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
+            file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             assert len(file_dict[file].index)
-    assert sorted(list(file_dict.keys())) == ALL_CSVS
+    if soc == "mi200":
+        print(sorted(list(file_dict.keys())))
+        assert sorted(list(file_dict.keys())) == ROOF_ONLY_CSVS
+    else:
+        assert sorted(list(file_dict.keys())) == ALL_CSVS
 
 
 def test_mem_levels_HBM_LDS():
+    if os.path.exists(workload_1):
+        shutil.rmtree(workload_1)
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
@@ -1597,19 +2018,25 @@ def test_mem_levels_HBM_LDS():
 
     # assert successful run
     assert e.value.code == 0
-    workload_1_dir = workload_1 + "/app_1/" + soc
-    files_in_workload = os.listdir(workload_1_dir)
+    
+    files_in_workload = os.listdir(workload_1)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
+            file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             assert len(file_dict[file].index)
-    assert sorted(list(file_dict.keys())) == ALL_CSVS
+    if soc == "mi200":
+        print(sorted(list(file_dict.keys())))
+        assert sorted(list(file_dict.keys())) == ROOF_ONLY_CSVS
+    else:
+        assert sorted(list(file_dict.keys())) == ALL_CSVS
 
 
 def test_mem_levels_vL1D_LDS():
+    if os.path.exists(workload_1):
+        shutil.rmtree(workload_1)
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
@@ -1638,19 +2065,25 @@ def test_mem_levels_vL1D_LDS():
 
     # assert successful run
     assert e.value.code == 0
-    workload_1_dir = workload_1 + "/app_1/" + soc
-    files_in_workload = os.listdir(workload_1_dir)
+    
+    files_in_workload = os.listdir(workload_1)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
+            file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             assert len(file_dict[file].index)
-    assert sorted(list(file_dict.keys())) == ALL_CSVS
+    if soc == "mi200":
+        print(sorted(list(file_dict.keys())))
+        assert sorted(list(file_dict.keys())) == ROOF_ONLY_CSVS
+    else:
+        assert sorted(list(file_dict.keys())) == ALL_CSVS
 
 
 def test_mem_levels_L2_vL1D_LDS():
+    if os.path.exists(workload_1):
+        shutil.rmtree(workload_1)
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
@@ -1679,19 +2112,25 @@ def test_mem_levels_L2_vL1D_LDS():
         return
     # assert successful run
     assert e.value.code == 0
-    workload_1_dir = workload_1 + "/app_1/" + soc
-    files_in_workload = os.listdir(workload_1_dir)
+    
+    files_in_workload = os.listdir(workload_1)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
+            file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             assert len(file_dict[file].index)
-    assert sorted(list(file_dict.keys())) == ALL_CSVS
+    if soc == "mi200":
+        print(sorted(list(file_dict.keys())))
+        assert sorted(list(file_dict.keys())) == ROOF_ONLY_CSVS
+    else:
+        assert sorted(list(file_dict.keys())) == ALL_CSVS
 
 
 def test_kernel_names():
+    if os.path.exists(workload_1):
+        shutil.rmtree(workload_1)
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
@@ -1718,13 +2157,17 @@ def test_kernel_names():
         return
     # assert successful run
     assert e.value.code == 0
-    workload_1_dir = workload_1 + "/app_1/" + soc
-    files_in_workload = os.listdir(workload_1_dir)
+    
+    files_in_workload = os.listdir(workload_1)
 
     # Check if csvs have data
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_1_dir + "/" + file)
+            file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             assert len(file_dict[file].index)
-    assert sorted(list(file_dict.keys())) == ALL_CSVS
+    if soc == "mi200":
+        print(sorted(list(file_dict.keys())))
+        assert sorted(list(file_dict.keys())) == ROOF_ONLY_CSVS
+    else:
+        assert sorted(list(file_dict.keys())) == ALL_CSVS
