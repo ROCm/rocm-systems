@@ -110,6 +110,8 @@ bool isSystemBigEndian();
 std::string getBuildType();
 std::string getMyLibPath();
 int subDirectoryCountInPath(const std::string path);
+std::string monitor_type_string(amd::smi::MonitorTypes type);
+std::string power_type_string(RSMI_POWER_TYPE type);
 template <typename T>
 std::string print_int_as_hex(T i, bool showHexNotation=true) {
   std::stringstream ss;

@@ -53,14 +53,13 @@
 #include <map>
 
 #include "rocm_smi/rocm_smi.h"
+#include "rocm_smi/rocm_smi_utils.h"
 
 #define PRINT_RSMI_ERR(RET) { \
   if (RET != RSMI_STATUS_SUCCESS) { \
-    const char *err_str; \
     std::cout << "[ERROR] RSMI call returned " << (RET) \
-      << " at line " << __LINE__ << "\n"; \
-      rsmi_status_string((RET), &err_str); \
-      std::cout << err_str << "\n"; \
+      << " at line " << __LINE__ << std::endl; \
+      std::cout << amd::smi::getRSMIStatusString(RET) << std::endl; \
   } \
 }
 
@@ -696,6 +695,10 @@ static rsmi_status_t test_set_memory_partition(uint32_t dv_ind) {
   return RSMI_STATUS_SUCCESS;
 }
 
+template<typename T> constexpr float convert_mw_to_w(T mw) {
+    return static_cast<float>(mw / 1000.0);
+}
+
 int main() {
   rsmi_status_t ret;
 
@@ -711,9 +714,11 @@ int main() {
   rsmi_frequencies_t f;
   uint32_t num_monitor_devs = 0;
   rsmi_gpu_metrics_t p;
+  RSMI_POWER_TYPE power_type = RSMI_INVALID_POWER;
 
   rsmi_num_monitor_devices(&num_monitor_devs);
   for (uint32_t i = 0; i < num_monitor_devs; ++i) {
+    std::cout << "\t**Device #: " << std::dec << i << std::endl;
     ret = rsmi_dev_id_get(i, &val_ui16);
     CHK_RSMI_RET_I(ret)
     std::cout << "\t**Device ID: 0x" << std::hex << val_ui16 << "\n";
@@ -816,7 +821,7 @@ int main() {
     ret = rsmi_dev_temp_metric_get(i, RSMI_TEMP_TYPE_JUNCTION,
       rsmi_temperature_metric_t::RSMI_TEMP_CURRENT, &val_i64);
     if (ret == RSMI_STATUS_SUCCESS) {
-      std::cout << val_i64/1000 << "C" << "\n";
+      std::cout << (val_i64 / 1000) << "C" << std::endl;
     }
     CHK_RSMI_NOT_SUPPORTED_RET(ret)
 
@@ -864,7 +869,22 @@ int main() {
     std::cout << "\t**Average Power Usage: ";
     ret = rsmi_dev_power_ave_get(i, 0, &val_ui64);
     if (ret == RSMI_STATUS_SUCCESS) {
-      std::cout << static_cast<float>(val_ui64)/1000 << " W" << "\n";
+      std::cout << convert_mw_to_w(val_ui64) << " W" << std::endl;
+    }
+    CHK_RSMI_NOT_SUPPORTED_RET(ret)
+
+    std::cout << "\t**Current Socket Power Usage: ";
+    ret = rsmi_dev_current_socket_power_get(i, &val_ui64);
+    if (ret == RSMI_STATUS_SUCCESS) {
+      std::cout << convert_mw_to_w(val_ui64) << " W" << std::endl;
+    }
+    CHK_RSMI_NOT_SUPPORTED_RET(ret)
+
+    std::cout << "\t**Generic Power Usage: ";
+    ret = rsmi_dev_power_get(i, &val_ui64, &power_type);
+    if (ret == RSMI_STATUS_SUCCESS) {
+      std::cout << "[" << amd::smi::power_type_string(power_type) << "] "
+                << convert_mw_to_w(val_ui64) << " W" << std::endl;
     }
     CHK_RSMI_NOT_SUPPORTED_RET(ret)
     std::cout << "\t=======" << "\n";

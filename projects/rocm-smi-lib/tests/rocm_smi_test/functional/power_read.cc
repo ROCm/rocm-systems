@@ -5,7 +5,7 @@
  * The University of Illinois/NCSA
  * Open Source License (NCSA)
  *
- * Copyright (c) 2019, Advanced Micro Devices, Inc.
+ * Copyright (c) 2019-2023, Advanced Micro Devices, Inc.
  * All rights reserved.
  *
  * Developed by:
@@ -89,6 +89,7 @@ void TestPowerRead::Close() {
 void TestPowerRead::Run(void) {
   rsmi_status_t err;
   uint64_t val_ui64, val2_ui64;
+  RSMI_POWER_TYPE type = RSMI_INVALID_POWER;
 
   TestBase::Run();
   if (setup_failed_) {
@@ -119,44 +120,71 @@ void TestPowerRead::Run(void) {
 
       /* Average Power */
       err = rsmi_dev_power_ave_get(i, 0, &val_ui64);
+
+      ASSERT_TRUE(err == RSMI_STATUS_SUCCESS
+                 || err == RSMI_STATUS_NOT_SUPPORTED);
       if (err == RSMI_STATUS_NOT_SUPPORTED) {
         std::cout <<
             "\t**Average Power Usage: not supported on this device"
                                                                    << std::endl;
       } else {
+        CHK_RSMI_PERM_ERR(err)
         IF_VERB(STANDARD) {
           std::cout << "\t**Average Power Usage: ";
-          CHK_RSMI_PERM_ERR(err)
           if (err == RSMI_STATUS_SUCCESS) {
-            std::cout << static_cast<float>(val_ui64) / 1000 << " mW"
+            std::cout << static_cast<float>(val_ui64) / 1000 << " W"
                       << std::endl;
           }
-          // Verify api support checking functionality is working
-          err = rsmi_dev_power_ave_get(i, 0, nullptr);
-          ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
         }
+        // Verify api support checking functionality is working
+        err = rsmi_dev_power_ave_get(i, 0, nullptr);
+        ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
       }
 
       /* Current Socket Power */
       err = rsmi_dev_current_socket_power_get(i, &val_ui64);
-
+      ASSERT_TRUE(err == RSMI_STATUS_SUCCESS
+                 || err == RSMI_STATUS_NOT_SUPPORTED);
       if (err == RSMI_STATUS_NOT_SUPPORTED) {
         std::cout <<
             "\t**Current Socket Power: not supported"
             " on this device" << std::endl;
       } else {
+        CHK_RSMI_PERM_ERR(err)
         IF_VERB(STANDARD) {
           std::cout << "\t**Current Socket Power: ";
-          CHK_RSMI_PERM_ERR(err)
           if (err == RSMI_STATUS_SUCCESS) {
-            std::cout << static_cast<float>(val_ui64) / 1000 << " mW"
+            std::cout << static_cast<float>(val_ui64) / 1000 << " W"
                       << std::endl;
           }
-          // Verify api support checking functionality is working
-          err = rsmi_dev_current_socket_power_get(i, nullptr);
-          // std::cout << "err = " << amd::smi::getRSMIStatusString(err);
-          ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
         }
+        // Verify api support checking functionality is working
+        err = rsmi_dev_current_socket_power_get(i, nullptr);
+        ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
+      }
+
+      /* Generic Power */
+      err = rsmi_dev_power_get(i, &val_ui64, &type);
+      ASSERT_TRUE(err == RSMI_STATUS_SUCCESS
+                 || err == RSMI_STATUS_NOT_SUPPORTED);
+
+      if (err == RSMI_STATUS_NOT_SUPPORTED) {
+        std::cout <<
+            "\t**Generic Power: not supported"
+            " on this device" << std::endl;
+      } else {
+        CHK_RSMI_PERM_ERR(err)
+        IF_VERB(STANDARD) {
+          std::cout << "\t**Generic Power: ";
+          if (err == RSMI_STATUS_SUCCESS) {
+            std::cout << "[" << amd::smi::power_type_string(type) << "] "
+                      << static_cast<float>(val_ui64) / 1000 << " W"
+                      << std::endl;
+          }
+        }
+        // Verify api support checking functionality is working
+        err = rsmi_dev_power_get(i, nullptr, nullptr);
+        ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
       }
       std::cout << "\n";
     }

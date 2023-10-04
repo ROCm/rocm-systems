@@ -698,6 +698,15 @@ typedef enum {
 } RSMI_UTILIZATION_COUNTER_TYPE;
 
 /**
+ * @brief Power types
+ */
+typedef enum {
+  RSMI_AVERAGE_POWER = 0,            //!< Average Power
+  RSMI_CURRENT_POWER,                //!< Current / Instant Power
+  RSMI_INVALID_POWER = 0xFFFFFFFF    //!< Invalid / Undetected Power
+} RSMI_POWER_TYPE;
+
+/**
  * @brief The utilization counter data
  */
 typedef struct  {
@@ -1728,6 +1737,40 @@ rsmi_dev_power_ave_get(uint32_t dv_ind, uint32_t sensor_ind, uint64_t *power);
  */
 rsmi_status_t
 rsmi_dev_current_socket_power_get(uint32_t dv_ind, uint64_t *socket_power);
+
+/**
+ *  @brief A generic get which attempts to retieve current socket power
+ *  (also known as instant power) of the device index provided, if not
+ *  supported tries to get average power consumed by device. Current
+ *  socket power is typically supported by newer devices, whereas average
+ *  power is generally reported on older devices. This function
+ *  aims to provide backwards compatability depending on device support.
+ *
+ *  @details Given a device index @p dv_ind, a pointer to a uint64_t
+ *  @p power, and @p type this function will write the current socket or
+ *  average power (in microwatts) to the uint64_t pointed to by @p power and
+ *  a pointer to its @p type RSMI_POWER_TYPE read.
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[inout] power a pointer to uint64_t to which the current or average
+ *  power will be written to. If this parameter is nullptr,
+ *  this function will return ::RSMI_STATUS_INVALID_ARGS if the function is
+ *  supported with the provided, arguments and ::RSMI_STATUS_NOT_SUPPORTED
+ *  if it is not supported with the provided arguments.
+ *
+ *  @param[inout] type a pointer to RSMI_POWER_TYPE object. Returns the type
+ *  of power retrieved from the device. Current power is ::RSMI_CURRENT_POWER
+ *  and average power is ::RSMI_AVERAGE_POWER. If an error occurs,
+ *  returns an invalid power type ::RSMI_INVALID_POWER.
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful
+ *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
+ *  support this function with the given arguments
+ *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
+ */
+rsmi_status_t rsmi_dev_power_get(uint32_t dv_ind, uint64_t *power,
+                                 RSMI_POWER_TYPE *type);
 
 /**
  *  @brief Get the energy accumulator counter of the device with provided

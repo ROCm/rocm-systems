@@ -98,4 +98,6 @@ void DumpMonitorInfo(const TestBase *test);
     } \
 }
 
+void printRSMIError(rsmi_status_t err);
+
 #endif  // TESTS_ROCM_SMI_TEST_TEST_COMMON_H_

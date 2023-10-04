@@ -48,7 +48,6 @@
 #include <unistd.h>
 #include <dirent.h>
 #include <glob.h>
-#include <sys/stat.h>
 #include <sys/utsname.h>
 #include <dlfcn.h>
 
@@ -63,7 +62,6 @@
 #include <regex>
 #include <sstream>
 #include <string>
-#include <type_traits>
 #include <vector>
 
 #include "rocm_smi/rocm_smi.h"
@@ -882,6 +880,98 @@ int subDirectoryCountInPath(const std::string path) {
   }
   closedir(srcdir);
   return dir_count;
+}
+
+std::string monitor_type_string(MonitorTypes type) {
+  const std::map<MonitorTypes, std::string> monitorTypesToString{
+      {kMonName,
+       "MonitorTypes::kMonName"},
+      {kMonTemp,
+       "MonitorTypes::kMonTemp"},
+      {kMonFanSpeed,
+       "MonitorTypes::kMonFanSpeed"},
+      {kMonMaxFanSpeed,
+      "MonitorTypes::kMonMaxFanSpeed"},
+      {kMonFanRPMs,
+      "MonitorTypes::kMonFanRPMs"},
+      {kMonFanCntrlEnable,
+      "MonitorTypes::kMonFanCntrlEnable"},
+      {kMonPowerCap,
+      "MonitorTypes::kMonPowerCap"},
+      {kMonPowerCapDefault,
+      "MonitorTypes::kMonPowerCapDefault"},
+      {kMonPowerCapMax,
+      "MonitorTypes::kMonPowerCapMax"},
+      {kMonPowerCapMin,
+      "MonitorTypes::kMonPowerCapMin"},
+      {kMonPowerAve,
+      "MonitorTypes::kMonPowerAve"},
+      {kMonPowerInput,
+      "MonitorTypes::kMonPowerInput"},
+      {kMonPowerLabel,
+      "MonitorTypes::kMonPowerLabel"},
+      {kMonTempMax,
+      "MonitorTypes::kMonTempMax"},
+      {kMonTempMin,
+      "MonitorTypes::kMonTempMin"},
+      {kMonTempMaxHyst,
+      "MonitorTypes::kMonTempMaxHyst"},
+      {kMonTempMinHyst,
+      "MonitorTypes::kMonTempMinHyst"},
+      {kMonTempCritical,
+      "MonitorTypes::kMonTempCritical"},
+      {kMonTempCriticalHyst,
+      "MonitorTypes::kMonTempCriticalHyst"},
+      {kMonTempEmergency,
+      "MonitorTypes::kMonTempEmergency"},
+      {kMonTempEmergencyHyst,
+       "MonitorTypes::kMonTempEmergencyHyst"},
+      {kMonTempCritMin,
+      "MonitorTypes::kMonTempCritMin"},
+      {kMonTempCritMinHyst,
+      "MonitorTypes::kMonTempCritMinHyst"},
+      {kMonTempOffset,
+      "MonitorTypes::kMonTempOffset"},
+      {kMonTempLowest,
+      "MonitorTypes::kMonTempLowest"},
+      {kMonTempHighest,
+      "MonitorTypes::kMonTempHighest"},
+      {kMonTempLabel,
+      "MonitorTypes::kMonTempLabel"},
+      {kMonVolt,
+      "MonitorTypes::kMonVolt"},
+      {kMonVoltMax,
+      "MonitorTypes::kMonVoltMax"},
+      {kMonVoltMinCrit,
+      "MonitorTypes::kMonVoltMinCrit"},
+      {kMonVoltMin,
+      "MonitorTypes::kMonVoltMin"},
+      {kMonVoltMaxCrit,
+      "MonitorTypes::kMonVoltMaxCrit"},
+      {kMonVoltAverage,
+      "MonitorTypes::kMonVoltAverage"},
+      {kMonVoltLowest,
+      "MonitorTypes::kMonVoltLowest"},
+      {kMonVoltHighest,
+      "MonitorTypes::kMonVoltHighest"},
+      {kMonVoltLabel,
+      "MonitorTypes::kMonVoltLabel"},
+      {kMonInvalid,
+      "MonitorTypes::kMonInvalid"},
+  };
+  return monitorTypesToString.at(type);
+}
+
+std::string power_type_string(RSMI_POWER_TYPE type) {
+  const std::map<RSMI_POWER_TYPE, std::string> powerTypesToString{
+      {RSMI_AVERAGE_POWER,
+      "RSMI_POWER_TYPE::RSMI_AVERAGE_POWER"},
+      {RSMI_CURRENT_POWER,
+      "RSMI_POWER_TYPE::RSMI_CURRENT_POWER"},
+      {RSMI_INVALID_POWER,
+      "RSMI_POWER_TYPE::RSMI_INVALID_POWER"},
+  };
+  return powerTypesToString.at(type);
 }
 
 }  // namespace smi
