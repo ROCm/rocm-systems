@@ -18,6 +18,20 @@ from stitch import stitch
 import gc
 from collections import defaultdict
 
+ATT_VERSION = 2
+
+class TraceData(ctypes.Structure):
+    _fields_ = [
+        ("num_waves", c_uint64),
+        ("type", c_uint64),
+        ("cycles", c_uint64)
+    ]
+
+class Trace:
+    def __init__(self, traceid, tracesize, instructions_array):
+        self.instructions = [deepcopy(instructions_array[k]) for k in range(tracesize)]
+        self.traceid = traceid
+
 class PerfEvent(ctypes.Structure):
     _fields_ = [
         ("time", c_uint64),
@@ -72,6 +86,7 @@ class Wave(ctypes.Structure):
         ("wave_id", ctypes.c_uint64),
         ("begin_time", ctypes.c_uint64),  # Begin and end cycle
         ("end_time", ctypes.c_uint64),
+        ("traceid", ctypes.c_int64),
         # total VMEM/FLAT/LDS/SMEM instructions issued
         # total issued memory instructions
         ("num_mem_instrs", ctypes.c_uint64),
@@ -97,34 +112,53 @@ class Wave(ctypes.Structure):
         ("num_branch_instrs", ctypes.c_uint64),
         ("num_branch_taken_instrs", ctypes.c_uint64),
         ("num_branch_stalls", ctypes.c_uint64),
-        ("timeline_array", POINTER(ctypes.c_int64)),
-        ("instructions_array", POINTER(ctypes.c_int64)),
+
         ("timeline_size", ctypes.c_uint64),
         ("instructions_size", ctypes.c_uint64),
+        ("timeline_array", POINTER(ctypes.c_int32)),
+        ("instructions_array", POINTER(ctypes.c_uint64)),
     ]
 
 
 class PythonWave:
-    def __init__(self, source_wave):
+    def __init__(self, sourcew):
         for property, value in Wave._fields_:
-            setattr(self, property, getattr(source_wave, property))
+            try:
+                setattr(self, deepcopy(property), deepcopy(getattr(sourcew, property)))
+            except:
+                pass
+
+        self.timeline = [
+            (int(sourcew.timeline_array[2 * k]), int(sourcew.timeline_array[2 * k + 1]))
+            for k in range(self.timeline_size)
+        ]
         self.timeline_array = None
+
+        self.instructions = [
+            (int(sourcew.instructions_array[2*k+0]), int(sourcew.instructions_array[2*k+1]))
+            for k in range(self.instructions_size)
+        ]
         self.instructions_array = None
 
 
-# Flags :
-#   IS_NAVI = 0x1
 class ReturnInfo(ctypes.Structure):
     _fields_ = [
-        ("num_waves", ctypes.c_uint64),
-        ("wavedata", POINTER(Wave)),
+        ("flags", ctypes.c_uint64),
+        ("binaryID", ctypes.c_uint64),
+        ("num_traces", ctypes.c_uint64),
+        ("tracesizes", POINTER(ctypes.c_uint64)),
+        ("traceIDs", POINTER(ctypes.c_int64)),
+        ("tracedata", POINTER(POINTER(TraceData))),
+
         ("num_events", ctypes.c_uint64),
         ("perfevents", POINTER(PerfEvent)),
         ("occupancy", POINTER(ctypes.c_uint64)),
         ("num_occupancy", ctypes.c_uint64),
-        ("flags", ctypes.c_uint64),
         ("kernel_id_addr", POINTER(ctypes.c_uint64)),
         ("num_kernel_ids", ctypes.c_uint64),
+
+        ("wavedata", POINTER(Wave)),
+        ("num_waves", ctypes.c_uint64),
     ]
 
 
@@ -141,16 +175,14 @@ SO.AnalyseBinary.restype = ReturnInfo
 SO.AnalyseBinary.argtypes = [ctypes.c_char_p, ctypes.c_int, ctypes.c_bool]
 SO.wrapped_parse_binary.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
 SO.wrapped_parse_binary.restype = ReturnAssemblyInfo
-
+SO.FreeBinary.argtypes = [ctypes.c_uint64]
 
 def parse_binary(filename, kernel=None):
     if kernel is None or kernel == "":
         kernel = ctypes.c_char_p(0)
-        print("Parsing all kernels")
     else:
         with open(glob.glob(kernel)[0], "r") as file:
             kernel = file.readlines()
-        print("Parsing kernel:", kernel[0].split(": ")[0])
         kernel = kernel[0].split(": ")[1].split(".kd")[0]
         kernel = str(kernel).encode("utf-8")
     filename = os.path.abspath(str(filename))
@@ -185,59 +217,63 @@ def parse_binary(filename, kernel=None):
     return code, jumps, kernel_addr
 
 
-def getWaves_binary(name, shader_engine_data_dict, target_cu):
+def getWaves_binary(name, target_cu):
     filename = os.path.abspath(str(name))
     info = SO.AnalyseBinary(filename.encode("utf-8"), target_cu, False)
 
+    isValid = info.flags & 0x1
+    if isValid == 0:
+        print('Invalid trace ', name)
+        return ([], [], [], [], None, [])
+    flags = "navi" if (info.flags & 0x2) else "vega"
     kernel_addr = [int(info.kernel_id_addr[k]) for k in range(info.num_kernel_ids)]
-
-    waves = [info.wavedata[k] for k in range(info.num_waves)]
     events = [deepcopy(info.perfevents[k]) for k in range(info.num_events)]
     occupancy = [int(info.occupancy[k]) for k in range(int(info.num_occupancy))]
-    flags = "navi" if (info.flags & 0x1) else "vega"
+
+    assert(((info.flags >> 3) & 0x1FFF == ATT_VERSION)) # Check ATT parser version
+
+    traces_python = {}
+    for T in range(info.num_traces):
+        if info.tracesizes[T] > 2:
+            id = info.traceIDs[T]
+            traces_python[id] = Trace(id, int(info.tracesizes[T]), info.tracedata[T])
 
     waves_python = []
-    for wave in waves:
-        if wave.instructions_size < 2:
-            continue
-        pwave = PythonWave(wave)
-        pwave.timeline = [
-            (wave.timeline_array[2 * k], wave.timeline_array[2 * k + 1])
-            for k in range(wave.timeline_size)
-        ]
-        pwave.instructions = [
-            tuple([wave.instructions_array[4 * k + m] for m in range(4)])
-            for k in range(wave.instructions_size)
-        ]
-        waves_python.append(pwave)
-    shader_engine_data_dict[name] = (waves_python, events, occupancy, flags, kernel_addr)
+    for k in range(info.num_waves):
+        if info.wavedata[k].instructions_size > 2:
+            waves_python.append(PythonWave(info.wavedata[k]))
+
+    SO.FreeBinary(info.binaryID)
+
+    return (traces_python, waves_python, events, occupancy, flags, kernel_addr)
 
 
-def getWaves_stitch(SIMD, code, jumps, flags, latency_map, hitcount_map, bIsAuto):
-    for pwave in SIMD:
-        pwave.instructions = stitch(pwave.instructions, code, jumps, flags, bIsAuto)
-        if pwave.instructions is not None:
-            for inst in pwave.instructions[0]:
-                hitcount_map[inst[-1]] += 1
-                latency_map[inst[-1]] += inst[3]
+def getWaves_stitch(traces, code, jumps, flags, latency_map, hitcount_map, bIsAuto):
+    for id in traces.keys():
+        traces[id].instructions = stitch(traces[id].instructions, code, jumps, flags, bIsAuto)
+        if traces[id].instructions is not None:
+            for inst in traces[id].instructions[0]:
+                hitcount_map[inst.asmline] += inst.num_waves
+                latency_map[inst.asmline] += inst.cycles
 
 
-def persist(trace_file, SIMD):
+def persist(trace_file, SIMD, traces):
     trace = Path(trace_file).name
     simds, waves = [], []
-    begin_time, end_time, timeline, instructions = [], [], [], []
+    begin_time, end_time, timeline, instructions, trace_ids = [], [], [], [], []
     mem_ins, issued_ins, valu_ins, valu_stalls = [], [], [], []
     vmem_ins, vmem_stalls, flat_ins, flat_stalls = [], [], [], []
     lds_ins, lds_stalls, salu_ins, salu_stalls = [], [], [], []
     smem_ins, smem_stalls, br_ins, br_taken_ins, br_stalls = [], [], [], [], []
 
     for wave in SIMD:
-        if wave.instructions is None:
+        if wave.instructions is None or traces[wave.traceid].instructions is None:
             continue
         simds.append(wave.simd)
         waves.append(wave.wave_id)
         begin_time.append(wave.begin_time)
         end_time.append(wave.end_time)
+        trace_ids.append(wave.traceid)
         mem_ins.append(wave.num_mem_instrs)
         issued_ins.append(wave.num_issued_instrs)
         valu_ins.append(wave.num_valu_instrs)
@@ -256,7 +292,20 @@ def persist(trace_file, SIMD):
         br_taken_ins.append(wave.num_branch_taken_instrs)
         br_stalls.append(wave.num_branch_stalls)
         timeline.append(wave.timeline)
-        instructions.append(wave.instructions)
+
+        cc = 1
+        insts = []
+        skips = traces[wave.traceid].instructions[-1]
+        try:
+            for v in traces[wave.traceid].instructions[0]:
+                if cc in skips:
+                    cc += 1
+                t = wave.instructions[cc]
+                insts.append((t[0], v.type, 0, t[1], v.asmline))
+                cc += 1
+        except:
+            pass # Incomplete waves
+        instructions.append((insts,) + traces[wave.traceid].instructions[1:-1])
 
     df = {
         "name": [trace for _ in range(len(begin_time))],
@@ -284,6 +333,7 @@ def persist(trace_file, SIMD):
         "br_stalls": br_stalls,
         "timeline": timeline,
         "instructions": instructions,
+        "traceids": trace_ids,
     }
     return df
 
@@ -422,108 +472,100 @@ if __name__ == "__main__":
     if args.target_cu is None:
         args.target_cu = 1
 
-    att_kernel = glob.glob(args.att_kernel)
+    att_kernel_list = glob.glob(args.att_kernel)
 
-    if len(att_kernel) == 0:
+    if len(att_kernel_list) == 0:
         print("Could not find att output kernel:", args.att_kernel)
-        exit(1)
-    elif len(att_kernel) > 1:
-        print("Found multiple kernel matching given filters:")
-        for n, k in enumerate(att_kernel):
-            print("\t", n, "->", k)
-
-        bValid = False
-        while bValid == False:
-            try:
-                args.att_kernel = att_kernel[int(input("Please select number: "))]
-                bValid = True
-            except KeyboardInterrupt:
-                exit(0)
-            except:
-                print("Invalid option.")
-    else:
-        args.att_kernel = att_kernel[0]
-
-    # Assembly parsing
-    bIsAuto = False
-    if args.assembly_code.lower().strip() == 'auto':
-        args.assembly_code = args.att_kernel.split('_kernel.txt')[0]+'_isa.s'
-        bIsAuto = True
-    path = Path(args.assembly_code)
-    if not path.is_file():
-        print("Invalid assembly_code('{0}')!".format(args.assembly_code))
-        sys.exit(1)
-
-    # Trace Parsing
-    if args.trace_file is None:
-        filenames = glob.glob(args.att_kernel.split("_kernel.txt")[0] + "_*.att")
-    else:
-        filenames = glob.glob(args.trace_file)
-    assert len(filenames) > 0
-
-    print('Att kernel:', args.att_kernel)
-    code, jumps, kern_addr = parse_binary(args.assembly_code, None if bIsAuto else args.att_kernel)
-
-    DBFILES = []
-    EVENTS = []
-    OCCUPANCY = []
-    GFXV = []
-    analysed_filenames = []
-    occupancy_filenames = []
-    dispatch_kernel_names = {}
-    shader_engine_data_dict = {}
-    for name in filenames:
-        getWaves_binary(name, shader_engine_data_dict, args.target_cu)
-
-    gc.collect()
-    latency_map = np.zeros((len(code)), dtype=np.int64)
-    hitcount_map = np.zeros((len(code)), dtype=np.int32)
-    for name in filenames:
-        SIMD, perfevents, occupancy, gfxv, addrs = shader_engine_data_dict[name]
-
-        for id, addr in enumerate(addrs):
-            dispatch_kernel_names[id] = kern_addr[addr]
-        if len(occupancy) > 16:
-            OCCUPANCY.append( occupancy )
-            occupancy_filenames.append(name)
-        if np.sum([0]+[len(s.instructions) for s in SIMD]) == 0:
-            print("No waves from", name)
-            continue
-        getWaves_stitch(SIMD, code, jumps, gfxv, latency_map, hitcount_map, bIsAuto)
-
-        analysed_filenames.append(name)
-        EVENTS.append(perfevents)
-        DBFILES.append( persist(name, SIMD) )
-        GFXV.append(gfxv)
-
-    gc.collect()
-    for k in range(len(code)):
-        code[k][-2] = int(hitcount_map[k])
-        code[k][-1] = int(latency_map[k])
-
-    if CSV_MODE:
-        from att_to_csv import dump_csv
-        dump_csv(code)
         quit()
 
+    for att_kernel in att_kernel_list:
+        print('Parsing:', att_kernel)
+        assembly_code = deepcopy(args.assembly_code)
 
-    gc.collect()
+        # Assembly parsing
+        bIsAuto = False
+        if assembly_code.lower().strip() == 'auto':
+            assembly_code = att_kernel.split('_kernel.txt')[0]+'_isa.s'
+            bIsAuto = True
+        path = Path(assembly_code)
+        if not path.is_file():
+            print("Invalid assembly_code('{0}')!".format(assembly_code))
+            sys.exit(1)
 
-    drawinfo = {
-        "TIMELINES": gen_timelines(DBFILES),
-        "EVENTS": EVENTS,
-        "EVENT_NAMES": EVENT_NAMES,
-        "OCCUPANCY": OCCUPANCY,
-        "ShaderNames": occupancy_filenames,
-        "DispatchNames": dispatch_kernel_names,
-    }
-    view_trace(
-        args,
-        code,
-        DBFILES,
-        analysed_filenames,
-        args.dumpfiles,
-        0,
-        gfxv,
-        drawinfo
-    )
+        # Trace Parsing
+        trace_instance_name = att_kernel.split("_kernel.txt")[0]
+        if args.trace_file is None:
+            filenames = glob.glob(trace_instance_name + "_*.att")
+        else:
+            filenames = glob.glob(args.trace_file)
+
+        if len(filenames) == 0:
+            print("Could not find trace files for", att_kernel)
+            continue
+
+        print('Att kernel:', att_kernel)
+        code, jumps, kern_addr = parse_binary(assembly_code, None if bIsAuto else att_kernel)
+
+        DBFILES = []
+        EVENTS = []
+        OCCUPANCY = []
+        GFXV = []
+        analysed_filenames = []
+        occupancy_filenames = []
+        dispatch_kernel_names = {}
+
+        latency_map = np.zeros((len(code)), dtype=np.int64)
+        hitcount_map = np.zeros((len(code)), dtype=np.int32)
+
+        gc.collect()
+
+        for name in filenames:
+            traces, waves, perfevents, occupancy, gfxv, addrs = getWaves_binary(name, args.target_cu)
+            if gfxv is None:
+                continue
+
+            for id, addr in enumerate(addrs):
+                dispatch_kernel_names[id] = kern_addr[addr]
+            if len(occupancy) > 16:
+                OCCUPANCY.append( occupancy )
+                occupancy_filenames.append(name)
+
+            if np.sum([0]+[len(s.instructions) for id, s in traces.items()]) == 0:
+                print("No traces from", name)
+                continue
+
+            getWaves_stitch(traces, code, jumps, gfxv, latency_map, hitcount_map, bIsAuto)
+
+            analysed_filenames.append(name)
+            EVENTS.append(perfevents)
+            DBFILES.append( persist(name, waves, traces) )
+            GFXV.append(gfxv)
+
+        gc.collect()
+        for k in range(len(code)):
+            code[k][-2] = int(hitcount_map[k])
+            code[k][-1] = int(latency_map[k])
+
+        if CSV_MODE:
+            from att_to_csv import dump_csv
+            dump_csv(code, trace_instance_name)
+        else:
+            drawinfo = {
+                "TIMELINES": gen_timelines(DBFILES),
+                "EVENTS": EVENTS,
+                "EVENT_NAMES": EVENT_NAMES,
+                "OCCUPANCY": OCCUPANCY,
+                "ShaderNames": occupancy_filenames,
+                "DispatchNames": dispatch_kernel_names,
+            }
+            view_trace(
+                args,
+                code,
+                DBFILES,
+                analysed_filenames,
+                args.dumpfiles,
+                0,
+                gfxv,
+                drawinfo,
+                trace_instance_name
+            )

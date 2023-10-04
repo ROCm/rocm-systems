@@ -22,8 +22,6 @@
 #define _XOPEN_SOURCE 700
 #endif
 
-#include "code_printing.hpp"
-
 #include <sys/mman.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -49,9 +47,10 @@
 #include <cstdlib>
 #include <cstring>
 
-#include <hsa/amd_hsa_elf.h>
-#include "../utils.h"
 #include <elfutils/libdw.h>
+#include "../utils.h"
+#include "code_printing.hpp"
+#include <hsa/amd_hsa_elf.h>
 
 #define CHECK_COMGR(call)                                                                          \
   if (amd_comgr_status_s status = call) {                                                          \
@@ -170,21 +169,30 @@ DisassemblyInstance::DisassemblyInstance(code_object_decoder_t& decoder)
       [](uint64_t address, void* user_data) {}, &info));
 }
 
+static bool IsKernelType(amd_comgr_symbol_type_t type)
+{
+  if (type == AMD_COMGR_SYMBOL_TYPE_FUNC)
+    return true;
+#ifdef AMD_COMGR_SYMBOL_TYPE_AMDGPU_HSA_KERNEL // To be deprecated
+  if (type == AMD_COMGR_SYMBOL_TYPE_AMDGPU_HSA_KERNEL)
+    return true;
+#endif
+  return false;
+}
+
 amd_comgr_status_t DisassemblyInstance::symbol_callback(amd_comgr_symbol_t symbol,
                                                         void* user_data) {
   amd_comgr_symbol_type_t type;
   CHECK_COMGR(amd_comgr_symbol_get_info(symbol, AMD_COMGR_SYMBOL_INFO_TYPE, &type));
 
-  if (type != AMD_COMGR_SYMBOL_TYPE_FUNC && type != AMD_COMGR_SYMBOL_TYPE_AMDGPU_HSA_KERNEL)
+  if (!IsKernelType(type))
     return AMD_COMGR_STATUS_SUCCESS;
 
   uint64_t vaddr;
-  CHECK_COMGR(amd_comgr_symbol_get_info(symbol, AMD_COMGR_SYMBOL_INFO_VALUE, &vaddr));
-
   uint64_t mem_size;
-  CHECK_COMGR(amd_comgr_symbol_get_info(symbol, AMD_COMGR_SYMBOL_INFO_SIZE, &mem_size));
-
   uint64_t name_size;
+  CHECK_COMGR(amd_comgr_symbol_get_info(symbol, AMD_COMGR_SYMBOL_INFO_VALUE, &vaddr));
+  CHECK_COMGR(amd_comgr_symbol_get_info(symbol, AMD_COMGR_SYMBOL_INFO_SIZE, &mem_size));
   CHECK_COMGR(amd_comgr_symbol_get_info(symbol, AMD_COMGR_SYMBOL_INFO_NAME_LENGTH, &name_size));
 
   std::string name;

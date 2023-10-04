@@ -4,12 +4,11 @@ import numpy as np
 import csv
 import os
 
-def dump_csv(code):
+def dump_csv(code, trace_instance_name):
     outpath = os.getenv("OUT_FILE_NAME")
     if outpath is None:
-        outpath = "att_output.csv"
-    if ".csv" not in outpath:
-        outpath += ".csv"
+        outpath = "att_output"
+    outpath += '_' + trace_instance_name.split('/')[-1] + '.csv'
 
     with open(outpath, 'w') as f:
         writer = csv.writer(f)

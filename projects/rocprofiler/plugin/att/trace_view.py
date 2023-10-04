@@ -210,11 +210,10 @@ class RocTCPServer(socketserver.TCPServer):
         self.socket.bind(self.server_address)
 
 
-def run_server(drawinfo):
+def run_server(drawinfo, trace_instance_name):
     Handler = NoCacheHTTPRequestHandler
     Handler.drawinfo = drawinfo
-    os.chdir(os.path.join(os.path.dirname(os.path.abspath(__file__)), "ui/"))
-    # os.chdir('ui/')
+    os.chdir(trace_instance_name+"_ui/")
     try:
         with RocTCPServer((IPAddr, PORT), Handler) as httpd:
             httpd.serve_forever()
@@ -299,7 +298,8 @@ def view_trace(
     bDumpOnly,
     se_time_begin,
     gfxv,
-    drawinfo
+    drawinfo,
+    trace_instance_name
 ):
     global JSON_GLOBAL_DICTIONARY
     pic_thread = None
@@ -387,7 +387,7 @@ def view_trace(
         print("serving at ports: {0},{1}".format(PORT, WebSocketPort))
         try:
             PROCS = [
-                Process(target=run_server, args=[drawinfo]),
+                Process(target=run_server, args=[drawinfo, trace_instance_name]),
                 Process(target=run_websocket),
             ]
             for p in PROCS:
@@ -397,13 +397,13 @@ def view_trace(
         except KeyboardInterrupt:
             print("Exitting.")
     else:
-        os.makedirs("ui/", exist_ok=True)
+        os.makedirs(trace_instance_name + "_ui/", exist_ok=True)
         JSON_GLOBAL_DICTIONARY["live.json"] = Readable({"live": 0})
         os.system(
             "cp "
             + os.path.join(os.path.abspath(os.path.dirname(__file__)), "ui")
-            + "/* ui/"
+            + "/* " + trace_instance_name + "_ui/"
         )
         for k, v in JSON_GLOBAL_DICTIONARY.items():
-            with open(os.path.join("ui", k), "w" if ".json" in k else "wb") as f:
+            with open(os.path.join(trace_instance_name+"_ui", k), "w" if ".json" in k else "wb") as f:
                 f.write(v.read())

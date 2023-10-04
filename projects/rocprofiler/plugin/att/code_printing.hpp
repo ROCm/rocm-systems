@@ -20,12 +20,14 @@
 
 #pragma once
 
+#include "rocprofiler.h"
+
 #include <map>
 #include <optional>
 #include <string>
 #include <vector>
-#include "rocprofiler.h"
 #include <memory>
+
 #include "disassembly.hpp"
 
 class code_object_decoder_t {
