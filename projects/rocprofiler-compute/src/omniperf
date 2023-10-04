@@ -529,7 +529,10 @@ def omniperf_profile(args, VER):
         print("KernelName verbose level: ", str(args.kernelVerbose))
 
     # Set up directories
-    workload_dir = args.path + "/" + args.name + "/" + args.target
+    if args.path == os.getcwd() + "/workloads":
+        workload_dir = args.path + "/" + args.name + "/" + args.target
+    else:
+        workload_dir = args.path
     perfmon_dir = str(OMNIPERF_HOME) + "/perfmon_pub"
 
     # Perfmon filtering
