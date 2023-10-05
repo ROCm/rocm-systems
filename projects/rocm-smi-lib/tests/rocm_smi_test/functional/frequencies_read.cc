@@ -43,9 +43,7 @@
  *
  */
 
-#include <stdint.h>
-#include <stddef.h>
-
+#include <cstdint>
 #include <iostream>
 #include <string>
 
@@ -87,15 +85,23 @@ void TestFrequenciesRead::Close() {
 
 static void print_frequencies(rsmi_frequencies_t *f, uint32_t *l = nullptr) {
   assert(f != nullptr);
-  for (uint32_t j = 0; j < f->num_supported; ++j) {
-    std::cout << "\t**  " << j << ": " << f->frequency[j];
+  for (uint32_t clk_i = 0; clk_i < f->num_supported; ++clk_i) {
+    std::string clk_i_str;
+    if (f->has_deep_sleep) {
+      clk_i_str = (clk_i == 0) ? "S" : std::to_string(clk_i-1);
+    } else {
+      clk_i_str = std::to_string(clk_i);
+    }
+    std::cout << "\t**  " <<
+      std::setw(2) << std::right << clk_i_str << ": " <<
+      std::setw(11) << std::right << f->frequency[clk_i];
     if (l != nullptr) {
-      std::cout << "T/s; x" << l[j];
+      std::cout << "T/s; x" << l[clk_i];
     } else {
       std::cout << "Hz";
     }
 
-    if (j == f->current) {
+    if (clk_i == f->current) {
       std::cout << " *";
     }
     std::cout << std::endl;
@@ -123,12 +129,14 @@ void TestFrequenciesRead::Run(void) {
           // Verify api support checking functionality is working
           err = rsmi_dev_gpu_clk_freq_get(i, t, nullptr);
           ASSERT_EQ(err, RSMI_STATUS_NOT_SUPPORTED);
+          return;
         }
 
         // special driver issue, shouldn't normally occur
         if (err == RSMI_STATUS_UNEXPECTED_DATA) {
           std::cerr << "WARN: Clock file [" << FreqEnumToStr(t) << "] exists on device [" << i << "] but empty!" << std::endl;
           std::cerr << "      Likely a driver issue!" << std::endl;
+          return;
         }
 
         CHK_ERR_ASRT(err)
@@ -158,15 +166,15 @@ void TestFrequenciesRead::Run(void) {
         err = rsmi_dev_pci_bandwidth_get(i, nullptr);
         ASSERT_EQ(err, RSMI_STATUS_NOT_SUPPORTED);
       } else {
-          CHK_ERR_ASRT(err)
-          IF_VERB(STANDARD) {
-            std::cout << "\t**Supported PCIe bandwidths: ";
-            std::cout << b.transfer_rate.num_supported << std::endl;
-            print_frequencies(&b.transfer_rate, b.lanes);
-            // Verify api support checking functionality is working
-            err = rsmi_dev_pci_bandwidth_get(i, nullptr);
-            ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
-          }
+        CHK_ERR_ASRT(err)
+        IF_VERB(STANDARD) {
+          std::cout << "\t**Supported PCIe bandwidths: ";
+          std::cout << b.transfer_rate.num_supported << std::endl;
+          print_frequencies(&b.transfer_rate, b.lanes);
+          // Verify api support checking functionality is working
+          err = rsmi_dev_pci_bandwidth_get(i, nullptr);
+          ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
+        }
       }
     }
   }

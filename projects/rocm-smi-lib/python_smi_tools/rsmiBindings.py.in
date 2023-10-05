@@ -37,8 +37,6 @@ def initRsmiBindings(silent=False):
             print_silent('Using lib from %s' % path_librocm)
         else:
             print('Unable to find librocm_smi64.so.@VERSION_MAJOR@')
-    else:
-        print_silent('Library loaded from: %s ' % path_librocm)
 
     # ----------> TODO: Support static libs as well as SO
     try:
@@ -419,25 +417,27 @@ class rsmi_fw_block_t(c_int):
     RSMI_FW_BLOCK_ME = 4
     RSMI_FW_BLOCK_MEC = 5
     RSMI_FW_BLOCK_MEC2 = 6
-    RSMI_FW_BLOCK_PFP = 7
-    RSMI_FW_BLOCK_RLC = 8
-    RSMI_FW_BLOCK_RLC_SRLC = 9
-    RSMI_FW_BLOCK_RLC_SRLG = 10
-    RSMI_FW_BLOCK_RLC_SRLS = 11
-    RSMI_FW_BLOCK_SDMA = 12
-    RSMI_FW_BLOCK_SDMA2 = 13
-    RSMI_FW_BLOCK_SMC = 14
-    RSMI_FW_BLOCK_SOS = 15
-    RSMI_FW_BLOCK_TA_RAS = 16
-    RSMI_FW_BLOCK_TA_XGMI = 17
-    RSMI_FW_BLOCK_UVD = 18
-    RSMI_FW_BLOCK_VCE = 19
-    RSMI_FW_BLOCK_VCN = 20
+    RSMI_FW_BLOCK_MES = 7
+    RSMI_FW_BLOCK_MES_KIQ = 8
+    RSMI_FW_BLOCK_PFP = 9
+    RSMI_FW_BLOCK_RLC = 10
+    RSMI_FW_BLOCK_RLC_SRLC = 11
+    RSMI_FW_BLOCK_RLC_SRLG = 12
+    RSMI_FW_BLOCK_RLC_SRLS = 13
+    RSMI_FW_BLOCK_SDMA = 14
+    RSMI_FW_BLOCK_SDMA2 = 15
+    RSMI_FW_BLOCK_SMC = 16
+    RSMI_FW_BLOCK_SOS = 17
+    RSMI_FW_BLOCK_TA_RAS = 18
+    RSMI_FW_BLOCK_TA_XGMI = 19
+    RSMI_FW_BLOCK_UVD = 20
+    RSMI_FW_BLOCK_VCE = 21
+    RSMI_FW_BLOCK_VCN = 22
     RSMI_FW_BLOCK_LAST = RSMI_FW_BLOCK_VCN
 
 
 # The following list correlated to the rsmi_fw_block_t
-fw_block_names_l = ['ASD', 'CE', 'DMCU', 'MC', 'ME', 'MEC', 'MEC2', 'PFP',\
+fw_block_names_l = ['ASD', 'CE', 'DMCU', 'MC', 'ME', 'MEC', 'MEC2', 'MES', 'MES KIQ', 'PFP',\
                     'RLC', 'RLC SRLC', 'RLC SRLG', 'RLC SRLS', 'SDMA', 'SDMA2',\
                     'SMC', 'SOS', 'TA RAS', 'TA XGMI', 'UVD', 'VCE', 'VCN']
 

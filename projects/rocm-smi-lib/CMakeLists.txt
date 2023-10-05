@@ -1,11 +1,11 @@
 #
-# Minimum version of cmake required
+# Minimum version of cmake and C++ required
 #
-cmake_minimum_required(VERSION 3.6.3)
+cmake_minimum_required(VERSION 3.14)
 
-set(AMD_SMI_LIBS_TARGET "amd_smi_libraries")
+set(ROCM_SMI_LIBS_TARGET "rocm_smi_libraries")
 
-set ( BUILD_SHARED_LIBS ON CACHE BOOL "Build shared library (.so) or not.")
+set(BUILD_SHARED_LIBS ON CACHE BOOL "Build shared library (.so) or not.")
 
 ## Set default module path if not already set
 if(NOT DEFINED CMAKE_MODULE_PATH)
@@ -35,19 +35,19 @@ find_program (GIT NAMES git)
 
 ## Setup the package version based on git tags.
 set(PKG_VERSION_GIT_TAG_PREFIX "rsmi_pkg_ver")
-get_package_version_number("5.0.0" ${PKG_VERSION_GIT_TAG_PREFIX} GIT)
+get_package_version_number("6.0.0" ${PKG_VERSION_GIT_TAG_PREFIX} GIT)
 message("Package version: ${PKG_VERSION_STR}")
-set(${AMD_SMI_LIBS_TARGET}_VERSION_MAJOR "${VERSION_MAJOR}")
-set(${AMD_SMI_LIBS_TARGET}_VERSION_MINOR "${VERSION_MINOR}")
-set(${AMD_SMI_LIBS_TARGET}_VERSION_PATCH "0")
-set(${AMD_SMI_LIBS_TARGET}_VERSION_BUILD "0")
+set(${ROCM_SMI_LIBS_TARGET}_VERSION_MAJOR "${VERSION_MAJOR}")
+set(${ROCM_SMI_LIBS_TARGET}_VERSION_MINOR "${VERSION_MINOR}")
+set(${ROCM_SMI_LIBS_TARGET}_VERSION_PATCH "0")
+set(${ROCM_SMI_LIBS_TARGET}_VERSION_BUILD "0")
 
 # The following default version values should be updated as appropriate for
 # ABI breaks (update MAJOR and MINOR), and ABI/API additions (update MINOR).
 # Until ABI stabilizes VERSION_MAJOR will be 0. This should be over-ridden
 # by git tags (through "git describe") when they are present.
-set(PKG_VERSION_MAJOR 1)
-set(PKG_VERSION_MINOR 0)
+set(PKG_VERSION_MAJOR "${VERSION_MAJOR}")
+set(PKG_VERSION_MINOR "${VERSION_MINOR}")
 set(PKG_VERSION_PATCH 0)
 set(PKG_VERSION_NUM_COMMIT 0)
 
@@ -57,7 +57,9 @@ set(CMAKE_INSTALL_PREFIX "/opt/rocm" CACHE STRING "Default installation director
 set(COMMON_SRC_ROOT ${CMAKE_CURRENT_SOURCE_DIR} CACHE STRING "Location source code common root.")
 set(ROCM_SMI_PACKAGE rocm-smi-lib)
 
-project(${AMD_SMI_LIBS_TARGET})
+project(${ROCM_SMI_LIBS_TARGET})
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 include(GNUInstallDirs)
 set(COMMON_PROJ_ROOT ${PROJECT_SOURCE_DIR})
@@ -70,7 +72,7 @@ endif()
 
 ## Compiler flags
 set(CMAKE_CXX_FLAGS
- "${CMAKE_CXX_FLAGS} -Wall -Wextra -fno-rtti -m64 -msse -msse2 -std=c++11 ")
+ "${CMAKE_CXX_FLAGS} -Wall -Wextra -fno-rtti -m64 -msse -msse2 ")
 # Security options
 set(CMAKE_CXX_FLAGS
  "${CMAKE_CXX_FLAGS} -Wconversion -Wcast-align ")
@@ -78,7 +80,7 @@ set(CMAKE_CXX_FLAGS
  "${CMAKE_CXX_FLAGS} -Wformat=2 -fno-common -Wstrict-overflow ")
  # Intentionally leave out -Wsign-promo. It causes spurious warnings.
 set(CMAKE_CXX_FLAGS
- "${CMAKE_CXX_FLAGS}  -Woverloaded-virtual -Wreorder ")
+ "${CMAKE_CXX_FLAGS} -Woverloaded-virtual -Wreorder ")
 
 # Clang does not set the build-id
 if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
