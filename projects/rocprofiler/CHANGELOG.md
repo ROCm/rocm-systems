@@ -302,3 +302,4 @@ Example for file plugin output:
 - Automatic ISA dumping for ATT. See README.
 - CSV mode for ATT. See README.
 - Added option to control kernel name truncation.
+- Limit rocprof(v1) srcipt usage to only supported architectures.
