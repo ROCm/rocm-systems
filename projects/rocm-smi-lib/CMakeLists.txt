@@ -35,7 +35,7 @@ find_program (GIT NAMES git)
 
 ## Setup the package version based on git tags.
 set(PKG_VERSION_GIT_TAG_PREFIX "rsmi_pkg_ver")
-get_package_version_number("5.0.0" ${PKG_VERSION_GIT_TAG_PREFIX} GIT)
+get_package_version_number("6.0.0" ${PKG_VERSION_GIT_TAG_PREFIX} GIT)
 message("Package version: ${PKG_VERSION_STR}")
 set(${ROCM_SMI_LIBS_TARGET}_VERSION_MAJOR "${VERSION_MAJOR}")
 set(${ROCM_SMI_LIBS_TARGET}_VERSION_MINOR "${VERSION_MINOR}")
@@ -46,8 +46,8 @@ set(${ROCM_SMI_LIBS_TARGET}_VERSION_BUILD "0")
 # ABI breaks (update MAJOR and MINOR), and ABI/API additions (update MINOR).
 # Until ABI stabilizes VERSION_MAJOR will be 0. This should be over-ridden
 # by git tags (through "git describe") when they are present.
-set(PKG_VERSION_MAJOR 1)
-set(PKG_VERSION_MINOR 0)
+set(PKG_VERSION_MAJOR "${VERSION_MAJOR}")
+set(PKG_VERSION_MINOR "${VERSION_MINOR}")
 set(PKG_VERSION_PATCH 0)
 set(PKG_VERSION_NUM_COMMIT 0)
 
