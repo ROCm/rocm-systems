@@ -24,6 +24,7 @@
 #include <vector>
 #include <amd_comgr/amd_comgr.h>
 #include <memory>
+#include <limits>
 
 typedef struct {
   const char* instruction;
