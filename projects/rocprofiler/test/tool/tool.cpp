@@ -1296,6 +1296,8 @@ extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings) {
         ctrl_len > ctrl_rate)
       std::cerr << "Invalid ROCP_CTRL_RATE variable (ctrl_delay:ctrl_len:ctrl_rate)" << std::endl;
 
+    if (ctrl_len <= 0 && ctrl_rate <= 0) allow_profiling = true;
+
     control_dist_us = ctrl_rate - ctrl_len;
     control_len_us = ctrl_len;
     control_delay_us = ctrl_delay;
