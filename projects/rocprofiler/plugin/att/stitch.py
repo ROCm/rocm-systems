@@ -258,7 +258,6 @@ def stitch(insts, raw_code, jumps, gfxv, bIsAuto):
     while i < N:
         if insts[i].type == PCINFO:
             i += 1
-            N -= 1
             continue
 
         #print(line, i, WaveInstCategory[insts[i].type], insts[i].num_waves, insts[i].cycles)
@@ -297,7 +296,6 @@ def stitch(insts, raw_code, jumps, gfxv, bIsAuto):
                 pcskip.append(i)
                 matched = next >= 0
                 i += 1
-                N -= 1
         elif as_line[1] == SWAPPC:
             next = watchlist.swappc(as_line[0], line, i)
             matched = inst.type in [SALU, JUMP]
@@ -305,7 +303,6 @@ def stitch(insts, raw_code, jumps, gfxv, bIsAuto):
                 pcskip.append(i)
                 matched = next >= 0
                 i += 1
-                N -= 1
         elif inst.type == as_line[1]:
             if line in jumps:
                 loopCount[jumps[line] - 1] += 1

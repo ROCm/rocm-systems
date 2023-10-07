@@ -38,7 +38,8 @@ in_filename = sys.argv[1]
 out_filename = in_filename.split(".att")[0] + ".out"
 
 in_bytes = np.fromfile(in_filename, dtype=np.uint16)
-out_bytes = [map16(c) + "\n" for c in in_bytes]
+offset = 4 if in_bytes[0] >= 0xC000 else 0
+out_bytes = [map16(c) + "\n" for c in in_bytes[offset:]]
 
 with open(out_filename, "w") as f:
     [f.write(b) for b in out_bytes]

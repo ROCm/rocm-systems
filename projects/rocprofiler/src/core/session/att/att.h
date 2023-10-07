@@ -44,6 +44,19 @@ typedef struct {
   uint64_t queue_index;
 } att_pending_signal_t;
 
+union att_header_packet_t {
+  struct {
+    uint64_t reserved : 14;
+    uint64_t navi : 1;
+    uint64_t enable : 1;
+    uint64_t DSIMDM : 4;
+    uint64_t DCU : 5;
+    uint64_t DSA : 1;
+    uint64_t SEID : 6;
+  };
+  uint64_t raw;
+};
+
 namespace att {
 
 class AttTracer {

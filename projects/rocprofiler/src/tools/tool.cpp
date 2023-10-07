@@ -59,6 +59,14 @@
 
 #include "utils/helper.h"
 #include "trace_buffer.h"
+#include "core/session/att/att.h"
+
+
+struct PluginHeaderPacket
+{
+  std::string plugin_path;
+  void* userdata;
+};
 
 #define SLEEP_CYCLE_LENGTH 100l
 
@@ -97,10 +105,10 @@ void warning(const std::string& msg) { std::cerr << msg << std::endl; }
 
 class rocprofiler_plugin_t {
  public:
-  rocprofiler_plugin_t(const std::string& plugin_path) {
-    plugin_handle_ = dlopen(plugin_path.c_str(), RTLD_LAZY);
+  rocprofiler_plugin_t(const PluginHeaderPacket& data) {
+    plugin_handle_ = dlopen(data.plugin_path.c_str(), RTLD_LAZY);
     if (plugin_handle_ == nullptr) {
-      warning(std::string("Warning: dlopen for ") + plugin_path + " failed: " + dlerror());
+      warning(std::string("Warning: dlopen for ") + data.plugin_path + " failed: " + dlerror());
       return;
     }
 
@@ -117,8 +125,7 @@ class rocprofiler_plugin_t {
     if (auto* initialize = reinterpret_cast<decltype(rocprofiler_plugin_initialize)*>(
             dlsym(plugin_handle_, "rocprofiler_plugin_initialize"));
         initialize != nullptr)
-      valid_ =
-          initialize(ROCPROFILER_VERSION_MAJOR, ROCPROFILER_VERSION_MINOR, &counter_names) == 0;
+      valid_ = initialize(ROCPROFILER_VERSION_MAJOR, ROCPROFILER_VERSION_MINOR, data.userdata) == 0;
   }
 
   ~rocprofiler_plugin_t() {
@@ -253,7 +260,7 @@ std::vector<std::string> GetCounterNames() {
 }
 
 typedef std::tuple<std::vector<std::pair<rocprofiler_att_parameter_name_t, uint32_t>>,
-                   std::vector<std::string>, std::vector<std::string>, std::vector<uint64_t>>
+        std::vector<std::string>, std::vector<std::string>, std::vector<uint64_t>, uint64_t>
     att_parsed_input_t;
 
 static int GetMpRank() {
@@ -269,7 +276,7 @@ att_parsed_input_t GetATTParams() {
   std::vector<std::string> counters_names;
   std::vector<uint64_t> dispatch_ids;
   const char* path = getenv("COUNTERS_PATH");
-  if (!path) return {{}, {}, {}, {}};
+  if (!path) return {{}, {}, {}, {}, 0};
 
   // List of parameters the user can set. Maxvalue is unused.
   std::unordered_map<std::string, rocprofiler_att_parameter_name_t> ATT_PARAM_NAMES{};
@@ -304,9 +311,12 @@ att_parsed_input_t GetATTParams() {
   std::ifstream trace_file(path);
   if (!trace_file.is_open()) {
     std::cout << "Unable to open att trace file." << std::endl;
-    return {{}, {}, {}, {}};
+    return {{}, {}, {}, {}, 0};
   }
 
+  rocprofiler::att_header_packet_t header{.raw = 0};
+  header.enable = 1;
+  header.DSIMDM = default_params["SIMD_SELECT"];
   int MPI_RANK = GetMpRank();
 
   bool started_att_counters = false;
@@ -332,7 +342,10 @@ att_parsed_input_t GetATTParams() {
     }
     if (!started_att_counters) continue;
 
-    if (param_name == "KERNEL") {
+    if (param_name == "REMOVE_HEADER_PACKET") {
+      header.enable = 0;
+      continue;
+    } else if (param_name == "KERNEL") {
       kernel_names.push_back(line);
       continue;
     } else if (param_name == "PERFCOUNTER") {
@@ -371,14 +384,19 @@ att_parsed_input_t GetATTParams() {
              param_name.c_str(), line.c_str());
       for (auto& name : ATT_PARAM_NAMES) printf("%s\n", name.first.c_str());
     }
+
+    if (param_name.find("TARGET_CU") != std::string::npos)
+      header.DCU = param_value;
+    else if (param_name.find("SIMD_SELECT") != std::string::npos)
+      header.DSIMDM = param_value;
   }
 
-  if (!started_att_counters) return {{}, {}, {}, {}};
+  if (!started_att_counters) return {{}, {}, {}, {}, 0};
 
   for (auto& param : default_params)
     parameters.push_back(std::make_pair(ATT_PARAM_NAMES[param.first], param.second));
 
-  return {parameters, kernel_names, counters_names, dispatch_ids};
+  return {parameters, kernel_names, counters_names, dispatch_ids, header.raw};
 }
 
 void finish() {
@@ -435,7 +453,7 @@ static void env_var_replace(const char* env_name) {
 }
 
 // load plugins
-void plugins_load() {
+void plugins_load(void* userdata) {
   // Load output plugin
   if (Dl_info dl_info; dladdr((void*)plugins_load, &dl_info) != 0) {
     const char* plugin_name = getenv("ROCPROFILER_PLUGIN_LIB");
@@ -461,7 +479,11 @@ void plugins_load() {
         << std::string(getenv("ROCPROFILER_COUNTERS")) << '\n';
     }
 
-    if (!plugin.emplace(fs::path(dl_info.dli_fname).replace_filename(plugin_name)).is_valid()) {
+    PluginHeaderPacket header{
+      .plugin_path = fs::path(dl_info.dli_fname).replace_filename(plugin_name),
+      .userdata = userdata
+    };
+    if (!plugin.emplace(header).is_valid()) {
       plugin.reset();
     }
   }
@@ -683,10 +705,6 @@ ROCPROFILER_EXPORT bool OnLoad(void* table, uint64_t runtime_version, uint64_t f
     }
   }
 
-  // load the plugins
-  plugins_load();
-
-
   std::vector<rocprofiler_tracer_activity_domain_t> apis_requested;
 
   if (getenv("ROCPROFILER_HIP_API_TRACE")) apis_requested.emplace_back(ACTIVITY_DOMAIN_HIP_API);
@@ -703,7 +721,11 @@ ROCPROFILER_EXPORT bool OnLoad(void* table, uint64_t runtime_version, uint64_t f
   std::vector<std::string> kernel_names;
   std::vector<std::string> att_counters_names;
   std::vector<uint64_t> dispatch_ids;
-  std::tie(params, kernel_names, att_counters_names, dispatch_ids) = GetATTParams();
+  uint64_t attheader;
+  std::tie(params, kernel_names, att_counters_names, dispatch_ids, attheader) = GetATTParams();
+
+  // load the plugins
+  plugins_load(params.size() ? (void*)attheader : (void*)&counter_names);
 
   for (auto& kv_pair : params)
     parameters.emplace_back(rocprofiler_att_parameter_t{kv_pair.first, kv_pair.second});

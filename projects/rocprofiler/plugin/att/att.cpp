@@ -45,30 +45,33 @@
 #include "rocprofiler_plugin.h"
 #include "../utils.h"
 #include "code_printing.hpp"
-
+#include "../../src/core/session/att/att.h"
 
 #define ATT_FILENAME_MAXBYTES 90
 #define TEST_INVALID_KERNEL size_t(-1)
 
 namespace {
-
 class att_plugin_t {
  public:
-  att_plugin_t() {
+  att_plugin_t(void* data) {
     std::vector<const char*> mpivars = {"MPI_RANK", "OMPI_COMM_WORLD_RANK", "MV2_COMM_WORLD_RANK"};
 
     for (const char* envvar : mpivars)
-      if (const char* env = getenv(envvar)) {
-        MPI_RANK = atoi(env);
-        MPI_ENABLE = true;
-        break;
-      }
+    if (const char* env = getenv(envvar)) {
+      MPI_RANK = atoi(env);
+      MPI_ENABLE = true;
+      break;
+    }
+
+    header.raw = reinterpret_cast<uint64_t>(data);
+    header.reserved = 0x11;
   }
 
   bool MPI_ENABLE = false;
   int MPI_RANK = 0;
   std::mutex writing_lock;
   bool is_valid_{true};
+  rocprofiler::att_header_packet_t header{.raw = 0};
 
   inline bool att_file_exists(const std::string& name) {
     struct stat buffer;
@@ -130,12 +133,14 @@ class att_plugin_t {
                                  << '\n';
 
     // iterate over each shader engine att trace
+    header.navi = !att_tracer_record->intercept_list.userdata;
     int se_num = att_tracer_record->shader_engine_data_count;
     for (int i = 0; i < se_num; i++) {
       if (!att_tracer_record->shader_engine_data ||
           !att_tracer_record->shader_engine_data[i].buffer_ptr)
         continue;
       printf("--------------collecting data for shader_engine %d---------------\n", i);
+      header.SEID = i;
       rocprofiler_record_se_att_data_t* se_att_trace = &att_tracer_record->shader_engine_data[i];
       char* data_buffer_ptr = reinterpret_cast<char*>(se_att_trace->buffer_ptr);
 
@@ -145,6 +150,8 @@ class att_plugin_t {
         std::cerr << "ATT Failed to open file: " << outfilepath << "_se" << i << ".att\n";
         return ROCPROFILER_STATUS_ERROR;
       }
+      if (header.enable)
+        out.write((const char*)&header, sizeof(header.raw));
       out.write(data_buffer_ptr, se_att_trace->buffer_size);
     }
 
@@ -153,7 +160,6 @@ class att_plugin_t {
       std::cerr << "Could not open ISA file: " << outfilepath << "_isa.s" << std::endl;
       return ROCPROFILER_STATUS_ERROR;
     }
-    uint64_t kernel_begin_addr = att_tracer_record->intercept_list.userdata;
     isafile << "<Kernel> " << kernel_name_mangled << '\n';
 
     for (size_t i = 0; i < att_tracer_record->intercept_list.count; i++) {
@@ -231,7 +237,7 @@ ROCPROFILER_EXPORT int rocprofiler_plugin_initialize(uint32_t rocprofiler_major_
 
   if (att_plugin != nullptr) return ROCPROFILER_STATUS_ERROR;
 
-  att_plugin = new att_plugin_t();
+  att_plugin = new att_plugin_t(data);
   if (att_plugin->IsValid()) return ROCPROFILER_STATUS_SUCCESS;
 
   // The plugin failed to initialied, destroy it and return an error.

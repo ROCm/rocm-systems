@@ -172,7 +172,7 @@ path_to_parser = os.path.abspath(rocprofv2_att_lib)
 SO = CDLL(path_to_parser)
 
 SO.AnalyseBinary.restype = ReturnInfo
-SO.AnalyseBinary.argtypes = [ctypes.c_char_p, ctypes.c_int, ctypes.c_bool]
+SO.AnalyseBinary.argtypes = [ctypes.c_char_p]
 SO.wrapped_parse_binary.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
 SO.wrapped_parse_binary.restype = ReturnAssemblyInfo
 SO.FreeBinary.argtypes = [ctypes.c_uint64]
@@ -217,9 +217,9 @@ def parse_binary(filename, kernel=None):
     return code, jumps, kernel_addr
 
 
-def getWaves_binary(name, target_cu):
+def getWaves_binary(name):
     filename = os.path.abspath(str(name))
-    info = SO.AnalyseBinary(filename.encode("utf-8"), target_cu, False)
+    info = SO.AnalyseBinary(filename.encode("utf-8"))
 
     isValid = info.flags & 0x1
     if isValid == 0:
@@ -267,7 +267,10 @@ def persist(trace_file, SIMD, traces):
     smem_ins, smem_stalls, br_ins, br_taken_ins, br_stalls = [], [], [], [], []
 
     for wave in SIMD:
-        if wave.instructions is None or traces[wave.traceid].instructions is None:
+        try:
+            if wave.instructions is None or traces[wave.traceid].instructions is None:
+                continue
+        except:
             continue
         simds.append(wave.simd)
         waves.append(wave.wave_id)
@@ -456,21 +459,18 @@ if __name__ == "__main__":
         print("Skipping analysis.")
         quit()
 
-    with open(os.getenv("COUNTERS_PATH"), "r") as f:
-        lines = [l.split("//")[0] for l in f.readlines()]
+    if os.getenv("COUNTERS_PATH"):
+        with open(os.getenv("COUNTERS_PATH"), "r") as f:
+            lines = [l.split("//")[0] for l in f.readlines()]
 
-        EVENT_NAMES = []
-        clean = lambda x: x.split("=")[1].split(" ")[0].split("\n")[0]
-        for line in lines:
-            if "PERFCOUNTER_ID=" in line:
-                EVENT_NAMES += ["id: " + clean(line)]
-            elif "att: TARGET_CU" in line:
-                args.target_cu = int(clean(line))
-        for line in lines:
-            if "PERFCOUNTER=" in line:
-                EVENT_NAMES += [clean(line).split("SQ_")[1].lower()]
-    if args.target_cu is None:
-        args.target_cu = 1
+            EVENT_NAMES = []
+            clean = lambda x: x.split("=")[1].split(" ")[0].split("\n")[0]
+            for line in lines:
+                if "PERFCOUNTER_ID=" in line:
+                    EVENT_NAMES += ["id: " + clean(line)]
+            for line in lines:
+                if "PERFCOUNTER=" in line:
+                    EVENT_NAMES += [clean(line).split("SQ_")[1].lower()]
 
     att_kernel_list = glob.glob(args.att_kernel)
 
@@ -520,7 +520,7 @@ if __name__ == "__main__":
         gc.collect()
 
         for name in filenames:
-            traces, waves, perfevents, occupancy, gfxv, addrs = getWaves_binary(name, args.target_cu)
+            traces, waves, perfevents, occupancy, gfxv, addrs = getWaves_binary(name)
             if gfxv is None:
                 continue
 

@@ -171,7 +171,6 @@ static const kernel_descriptor_t* GetKernelCode(uint64_t kernel_object) {
 
 static uint32_t arch_vgpr_count(const std::string_view& name,
                                 const kernel_descriptor_t& kernel_code) {
-  std::string info_name(name.data(), name.size());
   if (strcmp(name.data(), "gfx90a") == 0 || strncmp(name.data(), "gfx94", 5) == 0)
     return (AMD_HSA_BITS_GET(kernel_code.compute_pgm_rsrc3,
                              AMD_COMPUTE_PGM_RSRC_THREE_ACCUM_OFFSET) +
@@ -1127,9 +1126,12 @@ void Queue::WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t u
           dispatch_packet.completion_signal, session_id_snapshot, buffer_id, profile,
           kernel_properties, (uint32_t)syscall(__NR_gettid), user_pkt_index);
 
-      uint64_t off = dispatch_packet.kernel_object +
-          GetKernelCode(dispatch_packet.kernel_object)->kernel_code_entry_byte_offset;
-      codeobj_record::make_capture(rocprofiler_record_id_t{record_id}, capture_mode, off);
+      uint64_t userdata = HSASupport_Singleton::GetInstance()
+                          .GetHSAAgentInfo(queue_info.GetGPUAgent().handle)
+                          .GetDeviceInfo()
+                          .getName()
+                          .find("gfx9") != std::string::npos;
+      codeobj_record::make_capture(rocprofiler_record_id_t{record_id}, capture_mode, userdata);
       codeobj_record::start_capture(rocprofiler_record_id_t{record_id});
       codeobj_record::stop_capture(rocprofiler_record_id_t{record_id});
 
