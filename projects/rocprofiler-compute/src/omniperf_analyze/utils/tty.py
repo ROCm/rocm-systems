@@ -26,6 +26,7 @@ import pandas as pd
 from pathlib import Path
 from tabulate import tabulate
 import sys
+import copy
 
 from omniperf_analyze.utils import schema, parser
 
@@ -139,6 +140,8 @@ def show_all(args, runs, archConfigs, output):
                                             + t_df_pretty.map(str)
                                             + "%)"
                                         )
+                                        df = pd.concat([df, t_df], axis=1)
+                                        
                                         # DEBUG: When in a CI setting and flag is set,
                                         #       then verify metrics meet threshold requirement
                                         if args.report_diff:
@@ -147,23 +150,24 @@ def show_all(args, runs, archConfigs, output):
                                                 .gt(args.report_diff)
                                                 .any()
                                             ):
+                                                violation_idx = t_df_pretty.index[t_df_pretty.abs() > args.report_diff]
                                                 print(
-                                                    "DEBUG ERROR: Dataframe diff exceeds {} threshold requirement".format(
-                                                        str(args.report_diff) + "%"
+                                                    "DEBUG ERROR: Dataframe diff exceeds {} threshold requirement\nSee metric {}".format(
+                                                        str(args.report_diff) + "%",
+                                                        violation_idx.to_numpy()
                                                     )
                                                 )
+                                                print(df)
                                                 sys.exit(1)
-
-                                        df = pd.concat([df, t_df], axis=1)
                                     else:
-                                        cur_df[header] = [
+                                        cur_df_copy = copy.deepcopy(cur_df)
+                                        cur_df_copy[header] = [
                                             round(float(x), args.decimal)
                                             if x != ""
                                             else x
                                             for x in base_df[header]
                                         ]
-
-                                        df = pd.concat([df, cur_df[header]], axis=1)
+                                        df = pd.concat([df, cur_df_copy[header]], axis=1)
 
                 if not df.empty:
                     # subtitle for each table in a panel if existing
