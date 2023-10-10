@@ -56,6 +56,7 @@
 #include <sstream>
 #include <string>
 #include <unordered_set>
+#include <regex>
 
 #include "rocm_smi/rocm_smi_io_link.h"
 #include "rocm_smi/rocm_smi_kfd.h"
@@ -183,6 +184,7 @@ int ReadKFDDeviceProperties(uint32_t kfd_node_id,
   int ret;
   std::ifstream fs;
   std::string properties_path;
+  std::ostringstream ss;
 
   assert(retVec != nullptr);
 
@@ -192,9 +194,14 @@ int ReadKFDDeviceProperties(uint32_t kfd_node_id,
     return ret;
   }
 
+  ss << __PRETTY_FUNCTION__ << " | properties file contains = {";
   while (std::getline(fs, line)) {
     retVec->push_back(line);
+    ss << line << ",\n";
   }
+  ss << "}";
+  // Leaving below to debug any future properties file changes
+  // LOG_DEBUG(ss);
 
   if (retVec->empty()) {
     fs.close();
@@ -616,15 +623,20 @@ int KFDNode::ReadProperties(void) {
   }
 
   std::string key_str;
-  // std::string val_str;
+  std::string val_str;
   uint64_t val_int;  // Assume all properties are unsigned integers for now
   std::istringstream fs;
+  std::ostringstream ss;
 
   for (const auto & i : propVec) {
     fs.str(i);
     fs >> key_str;
-    fs >> val_int;
-
+    fs >> val_str;
+    // Leaving below to debug any new properties file changes
+    // ss << __PRETTY_FUNCTION__ << " | key = " << key_str
+    //    << "; val = " << val_str;
+    // LOG_TRACE(ss);
+    val_int = std::stoull(val_str);
     properties_[key_str] = val_int;
 
     fs.str("");

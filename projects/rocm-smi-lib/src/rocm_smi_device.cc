@@ -1272,7 +1272,7 @@ template <typename T> rsmi_status_t storeParameter(uint32_t dv_ind);
 // Uses template specialization, to restrict types to identify
 // calls needed to complete the function.
 // typename - restricted to
-// rsmi_compute_partition_type_t or rsmi_compute_partition_type_t
+// rsmi_compute_partition_type_t or rsmi_memory_partition_type_t
 // dv_ind - device index
 // tempFileName - base file name
 template <>
@@ -1286,9 +1286,9 @@ rsmi_status_t storeParameter<rsmi_compute_partition_type_t>(uint32_t dv_ind) {
   if (doesFileExist) {
     return returnStatus;
   }
-  uint32_t length = 128;
-  char data[length];
-  rsmi_status_t ret = rsmi_dev_compute_partition_get(dv_ind, data, length);
+  const uint32_t kLen = 128;
+  char data[kLen];
+  rsmi_status_t ret = rsmi_dev_compute_partition_get(dv_ind, data, kLen);
   rsmi_status_t storeRet;
 
   if (ret == RSMI_STATUS_SUCCESS) {
@@ -1312,31 +1312,32 @@ rsmi_status_t storeParameter<rsmi_compute_partition_type_t>(uint32_t dv_ind) {
 // Uses template specialization, to restrict types to identify
 // calls needed to complete the function.
 // typename - restricted to
-// rsmi_compute_partition_type_t or rsmi_compute_partition_type_t
+// rsmi_compute_partition_type_t or rsmi_memory_partition_type_t
 // dv_ind - device index
 // tempFileName - base file name
-template <> rsmi_status_t storeParameter<rsmi_nps_mode_type_t>(uint32_t dv_ind) {
+template <>
+rsmi_status_t storeParameter<rsmi_memory_partition_type_t>(uint32_t dv_ind) {
   rsmi_status_t returnStatus = RSMI_STATUS_SUCCESS;
-  uint32_t length = 128;
-  char data[length];
+  uint32_t kDatalength = 128;
+  char data[kDatalength];
   bool doesFileExist;
   std::tie(doesFileExist, std::ignore) = readTmpFile(dv_ind, "boot",
-                                                     "nps_mode");
+                                                     "memory_partition");
   // if temporary file exists -> we do not need to store anything new
   // if not, read & store the state value
   if (doesFileExist) {
     return returnStatus;
   }
-  rsmi_status_t ret = rsmi_dev_nps_mode_get(dv_ind, data, length);
+  rsmi_status_t ret = rsmi_dev_memory_partition_get(dv_ind, data, kDatalength);
   rsmi_status_t storeRet;
 
   if (ret == RSMI_STATUS_SUCCESS) {
-    storeRet = storeTmpFile(dv_ind, "nps_mode", "boot", data);
+    storeRet = storeTmpFile(dv_ind, "memory_partition", "boot", data);
   } else if (ret == RSMI_STATUS_NOT_SUPPORTED) {
     // not supported is ok
-    storeRet = storeTmpFile(dv_ind, "nps_mode", "boot", "UNKNOWN");
+    storeRet = storeTmpFile(dv_ind, "memory_partition", "boot", "UNKNOWN");
   } else {
-    storeRet = storeTmpFile(dv_ind, "nps_mode", "boot", "UNKNOWN");
+    storeRet = storeTmpFile(dv_ind, "memory_partition", "boot", "UNKNOWN");
     returnStatus = ret;
   }
 
@@ -1350,9 +1351,9 @@ template <> rsmi_status_t storeParameter<rsmi_nps_mode_type_t>(uint32_t dv_ind) 
 rsmi_status_t Device::storeDevicePartitions(uint32_t dv_ind) {
   rsmi_status_t returnStatus = RSMI_STATUS_SUCCESS;
   returnStatus = storeParameter<rsmi_compute_partition_type_t>(dv_ind);
-  rsmi_status_t npsRet = storeParameter<rsmi_nps_mode_type_t>(dv_ind);
-  if (returnStatus == RSMI_STATUS_SUCCESS) { // only record earliest error
-    returnStatus = npsRet;
+  rsmi_status_t ret = storeParameter<rsmi_memory_partition_type_t>(dv_ind);
+  if (returnStatus == RSMI_STATUS_SUCCESS) {  // only record earliest error
+    returnStatus = ret;
   }
   return returnStatus;
 }
@@ -1381,10 +1382,11 @@ std::string Device::readBootPartitionState<rsmi_compute_partition_type_t>(
 // or rsmi_compute_partition_type_t
 // dv_ind - device index
 template <>
-std::string Device::readBootPartitionState<rsmi_nps_mode_type_t>(
+std::string Device::readBootPartitionState<rsmi_memory_partition_type_t>(
     uint32_t dv_ind) {
   std::string boot_state;
-  std::tie(std::ignore, boot_state) = readTmpFile(dv_ind, "boot", "nps_mode");
+  std::tie(std::ignore, boot_state) = readTmpFile(dv_ind, "boot",
+                                                  "memory_partition");
   return boot_state;
 }
 

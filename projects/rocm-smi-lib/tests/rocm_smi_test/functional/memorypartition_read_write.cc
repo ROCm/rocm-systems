@@ -47,45 +47,47 @@
 #include <stddef.h>
 
 #include <iostream>
+#include <string>
+#include <map>
 
 #include "gtest/gtest.h"
 #include "rocm_smi/rocm_smi.h"
-#include "rocm_smi_test/functional/npsmode_read_write.h"
+#include "rocm_smi_test/functional/memorypartition_read_write.h"
 #include "rocm_smi_test/test_common.h"
 
-TestNPSModeReadWrite::TestNPSModeReadWrite() : TestBase() {
-  set_title("RSMI NPS Mode Read Test");
-  set_description("The NPS Mode tests verifies that the memory "
-                  "parition setting can be read and updated properly.");
+TestMemoryPartitionReadWrite::TestMemoryPartitionReadWrite() : TestBase() {
+  set_title("RSMI Memory Partition Read Test");
+  set_description("The memory partition tests verifies that the memory "
+                  "partition settings can be read and updated properly.");
 }
 
-TestNPSModeReadWrite::~TestNPSModeReadWrite(void) {
+TestMemoryPartitionReadWrite::~TestMemoryPartitionReadWrite(void) {
 }
 
-void TestNPSModeReadWrite::SetUp(void) {
+void TestMemoryPartitionReadWrite::SetUp(void) {
   TestBase::SetUp();
 
   return;
 }
 
-void TestNPSModeReadWrite::DisplayTestInfo(void) {
+void TestMemoryPartitionReadWrite::DisplayTestInfo(void) {
   TestBase::DisplayTestInfo();
 }
 
-void TestNPSModeReadWrite::DisplayResults(void) const {
+void TestMemoryPartitionReadWrite::DisplayResults(void) const {
   TestBase::DisplayResults();
   return;
 }
 
-void TestNPSModeReadWrite::Close() {
+void TestMemoryPartitionReadWrite::Close() {
   // This will close handles opened within rsmitst utility calls and call
   // rsmi_shut_down(), so it should be done after other hsa cleanup
   TestBase::Close();
 }
 
 static const std::string
-npsModeString(rsmi_nps_mode_type npsModeType) {
-  switch (npsModeType) {
+memoryPartitionString(rsmi_memory_partition_type memoryPartitionType) {
+  switch (memoryPartitionType) {
     case RSMI_MEMORY_PARTITION_NPS1:
       return "NPS1";
     case RSMI_MEMORY_PARTITION_NPS2:
@@ -99,20 +101,20 @@ npsModeString(rsmi_nps_mode_type npsModeType) {
   }
 }
 
-static const std::map<std::string, rsmi_nps_mode_type_t>
-mapStringToRSMINpsModeTypes {
+static const std::map<std::string, rsmi_memory_partition_type_t>
+mapStringToRSMIMemoryPartitionTypes {
   {"NPS1", RSMI_MEMORY_PARTITION_NPS1},
   {"NPS2", RSMI_MEMORY_PARTITION_NPS2},
   {"NPS4", RSMI_MEMORY_PARTITION_NPS4},
   {"NPS8", RSMI_MEMORY_PARTITION_NPS8}
 };
 
-void TestNPSModeReadWrite::Run(void) {
+void TestMemoryPartitionReadWrite::Run(void) {
   rsmi_status_t ret, err;
-  char orig_nps_mode[255];
-  char current_nps_mode[255];
-  orig_nps_mode[0] = '\0';
-  current_nps_mode[0] = '\0';
+  char orig_memory_partition[255];
+  char current_memory_partition[255];
+  orig_memory_partition[0] = '\0';
+  current_memory_partition[0] = '\0';
 
   TestBase::Run();
   if (setup_failed_) {
@@ -128,8 +130,8 @@ void TestNPSModeReadWrite::Run(void) {
     }
     PrintDeviceHeader(dv_ind);
 
-    //Standard checks to see if API is supported, before running full tests
-    ret = rsmi_dev_nps_mode_get(dv_ind, orig_nps_mode, 255);
+    // Standard checks to see if API is supported, before running full tests
+    ret = rsmi_dev_memory_partition_get(dv_ind, orig_memory_partition, 255);
     if (ret == RSMI_STATUS_NOT_SUPPORTED) {
        IF_VERB(STANDARD) {
           std::cout << "\t**" <<  ": "
@@ -140,36 +142,35 @@ void TestNPSModeReadWrite::Run(void) {
         CHK_ERR_ASRT(ret)
     }
     IF_VERB(STANDARD) {
-      std::cout << std::endl << "\t**"
-                << "NPS Mode: "
-                << orig_nps_mode << std::endl;
+      std::cout << std::endl << "\t**Current Memory Partition: "
+                << orig_memory_partition << std::endl;
     }
 
-    if ((orig_nps_mode == nullptr) ||
-       (orig_nps_mode[0] == '\0')) {
-      std::cout << "***System nps mode value is not defined or received unexpected data. "
-                  "Skip nps mode test." << std::endl;
+    if ((orig_memory_partition == nullptr) ||
+       (orig_memory_partition[0] == '\0')) {
+      std::cout << "***System memory partition value is not defined or received"
+                  " unexpected data. Skip memory partition test." << std::endl;
       continue;
     }
     ASSERT_TRUE(ret == RSMI_STATUS_SUCCESS);
 
     // Verify api support checking functionality is working
-    uint32_t length = 2;
-    char smallBuffer[length];
-    err = rsmi_dev_nps_mode_get(dv_ind, smallBuffer, length);
+    uint32_t kLen = 2;
+    char smallBuffer[kLen];
+    err = rsmi_dev_memory_partition_get(dv_ind, smallBuffer, kLen);
     size_t size = sizeof(smallBuffer)/sizeof(*smallBuffer);
     ASSERT_EQ(err, RSMI_STATUS_INSUFFICIENT_SIZE);
-    ASSERT_EQ((size_t)length, size);
+    ASSERT_EQ((size_t)kLen, size);
     if (err == RSMI_STATUS_INSUFFICIENT_SIZE) {
       IF_VERB(STANDARD) {
         std::cout << "\t**"
                   << "Confirmed RSMI_STATUS_INSUFFICIENT_SIZE was returned "
-                  << "and size matches length requested." << std::endl;
+                  << "and size matches kLen requested." << std::endl;
       }
     }
 
     // Verify api support checking functionality is working
-    err = rsmi_dev_nps_mode_get(dv_ind, nullptr, 255);
+    err = rsmi_dev_memory_partition_get(dv_ind, nullptr, 255);
     ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
 
     if (err == RSMI_STATUS_INVALID_ARGS) {
@@ -181,7 +182,7 @@ void TestNPSModeReadWrite::Run(void) {
     }
 
     // Verify api support checking functionality is working
-    err = rsmi_dev_nps_mode_get(dv_ind, orig_nps_mode, 0);
+    err = rsmi_dev_memory_partition_get(dv_ind, orig_memory_partition, 0);
     ASSERT_TRUE((err == RSMI_STATUS_INVALID_ARGS) ||
                 (err == RSMI_STATUS_NOT_SUPPORTED));
     if (err == RSMI_STATUS_INVALID_ARGS) {
@@ -193,12 +194,12 @@ void TestNPSModeReadWrite::Run(void) {
     }
 
     /******************************/
-    /* rsmi_dev_nps_mode_set(...) */
+    /* rsmi_dev_memory_partition_set(...) */
     /******************************/
     // Verify api support checking functionality is working
-    rsmi_nps_mode_type new_nps_mode;
-    err = rsmi_dev_nps_mode_set(dv_ind, new_nps_mode);
-    // Note: new_nps_mode is not set
+    rsmi_memory_partition_type new_memory_partition;
+    err = rsmi_dev_memory_partition_set(dv_ind, new_memory_partition);
+    // Note: new_memory_partition is not set
     ASSERT_TRUE((err == RSMI_STATUS_INVALID_ARGS) ||
                 (err == RSMI_STATUS_NOT_SUPPORTED));
     if (err == RSMI_STATUS_INVALID_ARGS) {
@@ -210,9 +211,9 @@ void TestNPSModeReadWrite::Run(void) {
     } else if (err == RSMI_STATUS_NOT_SUPPORTED) {
          IF_VERB(STANDARD) {
           std::cout << "\t**" <<  ": "
-                    << "rsmi_dev_nps_mode_set not supported on this device"
-                    << "\n\t    (if rsmi_dev_nps_mode_get works, then likely "
-                    << "need to set in bios)"
+                    << "rsmi_dev_memory_partition_set not supported on this "
+                    << "device\n\t    (if rsmi_dev_memory_partition_get works, "
+                    << "then likely need to set in bios)"
                     << std::endl;
         }
         continue;
@@ -222,8 +223,9 @@ void TestNPSModeReadWrite::Run(void) {
     ASSERT_FALSE(err == RSMI_STATUS_PERMISSION);
 
     // Verify api support checking functionality is working
-    new_nps_mode = rsmi_nps_mode_type::RSMI_MEMORY_PARTITION_UNKNOWN;
-    err = rsmi_dev_nps_mode_set(dv_ind, new_nps_mode);
+    new_memory_partition =
+                      rsmi_memory_partition_type::RSMI_MEMORY_PARTITION_UNKNOWN;
+    err = rsmi_dev_memory_partition_set(dv_ind, new_memory_partition);
     ASSERT_TRUE((err == RSMI_STATUS_INVALID_ARGS) ||
                 (err == RSMI_STATUS_NOT_SUPPORTED) ||
                 (err == RSMI_STATUS_PERMISSION));
@@ -242,101 +244,106 @@ void TestNPSModeReadWrite::Run(void) {
     }
 
     // Re-run original get, so we can reset to later
-    ret = rsmi_dev_nps_mode_get(dv_ind, orig_nps_mode, 255);
+    ret = rsmi_dev_memory_partition_get(dv_ind, orig_memory_partition, 255);
     ASSERT_EQ(RSMI_STATUS_SUCCESS, ret);
 
     for (int partition = RSMI_MEMORY_PARTITION_NPS1;
          partition <= RSMI_MEMORY_PARTITION_NPS8;
          partition++) {
-      new_nps_mode = static_cast<rsmi_nps_mode_type>(partition);
+      new_memory_partition = static_cast<rsmi_memory_partition_type>(partition);
       IF_VERB(STANDARD) {
         std::cout << std::endl;
         std::cout << "\t**"
                   << "======== TEST RSMI_MEMORY_PARTITION_"
-                  << npsModeString(new_nps_mode)
+                  << memoryPartitionString(new_memory_partition)
                   << " ===============" << std::endl;
       }
       IF_VERB(STANDARD) {
         std::cout << "\t**"
-                  << "Attempting to set nps mode to: "
-                  << npsModeString(new_nps_mode) << std::endl;
+                  << "Attempting to set memory partition to: "
+                  << memoryPartitionString(new_memory_partition) << std::endl;
       }
-      ret = rsmi_dev_nps_mode_set(dv_ind, new_nps_mode);
+      ret = rsmi_dev_memory_partition_set(dv_ind, new_memory_partition);
       CHK_ERR_ASRT(ret)
 
-      ret = rsmi_dev_nps_mode_get(dv_ind, current_nps_mode, 255);
+      ret = rsmi_dev_memory_partition_get(dv_ind, current_memory_partition,
+                                          255);
       CHK_ERR_ASRT(ret)
       IF_VERB(STANDARD) {
         std::cout << "\t**"
-                  << "Current nps mode: " << current_nps_mode << std::endl;
+                  << "Current memory partition: " << current_memory_partition
+                  << std::endl;
       }
       ASSERT_EQ(RSMI_STATUS_SUCCESS, ret);
-      ASSERT_STREQ(npsModeString(new_nps_mode).c_str(), current_nps_mode);
+      ASSERT_STREQ(memoryPartitionString(new_memory_partition).c_str(),
+                   current_memory_partition);
     }
 
-    /* TEST RETURN TO BOOT NPS MODE SETTING */
+    /* TEST RETURN TO BOOT MEMORY PARTITION SETTING */
     IF_VERB(STANDARD) {
       std::cout << std::endl;
       std::cout << "\t**"
-                << "=========== TEST RETURN TO BOOT NPS MODE SETTING "
-                << "========" << std::endl;
+                << "=========== TEST RETURN TO BOOT MEMORY PARTITION "
+                << "SETTING ========" << std::endl;
     }
-    std::string oldMode = current_nps_mode;
+    std::string oldMode = current_memory_partition;
     bool wasResetSuccess = false;
-    ret = rsmi_dev_nps_mode_reset(dv_ind);
+    ret = rsmi_dev_memory_partition_reset(dv_ind);
     ASSERT_TRUE((ret == RSMI_STATUS_SUCCESS) ||
                 (ret == RSMI_STATUS_NOT_SUPPORTED));
     if (ret == RSMI_STATUS_SUCCESS) {
       wasResetSuccess = true;
     }
-    ret = rsmi_dev_nps_mode_get(dv_ind, current_nps_mode, 255);
+    ret = rsmi_dev_memory_partition_get(dv_ind, current_memory_partition, 255);
     CHK_ERR_ASRT(ret)
     IF_VERB(STANDARD) {
       std::cout << "\t**"
-                << "Current nps mode: " << current_nps_mode << std::endl;
+                << "Current memory partition: " << current_memory_partition
+                << std::endl;
     }
     if (wasResetSuccess) {
-      ASSERT_STRNE(oldMode.c_str(), current_nps_mode);
+      ASSERT_STRNE(oldMode.c_str(), current_memory_partition);
       IF_VERB(STANDARD) {
       std::cout << "\t**"
-                << "Confirmed prior nps mode (" << oldMode << ") is not "
-                << "equal to current nps mode ("
-                << current_nps_mode << ")" << std::endl;
+                << "Confirmed prior memory partition (" << oldMode << ") is "
+                << "not equal to current memory partition ("
+                << current_memory_partition << ")" << std::endl;
       }
     } else {
-      ASSERT_STREQ(oldMode.c_str(), current_nps_mode);
+      ASSERT_STREQ(oldMode.c_str(), current_memory_partition);
       IF_VERB(STANDARD) {
       std::cout << "\t**"
-                << "Confirmed prior nps mode (" << oldMode << ") is equal"
-                << " to current nps mode ("
-                << current_nps_mode << ")" << std::endl;
+                << "Confirmed prior memory partition (" << oldMode << ") is "
+                << "equal to current memory partition ("
+                << current_memory_partition << ")" << std::endl;
       }
     }
 
-    /* TEST RETURN TO ORIGINAL NPS MODE SETTING */
+    /* TEST RETURN TO ORIGINAL MEMORY PARTITION SETTING */
     IF_VERB(STANDARD) {
       std::cout << std::endl;
       std::cout << "\t**"
-                << "=========== TEST RETURN TO ORIGINAL NPS MODE "
+                << "=========== TEST RETURN TO ORIGINAL MEMORY PARTITION "
                 << "SETTING ========" << std::endl;
     }
-    new_nps_mode
-      = mapStringToRSMINpsModeTypes.at(orig_nps_mode);
+    new_memory_partition
+      = mapStringToRSMIMemoryPartitionTypes.at(orig_memory_partition);
     IF_VERB(STANDARD) {
-      std::cout << "\t**" << "Returning nps mode to: "
-                << npsModeString(new_nps_mode) << std::endl;
+      std::cout << "\t**" << "Returning memory partition to: "
+                << memoryPartitionString(new_memory_partition) << std::endl;
     }
-    ret = rsmi_dev_nps_mode_set(dv_ind, new_nps_mode);
+    ret = rsmi_dev_memory_partition_set(dv_ind, new_memory_partition);
     CHK_ERR_ASRT(ret)
-    ret = rsmi_dev_nps_mode_get(dv_ind, current_nps_mode, 255);
+    ret = rsmi_dev_memory_partition_get(dv_ind, current_memory_partition, 255);
     CHK_ERR_ASRT(ret)
     IF_VERB(STANDARD) {
-      std::cout << "\t**" << "Attempted to set nps mode: "
-                << npsModeString(new_nps_mode) << std::endl
-                << "\t**" << "Current nps mode: " << current_nps_mode
+      std::cout << "\t**" << "Attempted to set memory partition: "
+                << memoryPartitionString(new_memory_partition) << std::endl
+                << "\t**" << "Current memory partition: "
+                << current_memory_partition
                 << std::endl;
     }
     ASSERT_EQ(RSMI_STATUS_SUCCESS, ret);
-    ASSERT_STREQ(npsModeString(new_nps_mode).c_str(), current_nps_mode);
+    ASSERT_STREQ(memoryPartitionString(new_memory_partition).c_str(), current_memory_partition);
   }
 }

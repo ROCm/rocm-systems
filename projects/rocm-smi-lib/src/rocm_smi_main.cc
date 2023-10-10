@@ -59,6 +59,7 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+#include <climits>
 
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_device.h"
@@ -780,7 +781,7 @@ uint32_t RocmSMI::DiscoverAmdgpuDevices(void) {
       myNode.s_node_id = node_id;
       myNode.s_gpu_id = gpu_id;
       myNode.s_unique_id = unique_id;
-      if(gpu_id != 0) { // only add gpu nodes, 0 = CPU
+      if (gpu_id != 0) {  // only add gpu nodes, 0 = CPU
         allSystemNodes.emplace(unique_id, myNode);
       }
     } else {
@@ -790,93 +791,119 @@ uint32_t RocmSMI::DiscoverAmdgpuDevices(void) {
   }
 
   ss << __PRETTY_FUNCTION__ << " | Ordered system nodes found = {";
-  for(auto i: allSystemNodes) {
+  for (auto i : allSystemNodes) {
     ss << "\n[node_id = " << std::to_string(i.second.s_node_id)
        << "; gpu_id = " << std::to_string(i.second.s_gpu_id)
        << "; unique_id = " << std::to_string(i.second.s_unique_id)
-       << "], "
-    ;
+       << "], ";
   }
   ss << "}";
   LOG_DEBUG(ss);
 
+  uint32_t cardAdded = 0;
   // Discover all root cards & gpu partitions associated with each
-  for (uint32_t node_id = 0; node_id < count; node_id++) {
+  for (uint32_t cardId = 0; cardId < count; cardId++) {
     std::string path = kPathDRMRoot;
     path += "/card";
-    path += std::to_string(node_id);
+    path += std::to_string(cardId);
     uint64_t primary_unique_id = 0;
 
     // each identified gpu card node is a primary node for
     // potential matching unique ids
     if (isAMDGPU(path) ||
-       (init_options_ & RSMI_INIT_FLAG_ALL_GPUS)) {
-          std::string d_name = "card";
-          d_name += std::to_string(node_id);
-          AddToDeviceList(d_name);
+        (init_options_ & RSMI_INIT_FLAG_ALL_GPUS)) {
+      std::string d_name = "card";
+      d_name += std::to_string(cardId);
+      AddToDeviceList(d_name);
 
-          ss << __PRETTY_FUNCTION__
-             << " | Ordered system nodes seen in lookup = {";
-          for (auto i : allSystemNodes) {
-            ss << "\n[node_id = " << std::to_string(i.second.s_node_id)
-               << "; gpu_id = " << std::to_string(i.second.s_gpu_id)
-               << "; unique_id = " << std::to_string(i.second.s_unique_id)
-               << "], ";
-          }
-          ss << "}";
-          LOG_DEBUG(ss);
+      ss << __PRETTY_FUNCTION__
+         << " | Ordered system nodes seen in lookup = {";
+      for (auto i : allSystemNodes) {
+        ss << "\n[node_id = " << std::to_string(i.second.s_node_id)
+           << "; gpu_id = " << std::to_string(i.second.s_gpu_id)
+           << "; unique_id = " << std::to_string(i.second.s_unique_id)
+           << "], ";
+      }
+      ss << "}";
+      LOG_DEBUG(ss);
 
-          uint64_t temp_primary_unique_id = 0;
-          if (allSystemNodes.empty()) {
-            continue;
-          }
+      uint64_t temp_primary_unique_id = 0;
+      if (allSystemNodes.empty()) {
+        cardAdded++;
+        ss << __PRETTY_FUNCTION__
+           << " | allSystemNodes.empty() = true, continue...";
+        LOG_DEBUG(ss);
+        continue;
+      }
 
-          // get lowest key 1st to keep order of nodes matching card
-          uint32_t lowest_NodeId = 0;
-          uint32_t curr_NodeId = 0;
+      // get current partition
+      const int kSize = 256;
+      char computePartition[kSize];
+      std::string strCompPartition = "UNKNOWN";
+      uint32_t numMonDevices = 0;
+      rsmi_num_monitor_devices(&numMonDevices);
+      if (rsmi_dev_compute_partition_get(cardAdded, computePartition, kSize)
+          == RSMI_STATUS_SUCCESS) {
+        strCompPartition = computePartition;
+      }
+      uint64_t device_uuid = 0;
+      if (rsmi_dev_unique_id_get(cardAdded, &device_uuid)
+          != RSMI_STATUS_SUCCESS) {
+        cardAdded++;
+        allSystemNodes.erase(device_uuid);
+        ss << __PRETTY_FUNCTION__
+           << " | rsmi_dev_unique_id_get(cardId, &device_uuid)"
+           << " was not successful, continue.. ";
+        LOG_DEBUG(ss);
+        continue;
+      }
 
-          for (auto it = allSystemNodes.begin(), end = allSystemNodes.end();
-               it != end; it = allSystemNodes.upper_bound(it->first)) {
-            curr_NodeId = it->second.s_node_id;
-            if (it == allSystemNodes.begin()) {
-              lowest_NodeId = it->second.s_node_id;
-            }
-            if (curr_NodeId <= lowest_NodeId) {
-              lowest_NodeId = curr_NodeId;
-              temp_primary_unique_id = it->second.s_unique_id;
-            }
-          }
-          ss << __PRETTY_FUNCTION__
-             << " | lowest_NodeId = " << std::to_string(lowest_NodeId)
-             << " | curr_NodeId = " << std::to_string(curr_NodeId)
-             << " | temp_primary_unique_id = "
-             << std::to_string(temp_primary_unique_id);
-          LOG_DEBUG(ss);
+      temp_primary_unique_id =
+          allSystemNodes.find(device_uuid)->second.s_unique_id;
+      auto temp_numb_nodes = allSystemNodes.count(temp_primary_unique_id);
 
-          if (temp_primary_unique_id != 0) {
-            primary_unique_id = temp_primary_unique_id;
-          } else {
-            allSystemNodes.erase(primary_unique_id);
-            continue;
-          }
+      ss << __PRETTY_FUNCTION__
+         << " | device/node id (cardId) = " << std::to_string(cardId)
+         << " | card id (cardAdded) = " << std::to_string(cardAdded)
+         << " | numMonDevices = " << std::to_string(numMonDevices)
+         << " | compute partition = " << strCompPartition
+         << " | temp_primary_unique_id = "
+         << std::to_string(temp_primary_unique_id)
+         << " | Num of nodes matching temp_primary_unique_id = "
+         << temp_numb_nodes
+         << " | device_uuid (hex/uint) = "
+         << print_unsigned_hex_and_int(device_uuid)
+         << " | device_uuid (uint64_t) = " << device_uuid;
+      LOG_DEBUG(ss);
 
-          auto numb_nodes = allSystemNodes.count(primary_unique_id);
-          ss << __PRETTY_FUNCTION__ << " | REFRESH - primary_unique_id = "
-             << std::to_string(primary_unique_id) << " has "
-             << std::to_string(numb_nodes) << " known gpu nodes";
-          LOG_DEBUG(ss);
-          while (numb_nodes > 1) {
-            std::string secNode = "card";
-            secNode += std::to_string(node_id); // add the primary node id
-            AddToDeviceList(secNode);
-            numb_nodes--;
-          }
-          // remove already added nodes associated with current card
-          auto erasedNodes = allSystemNodes.erase(primary_unique_id);
-          ss << __PRETTY_FUNCTION__ << " | After finding primary_unique_id = "
-             << std::to_string(primary_unique_id) << " erased "
-             << std::to_string(erasedNodes) << " nodes";
-          LOG_DEBUG(ss);
+      if (temp_primary_unique_id != 0) {
+        primary_unique_id = temp_primary_unique_id;
+      } else {
+        cardAdded++;
+        // remove already added nodes associated with current card
+        auto erasedNodes = allSystemNodes.erase(0);
+        continue;
+      }
+
+      auto numb_nodes = allSystemNodes.count(primary_unique_id);
+      ss << __PRETTY_FUNCTION__ << " | REFRESH - primary_unique_id = "
+         << std::to_string(primary_unique_id) << " has "
+         << std::to_string(numb_nodes) << " known gpu nodes";
+      LOG_DEBUG(ss);
+      while (numb_nodes > 1) {
+        std::string secNode = "card";
+        secNode += std::to_string(cardId);  // add the primary node id
+        AddToDeviceList(secNode);
+        numb_nodes--;
+        cardAdded++;
+      }
+      // remove already added nodes associated with current card
+      auto erasedNodes = allSystemNodes.erase(primary_unique_id);
+      ss << __PRETTY_FUNCTION__ << " | After finding primary_unique_id = "
+         << std::to_string(primary_unique_id) << " erased "
+         << std::to_string(erasedNodes) << " nodes";
+      LOG_DEBUG(ss);
+      cardAdded++;
     }
   }
 
