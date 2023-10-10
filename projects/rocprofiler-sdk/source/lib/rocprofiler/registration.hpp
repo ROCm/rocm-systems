@@ -54,6 +54,10 @@ namespace rocprofiler
 {
 namespace registration
 {
+// initialize google logging
+void
+init_logging();
+
 // initialize the clients
 void
 initialize();

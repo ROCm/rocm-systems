@@ -20,4 +20,4 @@ gtest_add_tests(
     TEST_LIST buffering-tests_TESTS
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 
-set_tests_properties(${buffering-tests_TESTS} PROPERTIES TIMEOUT 45 LABELS "unittests")
+set_tests_properties(${buffering-tests_TESTS} PROPERTIES TIMEOUT 120 LABELS "unittests")

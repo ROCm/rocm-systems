@@ -67,6 +67,8 @@ typedef enum  // NOLINT(performance-enum-size)
                                                           ///< rocprofiler configuration (i.e.
                                                           ///< function called post-initialization)
     ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED,             ///< Function is not implemented
+    ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_ABI,  ///< Data structure provided by user is incompatible
+                                                ///< with current version of rocprofiler
     ROCPROFILER_STATUS_LAST,
 } rocprofiler_status_t;
 

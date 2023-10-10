@@ -18,9 +18,9 @@ std::vector<rocprofiler_context_id_t> contexts;
 std::vector<rocprofiler_buffer_id_t>  buffer_ids;
 
 rocprofiler_status_t
-find_all_gpu_agents_supporting_pc_sampling_impl(rocprofiler_agent_t** agents,
-                                                size_t                num_agents,
-                                                void*                 data)
+find_all_gpu_agents_supporting_pc_sampling_impl(const rocprofiler_agent_t** agents,
+                                                size_t                      num_agents,
+                                                void*                       data)
 {
     // data is required
     if(!data) return ROCPROFILER_STATUS_ERROR;

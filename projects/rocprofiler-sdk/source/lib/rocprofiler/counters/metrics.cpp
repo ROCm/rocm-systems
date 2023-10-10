@@ -104,7 +104,7 @@ findViaEnvironment(const std::string& filename)
 }  // namespace
 
 MetricMap
-getDerrivedHardwareMetrics()
+getDerivedHardwareMetrics()
 {
     return loadXml(findViaEnvironment("derived_counters.xml"));
 }

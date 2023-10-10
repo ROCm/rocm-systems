@@ -48,7 +48,7 @@ MetricMap
 getBaseHardwareMetrics();
 
 MetricMap
-getDerrivedHardwareMetrics();
+getDerivedHardwareMetrics();
 
 }  // namespace counters
 

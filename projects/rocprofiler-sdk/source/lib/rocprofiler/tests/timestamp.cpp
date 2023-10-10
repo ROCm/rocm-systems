@@ -25,20 +25,17 @@
 
 #include "lib/common/utility.hpp"
 
-extern "C" {
-rocprofiler_status_t
-rocprofiler_get_version(uint32_t* major, uint32_t* minor, uint32_t* patch)
-{
-    if(major) *major = ROCPROFILER_VERSION_MAJOR;
-    if(minor) *minor = ROCPROFILER_VERSION_MINOR;
-    if(patch) *patch = ROCPROFILER_VERSION_PATCH;
-    return ROCPROFILER_STATUS_SUCCESS;
-}
+#include <gtest/gtest.h>
 
-rocprofiler_status_t
-rocprofiler_get_timestamp(rocprofiler_timestamp_t* ts)
+TEST(rocprofiler_lib, timestamp)
 {
-    *ts = rocprofiler::common::timestamp_ns();
-    return ROCPROFILER_STATUS_SUCCESS;
-}
+    auto beg = rocprofiler::common::timestamp_ns();
+    auto mid = rocprofiler_timestamp_t{};
+    auto ret = rocprofiler_get_timestamp(&mid);
+    auto end = rocprofiler::common::timestamp_ns();
+
+    EXPECT_EQ(ret, ROCPROFILER_STATUS_SUCCESS);
+    EXPECT_GT(beg, 0);
+    EXPECT_GT(mid, beg);
+    EXPECT_GT(end, mid);
 }

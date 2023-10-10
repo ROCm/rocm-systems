@@ -51,3 +51,4 @@ rocprofiler_add_interface_library(rocprofiler-fmt "C++ format string library" IN
 rocprofiler_add_interface_library(rocprofiler-stdcxxfs "C++ filesystem library" INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-ptl "Parallel Tasking Library" INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-hsa-aql "AQL library" INTERNAL)
+rocprofiler_add_interface_library(rocprofiler-drm "drm (amdgpu) library" INTERNAL)

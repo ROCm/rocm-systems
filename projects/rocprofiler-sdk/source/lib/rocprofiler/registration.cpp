@@ -100,28 +100,6 @@ get_forced_configure()
     return _v;
 }
 
-void
-init_logging()
-{
-    static auto _once = std::once_flag{};
-    std::call_once(_once, []() {
-        auto get_argv0 = []() {
-            auto ifs  = std::ifstream{"/proc/self/cmdline"};
-            auto sarg = std::string{};
-            while(ifs && !ifs.eof())
-            {
-                ifs >> sarg;
-                if(!sarg.empty()) break;
-            }
-            return sarg;
-        };
-
-        static auto argv0 = get_argv0();
-        google::InitGoogleLogging(argv0.c_str());
-        LOG(INFO) << "logging initialized";
-    });
-}
-
 std::vector<std::string>
 get_link_map()
 {
@@ -396,6 +374,28 @@ invoke_client_finalizer(rocprofiler_client_id_t client_id)
     }
 }
 }  // namespace
+
+void
+init_logging()
+{
+    static auto _once = std::once_flag{};
+    std::call_once(_once, []() {
+        auto get_argv0 = []() {
+            auto ifs  = std::ifstream{"/proc/self/cmdline"};
+            auto sarg = std::string{};
+            while(ifs && !ifs.eof())
+            {
+                ifs >> sarg;
+                if(!sarg.empty()) break;
+            }
+            return sarg;
+        };
+
+        static auto argv0 = get_argv0();
+        google::InitGoogleLogging(argv0.c_str());
+        LOG(INFO) << "logging initialized";
+    });
+}
 
 uint32_t
 get_client_offset()

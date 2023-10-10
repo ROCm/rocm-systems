@@ -11,10 +11,10 @@ include(GoogleTest)
 #
 # -------------------------------------------------------------------------------------- #
 
-set(rocprofiler_lib_sources buffer.cpp)
+set(rocprofiler_lib_sources agent.cpp buffer.cpp timestamp.cpp version.cpp)
 
 add_executable(rocprofiler-lib-tests)
-target_sources(rocprofiler-lib-tests PRIVATE ${rocprofiler_lib_sources})
+target_sources(rocprofiler-lib-tests PRIVATE ${rocprofiler_lib_sources} details/agent.cpp)
 target_link_libraries(
     rocprofiler-lib-tests
     PRIVATE rocprofiler::rocprofiler-static-library

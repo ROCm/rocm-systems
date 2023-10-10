@@ -168,3 +168,39 @@ find_library(
     PATHS ${rocm_version_DIR} ${ROCM_PATH})
 
 target_link_libraries(rocprofiler-hsa-aql INTERFACE ${hsa-amd-aqlprofile64_library})
+
+# ----------------------------------------------------------------------------------------#
+#
+# drm
+#
+# ----------------------------------------------------------------------------------------#
+
+find_path(
+    drm_INCLUDE_DIR
+    NAMES drm.h
+    HINTS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu
+    PATHS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu
+    PATH_SUFFIXES include/drm include REQUIRED)
+
+find_path(
+    xf86drm_INCLUDE_DIR
+    NAMES xf86drm.h
+    HINTS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu
+    PATHS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu
+    PATH_SUFFIXES include/drm include REQUIRED)
+
+find_library(
+    drm_LIBRARY
+    NAMES drm
+    HINTS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu
+    PATHS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu REQUIRED)
+
+find_library(
+    drm_amdgpu_LIBRARY
+    NAMES drm_amdgpu
+    HINTS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu
+    PATHS ${rocm_version_DIR} ${ROCM_PATH} /opt/amdgpu REQUIRED)
+
+target_include_directories(rocprofiler-drm SYSTEM INTERFACE ${drm_INCLUDE_DIR}
+                                                            ${xf86drm_INCLUDE_DIR})
+target_link_libraries(rocprofiler-drm INTERFACE ${drm_LIBRARY} ${drm_amdgpu_LIBRARY})

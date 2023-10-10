@@ -37,7 +37,7 @@ const std::string_view MI200_NAME        = "gfx90a";
     }
 
 static rocprofiler_status_t
-find_first_gpu_agent_impl(rocprofiler_agent_t** agents, size_t num_agents, void* data)
+find_first_gpu_agent_impl(const rocprofiler_agent_t** agents, size_t num_agents, void* data)
 {
     // data is required
     if(!data) return ROCPROFILER_STATUS_ERROR;

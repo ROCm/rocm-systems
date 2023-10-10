@@ -24,9 +24,547 @@
 #include <rocprofiler/fwd.h>
 #include <rocprofiler/rocprofiler.h>
 
-#include "lib/rocprofiler/hsa/agent.hpp"
+#include <fmt/core.h>
+#include <glog/logging.h>
+#include <libdrm/amdgpu.h>
+#include <xf86drm.h>
 
+#include <filesystem>
+#include <fstream>
+#include <limits>
+#include <regex>
+#include <sstream>
+#include <string>
+#include <type_traits>
+#include <unordered_map>
 #include <vector>
+
+namespace rocprofiler
+{
+namespace agent
+{
+namespace
+{
+namespace fs = ::std::filesystem;
+
+struct cpu_info
+{
+    long        processor   = -1;
+    long        family      = -1;
+    long        model       = -1;
+    long        physical_id = -1;
+    long        core_id     = -1;
+    long        apicid      = -1;
+    std::string vendor_id   = {};
+    std::string model_name  = {};
+
+    bool is_valid() const
+    {
+        return !(processor < 0 || family < 0 || model < 0 || physical_id < 0 || core_id < 0 ||
+                 apicid < 0 || vendor_id.empty() || model_name.empty());
+    }
+};
+
+auto
+parse_cpu_info()
+{
+    auto ifs  = std::ifstream{"/proc/cpuinfo"};
+    auto data = std::vector<cpu_info>{};
+    if(!ifs) return data;
+
+    auto read_blocks = [&ifs]() {
+        auto blocks        = std::vector<std::vector<std::string>>{};
+        auto current_block = std::vector<std::string>{};
+        auto line          = std::string{};
+        while(std::getline(ifs, line))
+        {
+            if(ifs.eof())
+            {
+                if(!current_block.empty()) blocks.emplace_back(std::move(current_block));
+                break;
+            }
+
+            if(line.empty())
+            {
+                if(!current_block.empty()) blocks.emplace_back(std::move(current_block));
+                current_block.clear();
+            }
+            else
+            {
+                current_block.emplace_back(line);
+            }
+        }
+        return blocks;
+    };
+
+    auto processor_blocks = read_blocks();
+    auto processor_info   = std::vector<cpu_info>{};
+    processor_info.reserve(processor_blocks.size());
+
+    for(const auto& bitr : processor_blocks)
+    {
+        auto info_v = cpu_info{};
+        for(const auto& itr : bitr)
+        {
+            auto             match = std::smatch{};
+            const std::regex re{".*: (.*)$"};
+            if(std::regex_match(itr, match, re))
+            {
+                if(match.size() == 2)
+                {
+                    std::ssub_match value = match[1];
+
+                    if(itr.find("vendor_id") == 0)
+                        info_v.vendor_id = value.str();
+                    else if(itr.find("model name") == 0)
+                        info_v.model_name = value.str();
+                    else if(itr.find("processor") == 0)
+                        info_v.processor = std::stol(value.str());
+                    else if(itr.find("cpu family") == 0)
+                        info_v.family = std::stol(value.str());
+                    else if(itr.find("model") == 0 && itr.find("model name") != 0)
+                        info_v.model = std::stol(value.str());
+                    else if(itr.find("physical id") == 0)
+                        info_v.physical_id = std::stol(value.str());
+                    else if(itr.find("core id") == 0)
+                        info_v.core_id = std::stol(value.str());
+                    else if(itr.find("apicid") == 0)
+                        info_v.apicid = std::stol(value.str());
+                }
+            }
+        }
+        if(info_v.is_valid())
+            processor_info.emplace_back(info_v);
+        else
+        {
+            LOG(ERROR) << "Invalid processor info: "
+                       << fmt::format("processor={}, vendor={}, family={}, model={}, name={}, "
+                                      "physical id={}, core id={}, apicid={}",
+                                      info_v.processor,
+                                      info_v.vendor_id,
+                                      info_v.family,
+                                      info_v.model,
+                                      info_v.model_name,
+                                      info_v.physical_id,
+                                      info_v.core_id,
+                                      info_v.apicid);
+        }
+    }
+
+    return processor_info;
+}
+
+auto&
+get_cpu_info()
+{
+    static auto _v = parse_cpu_info();
+    return _v;
+}
+
+auto
+read_file(const std::string& fname)
+{
+    auto data = std::vector<std::string>{};
+    auto ifs  = std::ifstream{fname};
+    if(!ifs) throw std::runtime_error{fmt::format("file '{}' cannot be read", fname)};
+
+    while(true)
+    {
+        auto value = std::string{};
+        ifs >> value;
+        if(ifs.eof()) break;
+
+        if(!value.empty()) data.emplace_back(value);
+    }
+
+    return data;
+}
+
+auto
+read_map(const std::string& fname)
+{
+    auto data = std::unordered_map<std::string, std::string>{};
+    auto ifs  = std::ifstream{fname};
+    if(!ifs) throw std::runtime_error{fmt::format("file '{}' cannot be read", fname)};
+
+    while(true)
+    {
+        auto label = std::string{};
+        ifs >> label;
+        if(ifs.eof()) break;
+
+        auto entry = std::string{};
+        ifs >> entry;
+        if(ifs.eof())
+            throw std::runtime_error{
+                fmt::format("unexpected file format in '{}' at {}", fname, label)};
+
+        auto ret = data.emplace(label, entry);
+        if(!ret.second)
+            throw std::runtime_error{fmt::format("duplicate entry in '{}': {}", fname, label)};
+    }
+
+    return data;
+}
+
+template <typename MapT, typename Tp>
+void
+read_property(const MapT& data, const std::string& label, Tp& value)
+{
+    if constexpr(std::is_enum<Tp>::value)
+    {
+        using value_type = std::underlying_type_t<Tp>;
+        // never expect this to be true but it does guard against infinite recursion
+        static_assert(!std::is_enum<value_type>::value, "Expected non-enum type");
+
+        auto value_v = static_cast<value_type>(value);
+        read_property(data, label, value_v);
+        value = static_cast<Tp>(value_v);
+    }
+    else
+    {
+        static_assert(std::is_integral<Tp>::value, "Expected integral type");
+        using value_type = std::conditional_t<std::is_signed<Tp>::value, intmax_t, uintmax_t>;
+
+        if(data.find(label) == data.end())
+        {
+            LOG(ERROR) << "agent properties map missing " << label << " entry";
+            return;
+        }
+
+        auto       iss = std::istringstream{data.at(label)};
+        value_type local_value;
+        iss >> local_value;
+
+        // verify that we have used the correct data sizes
+        constexpr auto min_value = std::numeric_limits<Tp>::min();
+        constexpr auto max_value = std::numeric_limits<Tp>::max();
+        if(local_value < min_value)
+        {
+            throw std::runtime_error{
+                fmt::format("data with label {} has a value (={}) which is less "
+                            "than the min value for the type (={})",
+                            label,
+                            local_value,
+                            min_value)};
+        }
+        else if(local_value > max_value)
+        {
+            throw std::runtime_error{fmt::format("data with label {} has a value (={}) which is "
+                                                 "greater "
+                                                 "than the max value for the type (={})",
+                                                 label,
+                                                 local_value,
+                                                 max_value)};
+        }
+
+        value = static_cast<Tp>(local_value);
+    }
+}
+
+constexpr auto
+compute_version(uint32_t major_v, uint32_t minor_v, uint32_t patch_v)
+{
+    return (major_v * 10000) + (minor_v * 100) + patch_v;
+}
+
+auto
+read_topology()
+{
+    using unique_agent_t = std::unique_ptr<rocprofiler_agent_t, void (*)(rocprofiler_agent_t*)>;
+
+    auto sysfs_nodes_path = fs::path{"/sys/class/kfd/kfd/topology/nodes/"};
+    if(!fs::exists(sysfs_nodes_path))
+        throw std::runtime_error{
+            fmt::format("sysfs nodes path '{}' does not exist", sysfs_nodes_path.string())};
+
+    using pc_sampling_config_vec_t = std::vector<rocprofiler_pc_sampling_configuration_t>;
+
+    auto mi200_pc_sampling_config = pc_sampling_config_vec_t{
+        rocprofiler_pc_sampling_configuration_t{ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP,
+                                                ROCPROFILER_PC_SAMPLING_UNIT_TIME,
+                                                1UL,
+                                                1000000000UL,
+                                                0}};
+
+    const auto& cpu_info_v = get_cpu_info();
+    auto        data       = std::vector<unique_agent_t>{};
+    uint64_t    n          = 0;
+
+    while(true)
+    {
+        auto idx       = n++;
+        auto node_path = sysfs_nodes_path / std::to_string(idx);
+        if(!fs::exists(node_path)) break;
+
+        auto properties  = std::unordered_map<std::string, std::string>{};
+        auto name_prop   = std::vector<std::string>{};
+        auto gpu_id_prop = std::vector<std::string>{};
+        try
+        {
+            properties  = read_map(node_path / "properties");
+            name_prop   = read_file(node_path / "name");
+            gpu_id_prop = read_file(node_path / "gpu_id");
+        } catch(std::runtime_error& e)
+        {
+            LOG(ERROR) << "Error reading '" << (node_path / "properties").string()
+                       << "' :: " << e.what();
+            continue;
+        }
+
+        auto agent_info = rocprofiler_agent_t{};
+        memset(&agent_info, 0, sizeof(agent_info));
+
+        agent_info.size      = sizeof(rocprofiler_agent_t);
+        agent_info.id.handle = idx;
+        agent_info.type      = ROCPROFILER_AGENT_TYPE_NONE;
+
+        if(!name_prop.empty())
+            agent_info.model_name = strdup(name_prop.front().c_str());
+        else
+            agent_info.model_name = "";
+
+        if(!gpu_id_prop.empty()) agent_info.gpu_id = std::stoull(gpu_id_prop.front());
+
+        read_property(properties, "cpu_cores_count", agent_info.cpu_cores_count);
+        read_property(properties, "simd_count", agent_info.simd_count);
+
+        if(agent_info.cpu_cores_count > 0)
+            agent_info.type = ROCPROFILER_AGENT_TYPE_CPU;
+        else if(agent_info.simd_count > 0)
+            agent_info.type = ROCPROFILER_AGENT_TYPE_GPU;
+
+        read_property(properties, "mem_banks_count", agent_info.mem_banks_count);
+        read_property(properties, "caches_count", agent_info.caches_count);
+        read_property(properties, "io_links_count", agent_info.io_links_count);
+        read_property(properties, "cpu_core_id_base", agent_info.cpu_core_id_base);
+        read_property(properties, "simd_id_base", agent_info.simd_id_base);
+        read_property(properties, "max_waves_per_simd", agent_info.max_waves_per_simd);
+        read_property(properties, "lds_size_in_kb", agent_info.lds_size_in_kb);
+        read_property(properties, "gds_size_in_kb", agent_info.gds_size_in_kb);
+        read_property(properties, "num_gws", agent_info.num_gws);
+        read_property(properties, "wave_front_size", agent_info.wave_front_size);
+        read_property(properties, "array_count", agent_info.array_count);
+        read_property(properties, "simd_arrays_per_engine", agent_info.simd_arrays_per_engine);
+        read_property(properties, "cu_per_simd_array", agent_info.cu_per_simd_array);
+        read_property(properties, "simd_per_cu", agent_info.simd_per_cu);
+        read_property(properties, "max_slots_scratch_cu", agent_info.max_slots_scratch_cu);
+        read_property(properties, "gfx_target_version", agent_info.gfx_target_version);
+        read_property(properties, "vendor_id", agent_info.vendor_id);
+        read_property(properties, "device_id", agent_info.device_id);
+        read_property(properties, "location_id", agent_info.location_id);
+        read_property(properties, "domain", agent_info.domain);
+        read_property(properties, "drm_render_minor", agent_info.drm_render_minor);
+        read_property(properties, "hive_id", agent_info.hive_id);
+        read_property(properties, "num_sdma_engines", agent_info.num_sdma_engines);
+        read_property(properties, "num_sdma_xgmi_engines", agent_info.num_sdma_xgmi_engines);
+        read_property(
+            properties, "num_sdma_queues_per_engine", agent_info.num_sdma_queues_per_engine);
+        read_property(properties, "num_cp_queues", agent_info.num_cp_queues);
+        read_property(properties, "max_engine_clk_ccompute", agent_info.max_engine_clk_ccompute);
+
+        agent_info.name         = "";
+        agent_info.product_name = "";
+        agent_info.vendor_name  = "";
+        if(agent_info.type == ROCPROFILER_AGENT_TYPE_GPU)
+        {
+            constexpr auto workgrp_max = 1024;
+            constexpr auto grid_max    = std::numeric_limits<uint32_t>::max();
+
+            read_property(
+                properties, "max_engine_clk_fcompute", agent_info.max_engine_clk_fcompute);
+            read_property(properties, "local_mem_size", agent_info.local_mem_size);
+            read_property(properties, "fw_version", agent_info.fw_version.Value);
+            read_property(properties, "capability", agent_info.capability.Value);
+            read_property(properties, "sdma_fw_version", agent_info.sdma_fw_version.Value);
+            agent_info.fw_version.Value &= 0x3ff;
+            agent_info.sdma_fw_version.Value &= 0x3ff;
+            agent_info.workgroup_max_size = workgrp_max;  // hardcoded in hsa-runtime
+            agent_info.workgroup_max_dim  = {workgrp_max, workgrp_max, workgrp_max};
+            agent_info.grid_max_size      = grid_max;  // hardcoded in hsa-runtime
+            agent_info.grid_max_dim       = {grid_max, grid_max, grid_max};
+            agent_info.cu_count           = agent_info.simd_count / agent_info.simd_per_cu;
+
+            if(int drm_fd = 0; (drm_fd = drmOpenRender(agent_info.drm_render_minor)) >= 0)
+            {
+                uint32_t major_version = 0;
+                uint32_t minor_version = 0;
+                auto*    device_handle = amdgpu_device_handle{};
+                if(amdgpu_device_initialize(
+                       drm_fd, &major_version, &minor_version, &device_handle) == 0)
+                {
+                    auto major = (agent_info.gfx_target_version / 10000) % 100;
+                    auto minor = (agent_info.gfx_target_version / 100) % 100;
+                    auto step  = (agent_info.gfx_target_version % 100);
+
+                    agent_info.name =
+                        strdup(fmt::format("gfx{}{}{:x}", major, minor, step).c_str());
+                    agent_info.product_name = strdup(amdgpu_get_marketing_name(device_handle));
+                    agent_info.vendor_name  = strdup("AMD");
+
+                    amdgpu_gpu_info gpu_info = {};
+                    if(amdgpu_query_gpu_info(device_handle, &gpu_info) == 0)
+                    {
+                        agent_info.family_id = gpu_info.family_id;
+                    }
+                    amdgpu_device_deinitialize(device_handle);
+                }
+                drmClose(drm_fd);
+            }
+
+            constexpr auto gfx90a_version = compute_version(9, 0, 10);
+
+            if(agent_info.gfx_target_version >= gfx90a_version)
+            {
+                agent_info.pc_sampling_configs = rocprofiler_pc_sampling_config_array_t{
+                    mi200_pc_sampling_config.data(), mi200_pc_sampling_config.size()};
+            }
+        }
+        else if(agent_info.type == ROCPROFILER_AGENT_TYPE_CPU)
+        {
+            agent_info.cu_count    = agent_info.cpu_cores_count;
+            agent_info.vendor_name = strdup("CPU");
+            for(const auto& itr : cpu_info_v)
+            {
+                if(agent_info.cpu_core_id_base == itr.apicid)
+                {
+                    agent_info.name         = strdup(itr.model_name.c_str());
+                    agent_info.product_name = strdup(agent_info.name);
+                    agent_info.family_id    = itr.family;
+                    break;
+                }
+            }
+        }
+
+        if(properties.count("num_xcc") > 0)
+            read_property(properties, "num_xcc", agent_info.num_xcc);
+        else
+            agent_info.num_xcc = 1;
+
+        agent_info.max_waves_per_cu = agent_info.simd_per_cu * agent_info.max_waves_per_simd;
+
+        if(agent_info.simd_arrays_per_engine > 0)
+        {
+            agent_info.num_shader_banks =
+                agent_info.array_count / agent_info.simd_arrays_per_engine;
+
+            // depends on above
+            if(agent_info.num_shader_banks * agent_info.simd_arrays_per_engine > 0)
+            {
+                agent_info.cu_per_engine =
+                    (agent_info.simd_count / agent_info.simd_per_cu) /
+                    (agent_info.num_shader_banks * agent_info.simd_arrays_per_engine);
+            }
+        }
+
+        agent_info.mem_banks = nullptr;
+        agent_info.caches    = nullptr;
+        agent_info.io_links  = nullptr;
+
+        if(agent_info.mem_banks_count > 0)
+        {
+            agent_info.mem_banks = new rocprofiler_agent_mem_bank_t[agent_info.mem_banks_count];
+
+            for(uint32_t i = 0; i < agent_info.mem_banks_count; ++i)
+            {
+                using heap_type_t            = HSA_HEAPTYPE;
+                using underlying_heap_type_t = std::underlying_type_t<heap_type_t>;
+
+                auto subproperties =
+                    read_map(node_path / "mem_banks" / std::to_string(i) / "properties");
+
+                auto _heap_type = underlying_heap_type_t{};
+                read_property(subproperties, "heap_type", _heap_type);
+                agent_info.mem_banks[i].heap_type = static_cast<heap_type_t>(_heap_type);
+
+                read_property(
+                    subproperties, "size_in_bytes", agent_info.mem_banks[i].size_in_bytes);
+                read_property(subproperties, "flags", agent_info.mem_banks[i].flags.MemoryProperty);
+                read_property(subproperties, "width", agent_info.mem_banks[i].width);
+                read_property(subproperties, "mem_clk_max", agent_info.mem_banks[i].mem_clk_max);
+            }
+        }
+
+        if(agent_info.caches_count > 0)
+        {
+            agent_info.caches = new rocprofiler_agent_cache_t[agent_info.caches_count];
+
+            for(uint32_t i = 0; i < agent_info.caches_count; ++i)
+            {
+                auto subproperties =
+                    read_map(node_path / "caches" / std::to_string(i) / "properties");
+
+                read_property(
+                    subproperties, "processor_id_low", agent_info.caches[i].processor_id_low);
+                read_property(subproperties, "level", agent_info.caches[i].level);
+                read_property(subproperties, "size", agent_info.caches[i].size);
+                read_property(
+                    subproperties, "cache_line_size", agent_info.caches[i].cache_line_size);
+                read_property(
+                    subproperties, "cache_lines_per_tag", agent_info.caches[i].cache_lines_per_tag);
+                read_property(subproperties, "association", agent_info.caches[i].association);
+                read_property(subproperties, "latency", agent_info.caches[i].latency);
+                read_property(subproperties, "type", agent_info.caches[i].type.Value);
+            }
+        }
+
+        if(agent_info.io_links_count > 0)
+        {
+            agent_info.io_links = new rocprofiler_agent_io_link_t[agent_info.io_links_count];
+
+            for(uint32_t i = 0; i < agent_info.io_links_count; ++i)
+            {
+                auto subproperties =
+                    read_map(node_path / "io_links" / std::to_string(i) / "properties");
+
+                read_property(subproperties, "type", agent_info.io_links[i].type);
+                read_property(subproperties, "version_major", agent_info.io_links[i].version_major);
+                read_property(subproperties, "version_minor", agent_info.io_links[i].version_minor);
+                read_property(subproperties, "node_from", agent_info.io_links[i].node_from);
+                read_property(subproperties, "node_to", agent_info.io_links[i].node_to);
+                read_property(subproperties, "weight", agent_info.io_links[i].weight);
+                read_property(subproperties, "min_latency", agent_info.io_links[i].min_latency);
+                read_property(subproperties, "max_latency", agent_info.io_links[i].max_latency);
+                read_property(subproperties, "min_bandwidth", agent_info.io_links[i].min_bandwidth);
+                read_property(subproperties, "max_bandwidth", agent_info.io_links[i].max_bandwidth);
+                read_property(subproperties,
+                              "recommended_transfer_size",
+                              agent_info.io_links[i].recommended_transfer_size);
+                read_property(subproperties, "flags", agent_info.io_links[i].flags.LinkProperty);
+            }
+        }
+
+        data.emplace_back(new rocprofiler_agent_t{agent_info}, [](rocprofiler_agent_t* ptr) {
+            if(ptr)
+            {
+                auto free_cstring = [](const char*& val) {
+                    if(val && ::strnlen(val, 1) > 0) ::free(const_cast<char*>(val));
+                    val = "";
+                };
+
+                delete[] ptr->mem_banks;
+                delete[] ptr->caches;
+                delete[] ptr->io_links;
+                free_cstring(ptr->name);
+                free_cstring(ptr->vendor_name);
+                free_cstring(ptr->product_name);
+                free_cstring(ptr->model_name);
+            }
+            delete ptr;
+        });
+    }
+    return data;
+}
+
+auto&
+get_agent_topology()
+{
+    static auto _v = read_topology();
+    return _v;
+}
+}  // namespace
+}  // namespace agent
+}  // namespace rocprofiler
 
 extern "C" {
 rocprofiler_status_t
@@ -34,45 +572,22 @@ rocprofiler_query_available_agents(rocprofiler_available_agents_cb_t callback,
                                    size_t                            agent_size,
                                    void*                             user_data)
 {
-    using pc_sampling_config_vec_t = std::vector<rocprofiler_pc_sampling_configuration_t>;
+    if(agent_size > sizeof(rocprofiler_agent_t))
+    {
+        LOG(ERROR) << "rocprofiler_agent_t used by caller is ABI-incompatible with "
+                      "rocprofiler_agent_t in rocprofiler";
+        return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_ABI;
+    }
 
-    auto pc_sampling_configs = std::vector<pc_sampling_config_vec_t>{};
-    auto get_agents          = [&pc_sampling_configs]() {
-        static const auto _default_pc_config =
-            rocprofiler_pc_sampling_configuration_t{ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP,
-                                                    ROCPROFILER_PC_SAMPLING_UNIT_TIME,
-                                                    1UL,
-                                                    1000000000UL,
-                                                    0};
-        auto        temporaries_ = std::vector<rocprofiler_agent_t>{};
-        const auto& agent_info   = rocprofiler::hsa::all_agents();
-        for(const auto& agent : agent_info)
-        {
-            auto& _data = pc_sampling_configs.emplace_back();
-            if(agent.isGpu()) _data = {_default_pc_config};
-            temporaries_.emplace_back(rocprofiler_agent_t{
-                .id   = rocprofiler_agent_id_t{.handle = temporaries_.size()},
-                .type = (agent.isCpu() ? ROCPROFILER_AGENT_TYPE_CPU
-                                                : (agent.isGpu() ? ROCPROFILER_AGENT_TYPE_GPU
-                                                                 : ROCPROFILER_AGENT_TYPE_NONE)),
-                .name = agent.getNameChar(),
-                .pc_sampling_configs =
-                    rocprofiler_pc_sampling_config_array_t{_data.data(), _data.size()}});
-        }
-        return temporaries_;
-    };
-
-    auto agents   = get_agents();
-    auto pointers = std::vector<rocprofiler_agent_t*>{};
+    // auto agents   = get_agents();
+    auto& agents   = rocprofiler::agent::get_agent_topology();
+    auto  pointers = std::vector<const rocprofiler_agent_t*>{};
     pointers.reserve(agents.size());
     for(auto& agent : agents)
     {
-        pointers.emplace_back(&agent);
+        pointers.emplace_back(agent.get());
     }
 
-    assert(agent_size <= sizeof(rocprofiler_agent_t) &&
-           "rocprofiler_agent_t used by caller is ABI-incompatible with rocprofiler_agent_t in "
-           "rocprofiler");
     return callback(pointers.data(), pointers.size(), user_data);
 }
 }
