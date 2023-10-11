@@ -78,6 +78,8 @@
 
 using amd::smi::monitorTypesToString;
 using amd::smi::getRSMIStatusString;
+using amd::smi::AMDGpuMetricsUnitType_t;
+using amd::smi::AMDGpuMetricTypeId_t;
 auto &devInfoTypesStrings = amd::smi::RocmSMI::devInfoTypesStrings;
 
 static const uint32_t kMaxOverdriveLevel = 20;
@@ -5901,7 +5903,7 @@ rsmi_dev_curr_uclk_get(uint32_t dv_ind, uint16_t* uclk_value)
 }
 
 rsmi_status_t
-rsmi_dev_vcn_activity_get(uint32_t dv_ind, GPUMetricVcnActivityTbl_t* vcn_activity_value)
+rsmi_dev_vcn_activity_get(uint32_t dv_ind, amd::smi::GPUMetricVcnActivityTbl_t* vcn_activity_value)
 {
   TRY
   std::ostringstream ostrstream;
@@ -5909,7 +5911,7 @@ rsmi_dev_vcn_activity_get(uint32_t dv_ind, GPUMetricVcnActivityTbl_t* vcn_activi
   LOG_TRACE(ostrstream);
 
   const auto gpu_metric_unit(AMDGpuMetricsUnitType_t::kMetricVcnActivity);
-  GPUMetricVcnActivityTbl_t tmp_vcn_activity_value;
+  amd::smi::GPUMetricVcnActivityTbl_t tmp_vcn_activity_value;
   *vcn_activity_value = tmp_vcn_activity_value;
   auto status_code(rsmi_status_t::RSMI_STATUS_SUCCESS);
   ostrstream << __PRETTY_FUNCTION__
@@ -5924,7 +5926,7 @@ rsmi_dev_vcn_activity_get(uint32_t dv_ind, GPUMetricVcnActivityTbl_t* vcn_activi
 }
 
 rsmi_status_t
-rsmi_dev_xgmi_read_data_get(uint32_t dv_ind, GPUMetricXgmiAccTbl_t* xgmi_read_data_acc_value)
+rsmi_dev_xgmi_read_data_get(uint32_t dv_ind, amd::smi::GPUMetricXgmiAccTbl_t* xgmi_read_data_acc_value)
 {
   TRY
   std::ostringstream ostrstream;
@@ -5932,7 +5934,7 @@ rsmi_dev_xgmi_read_data_get(uint32_t dv_ind, GPUMetricXgmiAccTbl_t* xgmi_read_da
   LOG_TRACE(ostrstream);
 
   const auto gpu_metric_unit(AMDGpuMetricsUnitType_t::kMetricVcnActivity);
-  GPUMetricXgmiAccTbl_t tmp_xgmi_read_data_acc_value;
+  amd::smi::GPUMetricXgmiAccTbl_t tmp_xgmi_read_data_acc_value;
   *xgmi_read_data_acc_value = tmp_xgmi_read_data_acc_value;
   auto status_code(rsmi_status_t::RSMI_STATUS_SUCCESS);
   ostrstream << __PRETTY_FUNCTION__
@@ -5947,7 +5949,7 @@ rsmi_dev_xgmi_read_data_get(uint32_t dv_ind, GPUMetricXgmiAccTbl_t* xgmi_read_da
 }
 
 rsmi_status_t
-rsmi_dev_xgmi_write_data_get(uint32_t dv_ind, GPUMetricXgmiAccTbl_t* xgmi_write_data_acc_value)
+rsmi_dev_xgmi_write_data_get(uint32_t dv_ind, amd::smi::GPUMetricXgmiAccTbl_t* xgmi_write_data_acc_value)
 {
   TRY
   std::ostringstream ostrstream;
@@ -5955,7 +5957,7 @@ rsmi_dev_xgmi_write_data_get(uint32_t dv_ind, GPUMetricXgmiAccTbl_t* xgmi_write_
   LOG_TRACE(ostrstream);
 
   const auto gpu_metric_unit(AMDGpuMetricsUnitType_t::kMetricVcnActivity);
-  GPUMetricXgmiAccTbl_t tmp_xgmi_write_data_acc_value;
+  amd::smi::GPUMetricXgmiAccTbl_t tmp_xgmi_write_data_acc_value;
   *xgmi_write_data_acc_value = tmp_xgmi_write_data_acc_value;
   auto status_code(rsmi_status_t::RSMI_STATUS_SUCCESS);
   ostrstream << __PRETTY_FUNCTION__
@@ -5970,7 +5972,7 @@ rsmi_dev_xgmi_write_data_get(uint32_t dv_ind, GPUMetricXgmiAccTbl_t* xgmi_write_
 }
 
 rsmi_status_t
-rsmi_dev_curr_gfxclk_get(uint32_t dv_ind, GPUMetricCurrGfxClkTbl_t* current_gfxclk_value)
+rsmi_dev_curr_gfxclk_get(uint32_t dv_ind, amd::smi::GPUMetricCurrGfxClkTbl_t* current_gfxclk_value)
 {
   TRY
   std::ostringstream ostrstream;
@@ -5978,7 +5980,7 @@ rsmi_dev_curr_gfxclk_get(uint32_t dv_ind, GPUMetricCurrGfxClkTbl_t* current_gfxc
   LOG_TRACE(ostrstream);
 
   const auto gpu_metric_unit(AMDGpuMetricsUnitType_t::kMetricVcnActivity);
-  GPUMetricCurrGfxClkTbl_t tmp_current_gfxclk_value;
+  amd::smi::GPUMetricCurrGfxClkTbl_t tmp_current_gfxclk_value;
   *current_gfxclk_value = tmp_current_gfxclk_value;
   auto status_code(rsmi_status_t::RSMI_STATUS_SUCCESS);
   ostrstream << __PRETTY_FUNCTION__
@@ -5993,7 +5995,7 @@ rsmi_dev_curr_gfxclk_get(uint32_t dv_ind, GPUMetricCurrGfxClkTbl_t* current_gfxc
 }
 
 rsmi_status_t
-rsmi_dev_curr_socclk_get(uint32_t dv_ind, GPUMetricCurrSocClkTbl_t* current_socclk_value)
+rsmi_dev_curr_socclk_get(uint32_t dv_ind, amd::smi::GPUMetricCurrSocClkTbl_t* current_socclk_value)
 {
   TRY
   std::ostringstream ostrstream;
@@ -6001,7 +6003,7 @@ rsmi_dev_curr_socclk_get(uint32_t dv_ind, GPUMetricCurrSocClkTbl_t* current_socc
   LOG_TRACE(ostrstream);
 
   const auto gpu_metric_unit(AMDGpuMetricsUnitType_t::kMetricVcnActivity);
-  GPUMetricCurrSocClkTbl_t tmp_current_socclk_value;
+  amd::smi::GPUMetricCurrSocClkTbl_t tmp_current_socclk_value;
   *current_socclk_value = tmp_current_socclk_value;
   auto status_code(rsmi_status_t::RSMI_STATUS_SUCCESS);
   ostrstream << __PRETTY_FUNCTION__
@@ -6016,7 +6018,7 @@ rsmi_dev_curr_socclk_get(uint32_t dv_ind, GPUMetricCurrSocClkTbl_t* current_socc
 }
 
 rsmi_status_t
-rsmi_dev_curr_vclk0_get(uint32_t dv_ind, GPUMetricCurrVClkTbl_t* current_vclk_value)
+rsmi_dev_curr_vclk0_get(uint32_t dv_ind, amd::smi::GPUMetricCurrVClkTbl_t* current_vclk_value)
 {
   TRY
   std::ostringstream ostrstream;
@@ -6024,7 +6026,7 @@ rsmi_dev_curr_vclk0_get(uint32_t dv_ind, GPUMetricCurrVClkTbl_t* current_vclk_va
   LOG_TRACE(ostrstream);
 
   const auto gpu_metric_unit(AMDGpuMetricsUnitType_t::kMetricVcnActivity);
-  GPUMetricCurrVClkTbl_t tmp_current_vclk_value;
+  amd::smi::GPUMetricCurrVClkTbl_t tmp_current_vclk_value;
   *current_vclk_value = tmp_current_vclk_value;
   auto status_code(rsmi_status_t::RSMI_STATUS_SUCCESS);
   ostrstream << __PRETTY_FUNCTION__
@@ -6039,7 +6041,7 @@ rsmi_dev_curr_vclk0_get(uint32_t dv_ind, GPUMetricCurrVClkTbl_t* current_vclk_va
 }
 
 rsmi_status_t
-rsmi_dev_curr_vdlk0_get(uint32_t dv_ind, GPUMetricCurrDClkTbl_t* current_dclk_value)
+rsmi_dev_curr_vdlk0_get(uint32_t dv_ind, amd::smi::GPUMetricCurrDClkTbl_t* current_dclk_value)
 {
   TRY
   std::ostringstream ostrstream;
@@ -6047,7 +6049,7 @@ rsmi_dev_curr_vdlk0_get(uint32_t dv_ind, GPUMetricCurrDClkTbl_t* current_dclk_va
   LOG_TRACE(ostrstream);
 
   const auto gpu_metric_unit(AMDGpuMetricsUnitType_t::kMetricVcnActivity);
-  GPUMetricCurrDClkTbl_t tmp_current_dclk_value;
+  amd::smi::GPUMetricCurrDClkTbl_t tmp_current_dclk_value;
   *current_dclk_value = tmp_current_dclk_value;
   auto status_code(rsmi_status_t::RSMI_STATUS_SUCCESS);
   ostrstream << __PRETTY_FUNCTION__
