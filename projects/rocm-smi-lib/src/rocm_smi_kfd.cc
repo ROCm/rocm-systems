@@ -890,9 +890,12 @@ int KFDNode::get_used_memory(uint64_t* used) {
 int read_node_properties(uint32_t node, std::string property_name,
                          uint64_t *val) {
   std::ostringstream ss;
+  std::string propertiesFullPath = "/sys/class/kfd/kfd/topology/nodes/"
+    + std::to_string(node) + "/properties";
   int retVal = EINVAL;
   if (property_name.empty() || val == nullptr) {
     ss << __PRETTY_FUNCTION__
+       << " | File: " << propertiesFullPath
        << " | Issue: Could not read node #" << std::to_string(node)
        << ", property_name is empty or *val is nullptr "
        << " | return = " << std::to_string(retVal)
@@ -905,6 +908,7 @@ int read_node_properties(uint32_t node, std::string property_name,
   if (KFDNodeSupported(node)) {
     retVal = myNode->get_property_value(property_name, val);
     ss << __PRETTY_FUNCTION__
+       << " | File: " << propertiesFullPath
        << " | Successfully read node #" << std::to_string(node)
        << " for property_name = " << property_name
        << " | Data (" << property_name << ") * val = "
@@ -915,6 +919,7 @@ int read_node_properties(uint32_t node, std::string property_name,
   } else {
     retVal = 1;
     ss << __PRETTY_FUNCTION__
+       << " | File: " << propertiesFullPath
        << " | Issue: Could not read node #" << std::to_string(node)
        << ", KFD node was an unsupported node."
        << " | return = " << std::to_string(retVal)
@@ -927,9 +932,12 @@ int read_node_properties(uint32_t node, std::string property_name,
 // /sys/class/kfd/kfd/topology/nodes/*/gpu_id
 int get_gpu_id(uint32_t node, uint64_t *gpu_id) {
   std::ostringstream ss;
+  std::string gpu_id_FullPath = "/sys/class/kfd/kfd/topology/nodes/"
+    + std::to_string(node) + "/gpu_id";
   int retVal = EINVAL;
   if (gpu_id == nullptr) {
     ss << __PRETTY_FUNCTION__
+       << " | File: " << gpu_id_FullPath
        << " | Issue: Could not read node #" << std::to_string(node)
        << ", gpu_id is a nullptr "
        << " | return = " << std::to_string(retVal)
@@ -942,6 +950,7 @@ int get_gpu_id(uint32_t node, uint64_t *gpu_id) {
   if (KFDNodeSupported(node)) {
     retVal = ReadKFDGpuId(node, gpu_id);
     ss << __PRETTY_FUNCTION__
+       << " | File: " << gpu_id_FullPath
        << " | Successfully read node #" << std::to_string(node)
        << " for gpu_id"
        << " | Data (gpu_id) *gpu_id = "
@@ -952,6 +961,7 @@ int get_gpu_id(uint32_t node, uint64_t *gpu_id) {
   } else {
     retVal = 1;
     ss << __PRETTY_FUNCTION__
+       << " | File: " << gpu_id_FullPath
        << " | Issue: Could not read node #" << std::to_string(node)
        << ", KFD node was an unsupported node."
        << " | return = " << std::to_string(retVal)
