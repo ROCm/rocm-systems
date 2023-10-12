@@ -172,24 +172,30 @@ if(${GIT_CLONE})
                    ${PROJECT_SOURCE_DIR}/VERSION.sha @ONLY)
 endif()
 
+# Setup testing collateral
 enable_testing()
+
+option(ENABLE_COVERAGE "Enable code coverage" OFF)
+set(COV_OPTION "")
+if(${ENABLE_COVERAGE})
+    set(COV_OPTION "--cov=src" "--junitxml=tests/test-results.xml" "--cov-append"
+                   "--cov-report=term-missing" "--cov-report=xml:tests/coverage.xml")
+endif()
+message(STATUS "Code coverage: ${ENABLE_COVERAGE}")
 
 add_test(
     NAME test_analyze_commands
-    COMMAND ${Python3_EXECUTABLE} -m pytest
-            ${PROJECT_SOURCE_DIR}/tests/test_analyze_commands.py
+    COMMAND pytest ${COV_OPTION} ${PROJECT_SOURCE_DIR}/tests/test_analyze_commands.py
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 
 add_test(
     NAME test_analyze_workloads
-    COMMAND ${Python3_EXECUTABLE} -m pytest
-            ${PROJECT_SOURCE_DIR}/tests/test_analyze_workloads.py
+    COMMAND pytest ${COV_OPTION} ${PROJECT_SOURCE_DIR}/tests/test_analyze_workloads.py
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 
 add_test(
     NAME test_saved_analysis
-    COMMAND ${Python3_EXECUTABLE} -m pytest
-            ${PROJECT_SOURCE_DIR}/tests/test_saved_analysis.py
+    COMMAND pytest ${COV_OPTION} ${PROJECT_SOURCE_DIR}/tests/test_saved_analysis.py
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 
 # if(EXISTS ${PROJECT_SOURCE_DIR}/src/mibench/roofline/roofline.cpp) message(STATUS

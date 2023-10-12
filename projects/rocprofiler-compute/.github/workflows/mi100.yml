@@ -1,0 +1,51 @@
+name: mi100
+
+on:
+  pull_request:
+    branches:
+      - 'ci'
+
+  # Allows manual execution
+  workflow_dispatch:            
+
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+
+jobs:
+  build:
+    runs-on: [mi100, rhel9]
+    env:
+       TEST_DIR: ${RUNNER_TEMP}/omniperf
+       PYTHONPATH: /share/sw/omniperf/python-libs
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          submodules: recursive
+          token: ${{ secrets.GH_PAT }}
+      - name: Configure
+        run: |
+          mkdir build
+          cd build
+          ml cmake
+          cmake -DENABLE_COVERAGE=ON ..
+      - name: Install Python testing collateral
+        run: pip3 install pytest pytest-cov mock
+      - name: Run [profile] mode
+        run: |
+          cd build
+          ml cmake
+          ctest --verbose -R test_profiler_execution
+      - name: Run [analyze] mode
+        run: |
+          cd build
+          ml cmake
+          srun -N 1 -J omniperf -p ci -t 00:25:00 ctest --verbose -R test_analyze_commands
+      - name: Pytest coverage comment
+        uses: MishaKav/pytest-coverage-comment@v1.1.48
+        with:
+          pytest-xml-coverage-path: 'tests/coverage.xml'
+          junitxml-path: 'tests/test-results.xml'
+          coverage-path-prefix: src/
