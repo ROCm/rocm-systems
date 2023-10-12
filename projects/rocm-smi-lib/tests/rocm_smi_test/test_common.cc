@@ -54,6 +54,7 @@
 #include "rocm_smi_test/test_base.h"
 #include "rocm_smi_test/test_common.h"
 #include "rocm_smi/rocm_smi.h"
+#include "rocm_smi/rocm_smi_utils.h"
 
 static const std::map<rsmi_dev_perf_level_t, const char *>
    kDevPerfLvlNameMap = {
@@ -225,6 +226,10 @@ const char *FreqEnumToStr(rsmi_clk_type rsmi_clk) {
     case RSMI_CLK_TYPE_MEM:  return "Memory clock";
     default: return "Invalid Clock ID";
   }
+}
+
+void printRSMIError(rsmi_status_t err) {
+  std::cout << "err = " << amd::smi::getRSMIStatusString(err);
 }
 
 #if ENABLE_SMI
