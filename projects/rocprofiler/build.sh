@@ -75,7 +75,7 @@ if [ -n "$ROCM_RPATH" ] ; then LD_RUNPATH_FLAG=" -Wl,--enable-new-dtags -Wl,--rp
 if [ -z "$TO_CLEAN" ] ; then TO_CLEAN=yes; fi
 if [ -z "$RUN_TEST" ] ; then RUN_TEST=no; fi
 if [ -z "$ASAN" ] ; then ASAN=False; fi
-if [ -z "$GPU_LIST" ] ; then GPU_LIST="gfx900 gfx906 gfx908 gfx90a gfx940 gfx941 gfx942 gfx1030 gfx1100 gfx1101 gfx1102"; fi
+if [ -z "$GPU_LIST" ] ; then GPU_LIST="gfx900 gfx906 gfx908 gfx90a gfx940 gfx941 gfx942 gfx1030 gfx1100 gfx1101 gfx1102 gfx1031"; fi
 
 ROCPROFILER_ROOT=$(cd $ROCPROFILER_ROOT && echo $PWD)
 
