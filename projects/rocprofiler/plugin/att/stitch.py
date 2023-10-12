@@ -56,7 +56,7 @@ WaveInstCategory = {
 class RegisterWatchList:
     def __init__(self, labels):
         self.registers = {"v" + str(k): [[] for m in range(64)] for k in range(64)}
-        for k in range(64):
+        for k in range(128):
             self.registers["s" + str(k)] = []
         self.labels = labels
 
@@ -83,9 +83,23 @@ class RegisterWatchList:
         # print('Get pc:', line)
         try:
             dst = line.split(" ")[1].strip()
-            label_dest = next_line.split(", ")[-1].split("@")[0]
-            for reg in self.range(dst):
-                self.registers[reg].append(deepcopy(self.labels[label_dest]))
+            label_dests = []
+            try:
+                label_dests = next_line.split(", ")
+            except:
+                pass
+            try:
+                label_dests.append(next_line.split(", ")[-1].split("@")[0])
+            except:
+                pass
+
+            for label_dst in label_dests:
+                try:
+                    cur_label = self.labels[label_dst]
+                    for reg in self.range(dst):
+                        self.registers[reg].append(deepcopy(cur_label))
+                except:
+                    pass
         except:
             pass
 
@@ -219,17 +233,16 @@ def stitch(insts, raw_code, jumps, gfxv, bIsAuto):
     for c in raw_code[1:]:
         c = list(c)
         c[0] = c[0].split(";")[0].split("//")[0].strip()
+        jump_map.append(len(code))
 
         if c[1] != 100:
             code.append(c)
         elif ":" in c[0]:
             labels[c[0].split(":")[0]] = len(code)
-        jump_map.append(len(code) - 1)
 
-    reverse_map = []
+    reverse_map = {}
     for k, v in enumerate(jump_map):
-        if v >= len(reverse_map):
-            reverse_map.append(k)
+        reverse_map[v] = k
 
     jumps = {jump_map[j] + 1: j for j in jumps}
 
@@ -260,7 +273,7 @@ def stitch(insts, raw_code, jumps, gfxv, bIsAuto):
             i += 1
             continue
 
-        #print(line, i, WaveInstCategory[insts[i].type], insts[i].num_waves, insts[i].cycles)
+        #print(line, i, WaveInstCategory[insts[i].type], insts[i].num_waves, insts[i].cycles, code[line])
 
         loops += 1
         if line >= len(code) or loops > MAX_STITCHED_TOKENS \

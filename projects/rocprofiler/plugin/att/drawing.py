@@ -210,7 +210,6 @@ def draw_occupancy_per_dispatch(selections, normalize, OCCUPANCY, dispatchnames)
     for k in range(len(OCCUPANCY)):
         if len(OCCUPANCY[k]) <= 16:
             continue
-        OCCUPANCY[k] = [(16*int(u>>23), (u>>12) & 0x7F, (u>>19) & 0xF, u&0xFFF) for u in OCCUPANCY[k]]
         maxtime = max(maxtime, OCCUPANCY[k][-1][0])
 
     NUM_DOTS = 1600
@@ -265,17 +264,12 @@ def draw_occupancy_per_dispatch(selections, normalize, OCCUPANCY, dispatchnames)
 def draw_occupancy(selections, normalize, OCCUPANCY, shadernames, numdispatchid):
     plt.figure(figsize=(15, 4))
     names = []
-    if len(OCCUPANCY) == 1: # If single SE, do occupancy per CU/WGP
-        percu = [[u for u in OCCUPANCY[0] if (u>>19) & 0xF == k] for k in range(16)]
-        shadernames = shadernames + [['CU'+str(k),''] for k in range(16) if len(percu[k]) > 0]
-        OCCUPANCY = OCCUPANCY + [occ for occ in percu if len(occ) > 0]
 
+    g_maxtime = 1
+    g_delta = 1
     for name, occ in zip(shadernames, OCCUPANCY):
         if len(occ) <= 16:
             continue
-        maxtime = 1
-        delta = 1
-        occ = [(16*int(u >> 23), (u >> 12) & 0x7F, (u>>19) & 0xF, u&0xFFF) for u in occ]
         current_occ = [[0 for m in range(16)] for k in range(numdispatchid)]
         current_occ[0] = [m[1] for m in occ[:16]]
 
@@ -294,6 +288,8 @@ def draw_occupancy(selections, normalize, OCCUPANCY, shadernames, numdispatchid)
         NUM_DOTS = 1500
         maxtime = occ_times[-1]+1
         delta = max(1, maxtime // NUM_DOTS)
+        g_maxtime = max(g_maxtime, maxtime)
+        g_delta = max(g_delta, delta)
         chart = np.zeros((maxtime // delta + 1), dtype=np.float32)
         norm_fact = np.zeros_like(chart)
         norm_fact += 1E-6
@@ -317,7 +313,7 @@ def draw_occupancy(selections, normalize, OCCUPANCY, shadernames, numdispatchid)
         plt.ylabel("Occupancy total")
     plt.xlabel("Cycle")
     plt.ylim(-1)
-    plt.xlim(-maxtime // 200, maxtime + maxtime // 200 + delta + 1)
+    plt.xlim(-g_maxtime // 200, g_maxtime + g_maxtime // 200 + g_delta + 1)
     plt.subplots_adjust(left=0.04, right=1, top=1, bottom=0.1)
     figure_bytes = BytesIO()
     plt.savefig(figure_bytes, dpi=150)
@@ -330,11 +326,14 @@ def GeneratePIC(drawinfo, selections=[True for k in range(16)], normalize=False)
     response = {}
     figures = {}
 
-    states, figure = draw_occupancy(selections, normalize, drawinfo["OCCUPANCY"], drawinfo["ShaderNames"], len(drawinfo["DispatchNames"]))
+    OCCUPANCY = drawinfo["OCCUPANCY"]
+    OCCUPANCY = [[(16*int(u>>23), (u>>12) & 0x7F, (u>>19) & 0xF, u&0xFFF) for u in OCCUPANCY[k]] for k in range(len(OCCUPANCY))]
+
+    states, figure = draw_occupancy(selections, normalize, OCCUPANCY, drawinfo["ShaderNames"], len(drawinfo["DispatchNames"]))
     response["occupancy.png"] = states
     figures["occupancy.png"] = figure
 
-    states, figure = draw_occupancy_per_dispatch(selections, normalize, drawinfo["OCCUPANCY"], drawinfo["DispatchNames"])
+    states, figure = draw_occupancy_per_dispatch(selections, normalize, OCCUPANCY, drawinfo["DispatchNames"])
     response["dispatches.png"] = states
     figures["dispatches.png"] = figure
 
