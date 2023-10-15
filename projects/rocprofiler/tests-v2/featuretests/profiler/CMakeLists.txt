@@ -172,6 +172,49 @@ endif()
 #             COMPONENT tests)
 # endif()
 
+# pmc correctness vectoradd
+set_source_files_properties(apps/vectoradd.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+rocprofiler_featuretests_profiler_add_executable(pmc_vectoradd apps/vectoradd.cpp)
+set_target_properties(
+    pmc_vectoradd PROPERTIES RUNTIME_OUTPUT_DIRECTORY
+                             "${PROJECT_BINARY_DIR}/tests-v2/featuretests/profiler/apps")
+target_link_options(pmc_vectoradd PRIVATE "-Wl,--build-id=md5")
+install(
+    TARGETS pmc_vectoradd
+    RUNTIME
+        DESTINATION
+            ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/tests/featuretests/profiler/apps
+        COMPONENT tests)
+
+# pmc correctness hstogram
+set_source_files_properties(apps/histogram.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+rocprofiler_featuretests_profiler_add_executable(pmc_histogram apps/histogram.cpp)
+set_target_properties(
+    pmc_histogram PROPERTIES RUNTIME_OUTPUT_DIRECTORY
+                             "${PROJECT_BINARY_DIR}/tests-v2/featuretests/profiler/apps")
+target_link_options(pmc_histogram PRIVATE "-Wl,--build-id=md5")
+install(
+    TARGETS pmc_histogram
+    RUNTIME
+        DESTINATION
+            ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/tests/featuretests/profiler/apps
+        COMPONENT tests)
+
+# pmc correctness transpose
+set_source_files_properties(apps/transpose.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+rocprofiler_featuretests_profiler_add_executable(pmc_transpose apps/transpose.cpp)
+set_target_properties(
+    pmc_transpose PROPERTIES RUNTIME_OUTPUT_DIRECTORY
+                             "${PROJECT_BINARY_DIR}/tests-v2/featuretests/profiler/apps")
+target_link_options(pmc_transpose PRIVATE "-Wl,--build-id=md5")
+install(
+    TARGETS pmc_transpose
+    RUNTIME
+        DESTINATION
+            ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/tests/featuretests/profiler/apps
+        COMPONENT tests)
+
+
 # hsa-mem_async_copy -- Not Enabled for Now
 set_source_files_properties(apps/async_mem_copy.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT
                                                                1)
@@ -381,4 +424,5 @@ find_package(
     else()
         # cmake based tests
         include(${CMAKE_CURRENT_LIST_DIR}/counter_validation_tests.cmake)
+        include(${CMAKE_CURRENT_LIST_DIR}/counter_correctness_tests.cmake)
     endif()
