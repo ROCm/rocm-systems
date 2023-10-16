@@ -44,7 +44,7 @@ set_target_properties(
 
 install(
     TARGETS test_hsatool_library LIBRARY
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}/rocprofiler
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/tests
     COMPONENT tests)
 
 target_link_libraries(test_hsatool_library PRIVATE hsa-runtime64::hsa-runtime64)

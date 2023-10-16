@@ -229,6 +229,8 @@ target_compile_definitions(
      PRIVATE PROF_API_IMPL HIP_PROF_HIP_API_STRING=1 __HIP_PLATFORM_AMD__=1)
 target_link_libraries(runCoreUnitTests PRIVATE rocprofiler::build-flags)
 
+set_target_properties(runCoreUnitTests PROPERTIES
+ INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/tests")
 target_link_libraries(
     runCoreUnitTests
     PRIVATE ${AQLPROFILE_LIB}
