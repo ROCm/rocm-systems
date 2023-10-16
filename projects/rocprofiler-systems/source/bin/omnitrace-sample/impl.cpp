@@ -140,12 +140,6 @@ get_initial_environment()
     auto _mode = get_env<std::string>("OMNITRACE_MODE", "sampling", false);
 
     update_env(_env, "OMNITRACE_USE_SAMPLING", (_mode != "causal"));
-    update_env(_env, "OMNITRACE_CRITICAL_TRACE", false);
-    update_env(_env, "OMNITRACE_USE_PROCESS_SAMPLING", false);
-
-    // update_env(_env, "OMNITRACE_USE_PID", false);
-    // update_env(_env, "OMNITRACE_TIME_OUTPUT", false);
-    // update_env(_env, "OMNITRACE_OUTPUT_PATH", "omnitrace-output/%tag%/%launch_time%");
 
 #if defined(OMNITRACE_USE_ROCTRACER) || defined(OMNITRACE_USE_ROCPROFILER)
     update_env(_env, "HSA_TOOLS_LIB", _dl_libpath);

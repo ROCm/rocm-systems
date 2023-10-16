@@ -109,6 +109,7 @@ struct thread_info
     std::string as_string() const;
 
     static bool                              exists();
+    static size_t                            get_peak_num_threads();
     static const std::optional<thread_info>& init(bool _offset = false);
     static const std::optional<thread_info>& get();
     static const std::optional<thread_info>& get(native_handle_t&);

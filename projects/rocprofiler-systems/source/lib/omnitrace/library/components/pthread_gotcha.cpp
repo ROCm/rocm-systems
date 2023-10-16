@@ -97,7 +97,7 @@ pthread_gotcha::shutdown()
     if(is_configured)
     {
         ::omnitrace::component::pthread_mutex_gotcha::shutdown();
-        // ::omnitrace::component::pthread_create_gotcha::shutdown();
+        ::omnitrace::component::pthread_create_gotcha::shutdown();
         is_configured = false;
     }
 }

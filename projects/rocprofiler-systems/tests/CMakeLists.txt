@@ -24,3 +24,5 @@ include(${CMAKE_CURRENT_LIST_DIR}/omnitrace-overflow-tests.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/omnitrace-annotate-tests.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/omnitrace-causal-tests.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/omnitrace-python-tests.cmake)
+
+add_subdirectory(source)

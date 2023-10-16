@@ -92,6 +92,7 @@ shutdown()
         trait::runtime_enabled<ompt_toolset_t>::set(false);
         trait::runtime_enabled<ompt_context_t>::set(false);
         comp::user_ompt_bundle::reset();
+        pthread_gotcha::shutdown();
         // call the OMPT finalize callback
         if(f_finalize) (*f_finalize)();
     }

@@ -85,11 +85,8 @@ extern OMNITRACE_HIDDEN_API bool debug_mark;
 std::unordered_map<hash_value_t, std::string>&
 get_perfetto_track_uuids();
 
-tim::hash_map_ptr_t&
-get_timemory_hash_ids(int64_t _tid = threading::get_id());
-
-tim::hash_alias_ptr_t&
-get_timemory_hash_aliases(int64_t _tid = threading::get_id());
+void
+copy_timemory_hash_ids();
 
 std::vector<std::function<void()>>&
 get_finalization_functions();
@@ -148,7 +145,7 @@ template <typename CategoryT, typename... Args>
 auto
 get_perfetto_category_uuid(Args&&... _args)
 {
-    return tim::hash::get_combined_hash_id(
+    return tim::hash::get_hash_id(
         tim::hash::get_hash_id(JOIN('_', "omnitrace", trait::name<CategoryT>::value)),
         std::forward<Args>(_args)...);
 }
@@ -199,7 +196,7 @@ now()
 inline auto&
 get_instrumentation_bundles(int64_t _tid = threading::get_id())
 {
-    return instrumentation_bundles::instance(_tid);
+    return instrumentation_bundles::instance(construct_on_thread{ _tid });
 }
 
 inline auto&
@@ -290,11 +287,14 @@ push_timemory(CategoryT, std::string_view name, Args&&... args)
     if(category_push_disabled<CategoryT>()) return;
 
     auto& _data = tracing::get_instrumentation_bundles();
-    // this generates a hash for the raw string array
-    auto _hash = tim::add_hash_id(name);
-    _data.construct(_hash)->start(std::forward<Args>(args)...);
-    // increment the profile stack
-    ++get_profile_stack<CategoryT>();
+    if(OMNITRACE_LIKELY(_data != nullptr))
+    {
+        // this generates a hash for the raw string array
+        auto _hash = tim::add_hash_id(name);
+        _data->construct(_hash)->start(std::forward<Args>(args)...);
+        // increment the profile stack
+        ++get_profile_stack<CategoryT>();
+    }
 }
 
 template <typename CategoryT>
@@ -307,23 +307,23 @@ get_timemory(CategoryT, std::string_view name)
 
     auto  _hash = tim::hash::get_hash_id(name);
     auto& _data = tracing::get_instrumentation_bundles();
-    if(OMNITRACE_UNLIKELY(_data.bundles.empty()))
+    if(OMNITRACE_UNLIKELY(_data == nullptr || _data->empty()))
     {
         OMNITRACE_DEBUG("[%s] skipped %s :: empty bundle stack\n", "omnitrace_pop_trace",
                         name.data());
         return return_type{ nullptr, -1 };
     }
 
-    auto*& _v_back = _data.bundles.back();
+    auto*& _v_back = _data->back();
     if(OMNITRACE_LIKELY(_v_back->get_hash() == _hash))
     {
-        return std::make_pair(_v_back, _data.bundles.size() - 1);
+        return std::make_pair(_v_back, _data->size() - 1);
     }
-    else if(_data.bundles.size() > 1)
+    else if(_data->size() > 1)
     {
-        for(size_t i = _data.bundles.size() - 1; i > 0; --i)
+        for(size_t i = _data->size() - 1; i > 0; --i)
         {
-            auto*& _v = _data.bundles.at(i - 1);
+            auto*& _v = _data->at(i - 1);
             if(_v->get_hash() == _hash)
             {
                 return std::make_pair(_v, i - 1);
@@ -357,9 +357,8 @@ destroy_timemory(std::pair<instrumentation_bundle_t*, size_t> _data)
     if(_data.first)
     {
         auto& _bundles = tracing::get_instrumentation_bundles();
-        _bundles.allocator.destroy(_data.first);
-        _bundles.allocator.deallocate(_data.first, 1);
-        _bundles.bundles.erase(_bundles.bundles.begin() + _data.second);
+        if(OMNITRACE_LIKELY(_bundles != nullptr))
+            _bundles->destroy(_data.first, _data.second);
     }
 }
 

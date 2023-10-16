@@ -156,7 +156,7 @@ join()
     if(roctracer::get_thread_pool_state() == State::Active)
     {
         OMNITRACE_DEBUG_F("waiting for all roctracer tasks to complete...\n");
-        for(size_t i = 0; i < max_supported_threads; ++i)
+        for(size_t i = 0; i < thread_info::get_peak_num_threads(); ++i)
             roctracer::get_task_group(i).join();
     }
     else
@@ -167,7 +167,7 @@ join()
     if(critical_trace::get_thread_pool_state() == State::Active)
     {
         OMNITRACE_DEBUG_F("waiting for all critical trace tasks to complete...\n");
-        for(size_t i = 0; i < max_supported_threads; ++i)
+        for(size_t i = 0; i < thread_info::get_peak_num_threads(); ++i)
             critical_trace::get_task_group(i).join();
     }
     else
@@ -178,7 +178,7 @@ join()
     if(general::get_thread_pool_state() == State::Active)
     {
         OMNITRACE_DEBUG_F("waiting for all general tasks to complete...\n");
-        for(size_t i = 0; i < max_supported_threads; ++i)
+        for(size_t i = 0; i < thread_info::get_peak_num_threads(); ++i)
             general::get_task_group(i).join();
     }
 }
@@ -189,7 +189,7 @@ shutdown()
     if(roctracer::get_thread_pool_state() == State::Active)
     {
         OMNITRACE_DEBUG_F("Waiting on completion of roctracer tasks...\n");
-        for(size_t i = 0; i < max_supported_threads; ++i)
+        for(size_t i = 0; i < thread_info::get_peak_num_threads(); ++i)
         {
             roctracer::get_task_group(i).join();
             roctracer::get_task_group(i).clear();
@@ -205,7 +205,7 @@ shutdown()
     if(critical_trace::get_thread_pool_state() == State::Active)
     {
         OMNITRACE_DEBUG_F("Waiting on completion of critical trace tasks...\n");
-        for(size_t i = 0; i < max_supported_threads; ++i)
+        for(size_t i = 0; i < thread_info::get_peak_num_threads(); ++i)
         {
             critical_trace::get_task_group(i).join();
             critical_trace::get_task_group(i).clear();
@@ -221,7 +221,7 @@ shutdown()
     if(general::get_thread_pool_state() == State::Active)
     {
         OMNITRACE_DEBUG_F("Waiting on completion of general tasks...\n");
-        for(size_t i = 0; i < max_supported_threads; ++i)
+        for(size_t i = 0; i < thread_info::get_peak_num_threads(); ++i)
         {
             general::get_task_group(i).join();
             general::get_task_group(i).clear();
@@ -254,9 +254,9 @@ general::get_task_group(int64_t _tid)
     struct local
     {};
     using thread_data_t = thread_data<PTL::TaskGroup<void>, local>;
-    static auto& _v =
-        thread_data_t::instances(construct_on_init{}, &tasking::get_thread_pool());
-    return *_v.at(_tid);
+    static thread_local auto& _v =
+        thread_data_t::instance(construct_on_thread{ _tid }, &tasking::get_thread_pool());
+    return *_v;
 }
 
 PTL::TaskGroup<void>&
@@ -264,11 +264,11 @@ roctracer::get_task_group(int64_t _tid)
 {
     struct local
     {};
-    using thread_data_t = thread_data<PTL::TaskGroup<void>, local>;
-    static auto& _v =
-        (roctracer::get_thread_pool_state() = State::Active,
-         thread_data_t::instances(construct_on_init{}, &tasking::get_thread_pool()));
-    return *_v.at(_tid);
+    using thread_data_t          = thread_data<PTL::TaskGroup<void>, local>;
+    static thread_local auto& _v = (roctracer::get_thread_pool_state() = State::Active,
+                                    thread_data_t::instance(construct_on_thread{ _tid },
+                                                            &tasking::get_thread_pool()));
+    return *_v;
 }
 
 PTL::TaskGroup<void>&
@@ -277,10 +277,11 @@ critical_trace::get_task_group(int64_t _tid)
     struct local
     {};
     using thread_data_t = thread_data<PTL::TaskGroup<void>, local>;
-    static auto& _v =
+    static thread_local auto& _v =
         (critical_trace::get_thread_pool_state() = State::Active,
-         thread_data_t::instances(construct_on_init{}, &tasking::get_thread_pool()));
-    return *_v.at(_tid);
+         thread_data_t::instance(construct_on_thread{ _tid },
+                                 &tasking::get_thread_pool()));
+    return *_v;
 }
 }  // namespace tasking
 }  // namespace omnitrace

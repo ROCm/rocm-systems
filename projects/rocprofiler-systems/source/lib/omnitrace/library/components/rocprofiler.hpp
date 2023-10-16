@@ -57,7 +57,7 @@ using rocm_feature_value = std::variant<uint32_t, float, uint64_t, double>;
 
 struct rocm_counter
 {
-    std::array<rocm_metric_type, OMNITRACE_MAX_COUNTERS> counters;
+    std::array<rocm_metric_type, OMNITRACE_ROCM_MAX_COUNTERS> counters;
 };
 
 struct rocm_event

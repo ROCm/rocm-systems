@@ -30,6 +30,7 @@
 #include "library/roctracer.hpp"
 #include "library/runtime.hpp"
 #include "library/thread_data.hpp"
+#include "library/thread_info.hpp"
 
 #include <roctracer.h>
 
@@ -265,7 +266,7 @@ roctracer::setup(void* table, bool on_load_trace)
         itr.second();
 
     // make sure all async callbacks are allocated
-    for(size_t i = 0; i < max_supported_threads; ++i)
+    for(size_t i = 0; i < thread_info::get_peak_num_threads(); ++i)
         hip_exec_activity_callbacks(i);
 
     OMNITRACE_VERBOSE_F(1, "roctracer is setup\n");
@@ -286,9 +287,9 @@ roctracer::shutdown()
     OMNITRACE_VERBOSE_F(1, "shutting down roctracer...\n");
 
     OMNITRACE_VERBOSE_F(2, "executing hip_exec_activity_callbacks(0..%zu)\n",
-                        max_supported_threads);
+                        thread_info::get_peak_num_threads());
     // make sure all async operations are executed
-    for(size_t i = 0; i < max_supported_threads; ++i)
+    for(size_t i = 0; i < thread_info::get_peak_num_threads(); ++i)
         hip_exec_activity_callbacks(i);
 
     // callback for hsa

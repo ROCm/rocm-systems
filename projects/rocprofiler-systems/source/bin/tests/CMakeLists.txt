@@ -1,6 +1,7 @@
 set(OMNITRACE_ABORT_FAIL_REGEX
-    "### ERROR ###|address of faulting memory reference|exiting with non-zero exit code|terminate called after throwing an instance|calling abort.. in |Exit code: [1-9]"
-    CACHE INTERNAL "Regex to catch abnormal exits when a PASS_REGULAR_EXPRESSION is set")
+    "### ERROR ###|unknown-hash=|address of faulting memory reference|exiting with non-zero exit code|terminate called after throwing an instance|calling abort.. in |Exit code: [1-9]"
+    CACHE INTERNAL "Regex to catch abnormal exits when a PASS_REGULAR_EXPRESSION is set"
+          FORCE)
 
 # adds a ctest for executable
 function(OMNITRACE_ADD_BIN_TEST)

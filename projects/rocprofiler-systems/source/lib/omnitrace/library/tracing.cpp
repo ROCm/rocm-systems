@@ -21,14 +21,42 @@
 // SOFTWARE.
 
 #include "library/tracing.hpp"
+#include "core/concepts.hpp"
 #include "core/config.hpp"
 #include "core/state.hpp"
+#include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
+
+#include <timemory/hash/types.hpp>
+#include <timemory/process/threading.hpp>
 
 namespace omnitrace
 {
 namespace tracing
 {
+namespace
+{
+tim::hash_map_ptr_t&
+get_timemory_hash_ids(int64_t _tid = threading::get_id());
+
+tim::hash_alias_ptr_t&
+get_timemory_hash_aliases(int64_t _tid = threading::get_id());
+
+tim::hash_map_ptr_t&
+get_timemory_hash_ids(int64_t _tid)
+{
+    return thread_data<identity<tim::hash_map_ptr_t>>::instance(
+        construct_on_thread{ _tid });
+}
+
+tim::hash_alias_ptr_t&
+get_timemory_hash_aliases(int64_t _tid)
+{
+    return thread_data<identity<tim::hash_alias_ptr_t>>::instance(
+        construct_on_thread{ _tid });
+}
+}  // namespace
+
 bool debug_push = tim::get_env("OMNITRACE_DEBUG_PUSH", false) || get_debug_env();
 bool debug_pop  = tim::get_env("OMNITRACE_DEBUG_POP", false) || get_debug_env();
 bool debug_mark = tim::get_env("OMNITRACE_DEBUG_MARK", false) || get_debug_env();
@@ -41,19 +69,52 @@ get_perfetto_track_uuids()
     return _v;
 }
 
-tim::hash_map_ptr_t&
-get_timemory_hash_ids(int64_t _tid)
+void
+copy_timemory_hash_ids()
 {
-    static auto _v = std::array<tim::hash_map_ptr_t, omnitrace::max_supported_threads>{};
-    return _v.at(_tid);
-}
+    auto_lock_t _ilk{ type_mutex<tim::hash_map_t>(), std::defer_lock };
+    auto_lock_t _alk{ type_mutex<tim::hash_alias_map_t>(), std::defer_lock };
 
-tim::hash_alias_ptr_t&
-get_timemory_hash_aliases(int64_t _tid)
-{
-    static auto _v =
-        std::array<tim::hash_alias_ptr_t, omnitrace::max_supported_threads>{};
-    return _v.at(_tid);
+    if(!_ilk.owns_lock()) _ilk.lock();
+    if(!_alk.owns_lock()) _alk.lock();
+
+    // copy these over so that all hashes are known
+    auto& _hmain = tim::hash::get_main_hash_ids();
+    auto& _amain = tim::hash::get_main_hash_aliases();
+    OMNITRACE_REQUIRE(_hmain != nullptr) << "no main timemory hash ids";
+    OMNITRACE_REQUIRE(_amain != nullptr) << "no main timemory hash aliases";
+
+    // combine all the hash and alias info into one container
+    for(size_t i = 0; i < thread_info::get_peak_num_threads(); ++i)
+    {
+        auto& _hitr = get_timemory_hash_ids(i);
+        auto& _aitr = get_timemory_hash_aliases(i);
+
+        if(_hitr)
+        {
+            for(const auto& itr : *_hitr)
+                _hmain->emplace(itr.first, itr.second);
+        }
+        if(_aitr)
+        {
+            for(auto itr : *_aitr)
+                _amain->emplace(itr.first, itr.second);
+        }
+    }
+
+    // distribute the contents of that combined container to each thread-specific
+    // container before finalizing
+    if(get_state() == State::Finalized)
+    {
+        for(size_t i = 0; i < thread_info::get_peak_num_threads(); ++i)
+        {
+            auto& _hitr = get_timemory_hash_ids(i);
+            auto& _aitr = get_timemory_hash_aliases(i);
+
+            if(_hitr) *_hitr = *_hmain;
+            if(_aitr) *_aitr = *_amain;
+        }
+    }
 }
 
 std::vector<std::function<void()>>&
@@ -94,15 +155,29 @@ thread_init()
     if(get_thread_state() == ThreadState::Disabled) return;
 
     static thread_local auto _thread_setup = []() {
-        if(threading::get_id() > 0)
-            threading::set_thread_name(JOIN(" ", "Thread", threading::get_id()).c_str());
-        thread_data<thread_bundle_t>::construct(JOIN('/', "omnitrace/process",
-                                                     process::get_id(), "thread",
-                                                     threading::get_id()),
-                                                quirk::config<quirk::auto_start>{});
+        const auto& _tinfo = thread_info::init();
+        auto _tidx = (_tinfo && _tinfo->index_data) ? _tinfo->index_data->sequent_value
+                                                    : threading::get_id();
+
+        OMNITRACE_REQUIRE(_tidx >= 0)
+            << "thread setup failed. thread info not initialized: " << [&_tinfo]() {
+                   if(_tinfo) return JOIN("", *_tinfo);
+                   return std::string{ "no thread_info" };
+               }();
+
+        if(_tidx > 0) threading::set_thread_name(JOIN(" ", "Thread", _tidx).c_str());
+        thread_data<thread_bundle_t>::construct(
+            JOIN('/', "omnitrace/process", process::get_id(), "thread", _tidx),
+            quirk::config<quirk::auto_start>{});
         // save the hash maps
-        get_timemory_hash_ids()     = tim::get_hash_ids();
-        get_timemory_hash_aliases() = tim::get_hash_aliases();
+        get_timemory_hash_ids(_tidx)     = tim::get_hash_ids();
+        get_timemory_hash_aliases(_tidx) = tim::get_hash_aliases();
+
+        OMNITRACE_REQUIRE(get_timemory_hash_ids(_tidx) != nullptr)
+            << "no timemory hash ids pointer for thread " << _tidx;
+        OMNITRACE_REQUIRE(get_timemory_hash_aliases(_tidx) != nullptr)
+            << "no timemory hash aliases pointer for thread " << _tidx;
+
         record_thread_start_time();
         return true;
     }();

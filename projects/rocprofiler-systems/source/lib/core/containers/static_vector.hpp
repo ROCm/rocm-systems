@@ -40,9 +40,16 @@ namespace container
 template <typename Tp, size_t N, bool AtomicSizeV = false>
 struct static_vector
 {
-    using count_type = std::conditional_t<AtomicSizeV, std::atomic<size_t>, size_t>;
-    using this_type  = static_vector<Tp, N>;
-    using value_type = Tp;
+    using count_type      = std::conditional_t<AtomicSizeV, std::atomic<size_t>, size_t>;
+    using this_type       = static_vector<Tp, N>;
+    using value_type      = Tp;
+    using array_type      = std::array<Tp, N>;
+    using reference       = value_type&;
+    using const_reference = const value_type&;
+    using pointer         = value_type*;
+    using const_pointer   = const value_type*;
+    using size_type       = size_t;
+    using difference_type = std::ptrdiff_t;
 
     static_vector()                         = default;
     static_vector(const static_vector&)     = default;

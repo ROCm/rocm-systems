@@ -31,7 +31,7 @@
 
 namespace omnitrace
 {
-template struct component_bundle_cache<instrumentation_bundle_t>;
+template struct component_bundle_cache_impl<instrumentation_bundle_t>;
 
 void
 thread_deleter<void>::operator()() const

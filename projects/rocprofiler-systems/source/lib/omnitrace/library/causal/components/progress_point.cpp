@@ -60,8 +60,7 @@ get_progress_map(int64_t _tid)
 auto&
 get_progress_allocator(int64_t _tid)
 {
-    static auto& _v = thread_data<progress_allocator_t>::instances(construct_on_init{});
-    return _v.at(_tid);
+    return thread_data<progress_allocator_t>::instance(construct_on_thread{ _tid });
 }
 }  // namespace
 

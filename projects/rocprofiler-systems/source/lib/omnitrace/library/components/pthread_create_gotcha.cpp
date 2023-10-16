@@ -23,6 +23,7 @@
 #include "library/components/pthread_create_gotcha.hpp"
 #include "core/config.hpp"
 #include "core/debug.hpp"
+#include "core/locking.hpp"
 #include "core/state.hpp"
 #include "core/utility.hpp"
 #include "library/causal/delay.hpp"
@@ -32,14 +33,18 @@
 #include "library/sampling.hpp"
 #include "library/thread_data.hpp"
 #include "library/thread_info.hpp"
+#include "library/tracing.hpp"
 
 #include <timemory/backends/threading.hpp>
 #include <timemory/components/macros.hpp>
 #include <timemory/components/timing/wall_clock.hpp>
+#include <timemory/hash/types.hpp>
 #include <timemory/mpl/types.hpp>
 #include <timemory/sampling/allocator.hpp>
+#include <timemory/units.hpp>
 #include <timemory/utility/types.hpp>
 
+#include <csignal>
 #include <ostream>
 #include <pthread.h>
 #include <utility>
@@ -74,11 +79,12 @@ auto  bundles_dtor  = scope::destructor{ []() {
 
 template <typename... Args>
 inline void
-start_bundle(bundle_t& _bundle, Args&&... _args)
+start_bundle(bundle_t& _bundle, int64_t _tid, Args&&... _args)
 {
     if(!get_use_timemory() && !get_use_perfetto()) return;
     trait::runtime_enabled<comp::roctracer_data>::set(get_use_roctracer());
-    OMNITRACE_BASIC_VERBOSE_F(3, "starting bundle '%s'...\n", _bundle.key().c_str());
+    OMNITRACE_BASIC_VERBOSE_F(3, "starting bundle '%s' in thread %li...\n",
+                              _bundle.key().c_str(), _tid);
     if constexpr(sizeof...(Args) > 0)
     {
         const char* _name = nullptr;
@@ -94,7 +100,7 @@ start_bundle(bundle_t& _bundle, Args&&... _args)
     }
     if(get_use_timemory())
     {
-        _bundle.push();
+        _bundle.push(_tid);
         _bundle.start();
     }
 }
@@ -139,7 +145,11 @@ stop_bundle(bundle_t& _bundle, int64_t _tid, Args&&... _args)
     }
 }
 
-std::set<pthread_create_gotcha::native_handle_t> native_handles = {};
+using native_handle_set_t = std::set<pthread_create_gotcha::native_handle_t>;
+
+auto native_handles          = native_handle_set_t{};
+auto internal_native_handles = native_handle_set_t{};
+auto native_handles_mutex    = locking::atomic_mutex{};
 }  // namespace
 
 //--------------------------------------------------------------------------------------//
@@ -210,6 +220,13 @@ pthread_create_gotcha::wrapper::operator()() const
 
     auto _active = (get_state() == ::omnitrace::State::Active && bundles != nullptr &&
                     bundles_mutex != nullptr);
+
+    if(m_config.offset)
+    {
+        auto _lk = locking::atomic_lock{ native_handles_mutex };
+        internal_native_handles.emplace(pthread_self());
+    }
+
     if(_active && !_coverage && !m_config.offset)
     {
         _tid = _info->index_data->sequent_value;
@@ -220,13 +237,13 @@ pthread_create_gotcha::wrapper::operator()() const
         threading::set_thread_name(TIMEMORY_JOIN(" ", "Thread", _tid).c_str());
         auto _manager = tim::manager::instance();
         if(_manager) _manager->initialize();
-        if(!thread_bundle_data_t::instances().at(_tid))
+        if(!thread_bundle_data_t::get()->at(_tid))
         {
             thread_data<thread_bundle_t>::construct(
                 TIMEMORY_JOIN('/', "omnitrace/process", process::get_id(), "thread",
                               _tid),
                 quirk::config<quirk::auto_start>{});
-            thread_bundle_data_t::instances().at(_tid)->start();
+            thread_bundle_data_t::get()->at(_tid)->start();
         }
         if(bundles && bundles_mutex)
         {
@@ -234,7 +251,7 @@ pthread_create_gotcha::wrapper::operator()() const
             _bundle = bundles->emplace(_tid, std::make_shared<bundle_t>("start_thread"))
                           .first->second;
         }
-        if(_bundle) start_bundle(*_bundle);
+        if(_bundle) start_bundle(*_bundle, _tid);
         get_cpu_cid_stack(_tid, m_config.parent_tid);
         if(m_config.enable_causal)
         {
@@ -299,19 +316,48 @@ pthread_create_gotcha::wrapper::wrap(void* _arg)
     wrapper* _wrapper = static_cast<wrapper*>(_arg);
 
     // store the handle
-    native_handles.emplace(_self);
+    {
+        auto _lk = locking::atomic_lock{ native_handles_mutex };
+        native_handles.emplace(_self);
+    }
+
+    static thread_local auto _remover = scope::destructor{ []() {
+        if(get_state() >= omnitrace::State::Finalized) return;
+        // remove the handle even if original function aborts
+        auto                 _lk      = locking::atomic_lock{ native_handles_mutex };
+        native_handles.erase(pthread_self());
+    } };
+    (void) _remover;
 
     // execute the original function
     void* _ret = (*_wrapper)();
 
     // remove the handle
-    if(::pthread_equal(_self, pthread_self()) == 0) native_handles.erase(_self);
+    if(::pthread_equal(_self, pthread_self()) == 0)
+    {
+        auto _lk = locking::atomic_lock{ native_handles_mutex };
+        native_handles.erase(_self);
+    }
 
     // eliminate memory leak
     if(_ret != _arg) delete _wrapper;
 
     return _ret;
 }
+
+namespace
+{
+const auto shutdown_signal_v = SIGRTMAX - 1;
+
+size_t shutdown_signals_delivered = 0;
+
+void
+pthread_create_gotcha_shutdown_handler(int)
+{
+    pthread_create_gotcha::shutdown(threading::get_id());
+    ++shutdown_signals_delivered;
+}
+}  // namespace
 
 void
 pthread_create_gotcha::configure()
@@ -322,6 +368,8 @@ pthread_create_gotcha::configure()
             0, int, pthread_t*, const pthread_attr_t*, void* (*) (void*), void*>(
             "pthread_create");
     };
+
+    tim::hash::add_hash_id("start_thread");
 }
 
 void
@@ -335,8 +383,67 @@ pthread_create_gotcha::shutdown()
 
     if(!bundles_mutex || !bundles) return;
 
+    unsigned long _ndangling = 0;
+
+    for(const auto& itr : *bundles)
+    {
+        if(itr.second) ++_ndangling;
+    }
+
+    tracing::copy_timemory_hash_ids();
+
+    // enable the signal handler for when the timeout is reached
+    struct sigaction _action = {};
+    struct sigaction _former = {};
+
+    memset(&_action, 0, sizeof(_action));
+    memset(&_former, 0, sizeof(_former));
+    sigemptyset(&_action.sa_mask);
+    sigemptyset(&_former.sa_mask);
+
+    _action.sa_flags   = SA_RESTART;
+    _action.sa_handler = pthread_create_gotcha_shutdown_handler;
+    // activate signal handler
+    sigaction(shutdown_signal_v, &_action, &_former);
+
+    size_t _expected_shutdown_signals_delivered = 0;
+    {
+        auto _lk = locking::atomic_lock{ native_handles_mutex };
+        for(auto itr : native_handles)
+        {
+            // skip sending signals to internal threads
+            if(internal_native_handles.count(itr) != 0) continue;
+            if(pthread_equal(pthread_self(), itr) == 0 && pthread_equal(itr, itr) != 0)
+            {
+                ::pthread_kill(itr, shutdown_signal_v);
+                ++_expected_shutdown_signals_delivered;
+            }
+        }
+
+        auto           _nattempt    = 0U;
+        constexpr auto nmax_attempt = 20U;
+        while(shutdown_signals_delivered < _expected_shutdown_signals_delivered &&
+              _nattempt++ < nmax_attempt)
+        {
+            std::this_thread::yield();
+            std::this_thread::sleep_for(std::chrono::milliseconds{ 50 });
+        }
+
+        OMNITRACE_CI_BASIC_FAIL(
+            shutdown_signals_delivered != _expected_shutdown_signals_delivered,
+            "Number of signals delivered (%zu) != expected number of signals delievered "
+            "(%zu)",
+            shutdown_signals_delivered, _expected_shutdown_signals_delivered);
+    }
+
+    // restore existing signal handler
+    sigaction(shutdown_signal_v, &_former, nullptr);
+
+    // subtract the bundles that had signals delivered
+    _ndangling -= shutdown_signals_delivered;
+
+    // stop any remaining dangling bundles on this thread
     std::unique_lock<std::mutex> _lk{ *bundles_mutex };
-    unsigned long                _ndangling = 0;
     for(auto itr : *bundles)
     {
         if(itr.second)
@@ -480,7 +587,8 @@ pthread_create_gotcha::operator()(pthread_t* thread, const pthread_attr_t* attr,
     if(_use_bundle)
     {
         _bundle = bundle_t{ "pthread_create" };
-        start_bundle(*_bundle, audit::incoming{}, thread, attr, func, arg);
+        start_bundle(*_bundle, _info->index_data->sequent_value, audit::incoming{},
+                     thread, attr, func, arg);
     }
 
     // threads must process their delays before creating a new thread

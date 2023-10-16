@@ -95,6 +95,12 @@ auto speedup_dist      = []() {
 auto perform_experiment_impl_completed = std::unique_ptr<std::promise<void>>{};
 auto num_progress_points               = std::atomic<size_t>{ 0 };
 
+auto&
+get_progress_bundles(int64_t _tid = utility::get_thread_index())
+{
+    return progress_bundles_t::instance(construct_on_thread{ _tid });
+}
+
 template <typename ContextT>
 auto&
 get_engine()
@@ -107,7 +113,7 @@ get_engine()
     }();
 
     static thread_local auto _v =
-        random_engine_t{ tim::get_combined_hash_id(_seed, utility::get_thread_index()) };
+        random_engine_t{ tim::get_hash_id(_seed, utility::get_thread_index()) };
     return _v;
 }
 
@@ -965,11 +971,14 @@ push_progress_point(std::string_view _name)
 
     ++num_progress_points;
 
-    auto  _hash   = tim::add_hash_id(_name);
-    auto& _data   = progress_bundles_t::instance(utility::get_thread_index());
-    auto* _bundle = _data.construct(_hash);
-    _bundle->push();
-    _bundle->start();
+    auto  _hash = tim::add_hash_id(_name);
+    auto& _data = get_progress_bundles();
+    if(OMNITRACE_LIKELY(_data != nullptr))
+    {
+        auto* _bundle = _data->construct(_hash);
+        _bundle->push();
+        _bundle->start();
+    }
 }
 
 void
@@ -977,26 +986,26 @@ pop_progress_point(std::string_view _name)
 {
     if(config::get_causal_end_to_end()) return;
 
-    auto& _data = progress_bundles_t::instance(utility::get_thread_index());
-    if(_data.empty()) return;
+    auto& _data = get_progress_bundles();
+    if(OMNITRACE_UNLIKELY(!_data || _data->empty())) return;
     if(_name.empty())
     {
-        auto* itr = _data.back();
+        auto* itr = _data->back();
         itr->stop();
         itr->pop();
-        _data.pop_back();
+        _data->pop_back();
         return;
     }
     else
     {
         auto _hash = tim::add_hash_id(_name);
-        for(auto itr = _data.rbegin(); itr != _data.rend(); ++itr)
+        for(auto itr = _data->rbegin(); itr != _data->rend(); ++itr)
         {
             if((*itr)->get_hash() == _hash)
             {
                 (*itr)->stop();
                 (*itr)->pop();
-                _data.destroy(itr);
+                _data->destroy(itr);
                 return;
             }
         }
@@ -1010,13 +1019,16 @@ mark_progress_point(std::string_view _name, bool _force)
 
     ++num_progress_points;
 
-    auto  _hash   = tim::add_hash_id(_name);
-    auto& _data   = progress_bundles_t::instance(utility::get_thread_index());
-    auto* _bundle = _data.construct(_hash);
-    _bundle->push();
-    _bundle->mark();
-    _bundle->pop();
-    _data.pop_back();
+    auto  _hash = tim::add_hash_id(_name);
+    auto& _data = get_progress_bundles();
+    if(OMNITRACE_LIKELY(_data != nullptr))
+    {
+        auto* _bundle = _data->construct(_hash);
+        _bundle->push();
+        _bundle->mark();
+        _bundle->pop();
+        _data->pop_back();
+    }
 }
 
 uint16_t

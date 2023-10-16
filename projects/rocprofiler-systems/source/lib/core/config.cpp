@@ -293,7 +293,7 @@ configure_settings(bool _init)
     OMNITRACE_CONFIG_SETTING(
         bool, "OMNITRACE_USE_ROCM_SMI",
         "Enable sampling GPU power, temp, utilization, and memory usage", true, "backend",
-        "rocm_smi", "rocm");
+        "rocm_smi", "rocm", "process_sampling");
 
     OMNITRACE_CONFIG_SETTING(
         bool, "OMNITRACE_USE_ROCTX",
@@ -1154,7 +1154,6 @@ configure_mode_settings(const std::shared_ptr<settings>& _config)
     {
         set_default_setting_value("OMNITRACE_USE_SAMPLING", true);
         set_default_setting_value("OMNITRACE_USE_PROCESS_SAMPLING", true);
-        _set("OMNITRACE_CRITICAL_TRACE", false);
     }
 
     if(gpu::device_count() == 0)

@@ -86,7 +86,7 @@ endif()
 #
 add_flag_if_avail(
     "-W" "-Wall" "-Wno-unknown-pragmas" "-Wno-unused-function" "-Wno-ignored-attributes"
-    "-Wno-attributes" "-Wno-missing-field-initializers")
+    "-Wno-attributes" "-Wno-missing-field-initializers" "-Wno-interference-size")
 
 if(OMNITRACE_BUILD_DEBUG)
     add_flag_if_avail("-g3" "-fno-omit-frame-pointer")

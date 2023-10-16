@@ -183,7 +183,7 @@ address_range::operator+=(address_range _v)
 hash_value_t
 address_range::hash() const
 {
-    return (is_range()) ? tim::get_combined_hash_id(hash_value_t{ low }, high)
+    return (is_range()) ? tim::get_hash_id(hash_value_t{ low }, high)
                         : hash_value_t{ low };
 }
 }  // namespace binary

@@ -96,30 +96,25 @@ struct perfetto_rusage
 unique_ptr_t<std::vector<std::string>>&
 get_papi_labels(int64_t _tid)
 {
-    static auto& _v = papi_label_instances::instances(construct_on_init{});
-    return _v.at(_tid);
+    return papi_label_instances::instance(construct_on_thread{ _tid });
 }
 
 unique_ptr_t<hw_counters>&
 get_papi_vector(int64_t _tid)
 {
-    static auto& _v = papi_vector_instances::instances();
-    if(_tid == threading::get_id()) papi_vector_instances::construct();
-    return _v.at(_tid);
+    return papi_vector_instances::instance(construct_on_thread{ _tid });
 }
 
 unique_ptr_t<backtrace_metrics>&
 get_backtrace_metrics_init(int64_t _tid)
 {
-    static auto& _v = backtrace_metrics_init_instances::instances();
-    return _v.at(_tid);
+    return backtrace_metrics_init_instances::instance(construct_on_thread{ _tid });
 }
 
 unique_ptr_t<bool>&
 get_sampler_running(int64_t _tid)
 {
-    static auto& _v = sampler_running_instances::instances(construct_on_init{}, false);
-    return _v.at(_tid);
+    return sampler_running_instances::instance(construct_on_thread{ _tid }, false);
 }
 }  // namespace
 
@@ -248,6 +243,9 @@ backtrace_metrics::init_perfetto(int64_t _tid, valid_array_t _valid)
 
     if(!perfetto_counter_track<perfetto_rusage>::exists(_tid))
     {
+        if(get_valid(category::thread_cpu_time{}, _valid))
+            perfetto_counter_track<perfetto_rusage>::emplace(
+                _tid, JOIN(' ', "Thread CPU time", _tid_name, "(S)"), "sec");
         if(get_valid(category::thread_peak_memory{}, _valid))
             perfetto_counter_track<perfetto_rusage>::emplace(
                 _tid, JOIN(' ', "Thread Peak Memory Usage", _tid_name, "(S)"), "MB");
@@ -283,24 +281,35 @@ backtrace_metrics::fini_perfetto(int64_t _tid, valid_array_t _valid)
     OMNITRACE_CI_THROW(!_thread_info, "Error! missing thread info for tid=%li\n", _tid);
     if(!_thread_info) return;
 
-    uint64_t _ts = _thread_info->get_stop();
+    uint64_t _ts         = _thread_info->get_stop();
+    uint64_t _rusage_idx = 0;
+
+    if(get_valid(category::thread_cpu_time{}, _valid))
+    {
+        TRACE_COUNTER(trait::name<category::thread_cpu_time>::value,
+                      perfetto_counter_track<perfetto_rusage>::at(_tid, _rusage_idx++),
+                      _ts, 0);
+    }
 
     if(get_valid(category::thread_peak_memory{}, _valid))
     {
         TRACE_COUNTER(trait::name<category::thread_peak_memory>::value,
-                      perfetto_counter_track<perfetto_rusage>::at(_tid, 0), _ts, 0);
+                      perfetto_counter_track<perfetto_rusage>::at(_tid, _rusage_idx++),
+                      _ts, 0);
     }
 
     if(get_valid(category::thread_context_switch{}, _valid))
     {
         TRACE_COUNTER(trait::name<category::thread_context_switch>::value,
-                      perfetto_counter_track<perfetto_rusage>::at(_tid, 1), _ts, 0);
+                      perfetto_counter_track<perfetto_rusage>::at(_tid, _rusage_idx++),
+                      _ts, 0);
     }
 
     if(get_valid(category::thread_page_fault{}, _valid))
     {
         TRACE_COUNTER(trait::name<category::thread_page_fault>::value,
-                      perfetto_counter_track<perfetto_rusage>::at(_tid, 2), _ts, 0);
+                      perfetto_counter_track<perfetto_rusage>::at(_tid, _rusage_idx++),
+                      _ts, 0);
     }
 
     if(get_valid(type_list<hw_counters>{}, _valid) &&
@@ -321,6 +330,12 @@ backtrace_metrics&
 backtrace_metrics::operator-=(const backtrace_metrics& _rhs)
 {
     auto& _lhs = *this;
+
+    if(_lhs(category::thread_cpu_time{}))
+    {
+        _lhs.m_cpu -= _rhs.m_cpu;
+    }
+
     if(_lhs(category::thread_peak_memory{}))
     {
         _lhs.m_mem_peak -= _rhs.m_mem_peak;
@@ -348,25 +363,34 @@ backtrace_metrics::operator-=(const backtrace_metrics& _rhs)
 void
 backtrace_metrics::post_process_perfetto(int64_t _tid, uint64_t _ts) const
 {
+    uint64_t _rusage_idx = 0;
+
+    if((*this)(category::thread_cpu_time{}))
+    {
+        TRACE_COUNTER(trait::name<category::thread_cpu_time>::value,
+                      perfetto_counter_track<perfetto_rusage>::at(_tid, _rusage_idx++),
+                      _ts, m_cpu / units::sec);
+    }
+
     if((*this)(category::thread_peak_memory{}))
     {
         TRACE_COUNTER(trait::name<category::thread_peak_memory>::value,
-                      perfetto_counter_track<perfetto_rusage>::at(_tid, 0), _ts,
-                      m_mem_peak / units::megabyte);
+                      perfetto_counter_track<perfetto_rusage>::at(_tid, _rusage_idx++),
+                      _ts, m_mem_peak / units::megabyte);
     }
 
     if((*this)(category::thread_context_switch{}))
     {
         TRACE_COUNTER(trait::name<category::thread_context_switch>::value,
-                      perfetto_counter_track<perfetto_rusage>::at(_tid, 1), _ts,
-                      m_ctx_swch);
+                      perfetto_counter_track<perfetto_rusage>::at(_tid, _rusage_idx++),
+                      _ts, m_ctx_swch);
     }
 
     if((*this)(category::thread_page_fault{}))
     {
         TRACE_COUNTER(trait::name<category::thread_page_fault>::value,
-                      perfetto_counter_track<perfetto_rusage>::at(_tid, 2), _ts,
-                      m_page_flt);
+                      perfetto_counter_track<perfetto_rusage>::at(_tid, _rusage_idx++),
+                      _ts, m_page_flt);
     }
 
     if((*this)(type_list<hw_counters>{}) && (*this)(category::thread_hardware_counter{}))

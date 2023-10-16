@@ -105,7 +105,8 @@ init_index_data(int64_t _tid, bool _offset = false)
     return itr;
 }
 
-const auto unknown_thread = std::optional<thread_info>{};
+const auto unknown_thread   = std::optional<thread_info>{};
+int64_t    peak_num_threads = max_supported_threads;
 }  // namespace
 
 std::string
@@ -123,21 +124,19 @@ grow_data(int64_t _tid)
     struct data_growth
     {};
 
-    static int64_t _max_threads = max_supported_threads;
-    if(_tid >= _max_threads)
+    if(_tid >= peak_num_threads)
     {
         OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
         auto_lock_t _lk{ type_mutex<data_growth>() };
 
         // check again after locking
-        if(_tid >= _max_threads)
+        if(_tid >= peak_num_threads)
         {
             TIMEMORY_PRINTF_WARNING(
                 stderr, "[%li] Growing thread data from %li to %li...\n", _tid,
-                _max_threads, _max_threads + max_supported_threads);
+                peak_num_threads, peak_num_threads + max_supported_threads);
             fflush(stderr);
 
-            // auto _expected = _max_threads + max_supported_threads;
             for(auto itr : grow_functors())
             {
                 if(itr)
@@ -145,20 +144,26 @@ grow_data(int64_t _tid)
                     int64_t _new_capacity = (*itr)(_tid + 1);
                     TIMEMORY_PRINTF_WARNING(stderr,
                                             "[%li] Grew thread data from %li to %li...\n",
-                                            _tid, _max_threads, _new_capacity);
+                                            _tid, peak_num_threads, _new_capacity);
                 }
             }
-            _max_threads += max_supported_threads;
+            peak_num_threads += max_supported_threads;
         }
     }
 
-    return _max_threads;
+    return peak_num_threads;
 }
 
 bool
 thread_info::exists()
 {
     return (get_info_data() != nullptr);
+}
+
+size_t
+thread_info::get_peak_num_threads()
+{
+    return peak_num_threads;
 }
 
 const std::optional<thread_info>&

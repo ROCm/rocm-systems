@@ -107,19 +107,19 @@ get_cpu_cid_stack(int64_t _tid, int64_t _parent)
     using init_data_t   = thread_data<bool, omnitrace_cpu_cid_stack>;
     using thread_data_t = thread_data<std::vector<uint64_t>, omnitrace_cpu_cid_stack>;
 
-    static auto& _v = thread_data_t::instances(construct_on_init{});
-    static auto& _b = init_data_t::instances(construct_on_init{}, false);
+    auto& _v_tid = thread_data_t::instance(construct_on_thread{ _tid });
+    auto& _b_tid = init_data_t::instance(construct_on_thread{ _tid }, false);
 
-    auto& _v_tid = _v.at(_tid);
-    if(_b.at(_tid) && !(*_b.at(_tid)))
+    if(_b_tid && !(*_b_tid))
     {
-        *_b.at(_tid)     = true;
-        auto _parent_tid = _parent;
+        *_b_tid           = true;
+        auto  _parent_tid = _parent;
+        auto& _p_tid      = thread_data_t::instance(construct_on_thread{ _parent_tid });
         // if tid != parent and there is not a valid pointer for the provided parent
         // thread id set it to zero since that will always be valid
-        if(_tid != _parent_tid && !_v.at(_parent_tid)) _parent_tid = 0;
+        if(_tid != _parent_tid && !_p_tid) _parent_tid = 0;
         // copy over the thread ids from the parent if tid != parent
-        if(_tid != _parent_tid) *_v_tid = *_v.at(_parent_tid);
+        if(_tid != _parent_tid) *_v_tid = *_p_tid;
     }
     return _v_tid;
 }
@@ -130,9 +130,7 @@ get_cpu_cid_parents(int64_t _tid)
     struct omnitrace_cpu_cid_stack
     {};
     using thread_data_t = thread_data<cpu_cid_parent_map_t, omnitrace_cpu_cid_stack>;
-    static auto& _v =
-        thread_data_t::instances(construct_on_init{}, cpu_cid_parent_map_t{});
-    return _v.at(_tid);
+    return thread_data_t::instance(construct_on_thread{ _tid }, cpu_cid_parent_map_t{});
 }
 
 std::tuple<uint64_t, uint64_t, uint32_t>

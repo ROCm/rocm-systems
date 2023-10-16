@@ -61,8 +61,7 @@ unique_ptr_t<rocm_data_t>&
 rocm_data(int64_t _tid)
 {
     using thread_data_t = thread_data<rocm_data_t, rocm_event>;
-    static auto& _v     = thread_data_t::instances(construct_on_init{});
-    return _v.at(_tid);
+    return thread_data_t::instance(construct_on_thread{ _tid });
 }
 
 rocm_event::rocm_event(uint32_t _dev, uint32_t _thr, uint32_t _queue,

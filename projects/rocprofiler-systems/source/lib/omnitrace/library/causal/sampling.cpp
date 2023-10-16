@@ -573,7 +573,7 @@ post_process()
 
     block_samples();
 
-    for(size_t i = 0; i < max_supported_threads; ++i)
+    for(size_t i = 0; i < thread_info::get_peak_num_threads(); ++i)
     {
         auto& _causal = get_causal_sampler(i);
         if(_causal) _causal->stop();
@@ -586,7 +586,7 @@ post_process()
     auto _allocator = get_causal_sampler_allocator(false);
     if(_allocator) _allocator->flush();
 
-    for(size_t i = 0; i < max_supported_threads; ++i)
+    for(size_t i = 0; i < thread_info::get_peak_num_threads(); ++i)
     {
         auto& _causal = get_causal_sampler(i);
         auto  _causal_data =
@@ -595,7 +595,7 @@ post_process()
         if(!_causal_data.empty()) post_process_causal(i, _causal_data);
     }
 
-    for(size_t i = 0; i < max_supported_threads; ++i)
+    for(size_t i = 0; i < thread_info::get_peak_num_threads(); ++i)
     {
         get_causal_sampler(i).reset();
 

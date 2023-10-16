@@ -46,6 +46,17 @@
 #define OMNITRACE_HIP_VERSION_MAJOR @OMNITRACE_HIP_VERSION_MAJOR@
 #define OMNITRACE_HIP_VERSION_MINOR @OMNITRACE_HIP_VERSION_MINOR@
 #define OMNITRACE_HIP_VERSION_PATCH @OMNITRACE_HIP_VERSION_PATCH@
+
+// these can be set via defining the variable in CMake, e.g.:
+//      cmake -D OMNITRACE_CACHELINE_SIZE=N /path/to/source
+// if not defined when configuring cmake, these values fall back to
+// default values set in core/containers/aligned_static_vector.hpp.
+// the OMNITRACE_CACHELINE_SIZE_MIN is used to ensure portability
+#cmakedefine OMNITRACE_CACHELINE_SIZE @OMNITRACE_CACHELINE_SIZE@
+#cmakedefine OMNITRACE_CACHELINE_SIZE_MIN @OMNITRACE_CACHELINE_SIZE_MIN@
+
+// misc definitions which can be configured by cmake to override the defaults
+#cmakedefine OMNITRACE_ROCM_MAX_COUNTERS @OMNITRACE_ROCM_MAX_COUNTERS@
 // clang-format on
 
 #define OMNITRACE_VERSION                                                                \
@@ -87,16 +98,22 @@
 #endif
 // clang-format on
 
-#if !defined(OMNITRACE_MAX_COUNTERS)
-#    define OMNITRACE_MAX_COUNTERS 25
+// in general, we want to make sure the cache line size is not less than
+// 64 bytes (most common cacheline size for x86-64 CPUs) so unless
+// OMNITRACE_CACHELINE_SIZE was explicitly set, we set the min to 64
+// and use the max value of OMNITRACE_CACHELINE_SIZE and
+// OMNITRACE_CACHELINE_SIZE_MIN to assure that false-sharing is well
+// guarded against
+#if !defined(OMNITRACE_CACHELINE_SIZE_MIN)
+#    if defined(OMNITRACE_CACHELINE_SIZE)
+#        define OMNITRACE_CACHELINE_SIZE_MIN OMNITRACE_CACHELINE_SIZE
+#    else
+#        define OMNITRACE_CACHELINE_SIZE_MIN 64
+#    endif
 #endif
 
-#if !defined(OMNITRACE_ROCM_LOOK_AHEAD)
-#    define OMNITRACE_ROCM_LOOK_AHEAD 128
-#endif
-
-#if !defined(OMNITRACE_MAX_ROCM_QUEUES)
-#    define OMNITRACE_MAX_ROCM_QUEUES OMNITRACE_MAX_THREADS
+#if !defined(OMNITRACE_ROCM_MAX_COUNTERS)
+#    define OMNITRACE_ROCM_MAX_COUNTERS 25
 #endif
 
 #define OMNITRACE_ATTRIBUTE(...)    __attribute__((__VA_ARGS__))

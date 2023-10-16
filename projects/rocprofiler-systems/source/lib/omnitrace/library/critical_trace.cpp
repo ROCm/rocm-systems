@@ -92,16 +92,8 @@ template <typename Arg0, typename Arg1, typename... Args>
 size_t
 get_combined_hash(Arg0&& _zero, Arg1&& _one, Args&&... _args)
 {
-    size_t _hash = tim::hash::get_combined_hash_id(std::forward<Arg0>(_zero),
-                                                   std::forward<Arg1>(_one));
-    if constexpr(sizeof...(_args) == 0)
-    {
-        return _hash;
-    }
-    else
-    {
-        return get_combined_hash(_hash, std::forward<Args>(_args)...);
-    }
+    return tim::hash::get_hash_id(std::forward<Arg0>(_zero), std::forward<Arg1>(_one),
+                                  std::forward<Args>(_args)...);
 }
 }  // namespace
 
@@ -386,15 +378,15 @@ get_update_frequency()
 unique_ptr_t<call_chain>&
 get(int64_t _tid)
 {
-    static auto&             _v    = thread_data<call_chain>::instances();
+    static auto*             _v    = thread_data<call_chain>::get();
     static thread_local auto _once = [_tid]() {
-        if(!_v.at(0)) _v.at(0) = unique_ptr_t<call_chain>{ new call_chain{} };
-        if(!_v.at(_tid)) _v.at(_tid) = unique_ptr_t<call_chain>{ new call_chain{} };
-        if(_tid > 0) *_v.at(_tid) = *_v.at(0);
+        if(!_v->at(0)) _v->at(0) = unique_ptr_t<call_chain>{ new call_chain{} };
+        if(!_v->at(_tid)) _v->at(_tid) = unique_ptr_t<call_chain>{ new call_chain{} };
+        if(_tid > 0) *_v->at(_tid) = *_v->at(0);
         return true;
     }();
     (void) _once;
-    return _v.at(_tid);
+    return _v->at(_tid);
 }
 
 void

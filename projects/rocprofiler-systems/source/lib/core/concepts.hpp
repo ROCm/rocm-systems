@@ -52,6 +52,13 @@ using tim::identity_t;  // NOLINT
 template <typename Tp>
 struct use_placement_new_when_generating_unique_ptr : std::false_type
 {};
+
+template <typename Tp, typename... Args>
+auto
+make_unique(Args&&... args)
+{
+    return unique_ptr_t<Tp>{ new Tp{ std::forward<Args>(args)... } };
+}
 }  // namespace omnitrace
 
 namespace tim

@@ -113,8 +113,7 @@ get_roctracer_hip_data(int64_t _tid = threading::get_id())
 {
     using data_t        = std::unordered_map<uint64_t, roctracer_hip_bundle_t>;
     using thread_data_t = thread_data<data_t, category::roctracer>;
-    static auto& _v     = thread_data_t::instances(construct_on_init{});
-    return _v.at(_tid);
+    return thread_data_t::instance(construct_on_thread{ _tid });
 }
 
 std::unordered_map<uint64_t, const char*>&
@@ -154,8 +153,7 @@ get_roctracer_cid_data(int64_t _tid = threading::get_id())
 {
     using thread_data_t =
         thread_data<std::unordered_map<uint64_t, cid_data>, category::roctracer>;
-    static auto& _v = thread_data_t::instances(construct_on_init{});
-    return *_v.at(_tid);
+    return thread_data_t::instance(construct_on_thread{ _tid });
 }
 
 auto&
@@ -163,8 +161,7 @@ get_hip_activity_callbacks(int64_t _tid = threading::get_id())
 {
     using thread_data_t =
         thread_data<std::vector<std::function<void()>>, category::roctracer>;
-    static auto& _v = thread_data_t::instances(construct_on_init{});
-    return _v.at(_tid);
+    return thread_data_t::instance(construct_on_thread{ _tid });
 }
 
 using hip_activity_mutex_t = std::decay_t<decltype(get_hip_activity_callbacks())>;
@@ -804,7 +801,7 @@ hip_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
                 critical_trace::add_hash_id(op_name), _depth);
         }
 
-        get_roctracer_cid_data(_tid).emplace(
+        get_roctracer_cid_data(_tid)->emplace(
             _roct_cid, cid_data{ _crit_cid, _parent_crit_cid, _depth, _queue });
 
         hip_exec_activity_callbacks(_tid);
@@ -814,7 +811,7 @@ hip_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
         hip_exec_activity_callbacks(_tid);
 
         std::tie(_crit_cid, _parent_crit_cid, _depth, std::ignore) =
-            get_roctracer_cid_data(_tid).at(_roct_cid);
+            get_roctracer_cid_data(_tid)->at(_roct_cid);
 
         if(get_use_perfetto())
         {
@@ -841,7 +838,7 @@ hip_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
             };
             if(!_stop(_tid))
             {
-                for(size_t i = 0; i < max_supported_threads; ++i)
+                for(size_t i = 0; i < thread_info::get_peak_num_threads(); ++i)
                 {
                     if(_stop(i)) break;
                 }
@@ -941,8 +938,8 @@ hip_activity_callback(const char* begin, const char* end, void* arg)
         if(_critical_trace)
         {
             auto& _crit_cids = get_roctracer_cid_data(_tid);
-            if(_crit_cids.find(_roct_cid) != _crit_cids.end())
-                std::tie(_crit_cid, _pcid, _depth, _queue) = _crit_cids.at(_roct_cid);
+            if(_crit_cids->find(_roct_cid) != _crit_cids->end())
+                std::tie(_crit_cid, _pcid, _depth, _queue) = _crit_cids->at(_roct_cid);
             else
             {
                 OMNITRACE_VERBOSE_F(3,

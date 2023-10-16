@@ -164,7 +164,7 @@ config()
     {
         if(data::device_list.count(i) > 0)
         {
-            _bundle_data.at(i) = &sampler_instances::instances().at(i);
+            _bundle_data.at(i) = &sampler_instances::get()->at(i);
             if(!*_bundle_data.at(i))
                 *_bundle_data.at(i) = unique_ptr_t<bundle_t>{ new bundle_t{} };
         }
@@ -239,7 +239,7 @@ data::post_process(uint32_t _dev_id)
 
     if(device_count < _dev_id) return;
 
-    auto&       _rocm_smi_v = sampler_instances::instances().at(_dev_id);
+    auto&       _rocm_smi_v = sampler_instances::get()->at(_dev_id);
     auto        _rocm_smi   = (_rocm_smi_v) ? *_rocm_smi_v : std::deque<rocm_smi::data>{};
     const auto& _thread_info = thread_info::get(0, InternalTID);
 

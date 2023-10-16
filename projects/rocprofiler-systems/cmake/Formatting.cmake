@@ -64,6 +64,8 @@ if(OMNITRACE_CLANG_FORMAT_EXE
     file(GLOB_RECURSE examples ${PROJECT_SOURCE_DIR}/examples/*.cpp
          ${PROJECT_SOURCE_DIR}/examples/*.c ${PROJECT_SOURCE_DIR}/examples/*.hpp
          ${PROJECT_SOURCE_DIR}/examples/*.h)
+    file(GLOB_RECURSE tests_source ${PROJECT_SOURCE_DIR}/tests/source/*.cpp
+         ${PROJECT_SOURCE_DIR}/tests/source/*.hpp)
     file(GLOB_RECURSE external ${PROJECT_SOURCE_DIR}/examples/lulesh/external/kokkos/*)
     file(
         GLOB_RECURSE
@@ -86,6 +88,7 @@ if(OMNITRACE_CLANG_FORMAT_EXE
         add_custom_target(
             format-omnitrace-source
             ${OMNITRACE_CLANG_FORMAT_EXE} -i ${sources} ${headers} ${examples}
+            ${tests_source}
             COMMENT "[omnitrace] Running C++ formatter ${OMNITRACE_CLANG_FORMAT_EXE}...")
     endif()
 

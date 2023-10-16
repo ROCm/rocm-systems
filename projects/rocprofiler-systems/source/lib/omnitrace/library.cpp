@@ -112,10 +112,10 @@ ensure_initialization(bool _offset, int64_t _glob_n, int64_t _offset_n)
     auto _exit_info = component::exit_gotcha::get_exit_info();
     if(_exit_info.is_known && _exit_info.exit_code != EXIT_SUCCESS) return _offset;
 
-    auto _tid         = utility::get_thread_index();
-    auto _max_threads = grow_data(_tid + 1);
+    auto _tid              = utility::get_thread_index();
+    auto _peak_num_threads = grow_data(_tid + 1);
 
-    if(_tid > 0 && _tid < _max_threads)
+    if(_tid > 0 && _tid < _peak_num_threads)
     {
         const auto& _info = thread_info::get();
         OMNITRACE_BASIC_VERBOSE_F(3,
@@ -123,7 +123,7 @@ ensure_initialization(bool _offset, int64_t _glob_n, int64_t _offset_n)
                                   "offset counter: %li, max threads: %li\n",
                                   std::to_string(static_cast<bool>(_info)).c_str(),
                                   std::to_string(_offset).c_str(), _glob_n, _offset_n,
-                                  _max_threads);
+                                  _peak_num_threads);
     }
 
     return _offset;
@@ -762,29 +762,7 @@ omnitrace_finalize_hidden(void)
                                           [](int) {});
 
     OMNITRACE_DEBUG_F("Copying over all timemory hash information to main thread...\n");
-    // copy these over so that all hashes are known
-    auto& _hmain = tim::hash::get_main_hash_ids();
-    auto& _amain = tim::hash::get_main_hash_aliases();
-    auto& _hzero = tracing::get_timemory_hash_ids(0);
-    auto& _azero = tracing::get_timemory_hash_aliases(0);
-    for(size_t i = 0; i < max_supported_threads; ++i)
-    {
-        auto& _hitr = tracing::get_timemory_hash_ids(i);
-        auto& _aitr = tracing::get_timemory_hash_aliases(i);
-        if(_hmain && _hitr)
-        {
-            for(const auto& itr : *_hitr)
-                _hmain->emplace(itr.first, itr.second);
-        }
-        if(_amain && _aitr)
-        {
-            for(auto itr : *_aitr)
-                _amain->emplace(itr.first, itr.second);
-        }
-    }
-
-    if(_hzero && _hmain) *_hzero = *_hmain;
-    if(_azero && _amain) *_azero = *_amain;
+    tracing::copy_timemory_hash_ids();
 
     // stop the main bundle which has stats for run
     if(get_main_bundle())
@@ -809,11 +787,12 @@ omnitrace_finalize_hidden(void)
     }
 
     OMNITRACE_DEBUG_F("Stopping and destroying instrumentation bundles...\n");
-    for(size_t i = 0; i < max_supported_threads; ++i)
+    for(size_t i = 0; i < thread_info::get_peak_num_threads(); ++i)
     {
-        auto&       itr   = instrumentation_bundles::instances().at(i);
+        if(!instrumentation_bundles::get()) continue;
         const auto& _info = thread_info::get(i, SequentTID);
-        while(!itr.bundles.empty())
+        auto&       itr   = instrumentation_bundles::get()->at(i);
+        while(itr != nullptr && !itr->empty())
         {
             int _lvl = 1;
             if(_info->is_offset)
@@ -824,14 +803,11 @@ omnitrace_finalize_hidden(void)
             OMNITRACE_VERBOSE_F(_lvl,
                                 "Warning! instrumentation bundle on thread %zu (TID=%li) "
                                 "with label '%s' was not stopped.\n",
-                                i, itr.bundles.back()->tid(),
-                                itr.bundles.back()->key().c_str());
+                                i, itr->back()->tid(), itr->back()->key().c_str());
 
-            itr.bundles.back()->stop();
-            itr.bundles.back()->pop();
-            itr.allocator.destroy(itr.bundles.back());
-            itr.allocator.deallocate(itr.bundles.back(), 1);
-            itr.bundles.pop_back();
+            itr->back()->stop();
+            itr->back()->pop();
+            itr->pop_back();
         }
     }
 
@@ -907,15 +883,18 @@ omnitrace_finalize_hidden(void)
     // thread-specific data will be wrong if try to stop them from
     // the main thread.
     auto _thr_verbose = (config::get_use_causal()) ? 1 : 0;
-    for(auto& itr : thread_data<thread_bundle_t>::instances())
+    if(thread_data<thread_bundle_t>::get())
     {
-        if(itr && itr->get<comp::wall_clock>() &&
-           !itr->get<comp::wall_clock>()->get_is_running())
+        for(auto& itr : *thread_data<thread_bundle_t>::get())
         {
-            std::string _msg = JOIN("", *itr);
-            auto        _pos = _msg.find(">>>  ");
-            if(_pos != std::string::npos) _msg = _msg.substr(_pos + 5);
-            OMNITRACE_VERBOSE_F(_thr_verbose, "%s\n", _msg.c_str());
+            if(itr && itr->get<comp::wall_clock>() &&
+               !itr->get<comp::wall_clock>()->get_is_running())
+            {
+                std::string _msg = JOIN("", *itr);
+                auto        _pos = _msg.find(">>>  ");
+                if(_pos != std::string::npos) _msg = _msg.substr(_pos + 5);
+                OMNITRACE_VERBOSE_F(_thr_verbose, "%s\n", _msg.c_str());
+            }
         }
     }
 
@@ -937,23 +916,25 @@ omnitrace_finalize_hidden(void)
     if(get_use_critical_trace() || (get_use_rocm_smi() && get_use_roctracer()))
     {
         OMNITRACE_VERBOSE_F(1, "Generating the critical trace...\n");
-        for(size_t i = 0; i < max_supported_threads; ++i)
+        for(size_t i = 0; i < thread_info::get_peak_num_threads(); ++i)
         {
             using critical_trace_hash_data =
                 thread_data<critical_trace::hash_ids, critical_trace::id>;
 
-            if(critical_trace_hash_data::instances().at(i))
+            if(i < critical_trace_hash_data::get()->size() &&
+               critical_trace_hash_data::get()->at(i))
             {
                 OMNITRACE_DEBUG_F("Copying the hash id data for thread %zu...\n", i);
-                critical_trace::add_hash_id(*critical_trace_hash_data::instances().at(i));
+                critical_trace::add_hash_id(*critical_trace_hash_data::get()->at(i));
             }
         }
 
-        for(size_t i = 0; i < max_supported_threads; ++i)
+        for(size_t i = 0; i < thread_info::get_peak_num_threads(); ++i)
         {
             using critical_trace_chain_data = thread_data<critical_trace::call_chain>;
 
-            if(critical_trace_chain_data::instances().at(i))
+            if(i < critical_trace_chain_data::get()->size() &&
+               critical_trace_chain_data::get()->at(i))
             {
                 OMNITRACE_DEBUG_F(
                     "Updating the critical trace call-chains for thread %zu...\n", i);
@@ -990,6 +971,8 @@ omnitrace_finalize_hidden(void)
         OMNITRACE_VERBOSE_F(1, "Post-processing the code coverage...\n");
         coverage::post_process();
     }
+
+    tracing::copy_timemory_hash_ids();
 
     bool _perfetto_output_error = false;
     if(get_use_perfetto())

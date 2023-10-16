@@ -22,8 +22,8 @@
 
 #pragma once
 
+#include "core/containers/aligned_static_vector.hpp"
 #include "core/containers/operators.hpp"
-#include "core/containers/static_vector.hpp"
 #include "core/defines.hpp"
 
 #include <algorithm>
@@ -38,7 +38,8 @@ namespace omnitrace
 {
 namespace container
 {
-template <typename Tp, size_t ChunkSizeV = OMNITRACE_MAX_THREADS>
+template <typename Tp, size_t ChunkSizeV = OMNITRACE_MAX_THREADS,
+          size_t AlignN = alignof(Tp)>
 class stable_vector
 {
 public:
@@ -62,8 +63,8 @@ private:
     static_assert(ChunkSizeV > 0, "ChunkSize needs to be greater than zero");
     static_assert(is_pow2<ChunkSizeV>::value, "ChunkSize needs to be a power of 2");
 
-    using this_type       = stable_vector<Tp, ChunkSizeV>;
-    using const_this_type = const stable_vector<Tp, ChunkSizeV>;
+    using this_type       = stable_vector<Tp, ChunkSizeV, AlignN>;
+    using const_this_type = const stable_vector<Tp, ChunkSizeV, AlignN>;
 
     template <typename ContainerT>
     struct iterator_base
@@ -120,7 +121,6 @@ public:
 
     struct iterator
     : public iterator_base<this_type>
-    //, std::iterator<std::random_access_iterator_tag, value_type>
     , public random_access_iterator_helper<iterator, value_type>
     {
         using iterator_base<this_type>::iterator_base;
@@ -131,7 +131,6 @@ public:
 
     struct const_iterator
     : public iterator_base<const_this_type>
-    //, std::iterator<std::random_access_iterator_tag, const value_type>
     , public random_access_iterator_helper<const_iterator, const value_type>
     {
         using iterator_base<const_this_type>::iterator_base;
@@ -221,7 +220,7 @@ public:
     const_reference at(size_type i) const;
 
 private:
-    using chunk_type   = container::static_vector<Tp, ChunkSizeV, true>;
+    using chunk_type   = container::aligned_static_vector<Tp, ChunkSizeV, AlignN, true>;
     using storage_type = std::vector<std::unique_ptr<chunk_type>>;
 
     void        add_chunk();
@@ -230,17 +229,17 @@ private:
     storage_type m_chunks;
 };
 
-template <typename Tp, size_t ChunkSizeV>
-stable_vector<Tp, ChunkSizeV>::stable_vector(size_type count, const Tp& value)
+template <typename Tp, size_t ChunkSizeV, size_t AlignN>
+stable_vector<Tp, ChunkSizeV, AlignN>::stable_vector(size_type count, const Tp& value)
 {
     for(size_type i = 0; i < count; ++i)
     {
-        push_back(value);
+        emplace_back(value);
     }
 }
 
-template <typename Tp, size_t ChunkSizeV>
-stable_vector<Tp, ChunkSizeV>::stable_vector(size_type count)
+template <typename Tp, size_t ChunkSizeV, size_t AlignN>
+stable_vector<Tp, ChunkSizeV, AlignN>::stable_vector(size_type count)
 {
     for(size_type i = 0; i < count; ++i)
     {
@@ -248,18 +247,18 @@ stable_vector<Tp, ChunkSizeV>::stable_vector(size_type count)
     }
 }
 
-template <typename Tp, size_t ChunkSizeV>
+template <typename Tp, size_t ChunkSizeV, size_t AlignN>
 template <typename InputItrT, typename>
-stable_vector<Tp, ChunkSizeV>::stable_vector(InputItrT first, InputItrT last)
+stable_vector<Tp, ChunkSizeV, AlignN>::stable_vector(InputItrT first, InputItrT last)
 {
     for(; first != last; ++first)
     {
-        push_back(*first);
+        emplace_back(*first);
     }
 }
 
-template <typename Tp, size_t ChunkSizeV>
-stable_vector<Tp, ChunkSizeV>::stable_vector(const stable_vector& other)
+template <typename Tp, size_t ChunkSizeV, size_t AlignN>
+stable_vector<Tp, ChunkSizeV, AlignN>::stable_vector(const stable_vector& other)
 {
     for(const auto& chunk : other.m_chunks)
     {
@@ -267,38 +266,38 @@ stable_vector<Tp, ChunkSizeV>::stable_vector(const stable_vector& other)
     }
 }
 
-template <typename Tp, size_t ChunkSizeV>
-stable_vector<Tp, ChunkSizeV>::stable_vector(stable_vector&& other) noexcept
+template <typename Tp, size_t ChunkSizeV, size_t AlignN>
+stable_vector<Tp, ChunkSizeV, AlignN>::stable_vector(stable_vector&& other) noexcept
 : m_chunks(std::move(other.m_chunks))
 {}
 
-template <typename Tp, size_t ChunkSizeV>
-stable_vector<Tp, ChunkSizeV>::stable_vector(std::initializer_list<Tp> ilist)
+template <typename Tp, size_t ChunkSizeV, size_t AlignN>
+stable_vector<Tp, ChunkSizeV, AlignN>::stable_vector(std::initializer_list<Tp> ilist)
 {
     for(const auto& t : ilist)
     {
-        push_back(t);
+        emplace_back(t);
     }
 }
 
-template <typename Tp, size_t ChunkSizeV>
-stable_vector<Tp, ChunkSizeV>&
-stable_vector<Tp, ChunkSizeV>::operator=(stable_vector v)
+template <typename Tp, size_t ChunkSizeV, size_t AlignN>
+stable_vector<Tp, ChunkSizeV, AlignN>&
+stable_vector<Tp, ChunkSizeV, AlignN>::operator=(stable_vector v)
 {
     swap(v);
     return *this;
 }
 
-template <typename Tp, size_t ChunkSizeV>
+template <typename Tp, size_t ChunkSizeV, size_t AlignN>
 void
-stable_vector<Tp, ChunkSizeV>::add_chunk()
+stable_vector<Tp, ChunkSizeV, AlignN>::add_chunk()
 {
     m_chunks.emplace_back(std::make_unique<chunk_type>());
 }
 
-template <typename Tp, size_t ChunkSizeV>
-typename stable_vector<Tp, ChunkSizeV>::chunk_type&
-stable_vector<Tp, ChunkSizeV>::last_chunk()
+template <typename Tp, size_t ChunkSizeV, size_t AlignN>
+typename stable_vector<Tp, ChunkSizeV, AlignN>::chunk_type&
+stable_vector<Tp, ChunkSizeV, AlignN>::last_chunk()
 {
     if(OMNITRACE_UNLIKELY(m_chunks.empty() || m_chunks.back()->size() == ChunkSizeV))
     {
@@ -308,9 +307,9 @@ stable_vector<Tp, ChunkSizeV>::last_chunk()
     return *m_chunks.back();
 }
 
-template <typename Tp, size_t ChunkSizeV>
+template <typename Tp, size_t ChunkSizeV, size_t AlignN>
 void
-stable_vector<Tp, ChunkSizeV>::reserve(size_type new_capacity)
+stable_vector<Tp, ChunkSizeV, AlignN>::reserve(size_type new_capacity)
 {
     const size_t initial_capacity = capacity();
     for(difference_type i = new_capacity - initial_capacity; i > 0; i -= ChunkSizeV)
@@ -319,45 +318,45 @@ stable_vector<Tp, ChunkSizeV>::reserve(size_type new_capacity)
     }
 }
 
-template <typename Tp, size_t ChunkSizeV>
+template <typename Tp, size_t ChunkSizeV, size_t AlignN>
 void
-stable_vector<Tp, ChunkSizeV>::push_back(const Tp& t)
+stable_vector<Tp, ChunkSizeV, AlignN>::push_back(const Tp& t)
 {
     last_chunk().push_back(t);
 }
 
-template <typename Tp, size_t ChunkSizeV>
+template <typename Tp, size_t ChunkSizeV, size_t AlignN>
 void
-stable_vector<Tp, ChunkSizeV>::push_back(Tp&& t)
+stable_vector<Tp, ChunkSizeV, AlignN>::push_back(Tp&& t)
 {
     last_chunk().push_back(std::move(t));
 }
 
-template <typename Tp, size_t ChunkSizeV>
+template <typename Tp, size_t ChunkSizeV, size_t AlignN>
 template <typename... Args>
 void
-stable_vector<Tp, ChunkSizeV>::emplace_back(Args&&... args)
+stable_vector<Tp, ChunkSizeV, AlignN>::emplace_back(Args&&... args)
 {
     last_chunk().emplace_back(std::forward<Args>(args)...);
 }
 
-template <typename Tp, size_t ChunkSizeV>
-typename stable_vector<Tp, ChunkSizeV>::reference
-stable_vector<Tp, ChunkSizeV>::operator[](size_type i)
+template <typename Tp, size_t ChunkSizeV, size_t AlignN>
+typename stable_vector<Tp, ChunkSizeV, AlignN>::reference
+stable_vector<Tp, ChunkSizeV, AlignN>::operator[](size_type i)
 {
     return (*m_chunks[i / ChunkSizeV])[i % ChunkSizeV];
 }
 
-template <typename Tp, size_t ChunkSizeV>
-typename stable_vector<Tp, ChunkSizeV>::const_reference
-stable_vector<Tp, ChunkSizeV>::operator[](size_type i) const
+template <typename Tp, size_t ChunkSizeV, size_t AlignN>
+typename stable_vector<Tp, ChunkSizeV, AlignN>::const_reference
+stable_vector<Tp, ChunkSizeV, AlignN>::operator[](size_type i) const
 {
     return const_cast<this_type&>(*this)[i];
 }
 
-template <typename Tp, size_t ChunkSizeV>
-typename stable_vector<Tp, ChunkSizeV>::reference
-stable_vector<Tp, ChunkSizeV>::at(size_type i)
+template <typename Tp, size_t ChunkSizeV, size_t AlignN>
+typename stable_vector<Tp, ChunkSizeV, AlignN>::reference
+stable_vector<Tp, ChunkSizeV, AlignN>::at(size_type i)
 {
     if(OMNITRACE_UNLIKELY(i >= size()))
     {
@@ -369,16 +368,16 @@ stable_vector<Tp, ChunkSizeV>::at(size_type i)
     return operator[](i);
 }
 
-template <typename Tp, size_t ChunkSizeV>
-typename stable_vector<Tp, ChunkSizeV>::const_reference
-stable_vector<Tp, ChunkSizeV>::at(size_type i) const
+template <typename Tp, size_t ChunkSizeV, size_t AlignN>
+typename stable_vector<Tp, ChunkSizeV, AlignN>::const_reference
+stable_vector<Tp, ChunkSizeV, AlignN>::at(size_type i) const
 {
     return const_cast<this_type&>(*this).at(i);
 }
 
-template <typename Tp, size_t ChunkSizeV, typename... Args>
+template <typename Tp, size_t ChunkSizeV, size_t AlignN, typename... Args>
 auto
-resize(stable_vector<Tp, ChunkSizeV>& _v, size_t _n, Args&&... args)
+resize(stable_vector<Tp, ChunkSizeV, AlignN>& _v, size_t _n, Args&&... args)
 {
     if(_n > _v.capacity()) _v.reserve(_n);
 

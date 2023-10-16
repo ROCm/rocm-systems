@@ -251,23 +251,20 @@ get_signal_names(Tp&& _v)
 unique_ptr_t<sampler_t>&
 get_sampler(int64_t _tid = threading::get_id())
 {
-    static auto& _v = sampler_instances::instances();
-    return _v.at(_tid);
+    static auto* _v = sampler_instances::get();
+    return _v->at(_tid);
 }
 
 unique_ptr_t<bundle_t>&
 get_sampler_init(int64_t _tid = threading::get_id())
 {
-    static auto& _v = sampler_init_instances::instances();
-    if(!_v.at(_tid)) _v.at(_tid) = unique_ptr_t<bundle_t>{ new bundle_t{} };
-    return _v.at(_tid);
+    return sampler_init_instances::instance(construct_on_thread{ _tid });
 }
 
 unique_ptr_t<bool>&
 get_sampler_running(int64_t _tid)
 {
-    static auto& _v = sampler_running_instances::instances(construct_on_init{}, false);
-    return _v.at(_tid);
+    return sampler_running_instances::instance(construct_on_thread{ _tid }, false);
 }
 
 auto&
@@ -816,10 +813,8 @@ auto static_strings = std::set<std::string>{};
 unique_ptr_t<std::set<int>>&
 get_signal_types(int64_t _tid)
 {
-    static auto& _v = signal_type_instances::instances();
-    signal_type_instances::construct(construct_on_thread{ _tid },
-                                     omnitrace::get_sampling_signals(_tid));
-    return _v.at(_tid);
+    return signal_type_instances::instance(construct_on_thread{ _tid },
+                                           omnitrace::get_sampling_signals(_tid));
 }
 
 std::set<int>
@@ -834,7 +829,7 @@ shutdown()
 {
     if(is_child_process())
     {
-        for(auto& itr : sampler_instances::instances())
+        for(auto& itr : *sampler_instances::get())
             itr.release();
         return std::set<int>{};
     }
@@ -862,7 +857,7 @@ block_signals(std::set<int> _signals)
     if(_signals.empty()) _signals = *get_signal_types(threading::get_id());
     if(_signals.empty())
     {
-        OMNITRACE_PRINT("No signals to block...\n");
+        OMNITRACE_VERBOSE(2, "No signals to block...\n");
         return;
     }
 
@@ -879,7 +874,7 @@ unblock_signals(std::set<int> _signals)
     if(_signals.empty()) _signals = *get_signal_types(threading::get_id());
     if(_signals.empty())
     {
-        OMNITRACE_PRINT("No signals to unblock...\n");
+        OMNITRACE_VERBOSE(2, "No signals to unblock...\n");
         return;
     }
 
@@ -908,7 +903,7 @@ post_process()
     for(auto& itr : get_sampler_allocators())
         if(itr) itr->flush();
 
-    for(size_t i = 0; i < max_supported_threads; ++i)
+    for(size_t i = 0; i < thread_info::get_peak_num_threads(); ++i)
     {
         auto& _sampler = get_sampler(i);
 
@@ -1004,7 +999,7 @@ post_process()
 
     get_offload_file().reset();  // remove the temporary file
 
-    for(size_t i = 0; i < max_supported_threads; ++i)
+    for(size_t i = 0; i < thread_info::get_peak_num_threads(); ++i)
         get_sampler(i).reset();
 
     for(auto& itr : get_sampler_allocators())

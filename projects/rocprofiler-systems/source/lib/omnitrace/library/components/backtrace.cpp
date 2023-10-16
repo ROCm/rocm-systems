@@ -121,6 +121,7 @@ backtrace::filter_and_patch(const std::vector<entry_type>& _data)
         if(_keep_internal) return 1;
         if(_lbl.find("omnitrace_main") != _npos) return 0;
         if(_lbl.find("omnitrace::") != _npos) return 0;
+        if(_lbl.find("tim::openmp::") != _npos) return -1;
         if(_lbl.find("tim::") != _npos) return 0;
         if(_lbl.find("DYNINST_") != _npos) return 0;
         if(_lbl.find("omnitrace_") != _npos) return -1;

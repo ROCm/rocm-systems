@@ -127,6 +127,12 @@ causal_e2e_args_and_validation(_causal_fast_func fast-func "-F" "cpu_fast_func" 
 causal_e2e_args_and_validation(_causal_line_100 line-100 "-S" "causal.cpp:100" 10 20 20 5)
 causal_e2e_args_and_validation(_causal_line_110 line-110 "-S" "causal.cpp:110" 0 0 0 5)
 
+if(OMNITRACE_BUILD_NUMBER GREATER 1)
+    set(_causal_e2e_environment)
+else()
+    set(_causal_e2e_environment "OMNITRACE_VERBOSE=0")
+endif()
+
 omnitrace_add_causal_test(
     SKIP_BASELINE
     NAME cpu-omni-slow-func-e2e
@@ -138,6 +144,7 @@ omnitrace_add_causal_test(
     CAUSAL_VALIDATE_ARGS ${_causal_slow_func_valid}
     CAUSAL_PASS_REGEX
         "Starting causal experiment #1(.*)causal/experiments.json(.*)causal/experiments.coz"
+    ENVIRONMENT "${_causal_e2e_environment}"
     PROPERTIES PROCESSORS 2 PROCESSOR_AFFINITY OFF)
 
 omnitrace_add_causal_test(
@@ -151,6 +158,7 @@ omnitrace_add_causal_test(
     CAUSAL_VALIDATE_ARGS ${_causal_fast_func_valid}
     CAUSAL_PASS_REGEX
         "Starting causal experiment #1(.*)causal/experiments.json(.*)causal/experiments.coz"
+    ENVIRONMENT "${_causal_e2e_environment}"
     PROPERTIES PROCESSORS 2 PROCESSOR_AFFINITY OFF)
 
 omnitrace_add_causal_test(
@@ -164,6 +172,7 @@ omnitrace_add_causal_test(
     CAUSAL_VALIDATE_ARGS ${_causal_line_100_valid}
     CAUSAL_PASS_REGEX
         "Starting causal experiment #1(.*)causal/experiments.json(.*)causal/experiments.coz"
+    ENVIRONMENT "${_causal_e2e_environment}"
     PROPERTIES PROCESSORS 2 PROCESSOR_AFFINITY OFF)
 
 omnitrace_add_causal_test(
@@ -177,4 +186,5 @@ omnitrace_add_causal_test(
     CAUSAL_VALIDATE_ARGS ${_causal_line_110_valid}
     CAUSAL_PASS_REGEX
         "Starting causal experiment #1(.*)causal/experiments.json(.*)causal/experiments.coz"
+    ENVIRONMENT "${_causal_e2e_environment}"
     PROPERTIES PROCESSORS 2 PROCESSOR_AFFINITY OFF)
