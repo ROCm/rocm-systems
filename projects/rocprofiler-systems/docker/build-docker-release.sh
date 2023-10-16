@@ -101,7 +101,7 @@ reset-last
 : ${VERSIONS:=20.04 18.04}
 : ${ROCM_VERSIONS:=5.0 4.5 4.3}
 : ${MPI:=0}
-: ${PYTHON_VERSIONS:="6 7 8 9 10 11"}
+: ${PYTHON_VERSIONS:="6 7 8 9 10 11 12"}
 : ${RETRY:=3}
 
 n=0
@@ -156,6 +156,10 @@ do
 done
 
 CODE_VERSION=$(cat VERSION)
+
+if [ "${RETRY}" -lt 1 ]; then
+    RETRY=1
+fi
 
 if [ "${DISTRO}" = "rhel" ]; then
     SCRIPT_ARGS="${SCRIPT_ARGS} --static-libstdcxx off"

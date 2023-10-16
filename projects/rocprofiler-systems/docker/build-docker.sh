@@ -4,7 +4,7 @@
 : ${ROCM_VERSIONS:="5.0"}
 : ${DISTRO:=ubuntu}
 : ${VERSIONS:=20.04}
-: ${PYTHON_VERSIONS:="6 7 8 9 10 11"}
+: ${PYTHON_VERSIONS:="6 7 8 9 10 11 12"}
 : ${BUILD_CI:=""}
 : ${PUSH:=0}
 : ${PULL:=--pull}
@@ -144,6 +144,10 @@ done
 
 DOCKER_FILE="Dockerfile.${DISTRO}"
 
+if [ "${RETRY}" -lt 1 ]; then
+    RETRY=1
+fi
+
 if [ -n "${BUILD_CI}" ]; then DOCKER_FILE="${DOCKER_FILE}.ci"; fi
 if [ ! -f ${DOCKER_FILE} ]; then cd docker; fi
 if [ ! -f ${DOCKER_FILE} ]; then send-error "File \"${DOCKER_FILE}\" not found"; fi
@@ -173,7 +177,7 @@ do
                 4.1* | 4.0*)
                     ROCM_REPO_DIST="xenial"
                     ;;
-                5.3* | 5.4* | 5.5* | 5.6*)
+                5.3 | 5.3.* | 5.4 | 5.4.* | 5.5 | 5.5.* | 5.6 | 5.6.* | 5.7 | 5.7.*)
                     case "${VERSION}" in
                         22.04)
                             ROCM_REPO_DIST="jammy"
@@ -204,7 +208,7 @@ do
 
             # set the sub-URL in https://repo.radeon.com/amdgpu-install/<sub-URL>
             case "${ROCM_VERSION}" in
-                5.3 | 5.3.* | 5.4 | 5.4.* | 5.5 | 5.5.* | 5.6 | 5.6.*)
+                5.3 | 5.3.* | 5.4 | 5.4.* | 5.5 | 5.5.* | 5.6 | 5.6.* | 5.7 | 5.7.*)
                     ROCM_RPM=${ROCM_VERSION}/rhel/${RPM_PATH}/amdgpu-install-${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1${RPM_TAG}.noarch.rpm
                     ;;
                 5.2 | 5.2.* | 5.1 | 5.1.* | 5.0 | 5.0.* | 4.*)
@@ -232,7 +236,7 @@ do
                     ;;
             esac
             case "${ROCM_VERSION}" in
-                5.3 | 5.3.* | 5.4 | 5.4.* | 5.5 | 5.5.* | 5.6 | 5.6.*)
+                5.3 | 5.3.* | 5.4 | 5.4.* | 5.5 | 5.5.* | 5.6 | 5.6.* | 5.7 | 5.7.*)
                     ROCM_RPM=${ROCM_VERSION}/sle/${VERSION}/amdgpu-install-${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1.noarch.rpm
                     ;;
                 5.2 | 5.2.*)

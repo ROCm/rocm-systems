@@ -8,7 +8,7 @@ set -e
 : ${NJOBS=$(nproc)}
 : ${ELFUTILS_VERSION:=0.186}
 : ${BOOST_VERSION:=1.79.0}
-: ${PYTHON_VERSIONS:="6 7 8 9 10 11"}
+: ${PYTHON_VERSIONS:="6 7 8 9 10 11 12"}
 : ${PUSH:=0}
 : ${PULL:=--pull}
 
