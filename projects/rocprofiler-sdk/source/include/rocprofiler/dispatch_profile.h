@@ -69,28 +69,28 @@ typedef struct
  * @param [in] config
  */
 typedef void (*rocprofiler_profile_counting_dispatch_callback_t)(
-    rocprofiler_queue_id_t              queue_id,
-    rocprofiler_agent_t                 agent_id,
-    rocprofiler_correlation_id_t        correlation_id,
-    const hsa_kernel_dispatch_packet_t* dispatch_packet,
-    void*                               callback_data_args,
-    rocprofiler_profile_config_id_t*    config);
+    rocprofiler_queue_id_t                           queue_id,
+    rocprofiler_agent_t                              agent_id,
+    rocprofiler_correlation_id_t                     correlation_id,
+    const hsa_kernel_dispatch_packet_t*              dispatch_packet,
+    void*                                            callback_data_args,
+    rocprofiler_dispatch_profile_counting_record_t** records,
+    size_t                                           record_count,
+    rocprofiler_profile_config_id_t                  config);
 
 /**
  * @brief Configure Dispatch Profile Counting Service.
  *
- * @param [in] context_id
- * @param [in] agent_id
- * @param [in] buffer_id
- * @param [in] callback
- * @param [in] callback_data_args
+ * @param [in] context_id context id
+ * @param [in] profile profile config to use for dispatch
+ * @param [in] callback callback
+ * @param [in] callback_data_args callback data
  * @return ::rocprofiler_status_t
  */
 rocprofiler_status_t ROCPROFILER_API
 rocprofiler_configure_dispatch_profile_counting_service(
     rocprofiler_context_id_t                         context_id,
-    rocprofiler_agent_t                              agent_id,
-    rocprofiler_buffer_id_t                          buffer_id,
+    rocprofiler_profile_config_id_t                  profile,
     rocprofiler_profile_counting_dispatch_callback_t callback,
     void*                                            callback_data_args);
 

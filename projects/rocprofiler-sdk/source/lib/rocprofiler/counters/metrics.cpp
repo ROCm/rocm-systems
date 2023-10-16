@@ -22,15 +22,22 @@ THE SOFTWARE.
 
 #include "metrics.hpp"
 
+#include <rocprofiler/rocprofiler.h>
+
+#include "lib/common/synchronized.hpp"
+#include "lib/common/utility.hpp"
+#include "lib/common/xml.hpp"
+
+#include "glog/logging.h"
+
 #include <dlfcn.h>  // for dladdr
+#include <atomic>
 #include <cstdlib>
 #include <filesystem>
 #include <optional>
 
-#include "glog/logging.h"
-#include "lib/common/xml.hpp"
-#include "rocprofiler/rocprofiler.h"
-
+namespace rocprofiler
+{
 namespace counters
 {
 namespace
@@ -38,10 +45,11 @@ namespace
 MetricMap
 loadXml(const std::string& filename)
 {
-    MetricMap ret;
+    static std::atomic<uint64_t> id = 0;
+    MetricMap                    ret;
     DLOG(INFO) << "Loading Counter Config: " << filename;
     // todo: return unique_ptr....
-    auto xml = xml::Xml::Create(filename);
+    auto xml = common::Xml::Create(filename);
     LOG_IF(FATAL, !xml)
         << "Could not open XML Counter Config File (set env ROCPROFILER_METRICS_PATH)";
 
@@ -68,23 +76,25 @@ loadXml(const std::string& filename)
                                    node->opts["block"],
                                    node->opts["event"],
                                    node->opts["descr"],
-                                   node->opts["expr"]);
+                                   node->opts["expr"],
+                                   node->opts["special"],
+                                   id);
+            id++;
         }
     }
 
-    DLOG(INFO) << fmt::format("{}", ret);
     return ret;
 }
 
 std::string
 findViaInstallPath(const std::string& filename)
 {
-    Dl_info dl_info;
+    Dl_info dl_info = {};
     DLOG(INFO) << filename << " is being looked up via install path";
     if(dladdr(reinterpret_cast<const void*>(rocprofiler_query_available_agents), &dl_info) != 0)
     {
-        return std::filesystem::path{dl_info.dli_fname}.remove_filename() /
-               fmt::format("../lib/{}", filename);
+        return std::filesystem::path{dl_info.dli_fname}.parent_path().parent_path() /
+               fmt::format("share/rocprofiler/{}", filename);
     }
     return filename;
 }
@@ -92,10 +102,10 @@ findViaInstallPath(const std::string& filename)
 std::string
 findViaEnvironment(const std::string& filename)
 {
-    if(getenv("ROCPROFILER_METRICS_PATH"))
+    if(const char* metrics_path = nullptr; (metrics_path = getenv("ROCPROFILER_METRICS_PATH")))
     {
         DLOG(INFO) << filename << " is being looked up via env variable ROCPROFILER_METRICS_PATH";
-        return std::filesystem::path{std::string(getenv("ROCPROFILER_METRICS_PATH"))} / filename;
+        return std::filesystem::path{std::string{metrics_path}} / filename;
     }
     // No environment variable, lookup via install path
     return findViaInstallPath(filename);
@@ -115,4 +125,58 @@ getBaseHardwareMetrics()
     return loadXml(findViaEnvironment("basic_counters.xml"));
 }
 
-};  // namespace counters
+const MetricIdMap&
+getMetricIdMap()
+{
+    static MetricIdMap id_map = []() {
+        MetricIdMap map;
+        for(const auto& [_, val] : getMetricMap())
+        {
+            for(const auto& metric : val)
+            {
+                map.emplace(metric.id(), metric);
+            }
+        }
+        return map;
+    }();
+    return id_map;
+}
+
+const MetricMap&
+getMetricMap()
+{
+    static MetricMap map = []() {
+        MetricMap ret = getBaseHardwareMetrics();
+        for(auto& [key, val] : getDerivedHardwareMetrics())
+        {
+            auto [iter, inserted] = ret.emplace(key, val);
+            if(!inserted)
+            {
+                iter->second.insert(iter->second.end(), val.begin(), val.end());
+            }
+        }
+        return ret;
+    }();
+    return map;
+}
+
+const std::vector<Metric>&
+getMetricsForAgent(const std::string& agent)
+{
+    static const std::vector<Metric> empty;
+    const auto&                      map = getMetricMap();
+    if(const auto* metric_ptr = rocprofiler::common::get_val(map, agent))
+    {
+        return *metric_ptr;
+    }
+
+    return empty;
+}
+
+bool
+operator<(Metric const& lhs, Metric const& rhs)
+{
+    return lhs.id() < rhs.id();
+}
+}  // namespace counters
+}  // namespace rocprofiler

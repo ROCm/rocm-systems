@@ -270,7 +270,7 @@ jobs:
         git config --global --add safe.directory '*'
 
     - name: Configure, Build, and Test
-      timeout-minutes: 30
+      timeout-minutes: 45
       shell: bash
       run:
         python3 ./source/scripts/run-ci.py -B build

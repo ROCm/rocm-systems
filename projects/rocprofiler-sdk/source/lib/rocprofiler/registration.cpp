@@ -23,6 +23,7 @@
 #include "lib/rocprofiler/registration.hpp"
 #include "lib/rocprofiler/context/context.hpp"
 #include "lib/rocprofiler/hsa/hsa.hpp"
+#include "lib/rocprofiler/hsa/queue.hpp"
 #include "lib/rocprofiler/internal_threading.hpp"
 
 #include <rocprofiler/context.h>
@@ -542,6 +543,7 @@ rocprofiler_set_api_table(const char* name,
         auto& saved_hsa_api_table = rocprofiler::hsa::get_table();
         ::copyTables(hsa_api_table, &saved_hsa_api_table);
 
+        rocprofiler::hsa::queue_controller_init(hsa_api_table);
         rocprofiler::hsa::update_table(hsa_api_table);
     }
     else if(std::string_view{name} == "roctx")

@@ -10,8 +10,11 @@ set(ROCPROFILER_LIB_SOURCES
     buffer_tracing.cpp
     callback_tracing.cpp
     context.cpp
+    counters.cpp
+    dispatch_profile.cpp
     internal_threading.cpp
     pc_sampling.cpp
+    profile_config.cpp
     rocprofiler.cpp
     registration.cpp)
 
@@ -31,6 +34,7 @@ target_sources(rocprofiler-object-library PRIVATE ${ROCPROFILER_LIB_SOURCES}
 add_subdirectory(hsa)
 add_subdirectory(context)
 add_subdirectory(counters)
+add_subdirectory(aql)
 
 target_link_libraries(
     rocprofiler-object-library
@@ -59,9 +63,13 @@ target_link_libraries(
     rocprofiler-shared-library
     INTERFACE rocprofiler::rocprofiler-headers rocprofiler::rocprofiler-hsa-runtime
               rocprofiler::rocprofiler-hip
-    PRIVATE rocprofiler::rocprofiler-build-flags rocprofiler::rocprofiler-memcheck
-            rocprofiler::rocprofiler-common-library rocprofiler::rocprofiler-stdcxxfs
-            rocprofiler::rocprofiler-dl rocprofiler::rocprofiler-amd-comgr)
+    PRIVATE rocprofiler::rocprofiler-build-flags
+            rocprofiler::rocprofiler-memcheck
+            rocprofiler::rocprofiler-common-library
+            rocprofiler::rocprofiler-stdcxxfs
+            rocprofiler::rocprofiler-dl
+            rocprofiler::rocprofiler-amd-comgr
+            rocprofiler::rocprofiler-object-library)
 
 set_target_properties(
     rocprofiler-shared-library
@@ -97,7 +105,8 @@ target_link_libraries(
     rocprofiler-static-library
     PUBLIC rocprofiler::rocprofiler-headers rocprofiler::rocprofiler-hsa-runtime
            rocprofiler::rocprofiler-hip
-    PRIVATE rocprofiler::rocprofiler-common-library)
+    PRIVATE rocprofiler::rocprofiler-common-library
+            rocprofiler::rocprofiler-object-library)
 
 set_target_properties(
     rocprofiler-static-library PROPERTIES OUTPUT_NAME rocprofiler64 DEFINE_SYMBOL

@@ -28,6 +28,7 @@
 
 #include "lib/common/container/stable_vector.hpp"
 #include "lib/rocprofiler/context/domain.hpp"
+#include "lib/rocprofiler/counters/core.hpp"
 
 #include <array>
 #include <atomic>
@@ -78,15 +79,29 @@ struct buffer_tracing_service
     buffer_array_t           buffer_data = {};
 };
 
+struct counter_collection_service
+{
+    // Contains a vector of counter collection instances associated with this context.
+    // Each instance is assocated with an agent and a counter collection profile.
+    // Contains callback information along with other data needed to collect/process
+    // counters.
+    std::vector<std::shared_ptr<rocprofiler::counters::counter_callback_info>> callbacks{};
+    // A flag to state wether or not the counter set is currently enabled. This is primarily
+    // to protect against multithreaded calls to enable a context (and enabling already enabled
+    // counters).
+    rocprofiler::common::Synchronized<bool> enabled{false};
+};
+
 struct context
 {
     // size is used to ensure that we never read past the end of the version
-    size_t                                    size               = 0;
-    uint64_t                                  context_idx        = 0;  // context id
-    uint32_t                                  client_idx         = 0;  // tool id
-    correlation_tracing_service               correlation_tracer = {};
-    std::unique_ptr<callback_tracing_service> callback_tracer    = {};
-    std::unique_ptr<buffer_tracing_service>   buffered_tracer    = {};
+    size_t                                      size               = 0;
+    uint64_t                                    context_idx        = 0;  // context id
+    uint32_t                                    client_idx         = 0;  // tool id
+    correlation_tracing_service                 correlation_tracer = {};
+    std::unique_ptr<callback_tracing_service>   callback_tracer    = {};
+    std::unique_ptr<buffer_tracing_service>     buffered_tracer    = {};
+    std::unique_ptr<counter_collection_service> counter_collection = {};
 };
 
 // set the client index needs to be called before allocate_context()

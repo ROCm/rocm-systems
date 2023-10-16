@@ -1,4 +1,9 @@
 <gfx8 base="gfx8">
+  <metric name="MAX_WAVE_SIZE"  descr="Max wave size constant" special="yes"></metric>
+  <metric name="KERNEL_DURATION" descr="The duration of the kernel dispatch" special="yes"></metric>
+  <metric name="SE_NUM" descr="SE_NUM" special="yes"></metric>
+  <metric name="SIMD_NUM" descr="SIMD Number" special="yes"></metric>
+  <metric name="CU_NUM" descr="CU_NUM" special="yes"></metric>
   <metric name="GRBM_COUNT" block=GRBM event=0 descr="Tie High - Count Number of Clocks"></metric>
   <metric name="GRBM_GUI_ACTIVE" block=GRBM event=2 descr="The GUI is Active"></metric>
 
@@ -33,6 +38,11 @@
 </gfx8>
 
 <gfx9>
+  <metric name="MAX_WAVE_SIZE"  descr="Max wave size constant" special="yes"></metric>
+  <metric name="KERNEL_DURATION" descr="The duration of the kernel dispatch" special="yes"></metric>
+  <metric name="SE_NUM" descr="SE_NUM" special="yes"></metric>
+  <metric name="SIMD_NUM" descr="SIMD Number" special="yes"></metric>
+  <metric name="CU_NUM" descr="CU_NUM" special="yes"></metric>
   <metric name="GRBM_COUNT" block=GRBM event=0 descr="Tie High - Count Number of Clocks"></metric>
   <metric name="GRBM_GUI_ACTIVE" block=GRBM event=2 descr="The GUI is Active"></metric>
 
@@ -70,6 +80,11 @@
 
 <gfx906 base="gfx9">
   # EA1
+  <metric name="MAX_WAVE_SIZE"  descr="Max wave size constant" special="yes"></metric>
+  <metric name="KERNEL_DURATION" descr="The duration of the kernel dispatch" special="yes"></metric>
+  <metric name="SE_NUM" descr="SE_NUM" special="yes"></metric>
+  <metric name="SIMD_NUM" descr="SIMD Number" special="yes"></metric>
+  <metric name="CU_NUM" descr="CU_NUM" special="yes"></metric>
   <metric name="TCC_EA1_WRREQ" block=TCC event=256 descr="Number of transactions (either 32-byte or 64-byte) going over the TC_EA_wrreq interface. Atomics may travel over the same interface and are generally classified as write requests. This does not include probe commands."></metric>
   <metric name="TCC_EA1_WRREQ_64B" block=TCC event=257 descr="Number of 64-byte transactions going (64-byte write or CMPSWAP) over the TC_EA_wrreq interface."></metric>
   <metric name="TCC_EA1_WRREQ_STALL" block=TCC event=260 descr="Number of cycles a write request was stalled."></metric>
@@ -103,6 +118,11 @@
 </gfx908>
 
 <gfx90a>
+  <metric name="MAX_WAVE_SIZE"  descr="Max wave size constant" special="yes"></metric>
+  <metric name="KERNEL_DURATION" descr="The duration of the kernel dispatch" special="yes"></metric>
+  <metric name="SE_NUM" descr="SE_NUM" special="yes"></metric>
+  <metric name="SIMD_NUM" descr="SIMD Number" special="yes"></metric>
+  <metric name="CU_NUM" descr="CU_NUM" special="yes"></metric>
   <metric name="SQ_WAIT_INST_LDS" block=SQ event=91 descr="Number of wave-cycles spent waiting for LDS instruction issue. In units of 4 cycles. (per-simd, nondeterministic)"></metric>
   <metric name="TCP_TCP_TA_DATA_STALL_CYCLES" block=TCP event=6 descr="TCP stalls TA data interface. Now Windowed."></metric>
   <metric name="GRBM_COUNT" block=GRBM event=0 descr="Tie High - Count Number of Clocks"></metric>
@@ -366,6 +386,11 @@
 </gfx90a>
 
 <gfx940>
+  <metric name="MAX_WAVE_SIZE"  descr="Max wave size constant" special="yes"></metric>
+  <metric name="KERNEL_DURATION" descr="The duration of the kernel dispatch" special="yes"></metric>
+  <metric name="SE_NUM" descr="SE_NUM" special="yes"></metric>
+  <metric name="SIMD_NUM" descr="SIMD Number" special="yes"></metric>
+  <metric name="CU_NUM" descr="CU_NUM" special="yes"></metric>
   <metric name="SQ_WAIT_INST_LDS" block=SQ event=96 descr="Number of wave-cycles spent waiting for LDS instruction issue. In units of 4 cycles. (per-simd, nondeterministic)"></metric>
   <metric name="TCP_TCP_TA_DATA_STALL_CYCLES" block=TCP event=6 descr="TCP stalls TA data interface. Now Windowed."></metric>
   <metric name="GRBM_COUNT" block=GRBM event=0 descr="Tie High - Count Number of Clocks"></metric>
@@ -634,6 +659,11 @@
 <gfx942 base="gfx940"></gfx942>
 
 <gfx10>
+  <metric name="MAX_WAVE_SIZE"  descr="Max wave size constant" special="yes"></metric>
+  <metric name="KERNEL_DURATION" descr="The duration of the kernel dispatch" special="yes"></metric>
+  <metric name="SE_NUM" descr="SE_NUM" special="yes"></metric>
+  <metric name="SIMD_NUM" descr="SIMD Number" special="yes"></metric>
+  <metric name="CU_NUM" descr="CU_NUM" special="yes"></metric>
   <metric name="GRBM_COUNT" block=GRBM event=0 descr="Tie High - Count Number of Clocks"></metric>
   <metric name="GRBM_GUI_ACTIVE" block=GRBM event=2 descr="The GUI is Active"></metric>
   <metric name="GRBM_CP_BUSY" block=GRBM event=3 descr="Any of the Command Processor (CPG/CPC/CPF) blocks are busy."></metric>
@@ -678,7 +708,7 @@
   <metric name="SQ_INSTS_LDS" block=SQ event=59 descr="Number of LDS indexed instructions issued. {emulated, C1}"></metric>
   <metric name="SQ_INSTS_GDS" block=SQ event=55 descr="Number of GDS instructions issued. {emulated, C1}"></metric>
   <metric name="SQ_WAIT_INST_LDS" block=SQ event=31 descr="Number of clock cycles spent waiting for LDS (indexed) instruction issue. In units of cycles. {nondeterministic, C1}"></metric>
-  
+
   <metric name="TA_TA_BUSY" block=TA event=15 descr="TA block is busy. Perf_Windowing not supported for this counter."></metric>
   <metric name="TA_FLAT_LOAD_WAVEFRONTS" block=TA event=101 descr=" Number of flat load vec32 packets processed by TA, same as flat_read_wavefronts in earlier IP"></metric>
   <metric name="TA_FLAT_STORE_WAVEFRONTS" block=TA event=102 descr="Number of flat store vec32 packets processed by TA, same as flat_write_wavefronts in earlier IP"></metric>
@@ -694,6 +724,11 @@
 </gfx1032>
 
 <gfx11>
+  <metric name="MAX_WAVE_SIZE"  descr="Max wave size constant" special="yes"></metric>
+  <metric name="KERNEL_DURATION" descr="The duration of the kernel dispatch" special="yes"></metric>
+  <metric name="SE_NUM" descr="SE_NUM" special="yes"></metric>
+  <metric name="SIMD_NUM" descr="SIMD Number" special="yes"></metric>
+  <metric name="CU_NUM" descr="CU_NUM" special="yes"></metric>
   <metric name="GRBM_COUNT" block=GRBM event=0 descr="Tie High - Count Number of Clocks"></metric>
   <metric name="GRBM_GUI_ACTIVE" block=GRBM event=2 descr="The GUI is Active"></metric>
   <metric name="GL2C_HIT" block=GL2C event=42 descr="Number of cache hits"></metric>
@@ -741,4 +776,3 @@
 
 <gfx1101 base="gfx11">
 </gfx1101>
-

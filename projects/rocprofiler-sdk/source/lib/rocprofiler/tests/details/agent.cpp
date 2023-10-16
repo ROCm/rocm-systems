@@ -18,8 +18,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include "agent.hpp"
-
+#include "lib/rocprofiler/tests/details/agent.hpp"
 #include "lib/common/utility.hpp"
 
 #include <glog/logging.h>

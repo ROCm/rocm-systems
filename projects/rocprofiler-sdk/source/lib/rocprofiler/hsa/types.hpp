@@ -20,9 +20,10 @@
 
 #pragma once
 
+#include <rocprofiler/hsa.h>
+#include <rocprofiler/version.h>
+
 #include "lib/common/defines.hpp"
-#include "rocprofiler/hsa.h"
-#include "rocprofiler/version.h"
 
 #ifndef ROCPROFILER_UNSAFE_NO_VERSION_CHECK
 #    if defined(ROCPROFILER_CI) && ROCPROFILER_CI > 0

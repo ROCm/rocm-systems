@@ -92,6 +92,7 @@ def generate_custom(args, cmake_args, ctest_args):
         "samples/.*",
         "tests/.*",
         ".*/details/.*",
+        "*/counters/parser/.*",
     ]
     if args.coverage == "samples":
         codecov_exclude += [".*/lib/common/.*"]

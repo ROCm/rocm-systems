@@ -78,6 +78,9 @@ rocprofiler_add_option(ROCPROFILER_BUILD_STACK_PROTECTOR "Build with -fstack-pro
                        ON ADVANCED)
 rocprofiler_add_option(ROCPROFILER_UNSAFE_NO_VERSION_CHECK
                        "Disable HSA version checking (for development only)" OFF ADVANCED)
+rocprofiler_add_option(
+    ROCPROFILER_REGENERATE_COUNTERS_PARSER
+    "Regenerate the counter parser (requires bison and flex)" OFF ADVANCED)
 
 # In the future, we will do this even with clang-tidy enabled
 if(ROCPROFILER_BUILD_CI AND NOT ROCPROFILER_BUILD_WERROR)

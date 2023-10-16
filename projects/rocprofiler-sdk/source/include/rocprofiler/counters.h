@@ -38,37 +38,44 @@ ROCPROFILER_EXTERN_C_INIT
  * @brief Query Counter name.
  *
  * @param [in] counter_id
- * @param [out] name if nullptr, size will be returned
- * @param [out] size
+ * @param [out] name returns a pointer to the name of the counter
+ * @param [out] size returns the size of the name returned
  * @return ::rocprofiler_status_t
  */
 rocprofiler_status_t ROCPROFILER_API
-rocprofiler_query_counter_name(rocprofiler_counter_id_t counter_id, const char* name, size_t* size)
-    ROCPROFILER_NONNULL(3);
+rocprofiler_query_counter_name(rocprofiler_counter_id_t counter_id, const char** name, size_t* size)
+    ROCPROFILER_NONNULL(2, 3);
 
 /**
  * @brief Query Counter Instances Count.
  *
- * @param [in] counter_id
- * @param [out] instance_count
+ * @param [in] agent rocprofiler agent
+ * @param [in] counter_id counter id (obtained from iterate_agent_supported_counters)
+ * @param [out] instance_count number of instances the counter has
  * @return rocprofiler_status_t
  */
 rocprofiler_status_t ROCPROFILER_API
-rocprofiler_query_counter_instance_count(rocprofiler_counter_id_t counter_id,
-                                         size_t* instance_count) ROCPROFILER_NONNULL(2);
+rocprofiler_query_counter_instance_count(rocprofiler_agent_t      agent,
+                                         rocprofiler_counter_id_t counter_id,
+                                         size_t* instance_count) ROCPROFILER_NONNULL(3);
+
+typedef rocprofiler_status_t (*rocprofiler_available_counters_cb_t)(
+    rocprofiler_counter_id_t* counters,
+    size_t                    num_counters,
+    void*                     user_data);
 
 /**
  * @brief Query Agent Counters Availability.
  *
  * @param [in] agent
- * @param [out] counters_list
- * @param [out] counters_count
+ * @param [in] cb callback to caller to get counters
+ * @param [in] user_data data to pass into the callback
  * @return ::rocprofiler_status_t
  */
 rocprofiler_status_t ROCPROFILER_API
-rocprofiler_query_agent_supported_counters(rocprofiler_agent_t       agent,
-                                           rocprofiler_counter_id_t* counters_list,
-                                           size_t* counters_count) ROCPROFILER_NONNULL(2, 3);
+rocprofiler_iterate_agent_supported_counters(rocprofiler_agent_t                 agent,
+                                             rocprofiler_available_counters_cb_t cb,
+                                             void* user_data) ROCPROFILER_NONNULL(2);
 
 /** @} */
 

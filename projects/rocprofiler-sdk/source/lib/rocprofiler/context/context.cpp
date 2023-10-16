@@ -26,6 +26,7 @@
 #include "lib/common/container/stable_vector.hpp"
 #include "lib/rocprofiler/buffer.hpp"
 #include "lib/rocprofiler/context/context.hpp"
+#include "lib/rocprofiler/counters/core.hpp"
 
 #include <glog/logging.h>
 
@@ -206,6 +207,8 @@ start_context(rocprofiler_context_id_t context_id)
 
     if(!success) return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_STARTED;
 
+    rocprofiler::counters::start_context(context_id);
+
     return ROCPROFILER_STATUS_SUCCESS;
 }
 
@@ -221,6 +224,7 @@ stop_context(rocprofiler_context_id_t idx)
         {
             bool success = itr.compare_exchange_strong(_expected, nullptr);
 
+            rocprofiler::counters::stop_context(idx);
             if(success) return ROCPROFILER_STATUS_SUCCESS;
         }
     }

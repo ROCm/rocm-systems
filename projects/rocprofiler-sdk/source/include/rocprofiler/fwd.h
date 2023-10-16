@@ -69,6 +69,8 @@ typedef enum  // NOLINT(performance-enum-size)
     ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED,             ///< Function is not implemented
     ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_ABI,  ///< Data structure provided by user is incompatible
                                                 ///< with current version of rocprofiler
+    ROCPROFILER_STATUS_ERROR_AGENT_NOT_FOUND,   ///< Agent not found
+    ROCPROFILER_STATUS_ERROR_COUNTER_NOT_FOUND,  ///< Counter does not exist
     ROCPROFILER_STATUS_LAST,
 } rocprofiler_status_t;
 

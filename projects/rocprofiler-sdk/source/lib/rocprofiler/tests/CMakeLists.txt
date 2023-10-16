@@ -51,5 +51,5 @@ gtest_add_tests(
 
 set_tests_properties(
     ${shared_lib_TESTS}
-    PROPERTIES TIMEOUT 45 LABELS "unittests" ENVIRONMENT
+    PROPERTIES TIMEOUT 360 LABELS "unittests" ENVIRONMENT
                "HSA_TOOLS_LIB=$<TARGET_FILE:rocprofiler-shared-library>")

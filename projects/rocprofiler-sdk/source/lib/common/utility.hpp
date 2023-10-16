@@ -66,5 +66,36 @@ get_val(Container& map, const Key& key)
     auto pos = map.find(key);
     return (pos != map.end() ? &pos->second : nullptr);
 }
+
+/**
+ * A simple wrapper that will call a function when the
+ * wrapper is being destroyed. This is primarily useful
+ * for static variables where we want to run some destruction
+ * operations when the program exits.
+ */
+template <typename T, typename L>
+class static_cleanup_wrapper
+{
+public:
+    static_cleanup_wrapper(T&& data, L&& destroy_func)
+    : _data(std::move(data))
+    , _destroy_func(destroy_func)
+    {}
+
+    static_cleanup_wrapper(L&& destroy_func)
+    : _destroy_func(destroy_func)
+    {}
+
+    ~static_cleanup_wrapper() { _destroy_func(_data); }
+
+    void destroy() { _destroy_func(_data); }
+
+    T& get() { return _data; }
+
+private:
+    T _data;
+    L _destroy_func;
+};
+
 }  // namespace common
 }  // namespace rocprofiler
