@@ -54,7 +54,7 @@ find_first_gpu_agent_impl(const rocprofiler_agent_t** agents, size_t num_agents,
                    _out_agent->name,
                    _out_agent->id.handle,
                    _out_agent->type,
-                   _out_agent->pc_sampling_configs.size);
+                   _out_agent->num_pc_sampling_configs);
             return ROCPROFILER_STATUS_SUCCESS;
         }
         else
@@ -64,7 +64,7 @@ find_first_gpu_agent_impl(const rocprofiler_agent_t** agents, size_t num_agents,
                    agents[i]->name,
                    agents[i]->id.handle,
                    agents[i]->type,
-                   agents[i]->pc_sampling_configs.size);
+                   agents[i]->num_pc_sampling_configs);
         }
     }
     return ROCPROFILER_STATUS_ERROR;

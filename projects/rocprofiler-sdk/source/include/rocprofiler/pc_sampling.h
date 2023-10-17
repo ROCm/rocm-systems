@@ -63,19 +63,6 @@ struct rocprofiler_pc_sampling_configuration_s
     uint64_t                         flags;
 };
 
-/**
- * @brief Query PC Sampling Configuration.
- *
- * @param [in] agent
- * @param [out] config
- * @param [out] config_count
- * @return ::rocprofiler_status_t
- */
-rocprofiler_status_t ROCPROFILER_API
-rocprofiler_query_pc_sampling_agent_configurations(rocprofiler_agent_t                      agent,
-                                                   rocprofiler_pc_sampling_configuration_t* config,
-                                                   size_t* config_count) ROCPROFILER_NONNULL(2, 3);
-
 /** @} */
 
 ROCPROFILER_EXTERN_C_FINI

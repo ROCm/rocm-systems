@@ -211,15 +211,20 @@ template <typename MapT, typename Tp>
 void
 read_property(const MapT& data, const std::string& label, Tp& value)
 {
+    using mutable_type = std::remove_const_t<Tp>;
+
     if constexpr(std::is_enum<Tp>::value)
     {
-        using value_type = std::underlying_type_t<Tp>;
+        using value_type = std::underlying_type_t<mutable_type>;
         // never expect this to be true but it does guard against infinite recursion
         static_assert(!std::is_enum<value_type>::value, "Expected non-enum type");
 
         auto value_v = static_cast<value_type>(value);
         read_property(data, label, value_v);
-        value = static_cast<Tp>(value_v);
+        if constexpr(std::is_const<Tp>::value)
+            const_cast<mutable_type&>(value) = static_cast<mutable_type>(value_v);
+        else
+            value = static_cast<Tp>(value_v);
     }
     else
     {
@@ -258,7 +263,10 @@ read_property(const MapT& data, const std::string& label, Tp& value)
                                                  max_value)};
         }
 
-        value = static_cast<Tp>(local_value);
+        if constexpr(std::is_const<Tp>::value)
+            const_cast<mutable_type&>(value) = static_cast<mutable_type>(local_value);
+        else
+            value = static_cast<Tp>(local_value);
     }
 }
 
@@ -280,7 +288,7 @@ read_topology()
 
     using pc_sampling_config_vec_t = std::vector<rocprofiler_pc_sampling_configuration_t>;
 
-    auto mi200_pc_sampling_config = pc_sampling_config_vec_t{
+    static auto mi200_pc_sampling_config = pc_sampling_config_vec_t{
         rocprofiler_pc_sampling_configuration_t{ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP,
                                                 ROCPROFILER_PC_SAMPLING_UNIT_TIME,
                                                 1UL,
@@ -412,12 +420,16 @@ read_topology()
                 drmClose(drm_fd);
             }
 
-            constexpr auto gfx90a_version = compute_version(9, 0, 10);
-
-            if(agent_info.gfx_target_version >= gfx90a_version)
+            // TODO(jomadsen): make contingent on whether this process acquired the PC sampling
+            // device lock
             {
-                agent_info.pc_sampling_configs = rocprofiler_pc_sampling_config_array_t{
-                    mi200_pc_sampling_config.data(), mi200_pc_sampling_config.size()};
+                constexpr auto gfx90a_version = compute_version(9, 0, 10);
+
+                if(agent_info.gfx_target_version >= gfx90a_version)
+                {
+                    agent_info.pc_sampling_configs     = mi200_pc_sampling_config.data();
+                    agent_info.num_pc_sampling_configs = mi200_pc_sampling_config.size();
+                }
             }
         }
         else if(agent_info.type == ROCPROFILER_AGENT_TYPE_CPU)
@@ -467,16 +479,10 @@ read_topology()
 
             for(uint32_t i = 0; i < agent_info.mem_banks_count; ++i)
             {
-                using heap_type_t            = HSA_HEAPTYPE;
-                using underlying_heap_type_t = std::underlying_type_t<heap_type_t>;
-
                 auto subproperties =
                     read_map(node_path / "mem_banks" / std::to_string(i) / "properties");
 
-                auto _heap_type = underlying_heap_type_t{};
-                read_property(subproperties, "heap_type", _heap_type);
-                agent_info.mem_banks[i].heap_type = static_cast<heap_type_t>(_heap_type);
-
+                read_property(subproperties, "heap_type", agent_info.mem_banks[i].heap_type);
                 read_property(
                     subproperties, "size_in_bytes", agent_info.mem_banks[i].size_in_bytes);
                 read_property(subproperties, "flags", agent_info.mem_banks[i].flags.MemoryProperty);

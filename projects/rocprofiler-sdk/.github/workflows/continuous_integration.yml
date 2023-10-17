@@ -58,7 +58,6 @@ jobs:
       image: compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:${{ needs.get_latest_mainline_build_number.outputs.LATEST_BUILD_NUMBER }}-${{ matrix.os }}-stg1
       options: --memory=128g --cpus=32 --ipc=host --device=/dev/kfd --device=/dev/dri${{ matrix.device }} --group-add video --cap-add=SYS_PTRACE --cap-add CAP_SYS_PTRACE --cap-add CAP_SYS_ADMIN --security-opt seccomp=unconfined
 
-    if: ${{ always() }}
     needs: get_latest_mainline_build_number
 
     steps:
@@ -147,7 +146,6 @@ jobs:
       image: compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:${{ needs.get_latest_mainline_build_number.outputs.LATEST_BUILD_NUMBER }}-${{ matrix.os }}-stg1
       options: --memory=128g --cpus=32 --ipc=host --device=/dev/kfd --device=/dev/dri${{ matrix.device }} --group-add video --cap-add=SYS_PTRACE --cap-add CAP_SYS_PTRACE --cap-add CAP_SYS_ADMIN --security-opt seccomp=unconfined
 
-    if: ${{ always() }}
     needs: get_latest_mainline_build_number
 
     steps:
@@ -247,7 +245,6 @@ jobs:
       image: compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:${{ needs.get_latest_mainline_build_number.outputs.LATEST_BUILD_NUMBER }}-${{ matrix.os }}-stg1
       options: --privileged --ipc=host --device=/dev/kfd --device=/dev/dri${{ matrix.device }} --group-add video --cap-add=SYS_PTRACE --cap-add CAP_SYS_PTRACE --cap-add CAP_SYS_ADMIN --security-opt seccomp=unconfined
 
-    if: ${{ always() }}
     needs: get_latest_mainline_build_number
 
     steps:

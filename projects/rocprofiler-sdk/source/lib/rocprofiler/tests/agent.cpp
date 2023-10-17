@@ -97,7 +97,8 @@ TEST(rocprofiler_lib, agent_abi)
     EXPECT_EQ(offsetof(rocprofiler_agent_t, vendor_name), 256) << msg;
     EXPECT_EQ(offsetof(rocprofiler_agent_t, product_name), 264) << msg;
     EXPECT_EQ(offsetof(rocprofiler_agent_t, model_name), 272) << msg;
-    EXPECT_EQ(offsetof(rocprofiler_agent_t, pc_sampling_configs), 280) << msg;
+    EXPECT_EQ(offsetof(rocprofiler_agent_t, num_pc_sampling_configs), 280) << msg;
+    EXPECT_EQ(offsetof(rocprofiler_agent_t, pc_sampling_configs), 288) << msg;
     // Add test for offset of new field above this. Do NOT change any existing values!
 
     // If a new field is added, increase this value by the size of the new field(s)

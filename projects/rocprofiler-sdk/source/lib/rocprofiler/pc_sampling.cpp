@@ -48,13 +48,4 @@ rocprofiler_configure_pc_sampling_service(rocprofiler_context_id_t         conte
     consume_args(context_id, agent, method, unit, interval, buffer_id);
     return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
 }
-
-rocprofiler_status_t
-rocprofiler_query_pc_sampling_agent_configurations(rocprofiler_agent_t                      agent,
-                                                   rocprofiler_pc_sampling_configuration_t* config,
-                                                   size_t* config_count)
-{
-    consume_args(agent, config, config_count);
-    return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
-}
 }

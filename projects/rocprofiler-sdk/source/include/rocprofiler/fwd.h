@@ -327,15 +327,6 @@ typedef struct
 } rocprofiler_profile_config_id_t;
 
 /**
- * @brief Array of PC Sampling Configurations
- */
-typedef struct rocprofiler_pc_sampling_config_array_s
-{
-    rocprofiler_pc_sampling_configuration_t* data;
-    size_t                                   size;
-} rocprofiler_pc_sampling_config_array_t;
-
-/**
  * @brief Tracing record
  *
  */

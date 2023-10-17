@@ -198,22 +198,18 @@ hsa_api_impl<Idx>::functor(Args&&... args)
         if(itr->callback_tracer)
         {
             // if the given domain + op is not enabled, skip this context
-            if(!itr->callback_tracer->domains(info_type::callback_domain_idx,
-                                              info_type::operation_idx))
-                continue;
-
-            callback_contexts.emplace_back(
-                callback_context_data{itr, rocprofiler_callback_tracing_record_t{}});
+            if(itr->callback_tracer->domains(info_type::callback_domain_idx,
+                                             info_type::operation_idx))
+                callback_contexts.emplace_back(
+                    callback_context_data{itr, rocprofiler_callback_tracing_record_t{}});
         }
 
         if(itr->buffered_tracer)
         {
             // if the given domain + op is not enabled, skip this context
-            if(!itr->buffered_tracer->domains(info_type::buffered_domain_idx,
-                                              info_type::operation_idx))
-                continue;
-
-            buffered_contexts.emplace_back(buffered_context_data{itr});
+            if(itr->buffered_tracer->domains(info_type::buffered_domain_idx,
+                                             info_type::operation_idx))
+                buffered_contexts.emplace_back(buffered_context_data{itr});
         }
     }
 

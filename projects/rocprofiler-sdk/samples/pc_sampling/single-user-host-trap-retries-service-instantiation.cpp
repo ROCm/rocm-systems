@@ -57,11 +57,11 @@ second_user()
 
     // After failure, the second user queries available configuration and observes the one chosen by
     // the first user.
-    size_t                                               config_count = 10;
-    std::vector<rocprofiler_pc_sampling_configuration_t> configs(config_count);
-    ROCPROFILER_CALL(rocprofiler_query_pc_sampling_agent_configurations(
-                         *gpu_agent, configs.data(), &config_count),
-                     "The second user cannot query available configurations");
+    auto config_count = gpu_agent->num_pc_sampling_configs;
+    auto configs      = std::vector<rocprofiler_pc_sampling_configuration_t>{};
+    configs.reserve(config_count);
+    for(size_t i = 0; i < config_count; ++i)
+        configs.emplace_back(gpu_agent->pc_sampling_configs[i]);
 
     // Only one configuration should be listed, and its parameters should match the parameters set
     // by the first user. Vladimir: Is it ok to use assertions? In the release mode, they might be

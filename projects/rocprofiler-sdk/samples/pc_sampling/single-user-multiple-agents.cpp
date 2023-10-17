@@ -34,7 +34,7 @@ find_all_gpu_agents_supporting_pc_sampling_impl(const rocprofiler_agent_t** agen
             // Skip GPU agents not supporting PC sampling
             // Vladimir: The assumption is that if a GPU agent does not support PC sampling,
             // the size is 0.
-            if(agents[i]->pc_sampling_configs.size == 0) continue;
+            if(agents[i]->num_pc_sampling_configs == 0) continue;
 
             _out_agents->push_back(*agents[i]);
 
@@ -43,7 +43,7 @@ find_all_gpu_agents_supporting_pc_sampling_impl(const rocprofiler_agent_t** agen
                    agents[i]->name,
                    agents[i]->id.handle,
                    agents[i]->type,
-                   agents[i]->pc_sampling_configs.size);
+                   agents[i]->num_pc_sampling_configs);
             return ROCPROFILER_STATUS_SUCCESS;
         }
         else
@@ -53,7 +53,7 @@ find_all_gpu_agents_supporting_pc_sampling_impl(const rocprofiler_agent_t** agen
                    agents[i]->name,
                    agents[i]->id.handle,
                    agents[i]->type,
-                   agents[i]->pc_sampling_configs.size);
+                   agents[i]->num_pc_sampling_configs);
         }
     }
 
@@ -78,10 +78,10 @@ configure_host_trap_sampling(rocprofiler_context_id_t context_id,
                              rocprofiler_agent_t      gpu_agent)
 {
     // Vladimir: Does MI200 have only one configuration?
-    assert(gpu_agent.pc_sampling_configs.size == 1);
+    assert(gpu_agent.num_pc_sampling_configs == 1);
 
     // Extract the configuration
-    auto host_trap_config = gpu_agent.pc_sampling_configs.data[0];
+    auto host_trap_config = gpu_agent.pc_sampling_configs[0];
 
     // The mean of min_interval and max_interval
     auto interval = (host_trap_config.min_interval + host_trap_config.max_interval) / 2;
@@ -96,15 +96,16 @@ configure_host_trap_sampling(rocprofiler_context_id_t context_id,
 }
 
 rocprofiler_pc_sampling_configuration_t
-extract_stochastic_config(rocprofiler_pc_sampling_config_array_t* configs)
+extract_stochastic_config(const rocprofiler_pc_sampling_configuration_t* configs,
+                          size_t                                         num_configs)
 {
     // Iterate over an array of configurations and return the first one
     // with stochasting method.
-    for(size_t i = 0; i < configs->size; i++)
+    for(size_t i = 0; i < num_configs; i++)
     {
-        if(configs->data[i].method == ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC)
+        if(configs[i].method == ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC)
         {
-            return configs->data[i];
+            return configs[i];
         }
     }
     printf("Improper use of the `extract_stochastic_config` function.");
@@ -118,7 +119,7 @@ configure_stochastic_sampling(rocprofiler_context_id_t context_id,
 {
     // Find the configuration matching stochastic sampling in cycles
     rocprofiler_pc_sampling_configuration_t stochastic_config =
-        extract_stochastic_config(&gpu_agent.pc_sampling_configs);
+        extract_stochastic_config(gpu_agent.pc_sampling_configs, gpu_agent.num_pc_sampling_configs);
 
     // The mean of min_interval and max_interval
     auto interval = (stochastic_config.min_interval + stochastic_config.max_interval) / 2;

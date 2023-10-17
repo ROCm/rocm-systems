@@ -172,14 +172,20 @@ typedef struct rocprofiler_agent_t
                                            ///< dimension of a work-group.
     rocprofiler_dim3_t grid_max_dim;  ///< GPU only. Maximum number of work-items of each dimension
                                       ///< of a grid.
-    rocprofiler_agent_mem_bank_t* mem_banks;
-    rocprofiler_agent_cache_t*    caches;
-    rocprofiler_agent_io_link_t*  io_links;
+    const rocprofiler_agent_mem_bank_t* mem_banks;
+    const rocprofiler_agent_cache_t*    caches;
+    const rocprofiler_agent_io_link_t*  io_links;
     const char* name;          ///< Name of the agent. Will be identical to product name for CPU
     const char* vendor_name;   ///< Vendor of agent (will be AMD)
     const char* product_name;  ///< Marketing name
     const char* model_name;    ///< GPU only. Will be something like vega20, mi200, etc.
-    rocprofiler_pc_sampling_config_array_t pc_sampling_configs;
+    uint64_t num_pc_sampling_configs;  ///< GPU only. Number of PC sampling modes available for this
+                                       ///< device type. Note: if another process is currently using
+                                       ///< PC sampling on this agent, this value will be zero so
+                                       ///< do not assume the number of PC sampling configurations
+                                       ///< based on the device type.
+    const rocprofiler_pc_sampling_configuration_t*
+        pc_sampling_configs;  ///< GPU only. Array of PC sampling configuration types.
 } rocprofiler_agent_t;
 
 /**
