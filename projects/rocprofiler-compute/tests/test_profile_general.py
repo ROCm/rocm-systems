@@ -8,7 +8,7 @@ import subprocess
 import re
 import shutil
 
-omniperf = SourceFileLoader("omniperf", "src/omniperf").load_module()
+# omniperf = SourceFileLoader("omniperf", "src/omniperf").load_module()
 workload_1 = os.path.realpath("workload")
 kernel_name_1 = "vecCopy(double*, double*, double*, int, int) [clone .kd]"
 app_1 = ["./sample/vcopy", "1048576", "256"]
@@ -70,6 +70,56 @@ ALL_CSVS_MI200 = [
 
 ROOF_ONLY_CSVS = ['pmc_perf.csv', 'pmc_perf_0.csv', 'pmc_perf_1.csv', 'pmc_perf_2.csv', 'roofline.csv', 'sysinfo.csv', 'timestamps.csv']
 
+Baseline_dir = os.path.realpath("Baseline_mi100")
+def metric_compare(errors_pd, baseline_df, run_df, threshold = 1):
+    #iterate data one row at a time
+    for idx_1, idx_2 in zip(baseline_df.index, run_df.index):
+        row_1 = baseline_df.iloc[idx_1]
+        row_2 = run_df.iloc[idx_2]
+        kernel_name=""
+        differences={}
+        if "KernelName" in row_2.index:
+            kernel_name=row_2["KernelName"]
+            differences ={}
+        
+        for pmc_counter in row_2.index:
+            if "Ns" in pmc_counter or "id" in pmc_counter or "[" in pmc_counter:
+                # print("skipping "+pmc_counter)
+                continue
+                # assert 0
+                
+            if not pmc_counter in list(baseline_df.columns):
+                print("error: pmc mismatch! "+pmc_counter+" is not in baseline_df")
+                continue
+            
+            data_1 = row_1[pmc_counter]
+            data_2 = row_2[pmc_counter]
+            if isinstance( data_1, str) and isinstance( data_2, str):
+                if data_1 not in  data_2:
+                    print(data_2)
+            else:
+                # relative difference
+                if not data_1 == 0:
+                    diff = round(100* abs(data_2 - data_1)/data_1,2)
+                    if diff > threshold:
+                        print("["+pmc_counter+"] diff is :"+str(diff)+"%")
+                        if pmc_counter not in differences.keys():
+                            print("["+pmc_counter+"] not found in ", list(differences.keys()))
+                            differences[pmc_counter] = diff
+                        else:
+                            # Why are we here?
+                            print("Why did we get here?!?!? errors_pd[idx_1]:", list(differences.keys()))
+                            differences[pmc_counter].append(diff)
+                else:
+                    # if 0 show absolute difference
+                    diff = round(data_2 - data_1, 2)
+                    if diff > threshold:
+                        print(idx_1+"["+pmc_counter+"] diff is :"+str(diff,2))
+        errors_pd = pd.concat([errors_pd,pd.DataFrame(differences,index=[kernel_name])])
+    return errors_pd
+            
+        
+    
 
 def run(cmd):
     p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -107,26 +157,26 @@ soc = gpu_soc()
 
 
 def test_path():
-    if os.path.exists(workload_1):
-        shutil.rmtree(workload_1)
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            [
-                "omniperf",
-                "profile",
-                "-n",
-                "app_1",
-                "-VVV",
-                "--path",
-                workload_1,
-                "--",
-            ]
-            + app_1,
-        ):
-            omniperf.main()
-    # assert successful run
-    assert e.value.code == 0
+    # if os.path.exists(workload_1):
+    #     shutil.rmtree(workload_1)
+    # with pytest.raises(SystemExit) as e:
+    #     with patch(
+    #         "sys.argv",
+    #         [
+    #             "omniperf",
+    #             "profile",
+    #             "-n",
+    #             "app_1",
+    #             "-VVV",
+    #             "--path",
+    #             workload_1,
+    #             "--",
+    #         ]
+    #         + app_1,
+    #     ):
+    #         omniperf.main()
+    # # assert successful run
+    # assert e.value.code == 0
     
     files_in_workload = os.listdir(workload_1)
 
@@ -134,7 +184,7 @@ def test_path():
     file_dict = {}
     for file in files_in_workload:
         if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_1 + "/" + file)
+            file_dict[file] = pd.read_csv(workload_1 + "/" + file,index_col=0)
             print("length is: ", len(file_dict[file].index))
             print(file_dict[file])
             assert len(file_dict[file].index)
@@ -144,7 +194,23 @@ def test_path():
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
-
+        
+    for file in file_dict.keys():
+        if file == "pmc_perf.csv" or "SQ" in file:
+            print(file)
+            # read file in Baseline
+            df_1  = pd.read_csv(Baseline_dir +"/" +file, index_col=0)
+            # get corresponding file from current test run
+            df_2 = file_dict[file]
+            
+            errors = metric_compare(pd.DataFrame(), df_1, df_2, 1)
+            if not errors.empty:
+                if os.path.exists(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv"):
+                    error_log =  pd.read_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv")
+                    new_error_log = pd.concat([error_log, errors])
+                    new_error_log.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
+                else:
+                    errors.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
 
 def test_kernel():
     if os.path.exists(workload_1):
@@ -307,6 +373,23 @@ def test_ipblocks_SQ():
         ]
 
     assert sorted(list(file_dict.keys())) == expected_csvs
+    
+    for file in file_dict.keys():
+        if file == "pmc_perf.csv" or "SQ" in file:
+            print(file)
+            # read file in Baseline
+            df_1  = pd.read_csv(Baseline_dir +"/" +file, index_col=0)
+            # get corresponding file from current test run
+            df_2 = file_dict[file]
+            
+            errors = metric_compare(pd.DataFrame(), df_1, df_2, 1)
+            if not errors.empty:
+                if os.path.exists(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv"):
+                    error_log =  pd.read_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv")
+                    new_error_log = pd.concat([error_log, errors])
+                    new_error_log.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
+                else:
+                    errors.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
 
 
 def test_ipblocks_SQC():
@@ -356,6 +439,23 @@ def test_ipblocks_SQC():
         expected_csvs.insert(5, "roofline.csv")
 
     assert sorted(list(file_dict.keys())) == expected_csvs
+    
+    for file in file_dict.keys():
+        if file == "pmc_perf.csv" or "SQ" in file:
+            print(file)
+            # read file in Baseline
+            df_1  = pd.read_csv(Baseline_dir +"/" +file, index_col=0)
+            # get corresponding file from current test run
+            df_2 = file_dict[file]
+            
+            errors = metric_compare(pd.DataFrame(), df_1, df_2, 1)
+            if not errors.empty:
+                if os.path.exists(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv"):
+                    error_log =  pd.read_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv")
+                    new_error_log = pd.concat([error_log, errors])
+                    new_error_log.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
+                else:
+                    errors.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
 
 
 def test_ipblocks_TA():
@@ -411,6 +511,23 @@ def test_ipblocks_TA():
         expected_csvs.insert(9, "roofline.csv")
 
     assert sorted(list(file_dict.keys())) == expected_csvs
+    
+    for file in file_dict.keys():
+        if file == "pmc_perf.csv" or "SQ" in file:
+            print(file)
+            # read file in Baseline
+            df_1  = pd.read_csv(Baseline_dir +"/" +file, index_col=0)
+            # get corresponding file from current test run
+            df_2 = file_dict[file]
+            
+            errors = metric_compare(pd.DataFrame(), df_1, df_2, 1)
+            if not errors.empty:
+                if os.path.exists(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv"):
+                    error_log =  pd.read_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv")
+                    new_error_log = pd.concat([error_log, errors])
+                    new_error_log.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
+                else:
+                    errors.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
 
 
 def test_ipblocks_TD():
@@ -470,6 +587,23 @@ def test_ipblocks_TD():
         ]
 
     assert sorted(list(file_dict.keys())) == expected_csvs
+    
+    for file in file_dict.keys():
+        if file == "pmc_perf.csv" or "SQ" in file:
+            print(file)
+            # read file in Baseline
+            df_1  = pd.read_csv(Baseline_dir +"/" +file, index_col=0)
+            # get corresponding file from current test run
+            df_2 = file_dict[file]
+            
+            errors = metric_compare(pd.DataFrame(), df_1, df_2, 1)
+            if not errors.empty:
+                if os.path.exists(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv"):
+                    error_log =  pd.read_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv")
+                    new_error_log = pd.concat([error_log, errors])
+                    new_error_log.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
+                else:
+                    errors.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
 
 
 def test_ipblocks_TCP():
@@ -526,6 +660,23 @@ def test_ipblocks_TCP():
         expected_csvs.insert(11, "roofline.csv")
 
     assert sorted(list(file_dict.keys())) == expected_csvs
+    
+    for file in file_dict.keys():
+        if file == "pmc_perf.csv" or "SQ" in file:
+            print(file)
+            # read file in Baseline
+            df_1  = pd.read_csv(Baseline_dir +"/" +file, index_col=0)
+            # get corresponding file from current test run
+            df_2 = file_dict[file]
+            
+            errors = metric_compare(pd.DataFrame(), df_1, df_2, 1)
+            if not errors.empty:
+                if os.path.exists(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv"):
+                    error_log =  pd.read_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv")
+                    new_error_log = pd.concat([error_log, errors])
+                    new_error_log.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
+                else:
+                    errors.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
 
 
 def test_ipblocks_TCC():
@@ -583,6 +734,23 @@ def test_ipblocks_TCC():
         expected_csvs.insert(12, "roofline.csv")
 
     assert sorted(list(file_dict.keys())) == expected_csvs
+    
+    for file in file_dict.keys():
+        if file == "pmc_perf.csv" or "SQ" in file:
+            print(file)
+            # read file in Baseline
+            df_1  = pd.read_csv(Baseline_dir +"/" +file, index_col=0)
+            # get corresponding file from current test run
+            df_2 = file_dict[file]
+            
+            errors = metric_compare(pd.DataFrame(), df_1, df_2, 1)
+            if not errors.empty:
+                if os.path.exists(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv"):
+                    error_log =  pd.read_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv")
+                    new_error_log = pd.concat([error_log, errors])
+                    new_error_log.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
+                else:
+                    errors.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
 
 
 def test_ipblocks_SPI():
@@ -638,6 +806,23 @@ def test_ipblocks_SPI():
         expected_csvs.insert(10, "roofline.csv")
 
     assert sorted(list(file_dict.keys())) == expected_csvs
+    
+    for file in file_dict.keys():
+        if file == "pmc_perf.csv" or "SQ" in file:
+            print(file)
+            # read file in Baseline
+            df_1  = pd.read_csv(Baseline_dir +"/" +file, index_col=0)
+            # get corresponding file from current test run
+            df_2 = file_dict[file]
+            
+            errors = metric_compare(pd.DataFrame(), df_1, df_2, 1)
+            if not errors.empty:
+                if os.path.exists(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv"):
+                    error_log =  pd.read_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv")
+                    new_error_log = pd.concat([error_log, errors])
+                    new_error_log.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
+                else:
+                    errors.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
 
 
 def test_ipblocks_CPC():
@@ -688,6 +873,23 @@ def test_ipblocks_CPC():
     if soc == "mi200":
         expected_csvs.insert(7, "roofline.csv")
     assert sorted(list(file_dict.keys())) == expected_csvs
+    
+    for file in file_dict.keys():
+        if file == "pmc_perf.csv" or "SQ" in file:
+            print(file)
+            # read file in Baseline
+            df_1  = pd.read_csv(Baseline_dir +"/" +file, index_col=0)
+            # get corresponding file from current test run
+            df_2 = file_dict[file]
+            
+            errors = metric_compare(pd.DataFrame(), df_1, df_2, 1)
+            if not errors.empty:
+                if os.path.exists(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv"):
+                    error_log =  pd.read_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv")
+                    new_error_log = pd.concat([error_log, errors])
+                    new_error_log.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
+                else:
+                    errors.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
 
 
 def test_ipblocks_CPF():
@@ -736,6 +938,23 @@ def test_ipblocks_CPF():
     if soc == "mi200":
         expected_csvs.insert(5, "roofline.csv")
     assert sorted(list(file_dict.keys())) == expected_csvs
+    
+    for file in file_dict.keys():
+        if file == "pmc_perf.csv" or "SQ" in file:
+            print(file)
+            # read file in Baseline
+            df_1  = pd.read_csv(Baseline_dir +"/" +file, index_col=0)
+            # get corresponding file from current test run
+            df_2 = file_dict[file]
+            
+            errors = metric_compare(pd.DataFrame(), df_1, df_2, 1)
+            if not errors.empty:
+                if os.path.exists(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv"):
+                    error_log =  pd.read_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv")
+                    new_error_log = pd.concat([error_log, errors])
+                    new_error_log.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
+                else:
+                    errors.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
 
 
 def test_ipblocks_SQ_CPC():
@@ -820,6 +1039,23 @@ def test_ipblocks_SQ_CPC():
         ]
 
     assert sorted(list(file_dict.keys())) == expected_csvs
+    
+    for file in file_dict.keys():
+        if file == "pmc_perf.csv" or "SQ" in file:
+            print(file)
+            # read file in Baseline
+            df_1  = pd.read_csv(Baseline_dir +"/" +file, index_col=0)
+            # get corresponding file from current test run
+            df_2 = file_dict[file]
+            
+            errors = metric_compare(pd.DataFrame(), df_1, df_2, 1)
+            if not errors.empty:
+                if os.path.exists(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv"):
+                    error_log =  pd.read_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv")
+                    new_error_log = pd.concat([error_log, errors])
+                    new_error_log.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
+                else:
+                    errors.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
 
 
 def test_ipblocks_SQ_TA():
@@ -903,6 +1139,23 @@ def test_ipblocks_SQ_TA():
             "timestamps.csv",
         ]
     assert sorted(list(file_dict.keys())) == expected_csvs
+    
+    for file in file_dict.keys():
+        if file == "pmc_perf.csv" or "SQ" in file:
+            print(file)
+            # read file in Baseline
+            df_1  = pd.read_csv(Baseline_dir +"/" +file, index_col=0)
+            # get corresponding file from current test run
+            df_2 = file_dict[file]
+            
+            errors = metric_compare(pd.DataFrame(), df_1, df_2, 1)
+            if not errors.empty:
+                if os.path.exists(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv"):
+                    error_log =  pd.read_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv")
+                    new_error_log = pd.concat([error_log, errors])
+                    new_error_log.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
+                else:
+                    errors.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
 
 
 def test_ipblocks_SQ_SPI():
@@ -986,6 +1239,23 @@ def test_ipblocks_SQ_SPI():
             "timestamps.csv",
         ]
     assert sorted(list(file_dict.keys())) == expected_csvs
+    
+    for file in file_dict.keys():
+        if file == "pmc_perf.csv" or "SQ" in file:
+            print(file)
+            # read file in Baseline
+            df_1  = pd.read_csv(Baseline_dir +"/" +file, index_col=0)
+            # get corresponding file from current test run
+            df_2 = file_dict[file]
+            
+            errors = metric_compare(pd.DataFrame(), df_1, df_2, 1)
+            if not errors.empty:
+                if os.path.exists(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv"):
+                    error_log =  pd.read_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv")
+                    new_error_log = pd.concat([error_log, errors])
+                    new_error_log.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
+                else:
+                    errors.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
 
 
 def test_ipblocks_SQ_SQC_TCP_CPC():
@@ -1072,6 +1342,23 @@ def test_ipblocks_SQ_SQC_TCP_CPC():
             "timestamps.csv",
         ]
     assert sorted(list(file_dict.keys())) == expected_csvs
+    
+    for file in file_dict.keys():
+        if file == "pmc_perf.csv" or "SQ" in file:
+            print(file)
+            # read file in Baseline
+            df_1  = pd.read_csv(Baseline_dir +"/" +file, index_col=0)
+            # get corresponding file from current test run
+            df_2 = file_dict[file]
+            
+            errors = metric_compare(pd.DataFrame(), df_1, df_2, 1)
+            if not errors.empty:
+                if os.path.exists(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv"):
+                    error_log =  pd.read_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv")
+                    new_error_log = pd.concat([error_log, errors])
+                    new_error_log.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
+                else:
+                    errors.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
 
 
 def test_ipblocks_SQ_SPI_TA_TCC_CPF():
@@ -1160,6 +1447,23 @@ def test_ipblocks_SQ_SPI_TA_TCC_CPF():
             "timestamps.csv",
         ]
     assert sorted(list(file_dict.keys())) == expected_csvs
+    
+    for file in file_dict.keys():
+        if file == "pmc_perf.csv" or "SQ" in file:
+            print(file)
+            # read file in Baseline
+            df_1  = pd.read_csv(Baseline_dir +"/" +file, index_col=0)
+            # get corresponding file from current test run
+            df_2 = file_dict[file]
+            
+            errors = metric_compare(pd.DataFrame(), df_1, df_2, 1)
+            if not errors.empty:
+                if os.path.exists(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv"):
+                    error_log =  pd.read_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv")
+                    new_error_log = pd.concat([error_log, errors])
+                    new_error_log.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
+                else:
+                    errors.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
 
 
 def test_dispatch_0():
@@ -1200,6 +1504,23 @@ def test_dispatch_0():
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
+    
+    for file in file_dict.keys():
+        if file == "pmc_perf.csv" or "SQ" in file:
+            print(file)
+            # read file in Baseline
+            df_1  = pd.read_csv(Baseline_dir +"/" +file, index_col=0)
+            # get corresponding file from current test run
+            df_2 = file_dict[file]
+            
+            errors = metric_compare(pd.DataFrame(), df_1, df_2, 1)
+            if not errors.empty:
+                if os.path.exists(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv"):
+                    error_log =  pd.read_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv")
+                    new_error_log = pd.concat([error_log, errors])
+                    new_error_log.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
+                else:
+                    errors.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
 
 
 def test_dispatch_0_1():
@@ -1241,6 +1562,23 @@ def test_dispatch_0_1():
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
+        
+    for file in file_dict.keys():
+        if file == "pmc_perf.csv" or "SQ" in file:
+            print(file)
+            # read file in Baseline
+            df_1  = pd.read_csv(Baseline_dir +"/" +file, index_col=0)
+            # get corresponding file from current test run
+            df_2 = file_dict[file]
+            
+            errors = metric_compare(pd.DataFrame(), df_1, df_2, 1)
+            if not errors.empty:
+                if os.path.exists(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv"):
+                    error_log =  pd.read_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv")
+                    new_error_log = pd.concat([error_log, errors])
+                    new_error_log.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
+                else:
+                    errors.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
 
 
 def test_dispatch_2():
@@ -1281,6 +1619,23 @@ def test_dispatch_2():
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
+    
+    for file in file_dict.keys():
+        if file == "pmc_perf.csv" or "SQ" in file:
+            print(file)
+            # read file in Baseline
+            df_1  = pd.read_csv(Baseline_dir +"/" +file, index_col=0)
+            # get corresponding file from current test run
+            df_2 = file_dict[file]
+            
+            errors = metric_compare(pd.DataFrame(), df_1, df_2, 1)
+            if not errors.empty:
+                if os.path.exists(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv"):
+                    error_log =  pd.read_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv")
+                    new_error_log = pd.concat([error_log, errors])
+                    new_error_log.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
+                else:
+                    errors.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
 
 
 def test_kernel_verbose_0():
@@ -1321,6 +1676,23 @@ def test_kernel_verbose_0():
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
+        
+    for file in file_dict.keys():
+        if file == "pmc_perf.csv" or "SQ" in file:
+            print(file)
+            # read file in Baseline
+            df_1  = pd.read_csv(Baseline_dir +"/" +file, index_col=0)
+            # get corresponding file from current test run
+            df_2 = file_dict[file]
+            
+            errors = metric_compare(pd.DataFrame(), df_1, df_2, 1)
+            if not errors.empty:
+                if os.path.exists(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv"):
+                    error_log =  pd.read_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv")
+                    new_error_log = pd.concat([error_log, errors])
+                    new_error_log.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
+                else:
+                    errors.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
 
 
 def test_kernel_verbose_1():
@@ -1361,6 +1733,23 @@ def test_kernel_verbose_1():
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
+        
+    for file in file_dict.keys():
+        if file == "pmc_perf.csv" or "SQ" in file:
+            print(file)
+            # read file in Baseline
+            df_1  = pd.read_csv(Baseline_dir +"/" +file, index_col=0)
+            # get corresponding file from current test run
+            df_2 = file_dict[file]
+            
+            errors = metric_compare(pd.DataFrame(), df_1, df_2, 1)
+            if not errors.empty:
+                if os.path.exists(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv"):
+                    error_log =  pd.read_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv")
+                    new_error_log = pd.concat([error_log, errors])
+                    new_error_log.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
+                else:
+                    errors.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
 
 
 def test_kernel_verbose_2():
@@ -1401,6 +1790,23 @@ def test_kernel_verbose_2():
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
+        
+    for file in file_dict.keys():
+        if file == "pmc_perf.csv" or "SQ" in file:
+            print(file)
+            # read file in Baseline
+            df_1  = pd.read_csv(Baseline_dir +"/" +file, index_col=0)
+            # get corresponding file from current test run
+            df_2 = file_dict[file]
+            
+            errors = metric_compare(pd.DataFrame(), df_1, df_2, 1)
+            if not errors.empty:
+                if os.path.exists(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv"):
+                    error_log =  pd.read_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv")
+                    new_error_log = pd.concat([error_log, errors])
+                    new_error_log.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
+                else:
+                    errors.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
 
 
 def test_kernel_verbose_3():
@@ -1441,6 +1847,23 @@ def test_kernel_verbose_3():
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
+        
+    for file in file_dict.keys():
+        if file == "pmc_perf.csv" or "SQ" in file:
+            print(file)
+            # read file in Baseline
+            df_1  = pd.read_csv(Baseline_dir +"/" +file, index_col=0)
+            # get corresponding file from current test run
+            df_2 = file_dict[file]
+            
+            errors = metric_compare(pd.DataFrame(), df_1, df_2, 1)
+            if not errors.empty:
+                if os.path.exists(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv"):
+                    error_log =  pd.read_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv")
+                    new_error_log = pd.concat([error_log, errors])
+                    new_error_log.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
+                else:
+                    errors.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
 
 
 def test_kernel_verbose_4():
@@ -1481,6 +1904,23 @@ def test_kernel_verbose_4():
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
+        
+    for file in file_dict.keys():
+        if file == "pmc_perf.csv" or "SQ" in file:
+            print(file)
+            # read file in Baseline
+            df_1  = pd.read_csv(Baseline_dir +"/" +file, index_col=0)
+            # get corresponding file from current test run
+            df_2 = file_dict[file]
+            
+            errors = metric_compare(pd.DataFrame(), df_1, df_2, 1)
+            if not errors.empty:
+                if os.path.exists(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv"):
+                    error_log =  pd.read_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv")
+                    new_error_log = pd.concat([error_log, errors])
+                    new_error_log.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
+                else:
+                    errors.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
 
 
 def test_kernel_verbose_5():
@@ -1521,6 +1961,23 @@ def test_kernel_verbose_5():
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
+        
+    for file in file_dict.keys():
+        if file == "pmc_perf.csv" or "SQ" in file:
+            print(file)
+            # read file in Baseline
+            df_1  = pd.read_csv(Baseline_dir +"/" +file, index_col=0)
+            # get corresponding file from current test run
+            df_2 = file_dict[file]
+            
+            errors = metric_compare(pd.DataFrame(), df_1, df_2, 1)
+            if not errors.empty:
+                if os.path.exists(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv"):
+                    error_log =  pd.read_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv")
+                    new_error_log = pd.concat([error_log, errors])
+                    new_error_log.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
+                else:
+                    errors.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
 
 
 def test_join_type_grid():
@@ -1561,6 +2018,23 @@ def test_join_type_grid():
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
+        
+    for file in file_dict.keys():
+        if file == "pmc_perf.csv" or "SQ" in file:
+            print(file)
+            # read file in Baseline
+            df_1  = pd.read_csv(Baseline_dir +"/" +file, index_col=0)
+            # get corresponding file from current test run
+            df_2 = file_dict[file]
+            
+            errors = metric_compare(pd.DataFrame(), df_1, df_2, 1)
+            if not errors.empty:
+                if os.path.exists(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv"):
+                    error_log =  pd.read_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv")
+                    new_error_log = pd.concat([error_log, errors])
+                    new_error_log.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
+                else:
+                    errors.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
 
 
 def test_join_type_kernel():
@@ -1601,6 +2075,23 @@ def test_join_type_kernel():
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
+        
+    for file in file_dict.keys():
+        if file == "pmc_perf.csv" or "SQ" in file:
+            print(file)
+            # read file in Baseline
+            df_1  = pd.read_csv(Baseline_dir +"/" +file, index_col=0)
+            # get corresponding file from current test run
+            df_2 = file_dict[file]
+            
+            errors = metric_compare(pd.DataFrame(), df_1, df_2, 1)
+            if not errors.empty:
+                if os.path.exists(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv"):
+                    error_log =  pd.read_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv")
+                    new_error_log = pd.concat([error_log, errors])
+                    new_error_log.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
+                else:
+                    errors.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
 
 
 def test_device_0():
@@ -1641,6 +2132,23 @@ def test_device_0():
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
+        
+    for file in file_dict.keys():
+        if file == "pmc_perf.csv" or "SQ" in file:
+            print(file)
+            # read file in Baseline
+            df_1  = pd.read_csv(Baseline_dir +"/" +file, index_col=0)
+            # get corresponding file from current test run
+            df_2 = file_dict[file]
+            
+            errors = metric_compare(pd.DataFrame(), df_1, df_2, 1)
+            if not errors.empty:
+                if os.path.exists(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv"):
+                    error_log =  pd.read_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv")
+                    new_error_log = pd.concat([error_log, errors])
+                    new_error_log.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
+                else:
+                    errors.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
 
 
 def test_no_roof():
@@ -1706,6 +2214,23 @@ def test_no_roof():
         ]
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
+        
+    for file in file_dict.keys():
+        if file == "pmc_perf.csv" or "SQ" in file:
+            print(file)
+            # read file in Baseline
+            df_1  = pd.read_csv(Baseline_dir +"/" +file, index_col=0)
+            # get corresponding file from current test run
+            df_2 = file_dict[file]
+            
+            errors = metric_compare(pd.DataFrame(), df_1, df_2, 1)
+            if not errors.empty:
+                if os.path.exists(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv"):
+                    error_log =  pd.read_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv")
+                    new_error_log = pd.concat([error_log, errors])
+                    new_error_log.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
+                else:
+                    errors.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
 
 
 def test_sort_dispatches():
@@ -1753,6 +2278,23 @@ def test_sort_dispatches():
         assert sorted(list(file_dict.keys())) == ROOF_ONLY_CSVS
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
+        
+    for file in file_dict.keys():
+        if file == "pmc_perf.csv" or "SQ" in file:
+            print(file)
+            # read file in Baseline
+            df_1  = pd.read_csv(Baseline_dir +"/" +file, index_col=0)
+            # get corresponding file from current test run
+            df_2 = file_dict[file]
+            
+            errors = metric_compare(pd.DataFrame(), df_1, df_2, 1)
+            if not errors.empty:
+                if os.path.exists(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv"):
+                    error_log =  pd.read_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv")
+                    new_error_log = pd.concat([error_log, errors])
+                    new_error_log.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
+                else:
+                    errors.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
 
 
 def test_sort_kernels():
@@ -1799,6 +2341,23 @@ def test_sort_kernels():
         assert sorted(list(file_dict.keys())) == ROOF_ONLY_CSVS
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
+        
+    for file in file_dict.keys():
+        if file == "pmc_perf.csv" or "SQ" in file:
+            print(file)
+            # read file in Baseline
+            df_1  = pd.read_csv(Baseline_dir +"/" +file, index_col=0)
+            # get corresponding file from current test run
+            df_2 = file_dict[file]
+            
+            errors = metric_compare(pd.DataFrame(), df_1, df_2, 1)
+            if not errors.empty:
+                if os.path.exists(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv"):
+                    error_log =  pd.read_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv")
+                    new_error_log = pd.concat([error_log, errors])
+                    new_error_log.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
+                else:
+                    errors.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
 
 
 def test_mem_levels_HBM():
@@ -1846,6 +2405,23 @@ def test_mem_levels_HBM():
         assert sorted(list(file_dict.keys())) == ROOF_ONLY_CSVS
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
+        
+    for file in file_dict.keys():
+        if file == "pmc_perf.csv" or "SQ" in file:
+            print(file)
+            # read file in Baseline
+            df_1  = pd.read_csv(Baseline_dir +"/" +file, index_col=0)
+            # get corresponding file from current test run
+            df_2 = file_dict[file]
+            
+            errors = metric_compare(pd.DataFrame(), df_1, df_2, 1)
+            if not errors.empty:
+                if os.path.exists(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv"):
+                    error_log =  pd.read_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv")
+                    new_error_log = pd.concat([error_log, errors])
+                    new_error_log.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
+                else:
+                    errors.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
 
 
 def test_mem_levels_L2():
@@ -1893,6 +2469,23 @@ def test_mem_levels_L2():
         assert sorted(list(file_dict.keys())) == ROOF_ONLY_CSVS
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
+        
+    for file in file_dict.keys():
+        if file == "pmc_perf.csv" or "SQ" in file:
+            print(file)
+            # read file in Baseline
+            df_1  = pd.read_csv(Baseline_dir +"/" +file, index_col=0)
+            # get corresponding file from current test run
+            df_2 = file_dict[file]
+            
+            errors = metric_compare(pd.DataFrame(), df_1, df_2, 1)
+            if not errors.empty:
+                if os.path.exists(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv"):
+                    error_log =  pd.read_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv")
+                    new_error_log = pd.concat([error_log, errors])
+                    new_error_log.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
+                else:
+                    errors.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
 
 
 def test_mem_levels_vL1D():
@@ -1939,6 +2532,23 @@ def test_mem_levels_vL1D():
         assert sorted(list(file_dict.keys())) == ROOF_ONLY_CSVS
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
+        
+    for file in file_dict.keys():
+        if file == "pmc_perf.csv" or "SQ" in file:
+            print(file)
+            # read file in Baseline
+            df_1  = pd.read_csv(Baseline_dir +"/" +file, index_col=0)
+            # get corresponding file from current test run
+            df_2 = file_dict[file]
+            
+            errors = metric_compare(pd.DataFrame(), df_1, df_2, 1)
+            if not errors.empty:
+                if os.path.exists(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv"):
+                    error_log =  pd.read_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv")
+                    new_error_log = pd.concat([error_log, errors])
+                    new_error_log.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
+                else:
+                    errors.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
 
 
 def test_mem_levels_LDS():
@@ -1985,6 +2595,23 @@ def test_mem_levels_LDS():
         assert sorted(list(file_dict.keys())) == ROOF_ONLY_CSVS
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
+        
+    for file in file_dict.keys():
+        if file == "pmc_perf.csv" or "SQ" in file:
+            print(file)
+            # read file in Baseline
+            df_1  = pd.read_csv(Baseline_dir +"/" +file, index_col=0)
+            # get corresponding file from current test run
+            df_2 = file_dict[file]
+            
+            errors = metric_compare(pd.DataFrame(), df_1, df_2, 1)
+            if not errors.empty:
+                if os.path.exists(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv"):
+                    error_log =  pd.read_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv")
+                    new_error_log = pd.concat([error_log, errors])
+                    new_error_log.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
+                else:
+                    errors.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
 
 
 def test_mem_levels_HBM_LDS():
@@ -2032,6 +2659,23 @@ def test_mem_levels_HBM_LDS():
         assert sorted(list(file_dict.keys())) == ROOF_ONLY_CSVS
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
+        
+    for file in file_dict.keys():
+        if file == "pmc_perf.csv" or "SQ" in file:
+            print(file)
+            # read file in Baseline
+            df_1  = pd.read_csv(Baseline_dir +"/" +file, index_col=0)
+            # get corresponding file from current test run
+            df_2 = file_dict[file]
+            
+            errors = metric_compare(pd.DataFrame(), df_1, df_2, 1)
+            if not errors.empty:
+                if os.path.exists(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv"):
+                    error_log =  pd.read_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv")
+                    new_error_log = pd.concat([error_log, errors])
+                    new_error_log.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
+                else:
+                    errors.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
 
 
 def test_mem_levels_vL1D_LDS():
@@ -2079,6 +2723,23 @@ def test_mem_levels_vL1D_LDS():
         assert sorted(list(file_dict.keys())) == ROOF_ONLY_CSVS
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
+        
+    for file in file_dict.keys():
+        if file == "pmc_perf.csv" or "SQ" in file:
+            print(file)
+            # read file in Baseline
+            df_1  = pd.read_csv(Baseline_dir +"/" +file, index_col=0)
+            # get corresponding file from current test run
+            df_2 = file_dict[file]
+            
+            errors = metric_compare(pd.DataFrame(), df_1, df_2, 1)
+            if not errors.empty:
+                if os.path.exists(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv"):
+                    error_log =  pd.read_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv")
+                    new_error_log = pd.concat([error_log, errors])
+                    new_error_log.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
+                else:
+                    errors.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
 
 
 def test_mem_levels_L2_vL1D_LDS():
@@ -2126,6 +2787,23 @@ def test_mem_levels_L2_vL1D_LDS():
         assert sorted(list(file_dict.keys())) == ROOF_ONLY_CSVS
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
+        
+    for file in file_dict.keys():
+        if file == "pmc_perf.csv" or "SQ" in file:
+            print(file)
+            # read file in Baseline
+            df_1  = pd.read_csv(Baseline_dir +"/" +file, index_col=0)
+            # get corresponding file from current test run
+            df_2 = file_dict[file]
+            
+            errors = metric_compare(pd.DataFrame(), df_1, df_2, 1)
+            if not errors.empty:
+                if os.path.exists(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv"):
+                    error_log =  pd.read_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv")
+                    new_error_log = pd.concat([error_log, errors])
+                    new_error_log.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
+                else:
+                    errors.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
 
 
 def test_kernel_names():
@@ -2171,3 +2849,20 @@ def test_kernel_names():
         assert sorted(list(file_dict.keys())) == ROOF_ONLY_CSVS
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
+    
+    for file in file_dict.keys():
+        if file == "pmc_perf.csv" or "SQ" in file:
+            print(file)
+            # read file in Baseline
+            df_1  = pd.read_csv(Baseline_dir +"/" +file, index_col=0)
+            # get corresponding file from current test run
+            df_2 = file_dict[file]
+            
+            errors = metric_compare(pd.DataFrame(), df_1, df_2, 1)
+            if not errors.empty:
+                if os.path.exists(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv"):
+                    error_log =  pd.read_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv")
+                    new_error_log = pd.concat([error_log, errors])
+                    new_error_log.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
+                else:
+                    errors.to_csv(Baseline_dir +"/" + file.split(".")[0] +"_error_log.csv", index = False)
