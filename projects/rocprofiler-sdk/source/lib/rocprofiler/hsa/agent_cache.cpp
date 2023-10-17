@@ -28,6 +28,11 @@
 #include "lib/common/synchronized.hpp"
 #include "lib/common/utility.hpp"
 
+// For Pre-ROCm 6.0 releases
+#ifndef HSA_AMD_AGENT_INFO_NEAREST_CPU
+#    define HSA_AMD_AGENT_INFO_NEAREST_CPU 0xA113
+#endif
+
 namespace
 {
 // This function checks to see if the provided
@@ -93,14 +98,18 @@ init_cpu_pool(const AmdExtTable& api, rocprofiler::hsa::AgentCache& agent)
 
     auto status =
         api.hsa_amd_agent_iterate_memory_pools_fn(agent.near_cpu(), FindStandardPool, &params);
-    LOG_IF(FATAL, status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK)
-        << "Error: Command Buffer Pool is not initialized";
+    if(status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK)
+    {
+        throw std::runtime_error("Error: Command Buffer Pool is not initialized");
+    }
 
     params.second = &agent.kernarg_pool();
     status =
         api.hsa_amd_agent_iterate_memory_pools_fn(agent.near_cpu(), FindKernArgPool, &(params));
-    LOG_IF(FATAL, status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK)
-        << "Error: Output Buffer Pool is not initialized";
+    if(status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK)
+    {
+        throw std::runtime_error("Error: Output Buffer Pool is not initialized");
+    }
 }
 
 void
@@ -111,8 +120,10 @@ init_gpu_pool(const AmdExtTable& api, rocprofiler::hsa::AgentCache& agent)
     auto status =
         api.hsa_amd_agent_iterate_memory_pools_fn(agent.get_agent(), FindStandardPool, &params);
 
-    LOG_IF(FATAL, status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK)
-        << "Error: GPU Pool is not initialized";
+    if(status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK)
+    {
+        throw std::runtime_error("Error: GPU Pool is not initialized");
+    }
 }
 
 }  // namespace
@@ -174,8 +185,7 @@ AgentCache::AgentCache(rocprofiler_agent_t   agent_t,
                static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NEAREST_CPU),
                &_nearest_cpu) != HSA_STATUS_SUCCESS)
         {
-            if(!last_cpu) throw std::runtime_error("HSA_AMD_AGENT_INFO_NEAREST_CPU failed!");
-            _nearest_cpu = *last_cpu;
+            _nearest_cpu = last_cpu ? *last_cpu : hsa_agent_t{.handle = 0};
         }
 
         found  = true;
@@ -188,8 +198,18 @@ AgentCache::AgentCache(rocprofiler_agent_t   agent_t,
     }
 
     // Construct CPU/GPU pools
-    init_cpu_pool(ext, *this);
-    init_gpu_pool(ext, *this);
+
+    try
+    {
+        init_cpu_pool(ext, *this);
+        init_gpu_pool(ext, *this);
+    } catch(std::runtime_error& e)
+    {
+        LOG(WARNING) << fmt::format(
+            "Buffer creation for Agent {} failed ({}), Some profiling options will be unavialable.",
+            agent_t.id.handle,
+            e.what());
+    }
 }
 
 }  // namespace hsa
