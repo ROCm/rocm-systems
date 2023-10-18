@@ -159,7 +159,7 @@ static inline uint32_t GetTid() { return syscall(__NR_gettid); }
 uint32_t my_pid = GetPid();
 
 // Error handler
-void fatal(const std::string msg) [[noreturn]] {
+void fatal(const std::string msg) {
   fflush(stdout);
   fprintf(stderr, "%s\n\n", msg.c_str());
   fflush(stderr);

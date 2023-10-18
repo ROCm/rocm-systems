@@ -46,7 +46,7 @@ volatile bool is_loaded = false;
 // unsigned feature_count = 0;
 
 // Error handler
-void fatal(const std::string msg) [[noreturn]] {
+void fatal(const std::string msg) {
   fflush(stdout);
   fprintf(stderr, "%s\n\n", msg.c_str());
   fflush(stderr);

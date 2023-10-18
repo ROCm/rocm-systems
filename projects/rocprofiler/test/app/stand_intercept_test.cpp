@@ -39,7 +39,7 @@ THE SOFTWARE.
 pthread_mutex_t mutex = PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP;
 
 // Error handler
-void fatal(const std::string msg) [[noreturn]] {
+void fatal(const std::string msg) {
   fflush(stdout);
   fprintf(stderr, "%s\n\n", msg.c_str());
   fflush(stderr);
