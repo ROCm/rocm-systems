@@ -94,6 +94,13 @@ uint32_t GetTid() {
   return tid;
 }
 
+size_t GetBufferSize() {
+  auto bufSize = getenv("ROCTRACER_BUFFER_SIZE");
+  // Default size if not set
+  if (!bufSize) return 0x200000;
+  return std::stoll({bufSize});
+}
+
 // Tracing control thread
 uint32_t control_delay_us = 0;
 uint32_t control_len_us = 0;
@@ -217,7 +224,7 @@ struct roctx_trace_entry_t {
 };
 
 roctracer::TraceBuffer<roctx_trace_entry_t> roctx_trace_buffer(
-    "rocTX API", 0x200000, [](roctx_trace_entry_t* entry) {
+    "rocTX API", GetBufferSize(), [](roctx_trace_entry_t* entry) {
       assert(plugin && "plugin is not initialized");
       plugin->write_callback_record(&entry->record, &entry->data);
     });
@@ -258,7 +265,7 @@ struct hsa_api_trace_entry_t {
 };
 
 roctracer::TraceBuffer<hsa_api_trace_entry_t> hsa_api_trace_buffer(
-    "HSA API", 0x200000, [](hsa_api_trace_entry_t* entry) {
+    "HSA API", GetBufferSize(), [](hsa_api_trace_entry_t* entry) {
       assert(plugin && "plugin is not initialized");
       plugin->write_callback_record(&entry->record, &entry->data);
     });
@@ -397,7 +404,7 @@ static std::optional<std::string> getKernelName(uint32_t cid, const hip_api_data
 }
 
 roctracer::TraceBuffer<hip_api_trace_entry_t> hip_api_trace_buffer(
-    "HIP API", 0x200000, [](hip_api_trace_entry_t* entry) {
+    "HIP API", GetBufferSize(), [](hip_api_trace_entry_t* entry) {
       assert(plugin && "plugin is not initialized");
       plugin->write_callback_record(&entry->record, &entry->data);
     });
@@ -481,7 +488,7 @@ int get_xml_array(const xml::Xml::level_t* node, const std::string& field, const
 void open_tracing_pool() {
   if (roctracer_default_pool() == nullptr) {
     roctracer_properties_t properties{};
-    properties.buffer_size = 0x80000;
+    properties.buffer_size = GetBufferSize();
     properties.buffer_callback_fun = [](const char* begin, const char* end, void* /* arg */) {
       assert(plugin && "plugin is not initialized");
       plugin->write_activity_records(reinterpret_cast<const roctracer_record_t*>(begin),
