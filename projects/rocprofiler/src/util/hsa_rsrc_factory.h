@@ -172,6 +172,7 @@ struct AgentInfo {
   uint32_t sgpr_block_size;
   uint32_t vgpr_block_size;
   static const uint32_t lds_block_size = 128 * 4;
+  uint32_t xcc_num;
 };
 
 // HSA timer class
