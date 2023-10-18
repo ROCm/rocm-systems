@@ -167,12 +167,14 @@ store_callback_id_names(call_stack_t* tool_data)
 }
 
 void
-tool_tracing_callback(rocprofiler_callback_tracing_record_t record, void* user_data)
+tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
+                      rocprofiler_user_data_t*,
+                      void* user_data)
 {
     assert(user_data != nullptr);
 
     auto info = std::stringstream{};
-    info << "tid=" << record.thread_id << ", cid=" << record.correlation_id.id
+    info << "tid=" << record.thread_id << ", cid=" << record.correlation_id.internal
          << ", kind=" << record.kind << ", operation=" << record.operation
          << ", phase=" << record.phase;
 

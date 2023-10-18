@@ -200,8 +200,7 @@ typedef struct
 {
     rocprofiler_service_buffer_tracing_kind_t kind;
     rocprofiler_correlation_id_t              correlation_id;
-    rocprofiler_external_correlation_id_t     external_correlation_id;
-} rocprofiler_buffer_tracing_external_correlation_record_t;
+} rocprofiler_buffer_tracing_correlation_record_t;
 
 /**
  * @brief Callback function for mapping @ref rocprofiler_service_buffer_tracing_kind_t ids to

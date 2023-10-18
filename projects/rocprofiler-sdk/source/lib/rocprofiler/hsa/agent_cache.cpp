@@ -29,7 +29,7 @@
 #include "lib/common/utility.hpp"
 
 // For Pre-ROCm 6.0 releases
-#ifndef HSA_AMD_AGENT_INFO_NEAREST_CPU
+#if ROCPROFILER_HSA_RUNTIME_VERSION <= 100900
 #    define HSA_AMD_AGENT_INFO_NEAREST_CPU 0xA113
 #endif
 

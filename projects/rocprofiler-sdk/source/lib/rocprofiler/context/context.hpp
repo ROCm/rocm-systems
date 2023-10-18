@@ -27,8 +27,10 @@
 #include <rocprofiler/rocprofiler.h>
 
 #include "lib/common/container/stable_vector.hpp"
+#include "lib/common/synchronized.hpp"
 #include "lib/rocprofiler/context/domain.hpp"
 #include "lib/rocprofiler/counters/core.hpp"
+#include "lib/rocprofiler/external_correlation.hpp"
 
 #include <array>
 #include <atomic>
@@ -48,11 +50,8 @@ using external_cid_cb_t = uint64_t (*)(rocprofiler_service_callback_tracing_kind
 /// the rocprofiler generated correlation id
 struct correlation_tracing_service
 {
-    uint64_t          id                   = 0;
-    uint64_t          external_id          = 0;
-    external_cid_cb_t external_id_callback = nullptr;
-
-    static uint64_t get_unique_record_id();
+    external_correlation::external_correlation external_correlator = {};
+    static uint64_t                            get_unique_internal_id();
 };
 
 struct callback_tracing_service
@@ -85,11 +84,11 @@ struct counter_collection_service
     // Each instance is assocated with an agent and a counter collection profile.
     // Contains callback information along with other data needed to collect/process
     // counters.
-    std::vector<std::shared_ptr<rocprofiler::counters::counter_callback_info>> callbacks{};
+    std::vector<std::shared_ptr<counters::counter_callback_info>> callbacks{};
     // A flag to state wether or not the counter set is currently enabled. This is primarily
     // to protect against multithreaded calls to enable a context (and enabling already enabled
     // counters).
-    rocprofiler::common::Synchronized<bool> enabled{false};
+    common::Synchronized<bool> enabled{false};
 };
 
 struct context
@@ -135,7 +134,7 @@ start_context(rocprofiler_context_id_t id);
 rocprofiler_status_t stop_context(rocprofiler_context_id_t);
 
 using unique_context_vec_t = common::container::stable_vector<std::unique_ptr<context>, 8>;
-using active_context_vec_t = common::container::stable_vector<std::atomic<context*>, 8>;
+using active_context_vec_t = common::container::stable_vector<std::atomic<const context*>, 8>;
 
 unique_context_vec_t&
 get_registered_contexts();

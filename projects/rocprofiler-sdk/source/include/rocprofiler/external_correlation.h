@@ -37,23 +37,32 @@ ROCPROFILER_EXTERN_C_INIT
 /** @} */
 
 /**
- * @brief ROCProfiler Push External Correlation ID.
+ * @brief Push default value for `external` field in @ref rocprofiler_correlation_id_t onto stack.
  *
- * @param external_correlation_id
- * @return rocprofiler_status_t
+ * @param context [in] Associated context
+ * @param tid [in] thread identifier. @see rocprofiler_get_thread_id
+ * @param external_correlation_id [in] User data to place in external field in @ref
+ * rocprofiler_correlation_id_t
+ * @return rocprofiler_status_t Returns ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND if the context
+ * does not exist. Returns ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT if thread id is not valid.
  */
 rocprofiler_status_t ROCPROFILER_API
-rocprofiler_push_external_correlation_id(
-    rocprofiler_external_correlation_id_t external_correlation_id);
+rocprofiler_push_external_correlation_id(rocprofiler_context_id_t context,
+                                         rocprofiler_thread_id_t  tid,
+                                         rocprofiler_user_data_t  external_correlation_id);
 
 /**
- * @brief ROCProfiler Push External Correlation ID.
+ * @brief Pop default value for `external` field in @ref rocprofiler_correlation_id_t off of stack
  *
- * @param external_correlation_id
- * @return rocprofiler_status_t
+ * @param context [in] Associated context
+ * @param tid [in] thread identifier. @see rocprofiler_get_thread_id
+ * @param external_correlation_id [out] Correlation id data popped off the stack
+ * @return rocprofiler_status_t Returns ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND if the context
+ * does not exist. Returns ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT if thread id is not valid.
  */
 rocprofiler_status_t ROCPROFILER_API
-rocprofiler_pop_external_correlation_id(
-    rocprofiler_external_correlation_id_t* external_correlation_id);
+rocprofiler_pop_external_correlation_id(rocprofiler_context_id_t context,
+                                        rocprofiler_thread_id_t  tid,
+                                        rocprofiler_user_data_t* external_correlation_id);
 
 ROCPROFILER_EXTERN_C_FINI

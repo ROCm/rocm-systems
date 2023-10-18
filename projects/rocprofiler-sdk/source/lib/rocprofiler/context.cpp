@@ -65,7 +65,7 @@ rocprofiler_context_is_active(rocprofiler_context_id_t context_id, int* status)
     *status = 0;
     for(const auto& itr : rocprofiler::context::get_active_contexts())
     {
-        auto* cfg = itr.load(std::memory_order_relaxed);
+        const auto* cfg = itr.load(std::memory_order_relaxed);
         if(cfg && cfg->context_idx == context_id.handle)
         {
             *status = 1;

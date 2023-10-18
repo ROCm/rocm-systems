@@ -97,6 +97,32 @@ ROCPROFILER_EXTERN_C_INIT
 rocprofiler_status_t
 rocprofiler_get_timestamp(rocprofiler_timestamp_t* ts) ROCPROFILER_API ROCPROFILER_NONNULL(1);
 
+/**
+ * @fn rocprofiler_status_t rocprofiler_get_thread_id(rocprofiler_thread_id_t* tid)
+ * @brief Get the identifier value of the current thread that is used by rocprofiler
+ * @param [out] tid Output address of the rocprofiler thread id value
+ */
+rocprofiler_status_t
+rocprofiler_get_thread_id(rocprofiler_thread_id_t* tid) ROCPROFILER_API ROCPROFILER_NONNULL(1);
+
+/**
+ * @fn const char* rocprofiler_get_status_name(rocprofiler_status_t status)
+ * @brief Return the string encoding of @ref rocprofiler_status_t value
+ * @param [in] status error code value
+ * @return Will return a nullptr if invalid/unsupported @ref rocprofiler_status_t value is provided.
+ */
+const char*
+rocprofiler_get_status_name(rocprofiler_status_t status) ROCPROFILER_API;
+
+/**
+ * @fn const char* rocprofiler_get_status_string(rocprofiler_status_t status)
+ * @brief Return the message associated with @ref rocprofiler_status_t value
+ * @param [in] status error code value
+ * @return Will return a nullptr if invalid/unsupported @ref rocprofiler_status_t value is provided.
+ */
+const char*
+rocprofiler_get_status_string(rocprofiler_status_t status) ROCPROFILER_API;
+
 /** @} */
 
 ROCPROFILER_EXTERN_C_FINI

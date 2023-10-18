@@ -132,10 +132,26 @@ typedef struct
 } rocprofiler_callback_tracer_code_object_register_host_kernel_symbol_data_t;
 
 /**
- * @brief API Tracing callback function.
+ * @brief API Tracing callback function. This function is invoked twice per API function: once
+ * before the function is invoked and once after the function is invoked.  The external correlation
+ * id value within the record is assigned the value at the top of the external correlation id stack.
+ * It is permissible to invoke @ref rocprofiler_push_external_correlation_id within the enter phase;
+ * when a new external correlation id is pushed during the enter phase, rocprofiler will use that
+ * external correlation id for any async events and provide the new external correlation id during
+ * the exit callback... In other words, pushing a new external correlation id within the enter
+ * callback will result in that external correlation id value in the exit callback (which may or may
+ * not be different from the external correlation id value in the enter callback). If a tool pushes
+ * new external correlation ids in the enter phase, it is recommended to pop the external
+ * correlation id in the exit callback.
+ *
+ * @param record [in] Callback record data
+ * @param user_data [in,out] This paramter can be used to retain information in between the enter
+ * and exit phases.
+ * @param callback_data [in] User data provided when configuring the callback tracing service
  */
 typedef void (*rocprofiler_callback_tracing_cb_t)(rocprofiler_callback_tracing_record_t record,
-                                                  void*                                 user_data);
+                                                  rocprofiler_user_data_t*              user_data,
+                                                  void* callback_data) ROCPROFILER_NONNULL(2);
 
 /**
  * @brief Callback function for mapping @ref rocprofiler_service_callback_tracing_kind_t ids to
@@ -180,15 +196,31 @@ typedef int (*rocprofiler_callback_tracing_operation_args_cb_t)(
     void*                                       data);
 
 /**
- * @brief Configure Callback Tracing Service.
+ * @brief Configure Callback Tracing Service. The callback tracing service provides two synchronous
+ * callbacks around an API function on the same thread as the application which is invoking the API
+ * function. This function can only be invoked once per @ref
+ * rocprofiler_service_callback_tracing_kind_t value, i.e. it can be invoked once for the HSA API,
+ * once for the HIP API, and so on but it will fail if it is invoked for the HSA API twice. Please
+ * note, the callback API does have the potentially non-trivial overhead of copying the function
+ * arguments into the record. If you are willing to let rocprofiler record the timestamps, do not
+ * require synchronous notifications of the API calls, and want to lowest possible overhead, use the
+ * @see BUFFER_TRACING_SERVICE.
  *
- * @param [in] context_id
- * @param [in] kind
- * @param [in] operations
- * @param [in] operations_count
- * @param [in] callback
- * @param [in] callback_args
- * @return ::rocprofiler_status_t
+ * @param [in] context_id Context to associate the service with
+ * @param [in] kind The domain of the callback tracing service
+ * @param [in] operations Array of operations in the domain (i.e. enum values which identify
+ * specific API functions). If this is null, all API functions in the domain will be traced
+ * @param [in] operations_count If the operations array is non-null, set this to the size of the
+ * array.
+ * @param [in] callback The function to invoke before and after an API function
+ * @param [in] callback_args Data provided to every invocation of the callback function
+ * @return ::rocprofiler_status_t Will return @ref ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED if
+ * invoked outside of the initialization function in @ref rocprofiler_tool_configure_result_t
+ * provided to rocprofiler via @ref rocprofiler_configure function. Will return @ref
+ * ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND if the provided context is not valid/registered. Will
+ * return @ref ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED if the same @ref
+ * rocprofiler_service_callback_tracing_kind_t value is provided more than once (per context) -- in
+ * other words, we do not support overriding or combining the operations in separate function calls.
  *
  */
 rocprofiler_status_t ROCPROFILER_API

@@ -26,6 +26,8 @@
 #include "lib/common/environment.hpp"
 #include "lib/common/units.hpp"
 #include "lib/common/utility.hpp"
+#include "rocprofiler/external_correlation.h"
+#include "rocprofiler/fwd.h"
 
 #include <gtest/gtest.h>
 
@@ -35,10 +37,13 @@
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
+#include <map>
+#include <mutex>
 #include <random>
 #include <sstream>
 #include <string_view>
 #include <typeinfo>
+#include <unordered_map>
 #include <vector>
 
 #define ROCPROFILER_CALL(ARG, MSG)                                                                 \
@@ -51,15 +56,16 @@ namespace
 {
 struct callback_data
 {
-    rocprofiler_client_id_t*      client_id             = nullptr;
-    rocprofiler_client_finalize_t client_fini_func      = nullptr;
-    rocprofiler_context_id_t      client_ctx            = {};
-    rocprofiler_buffer_id_t       client_buffer         = {};
-    rocprofiler_callback_thread_t client_thread         = {};
-    uint64_t                      client_workflow_count = {};
-    uint64_t                      client_callback_count = {};
-    int64_t                       current_depth         = 0;
-    int64_t                       max_depth             = 0;
+    rocprofiler_client_id_t*                    client_id             = nullptr;
+    rocprofiler_client_finalize_t               client_fini_func      = nullptr;
+    rocprofiler_context_id_t                    client_ctx            = {};
+    rocprofiler_buffer_id_t                     client_buffer         = {};
+    rocprofiler_callback_thread_t               client_thread         = {};
+    uint64_t                                    client_workflow_count = {};
+    uint64_t                                    client_callback_count = {};
+    int64_t                                     current_depth         = 0;
+    int64_t                                     max_depth             = 0;
+    std::map<uint64_t, rocprofiler_user_data_t> client_correlation    = {};
 };
 
 struct agent_data
@@ -70,96 +76,74 @@ struct agent_data
 
 void
 tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
-                      rocprofiler_user_data_t*,
-                      void* client_data)
+                      rocprofiler_user_data_t*              user_data,
+                      void*                                 client_data)
 {
-    using name_map_t = std::unordered_map<rocprofiler_service_callback_tracing_kind_t,
-                                          std::unordered_map<uint32_t, const char*>>;
+    static auto mtx = std::mutex{};
+    auto        lk  = std::unique_lock{mtx};
 
-    auto* cb_data = static_cast<callback_data*>(client_data);
+    auto*       cb_data          = static_cast<callback_data*>(client_data);
+    auto        now              = rocprofiler::common::timestamp_ns();
+    auto        internal_corr_id = record.correlation_id.internal;
+    auto&       external_corr_id = record.correlation_id.external;
+    static auto first_now        = now;
 
-    static auto name_map = []() {
-        auto outer_cb = [](rocprofiler_service_callback_tracing_kind_t kind_v,
-                           const char* /*kind_name*/,
-                           void* data_v) {
-            auto inner_cb = [](rocprofiler_service_callback_tracing_kind_t kind,
-                               uint32_t                                    operation,
-                               const char*                                 operation_name,
-                               void*                                       data) {
-                auto& mdata            = *static_cast<name_map_t*>(data);
-                mdata[kind][operation] = operation_name;
-                return 0;
-            };
-
-            auto& mdata_v = *static_cast<name_map_t*>(data_v);
-            mdata_v.emplace(kind_v, std::unordered_map<uint32_t, const char*>{});
-
-            rocprofiler_iterate_callback_tracing_kind_operation_names(kind_v, inner_cb, data_v);
-            return 0;
-        };
-
-        auto tmp = name_map_t{};
-        rocprofiler_iterate_callback_tracing_kind_names(outer_cb, static_cast<void*>(&tmp));
-
-        EXPECT_EQ(tmp.size(), ROCPROFILER_SERVICE_CALLBACK_TRACING_LAST - 1);
-        EXPECT_EQ(tmp.at(ROCPROFILER_SERVICE_CALLBACK_TRACING_HSA_API).size(),
-                  ROCPROFILER_HSA_API_ID_LAST);
-
-        return tmp;
-    }();
-
-    std::cout << "[" << __FILE__ << ":" << __LINE__ << "] "
-              << name_map[record.kind][record.operation] << "\n"
-              << std::flush;
+    ASSERT_NE(cb_data, nullptr);
 
     cb_data->client_callback_count++;
+
+    static auto first = std::once_flag{};
+    std::call_once(
+        first, [record]() { EXPECT_EQ(record.phase, ROCPROFILER_SERVICE_CALLBACK_PHASE_ENTER); });
+
     if(record.phase == ROCPROFILER_SERVICE_CALLBACK_PHASE_ENTER)
     {
-        cb_data->current_depth++;
-    }
-    else if(record.phase == ROCPROFILER_SERVICE_CALLBACK_PHASE_EXIT)
-    {
-        cb_data->max_depth = std::max(cb_data->current_depth, cb_data->max_depth);
-        cb_data->current_depth--;
+        EXPECT_EQ(cb_data->client_correlation.find(internal_corr_id),
+                  cb_data->client_correlation.end())
+            << "entry for internal correlation id " << internal_corr_id << " already exists";
+
+        cb_data->client_correlation[internal_corr_id] = external_corr_id;
+
+        user_data->value   = now;
+        auto current_depth = cb_data->current_depth++;
+
+        if(current_depth == 0)
+        {
+            uint64_t tid = 0;
+            ROCPROFILER_CALL(rocprofiler_get_thread_id(&tid), "Failed to get thread id");
+            EXPECT_EQ(external_corr_id.value, tid);
+        }
+
+        ROCPROFILER_CALL(rocprofiler_push_external_correlation_id(
+                             record.context_id,
+                             record.thread_id,
+                             rocprofiler_user_data_t{.value = (internal_corr_id + 1) * 1000}),
+                         "Failed to push new external correlation");
     }
     else
     {
-        GTEST_FAIL() << "unsupported callback tracing phase " << record.phase;
-    }
+        EXPECT_NE(cb_data->client_correlation.find(internal_corr_id),
+                  cb_data->client_correlation.end())
+            << "entry for internal correlation id " << internal_corr_id << " does not exist";
 
-    struct info_data
-    {
-        uint64_t          num_args = 0;
-        std::stringstream arg_ss   = {};
-    } info_data_v;
+        EXPECT_EQ(external_corr_id.value, (internal_corr_id + 1) * 1000)
+            << "external correlation id change was not retained";
 
-    auto info_data_cb = [](rocprofiler_service_callback_tracing_kind_t,
-                           uint32_t,
-                           uint32_t          arg_num,
-                           const char*       arg_name,
-                           const char*       arg_value_str,
-                           const void* const arg_value_addr,
-                           void*             data) -> int {
-        auto& info = *static_cast<info_data*>(data);
-        info.arg_ss << ((arg_num == 0) ? "(" : ", ");
-        info.arg_ss << arg_num << ": " << arg_name << "=" << arg_value_str;
-        EXPECT_NE(arg_name, nullptr);
-        EXPECT_NE(arg_value_str, nullptr);
-        EXPECT_NE(arg_value_addr, nullptr);
-        EXPECT_EQ(arg_num, info.num_args);
-        info.num_args++;
-        return 0;
-    };
+        auto external_corr_data = rocprofiler_user_data_t{};
+        ROCPROFILER_CALL(rocprofiler_pop_external_correlation_id(
+                             record.context_id, record.thread_id, &external_corr_data),
+                         "Failed to pop external correlation");
 
-    ROCPROFILER_CALL(rocprofiler_iterate_callback_tracing_operation_args(
-                         record, info_data_cb, static_cast<void*>(&info_data_v)),
-                     "Failure iterating trace operation args");
-    if(record.kind == ROCPROFILER_SERVICE_CALLBACK_TRACING_HSA_API &&
-       !(record.operation == ROCPROFILER_HSA_API_ID_hsa_init ||
-         record.operation == ROCPROFILER_HSA_API_ID_hsa_shut_down))
-    {
-        EXPECT_GT(info_data_v.num_args, 0)
-            << name_map[record.kind][record.operation] << info_data_v.arg_ss.str();
+        EXPECT_EQ(external_corr_data.value, (internal_corr_id + 1) * 1000)
+            << "external correlation pop did not return current external correlation";
+
+        EXPECT_GT(user_data->value, 0) << "user data not set";
+        EXPECT_GE(user_data->value, first_now) << "timestamp not monotonically increasing";
+        EXPECT_LT(user_data->value, now) << "timestamp not monotonically increasing";
+        EXPECT_GT(cb_data->current_depth, 0) << "depth should be > 0";
+
+        cb_data->max_depth = std::max(cb_data->current_depth, cb_data->max_depth);
+        cb_data->current_depth--;
     }
 }
 
@@ -171,36 +155,8 @@ tool_tracing_buffered(rocprofiler_context_id_t      context,
                       void*                         buffer_data,
                       uint64_t                      drop_count)
 {
-    using name_map_t = std::unordered_map<rocprofiler_service_buffer_tracing_kind_t,
-                                          std::unordered_map<uint32_t, const char*>>;
-
     std::cout << __FUNCTION__ << "...\n" << std::endl;
     auto* cb_data = static_cast<callback_data*>(buffer_data);
-
-    static auto name_map = []() {
-        auto tmp = name_map_t{};
-        //
-        static auto tracing_kind_names_cb = [](rocprofiler_service_buffer_tracing_kind_t kind,
-                                               const char* /*kind_name*/,
-                                               void* data) {
-            auto tracing_operation_names_cb = [](rocprofiler_service_buffer_tracing_kind_t kindv,
-                                                 uint32_t    operation,
-                                                 const char* operation_name,
-                                                 void*       data_v) {
-                (*static_cast<name_map_t*>(data_v))[kindv][operation] = operation_name;
-                return 0;
-            };
-
-            rocprofiler_iterate_buffer_tracing_kind_operation_names(
-                kind, tracing_operation_names_cb, data);
-
-            return 0;
-        };
-
-        rocprofiler_iterate_buffer_tracing_kind_names(tracing_kind_names_cb,
-                                                      static_cast<void*>(&tmp));
-        return tmp;
-    }();
 
     auto v_records = std::vector<rocprofiler_buffer_tracing_hsa_api_record_t*>{};
     v_records.reserve(num_headers);
@@ -266,28 +222,7 @@ thread_postcreate(rocprofiler_internal_thread_library_t /*lib*/, void* tool_data
 }
 }  // namespace
 
-TEST(rocprofiler_lib, registration_lambda_no_result)
-{
-    static rocprofiler_configure_func_t rocp_init =
-        [](uint32_t                 version,
-           const char*              runtime_version,
-           uint32_t                 prio,
-           rocprofiler_client_id_t* client_id) -> rocprofiler_tool_configure_result_t* {
-        auto expected_version = ROCPROFILER_VERSION;
-        EXPECT_EQ(expected_version, version);
-        EXPECT_EQ(std::string_view{runtime_version}, std::string_view{ROCPROFILER_VERSION_STRING});
-        EXPECT_EQ(prio, 0);
-        EXPECT_EQ(client_id->name, nullptr);
-        return nullptr;
-    };
-
-    auto ctx = rocprofiler_context_id_t{};
-    EXPECT_NE(rocprofiler_create_context(&ctx), ROCPROFILER_STATUS_SUCCESS);
-    EXPECT_EQ(rocprofiler_force_configure(rocp_init), ROCPROFILER_STATUS_SUCCESS);
-    EXPECT_NE(rocprofiler_create_context(&ctx), ROCPROFILER_STATUS_SUCCESS);
-}
-
-TEST(rocprofiler_lib, callback_registration_lambda_with_result)
+TEST(rocprofiler_lib, callback_external_correlation)
 {
     using init_func_t = int (*)(rocprofiler_client_finalize_t, void*);
     using fini_func_t = void (*)(void*);
@@ -360,10 +295,14 @@ TEST(rocprofiler_lib, callback_registration_lambda_with_result)
         return &cfg_result;
     };
 
-    auto ctx = rocprofiler_context_id_t{};
-    EXPECT_NE(rocprofiler_create_context(&ctx), ROCPROFILER_STATUS_SUCCESS);
     EXPECT_EQ(rocprofiler_force_configure(rocp_init), ROCPROFILER_STATUS_SUCCESS);
-    EXPECT_NE(rocprofiler_create_context(&ctx), ROCPROFILER_STATUS_SUCCESS);
+
+    uint64_t tid = 0;
+    ROCPROFILER_CALL(rocprofiler_get_thread_id(&tid), "failed to get thread id");
+
+    ROCPROFILER_CALL(rocprofiler_push_external_correlation_id(
+                         cb_data.client_ctx, tid, rocprofiler_user_data_t{.value = tid}),
+                     "failed to push correlation id");
 
     hsa_iterate_agents_cb_t agent_cb = [](hsa_agent_t agent, void* data) {
         static_cast<agent_data*>(data)->agent_count++;
@@ -377,11 +316,32 @@ TEST(rocprofiler_lib, callback_registration_lambda_with_result)
         return status;
     };
 
-    auto _agent_data = agent_data{};
+    auto     _agent_data = agent_data{};
+    uint64_t num_runs    = 0;
     hsa_init();
-    hsa_status_t itr_status = hsa_iterate_agents(agent_cb, static_cast<void*>(&_agent_data));
+    auto run = [&agent_cb, &_agent_data, &num_runs]() {
+        ++num_runs;
+        uint64_t _tid = 0;
+        ROCPROFILER_CALL(rocprofiler_get_thread_id(&_tid), "failed to get thread id");
+        ROCPROFILER_CALL(rocprofiler_push_external_correlation_id(
+                             cb_data.client_ctx, _tid, rocprofiler_user_data_t{.value = _tid}),
+                         "failed to push correlation id");
 
-    EXPECT_EQ(itr_status, HSA_STATUS_SUCCESS);
+        hsa_status_t itr_status = hsa_iterate_agents(agent_cb, static_cast<void*>(&_agent_data));
+        EXPECT_EQ(itr_status, HSA_STATUS_SUCCESS);
+
+        auto user_data = rocprofiler_user_data_t{};
+        ROCPROFILER_CALL(
+            rocprofiler_pop_external_correlation_id(cb_data.client_ctx, _tid, &user_data),
+            "failed to push correlation id");
+        EXPECT_EQ(user_data.value, _tid)
+            << "callback modification to external correlation id should not be seen here";
+    };
+
+    run();
+    std::thread{run}.join();
+    std::thread{run}.join();
+
     EXPECT_GT(_agent_data.agent_count, 0);
     EXPECT_EQ(_agent_data.agent_count, _agent_data.agents.size());
 
@@ -390,17 +350,18 @@ TEST(rocprofiler_lib, callback_registration_lambda_with_result)
 
     cb_data.client_fini_func(*cb_data.client_id);
 
-    // expected callback count is two for hsa_iterate_agents and two callbacks for
+    // expected callback count is two for each hsa_iterate_agents and two callbacks for
     // hsa_agent_get_info for each agent.
-    uint64_t expected_cb_count = 2 + (2 * _agent_data.agent_count);
+    uint64_t expected_cb_count = (2 * num_runs) + (2 * _agent_data.agent_count);
 
     EXPECT_EQ(cb_data.client_workflow_count, 2);
     EXPECT_EQ(cb_data.client_callback_count, expected_cb_count);
+    EXPECT_EQ(cb_data.client_correlation.size(), expected_cb_count / 2);
     EXPECT_EQ(cb_data.current_depth, 0);
     EXPECT_EQ(cb_data.max_depth, 2);
 }
 
-TEST(rocprofiler_lib, buffer_registration_lambda_with_result)
+TEST(rocprofiler_lib, buffered_external_correlation)
 {
     using init_func_t = int (*)(rocprofiler_client_finalize_t, void*);
     using fini_func_t = void (*)(void*);

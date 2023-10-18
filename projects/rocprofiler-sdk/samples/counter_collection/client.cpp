@@ -44,7 +44,7 @@ test_callback(rocprofiler_queue_id_t       queue_id,
 {
     // Callback containing counter data.
     std::clog << "[" << __FUNCTION__ << "] " << queue_id.handle << " | " << agent_id.id.handle
-              << " | " << corr_id.id << "\n";
+              << " | " << corr_id.internal << "\n";
 }
 
 int

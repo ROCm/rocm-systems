@@ -36,15 +36,15 @@ TEST(common, demangling)
 
     using strview_pair_t = std::pair<std::string_view, std::string_view>;
     for(auto [mangled, demangled] :
-        {strview_pair_t{"_ZN11rocprofiler8internal18correlation_config20get_unique_record_idEv",
-                        "rocprofiler::internal::correlation_config::get_unique_record_id()"},
+        {strview_pair_t{"_ZN11rocprofiler8internal18correlation_config22get_unique_internal_idEv",
+                        "rocprofiler::internal::correlation_config::get_unique_internal_id()"},
          strview_pair_t{"_ZN11rocprofiler8internal18get_active_configsEv",
                         "rocprofiler::internal::get_active_configs()"},
          strview_pair_t{"_ZN11rocprofiler8internal22get_registered_configsEv",
                         "rocprofiler::internal::get_registered_configs()"},
          strview_pair_t{
-             "_ZZN11rocprofiler8internal18correlation_config20get_unique_record_idEvE2_v",
-             "rocprofiler::internal::correlation_config::get_unique_record_id()::_v"},
+             "_ZZN11rocprofiler8internal18correlation_config22get_unique_internal_idEvE2_v",
+             "rocprofiler::internal::correlation_config::get_unique_internal_id()::_v"},
          strview_pair_t{"_ZZN11rocprofiler8internal18get_active_configsEvE2_v",
                         "rocprofiler::internal::get_active_configs()::_v"},
          strview_pair_t{"_ZZN11rocprofiler8internal22get_registered_configsEvE2_v",

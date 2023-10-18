@@ -211,10 +211,10 @@ tool_tracing_callback(rocprofiler_context_id_t      context,
                 static_cast<rocprofiler_buffer_tracing_hsa_api_record_t*>(header->payload);
             auto info = std::stringstream{};
             info << "tid=" << record->thread_id << ", context=" << context.handle
-                 << ", buffer_id=" << buffer_id.handle << ", cid=" << record->correlation_id.id
-                 << ", kind=" << record->kind << ", operation=" << record->operation
-                 << ", drop_count=" << drop_count << ", start=" << record->start_timestamp
-                 << ", stop=" << record->end_timestamp;
+                 << ", buffer_id=" << buffer_id.handle
+                 << ", cid=" << record->correlation_id.internal << ", kind=" << record->kind
+                 << ", operation=" << record->operation << ", drop_count=" << drop_count
+                 << ", start=" << record->start_timestamp << ", stop=" << record->end_timestamp;
 
             if(record->start_timestamp > record->end_timestamp)
                 throw std::runtime_error("start > end");

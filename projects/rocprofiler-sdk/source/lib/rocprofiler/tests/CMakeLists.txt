@@ -34,7 +34,7 @@ set_tests_properties(${lib_TESTS} PROPERTIES TIMEOUT 45 LABELS "unittests")
 #
 # -------------------------------------------------------------------------------------- #
 
-set(rocprofiler_shared_lib_sources registration.cpp)
+set(rocprofiler_shared_lib_sources external_correlation.cpp registration.cpp status.cpp)
 
 add_executable(rocprofiler-lib-tests-shared)
 target_sources(rocprofiler-lib-tests-shared PRIVATE ${rocprofiler_shared_lib_sources})

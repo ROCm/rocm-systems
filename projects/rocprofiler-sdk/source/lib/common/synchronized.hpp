@@ -26,6 +26,7 @@
 #include <functional>
 #include <mutex>
 #include <shared_mutex>
+#include <type_traits>
 
 namespace rocprofiler
 {
@@ -52,45 +53,89 @@ namespace common
  *  // set data to new value
  * });
  */
-template <typename LockedType>
+template <typename LockedType, bool IsMappedTypeV = false>
 class Synchronized
 {
 public:
-    Synchronized() = default;
-    Synchronized(LockedType&& data)
-    : data_(std::move(data))
+    using value_type = LockedType;
+    using this_type  = Synchronized<value_type, IsMappedTypeV>;
+
+    Synchronized()  = default;
+    ~Synchronized() = default;
+
+    explicit Synchronized(value_type&& data)
+    : m_data{std::move(data)}
     {}
+
+    Synchronized(Synchronized&& data) noexcept = default;
+    Synchronized& operator=(Synchronized&& data) noexcept = default;
+
     // Do not allow this data structure to be copied, std::move only.
     Synchronized(const Synchronized&) = delete;
+    Synchronized& operator=(const Synchronized&) = delete;
 
-    void rlock(std::function<void(const LockedType&)> lambda) const
+    template <typename FuncT, typename... Args>
+    auto rlock(FuncT&& lambda, Args&&... args) const
     {
-        std::shared_lock lock(mutex_);
-        lambda(data_);
+        static_assert(std::is_invocable<FuncT, const value_type&, Args...>::value,
+                      "function must accept const reference to locked type");
+
+        auto lock = std::shared_lock{m_mutex};
+        return std::forward<FuncT>(lambda)(m_data, std::forward<Args>(args)...);
     }
 
-    void wlock(std::function<void(LockedType&)> lambda)
+    template <typename FuncT, typename... Args>
+    auto wlock(FuncT&& lambda, Args&&... args)
     {
-        std::unique_lock lock(mutex_);
-        lambda(data_);
+        static_assert(std::is_invocable<FuncT, value_type&, Args...>::value,
+                      "function must accept reference to locked type");
+
+        auto lock = std::unique_lock{m_mutex};
+        return std::forward<FuncT>(lambda)(m_data, std::forward<Args>(args)...);
+    }
+
+    // This overload to wlock allows a synchronized map whose keys map to synchronized data to
+    // use a read lock on the key data and then a write lock on the mapped data.
+    template <typename FuncT,
+              typename... Args,
+              bool EnableForMappedType                   = IsMappedTypeV,
+              std::enable_if_t<EnableForMappedType, int> = 0>
+    auto wlock(FuncT&& lambda, Args&&... args) const
+    {
+        return const_cast<this_type*>(this)->wlock(std::forward<FuncT>(lambda),
+                                                   std::forward<Args>(args)...);
     }
 
     // Upgradable lock. If read returns false, write will be called with a unique_lock.
     // Essentially a helper function that does .rlock() followed by .wlock().
-    void ulock(std::function<bool(const LockedType&)> read, std::function<bool(LockedType&)> write)
+    template <typename ReadFuncT, typename WriteFuncT, typename... Args>
+    bool ulock(ReadFuncT&& read, WriteFuncT&& write, Args&&... args)
     {
+        static_assert(std::is_invocable<ReadFuncT, const value_type&, Args...>::value,
+                      "read function must accept const reference to locked type");
+        static_assert(std::is_invocable<WriteFuncT, value_type&, Args...>::value,
+                      "write function must accept reference to locked type");
+
+        using read_return_type  = std::invoke_result_t<ReadFuncT, const value_type&, Args...>;
+        using write_return_type = std::invoke_result_t<WriteFuncT, value_type&, Args...>;
+
+        static_assert(std::is_same<read_return_type, write_return_type>::value,
+                      "read and write functions must return same type");
+        static_assert(std::is_same<read_return_type, bool>::value,
+                      "read/write functions must return bool");
+
         {
-            std::shared_lock lock(mutex_);
-            if(read(data_)) return;
+            auto lock = std::shared_lock{m_mutex};
+            if(read(m_data, std::forward<Args>(args)...)) return true;
         }
 
-        std::unique_lock lock(mutex_);
-        write(data_);
+        auto lock = std::unique_lock{m_mutex};
+        return write(m_data, std::forward<Args>(args)...);
     }
 
 private:
-    mutable std::shared_mutex mutex_;
-    LockedType                data_;
+    mutable std::shared_mutex m_mutex = {};
+    value_type                m_data  = {};
 };
 }  // namespace common
 }  // namespace rocprofiler

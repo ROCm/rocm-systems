@@ -61,7 +61,7 @@ get_client_index()
 }  // namespace
 
 uint64_t
-correlation_tracing_service::get_unique_record_id()
+correlation_tracing_service::get_unique_internal_id()
 {
     static auto _v = std::atomic<uint64_t>{};
     return _v++;
@@ -181,7 +181,7 @@ start_context(rocprofiler_context_id_t context_id)
         // try to find a nullptr slot first
         for(size_t i = 0; i < get_active_contexts().size(); ++i)
         {
-            auto* itr = get_active_contexts().at(i).load(std::memory_order_relaxed);
+            const auto* itr = get_active_contexts().at(i).load(std::memory_order_relaxed);
             if(itr == nullptr)
             {
                 idx = i;
@@ -201,8 +201,8 @@ start_context(rocprofiler_context_id_t context_id)
     }
 
     // atomic swap the pointer into the "active" array used internally
-    context* _expected = nullptr;
-    bool     success   = get_active_contexts().at(idx).compare_exchange_strong(
+    const context* _expected = nullptr;
+    bool           success   = get_active_contexts().at(idx).compare_exchange_strong(
         _expected, get_registered_contexts().at(context_id.handle).get());
 
     if(!success) return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_STARTED;
@@ -219,7 +219,7 @@ stop_context(rocprofiler_context_id_t idx)
     // callbacks
     for(auto& itr : get_active_contexts())
     {
-        auto* _expected = itr.load(std::memory_order_relaxed);
+        const auto* _expected = itr.load(std::memory_order_relaxed);
         if(_expected && _expected->context_idx == idx.handle)
         {
             bool success = itr.compare_exchange_strong(_expected, nullptr);
@@ -237,7 +237,7 @@ deactivate_client_contexts(rocprofiler_client_id_t client_id)
 {
     for(auto& itr : get_active_contexts())
     {
-        auto* itr_v = itr.load();
+        const auto* itr_v = itr.load();
         if(itr_v->client_idx == client_id.handle)
         {
             itr.store(nullptr);

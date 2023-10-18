@@ -54,6 +54,8 @@ typedef enum  // NOLINT(performance-enum-size)
     ROCPROFILER_STATUS_ERROR_DOMAIN_NOT_FOUND,     ///< Domain identifier is invalid
     ROCPROFILER_STATUS_ERROR_OPERATION_NOT_FOUND,  ///< Operation identifier is invalid for domain
     ROCPROFILER_STATUS_ERROR_THREAD_NOT_FOUND,     ///< No valid thread for given thread id
+    ROCPROFILER_STATUS_ERROR_AGENT_NOT_FOUND,      ///< Agent identifier not found
+    ROCPROFILER_STATUS_ERROR_COUNTER_NOT_FOUND,    ///< Counter identifier does not exist
     ROCPROFILER_STATUS_ERROR_CONTEXT_ERROR,        ///> Generalized context error
     ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID,      ///< Context configuration is not valid
     ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_STARTED,  ///< Context was not started (maybe already
@@ -69,8 +71,8 @@ typedef enum  // NOLINT(performance-enum-size)
     ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED,             ///< Function is not implemented
     ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_ABI,  ///< Data structure provided by user is incompatible
                                                 ///< with current version of rocprofiler
-    ROCPROFILER_STATUS_ERROR_AGENT_NOT_FOUND,   ///< Agent not found
-    ROCPROFILER_STATUS_ERROR_COUNTER_NOT_FOUND,  ///< Counter does not exist
+    ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT,  ///< Function invoked with one or more invalid
+                                                ///< arguments
     ROCPROFILER_STATUS_LAST,
 } rocprofiler_status_t;
 
@@ -282,16 +284,9 @@ typedef struct
  */
 typedef struct
 {
-    uint64_t id;
+    uint64_t                internal;
+    rocprofiler_user_data_t external;
 } rocprofiler_correlation_id_t;
-
-/**
- * @brief ROCProfiler External Correlation ID.
- */
-typedef struct
-{
-    uint64_t id;
-} rocprofiler_external_correlation_id_t;
 
 /**
  * @struct rocprofiler_buffer_id_t
@@ -332,13 +327,12 @@ typedef struct
  */
 typedef struct rocprofiler_callback_tracing_record_t
 {
+    rocprofiler_context_id_t                    context_id;
     rocprofiler_thread_id_t                     thread_id;
     rocprofiler_correlation_id_t                correlation_id;
-    rocprofiler_external_correlation_id_t       external_correlation_id;
     rocprofiler_service_callback_tracing_kind_t kind;
     uint32_t                                    operation;
     rocprofiler_service_callback_phase_t        phase;
-    rocprofiler_user_data_t                     data;
     void*                                       payload;
 } rocprofiler_callback_tracing_record_t;
 

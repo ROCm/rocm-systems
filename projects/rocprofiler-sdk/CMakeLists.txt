@@ -16,7 +16,7 @@ string(REGEX REPLACE "([0-9]+)\.([0-9]+)\.([0-9]+)(.*)" "\\1.\\2.\\3" ROCPROFILE
 
 foreach(_LANG C CXX)
     set(CMAKE_${_LANG}_FLAGS_COVERAGE_INIT
-        "-Og -g3 -fno-omit-frame-pointer -fprofile-abs-path -fprofile-arcs -ftest-coverage --coverage"
+        "-Og -g3 -fno-omit-frame-pointer -fprofile-abs-path -fprofile-arcs -ftest-coverage --coverage -DCODECOV=1"
         CACHE STRING "${_LANG} flags for code coverage builds")
     set(CMAKE_${_LANG}_FLAGS_COVERAGE
         "${CMAKE_${_LANG}_FLAGS_COVERAGE_INIT}"
