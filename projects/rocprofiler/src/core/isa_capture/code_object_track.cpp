@@ -35,7 +35,6 @@
 #include <cstring>
 #include <sys/mman.h>
 #include <hsa/hsa.h>
-#include <amd-dbgapi/amd-dbgapi.h>
 #include <hsa/amd_hsa_kernel_code.h>
 #include <hsa/hsa_ven_amd_loader.h>
 #include <iostream>
