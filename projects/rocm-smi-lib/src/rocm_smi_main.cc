@@ -53,6 +53,7 @@
 #include <functional>
 #include <iostream>
 #include <memory>
+#include <algorithm>
 #include <set>
 #include <sstream>
 #include <string>
@@ -85,6 +86,7 @@ amd::smi::RocmSMI::devInfoTypesStrings = {
   {amd::smi::kDevOverDriveLevel, amdSMI + "kDevOverDriveLevel"},
   {amd::smi::kDevMemOverDriveLevel, amdSMI + "kDevMemOverDriveLevel"},
   {amd::smi::kDevDevID, amdSMI + "kDevDevID"},
+  {amd::smi::kDevXGMIPhysicalID, amdSMI + "kDevXGMIPhysicalID"},
   {amd::smi::kDevDevRevID, amdSMI + "kDevDevRevID"},
   {amd::smi::kDevDevProdName, amdSMI + "kDevDevProdName"},
   {amd::smi::kDevDevProdNum, amdSMI + "kDevDevProdNum"},
@@ -383,9 +385,28 @@ RocmSMI::Initialize(uint64_t flags) {
          << "\n | final update: device->bdfid() holds correct device bdf";
       LOG_TRACE(ss);
   }
-  if (ret != 0) {
-    throw amd::smi::rsmi_exception(RSMI_INITIALIZATION_ERROR,
-            "Failed to initialize rocm_smi library (amdgpu node discovery).");
+
+  std::shared_ptr<amd::smi::Device> dev;
+  // Sort index based on the BDF, collect BDF id firstly.
+  std::vector<std::pair<uint64_t, std::shared_ptr<amd::smi::Device>>> dv_to_id;
+  dv_to_id.reserve(devices_.size());
+  for (uint32_t dv_ind = 0; dv_ind < devices_.size(); ++dv_ind) {
+      dev = devices_[dv_ind];
+      uint64_t bdfid = dev->bdfid();
+      dv_to_id.push_back({bdfid, dev});
+    }
+  ss << __PRETTY_FUNCTION__ << " Sort index based on BDF.";
+  LOG_DEBUG(ss);
+
+  // Stable sort to keep the order if bdf is equal.
+  std::stable_sort(dv_to_id.begin(), dv_to_id.end(), []
+  (const std::pair<uint64_t, std::shared_ptr<amd::smi::Device>>& p1,
+    const std::pair<uint64_t, std::shared_ptr<amd::smi::Device>>& p2) {
+        return p1.first < p2.first;
+  });
+  devices_.clear();
+  for (uint32_t dv_ind = 0; dv_ind < dv_to_id.size(); ++dv_ind) {
+    devices_.push_back(dv_to_id[dv_ind].second);
   }
 
   std::map<uint64_t, std::shared_ptr<KFDNode>> tmp_map;
@@ -406,7 +427,6 @@ RocmSMI::Initialize(uint64_t flags) {
   for (it = io_link_map_tmp.begin(); it != io_link_map_tmp.end(); it++)
     io_link_map_[it->first] = it->second;
 
-  std::shared_ptr<amd::smi::Device> dev;
 
   // Remove any drm nodes that don't have  a corresponding readable kfd node.
   // kfd nodes will not be added if their properties file is not readable.
@@ -451,6 +471,7 @@ RocmSMI::Initialize(uint64_t flags) {
   if (ROCmLogging::Logger::getInstance()->isLoggerEnabled()) {
     logSystemDetails();
   }
+
   // Leaving below to help debug temp file issues
   // displayAppTmpFilesContent();
   std::string amdGPUDeviceList = displayAllDevicePaths(devices_);

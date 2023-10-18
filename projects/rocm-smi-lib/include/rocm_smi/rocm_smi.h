@@ -1503,6 +1503,23 @@ rsmi_status_t rsmi_dev_subsystem_vendor_id_get(uint32_t dv_ind, uint16_t *id);
  */
 rsmi_status_t rsmi_dev_unique_id_get(uint32_t dv_ind, uint64_t *id);
 
+/**
+ *  @brief Get the XGMI physical id associated with the device
+ *
+ *  @details Given a device index @p dv_ind and a pointer to a uint32_t to
+ *  which the XGMI physical id will be written
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[inout] revision a pointer to uint32_t to which the XGMI physical id
+ *  will be written
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ *
+ */
+rsmi_status_t rsmi_dev_xgmi_physical_id_get(uint32_t dv_ind, uint16_t *id);
+
+
 /** @} */  // end of IDQuer
 
 /*****************************************************************************/
