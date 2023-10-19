@@ -51,7 +51,7 @@ typedef enum  // NOLINT(performance-enum-size)
     ROCPROFILER_STATUS_ERROR,                      ///< Generalized error
     ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND,    ///< No valid context for given context id
     ROCPROFILER_STATUS_ERROR_BUFFER_NOT_FOUND,     ///< No valid buffer for given buffer id
-    ROCPROFILER_STATUS_ERROR_DOMAIN_NOT_FOUND,     ///< Domain identifier is invalid
+    ROCPROFILER_STATUS_ERROR_KIND_NOT_FOUND,       ///< Kind identifier is invalid
     ROCPROFILER_STATUS_ERROR_OPERATION_NOT_FOUND,  ///< Operation identifier is invalid for domain
     ROCPROFILER_STATUS_ERROR_THREAD_NOT_FOUND,     ///< No valid thread for given thread id
     ROCPROFILER_STATUS_ERROR_AGENT_NOT_FOUND,      ///< Agent identifier not found

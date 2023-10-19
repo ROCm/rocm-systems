@@ -49,6 +49,7 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <map>
 #include <mutex>
 #include <string>
 #include <string_view>
@@ -77,7 +78,16 @@ struct source_location
     std::string context  = {};
 };
 
-using call_stack_t = std::vector<source_location>;
+using call_stack_t        = std::vector<source_location>;
+using buffer_kind_names_t = std::map<rocprofiler_service_buffer_tracing_kind_t, const char*>;
+using buffer_kind_operation_names_t =
+    std::map<rocprofiler_service_buffer_tracing_kind_t, std::map<uint32_t, const char*>>;
+
+struct buffer_name_info
+{
+    buffer_kind_names_t           kind_names      = {};
+    buffer_kind_operation_names_t operation_names = {};
+};
 
 rocprofiler_client_id_t*      client_id        = nullptr;
 rocprofiler_client_finalize_t client_fini_func = nullptr;
@@ -129,48 +139,53 @@ print_call_stack(const call_stack_t& _call_stack)
     if(cleanup) cleanup(ofs);
 }
 
-void
-store_buffer_id_names(call_stack_t* tool_data)
+buffer_name_info
+get_buffer_tracing_names()
 {
+    auto cb_name_info = buffer_name_info{};
     //
-    // buffered for each kind operation
+    // callback for each kind operation
     //
-    static auto tracing_operation_names_cb = [](rocprofiler_service_buffer_tracing_kind_t /*kindv*/,
-                                                uint32_t /*operation*/,
-                                                const char* operation_name,
-                                                void*       data_v) {
-        static_cast<call_stack_t*>(data_v)->emplace_back(
-            source_location{"rocprofiler_iterate_buffer_trace_kind_operation_names",
-                            __FILE__,
-                            __LINE__,
-                            std::string{"    "} + std::string{operation_name}});
-        return 0;
-    };
+    static auto tracing_kind_operation_cb =
+        [](rocprofiler_service_buffer_tracing_kind_t kindv, uint32_t operation, void* data_v) {
+            auto* name_info_v = static_cast<buffer_name_info*>(data_v);
+
+            if(kindv == ROCPROFILER_SERVICE_BUFFER_TRACING_HSA_API)
+            {
+                const char* name = nullptr;
+                ROCPROFILER_CALL(rocprofiler_query_buffer_tracing_kind_operation_name(
+                                     kindv, operation, &name, nullptr),
+                                 "query buffer tracing kind operation name");
+                if(name) name_info_v->operation_names[kindv][operation] = name;
+            }
+            return 0;
+        };
 
     //
     //  callback for each buffer kind (i.e. domain)
     //
-    static auto tracing_kind_names_cb =
-        [](rocprofiler_service_buffer_tracing_kind_t kind, const char* kind_name, void* data) {
-            //  store the buffer kind name
-            static_cast<call_stack_t*>(data)->emplace_back(
-                source_location{"rocprofiler_iterate_buffer_trace_kind_names          ",
-                                __FILE__,
-                                __LINE__,
-                                kind_name});
+    static auto tracing_kind_cb = [](rocprofiler_service_buffer_tracing_kind_t kind, void* data) {
+        //  store the buffer kind name
+        auto*       name_info_v = static_cast<buffer_name_info*>(data);
+        const char* name        = nullptr;
+        ROCPROFILER_CALL(rocprofiler_query_buffer_tracing_kind_name(kind, &name, nullptr),
+                         "query buffer tracing kind operation name");
+        if(name) name_info_v->kind_names[kind] = name;
 
-            // store the operation names for the HSA API
-            if(kind == ROCPROFILER_SERVICE_BUFFER_TRACING_HSA_API)
-            {
-                rocprofiler_iterate_buffer_tracing_kind_operation_names(
-                    kind, tracing_operation_names_cb, data);
-            }
+        if(kind == ROCPROFILER_SERVICE_BUFFER_TRACING_HSA_API)
+        {
+            ROCPROFILER_CALL(rocprofiler_iterate_buffer_tracing_kind_operations(
+                                 kind, tracing_kind_operation_cb, static_cast<void*>(data)),
+                             "iterating buffer tracing kind operations");
+        }
+        return 0;
+    };
 
-            return 0;
-        };
+    ROCPROFILER_CALL(rocprofiler_iterate_buffer_tracing_kinds(tracing_kind_cb,
+                                                              static_cast<void*>(&cb_name_info)),
+                     "iterating buffer tracing kinds");
 
-    rocprofiler_iterate_buffer_tracing_kind_names(tracing_kind_names_cb,
-                                                  static_cast<void*>(tool_data));
+    return cb_name_info;
 }
 
 void
@@ -256,10 +271,33 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 {
     assert(tool_data != nullptr);
 
-    static_cast<call_stack_t*>(tool_data)->emplace_back(
-        source_location{__FUNCTION__, __FILE__, __LINE__, ""});
+    auto* call_stack_v = static_cast<call_stack_t*>(tool_data);
 
-    store_buffer_id_names(static_cast<call_stack_t*>(tool_data));
+    call_stack_v->emplace_back(source_location{__FUNCTION__, __FILE__, __LINE__, ""});
+
+    buffer_name_info name_info = get_buffer_tracing_names();
+
+    for(const auto& itr : name_info.operation_names)
+    {
+        auto name_idx = std::stringstream{};
+        name_idx << " [" << std::setw(3) << static_cast<int32_t>(itr.first) << "]";
+        call_stack_v->emplace_back(
+            source_location{"rocprofiler_buffer_tracing_kind_names          " + name_idx.str(),
+                            __FILE__,
+                            __LINE__,
+                            name_info.kind_names.at(itr.first)});
+
+        for(const auto& ditr : itr.second)
+        {
+            auto operation_idx = std::stringstream{};
+            operation_idx << " [" << std::setw(3) << static_cast<int32_t>(ditr.first) << "]";
+            call_stack_v->emplace_back(source_location{
+                "rocprofiler_buffer_tracing_kind_operation_names" + operation_idx.str(),
+                __FILE__,
+                __LINE__,
+                std::string{"- "} + std::string{ditr.second}});
+        }
+    }
 
     client_fini_func = fini_func;
 

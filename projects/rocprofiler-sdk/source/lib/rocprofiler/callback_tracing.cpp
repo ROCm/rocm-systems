@@ -20,6 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include <rocprofiler/fwd.h>
 #include <rocprofiler/rocprofiler.h>
 
 #include "lib/rocprofiler/context/context.hpp"
@@ -37,6 +38,43 @@
     {                                                                                              \
         return _status;                                                                            \
     }
+
+namespace rocprofiler
+{
+namespace callback_tracing
+{
+namespace
+{
+#define ROCPROFILER_CALLBACK_TRACING_KIND_STRING(CODE)                                             \
+    template <>                                                                                    \
+    struct callback_tracing_kind_string<ROCPROFILER_SERVICE_CALLBACK_TRACING_##CODE>               \
+    {                                                                                              \
+        static constexpr auto value =                                                              \
+            std::pair<const char*, size_t>{#CODE, std::string_view{#CODE}.length()};               \
+    };
+
+template <size_t Idx>
+struct callback_tracing_kind_string;
+
+ROCPROFILER_CALLBACK_TRACING_KIND_STRING(NONE)
+ROCPROFILER_CALLBACK_TRACING_KIND_STRING(HSA_API)
+ROCPROFILER_CALLBACK_TRACING_KIND_STRING(HIP_API)
+ROCPROFILER_CALLBACK_TRACING_KIND_STRING(MARKER_API)
+ROCPROFILER_CALLBACK_TRACING_KIND_STRING(CODE_OBJECT)
+ROCPROFILER_CALLBACK_TRACING_KIND_STRING(KERNEL_DISPATCH)
+
+template <size_t Idx, size_t... Tail>
+std::pair<const char*, size_t>
+get_kind_name(rocprofiler_service_callback_tracing_kind_t kind, std::index_sequence<Idx, Tail...>)
+{
+    if(kind == Idx) return callback_tracing_kind_string<Idx>::value;
+    // recursion until tail empty
+    if constexpr(sizeof...(Tail) > 0) return get_kind_name(kind, std::index_sequence<Tail...>{});
+    return {nullptr, 0};
+}
+}  // namespace
+}  // namespace callback_tracing
+}  // namespace rocprofiler
 
 extern "C" {
 rocprofiler_status_t
@@ -79,49 +117,68 @@ rocprofiler_configure_callback_tracing_service(rocprofiler_context_id_t context_
 }
 
 rocprofiler_status_t
-rocprofiler_iterate_callback_tracing_kind_names(
-    rocprofiler_callback_tracing_kind_name_cb_t callback,
-    void*                                       data)
+rocprofiler_query_callback_tracing_kind_name(rocprofiler_service_callback_tracing_kind_t kind,
+                                             const char**                                name,
+                                             uint64_t*                                   name_len)
 {
-    // TODO(jrmadsen): need to add for other kinds
-    size_t n         = 0;
-    bool   premature = false;
-    using pair_t     = std::pair<rocprofiler_service_callback_tracing_kind_t, const char*>;
-    for(auto [eitr, sitr] : {
-            pair_t{ROCPROFILER_SERVICE_CALLBACK_TRACING_HSA_API, "HSA_API"},
-            pair_t{ROCPROFILER_SERVICE_CALLBACK_TRACING_HIP_API, "HIP_API"},
-            pair_t{ROCPROFILER_SERVICE_CALLBACK_TRACING_MARKER_API, "MARKER_API"},
-            pair_t{ROCPROFILER_SERVICE_CALLBACK_TRACING_CODE_OBJECT, "CODE_OBJECT"},
-            pair_t{ROCPROFILER_SERVICE_CALLBACK_TRACING_KERNEL_DISPATCH, "KERNEL_DISPATCH"},
-        })
+    auto&& val = rocprofiler::callback_tracing::get_kind_name(
+        kind, std::make_index_sequence<ROCPROFILER_SERVICE_CALLBACK_TRACING_LAST>{});
+
+    if(name) *name = val.first;
+    if(name_len) *name_len = val.second;
+
+    return (val.first) ? ROCPROFILER_STATUS_SUCCESS : ROCPROFILER_STATUS_ERROR_KIND_NOT_FOUND;
+}
+
+rocprofiler_status_t
+rocprofiler_query_callback_tracing_kind_operation_name(
+    rocprofiler_service_callback_tracing_kind_t kind,
+    uint32_t                                    operation,
+    const char**                                name,
+    uint64_t*                                   name_len)
+{
+    if(kind < ROCPROFILER_SERVICE_CALLBACK_TRACING_NONE ||
+       kind >= ROCPROFILER_SERVICE_CALLBACK_TRACING_LAST)
+        return ROCPROFILER_STATUS_ERROR_KIND_NOT_FOUND;
+
+    if(kind == ROCPROFILER_SERVICE_CALLBACK_TRACING_HSA_API)
     {
-        auto _success = callback(eitr, sitr, data);
-        if(_success != 0)
+        const auto* val = rocprofiler::hsa::name_by_id(operation);
+
+        if(!val)
         {
-            premature = true;
-            break;
+            if(name) *name = nullptr;
+            if(name_len) *name_len = 0;
+
+            return ROCPROFILER_STATUS_ERROR_OPERATION_NOT_FOUND;
         }
-        ++n;
+
+        if(name) *name = val;
+        if(name_len) *name_len = strnlen(val, 4096);
+
+        return ROCPROFILER_STATUS_SUCCESS;
     }
 
-#if defined(ROCPROFILER_CI)
-    if(!premature)
+    return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
+}
+
+rocprofiler_status_t
+rocprofiler_iterate_callback_tracing_kinds(rocprofiler_callback_tracing_kind_cb_t callback,
+                                           void*                                  data)
+{
+    for(uint32_t i = 0; i < ROCPROFILER_SERVICE_CALLBACK_TRACING_LAST; ++i)
     {
-        LOG_ASSERT(n == ROCPROFILER_SERVICE_CALLBACK_TRACING_LAST - 1)
-            << " :: new enumeration value added. Update this function";
+        auto _success = callback(static_cast<rocprofiler_service_callback_tracing_kind_t>(i), data);
+        if(_success != 0) break;
     }
-#else
-    (void) n;
-    (void) premature;
-#endif
 
     return ROCPROFILER_STATUS_SUCCESS;
 }
 
 rocprofiler_status_t
-rocprofiler_iterate_callback_tracing_kind_operation_names(
+rocprofiler_iterate_callback_tracing_kind_operations(
     rocprofiler_service_callback_tracing_kind_t      kind,
-    rocprofiler_callback_tracing_operation_name_cb_t callback,
+    rocprofiler_callback_tracing_kind_operation_cb_t callback,
     void*                                            data)
 {
     if(kind == ROCPROFILER_SERVICE_CALLBACK_TRACING_HSA_API)
@@ -129,7 +186,7 @@ rocprofiler_iterate_callback_tracing_kind_operation_names(
         auto ops = rocprofiler::hsa::get_ids();
         for(const auto& itr : ops)
         {
-            auto _success = callback(kind, itr, rocprofiler::hsa::name_by_id(itr), data);
+            auto _success = callback(kind, itr, data);
             if(_success != 0) break;
         }
         return ROCPROFILER_STATUS_SUCCESS;
@@ -139,7 +196,7 @@ rocprofiler_iterate_callback_tracing_kind_operation_names(
 }
 
 rocprofiler_status_t
-rocprofiler_iterate_callback_tracing_operation_args(
+rocprofiler_iterate_callback_tracing_kind_operation_args(
     rocprofiler_callback_tracing_record_t            record,
     rocprofiler_callback_tracing_operation_args_cb_t callback,
     void*                                            user_data)

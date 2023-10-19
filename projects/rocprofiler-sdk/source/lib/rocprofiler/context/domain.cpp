@@ -47,7 +47,7 @@ rocprofiler_status_t
 add_domain(domain_context<DomainT>& _cfg, DomainT _domain)
 {
     if(_domain <= domain_info<DomainT>::none || _domain >= domain_info<DomainT>::last)
-        return ROCPROFILER_STATUS_ERROR_DOMAIN_NOT_FOUND;
+        return ROCPROFILER_STATUS_ERROR_KIND_NOT_FOUND;
 
     _cfg.domains |= (1 << _domain);
     return ROCPROFILER_STATUS_SUCCESS;
@@ -58,7 +58,7 @@ rocprofiler_status_t
 add_domain_op(domain_context<DomainT>& _cfg, DomainT _domain, uint32_t _op)
 {
     if(_domain <= domain_info<DomainT>::none || _domain >= domain_info<DomainT>::last)
-        return ROCPROFILER_STATUS_ERROR_DOMAIN_NOT_FOUND;
+        return ROCPROFILER_STATUS_ERROR_KIND_NOT_FOUND;
 
     if(_op >= domain_info<DomainT>::padding) return ROCPROFILER_STATUS_ERROR_OPERATION_NOT_FOUND;
 
