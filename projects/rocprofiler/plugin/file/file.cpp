@@ -389,7 +389,7 @@ class file_plugin_t {
         found = kernel_name.rfind(key, found - 1);
       }
     }
-    *output_file << "," << std::to_string(profiler_record->kernel_id.handle) << ",\"" << kernel_name
+    *output_file << ",\"" << kernel_name
                  << "\"," << std::to_string(profiler_record->timestamps.begin.value) << ","
                  << std::to_string(profiler_record->timestamps.end.value) << ","
                  << std::to_string(profiler_record->correlation_id.value);
