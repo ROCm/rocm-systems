@@ -245,27 +245,6 @@ WriteInterceptor(const void* packets,
 }
 }  // namespace
 
-AQLPacket::~AQLPacket()
-{
-    if(!command_buf_mallocd)
-    {
-        free_func(profile.command_buffer.ptr);
-    }
-    else
-    {
-        free(profile.command_buffer.ptr);
-    }
-
-    if(!output_buffer_malloced)
-    {
-        free_func(profile.output_buffer.ptr);
-    }
-    else
-    {
-        free(profile.output_buffer.ptr);
-    }
-}
-
 Queue::~Queue()
 {
     // Potentially replace with condition variable at some point
