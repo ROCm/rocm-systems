@@ -222,7 +222,7 @@ class file_plugin_t {
             return HSA_STATUS_ERROR;
 
           *file << std::hex << std::showbase << agent.handle << " agent "
-                << ((type == HSA_DEVICE_TYPE_CPU) ? "cpu" : "gpu") << std::endl;
+                << ((type == HSA_DEVICE_TYPE_CPU) ? "cpu" : "gpu") << "\n";
           return HSA_STATUS_SUCCESS;
         },
         &hsa_handles);
@@ -237,7 +237,7 @@ class file_plugin_t {
 
     roctracer_timestamp_t app_begin_timestamp;
     CHECK_ROCTRACER(roctracer_get_timestamp(&app_begin_timestamp));
-    begin_ts << std::dec << app_begin_timestamp << std::endl;
+    begin_ts << std::dec << app_begin_timestamp << "\n";
     if (begin_ts.fail()) {
       warning("Cannot write to '%s'", begin_ts.name().c_str());
       return;
@@ -247,25 +247,28 @@ class file_plugin_t {
   }
 
   int write_callback_record(const roctracer_record_t* record, const void* callback_data) {
+    std::stringstream ss;
     output_file_t* output_file{nullptr};
     switch (record->domain) {
       case ACTIVITY_DOMAIN_ROCTX: {
         const roctx_api_data_t* data = reinterpret_cast<const roctx_api_data_t*>(callback_data);
         output_file = get_output_file(ACTIVITY_DOMAIN_ROCTX);
-        *output_file << std::dec << record->begin_ns << " " << record->process_id << ":"
-                     << record->thread_id << " " << record->op << ":" << data->args.id << ":\""
-                     << (data->args.message ? data->args.message : "") << "\"" << std::endl;
+        ss << std::dec << record->begin_ns << " " << record->process_id << ":" << record->thread_id
+           << " " << record->op << ":" << data->args.id << ":\""
+           << (data->args.message ? data->args.message : "") << "\""
+           << "\n";
+        *output_file << ss.str();
         break;
       }
       case ACTIVITY_DOMAIN_HSA_API: {
         const hsa_api_data_t* data = reinterpret_cast<const hsa_api_data_t*>(callback_data);
         output_file = get_output_file(ACTIVITY_DOMAIN_HSA_API);
-        *output_file << std::dec << record->begin_ns << ":"
-                     << ((record->op == HSA_API_ID_hsa_shut_down) ? record->begin_ns
-                                                                  : record->end_ns)
-                     << " " << record->process_id << ":" << record->thread_id << " "
-                     << hsa_api_data_pair_t(record->op, *data) << " :" << std::dec
-                     << data->correlation_id << std::endl;
+        ss << std::dec << record->begin_ns << ":"
+           << ((record->op == HSA_API_ID_hsa_shut_down) ? record->begin_ns : record->end_ns) << " "
+           << record->process_id << ":" << record->thread_id << " "
+           << hsa_api_data_pair_t(record->op, *data) << " :" << std::dec << data->correlation_id
+           << "\n";
+        *output_file << ss.str();
         break;
       }
       case ACTIVITY_DOMAIN_HIP_API: {
@@ -283,10 +286,10 @@ class file_plugin_t {
         }
 
         output_file = get_output_file(ACTIVITY_DOMAIN_HIP_API);
-        *output_file << std::dec << record->begin_ns << ":" << record->end_ns << " "
-                     << record->process_id << ":" << record->thread_id << " "
-                     << hipApiString((hip_api_id_t)record->op, data) << kernel_name << " :"
-                     << std::dec << data->correlation_id << std::endl;
+        ss << std::dec << record->begin_ns << ":" << record->end_ns << " " << record->process_id
+           << ":" << record->thread_id << " " << hipApiString((hip_api_id_t)record->op, data)
+           << kernel_name << " :" << std::dec << data->correlation_id << "\n";
+        *output_file << ss.str();
         break;
       }
       default:
@@ -299,6 +302,7 @@ class file_plugin_t {
 
   int write_activity_records(const roctracer_record_t* begin, const roctracer_record_t* end) {
     while (begin != end) {
+      std::stringstream ss;
       output_file_t* output_file{nullptr};
       const char* name = roctracer_op_string(begin->domain, begin->op, begin->kind);
 
@@ -311,21 +315,23 @@ class file_plugin_t {
           if (begin->correlation_id == 0) break;
 
           output_file = get_output_file(ACTIVITY_DOMAIN_HIP_OPS);
-          *output_file << std::dec << begin->begin_ns << ":" << begin->end_ns << " "
-                       << begin->device_id << ":" << begin->queue_id << " " << name << ":"
-                       << begin->correlation_id << ":" << GetPid() << std::endl;
+          ss << std::dec << begin->begin_ns << ":" << begin->end_ns << " " << begin->device_id
+             << ":" << begin->queue_id << " " << name << ":" << begin->correlation_id << ":"
+             << GetPid() << "\n";
+          *output_file << ss.str();
           break;
         }
         case ACTIVITY_DOMAIN_HSA_OPS:
           output_file = get_output_file(ACTIVITY_DOMAIN_HSA_OPS, begin->op);
           if (begin->op == HSA_OP_ID_COPY) {
-            *output_file << std::dec << begin->begin_ns << ":" << begin->end_ns
-                         << " async-copy:" << begin->correlation_id << ":" << GetPid() << std::endl;
+            ss << std::dec << begin->begin_ns << ":" << begin->end_ns
+               << " async-copy:" << begin->correlation_id << ":" << GetPid() << "\n";
+            *output_file << ss.str();
             break;
           } else if (begin->op == HSA_OP_ID_RESERVED1) {
-            *output_file << std::dec << begin->pc_sample.se << " " << begin->pc_sample.cycle << " "
-                         << std::hex << std::showbase << begin->pc_sample.pc << " " << name
-                         << std::endl;
+            ss << std::dec << begin->pc_sample.se << " " << begin->pc_sample.cycle << " "
+               << std::hex << std::showbase << begin->pc_sample.pc << " " << name << "\n";
+            *output_file << ss.str();
             break;
           }
           [[fallthrough]];
