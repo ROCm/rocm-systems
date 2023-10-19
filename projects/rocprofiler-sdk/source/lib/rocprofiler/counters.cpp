@@ -6,6 +6,7 @@
 #include "lib/rocprofiler/counters/metrics.hpp"
 #include "lib/rocprofiler/hsa/agent_cache.hpp"
 #include "lib/rocprofiler/hsa/queue.hpp"
+#include "lib/rocprofiler/hsa/queue_controller.hpp"
 
 extern "C" {
 /**

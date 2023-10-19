@@ -4,6 +4,7 @@
 #include "lib/rocprofiler/aql/helpers.hpp"
 #include "lib/rocprofiler/aql/packet_construct.hpp"
 #include "lib/rocprofiler/context/context.hpp"
+#include "lib/rocprofiler/hsa/queue_controller.hpp"
 #include "lib/rocprofiler/registration.hpp"
 
 #include <rocprofiler/rocprofiler.h>

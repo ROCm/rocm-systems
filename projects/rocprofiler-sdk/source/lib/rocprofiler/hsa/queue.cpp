@@ -21,6 +21,9 @@
 #include "lib/rocprofiler/hsa/queue.hpp"
 
 #include <glog/logging.h>
+#include <atomic>
+#include <chrono>
+#include <thread>
 
 namespace rocprofiler
 {
@@ -88,24 +91,6 @@ AddVendorSpecificPacket(const hsa_ext_amd_aql_pm4_packet_t&        packet,
                         const hsa_signal_t&                        packet_completion_signal)
 {
     transformed_packets.emplace_back(packet).completion_signal = packet_completion_signal;
-}
-}  // namespace
-
-void
-Queue::signal_async_handler(const hsa_signal_t& signal, Queue::queue_info_session_t* data) const
-{
-    hsa_status_t status = _ext_api.hsa_amd_signal_async_handler_fn(
-        signal, HSA_SIGNAL_CONDITION_EQ, 0, AsyncSignalHandler, static_cast<void*>(data));
-    LOG_IF(FATAL, status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK)
-        << "Error: hsa_amd_signal_async_handler failed";
-}
-
-void
-Queue::create_signal(uint32_t attribute, hsa_signal_t* signal) const
-{
-    hsa_status_t status = _ext_api.hsa_amd_signal_create_fn(1, 0, nullptr, attribute, signal);
-    LOG_IF(FATAL, status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK)
-        << "Error: hsa_amd_signal_create failed";
 }
 
 template <typename Integral = uint64_t>
@@ -258,6 +243,55 @@ WriteInterceptor(const void* packets,
 
     writer(transformed_packets.data(), transformed_packets.size());
 }
+}  // namespace
+
+AQLPacket::~AQLPacket()
+{
+    if(!command_buf_mallocd)
+    {
+        free_func(profile.command_buffer.ptr);
+    }
+    else
+    {
+        free(profile.command_buffer.ptr);
+    }
+
+    if(!output_buffer_malloced)
+    {
+        free_func(profile.output_buffer.ptr);
+    }
+    else
+    {
+        free(profile.output_buffer.ptr);
+    }
+}
+
+Queue::~Queue()
+{
+    // Potentially replace with condition variable at some point
+    // but performance may not matter here.
+    while(_active_async_packets.load(std::memory_order_relaxed) > 0)
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds{1});
+    }
+}
+
+void
+Queue::signal_async_handler(const hsa_signal_t& signal, Queue::queue_info_session_t* data) const
+{
+    hsa_status_t status = _ext_api.hsa_amd_signal_async_handler_fn(
+        signal, HSA_SIGNAL_CONDITION_EQ, 0, AsyncSignalHandler, static_cast<void*>(data));
+    LOG_IF(FATAL, status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK)
+        << "Error: hsa_amd_signal_async_handler failed";
+}
+
+void
+Queue::create_signal(uint32_t attribute, hsa_signal_t* signal) const
+{
+    hsa_status_t status = _ext_api.hsa_amd_signal_create_fn(1, 0, nullptr, attribute, signal);
+    LOG_IF(FATAL, status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK)
+        << "Error: hsa_amd_signal_create failed";
+}
 
 Queue::Queue(const AgentCache&  agent,
              uint32_t           size,
@@ -313,159 +347,5 @@ Queue::remove_callback(ClientID id)
         if(map.erase(id) == 1) _notifiers--;
     });
 }
-
-void
-QueueController::add_queue(hsa_queue_t* id, std::unique_ptr<Queue> queue)
-{
-    CHECK(queue);
-    _callback_cache.wlock([&](auto& callbacks) {
-        _queues.wlock([&](auto& map) {
-            const auto agent_id = queue->get_agent().agent_t().id.handle;
-            map[id]             = std::move(queue);
-            for(const auto& [cbid, cb_tuple] : callbacks)
-            {
-                auto& [agent, qcb, ccb] = cb_tuple;
-                if(agent.id.handle == agent_id)
-                {
-                    map[id]->register_callback(cbid, qcb, ccb);
-                }
-            }
-        });
-    });
-}
-
-void
-QueueController::destory_queue(hsa_queue_t* id)
-{
-    _queues.wlock([&](auto& map) { map.erase(id); });
-}
-
-ClientID
-QueueController::add_callback(const rocprofiler_agent_t& agent,
-                              Queue::QueueCB             qcb,
-                              Queue::CompletedCB         ccb)
-{
-    static std::atomic<ClientID> client_id = 1;
-    ClientID                     return_id;
-    _callback_cache.wlock([&](auto& cb_cache) {
-        return_id           = client_id;
-        cb_cache[client_id] = std::tuple(agent, qcb, ccb);
-        client_id++;
-        _queues.wlock([&](auto& map) {
-            for(auto& [_, queue] : map)
-            {
-                if(queue->get_agent().agent_t().id.handle == agent.id.handle)
-                {
-                    queue->register_callback(return_id, qcb, ccb);
-                }
-            }
-        });
-    });
-    return return_id;
-}
-
-void
-QueueController::remove_callback(ClientID id)
-{
-    _callback_cache.wlock([&](auto& cb_cache) {
-        cb_cache.erase(id);
-        _queues.wlock([&](auto& map) {
-            for(auto& [_, queue] : map)
-            {
-                queue->remove_callback(id);
-            }
-        });
-    });
-}
-
-// HSA Intercept Functions (create_queue/destroy_queue)
-hsa_status_t
-create_queue(hsa_agent_t        agent,
-             uint32_t           size,
-             hsa_queue_type32_t type,
-             void (*callback)(hsa_status_t status, hsa_queue_t* source, void* data),
-             void*         data,
-             uint32_t      private_segment_size,
-             uint32_t      group_segment_size,
-             hsa_queue_t** queue)
-{
-    for(const auto& [_, agent_info] : get_queue_controller().get_supported_agents())
-    {
-        if(agent_info.get_agent().handle == agent.handle)
-        {
-            auto new_queue = std::make_unique<Queue>(agent_info,
-                                                     size,
-                                                     type,
-                                                     callback,
-                                                     data,
-                                                     private_segment_size,
-                                                     group_segment_size,
-                                                     get_queue_controller().get_core_table(),
-                                                     get_queue_controller().get_ext_table(),
-                                                     queue);
-            get_queue_controller().add_queue(*queue, std::move(new_queue));
-            return HSA_STATUS_SUCCESS;
-        }
-    }
-    LOG(FATAL) << "Could not find agent - " << agent.handle;
-    return HSA_STATUS_ERROR_FATAL;
-}
-
-hsa_status_t
-destroy_queue(hsa_queue_t* hsa_queue)
-{
-    get_queue_controller().destory_queue(hsa_queue);
-    return HSA_STATUS_SUCCESS;
-}
-
-void
-QueueController::Init(CoreApiTable& core_table, AmdExtTable& ext_table)
-{
-    _core_table = core_table;
-    _ext_table  = ext_table;
-
-    core_table.hsa_queue_create_fn  = create_queue;
-    core_table.hsa_queue_destroy_fn = destroy_queue;
-
-    // Generate supported agents
-    rocprofiler_query_available_agents(
-        [](const rocprofiler_agent_t** agents, size_t num_agents, void* user_data) {
-            CHECK(user_data);
-            QueueController& queue = *reinterpret_cast<QueueController*>(user_data);
-            for(size_t i = 0; i < num_agents; i++)
-            {
-                const auto& agent = *agents[i];
-                if(agent.type != ROCPROFILER_AGENT_TYPE_GPU) continue;
-                try
-                {
-                    queue.get_supported_agents().emplace(
-                        i, AgentCache{agent, i, queue.get_core_table(), queue.get_ext_table()});
-                } catch(std::runtime_error& error)
-                {
-                    LOG(ERROR) << fmt::format("GPU Agent Construction Failed (HSA queue will not "
-                                              "be intercepted): {} ({})",
-                                              agent.id.handle,
-                                              error.what());
-                }
-            }
-            return ROCPROFILER_STATUS_SUCCESS;
-        },
-        sizeof(rocprofiler_agent_t),
-        this);
-}
-
-QueueController&
-get_queue_controller()
-{
-    static QueueController controller;
-    return controller;
-}
-
-void
-queue_controller_init(HsaApiTable* table)
-{
-    get_queue_controller().Init(*table->core_, *table->amd_ext_);
-}
-
 }  // namespace hsa
 }  // namespace rocprofiler

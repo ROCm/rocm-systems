@@ -24,6 +24,7 @@
 #include "lib/rocprofiler/context/context.hpp"
 #include "lib/rocprofiler/hsa/hsa.hpp"
 #include "lib/rocprofiler/hsa/queue.hpp"
+#include "lib/rocprofiler/hsa/queue_controller.hpp"
 #include "lib/rocprofiler/internal_threading.hpp"
 
 #include <rocprofiler/context.h>
