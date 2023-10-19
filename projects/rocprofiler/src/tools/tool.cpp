@@ -197,18 +197,25 @@ struct hip_api_trace_entry_t {
   }
 };
 
+size_t GetBufferSize() {
+  auto bufSize = getenv("ROCPROFILER_BUFFER_SIZE");
+  // Default size if not set
+  if (!bufSize) return 0x200000;
+  return std::stoll({bufSize});
+}
+
 rocprofiler::TraceBuffer<hip_api_trace_entry_t> hip_api_buffer(
-    "HIP API", 0x200000, [](hip_api_trace_entry_t* entry) {
+    "HIP API", GetBufferSize(), [](hip_api_trace_entry_t* entry) {
       assert(plugin && "plugin is not initialized");
       plugin->write_callback_record(entry->record);
     });
 rocprofiler::TraceBuffer<hsa_api_trace_entry_t> hsa_api_buffer(
-    "HSA API", 0x200000, [](hsa_api_trace_entry_t* entry) {
+    "HSA API", GetBufferSize(), [](hsa_api_trace_entry_t* entry) {
       assert(plugin && "plugin is not initialized");
       plugin->write_callback_record(entry->record);
     });
 rocprofiler::TraceBuffer<roctx_trace_entry_t> roctx_trace_buffer(
-    "rocTX API", 0x200000, [](roctx_trace_entry_t* entry) {
+    "rocTX API", GetBufferSize(), [](roctx_trace_entry_t* entry) {
       assert(plugin && "plugin is not initialized");
       plugin->write_callback_record(entry->record);
     });
