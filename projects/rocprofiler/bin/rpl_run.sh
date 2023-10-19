@@ -404,6 +404,15 @@ while [ 1 ] ; do
       echo "Wrong option '$1 $2'"
       usage
     fi
+  elif [ "$1" = "--version" ]; then
+    if [ -f "$BIN_DIR/../libexec/rocprofiler/rocprofiler-version" ]; then
+      ROCPROFILER_LIBRARY_VERSION=1 $BIN_DIR/../libexec/rocprofiler/rocprofiler-version
+    else
+      ROCM_VERSION=$(cat $BIN_DIR/../.info/version)
+      echo -e "ROCm version: $ROCM_VERSION"
+      echo -e "ROCProfiler version: 2.0"
+    fi
+    exit 0
   elif [ "$1" = "-h" ] ; then
     usage
   elif [ "$1" = "-i" ] ; then

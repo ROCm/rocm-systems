@@ -303,3 +303,6 @@ Example for file plugin output:
 - CSV mode for ATT. See README.
 - Added option to control kernel name truncation.
 - Limit rocprof(v1) srcipt usage to only supported architectures.
+- Added Tool versioning to be able to run rocprofv2 using rocprof. See README for more information.
+- Added Plugin Versioning way in rocprofv2. See README for more details.
+- Added --version in the rocprof and rocprofv2 to be able to see the current rocprof/v2 version along with ROCm version information.

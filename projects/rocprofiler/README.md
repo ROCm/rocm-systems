@@ -220,6 +220,23 @@ A command line utility to control a session (launch/start/stop/exit), with the r
   rocsys –session session_name exit
   ```
 
+### ROCProf Versioning Support
+
+Currently, rocprof can support both versions, rocprof and rocprofv2, that can be done using `--tool-version`
+
+```bash
+rocprof --tool-version <VERSION_REQUIRED> <rocprof/v2_options> <app_relative_path>
+```
+
+- `--tool-version 1` means it will just use rocprof V1.
+- `--tool-version 2` means it will just use rocprofv2.
+
+To know what version you are using right now, along with more information about the rocm version, use the following:
+
+```bash
+rocprof --version
+```
+
 ### Counters and Metric Collection
 
 HW counters and derived metrics can be collected using following option:
@@ -279,11 +296,29 @@ rocprofiler-plugins_2.0.0-local_amd64.deb
 rocprofiler-plugins-2.0.0-local.x86_64.rpm
 ```
 
-- File plugin: outputs the data in txt files.
+Plugins may have multiple versions, the user can specify which version of the plugin to use by running the following command:
+
+```bash
+rocprofv2 --plugin <plugin_name> --plugin-version <plugin_version_required> <rocprofv2_options> <app_relative_path>
+```
+
+- File plugin: outputs the data in txt files. File plugin have two versions, by default version 2 is the current default.
 Usage:
 
   ```bash
   rocprofv2 --plugin file -i samples/input.txt -d output_dir <app_relative_path> # -d is optional, but can be used to define the directory output for output results
+  ```
+
+  File plugin version 1 output header will be similar to the legacy rocprof v1 output:
+
+  ```text
+  Index,KernelName,gpu-id,queue-id,queue-index,pid,tid,grd,wgr,lds,scr,arch_vgpr,accum_vgpr,sgpr,wave_size,sig,obj,DispatchNs,BeginNs,EndNs,CompleteNs,Counters
+  ```
+
+  File plugin version 2 output header:
+
+  ```text
+  Dispatch_ID,GPU_ID,Queue_ID,PID,TID,Grid_Size,Workgroup_Size,LDS_Per_Workgroup,Scratch_Per_Workitem,Arch_VGPR,Accum_VGPR,SGPR,Wave_Size,Kernel_Name,Start_Timestamp,End_Timestamp,Correlation_ID,Counters
   ```
 
 - Perfetto plugin: outputs the data in protobuf format. Protobuf files can be viewed using ui.perfetto.dev or using trace_processor.
@@ -362,7 +397,7 @@ Tool used to collect fine-grained hardware metrics. Provides ISA-level instructi
         - 1 = capture symbols for file:// and make a copy of memory://
         - 2 = Copy file:// and memory://
     - By default, kernel names are truncated for ATT.To disable, please see the kernel name truncation section below.
-  
+
   - Example for vectoradd.
 
     ```bash
@@ -371,9 +406,11 @@ Tool used to collect fine-grained hardware metrics. Provides ISA-level instructi
     # "auto" means to use the automatically captured ISA. "csv" dumps result to "vectoradd_float_v0.csv".
     rocprofv2 -i input.txt --plugin att auto --mode csv ./vectoradd_hip.exe
     ```
+
     Instruction latencies will be in vectoradd_float_v0.csv
 
   - Example with symbolic ISA (as in ROCm 5.7 or previous).
+
     ```bash
     hipcc -g --save-temps vectoradd_hip.cpp -o vectoradd_hip.exe
     # A custom ISA can be used such as vectoradd_hip-hip-amdgcn-amd-amdhsa-gfx1100.s
@@ -389,7 +426,9 @@ Tool used to collect fine-grained hardware metrics. Provides ISA-level instructi
   # Run only data collection, not the parser
   rocprofv2 -i input.txt --plugin att auto --mode off ./vectoradd_hip.exe
   ```
+
   Remove the binary/application from the command line.
+
   ```bash
   # Only runs the parser on previously collected data.
   rocprofv2 -i input.txt --plugin att auto --mode csv

@@ -8,7 +8,7 @@ if [ -n "${ROCP_PRELOAD}" ]; then LD_PRELOAD="${ROCP_PRELOAD}"; fi
 CURRENT_DIR="$( dirname -- "$0"; )";
 ROCPROFV2_DIR=$(dirname -- $(realpath ${BASH_SOURCE[0]}));
 ROCM_DIR=$( dirname -- "$ROCPROFV2_DIR"; )
-PLUGIN_LIST=("ctf" "perfetto" "file" "att")
+PLUGIN_LIST=("ctf" "perfetto" "file" "att" "cli")
 RUN_FROM_BUILD=0
 if [[ $ROCPROFV2_DIR == *"/build"* ]]; then
   RUN_FROM_BUILD=1
@@ -41,7 +41,7 @@ usage() {
   echo -e "${GREEN}--kernel-trace ${RESET}               For Collecting Kernel dispatch Traces"
   echo -e "${GREEN}--sys-trace ${RESET}                  For Collecting HIP and HSA APIs and their Activities Traces along ROCTX and Kernel Dispatch traces\n"
   echo -e "\t#${GREY}usage e.g: rocprofv2 --[hip-trace|hsa-trace|roctx-trace|kernel-trace|sys-trace]  <executable>\n"${RESET}
-  echo -e "${GREEN}--plugin ${RESET} PLUGIN_NAME         For enabling a plugin (file/perfetto/att/ctf)"
+  echo -e "${GREEN}--plugin ${RESET} PLUGIN_NAME         For enabling a plugin (cli/file/perfetto/att/ctf)"
   echo -e "\t#${GREY} usage(file/perfetto/ctf) e.g: rocprofv2 -i pmc.txt --plugin [file/perfetto/ctf] -d out_dir <executable>"
   echo -e "\t# usage(att): rocprofv2 <rocprofv2_params> --plugin att <ISA_file> <att_parameters> <executable>"
   echo -e "\t# use \"rocprofv2 --plugin att --help\" for ATT-specific parameters help.${RESET}\n"
@@ -69,24 +69,24 @@ fi
 OUTPUT_PATH_INTERNAL="."
 
 while [ 1 ]; do
-  if [[ "$1" = "-h" || "$1" = "--help" ]]; then
+  if [[ "$1" == "-h" || "$1" == "--help" ]]; then
     usage
     exit 1
-  elif [[ "$1" = "-t" || "$1" = "--test" ]]; then
+  elif [[ "$1" == "-t" || "$1" == "--test" ]]; then
     if [ $RUN_FROM_BUILD == 1 ]; then
       ./run_tests.sh
       exit 1
     fi
-  elif [[ "$1" = "-mt" || "$1" = "--mem-test" ]]; then
+  elif [[ "$1" == "-mt" || "$1" == "--mem-test" ]]; then
     if [ $RUN_FROM_BUILD == 1 ]; then
       $ROCM_DIR/tests-v2/memorytests/run_asan_tests.sh $ROCM_DIR/tests-v2/featuretests/profiler/apps/hip_vectoradd $ROCM_DIR/memleaks.log
       exit 1
     fi
-  elif [[ "$1" = "--list-counters" ]]; then
+  elif [[ "$1" == "--list-counters" ]]; then
     export LD_PRELOAD=$LD_PRELOAD:$ROCM_DIR/lib/rocprofiler/librocprofiler_tool.so
     eval $ROCM_DIR/libexec/rocprofiler/ctrl
     exit 1
-  elif [[ "$1" = "-i" || "$1" = "--input" ]]; then
+  elif [[ "$1" == "-i" || "$1" == "--input" ]]; then
     if [ $2 ] && [ -n $2 ] && [ -r $2 ]; then
       export COUNTERS_PATH=$2
     else
@@ -96,7 +96,7 @@ while [ 1 ]; do
     fi
     shift
     shift
-  elif [[ "$1" = "-o" || "$1" = "--output-file-name" ]]; then
+  elif [[ "$1" == "-o" || "$1" == "--output-file-name" ]]; then
     if [ $2 ]; then
       export OUT_FILE_NAME=$2
     else
@@ -105,7 +105,7 @@ while [ 1 ]; do
     fi
     shift
     shift
-  elif [[ "$1" = "-d" || "$1" = "--output-directory" ]]; then
+  elif [[ "$1" == "-d" || "$1" == "--output-directory" ]]; then
     if [ $2 ]; then
       OUTPUT_PATH_INTERNAL=$2
       export OUTPUT_PATH=$OUTPUT_PATH_INTERNAL
@@ -115,7 +115,7 @@ while [ 1 ]; do
     fi
     shift
     shift
-  elif [[ "$1" = "-fi" || "$1" = "--flush-interval" ]]; then
+  elif [[ "$1" == "-fi" || "$1" == "--flush-interval" ]]; then
     if [ $2 ] && [ $2 -gt 0 ]; then
       export ROCPROFILER_FLUSH_INTERVAL=$2
     else
@@ -125,7 +125,7 @@ while [ 1 ]; do
     fi
     shift
     shift
-  elif [[ "$1" = "-tp" || "$1" = "--trace-period" ]]; then
+  elif [[ "$1" == "-tp" || "$1" == "--trace-period" ]]; then
     if [ $2 ] && [[ "$2" == *":"* ]]; then
       export ROCPROFILER_TRACE_PERIOD=$2
     else
@@ -135,38 +135,38 @@ while [ 1 ]; do
     fi
     shift
     shift
-  elif [ "$1" = "--hip-api" ]; then
+  elif [ "$1" == "--hip-api" ]; then
     export ROCPROFILER_HIP_API_TRACE=1
     shift
-  elif [[ "$1" = "--hip-activity" || "$1" = "--hip-trace" ]]; then
+  elif [[ "$1" == "--hip-activity" || "$1" == "--hip-trace" ]]; then
     export ROCPROFILER_HIP_API_TRACE=1
     export ROCPROFILER_HIP_ACTIVITY_TRACE=1
     shift
-  elif [ "$1" = "--hsa-api" ]; then
+  elif [ "$1" == "--hsa-api" ]; then
     export ROCPROFILER_HSA_API_TRACE=1
     shift
-  elif [[ "$1" = "--hsa-activity" || "$1" = "--hsa-trace" ]]; then
+  elif [[ "$1" == "--hsa-activity" || "$1" == "--hsa-trace" ]]; then
     export ROCPROFILER_HSA_API_TRACE=1
     export ROCPROFILER_HSA_ACTIVITY_TRACE=1
     shift
-  elif [ "$1" = "--roctx-trace" ]; then
+  elif [ "$1" == "--roctx-trace" ]; then
     export ROCPROFILER_ROCTX_TRACE=1
     shift
-  elif [ "$1" = "--kernel-trace" ]; then
+  elif [ "$1" == "--kernel-trace" ]; then
     export ROCPROFILER_KERNEL_TRACE=1
     shift
-  elif [ "$1" = "--sys-trace" ]; then
+  elif [ "$1" == "--sys-trace" ]; then
     export ROCPROFILER_HIP_API_TRACE=1
     export ROCPROFILER_HIP_ACTIVITY_TRACE=1
     export ROCPROFILER_HSA_API_TRACE=1
     export ROCPROFILER_HSA_ACTIVITY_TRACE=1
     export ROCPROFILER_ROCTX_TRACE=1
     shift
-  elif [ "$1" = "--roc-sys" ]; then
+  elif [ "$1" == "--roc-sys" ]; then
     export ROCPROFILER_ENABLE_ROCSYS=$2
     shift
     shift
-  elif [ "$1" = "-m" ]; then
+  elif [ "$1" == "-m" ]; then
     if [ $2 ] && [ -n $2 ] && [ -r $2 ]; then
      export ROCPROFILER_METRICS_PATH=$2
     else
@@ -176,17 +176,33 @@ while [ 1 ]; do
     fi
     shift
     shift
-  elif [ "$1" = "--basenames" ]; then
+  elif [ "$1" == "--version" ]; then
+    if [ -f "$ROCM_DIR/libexec/rocprofiler/rocprofiler-version" ]; then
+      ROCPROFILER_LIBRARY_VERSION=2 $ROCM_DIR/libexec/rocprofiler/rocprofiler-version
+    else
+      ROCM_VERSION=$(cat $ROCM_DIR/.info/version)
+      echo -e "ROCm version: $ROCM_VERSION"
+      echo -e "ROCProfiler version: 2.0"
+    fi
+    exit 0
+  elif [ "$1" == "--basenames" ]; then
     export ROCPROFILER_TRUNCATE_KERNEL_PATH=1
-    shift
-  elif [ "$1" = "--version" ]; then
-    shift
-    shift
-  elif [ "$1" = "--plugin-version" ]; then
-    export ROCPROFILER_PLUGIN_LIB=$ROCPROFILER_PLUGIN_LIB.$2
+  elif [ "$1" == "--tool-version" ]; then
     shift
     shift
-  elif [ "$1" = "--plugin" ]; then
+  elif [ "$1" == "--plugin-version" ]; then
+    export ROCPROFILER_PLUGIN_LIB_VERSION=".$2"
+    if [ ! -z $ROCPROFILER_PLUGIN_LIB ]; then
+      if [ -f $ROCM_DIR/lib/rocprofiler/$ROCPROFILER_PLUGIN_LIB$ROCPROFILER_PLUGIN_LIB_VERSION ]; then
+        export ROCPROFILER_PLUGIN_LIB=$ROCPROFILER_PLUGIN_LIB$ROCPROFILER_PLUGIN_LIB_VERSION
+      else
+        echo -e "Error: \"$ROCPROFILER_PLUGIN_LIB$ROCPROFILER_PLUGIN_LIB_VERSION\" doesn't exist!"
+        exit 1
+      fi
+    fi
+    shift
+    shift
+  elif [ "$1" == "--plugin" ]; then
     if [ -n $2 ]; then
       PLUGIN=$2
       if [[ ! "${PLUGIN_LIST[*]}" =~ $PLUGIN ]]; then
@@ -194,7 +210,7 @@ while [ 1 ]; do
         usage
         exit 1
       fi
-      export ROCPROFILER_PLUGIN_LIB=lib${PLUGIN}_plugin.so$ROCPROFILER_PLUGIN_LIB
+      export ROCPROFILER_PLUGIN_LIB=lib${PLUGIN}_plugin.so$ROCPROFILER_PLUGIN_LIB_VERSION
     else
       echo -e "Wrong input \"$2\" for plugin!"
       usage
@@ -229,7 +245,7 @@ while [ 1 ]; do
     fi
     shift
     shift
-  elif [[ "$1" = "-"* || "$1" = "--"* ]]; then
+  elif [[ "$1" == "-"* || "$1" == "--"* ]]; then
     echo -e "Wrong option \"$1\", Please use the following options:\n"
     usage
     exit 1
@@ -251,6 +267,18 @@ if [ -n "$COUNTERS_PATH" ]; then
       PMC_LINES+=("$line")
     fi
   done <$input
+fi
+
+if [ -z $ROCPROFILER_PLUGIN_LIB ]; then
+  PLUGIN_TO_BE_USED=file_plugin
+  if [ -z $OUTPUT_PATH ]; then
+    PLUGIN_TO_BE_USED=cli_plugin
+  fi
+  if [ -f $ROCM_DIR/lib/rocprofiler/$ROCPROFILER_PLUGIN_LIB$ROCPROFILER_PLUGIN_LIB_VERSION ]; then
+    export ROCPROFILER_PLUGIN_LIB=lib$PLUGIN_TO_BE_USED.so$ROCPROFILER_PLUGIN_LIB_VERSION
+  else
+    export ROCPROFILER_PLUGIN_LIB=lib$PLUGIN_TO_BE_USED.so
+  fi
 fi
 
 if [ -n "$PMC_LINES" ] && [ ! -n "$ATT_ARGV" ]; then

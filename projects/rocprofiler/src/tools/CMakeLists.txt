@@ -47,6 +47,7 @@ install(TARGETS rocprofiler_tool LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/roc
 
 add_subdirectory(rocsys)
 add_subdirectory(rocprofv2)
+add_subdirectory(versioning)
 
 add_executable(ctrl ctrl.cpp)
 set_target_properties(
