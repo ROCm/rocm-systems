@@ -2,11 +2,11 @@ name: Continuous Integration
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ amd-mainline, amd-staging ]
     paths-ignore:
       - '*.md'
   pull_request:
-    branches: [ main, develop ]
+    branches: [ amd-mainline, amd-staging ]
     paths-ignore:
       - '*.md'
 
