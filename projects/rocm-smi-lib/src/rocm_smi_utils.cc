@@ -520,7 +520,7 @@ std::vector<std::string> readEntireFile(std::string path) {
 void displayAppTmpFilesContent() {
   std::vector<std::string> tmpFiles = getListOfAppTmpFiles();
   if (!tmpFiles.empty()) {
-    for (auto &x: tmpFiles) {
+    for (auto &x : tmpFiles) {
       std::string out = readFile(x);
       std::cout << __PRETTY_FUNCTION__ << " | Temporary file: " << x
                 << "; Contained content: " << out << std::endl;
@@ -539,7 +539,7 @@ std::string debugVectorContent(std::vector<std::string> v) {
     for (auto it=v.begin(); it < v.end(); it++) {
       ss << *it;
       auto temp_it = it;
-      if(++temp_it != v.end()) {
+      if (++temp_it != v.end()) {
         ss << ", ";
       }
     }
@@ -557,7 +557,7 @@ std::string displayAllDevicePaths(std::vector<std::shared_ptr<Device>> v) {
     for (auto it=v.begin(); it < v.end(); it++) {
       ss << (*it)->path();
       auto temp_it = it;
-      if(++temp_it != v.end()) {
+      if (++temp_it != v.end()) {
         ss << ", ";
       }
     }

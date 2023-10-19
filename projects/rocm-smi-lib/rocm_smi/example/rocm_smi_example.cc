@@ -58,8 +58,8 @@
 #define PRINT_RSMI_ERR(RET) { \
   if (RET != RSMI_STATUS_SUCCESS) { \
     std::cout << "[ERROR] RSMI call returned " << (RET) \
-      << " at line " << __LINE__ << std::endl; \
-      std::cout << amd::smi::getRSMIStatusString(RET) << std::endl; \
+      << " at line " << __LINE__ << "\n"; \
+      std::cout << amd::smi::getRSMIStatusString(RET) << "\n"; \
   } \
 }
 
@@ -718,7 +718,7 @@ int main() {
 
   rsmi_num_monitor_devices(&num_monitor_devs);
   for (uint32_t i = 0; i < num_monitor_devs; ++i) {
-    std::cout << "\t**Device #: " << std::dec << i << std::endl;
+    std::cout << "\t**Device #: " << std::dec << i << "\n";
     ret = rsmi_dev_id_get(i, &val_ui16);
     CHK_RSMI_RET_I(ret)
     std::cout << "\t**Device ID: 0x" << std::hex << val_ui16 << "\n";
@@ -765,8 +765,9 @@ int main() {
       uint64_t max_bandwidth = 0;
       ret = rsmi_minmax_bandwidth_get(0, i, &min_bandwidth, &max_bandwidth);
       CHK_RSMI_NOT_SUPPORTED_OR_UNEXPECTED_DATA_RET(ret)
-      std::cout << "\nMinimum Bandwidth: " << min_bandwidth
-                << "\nMaximum Bandwidth: " << max_bandwidth;
+      std::cout << "\n\t**\tMinimum Bandwidth: " << std::dec << min_bandwidth
+                << "\n\t**\tMaximum Bandwidth: " << std::dec
+                << max_bandwidth << "\n";
     } else {
       std::cout << "Not Supported\n";
     }
@@ -813,7 +814,7 @@ int main() {
     ret = rsmi_dev_temp_metric_get(i, RSMI_TEMP_TYPE_EDGE,
       rsmi_temperature_metric_t::RSMI_TEMP_CURRENT, &val_i64);
     if (ret == RSMI_STATUS_SUCCESS) {
-      std::cout << val_i64/1000 << "C" << "\n";
+      std::cout << std::dec << val_i64/1000 << " C" << "\n";
     }
     CHK_RSMI_NOT_SUPPORTED_RET(ret)
 
@@ -821,7 +822,7 @@ int main() {
     ret = rsmi_dev_temp_metric_get(i, RSMI_TEMP_TYPE_JUNCTION,
       rsmi_temperature_metric_t::RSMI_TEMP_CURRENT, &val_i64);
     if (ret == RSMI_STATUS_SUCCESS) {
-      std::cout << (val_i64 / 1000) << "C" << std::endl;
+      std::cout << std::dec << (val_i64 / 1000) << " C" << "\n";
     }
     CHK_RSMI_NOT_SUPPORTED_RET(ret)
 
@@ -869,14 +870,14 @@ int main() {
     std::cout << "\t**Average Power Usage: ";
     ret = rsmi_dev_power_ave_get(i, 0, &val_ui64);
     if (ret == RSMI_STATUS_SUCCESS) {
-      std::cout << convert_mw_to_w(val_ui64) << " W" << std::endl;
+      std::cout << convert_mw_to_w(val_ui64) << " W" << "\n";
     }
     CHK_RSMI_NOT_SUPPORTED_RET(ret)
 
     std::cout << "\t**Current Socket Power Usage: ";
     ret = rsmi_dev_current_socket_power_get(i, &val_ui64);
     if (ret == RSMI_STATUS_SUCCESS) {
-      std::cout << convert_mw_to_w(val_ui64) << " W" << std::endl;
+      std::cout << convert_mw_to_w(val_ui64) << " W" << "\n";
     }
     CHK_RSMI_NOT_SUPPORTED_RET(ret)
 
@@ -884,7 +885,7 @@ int main() {
     ret = rsmi_dev_power_get(i, &val_ui64, &power_type);
     if (ret == RSMI_STATUS_SUCCESS) {
       std::cout << "[" << amd::smi::power_type_string(power_type) << "] "
-                << convert_mw_to_w(val_ui64) << " W" << std::endl;
+                << convert_mw_to_w(val_ui64) << " W" << "\n";
     }
     CHK_RSMI_NOT_SUPPORTED_RET(ret)
     std::cout << "\t=======" << "\n";
@@ -897,7 +898,7 @@ int main() {
     return 0;
   }
 
-  for (uint32_t i = 0; i< num_monitor_devs; ++i) {
+  for (uint32_t i = 0; i < num_monitor_devs; ++i) {
     ret = test_set_overdrive(i);
     CHK_AND_PRINT_RSMI_ERR_RET(ret)
 

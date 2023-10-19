@@ -167,6 +167,8 @@ void TestPowerRead::Run(void) {
       err = rsmi_dev_power_get(i, &val_ui64, &type);
       ASSERT_TRUE(err == RSMI_STATUS_SUCCESS
                  || err == RSMI_STATUS_NOT_SUPPORTED);
+      ASSERT_TRUE(type == RSMI_AVERAGE_POWER || type == RSMI_CURRENT_POWER
+                  || type == RSMI_INVALID_POWER);
 
       if (err == RSMI_STATUS_NOT_SUPPORTED) {
         std::cout <<

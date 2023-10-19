@@ -128,7 +128,7 @@ class RocmSMI {
     std::map<std::pair<uint32_t, uint32_t>, std::shared_ptr<IOLink>>
       io_link_map_;
     std::map<uint32_t, uint32_t> dev_ind_to_node_ind_map_;
-    void AddToDeviceList(std::string dev_name);
+    void AddToDeviceList(std::string dev_name, uint64_t bdfid = 0);
     void GetEnvVariables(void);
     std::shared_ptr<Monitor> FindMonitor(std::string monitor_path);
 

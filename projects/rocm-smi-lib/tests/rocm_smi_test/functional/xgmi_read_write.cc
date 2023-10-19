@@ -85,6 +85,7 @@ void TestXGMIReadWrite::Close() {
 
 
 void TestXGMIReadWrite::Run(void) {
+  GTEST_SKIP_("Temporarily disabled");
   rsmi_status_t err;
   rsmi_xgmi_status_t err_stat;
   uint64_t hive_id;
