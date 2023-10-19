@@ -19,6 +19,7 @@
 // THE SOFTWARE.
 
 #include "lib/rocprofiler/hsa/queue_controller.hpp"
+#include "lib/rocprofiler/context/context.hpp"
 
 #include <glog/logging.h>
 
@@ -139,9 +140,6 @@ QueueController::init(CoreApiTable& core_table, AmdExtTable& ext_table)
     _core_table = core_table;
     _ext_table  = ext_table;
 
-    core_table.hsa_queue_create_fn  = create_queue;
-    core_table.hsa_queue_destroy_fn = destroy_queue;
-
     // Generate supported agents
     rocprofiler_query_available_agents(
         [](const rocprofiler_agent_t** agents, size_t num_agents, void* user_data) {
@@ -167,6 +165,37 @@ QueueController::init(CoreApiTable& core_table, AmdExtTable& ext_table)
         },
         sizeof(rocprofiler_agent_t),
         this);
+
+    auto enable_intercepter = false;
+    for(const auto& itr : context::get_registered_contexts())
+    {
+        constexpr auto expected_context_size = 160UL;
+        static_assert(
+            sizeof(context::context) == expected_context_size,
+            "If you added a new field to context struct, make sure there is a check here if it "
+            "requires queue interception. Once you have done so, increment expected_context_size");
+
+        if(itr->counter_collection)
+        {
+            enable_intercepter = true;
+            break;
+        }
+        else if(itr->buffered_tracer)
+        {
+            if(itr->buffered_tracer->domains(ROCPROFILER_SERVICE_BUFFER_TRACING_KERNEL_DISPATCH) ||
+               itr->buffered_tracer->domains(ROCPROFILER_SERVICE_BUFFER_TRACING_MEMORY_COPY))
+            {
+                enable_intercepter = true;
+                break;
+            }
+        }
+    }
+
+    if(enable_intercepter)
+    {
+        core_table.hsa_queue_create_fn  = create_queue;
+        core_table.hsa_queue_destroy_fn = destroy_queue;
+    }
 }
 
 QueueController&

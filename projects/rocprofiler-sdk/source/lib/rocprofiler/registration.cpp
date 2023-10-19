@@ -540,11 +540,15 @@ rocprofiler_set_api_table(const char* name,
         LOG_IF(ERROR, num_tables > 1)
             << " rocprofiler expected HSA library to pass 1 API table, not " << num_tables;
 
-        auto* hsa_api_table       = static_cast<HsaApiTable*>(*tables);
+        auto* hsa_api_table = static_cast<HsaApiTable*>(*tables);
+        rocprofiler::hsa::queue_controller_init(hsa_api_table);
+
+        // any internal modifications to the HsaApiTable need to be done before we make the
+        // copy or else those modifications will be lost when HSA API tracing is enabled
+        // because the HSA API tracing invokes the function pointers from the copy below
         auto& saved_hsa_api_table = rocprofiler::hsa::get_table();
         ::copyTables(hsa_api_table, &saved_hsa_api_table);
 
-        rocprofiler::hsa::queue_controller_init(hsa_api_table);
         rocprofiler::hsa::update_table(hsa_api_table);
     }
     else if(std::string_view{name} == "roctx")
