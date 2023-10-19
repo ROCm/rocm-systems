@@ -40,21 +40,23 @@ The following tools are required for gRPC build & installation
 
     automake make g++ unzip build-essential autoconf libtool pkg-config libgflags-dev libgtest-dev clang-5.0 libc++-dev curl
 
-Download and build gRPC
-```bash
-git clone -b v1.44.0 https://github.com/grpc/grpc
-cd grpc
-git submodule update --init --recursive
-mkdir -p build
-```
+### Download and build gRPC
 
 By default (without using CMAKE_INSTALL_PREFIX option), gRPC will install to /usr/local lib, include and bin directories.  
 It is highly recommended to install gRPC into a unique directory.  
 Below example installs gRPC into /opt/grpc
 
 ```bash
+git clone -b v1.59.1 https://github.com/grpc/grpc --depth=1 --shallow-submodules --recurse-submodules
+cd grpc
 export GRPC_ROOT=/opt/grpc
-cmake -B build -DgRPC_INSTALL=ON -DBUILD_SHARED_LIBS=ON -DCMAKE_INSTALL_PREFIX="$GRPC_ROOT"
+cmake -B build \
+    -DgRPC_INSTALL=ON \
+    -DgRPC_BUILD_TESTS=OFF \
+    -DBUILD_SHARED_LIBS=ON \
+    -DCMAKE_INSTALL_PREFIX="$GRPC_ROOT" \
+    -DCMAKE_INSTALL_LIBDIR=lib \
+    -DCMAKE_BUILD_TYPE=Release
 make -C build -j $(nproc)
 sudo make -C build install
 echo "$GRPC_ROOT" | sudo tee /etc/ld.so.conf.d/grpc.conf

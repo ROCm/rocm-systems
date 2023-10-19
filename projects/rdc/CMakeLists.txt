@@ -83,7 +83,7 @@ set(COMMON_DIR "${CMAKE_CURRENT_SOURCE_DIR}/common")
 
 set(GRPC_ROOT_DEFAULT "/usr")
 set(GRPC_ROOT ${GRPC_ROOT_DEFAULT} CACHE STRING "GRPC installation directory.")
-set(GRPC_DESIRED_VERSION 1.44.0 CACHE STRING "GRPC desired package version.")
+set(GRPC_DESIRED_VERSION 1.59.1 CACHE STRING "GRPC desired package version.")
 set(RDC_SHARE_INSTALL_PREFIX "share/${RDC}" CACHE INTERNAL "Tests and Example install directory")
 
 set(CMAKE_INSTALL_PREFIX ${ROCM_DIR} CACHE STRING "Default installation directory.")
