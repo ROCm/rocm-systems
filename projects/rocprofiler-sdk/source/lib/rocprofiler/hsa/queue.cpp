@@ -31,6 +31,15 @@ namespace hsa
 {
 namespace
 {
+common::active_capacity_gate&
+signal_limiter()
+{
+    // Limit the maximun number of HSA signals created.
+    // There is a hard limit to the maximum that can exist.
+    static common::active_capacity_gate _gate(1024);
+    return _gate;
+}
+
 bool
 AsyncSignalHandler(hsa_signal_value_t, void* data)
 {
@@ -59,14 +68,23 @@ AsyncSignalHandler(hsa_signal_value_t, void* data)
         }
     });
 
+    size_t signals_to_remove = 0;
     // Delete signals and packets, signal we have completed.
     if(queue_info_session.interrupt_signal.handle != 0u)
+    {
+        signals_to_remove++;
         queue_info_session.queue.core_api().hsa_signal_destroy_fn(
             queue_info_session.interrupt_signal);
+    }
     if(queue_info_session.kernel_pkt.completion_signal.handle != 0u)
     {
+        signals_to_remove++;
         queue_info_session.queue.core_api().hsa_signal_destroy_fn(
             queue_info_session.kernel_pkt.completion_signal);
+    }
+    if(signals_to_remove > 0)
+    {
+        signal_limiter().remove_active(signals_to_remove);
     }
     queue_info_session.queue.async_complete();
 
@@ -267,6 +285,7 @@ Queue::signal_async_handler(const hsa_signal_t& signal, Queue::queue_info_sessio
 void
 Queue::create_signal(uint32_t attribute, hsa_signal_t* signal) const
 {
+    signal_limiter().add_active(1);
     hsa_status_t status = _ext_api.hsa_amd_signal_create_fn(1, 0, nullptr, attribute, signal);
     LOG_IF(FATAL, status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK)
         << "Error: hsa_amd_signal_create failed";

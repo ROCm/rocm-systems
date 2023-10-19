@@ -47,7 +47,7 @@ set_tests_properties(
     counter-collection
     PROPERTIES
         TIMEOUT
-        45
+        300
         LABELS
         "samples"
         ENVIRONMENT

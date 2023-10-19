@@ -25,7 +25,9 @@
 #include <sys/syscall.h>
 #include <unistd.h>
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -95,6 +97,58 @@ public:
 private:
     T _data;
     L _destroy_func;
+};
+
+/**
+ * Limits the number of active items to those set in capacity.
+ * If capacity is reached, will block until another caller
+ * removes active capacity.
+ */
+class active_capacity_gate
+{
+public:
+    active_capacity_gate(size_t capacity)
+    : _capacity(capacity)
+    {}
+    void add_active(size_t size)
+    {
+        if(size >= _capacity)
+        {
+            throw std::runtime_error("Size exceeds gate capacity");
+        }
+
+        std::unique_lock lock(_m);
+        if(_count + size < _capacity)
+        {
+            _count += size;
+            return;
+        }
+        _waiters++;
+        _cv.wait(lock, [&]() { return _count + size < _capacity; });
+        _waiters--;
+        _count += size;
+    }
+
+    void remove_active(size_t size)
+    {
+        std::unique_lock lock(_m);
+        if(_count > size)
+            _count -= size;
+        else
+            _count = 0;
+
+        if(_waiters > 0)
+        {
+            _cv.notify_all();
+        }
+    }
+
+private:
+    size_t                  _count{0};
+    size_t                  _capacity{0};
+    size_t                  _waiters{0};
+    std::mutex              _m;
+    std::condition_variable _cv;
 };
 
 }  // namespace common
