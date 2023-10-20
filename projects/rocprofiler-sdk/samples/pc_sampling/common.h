@@ -49,20 +49,20 @@ find_first_gpu_agent_impl(const rocprofiler_agent_t** agents, size_t num_agents,
         if(agents[i]->type == ROCPROFILER_AGENT_TYPE_GPU)
         {
             *_out_agent = *agents[i];
-            printf("[%s] %s :: id=%zu, type=%i, num pc sample configs=%zu\n",
+            printf("[%s] %s :: id=%u, type=%i, num pc sample configs=%zu\n",
                    __FUNCTION__,
                    _out_agent->name,
-                   _out_agent->id.handle,
+                   _out_agent->node_id,
                    _out_agent->type,
                    _out_agent->num_pc_sampling_configs);
             return ROCPROFILER_STATUS_SUCCESS;
         }
         else
         {
-            printf("[%s] %s :: id=%zu, type=%i, num pc sample configs=%zu\n",
+            printf("[%s] %s :: id=%u, type=%i, num pc sample configs=%zu\n",
                    __FUNCTION__,
                    agents[i]->name,
-                   agents[i]->id.handle,
+                   agents[i]->node_id,
                    agents[i]->type,
                    agents[i]->num_pc_sampling_configs);
         }

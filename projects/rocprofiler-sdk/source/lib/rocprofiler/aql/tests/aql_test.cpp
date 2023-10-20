@@ -60,7 +60,7 @@ TEST(aql_profile, construct_packets)
         auto agents = rocprofiler::hsa::get_queue_controller().get_supported_agents();
         for(const auto& [_, agent] : agents)
         {
-            LOG(WARNING) << fmt::format("Found Agent: {}", agent.get_agent().handle);
+            LOG(WARNING) << fmt::format("Found Agent: {}", agent.get_hsa_agent().handle);
             auto metrics = rocprofiler::findDeviceMetrics(agent, {"SQ_WAVES"});
             ASSERT_EQ(metrics.size(), 1);
             AQLPacketConstruct(agent, metrics);
@@ -82,7 +82,7 @@ TEST(aql_profile, too_many_counters)
 
         for(const auto& [_, agent] : agents)
         {
-            LOG(WARNING) << fmt::format("Found Agent: {}", agent.get_agent().handle);
+            LOG(WARNING) << fmt::format("Found Agent: {}", agent.get_hsa_agent().handle);
 
             auto metrics = rocprofiler::findDeviceMetrics(agent, {});
             EXPECT_THROW(

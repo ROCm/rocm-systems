@@ -185,7 +185,10 @@ typedef struct rocprofiler_agent_t
                                        ///< do not assume the number of PC sampling configurations
                                        ///< based on the device type.
     const rocprofiler_pc_sampling_configuration_t*
-        pc_sampling_configs;  ///< GPU only. Array of PC sampling configuration types.
+             pc_sampling_configs;  ///< GPU only. Array of PC sampling configuration types.
+    uint32_t node_id;    ///< Node sequence number. This will be equivalent to the HSA-runtime
+                         ///< HSA_AMD_AGENT_INFO_DRIVER_NODE_ID property
+    uint32_t reserved0;  ///< reserved padding
 } rocprofiler_agent_t;
 
 /**

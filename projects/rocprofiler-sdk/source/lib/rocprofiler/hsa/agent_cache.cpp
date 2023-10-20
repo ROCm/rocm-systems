@@ -23,15 +23,12 @@
 #include <glog/logging.h>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <optional>
+#include <stdexcept>
 
 #include "lib/common/synchronized.hpp"
 #include "lib/common/utility.hpp"
-
-// For Pre-ROCm 6.0 releases
-#if ROCPROFILER_HSA_RUNTIME_VERSION <= 100900
-#    define HSA_AMD_AGENT_INFO_NEAREST_CPU 0xA113
-#endif
 
 namespace
 {
@@ -118,7 +115,7 @@ init_gpu_pool(const AmdExtTable& api, rocprofiler::hsa::AgentCache& agent)
     std::pair<const AmdExtTable*, hsa_amd_memory_pool_t*> params =
         std::make_pair(&api, &agent.gpu_pool());
     auto status =
-        api.hsa_amd_agent_iterate_memory_pools_fn(agent.get_agent(), FindStandardPool, &params);
+        api.hsa_amd_agent_iterate_memory_pools_fn(agent.get_hsa_agent(), FindStandardPool, &params);
 
     if(status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK)
     {
@@ -132,82 +129,27 @@ namespace rocprofiler
 {
 namespace hsa
 {
-AgentCache::AgentCache(rocprofiler_agent_t   agent_t,
-                       size_t                index,
-                       const ::CoreApiTable& table,
-                       const AmdExtTable&    ext)
-: _agent_t(agent_t)
-, _index(index)
-, _name(agent_t.name)
+AgentCache::AgentCache(const rocprofiler_agent_t* rocp_agent,
+                       hsa_agent_t                hsa_agent,
+                       size_t                     index,
+                       hsa_agent_t                nearest_cpu,
+                       const AmdExtTable&         ext_table)
+: m_rocp_agent{rocp_agent}
+, m_index{index}
+, m_hsa_agent{hsa_agent}
+, m_nearest_cpu{nearest_cpu}
+, m_name{rocp_agent->name}
 {
-    // Get HSA Agents
-    std::vector<hsa_agent_t> agents;
-    table.hsa_iterate_agents_fn(
-        [](hsa_agent_t agent, void* data) {
-            CHECK_NOTNULL(static_cast<std::vector<hsa_agent_t>*>(data))->emplace_back(agent);
-            return HSA_STATUS_SUCCESS;
-        },
-        &agents);
-
-    // In case HSA_AMD_AGENT_INFO_NEAREST_CPU is non-functional, default to original v1 behavior
-    // of last CPU agent being nearest.
-    std::optional<hsa_agent_t> last_cpu;
-
-    bool found = false;
-    // Find the HSA agent that is represented by rocprofiler_agent_t
-    for(const auto& agent : agents)
-    {
-        hsa_device_type_t type = HSA_DEVICE_TYPE_CPU;
-        if(table.hsa_agent_get_info_fn(agent, HSA_AGENT_INFO_DEVICE, &type) != HSA_STATUS_SUCCESS)
-        {
-            throw std::runtime_error("hsa_agent_get_info failed to find device");
-        }
-
-        if(type != HSA_DEVICE_TYPE_GPU)
-        {
-            if(type == HSA_DEVICE_TYPE_CPU && !last_cpu) last_cpu = agent;
-            continue;
-        }
-
-        uint32_t node_id = 0;
-        if(table.hsa_agent_get_info_fn(
-               agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_DRIVER_NODE_ID), &node_id) !=
-           HSA_STATUS_SUCCESS)
-        {
-            throw std::runtime_error("hsa_agent_get_info failed to find driver id");
-        }
-
-        // Match rocprofiler_agent_t to hsa_agent for GPU agents
-        if(_index != node_id) continue;
-
-        if(table.hsa_agent_get_info_fn(
-               agent,
-               static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NEAREST_CPU),
-               &_nearest_cpu) != HSA_STATUS_SUCCESS)
-        {
-            _nearest_cpu = last_cpu ? *last_cpu : hsa_agent_t{.handle = 0};
-        }
-
-        found  = true;
-        _agent = agent;
-    }
-
-    if(!found)
-    {
-        throw std::runtime_error(fmt::format("Could not find GPU id = {}", agent_t.id.handle));
-    }
-
     // Construct CPU/GPU pools
-
     try
     {
-        init_cpu_pool(ext, *this);
-        init_gpu_pool(ext, *this);
+        init_cpu_pool(ext_table, *this);
+        init_gpu_pool(ext_table, *this);
     } catch(std::runtime_error& e)
     {
         LOG(WARNING) << fmt::format(
-            "Buffer creation for Agent {} failed ({}), Some profiling options will be unavialable.",
-            agent_t.id.handle,
+            "Buffer creation for Agent {} failed ({}), Some profiling options will be unavailable.",
+            rocp_agent->node_id,
             e.what());
     }
 }

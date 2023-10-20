@@ -19,7 +19,11 @@
 // THE SOFTWARE.
 
 #include "lib/rocprofiler/hsa/queue_controller.hpp"
+#include "lib/rocprofiler/agent.hpp"
 #include "lib/rocprofiler/context/context.hpp"
+#include "lib/rocprofiler/hsa/agent_cache.hpp"
+
+#include <rocprofiler/fwd.h>
 
 #include <glog/logging.h>
 
@@ -42,7 +46,7 @@ create_queue(hsa_agent_t        agent,
 {
     for(const auto& [_, agent_info] : get_queue_controller().get_supported_agents())
     {
-        if(agent_info.get_agent().handle == agent.handle)
+        if(agent_info.get_hsa_agent().handle == agent.handle)
         {
             auto new_queue = std::make_unique<Queue>(agent_info,
                                                      size,
@@ -76,7 +80,7 @@ QueueController::add_queue(hsa_queue_t* id, std::unique_ptr<Queue> queue)
     CHECK(queue);
     _callback_cache.wlock([&](auto& callbacks) {
         _queues.wlock([&](auto& map) {
-            const auto agent_id = queue->get_agent().agent_t().id.handle;
+            const auto agent_id = queue->get_agent().get_rocp_agent().id.handle;
             map[id]             = std::move(queue);
             for(const auto& [cbid, cb_tuple] : callbacks)
             {
@@ -110,7 +114,7 @@ QueueController::add_callback(const rocprofiler_agent_t& agent,
         _queues.wlock([&](auto& map) {
             for(auto& [_, queue] : map)
             {
-                if(queue->get_agent().agent_t().id.handle == agent.id.handle)
+                if(queue->get_agent().get_rocp_agent().id.handle == agent.id.handle)
                 {
                     queue->register_callback(return_id, qcb, ccb);
                 }
@@ -140,31 +144,17 @@ QueueController::init(CoreApiTable& core_table, AmdExtTable& ext_table)
     _core_table = core_table;
     _ext_table  = ext_table;
 
+    auto agents = agent::get_agents();
+
     // Generate supported agents
-    rocprofiler_query_available_agents(
-        [](const rocprofiler_agent_t** agents, size_t num_agents, void* user_data) {
-            CHECK(user_data);
-            QueueController& queue = *reinterpret_cast<QueueController*>(user_data);
-            for(size_t i = 0; i < num_agents; i++)
-            {
-                const auto& agent = *agents[i];
-                if(agent.type != ROCPROFILER_AGENT_TYPE_GPU) continue;
-                try
-                {
-                    queue.get_supported_agents().emplace(
-                        i, AgentCache{agent, i, queue.get_core_table(), queue.get_ext_table()});
-                } catch(std::runtime_error& error)
-                {
-                    LOG(ERROR) << fmt::format("GPU Agent Construction Failed (HSA queue will not "
-                                              "be intercepted): {} ({})",
-                                              agent.id.handle,
-                                              error.what());
-                }
-            }
-            return ROCPROFILER_STATUS_SUCCESS;
-        },
-        sizeof(rocprofiler_agent_t),
-        this);
+    for(const auto* itr : agents)
+    {
+        auto cached_agent = agent::get_agent_cache(itr);
+        if(cached_agent && cached_agent->get_rocp_agent().type == ROCPROFILER_AGENT_TYPE_GPU)
+        {
+            get_supported_agents().emplace(cached_agent->index(), *cached_agent);
+        }
+    }
 
     auto enable_intercepter = false;
     for(const auto& itr : context::get_registered_contexts())

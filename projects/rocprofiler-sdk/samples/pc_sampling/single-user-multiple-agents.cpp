@@ -38,20 +38,20 @@ find_all_gpu_agents_supporting_pc_sampling_impl(const rocprofiler_agent_t** agen
 
             _out_agents->push_back(*agents[i]);
 
-            printf("[%s] %s :: id=%zu, type=%i, num pc sample configs=%zu\n",
+            printf("[%s] %s :: id=%u, type=%i, num pc sample configs=%zu\n",
                    __FUNCTION__,
                    agents[i]->name,
-                   agents[i]->id.handle,
+                   agents[i]->node_id,
                    agents[i]->type,
                    agents[i]->num_pc_sampling_configs);
             return ROCPROFILER_STATUS_SUCCESS;
         }
         else
         {
-            printf("[%s] %s :: id=%zu, type=%i, num pc sample configs=%zu\n",
+            printf("[%s] %s :: id=%u, type=%i, num pc sample configs=%zu\n",
                    __FUNCTION__,
                    agents[i]->name,
-                   agents[i]->id.handle,
+                   agents[i]->node_id,
                    agents[i]->type,
                    agents[i]->num_pc_sampling_configs);
         }

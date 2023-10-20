@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "lib/rocprofiler/registration.hpp"
+#include "lib/rocprofiler/agent.hpp"
 #include "lib/rocprofiler/context/context.hpp"
 #include "lib/rocprofiler/hsa/hsa.hpp"
 #include "lib/rocprofiler/hsa/queue.hpp"
@@ -541,6 +542,9 @@ rocprofiler_set_api_table(const char* name,
             << " rocprofiler expected HSA library to pass 1 API table, not " << num_tables;
 
         auto* hsa_api_table = static_cast<HsaApiTable*>(*tables);
+
+        // need to construct agent mappings before initializing the queue controller
+        rocprofiler::agent::construct_agent_cache(hsa_api_table);
         rocprofiler::hsa::queue_controller_init(hsa_api_table);
 
         // any internal modifications to the HsaApiTable need to be done before we make the

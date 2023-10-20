@@ -81,7 +81,7 @@ rocprofiler_query_counter_instance_count(rocprofiler_agent_t      agent,
             *instance_count = std::max(size_t(1), *instance_count);
             continue;
         }
-        auto query_info = rocprofiler::aql::get_query_info(maybe_agent->get_agent(), counter);
+        auto query_info = rocprofiler::aql::get_query_info(maybe_agent->get_hsa_agent(), counter);
         *instance_count = std::max(static_cast<size_t>(query_info.instance_count), *instance_count);
     }
 

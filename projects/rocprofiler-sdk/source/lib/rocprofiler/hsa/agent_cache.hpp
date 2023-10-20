@@ -53,34 +53,59 @@ static const uint32_t LDS_BLOCK_SIZE = 128 * 4;
 class AgentCache
 {
 public:
-    AgentCache(rocprofiler_agent_t, size_t index, const ::CoreApiTable&, const AmdExtTable&);
+    AgentCache(const rocprofiler_agent_t* rocp_agent,
+               hsa_agent_t                hsa_agent,
+               size_t                     index,
+               hsa_agent_t                nearest_cpu,
+               const AmdExtTable&         ext_table);
+    ~AgentCache()                     = default;
+    AgentCache(const AgentCache&)     = default;
+    AgentCache(AgentCache&&) noexcept = default;
+
+    AgentCache& operator=(const AgentCache&) = default;
+    AgentCache& operator=(AgentCache&&) noexcept = default;
 
     // Provides const and a non-const accessor functions.
-    CONST_NONCONST_ACCESSOR(hsa_amd_memory_pool_t, cpu_pool, _cpu_pool);
-    CONST_NONCONST_ACCESSOR(hsa_amd_memory_pool_t, kernarg_pool, _kernarg_pool);
-    CONST_NONCONST_ACCESSOR(hsa_amd_memory_pool_t, gpu_pool, _gpu_pool);
-    CONST_NONCONST_ACCESSOR(rocprofiler_agent_t, agent_t, _agent_t);
-    CONST_NONCONST_ACCESSOR(hsa_agent_t, get_agent, _agent);
-    CONST_NONCONST_ACCESSOR(hsa_agent_t, near_cpu, _nearest_cpu);
+    CONST_NONCONST_ACCESSOR(hsa_amd_memory_pool_t, cpu_pool, m_cpu_pool);
+    CONST_NONCONST_ACCESSOR(hsa_amd_memory_pool_t, kernarg_pool, m_kernarg_pool);
+    CONST_NONCONST_ACCESSOR(hsa_amd_memory_pool_t, gpu_pool, m_gpu_pool);
+    CONST_NONCONST_ACCESSOR(hsa_agent_t, get_hsa_agent, m_hsa_agent);
+    CONST_NONCONST_ACCESSOR(hsa_agent_t, near_cpu, m_nearest_cpu);
 
-    const std::string& name() const { return _name; }
+    const rocprofiler_agent_t& get_rocp_agent() const { return *m_rocp_agent; }
+    std::string_view           name() const { return m_name; }
+    size_t                     index() const { return m_index; }
+
+    bool operator==(const rocprofiler_agent_t*) const;
+    bool operator==(hsa_agent_t) const;
 
 private:
     // Agent info
-    rocprofiler_agent_t _agent_t;
-    size_t              _index{0};  // rocprofiler_agent index
+    const rocprofiler_agent_t* m_rocp_agent = nullptr;
+    size_t                     m_index{0};  // rocprofiler_agent index
 
     // GPU Agent
-    hsa_agent_t _agent{.handle = 0};
-    hsa_agent_t _nearest_cpu{.handle = 0};
+    hsa_agent_t m_hsa_agent{.handle = 0};
+    hsa_agent_t m_nearest_cpu{.handle = 0};
 
     // memory pools
-    hsa_amd_memory_pool_t _cpu_pool{.handle = 0};
-    hsa_amd_memory_pool_t _kernarg_pool{.handle = 0};
-    hsa_amd_memory_pool_t _gpu_pool{.handle = 0};
+    hsa_amd_memory_pool_t m_cpu_pool{.handle = 0};
+    hsa_amd_memory_pool_t m_kernarg_pool{.handle = 0};
+    hsa_amd_memory_pool_t m_gpu_pool{.handle = 0};
 
-    std::string _name;
+    std::string_view m_name = {};
 };
 
+inline bool
+AgentCache::operator==(const rocprofiler_agent_t* agent) const
+{
+    return (agent == m_rocp_agent);
+}
+
+inline bool
+AgentCache::operator==(hsa_agent_t agent) const
+{
+    return (agent.handle == m_hsa_agent.handle);
+}
 }  // namespace hsa
 }  // namespace rocprofiler

@@ -99,13 +99,17 @@ TEST(rocprofiler_lib, agent_abi)
     EXPECT_EQ(offsetof(rocprofiler_agent_t, model_name), 272) << msg;
     EXPECT_EQ(offsetof(rocprofiler_agent_t, num_pc_sampling_configs), 280) << msg;
     EXPECT_EQ(offsetof(rocprofiler_agent_t, pc_sampling_configs), 288) << msg;
+    EXPECT_EQ(offsetof(rocprofiler_agent_t, node_id), 296) << msg;
+    EXPECT_EQ(offsetof(rocprofiler_agent_t, reserved0), 300) << msg;
     // Add test for offset of new field above this. Do NOT change any existing values!
 
+    constexpr auto expected_rocp_agent_size = 304;
     // If a new field is added, increase this value by the size of the new field(s)
-    EXPECT_EQ(sizeof(rocprofiler_agent_t), 296)
+    EXPECT_EQ(sizeof(rocprofiler_agent_t), expected_rocp_agent_size)
         << "ABI break. If you added a new field, make sure that this is the only new check that "
            "failed. Please add a check for the new field at the offset and update this test to the "
            "new size";
+    static_assert(sizeof(rocprofiler_agent_t) == expected_rocp_agent_size, "Update agent size!");
 }
 
 TEST(rocprofiler_lib, agent)
@@ -115,10 +119,18 @@ TEST(rocprofiler_lib, agent)
     auto info_ret = std::system("/usr/bin/rocminfo");
     EXPECT_EQ(info_ret, 0);
 
-    auto sys_ret = std::system(
+    std::cout << "# Data from '/sys/class/kfd/kfd/topology/nodes': \n" << std::flush;
+    auto sys_ret_kfd = std::system(
         "/bin/bash -c 'for i in $(find /sys/class/kfd/kfd/topology/nodes -maxdepth 2 -type f | "
         "grep properties | sort); do echo -e \"\n##### ${i} #####\n\"; cat ${i}; echo \"\"; done'");
-    EXPECT_EQ(sys_ret, 0);
+    EXPECT_EQ(sys_ret_kfd, 0);
+
+    std::cout << "# Data from '/sys/devices/virtual/kfd/kfd/topology/nodes': \n" << std::flush;
+    auto sys_ret_virt =
+        std::system("/bin/bash -c 'for i in $(find /sys/devices/virtual/kfd/kfd/topology/nodes "
+                    "-maxdepth 2 -type f | grep properties | sort); do echo -e \"\n##### ${i} "
+                    "#####\n\"; cat ${i}; echo \"\"; done'");
+    EXPECT_EQ(sys_ret_virt, 0);
 
     auto                              agents = std::vector<const rocprofiler_agent_t*>{};
     rocprofiler_available_agents_cb_t iterate_cb =
@@ -133,6 +145,7 @@ TEST(rocprofiler_lib, agent)
             return ROCPROFILER_STATUS_SUCCESS;
         };
 
+    std::cout << "# querying available agents...\n" << std::flush;
     auto status =
         rocprofiler_query_available_agents(iterate_cb,
                                            sizeof(rocprofiler_agent_t),
@@ -154,7 +167,7 @@ TEST(rocprofiler_lib, agent)
                                agent->name,
                                agent->model_name,
                                agent->gfx_target_version,
-                               agent->id.handle,
+                               agent->node_id,
                                agent->type == ROCPROFILER_AGENT_TYPE_CPU ? "CPU" : "GPU");
 
         // std::cout << msg << std::endl;
@@ -182,6 +195,9 @@ TEST(rocprofiler_lib, agent)
         EXPECT_EQ(std::string_view{agent->product_name},
                   std::string_view{hsa_agent->device_mkt_name})
             << msg;
+        EXPECT_EQ(agent->node_id, hsa_agent->internal_node_id) << msg;
+        EXPECT_EQ(agent->location_id, hsa_agent->bdf_id) << msg;
+        EXPECT_EQ(agent->device_id, hsa_agent->chip_id) << msg;
         EXPECT_EQ(agent->simd_count, hsa_agent->compute_unit * hsa_agent->simds_per_cu) << msg;
         EXPECT_EQ(agent->cu_count, hsa_agent->compute_unit) << msg;
         EXPECT_EQ(agent->simd_per_cu, hsa_agent->simds_per_cu) << msg;

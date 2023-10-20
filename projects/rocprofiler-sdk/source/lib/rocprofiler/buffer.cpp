@@ -99,8 +99,6 @@ allocate_buffer()
 rocprofiler_status_t
 flush(rocprofiler_buffer_id_t buffer_id, bool wait)
 {
-    LOG(ERROR) << "flushing...";
-
     if(buffer_id.handle >= get_buffers().size()) return ROCPROFILER_STATUS_ERROR_BUFFER_NOT_FOUND;
 
     auto& buff = get_buffers().at(buffer_id.handle);
@@ -116,7 +114,6 @@ flush(rocprofiler_buffer_id_t buffer_id, bool wait)
     auto idx = buff->buffer_idx++;
 
     auto _task = [buffer_id, idx]() {
-        LOG(ERROR) << "executing task...";
         auto& buff_v          = get_buffers().at(buffer_id.handle);
         auto& buff_internal_v = buff_v->get_internal_buffer(idx);
 
@@ -154,7 +151,6 @@ flush(rocprofiler_buffer_id_t buffer_id, bool wait)
 
     if(task_group)
     {
-        LOG(ERROR) << "executing task...";
         task_group->exec(_task);
         if(wait) task_group->wait();
     }

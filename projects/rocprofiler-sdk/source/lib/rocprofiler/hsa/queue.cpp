@@ -307,7 +307,7 @@ Queue::Queue(const AgentCache&  agent,
 
 {
     LOG_IF(FATAL,
-           _ext_api.hsa_amd_queue_intercept_create_fn(_agent.get_agent(),
+           _ext_api.hsa_amd_queue_intercept_create_fn(_agent.get_hsa_agent(),
                                                       size,
                                                       type,
                                                       callback,

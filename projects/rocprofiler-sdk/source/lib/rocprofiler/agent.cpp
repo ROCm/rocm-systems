@@ -24,8 +24,12 @@
 #include <rocprofiler/fwd.h>
 #include <rocprofiler/rocprofiler.h>
 
+#include "lib/rocprofiler/agent.hpp"
+#include "lib/rocprofiler/hsa/agent_cache.hpp"
+
 #include <fmt/core.h>
 #include <glog/logging.h>
+#include <hsa/hsa_api_trace.h>
 #include <libdrm/amdgpu.h>
 #include <xf86drm.h>
 
@@ -161,20 +165,36 @@ get_cpu_info()
     return _v;
 }
 
+// check to see if the file is readable
+bool
+is_readable(const fs::path& fpath)
+{
+    auto ec    = std::error_code{};
+    auto perms = fs::status(fpath, ec).permissions();
+    LOG_IF(ERROR, ec) << fmt::format(
+        "Error getting status for file '{}': {}", fpath.string(), ec.message());
+    return (!ec && (perms & fs::perms::owner_read) != fs::perms::none);
+}
+
 auto
 read_file(const std::string& fname)
 {
     auto data = std::vector<std::string>{};
-    auto ifs  = std::ifstream{fname};
-    if(!ifs) throw std::runtime_error{fmt::format("file '{}' cannot be read", fname)};
+
+    if(!is_readable(fs::path{fname}))
+        throw std::runtime_error{fmt::format("file '{}' cannot be read", fname)};
+
+    auto ifs = std::ifstream{fname};
+    if(!ifs || !ifs.good())
+        throw std::runtime_error{fmt::format("file '{}' cannot be read", fname)};
 
     while(true)
     {
         auto value = std::string{};
         ifs >> value;
-        if(ifs.eof()) break;
+        if(ifs.eof() || value.empty()) break;
 
-        if(!value.empty()) data.emplace_back(value);
+        data.emplace_back(value);
     }
 
     return data;
@@ -184,14 +204,20 @@ auto
 read_map(const std::string& fname)
 {
     auto data = std::unordered_map<std::string, std::string>{};
-    auto ifs  = std::ifstream{fname};
-    if(!ifs) throw std::runtime_error{fmt::format("file '{}' cannot be read", fname)};
 
+    if(!is_readable(fs::path{fname}))
+        throw std::runtime_error{fmt::format("file '{}' cannot be read", fname)};
+
+    auto ifs = std::ifstream{fname};
+    if(!ifs || !ifs.good())
+        throw std::runtime_error{fmt::format("file '{}' cannot be read", fname)};
+
+    auto last_label = std::string{};
     while(true)
     {
         auto label = std::string{};
         ifs >> label;
-        if(ifs.eof()) break;
+        if(ifs.eof() || label.empty()) break;
 
         auto entry = std::string{};
         ifs >> entry;
@@ -201,7 +227,14 @@ read_map(const std::string& fname)
 
         auto ret = data.emplace(label, entry);
         if(!ret.second)
-            throw std::runtime_error{fmt::format("duplicate entry in '{}': {}", fname, label)};
+            throw std::runtime_error{
+                fmt::format("duplicate entry in '{}': '{}' (='{}'). last label was '{}'",
+                            fname,
+                            label,
+                            entry,
+                            last_label)};
+
+        if(!label.empty()) last_label = std::move(label);
     }
 
     return data;
@@ -297,13 +330,18 @@ read_topology()
 
     const auto& cpu_info_v = get_cpu_info();
     auto        data       = std::vector<unique_agent_t>{};
-    uint64_t    n          = 0;
+    uint64_t    idcount    = 0;
+    uint64_t    nodecount  = 0;
 
     while(true)
     {
-        auto idx       = n++;
+        auto idx       = idcount++;
         auto node_path = sysfs_nodes_path / std::to_string(idx);
+        // assumes that nodes are monotonically increasing and thus once we are missing a node
+        // folder for a number, there are no more nodes
         if(!fs::exists(node_path)) break;
+        // skip if we don't have permission to read the file
+        if(!is_readable(node_path)) continue;
 
         auto properties  = std::unordered_map<std::string, std::string>{};
         auto name_prop   = std::vector<std::string>{};
@@ -320,12 +358,16 @@ read_topology()
             continue;
         }
 
+        // we may have been able to open the properties file but if it was empty, we ignore it
+        if(properties.empty()) continue;
+
         auto agent_info = rocprofiler_agent_t{};
         memset(&agent_info, 0, sizeof(agent_info));
 
         agent_info.size      = sizeof(rocprofiler_agent_t);
         agent_info.id.handle = idx;
         agent_info.type      = ROCPROFILER_AGENT_TYPE_NONE;
+        agent_info.node_id   = nodecount++;
 
         if(!name_prop.empty())
             agent_info.model_name = strdup(name_prop.front().c_str());
@@ -568,7 +610,209 @@ get_agent_topology()
     static auto _v = read_topology();
     return _v;
 }
+
+auto&
+get_agent_caches()
+{
+    static auto _v = std::vector<hsa::AgentCache>{};
+    return _v;
+}
 }  // namespace
+
+std::vector<const rocprofiler_agent_t*>
+get_agents()
+{
+    auto& agents   = rocprofiler::agent::get_agent_topology();
+    auto  pointers = std::vector<const rocprofiler_agent_t*>{};
+    pointers.reserve(agents.size());
+    for(auto& agent : agents)
+    {
+        pointers.emplace_back(agent.get());
+    }
+    return pointers;
+}
+
+void
+construct_agent_cache(::HsaApiTable* table)
+{
+    if(!table) return;
+
+    auto rocp_agents = agent::get_agents();
+    auto hsa_agents  = std::vector<hsa_agent_t>{};
+
+    // Get HSA Agents
+    table->core_->hsa_iterate_agents_fn(
+        [](hsa_agent_t agent, void* data) {
+            CHECK_NOTNULL(static_cast<std::vector<hsa_agent_t>*>(data))->emplace_back(agent);
+            return HSA_STATUS_SUCCESS;
+        },
+        &hsa_agents);
+
+    LOG_IF(FATAL, rocp_agents.size() != hsa_agents.size())
+        << "Found " << rocp_agents.size() << " rocprofiler agents and " << hsa_agents.size()
+        << " HSA agents";
+
+    auto hsa_agent_node_map = std::unordered_map<uint32_t, hsa_agent_t>{};
+    for(const auto& itr : hsa_agents)
+    {
+        if(uint32_t node_id = 0;
+           table->core_->hsa_agent_get_info_fn(
+               itr, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_DRIVER_NODE_ID), &node_id) ==
+           HSA_STATUS_SUCCESS)
+        {
+            hsa_agent_node_map[node_id] = itr;
+        }
+    }
+
+    auto agent_map =
+        std::unordered_map<uint32_t, std::tuple<const rocprofiler_agent_t*, hsa_agent_t>>{};
+    for(const auto* ritr : rocp_agents)
+    {
+        for(auto hitr : hsa_agents)
+        {
+            if(uint32_t node_id = 0;
+               table->core_->hsa_agent_get_info_fn(
+                   hitr,
+                   static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_DRIVER_NODE_ID),
+                   &node_id) == HSA_STATUS_SUCCESS)
+            {
+                if(ritr->node_id == node_id)
+                {
+                    agent_map.emplace(ritr->node_id, std::make_tuple(ritr, hitr));
+                    break;
+                }
+            }
+        }
+    }
+
+    LOG_IF(ERROR, agent_map.size() != hsa_agents.size())
+        << "rocprofiler was only able to map " << agent_map.size()
+        << " rocprofiler agents to HSA agents, expected " << hsa_agents.size();
+
+// For Pre-ROCm 6.0 releases
+#if ROCPROFILER_HSA_RUNTIME_VERSION <= 100900
+#    define HSA_AMD_AGENT_INFO_NEAREST_CPU 0xA113
+#endif
+
+    auto find_nearest_hsa_cpu_agent = [&table, &agent_map](uint32_t node_id) {
+        auto _nearest_cpu = hsa_agent_t{.handle = 0};
+        auto _hsa_agent   = std::get<1>(agent_map.at(node_id));
+        if(table->core_->hsa_agent_get_info_fn(
+               _hsa_agent,
+               static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NEAREST_CPU),
+               &_nearest_cpu) != HSA_STATUS_SUCCESS)
+        {
+            const auto* _rocp_agent  = std::get<0>(agent_map.at(node_id));
+            auto        distance_min = std::numeric_limits<int32_t>::max();
+            for(uint32_t i = 0; i < _rocp_agent->io_links_count; ++i)
+            {
+                const auto& io_link = _rocp_agent->io_links[i];
+                auto        _from   = io_link.node_from;
+                auto        _to     = io_link.node_to;
+
+                LOG_IF(FATAL, _from != node_id)
+                    << "unexpected condition for node_id=" << node_id << ". io_link[" << i
+                    << "].node_from=" << _from
+                    << ". Expected this to match the node_id (node_to=" << _to << ")";
+
+                if(agent_map.find(_to) == agent_map.end())
+                {
+                    LOG(WARNING) << "no agent mapping for io_link[" << i << "].node_to=" << _to
+                                 << " in rocprofiler agent " << node_id;
+                    continue;
+                }
+
+                auto [_to_rocp_agent, _to_hsa_agent] = agent_map.at(_to);
+                auto _distance                       = std::abs(static_cast<int32_t>(_from - _to));
+                if(_distance > 0 && _distance < distance_min &&
+                   _to_rocp_agent->type == ROCPROFILER_AGENT_TYPE_CPU)
+                {
+                    distance_min = _distance;
+                    _nearest_cpu = _to_hsa_agent;
+                }
+            }
+        }
+        return _nearest_cpu;
+    };
+
+    auto is_duplicate = [](const auto* agent_v) {
+        for(const auto& itr : get_agent_caches())
+        {
+            if(itr == agent_v) return true;
+        }
+        return false;
+    };
+
+    // Generate supported agents
+    for(const auto& itr : agent_map)
+    {
+        const auto* rocp_agent = std::get<0>(itr.second);
+        auto        hsa_agent  = std::get<1>(itr.second);
+        if(is_duplicate(rocp_agent)) continue;
+
+        // AgentCache is only for GPU agents
+        if(rocp_agent->type != ROCPROFILER_AGENT_TYPE_GPU) continue;
+
+        auto _nearest_cpu = find_nearest_hsa_cpu_agent(itr.first);
+        try
+        {
+            get_agent_caches().emplace_back(
+                rocp_agent, hsa_agent, itr.first, _nearest_cpu, *table->amd_ext_);
+        } catch(std::runtime_error& err)
+        {
+            if(rocp_agent->type == ROCPROFILER_AGENT_TYPE_GPU)
+            {
+                LOG(ERROR) << fmt::format("rocprofiler agent <-> HSA agent mapping failed: {} ({})",
+                                          rocp_agent->node_id,
+                                          err.what());
+            }
+        }
+    }
+}
+
+std::optional<hsa_agent_t>
+get_hsa_agent(const rocprofiler_agent_t* agent)
+{
+    for(const auto& itr : get_agent_caches())
+    {
+        if(itr == agent) return itr.get_hsa_agent();
+    }
+
+    return std::nullopt;
+}
+
+const rocprofiler_agent_t*
+get_rocprofiler_agent(hsa_agent_t agent)
+{
+    for(const auto& itr : get_agent_caches())
+    {
+        if(itr == agent) return &itr.get_rocp_agent();
+    }
+
+    return nullptr;
+}
+
+std::optional<hsa::AgentCache>
+get_agent_cache(const rocprofiler_agent_t* agent)
+{
+    for(const auto& itr : get_agent_caches())
+    {
+        if(itr == agent) return itr;
+    }
+
+    return std::nullopt;
+}
+
+std::optional<hsa::AgentCache>
+get_agent_cache(hsa_agent_t agent)
+{
+    for(const auto& itr : get_agent_caches())
+    {
+        if(itr == agent) return itr;
+    }
+
+    return std::nullopt;
+}
 }  // namespace agent
 }  // namespace rocprofiler
 
@@ -585,15 +829,7 @@ rocprofiler_query_available_agents(rocprofiler_available_agents_cb_t callback,
         return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_ABI;
     }
 
-    // auto agents   = get_agents();
-    auto& agents   = rocprofiler::agent::get_agent_topology();
-    auto  pointers = std::vector<const rocprofiler_agent_t*>{};
-    pointers.reserve(agents.size());
-    for(auto& agent : agents)
-    {
-        pointers.emplace_back(agent.get());
-    }
-
+    auto&& pointers = rocprofiler::agent::get_agents();
     return callback(pointers.data(), pointers.size(), user_data);
 }
 }

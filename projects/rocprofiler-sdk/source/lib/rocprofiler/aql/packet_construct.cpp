@@ -21,7 +21,7 @@ AQLPacketConstruct::AQLPacketConstruct(const hsa::AgentCache&               agen
     // for the counter.
     for(const auto& x : metrics)
     {
-        auto query_info                = get_query_info(_agent.get_agent(), x);
+        auto query_info                = get_query_info(_agent.get_hsa_agent(), x);
         _metrics.emplace_back().metric = x;
         uint32_t event_id              = std::atoi(x.event().c_str());
         for(unsigned block_index = 0; block_index < query_info.instance_count; ++block_index)
@@ -32,7 +32,7 @@ AQLPacketConstruct::AQLPacketConstruct(const hsa::AgentCache&               agen
                  event_id});
             bool validate_event_result;
             LOG_IF(FATAL,
-                   hsa_ven_amd_aqlprofile_validate_event(_agent.get_agent(),
+                   hsa_ven_amd_aqlprofile_validate_event(_agent.get_hsa_agent(),
                                                          &_metrics.back().instances.back(),
                                                          &validate_event_result) !=
                        HSA_STATUS_SUCCESS);
@@ -58,7 +58,7 @@ AQLPacketConstruct::construct_packet(const AmdExtTable& ext) const
     }
 
     pkt.profile = hsa_ven_amd_aqlprofile_profile_t{
-        _agent.get_agent(),
+        _agent.get_hsa_agent(),
         HSA_VEN_AMD_AQLPROFILE_EVENT_TYPE_PMC,  // SPM?
         _events.data(),
         static_cast<uint32_t>(_events.size()),
@@ -69,7 +69,7 @@ AQLPacketConstruct::construct_packet(const AmdExtTable& ext) const
     auto& profile = pkt.profile;
 
     hsa_amd_memory_pool_access_t _access = HSA_AMD_MEMORY_POOL_ACCESS_NEVER_ALLOWED;
-    ext.hsa_amd_agent_memory_pool_get_info_fn(_agent.get_agent(),
+    ext.hsa_amd_agent_memory_pool_get_info_fn(_agent.get_hsa_agent(),
                                               _agent.kernarg_pool(),
                                               HSA_AMD_AGENT_MEMORY_POOL_INFO_ACCESS,
                                               static_cast<void*>(&_access));
@@ -79,7 +79,7 @@ AQLPacketConstruct::construct_packet(const AmdExtTable& ext) const
     {
         throw std::runtime_error(
             fmt::format("Agent {} does not allow memory pool access for counter collection",
-                        _agent.get_agent().handle));
+                        _agent.get_hsa_agent().handle));
     }
 
     auto throw_if_failed = [](auto status, auto& message) {
@@ -113,7 +113,7 @@ AQLPacketConstruct::construct_packet(const AmdExtTable& ext) const
         else
         {
             CHECK(*mem_loc);
-            hsa_agent_t agent = _agent.get_agent();
+            hsa_agent_t agent = _agent.get_hsa_agent();
             // Memory is accessable by both the GPU and CPU, unlock the command buffer for
             // sharing.
             LOG_IF(FATAL,
@@ -167,7 +167,8 @@ AQLPacketConstruct::can_collect()
             iter->second++;
             if(inserted)
             {
-                max_allowed.emplace(block_pair, get_block_counters(_agent.get_agent(), instance));
+                max_allowed.emplace(block_pair,
+                                    get_block_counters(_agent.get_hsa_agent(), instance));
             }
         }
     }
