@@ -178,6 +178,7 @@ while [ 1 ]; do
     shift
   elif [ "$1" = "--basenames" ]; then
     export ROCPROFILER_TRUNCATE_KERNEL_PATH=1
+    shift
   elif [ "$1" = "--version" ]; then
     shift
     shift
