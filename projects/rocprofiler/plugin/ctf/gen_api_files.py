@@ -615,6 +615,33 @@ def _cpp_switch_statement_from_erts(api_prefix, erts):
     return lines
 
 
+# Returns a set of expected API function names based on the
+# enumerators of the `*_api_id_t` enumeration.
+def _api_func_names(api_prefix, cpp_header):
+    # Find the `*_api_id_t` enumeration.
+    for enum in cpp_header.enums:
+        if enum.get('name') == f'{api_prefix}_api_id_t':
+            break
+
+    # Create the set of API function names based on enumerators.
+    func_names = set()
+    pat = re.compile(rf'{api_prefix.upper()}_API_ID_(_*{api_prefix}.+)$')
+
+    for entry in enum['values']:
+        if type(entry['value']) is str and 'API_ID_NONE' in entry['value']:
+            # An enumerator may have the value `*_API_ID_NONE` which
+            # means the corresponding API function is not available.
+            continue
+
+        m = pat.match(entry['name'])
+
+        if m is not None:
+            func_names.add(m.group(1))
+
+    # Return API function names
+    return func_names
+
+
 # Processes the complete API header file `path`.
 def _process_file(api_prefix, path):
     # Create `CppHeader` object.
@@ -629,25 +656,40 @@ def _process_file(api_prefix, path):
 
     # Find callback data structure.
     for struct_name, struct in cpp_header.classes.items():
-        if re.match(r"^" + api_prefix + r"_api_data\w+$", struct_name):
-            # Process callback data structure.
-            begin_erts, end_erts = _erts_from_cb_data_struct(
-                api_prefix, cpp_header, retval_info, struct
-            )
+        if re.match(r'^' + api_prefix + r'_api_data\w+$', struct_name) is not None:
+            break
 
-            # Write barectf YAML file.
-            with open(f"{api_prefix}_erts.yaml", "w") as f:
-                f.write(_yaml_dst_from_erts(api_prefix, begin_erts + end_erts))
+    # Process callback data structure.
+    begin_erts, end_erts = _erts_from_cb_data_struct(api_prefix,
+                                                     cpp_header,
+                                                     retval_info,
+                                                     struct)
 
-            # Write C++ code (beginning event record).
-            with open(f"{api_prefix}_begin.cpp.i", "w") as f:
-                f.write(
-                    "\n".join(_cpp_switch_statement_from_erts(api_prefix, begin_erts))
-                )
+    # API functions without parameters are not part of the callback data
+    # structure, but they have an ID in the `*_api_id_t` enumeration.
+    #
+    # Add missing event record types to `begin_erts` and `end_erts`
+    # considering the `*_api_id_t` enumeration.
+    processed_api_func_names = set([ert.api_func_name for ert in begin_erts])
 
-            # Write C++ code (end event record).
-            with open(f"{api_prefix}_end.cpp.i", "w") as f:
-                f.write("\n".join(_cpp_switch_statement_from_erts(api_prefix, end_erts)))
+    for func_name in _api_func_names(api_prefix, cpp_header):
+        if func_name not in processed_api_func_names:
+            begin_erts.append(_BeginErt(func_name, []))
+            end_erts.append(_EndErt(func_name, []))
+
+    # Write barectf YAML file.
+    with open(f'{api_prefix}_erts.yaml', 'w') as f:
+        f.write(_yaml_dst_from_erts(api_prefix, begin_erts + end_erts))
+
+    # Write C++ code (beginning event record).
+    with open(f'{api_prefix}_begin.cpp.i', 'w') as f:
+        f.write('\n'.join(_cpp_switch_statement_from_erts(api_prefix,
+                                                          begin_erts)))
+
+    # Write C++ code (end event record).
+    with open(f'{api_prefix}_end.cpp.i', 'w') as f:
+        f.write('\n'.join(_cpp_switch_statement_from_erts(api_prefix,
+                                                          end_erts)))
 
 
 if __name__ == "__main__":
