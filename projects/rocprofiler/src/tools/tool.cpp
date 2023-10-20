@@ -428,9 +428,13 @@ void finish() {
     rocprofiler::TraceBufferBase::FlushAll();
     CHECK_ROCPROFILER(rocprofiler_terminate_session(session_id));
   }
-  if (session_id.handle > 0) {
-    CHECK_ROCPROFILER(rocprofiler_destroy_session(session_id));
-  }
+  // If hsa_shut_down() is not called from the application then we may still have async calls back
+  // to the rocprofiler to use session parameters, thats why we need to leak the session up till
+  // this is fixed in the ROCR-Runtime
+
+  // if (session_id.handle > 0) {
+  //   CHECK_ROCPROFILER(rocprofiler_destroy_session(session_id));
+  // }
 }
 
 static bool env_var_search(std::string& s) {
