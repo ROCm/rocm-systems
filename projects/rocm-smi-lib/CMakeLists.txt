@@ -72,7 +72,11 @@ endif()
 
 ## Compiler flags
 set(CMAKE_CXX_FLAGS
- "${CMAKE_CXX_FLAGS} -Wall -Wextra -fno-rtti -m64 -msse -msse2 ")
+ "${CMAKE_CXX_FLAGS} -Wall -Wextra -fno-rtti")
+if (${CMAKE_HOST_SYSTEM_PROCESSOR} STREQUAL "x86_64")
+    set(CMAKE_CXX_FLAGS
+     "${CMAKE_CXX_FLAGS} -m64 -msse -msse2")
+endif()
 
 # Security options
 set(CMAKE_CXX_FLAGS
