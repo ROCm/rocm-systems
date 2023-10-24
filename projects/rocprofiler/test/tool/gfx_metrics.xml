@@ -607,9 +607,6 @@
   <metric name="TCC_EA0_WRREQ_PROBE_COMMAND" block=TCC event=28 descr="Number of probe commands going over the TC_EA_wrreq interface."></metric>
   <metric name="TCC_EA0_WR_UNCACHED_32B" block=TCC event=29 descr="Number of 32-byte write/atomic going over the TC_EA_wrreq interface due to uncached traffic. Note that CC mtypes can produce uncached requests, and those are included in this. A 64-byte request will be counted as 2"></metric>
   <metric name="TCC_EA0_WRREQ_STALL" block=TCC event=30 descr="Number of cycles a write request was stalled."></metric>
-  <metric name="TCC_EA0_WRREQ_IO_CREDIT_STALL" block=TCC event=31 descr="Number of cycles a EA write request was stalled because the interface was out of IO credits."></metric>
-  <metric name="TCC_EA0_WRREQ_GMI_CREDIT_STALL" block=TCC event=32 descr="Number of cycles a EA write request was stalled because the interface was out of GMI credits."></metric>
-  <metric name="TCC_EA0_WRREQ_DRAM_CREDIT_STALL" block=TCC event=33 descr="Number of cycles a EA write request was stalled because the interface was out of DRAM credits."></metric>
   <metric name="TCC_TOO_MANY_EA_WRREQS_STALL" block=TCC event=34 descr="Number of cycles the TCC could not send a EA write request because it already reached its maximum number of pending EA write requests."></metric>
   <metric name="TCC_EA0_WRREQ_LEVEL" block=TCC event=35 descr="The sum of the number of EA write requests in flight. This is primarily meant for measure average EA write latency. Average write latency = TCC_PERF_SEL_EA_WRREQ_LEVEL/TCC_PERF_SEL_EA_WRREQ."></metric>
   <metric name="TCC_EA0_ATOMIC" block=TCC event=36 descr="Number of transactions going over the TC_EA_wrreq interface that are actually atomic requests."></metric>
@@ -617,9 +614,6 @@
   <metric name="TCC_EA0_RDREQ" block=TCC event=38 descr="Number of TCC/EA read requests (either 32-byte or 64-byte)"></metric>
   <metric name="TCC_EA0_RDREQ_32B" block=TCC event=39 descr="Number of 32-byte TCC/EA read requests"></metric>
   <metric name="TCC_EA0_RD_UNCACHED_32B" block=TCC event=40 descr="Number of 32-byte TCC/EA read due to uncached traffic. A 64-byte request will be counted as 2"></metric>
-  <metric name="TCC_EA0_RDREQ_IO_CREDIT_STALL" block=TCC event=41 descr="Number of cycles there was a stall because the read request interface was out of IO credits. Stalls occur regardless of whether a read needed to be performed or not."></metric>
-  <metric name="TCC_EA0_RDREQ_GMI_CREDIT_STALL" block=TCC event=42 descr="Number of cycles there was a stall because the read request interface was out of GMI credits. Stalls occur regardless of whether a read needed to be performed or not."></metric>
-  <metric name="TCC_EA0_RDREQ_DRAM_CREDIT_STALL" block=TCC event=43 descr="Number of cycles there was a stall because the read request interface was out of DRAM credits. Stalls occur regardless of whether a read needed to be performed or not."></metric>
   <metric name="TCC_EA0_RDREQ_LEVEL" block=TCC event=44 descr="The sum of the number of TCC/EA read requests in flight. This is primarily meant for measure average EA read latency. Average read latency = TCC_PERF_SEL_EA_RDREQ_LEVEL/TCC_PERF_SEL_EA_RDREQ."></metric>
   <metric name="TCC_TAG_STALL" block=TCC event=45 descr="Number of cycles the normal request pipeline in the tag was stalled for any reason. Normally, stalls of this nature are measured exactly from one point the pipeline, but that is not the case for this counter. Probes can stall the pipeline at a variety of places, and there is no single point that can reasonably measure the total stalls accurately."></metric>
   <metric name="TCC_NORMAL_WRITEBACK" block=TCC event=68 descr="Number of writebacks due to requests that are not writeback requests."></metric>
@@ -681,7 +675,7 @@
   <metric name="SQ_INSTS_TEX_LOAD" block=SQ event=69 descr="Number of buffer load, image load, sample, or atomic (with return) instructions issued. {emulated, C1}"></metric>
   <metric name="SQ_INSTS_TEX_STORE" block=SQ event=70 descr="Number of buffer store, image store, or atomic (without return) instructions issued. {emulated, C1}"></metric>
   <metric name="SQ_WAIT_INST_LDS" block=SQ event=31 descr="Number of clock cycles spent waiting for LDS (indexed) instruction issue. In units of cycles. {nondeterministic, C1}"></metric>
-  
+
   <metric name="TA_TA_BUSY" block=TA event=15 descr="TA block is busy. Perf_Windowing not supported for this counter."></metric>
   <metric name="TA_FLAT_LOAD_WAVEFRONTS" block=TA event=101 descr=" Number of flat load vec32 packets processed by TA, same as flat_read_wavefronts in earlier IP"></metric>
   <metric name="TA_FLAT_STORE_WAVEFRONTS" block=TA event=102 descr="Number of flat store vec32 packets processed by TA, same as flat_write_wavefronts in earlier IP"></metric>
