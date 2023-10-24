@@ -301,3 +301,4 @@ Example for file plugin output:
 - Updated supported GPU architectures in README with profiler versions
 - Automatic ISA dumping for ATT. See README.
 - CSV mode for ATT. See README.
+- Added option to control kernel name truncation.

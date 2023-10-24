@@ -533,6 +533,7 @@ A device profiling session allows the user to profile the GPU device for counter
   - PERFCOUNTERS_COL_PERIOD=0x3 // Multiplier period for counter collection [0~31]. 0=fastest (usually once every 16 cycles). GFX9 only. Counters will be shown in a graph over time in the browser UI.
   - PERFCOUNTER=counter_name // Add a SQ counter to be collected with ATT; period defined by PERFCOUNTERS_COL_PERIOD. GFX9 only.
   - BUFFER_SIZE=[size] // Sets size of the ATT buffer collection, per dispatch, in megabytes (shared among all shader engines).
+  - By default, kernel names are truncated for ATT.To disable, please see the kernel name truncation section below.
 
 ## Tests
 
@@ -591,6 +592,14 @@ To enable error messages logging to '/tmp/rocprofiler_log.txt':
 
 ```bash
 export ROCPROFILER_LOG=1
+```
+
+## Kernel Name Truncation
+
+By default kernel names are not truncated. To enable truncation for readability:
+
+```
+export ROCPROFILER_TRUNCATE_KERNEL_PATH=1
 ```
 
 ## Documentation

@@ -201,6 +201,7 @@ while [ 1 ]; do
       exit 1
     fi
     if [ "$2" = "att" ]; then
+      export ROCPROFILER_TRUNCATE_KERNEL_PATH=1
       if [ $RUN_FROM_BUILD == 1 ]; then
         ATT_PATH=$ROCM_DIR/plugin/att/att/att.py
       else
