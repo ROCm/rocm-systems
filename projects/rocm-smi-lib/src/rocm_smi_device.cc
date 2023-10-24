@@ -598,14 +598,17 @@ int Device::openSysfsFileStream(DevInfoTypes type, T *fs, const char *str) {
 
   int ret = isRegularFile(sysfs_path, &reg_file);
   if (ret != 0) {
-    ss << "File did not exist - SYSFS file (" << sysfs_path
+    ss << __PRETTY_FUNCTION__ << " | Issue: File did not exist - SYSFS file ("
+       << sysfs_path
        << ") for DevInfoInfoType (" << RocmSMI::devInfoTypesStrings.at(type)
        << "), returning " << std::to_string(ret);
     LOG_ERROR(ss);
     return ret;
   }
   if (!reg_file) {
-    ss << "File is not a regular file - SYSFS file (" << sysfs_path << ") for "
+    ss << __PRETTY_FUNCTION__
+       << " | Issue: File is not a regular file - SYSFS file ("
+       << sysfs_path << ") for "
        << "DevInfoInfoType (" << RocmSMI::devInfoTypesStrings.at(type) << "),"
        << " returning ENOENT (" << std::strerror(ENOENT) << ")";
     LOG_ERROR(ss);
@@ -615,7 +618,8 @@ int Device::openSysfsFileStream(DevInfoTypes type, T *fs, const char *str) {
   fs->open(sysfs_path);
 
   if (!fs->is_open()) {
-    ss << "Could not open - SYSFS file (" << sysfs_path << ") for "
+    ss << __PRETTY_FUNCTION__
+       << " | Issue: Could not open - SYSFS file (" << sysfs_path << ") for "
        << "DevInfoInfoType (" << RocmSMI::devInfoTypesStrings.at(type) << "), "
        << ", returning " << std::to_string(errno) << " ("
        << std::strerror(errno) << ")";
@@ -623,7 +627,8 @@ int Device::openSysfsFileStream(DevInfoTypes type, T *fs, const char *str) {
     return errno;
   }
 
-  ss << "Successfully opened SYSFS file (" << sysfs_path
+  ss << __PRETTY_FUNCTION__ << " | Successfully opened SYSFS file ("
+     << sysfs_path
      << ") for DevInfoInfoType (" << RocmSMI::devInfoTypesStrings.at(type)
      << ")";
   LOG_INFO(ss);
@@ -671,32 +676,51 @@ int Device::readDevInfoStr(DevInfoTypes type, std::string *retStr) {
   ret = openSysfsFileStream(type, &fs);
   if (ret != 0) {
     ss << "Could not read device info string for DevInfoType ("
-     << RocmSMI::devInfoTypesStrings.at(type)<< "), returning "
+     << RocmSMI::devInfoTypesStrings.at(type) << "), returning "
      << std::to_string(ret);
     LOG_ERROR(ss);
     return ret;
   }
 
   fs >> *retStr;
-  std::string info = "Successfully read device info string for DevInfoType (" +
-                      RocmSMI::devInfoTypesStrings.at(type) + "): " +
-                      *retStr;
-  LOG_INFO(info);
   fs.close();
-
+  ss << __PRETTY_FUNCTION__
+     << "Successfully read device info string for DevInfoType (" +
+            RocmSMI::devInfoTypesStrings.at(type) + "): " + *retStr
+     << " | "
+     << (fs.is_open() ? " File stream is opened" : " File stream is closed")
+     << " | " << (fs.bad() ? "[ERROR] Bad read operation" :
+     "[GOOD] No bad bit read, successful read operation")
+     << " | " << (fs.fail() ? "[ERROR] Failed read - format error" :
+     "[GOOD] No fail - Successful read operation")
+     << " | " << (fs.eof() ? "[ERROR] Failed read - EOF error" :
+     "[GOOD] No eof error - Successful read operation")
+     << " | " << (fs.good() ? "[GOOD] read good - Successful read operation" :
+     "[ERROR] Failed read - good error");
+  LOG_INFO(ss);
   return 0;
 }
 
-int Device::writeDevInfoStr(DevInfoTypes type, std::string valStr) {
-  auto tempPath = path_;
+int Device::writeDevInfoStr(DevInfoTypes type, std::string valStr,
+                           bool returnWriteErr) {
+  // returnWriteErr = false, backwards compatability (old calls)
+  // returnWriteErr = true, improvement - allows us to detect errors
+  // when writing to file
+  // (such as EBUSY)
+  auto sysfs_path = path_;
+  sysfs_path += "/device/";
+  sysfs_path += kDevAttribNameMap.at(type);
   std::ofstream fs;
   int ret;
   std::ostringstream ss;
 
-  fs.rdbuf()->pubsetbuf(nullptr,0);
+  fs.flush();
+  fs.rdbuf()->pubsetbuf(0, 0);
   ret = openSysfsFileStream(type, &fs, valStr.c_str());
   if (ret != 0) {
-    ss << "Could not write device info string (" << valStr
+    fs.close();
+    ss << __PRETTY_FUNCTION__ << " | Issue: Could not open fileStream; "
+       << "Could not write device info string (" << valStr
        << ") for DevInfoType (" << RocmSMI::devInfoTypesStrings.at(type)
        << "), returning " << std::to_string(ret);
     LOG_ERROR(ss);
@@ -705,19 +729,39 @@ int Device::writeDevInfoStr(DevInfoTypes type, std::string valStr) {
 
   // We'll catch any exceptions in rocm_smi.cc code.
   if (fs << valStr) {
+    fs.flush();
+    fs.close();
     ss << "Successfully wrote device info string (" << valStr
        << ") for DevInfoType (" << RocmSMI::devInfoTypesStrings.at(type)
        << "), returning RSMI_STATUS_SUCCESS";
     LOG_INFO(ss);
     ret = RSMI_STATUS_SUCCESS;
   } else {
-    ss << "Could not write device info string (" << valStr
+    if (returnWriteErr) {
+      ret = errno;
+    } else {
+      ret = RSMI_STATUS_NOT_SUPPORTED;
+    }
+    fs.flush();
+    fs.close();
+    ss << __PRETTY_FUNCTION__ << " | Issue: Could not write to file; "
+       << "Could not write device info string (" << valStr
        << ") for DevInfoType (" << RocmSMI::devInfoTypesStrings.at(type)
-       << "), returning RSMI_STATUS_NOT_SUPPORTED";
+       << "), returning " << getRSMIStatusString(ErrnoToRsmiStatus(ret));
+    ss << " | "
+       << (fs.is_open() ? "[ERROR] File stream open" :
+          "[GOOD] File stream closed")
+       << " | " << (fs.bad() ? "[ERROR] Bad write operation" :
+                    "[GOOD] No bad bit write, successful write operation")
+       << " | " << (fs.fail() ? "[ERROR] Failed write - format error" :
+                    "[GOOD] No fail - Successful write operation")
+       << " | " << (fs.eof() ? "[ERROR] Failed write - EOF error" :
+                    "[GOOD] No eof error - Successful write operation")
+       << " | " << (fs.good() ?
+                   "[GOOD] Write good - Successful write operation" :
+                   "[ERROR] Failed write - good error");
     LOG_ERROR(ss);
-    ret = RSMI_STATUS_NOT_SUPPORTED;
   }
-  fs.close();
 
   return ret;
 }
@@ -756,6 +800,9 @@ int Device::writeDevInfo(DevInfoTypes type, uint64_t val) {
 }
 
 int Device::writeDevInfo(DevInfoTypes type, std::string val) {
+  auto sysfs_path = path_;
+  sysfs_path += "/device/";
+  sysfs_path += kDevAttribNameMap.at(type);
   switch (type) {
     case kDevGPUMClk:
     case kDevDCEFClk:
@@ -764,9 +811,10 @@ int Device::writeDevInfo(DevInfoTypes type, std::string val) {
     case kDevPCIEClk:
     case kDevPowerODVoltage:
     case kDevSOCClk:
+      return writeDevInfoStr(type, val);
     case kDevComputePartition:
     case kDevMemoryPartition:
-      return writeDevInfoStr(type, val);
+      return writeDevInfoStr(type, val, true);
 
     default:
       return EINVAL;
@@ -899,6 +947,7 @@ int Device::readDevInfo(DevInfoTypes type, uint64_t *val) {
   std::string tempStr;
   int ret;
   int tmp_val;
+  std::ostringstream ss;
 
   switch (type) {
     case kDevDevID:

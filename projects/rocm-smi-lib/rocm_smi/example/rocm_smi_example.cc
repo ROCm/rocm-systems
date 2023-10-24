@@ -156,6 +156,15 @@
     } \
 }
 
+void print_function_header_with_rsmi_ret(
+  rsmi_status_t myReturn, std::string header = "") {
+  std::cout << "\t** ";
+  if (!header.empty()) {
+    std::cout << header << ": ";
+  }
+  std::cout << amd::smi::getRSMIStatusString(myReturn, false) << "\n";
+}
+
 static void print_test_header(const char *str, uint32_t dv_ind) {
   std::cout << "********************************" << "\n";
   std::cout << "*** " << str << "\n";
@@ -254,14 +263,24 @@ perf_level_string(rsmi_dev_perf_level_t perf_lvl) {
   }
 }
 
-static bool isUserRunningAsSudo() {
-  bool isRunningWithSudo = false;
-  auto myUID = getuid();
-  auto myPrivledges = geteuid();
-  if ((myUID == myPrivledges) && (myPrivledges == 0)) {
-    isRunningWithSudo = true;
+static const std::string
+clock_type_string(rsmi_clk_type_t clk) {
+  switch (clk) {
+    case RSMI_CLK_TYPE_SYS:
+      return "RSMI_CLK_TYPE_SYS";
+    case RSMI_CLK_TYPE_DF:
+      return "RSMI_CLK_TYPE_DF";
+    case RSMI_CLK_TYPE_DCEF:
+      return "RSMI_CLK_TYPE_DCEF";
+    case RSMI_CLK_TYPE_SOC:
+      return "RSMI_CLK_TYPE_SOC";
+    case RSMI_CLK_TYPE_MEM:
+      return "RSMI_CLK_TYPE_MEM";
+    case RSMI_CLK_TYPE_PCIE:
+      return "RSMI_CLK_TYPE_PCIE";
+    default:
+      return "RSMI_CLK_INVALID";
   }
-  return isRunningWithSudo;
 }
 
 static bool isFileWritable(rsmi_status_t response) {
@@ -271,7 +290,7 @@ static bool isFileWritable(rsmi_status_t response) {
   // isFileWritable(ret) - intends to capture this
   // response situation.
   bool fileWritable = true;
-  if (isUserRunningAsSudo() && (response == RSMI_STATUS_PERMISSION)) {
+  if (amd::smi::is_sudo_user() && (response == RSMI_STATUS_PERMISSION)) {
       std::cout << "[WARN] User is running with sudo "
                 << "permissions, file is not writable." << "\n";
       fileWritable = false;
@@ -574,9 +593,19 @@ static rsmi_status_t test_set_freq(uint32_t dv_ind) {
 }
 
 static void print_frequencies(rsmi_frequencies_t *f) {
-  assert(f != nullptr);
+  bool hasDeepSleep = false;
+  if (f == nullptr) {
+    std::cout << "Freq was nullptr\n";
+    return;
+  }
   for (uint32_t j = 0; j < f->num_supported; ++j) {
-    std::cout << "\t**  " << j << ": " << std::to_string(f->frequency[j]);
+    if (f->has_deep_sleep && j == 0) {
+      std::cout << "\t**  S: " << std::to_string(f->frequency[j]);
+      hasDeepSleep = true;
+    } else {
+      std::cout << "\t**  " << (hasDeepSleep ? j-1 : j)
+                << ": " << std::to_string(f->frequency[j]);
+    }
     if (j == f->current) {
       std::cout << " *";
     }
@@ -714,6 +743,7 @@ int main() {
   rsmi_frequencies_t f;
   uint32_t num_monitor_devs = 0;
   rsmi_gpu_metrics_t p;
+  std::string val_str;
   RSMI_POWER_TYPE power_type = RSMI_INVALID_POWER;
 
   rsmi_num_monitor_devices(&num_monitor_devs);
@@ -725,6 +755,8 @@ int main() {
     ret = rsmi_dev_revision_get(i, &val_ui16);
     CHK_RSMI_RET_I(ret)
     std::cout << "\t**Dev.Rev.ID: 0x" << std::hex << val_ui16 << "\n";
+    ret = amd::smi::rsmi_get_gfx_target_version(i , &val_str);
+    std::cout << "\t**Target Graphics Version: " << val_str << "\n";
 
     char current_compute_partition[256];
     current_compute_partition[0] = '\0';
@@ -736,7 +768,7 @@ int main() {
                   ? "UNKNOWN" : current_compute_partition);
     if (ret != RSMI_STATUS_SUCCESS) {
       std::cout << ", RSMI_STATUS = ";
-} else {
+    } else {
       std::cout << "\n";
     }
     CHK_RSMI_NOT_SUPPORTED_OR_UNEXPECTED_DATA_RET(ret)
@@ -773,8 +805,38 @@ int main() {
     }
 
     ret = rsmi_dev_gpu_metrics_info_get(i, &p);
-    CHK_AND_PRINT_RSMI_ERR_RET(ret)
-    std::cout << "\t**GPU METRICS" << "\n";
+    print_test_header("GPU METRICS", i);
+    print_function_header_with_rsmi_ret(ret,
+      "rsmi_dev_gpu_metrics_info_get("  + std::to_string(i) + ", &p)");
+    std::cout << "\t**p.average_gfxclk_frequency: " << std::dec
+              << p.average_gfxclk_frequency << "\n";
+    std::cout << "\t**p.average_socclk_frequency: " << std::dec
+              << p.average_socclk_frequency << "\n";
+    std::cout << "\t**p.average_uclk_frequency: " << std::dec
+              << p.average_uclk_frequency << "\n";
+    std::cout << "\t**p.average_vclk0_frequency: " << std::dec
+              << p.average_vclk0_frequency << "\n";
+    std::cout << "\t**p.average_dclk0_frequency: " << std::dec
+              << p.average_dclk0_frequency << "\n";
+    std::cout << "\t**p.average_vclk1_frequency: " << std::dec
+              << p.average_vclk1_frequency << "\n";
+    std::cout << "\t**p.average_dclk1_frequency: " << std::dec
+              << p.average_dclk1_frequency << "\n";
+
+    std::cout << "\t**p.current_gfxclk: " << std::dec
+              << p.current_gfxclk << "\n";
+    std::cout << "\t**p.current_socclk: " << std::dec
+              << p.current_socclk << "\n";
+    std::cout << "\t**p.current_uclk: " << std::dec
+              << p.current_uclk << "\n";
+    std::cout << "\t**p.current_vclk0: " << std::dec
+              << p.current_vclk0 << "\n";
+    std::cout << "\t**p.current_dclk0: " << std::dec
+              << p.current_dclk0 << "\n";
+    std::cout << "\t**p.current_vclk1: " << std::dec
+              << p.current_vclk1 << "\n";
+    std::cout << "\t**p.current_dclk1: " << std::dec
+              << p.current_dclk1 << "\n";
 
     ret = rsmi_dev_perf_level_get(i, &pfl);
     CHK_AND_PRINT_RSMI_ERR_RET(ret)
@@ -784,25 +846,25 @@ int main() {
     CHK_AND_PRINT_RSMI_ERR_RET(ret)
     std::cout << "\t**OverDrive Level:" << val_ui32 << "\n";
 
-    ret = rsmi_dev_gpu_clk_freq_get(i, RSMI_CLK_TYPE_MEM, &f);
-    CHK_AND_PRINT_RSMI_ERR_RET(ret)
-    std::cout << "\t**Supported GPU Memory clock frequencies: ";
-    std::cout << f.num_supported << "\n";
-    print_frequencies(&f);
-
-    ret = rsmi_dev_gpu_clk_freq_get(i, RSMI_CLK_TYPE_SYS, &f);
-    CHK_AND_PRINT_RSMI_ERR_RET(ret)
-    std::cout << "\t**Supported GPU clock frequencies: ";
-    std::cout << f.num_supported << "\n";
-    print_frequencies(&f);
-
-    ret = rsmi_dev_gpu_clk_freq_get(i, RSMI_CLK_TYPE_SOC, &f);
-    CHK_RSMI_NOT_SUPPORTED_OR_UNEXPECTED_DATA_RET(ret)
-    std::cout << "\t**Supported GPU clock frequencies (SOC clk): ";
-    std::cout << f.num_supported << "\n";
-    std::cout << "\t**Current value (SOC clk): ";
-    std::cout << f.current << "\n";
-    print_frequencies(&f);
+    print_test_header("GPU Clocks", i);
+    for (int clkType = static_cast<int>(RSMI_CLK_TYPE_SYS);
+       clkType <= static_cast<int>(RSMI_CLK_TYPE_PCIE);
+       clkType++) {
+      rsmi_clk_type_t type = static_cast<rsmi_clk_type_t>(clkType);
+      ret = rsmi_dev_gpu_clk_freq_get(i, type, &f);
+      print_function_header_with_rsmi_ret(ret,
+        "rsmi_dev_gpu_clk_freq_get(" + std::to_string(i) +
+        ", " + clock_type_string(type) + ", &f)");
+      if (ret != RSMI_STATUS_SUCCESS) {
+        continue;
+      }
+      std::cout << "\t** " << clock_type_string(type)
+                << " - Supported # of freqs: ";
+      std::cout << f.num_supported << "\n";
+      std::cout << "\t** " << clock_type_string(type) << " f.current: "
+                << f.current << "\n";
+      print_frequencies(&f);
+    }
 
     std::cout << "\t**Monitor name: ";
     char name[128];
@@ -892,7 +954,7 @@ int main() {
   }
 
   std::cout << "***** Testing write api's" << "\n";
-  if (isUserRunningAsSudo() == false) {
+  if (amd::smi::is_sudo_user() == false) {
     std::cout << "Write APIs require users to execute with sudo. "
               << "Cannot proceed." << "\n";
     return 0;

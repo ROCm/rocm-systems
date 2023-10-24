@@ -363,16 +363,16 @@ typedef rsmi_clk_type_t rsmi_clk_type;
  */
 typedef enum {
   RSMI_COMPUTE_PARTITION_INVALID = 0,
-  RSMI_COMPUTE_PARTITION_CPX,         //!< Core mode (CPX)- Per-chip XCC with
-                                      //!< shared memory
-  RSMI_COMPUTE_PARTITION_SPX,         //!< Single GPU mode (SPX)- All XCCs work
-                                      //!< together with shared memory
-  RSMI_COMPUTE_PARTITION_DPX,         //!< Dual GPU mode (DPX)- Half XCCs work
-                                      //!< together with shared memory
-  RSMI_COMPUTE_PARTITION_TPX,         //!< Triple GPU mode (TPX)- One-third XCCs
-                                      //!< work together with shared memory
-  RSMI_COMPUTE_PARTITION_QPX          //!< Quad GPU mode (QPX)- Quarter XCCs
-                                      //!< work together with shared memory
+  RSMI_COMPUTE_PARTITION_CPX = 1,    //!< Core mode (CPX)- Per-chip XCC with
+                                     //!< shared memory
+  RSMI_COMPUTE_PARTITION_SPX  = 2,   //!< Single GPU mode (SPX)- All XCCs work
+                                     //!< together with shared memory
+  RSMI_COMPUTE_PARTITION_DPX  = 3,   //!< Dual GPU mode (DPX)- Half XCCs work
+                                     //!< together with shared memory
+  RSMI_COMPUTE_PARTITION_TPX = 4,    //!< Triple GPU mode (TPX)- One-third XCCs
+                                     //!< work together with shared memory
+  RSMI_COMPUTE_PARTITION_QPX = 5,    //!< Quad GPU mode (QPX)- Quarter XCCs
+                                     //!< work together with shared memory
 } rsmi_compute_partition_type_t;
 /// \cond Ignore in docs.
 typedef rsmi_compute_partition_type_t rsmi_compute_partition_type;
@@ -3783,6 +3783,8 @@ rsmi_dev_compute_partition_get(uint32_t dv_ind, char *compute_partition,
  *  unavailable for current device
  *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
  *  support this function
+ *  @retval ::RSMI_STATUS_BUSY A resource or mutex could not be acquired
+ *  because it is already being used - device is busy
  *
  */
 rsmi_status_t
@@ -3802,6 +3804,8 @@ rsmi_dev_compute_partition_set(uint32_t dv_ind,
  *  @retval ::RSMI_STATUS_PERMISSION function requires root access
  *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
  *  support this function
+ *  @retval ::RSMI_STATUS_BUSY A resource or mutex could not be acquired
+ *  because it is already being used - device is busy
  *
  */
 rsmi_status_t rsmi_dev_compute_partition_reset(uint32_t dv_ind);
@@ -3866,6 +3870,8 @@ rsmi_dev_memory_partition_get(uint32_t dv_ind, char *memory_partition,
  *  support this function
  *  @retval ::RSMI_STATUS_AMDGPU_RESTART_ERR could not successfully restart
  *  the amdgpu driver
+  *  @retval ::RSMI_STATUS_BUSY A resource or mutex could not be acquired
+ *  because it is already being used - device is busy
  *
  */
 rsmi_status_t
@@ -3887,6 +3893,8 @@ rsmi_dev_memory_partition_set(uint32_t dv_ind,
  *  support this function
  *  @retval ::RSMI_STATUS_AMDGPU_RESTART_ERR could not successfully restart
  *  the amdgpu driver
+ *  @retval ::RSMI_STATUS_BUSY A resource or mutex could not be acquired
+ *  because it is already being used - device is busy
  *
  */
 rsmi_status_t rsmi_dev_memory_partition_reset(uint32_t dv_ind);

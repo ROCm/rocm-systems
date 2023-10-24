@@ -51,6 +51,8 @@
 #include <sstream>
 #include <iomanip>
 #include <type_traits>
+#include <tuple>
+#include <queue>
 
 #include "rocm_smi/rocm_smi_device.h"
 
@@ -97,10 +99,10 @@ rsmi_status_t
 GetDevBinaryBlob(amd::smi::DevInfoTypes type,
            uint32_t dv_ind, std::size_t b_size, void* p_binary_data);
 rsmi_status_t ErrnoToRsmiStatus(int err);
-std::string getRSMIStatusString(rsmi_status_t ret);
+std::string getRSMIStatusString(rsmi_status_t ret, bool fullStatus = true);
 std::tuple<bool, std::string, std::string, std::string, std::string,
            std::string, std::string, std::string, std::string,
-           std::string, std::string, std::string>
+           std::string, std::string, std::string, std::string, std::string>
            getSystemDetails(void);
 void logSystemDetails(void);
 rsmi_status_t getBDFString(uint64_t bdf_id, std::string& bfd_str);
@@ -109,11 +111,20 @@ void logHexDump(const char *desc, const void *addr, const size_t len,
 bool isSystemBigEndian();
 std::string getBuildType();
 std::string getMyLibPath();
+std::string getFileCreationDate(std::string path);
 int subDirectoryCountInPath(const std::string path);
+std::queue<std::string> getAllDeviceGfxVers();
 std::string monitor_type_string(amd::smi::MonitorTypes type);
 std::string power_type_string(RSMI_POWER_TYPE type);
+std::string splitString(std::string str, char delim);
+std::string print_rsmi_od_volt_freq_data_t(rsmi_od_volt_freq_data_t *odv);
+std::string print_rsmi_od_volt_freq_regions(uint32_t num_regions,
+                                            rsmi_freq_volt_region_t *regions);
+bool is_sudo_user();
+rsmi_status_t rsmi_get_gfx_target_version(uint32_t dv_ind,
+  std::string *gfx_version);
 template <typename T>
-std::string print_int_as_hex(T i, bool showHexNotation=true) {
+  std::string print_int_as_hex(T i, bool showHexNotation = true) {
   std::stringstream ss;
   if (showHexNotation) {
     ss << "0x" << std::setfill('0') << std::setw(sizeof(T) * 2) << std::hex;
@@ -132,7 +143,7 @@ std::string print_int_as_hex(T i, bool showHexNotation=true) {
   }
   ss << std::dec;
   return ss.str();
-};
+}
 
 template <typename T>
 std::string print_unsigned_int(T i) {
@@ -263,7 +274,7 @@ class ScopedAcquire {
   LockType* lock_;
   bool doRelease;
   /// @brief: Disable copiable and assignable ability.
-  DISALLOW_COPY_AND_ASSIGN(ScopedAcquire);
+  DISALLOW_COPY_AND_ASSIGN(ScopedAcquire)
 };
 
 }  // namespace smi

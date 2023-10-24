@@ -163,6 +163,14 @@ TEST(rsmitstReadOnly, TestPerfLevelRead) {
   TestPerfLevelRead tst;
   RunGenericTest(&tst);
 }
+TEST(rsmitstReadWrite, TestComputePartitionReadWrite) {
+  TestComputePartitionReadWrite tst;
+  RunGenericTest(&tst);
+}
+TEST(rsmitstReadWrite, TestMemoryPartitionReadWrite) {
+  TestMemoryPartitionReadWrite tst;
+  RunGenericTest(&tst);
+}
 TEST(rsmitstReadWrite, TestPerfLevelReadWrite) {
   TestPerfLevelReadWrite tst;
   RunGenericTest(&tst);
@@ -266,14 +274,6 @@ TEST(rsmitstReadOnly, TestMutualExclusion) {
   tst.SetUp();
   tst.Run();
   RunCustomTestEpilog(&tst);
-}
-TEST(rsmitstReadWrite, TestComputePartitionReadWrite) {
-  TestComputePartitionReadWrite tst;
-  RunGenericTest(&tst);
-}
-TEST(rsmitstReadWrite, TestMemoryPartitionReadWrite) {
-  TestMemoryPartitionReadWrite tst;
-  RunGenericTest(&tst);
 }
 TEST(rsmitstReadWrite, TestEvtNotifReadWrite) {
   TestEvtNotifReadWrite tst;

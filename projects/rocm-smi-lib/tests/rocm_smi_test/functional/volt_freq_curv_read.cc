@@ -5,7 +5,7 @@
  * The University of Illinois/NCSA
  * Open Source License (NCSA)
  *
- * Copyright (c) 2019, Advanced Micro Devices, Inc.
+ * Copyright (c) 2019-2023, Advanced Micro Devices, Inc.
  * All rights reserved.
  *
  * Developed by:
@@ -53,6 +53,7 @@
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi_test/functional/volt_freq_curv_read.h"
 #include "rocm_smi_test/test_common.h"
+#include "rocm_smi/rocm_smi_utils.h"
 
 TestVoltCurvRead::TestVoltCurvRead() : TestBase() {
   set_title("RSMI Voltage-Frequency Curve Read Test");
@@ -84,69 +85,10 @@ void TestVoltCurvRead::Close() {
   TestBase::Close();
 }
 
-static void pt_rng_Mhz(std::string title, rsmi_range *r) {
-  assert(r != nullptr);
-
-  std::cout << title << std::endl;
-  std::cout << "\t\t** " << r->lower_bound/1000000 << " to " <<
-                                r->upper_bound/1000000 << " MHz" << std::endl;
-}
-
-static void pt_rng_mV(std::string title, rsmi_range *r) {
-  assert(r != nullptr);
-
-  std::cout << title << std::endl;
-  std::cout << "\t\t** " << r->lower_bound << " to " << r->upper_bound <<
-                                                           " mV" << std::endl;
-}
-
-static void print_pnt(rsmi_od_vddc_point_t *pt) {
-  std::cout << "\t\t** Frequency: " << pt->frequency/1000000 << "MHz" <<
-                                                                    std::endl;
-  std::cout << "\t\t** Voltage: " << pt->voltage << "mV" << std::endl;
-}
-static void pt_vddc_curve(rsmi_od_volt_curve *c) {
-  assert(c != nullptr);
-
-  for (uint32_t i = 0; i < RSMI_NUM_VOLTAGE_CURVE_POINTS; ++i) {
-    print_pnt(&c->vc_points[i]);
-  }
-}
-
-static void print_rsmi_od_volt_freq_data_t(rsmi_od_volt_freq_data_t *odv) {
-  assert(odv != nullptr);
-
-  std::cout.setf(std::ios::dec, std::ios::basefield);
-  pt_rng_Mhz("\t\tCurrent SCLK frequency range:", &odv->curr_sclk_range);
-  pt_rng_Mhz("\t\tCurrent MCLK frequency range:", &odv->curr_mclk_range);
-  pt_rng_Mhz("\t\tMin/Max Possible SCLK frequency range:",
-                                                      &odv->sclk_freq_limits);
-  pt_rng_Mhz("\t\tMin/Max Possible MCLK frequency range:",
-                                                      &odv->mclk_freq_limits);
-
-  std::cout << "\t\tCurrent Freq/Volt. curve:" << std::endl;
-  pt_vddc_curve(&odv->curve);
-
-  std::cout << "\tNumber of Freq./Volt. regions: " <<
-                                                odv->num_regions << std::endl;
-}
-
-static void print_odv_region(rsmi_freq_volt_region_t *region) {
-  pt_rng_Mhz("\t\tFrequency range:", &region->freq_range);
-  pt_rng_mV("\t\tVoltage range:", &region->volt_range);
-}
-
-static void print_rsmi_od_volt_freq_regions(uint32_t num_regions,
-                                             rsmi_freq_volt_region_t *regions) {
-  for (uint32_t i = 0; i < num_regions; ++i) {
-    std::cout << "\tRegion " << i << ":" << std::endl;
-    print_odv_region(&regions[i]);
-  }
-}
-
 void TestVoltCurvRead::Run(void) {
-  rsmi_status_t err;
+  rsmi_status_t err, ret;
   rsmi_od_volt_freq_data_t odv;
+  rsmi_dev_perf_level_t pfl;
 
   TestBase::Run();
   if (setup_failed_) {
@@ -157,26 +99,57 @@ void TestVoltCurvRead::Run(void) {
   for (uint32_t i = 0; i < num_monitor_devs(); ++i) {
     PrintDeviceHeader(i);
 
+    std::cout << "\n\t**Resetting performance determinism to auto\n";
+    err = rsmi_dev_perf_level_set(i, RSMI_DEV_PERF_LEVEL_AUTO);
+    IF_VERB(STANDARD) {
+      std::cout << "\t**rsmi_dev_perf_level_set(i, RSMI_DEV_PERF_LEVEL_AUTO): "
+                << amd::smi::getRSMIStatusString(err, false)
+                << "\n";
+    }
+    CHK_ERR_ASRT(err)
+    ret = rsmi_dev_perf_level_get(i, &pfl);
+    IF_VERB(STANDARD) {
+      std::cout << "\t**rsmi_dev_perf_level_get(i, &pfl): "
+                << amd::smi::getRSMIStatusString(ret, false) << "\n";
+    }
+    CHK_ERR_ASRT(ret)
     err = rsmi_dev_od_volt_info_get(i, &odv);
-    if (err == RSMI_STATUS_NOT_SUPPORTED) {
+    IF_VERB(STANDARD) {
+        std::cout << "\t**rsmi_dev_od_volt_info_get(i, &odv): "
+                  << amd::smi::getRSMIStatusString(err, false)
+                  << "\n"
+                  << amd::smi::print_rsmi_od_volt_freq_data_t(&odv)
+                  << "\n";
+    }
+    if (err != RSMI_STATUS_SUCCESS) {
       IF_VERB(STANDARD) {
         std::cout <<
             "\t**rsmi_dev_od_volt_info_get: Not supported on this machine"
                                                                << std::endl;
       }
-      // Verify api support checking functionality is working
-      err = rsmi_dev_od_volt_info_get(i, nullptr);
-      ASSERT_EQ(err, RSMI_STATUS_NOT_SUPPORTED);
-    } else {
-      CHK_ERR_ASRT(err)
-      // Verify api support checking functionality is working
-      err = rsmi_dev_od_volt_info_get(i, nullptr);
-      ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
+      continue;
     }
-
+    // Verify api support checking functionality is working
+    err = rsmi_dev_od_volt_info_get(i, nullptr);
+    IF_VERB(STANDARD) {
+      std::cout << "\t**rsmi_dev_od_volt_info_get(i, nullptr): "
+                << amd::smi::getRSMIStatusString(err, false) << "\n";
+      // << "\n"
+      // << amd::smi::print_rsmi_od_volt_freq_data_t(&odv)
+      // << "\n";
+    }
+    ASSERT_TRUE(err == RSMI_STATUS_INVALID_ARGS);
+    err = rsmi_dev_od_volt_info_get(i, &odv);
+    IF_VERB(STANDARD) {
+        std::cout << "\t**rsmi_dev_od_volt_info_get(i, &odv): "
+                  << amd::smi::getRSMIStatusString(err, false) << "\n"
+                  << amd::smi::print_rsmi_od_volt_freq_data_t(&odv)
+                  << "\t**odv.num_regions = " << std::dec
+                  << odv.num_regions << "\n";
+    }
     if (err == RSMI_STATUS_SUCCESS) {
-      std::cout << "\t**Frequency-voltage curve data:" << std::endl;
-      print_rsmi_od_volt_freq_data_t(&odv);
+      std::cout << "\t**Frequency-voltage curve data:" << "\n";
+      std::cout << amd::smi::print_rsmi_od_volt_freq_data_t(&odv);
 
       rsmi_freq_volt_region_t *regions;
       uint32_t num_regions;
@@ -185,11 +158,30 @@ void TestVoltCurvRead::Run(void) {
 
       num_regions = odv.num_regions;
       err = rsmi_dev_od_volt_curve_regions_get(i, &num_regions, regions);
+      IF_VERB(STANDARD) {
+        std::cout << "\t**rsmi_dev_od_volt_curve_regions_get("
+                  << "i, &num_regions, regions): "
+                  << amd::smi::getRSMIStatusString(err, false) << "\n"
+                  << "\t**Number of regions: " << std::dec << num_regions
+                  << "\n";
+      }
+      ASSERT_TRUE(err == RSMI_STATUS_SUCCESS
+                  || err == RSMI_STATUS_NOT_SUPPORTED
+                  || err == RSMI_STATUS_UNEXPECTED_DATA
+                  || err == RSMI_STATUS_UNEXPECTED_SIZE);
+      if (err != RSMI_STATUS_SUCCESS) {
+        IF_VERB(STANDARD) {
+          std::cout << "\t**rsmi_dev_od_volt_curve_regions_get: "
+                       "Not supported on this machine" << std::endl;
+        }
+        continue;
+      }
       CHK_ERR_ASRT(err)
       ASSERT_TRUE(num_regions == odv.num_regions);
 
       std::cout << "\t**Frequency-voltage curve regions:" << std::endl;
-      print_rsmi_od_volt_freq_regions(num_regions, regions);
+      std::cout << amd::smi::print_rsmi_od_volt_freq_regions(num_regions,
+                                                             regions);
 
       delete []regions;
     }

@@ -599,9 +599,19 @@ std::tuple<bool, std::string> readTmpFile(uint32_t dv_ind,
 }
 
 // wrapper to return string expression of a rsmi_status_t return
-std::string getRSMIStatusString(rsmi_status_t ret) {
+// rsmi_status_t ret - return value of RSMI API function
+// bool fullStatus - defaults to true, set to false to chop off description
+// Returns:
+// string - if fullStatus == true, returns full decription of return value
+//      ex. 'RSMI_STATUS_SUCCESS: The function has been executed successfully.'
+// string - if fullStatus == false, returns a minimalized return value
+//      ex. 'RSMI_STATUS_SUCCESS'
+std::string getRSMIStatusString(rsmi_status_t ret, bool fullStatus) {
   const char *err_str;
   rsmi_status_string(ret, &err_str);
+  if (!fullStatus) {
+    return splitString(std::string(err_str), ':');
+  }
   return std::string(err_str);
 }
 
@@ -620,9 +630,13 @@ std::string getRSMIStatusString(rsmi_status_t ret) {
 // Expressed as big endian or little endian.
 // Big Endian (BE), multi-bit symbols encoded as big endian (MSB first)
 // Little Endian (LE), multi-bit symbols encoded as little endian (LSB first)
+// string rocm_lib_path = Path to library
+// string rocm_build_type = Release or debug
+// string rocm_build_date = Creation date of library
+// string dev_gfx_versions = GPU target graphics version
 std::tuple<bool, std::string, std::string, std::string, std::string,
            std::string, std::string, std::string, std::string,
-           std::string, std::string, std::string>
+           std::string, std::string, std::string, std::string, std::string>
            getSystemDetails(void) {
   struct utsname buf;
   bool errorDetected = false;
@@ -637,7 +651,9 @@ std::tuple<bool, std::string, std::string, std::string, std::string,
   std::string endianness = "<undefined>";
   std::string rocm_lib_path = "<undefined>";
   std::string rocm_build_type = "<undefined>";
+  std::string rocm_build_date = "<undefined>";
   std::string rocm_env_variables = "<undefined>";
+  std::string dev_gfx_versions = "<undefined>";
 
   if (uname(&buf) < 0) {
     errorDetected = true;
@@ -674,11 +690,20 @@ std::tuple<bool, std::string, std::string, std::string, std::string,
   }
   rocm_build_type = getBuildType();
   rocm_lib_path = getMyLibPath();
+  rocm_build_date = getFileCreationDate(rocm_lib_path);
   rocm_env_variables = RocmSMI::getInstance().getRSMIEnvVarInfo();
+  std::queue<std::string> devGraphicsVersions = getAllDeviceGfxVers();
+  if (devGraphicsVersions.empty() == false) {
+    dev_gfx_versions = "";
+    while (devGraphicsVersions.empty() == false) {
+      dev_gfx_versions += "\n\t" + devGraphicsVersions.front();
+      devGraphicsVersions.pop();
+    }
+  }
   return std::make_tuple(errorDetected, sysname, nodename, release,
                          version, machine, domainName, os_distribution,
                          endianness, rocm_build_type, rocm_lib_path,
-                         rocm_env_variables);
+                         rocm_build_date, rocm_env_variables, dev_gfx_versions);
 }
 
 // If logging is enabled through RSMI_LOGGING environment variable.
@@ -687,10 +712,11 @@ void logSystemDetails(void) {
   std::ostringstream ss;
   bool errorDetected;
   std::string sysname, node, release, version, machine, domain, distName,
-              endianness, rocm_build_type, lib_path, rocm_env_vars;
+              endianness, rocm_build_type, lib_path, build_date, rocm_env_vars,
+              dev_gfx_versions;
   std::tie(errorDetected, sysname, node, release, version, machine, domain,
-           distName, endianness, rocm_build_type, lib_path,
-           rocm_env_vars) = getSystemDetails();
+           distName, endianness, rocm_build_type, lib_path, build_date,
+           rocm_env_vars, dev_gfx_versions) = getSystemDetails();
   if (errorDetected == false) {
     ss << "====== Gathered system details ============\n"
        << "SYSTEM NAME: " << sysname << "\n"
@@ -703,7 +729,9 @@ void logSystemDetails(void) {
        << "ENDIANNESS: " << endianness << "\n"
        << "ROCM BUILD TYPE: " << rocm_build_type << "\n"
        << "ROCM-SMI-LIB PATH: " << lib_path << "\n"
-       << "ROCM ENV VARIABLES: " << rocm_env_vars << "\n";
+       << "ROCM-SMI-LIB BUILD DATE: " << build_date << "\n"
+       << "ROCM ENV VARIABLES: " << rocm_env_vars
+       << "AMD GFX VERSIONS: " << dev_gfx_versions << "\n";
     LOG_INFO(ss);
   } else {
     ss << "====== Gathered system details ============\n"
@@ -829,6 +857,13 @@ std::string getMyLibPath(void) {
     path = "Could not find library path for " + libName;
   }
   return path;
+}
+
+std::string getFileCreationDate(std::string path) {
+  struct stat t_stat;
+  stat(path.c_str(), &t_stat);
+  struct tm *timeinfo = localtime(&t_stat.st_ctime); // NOLINT
+  return removeNewLines(std::string(asctime(timeinfo))); // NOLINT
 }
 
 rsmi_status_t getBDFString(uint64_t bdf_id, std::string& bfd_str)
@@ -972,6 +1007,165 @@ std::string power_type_string(RSMI_POWER_TYPE type) {
       "RSMI_POWER_TYPE::RSMI_INVALID_POWER"},
   };
   return powerTypesToString.at(type);
+}
+
+std::string splitString(std::string str, char delim) {
+  std::vector<std::string> tokens;
+  std::stringstream ss(str);
+  std::string token;
+
+  if (str.empty()) {
+    return "";
+  }
+
+  while (std::getline(ss, token, delim)) {
+    tokens.push_back(token);
+    return token;  // return 1st match
+  }
+}
+
+static std::string pt_rng_Mhz(std::string title, rsmi_range *r) {
+  std::ostringstream ss;
+  if (r == nullptr) {
+    ss << "pt_rng_Mhz | rsmi_range r = nullptr\n";
+    return ss.str();
+  }
+
+  ss << title;
+  ss << r->lower_bound/1000000 << " to "
+     << r->upper_bound/1000000 << " MHz" << "\n";
+  return ss.str();
+}
+
+static std::string pt_rng_mV(std::string title, rsmi_range *r) {
+  std::ostringstream ss;
+  if (r == nullptr) {
+    ss << "pt_rng_mV | rsmi_range r = nullptr\n";
+    return ss.str();
+  }
+
+  ss << title;
+  ss << r->lower_bound << " to " << r->upper_bound
+     << " mV" << "\n";
+  return ss.str();
+}
+
+static std::string print_pnt(rsmi_od_vddc_point_t *pt) {
+  std::ostringstream ss;
+  ss << "\t\t** Frequency: " << pt->frequency/1000000 << " MHz\n";
+  ss << "\t\t** Voltage: " << pt->voltage << " mV\n";
+  return ss.str();
+}
+static std::string pt_vddc_curve(rsmi_od_volt_curve *c) {
+  std::ostringstream ss;
+  if (c == nullptr) {
+    ss << "pt_vddc_curve | rsmi_od_volt_curve c = nullptr\n";
+    return ss.str();
+  }
+
+  for (uint32_t i = 0; i < RSMI_NUM_VOLTAGE_CURVE_POINTS; ++i) {
+    ss << print_pnt(&c->vc_points[i]);
+  }
+  return ss.str();
+}
+
+std::string print_rsmi_od_volt_freq_data_t(rsmi_od_volt_freq_data_t *odv) {
+  std::ostringstream ss;
+  if (odv == nullptr) {
+    ss << "rsmi_od_volt_freq_data_t odv = nullptr\n";
+    return ss.str();
+  }
+
+  ss << pt_rng_Mhz("\t**Current SCLK frequency range: ", &odv->curr_sclk_range);
+  ss << pt_rng_Mhz("\t**Current MCLK frequency range: ", &odv->curr_mclk_range);
+  ss << pt_rng_Mhz("\t**Min/Max Possible SCLK frequency range: ",
+                   &odv->sclk_freq_limits);
+  ss << pt_rng_Mhz("\t**Min/Max Possible MCLK frequency range: ",
+                   &odv->mclk_freq_limits);
+
+  ss << "\t**Current Freq/Volt. curve: " << "\n";
+  ss << pt_vddc_curve(&odv->curve);
+
+  ss << "\t**Number of Freq./Volt. regions: " << odv->num_regions << "\n\n";
+  return ss.str();
+}
+
+std::string print_odv_region(rsmi_freq_volt_region_t *region) {
+  std::ostringstream ss;
+  ss << pt_rng_Mhz("\t\tFrequency range: ", &region->freq_range);
+  ss << pt_rng_mV("\t\tVoltage range: ", &region->volt_range);
+  return ss.str();
+}
+
+std::string print_rsmi_od_volt_freq_regions(uint32_t num_regions,
+                                            rsmi_freq_volt_region_t *regions) {
+  std::ostringstream ss;
+  if (regions == nullptr) {
+    ss << "rsmi_freq_volt_region_t regions = nullptr\n";
+    return ss.str();
+  }
+  for (uint32_t i = 0; i < num_regions; ++i) {
+    ss << "\tRegion " << i << ": " << "\n";
+    ss << print_odv_region(&regions[i]);
+  }
+  return ss.str();
+}
+
+bool is_sudo_user() {
+  std::ostringstream ss;
+  bool isRunningWithSudo = false;
+  auto myUID = getuid();
+  auto myPrivledges = geteuid();
+  if ((myUID == myPrivledges) && (myPrivledges == 0)) {
+    isRunningWithSudo = true;
+  }
+  ss << __PRETTY_FUNCTION__ << (isRunningWithSudo ? " | running as sudoer" :
+     " | NOT running as sudoer");
+  LOG_DEBUG(ss);
+  return isRunningWithSudo;
+}
+
+rsmi_status_t rsmi_get_gfx_target_version(uint32_t dv_ind,
+  std::string *gfx_version) {
+  std::ostringstream ss;
+  uint64_t kfd_gfx_version = 0;
+  GET_DEV_AND_KFDNODE_FROM_INDX
+
+  int ret = kfd_node->get_gfx_target_version(&kfd_gfx_version);
+  if (ret == 0) {
+    ss << "gfx" << kfd_gfx_version;
+    *gfx_version = ss.str();
+    return RSMI_STATUS_SUCCESS;
+  } else {
+    *gfx_version = "Unknown";
+    return RSMI_STATUS_NOT_SUPPORTED;
+  }
+}
+
+std::queue<std::string> getAllDeviceGfxVers() {
+  uint32_t num_monitor_devs = 0;
+  rsmi_status_t ret;
+  std::queue<std::string> deviceGfxVersions;
+  std::string response = "";
+  std::string dev_gfx_ver = "";
+
+  ret = rsmi_num_monitor_devices(&num_monitor_devs);
+  if (ret != RSMI_STATUS_SUCCESS || num_monitor_devs == 0) {
+    response = "N/A - No AMD devices detected";
+    deviceGfxVersions.push(response);
+    return deviceGfxVersions;
+  }
+
+  for (uint32_t i = 0; i < num_monitor_devs; ++i) {
+    ret = amd::smi::rsmi_get_gfx_target_version(i , &dev_gfx_ver);
+    response = "Device[" + std::to_string(i) + "]: ";
+    if (ret != RSMI_STATUS_SUCCESS) {
+      deviceGfxVersions.push(response + getRSMIStatusString(ret, false));
+    } else {
+      deviceGfxVersions.push(response + std::string(dev_gfx_ver));
+    }
+  }
+  return deviceGfxVersions;
 }
 
 }  // namespace smi

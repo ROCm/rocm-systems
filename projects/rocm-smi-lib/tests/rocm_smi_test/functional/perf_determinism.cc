@@ -5,7 +5,7 @@
  * The University of Illinois/NCSA
  * Open Source License (NCSA)
  *
- * Copyright (c) 2020, Advanced Micro Devices, Inc.
+ * Copyright (c) 2020-2023, Advanced Micro Devices, Inc.
  * All rights reserved.
  *
  * Developed by:
@@ -56,6 +56,7 @@
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi_test/functional/perf_determinism.h"
 #include "rocm_smi_test/test_common.h"
+#include "rocm_smi/rocm_smi_utils.h"
 
 
 TestPerfDeterminism::TestPerfDeterminism() : TestBase() {
@@ -103,23 +104,49 @@ void TestPerfDeterminism::Run(void) {
 
   for (uint32_t i = 0; i < num_monitor_devs(); ++i) {
     PrintDeviceHeader(i);
+    std::cout << "\t**Resetting performance determinism\n";
+    err = rsmi_dev_perf_level_set(i, RSMI_DEV_PERF_LEVEL_AUTO);
+    IF_VERB(STANDARD) {
+      std::cout << "\t**rsmi_dev_perf_level_set(i, RSMI_DEV_PERF_LEVEL_AUTO): "
+                << amd::smi::getRSMIStatusString(err, false)
+                << "\n";
+    }
+    CHK_ERR_ASRT(err)
+    ret = rsmi_dev_perf_level_get(i, &pfl);
+    IF_VERB(STANDARD) {
+      std::cout << "\t**rsmi_dev_perf_level_get(i, &pfl): "
+                << amd::smi::getRSMIStatusString(ret, false) << "\n";
+    }
+    CHK_ERR_ASRT(ret)
     err = rsmi_dev_od_volt_info_get(i, &odv);
+    IF_VERB(STANDARD) {
+        std::cout << "\t**rsmi_dev_od_volt_info_get(i, &odv): "
+                  << amd::smi::getRSMIStatusString(err, false)
+                  << "\n"
+                  << amd::smi::print_rsmi_od_volt_freq_data_t(&odv)
+                  << "\n";
+    }
     if (err == RSMI_STATUS_NOT_SUPPORTED) {
       IF_VERB(STANDARD) {
-        std::cout << "\t** Not supported on this machine" << std::endl;
+        std::cout << "\t** Not supported on this machine\n";
       }
       return;
-    }
-    else{
+    }  else if (err == RSMI_STATUS_SUCCESS) {
       clkvalue = (odv.curr_sclk_range.lower_bound/1000000) + 50;
+    } else {
+      IF_VERB(STANDARD) {
+        std::cout << "\t** Unable to retrieve lower bound sclk, continue.. \n";
+      }
+      continue;
     }
+    std::cout << "About to rsmi_perf_determinism_mode_set() -->\n";
 
     err = rsmi_perf_determinism_mode_set(i, clkvalue);
     if (err == RSMI_STATUS_NOT_SUPPORTED) {
       IF_VERB(STANDARD) {
         std::cout << "\t**Not supported on this machine" << std::endl;
       }
-      return;
+      continue;
     } else {
       ret = rsmi_dev_perf_level_get(i, &pfl);
       CHK_ERR_ASRT(ret)
@@ -130,7 +157,7 @@ void TestPerfDeterminism::Run(void) {
       }
 
       std::cout << "\t**Resetting performance determinism" << std::endl;
-      err = rsmi_dev_perf_level_set(i, RSMI_DEV_PERF_LEVEL_AUTO);;
+      err = rsmi_dev_perf_level_set(i, RSMI_DEV_PERF_LEVEL_AUTO);
       CHK_ERR_ASRT(err)
       ret = rsmi_dev_perf_level_get(i, &pfl);
       CHK_ERR_ASRT(ret)
@@ -138,7 +165,6 @@ void TestPerfDeterminism::Run(void) {
           std::cout << "\t**New Perf Level:" <<  GetPerfLevelStr(pfl) <<
                                                                   std::endl;
       }
-      return;
-    }
-  }
+    }  // END - SET SUPPORTED
+  }  // END - DEVICE LOOP
 }
