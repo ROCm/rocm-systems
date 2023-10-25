@@ -53,8 +53,6 @@
 #include "trace_buffer.h"
 #include "xml.h"
 
-void initialize() __attribute__((constructor(101)));
-
 namespace fs = std::experimental::filesystem;
 
 // Macro to check ROC-tracer calls status
@@ -788,7 +786,3 @@ ROCTRACER_EXPORT bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
 ROCTRACER_EXPORT void OnUnload() { tool_unload(); }
 
 }  // extern "C"
-
-void initialize() {
-  tool_load();
-}
