@@ -4387,6 +4387,30 @@ rsmi_topo_get_link_type(uint32_t dv_ind_src, uint32_t dv_ind_dst,
 
   rsmi_status_t status;
   uint32_t node_ind_dst;
+
+  // handle the link type for CPU
+  if (dv_ind_dst == CPU_NODE_INDEX) {
+    // No CPU connected
+    if (kfd_node->numa_node_weight() == 0) {
+      return RSMI_STATUS_NOT_SUPPORTED;
+    }
+    amd::smi::IO_LINK_TYPE io_link_type =
+              kfd_node->numa_node_type();
+    switch (io_link_type) {
+      case amd::smi::IOLINK_TYPE_XGMI:
+        *type = RSMI_IOLINK_TYPE_XGMI;
+        *hops = 1;
+        return RSMI_STATUS_SUCCESS;
+      case amd::smi::IOLINK_TYPE_PCIEXPRESS:
+        *type = RSMI_IOLINK_TYPE_PCIEXPRESS;
+        // always be the same CPU node
+        *hops = 2;
+        return RSMI_STATUS_SUCCESS;
+      default:
+        return RSMI_STATUS_NOT_SUPPORTED;
+    }
+  }
+
   int ret = smi.get_node_index(dv_ind_dst, &node_ind_dst);
 
   if (ret == 0) {

@@ -686,6 +686,10 @@ typedef enum _RSMI_IO_LINK_TYPE {
   RSMI_IOLINK_TYPE_SIZE           = 0xFFFFFFFF  //!< Max of IO Link types
 } RSMI_IO_LINK_TYPE;
 
+//! The CPU node index which will be used in rsmi_topo_get_link_type
+//! to query the link type between GPU and CPU
+#define CPU_NODE_INDEX 0xFFFFFFFF
+
 /**
  * @brief The utilization counter type
  */
@@ -3671,13 +3675,21 @@ rsmi_minmax_bandwidth_get(uint32_t dv_ind_src, uint32_t dv_ind_dst,
                           uint64_t *min_bandwidth, uint64_t *max_bandwidth);
 
 /**
- *  @brief Retrieve the hops and the connection type between 2 GPUs
+ *  @brief Retrieve the hops and the connection type between GPU to GPU/CPU
  *
  *  @details Given a source device index @p dv_ind_src and
  *  a destination device index @p dv_ind_dst, and a pointer to an
  *  uint64_t @p hops and a pointer to an RSMI_IO_LINK_TYPE @p type,
  *  this function will write the number of hops and the connection type
  *  between the device @p dv_ind_src and @p dv_ind_dst to the memory
+ *  pointed to by @p hops and @p type.
+ *
+ *  To query the link type between GPU and CPU, given a source GPU index
+ *  @p dev_ind_srcc and a destination device index @p dv_ind_dst
+ *  CPU_NODE_INDEX(0xFFFFFFFF), a pointer to an
+ *  uint64_t @p hops and a pointer to an RSMI_IO_LINK_TYPE @p type,
+ *  this function will write the number of hops and the connection type
+ *  between the device @p dv_ind_src and CPU to the memory
  *  pointed to by @p hops and @p type.
  *
  *  @param[in] dv_ind_src the source device index
