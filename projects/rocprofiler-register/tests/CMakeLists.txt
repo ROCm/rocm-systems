@@ -56,6 +56,14 @@ function(rocp_register_strip_target)
     endif()
 endfunction()
 
+if(NOT CMAKE_DL_LIBS)
+    find_library(DL_LIBRARY NAMES dl)
+    if(NOT DL_LIBRARY)
+        set(DL_LIBRARY dl)
+    endif()
+    set(CMAKE_DL_LIBS ${DL_LIBRARY})
+endif()
+
 #
 # mock libraries
 #
@@ -72,7 +80,8 @@ find_package(Threads REQUIRED)
 add_library(rocprofiler-register-tests-common INTERFACE)
 target_include_directories(rocprofiler-register-tests-common
                            INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}>)
-target_link_libraries(rocprofiler-register-tests-common INTERFACE Threads::Threads stdc++)
+target_link_libraries(rocprofiler-register-tests-common INTERFACE Threads::Threads stdc++
+                                                                  ${CMAKE_DL_LIBS})
 
 add_library(rocprofiler-register-tests-strong INTERFACE)
 target_compile_definitions(rocprofiler-register-tests-strong

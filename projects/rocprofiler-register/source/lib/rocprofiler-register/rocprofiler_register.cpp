@@ -24,12 +24,12 @@
 
 #include "details/dl.hpp"
 #include "details/environment.hpp"
+#include "details/filesystem.hpp"
 #include "glog/logging.h"
 
 #include <array>
 #include <atomic>
 #include <bitset>
-#include <filesystem>
 #include <mutex>
 #include <regex>
 #include <stdexcept>
@@ -75,7 +75,6 @@ rocprofiler_register_import_roctx_static(void);
 
 namespace
 {
-namespace fs = ::std::filesystem;
 using namespace rocprofiler_register;
 using rocprofiler_set_api_table_t = decltype(::rocprofiler_set_api_table)*;
 using bitset_t = std::bitset<sizeof(rocprofiler_register_library_indentifier_t::handle)>;

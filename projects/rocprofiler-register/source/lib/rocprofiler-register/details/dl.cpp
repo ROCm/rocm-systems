@@ -23,9 +23,9 @@
 #define GNU_SOURCE 1
 
 #include "dl.hpp"
+#include "filesystem.hpp"
 #include "utility.hpp"
 
-#include <filesystem>
 #include <fstream>
 #include <optional>
 #include <string>
@@ -37,8 +37,6 @@
 #include <link.h>
 #include <sys/types.h>
 #include <unistd.h>
-
-namespace fs = ::std::filesystem;
 
 namespace rocprofiler_register
 {
