@@ -106,7 +106,7 @@ void TestTempRead::Run(void) {
     return;
   }
 
-  uint32_t type;
+  uint32_t type(0);
   for (uint32_t x = 0; x < num_iterations(); ++x) {
     for (uint32_t i = 0; i < num_monitor_devs(); ++i) {
       PrintDeviceHeader(i);

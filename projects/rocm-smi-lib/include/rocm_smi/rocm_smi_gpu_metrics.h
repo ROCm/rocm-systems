@@ -47,10 +47,12 @@
 #include "rocm_smi/rocm_smi_common.h"
 #include "rocm_smi/rocm_smi.h"
 
+#include <array>
 #include <cstdint>
 #include <map>
 #include <memory>
 #include <tuple>
+#include <variant>
 #include <vector>
 
 
@@ -97,12 +99,11 @@ struct AMDGpuMetricsHeader_v1_t
 };
 
 
-struct AMDGpuMetricsBase_t;
-using AMDGpuMetricsBaseRef = AMDGpuMetricsBase_t&;
 struct AMDGpuMetricsBase_t
 {
     virtual ~AMDGpuMetricsBase_t() = default;
 };
+using AMDGpuMetricsBaseRef = AMDGpuMetricsBase_t&;
 
 struct AMDGpuMetrics_v11_t : AMDGpuMetricsBase_t
 {
@@ -316,7 +317,7 @@ struct AMDGpuMetrics_v14_t : AMDGpuMetricsBase_t
   uint16_t m_temperature_vrsoc;
 
   // Power (Watts)
-  uint16_t m_curr_socket_power;
+  uint16_t m_current_socket_power;
 
   // Utilization (%)
   uint16_t m_average_gfx_activity;
@@ -340,8 +341,8 @@ struct AMDGpuMetrics_v14_t : AMDGpuMetricsBase_t
   uint16_t m_pcie_link_speed; // in 0.1 GT/s
 
 	// XGMI bus width and bitrate (in Gbps)
-  uint16_t  m_xgmi_link_width;
-  uint16_t  m_xgmi_link_speed;
+  uint16_t m_xgmi_link_width;
+  uint16_t m_xgmi_link_speed;
 
   // Utilization Accumulated (%)
   uint32_t m_gfx_activity_acc;
@@ -352,6 +353,15 @@ struct AMDGpuMetrics_v14_t : AMDGpuMetricsBase_t
 
 	// PCIE instantaneous bandwidth (GB/sec)
   uint64_t m_pcie_bandwidth_inst;
+
+  // PCIE L0 to recovery state transition accumulated count
+  uint64_t m_pcie_l0_to_recov_count_acc;
+
+  // PCIE replay accumulated count
+  uint64_t m_pcie_replay_count_acc;
+
+  // PCIE replay rollover accumulated count
+  uint64_t m_pcie_replay_rover_count_acc;
 
   // XGMI accumulated data transfer size(KiloBytes)
   uint64_t m_xgmi_read_data_acc[kRSMI_MAX_NUM_XGMI_LINKS];
@@ -371,33 +381,52 @@ struct AMDGpuMetrics_v14_t : AMDGpuMetricsBase_t
 };
 using AMGpuMetricsLatest_t = AMDGpuMetrics_v14_t;
 
+/**
+ *  This is GPU Metrics version that gets to public access.
+ *  It is a unique/unified version (joined) of the previous
+ *  versions (1.2 to latest 1.4). Data fields not used/relevant
+ *  for the current driver version and GPU metrics version will
+ *  not be populated, and therefore 0s (zeroes).
+ *
+ *  If/in case anything new is added to a new version and there is
+ *  a requirement to make it publicly available, into a single static
+ *  table/form/struct, then it should be added here.
+ *
+ */
+using AMGpuMetricsPublicLatest_t = rsmi_gpu_metrics_t;
+using AMGpuMetricsPublicLatestTupl_t = std::tuple<rsmi_status_t, AMGpuMetricsPublicLatest_t>;
+
+using GpuMetricU16Tbl_t = std::vector<uint16_t>;
+using GpuMetricU32Tbl_t = std::vector<uint32_t>;
+using GpuMetricU64Tbl_t = std::vector<uint64_t>;
 
 using GPUMetricTempHbm_t = decltype(AMDGpuMetrics_v13_t::m_temperature_hbm);
-using GPUMetricTempHbmTbl_t = std::array<uint16_t, kRSMI_MAX_NUM_HBM_INSTANCES>;
+using GPUMetricTempHbmTbl_t = GpuMetricU16Tbl_t;
 
 using GPUMetricVcnActivity_t = decltype(AMDGpuMetrics_v14_t::m_vcn_activity);
-using GPUMetricVcnActivityTbl_t = std::array<uint16_t, kRSMI_MAX_NUM_VCN>;
+using GPUMetricVcnActivityTbl_t = GpuMetricU16Tbl_t;
 
 using GPUMetricXgmiReadDataAcc_t = decltype(AMDGpuMetrics_v14_t::m_xgmi_read_data_acc);
 using GPUMetricXgmiWriteDataAcc_t = decltype(AMDGpuMetrics_v14_t::m_xgmi_write_data_acc);
-using GPUMetricXgmiAccTbl_t = std::array<uint64_t, kRSMI_MAX_NUM_XGMI_LINKS>;
+using GPUMetricXgmiAccTbl_t = GpuMetricU64Tbl_t;
 
 using GPUMetricCurrGfxClk_t = decltype(AMDGpuMetrics_v14_t::m_current_gfxclk);
-using GPUMetricCurrGfxClkTbl_t = std::array<uint16_t, kRSMI_MAX_NUM_GFX_CLKS>;
+using GPUMetricCurrGfxClkTbl_t = GpuMetricU16Tbl_t;
 
 using GPUMetricCurrSocClk_t = decltype(AMDGpuMetrics_v14_t::m_current_socclk);
-using GPUMetricCurrSocClkTbl_t = std::array<uint16_t, kRSMI_MAX_NUM_CLKS>;
+using GPUMetricCurrSocClkTbl_t = GpuMetricU16Tbl_t;
 
 using GPUMetricCurrVClk0_t = decltype(AMDGpuMetrics_v14_t::m_current_vclk0);
-using GPUMetricCurrVClkTbl_t = std::array<uint16_t, kRSMI_MAX_NUM_CLKS>;
+using GPUMetricCurrVClkTbl_t = GpuMetricU16Tbl_t;
 
 using GPUMetricCurrDClk0_t = decltype(AMDGpuMetrics_v14_t::m_current_dclk0);
-using GPUMetricCurrDClkTbl_t = std::array<uint16_t, kRSMI_MAX_NUM_CLKS>;
+using GPUMetricCurrDClkTbl_t = GpuMetricU16Tbl_t;
 
 
-/*
+////
+/************************************************************
   * When a new metric table is released, we have to update: *
-    1.  Constants related to the new metrics added;
+    1.  Constants related to the new metrics added (if any);
         (ie: kRSMI_MAX_NUM_XGMI_LINKS)
     2.  Constants related to new version:
         (ie: kRSMI_GPU_METRICS_API_CONTENT_MAJOR_VER_1)
@@ -411,19 +440,35 @@ using GPUMetricCurrDClkTbl_t = std::array<uint16_t, kRSMI_MAX_NUM_CLKS>;
     5.  AMGpuMetricsLatest_t -> Newest AMDGpuMetrics_v1x_t
     6.  AMDGpuMetricVersionFlags_t
         (ie: AMDGpuMetricVersionFlags_t::kGpuMetricV14)
+    7.  Create the proper API using granular controls used by
+        rsmi_dev_gpu_metrics_info_query() (ie: rsmi_dev_temp_hotspot_get())
+
+    -> Remember to check/update:
+      - AMDGpuMetricsUnitType_t
+      - amdgpu_metrics_unit_type_translation_table
+      - AMDGpuMetrics_v1X_t structure in question
+      - populate_metrics_dynamic_tbl()
+      - copy_internal_to_external_metrics()
+      - init_max_public_gpu_matrics()
 */
 
 using AMDGpuMetricTypeId_t = uint32_t;
 using AMDGpuMetricTypeIdSeq_t = uint32_t;
 using AMDGpuMetricVersionFlagId_t = uint32_t;
 
+////
+/*
+  *
+  * These are used as Metric class, so Metric Units can be properly grouped.
+  * Each Metric Unit (or a set of them) is related to a Metric class.
+  *
+ */
 enum class AMDGpuMetricsClassId_t : AMDGpuMetricTypeId_t
 {
-  kGpuMetricHeader = 0,
+  kGpuMetricHeader,
   kGpuMetricTemperature,
   kGpuMetricUtilization,
   kGpuMetricPowerEnergy,
-  kGpuMetricSystemClockCounter,
   kGpuMetricAverageClock,
   kGpuMetricCurrentClock,
   kGpuMetricThrottleStatus,
@@ -435,6 +480,22 @@ enum class AMDGpuMetricsClassId_t : AMDGpuMetricTypeId_t
 };
 using AMDGpuMetricsClassIdTranslationTbl_t = std::map<AMDGpuMetricsClassId_t, std::string>;
 
+/*
+  *
+  * These are the Metric units. Each one represents a specific metric we want
+  * to either store or retrieve.
+  *
+  * This also gives a more granular control over to what exactly is needed,
+  * helping to generalize metric queries.
+  *
+  * Each type a new (non-existing metric unit) metric is added, it should be
+  * updated here.
+  *   - Their names matches (closely, regardless of their version) the name of
+  *     the data structure members they represent.
+  *
+  * All metric units not flagged as v1.4 were either part of the base or
+  * added/changed up to v1.3
+ */
 enum class AMDGpuMetricsUnitType_t : AMDGpuMetricTypeId_t
 {
   // kGpuMetricTemperature counters
@@ -452,7 +513,7 @@ enum class AMDGpuMetricsUnitType_t : AMDGpuMetricTypeId_t
   kMetricAvgMmActivity,
   kMetricGfxActivityAccumulator,
   kMetricMemActivityAccumulator,
-  kMetricVcnActivity,
+  kMetricVcnActivity,                     //v1.4
 
   // kGpuMetricAverageClock counters
   kMetricAvgGfxClockFrequency,
@@ -464,11 +525,11 @@ enum class AMDGpuMetricsUnitType_t : AMDGpuMetricTypeId_t
   kMetricAvgDClock1Frequency,
 
   // kGpuMetricCurrentClock counters
-  kMetricCurrGfxClock,
-  kMetricCurrSocClock,
+  kMetricCurrGfxClock,                    //v1.4: Changed to multi-valued
+  kMetricCurrSocClock,                    //v1.4: Changed to multi-valued
   kMetricCurrUClock,
-  kMetricCurrVClock0,
-  kMetricCurrDClock0,
+  kMetricCurrVClock0,                     //v1.4: Changed to multi-valued
+  kMetricCurrDClock0,                     //v1.4: Changed to multi-valued
   kMetricCurrVClock1,
   kMetricCurrDClock1,
 
@@ -477,7 +538,7 @@ enum class AMDGpuMetricsUnitType_t : AMDGpuMetricTypeId_t
   kMetricIndepThrottleStatus,
 
   // kGpuMetricGfxClkLockStatus counters
-  kMetricGfxClkLockStatus,
+  kMetricGfxClkLockStatus,                //v1.4
 
   // kGpuMetricCurrentFanSpeed counters
   kMetricCurrFanSpeed,
@@ -485,22 +546,25 @@ enum class AMDGpuMetricsUnitType_t : AMDGpuMetricTypeId_t
   // kGpuMetricLinkWidthSpeed counters
   kMetricPcieLinkWidth,
   kMetricPcieLinkSpeed,
-  kMetricPcieBandwidthAccumulator,
-  kMetricPcieBandwidthInst,
-  kMetricXgmiLinkWidth,
-  kMetricXgmiLinkSpeed,
-  kMetricXgmiReadDataAccumulator,
-  kMetricXgmiWriteDataAccumulator,
+  kMetricPcieBandwidthAccumulator,              //v1.4
+  kMetricPcieBandwidthInst,                     //v1.4
+  kMetricXgmiLinkWidth,                         //v1.4
+  kMetricXgmiLinkSpeed,                         //v1.4
+  kMetricXgmiReadDataAccumulator,               //v1.4
+  kMetricXgmiWriteDataAccumulator,              //v1.4
+  kMetricPcieL0RecovCountAccumulator,           //v1.4
+  kMetricPcieReplayCountAccumulator,            //v1.4
+  kMetricPcieReplayRollOverCountAccumulator,    //v1.4
 
   // kGpuMetricPowerEnergy counters
   kMetricAvgSocketPower,
-  kMetricCurrSocketPower,
-  kMetricEnergyAccumulator,
+  kMetricCurrSocketPower,                 //v1.4
+  kMetricEnergyAccumulator,               //v1.4
 
   // kGpuMetricVoltage counters
-  kMetricVoltageSoc,
-  kMetricVoltageGfx,
-  kMetricVoltageMem,
+  kMetricVoltageSoc,                      //v1.3
+  kMetricVoltageGfx,                      //v1.3
+  kMetricVoltageMem,                      //v1.3
 
   // kGpuMetricTimestamp counters
   kMetricTSClockCounter,
@@ -526,8 +590,12 @@ struct AMDGpuDynamicMetricsValue_t
 using AMDGpuDynamicMetricTblValues_t = std::vector<AMDGpuDynamicMetricsValue_t>;
 using AMDGpuDynamicMetricsTbl_t = std::map<AMDGpuMetricsClassId_t, std::map<AMDGpuMetricsUnitType_t, AMDGpuDynamicMetricTblValues_t>>;
 
-//  Note: All supported metric versions are listed her
-//        If not here, they are not supported
+
+/*
+  *
+  * Note: All supported metric versions are listed here, otherwise unsupported
+  *
+ */
 enum class AMDGpuMetricVersionFlags_t : AMDGpuMetricVersionFlagId_t
 {
   kGpuMetricNone = 0x0,
@@ -537,7 +605,7 @@ enum class AMDGpuMetricVersionFlags_t : AMDGpuMetricVersionFlagId_t
   kGpuMetricV13 = (0x1 << 3),
   kGpuMetricV14 = (0x1 << 4),
 };
-using AMDGpuMetricVersionTranslationTbl_t = std::map<uint64_t, AMDGpuMetricVersionFlags_t>;
+using AMDGpuMetricVersionTranslationTbl_t = std::map<uint16_t, AMDGpuMetricVersionFlags_t>;
 
 
 class GpuMetricsBase_t;
@@ -551,7 +619,7 @@ class GpuMetricsBase_t
     virtual AMDGpuMetricsBaseRef get_metrics_table() = 0;
     virtual AMDGpuMetricVersionFlags_t get_gpu_metrics_version_used() = 0;
     virtual rsmi_status_t populate_metrics_dynamic_tbl() = 0;
-
+    virtual AMGpuMetricsPublicLatestTupl_t copy_internal_to_external_metrics() = 0;
     virtual AMDGpuDynamicMetricsTbl_t get_metrics_dynamic_tbl() {
       return m_metrics_dynamic_tbl;
     }
@@ -575,7 +643,7 @@ class GpuMetricsBase_v11_t final : public GpuMetricsBase_t
 
     AMDGpuMetricsBaseRef get_metrics_table() override
     {
-      return m_gpu_metrics_tbl;
+      return this->m_gpu_metrics_tbl;
     }
 
     AMDGpuMetricVersionFlags_t get_gpu_metrics_version_used() override
@@ -584,6 +652,7 @@ class GpuMetricsBase_v11_t final : public GpuMetricsBase_t
     }
 
     rsmi_status_t populate_metrics_dynamic_tbl() override;
+    AMGpuMetricsPublicLatestTupl_t copy_internal_to_external_metrics() override;
 
 
   private:
@@ -602,7 +671,7 @@ class GpuMetricsBase_v12_t final : public GpuMetricsBase_t
 
     AMDGpuMetricsBaseRef get_metrics_table() override
     {
-      return m_gpu_metrics_tbl;
+      return this->m_gpu_metrics_tbl;
     }
 
     AMDGpuMetricVersionFlags_t get_gpu_metrics_version_used() override
@@ -611,7 +680,7 @@ class GpuMetricsBase_v12_t final : public GpuMetricsBase_t
     }
 
     rsmi_status_t populate_metrics_dynamic_tbl() override;
-
+    AMGpuMetricsPublicLatestTupl_t copy_internal_to_external_metrics() override;
 
   private:
     AMDGpuMetrics_v12_t m_gpu_metrics_tbl;
@@ -629,7 +698,7 @@ class GpuMetricsBase_v13_t final : public GpuMetricsBase_t
 
     AMDGpuMetricsBaseRef get_metrics_table() override
     {
-      return m_gpu_metrics_tbl;
+      return this->m_gpu_metrics_tbl;
     }
 
     AMDGpuMetricVersionFlags_t get_gpu_metrics_version_used() override
@@ -638,6 +707,7 @@ class GpuMetricsBase_v13_t final : public GpuMetricsBase_t
     }
 
     rsmi_status_t populate_metrics_dynamic_tbl() override;
+    AMGpuMetricsPublicLatestTupl_t copy_internal_to_external_metrics() override;
 
 
   private:
@@ -656,7 +726,7 @@ class GpuMetricsBase_v14_t final : public GpuMetricsBase_t
 
     AMDGpuMetricsBaseRef get_metrics_table() override
     {
-      return m_gpu_metrics_tbl;
+      return this->m_gpu_metrics_tbl;
     }
 
     AMDGpuMetricVersionFlags_t get_gpu_metrics_version_used() override
@@ -665,6 +735,7 @@ class GpuMetricsBase_v14_t final : public GpuMetricsBase_t
     }
 
     rsmi_status_t populate_metrics_dynamic_tbl() override;
+    AMGpuMetricsPublicLatestTupl_t copy_internal_to_external_metrics() override;
 
 
   private:
@@ -677,5 +748,9 @@ rsmi_status_t rsmi_dev_gpu_metrics_info_query(uint32_t dv_ind, AMDGpuMetricsUnit
 
 } // namespace amd::smi
 
-#endif // ROCM_SMI_ROCM_SMI_GPU_METRICS_H_
 
+rsmi_status_t
+rsmi_dev_gpu_metrics_header_info_get(uint32_t dv_ind, metrics_table_header_t& header_value);
+
+
+#endif // ROCM_SMI_ROCM_SMI_GPU_METRICS_H_

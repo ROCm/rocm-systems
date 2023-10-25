@@ -530,7 +530,7 @@ static const std::map<const char *, dev_depends_t> kDevFuncDependsMap = {
 
 Device::Device(std::string p, RocmSMI_env_vars const *e) :
             monitor_(nullptr), path_(p), env_(e), evt_notif_anon_fd_(-1),
-                                                   gpu_metrics_ver_{0, 0, 0} {
+                                                   m_gpu_metrics_header{0, 0, 0} {
 #ifndef DEBUG
     env_ = nullptr;
 #endif
@@ -875,7 +875,14 @@ int Device::readDevInfoBinary(DevInfoTypes type, std::size_t b_size,
   if ((num*b_size) != b_size) {
     ss << "Could not read DevInfoBinary for DevInfoType ("
        << RocmSMI::devInfoTypesStrings.at(type) << ") - SYSFS ("
-       << sysfs_path << "), binary size error, "
+       << sysfs_path << "), binary size error; "
+       << "[buff: "
+       << p_binary_data
+       << " size: "
+       << b_size
+       << " read: "
+       << num
+       << "]"
        << ", returning ENOENT (" << std::strerror(ENOENT) << ")";
     LOG_ERROR(ss);
     return ENOENT;

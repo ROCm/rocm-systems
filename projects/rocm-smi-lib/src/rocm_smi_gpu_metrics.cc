@@ -54,16 +54,20 @@
 #include <pthread.h>
 
 #include <algorithm>
+#include <array>
 #include <cassert>
 #include <chrono>
 #include <cstdint>
 #include <cstring>
+#include <ctime>
 #include <fstream>
 #include <iostream>
 #include <map>
 #include <memory>
+#include <optional>
 #include <regex>  // NOLINT
 #include <string>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -73,478 +77,6 @@ using namespace amd::smi;
 
 #define TRY try {
 #define CATCH } catch (...) {return amd::smi::handleException();}
-
-// Put definitions of old gpu_metrics formats here
-typedef struct {
-  struct metrics_table_header_t common_header;
-
-  /* Driver attached timestamp (in ns) */
-  uint64_t      system_clock_counter;
-
-/* Temperature */
-  uint16_t      temperature_edge;
-  uint16_t      temperature_hotspot;
-  uint16_t      temperature_mem;
-  uint16_t      temperature_vrgfx;
-  uint16_t      temperature_vrsoc;
-  uint16_t      temperature_vrmem;
-
-/* Utilization */
-  uint16_t      average_gfx_activity;
-  uint16_t      average_umc_activity;  // memory controller
-  uint16_t      average_mm_activity;   // UVD or VCN
-
-/* Power/Energy */
-  uint16_t      average_socket_power;
-  uint32_t      energy_accumulator;
-
-/* Average clocks */
-  uint16_t      average_gfxclk_frequency;
-  uint16_t      average_socclk_frequency;
-  uint16_t      average_uclk_frequency;
-  uint16_t      average_vclk0_frequency;
-  uint16_t      average_dclk0_frequency;
-  uint16_t      average_vclk1_frequency;
-  uint16_t      average_dclk1_frequency;
-
-/* Current clocks */
-  uint16_t      current_gfxclk;
-  uint16_t      current_socclk;
-  uint16_t      current_uclk;
-  uint16_t      current_vclk0;
-  uint16_t      current_dclk0;
-  uint16_t      current_vclk1;
-  uint16_t      current_dclk1;
-
-/* Throttle status */
-  uint32_t      throttle_status;
-
-/* Fans */
-  uint16_t      current_fan_speed;
-
-/* Link width/speed */
-  uint8_t       pcie_link_width;
-  uint8_t       pcie_link_speed;  // in 0.1 GT/s
-} rsmi_gpu_metrics_v_1_0_t;
-
-typedef struct {
-  rsmi_gpu_metrics_t base;
-  uint64_t           firmware_timestamp;
-} rsmi_gpu_metrics_v_1_2;
-
-typedef struct {
-  rsmi_gpu_metrics_t base;
-  /* PMFW attached timestamp (10ns resolution) */
-  uint64_t			firmware_timestamp;
-
-  /* Voltage (mV) */
-  uint16_t			voltage_soc;
-  uint16_t			voltage_gfx;
-  uint16_t			voltage_mem;
-
-  uint16_t          padding1;
-
-  /* Throttle status (ASIC independent) */
-  uint64_t			indep_throttle_status;
-
-} rsmi_gpu_metrics_v_1_3;
-
-
-// log current gpu_metrics file content read
-// any metrics value can be a nullptr
-void log_gpu_metrics(const metrics_table_header_t *gpu_metrics_table_header,
-                     const rsmi_gpu_metrics_v_1_2 *rsmi_gpu_metrics_v_1_2,
-                     const rsmi_gpu_metrics_v_1_3 *gpu_metrics_v_1_3,
-                     const rsmi_gpu_metrics_t *rsmi_gpu_metrics) {
-  if (!RocmSMI::getInstance().isLoggingOn()) {
-    return;
-  }
-  std::ostringstream ss;
-  if (gpu_metrics_table_header != nullptr) {
-    ss
-        /* Common Header */
-        << print_unsigned_hex_and_int(
-            gpu_metrics_table_header->structure_size,
-            "gpu_metrics_table_header->structure_size")
-        << print_unsigned_hex_and_int(
-            gpu_metrics_table_header->format_revision,
-            "gpu_metrics_table_header->format_revision")
-        << print_unsigned_hex_and_int(
-            gpu_metrics_table_header->content_revision,
-            "gpu_metrics_table_header->content_revision");
-    LOG_DEBUG(ss);
-  }
-  if (rsmi_gpu_metrics == nullptr) {
-    return;
-  }
-
-  ss
-    /* Common Header */
-    << print_unsigned_hex_and_int(
-        rsmi_gpu_metrics->common_header.structure_size,
-        "rsmi_gpu_metrics->common_header.structure_size")
-    << print_unsigned_hex_and_int(
-        rsmi_gpu_metrics->common_header.format_revision,
-        "rsmi_gpu_metrics->common_header.format_revision")
-    << print_unsigned_hex_and_int(
-        rsmi_gpu_metrics->common_header.content_revision,
-        "rsmi_gpu_metrics->common_header.content_revision")
-    /* Temperature */
-    << print_unsigned_hex_and_int(
-        rsmi_gpu_metrics->temperature_edge,
-        "rsmi_gpu_metrics->temperature_edge")
-    << print_unsigned_hex_and_int(
-        rsmi_gpu_metrics->temperature_hotspot,
-        "rsmi_gpu_metrics->temperature_hotspot")
-    << print_unsigned_hex_and_int(
-        rsmi_gpu_metrics->temperature_mem,
-        "rsmi_gpu_metrics->temperature_mem")
-    << print_unsigned_hex_and_int(
-        rsmi_gpu_metrics->temperature_vrgfx,
-        "rsmi_gpu_metrics->temperature_vrgfx")
-    << print_unsigned_hex_and_int(
-        rsmi_gpu_metrics->temperature_vrsoc,
-        "rsmi_gpu_metrics->temperature_vrsoc")
-    << print_unsigned_hex_and_int(
-        rsmi_gpu_metrics->temperature_vrmem,
-        "rsmi_gpu_metrics->temperature_vrmem")
-    /* Utilization */
-    << print_unsigned_hex_and_int(
-        rsmi_gpu_metrics->average_gfx_activity,
-        "rsmi_gpu_metrics->average_gfx_activity")
-    << print_unsigned_hex_and_int(
-        rsmi_gpu_metrics->average_umc_activity,
-        "rsmi_gpu_metrics->average_umc_activity")
-    << print_unsigned_hex_and_int(
-        rsmi_gpu_metrics->average_mm_activity,
-        "rsmi_gpu_metrics->average_mm_activity")
-    /* Power/Energy */
-    << print_unsigned_hex_and_int(
-        rsmi_gpu_metrics->average_socket_power,
-        "rsmi_gpu_metrics->average_socket_power")
-    << print_unsigned_hex_and_int(
-        rsmi_gpu_metrics->energy_accumulator,
-        "rsmi_gpu_metrics->energy_accumulator")
-    /* Driver attached timestamp (in ns) */
-    << print_unsigned_hex_and_int(
-        rsmi_gpu_metrics->system_clock_counter,
-        "rsmi_gpu_metrics->system_clock_counter")
-    /* Average clocks */
-    << print_unsigned_hex_and_int(
-        rsmi_gpu_metrics->average_gfxclk_frequency,
-        "rsmi_gpu_metrics->average_gfxclk_frequency")
-    << print_unsigned_hex_and_int(
-        rsmi_gpu_metrics->average_socclk_frequency,
-        "rsmi_gpu_metrics->average_socclk_frequency")
-    << print_unsigned_hex_and_int(
-        rsmi_gpu_metrics->average_uclk_frequency,
-        "rsmi_gpu_metrics->average_uclk_frequency")
-    << print_unsigned_hex_and_int(
-        rsmi_gpu_metrics->average_vclk0_frequency,
-        "rsmi_gpu_metrics->average_vclk0_frequency")
-    << print_unsigned_hex_and_int(
-        rsmi_gpu_metrics->average_dclk0_frequency,
-        "rsmi_gpu_metrics->average_dclk0_frequency")
-    << print_unsigned_hex_and_int(
-        rsmi_gpu_metrics->average_vclk1_frequency,
-        "rsmi_gpu_metrics->average_vclk1_frequency")
-    << print_unsigned_hex_and_int(
-        rsmi_gpu_metrics->average_dclk1_frequency,
-        "rsmi_gpu_metrics->average_dclk1_frequency")
-    /* Current clocks */
-    << print_unsigned_hex_and_int(
-        rsmi_gpu_metrics->current_gfxclk,
-        "rsmi_gpu_metrics->current_gfxclk")
-    << print_unsigned_hex_and_int(
-        rsmi_gpu_metrics->current_socclk,
-        "rsmi_gpu_metrics->current_socclk")
-    << print_unsigned_hex_and_int(
-        rsmi_gpu_metrics->current_uclk,
-        "rsmi_gpu_metrics->current_uclk")
-    << print_unsigned_hex_and_int(
-        rsmi_gpu_metrics->current_vclk0,
-        "rsmi_gpu_metrics->current_vclk0")
-    << print_unsigned_hex_and_int(
-        rsmi_gpu_metrics->current_dclk0,
-        "rsmi_gpu_metrics->current_dclk0")
-    << print_unsigned_hex_and_int(
-        rsmi_gpu_metrics->current_vclk1,
-        "rsmi_gpu_metrics->current_vclk1")
-    << print_unsigned_hex_and_int(
-        rsmi_gpu_metrics->current_dclk1,
-        "rsmi_gpu_metrics->current_dclk1")
-    /* Throttle status */
-    << print_unsigned_hex_and_int(
-        rsmi_gpu_metrics->throttle_status,
-        "rsmi_gpu_metrics->throttle_status")
-    /* Fans */
-    << print_unsigned_hex_and_int(
-        rsmi_gpu_metrics->current_fan_speed,
-        "rsmi_gpu_metrics->current_fan_speed")
-    /* Link width/speed */
-    << print_unsigned_hex_and_int(
-        rsmi_gpu_metrics->pcie_link_width,
-        "rsmi_gpu_metrics->pcie_link_width")
-    << print_unsigned_hex_and_int(
-        rsmi_gpu_metrics->pcie_link_speed,
-        "rsmi_gpu_metrics->pcie_link_speed")
-    << print_unsigned_hex_and_int(
-        rsmi_gpu_metrics->padding,
-        "rsmi_gpu_metrics->padding")
-    << print_unsigned_hex_and_int(
-        rsmi_gpu_metrics->gfx_activity_acc,
-        "rsmi_gpu_metrics->gfx_activity_acc")
-    << print_unsigned_hex_and_int(
-        rsmi_gpu_metrics->mem_activity_acc,
-        "rsmi_gpu_metrics->mem_activity_acc");
-    for (int i=0; i < RSMI_NUM_HBM_INSTANCES; i++) {
-      ss << print_unsigned_hex_and_int(
-        rsmi_gpu_metrics->temperature_hbm[i],
-        "rsmi_gpu_metrics->temperature_hbm[" + std::to_string(i) + "]");
-    }
-
-    if (rsmi_gpu_metrics_v_1_2 != nullptr) {
-      /* PMFW attached timestamp (10ns resolution) */
-      ss
-      << print_unsigned_hex_and_int(
-          rsmi_gpu_metrics_v_1_2->firmware_timestamp,
-          "rsmi_gpu_metrics_v_1_2->firmware_timestamp");
-    }
-
-    if (gpu_metrics_v_1_3 != nullptr) {
-      /* PMFW attached timestamp (10ns resolution) */
-      ss
-      << print_unsigned_hex_and_int(
-          gpu_metrics_v_1_3->firmware_timestamp,
-          "gpu_metrics_v_1_3->firmware_timestamp")
-      /* Voltage (mV) */
-      << print_unsigned_hex_and_int(
-          gpu_metrics_v_1_3->voltage_soc,
-          "gpu_metrics_v_1_3->voltage_soc")
-      << print_unsigned_hex_and_int(
-          gpu_metrics_v_1_3->voltage_gfx,
-          "gpu_metrics_v_1_3->voltage_gfx")
-      << print_unsigned_hex_and_int(
-          gpu_metrics_v_1_3->voltage_mem,
-          "gpu_metrics_v_1_3->voltage_mem")
-      << print_unsigned_hex_and_int(
-          gpu_metrics_v_1_3->padding1,
-          "gpu_metrics_v_1_3->padding1")
-      /* Throttle status (ASIC independent) */
-      << print_unsigned_hex_and_int(
-          gpu_metrics_v_1_3->indep_throttle_status,
-          "gpu_metrics_v_1_3->indep_throttle_status");
-    }
-    LOG_DEBUG(ss);
-}
-
-static rsmi_status_t GetGPUMetricsFormat1(uint32_t dv_ind,
-                                rsmi_gpu_metrics_t *data, uint8_t content_v) {
-  assert(content_v != RSMI_GPU_METRICS_API_CONTENT_VER_1 &&
-         content_v != RSMI_GPU_METRICS_API_CONTENT_VER_2 &&
-         content_v != RSMI_GPU_METRICS_API_CONTENT_VER_3 );
-  if (content_v == RSMI_GPU_METRICS_API_CONTENT_VER_1 ||
-      content_v == RSMI_GPU_METRICS_API_CONTENT_VER_2 ||
-      content_v == RSMI_GPU_METRICS_API_CONTENT_VER_3 ) {
-    // This function shouldn't be called if content version is
-    // RSMI_GPU_METRICS_API_CONTENT_VER_1 or RSMI_GPU_METRICS_API_CONTENT_VER_2
-    // or RSMI_GPU_METRICS_API_CONTENT_VER_3
-    return RSMI_STATUS_INVALID_ARGS;
-  }
-  void *metric_data = nullptr;
-  size_t data_size;
-  rsmi_status_t ret;
-
-  rsmi_gpu_metrics_v_1_0_t metric_data_v_1_0;
-
-  if (content_v == 0) {
-    metric_data = &metric_data_v_1_0;
-    data_size = sizeof(rsmi_gpu_metrics_v_1_0_t);
-  }  // else { ...   handle other conversions to v1
-
-  assert(metric_data != nullptr && "Unexpected conversion attempted.");
-  ret = GetDevBinaryBlob(amd::smi::kDevGpuMetrics, dv_ind, data_size,
-                                                                 metric_data);
-  if (ret != RSMI_STATUS_SUCCESS) {
-    return ret;
-  }
-
-#define ASSIGN_DATA_FIELD(FIELD, SRC) \
-  data->FIELD = (SRC)->FIELD;
-
-#define ASSIGN_COMMON_FORMATS(SRC) \
-    ASSIGN_DATA_FIELD(common_header, (SRC)) \
-    ASSIGN_DATA_FIELD(temperature_edge, (SRC)) \
-    ASSIGN_DATA_FIELD(temperature_hotspot, (SRC)) \
-    ASSIGN_DATA_FIELD(temperature_mem, (SRC)) \
-    ASSIGN_DATA_FIELD(temperature_vrgfx, (SRC)) \
-    ASSIGN_DATA_FIELD(temperature_vrsoc, (SRC)) \
-    ASSIGN_DATA_FIELD(temperature_vrmem, (SRC)) \
-    ASSIGN_DATA_FIELD(average_gfx_activity, (SRC)) \
-    ASSIGN_DATA_FIELD(average_umc_activity, (SRC)) \
-    ASSIGN_DATA_FIELD(average_mm_activity, (SRC)) \
-    ASSIGN_DATA_FIELD(average_socket_power, (SRC)) \
-    ASSIGN_DATA_FIELD(system_clock_counter, (SRC)) \
-    ASSIGN_DATA_FIELD(average_gfxclk_frequency, (SRC)) \
-    ASSIGN_DATA_FIELD(average_socclk_frequency, (SRC)) \
-    ASSIGN_DATA_FIELD(average_uclk_frequency, (SRC)) \
-    ASSIGN_DATA_FIELD(average_vclk0_frequency, (SRC)) \
-    ASSIGN_DATA_FIELD(average_dclk0_frequency, (SRC)) \
-    ASSIGN_DATA_FIELD(average_vclk1_frequency, (SRC)) \
-    ASSIGN_DATA_FIELD(average_dclk1_frequency, (SRC)) \
-    ASSIGN_DATA_FIELD(current_gfxclk, (SRC)) \
-    ASSIGN_DATA_FIELD(current_socclk, (SRC)) \
-    ASSIGN_DATA_FIELD(current_uclk, (SRC)) \
-    ASSIGN_DATA_FIELD(current_vclk0, (SRC)) \
-    ASSIGN_DATA_FIELD(current_dclk0, (SRC)) \
-    ASSIGN_DATA_FIELD(current_vclk1, (SRC)) \
-    ASSIGN_DATA_FIELD(current_dclk1, (SRC)) \
-    ASSIGN_DATA_FIELD(throttle_status, (SRC)) \
-    ASSIGN_DATA_FIELD(current_fan_speed, (SRC))
-
-  // Now handle differences from format 1
-  if (content_v == 0) {
-    // First handle all data that is common to Format1 and other formats
-    ASSIGN_COMMON_FORMATS(
-                    reinterpret_cast<rsmi_gpu_metrics_v_1_0_t *>(metric_data))
-
-    // Then, the differences:
-    data->energy_accumulator = static_cast<uint64_t>(
-        reinterpret_cast<rsmi_gpu_metrics_v_1_0_t *>(
-                                            metric_data)->energy_accumulator);
-    data->pcie_link_width = static_cast<uint16_t>(
-        reinterpret_cast<rsmi_gpu_metrics_v_1_0_t *>(
-                                               metric_data)->pcie_link_width);
-    data->pcie_link_speed = static_cast<uint16_t>(
-        reinterpret_cast<rsmi_gpu_metrics_v_1_0_t *>(
-                                               metric_data)->pcie_link_speed);
-
-    // These fields didn't exist in v0
-    data->gfx_activity_acc = 0;
-    data->mem_activity_acc  = 0;
-    (void)memset(data->temperature_hbm, 0,
-                                   RSMI_NUM_HBM_INSTANCES * sizeof(uint16_t));
-  }  // else handle other conversions to format 1
-#undef ASSIGN_DATA_FIELD
-#undef ASSIGN_COMMON_FORMATS
-  return RSMI_STATUS_SUCCESS;
-}
-
-// Translate gpu_metrics version 1.2 to rsmi_gpu_metrics_t. gpu_metrics
-// version 1.2 provides timestamp provided by the firmware. This timestamp
-// is sampled atomically along when gpu_metric information. Use this
-// timestamp instead of system_clock_counter
-
-static void map_gpu_metrics_1_2_to_rsmi_gpu_metrics_t(
-        const rsmi_gpu_metrics_v_1_2 *gpu_metrics_v_1_2,
-        rsmi_gpu_metrics_t *rsmi_gpu_metrics)
-{
-    memcpy(rsmi_gpu_metrics, &gpu_metrics_v_1_2->base,
-           sizeof(rsmi_gpu_metrics_t));
-    // firmware_timestamp is at 10ns resolution
-    rsmi_gpu_metrics->system_clock_counter =
-          gpu_metrics_v_1_2->firmware_timestamp * 10;
-}
-
-static void map_gpu_metrics_1_3_to_rsmi_gpu_metrics_t(
-        const rsmi_gpu_metrics_v_1_3 *gpu_metrics_v_1_3,
-        rsmi_gpu_metrics_t *rsmi_gpu_metrics)
-{
-    memcpy(rsmi_gpu_metrics, &gpu_metrics_v_1_3->base,
-           sizeof(rsmi_gpu_metrics_t));
-    // firmware_timestamp is at 10ns resolution
-    rsmi_gpu_metrics->system_clock_counter =
-          gpu_metrics_v_1_3->firmware_timestamp * 10;
-
-}
-
-rsmi_status_t
-rsmi_dev_gpu_metrics_info_get(uint32_t dv_ind, rsmi_gpu_metrics_t *smu) {
-  TRY
-  DEVICE_MUTEX
-  CHK_SUPPORT_NAME_ONLY(smu)
-  rsmi_gpu_metrics_v_1_2 smu_v_1_2;
-  rsmi_gpu_metrics_v_1_3 smu_v_1_3;
-  rsmi_status_t ret;
-
-  std::ostringstream ss;
-  if (!dev->gpu_metrics_ver().structure_size) {
-    ret = GetDevBinaryBlob(amd::smi::kDevGpuMetrics, dv_ind,
-              sizeof(struct metrics_table_header_t), &dev->gpu_metrics_ver());
-    log_gpu_metrics(&dev->gpu_metrics_ver(), nullptr, nullptr, nullptr);
-
-    if (ret != RSMI_STATUS_SUCCESS) {
-      ss << "Returning = " << getRSMIStatusString(ret)
-         << ",\ndev->gpu_metrics_ver().structure_size = "
-         << print_unsigned_int(dev->gpu_metrics_ver().structure_size)
-         << ", could not read common header";
-      LOG_ERROR(ss);
-      return ret;
-    }
-  }
-  // only supports gpu_metrics_v1_x version
-  if (dev->gpu_metrics_ver().format_revision != 1) {
-    ss << "Returning = " << getRSMIStatusString(RSMI_STATUS_NOT_SUPPORTED)
-         << ",\ndev->gpu_metrics_ver().format_revision = "
-         << print_unsigned_int(dev->gpu_metrics_ver().format_revision)
-         << " was not equal to 1";
-    LOG_ERROR(ss);
-    return RSMI_STATUS_NOT_SUPPORTED;
-  }
-
-  // Initialize the smu fields to zero as some of them only valid in
-  // a specific version.
-  *smu = {};
-
-  bool isRevisionExpected = ((dev->gpu_metrics_ver().content_revision == 1) ||
-        (dev->gpu_metrics_ver().content_revision == 2) ||
-        (dev->gpu_metrics_ver().content_revision == 3));
-  if (isRevisionExpected == false) {
-    ss << __PRETTY_FUNCTION__ << " | content revision was = "
-       << print_unsigned_hex_and_int(dev->gpu_metrics_ver().content_revision)
-       << ", expected version 1,2, or 3 | returning "
-       << getRSMIStatusString(RSMI_STATUS_NOT_SUPPORTED);
-    LOG_ERROR(ss);
-    return RSMI_STATUS_NOT_SUPPORTED;
-  }
-  if (dev->gpu_metrics_ver().content_revision ==
-                                        RSMI_GPU_METRICS_API_CONTENT_VER_1) {
-        ret = GetDevBinaryBlob(amd::smi::kDevGpuMetrics, dv_ind,
-                                           sizeof(rsmi_gpu_metrics_t), smu);
-        ss << __PRETTY_FUNCTION__ << " | RSMI_GPU_METRICS_API_CONTENT_VER_1";
-        LOG_DEBUG(ss);
-        log_gpu_metrics(nullptr, nullptr, nullptr, smu);
-  } else if (dev->gpu_metrics_ver().content_revision ==
-                                        RSMI_GPU_METRICS_API_CONTENT_VER_2) {
-        ret = GetDevBinaryBlob(amd::smi::kDevGpuMetrics, dv_ind,
-                                sizeof(rsmi_gpu_metrics_v_1_2), &smu_v_1_2);
-        map_gpu_metrics_1_2_to_rsmi_gpu_metrics_t(&smu_v_1_2, smu);
-        ss << __PRETTY_FUNCTION__ << " | RSMI_GPU_METRICS_API_CONTENT_VER_2";
-        LOG_DEBUG(ss);
-        log_gpu_metrics(nullptr, &smu_v_1_2, nullptr, smu);
-  } else if (dev->gpu_metrics_ver().content_revision ==
-                                        RSMI_GPU_METRICS_API_CONTENT_VER_3) {
-        ret = GetDevBinaryBlob(amd::smi::kDevGpuMetrics, dv_ind,
-                                sizeof(rsmi_gpu_metrics_v_1_3), &smu_v_1_3);
-        map_gpu_metrics_1_3_to_rsmi_gpu_metrics_t(&smu_v_1_3, smu);
-        ss << __PRETTY_FUNCTION__ << " | RSMI_GPU_METRICS_API_CONTENT_VER_3";
-        LOG_DEBUG(ss);
-        log_gpu_metrics(nullptr, nullptr, &smu_v_1_3, smu);
-  } else {
-            ret = GetGPUMetricsFormat1(dv_ind, smu,
-                                     dev->gpu_metrics_ver().content_revision);
-            ss << __PRETTY_FUNCTION__ << " | GetGPUMetricsFormat1";
-            LOG_DEBUG(ss);
-            log_gpu_metrics(nullptr, nullptr, nullptr, smu);
-  }
-
-  if (ret != RSMI_STATUS_SUCCESS) {
-    return ret;
-  }
-
-  return ret;
-  CATCH
-}
 
 
 namespace amd::smi
@@ -576,24 +108,54 @@ uint64_t actual_timestamp_in_secs()
   return duration_cast<seconds>(system_clock::now().time_since_epoch()).count();
 }
 
+auto timestamp_to_time_point(uint64_t timestamp_in_secs)
+{
+  using namespace std::chrono;
+  system_clock::time_point time_point{seconds{timestamp_in_secs}};
+  std::time_t timestamp_time = system_clock::to_time_t(time_point);
+  return timestamp_time;
+}
+
+
 std::string stringfy_metrics_header(const AMDGpuMetricsHeader_v1_t& metrics_header)
 {
   std::stringstream metrics_header_info;
   metrics_header_info
-    << "Format: " << print_unsigned_hex_and_int(metrics_header.m_format_revision)
-    << "." << print_unsigned_hex_and_int(metrics_header.m_content_revision)
-    << " Size: " << print_unsigned_hex_and_int(metrics_header.m_structure_size);
+    << "{Header Info: "
+    << print_unsigned_int(metrics_header.m_format_revision)
+    << "."
+    << print_unsigned_int(metrics_header.m_content_revision)
+    << " Size: "
+    << print_unsigned_int(metrics_header.m_structure_size)
+    << "}  "
+    << "[Format: " << print_unsigned_hex_and_int(metrics_header.m_format_revision)
+    << " Revision: " << print_unsigned_hex_and_int(metrics_header.m_content_revision)
+    << " Size: " << print_unsigned_hex_and_int(metrics_header.m_structure_size)
+    << "]"
+    << "\n";
 
   return metrics_header_info.str();
 }
 
+std::string stringfy_metric_header_version(const AMDGpuMetricsHeader_v1_t& metrics_header)
+{
+  std::stringstream metrics_header_info;
+  metrics_header_info
+    << print_unsigned_int(metrics_header.m_format_revision)
+    << "."
+    << print_unsigned_int(metrics_header.m_content_revision);
+
+  return metrics_header_info.str();
+}
+
+
 //
-//  version 1,0: 256
-//  version 1,1: 257
-//  version 1,2: 258
-//  version 1,3: 259
-//  version 1,4: 260
-//  version 1,5: 261
+//  version 1.0: 256
+//  version 1.1: 257
+//  version 1.2: 258
+//  version 1.3: 259
+//  version 1.4: 260
+//  version 1.5: 261
 //
 const AMDGpuMetricVersionTranslationTbl_t amdgpu_metric_version_translation_table
 {
@@ -612,7 +174,6 @@ const AMDGpuMetricsClassIdTranslationTbl_t amdgpu_metrics_class_id_translation_t
   {AMDGpuMetricsClassId_t::kGpuMetricTemperature, "Temperature"},
   {AMDGpuMetricsClassId_t::kGpuMetricUtilization, "Utilization"},
   {AMDGpuMetricsClassId_t::kGpuMetricPowerEnergy, "Power/Energy"},
-  {AMDGpuMetricsClassId_t::kGpuMetricSystemClockCounter, "System Clock"},
   {AMDGpuMetricsClassId_t::kGpuMetricAverageClock, "Average Clock"},
   {AMDGpuMetricsClassId_t::kGpuMetricCurrentClock, "Current Clock"},
   {AMDGpuMetricsClassId_t::kGpuMetricThrottleStatus, "Throttle"},
@@ -679,6 +240,9 @@ const AMDGpuMetricsUnitTypeTranslationTbl_t amdgpu_metrics_unit_type_translation
   {AMDGpuMetricsUnitType_t::kMetricXgmiLinkSpeed, "XgmiLinkSpeed"},
   {AMDGpuMetricsUnitType_t::kMetricXgmiReadDataAccumulator, "XgmiReadDataAcc"},
   {AMDGpuMetricsUnitType_t::kMetricXgmiWriteDataAccumulator, "XgmiWriteDataAcc"},
+  {AMDGpuMetricsUnitType_t::kMetricPcieL0RecovCountAccumulator, "PcieL0RecovCountAcc"},
+  {AMDGpuMetricsUnitType_t::kMetricPcieReplayCountAccumulator, "PcieReplayCountAcc"},
+  {AMDGpuMetricsUnitType_t::kMetricPcieReplayRollOverCountAccumulator, "PcieReplayRollOverCountAcc"},
 
   // kGpuMetricPowerEnergy counters
   {AMDGpuMetricsUnitType_t::kMetricAvgSocketPower, "AvgSocketPower"},
@@ -698,13 +262,71 @@ const AMDGpuMetricsUnitTypeTranslationTbl_t amdgpu_metrics_unit_type_translation
 
 AMDGpuMetricVersionFlags_t translate_header_to_flag_version(const AMDGpuMetricsHeader_v1_t& metrics_header)
 {
+  std::ostringstream ostrstream;
+  auto version_id(AMDGpuMetricVersionFlags_t::kGpuMetricNone);
+  ostrstream << __PRETTY_FUNCTION__ << " | ======= start =======";
+  LOG_TRACE(ostrstream);
+
   const auto flag_version = join_metrics_version(metrics_header);
   if (amdgpu_metric_version_translation_table.find(flag_version) != amdgpu_metric_version_translation_table.end()) {
-    return amdgpu_metric_version_translation_table.at(flag_version);
+    version_id = amdgpu_metric_version_translation_table.at(flag_version);
+    ostrstream << __PRETTY_FUNCTION__
+                << " | ======= end ======= "
+                << " | Success "
+                << " | Translation Tbl: " << flag_version
+                << " | Metric Version: " << stringfy_metrics_header(metrics_header)
+                << " | Returning = "
+                << static_cast<AMDGpuMetricVersionFlagId_t>(version_id)
+                << " |";
+    LOG_TRACE(ostrstream);
+    return version_id;
   }
 
-  return AMDGpuMetricVersionFlags_t::kGpuMetricNone;
+  ostrstream << __PRETTY_FUNCTION__
+              << " | ======= end ======= "
+              << " | Fail "
+              << " | Translation Tbl: " << flag_version
+              << " | Metric Version: " << stringfy_metrics_header(metrics_header)
+              << " | Returning = "
+              << static_cast<AMDGpuMetricVersionFlagId_t>(version_id)
+              << " |";
+  LOG_ERROR(ostrstream);
+  return version_id;
 }
+
+uint16_t translate_flag_to_metric_version(AMDGpuMetricVersionFlags_t version_flag)
+{
+  std::ostringstream ostrstream;
+  auto version_id = uint16_t(0);
+  ostrstream << __PRETTY_FUNCTION__ << " | ======= start =======";
+  LOG_TRACE(ostrstream);
+
+  for (const auto& [key, value] : amdgpu_metric_version_translation_table) {
+      if (value == version_flag) {
+        version_id = key;
+        ostrstream << __PRETTY_FUNCTION__
+                   << " | ======= end ======= "
+                   << " | Success "
+                   << " | Version Flag: " << static_cast<AMDGpuMetricVersionFlagId_t>(version_flag)
+                   << " | Unified Version: " << version_id
+                   << " | Str. Version: " << stringfy_metric_header_version(disjoin_metrics_version(version_id))
+                   << " |";
+        LOG_TRACE(ostrstream);
+        return version_id;
+      }
+  }
+
+  ostrstream << __PRETTY_FUNCTION__
+              << " | ======= end ======= "
+              << " | Fail "
+              << " | Version Flag: " << static_cast<AMDGpuMetricVersionFlagId_t>(version_flag)
+              << " | Unified Version: " << version_id
+              << " | Str. Version: " << stringfy_metric_header_version(disjoin_metrics_version(version_id))
+              << " |";
+  LOG_TRACE(ostrstream);
+  return version_id;
+}
+
 
 rsmi_status_t is_gpu_metrics_version_supported(const AMDGpuMetricsHeader_v1_t& metrics_header)
 {
@@ -714,69 +336,63 @@ rsmi_status_t is_gpu_metrics_version_supported(const AMDGpuMetricsHeader_v1_t& m
          ? rsmi_status_t::RSMI_STATUS_SUCCESS : rsmi_status_t::RSMI_STATUS_NOT_SUPPORTED;
 }
 
-struct AMDGpuMetricsLogInfo_t
-{
-  rsmi_status_t m_status_code;
-  std::string m_title;
-  std::string m_pretty_function;
-};
-
-class AMDGpuMetricsLogger_t
-{
-  public:
-    enum class LogInfoType_t
-    {
-      kLogError,
-      kLogAlarm,
-      kLogInfo,
-      kLogBuffer,
-      kLogTrace,
-      kLogDebug,
-    };
-
-    void operator()(const AMDGpuMetricsLogInfo_t& log_info)
-    {
-      m_ostrstream << log_info.m_pretty_function << log_info.m_title;
-      LOG_TRACE(m_ostrstream);
-
-      m_ostrstream << log_info.m_pretty_function
-                   << " | ======= end ======= "
-                   << " | Fail "
-                   << " | Device #: "
-                   << " | Metric Version: "
-                   << " | Cause: Couldn't get a valid metric object"
-                   << " | Returning = "
-                   << getRSMIStatusString(log_info.m_status_code)
-                   << " |";
-
-      LOG_ERROR(m_ostrstream);
-    }
-
-  private:
-    std::ostringstream m_ostrstream;
-
-};
-
 
 AMDGpuMetricFactories_t amd_gpu_metrics_factory_table
 {
-  {AMDGpuMetricVersionFlags_t::kGpuMetricV11, std::make_unique<GpuMetricsBase_v11_t>(GpuMetricsBase_v11_t{})},
-  {AMDGpuMetricVersionFlags_t::kGpuMetricV12, std::make_unique<GpuMetricsBase_v12_t>(GpuMetricsBase_v12_t{})},
-  {AMDGpuMetricVersionFlags_t::kGpuMetricV13, std::make_unique<GpuMetricsBase_v13_t>(GpuMetricsBase_v13_t{})},
-  {AMDGpuMetricVersionFlags_t::kGpuMetricV14, std::make_unique<GpuMetricsBase_v14_t>(GpuMetricsBase_v14_t{})},
+  {AMDGpuMetricVersionFlags_t::kGpuMetricV11, std::make_shared<GpuMetricsBase_v11_t>(GpuMetricsBase_v11_t{})},
+  {AMDGpuMetricVersionFlags_t::kGpuMetricV12, std::make_shared<GpuMetricsBase_v12_t>(GpuMetricsBase_v12_t{})},
+  {AMDGpuMetricVersionFlags_t::kGpuMetricV13, std::make_shared<GpuMetricsBase_v13_t>(GpuMetricsBase_v13_t{})},
+  {AMDGpuMetricVersionFlags_t::kGpuMetricV14, std::make_shared<GpuMetricsBase_v14_t>(GpuMetricsBase_v14_t{})},
 };
 
 GpuMetricsBasePtr amdgpu_metrics_factory(AMDGpuMetricVersionFlags_t gpu_metric_version)
 {
+  std::ostringstream ostrstream;
+  ostrstream << __PRETTY_FUNCTION__ << " | ======= start =======";
+  LOG_TRACE(ostrstream);
+
   auto contains = [](const AMDGpuMetricVersionFlags_t metric_version) {
     return (amd_gpu_metrics_factory_table.find(metric_version) != amd_gpu_metrics_factory_table.end());
   };
 
   if (contains(gpu_metric_version)) {
-    return std::move(amd_gpu_metrics_factory_table[gpu_metric_version]);
+    ostrstream << __PRETTY_FUNCTION__
+                << " | ======= end ======= "
+                << " | Success "
+                << " | Factory Version: " << static_cast<AMDGpuMetricVersionFlagId_t>(gpu_metric_version)
+                << " |";
+    LOG_TRACE(ostrstream);
+
+    return (amd_gpu_metrics_factory_table[gpu_metric_version]);
   }
 
+  ostrstream << __PRETTY_FUNCTION__
+              << " | ======= end ======= "
+              << " | Fail "
+              << " | Factory Version: " << static_cast<AMDGpuMetricVersionFlagId_t>(gpu_metric_version)
+              << " | Returning = "
+              << "No object from factory."
+              << " |";
+  LOG_ERROR(ostrstream);
   return nullptr;
+}
+
+
+template<typename>
+constexpr bool is_dependent_false_v = false;
+
+template<typename T>
+constexpr T init_max_uint_types()
+{
+  if constexpr ((std::is_same_v<T, std::uint8_t>)  ||
+                (std::is_same_v<T, std::uint16_t>) ||
+                (std::is_same_v<T, std::uint32_t>) ||
+                (std::is_same_v<T, std::uint64_t>)) {
+    return std::numeric_limits<T>::max();
+  }
+  else {
+    static_assert(is_dependent_false_v<T>, "Error: Type not supported...");
+  }
 }
 
 template<typename T>
@@ -787,20 +403,20 @@ AMDGpuDynamicMetricTblValues_t format_metric_row(const T& metric, const std::str
   auto get_data_type_info = [&]() {
     auto data_type(AMDGpuMetricsDataType_t::kUInt64);
     if constexpr (std::is_array_v<T>) {
-      const uint8_t  check_uint8[]={1};
-      const uint16_t check_uint16[]={2};
-      const uint32_t check_uint32[]={3};
-      const uint64_t check_uint64[]={4};
-      if constexpr (std::is_same_v<decltype(metric[0]), decltype(check_uint8[0])>) {
+      const uint8_t  kCheckUint8[]={1};
+      const uint16_t kCheckUint16[]={2};
+      const uint32_t kCheckUint32[]={3};
+      const uint64_t kCheckUint64[]={4};
+      if constexpr (std::is_same_v<decltype(metric[0]), decltype(kCheckUint8[0])>) {
         data_type = AMDGpuMetricsDataType_t::kUInt8;
       }
-      if constexpr (std::is_same_v<decltype(metric[0]), decltype(check_uint16[0])>) {
+      if constexpr (std::is_same_v<decltype(metric[0]), decltype(kCheckUint16[0])>) {
         data_type = AMDGpuMetricsDataType_t::kUInt16;
       }
-      if constexpr (std::is_same_v<decltype(metric[0]), decltype(check_uint32[0])>) {
+      if constexpr (std::is_same_v<decltype(metric[0]), decltype(kCheckUint32[0])>) {
         data_type = AMDGpuMetricsDataType_t::kUInt32;
       }
-      if constexpr (std::is_same_v<decltype(metric[0]), decltype(check_uint64[0])>) {
+      if constexpr (std::is_same_v<decltype(metric[0]), decltype(kCheckUint64[0])>) {
         data_type = AMDGpuMetricsDataType_t::kUInt64;
       }
       return std::make_tuple(data_type, static_cast<uint16_t>(std::end(metric) - std::begin(metric)));
@@ -848,12 +464,40 @@ AMDGpuDynamicMetricTblValues_t format_metric_row(const T& metric, const std::str
 
 rsmi_status_t GpuMetricsBase_v14_t::populate_metrics_dynamic_tbl()
 {
+  std::ostringstream ostrstream;
+  auto status_code(rsmi_status_t::RSMI_STATUS_SUCCESS);
+  ostrstream << __PRETTY_FUNCTION__ << " | ======= start =======";
+  LOG_TRACE(ostrstream);
+
+  //
+  //  Note: Any metric treatment/changes (if any) should happen before they
+  //        get written to internal/external tables.
+  //
+  auto run_metric_adjustments_v14 = [&]() {
+    ostrstream << __PRETTY_FUNCTION__ << " | ======= start =======";
+    const auto gpu_metrics_version = translate_flag_to_metric_version(get_gpu_metrics_version_used());
+    ostrstream << __PRETTY_FUNCTION__
+                << " | ======= info ======= "
+                << " | Applying adjustments "
+                << " | Metric Version: " << stringfy_metric_header_version(
+                                              disjoin_metrics_version(gpu_metrics_version))
+                << " |";
+    LOG_TRACE(ostrstream);
+
+    // firmware_timestamp is at 10ns resolution
+    ostrstream << __PRETTY_FUNCTION__
+                << " | ======= Changes ======= "
+                << " | {m_firmware_timestamp} from: " << m_gpu_metrics_tbl.m_firmware_timestamp
+                << " to: " << (m_gpu_metrics_tbl.m_firmware_timestamp * 10);
+    m_gpu_metrics_tbl.m_firmware_timestamp = (m_gpu_metrics_tbl.m_firmware_timestamp * 10);
+    LOG_DEBUG(ostrstream);
+  };
+
+
+  //  Adjustments/Changes specific to this version
+  run_metric_adjustments_v14();
+
   // Temperature Info
-  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricTemperature]
-    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricTempHotspot,
-              format_metric_row(m_gpu_metrics_tbl.m_temperature_hotspot,
-                                "temperature_hotspot"))
-           );
   m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricTemperature]
     .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricTempHotspot,
               format_metric_row(m_gpu_metrics_tbl.m_temperature_hotspot,
@@ -873,7 +517,7 @@ rsmi_status_t GpuMetricsBase_v14_t::populate_metrics_dynamic_tbl()
   // Power/Energy Info
   m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricPowerEnergy]
     .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricCurrSocketPower,
-              format_metric_row(m_gpu_metrics_tbl.m_curr_socket_power,
+              format_metric_row(m_gpu_metrics_tbl.m_current_socket_power,
                                 "curr_socket_power"))
            );
   m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricPowerEnergy]
@@ -957,14 +601,29 @@ rsmi_status_t GpuMetricsBase_v14_t::populate_metrics_dynamic_tbl()
                                 "xgmi_link_speed"))
            );
   m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricLinkWidthSpeed]
-    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricPcieBandwidthAccumulator,\
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricPcieBandwidthAccumulator,
               format_metric_row(m_gpu_metrics_tbl.m_pcie_bandwidth_acc,
                                 "pcie_bandwidth_acc"))
            );
   m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricLinkWidthSpeed]
     .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricPcieBandwidthInst,
-              format_metric_row(m_gpu_metrics_tbl.m_pcie_bandwidth_acc,
+              format_metric_row(m_gpu_metrics_tbl.m_pcie_bandwidth_inst,
                                 "pcie_bandwidth_inst"))
+           );
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricLinkWidthSpeed]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricPcieL0RecovCountAccumulator,
+              format_metric_row(m_gpu_metrics_tbl.m_pcie_l0_to_recov_count_acc,
+                                "pcie_l0_recov_count_acc"))
+           );
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricLinkWidthSpeed]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricPcieReplayCountAccumulator,
+              format_metric_row(m_gpu_metrics_tbl.m_pcie_replay_count_acc,
+                                "pcie_replay_count_acc"))
+           );
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricLinkWidthSpeed]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricPcieReplayRollOverCountAccumulator,
+              format_metric_row(m_gpu_metrics_tbl.m_pcie_replay_rover_count_acc,
+                                "pcie_replay_rollover_count_acc"))
            );
   m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricLinkWidthSpeed]
     .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricXgmiReadDataAccumulator,
@@ -1004,11 +663,325 @@ rsmi_status_t GpuMetricsBase_v14_t::populate_metrics_dynamic_tbl()
                                 "current_uclk"))
            );
 
-  return rsmi_status_t::RSMI_STATUS_SUCCESS;
+  ostrstream << __PRETTY_FUNCTION__
+              << " | ======= end ======= "
+              << " | Success "
+              << " | Returning = " << getRSMIStatusString(status_code)
+              << " |";
+  LOG_TRACE(ostrstream);
+
+  return status_code;
+}
+
+rsmi_status_t init_max_public_gpu_matrics(AMGpuMetricsPublicLatest_t& rsmi_gpu_metrics)
+{
+  std::ostringstream ostrstream;
+  auto status_code(rsmi_status_t::RSMI_STATUS_SUCCESS);
+  ostrstream << __PRETTY_FUNCTION__ << " | ======= start =======";
+  LOG_TRACE(ostrstream);
+
+  rsmi_gpu_metrics.temperature_edge = init_max_uint_types<decltype(rsmi_gpu_metrics.temperature_edge)>();
+  rsmi_gpu_metrics.temperature_hotspot = init_max_uint_types<decltype(rsmi_gpu_metrics.temperature_hotspot)>();
+  rsmi_gpu_metrics.temperature_mem = init_max_uint_types<decltype(rsmi_gpu_metrics.temperature_mem)>();
+  rsmi_gpu_metrics.temperature_vrgfx = init_max_uint_types<decltype(rsmi_gpu_metrics.temperature_vrgfx)>();
+  rsmi_gpu_metrics.temperature_vrsoc = init_max_uint_types<decltype(rsmi_gpu_metrics.temperature_vrsoc)>();
+  rsmi_gpu_metrics.temperature_vrmem = init_max_uint_types<decltype(rsmi_gpu_metrics.temperature_vrmem)>();
+  rsmi_gpu_metrics.average_gfx_activity = init_max_uint_types<decltype(rsmi_gpu_metrics.average_gfx_activity)>();
+  rsmi_gpu_metrics.average_umc_activity = init_max_uint_types<decltype(rsmi_gpu_metrics.average_umc_activity)>();
+  rsmi_gpu_metrics.average_mm_activity = init_max_uint_types<decltype(rsmi_gpu_metrics.average_mm_activity)>();
+  rsmi_gpu_metrics.average_socket_power = init_max_uint_types<decltype(rsmi_gpu_metrics.average_socket_power)>();
+  rsmi_gpu_metrics.energy_accumulator = init_max_uint_types<decltype(rsmi_gpu_metrics.energy_accumulator)>();
+  rsmi_gpu_metrics.system_clock_counter = init_max_uint_types<decltype(rsmi_gpu_metrics.system_clock_counter)>();
+  rsmi_gpu_metrics.average_gfxclk_frequency = init_max_uint_types<decltype(rsmi_gpu_metrics.average_gfxclk_frequency)>();
+  rsmi_gpu_metrics.average_socclk_frequency = init_max_uint_types<decltype(rsmi_gpu_metrics.average_socclk_frequency)>();
+  rsmi_gpu_metrics.average_uclk_frequency = init_max_uint_types<decltype(rsmi_gpu_metrics.average_uclk_frequency)>();
+  rsmi_gpu_metrics.average_vclk0_frequency = init_max_uint_types<decltype(rsmi_gpu_metrics.average_vclk0_frequency)>();
+  rsmi_gpu_metrics.average_dclk0_frequency = init_max_uint_types<decltype(rsmi_gpu_metrics.average_dclk0_frequency)>();
+  rsmi_gpu_metrics.average_vclk1_frequency = init_max_uint_types<decltype(rsmi_gpu_metrics.average_vclk1_frequency)>();
+  rsmi_gpu_metrics.average_dclk1_frequency = init_max_uint_types<decltype(rsmi_gpu_metrics.average_dclk1_frequency)>();
+  rsmi_gpu_metrics.current_gfxclk = init_max_uint_types<decltype(rsmi_gpu_metrics.current_gfxclk)>();
+  rsmi_gpu_metrics.current_socclk = init_max_uint_types<decltype(rsmi_gpu_metrics.current_socclk)>();
+  rsmi_gpu_metrics.current_uclk = init_max_uint_types<decltype(rsmi_gpu_metrics.current_uclk)>();
+  rsmi_gpu_metrics.current_vclk0 = init_max_uint_types<decltype(rsmi_gpu_metrics.current_vclk0)>();
+  rsmi_gpu_metrics.current_dclk0 = init_max_uint_types<decltype(rsmi_gpu_metrics.current_dclk0)>();
+  rsmi_gpu_metrics.current_vclk1 = init_max_uint_types<decltype(rsmi_gpu_metrics.current_vclk1)>();
+  rsmi_gpu_metrics.current_dclk1 = init_max_uint_types<decltype(rsmi_gpu_metrics.current_dclk1)>();
+  rsmi_gpu_metrics.throttle_status = init_max_uint_types<decltype(rsmi_gpu_metrics.throttle_status)>();
+  rsmi_gpu_metrics.current_fan_speed = init_max_uint_types<decltype(rsmi_gpu_metrics.current_fan_speed)>();
+  rsmi_gpu_metrics.pcie_link_width = init_max_uint_types<decltype(rsmi_gpu_metrics.pcie_link_width)>();
+  rsmi_gpu_metrics.pcie_link_speed = init_max_uint_types<decltype(rsmi_gpu_metrics.pcie_link_speed)>();
+  rsmi_gpu_metrics.gfx_activity_acc = init_max_uint_types<decltype(rsmi_gpu_metrics.gfx_activity_acc)>();
+  rsmi_gpu_metrics.mem_activity_acc = init_max_uint_types<decltype(rsmi_gpu_metrics.mem_activity_acc)>();
+
+  std::fill(std::begin(rsmi_gpu_metrics.temperature_hbm),
+            std::end(rsmi_gpu_metrics.temperature_hbm),
+            init_max_uint_types<std::uint16_t>());
+
+  rsmi_gpu_metrics.firmware_timestamp = init_max_uint_types<decltype(rsmi_gpu_metrics.firmware_timestamp)>();
+  rsmi_gpu_metrics.voltage_soc = init_max_uint_types<decltype(rsmi_gpu_metrics.voltage_soc)>();
+  rsmi_gpu_metrics.voltage_gfx = init_max_uint_types<decltype(rsmi_gpu_metrics.voltage_gfx)>();
+  rsmi_gpu_metrics.voltage_mem = init_max_uint_types<decltype(rsmi_gpu_metrics.voltage_mem)>();
+  rsmi_gpu_metrics.indep_throttle_status = init_max_uint_types<decltype(rsmi_gpu_metrics.indep_throttle_status)>();
+  rsmi_gpu_metrics.current_socket_power  = init_max_uint_types<decltype(rsmi_gpu_metrics.current_socket_power)>();
+
+  std::fill(std::begin(rsmi_gpu_metrics.vcn_activity),
+            std::end(rsmi_gpu_metrics.vcn_activity),
+            init_max_uint_types<std::uint16_t>());
+
+  rsmi_gpu_metrics.gfxclk_lock_status = init_max_uint_types<decltype(rsmi_gpu_metrics.gfxclk_lock_status)>();
+  rsmi_gpu_metrics.xgmi_link_width = init_max_uint_types<decltype(rsmi_gpu_metrics.xgmi_link_width)>();
+  rsmi_gpu_metrics.xgmi_link_speed = init_max_uint_types<decltype(rsmi_gpu_metrics.xgmi_link_speed)>();
+  rsmi_gpu_metrics.pcie_bandwidth_acc = init_max_uint_types<decltype(rsmi_gpu_metrics.pcie_bandwidth_acc)>();
+  rsmi_gpu_metrics.pcie_bandwidth_inst = init_max_uint_types<decltype(rsmi_gpu_metrics.pcie_bandwidth_inst)>();
+  rsmi_gpu_metrics.pcie_l0_to_recov_count_acc = init_max_uint_types<decltype(rsmi_gpu_metrics.pcie_l0_to_recov_count_acc)>();
+  rsmi_gpu_metrics.pcie_replay_count_acc = init_max_uint_types<decltype(rsmi_gpu_metrics.pcie_replay_count_acc)>();
+  rsmi_gpu_metrics.pcie_replay_rover_count_acc = init_max_uint_types<decltype(rsmi_gpu_metrics.pcie_replay_rover_count_acc)>();
+
+  std::fill(std::begin(rsmi_gpu_metrics.xgmi_read_data_acc),
+            std::end(rsmi_gpu_metrics.xgmi_read_data_acc),
+            init_max_uint_types<std::uint64_t>());
+
+  std::fill(std::begin(rsmi_gpu_metrics.xgmi_write_data_acc),
+            std::end(rsmi_gpu_metrics.xgmi_write_data_acc),
+            init_max_uint_types<std::uint64_t>());
+
+  std::fill(std::begin(rsmi_gpu_metrics.current_gfxclks),
+            std::end(rsmi_gpu_metrics.current_gfxclks),
+            init_max_uint_types<std::uint16_t>());
+
+  std::fill(std::begin(rsmi_gpu_metrics.current_socclks),
+            std::end(rsmi_gpu_metrics.current_socclks),
+            init_max_uint_types<std::uint16_t>());
+
+  std::fill(std::begin(rsmi_gpu_metrics.current_vclk0s),
+            std::end(rsmi_gpu_metrics.current_vclk0s),
+            init_max_uint_types<std::uint16_t>());
+
+  std::fill(std::begin(rsmi_gpu_metrics.current_dclk0s),
+            std::end(rsmi_gpu_metrics.current_dclk0s),
+            init_max_uint_types<std::uint16_t>());
+
+  ostrstream << __PRETTY_FUNCTION__
+              << " | ======= end ======= "
+              << " | Success "
+              << " | Returning = " << getRSMIStatusString(status_code)
+              << " |";
+  LOG_TRACE(ostrstream);
+
+  return status_code;
+}
+
+
+AMGpuMetricsPublicLatestTupl_t GpuMetricsBase_v14_t::copy_internal_to_external_metrics()
+{
+  std::ostringstream ostrstream;
+  auto status_code(rsmi_status_t::RSMI_STATUS_SUCCESS);
+  ostrstream << __PRETTY_FUNCTION__ << " | ======= start =======";
+  LOG_TRACE(ostrstream);
+
+  auto copy_data_from_internal_metrics_tbl = [&]() {
+    AMGpuMetricsPublicLatest_t metrics_public_init{};
+
+    //
+    //  Note: Initializing data members with their max. If field is max,
+    //        no data was assigned to it.
+    init_max_public_gpu_matrics(metrics_public_init);
+
+    // Header
+    metrics_public_init.common_header.structure_size = m_gpu_metrics_tbl.m_common_header.m_structure_size;
+    metrics_public_init.common_header.format_revision = m_gpu_metrics_tbl.m_common_header.m_format_revision;
+    metrics_public_init.common_header.content_revision = m_gpu_metrics_tbl.m_common_header.m_content_revision;
+
+
+    // Temperature
+    metrics_public_init.temperature_hotspot = m_gpu_metrics_tbl.m_temperature_hotspot;
+    metrics_public_init.temperature_mem = m_gpu_metrics_tbl.m_temperature_mem;
+    metrics_public_init.temperature_vrsoc = m_gpu_metrics_tbl.m_temperature_vrsoc;
+
+    // Power
+    metrics_public_init.current_socket_power = m_gpu_metrics_tbl.m_current_socket_power;
+
+    // Utilization
+    metrics_public_init.average_gfx_activity = m_gpu_metrics_tbl.m_average_gfx_activity;
+    metrics_public_init.average_umc_activity = m_gpu_metrics_tbl.m_average_umc_activity;
+
+    // vcn_activity
+    const auto vcn_activity_num_elems =
+      static_cast<uint16_t>(
+        std::end(m_gpu_metrics_tbl.m_vcn_activity) -
+        std::begin(m_gpu_metrics_tbl.m_vcn_activity));
+    std::copy_n(std::begin(m_gpu_metrics_tbl.m_vcn_activity),
+                vcn_activity_num_elems,
+                metrics_public_init.vcn_activity);
+
+    // Power/Energy
+    metrics_public_init.energy_accumulator = m_gpu_metrics_tbl.m_energy_accumulator;
+
+    // Driver attached timestamp (in ns)
+    metrics_public_init.system_clock_counter = m_gpu_metrics_tbl.m_system_clock_counter;
+
+    // Throttle status
+    metrics_public_init.throttle_status = m_gpu_metrics_tbl.m_throttle_status;
+
+    // Clock Lock Status. Each bit corresponds to clock instance
+    metrics_public_init.gfxclk_lock_status = m_gpu_metrics_tbl.m_gfxclk_lock_status;
+
+    // Link width (number of lanes) and speed
+    metrics_public_init.pcie_link_width = m_gpu_metrics_tbl.m_pcie_link_width;
+    metrics_public_init.pcie_link_speed = m_gpu_metrics_tbl.m_pcie_link_speed;
+
+    // XGMI bus width and bitrate
+    metrics_public_init.xgmi_link_width = m_gpu_metrics_tbl.m_xgmi_link_width;
+    metrics_public_init.xgmi_link_speed = m_gpu_metrics_tbl.m_xgmi_link_speed;
+
+    // Utilization Accumulated
+    metrics_public_init.gfx_activity_acc = m_gpu_metrics_tbl.m_gfx_activity_acc;
+    metrics_public_init.mem_activity_acc = m_gpu_metrics_tbl.m_mem_activity_acc;
+
+    // PCIE accumulated bandwidth
+    metrics_public_init.pcie_bandwidth_acc = m_gpu_metrics_tbl.m_pcie_bandwidth_acc;
+
+    // PCIE instantaneous bandwidth
+    metrics_public_init.pcie_bandwidth_inst = m_gpu_metrics_tbl.m_pcie_bandwidth_inst;
+
+    // PCIE L0 to recovery state transition accumulated count
+    metrics_public_init.pcie_l0_to_recov_count_acc = m_gpu_metrics_tbl.m_pcie_l0_to_recov_count_acc;
+
+    // PCIE replay accumulated count
+    metrics_public_init.pcie_replay_count_acc = m_gpu_metrics_tbl.m_pcie_replay_count_acc;
+
+    // PCIE replay rollover accumulated count
+    metrics_public_init.pcie_replay_rover_count_acc = m_gpu_metrics_tbl.m_pcie_replay_rover_count_acc;
+
+    // XGMI accumulated data transfer size
+    // xgmi_read_data
+    const auto xgmi_read_data_num_elems =
+      static_cast<uint16_t>(
+        std::end(m_gpu_metrics_tbl.m_xgmi_read_data_acc) -
+        std::begin(m_gpu_metrics_tbl.m_xgmi_read_data_acc));
+    std::copy_n(std::begin(m_gpu_metrics_tbl.m_xgmi_read_data_acc),
+                xgmi_read_data_num_elems,
+                metrics_public_init.xgmi_read_data_acc);
+    // xgmi_write_data
+    const auto xgmi_write_data_num_elems =
+      static_cast<uint16_t>(
+        std::end(m_gpu_metrics_tbl.m_xgmi_write_data_acc) -
+        std::begin(m_gpu_metrics_tbl.m_xgmi_write_data_acc));
+    std::copy_n(std::begin(m_gpu_metrics_tbl.m_xgmi_write_data_acc),
+                xgmi_write_data_num_elems,
+                metrics_public_init.xgmi_write_data_acc);
+
+    // PMFW attached timestamp (10ns resolution)
+    metrics_public_init.firmware_timestamp = m_gpu_metrics_tbl.m_firmware_timestamp;
+
+    // Current clocks
+    // current_gfxclk
+    const auto curr_gfxclk_num_elems =
+      static_cast<uint16_t>(
+        std::end(m_gpu_metrics_tbl.m_current_gfxclk) -
+        std::begin(m_gpu_metrics_tbl.m_current_gfxclk));
+    std::copy_n(std::begin(m_gpu_metrics_tbl.m_current_gfxclk),
+                curr_gfxclk_num_elems,
+                metrics_public_init.current_gfxclks);
+
+    // current_socclk
+    const auto curr_socclk_num_elems =
+      static_cast<uint16_t>(
+        std::end(m_gpu_metrics_tbl.m_current_socclk) -
+        std::begin(m_gpu_metrics_tbl.m_current_socclk));
+    std::copy_n(std::begin(m_gpu_metrics_tbl.m_current_socclk),
+                curr_socclk_num_elems,
+                metrics_public_init.current_socclks);
+
+    // current_vclk0
+    const auto curr_vclk0_num_elems =
+      static_cast<uint16_t>(
+        std::end(m_gpu_metrics_tbl.m_current_vclk0) -
+        std::begin(m_gpu_metrics_tbl.m_current_vclk0));
+    std::copy_n(std::begin(m_gpu_metrics_tbl.m_current_vclk0),
+                curr_vclk0_num_elems,
+                metrics_public_init.current_vclk0s);
+
+    // current_dclk0
+    const auto curr_dclk0_num_elems =
+      static_cast<uint16_t>(
+        std::end(m_gpu_metrics_tbl.m_current_dclk0) -
+        std::begin(m_gpu_metrics_tbl.m_current_dclk0));
+    std::copy_n(std::begin(m_gpu_metrics_tbl.m_current_dclk0),
+                curr_dclk0_num_elems,
+                metrics_public_init.current_dclk0s);
+
+    metrics_public_init.current_uclk = m_gpu_metrics_tbl.m_current_uclk;
+
+    //
+    // Note:  Backwards compatibility -> Handling extra/exception cases
+    //        related to earlier versions (1.3)
+    metrics_public_init.current_gfxclk = metrics_public_init.current_gfxclks[0];
+    metrics_public_init.average_gfxclk_frequency = metrics_public_init.current_gfxclks[0];
+
+    metrics_public_init.current_socclk = metrics_public_init.current_socclks[0];
+    metrics_public_init.average_socclk_frequency = metrics_public_init.current_socclks[0];
+
+    metrics_public_init.current_vclk0 = metrics_public_init.current_vclk0s[0];
+    metrics_public_init.average_vclk0_frequency = metrics_public_init.current_vclk0s[0];
+
+    metrics_public_init.current_vclk1 = metrics_public_init.current_vclk0s[1];
+    metrics_public_init.average_vclk1_frequency = metrics_public_init.current_vclk0s[1];
+
+    metrics_public_init.current_dclk0 = metrics_public_init.current_dclk0s[0];
+    metrics_public_init.average_dclk0_frequency = metrics_public_init.current_dclk0s[0];
+
+    metrics_public_init.current_dclk1 = metrics_public_init.current_dclk0s[1];
+    metrics_public_init.average_dclk1_frequency = metrics_public_init.current_dclk0s[1];
+
+    return metrics_public_init;
+  }();
+
+  ostrstream << __PRETTY_FUNCTION__
+              << " | ======= end ======= "
+              << " | Success "
+              << " | Returning = " << getRSMIStatusString(status_code)
+              << " |";
+  LOG_TRACE(ostrstream);
+
+  return std::make_tuple(status_code, copy_data_from_internal_metrics_tbl);
 }
 
 rsmi_status_t GpuMetricsBase_v13_t::populate_metrics_dynamic_tbl()
 {
+  std::ostringstream ostrstream;
+  auto status_code(rsmi_status_t::RSMI_STATUS_SUCCESS);
+  ostrstream << __PRETTY_FUNCTION__ << " | ======= start =======";
+  LOG_TRACE(ostrstream);
+
+  //
+  //  Note: Any metric treatment/changes (if any) should happen before they
+  //        get written to internal/external tables.
+  //
+  auto run_metric_adjustments_v13 = [&]() {
+    ostrstream << __PRETTY_FUNCTION__ << " | ======= start =======";
+    const auto gpu_metrics_version = translate_flag_to_metric_version(get_gpu_metrics_version_used());
+    ostrstream << __PRETTY_FUNCTION__
+                << " | ======= info ======= "
+                << " | Applying adjustments "
+                << " | Metric Version: " << stringfy_metric_header_version(
+                                              disjoin_metrics_version(gpu_metrics_version))
+                << " |";
+    LOG_TRACE(ostrstream);
+
+    // firmware_timestamp is at 10ns resolution
+    ostrstream << __PRETTY_FUNCTION__
+                << " | ======= Changes ======= "
+                << " | {m_firmware_timestamp} from: " << m_gpu_metrics_tbl.m_firmware_timestamp
+                << " to: " << (m_gpu_metrics_tbl.m_firmware_timestamp * 10);
+    m_gpu_metrics_tbl.m_firmware_timestamp = (m_gpu_metrics_tbl.m_firmware_timestamp * 10);
+    LOG_DEBUG(ostrstream);
+  };
+
+
+  //  Adjustments/Changes specific to this version
+  run_metric_adjustments_v13();
+
   // Temperature Info
   m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricTemperature]
     .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricTempEdge,
@@ -1219,19 +1192,776 @@ rsmi_status_t GpuMetricsBase_v13_t::populate_metrics_dynamic_tbl()
                                 "voltage_mem"))
            );
 
-  return rsmi_status_t::RSMI_STATUS_SUCCESS;
+  ostrstream << __PRETTY_FUNCTION__
+              << " | ======= end ======= "
+              << " | Success "
+              << " | Returning = " << getRSMIStatusString(status_code)
+              << " |";
+  LOG_TRACE(ostrstream);
+
+  return status_code;
 }
+
+AMGpuMetricsPublicLatestTupl_t GpuMetricsBase_v13_t::copy_internal_to_external_metrics()
+{
+  std::ostringstream ostrstream;
+  auto status_code(rsmi_status_t::RSMI_STATUS_SUCCESS);
+  ostrstream << __PRETTY_FUNCTION__ << " | ======= start =======";
+  LOG_TRACE(ostrstream);
+
+  auto copy_data_from_internal_metrics_tbl = [&]() {
+    AMGpuMetricsPublicLatest_t metrics_public_init{};
+
+    //
+    //  Note: Initializing data members with their max. If field is max,
+    //        no data was assigned to it.
+    init_max_public_gpu_matrics(metrics_public_init);
+
+    // Header
+    metrics_public_init.common_header.structure_size = m_gpu_metrics_tbl.m_common_header.m_structure_size;
+    metrics_public_init.common_header.format_revision = m_gpu_metrics_tbl.m_common_header.m_format_revision;
+    metrics_public_init.common_header.content_revision = m_gpu_metrics_tbl.m_common_header.m_content_revision;
+
+    // Temperature
+    metrics_public_init.temperature_edge = m_gpu_metrics_tbl.m_temperature_edge;
+    metrics_public_init.temperature_hotspot = m_gpu_metrics_tbl.m_temperature_hotspot;
+    metrics_public_init.temperature_mem = m_gpu_metrics_tbl.m_temperature_mem;
+    metrics_public_init.temperature_vrgfx = m_gpu_metrics_tbl.m_temperature_vrgfx;
+    metrics_public_init.temperature_vrsoc = m_gpu_metrics_tbl.m_temperature_vrsoc;
+    metrics_public_init.temperature_vrmem = m_gpu_metrics_tbl.m_temperature_vrmem;
+
+    // Utilization
+    metrics_public_init.average_gfx_activity = m_gpu_metrics_tbl.m_average_gfx_activity;
+    metrics_public_init.average_umc_activity = m_gpu_metrics_tbl.m_average_umc_activity;
+    metrics_public_init.average_mm_activity = m_gpu_metrics_tbl.m_average_mm_activity;
+
+    // Power/Energy
+    metrics_public_init.average_socket_power = m_gpu_metrics_tbl.m_average_socket_power;  // 1.3 and 1.4 have the same value
+    metrics_public_init.energy_accumulator = m_gpu_metrics_tbl.m_energy_accumulator;
+
+    // Driver attached timestamp (in ns)
+    metrics_public_init.system_clock_counter = m_gpu_metrics_tbl.m_system_clock_counter;
+
+    // Average clocks
+    metrics_public_init.average_gfxclk_frequency = m_gpu_metrics_tbl.m_average_gfxclk_frequency;
+    metrics_public_init.average_socclk_frequency = m_gpu_metrics_tbl.m_average_socclk_frequency;
+    metrics_public_init.average_uclk_frequency = m_gpu_metrics_tbl.m_average_uclk_frequency;
+    metrics_public_init.average_vclk0_frequency = m_gpu_metrics_tbl.m_average_vclk0_frequency;
+    metrics_public_init.average_dclk0_frequency = m_gpu_metrics_tbl.m_average_dclk0_frequency;
+    metrics_public_init.average_vclk1_frequency = m_gpu_metrics_tbl.m_average_vclk1_frequency;
+    metrics_public_init.average_dclk1_frequency = m_gpu_metrics_tbl.m_average_dclk1_frequency;
+
+    // Current clocks
+    metrics_public_init.current_gfxclk = m_gpu_metrics_tbl.m_current_gfxclk;
+    metrics_public_init.current_socclk = m_gpu_metrics_tbl.m_current_socclk;
+    metrics_public_init.current_vclk0 = m_gpu_metrics_tbl.m_current_vclk0;
+    metrics_public_init.current_dclk0 = m_gpu_metrics_tbl.m_current_dclk0;
+    metrics_public_init.current_uclk = m_gpu_metrics_tbl.m_current_uclk;
+    metrics_public_init.current_vclk1 = m_gpu_metrics_tbl.m_current_vclk1;
+    metrics_public_init.current_dclk1 = m_gpu_metrics_tbl.m_current_dclk1;
+
+    // Throttle status
+    metrics_public_init.throttle_status = m_gpu_metrics_tbl.m_throttle_status;
+
+    // Fans
+    metrics_public_init.current_fan_speed = m_gpu_metrics_tbl.m_current_fan_speed;
+
+    // Link width/speed
+    metrics_public_init.pcie_link_width = m_gpu_metrics_tbl.m_pcie_link_width;
+    metrics_public_init.pcie_link_speed = m_gpu_metrics_tbl.m_pcie_link_speed;
+
+    metrics_public_init.gfx_activity_acc = m_gpu_metrics_tbl.m_gfx_activity_acc;
+    metrics_public_init.mem_activity_acc = m_gpu_metrics_tbl.m_mem_activity_acc;
+
+    // temperature_hbm
+    const auto temp_hbm_num_elems =
+      static_cast<uint16_t>(
+        std::end(m_gpu_metrics_tbl.m_temperature_hbm) -
+        std::begin(m_gpu_metrics_tbl.m_temperature_hbm));
+    std::copy_n(std::begin(m_gpu_metrics_tbl.m_temperature_hbm),
+                temp_hbm_num_elems,
+                metrics_public_init.temperature_hbm);
+
+    // PMFW attached timestamp (10ns resolution)
+    metrics_public_init.firmware_timestamp = m_gpu_metrics_tbl.m_firmware_timestamp;
+
+    // Voltage (mV)
+    metrics_public_init.voltage_soc = m_gpu_metrics_tbl.m_voltage_soc;
+    metrics_public_init.voltage_gfx = m_gpu_metrics_tbl.m_voltage_gfx;
+    metrics_public_init.voltage_mem = m_gpu_metrics_tbl.m_voltage_mem;
+
+    // Throttle status
+    metrics_public_init.indep_throttle_status = m_gpu_metrics_tbl.m_indep_throttle_status;
+
+    //
+    // Note:  Backwards compatibility -> Handling extra/exception cases
+    //        related to earlier versions (1.2)
+    metrics_public_init.current_socket_power = metrics_public_init.average_socket_power;
+
+    return metrics_public_init;
+  }();
+
+  ostrstream << __PRETTY_FUNCTION__
+              << " | ======= end ======= "
+              << " | Success "
+              << " | Returning = " << getRSMIStatusString(status_code)
+              << " |";
+  LOG_TRACE(ostrstream);
+
+  return std::make_tuple(status_code, copy_data_from_internal_metrics_tbl);
+}
+
 
 rsmi_status_t GpuMetricsBase_v12_t::populate_metrics_dynamic_tbl()
 {
-  // TODO: Implement these;
-  return rsmi_status_t::RSMI_STATUS_NOT_YET_IMPLEMENTED;
+  std::ostringstream ostrstream;
+  auto status_code(rsmi_status_t::RSMI_STATUS_SUCCESS);
+  ostrstream << __PRETTY_FUNCTION__ << " | ======= start =======";
+  LOG_TRACE(ostrstream);
+
+  //
+  //  Note: Any metric treatment/changes (if any) should happen before they
+  //        get written to internal/external tables.
+  //
+  auto run_metric_adjustments_v12 = [&]() {
+    ostrstream << __PRETTY_FUNCTION__ << " | ======= start =======";
+    const auto gpu_metrics_version = translate_flag_to_metric_version(get_gpu_metrics_version_used());
+    ostrstream << __PRETTY_FUNCTION__
+                << " | ======= info ======= "
+                << " | Applying adjustments "
+                << " | Metric Version: " << stringfy_metric_header_version(
+                                              disjoin_metrics_version(gpu_metrics_version))
+                << " |";
+    LOG_TRACE(ostrstream);
+
+    // firmware_timestamp is at 10ns resolution
+    ostrstream << __PRETTY_FUNCTION__
+                << " | ======= Changes ======= "
+                << " | {m_firmware_timestamp} from: " << m_gpu_metrics_tbl.m_firmware_timestamp
+                << " to: " << (m_gpu_metrics_tbl.m_firmware_timestamp * 10);
+    m_gpu_metrics_tbl.m_firmware_timestamp = (m_gpu_metrics_tbl.m_firmware_timestamp * 10);
+    LOG_DEBUG(ostrstream);
+  };
+
+
+  //  Adjustments/Changes specific to this version
+  run_metric_adjustments_v12();
+
+  // Temperature Info
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricTemperature]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricTempEdge,
+              format_metric_row(m_gpu_metrics_tbl.m_temperature_edge,
+                                "temperature_edge"))
+           );
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricTemperature]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricTempHotspot,
+              format_metric_row(m_gpu_metrics_tbl.m_temperature_hotspot,
+                                "temperature_hotspot"))
+           );
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricTemperature]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricTempMem,
+              format_metric_row(m_gpu_metrics_tbl.m_temperature_mem,
+                                "temperature_mem"))
+           );
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricTemperature]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricTempVrGfx,
+              format_metric_row(m_gpu_metrics_tbl.m_temperature_vrgfx,
+                                "temperature_vrgfx"))
+           );
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricTemperature]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricTempVrSoc,
+              format_metric_row(m_gpu_metrics_tbl.m_temperature_vrsoc,
+                                "temperature_vrsoc"))
+           );
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricTemperature]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricTempVrMem,
+              format_metric_row(m_gpu_metrics_tbl.m_temperature_vrmem,
+                                "temperature_vrmem"))
+           );
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricTemperature]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricTempHbm,
+              format_metric_row(m_gpu_metrics_tbl.m_temperature_hbm,
+                                "[temperature_hbm]"))
+           );
+
+  // Power/Energy Info
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricPowerEnergy]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricAvgSocketPower,
+              format_metric_row(m_gpu_metrics_tbl.m_average_socket_power,
+                                "average_socket_power"))
+           );
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricPowerEnergy]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricEnergyAccumulator,
+              format_metric_row(m_gpu_metrics_tbl.m_energy_accumulator,
+                                "energy_acc"))
+           );
+
+  // Utilization Info
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricUtilization]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricAvgGfxActivity,
+              format_metric_row(m_gpu_metrics_tbl.m_average_gfx_activity,
+                                "average_gfx_activity"))
+           );
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricUtilization]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricAvgUmcActivity,
+              format_metric_row(m_gpu_metrics_tbl.m_average_umc_activity,
+                                "average_umc_activity"))
+           );
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricUtilization]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricAvgMmActivity,
+              format_metric_row(m_gpu_metrics_tbl.m_average_mm_activity,
+                                "average_mm_activity"))
+           );
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricUtilization]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricGfxActivityAccumulator,
+              format_metric_row(m_gpu_metrics_tbl.m_gfx_activity_acc,
+                                "gfx_activity_acc"))
+           );
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricUtilization]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricMemActivityAccumulator,
+              format_metric_row(m_gpu_metrics_tbl.m_mem_activity_acc,
+                                "mem_activity_acc"))
+           );
+
+  // Timestamp Info
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricTimestamp]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricTSFirmware,
+              format_metric_row(m_gpu_metrics_tbl.m_firmware_timestamp,
+                                "firmware_timestamp"))
+           );
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricTimestamp]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricTSClockCounter,
+              format_metric_row(m_gpu_metrics_tbl.m_system_clock_counter,
+                                "system_clock_counter"))
+           );
+
+  // Fan Info
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricCurrentFanSpeed]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricCurrFanSpeed,
+              format_metric_row(m_gpu_metrics_tbl.m_current_fan_speed,
+                                "current_fan_speed"))
+           );
+
+  // Throttle Info
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricThrottleStatus]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricThrottleStatus,
+              format_metric_row(m_gpu_metrics_tbl.m_throttle_status,
+                                "throttle_status"))
+           );
+
+  // Average Info
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricAverageClock]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricAvgGfxClockFrequency,
+              format_metric_row(m_gpu_metrics_tbl.m_average_gfxclk_frequency,
+                                "average_gfxclk_frequency"))
+           );
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricAverageClock]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricAvgSocClockFrequency,
+              format_metric_row(m_gpu_metrics_tbl.m_average_socclk_frequency,
+                                "average_socclk_frequency"))
+           );
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricAverageClock]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricAvgUClockFrequency,
+              format_metric_row(m_gpu_metrics_tbl.m_average_uclk_frequency,
+                                "average_uclk_frequency"))
+           );
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricAverageClock]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricAvgVClock0Frequency,
+              format_metric_row(m_gpu_metrics_tbl.m_average_vclk0_frequency,
+                                "average_vclk0_frequency"))
+           );
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricAverageClock]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricAvgDClock0Frequency,
+              format_metric_row(m_gpu_metrics_tbl.m_average_dclk0_frequency,
+                                "average_dclk0_frequency"))
+           );
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricAverageClock]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricAvgVClock1Frequency,
+              format_metric_row(m_gpu_metrics_tbl.m_average_vclk1_frequency,
+                                "average_vclk1_frequency"))
+           );
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricAverageClock]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricAvgDClock1Frequency,
+              format_metric_row(m_gpu_metrics_tbl.m_average_dclk1_frequency,
+                                "average_dclk1_frequency"))
+           );
+
+  // CurrentClock Info
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricCurrentClock]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricCurrGfxClock,
+              format_metric_row(m_gpu_metrics_tbl.m_current_gfxclk,
+                                "current_gfxclk"))
+           );
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricCurrentClock]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricCurrSocClock,
+              format_metric_row(m_gpu_metrics_tbl.m_current_socclk,
+                                "current_socclk"))
+           );
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricCurrentClock]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricCurrUClock,
+              format_metric_row(m_gpu_metrics_tbl.m_current_uclk,
+                                "current_uclk"))
+           );
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricCurrentClock]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricCurrVClock0,
+              format_metric_row(m_gpu_metrics_tbl.m_current_vclk0,
+                                "current_vclk0"))
+           );
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricCurrentClock]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricCurrDClock0,
+              format_metric_row(m_gpu_metrics_tbl.m_current_dclk0,
+                                "current_dclk0"))
+           );
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricCurrentClock]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricCurrVClock1,
+              format_metric_row(m_gpu_metrics_tbl.m_current_vclk1,
+                                "current_vclk1"))
+           );
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricCurrentClock]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricCurrDClock1,
+              format_metric_row(m_gpu_metrics_tbl.m_current_dclk1,
+                                "current_dclk1"))
+           );
+
+  // Link/Width/Speed Info
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricLinkWidthSpeed]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricPcieLinkWidth,
+              format_metric_row(m_gpu_metrics_tbl.m_pcie_link_width,
+                                "pcie_link_width"))
+           );
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricLinkWidthSpeed]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricPcieLinkSpeed,
+              format_metric_row(m_gpu_metrics_tbl.m_pcie_link_speed,
+                                "pcie_link_speed"))
+           );
+
+  ostrstream << __PRETTY_FUNCTION__
+              << " | ======= end ======= "
+              << " | Success "
+              << " | Returning = " << getRSMIStatusString(status_code)
+              << " |";
+  LOG_TRACE(ostrstream);
+
+  return status_code;
+}
+
+AMGpuMetricsPublicLatestTupl_t GpuMetricsBase_v12_t::copy_internal_to_external_metrics()
+{
+  std::ostringstream ostrstream;
+  auto status_code(rsmi_status_t::RSMI_STATUS_SUCCESS);
+  ostrstream << __PRETTY_FUNCTION__ << " | ======= start =======";
+  LOG_TRACE(ostrstream);
+
+  auto copy_data_from_internal_metrics_tbl = [&]() {
+    AMGpuMetricsPublicLatest_t metrics_public_init{};
+
+    //
+    //  Note: Initializing data members with their max. If field is max,
+    //        no data was assigned to it.
+    init_max_public_gpu_matrics(metrics_public_init);
+
+    // Header
+    metrics_public_init.common_header.structure_size = m_gpu_metrics_tbl.m_common_header.m_structure_size;
+    metrics_public_init.common_header.format_revision = m_gpu_metrics_tbl.m_common_header.m_format_revision;
+    metrics_public_init.common_header.content_revision = m_gpu_metrics_tbl.m_common_header.m_content_revision;
+
+    // Temperature
+    metrics_public_init.temperature_edge = m_gpu_metrics_tbl.m_temperature_edge;
+    metrics_public_init.temperature_hotspot = m_gpu_metrics_tbl.m_temperature_hotspot;
+    metrics_public_init.temperature_mem = m_gpu_metrics_tbl.m_temperature_mem;
+    metrics_public_init.temperature_vrgfx = m_gpu_metrics_tbl.m_temperature_vrgfx;
+    metrics_public_init.temperature_vrsoc = m_gpu_metrics_tbl.m_temperature_vrsoc;
+    metrics_public_init.temperature_vrmem = m_gpu_metrics_tbl.m_temperature_vrmem;
+
+    // Utilization
+    metrics_public_init.average_gfx_activity = m_gpu_metrics_tbl.m_average_gfx_activity;
+    metrics_public_init.average_umc_activity = m_gpu_metrics_tbl.m_average_umc_activity;
+    metrics_public_init.average_mm_activity = m_gpu_metrics_tbl.m_average_mm_activity;
+
+    // Power/Energy
+    metrics_public_init.average_socket_power = m_gpu_metrics_tbl.m_average_socket_power;
+    metrics_public_init.energy_accumulator = m_gpu_metrics_tbl.m_energy_accumulator;
+
+    // Driver attached timestamp (in ns)
+    metrics_public_init.system_clock_counter = m_gpu_metrics_tbl.m_system_clock_counter;
+
+    // Average clocks
+    metrics_public_init.average_gfxclk_frequency = m_gpu_metrics_tbl.m_average_gfxclk_frequency;
+    metrics_public_init.average_socclk_frequency = m_gpu_metrics_tbl.m_average_socclk_frequency;
+    metrics_public_init.average_uclk_frequency = m_gpu_metrics_tbl.m_average_uclk_frequency;
+    metrics_public_init.average_vclk0_frequency = m_gpu_metrics_tbl.m_average_vclk0_frequency;
+    metrics_public_init.average_dclk0_frequency = m_gpu_metrics_tbl.m_average_dclk0_frequency;
+    metrics_public_init.average_vclk1_frequency = m_gpu_metrics_tbl.m_average_vclk1_frequency;
+    metrics_public_init.average_dclk1_frequency = m_gpu_metrics_tbl.m_average_dclk1_frequency;
+
+    // Current clocks
+    metrics_public_init.current_gfxclk = m_gpu_metrics_tbl.m_current_gfxclk;
+    metrics_public_init.current_socclk = m_gpu_metrics_tbl.m_current_socclk;
+    metrics_public_init.current_vclk0 = m_gpu_metrics_tbl.m_current_vclk0;
+    metrics_public_init.current_dclk0 = m_gpu_metrics_tbl.m_current_dclk0;
+    metrics_public_init.current_uclk = m_gpu_metrics_tbl.m_current_uclk;
+    metrics_public_init.current_vclk1 = m_gpu_metrics_tbl.m_current_vclk1;
+    metrics_public_init.current_dclk1 = m_gpu_metrics_tbl.m_current_dclk1;
+
+    // Throttle status
+    metrics_public_init.throttle_status = m_gpu_metrics_tbl.m_throttle_status;
+
+    // Fans
+    metrics_public_init.current_fan_speed = m_gpu_metrics_tbl.m_current_fan_speed;
+
+    // Link width/speed
+    metrics_public_init.pcie_link_width = m_gpu_metrics_tbl.m_pcie_link_width;
+    metrics_public_init.pcie_link_speed = m_gpu_metrics_tbl.m_pcie_link_speed;
+
+    metrics_public_init.gfx_activity_acc = m_gpu_metrics_tbl.m_gfx_activity_acc;
+    metrics_public_init.mem_activity_acc = m_gpu_metrics_tbl.m_mem_activity_acc;
+
+    // temperature_hbm
+    const auto temp_hbm_num_elems =
+      static_cast<uint16_t>(
+        std::end(m_gpu_metrics_tbl.m_temperature_hbm) -
+        std::begin(m_gpu_metrics_tbl.m_temperature_hbm));
+    std::copy_n(std::begin(m_gpu_metrics_tbl.m_temperature_hbm),
+                temp_hbm_num_elems,
+                metrics_public_init.temperature_hbm);
+
+    // PMFW attached timestamp (10ns resolution)
+    metrics_public_init.firmware_timestamp = m_gpu_metrics_tbl.m_firmware_timestamp;
+
+    //
+    // Note:  Backwards compatibility -> Handling extra/exception cases
+    //        related to earlier versions (1.1)
+
+
+    return metrics_public_init;
+  }();
+
+  ostrstream << __PRETTY_FUNCTION__
+              << " | ======= end ======= "
+              << " | Success "
+              << " | Returning = " << getRSMIStatusString(status_code)
+              << " |";
+  LOG_TRACE(ostrstream);
+
+  return std::make_tuple(status_code, copy_data_from_internal_metrics_tbl);
 }
 
 rsmi_status_t GpuMetricsBase_v11_t::populate_metrics_dynamic_tbl()
 {
-  // TODO: Implement these;
-  return rsmi_status_t::RSMI_STATUS_NOT_YET_IMPLEMENTED;
+  std::ostringstream ostrstream;
+  auto status_code(rsmi_status_t::RSMI_STATUS_SUCCESS);
+  ostrstream << __PRETTY_FUNCTION__ << " | ======= start =======";
+  LOG_TRACE(ostrstream);
+
+  //
+  //  Note: Any metric treatment/changes (if any) should happen before they
+  //        get written to internal/external tables.
+  //
+  auto run_metric_adjustments_v11 = [&]() {
+    ostrstream << __PRETTY_FUNCTION__ << " | ======= start =======";
+    const auto gpu_metrics_version = translate_flag_to_metric_version(get_gpu_metrics_version_used());
+    ostrstream << __PRETTY_FUNCTION__
+                << " | ======= info ======= "
+                << " | Applying adjustments "
+                << " | Metric Version: " << stringfy_metric_header_version(
+                                              disjoin_metrics_version(gpu_metrics_version))
+                << " |";
+    LOG_TRACE(ostrstream);
+  };
+
+
+  //  Adjustments/Changes specific to this version
+  run_metric_adjustments_v11();
+
+  // Temperature Info
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricTemperature]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricTempEdge,
+              format_metric_row(m_gpu_metrics_tbl.m_temperature_edge,
+                                "temperature_edge"))
+           );
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricTemperature]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricTempHotspot,
+              format_metric_row(m_gpu_metrics_tbl.m_temperature_hotspot,
+                                "temperature_hotspot"))
+           );
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricTemperature]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricTempMem,
+              format_metric_row(m_gpu_metrics_tbl.m_temperature_mem,
+                                "temperature_mem"))
+           );
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricTemperature]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricTempVrGfx,
+              format_metric_row(m_gpu_metrics_tbl.m_temperature_vrgfx,
+                                "temperature_vrgfx"))
+           );
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricTemperature]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricTempVrSoc,
+              format_metric_row(m_gpu_metrics_tbl.m_temperature_vrsoc,
+                                "temperature_vrsoc"))
+           );
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricTemperature]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricTempVrMem,
+              format_metric_row(m_gpu_metrics_tbl.m_temperature_vrmem,
+                                "temperature_vrmem"))
+           );
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricTemperature]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricTempHbm,
+              format_metric_row(m_gpu_metrics_tbl.m_temperature_hbm,
+                                "[temperature_hbm]"))
+           );
+
+  // Power/Energy Info
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricPowerEnergy]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricAvgSocketPower,
+              format_metric_row(m_gpu_metrics_tbl.m_average_socket_power,
+                                "average_socket_power"))
+           );
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricPowerEnergy]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricEnergyAccumulator,
+              format_metric_row(m_gpu_metrics_tbl.m_energy_accumulator,
+                                "energy_acc"))
+           );
+
+  // Utilization Info
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricUtilization]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricAvgGfxActivity,
+              format_metric_row(m_gpu_metrics_tbl.m_average_gfx_activity,
+                                "average_gfx_activity"))
+           );
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricUtilization]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricAvgUmcActivity,
+              format_metric_row(m_gpu_metrics_tbl.m_average_umc_activity,
+                                "average_umc_activity"))
+           );
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricUtilization]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricAvgMmActivity,
+              format_metric_row(m_gpu_metrics_tbl.m_average_mm_activity,
+                                "average_mm_activity"))
+           );
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricUtilization]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricGfxActivityAccumulator,
+              format_metric_row(m_gpu_metrics_tbl.m_gfx_activity_acc,
+                                "gfx_activity_acc"))
+           );
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricUtilization]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricMemActivityAccumulator,
+              format_metric_row(m_gpu_metrics_tbl.m_mem_activity_acc,
+                                "mem_activity_acc"))
+           );
+
+  // Timestamp Info
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricTimestamp]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricTSClockCounter,
+              format_metric_row(m_gpu_metrics_tbl.m_system_clock_counter,
+                                "system_clock_counter"))
+           );
+
+  // Fan Info
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricCurrentFanSpeed]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricCurrFanSpeed,
+              format_metric_row(m_gpu_metrics_tbl.m_current_fan_speed,
+                                "current_fan_speed"))
+           );
+
+  // Throttle Info
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricThrottleStatus]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricThrottleStatus,
+              format_metric_row(m_gpu_metrics_tbl.m_throttle_status,
+                                "throttle_status"))
+           );
+
+  // Average Info
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricAverageClock]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricAvgGfxClockFrequency,
+              format_metric_row(m_gpu_metrics_tbl.m_average_gfxclk_frequency,
+                                "average_gfxclk_frequency"))
+           );
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricAverageClock]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricAvgSocClockFrequency,
+              format_metric_row(m_gpu_metrics_tbl.m_average_socclk_frequency,
+                                "average_socclk_frequency"))
+           );
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricAverageClock]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricAvgUClockFrequency,
+              format_metric_row(m_gpu_metrics_tbl.m_average_uclk_frequency,
+                                "average_uclk_frequency"))
+           );
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricAverageClock]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricAvgVClock0Frequency,
+              format_metric_row(m_gpu_metrics_tbl.m_average_vclk0_frequency,
+                                "average_vclk0_frequency"))
+           );
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricAverageClock]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricAvgDClock0Frequency,
+              format_metric_row(m_gpu_metrics_tbl.m_average_dclk0_frequency,
+                                "average_dclk0_frequency"))
+           );
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricAverageClock]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricAvgVClock1Frequency,
+              format_metric_row(m_gpu_metrics_tbl.m_average_vclk1_frequency,
+                                "average_vclk1_frequency"))
+           );
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricAverageClock]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricAvgDClock1Frequency,
+              format_metric_row(m_gpu_metrics_tbl.m_average_dclk1_frequency,
+                                "average_dclk1_frequency"))
+           );
+
+  // CurrentClock Info
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricCurrentClock]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricCurrGfxClock,
+              format_metric_row(m_gpu_metrics_tbl.m_current_gfxclk,
+                                "current_gfxclk"))
+           );
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricCurrentClock]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricCurrSocClock,
+              format_metric_row(m_gpu_metrics_tbl.m_current_socclk,
+                                "current_socclk"))
+           );
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricCurrentClock]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricCurrUClock,
+              format_metric_row(m_gpu_metrics_tbl.m_current_uclk,
+                                "current_uclk"))
+           );
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricCurrentClock]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricCurrVClock0,
+              format_metric_row(m_gpu_metrics_tbl.m_current_vclk0,
+                                "current_vclk0"))
+           );
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricCurrentClock]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricCurrDClock0,
+              format_metric_row(m_gpu_metrics_tbl.m_current_dclk0,
+                                "current_dclk0"))
+           );
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricCurrentClock]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricCurrVClock1,
+              format_metric_row(m_gpu_metrics_tbl.m_current_vclk1,
+                                "current_vclk1"))
+           );
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricCurrentClock]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricCurrDClock1,
+              format_metric_row(m_gpu_metrics_tbl.m_current_dclk1,
+                                "current_dclk1"))
+           );
+
+  // Link/Width/Speed Info
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricLinkWidthSpeed]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricPcieLinkWidth,
+              format_metric_row(m_gpu_metrics_tbl.m_pcie_link_width,
+                                "pcie_link_width"))
+           );
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricLinkWidthSpeed]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricPcieLinkSpeed,
+              format_metric_row(m_gpu_metrics_tbl.m_pcie_link_speed,
+                                "pcie_link_speed"))
+           );
+
+  ostrstream << __PRETTY_FUNCTION__
+              << " | ======= end ======= "
+              << " | Success "
+              << " | Returning = " << getRSMIStatusString(status_code)
+              << " |";
+  LOG_TRACE(ostrstream);
+
+  return status_code;
+}
+
+AMGpuMetricsPublicLatestTupl_t GpuMetricsBase_v11_t::copy_internal_to_external_metrics()
+{
+  std::ostringstream ostrstream;
+  auto status_code(rsmi_status_t::RSMI_STATUS_SUCCESS);
+  ostrstream << __PRETTY_FUNCTION__ << " | ======= start =======";
+  LOG_TRACE(ostrstream);
+
+  auto copy_data_from_internal_metrics_tbl = [&]() {
+    AMGpuMetricsPublicLatest_t metrics_public_init{};
+
+    //
+    //  Note: Initializing data members with their max. If field is max,
+    //        no data was assigned to it.
+    init_max_public_gpu_matrics(metrics_public_init);
+
+    // Header
+    metrics_public_init.common_header.structure_size = m_gpu_metrics_tbl.m_common_header.m_structure_size;
+    metrics_public_init.common_header.format_revision = m_gpu_metrics_tbl.m_common_header.m_format_revision;
+    metrics_public_init.common_header.content_revision = m_gpu_metrics_tbl.m_common_header.m_content_revision;
+
+    // Temperature
+    metrics_public_init.temperature_edge = m_gpu_metrics_tbl.m_temperature_edge;
+    metrics_public_init.temperature_hotspot = m_gpu_metrics_tbl.m_temperature_hotspot;
+    metrics_public_init.temperature_mem = m_gpu_metrics_tbl.m_temperature_mem;
+    metrics_public_init.temperature_vrgfx = m_gpu_metrics_tbl.m_temperature_vrgfx;
+    metrics_public_init.temperature_vrsoc = m_gpu_metrics_tbl.m_temperature_vrsoc;
+    metrics_public_init.temperature_vrmem = m_gpu_metrics_tbl.m_temperature_vrmem;
+
+    // Utilization
+    metrics_public_init.average_gfx_activity = m_gpu_metrics_tbl.m_average_gfx_activity;
+    metrics_public_init.average_umc_activity = m_gpu_metrics_tbl.m_average_umc_activity;
+    metrics_public_init.average_mm_activity = m_gpu_metrics_tbl.m_average_mm_activity;
+
+    // Power/Energy
+    metrics_public_init.average_socket_power = m_gpu_metrics_tbl.m_average_socket_power;
+    metrics_public_init.energy_accumulator = m_gpu_metrics_tbl.m_energy_accumulator;
+
+    // Driver attached timestamp (in ns)
+    metrics_public_init.system_clock_counter = m_gpu_metrics_tbl.m_system_clock_counter;
+
+    // Average clocks
+    metrics_public_init.average_gfxclk_frequency = m_gpu_metrics_tbl.m_average_gfxclk_frequency;
+    metrics_public_init.average_socclk_frequency = m_gpu_metrics_tbl.m_average_socclk_frequency;
+    metrics_public_init.average_uclk_frequency = m_gpu_metrics_tbl.m_average_uclk_frequency;
+    metrics_public_init.average_vclk0_frequency = m_gpu_metrics_tbl.m_average_vclk0_frequency;
+    metrics_public_init.average_dclk0_frequency = m_gpu_metrics_tbl.m_average_dclk0_frequency;
+    metrics_public_init.average_vclk1_frequency = m_gpu_metrics_tbl.m_average_vclk1_frequency;
+    metrics_public_init.average_dclk1_frequency = m_gpu_metrics_tbl.m_average_dclk1_frequency;
+
+    // Current clocks
+    metrics_public_init.current_gfxclk = m_gpu_metrics_tbl.m_current_gfxclk;
+    metrics_public_init.current_socclk = m_gpu_metrics_tbl.m_current_socclk;
+    metrics_public_init.current_vclk0 = m_gpu_metrics_tbl.m_current_vclk0;
+    metrics_public_init.current_dclk0 = m_gpu_metrics_tbl.m_current_dclk0;
+    metrics_public_init.current_uclk = m_gpu_metrics_tbl.m_current_uclk;
+    metrics_public_init.current_vclk1 = m_gpu_metrics_tbl.m_current_vclk1;
+    metrics_public_init.current_dclk1 = m_gpu_metrics_tbl.m_current_dclk1;
+
+    // Throttle status
+    metrics_public_init.throttle_status = m_gpu_metrics_tbl.m_throttle_status;
+
+    // Fans
+    metrics_public_init.current_fan_speed = m_gpu_metrics_tbl.m_current_fan_speed;
+
+    // Link width/speed
+    metrics_public_init.pcie_link_width = m_gpu_metrics_tbl.m_pcie_link_width;
+    metrics_public_init.pcie_link_speed = m_gpu_metrics_tbl.m_pcie_link_speed;
+
+    metrics_public_init.gfx_activity_acc = m_gpu_metrics_tbl.m_gfx_activity_acc;
+    metrics_public_init.mem_activity_acc = m_gpu_metrics_tbl.m_mem_activity_acc;
+
+    // temperature_hbm
+    const auto temp_hbm_num_elems =
+      static_cast<uint16_t>(
+        std::end(m_gpu_metrics_tbl.m_temperature_hbm) -
+        std::begin(m_gpu_metrics_tbl.m_temperature_hbm));
+    std::copy_n(std::begin(m_gpu_metrics_tbl.m_temperature_hbm),
+                temp_hbm_num_elems,
+                metrics_public_init.temperature_hbm);
+
+    //
+    // Note:  Backwards compatibility -> Handling extra/exception cases
+    //        related to earlier versions (1.0)
+
+
+    return metrics_public_init;
+  }();
+
+  ostrstream << __PRETTY_FUNCTION__
+              << " | ======= end ======= "
+              << " | Success "
+              << " | Returning = " << getRSMIStatusString(status_code)
+              << " |";
+  LOG_TRACE(ostrstream);
+
+  return std::make_tuple(status_code, copy_data_from_internal_metrics_tbl);
 }
 
 
@@ -1308,15 +2038,19 @@ rsmi_status_t Device::dev_read_gpu_metrics_all_data()
   ostrstream << __PRETTY_FUNCTION__ << " | ======= start =======";
   LOG_TRACE(ostrstream);
 
-  // At this point we should have a valid gpu_metrics pointer.
-  if (!m_gpu_metrics_ptr) {
-    status_code = rsmi_status_t::RSMI_STATUS_UNEXPECTED_DATA;
+  //  At this point we should have a valid gpu_metrics pointer, and
+  //  we already read the header; setup_gpu_metrics_reading()
+  if ((!m_gpu_metrics_ptr) ||
+      ((!m_gpu_metrics_header.m_structure_size)  ||
+       (!m_gpu_metrics_header.m_format_revision) ||
+       (!m_gpu_metrics_header.m_content_revision))) {
+    status_code = rsmi_status_t::RSMI_STATUS_SETTING_UNAVAILABLE;
     ostrstream << __PRETTY_FUNCTION__
                 << " | ======= end ======= "
                 << " | Fail "
                 << " | Device #: " << index()
                 << " | Metric Version: " << stringfy_metrics_header(dev_get_metrics_header())
-                << " | Cause: Couldn't get a valid metric object"
+                << " | Cause: Couldn't get a valid metric object. setup_gpu_metrics_reading()"
                 << " | Returning = "
                 << getRSMIStatusString(status_code)
                 << " |";
@@ -1325,7 +2059,7 @@ rsmi_status_t Device::dev_read_gpu_metrics_all_data()
   }
 
   auto op_result = readDevInfo(DevInfoTypes::kDevGpuMetrics,
-                               m_gpu_metrics_ptr->sizeof_metric_table(),
+                               m_gpu_metrics_header.m_structure_size,
                                &m_gpu_metrics_ptr->get_metrics_table());
   if ((status_code = ErrnoToRsmiStatus(op_result)) !=
       rsmi_status_t::RSMI_STATUS_SUCCESS) {
@@ -1342,6 +2076,21 @@ rsmi_status_t Device::dev_read_gpu_metrics_all_data()
                 << " |";
     LOG_ERROR(ostrstream);
     return status_code;
+  }
+
+  //  All metric units are pushed in.
+  status_code = m_gpu_metrics_ptr->populate_metrics_dynamic_tbl();
+  if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) {
+    ostrstream << __PRETTY_FUNCTION__
+              << " | ======= end ======= "
+              << " | Fail "
+              << " | Device #: " << index()
+              << " | Metric Version: " << stringfy_metrics_header(m_gpu_metrics_header)
+              << " | Update Timestamp: " << m_gpu_metrics_updated_timestamp
+              << " | Returning = "
+              << getRSMIStatusString(status_code)
+              << " |";
+    LOG_ERROR(ostrstream);
   }
 
   m_gpu_metrics_updated_timestamp = actual_timestamp_in_secs();
@@ -1388,24 +2137,28 @@ rsmi_status_t Device::setup_gpu_metrics_reading()
     return status_code;
   }
 
-  auto gpu_metrics_ptr = amdgpu_metrics_factory(gpu_metrics_flag_version);
-  if (!gpu_metrics_ptr) {
-    status_code = rsmi_status_t::RSMI_STATUS_UNEXPECTED_DATA;
-    ostrstream << __PRETTY_FUNCTION__
-                << " | ======= end ======= "
-                << " | Fail "
-                << " | Device #: " << index()
-                << " | Metric Version: " << stringfy_metrics_header(dev_get_metrics_header())
-                << " | Cause: amdgpu_metrics_factory() couldn't get a valid metric object"
-                << " | Returning = "
-                << getRSMIStatusString(status_code)
-                << " |";
-    LOG_ERROR(ostrstream);
-    return status_code;
+  //
+  // if/in case setup_gpu_metrics_reading() was called already use the same pointer
+  if (!m_gpu_metrics_ptr) {
+    m_gpu_metrics_ptr = amdgpu_metrics_factory(gpu_metrics_flag_version);
+    if (!m_gpu_metrics_ptr) {
+      status_code = rsmi_status_t::RSMI_STATUS_UNEXPECTED_DATA;
+      ostrstream << __PRETTY_FUNCTION__
+                  << " | ======= end ======= "
+                  << " | Fail "
+                  << " | Device #: " << index()
+                  << " | Metric Version: " << stringfy_metrics_header(dev_get_metrics_header())
+                  << " | Cause: amdgpu_metrics_factory() couldn't get a valid metric object"
+                  << " | Returning = "
+                  << getRSMIStatusString(status_code)
+                  << " |";
+      LOG_ERROR(ostrstream);
+      return status_code;
+    }
   }
 
-  /// gpu_metrics_ptr has the pointer to the proper object type/version.
-  dev_set_gpu_metric(gpu_metrics_ptr);
+  //
+  // m_gpu_metrics_ptr has the pointer to the proper object type/version.
   status_code = dev_read_gpu_metrics_all_data();
   if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) {
     ostrstream << __PRETTY_FUNCTION__
@@ -1421,139 +2174,312 @@ rsmi_status_t Device::setup_gpu_metrics_reading()
     return status_code;
   }
 
+  ostrstream << __PRETTY_FUNCTION__
+              << " | ======= end ======= "
+              << " | Success "
+              << " | Device #: " << index()
+              << " | Metric Version: " << stringfy_metrics_header(dev_get_metrics_header())
+              << " | Fabric: [" << &m_gpu_metrics_ptr
+              << " ]"
+              << " | Returning = "
+              << getRSMIStatusString(status_code)
+              << " |";
+  LOG_TRACE(ostrstream);
   return status_code;
 }
 
-rsmi_status_t Device::dev_log_gpu_metrics()
+
+template<AMDGpuMetricsDataType_t data_type>
+struct MetricValueCast_t;
+
+template<>
+struct MetricValueCast_t<AMDGpuMetricsDataType_t::kUInt8>
+{
+  using value_type = std::uint8_t;
+};
+template<>
+struct MetricValueCast_t<AMDGpuMetricsDataType_t::kUInt16>
+{
+  using value_type = std::uint16_t;
+};
+template<>
+struct MetricValueCast_t<AMDGpuMetricsDataType_t::kUInt32>
+{
+  using value_type = std::uint32_t;
+};
+
+template<>
+struct MetricValueCast_t<AMDGpuMetricsDataType_t::kUInt64>
+{
+  using value_type = std::uint64_t;
+};
+
+template<AMDGpuMetricsDataType_t dt>
+auto get_casted_value(const AMDGpuDynamicMetricsValue_t& metrics_value)
+{
+    using ValueType_t = typename MetricValueCast_t<dt>::value_type;
+    return static_cast<ValueType_t>(metrics_value.m_value);
+}
+
+
+rsmi_status_t Device::dev_log_gpu_metrics(std::ostringstream& outstream_metrics)
 {
   std::ostringstream ostrstream;
+  std::ostringstream tmp_outstream_metrics;
   auto status_code(rsmi_status_t::RSMI_STATUS_SUCCESS);
   ostrstream << __PRETTY_FUNCTION__ << " | ======= start =======";
   LOG_TRACE(ostrstream);
 
-  // At this point we should have a valid gpu_metrics pointer.
+  //  If we still don't have a valid gpu_metrics pointer;
+  //  meaning, we didn't run any queries, and just want to
+  //  print all the gpu metrics content, we need to setup
+  //  the environment first.
   if (!m_gpu_metrics_ptr) {
-    status_code = rsmi_status_t::RSMI_STATUS_UNEXPECTED_DATA;
-    ostrstream << __PRETTY_FUNCTION__
-                << " | ======= end ======= "
-                << " | Fail "
-                << " | Device #: " << index()
-                << " | Metric Version: " << stringfy_metrics_header(dev_get_metrics_header())
-                << " | Cause: Couldn't get a valid metric object"
-                << " | Returning = "
-                << getRSMIStatusString(status_code)
-                << " |";
-    LOG_ERROR(ostrstream);
-    return status_code;
+    status_code = setup_gpu_metrics_reading();
+    if ((status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) || (!m_gpu_metrics_ptr)) {
+      // At this point we should have a valid gpu_metrics pointer.
+      status_code = rsmi_status_t::RSMI_STATUS_UNEXPECTED_DATA;
+      ostrstream << __PRETTY_FUNCTION__
+                  << " | ======= end ======= "
+                  << " | Fail "
+                  << " | Device #: " << index()
+                  << " | Metric Version: " << stringfy_metrics_header(dev_get_metrics_header())
+                  << " | Cause: Couldn't get a valid metric object"
+                  << " | Returning = "
+                  << getRSMIStatusString(status_code)
+                  << " |";
+      LOG_ERROR(ostrstream);
+      return status_code;
+    }
   }
 
   //  Header info
+  const auto kDoubleLine = std::string("+==============================+");
+  const auto kSingleLine = std::string("+------------------------------+");
   auto header_output = [&]() {
     const auto gpu_metrics_header = dev_get_metrics_header();
-    ostrstream << "GPU Metrics Header: \n";
-    ostrstream << "Timestamp: " << m_gpu_metrics_updated_timestamp << "\n";
-    ostrstream << "Based on:  " << static_cast<uint32_t>(m_gpu_metrics_ptr->get_gpu_metrics_version_used()) << "\n";
-    ostrstream << print_unsigned_hex_and_int(gpu_metrics_header.m_structure_size,   " ->structure_size ");
-    ostrstream << print_unsigned_hex_and_int(gpu_metrics_header.m_format_revision,  " ->format_revision ");
-    ostrstream << print_unsigned_hex_and_int(gpu_metrics_header.m_content_revision, " ->content_revision ");
-    LOG_DEBUG(ostrstream);
+    const auto timestamp_time = timestamp_to_time_point(m_gpu_metrics_updated_timestamp);
+    tmp_outstream_metrics << "\n" << kDoubleLine << "\n";
+    tmp_outstream_metrics << "*** GPU Metrics Header: ***";
+    tmp_outstream_metrics << "\n";
+    tmp_outstream_metrics << "Timestamp: "
+                          << " ["
+                          << m_gpu_metrics_updated_timestamp
+                          << "] "
+                          << std::ctime(&timestamp_time);
+    tmp_outstream_metrics << "Version: "
+                          << print_unsigned_int(gpu_metrics_header.m_format_revision)
+                          << "."
+                          << print_unsigned_int(gpu_metrics_header.m_content_revision)
+                          << " [Flag: "
+                          << static_cast<uint32_t>(m_gpu_metrics_ptr->get_gpu_metrics_version_used())
+                          << "] "
+                          << "\n";
+
+    tmp_outstream_metrics << print_unsigned_hex_and_int(gpu_metrics_header.m_structure_size,   " ->structure_size   ");
+    tmp_outstream_metrics << print_unsigned_hex_and_int(gpu_metrics_header.m_format_revision,  " ->format_revision  ");
+    tmp_outstream_metrics << print_unsigned_hex_and_int(gpu_metrics_header.m_content_revision, " ->content_revision ");
+    tmp_outstream_metrics << "\n" << kSingleLine << "\n";
     return;
   };
 
+  //  Metrics info
   auto table_content_output = [&]() {
     const auto gpu_metrics_tbl = m_gpu_metrics_ptr->get_metrics_dynamic_tbl();
-
-    ostrstream << "GPU Metrics Data: \n";
+    tmp_outstream_metrics << "\n";
+    tmp_outstream_metrics << "*** GPU Metrics Data: *** \n";
     for (const auto& [metric_class, metric_data] : gpu_metrics_tbl) {
-      ostrstream << amdgpu_metrics_class_id_translation_table.at(metric_class) << "\n";
+      tmp_outstream_metrics << "\n";
+      tmp_outstream_metrics << "[ " << amdgpu_metrics_class_id_translation_table.at(metric_class) << " ]" << "\n";
 
       for (const auto& [metric_unit, metric_values] : metric_data) {
+        auto tmp_metric_info = ("[ " + amdgpu_metrics_unit_type_translation_table.at(metric_unit) + " ]");
         for (const auto& metric_value : metric_values) {
-          ostrstream << print_unsigned_hex_and_int(metric_value.m_value, metric_value.m_info);
+          switch (metric_value.m_original_type) {
+            case (AMDGpuMetricsDataType_t::kUInt16):
+              {
+                auto value = get_casted_value<AMDGpuMetricsDataType_t::kUInt16>(metric_value);
+                tmp_outstream_metrics << print_unsigned_hex_and_int((value), metric_value.m_info) << " -> " << tmp_metric_info;
+              }
+              break;
+
+            case (AMDGpuMetricsDataType_t::kUInt32):
+              {
+                auto value = get_casted_value<AMDGpuMetricsDataType_t::kUInt32>(metric_value);
+                tmp_outstream_metrics << print_unsigned_hex_and_int((value), metric_value.m_info) << " -> " << tmp_metric_info;
+              }
+              break;
+
+            case (AMDGpuMetricsDataType_t::kUInt64):
+              {
+                auto value = get_casted_value<AMDGpuMetricsDataType_t::kUInt64>(metric_value);
+                tmp_outstream_metrics << print_unsigned_hex_and_int((value), metric_value.m_info) << " -> " << tmp_metric_info;
+              }
+              break;
+
+              default:
+                tmp_outstream_metrics << "Error: No data type conversion for original type: " << static_cast<AMDGpuMetricsDataTypeId_t>(metric_value.m_original_type) << "\n";
+                break;
+          }
         }
       }
+      tmp_outstream_metrics << "\n\n";
     }
+    tmp_outstream_metrics << "\n" << kDoubleLine << "\n";
     return;
   };
 
   //
   header_output();
   table_content_output();
+  outstream_metrics << tmp_outstream_metrics.rdbuf();
+  LOG_DEBUG(tmp_outstream_metrics);
 
+  ostrstream << __PRETTY_FUNCTION__
+              << " | ======= end ======= "
+              << " | Success "
+              << " | Device #: " << index()
+              << " | Metric Version: " << stringfy_metrics_header(dev_get_metrics_header())
+              << " | Fabric: [" << &m_gpu_metrics_ptr
+              << " ]"
+              << " | Returning = "
+              << getRSMIStatusString(status_code)
+              << " |";
+  LOG_TRACE(ostrstream);
   return status_code;
 }
+
+AMGpuMetricsPublicLatestTupl_t Device::dev_copy_internal_to_external_metrics()
+{
+  std::ostringstream ostrstream;
+  std::ostringstream tmp_outstream_metrics;
+  auto status_code(rsmi_status_t::RSMI_STATUS_SUCCESS);
+  ostrstream << __PRETTY_FUNCTION__ << " | ======= start =======";
+  LOG_TRACE(ostrstream);
+
+  if (!m_gpu_metrics_ptr) {
+    // At this point we should have a valid gpu_metrics pointer.
+    status_code = rsmi_status_t::RSMI_STATUS_UNEXPECTED_DATA;
+    ostrstream << __PRETTY_FUNCTION__
+               << " | ======= end ======= "
+               << " | Fail "
+               << " | Device #: " << index()
+               << " | Metric Version: " << stringfy_metrics_header(dev_get_metrics_header())
+               << " | Cause: Couldn't get a valid metric object"
+               << " | Returning = "
+               << getRSMIStatusString(status_code)
+               << " |";
+    LOG_ERROR(ostrstream);
+    return std::make_tuple(status_code, AMGpuMetricsPublicLatest_t());
+  }
+
+  ostrstream << __PRETTY_FUNCTION__
+              << " | ======= end ======= "
+              << " | Success "
+              << " | Device #: " << index()
+              << " | Metric Version: " << stringfy_metrics_header(dev_get_metrics_header())
+              << " | Fabric: [" << &m_gpu_metrics_ptr
+              << " ]"
+              << " | Returning = "
+              << getRSMIStatusString(status_code)
+              << " |";
+  LOG_TRACE(ostrstream);
+
+  return m_gpu_metrics_ptr->copy_internal_to_external_metrics();
+}
+
 
 rsmi_status_t Device::run_internal_gpu_metrics_query(AMDGpuMetricsUnitType_t metric_counter, AMDGpuDynamicMetricTblValues_t& values)
 {
   std::ostringstream ostrstream;
-  auto status_code(rsmi_status_t::RSMI_STATUS_NOT_FOUND);
+  auto status_code(rsmi_status_t::RSMI_STATUS_NOT_SUPPORTED);
   ostrstream << __PRETTY_FUNCTION__ << " | ======= start =======";
   LOG_TRACE(ostrstream);
 
-  status_code = setup_gpu_metrics_reading();
-  if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) {
-    return status_code;
-  }
-
   if (!m_gpu_metrics_ptr) {
-    status_code = rsmi_status_t::RSMI_STATUS_UNEXPECTED_DATA;
-    ostrstream << __PRETTY_FUNCTION__
-                << " | ======= end ======= "
-                << " | Fail "
-                << " | Device #: " << index()
-                << " | Metric Version: " << stringfy_metrics_header(dev_get_metrics_header())
-                << " | Cause: Couldn't get a valid metric object"
-                << " | Returning = "
-                << getRSMIStatusString(status_code)
-                << " |";
-    LOG_ERROR(ostrstream);
-    return status_code;
+    status_code = setup_gpu_metrics_reading();
+    if ((status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) || (!m_gpu_metrics_ptr)) {
+      status_code = rsmi_status_t::RSMI_STATUS_UNEXPECTED_DATA;
+      ostrstream << __PRETTY_FUNCTION__
+                  << " | ======= end ======= "
+                  << " | Fail "
+                  << " | Device #: " << index()
+                  << " | Metric Version: " << stringfy_metrics_header(dev_get_metrics_header())
+                  << " | Cause: Couldn't get a valid metric object"
+                  << " | Returning = "
+                  << getRSMIStatusString(status_code)
+                  << " |";
+      LOG_ERROR(ostrstream);
+      return status_code;
+    }
   }
 
   // Lookup the dynamic table
+  ostrstream << __PRETTY_FUNCTION__
+              << " | ======= info ======= "
+              << " | Device #: " << index()
+              << " | Metric Version: " << stringfy_metrics_header(dev_get_metrics_header())
+              << " | Metric Unit: " << static_cast<AMDGpuMetricTypeId_t>(metric_counter)
+              << " |";
+  LOG_INFO(ostrstream);
   const auto gpu_metrics_tbl = m_gpu_metrics_ptr->get_metrics_dynamic_tbl();
   for (const auto& [metric_class, metric_data] : gpu_metrics_tbl) {
     for (const auto& [metric_unit, metric_values] : metric_data) {
       if (metric_unit == metric_counter) {
         values = metric_values;
-        return rsmi_status_t::RSMI_STATUS_SUCCESS;
+        status_code = rsmi_status_t::RSMI_STATUS_SUCCESS;
+        ostrstream << __PRETTY_FUNCTION__
+                    << " | ======= end ======= "
+                    << " | Success "
+                    << " | Device #: " << index()
+                    << " | Metric Version: " << stringfy_metrics_header(dev_get_metrics_header())
+                    << " | Metric Unit: " << static_cast<AMDGpuMetricTypeId_t>(metric_counter)
+                    << " | Returning = "
+                    << getRSMIStatusString(status_code)
+                    << " |";
+        LOG_ERROR(ostrstream);
+        return status_code;
       }
     }
   }
 
+  ostrstream << __PRETTY_FUNCTION__
+              << " | ======= end ======= "
+              << " | Fail "
+              << " | Device #: " << index()
+              << " | Metric Version: " << stringfy_metrics_header(dev_get_metrics_header())
+              << " | Returning = "
+              << getRSMIStatusString(status_code)
+              << " |";
+  LOG_ERROR(ostrstream);
   return status_code;
 }
 
 
-template<typename> struct is_vector : std::false_type {};
-template <typename... Ts> struct is_vector<std::vector<Ts...>> : std::true_type {};
-template <typename T> inline constexpr bool is_vector_v = is_vector<T>::value;
+template<typename T>
+constexpr inline bool is_metric_data_type_supported_v =
+    ((std::is_same_v<T, std::uint16_t>) || (std::is_same_v<T, const std::uint16_t>) ||
+     (std::is_same_v<T, std::uint32_t>) || (std::is_same_v<T, const std::uint32_t>) ||
+     (std::is_same_v<T, std::uint64_t>) || (std::is_same_v<T, const std::uint64_t>));
 
-template <typename> struct is_array : std::false_type {};
-template <typename T, std::size_t N> struct is_array<std::array<T, N>> : std::true_type {};
+template<typename>
+struct is_std_vector : std::false_type {};
 
-template <class> struct is_bounded_uint8_array : std::false_type {};
-template <class> struct is_bounded_uint16_array : std::false_type {};
-template <class> struct is_bounded_uint32_array : std::false_type {};
-template <class> struct is_bounded_uint64_array : std::false_type {};
+template <typename T, typename... Ts>
+struct is_std_vector<std::vector<T, Ts...>> : std::true_type {};
 
-template <size_t N>
-struct is_bounded_uint8_array<uint8_t[N]> : std::true_type {};
+template <typename T>
+inline constexpr bool is_std_vector_v = is_std_vector<T>::value;
 
-template <size_t N>
-struct is_bounded_uint16_array<uint16_t[N]> : std::true_type {};
-
-template <size_t N>
-struct is_bounded_uint32_array<uint32_t[N]> : std::true_type {};
-
-template <size_t N>
-struct is_bounded_uint64_array<uint64_t[N]> : std::true_type {};
-
-template <class> struct is_bounded_array : std::false_type {};
-
-template <class T, size_t N>
-struct is_bounded_array<T[N]> : std::true_type {};
-
+template <typename T>
+constexpr bool is_std_vector_type_supported_v()
+{
+    if constexpr (is_std_vector_v<T>) {
+        using ValueType_t = typename T::value_type;
+        return (is_metric_data_type_supported_v<ValueType_t>);
+    }
+    return false;
+};
 
 template<typename T>
 rsmi_status_t rsmi_dev_gpu_metrics_info_query(uint32_t dv_ind, AMDGpuMetricsUnitType_t metric_counter, T& metric_value)
@@ -1563,79 +2489,173 @@ rsmi_status_t rsmi_dev_gpu_metrics_info_query(uint32_t dv_ind, AMDGpuMetricsUnit
   ostrstream << __PRETTY_FUNCTION__ << " | ======= start =======";
   LOG_TRACE(ostrstream);
 
-  AMDGpuDynamicMetricTblValues_t tmp_values{};
-  GET_DEV_FROM_INDX
-  status_code = dev->run_internal_gpu_metrics_query(metric_counter, tmp_values);
-  if ((status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) || tmp_values.empty()) {
-    ostrstream << __PRETTY_FUNCTION__
-                << " | ======= end ======= "
-                << " | Fail "
-                << " | Device #: " << dv_ind
-                << " | Metric Version: " << stringfy_metrics_header(dev->dev_get_metrics_header())
-                << " | Cause: Couldn't find metric/counter requested"
-                << " | Metric Type: " << static_cast<uint32_t>(metric_counter)
-                << " " << amdgpu_metrics_unit_type_translation_table.at(metric_counter)
-                << " | Values: " << tmp_values.size()
-                << " | Returning = "
-                << getRSMIStatusString(status_code)
-                << " |";
-    LOG_ERROR(ostrstream);
-    return status_code;
-  }
-
-  const auto num_stored_elems = (std::end(tmp_values) - std::begin(tmp_values));
-  if constexpr (std::is_array_v<T>) {
-    std::variant<uint8_t, uint16_t, uint32_t, uint64_t> tmp_value;
-    auto idx = uint16_t(0);
-    for (const auto& value : tmp_values) {
-      tmp_value = value.m_value;
-      idx++;
-      switch (value.m_original_type) {
-        case AMDGpuMetricsDataType_t::kUInt8:
-          metric_value[idx] = std::get<uint8_t>(tmp_value);
-          break;
-
-        case AMDGpuMetricsDataType_t::kUInt16:
-          metric_value[idx] = std::get<uint16_t>(tmp_value);
-          break;
-
-        case AMDGpuMetricsDataType_t::kUInt32:
-          metric_value[idx] = std::get<uint32_t>(tmp_value);
-          break;
-
-        case AMDGpuMetricsDataType_t::kUInt64:
-          metric_value[idx] = std::get<uint64_t>(tmp_value);
-          break;
-
-        default:
-          break;
+  static constexpr bool is_supported_vector_type = [&]() {
+    if constexpr (is_std_vector_v<T>) {
+      if (is_std_vector_type_supported_v<T>()) {
+        return true;
       }
+    }
+    return false;
+  }();
 
-      metric_value[idx++] = tmp_value;
+
+  if constexpr ((is_supported_vector_type) || (is_metric_data_type_supported_v<T>)) {
+    // Get all stored values for the metric unit/counter
+    AMDGpuDynamicMetricTblValues_t tmp_values{};
+    GET_DEV_FROM_INDX
+    status_code = dev->run_internal_gpu_metrics_query(metric_counter, tmp_values);
+    if ((status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) || tmp_values.empty()) {
+      ostrstream << __PRETTY_FUNCTION__
+                  << " | ======= end ======= "
+                  << " | Fail "
+                  << " | Device #: " << dv_ind
+                  << " | Metric Version: " << stringfy_metrics_header(dev->dev_get_metrics_header())
+                  << " | Cause: Couldn't find metric/counter requested"
+                  << " | Metric Type: " << static_cast<uint32_t>(metric_counter)
+                  << " " << amdgpu_metrics_unit_type_translation_table.at(metric_counter)
+                  << " | Values: " << tmp_values.size()
+                  << " | Returning = "
+                  << getRSMIStatusString(status_code)
+                  << " |";
+      LOG_ERROR(ostrstream);
+      return status_code;
+    }
+
+    if constexpr (is_std_vector_v<T>) {
+      using ValueType_t = typename T::value_type;
+      ValueType_t tmp_value;
+
+      for (const auto& value : tmp_values) {
+        tmp_value = static_cast<ValueType_t>(value.m_value);
+        metric_value.push_back(tmp_value);
+      }
+    }
+    else if constexpr (is_metric_data_type_supported_v<T>) {
+      T tmp_value(0);
+      tmp_value = static_cast<decltype(tmp_value)>(tmp_values[0].m_value);
+      metric_value = tmp_value;
     }
   }
-  if constexpr ((std::is_same_v<T, uint8_t>)  || (std::is_same_v<T, uint16_t>) ||
-                (std::is_same_v<T, uint32_t>) || (std::is_same_v<T, uint64_t>)) {
-    T tmp_value(0);
-    tmp_value = static_cast<decltype(tmp_value)>(tmp_values[0].m_value);
-    metric_value = tmp_value;
+  else {
+    static_assert(is_dependent_false_v<T>, "Error: Data Type not supported...");
   }
 
+  ostrstream << __PRETTY_FUNCTION__
+              << " | ======= end ======= "
+              << " | Device #: " << dv_ind
+              << " | Metric Type: " << static_cast<uint32_t>(metric_counter)
+              << " | Returning = "
+              << getRSMIStatusString(status_code)
+              << " |";
+  LOG_ERROR(ostrstream);
   return status_code;
 }
 
 
 template
-rsmi_status_t rsmi_dev_gpu_metrics_info_query<uint8_t>(uint32_t dv_ind, AMDGpuMetricsUnitType_t metric_counter, uint8_t& metric_value);
+rsmi_status_t rsmi_dev_gpu_metrics_info_query<uint16_t>
+(uint32_t dv_ind, AMDGpuMetricsUnitType_t metric_counter, uint16_t& metric_value);
 
 template
-rsmi_status_t rsmi_dev_gpu_metrics_info_query<uint16_t>(uint32_t dv_ind, AMDGpuMetricsUnitType_t metric_counter, uint16_t& metric_value);
+rsmi_status_t rsmi_dev_gpu_metrics_info_query<uint32_t>
+(uint32_t dv_ind, AMDGpuMetricsUnitType_t metric_counter, uint32_t& metric_value);
 
 template
-rsmi_status_t rsmi_dev_gpu_metrics_info_query<uint32_t>(uint32_t dv_ind, AMDGpuMetricsUnitType_t metric_counter, uint32_t& metric_value);
+rsmi_status_t rsmi_dev_gpu_metrics_info_query<uint64_t>
+(uint32_t dv_ind, AMDGpuMetricsUnitType_t metric_counter, uint64_t& metric_value);
 
 template
-rsmi_status_t rsmi_dev_gpu_metrics_info_query<uint64_t>(uint32_t dv_ind, AMDGpuMetricsUnitType_t metric_counter, uint64_t& metric_value);
+rsmi_status_t rsmi_dev_gpu_metrics_info_query<GpuMetricU16Tbl_t>
+(uint32_t dv_ind, AMDGpuMetricsUnitType_t metric_counter, GpuMetricU16Tbl_t& metric_value);
 
+template
+rsmi_status_t rsmi_dev_gpu_metrics_info_query<GpuMetricU32Tbl_t>
+(uint32_t dv_ind, AMDGpuMetricsUnitType_t metric_counter, GpuMetricU32Tbl_t& metric_value);
+
+template
+rsmi_status_t rsmi_dev_gpu_metrics_info_query<GpuMetricU64Tbl_t>
+(uint32_t dv_ind, AMDGpuMetricsUnitType_t metric_counter, GpuMetricU64Tbl_t& metric_value);
 
 } //namespace amd::smi
+
+rsmi_status_t
+rsmi_dev_gpu_metrics_header_info_get(uint32_t dv_ind, metrics_table_header_t& header_value)
+{
+  TRY
+  auto status_code(rsmi_status_t::RSMI_STATUS_SUCCESS);
+  std::ostringstream ostrstream;
+  ostrstream << __PRETTY_FUNCTION__ << "| ======= start =======";
+  LOG_TRACE(ostrstream);
+
+  GET_DEV_FROM_INDX
+  status_code = dev->dev_read_gpu_metrics_header_data();
+  if (status_code == rsmi_status_t::RSMI_STATUS_SUCCESS) {
+    auto tmp_header_info = dev->dev_get_metrics_header();
+    std::memcpy(&header_value, &tmp_header_info, sizeof(metrics_table_header_t));
+  }
+
+  ostrstream << __PRETTY_FUNCTION__
+              << " | ======= end ======= "
+              << " | Success "
+              << " | Device #: " << dv_ind
+              << " | Returning = "
+              << getRSMIStatusString(status_code)
+              << " |";
+  LOG_TRACE(ostrstream);
+
+  return status_code;
+  CATCH
+}
+
+//dev_read_gpu_metrics_header_data
+
+/**
+ *  Note: These keep backwards compatibility with previous GPU metrics work
+ */
+// log current gpu_metrics file content read
+// any metrics value can be a nullptr
+rsmi_status_t
+rsmi_dev_gpu_metrics_info_get(uint32_t dv_ind, rsmi_gpu_metrics_t* smu) {
+  TRY
+  DEVICE_MUTEX
+  CHK_SUPPORT_NAME_ONLY(smu)
+
+  auto status_code(rsmi_status_t::RSMI_STATUS_SUCCESS);
+  std::ostringstream ostrstream;
+  ostrstream << __PRETTY_FUNCTION__ << "| ======= start =======";
+  LOG_TRACE(ostrstream);
+
+  assert(smu != nullptr);
+  if (smu == nullptr) {
+    status_code = rsmi_status_t::RSMI_STATUS_INVALID_ARGS;
+    return status_code;
+  }
+
+  dev->dev_log_gpu_metrics(ostrstream);
+  const auto [error_code, external_metrics] = dev->dev_copy_internal_to_external_metrics();
+  if (error_code != rsmi_status_t::RSMI_STATUS_SUCCESS) {
+    ostrstream << __PRETTY_FUNCTION__
+               << " | ======= end ======= "
+               << " | Fail "
+               << " | Device #: " << dv_ind
+               << " | Returning = "
+               << getRSMIStatusString(error_code)
+               << " |";
+    LOG_ERROR(ostrstream);
+    return error_code;
+  }
+
+  *smu = external_metrics;
+  ostrstream << __PRETTY_FUNCTION__
+              << " | ======= end ======= "
+              << " | Success "
+              << " | Device #: " << dv_ind
+              << " | Returning = "
+              << getRSMIStatusString(status_code)
+              << " |";
+  LOG_TRACE(ostrstream);
+
+  return status_code;
+  CATCH
+}
+

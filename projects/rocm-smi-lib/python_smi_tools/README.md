@@ -1,6 +1,4 @@
-## Synopsis
-
-Radeon Open Compute Platform - System Management Interface - Command Line tool.
+## Radeon Open Compute (ROCm) - System Management Interface - Command Line Tool
 
 This tool acts as a command line interface for manipulating
 and monitoring the amdgpu kernel, and is intended to replace
