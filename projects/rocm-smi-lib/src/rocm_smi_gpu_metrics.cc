@@ -462,6 +462,105 @@ AMDGpuDynamicMetricTblValues_t format_metric_row(const T& metric, const std::str
   return multi_values;
 }
 
+void GpuMetricsBase_v14_t::dump_internal_metrics_table()
+{
+  std::ostringstream ostrstream;
+  std::cout << __PRETTY_FUNCTION__ << " | ======= start ======= \n";
+  ostrstream << __PRETTY_FUNCTION__
+              << " | ======= DEBUG ======= "
+              << " | Metric Version: " << stringfy_metric_header_version(m_gpu_metrics_tbl.m_common_header)
+              << " | Size: " << print_unsigned_int(m_gpu_metrics_tbl.m_common_header.m_structure_size)
+              << " |"
+              << "\n";
+  ostrstream  << " temperature_hotspot: " << m_gpu_metrics_tbl.m_temperature_hotspot  << "\n"
+              << " temperature_mem: " << m_gpu_metrics_tbl.m_temperature_mem << "\n"
+              << " temperature_vrsoc: " << m_gpu_metrics_tbl.m_temperature_vrsoc << "\n"
+
+              << " current_socket_power: " << m_gpu_metrics_tbl.m_current_socket_power << "\n"
+
+              << " average_gfx_activity: " << m_gpu_metrics_tbl.m_average_gfx_activity << "\n"
+              << " average_umc_activity: " << m_gpu_metrics_tbl.m_average_umc_activity << "\n";
+
+  ostrstream  << " vcn_activity: " << "\n";
+  auto idx = uint64_t(0);
+  for (const auto& temp : m_gpu_metrics_tbl.m_vcn_activity) {
+    ostrstream << "\t [" << idx << "]: " << temp << "\n";
+    ++idx;
+  }
+
+  ostrstream  << " energy_accumulator: " << m_gpu_metrics_tbl.m_energy_accumulator << "\n"
+              << " system_clock_counter: " << m_gpu_metrics_tbl.m_system_clock_counter << "\n"
+
+              << " throttle_status: " << m_gpu_metrics_tbl.m_throttle_status << "\n"
+
+              << " average_gfx_activity: " << m_gpu_metrics_tbl.m_average_gfx_activity << "\n"
+              << " average_umc_activity: " << m_gpu_metrics_tbl.m_average_umc_activity << "\n"
+
+              << " gfxclk_lock_status: " << m_gpu_metrics_tbl.m_gfxclk_lock_status << "\n"
+
+              << " pcie_link_width: " << m_gpu_metrics_tbl.m_pcie_link_width << "\n"
+              << " pcie_link_speed: " << m_gpu_metrics_tbl.m_pcie_link_speed << "\n"
+
+              << " xgmi_link_width: " << m_gpu_metrics_tbl.m_xgmi_link_width << "\n"
+              << " xgmi_link_speed: " << m_gpu_metrics_tbl.m_xgmi_link_speed << "\n"
+
+              << " gfx_activity_acc: " << m_gpu_metrics_tbl.m_gfx_activity_acc << "\n"
+              << " mem_activity_acc: " << m_gpu_metrics_tbl.m_mem_activity_acc << "\n"
+
+              << " pcie_bandwidth_acc: " << m_gpu_metrics_tbl.m_pcie_bandwidth_acc << "\n"
+              << " pcie_bandwidth_inst: " << m_gpu_metrics_tbl.m_pcie_bandwidth_inst << "\n"
+              << " pcie_l0_to_recov_count_acc: " << m_gpu_metrics_tbl.m_pcie_l0_to_recov_count_acc << "\n"
+              << " pcie_replay_count_acc: " << m_gpu_metrics_tbl.m_pcie_replay_count_acc << "\n"
+              << " pcie_replay_rover_count_acc: " << m_gpu_metrics_tbl.m_pcie_replay_rover_count_acc << "\n";
+
+  ostrstream  << " xgmi_read_data_acc: " << "\n";
+  idx = 0;
+  for (const auto& temp : m_gpu_metrics_tbl.m_xgmi_read_data_acc) {
+    ostrstream << "\t [" << idx << "]: " << temp << "\n";
+    ++idx;
+  }
+
+  ostrstream  << " xgmi_write_data_acc: " << "\n";
+  idx = 0;
+  for (const auto& temp : m_gpu_metrics_tbl.m_xgmi_write_data_acc) {
+    ostrstream << "\t [" << idx << "]: " << temp << "\n";
+    ++idx;
+  }
+
+  ostrstream  << " firmware_timestamp: " << m_gpu_metrics_tbl.m_firmware_timestamp << "\n";
+
+  ostrstream  << " current_gfxclk: " << "\n";
+  idx = 0;
+  for (const auto& temp : m_gpu_metrics_tbl.m_current_gfxclk) {
+    ostrstream << "\t [" << idx << "]: " << temp << "\n";
+    ++idx;
+  }
+
+  ostrstream  << " current_socclk: " << "\n";
+  idx = 0;
+  for (const auto& temp : m_gpu_metrics_tbl.m_current_socclk) {
+    ostrstream << "\t [" << idx << "]: " << temp << "\n";
+    ++idx;
+  }
+
+  ostrstream  << " current_vclk0: " << "\n";
+  idx = 0;
+  for (const auto& temp : m_gpu_metrics_tbl.m_current_vclk0) {
+    ostrstream << "\t [" << idx << "]: " << temp << "\n";
+    ++idx;
+  }
+
+  ostrstream  << " current_dclk0: " << "\n";
+  idx = 0;
+  for (const auto& temp : m_gpu_metrics_tbl.m_current_dclk0) {
+    ostrstream << "\t [" << idx << "]: " << temp << "\n";
+    ++idx;
+  }
+
+  ostrstream  << " padding: " << m_gpu_metrics_tbl.m_padding << "\n";
+  LOG_DEBUG(ostrstream);
+}
+
 rsmi_status_t GpuMetricsBase_v14_t::populate_metrics_dynamic_tbl()
 {
   std::ostringstream ostrstream;
@@ -947,6 +1046,78 @@ AMGpuMetricsPublicLatestTupl_t GpuMetricsBase_v14_t::copy_internal_to_external_m
   return std::make_tuple(status_code, copy_data_from_internal_metrics_tbl);
 }
 
+void GpuMetricsBase_v13_t::dump_internal_metrics_table()
+{
+  std::ostringstream ostrstream;
+  std::cout << __PRETTY_FUNCTION__ << " | ======= start ======= \n";
+  ostrstream << __PRETTY_FUNCTION__
+              << " | ======= DEBUG ======= "
+              << " | Metric Version: " << stringfy_metric_header_version(m_gpu_metrics_tbl.m_common_header)
+              << " | Size: " << print_unsigned_int(m_gpu_metrics_tbl.m_common_header.m_structure_size)
+              << " |"
+              << "\n";
+  ostrstream  << " temperature_edge: " << m_gpu_metrics_tbl.m_temperature_edge  << "\n"
+              << " temperature_hotspot: " << m_gpu_metrics_tbl.m_temperature_hotspot  << "\n"
+              << " temperature_mem: " << m_gpu_metrics_tbl.m_temperature_mem << "\n"
+              << " temperature_vrgfx: " << m_gpu_metrics_tbl.m_temperature_vrgfx << "\n"
+              << " temperature_vrsoc: " << m_gpu_metrics_tbl.m_temperature_vrsoc << "\n"
+              << " temperature_vrmem: " << m_gpu_metrics_tbl.m_temperature_vrmem << "\n"
+
+              << " average_gfx_activity: " << m_gpu_metrics_tbl.m_average_gfx_activity << "\n"
+              << " average_umc_activity: " << m_gpu_metrics_tbl.m_average_umc_activity << "\n"
+              << " average_mm_activity: " << m_gpu_metrics_tbl.m_average_mm_activity << "\n"
+              << " average_socket_power: " << m_gpu_metrics_tbl.m_average_socket_power << "\n"
+
+              << " energy_accumulator: " << m_gpu_metrics_tbl.m_energy_accumulator << "\n"
+              << " system_clock_counter: " << m_gpu_metrics_tbl.m_system_clock_counter << "\n"
+
+              << " average_gfxclk_frequency: " << m_gpu_metrics_tbl.m_average_gfxclk_frequency << "\n"
+              << " average_socclk_frequency: " << m_gpu_metrics_tbl.m_average_socclk_frequency << "\n"
+              << " average_uclk_frequency: " << m_gpu_metrics_tbl.m_average_uclk_frequency << "\n"
+              << " average_vclk0_frequency: " << m_gpu_metrics_tbl.m_average_vclk0_frequency << "\n"
+              << " average_dclk0_frequency: " << m_gpu_metrics_tbl.m_average_dclk0_frequency << "\n"
+              << " average_vclk1_frequency: " << m_gpu_metrics_tbl.m_average_vclk1_frequency << "\n"
+              << " average_dclk1_frequency: " << m_gpu_metrics_tbl.m_average_dclk1_frequency << "\n"
+
+              << " current_gfxclk: " << m_gpu_metrics_tbl.m_current_gfxclk << "\n"
+              << " current_socclk: " << m_gpu_metrics_tbl.m_current_socclk << "\n"
+              << " current_uclk: " << m_gpu_metrics_tbl.m_current_uclk << "\n"
+              << " current_vclk0: " << m_gpu_metrics_tbl.m_current_vclk0 << "\n"
+              << " current_dclk0: " << m_gpu_metrics_tbl.m_current_dclk0 << "\n"
+              << " current_vclk1: " << m_gpu_metrics_tbl.m_current_vclk1 << "\n"
+              << " current_dclk1: " << m_gpu_metrics_tbl.m_current_dclk1 << "\n"
+
+              << " throttle_status: " << m_gpu_metrics_tbl.m_throttle_status << "\n"
+
+              << " current_fan_speed: " << m_gpu_metrics_tbl.m_current_fan_speed << "\n"
+
+              << " pcie_link_width: " << m_gpu_metrics_tbl.m_pcie_link_width << "\n"
+              << " pcie_link_speed: " << m_gpu_metrics_tbl.m_pcie_link_speed << "\n"
+
+              << " padding: " << m_gpu_metrics_tbl.m_padding << "\n"
+
+              << " gfx_activity_acc: " << m_gpu_metrics_tbl.m_gfx_activity_acc << "\n"
+              << " mem_activity_acc: " << m_gpu_metrics_tbl.m_mem_activity_acc << "\n";
+  LOG_DEBUG(ostrstream);
+
+  ostrstream  << " temperature_hbm: " << "\n";
+  auto idx = uint64_t(0);
+  for (const auto& temp : m_gpu_metrics_tbl.m_temperature_hbm) {
+    ostrstream << "\t [" << idx << "]: " << temp << "\n";
+    ++idx;
+  }
+
+  ostrstream  << " firmware_timestamp: " << m_gpu_metrics_tbl.m_firmware_timestamp << "\n"
+
+              << " voltage_soc: " << m_gpu_metrics_tbl.m_voltage_soc  << "\n"
+              << " voltage_gfx: " << m_gpu_metrics_tbl.m_voltage_gfx  << "\n"
+              << " voltage_mem: " << m_gpu_metrics_tbl.m_voltage_mem  << "\n"
+
+              << " padding1: " << m_gpu_metrics_tbl.m_padding1 << "\n"
+              << " m_indep_throttle_status: " << m_gpu_metrics_tbl.m_indep_throttle_status << "\n";
+  LOG_DEBUG(ostrstream);
+}
+
 rsmi_status_t GpuMetricsBase_v13_t::populate_metrics_dynamic_tbl()
 {
   std::ostringstream ostrstream;
@@ -1310,7 +1481,6 @@ AMGpuMetricsPublicLatestTupl_t GpuMetricsBase_v13_t::copy_internal_to_external_m
 
   return std::make_tuple(status_code, copy_data_from_internal_metrics_tbl);
 }
-
 
 rsmi_status_t GpuMetricsBase_v12_t::populate_metrics_dynamic_tbl()
 {
@@ -2059,8 +2229,8 @@ rsmi_status_t Device::dev_read_gpu_metrics_all_data()
   }
 
   auto op_result = readDevInfo(DevInfoTypes::kDevGpuMetrics,
-                               m_gpu_metrics_header.m_structure_size,
-                               &m_gpu_metrics_ptr->get_metrics_table());
+                          m_gpu_metrics_header.m_structure_size,
+                          m_gpu_metrics_ptr->get_metrics_table().get());
   if ((status_code = ErrnoToRsmiStatus(op_result)) !=
       rsmi_status_t::RSMI_STATUS_SUCCESS) {
     ostrstream << __PRETTY_FUNCTION__
@@ -2275,7 +2445,7 @@ rsmi_status_t Device::dev_log_gpu_metrics(std::ostringstream& outstream_metrics)
                           << static_cast<uint32_t>(m_gpu_metrics_ptr->get_gpu_metrics_version_used())
                           << "] "
                           << "\n";
-
+    tmp_outstream_metrics << " ->Device #: " << index() << "\n";
     tmp_outstream_metrics << print_unsigned_hex_and_int(gpu_metrics_header.m_structure_size,   " ->structure_size   ");
     tmp_outstream_metrics << print_unsigned_hex_and_int(gpu_metrics_header.m_format_revision,  " ->format_revision  ");
     tmp_outstream_metrics << print_unsigned_hex_and_int(gpu_metrics_header.m_content_revision, " ->content_revision ");
