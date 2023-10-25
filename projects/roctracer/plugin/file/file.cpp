@@ -316,8 +316,11 @@ class file_plugin_t {
 
           output_file = get_output_file(ACTIVITY_DOMAIN_HIP_OPS);
           ss << std::dec << begin->begin_ns << ":" << begin->end_ns << " " << begin->device_id
-             << ":" << begin->queue_id << " " << name << ":" << begin->correlation_id << ":"
-             << GetPid() << "\n";
+             << ":" << begin->queue_id << " "
+             << ((begin->op == HIP_OP_ID_DISPATCH && begin->kernel_name != nullptr)
+                     ? cxx_demangle(begin->kernel_name)
+                     : name)
+             << ":" << begin->correlation_id << ":" << GetPid() << "\n";
           *output_file << ss.str();
           break;
         }
