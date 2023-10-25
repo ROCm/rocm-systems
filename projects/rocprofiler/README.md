@@ -343,7 +343,7 @@ Tool used to collect fine-grained hardware metrics. Provides ISA-level instructi
       # histogram
       att: TARGET_CU=0
       SE_MASK=0xFF
-      SIMD_SELECT=0xF // 0xF for GFX9, SIMD_MASK=0 for Navi
+      SIMD_SELECT=0xF // 0xF for GFX9, SIMD_SELECT=0 for Navi
       ```
 
       Possible contents:
@@ -361,7 +361,8 @@ Tool used to collect fine-grained hardware metrics. Provides ISA-level instructi
         - 0 = capture symbols only.
         - 1 = capture symbols for file:// and make a copy of memory://
         - 2 = Copy file:// and memory://
-
+    - By default, kernel names are truncated for ATT.To disable, please see the kernel name truncation section below.
+  
   - Example for vectoradd.
 
     ```bash
@@ -435,105 +436,6 @@ A device profiling session allows the user to profile the GPU device for counter
 ### Session Support
 
   A session is a unique identifier for a profiling/tracing/pc-sampling task. A ROCProfilerV2 Session has enough information about what needs to be collected or traced and it allows the user to start/stop profiling/tracing whenever required. More details on the API can be found in the API specification documentation that can be installed using rocprofiler-doc package. Samples also can be found for how to use the API in samples directory.
-
-- #### (ATT) Advanced Thread Trace
-
-    Tool used to collect fine-grained hardware metrics. Provides ISA-level instruction hotspot analysis via hardware tracing.
-
-    ```bash
-    # ATT(Advanced Thread Trace) needs some preparation before running.
-
-    # 1. Make sure to generate the assembly file for application by executing the following before compiling your HIP Application
-    # This can be achieved globally by following environment variable
-    export HIPCC_COMPILE_FLAGS_APPEND="--save-temps -g"
-    # Similarly, the --save-temps -g flags can be added per file for better ISA generation control.
-
-    # 2. Install plugin package
-    # see Plugin Support section for installation
-
-    # 3. Run the following to view the trace
-    # Att-specific options must come right after the assembly file
-    rocprofv2 -i input.txt --plugin att <app_assembly_file> --mode network <app_relative_path>
-    ```
-
-    ```bash
-    # Example for vectoradd on navi31.
-    # Special attention to gfx1100.s==navi31 in the ISA file name.
-    # Use gfx1030 for navi21, gfx90a for MI200 and gfx940 for MI300
-    hipcc -g --save-temps vectoradd_hip.cpp -o vectoradd_hip.exe
-    rocprofv2 -i input.txt --plugin att vectoradd_hip-hip-amdgcn-amd-amdhsa-gfx1100.s --mode network ./vectoradd_hip.exe
-    # Then open the browser at http://localhost:8000
-    # The ISA can also be obtained from llvm/roc objdump, however, annotations will be different
-    ```
-
-    For MPI or very long applications, we recommend to run collection, and later run the parser with already collected data:
-
-    ```bash
-    # Run only collection: The assembly file is not used. Use mpirun [...] rocprofv2 [...] if needed.
-    rocprofv2 -i input.txt --plugin att none ./vectoradd_hip.exe
-    # Remove the binary/application: Only runs the parser.
-    rocprofv2 -i input.txt --plugin att vectoradd_hip-hip-amdgcn-amd-amdhsa-gfx1100.s --mode network
-    ```
-
-- ##### app_assembly_file_relative_path
-
-  AMDGCN ISA file with .s extension generated in 1st step
-
-- ##### app_relative_path
-
-  Path for the running application
-
-- ##### ATT plugin optional parameters
-
-  - --depth [n]: How many waves per slot to parse (maximum).
-  - --mpi [proc]: Parse with this many mpi processes, for greater analysis speed. Does not change results. Requires mpi4py.
-  - --att_kernel "filename": Kernel filename to use (instead of ATT asking which one to use).
-  - --trace_file "files": glob (wildcards allowed) of traces files to parse. Requires quotes for use with wildcards.
-  - --mode [network, file, off (default)]
-
-- ##### network
-
-  Opens the server with the browser UI.
-  att needs 2 ports available (e.g. 8000, 18000). There is an option (default: --ports "8000,18000") to change these.
-  In case rocprofv2 is running on a different machine, use port forwarding "ssh -L 8000:localhost:8000 <user@IP>" so the browser can be used locally. For docker, use --network=host --ipc=host -p8000:8000 -p18000:18000
-
-- ##### file
-
-  Dumps the analyzed json files to disk for vieweing at a later time. Run python3 httpserver.py from within the generated ui/ folder to view the trace, similarly to network mode. The folder can be copied to another machine, and will run without rocm.
-
-- ##### off
-
-  Runs trace collection but not analysis, so it can be analyzed at a later time. Run rocprofv2 ATT [network, file] with the same parameters, removing the application binary, to analyze previously generated traces. We recommend not setting the mode when collecting for MPI applications.
-
-- ##### input.txt
-
-  Required. Used to select specific compute units and other trace parameters.
-  For first time users, we recommend compiling and running vectorAdd with
-
-  ```bash
-  att: TARGET_CU=1
-  SE_MASK=0x1
-  SIMD_MASK=0x3
-  ```
-
-  and histogram with
-
-  ```bash
-  att: TARGET_CU=0
-  SE_MASK=0xFF
-  SIMD_MASK=0xF // 0xF for GFX9, SIMD_MASK=0 for Navi
-  ```
-
-  Possible contents:
-  - att: TARGET_CU=1 //or some other CU [0,15] - WGP for Navi [0,8]
-  - SE_MASK=0x1 // bitmask of shader engines. The fewer, the easier on the hardware. Default enables 1 out of 4 shader engines.
-  - SIMD_MASK=0xF // GFX9: bitmask of SIMDs. Navi: SIMD Index [0-3].
-  - DISPATCH=ID,RN // collect trace only for the given dispatch_ID and MPI rank RN. RN is optional and ignored for single processes. Multiple lines with varying combinations of RN and ID can be added.
-  - KERNEL=kernname // Profile only kernels containing the string kernname (c++ mangled name). Multiple lines can be added.
-  - PERFCOUNTERS_COL_PERIOD=0x3 // Multiplier period for counter collection [0~31]. 0=fastest (usually once every 16 cycles). GFX9 only. Counters will be shown in a graph over time in the browser UI.
-  - PERFCOUNTER=counter_name // Add a SQ counter to be collected with ATT; period defined by PERFCOUNTERS_COL_PERIOD. GFX9 only.
-  - BUFFER_SIZE=[size] // Sets size of the ATT buffer collection, per dispatch, in megabytes (shared among all shader engines).
-  - By default, kernel names are truncated for ATT.To disable, please see the kernel name truncation section below.
 
 ## Tests
 
