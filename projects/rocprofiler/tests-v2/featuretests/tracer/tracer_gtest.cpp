@@ -246,6 +246,16 @@ TEST_F(HelloWorldTest, WhenRunningTracerWithAppThenFunctionNamesMatchWithGoldenO
 
   ASSERT_TRUE(current_kernel_info.size());
 
+  int version_position = current_kernel_info[0].function.find('R');
+  if(version_position != std::string::npos) {
+    current_kernel_info[0].function = current_kernel_info[0].function.substr(0, version_position) + ')';
+  }
+
+  version_position = current_kernel_info[1].function.find('R');
+  if(version_position != std::string::npos) {
+    current_kernel_info[1].function = current_kernel_info[1].function.substr(0, version_position) + ')';
+  }
+
   EXPECT_EQ(golden_kernel_info[0].function, current_kernel_info[0].function);
   EXPECT_EQ(golden_kernel_info[1].function, current_kernel_info[1].function);
 }

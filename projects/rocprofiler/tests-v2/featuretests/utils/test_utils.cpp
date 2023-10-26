@@ -129,6 +129,10 @@ void tokenize_tracer_output(std::string line, tracer_kernel_info_t& kinfo) {
   std::getline(tokenStream, token, ',');
   kinfo.domain = token;
   std::getline(tokenStream, token, ',');
+  int version_position = token.find('R');
+  if (version_position != std::string::npos) {
+    token = token.substr(0, version_position) + ')';
+  }
   kinfo.function = token;
   std::getline(tokenStream, token, ',');
   kinfo.begin_time = token;
