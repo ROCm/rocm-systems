@@ -37,6 +37,7 @@ add_subdirectory(hsa)
 add_subdirectory(context)
 add_subdirectory(counters)
 add_subdirectory(aql)
+add_subdirectory(pc_sampling)
 
 target_link_libraries(
     rocprofiler-object-library
