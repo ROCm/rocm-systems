@@ -1,5 +1,5 @@
 Enabling API Tracing
-Domain(HIP_API_DOMAIN), Function(hipGetDeviceProperties), Start_Timestamp(611510516147389), End_Timestamp(611510516154633), Correlation_ID(1)
+Domain(HIP_API_DOMAIN), Function(hipGetDevicePropertiesR0600), Start_Timestamp(611510516147389), End_Timestamp(611510516154633), Correlation_ID(1)
 Domain(HIP_API_DOMAIN), Function(hipMalloc), Start_Timestamp(611510516160324), End_Timestamp(611510516183168), Correlation_ID(2)
 Domain(HIP_API_DOMAIN), Function(hipMalloc), Start_Timestamp(611510516183599), End_Timestamp(611510516189250), Correlation_ID(3)
 Domain(HIP_API_DOMAIN), Function(hipMemcpy), Start_Timestamp(611510516192225), End_Timestamp(611510784335292), Correlation_ID(4)
