@@ -615,6 +615,7 @@
   <metric name="TCC_EA0_RD_UNCACHED_32B" block=TCC event=40 descr="Number of 32-byte TCC/EA read due to uncached traffic. A 64-byte request will be counted as 2"></metric>
   <metric name="TCC_EA0_RDREQ_LEVEL" block=TCC event=44 descr="The sum of the number of TCC/EA read requests in flight. This is primarily meant for measure average EA read latency. Average read latency = TCC_PERF_SEL_EA_RDREQ_LEVEL/TCC_PERF_SEL_EA_RDREQ."></metric>
   <metric name="TCC_TAG_STALL" block=TCC event=45 descr="Number of cycles the normal request pipeline in the tag was stalled for any reason. Normally, stalls of this nature are measured exactly from one point the pipeline, but that is not the case for this counter. Probes can stall the pipeline at a variety of places, and there is no single point that can reasonably measure the total stalls accurately."></metric>
+  <metric name="TCC_BUBBLE" block="TCC" event=56 descr="Number of 128-byte read requests sent to EA."></metric>
   <metric name="TCC_NORMAL_WRITEBACK" block=TCC event=68 descr="Number of writebacks due to requests that are not writeback requests."></metric>
   <metric name="TCC_ALL_TC_OP_WB_WRITEBACK" block=TCC event=73 descr="Number of writebacks due to all TC_OP writeback requests."></metric>
   <metric name="TCC_NORMAL_EVICT" block=TCC event=74 descr="Number of evictions due to requests that are not invalidate or probe requests."></metric>
