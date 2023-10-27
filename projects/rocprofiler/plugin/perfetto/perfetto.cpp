@@ -121,7 +121,7 @@ std::string get_kernel_name(rocprofiler_record_profiler_t& profiler_record) {
     CHECK_ROCPROFILER(rocprofiler_query_kernel_info(ROCPROFILER_KERNEL_NAME,
                                                     profiler_record.kernel_id, &kernel_name_c));
     if (kernel_name_c && strlen(kernel_name_c) > 1)
-      kernel_name = rocprofiler::cxx_demangle(strdup(kernel_name_c));
+      kernel_name = rocprofiler::truncate_name(rocprofiler::cxx_demangle(strdup(kernel_name_c)));
   }
 #pragma GCC diagnostic pop
   return kernel_name;
@@ -548,7 +548,7 @@ class perfetto_plugin_t {
       case ACTIVITY_DOMAIN_HIP_OPS: {
         std::string::size_type pos = std::string::npos;
         if (tracer_record.name) {
-          kernel_name = rocprofiler::cxx_demangle(tracer_record.name);
+          kernel_name = rocprofiler::truncate_name(rocprofiler::cxx_demangle(tracer_record.name));
           TRACE_EVENT_BEGIN(
               "HIP_OPS", perfetto::DynamicString(rocprofiler::truncate_name(kernel_name).c_str()),
               gpu_track, tracer_record.timestamps.begin.value, "Agent ID",

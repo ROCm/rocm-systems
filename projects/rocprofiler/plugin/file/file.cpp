@@ -307,7 +307,7 @@ class file_plugin_t {
     }
     if (operation_name_c) ss << ",\"" << operation_name_c << "\"";
     if (tracer_record.name && tracer_record.domain != ACTIVITY_DOMAIN_ROCTX) {
-      ss << ",\"" << rocprofiler::cxx_demangle(tracer_record.name) << "\"";
+      ss << ",\"" << rocprofiler::truncate_name(rocprofiler::cxx_demangle(tracer_record.name)) << "\"";
     } else if (tracer_record.domain == ACTIVITY_DOMAIN_HIP_OPS) {
       ss << ",";
     }
@@ -379,7 +379,7 @@ class file_plugin_t {
        << std::to_string(profiler_record->kernel_properties.wave_size);
     std::string kernel_name = "";
     if (name_length > 1) {
-      kernel_name = rocprofiler::cxx_demangle(kernel_name_c);
+      kernel_name = rocprofiler::truncate_name(rocprofiler::cxx_demangle(kernel_name_c));
       std::string key = "\"";
       std::size_t found = kernel_name.rfind(key);
       while (found != std::string::npos) {

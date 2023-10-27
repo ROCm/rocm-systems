@@ -612,7 +612,7 @@ void Plugin::HandleTracerRecord(const rocprofiler_record_tracer_t& record,
         std::string kernel_name;
         hip_api_data_t hip_api_data = *(record.api_data.hip);
         if (record.name != nullptr)
-          kernel_name = rocprofiler::cxx_demangle(std::string(record.name));
+          kernel_name = rocprofiler::truncate_name(rocprofiler::cxx_demangle(std::string(record.name)));
         else
           kernel_name = "";
         hip_api_tracer_.AddEventRecord(
