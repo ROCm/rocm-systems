@@ -53,6 +53,8 @@
 #include "trace_buffer.h"
 #include "xml.h"
 
+void initialize() __attribute__((constructor(101)));
+
 namespace fs = std::experimental::filesystem;
 
 // Macro to check ROC-tracer calls status
@@ -551,14 +553,6 @@ void tool_load() {
   if (is_loaded == true) return;
   is_loaded = true;
 
-  // Load output plugin
-  const char* plugin_name = getenv("ROCTRACER_PLUGIN_LIB");
-  if (plugin_name == nullptr) plugin_name = "libfile_plugin.so";
-  if (Dl_info dl_info; dladdr((void*)tool_load, &dl_info) != 0) {
-    if (!plugin.emplace(fs::path(dl_info.dli_fname).replace_filename(plugin_name)).is_valid())
-      plugin.reset();
-  }
-
   // API traces switches
   const char* trace_domain = getenv("ROCTRACER_DOMAIN");
   if (trace_domain != nullptr) {
@@ -698,6 +692,14 @@ ROCTRACER_EXPORT bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
     return true;
   }
 
+  // Load output plugin
+  const char* plugin_name = getenv("ROCTRACER_PLUGIN_LIB");
+  if (plugin_name == nullptr) plugin_name = "libfile_plugin.so";
+  if (Dl_info dl_info; dladdr((void*)tool_load, &dl_info) != 0) {
+    if (!plugin.emplace(fs::path(dl_info.dli_fname).replace_filename(plugin_name)).is_valid())
+      plugin.reset();
+  }
+
   tool_load();
 
   // OnUnload may not be called if the ROC runtime is not shutdown by the client
@@ -786,3 +788,7 @@ ROCTRACER_EXPORT bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
 ROCTRACER_EXPORT void OnUnload() { tool_unload(); }
 
 }  // extern "C"
+
+void initialize() {
+  tool_load();
+}
