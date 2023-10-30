@@ -32,8 +32,11 @@ bin_name=`basename $0`
 usage() {
   echo "Script for aggregating results from multiple rocprofiler out directries."
   echo "Full path: $BIN_DIR/$bin_name"
-  echo "Usage:"
+  echo "Usage: if running independently"
   echo "  $bin_name -o <outputdir> [<inputdir>...]"
+  echo ""
+  echo "Usage: if running with rocprof"
+  echo "  rocprof --merge-traces -o <outputdir> [<inputdir>...]"
   echo ""
   echo "Options:"
   echo "  -o <outputdir> - output directory where the results will be aggregated."

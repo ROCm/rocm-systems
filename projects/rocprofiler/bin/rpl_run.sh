@@ -227,6 +227,10 @@ usage() {
   echo "      obj-tracking=off"
   echo "    ></defaults>"
   echo ""
+  echo "  --merge-traces - Script for aggregating results from multiple rocprofiler out directries."
+  echo "                   Usage: if running with rocprof"
+  echo "                   rocprof --merge-traces -o <outputdir> [<inputdir>...]"
+  echo ""
   exit 1
 }
 
@@ -529,6 +533,11 @@ while [ 1 ] ; do
     if [ "$2" = "off" ] ; then
       CMD_QTS=0
     fi
+  elif [ "$1" = "--merge-traces" ] ; then
+    shift
+    echo "merging traces with $PROF_BIN_DIR/merge_traces.sh"
+    $PROF_BIN_DIR/merge_traces.sh $@
+    exit 0
   else
     break
   fi
