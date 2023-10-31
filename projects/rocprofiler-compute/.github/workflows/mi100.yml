@@ -33,6 +33,8 @@ jobs:
           cmake -DENABLE_COVERAGE=ON ..
       - name: Install Python testing collateral
         run: pip3 install pytest pytest-cov mock
+      - name: Create HIP binary (vcopy)
+        run: hipcc -o tests/vcopy ./sample/vcopy.cpp
       - name: Run [profile] mode
         run: |
           cd build
