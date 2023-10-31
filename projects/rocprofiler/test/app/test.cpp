@@ -50,8 +50,8 @@ void thread_fun(const int kiter, const int diter, const uint32_t agents_number) 
 
   for (int i = 0; i < kiter; ++i) {
     for (uint32_t n = 0; n < agents_number; ++n) {
-      RunKernel<DummyKernel, TestAql>(0, NULL, agent_info[n], queue[n], diter);
-      // RunKernel<SimpleConvolution, TestAql>(0, NULL, agent_info[n], queue[n], diter);
+      //RunKernel<DummyKernel, TestAql>(0, NULL, agent_info[n], queue[n], diter);
+       RunKernel<SimpleConvolution, TestAql>(0, NULL, agent_info[n], queue[n], diter);
     }
   }
 
