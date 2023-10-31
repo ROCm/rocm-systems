@@ -20,14 +20,16 @@
 
 #pragma once
 
-// NOLINTNEXTLINE(performance-enum-size)
-typedef enum
+/**
+ * @brief ROCProfiler enumeration of Marker (ROCTx) API tracing operations
+ */
+typedef enum  // NOLINT(performance-enum-size)
 {
-    ROCPROFILER_ROCTX_API_ID_NONE       = -1,
-    ROCPROFILER_ROCTX_API_ID_roctxMarkA = 0,
-    ROCPROFILER_ROCTX_API_ID_roctxRangePushA,
-    ROCPROFILER_ROCTX_API_ID_roctxRangePop,
-    ROCPROFILER_ROCTX_API_ID_roctxRangeStartA,
-    ROCPROFILER_ROCTX_API_ID_roctxRangeStop,
-    ROCPROFILER_ROCTX_API_ID_LAST,
-} rocprofiler_roctx_api_id_t;
+    ROCPROFILER_MARKER_API_ID_NONE       = -1,
+    ROCPROFILER_MARKER_API_ID_roctxMarkA = 0,
+    ROCPROFILER_MARKER_API_ID_roctxRangePushA,
+    ROCPROFILER_MARKER_API_ID_roctxRangePop,
+    ROCPROFILER_MARKER_API_ID_roctxRangeStartA,
+    ROCPROFILER_MARKER_API_ID_roctxRangeStop,
+    ROCPROFILER_MARKER_API_ID_LAST,
+} rocprofiler_marker_api_id_t;

@@ -106,7 +106,13 @@ typedef enum  // NOLINT(performance-enum-size)
 {
     ROCPROFILER_SERVICE_CALLBACK_PHASE_NONE = 0,  ///< Callback has no phase
     ROCPROFILER_SERVICE_CALLBACK_PHASE_ENTER,     ///< Callback invoked prior to function execution
-    ROCPROFILER_SERVICE_CALLBACK_PHASE_EXIT,      ///< Callback invoked after to function execution
+    ROCPROFILER_SERVICE_CALLBACK_PHASE_LOAD =
+        ROCPROFILER_SERVICE_CALLBACK_PHASE_ENTER,  ///< Callback invoked prior to code object
+                                                   ///< loading
+    ROCPROFILER_SERVICE_CALLBACK_PHASE_EXIT,       ///< Callback invoked after to function execution
+    ROCPROFILER_SERVICE_CALLBACK_PHASE_UNLOAD =
+        ROCPROFILER_SERVICE_CALLBACK_PHASE_EXIT,  ///< Callback invoked prior to code object
+                                                  ///< unloading
     ROCPROFILER_SERVICE_CALLBACK_PHASE_LAST,
 } rocprofiler_service_callback_phase_t;
 

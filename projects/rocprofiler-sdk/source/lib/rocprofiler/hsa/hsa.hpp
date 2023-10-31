@@ -64,10 +64,10 @@ uint32_t
 id_by_name(const char* name);
 
 void
-iterate_args(uint32_t                                          id,
-             const rocprofiler_hsa_api_callback_tracer_data_t& data,
-             rocprofiler_callback_tracing_operation_args_cb_t  callback,
-             void*                                             user_data);
+iterate_args(uint32_t                                           id,
+             const rocprofiler_callback_tracing_hsa_api_data_t& data,
+             rocprofiler_callback_tracing_operation_args_cb_t   callback,
+             void*                                              user_data);
 
 std::vector<const char*>
 get_names();

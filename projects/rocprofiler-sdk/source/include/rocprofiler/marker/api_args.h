@@ -24,7 +24,13 @@
 
 typedef uint64_t roctx_range_id_t;
 
-typedef union rocprofiler_roctx_api_args_u
+typedef union rocprofiler_marker_api_retval_u
+{
+    uint32_t uint32_t_retval;
+    uint64_t uint64_t_retval;
+} rocprofiler_marker_api_retval_t;
+
+typedef union rocprofiler_marker_api_args_u
 {
     struct
     {
@@ -36,16 +42,13 @@ typedef union rocprofiler_roctx_api_args_u
     } roctxRangePushA;
     struct
     {
-        const char* message;
     } roctxRangePop;
     struct
     {
-        const char*      message;
-        roctx_range_id_t id;
+        const char* message;
     } roctxRangeStartA;
     struct
     {
-        const char*      message;
         roctx_range_id_t id;
     } roctxRangeStop;
-} rocprofiler_roctx_api_args_t;
+} rocprofiler_marker_api_args_t;

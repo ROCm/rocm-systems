@@ -228,7 +228,7 @@ hsa_api_impl<Idx>::functor(Args&&... args)
 
     constexpr auto empty_user_data = rocprofiler_user_data_t{.value = 0};
     auto           buffer_record   = rocprofiler_buffer_tracing_hsa_api_record_t{};
-    auto           tracer_data     = rocprofiler_hsa_api_callback_tracer_data_t{};
+    auto           tracer_data     = rocprofiler_callback_tracing_hsa_api_data_t{};
     auto internal_corr_id          = context::correlation_tracing_service::get_unique_internal_id();
 
     // construct the buffered info before the callback so the callbacks are as closely wrapped
@@ -246,7 +246,7 @@ hsa_api_impl<Idx>::functor(Args&&... args)
     // invoke the callbacks
     if(!callback_contexts.empty())
     {
-        tracer_data.size = sizeof(rocprofiler_hsa_api_callback_tracer_data_t);
+        tracer_data.size = sizeof(rocprofiler_callback_tracing_hsa_api_data_t);
         set_data_args(info_type::get_api_data_args(tracer_data.args), std::forward<Args>(args)...);
 
         for(auto& itr : callback_contexts)
@@ -382,10 +382,10 @@ id_by_name(const char* name, std::index_sequence<Idx, IdxTail...>)
 
 template <size_t Idx, size_t... IdxTail>
 void
-iterate_args(const uint32_t                                    id,
-             const rocprofiler_hsa_api_callback_tracer_data_t& data,
-             rocprofiler_callback_tracing_operation_args_cb_t  func,
-             void*                                             user_data,
+iterate_args(const uint32_t                                     id,
+             const rocprofiler_callback_tracing_hsa_api_data_t& data,
+             rocprofiler_callback_tracing_operation_args_cb_t   func,
+             void*                                              user_data,
              std::index_sequence<Idx, IdxTail...>)
 {
     if(Idx == id)
@@ -495,10 +495,10 @@ id_by_name(const char* name)
 }
 
 void
-iterate_args(uint32_t                                          id,
-             const rocprofiler_hsa_api_callback_tracer_data_t& data,
-             rocprofiler_callback_tracing_operation_args_cb_t  callback,
-             void*                                             user_data)
+iterate_args(uint32_t                                           id,
+             const rocprofiler_callback_tracing_hsa_api_data_t& data,
+             rocprofiler_callback_tracing_operation_args_cb_t   callback,
+             void*                                              user_data)
 {
     if(callback)
         iterate_args(

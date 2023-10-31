@@ -205,7 +205,7 @@ rocprofiler_iterate_callback_tracing_kind_operation_args(
     {
         rocprofiler::hsa::iterate_args(
             record.operation,
-            *static_cast<rocprofiler_hsa_api_callback_tracer_data_t*>(record.payload),
+            *static_cast<rocprofiler_callback_tracing_hsa_api_data_t*>(record.payload),
             callback,
             user_data);
         return ROCPROFILER_STATUS_SUCCESS;

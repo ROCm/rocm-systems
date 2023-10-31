@@ -41,17 +41,3 @@
 #if defined(ROCPROFILER_DEFINED_AMD_INTERNAL_BUILD) && ROCPROFILER_DEFINED_AMD_INTERNAL_BUILD > 0
 #    undef AMD_INTERNAL_BUILD
 #endif
-
-#include <stdint.h>
-
-typedef struct hsa_kernel_dispatch_packet_s hsa_kernel_dispatch_packet_t;
-typedef struct rocprofiler_hsa_api_data_s   rocprofiler_hsa_api_data_t;
-
-struct rocprofiler_hsa_api_data_s
-{
-    uint64_t                     correlation_id;
-    uint32_t                     phase;
-    rocprofiler_hsa_api_args_t   args;
-    rocprofiler_hsa_api_retval_t retval;
-    uint64_t*                    phase_data;
-};

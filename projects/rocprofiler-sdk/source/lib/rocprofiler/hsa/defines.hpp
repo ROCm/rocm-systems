@@ -138,13 +138,13 @@
                                                                                                    \
         static auto get_functor() { return get_functor(get_table_func()); }                        \
                                                                                                    \
-        static std::vector<void*> as_arg_addr(rocprofiler_hsa_api_callback_tracer_data_t)          \
+        static std::vector<void*> as_arg_addr(rocprofiler_callback_tracing_hsa_api_data_t)         \
         {                                                                                          \
             return std::vector<void*>{};                                                           \
         }                                                                                          \
                                                                                                    \
         static std::vector<std::pair<std::string, std::string>> as_arg_list(                       \
-            rocprofiler_hsa_api_callback_tracer_data_t)                                            \
+            rocprofiler_callback_tracing_hsa_api_data_t)                                           \
         {                                                                                          \
             return {};                                                                             \
         }                                                                                          \
@@ -211,13 +211,13 @@
         static auto get_functor() { return get_functor(get_table_func()); }                        \
                                                                                                    \
         static std::vector<void*> as_arg_addr(                                                     \
-            rocprofiler_hsa_api_callback_tracer_data_t trace_data)                                 \
+            rocprofiler_callback_tracing_hsa_api_data_t trace_data)                                \
         {                                                                                          \
             return std::vector<void*>{                                                             \
                 GET_ADDR_MEMBER_FIELDS(get_api_data_args(trace_data.args), __VA_ARGS__)};          \
         }                                                                                          \
                                                                                                    \
-        static auto as_arg_list(rocprofiler_hsa_api_callback_tracer_data_t trace_data)             \
+        static auto as_arg_list(rocprofiler_callback_tracing_hsa_api_data_t trace_data)            \
         {                                                                                          \
             return utils::stringize(                                                               \
                 GET_NAMED_MEMBER_FIELDS(get_api_data_args(trace_data.args), __VA_ARGS__));         \

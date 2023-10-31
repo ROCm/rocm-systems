@@ -24,7 +24,11 @@
 
 #include <rocprofiler/defines.h>
 #include <rocprofiler/fwd.h>
+#include <rocprofiler/hip.h>
 #include <rocprofiler/hsa.h>
+#include <rocprofiler/marker.h>
+
+#include <hsa/hsa_ven_amd_loader.h>
 
 ROCPROFILER_EXTERN_C_INIT
 
@@ -36,68 +40,89 @@ ROCPROFILER_EXTERN_C_INIT
  */
 
 /**
+ * @brief ROCProfiler Enumeration for code object storage types (identical values to
+ * `hsa_ven_amd_loader_code_object_storage_type_t` enumeration)
+ */
+typedef enum
+{
+    ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_NONE = HSA_VEN_AMD_LOADER_CODE_OBJECT_STORAGE_TYPE_NONE,
+    ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_FILE = HSA_VEN_AMD_LOADER_CODE_OBJECT_STORAGE_TYPE_FILE,
+    ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_MEMORY =
+        HSA_VEN_AMD_LOADER_CODE_OBJECT_STORAGE_TYPE_MEMORY,
+} rocprofiler_code_object_storage_type_t;
+
+/**
  * @brief ROCProfiler HSA API Callback Data.
  */
 typedef struct
 {
-    size_t                       size;  ///< provides the size of this struct
+    uint64_t                     size;  ///< size of this struct
     rocprofiler_hsa_api_args_t   args;
     rocprofiler_hsa_api_retval_t retval;
-} rocprofiler_hsa_api_callback_tracer_data_t;
-
-/**
- * @brief ROCProfiler HIP API Callback Data.
- *
- * Depending on the operation kind, the data can be casted to the corresponding
- * structure.
- *
- */
-typedef void* rocprofiler_hip_api_callback_api_data_t;
+} rocprofiler_callback_tracing_hsa_api_data_t;
 
 /**
  * @brief ROCProfiler HIP API Tracer Callback Data.
  */
 typedef struct
 {
-    size_t                                  size;
-    rocprofiler_correlation_id_t            correlation_id;
-    rocprofiler_address_t                   host_kernel_address;
-    rocprofiler_hip_api_callback_api_data_t data;  // Arguments or api_data?
-} rocprofiler_hip_api_callback_tracer_data_t;
-
-/**
- * @brief ROCProfiler Marker Callback Data.
- *
- * Depending on the operation kind, the data can be casted to the corresponding
- * structure.
- *
- */
-typedef void* rocprofiler_marker_callback_api_data_t;
+    uint64_t                     size;  ///< size of this struct
+    rocprofiler_hip_api_args_t   args;
+    rocprofiler_hip_api_retval_t retval;
+} rocprofiler_callback_tracing_hip_api_data_t;
 
 /**
  * @brief ROCProfiler Marker Tracer Callback Data.
  */
 typedef struct
 {
-    size_t                                 size;
-    rocprofiler_correlation_id_t           correlation_id;
-    rocprofiler_marker_callback_api_data_t data;  // Arguments or api_data?
-} rocprofiler_marker_callback_tracer_data_t;
+    uint64_t                        size;  ///< size of this struct
+    rocprofiler_marker_api_args_t   args;
+    rocprofiler_marker_api_retval_t retval;
+} rocprofiler_callback_tracing_marker_api_data_t;
 
 /**
  * @brief ROCProfiler Code Object Load Tracer Callback Record.
  */
 typedef struct
 {
-    uint64_t    load_base;  // code object load base
-    uint64_t    load_size;  // code object load size
-    const char* uri;        // URI string (NULL terminated)
-                            // uint32_t storage_type; // code object storage type (Need Review?)
-                            // int storage_file;      // origin file descriptor (Need Review?)
-                            // uint64_t memory_base;  // origin memory base (Need Review?)
-                            // uint64_t memory_size;  // origin memory size (Need Review?)
-                            // uint64_t load_delta;   // code object load delta (Need Review?)
-} rocprofiler_callback_tracer_code_object_load_data_t;
+    uint64_t               size;            ///< size of this struct
+    uint64_t               code_object_id;  ///< unique code object identifier
+    rocprofiler_agent_id_t rocp_agent;  ///< The agent on which this loaded code object is loaded
+    hsa_agent_t            hsa_agent;   ///< The agent on which this loaded code object is loaded
+    const char*            uri;         ///< The URI name from which the code object was loaded
+    uint64_t load_base;  ///< The base memory address at which the code object is loaded. This is
+                         ///< the base address of the allocation for the lowest addressed segment of
+                         ///< the code object that is loaded. Note that any non-loaded segments
+                         ///< before the first loaded segment are ignored.
+    uint64_t load_size;  ///< The byte size of the loaded code objects contiguous memory allocation.
+    uint64_t load_delta;  ///< The signed byte address difference of the memory address at which the
+                          ///< code object is loaded minus the virtual address specified in the code
+                          ///< object that is loaded.
+    rocprofiler_code_object_storage_type_t
+        storage_type;  ///< storage type of the code object reader used to load the loaded code
+                       ///< object
+    union
+    {
+        struct
+        {
+            int storage_file;  ///< file descriptor of the code object that was loaded. Access this
+                               ///< field if @ref rocprofiler_code_object_storage_type_t is
+                               ///< @ref ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_FILE
+        };
+        struct
+        {
+            uint64_t memory_base;  ///< The memory address of the first byte of the code object that
+                                   ///< was loaded. Access this
+                                   ///< field if @ref rocprofiler_code_object_storage_type_t is
+                                   ///< @ref ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_MEMORY
+            uint64_t memory_size;  ///< The memory size in bytes of the code object that was loaded.
+                                   ///< Access this field if @ref
+                                   ///< rocprofiler_code_object_storage_type_t is
+                                   ///< @ref ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_MEMORY
+        };
+    };
+} rocprofiler_callback_tracing_code_object_load_data_t;
 
 /**
  * @brief ROCProfiler Code Object UnLoad Tracer Callback Record.
@@ -105,18 +130,31 @@ typedef struct
  */
 typedef struct
 {
-    uint64_t load_base;  // code object load base
-} rocprofiler_callback_tracer_code_object_unload_data_t;
+    uint64_t size;            ///< size of this struct
+    uint64_t code_object_id;  ///< unique code object identifier
+} rocprofiler_callback_tracing_code_object_unload_data_t;
 
 /**
- * @brief ROCProfiler Code Object Device Kernel Symbol Tracer Callback Record.
+ * @brief ROCProfiler Code Object Kernel Symbol Tracer Callback Record.
  *
  */
 typedef struct
 {
-    const char*           kernel_name;        // kernel name string (NULL terminated)
-    rocprofiler_address_t kernel_descriptor;  // kernel descriptor
-} rocprofiler_callback_tracer_code_object_device_kernel_symbol_data_t;
+    uint64_t               size;            ///< size of this struct
+    uint64_t               kernel_id;       ///< unique symbol identifier value
+    uint64_t               code_object_id;  ///< parent unique code object identifier
+    rocprofiler_agent_id_t rocp_agent;      ///< Agent associated with this symbol
+    const char*            kernel_name;     ///< name of the kernel
+    uint64_t kernel_object;         ///< kernel object handle, used in the kernel dispatch packet
+    uint32_t kernarg_segment_size;  ///< size of memory (in bytes) allocated for kernel arguments.
+                                    ///< Will be multiple of 16
+    uint32_t kernarg_segment_alignment;  ///< Alignment (in bytes) of the buffer used to pass
+                                         ///< arguments to the kernel
+    uint32_t group_segment_size;    ///< Size of static group segment memory required by the kernel
+                                    ///< (per work-group), in bytes
+    uint32_t private_segment_size;  ///< Size of static private, spill, and arg segment memory
+                                    ///< required by this kernel (per work-item), in bytes.
+} rocprofiler_callback_tracing_code_object_kernel_symbol_data_t;
 
 /**
  * @brief ROCProfiler Code Object Register Host Kernel Symbol Tracer Callback
@@ -125,11 +163,12 @@ typedef struct
  */
 typedef struct
 {
+    uint64_t              size;          ///< size of this struct
     rocprofiler_address_t host_address;  // host address
     // Should this be nullptr if it is unregister?
     const char*           kernel_name;        // kernel name string (NULL terminated)
     rocprofiler_address_t kernel_descriptor;  // kernel descriptor
-} rocprofiler_callback_tracer_code_object_register_host_kernel_symbol_data_t;
+} rocprofiler_callback_tracing_code_object_register_host_kernel_symbol_data_t;
 
 /**
  * @brief API Tracing callback function. This function is invoked twice per API function: once

@@ -22,8 +22,10 @@
 
 #include <rocprofiler/version.h>
 
-// NOLINTNEXTLINE(performance-enum-size)
-typedef enum
+/**
+ * @brief ROCProfiler enumeration of HSA API tracing operations
+ */
+typedef enum  // NOLINT(performance-enum-size)
 {
     ROCPROFILER_HSA_API_ID_NONE = -1,
     // block: CoreApi API

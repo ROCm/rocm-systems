@@ -22,6 +22,13 @@
 
 #include <hip/hip_runtime.h>
 
+typedef union rocprofiler_hip_api_retval_u
+{
+    int         int_retval;
+    const char* const_charp_retval;
+    hipError_t  hipError_t_retval;
+} rocprofiler_hip_api_retval_t;
+
 typedef union rocprofiler_hip_api_args_u
 {
     struct

@@ -24,27 +24,3 @@
 
 #include <rocprofiler/hip/api_args.h>
 #include <rocprofiler/hip/api_id.h>
-
-#include <stdint.h>
-
-typedef struct rocprofiler_hip_trace_data_s rocprofiler_hip_trace_data_t;
-typedef struct rocprofiler_hip_api_data_s   rocprofiler_hip_api_data_t;
-
-struct rocprofiler_hip_api_data_s
-{
-    uint64_t                   correlation_id;
-    uint32_t                   phase;
-    rocprofiler_hip_api_args_t args;
-    uint64_t*                  phase_data;
-};
-
-struct rocprofiler_hip_trace_data_s
-{
-    rocprofiler_hip_api_data_t api_data;
-    uint64_t                   phase_enter_timestamp;
-    uint64_t                   phase_exit_timestamp;
-    uint64_t                   phase_data;
-
-    void (*phase_enter)(rocprofiler_hip_api_id_t operation_id, rocprofiler_hip_trace_data_t* data);
-    void (*phase_exit)(rocprofiler_hip_api_id_t operation_id, rocprofiler_hip_trace_data_t* data);
-};

@@ -23,10 +23,4 @@
 #pragma once
 
 #include <rocprofiler/marker/api_args.h>
-
-typedef struct rocprofiler_roctx_api_data_s rocprofiler_roctx_api_data_t;
-
-struct rocprofiler_roctx_api_data_s
-{
-    rocprofiler_roctx_api_args_t args;
-};
+#include <rocprofiler/marker/api_id.h>

@@ -20,8 +20,10 @@
 
 #pragma once
 
-// NOLINTNEXTLINE(performance-enum-size)
-typedef enum
+/**
+ * @brief ROCProfiler enumeration of HIP API tracing operations
+ */
+typedef enum  // NOLINT(performance-enum-size)
 {
     ROCPROFILER_HIP_API_ID_NONE                      = -1,
     ROCPROFILER_HIP_API_ID___hipPopCallConfiguration = 0,
