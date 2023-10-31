@@ -39,11 +39,13 @@ jobs:
           ml cmake
           ctest --verbose -R test_profiler_general
       - name: Run [analyze] mode
+        if: '!cancelled()'
         run: |
           cd build
           ml cmake
           srun -N 1 -J omniperf -p ci -t 00:25:00 ctest --verbose -R test_analyze_commands
       - name: Pytest coverage comment
+        if: '!cancelled()'
         uses: MishaKav/pytest-coverage-comment@v1.1.48
         with:
           pytest-xml-coverage-path: 'tests/coverage.xml'
