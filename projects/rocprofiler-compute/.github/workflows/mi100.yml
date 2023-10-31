@@ -37,7 +37,7 @@ jobs:
         run: |
           cd build
           ml cmake
-          ctest --verbose -R test_profiler_execution
+          ctest --verbose -R test_profiler_general
       - name: Run [analyze] mode
         run: |
           cd build

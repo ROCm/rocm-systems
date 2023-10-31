@@ -194,6 +194,11 @@ add_test(
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 
 add_test(
+    NAME test_profiler_general
+    COMMAND pytest ${COV_OPTION} ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+
+add_test(
     NAME test_saved_analysis
     COMMAND pytest ${COV_OPTION} ${PROJECT_SOURCE_DIR}/tests/test_saved_analysis.py
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
