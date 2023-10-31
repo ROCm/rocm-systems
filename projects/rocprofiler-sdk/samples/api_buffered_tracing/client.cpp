@@ -150,7 +150,7 @@ get_buffer_tracing_names()
         [](rocprofiler_service_buffer_tracing_kind_t kindv, uint32_t operation, void* data_v) {
             auto* name_info_v = static_cast<buffer_name_info*>(data_v);
 
-            if(kindv == ROCPROFILER_SERVICE_BUFFER_TRACING_HSA_API)
+            if(kindv == ROCPROFILER_BUFFER_TRACING_HSA_API)
             {
                 const char* name = nullptr;
                 ROCPROFILER_CALL(rocprofiler_query_buffer_tracing_kind_operation_name(
@@ -172,7 +172,7 @@ get_buffer_tracing_names()
                          "query buffer tracing kind operation name");
         if(name) name_info_v->kind_names[kind] = name;
 
-        if(kind == ROCPROFILER_SERVICE_BUFFER_TRACING_HSA_API)
+        if(kind == ROCPROFILER_BUFFER_TRACING_HSA_API)
         {
             ROCPROFILER_CALL(rocprofiler_iterate_buffer_tracing_kind_operations(
                                  kind, tracing_kind_operation_cb, static_cast<void*>(data)),
@@ -220,7 +220,7 @@ tool_tracing_callback(rocprofiler_context_id_t      context,
             throw std::runtime_error{"rocprofiler_record_header_t (category | kind) != hash"};
         }
         else if(header->category == ROCPROFILER_BUFFER_CATEGORY_TRACING &&
-                header->kind == ROCPROFILER_SERVICE_BUFFER_TRACING_HSA_API)
+                header->kind == ROCPROFILER_BUFFER_TRACING_HSA_API)
         {
             auto* record =
                 static_cast<rocprofiler_buffer_tracing_hsa_api_record_t*>(header->payload);
@@ -312,10 +312,9 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                                &client_buffer),
                      "buffer creation failed");
 
-    ROCPROFILER_CALL(
-        rocprofiler_configure_buffer_tracing_service(
-            client_ctx, ROCPROFILER_SERVICE_BUFFER_TRACING_HSA_API, nullptr, 0, client_buffer),
-        "buffer tracing service failed to configure");
+    ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
+                         client_ctx, ROCPROFILER_BUFFER_TRACING_HSA_API, nullptr, 0, client_buffer),
+                     "buffer tracing service failed to configure");
 
     auto client_thread = rocprofiler_callback_thread_t{};
     ROCPROFILER_CALL(rocprofiler_create_callback_thread(&client_thread),

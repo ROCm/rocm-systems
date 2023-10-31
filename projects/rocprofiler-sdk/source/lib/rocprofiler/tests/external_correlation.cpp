@@ -93,10 +93,10 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
     cb_data->client_callback_count++;
 
     static auto first = std::once_flag{};
-    std::call_once(
-        first, [record]() { EXPECT_EQ(record.phase, ROCPROFILER_SERVICE_CALLBACK_PHASE_ENTER); });
+    std::call_once(first,
+                   [record]() { EXPECT_EQ(record.phase, ROCPROFILER_CALLBACK_PHASE_ENTER); });
 
-    if(record.phase == ROCPROFILER_SERVICE_CALLBACK_PHASE_ENTER)
+    if(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
     {
         EXPECT_EQ(cb_data->client_correlation.find(internal_corr_id),
                   cb_data->client_correlation.end())
@@ -169,7 +169,7 @@ tool_tracing_buffered(rocprofiler_context_id_t      context,
         auto hash = rocprofiler_record_header_compute_hash(header->category, header->kind);
         EXPECT_EQ(header->hash, hash);
         EXPECT_TRUE(header->category == ROCPROFILER_BUFFER_CATEGORY_TRACING &&
-                    header->kind == ROCPROFILER_SERVICE_BUFFER_TRACING_HSA_API);
+                    header->kind == ROCPROFILER_BUFFER_TRACING_HSA_API);
 
         v_records.emplace_back(
             static_cast<rocprofiler_buffer_tracing_hsa_api_record_t*>(header->payload));
@@ -242,14 +242,14 @@ TEST(rocprofiler_lib, callback_external_correlation)
         ROCPROFILER_CALL(rocprofiler_create_context(&cb_data->client_ctx),
                          "failed to create context");
 
-        ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
-                             cb_data->client_ctx,
-                             ROCPROFILER_SERVICE_CALLBACK_TRACING_HSA_API,
-                             nullptr,
-                             0,
-                             tool_tracing_callback,
-                             client_data),
-                         "callback tracing service failed to configure");
+        ROCPROFILER_CALL(
+            rocprofiler_configure_callback_tracing_service(cb_data->client_ctx,
+                                                           ROCPROFILER_CALLBACK_TRACING_HSA_API,
+                                                           nullptr,
+                                                           0,
+                                                           tool_tracing_callback,
+                                                           client_data),
+            "callback tracing service failed to configure");
 
         int valid_ctx = 0;
         ROCPROFILER_CALL(rocprofiler_context_is_valid(cb_data->client_ctx, &valid_ctx),
@@ -392,7 +392,7 @@ TEST(rocprofiler_lib, buffered_external_correlation)
 
         ROCPROFILER_CALL(
             rocprofiler_configure_buffer_tracing_service(cb_data->client_ctx,
-                                                         ROCPROFILER_SERVICE_BUFFER_TRACING_HSA_API,
+                                                         ROCPROFILER_BUFFER_TRACING_HSA_API,
                                                          nullptr,
                                                          0,
                                                          cb_data->client_buffer),

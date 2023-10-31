@@ -104,16 +104,14 @@ typedef enum  // NOLINT(performance-enum-size)
  */
 typedef enum  // NOLINT(performance-enum-size)
 {
-    ROCPROFILER_SERVICE_CALLBACK_PHASE_NONE = 0,  ///< Callback has no phase
-    ROCPROFILER_SERVICE_CALLBACK_PHASE_ENTER,     ///< Callback invoked prior to function execution
-    ROCPROFILER_SERVICE_CALLBACK_PHASE_LOAD =
-        ROCPROFILER_SERVICE_CALLBACK_PHASE_ENTER,  ///< Callback invoked prior to code object
-                                                   ///< loading
-    ROCPROFILER_SERVICE_CALLBACK_PHASE_EXIT,       ///< Callback invoked after to function execution
-    ROCPROFILER_SERVICE_CALLBACK_PHASE_UNLOAD =
-        ROCPROFILER_SERVICE_CALLBACK_PHASE_EXIT,  ///< Callback invoked prior to code object
-                                                  ///< unloading
-    ROCPROFILER_SERVICE_CALLBACK_PHASE_LAST,
+    ROCPROFILER_CALLBACK_PHASE_NONE = 0,  ///< Callback has no phase
+    ROCPROFILER_CALLBACK_PHASE_ENTER,     ///< Callback invoked prior to function execution
+    ROCPROFILER_CALLBACK_PHASE_LOAD =
+        ROCPROFILER_CALLBACK_PHASE_ENTER,  ///< Callback invoked prior to code object loading
+    ROCPROFILER_CALLBACK_PHASE_EXIT,       ///< Callback invoked after to function execution
+    ROCPROFILER_CALLBACK_PHASE_UNLOAD =
+        ROCPROFILER_CALLBACK_PHASE_EXIT,  ///< Callback invoked prior to code object unloading
+    ROCPROFILER_CALLBACK_PHASE_LAST,
 } rocprofiler_service_callback_phase_t;
 
 /**
@@ -121,13 +119,13 @@ typedef enum  // NOLINT(performance-enum-size)
  */
 typedef enum  // NOLINT(performance-enum-size)
 {
-    ROCPROFILER_SERVICE_CALLBACK_TRACING_NONE = 0,
-    ROCPROFILER_SERVICE_CALLBACK_TRACING_HSA_API,          ///< Callbacks for HSA functions
-    ROCPROFILER_SERVICE_CALLBACK_TRACING_HIP_API,          ///< Callbacks for HIP functions
-    ROCPROFILER_SERVICE_CALLBACK_TRACING_MARKER_API,       ///< Callbacks for ROCTx functions
-    ROCPROFILER_SERVICE_CALLBACK_TRACING_CODE_OBJECT,      ///< Callbacks for code object info
-    ROCPROFILER_SERVICE_CALLBACK_TRACING_KERNEL_DISPATCH,  ///< Callbacks for kernel dispatches
-    ROCPROFILER_SERVICE_CALLBACK_TRACING_LAST,
+    ROCPROFILER_CALLBACK_TRACING_NONE = 0,
+    ROCPROFILER_CALLBACK_TRACING_HSA_API,          ///< Callbacks for HSA functions
+    ROCPROFILER_CALLBACK_TRACING_HIP_API,          ///< Callbacks for HIP functions
+    ROCPROFILER_CALLBACK_TRACING_MARKER_API,       ///< Callbacks for ROCTx functions
+    ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT,      ///< Callbacks for code object info
+    ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,  ///< Callbacks for kernel dispatches
+    ROCPROFILER_CALLBACK_TRACING_LAST,
 } rocprofiler_service_callback_tracing_kind_t;
 
 /**
@@ -135,18 +133,18 @@ typedef enum  // NOLINT(performance-enum-size)
  */
 typedef enum  // NOLINT(performance-enum-size)
 {
-    ROCPROFILER_SERVICE_BUFFER_TRACING_NONE = 0,
-    ROCPROFILER_SERVICE_BUFFER_TRACING_HSA_API,          ///< Buffer HSA function calls
-    ROCPROFILER_SERVICE_BUFFER_TRACING_HIP_API,          ///< Buffer HIP function calls
-    ROCPROFILER_SERVICE_BUFFER_TRACING_MARKER_API,       ///< Buffer ROCTx function calls
-    ROCPROFILER_SERVICE_BUFFER_TRACING_MEMORY_COPY,      ///< Buffer memory copy info
-    ROCPROFILER_SERVICE_BUFFER_TRACING_KERNEL_DISPATCH,  ///< Buffer kernel dispatch info
-    ROCPROFILER_SERVICE_BUFFER_TRACING_PAGE_MIGRATION,   ///< Buffer page migration info
-    ROCPROFILER_SERVICE_BUFFER_TRACING_SCRATCH_MEMORY,  ///< Buffer scratch memory reclaimation info
-    ROCPROFILER_SERVICE_BUFFER_TRACING_EXTERNAL_CORRELATION,  ///< Buffer external correlation info
+    ROCPROFILER_BUFFER_TRACING_NONE = 0,
+    ROCPROFILER_BUFFER_TRACING_HSA_API,               ///< Buffer HSA function calls
+    ROCPROFILER_BUFFER_TRACING_HIP_API,               ///< Buffer HIP function calls
+    ROCPROFILER_BUFFER_TRACING_MARKER_API,            ///< Buffer ROCTx function calls
+    ROCPROFILER_BUFFER_TRACING_MEMORY_COPY,           ///< Buffer memory copy info
+    ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,       ///< Buffer kernel dispatch info
+    ROCPROFILER_BUFFER_TRACING_PAGE_MIGRATION,        ///< Buffer page migration info
+    ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY,        ///< Buffer scratch memory reclaimation info
+    ROCPROFILER_BUFFER_TRACING_EXTERNAL_CORRELATION,  ///< Buffer external correlation info
     // To determine if this is possible to implement?
-    // ROCPROFILER_SERVICE_BUFFER_TRACING_QUEUE_SCHEDULING,
-    ROCPROFILER_SERVICE_BUFFER_TRACING_LAST,
+    // ROCPROFILER_BUFFER_TRACING_QUEUE_SCHEDULING,
+    ROCPROFILER_BUFFER_TRACING_LAST,
 } rocprofiler_service_buffer_tracing_kind_t;
 
 /**
@@ -356,7 +354,7 @@ typedef struct rocprofiler_callback_tracing_record_t
  *         rocprofiler_record_header_t* header = headers[i];
  *
  *         if(header->category == ROCPROFILER_BUFFER_CATEGORY_TRACING &&
- *            header->kind == ROCPROFILER_SERVICE_BUFFER_TRACING_HSA_API)
+ *            header->kind == ROCPROFILER_BUFFER_TRACING_HSA_API)
  *         {
  *             // cast to rocprofiler_buffer_tracing_hsa_api_record_t which
  *             // is type associated with this category + kind

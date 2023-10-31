@@ -48,7 +48,7 @@ namespace
 {
 #define ROCPROFILER_BUFFER_TRACING_KIND_STRING(CODE)                                               \
     template <>                                                                                    \
-    struct buffer_tracing_kind_string<ROCPROFILER_SERVICE_BUFFER_TRACING_##CODE>                   \
+    struct buffer_tracing_kind_string<ROCPROFILER_BUFFER_TRACING_##CODE>                           \
     {                                                                                              \
         static constexpr auto value =                                                              \
             std::pair<const char*, size_t>{#CODE, std::string_view{#CODE}.length()};               \
@@ -131,7 +131,7 @@ rocprofiler_query_buffer_tracing_kind_name(rocprofiler_service_buffer_tracing_ki
                                            uint64_t*                                 name_len)
 {
     auto&& val = rocprofiler::buffer_tracing::get_kind_name(
-        kind, std::make_index_sequence<ROCPROFILER_SERVICE_BUFFER_TRACING_LAST>{});
+        kind, std::make_index_sequence<ROCPROFILER_BUFFER_TRACING_LAST>{});
 
     if(name) *name = val.first;
     if(name_len) *name_len = val.second;
@@ -145,11 +145,10 @@ rocprofiler_query_buffer_tracing_kind_operation_name(rocprofiler_service_buffer_
                                                      const char** name,
                                                      uint64_t*    name_len)
 {
-    if(kind < ROCPROFILER_SERVICE_BUFFER_TRACING_NONE ||
-       kind >= ROCPROFILER_SERVICE_BUFFER_TRACING_LAST)
+    if(kind < ROCPROFILER_BUFFER_TRACING_NONE || kind >= ROCPROFILER_BUFFER_TRACING_LAST)
         return ROCPROFILER_STATUS_ERROR_KIND_NOT_FOUND;
 
-    if(kind == ROCPROFILER_SERVICE_BUFFER_TRACING_HSA_API)
+    if(kind == ROCPROFILER_BUFFER_TRACING_HSA_API)
     {
         const auto* val = rocprofiler::hsa::name_by_id(operation);
 
@@ -173,7 +172,7 @@ rocprofiler_query_buffer_tracing_kind_operation_name(rocprofiler_service_buffer_
 rocprofiler_status_t
 rocprofiler_iterate_buffer_tracing_kinds(rocprofiler_buffer_tracing_kind_cb_t callback, void* data)
 {
-    for(uint32_t i = 0; i < ROCPROFILER_SERVICE_BUFFER_TRACING_LAST; ++i)
+    for(uint32_t i = 0; i < ROCPROFILER_BUFFER_TRACING_LAST; ++i)
     {
         auto _success = callback(static_cast<rocprofiler_service_buffer_tracing_kind_t>(i), data);
         if(_success != 0) break;
@@ -188,7 +187,7 @@ rocprofiler_iterate_buffer_tracing_kind_operations(
     rocprofiler_buffer_tracing_kind_operation_cb_t callback,
     void*                                          data)
 {
-    if(kind == ROCPROFILER_SERVICE_BUFFER_TRACING_HSA_API)
+    if(kind == ROCPROFILER_BUFFER_TRACING_HSA_API)
     {
         auto ops = rocprofiler::hsa::get_ids();
         for(const auto& itr : ops)

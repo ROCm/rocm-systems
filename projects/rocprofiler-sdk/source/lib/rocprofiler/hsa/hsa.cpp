@@ -263,7 +263,7 @@ hsa_api_impl<Idx>::functor(Args&&... args)
                                                       corr_id,
                                                       info_type::callback_domain_idx,
                                                       info_type::operation_idx,
-                                                      ROCPROFILER_SERVICE_CALLBACK_PHASE_ENTER,
+                                                      ROCPROFILER_CALLBACK_PHASE_ENTER,
                                                       static_cast<void*>(&tracer_data)};
 
             auto& callback_info =
@@ -305,7 +305,7 @@ hsa_api_impl<Idx>::functor(Args&&... args)
             auto& record    = itr.record;
             auto& user_data = itr.user_data;
 
-            record.phase   = ROCPROFILER_SERVICE_CALLBACK_PHASE_EXIT;
+            record.phase   = ROCPROFILER_CALLBACK_PHASE_EXIT;
             record.payload = static_cast<void*>(&tracer_data);
 
             auto& callback_info =

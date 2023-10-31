@@ -88,8 +88,8 @@
     template <>                                                                                    \
     struct hsa_api_info<HSA_API_ID>                                                                \
     {                                                                                              \
-        static constexpr auto callback_domain_idx = ROCPROFILER_SERVICE_CALLBACK_TRACING_HSA_API;  \
-        static constexpr auto buffered_domain_idx = ROCPROFILER_SERVICE_BUFFER_TRACING_HSA_API;    \
+        static constexpr auto callback_domain_idx = ROCPROFILER_CALLBACK_TRACING_HSA_API;          \
+        static constexpr auto buffered_domain_idx = ROCPROFILER_BUFFER_TRACING_HSA_API;            \
         static constexpr auto table_idx           = HSA_TABLE;                                     \
         static constexpr auto operation_idx       = HSA_API_ID;                                    \
         static constexpr auto name                = #HSA_FUNC;                                     \
@@ -160,8 +160,8 @@
     template <>                                                                                    \
     struct hsa_api_info<HSA_API_ID>                                                                \
     {                                                                                              \
-        static constexpr auto callback_domain_idx = ROCPROFILER_SERVICE_CALLBACK_TRACING_HSA_API;  \
-        static constexpr auto buffered_domain_idx = ROCPROFILER_SERVICE_BUFFER_TRACING_HSA_API;    \
+        static constexpr auto callback_domain_idx = ROCPROFILER_CALLBACK_TRACING_HSA_API;          \
+        static constexpr auto buffered_domain_idx = ROCPROFILER_BUFFER_TRACING_HSA_API;            \
         static constexpr auto table_idx           = HSA_TABLE;                                     \
         static constexpr auto operation_idx       = HSA_API_ID;                                    \
         static constexpr auto name                = #HSA_FUNC;                                     \

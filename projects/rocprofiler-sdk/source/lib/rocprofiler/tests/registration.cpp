@@ -92,7 +92,7 @@ get_callback_tracing_names()
         [](rocprofiler_service_callback_tracing_kind_t kindv, uint32_t operation, void* data_v) {
             auto* name_info_v = static_cast<callback_name_info*>(data_v);
 
-            if(kindv == ROCPROFILER_SERVICE_CALLBACK_TRACING_HSA_API)
+            if(kindv == ROCPROFILER_CALLBACK_TRACING_HSA_API)
             {
                 const char* name = nullptr;
                 ROCPROFILER_CALL(rocprofiler_query_callback_tracing_kind_operation_name(
@@ -114,7 +114,7 @@ get_callback_tracing_names()
                          "query callback tracing kind operation name");
         if(name) name_info_v->kind_names[kind] = name;
 
-        if(kind == ROCPROFILER_SERVICE_CALLBACK_TRACING_HSA_API)
+        if(kind == ROCPROFILER_CALLBACK_TRACING_HSA_API)
         {
             ROCPROFILER_CALL(rocprofiler_iterate_callback_tracing_kind_operations(
                                  kind, tracing_kind_operation_cb, static_cast<void*>(data)),
@@ -151,7 +151,7 @@ get_buffer_tracing_names()
         [](rocprofiler_service_buffer_tracing_kind_t kindv, uint32_t operation, void* data_v) {
             auto* name_info_v = static_cast<buffer_name_info*>(data_v);
 
-            if(kindv == ROCPROFILER_SERVICE_BUFFER_TRACING_HSA_API)
+            if(kindv == ROCPROFILER_BUFFER_TRACING_HSA_API)
             {
                 const char* name = nullptr;
                 ROCPROFILER_CALL(rocprofiler_query_buffer_tracing_kind_operation_name(
@@ -173,7 +173,7 @@ get_buffer_tracing_names()
                          "query buffer tracing kind operation name");
         if(name) name_info_v->kind_names[kind] = name;
 
-        if(kind == ROCPROFILER_SERVICE_BUFFER_TRACING_HSA_API)
+        if(kind == ROCPROFILER_BUFFER_TRACING_HSA_API)
         {
             ROCPROFILER_CALL(rocprofiler_iterate_buffer_tracing_kind_operations(
                                  kind, tracing_kind_operation_cb, static_cast<void*>(data)),
@@ -199,15 +199,15 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
         return std::chrono::steady_clock::now().time_since_epoch().count();
     };
 
-    if(record.phase == ROCPROFILER_SERVICE_CALLBACK_PHASE_ENTER && cb_data->current_depth == 0)
+    if(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER && cb_data->current_depth == 0)
     {
         user_data->value = get_timestamp();
     }
 
     static auto name_map = get_callback_tracing_names();
 
-    EXPECT_EQ(name_map.kind_names.size(), ROCPROFILER_SERVICE_CALLBACK_TRACING_LAST);
-    EXPECT_EQ(name_map.operation_names.at(ROCPROFILER_SERVICE_CALLBACK_TRACING_HSA_API).size(),
+    EXPECT_EQ(name_map.kind_names.size(), ROCPROFILER_CALLBACK_TRACING_LAST);
+    EXPECT_EQ(name_map.operation_names.at(ROCPROFILER_CALLBACK_TRACING_HSA_API).size(),
               ROCPROFILER_HSA_API_ID_LAST);
 
     std::cout << "[" << __FILE__ << ":" << __LINE__ << "] "
@@ -215,11 +215,11 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
               << std::flush;
 
     cb_data->client_callback_count++;
-    if(record.phase == ROCPROFILER_SERVICE_CALLBACK_PHASE_ENTER)
+    if(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
     {
         cb_data->current_depth++;
     }
-    else if(record.phase == ROCPROFILER_SERVICE_CALLBACK_PHASE_EXIT)
+    else if(record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT)
     {
         cb_data->max_depth = std::max(cb_data->current_depth, cb_data->max_depth);
         cb_data->current_depth--;
@@ -256,7 +256,7 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
     ROCPROFILER_CALL(rocprofiler_iterate_callback_tracing_kind_operation_args(
                          record, info_data_cb, static_cast<void*>(&info_data_v)),
                      "Failure iterating trace operation args");
-    if(record.kind == ROCPROFILER_SERVICE_CALLBACK_TRACING_HSA_API &&
+    if(record.kind == ROCPROFILER_CALLBACK_TRACING_HSA_API &&
        !(record.operation == ROCPROFILER_HSA_API_ID_hsa_init ||
          record.operation == ROCPROFILER_HSA_API_ID_hsa_shut_down))
     {
@@ -264,7 +264,7 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
             << name_map.operation_names[record.kind][record.operation] << info_data_v.arg_ss.str();
     }
 
-    if(record.phase == ROCPROFILER_SERVICE_CALLBACK_PHASE_EXIT && cb_data->current_depth == 0)
+    if(record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT && cb_data->current_depth == 0)
     {
         cb_data->client_elapsed += (get_timestamp() - user_data->value);
     }
@@ -282,8 +282,8 @@ tool_tracing_buffered(rocprofiler_context_id_t      context,
 
     static auto name_map = get_buffer_tracing_names();
 
-    EXPECT_EQ(name_map.kind_names.size(), ROCPROFILER_SERVICE_BUFFER_TRACING_LAST);
-    EXPECT_EQ(name_map.operation_names.at(ROCPROFILER_SERVICE_BUFFER_TRACING_HSA_API).size(),
+    EXPECT_EQ(name_map.kind_names.size(), ROCPROFILER_BUFFER_TRACING_LAST);
+    EXPECT_EQ(name_map.operation_names.at(ROCPROFILER_BUFFER_TRACING_HSA_API).size(),
               ROCPROFILER_HSA_API_ID_LAST);
 
     auto v_records = std::vector<rocprofiler_buffer_tracing_hsa_api_record_t*>{};
@@ -297,7 +297,7 @@ tool_tracing_buffered(rocprofiler_context_id_t      context,
         auto hash = rocprofiler_record_header_compute_hash(header->category, header->kind);
         EXPECT_EQ(header->hash, hash);
         EXPECT_TRUE(header->category == ROCPROFILER_BUFFER_CATEGORY_TRACING &&
-                    header->kind == ROCPROFILER_SERVICE_BUFFER_TRACING_HSA_API);
+                    header->kind == ROCPROFILER_BUFFER_TRACING_HSA_API);
 
         v_records.emplace_back(
             static_cast<rocprofiler_buffer_tracing_hsa_api_record_t*>(header->payload));
@@ -393,14 +393,14 @@ TEST(rocprofiler_lib, callback_registration_lambda_with_result)
         ROCPROFILER_CALL(rocprofiler_create_context(&cb_data->client_ctx),
                          "failed to create context");
 
-        ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
-                             cb_data->client_ctx,
-                             ROCPROFILER_SERVICE_CALLBACK_TRACING_HSA_API,
-                             nullptr,
-                             0,
-                             tool_tracing_callback,
-                             client_data),
-                         "callback tracing service failed to configure");
+        ROCPROFILER_CALL(
+            rocprofiler_configure_callback_tracing_service(cb_data->client_ctx,
+                                                           ROCPROFILER_CALLBACK_TRACING_HSA_API,
+                                                           nullptr,
+                                                           0,
+                                                           tool_tracing_callback,
+                                                           client_data),
+            "callback tracing service failed to configure");
 
         int valid_ctx = 0;
         ROCPROFILER_CALL(rocprofiler_context_is_valid(cb_data->client_ctx, &valid_ctx),
@@ -533,7 +533,7 @@ TEST(rocprofiler_lib, buffer_registration_lambda_with_result)
 
         ROCPROFILER_CALL(
             rocprofiler_configure_buffer_tracing_service(cb_data->client_ctx,
-                                                         ROCPROFILER_SERVICE_BUFFER_TRACING_HSA_API,
+                                                         ROCPROFILER_BUFFER_TRACING_HSA_API,
                                                          nullptr,
                                                          0,
                                                          cb_data->client_buffer),

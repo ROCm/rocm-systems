@@ -43,16 +43,16 @@ struct domain_info;
 template <>
 struct domain_info<rocprofiler_service_callback_tracing_kind_t>
 {
-    static constexpr size_t none    = ROCPROFILER_SERVICE_CALLBACK_TRACING_NONE;
-    static constexpr size_t last    = ROCPROFILER_SERVICE_CALLBACK_TRACING_LAST;
+    static constexpr size_t none    = ROCPROFILER_CALLBACK_TRACING_NONE;
+    static constexpr size_t last    = ROCPROFILER_CALLBACK_TRACING_LAST;
     static constexpr auto   padding = domain_ops_padding;
 };
 
 template <>
 struct domain_info<rocprofiler_service_buffer_tracing_kind_t>
 {
-    static constexpr size_t none    = ROCPROFILER_SERVICE_BUFFER_TRACING_NONE;
-    static constexpr size_t last    = ROCPROFILER_SERVICE_BUFFER_TRACING_LAST;
+    static constexpr size_t none    = ROCPROFILER_BUFFER_TRACING_NONE;
+    static constexpr size_t last    = ROCPROFILER_BUFFER_TRACING_LAST;
     static constexpr auto   padding = domain_ops_padding;
 };
 
