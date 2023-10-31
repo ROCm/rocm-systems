@@ -33,7 +33,8 @@ import getpass
 from pymongo import MongoClient
 from tqdm import tqdm
 import glob
-from common import resolve_rocprof
+import re
+import logging
 
 cache = dict()
 
@@ -129,12 +130,12 @@ def kernel_name_shortener(workload_dir, level):
     if level < 5:
         cpp_filt = os.path.join("/usr", "bin", "c++filt")
         if not os.path.isfile(cpp_filt):
-            print(
+            logging.error(
                 "Error: Could not resolve c++filt in expected directory: {}".format(
                     cpp_filt
                 )
             )
-            sys.exit(0)
+            sys.exit(1)
 
         for fpath in glob.glob(workload_dir + "/*.csv"):
             try:
@@ -146,9 +147,9 @@ def kernel_name_shortener(workload_dir, level):
                 modified_df = shorten_file(orig_df, level)
                 modified_df.to_csv(fpath, index=False)
             except pd.errors.EmptyDataError:
-                print("Skipping empty csv " + str(fpath))
+                logging.debug("[profiling] Skipping shortening on empty csv " + str(fpath))
 
-        print("KernelName shortening complete!")
+        logging.info("[profiling] KernelName shortening complete!")
 
 
 # Verify target directory and setup connection

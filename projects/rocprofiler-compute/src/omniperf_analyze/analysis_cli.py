@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 ##############################################################################bl
 # MIT License
 #
@@ -24,24 +22,21 @@
 # SOFTWARE.
 ##############################################################################el
 
-from omniperf_base import Omniperf
+import logging
+from omniperf_analyze.analysis_base import OmniAnalyze_Base
+from utils.utils import demarcate
 
-def main():
+class cli_analysis(OmniAnalyze_Base):
 
-    omniperf = Omniperf()
-    omniperf.parse_args() #TODO: We already do this in the __init__ for Omniperf(). Change that?
+    # Required child methods
+    @demarcate
+    def pre_processing(self):
+        """Perform any pre-processing steps prior to analysis.
+        """
+        logging.debug("[analysis] prepping to do some analysis")
 
-    mode = omniperf.get_mode()
-
-    # major omniperf execution modes
-    if mode == "profile":
-        omniperf.run_profiler()
-    elif mode == "database":
-        omniperf.update_DB()
-    elif mode == "analyze":
-        omniperf.run_analysis()
-    else:
-        omniperf.error("Unsupported execution mode")
-
-if __name__ == "__main__":
-    main()
+    @demarcate
+    def run_analysis(self):
+        """Run CLI analysis.
+        """
+        logging.debug("[analysis] check out this wicked cli ascii art")

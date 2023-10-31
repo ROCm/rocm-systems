@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 ##############################################################################bl
 # MIT License
 #
@@ -24,24 +22,28 @@
 # SOFTWARE.
 ##############################################################################el
 
-from omniperf_base import Omniperf
+import logging
+from omniperf_profile.profiler_base import OmniProfiler_Base
+from utils.utils import demarcate
 
-def main():
+class rocscope_profiler(OmniProfiler_Base):
+    def __init__(self,profiling_args,profiler_mode,soc):
+        super().__init__(profiling_args,profiler_mode,soc)
 
-    omniperf = Omniperf()
-    omniperf.parse_args() #TODO: We already do this in the __init__ for Omniperf(). Change that?
-
-    mode = omniperf.get_mode()
-
-    # major omniperf execution modes
-    if mode == "profile":
-        omniperf.run_profiler()
-    elif mode == "database":
-        omniperf.update_DB()
-    elif mode == "analyze":
-        omniperf.run_analysis()
-    else:
-        omniperf.error("Unsupported execution mode")
-
-if __name__ == "__main__":
-    main()
+    # Required child methods
+    @demarcate
+    def pre_processing(self):
+        """Perform any pre-processing steps prior to profiling.
+        """
+        self.__profiler="rocscope"
+        logging.debug("[profiling] pre-processing using %s profiler" % self.__profiler)
+    @demarcate
+    def run_profiling(self, version, prog):
+        """Run profiling.
+        """
+        logging.debug("[profiling] performing profiling using %s profiler" % self.__profiler)
+    @demarcate
+    def post_processing(self):
+        """Perform any post-processing steps prior to profiling.
+        """
+        logging.debug("[profiling] performing post-processing using %s profiler" % self.__profiler)

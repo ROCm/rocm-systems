@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 ##############################################################################bl
 # MIT License
 #
@@ -24,24 +22,8 @@
 # SOFTWARE.
 ##############################################################################el
 
-from omniperf_base import Omniperf
+from pathlib import Path
 
-def main():
-
-    omniperf = Omniperf()
-    omniperf.parse_args() #TODO: We already do this in the __init__ for Omniperf(). Change that?
-
-    mode = omniperf.get_mode()
-
-    # major omniperf execution modes
-    if mode == "profile":
-        omniperf.run_profiler()
-    elif mode == "database":
-        omniperf.update_DB()
-    elif mode == "analyze":
-        omniperf.run_analysis()
-    else:
-        omniperf.error("Unsupported execution mode")
-
-if __name__ == "__main__":
-    main()
+# NB: Creating a new module to share global vars across modules
+omniperf_home = Path(__file__).resolve().parent
+prog = "omniperf"
