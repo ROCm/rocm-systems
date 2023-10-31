@@ -496,10 +496,15 @@ rsmi_dev_gpu_metrics_info_get(uint32_t dv_ind, rsmi_gpu_metrics_t *smu) {
   // a specific version.
   *smu = {};
 
-  uint8_t dev_content_revision = dev->gpu_metrics_ver().content_revision;
-  if (dev_content_revision != RSMI_GPU_METRICS_API_CONTENT_VER_1 ||
-      dev_content_revision != RSMI_GPU_METRICS_API_CONTENT_VER_2 ||
-      dev_content_revision != RSMI_GPU_METRICS_API_CONTENT_VER_3) {
+  bool isRevisionExpected = ((dev->gpu_metrics_ver().content_revision == 1) ||
+        (dev->gpu_metrics_ver().content_revision == 2) ||
+        (dev->gpu_metrics_ver().content_revision == 3));
+  if (isRevisionExpected == false) {
+    ss << __PRETTY_FUNCTION__ << " | content revision was = "
+       << print_unsigned_hex_and_int(dev->gpu_metrics_ver().content_revision)
+       << ", expected version 1,2, or 3 | returning "
+       << getRSMIStatusString(RSMI_STATUS_NOT_SUPPORTED);
+    LOG_ERROR(ss);
     return RSMI_STATUS_NOT_SUPPORTED;
   }
   if (dev->gpu_metrics_ver().content_revision ==

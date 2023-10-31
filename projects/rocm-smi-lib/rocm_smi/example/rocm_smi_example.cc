@@ -808,6 +808,10 @@ int main() {
     print_test_header("GPU METRICS", i);
     print_function_header_with_rsmi_ret(ret,
       "rsmi_dev_gpu_metrics_info_get("  + std::to_string(i) + ", &p)");
+    std::cout << "\t**p.common_header.content_revision: " << std::dec
+              << p.common_header.content_revision << "\n";
+    std::cout << "\t**p.common_header.format_revision: " << std::dec
+              << p.common_header.format_revision << "\n";
     std::cout << "\t**p.average_gfxclk_frequency: " << std::dec
               << p.average_gfxclk_frequency << "\n";
     std::cout << "\t**p.average_socclk_frequency: " << std::dec
