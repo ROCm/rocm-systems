@@ -11,13 +11,15 @@ import inspect
 
 omniperf = SourceFileLoader("omniperf", "src/omniperf").load_module()
 workload_1 = os.path.realpath("workload")
-# kernel_name_1 = "vecCopy(double*, double*, double*, int, int) [clone .kd]"
-kernel_name_1 = "void benchmark_func<__half2, 256, 8u, 11u>(__half2, __half2*) "
+kernel_name_1 = "vecCopy(double*, double*, double*, int, int) [clone .kd]"
+## kernel_name_1 = "void benchmark_func<__half2, 256, 8u, 11u>(__half2, __half2*) "
 
 # change to directory where app is at
 # app_1 = ["./sample/vcopy", "1048576", "256"]
-app_1 = ["./mixbench/build_mi100/mixbench-hip"]
-
+# app_1 = ["./mixbench/build_mi100/mixbench-hip"]
+app_1 = ["./tests/vcopy", "1048576", "256"]
+num_kernels = 1
+dispatch_id = 0
 
 ALL_CSVS = [
     "SQ_IFETCH_LEVEL.csv",
@@ -254,8 +256,9 @@ def test_path():
             file_dict[file] = pd.read_csv(workload_1 + "/" + file, index_col=0)
             print("length is: ", len(file_dict[file].index))
             print(file_dict[file])
+            # TODO: verify contents: we know function evaluated
             if not "sysinfo" in file:
-                assert len(file_dict[file].index) > 3
+                assert len(file_dict[file].index) >= num_kernels
     print(sorted(list(file_dict.keys())))
     if soc == "mi200":
         print(sorted(list(file_dict.keys())))
@@ -300,7 +303,7 @@ def test_kernel():
         if file.endswith(".csv"):
             file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             if not "sysinfo" in file:
-                assert len(file_dict[file].index) > 3
+                assert len(file_dict[file].index) >= num_kernels
     if soc == "mi200":
         print(sorted(list(file_dict.keys())))
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
@@ -344,7 +347,7 @@ def test_kernel_summaries():
         if file.endswith(".csv"):
             file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             if not "sysinfo" in file:
-                assert len(file_dict[file].index) > 3
+                assert len(file_dict[file].index) >= num_kernels
     if soc == "mi200":
         print(sorted(list(file_dict.keys())))
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
@@ -388,7 +391,7 @@ def test_ipblocks_SQ():
         if file.endswith(".csv"):
             file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             if not "sysinfo" in file:
-                assert len(file_dict[file].index) > 3
+                assert len(file_dict[file].index) >= num_kernels
     print(sorted(list(file_dict.keys())))
     expected_csvs = [
         "SQ_IFETCH_LEVEL.csv",
@@ -474,7 +477,7 @@ def test_ipblocks_SQC():
         if file.endswith(".csv"):
             file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             if not "sysinfo" in file:
-                assert len(file_dict[file].index) > 3
+                assert len(file_dict[file].index) >= num_kernels
     print(sorted(list(file_dict.keys())))
     expected_csvs = [
         "pmc_perf.csv",
@@ -527,7 +530,7 @@ def test_ipblocks_TA():
         if file.endswith(".csv"):
             file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             if not "sysinfo" in file:
-                assert len(file_dict[file].index) > 3
+                assert len(file_dict[file].index) >= num_kernels
 
     print(sorted(list(file_dict.keys())))
 
@@ -586,7 +589,7 @@ def test_ipblocks_TD():
         if file.endswith(".csv"):
             file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             if not "sysinfo" in file:
-                assert len(file_dict[file].index) > 3
+                assert len(file_dict[file].index) >= num_kernels
 
     print(sorted(list(file_dict.keys())))
 
@@ -649,7 +652,7 @@ def test_ipblocks_TCP():
         if file.endswith(".csv"):
             file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             if not "sysinfo" in file:
-                assert len(file_dict[file].index) > 3
+                assert len(file_dict[file].index) >= num_kernels
     print(sorted(list(file_dict.keys())))
 
     expected_csvs = [
@@ -709,7 +712,7 @@ def test_ipblocks_TCC():
         if file.endswith(".csv"):
             file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             if not "sysinfo" in file:
-                assert len(file_dict[file].index) > 3
+                assert len(file_dict[file].index) >= num_kernels
 
     print(sorted(list(file_dict.keys())))
     expected_csvs = [
@@ -770,7 +773,7 @@ def test_ipblocks_SPI():
         if file.endswith(".csv"):
             file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             if not "sysinfo" in file:
-                assert len(file_dict[file].index) > 3
+                assert len(file_dict[file].index) >= num_kernels
     print(sorted(list(file_dict.keys())))
 
     expected_csvs = [
@@ -829,7 +832,7 @@ def test_ipblocks_CPC():
         if file.endswith(".csv"):
             file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             if not "sysinfo" in file:
-                assert len(file_dict[file].index) > 3
+                assert len(file_dict[file].index) >= num_kernels
     print(sorted(list(file_dict.keys())))
     expected_csvs = [
         "pmc_perf.csv",
@@ -883,7 +886,7 @@ def test_ipblocks_CPF():
         if file.endswith(".csv"):
             file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             if not "sysinfo" in file:
-                assert len(file_dict[file].index) > 3
+                assert len(file_dict[file].index) >= num_kernels
     print(sorted(list(file_dict.keys())))
     expected_csvs = [
         "pmc_perf.csv",
@@ -936,7 +939,7 @@ def test_ipblocks_SQ_CPC():
         if file.endswith(".csv"):
             file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             if not "sysinfo" in file:
-                assert len(file_dict[file].index) > 3
+                assert len(file_dict[file].index) >= num_kernels
 
     print(sorted(list(file_dict.keys())))
     expected_csvs = [
@@ -1024,7 +1027,7 @@ def test_ipblocks_SQ_TA():
         if file.endswith(".csv"):
             file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             if not "sysinfo" in file:
-                assert len(file_dict[file].index) > 3
+                assert len(file_dict[file].index) >= num_kernels
 
     print(sorted(list(file_dict.keys())))
     expected_csvs = [
@@ -1111,7 +1114,7 @@ def test_ipblocks_SQ_SPI():
         if file.endswith(".csv"):
             file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             if not "sysinfo" in file:
-                assert len(file_dict[file].index) > 3
+                assert len(file_dict[file].index) >= num_kernels
 
     print(sorted(list(file_dict.keys())))
     expected_csvs = [
@@ -1200,7 +1203,7 @@ def test_ipblocks_SQ_SQC_TCP_CPC():
         if file.endswith(".csv"):
             file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             if not "sysinfo" in file:
-                assert len(file_dict[file].index) > 3
+                assert len(file_dict[file].index) >= num_kernels
 
     print(sorted(list(file_dict.keys())))
     expected_csvs = [
@@ -1291,7 +1294,7 @@ def test_ipblocks_SQ_SPI_TA_TCC_CPF():
         if file.endswith(".csv"):
             file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             if not "sysinfo" in file:
-                assert len(file_dict[file].index) > 3
+                assert len(file_dict[file].index) >= num_kernels
 
     print(sorted(list(file_dict.keys())))
     expected_csvs = [
@@ -1423,7 +1426,7 @@ def test_dispatch_0_1():
         if file.endswith(".csv"):
             file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             if not "sysinfo" in file and not "roofline" in file:
-                assert len(file_dict[file].index) == 2
+                assert len(file_dict[file].index) == num_kernels
     if soc == "mi200":
         print(sorted(list(file_dict.keys())))
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
@@ -1449,7 +1452,7 @@ def test_dispatch_2():
                 "--path",
                 workload_1,
                 "--dispatch",
-                "2",
+                dispatch_id,
                 "--",
             ]
             + app_1,
@@ -1511,7 +1514,7 @@ def test_kernel_verbose_0():
         if file.endswith(".csv"):
             file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             if not "sysinfo" in file:
-                assert len(file_dict[file].index) > 3
+                assert len(file_dict[file].index) >= num_kernels
     if soc == "mi200":
         print(sorted(list(file_dict.keys())))
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
@@ -1555,7 +1558,7 @@ def test_kernel_verbose_1():
         if file.endswith(".csv"):
             file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             if not "sysinfo" in file:
-                assert len(file_dict[file].index) > 3
+                assert len(file_dict[file].index) >= num_kernels
     if soc == "mi200":
         print(sorted(list(file_dict.keys())))
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
@@ -1599,7 +1602,7 @@ def test_kernel_verbose_2():
         if file.endswith(".csv"):
             file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             if not "sysinfo" in file:
-                assert len(file_dict[file].index) > 3
+                assert len(file_dict[file].index) >= num_kernels
     if soc == "mi200":
         print(sorted(list(file_dict.keys())))
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
@@ -1643,7 +1646,7 @@ def test_kernel_verbose_3():
         if file.endswith(".csv"):
             file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             if not "sysinfo" in file:
-                assert len(file_dict[file].index) > 3
+                assert len(file_dict[file].index) >= num_kernels
     if soc == "mi200":
         print(sorted(list(file_dict.keys())))
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
@@ -1687,7 +1690,7 @@ def test_kernel_verbose_4():
         if file.endswith(".csv"):
             file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             if not "sysinfo" in file:
-                assert len(file_dict[file].index) > 3
+                assert len(file_dict[file].index) >= num_kernels
     if soc == "mi200":
         print(sorted(list(file_dict.keys())))
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
@@ -1731,7 +1734,7 @@ def test_kernel_verbose_5():
         if file.endswith(".csv"):
             file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             if not "sysinfo" in file:
-                assert len(file_dict[file].index) > 3
+                assert len(file_dict[file].index) >= num_kernels
     if soc == "mi200":
         print(sorted(list(file_dict.keys())))
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
@@ -1775,7 +1778,7 @@ def test_join_type_grid():
         if file.endswith(".csv"):
             file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             if not "sysinfo" in file:
-                assert len(file_dict[file].index) > 3
+                assert len(file_dict[file].index) >= num_kernels
     if soc == "mi200":
         print(sorted(list(file_dict.keys())))
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
@@ -1819,7 +1822,7 @@ def test_join_type_kernel():
         if file.endswith(".csv"):
             file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             if not "sysinfo" in file:
-                assert len(file_dict[file].index) > 3
+                assert len(file_dict[file].index) >= num_kernels
     if soc == "mi200":
         print(sorted(list(file_dict.keys())))
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
@@ -1866,7 +1869,7 @@ def test_device_0():
                 if "roofline" in file:
                     assert len(file_dict[file].index)
                 else:
-                    assert len(file_dict[file].index) > 3
+                    assert len(file_dict[file].index) >= num_kernels
     if soc == "mi200":
         print(sorted(list(file_dict.keys())))
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
@@ -1909,7 +1912,7 @@ def test_no_roof():
         if file.endswith(".csv"):
             file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             if not "sysinfo" in file:
-                assert len(file_dict[file].index) > 3
+                assert len(file_dict[file].index) >= num_kernels
     if soc == "mi200":
         print(sorted(list(file_dict.keys())))
         assert sorted(list(file_dict.keys())) == [
@@ -1986,7 +1989,7 @@ def test_sort_dispatches():
         if file.endswith(".csv"):
             file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             if not "sysinfo" in file:
-                assert len(file_dict[file].index) > 3
+                assert len(file_dict[file].index) >= num_kernels
         elif file.endswith(".pdf"):
             file_dict[file] = "pdf"
     if soc == "mi200":
@@ -2038,7 +2041,7 @@ def test_sort_kernels():
         if file.endswith(".csv"):
             file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             if not "sysinfo" in file:
-                assert len(file_dict[file].index) > 3
+                assert len(file_dict[file].index) >= num_kernels
         elif file.endswith(".pdf"):
             file_dict[file] = "pdf"
     if soc == "mi200":
@@ -2091,7 +2094,7 @@ def test_mem_levels_HBM():
         if file.endswith(".csv"):
             file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             if not "sysinfo" in file:
-                assert len(file_dict[file].index) > 3
+                assert len(file_dict[file].index) >= num_kernels
         elif file.endswith(".pdf"):
             file_dict[file] = "pdf"
     if soc == "mi200":
@@ -2144,7 +2147,7 @@ def test_mem_levels_L2():
         if file.endswith(".csv"):
             file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             if not "sysinfo" in file:
-                assert len(file_dict[file].index) > 3
+                assert len(file_dict[file].index) >= num_kernels
         elif file.endswith(".pdf"):
             file_dict[file] = "pdf"
     if soc == "mi200":
@@ -2196,7 +2199,7 @@ def test_mem_levels_vL1D():
         if file.endswith(".csv"):
             file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             if not "sysinfo" in file:
-                assert len(file_dict[file].index) > 3
+                assert len(file_dict[file].index) >= num_kernels
         elif file.endswith(".pdf"):
             file_dict[file] = "pdf"
     if soc == "mi200":
@@ -2248,7 +2251,7 @@ def test_mem_levels_LDS():
         if file.endswith(".csv"):
             file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             if not "sysinfo" in file:
-                assert len(file_dict[file].index) > 3
+                assert len(file_dict[file].index) >= num_kernels
         elif file.endswith(".pdf"):
             file_dict[file] = "pdf"
     if soc == "mi200":
@@ -2301,7 +2304,7 @@ def test_mem_levels_HBM_LDS():
         if file.endswith(".csv"):
             file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             if not "sysinfo" in file:
-                assert len(file_dict[file].index) > 3
+                assert len(file_dict[file].index) >= num_kernels
         elif file.endswith(".pdf"):
             file_dict[file] = "pdf"
     if soc == "mi200":
@@ -2354,7 +2357,7 @@ def test_mem_levels_vL1D_LDS():
         if file.endswith(".csv"):
             file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             if not "sysinfo" in file:
-                assert len(file_dict[file].index) > 3
+                assert len(file_dict[file].index) >= num_kernels
         elif file.endswith(".pdf"):
             file_dict[file] = "pdf"
     if soc == "mi200":
@@ -2407,7 +2410,7 @@ def test_mem_levels_L2_vL1D_LDS():
         if file.endswith(".csv"):
             file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             if not "sysinfo" in file:
-                assert len(file_dict[file].index) > 3
+                assert len(file_dict[file].index) >= num_kernels
         elif file.endswith(".pdf"):
             file_dict[file] = "pdf"
     if soc == "mi200":
@@ -2458,7 +2461,7 @@ def test_kernel_names():
         if file.endswith(".csv"):
             file_dict[file] = pd.read_csv(workload_1 + "/" + file)
             if not "sysinfo" in file:
-                assert len(file_dict[file].index) > 3
+                assert len(file_dict[file].index) >= num_kernels
         elif file.endswith(".pdf"):
             file_dict[file] = "pdf"
     if soc == "mi200":
