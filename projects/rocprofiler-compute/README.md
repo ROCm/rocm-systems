@@ -1,5 +1,6 @@
 [![Ubuntu 20.04](https://github.com/AMDResearch/omniperf/actions/workflows/ubuntu-focal.yml/badge.svg)](https://github.com/AMDResearch/omniperf/actions/workflows/ubuntu-focal.yml)
 [![RHEL 8](https://github.com/AMDResearch/omniperf/actions/workflows/opensuse.yml/badge.svg)](https://github.com/AMDResearch/omniperf/actions/workflows/opensuse.yml)
+[![MI100](https://github.com/AMDResearch/omniperf/actions/workflows/mi100.yml/badge.svg?branch=2.x)](https://github.com/AMDResearch/omniperf/actions/workflows/mi100.yml)
 [![Docs](https://github.com/AMDResearch/omniperf/actions/workflows/docs.yml/badge.svg)](https://amdresearch.github.io/omniperf/)
 [![DOI](https://zenodo.org/badge/561919887.svg)](https://zenodo.org/badge/latestdoi/561919887)
 
