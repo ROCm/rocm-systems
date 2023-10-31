@@ -36,3 +36,6 @@
 /build*
 /.cache
 /.vscode
+
+# Github Workflows
+/.github
