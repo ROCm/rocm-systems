@@ -3,3 +3,4 @@ compile_commands.json
 .cache
 .DS_Store
 plugin/att/__pycache__
+.github
