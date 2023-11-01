@@ -43,7 +43,7 @@ ROCPROFILER_EXTERN_C_INIT
 /**
  * @brief Create context.
  *
- * @param context_id [out] Context identifier
+ * @param [out] context_id Context identifier
  * @return ::rocprofiler_status_t
  */
 rocprofiler_status_t ROCPROFILER_API

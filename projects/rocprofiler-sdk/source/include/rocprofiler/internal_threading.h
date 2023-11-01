@@ -71,12 +71,12 @@ typedef void (*rocprofiler_internal_thread_library_cb_t)(rocprofiler_internal_th
  * caller is responsible for ignoring these callbacks if they want to ignore them beyond a certain
  * point in the application.
  *
- * @param precreate [in] Callback invoked immediately before a new internal thread is created
- * @param postcreate [in] Callback invoked immediately after a new internal thread is created
- * @param libs [in] Bitwise-or of libraries, e.g. `ROCPROFILER_LIBRARY | ROCPROFILER_MARKER_LIBRARY`
+ * @param [in] precreate Callback invoked immediately before a new internal thread is created
+ * @param [in] postcreate Callback invoked immediately after a new internal thread is created
+ * @param [in] libs Bitwise-or of libraries, e.g. `ROCPROFILER_LIBRARY | ROCPROFILER_MARKER_LIBRARY`
  * means the callbacks will be invoked whenever rocprofiler and/or the marker library create
  * internal threads but not when the HSA or HIP libraries create internal threads.
- * @param data [in] Data shared between callbacks
+ * @param [in] data Data shared between callbacks
  */
 rocprofiler_status_t ROCPROFILER_API
 rocprofiler_at_internal_thread_create(rocprofiler_internal_thread_library_cb_t precreate,

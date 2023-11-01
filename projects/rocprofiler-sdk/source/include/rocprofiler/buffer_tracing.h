@@ -242,15 +242,16 @@ rocprofiler_configure_buffer_tracing_service(rocprofiler_context_id_t           
  * string literal that is encoded in the read-only section of the binary (i.e. it is always
  * "allocated" and never "deallocated").
  *
- * @param kind [in] Buffer tracing domain
- * @param name [out] If non-null and the name is a constant string that does not require dynamic
+ * @param [in] kind Buffer tracing domain
+ * @param [out] name If non-null and the name is a constant string that does not require dynamic
  * allocation, this paramter will be set to the address of the string literal, otherwise it will
  * be set to nullptr
- * @param name_len [out] If non-null, this will be assigned the length of the name (regardless of
+ * @param [out] name_len If non-null, this will be assigned the length of the name (regardless of
  * the name is a constant string or requires dynamic allocation)
- * @return rocprofiler_status_t Returns @ref ROCPROFILER_STATUS_ERROR_KIND_NOT_FOUND if the
- * domain id is not valid. Returns @ref ROCPROFILER_STATUS_SUCCESS for a valid domain regardless if
- * there is a constant string or not.
+ * @return ::rocprofiler_status_t
+ * @retval ::ROCPROFILER_STATUS_ERROR_KIND_NOT_FOUND Returned if the domain id is not valid
+ * @retval ::ROCPROFILER_STATUS_SUCCESS Returned if a valid domain, regardless if there is a
+ * constant string or not.
  */
 rocprofiler_status_t
 rocprofiler_query_buffer_tracing_kind_name(rocprofiler_service_buffer_tracing_kind_t kind,
@@ -262,18 +263,20 @@ rocprofiler_query_buffer_tracing_kind_name(rocprofiler_service_buffer_tracing_ki
  * string literal that is encoded in the read-only section of the binary (i.e. it is always
  * "allocated" and never "deallocated").
  *
- * @param kind [in] Buffer tracing domain
- * @param operation [in] Enumeration id value which maps to a specific API function or event type
- * @param name [out] If non-null and the name is a constant string that does not require dynamic
+ * @param [in] kind Buffer tracing domain
+ * @param [in] operation Enumeration id value which maps to a specific API function or event type
+ * @param [out] name If non-null and the name is a constant string that does not require dynamic
  * allocation, this paramter will be set to the address of the string literal, otherwise it will
  * be set to nullptr
- * @param name_len [out] If non-null, this will be assigned the length of the name (regardless of
+ * @param [out] name_len If non-null, this will be assigned the length of the name (regardless of
  * the name is a constant string or requires dynamic allocation)
- * @return rocprofiler_status_t Returns @ref ROCPROFILER_STATUS_ERROR_KIND_NOT_FOUND on an invalid
- * domain id. Returns @ref ROCPROFILER_STATUS_ERROR_OPERATION_NOT_FOUND if the operation number is
- * not recognized for the given domain. Returns @ref ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED if
- * rocprofiler does not support providing the operation name within this domain. Returns @ref
- * ROCPROFILER_STATUS_SUCCESS for valid domain and operation regardless of whether there is a
+ * @return ::rocprofiler_status_t
+ * @retval ::ROCPROFILER_STATUS_ERROR_KIND_NOT_FOUND An invalid domain id
+ * @retval ::ROCPROFILER_STATUS_ERROR_OPERATION_NOT_FOUND The operation number is not recognized for
+ * the given domain
+ * @retval ::ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED Rocprofiler does not support providing the
+ * operation name within this domain
+ * @retval ::ROCPROFILER_STATUS_SUCCESS Valid domain and operation, regardless of whether there is a
  * constant string or not.
  */
 rocprofiler_status_t

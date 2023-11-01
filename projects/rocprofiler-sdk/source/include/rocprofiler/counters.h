@@ -52,7 +52,7 @@ rocprofiler_query_counter_name(rocprofiler_counter_id_t counter_id, const char**
  * @param [in] agent rocprofiler agent
  * @param [in] counter_id counter id (obtained from iterate_agent_supported_counters)
  * @param [out] instance_count number of instances the counter has
- * @return rocprofiler_status_t
+ * @return ::rocprofiler_status_t
  */
 rocprofiler_status_t ROCPROFILER_API
 rocprofiler_query_counter_instance_count(rocprofiler_agent_t      agent,

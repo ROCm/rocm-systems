@@ -34,17 +34,16 @@ ROCPROFILER_EXTERN_C_INIT
  * @{
  */
 
-/** @} */
-
 /**
  * @brief Push default value for `external` field in @ref rocprofiler_correlation_id_t onto stack.
  *
- * @param context [in] Associated context
- * @param tid [in] thread identifier. @see rocprofiler_get_thread_id
- * @param external_correlation_id [in] User data to place in external field in @ref
+ * @param [in] context Associated context
+ * @param [in] tid thread identifier. @see rocprofiler_get_thread_id
+ * @param [in] external_correlation_id User data to place in external field in @ref
  * rocprofiler_correlation_id_t
- * @return rocprofiler_status_t Returns ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND if the context
- * does not exist. Returns ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT if thread id is not valid.
+ * @return ::rocprofiler_status_t
+ * @retval ::ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND Context does not exist
+ * @retval ::ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT Thread id is not valid
  */
 rocprofiler_status_t ROCPROFILER_API
 rocprofiler_push_external_correlation_id(rocprofiler_context_id_t context,
@@ -54,15 +53,18 @@ rocprofiler_push_external_correlation_id(rocprofiler_context_id_t context,
 /**
  * @brief Pop default value for `external` field in @ref rocprofiler_correlation_id_t off of stack
  *
- * @param context [in] Associated context
- * @param tid [in] thread identifier. @see rocprofiler_get_thread_id
- * @param external_correlation_id [out] Correlation id data popped off the stack
- * @return rocprofiler_status_t Returns ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND if the context
- * does not exist. Returns ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT if thread id is not valid.
+ * @param [in] context Associated context
+ * @param [in] tid thread identifier. @see rocprofiler_get_thread_id
+ * @param [out] external_correlation_id Correlation id data popped off the stack
+ * @return ::rocprofiler_status_t
+ * @retval ::ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND Context does not exist
+ * @retval ::ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT Thread id is not valid
  */
 rocprofiler_status_t ROCPROFILER_API
 rocprofiler_pop_external_correlation_id(rocprofiler_context_id_t context,
                                         rocprofiler_thread_id_t  tid,
                                         rocprofiler_user_data_t* external_correlation_id);
+
+/** @} */
 
 ROCPROFILER_EXTERN_C_FINI

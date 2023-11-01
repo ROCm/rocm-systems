@@ -183,10 +183,10 @@ typedef struct
  * new external correlation ids in the enter phase, it is recommended to pop the external
  * correlation id in the exit callback.
  *
- * @param record [in] Callback record data
- * @param user_data [in,out] This paramter can be used to retain information in between the enter
+ * @param [in] record Callback record data
+ * @param [in,out] user_data This paramter can be used to retain information in between the enter
  * and exit phases.
- * @param callback_data [in] User data provided when configuring the callback tracing service
+ * @param [in] callback_data User data provided when configuring the callback tracing service
  */
 typedef void (*rocprofiler_callback_tracing_cb_t)(rocprofiler_callback_tracing_record_t record,
                                                   rocprofiler_user_data_t*              user_data,
@@ -215,13 +215,13 @@ typedef int (*rocprofiler_callback_tracing_kind_operation_cb_t)(
  * This function will be invoked for each argument.
  * @see rocprofiler_iterate_callback_tracing_operation_args
  *
- * @param kind [in] domain
- * @param operation [in] associated domain operation
- * @param arg_number [in] the argument number, starting at zero
- * @param arg_name [in] the name of the argument in the prototype (or rocprofiler union)
- * @param arg_value_str [in] conversion of the argument to a string, e.g. operator<< overload
- * @param arg_value_addr [in] the address of the argument stored by rocprofiler.
- * @param data [in] user data
+ * @param [in] kind domain
+ * @param [in] operation associated domain operation
+ * @param [in] arg_number the argument number, starting at zero
+ * @param [in] arg_name the name of the argument in the prototype (or rocprofiler union)
+ * @param [in] arg_value_str conversion of the argument to a string, e.g. operator<< overload
+ * @param [in] arg_value_addr the address of the argument stored by rocprofiler.
+ * @param [in] data user data
  */
 typedef int (*rocprofiler_callback_tracing_operation_args_cb_t)(
     rocprofiler_service_callback_tracing_kind_t kind,
@@ -251,11 +251,12 @@ typedef int (*rocprofiler_callback_tracing_operation_args_cb_t)(
  * array.
  * @param [in] callback The function to invoke before and after an API function
  * @param [in] callback_args Data provided to every invocation of the callback function
- * @return ::rocprofiler_status_t Will return @ref ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED if
- * invoked outside of the initialization function in @ref rocprofiler_tool_configure_result_t
- * provided to rocprofiler via @ref rocprofiler_configure function. Will return @ref
- * ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND if the provided context is not valid/registered. Will
- * return @ref ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED if the same @ref
+ * @return ::rocprofiler_status_t
+ * @retval ::ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED Invoked outside of the initialization
+ * function in @ref rocprofiler_tool_configure_result_t provided to rocprofiler via @ref
+ * rocprofiler_configure function
+ * @retval ::ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND The provided context is not valid/registered
+ * @retval ::ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED if the same @ref
  * rocprofiler_service_callback_tracing_kind_t value is provided more than once (per context) -- in
  * other words, we do not support overriding or combining the operations in separate function calls.
  *
@@ -273,13 +274,13 @@ rocprofiler_configure_callback_tracing_service(rocprofiler_context_id_t context_
  * string literal that is encoded in the read-only section of the binary (i.e. it is always
  * "allocated" and never "deallocated").
  *
- * @param kind [in] Callback tracing domain
- * @param name [out] If non-null and the name is a constant string that does not require dynamic
+ * @param [in] kind Callback tracing domain
+ * @param [out] name If non-null and the name is a constant string that does not require dynamic
  * allocation, this paramter will be set to the address of the string literal, otherwise it will
  * be set to nullptr
- * @param name_len [out] If non-null, this will be assigned the length of the name (regardless of
+ * @param [out] name_len If non-null, this will be assigned the length of the name (regardless of
  * the name is a constant string or requires dynamic allocation)
- * @return rocprofiler_status_t
+ * @return ::rocprofiler_status_t
  */
 rocprofiler_status_t
 rocprofiler_query_callback_tracing_kind_name(rocprofiler_service_callback_tracing_kind_t kind,
@@ -291,16 +292,17 @@ rocprofiler_query_callback_tracing_kind_name(rocprofiler_service_callback_tracin
  * string literal that is encoded in the read-only section of the binary (i.e. it is always
  * "allocated" and never "deallocated").
  *
- * @param kind [in] Callback tracing domain
- * @param operation [in] Enumeration id value which maps to a specific API function or event type
- * @param name [out] If non-null and the name is a constant string that does not require dynamic
+ * @param [in] kind Callback tracing domain
+ * @param [in] operation Enumeration id value which maps to a specific API function or event type
+ * @param [out] name If non-null and the name is a constant string that does not require dynamic
  * allocation, this paramter will be set to the address of the string literal, otherwise it will
  * be set to nullptr
- * @param name_len [out] If non-null, this will be assigned the length of the name (regardless of
+ * @param [out] name_len If non-null, this will be assigned the length of the name (regardless of
  * the name is a constant string or requires dynamic allocation)
- * @return rocprofiler_status_t Returns @ref ROCPROFILER_STATUS_ERROR_KIND_NOT_FOUND if the
- * domain id is not valid. Returns @ref ROCPROFILER_STATUS_SUCCESS for a valid domain regardless if
- * there is a constant string or not.
+ * @return ::rocprofiler_status_t
+ * @retval ::ROCPROFILER_STATUS_ERROR_KIND_NOT_FOUND Domain id is not valid
+ * @retval ::ROCPROFILER_STATUS_SUCCESS Valid domain provided, regardless if there is a constant
+ * string or not.
  */
 rocprofiler_status_t
 rocprofiler_query_callback_tracing_kind_operation_name(
@@ -310,20 +312,13 @@ rocprofiler_query_callback_tracing_kind_operation_name(
     uint64_t*                                   name_len) ROCPROFILER_API;
 
 /**
- * @brief Iterate over all the mappings of the callback tracing kinds and get a callback with the id
- * mapped to a constant string. The strings provided in the arg will be valid pointers for the
- * entire duration of the program. It is recommended to call this function once and cache this data
- * in the client instead of making multiple on-demand calls.
+ * @brief Iterate over all the mappings of the callback tracing kinds and get a callback for each
+ * kind.
  *
  * @param [in] callback Callback function invoked for each enumeration value in @ref
  * rocprofiler_service_callback_tracing_kind_t with the exception of the `NONE` and `LAST` values.
  * @param [in] data User data passed back into the callback
- * @return rocprofiler_status_t Returns @ref ROCPROFILER_STATUS_ERROR_KIND_NOT_FOUND on an invalid
- * domain id. Returns @ref ROCPROFILER_STATUS_ERROR_OPERATION_NOT_FOUND if the operation number is
- * not recognized for the given domain. Returns @ref ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED if
- * rocprofiler does not support providing the operation name within this domain. Returns @ref
- * ROCPROFILER_STATUS_SUCCESS for valid domain and operation regardless of whether there is a
- * constant string or not.
+ * @return ::rocprofiler_status_t
  */
 rocprofiler_status_t ROCPROFILER_API
 rocprofiler_iterate_callback_tracing_kinds(rocprofiler_callback_tracing_kind_cb_t callback,
@@ -331,15 +326,16 @@ rocprofiler_iterate_callback_tracing_kinds(rocprofiler_callback_tracing_kind_cb_
 
 /**
  * @brief Iterates over all the mappings of the operations for a given @ref
- * rocprofiler_service_callback_tracing_kind_t and invokes the callback with the kind, operation id,
- * and the string mapping to the operation id. The strings provided in the callback arg will be
- * valid pointers for the entire duration of the program. It is recommended to call this function
- * once per kind, and cache this data in the client instead of making multiple on-demand calls.
+ * rocprofiler_service_callback_tracing_kind_t and invokes the callback with the kind id, operation
+ * id, and user-provided data.
  *
  * @param [in] kind which tracing callback kind operations to iterate over
  * @param [in] callback Callback function invoked for each operation associated with @ref
  * rocprofiler_service_callback_tracing_kind_t with the exception of the `NONE` and `LAST` values.
  * @param [in] data User data passed back into the callback
+ * @return ::rocprofiler_status_t
+ * @retval ::ROCPROFILER_STATUS_ERROR_KIND_NOT_FOUND Invalid domain id
+ * @retval ::ROCPROFILER_STATUS_SUCCESS Valid domain
  */
 rocprofiler_status_t ROCPROFILER_API
 rocprofiler_iterate_callback_tracing_kind_operations(

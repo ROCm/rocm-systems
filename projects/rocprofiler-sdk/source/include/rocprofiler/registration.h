@@ -74,7 +74,7 @@ typedef struct
  *
  * @param [out] status 0 indicates rocprofiler has not been initialized (i.e. configured), 1
  * indicates rocprofiler has been initialized, -1 indicates rocprofiler is currently initializing.
- * @return rocprofiler_status_t
+ * @return ::rocprofiler_status_t
  */
 rocprofiler_status_t
 rocprofiler_is_initialized(int* status) ROCPROFILER_API;
@@ -84,7 +84,7 @@ rocprofiler_is_initialized(int* status) ROCPROFILER_API;
  *
  * @param [out] status 0 indicates rocprofiler has not been finalized, 1 indicates rocprofiler has
  * been finalized, -1 indicates rocprofiler is currently finalizing.
- * @return rocprofiler_status_t
+ * @return ::rocprofiler_status_t
  */
 rocprofiler_status_t
 rocprofiler_is_finalized(int* status) ROCPROFILER_API;

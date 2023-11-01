@@ -388,8 +388,8 @@ typedef struct
  * @brief Function for computing the unsigned 64-bit hash value in @ref rocprofiler_record_header_t
  * from a category and kind (two unsigned 32-bit values)
  *
- * @param category [in] a value from @ref rocprofiler_buffer_category_t
- * @param kind [in] depending on the category, this is the domain value, e.g., @ref
+ * @param [in] category a value from @ref rocprofiler_buffer_category_t
+ * @param [in] kind depending on the category, this is the domain value, e.g., @ref
  * rocprofiler_service_buffer_tracing_kind_t value
  * @return uint64_t hash value of category and kind
  */

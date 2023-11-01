@@ -37,7 +37,7 @@ rocprofiler_query_counter_name(rocprofiler_counter_id_t counter_id, const char**
  *
  * @param [in] counter_id
  * @param [out] instance_count
- * @return rocprofiler_status_t
+ * @return ::rocprofiler_status_t
  */
 rocprofiler_status_t ROCPROFILER_API
 rocprofiler_query_counter_instance_count(rocprofiler_agent_t      agent,

@@ -47,10 +47,13 @@ jobs:
       - name: Create Docs Directory
         run:
           mkdir -p docs
-      - name: Update Docs
+      - name: Install Conda environment
         working-directory: source/docs
         run: |
           conda env create -n rocprofiler-docs -f environment.yml
+      - name: Build Docs
+        working-directory: source/docs
+        run: |
           source activate
           conda activate rocprofiler-docs
           ../scripts/update-docs.sh
