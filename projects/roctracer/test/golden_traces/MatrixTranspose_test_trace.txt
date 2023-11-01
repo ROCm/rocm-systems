@@ -3,8 +3,8 @@
 # START (99) #############################
 <hipSetDevice id(11)	correlation_id(1) on-enter pid(1942) tid(1942)>
 <hipSetDevice id(11)	correlation_id(1) on-exit pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(2) on-enter pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(2) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(2) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(2) on-exit pid(1942) tid(1942)>
 Device 0 name: Device 687f
 <hipMalloc id(6)	correlation_id(3) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
 <hipMalloc id(6)	correlation_id(3) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0594a00000)
@@ -37,8 +37,8 @@ PASSED!
 # START (97) #############################
 <hipSetDevice id(11)	correlation_id(12) on-enter pid(1942) tid(1942)>
 <hipSetDevice id(11)	correlation_id(12) on-exit pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(13) on-enter pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(13) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(13) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(13) on-exit pid(1942) tid(1942)>
 Device 0 name: Device 687f
 <hipMalloc id(6)	correlation_id(14) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
 <hipMalloc id(6)	correlation_id(14) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
@@ -71,8 +71,8 @@ PASSED!
 # START (95) #############################
 <hipSetDevice id(11)	correlation_id(23) on-enter pid(1942) tid(1942)>
 <hipSetDevice id(11)	correlation_id(23) on-exit pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(24) on-enter pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(24) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(24) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(24) on-exit pid(1942) tid(1942)>
 Device 0 name: Device 687f
 <hipMalloc id(6)	correlation_id(25) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
 <hipMalloc id(6)	correlation_id(25) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
@@ -105,8 +105,8 @@ PASSED!
 # START (93) #############################
 <hipSetDevice id(11)	correlation_id(34) on-enter pid(1942) tid(1942)>
 <hipSetDevice id(11)	correlation_id(34) on-exit pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(35) on-enter pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(35) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(35) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(35) on-exit pid(1942) tid(1942)>
 Device 0 name: Device 687f
 <hipMalloc id(6)	correlation_id(36) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
 <hipMalloc id(6)	correlation_id(36) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
@@ -139,8 +139,8 @@ PASSED!
 # START (91) #############################
 <hipSetDevice id(11)	correlation_id(45) on-enter pid(1942) tid(1942)>
 <hipSetDevice id(11)	correlation_id(45) on-exit pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(46) on-enter pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(46) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(46) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(46) on-exit pid(1942) tid(1942)>
 Device 0 name: Device 687f
 <hipMalloc id(6)	correlation_id(47) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
 <hipMalloc id(6)	correlation_id(47) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
@@ -173,8 +173,8 @@ PASSED!
 # START (89) #############################
 <hipSetDevice id(11)	correlation_id(56) on-enter pid(1942) tid(1942)>
 <hipSetDevice id(11)	correlation_id(56) on-exit pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(57) on-enter pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(57) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(57) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(57) on-exit pid(1942) tid(1942)>
 Device 0 name: Device 687f
 <hipMalloc id(6)	correlation_id(58) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
 <hipMalloc id(6)	correlation_id(58) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
@@ -207,8 +207,8 @@ PASSED!
 # START (87) #############################
 <hipSetDevice id(11)	correlation_id(67) on-enter pid(1942) tid(1942)>
 <hipSetDevice id(11)	correlation_id(67) on-exit pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(68) on-enter pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(68) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(68) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(68) on-exit pid(1942) tid(1942)>
 Device 0 name: Device 687f
 <hipMalloc id(6)	correlation_id(69) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
 <hipMalloc id(6)	correlation_id(69) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
@@ -241,8 +241,8 @@ PASSED!
 # START (85) #############################
 <hipSetDevice id(11)	correlation_id(78) on-enter pid(1942) tid(1942)>
 <hipSetDevice id(11)	correlation_id(78) on-exit pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(79) on-enter pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(79) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(79) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(79) on-exit pid(1942) tid(1942)>
 Device 0 name: Device 687f
 <hipMalloc id(6)	correlation_id(80) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
 <hipMalloc id(6)	correlation_id(80) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
@@ -275,8 +275,8 @@ PASSED!
 # START (83) #############################
 <hipSetDevice id(11)	correlation_id(89) on-enter pid(1942) tid(1942)>
 <hipSetDevice id(11)	correlation_id(89) on-exit pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(90) on-enter pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(90) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(90) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(90) on-exit pid(1942) tid(1942)>
 Device 0 name: Device 687f
 <hipMalloc id(6)	correlation_id(91) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
 <hipMalloc id(6)	correlation_id(91) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
@@ -309,8 +309,8 @@ PASSED!
 # START (81) #############################
 <hipSetDevice id(11)	correlation_id(100) on-enter pid(1942) tid(1942)>
 <hipSetDevice id(11)	correlation_id(100) on-exit pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(101) on-enter pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(101) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(101) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(101) on-exit pid(1942) tid(1942)>
 Device 0 name: Device 687f
 <hipMalloc id(6)	correlation_id(102) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
 <hipMalloc id(6)	correlation_id(102) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
@@ -343,8 +343,8 @@ PASSED!
 # START (79) #############################
 <hipSetDevice id(11)	correlation_id(111) on-enter pid(1942) tid(1942)>
 <hipSetDevice id(11)	correlation_id(111) on-exit pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(112) on-enter pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(112) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(112) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(112) on-exit pid(1942) tid(1942)>
 Device 0 name: Device 687f
 <hipMalloc id(6)	correlation_id(113) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
 <hipMalloc id(6)	correlation_id(113) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
@@ -377,8 +377,8 @@ PASSED!
 # START (77) #############################
 <hipSetDevice id(11)	correlation_id(122) on-enter pid(1942) tid(1942)>
 <hipSetDevice id(11)	correlation_id(122) on-exit pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(123) on-enter pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(123) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(123) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(123) on-exit pid(1942) tid(1942)>
 Device 0 name: Device 687f
 <hipMalloc id(6)	correlation_id(124) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
 <hipMalloc id(6)	correlation_id(124) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
@@ -411,8 +411,8 @@ PASSED!
 # START (75) #############################
 <hipSetDevice id(11)	correlation_id(133) on-enter pid(1942) tid(1942)>
 <hipSetDevice id(11)	correlation_id(133) on-exit pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(134) on-enter pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(134) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(134) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(134) on-exit pid(1942) tid(1942)>
 Device 0 name: Device 687f
 <hipMalloc id(6)	correlation_id(135) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
 <hipMalloc id(6)	correlation_id(135) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
@@ -445,8 +445,8 @@ PASSED!
 # START (73) #############################
 <hipSetDevice id(11)	correlation_id(144) on-enter pid(1942) tid(1942)>
 <hipSetDevice id(11)	correlation_id(144) on-exit pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(145) on-enter pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(145) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(145) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(145) on-exit pid(1942) tid(1942)>
 Device 0 name: Device 687f
 <hipMalloc id(6)	correlation_id(146) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
 <hipMalloc id(6)	correlation_id(146) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
@@ -479,8 +479,8 @@ PASSED!
 # START (71) #############################
 <hipSetDevice id(11)	correlation_id(155) on-enter pid(1942) tid(1942)>
 <hipSetDevice id(11)	correlation_id(155) on-exit pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(156) on-enter pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(156) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(156) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(156) on-exit pid(1942) tid(1942)>
 Device 0 name: Device 687f
 <hipMalloc id(6)	correlation_id(157) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
 <hipMalloc id(6)	correlation_id(157) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
@@ -513,8 +513,8 @@ PASSED!
 # START (69) #############################
 <hipSetDevice id(11)	correlation_id(166) on-enter pid(1942) tid(1942)>
 <hipSetDevice id(11)	correlation_id(166) on-exit pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(167) on-enter pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(167) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(167) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(167) on-exit pid(1942) tid(1942)>
 Device 0 name: Device 687f
 <hipMalloc id(6)	correlation_id(168) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
 <hipMalloc id(6)	correlation_id(168) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
@@ -547,8 +547,8 @@ PASSED!
 # START (67) #############################
 <hipSetDevice id(11)	correlation_id(177) on-enter pid(1942) tid(1942)>
 <hipSetDevice id(11)	correlation_id(177) on-exit pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(178) on-enter pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(178) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(178) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(178) on-exit pid(1942) tid(1942)>
 Device 0 name: Device 687f
 <hipMalloc id(6)	correlation_id(179) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
 <hipMalloc id(6)	correlation_id(179) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
@@ -581,8 +581,8 @@ PASSED!
 # START (65) #############################
 <hipSetDevice id(11)	correlation_id(188) on-enter pid(1942) tid(1942)>
 <hipSetDevice id(11)	correlation_id(188) on-exit pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(189) on-enter pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(189) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(189) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(189) on-exit pid(1942) tid(1942)>
 Device 0 name: Device 687f
 <hipMalloc id(6)	correlation_id(190) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
 <hipMalloc id(6)	correlation_id(190) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
@@ -615,8 +615,8 @@ PASSED!
 # START (63) #############################
 <hipSetDevice id(11)	correlation_id(199) on-enter pid(1942) tid(1942)>
 <hipSetDevice id(11)	correlation_id(199) on-exit pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(200) on-enter pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(200) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(200) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(200) on-exit pid(1942) tid(1942)>
 Device 0 name: Device 687f
 <hipMalloc id(6)	correlation_id(201) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
 <hipMalloc id(6)	correlation_id(201) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
@@ -649,8 +649,8 @@ PASSED!
 # START (61) #############################
 <hipSetDevice id(11)	correlation_id(210) on-enter pid(1942) tid(1942)>
 <hipSetDevice id(11)	correlation_id(210) on-exit pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(211) on-enter pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(211) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(211) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(211) on-exit pid(1942) tid(1942)>
 Device 0 name: Device 687f
 <hipMalloc id(6)	correlation_id(212) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
 <hipMalloc id(6)	correlation_id(212) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
@@ -683,8 +683,8 @@ PASSED!
 # START (59) #############################
 <hipSetDevice id(11)	correlation_id(221) on-enter pid(1942) tid(1942)>
 <hipSetDevice id(11)	correlation_id(221) on-exit pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(222) on-enter pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(222) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(222) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(222) on-exit pid(1942) tid(1942)>
 Device 0 name: Device 687f
 <hipMalloc id(6)	correlation_id(223) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
 <hipMalloc id(6)	correlation_id(223) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
@@ -717,8 +717,8 @@ PASSED!
 # START (57) #############################
 <hipSetDevice id(11)	correlation_id(232) on-enter pid(1942) tid(1942)>
 <hipSetDevice id(11)	correlation_id(232) on-exit pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(233) on-enter pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(233) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(233) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(233) on-exit pid(1942) tid(1942)>
 Device 0 name: Device 687f
 <hipMalloc id(6)	correlation_id(234) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
 <hipMalloc id(6)	correlation_id(234) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
@@ -816,8 +816,8 @@ PASSED!
 # START (55) #############################
 <hipSetDevice id(11)	correlation_id(243) on-enter pid(1942) tid(1942)>
 <hipSetDevice id(11)	correlation_id(243) on-exit pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(244) on-enter pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(244) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(244) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(244) on-exit pid(1942) tid(1942)>
 Device 0 name: Device 687f
 <hipMalloc id(6)	correlation_id(245) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
 <hipMalloc id(6)	correlation_id(245) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
@@ -850,8 +850,8 @@ PASSED!
 # START (53) #############################
 <hipSetDevice id(11)	correlation_id(254) on-enter pid(1942) tid(1942)>
 <hipSetDevice id(11)	correlation_id(254) on-exit pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(255) on-enter pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(255) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(255) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(255) on-exit pid(1942) tid(1942)>
 Device 0 name: Device 687f
 <hipMalloc id(6)	correlation_id(256) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
 <hipMalloc id(6)	correlation_id(256) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
@@ -884,8 +884,8 @@ PASSED!
 # START (51) #############################
 <hipSetDevice id(11)	correlation_id(265) on-enter pid(1942) tid(1942)>
 <hipSetDevice id(11)	correlation_id(265) on-exit pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(266) on-enter pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(266) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(266) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(266) on-exit pid(1942) tid(1942)>
 Device 0 name: Device 687f
 <hipMalloc id(6)	correlation_id(267) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
 <hipMalloc id(6)	correlation_id(267) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
@@ -918,8 +918,8 @@ PASSED!
 # START (49) #############################
 <hipSetDevice id(11)	correlation_id(276) on-enter pid(1942) tid(1942)>
 <hipSetDevice id(11)	correlation_id(276) on-exit pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(277) on-enter pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(277) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(277) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(277) on-exit pid(1942) tid(1942)>
 Device 0 name: Device 687f
 <hipMalloc id(6)	correlation_id(278) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
 <hipMalloc id(6)	correlation_id(278) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
@@ -952,8 +952,8 @@ PASSED!
 # START (47) #############################
 <hipSetDevice id(11)	correlation_id(287) on-enter pid(1942) tid(1942)>
 <hipSetDevice id(11)	correlation_id(287) on-exit pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(288) on-enter pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(288) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(288) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(288) on-exit pid(1942) tid(1942)>
 Device 0 name: Device 687f
 <hipMalloc id(6)	correlation_id(289) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
 <hipMalloc id(6)	correlation_id(289) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
@@ -986,8 +986,8 @@ PASSED!
 # START (45) #############################
 <hipSetDevice id(11)	correlation_id(298) on-enter pid(1942) tid(1942)>
 <hipSetDevice id(11)	correlation_id(298) on-exit pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(299) on-enter pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(299) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(299) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(299) on-exit pid(1942) tid(1942)>
 Device 0 name: Device 687f
 <hipMalloc id(6)	correlation_id(300) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
 <hipMalloc id(6)	correlation_id(300) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
@@ -1020,8 +1020,8 @@ PASSED!
 # START (43) #############################
 <hipSetDevice id(11)	correlation_id(309) on-enter pid(1942) tid(1942)>
 <hipSetDevice id(11)	correlation_id(309) on-exit pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(310) on-enter pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(310) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(310) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(310) on-exit pid(1942) tid(1942)>
 Device 0 name: Device 687f
 <hipMalloc id(6)	correlation_id(311) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
 <hipMalloc id(6)	correlation_id(311) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
@@ -1054,8 +1054,8 @@ PASSED!
 # START (41) #############################
 <hipSetDevice id(11)	correlation_id(320) on-enter pid(1942) tid(1942)>
 <hipSetDevice id(11)	correlation_id(320) on-exit pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(321) on-enter pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(321) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(321) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(321) on-exit pid(1942) tid(1942)>
 Device 0 name: Device 687f
 <hipMalloc id(6)	correlation_id(322) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
 <hipMalloc id(6)	correlation_id(322) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
@@ -1088,8 +1088,8 @@ PASSED!
 # START (39) #############################
 <hipSetDevice id(11)	correlation_id(331) on-enter pid(1942) tid(1942)>
 <hipSetDevice id(11)	correlation_id(331) on-exit pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(332) on-enter pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(332) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(332) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(332) on-exit pid(1942) tid(1942)>
 Device 0 name: Device 687f
 <hipMalloc id(6)	correlation_id(333) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
 <hipMalloc id(6)	correlation_id(333) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
@@ -1122,8 +1122,8 @@ PASSED!
 # START (37) #############################
 <hipSetDevice id(11)	correlation_id(342) on-enter pid(1942) tid(1942)>
 <hipSetDevice id(11)	correlation_id(342) on-exit pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(343) on-enter pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(343) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(343) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(343) on-exit pid(1942) tid(1942)>
 Device 0 name: Device 687f
 <hipMalloc id(6)	correlation_id(344) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
 <hipMalloc id(6)	correlation_id(344) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
@@ -1156,8 +1156,8 @@ PASSED!
 # START (35) #############################
 <hipSetDevice id(11)	correlation_id(353) on-enter pid(1942) tid(1942)>
 <hipSetDevice id(11)	correlation_id(353) on-exit pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(354) on-enter pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(354) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(354) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(354) on-exit pid(1942) tid(1942)>
 Device 0 name: Device 687f
 <hipMalloc id(6)	correlation_id(355) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
 <hipMalloc id(6)	correlation_id(355) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
@@ -1190,8 +1190,8 @@ PASSED!
 # START (33) #############################
 <hipSetDevice id(11)	correlation_id(364) on-enter pid(1942) tid(1942)>
 <hipSetDevice id(11)	correlation_id(364) on-exit pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(365) on-enter pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(365) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(365) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(365) on-exit pid(1942) tid(1942)>
 Device 0 name: Device 687f
 <hipMalloc id(6)	correlation_id(366) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
 <hipMalloc id(6)	correlation_id(366) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
@@ -1224,8 +1224,8 @@ PASSED!
 # START (31) #############################
 <hipSetDevice id(11)	correlation_id(375) on-enter pid(1942) tid(1942)>
 <hipSetDevice id(11)	correlation_id(375) on-exit pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(376) on-enter pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(376) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(376) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(376) on-exit pid(1942) tid(1942)>
 Device 0 name: Device 687f
 <hipMalloc id(6)	correlation_id(377) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
 <hipMalloc id(6)	correlation_id(377) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
@@ -1258,8 +1258,8 @@ PASSED!
 # START (29) #############################
 <hipSetDevice id(11)	correlation_id(386) on-enter pid(1942) tid(1942)>
 <hipSetDevice id(11)	correlation_id(386) on-exit pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(387) on-enter pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(387) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(387) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(387) on-exit pid(1942) tid(1942)>
 Device 0 name: Device 687f
 <hipMalloc id(6)	correlation_id(388) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
 <hipMalloc id(6)	correlation_id(388) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
@@ -1292,8 +1292,8 @@ PASSED!
 # START (27) #############################
 <hipSetDevice id(11)	correlation_id(397) on-enter pid(1942) tid(1942)>
 <hipSetDevice id(11)	correlation_id(397) on-exit pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(398) on-enter pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(398) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(398) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(398) on-exit pid(1942) tid(1942)>
 Device 0 name: Device 687f
 <hipMalloc id(6)	correlation_id(399) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
 <hipMalloc id(6)	correlation_id(399) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
@@ -1326,8 +1326,8 @@ PASSED!
 # START (25) #############################
 <hipSetDevice id(11)	correlation_id(408) on-enter pid(1942) tid(1942)>
 <hipSetDevice id(11)	correlation_id(408) on-exit pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(409) on-enter pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(409) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(409) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(409) on-exit pid(1942) tid(1942)>
 Device 0 name: Device 687f
 <hipMalloc id(6)	correlation_id(410) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
 <hipMalloc id(6)	correlation_id(410) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
@@ -1360,8 +1360,8 @@ PASSED!
 # START (23) #############################
 <hipSetDevice id(11)	correlation_id(419) on-enter pid(1942) tid(1942)>
 <hipSetDevice id(11)	correlation_id(419) on-exit pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(420) on-enter pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(420) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(420) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(420) on-exit pid(1942) tid(1942)>
 Device 0 name: Device 687f
 <hipMalloc id(6)	correlation_id(421) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
 <hipMalloc id(6)	correlation_id(421) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
@@ -1394,8 +1394,8 @@ PASSED!
 # START (21) #############################
 <hipSetDevice id(11)	correlation_id(430) on-enter pid(1942) tid(1942)>
 <hipSetDevice id(11)	correlation_id(430) on-exit pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(431) on-enter pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(431) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(431) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(431) on-exit pid(1942) tid(1942)>
 Device 0 name: Device 687f
 <hipMalloc id(6)	correlation_id(432) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
 <hipMalloc id(6)	correlation_id(432) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
@@ -1428,8 +1428,8 @@ PASSED!
 # START (19) #############################
 <hipSetDevice id(11)	correlation_id(441) on-enter pid(1942) tid(1942)>
 <hipSetDevice id(11)	correlation_id(441) on-exit pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(442) on-enter pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(442) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(442) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(442) on-exit pid(1942) tid(1942)>
 Device 0 name: Device 687f
 <hipMalloc id(6)	correlation_id(443) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
 <hipMalloc id(6)	correlation_id(443) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
@@ -1462,8 +1462,8 @@ PASSED!
 # START (17) #############################
 <hipSetDevice id(11)	correlation_id(452) on-enter pid(1942) tid(1942)>
 <hipSetDevice id(11)	correlation_id(452) on-exit pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(453) on-enter pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(453) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(453) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(453) on-exit pid(1942) tid(1942)>
 Device 0 name: Device 687f
 <hipMalloc id(6)	correlation_id(454) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
 <hipMalloc id(6)	correlation_id(454) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
@@ -1496,8 +1496,8 @@ PASSED!
 # START (15) #############################
 <hipSetDevice id(11)	correlation_id(463) on-enter pid(1942) tid(1942)>
 <hipSetDevice id(11)	correlation_id(463) on-exit pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(464) on-enter pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(464) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(464) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(464) on-exit pid(1942) tid(1942)>
 Device 0 name: Device 687f
 <hipMalloc id(6)	correlation_id(465) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
 <hipMalloc id(6)	correlation_id(465) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
@@ -1595,8 +1595,8 @@ PASSED!
 # START (13) #############################
 <hipSetDevice id(11)	correlation_id(474) on-enter pid(1942) tid(1942)>
 <hipSetDevice id(11)	correlation_id(474) on-exit pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(475) on-enter pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(475) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(475) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(475) on-exit pid(1942) tid(1942)>
 Device 0 name: Device 687f
 <hipMalloc id(6)	correlation_id(476) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
 <hipMalloc id(6)	correlation_id(476) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
@@ -1629,8 +1629,8 @@ PASSED!
 # START (11) #############################
 <hipSetDevice id(11)	correlation_id(485) on-enter pid(1942) tid(1942)>
 <hipSetDevice id(11)	correlation_id(485) on-exit pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(486) on-enter pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(486) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(486) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(486) on-exit pid(1942) tid(1942)>
 Device 0 name: Device 687f
 <hipMalloc id(6)	correlation_id(487) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
 <hipMalloc id(6)	correlation_id(487) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
@@ -1663,8 +1663,8 @@ PASSED!
 # START (9) #############################
 <hipSetDevice id(11)	correlation_id(496) on-enter pid(1942) tid(1942)>
 <hipSetDevice id(11)	correlation_id(496) on-exit pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(497) on-enter pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(497) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(497) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(497) on-exit pid(1942) tid(1942)>
 Device 0 name: Device 687f
 <hipMalloc id(6)	correlation_id(498) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
 <hipMalloc id(6)	correlation_id(498) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
@@ -1697,8 +1697,8 @@ PASSED!
 # START (7) #############################
 <hipSetDevice id(11)	correlation_id(507) on-enter pid(1942) tid(1942)>
 <hipSetDevice id(11)	correlation_id(507) on-exit pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(508) on-enter pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(508) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(508) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(508) on-exit pid(1942) tid(1942)>
 Device 0 name: Device 687f
 <hipMalloc id(6)	correlation_id(509) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
 <hipMalloc id(6)	correlation_id(509) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
@@ -1731,8 +1731,8 @@ PASSED!
 # START (5) #############################
 <hipSetDevice id(11)	correlation_id(518) on-enter pid(1942) tid(1942)>
 <hipSetDevice id(11)	correlation_id(518) on-exit pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(519) on-enter pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(519) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(519) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(519) on-exit pid(1942) tid(1942)>
 Device 0 name: Device 687f
 <hipMalloc id(6)	correlation_id(520) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
 <hipMalloc id(6)	correlation_id(520) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
@@ -1765,8 +1765,8 @@ PASSED!
 # START (3) #############################
 <hipSetDevice id(11)	correlation_id(529) on-enter pid(1942) tid(1942)>
 <hipSetDevice id(11)	correlation_id(529) on-exit pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(530) on-enter pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(530) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(530) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(530) on-exit pid(1942) tid(1942)>
 Device 0 name: Device 687f
 <hipMalloc id(6)	correlation_id(531) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
 <hipMalloc id(6)	correlation_id(531) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)
@@ -1799,8 +1799,8 @@ PASSED!
 # START (1) #############################
 <hipSetDevice id(11)	correlation_id(540) on-enter pid(1942) tid(1942)>
 <hipSetDevice id(11)	correlation_id(540) on-exit pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(541) on-enter pid(1942) tid(1942)>
-<hipGetDeviceProperties id(172)	correlation_id(541) on-exit pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(541) on-enter pid(1942) tid(1942)>
+<hipGetDevicePropertiesR0600 id(172)	correlation_id(541) on-exit pid(1942) tid(1942)>
 Device 0 name: Device 687f
 <hipMalloc id(6)	correlation_id(542) on-enter pid(1942) tid(1942)> ptr(0x7fff13900c60) size(0x400000)
 <hipMalloc id(6)	correlation_id(542) on-exit pid(1942) tid(1942)> *ptr(0x0x7f0595600000)

@@ -197,7 +197,14 @@ def gen_cppheader(infilepath, outfilepath, rank):
       header_s = \
         '#ifndef INC_' + apiname + '_OSTREAM_OPS_H_\n' + \
         '#define INC_' + apiname + '_OSTREAM_OPS_H_\n' + \
-        '\n' + \
+        '\n'
+      if apiname.upper() == 'HIP':
+        header_s = \
+          header_s + \
+          '#include <hip/hip_runtime.h>\n' + \
+          '#include <hip/hip_deprecated.h>\n'
+      header_s = \
+        header_s + \
         '#include "roctracer.h"\n' + \
         '\n' + \
         '#ifdef __cplusplus\n' + \

@@ -2,8 +2,8 @@
 # START (99) #############################
 <hipSetDevice id(186)	correlation_id(1) on-enter pid(877926) tid(877926)>
 <hipSetDevice id(186)	correlation_id(1) on-exit pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(2) on-enter pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(2) on-exit pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(2) on-enter pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(2) on-exit pid(877926) tid(877926)>
 Device 0 name: AMD Radeon VII
 <hipMalloc id(108)	correlation_id(3) on-enter pid(877926) tid(877926)> ptr(0x7ffcb1cb2190) size(0x400000)
 <hipMalloc id(108)	correlation_id(3) on-exit pid(877926) tid(877926)> *ptr(0x0x7fc7e1c00000)
@@ -36,8 +36,8 @@ PASSED!
 # START (97) #############################
 <hipSetDevice id(186)	correlation_id(12) on-enter pid(877926) tid(877926)>
 <hipSetDevice id(186)	correlation_id(12) on-exit pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(13) on-enter pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(13) on-exit pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(13) on-enter pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(13) on-exit pid(877926) tid(877926)>
 Device 0 name: AMD Radeon VII
 <hipMalloc id(108)	correlation_id(14) on-enter pid(877926) tid(877926)> ptr(0x7ffcb1cb2190) size(0x400000)
 <hipMalloc id(108)	correlation_id(14) on-exit pid(877926) tid(877926)> *ptr(0x0x7fc7e2800000)
@@ -70,8 +70,8 @@ PASSED!
 # START (95) #############################
 <hipSetDevice id(186)	correlation_id(23) on-enter pid(877926) tid(877926)>
 <hipSetDevice id(186)	correlation_id(23) on-exit pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(24) on-enter pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(24) on-exit pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(24) on-enter pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(24) on-exit pid(877926) tid(877926)>
 Device 0 name: AMD Radeon VII
 <hipMalloc id(108)	correlation_id(25) on-enter pid(877926) tid(877926)> ptr(0x7ffcb1cb2190) size(0x400000)
 <hipMalloc id(108)	correlation_id(25) on-exit pid(877926) tid(877926)> *ptr(0x0x7fc7e2800000)
@@ -104,12 +104,12 @@ PASSED!
 # START (93) #############################
 <hipSetDevice id(186)	correlation_id(34) on-enter pid(877926) tid(877926)>
 <hipSetDevice id(186)	correlation_id(34) on-exit pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(35) on-enter pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(35) on-exit pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(35) on-enter pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(35) on-exit pid(877926) tid(877926)>
 Device 0 name: AMD Radeon VII
 	Activity records:
 	hipSetDevice	correlation_id(1) time_ns(4494964957948720:4494964958022520) process_id(877926) thread_id(877926)
-	hipGetDeviceProperties	correlation_id(2) time_ns(4494964958028761:4494964958036436) process_id(877926) thread_id(877926)
+	hipGetDevicePropertiesR0600	correlation_id(2) time_ns(4494964958028761:4494964958036436) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(3) time_ns(4494964959015642:4494964959188518) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(4) time_ns(4494964959199288:4494964959347988) process_id(877926) thread_id(877926)
 	CopyHostToDevice	correlation_id(5) time_ns(4494965176650140:4494965176957179) device_id(0) queue_id(0) bytes(0x0)
@@ -130,7 +130,7 @@ Device 0 name: AMD Radeon VII
 	EXT_API	correlation_id(11) time_ns(0:0) external_id(31)
 	hipFree	correlation_id(11) time_ns(4494965189829986:4494965189850174) process_id(877926) thread_id(877926)
 	hipSetDevice	correlation_id(12) time_ns(4494965204041685:4494965204066181) process_id(877926) thread_id(877926)
-	hipGetDeviceProperties	correlation_id(13) time_ns(4494965204067864:4494965204073214) process_id(877926) thread_id(877926)
+	hipGetDevicePropertiesR0600	correlation_id(13) time_ns(4494965204067864:4494965204073214) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(14) time_ns(4494965204682343:4494965204935060) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(15) time_ns(4494965204936212:4494965205065065) process_id(877926) thread_id(877926)
 	CopyHostToDevice	correlation_id(16) time_ns(4494965206338939:4494965206640537) device_id(0) queue_id(0) bytes(0x0)
@@ -151,7 +151,7 @@ Device 0 name: AMD Radeon VII
 	EXT_API	correlation_id(22) time_ns(0:0) external_id(31)
 	hipFree	correlation_id(22) time_ns(4494965217603739:4494965217626251) process_id(877926) thread_id(877926)
 	hipSetDevice	correlation_id(23) time_ns(4494965232061580:4494965232086868) process_id(877926) thread_id(877926)
-	hipGetDeviceProperties	correlation_id(24) time_ns(4494965232088591:4494965232093450) process_id(877926) thread_id(877926)
+	hipGetDevicePropertiesR0600	correlation_id(24) time_ns(4494965232088591:4494965232093450) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(25) time_ns(4494965232701416:4494965232956377) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(26) time_ns(4494965232957760:4494965233086032) process_id(877926) thread_id(877926)
 	CopyHostToDevice	correlation_id(27) time_ns(4494965234316878:4494965234617997) device_id(0) queue_id(0) bytes(0x0)
@@ -203,8 +203,8 @@ PASSED!
 # START (91) #############################
 <hipSetDevice id(186)	correlation_id(45) on-enter pid(877926) tid(877926)>
 <hipSetDevice id(186)	correlation_id(45) on-exit pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(46) on-enter pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(46) on-exit pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(46) on-enter pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(46) on-exit pid(877926) tid(877926)>
 Device 0 name: AMD Radeon VII
 <hipMalloc id(108)	correlation_id(47) on-enter pid(877926) tid(877926)> ptr(0x7ffcb1cb2190) size(0x400000)
 <hipMalloc id(108)	correlation_id(47) on-exit pid(877926) tid(877926)> *ptr(0x0x7fc7e2800000)
@@ -237,8 +237,8 @@ PASSED!
 # START (89) #############################
 <hipSetDevice id(186)	correlation_id(56) on-enter pid(877926) tid(877926)>
 <hipSetDevice id(186)	correlation_id(56) on-exit pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(57) on-enter pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(57) on-exit pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(57) on-enter pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(57) on-exit pid(877926) tid(877926)>
 Device 0 name: AMD Radeon VII
 <hipMalloc id(108)	correlation_id(58) on-enter pid(877926) tid(877926)> ptr(0x7ffcb1cb2190) size(0x400000)
 <hipMalloc id(108)	correlation_id(58) on-exit pid(877926) tid(877926)> *ptr(0x0x7fc7e2800000)
@@ -271,14 +271,14 @@ PASSED!
 # START (87) #############################
 <hipSetDevice id(186)	correlation_id(67) on-enter pid(877926) tid(877926)>
 <hipSetDevice id(186)	correlation_id(67) on-exit pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(68) on-enter pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(68) on-exit pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(68) on-enter pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(68) on-exit pid(877926) tid(877926)>
 Device 0 name: AMD Radeon VII
 <hipMalloc id(108)	correlation_id(69) on-enter pid(877926) tid(877926)> ptr(0x7ffcb1cb2190) size(0x400000)
 <hipMalloc id(108)	correlation_id(69) on-exit pid(877926) tid(877926)> *ptr(0x0x7fc7e2800000)
 <hipMalloc id(108)	correlation_id(70) on-enter pid(877926) tid(877926)> ptr(0x7ffcb1cb2188) size(0x400000)
 	Activity records:
-	hipGetDeviceProperties	correlation_id(35) time_ns(4494965260111582:4494965260116351) process_id(877926) thread_id(877926)
+	hipGetDevicePropertiesR0600	correlation_id(35) time_ns(4494965260111582:4494965260116351) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(36) time_ns(4494965260763622:4494965261020185) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(37) time_ns(4494965261021568:4494965261153887) process_id(877926) thread_id(877926)
 	CopyHostToDevice	correlation_id(38) time_ns(4494965262331477:4494965262632596) device_id(0) queue_id(0) bytes(0x0)
@@ -299,7 +299,7 @@ Device 0 name: AMD Radeon VII
 	EXT_API	correlation_id(44) time_ns(0:0) external_id(31)
 	hipFree	correlation_id(44) time_ns(4494965273501501:4494965273515467) process_id(877926) thread_id(877926)
 	hipSetDevice	correlation_id(45) time_ns(4494965288028895:4494965288054393) process_id(877926) thread_id(877926)
-	hipGetDeviceProperties	correlation_id(46) time_ns(4494965288055966:4494965288060875) process_id(877926) thread_id(877926)
+	hipGetDevicePropertiesR0600	correlation_id(46) time_ns(4494965288055966:4494965288060875) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(47) time_ns(4494965288668321:4494965288923442) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(48) time_ns(4494965288924564:4494965289062965) process_id(877926) thread_id(877926)
 	CopyHostToDevice	correlation_id(49) time_ns(4494965290315038:4494965290616797) device_id(0) queue_id(0) bytes(0x0)
@@ -320,7 +320,7 @@ Device 0 name: AMD Radeon VII
 	EXT_API	correlation_id(55) time_ns(0:0) external_id(31)
 	hipFree	correlation_id(55) time_ns(4494965301519494:4494965301534202) process_id(877926) thread_id(877926)
 	hipSetDevice	correlation_id(56) time_ns(4494965316040194:4494965316064620) process_id(877926) thread_id(877926)
-	hipGetDeviceProperties	correlation_id(57) time_ns(4494965316066413:4494965316071653) process_id(877926) thread_id(877926)
+	hipGetDevicePropertiesR0600	correlation_id(57) time_ns(4494965316066413:4494965316071653) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(58) time_ns(4494965316681383:4494965316929451) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(59) time_ns(4494965316930332:4494965317040380) process_id(877926) thread_id(877926)
 	CopyHostToDevice	correlation_id(60) time_ns(4494965318325943:4494965318627542) device_id(0) queue_id(0) bytes(0x0)
@@ -341,7 +341,7 @@ Device 0 name: AMD Radeon VII
 	EXT_API	correlation_id(66) time_ns(0:0) external_id(31)
 	hipFree	correlation_id(66) time_ns(4494965329507309:4494965329521706) process_id(877926) thread_id(877926)
 	hipSetDevice	correlation_id(67) time_ns(4494965344065922:4494965344099144) process_id(877926) thread_id(877926)
-	hipGetDeviceProperties	correlation_id(68) time_ns(4494965344100838:4494965344105797) process_id(877926) thread_id(877926)
+	hipGetDevicePropertiesR0600	correlation_id(68) time_ns(4494965344100838:4494965344105797) process_id(877926) thread_id(877926)
 <hipMalloc id(108)	correlation_id(70) on-exit pid(877926) tid(877926)> *ptr(0x0x7fc7e0c00000)
 <hipMemcpy id(125)	correlation_id(71) on-enter pid(877926) tid(877926)> dst(0x7fc7e2800000) src(0x1bdfbf0) size(0x400000) kind(1)
 <hipMemcpy id(125)	correlation_id(71) on-exit pid(877926) tid(877926)>
@@ -370,8 +370,8 @@ PASSED!
 # START (85) #############################
 <hipSetDevice id(186)	correlation_id(78) on-enter pid(877926) tid(877926)>
 <hipSetDevice id(186)	correlation_id(78) on-exit pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(79) on-enter pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(79) on-exit pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(79) on-enter pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(79) on-exit pid(877926) tid(877926)>
 Device 0 name: AMD Radeon VII
 <hipMalloc id(108)	correlation_id(80) on-enter pid(877926) tid(877926)> ptr(0x7ffcb1cb2190) size(0x400000)
 <hipMalloc id(108)	correlation_id(80) on-exit pid(877926) tid(877926)> *ptr(0x0x7fc7e2800000)
@@ -404,8 +404,8 @@ PASSED!
 # START (83) #############################
 <hipSetDevice id(186)	correlation_id(89) on-enter pid(877926) tid(877926)>
 <hipSetDevice id(186)	correlation_id(89) on-exit pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(90) on-enter pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(90) on-exit pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(90) on-enter pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(90) on-exit pid(877926) tid(877926)>
 Device 0 name: AMD Radeon VII
 <hipMalloc id(108)	correlation_id(91) on-enter pid(877926) tid(877926)> ptr(0x7ffcb1cb2190) size(0x400000)
 <hipMalloc id(108)	correlation_id(91) on-exit pid(877926) tid(877926)> *ptr(0x0x7fc7e2800000)
@@ -438,8 +438,8 @@ PASSED!
 # START (81) #############################
 <hipSetDevice id(186)	correlation_id(100) on-enter pid(877926) tid(877926)>
 <hipSetDevice id(186)	correlation_id(100) on-exit pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(101) on-enter pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(101) on-exit pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(101) on-enter pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(101) on-exit pid(877926) tid(877926)>
 Device 0 name: AMD Radeon VII
 <hipMalloc id(108)	correlation_id(102) on-enter pid(877926) tid(877926)> ptr(0x7ffcb1cb2190) size(0x400000)
 <hipMalloc id(108)	correlation_id(102) on-exit pid(877926) tid(877926)> *ptr(0x0x7fc7e2800000)
@@ -467,7 +467,7 @@ Device 0 name: AMD Radeon VII
 	EXT_API	correlation_id(77) time_ns(0:0) external_id(31)
 	hipFree	correlation_id(77) time_ns(4494965357400815:4494965357413810) process_id(877926) thread_id(877926)
 	hipSetDevice	correlation_id(78) time_ns(4494965372044830:4494965372069226) process_id(877926) thread_id(877926)
-	hipGetDeviceProperties	correlation_id(79) time_ns(4494965372070919:4494965372075618) process_id(877926) thread_id(877926)
+	hipGetDevicePropertiesR0600	correlation_id(79) time_ns(4494965372070919:4494965372075618) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(80) time_ns(4494965372687151:4494965372924548) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(81) time_ns(4494965372925540:4494965373035207) process_id(877926) thread_id(877926)
 	CopyHostToDevice	correlation_id(82) time_ns(4494965374326776:4494965374627895) device_id(0) queue_id(0) bytes(0x0)
@@ -488,7 +488,7 @@ Device 0 name: AMD Radeon VII
 	EXT_API	correlation_id(88) time_ns(0:0) external_id(31)
 	hipFree	correlation_id(88) time_ns(4494965385517184:4494965385532543) process_id(877926) thread_id(877926)
 	hipSetDevice	correlation_id(89) time_ns(4494965400054896:4494965400079142) process_id(877926) thread_id(877926)
-	hipGetDeviceProperties	correlation_id(90) time_ns(4494965400080975:4494965400086295) process_id(877926) thread_id(877926)
+	hipGetDevicePropertiesR0600	correlation_id(90) time_ns(4494965400080975:4494965400086295) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(91) time_ns(4494965400697037:4494965400935467) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(92) time_ns(4494965400936508:4494965401045354) process_id(877926) thread_id(877926)
 	CopyHostToDevice	correlation_id(93) time_ns(4494965402318373:4494965402620132) device_id(0) queue_id(0) bytes(0x0)
@@ -509,7 +509,7 @@ Device 0 name: AMD Radeon VII
 	EXT_API	correlation_id(99) time_ns(0:0) external_id(31)
 	hipFree	correlation_id(99) time_ns(4494965413484119:4494965413499949) process_id(877926) thread_id(877926)
 	hipSetDevice	correlation_id(100) time_ns(4494965428104369:4494965428129506) process_id(877926) thread_id(877926)
-	hipGetDeviceProperties	correlation_id(101) time_ns(4494965428131289:4494965428136139) process_id(877926) thread_id(877926)
+	hipGetDevicePropertiesR0600	correlation_id(101) time_ns(4494965428131289:4494965428136139) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(102) time_ns(4494965428755336:4494965428982905) process_id(877926) thread_id(877926)
 <hipMemcpy id(125)	correlation_id(104) on-exit pid(877926) tid(877926)>
 rocTX <"before hipLaunchKernel pid(877926) tid(877926)">
@@ -537,8 +537,8 @@ PASSED!
 # START (79) #############################
 <hipSetDevice id(186)	correlation_id(111) on-enter pid(877926) tid(877926)>
 <hipSetDevice id(186)	correlation_id(111) on-exit pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(112) on-enter pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(112) on-exit pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(112) on-enter pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(112) on-exit pid(877926) tid(877926)>
 Device 0 name: AMD Radeon VII
 <hipMalloc id(108)	correlation_id(113) on-enter pid(877926) tid(877926)> ptr(0x7ffcb1cb2190) size(0x400000)
 <hipMalloc id(108)	correlation_id(113) on-exit pid(877926) tid(877926)> *ptr(0x0x7fc7e2800000)
@@ -571,8 +571,8 @@ PASSED!
 # START (77) #############################
 <hipSetDevice id(186)	correlation_id(122) on-enter pid(877926) tid(877926)>
 <hipSetDevice id(186)	correlation_id(122) on-exit pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(123) on-enter pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(123) on-exit pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(123) on-enter pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(123) on-exit pid(877926) tid(877926)>
 Device 0 name: AMD Radeon VII
 <hipMalloc id(108)	correlation_id(124) on-enter pid(877926) tid(877926)> ptr(0x7ffcb1cb2190) size(0x400000)
 <hipMalloc id(108)	correlation_id(124) on-exit pid(877926) tid(877926)> *ptr(0x0x7fc7e2800000)
@@ -605,8 +605,8 @@ PASSED!
 # START (75) #############################
 <hipSetDevice id(186)	correlation_id(133) on-enter pid(877926) tid(877926)>
 <hipSetDevice id(186)	correlation_id(133) on-exit pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(134) on-enter pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(134) on-exit pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(134) on-enter pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(134) on-exit pid(877926) tid(877926)>
 Device 0 name: AMD Radeon VII
 <hipMalloc id(108)	correlation_id(135) on-enter pid(877926) tid(877926)> ptr(0x7ffcb1cb2190) size(0x400000)
 <hipMalloc id(108)	correlation_id(135) on-exit pid(877926) tid(877926)> *ptr(0x0x7fc7e2800000)
@@ -645,7 +645,7 @@ rocTX <"hipMemcpy pid(877926) tid(877926)">
 	EXT_API	correlation_id(110) time_ns(0:0) external_id(31)
 	hipFree	correlation_id(110) time_ns(4494965441493084:4494965441513743) process_id(877926) thread_id(877926)
 	hipSetDevice	correlation_id(111) time_ns(4494965456099507:4494965456125165) process_id(877926) thread_id(877926)
-	hipGetDeviceProperties	correlation_id(112) time_ns(4494965456127039:4494965456131888) process_id(877926) thread_id(877926)
+	hipGetDevicePropertiesR0600	correlation_id(112) time_ns(4494965456127039:4494965456131888) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(113) time_ns(4494965456748481:4494965456980709) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(114) time_ns(4494965456981640:4494965457090917) process_id(877926) thread_id(877926)
 	CopyHostToDevice	correlation_id(115) time_ns(4494965458327520:4494965458628800) device_id(0) queue_id(0) bytes(0x0)
@@ -666,7 +666,7 @@ rocTX <"hipMemcpy pid(877926) tid(877926)">
 	EXT_API	correlation_id(121) time_ns(0:0) external_id(31)
 	hipFree	correlation_id(121) time_ns(4494965469510316:4494965469529572) process_id(877926) thread_id(877926)
 	hipSetDevice	correlation_id(122) time_ns(4494965484086380:4494965484109844) process_id(877926) thread_id(877926)
-	hipGetDeviceProperties	correlation_id(123) time_ns(4494965484111848:4494965484124832) process_id(877926) thread_id(877926)
+	hipGetDevicePropertiesR0600	correlation_id(123) time_ns(4494965484111848:4494965484124832) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(124) time_ns(4494965484731116:4494965484970958) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(125) time_ns(4494965484971930:4494965485082709) process_id(877926) thread_id(877926)
 	CopyHostToDevice	correlation_id(126) time_ns(4494965486321520:4494965486622640) device_id(0) queue_id(0) bytes(0x0)
@@ -687,7 +687,7 @@ rocTX <"hipMemcpy pid(877926) tid(877926)">
 	EXT_API	correlation_id(132) time_ns(0:0) external_id(31)
 	hipFree	correlation_id(132) time_ns(4494965497478082:4494965497493782) process_id(877926) thread_id(877926)
 	hipSetDevice	correlation_id(133) time_ns(4494965512111156:4494965512135522) process_id(877926) thread_id(877926)
-	hipGetDeviceProperties	correlation_id(134) time_ns(4494965512137185:4494965512141994) process_id(877926) thread_id(877926)
+	hipGetDevicePropertiesR0600	correlation_id(134) time_ns(4494965512137185:4494965512141994) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(135) time_ns(4494965512750121:4494965512993950) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(136) time_ns(4494965512994862:4494965513104138) process_id(877926) thread_id(877926)
 <hipMemcpy id(125)	correlation_id(141) on-exit pid(877926) tid(877926)>
@@ -704,8 +704,8 @@ PASSED!
 # START (73) #############################
 <hipSetDevice id(186)	correlation_id(144) on-enter pid(877926) tid(877926)>
 <hipSetDevice id(186)	correlation_id(144) on-exit pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(145) on-enter pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(145) on-exit pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(145) on-enter pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(145) on-exit pid(877926) tid(877926)>
 Device 0 name: AMD Radeon VII
 <hipMalloc id(108)	correlation_id(146) on-enter pid(877926) tid(877926)> ptr(0x7ffcb1cb2190) size(0x400000)
 <hipMalloc id(108)	correlation_id(146) on-exit pid(877926) tid(877926)> *ptr(0x0x7fc7e2800000)
@@ -738,8 +738,8 @@ PASSED!
 # START (71) #############################
 <hipSetDevice id(186)	correlation_id(155) on-enter pid(877926) tid(877926)>
 <hipSetDevice id(186)	correlation_id(155) on-exit pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(156) on-enter pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(156) on-exit pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(156) on-enter pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(156) on-exit pid(877926) tid(877926)>
 Device 0 name: AMD Radeon VII
 <hipMalloc id(108)	correlation_id(157) on-enter pid(877926) tid(877926)> ptr(0x7ffcb1cb2190) size(0x400000)
 <hipMalloc id(108)	correlation_id(157) on-exit pid(877926) tid(877926)> *ptr(0x0x7fc7e2800000)
@@ -772,8 +772,8 @@ PASSED!
 # START (69) #############################
 <hipSetDevice id(186)	correlation_id(166) on-enter pid(877926) tid(877926)>
 <hipSetDevice id(186)	correlation_id(166) on-exit pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(167) on-enter pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(167) on-exit pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(167) on-enter pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(167) on-exit pid(877926) tid(877926)>
 Device 0 name: AMD Radeon VII
 <hipMalloc id(108)	correlation_id(168) on-enter pid(877926) tid(877926)> ptr(0x7ffcb1cb2190) size(0x400000)
 <hipMalloc id(108)	correlation_id(168) on-exit pid(877926) tid(877926)> *ptr(0x0x7fc7e2800000)
@@ -811,7 +811,7 @@ rocTX <"hipMemcpy pid(877926) tid(877926)">
 	EXT_API	correlation_id(143) time_ns(0:0) external_id(31)
 	hipFree	correlation_id(143) time_ns(4494965525839892:4494965525858648) process_id(877926) thread_id(877926)
 	hipSetDevice	correlation_id(144) time_ns(4494965540093971:4494965540120321) process_id(877926) thread_id(877926)
-	hipGetDeviceProperties	correlation_id(145) time_ns(4494965540122354:4494965540127214) process_id(877926) thread_id(877926)
+	hipGetDevicePropertiesR0600	correlation_id(145) time_ns(4494965540122354:4494965540127214) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(146) time_ns(4494965540734689:4494965540973179) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(147) time_ns(4494965540974131:4494965541082906) process_id(877926) thread_id(877926)
 	CopyHostToDevice	correlation_id(148) time_ns(4494965542319629:4494965542621388) device_id(0) queue_id(0) bytes(0x0)
@@ -832,7 +832,7 @@ rocTX <"hipMemcpy pid(877926) tid(877926)">
 	EXT_API	correlation_id(154) time_ns(0:0) external_id(31)
 	hipFree	correlation_id(154) time_ns(4494965553776181:4494965553791450) process_id(877926) thread_id(877926)
 	hipSetDevice	correlation_id(155) time_ns(4494965568074301:4494965568099389) process_id(877926) thread_id(877926)
-	hipGetDeviceProperties	correlation_id(156) time_ns(4494965568101833:4494965568106622) process_id(877926) thread_id(877926)
+	hipGetDevicePropertiesR0600	correlation_id(156) time_ns(4494965568101833:4494965568106622) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(157) time_ns(4494965568722774:4494965568966153) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(158) time_ns(4494965568967325:4494965569077553) process_id(877926) thread_id(877926)
 	CopyHostToDevice	correlation_id(159) time_ns(4494965570328365:4494965570629644) device_id(0) queue_id(0) bytes(0x0)
@@ -853,7 +853,7 @@ rocTX <"hipMemcpy pid(877926) tid(877926)">
 	EXT_API	correlation_id(165) time_ns(0:0) external_id(31)
 	hipFree	correlation_id(165) time_ns(4494965581520797:4494965581540064) process_id(877926) thread_id(877926)
 	hipSetDevice	correlation_id(166) time_ns(4494965596144443:4494965596170362) process_id(877926) thread_id(877926)
-	hipGetDeviceProperties	correlation_id(167) time_ns(4494965596172115:4494965596176984) process_id(877926) thread_id(877926)
+	hipGetDevicePropertiesR0600	correlation_id(167) time_ns(4494965596172115:4494965596176984) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(168) time_ns(4494965596785953:4494965597015626) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(169) time_ns(4494965597016688:4494965597135452) process_id(877926) thread_id(877926)
 	CopyHostToDevice	correlation_id(170) time_ns(4494965598321624:4494965598622904) device_id(0) queue_id(0) bytes(0x0)
@@ -871,8 +871,8 @@ PASSED!
 # START (67) #############################
 <hipSetDevice id(186)	correlation_id(177) on-enter pid(877926) tid(877926)>
 <hipSetDevice id(186)	correlation_id(177) on-exit pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(178) on-enter pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(178) on-exit pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(178) on-enter pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(178) on-exit pid(877926) tid(877926)>
 Device 0 name: AMD Radeon VII
 <hipMalloc id(108)	correlation_id(179) on-enter pid(877926) tid(877926)> ptr(0x7ffcb1cb2190) size(0x400000)
 <hipMalloc id(108)	correlation_id(179) on-exit pid(877926) tid(877926)> *ptr(0x0x7fc7e2800000)
@@ -905,8 +905,8 @@ PASSED!
 # START (65) #############################
 <hipSetDevice id(186)	correlation_id(188) on-enter pid(877926) tid(877926)>
 <hipSetDevice id(186)	correlation_id(188) on-exit pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(189) on-enter pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(189) on-exit pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(189) on-enter pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(189) on-exit pid(877926) tid(877926)>
 Device 0 name: AMD Radeon VII
 <hipMalloc id(108)	correlation_id(190) on-enter pid(877926) tid(877926)> ptr(0x7ffcb1cb2190) size(0x400000)
 <hipMalloc id(108)	correlation_id(190) on-exit pid(877926) tid(877926)> *ptr(0x0x7fc7e2800000)
@@ -939,8 +939,8 @@ PASSED!
 # START (63) #############################
 <hipSetDevice id(186)	correlation_id(199) on-enter pid(877926) tid(877926)>
 <hipSetDevice id(186)	correlation_id(199) on-exit pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(200) on-enter pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(200) on-exit pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(200) on-enter pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(200) on-exit pid(877926) tid(877926)>
 Device 0 name: AMD Radeon VII
 <hipMalloc id(108)	correlation_id(201) on-enter pid(877926) tid(877926)> ptr(0x7ffcb1cb2190) size(0x400000)
 <hipMalloc id(108)	correlation_id(201) on-exit pid(877926) tid(877926)> *ptr(0x0x7fc7e2800000)
@@ -977,7 +977,7 @@ rocTX <"hipMemcpy pid(877926) tid(877926)">
 	EXT_API	correlation_id(176) time_ns(0:0) external_id(31)
 	hipFree	correlation_id(176) time_ns(4494965609996943:4494965610013754) process_id(877926) thread_id(877926)
 	hipSetDevice	correlation_id(177) time_ns(4494965624011941:4494965624036717) process_id(877926) thread_id(877926)
-	hipGetDeviceProperties	correlation_id(178) time_ns(4494965624038471:4494965624051315) process_id(877926) thread_id(877926)
+	hipGetDevicePropertiesR0600	correlation_id(178) time_ns(4494965624038471:4494965624051315) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(179) time_ns(4494965624660163:4494965624896969) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(180) time_ns(4494965624897971:4494965625004332) process_id(877926) thread_id(877926)
 	CopyHostToDevice	correlation_id(181) time_ns(4494965625525884:4494965625827644) device_id(0) queue_id(0) bytes(0x0)
@@ -998,7 +998,7 @@ rocTX <"hipMemcpy pid(877926) tid(877926)">
 	EXT_API	correlation_id(187) time_ns(0:0) external_id(31)
 	hipFree	correlation_id(187) time_ns(4494965636989833:4494965637006925) process_id(877926) thread_id(877926)
 	hipSetDevice	correlation_id(188) time_ns(4494965650893900:4494965650918306) process_id(877926) thread_id(877926)
-	hipGetDeviceProperties	correlation_id(189) time_ns(4494965650919959:4494965650924948) process_id(877926) thread_id(877926)
+	hipGetDevicePropertiesR0600	correlation_id(189) time_ns(4494965650919959:4494965650924948) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(190) time_ns(4494965651533035:4494965651774250) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(191) time_ns(4494965651775172:4494965651884027) process_id(877926) thread_id(877926)
 	CopyHostToDevice	correlation_id(192) time_ns(4494965652367342:4494965652669102) device_id(0) queue_id(0) bytes(0x0)
@@ -1019,7 +1019,7 @@ rocTX <"hipMemcpy pid(877926) tid(877926)">
 	EXT_API	correlation_id(198) time_ns(0:0) external_id(31)
 	hipFree	correlation_id(198) time_ns(4494965663549394:4494965663565004) process_id(877926) thread_id(877926)
 	hipSetDevice	correlation_id(199) time_ns(4494965678099832:4494965678124508) process_id(877926) thread_id(877926)
-	hipGetDeviceProperties	correlation_id(200) time_ns(4494965678126192:4494965678130961) process_id(877926) thread_id(877926)
+	hipGetDevicePropertiesR0600	correlation_id(200) time_ns(4494965678126192:4494965678130961) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(201) time_ns(4494965678735731:4494965678965735) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(202) time_ns(4494965678966737:4494965679073468) process_id(877926) thread_id(877926)
 	CopyHostToDevice	correlation_id(203) time_ns(4494965680329683:4494965680630802) device_id(0) queue_id(0) bytes(0x0)
@@ -1038,8 +1038,8 @@ PASSED!
 # START (61) #############################
 <hipSetDevice id(186)	correlation_id(210) on-enter pid(877926) tid(877926)>
 <hipSetDevice id(186)	correlation_id(210) on-exit pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(211) on-enter pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(211) on-exit pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(211) on-enter pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(211) on-exit pid(877926) tid(877926)>
 Device 0 name: AMD Radeon VII
 <hipMalloc id(108)	correlation_id(212) on-enter pid(877926) tid(877926)> ptr(0x7ffcb1cb2190) size(0x400000)
 <hipMalloc id(108)	correlation_id(212) on-exit pid(877926) tid(877926)> *ptr(0x0x7fc7e2800000)
@@ -1072,8 +1072,8 @@ PASSED!
 # START (59) #############################
 <hipSetDevice id(186)	correlation_id(221) on-enter pid(877926) tid(877926)>
 <hipSetDevice id(186)	correlation_id(221) on-exit pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(222) on-enter pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(222) on-exit pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(222) on-enter pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(222) on-exit pid(877926) tid(877926)>
 Device 0 name: AMD Radeon VII
 <hipMalloc id(108)	correlation_id(223) on-enter pid(877926) tid(877926)> ptr(0x7ffcb1cb2190) size(0x400000)
 <hipMalloc id(108)	correlation_id(223) on-exit pid(877926) tid(877926)> *ptr(0x0x7fc7e2800000)
@@ -1106,8 +1106,8 @@ PASSED!
 # START (57) #############################
 <hipSetDevice id(186)	correlation_id(232) on-enter pid(877926) tid(877926)>
 <hipSetDevice id(186)	correlation_id(232) on-exit pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(233) on-enter pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(233) on-exit pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(233) on-enter pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(233) on-exit pid(877926) tid(877926)>
 Device 0 name: AMD Radeon VII
 <hipMalloc id(108)	correlation_id(234) on-enter pid(877926) tid(877926)> ptr(0x7ffcb1cb2190) size(0x400000)
 <hipMalloc id(108)	correlation_id(234) on-exit pid(877926) tid(877926)> *ptr(0x0x7fc7e2800000)
@@ -1143,7 +1143,7 @@ rocTX <"hipMemcpy pid(877926) tid(877926)">
 	EXT_API	correlation_id(209) time_ns(0:0) external_id(31)
 	hipFree	correlation_id(209) time_ns(4494965691532391:4494965691548591) process_id(877926) thread_id(877926)
 	hipSetDevice	correlation_id(210) time_ns(4494965706159863:4494965706184208) process_id(877926) thread_id(877926)
-	hipGetDeviceProperties	correlation_id(211) time_ns(4494965706186252:4494965706190951) process_id(877926) thread_id(877926)
+	hipGetDevicePropertiesR0600	correlation_id(211) time_ns(4494965706186252:4494965706190951) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(212) time_ns(4494965706798847:4494965707032348) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(213) time_ns(4494965707033450:4494965707143628) process_id(877926) thread_id(877926)
 	CopyHostToDevice	correlation_id(214) time_ns(4494965708323704:4494965708624983) device_id(0) queue_id(0) bytes(0x0)
@@ -1164,7 +1164,7 @@ rocTX <"hipMemcpy pid(877926) tid(877926)">
 	EXT_API	correlation_id(220) time_ns(0:0) external_id(31)
 	hipFree	correlation_id(220) time_ns(4494965719489528:4494965719506600) process_id(877926) thread_id(877926)
 	hipSetDevice	correlation_id(221) time_ns(4494965734154912:4494965734179899) process_id(877926) thread_id(877926)
-	hipGetDeviceProperties	correlation_id(222) time_ns(4494965734181723:4494965734186562) process_id(877926) thread_id(877926)
+	hipGetDevicePropertiesR0600	correlation_id(222) time_ns(4494965734181723:4494965734186562) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(223) time_ns(4494965734796782:4494965735036665) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(224) time_ns(4494965735037737:4494965735151671) process_id(877926) thread_id(877926)
 	CopyHostToDevice	correlation_id(225) time_ns(4494965736321130:4494965736622730) device_id(0) queue_id(0) bytes(0x0)
@@ -1185,7 +1185,7 @@ rocTX <"hipMemcpy pid(877926) tid(877926)">
 	EXT_API	correlation_id(231) time_ns(0:0) external_id(31)
 	hipFree	correlation_id(231) time_ns(4494965747421167:4494965747436596) process_id(877926) thread_id(877926)
 	hipSetDevice	correlation_id(232) time_ns(4494965761247679:4494965761273418) process_id(877926) thread_id(877926)
-	hipGetDeviceProperties	correlation_id(233) time_ns(4494965761275231:4494965761280221) process_id(877926) thread_id(877926)
+	hipGetDevicePropertiesR0600	correlation_id(233) time_ns(4494965761275231:4494965761280221) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(234) time_ns(4494965761901162:4494965762143068) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(235) time_ns(4494965762144571:4494965762254408) process_id(877926) thread_id(877926)
 	CopyHostToDevice	correlation_id(236) time_ns(4494965763322041:4494965763623640) device_id(0) queue_id(0) bytes(0x0)
@@ -1205,8 +1205,8 @@ PASSED!
 # START (55) #############################
 <hipSetDevice id(186)	correlation_id(243) on-enter pid(877926) tid(877926)>
 <hipSetDevice id(186)	correlation_id(243) on-exit pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(244) on-enter pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(244) on-exit pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(244) on-enter pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(244) on-exit pid(877926) tid(877926)>
 Device 0 name: AMD Radeon VII
 <hipMalloc id(108)	correlation_id(245) on-enter pid(877926) tid(877926)> ptr(0x7ffcb1cb2190) size(0x400000)
 <hipMalloc id(108)	correlation_id(245) on-exit pid(877926) tid(877926)> *ptr(0x0x7fc7e2800000)
@@ -1239,8 +1239,8 @@ PASSED!
 # START (53) #############################
 <hipSetDevice id(186)	correlation_id(254) on-enter pid(877926) tid(877926)>
 <hipSetDevice id(186)	correlation_id(254) on-exit pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(255) on-enter pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(255) on-exit pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(255) on-enter pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(255) on-exit pid(877926) tid(877926)>
 Device 0 name: AMD Radeon VII
 <hipMalloc id(108)	correlation_id(256) on-enter pid(877926) tid(877926)> ptr(0x7ffcb1cb2190) size(0x400000)
 <hipMalloc id(108)	correlation_id(256) on-exit pid(877926) tid(877926)> *ptr(0x0x7fc7e2800000)
@@ -1273,8 +1273,8 @@ PASSED!
 # START (51) #############################
 <hipSetDevice id(186)	correlation_id(265) on-enter pid(877926) tid(877926)>
 <hipSetDevice id(186)	correlation_id(265) on-exit pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(266) on-enter pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(266) on-exit pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(266) on-enter pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(266) on-exit pid(877926) tid(877926)>
 Device 0 name: AMD Radeon VII
 <hipMalloc id(108)	correlation_id(267) on-enter pid(877926) tid(877926)> ptr(0x7ffcb1cb2190) size(0x400000)
 <hipMalloc id(108)	correlation_id(267) on-exit pid(877926) tid(877926)> *ptr(0x0x7fc7e2800000)
@@ -1309,7 +1309,7 @@ rocTX <"hipMemcpy pid(877926) tid(877926)">
 	EXT_API	correlation_id(242) time_ns(0:0) external_id(31)
 	hipFree	correlation_id(242) time_ns(4494965774493667:4494965774508846) process_id(877926) thread_id(877926)
 	hipSetDevice	correlation_id(243) time_ns(4494965789155423:4494965789181091) process_id(877926) thread_id(877926)
-	hipGetDeviceProperties	correlation_id(244) time_ns(4494965789182664:4494965789187924) process_id(877926) thread_id(877926)
+	hipGetDevicePropertiesR0600	correlation_id(244) time_ns(4494965789182664:4494965789187924) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(245) time_ns(4494965789803635:4494965790031695) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(246) time_ns(4494965790032777:4494965790141102) process_id(877926) thread_id(877926)
 	CopyHostToDevice	correlation_id(247) time_ns(4494965791330887:4494965791632007) device_id(0) queue_id(0) bytes(0x0)
@@ -1330,7 +1330,7 @@ rocTX <"hipMemcpy pid(877926) tid(877926)">
 	EXT_API	correlation_id(253) time_ns(0:0) external_id(31)
 	hipFree	correlation_id(253) time_ns(4494965802481211:4494965802508202) process_id(877926) thread_id(877926)
 	hipSetDevice	correlation_id(254) time_ns(4494965817169068:4494965817193414) process_id(877926) thread_id(877926)
-	hipGetDeviceProperties	correlation_id(255) time_ns(4494965817195127:4494965817200477) process_id(877926) thread_id(877926)
+	hipGetDevicePropertiesR0600	correlation_id(255) time_ns(4494965817195127:4494965817200477) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(256) time_ns(4494965817824464:4494965818053966) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(257) time_ns(4494965818054978:4494965818166979) process_id(877926) thread_id(877926)
 	CopyHostToDevice	correlation_id(258) time_ns(4494965819325393:4494965819626512) device_id(0) queue_id(0) bytes(0x0)
@@ -1351,7 +1351,7 @@ rocTX <"hipMemcpy pid(877926) tid(877926)">
 	EXT_API	correlation_id(264) time_ns(0:0) external_id(31)
 	hipFree	correlation_id(264) time_ns(4494965830450310:4494965830465800) process_id(877926) thread_id(877926)
 	hipSetDevice	correlation_id(265) time_ns(4494965844275019:4494965844301139) process_id(877926) thread_id(877926)
-	hipGetDeviceProperties	correlation_id(266) time_ns(4494965844302872:4494965844307861) process_id(877926) thread_id(877926)
+	hipGetDevicePropertiesR0600	correlation_id(266) time_ns(4494965844302872:4494965844307861) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(267) time_ns(4494965844917281:4494965845146242) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(268) time_ns(4494965845147204:4494965845258294) process_id(877926) thread_id(877926)
 	CopyHostToDevice	correlation_id(269) time_ns(4494965846324701:4494965846626460) device_id(0) queue_id(0) bytes(0x0)
@@ -1372,8 +1372,8 @@ PASSED!
 # START (49) #############################
 <hipSetDevice id(186)	correlation_id(276) on-enter pid(877926) tid(877926)>
 <hipSetDevice id(186)	correlation_id(276) on-exit pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(277) on-enter pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(277) on-exit pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(277) on-enter pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(277) on-exit pid(877926) tid(877926)>
 Device 0 name: AMD Radeon VII
 <hipMalloc id(108)	correlation_id(278) on-enter pid(877926) tid(877926)> ptr(0x7ffcb1cb2190) size(0x400000)
 <hipMalloc id(108)	correlation_id(278) on-exit pid(877926) tid(877926)> *ptr(0x0x7fc7e2800000)
@@ -1406,8 +1406,8 @@ PASSED!
 # START (47) #############################
 <hipSetDevice id(186)	correlation_id(287) on-enter pid(877926) tid(877926)>
 <hipSetDevice id(186)	correlation_id(287) on-exit pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(288) on-enter pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(288) on-exit pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(288) on-enter pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(288) on-exit pid(877926) tid(877926)>
 Device 0 name: AMD Radeon VII
 <hipMalloc id(108)	correlation_id(289) on-enter pid(877926) tid(877926)> ptr(0x7ffcb1cb2190) size(0x400000)
 <hipMalloc id(108)	correlation_id(289) on-exit pid(877926) tid(877926)> *ptr(0x0x7fc7e2800000)
@@ -1440,8 +1440,8 @@ PASSED!
 # START (45) #############################
 <hipSetDevice id(186)	correlation_id(298) on-enter pid(877926) tid(877926)>
 <hipSetDevice id(186)	correlation_id(298) on-exit pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(299) on-enter pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(299) on-exit pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(299) on-enter pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(299) on-exit pid(877926) tid(877926)>
 Device 0 name: AMD Radeon VII
 <hipMalloc id(108)	correlation_id(300) on-enter pid(877926) tid(877926)> ptr(0x7ffcb1cb2190) size(0x400000)
 <hipMalloc id(108)	correlation_id(300) on-exit pid(877926) tid(877926)> *ptr(0x0x7fc7e2800000)
@@ -1475,7 +1475,7 @@ rocTX <"hipMemcpy pid(877926) tid(877926)">
 	EXT_API	correlation_id(275) time_ns(0:0) external_id(31)
 	hipFree	correlation_id(275) time_ns(4494965857469781:4494965857488857) process_id(877926) thread_id(877926)
 	hipSetDevice	correlation_id(276) time_ns(4494965871278969:4494965871303605) process_id(877926) thread_id(877926)
-	hipGetDeviceProperties	correlation_id(277) time_ns(4494965871305459:4494965871310398) process_id(877926) thread_id(877926)
+	hipGetDevicePropertiesR0600	correlation_id(277) time_ns(4494965871305459:4494965871310398) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(278) time_ns(4494965871918585:4494965872162194) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(279) time_ns(4494965872163136:4494965872273715) process_id(877926) thread_id(877926)
 	CopyHostToDevice	correlation_id(280) time_ns(4494965873321382:4494965873623142) device_id(0) queue_id(0) bytes(0x0)
@@ -1496,7 +1496,7 @@ rocTX <"hipMemcpy pid(877926) tid(877926)">
 	EXT_API	correlation_id(286) time_ns(0:0) external_id(31)
 	hipFree	correlation_id(286) time_ns(4494965884465174:4494965884480743) process_id(877926) thread_id(877926)
 	hipSetDevice	correlation_id(287) time_ns(4494965898307456:4494965898332012) process_id(877926) thread_id(877926)
-	hipGetDeviceProperties	correlation_id(288) time_ns(4494965898333696:4494965898338875) process_id(877926) thread_id(877926)
+	hipGetDevicePropertiesR0600	correlation_id(288) time_ns(4494965898333696:4494965898338875) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(289) time_ns(4494965898941913:4494965899191042) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(290) time_ns(4494965899192094:4494965899303424) process_id(877926) thread_id(877926)
 	CopyHostToDevice	correlation_id(291) time_ns(4494965900325973:4494965900627093) device_id(0) queue_id(0) bytes(0x0)
@@ -1517,7 +1517,7 @@ rocTX <"hipMemcpy pid(877926) tid(877926)">
 	EXT_API	correlation_id(297) time_ns(0:0) external_id(31)
 	hipFree	correlation_id(297) time_ns(4494965911437093:4494965911453494) process_id(877926) thread_id(877926)
 	hipSetDevice	correlation_id(298) time_ns(4494965925257554:4494965925283212) process_id(877926) thread_id(877926)
-	hipGetDeviceProperties	correlation_id(299) time_ns(4494965925285176:4494965925298000) process_id(877926) thread_id(877926)
+	hipGetDevicePropertiesR0600	correlation_id(299) time_ns(4494965925285176:4494965925298000) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(300) time_ns(4494965925936003:4494965926177829) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(301) time_ns(4494965926179021:4494965926290502) process_id(877926) thread_id(877926)
 	CopyHostToDevice	correlation_id(302) time_ns(4494965927322611:4494965927623891) device_id(0) queue_id(0) bytes(0x0)
@@ -1539,8 +1539,8 @@ PASSED!
 # START (43) #############################
 <hipSetDevice id(186)	correlation_id(309) on-enter pid(877926) tid(877926)>
 <hipSetDevice id(186)	correlation_id(309) on-exit pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(310) on-enter pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(310) on-exit pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(310) on-enter pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(310) on-exit pid(877926) tid(877926)>
 Device 0 name: AMD Radeon VII
 <hipMalloc id(108)	correlation_id(311) on-enter pid(877926) tid(877926)> ptr(0x7ffcb1cb2190) size(0x400000)
 <hipMalloc id(108)	correlation_id(311) on-exit pid(877926) tid(877926)> *ptr(0x0x7fc7e2800000)
@@ -1573,8 +1573,8 @@ PASSED!
 # START (41) #############################
 <hipSetDevice id(186)	correlation_id(320) on-enter pid(877926) tid(877926)>
 <hipSetDevice id(186)	correlation_id(320) on-exit pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(321) on-enter pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(321) on-exit pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(321) on-enter pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(321) on-exit pid(877926) tid(877926)>
 Device 0 name: AMD Radeon VII
 <hipMalloc id(108)	correlation_id(322) on-enter pid(877926) tid(877926)> ptr(0x7ffcb1cb2190) size(0x400000)
 <hipMalloc id(108)	correlation_id(322) on-exit pid(877926) tid(877926)> *ptr(0x0x7fc7e2800000)
@@ -1607,8 +1607,8 @@ PASSED!
 # START (39) #############################
 <hipSetDevice id(186)	correlation_id(331) on-enter pid(877926) tid(877926)>
 <hipSetDevice id(186)	correlation_id(331) on-exit pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(332) on-enter pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(332) on-exit pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(332) on-enter pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(332) on-exit pid(877926) tid(877926)>
 Device 0 name: AMD Radeon VII
 <hipMalloc id(108)	correlation_id(333) on-enter pid(877926) tid(877926)> ptr(0x7ffcb1cb2190) size(0x400000)
 <hipMalloc id(108)	correlation_id(333) on-exit pid(877926) tid(877926)> *ptr(0x0x7fc7e2800000)
@@ -1641,7 +1641,7 @@ rocTX <"hipMemcpy pid(877926) tid(877926)">
 	EXT_API	correlation_id(308) time_ns(0:0) external_id(31)
 	hipFree	correlation_id(308) time_ns(4494965938475349:4494965938492651) process_id(877926) thread_id(877926)
 	hipSetDevice	correlation_id(309) time_ns(4494965953124190:4494965953156301) process_id(877926) thread_id(877926)
-	hipGetDeviceProperties	correlation_id(310) time_ns(4494965953158214:4494965953162993) process_id(877926) thread_id(877926)
+	hipGetDevicePropertiesR0600	correlation_id(310) time_ns(4494965953158214:4494965953162993) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(311) time_ns(4494965953777702:4494965954012876) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(312) time_ns(4494965954013898:4494965954122202) process_id(877926) thread_id(877926)
 	CopyHostToDevice	correlation_id(313) time_ns(4494965955332481:4494965955634240) device_id(0) queue_id(0) bytes(0x0)
@@ -1662,7 +1662,7 @@ rocTX <"hipMemcpy pid(877926) tid(877926)">
 	EXT_API	correlation_id(319) time_ns(0:0) external_id(31)
 	hipFree	correlation_id(319) time_ns(4494965966467151:4494965966482810) process_id(877926) thread_id(877926)
 	hipSetDevice	correlation_id(320) time_ns(4494965980250892:4494965980275829) process_id(877926) thread_id(877926)
-	hipGetDeviceProperties	correlation_id(321) time_ns(4494965980277583:4494965980282592) process_id(877926) thread_id(877926)
+	hipGetDevicePropertiesR0600	correlation_id(321) time_ns(4494965980277583:4494965980282592) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(322) time_ns(4494965980892582:4494965981125151) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(323) time_ns(4494965981126083:4494965981236962) process_id(877926) thread_id(877926)
 	CopyHostToDevice	correlation_id(324) time_ns(4494965982332433:4494965982634192) device_id(0) queue_id(0) bytes(0x0)
@@ -1683,7 +1683,7 @@ rocTX <"hipMemcpy pid(877926) tid(877926)">
 	EXT_API	correlation_id(330) time_ns(0:0) external_id(31)
 	hipFree	correlation_id(330) time_ns(4494965993493925:4494965993509434) process_id(877926) thread_id(877926)
 	hipSetDevice	correlation_id(331) time_ns(4494966008113952:4494966008138127) process_id(877926) thread_id(877926)
-	hipGetDeviceProperties	correlation_id(332) time_ns(4494966008139851:4494966008144459) process_id(877926) thread_id(877926)
+	hipGetDevicePropertiesR0600	correlation_id(332) time_ns(4494966008139851:4494966008144459) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(333) time_ns(4494966008752315:4494966008991256) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(334) time_ns(4494966008992288:4494966009101223) process_id(877926) thread_id(877926)
 	CopyHostToDevice	correlation_id(335) time_ns(4494966010324034:4494966010625154) device_id(0) queue_id(0) bytes(0x0)
@@ -1706,8 +1706,8 @@ PASSED!
 # START (37) #############################
 <hipSetDevice id(186)	correlation_id(342) on-enter pid(877926) tid(877926)>
 <hipSetDevice id(186)	correlation_id(342) on-exit pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(343) on-enter pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(343) on-exit pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(343) on-enter pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(343) on-exit pid(877926) tid(877926)>
 Device 0 name: AMD Radeon VII
 <hipMalloc id(108)	correlation_id(344) on-enter pid(877926) tid(877926)> ptr(0x7ffcb1cb2190) size(0x400000)
 <hipMalloc id(108)	correlation_id(344) on-exit pid(877926) tid(877926)> *ptr(0x0x7fc7e2800000)
@@ -1740,8 +1740,8 @@ PASSED!
 # START (35) #############################
 <hipSetDevice id(186)	correlation_id(353) on-enter pid(877926) tid(877926)>
 <hipSetDevice id(186)	correlation_id(353) on-exit pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(354) on-enter pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(354) on-exit pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(354) on-enter pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(354) on-exit pid(877926) tid(877926)>
 Device 0 name: AMD Radeon VII
 <hipMalloc id(108)	correlation_id(355) on-enter pid(877926) tid(877926)> ptr(0x7ffcb1cb2190) size(0x400000)
 <hipMalloc id(108)	correlation_id(355) on-exit pid(877926) tid(877926)> *ptr(0x0x7fc7e2800000)
@@ -1774,8 +1774,8 @@ PASSED!
 # START (33) #############################
 <hipSetDevice id(186)	correlation_id(364) on-enter pid(877926) tid(877926)>
 <hipSetDevice id(186)	correlation_id(364) on-exit pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(365) on-enter pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(365) on-exit pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(365) on-enter pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(365) on-exit pid(877926) tid(877926)>
 Device 0 name: AMD Radeon VII
 <hipMalloc id(108)	correlation_id(366) on-enter pid(877926) tid(877926)> ptr(0x7ffcb1cb2190) size(0x400000)
 <hipMalloc id(108)	correlation_id(366) on-exit pid(877926) tid(877926)> *ptr(0x0x7fc7e2800000)
@@ -1807,7 +1807,7 @@ rocTX <"hipMemcpy pid(877926) tid(877926)">
 	EXT_API	correlation_id(341) time_ns(0:0) external_id(31)
 	hipFree	correlation_id(341) time_ns(4494966021487741:4494966021505454) process_id(877926) thread_id(877926)
 	hipSetDevice	correlation_id(342) time_ns(4494966035241786:4494966035267505) process_id(877926) thread_id(877926)
-	hipGetDeviceProperties	correlation_id(343) time_ns(4494966035269238:4494966035274398) process_id(877926) thread_id(877926)
+	hipGetDevicePropertiesR0600	correlation_id(343) time_ns(4494966035269238:4494966035274398) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(344) time_ns(4494966035882525:4494966036121966) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(345) time_ns(4494966036122968:4494966036237123) process_id(877926) thread_id(877926)
 	CopyHostToDevice	correlation_id(346) time_ns(4494966037323670:4494966037624629) device_id(0) queue_id(0) bytes(0x0)
@@ -1828,7 +1828,7 @@ rocTX <"hipMemcpy pid(877926) tid(877926)">
 	EXT_API	correlation_id(352) time_ns(0:0) external_id(31)
 	hipFree	correlation_id(352) time_ns(4494966049174818:4494966049190778) process_id(877926) thread_id(877926)
 	hipSetDevice	correlation_id(353) time_ns(4494966063511292:4494966063537702) process_id(877926) thread_id(877926)
-	hipGetDeviceProperties	correlation_id(354) time_ns(4494966063539475:4494966063544705) process_id(877926) thread_id(877926)
+	hipGetDevicePropertiesR0600	correlation_id(354) time_ns(4494966063539475:4494966063544705) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(355) time_ns(4494966064161107:4494966064417200) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(356) time_ns(4494966064418222:4494966064561893) process_id(877926) thread_id(877926)
 	CopyHostToDevice	correlation_id(357) time_ns(4494966065049847:4494966065351447) device_id(0) queue_id(0) bytes(0x0)
@@ -1849,7 +1849,7 @@ rocTX <"hipMemcpy pid(877926) tid(877926)">
 	EXT_API	correlation_id(363) time_ns(0:0) external_id(31)
 	hipFree	correlation_id(363) time_ns(4494966076444831:4494966076461282) process_id(877926) thread_id(877926)
 	hipSetDevice	correlation_id(364) time_ns(4494966090240594:4494966090266122) process_id(877926) thread_id(877926)
-	hipGetDeviceProperties	correlation_id(365) time_ns(4494966090267835:4494966090272644) process_id(877926) thread_id(877926)
+	hipGetDevicePropertiesR0600	correlation_id(365) time_ns(4494966090267835:4494966090272644) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(366) time_ns(4494966090890439:4494966091125131) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(367) time_ns(4494966091126354:4494966091238245) process_id(877926) thread_id(877926)
 	CopyHostToDevice	correlation_id(368) time_ns(4494966092333641:4494966092635400) device_id(0) queue_id(0) bytes(0x0)
@@ -1873,8 +1873,8 @@ PASSED!
 # START (31) #############################
 <hipSetDevice id(186)	correlation_id(375) on-enter pid(877926) tid(877926)>
 <hipSetDevice id(186)	correlation_id(375) on-exit pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(376) on-enter pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(376) on-exit pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(376) on-enter pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(376) on-exit pid(877926) tid(877926)>
 Device 0 name: AMD Radeon VII
 <hipMalloc id(108)	correlation_id(377) on-enter pid(877926) tid(877926)> ptr(0x7ffcb1cb2190) size(0x400000)
 <hipMalloc id(108)	correlation_id(377) on-exit pid(877926) tid(877926)> *ptr(0x0x7fc7e2800000)
@@ -1907,8 +1907,8 @@ PASSED!
 # START (29) #############################
 <hipSetDevice id(186)	correlation_id(386) on-enter pid(877926) tid(877926)>
 <hipSetDevice id(186)	correlation_id(386) on-exit pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(387) on-enter pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(387) on-exit pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(387) on-enter pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(387) on-exit pid(877926) tid(877926)>
 Device 0 name: AMD Radeon VII
 <hipMalloc id(108)	correlation_id(388) on-enter pid(877926) tid(877926)> ptr(0x7ffcb1cb2190) size(0x400000)
 <hipMalloc id(108)	correlation_id(388) on-exit pid(877926) tid(877926)> *ptr(0x0x7fc7e2800000)
@@ -1941,8 +1941,8 @@ PASSED!
 # START (27) #############################
 <hipSetDevice id(186)	correlation_id(397) on-enter pid(877926) tid(877926)>
 <hipSetDevice id(186)	correlation_id(397) on-exit pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(398) on-enter pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(398) on-exit pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(398) on-enter pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(398) on-exit pid(877926) tid(877926)>
 Device 0 name: AMD Radeon VII
 <hipMalloc id(108)	correlation_id(399) on-enter pid(877926) tid(877926)> ptr(0x7ffcb1cb2190) size(0x400000)
 <hipMalloc id(108)	correlation_id(399) on-exit pid(877926) tid(877926)> *ptr(0x0x7fc7e2800000)
@@ -1973,7 +1973,7 @@ rocTX <"hipMemcpy pid(877926) tid(877926)">
 	EXT_API	correlation_id(374) time_ns(0:0) external_id(31)
 	hipFree	correlation_id(374) time_ns(4494966103517550:4494966103533239) process_id(877926) thread_id(877926)
 	hipSetDevice	correlation_id(375) time_ns(4494966118101030:4494966118125576) process_id(877926) thread_id(877926)
-	hipGetDeviceProperties	correlation_id(376) time_ns(4494966118127289:4494966118132138) process_id(877926) thread_id(877926)
+	hipGetDevicePropertiesR0600	correlation_id(376) time_ns(4494966118127289:4494966118132138) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(377) time_ns(4494966118742820:4494966118976260) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(378) time_ns(4494966118977232:4494966119085616) process_id(877926) thread_id(877926)
 	CopyHostToDevice	correlation_id(379) time_ns(4494966120322714:4494966120623834) device_id(0) queue_id(0) bytes(0x0)
@@ -1994,7 +1994,7 @@ rocTX <"hipMemcpy pid(877926) tid(877926)">
 	EXT_API	correlation_id(385) time_ns(0:0) external_id(31)
 	hipFree	correlation_id(385) time_ns(4494966131517297:4494966131532976) process_id(877926) thread_id(877926)
 	hipSetDevice	correlation_id(386) time_ns(4494966146080048:4494966146105706) process_id(877926) thread_id(877926)
-	hipGetDeviceProperties	correlation_id(387) time_ns(4494966146107479:4494966146112839) process_id(877926) thread_id(877926)
+	hipGetDevicePropertiesR0600	correlation_id(387) time_ns(4494966146107479:4494966146112839) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(388) time_ns(4494966146720135:4494966146964315) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(389) time_ns(4494966146965227:4494966147075144) process_id(877926) thread_id(877926)
 	CopyHostToDevice	correlation_id(390) time_ns(4494966148334541:4494966148635661) device_id(0) queue_id(0) bytes(0x0)
@@ -2015,7 +2015,7 @@ rocTX <"hipMemcpy pid(877926) tid(877926)">
 	EXT_API	correlation_id(396) time_ns(0:0) external_id(31)
 	hipFree	correlation_id(396) time_ns(4494966159537444:4494966159553334) process_id(877926) thread_id(877926)
 	hipSetDevice	correlation_id(397) time_ns(4494966174150248:4494966174175595) process_id(877926) thread_id(877926)
-	hipGetDeviceProperties	correlation_id(398) time_ns(4494966174177779:4494966174182488) process_id(877926) thread_id(877926)
+	hipGetDevicePropertiesR0600	correlation_id(398) time_ns(4494966174177779:4494966174182488) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(399) time_ns(4494966174791857:4494966175022462) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(400) time_ns(4494966175023654:4494966175132249) process_id(877926) thread_id(877926)
 	CopyHostToDevice	correlation_id(401) time_ns(4494966176326019:4494966176627939) device_id(0) queue_id(0) bytes(0x0)
@@ -2040,8 +2040,8 @@ PASSED!
 # START (25) #############################
 <hipSetDevice id(186)	correlation_id(408) on-enter pid(877926) tid(877926)>
 <hipSetDevice id(186)	correlation_id(408) on-exit pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(409) on-enter pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(409) on-exit pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(409) on-enter pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(409) on-exit pid(877926) tid(877926)>
 Device 0 name: AMD Radeon VII
 <hipMalloc id(108)	correlation_id(410) on-enter pid(877926) tid(877926)> ptr(0x7ffcb1cb2190) size(0x400000)
 <hipMalloc id(108)	correlation_id(410) on-exit pid(877926) tid(877926)> *ptr(0x0x7fc7e2800000)
@@ -2074,8 +2074,8 @@ PASSED!
 # START (23) #############################
 <hipSetDevice id(186)	correlation_id(419) on-enter pid(877926) tid(877926)>
 <hipSetDevice id(186)	correlation_id(419) on-exit pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(420) on-enter pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(420) on-exit pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(420) on-enter pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(420) on-exit pid(877926) tid(877926)>
 Device 0 name: AMD Radeon VII
 <hipMalloc id(108)	correlation_id(421) on-enter pid(877926) tid(877926)> ptr(0x7ffcb1cb2190) size(0x400000)
 <hipMalloc id(108)	correlation_id(421) on-exit pid(877926) tid(877926)> *ptr(0x0x7fc7e2800000)
@@ -2108,8 +2108,8 @@ PASSED!
 # START (21) #############################
 <hipSetDevice id(186)	correlation_id(430) on-enter pid(877926) tid(877926)>
 <hipSetDevice id(186)	correlation_id(430) on-exit pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(431) on-enter pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(431) on-exit pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(431) on-enter pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(431) on-exit pid(877926) tid(877926)>
 Device 0 name: AMD Radeon VII
 <hipMalloc id(108)	correlation_id(432) on-enter pid(877926) tid(877926)> ptr(0x7ffcb1cb2190) size(0x400000)
 <hipMalloc id(108)	correlation_id(432) on-exit pid(877926) tid(877926)> *ptr(0x0x7fc7e2800000)
@@ -2142,7 +2142,7 @@ rocTX <"(null) pid(877926) tid(877926)">
 	EXT_API	correlation_id(407) time_ns(0:0) external_id(31)
 	hipFree	correlation_id(407) time_ns(4494966187546028:4494966187562910) process_id(877926) thread_id(877926)
 	hipSetDevice	correlation_id(408) time_ns(4494966202110582:4494966202136531) process_id(877926) thread_id(877926)
-	hipGetDeviceProperties	correlation_id(409) time_ns(4494966202138364:4494966202143173) process_id(877926) thread_id(877926)
+	hipGetDevicePropertiesR0600	correlation_id(409) time_ns(4494966202138364:4494966202143173) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(410) time_ns(4494966202748775:4494966202977517) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(411) time_ns(4494966202978629:4494966203098715) process_id(877926) thread_id(877926)
 	CopyHostToDevice	correlation_id(412) time_ns(4494966204321996:4494966204623756) device_id(0) queue_id(0) bytes(0x0)
@@ -2163,7 +2163,7 @@ rocTX <"(null) pid(877926) tid(877926)">
 	EXT_API	correlation_id(418) time_ns(0:0) external_id(31)
 	hipFree	correlation_id(418) time_ns(4494966215468179:4494966215483457) process_id(877926) thread_id(877926)
 	hipSetDevice	correlation_id(419) time_ns(4494966229242062:4494966229267530) process_id(877926) thread_id(877926)
-	hipGetDeviceProperties	correlation_id(420) time_ns(4494966229269433:4494966229274493) process_id(877926) thread_id(877926)
+	hipGetDevicePropertiesR0600	correlation_id(420) time_ns(4494966229269433:4494966229274493) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(421) time_ns(4494966229898309:4494966230132511) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(422) time_ns(4494966230133453:4494966230244913) process_id(877926) thread_id(877926)
 	CopyHostToDevice	correlation_id(423) time_ns(4494966231322435:4494966231623554) device_id(0) queue_id(0) bytes(0x0)
@@ -2184,7 +2184,7 @@ rocTX <"(null) pid(877926) tid(877926)">
 	EXT_API	correlation_id(429) time_ns(0:0) external_id(31)
 	hipFree	correlation_id(429) time_ns(4494966242488721:4494966242515321) process_id(877926) thread_id(877926)
 	hipSetDevice	correlation_id(430) time_ns(4494966256282390:4494966256306436) process_id(877926) thread_id(877926)
-	hipGetDeviceProperties	correlation_id(431) time_ns(4494966256308149:4494966256313008) process_id(877926) thread_id(877926)
+	hipGetDevicePropertiesR0600	correlation_id(431) time_ns(4494966256308149:4494966256313008) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(432) time_ns(4494966256917477:4494966257146850) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(433) time_ns(4494966257147972:4494966257259262) process_id(877926) thread_id(877926)
 	CopyHostToDevice	correlation_id(434) time_ns(4494966258324315:4494966258625434) device_id(0) queue_id(0) bytes(0x0)
@@ -2207,8 +2207,8 @@ PASSED!
 # START (19) #############################
 <hipSetDevice id(186)	correlation_id(441) on-enter pid(877926) tid(877926)>
 <hipSetDevice id(186)	correlation_id(441) on-exit pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(442) on-enter pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(442) on-exit pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(442) on-enter pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(442) on-exit pid(877926) tid(877926)>
 Device 0 name: AMD Radeon VII
 <hipMalloc id(108)	correlation_id(443) on-enter pid(877926) tid(877926)> ptr(0x7ffcb1cb2190) size(0x400000)
 <hipMalloc id(108)	correlation_id(443) on-exit pid(877926) tid(877926)> *ptr(0x0x7fc7e2800000)
@@ -2241,8 +2241,8 @@ PASSED!
 # START (17) #############################
 <hipSetDevice id(186)	correlation_id(452) on-enter pid(877926) tid(877926)>
 <hipSetDevice id(186)	correlation_id(452) on-exit pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(453) on-enter pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(453) on-exit pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(453) on-enter pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(453) on-exit pid(877926) tid(877926)>
 Device 0 name: AMD Radeon VII
 <hipMalloc id(108)	correlation_id(454) on-enter pid(877926) tid(877926)> ptr(0x7ffcb1cb2190) size(0x400000)
 <hipMalloc id(108)	correlation_id(454) on-exit pid(877926) tid(877926)> *ptr(0x0x7fc7e2800000)
@@ -2275,8 +2275,8 @@ PASSED!
 # START (15) #############################
 <hipSetDevice id(186)	correlation_id(463) on-enter pid(877926) tid(877926)>
 <hipSetDevice id(186)	correlation_id(463) on-exit pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(464) on-enter pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(464) on-exit pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(464) on-enter pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(464) on-exit pid(877926) tid(877926)>
 Device 0 name: AMD Radeon VII
 <hipMalloc id(108)	correlation_id(465) on-enter pid(877926) tid(877926)> ptr(0x7ffcb1cb2190) size(0x400000)
 <hipMalloc id(108)	correlation_id(465) on-exit pid(877926) tid(877926)> *ptr(0x0x7fc7e2800000)
@@ -2308,7 +2308,7 @@ rocTX <"(null) pid(877926) tid(877926)">
 	EXT_API	correlation_id(440) time_ns(0:0) external_id(31)
 	hipFree	correlation_id(440) time_ns(4494966269514081:4494966269530552) process_id(877926) thread_id(877926)
 	hipSetDevice	correlation_id(441) time_ns(4494966283318912:4494966283343779) process_id(877926) thread_id(877926)
-	hipGetDeviceProperties	correlation_id(442) time_ns(4494966283345492:4494966283350251) process_id(877926) thread_id(877926)
+	hipGetDevicePropertiesR0600	correlation_id(442) time_ns(4494966283345492:4494966283350251) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(443) time_ns(4494966283956084:4494966284200064) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(444) time_ns(4494966284201036:4494966284312205) process_id(877926) thread_id(877926)
 	CopyHostToDevice	correlation_id(445) time_ns(4494966285330357:4494966285632116) device_id(0) queue_id(0) bytes(0x0)
@@ -2329,7 +2329,7 @@ rocTX <"(null) pid(877926) tid(877926)">
 	EXT_API	correlation_id(451) time_ns(0:0) external_id(31)
 	hipFree	correlation_id(451) time_ns(4494966296486823:4494966296502673) process_id(877926) thread_id(877926)
 	hipSetDevice	correlation_id(452) time_ns(4494966310231519:4494966310255234) process_id(877926) thread_id(877926)
-	hipGetDeviceProperties	correlation_id(453) time_ns(4494966310256847:4494966310262097) process_id(877926) thread_id(877926)
+	hipGetDevicePropertiesR0600	correlation_id(453) time_ns(4494966310256847:4494966310262097) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(454) time_ns(4494966310867408:4494966311118161) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(455) time_ns(4494966311119203:4494966311232737) process_id(877926) thread_id(877926)
 	CopyHostToDevice	correlation_id(456) time_ns(4494966312321357:4494966312622956) device_id(0) queue_id(0) bytes(0x0)
@@ -2350,7 +2350,7 @@ rocTX <"(null) pid(877926) tid(877926)">
 	EXT_API	correlation_id(462) time_ns(0:0) external_id(31)
 	hipFree	correlation_id(462) time_ns(4494966323493627:4494966323509648) process_id(877926) thread_id(877926)
 	hipSetDevice	correlation_id(463) time_ns(4494966338104158:4494966338129396) process_id(877926) thread_id(877926)
-	hipGetDeviceProperties	correlation_id(464) time_ns(4494966338130999:4494966338136069) process_id(877926) thread_id(877926)
+	hipGetDevicePropertiesR0600	correlation_id(464) time_ns(4494966338130999:4494966338136069) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(465) time_ns(4494966338742342:4494966338973969) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(466) time_ns(4494966338974930:4494966339085449) process_id(877926) thread_id(877926)
 	CopyHostToDevice	correlation_id(467) time_ns(4494966340335418:4494966340636698) device_id(0) queue_id(0) bytes(0x0)
@@ -2374,8 +2374,8 @@ PASSED!
 # START (13) #############################
 <hipSetDevice id(186)	correlation_id(474) on-enter pid(877926) tid(877926)>
 <hipSetDevice id(186)	correlation_id(474) on-exit pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(475) on-enter pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(475) on-exit pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(475) on-enter pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(475) on-exit pid(877926) tid(877926)>
 Device 0 name: AMD Radeon VII
 <hipMalloc id(108)	correlation_id(476) on-enter pid(877926) tid(877926)> ptr(0x7ffcb1cb2190) size(0x400000)
 <hipMalloc id(108)	correlation_id(476) on-exit pid(877926) tid(877926)> *ptr(0x0x7fc7e2800000)
@@ -2408,8 +2408,8 @@ PASSED!
 # START (11) #############################
 <hipSetDevice id(186)	correlation_id(485) on-enter pid(877926) tid(877926)>
 <hipSetDevice id(186)	correlation_id(485) on-exit pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(486) on-enter pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(486) on-exit pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(486) on-enter pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(486) on-exit pid(877926) tid(877926)>
 Device 0 name: AMD Radeon VII
 <hipMalloc id(108)	correlation_id(487) on-enter pid(877926) tid(877926)> ptr(0x7ffcb1cb2190) size(0x400000)
 <hipMalloc id(108)	correlation_id(487) on-exit pid(877926) tid(877926)> *ptr(0x0x7fc7e2800000)
@@ -2442,8 +2442,8 @@ PASSED!
 # START (9) #############################
 <hipSetDevice id(186)	correlation_id(496) on-enter pid(877926) tid(877926)>
 <hipSetDevice id(186)	correlation_id(496) on-exit pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(497) on-enter pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(497) on-exit pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(497) on-enter pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(497) on-exit pid(877926) tid(877926)>
 Device 0 name: AMD Radeon VII
 <hipMalloc id(108)	correlation_id(498) on-enter pid(877926) tid(877926)> ptr(0x7ffcb1cb2190) size(0x400000)
 <hipMalloc id(108)	correlation_id(498) on-exit pid(877926) tid(877926)> *ptr(0x0x7fc7e2800000)
@@ -2474,7 +2474,7 @@ rocTX <"(null) pid(877926) tid(877926)">
 	EXT_API	correlation_id(473) time_ns(0:0) external_id(31)
 	hipFree	correlation_id(473) time_ns(4494966351487523:4494966351503153) process_id(877926) thread_id(877926)
 	hipSetDevice	correlation_id(474) time_ns(4494966366135655:4494966366161274) process_id(877926) thread_id(877926)
-	hipGetDeviceProperties	correlation_id(475) time_ns(4494966366162997:4494966366168167) process_id(877926) thread_id(877926)
+	hipGetDevicePropertiesR0600	correlation_id(475) time_ns(4494966366162997:4494966366168167) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(476) time_ns(4494966366776123:4494966367009042) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(477) time_ns(4494966367009994:4494966367115343) process_id(877926) thread_id(877926)
 	CopyHostToDevice	correlation_id(478) time_ns(4494966368330579:4494966368631859) device_id(0) queue_id(0) bytes(0x0)
@@ -2495,7 +2495,7 @@ rocTX <"(null) pid(877926) tid(877926)">
 	EXT_API	correlation_id(484) time_ns(0:0) external_id(31)
 	hipFree	correlation_id(484) time_ns(4494966379483004:4494966379497962) process_id(877926) thread_id(877926)
 	hipSetDevice	correlation_id(485) time_ns(4494966393278436:4494966393311819) process_id(877926) thread_id(877926)
-	hipGetDeviceProperties	correlation_id(486) time_ns(4494966393313583:4494966393318522) process_id(877926) thread_id(877926)
+	hipGetDevicePropertiesR0600	correlation_id(486) time_ns(4494966393313583:4494966393318522) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(487) time_ns(4494966393938571:4494966394180107) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(488) time_ns(4494966394181038:4494966394292368) process_id(877926) thread_id(877926)
 	CopyHostToDevice	correlation_id(489) time_ns(4494966395330703:4494966395632302) device_id(0) queue_id(0) bytes(0x0)
@@ -2516,7 +2516,7 @@ rocTX <"(null) pid(877926) tid(877926)">
 	EXT_API	correlation_id(495) time_ns(0:0) external_id(31)
 	hipFree	correlation_id(495) time_ns(4494966406492454:4494966406508815) process_id(877926) thread_id(877926)
 	hipSetDevice	correlation_id(496) time_ns(4494966420280684:4494966420305942) process_id(877926) thread_id(877926)
-	hipGetDeviceProperties	correlation_id(497) time_ns(4494966420307585:4494966420312544) process_id(877926) thread_id(877926)
+	hipGetDevicePropertiesR0600	correlation_id(497) time_ns(4494966420307585:4494966420312544) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(498) time_ns(4494966420919849:4494966421147138) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(499) time_ns(4494966421148300:4494966421256224) process_id(877926) thread_id(877926)
 	CopyHostToDevice	correlation_id(500) time_ns(4494966422330404:4494966422632004) device_id(0) queue_id(0) bytes(0x0)
@@ -2541,8 +2541,8 @@ PASSED!
 # START (7) #############################
 <hipSetDevice id(186)	correlation_id(507) on-enter pid(877926) tid(877926)>
 <hipSetDevice id(186)	correlation_id(507) on-exit pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(508) on-enter pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(508) on-exit pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(508) on-enter pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(508) on-exit pid(877926) tid(877926)>
 Device 0 name: AMD Radeon VII
 <hipMalloc id(108)	correlation_id(509) on-enter pid(877926) tid(877926)> ptr(0x7ffcb1cb2190) size(0x400000)
 <hipMalloc id(108)	correlation_id(509) on-exit pid(877926) tid(877926)> *ptr(0x0x7fc7e2800000)
@@ -2575,8 +2575,8 @@ PASSED!
 # START (5) #############################
 <hipSetDevice id(186)	correlation_id(518) on-enter pid(877926) tid(877926)>
 <hipSetDevice id(186)	correlation_id(518) on-exit pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(519) on-enter pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(519) on-exit pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(519) on-enter pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(519) on-exit pid(877926) tid(877926)>
 Device 0 name: AMD Radeon VII
 <hipMalloc id(108)	correlation_id(520) on-enter pid(877926) tid(877926)> ptr(0x7ffcb1cb2190) size(0x400000)
 <hipMalloc id(108)	correlation_id(520) on-exit pid(877926) tid(877926)> *ptr(0x0x7fc7e2800000)
@@ -2609,8 +2609,8 @@ PASSED!
 # START (3) #############################
 <hipSetDevice id(186)	correlation_id(529) on-enter pid(877926) tid(877926)>
 <hipSetDevice id(186)	correlation_id(529) on-exit pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(530) on-enter pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(530) on-exit pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(530) on-enter pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(530) on-exit pid(877926) tid(877926)>
 Device 0 name: AMD Radeon VII
 <hipMalloc id(108)	correlation_id(531) on-enter pid(877926) tid(877926)> ptr(0x7ffcb1cb2190) size(0x400000)
 <hipMalloc id(108)	correlation_id(531) on-exit pid(877926) tid(877926)> *ptr(0x0x7fc7e2800000)
@@ -2640,7 +2640,7 @@ rocTX <"(null) pid(877926) tid(877926)">
 	EXT_API	correlation_id(506) time_ns(0:0) external_id(31)
 	hipFree	correlation_id(506) time_ns(4494966433520789:4494966433538142) process_id(877926) thread_id(877926)
 	hipSetDevice	correlation_id(507) time_ns(4494966448181986:4494966448207313) process_id(877926) thread_id(877926)
-	hipGetDeviceProperties	correlation_id(508) time_ns(4494966448209247:4494966448213906) process_id(877926) thread_id(877926)
+	hipGetDevicePropertiesR0600	correlation_id(508) time_ns(4494966448209247:4494966448213906) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(509) time_ns(4494966448825639:4494966449055343) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(510) time_ns(4494966449056415:4494966449164789) process_id(877926) thread_id(877926)
 	CopyHostToDevice	correlation_id(511) time_ns(4494966450336285:4494966450637404) device_id(0) queue_id(0) bytes(0x0)
@@ -2661,7 +2661,7 @@ rocTX <"(null) pid(877926) tid(877926)">
 	EXT_API	correlation_id(517) time_ns(0:0) external_id(31)
 	hipFree	correlation_id(517) time_ns(4494966461546757:4494966461562076) process_id(877926) thread_id(877926)
 	hipSetDevice	correlation_id(518) time_ns(4494966476134273:4494966476159040) process_id(877926) thread_id(877926)
-	hipGetDeviceProperties	correlation_id(519) time_ns(4494966476160943:4494966476165743) process_id(877926) thread_id(877926)
+	hipGetDevicePropertiesR0600	correlation_id(519) time_ns(4494966476160943:4494966476165743) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(520) time_ns(4494966476771625:4494966477011157) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(521) time_ns(4494966477012149:4494966477123328) process_id(877926) thread_id(877926)
 	CopyHostToDevice	correlation_id(522) time_ns(4494966478328173:4494966478629293) device_id(0) queue_id(0) bytes(0x0)
@@ -2682,7 +2682,7 @@ rocTX <"(null) pid(877926) tid(877926)">
 	EXT_API	correlation_id(528) time_ns(0:0) external_id(31)
 	hipFree	correlation_id(528) time_ns(4494966490064551:4494966490080872) process_id(877926) thread_id(877926)
 	hipSetDevice	correlation_id(529) time_ns(4494966504078407:4494966504102663) process_id(877926) thread_id(877926)
-	hipGetDeviceProperties	correlation_id(530) time_ns(4494966504104406:4494966504109816) process_id(877926) thread_id(877926)
+	hipGetDevicePropertiesR0600	correlation_id(530) time_ns(4494966504104406:4494966504109816) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(531) time_ns(4494966504723494:4494966504970780) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(532) time_ns(4494966504971912:4494966505082501) process_id(877926) thread_id(877926)
 	CopyHostToDevice	correlation_id(533) time_ns(4494966506333094:4494966506634853) device_id(0) queue_id(0) bytes(0x0)
@@ -2708,8 +2708,8 @@ PASSED!
 # START (1) #############################
 <hipSetDevice id(186)	correlation_id(540) on-enter pid(877926) tid(877926)>
 <hipSetDevice id(186)	correlation_id(540) on-exit pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(541) on-enter pid(877926) tid(877926)>
-<hipGetDeviceProperties id(81)	correlation_id(541) on-exit pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(541) on-enter pid(877926) tid(877926)>
+<hipGetDevicePropertiesR0600 id(81)	correlation_id(541) on-exit pid(877926) tid(877926)>
 Device 0 name: AMD Radeon VII
 <hipMalloc id(108)	correlation_id(542) on-enter pid(877926) tid(877926)> ptr(0x7ffcb1cb2190) size(0x400000)
 <hipMalloc id(108)	correlation_id(542) on-exit pid(877926) tid(877926)> *ptr(0x0x7fc7e2800000)
@@ -2746,7 +2746,7 @@ PASSED!
 	EXT_API	correlation_id(539) time_ns(0:0) external_id(31)
 	hipFree	correlation_id(539) time_ns(4494966523219930:4494966523238024) process_id(877926) thread_id(877926)
 	hipSetDevice	correlation_id(540) time_ns(4494966537076139:4494966537101978) process_id(877926) thread_id(877926)
-	hipGetDeviceProperties	correlation_id(541) time_ns(4494966537103701:4494966537117707) process_id(877926) thread_id(877926)
+	hipGetDevicePropertiesR0600	correlation_id(541) time_ns(4494966537103701:4494966537117707) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(542) time_ns(4494966537741654:4494966537979853) process_id(877926) thread_id(877926)
 	hipMalloc	correlation_id(543) time_ns(4494966537981075:4494966538092966) process_id(877926) thread_id(877926)
 	CopyHostToDevice	correlation_id(544) time_ns(4494966539326649:4494966539628248) device_id(0) queue_id(0) bytes(0x0)
