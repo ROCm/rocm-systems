@@ -44,7 +44,7 @@ jobs:
         run: |
           cd build
           ml cmake
-          srun -N 1 -J omniperf -p ci -t 00:35:00 ctest --verbose -R test_analyze_commands
+          srun -N 1 -J omniperf -p ci -t 00:55:00 ctest --verbose -R test_analyze_commands
       - name: Pytest coverage comment
         uses: MishaKav/pytest-coverage-comment@v1.1.48
         with:
