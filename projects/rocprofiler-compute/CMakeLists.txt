@@ -92,6 +92,7 @@ endfunction()
 
 list(APPEND CMAKE_MESSAGE_INDENT "  ")
 foreach(package IN LISTS pythonDeps)
+    # Filter out any version requirements from requirements.txt
     string(REGEX REPLACE "[><=].*" "" package "${package}")
     checkpythonpackage(${package})
 endforeach()
