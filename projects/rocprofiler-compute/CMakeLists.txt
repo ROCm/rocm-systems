@@ -72,20 +72,7 @@ if(DEFINED PYTHON_DEPS)
 endif()
 
 # Check required Python packages
-set(pythonDeps
-    "astunparse"
-    "colorlover"
-    "dash"
-    "matplotlib"
-    "numpy"
-    "pandas"
-    "pymongo"
-    "yaml"
-    "tabulate"
-    "tqdm"
-    "dash_svg"
-    "dash_bootstrap_components"
-    "kaleido")
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/requirements.txt" pythonDeps)
 
 message(STATUS "Checking for required Python package dependencies...")
 set_property(GLOBAL PROPERTY pythonDepsFlag "groovy")
@@ -105,6 +92,7 @@ endfunction()
 
 list(APPEND CMAKE_MESSAGE_INDENT "  ")
 foreach(package IN LISTS pythonDeps)
+    string(REGEX REPLACE "[><=].*" "" package "${package}")
     checkpythonpackage(${package})
 endforeach()
 list(POP_BACK CMAKE_MESSAGE_INDENT)
