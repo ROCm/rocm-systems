@@ -56,6 +56,9 @@ option(BUILD_ROCPTEST "Build targets for librdc_rocp.so" OFF)
 # When cmake -DBUILD_TESTS=off, it will not build RDC tests.
 option(BUILD_TESTS "Build test suite" OFF)
 
+# Enable shared libraries for gtest
+option(BUILD_SHARED_LIBS "Build shared library (.so) or not." ON)
+
 # File reorganization enable/disable
 option(FILE_REORG_BACKWARD_COMPATIBILITY "Enable File Reorg with backward compatibility" OFF)
 
@@ -80,7 +83,7 @@ set(COMMON_DIR "${CMAKE_CURRENT_SOURCE_DIR}/common")
 
 set(GRPC_ROOT_DEFAULT "/usr")
 set(GRPC_ROOT ${GRPC_ROOT_DEFAULT} CACHE STRING "GRPC installation directory.")
-set(GRPC_DESIRED_VERSION 1.44.0 CACHE STRING "GRPC desired package version.")
+set(GRPC_DESIRED_VERSION 1.59.1 CACHE STRING "GRPC desired package version.")
 set(RDC_SHARE_INSTALL_PREFIX "share/${RDC}" CACHE INTERNAL "Tests and Example install directory")
 
 set(CMAKE_INSTALL_PREFIX ${ROCM_DIR} CACHE STRING "Default installation directory.")
@@ -159,7 +162,7 @@ set(${RDC}_VERSION_PATCH "0")
 set(${RDC}_VERSION_BUILD "0")
 set(CPACK_PACKAGE_VERSION ${VERSION_STRING})
 
-set(CMAKE_CXX_STANDARD 11 CACHE STRING "The C++ standard to use")
+set(CMAKE_CXX_STANDARD 17 CACHE STRING "The C++ standard to use")
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 

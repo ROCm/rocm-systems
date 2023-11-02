@@ -32,7 +32,7 @@ option(CMAKE_VERBOSE_MAKEFILE "Enable verbose output" ON)
 option(CMAKE_EXPORT_COMPILE_COMMANDS "Export compile commands for linters and autocompleters" ON)
 
 # Compiler flags
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -m64 -msse -msse2 -std=c++11 -pthread")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -m64 -msse -msse2 -pthread")
 
 if("${CMAKE_BUILD_TYPE}" STREQUAL Release)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O2")
@@ -40,7 +40,7 @@ else()
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -ggdb -O0 -DDEBUG")
 endif()
 
-set(CMAKE_CXX_STANDARD 11 CACHE STRING "The C++ standard to use")
+set(CMAKE_CXX_STANDARD 17 CACHE STRING "The C++ standard to use")
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
