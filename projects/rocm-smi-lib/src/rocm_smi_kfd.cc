@@ -971,5 +971,26 @@ int get_gpu_id(uint32_t node, uint64_t *gpu_id) {
   return retVal;
 }
 
+// /sys/class/kfd/kfd/topology/nodes/*/properties | grep gfx_target_version
+int KFDNode::get_gfx_target_version(uint64_t *gfx_target_version) {
+  std::ostringstream ss;
+  std::string properties_path = "/sys/class/kfd/kfd/topology/nodes/"
+    + std::to_string(this->node_indx_) + "/properties";
+  uint64_t gfx_version = 0;
+  int ret = read_node_properties(this->node_indx_, "gfx_target_version",
+                                 &gfx_version);
+  *gfx_target_version = gfx_version;
+  ss << __PRETTY_FUNCTION__
+     << " | File: " << properties_path
+     << " | Successfully read node #" << std::to_string(this->node_indx_)
+     << " for gfx_target_version"
+     << " | Data (gfx_target_version) *gfx_target_version = "
+     << std::to_string(*gfx_target_version)
+     << " | return = " << std::to_string(ret)
+     << " | ";
+  LOG_DEBUG(ss);
+  return ret;
+}
+
 }  // namespace smi
 }  // namespace amd

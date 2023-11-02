@@ -445,6 +445,12 @@ RocmSMI::Initialize(uint64_t flags) {
     // store each device boot partition state, if file doesn't exist
     dev->storeDevicePartitions(dv_ind);
   }
+
+  // Assists displaying GPU information after device enumeration
+  // Otherwise GPU related info will not be discoverable
+  if (ROCmLogging::Logger::getInstance()->isLoggerEnabled()) {
+    logSystemDetails();
+  }
   // Leaving below to help debug temp file issues
   // displayAppTmpFilesContent();
   std::string amdGPUDeviceList = displayAllDevicePaths(devices_);

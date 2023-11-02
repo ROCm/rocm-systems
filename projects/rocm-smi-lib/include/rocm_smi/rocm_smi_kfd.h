@@ -84,6 +84,9 @@ class KFDNode {
     int get_total_memory(uint64_t* total);
     int get_used_memory(uint64_t* used);
 
+    // Get gfx target version from kfd
+    int get_gfx_target_version(uint64_t* gfx_target_version);
+
  private:
     uint32_t node_indx_;
     uint32_t amdgpu_dev_index_;

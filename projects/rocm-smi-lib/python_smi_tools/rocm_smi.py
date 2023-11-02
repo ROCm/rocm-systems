@@ -965,6 +965,9 @@ def resetComputePartition(deviceList):
             printLog(device, 'Permission denied', None)
         elif ret == rsmi_status_t.RSMI_STATUS_NOT_SUPPORTED:
             printLog(device, 'Not supported on the given system', None)
+        elif ret == rsmi_status_t.RSMI_STATUS_BUSY:
+            printLog(device, 'Device is currently busy, try again later',
+                     None)
         else:
             rsmi_ret_ok(ret, device, 'reset_compute_partition')
             printErrLog(device, 'Failed to reset the compute partition to boot state')
@@ -1001,6 +1004,9 @@ def resetMemoryPartition(deviceList):
             printLog(device, 'Permission denied', None, addExtraLine)
         elif ret == rsmi_status_t.RSMI_STATUS_NOT_SUPPORTED:
             printLog(device, 'Not supported on the given system', None, addExtraLine)
+        elif ret == rsmi_status_t.RSMI_STATUS_BUSY:
+            printLog(device, 'Device is currently busy, try again later',
+                     None)
         else:
             rsmi_ret_ok(ret, device, 'reset_memory_partition')
             printErrLog(device, 'Failed to reset memory partition to boot state')
@@ -1602,6 +1608,9 @@ def setComputePartition(deviceList, computePartitionType):
                      %computePartitionType, None)
         elif ret == rsmi_status_t.RSMI_STATUS_NOT_SUPPORTED:
             printLog(device, 'Not supported on the given system', None)
+        elif ret == rsmi_status_t.RSMI_STATUS_BUSY:
+            printLog(device, 'Device is currently busy, try again later',
+                     None)
         else:
             rsmi_ret_ok(ret, device, 'set_compute_partition')
             printErrLog(device, 'Failed to retrieve compute partition, even though device supports it.')
@@ -1672,6 +1681,9 @@ def setMemoryPartition(deviceList, memoryPartition):
             printLog(device, 'Permission denied', None, addExtraLine)
         elif ret == rsmi_status_t.RSMI_STATUS_NOT_SUPPORTED:
             printLog(device, 'Not supported on the given system', None, addExtraLine)
+        elif ret == rsmi_status_t.RSMI_STATUS_BUSY:
+            printLog(device, 'Device is currently busy, try again later',
+                     None, addExtraLine)
         else:
             rsmi_ret_ok(ret, device, 'set_memory_partition')
             printErrLog(device, 'Failed to retrieve memory partition, even though device supports it.')

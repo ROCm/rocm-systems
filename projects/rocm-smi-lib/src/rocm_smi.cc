@@ -929,6 +929,9 @@ rsmi_status_t
 rsmi_perf_determinism_mode_set(uint32_t dv_ind, uint64_t clkvalue) {
   TRY
   DEVICE_MUTEX
+  std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << " | ======= start =======";
+  LOG_TRACE(ss);
 
   // Set perf. level to performance determinism so that we can then set the power profile
   rsmi_status_t ret = rsmi_dev_perf_level_set_v1(dv_ind,
@@ -1510,6 +1513,9 @@ rsmi_status_t rsmi_dev_od_volt_info_set(uint32_t dv_ind, uint32_t vpoint,
 
 static void get_vc_region(uint32_t start_ind,
                 std::vector<std::string> *val_vec, rsmi_freq_volt_region_t *p) {
+  std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << " | ======= start =======";
+  LOG_TRACE(ss);
   assert(p != nullptr);
   assert(val_vec != nullptr);
   THROW_IF_NULLPTR_DEREF(p)
@@ -1520,6 +1526,9 @@ static void get_vc_region(uint32_t start_ind,
   assert((*val_vec)[kOD_OD_RANGE_label_array_index] == "OD_RANGE:");
   if ((val_vec->size() < kOD_OD_RANGE_label_array_index + 2)  ||
       ((*val_vec)[kOD_OD_RANGE_label_array_index] != "OD_RANGE:") ) {
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======= | returning "
+       << getRSMIStatusString(RSMI_STATUS_UNEXPECTED_DATA);
+    LOG_TRACE(ss);
     throw amd::smi::rsmi_exception(RSMI_STATUS_UNEXPECTED_DATA, __FUNCTION__);
   }
   od_value_pair_str_to_range((*val_vec)[start_ind], &p->freq_range);
@@ -1539,6 +1548,7 @@ static rsmi_status_t get_od_clk_volt_curve_regions(uint32_t dv_ind,
   TRY
   std::vector<std::string> val_vec;
   rsmi_status_t ret;
+  std::ostringstream ss;
 
   assert(num_regions != nullptr);
   assert(p != nullptr);
@@ -1547,12 +1557,20 @@ static rsmi_status_t get_od_clk_volt_curve_regions(uint32_t dv_ind,
 
   ret = GetDevValueVec(amd::smi::kDevPowerODVoltage, dv_ind, &val_vec);
   if (ret != RSMI_STATUS_SUCCESS) {
+    ss << __PRETTY_FUNCTION__
+       << " | Issue: could not retreive kDevPowerODVoltage" << "; returning "
+       << getRSMIStatusString(ret);
+    LOG_ERROR(ss);
     return ret;
   }
 
   // This is a work-around to handle systems where kDevPowerODVoltage is not
   // fully supported yet.
   if (val_vec.size() < 2) {
+    ss << __PRETTY_FUNCTION__
+       << " | Issue: val_vec.size() < 2" << "; returning "
+       << getRSMIStatusString(RSMI_STATUS_NOT_YET_IMPLEMENTED);
+    LOG_ERROR(ss);
     return RSMI_STATUS_NOT_YET_IMPLEMENTED;
   }
 
@@ -1560,8 +1578,17 @@ static rsmi_status_t get_od_clk_volt_curve_regions(uint32_t dv_ind,
   assert((val_vec_size - kOD_VDDC_CURVE_start_index) > 0);
   assert((val_vec_size - kOD_VDDC_CURVE_start_index)%2 == 0);
 
+  ss << __PRETTY_FUNCTION__
+     << " | val_vec_size = " << std::dec
+     << val_vec_size
+     << " | kOD_VDDC_CURVE_start_index = " << kOD_VDDC_CURVE_start_index;
+  LOG_DEBUG(ss);
   if (((val_vec_size - kOD_VDDC_CURVE_start_index) <= 0)  ||
       (((val_vec_size - kOD_VDDC_CURVE_start_index)%2 != 0))) {
+    ss << __PRETTY_FUNCTION__ << " | Issue: od vdd curve returned unexpected "
+       << "data" << "; returning "
+       << getRSMIStatusString(RSMI_STATUS_UNEXPECTED_SIZE);
+    LOG_ERROR(ss);
     throw amd::smi::rsmi_exception(RSMI_STATUS_UNEXPECTED_SIZE, __FUNCTION__);
   }
 
@@ -2749,6 +2776,9 @@ rsmi_dev_od_volt_info_get(uint32_t dv_ind, rsmi_od_volt_freq_data_t *odv) {
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
   DEVICE_MUTEX
+  if (odv == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
   CHK_SUPPORT_NAME_ONLY(odv)
   rsmi_status_t ret = get_od_clk_volt_info(dv_ind, odv);
 
@@ -2779,7 +2809,7 @@ rsmi_status_t rsmi_dev_od_volt_curve_regions_get(uint32_t dv_ind,
                      uint32_t *num_regions, rsmi_freq_volt_region_t *buffer) {
   TRY
   std::ostringstream ss;
-  ss << __PRETTY_FUNCTION__ << "| ======= start =======";
+  ss << __PRETTY_FUNCTION__ << " | ======= start =======";
   LOG_TRACE(ss);
 
   CHK_SUPPORT_NAME_ONLY((num_regions == nullptr || buffer == nullptr) ?
@@ -2791,6 +2821,12 @@ rsmi_status_t rsmi_dev_od_volt_curve_regions_get(uint32_t dv_ind,
   DEVICE_MUTEX
   rsmi_status_t ret = get_od_clk_volt_curve_regions(dv_ind, num_regions,
                                                                       buffer);
+  if (*num_regions == 0) {
+    ret = RSMI_STATUS_NOT_SUPPORTED;
+  }
+  ss << __PRETTY_FUNCTION__ << " | ======= end ======= | returning "
+     << getRSMIStatusString(ret);
+  LOG_TRACE(ss);
   return ret;
   CATCH
 }
@@ -4351,6 +4387,30 @@ rsmi_topo_get_link_type(uint32_t dv_ind_src, uint32_t dv_ind_dst,
 
   rsmi_status_t status;
   uint32_t node_ind_dst;
+
+  // handle the link type for CPU
+  if (dv_ind_dst == CPU_NODE_INDEX) {
+    // No CPU connected
+    if (kfd_node->numa_node_weight() == 0) {
+      return RSMI_STATUS_NOT_SUPPORTED;
+    }
+    amd::smi::IO_LINK_TYPE io_link_type =
+              kfd_node->numa_node_type();
+    switch (io_link_type) {
+      case amd::smi::IOLINK_TYPE_XGMI:
+        *type = RSMI_IOLINK_TYPE_XGMI;
+        *hops = 1;
+        return RSMI_STATUS_SUCCESS;
+      case amd::smi::IOLINK_TYPE_PCIEXPRESS:
+        *type = RSMI_IOLINK_TYPE_PCIEXPRESS;
+        // always be the same CPU node
+        *hops = 2;
+        return RSMI_STATUS_SUCCESS;
+      default:
+        return RSMI_STATUS_NOT_SUPPORTED;
+    }
+  }
+
   int ret = smi.get_node_index(dv_ind_dst, &node_ind_dst);
 
   if (ret == 0) {
@@ -4468,7 +4528,7 @@ get_compute_partition(uint32_t dv_ind, std::string &compute_partition) {
     return ret;
   }
 
-  switch (mapStringToRSMIComputePartitionTypes[compute_partition_str]) {
+  switch (mapStringToRSMIComputePartitionTypes.at(compute_partition_str)) {
     case RSMI_COMPUTE_PARTITION_CPX:
     case RSMI_COMPUTE_PARTITION_SPX:
     case RSMI_COMPUTE_PARTITION_DPX:
@@ -4585,9 +4645,12 @@ rsmi_dev_compute_partition_set(uint32_t dv_ind,
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
   REQUIRE_ROOT_ACCESS
+  if (!amd::smi::is_sudo_user()) {
+    return RSMI_STATUS_PERMISSION;
+  }
   DEVICE_MUTEX
   std::string newComputePartitionStr
-              = mapRSMIToStringComputePartitionTypes[compute_partition];
+              = mapRSMIToStringComputePartitionTypes.at(compute_partition);
   std::string currentComputePartition;
 
   switch (compute_partition) {
@@ -4605,6 +4668,7 @@ rsmi_dev_compute_partition_set(uint32_t dv_ind,
          << " | Device #: " << dv_ind
          << " | Type: "
          << devInfoTypesStrings.at(amd::smi::kDevComputePartition)
+         << " | Data: " << newComputePartitionStr
          << " | Cause: requested setting was invalid"
          << " | Returning = "
          << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS) << " |";
@@ -4623,6 +4687,7 @@ rsmi_dev_compute_partition_set(uint32_t dv_ind,
        << " | Device #: " << dv_ind
        << " | Type: "
        << devInfoTypesStrings.at(amd::smi::kDevComputePartition)
+       << " | Data: " << newComputePartitionStr
        << " | Cause: not an available compute partition setting"
        << " | Returning = "
        << getRSMIStatusString(available_ret) << " |";
@@ -4650,7 +4715,7 @@ rsmi_dev_compute_partition_set(uint32_t dv_ind,
     return ret_get;
   }
   rsmi_compute_partition_type_t currRSMIComputePartition
-    = mapStringToRSMIComputePartitionTypes[currentComputePartition];
+    = mapStringToRSMIComputePartitionTypes.at(currentComputePartition);
   if (currRSMIComputePartition == compute_partition) {
     ss << __PRETTY_FUNCTION__
        << " | ======= end ======= "
@@ -4664,6 +4729,15 @@ rsmi_dev_compute_partition_set(uint32_t dv_ind,
     LOG_TRACE(ss);
     return RSMI_STATUS_SUCCESS;
   }
+
+  ss <<  __PRETTY_FUNCTION__ << " | about to try writing |"
+     << newComputePartitionStr
+     << "| size of string = " << newComputePartitionStr.size()
+     << "| size of c-string = "<< std::dec
+     << sizeof(newComputePartitionStr.c_str())/sizeof(newComputePartitionStr[0])
+     << "| sizeof string = " << std::dec
+     << sizeof(newComputePartitionStr);
+  LOG_DEBUG(ss);
 
   GET_DEV_FROM_INDX
   int ret = dev->writeDevInfo(amd::smi::kDevComputePartition,
@@ -4699,7 +4773,7 @@ static rsmi_status_t get_memory_partition(uint32_t dv_ind,
     return ret;
   }
 
-  switch (mapStringToMemoryPartitionTypes[val_str]) {
+  switch (mapStringToMemoryPartitionTypes.at(val_str)) {
     case RSMI_MEMORY_PARTITION_NPS1:
     case RSMI_MEMORY_PARTITION_NPS2:
     case RSMI_MEMORY_PARTITION_NPS4:
@@ -4755,7 +4829,7 @@ rsmi_dev_memory_partition_set(uint32_t dv_ind,
   }
 
   std::string newMemoryPartition
-              = mapRSMIToStringMemoryPartitionTypes[memory_partition];
+              = mapRSMIToStringMemoryPartitionTypes.at(memory_partition);
   std::string currentMemoryPartition;
 
   switch (memory_partition) {
@@ -4798,7 +4872,7 @@ rsmi_dev_memory_partition_set(uint32_t dv_ind,
     return ret_get;
   }
   rsmi_memory_partition_type_t currRSMIMemoryPartition
-    = mapStringToMemoryPartitionTypes[currentMemoryPartition];
+    = mapStringToMemoryPartitionTypes.at(currentMemoryPartition);
   if (currRSMIMemoryPartition == memory_partition) {
     ss << __PRETTY_FUNCTION__
      << " | ======= end ======= "
@@ -4942,7 +5016,7 @@ rsmi_status_t rsmi_dev_compute_partition_reset(uint32_t dv_ind) {
   // Likely due to device not supporting it
   if (bootState != "UNKNOWN") {
     rsmi_compute_partition_type_t compute_partition =
-      mapStringToRSMIComputePartitionTypes[bootState];
+      mapStringToRSMIComputePartitionTypes.at(bootState);
     ret = rsmi_dev_compute_partition_set(dv_ind, compute_partition);
   }
   ss << __PRETTY_FUNCTION__
@@ -4981,7 +5055,7 @@ rsmi_status_t rsmi_dev_memory_partition_reset(uint32_t dv_ind) {
   // Likely due to device not supporting it
   if (bootState != "UNKNOWN") {
     rsmi_memory_partition_type_t memory_partition =
-      mapStringToMemoryPartitionTypes[bootState];
+      mapStringToMemoryPartitionTypes.at(bootState);
     ret = rsmi_dev_memory_partition_set(dv_ind, memory_partition);
   }
   ss << __PRETTY_FUNCTION__
