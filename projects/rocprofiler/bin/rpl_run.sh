@@ -41,24 +41,6 @@ V1_SUPPORTED_GPU_ARCHS=("gfx80x","gfx90x","gfx10xx")
 CURRENT_AGENTS_LIST=$($BIN_DIR/rocm_agent_enumerator)
 IS_SUPPORTED="false"
 
-# split the CURRENT_AGENTS_LIST array into individual elements.
-current_gpus=(${CURRENT_AGENTS_LIST[@]})
-
-for gpu in "${current_gpus[@]}"; do
-
-  # Check first 5 characters of gpu strings.
-  if [[ "${V1_SUPPORTED_GPU_ARCHS[@]:0:5}" =~ "${gpu:0:5}" ]]; then
-    IS_SUPPORTED="true"
-  fi
-
-done
-
-if [[ $IS_SUPPORTED == "false" ]]; then
-  echo "rocprof(v1) is not supported on this device."
-  echo "Please refer project's README for a list of supported architecures or use rocprofv2"
-  exit 1
-fi
-
 if [ -z "$ROCP_PYTHON_VERSION" ] ; then
   ROCP_PYTHON_VERSION=python3
 fi
@@ -259,6 +241,25 @@ run() {
      echo " Fatal could not find ROCm lib directory "
      fatal
   fi
+
+  # split the CURRENT_AGENTS_LIST array into individual elements.
+  current_gpus=(${CURRENT_AGENTS_LIST[@]})
+
+  for gpu in "${current_gpus[@]}"; do
+
+    # Check first 5 characters of gpu strings.
+    if [[ "${V1_SUPPORTED_GPU_ARCHS[@]:0:5}" =~ "${gpu:0:5}" ]]; then
+      IS_SUPPORTED="true"
+    fi
+
+  done
+
+  if [[ $IS_SUPPORTED == "false" ]]; then
+    echo "rocprof(v1) is not supported on this device."
+    echo "Please refer project's README for a list of supported architecures or use rocprofv2"
+    exit 1
+  fi
+
   export ROCP_INPUT="$1"
   OUTPUT_DIR="$2"
   shift
