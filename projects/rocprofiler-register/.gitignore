@@ -35,3 +35,6 @@
 /build*
 /.cache
 /compile_commands.json
+
+# Github Workflows
+/.github/workflows/continuous-integration.yml
