@@ -245,7 +245,7 @@ tool_tracing_callback(rocprofiler_context_id_t      context,
 }
 
 void
-thread_precreate(rocprofiler_internal_thread_library_t lib, void* tool_data)
+thread_precreate(rocprofiler_runtime_library_t lib, void* tool_data)
 {
     static_cast<call_stack_t*>(tool_data)->emplace_back(
         source_location{__FUNCTION__,
@@ -256,7 +256,7 @@ thread_precreate(rocprofiler_internal_thread_library_t lib, void* tool_data)
 }
 
 void
-thread_postcreate(rocprofiler_internal_thread_library_t lib, void* tool_data)
+thread_postcreate(rocprofiler_runtime_library_t lib, void* tool_data)
 {
     static_cast<call_stack_t*>(tool_data)->emplace_back(
         source_location{__FUNCTION__,

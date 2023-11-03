@@ -26,6 +26,7 @@
 #include "lib/rocprofiler/hsa/hsa.hpp"
 #include "lib/rocprofiler/hsa/queue.hpp"
 #include "lib/rocprofiler/hsa/queue_controller.hpp"
+#include "lib/rocprofiler/intercept_table.hpp"
 #include "lib/rocprofiler/internal_threading.hpp"
 
 #include <rocprofiler/context.h>
@@ -369,7 +370,10 @@ invoke_client_finalizer(rocprofiler_client_id_t client_id)
         {
             if(itr.configure_result && itr.configure_result->finalize)
             {
+                auto _fini_status = get_fini_status();
+                if(_fini_status == 0) set_fini_status(-1);
                 itr.configure_result->finalize(itr.configure_result->tool_data);
+                if(_fini_status == 0) set_fini_status(_fini_status);
                 // set to nullptr so finalize only gets called once
                 itr.configure_result->finalize = nullptr;
             }
@@ -553,7 +557,12 @@ rocprofiler_set_api_table(const char* name,
         auto& saved_hsa_api_table = rocprofiler::hsa::get_table();
         ::copyTables(hsa_api_table, &saved_hsa_api_table);
 
+        // install rocprofiler API wrappers
         rocprofiler::hsa::update_table(hsa_api_table);
+
+        // allow tools to install API wrappers
+        rocprofiler::intercept_table::notify_runtime_api_registration(
+            ROCPROFILER_HSA_LIBRARY, lib_version, lib_instance, std::make_tuple(hsa_api_table));
     }
     else if(std::string_view{name} == "roctx")
     {

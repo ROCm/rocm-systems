@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include <rocprofiler/context.h>
+#include <rocprofiler/fwd.h>
 #include <rocprofiler/rocprofiler.h>
 
 #include "lib/rocprofiler/context/context.hpp"
@@ -31,12 +32,17 @@
 #include <atomic>
 #include <vector>
 
+namespace
+{
+constexpr auto rocprofiler_context_none = ROCPROFILER_CONTEXT_NONE;
+}
+
 extern "C" {
 rocprofiler_status_t
 rocprofiler_create_context(rocprofiler_context_id_t* context_id)
 {
     // always set to none first
-    *context_id = ROCPROFILER_CONTEXT_NONE;
+    *context_id = rocprofiler_context_none;
 
     if(rocprofiler::registration::get_init_status() > -1)
         return ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED;
@@ -50,12 +56,22 @@ rocprofiler_create_context(rocprofiler_context_id_t* context_id)
 rocprofiler_status_t
 rocprofiler_start_context(rocprofiler_context_id_t context_id)
 {
+    if(context_id.handle == rocprofiler_context_none.handle)
+        return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
+
+    // if currently finalizing or finalized, don't allow starting a context
+    if(rocprofiler::registration::get_fini_status() != 0)
+        return ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED;
+
     return rocprofiler::context::start_context(context_id);
 }
 
 rocprofiler_status_t
 rocprofiler_stop_context(rocprofiler_context_id_t context_id)
 {
+    if(context_id.handle == rocprofiler_context_none.handle)
+        return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
+
     return rocprofiler::context::stop_context(context_id);
 }
 
@@ -63,6 +79,10 @@ rocprofiler_status_t
 rocprofiler_context_is_active(rocprofiler_context_id_t context_id, int* status)
 {
     *status = 0;
+
+    if(context_id.handle == rocprofiler_context_none.handle)
+        return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
+
     for(const auto& itr : rocprofiler::context::get_active_contexts())
     {
         const auto* cfg = itr.load(std::memory_order_relaxed);
@@ -79,6 +99,10 @@ rocprofiler_status_t
 rocprofiler_context_is_valid(rocprofiler_context_id_t context_id, int* status)
 {
     *status = 0;
+
+    if(context_id.handle == rocprofiler_context_none.handle)
+        return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
+
     for(const auto& itr : rocprofiler::context::get_registered_contexts())
     {
         if(itr && itr->context_idx == context_id.handle)

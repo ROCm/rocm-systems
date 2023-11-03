@@ -54,8 +54,8 @@ using task_group_vec_t = rocprofiler::common::static_cleanup_wrapper<
     std::vector<task_group_cleanup_t>,
     std::function<void(std::vector<task_group_cleanup_t>&)>>;
 
-void notify_pre_internal_thread_create(rocprofiler_internal_thread_library_t);
-void notify_post_internal_thread_create(rocprofiler_internal_thread_library_t);
+void notify_pre_internal_thread_create(rocprofiler_runtime_library_t);
+void notify_post_internal_thread_create(rocprofiler_runtime_library_t);
 
 // initialize the default thread pool
 void

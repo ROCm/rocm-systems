@@ -209,6 +209,20 @@ typedef enum  // NOLINT(performance-enum-size)
     ROCPROFILER_BUFFER_POLICY_LAST,
 } rocprofiler_buffer_policy_t;
 
+/**
+ * @brief Enumeration for specifying runtime libraries supported by rocprofiler. This enumeration is
+ * used for intercept tables and thread creation callbacks. @see INTERCEPT_TABLE and @see
+ * INTERNAL_THREADING.
+ */
+typedef enum
+{
+    ROCPROFILER_LIBRARY        = (1 << 0),
+    ROCPROFILER_HSA_LIBRARY    = (1 << 1),
+    ROCPROFILER_HIP_LIBRARY    = (1 << 2),
+    ROCPROFILER_MARKER_LIBRARY = (1 << 3),
+    ROCPROFILER_LIBRARY_LAST   = ROCPROFILER_MARKER_LIBRARY,
+} rocprofiler_runtime_library_t;
+
 //--------------------------------------------------------------------------------------//
 //
 //                                      ALIASES

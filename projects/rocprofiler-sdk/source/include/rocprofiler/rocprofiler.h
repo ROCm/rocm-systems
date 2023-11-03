@@ -65,7 +65,7 @@ ROCPROFILER_EXTERN_C_FINI
 /** @} */
 
 #include "rocprofiler/agent.h"
-#include "rocprofiler/agent_profile.h"
+// #include "rocprofiler/agent_profile.h"
 #include "rocprofiler/buffer.h"
 #include "rocprofiler/buffer_tracing.h"
 #include "rocprofiler/callback_tracing.h"
@@ -75,11 +75,12 @@ ROCPROFILER_EXTERN_C_FINI
 #include "rocprofiler/external_correlation.h"
 #include "rocprofiler/hip.h"
 #include "rocprofiler/hsa.h"
+#include "rocprofiler/intercept_table.h"
 #include "rocprofiler/internal_threading.h"
-#include "rocprofiler/marker.h"
+// #include "rocprofiler/marker.h"
 #include "rocprofiler/pc_sampling.h"
 #include "rocprofiler/profile_config.h"
-#include "rocprofiler/spm.h"
+// #include "rocprofiler/spm.h"
 
 ROCPROFILER_EXTERN_C_INIT
 

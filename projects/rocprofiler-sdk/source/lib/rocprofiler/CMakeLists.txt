@@ -4,7 +4,7 @@
 rocprofiler_activate_clang_tidy()
 
 set(ROCPROFILER_LIB_HEADERS agent.hpp buffer.hpp external_correlation.hpp
-                            internal_threading.hpp registration.hpp)
+                            intercept_table.hpp internal_threading.hpp registration.hpp)
 set(ROCPROFILER_LIB_SOURCES
     agent.cpp
     buffer.cpp
@@ -14,6 +14,7 @@ set(ROCPROFILER_LIB_SOURCES
     counters.cpp
     dispatch_profile.cpp
     external_correlation.cpp
+    intercept_table.cpp
     internal_threading.cpp
     pc_sampling.cpp
     profile_config.cpp

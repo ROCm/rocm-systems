@@ -24,6 +24,7 @@ set(ROCPROFILER_HEADER_FILES
     fwd.h
     hip.h
     hsa.h
+    intercept_table.h
     internal_threading.h
     marker.h
     pc_sampling.h

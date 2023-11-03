@@ -32,44 +32,37 @@ ROCPROFILER_EXTERN_C_INIT
  * @brief Callbacks before and after threads created internally by libraries
  *
  * @{
+ * @example api_buffered_tracing/client.cpp
+ * Example demonstrating @ref BUFFER_TRACING_SERVICE that includes usage of @ref
+ * rocprofiler_at_internal_thread_create, @ref rocprofiler_create_callback_thread, and @ref
+ * rocprofiler_assign_callback_thread.
  */
-
-/**
- * @brief Enumeration for specifying which libraries you want callbacks before and after the library
- * creates an internal thread. These callbacks will be invoked on the thread that is about to create
- * the new thread (not on the newly created thread). In thread-aware tools that wrap pthread_create,
- * this can be used to disable the wrapper before the pthread_create invocation and re-enable the
- * wrapper afterwards. In many cases, tools will want to ignore the thread(s) created by rocprofiler
- * since these threads do not exist in the normal application execution, whereas the internal
- * threads for HSA, HIP, etc. are created in normal application execution; however, the HIP, HSA,
- * etc. internal threads are typically background threads which just monitor kernel completion and
- * are unlikely to contribute to any performance issues.
- */
-typedef enum
-{
-    ROCPROFILER_LIBRARY        = (1 << 0),
-    ROCPROFILER_HSA_LIBRARY    = (1 << 1),
-    ROCPROFILER_HIP_LIBRARY    = (1 << 2),
-    ROCPROFILER_MARKER_LIBRARY = (1 << 3),
-    ROCPROFILER_LIBRARY_LAST   = ROCPROFILER_MARKER_LIBRARY,
-} rocprofiler_internal_thread_library_t;
 
 /**
  * @brief Callback type before and after internal thread creation. @see
  * rocprofiler_at_internal_thread_create
  *
  */
-typedef void (*rocprofiler_internal_thread_library_cb_t)(rocprofiler_internal_thread_library_t,
-                                                         void*);
+typedef void (*rocprofiler_internal_thread_library_cb_t)(rocprofiler_runtime_library_t, void*);
 
 /**
  * @brief Invoke this function to receive callbacks before and after the creation of an internal
  * thread by a library which as invoked on the thread which is creating the internal thread(s).
- * Please note that the postcreate callback is guaranteed to be invoked after the underlying
- * system call to create a new thread but it does not guarantee that the new thread has been
- * started. Please note, that once these callbacks are registered, they cannot be removed so the
- * caller is responsible for ignoring these callbacks if they want to ignore them beyond a certain
- * point in the application.
+ *
+ * Use the @ref rocprofiler_runtime_library_t enumeration for specifying which libraries you want
+ * callbacks before and after the library creates an internal thread. These callbacks will be
+ * invoked on the thread that is about to create the new thread (not on the newly created thread).
+ * In thread-aware tools that wrap pthread_create, this can be used to disable the wrapper before
+ * the pthread_create invocation and re-enable the wrapper afterwards. In many cases, tools will
+ * want to ignore the thread(s) created by rocprofiler since these threads do not exist in the
+ * normal application execution, whereas the internal threads for HSA, HIP, etc. are created in
+ * normal application execution; however, the HIP, HSA, etc. internal threads are typically
+ * background threads which just monitor kernel completion and are unlikely to contribute to any
+ * performance issues. Please note that the postcreate callback is guaranteed to be invoked after
+ * the underlying system call to create a new thread but it does not guarantee that the new thread
+ * has been started. Please note, that once these callbacks are registered, they cannot be removed
+ * so the caller is responsible for ignoring these callbacks if they want to ignore them beyond a
+ * certain point in the application.
  *
  * @param [in] precreate Callback invoked immediately before a new internal thread is created
  * @param [in] postcreate Callback invoked immediately after a new internal thread is created
@@ -77,6 +70,9 @@ typedef void (*rocprofiler_internal_thread_library_cb_t)(rocprofiler_internal_th
  * means the callbacks will be invoked whenever rocprofiler and/or the marker library create
  * internal threads but not when the HSA or HIP libraries create internal threads.
  * @param [in] data Data shared between callbacks
+ * @return ::rocprofiler_status_t
+ * @retval ::ROCPROFILER_STATUS_SUCCESS There are currently no conditions which result in any other
+ * value, even if internal threads have already been created
  */
 rocprofiler_status_t ROCPROFILER_API
 rocprofiler_at_internal_thread_create(rocprofiler_internal_thread_library_cb_t precreate,
@@ -100,6 +96,8 @@ typedef struct
  *
  * @param [in] cb_thread_id User-provided pointer to a @ref rocprofiler_callback_thread_t
  * @return ::rocprofiler_status_t
+ * @retval ::ROCPROFILER_STATUS_SUCCESS Successful thread creation
+ * @retval ::ROCPROFILER_STATUS_ERROR Failed to create thread
  */
 rocprofiler_status_t ROCPROFILER_API
 rocprofiler_create_callback_thread(rocprofiler_callback_thread_t* cb_thread_id)
@@ -113,6 +111,12 @@ rocprofiler_create_callback_thread(rocprofiler_callback_thread_t* cb_thread_id)
  * @param [in] buffer_id Buffer identifier
  * @param [in] cb_thread_id Callback thread identifier via @ref rocprofiler_create_callback_thread
  * @return ::rocprofiler_status_t
+ * @retval ::ROCPROFILER_STATUS_SUCCESS Successful assignment of the delivery thread for the given
+ * buffer
+ * @retval ::ROCPROFILER_STATUS_ERROR_THREAD_NOT_FOUND Thread identifier did not match any of the
+ * threads created by rocprofiler
+ * @retval ::ROCPROFILER_STATUS_ERROR_BUFFER_NOT_FOUND Buffer identifier did not match any of the
+ * buffers registered with rocprofiler
  */
 rocprofiler_status_t ROCPROFILER_API
 rocprofiler_assign_callback_thread(rocprofiler_buffer_id_t       buffer_id,

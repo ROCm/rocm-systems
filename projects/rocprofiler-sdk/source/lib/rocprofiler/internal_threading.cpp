@@ -43,9 +43,9 @@ namespace internal_threading
 {
 namespace
 {
-template <rocprofiler_internal_thread_library_t... Idx>
-using library_sequence_t     = std::integer_sequence<rocprofiler_internal_thread_library_t, Idx...>;
-using creation_notifier_cb_t = void (*)(rocprofiler_internal_thread_library_t, void*);
+template <rocprofiler_runtime_library_t... Idx>
+using library_sequence_t     = std::integer_sequence<rocprofiler_runtime_library_t, Idx...>;
+using creation_notifier_cb_t = void (*)(rocprofiler_runtime_library_t, void*);
 using thread_pool_config_t   = PTL::ThreadPool::Config;
 
 // this is used to loop over the different libraries
@@ -66,7 +66,7 @@ enum class notifier_stage
 };
 
 // data structure holding list of callbacks
-template <rocprofiler_internal_thread_library_t LibT>
+template <rocprofiler_runtime_library_t LibT>
 struct creation_notifier
 {
     static constexpr auto value = LibT;
@@ -78,7 +78,7 @@ struct creation_notifier
 };
 
 // static accessor for creation_notifier instance
-template <rocprofiler_internal_thread_library_t LibT>
+template <rocprofiler_runtime_library_t LibT>
 auto&
 get_creation_notifier()
 {
@@ -87,7 +87,7 @@ get_creation_notifier()
 }
 
 // adds callbacks to creation_notifier instance(s)
-template <rocprofiler_internal_thread_library_t... Idx>
+template <rocprofiler_runtime_library_t... Idx>
 void
 update_creation_notifiers(creation_notifier_cb_t pre,
                           creation_notifier_cb_t post,
@@ -110,10 +110,10 @@ update_creation_notifiers(creation_notifier_cb_t pre,
 }
 
 // invokes creation notifiers
-template <notifier_stage StageT, rocprofiler_internal_thread_library_t... Idx>
+template <notifier_stage StageT, rocprofiler_runtime_library_t... Idx>
 void
-execute_creation_notifiers(rocprofiler_internal_thread_library_t libs,
-                           std::integer_sequence<rocprofiler_internal_thread_library_t, Idx...>)
+execute_creation_notifiers(rocprofiler_runtime_library_t libs,
+                           std::integer_sequence<rocprofiler_runtime_library_t, Idx...>)
 {
     auto execute = [libs](auto& notifier) {
         if(((libs & notifier.value) == notifier.value))
@@ -189,13 +189,13 @@ finalize()
 }
 
 void
-notify_pre_internal_thread_create(rocprofiler_internal_thread_library_t libs)
+notify_pre_internal_thread_create(rocprofiler_runtime_library_t libs)
 {
     execute_creation_notifiers<notifier_stage::precreation>(libs, creation_notifier_library_seq);
 }
 
 void
-notify_post_internal_thread_create(rocprofiler_internal_thread_library_t libs)
+notify_post_internal_thread_create(rocprofiler_runtime_library_t libs)
 {
     execute_creation_notifiers<notifier_stage::postcreation>(libs, creation_notifier_library_seq);
 }

@@ -337,14 +337,14 @@ tool_tracing_buffered(rocprofiler_context_id_t      context,
 }
 
 void
-thread_precreate(rocprofiler_internal_thread_library_t /*lib*/, void* tool_data)
+thread_precreate(rocprofiler_runtime_library_t /*lib*/, void* tool_data)
 {
     auto* cb_data = static_cast<callback_data*>(tool_data);
     cb_data->client_workflow_count++;
 }
 
 void
-thread_postcreate(rocprofiler_internal_thread_library_t /*lib*/, void* tool_data)
+thread_postcreate(rocprofiler_runtime_library_t /*lib*/, void* tool_data)
 {
     auto* cb_data = static_cast<callback_data*>(tool_data);
     cb_data->client_workflow_count++;
