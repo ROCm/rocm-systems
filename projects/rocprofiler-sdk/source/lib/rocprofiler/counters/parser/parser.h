@@ -1,8 +1,8 @@
-/* A Bison parser, made by GNU Bison 3.5.1.  */
+/* A Bison parser, made by GNU Bison 3.8.2.  */
 
 /* Bison interface for Yacc-like parsers in C
 
-   Copyright (C) 1984, 1989-1990, 2000-2015, 2018-2020 Free Software Foundation,
+   Copyright (C) 1984, 1989-1990, 2000-2015, 2018-2021 Free Software Foundation,
    Inc.
 
    This program is free software: you can redistribute it and/or modify
@@ -16,7 +16,7 @@
    GNU General Public License for more details.
 
    You should have received a copy of the GNU General Public License
-   along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
+   along with this program.  If not, see <https://www.gnu.org/licenses/>.  */
 
 /* As a special exception, you may create a larger work that contains
    part or all of the Bison parser skeleton and distribute that work
@@ -31,8 +31,9 @@
    This special exception was added by the Free Software Foundation in
    version 2.2 of Bison.  */
 
-/* Undocumented macros, especially those whose name start with YY_,
-   are private implementation details.  Do not rely on them.  */
+/* DO NOT RELY ON FEATURES THAT ARE NOT DOCUMENTED in the manual,
+   especially those whose name start with YY_ or yy_.  They are
+   private implementation details that can be changed or removed.  */
 
 #ifndef YY_YY_ROCPROFILER_SOURCE_LIB_ROCPROFILER_COUNTERS_PARSER_PARSER_H_INCLUDED
 #define YY_YY_ROCPROFILER_SOURCE_LIB_ROCPROFILER_COUNTERS_PARSER_PARSER_H_INCLUDED
@@ -50,35 +51,40 @@ extern int yydebug;
 using namespace rocprofiler::counters;
 #define YYDEBUG 1
 
-#line 54 "parser.h"
+#line 55 "parser.h"
 
-/* Token type.  */
+/* Token kinds.  */
 #ifndef YYTOKENTYPE
 #    define YYTOKENTYPE
 enum yytokentype
 {
-    ADD             = 258,
-    SUB             = 259,
-    MUL             = 260,
-    DIV             = 261,
-    ABS             = 262,
-    EQUALS          = 263,
-    OP              = 264,
-    CP              = 265,
-    O_SQ            = 266,
-    C_SQ            = 267,
-    COLON           = 268,
-    EOL             = 269,
-    UMINUS          = 270,
-    CM              = 271,
-    NUMBER          = 272,
-    RANGE           = 273,
-    NAME            = 274,
-    REDUCE          = 275,
-    SELECT          = 276,
-    LOWER_THAN_ELSE = 277,
-    ELSE            = 278
+    YYEMPTY         = -2,
+    YYEOF           = 0,   /* "end of file"  */
+    YYerror         = 256, /* error  */
+    YYUNDEF         = 257, /* "invalid token"  */
+    ADD             = 258, /* ADD  */
+    SUB             = 259, /* SUB  */
+    MUL             = 260, /* MUL  */
+    DIV             = 261, /* DIV  */
+    ABS             = 262, /* ABS  */
+    EQUALS          = 263, /* EQUALS  */
+    OP              = 264, /* OP  */
+    CP              = 265, /* CP  */
+    O_SQ            = 266, /* O_SQ  */
+    C_SQ            = 267, /* C_SQ  */
+    COLON           = 268, /* COLON  */
+    EOL             = 269, /* EOL  */
+    UMINUS          = 270, /* UMINUS  */
+    CM              = 271, /* CM  */
+    NUMBER          = 272, /* NUMBER  */
+    RANGE           = 273, /* RANGE  */
+    NAME            = 274, /* NAME  */
+    REDUCE          = 275, /* REDUCE  */
+    SELECT          = 276, /* SELECT  */
+    LOWER_THAN_ELSE = 277, /* LOWER_THAN_ELSE  */
+    ELSE            = 278  /* ELSE  */
 };
+typedef enum yytokentype yytoken_kind_t;
 #endif
 
 /* Value type.  */
@@ -87,11 +93,12 @@ union YYSTYPE
 {
 #    line 34 "parser.y"
 
-    RawAST* a; /* For ast node */
-    int64_t d;
-    char*   s;
+    RawAST*     a;  /* For ast node */
+    LinkedList* ll; /* For linked list node */
+    int64_t     d;
+    char*       s;
 
-#    line 95 "parser.h"
+#    line 102 "parser.h"
 };
 typedef union YYSTYPE YYSTYPE;
 #    define YYSTYPE_IS_TRIVIAL  1

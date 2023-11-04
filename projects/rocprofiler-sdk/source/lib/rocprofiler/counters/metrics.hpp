@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <iostream>
 #include <string>
 #include <unordered_map>
@@ -19,7 +20,8 @@ class Metric
 {
 public:
     Metric() = default;
-    Metric(std::string name,
+    Metric(const std::string&,  // Get rid of this...
+           std::string name,
            std::string block,
            std::string event,
            std::string dsc,

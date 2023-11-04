@@ -38,13 +38,24 @@ test_callback(rocprofiler_queue_id_t       queue_id,
               rocprofiler_correlation_id_t corr_id,
               const hsa_kernel_dispatch_packet_t*,
               void*,
-              rocprofiler_dispatch_profile_counting_record_t**,
-              size_t,
+              rocprofiler_record_counter_t* out_counters,
+              size_t                        out_size,
               rocprofiler_profile_config_id_t)
 {
+    static int enter_count = 0;
+    enter_count++;
+    // Limit output to avoid massive log size
+    if(enter_count % 100 != 0) return;
+
+    std::stringstream ss;
+    for(size_t i = 0; i < out_size; i++)
+    {
+        ss << "(Id: " << out_counters[i].id << " Value [D]: " << out_counters[i].derived_counter
+           << ", Value [I]: " << out_counters[i].hw_counter << "),";
+    }
     // Callback containing counter data.
     std::clog << "[" << __FUNCTION__ << "] " << queue_id.handle << " | " << agent_id.id.handle
-              << " | " << corr_id.internal << "\n";
+              << " | " << corr_id.internal << "|" << ss.str() << "\n";
 }
 
 int

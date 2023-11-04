@@ -31,6 +31,8 @@ public:
     AQLPacketConstruct(const hsa::AgentCache& agent, const std::vector<counters::Metric>& metrics);
     std::unique_ptr<hsa::AQLPacket> construct_packet(const AmdExtTable&) const;
 
+    const counters::Metric* event_to_metric(const hsa_ven_amd_aqlprofile_event_t& event) const;
+
 private:
     struct AQLProfileMetric
     {
@@ -44,6 +46,8 @@ private:
     const hsa::AgentCache&                      _agent;
     std::vector<AQLProfileMetric>               _metrics;
     std::vector<hsa_ven_amd_aqlprofile_event_t> _events;
+    std::map<std::tuple<hsa_ven_amd_aqlprofile_block_name_t, uint32_t, uint32_t>, counters::Metric>
+        _event_to_metric;
 };
 
 }  // namespace aql

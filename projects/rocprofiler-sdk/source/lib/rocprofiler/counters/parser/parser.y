@@ -33,6 +33,7 @@ void yyerror(rocprofiler::counters::RawAST**, const char *s) { LOG(ERROR) << s; 
 /*declare data types*/
 %union {
  RawAST* a;          /* For ast node */
+ LinkedList* ll;     /* For linked list node */
  int64_t d;
  char* s;
 }
@@ -43,6 +44,7 @@ void yyerror(rocprofiler::counters::RawAST**, const char *s) { LOG(ERROR) << s; 
 %type <a> exp                    /* set data type for expressions */
 %type <s> NAME
 %type <d> NUMBER
+%type <ll> reduce_dim_args select_dim_args
 
 %nonassoc LOWER_THAN_ELSE
 %nonassoc ELSE
@@ -54,14 +56,6 @@ void yyerror(rocprofiler::counters::RawAST**, const char *s) { LOG(ERROR) << s; 
 top:
   exp { *result = $1;};
 
-// line: /* nothing */
-//  | line exp EOL {
-//     // TODO
-//     //printf("= %g\n", eval($2)); //evaluate and print the AST
-//     //printf("> ");
-//    }
-//  | line EOL { printf("> "); } /* blank line or a comment */
-//  ;
 
 exp: NUMBER                               { $$ = new RawAST(NUMBER_NODE, $1); }
   | exp ADD exp                           { $$ = new RawAST(ADDITION_NODE, {$1, $3}); }
@@ -69,35 +63,41 @@ exp: NUMBER                               { $$ = new RawAST(NUMBER_NODE, $1); }
   | exp MUL exp                           { $$ = new RawAST(MULTIPLY_NODE, {$1, $3}); }
   | exp DIV exp                           { $$ = new RawAST(DIVIDE_NODE, {$1, $3}); }
   | OP exp CP                             { $$ = $2; }
-  | O_SQ exp COLON exp C_SQ               { $$ = new RawAST(RANGE_NODE, {$2, $4}); }
   | NAME                                  { $$ = new RawAST(REFERENCE_NODE, $1);
                                             free($1);
                                           }
-  | NAME EQUALS exp                       { $$ = new RawAST(REFERENCE_SET, $1, $3);
-                                            free($1);
-                                          }
-  | NAME EQUALS exp CM exp                { $$ = new RawAST(REFERENCE_SET, $1, $3, $5);
-                                            free($1);
-                                          }
-  | REDUCE OP exp CM NAME CP              { $$ = new RawAST(REDUCE_NODE, $3, $5);
+  | REDUCE OP exp CM NAME CP              {
+                                            $$ = new RawAST(REDUCE_NODE, $3, $5, NULL);
                                             free($5);
                                           }
-  | REDUCE OP exp CM NAME CM exp CP       { $$ = new RawAST(REDUCE_NODE, $3, $5, $7);
+  | REDUCE OP exp CM NAME CM O_SQ reduce_dim_args C_SQ CP {
+                                            $$ = new RawAST(REDUCE_NODE, $3, $5, $8);
                                             free($5);
                                           }
-  | SELECT OP exp CM NAME CP              { $$ = new RawAST(SELECT_NODE, $3, $5);
-                                            free($5);
+  | SELECT OP exp CM O_SQ select_dim_args C_SQ CP {
+                                            $$ = new RawAST(SELECT_NODE, $3, $6);
                                           }
-  | SELECT OP exp CM NAME CM exp CP       { $$ = new RawAST(SELECT_NODE, $3, $5, $7);
-                                            free($5);
-                                          }
-  // | NAME O_SQ POS_INTEGER C_SQ            { $$ = create_index_access_node($1, $3); }
   ;
 
 
-%%
 
-// void yyerror(char const *s)
-// {
-//   fprintf(stderr, "check error saurabh: %s\n", s);
-// }
+reduce_dim_args: NAME                     { $$ = new LinkedList($1, NULL); 
+                                            free($1);
+                                          }
+ | NAME CM reduce_dim_args               { $$ = new LinkedList($1, $3); 
+                                            free($1);
+                                          }
+ ;
+
+
+
+select_dim_args: NAME EQUALS NUMBER       { $$ = new LinkedList($1, $3, NULL); 
+                                            free($1);
+                                          }
+ | NAME EQUALS NUMBER CM select_dim_args { $$ = new LinkedList($1, $3, $5);
+                                            free($1);
+                                          }
+ ;
+
+
+%%

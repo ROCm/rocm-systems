@@ -3,6 +3,8 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -10,6 +12,9 @@
 #include <fmt/core.h>
 #include <fmt/ranges.h>
 #include <glog/logging.h>
+
+#include "lib/common/utility.hpp"
+#include "lib/rocprofiler/counters/id_decode.hpp"
 
 namespace rocprofiler
 {
@@ -25,16 +30,31 @@ enum NodeType
     RANGE_NODE,
     REDUCE_NODE,
     REFERENCE_NODE,
-    REFERENCE_SET,
     SELECT_NODE,
     SUBTRACTION_NODE,
+};
+
+struct LinkedList
+{
+    std::string name;
+    int         data{-1};
+    LinkedList* next{nullptr};
+    LinkedList(const char* v, LinkedList* next_node)
+    : name(std::string{CHECK_NOTNULL(v)})
+    , next(next_node)
+    {}
+    LinkedList(const char* v, int d, LinkedList* next_node)
+    : name(std::string{CHECK_NOTNULL(v)})
+    , data(d)
+    , next(next_node)
+    {}
 };
 
 struct RawAST
 {
     // Node type
-    NodeType type{NONE};  // Operation to perform on the counter set
-    NodeType operation{NONE};
+    NodeType    type{NONE};  // Operation to perform on the counter set
+    std::string reduce_op;
 
     // Stores either the name or digit dependening on whether this
     // is a name or number
@@ -44,10 +64,12 @@ struct RawAST
     // Operation is applied to all counters in this set.
     std::vector<RawAST*> counter_set;
 
-    // Reference set to remove dimensions (such as shader)
-    // from the result. This is a future looking change and
-    // will be unsupported in 6.0.
-    std::vector<RawAST*> reference_set;
+    // Dimension set to remove dimensions (such as shader engine)
+    // from the result.
+    std::unordered_set<rocprofiler_profile_counter_instance_types> reduce_dimension_set;
+
+    // Dimension set to select certain dimensions from the result
+    std::unordered_map<rocprofiler_profile_counter_instance_types, int> select_dimension_set;
 
     // Range restriction on this node
     RawAST* range{nullptr};
@@ -61,7 +83,6 @@ struct RawAST
             }
         };
 
-        deleteVec(reference_set);
         deleteVec(counter_set);
         delete range;
     }
@@ -77,47 +98,86 @@ struct RawAST
     , value(v)
     {}
 
-    // Reduce/Select operation constructor. Counter is the counter AST
-    // to use for the reduce/select op, op is how to reduce (i.e. SUM,AVG,etc),
-    // refs is the reference set AST. This reference set is copied to flatten
-    // the AST.
-    RawAST(NodeType t, RawAST* counter, const char* op, RawAST* refs = nullptr)
+    static const auto& get_dim_map()
+    {
+        static const auto dim_map = []() {
+            std::map<std::string, rocprofiler_profile_counter_instance_types> out;
+            const auto& dims = dimension_map();
+            for(const auto& [id, name] : dims)
+            {
+                out.emplace(name, id);
+            }
+            return out;
+        }();
+        return dim_map;
+    }
+
+    // Reduce operation constructor. Counter is the counter AST
+    // to use for the reduce op, op is how to reduce (i.e. SUM,AVG,etc),
+    // dimensions contains the set of dimensions which we want to keep
+    // in the result. Dimensions not specified are all reduced according to op
+    RawAST(NodeType t, RawAST* counter, const char* op, LinkedList* dimensions)
     : type(t)
-    , value(std::string{CHECK_NOTNULL(op)})
+    , reduce_op(CHECK_NOTNULL(op))
     , counter_set({counter})
     {
-        copy_reference_set(refs);
+        if(dimensions)
+        {
+            while(dimensions)
+            {
+                const rocprofiler_profile_counter_instance_types* dim =
+                    rocprofiler::common::get_val(get_dim_map(), std::string{dimensions->name});
+                if(!dim)
+                {
+                    throw std::runtime_error(
+                        fmt::format("Unknown Dimension - {}", dimensions->name));
+                }
+
+                reduce_dimension_set.insert(*dim);
+                LinkedList* current = dimensions;
+                dimensions          = dimensions->next;
+                delete current;
+            }
+        }
+    }
+
+    // Select operation constructor. Counter is the counter AST
+    // to use for the reduce op, refs is the reference set AST.
+    // dimensions contains the mapping for selecting dimensions
+    // (XCC=1,SE=2,...)
+    RawAST(NodeType t, RawAST* counter, LinkedList* dimensions)
+    : type(t)
+    , counter_set({counter})
+    {
+        if(dimensions)
+        {
+            LinkedList* ptr = dimensions;
+            while(ptr)
+            {
+                const rocprofiler_profile_counter_instance_types* dim =
+                    rocprofiler::common::get_val(get_dim_map(), dimensions->name);
+                if(!dim)
+                {
+                    throw std::runtime_error(
+                        fmt::format("Unknown Dimension - {}", dimensions->name));
+                }
+
+                select_dimension_set.insert({*dim, ptr->data});
+                LinkedList* current = ptr;
+                ptr                 = ptr->next;
+                delete current;
+            }
+        }
+        else
+        {
+            LOG(ERROR) << "select_dimension_set creation failed.";
+        }
     }
 
     RawAST(NodeType t, std::vector<RawAST*> c)
     : type(t)
     , counter_set(std::move(c))
     {}
-
-    // Following two calls are for future reference set settings
-    // for select/reduce ops.
-
-    // Referene set constructor, refs is a pointer to an existing
-    // reference set when multiple references are given (i.e.
-    // shader=X,anotherRef=Y,....).
-    RawAST(NodeType t, const char* v, RawAST* r, RawAST* refs = nullptr)
-    : type(t)
-    , value(std::string{CHECK_NOTNULL(v)})
-    , range(r)
-    {
-        LOG(ERROR) << "BUilding bad ast";
-        copy_reference_set(refs);
-    }
-
-    // Flattens reference set tree into this node.
-    void copy_reference_set(RawAST* ast)
-    {
-        if(!ast) return;
-        reference_set.push_back(ast);
-        reference_set.insert(
-            reference_set.end(), ast->reference_set.begin(), ast->reference_set.end());
-        ast->reference_set.clear();
-    }
 };
 }  // namespace counters
 }  // namespace rocprofiler
@@ -146,15 +206,14 @@ struct formatter<rocprofiler::counters::RawAST>
             {rocprofiler::counters::RANGE_NODE, "RANGE_NODE"},
             {rocprofiler::counters::REDUCE_NODE, "REDUCE_NODE"},
             {rocprofiler::counters::REFERENCE_NODE, "REFERENCE_NODE"},
-            {rocprofiler::counters::REFERENCE_SET, "REFERENCE_SET"},
             {rocprofiler::counters::SELECT_NODE, "SELECT_NODE"},
             {rocprofiler::counters::SUBTRACTION_NODE, "SUBTRACTION_NODE"},
         };
 
         auto out = fmt::format_to(ctx.out(),
-                                  "{{\"Type\":\"{}\", \"Operation\":\"{}\",",
+                                  "{{\"Type\":\"{}\", \"REDUCE_OP\":\"{}\",",
                                   NodeTypeToString.at(ast.type),
-                                  NodeTypeToString.at(ast.operation));
+                                  ast.reduce_op);
 
         if(const auto* string_val = std::get_if<std::string>(&ast.value))
         {
@@ -170,19 +229,34 @@ struct formatter<rocprofiler::counters::RawAST>
             out = fmt::format_to(out, " \"Range\":{},", *ast.range);
         }
 
-        out = fmt::format_to(out, "\"ReferenceSet\":[");
-        for(const auto& ref : ast.reference_set)
-        {
-            out = fmt::format_to(
-                out, "{}{}", *CHECK_NOTNULL(ref), ref == ast.reference_set.back() ? "" : ",");
-        }
-
-        out = fmt::format_to(out, "], \"CounterSet\":[");
+        out = fmt::format_to(out, " \"Counter_Set\":[");
         for(const auto& ref : ast.counter_set)
         {
             out = fmt::format_to(
                 out, "{}{}", *CHECK_NOTNULL(ref), ref == ast.counter_set.back() ? "" : ",");
         }
+
+        out                   = fmt::format_to(out, "], \"Reduce_Dimension_Set\":[");
+        size_t ReduceSetIndex = 0;
+        for(const auto& ref : ast.reduce_dimension_set)
+        {
+            out = fmt::format_to(out,
+                                 "\"{}\"{}",
+                                 static_cast<int>(ref),
+                                 ++ReduceSetIndex == ast.reduce_dimension_set.size() ? "" : ",");
+        }
+
+        out                   = fmt::format_to(out, "], \"Select_Dimension_Set\":[");
+        size_t SelectSetIndex = 0;
+        for(const auto& [type, val] : ast.select_dimension_set)
+        {
+            out = fmt::format_to(out,
+                                 "\"{},{}\"{}",
+                                 static_cast<int>(type),
+                                 val,
+                                 ++SelectSetIndex == ast.select_dimension_set.size() ? "" : ",");
+        }
+
         return fmt::format_to(out, "]}}");
     }
 };

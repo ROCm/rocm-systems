@@ -28,10 +28,12 @@ THE SOFTWARE.
 #include "lib/common/utility.hpp"
 #include "lib/common/xml.hpp"
 
+#include "dimensions.hpp"
 #include "glog/logging.h"
 
 #include <dlfcn.h>  // for dladdr
 #include <atomic>
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <optional>
@@ -42,6 +44,7 @@ namespace counters
 {
 namespace
 {
+// Future TODO: inheritance? does it work for derived_counters.xml?
 MetricMap
 loadXml(const std::string& filename)
 {
@@ -72,7 +75,8 @@ loadXml(const std::string& filename)
                 .first->second;
         for(const auto& node : nodes)
         {
-            metricVec.emplace_back(node->opts["name"],
+            metricVec.emplace_back(gfx_name,
+                                   node->opts["name"],
                                    node->opts["block"],
                                    node->opts["event"],
                                    node->opts["descr"],

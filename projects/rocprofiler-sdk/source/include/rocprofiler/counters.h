@@ -35,6 +35,44 @@ ROCPROFILER_EXTERN_C_INIT
  */
 
 /**
+ * @brief Query counter id information from record_id
+ *
+ * @param [in] id record id from rocprofiler_record_counter_t
+ * @param [out] counter_id counter id associated with the record
+ * @return ::rocprofiler_status_t
+ */
+rocprofiler_status_t ROCPROFILER_API
+rocprofiler_query_record_counter_id(rocprofiler_counter_instance_id_t id,
+                                    rocprofiler_counter_id_t* counter_id) ROCPROFILER_NONNULL(2);
+
+/**
+ * @brief Query dimension position from record_id
+ *
+ * @param [in] id record id from rocprofiler_record_counter_t
+ * @param [in]  dim dimension for which positional info is requested
+ * @param [out] pos value of the dimension in id.
+ * @return ::rocprofiler_status_t
+ */
+rocprofiler_status_t ROCPROFILER_API
+rocprofiler_query_record_dimension_position(rocprofiler_counter_instance_id_t  id,
+                                            rocprofiler_counter_dimension_id_t dim,
+                                            size_t* pos) ROCPROFILER_NONNULL(3);
+
+/**
+ * @brief Return information about the dimension for a specified counter
+ *
+ * @param [in] id counter id to query dimension info for.
+ * @param [in]  dim dimension
+ * @param [out] info info on the dimension (name, instance_size)
+ * @return ::rocprofiler_status_t
+ */
+rocprofiler_status_t ROCPROFILER_API
+rocprofiler_query_record_dimension_info(rocprofiler_counter_id_t             id,
+                                        rocprofiler_counter_dimension_id_t   dim,
+                                        rocprofiler_record_dimension_info_t* info)
+    ROCPROFILER_NONNULL(3);
+
+/**
  * @brief Query Counter name.
  *
  * @param [in] counter_id

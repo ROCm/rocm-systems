@@ -249,21 +249,21 @@
   <metric name="MfmaFlopsF64"                                           expr=SQ_INSTS_VALU_MFMA_MOPS_F64*512                          descr="Unit: IOP"></metric>
   <metric name="ScaPipeIssueUtil"                                       expr=100*SQ_ACTIVE_INST_SCA/(GRBM_GUI_ACTIVE*CU_NUM)          descr="Unit: percent"></metric>
   <metric name="ValuPipeIssueUtil"                                      expr=100*SQ_ACTIVE_INST_VALU/(GRBM_GUI_ACTIVE*CU_NUM)         descr="Unit: percent"></metric>
-  <metric name="VmemPipeIssueUtil"                                      expr=100*4*(SQ_ACTIVE_INST_VMEM+SQ_ACTIVE_INST_FLAT)/(GRBM_GUI_ACTIVE*CU_NUM)      descr="Unit: percent"></metric>
+  <metric name="VmemPipeIssueUtil"                                      expr=400*(SQ_ACTIVE_INST_VMEM+SQ_ACTIVE_INST_FLAT)/(GRBM_GUI_ACTIVE*CU_NUM)      descr="Unit: percent"></metric>
   <metric name="MfmaUtil"                                               expr=100*SQ_VALU_MFMA_BUSY_CYCLES/(GRBM_GUI_ACTIVE*CU_NUM*4)                       descr="Unit: percent"></metric>
   <metric name="AvgNumActiveThreads"                                    expr=SQ_THREAD_CYCLES_VALU/SQ_ACTIVE_INST_VALU                descr="Unit: percent"></metric>
   <metric name="VmemLatency"                                            expr=SQ_ACCUM_PREV_HIRES/SQ_INSTS_VMEM                        descr="Unit: cycles"></metric>
   <metric name="SmemLatency"                                            expr=SQ_ACCUM_PREV_HIRES/SQ_INSTS_SMEM_NORM                   descr="Unit: cycles"></metric>
   ## Local Data Share (LDS) Metrics
   <metric name="LdsUtil"                                                expr=100*SQ_LDS_IDX_ACTIVE/(GRBM_GUI_ACTIVE*CU_NUM)                       descr="Unit: percent"></metric>
-  <metric name="LdsPipeIssueUtil"                                       expr=100*4*SQ_ACTIVE_INST_LDS/(GRBM_GUI_ACTIVE*CU_NUM*2)                  descr="Unit: percent"></metric>
+  <metric name="LdsPipeIssueUtil"                                       expr=400*SQ_ACTIVE_INST_LDS/(GRBM_GUI_ACTIVE*CU_NUM*2)                  descr="Unit: percent"></metric>
   <metric name="LdsLatency"                                             expr=SQ_ACCUM_PREV_HIRES/SQ_INSTS_LDS                                     descr="Unit: cycles"></metric>
   <metric name="LdsBankConflict"                                        expr=SQ_LDS_BANK_CONFLICT/(SQ_LDS_IDX_ACTIVE-SQ_LDS_BANK_CONFLICT)        descr="Unit: conflicts/access"></metric>
   ## L1I and sL1D Cache Metrics
   <metric name="L1iCacheHitRate"                                        expr=100*SQC_ICACHE_HITS/SQC_ICACHE_REQ                               descr="Unit: percent"></metric>
   <metric name="sL1dCacheHitRate"                                       expr=100*SQC_DCACHE_HITS/SQC_DCACHE_REQ                               descr="Unit: percent"></metric>
   ## vL1D Cache Metrics
-  <metric name="vL1dBufCoalesceRate"                                    expr=100*64*TA_TOTAL_WAVEFRONTS_sum/(TCP_TOTAL_ACCESSES_sum*4)        descr="Unit: percent"></metric>
+  <metric name="vL1dBufCoalesceRate"                                    expr=6400*TA_TOTAL_WAVEFRONTS_sum/(TCP_TOTAL_ACCESSES_sum*4)        descr="Unit: percent"></metric>
   <metric name="vL1dCacheUtil"                                          expr=100*TCP_GATE_EN2_sum/TCP_GATE_EN1_sum                            descr="Unit: percent"></metric>
   <metric name="vL1dCacheTcbHitRate"                                    expr=100*TCP_UTCL1_TRANSLATION_HIT_sum/TCP_UTCL1_REQUEST_sum          descr="Unit: percent"></metric>
   <metric name="vL1dCacheWaveLatency"                                   expr=TCP_TCP_LATENCY_sum/TCP_TA_TCP_STATE_READ_sum                    descr="Unit: cycles"></metric>

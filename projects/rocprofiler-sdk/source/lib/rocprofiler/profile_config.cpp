@@ -34,19 +34,6 @@ rocprofiler_create_profile_config(rocprofiler_agent_t              agent,
         const auto* metric_ptr = rocprofiler::common::get_val(id_map, counter_id.handle);
         if(!metric_ptr) return ROCPROFILER_STATUS_ERROR_COUNTER_NOT_FOUND;
         config.metrics.push_back(*metric_ptr);
-
-        auto agent_name = std::string(agent.name);
-        auto req_counters =
-            rocprofiler::counters::get_required_hardware_counters(agent_name, *metric_ptr);
-        if(!req_counters) return ROCPROFILER_STATUS_ERROR_COUNTER_NOT_FOUND;
-        config.reqired_hw_counters.insert(req_counters->begin(), req_counters->end());
-
-        const auto& asts      = rocprofiler::counters::get_ast_map();
-        const auto* agent_map = rocprofiler::common::get_val(asts, agent_name);
-        if(!agent_map) return ROCPROFILER_STATUS_ERROR_COUNTER_NOT_FOUND;
-        const auto* counter_ast = rocprofiler::common::get_val(*agent_map, metric_ptr->name());
-        if(!counter_ast) return ROCPROFILER_STATUS_ERROR_COUNTER_NOT_FOUND;
-        config.asts.push_back(*counter_ast);
     }
 
     config.agent      = agent;

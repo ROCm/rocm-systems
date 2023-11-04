@@ -3,6 +3,7 @@
 #include "lib/common/synchronized.hpp"
 #include "lib/rocprofiler/aql/helpers.hpp"
 #include "lib/rocprofiler/counters/evaluate_ast.hpp"
+#include "lib/rocprofiler/counters/id_decode.hpp"
 #include "lib/rocprofiler/counters/metrics.hpp"
 #include "lib/rocprofiler/hsa/agent_cache.hpp"
 #include "lib/rocprofiler/hsa/queue.hpp"
@@ -109,5 +110,49 @@ rocprofiler_iterate_agent_supported_counters(rocprofiler_agent_t                
     }
 
     return cb(ids.data(), ids.size(), user_data);
+}
+
+/**
+ * @brief Query counter id information from record_id
+ *
+ * @param [in] id record id from rocprofiler_record_counter_t
+ * @param [out] counter_id counter id associated with the record
+ * @return ::rocprofiler_status_t
+ */
+rocprofiler_status_t ROCPROFILER_API
+rocprofiler_query_record_counter_id(rocprofiler_counter_instance_id_t id,
+                                    rocprofiler_counter_id_t*         counter_id)
+{
+    // Get counter id from record
+    *counter_id = rocprofiler::counters::rec_to_counter_id(id);
+    return ROCPROFILER_STATUS_SUCCESS;
+}
+
+rocprofiler_status_t ROCPROFILER_API
+rocprofiler_query_record_dimension_position(rocprofiler_counter_instance_id_t  id,
+                                            rocprofiler_counter_dimension_id_t dim,
+                                            size_t*                            pos)
+{
+    *pos = rocprofiler::counters::rec_to_dim_pos(
+        id, static_cast<rocprofiler::counters::rocprofiler_profile_counter_instance_types>(dim));
+    return ROCPROFILER_STATUS_SUCCESS;
+}
+
+rocprofiler_status_t ROCPROFILER_API
+rocprofiler_query_record_dimension_info(rocprofiler_counter_id_t,
+                                        rocprofiler_counter_dimension_id_t   dim,
+                                        rocprofiler_record_dimension_info_t* info)
+{
+    if(const auto* ptr = rocprofiler::common::get_val(
+           rocprofiler::counters::dimension_map(),
+           static_cast<rocprofiler::counters::rocprofiler_profile_counter_instance_types>(dim)))
+    {
+        info->name = ptr->c_str();
+        // TODO: Needs info on the instance size per block to fill in.
+        //       counter_id will be used to lookup this information.
+        info->instance_size = 0;
+        return ROCPROFILER_STATUS_SUCCESS;
+    }
+    return ROCPROFILER_STATUS_ERROR;
 }
 }

@@ -1,5 +1,6 @@
 #include "metrics_test.h"
 
+#include <glog/logging.h>
 #include <gtest/gtest.h>
 
 #include "lib/rocprofiler/counters/metrics.hpp"
@@ -17,7 +18,8 @@ loadTestData(const std::unordered_map<std::string, std::vector<std::vector<std::
         auto& metric_vec = ret.emplace(gfx, std::vector<counters::Metric>{}).first->second;
         for(const auto& data_vec : dataMap)
         {
-            metric_vec.emplace_back(data_vec.at(0),
+            metric_vec.emplace_back("gfx9",
+                                    data_vec.at(0),
                                     data_vec.at(1),
                                     data_vec.at(2),
                                     data_vec.at(4),
@@ -34,6 +36,7 @@ TEST(metrics, base_load)
 {
     auto rocp_data = counters::getBaseHardwareMetrics();
     auto test_data = loadTestData(basic_gfx908);
+
     ASSERT_EQ(rocp_data.count("gfx908"), 1);
     ASSERT_EQ(test_data.count("gfx908"), 1);
     auto rocp_data_v = rocp_data.at("gfx908");
@@ -41,7 +44,10 @@ TEST(metrics, base_load)
     EXPECT_EQ(rocp_data_v.size(), test_data_v.size());
     auto find = [&rocp_data_v](const auto& v) -> std::optional<counters::Metric> {
         for(const auto& ditr : rocp_data_v)
+        {
+            LOG(ERROR) << fmt::format("{}", ditr);
             if(ditr.name() == v.name()) return ditr;
+        }
         return std::nullopt;
     };
     auto equal = [](const auto& lhs, const auto& rhs) {

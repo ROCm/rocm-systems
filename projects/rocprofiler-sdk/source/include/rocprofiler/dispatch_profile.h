@@ -69,14 +69,14 @@ typedef struct
  * @param [in] config
  */
 typedef void (*rocprofiler_profile_counting_dispatch_callback_t)(
-    rocprofiler_queue_id_t                           queue_id,
-    rocprofiler_agent_t                              agent_id,
-    rocprofiler_correlation_id_t                     correlation_id,
-    const hsa_kernel_dispatch_packet_t*              dispatch_packet,
-    void*                                            callback_data_args,
-    rocprofiler_dispatch_profile_counting_record_t** records,
-    size_t                                           record_count,
-    rocprofiler_profile_config_id_t                  config);
+    rocprofiler_queue_id_t              queue_id,
+    rocprofiler_agent_t                 agent_id,
+    rocprofiler_correlation_id_t        correlation_id,
+    const hsa_kernel_dispatch_packet_t* dispatch_packet,
+    void*                               callback_data_args,
+    rocprofiler_record_counter_t*       records,
+    size_t                              record_count,
+    rocprofiler_profile_config_id_t     config);
 
 /**
  * @brief Configure Dispatch Profile Counting Service.

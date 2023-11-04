@@ -251,13 +251,22 @@ typedef uint64_t rocprofiler_thread_id_t;
  */
 typedef uint32_t rocprofiler_tracing_operation_t;
 
-/**
- * @brief Needs non-typedef specification?
- */
-typedef uint32_t rocprofiler_counter_instance_id_t;
-
 // forward declaration of struct
 typedef struct rocprofiler_pc_sampling_configuration_s rocprofiler_pc_sampling_configuration_t;
+
+/**
+ * @brief Unique record id encoding both the counter
+ *        and dimensional values (positions) for the record.
+ */
+typedef uint64_t rocprofiler_counter_instance_id_t;
+
+/**
+ * @brief A dimension for counter instances. Some example
+ *        dimensions include XCC, SM (Shader), etc. This
+ *        value represents the dimension beind described
+ *        or queried about.
+ */
+typedef uint64_t rocprofiler_counter_dimension_id_t;
 
 //--------------------------------------------------------------------------------------//
 //
@@ -416,13 +425,25 @@ rocprofiler_record_header_compute_hash(uint32_t category, uint32_t kind)
 }
 
 /**
+ * @brief Details for the dimension, including its size, for a counter.
+ */
+typedef struct
+{
+    const char* name;
+    size_t      instance_size;
+} rocprofiler_record_dimension_info_t;
+
+/**
  * @brief ROCProfiler Profile Counting Counter per instance.
  */
 typedef struct
 {
-    rocprofiler_counter_id_t          counter_id;
-    rocprofiler_counter_instance_id_t instance_id;
-    double                            counter_value;
+    rocprofiler_counter_instance_id_t id;
+    union
+    {
+        int64_t hw_counter;       //<< physical hardware counter
+        double  derived_counter;  //<< derived counter value
+    };
 } rocprofiler_record_counter_t;
 
 /**

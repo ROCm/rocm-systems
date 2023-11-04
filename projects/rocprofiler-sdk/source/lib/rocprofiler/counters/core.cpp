@@ -34,6 +34,38 @@ queue_cb(const std::shared_ptr<rocprofiler::counters::counter_callback_info>& in
         // This ensures that HSA exists
         if(!info->pkt_generator)
         {
+            // One time setup of profile config
+            if(info->profile_cfg.reqired_hw_counters.empty())
+            {
+                auto& config     = info->profile_cfg;
+                auto  agent_name = std::string(config.agent.name);
+                for(const auto& metric : config.metrics)
+                {
+                    auto req_counters =
+                        rocprofiler::counters::get_required_hardware_counters(agent_name, metric);
+                    if(!req_counters)
+                    {
+                        throw std::runtime_error(
+                            fmt::format("Could not find counter {}", metric.name()));
+                    }
+                    config.reqired_hw_counters.insert(req_counters->begin(), req_counters->end());
+
+                    const auto& asts      = rocprofiler::counters::get_ast_map();
+                    const auto* agent_map = rocprofiler::common::get_val(asts, agent_name);
+                    if(!agent_map)
+                        throw std::runtime_error(
+                            fmt::format("Coult not build AST for {}", agent_name));
+                    const auto* counter_ast =
+                        rocprofiler::common::get_val(*agent_map, metric.name());
+                    if(!counter_ast)
+                    {
+                        throw std::runtime_error(
+                            fmt::format("Coult not find AST for {}", metric.name()));
+                    }
+                    config.asts.push_back(*counter_ast);
+                }
+            }
+
             info->pkt_generator = std::make_unique<rocprofiler::aql::AQLPacketConstruct>(
                 queue.get_agent(),
                 std::vector<counters::Metric>{info->profile_cfg.reqired_hw_counters.begin(),
@@ -70,6 +102,7 @@ completed_cb(const std::shared_ptr<rocprofiler::counters::counter_callback_info>
 
     // auto out_buf = pkt->profile.output_buffer.ptr;
     // Read data and create user return....
+    auto decoded_pkt = EvaluateAST::read_pkt(info->pkt_generator.get(), *pkt);
 
     // return AQL packet for reuse.
 
@@ -82,13 +115,22 @@ completed_cb(const std::shared_ptr<rocprofiler::counters::counter_callback_info>
 
     if(!info->user_cb) return;
 
+    std::vector<rocprofiler_record_counter_t> out;
+    for(auto& ast : info->profile_cfg.asts)
+    {
+        auto* ret = ast.evaluate(decoded_pkt);
+        CHECK(ret);
+        out.insert(out.end(), ret->begin(), ret->end());
+    }
+
+    // Maybe move to its own thread?
     info->user_cb(queue.get_id(),
                   info->profile_cfg.agent,
                   rocprofiler_correlation_id_t{},
                   reinterpret_cast<const hsa_kernel_dispatch_packet_t*>(&kernel),
                   info->callback_args,
-                  nullptr,  // Date pointer does here.
-                  0,        // Number of objects
+                  out.data(),  // Date pointer does here.
+                  out.size(),  // Number of objects
                   info->profile_cfg.id);
 }
 

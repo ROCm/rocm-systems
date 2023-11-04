@@ -1,5 +1,7 @@
-set(ROCPROFILER_LIB_COUNTERS_SOURCES metrics.cpp evaluate_ast.cpp core.cpp)
-set(ROCPROFILER_LIB_COUNTERS_HEADERS metrics.hpp evaluate_ast.hpp core.hpp)
+set(ROCPROFILER_LIB_COUNTERS_SOURCES metrics.cpp dimensions.cpp evaluate_ast.cpp core.cpp
+                                     id_decode.cpp)
+set(ROCPROFILER_LIB_COUNTERS_HEADERS metrics.hpp dimensions.hpp evaluate_ast.hpp core.hpp
+                                     id_decode.hpp)
 target_sources(rocprofiler-object-library PRIVATE ${ROCPROFILER_LIB_COUNTERS_SOURCES}
                                                   ${ROCPROFILER_LIB_COUNTERS_HEADERS})
 

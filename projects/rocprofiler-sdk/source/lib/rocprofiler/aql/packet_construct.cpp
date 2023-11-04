@@ -38,6 +38,10 @@ AQLPacketConstruct::AQLPacketConstruct(const hsa::AgentCache&               agen
                        HSA_STATUS_SUCCESS);
             LOG_IF(FATAL, !validate_event_result)
                 << "Invalid Metric: " << block_index << " " << event_id;
+            _event_to_metric[std::make_tuple(
+                static_cast<hsa_ven_amd_aqlprofile_block_name_t>(query_info.id),
+                block_index,
+                event_id)] = x;
         }
     }
     // Check that we can collect all of the metrics in a single execution
@@ -150,6 +154,18 @@ AQLPacketConstruct::get_all_events() const
         ret.insert(ret.end(), metric.instances.begin(), metric.instances.end());
     }
     return ret;
+}
+
+const counters::Metric*
+AQLPacketConstruct::event_to_metric(const hsa_ven_amd_aqlprofile_event_t& event) const
+{
+    if(const auto* ptr = rocprofiler::common::get_val(
+           _event_to_metric,
+           std::make_tuple(event.block_name, event.block_index, event.counter_id)))
+    {
+        return ptr;
+    }
+    return nullptr;
 }
 
 void
