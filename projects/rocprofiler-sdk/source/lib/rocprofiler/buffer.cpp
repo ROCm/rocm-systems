@@ -143,7 +143,7 @@ flush(rocprofiler_buffer_id_t buffer_id, bool wait)
         }
         else
         {
-            LOG(ERROR) << "buffer at " << buffer_id.handle << " is empty...";
+            LOG(INFO) << "buffer at " << buffer_id.handle << " is empty...";
         }
 
         buff_v->syncer.clear();

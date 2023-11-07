@@ -84,16 +84,16 @@ getBlockDimensions(const std::string& agent, const Metric& metric)
         {
             return std::vector<MetricDimension>{
                 {dimension_map().at(ROCPROFILER_DIMENSION_SHADER_ENGINE),
-                 maybe_agent.get_rocp_agent().num_shader_banks,
+                 maybe_agent.get_rocp_agent()->num_shader_banks,
                  ROCPROFILER_DIMENSION_SHADER_ENGINE},
                 {dimension_map().at(ROCPROFILER_DIMENSION_XCC),
-                 maybe_agent.get_rocp_agent().num_xcc,
+                 maybe_agent.get_rocp_agent()->num_xcc,
                  ROCPROFILER_DIMENSION_XCC},
                 {dimension_map().at(ROCPROFILER_DIMENSION_CU),
-                 maybe_agent.get_rocp_agent().cu_count,
+                 maybe_agent.get_rocp_agent()->cu_count,
                  ROCPROFILER_DIMENSION_CU},
                 {dimension_map().at(ROCPROFILER_DIMENSION_AGENT),
-                 maybe_agent.get_rocp_agent().id.handle,
+                 maybe_agent.get_rocp_agent()->id.handle,
                  ROCPROFILER_DIMENSION_AGENT}};
 
             // auto query_info = aql::get_query_info(maybe_agent.get_agent(), metric);

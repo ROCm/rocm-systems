@@ -22,7 +22,7 @@ std::unique_ptr<rocprofiler::hsa::AQLPacket>
 queue_cb(const std::shared_ptr<rocprofiler::counters::counter_callback_info>& info,
          const hsa::Queue&                                                    queue,
          hsa::ClientID,
-         const hsa_ext_amd_aql_pm4_packet_t&)
+         hsa::rocprofiler_packet)
 {
     if(!info) return nullptr;
 
@@ -95,7 +95,7 @@ void
 completed_cb(const std::shared_ptr<rocprofiler::counters::counter_callback_info>& info,
              const hsa::Queue&                                                    queue,
              hsa::ClientID,
-             const hsa_ext_amd_aql_pm4_packet_t&          kernel,
+             hsa::rocprofiler_packet                      kernel,
              std::unique_ptr<rocprofiler::hsa::AQLPacket> pkt)
 {
     if(!info) return;
@@ -127,7 +127,7 @@ completed_cb(const std::shared_ptr<rocprofiler::counters::counter_callback_info>
     info->user_cb(queue.get_id(),
                   info->profile_cfg.agent,
                   rocprofiler_correlation_id_t{},
-                  reinterpret_cast<const hsa_kernel_dispatch_packet_t*>(&kernel),
+                  &kernel.kernel_dispatch,
                   info->callback_args,
                   out.data(),  // Date pointer does here.
                   out.size(),  // Number of objects
@@ -215,31 +215,29 @@ destroy_counter_profile(uint64_t id)
 }
 
 void
-start_context(rocprofiler_context_id_t context_id)
+start_context(context::context* ctx)
 {
-    auto& ctx        = *rocprofiler::context::get_registered_contexts().at(context_id.handle);
+    if(!ctx || !ctx->counter_collection) return;
+
     auto& controller = hsa::get_queue_controller();
-    if(!ctx.counter_collection) return;
 
     // Only one thread should be attempting to enable/disable this context
-    ctx.counter_collection->enabled.wlock([&](auto& enabled) {
+    ctx->counter_collection->enabled.wlock([&](auto& enabled) {
         if(enabled) return;
-        for(auto& cb : ctx.counter_collection->callbacks)
+        for(auto& cb : ctx->counter_collection->callbacks)
         {
             // Insert our callbacks into HSA Interceptor. This
             // turns on counter instrumentation.
             cb->queue_id = controller.add_callback(
                 cb->profile_cfg.agent,
-                [=](const hsa::Queue&                   q,
-                    hsa::ClientID                       c,
-                    const hsa_ext_amd_aql_pm4_packet_t& kern_pkt) {
+                [=](const hsa::Queue& q, hsa::ClientID c, hsa::rocprofiler_packet kern_pkt) {
                     return queue_cb(cb, q, c, kern_pkt);
                 },
                 // Completion CB
-                [=](const hsa::Queue&                   q,
-                    hsa::ClientID                       c,
-                    const hsa_ext_amd_aql_pm4_packet_t& kern_pkt,
-                    std::unique_ptr<hsa::AQLPacket>     aql) {
+                [=](const hsa::Queue&               q,
+                    hsa::ClientID                   c,
+                    hsa::rocprofiler_packet         kern_pkt,
+                    std::unique_ptr<hsa::AQLPacket> aql) {
                     completed_cb(cb, q, c, kern_pkt, std::move(aql));
                 });
         }
@@ -248,15 +246,15 @@ start_context(rocprofiler_context_id_t context_id)
 }
 
 void
-stop_context(rocprofiler_context_id_t context_id)
+stop_context(context::context* ctx)
 {
-    auto& controller = hsa::get_queue_controller();
-    auto& ctx        = *rocprofiler::context::get_registered_contexts().at(context_id.handle);
-    if(!ctx.counter_collection) return;
+    if(!ctx || !ctx->counter_collection) return;
 
-    ctx.counter_collection->enabled.wlock([&](auto& enabled) {
+    auto& controller = hsa::get_queue_controller();
+
+    ctx->counter_collection->enabled.wlock([&](auto& enabled) {
         if(!enabled) return;
-        for(auto& cb : ctx.counter_collection->callbacks)
+        for(auto& cb : ctx->counter_collection->callbacks)
         {
             // Remove our callbacks from HSA's queue controller
             controller.remove_callback(cb->queue_id);

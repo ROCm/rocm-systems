@@ -175,8 +175,6 @@ hsa_api_impl<Idx>::functor(Args&&... args)
 {
     using info_type = hsa_api_info<Idx>;
 
-    LOG(INFO) << __PRETTY_FUNCTION__;
-
     struct callback_context_data
     {
         const context::context*               ctx       = nullptr;
@@ -190,13 +188,16 @@ hsa_api_impl<Idx>::functor(Args&&... args)
         rocprofiler_user_data_t external_correlation = {};
     };
 
-    auto thr_id            = common::get_tid();
-    auto callback_contexts = std::vector<callback_context_data>{};
-    auto buffered_contexts = std::vector<buffered_context_data>{};
-    for(const auto& aitr : context::get_active_contexts())
+    static thread_local auto active_contexts   = std::vector<const context::context*>{};
+    auto                     thr_id            = common::get_tid();
+    auto                     callback_contexts = std::vector<callback_context_data>{};
+    auto                     buffered_contexts = std::vector<buffered_context_data>{};
+    auto                     has_pc_sampling   = false;
+    for(const auto* itr : context::get_active_contexts(active_contexts))
     {
-        const auto* itr = aitr.load();
         if(!itr) continue;
+
+        // if(itr->pc_sampler) has_pc_sampling = true;
 
         if(itr->callback_tracer)
         {
@@ -226,10 +227,16 @@ hsa_api_impl<Idx>::functor(Args&&... args)
             return HSA_STATUS_SUCCESS;
     }
 
-    constexpr auto empty_user_data = rocprofiler_user_data_t{.value = 0};
-    auto           buffer_record   = rocprofiler_buffer_tracing_hsa_api_record_t{};
-    auto           tracer_data     = rocprofiler_callback_tracing_hsa_api_data_t{};
-    auto internal_corr_id          = context::correlation_tracing_service::get_unique_internal_id();
+    using correlation_service     = context::correlation_tracing_service;
+    using buffer_hsa_api_record_t = rocprofiler_buffer_tracing_hsa_api_record_t;
+    using callback_hsa_api_data_t = rocprofiler_callback_tracing_hsa_api_data_t;
+
+    constexpr auto empty_user_data  = rocprofiler_user_data_t{.value = 0};
+    auto           ref_count        = (has_pc_sampling) ? 4 : 2;
+    auto           buffer_record    = common::init_public_api_struct(buffer_hsa_api_record_t{});
+    auto           tracer_data      = common::init_public_api_struct(callback_hsa_api_data_t{});
+    auto*          corr_id          = correlation_service::construct(ref_count);
+    auto           internal_corr_id = corr_id->internal;
 
     // construct the buffered info before the callback so the callbacks are as closely wrapped
     // around the function call as possible
@@ -246,7 +253,6 @@ hsa_api_impl<Idx>::functor(Args&&... args)
     // invoke the callbacks
     if(!callback_contexts.empty())
     {
-        tracer_data.size = sizeof(rocprofiler_callback_tracing_hsa_api_data_t);
         set_data_args(info_type::get_api_data_args(tracer_data.args), std::forward<Args>(args)...);
 
         for(auto& itr : callback_contexts)
@@ -255,12 +261,13 @@ hsa_api_impl<Idx>::functor(Args&&... args)
             auto& record    = itr.record;
             auto& user_data = itr.user_data;
 
-            auto corr_id = rocprofiler_correlation_id_t{
-                internal_corr_id, ctx->correlation_tracer.external_correlator.get(thr_id)};
+            auto extern_corr_id_v = ctx->correlation_tracer.external_correlator.get(thr_id);
+
+            auto corr_id_v = rocprofiler_correlation_id_t{internal_corr_id, extern_corr_id_v};
             record =
                 rocprofiler_callback_tracing_record_t{rocprofiler_context_id_t{ctx->context_idx},
                                                       thr_id,
-                                                      corr_id,
+                                                      corr_id_v,
                                                       info_type::callback_domain_idx,
                                                       info_type::operation_idx,
                                                       ROCPROFILER_CALLBACK_PHASE_ENTER,
@@ -286,6 +293,9 @@ hsa_api_impl<Idx>::functor(Args&&... args)
 
         buffer_record.start_timestamp = common::timestamp_ns();
     }
+
+    // decrement the reference count before invoking
+    corr_id->ref_count.fetch_sub(1);
 
     auto _ret = exec(info_type::get_table_func(), std::forward<Args>(args)...);
 
@@ -333,12 +343,17 @@ hsa_api_impl<Idx>::functor(Args&&... args)
 
                     bitr->emplace(ROCPROFILER_BUFFER_CATEGORY_TRACING,
                                   info_type::buffered_domain_idx,
-                                  buffer_record);
+                                  record_v);
                     break;
                 }
             }
         }
     }
+
+    // decrement the reference count after usage in the callback/buffers
+    corr_id->ref_count.fetch_sub(1);
+
+    context::pop_latest_correlation_id(corr_id);
 
     if constexpr(!std::is_same<decltype(_ret), null_type>::value)
         return _ret;
@@ -347,6 +362,8 @@ hsa_api_impl<Idx>::functor(Args&&... args)
 }
 }  // namespace hsa
 }  // namespace rocprofiler
+
+#define ROCPROFILER_LIB_ROCPROFILER_HSA_HSA_CPP_IMPL 1
 
 // template specializations
 #include "hsa.def.cpp"

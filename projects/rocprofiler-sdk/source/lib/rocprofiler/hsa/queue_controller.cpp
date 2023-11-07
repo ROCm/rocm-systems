@@ -80,7 +80,7 @@ QueueController::add_queue(hsa_queue_t* id, std::unique_ptr<Queue> queue)
     CHECK(queue);
     _callback_cache.wlock([&](auto& callbacks) {
         _queues.wlock([&](auto& map) {
-            const auto agent_id = queue->get_agent().get_rocp_agent().id.handle;
+            const auto agent_id = queue->get_agent().get_rocp_agent()->id.handle;
             map[id]             = std::move(queue);
             for(const auto& [cbid, cb_tuple] : callbacks)
             {
@@ -102,8 +102,8 @@ QueueController::destory_queue(hsa_queue_t* id)
 
 ClientID
 QueueController::add_callback(const rocprofiler_agent_t& agent,
-                              Queue::QueueCB             qcb,
-                              Queue::CompletedCB         ccb)
+                              Queue::queue_cb_t          qcb,
+                              Queue::completed_cb_t      ccb)
 {
     static std::atomic<ClientID> client_id = 1;
     ClientID                     return_id;
@@ -114,7 +114,7 @@ QueueController::add_callback(const rocprofiler_agent_t& agent,
         _queues.wlock([&](auto& map) {
             for(auto& [_, queue] : map)
             {
-                if(queue->get_agent().get_rocp_agent().id.handle == agent.id.handle)
+                if(queue->get_agent().get_rocp_agent()->id.handle == agent.id.handle)
                 {
                     queue->register_callback(return_id, qcb, ccb);
                 }
@@ -150,7 +150,7 @@ QueueController::init(CoreApiTable& core_table, AmdExtTable& ext_table)
     for(const auto* itr : agents)
     {
         auto cached_agent = agent::get_agent_cache(itr);
-        if(cached_agent && cached_agent->get_rocp_agent().type == ROCPROFILER_AGENT_TYPE_GPU)
+        if(cached_agent && cached_agent->get_rocp_agent()->type == ROCPROFILER_AGENT_TYPE_GPU)
         {
             get_supported_agents().emplace(cached_agent->index(), *cached_agent);
         }
@@ -186,6 +186,20 @@ QueueController::init(CoreApiTable& core_table, AmdExtTable& ext_table)
         core_table.hsa_queue_create_fn  = create_queue;
         core_table.hsa_queue_destroy_fn = destroy_queue;
     }
+}
+
+const Queue*
+QueueController::get_queue(const hsa_queue_t& _hsa_queue) const
+{
+    return _queues.rlock(
+        [](const queue_map_t& _data, const hsa_queue_t& _inp) -> const Queue* {
+            for(const auto& itr : _data)
+            {
+                if(itr.first->id == _inp.id) return itr.second.get();
+            }
+            return nullptr;
+        },
+        _hsa_queue);
 }
 
 QueueController&

@@ -19,8 +19,15 @@
  THE SOFTWARE. */
 
 #include "lib/rocprofiler/hsa/queue.hpp"
+#include "lib/common/utility.hpp"
+#include "lib/rocprofiler/buffer.hpp"
+#include "lib/rocprofiler/context/context.hpp"
 
 #include <glog/logging.h>
+#include <hsa/hsa.h>
+#include <hsa/hsa_ext_amd.h>
+#include <rocprofiler/fwd.h>
+
 #include <atomic>
 #include <chrono>
 #include <thread>
@@ -76,11 +83,11 @@ AsyncSignalHandler(hsa_signal_value_t, void* data)
         queue_info_session.queue.core_api().hsa_signal_destroy_fn(
             queue_info_session.interrupt_signal);
     }
-    if(queue_info_session.kernel_pkt.completion_signal.handle != 0u)
+    if(queue_info_session.kernel_pkt.ext_amd_aql_pm4.completion_signal.handle != 0u)
     {
         signals_to_remove++;
         queue_info_session.queue.core_api().hsa_signal_destroy_fn(
-            queue_info_session.kernel_pkt.completion_signal);
+            queue_info_session.kernel_pkt.ext_amd_aql_pm4.completion_signal);
     }
     if(signals_to_remove > 0)
     {
@@ -90,25 +97,6 @@ AsyncSignalHandler(hsa_signal_value_t, void* data)
 
     delete static_cast<Queue::queue_info_session_t*>(data);
     return false;
-}
-
-void
-CreateBarrierPacket(const hsa_signal_t&                        packet_completion_signal,
-                    std::vector<hsa_ext_amd_aql_pm4_packet_t>& transformed_packets)
-{
-    hsa_barrier_and_packet_t barrier{};
-    barrier.header        = HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE;
-    barrier.dep_signal[0] = packet_completion_signal;
-    void* barrier_ptr     = &barrier;
-    transformed_packets.emplace_back(*reinterpret_cast<hsa_ext_amd_aql_pm4_packet_t*>(barrier_ptr));
-}
-
-void
-AddVendorSpecificPacket(const hsa_ext_amd_aql_pm4_packet_t&        packet,
-                        std::vector<hsa_ext_amd_aql_pm4_packet_t>& transformed_packets,
-                        const hsa_signal_t&                        packet_completion_signal)
-{
-    transformed_packets.emplace_back(packet).completion_signal = packet_completion_signal;
 }
 
 template <typename Integral = uint64_t>
@@ -145,48 +133,68 @@ WriteInterceptor(const void* packets,
                  void*                                 data,
                  hsa_amd_queue_intercept_packet_writer writer)
 {
-    Queue& queue_info = *static_cast<Queue*>(data);
+    auto&& AddVendorSpecificPacket = [](hsa_ext_amd_aql_pm4_packet_t     _packet,
+                                        hsa_signal_t                     _signal,
+                                        std::vector<rocprofiler_packet>& _packets) {
+        _packets.emplace_back(_packet).ext_amd_aql_pm4.completion_signal = _signal;
+    };
+
+    auto&& CreateBarrierPacket = [](hsa_signal_t                     _signal,
+                                    std::vector<rocprofiler_packet>& _packets) {
+        hsa_barrier_and_packet_t barrier{};
+        barrier.header        = HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE;
+        barrier.dep_signal[0] = _signal;
+        _packets.emplace_back(barrier);
+    };
+
+    LOG_IF(FATAL, data == nullptr) << "WriteInterceptor was not passed a pointer to the queue";
+
+    auto& queue   = *static_cast<Queue*>(data);
+    auto  thr_id  = common::get_tid();
+    auto* corr_id = context::get_latest_correlation_id();
+    // increase the reference count to denote that this correlation id is being used in a kernel
+    if(corr_id) corr_id->ref_count.fetch_add(1);
 
     // We have no packets or no one who needs to be notified, do nothing.
-    if(pkt_count == 0 || queue_info.get_notifiers() == 0)
+    if(pkt_count == 0 || queue.get_notifiers() == 0)
     {
         writer(packets, pkt_count);
         return;
     }
 
     // hsa_ext_amd_aql_pm4_packet_t
-    const hsa_ext_amd_aql_pm4_packet_t* packets_arr =
-        static_cast<const hsa_ext_amd_aql_pm4_packet_t*>(packets);
-    std::vector<hsa_ext_amd_aql_pm4_packet_t> transformed_packets;
+    const auto* packets_arr         = static_cast<const rocprofiler_packet*>(packets);
+    auto        transformed_packets = std::vector<rocprofiler_packet>{};
 
     // Searching accross all the packets given during this write
     for(size_t i = 0; i < pkt_count; ++i)
     {
-        const auto& original_packet = static_cast<const hsa_barrier_and_packet_t*>(packets)[i];
-        if(bit_extract(original_packet.header,
-                       HSA_PACKET_HEADER_TYPE,
-                       HSA_PACKET_HEADER_TYPE + HSA_PACKET_HEADER_WIDTH_TYPE - 1) !=
-           HSA_PACKET_TYPE_KERNEL_DISPATCH)
+        const auto& original_packet = packets_arr[i].kernel_dispatch;
+        auto        packet_type     = bit_extract(original_packet.header,
+                                       HSA_PACKET_HEADER_TYPE,
+                                       HSA_PACKET_HEADER_TYPE + HSA_PACKET_HEADER_WIDTH_TYPE - 1);
+        if(packet_type != HSA_PACKET_TYPE_KERNEL_DISPATCH)
         {
             transformed_packets.emplace_back(packets_arr[i]);
             continue;
         }
 
         // Copy kernel pkt, copy is to allow for signal to be modified
-        hsa_ext_amd_aql_pm4_packet_t kernel_pkt = packets_arr[i];
-        queue_info.create_signal(HSA_AMD_SIGNAL_AMD_GPU_ONLY, &kernel_pkt.completion_signal);
+        rocprofiler_packet kernel_pkt = packets_arr[i];
+        queue.create_signal(HSA_AMD_SIGNAL_AMD_GPU_ONLY,
+                            &kernel_pkt.ext_amd_aql_pm4.completion_signal);
 
         // Stores the instrumentation pkt (i.e. AQL packets for counter collection)
         // along with an ID of the client we got the packet from (this will be returned via
-        // CompletedCB)
+        // completed_cb_t)
         ClientID                   inst_pkt_id = -1;
         std::unique_ptr<AQLPacket> inst_pkt;
 
         // Signal callbacks that a kernel_pkt is being enqueued
-        queue_info.signal_callback([&](const auto& map) {
+        queue.signal_callback([&](const auto& map) {
             for(const auto& [client_id, cb_pair] : map)
             {
-                if(auto maybe_pkt = cb_pair.first(queue_info, client_id, kernel_pkt))
+                if(auto maybe_pkt = cb_pair.first(queue, client_id, kernel_pkt))
                 {
                     LOG_IF(FATAL, inst_pkt)
                         << "We do not support two injections into the HSA queue";
@@ -196,14 +204,13 @@ WriteInterceptor(const void* packets,
             }
         });
 
+        constexpr auto dummy_signal = hsa_signal_t{.handle = 0};
+
         // Write instrumentation start packet (if one exists)
         if(inst_pkt)
         {
-            hsa_signal_t dummy_signal{};
-            dummy_signal.handle    = 0;
             inst_pkt->start.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC << HSA_PACKET_HEADER_TYPE;
-            AddVendorSpecificPacket(inst_pkt->start, transformed_packets, dummy_signal);
-
+            AddVendorSpecificPacket(inst_pkt->start, dummy_signal, transformed_packets);
             CreateBarrierPacket(inst_pkt->start.completion_signal, transformed_packets);
         }
 
@@ -214,25 +221,21 @@ WriteInterceptor(const void* packets,
         if(original_packet.completion_signal.handle != 0u)
         {
             hsa_barrier_and_packet_t barrier{};
-            barrier.header = HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE;
-            hsa_ext_amd_aql_pm4_packet_t* __attribute__((__may_alias__)) pkt =
-                (reinterpret_cast<hsa_ext_amd_aql_pm4_packet_t*>(&barrier));
-            transformed_packets.emplace_back(*pkt).completion_signal =
-                original_packet.completion_signal;
+            barrier.header            = HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE;
+            barrier.completion_signal = original_packet.completion_signal;
+            transformed_packets.emplace_back(barrier);
         }
 
         hsa_signal_t interrupt_signal{};
         // Adding a barrier packet with the original packet's completion signal.
-        queue_info.create_signal(0, &interrupt_signal);
+        queue.create_signal(0, &interrupt_signal);
 
         if(inst_pkt)
         {
-            hsa_signal_t dummy_signal{};
-            dummy_signal.handle   = 0;
             inst_pkt->stop.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC << HSA_PACKET_HEADER_TYPE;
-            AddVendorSpecificPacket(inst_pkt->stop, transformed_packets, dummy_signal);
+            AddVendorSpecificPacket(inst_pkt->stop, dummy_signal, transformed_packets);
             inst_pkt->read.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC << HSA_PACKET_HEADER_TYPE;
-            AddVendorSpecificPacket(inst_pkt->read, transformed_packets, interrupt_signal);
+            AddVendorSpecificPacket(inst_pkt->read, interrupt_signal, transformed_packets);
 
             // Added Interrupt Signal with barrier and provided handler for it
             CreateBarrierPacket(interrupt_signal, transformed_packets);
@@ -242,21 +245,25 @@ WriteInterceptor(const void* packets,
             hsa_barrier_and_packet_t barrier{};
             barrier.header            = HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE;
             barrier.completion_signal = interrupt_signal;
-            hsa_ext_amd_aql_pm4_packet_t* __attribute__((__may_alias__)) pkt =
-                (reinterpret_cast<hsa_ext_amd_aql_pm4_packet_t*>(&barrier));
-            transformed_packets.emplace_back(*pkt);
+            transformed_packets.emplace_back(barrier);
         }
+
+        // TODO(jrmadsen): fetch kernel identifier from code object loading
+        uint64_t kernel_id = 0;
 
         // Enqueue the signal into the handler. Will call completed_cb when
         // signal completes.
-        queue_info.async_started();
-        queue_info.signal_async_handler(
+        queue.async_started();
+        queue.signal_async_handler(
             interrupt_signal,
-            new Queue::queue_info_session_t{.queue            = queue_info,
+            new Queue::queue_info_session_t{.queue            = queue,
                                             .inst_pkt         = std::move(inst_pkt),
                                             .inst_pkt_id      = inst_pkt_id,
-                                            .kernel_pkt       = kernel_pkt,
-                                            .interrupt_signal = interrupt_signal});
+                                            .interrupt_signal = interrupt_signal,
+                                            .tid              = thr_id,
+                                            .kernel_id        = kernel_id,
+                                            .correlation_id   = corr_id,
+                                            .kernel_pkt       = kernel_pkt});
     }
 
     writer(transformed_packets.data(), transformed_packets.size());
@@ -329,7 +336,7 @@ Queue::Queue(const AgentCache&  agent,
 }
 
 void
-Queue::register_callback(ClientID id, QueueCB enqueue_cb, CompletedCB complete_cb)
+Queue::register_callback(ClientID id, queue_cb_t enqueue_cb, completed_cb_t complete_cb)
 {
     _callbacks.wlock([&](auto& map) {
         LOG_IF(FATAL, rocprofiler::common::get_val(map, id)) << "ID already exists!";

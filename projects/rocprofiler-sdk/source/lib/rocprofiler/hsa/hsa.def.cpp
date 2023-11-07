@@ -18,10 +18,13 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include <rocprofiler/hsa.h>
+#if defined(ROCPROFILER_LIB_ROCPROFILER_HSA_HSA_CPP_IMPL) &&                                       \
+    ROCPROFILER_LIB_ROCPROFILER_HSA_HSA_CPP_IMPL == 1
 
-#include "defines.hpp"
-#include "hsa.hpp"
+#    include <rocprofiler/hsa.h>
+
+#    include "defines.hpp"
+#    include "hsa.hpp"
 
 // clang-format off
 HSA_API_TABLE_LOOKUP_DEFINITION(ROCPROFILER_HSA_API_TABLE_ID_CoreApi, core_)
@@ -223,7 +226,7 @@ HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_API_TABLE_ID_AmdExt, ROCPROFILER_HSA_A
 HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_API_TABLE_ID_AmdExt, ROCPROFILER_HSA_API_ID_hsa_amd_runtime_queue_create_register, hsa_amd_runtime_queue_create_register, hsa_amd_runtime_queue_create_register_fn, callback, user_data)
 // clang-format on
 
-#if HSA_AMD_EXT_API_TABLE_MAJOR_VERSION >= 0x02
+#    if HSA_AMD_EXT_API_TABLE_MAJOR_VERSION >= 0x02
 HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_API_TABLE_ID_AmdExt,
                           ROCPROFILER_HSA_API_ID_hsa_amd_vmem_address_reserve,
                           hsa_amd_vmem_address_reserve,
@@ -308,4 +311,8 @@ HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_API_TABLE_ID_AmdExt,
                           alloc_handle,
                           pool,
                           type)
+#    endif
+
+#else
+#    error "Do not compile this file directly. It is included by lib/rocprofiler/hsa/hsa.cpp"
 #endif

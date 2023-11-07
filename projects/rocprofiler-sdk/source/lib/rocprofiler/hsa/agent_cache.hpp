@@ -72,7 +72,7 @@ public:
     CONST_NONCONST_ACCESSOR(hsa_agent_t, get_hsa_agent, m_hsa_agent);
     CONST_NONCONST_ACCESSOR(hsa_agent_t, near_cpu, m_nearest_cpu);
 
-    const rocprofiler_agent_t& get_rocp_agent() const { return *m_rocp_agent; }
+    const rocprofiler_agent_t* get_rocp_agent() const { return m_rocp_agent; }
     std::string_view           name() const { return m_name; }
     size_t                     index() const { return m_index; }
 

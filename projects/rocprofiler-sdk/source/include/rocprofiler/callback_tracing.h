@@ -49,6 +49,7 @@ typedef enum
     ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_FILE = HSA_VEN_AMD_LOADER_CODE_OBJECT_STORAGE_TYPE_FILE,
     ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_MEMORY =
         HSA_VEN_AMD_LOADER_CODE_OBJECT_STORAGE_TYPE_MEMORY,
+    ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_LAST,
 } rocprofiler_code_object_storage_type_t;
 
 /**
@@ -125,16 +126,6 @@ typedef struct
 } rocprofiler_callback_tracing_code_object_load_data_t;
 
 /**
- * @brief ROCProfiler Code Object UnLoad Tracer Callback Record.
- *
- */
-typedef struct
-{
-    uint64_t size;            ///< size of this struct
-    uint64_t code_object_id;  ///< unique code object identifier
-} rocprofiler_callback_tracing_code_object_unload_data_t;
-
-/**
  * @brief ROCProfiler Code Object Kernel Symbol Tracer Callback Record.
  *
  */
@@ -154,21 +145,7 @@ typedef struct
                                     ///< (per work-group), in bytes
     uint32_t private_segment_size;  ///< Size of static private, spill, and arg segment memory
                                     ///< required by this kernel (per work-item), in bytes.
-} rocprofiler_callback_tracing_code_object_kernel_symbol_data_t;
-
-/**
- * @brief ROCProfiler Code Object Register Host Kernel Symbol Tracer Callback
- * Record.
- *
- */
-typedef struct
-{
-    uint64_t              size;          ///< size of this struct
-    rocprofiler_address_t host_address;  // host address
-    // Should this be nullptr if it is unregister?
-    const char*           kernel_name;        // kernel name string (NULL terminated)
-    rocprofiler_address_t kernel_descriptor;  // kernel descriptor
-} rocprofiler_callback_tracing_code_object_register_host_kernel_symbol_data_t;
+} rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t;
 
 /**
  * @brief API Tracing callback function. This function is invoked twice per API function: once

@@ -83,10 +83,10 @@ rocprofiler_context_is_active(rocprofiler_context_id_t context_id, int* status)
     if(context_id.handle == rocprofiler_context_none.handle)
         return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
 
-    for(const auto& itr : rocprofiler::context::get_active_contexts())
+    auto ctxs = std::vector<const rocprofiler::context::context*>{};
+    for(const auto* itr : rocprofiler::context::get_active_contexts(ctxs))
     {
-        const auto* cfg = itr.load(std::memory_order_relaxed);
-        if(cfg && cfg->context_idx == context_id.handle)
+        if(itr && itr->context_idx == context_id.handle)
         {
             *status = 1;
             return ROCPROFILER_STATUS_SUCCESS;

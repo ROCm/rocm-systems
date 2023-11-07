@@ -351,6 +351,7 @@ invoke_client_finalizers()
             // set to nullptr so finalize only gets called once
             itr.configure_result->finalize = nullptr;
         }
+        context::deactivate_client_contexts(itr.internal_client_id);
     }
 
     return true;
@@ -377,6 +378,7 @@ invoke_client_finalizer(rocprofiler_client_id_t client_id)
                 // set to nullptr so finalize only gets called once
                 itr.configure_result->finalize = nullptr;
             }
+            context::deactivate_client_contexts(itr.internal_client_id);
         }
     }
 }
@@ -472,8 +474,6 @@ finalize()
         if(get_init_status() > 0)
         {
             invoke_client_finalizers();
-            for(auto& itr : rocprofiler::context::get_active_contexts())
-                itr.store(nullptr, std::memory_order_seq_cst);
         }
         internal_threading::finalize();
         set_fini_status(1);

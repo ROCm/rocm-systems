@@ -20,9 +20,11 @@
 
 #pragma once
 
+#include <rocprofiler/buffer_tracing.h>
 #include <rocprofiler/fwd.h>
 
 #include "lib/common/synchronized.hpp"
+#include "lib/common/utility.hpp"
 #include "lib/rocprofiler/hsa/agent_cache.hpp"
 #include "lib/rocprofiler/hsa/aql_packet.hpp"
 
@@ -30,6 +32,7 @@
 #include <hsa/hsa.h>
 #include <hsa/hsa_api_trace.h>
 #include <hsa/hsa_ext_amd.h>
+#include <hsa/hsa_ven_amd_aqlprofile.h>
 #include <hsa/hsa_ven_amd_loader.h>
 
 #include <atomic>
@@ -42,9 +45,48 @@
 
 namespace rocprofiler
 {
+namespace context
+{
+struct correlation_id;
+}
 namespace hsa
 {
 using ClientID = int64_t;
+
+union rocprofiler_packet
+{
+    hsa_ext_amd_aql_pm4_packet_t ext_amd_aql_pm4;
+    hsa_kernel_dispatch_packet_t kernel_dispatch;
+    hsa_barrier_and_packet_t     barrier_and;
+    hsa_barrier_or_packet_t      barrier_or;
+
+    rocprofiler_packet()
+    : ext_amd_aql_pm4{null_amd_aql_pm4_packet}
+    {}
+
+    rocprofiler_packet(hsa_ext_amd_aql_pm4_packet_t val)
+    : ext_amd_aql_pm4{val}
+    {}
+
+    rocprofiler_packet(hsa_kernel_dispatch_packet_t val)
+    : kernel_dispatch{val}
+    {}
+
+    rocprofiler_packet(hsa_barrier_and_packet_t val)
+    : barrier_and{val}
+    {}
+
+    rocprofiler_packet(hsa_barrier_or_packet_t val)
+    : barrier_or{val}
+    {}
+
+    ~rocprofiler_packet()                             = default;
+    rocprofiler_packet(const rocprofiler_packet&)     = default;
+    rocprofiler_packet(rocprofiler_packet&&) noexcept = default;
+
+    rocprofiler_packet& operator=(const rocprofiler_packet&) = default;
+    rocprofiler_packet& operator=(rocprofiler_packet&&) noexcept = default;
+};
 
 // Interceptor for a single specific queue
 class Queue
@@ -54,24 +96,25 @@ public:
     // Function prototype used to notify consumers that a kernel has been
     // enqueued. An AQL packet can be returned that will be injected into
     // the queue.
-    using QueueCB = std::function<
-        std::unique_ptr<AQLPacket>(const Queue&, ClientID, const hsa_ext_amd_aql_pm4_packet_t&)>;
+    using queue_cb_t = std::function<
+        std::unique_ptr<AQLPacket>(const Queue&, ClientID, const rocprofiler_packet&)>;
     // Signals the completion of the kernel packet.
-    using CompletedCB    = std::function<void(const Queue&,
-                                           ClientID,
-                                           const hsa_ext_amd_aql_pm4_packet_t&,
-                                           std::unique_ptr<AQLPacket>)>;
-    using callback_map_t = std::unordered_map<ClientID, std::pair<QueueCB, CompletedCB>>;
+    using completed_cb_t = std::function<
+        void(const Queue&, ClientID, const rocprofiler_packet&, std::unique_ptr<AQLPacket>)>;
+    using callback_map_t = std::unordered_map<ClientID, std::pair<queue_cb_t, completed_cb_t>>;
 
     // Internal session information that is used by write interceptor
     // to track state of the intercepted kernel.
     struct queue_info_session_t
     {
-        Queue&                       queue;
-        std::unique_ptr<AQLPacket>   inst_pkt         = {};
-        ClientID                     inst_pkt_id      = 0;
-        hsa_ext_amd_aql_pm4_packet_t kernel_pkt       = null_amd_aql_pm4_packet;
-        hsa_signal_t                 interrupt_signal = {};
+        Queue&                     queue;
+        std::unique_ptr<AQLPacket> inst_pkt         = {};
+        ClientID                   inst_pkt_id      = 0;
+        hsa_signal_t               interrupt_signal = {};
+        rocprofiler_thread_id_t    tid              = common::get_tid();
+        rocprofiler_kernel_id_t    kernel_id        = 0;
+        context::correlation_id*   correlation_id   = nullptr;
+        rocprofiler_packet         kernel_pkt       = {};
     };
 
     Queue(const AgentCache&  agent,
@@ -93,16 +136,10 @@ public:
     void create_signal(uint32_t attribute, hsa_signal_t* signal) const;
     void signal_async_handler(const hsa_signal_t& signal, Queue::queue_info_session_t* data) const;
 
-    rocprofiler_queue_id_t get_id() const
-    {
-        return {.handle = reinterpret_cast<uint64_t>(intercept_queue())};
-    };
+    template <typename FuncT>
+    void signal_callback(FuncT&& func) const;
 
-    template <class Func>
-    void signal_callback(Func&& func) const
-    {
-        _callbacks.rlock([&func](const auto& data) { func(data); });
-    }
+    rocprofiler_queue_id_t get_id() const;
 
     // Fast check to see if we have any callbacks we need to notify
     int get_notifiers() const { return _notifiers; }
@@ -113,7 +150,7 @@ public:
     void async_started() { _active_async_packets++; }
     void async_complete() { _active_async_packets--; }
 
-    void register_callback(ClientID id, QueueCB enqueue_cb, CompletedCB complete_cb);
+    void register_callback(ClientID id, queue_cb_t enqueue_cb, completed_cb_t complete_cb);
     void remove_callback(ClientID id);
 
     const CoreApiTable& core_api() const { return _core_api; }
@@ -128,6 +165,19 @@ private:
     rocprofiler::common::Synchronized<callback_map_t> _callbacks       = {};
     hsa_queue_t*                                      _intercept_queue = nullptr;
 };
+
+inline rocprofiler_queue_id_t
+Queue::get_id() const
+{
+    return {.handle = reinterpret_cast<uint64_t>(intercept_queue())};
+};
+
+template <typename FuncT>
+inline void
+Queue::signal_callback(FuncT&& func) const
+{
+    _callbacks.rlock([&func](const auto& data) { func(data); });
+}
 
 }  // namespace hsa
 }  // namespace rocprofiler

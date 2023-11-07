@@ -46,12 +46,53 @@ using external_cid_cb_t = uint64_t (*)(rocprofiler_service_callback_tracing_kind
                                        uint32_t,
                                        uint64_t);
 
+constexpr auto null_user_data = rocprofiler_user_data_t{.value = 0};
+struct correlation_id
+{
+    // reference count starts at 5:
+    // - decrement after begin callback/buffer API
+    // - decrement after end callback/buffer API
+    // - decrement after kernel dispatch/HW counters
+    // - if PC sampling is not enabled, we can "retire" correlation id at ref count at 2
+    // - if PC sampling is enabled, we decrement after each HSA buffer flush once ref count hits 2
+    //   - after the kernel dispatch completes, we know no more PC samples will be generated and
+    //     thus, after two HSA buffer flushes, we will have received all the PC samples for
+    //     the
+    correlation_id(uint32_t _cnt, rocprofiler_thread_id_t _tid, uint64_t _internal) noexcept
+    : ref_count{_cnt}
+    , thread_idx{_tid}
+    , internal{_internal}
+    {}
+
+    correlation_id()                              = default;
+    ~correlation_id()                             = default;
+    correlation_id(correlation_id&& val) noexcept = delete;
+    correlation_id(const correlation_id&)         = delete;
+
+    correlation_id& operator=(const correlation_id&) = delete;
+    correlation_id& operator=(correlation_id&&) noexcept = delete;
+
+    std::atomic<uint32_t>   ref_count  = {};
+    rocprofiler_thread_id_t thread_idx = 0;
+    uint64_t                internal   = 0;
+};
+
+correlation_id*
+get_correlation_id(rocprofiler_thread_id_t tid, uint64_t internal_id);
+
+// latest correlation id for thread
+correlation_id*
+get_latest_correlation_id();
+
+void
+pop_latest_correlation_id(const correlation_id*);
+
 /// permits tools opportunity to modify the correlation id based on the domain, op, and
 /// the rocprofiler generated correlation id
 struct correlation_tracing_service
 {
     external_correlation::external_correlation external_correlator = {};
-    static uint64_t                            get_unique_internal_id();
+    static correlation_id*                     construct(uint32_t init_ref_count);
 };
 
 struct callback_tracing_service
@@ -139,8 +180,20 @@ using active_context_vec_t = common::container::stable_vector<std::atomic<const 
 unique_context_vec_t&
 get_registered_contexts();
 
-active_context_vec_t&
-get_active_contexts();
+using context_filter_t = bool (*)(const context*);
+
+inline bool
+default_context_filter(const context* val)
+{
+    return (val != nullptr);
+}
+
+std::vector<const context*>&
+get_active_contexts(std::vector<const context*>& data,
+                    context_filter_t             filter = default_context_filter);
+
+std::vector<const context*>
+get_active_contexts(context_filter_t filter = default_context_filter);
 
 void deactivate_client_contexts(rocprofiler_client_id_t);
 

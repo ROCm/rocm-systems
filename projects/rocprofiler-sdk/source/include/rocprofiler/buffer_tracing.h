@@ -22,6 +22,7 @@
 
 #pragma once
 
+#include <rocprofiler/agent.h>
 #include <rocprofiler/defines.h>
 #include <rocprofiler/fwd.h>
 
@@ -39,6 +40,7 @@ ROCPROFILER_EXTERN_C_INIT
  */
 typedef struct
 {
+    uint64_t                                  size;
     rocprofiler_service_buffer_tracing_kind_t kind;
     rocprofiler_correlation_id_t              correlation_id;
     rocprofiler_tracing_operation_t           operation;  // rocprofiler/hsa.h
@@ -52,6 +54,7 @@ typedef struct
  */
 typedef struct
 {
+    uint64_t                                  size;
     rocprofiler_service_buffer_tracing_kind_t kind;
     rocprofiler_correlation_id_t              correlation_id;
     rocprofiler_tracing_operation_t           operation;  // rocprofiler/hip.h
@@ -65,6 +68,7 @@ typedef struct
  */
 typedef struct
 {
+    uint64_t                                  size;
     rocprofiler_service_buffer_tracing_kind_t kind;
     rocprofiler_correlation_id_t              correlation_id;
     rocprofiler_tracing_operation_t           operation;  // rocprofiler/marker.h
@@ -79,6 +83,7 @@ typedef struct
  */
 typedef struct
 {
+    uint64_t                                  size;
     rocprofiler_service_buffer_tracing_kind_t kind;
     rocprofiler_correlation_id_t              correlation_id;
     /**
@@ -96,12 +101,18 @@ typedef struct
  */
 typedef struct
 {
+    uint64_t                                  size;
     rocprofiler_service_buffer_tracing_kind_t kind;
     rocprofiler_correlation_id_t              correlation_id;
     rocprofiler_timestamp_t                   start_timestamp;
     rocprofiler_timestamp_t                   end_timestamp;
+    rocprofiler_agent_id_t                    agent_id;
     rocprofiler_queue_id_t                    queue_id;
-    const char*                               kernel_name;
+    rocprofiler_kernel_id_t                   kernel_id;
+    uint32_t                                  private_segment_size;
+    uint32_t                                  group_segment_size;
+    rocprofiler_dim3_t                        workgroup_size;
+    rocprofiler_dim3_t                        grid_size;
 } rocprofiler_buffer_tracing_kernel_dispatch_record_t;
 
 /**
@@ -109,6 +120,7 @@ typedef struct
  */
 typedef struct
 {
+    uint64_t                                  size;
     rocprofiler_service_buffer_tracing_kind_t kind;
     rocprofiler_correlation_id_t              correlation_id;
     rocprofiler_timestamp_t                   start_timestamp;
@@ -122,6 +134,7 @@ typedef struct
  */
 typedef struct
 {
+    uint64_t                                  size;
     rocprofiler_service_buffer_tracing_kind_t kind;
     rocprofiler_correlation_id_t              correlation_id;
     rocprofiler_timestamp_t                   start_timestamp;
@@ -135,6 +148,7 @@ typedef struct
  */
 typedef struct
 {
+    uint64_t                                  size;
     rocprofiler_service_buffer_tracing_kind_t kind;
     rocprofiler_correlation_id_t              correlation_id;
     rocprofiler_timestamp_t                   start_timestamp;
@@ -198,6 +212,7 @@ typedef struct
  */
 typedef struct
 {
+    uint64_t                                  size;
     rocprofiler_service_buffer_tracing_kind_t kind;
     rocprofiler_correlation_id_t              correlation_id;
 } rocprofiler_buffer_tracing_correlation_record_t;

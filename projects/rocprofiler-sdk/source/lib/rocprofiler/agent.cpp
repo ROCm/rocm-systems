@@ -786,7 +786,7 @@ get_rocprofiler_agent(hsa_agent_t agent)
 {
     for(const auto& itr : get_agent_caches())
     {
-        if(itr == agent) return &itr.get_rocp_agent();
+        if(itr == agent) return itr.get_rocp_agent();
     }
 
     return nullptr;

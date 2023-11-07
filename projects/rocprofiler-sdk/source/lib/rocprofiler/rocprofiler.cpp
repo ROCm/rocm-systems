@@ -52,9 +52,9 @@ ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_ERROR_AGENT_NOT_FOUND, "Agent ID no
 ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_ERROR_COUNTER_NOT_FOUND, "HW counter not found")
 ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID,
                           "Context configuration is not valid")
-ROCPROFILER_STATUS_STRING(
-    ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_STARTED,
-    "Context failed to be started (may be already started or atomic swap may have failed)")
+ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_STARTED, "Context failed to start")
+ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT,
+                          "Context has a conflict with another context")
 ROCPROFILER_STATUS_STRING(
     ROCPROFILER_STATUS_ERROR_BUFFER_BUSY,
     "Buffer operation failed because it is currently busy handling another request")

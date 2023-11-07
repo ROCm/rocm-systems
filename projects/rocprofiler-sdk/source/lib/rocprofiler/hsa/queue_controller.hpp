@@ -47,7 +47,7 @@ public:
 
     // Add callback to queues associated with the agent. Returns a client
     // id that can be used by callers to remove the callback.
-    ClientID add_callback(const rocprofiler_agent_t&, Queue::QueueCB, Queue::CompletedCB);
+    ClientID add_callback(const rocprofiler_agent_t&, Queue::queue_cb_t, Queue::completed_cb_t);
     void     remove_callback(ClientID);
 
     const CoreApiTable& get_core_table() const { return _core_table; }
@@ -57,9 +57,11 @@ public:
     const auto& get_supported_agents() const { return _supported_agents; }
     auto&       get_supported_agents() { return _supported_agents; }
 
+    const Queue* get_queue(const hsa_queue_t&) const;
+
 private:
     using agent_callback_tuple_t =
-        std::tuple<rocprofiler_agent_t, Queue::QueueCB, Queue::CompletedCB>;
+        std::tuple<rocprofiler_agent_t, Queue::queue_cb_t, Queue::completed_cb_t>;
     using queue_map_t       = std::unordered_map<hsa_queue_t*, std::unique_ptr<Queue>>;
     using client_id_map_t   = std::unordered_map<ClientID, agent_callback_tuple_t>;
     using agent_cache_map_t = std::unordered_map<uint32_t, AgentCache>;

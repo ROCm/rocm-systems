@@ -32,6 +32,7 @@
 #include <dlfcn.h>
 #include <pthread.h>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
@@ -483,8 +484,11 @@ TEST(rocprofiler_lib, callback_registration_lambda_with_result)
     EXPECT_GT(elapsed, 0);
 #else
     decltype(elapsed) elapsed_tolerance = 0.25 * elapsed;
+    int64_t           diff              = (cb_data.client_elapsed - elapsed);
+    auto              frac              = std::abs(diff) / (1.0 * elapsed);
     EXPECT_NEAR(elapsed, cb_data.client_elapsed, elapsed_tolerance)
-        << "it is possible this failed due to noise on the machine";
+        << "% diff = " << std::fixed << std::setprecision(3) << (100.0 * frac)
+        << "%. It is possible this failed due to noise on the machine";
 #endif
 
     ASSERT_NE(cb_data.client_id, nullptr);

@@ -58,9 +58,10 @@ typedef enum  // NOLINT(performance-enum-size)
     ROCPROFILER_STATUS_ERROR_COUNTER_NOT_FOUND,    ///< Counter identifier does not exist
     ROCPROFILER_STATUS_ERROR_CONTEXT_ERROR,        ///> Generalized context error
     ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID,      ///< Context configuration is not valid
-    ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_STARTED,  ///< Context was not started (maybe already
-                                                   ///< started or atomic swap into active array
-                                                   ///< failed)
+    ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_STARTED,  ///< Context was not started (e.g., atomic swap
+                                                   ///< into active array failed)
+    ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT,  ///< Context operation failed due to a conflict with
+                                                ///< another context
     ROCPROFILER_STATUS_ERROR_BUFFER_BUSY,  ///< buffer operation failed because it currently busy
                                            ///< handling another request (e.g. flushing)
     ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED,  ///< service has already been configured
@@ -154,12 +155,9 @@ typedef enum  // NOLINT(performance-enum-size)
 {
     ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT_NONE = 0,
     ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT_LOAD,
-    ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT_UNLOAD,
     ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER,
-    ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_UNREGISTER,
     // next two are part of hipRegisterFunction API.
     // ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT_HOST_KERNEL_SYMBOL_REGISTER,
-    // ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT_HOST_KERNEL_SYMBOL_UNREGISTER,
     ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT_LAST,
 } rocprofiler_callback_tracing_code_object_operation_t;
 
@@ -250,6 +248,12 @@ typedef uint64_t rocprofiler_thread_id_t;
  * for tracing.
  */
 typedef uint32_t rocprofiler_tracing_operation_t;
+
+/**
+ * @brief Kernel identifier type
+ *
+ */
+typedef uint64_t rocprofiler_kernel_id_t;
 
 // forward declaration of struct
 typedef struct rocprofiler_pc_sampling_configuration_s rocprofiler_pc_sampling_configuration_t;
@@ -347,6 +351,16 @@ typedef struct
 {
     uint64_t handle;
 } rocprofiler_profile_config_id_t;
+
+/**
+ * @brief Multi-dimensional struct of data used to describe GPU workgroup and grid sizes
+ */
+typedef struct rocprofiler_dim3_t
+{
+    uint32_t x;
+    uint32_t y;
+    uint32_t z;
+} rocprofiler_dim3_t;
 
 /**
  * @brief Tracing record

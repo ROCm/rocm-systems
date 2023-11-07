@@ -11,6 +11,10 @@
 
 namespace rocprofiler
 {
+namespace context
+{
+struct context;
+}
 namespace counters
 {
 // Stores counter profiling information such as the agent
@@ -55,15 +59,21 @@ struct counter_callback_info
 };
 
 uint64_t
-     create_counter_profile(profile_config&& config);
-void destroy_counter_profile(uint64_t);
-bool
-     configure_dispatch(rocprofiler_context_id_t                         context_id,
-                        uint64_t                                         profile_id,
-                        rocprofiler_profile_counting_dispatch_callback_t callback,
-                        void*                                            callback_args);
-void start_context(rocprofiler_context_id_t);
+create_counter_profile(profile_config&& config);
 
-void stop_context(rocprofiler_context_id_t);
+void
+destroy_counter_profile(uint64_t id);
+
+bool
+configure_dispatch(rocprofiler_context_id_t                         context_id,
+                   uint64_t                                         profile_id,
+                   rocprofiler_profile_counting_dispatch_callback_t callback,
+                   void*                                            callback_args);
+
+void
+start_context(context::context*);
+
+void
+stop_context(context::context*);
 }  // namespace counters
 }  // namespace rocprofiler

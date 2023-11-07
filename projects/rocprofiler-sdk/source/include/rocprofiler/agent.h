@@ -87,16 +87,6 @@ typedef struct rocprofiler_agent_mem_bank_t
 } rocprofiler_agent_mem_bank_t;
 
 /**
- * @brief Multi-dimensional struct of data
- */
-typedef struct rocprofiler_dim3_t
-{
-    uint32_t x;
-    uint32_t y;
-    uint32_t z;
-} rocprofiler_dim3_t;
-
-/**
  * @brief Agent.
  */
 typedef struct rocprofiler_agent_t

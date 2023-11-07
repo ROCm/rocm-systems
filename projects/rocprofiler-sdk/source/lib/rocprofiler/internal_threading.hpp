@@ -41,18 +41,14 @@ namespace internal_threading
 {
 using thread_pool_t         = PTL::ThreadPool;
 using task_group_t          = PTL::TaskGroup<void>;
-using thread_pool_cleanup_t = rocprofiler::common::static_cleanup_wrapper<
-    std::unique_ptr<thread_pool_t>,
-    std::function<void(std::unique_ptr<thread_pool_t>&)>>;
+using thread_pool_cleanup_t = common::static_cleanup_wrapper<std::unique_ptr<thread_pool_t>>;
 using task_group_cleanup_t =
     std::pair<std::unique_ptr<task_group_t>, std::shared_ptr<thread_pool_cleanup_t>>;
 using thread_pool_vec_t = std::vector<std::shared_ptr<thread_pool_cleanup_t>>;
 
 // Note: task_group maintains a shared_ptr copy to thread_pool to ensure it is not destroyed
 // before the task can be sync'd.
-using task_group_vec_t = rocprofiler::common::static_cleanup_wrapper<
-    std::vector<task_group_cleanup_t>,
-    std::function<void(std::vector<task_group_cleanup_t>&)>>;
+using task_group_vec_t = common::static_cleanup_wrapper<std::vector<task_group_cleanup_t>>;
 
 void notify_pre_internal_thread_create(rocprofiler_runtime_library_t);
 void notify_post_internal_thread_create(rocprofiler_runtime_library_t);
