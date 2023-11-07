@@ -90,7 +90,7 @@ get_accurate_clock_id_impl()
 }
 
 uint64_t
-get_clock_freq_ns_impl(clockid_t _clk_id)
+get_clock_period_ns_impl(clockid_t _clk_id)
 {
     constexpr auto nanosec = std::nano::den;
 
@@ -110,9 +110,7 @@ get_clock_freq_ns_impl(clockid_t _clk_id)
                    << ") returned very low frequency (<1Hz)";
     }
 
-    auto&& _period =
-        (static_cast<uint64_t>(ts.tv_sec) * nanosec) + static_cast<uint64_t>(ts.tv_nsec);
-    return nanosec / _period;
+    return (static_cast<uint64_t>(ts.tv_sec) * nanosec) + static_cast<uint64_t>(ts.tv_nsec);
 }
 
 std::vector<std::string>

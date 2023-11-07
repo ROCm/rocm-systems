@@ -51,7 +51,7 @@ clockid_t
 get_accurate_clock_id_impl();
 
 uint64_t
-get_clock_freq_ns_impl(clockid_t _clk_id);
+get_clock_period_ns_impl(clockid_t _clk_id);
 
 inline uint64_t
 get_tid()
@@ -69,10 +69,10 @@ get_accurate_clock_id()
 }
 
 inline uint64_t
-get_accurate_clock_freq_ns()
+get_accurate_clock_period_ns()
 {
-    static auto clk_freq = get_clock_freq_ns_impl(get_accurate_clock_id());
-    return clk_freq;
+    static auto clk_period = get_clock_period_ns_impl(get_accurate_clock_id());
+    return clk_period;
 }
 
 inline uint64_t
@@ -95,17 +95,20 @@ get_ticks(clockid_t clk_id_v) noexcept
 inline uint64_t
 timestamp_ns()
 {
-    return get_ticks(get_accurate_clock_id()) * get_accurate_clock_freq_ns();
+    auto&& clk_period = get_accurate_clock_period_ns();
+    if(ROCPROFILER_LIKELY(clk_period == 1)) return get_ticks(get_accurate_clock_id());
+    return get_ticks(get_accurate_clock_id()) / clk_period;
 }
 
 // this equates to HSA-runtime library implementation of os::ReadSystemClock()
 inline uint64_t
 system_timestamp_ns()
 {
-    constexpr auto boottime_clk      = CLOCK_BOOTTIME;
-    static auto    boottime_clk_freq = get_clock_freq_ns_impl(boottime_clk);
+    constexpr auto boottime_clk        = CLOCK_BOOTTIME;
+    static auto    boottime_clk_period = get_clock_period_ns_impl(boottime_clk);
 
-    return get_ticks(boottime_clk) * boottime_clk_freq;
+    if(ROCPROFILER_LIKELY(boottime_clk_period == 1)) return get_ticks(boottime_clk);
+    return get_ticks(boottime_clk) / boottime_clk_period;
 }
 
 std::vector<std::string>

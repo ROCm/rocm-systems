@@ -57,4 +57,5 @@ set_tests_properties(
         "samples"
         ENVIRONMENT
         "${ROCPROFILER_MEMCHECK_PRELOAD_ENV};HSA_TOOLS_LIB=$<TARGET_FILE:rocprofiler::rocprofiler>"
-    )
+        FAIL_REGULAR_EXPRESSION
+        "threw an exception")
