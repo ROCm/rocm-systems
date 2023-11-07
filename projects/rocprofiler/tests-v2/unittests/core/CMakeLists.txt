@@ -174,12 +174,12 @@ add_custom_command(
     COMMAND
         ${CMAKE_C_COMPILER}
         "$<$<BOOL:${HIP_INCLUDE_DIRECTORIES}>:-I$<JOIN:${HIP_INCLUDE_DIRECTORIES},$<SEMICOLON>-I>>"
-        -E "${HIP_RUNTIME_API_H}" -D__HIP_PLATFORM_AMD__=1 -D__HIP_ROCclr__=1 -o
+        -E "${PROJECT_SOURCE_DIR}/src/core/session/tracer/src/hip_full_api.h" -D__HIP_PLATFORM_AMD__=1 -D__HIP_ROCclr__=1 -o
         hip_runtime_api.h.i
     BYPRODUCTS hip_runtime_api.h.i
     COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/script/gen_ostream_ops.py -in
             hip_runtime_api.h.i -out hip_ostream_ops.h > /dev/null
-    DEPENDS ${PROJECT_SOURCE_DIR}/script/gen_ostream_ops.py "${HIP_RUNTIME_API_H}"
+    DEPENDS ${PROJECT_SOURCE_DIR}/script/gen_ostream_ops.py "${PROJECT_SOURCE_DIR}/src/core/session/tracer/src/hip_full_api.h"
     COMMENT "Generating hip_ostream_ops.h..."
     COMMAND_EXPAND_LISTS)
 

@@ -128,13 +128,13 @@ find_file(
 list(TRANSFORM HIP_INCLUDE_DIRS PREPEND -I)
 add_custom_command(
     OUTPUT hip_erts.yaml hip_begin.cpp.i hip_end.cpp.i
-    COMMAND ${CMAKE_C_COMPILER} ${HIP_INCLUDE_DIRS} -E "${HIP_RUNTIME_API_H}"
+    COMMAND ${CMAKE_C_COMPILER} ${HIP_INCLUDE_DIRS} -E "${PROJECT_SOURCE_DIR}/src/core/session/tracer/src/hip_full_api.h"
             -D__HIP_PLATFORM_AMD__=1 -D__HIP_ROCclr__=1 -o hip_runtime_api.h.i
     COMMAND cat hip_runtime_api.h.i "${HIP_PROF_STR_H}" > hip_input.h
     BYPRODUCTS hip_runtime_api.h.i hip_input.h
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/gen_api_files.py" hip
             hip_input.h
-    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/gen_api_files.py" "${HIP_RUNTIME_API_H}"
+    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/gen_api_files.py" "${PROJECT_SOURCE_DIR}/src/core/session/tracer/src/hip_full_api.h"
             "${HIP_PROF_STR_H}"
     COMMENT "Generating HIP API files for the `ctf` plugin...")
 

@@ -22,6 +22,7 @@
 #define SRC_TOOLS_TRACER_SRC_ROCTRACER_H_
 
 #include <hip/hip_runtime.h>
+#include <hip/hip_deprecated.h>
 #include <hsa/hsa.h>
 #include <hsa/hsa_ext_amd.h>
 #include <stddef.h>
