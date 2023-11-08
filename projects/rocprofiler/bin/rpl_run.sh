@@ -57,32 +57,6 @@ GEN_STATS=0
 # Quoting profiled cmd line
 CMD_QTS=1
 
-export PATH=.:$PATH
-
-# enable error logging
-export HSA_TOOLS_REPORT_LOAD_FAILURE=1
-export HSA_VEN_AMD_AQLPROFILE_LOG=1
-export ROCPROFILER_LOG=1
-unset ROCPROFILER_SESS
-
-# Profiler environment
-# Loading of profiler library by HSA runtime
-MY_HSA_TOOLS_LIB="$RPL_PATH/librocprofiler64.so.1"
-# Loading of the test tool by ROC Profiler
-export ROCP_TOOL_LIB=$TLIB_PATH/librocprof-tool.so
-# Enabling HSA dispatches intercepting by ROC PRofiler
-export ROCP_HSA_INTERCEPT=1
-# Disabling internal ROC Profiler proxy queue (simple version supported for testing purposes)
-unset ROCP_PROXY_QUEUE
-# ROC Profiler metrics definition
-export ROCP_METRICS=$TLIB_PATH/metrics.xml
-# Disable AQL-profile read API
-export AQLPROFILE_READ_API=0
-# ROC Profiler package path
-export ROCP_PACKAGE_DIR=$ROOT_DIR
-# enabled SPM KFD mode
-export ROCP_SPM_KFD_MODE=1
-
 # error handling
 fatal() {
   echo "$0: Error: $1"
@@ -545,6 +519,33 @@ while [ 1 ] ; do
   shift
   if [ "$ARG_VAL" = 1 ] ; then shift; fi
 done
+
+export PATH=.:$PATH
+
+# enable error logging
+export HSA_TOOLS_REPORT_LOAD_FAILURE=1
+export HSA_VEN_AMD_AQLPROFILE_LOG=1
+export ROCPROFILER_LOG=1
+unset ROCPROFILER_SESS
+
+# Profiler environment
+# Loading of profiler library by HSA runtime
+MY_HSA_TOOLS_LIB="$RPL_PATH/librocprofiler64.so.1"
+# Loading of the test tool by ROC Profiler
+export ROCP_TOOL_LIB=$TLIB_PATH/librocprof-tool.so
+# Enabling HSA dispatches intercepting by ROC PRofiler
+export ROCP_HSA_INTERCEPT=1
+# Disabling internal ROC Profiler proxy queue (simple version supported for testing purposes)
+unset ROCP_PROXY_QUEUE
+# ROC Profiler metrics definition
+export ROCP_METRICS=$TLIB_PATH/metrics.xml
+# Disable AQL-profile read API
+export AQLPROFILE_READ_API=0
+# ROC Profiler package path
+export ROCP_PACKAGE_DIR=$ROOT_DIR
+# enabled SPM KFD mode
+export ROCP_SPM_KFD_MODE=1
+
 
 ARG_CK=`echo $ARG_IN | sed "s/^-.*$/-/"`
 if [ "$ARG_CK" = "-" ] ; then
