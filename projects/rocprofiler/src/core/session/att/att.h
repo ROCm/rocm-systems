@@ -44,6 +44,13 @@ typedef struct {
   uint64_t queue_index;
 } att_pending_signal_t;
 
+enum rocprofiler_att_isa_dump_mode {
+  ISA_MODE_DUMP_ALL=0,
+  ISA_MODE_DUMP_OBJ,
+  ISA_MODE_DUMP_KERNEL,
+  ISA_MODE_DUMP_NONE
+};
+
 union att_header_packet_t {
   struct {
     uint64_t reserved : 14;
@@ -53,6 +60,7 @@ union att_header_packet_t {
     uint64_t DCU : 5;
     uint64_t DSA : 1;
     uint64_t SEID : 6;
+    uint64_t isadumpmode : 3;
   };
   uint64_t raw;
 };

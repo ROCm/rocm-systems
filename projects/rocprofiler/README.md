@@ -392,10 +392,15 @@ Tool used to collect fine-grained hardware metrics. Provides ISA-level instructi
     - PERFCOUNTER_MASK=0xFFF // Bitmask for perfcounter collection. GFX9 only.
     - PERFCOUNTER=counter_name // Add a SQ counter to be collected with ATT; period defined by PERFCOUNTERS_CTRL. GFX9 only.
     - BUFFER_SIZE=[size] // Sets size of the ATT buffer collection, per dispatch, in megabytes (shared among all shader engines).
-    - ISA_CAPTURE_MODE=[0,1,2] // Set capture mode during kernel dispatch.
+    - ISA_CAPTURE_MODE=[0,1,2] // Set codeobj capture mode during kernel dispatch.
         - 0 = capture symbols only.
         - 1 = capture symbols for file:// and make a copy of memory://
         - 2 = Copy file:// and memory://
+    - ISA_DUMP_MODE=[0,1,2,3] // Set how captured codeobj information is dumped when a trace record arrives.
+        - 0 = Default. Dump everything.
+        - 1 = Dump only the code object containing the kernel address in the kernel dispatch packet.
+        - 2 = Dump a single kernel symbol matching the kernel dispatch packet.
+        - 3 = Disables ISA Dumping.
     - By default, kernel names are truncated for ATT.To disable, please see the kernel name truncation section below.
 
   - Example for vectoradd.

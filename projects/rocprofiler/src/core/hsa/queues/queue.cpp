@@ -1152,12 +1152,16 @@ void Queue::WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t u
           session_id_snapshot, buffer_id, profile, kernel_properties,
           (uint32_t)syscall(__NR_gettid), user_pkt_index);
 
-      uint64_t userdata = HSASupport_Singleton::GetInstance()
+      uint64_t off = dispatch_packet.kernel_object +
+        GetKernelCode(dispatch_packet.kernel_object)->kernel_code_entry_byte_offset;
+      codeobj_record::make_capture(rocprofiler_record_id_t{record_id}, capture_mode, off);
+
+      uint64_t IsGFX9 = HSASupport_Singleton::GetInstance()
                           .GetHSAAgentInfo(queue_info.GetGPUAgent().handle)
                           .GetDeviceInfo()
                           .getName()
                           .find("gfx9") != std::string::npos;
-      codeobj_record::make_capture(rocprofiler_record_id_t{record_id}, capture_mode, userdata);
+      codeobj_record::make_capture(rocprofiler_record_id_t{record_id}, capture_mode, IsGFX9 | (off<<1));
       codeobj_record::start_capture(rocprofiler_record_id_t{record_id});
       codeobj_record::stop_capture(rocprofiler_record_id_t{record_id});
 

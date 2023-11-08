@@ -1186,13 +1186,17 @@ typedef struct {
   */
   uint64_t base_address;
   /**
+   * Maximum offset from base address
+  */
+  uint64_t mem_size;
+  /**
    * If a copy of the codeobj is made, contains the data. Nullptr otherwise.
   */
   const char* data;
   /**
    * If a copy of the codeobj is made, contains the size of the data. 0 otherwise.
   */
-  uint64_t size;
+  uint64_t data_size;
   /**
    * Timestamp for the time point this codeobj was loaded.
   */

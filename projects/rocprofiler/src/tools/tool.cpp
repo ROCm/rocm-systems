@@ -380,6 +380,11 @@ att_parsed_input_t GetATTParams() {
       continue;
     }
 
+    if (param_name.find("ISA_DUMP_MODE") != std::string::npos) {
+      header.isadumpmode = param_value;
+      continue;
+    }
+
     if (ATT_PARAM_NAMES.find(param_name) != ATT_PARAM_NAMES.end()) {
       parameters.push_back(std::make_pair(ATT_PARAM_NAMES[param_name], param_value));
       try {

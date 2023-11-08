@@ -65,6 +65,9 @@ class att_plugin_t {
 
     header.raw = reinterpret_cast<uint64_t>(data);
     header.reserved = 0x11;
+
+    isa_mode = static_cast<decltype(isa_mode)>(header.isadumpmode);
+    header.isadumpmode = 0;
   }
 
   bool MPI_ENABLE = false;
@@ -72,6 +75,14 @@ class att_plugin_t {
   std::mutex writing_lock;
   bool is_valid_{true};
   rocprofiler::att_header_packet_t header{.raw = 0};
+  rocprofiler::rocprofiler_att_isa_dump_mode isa_mode = rocprofiler::ISA_MODE_DUMP_ALL;
+
+  bool CheckAddrMatches(uint64_t kernel_addr, uint64_t base_address, uint64_t size)
+  {
+    if (isa_mode == rocprofiler::ISA_MODE_DUMP_ALL)
+      return true;
+    return (kernel_addr >= base_address) && (kernel_addr < base_address + size);
+  }
 
   inline bool att_file_exists(const std::string& name) {
     struct stat buffer;
@@ -133,7 +144,7 @@ class att_plugin_t {
                                  << '\n';
 
     // iterate over each shader engine att trace
-    header.navi = !att_tracer_record->intercept_list.userdata;
+    header.navi = !att_tracer_record->intercept_list.userdata & 0x1;
     int se_num = att_tracer_record->shader_engine_data_count;
     for (int i = 0; i < se_num; i++) {
       if (!att_tracer_record->shader_engine_data ||
@@ -155,6 +166,11 @@ class att_plugin_t {
       out.write(data_buffer_ptr, se_att_trace->buffer_size);
     }
 
+    if (isa_mode == rocprofiler::ISA_MODE_DUMP_NONE)
+      return 0;
+
+    uint64_t kernel_addr = att_tracer_record->intercept_list.userdata >> 1;
+
     std::ofstream isafile(outfilepath + "_isa.s");
     if (!isafile.is_open()) {
       std::cerr << "Could not open ISA file: " << outfilepath << "_isa.s" << std::endl;
@@ -166,11 +182,13 @@ class att_plugin_t {
       const rocprofiler_intercepted_codeobj_t& symbol =
           att_tracer_record->intercept_list.symbols[i];
 
+      if (!CheckAddrMatches(kernel_addr, symbol.base_address, symbol.mem_size)) continue;
+
       std::unique_ptr<CodeObjectBinary> binary;
       std::unique_ptr<code_object_decoder_t> decoder;
 
-      if (symbol.data && symbol.size) {
-        decoder = std::make_unique<code_object_decoder_t>(symbol.data, symbol.size);
+      if (symbol.data && symbol.data_size) {
+        decoder = std::make_unique<code_object_decoder_t>(symbol.data, symbol.data_size);
       } else if (std::string(symbol.filepath).find("file://") != std::string::npos) {
         binary = std::make_unique<CodeObjectBinary>(symbol.filepath);
         decoder =
@@ -178,6 +196,11 @@ class att_plugin_t {
       } else {
         continue;
       }
+
+      if (isa_mode == rocprofiler::ISA_MODE_DUMP_KERNEL)
+        decoder->disassemble_single_kernel(kernel_addr-symbol.base_address);
+      else
+        decoder->disassemble_kernels();
 
       for (auto& instance : decoder->instructions) {
         uint64_t addr = instance.address + symbol.base_address;

@@ -41,7 +41,7 @@ class codeobj_capture_instance {
 
   rocprofiler_intercepted_codeobj_t get() const {
     const char* buf_ptr = buffer.size() ? buffer.data() : nullptr;
-    return {URI.c_str(), addr, buf_ptr, buffer.size(), start_time, end_time};
+    return {URI.c_str(), addr, mem_size, buf_ptr, buffer.size(), start_time, end_time};
   };
 
   const uint64_t addr;

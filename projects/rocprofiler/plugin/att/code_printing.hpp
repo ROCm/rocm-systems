@@ -39,7 +39,9 @@ class code_object_decoder_t {
   ~code_object_decoder_t();
 
   void disassemble_kernel(uint64_t faddr, uint64_t vaddr);
+  void disassemble_single_kernel(uint64_t kaddr);
   void disassemble_kernels();
+
   int m_fd;
 
   std::map<uint64_t, std::pair<std::string, size_t>> m_line_number_map;

@@ -661,7 +661,7 @@ TEST_F(CodeobjTest, WhenRunningProfilerWithMultipleCaptureAndCopy) {
     EXPECT_NE(capture.symbols[i].base_address, 0);
     EXPECT_NE(capture.symbols[i].clock_start.value, 0);
     EXPECT_NE(capture.symbols[i].data, nullptr);
-    EXPECT_NE(capture.symbols[i].size, 0);
+    EXPECT_NE(capture.symbols[i].data_size, 0);
   }
 
   result = rocprofiler_codeobj_capture_stop(id);

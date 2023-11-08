@@ -238,9 +238,7 @@ class perfetto_plugin_t {
     uint64_t device_id = profiler_record.gpu_id.handle;
     std::unordered_map<uint64_t, perfetto::Track>::iterator device_track_it;
     {
-      std::lock_guard<std::mutex> lock(device_tracks_lock_);
       uint64_t device_track_id = getTrackID(machine_id_, TrackType::DEVICE, device_id);
-
       device_track_it = device_tracks.find(device_track_id);
       if (device_track_it == device_tracks.end()) {
         /* Create a new perfetto::Track (Sub-Track) */
@@ -250,30 +248,25 @@ class perfetto_plugin_t {
         gpu_desc.mutable_process()->set_pid(device_id);
         gpu_desc.mutable_process()->set_chrome_process_type(
             perfetto::protos::gen::ProcessDescriptor::PROCESS_GPU);
-        gpu_desc.mutable_process()->set_process_name("Node: " + std::string(hostname_) +
-                                                     " Device: ");
+        gpu_desc.mutable_process()->set_process_name("Node: " + std::string(hostname_)
+                                                    + std::to_string(GetPid()) + " Device: ");
         perfetto::TrackEvent::SetTrackDescriptor(device_track_it->second, gpu_desc);
         track_ids_used_.emplace_back(device_track_id);
       }
     }
     auto& gpu_track = device_track_it->second;
-    std::pair<int, uint64_t> gpu_queue_id =
-        std::make_pair(device_id, profiler_record.queue_id.handle);
-    auto queue_track_it = queue_tracks_.find(gpu_queue_id.first);
-    {
-      std::lock_guard<std::mutex> lock(stream_tracks_lock_);
-      uint64_t queue_track_id = getTrackID(machine_id_, device_id+TrackType::DEVICE_ID, gpu_queue_id.first);
-      queue_track_it = queue_tracks_.find(queue_track_id);
-      if (queue_track_it == queue_tracks_.end()) {
-        /* Create a new perfetto::Track */
-        queue_track_it =
-            queue_tracks_.emplace(queue_track_id, perfetto::Track(queue_track_id, gpu_track)).first;
+    uint64_t queue_track_id
+      = getTrackID(machine_id_, device_id+TrackType::DEVICE_ID, profiler_record.queue_id.handle);
+    auto queue_track_it = queue_tracks_.find(queue_track_id);
+    if (queue_track_it == queue_tracks_.end()) {
+      /* Create a new perfetto::Track */
+      queue_track_it =
+          queue_tracks_.emplace(queue_track_id, perfetto::Track(queue_track_id, gpu_track)).first;
 
-        auto queue_desc = queue_track_it->second.Serialize();
-        std::string queue_str = rocprofiler::string_printf("Queue %ld", gpu_queue_id.second);
-        queue_desc.set_name(queue_str);
-        perfetto::TrackEvent::SetTrackDescriptor(queue_track_it->second, queue_desc);
-      }
+      auto queue_desc = queue_track_it->second.Serialize();
+      std::string queue_str = rocprofiler::string_printf("Queue %ld", profiler_record.queue_id.handle);
+      queue_desc.set_name(queue_str);
+      perfetto::TrackEvent::SetTrackDescriptor(queue_track_it->second, queue_desc);
       track_ids_used_.emplace_back(queue_track_id);
     }
     auto& queue_track = queue_track_it->second;
@@ -306,7 +299,6 @@ class perfetto_plugin_t {
       std::pair<int, std::string> gpu_counter_track_id = std::make_pair(device_id, counter_name);
       std::unordered_map<std::string, perfetto::CounterTrack>::iterator counters_track_it;
       {
-        std::lock_guard<std::mutex> lock(counter_tracks_lock_);
         counters_track_it = counter_tracks_.find(gpu_counter_track_id.second);
         if (counters_track_it == counter_tracks_.end()) {
           /* Create a new perfetto::Track */
@@ -642,9 +634,6 @@ class perfetto_plugin_t {
 
   std::atomic<uint64_t> track_counter_{GetPid()};
   std::vector<uint64_t> track_ids_used_;
-
-  std::mutex roctx_tracks_lock_, hsa_tracks_lock_, hip_tracks_lock_, device_tracks_lock_;
-  std::mutex stream_tracks_lock_, counter_tracks_lock_, mem_copies_tracks_lock_;
 
   char hostname_[1024];
   uint64_t machine_id_;

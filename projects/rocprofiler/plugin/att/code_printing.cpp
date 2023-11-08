@@ -109,7 +109,11 @@ code_object_decoder_t::code_object_decoder_t(const char* codeobj_data, uint64_t 
     }
     // load_symbol_map();
   }
-  disassemble_kernels();
+
+  disassembly = std::make_unique<DisassemblyInstance>(*this);
+  m_symbol_map = disassembly->GetKernelMap();
+
+  //disassemble_kernels();
 }
 
 
@@ -170,8 +174,11 @@ void code_object_decoder_t::disassemble_kernel(uint64_t faddr, uint64_t vaddr) {
 }
 
 void code_object_decoder_t::disassemble_kernels() {
-  disassembly = std::make_unique<DisassemblyInstance>(*this);
-  m_symbol_map = disassembly->GetKernelMap();
-
   for (auto& [vaddr, v] : m_symbol_map) disassemble_kernel(v.faddr, vaddr);
+}
+
+void code_object_decoder_t::disassemble_single_kernel(uint64_t kaddr) {
+  for (auto& [vaddr, v] : m_symbol_map)
+    if (kaddr >= vaddr && kaddr < vaddr + v.mem_size)
+      disassemble_kernel(v.faddr, vaddr);
 }
