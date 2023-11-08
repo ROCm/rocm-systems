@@ -210,10 +210,10 @@ class RocTCPServer(socketserver.TCPServer):
         self.socket.bind(self.server_address)
 
 
-def run_server(drawinfo, trace_instance_name):
+def run_server(drawinfo):
     Handler = NoCacheHTTPRequestHandler
     Handler.drawinfo = drawinfo
-    os.chdir(trace_instance_name+"_ui/")
+    os.chdir(os.path.join(os.path.dirname(os.path.realpath(__file__)),"ui/"))
     try:
         with RocTCPServer((IPAddr, PORT), Handler) as httpd:
             httpd.serve_forever()
@@ -387,7 +387,7 @@ def view_trace(
         print("serving at ports: {0},{1}".format(PORT, WebSocketPort))
         try:
             PROCS = [
-                Process(target=run_server, args=[drawinfo, trace_instance_name]),
+                Process(target=run_server, args=[drawinfo]),
                 Process(target=run_websocket),
             ]
             for p in PROCS:
