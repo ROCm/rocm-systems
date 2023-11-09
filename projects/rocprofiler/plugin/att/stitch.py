@@ -7,9 +7,8 @@ if sys.version_info[0] < 3:
 from collections import defaultdict
 from copy import deepcopy
 
-MAX_STITCHED_TOKENS = 100000000
+MAX_STITCHED_TOKENS = 200000000
 MAX_FAILED_STITCHES = 256
-STACK_SIZE_LIMIT = 64
 
 UNKNOWN = 0
 SMEM = 1
@@ -80,7 +79,6 @@ class RegisterWatchList:
         ]
 
     def getpc(self, line, next_line):
-        # print('Get pc:', line)
         try:
             dst = line.split(" ")[1].strip()
             label_dests = []
@@ -97,7 +95,7 @@ class RegisterWatchList:
                 try:
                     cur_label = self.labels[label_dst]
                     for reg in self.range(dst):
-                        self.registers[reg].append(deepcopy(cur_label))
+                        self.registers[reg] = deepcopy(cur_label)
                 except:
                     pass
         except:
@@ -109,21 +107,18 @@ class RegisterWatchList:
             dst = tokens[1]
             src = tokens[2]
 
-            popped = self.registers[self.range(src)[0]][-1]
-            self.registers[self.range(src)[0]] = self.registers[self.range(src)[0]][:-1]
-            self.registers[self.range(dst)[0]].append(line_num + 1)
+            popped = deepcopy(self.registers[self.range(src)[0]])
+            self.registers[self.range(dst)[0]] = line_num + 1
             return popped
         except:
-            return 0
+            return -1
 
     def setpc(self, line, inst_num):
         try:
             src = line.split(' ')[1].strip()
-            popped = self.registers[self.range(src)[0]][-1]
-            self.registers[self.range(src)[0]] = self.registers[self.range(src)[0]][:-1]
-            return popped
+            return deepcopy(self.registers[self.range(src)[0]])
         except:
-            return 0
+            return -1
 
     def scratch(self, line):
         try:
@@ -134,7 +129,7 @@ class RegisterWatchList:
             else:
                 src = tokens[2]
                 dst = tokens[3] + tokens[4]
-            self.registers[dst] = self.registers[src]
+            self.registers[dst] = deepcopy(self.registers[src])
         except:
             pass
 
@@ -152,25 +147,17 @@ class RegisterWatchList:
         tokens = self.tokenize(line)
         try:
             if "v_readlane" in tokens[0]:
-                self.registers[tokens[1]].append(
-                    self.registers[tokens[2]][int(tokens[3])][-1]
-                )
-                self.registers[tokens[2]][int(tokens[3])] = self.registers[tokens[2]][
-                    int(tokens[3])
-                ][:-1]
+                self.registers[tokens[1]] = deepcopy(self.registers[tokens[2]][int(tokens[3])])
             elif "v_writelane" in tokens[0]:
-                self.registers[tokens[1]][int(tokens[3])].append(
-                    self.registers[tokens[2]][-1]
-                )
-                self.registers[tokens[2]] = self.registers[tokens[2]][-STACK_SIZE_LIMIT:]
-        except Exception as e:
+                self.registers[tokens[1]][int(tokens[3])] = deepcopy(self.registers[tokens[2]])
+        except:
             pass
 
 # Translates PC values to instructions, for auto captured ISA
 class PCTranslator:
     def __init__(self, code, insts):
         self.code = code
-        self.insts = insts
+        self.insts = insts[1:]
         self.addrmap = {code[m][-3] : m for m in range(len(code))}
 
     def try_translate(self, tok):
@@ -186,14 +173,14 @@ class PCTranslator:
             loc = self.addrmap[self.insts[inst_index+1].cycles]
             return loc
         except:
-            print('SWAPPC: Could not find addr', self.insts[inst_index+1].cycles, 'for', line)
+            print('SWAPPC warning: Could not find addr', hex(self.insts[inst_index+1].cycles), 'for', inst_index, line)
             return -1
     def setpc(self, line, inst_index):
         try:
             loc = self.addrmap[self.insts[inst_index+1].cycles]
             return loc
         except:
-            print('SETPC: Could not find addr', self.insts[inst_index+1].cycles, 'for', line)
+            print('SETPC warning: Could not find addr', hex(self.insts[inst_index+1].cycles), 'for', inst_index, line)
             return -1
     def scratch(self, line):
         pass
@@ -255,11 +242,18 @@ def stitch(insts, raw_code, jumps, gfxv, bIsAuto):
     loops = 0
     maxline = 0
 
-    if bIsAuto and len(insts) and insts[0].type == PCINFO:
+    if bIsAuto:
         try:
+            if insts[0].type != PCINFO:
+                print('Warning: Waves without PCINFO')
+                return None
+            elif insts[0].cycles == 0:
+                print('Info: Some waves started before the trace')
+                return None
             watchlist = PCTranslator(code, insts)
             line = watchlist.addrmap[insts[0].cycles]
-        except:
+        except Exception as e:
+            print(e)
             return None
         insts = insts[1:]
     else:
@@ -272,8 +266,6 @@ def stitch(insts, raw_code, jumps, gfxv, bIsAuto):
         if insts[i].type == PCINFO:
             i += 1
             continue
-
-        #print(line, i, WaveInstCategory[insts[i].type], insts[i].num_waves, insts[i].cycles, code[line])
 
         loops += 1
         if line >= len(code) or loops > MAX_STITCHED_TOKENS \
@@ -307,15 +299,33 @@ def stitch(insts, raw_code, jumps, gfxv, bIsAuto):
             matched = inst.type in [SALU, JUMP]
             if bIsAuto:
                 pcskip.append(i)
-                matched = next >= 0
                 i += 1
+                while next < 0 and i+1 < len(insts):
+                    if insts[i+1].type == PCINFO:
+                        next = watchlist.setpc(as_line[0], i)
+                        pcskip.append(i)
+                    else:
+                        inst.cycles += insts[i+1].cycles
+                    i += 1
+            if next < 0:
+                print('Jump to unknown location in line', as_line[0])
+                break
         elif as_line[1] == SWAPPC:
             next = watchlist.swappc(as_line[0], line, i)
             matched = inst.type in [SALU, JUMP]
             if bIsAuto:
                 pcskip.append(i)
-                matched = next >= 0
                 i += 1
+                while next < 0 and i+1 < len(insts):
+                    if insts[i+1].type == PCINFO:
+                        next = watchlist.swappc(as_line[0], line, i)
+                        pcskip.append(i)
+                    else:
+                        inst.cycles += insts[i+1].cycles
+                    i += 1
+            if next < 0:
+                print('Jump to unknown location in line', as_line[0])
+                break
         elif inst.type == as_line[1]:
             if line in jumps:
                 loopCount[jumps[line] - 1] += 1
