@@ -8,7 +8,10 @@ def dump_csv(code, trace_instance_name):
     outpath = os.getenv("OUT_FILE_NAME")
     if outpath is None:
         outpath = "att_output"
-    outpath += '_' + trace_instance_name.split('/')[-1] + '.csv'
+    elif os.path.dirname(outpath) != '':
+        os.makedirs(os.path.dirname(outpath), exist_ok=True)
+
+    outpath += '_' + os.path.basename(trace_instance_name) + '.csv'
 
     with open(outpath, 'w') as f:
         writer = csv.writer(f)

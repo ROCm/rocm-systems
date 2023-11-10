@@ -344,7 +344,7 @@ Tool used to collect fine-grained hardware metrics. Provides ISA-level instructi
 
     ```bash
     rocprofv2 -i input.txt --plugin att auto --mode csv <app_relative_path>
-    # This is the 5.7 version:
+    # Or using a user-supplied ISA:
     # rocprofv2 -i input.txt --plugin att <app_assembly_file> --mode csv <app_relative_path>
     ```
 
@@ -408,19 +408,24 @@ Tool used to collect fine-grained hardware metrics. Provides ISA-level instructi
     ```bash
     # -g adds debugging symbols to the binary. Required only for tracking disassembly back to c++.
     hipcc -g vectoradd_hip.cpp -o vectoradd_hip.exe
-    # "auto" means to use the automatically captured ISA. "csv" dumps result to "vectoradd_float_v0.csv".
+    # "auto" means to use the automatically captured ISA, e.g. vectoradd_float_v0_isa.s dumped along with .att files.
+    # "--mode csv" dumps the result to "att_output_vectoradd_float_v0.csv".
     rocprofv2 -i input.txt --plugin att auto --mode csv ./vectoradd_hip.exe
     ```
-
-    Instruction latencies will be in vectoradd_float_v0.csv
-
-  - Example with symbolic ISA (as in ROCm 5.7 or previous).
-
     ```bash
+    # Alternatively, using --save-temps to generate the ISA
     hipcc -g --save-temps vectoradd_hip.cpp -o vectoradd_hip.exe
-    # A custom ISA can be used such as vectoradd_hip-hip-amdgcn-amd-amdhsa-gfx1100.s
+    # Replace "auto" with <generated_gpu_isa.s> for user-supplied ISA. Typically they match the wildcards *amdgcn-amd-amdhsa*.s.
     # Special attention to the correct architecture for the ISA, such as "gfx1100" (navi31).
     rocprofv2 -i input.txt --plugin att vectoradd_hip-hip-amdgcn-amd-amdhsa-gfx1100.s --mode csv ./vectoradd_hip.exe
+    ```
+
+    Instruction latencies will be in att_output_vectoradd_float_v0.csv
+
+    ```bash
+    # Use -d option to specify the generated data directory, and -o to specify dir and filename is the csv:
+    rocprofv2 -d mydir -o test/mycsv -i input.txt --plugin att auto --mode csv ./vectoradd_hip.exe
+    # Generates raw files inside mydir/ and the parsed data on test/mycsv_vectoradd_float_v0.csv
     ```
 
   ***
