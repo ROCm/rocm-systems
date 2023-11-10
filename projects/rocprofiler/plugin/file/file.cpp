@@ -175,6 +175,9 @@ class file_plugin_t {
   file_plugin_t(void* data) {
     if (data) counter_names_ = GetCounterNames();
 
+    const char* str = getenv("ROCPROFILER_INDIVIDUAL_XCC_MODE");
+    if (str != NULL) is_individual_xcc_mode = (atol(str) > 0);
+
     valid_ = true;
   }
 
@@ -342,6 +345,7 @@ class file_plugin_t {
 
     if (!counter_header_written_) {
       if (profiler_record->counters) {
+        if(is_individual_xcc_mode) ss << ',' << "XCC_Index";
         for (uint64_t i = 0; i < profiler_record->counters_count.value; i++) {
           auto counter_handler = profiler_record->counters[i].counter_handler;
           if (!counter_handler.handle) continue;
@@ -393,6 +397,7 @@ class file_plugin_t {
 
     // For Counters
     if (profiler_record->counters) {
+      if(is_individual_xcc_mode) ss << "," << profiler_record->xcc_index;
       for (uint64_t i = 0; i < profiler_record->counters_count.value; i++) {
         if (profiler_record->counters[i].counter_handler.handle > 0) {
           ss << "," << std::to_string(profiler_record->counters[i].value.value);
@@ -456,6 +461,7 @@ class file_plugin_t {
  private:
   bool valid_{false};
   bool counter_header_written_ = false;
+  bool is_individual_xcc_mode=false;
   std::vector<std::string> counter_names_;
 
   std::atomic<bool> roctx_header_written_{false}, hsa_api_header_written_{false},

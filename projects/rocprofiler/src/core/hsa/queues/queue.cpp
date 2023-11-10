@@ -434,6 +434,7 @@ bool AsyncSignalHandler(hsa_signal_value_t signal_value, void* data) {
         record.queue_idx = rocprofiler_queue_index_t{pending->queue_index};
         record.timestamps = rocprofiler_record_header_timestamp_t{time.start, time.end};
         record.queue_id = rocprofiler_queue_id_t{queue_info_session->queue_id};
+        record.xcc_index = xcc_id;
         // Kernel Descriptor is the right record id generated in the WriteInterceptor function and
         // will be used to handle the kernel name of that dispatch
         record.header = rocprofiler_record_header_t{

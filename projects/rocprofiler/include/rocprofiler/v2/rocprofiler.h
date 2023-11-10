@@ -1103,6 +1103,10 @@ typedef struct {
    */
   rocprofiler_record_counters_instances_count_t counters_count; /* Counters Count */
   /**
+   * The index of the xcc from which these counters were collected
+   */
+  uint32_t xcc_index;
+  /**
    * kernel properties, including the grid size, work group size,
    * registers count, wave size and completion signal
    */
@@ -2394,7 +2398,7 @@ rocprofiler_codeobj_capture_free(rocprofiler_record_id_t id);
  * \param[in] id record handle.
  * \retval ::ROCPROFILER_STATUS_SUCCESS The function has been executed successfully.
  * \retval ::ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENTS invalid ID.
- */
+ */ 
 ROCPROFILER_API rocprofiler_status_t
 rocprofiler_codeobj_capture_start(rocprofiler_record_id_t id);
 
