@@ -69,7 +69,7 @@ PERFETTO_DEFINE_CATEGORIES(
 PERFETTO_TRACK_EVENT_STATIC_STORAGE();
 
 
-enum TrackType {
+enum class TrackType {
   DEVICE=2,
   HSAQUEUE,
   HIPSTREAM,
@@ -78,20 +78,23 @@ enum TrackType {
   HIPAPI,
   HSAAPI,
   ROCTX,
-  DEVICE_ID
+  TRACER_DEV_ID,
+  PROFILER_DEV_ID,
 };
 
 struct TrackID
 {
-  TrackID(uint64_t machine, uint64_t device, uint64_t stream)
-    : machine(machine), dev(device), stream(stream) {};
+  TrackID(TrackType type, uint64_t machine, uint64_t device, uint64_t stream)
+    : type(type), machine(machine), dev(device), stream(stream) {};
+  TrackType type;
   uint64_t machine;
   uint64_t dev;
   uint64_t stream;
   bool operator==(const TrackID& other) const {
     return machine == other.machine
         && dev == other.dev
-        && stream == other.stream;
+        && stream == other.stream
+        && type == other.type;
   }
 };
 
@@ -99,7 +102,8 @@ template<>
 struct std::hash<TrackID>
 {
   uint64_t operator()(const TrackID& s) const {
-    return (s.machine + 1) ^ (s.dev << 32) ^ (s.dev >> 32) ^ (s.stream << 48) ^ (s.stream >> 16);
+    return static_cast<uint64_t>(s.type) ^ (s.machine + 1) ^ (s.dev << 32)
+            ^ (s.dev >> 32) ^ (s.stream << 48) ^ (s.stream >> 16);
   }
 };
 
@@ -121,7 +125,7 @@ std::string get_kernel_name(rocprofiler_record_profiler_t& profiler_record) {
     CHECK_ROCPROFILER(rocprofiler_query_kernel_info(ROCPROFILER_KERNEL_NAME,
                                                     profiler_record.kernel_id, &kernel_name_c));
     if (kernel_name_c && strlen(kernel_name_c) > 1)
-      kernel_name = rocprofiler::truncate_name(rocprofiler::cxx_demangle(strdup(kernel_name_c)));
+      kernel_name = rocprofiler::truncate_name(rocprofiler::cxx_demangle(kernel_name_c));
   }
 #pragma GCC diagnostic pop
   return kernel_name;
@@ -144,7 +148,8 @@ class perfetto_plugin_t {
     }
 
     machine_id_ = gethostid();
-    gethostname(hostname_, sizeof(hostname_));
+    hostname_.resize(1024);
+    gethostname(hostname_.data(), hostname_.size());
 
     perfetto::TracingInitArgs args;
     args.backends |= perfetto::kInProcessBackend;
@@ -189,7 +194,7 @@ class perfetto_plugin_t {
     // Give a custom name for the traced process.
     perfetto::ProcessTrack process_track = perfetto::ProcessTrack::Current();
     perfetto::protos::gen::TrackDescriptor desc = process_track.Serialize();
-    desc.mutable_process()->set_process_name("Node: " + std::string(hostname_));
+    desc.mutable_process()->set_process_name("Node: " + hostname_);
     perfetto::TrackEvent::SetTrackDescriptor(process_track, desc);
 
     is_valid_ = true;
@@ -227,36 +232,37 @@ class perfetto_plugin_t {
     }
   }
 
-  std::mutex writing_lock;
-
   int FlushProfilerRecord(rocprofiler_record_profiler_t profiler_record,
                           rocprofiler_session_id_t session_id) {
-    std::lock_guard<std::mutex> lock(writing_lock);
     // ToDO: rename this variable?
     if (!tracing_session_) rocprofiler::warning("Tracing session is deleted!\n");
 
-    uint64_t device_id = profiler_record.gpu_id.handle;
+    const uint64_t device_id = profiler_record.gpu_id.handle;
+    const uint64_t queue_id = profiler_record.queue_id.handle;
+    const uint64_t correlation_id = profiler_record.correlation_id.value;
+
     std::unordered_map<uint64_t, perfetto::Track>::iterator device_track_it;
     {
-      uint64_t device_track_id = getTrackID(machine_id_, TrackType::DEVICE, device_id);
+      uint64_t device_track_id = getTrackID(TrackType::DEVICE, machine_id_, 0, device_id);
       device_track_it = device_tracks.find(device_track_id);
       if (device_track_it == device_tracks.end()) {
         /* Create a new perfetto::Track (Sub-Track) */
-        device_track_it =
-            device_tracks.emplace(device_track_id, perfetto::Track::Global(device_track_id)).first;
+        device_track_it = device_tracks.emplace(
+            device_track_id,
+            perfetto::ProcessTrack::Current()
+          ).first;
         auto gpu_desc = device_track_it->second.Serialize();
         gpu_desc.mutable_process()->set_pid(device_id);
         gpu_desc.mutable_process()->set_chrome_process_type(
             perfetto::protos::gen::ProcessDescriptor::PROCESS_GPU);
-        gpu_desc.mutable_process()->set_process_name("Node: " + std::string(hostname_)
-                                                    + std::to_string(GetPid()) + " Device: ");
+        gpu_desc.mutable_process()->set_process_name("Node: " + hostname_ + " Device: ");
         perfetto::TrackEvent::SetTrackDescriptor(device_track_it->second, gpu_desc);
         track_ids_used_.emplace_back(device_track_id);
       }
     }
     auto& gpu_track = device_track_it->second;
-    uint64_t queue_track_id
-      = getTrackID(machine_id_, device_id+TrackType::DEVICE_ID, profiler_record.queue_id.handle);
+    uint64_t queue_track_id = getTrackID(TrackType::PROFILER_DEV_ID, machine_id_, device_id, queue_id);
+
     auto queue_track_it = queue_tracks_.find(queue_track_id);
     if (queue_track_it == queue_tracks_.end()) {
       /* Create a new perfetto::Track */
@@ -264,8 +270,7 @@ class perfetto_plugin_t {
           queue_tracks_.emplace(queue_track_id, perfetto::Track(queue_track_id, gpu_track)).first;
 
       auto queue_desc = queue_track_it->second.Serialize();
-      std::string queue_str = rocprofiler::string_printf("Queue %ld", profiler_record.queue_id.handle);
-      queue_desc.set_name(queue_str);
+      queue_desc.set_name("GPU Queue " + std::to_string(queue_id));
       perfetto::TrackEvent::SetTrackDescriptor(queue_track_it->second, queue_desc);
       track_ids_used_.emplace_back(queue_track_id);
     }
@@ -275,7 +280,7 @@ class perfetto_plugin_t {
     static const uint32_t lds_block_size = 128 * 4;
 
     std::string full_kernel_name = get_kernel_name(profiler_record);
-    // std::string truncated_kernel_name = rocprofiler::truncate_name(full_kernel_name);
+
     TRACE_EVENT_BEGIN("KERNELS", perfetto::DynamicString(full_kernel_name.c_str()), queue_track,
                       profiler_record.timestamps.begin.value, "Full Kernel Name",
                       full_kernel_name.c_str(), "Agent ID", device_id, "Queue ID",
@@ -290,7 +295,7 @@ class perfetto_plugin_t {
                       profiler_record.kernel_properties.sgpr_count, "Wave Size",
                       profiler_record.kernel_properties.wave_size, "Signal",
                       profiler_record.kernel_properties.signal_handle,
-                      perfetto::Flow::ProcessScoped(profiler_record.correlation_id.value));
+                      perfetto::Flow::ProcessScoped(correlation_id));
 
     TRACE_EVENT_END("KERNELS", queue_track, profiler_record.timestamps.end.value);
 
@@ -318,27 +323,29 @@ class perfetto_plugin_t {
     };
 
     // For Counters
-    if (profiler_record.counters) {
-      for (uint64_t i = 0; i < profiler_record.counters_count.value; i++) {
-        if (profiler_record.counters[i].counter_handler.handle > 0) {
-          size_t name_length = 0;
-          CHECK_ROCPROFILER(rocprofiler_query_counter_info_size(
-              session_id, ROCPROFILER_COUNTER_NAME, profiler_record.counters[i].counter_handler,
-              &name_length));
-          if (name_length > 1) {
-            const char* name_c = nullptr;
-            CHECK_ROCPROFILER(rocprofiler_query_counter_info(
-                session_id, ROCPROFILER_COUNTER_NAME, profiler_record.counters[i].counter_handler,
-                &name_c));
+    if (!profiler_record.counters) return 0;
 
-            perfetto::CounterTrack counters_track = get_counter_track_fn(std::string(name_c));
-            TRACE_COUNTER("COUNTERS", counters_track, profiler_record.timestamps.begin.value,
-                          profiler_record.counters[i].value.value);
-            // Added an extra zero event for maintaining start-end of the counter
-            TRACE_COUNTER("COUNTERS", counters_track, profiler_record.timestamps.end.value, 0.001);
-          }
-        }
-      }
+    for (uint64_t i = 0; i < profiler_record.counters_count.value; i++) {
+      if (profiler_record.counters[i].counter_handler.handle == 0) continue;
+
+      size_t name_length = 0;
+      CHECK_ROCPROFILER(rocprofiler_query_counter_info_size(
+          session_id, ROCPROFILER_COUNTER_NAME, profiler_record.counters[i].counter_handler,
+          &name_length));
+
+      if (name_length <= 1)
+        continue;
+
+      const char* name_c = nullptr;
+      CHECK_ROCPROFILER(rocprofiler_query_counter_info(
+          session_id, ROCPROFILER_COUNTER_NAME, profiler_record.counters[i].counter_handler,
+          &name_c));
+
+      perfetto::CounterTrack counters_track = get_counter_track_fn(std::string(name_c));
+      TRACE_COUNTER("COUNTERS", counters_track, profiler_record.timestamps.begin.value,
+                    profiler_record.counters[i].value.value);
+      // Added an extra zero event for maintaining start-end of the counter
+      TRACE_COUNTER("COUNTERS", counters_track, profiler_record.timestamps.end.value, 0.001);
     }
 
     return 0;
@@ -346,7 +353,6 @@ class perfetto_plugin_t {
 
   int FlushTracerRecord(rocprofiler_record_tracer_t tracer_record,
                         rocprofiler_session_id_t session_id) {
-    std::lock_guard<std::mutex> lock(writing_lock);
     if (!tracing_session_) rocprofiler::warning("Tracing session is deleted!\n");
     uint64_t device_id = tracer_record.agent_id.handle;
     std::string kernel_name;
@@ -366,7 +372,7 @@ class perfetto_plugin_t {
     std::unordered_map<uint64_t, perfetto::Track>::iterator device_track_it;
     std::unordered_map<uint64_t, perfetto::Track>::iterator hip_stream_tracks_it;
     {
-      uint64_t thread_track_id = getTrackID(machine_id_, TrackType::THREAD, thread_id);
+      uint64_t thread_track_id = getTrackID(TrackType::THREAD, machine_id_, 0, thread_id);
       thread_track_it = thread_tracks_.find(thread_track_id);
       if (thread_track_it == thread_tracks_.end()) {
         thread_track_it = thread_tracks_.emplace(thread_track_id,
@@ -387,7 +393,7 @@ class perfetto_plugin_t {
       bool bIsHSAQueue = tracer_record.domain == ACTIVITY_DOMAIN_HSA_OPS;
       uint64_t qID = tracer_record.queue_id.handle;
       {
-        uint64_t device_track_id = getTrackID(machine_id_, TrackType::DEVICE, device_id);
+        uint64_t device_track_id = getTrackID(TrackType::DEVICE, machine_id_, 0, device_id);
 
         device_track_it = device_tracks.find(device_track_id);
         if (device_track_it == device_tracks.end())
@@ -401,14 +407,13 @@ class perfetto_plugin_t {
           gpu_desc.mutable_process()->set_pid(device_id);
           gpu_desc.mutable_process()->set_chrome_process_type(
               perfetto::protos::gen::ProcessDescriptor::PROCESS_GPU);
-          gpu_desc.mutable_process()->set_process_name(
-            "Node: " + std::string(hostname_) + std::to_string(GetPid()) + " Device: ");
+          gpu_desc.mutable_process()->set_process_name("Node: " + hostname_ + " Device: ");
           perfetto::TrackEvent::SetTrackDescriptor(device_track_it->second, gpu_desc);
           track_ids_used_.emplace_back(device_track_id);
         }
       }
       {
-        uint64_t hip_track_id = getTrackID(machine_id_, TrackType::DEVICE_ID + device_id, qID);
+        uint64_t hip_track_id = getTrackID(TrackType::TRACER_DEV_ID, machine_id_, device_id, qID);
         hip_stream_tracks_it = hip_stream_tracks.find(hip_track_id);
         if (hip_stream_tracks_it == hip_stream_tracks.end())
         {
@@ -425,7 +430,7 @@ class perfetto_plugin_t {
         }
       }
       {
-        uint64_t mcpy_track_id = getTrackID(machine_id_, TrackType::MCOPY, thread_id);
+        uint64_t mcpy_track_id = getTrackID(TrackType::MCOPY, machine_id_, 0, thread_id);
         mem_copies_track_it = mem_copies_tracks_.find(mcpy_track_id);
         if (mem_copies_track_it == mem_copies_tracks_.end()) {
           mem_copies_track_it =
@@ -447,7 +452,7 @@ class perfetto_plugin_t {
       case ACTIVITY_DOMAIN_ROCTX: {
         std::unordered_map<uint64_t, perfetto::Track>::iterator roctx_track_it;
         {
-          uint64_t rtx_track_id = getTrackID(machine_id_, TrackType::ROCTX, thread_id);
+          uint64_t rtx_track_id = getTrackID(TrackType::ROCTX, machine_id_, 0, thread_id);
           roctx_track_it = roctx_tracks_.find(rtx_track_id);
           if (roctx_track_it == roctx_tracks_.end()) {
             roctx_track_it =
@@ -478,7 +483,7 @@ class perfetto_plugin_t {
       case ACTIVITY_DOMAIN_HSA_API: {
         std::unordered_map<uint64_t, perfetto::Track>::iterator hsa_track_it;
         {
-          uint64_t hsa_track_id = getTrackID(machine_id_, TrackType::HSAAPI, thread_id);
+          uint64_t hsa_track_id = getTrackID(TrackType::HSAAPI, machine_id_, 0, thread_id);
           hsa_track_it = hsa_tracks_.find(hsa_track_id);
           if (hsa_track_it == hsa_tracks_.end()) {
             hsa_track_it = hsa_tracks_.emplace(hsa_track_id, perfetto::Track(hsa_track_id, thread_track)).first;
@@ -506,7 +511,7 @@ class perfetto_plugin_t {
       case ACTIVITY_DOMAIN_HIP_API: {
         std::unordered_map<uint64_t, perfetto::Track>::iterator hip_track_it;
         {
-          uint64_t hipapi_track_id = getTrackID(machine_id_, TrackType::HIPAPI, thread_id);
+          uint64_t hipapi_track_id = getTrackID(TrackType::HIPAPI, machine_id_, 0, thread_id);
           hip_track_it = hip_tracks_.find(hipapi_track_id);
           if (hip_track_it == hip_tracks_.end()) {
             hip_track_it =
@@ -635,7 +640,7 @@ class perfetto_plugin_t {
   std::atomic<uint64_t> track_counter_{GetPid()};
   std::vector<uint64_t> track_ids_used_;
 
-  char hostname_[1024];
+  std::string hostname_;
   uint64_t machine_id_;
 
   std::ofstream stream_;
@@ -644,8 +649,8 @@ class perfetto_plugin_t {
   std::unordered_map<uint64_t, perfetto::Track> device_tracks;
   std::unordered_map<uint64_t, perfetto::Track> hip_stream_tracks;
 
-  uint64_t getTrackID(uint64_t machine, uint64_t device, uint64_t queue) {
-    TrackID id(machine, device, queue);
+  uint64_t getTrackID(TrackType type, uint64_t machine, uint64_t device, uint64_t queue) {
+    TrackID id(type, machine, device, queue);
 
     auto it = track_ids.find(id);
     if (it == track_ids.end())
@@ -662,12 +667,15 @@ perfetto_plugin_t* perfetto_plugin = nullptr;
 
 }  // namespace
 
+static std::mutex writing_lock;
+
 int rocprofiler_plugin_initialize(uint32_t rocprofiler_major_version,
                                   uint32_t rocprofiler_minor_version, void* data) {
   if (rocprofiler_major_version != ROCPROFILER_VERSION_MAJOR ||
       rocprofiler_minor_version > ROCPROFILER_VERSION_MINOR)
     return -1;
 
+  std::lock_guard<std::mutex> lock(writing_lock);
   if (perfetto_plugin != nullptr) return -1;
 
   perfetto_plugin = new perfetto_plugin_t();
@@ -679,6 +687,8 @@ int rocprofiler_plugin_initialize(uint32_t rocprofiler_major_version,
 }
 
 void rocprofiler_plugin_finalize() {
+  std::lock_guard<std::mutex> lock(writing_lock);
+
   if (!perfetto_plugin) return;
   delete perfetto_plugin;
   perfetto_plugin = nullptr;
@@ -687,13 +697,17 @@ void rocprofiler_plugin_finalize() {
 ROCPROFILER_EXPORT int rocprofiler_plugin_write_buffer_records(
     const rocprofiler_record_header_t* begin, const rocprofiler_record_header_t* end,
     rocprofiler_session_id_t session_id, rocprofiler_buffer_id_t buffer_id) {
+  std::lock_guard<std::mutex> lock(writing_lock);
+
   if (!perfetto_plugin || !perfetto_plugin->IsValid()) return -1;
   return perfetto_plugin->WriteBufferRecords(begin, end, session_id, buffer_id);
 }
 
 ROCPROFILER_EXPORT int rocprofiler_plugin_write_record(rocprofiler_record_tracer_t record) {
-  if (!perfetto_plugin || !perfetto_plugin->IsValid()) return -1;
   if (record.header.id.handle == 0) return 0;
-  perfetto_plugin->FlushTracerRecord(record, rocprofiler_session_id_t{0});
-  return 0;
+
+  std::lock_guard<std::mutex> lock(writing_lock);
+
+  if (!perfetto_plugin || !perfetto_plugin->IsValid()) return -1;
+  return perfetto_plugin->FlushTracerRecord(record, rocprofiler_session_id_t{0});
 }
