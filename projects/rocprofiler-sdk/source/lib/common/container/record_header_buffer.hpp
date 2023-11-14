@@ -261,9 +261,11 @@ record_header_buffer::emplace(uint32_t _category, uint32_t _kind, Tp& _v)
         // for where the header record should be placed.
         // NOTE: m_headers was resized to be large enough to accomodate
         // sizeof(Tp) == 1 for every entry in buffer
-        auto idx = m_index.fetch_add(1, std::memory_order_release);
-        m_headers.at(idx) =
-            rocprofiler_record_header_t{.category = _category, .kind = _kind, .payload = _addr};
+        auto idx                   = m_index.fetch_add(1, std::memory_order_release);
+        m_headers.at(idx)          = rocprofiler_record_header_t{};
+        m_headers.at(idx).category = _category;
+        m_headers.at(idx).kind     = _kind;
+        m_headers.at(idx).payload  = _addr;
     }
     read_unlock();
     return (_addr != nullptr);
