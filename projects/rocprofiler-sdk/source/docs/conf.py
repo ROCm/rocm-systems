@@ -34,7 +34,7 @@ read_the_docs_build = os.environ.get("READTHEDOCS", None) == "True"
 # -- Project information -----------------------------------------------------
 project = "rocprofiler"
 copyright = "2023, Advanced Micro Devices, Inc."
-author = "ROCm Developer Tools"
+author = "Advanced Micro Devices, Inc."
 
 project_root = os.path.normpath(os.path.join(os.getcwd(), "..", ".."))
 version = open(os.path.join(project_root, "VERSION")).read().strip()

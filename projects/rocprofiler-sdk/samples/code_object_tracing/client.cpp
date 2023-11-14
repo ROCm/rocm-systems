@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023 ROCm Developer Tools
+// Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -21,7 +21,6 @@
 // SOFTWARE.
 //
 // undefine NDEBUG so asserts are implemented
-#include <regex>
 #ifdef NDEBUG
 #    undef NDEBUG
 #endif
@@ -52,6 +51,7 @@
 #include <iostream>
 #include <map>
 #include <mutex>
+#include <regex>
 #include <string>
 #include <string_view>
 #include <thread>
