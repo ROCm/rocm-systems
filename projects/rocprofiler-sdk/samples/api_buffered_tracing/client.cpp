@@ -19,7 +19,7 @@
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
-
+//
 // undefine NDEBUG so asserts are implemented
 #ifdef NDEBUG
 #    undef NDEBUG
@@ -34,11 +34,14 @@
 #include "client.hpp"
 
 #include <rocprofiler/buffer.h>
+#include <rocprofiler/callback_tracing.h>
+#include <rocprofiler/external_correlation.h>
 #include <rocprofiler/fwd.h>
 #include <rocprofiler/internal_threading.h>
 #include <rocprofiler/registration.h>
 #include <rocprofiler/rocprofiler.h>
 
+#include <atomic>
 #include <cassert>
 #include <chrono>
 #include <cstddef>
@@ -61,8 +64,14 @@
         rocprofiler_status_t CHECKSTATUS = result;                                                 \
         if(CHECKSTATUS != ROCPROFILER_STATUS_SUCCESS)                                              \
         {                                                                                          \
-            std::cerr << #result << " failed with error code " << CHECKSTATUS << std::endl;        \
-            throw std::runtime_error(#result " failure");                                          \
+            std::string status_msg = rocprofiler_get_status_string(CHECKSTATUS);                   \
+            std::cerr << "[" #result "][" << __FILE__ << ":" << __LINE__ << "] " << msg            \
+                      << " failed with error code " << CHECKSTATUS << ": " << status_msg           \
+                      << std::endl;                                                                \
+            std::stringstream errmsg{};                                                            \
+            errmsg << "[" #result "][" << __FILE__ << ":" << __LINE__ << "] " << msg " failure ("  \
+                   << status_msg << ")";                                                           \
+            throw std::runtime_error(errmsg.str());                                                \
         }                                                                                          \
     }
 
@@ -82,6 +91,8 @@ using call_stack_t        = std::vector<source_location>;
 using buffer_kind_names_t = std::map<rocprofiler_service_buffer_tracing_kind_t, const char*>;
 using buffer_kind_operation_names_t =
     std::map<rocprofiler_service_buffer_tracing_kind_t, std::map<uint32_t, const char*>>;
+using kernel_symbol_data_t = rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t;
+using kernel_symbol_map_t  = std::unordered_map<rocprofiler_kernel_id_t, kernel_symbol_data_t>;
 
 struct buffer_name_info
 {
@@ -93,6 +104,8 @@ rocprofiler_client_id_t*      client_id        = nullptr;
 rocprofiler_client_finalize_t client_fini_func = nullptr;
 rocprofiler_context_id_t      client_ctx       = {};
 rocprofiler_buffer_id_t       client_buffer    = {};
+buffer_name_info              client_name_info = {};
+kernel_symbol_map_t           client_kernels   = {};
 
 void
 print_call_stack(const call_stack_t& _call_stack)
@@ -127,9 +140,9 @@ print_call_stack(const call_stack_t& _call_stack)
     size_t n = 0;
     for(const auto& itr : _call_stack)
     {
-        *ofs << std::setw(2) << ++n << "/" << std::setw(2) << _call_stack.size() << " ";
-        *ofs << "[" << fs::path{itr.file}.filename() << ":" << itr.line << "] " << std::setw(20)
-             << std::left << itr.function;
+        *ofs << std::left << std::setw(2) << ++n << "/" << std::setw(2) << _call_stack.size()
+             << " [" << fs::path{itr.file}.filename() << ":" << itr.line << "] " << std::setw(20)
+             << itr.function;
         if(!itr.context.empty()) *ofs << " :: " << itr.context;
         *ofs << "\n";
     }
@@ -189,6 +202,42 @@ get_buffer_tracing_names()
 }
 
 void
+tool_code_object_callback(rocprofiler_callback_tracing_record_t record,
+                          rocprofiler_user_data_t*              user_data,
+                          void*                                 callback_data)
+{
+    if(record.kind == ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT &&
+       record.operation == ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT_LOAD)
+    {
+        if(record.phase == ROCPROFILER_CALLBACK_PHASE_UNLOAD)
+        {
+            // flush the buffer to ensure that any lookups for the client kernel names for the code
+            // object are completed
+            auto flush_status = rocprofiler_flush_buffer(client_buffer);
+            if(flush_status != ROCPROFILER_STATUS_ERROR_BUFFER_BUSY)
+                ROCPROFILER_CALL(flush_status, "buffer flush");
+        }
+    }
+    else if(record.kind == ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT &&
+            record.operation ==
+                ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER)
+    {
+        auto* data = static_cast<kernel_symbol_data_t*>(record.payload);
+        if(record.phase == ROCPROFILER_CALLBACK_PHASE_LOAD)
+        {
+            client_kernels.emplace(data->kernel_id, *data);
+        }
+        else if(record.phase == ROCPROFILER_CALLBACK_PHASE_UNLOAD)
+        {
+            client_kernels.erase(data->kernel_id);
+        }
+    }
+
+    (void) user_data;
+    (void) callback_data;
+}
+
+void
 tool_tracing_callback(rocprofiler_context_id_t      context,
                       rocprofiler_buffer_id_t       buffer_id,
                       rocprofiler_record_header_t** headers,
@@ -197,6 +246,7 @@ tool_tracing_callback(rocprofiler_context_id_t      context,
                       uint64_t                      drop_count)
 {
     assert(user_data != nullptr);
+    assert(drop_count == 0 && "drop count should be zero for lossless policy");
 
     if(num_headers == 0)
         throw std::runtime_error{
@@ -227,12 +277,49 @@ tool_tracing_callback(rocprofiler_context_id_t      context,
             auto info = std::stringstream{};
             info << "tid=" << record->thread_id << ", context=" << context.handle
                  << ", buffer_id=" << buffer_id.handle
-                 << ", cid=" << record->correlation_id.internal << ", kind=" << record->kind
-                 << ", operation=" << record->operation << ", drop_count=" << drop_count
-                 << ", start=" << record->start_timestamp << ", stop=" << record->end_timestamp;
+                 << ", cid=" << record->correlation_id.internal
+                 << ", extern_cid=" << record->correlation_id.external.value
+                 << ", kind=" << record->kind << ", operation=" << record->operation
+                 << ", start=" << record->start_timestamp << ", stop=" << record->end_timestamp
+                 << ", name=" << client_name_info.operation_names[record->kind][record->operation];
 
             if(record->start_timestamp > record->end_timestamp)
-                throw std::runtime_error("start > end");
+            {
+                auto msg = std::stringstream{};
+                msg << "hsa api: start > end (" << record->start_timestamp << " > "
+                    << record->end_timestamp
+                    << "). diff = " << (record->start_timestamp - record->end_timestamp);
+                std::cerr << "threw an exception " << msg.str() << "\n" << std::flush;
+                // throw std::runtime_error{msg.str()};
+            }
+
+            static_cast<call_stack_t*>(user_data)->emplace_back(
+                source_location{__FUNCTION__, __FILE__, __LINE__, info.str()});
+        }
+        else if(header->category == ROCPROFILER_BUFFER_CATEGORY_TRACING &&
+                header->kind == ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH)
+        {
+            auto* record =
+                static_cast<rocprofiler_buffer_tracing_kernel_dispatch_record_t*>(header->payload);
+
+            auto info = std::stringstream{};
+
+            info << "agent_id=" << record->agent_id.handle
+                 << ", queue_id=" << record->queue_id.handle << ", kernel_id=" << record->kernel_id
+                 << ", kernel=" << client_kernels.at(record->kernel_id).kernel_name
+                 << ", context=" << context.handle << ", buffer_id=" << buffer_id.handle
+                 << ", cid=" << record->correlation_id.internal
+                 << ", extern_cid=" << record->correlation_id.external.value
+                 << ", kind=" << record->kind << ", start=" << record->start_timestamp
+                 << ", stop=" << record->end_timestamp
+                 << ", private_segment_size=" << record->private_segment_size
+                 << ", group_segment_size=" << record->group_segment_size << ", workgroup_size=("
+                 << record->workgroup_size.x << "," << record->workgroup_size.y << ","
+                 << record->workgroup_size.z << "), grid_size=(" << record->grid_size.x << ","
+                 << record->grid_size.y << "," << record->grid_size.z << ")";
+
+            if(record->start_timestamp > record->end_timestamp)
+                throw std::runtime_error("kernel dispatch: start > end");
 
             static_cast<call_stack_t*>(user_data)->emplace_back(
                 source_location{__FUNCTION__, __FILE__, __LINE__, info.str()});
@@ -275,9 +362,9 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 
     call_stack_v->emplace_back(source_location{__FUNCTION__, __FILE__, __LINE__, ""});
 
-    buffer_name_info name_info = get_buffer_tracing_names();
+    client_name_info = get_buffer_tracing_names();
 
-    for(const auto& itr : name_info.operation_names)
+    for(const auto& itr : client_name_info.operation_names)
     {
         auto name_idx = std::stringstream{};
         name_idx << " [" << std::setw(3) << static_cast<int32_t>(itr.first) << "]";
@@ -285,7 +372,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
             source_location{"rocprofiler_buffer_tracing_kind_names          " + name_idx.str(),
                             __FILE__,
                             __LINE__,
-                            name_info.kind_names.at(itr.first)});
+                            client_name_info.kind_names.at(itr.first)});
 
         for(const auto& ditr : itr.second)
         {
@@ -301,7 +388,16 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 
     client_fini_func = fini_func;
 
-    ROCPROFILER_CALL(rocprofiler_create_context(&client_ctx), "context creation failed");
+    ROCPROFILER_CALL(rocprofiler_create_context(&client_ctx), "context creation");
+
+    ROCPROFILER_CALL(
+        rocprofiler_configure_callback_tracing_service(client_ctx,
+                                                       ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT,
+                                                       nullptr,
+                                                       0,
+                                                       tool_code_object_callback,
+                                                       nullptr),
+        "code object tracing service configure");
 
     ROCPROFILER_CALL(rocprofiler_create_buffer(client_ctx,
                                                4096,
@@ -310,22 +406,32 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                                tool_tracing_callback,
                                                tool_data,
                                                &client_buffer),
-                     "buffer creation failed");
+                     "buffer creation");
 
     ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
                          client_ctx, ROCPROFILER_BUFFER_TRACING_HSA_API, nullptr, 0, client_buffer),
-                     "buffer tracing service failed to configure");
+                     "buffer tracing service configure");
+
+    ROCPROFILER_CALL(
+        rocprofiler_configure_buffer_tracing_service(
+            client_ctx, ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH, nullptr, 0, client_buffer),
+        "buffer tracing service for kernel dispatch configure");
+
+    ROCPROFILER_CALL(
+        rocprofiler_configure_buffer_tracing_service(
+            client_ctx, ROCPROFILER_BUFFER_TRACING_MEMORY_COPY, nullptr, 0, client_buffer),
+        "buffer tracing service for memory copy configure");
 
     auto client_thread = rocprofiler_callback_thread_t{};
     ROCPROFILER_CALL(rocprofiler_create_callback_thread(&client_thread),
-                     "failure creating callback thread");
+                     "creating callback thread");
 
     ROCPROFILER_CALL(rocprofiler_assign_callback_thread(client_buffer, client_thread),
-                     "failed to assign thread for buffer");
+                     "assignment of thread for buffer");
 
     int valid_ctx = 0;
     ROCPROFILER_CALL(rocprofiler_context_is_valid(client_ctx, &valid_ctx),
-                     "failure checking context validity");
+                     "context validity check");
     if(valid_ctx == 0)
     {
         // notify rocprofiler that initialization failed
@@ -334,7 +440,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         return -1;
     }
 
-    ROCPROFILER_CALL(rocprofiler_start_context(client_ctx), "rocprofiler context start failed");
+    ROCPROFILER_CALL(rocprofiler_start_context(client_ctx), "rocprofiler context start");
 
     // no errors
     return 0;
@@ -357,8 +463,7 @@ tool_fini(void* tool_data)
 void
 setup()
 {
-    ROCPROFILER_CALL(rocprofiler_force_configure(&rocprofiler_configure),
-                     "failed to force configuration");
+    ROCPROFILER_CALL(rocprofiler_force_configure(&rocprofiler_configure), "force configuration");
 }
 
 void
@@ -366,20 +471,7 @@ shutdown()
 {
     if(client_id)
     {
-        auto status = ROCPROFILER_STATUS_SUCCESS;
-        while((status = rocprofiler_flush_buffer(client_buffer)) ==
-              ROCPROFILER_STATUS_ERROR_BUFFER_BUSY)
-        {
-            std::this_thread::yield();
-            std::this_thread::sleep_for(std::chrono::milliseconds{10});
-        }
-        ROCPROFILER_CALL(status, "rocprofiler_flush_buffer failed");
-        while((status = rocprofiler_flush_buffer(client_buffer)) ==
-              ROCPROFILER_STATUS_ERROR_BUFFER_BUSY)
-        {
-            std::this_thread::yield();
-            std::this_thread::sleep_for(std::chrono::milliseconds{10});
-        }
+        ROCPROFILER_CALL(rocprofiler_flush_buffer(client_buffer), "buffer flush");
         client_fini_func(*client_id);
     }
 }
@@ -387,13 +479,22 @@ shutdown()
 void
 start()
 {
-    ROCPROFILER_CALL(rocprofiler_start_context(client_ctx), "rocprofiler context start failed");
+    ROCPROFILER_CALL(rocprofiler_start_context(client_ctx), "context start");
+}
+
+void
+identify(uint64_t val)
+{
+    auto _tid = rocprofiler_thread_id_t{};
+    rocprofiler_get_thread_id(&_tid);
+    rocprofiler_push_external_correlation_id(
+        client_ctx, _tid, rocprofiler_user_data_t{.value = val});
 }
 
 void
 stop()
 {
-    ROCPROFILER_CALL(rocprofiler_stop_context(client_ctx), "rocprofiler context stop failed");
+    ROCPROFILER_CALL(rocprofiler_stop_context(client_ctx), "context stop");
 }
 }  // namespace client
 
@@ -435,7 +536,7 @@ rocprofiler_configure(uint32_t                 version,
                          ROCPROFILER_LIBRARY | ROCPROFILER_HSA_LIBRARY | ROCPROFILER_HIP_LIBRARY |
                              ROCPROFILER_MARKER_LIBRARY,
                          static_cast<void*>(client_tool_data)),
-                     "failed to register for thread creation notifications");
+                     "registration for thread creation notifications");
 
     // create configure data
     static auto cfg =

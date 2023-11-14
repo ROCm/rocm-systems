@@ -19,23 +19,27 @@
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
-
+//
 // undefine NDEBUG so asserts are implemented
+#include <regex>
 #ifdef NDEBUG
 #    undef NDEBUG
 #endif
 
 /**
- * @file samples/api_callback_tracing/client.cpp
+ * @file samples/code_object_tracing/client.cpp
  *
  * @brief Example rocprofiler client (tool)
  */
 
-#include "client.hpp"
-
+#include <rocprofiler/buffer.h>
+#include <rocprofiler/callback_tracing.h>
+#include <rocprofiler/fwd.h>
 #include <rocprofiler/registration.h>
 #include <rocprofiler/rocprofiler.h>
 
+#include <cxxabi.h>
+#include <atomic>
 #include <cassert>
 #include <chrono>
 #include <cstddef>
@@ -48,9 +52,9 @@
 #include <iostream>
 #include <map>
 #include <mutex>
-#include <ratio>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 #define ROCPROFILER_CALL(result, msg)                                                              \
@@ -81,27 +85,96 @@ struct source_location
     std::string context  = {};
 };
 
-using call_stack_t          = std::vector<source_location>;
-using callback_kind_names_t = std::map<rocprofiler_service_callback_tracing_kind_t, const char*>;
-using callback_kind_operation_names_t =
-    std::map<rocprofiler_service_callback_tracing_kind_t, std::map<uint32_t, const char*>>;
-
-struct callback_name_info
-{
-    callback_kind_names_t           kind_names      = {};
-    callback_kind_operation_names_t operation_names = {};
-};
+using call_stack_t         = std::vector<source_location>;
+using code_obj_load_data_t = rocprofiler_callback_tracing_code_object_load_data_t;
+using kernel_symbol_data_t = rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t;
+using kernel_symbol_map_t  = std::unordered_map<rocprofiler_kernel_id_t, kernel_symbol_data_t>;
 
 rocprofiler_client_id_t*      client_id        = nullptr;
 rocprofiler_client_finalize_t client_fini_func = nullptr;
 rocprofiler_context_id_t      client_ctx       = {};
+kernel_symbol_map_t           client_kernels   = {};
+
+std::string
+cxa_demangle(std::string_view _mangled_name, int* _status)
+{
+    constexpr size_t buffer_len = 4096;
+    // return the mangled since there is no buffer
+    if(_mangled_name.empty())
+    {
+        *_status = -2;
+        return std::string{};
+    }
+
+    auto _demangled_name = std::string{_mangled_name};
+
+    // PARAMETERS to __cxa_demangle
+    //  mangled_name:
+    //      A NULL-terminated character string containing the name to be demangled.
+    //  buffer:
+    //      A region of memory, allocated with malloc, of *length bytes, into which the
+    //      demangled name is stored. If output_buffer is not long enough, it is expanded
+    //      using realloc. output_buffer may instead be NULL; in that case, the demangled
+    //      name is placed in a region of memory allocated with malloc.
+    //  _buflen:
+    //      If length is non-NULL, the length of the buffer containing the demangled name
+    //      is placed in *length.
+    //  status:
+    //      *status is set to one of the following values
+    size_t _demang_len = 0;
+    char*  _demang = abi::__cxa_demangle(_demangled_name.c_str(), nullptr, &_demang_len, _status);
+    switch(*_status)
+    {
+        //  0 : The demangling operation succeeded.
+        // -1 : A memory allocation failure occurred.
+        // -2 : mangled_name is not a valid name under the C++ ABI mangling rules.
+        // -3 : One of the arguments is invalid.
+        case 0:
+        {
+            if(_demang) _demangled_name = std::string{_demang};
+            break;
+        }
+        case -1:
+        {
+            char _msg[buffer_len];
+            ::memset(_msg, '\0', buffer_len * sizeof(char));
+            ::snprintf(_msg,
+                       buffer_len,
+                       "memory allocation failure occurred demangling %s",
+                       _demangled_name.c_str());
+            ::perror(_msg);
+            break;
+        }
+        case -2: break;
+        case -3:
+        {
+            char _msg[buffer_len];
+            ::memset(_msg, '\0', buffer_len * sizeof(char));
+            ::snprintf(_msg,
+                       buffer_len,
+                       "Invalid argument in: (\"%s\", nullptr, nullptr, %p)",
+                       _demangled_name.c_str(),
+                       (void*) _status);
+            ::perror(_msg);
+            break;
+        }
+        default: break;
+    };
+
+    // if it "demangled" but the length is zero, set the status to -2
+    if(_demang_len == 0 && *_status == 0) *_status = -2;
+
+    // free allocated buffer
+    ::free(_demang);
+    return _demangled_name;
+}
 
 void
 print_call_stack(const call_stack_t& _call_stack)
 {
     namespace fs = ::std::filesystem;
 
-    auto ofname = std::string{"api_callback_trace.log"};
+    auto ofname = std::string{"code_object_trace.log"};
     if(auto* eofname = getenv("ROCPROFILER_SAMPLE_OUTPUT_FILE")) ofname = eofname;
 
     std::ostream* ofs     = nullptr;
@@ -127,7 +200,6 @@ print_call_stack(const call_stack_t& _call_stack)
     std::cout << "Outputting collected data to " << ofname << "...\n" << std::flush;
 
     size_t n = 0;
-    *ofs << std::left;
     for(const auto& itr : _call_stack)
     {
         *ofs << std::left << std::setw(2) << ++n << "/" << std::setw(2) << _call_stack.size()
@@ -142,53 +214,14 @@ print_call_stack(const call_stack_t& _call_stack)
     if(cleanup) cleanup(ofs);
 }
 
-callback_name_info
-get_callback_id_names()
+template <typename Tp>
+std::string
+as_hex(Tp _v, size_t _width = 16)
 {
-    auto cb_name_info = callback_name_info{};
-    //
-    // callback for each kind operation
-    //
-    static auto tracing_kind_operation_cb =
-        [](rocprofiler_service_callback_tracing_kind_t kindv, uint32_t operation, void* data_v) {
-            auto* name_info_v = static_cast<callback_name_info*>(data_v);
-
-            if(kindv == ROCPROFILER_CALLBACK_TRACING_HSA_API)
-            {
-                const char* name = nullptr;
-                ROCPROFILER_CALL(rocprofiler_query_callback_tracing_kind_operation_name(
-                                     kindv, operation, &name, nullptr),
-                                 "query callback tracing kind operation name");
-                if(name) name_info_v->operation_names[kindv][operation] = name;
-            }
-            return 0;
-        };
-
-    //
-    //  callback for each callback kind (i.e. domain)
-    //
-    static auto tracing_kind_cb = [](rocprofiler_service_callback_tracing_kind_t kind, void* data) {
-        //  store the callback kind name
-        auto*       name_info_v = static_cast<callback_name_info*>(data);
-        const char* name        = nullptr;
-        ROCPROFILER_CALL(rocprofiler_query_callback_tracing_kind_name(kind, &name, nullptr),
-                         "query callback tracing kind operation name");
-        if(name) name_info_v->kind_names[kind] = name;
-
-        if(kind == ROCPROFILER_CALLBACK_TRACING_HSA_API)
-        {
-            ROCPROFILER_CALL(rocprofiler_iterate_callback_tracing_kind_operations(
-                                 kind, tracing_kind_operation_cb, static_cast<void*>(data)),
-                             "iterating callback tracing kind operations");
-        }
-        return 0;
-    };
-
-    ROCPROFILER_CALL(rocprofiler_iterate_callback_tracing_kinds(tracing_kind_cb,
-                                                                static_cast<void*>(&cb_name_info)),
-                     "iterating callback tracing kinds");
-
-    return cb_name_info;
+    auto _ss = std::stringstream{};
+    _ss.fill('0');
+    _ss << "0x" << std::hex << std::setw(_width) << _v;
+    return _ss.str();
 }
 
 void
@@ -196,48 +229,68 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                       rocprofiler_user_data_t*              user_data,
                       void*                                 callback_data)
 {
-    assert(callback_data != nullptr);
+    if(record.kind == ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT &&
+       record.operation == ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT_LOAD)
+    {
+        auto* data         = static_cast<code_obj_load_data_t*>(record.payload);
+        auto* call_stack_v = static_cast<call_stack_t*>(callback_data);
+        auto  info         = std::stringstream{};
 
-    auto     now = std::chrono::steady_clock::now().time_since_epoch().count();
-    uint64_t dt  = 0;
-    if(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
-        user_data->value = now;
-    else
-        dt = (now - user_data->value);
+        if(record.phase == ROCPROFILER_CALLBACK_PHASE_LOAD)
+        {
+            info << "code object load :: ";
+        }
+        else if(record.phase == ROCPROFILER_CALLBACK_PHASE_UNLOAD)
+        {
+            info << "code object unload :: ";
+        }
 
-    auto info = std::stringstream{};
-    info << std::left << "tid=" << record.thread_id << ", cid=" << std::setw(3)
-         << record.correlation_id.internal << ", kind=" << record.kind
-         << ", operation=" << std::setw(3) << record.operation << ", phase=" << record.phase
-         << ", dt_nsec=" << std::setw(6) << dt;
+        info << "code_object_id=" << data->code_object_id
+             << ", rocp_agent=" << data->rocp_agent.handle << ", uri=" << data->uri
+             << ", load_base=" << as_hex(data->load_base) << ", load_size=" << data->load_size
+             << ", load_delta=" << as_hex(data->load_delta);
+        if(data->storage_type == ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_FILE)
+            info << ", storage_file_descr=" << data->storage_file;
+        else if(data->storage_type == ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_MEMORY)
+            info << ", storage_memory_base=" << as_hex(data->memory_base)
+                 << ", storage_memory_size=" << data->memory_size;
 
-    auto info_data_cb = [](rocprofiler_service_callback_tracing_kind_t,
-                           uint32_t,
-                           uint32_t          arg_num,
-                           const char*       arg_name,
-                           const char*       arg_value_str,
-                           const void* const arg_value_addr,
-                           void*             cb_data) -> int {
-        auto& dss = *static_cast<std::stringstream*>(cb_data);
-        dss << ((arg_num == 0) ? "(" : ", ");
-        dss << arg_num << ": " << arg_name << "=" << arg_value_str;
-        (void) arg_value_addr;
-        return 0;
-    };
+        call_stack_v->emplace_back(source_location{__FUNCTION__, __FILE__, __LINE__, info.str()});
+    }
+    if(record.kind == ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT &&
+       record.operation == ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER)
+    {
+        auto* data         = static_cast<kernel_symbol_data_t*>(record.payload);
+        auto* call_stack_v = static_cast<call_stack_t*>(callback_data);
+        auto  info         = std::stringstream{};
 
-    auto info_data = std::stringstream{};
-    ROCPROFILER_CALL(rocprofiler_iterate_callback_tracing_kind_operation_args(
-                         record, info_data_cb, static_cast<void*>(&info_data)),
-                     "Failure iterating trace operation args");
+        if(record.phase == ROCPROFILER_CALLBACK_PHASE_LOAD)
+        {
+            info << "kernel symbol load :: ";
+            client_kernels.emplace(data->kernel_id, *data);
+        }
+        else if(record.phase == ROCPROFILER_CALLBACK_PHASE_UNLOAD)
+        {
+            info << "kernel symbol unload :: ";
+            client_kernels.erase(data->kernel_id);
+        }
 
-    auto info_data_str = info_data.str();
-    if(!info_data_str.empty()) info << " " << info_data_str << ")";
+        auto kernel_name     = std::regex_replace(data->kernel_name, std::regex{"(\\.kd)$"}, "");
+        int  demangle_status = 0;
+        kernel_name          = cxa_demangle(kernel_name, &demangle_status);
 
-    static auto _mutex = std::mutex{};
-    _mutex.lock();
-    static_cast<call_stack_t*>(callback_data)
-        ->emplace_back(source_location{__FUNCTION__, __FILE__, __LINE__, info.str()});
-    _mutex.unlock();
+        info << "code_object_id=" << data->code_object_id << ", kernel_id=" << data->kernel_id
+             << ", kernel_object=" << as_hex(data->kernel_object)
+             << ", kernarg_segment_size=" << data->kernarg_segment_size
+             << ", kernarg_segment_alignment=" << data->kernarg_segment_alignment
+             << ", group_segment_size=" << data->group_segment_size
+             << ", private_segment_size=" << data->private_segment_size
+             << ", kernel_name=" << kernel_name;
+
+        call_stack_v->emplace_back(source_location{__FUNCTION__, __FILE__, __LINE__, info.str()});
+    }
+
+    (void) user_data;
 }
 
 int
@@ -249,46 +302,22 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 
     call_stack_v->emplace_back(source_location{__FUNCTION__, __FILE__, __LINE__, ""});
 
-    callback_name_info name_info = get_callback_id_names();
-
-    for(const auto& itr : name_info.operation_names)
-    {
-        auto name_idx = std::stringstream{};
-        name_idx << " [" << std::setw(3) << static_cast<int32_t>(itr.first) << "]";
-        call_stack_v->emplace_back(
-            source_location{"rocprofiler_callback_tracing_kind_names          " + name_idx.str(),
-                            __FILE__,
-                            __LINE__,
-                            name_info.kind_names.at(itr.first)});
-
-        for(const auto& ditr : itr.second)
-        {
-            auto operation_idx = std::stringstream{};
-            operation_idx << " [" << std::setw(3) << static_cast<int32_t>(ditr.first) << "]";
-            call_stack_v->emplace_back(source_location{
-                "rocprofiler_callback_tracing_kind_operation_names" + operation_idx.str(),
-                __FILE__,
-                __LINE__,
-                std::string{"- "} + std::string{ditr.second}});
-        }
-    }
-
     client_fini_func = fini_func;
 
-    ROCPROFILER_CALL(rocprofiler_create_context(&client_ctx), "context creation failed");
+    ROCPROFILER_CALL(rocprofiler_create_context(&client_ctx), "context creation");
 
     ROCPROFILER_CALL(
         rocprofiler_configure_callback_tracing_service(client_ctx,
-                                                       ROCPROFILER_CALLBACK_TRACING_HSA_API,
+                                                       ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT,
                                                        nullptr,
                                                        0,
                                                        tool_tracing_callback,
                                                        tool_data),
-        "callback tracing service failed to configure");
+        "code object tracing service configure");
 
     int valid_ctx = 0;
     ROCPROFILER_CALL(rocprofiler_context_is_valid(client_ctx, &valid_ctx),
-                     "failure checking context validity");
+                     "context validity check");
     if(valid_ctx == 0)
     {
         // notify rocprofiler that initialization failed
@@ -297,7 +326,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         return -1;
     }
 
-    ROCPROFILER_CALL(rocprofiler_start_context(client_ctx), "rocprofiler context start failed");
+    ROCPROFILER_CALL(rocprofiler_start_context(client_ctx), "context start");
 
     // no errors
     return 0;
@@ -315,34 +344,21 @@ tool_fini(void* tool_data)
 
     delete _call_stack;
 }
-}  // namespace
 
 void
 setup()
-{}
-
-void
-shutdown()
 {
-    if(client_id) client_fini_func(*client_id);
-}
-
-void
-start()
-{
-    ROCPROFILER_CALL(rocprofiler_start_context(client_ctx), "rocprofiler context start failed");
-}
-
-void
-stop()
-{
-    int status = 0;
-    ROCPROFILER_CALL(rocprofiler_is_initialized(&status), "failed to retrieve init status");
-    if(status != 0)
+    if(int status = 0;
+       rocprofiler_is_initialized(&status) == ROCPROFILER_STATUS_SUCCESS && status == 0)
     {
-        ROCPROFILER_CALL(rocprofiler_stop_context(client_ctx), "rocprofiler context stop failed");
+        ROCPROFILER_CALL(rocprofiler_force_configure(&rocprofiler_configure),
+                         "force configuration");
     }
 }
+}  // namespace
+
+// force configuration when library is loaded
+bool cfg_on_load = (client::setup(), true);
 }  // namespace client
 
 extern "C" rocprofiler_tool_configure_result_t*
@@ -372,23 +388,8 @@ rocprofiler_configure(uint32_t                 version,
 
     std::clog << info.str() << std::endl;
 
-    // demonstration of alternative way to get the version info
-    {
-        auto version_info = std::array<uint32_t, 3>{};
-        ROCPROFILER_CALL(
-            rocprofiler_get_version(&version_info.at(0), &version_info.at(1), &version_info.at(2)),
-            "failed to get version info");
-
-        if(std::array<uint32_t, 3>{major, minor, patch} != version_info)
-        {
-            throw std::runtime_error{"version info mismatch"};
-        }
-    }
-
-    // data passed around all the callbacks
     auto* client_tool_data = new std::vector<client::source_location>{};
 
-    // add first entry
     client_tool_data->emplace_back(
         client::source_location{__FUNCTION__, __FILE__, __LINE__, info.str()});
 

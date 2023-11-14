@@ -23,6 +23,7 @@
 #include <rocprofiler/buffer_tracing.h>
 #include <rocprofiler/fwd.h>
 
+#include "lib/common/container/small_vector.hpp"
 #include "lib/common/synchronized.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler/hsa/agent_cache.hpp"
@@ -47,8 +48,9 @@ namespace rocprofiler
 {
 namespace context
 {
+struct context;
 struct correlation_id;
-}
+}  // namespace context
 namespace hsa
 {
 using ClientID = int64_t;
@@ -92,7 +94,9 @@ union rocprofiler_packet
 class Queue
 {
 public:
-    using callback_t = void (*)(hsa_status_t status, hsa_queue_t* source, void* data);
+    using context_t       = context::context;
+    using context_array_t = common::container::small_vector<const context_t*>;
+    using callback_t      = void (*)(hsa_status_t status, hsa_queue_t* source, void* data);
     // Function prototype used to notify consumers that a kernel has been
     // enqueued. An AQL packet can be returned that will be injected into
     // the queue.
@@ -107,6 +111,9 @@ public:
     // to track state of the intercepted kernel.
     struct queue_info_session_t
     {
+        using external_corr_id_map_t =
+            std::unordered_map<const context_t*, rocprofiler_user_data_t>;
+
         Queue&                     queue;
         std::unique_ptr<AQLPacket> inst_pkt         = {};
         ClientID                   inst_pkt_id      = 0;
@@ -115,6 +122,8 @@ public:
         rocprofiler_kernel_id_t    kernel_id        = 0;
         context::correlation_id*   correlation_id   = nullptr;
         rocprofiler_packet         kernel_pkt       = {};
+        context_array_t            contexts         = {};
+        external_corr_id_map_t     extern_corr_ids  = {};
     };
 
     Queue(const AgentCache&  agent,

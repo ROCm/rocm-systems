@@ -22,7 +22,9 @@
 
 #include "lib/rocprofiler/registration.hpp"
 #include "lib/rocprofiler/agent.hpp"
+#include "lib/rocprofiler/allocator.hpp"
 #include "lib/rocprofiler/context/context.hpp"
+#include "lib/rocprofiler/hsa/code_object.hpp"
 #include "lib/rocprofiler/hsa/hsa.hpp"
 #include "lib/rocprofiler/hsa/queue.hpp"
 #include "lib/rocprofiler/hsa/queue_controller.hpp"
@@ -131,18 +133,30 @@ get_link_map()
 
 struct client_library
 {
-    std::string                                          name               = {};
-    void*                                                dlhandle           = nullptr;
-    decltype(::rocprofiler_configure)*                   configure_func     = nullptr;
-    std::unique_ptr<rocprofiler_tool_configure_result_t> configure_result   = {};
-    rocprofiler_client_id_t                              internal_client_id = {};
-    rocprofiler_client_id_t                              mutable_client_id  = {};
+    client_library() = default;
+    ~client_library() { delete configure_result; }
+
+    client_library(const client_library&)     = delete;
+    client_library(client_library&&) noexcept = default;
+
+    client_library& operator=(const client_library&) = delete;
+    client_library& operator=(client_library&&) noexcept = delete;
+
+    std::string                          name               = {};
+    void*                                dlhandle           = nullptr;
+    decltype(::rocprofiler_configure)*   configure_func     = nullptr;
+    rocprofiler_tool_configure_result_t* configure_result   = nullptr;
+    rocprofiler_client_id_t              internal_client_id = {};
+    rocprofiler_client_id_t              mutable_client_id  = {};
 };
 
-std::vector<client_library>
+using client_library_vec_t =
+    std::vector<client_library, allocator::static_data_allocator<client_library>>;
+
+client_library_vec_t
 find_clients()
 {
-    auto data            = std::vector<client_library>{};
+    auto data            = client_library_vec_t{};
     auto priority_offset = get_client_offset();
 
     if(get_forced_configure())
@@ -227,7 +241,7 @@ find_clients()
     return data;
 }
 
-std::vector<client_library>&
+client_library_vec_t&
 get_clients()
 {
     static auto _v = find_clients();
@@ -290,7 +304,7 @@ invoke_client_configures()
 
         if(_result)
         {
-            itr.configure_result = std::make_unique<rocprofiler_tool_configure_result_t>(*_result);
+            itr.configure_result = new rocprofiler_tool_configure_result_t{*_result};
         }
         else
         {
@@ -467,10 +481,15 @@ finalize()
 {
     if(get_fini_status() != 0) return;
 
+    static auto _sync = std::atomic_flag{};
+    if(_sync.test_and_set()) return;
+    // above returns true for all invocations after the first one
+
     static auto _once = std::once_flag{};
     std::call_once(_once, []() {
         set_fini_status(-1);
-        hsa_shut_down();
+        ::hsa_shut_down();
+        hsa::code_object_shutdown();
         if(get_init_status() > 0)
         {
             invoke_client_finalizers();
@@ -550,6 +569,7 @@ rocprofiler_set_api_table(const char* name,
         // need to construct agent mappings before initializing the queue controller
         rocprofiler::agent::construct_agent_cache(hsa_api_table);
         rocprofiler::hsa::queue_controller_init(hsa_api_table);
+        rocprofiler::hsa::code_object_init(hsa_api_table);
 
         // any internal modifications to the HsaApiTable need to be done before we make the
         // copy or else those modifications will be lost when HSA API tracing is enabled

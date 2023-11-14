@@ -58,8 +58,14 @@
         rocprofiler_status_t CHECKSTATUS = result;                                                 \
         if(CHECKSTATUS != ROCPROFILER_STATUS_SUCCESS)                                              \
         {                                                                                          \
-            std::cerr << #result << " failed with error code " << CHECKSTATUS << std::endl;        \
-            throw std::runtime_error(#result " failure");                                          \
+            std::string status_msg = rocprofiler_get_status_string(CHECKSTATUS);                   \
+            std::cerr << "[" #result "][" << __FILE__ << ":" << __LINE__ << "] " << msg            \
+                      << " failed with error code " << CHECKSTATUS << ": " << status_msg           \
+                      << std::endl;                                                                \
+            std::stringstream errmsg{};                                                            \
+            errmsg << "[" #result "][" << __FILE__ << ":" << __LINE__ << "] " << msg " failure ("  \
+                   << status_msg << ")";                                                           \
+            throw std::runtime_error(errmsg.str());                                                \
         }                                                                                          \
     }
 
@@ -118,8 +124,8 @@ print_call_stack(const call_stack_t& _call_stack)
     *ofs << std::left;
     for(const auto& itr : _call_stack)
     {
-        *ofs << std::setw(2) << ++n << "/" << std::setw(2) << _call_stack.size() << " ";
-        *ofs << "[" << fs::path{itr.file}.filename() << ":" << itr.line << "] " << std::setw(20)
+        *ofs << std::left << std::setw(2) << ++n << "/" << std::setw(2) << _call_stack.size()
+             << " [" << fs::path{itr.file}.filename() << ":" << itr.line << "] " << std::setw(20)
              << itr.function;
         if(!itr.context.empty()) *ofs << " :: " << itr.context;
         *ofs << "\n";

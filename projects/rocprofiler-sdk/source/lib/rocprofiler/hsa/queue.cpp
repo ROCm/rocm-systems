@@ -22,6 +22,7 @@
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler/buffer.hpp"
 #include "lib/rocprofiler/context/context.hpp"
+#include "lib/rocprofiler/hsa/code_object.hpp"
 
 #include <glog/logging.h>
 #include <hsa/hsa.h>
@@ -31,6 +32,31 @@
 #include <atomic>
 #include <chrono>
 #include <thread>
+
+// static assert for rocprofiler_packet ABI compatibility
+static_assert(sizeof(hsa_ext_amd_aql_pm4_packet_t) == sizeof(hsa_kernel_dispatch_packet_t),
+              "unexpected ABI incompatibility");
+static_assert(sizeof(hsa_ext_amd_aql_pm4_packet_t) == sizeof(hsa_barrier_and_packet_t),
+              "unexpected ABI incompatibility");
+static_assert(sizeof(hsa_ext_amd_aql_pm4_packet_t) == sizeof(hsa_barrier_or_packet_t),
+              "unexpected ABI incompatibility");
+static_assert(offsetof(hsa_ext_amd_aql_pm4_packet_t, completion_signal) ==
+                  offsetof(hsa_kernel_dispatch_packet_t, completion_signal),
+              "unexpected ABI incompatibility");
+static_assert(offsetof(hsa_ext_amd_aql_pm4_packet_t, completion_signal) ==
+                  offsetof(hsa_barrier_and_packet_t, completion_signal),
+              "unexpected ABI incompatibility");
+static_assert(offsetof(hsa_ext_amd_aql_pm4_packet_t, completion_signal) ==
+                  offsetof(hsa_barrier_or_packet_t, completion_signal),
+              "unexpected ABI incompatibility");
+
+#if defined(ROCPROFILER_CI)
+#    define ROCP_CI_LOG_IF(NON_CI_LEVEL, ...) LOG_IF(FATAL, __VA_ARGS__)
+#    define ROCP_CI_LOG(NON_CI_LEVEL, ...)    LOG(FATAL)
+#else
+#    define ROCP_CI_LOG_IF(NON_CI_LEVEL, ...) LOG_IF(NON_CI_LEVEL, __VA_ARGS__)
+#    define ROCP_CI_LOG(NON_CI_LEVEL, ...)    LOG(NON_CI_LEVEL)
+#endif
 
 namespace rocprofiler
 {
@@ -43,15 +69,137 @@ signal_limiter()
 {
     // Limit the maximun number of HSA signals created.
     // There is a hard limit to the maximum that can exist.
-    static common::active_capacity_gate _gate(1024);
+    static common::active_capacity_gate _gate{96};
     return _gate;
 }
 
 bool
-AsyncSignalHandler(hsa_signal_value_t, void* data)
+context_filter(const context::context* ctx)
 {
+    return (ctx->buffered_tracer &&
+            (ctx->buffered_tracer->domains(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH) ||
+             ctx->buffered_tracer->domains(ROCPROFILER_BUFFER_TRACING_MEMORY_COPY)));
+}
+
+bool
+AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
+{
+    // LOG(ERROR) << "signal value is " << signal_v;
+
     if(!data) return true;
     auto& queue_info_session = *static_cast<Queue::queue_info_session_t*>(data);
+
+    // we need to decrement this reference count at the end of the functions
+    auto* _corr_id = queue_info_session.correlation_id;
+    // get the contexts that were active when the signal was created
+    const auto& ctxs = queue_info_session.contexts;
+    if(!ctxs.empty())
+    {
+        // only do the following work if there are contexts that require this info
+        const auto* _rocp_agent      = queue_info_session.queue.get_agent().get_rocp_agent();
+        auto        _hsa_agent       = queue_info_session.queue.get_agent().get_hsa_agent();
+        auto        _queue_id        = queue_info_session.queue.get_id();
+        auto        _signal          = queue_info_session.interrupt_signal;
+        auto        _kern_id         = queue_info_session.kernel_id;
+        const auto& _extern_corr_ids = queue_info_session.extern_corr_ids;
+
+        auto dispatch_time = hsa_amd_profiling_dispatch_time_t{};
+        auto dispatch_time_status =
+            queue_info_session.queue.ext_api().hsa_amd_profiling_get_dispatch_time_fn(
+                _hsa_agent, _signal, &dispatch_time);
+
+        // if we encounter this in CI, it will cause test to fail
+        ROCP_CI_LOG_IF(
+            ERROR,
+            dispatch_time_status == HSA_STATUS_SUCCESS && dispatch_time.end < dispatch_time.start)
+            << "hsa_amd_profiling_get_dispatch_time for kernel_id=" << _kern_id
+            << " on rocprofiler_agent=" << _rocp_agent->id.handle
+            << " returned dispatch times where the end time (" << dispatch_time.end
+            << ") was less than the start time (" << dispatch_time.start << ")";
+
+        // try to extract the async copy time. this will return HSA_STATUS_ERROR if there
+        // is not an async copy agent associated with the signal so we just predicate
+        // putting something into the buffer based on whether or not
+        // hsa_amd_profiling_get_async_copy_time returns HSA_STATUS_SUCCESS.
+        auto copy_time = hsa_amd_profiling_async_copy_time_t{};
+        auto copy_time_status =
+            queue_info_session.queue.ext_api().hsa_amd_profiling_get_async_copy_time_fn(_signal,
+                                                                                        &copy_time);
+
+        // if we encounter this in CI, it will cause test to fail
+        ROCP_CI_LOG_IF(ERROR,
+                       copy_time_status == HSA_STATUS_SUCCESS && copy_time.end < copy_time.start)
+            << "hsa_amd_profiling_get_async_copy_time for kernel_id=" << _kern_id
+            << " on rocprofiler_agent=" << _rocp_agent->id.handle
+            << " returned async times where the end time (" << copy_time.end
+            << ") was less than the start time (" << copy_time.start << ")";
+
+        for(const auto* itr : ctxs)
+        {
+            auto* _buffer = buffer::get_buffer(
+                itr->buffered_tracer->buffer_data.at(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH));
+
+            // go ahead and create the correlation id value since we expect at least one of these
+            // domains will require it
+            auto _corr_id_v =
+                rocprofiler_correlation_id_t{.internal = 0, .external = context::null_user_data};
+            if(_corr_id)
+            {
+                _corr_id_v.internal = _corr_id->internal;
+                _corr_id_v.external = _extern_corr_ids.at(itr);
+            }
+
+            if(itr->buffered_tracer->domains(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH))
+            {
+                if(dispatch_time_status == HSA_STATUS_SUCCESS)
+                {
+                    const auto& dispatch_packet = queue_info_session.kernel_pkt.kernel_dispatch;
+
+                    auto record = rocprofiler_buffer_tracing_kernel_dispatch_record_t{
+                        sizeof(rocprofiler_buffer_tracing_kernel_dispatch_record_t),
+                        ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
+                        _corr_id_v,
+                        dispatch_time.start,
+                        dispatch_time.end,
+                        _rocp_agent->id,
+                        _queue_id,
+                        _kern_id,
+                        dispatch_packet.private_segment_size,
+                        dispatch_packet.group_segment_size,
+                        rocprofiler_dim3_t{dispatch_packet.workgroup_size_x,
+                                           dispatch_packet.workgroup_size_y,
+                                           dispatch_packet.workgroup_size_z},
+                        rocprofiler_dim3_t{dispatch_packet.grid_size_x,
+                                           dispatch_packet.grid_size_y,
+                                           dispatch_packet.grid_size_z}};
+
+                    _buffer->emplace(ROCPROFILER_BUFFER_CATEGORY_TRACING,
+                                     ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
+                                     record);
+                }
+            }
+
+            if(itr->buffered_tracer->domains(ROCPROFILER_BUFFER_TRACING_MEMORY_COPY))
+            {
+                if(copy_time_status == HSA_STATUS_SUCCESS)
+                {
+                    auto record = rocprofiler_buffer_tracing_memory_copy_record_t{
+                        sizeof(rocprofiler_buffer_tracing_memory_copy_record_t),
+                        ROCPROFILER_BUFFER_TRACING_MEMORY_COPY,
+                        _corr_id_v,
+                        copy_time.start,
+                        copy_time.end,
+                        _rocp_agent->id,
+                        _queue_id,
+                        _kern_id};
+
+                    _buffer->emplace(ROCPROFILER_BUFFER_CATEGORY_TRACING,
+                                     ROCPROFILER_BUFFER_TRACING_MEMORY_COPY,
+                                     record);
+                }
+            }
+        }
+    }
 
     // Calls our internal callbacks to callers who need to be notified post
     // kernel execution.
@@ -95,6 +243,14 @@ AsyncSignalHandler(hsa_signal_value_t, void* data)
     }
     queue_info_session.queue.async_complete();
 
+    if(_corr_id)
+    {
+        LOG_IF(FATAL, _corr_id->ref_count.load() == 0)
+            << "reference counter for correlation id " << _corr_id->internal << " from thread "
+            << _corr_id->thread_idx << " has no reference count";
+        _corr_id->ref_count.fetch_sub(1);
+    }
+
     delete static_cast<Queue::queue_info_session_t*>(data);
     return false;
 }
@@ -133,6 +289,8 @@ WriteInterceptor(const void* packets,
                  void*                                 data,
                  hsa_amd_queue_intercept_packet_writer writer)
 {
+    using context_array_t = Queue::context_array_t;
+
     auto&& AddVendorSpecificPacket = [](hsa_ext_amd_aql_pm4_packet_t     _packet,
                                         hsa_signal_t                     _signal,
                                         std::vector<rocprofiler_packet>& _packets) {
@@ -149,18 +307,38 @@ WriteInterceptor(const void* packets,
 
     LOG_IF(FATAL, data == nullptr) << "WriteInterceptor was not passed a pointer to the queue";
 
-    auto& queue   = *static_cast<Queue*>(data);
-    auto  thr_id  = common::get_tid();
-    auto* corr_id = context::get_latest_correlation_id();
-    // increase the reference count to denote that this correlation id is being used in a kernel
-    if(corr_id) corr_id->ref_count.fetch_add(1);
+    static thread_local auto ctxs = context_array_t{};
+    context::get_active_contexts(ctxs, context_filter);
+
+    auto& queue = *static_cast<Queue*>(data);
 
     // We have no packets or no one who needs to be notified, do nothing.
-    if(pkt_count == 0 || queue.get_notifiers() == 0)
+    if(pkt_count == 0 || (queue.get_notifiers() == 0 && ctxs.empty()))
     {
         writer(packets, pkt_count);
         return;
     }
+
+    auto  thr_id  = common::get_tid();
+    auto* corr_id = context::get_latest_correlation_id();
+
+    // use thread-local value to reuse allocation
+    static thread_local auto extern_corr_ids_tl =
+        Queue::queue_info_session_t::external_corr_id_map_t{};
+
+    // increase the reference count to denote that this correlation id is being used in a kernel
+    if(corr_id)
+    {
+        extern_corr_ids_tl.clear();  // clear it so that it only contains the current contexts
+        extern_corr_ids_tl.reserve(ctxs.size());  // reserve for performance
+        for(const auto* ctx : ctxs)
+            extern_corr_ids_tl.emplace(ctx,
+                                       ctx->correlation_tracer.external_correlator.get(thr_id));
+        corr_id->ref_count.fetch_add(1);
+    }
+
+    // move to local variable
+    auto extern_corr_ids = std::move(extern_corr_ids_tl);
 
     // hsa_ext_amd_aql_pm4_packet_t
     const auto* packets_arr         = static_cast<const rocprofiler_packet*>(packets);
@@ -248,8 +426,9 @@ WriteInterceptor(const void* packets,
             transformed_packets.emplace_back(barrier);
         }
 
-        // TODO(jrmadsen): fetch kernel identifier from code object loading
-        uint64_t kernel_id = 0;
+        LOG_IF(FATAL, packet_type != HSA_PACKET_TYPE_KERNEL_DISPATCH)
+            << "get_kernel_id below might need to be updated";
+        uint64_t kernel_id = get_kernel_id(kernel_pkt.kernel_dispatch.kernel_object);
 
         // Enqueue the signal into the handler. Will call completed_cb when
         // signal completes.
@@ -263,7 +442,9 @@ WriteInterceptor(const void* packets,
                                             .tid              = thr_id,
                                             .kernel_id        = kernel_id,
                                             .correlation_id   = corr_id,
-                                            .kernel_pkt       = kernel_pkt});
+                                            .kernel_pkt       = kernel_pkt,
+                                            .contexts         = ctxs,
+                                            .extern_corr_ids  = extern_corr_ids});
     }
 
     writer(transformed_packets.data(), transformed_packets.size());
@@ -332,6 +513,21 @@ Queue::Queue(const AgentCache&  agent,
     LOG_IF(FATAL,
            _ext_api.hsa_amd_queue_intercept_register_fn(_intercept_queue, WriteInterceptor, this))
         << "Could not register interceptor";
+
+    bool enable_async_copy = false;
+    for(const auto& itr : context::get_registered_contexts())
+    {
+        if(itr->buffered_tracer &&
+           itr->buffered_tracer->domains(ROCPROFILER_BUFFER_TRACING_MEMORY_COPY))
+            enable_async_copy = true;
+    }
+
+    if(enable_async_copy)
+    {
+        LOG_IF(FATAL, _ext_api.hsa_amd_profiling_async_copy_enable_fn(true) != HSA_STATUS_SUCCESS)
+            << "Could not enable async copy timing";
+    }
+
     *queue = _intercept_queue;
 }
 

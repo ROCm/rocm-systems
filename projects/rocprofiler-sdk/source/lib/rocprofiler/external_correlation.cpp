@@ -24,6 +24,7 @@
 #include <rocprofiler/fwd.h>
 
 #include "lib/common/synchronized.hpp"
+#include "lib/common/utility.hpp"
 #include "lib/rocprofiler/context/context.hpp"
 #include "lib/rocprofiler/external_correlation.hpp"
 
@@ -33,17 +34,43 @@ namespace rocprofiler
 {
 namespace external_correlation
 {
+namespace
+{
+auto
+get_default_tid()
+{
+    static auto _v = common::get_tid();
+    return _v;
+}
+
+constexpr auto empty_user_data = rocprofiler_user_data_t{.value = 0};
+
+auto&
+get_default_data_impl()
+{
+    static auto _v = std::atomic<uint64_t>{0};
+    return _v;
+}
+
+auto
+get_default_data()
+{
+    return rocprofiler_user_data_t{.value =
+                                       get_default_data_impl().load(std::memory_order_relaxed)};
+}
+
+auto f_default_tid = get_default_tid();  // make sure it is initialized
+}  // namespace
+
 rocprofiler_user_data_t
 external_correlation::get(rocprofiler_thread_id_t tid) const
 {
-    static constexpr auto empty_user_data = rocprofiler_user_data_t{.value = 0};
-
     return data.rlock(
         [](const external_correlation_map_t& _data, rocprofiler_thread_id_t tid_v) {
-            if(_data.count(tid_v) == 0) return empty_user_data;
+            if(_data.count(tid_v) == 0) return get_default_data();
             const auto& itr = _data.at(tid_v);
             return itr.rlock([](const external_correlation_stack_t& data_stack) {
-                if(data_stack.empty()) return empty_user_data;
+                if(data_stack.empty()) return get_default_data();
                 return data_stack.back();
             });
         },
@@ -53,6 +80,8 @@ external_correlation::get(rocprofiler_thread_id_t tid) const
 void
 external_correlation::push(rocprofiler_thread_id_t tid, rocprofiler_user_data_t user_data)
 {
+    static auto default_tid = get_default_tid();
+
     // ensure that data contains key for provided thread id
     while(!data.ulock(
         [](const external_correlation_map_t& _data, rocprofiler_thread_id_t tid_v) {
@@ -78,6 +107,9 @@ external_correlation::push(rocprofiler_thread_id_t tid, rocprofiler_user_data_t 
             itr.wlock([](external_correlation_stack_t& data_stack,
                          rocprofiler_user_data_t       value) { data_stack.emplace_back(value); },
                       user_data_v);
+            // child threads inherit the current value on default thread
+            if(tid_v == default_tid)
+                get_default_data_impl().store(user_data_v.value, std::memory_order_relaxed);
         },
         tid,
         user_data);
@@ -86,16 +118,22 @@ external_correlation::push(rocprofiler_thread_id_t tid, rocprofiler_user_data_t 
 rocprofiler_user_data_t
 external_correlation::pop(rocprofiler_thread_id_t tid)
 {
-    static constexpr auto empty_user_data = rocprofiler_user_data_t{.value = 0};
+    static auto default_tid = get_default_tid();
 
     return data.wlock(
         [](external_correlation_map_t& _data, rocprofiler_thread_id_t tid_v) {
             if(_data.count(tid_v) == 0) return empty_user_data;
             auto& itr = _data.at(tid_v);
-            return itr.wlock([](external_correlation_stack_t& data_stack) {
+            return itr.wlock([tid_v](external_correlation_stack_t& data_stack) {
                 if(data_stack.empty()) return empty_user_data;
                 auto ret = data_stack.back();
                 data_stack.pop_back();
+                // child threads inherit the current value on default thread
+                if(tid_v == default_tid)
+                {
+                    uint64_t value = (!data_stack.empty()) ? data_stack.back().value : 0;
+                    get_default_data_impl().store(value, std::memory_order_relaxed);
+                }
                 return ret;
             });
         },

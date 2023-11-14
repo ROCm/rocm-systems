@@ -140,8 +140,8 @@ get_registered_contexts()
     return _v;
 }
 
-std::vector<const context*>&
-get_active_contexts(std::vector<const context*>& data, context_filter_t filter)
+context_array_t&
+get_active_contexts(context_array_t& data, context_filter_t filter)
 {
     data.clear();
     auto num_ctx = get_num_active_contexts().load(std::memory_order_acquire);
@@ -169,10 +169,10 @@ get_active_contexts(std::vector<const context*>& data, context_filter_t filter)
     return data;
 }
 
-std::vector<const context*>
+context_array_t
 get_active_contexts(context_filter_t filter)
 {
-    auto data = std::vector<const context*>{};
+    auto data = context_array_t{};
     get_active_contexts(data, filter);
     return data;
 }
@@ -213,7 +213,7 @@ allocate_context()
 
     // create an entry in the registered
     auto& _cfg_v = get_registered_contexts().back();
-    _cfg_v       = std::make_unique<context>();
+    _cfg_v       = allocator::make_unique_static<context>();
     auto* _cfg   = _cfg_v.get();
     // ...
 
@@ -260,7 +260,7 @@ start_context(rocprofiler_context_id_t context_id)
         return ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID;
     }
 
-    auto current_contexts = std::vector<const context*>{};
+    auto current_contexts = context_array_t{};
     for(const auto* itr : get_active_contexts(current_contexts))
     {
         if(cfg->context_idx == itr->context_idx)

@@ -3,10 +3,11 @@
 #
 rocprofiler_activate_clang_tidy()
 
-set(ROCPROFILER_LIB_HEADERS agent.hpp buffer.hpp external_correlation.hpp
+set(ROCPROFILER_LIB_HEADERS agent.hpp allocator.hpp buffer.hpp external_correlation.hpp
                             intercept_table.hpp internal_threading.hpp registration.hpp)
 set(ROCPROFILER_LIB_SOURCES
     agent.cpp
+    allocator.cpp
     buffer.cpp
     buffer_tracing.cpp
     callback_tracing.cpp

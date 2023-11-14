@@ -28,6 +28,7 @@
 #include "lib/common/container/record_header_buffer.hpp"
 #include "lib/common/container/stable_vector.hpp"
 #include "lib/common/demangle.hpp"
+#include "lib/rocprofiler/allocator.hpp"
 
 #include <array>
 #include <atomic>
@@ -61,7 +62,8 @@ struct instance
     buffer_t& get_internal_buffer(size_t);
 };
 
-using unique_buffer_vec_t = common::container::stable_vector<std::unique_ptr<instance>, 4>;
+using unique_buffer_vec_t =
+    common::container::stable_vector<allocator::unique_static_ptr_t<instance>, 4>;
 
 std::optional<rocprofiler_buffer_id_t>
 allocate_buffer();

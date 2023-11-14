@@ -88,7 +88,7 @@ allocate_buffer()
 
     // create an entry in the registered
     auto& _cfg_v = get_buffers().back();
-    _cfg_v       = std::make_unique<buffer::instance>();
+    _cfg_v       = allocator::make_unique_static<buffer::instance>();
     auto* _cfg   = _cfg_v.get();
 
     if(!_cfg) return std::nullopt;
@@ -99,6 +99,8 @@ allocate_buffer()
 rocprofiler_status_t
 flush(rocprofiler_buffer_id_t buffer_id, bool wait)
 {
+    if(registration::get_fini_status() > 0) return ROCPROFILER_STATUS_SUCCESS;
+
     if(buffer_id.handle >= get_buffers().size()) return ROCPROFILER_STATUS_ERROR_BUFFER_NOT_FOUND;
 
     auto& buff = get_buffers().at(buffer_id.handle);

@@ -1,26 +1,24 @@
-/*
-Copyright (c) 2015-2020 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
-
-#include "client.hpp"
+// MIT License
+//
+// Copyright (c) 2023 ROCm Developer Tools
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
 
 #include "hip/hip_runtime.h"
 
@@ -72,10 +70,6 @@ run(int rank, int tid, hipStream_t stream, int argc, char** argv);
 int
 main(int argc, char** argv)
 {
-    client::setup();  // forces rocprofiler to configure/initialize
-    client::start();  // starts context before any API tables are available
-    client::identify(1);
-
     int rank = 0;
     for(int i = 1; i < argc; ++i)
     {
@@ -127,9 +121,6 @@ main(int argc, char** argv)
     HIP_API_CALL(hipDeviceSynchronize());
     HIP_API_CALL(hipDeviceReset());
 
-    client::stop();
-    client::shutdown();
-
     return 0;
 }
 
@@ -148,7 +139,6 @@ transpose_a(const int* in, int* out, int M, int N)
 void
 run(int rank, int tid, hipStream_t stream, int argc, char** argv)
 {
-    client::identify(tid + 1);
     unsigned int M = 4960 * 2;
     unsigned int N = 4960 * 2;
     if(argc > 2) nitr = atoll(argv[2]);

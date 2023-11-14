@@ -1,7 +1,15 @@
-set(ROCPROFILER_LIB_HSA_SOURCES hsa.cpp queue.cpp queue_controller.cpp agent_cache.cpp
-                                aql_packet.cpp)
-set(ROCPROFILER_LIB_HSA_HEADERS hsa.hpp defines.hpp types.hpp utils.hpp queue.hpp
-                                queue_controller.hpp agent_cache.hpp aql_packet.hpp)
+set(ROCPROFILER_LIB_HSA_SOURCES agent_cache.cpp aql_packet.cpp code_object.cpp hsa.cpp
+                                queue_controller.cpp queue.cpp)
+set(ROCPROFILER_LIB_HSA_HEADERS
+    agent_cache.hpp
+    aql_packet.hpp
+    code_object.hpp
+    defines.hpp
+    hsa.hpp
+    queue_controller.hpp
+    queue.hpp
+    types.hpp
+    utils.hpp)
 target_sources(rocprofiler-object-library PRIVATE ${ROCPROFILER_LIB_HSA_SOURCES}
                                                   ${ROCPROFILER_LIB_HSA_HEADERS})
 

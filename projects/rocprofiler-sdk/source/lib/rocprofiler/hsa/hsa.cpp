@@ -188,7 +188,7 @@ hsa_api_impl<Idx>::functor(Args&&... args)
         rocprofiler_user_data_t external_correlation = {};
     };
 
-    static thread_local auto active_contexts   = std::vector<const context::context*>{};
+    static thread_local auto active_contexts   = context::context_array_t{};
     auto                     thr_id            = common::get_tid();
     auto                     callback_contexts = std::vector<callback_context_data>{};
     auto                     buffered_contexts = std::vector<buffered_context_data>{};
@@ -249,6 +249,9 @@ hsa_api_impl<Idx>::functor(Args&&... args)
         buffer_record.operation = info_type::operation_idx;
         buffer_record.thread_id = thr_id;
     }
+
+    tracer_data.size = sizeof(rocprofiler_callback_tracing_hsa_api_data_t);
+    set_data_args(info_type::get_api_data_args(tracer_data.args), std::forward<Args>(args)...);
 
     // invoke the callbacks
     if(!callback_contexts.empty())
@@ -448,41 +451,37 @@ get_names(std::vector<const char*>& _name_list, std::index_sequence<Idx...>)
     (_emplace(_name_list, hsa_api_info<Idx>::name), ...);
 }
 
+bool
+should_wrap_functor(rocprofiler_service_callback_tracing_kind_t _callback_domain,
+                    rocprofiler_service_buffer_tracing_kind_t   _buffered_domain,
+                    int                                         _operation)
+{
+    // we loop over all the *registered* contexts and see if any of them, at any point in time,
+    // might require callback or buffered API tracing
+    for(const auto& itr : context::get_registered_contexts())
+    {
+        if(!itr) continue;
+
+        // if there is a callback tracer enabled for the given domain and op, we need to wrap
+        if(itr->callback_tracer && itr->callback_tracer->domains(_callback_domain) &&
+           itr->callback_tracer->domains(_callback_domain, _operation))
+            return true;
+
+        // if there is a buffered tracer enabled for the given domain and op, we need to wrap
+        if(itr->buffered_tracer && itr->buffered_tracer->domains(_buffered_domain) &&
+           itr->buffered_tracer->domains(_buffered_domain, _operation))
+            return true;
+    }
+    return false;
+}
+
 template <size_t... Idx>
 void
 update_table(hsa_api_table_t* _orig, std::index_sequence<Idx...>)
 {
-    static auto _should_wrap_functor =
-        [](auto _callback_domain, auto _buffered_domain, auto _operation) {
-            for(const auto& itr : context::get_registered_contexts())
-            {
-                if(!itr) continue;
-
-                if(itr->callback_tracer)
-                {
-                    // domain not enabled so skip to next callback_tracer
-                    if(!itr->callback_tracer->domains(_callback_domain)) continue;
-
-                    // if the given domain + op is enabled, we need to wrap
-                    if(itr->callback_tracer->domains(_callback_domain, _operation)) return true;
-                }
-
-                if(itr->buffered_tracer)
-                {
-                    // domain not enabled so skip to next callback_tracer
-                    if(!itr->buffered_tracer->domains(_buffered_domain)) continue;
-
-                    // if the given domain + op is enabled, we need to wrap
-                    if(itr->buffered_tracer->domains(_buffered_domain, _operation)) return true;
-                }
-            }
-            return false;
-        };
-    (void) _should_wrap_functor;
-
     auto _update = [](hsa_api_table_t* _orig_v, auto _info) {
         // check to see if there are any contexts which enable this operation in the HSA API domain
-        if(!_should_wrap_functor(
+        if(!should_wrap_functor(
                _info.callback_domain_idx, _info.buffered_domain_idx, _info.operation_idx))
             return;
 

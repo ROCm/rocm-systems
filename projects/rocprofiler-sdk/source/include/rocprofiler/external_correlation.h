@@ -37,6 +37,13 @@ ROCPROFILER_EXTERN_C_INIT
 /**
  * @brief Push default value for `external` field in @ref rocprofiler_correlation_id_t onto stack.
  *
+ * External correlation ids are thread-local values. However, if rocprofiler internally requests an
+ * external correlation id on a non-main thread and an external correlation id has not been pushed
+ * for this thread, the external correlation ID will default to the latest external correlation id
+ * on the main thread -- this allows tools to push an external correlation id once on the main
+ * thread for, say, the MPI rank or process-wide UUID and this value will be used by all subsequent
+ * child threads.
+ *
  * @param [in] context Associated context
  * @param [in] tid thread identifier. @see rocprofiler_get_thread_id
  * @param [in] external_correlation_id User data to place in external field in @ref

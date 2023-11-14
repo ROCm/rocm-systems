@@ -26,8 +26,10 @@
 #include <rocprofiler/registration.h>
 #include <rocprofiler/rocprofiler.h>
 
+#include "lib/common/container/small_vector.hpp"
 #include "lib/common/container/stable_vector.hpp"
 #include "lib/common/synchronized.hpp"
+#include "lib/rocprofiler/allocator.hpp"
 #include "lib/rocprofiler/context/domain.hpp"
 #include "lib/rocprofiler/counters/core.hpp"
 #include "lib/rocprofiler/external_correlation.hpp"
@@ -174,8 +176,10 @@ start_context(rocprofiler_context_id_t id);
 /// \brief disable the contexturation.
 rocprofiler_status_t stop_context(rocprofiler_context_id_t);
 
-using unique_context_vec_t = common::container::stable_vector<std::unique_ptr<context>, 8>;
+using unique_context_vec_t =
+    common::container::stable_vector<allocator::unique_static_ptr_t<context>, 8>;
 using active_context_vec_t = common::container::stable_vector<std::atomic<const context*>, 8>;
+using context_array_t      = common::container::small_vector<const context*>;
 
 unique_context_vec_t&
 get_registered_contexts();
@@ -188,11 +192,10 @@ default_context_filter(const context* val)
     return (val != nullptr);
 }
 
-std::vector<const context*>&
-get_active_contexts(std::vector<const context*>& data,
-                    context_filter_t             filter = default_context_filter);
+context_array_t&
+get_active_contexts(context_array_t& data, context_filter_t filter = default_context_filter);
 
-std::vector<const context*>
+context_array_t
 get_active_contexts(context_filter_t filter = default_context_filter);
 
 void deactivate_client_contexts(rocprofiler_client_id_t);

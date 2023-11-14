@@ -4,13 +4,22 @@
 rocprofiler_activate_clang_tidy()
 
 set(common_sources config.cpp environment.cpp demangle.cpp utility.cpp xml.cpp)
-set(common_headers config.hpp defines.hpp environment.hpp demangle.hpp mpl.hpp
-                   synchronized.hpp utility.hpp xml.hpp)
+set(common_headers
+    config.hpp
+    defines.hpp
+    environment.hpp
+    demangle.hpp
+    mpl.hpp
+    scope_destructor.hpp
+    synchronized.hpp
+    utility.hpp
+    xml.hpp)
 
 add_library(rocprofiler-common-library STATIC)
 add_library(rocprofiler::rocprofiler-common-library ALIAS rocprofiler-common-library)
 
 add_subdirectory(container)
+add_subdirectory(memory)
 
 target_sources(rocprofiler-common-library PRIVATE ${common_sources} ${common_headers})
 target_include_directories(rocprofiler-common-library

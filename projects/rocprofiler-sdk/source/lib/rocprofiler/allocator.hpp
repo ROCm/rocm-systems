@@ -22,63 +22,58 @@
 
 #pragma once
 
-#include <rocprofiler/internal_threading.h>
-
-#include "lib/common/container/stable_vector.hpp"
+#include <memory>
 #include "lib/common/defines.hpp"
-#include "lib/common/utility.hpp"
-#include "lib/rocprofiler/allocator.hpp"
-
-#include <PTL/TaskGroup.hh>
-#include <PTL/ThreadPool.hh>
-
-#include <cstdint>
-#include <string>
-#include <vector>
+#include "lib/common/memory/deleter.hpp"
+#include "lib/common/memory/stateless_allocator.hpp"
 
 namespace rocprofiler
 {
-namespace internal_threading
+namespace allocator
 {
-class ThreadPool : public PTL::ThreadPool
-{
-public:
-    using parent_type = PTL::ThreadPool;
+// declare this trivial type for common::memory::deleter specialization
+struct static_data;
+}  // namespace allocator
 
-    ThreadPool(const parent_type::Config&);
-    ~ThreadPool();
+namespace common
+{
+namespace memory
+{
+template <>
+struct deleter<allocator::static_data>
+{
+    // specialize the deleter call operator to invoke registration::finalize
+    void operator()() const;
+};
+}  // namespace memory
+}  // namespace common
+
+namespace allocator
+{
+// use this allocator for static data which only gets deleted at the end of the application
+template <typename Tp>
+using static_data_allocator =
+    common::memory::stateless_allocator<Tp, 64, common::memory::deleter<static_data>>;
+
+// use this for unique_ptr
+template <typename Tp>
+struct static_data_deleter
+{
+    void operator()(Tp* ptr) const
+    {
+        common::memory::deleter<static_data>{}();
+        delete ptr;
+    }
 };
 
-class TaskGroup : public PTL::TaskGroup<void>
+template <typename Tp>
+using unique_static_ptr_t = std::unique_ptr<Tp, static_data_deleter<Tp>>;
+
+template <typename Tp, typename... Args>
+decltype(auto)
+make_unique_static(Args&&... args)
 {
-public:
-    using parent_type = PTL::TaskGroup<void>;
-
-    TaskGroup(std::shared_ptr<ThreadPool>);
-
-private:
-    std::shared_ptr<ThreadPool> m_pool = {};
-};
-
-using thread_pool_t = ThreadPool;
-using task_group_t  = TaskGroup;
-
-void notify_pre_internal_thread_create(rocprofiler_runtime_library_t);
-void notify_post_internal_thread_create(rocprofiler_runtime_library_t);
-
-// initialize the default thread pool
-void
-initialize();
-
-// destroy all the thread pools
-void
-finalize();
-
-// creates a new thread
-rocprofiler_callback_thread_t
-create_callback_thread();
-
-// returns the task group for the given callback thread identifier
-task_group_t* get_task_group(rocprofiler_callback_thread_t);
-}  // namespace internal_threading
+    return unique_static_ptr_t<Tp>{new Tp{std::forward<Args>(args)...}};
+}
+}  // namespace allocator
 }  // namespace rocprofiler

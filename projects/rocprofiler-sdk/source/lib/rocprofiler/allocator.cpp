@@ -20,65 +20,30 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#pragma once
-
-#include <rocprofiler/internal_threading.h>
-
-#include "lib/common/container/stable_vector.hpp"
-#include "lib/common/defines.hpp"
-#include "lib/common/utility.hpp"
 #include "lib/rocprofiler/allocator.hpp"
+#include "lib/rocprofiler/registration.hpp"
 
-#include <PTL/TaskGroup.hh>
-#include <PTL/ThreadPool.hh>
+#include <glog/logging.h>
 
-#include <cstdint>
-#include <string>
-#include <vector>
+#include <mutex>
 
 namespace rocprofiler
 {
-namespace internal_threading
+namespace common
 {
-class ThreadPool : public PTL::ThreadPool
+namespace memory
 {
-public:
-    using parent_type = PTL::ThreadPool;
-
-    ThreadPool(const parent_type::Config&);
-    ~ThreadPool();
-};
-
-class TaskGroup : public PTL::TaskGroup<void>
-{
-public:
-    using parent_type = PTL::TaskGroup<void>;
-
-    TaskGroup(std::shared_ptr<ThreadPool>);
-
-private:
-    std::shared_ptr<ThreadPool> m_pool = {};
-};
-
-using thread_pool_t = ThreadPool;
-using task_group_t  = TaskGroup;
-
-void notify_pre_internal_thread_create(rocprofiler_runtime_library_t);
-void notify_post_internal_thread_create(rocprofiler_runtime_library_t);
-
-// initialize the default thread pool
 void
-initialize();
-
-// destroy all the thread pools
-void
-finalize();
-
-// creates a new thread
-rocprofiler_callback_thread_t
-create_callback_thread();
-
-// returns the task group for the given callback thread identifier
-task_group_t* get_task_group(rocprofiler_callback_thread_t);
-}  // namespace internal_threading
+deleter<allocator::static_data>::operator()() const
+{
+    // if fully initialized and not yet finalized
+    if(registration::get_init_status() > 0 && registration ::get_fini_status() == 0)
+    {
+        static auto _once = std::atomic_flag{};
+        if(!_once.test_and_set()) registration::finalize();
+        // above returns false for only first invocation
+    }
+}
+}  // namespace memory
+}  // namespace common
 }  // namespace rocprofiler

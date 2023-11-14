@@ -97,7 +97,7 @@ typedef struct
                          ///< the code object that is loaded. Note that any non-loaded segments
                          ///< before the first loaded segment are ignored.
     uint64_t load_size;  ///< The byte size of the loaded code objects contiguous memory allocation.
-    uint64_t load_delta;  ///< The signed byte address difference of the memory address at which the
+    int64_t  load_delta;  ///< The signed byte address difference of the memory address at which the
                           ///< code object is loaded minus the virtual address specified in the code
                           ///< object that is loaded.
     rocprofiler_code_object_storage_type_t
@@ -131,12 +131,11 @@ typedef struct
  */
 typedef struct
 {
-    uint64_t               size;            ///< size of this struct
-    uint64_t               kernel_id;       ///< unique symbol identifier value
-    uint64_t               code_object_id;  ///< parent unique code object identifier
-    rocprofiler_agent_id_t rocp_agent;      ///< Agent associated with this symbol
-    const char*            kernel_name;     ///< name of the kernel
-    uint64_t kernel_object;         ///< kernel object handle, used in the kernel dispatch packet
+    uint64_t    size;               ///< size of this struct
+    uint64_t    kernel_id;          ///< unique symbol identifier value
+    uint64_t    code_object_id;     ///< parent unique code object identifier
+    const char* kernel_name;        ///< name of the kernel
+    uint64_t    kernel_object;      ///< kernel object handle, used in the kernel dispatch packet
     uint32_t kernarg_segment_size;  ///< size of memory (in bytes) allocated for kernel arguments.
                                     ///< Will be multiple of 16
     uint32_t kernarg_segment_alignment;  ///< Alignment (in bytes) of the buffer used to pass

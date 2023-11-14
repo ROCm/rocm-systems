@@ -86,14 +86,11 @@ typedef struct
     uint64_t                                  size;
     rocprofiler_service_buffer_tracing_kind_t kind;
     rocprofiler_correlation_id_t              correlation_id;
-    /**
-     * Memory copy operation that can be derived from
-     * ::rocprofiler_tracing_operation_t
-     */
-    uint32_t                operation;
-    rocprofiler_timestamp_t start_timestamp;
-    rocprofiler_timestamp_t end_timestamp;
-    rocprofiler_queue_id_t  queue_id;
+    rocprofiler_timestamp_t                   start_timestamp;
+    rocprofiler_timestamp_t                   end_timestamp;
+    rocprofiler_agent_id_t                    agent_id;
+    rocprofiler_queue_id_t                    queue_id;
+    rocprofiler_kernel_id_t                   kernel_id;
 } rocprofiler_buffer_tracing_memory_copy_record_t;
 
 /**
