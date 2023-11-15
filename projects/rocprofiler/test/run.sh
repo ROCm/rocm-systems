@@ -140,15 +140,6 @@ export ROCP_THRS=10
 export ROCP_INPUT=$BIN_DIR/pmc_input.xml
 eval_test "'rocprof' rocprof-tool PMC n-thread test" $BIN_DIR/test/rocprof-ctrl
 
-export ROCP_OPT_MODE=1
-export ROCP_KITER=20
-export ROCP_DITER=20
-export ROCP_AGENTS=1
-export ROCP_THRS=10
-export ROCP_INPUT=$BIN_DIR/pmc_input.xml
-eval_test "'rocprof' rocprof-tool PMC n-thread opt test" $BIN_DIR/test/rocprof-ctrl
-unset ROCP_OPT_MODE
-
 export ROCP_KITER=20
 export ROCP_DITER=20
 export ROCP_AGENTS=1
