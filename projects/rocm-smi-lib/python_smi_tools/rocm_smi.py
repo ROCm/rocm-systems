@@ -828,23 +828,20 @@ def printTableRow(space, displayString, v_delim=" "):
 
 def checkIfSecondaryDie(device):
     """ Checks if GCD(die) is the secondary die in a MCM.
+    MI200 device specific feature check.
+    The secondary dies lacks power management features.
 
-    Secondary dies lack power management features.
-    TODO: switch to more robust way to check for primary/secondary die, when implemented in Kernel and rocm_smi_lib.
     @param device: The device to check
     """
-    power_cap = c_uint64()
-    # secondary die can currently be determined by checking if all power1_* (power cap) values are equal to zero.
-    ret = rocmsmi.rsmi_dev_power_cap_get(device, 0, byref(power_cap))
-    if not (rsmi_ret_ok(ret, None, 'get_power_cap', False) and power_cap.value == 0):
-        return False
-    ret = rocmsmi.rsmi_dev_power_cap_default_get(device, byref(power_cap))
-    if not (rsmi_ret_ok(ret, None, 'get_power_cap_default', False) and power_cap.value == 0):
-        return False
-    ret = rocmsmi.rsmi_dev_power_ave_get(device, 0, byref(power_cap))
-    if not (rsmi_ret_ok(ret, None, 'get_power_avg', False) and power_cap.value == 0):
-        return False
-    return True
+    energy_count = c_uint64()
+    counter_resoution = c_float()
+    timestamp = c_uint64()
+
+    # secondary die can be determined by checking if energy counter == 0
+    ret = rocmsmi.rsmi_dev_energy_count_get(device, byref(energy_count), byref(counter_resoution), byref(timestamp))
+    if (rsmi_ret_ok(ret, None, 'energy_count_secondary_die_check', silent=False)) and (energy_count.value == 0):
+        return True
+    return False
 
 
 def resetClocks(deviceList):
