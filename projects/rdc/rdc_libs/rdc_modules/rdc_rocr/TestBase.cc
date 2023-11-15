@@ -22,6 +22,7 @@ THE SOFTWARE.
 
 #include <assert.h>
 #include <unistd.h>
+#include <algorithm>
 #include "rdc_modules/rdc_rocr/TestBase.h"
 #include "rdc_modules/rdc_rocr/base_rocr_utils.h"
 #include "rdc_lib/RdcLogger.h"
@@ -130,7 +131,26 @@ hsa_status_t TestBase::get_agent_by_gpu_index(uint32_t gpu_index,
   if (gpu_index >= gpus.size()) {
     throw_if_error(err, "GPU index is too large.");
   }
-  *agent = gpus[gpu_index];
+
+  // sort based on bdf id
+  std::vector<std::pair<uint16_t, hsa_agent_t>> dv_to_id;
+  for (uint32_t dv_ind = 0; dv_ind < gpus.size(); ++dv_ind) {
+      auto dev = gpus[dv_ind];
+      uint16_t bdf_id = 0;
+      err = hsa_agent_get_info(dev,
+                (hsa_agent_info_t)HSA_AMD_AGENT_INFO_BDFID, &bdf_id);
+      throw_if_error(err, "fail to get gpu bdfid");
+      dv_to_id.push_back({bdf_id, dev});
+  }
+  // Stable sort to keep the order if bdf is equal.
+  std::stable_sort(dv_to_id.begin(), dv_to_id.end(), []
+  (const std::pair<uint16_t, hsa_agent_t>& p1,
+    const std::pair<uint16_t, hsa_agent_t>& p2) {
+        return p1.first < p2.first;
+  });
+
+  *agent = dv_to_id[gpu_index].second;
+
   return err;
 }
 
