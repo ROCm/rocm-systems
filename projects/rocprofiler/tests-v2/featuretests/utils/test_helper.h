@@ -22,6 +22,7 @@ THE SOFTWARE.
 #ifndef TESTS_FEATURETESTS_PROFILER_UTILS_TEST_HELPER_H_
 #define TESTS_FEATURETESTS_PROFILER_UTILS_TEST_HELPER_H_
 
+#include <cassert>
 #include <cstdio>
 #include <unistd.h>
 
