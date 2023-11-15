@@ -17,6 +17,7 @@ import numpy as np
 from stitch import stitch
 import gc
 from collections import defaultdict
+from service import CodeobjService
 
 ATT_VERSION = 2
 
@@ -189,15 +190,10 @@ def parse_binary(filename, kernel=None):
     info = SO.wrapped_parse_binary(str(filename).encode("utf-8"), kernel)
 
     code = []
-    kernel_addr = defaultdict(lambda : "Unknown")
-    last_known_function = "Unknown"
     for k in range(info.code_len):
         code_entry = info.code[k]
 
         line = deepcopy(code_entry.line.decode("utf-8"))
-        if "; Begin " in line:
-            last_known_function = line.split("; Begin ")[1]
-
         loc = deepcopy(code_entry.loc.decode("utf-8"))
 
         to_line = int(code_entry.to_line) if (code_entry.to_line >= 0) else None
@@ -207,14 +203,11 @@ def parse_binary(filename, kernel=None):
         code.append([line, int(code_entry.value), to_line, loc, int(code_entry.index),
                     int(code_entry.line_num), int(code_entry.addr), 0, 0])
 
-        if code[-1][-3] != 0 and len(code) > 1:
-            kernel_addr[code[-1][-3]] = last_known_function
-
     jumps = {}
     for k in range(info.jumps_len):
         jumps[info.jumps[k].key] = info.jumps[k].value
 
-    return code, jumps, kernel_addr
+    return code, jumps
 
 
 def getWaves_binary(name):
@@ -248,13 +241,17 @@ def getWaves_binary(name):
     return (traces_python, waves_python, events, occupancy, flags, kernel_addr, info.flags & 0x4)
 
 
-def getWaves_stitch(traces, code, jumps, flags, latency_map, hitcount_map, bIsAuto):
+def getWaves_stitch(traces, code, jumps, flags, latency_map, hitcount_map, bIsAuto, codeobjservice):
     for id in traces.keys():
-        traces[id].instructions = stitch(traces[id].instructions, code, jumps, flags, bIsAuto)
+        traces[id].instructions = stitch(traces[id].instructions, code, jumps, flags, bIsAuto, codeobjservice)
+        if len(code) > hitcount_map.size:
+            hitcount_map = np.pad(hitcount_map, [0,len(code)-hitcount_map.size])
+            latency_map = np.pad(latency_map, [0,len(code)-latency_map.size])
         if traces[id].instructions is not None:
             for inst in traces[id].instructions[0]:
                 hitcount_map[inst.asmline] += inst.num_waves
                 latency_map[inst.asmline] += inst.cycles
+    return hitcount_map, latency_map
 
 
 def persist(trace_file, SIMD, traces):
@@ -301,7 +298,7 @@ def persist(trace_file, SIMD, traces):
         skips = traces[wave.traceid].instructions[-1]
         try:
             for v in traces[wave.traceid].instructions[0]:
-                if cc in skips:
+                while cc in skips:
                     cc += 1
                 t = wave.instructions[cc]
                 insts.append((t[0], v.type, 0, t[1], v.asmline))
@@ -434,7 +431,7 @@ if __name__ == "__main__":
         "--trace_file", help="Filter for trace files", default=None, type=str
     )
     parser.add_argument(
-        "--att_kernel", help="Kernel file", type=str, default=pathenv + "/*_kernel.txt"
+        "--att_kernel", help="Kernel file", type=str, default=os.path.join(pathenv, "*_kernel.txt")
     )
     parser.add_argument("--ports", help="Server and websocket ports, default: 8000,18000")
     parser.add_argument(
@@ -480,17 +477,28 @@ if __name__ == "__main__":
 
     for att_kernel in att_kernel_list:
         print('Parsing:', att_kernel)
+        att_kernel_f = []
+        with open(att_kernel, 'r') as f:
+            for line in f:
+                att_kernel_f.append(line.split('\n')[0])
+
+        get_path_loc = lambda x: np.sum([len(m) for m in x.split(' ')[:3]])+3
+        add_pathnv = lambda x: x[:get_path_loc(x)] + os.path.join(pathenv, x[get_path_loc(x):])
+
+        att_kernel_f = [add_pathnv(p) if '.out' == p[-4:] else p for p in att_kernel_f[1:]]
         assembly_code = deepcopy(args.assembly_code)
 
         # Assembly parsing
         bIsAuto = False
         if assembly_code.lower().strip() == 'auto':
-            assembly_code = att_kernel.split('_kernel.txt')[0]+'_isa.s'
             bIsAuto = True
-        path = Path(assembly_code)
-        if not path.is_file():
+            code = [['; Begin ATT ASM', 100, 0, '', 0, 0, 0, 0, 0]]
+            jumps = []
+        elif not Path(assembly_code).is_file():
             print("Invalid assembly_code('{0}')!".format(assembly_code))
             sys.exit(1)
+        else:
+            code, jumps = parse_binary(assembly_code, att_kernel)
 
         # Trace Parsing
         trace_instance_name = att_kernel.split("_kernel.txt")[0]
@@ -504,7 +512,6 @@ if __name__ == "__main__":
             continue
 
         print('Att kernel:', att_kernel)
-        code, jumps, kern_addr = parse_binary(assembly_code, None if bIsAuto else att_kernel)
 
         DBFILES = []
         EVENTS = []
@@ -512,12 +519,16 @@ if __name__ == "__main__":
         GFXV = []
         analysed_filenames = []
         occupancy_filenames = []
-        dispatch_kernel_names = {}
+        kernel_addr = {}
 
         latency_map = np.zeros((len(code)), dtype=np.int64)
         hitcount_map = np.zeros((len(code)), dtype=np.int32)
 
         gc.collect()
+        if bIsAuto:
+            codeservice = CodeobjService(att_kernel_f, SO.classify_asm_line)
+        else:
+            codeservice = None
 
         for name in filenames:
             traces, waves, perfevents, occupancy, gfxv, addrs, ftrace = getWaves_binary(name)
@@ -528,7 +539,7 @@ if __name__ == "__main__":
                 assert False
 
             for id, addr in enumerate(addrs):
-                dispatch_kernel_names[id] = kern_addr[addr]
+                kernel_addr[id] = addr
             if len(occupancy) > 16:
                 OCCUPANCY.append( occupancy )
                 occupancy_filenames.append(name)
@@ -537,7 +548,7 @@ if __name__ == "__main__":
                 print("No traces from", name)
                 continue
 
-            getWaves_stitch(traces, code, jumps, gfxv, latency_map, hitcount_map, bIsAuto)
+            hitcount_map, latency_map = getWaves_stitch(traces, code, jumps, gfxv, latency_map, hitcount_map, bIsAuto, codeservice)
 
             analysed_filenames.append(name)
             EVENTS.append(perfevents)
@@ -559,7 +570,7 @@ if __name__ == "__main__":
                 "EVENT_NAMES": EVENT_NAMES,
                 "OCCUPANCY": OCCUPANCY,
                 "ShaderNames": occupancy_filenames,
-                "DispatchNames": dispatch_kernel_names,
+                "DispatchNames": {id: codeservice.getSymbolName(addr) for id, addr in kernel_addr.items()}
             }
             view_trace(
                 args,

@@ -70,6 +70,12 @@ class Queue {
 
   static void WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t user_pkt_index,
                                void* data, hsa_amd_queue_intercept_packet_writer writer);
+  static bool ATTWriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t user_pkt_index,
+                               void* data, hsa_amd_queue_intercept_packet_writer writer);
+  static bool ATTSingleWriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t user_pkt_index,
+                               void* data, hsa_amd_queue_intercept_packet_writer writer);
+  static bool ATTContiguousWriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t user_pkt_index,
+                               void* data, hsa_amd_queue_intercept_packet_writer writer);
   hsa_queue_t* GetCurrentInterceptQueue();
   hsa_agent_t GetGPUAgent();
   hsa_agent_t GetCPUAgent();

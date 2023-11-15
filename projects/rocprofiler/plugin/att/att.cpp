@@ -44,13 +44,11 @@
 #include "rocprofiler.h"
 #include "rocprofiler_plugin.h"
 #include "../utils.h"
-#include "code_printing.hpp"
-#include "../../src/core/session/att/att.h"
+#include "../../src/core/session/att/att_header.h"
 
 #define ATT_FILENAME_MAXBYTES 90
 #define TEST_INVALID_KERNEL size_t(-1)
 
-namespace {
 class att_plugin_t {
  public:
   att_plugin_t(void* data) {
@@ -65,22 +63,16 @@ class att_plugin_t {
 
     header.raw = reinterpret_cast<uint64_t>(data);
     header.reserved = 0x11;
-
-    isa_mode = static_cast<decltype(isa_mode)>(header.isadumpmode);
-    header.isadumpmode = 0;
   }
 
   bool MPI_ENABLE = false;
   int MPI_RANK = 0;
-  std::mutex writing_lock;
+  static std::mutex writing_lock;
   bool is_valid_{true};
   rocprofiler::att_header_packet_t header{.raw = 0};
-  rocprofiler::rocprofiler_att_isa_dump_mode isa_mode = rocprofiler::ISA_MODE_DUMP_ALL;
 
   bool CheckAddrMatches(uint64_t kernel_addr, uint64_t base_address, uint64_t size)
   {
-    if (isa_mode == rocprofiler::ISA_MODE_DUMP_ALL)
-      return true;
     return (kernel_addr >= base_address) && (kernel_addr < base_address + size);
   }
 
@@ -93,7 +85,6 @@ class att_plugin_t {
 
   int FlushATTRecord(const rocprofiler_record_att_tracer_t* att_tracer_record,
                      rocprofiler_session_id_t session_id, rocprofiler_buffer_id_t buffer_id) {
-    std::lock_guard<std::mutex> lock(writing_lock);
 
     if (!att_tracer_record) return ROCPROFILER_STATUS_ERROR;
 
@@ -122,11 +113,11 @@ class att_plugin_t {
     if (name_demangled.size() > ATT_FILENAME_MAXBYTES)  // Limit filename size
       name_demangled = name_demangled.substr(0, ATT_FILENAME_MAXBYTES);
 
-    std::string outfilepath = ".";
-    if (const char* env = getenv("OUTPUT_PATH")) outfilepath = std::string(env);
+    std::string output_dir = ".";
+    if (const char* env = getenv("OUTPUT_PATH")) output_dir = std::string(env);
 
-    outfilepath.reserve(outfilepath.size() + 128);  // Max filename size
-    outfilepath += '/' + name_demangled;
+    std::string outfilepath = output_dir + '/' + name_demangled;
+    outfilepath.reserve(output_dir.size() + 128);  // Max filename size
     if (MPI_ENABLE) outfilepath += "_rank" + std::to_string(MPI_RANK);
     outfilepath += "_v";
 
@@ -139,14 +130,16 @@ class att_plugin_t {
     auto writer_id = att_tracer_record->writer_id;
 
     std::string fname = outfilepath + "_kernel.txt";
-    std::ofstream(fname.c_str()) << name_demangled << " dispatch[" << writer_id << "] GPU["
-                                 << att_tracer_record->gpu_id.handle << "]: " << kernel_name_mangled
-                                 << '\n';
+    std::ofstream kernel_txt_file((outfilepath + "_kernel.txt").c_str());
+    kernel_txt_file << name_demangled << " dispatch[" << writer_id << "] GPU["
+                    << att_tracer_record->gpu_id.handle << "]: " << kernel_name_mangled
+                    << '\n';
 
     // iterate over each shader engine att trace
     header.navi = !att_tracer_record->intercept_list.userdata & 0x1;
     int se_num = att_tracer_record->shader_engine_data_count;
-    for (int i = 0; i < se_num; i++) {
+    for (int i = 0; i < se_num; i++)
+    {
       if (!att_tracer_record->shader_engine_data ||
           !att_tracer_record->shader_engine_data[i].buffer_ptr)
         continue;
@@ -166,50 +159,39 @@ class att_plugin_t {
       out.write(data_buffer_ptr, se_att_trace->buffer_size);
     }
 
-    if (isa_mode == rocprofiler::ISA_MODE_DUMP_NONE)
-      return 0;
+    for (size_t i = 0; i < att_tracer_record->intercept_list.count; i++)
+    {
+      const auto& symbol = att_tracer_record->intercept_list.symbols[i];
+      if (!symbol.filepath) continue;
 
-    uint64_t kernel_addr = att_tracer_record->intercept_list.userdata >> 1;
+      std::string sfilepath(symbol.filepath);
+      bool bCopiedData = symbol.data && symbol.data_size;
 
-    std::ofstream isafile(outfilepath + "_isa.s");
-    if (!isafile.is_open()) {
-      std::cerr << "Could not open ISA file: " << outfilepath << "_isa.s" << std::endl;
-      return ROCPROFILER_STATUS_ERROR;
-    }
-    isafile << "<Kernel> " << kernel_name_mangled << '\n';
+      if (bCopiedData)
+      {
+        auto pos = sfilepath.find("://");
+        auto rpos = sfilepath.rfind('/');
 
-    for (size_t i = 0; i < att_tracer_record->intercept_list.count; i++) {
-      const rocprofiler_intercepted_codeobj_t& symbol =
-          att_tracer_record->intercept_list.symbols[i];
+        if (pos == std::string::npos || pos+3 >= sfilepath.size()) continue;
 
-      if (!CheckAddrMatches(kernel_addr, symbol.base_address, symbol.mem_size)) continue;
-
-      std::unique_ptr<CodeObjectBinary> binary;
-      std::unique_ptr<code_object_decoder_t> decoder;
-
-      if (symbol.data && symbol.data_size) {
-        decoder = std::make_unique<code_object_decoder_t>(symbol.data, symbol.data_size);
-      } else if (std::string(symbol.filepath).find("file://") != std::string::npos) {
-        binary = std::make_unique<CodeObjectBinary>(symbol.filepath);
-        decoder =
-            std::make_unique<code_object_decoder_t>(binary->buffer.data(), binary->buffer.size());
-      } else {
-        continue;
+        std::string type(sfilepath.begin(), sfilepath.begin()+pos);
+        std::string cut(sfilepath.begin()+rpos+1, sfilepath.end());
+        sfilepath = type + cut + ".out";
       }
 
-      if (isa_mode == rocprofiler::ISA_MODE_DUMP_KERNEL)
-        decoder->disassemble_single_kernel(kernel_addr-symbol.base_address);
-      else
-        decoder->disassemble_kernels();
+      kernel_txt_file << std::hex << "0x" << symbol.base_address << " 0x" << symbol.mem_size
+                      << ' ' << std::dec << symbol.att_marker_id << ' ' << sfilepath << '\n';
 
-      for (auto& instance : decoder->instructions) {
-        uint64_t addr = instance.address + symbol.base_address;
+      sfilepath = output_dir + '/' + sfilepath;
+      if (!bCopiedData || att_file_exists(sfilepath)) continue;
 
-        if (decoder->m_symbol_map.find(instance.address) != decoder->m_symbol_map.end())
-          isafile << "; Begin " << decoder->m_symbol_map[instance.address].name << '\n';
-        if (instance.cpp_reference) isafile << "; " << instance.cpp_reference << '\n';
-        isafile << instance.instruction << " // " << std::hex << addr << '\n';
+      std::ofstream isafile(sfilepath, std::ios::binary);
+      if (!isafile.is_open()) {
+        std::cerr << "Could not open file: " << sfilepath << std::endl;
+        return ROCPROFILER_STATUS_ERROR;
       }
+
+      isafile.write(symbol.data, symbol.data_size);
     }
 
     return ROCPROFILER_STATUS_SUCCESS;
@@ -248,8 +230,7 @@ class att_plugin_t {
 };
 
 att_plugin_t* att_plugin = nullptr;
-
-}  // namespace
+std::mutex att_plugin_t::writing_lock;
 
 ROCPROFILER_EXPORT int rocprofiler_plugin_initialize(uint32_t rocprofiler_major_version,
                                                      uint32_t rocprofiler_minor_version,
@@ -258,6 +239,7 @@ ROCPROFILER_EXPORT int rocprofiler_plugin_initialize(uint32_t rocprofiler_major_
       rocprofiler_minor_version < ROCPROFILER_VERSION_MINOR)
     return ROCPROFILER_STATUS_ERROR;
 
+  std::lock_guard<std::mutex> lock(att_plugin_t::writing_lock);
   if (att_plugin != nullptr) return ROCPROFILER_STATUS_ERROR;
 
   att_plugin = new att_plugin_t(data);
@@ -270,6 +252,7 @@ ROCPROFILER_EXPORT int rocprofiler_plugin_initialize(uint32_t rocprofiler_major_
 }
 
 ROCPROFILER_EXPORT void rocprofiler_plugin_finalize() {
+  std::lock_guard<std::mutex> lock(att_plugin_t::writing_lock);
   if (!att_plugin) return;
   delete att_plugin;
   att_plugin = nullptr;
@@ -278,11 +261,13 @@ ROCPROFILER_EXPORT void rocprofiler_plugin_finalize() {
 ROCPROFILER_EXPORT int rocprofiler_plugin_write_buffer_records(
     const rocprofiler_record_header_t* begin, const rocprofiler_record_header_t* end,
     rocprofiler_session_id_t session_id, rocprofiler_buffer_id_t buffer_id) {
+  std::lock_guard<std::mutex> lock(att_plugin_t::writing_lock);
   if (!att_plugin || !att_plugin->IsValid()) return ROCPROFILER_STATUS_ERROR;
   return att_plugin->WriteBufferRecords(begin, end, session_id, buffer_id);
 }
 
 ROCPROFILER_EXPORT int rocprofiler_plugin_write_record(rocprofiler_record_tracer_t record) {
+  std::lock_guard<std::mutex> lock(att_plugin_t::writing_lock);
   if (!att_plugin || !att_plugin->IsValid()) return ROCPROFILER_STATUS_ERROR;
   if (record.header.id.handle == 0) return ROCPROFILER_STATUS_SUCCESS;
   return ROCPROFILER_STATUS_SUCCESS;

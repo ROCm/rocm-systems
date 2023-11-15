@@ -61,7 +61,7 @@ class DisassemblyInstance {
 
   void* buffer;
   int64_t size;
-  std::vector<instruction_instance_t>& instructions;
+  instruction_instance_t last_instruction;
   amd_comgr_disassembly_info_t info;
   amd_comgr_data_t data;
   std::map<uint64_t, SymbolInfo> symbol_map;

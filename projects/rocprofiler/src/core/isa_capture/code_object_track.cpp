@@ -48,13 +48,10 @@ std::mutex codeobj_record::mutex;
 std::unordered_map<uint64_t, CodeobjPtr> codeobj_record::codeobjs{};
 std::unordered_map<uint64_t, codeobj_record::RecordInstance> codeobj_record::record_id_map{};
 std::unordered_set<codeobj_record*> codeobj_record::listeners;
+std::atomic<uint32_t> codeobj_capture_instance::loadcount{0};
 
 // Codeobj Record
 codeobj_record::codeobj_record(rocprofiler_codeobj_capture_mode_t mode) : capture_mode(mode){};
-
-static uint64_t timestamp() {
-  return rocprofiler::ROCProfiler_Singleton::GetInstance().timestamp_ns().value;
-}
 
 void codeobj_record::start_capture() {
   listeners.insert(this);
@@ -72,10 +69,18 @@ void codeobj_record::stop_capture() {
 }
 
 // Codeobj Capture
-void codeobj_capture_instance::Load(uint64_t addr, const std::string& URI, uint64_t mem_addr,
-                                    uint64_t size) {
+void codeobj_capture_instance::Load(
+  uint64_t addr,
+  const std::string& URI,
+  uint64_t mem_addr,
+  uint64_t size
+) {
+  uint32_t id = loadcount.fetch_add(1, std::memory_order_relaxed)+1;
+  auto time = rocprofiler::ROCProfiler_Singleton::GetInstance().timestamp_ns().value;
+
   std::lock_guard<std::mutex> lock(codeobj_record::mutex);
-  auto inst = std::make_shared<codeobj_capture_instance>(addr, URI, mem_addr, size, timestamp());
+
+  auto inst = std::make_shared<codeobj_capture_instance>(addr, URI, mem_addr, size, time, id);
   codeobj_record::codeobjs[addr] = inst;
   for (auto* listen : codeobj_record::listeners) listen->addcapture(inst);
 }
@@ -85,7 +90,8 @@ void codeobj_capture_instance::Unload(uint64_t addr) {
 
   if (codeobj_record::codeobjs.find(addr) == codeobj_record::codeobjs.end()) return;
 
-  codeobj_record::codeobjs.at(addr)->end_time = timestamp();
+  auto time = rocprofiler::ROCProfiler_Singleton::GetInstance().timestamp_ns().value;
+  codeobj_record::codeobjs.at(addr)->end_time = time;
   codeobj_record::codeobjs.erase(addr);
 }
 
@@ -178,11 +184,6 @@ std::pair<size_t, size_t> codeobj_capture_instance::parse_uri() {
 
   return {offset, size};
 }
-
-codeobj_capture_instance::codeobj_capture_instance(uint64_t _addr, const std::string& _uri,
-                                                   uint64_t mem_addr, uint64_t mem_size,
-                                                   uint64_t start_time)
-    : addr(_addr), start_time(start_time), URI(_uri), mem_addr(mem_addr), mem_size(mem_size) {};
 
 void codeobj_capture_instance::setmode(rocprofiler_codeobj_capture_mode_t mode) {
   // Only reset when needed & check if codeobj was not unloaded

@@ -417,67 +417,84 @@ struct CodeObjectCallbackArg {
   bool unload;
 };
 
-hsa_status_t CodeObjectCallback(hsa_executable_t executable,
-                                hsa_loaded_code_object_t loaded_code_object, void* arg) {
-  hsa_evt_data_t data{};
-  rocprofiler::HSASupport_Singleton& hsasupport_singleton =
-      rocprofiler::HSASupport_Singleton::GetInstance();
-  if (hsasupport_singleton.GetHSALoaderApi().hsa_ven_amd_loader_loaded_code_object_get_info(
-          loaded_code_object, HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_CODE_OBJECT_STORAGE_TYPE,
-          &data.codeobj.storage_type) != HSA_STATUS_SUCCESS)
+#define CheckInfo(x) if ((x) != HSA_STATUS_SUCCESS) \
     rocprofiler::fatal("hsa_ven_amd_loader_loaded_code_object_get_info failed");
 
-  if (data.codeobj.storage_type == HSA_VEN_AMD_LOADER_CODE_OBJECT_STORAGE_TYPE_FILE) {
-    if (hsasupport_singleton.GetHSALoaderApi().hsa_ven_amd_loader_loaded_code_object_get_info(
-            loaded_code_object, HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_CODE_OBJECT_STORAGE_FILE,
-            &data.codeobj.storage_file) != HSA_STATUS_SUCCESS ||
-        data.codeobj.storage_file == -1)
+hsa_status_t CodeObjectCallback(hsa_executable_t executable,
+                                hsa_loaded_code_object_t loaded_code_object, void* arg) {
+  using namespace std::placeholders;
+  hsa_evt_data_t data{};
+
+  auto codeobj_info_func = rocprofiler::HSASupport_Singleton::GetInstance()
+                                    .GetHSALoaderApi()
+                                    .hsa_ven_amd_loader_loaded_code_object_get_info;
+  auto codeobj_bound = std::bind(codeobj_info_func, loaded_code_object, _1, _2);
+
+  CheckInfo(codeobj_bound(
+    HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_CODE_OBJECT_STORAGE_TYPE,
+    &data.codeobj.storage_type
+  ));
+
+  if (data.codeobj.storage_type == HSA_VEN_AMD_LOADER_CODE_OBJECT_STORAGE_TYPE_FILE)
+  {
+    CheckInfo(codeobj_bound(
+      HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_CODE_OBJECT_STORAGE_FILE,
+      &data.codeobj.storage_file
+    ));
+    if (data.codeobj.storage_file == -1)
       rocprofiler::fatal("hsa_ven_amd_loader_loaded_code_object_get_info failed");
+
     data.codeobj.memory_base = data.codeobj.memory_size = 0;
-  } else if (data.codeobj.storage_type == HSA_VEN_AMD_LOADER_CODE_OBJECT_STORAGE_TYPE_MEMORY) {
-    if (hsasupport_singleton.GetHSALoaderApi().hsa_ven_amd_loader_loaded_code_object_get_info(
-            loaded_code_object,
-            HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_CODE_OBJECT_STORAGE_MEMORY_BASE,
-            &data.codeobj.memory_base) != HSA_STATUS_SUCCESS ||
-        hsasupport_singleton.GetHSALoaderApi().hsa_ven_amd_loader_loaded_code_object_get_info(
-            loaded_code_object,
-            HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_CODE_OBJECT_STORAGE_MEMORY_SIZE,
-            &data.codeobj.memory_size) != HSA_STATUS_SUCCESS)
-      rocprofiler::fatal("hsa_ven_amd_loader_loaded_code_object_get_info failed");
+  }
+  else if (data.codeobj.storage_type == HSA_VEN_AMD_LOADER_CODE_OBJECT_STORAGE_TYPE_MEMORY)
+  {
+    CheckInfo(codeobj_bound(
+      HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_CODE_OBJECT_STORAGE_MEMORY_BASE,
+      &data.codeobj.memory_base
+    ));
+    CheckInfo(codeobj_bound(
+      HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_CODE_OBJECT_STORAGE_MEMORY_SIZE,
+      &data.codeobj.memory_size
+    ));
     data.codeobj.storage_file = -1;
-  } else if (data.codeobj.storage_type == HSA_VEN_AMD_LOADER_CODE_OBJECT_STORAGE_TYPE_NONE) {
-    return HSA_STATUS_SUCCESS;  // FIXME: do we really not care about these
-                                // code objects?
-  } else {
+  }
+  else if (data.codeobj.storage_type == HSA_VEN_AMD_LOADER_CODE_OBJECT_STORAGE_TYPE_NONE)
+  {
+    return HSA_STATUS_SUCCESS;  // FIXME: do we really not care about these code objects?
+  }
+  else
+  {
     rocprofiler::fatal("unknown code object storage type: %d", data.codeobj.storage_type);
   }
 
-  if (hsasupport_singleton.GetHSALoaderApi().hsa_ven_amd_loader_loaded_code_object_get_info(
-          loaded_code_object, HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_LOAD_BASE,
-          &data.codeobj.load_base) != HSA_STATUS_SUCCESS ||
-      hsasupport_singleton.GetHSALoaderApi().hsa_ven_amd_loader_loaded_code_object_get_info(
-          loaded_code_object, HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_LOAD_SIZE,
-          &data.codeobj.load_size) != HSA_STATUS_SUCCESS ||
-      hsasupport_singleton.GetHSALoaderApi().hsa_ven_amd_loader_loaded_code_object_get_info(
-          loaded_code_object, HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_LOAD_DELTA,
-          &data.codeobj.load_delta) != HSA_STATUS_SUCCESS)
-    rocprofiler::fatal("hsa_ven_amd_loader_loaded_code_object_get_info failed");
+  CheckInfo(codeobj_bound(
+    HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_LOAD_BASE,
+    &data.codeobj.load_base
+  ));
+  CheckInfo(codeobj_bound(
+    HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_LOAD_SIZE,
+    &data.codeobj.load_size
+  ));
+  CheckInfo(codeobj_bound(
+    HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_LOAD_DELTA,
+    &data.codeobj.load_delta
+  ));
 
-  if (hsasupport_singleton.GetHSALoaderApi().hsa_ven_amd_loader_loaded_code_object_get_info(
-          loaded_code_object, HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_URI_LENGTH,
-          &data.codeobj.uri_length) != HSA_STATUS_SUCCESS)
-    rocprofiler::fatal("hsa_ven_amd_loader_loaded_code_object_get_info failed");
+  CheckInfo(codeobj_bound(
+    HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_URI_LENGTH,
+    &data.codeobj.uri_length
+  ));
 
   std::string uri_str(data.codeobj.uri_length, '\0');
-  if (hsasupport_singleton.GetHSALoaderApi().hsa_ven_amd_loader_loaded_code_object_get_info(
-          loaded_code_object, HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_URI, uri_str.data()) !=
-      HSA_STATUS_SUCCESS)
-    rocprofiler::fatal("hsa_ven_amd_loader_loaded_code_object_get_info failed");
 
-  if (hsasupport_singleton.GetHSALoaderApi().hsa_ven_amd_loader_loaded_code_object_get_info(
-          loaded_code_object, HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_AGENT,
-          &data.codeobj.agent) != HSA_STATUS_SUCCESS)
-    rocprofiler::fatal("hsa_ven_amd_loader_loaded_code_object_get_info failed");
+  CheckInfo(codeobj_bound(
+    HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_URI,
+    uri_str.data()
+  ));
+  CheckInfo(codeobj_bound(
+    HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_AGENT,
+    &data.codeobj.agent
+  ));
 
   data.codeobj.uri = uri_str.c_str();
   data.codeobj.unload = *static_cast<bool*>(arg) ? 1 : 0;
@@ -486,8 +503,8 @@ hsa_status_t CodeObjectCallback(hsa_executable_t executable,
   if (data.codeobj.unload)
     codeobj_capture_instance::Unload(data.codeobj.load_base);
   else
-    codeobj_capture_instance::Load(data.codeobj.load_base, uri_str, data.codeobj.memory_base,
-                                   data.codeobj.memory_size);
+    codeobj_capture_instance::Load(data.codeobj.load_base,
+            uri_str, data.codeobj.memory_base, data.codeobj.memory_size);
 
   hsa_executable_iterate_agent_symbols(executable, data.codeobj.agent,
                                        hsa_executable_iteration_callback, &(data.codeobj.unload));
@@ -783,6 +800,7 @@ const Agent::DeviceInfo& HSAAgentInfo::GetDeviceInfo() const {
     return device_info_;
   }
   assert("Attempting to read deviceInfo for a CPU agent");
+  return device_info_;
 }
 
 uint64_t HSAAgentInfo::getHandle() const { return agent_.handle; }
@@ -1037,7 +1055,6 @@ void HSASupport_Singleton::HSAInitialize(HsaApiTable* table) {
                 // is currently doing as well as the roctracer compatibility
                 // code earlier in this file.
                 uint32_t gpu_id = 0;
-
                 hsasupport_singleton.GetCoreApiTable().hsa_agent_get_info_fn(
                     agent, (hsa_agent_info_t)(HSA_AMD_AGENT_INFO_DRIVER_UID), &gpu_id);
                 const Agent::DeviceInfo& device_info = rocprofiler_instance.GetDeviceInfo(gpu_id);
@@ -1046,6 +1063,7 @@ void HSASupport_Singleton::HSAInitialize(HsaApiTable* table) {
                     agent, (hsa_agent_info_t)(HSA_AMD_AGENT_INFO_NEAREST_CPU), &nearCpuAgent);
                 rocprofiler::HSAAgentInfo agent_info(agent, device_type);
                 agent_info.SetNearCpuAgent(nearCpuAgent);
+
                 agent_info.SetDeviceInfo(device_info);
                 Packet::InitializeGPUPool(agent, &agent_info);
                 hsasupport_singleton.SetHSAAgentInfo(agent, agent_info);
@@ -1119,6 +1137,24 @@ void HSASupport_Singleton::HSAFinalize() {
   queues.clear();
   // table gets reset by rocr runtime
   FinitKsymbols();
+}
+
+#define CHECK_HSA_STATUS(msg, status)                                                          \
+if ((status) != HSA_STATUS_SUCCESS && (status) != HSA_STATUS_INFO_BREAK) {                     \
+  try {                                                                                        \
+    const char* emsg = nullptr;                                                                \
+    hsa_status_string(status, &emsg);                                                          \
+    if (!emsg) emsg = "<Unknown HSA Error>";                                                   \
+    std::cerr << msg << std::endl;                                                             \
+    std::cerr << emsg << std::endl;                                                            \
+  } catch (std::exception & e) {                                                               \
+  }                                                                                            \
+  abort();                                                                                     \
+}
+
+void HSASupport_Singleton::CreateSignal(uint32_t attribute, hsa_signal_t* signal) {
+  auto status = GetAmdExtTable().hsa_amd_signal_create_fn(1, 0, nullptr, attribute, signal);
+  CHECK_HSA_STATUS("Error: hsa_amd_signal_create failed", status);
 }
 
 

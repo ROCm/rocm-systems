@@ -49,6 +49,26 @@
 #include <elfutils/libdw.h>
 #include <sys/mman.h>
 
+#include <atomic>
+
+#define C_API_BEGIN try {
+
+#define C_API_END(returndata)                       \
+} catch (std::exception& e)                         \
+{                                                   \
+  std::cerr << "Error: " << e.what() << std::endl;  \
+  return returndata;                                \
+}                                                   \
+catch (std::string& s)                              \
+{                                                   \
+  std::cerr << "Error: " << s << std::endl;         \
+  return returndata;                                \
+}                                                   \
+catch (...)                                         \
+{                                                   \
+  return returndata;                                \
+}
+
 code_object_decoder_t::code_object_decoder_t(const char* codeobj_data, uint64_t codeobj_size) {
   buffer = std::vector<char>{};
   buffer.resize(codeobj_size);
@@ -110,8 +130,16 @@ code_object_decoder_t::code_object_decoder_t(const char* codeobj_data, uint64_t 
     // load_symbol_map();
   }
 
-  disassembly = std::make_unique<DisassemblyInstance>(*this);
-  m_symbol_map = disassembly->GetKernelMap();
+  try {
+    disassembly = std::make_unique<DisassemblyInstance>(*this); // Can throw
+  } catch(std::exception& e) {
+    return;
+  }
+  try {
+    m_symbol_map = disassembly->GetKernelMap(); // Can throw
+  } catch(std::exception& e) {
+    return;
+  }
 
   //disassemble_kernels();
 }
@@ -143,7 +171,29 @@ std::optional<SymbolInfo> code_object_decoder_t::find_symbol(uint64_t vaddr) {
   return SymbolInfo{symbol_name, symbol.faddr, symbol.mem_size};
 }
 
-void code_object_decoder_t::disassemble_kernel(uint64_t faddr, uint64_t vaddr) {
+std::pair<instruction_instance_t, size_t>
+code_object_decoder_t::disassemble_instruction(uint64_t faddr, uint64_t vaddr)
+{
+  if (!disassembly)
+    throw std::exception();
+
+  char* cpp_line = nullptr;
+  auto it = m_line_number_map.find(vaddr);
+  if (it != m_line_number_map.end()) {
+    const std::string& file_name = it->second.first;
+    size_t line_number = it->second.second;
+
+    std::string cpp = file_name + ':' + std::to_string(line_number);
+    cpp_line = (char*)calloc(cpp.size() + 4, sizeof(char));
+    std::memcpy(cpp_line, cpp.data(), cpp.size() * sizeof(char));
+  }
+  size_t size = disassembly->ReadInstruction(faddr, vaddr, cpp_line);
+  return {disassembly->last_instruction, size};
+}
+
+void code_object_decoder_t::disassemble_kernel(uint64_t faddr, uint64_t vaddr)
+{
+  if (!disassembly) return;
   auto symbol = find_symbol(vaddr);
 
   if (!symbol)
@@ -155,19 +205,12 @@ void code_object_decoder_t::disassemble_kernel(uint64_t faddr, uint64_t vaddr) {
   std::cout << "Dumping ISA for " << symbol->name << std::endl;
 
   uint64_t end_addr = faddr + symbol->mem_size;
-  while (faddr < end_addr) {
-    char* cpp_line = nullptr;
-    auto it = m_line_number_map.find(vaddr);
-    if (it != m_line_number_map.end()) {
-      const std::string& file_name = it->second.first;
-      size_t line_number = it->second.second;
-
-      std::string cpp = file_name + ':' + std::to_string(line_number);
-      cpp_line = (char*)calloc(cpp.size() + 4, sizeof(char));
-      std::memcpy(cpp_line, cpp.data(), cpp.size() * sizeof(char));
-    }
-
-    size_t size = disassembly->ReadInstruction(faddr, vaddr, cpp_line);
+  while (faddr < end_addr)
+  {
+    size_t size;
+    instruction_instance_t inst;
+    std::tie(inst, size) = this->disassemble_instruction(faddr, vaddr);
+    instructions.push_back(inst);
     faddr += size;
     vaddr += size;
   }
@@ -181,4 +224,137 @@ void code_object_decoder_t::disassemble_single_kernel(uint64_t kaddr) {
   for (auto& [vaddr, v] : m_symbol_map)
     if (kaddr >= vaddr && kaddr < vaddr + v.mem_size)
       disassemble_kernel(v.faddr, vaddr);
+}
+
+CodeobjService::CodeobjService(const char* filepath, uint64_t load_base): load_base(load_base)
+{
+  if (!filepath) throw "Empty filepath.";
+
+  std::string_view fpath(filepath);
+
+  if (fpath.rfind(".out") + 4 == fpath.size())
+  {
+    std::ifstream file(filepath, std::ios::in | std::ios::binary);
+
+    if (!file.is_open())
+      throw "Invalid filename " + std::string(filepath);
+
+    std::vector<char> buffer;
+    file.seekg(0, file.end);
+    buffer.resize(file.tellg());
+    file.seekg(0, file.beg);
+    file.read(buffer.data(), buffer.size());
+
+    decoder = std::make_unique<code_object_decoder_t>(buffer.data(), buffer.size());
+  }
+  else
+  {
+    std::unique_ptr<CodeObjectBinary> binary = std::make_unique<CodeObjectBinary>(filepath);
+    decoder = std::make_unique<code_object_decoder_t>(binary->buffer.data(), binary->buffer.size());
+  }
+}
+
+bool CodeobjService::decode_single(uint64_t vaddr, uint64_t faddr)
+{
+  if (!decoder->disassembly) return false;
+
+  try
+  {
+    decoded_map[vaddr] = decoder->disassemble_instruction(faddr, vaddr-load_base);
+  }
+  catch(std::exception& e)
+  {
+    return false;
+  }
+  return true;
+}
+
+std::pair<instruction_instance_t, size_t>& CodeobjService::getDecoded(uint64_t addr)
+{
+  if (decoded_map.find(addr) != decoded_map.end())
+    return decoded_map[addr];
+
+  std::optional<uint64_t> faddr{};
+
+  if (!bNotElfFILE)
+  {
+    faddr = DisassemblyInstance::va2fo(decoder->buffer.data(), addr-load_base);
+    if (!faddr)
+      bNotElfFILE = true;
+  }
+
+  if (bNotElfFILE && decoder->buffer.size() > 0x100) {
+    uint64_t f_offset = *reinterpret_cast<uint32_t*>(decoder->buffer.data()+0xb8);
+    uint64_t v_offset = *reinterpret_cast<uint32_t*>(decoder->buffer.data()+0xc8);
+
+    faddr = addr+f_offset-load_base-v_offset;
+  }
+
+  if (!faddr || !decode_single(addr, *faddr))
+  {
+    std::cerr << "Invalid addr: " << std::hex << addr << std::dec << std::endl;
+    throw std::exception();
+  }
+
+  return decoded_map[addr];
+}
+
+std::unordered_map<uint64_t, std::unique_ptr<CodeobjService>> services{};
+std::atomic<uint64_t> shandles{1};
+
+#define PUBLIC_API __attribute__((visibility("default")))
+
+extern "C"
+{
+  PUBLIC_API uint64_t createService(const char* filename, uint64_t load_base)
+  {
+    C_API_BEGIN
+
+    uint64_t handle = shandles.fetch_add(1);
+    services[handle] = std::make_unique<CodeobjService>(filename, load_base);
+    return handle;
+
+    C_API_END(0)
+  }
+  PUBLIC_API int deleteService(uint64_t handle)
+  {
+    return services.erase(handle);
+  }
+  PUBLIC_API const char* getInstruction(uint64_t handle, uint64_t addr)
+  {
+    C_API_BEGIN
+
+    return services.at(handle)->getInstruction(addr);
+
+    C_API_END(nullptr)
+  }
+  PUBLIC_API const char* getCppref(uint64_t handle, uint64_t addr)
+  {
+    C_API_BEGIN
+    
+    return services.at(handle)->getCppref(addr);
+
+    C_API_END(nullptr)
+  }
+  PUBLIC_API size_t getInstSize(uint64_t handle, uint64_t addr)
+  {
+    C_API_BEGIN
+
+    return services.at(handle)->getSize(addr);
+
+    C_API_END(0)
+  }
+  PUBLIC_API const char* getSymbolName(uint64_t addr)
+  {
+    C_API_BEGIN
+  
+    for (auto& [handle, service] : services)
+    {
+      if (!service->inrange(addr)) continue;
+      return service->getSymbolName(addr);
+    }
+    return nullptr;
+
+    C_API_END(nullptr)
+  }
 }

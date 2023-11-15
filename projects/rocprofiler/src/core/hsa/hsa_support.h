@@ -169,6 +169,7 @@ class HSASupport_Singleton {
   void HSAFinalize();
   void InitKsymbols();
   void FinitKsymbols();
+  void CreateSignal(uint32_t attribute, hsa_signal_t* signal);
   HSASupport_Singleton(const HSASupport_Singleton&) = delete;
   HSASupport_Singleton& operator=(const HSASupport_Singleton&) = delete;
 };

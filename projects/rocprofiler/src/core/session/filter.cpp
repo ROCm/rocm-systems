@@ -195,7 +195,7 @@ void Filter::SetProperty(rocprofiler_filter_property_t property) {
     case ROCPROFILER_FILTER_DISPATCH_IDS:
       dispatch_id_filter_.clear();
       for (uint32_t j = 0; j < property.data_count; j++)
-        dispatch_id_filter_.emplace_back(property.dispatch_ids[j]);
+        dispatch_id_filter_.push_back({property.dispatch_ids[j].start, property.dispatch_ids[j].end});
       break;
     default:
       break;
@@ -205,9 +205,8 @@ void Filter::SetProperty(rocprofiler_filter_property_t property) {
       //     "profiler mode!\n");
   }
 }
-std::variant<std::vector<std::string>, uint32_t*, std::vector<uint64_t>> Filter::GetProperty(
-    rocprofiler_filter_property_kind_t kind) {
-  std::variant<std::vector<std::string>, uint32_t*, std::vector<uint64_t>> property;
+Filter::filter_property_variant_t Filter::GetProperty(rocprofiler_filter_property_kind_t kind) {
+  filter_property_variant_t property;
   switch (kind) {
     case ROCPROFILER_FILTER_GPU_NAME: {
       property = agent_names_;

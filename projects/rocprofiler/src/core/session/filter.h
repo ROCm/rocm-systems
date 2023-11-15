@@ -33,6 +33,11 @@ namespace rocprofiler {
 
 class Filter {
  public:
+  typedef std::variant<
+    std::vector<std::string>,
+    uint32_t*,
+    std::vector<std::pair<uint64_t,uint64_t>>
+  > filter_property_variant_t;
   Filter(rocprofiler_filter_id_t id, rocprofiler_filter_kind_t filter_kind,
          rocprofiler_filter_data_t filter_data, uint64_t data_count);
   ~Filter();
@@ -53,8 +58,7 @@ class Filter {
   bool HasCallback();
 
   void SetProperty(rocprofiler_filter_property_t property);
-  std::variant<std::vector<std::string>, uint32_t*, std::vector<uint64_t> > GetProperty(
-      rocprofiler_filter_property_kind_t kind);
+  filter_property_variant_t GetProperty(rocprofiler_filter_property_kind_t kind);
 
   size_t GetPropertiesCount(rocprofiler_filter_property_kind_t kind);
   rocprofiler_spm_parameter_t* GetSpmParameterData();
@@ -77,7 +81,7 @@ class Filter {
   std::vector<rocprofiler_att_parameter_t> att_parameters_;        // ATT Parameters
   rocprofiler_counters_sampler_parameters_t
       counters_sampler_parameters_;  // sampled counters parameters
-  std::vector<uint64_t> dispatch_id_filter_;
+  std::vector<std::pair<uint64_t,uint64_t>> dispatch_id_filter_;
 
   bool has_sync_callback_{false};
   rocprofiler_sync_callback_t callback_;

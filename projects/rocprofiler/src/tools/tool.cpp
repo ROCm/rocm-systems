@@ -266,9 +266,14 @@ std::vector<std::string> GetCounterNames() {
   return counters;
 }
 
-typedef std::tuple<std::vector<std::pair<rocprofiler_att_parameter_name_t, uint32_t>>,
-        std::vector<std::string>, std::vector<std::string>, std::vector<uint64_t>, uint64_t>
-    att_parsed_input_t;
+struct att_parsed_input_t
+{
+  std::vector<std::pair<rocprofiler_att_parameter_name_t, uint32_t>> params{};
+  std::vector<std::string> kernel_names{};
+  std::vector<std::string> counters_names{};
+  std::vector<std::pair<uint64_t, uint64_t>> dispatch_ids{};
+  rocprofiler::att_header_packet_t header{.raw = 0};
+};
 
 static int GetMpRank() {
   std::vector<const char*> mpivars = {"MPI_RANK", "OMPI_COMM_WORLD_RANK", "MV2_COMM_WORLD_RANK"};
@@ -278,12 +283,9 @@ static int GetMpRank() {
 }
 
 att_parsed_input_t GetATTParams() {
-  std::vector<std::pair<rocprofiler_att_parameter_name_t, uint32_t>> parameters;
-  std::vector<std::string> kernel_names;
-  std::vector<std::string> counters_names;
-  std::vector<uint64_t> dispatch_ids;
+  att_parsed_input_t ret{};
   const char* path = getenv("COUNTERS_PATH");
-  if (!path) return {{}, {}, {}, {}, 0};
+  if (!path) return ret;
 
   // List of parameters the user can set. Maxvalue is unused.
   std::unordered_map<std::string, rocprofiler_att_parameter_name_t> ATT_PARAM_NAMES{};
@@ -317,12 +319,11 @@ att_parsed_input_t GetATTParams() {
   std::ifstream trace_file(path);
   if (!trace_file.is_open()) {
     std::cout << "Unable to open att trace file." << std::endl;
-    return {{}, {}, {}, {}, 0};
+    return ret;
   }
 
-  rocprofiler::att_header_packet_t header{.raw = 0};
-  header.enable = 1;
-  header.DSIMDM = default_params["SIMD_SELECT"];
+  ret.header.enable = 1;
+  ret.header.DSIMDM = default_params["SIMD_SELECT"];
   int MPI_RANK = GetMpRank();
 
   bool started_att_counters = false;
@@ -350,13 +351,13 @@ att_parsed_input_t GetATTParams() {
     if (!started_att_counters) continue;
 
     if (param_name == "REMOVE_HEADER_PACKET") {
-      header.enable = 0;
+      ret.header.enable = 0;
       continue;
     } else if (param_name == "KERNEL") {
-      kernel_names.push_back(line);
+      ret.kernel_names.push_back(line);
       continue;
     } else if (param_name == "PERFCOUNTER") {
-      counters_names.push_back(line);
+      ret.counters_names.push_back(line);
       continue;
     } else if (param_name == "DISPATCH") {
       size_t comma = line.find(',');
@@ -364,7 +365,14 @@ att_parsed_input_t GetATTParams() {
       int rank = (comma < line.size() - 1) ? stoi(line.substr(comma + 1)) : 0;
 
       if (MPI_RANK < 0 || rank == MPI_RANK)  // Only add ID if rank matches the one in input.txt
-        dispatch_ids.push_back(std::max(id - 1, 0));  // off by 1 in relation to kernel-trace
+        ret.dispatch_ids.push_back({id, id});
+      continue;
+    } else if (param_name == "DISPATCH_RANGE") {
+      size_t comma = line.find(',');
+      int start = stoi(line.substr(0, comma));
+      int end = (comma < line.size() - 1) ? stoi(line.substr(comma + 1)) : start;
+
+      ret.dispatch_ids.push_back({start, end});
       continue;
     }
     // param_value is a number
@@ -380,13 +388,8 @@ att_parsed_input_t GetATTParams() {
       continue;
     }
 
-    if (param_name.find("ISA_DUMP_MODE") != std::string::npos) {
-      header.isadumpmode = param_value;
-      continue;
-    }
-
     if (ATT_PARAM_NAMES.find(param_name) != ATT_PARAM_NAMES.end()) {
-      parameters.push_back(std::make_pair(ATT_PARAM_NAMES[param_name], param_value));
+      ret.params.push_back(std::make_pair(ATT_PARAM_NAMES[param_name], param_value));
       try {
         default_params.erase(param_name);
       } catch (...) {
@@ -398,17 +401,17 @@ att_parsed_input_t GetATTParams() {
     }
 
     if (param_name.find("TARGET_CU") != std::string::npos)
-      header.DCU = param_value;
+      ret.header.DCU = param_value;
     else if (param_name.find("SIMD_SELECT") != std::string::npos)
-      header.DSIMDM = param_value;
+      ret.header.DSIMDM = param_value;
   }
 
-  if (!started_att_counters) return {{}, {}, {}, {}, 0};
+  if (!started_att_counters) return {};
 
   for (auto& param : default_params)
-    parameters.push_back(std::make_pair(ATT_PARAM_NAMES[param.first], param.second));
+    ret.params.push_back(std::make_pair(ATT_PARAM_NAMES[param.first], param.second));
 
-  return {parameters, kernel_names, counters_names, dispatch_ids, header.raw};
+  return ret;
 }
 
 void finish() {
@@ -733,20 +736,15 @@ ROCPROFILER_EXPORT bool OnLoad(void* table, uint64_t runtime_version, uint64_t f
   if (getenv("ROCPROFILER_ROCTX_TRACE")) apis_requested.emplace_back(ACTIVITY_DOMAIN_ROCTX);
 
   // ATT Parameters
+  att_parsed_input_t att_params = GetATTParams();
   std::vector<rocprofiler_att_parameter_t> parameters;
-  std::vector<std::pair<rocprofiler_att_parameter_name_t, uint32_t>> params;
-  std::vector<std::string> kernel_names;
-  std::vector<std::string> att_counters_names;
-  std::vector<uint64_t> dispatch_ids;
-  uint64_t attheader;
-  std::tie(params, kernel_names, att_counters_names, dispatch_ids, attheader) = GetATTParams();
 
   // load the plugins
-  plugins_load(params.size() ? (void*)attheader : (void*)&counter_names);
+  plugins_load(att_params.params.size() ? (void*)att_params.header.raw : (void*)&counter_names);
 
-  for (auto& kv_pair : params)
+  for (auto& kv_pair : att_params.params)
     parameters.emplace_back(rocprofiler_att_parameter_t{kv_pair.first, kv_pair.second});
-  for (std::string& name : att_counters_names) {
+  for (std::string& name : att_params.counters_names) {
     rocprofiler_att_parameter_t param;
     param.parameter_name = ROCPROFILER_ATT_PERFCOUNTER_NAME;
     param.counter_name = name.c_str();
@@ -852,12 +850,12 @@ ROCPROFILER_EXPORT bool OnLoad(void* table, uint64_t runtime_version, uint64_t f
         rocprofiler_filter_property_t property = {};
         std::vector<const char*> kernel_names_c;
 
-        if (dispatch_ids.size()) {  // Correlation ID filter
+        if (att_params.dispatch_ids.size()) {  // Correlation ID filter
           property.kind = ROCPROFILER_FILTER_DISPATCH_IDS;
-          property.data_count = dispatch_ids.size();
-          property.dispatch_ids = dispatch_ids.data();
+          property.data_count = att_params.dispatch_ids.size();
+          property.dispatch_ids = reinterpret_cast<decltype(property.dispatch_ids)>(att_params.dispatch_ids.data());
         } else {  // Kernel names filter
-          for (auto& name : kernel_names) kernel_names_c.push_back(name.data());
+          for (auto& name : att_params.kernel_names) kernel_names_c.push_back(name.data());
 
           property.kind = ROCPROFILER_FILTER_KERNEL_NAMES;
           property.data_count = kernel_names_c.size();

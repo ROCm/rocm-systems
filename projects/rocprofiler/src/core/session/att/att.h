@@ -27,8 +27,15 @@
 #include <mutex>
 #include <string>
 #include <vector>
+#include <unordered_map>
+#include <atomic>
 
 #include "rocprofiler.h"
+#include "src/utils/helper.h"
+#include "src/core/proxy_queue.h"
+#include "src/core/hsa/hsa_support.h"
+#include "src/core/hsa/queues/queue.h"
+#include "att_header.h"
 
 namespace rocprofiler {
 
@@ -44,33 +51,25 @@ typedef struct {
   uint64_t queue_index;
 } att_pending_signal_t;
 
-enum rocprofiler_att_isa_dump_mode {
-  ISA_MODE_DUMP_ALL=0,
-  ISA_MODE_DUMP_OBJ,
-  ISA_MODE_DUMP_KERNEL,
-  ISA_MODE_DUMP_NONE
-};
-
-union att_header_packet_t {
-  struct {
-    uint64_t reserved : 14;
-    uint64_t navi : 1;
-    uint64_t enable : 1;
-    uint64_t DSIMDM : 4;
-    uint64_t DCU : 5;
-    uint64_t DSA : 1;
-    uint64_t SEID : 6;
-    uint64_t isadumpmode : 3;
-  };
-  uint64_t raw;
-};
 
 namespace att {
 
+struct ATTRecordSignal
+{
+  size_t record_id;
+  size_t writer_id;
+  size_t last_kernel_exec;
+  rocprofiler_session_id_t session_id_snapshot;
+  hsa_ext_amd_aql_pm4_packet_t stop_packet;
+};
+
 class AttTracer {
- public:
-  AttTracer(rocprofiler_buffer_id_t buffer_id, rocprofiler_filter_id_t filter_id,
-            rocprofiler_session_id_t session_id);
+public:
+  AttTracer(
+    rocprofiler_buffer_id_t buffer_id,
+    rocprofiler_filter_id_t filter_id,
+    rocprofiler_session_id_t session_id
+  );
 
   void AddPendingSignals(uint32_t writer_id, uint64_t kernel_object,
                          const hsa_signal_t& original_completion_signal,
@@ -82,10 +81,98 @@ class AttTracer {
 
   const std::vector<att_pending_signal_t>& GetPendingSignals(uint32_t writer_id);
 
- private:
+  bool ATTWriteInterceptor(
+    const void* packets,
+    uint64_t pkt_count,
+    uint64_t user_pkt_index,
+    queue::Queue& queue_info,
+    hsa_amd_queue_intercept_packet_writer writer,
+    rocprofiler_buffer_id_t buffer_id
+  );
+
+  void InsertMarker(
+    std::vector<packet_t>& transformed_packets,
+    hsa_agent_t agent,
+    uint32_t data
+  );
+
+  void SetParameters(const std::vector<rocprofiler_att_parameter_t>& params) {
+    att_parameters_data = params;
+  }
+  void SetDispatchIds(const std::vector<std::pair<uint64_t,uint64_t>>& ids) {
+    kernel_profile_dispatch_ids = ids;
+  }
+  void SetCountersNames(const std::vector<std::string>& names) {
+    att_counters_names = names;
+  }
+  void SetKernelsNames(const std::vector<std::string>& names) {
+    kernel_profile_names = names;
+  }
+  std::optional<std::pair<size_t, size_t>> RequiresStartPacket(size_t rstart, size_t size);
+
+  static void signalAsyncHandlerATT(const hsa_signal_t& signal, void* data);
+  static bool AsyncSignalHandlerATT(hsa_signal_value_t /* signal */, void* data);
+
+  static hsa_status_t attTraceDataCallback(
+    hsa_ven_amd_aqlprofile_info_type_t info_type,
+    hsa_ven_amd_aqlprofile_info_data_t* info_data,
+    void* data
+  );
+
+protected:
+  using packet_t = hsa_ext_amd_aql_pm4_packet_t;
+  static std::unordered_map<uint64_t, ATTRecordSignal> pending_stop_packets;
+  static std::mutex att_enable_disable_mutex;
+
+private:
+  uint32_t codeobj_load_cnt = 0;
+
+  static void AddAttRecord(
+    rocprofiler_record_att_tracer_t* record,
+    hsa_agent_t gpu_agent,
+    att_pending_signal_t& pending
+  );
+
+  std::pair<hsa_ven_amd_aqlprofile_profile_t*, rocprofiler_codeobj_capture_mode_t>
+  ProcessATTParams(
+    hsa_ext_amd_aql_pm4_packet_t& start_packet,
+    hsa_ext_amd_aql_pm4_packet_t& stop_packet,
+    queue::Queue& queue_info,
+    rocprofiler::HSAAgentInfo& agentInfo
+  );
+
+  bool ATTSingleWriteInterceptor(
+    const void* packets,
+    uint64_t pkt_count,
+    uint64_t user_pkt_index,
+    queue::Queue& queue_info,
+    hsa_amd_queue_intercept_packet_writer writer,
+    rocprofiler_buffer_id_t buffer_id
+  );
+
+  bool ATTContiguousWriteInterceptor(
+    const void* packets,
+    uint64_t pkt_count,
+    queue::Queue& queue_info,
+    hsa_amd_queue_intercept_packet_writer writer,
+    rocprofiler_buffer_id_t buffer_id
+  );
+
+  static void CreateSignal(uint32_t attribute, hsa_signal_t* signal) {
+    HSASupport_Singleton::GetInstance().CreateSignal(attribute, signal);
+  }
+
+  std::pair<std::vector<bool>, bool> GetAllowedProfilesList(const void* packets, int pkt_count);
+
   rocprofiler_buffer_id_t buffer_id_;
   rocprofiler_filter_id_t filter_id_;
   rocprofiler_session_id_t session_id_;
+  std::atomic<uint32_t> WRITER_ID{1};
+
+  std::vector<std::string> kernel_profile_names;
+  std::vector<std::pair<uint64_t,uint64_t>> kernel_profile_dispatch_ids;
+  std::vector<std::string> att_counters_names;
+  std::vector<rocprofiler_att_parameter_t> att_parameters_data;
 
   std::mutex sessions_pending_signals_lock_;
   std::map<uint32_t, std::vector<att_pending_signal_t>> sessions_pending_signals_;

@@ -60,6 +60,8 @@ hsa_ven_amd_aqlprofile_profile_t* GenerateATTPackets(
     std::vector<hsa_ven_amd_aqlprofile_parameter_t>& att_params, packet_t* start_packet,
     packet_t* stop_packet, size_t att_buffer_size);
 
+hsa_ven_amd_aqlprofile_descriptor_t
+GenerateATTMarkerPackets(hsa_agent_t gpu_agent, packet_t& marker_packet, uint32_t data);
 
 uint8_t* AllocateSysMemory(hsa_agent_t gpu_agent, size_t size, hsa_amd_memory_pool_t* cpu_pool);
 
@@ -74,6 +76,21 @@ typedef struct {
 
 att_memory_pools_t* GetAttMemPools(hsa_agent_t gpu_agent);
 
+void AddVendorSpecificPacket(const packet_t* packet,
+                             std::vector<packet_t>* transformed_packets,
+                             const hsa_signal_t& packet_completion_signal);
+
+void CreateBarrierPacket(std::vector<packet_t>* transformed_packets,
+                         const hsa_signal_t* packet_dependency_signal,
+                         const hsa_signal_t* packet_completion_signal);
+
+bool IsDispatchPacket(const hsa_barrier_and_packet_t& packet);
+
+// Returns a list of pointers to dispatch packets.
+std::vector<const hsa_kernel_dispatch_packet_s*> ExtractDispatchPackets(
+  const void* packets,
+  int pkt_count
+);
 
 }  // namespace Packet
 #endif  // SRC_CORE_HSA_PACKETS_PACKETS_GENERATOR_H_

@@ -1206,6 +1206,10 @@ typedef struct {
    * If the obj is still loaded by the time the record was generated, this value is 0
   */
   rocprofiler_timestamp_t clock_end;
+  /**
+   * Identifier for code object loading. This is the marker ID sent to the ATT buffer.
+  */
+  uint32_t att_marker_id;
 } rocprofiler_intercepted_codeobj_t;
 
 /**
@@ -1869,7 +1873,10 @@ typedef struct {
     rocprofiler_hip_function_name_t* hip_functions_names;
     rocprofiler_hsa_function_name_t* hsa_functions_names;
     uint32_t range[2];
-    uint64_t* dispatch_ids;
+    struct {
+      uint64_t start;
+      uint64_t end;
+    }* dispatch_ids;
   };
   /**
    * Data array count

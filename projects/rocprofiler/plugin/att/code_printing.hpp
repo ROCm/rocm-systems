@@ -27,28 +27,67 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include <unordered_map>
 
 #include "disassembly.hpp"
 
 class code_object_decoder_t {
- public:
-  // void load_symbol_map();
+public:
   std::optional<SymbolInfo> find_symbol(uint64_t address);
 
   code_object_decoder_t(const char* codeobj_data, uint64_t codeobj_size);
   ~code_object_decoder_t();
 
+  std::pair<instruction_instance_t, size_t>
+  disassemble_instruction(uint64_t faddr, uint64_t vaddr);
   void disassemble_kernel(uint64_t faddr, uint64_t vaddr);
   void disassemble_single_kernel(uint64_t kaddr);
   void disassemble_kernels();
 
   int m_fd;
 
-  std::map<uint64_t, std::pair<std::string, size_t>> m_line_number_map;
-  std::map<uint64_t, SymbolInfo> m_symbol_map;
+  std::map<uint64_t, std::pair<std::string, size_t>> m_line_number_map{};
+  std::map<uint64_t, SymbolInfo> m_symbol_map{};
 
   std::string m_uri;
   std::vector<char> buffer;
-  std::vector<instruction_instance_t> instructions;
-  std::unique_ptr<DisassemblyInstance> disassembly;
+  std::vector<instruction_instance_t> instructions{};
+  std::unique_ptr<DisassemblyInstance> disassembly{};
+};
+
+class CodeobjService
+{
+public:
+  CodeobjService(const char* filepath, uint64_t load_base);
+  bool decode_single(uint64_t vaddr, uint64_t faddr);
+
+  std::pair<instruction_instance_t, size_t>& getDecoded(uint64_t addr);
+  const char* getInstruction(uint64_t addr) { return getDecoded(addr).first.instruction; }
+  const char* getCppref(uint64_t addr) { return getDecoded(addr).first.cpp_reference; }
+  size_t getSize(uint64_t addr) { return getDecoded(addr).second; }
+
+  uint64_t size() const {
+    if (!decoder) return 0;
+    return decoder->buffer.size();
+  }
+  uint64_t begin() const { return load_base; };
+  uint64_t end() const { return begin() + size(); }
+  bool inrange(uint64_t addr) const { return addr >= begin() && addr < end(); }
+
+  const char* getSymbolName(uint64_t addr) const {
+    if (!decoder) return nullptr;
+
+    auto it = decoder->m_symbol_map.find(addr-load_base);
+    if (it != decoder->m_symbol_map.end())
+      return it->second.name.data();
+
+    return nullptr;
+  }
+private:
+  const uint64_t load_base;
+
+  std::unordered_map<uint64_t, std::pair<instruction_instance_t, size_t>> decoded_map;
+  std::unique_ptr<code_object_decoder_t> decoder{nullptr};
+
+  bool bNotElfFILE = false;
 };

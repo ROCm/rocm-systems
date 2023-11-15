@@ -184,8 +184,8 @@ file(GLOB ROCPROFILER_TRACER_SRC_FILES
      ${PROJECT_SOURCE_DIR}/src/core/session/tracer/*.cpp)
 file(GLOB ROCPROFILER_ROCTRACER_SRC_FILES
      ${PROJECT_SOURCE_DIR}/src/core/session/tracer/src/*.cpp)
-set(ROCPROFILER_ATT_SRC_FILES
-    ${PROJECT_SOURCE_DIR}/src/core/session/att/att.cpp)
+file(GLOB ROCPROFILER_ATT_SRC_FILES
+    ${PROJECT_SOURCE_DIR}/src/core/session/att/*.cpp)
 file(GLOB ROCPROFILER_CLASS_SRC_FILES
      ${CMAKE_CURRENT_SOURCE_DIR}/rocprofiler_singleton.cpp)
 file(GLOB ROCPROFILER_SPM_SRC_FILES ${PROJECT_SOURCE_DIR}/src/core/session/spm/spm.cpp)

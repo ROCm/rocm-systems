@@ -29,8 +29,8 @@ THE SOFTWARE.
 #include <map>
 #include <mutex>
 
-#include "core/queue.h"
-#include "core/types.h"
+#include "src/core/queue.h"
+#include "src/core/types.h"
 
 struct HsaApiTable;
 

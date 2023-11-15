@@ -18,6 +18,8 @@
  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  THE SOFTWARE. */
 
+//#define HSA_ATT_MARKER_ENABLE
+
 #include "packets_generator.h"
 #include "src/api/rocprofiler_singleton.h"
 
@@ -235,14 +237,12 @@ InitializeAqlPackets(hsa_agent_t cpu_agent, hsa_agent_t gpu_agent,
     rocprofiler::Metric* metric;
     if (std::find(counter_names.begin(), counter_names.end(), result->name) !=
         counter_names.end()) {
-      // std::cout << "Counter from Result List: " << result->name << std::endl;
       counters_taken.insert(result->name);
       metric = const_cast<rocprofiler::Metric*>(metricsDict[gpu_agent.handle]->Get(result->name));
       if (metric == nullptr) std::cout << result->name << " not found in metricsDict\n";
       context->metrics_list.push_back(metric);
     } else {
       metrics_counters_taken.insert(result->name);
-      // std::cout << "Counter Added: " << result->name << std::endl;
     }
   }
 
@@ -283,7 +283,6 @@ InitializeAqlPackets(hsa_agent_t cpu_agent, hsa_agent_t gpu_agent,
       }
     }
     if (flag) {
-      // std::cout << "Counter from Result Map: " << metric_name << std::endl;
       counters_taken.insert(metric_name);
       rocprofiler::Metric* metric =
           const_cast<rocprofiler::Metric*>(metricsDict[gpu_agent.handle]->Get(metric_name));
@@ -586,10 +585,12 @@ hsa_ven_amd_aqlprofile_profile_t* GenerateATTPackets(
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wconversion-null"
   // Preparing the profile structure to get the packets
+  auto* params = new hsa_ven_amd_aqlprofile_parameter_t[att_params.size()+1];
+  memcpy(params, att_params.data(), att_params.size()*sizeof(params[0]));
   hsa_ven_amd_aqlprofile_profile_t* profile =
       new hsa_ven_amd_aqlprofile_profile_t{gpu_agent,      HSA_VEN_AMD_AQLPROFILE_EVENT_TYPE_TRACE,
                                            nullptr,        0,
-                                           &att_params[0], (uint32_t)att_params.size(),
+                                           params,         (uint32_t)att_params.size(),
                                            NULL,           NULL};
 #pragma GCC diagnostic pop
 
@@ -612,6 +613,110 @@ hsa_ven_amd_aqlprofile_profile_t* GenerateATTPackets(
   status = hsa_ven_amd_aqlprofile_stop(profile, stop_packet);
   CHECK_HSA_STATUS("Error: Creating Stop PM4 Packet", status);
   return profile;
+}
+
+
+// Generate ATT tracer marker packets. Also generate and return
+// the descriptor object which has the PM4 buffer for inserting data
+hsa_ven_amd_aqlprofile_descriptor_t
+GenerateATTMarkerPackets(hsa_agent_t gpu_agent, packet_t& marker_packet, uint32_t data)
+{
+#ifdef HSA_ATT_MARKER_ENABLE
+  // Preparing the profile structure to get the packets
+  auto pool = rocprofiler::HSASupport_Singleton::GetInstance()
+                                                  .GetHSAAgentInfo(gpu_agent.handle)
+                                                  .cpu_pool_;
+
+  hsa_ven_amd_aqlprofile_descriptor_t desc{AllocateSysMemory(gpu_agent, 1024, &pool), 1024};
+  hsa_ven_amd_aqlprofile_profile_t profile{
+    gpu_agent, HSA_VEN_AMD_AQLPROFILE_EVENT_TYPE_TRACE,
+    nullptr, 0,
+    nullptr, 0,
+    {}, desc
+  };
+
+  hsa_ven_amd_aqlprofile_att_marker_channel_t channel = HSA_VEN_AMD_AQLPROFILE_ATT_CHANNEL_2;
+  hsa_status_t status = hsa_ven_amd_aqlprofile_att_marker(&profile, &marker_packet, data, channel);
+  if (status != HSA_STATUS_SUCCESS)
+  {
+    rocprofiler::warning("Could not create ATT Marker Packets.");
+    desc.size = 0;
+    desc.ptr = nullptr;
+  }
+
+  return desc;
+#else
+  return {nullptr,0};
+#endif
+}
+
+void AddVendorSpecificPacket(const packet_t* packet,
+                             std::vector<packet_t>* transformed_packets,
+                             const hsa_signal_t& packet_completion_signal) {
+  transformed_packets->emplace_back(*packet).completion_signal = packet_completion_signal;
+}
+
+/*
+    Function name: CreateBarrierPacket.
+    Argument :     The list of transformed packets to add the
+                   barrier packet to. Pointer to the completion signal
+                   and the input signal of the barrier packet to be created.
+    Description :  This packet creates the barrier packet with the given
+                   completion signal and dependency signal. It then adds to
+                   the transformed packets list.
+*/
+void CreateBarrierPacket(std::vector<packet_t>* transformed_packets,
+                         const hsa_signal_t* packet_dependency_signal,
+                         const hsa_signal_t* packet_completion_signal
+                         ) {
+  hsa_barrier_and_packet_t barrier{0};
+  barrier.header = HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE |
+      (1 << HSA_PACKET_HEADER_BARRIER) |
+      (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE) |
+      (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE);
+  if (packet_completion_signal != nullptr) barrier.completion_signal = *packet_completion_signal;
+  if (packet_dependency_signal != nullptr) barrier.dep_signal[0] = *packet_dependency_signal;
+  void* barrier_ptr = &barrier;
+  transformed_packets->emplace_back(*reinterpret_cast<packet_t*>(barrier_ptr));
+}
+
+template <typename Integral = uint64_t> constexpr Integral bit_mask(int first, int last) {
+  assert(last >= first && "Error: hsa_support::bit_mask -> invalid argument");
+  size_t num_bits = last - first + 1;
+  return ((num_bits >= sizeof(Integral) * 8) ? ~Integral{0}
+                                             /* num_bits exceed the size of Integral */
+                                             : ((Integral{1} << num_bits) - 1))
+      << first;
+}
+
+template <typename Integral> constexpr Integral bit_extract(Integral x, int first, int last) {
+  return (x >> first) & bit_mask<Integral>(0, last - first);
+}
+
+bool IsDispatchPacket(const hsa_barrier_and_packet_t& packet)
+{
+  return bit_extract(
+    packet.header,
+    HSA_PACKET_HEADER_TYPE,
+    HSA_PACKET_HEADER_TYPE + HSA_PACKET_HEADER_WIDTH_TYPE - 1
+  ) == HSA_PACKET_TYPE_KERNEL_DISPATCH;
+}
+
+// Returns a list of pointers to dispatch packets.
+std::vector<const hsa_kernel_dispatch_packet_s*> ExtractDispatchPackets(
+  const void* packets,
+  int pkt_count
+) {
+  std::vector<const hsa_kernel_dispatch_packet_s*> ret;
+  for (int i = 0; i < pkt_count; ++i) {
+    auto& original_packet = static_cast<const hsa_barrier_and_packet_t*>(packets)[i];
+
+    // Skip packets other than kernel dispatch packets.
+    if (!IsDispatchPacket(original_packet)) continue;
+
+    ret.push_back(static_cast<const hsa_kernel_dispatch_packet_s*>(packets)+i);
+  }
+  return ret;
 }
 
 }  // namespace Packet
