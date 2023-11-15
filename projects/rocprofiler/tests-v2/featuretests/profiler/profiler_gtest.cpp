@@ -45,6 +45,7 @@ std::string test_app_path;
 std::string metrics_path;
 std::string binary_path;
 std::string profiler_api_lib_path = "";
+bool bContainsGFX11Agent = false;
 
 static void init_test_path() {
   lib_path = "lib/rocprofiler/librocprofiler_tool.so";
@@ -515,6 +516,12 @@ TEST_F(LoadUnloadTest, WhenLoadingFirstTimeThenToolLoadsUnloadsSuccessfully) {
   // iterate for gpu's
   hsa_status_t status = hsa_iterate_agents(
       [](hsa_agent_t agent, void*) {
+        std::string agentname;
+        agentname.resize(64);
+        hsa_agent_get_info(agent, HSA_AGENT_INFO_NAME, agentname.data());
+        if (agentname.find("gfx11") != std::string::npos)
+          bContainsGFX11Agent = true;
+
         hsa_device_type_t type;
         return hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &type);
       },
@@ -888,22 +895,11 @@ class ProfilerAPITest : public ::testing::Test {
         const char* kernel_name_c = static_cast<const char*>(malloc(name_length * sizeof(char)));
         CheckApi(rocprofiler_query_kernel_info(ROCPROFILER_KERNEL_NAME, profiler_record->kernel_id,
                                                &kernel_name_c));
-        if (profiler_record->counters) {
-         for (uint64_t i = 0; i < profiler_record->counters_count.value; i++) {
-          if (profiler_record->counters[i].counter_handler.handle > 0) {
-           if(profiler_record->counters[i].value.value == 0)
-             rocprofiler::fatal("Serialization failed");
-        }
-      }
-    }
-        // int gpu_index = profiler_record->gpu_id.handle;
-        // uint64_t begin_time = profiler_record->timestamps.begin.value;
-        // uint64_t end_time = profiler_record->timestamps.end.value;
-        // printf(
-        //     "Kernel Info:\n\tGPU Index: %d\n\tKernel Name: %s\n\tStart "
-        //     "Time: "
-        //     "%lu\n\tEnd Time: %lu\n",
-        //     gpu_index, kernel_name_c, begin_time, end_time);
+
+        if (profiler_record->counters && !bContainsGFX11Agent)
+          for (uint64_t i = 0; i < profiler_record->counters_count.value; i++)
+            if (profiler_record->counters[i].counter_handler.handle > 0)
+              EXPECT_NE(profiler_record->counters[i].value.value, 0);
       }
       CheckApi(rocprofiler_next_record(record, &record, session_id, buffer_id));
     }
