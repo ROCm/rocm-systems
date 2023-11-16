@@ -175,9 +175,9 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
                                            dispatch_packet.grid_size_y,
                                            dispatch_packet.grid_size_z}};
 
-                    _buffer->emplace(ROCPROFILER_BUFFER_CATEGORY_TRACING,
-                                     ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
-                                     record);
+                    CHECK_NOTNULL(_buffer)->emplace(ROCPROFILER_BUFFER_CATEGORY_TRACING,
+                                                    ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
+                                                    record);
                 }
             }
 
@@ -195,9 +195,9 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
                         _queue_id,
                         _kern_id};
 
-                    _buffer->emplace(ROCPROFILER_BUFFER_CATEGORY_TRACING,
-                                     ROCPROFILER_BUFFER_TRACING_MEMORY_COPY,
-                                     record);
+                    CHECK_NOTNULL(_buffer)->emplace(ROCPROFILER_BUFFER_CATEGORY_TRACING,
+                                                    ROCPROFILER_BUFFER_TRACING_MEMORY_COPY,
+                                                    record);
                 }
             }
         }

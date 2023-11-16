@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "lib/rocprofiler/registration.hpp"
+#include "lib/common/environment.hpp"
 #include "lib/rocprofiler/agent.hpp"
 #include "lib/rocprofiler/allocator.hpp"
 #include "lib/rocprofiler/context/context.hpp"
@@ -171,9 +172,38 @@ find_clients()
                                          rocprofiler_client_id_t{nullptr, _prio}});
     }
 
-    if(!rocprofiler_configure && !get_forced_configure())
+    auto get_env_libs = []() {
+        auto       val       = common::get_env("ROCP_TOOL_LIBRARIES", std::string{});
+        auto       val_arr   = std::vector<std::string>{};
+        size_t     pos       = 0;
+        const auto delimiter = std::string_view{":"};
+        auto       token     = std::string{};
+
+        if(val.empty())
+        {
+            // do nothing
+        }
+        else if(val.find(delimiter) == std::string::npos)
+        {
+            val_arr.emplace_back(val);
+        }
+        else
+        {
+            while((pos = val.find(delimiter)) != std::string::npos)
+            {
+                token = val.substr(0, pos);
+                if(!token.empty()) val_arr.emplace_back(token);
+                val.erase(0, pos + delimiter.length());
+            }
+        }
+        return val_arr;
+    };
+
+    auto env = get_env_libs();
+
+    if(!rocprofiler_configure && !get_forced_configure() && env.empty())
     {
-        LOG(ERROR) << "no rocprofiler_configure function found";
+        LOG(ERROR) << "no rocprofiler_configure function(s) found";
         return data;
     }
 
@@ -201,18 +231,19 @@ find_clients()
         decltype(::rocprofiler_configure)* _sym = nullptr;
         *(void**) (&_sym)                       = dlsym(handle, "rocprofiler_configure");
 
+        // symbol not found
+        if(!_sym)
+        {
+            LOG(INFO) << "|_" << itr << " did not contain rocprofiler_configure symbol";
+            continue;
+        }
+
         // skip the configure function that was forced
         if(_sym == get_forced_configure())
         {
             data.front().name                    = itr;
             data.front().dlhandle                = handle;
             data.front().internal_client_id.name = "(forced)";
-            continue;
-        }
-
-        if(!_sym)
-        {
-            LOG(INFO) << "|_" << itr << " did not contain rocprofiler_configure symbol";
             continue;
         }
 
@@ -233,6 +264,38 @@ find_clients()
                                                  rocprofiler_client_id_t{nullptr, _prio},
                                                  rocprofiler_client_id_t{nullptr, _prio}});
             entry.internal_client_id.name = entry.name.c_str();
+        }
+    }
+
+    if(!env.empty())
+    {
+        for(const auto& itr : env)
+        {
+            void* handle = dlopen(itr.c_str(), RTLD_GLOBAL | RTLD_LAZY);
+            LOG_IF(ERROR, handle == nullptr) << "error dlopening " << itr;
+
+            for(const auto& ditr : data)
+            {
+                if(ditr.dlhandle && ditr.dlhandle == handle)
+                {
+                    handle = nullptr;
+                    break;
+                }
+            }
+
+            if(handle)
+            {
+                decltype(::rocprofiler_configure)* _sym = nullptr;
+                *(void**) (&_sym)                       = dlsym(handle, "rocprofiler_configure");
+
+                uint32_t _prio = priority_offset + data.size();
+                data.emplace_back(client_library{itr,
+                                                 handle,
+                                                 _sym,
+                                                 nullptr,
+                                                 rocprofiler_client_id_t{nullptr, _prio},
+                                                 rocprofiler_client_id_t{nullptr, _prio}});
+            }
         }
     }
 
@@ -479,16 +542,26 @@ initialize()
 void
 finalize()
 {
-    if(get_fini_status() != 0) return;
+    if(get_fini_status() != 0)
+    {
+        LOG(INFO) << "ignoring finalization request (value=" << get_fini_status() << ")";
+        return;
+    }
 
     static auto _sync = std::atomic_flag{};
-    if(_sync.test_and_set()) return;
+    if(_sync.test_and_set())
+    {
+        LOG(INFO) << "ignoring finalization request [already finalized] (value="
+                  << get_fini_status() << ")";
+        return;
+    }
     // above returns true for all invocations after the first one
+
+    LOG(INFO) << "finalizing rocprofiler (value=" << get_fini_status() << ")";
 
     static auto _once = std::once_flag{};
     std::call_once(_once, []() {
         set_fini_status(-1);
-        ::hsa_shut_down();
         hsa::code_object_shutdown();
         if(get_init_status() > 0)
         {
@@ -560,6 +633,11 @@ rocprofiler_set_api_table(const char* name,
     }
     else if(std::string_view{name} == "hsa")
     {
+        // this is a slight hack due to a hsa-runtime bug with rocprofiler-register which
+        // causes it to register the API table twice when HSA_TOOL_LIB is set to this
+        // rocprofiler library. Fixed in Gerrit review 961592.
+        setenv("HSA_TOOLS_ROCPROFILER_V1_TOOLS", "0", 0);
+
         // pass to hsa init
         LOG_IF(ERROR, num_tables > 1)
             << " rocprofiler expected HSA library to pass 1 API table, not " << num_tables;
@@ -622,5 +700,13 @@ OnLoad(HsaApiTable*       table,
     rocprofiler_set_api_table("hsa", runtime_version, 0, &table_v, 1);
 
     return true;
+}
+
+void
+OnUnload()
+{
+    LOG(INFO) << "Unloading hsa-runtime...";
+    ::rocprofiler::registration::finalize();
+    LOG(INFO) << "Finalization complete.";
 }
 }

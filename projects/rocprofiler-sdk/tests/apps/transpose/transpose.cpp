@@ -1,24 +1,24 @@
-/*
-Copyright (c) 2015-2020 Advanced Micro Devices, Inc. All rights reserved.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
+// MIT License
+//
+// Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
 
 #include "hip/hip_runtime.h"
 
@@ -66,7 +66,7 @@ verify(int* in, int* out, int M, int N);
 }  // namespace
 
 __global__ void
-transpose_a(int* in, int* out, int M, int N);
+transpose(int* in, int* out, int M, int N);
 
 void
 run(int rank, int tid, hipStream_t stream, int argc, char** argv);
@@ -148,7 +148,7 @@ main(int argc, char** argv)
 }
 
 __global__ void
-transpose_a(int* in, int* out, int M, int N)
+transpose(int* in, int* out, int M, int N)
 {
     __shared__ int tile[shared_mem_tile_dim][shared_mem_tile_dim];
 
@@ -193,12 +193,12 @@ run(int rank, int tid, hipStream_t stream, int argc, char** argv)
     HIP_API_CALL(hipStreamSynchronize(stream));
 
     dim3 grid(M / 32, N / 32, 1);
-    dim3 block(32, 32, 1);  // transpose_a
+    dim3 block(32, 32, 1);  // transpose
 
     auto t1 = std::chrono::high_resolution_clock::now();
     for(size_t i = 0; i < nitr; ++i)
     {
-        transpose_a<<<grid, block, 0, stream>>>(in, out, M, N);
+        transpose<<<grid, block, 0, stream>>>(in, out, M, N);
         check_hip_error();
         if(i % nsync == (nsync - 1)) HIP_API_CALL(hipStreamSynchronize(stream));
     }

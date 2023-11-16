@@ -336,21 +336,17 @@ hsa_api_impl<Idx>::functor(Args&&... args)
             assert(itr.ctx->buffered_tracer);
             auto buffer_id =
                 itr.ctx->buffered_tracer->buffer_data.at(info_type::buffered_domain_idx);
-            for(auto& bitr : buffer::get_buffers())
+            auto buffer_v = buffer::get_buffer(buffer_id);
+            if(buffer_v && buffer_v->context_id == itr.ctx->context_idx &&
+               buffer_v->buffer_id == buffer_id.handle)
             {
-                if(bitr && bitr->context_id == itr.ctx->context_idx &&
-                   bitr->buffer_id == buffer_id.handle)
-                {
-                    // make copy of record
-                    auto record_v = buffer_record;
-                    // update the record with the correlation
-                    record_v.correlation_id.external = itr.external_correlation;
+                // make copy of record
+                auto record_v = buffer_record;
+                // update the record with the correlation
+                record_v.correlation_id.external = itr.external_correlation;
 
-                    bitr->emplace(ROCPROFILER_BUFFER_CATEGORY_TRACING,
-                                  info_type::buffered_domain_idx,
-                                  record_v);
-                    break;
-                }
+                buffer_v->emplace(
+                    ROCPROFILER_BUFFER_CATEGORY_TRACING, info_type::buffered_domain_idx, record_v);
             }
         }
     }

@@ -13,3 +13,6 @@
 [submodule "external/ptl"]
 	path = external/ptl
 	url = https://github.com/jrmadsen/PTL
+[submodule "external/cereal"]
+	path = external/cereal
+	url = https://github.com/jrmadsen/cereal.git

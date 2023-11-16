@@ -45,12 +45,12 @@ struct instance
 
     mutable std::array<buffer_t, 2> buffers       = {};
     mutable std::atomic_flag        syncer        = ATOMIC_FLAG_INIT;
-    mutable std::atomic<uint32_t>   buffer_idx    = {};
+    mutable std::atomic<uint32_t>   buffer_idx    = {};  // array index
     mutable std::atomic<uint64_t>   drop_count    = {};
     uint64_t                        watermark     = 0;
-    uint64_t                        context_id    = 0;
-    uint64_t                        buffer_id     = 0;
-    uint64_t                        task_group_id = 0;
+    uint64_t                        context_id    = 0;  // rocprofiler_context_id_t value
+    uint64_t                        buffer_id     = 0;  // rocprofiler_buffer_id_t value
+    uint64_t                        task_group_id = 0;  // thread-pool assignment
     rocprofiler_buffer_tracing_cb_t callback      = nullptr;
     void*                           callback_data = nullptr;
     rocprofiler_buffer_policy_t     policy        = ROCPROFILER_BUFFER_POLICY_NONE;
@@ -64,6 +64,9 @@ struct instance
 
 using unique_buffer_vec_t =
     common::container::stable_vector<allocator::unique_static_ptr_t<instance>, 4>;
+
+bool
+is_valid_buffer_id(rocprofiler_buffer_id_t id);
 
 std::optional<rocprofiler_buffer_id_t>
 allocate_buffer();

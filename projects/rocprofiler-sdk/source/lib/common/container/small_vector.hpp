@@ -22,6 +22,21 @@
 
 #pragma once
 
+/**
+ * @file small_vector.hpp
+ * @brief This is inspired and largely derived from llvm/ADT/SmallVector.h. It provides a STL-like
+ * vector class which uses a small allocation on the stack when the number of elements is small.
+ *
+ * This container is ideal for vectors which are allocated frequently, will more than likely only
+ * contain a few elements, and are allocated in places where performance is a concern. When the
+ * number of elements is small, storing these elements will not require a heap allocation but it can
+ * also grow to accommodate larger allocation needs. In other words, it effectively has memory
+ * allocation like std::array<T, N> until the number of elements exceeds N. Once the number of
+ * elements exceeds N, it turns into std::vector<T>.
+ *
+ * Reference: https://github.com/llvm/llvm-project/blob/main/llvm/include/llvm/ADT/SmallVector.h
+ */
+
 #include "lib/common/defines.hpp"
 
 #include <algorithm>

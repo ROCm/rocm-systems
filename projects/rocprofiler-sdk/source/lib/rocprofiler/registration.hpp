@@ -40,6 +40,9 @@ OnLoad(HsaApiTable*       table,
        uint64_t           failed_tool_count,
        const char* const* failed_tool_names) ROCPROFILER_PUBLIC_API;
 
+void
+OnUnload() ROCPROFILER_PUBLIC_API;
+
 // this is the "hidden" function that rocprofiler-register invokes to pass
 // the API tables to rocprofiler
 int

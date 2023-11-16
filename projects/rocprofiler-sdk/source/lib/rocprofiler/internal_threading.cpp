@@ -292,14 +292,13 @@ rocprofiler_assign_callback_thread(rocprofiler_buffer_id_t       buffer_id,
     if(cb_thread_id.handle >= rocprofiler::internal_threading::get_task_groups()->size())
         return ROCPROFILER_STATUS_ERROR_THREAD_NOT_FOUND;
 
-    for(auto& bitr : rocprofiler::buffer::get_buffers())
+    auto* buff_v = rocprofiler::buffer::get_buffer(buffer_id);
+    if(buff_v)
     {
-        if(bitr && bitr->buffer_id == buffer_id.handle)
-        {
-            bitr->task_group_id = cb_thread_id.handle;
-            return ROCPROFILER_STATUS_SUCCESS;
-        }
+        buff_v->task_group_id = cb_thread_id.handle;
+        return ROCPROFILER_STATUS_SUCCESS;
     }
+
     return ROCPROFILER_STATUS_ERROR_BUFFER_NOT_FOUND;
 }
 }

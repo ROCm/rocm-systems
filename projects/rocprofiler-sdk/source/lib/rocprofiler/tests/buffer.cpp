@@ -45,13 +45,16 @@ TEST(rocprofiler_lib, buffer)
     auto buffer_id = buffer::allocate_buffer();
 
     EXPECT_TRUE(buffer_id) << "failed to allocate buffer";
+    EXPECT_GT(buffer_id->handle, 0);
+    EXPECT_TRUE(buffer::is_valid_buffer_id(*buffer_id)) << "id=" << buffer_id->handle;
     ASSERT_EQ(buffer::get_buffers().size(), 1) << "incorrect number of buffers created";
 
     // get pointer to buffer
-    auto* buffer_v      = buffer::get_buffer(*buffer_id);
-    buffer_v->watermark = common::units::get_page_size();
-    ASSERT_NE(buffer_v, nullptr) << "get_buffer returned a nullptr";
+    auto* buffer_v = buffer::get_buffer(*buffer_id);
+    ASSERT_NE(buffer_v, nullptr) << "get_buffer returned a nullptr. id=" << buffer_id->handle;
+    EXPECT_EQ(buffer_v->buffer_id, buffer_id->handle);
 
+    buffer_v->watermark = common::units::get_page_size();
     {
         auto records = buffer_v->get_internal_buffer().get_record_headers();
         EXPECT_EQ(records.size(), 0);

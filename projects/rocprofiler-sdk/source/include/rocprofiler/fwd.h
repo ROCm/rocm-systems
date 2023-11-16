@@ -113,7 +113,7 @@ typedef enum  // NOLINT(performance-enum-size)
     ROCPROFILER_CALLBACK_PHASE_UNLOAD =
         ROCPROFILER_CALLBACK_PHASE_EXIT,  ///< Callback invoked prior to code object unloading
     ROCPROFILER_CALLBACK_PHASE_LAST,
-} rocprofiler_service_callback_phase_t;
+} rocprofiler_callback_phase_t;
 
 /**
  * @brief Service Callback Tracing Kind.
@@ -373,7 +373,7 @@ typedef struct rocprofiler_callback_tracing_record_t
     rocprofiler_correlation_id_t                correlation_id;
     rocprofiler_service_callback_tracing_kind_t kind;
     uint32_t                                    operation;
-    rocprofiler_service_callback_phase_t        phase;
+    rocprofiler_callback_phase_t                phase;
     void*                                       payload;
 } rocprofiler_callback_tracing_record_t;
 

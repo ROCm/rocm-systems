@@ -241,7 +241,7 @@ def parse_cdash_args(args):
         "-c",
         "--coverage",
         help="Enable code coverage",
-        choices=("all", "unittests", "samples"),
+        choices=("all", "tests", "samples"),
         type=str,
         default=None,
     )
@@ -376,8 +376,8 @@ def parse_args(args=None):
         cmake_args += ["-DROCPROFILER_BUILD_CODECOV=ON"]
         if cdash_args.coverage == "samples":
             ctest_args += ["-L", "samples"]
-        elif cdash_args.coverage == "unittests":
-            ctest_args += ["-L", "unittests"]
+        elif cdash_args.coverage == "tests":
+            ctest_args += ["-L", "tests"]
 
     if cdash_args.linter == "clang-tidy":
         cmake_args += ["-DROCPROFILER_ENABLE_CLANG_TIDY=ON"]
@@ -438,6 +438,7 @@ if __name__ == "__main__":
         dashboard_args.append(f"{args.mode}{itr}")
 
     try:
+        ctest_args += ["--no-tests=error"]
         if not args.quiet and len(ctest_args) == 0:
             ctest_args = ["--output-on-failure", "-V"]
 

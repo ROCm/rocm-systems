@@ -75,6 +75,7 @@ jobs:
         update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 10 --slave /usr/bin/g++ g++ /usr/bin/g++-11
         update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 20 --slave /usr/bin/g++ g++ /usr/bin/g++-12
         python3 -m pip install -r requirements.txt
+        python3 -m pip install pytest
 
     - name: List Files
       shell: bash
@@ -163,9 +164,10 @@ jobs:
     - name: Install requirements
       shell: bash
       run: |
-        pip3 install -r requirements.txt
-        apt install -y cmake libgtest-dev
         git config --global --add safe.directory '*'
+        apt-get install -y cmake libgtest-dev python3-pip
+        python3 -m pip install -r requirements.txt
+        python3 -m pip install pytest
 
     - name: Configure, Build, and Test (Total Code Coverage)
       timeout-minutes: 30
@@ -181,17 +183,17 @@ jobs:
           -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
           -DPython3_EXECUTABLE=$(which python3)
 
-    - name: Configure, Build, and Test (Unit Tests Code Coverage)
+    - name: Configure, Build, and Test (Tests Code Coverage)
       timeout-minutes: 30
       shell: bash
       run:
         find build -type f | egrep '\.gcda$' | xargs rm &&
         python3 ./source/scripts/run-ci.py -B build
-          --name ${{ github.repository }}-${{ github.ref_name }}-mi200-${{ matrix.os }}-codecov-unittests
+          --name ${{ github.repository }}-${{ github.ref_name }}-mi200-${{ matrix.os }}-codecov-tests
           --build-jobs 8
           --site mi200
           --gpu-targets ${{ env.GPU_LIST }}
-          --coverage unittests
+          --coverage tests
           --
           -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
           -DPython3_EXECUTABLE=$(which python3)
@@ -210,6 +212,40 @@ jobs:
           --
           -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
           -DPython3_EXECUTABLE=$(which python3)
+
+    - name: Verify Test Labels
+      timeout-minutes: 5
+      shell: bash
+      run: |
+        pushd build
+        #
+        # if following fails, there is a test that does not have
+        # a label identifying it as sample or test (unit or integration).
+        # Recommended labels are:
+        #   - samples
+        #   - unittests
+        #   - integration-tests
+        #
+        ctest -N -LE 'samples|tests' -O ctest.mislabeled.log
+        grep 'Total Tests: 0' ctest.mislabeled.log
+        #
+        # if following fails, then there is overlap between the labels.
+        # A test cannot both be a sample and (unit/integration) test.
+        #
+        ctest -N -O ctest.all.log
+        ctest -N -O ctest.samples.log -L samples
+        ctest -N -O ctest.tests.log -L tests
+        NUM_ALL=$(grep 'Total Tests:' ctest.all.log | awk '{print $NF}')
+        NUM_SAMPLE=$(grep 'Total Tests:' ctest.samples.log | awk '{print $NF}')
+        NUM_TEST=$(grep 'Total Tests:' ctest.tests.log | awk '{print $NF}')
+        NUM_SUM=$((${NUM_SAMPLE} + ${NUM_TEST}))
+        echo "Total tests: ${NUM_ALL}"
+        echo "Total labeled tests: ${NUM_SUM}"
+        if [ ${NUM_ALL} != ${NUM_SUM} ]; then
+            echo "Test label overlap"
+            exit 1
+        fi
+        popd
 
   sanitizers:
     strategy:
@@ -262,9 +298,10 @@ jobs:
     - name: Install requirements
       shell: bash
       run: |
-        pip3 install -r requirements.txt
-        apt install -y cmake libgtest-dev libasan8 libtsan2
         git config --global --add safe.directory '*'
+        apt-get install -y cmake libgtest-dev python3-pip libasan8 libtsan2
+        python3 -m pip install -r requirements.txt
+        python3 -m pip install pytest
 
     - name: Configure, Build, and Test
       timeout-minutes: 45
