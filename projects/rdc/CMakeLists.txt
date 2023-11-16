@@ -306,27 +306,29 @@ add_subdirectory("rdc_libs")
 # Export the package for use from the build-tree
 # (this registers the build-tree with a global CMake-registry)
 export(PACKAGE rdc)
-# Create the rdc-config.cmake and rdc-config-version files
-# ... for the build tree
-set(CONF_INCLUDE_DIRS "${PROJECT_SOURCE_DIR}" "${PROJECT_BINARY_DIR}")
-set(CONF_LIB_DIR "${PROJECT_BINARY_DIR}")
+
 set(CONF_LIBS "librdc_bootstrap.so")
-configure_file(cmake_modules/rdc-config.cmake.in
-    "${PROJECT_BINARY_DIR}/rdc-config.cmake" @ONLY)
-# ... for the install tree
-set(CONF_INCLUDE_DIRS "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_INCLUDEDIR}")
 set(CONF_LIB_DIR "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}")
 
-configure_file(cmake_modules/rdc-config.cmake.in
-    "${PROJECT_BINARY_DIR}${CMAKE_FILES_DIRECTORY}/rdc-config.cmake" @ONLY)
-# ... for both
+# Create the rdc-config.cmake and rdc-config-version files
 configure_file(cmake_modules/rdc-config-version.cmake.in
     "${PROJECT_BINARY_DIR}/rdc-config-version.cmake" @ONLY)
+
+include(CMakePackageConfigHelpers)
+set(CONFIG_PACKAGE_INSTALL_DIR ${CONF_LIB_DIR}/cmake/${RDC})
+configure_package_config_file(
+    cmake_modules/rdc-config.cmake.in
+    ${CMAKE_CURRENT_BINARY_DIR}/rdc-config.cmake
+    INSTALL_DESTINATION ${CONFIG_PACKAGE_INSTALL_DIR}
+)
+
+
 # Install the rdc-config.cmake and rdc-config-version.cmake
 install(FILES
-    "${PROJECT_BINARY_DIR}${CMAKE_FILES_DIRECTORY}/rdc-config.cmake"
+    "${PROJECT_BINARY_DIR}/rdc-config.cmake"
     "${PROJECT_BINARY_DIR}/rdc-config-version.cmake"
     DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${RDC}" COMPONENT dev)
+
 # Install the export set for use with the install-tree
 install(EXPORT rdcTargets DESTINATION
     "${CMAKE_INSTALL_LIBDIR}/cmake/${RDC}" COMPONENT dev)
