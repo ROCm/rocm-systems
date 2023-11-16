@@ -127,7 +127,7 @@ typedef enum  // NOLINT(performance-enum-size)
     ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT,      ///< Callbacks for code object info
     ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,  ///< Callbacks for kernel dispatches
     ROCPROFILER_CALLBACK_TRACING_LAST,
-} rocprofiler_service_callback_tracing_kind_t;
+} rocprofiler_callback_tracing_kind_t;
 
 /**
  * @brief Service Buffer Tracing Kind.
@@ -146,7 +146,7 @@ typedef enum  // NOLINT(performance-enum-size)
     // To determine if this is possible to implement?
     // ROCPROFILER_BUFFER_TRACING_QUEUE_SCHEDULING,
     ROCPROFILER_BUFFER_TRACING_LAST,
-} rocprofiler_service_buffer_tracing_kind_t;
+} rocprofiler_buffer_tracing_kind_t;
 
 /**
  * @brief ROCProfiler Code Object Tracer Operation.
@@ -368,13 +368,13 @@ typedef struct rocprofiler_dim3_t
  */
 typedef struct rocprofiler_callback_tracing_record_t
 {
-    rocprofiler_context_id_t                    context_id;
-    rocprofiler_thread_id_t                     thread_id;
-    rocprofiler_correlation_id_t                correlation_id;
-    rocprofiler_service_callback_tracing_kind_t kind;
-    uint32_t                                    operation;
-    rocprofiler_callback_phase_t                phase;
-    void*                                       payload;
+    rocprofiler_context_id_t            context_id;
+    rocprofiler_thread_id_t             thread_id;
+    rocprofiler_correlation_id_t        correlation_id;
+    rocprofiler_callback_tracing_kind_t kind;
+    uint32_t                            operation;
+    rocprofiler_callback_phase_t        phase;
+    void*                               payload;
 } rocprofiler_callback_tracing_record_t;
 
 /**
@@ -427,7 +427,7 @@ typedef struct
  *
  * @param [in] category a value from @ref rocprofiler_buffer_category_t
  * @param [in] kind depending on the category, this is the domain value, e.g., @ref
- * rocprofiler_service_buffer_tracing_kind_t value
+ * rocprofiler_buffer_tracing_kind_t value
  * @return uint64_t hash value of category and kind
  */
 static inline uint64_t

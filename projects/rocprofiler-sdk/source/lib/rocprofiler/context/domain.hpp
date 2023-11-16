@@ -41,7 +41,7 @@ template <typename Tp>
 struct domain_info;
 
 template <>
-struct domain_info<rocprofiler_service_callback_tracing_kind_t>
+struct domain_info<rocprofiler_callback_tracing_kind_t>
 {
     static constexpr size_t none    = ROCPROFILER_CALLBACK_TRACING_NONE;
     static constexpr size_t last    = ROCPROFILER_CALLBACK_TRACING_LAST;
@@ -49,7 +49,7 @@ struct domain_info<rocprofiler_service_callback_tracing_kind_t>
 };
 
 template <>
-struct domain_info<rocprofiler_service_buffer_tracing_kind_t>
+struct domain_info<rocprofiler_buffer_tracing_kind_t>
 {
     static constexpr size_t none    = ROCPROFILER_BUFFER_TRACING_NONE;
     static constexpr size_t last    = ROCPROFILER_BUFFER_TRACING_LAST;
@@ -61,8 +61,8 @@ struct domain_info<rocprofiler_service_buffer_tracing_kind_t>
 template <typename DomainT>
 struct domain_context
 {
-    using supported_domains_v = common::mpl::type_list<rocprofiler_service_callback_tracing_kind_t,
-                                                       rocprofiler_service_buffer_tracing_kind_t>;
+    using supported_domains_v = common::mpl::type_list<rocprofiler_callback_tracing_kind_t,
+                                                       rocprofiler_buffer_tracing_kind_t>;
     static_assert(common::mpl::is_one_of<DomainT, supported_domains_v>::value,
                   "Unsupported domain type");
     static constexpr auto opcode_padding_v = domain_info<DomainT>::padding;

@@ -31,9 +31,9 @@ namespace rocprofiler
 {
 namespace hsa
 {
-using activity_functor_t = int (*)(rocprofiler_service_callback_tracing_kind_t domain,
-                                   uint32_t                                    operation_id,
-                                   void*                                       data);
+using activity_functor_t = int (*)(rocprofiler_callback_tracing_kind_t domain,
+                                   uint32_t                            operation_id,
+                                   void*                               data);
 
 using hsa_api_table_t = HsaApiTable;
 

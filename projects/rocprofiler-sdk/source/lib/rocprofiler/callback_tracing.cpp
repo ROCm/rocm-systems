@@ -65,7 +65,7 @@ ROCPROFILER_CALLBACK_TRACING_KIND_STRING(KERNEL_DISPATCH)
 
 template <size_t Idx, size_t... Tail>
 std::pair<const char*, size_t>
-get_kind_name(rocprofiler_service_callback_tracing_kind_t kind, std::index_sequence<Idx, Tail...>)
+get_kind_name(rocprofiler_callback_tracing_kind_t kind, std::index_sequence<Idx, Tail...>)
 {
     if(kind == Idx) return callback_tracing_kind_string<Idx>::value;
     // recursion until tail empty
@@ -78,12 +78,12 @@ get_kind_name(rocprofiler_service_callback_tracing_kind_t kind, std::index_seque
 
 extern "C" {
 rocprofiler_status_t
-rocprofiler_configure_callback_tracing_service(rocprofiler_context_id_t context_id,
-                                               rocprofiler_service_callback_tracing_kind_t kind,
-                                               rocprofiler_tracing_operation_t*  operations,
-                                               size_t                            operations_count,
-                                               rocprofiler_callback_tracing_cb_t callback,
-                                               void*                             callback_args)
+rocprofiler_configure_callback_tracing_service(rocprofiler_context_id_t            context_id,
+                                               rocprofiler_callback_tracing_kind_t kind,
+                                               rocprofiler_tracing_operation_t*    operations,
+                                               size_t                              operations_count,
+                                               rocprofiler_callback_tracing_cb_t   callback,
+                                               void*                               callback_args)
 {
     if(rocprofiler::registration::get_init_status() > -1)
         return ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED;
@@ -117,9 +117,9 @@ rocprofiler_configure_callback_tracing_service(rocprofiler_context_id_t context_
 }
 
 rocprofiler_status_t
-rocprofiler_query_callback_tracing_kind_name(rocprofiler_service_callback_tracing_kind_t kind,
-                                             const char**                                name,
-                                             uint64_t*                                   name_len)
+rocprofiler_query_callback_tracing_kind_name(rocprofiler_callback_tracing_kind_t kind,
+                                             const char**                        name,
+                                             uint64_t*                           name_len)
 {
     auto&& val = rocprofiler::callback_tracing::get_kind_name(
         kind, std::make_index_sequence<ROCPROFILER_CALLBACK_TRACING_LAST>{});
@@ -131,11 +131,10 @@ rocprofiler_query_callback_tracing_kind_name(rocprofiler_service_callback_tracin
 }
 
 rocprofiler_status_t
-rocprofiler_query_callback_tracing_kind_operation_name(
-    rocprofiler_service_callback_tracing_kind_t kind,
-    uint32_t                                    operation,
-    const char**                                name,
-    uint64_t*                                   name_len)
+rocprofiler_query_callback_tracing_kind_operation_name(rocprofiler_callback_tracing_kind_t kind,
+                                                       uint32_t     operation,
+                                                       const char** name,
+                                                       uint64_t*    name_len)
 {
     if(kind < ROCPROFILER_CALLBACK_TRACING_NONE || kind >= ROCPROFILER_CALLBACK_TRACING_LAST)
         return ROCPROFILER_STATUS_ERROR_KIND_NOT_FOUND;
@@ -167,7 +166,7 @@ rocprofiler_iterate_callback_tracing_kinds(rocprofiler_callback_tracing_kind_cb_
 {
     for(uint32_t i = 0; i < ROCPROFILER_CALLBACK_TRACING_LAST; ++i)
     {
-        auto _success = callback(static_cast<rocprofiler_service_callback_tracing_kind_t>(i), data);
+        auto _success = callback(static_cast<rocprofiler_callback_tracing_kind_t>(i), data);
         if(_success != 0) break;
     }
 
@@ -176,7 +175,7 @@ rocprofiler_iterate_callback_tracing_kinds(rocprofiler_callback_tracing_kind_cb_
 
 rocprofiler_status_t
 rocprofiler_iterate_callback_tracing_kind_operations(
-    rocprofiler_service_callback_tracing_kind_t      kind,
+    rocprofiler_callback_tracing_kind_t              kind,
     rocprofiler_callback_tracing_kind_operation_cb_t callback,
     void*                                            data)
 {

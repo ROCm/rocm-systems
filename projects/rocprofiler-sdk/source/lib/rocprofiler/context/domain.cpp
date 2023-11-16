@@ -70,30 +70,28 @@ add_domain_op(domain_context<DomainT>& _cfg, DomainT _domain, uint32_t _op)
 }
 
 // instantiate the templates
-template struct domain_context<rocprofiler_service_callback_tracing_kind_t>;
+template struct domain_context<rocprofiler_callback_tracing_kind_t>;
 
 template rocprofiler_status_t
-add_domain<rocprofiler_service_callback_tracing_kind_t>(
-    domain_context<rocprofiler_service_callback_tracing_kind_t>&,
-    rocprofiler_service_callback_tracing_kind_t);
+add_domain<rocprofiler_callback_tracing_kind_t>(
+    domain_context<rocprofiler_callback_tracing_kind_t>&,
+    rocprofiler_callback_tracing_kind_t);
 
 template rocprofiler_status_t
-add_domain<rocprofiler_service_buffer_tracing_kind_t>(
-    domain_context<rocprofiler_service_buffer_tracing_kind_t>&,
-    rocprofiler_service_buffer_tracing_kind_t);
+add_domain<rocprofiler_buffer_tracing_kind_t>(domain_context<rocprofiler_buffer_tracing_kind_t>&,
+                                              rocprofiler_buffer_tracing_kind_t);
 
 template rocprofiler_status_t
-add_domain_op<rocprofiler_service_callback_tracing_kind_t>(
-    domain_context<rocprofiler_service_callback_tracing_kind_t>&,
-    rocprofiler_service_callback_tracing_kind_t,
+add_domain_op<rocprofiler_callback_tracing_kind_t>(
+    domain_context<rocprofiler_callback_tracing_kind_t>&,
+    rocprofiler_callback_tracing_kind_t,
     uint32_t);
 
-template struct domain_context<rocprofiler_service_buffer_tracing_kind_t>;
+template struct domain_context<rocprofiler_buffer_tracing_kind_t>;
 
 template rocprofiler_status_t
-add_domain_op<rocprofiler_service_buffer_tracing_kind_t>(
-    domain_context<rocprofiler_service_buffer_tracing_kind_t>&,
-    rocprofiler_service_buffer_tracing_kind_t,
-    uint32_t);
+add_domain_op<rocprofiler_buffer_tracing_kind_t>(domain_context<rocprofiler_buffer_tracing_kind_t>&,
+                                                 rocprofiler_buffer_tracing_kind_t,
+                                                 uint32_t);
 }  // namespace context
 }  // namespace rocprofiler

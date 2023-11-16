@@ -88,9 +88,9 @@ struct source_location
 };
 
 using call_stack_t        = std::vector<source_location>;
-using buffer_kind_names_t = std::map<rocprofiler_service_buffer_tracing_kind_t, const char*>;
+using buffer_kind_names_t = std::map<rocprofiler_buffer_tracing_kind_t, const char*>;
 using buffer_kind_operation_names_t =
-    std::map<rocprofiler_service_buffer_tracing_kind_t, std::map<uint32_t, const char*>>;
+    std::map<rocprofiler_buffer_tracing_kind_t, std::map<uint32_t, const char*>>;
 using kernel_symbol_data_t = rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t;
 using kernel_symbol_map_t  = std::unordered_map<rocprofiler_kernel_id_t, kernel_symbol_data_t>;
 
@@ -160,7 +160,7 @@ get_buffer_tracing_names()
     // callback for each kind operation
     //
     static auto tracing_kind_operation_cb =
-        [](rocprofiler_service_buffer_tracing_kind_t kindv, uint32_t operation, void* data_v) {
+        [](rocprofiler_buffer_tracing_kind_t kindv, uint32_t operation, void* data_v) {
             auto* name_info_v = static_cast<buffer_name_info*>(data_v);
 
             if(kindv == ROCPROFILER_BUFFER_TRACING_HSA_API)
@@ -177,7 +177,7 @@ get_buffer_tracing_names()
     //
     //  callback for each buffer kind (i.e. domain)
     //
-    static auto tracing_kind_cb = [](rocprofiler_service_buffer_tracing_kind_t kind, void* data) {
+    static auto tracing_kind_cb = [](rocprofiler_buffer_tracing_kind_t kind, void* data) {
         //  store the buffer kind name
         auto*       name_info_v = static_cast<buffer_name_info*>(data);
         const char* name        = nullptr;

@@ -82,9 +82,9 @@ struct source_location
 };
 
 using call_stack_t          = std::vector<source_location>;
-using callback_kind_names_t = std::map<rocprofiler_service_callback_tracing_kind_t, const char*>;
+using callback_kind_names_t = std::map<rocprofiler_callback_tracing_kind_t, const char*>;
 using callback_kind_operation_names_t =
-    std::map<rocprofiler_service_callback_tracing_kind_t, std::map<uint32_t, const char*>>;
+    std::map<rocprofiler_callback_tracing_kind_t, std::map<uint32_t, const char*>>;
 using wrap_count_t = std::pair<source_location, size_t>;
 
 rocprofiler_client_id_t*       client_id        = nullptr;

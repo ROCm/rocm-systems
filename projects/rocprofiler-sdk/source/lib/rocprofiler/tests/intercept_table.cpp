@@ -86,9 +86,9 @@ struct agent_data
     std::vector<hsa_device_type_t> agents      = {};
 };
 
-using callback_kind_names_t = std::map<rocprofiler_service_callback_tracing_kind_t, const char*>;
+using callback_kind_names_t = std::map<rocprofiler_callback_tracing_kind_t, const char*>;
 using callback_kind_operation_names_t =
-    std::map<rocprofiler_service_callback_tracing_kind_t, std::map<uint32_t, const char*>>;
+    std::map<rocprofiler_callback_tracing_kind_t, std::map<uint32_t, const char*>>;
 using wrap_count_t = std::pair<std::string_view, size_t>;
 
 struct callback_name_info
@@ -126,7 +126,7 @@ get_callback_tracing_names()
     // callback for each kind operation
     //
     static auto tracing_kind_operation_cb =
-        [](rocprofiler_service_callback_tracing_kind_t kindv, uint32_t operation, void* data_v) {
+        [](rocprofiler_callback_tracing_kind_t kindv, uint32_t operation, void* data_v) {
             auto* name_info_v = static_cast<callback_name_info*>(data_v);
 
             if(kindv == ROCPROFILER_CALLBACK_TRACING_HSA_API)
@@ -143,7 +143,7 @@ get_callback_tracing_names()
     //
     //  callback for each callback kind (i.e. domain)
     //
-    static auto tracing_kind_cb = [](rocprofiler_service_callback_tracing_kind_t kind, void* data) {
+    static auto tracing_kind_cb = [](rocprofiler_callback_tracing_kind_t kind, void* data) {
         //  store the callback kind name
         auto*       name_info_v = static_cast<callback_name_info*>(data);
         const char* name        = nullptr;

@@ -169,22 +169,21 @@ typedef void (*rocprofiler_callback_tracing_cb_t)(rocprofiler_callback_tracing_r
                                                   void* callback_data) ROCPROFILER_NONNULL(2);
 
 /**
- * @brief Callback function for mapping @ref rocprofiler_service_callback_tracing_kind_t ids to
+ * @brief Callback function for mapping @ref rocprofiler_callback_tracing_kind_t ids to
  * string names. @see rocprofiler_iterate_callback_tracing_kind_names.
  */
-typedef int (*rocprofiler_callback_tracing_kind_cb_t)(
-    rocprofiler_service_callback_tracing_kind_t kind,
-    void*                                       data);
+typedef int (*rocprofiler_callback_tracing_kind_cb_t)(rocprofiler_callback_tracing_kind_t kind,
+                                                      void*                               data);
 
 /**
  * @brief Callback function for mapping the operations of a given @ref
- * rocprofiler_service_callback_tracing_kind_t to string names. @see
+ * rocprofiler_callback_tracing_kind_t to string names. @see
  * rocprofiler_iterate_callback_tracing_kind_operation_names.
  */
 typedef int (*rocprofiler_callback_tracing_kind_operation_cb_t)(
-    rocprofiler_service_callback_tracing_kind_t kind,
-    uint32_t                                    operation,
-    void*                                       data);
+    rocprofiler_callback_tracing_kind_t kind,
+    uint32_t                            operation,
+    void*                               data);
 
 /**
  * @brief Callback function for iterating over the function arguments to a traced function.
@@ -200,19 +199,19 @@ typedef int (*rocprofiler_callback_tracing_kind_operation_cb_t)(
  * @param [in] data user data
  */
 typedef int (*rocprofiler_callback_tracing_operation_args_cb_t)(
-    rocprofiler_service_callback_tracing_kind_t kind,
-    uint32_t                                    operation,
-    uint32_t                                    arg_number,
-    const char*                                 arg_name,
-    const char*                                 arg_value_str,
-    const void* const                           arg_value_addr,
-    void*                                       data);
+    rocprofiler_callback_tracing_kind_t kind,
+    uint32_t                            operation,
+    uint32_t                            arg_number,
+    const char*                         arg_name,
+    const char*                         arg_value_str,
+    const void* const                   arg_value_addr,
+    void*                               data);
 
 /**
  * @brief Configure Callback Tracing Service. The callback tracing service provides two synchronous
  * callbacks around an API function on the same thread as the application which is invoking the API
  * function. This function can only be invoked once per @ref
- * rocprofiler_service_callback_tracing_kind_t value, i.e. it can be invoked once for the HSA API,
+ * rocprofiler_callback_tracing_kind_t value, i.e. it can be invoked once for the HSA API,
  * once for the HIP API, and so on but it will fail if it is invoked for the HSA API twice. Please
  * note, the callback API does have the potentially non-trivial overhead of copying the function
  * arguments into the record. If you are willing to let rocprofiler record the timestamps, do not
@@ -233,17 +232,17 @@ typedef int (*rocprofiler_callback_tracing_operation_args_cb_t)(
  * rocprofiler_configure function
  * @retval ::ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND The provided context is not valid/registered
  * @retval ::ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED if the same @ref
- * rocprofiler_service_callback_tracing_kind_t value is provided more than once (per context) -- in
+ * rocprofiler_callback_tracing_kind_t value is provided more than once (per context) -- in
  * other words, we do not support overriding or combining the operations in separate function calls.
  *
  */
 rocprofiler_status_t ROCPROFILER_API
-rocprofiler_configure_callback_tracing_service(rocprofiler_context_id_t context_id,
-                                               rocprofiler_service_callback_tracing_kind_t kind,
-                                               rocprofiler_tracing_operation_t*  operations,
-                                               size_t                            operations_count,
-                                               rocprofiler_callback_tracing_cb_t callback,
-                                               void*                             callback_args);
+rocprofiler_configure_callback_tracing_service(rocprofiler_context_id_t            context_id,
+                                               rocprofiler_callback_tracing_kind_t kind,
+                                               rocprofiler_tracing_operation_t*    operations,
+                                               size_t                              operations_count,
+                                               rocprofiler_callback_tracing_cb_t   callback,
+                                               void*                               callback_args);
 
 /**
  * @brief Query the name of the callback tracing kind. The name retrieved from this function is a
@@ -259,8 +258,8 @@ rocprofiler_configure_callback_tracing_service(rocprofiler_context_id_t context_
  * @return ::rocprofiler_status_t
  */
 rocprofiler_status_t
-rocprofiler_query_callback_tracing_kind_name(rocprofiler_service_callback_tracing_kind_t kind,
-                                             const char**                                name,
+rocprofiler_query_callback_tracing_kind_name(rocprofiler_callback_tracing_kind_t kind,
+                                             const char**                        name,
                                              uint64_t* name_len) ROCPROFILER_API;
 
 /**
@@ -281,18 +280,17 @@ rocprofiler_query_callback_tracing_kind_name(rocprofiler_service_callback_tracin
  * string or not.
  */
 rocprofiler_status_t
-rocprofiler_query_callback_tracing_kind_operation_name(
-    rocprofiler_service_callback_tracing_kind_t kind,
-    uint32_t                                    operation,
-    const char**                                name,
-    uint64_t*                                   name_len) ROCPROFILER_API;
+rocprofiler_query_callback_tracing_kind_operation_name(rocprofiler_callback_tracing_kind_t kind,
+                                                       uint32_t     operation,
+                                                       const char** name,
+                                                       uint64_t*    name_len) ROCPROFILER_API;
 
 /**
  * @brief Iterate over all the mappings of the callback tracing kinds and get a callback for each
  * kind.
  *
  * @param [in] callback Callback function invoked for each enumeration value in @ref
- * rocprofiler_service_callback_tracing_kind_t with the exception of the `NONE` and `LAST` values.
+ * rocprofiler_callback_tracing_kind_t with the exception of the `NONE` and `LAST` values.
  * @param [in] data User data passed back into the callback
  * @return ::rocprofiler_status_t
  */
@@ -302,12 +300,12 @@ rocprofiler_iterate_callback_tracing_kinds(rocprofiler_callback_tracing_kind_cb_
 
 /**
  * @brief Iterates over all the mappings of the operations for a given @ref
- * rocprofiler_service_callback_tracing_kind_t and invokes the callback with the kind id, operation
+ * rocprofiler_callback_tracing_kind_t and invokes the callback with the kind id, operation
  * id, and user-provided data.
  *
  * @param [in] kind which tracing callback kind operations to iterate over
  * @param [in] callback Callback function invoked for each operation associated with @ref
- * rocprofiler_service_callback_tracing_kind_t with the exception of the `NONE` and `LAST` values.
+ * rocprofiler_callback_tracing_kind_t with the exception of the `NONE` and `LAST` values.
  * @param [in] data User data passed back into the callback
  * @return ::rocprofiler_status_t
  * @retval ::ROCPROFILER_STATUS_ERROR_KIND_NOT_FOUND Invalid domain id
@@ -315,7 +313,7 @@ rocprofiler_iterate_callback_tracing_kinds(rocprofiler_callback_tracing_kind_cb_
  */
 rocprofiler_status_t ROCPROFILER_API
 rocprofiler_iterate_callback_tracing_kind_operations(
-    rocprofiler_service_callback_tracing_kind_t      kind,
+    rocprofiler_callback_tracing_kind_t              kind,
     rocprofiler_callback_tracing_kind_operation_cb_t callback,
     void*                                            data) ROCPROFILER_NONNULL(2);
 

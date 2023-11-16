@@ -450,9 +450,9 @@ get_names(std::vector<const char*>& _name_list, std::index_sequence<Idx...>)
 }
 
 bool
-should_wrap_functor(rocprofiler_service_callback_tracing_kind_t _callback_domain,
-                    rocprofiler_service_buffer_tracing_kind_t   _buffered_domain,
-                    int                                         _operation)
+should_wrap_functor(rocprofiler_callback_tracing_kind_t _callback_domain,
+                    rocprofiler_buffer_tracing_kind_t   _buffered_domain,
+                    int                                 _operation)
 {
     // we loop over all the *registered* contexts and see if any of them, at any point in time,
     // might require callback or buffered API tracing

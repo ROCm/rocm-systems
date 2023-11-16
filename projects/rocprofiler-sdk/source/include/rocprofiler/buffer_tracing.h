@@ -40,13 +40,13 @@ ROCPROFILER_EXTERN_C_INIT
  */
 typedef struct
 {
-    uint64_t                                  size;
-    rocprofiler_service_buffer_tracing_kind_t kind;
-    rocprofiler_correlation_id_t              correlation_id;
-    rocprofiler_tracing_operation_t           operation;  // rocprofiler/hsa.h
-    rocprofiler_timestamp_t                   start_timestamp;
-    rocprofiler_timestamp_t                   end_timestamp;
-    rocprofiler_thread_id_t                   thread_id;
+    uint64_t                          size;
+    rocprofiler_buffer_tracing_kind_t kind;
+    rocprofiler_correlation_id_t      correlation_id;
+    rocprofiler_tracing_operation_t   operation;  // rocprofiler/hsa.h
+    rocprofiler_timestamp_t           start_timestamp;
+    rocprofiler_timestamp_t           end_timestamp;
+    rocprofiler_thread_id_t           thread_id;
 } rocprofiler_buffer_tracing_hsa_api_record_t;
 
 /**
@@ -54,13 +54,13 @@ typedef struct
  */
 typedef struct
 {
-    uint64_t                                  size;
-    rocprofiler_service_buffer_tracing_kind_t kind;
-    rocprofiler_correlation_id_t              correlation_id;
-    rocprofiler_tracing_operation_t           operation;  // rocprofiler/hip.h
-    rocprofiler_timestamp_t                   start_timestamp;
-    rocprofiler_timestamp_t                   end_timestamp;
-    rocprofiler_thread_id_t                   thread_id;
+    uint64_t                          size;
+    rocprofiler_buffer_tracing_kind_t kind;
+    rocprofiler_correlation_id_t      correlation_id;
+    rocprofiler_tracing_operation_t   operation;  // rocprofiler/hip.h
+    rocprofiler_timestamp_t           start_timestamp;
+    rocprofiler_timestamp_t           end_timestamp;
+    rocprofiler_thread_id_t           thread_id;
 } rocprofiler_buffer_tracing_hip_api_record_t;
 
 /**
@@ -68,13 +68,13 @@ typedef struct
  */
 typedef struct
 {
-    uint64_t                                  size;
-    rocprofiler_service_buffer_tracing_kind_t kind;
-    rocprofiler_correlation_id_t              correlation_id;
-    rocprofiler_tracing_operation_t           operation;  // rocprofiler/marker.h
-    rocprofiler_timestamp_t                   timestamp;
-    rocprofiler_thread_id_t                   thread_id;
-    uint64_t                                  marker_id;  // rocprofiler_marker_id_t
+    uint64_t                          size;
+    rocprofiler_buffer_tracing_kind_t kind;
+    rocprofiler_correlation_id_t      correlation_id;
+    rocprofiler_tracing_operation_t   operation;  // rocprofiler/marker.h
+    rocprofiler_timestamp_t           timestamp;
+    rocprofiler_thread_id_t           thread_id;
+    uint64_t                          marker_id;  // rocprofiler_marker_id_t
     // const char* message; // (Need Review?)
 } rocprofiler_buffer_tracing_marker_record_t;
 
@@ -83,14 +83,14 @@ typedef struct
  */
 typedef struct
 {
-    uint64_t                                  size;
-    rocprofiler_service_buffer_tracing_kind_t kind;
-    rocprofiler_correlation_id_t              correlation_id;
-    rocprofiler_timestamp_t                   start_timestamp;
-    rocprofiler_timestamp_t                   end_timestamp;
-    rocprofiler_agent_id_t                    agent_id;
-    rocprofiler_queue_id_t                    queue_id;
-    rocprofiler_kernel_id_t                   kernel_id;
+    uint64_t                          size;
+    rocprofiler_buffer_tracing_kind_t kind;
+    rocprofiler_correlation_id_t      correlation_id;
+    rocprofiler_timestamp_t           start_timestamp;
+    rocprofiler_timestamp_t           end_timestamp;
+    rocprofiler_agent_id_t            agent_id;
+    rocprofiler_queue_id_t            queue_id;
+    rocprofiler_kernel_id_t           kernel_id;
 } rocprofiler_buffer_tracing_memory_copy_record_t;
 
 /**
@@ -98,18 +98,18 @@ typedef struct
  */
 typedef struct
 {
-    uint64_t                                  size;
-    rocprofiler_service_buffer_tracing_kind_t kind;
-    rocprofiler_correlation_id_t              correlation_id;
-    rocprofiler_timestamp_t                   start_timestamp;
-    rocprofiler_timestamp_t                   end_timestamp;
-    rocprofiler_agent_id_t                    agent_id;
-    rocprofiler_queue_id_t                    queue_id;
-    rocprofiler_kernel_id_t                   kernel_id;
-    uint32_t                                  private_segment_size;
-    uint32_t                                  group_segment_size;
-    rocprofiler_dim3_t                        workgroup_size;
-    rocprofiler_dim3_t                        grid_size;
+    uint64_t                          size;
+    rocprofiler_buffer_tracing_kind_t kind;
+    rocprofiler_correlation_id_t      correlation_id;
+    rocprofiler_timestamp_t           start_timestamp;
+    rocprofiler_timestamp_t           end_timestamp;
+    rocprofiler_agent_id_t            agent_id;
+    rocprofiler_queue_id_t            queue_id;
+    rocprofiler_kernel_id_t           kernel_id;
+    uint32_t                          private_segment_size;
+    uint32_t                          group_segment_size;
+    rocprofiler_dim3_t                workgroup_size;
+    rocprofiler_dim3_t                grid_size;
 } rocprofiler_buffer_tracing_kernel_dispatch_record_t;
 
 /**
@@ -117,12 +117,12 @@ typedef struct
  */
 typedef struct
 {
-    uint64_t                                  size;
-    rocprofiler_service_buffer_tracing_kind_t kind;
-    rocprofiler_correlation_id_t              correlation_id;
-    rocprofiler_timestamp_t                   start_timestamp;
-    rocprofiler_timestamp_t                   end_timestamp;
-    rocprofiler_queue_id_t                    queue_id;
+    uint64_t                          size;
+    rocprofiler_buffer_tracing_kind_t kind;
+    rocprofiler_correlation_id_t      correlation_id;
+    rocprofiler_timestamp_t           start_timestamp;
+    rocprofiler_timestamp_t           end_timestamp;
+    rocprofiler_queue_id_t            queue_id;
     // Not Sure What is the info needed here?
 } rocprofiler_buffer_tracing_page_migration_record_t;
 
@@ -131,12 +131,12 @@ typedef struct
  */
 typedef struct
 {
-    uint64_t                                  size;
-    rocprofiler_service_buffer_tracing_kind_t kind;
-    rocprofiler_correlation_id_t              correlation_id;
-    rocprofiler_timestamp_t                   start_timestamp;
-    rocprofiler_timestamp_t                   end_timestamp;
-    rocprofiler_queue_id_t                    queue_id;
+    uint64_t                          size;
+    rocprofiler_buffer_tracing_kind_t kind;
+    rocprofiler_correlation_id_t      correlation_id;
+    rocprofiler_timestamp_t           start_timestamp;
+    rocprofiler_timestamp_t           end_timestamp;
+    rocprofiler_queue_id_t            queue_id;
     // Not Sure What is the info needed here?
 } rocprofiler_buffer_tracing_scratch_memory_record_t;
 
@@ -145,12 +145,12 @@ typedef struct
  */
 typedef struct
 {
-    uint64_t                                  size;
-    rocprofiler_service_buffer_tracing_kind_t kind;
-    rocprofiler_correlation_id_t              correlation_id;
-    rocprofiler_timestamp_t                   start_timestamp;
-    rocprofiler_timestamp_t                   end_timestamp;
-    rocprofiler_queue_id_t                    queue_id;
+    uint64_t                          size;
+    rocprofiler_buffer_tracing_kind_t kind;
+    rocprofiler_correlation_id_t      correlation_id;
+    rocprofiler_timestamp_t           start_timestamp;
+    rocprofiler_timestamp_t           end_timestamp;
+    rocprofiler_queue_id_t            queue_id;
     // Not Sure What is the info needed here?
 } rocprofiler_buffer_tracing_queue_scheduling_record_t;
 
@@ -209,27 +209,27 @@ typedef struct
  */
 typedef struct
 {
-    uint64_t                                  size;
-    rocprofiler_service_buffer_tracing_kind_t kind;
-    rocprofiler_correlation_id_t              correlation_id;
+    uint64_t                          size;
+    rocprofiler_buffer_tracing_kind_t kind;
+    rocprofiler_correlation_id_t      correlation_id;
 } rocprofiler_buffer_tracing_correlation_record_t;
 
 /**
- * @brief Callback function for mapping @ref rocprofiler_service_buffer_tracing_kind_t ids to
+ * @brief Callback function for mapping @ref rocprofiler_buffer_tracing_kind_t ids to
  * string names. @see rocprofiler_iterate_buffer_trace_kind_names.
  */
-typedef int (*rocprofiler_buffer_tracing_kind_cb_t)(rocprofiler_service_buffer_tracing_kind_t kind,
-                                                    void*                                     data);
+typedef int (*rocprofiler_buffer_tracing_kind_cb_t)(rocprofiler_buffer_tracing_kind_t kind,
+                                                    void*                             data);
 
 /**
  * @brief Callback function for mapping the operations of a given @ref
- * rocprofiler_service_buffer_tracing_kind_t to string names. @see
+ * rocprofiler_buffer_tracing_kind_t to string names. @see
  * rocprofiler_iterate_buffer_trace_kind_operation_names.
  */
 typedef int (*rocprofiler_buffer_tracing_kind_operation_cb_t)(
-    rocprofiler_service_buffer_tracing_kind_t kind,
-    uint32_t                                  operation,
-    void*                                     data);
+    rocprofiler_buffer_tracing_kind_t kind,
+    uint32_t                          operation,
+    void*                             data);
 
 /**
  * @brief Configure Buffer Tracing Service.
@@ -243,11 +243,11 @@ typedef int (*rocprofiler_buffer_tracing_kind_operation_cb_t)(
  *
  */
 rocprofiler_status_t ROCPROFILER_API
-rocprofiler_configure_buffer_tracing_service(rocprofiler_context_id_t                  context_id,
-                                             rocprofiler_service_buffer_tracing_kind_t kind,
-                                             rocprofiler_tracing_operation_t*          operations,
-                                             size_t                  operations_count,
-                                             rocprofiler_buffer_id_t buffer_id);
+rocprofiler_configure_buffer_tracing_service(rocprofiler_context_id_t          context_id,
+                                             rocprofiler_buffer_tracing_kind_t kind,
+                                             rocprofiler_tracing_operation_t*  operations,
+                                             size_t                            operations_count,
+                                             rocprofiler_buffer_id_t           buffer_id);
 
 /**
  * @brief Query the name of the buffer tracing kind. The name retrieved from this function is a
@@ -266,8 +266,8 @@ rocprofiler_configure_buffer_tracing_service(rocprofiler_context_id_t           
  * constant string or not.
  */
 rocprofiler_status_t
-rocprofiler_query_buffer_tracing_kind_name(rocprofiler_service_buffer_tracing_kind_t kind,
-                                           const char**                              name,
+rocprofiler_query_buffer_tracing_kind_name(rocprofiler_buffer_tracing_kind_t kind,
+                                           const char**                      name,
                                            uint64_t* name_len) ROCPROFILER_API;
 
 /**
@@ -292,10 +292,10 @@ rocprofiler_query_buffer_tracing_kind_name(rocprofiler_service_buffer_tracing_ki
  * constant string or not.
  */
 rocprofiler_status_t
-rocprofiler_query_buffer_tracing_kind_operation_name(rocprofiler_service_buffer_tracing_kind_t kind,
-                                                     uint32_t     operation,
-                                                     const char** name,
-                                                     uint64_t*    name_len) ROCPROFILER_API;
+rocprofiler_query_buffer_tracing_kind_operation_name(rocprofiler_buffer_tracing_kind_t kind,
+                                                     uint32_t                          operation,
+                                                     const char**                      name,
+                                                     uint64_t* name_len) ROCPROFILER_API;
 
 /**
  * @brief Iterate over all the mappings of the buffer tracing kinds and get a buffer with the id
@@ -304,7 +304,7 @@ rocprofiler_query_buffer_tracing_kind_operation_name(rocprofiler_service_buffer_
  * in the client instead of making multiple on-demand calls.
  *
  * @param [in] callback Callback function invoked for each enumeration value in @ref
- * rocprofiler_service_buffer_tracing_kind_t with the exception of the `NONE` and `LAST` values.
+ * rocprofiler_buffer_tracing_kind_t with the exception of the `NONE` and `LAST` values.
  * @param [in] data User data passed back into the callback
  */
 rocprofiler_status_t ROCPROFILER_API
@@ -313,18 +313,18 @@ rocprofiler_iterate_buffer_tracing_kinds(rocprofiler_buffer_tracing_kind_cb_t ca
 
 /**
  * @brief Iterates over all the operations for a given @ref
- * rocprofiler_service_buffer_tracing_kind_t and invokes the callback with the kind and operation
+ * rocprofiler_buffer_tracing_kind_t and invokes the callback with the kind and operation
  * id. This is useful to build a map of the operation names during tool initialization instead of
  * querying rocprofiler everytime in the callback hotpath.
  *
  * @param [in] kind which buffer tracing kind operations to iterate over
  * @param [in] callback Callback function invoked for each operation associated with @ref
- * rocprofiler_service_buffer_tracing_kind_t with the exception of the `NONE` and `LAST` values.
+ * rocprofiler_buffer_tracing_kind_t with the exception of the `NONE` and `LAST` values.
  * @param [in] data User data passed back into the callback
  */
 rocprofiler_status_t ROCPROFILER_API
 rocprofiler_iterate_buffer_tracing_kind_operations(
-    rocprofiler_service_buffer_tracing_kind_t      kind,
+    rocprofiler_buffer_tracing_kind_t              kind,
     rocprofiler_buffer_tracing_kind_operation_cb_t callback,
     void*                                          data) ROCPROFILER_NONNULL(2);
 

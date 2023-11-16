@@ -44,9 +44,7 @@ namespace rocprofiler
 {
 namespace context
 {
-using external_cid_cb_t = uint64_t (*)(rocprofiler_service_callback_tracing_kind_t,
-                                       uint32_t,
-                                       uint64_t);
+using external_cid_cb_t = uint64_t (*)(rocprofiler_callback_tracing_kind_t, uint32_t, uint64_t);
 
 constexpr auto null_user_data = rocprofiler_user_data_t{.value = 0};
 struct correlation_id
@@ -105,7 +103,7 @@ struct callback_tracing_service
         void*                             data     = nullptr;
     };
 
-    using domain_t         = rocprofiler_service_callback_tracing_kind_t;
+    using domain_t         = rocprofiler_callback_tracing_kind_t;
     using callback_array_t = std::array<callback_data, domain_info<domain_t>::last>;
 
     domain_context<domain_t> domains       = {};
@@ -114,7 +112,7 @@ struct callback_tracing_service
 
 struct buffer_tracing_service
 {
-    using domain_t       = rocprofiler_service_buffer_tracing_kind_t;
+    using domain_t       = rocprofiler_buffer_tracing_kind_t;
     using buffer_array_t = std::array<rocprofiler_buffer_id_t, domain_info<domain_t>::last>;
 
     domain_context<domain_t> domains     = {};

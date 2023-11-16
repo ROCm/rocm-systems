@@ -82,9 +82,9 @@ struct source_location
 };
 
 using call_stack_t          = std::vector<source_location>;
-using callback_kind_names_t = std::map<rocprofiler_service_callback_tracing_kind_t, const char*>;
+using callback_kind_names_t = std::map<rocprofiler_callback_tracing_kind_t, const char*>;
 using callback_kind_operation_names_t =
-    std::map<rocprofiler_service_callback_tracing_kind_t, std::map<uint32_t, const char*>>;
+    std::map<rocprofiler_callback_tracing_kind_t, std::map<uint32_t, const char*>>;
 
 struct callback_name_info
 {
@@ -150,7 +150,7 @@ get_callback_id_names()
     // callback for each kind operation
     //
     static auto tracing_kind_operation_cb =
-        [](rocprofiler_service_callback_tracing_kind_t kindv, uint32_t operation, void* data_v) {
+        [](rocprofiler_callback_tracing_kind_t kindv, uint32_t operation, void* data_v) {
             auto* name_info_v = static_cast<callback_name_info*>(data_v);
 
             if(kindv == ROCPROFILER_CALLBACK_TRACING_HSA_API)
@@ -167,7 +167,7 @@ get_callback_id_names()
     //
     //  callback for each callback kind (i.e. domain)
     //
-    static auto tracing_kind_cb = [](rocprofiler_service_callback_tracing_kind_t kind, void* data) {
+    static auto tracing_kind_cb = [](rocprofiler_callback_tracing_kind_t kind, void* data) {
         //  store the callback kind name
         auto*       name_info_v = static_cast<callback_name_info*>(data);
         const char* name        = nullptr;
@@ -211,7 +211,7 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
          << ", operation=" << std::setw(3) << record.operation << ", phase=" << record.phase
          << ", dt_nsec=" << std::setw(6) << dt;
 
-    auto info_data_cb = [](rocprofiler_service_callback_tracing_kind_t,
+    auto info_data_cb = [](rocprofiler_callback_tracing_kind_t,
                            uint32_t,
                            uint32_t          arg_num,
                            const char*       arg_name,
