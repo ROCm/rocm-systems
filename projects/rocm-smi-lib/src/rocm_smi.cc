@@ -837,6 +837,21 @@ rsmi_dev_id_get(uint32_t dv_ind, uint16_t *id) {
 }
 
 rsmi_status_t
+rsmi_dev_xgmi_physical_id_get(uint32_t dv_ind, uint16_t *id) {
+  std::ostringstream ss;
+  rsmi_status_t ret;
+  ss << __PRETTY_FUNCTION__ << "| ======= start =======";
+  LOG_TRACE(ss);
+  CHK_SUPPORT_NAME_ONLY(id)
+
+  ret = get_id(dv_ind, amd::smi::kDevXGMIPhysicalID, id);
+  ss << __PRETTY_FUNCTION__ << " | ======= end ======="
+     << ", reporting " << amd::smi::getRSMIStatusString(ret);
+  LOG_TRACE(ss);
+  return ret;
+}
+
+rsmi_status_t
 rsmi_dev_revision_get(uint32_t dv_ind, uint16_t *revision) {
   std::ostringstream outss;
   rsmi_status_t ret;
@@ -2776,9 +2791,6 @@ rsmi_dev_od_volt_info_get(uint32_t dv_ind, rsmi_od_volt_freq_data_t *odv) {
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
   DEVICE_MUTEX
-  if (odv == nullptr) {
-    return RSMI_STATUS_INVALID_ARGS;
-  }
   CHK_SUPPORT_NAME_ONLY(odv)
   rsmi_status_t ret = get_od_clk_volt_info(dv_ind, odv);
 

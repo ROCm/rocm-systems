@@ -363,16 +363,16 @@ typedef rsmi_clk_type_t rsmi_clk_type;
  */
 typedef enum {
   RSMI_COMPUTE_PARTITION_INVALID = 0,
-  RSMI_COMPUTE_PARTITION_CPX = 1,    //!< Core mode (CPX)- Per-chip XCC with
-                                     //!< shared memory
-  RSMI_COMPUTE_PARTITION_SPX  = 2,   //!< Single GPU mode (SPX)- All XCCs work
-                                     //!< together with shared memory
-  RSMI_COMPUTE_PARTITION_DPX  = 3,   //!< Dual GPU mode (DPX)- Half XCCs work
-                                     //!< together with shared memory
-  RSMI_COMPUTE_PARTITION_TPX = 4,    //!< Triple GPU mode (TPX)- One-third XCCs
-                                     //!< work together with shared memory
-  RSMI_COMPUTE_PARTITION_QPX = 5,    //!< Quad GPU mode (QPX)- Quarter XCCs
-                                     //!< work together with shared memory
+  RSMI_COMPUTE_PARTITION_CPX, //!< Core mode (CPX)- Per-chip XCC with
+                              //!< shared memory
+  RSMI_COMPUTE_PARTITION_SPX, //!< Single GPU mode (SPX)- All XCCs work
+                              //!< together with shared memory
+  RSMI_COMPUTE_PARTITION_DPX, //!< Dual GPU mode (DPX)- Half XCCs work
+                              //!< together with shared memory
+  RSMI_COMPUTE_PARTITION_TPX, //!< Triple GPU mode (TPX)- One-third XCCs
+                              //!< work together with shared memory
+  RSMI_COMPUTE_PARTITION_QPX, //!< Quad GPU mode (QPX)- Quarter XCCs
+                              //!< work together with shared memory
 } rsmi_compute_partition_type_t;
 /// \cond Ignore in docs.
 typedef rsmi_compute_partition_type_t rsmi_compute_partition_type;
@@ -680,8 +680,8 @@ typedef enum {
  */
 typedef enum _RSMI_IO_LINK_TYPE {
   RSMI_IOLINK_TYPE_UNDEFINED      = 0,          //!< unknown type.
-  RSMI_IOLINK_TYPE_PCIEXPRESS     = 1,          //!< PCI Express
-  RSMI_IOLINK_TYPE_XGMI           = 2,          //!< XGMI
+  RSMI_IOLINK_TYPE_PCIEXPRESS,                  //!< PCI Express
+  RSMI_IOLINK_TYPE_XGMI,                        //!< XGMI
   RSMI_IOLINK_TYPE_NUMIOLINKTYPES,              //!< Number of IO Link types
   RSMI_IOLINK_TYPE_SIZE           = 0xFFFFFFFF  //!< Max of IO Link types
 } RSMI_IO_LINK_TYPE;
@@ -1502,6 +1502,23 @@ rsmi_status_t rsmi_dev_subsystem_vendor_id_get(uint32_t dv_ind, uint16_t *id);
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  */
 rsmi_status_t rsmi_dev_unique_id_get(uint32_t dv_ind, uint64_t *id);
+
+/**
+ *  @brief Get the XGMI physical id associated with the device
+ *
+ *  @details Given a device index @p dv_ind and a pointer to a uint32_t to
+ *  which the XGMI physical id will be written
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[inout] revision a pointer to uint32_t to which the XGMI physical id
+ *  will be written
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ *
+ */
+rsmi_status_t rsmi_dev_xgmi_physical_id_get(uint32_t dv_ind, uint16_t *id);
+
 
 /** @} */  // end of IDQuer
 
