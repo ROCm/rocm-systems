@@ -29,10 +29,12 @@ from rsmiBindings import *
 # Major version - Increment when backwards-compatibility breaks
 # Minor version - Increment when adding a new feature, set to 0 when major is incremented
 # Patch version - Increment when adding a fix, set to 0 when minor is incremented
+# Hash  version - Shortened commit hash. Print here and not with lib for consistency with amd-smi
 SMI_MAJ = 1
 SMI_MIN = 5
 SMI_PAT = 0
-__version__ = '%s.%s.%s' % (SMI_MAJ, SMI_MIN, SMI_PAT)
+# SMI_HASH is provided by rsmiBindings
+__version__ = '%s.%s.%s+%s' % (SMI_MAJ, SMI_MIN, SMI_PAT, SMI_HASH)
 
 # Set to 1 if an error occurs
 RETCODE = 0

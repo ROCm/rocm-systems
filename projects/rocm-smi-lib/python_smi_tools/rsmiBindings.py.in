@@ -55,6 +55,8 @@ dv_id = c_uint64()
 # GPU ID
 gpu_id = c_uint32(0)
 
+SMI_HASH = '@PKG_VERSION_HASH@'
+
 
 # Policy enums
 RSMI_MAX_NUM_FREQUENCIES = 33

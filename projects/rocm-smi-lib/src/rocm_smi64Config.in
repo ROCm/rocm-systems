@@ -52,5 +52,6 @@
 #define rocm_smi_VERSION_MINOR @rocm_smi_VERSION_MINOR@
 #define rocm_smi_VERSION_PATCH @rocm_smi_VERSION_PATCH@
 #define rocm_smi_VERSION_BUILD "@rocm_smi_VERSION_BUILD@"
+#define rocm_smi_VERSION_HASH "@rocm_smi_VERSION_HASH@"
 
 #endif  // INCLUDE_ROCM_SMI_ROCM_SMI64CONFIG_H_
