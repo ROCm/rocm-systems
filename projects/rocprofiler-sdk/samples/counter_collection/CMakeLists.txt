@@ -52,21 +52,22 @@ set_tests_properties(
         FAIL_REGULAR_EXPRESSION
         "threw an exception")
 
-add_library(counter-collection-test-counter-client SHARED)
-target_sources(counter-collection-test-counter-client PRIVATE test_counter_client.cpp
-                                                              client.hpp)
-target_link_libraries(counter-collection-test-counter-client
+add_library(counter-collection-functional-counter-client SHARED)
+target_sources(counter-collection-functional-counter-client
+               PRIVATE print_functional_counters.cpp client.hpp)
+target_link_libraries(counter-collection-functional-counter-client
                       PRIVATE rocprofiler::rocprofiler)
-add_executable(counter-collection-test-counters)
-target_sources(counter-collection-test-counters PRIVATE main.cpp)
-target_link_libraries(counter-collection-test-counters
-                      PRIVATE counter-collection-test-counter-client Threads::Threads)
+add_executable(counter-collection-print-functional-counters)
+target_sources(counter-collection-print-functional-counters PRIVATE main.cpp)
+target_link_libraries(
+    counter-collection-print-functional-counters
+    PRIVATE counter-collection-functional-counter-client Threads::Threads)
 
-add_test(NAME counter-collection-test-counters
-         COMMAND $<TARGET_FILE:counter-collection-test-counters>)
+add_test(NAME counter-collection-print-functional-counters
+         COMMAND $<TARGET_FILE:counter-collection-print-functional-counters>)
 
 set_tests_properties(
-    counter-collection-test-counters
+    counter-collection-print-functional-counters
     PROPERTIES
         TIMEOUT
         300

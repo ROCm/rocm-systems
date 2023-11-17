@@ -148,7 +148,10 @@ dispatch_callback(rocprofiler_queue_id_t              queue_id,
                              "Could not query name");
             cap.expected_counter_names.emplace(found_counter.handle, std::string(name));
         }
-        if(cap.expected.empty()) throw std::runtime_error("No counters found for agent");
+        if(cap.expected.empty())
+        {
+            std::clog << "No counters found for agent - " << agent->name;
+        }
     }
     if(cap.remaining.empty()) return;
 
