@@ -246,6 +246,7 @@ read_property(const MapT& data, const std::string& label, Tp& value)
 {
     using mutable_type = std::remove_const_t<Tp>;
 
+    get_agent_available_properties().insert(label);
     if constexpr(std::is_enum<Tp>::value)
     {
         using value_type = std::underlying_type_t<mutable_type>;
@@ -812,6 +813,13 @@ get_agent_cache(hsa_agent_t agent)
     }
 
     return std::nullopt;
+}
+
+std::unordered_set<std::string>&
+get_agent_available_properties()
+{
+    static std::unordered_set<std::string> _prop;
+    return _prop;
 }
 }  // namespace agent
 }  // namespace rocprofiler

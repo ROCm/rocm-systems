@@ -22,6 +22,8 @@
 
 #include <rocprofiler/rocprofiler.h>
 
+#include <fmt/core.h>
+
 #include "lib/common/synchronized.hpp"
 #include "lib/rocprofiler/aql/helpers.hpp"
 #include "lib/rocprofiler/counters/evaluate_ast.hpp"
@@ -56,11 +58,17 @@ rocprofiler_query_counter_name(rocprofiler_counter_id_t counter_id, const char**
 }
 
 /**
- * @brief Query Counter Instances Count.
+ * @brief This call returns the number of instances specific counter contains.
+ *        WARNING: There is a restriction on this call in the alpha/beta release
+ *        of rocprof. This call will not return correct instance information in
+ *        tool_init and must be called as part of the dispatch callback for accurate
+ *        instance counting information. The reason for this restriction is that HSA
+ *        is not yet loaded on tool_init.
  *
- * @param [in] counter_id
- * @param [out] instance_count
- * @return ::rocprofiler_status_t
+ * @param [in] agent rocprofiler agent
+ * @param [in] counter_id counter id (obtained from iterate_agent_supported_counters)
+ * @param [out] instance_count number of instances the counter has
+ * @return rocprofiler_status_t
  */
 rocprofiler_status_t ROCPROFILER_API
 rocprofiler_query_counter_instance_count(rocprofiler_agent_t      agent,
@@ -72,8 +80,8 @@ rocprofiler_query_counter_instance_count(rocprofiler_agent_t      agent,
     if(!metric_ptr) return ROCPROFILER_STATUS_ERROR_COUNTER_NOT_FOUND;
 
     *instance_count = 0;
-    // Special counters like KERNEL_DURATION are not real counters and wont
-    // have any query info.
+    // Special counters do not have hardware metrics and will always have an instance
+    // count of 1 (i.e. MAX_WAVE_SIZE)
     if(!metric_ptr->special().empty())
     {
         *instance_count = 1;
@@ -83,8 +91,8 @@ rocprofiler_query_counter_instance_count(rocprofiler_agent_t      agent,
     // Returns the set of hardware counters needed to evaluate the metric.
     // For derived metrics, this can be more than one counter. In that case,
     // we return the maximum instance count among all underlying counters.
-    auto req_counters =
-        rocprofiler::counters::get_required_hardware_counters(std::string(agent.name), *metric_ptr);
+    auto req_counters = rocprofiler::counters::get_required_hardware_counters(
+        rocprofiler::counters::get_ast_map(), std::string(agent.name), *metric_ptr);
     if(!req_counters) return ROCPROFILER_STATUS_ERROR_COUNTER_NOT_FOUND;
 
     // NOTE: to look up instance information, we require HSA be init'd. Reason
@@ -104,8 +112,19 @@ rocprofiler_query_counter_instance_count(rocprofiler_agent_t      agent,
             *instance_count = std::max(size_t(1), *instance_count);
             continue;
         }
-        auto query_info = rocprofiler::aql::get_query_info(maybe_agent->get_hsa_agent(), counter);
-        *instance_count = std::max(static_cast<size_t>(query_info.instance_count), *instance_count);
+
+        try
+        {
+            auto dims = rocprofiler::counters::getBlockDimensions(maybe_agent->name(), counter);
+            for(const auto& dim : dims)
+            {
+                *instance_count = std::max(static_cast<size_t>(dim.size()), *instance_count);
+            }
+        } catch(std::runtime_error& err)
+        {
+            LOG(ERROR) << fmt::format("Could not lookup instance count for counter {}", counter);
+            return ROCPROFILER_STATUS_ERROR_COUNTER_NOT_FOUND;
+        }
     }
 
     return ROCPROFILER_STATUS_SUCCESS;

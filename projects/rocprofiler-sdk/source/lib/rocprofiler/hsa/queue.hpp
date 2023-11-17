@@ -99,15 +99,6 @@ public:
     using context_t       = context::context;
     using context_array_t = common::container::small_vector<const context_t*>;
     using callback_t      = void (*)(hsa_status_t status, hsa_queue_t* source, void* data);
-    // Function prototype used to notify consumers that a kernel has been
-    // enqueued. An AQL packet can be returned that will be injected into
-    // the queue.
-    using queue_cb_t = std::function<
-        std::unique_ptr<AQLPacket>(const Queue&, ClientID, const rocprofiler_packet&)>;
-    // Signals the completion of the kernel packet.
-    using completed_cb_t = std::function<
-        void(const Queue&, ClientID, const rocprofiler_packet&, std::unique_ptr<AQLPacket>)>;
-    using callback_map_t = std::unordered_map<ClientID, std::pair<queue_cb_t, completed_cb_t>>;
 
     // Internal session information that is used by write interceptor
     // to track state of the intercepted kernel.
@@ -127,6 +118,23 @@ public:
         context_array_t            contexts         = {};
         external_corr_id_map_t     extern_corr_ids  = {};
     };
+
+    // Function prototype used to notify consumers that a kernel has been
+    // enqueued. An AQL packet can be returned that will be injected into
+    // the queue.
+    using queue_cb_t = std::function<std::unique_ptr<AQLPacket>(
+        const Queue&,
+        ClientID,
+        const rocprofiler_packet&,
+        const queue_info_session_t::external_corr_id_map_t&,
+        const context::correlation_id*)>;
+    // Signals the completion of the kernel packet.
+    using completed_cb_t = std::function<void(const Queue&,
+                                              ClientID,
+                                              const rocprofiler_packet&,
+                                              const Queue::queue_info_session_t&,
+                                              std::unique_ptr<AQLPacket>)>;
+    using callback_map_t = std::unordered_map<ClientID, std::pair<queue_cb_t, completed_cb_t>>;
 
     Queue(const AgentCache&  agent,
           uint32_t           size,

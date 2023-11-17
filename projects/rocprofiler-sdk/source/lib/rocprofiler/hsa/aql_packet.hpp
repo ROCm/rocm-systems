@@ -60,6 +60,7 @@ struct AQLPacket
     bool                             command_buf_mallocd    = false;
     bool                             output_buffer_malloced = false;
     memory_pool_free_func_t          free_func              = nullptr;
+    bool                             empty                  = {true};
 };
 
 inline AQLPacket::AQLPacket(memory_pool_free_func_t func)

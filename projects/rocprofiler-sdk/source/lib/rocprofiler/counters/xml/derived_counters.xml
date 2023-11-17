@@ -1,5 +1,5 @@
 <gfx8>
-  <metric name="TA_BUSY_avr" expr=reduce(TA_TA_BUSY,average) descr="TA block is busy. Average over TA instances."></metric>
+  <metric name="TA_BUSY_avr" expr=reduce(TA_TA_BUSY,avr) descr="TA block is busy. Average over TA instances."></metric>
   <metric name="TA_BUSY_max" expr=reduce(TA_TA_BUSY,max) descr="TA block is busy. Max over TA instances."></metric>
   <metric name="TA_BUSY_min" expr=reduce(TA_TA_BUSY,min) descr="TA block is busy. Min over TA instances."></metric>
   <metric name="TA_FLAT_READ_WAVEFRONTS_sum" expr=reduce(TA_FLAT_READ_WAVEFRONTS,sum) descr="Number of flat opcode reads processed by the TA. Sum over TA instances."></metric>
@@ -33,7 +33,7 @@
 </gfx8>
 
 <gfx9>
-  <metric name="TA_BUSY_avr" expr=reduce(TA_TA_BUSY,average) descr="TA block is busy. Average over TA instances."></metric>
+  <metric name="TA_BUSY_avr" expr=reduce(TA_TA_BUSY,avr) descr="TA block is busy. Average over TA instances."></metric>
   <metric name="TA_BUSY_max" expr=reduce(TA_TA_BUSY,max) descr="TA block is busy. Max over TA instances."></metric>
   <metric name="TA_BUSY_min" expr=reduce(TA_TA_BUSY,min) descr="TA block is busy. Min over TA instances."></metric>
   <metric name="TA_FLAT_READ_WAVEFRONTS_sum" expr=reduce(TA_FLAT_READ_WAVEFRONTS,sum) descr="Number of flat opcode reads processed by the TA. Sum over TA instances."></metric>
@@ -103,7 +103,7 @@
 <gfx90a base="gfx9">
   <metric name="MeanOccupancyPerCU" expr=SQ_LEVEL_WAVES*0+SQ_ACCUM_PREV_HIRES/GRBM_GUI_ACTIVE/CU_NUM descr="Mean occupancy per compute unit."></metric>
   <metric name="MeanOccupancyPerActiveCU" expr=SQ_LEVEL_WAVES*0+SQ_ACCUM_PREV_HIRES*4/SQ_BUSY_CYCLES/CU_NUM descr="Mean occupancy per active compute unit."></metric>
-  <metric name="TA_BUSY_avr"                                            expr=reduce(TA_TA_BUSY,average) descr="TA block is busy. Average over TA instances."></metric>
+  <metric name="TA_BUSY_avr"                                            expr=reduce(TA_TA_BUSY,avr) descr="TA block is busy. Average over TA instances."></metric>
   <metric name="TA_BUSY_max"                                            expr=reduce(TA_TA_BUSY,max) descr="TA block is busy. Max over TA instances."></metric>
   <metric name="TA_BUSY_min"                                            expr=reduce(TA_TA_BUSY,min) descr="TA block is busy. Min over TA instances."></metric>
   <metric name="TA_TA_BUSY_sum"                                         expr=reduce(TA_TA_BUSY,sum) descr="TA block is busy. Perf_Windowing not supported for this counter. Sum over TA instances."></metric>
@@ -171,7 +171,7 @@
   <metric name="TCP_PENDING_STALL_CYCLES_sum"                           expr=reduce(TCP_PENDING_STALL_CYCLES,sum) descr="Stall due to data pending from L2. Sum over TCP instances."></metric>
   <metric name="TCA_CYCLE_sum"                                          expr=reduce(TCA_CYCLE,sum)  descr="Number of cycles. Sum over all TCA instances "></metric>
   <metric name="TCA_BUSY_sum"                                           expr=reduce(TCA_BUSY,sum)   descr="Number of cycles we have a request pending. Sum over all TCA instances."></metric>
-  <metric name="TCC_BUSY_avr"                                           expr=reduce(TCC_BUSY,average) descr="TCC_BUSY avr over all memory channels."></metric>
+  <metric name="TCC_BUSY_avr"                                           expr=reduce(TCC_BUSY,avr) descr="TCC_BUSY avr over all memory channels."></metric>
   <metric name="TCC_WRREQ_STALL_max"                                    expr=reduce(TCC_EA_WRREQ_STALL,max) descr="Number of cycles a write request was stalled. Max over TCC instances."></metric>
   <metric name="TCC_CYCLE_sum"                                          expr=reduce(TCC_CYCLE,sum) descr="Number of cycles. Not windowable. Sum over TCC instances."></metric>
   <metric name="TCC_BUSY_sum"                                           expr=reduce(TCC_BUSY,sum) descr="Number of cycles we have a request pending. Not windowable. Sum over TCC instances."></metric>
@@ -305,7 +305,7 @@
   <metric name="WriteSize" expr=WRITE_SIZE descr="The total kilobytes written to the video memory. This is measured with all extra fetches and any cache or memory effects taken into account."></metric>
   <metric name="MemWrites32B" expr=WRITE_REQ_32B descr="The total number of effective 32B write transactions to the memory"></metric>
   <metric name="MemUnitStalled" expr=100*TCP_TCP_TA_DATA_STALL_CYCLES_max/GRBM_GUI_ACTIVE/SE_NUM descr="The percentage of GPUTime the memory unit is stalled. Try reducing the number or size of fetches and writes if possible. Value range: 0% (optimal) to 100% (bad)."></metric>
-  <metric name="TA_BUSY_avr"                                            expr=reduce(TA_TA_BUSY,average) descr="TA block is busy. Average over TA instances."></metric>
+  <metric name="TA_BUSY_avr"                                            expr=reduce(TA_TA_BUSY,avr) descr="TA block is busy. Average over TA instances."></metric>
   <metric name="TA_BUSY_max"                                            expr=reduce(TA_TA_BUSY,max) descr="TA block is busy. Max over TA instances."></metric>
   <metric name="TA_BUSY_min"                                            expr=reduce(TA_TA_BUSY,min) descr="TA block is busy. Min over TA instances."></metric>
   <metric name="TA_TA_BUSY_sum"                                         expr=reduce(TA_TA_BUSY,sum) descr="TA block is busy. Perf_Windowing not supported for this counter. Sum over TA instances."></metric>
@@ -370,7 +370,7 @@
   <metric name="TCP_PENDING_STALL_CYCLES_sum"                           expr=reduce(TCP_PENDING_STALL_CYCLES,sum) descr="Stall due to data pending from L2. Sum over TCP instances."></metric>
   <metric name="TCA_CYCLE_sum"                                          expr=reduce(TCA_CYCLE,sum)  descr="Number of cycles. Sum over all TCA instances "></metric>
   <metric name="TCA_BUSY_sum"                                           expr=reduce(TCA_BUSY,sum)   descr="Number of cycles we have a request pending. Sum over all TCA instances."></metric>
-  <metric name="TCC_BUSY_avr"                                           expr=reduce(TCC_BUSY,average) descr="TCC_BUSY avr over all memory channels."></metric>
+  <metric name="TCC_BUSY_avr"                                           expr=reduce(TCC_BUSY,avr) descr="TCC_BUSY avr over all memory channels."></metric>
   <metric name="TCC_WRREQ_STALL_max"                                    expr=reduce(TCC_EA0_WRREQ_STALL,max) descr="Number of cycles a write request was stalled. Max over TCC instances."></metric>
   <metric name="TCC_CYCLE_sum"                                          expr=reduce(TCC_CYCLE,sum) descr="Number of cycles. Not windowable. Sum over TCC instances."></metric>
   <metric name="TCC_BUSY_sum"                                           expr=reduce(TCC_BUSY,sum) descr="Number of cycles we have a request pending. Not windowable. Sum over TCC instances."></metric>
@@ -436,7 +436,7 @@
   <metric name="WAVE_DEP_WAIT" expr=100*SQ_WAIT_ANY/SQ_WAVE_CYCLES descr="Percentage of the SQ_WAVE_CYCLE time spent waiting for anything."></metric>
   <metric name="WAVE_ISSUE_WAIT" expr=100*SQ_WAIT_INST_ANY/SQ_WAVE_CYCLES descr="Percentage of the SQ_WAVE_CYCLE time spent waiting for any instruction issue."></metric>
 
-  <metric name="TA_BUSY_avr" expr=reduce(TA_TA_BUSY,average) descr="TA block is busy. Average over TA instances."></metric>
+  <metric name="TA_BUSY_avr" expr=reduce(TA_TA_BUSY,avr) descr="TA block is busy. Average over TA instances."></metric>
   <metric name="TA_BUSY_max" expr=reduce(TA_TA_BUSY,max) descr="TA block is busy. Max over TA instances."></metric>
   <metric name="TA_BUSY_min" expr=reduce(TA_TA_BUSY,min) descr="TA block is busy. Min over TA instances."></metric>
   <metric name="TA_FLAT_LOAD_WAVEFRONTS_sum" expr=reduce(TA_FLAT_LOAD_WAVEFRONTS,sum) descr="Number of flat load vec32 packets processed by the TA. Sum over TA instances."></metric>
@@ -471,7 +471,7 @@
   <metric name="GPU_UTIL" expr=100*GRBM_GUI_ACTIVE/GRBM_COUNT descr="Percentage of the time that GUI is active"></metric>
   <metric name="WAVE_DEP_WAIT" expr=100*SQ_WAIT_ANY/SQ_WAVE_CYCLES descr="Percentage of the SQ_WAVE_CYCLE time spent waiting for anything."></metric>
   <metric name="WAVE_ISSUE_WAIT" expr=100*SQ_WAIT_INST_ANY/SQ_WAVE_CYCLES descr="Percentage of the SQ_WAVE_CYCLE time spent waiting for any instruction issue."></metric>
-  <metric name="TA_BUSY_avr" expr=reduce(TA_TA_BUSY,average) descr="TA block is busy. Average over TA instances."></metric>
+  <metric name="TA_BUSY_avr" expr=reduce(TA_TA_BUSY,avr) descr="TA block is busy. Average over TA instances."></metric>
   <metric name="TA_BUSY_max" expr=reduce(TA_TA_BUSY,max) descr="TA block is busy. Max over TA instances."></metric>
   <metric name="TA_BUSY_min" expr=reduce(TA_TA_BUSY,min) descr="TA block is busy. Min over TA instances."></metric>
   <metric name="TA_BUFFER_LOAD_WAVEFRONTS_sum" expr=reduce(TA_BUFFER_LOAD_WAVEFRONTS,sum) descr="Number of buffer load vec32 packets processed by the TA. Sum over TA instances."></metric>

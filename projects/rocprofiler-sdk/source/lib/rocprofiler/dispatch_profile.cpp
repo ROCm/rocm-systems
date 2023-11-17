@@ -30,24 +30,26 @@
 
 extern "C" {
 /**
- * @brief Configure Dispatch Profile Counting Service.
+ * @brief Configure buffered dispatch profile Counting Service.
+ *        Collects the counters in dispatch packets and stores them
+ *        in buffer_id. The buffer may contain packets from more than
+ *        one dispatch (denoted by correlation id). Will trigger the
+ *        callback based on the parameters setup in buffer_id_t.
  *
- * @param [in] context_id
- * @param [in] agent_id
- * @param [in] buffer_id
- * @param [in] callback
- * @param [in] callback_data_args
+ * @param [in] context_id context id
+ * @param [in] buffer_id id of the buffer to use for the counting service
+ * @param [in] profile profile config to use for dispatch
  * @return ::rocprofiler_status_t
  */
 rocprofiler_status_t ROCPROFILER_API
-rocprofiler_configure_dispatch_profile_counting_service(
+rocprofiler_configure_buffered_dispatch_profile_counting_service(
     rocprofiler_context_id_t                         context_id,
-    rocprofiler_profile_config_id_t                  profile,
+    rocprofiler_buffer_id_t                          buffer_id,
     rocprofiler_profile_counting_dispatch_callback_t callback,
     void*                                            callback_data_args)
 {
-    return rocprofiler::counters::configure_dispatch(
-               context_id, profile.handle, callback, callback_data_args)
+    return rocprofiler::counters::configure_buffered_dispatch(
+               context_id, buffer_id, callback, callback_data_args)
                ? ROCPROFILER_STATUS_SUCCESS
                : ROCPROFILER_STATUS_ERROR;
 }

@@ -23,8 +23,10 @@
 #include "lib/rocprofiler/counters/core.hpp"
 
 #include "lib/common/synchronized.hpp"
+#include "lib/rocprofiler/agent.hpp"
 #include "lib/rocprofiler/aql/helpers.hpp"
 #include "lib/rocprofiler/aql/packet_construct.hpp"
+#include "lib/rocprofiler/buffer.hpp"
 #include "lib/rocprofiler/context/context.hpp"
 #include "lib/rocprofiler/hsa/queue_controller.hpp"
 #include "lib/rocprofiler/registration.hpp"
@@ -35,139 +37,18 @@ namespace rocprofiler
 {
 namespace counters
 {
-/**
- * Callback we get from HSA interceptor when a kernel packet is being enqueued.
- *
- * We return an AQLPacket containing the start/stop/read packets for injection.
- */
-std::unique_ptr<rocprofiler::hsa::AQLPacket>
-queue_cb(const std::shared_ptr<rocprofiler::counters::counter_callback_info>& info,
-         const hsa::Queue&                                                    queue,
-         hsa::ClientID,
-         hsa::rocprofiler_packet)
-{
-    if(!info) return nullptr;
-
-    std::unique_ptr<rocprofiler::hsa::AQLPacket> ret_pkt;
-
-    // Check packet cache
-    info->packets.wlock([&](auto& pkt_vector) {
-        // Delay packet generator construction until first HSA packet is processed
-        // This ensures that HSA exists
-        if(!info->pkt_generator)
-        {
-            // One time setup of profile config
-            if(info->profile_cfg.reqired_hw_counters.empty())
-            {
-                auto& config     = info->profile_cfg;
-                auto  agent_name = std::string(config.agent.name);
-                for(const auto& metric : config.metrics)
-                {
-                    auto req_counters =
-                        rocprofiler::counters::get_required_hardware_counters(agent_name, metric);
-                    if(!req_counters)
-                    {
-                        throw std::runtime_error(
-                            fmt::format("Could not find counter {}", metric.name()));
-                    }
-                    config.reqired_hw_counters.insert(req_counters->begin(), req_counters->end());
-
-                    const auto& asts      = rocprofiler::counters::get_ast_map();
-                    const auto* agent_map = rocprofiler::common::get_val(asts, agent_name);
-                    if(!agent_map)
-                        throw std::runtime_error(
-                            fmt::format("Coult not build AST for {}", agent_name));
-                    const auto* counter_ast =
-                        rocprofiler::common::get_val(*agent_map, metric.name());
-                    if(!counter_ast)
-                    {
-                        throw std::runtime_error(
-                            fmt::format("Coult not find AST for {}", metric.name()));
-                    }
-                    config.asts.push_back(*counter_ast);
-                }
-            }
-
-            info->pkt_generator = std::make_unique<rocprofiler::aql::AQLPacketConstruct>(
-                queue.get_agent(),
-                std::vector<counters::Metric>{info->profile_cfg.reqired_hw_counters.begin(),
-                                              info->profile_cfg.reqired_hw_counters.end()});
-        }
-
-        if(!pkt_vector.empty())
-        {
-            ret_pkt = std::move(pkt_vector.back());
-            pkt_vector.pop_back();
-        }
-    });
-
-    if(!ret_pkt)
-    {
-        // If we do not have a packet in the cache, create one.
-        ret_pkt =
-            info->pkt_generator->construct_packet(hsa::get_queue_controller().get_ext_table());
-    }
-    return ret_pkt;
-}
-
-/**
- * Callback called by HSA interceptor when the kernel has completed processing.
- */
-void
-completed_cb(const std::shared_ptr<rocprofiler::counters::counter_callback_info>& info,
-             const hsa::Queue&                                                    queue,
-             hsa::ClientID,
-             hsa::rocprofiler_packet                      kernel,
-             std::unique_ptr<rocprofiler::hsa::AQLPacket> pkt)
-{
-    if(!info) return;
-
-    // auto out_buf = pkt->profile.output_buffer.ptr;
-    // Read data and create user return....
-    auto decoded_pkt = EvaluateAST::read_pkt(info->pkt_generator.get(), *pkt);
-
-    // return AQL packet for reuse.
-
-    info->packets.wlock([&](auto& pkt_vector) {
-        if(pkt)
-        {
-            pkt_vector.emplace_back(std::move(pkt));
-        }
-    });
-
-    if(!info->user_cb) return;
-
-    std::vector<rocprofiler_record_counter_t> out;
-    for(auto& ast : info->profile_cfg.asts)
-    {
-        auto* ret = ast.evaluate(decoded_pkt);
-        CHECK(ret);
-        out.insert(out.end(), ret->begin(), ret->end());
-    }
-
-    // Maybe move to its own thread?
-    info->user_cb(queue.get_id(),
-                  info->profile_cfg.agent,
-                  rocprofiler_correlation_id_t{},
-                  &kernel.kernel_dispatch,
-                  info->callback_args,
-                  out.data(),  // Date pointer does here.
-                  out.size(),  // Number of objects
-                  info->profile_cfg.id);
-}
-
 class CounterController
 {
 public:
     // Adds a counter collection profile to our global cache.
     // Note: these profiles can be used across multiple contexts
     //       and are independent of the context.
-    uint64_t add_profile(profile_config&& config)
+    uint64_t add_profile(std::shared_ptr<profile_config>&& config)
     {
         static std::atomic<uint64_t> profile_val = 1;
         uint64_t                     ret         = 0;
         _configs.wlock([&](auto& data) {
-            config.id = rocprofiler_profile_config_id_t{.handle = profile_val};
+            config->id = rocprofiler_profile_config_id_t{.handle = profile_val};
             data.emplace(profile_val, std::move(config));
             ret = profile_val;
             profile_val++;
@@ -184,16 +65,12 @@ public:
     // to contain the counters that need to be collected (specified in profile_id) and
     // the AQL packet generator for injecting packets. Note: the service is created
     // in the stop state.
-    bool configure_dispatch(rocprofiler_context_id_t                         context_id,
-                            uint64_t                                         profile_id,
-                            rocprofiler_profile_counting_dispatch_callback_t callback,
-                            void*                                            callback_args) const
+    static bool configure_dispatch(rocprofiler_context_id_t                         context_id,
+                                   rocprofiler_buffer_id_t                          buffer,
+                                   rocprofiler_profile_counting_dispatch_callback_t callback,
+                                   void*                                            callback_args)
     {
         auto& ctx = *rocprofiler::context::get_registered_contexts().at(context_id.handle);
-
-        // Note: A single profile config could be used on multiple contexts
-        profile_config cfg;
-        _configs.rlock([&](const auto& map) { cfg = map.at(profile_id); });
 
         if(!ctx.counter_collection)
         {
@@ -202,19 +79,28 @@ public:
         }
 
         auto& cb = *ctx.counter_collection->callbacks.emplace_back(
-            std::make_shared<rocprofiler::counters::counter_callback_info>());
+            std::make_shared<counter_callback_info>());
 
-        cb.user_cb = callback;
-
-        // Secondary copy of the config to be shared with async callback
-        cb.profile_cfg   = cfg;
+        cb.user_cb       = callback;
         cb.callback_args = callback_args;
         cb.context       = context_id;
+        cb.buffer        = buffer;
+        cb.internal_context =
+            rocprofiler::context::get_registered_contexts().at(context_id.handle).get();
+
         return true;
     }
 
+    std::shared_ptr<profile_config> get_profile_cfg(rocprofiler_profile_config_id_t id)
+    {
+        std::shared_ptr<profile_config> cfg;
+        _configs.rlock([&](const auto& map) { cfg = map.at(id.handle); });
+        return cfg;
+    }
+
 private:
-    rocprofiler::common::Synchronized<std::unordered_map<uint64_t, profile_config>> _configs;
+    rocprofiler::common::Synchronized<std::unordered_map<uint64_t, std::shared_ptr<profile_config>>>
+        _configs;
 };
 
 CounterController&
@@ -225,7 +111,7 @@ get_controller()
 }
 
 uint64_t
-create_counter_profile(profile_config&& config)
+create_counter_profile(std::shared_ptr<profile_config>&& config)
 {
     return get_controller().add_profile(std::move(config));
 }
@@ -234,6 +120,190 @@ void
 destroy_counter_profile(uint64_t id)
 {
     get_controller().destroy_profile(id);
+}
+
+/**
+ * Callback we get from HSA interceptor when a kernel packet is being enqueued.
+ *
+ * We return an AQLPacket containing the start/stop/read packets for injection.
+ */
+std::unique_ptr<rocprofiler::hsa::AQLPacket>
+queue_cb(const std::shared_ptr<counter_callback_info>& info,
+         const hsa::Queue&                             queue,
+         hsa::ClientID,
+         const hsa::rocprofiler_packet&                                  pkt,
+         const hsa::Queue::queue_info_session_t::external_corr_id_map_t& extern_corr_ids,
+         const context::correlation_id*                                  correlation_id)
+{
+    if(!info || !info->user_cb) return nullptr;
+
+    auto _corr_id_v =
+        rocprofiler_correlation_id_t{.internal = 0, .external = context::null_user_data};
+    if(const auto* _corr_id = correlation_id)
+    {
+        _corr_id_v.internal = _corr_id->internal;
+        if(const auto* extrenal =
+               rocprofiler::common::get_val(extern_corr_ids, info->internal_context))
+        {
+            _corr_id_v.external = *extrenal;
+        }
+    }
+
+    rocprofiler_profile_config_id_t req_profile = {.handle = 0};
+    info->user_cb(queue.get_id(),
+                  queue.get_agent().get_rocp_agent(),
+                  _corr_id_v,
+                  &pkt.kernel_dispatch,
+                  info->callback_args,
+                  &req_profile);
+    if(req_profile.handle == 0) return nullptr;
+
+    auto prof_config = get_controller().get_profile_cfg(req_profile);
+    CHECK(prof_config);
+
+    std::unique_ptr<rocprofiler::hsa::AQLPacket> ret_pkt;
+
+    // Check packet cache
+    prof_config->packets.wlock([&](auto& pkt_vector) {
+        // Delay packet generator construction until first HSA packet is processed
+        // This ensures that HSA exists
+        if(!prof_config->pkt_generator)
+        {
+            // One time setup of profile config
+            if(prof_config->reqired_hw_counters.empty())
+            {
+                auto& config     = *prof_config;
+                auto  agent_name = std::string(config.agent.name);
+                for(const auto& metric : config.metrics)
+                {
+                    auto req_counters =
+                        get_required_hardware_counters(get_ast_map(), agent_name, metric);
+
+                    if(!req_counters)
+                    {
+                        throw std::runtime_error(
+                            fmt::format("Could not find counter {}", metric.name()));
+                    }
+
+                    // Special metrics are those that are not hw counters but other
+                    // constants like MAX_WAVE_SIZE
+                    for(const auto& req_metric : *req_counters)
+                    {
+                        if(req_metric.special().empty())
+                        {
+                            config.reqired_hw_counters.insert(req_metric);
+                        }
+                        else
+                        {
+                            config.required_special_counters.insert(req_metric);
+                        }
+                    }
+
+                    const auto& asts      = get_ast_map();
+                    const auto* agent_map = rocprofiler::common::get_val(asts, agent_name);
+                    if(!agent_map)
+                        throw std::runtime_error(
+                            fmt::format("Coult not build AST for {}", agent_name));
+                    const auto* counter_ast =
+                        rocprofiler::common::get_val(*agent_map, metric.name());
+                    if(!counter_ast)
+                    {
+                        throw std::runtime_error(
+                            fmt::format("Coult not find AST for {}", metric.name()));
+                    }
+                    config.asts.push_back(*counter_ast);
+                    config.asts.back().set_dimensions();
+                }
+            }
+
+            prof_config->pkt_generator = std::make_unique<rocprofiler::aql::AQLPacketConstruct>(
+                queue.get_agent(),
+                std::vector<counters::Metric>{prof_config->reqired_hw_counters.begin(),
+                                              prof_config->reqired_hw_counters.end()});
+        }
+
+        if(!pkt_vector.empty())
+        {
+            ret_pkt = std::move(pkt_vector.back());
+            pkt_vector.pop_back();
+        }
+    });
+
+    if(!ret_pkt)
+    {
+        // If we do not have a packet in the cache, create one.
+        ret_pkt = prof_config->pkt_generator->construct_packet(
+            hsa::get_queue_controller().get_ext_table());
+    }
+
+    info->packet_return_map.wlock([&](auto& data) { data.emplace(ret_pkt.get(), prof_config); });
+
+    return ret_pkt;
+}
+
+/**
+ * Callback called by HSA interceptor when the kernel has completed processing.
+ */
+void
+completed_cb(const std::shared_ptr<counter_callback_info>& info,
+             const hsa::Queue&,
+             hsa::ClientID,
+             hsa::rocprofiler_packet,
+             const hsa::Queue::queue_info_session_t&      session,
+             std::unique_ptr<rocprofiler::hsa::AQLPacket> pkt)
+{
+    if(!info || !pkt) return;
+
+    std::shared_ptr<profile_config> prof_config;
+    // Get the Profile Config
+    info->packet_return_map.wlock([&](auto& data) {
+        prof_config = data.at(pkt.get());
+        data.erase(pkt.get());
+    });
+
+    auto decoded_pkt = EvaluateAST::read_pkt(prof_config->pkt_generator.get(), *pkt);
+    EvaluateAST::read_special_counters(
+        prof_config->agent, prof_config->required_special_counters, decoded_pkt);
+
+    prof_config->packets.wlock([&](auto& pkt_vector) {
+        if(pkt)
+        {
+            pkt_vector.emplace_back(std::move(pkt));
+        }
+    });
+
+    if(!info->buffer) return;
+
+    std::vector<rocprofiler_record_counter_t> out;
+    rocprofiler::buffer::instance*            buf = nullptr;
+
+    buf = CHECK_NOTNULL(buffer::get_buffer(info->buffer->handle));
+
+    auto _corr_id_v =
+        rocprofiler_correlation_id_t{.internal = 0, .external = context::null_user_data};
+    if(const auto* _corr_id = session.correlation_id)
+    {
+        _corr_id_v.internal = _corr_id->internal;
+        if(const auto* extrenal =
+               rocprofiler::common::get_val(session.extern_corr_ids, info->internal_context))
+        {
+            _corr_id_v.external = *extrenal;
+        }
+    }
+
+    for(auto& ast : prof_config->asts)
+    {
+        std::vector<std::unique_ptr<std::vector<rocprofiler_record_counter_t>>> cache;
+        auto* ret = ast.evaluate(decoded_pkt, cache);
+        CHECK(ret);
+        ast.set_out_id(*ret);
+
+        for(auto& val : *ret)
+        {
+            val.corr_id = _corr_id_v;
+            buf->emplace(ROCPROFILER_BUFFER_CATEGORY_COUNTERS, 0, val);
+        }
+    }
 }
 
 void
@@ -251,16 +321,21 @@ start_context(context::context* ctx)
             // Insert our callbacks into HSA Interceptor. This
             // turns on counter instrumentation.
             cb->queue_id = controller.add_callback(
-                cb->profile_cfg.agent,
-                [=](const hsa::Queue& q, hsa::ClientID c, hsa::rocprofiler_packet kern_pkt) {
-                    return queue_cb(cb, q, c, kern_pkt);
+                std::nullopt,
+                [=](const hsa::Queue&                                               q,
+                    hsa::ClientID                                                   c,
+                    const hsa::rocprofiler_packet&                                  kern_pkt,
+                    const hsa::Queue::queue_info_session_t::external_corr_id_map_t& extern_corr_ids,
+                    const context::correlation_id* correlation_id) {
+                    return queue_cb(cb, q, c, kern_pkt, extern_corr_ids, correlation_id);
                 },
                 // Completion CB
-                [=](const hsa::Queue&               q,
-                    hsa::ClientID                   c,
-                    hsa::rocprofiler_packet         kern_pkt,
-                    std::unique_ptr<hsa::AQLPacket> aql) {
-                    completed_cb(cb, q, c, kern_pkt, std::move(aql));
+                [=](const hsa::Queue&                       q,
+                    hsa::ClientID                           c,
+                    hsa::rocprofiler_packet                 kern_pkt,
+                    const hsa::Queue::queue_info_session_t& session,
+                    std::unique_ptr<hsa::AQLPacket>         aql) {
+                    completed_cb(cb, q, c, kern_pkt, session, std::move(aql));
                 });
         }
         enabled = true;
@@ -287,12 +362,12 @@ stop_context(context::context* ctx)
 }
 
 bool
-configure_dispatch(rocprofiler_context_id_t                         context_id,
-                   uint64_t                                         profile_id,
-                   rocprofiler_profile_counting_dispatch_callback_t callback,
-                   void*                                            callback_args)
+configure_buffered_dispatch(rocprofiler_context_id_t                         context_id,
+                            rocprofiler_buffer_id_t                          buffer,
+                            rocprofiler_profile_counting_dispatch_callback_t callback,
+                            void*                                            callback_args)
 {
-    return get_controller().configure_dispatch(context_id, profile_id, callback, callback_args);
+    return get_controller().configure_dispatch(context_id, buffer, callback, callback_args);
 }
 
 }  // namespace counters

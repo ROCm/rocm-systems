@@ -66,29 +66,105 @@ enum ReduceOperation
 class EvaluateAST
 {
 public:
-    EvaluateAST(const std::unordered_map<std::string, Metric>& metrics,
+    EvaluateAST(rocprofiler_counter_id_t                       out_id,
+                const std::unordered_map<std::string, Metric>& metrics,
                 const RawAST&                                  ast,
                 std::string                                    agent);
 
+    /**
+     * @brief Evaluates the AST, returning a pointer to the location where the output
+     *        results are stored. The output results will reuse a vector contained in
+     *        result map (and the map should be treated as tainted after this call).
+     *        For simple base counters, evaluate performs no copy operations. For
+     *        derived counters, the number of data copies is contingent on the complexity
+     *        of the counter.
+     *
+     * @param [in] results_map Results decoded from the AQL packet
+     * @param [in] cache       Used to store results generated from derived counter
+     *                         computations. This is needed to avoid destroying data
+     *                         in the result map that may be used by other evaluate calls.
+     *
+     * @return std::vector<rocprofiler_record_counter_t>* A pointer to the output records.
+     *          This pointer SHOULD NOT BE FREE'D/DELETED BY THE CALLER.
+     */
     std::vector<rocprofiler_record_counter_t>* evaluate(
-        std::unordered_map<uint64_t, std::vector<rocprofiler_record_counter_t>>& results_map);
+        std::unordered_map<uint64_t, std::vector<rocprofiler_record_counter_t>>& results_map,
+        std::vector<std::unique_ptr<std::vector<rocprofiler_record_counter_t>>>& cache);
 
+    /**
+     * @brief Expand derived counter ASTs contained within this AST to full hardware counter
+     *        representations.
+     *
+     * @param [in] asts all ASTs read for this agent.
+     */
+    void expand_derived(std::unordered_map<std::string, EvaluateAST>& asts);
+
+    /**
+     * @brief Set the dimensions for this AST and its sub-nodes. Returns the dimension
+     *        of this AST. Can throw if the AST is invalid (i.e. dimension mismatch in
+     *        child nodes of this AST). This is done in a recursive fashion.
+     *
+     * @return DimensionTypes dimension of the output of this AST.
+     */
     DimensionTypes set_dimensions();
 
     bool validate_raw_ast(const std::unordered_map<std::string, Metric>& metrics);
 
+    /**
+     * @brief Get the base hardware counters required to evaluate the expressions in the
+     *        AST structure. This is primarily useful if the AST contains derived metrics
+     *        which will be converted into the base metrics needed to evaluate the derived.
+     *
+     * @param [in] asts         All constructed ASTs returned by get_ast_map()
+     * @param [out] counters    Base metrics that need to be collected to evaluate this AST
+     */
     void get_required_counters(const std::unordered_map<std::string, EvaluateAST>& asts,
                                std::set<Metric>&                                   counters) const;
 
+    /**
+     * @brief Read the AQL packet and construct rocprofiler_record_counter_t. This call
+     *        does not perform any evaluation, only dumping the packet contents into
+     *        rocprofiler_record_counter_t.
+     *
+     * @param [in] pkt_gen packet generator used to generate the AQL packet. This packet
+     *                     generator contains information, such as the ordering of instances
+     *                     contained in the return packet, that is required to decode what
+     *                     data goes with what base counters.
+     * @param [in] pkt     AQL packet structure to decode
+     * @return std::unordered_map<uint64_t, std::vector<rocprofiler_record_counter_t>> map of
+     *         {metric->id(), vector<records>}
+     *
+     */
     static std::unordered_map<uint64_t, std::vector<rocprofiler_record_counter_t>> read_pkt(
         const aql::AQLPacketConstruct* pkt_gen,
         hsa::AQLPacket&                pkt);
+
+    /**
+     * @brief Insert special counter values, such as constants of the agent (i.e. max waves)
+     *        and kernel duration into the output map.
+     *
+     * @param [in] agent                        Agent of the output
+     * @param [in] required_special_counters     Special counters that are required for eval
+     * @param [out] out_map                     Where the special counter values will be written
+     */
+    static void read_special_counters(
+        const rocprofiler_agent_t&        agent,
+        const std::set<counters::Metric>& required_special_counters,
+        std::unordered_map<uint64_t, std::vector<rocprofiler_record_counter_t>>& out_map);
 
     NodeType                        type() const { return _type; }
     ReduceOperation                 reduce_op() const { return _reduce_op; }
     const std::vector<EvaluateAST>& children() const { return _children; }
     const Metric&                   metric() const { return _metric; }
     DimensionTypes                  dimension_types() const { return _dimension_types; }
+
+    /**
+     * @brief When an evaluation is complete, set the output id of the results. This is called
+     *        externally to reduce the number of times the id is set to only the end result.
+     *
+     * @param [in] results computed results that will have their id modified to be counter _out_id
+     */
+    void set_out_id(std::vector<rocprofiler_record_counter_t>& results) const;
 
 private:
     NodeType                                                       _type{NONE};
@@ -100,6 +176,8 @@ private:
     DimensionTypes                                                 _dimension_types{DIMENSION_LAST};
     std::vector<rocprofiler_record_counter_t>                      _static_value;
     std::unordered_set<rocprofiler_profile_counter_instance_types> _reduce_dimension_set;
+    bool                                                           _expanded{false};
+    rocprofiler_counter_id_t                                       _out_id{.handle = 0};
 };
 
 using EvaluateASTMap = std::unordered_map<std::string, EvaluateAST>;
@@ -116,7 +194,9 @@ get_ast_map();
  * specific metric (may be multiple HW counters if a derrived metric).
  */
 std::optional<std::set<Metric>>
-get_required_hardware_counters(const std::string& agent, const Metric& metric);
+get_required_hardware_counters(const std::unordered_map<std::string, EvaluateASTMap>& asts,
+                               const std::string&                                     agent,
+                               const Metric&                                          metric);
 }  // namespace counters
 }  // namespace rocprofiler
 
@@ -135,12 +215,11 @@ struct formatter<rocprofiler_record_counter_t>
     auto format(rocprofiler_record_counter_t const& data, Ctx& ctx) const
     {
         return fmt::format_to(ctx.out(),
-                              "(CounterId: {}, Dimension: {:x}, Value [D]: {}, Value [I]: {})",
+                              "(CounterId: {}, Dimension: {:x}, Value [D]: {})",
                               rocprofiler::counters::rec_to_counter_id(data.id).handle,
                               rocprofiler::counters::rec_to_dim_pos(
                                   data.id, rocprofiler::counters::ROCPROFILER_DIMENSION_NONE),
-                              data.derived_counter,
-                              data.hw_counter);
+                              data.counter_value);
     }
 };
 }  // namespace fmt

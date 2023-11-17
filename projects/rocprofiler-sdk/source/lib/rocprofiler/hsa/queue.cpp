@@ -71,7 +71,7 @@ signal_limiter()
 {
     // Limit the maximun number of HSA signals created.
     // There is a hard limit to the maximum that can exist.
-    static common::active_capacity_gate _gate{96};
+    static common::active_capacity_gate _gate(16);
     return _gate;
 }
 
@@ -215,12 +215,16 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
                 cb_pair.second(queue_info_session.queue,
                                client_id,
                                queue_info_session.kernel_pkt,
+                               queue_info_session,
                                std::move(queue_info_session.inst_pkt));
             }
             else
             {
-                cb_pair.second(
-                    queue_info_session.queue, client_id, queue_info_session.kernel_pkt, nullptr);
+                cb_pair.second(queue_info_session.queue,
+                               client_id,
+                               queue_info_session.kernel_pkt,
+                               queue_info_session,
+                               nullptr);
             }
         }
     });
@@ -374,7 +378,8 @@ WriteInterceptor(const void* packets,
         queue.signal_callback([&](const auto& map) {
             for(const auto& [client_id, cb_pair] : map)
             {
-                if(auto maybe_pkt = cb_pair.first(queue, client_id, kernel_pkt))
+                if(auto maybe_pkt =
+                       cb_pair.first(queue, client_id, kernel_pkt, extern_corr_ids, corr_id))
                 {
                     LOG_IF(FATAL, inst_pkt)
                         << "We do not support two injections into the HSA queue";
@@ -387,7 +392,7 @@ WriteInterceptor(const void* packets,
         constexpr auto dummy_signal = hsa_signal_t{.handle = 0};
 
         // Write instrumentation start packet (if one exists)
-        if(inst_pkt)
+        if(inst_pkt && !inst_pkt->empty)
         {
             inst_pkt->start.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC << HSA_PACKET_HEADER_TYPE;
             AddVendorSpecificPacket(inst_pkt->start, dummy_signal, transformed_packets);
@@ -410,7 +415,7 @@ WriteInterceptor(const void* packets,
         // Adding a barrier packet with the original packet's completion signal.
         queue.create_signal(0, &interrupt_signal);
 
-        if(inst_pkt)
+        if(inst_pkt && !inst_pkt->empty)
         {
             inst_pkt->stop.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC << HSA_PACKET_HEADER_TYPE;
             AddVendorSpecificPacket(inst_pkt->stop, dummy_signal, transformed_packets);

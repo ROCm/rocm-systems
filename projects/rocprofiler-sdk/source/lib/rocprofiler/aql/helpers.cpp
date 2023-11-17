@@ -39,6 +39,7 @@ get_query_info(hsa_agent_t agent, const counters::Metric& metric)
     if(hsa_ven_amd_aqlprofile_get_info(&profile, HSA_VEN_AMD_AQLPROFILE_INFO_BLOCK_ID, &query) !=
        HSA_STATUS_SUCCESS)
     {
+        DLOG(FATAL) << fmt::format("AQL failed to query info for counter {}", metric);
         throw std::runtime_error(fmt::format("AQL failed to query info for counter {}", metric));
     }
     return query;

@@ -25,6 +25,7 @@
 #include <glog/logging.h>
 #include <gtest/gtest.h>
 
+#include "lib/rocprofiler/agent.hpp"
 #include "lib/rocprofiler/counters/metrics.hpp"
 
 namespace
@@ -63,7 +64,9 @@ TEST(metrics, base_load)
     ASSERT_EQ(test_data.count("gfx908"), 1);
     auto rocp_data_v = rocp_data.at("gfx908");
     auto test_data_v = test_data.at("gfx908");
-    EXPECT_EQ(rocp_data_v.size(), test_data_v.size());
+    // get_agent_available_properties() is the metrics added for fields in agent.hpp
+    EXPECT_EQ(rocp_data_v.size(),
+              test_data_v.size() + rocprofiler::agent::get_agent_available_properties().size());
     auto find = [&rocp_data_v](const auto& v) -> std::optional<counters::Metric> {
         for(const auto& ditr : rocp_data_v)
         {

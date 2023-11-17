@@ -87,7 +87,7 @@ QueueController::add_queue(hsa_queue_t* id, std::unique_ptr<Queue> queue)
             for(const auto& [cbid, cb_tuple] : callbacks)
             {
                 auto& [agent, qcb, ccb] = cb_tuple;
-                if(agent.id.handle == agent_id)
+                if(agent.id.handle == ALL_AGENTS.id.handle || agent.id.handle == agent_id)
                 {
                     map[id]->register_callback(cbid, qcb, ccb);
                 }
@@ -103,20 +103,28 @@ QueueController::destory_queue(hsa_queue_t* id)
 }
 
 ClientID
-QueueController::add_callback(const rocprofiler_agent_t& agent,
-                              Queue::queue_cb_t          qcb,
-                              Queue::completed_cb_t      ccb)
+QueueController::add_callback(std::optional<rocprofiler_agent_t> agent,
+                              Queue::queue_cb_t                  qcb,
+                              Queue::completed_cb_t              ccb)
 {
     static std::atomic<ClientID> client_id = 1;
     ClientID                     return_id;
     _callback_cache.wlock([&](auto& cb_cache) {
-        return_id           = client_id;
-        cb_cache[client_id] = std::tuple(agent, qcb, ccb);
+        return_id = client_id;
+        if(agent)
+        {
+            cb_cache[client_id] = std::tuple(*agent, qcb, ccb);
+        }
+        else
+        {
+            cb_cache[client_id] = std::tuple(ALL_AGENTS, qcb, ccb);
+        }
         client_id++;
+
         _queues.wlock([&](auto& map) {
             for(auto& [_, queue] : map)
             {
-                if(queue->get_agent().get_rocp_agent()->id.handle == agent.id.handle)
+                if(!agent || queue->get_agent().get_rocp_agent()->id.handle == agent->id.handle)
                 {
                     queue->register_callback(return_id, qcb, ccb);
                 }

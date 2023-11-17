@@ -46,8 +46,10 @@ rocprofiler_create_profile_config(rocprofiler_agent_t              agent,
                                   size_t                           counters_count,
                                   rocprofiler_profile_config_id_t* config_id)
 {
-    rocprofiler::counters::profile_config config;
-    const auto&                           id_map = rocprofiler::counters::getMetricIdMap();
+    std::shared_ptr<rocprofiler::counters::profile_config> config =
+        std::make_shared<rocprofiler::counters::profile_config>();
+
+    const auto& id_map = rocprofiler::counters::getMetricIdMap();
 
     for(size_t i = 0; i < counters_count; i++)
     {
@@ -55,10 +57,10 @@ rocprofiler_create_profile_config(rocprofiler_agent_t              agent,
 
         const auto* metric_ptr = rocprofiler::common::get_val(id_map, counter_id.handle);
         if(!metric_ptr) return ROCPROFILER_STATUS_ERROR_COUNTER_NOT_FOUND;
-        config.metrics.push_back(*metric_ptr);
+        config->metrics.push_back(*metric_ptr);
     }
 
-    config.agent      = agent;
+    config->agent     = agent;
     config_id->handle = rocprofiler::counters::create_counter_profile(std::move(config));
 
     return ROCPROFILER_STATUS_SUCCESS;

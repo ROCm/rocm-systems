@@ -27,6 +27,7 @@
 #include "lib/rocprofiler/hsa/queue.hpp"
 
 #include <cstdint>
+#include <optional>
 #include <unordered_map>
 #include <vector>
 
@@ -48,8 +49,11 @@ public:
     void destory_queue(hsa_queue_t*);
 
     // Add callback to queues associated with the agent. Returns a client
-    // id that can be used by callers to remove the callback.
-    ClientID add_callback(const rocprofiler_agent_t&, Queue::queue_cb_t, Queue::completed_cb_t);
+    // id that can be used by callers to remove the callback. If no agent
+    // is specified, callback will be applied to all agents.
+    ClientID add_callback(std::optional<rocprofiler_agent_t>,
+                          Queue::queue_cb_t,
+                          Queue::completed_cb_t);
     void     remove_callback(ClientID);
 
     const CoreApiTable& get_core_table() const { return _core_table; }
@@ -62,6 +66,8 @@ public:
     const Queue* get_queue(const hsa_queue_t&) const;
 
 private:
+    static constexpr rocprofiler_agent_t ALL_AGENTS{
+        .id = {.handle = std::numeric_limits<uint64_t>::max()}};
     using agent_callback_tuple_t =
         std::tuple<rocprofiler_agent_t, Queue::queue_cb_t, Queue::completed_cb_t>;
     using queue_map_t       = std::unordered_map<hsa_queue_t*, std::unique_ptr<Queue>>;

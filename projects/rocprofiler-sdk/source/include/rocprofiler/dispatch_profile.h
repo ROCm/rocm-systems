@@ -38,62 +38,46 @@ ROCPROFILER_EXTERN_C_INIT
  */
 
 /**
- * @brief ROCProfiler Profile Counting Data.
+ * @brief Kernel Dispatch Callback. This is a callback that is invoked before the kernel
+ *        is enqueued into the HSA queue. What counters to collect for a kernel are set
+ *        via passing back a profile config (config) in this callback. These counters
+ *        will be collected and emplaced in the buffer rocprofiler_buffer_id_t used when
+ *        setting up this callback.
  *
- */
-typedef struct
-{
-    rocprofiler_timestamp_t start_timestamp;
-    rocprofiler_timestamp_t end_timestamp;
-    /**
-     * Counters, including identifiers to get counter information and Counters
-     * values
-     *
-     * Should it be a record per counter?
-     */
-    rocprofiler_record_counter_t* counters;
-    uint64_t                      counters_count;
-    rocprofiler_correlation_id_t  correlation_id;
-} rocprofiler_dispatch_profile_counting_record_t;
-
-/**
- * @brief Kernel Dispatch Callback
- *
- * @param [out] queue_id
- * @param [out] agent_id
- * @param [out] correlation_id
- * @param [out] dispatch_packet It can be used to get the kernel descriptor and then using
- * code_object tracing, we can get the kernel name. `dispatch_packet->reserved2` is the
- * correlation_id used to correlate the dispatch packet with the corresponding API call.
- * @param [out] callback_data_args
- * @param [in] config
+ * @param [in] queue_id        Queue the kernel dispatach packet is being enqueued onto
+ * @param [in] agent           Agent of this queue
+ * @param [in] correlation_id  Correlation ID for this dispatch
+ * @param [in] dispatch_packet Kernel dispatch packet about to be enqueued into HSA
+ * @param [in] callback_data_args Callback supplied via buffered_dispatch_profile_counting_service
+ * @param [out] config         Profile config detailing the counters to collect for this kernel
  */
 typedef void (*rocprofiler_profile_counting_dispatch_callback_t)(
     rocprofiler_queue_id_t              queue_id,
-    rocprofiler_agent_t                 agent_id,
+    const rocprofiler_agent_t*          agent,
     rocprofiler_correlation_id_t        correlation_id,
     const hsa_kernel_dispatch_packet_t* dispatch_packet,
     void*                               callback_data_args,
-    rocprofiler_record_counter_t*       records,
-    size_t                              record_count,
-    rocprofiler_profile_config_id_t     config);
+    rocprofiler_profile_config_id_t*    config);
 
 /**
- * @brief Configure Dispatch Profile Counting Service.
+ * @brief Configure buffered dispatch profile Counting Service.
+ *        Collects the counters in dispatch packets and stores them
+ *        in buffer_id. The buffer may contain packets from more than
+ *        one dispatch (denoted by correlation id). Will trigger the
+ *        callback based on the parameters setup in buffer_id_t.
  *
  * @param [in] context_id context id
- * @param [in] profile profile config to use for dispatch
- * @param [in] callback callback
+ * @param [in] buffer_id id of the buffer to use for the counting service
+ * @param [in] callback callback to perform when dispatch is enqueued
  * @param [in] callback_data_args callback data
  * @return ::rocprofiler_status_t
  */
 rocprofiler_status_t ROCPROFILER_API
-rocprofiler_configure_dispatch_profile_counting_service(
+rocprofiler_configure_buffered_dispatch_profile_counting_service(
     rocprofiler_context_id_t                         context_id,
-    rocprofiler_profile_config_id_t                  profile,
+    rocprofiler_buffer_id_t                          buffer_id,
     rocprofiler_profile_counting_dispatch_callback_t callback,
     void*                                            callback_data_args);
-
 /** @} */
 
 ROCPROFILER_EXTERN_C_FINI

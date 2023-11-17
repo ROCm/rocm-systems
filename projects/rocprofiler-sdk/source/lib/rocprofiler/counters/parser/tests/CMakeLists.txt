@@ -1,6 +1,3 @@
-#
-#
-#
 rocprofiler_deactivate_clang_tidy()
 
 include(GoogleTest)
@@ -14,7 +11,7 @@ target_sources(parser-test PRIVATE ${ROCPROFILER_LIB_PARSER_TEST_SOURCES})
 target_link_libraries(
     parser-test
     PRIVATE rocprofiler::rocprofiler-common-library
-            rocprofiler::rocprofiler-static-library GTest::gtest GTest::gtest_main)
+            rocprofiler::rocprofiler-object-library GTest::gtest GTest::gtest_main)
 
 gtest_add_tests(
     TARGET parser-test

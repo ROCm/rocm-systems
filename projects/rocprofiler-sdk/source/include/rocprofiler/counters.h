@@ -85,12 +85,17 @@ rocprofiler_query_counter_name(rocprofiler_counter_id_t counter_id, const char**
     ROCPROFILER_NONNULL(2, 3);
 
 /**
- * @brief Query Counter Instances Count.
+ * @brief This call returns the number of instances specific counter contains.
+ *        WARNING: There is a restriction on this call in the alpha/beta release
+ *        of rocprof. This call will not return correct instance information in
+ *        tool_init and must be called as part of the dispatch callback for accurate
+ *        instance counting information. The reason for this restriction is that HSA
+ *        is not yet loaded on tool_init.
  *
  * @param [in] agent rocprofiler agent
  * @param [in] counter_id counter id (obtained from iterate_agent_supported_counters)
  * @param [out] instance_count number of instances the counter has
- * @return ::rocprofiler_status_t
+ * @return rocprofiler_status_t
  */
 rocprofiler_status_t ROCPROFILER_API
 rocprofiler_query_counter_instance_count(rocprofiler_agent_t      agent,

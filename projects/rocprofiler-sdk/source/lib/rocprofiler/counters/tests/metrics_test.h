@@ -32,7 +32,6 @@
 static const std::unordered_map<std::string, std::vector<std::vector<std::string>>> basic_gfx908 = {
     {"gfx908",
      {{"MAX_WAVE_SIZE", "", "", "1", "Max wave size constant"},
-      {"KERNEL_DURATION", "", "", "1", "The duration of the kernel dispatch"},
       {"SE_NUM", "", "", "1", "SE_NUM"},
       {"SIMD_NUM", "", "", "1", "SIMD Number"},
       {"CU_NUM", "", "", "1", "CU_NUM"},
@@ -212,7 +211,7 @@ static const std::unordered_map<std::string, std::vector<std::vector<std::string
        {"TA_BUSY_avr",
         "",
         "",
-        "reduce(TA_TA_BUSY,average)",
+        "reduce(TA_TA_BUSY,avr)",
         "TA block is busy. Average over TA instances."},
        {"TA_BUSY_max",
         "",

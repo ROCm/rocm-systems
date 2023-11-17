@@ -1,30 +1,9 @@
-// MIT License
-//
-// Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
-
 #include "client.hpp"
 
-#include <fstream>
-#include <iostream>
+#include <unistd.h>
+#include <map>
 #include <mutex>
+#include <optional>
 #include <set>
 #include <shared_mutex>
 #include <sstream>
@@ -33,6 +12,10 @@
 
 #include <rocprofiler/registration.h>
 #include <rocprofiler/rocprofiler.h>
+
+/**
+ * Tests the collection of all counters on the agent the test is run on.
+ */
 
 #define ROCPROFILER_CALL(result, msg)                                                              \
     {                                                                                              \
@@ -72,30 +55,23 @@ get_buffer()
     return buf;
 }
 
-std::ostream*
-get_output_stream()
+struct CaptureRecords
 {
-    static std::ostream* isTerm = []() -> std::ostream* {
-        if(auto* outfile = getenv("ROCPROFILER_SAMPLE_OUTPUT_FILE"))
-        {
-            if(outfile == "stdout")
-                return static_cast<std::ostream*>(&std::cout);
-            else if(outfile == "stderr")
-                return &std::cerr;
-        }
-        return nullptr;
-    }();
-    static std::unique_ptr<std::ofstream> stream;
+    std::shared_mutex m_mutex{};
+    // <counter id handle, expected instances>
+    std::map<uint64_t, size_t>            expected{};
+    std::map<uint64_t, std::string>       expected_counter_names{};
+    std::vector<rocprofiler_counter_id_t> remaining{};
+    // <counter_id handle, instances seen>
+    std::map<uint64_t, size_t> captured{};
+};
 
-    if(isTerm) return isTerm;
-    if(stream) return stream.get();
-    std::string filename = "counter_collection.log";
-    if(auto* outfile = getenv("ROCPROFILER_SAMPLE_OUTPUT_FILE"))
-    {
-        filename = outfile;
-    }
-    stream = std::make_unique<std::ofstream>(filename);
-    return stream.get();
+CaptureRecords* REC = new CaptureRecords;
+
+CaptureRecords*
+get_capture()
+{
+    return REC;
 }
 
 void
@@ -106,22 +82,29 @@ buffered_callback(rocprofiler_context_id_t,
                   void*,
                   uint64_t)
 {
-    static int enter_count = 0;
-    enter_count++;
-    if(enter_count % 100 != 0) return;
-    std::stringstream ss;
+    auto&                      cap   = *get_capture();
+    auto                       wlock = std::unique_lock{cap.m_mutex};
+    std::map<uint64_t, size_t> seen_counters;
     for(size_t i = 0; i < num_headers; ++i)
     {
         auto* header = headers[i];
         if(header->category == ROCPROFILER_BUFFER_CATEGORY_COUNTERS && header->kind == 0)
         {
+            rocprofiler_counter_id_t counter;
             auto* record = static_cast<rocprofiler_record_counter_t*>(header->payload);
-            ss << "(Id: " << record->id << " Value [D]: " << record->counter_value
-               << " Corr_Id: " << record->corr_id.internal << "),";
+            rocprofiler_query_record_counter_id(record->id, &counter);
+            if(counter.handle == 517)
+            {
+                std::clog << "HERE";
+            }
+            seen_counters.emplace(counter.handle, 0).first->second++;
         }
     }
 
-    *get_output_stream() << "[" << __FUNCTION__ << "] " << ss.str() << "\n";
+    for(const auto& [counter_id, instances] : seen_counters)
+    {
+        cap.captured.emplace(counter_id, 0).first->second += instances;
+    }
 }
 
 void
@@ -132,76 +115,57 @@ dispatch_callback(rocprofiler_queue_id_t              queue_id,
                   void*                               callback_data_args,
                   rocprofiler_profile_config_id_t*    config)
 {
-    /**
-     * This simple example uses the same profile counter set for all agents.
-     * We store this in a cache to prevent constructing many identical profile counter
-     * sets. We first check the cache to see if we have already constructed a counter"
-     * set for the agent. If we have, return it. Otherwise, construct a new profile counter
-     * set.
-     */
-    static std::shared_mutex                                             m_mutex       = {};
-    static std::unordered_map<uint64_t, rocprofiler_profile_config_id_t> profile_cache = {};
+    auto& cap   = *get_capture();
+    auto  wlock = std::unique_lock{cap.m_mutex};
 
-    auto search_cache = [&]() {
-        if(auto pos = profile_cache.find(agent->id.handle); pos != profile_cache.end())
-        {
-            *config = pos->second;
-            return true;
-        }
-        return false;
-    };
-
+    if(cap.expected.empty())
     {
-        auto rlock = std::shared_lock{m_mutex};
-        if(search_cache()) return;
-    }
+        std::vector<rocprofiler_counter_id_t> counters_needed;
+        ROCPROFILER_CALL(
+            rocprofiler_iterate_agent_supported_counters(
+                *agent,
+                [](rocprofiler_counter_id_t* counters, size_t num_counters, void* user_data) {
+                    std::vector<rocprofiler_counter_id_t>* vec =
+                        static_cast<std::vector<rocprofiler_counter_id_t>*>(user_data);
+                    for(size_t i = 0; i < num_counters; i++)
+                    {
+                        vec->push_back(counters[i]);
+                    }
+                    return ROCPROFILER_STATUS_SUCCESS;
+                },
+                static_cast<void*>(&counters_needed)),
+            "Could not fetch supported counters");
 
-    auto wlock = std::unique_lock{m_mutex};
-    if(search_cache()) return;
-
-    std::set<std::string>                 counters_to_collect = {"SQ_WAVES"};
-    std::vector<rocprofiler_counter_id_t> gpu_counters;
-    ROCPROFILER_CALL(
-        rocprofiler_iterate_agent_supported_counters(
-            *agent,
-            [](rocprofiler_counter_id_t* counters, size_t num_counters, void* user_data) {
-                std::vector<rocprofiler_counter_id_t>* vec =
-                    static_cast<std::vector<rocprofiler_counter_id_t>*>(user_data);
-                for(size_t i = 0; i < num_counters; i++)
-                {
-                    vec->push_back(counters[i]);
-                }
-                return ROCPROFILER_STATUS_SUCCESS;
-            },
-            static_cast<void*>(&gpu_counters)),
-        "Could not fetch supported counters");
-
-    std::vector<rocprofiler_counter_id_t> collect_counters;
-    for(auto& counter : gpu_counters)
-    {
-        const char* name;
-        size_t      size;
-        ROCPROFILER_CALL(rocprofiler_query_counter_name(counter, &name, &size),
-                         "Could not query name");
-        if(counters_to_collect.count(std::string(name)) > 0)
+        for(auto& found_counter : counters_needed)
         {
-            std::clog << "Counter: " << counter.handle << " " << name << "\n";
-            collect_counters.push_back(counter);
+            size_t expected = 0;
+            rocprofiler_query_counter_instance_count(*agent, found_counter, &expected);
+            cap.remaining.push_back(found_counter);
+            cap.expected.emplace(found_counter.handle, expected);
+            const char* name;
+            size_t      name_size;
+            ROCPROFILER_CALL(rocprofiler_query_counter_name(found_counter, &name, &name_size),
+                             "Could not query name");
+            cap.expected_counter_names.emplace(found_counter.handle, std::string(name));
         }
+        if(cap.expected.empty()) throw std::runtime_error("No counters found for agent");
     }
+    if(cap.remaining.empty()) return;
 
     rocprofiler_profile_config_id_t profile;
-    ROCPROFILER_CALL(rocprofiler_create_profile_config(
-                         *agent, collect_counters.data(), collect_counters.size(), &profile),
-                     "Could not construct profile cfg");
 
-    profile_cache.emplace(agent->id.handle, profile);
+    ROCPROFILER_CALL(
+        rocprofiler_create_profile_config(*agent, &(cap.remaining.back()), 1, &profile),
+        "Could not construct profile cfg");
+
+    cap.remaining.pop_back();
     *config = profile;
 }
 
 int
 tool_init(rocprofiler_client_finalize_t, void*)
 {
+    get_capture();
     ROCPROFILER_CALL(rocprofiler_create_context(&get_client_ctx()), "context creation failed");
 
     ROCPROFILER_CALL(rocprofiler_create_buffer(get_client_ctx(),
@@ -216,7 +180,7 @@ tool_init(rocprofiler_client_finalize_t, void*)
     auto client_thread = rocprofiler_callback_thread_t{};
     ROCPROFILER_CALL(rocprofiler_create_callback_thread(&client_thread),
                      "failure creating callback thread");
-    get_output_stream();
+
     ROCPROFILER_CALL(rocprofiler_assign_callback_thread(get_buffer(), client_thread),
                      "failed to assign thread for buffer");
     ROCPROFILER_CALL(rocprofiler_configure_buffered_dispatch_profile_counting_service(
@@ -231,8 +195,51 @@ tool_init(rocprofiler_client_finalize_t, void*)
 void
 tool_fini(void*)
 {
+    rocprofiler_flush_buffer(get_buffer());
     rocprofiler_stop_context(get_client_ctx());
+    // Flush buffer isn't waiting....
+    sleep(2);
+
     std::clog << "In tool fini\n";
+
+    auto  cap_ptr = get_capture();
+    auto& cap     = *get_capture();
+    auto  wlock   = std::unique_lock{cap.m_mutex};
+
+    if(cap.captured.size() != cap.expected.size())
+    {
+        std::clog << "[ERROR] Expected " << cap.expected.size() << " counters collected but got "
+                  << cap.captured.size() << "\n";
+    }
+
+    for(const auto& [counter_id, expected] : cap.expected)
+    {
+        std::string name = "UNKNOWN";
+        if(auto pos = cap.expected_counter_names.find(counter_id);
+           pos != cap.expected_counter_names.end())
+        {
+            name = pos->second;
+        }
+
+        std::optional<size_t> actual_size;
+
+        if(auto pos = cap.captured.find(counter_id); pos != cap.captured.end())
+        {
+            actual_size = pos->second;
+        }
+
+        if(actual_size && *actual_size != expected)
+        {
+            std::clog << (*actual_size == expected ? "" : "[ERROR]") << "Counter ID: " << counter_id
+                      << " (" << name << ")"
+                      << " expected " << expected << " instances and got " << *actual_size << "\n";
+        }
+        else
+        {
+            std::clog << "[ERROR] Counter ID: " << counter_id << " (" << name
+                      << ") is missing from output\n";
+        }
+    }
 }
 
 }  // namespace

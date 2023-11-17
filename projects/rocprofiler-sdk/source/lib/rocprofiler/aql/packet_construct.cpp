@@ -34,11 +34,6 @@ AQLPacketConstruct::AQLPacketConstruct(const hsa::AgentCache&               agen
                                        const std::vector<counters::Metric>& metrics)
 : _agent(agent)
 {
-    if(metrics.empty())
-    {
-        throw std::runtime_error("No metrics supplied");
-    }
-
     // Validate that the counter exists and construct the block instances
     // for the counter.
     for(const auto& x : metrics)
@@ -80,8 +75,9 @@ AQLPacketConstruct::construct_packet(const AmdExtTable& ext) const
     auto&        pkt           = *pkt_ptr;
     if(_events.empty())
     {
-        throw std::runtime_error("Constructing packet with no events");
+        return pkt_ptr;
     }
+    pkt.empty = false;
 
     pkt.profile = hsa_ven_amd_aqlprofile_profile_t{
         _agent.get_hsa_agent(),

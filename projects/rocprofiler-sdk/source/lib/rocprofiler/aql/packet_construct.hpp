@@ -54,6 +54,7 @@ public:
     std::unique_ptr<hsa::AQLPacket> construct_packet(const AmdExtTable&) const;
 
     const counters::Metric* event_to_metric(const hsa_ven_amd_aqlprofile_event_t& event) const;
+    std::vector<hsa_ven_amd_aqlprofile_event_t> get_all_events() const;
 
 private:
     struct AQLProfileMetric
@@ -62,8 +63,7 @@ private:
         std::vector<hsa_ven_amd_aqlprofile_event_t> instances;
     };
 
-    std::vector<hsa_ven_amd_aqlprofile_event_t> get_all_events() const;
-    void                                        can_collect();
+    void can_collect();
 
     const hsa::AgentCache&                      _agent;
     std::vector<AQLProfileMetric>               _metrics;

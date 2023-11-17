@@ -54,6 +54,7 @@ enum NodeType
     REFERENCE_NODE,
     SELECT_NODE,
     SUBTRACTION_NODE,
+    CONSTANT_NODE,
 };
 
 struct LinkedList
@@ -76,7 +77,7 @@ struct RawAST
 {
     // Node type
     NodeType    type{NONE};  // Operation to perform on the counter set
-    std::string reduce_op;
+    std::string reduce_op{};
 
     // Stores either the name or digit dependening on whether this
     // is a name or number
@@ -143,6 +144,7 @@ struct RawAST
     , reduce_op(CHECK_NOTNULL(op))
     , counter_set({counter})
     {
+        CHECK_EQ(t, REDUCE_NODE);
         if(dimensions)
         {
             while(dimensions)

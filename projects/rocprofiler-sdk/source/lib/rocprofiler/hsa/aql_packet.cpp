@@ -30,7 +30,11 @@ namespace hsa
 {
 AQLPacket::~AQLPacket()
 {
-    if(!command_buf_mallocd)
+    if(!profile.command_buffer.ptr)
+    {
+        // pass, nothing malloced
+    }
+    else if(!command_buf_mallocd)
     {
         free_func(profile.command_buffer.ptr);
     }
@@ -39,7 +43,11 @@ AQLPacket::~AQLPacket()
         ::free(profile.command_buffer.ptr);
     }
 
-    if(!output_buffer_malloced)
+    if(!profile.output_buffer.ptr)
+    {
+        // pass, nothing malloced
+    }
+    else if(!output_buffer_malloced)
     {
         free_func(profile.output_buffer.ptr);
     }

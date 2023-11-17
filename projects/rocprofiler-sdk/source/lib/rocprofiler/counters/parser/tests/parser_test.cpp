@@ -240,3 +240,21 @@ TEST(parser, parse_derived_counters)
         }
     }
 }
+
+// TEST(parser, parse_complex_counters)
+// {
+//     std::map<std::string, std::string> expressionToExpected = {
+//         {"(TCC_EA_WRREQ_sum-TCC_EA_WRREQ_64B_sum)+(TCC_EA1_WRREQ_sum-TCC_EA1_WRREQ_64B_sum)+(TCC_EA_WRREQ_64B_sum+TCC_EA1_WRREQ_64B_sum)*2",""}
+//     };
+
+//     for(auto [op, expected] : expressionToExpected)
+//     {
+//         RawAST* ast = nullptr;
+//         auto*   buf = yy_scan_string(op.c_str());
+//         yyparse(&ast);
+//         ASSERT_TRUE(ast);
+//         EXPECT_EQ(fmt::format("{}", *ast), expected);
+//         yy_delete_buffer(buf);
+//         delete ast;
+//     }
+// }

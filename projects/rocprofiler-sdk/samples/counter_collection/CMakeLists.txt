@@ -29,22 +29,44 @@ if(NOT TARGET rocprofiler::rocprofiler)
     find_package(rocprofiler REQUIRED)
 endif()
 
-add_library(counter-collection-client SHARED)
-target_sources(counter-collection-client PRIVATE client.cpp client.hpp)
-target_link_libraries(counter-collection-client PRIVATE rocprofiler::rocprofiler)
-
+add_library(counter-collection-buffer-client SHARED)
+target_sources(counter-collection-buffer-client PRIVATE client.cpp client.hpp)
+target_link_libraries(counter-collection-buffer-client PRIVATE rocprofiler::rocprofiler)
 set_source_files_properties(main.cpp PROPERTIES LANGUAGE HIP)
-find_package(Threads REQUIRED)
+add_executable(counter-collection-buffer)
+target_sources(counter-collection-buffer PRIVATE main.cpp)
+target_link_libraries(counter-collection-buffer PRIVATE counter-collection-buffer-client
+                                                        Threads::Threads)
 
-add_executable(counter-collection)
-target_sources(counter-collection PRIVATE main.cpp)
-target_link_libraries(counter-collection PRIVATE counter-collection-client
-                                                 Threads::Threads)
-
-add_test(NAME counter-collection COMMAND $<TARGET_FILE:counter-collection>)
+add_test(NAME counter-collection-buffer COMMAND $<TARGET_FILE:counter-collection-buffer>)
 
 set_tests_properties(
-    counter-collection
+    counter-collection-buffer
+    PROPERTIES
+        TIMEOUT
+        300
+        LABELS
+        "samples"
+        ENVIRONMENT
+        "${ROCPROFILER_MEMCHECK_PRELOAD_ENV};HSA_TOOLS_LIB=$<TARGET_FILE:rocprofiler::rocprofiler-library>"
+        FAIL_REGULAR_EXPRESSION
+        "threw an exception")
+
+add_library(counter-collection-test-counter-client SHARED)
+target_sources(counter-collection-test-counter-client PRIVATE test_counter_client.cpp
+                                                              client.hpp)
+target_link_libraries(counter-collection-test-counter-client
+                      PRIVATE rocprofiler::rocprofiler)
+add_executable(counter-collection-test-counters)
+target_sources(counter-collection-test-counters PRIVATE main.cpp)
+target_link_libraries(counter-collection-test-counters
+                      PRIVATE counter-collection-test-counter-client Threads::Threads)
+
+add_test(NAME counter-collection-test-counters
+         COMMAND $<TARGET_FILE:counter-collection-test-counters>)
+
+set_tests_properties(
+    counter-collection-test-counters
     PROPERTIES
         TIMEOUT
         300

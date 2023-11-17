@@ -93,7 +93,7 @@ private:
 
 // get all dimensions for an agent, block_name
 std::vector<MetricDimension>
-getBlockDimensions(const std::string& agent, const counters::Metric&);
+getBlockDimensions(std::string_view agent, const counters::Metric&);
 
 // // get a specific dimension by id
 // const MetricDimension&

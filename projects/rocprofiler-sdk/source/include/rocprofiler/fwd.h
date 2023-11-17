@@ -86,6 +86,7 @@ typedef enum  // NOLINT(performance-enum-size)
     ROCPROFILER_BUFFER_CATEGORY_NONE = 0,
     ROCPROFILER_BUFFER_CATEGORY_TRACING,
     ROCPROFILER_BUFFER_CATEGORY_PC_SAMPLING,
+    ROCPROFILER_BUFFER_CATEGORY_COUNTERS,
     ROCPROFILER_BUFFER_CATEGORY_LAST,
 } rocprofiler_buffer_category_t;
 
@@ -453,11 +454,8 @@ typedef struct
 typedef struct
 {
     rocprofiler_counter_instance_id_t id;
-    union
-    {
-        int64_t hw_counter;       //<< physical hardware counter
-        double  derived_counter;  //<< derived counter value
-    };
+    double                            counter_value;  //<< counter value
+    rocprofiler_correlation_id_t      corr_id;
 } rocprofiler_record_counter_t;
 
 /**

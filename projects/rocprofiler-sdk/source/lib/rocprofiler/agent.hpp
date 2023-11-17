@@ -29,6 +29,7 @@
 #include <hsa/hsa_api_trace.h>
 
 #include <optional>
+#include <unordered_set>
 #include <vector>
 
 namespace rocprofiler
@@ -52,5 +53,14 @@ get_agent_cache(const rocprofiler_agent_t* agent);
 
 std::optional<hsa::AgentCache>
 get_agent_cache(hsa_agent_t agent);
+
+/**
+ * @brief A set containing all properties that may have been
+ *        set during decoding of the properties file.
+ *
+ * @return std::unordered_set<std::string> of all property names
+ */
+std::unordered_set<std::string>&
+get_agent_available_properties();
 }  // namespace agent
 }  // namespace rocprofiler

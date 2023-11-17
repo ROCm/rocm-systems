@@ -45,8 +45,9 @@ get_reduce_op_type_from_string(const std::string& op)
     static const std::unordered_map<std::string, ReduceOperation> reduce_op_string_to_type = {
         {"min", REDUCE_MIN}, {"max", REDUCE_MAX}, {"sum", REDUCE_SUM}, {"avr", REDUCE_AVG}};
 
-    ReduceOperation type           = REDUCE_NONE;
-    const auto*     reduce_op_type = rocprofiler::common::get_val(reduce_op_string_to_type, op);
+    ReduceOperation type = REDUCE_NONE;
+    if(op.empty()) return REDUCE_NONE;
+    const auto* reduce_op_type = rocprofiler::common::get_val(reduce_op_string_to_type, op);
     if(reduce_op_type) type = *reduce_op_type;
     return type;
 }
@@ -54,7 +55,7 @@ get_reduce_op_type_from_string(const std::string& op)
 std::vector<rocprofiler_record_counter_t>*
 perform_reduction(ReduceOperation reduce_op, std::vector<rocprofiler_record_counter_t>* input_array)
 {
-    rocprofiler_record_counter_t result{.id = 0, .derived_counter = 0};
+    rocprofiler_record_counter_t result{.id = 0, .counter_value = 0};
     if(input_array->empty()) return input_array;
     switch(reduce_op)
     {
@@ -63,7 +64,7 @@ perform_reduction(ReduceOperation reduce_op, std::vector<rocprofiler_record_coun
         {
             result =
                 *std::min_element(input_array->begin(), input_array->end(), [](auto& a, auto& b) {
-                    return a.derived_counter < b.derived_counter;
+                    return a.counter_value < b.counter_value;
                 });
             break;
         }
@@ -71,33 +72,33 @@ perform_reduction(ReduceOperation reduce_op, std::vector<rocprofiler_record_coun
         {
             result =
                 *std::max_element(input_array->begin(), input_array->end(), [](auto& a, auto& b) {
-                    return a.derived_counter > b.derived_counter;
+                    return a.counter_value > b.counter_value;
                 });
             break;
         }
         case REDUCE_SUM:
         {
-            result = std::accumulate(
-                input_array->begin(),
-                input_array->end(),
-                rocprofiler_record_counter_t{.id = 0, .derived_counter = 0},
-                [](auto& a, auto& b) {
-                    return rocprofiler_record_counter_t{
-                        .id = a.id, .derived_counter = a.derived_counter + b.derived_counter};
-                });
+            result = std::accumulate(input_array->begin(),
+                                     input_array->end(),
+                                     rocprofiler_record_counter_t{.id = 0, .counter_value = 0},
+                                     [](auto& a, auto& b) {
+                                         return rocprofiler_record_counter_t{
+                                             .id            = a.id,
+                                             .counter_value = a.counter_value + b.counter_value};
+                                     });
             break;
         }
         case REDUCE_AVG:
         {
-            result = std::accumulate(
-                input_array->begin(),
-                input_array->end(),
-                rocprofiler_record_counter_t{.id = 0, .derived_counter = 0},
-                [](auto& a, auto& b) {
-                    return rocprofiler_record_counter_t{
-                        .id = a.id, .derived_counter = a.derived_counter + b.derived_counter};
-                });
-            result.derived_counter /= input_array->size();
+            result = std::accumulate(input_array->begin(),
+                                     input_array->end(),
+                                     rocprofiler_record_counter_t{.id = 0, .counter_value = 0},
+                                     [](auto& a, auto& b) {
+                                         return rocprofiler_record_counter_t{
+                                             .id            = a.id,
+                                             .counter_value = a.counter_value + b.counter_value};
+                                     });
+            result.counter_value /= input_array->size();
             break;
         }
     }
@@ -142,7 +143,9 @@ get_ast_map()
                 try
                 {
                     auto& evaluate_ast_node =
-                        eval_map.emplace(metric.name(), EvaluateAST(by_name, *ast, gfx))
+                        eval_map
+                            .emplace(metric.name(),
+                                     EvaluateAST({.handle = metric.id()}, by_name, *ast, gfx))
                             .first->second;
                     evaluate_ast_node.validate_raw_ast(
                         by_name);  // TODO: refactor and consolidate internal post-construction
@@ -156,17 +159,10 @@ get_ast_map()
                 yy_delete_buffer(buf);
                 delete ast;
             }
-            // Set dimensions after all ASTs loaded for arch.
+
             for(auto& [name, ast] : eval_map)
             {
-                try
-                {
-                    ast.set_dimensions();
-                } catch(std::exception& e)
-                {
-                    LOG(ERROR) << "Could not set dimensions for " << name << " failed with "
-                               << e.what();
-                }
+                ast.expand_derived(eval_map);
             }
         }
 
@@ -176,9 +172,10 @@ get_ast_map()
 }
 
 std::optional<std::set<Metric>>
-get_required_hardware_counters(const std::string& agent, const Metric& metric)
+get_required_hardware_counters(const std::unordered_map<std::string, EvaluateASTMap>& asts,
+                               const std::string&                                     agent,
+                               const Metric&                                          metric)
 {
-    const auto& asts      = get_ast_map();
     const auto* agent_map = rocprofiler::common::get_val(asts, agent);
     if(!agent_map) return std::nullopt;
     const auto* counter_ast = rocprofiler::common::get_val(*agent_map, metric.name());
@@ -189,13 +186,15 @@ get_required_hardware_counters(const std::string& agent, const Metric& metric)
     return required_counters;
 }
 
-EvaluateAST::EvaluateAST(const std::unordered_map<std::string, Metric>& metrics,
+EvaluateAST::EvaluateAST(rocprofiler_counter_id_t                       out_id,
+                         const std::unordered_map<std::string, Metric>& metrics,
                          const RawAST&                                  ast,
                          std::string                                    agent)
 : _type(ast.type)
 , _reduce_op(get_reduce_op_type_from_string(ast.reduce_op))
 , _agent(std::move(agent))
 , _reduce_dimension_set(ast.reduce_dimension_set)
+, _out_id(out_id)
 {
     if(_type == NodeType::REFERENCE_NODE)
     {
@@ -212,12 +211,13 @@ EvaluateAST::EvaluateAST(const std::unordered_map<std::string, Metric>& metrics,
     if(_type == NodeType::NUMBER_NODE)
     {
         _raw_value = std::get<int64_t>(ast.value);
-        _static_value.push_back({.id = 0, .hw_counter = std::get<int64_t>(ast.value)});
+        _static_value.push_back(
+            {.id = 0, .counter_value = static_cast<double>(std::get<int64_t>(ast.value))});
     }
 
     for(const auto& nextAst : ast.counter_set)
     {
-        _children.emplace_back(metrics, *nextAst, _agent);
+        _children.emplace_back(_out_id, metrics, *nextAst, _agent);
     }
 }
 
@@ -242,6 +242,7 @@ EvaluateAST::set_dimensions()
     {
         case NONE:
         case RANGE_NODE:
+        case CONSTANT_NODE:
         case NUMBER_NODE: break;
         case ADDITION_NODE:
         case SUBTRACTION_NODE:
@@ -326,6 +327,7 @@ EvaluateAST::validate_raw_ast(const std::unordered_map<std::string, Metric>& met
         {
             case NONE:
             case RANGE_NODE:
+            case CONSTANT_NODE:
             case NUMBER_NODE: break;
             case ADDITION_NODE:
             case SUBTRACTION_NODE:
@@ -376,6 +378,77 @@ EvaluateAST::validate_raw_ast(const std::unordered_map<std::string, Metric>& met
     return ret;
 }
 
+namespace
+{
+using property_function_t = int64_t (*)(const rocprofiler_agent_t&);
+#define GEN_MAP_ENTRY(name, value)                                                                 \
+    {                                                                                              \
+        name, property_function_t([](const rocprofiler_agent_t& agent_info) {                      \
+            return static_cast<int64_t>(value);                                                    \
+        })                                                                                         \
+    }
+
+int64_t
+get_agent_property(const std::string& property, const rocprofiler_agent_t& agent)
+{
+    static std::unordered_map<std::string, property_function_t> props = {
+        GEN_MAP_ENTRY("cpu_cores_count", agent_info.cpu_cores_count),
+        GEN_MAP_ENTRY("simd_count", agent_info.simd_count),
+        GEN_MAP_ENTRY("mem_banks_count", agent_info.mem_banks_count),
+        GEN_MAP_ENTRY("caches_count", agent_info.caches_count),
+        GEN_MAP_ENTRY("io_links_count", agent_info.io_links_count),
+        GEN_MAP_ENTRY("cpu_core_id_base", agent_info.cpu_core_id_base),
+        GEN_MAP_ENTRY("simd_id_base", agent_info.simd_id_base),
+        GEN_MAP_ENTRY("max_waves_per_simd", agent_info.max_waves_per_simd),
+        GEN_MAP_ENTRY("lds_size_in_kb", agent_info.lds_size_in_kb),
+        GEN_MAP_ENTRY("gds_size_in_kb", agent_info.gds_size_in_kb),
+        GEN_MAP_ENTRY("num_gws", agent_info.num_gws),
+        GEN_MAP_ENTRY("wave_front_size", agent_info.wave_front_size),
+        GEN_MAP_ENTRY("array_count", agent_info.array_count),
+        GEN_MAP_ENTRY("simd_arrays_per_engine", agent_info.simd_arrays_per_engine),
+        GEN_MAP_ENTRY("cu_per_simd_array", agent_info.cu_per_simd_array),
+        GEN_MAP_ENTRY("simd_per_cu", agent_info.simd_per_cu),
+        GEN_MAP_ENTRY("max_slots_scratch_cu", agent_info.max_slots_scratch_cu),
+        GEN_MAP_ENTRY("gfx_target_version", agent_info.gfx_target_version),
+        GEN_MAP_ENTRY("vendor_id", agent_info.vendor_id),
+        GEN_MAP_ENTRY("device_id", agent_info.device_id),
+        GEN_MAP_ENTRY("location_id", agent_info.location_id),
+        GEN_MAP_ENTRY("domain", agent_info.domain),
+        GEN_MAP_ENTRY("drm_render_minor", agent_info.drm_render_minor),
+        GEN_MAP_ENTRY("hive_id", agent_info.hive_id),
+        GEN_MAP_ENTRY("num_sdma_engines", agent_info.num_sdma_engines),
+        GEN_MAP_ENTRY("num_sdma_xgmi_engines", agent_info.num_sdma_xgmi_engines),
+        GEN_MAP_ENTRY("num_sdma_queues_per_engine", agent_info.num_sdma_queues_per_engine),
+        GEN_MAP_ENTRY("num_cp_queues", agent_info.num_cp_queues),
+        GEN_MAP_ENTRY("max_engine_clk_ccompute", agent_info.max_engine_clk_ccompute),
+    };
+    if(const auto* func = rocprofiler::common::get_val(props, property))
+    {
+        return (*func)(agent);
+    }
+
+    LOG(ERROR) << fmt::format("Unsupported special property {}", property);
+    return 0.0;
+}
+}  // namespace
+
+void
+EvaluateAST::read_special_counters(
+    const rocprofiler_agent_t&        agent,
+    const std::set<counters::Metric>& required_special_counters,
+    std::unordered_map<uint64_t, std::vector<rocprofiler_record_counter_t>>& out_map)
+{
+    for(const auto& metric : required_special_counters)
+    {
+        if(!out_map[metric.id()].empty()) out_map[metric.id()].clear();
+        auto& record = out_map[metric.id()].emplace_back();
+        set_counter_in_rec(record.id, {.handle = metric.id()});
+        set_dim_in_rec(record.id, ROCPROFILER_DIMENSION_NONE, 0);
+
+        record.counter_value = get_agent_property(metric.name(), agent);
+    }
+}
+
 std::unordered_map<uint64_t, std::vector<rocprofiler_record_counter_t>>
 EvaluateAST::read_pkt(const aql::AQLPacketConstruct* pkt_gen, hsa::AQLPacket& pkt)
 {
@@ -386,8 +459,9 @@ EvaluateAST::read_pkt(const aql::AQLPacketConstruct* pkt_gen, hsa::AQLPacket& pk
     };
 
     std::unordered_map<uint64_t, std::vector<rocprofiler_record_counter_t>> ret;
+    if(pkt.empty) return ret;
     it_data aql_data{.data = &ret, .pkt_gen = pkt_gen};
-
+    ;
     hsa_status_t status = hsa_ven_amd_aqlprofile_iterate_data(
         &pkt.profile,
         [](hsa_ven_amd_aqlprofile_info_type_t  info_type,
@@ -405,7 +479,7 @@ EvaluateAST::read_pkt(const aql::AQLPacketConstruct* pkt_gen, hsa::AQLPacket& pk
             // Actual dimension info needs to be used here in the future
             set_dim_in_rec(next_rec.id, ROCPROFILER_DIMENSION_NONE, vec.size() - 1);
             // Note: in the near future we need to use hw_counter here instead
-            next_rec.derived_counter = info_data->pmc_data.result;
+            next_rec.counter_value = info_data->pmc_data.result;
             return HSA_STATUS_SUCCESS;
         },
         &aql_data);
@@ -413,16 +487,65 @@ EvaluateAST::read_pkt(const aql::AQLPacketConstruct* pkt_gen, hsa::AQLPacket& pk
     return ret;
 }
 
+void
+EvaluateAST::set_out_id(std::vector<rocprofiler_record_counter_t>& results) const
+{
+    for(auto& record : results)
+    {
+        set_counter_in_rec(record.id, _out_id);
+    }
+}
+
+void
+EvaluateAST::expand_derived(std::unordered_map<std::string, EvaluateAST>& asts)
+{
+    if(_expanded) return;
+    _expanded = true;
+    for(auto& child : _children)
+    {
+        if(auto* ptr = rocprofiler::common::get_val(asts, child.metric().name()))
+        {
+            ptr->expand_derived(asts);
+            child = *ptr;
+        }
+        else
+        {
+            child.expand_derived(asts);
+        }
+    }
+
+    /**
+     * This covers cases where a derived metric is not a child at all. I.e.
+     * <metric name="MemWrites32B" expr=WRITE_REQ_32B>. This will expand
+     * WRITE_REQ_32B to its proper expression.
+     */
+    if(!_metric.expression().empty())
+    {
+        if(auto* ptr = rocprofiler::common::get_val(asts, _metric.name()))
+        {
+            ptr->expand_derived(asts);
+            _children  = ptr->children();
+            _type      = ptr->type();
+            _reduce_op = ptr->reduce_op();
+        }
+    }
+}
+
 // convert to buffer at some point
 std::vector<rocprofiler_record_counter_t>*
 EvaluateAST::evaluate(
-    std::unordered_map<uint64_t, std::vector<rocprofiler_record_counter_t>>& results_map)
+    std::unordered_map<uint64_t, std::vector<rocprofiler_record_counter_t>>& results_map,
+    std::vector<std::unique_ptr<std::vector<rocprofiler_record_counter_t>>>& cache)
 {
     auto perform_op = [&](auto&& op) {
-        auto* r1 = _children[0].evaluate(results_map);
-        auto* r2 = _children[1].evaluate(results_map);
+        auto* r1 = _children.at(0).evaluate(results_map, cache);
+        auto* r2 = _children.at(1).evaluate(results_map, cache);
 
         if(r1->size() < r2->size()) swap(r1, r2);
+
+        cache.emplace_back(std::make_unique<std::vector<rocprofiler_record_counter_t>>());
+        *cache.back() = *r1;
+        r1            = cache.back().get();
 
         CHECK(!r1->empty() && !r2->empty());
 
@@ -452,29 +575,30 @@ EvaluateAST::evaluate(
     switch(_type)
     {
         case NONE:
+        case CONSTANT_NODE:
         case RANGE_NODE: break;
         case NUMBER_NODE: return &_static_value;
         case ADDITION_NODE:
             return perform_op([](auto& a, auto& b) {
                 return rocprofiler_record_counter_t{
-                    .id = a.id, .derived_counter = a.derived_counter + b.derived_counter};
+                    .id = a.id, .counter_value = a.counter_value + b.counter_value};
             });
         case SUBTRACTION_NODE:
             return perform_op([](auto& a, auto& b) {
                 return rocprofiler_record_counter_t{
-                    .id = a.id, .derived_counter = a.derived_counter - b.derived_counter};
+                    .id = a.id, .counter_value = a.counter_value - b.counter_value};
             });
         case MULTIPLY_NODE:
             return perform_op([](auto& a, auto& b) {
                 return rocprofiler_record_counter_t{
-                    .id = a.id, .derived_counter = a.derived_counter * b.derived_counter};
+                    .id = a.id, .counter_value = a.counter_value * b.counter_value};
             });
         case DIVIDE_NODE:
             return perform_op([](auto& a, auto& b) {
                 return rocprofiler_record_counter_t{
                     .id = a.id,
-                    .derived_counter =
-                        (b.derived_counter == 0 ? 0 : a.derived_counter / b.derived_counter)};
+                    .counter_value =
+                        (b.counter_value == 0 ? 0 : a.counter_value / b.counter_value)};
             });
         case REFERENCE_NODE:
         {

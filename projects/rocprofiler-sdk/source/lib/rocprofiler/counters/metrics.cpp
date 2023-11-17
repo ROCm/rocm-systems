@@ -27,6 +27,7 @@
 #include "lib/common/synchronized.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/common/xml.hpp"
+#include "lib/rocprofiler/agent.hpp"
 
 #include "dimensions.hpp"
 #include "glog/logging.h"
@@ -44,18 +45,56 @@ namespace counters
 {
 namespace
 {
+uint64_t&
+current_id()
+{
+    static uint64_t id = 0;
+    return id;
+}
+
+/**
+ * Constant/speical metrics are treated as psudo-metrics in that they
+ * are given their own metric id. MAX_WAVE_SIZE for example is not collected
+ * by AQL Profiler but is a constant from the topology. It will still have
+ * a counter associated with it. Nearly all metrics contained in
+ * rocprofiler_agent_t will have a counter id associated with it and can be
+ * used in derived counters (exact support properties that can be used can
+ * be viewed in evaluate_ast.cpp:get_agent_property()).
+ */
+const std::vector<Metric>&
+get_constants()
+{
+    static std::vector<Metric> constants;
+    if(!constants.empty()) return constants;
+    // Ensure topology is read
+    rocprofiler::agent::get_agents();
+    for(const auto& prop : rocprofiler::agent::get_agent_available_properties())
+    {
+        constants.emplace_back("constant",
+                               prop,
+                               "",
+                               "",
+                               fmt::format("Constant value {} from agent properties", prop),
+                               "",
+                               "yes",
+                               current_id());
+        current_id()++;
+    }
+    return constants;
+}
+
 // Future TODO: inheritance? does it work for derived_counters.xml?
 MetricMap
-loadXml(const std::string& filename)
+loadXml(const std::string& filename, bool load_constants = false)
 {
-    static std::atomic<uint64_t> id = 0;
-    MetricMap                    ret;
+    MetricMap ret;
     DLOG(INFO) << "Loading Counter Config: " << filename;
     // todo: return unique_ptr....
     auto xml = common::Xml::Create(filename);
     LOG_IF(FATAL, !xml)
         << "Could not open XML Counter Config File (set env ROCPROFILER_METRICS_PATH)";
 
+    const auto& constant_metrics = get_constants();
     for(const auto& [gfx_name, nodes] : xml->GetAllNodes())
     {
         /**
@@ -82,11 +121,18 @@ loadXml(const std::string& filename)
                                    node->opts["descr"],
                                    node->opts["expr"],
                                    node->opts["special"],
-                                   id);
-            id++;
+                                   current_id());
+            current_id()++;
+        }
+
+        if(load_constants)
+        {
+            metricVec.insert(metricVec.end(), constant_metrics.begin(), constant_metrics.end());
         }
     }
 
+    LOG_IF(FATAL, current_id() > 65536)
+        << "Counter count exceeds 16 bits, which may break counter id output";
     return ret;
 }
 
@@ -126,7 +172,7 @@ getDerivedHardwareMetrics()
 MetricMap
 getBaseHardwareMetrics()
 {
-    return loadXml(findViaEnvironment("basic_counters.xml"));
+    return loadXml(findViaEnvironment("basic_counters.xml"), true);
 }
 
 const MetricIdMap&
