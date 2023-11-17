@@ -78,8 +78,13 @@ message(STATUS "Checking for required Python package dependencies...")
 set_property(GLOBAL PROPERTY pythonDepsFlag "groovy")
 
 function(checkPythonPackage [package])
+    # mapping for non-default package names
+    set(PACKAGE ${ARGV0})
+    if(${ARGV0} STREQUAL "pyyaml")
+        set(PACKAGE "yaml")
+    endif()
     execute_process(
-        COMMAND ${Python3_EXECUTABLE} -c "import ${ARGV0}"
+        COMMAND ${Python3_EXECUTABLE} -c "import ${PACKAGE}"
         OUTPUT_QUIET ERROR_QUIET
         RESULT_VARIABLE EXIT_CODE)
     if(${EXIT_CODE} EQUAL 0)
