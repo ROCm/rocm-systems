@@ -17,22 +17,25 @@ jobs:
   build:
     runs-on: [mi100, rhel9]
     env:
-       TEST_DIR: ${RUNNER_TEMP}/omniperf
-       PYTHONPATH: /share/sw/omniperf/python-libs
+       PYTHONPATH: ${{ github.workspace }}/python-libs
     steps:
       - name: Checkout
         uses: actions/checkout@v3
         with:
           submodules: recursive
           token: ${{ secrets.GH_PAT }}
+      - name: pythonpath
+        run: echo ${PYTHONPATH}
+      - name: Install Python collateral (build and test)
+        run: |
+           pip3 install -t ${PYTHONPATH} -r requirements.txt
+           pip3 install -t ${PYTHONPATH} -r requirements-test.txt
       - name: Configure
         run: |
           mkdir build
           cd build
           ml cmake
           cmake -DENABLE_COVERAGE=ON ..
-      - name: Install Python testing collateral
-        run: pip3 install pytest pytest-cov mock
       - name: Create HIP binary (vcopy)
         run: hipcc -o tests/vcopy ./sample/vcopy.cpp
       - name: Run [profile] mode
