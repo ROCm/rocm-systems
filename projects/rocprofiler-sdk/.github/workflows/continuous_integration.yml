@@ -25,7 +25,10 @@ env:
 
 jobs:
   get_latest_mainline_build_number:
-    runs-on: mi200
+    # Run job on vega20 instead of mi200 as mi200 is unstable, as per ammar's instructions.
+    # TODO: Change it back when re-enabling on mi200
+    #runs-on: mi200
+    runs-on: vega20
 
     outputs:
       LATEST_BUILD_NUMBER: ${{ steps.get_build_number.outputs.LATEST_BUILD_NUMBER }}
@@ -34,16 +37,25 @@ jobs:
       - id: get_build_number
         run: echo "LATEST_BUILD_NUMBER=$(wget -qO- 'http://rocm-ci.amd.com/job/compute-rocm-dkms-no-npi-hipclang/lastSuccessfulBuild/buildNumber')" >> $GITHUB_OUTPUT
 
-  mi200-ubuntu:
+  # Changed job name from mi200-ubuntu to vega20-ubuntu
+  # TODO: Change it back when re-enabling on mi200
+  vega20-ubuntu:
     # See: https://docs.github.com/en/free-pro-team@latest/actions/learn-github-actions/managing-complex-workflows#using-a-build-matrix
     strategy:
       fail-fast: true
       max-parallel: 4
       matrix:
         include:
+          # Run job on vega20 instead of mi200 as mi200 is unstable, as per ammar's instructions.
+          # TODO: Change it back when re-enabling on mi200
+          # - os: 'ubuntu-22.04'
+          #   runner: 'renderD131'
+          #   device: '/renderD131'
+          #   build-type: 'RelWithDebInfo'
+          #   ci-flags: '--linter clang-tidy'
+          #   name-tag: ''
           - os: 'ubuntu-22.04'
-            runner: 'renderD131'
-            device: '/renderD131'
+            runner: 'vega20'
             build-type: 'RelWithDebInfo'
             ci-flags: '--linter clang-tidy'
             name-tag: ''
@@ -54,9 +66,15 @@ jobs:
     env:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
 
+    # TODO: Uncomment this when re-enabling tests on the mi200 as it contains --memory and --cpus flag for the mi200. Remove these 2 options when running on vega20.
+    # vega20 machine only has 24 cpus available.
+    # container:
+    #   image: compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:${{ needs.get_latest_mainline_build_number.outputs.LATEST_BUILD_NUMBER }}-${{ matrix.os }}-stg1
+    #   options: --memory=128g --cpus=32 --ipc=host --device=/dev/kfd --group-add video --cap-add=SYS_PTRACE --cap-add CAP_SYS_PTRACE --cap-add CAP_SYS_ADMIN --security-opt seccomp=unconfined
+
     container:
       image: compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:${{ needs.get_latest_mainline_build_number.outputs.LATEST_BUILD_NUMBER }}-${{ matrix.os }}-stg1
-      options: --memory=128g --cpus=32 --ipc=host --device=/dev/kfd --device=/dev/dri${{ matrix.device }} --group-add video --cap-add=SYS_PTRACE --cap-add CAP_SYS_PTRACE --cap-add CAP_SYS_ADMIN --security-opt seccomp=unconfined
+      options: --ipc=host --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --cap-add CAP_SYS_PTRACE --cap-add CAP_SYS_ADMIN --security-opt seccomp=unconfined
 
     needs: get_latest_mainline_build_number
 
@@ -87,11 +105,13 @@ jobs:
     - name: Configure, Build, and Test
       timeout-minutes: 30
       shell: bash
+      # Replaced 'mi200' with '${{ matrix.runner }}' when disabling jobs on mi200 and running it on vega20.
+      # TODO: Change it back when re-enabling on mi200
       run:
         python3 ./source/scripts/run-ci.py -B build
-          --name ${{ github.repository }}-${{ github.ref_name }}-mi200-${{ matrix.os }}${{ matrix.name-tag }}
+          --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.runner }}-${{ matrix.os }}${{ matrix.name-tag }}
           --build-jobs 8
-          --site mi200
+          --site ${{ matrix.runner }}
           --gpu-targets ${{ env.GPU_LIST }}
           ${{ matrix.ci-flags }}
           --
@@ -131,11 +151,16 @@ jobs:
       fail-fast: true
       max-parallel: 4
       matrix:
+      # TODO: Change it back when re-enabling on mi200
         include:
             - os: 'ubuntu-22.04'
-              runner: 'renderD131'
-              device: '/renderD131'
+              runner: 'vega20'
               build-type: 'Release'
+        # include:
+        #     - os: 'ubuntu-22.04'
+        #       runner: 'renderD131'
+        #       device: '/renderD131'
+        #       build-type: 'Release'
 
     runs-on: ${{ matrix.runner }}
 
@@ -143,9 +168,15 @@ jobs:
     env:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
 
+    # TODO: Uncomment this when re-enabling tests on the mi200 as it contains --memory and --cpus flag for the mi200. Remove these 2 options when running on vega20.
+    # vega20 machine only has 24 cpus available.
     container:
       image: compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:${{ needs.get_latest_mainline_build_number.outputs.LATEST_BUILD_NUMBER }}-${{ matrix.os }}-stg1
-      options: --memory=128g --cpus=32 --ipc=host --device=/dev/kfd --device=/dev/dri${{ matrix.device }} --group-add video --cap-add=SYS_PTRACE --cap-add CAP_SYS_PTRACE --cap-add CAP_SYS_ADMIN --security-opt seccomp=unconfined
+      options: --ipc=host --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --cap-add CAP_SYS_PTRACE --cap-add CAP_SYS_ADMIN --security-opt seccomp=unconfined
+    
+    # container:
+    #   image: compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:${{ needs.get_latest_mainline_build_number.outputs.LATEST_BUILD_NUMBER }}-${{ matrix.os }}-stg1
+    #   options: --memory=128g --cpus=32 --ipc=host --device=/dev/kfd --device=/dev/dri${{ matrix.device }} --group-add video --cap-add=SYS_PTRACE --cap-add CAP_SYS_PTRACE --cap-add CAP_SYS_ADMIN --security-opt seccomp=unconfined
 
     needs: get_latest_mainline_build_number
 
@@ -172,11 +203,13 @@ jobs:
     - name: Configure, Build, and Test (Total Code Coverage)
       timeout-minutes: 30
       shell: bash
+      # Replaced 'mi200' with '${{ matrix.runner }}' when disabling jobs on mi200 and running it on vega20.
+      # TODO: Change it back when re-enabling on mi200
       run:
         python3 ./source/scripts/run-ci.py -B build
-          --name ${{ github.repository }}-${{ github.ref_name }}-mi200-${{ matrix.os }}-codecov
+          --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.runner }}-${{ matrix.os }}-codecov
           --build-jobs 8
-          --site mi200
+          --site ${{ matrix.runner }}
           --gpu-targets ${{ env.GPU_LIST }}
           --coverage all
           --
@@ -189,9 +222,9 @@ jobs:
       run:
         find build -type f | egrep '\.gcda$' | xargs rm &&
         python3 ./source/scripts/run-ci.py -B build
-          --name ${{ github.repository }}-${{ github.ref_name }}-mi200-${{ matrix.os }}-codecov-tests
+          --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.runner }}-${{ matrix.os }}-codecov-tests
           --build-jobs 8
-          --site mi200
+          --site ${{ matrix.runner }}
           --gpu-targets ${{ env.GPU_LIST }}
           --coverage tests
           --
@@ -204,9 +237,9 @@ jobs:
       run:
         find build -type f | egrep '\.gcda$' | xargs rm &&
         python3 ./source/scripts/run-ci.py -B build
-          --name ${{ github.repository }}-${{ github.ref_name }}-mi200-${{ matrix.os }}-codecov-samples
+          --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.runner }}-${{ matrix.os }}-codecov-samples
           --build-jobs 8
-          --site mi200
+          --site ${{ matrix.runner }}
           --gpu-targets ${{ env.GPU_LIST }}
           --coverage samples
           --
@@ -252,24 +285,41 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Run job on vega20 instead of mi200 as mi200 is unstable, as per ammar's instructions.
+          # TODO: Change it back when re-enabling on mi200
           - os: 'ubuntu-22.04'
-            runner: 'renderD131'
-            device: '/renderD131'
+            runner: 'vega20'
             build-type: 'RelWithDebInfo'
             ci-flags: ''
             sanitizer: 'AddressSanitizer'
           - os: 'ubuntu-22.04'
-            runner: 'renderD131'
-            device: '/renderD131'
+            runner: 'vega20'
             build-type: 'RelWithDebInfo'
             ci-flags: ''
             sanitizer: 'ThreadSanitizer'
           - os: 'ubuntu-22.04'
-            runner: 'renderD131'
-            device: '/renderD131'
+            runner: 'vega20'
             build-type: 'RelWithDebInfo'
             ci-flags: ''
             sanitizer: 'LeakSanitizer'
+          # - os: 'ubuntu-22.04'
+          #   runner: 'renderD131'
+          #   device: '/renderD131'
+          #   build-type: 'RelWithDebInfo'
+          #   ci-flags: ''
+          #   sanitizer: 'AddressSanitizer'
+          # - os: 'ubuntu-22.04'
+          #   runner: 'renderD131'
+          #   device: '/renderD131'
+          #   build-type: 'RelWithDebInfo'
+          #   ci-flags: ''
+          #   sanitizer: 'ThreadSanitizer'
+          # - os: 'ubuntu-22.04'
+          #   runner: 'renderD131'
+          #   device: '/renderD131'
+          #   build-type: 'RelWithDebInfo'
+          #   ci-flags: ''
+          #   sanitizer: 'LeakSanitizer'
 
     runs-on: ${{ matrix.runner }}
 
@@ -279,7 +329,7 @@ jobs:
 
     container:
       image: compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:${{ needs.get_latest_mainline_build_number.outputs.LATEST_BUILD_NUMBER }}-${{ matrix.os }}-stg1
-      options: --privileged --ipc=host --device=/dev/kfd --device=/dev/dri${{ matrix.device }} --group-add video --cap-add=SYS_PTRACE --cap-add CAP_SYS_PTRACE --cap-add CAP_SYS_ADMIN --security-opt seccomp=unconfined
+      options: --privileged --ipc=host --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --cap-add CAP_SYS_PTRACE --cap-add CAP_SYS_ADMIN --security-opt seccomp=unconfined
 
     needs: get_latest_mainline_build_number
 
@@ -308,9 +358,9 @@ jobs:
       shell: bash
       run:
         python3 ./source/scripts/run-ci.py -B build
-          --name ${{ github.repository }}-${{ github.ref_name }}-mi200-${{ matrix.sanitizer }}
+          --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.runner }}-${{ matrix.sanitizer }}
           --build-jobs 8
-          --site mi200
+          --site ${{ matrix.runner }}
           --gpu-targets ${{ env.GPU_LIST }}
           --memcheck=${{ matrix.sanitizer }}
           ${{ matrix.ci-flags }}
