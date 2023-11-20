@@ -14,7 +14,7 @@
 
     To collect the default set of data for all kernels in the target application, launch, e.g.:
     ```shell
-    $ omniperf profile -n vcopy_data -- ./vcopy 1048576 256
+    $ omniperf profile -n vcopy_data -- ./vcopy -n 1048576 -b 256
     ```
     The app runs, each kernel is launched, and profiling results are generated. By default, results are written to (e.g.,) ./workloads/vcopy_data (configurable via the `-n` argument). To collect all requested profile information, it may be required to replay kernels multiple times.
 
