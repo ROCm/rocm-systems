@@ -89,7 +89,7 @@ class OmniProfiler_Base():
         if self.__args.ipblocks == None:
             logging.info("IP Blocks: All")
         else:
-            logging.info("IP Blocks: "+ self.__args.ipblocks)
+            logging.info("IP Blocks: "+ str(self.__args.ipblocks))
         if self.__args.kernel_verbose > 5:
             logging.info("KernelName verbose: DISABLED")
         else:
