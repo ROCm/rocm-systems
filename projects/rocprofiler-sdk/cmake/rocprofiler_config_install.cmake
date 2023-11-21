@@ -5,6 +5,9 @@ include(CMakePackageConfigHelpers)
 
 set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME config)
 
+install(DIRECTORY ${PROJECT_SOURCE_DIR}/samples
+        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME})
+
 install(
     EXPORT rocprofiler-library-targets
     FILE rocprofiler-library-targets.cmake

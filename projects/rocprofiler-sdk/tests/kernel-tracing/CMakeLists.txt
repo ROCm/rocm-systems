@@ -34,9 +34,15 @@ add_test(NAME test-kernel-tracing-execute COMMAND $<TARGET_FILE:reproducible-run
 
 set_tests_properties(
     test-kernel-tracing-execute
-    PROPERTIES TIMEOUT 45 LABELS "integration-tests" ENVIRONMENT
-               "${PRELOAD_ENV};HSA_TOOLS_LIB=$<TARGET_FILE:rocprofiler::rocprofiler>"
-               FAIL_REGULAR_EXPRESSION "threw an exception")
+    PROPERTIES
+        TIMEOUT
+        45
+        LABELS
+        "integration-tests"
+        ENVIRONMENT
+        "${PRELOAD_ENV};HSA_TOOLS_LIB=$<TARGET_FILE:rocprofiler::rocprofiler-shared-library>"
+        FAIL_REGULAR_EXPRESSION
+        "threw an exception")
 
 foreach(FILENAME validate.py pytest.ini conftest.py)
     configure_file(${CMAKE_CURRENT_SOURCE_DIR}/${FILENAME}
