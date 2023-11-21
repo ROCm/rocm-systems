@@ -27,14 +27,14 @@ THE SOFTWARE.
 namespace amd {
 namespace rdc {
 
-RdcRasLib::RdcRasLib(const char* lib_name):
+RdcRasLib::RdcRasLib():
     fields_value_get_(nullptr)
     , fields_query_(nullptr)
     , fields_watch_(nullptr)
     , fields_unwatch_(nullptr)
     , rdc_module_init_(nullptr)
     , rdc_module_destroy_(nullptr) {
-    rdc_status_t status = lib_loader_.load(lib_name);
+    rdc_status_t status = lib_loader_.load("librdc_ras.so");
     if (status != RDC_ST_OK) {
         RDC_LOG(RDC_ERROR, "RAS related function will not work.");
         return;

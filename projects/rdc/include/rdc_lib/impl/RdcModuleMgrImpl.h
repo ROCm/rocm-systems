@@ -46,10 +46,7 @@ class RdcModuleMgrImpl : public RdcModuleMgr {
     RdcDiagnosticPtr rdc_diagnostic_module_;
 
     //  Domain module
-    RdcRasLibPtr ras_lib_;
-    RdcSmiLibPtr smi_lib_;
     RdcMetricFetcherPtr fetcher_;
-    RdcRocrLibPtr rocr_lib_;
 };
 
 }  // namespace rdc

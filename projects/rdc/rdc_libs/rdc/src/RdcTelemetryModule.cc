@@ -21,7 +21,10 @@ THE SOFTWARE.
 */
 #include "rdc_lib/impl/RdcTelemetryModule.h"
 #include <functional>
+#include <memory>
 #include "rdc_lib/RdcLogger.h"
+#include "rdc_lib/RdcMetricFetcher.h"
+#include "rdc_lib/impl/RdcRasLib.h"
 #include "rdc_lib/impl/RdcSmiLib.h"
 
 namespace amd {
@@ -92,10 +95,10 @@ rdc_status_t RdcTelemetryModule::rdc_telemetry_fields_unwatch(
     return RDC_ST_OK;
 }
 
-RdcTelemetryModule::RdcTelemetryModule(
-    const RdcSmiLibPtr& smi_lib,
-    const RdcRasLibPtr& ras_module) {
-    telemetry_modules_.push_back(smi_lib);
+RdcTelemetryModule::RdcTelemetryModule(RdcMetricFetcherPtr fetcher) {
+    const RdcSmiLibPtr smi_module = std::make_shared<RdcSmiLib>(fetcher);
+    const RdcRasLibPtr ras_module = std::make_shared<RdcRasLib>();
+    telemetry_modules_.push_back(smi_module);
     if (ras_module) {
        telemetry_modules_.push_back(ras_module);
     }

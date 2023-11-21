@@ -51,7 +51,7 @@ class RdcRocrLib : public RdcDiagnostic {
     rdc_status_t rdc_diag_init(uint64_t flags) override;
     rdc_status_t rdc_diag_destroy() override;
 
-    explicit RdcRocrLib(const char* lib_name);
+    explicit RdcRocrLib();
 
     ~RdcRocrLib();
 

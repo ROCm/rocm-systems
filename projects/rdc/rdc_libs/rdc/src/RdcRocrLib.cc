@@ -27,12 +27,12 @@ THE SOFTWARE.
 namespace amd {
 namespace rdc {
 
-RdcRocrLib::RdcRocrLib(const char* lib_name):
+RdcRocrLib::RdcRocrLib():
     test_case_run_(nullptr)
     , diag_test_cases_query_(nullptr)
     , diag_init_(nullptr)
     , diag_destroy_(nullptr) {
-    rdc_status_t status = lib_loader_.load(lib_name);
+    rdc_status_t status = lib_loader_.load("librdc_rocr.so");
     if (status != RDC_ST_OK) {
         RDC_LOG(RDC_ERROR, "Rocr related function will not work.");
         return;

@@ -49,8 +49,7 @@ class RdcTelemetryModule : public RdcTelemetry {
     rdc_status_t rdc_telemetry_fields_unwatch(rdc_gpu_field_t* fields,
             uint32_t fields_count);
 
-    RdcTelemetryModule(const RdcSmiLibPtr& smi_lib,
-            const RdcRasLibPtr& ras_module);
+    RdcTelemetryModule(RdcMetricFetcherPtr fetcher);
 
  private:
     //< Helper function to dispatch fields to module

@@ -27,9 +27,8 @@ THE SOFTWARE.
 #include <vector>
 #include <memory>
 #include "rdc_lib/RdcDiagnostic.h"
-#include "rdc_lib/impl/RdcRasLib.h"
-#include "rdc_lib/impl/RdcSmiLib.h"
-#include "rdc_lib/impl/RdcRocrLib.h"
+#include "rdc_lib/RdcMetricFetcher.h"
+#include "rdc_lib/RdcTelemetryLibInterface.h"
 
 namespace amd {
 namespace rdc {
@@ -55,9 +54,7 @@ class RdcDiagnosticModule : public RdcDiagnostic {
     rdc_status_t rdc_diag_init(uint64_t flags) override;
     rdc_status_t rdc_diag_destroy() override;
 
-    explicit RdcDiagnosticModule(const RdcSmiLibPtr& smi_lib,
-        const RdcRasLibPtr& ras_module,
-        const RdcRocrLibPtr& rocr_module);
+    explicit RdcDiagnosticModule(RdcMetricFetcherPtr& fetcher);
 
  private:
     //< Helper function to dispatch fields to module

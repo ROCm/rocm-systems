@@ -21,11 +21,14 @@ THE SOFTWARE.
 */
 #include "rdc_lib/impl/RdcDiagnosticModule.h"
 #include <map>
+#include <memory>
 #include <vector>
 #include <functional>
 #include "rdc_lib/RdcLogger.h"
+#include "rdc_lib/RdcMetricFetcher.h"
 #include "rdc_lib/impl/RdcSmiLib.h"
 #include "rdc_lib/impl/RdcRasLib.h"
+#include "rdc_lib/impl/RdcRocrLib.h"
 
 namespace amd {
 namespace rdc {
@@ -114,10 +117,12 @@ rdc_status_t RdcDiagnosticModule::RdcDiagnosticModule::rdc_diag_destroy() {
     return RDC_ST_OK;
 }
 
-RdcDiagnosticModule::RdcDiagnosticModule(const RdcSmiLibPtr& smi_lib,
-    const RdcRasLibPtr& ras_module, const RdcRocrLibPtr& rocr_module) {
-    if (smi_lib) {
-       diagnostic_modules_.push_back(smi_lib);
+RdcDiagnosticModule::RdcDiagnosticModule(RdcMetricFetcherPtr& fetcher) {
+    const RdcSmiLibPtr smi_module = std::make_shared<RdcSmiLib>(fetcher);
+    const RdcRasLibPtr ras_module = std::make_shared<RdcRasLib>();
+    const RdcRocrLibPtr rocr_module = std::make_shared<RdcRocrLib>();
+    if (smi_module) {
+       diagnostic_modules_.push_back(smi_module);
     }
     if (rocr_module) {
        diagnostic_modules_.push_back(rocr_module);

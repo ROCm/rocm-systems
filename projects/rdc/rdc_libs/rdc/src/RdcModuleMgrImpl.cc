@@ -30,23 +30,16 @@ namespace amd {
 namespace rdc {
 
 RdcModuleMgrImpl::RdcModuleMgrImpl(const RdcMetricFetcherPtr& fetcher)
-    : smi_lib_(std::make_shared<RdcSmiLib>(fetcher)) {
-    // The smi_lib_ always need to be loaded.
-}
+    : fetcher_(fetcher) {}
 
 RdcTelemetryPtr RdcModuleMgrImpl::get_telemetry_module() {
     if (rdc_telemetry_module_) {
         return rdc_telemetry_module_;
     }
 
-    //  Delay load
-    if (!ras_lib_) {
-        ras_lib_.reset(new RdcRasLib("librdc_ras.so"));
-    }
-
     if (!rdc_telemetry_module_) {
         rdc_telemetry_module_.reset(
-            new RdcTelemetryModule(smi_lib_, ras_lib_));
+            new RdcTelemetryModule(fetcher_));
     }
 
     return rdc_telemetry_module_;
@@ -57,18 +50,9 @@ RdcDiagnosticPtr RdcModuleMgrImpl::get_diagnostic_module() {
         return rdc_diagnostic_module_;
     }
 
-    //  Delay load
-    if (!ras_lib_) {
-        ras_lib_.reset(new RdcRasLib("librdc_ras.so"));
-    }
-
-    if (!rocr_lib_) {
-        rocr_lib_.reset(new RdcRocrLib("librdc_rocr.so"));
-    }
-
     if (!rdc_diagnostic_module_) {
         rdc_diagnostic_module_.reset(
-            new RdcDiagnosticModule(smi_lib_, ras_lib_, rocr_lib_));
+            new RdcDiagnosticModule(fetcher_));
     }
 
     return rdc_diagnostic_module_;

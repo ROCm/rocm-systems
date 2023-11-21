@@ -71,7 +71,7 @@ class RdcRasLib: public RdcTelemetry, public RdcDiagnostic {
     rdc_status_t rdc_diag_init(uint64_t flags) override;
     rdc_status_t rdc_diag_destroy() override;
 
-    explicit RdcRasLib(const char* lib_name);
+    explicit RdcRasLib();
 
     ~RdcRasLib();
 
