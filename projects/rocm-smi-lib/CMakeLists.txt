@@ -35,12 +35,15 @@ find_program (GIT NAMES git)
 
 ## Setup the package version based on git tags.
 set(PKG_VERSION_GIT_TAG_PREFIX "rsmi_pkg_ver")
-get_package_version_number("6.1.0" ${PKG_VERSION_GIT_TAG_PREFIX} GIT)
+get_package_version_number("7.0.0" ${PKG_VERSION_GIT_TAG_PREFIX} GIT)
 message("Package version: ${PKG_VERSION_STR}")
-set(${ROCM_SMI_LIBS_TARGET}_VERSION_MAJOR "${VERSION_MAJOR}")
-set(${ROCM_SMI_LIBS_TARGET}_VERSION_MINOR "${VERSION_MINOR}")
-set(${ROCM_SMI_LIBS_TARGET}_VERSION_PATCH "0")
+set(${ROCM_SMI_LIBS_TARGET}_VERSION_MAJOR "${CPACK_PACKAGE_VERSION_MAJOR}")
+set(${ROCM_SMI_LIBS_TARGET}_VERSION_MINOR "${CPACK_PACKAGE_VERSION_MINOR}")
+set(${ROCM_SMI_LIBS_TARGET}_VERSION_PATCH "${CPACK_PACKAGE_VERSION_PATCH}")
 set(${ROCM_SMI_LIBS_TARGET}_VERSION_BUILD "0")
+set(${ROCM_SMI_LIBS_TARGET}_VERSION_HASH "${PKG_VERSION_HASH}")
+
+set(${ROCM_SMI_LIBS_TARGET}_VERSION_STRING "${${ROCM_SMI_LIBS_TARGET}_VERSION_MAJOR}.${${ROCM_SMI_LIBS_TARGET}_VERSION_MINOR}.${${ROCM_SMI_LIBS_TARGET}_VERSION_PATCH}+${${ROCM_SMI_LIBS_TARGET}_VERSION_HASH}")
 
 # The following default version values should be updated as appropriate for
 # ABI breaks (update MAJOR and MINOR), and ABI/API additions (update MINOR).
@@ -48,7 +51,7 @@ set(${ROCM_SMI_LIBS_TARGET}_VERSION_BUILD "0")
 # by git tags (through "git describe") when they are present.
 set(PKG_VERSION_MAJOR "${VERSION_MAJOR}")
 set(PKG_VERSION_MINOR "${VERSION_MINOR}")
-set(PKG_VERSION_PATCH 0)
+set(PKG_VERSION_PATCH "${CPACK_PACKAGE_VERSION_PATCH}")
 set(PKG_VERSION_NUM_COMMIT 0)
 
 ## Define default variable and variables for the optional build target

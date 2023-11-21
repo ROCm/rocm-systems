@@ -167,7 +167,900 @@ void TestMeasureApiExecutionTime::Run(void) {
     skip = false;
     std::cout << "----------------------------------------------------------------------------" << std::endl;
 
+    //Test execution time for each individual gpu metric
+    auto val_ui16 = uint16_t(0);
+    auto val_ui32 = uint32_t(0);
+    auto val_ui64 = uint64_t(0);
+    GPUMetricTempHbm_t temp_hbm_values;
+    GPUMetricVcnActivity_t temp_vcn_values;
+    GPUMetricCurrDClk0_t temp_curr_dclk0_values;
+    GPUMetricCurrGfxClk_t temp_curr_gfxclk_values;
+    GPUMetricCurrSocClk_t temp_curr_socclk_values;
+    GPUMetricCurrVClk0_t temp_curr_vclk0_values;
+    GPUMetricXgmiReadDataAcc_t temp_xgmi_read_values;
+    GPUMetricXgmiWriteDataAcc_t temp_xgmi_write_values;
+    auto status_code(rsmi_status_t::RSMI_STATUS_SUCCESS);
 
+    start = std::chrono::high_resolution_clock::now();
+    auto start_api = std::chrono::high_resolution_clock::now();
+    for (int i=0; i < repeat; ++i) {
+      status_code = rsmi_dev_metrics_temp_edge_get(dv_ind, &val_ui16);
     }
-    std::cout.precision(prev);
+    auto stop_api = std::chrono::high_resolution_clock::now();
+    auto duration_api = std::chrono::duration_cast<std::chrono::microseconds>(stop_api - start_api);
+    if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS){
+      skip = true;
+    }
+    if (!skip) {
+      std::cout << "\rsmi_dev_metrics_temp_edge_get() execution time: "
+                << (float(duration_api.count()) / repeat) << " microseconds" << std::endl;
+      EXPECT_LT(duration_api.count(), 500 * repeat);
+    }
+    skip = false;
+    std::cout << "----------------------------------------------------------------------------" << std::endl;
+
+    start_api = std::chrono::high_resolution_clock::now();
+    for (int i=0; i < repeat; ++i) {
+      status_code = rsmi_dev_metrics_temp_hotspot_get(dv_ind, &val_ui16);
+    }
+    stop_api = std::chrono::high_resolution_clock::now();
+    duration_api = std::chrono::duration_cast<std::chrono::microseconds>(stop_api - start_api);
+    if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS){
+      skip = true;
+    }
+    if (!skip) {
+      std::cout << "\rsmi_dev_metrics_temp_hotspot_get() execution time: "
+                << (float(duration_api.count()) / repeat) << " microseconds" << std::endl;
+      EXPECT_LT(duration_api.count(), 500 * repeat);
+    }
+    skip = false;
+    std::cout << "----------------------------------------------------------------------------" << std::endl;
+
+    start_api = std::chrono::high_resolution_clock::now();
+    for (int i=0; i < repeat; ++i) {
+      status_code = rsmi_dev_metrics_temp_mem_get(dv_ind, &val_ui16);
+    }
+    stop_api = std::chrono::high_resolution_clock::now();
+    duration_api = std::chrono::duration_cast<std::chrono::microseconds>(stop_api - start_api);
+    if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS){
+      skip = true;
+    }
+    if (!skip) {
+      std::cout << "\rsmi_dev_metrics_temp_mem_get() execution time: "
+                << (float(duration_api.count()) / repeat) << " microseconds" << std::endl;
+      EXPECT_LT(duration_api.count(), 500 * repeat);
+    }
+    skip = false;
+    std::cout << "----------------------------------------------------------------------------" << std::endl;
+
+    start_api = std::chrono::high_resolution_clock::now();
+    for (int i=0; i < repeat; ++i) {
+      status_code = rsmi_dev_metrics_temp_vrgfx_get(dv_ind, &val_ui16);
+    }
+    stop_api = std::chrono::high_resolution_clock::now();
+    duration_api = std::chrono::duration_cast<std::chrono::microseconds>(stop_api - start_api);
+    if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS){
+      skip = true;
+    }
+    if (!skip) {
+      std::cout << "\rsmi_dev_metrics_temp_vrgfx_get() execution time: "
+                << (float(duration_api.count()) / repeat) << " microseconds" << std::endl;
+      EXPECT_LT(duration_api.count(), 500 * repeat);
+    }
+    skip = false;
+    std::cout << "----------------------------------------------------------------------------" << std::endl;
+
+    start_api = std::chrono::high_resolution_clock::now();
+    for (int i=0; i < repeat; ++i) {
+      status_code = rsmi_dev_metrics_temp_vrsoc_get(dv_ind, &val_ui16);
+    }
+    stop_api = std::chrono::high_resolution_clock::now();
+    duration_api = std::chrono::duration_cast<std::chrono::microseconds>(stop_api - start_api);
+    if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS){
+      skip = true;
+    }
+    if (!skip) {
+      std::cout << "\rsmi_dev_metrics_temp_vrsoc_get() execution time: "
+                << (float(duration_api.count()) / repeat) << " microseconds" << std::endl;
+      EXPECT_LT(duration_api.count(), 500 * repeat);
+    }
+    skip = false;
+    std::cout << "----------------------------------------------------------------------------" << std::endl;
+
+    start_api = std::chrono::high_resolution_clock::now();
+    for (int i=0; i < repeat; ++i) {
+      status_code = rsmi_dev_metrics_temp_vrmem_get(dv_ind, &val_ui16);
+    }
+    stop_api = std::chrono::high_resolution_clock::now();
+    duration_api = std::chrono::duration_cast<std::chrono::microseconds>(stop_api - start_api);
+    if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS){
+      skip = true;
+    }
+    if (!skip) {
+      std::cout << "\rsmi_dev_metrics_temp_vrmem_get() execution time: "
+                << (float(duration_api.count()) / repeat) << " microseconds" << std::endl;
+      EXPECT_LT(duration_api.count(), 500 * repeat);
+    }
+    skip = false;
+    std::cout << "----------------------------------------------------------------------------" << std::endl;
+
+    start_api = std::chrono::high_resolution_clock::now();
+    for (int i=0; i < repeat; ++i) {
+      status_code = rsmi_dev_metrics_temp_hbm_get(dv_ind, &temp_hbm_values);
+    }
+    stop_api = std::chrono::high_resolution_clock::now();
+    duration_api = std::chrono::duration_cast<std::chrono::microseconds>(stop_api - start_api);
+    if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS){
+      skip = true;
+    }
+    if (!skip) {
+      std::cout << "\rsmi_dev_metrics_temp_hbm_get() execution time: "
+                << (float(duration_api.count()) / repeat) << " microseconds" << std::endl;
+      EXPECT_LT(duration_api.count(), 500 * repeat);
+    }
+    skip = false;
+    std::cout << "----------------------------------------------------------------------------" << std::endl;
+
+    start_api = std::chrono::high_resolution_clock::now();
+    for (int i=0; i < repeat; ++i) {
+      status_code = rsmi_dev_metrics_curr_socket_power_get(dv_ind, &val_ui16);
+    }
+    stop_api = std::chrono::high_resolution_clock::now();
+    duration_api = std::chrono::duration_cast<std::chrono::microseconds>(stop_api - start_api);
+    if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS){
+      skip = true;
+    }
+    if (!skip) {
+      std::cout << "\rsmi_dev_metrics_curr_socket_power_get() execution time: "
+                << (float(duration_api.count()) / repeat) << " microseconds" << std::endl;
+      EXPECT_LT(duration_api.count(), 500 * repeat);
+    }
+    skip = false;
+    std::cout << "----------------------------------------------------------------------------" << std::endl;
+
+    start_api = std::chrono::high_resolution_clock::now();
+    for (int i=0; i < repeat; ++i) {
+      status_code = rsmi_dev_metrics_energy_acc_get(dv_ind, &val_ui64);
+    }
+    stop_api = std::chrono::high_resolution_clock::now();
+    duration_api = std::chrono::duration_cast<std::chrono::microseconds>(stop_api - start_api);
+    if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS){
+      skip = true;
+    }
+    if (!skip) {
+      std::cout << "\rsmi_dev_metrics_energy_acc_get() execution time: "
+                << (float(duration_api.count()) / repeat) << " microseconds" << std::endl;
+      EXPECT_LT(duration_api.count(), 500 * repeat);
+    }
+    skip = false;
+    std::cout << "----------------------------------------------------------------------------" << std::endl;
+
+    start_api = std::chrono::high_resolution_clock::now();
+    for (int i=0; i < repeat; ++i) {
+      status_code = rsmi_dev_metrics_avg_socket_power_get(dv_ind, &val_ui16);
+    }
+    stop_api = std::chrono::high_resolution_clock::now();
+    duration_api = std::chrono::duration_cast<std::chrono::microseconds>(stop_api - start_api);
+    if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS){
+      skip = true;
+    }
+    if (!skip) {
+      std::cout << "\rsmi_dev_metrics_avg_socket_power_get() execution time: "
+                << (float(duration_api.count()) / repeat) << " microseconds" << std::endl;
+      EXPECT_LT(duration_api.count(), 500 * repeat);
+    }
+    skip = false;
+    std::cout << "----------------------------------------------------------------------------" << std::endl;
+
+    start_api = std::chrono::high_resolution_clock::now();
+    for (int i=0; i < repeat; ++i) {
+      status_code = rsmi_dev_metrics_avg_gfx_activity_get(dv_ind, &val_ui16);
+    }
+    stop_api = std::chrono::high_resolution_clock::now();
+    duration_api = std::chrono::duration_cast<std::chrono::microseconds>(stop_api - start_api);
+    if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS){
+      skip = true;
+    }
+    if (!skip) {
+      std::cout << "\rsmi_dev_metrics_avg_gfx_activity_get() execution time: "
+                << (float(duration_api.count()) / repeat) << " microseconds" << std::endl;
+      EXPECT_LT(duration_api.count(), 500 * repeat);
+    }
+    skip = false;
+    std::cout << "----------------------------------------------------------------------------" << std::endl;
+
+    start_api = std::chrono::high_resolution_clock::now();
+    for (int i=0; i < repeat; ++i) {
+      status_code = rsmi_dev_metrics_avg_umc_activity_get(dv_ind, &val_ui16);
+    }
+    stop_api = std::chrono::high_resolution_clock::now();
+    duration_api = std::chrono::duration_cast<std::chrono::microseconds>(stop_api - start_api);
+    if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS){
+      skip = true;
+    }
+    if (!skip) {
+      std::cout << "\rsmi_dev_metrics_avg_umc_activity_get() execution time: "
+                << (float(duration_api.count()) / repeat) << " microseconds" << std::endl;
+      EXPECT_LT(duration_api.count(), 500 * repeat);
+    }
+    skip = false;
+    std::cout << "----------------------------------------------------------------------------" << std::endl;
+
+    start_api = std::chrono::high_resolution_clock::now();
+    for (int i=0; i < repeat; ++i) {
+      status_code = rsmi_dev_metrics_avg_mm_activity_get(dv_ind, &val_ui16);
+    }
+    stop_api = std::chrono::high_resolution_clock::now();
+    duration_api = std::chrono::duration_cast<std::chrono::microseconds>(stop_api - start_api);
+    if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS){
+      skip = true;
+    }
+    if (!skip) {
+      std::cout << "\rsmi_dev_metrics_avg_mm_activity_get() execution time: "
+                << (float(duration_api.count()) / repeat) << " microseconds" << std::endl;
+      EXPECT_LT(duration_api.count(), 500 * repeat);
+    }
+    skip = false;
+    std::cout << "----------------------------------------------------------------------------" << std::endl;
+
+    start_api = std::chrono::high_resolution_clock::now();
+    for (int i=0; i < repeat; ++i) {
+      status_code = rsmi_dev_metrics_vcn_activity_get(dv_ind, &temp_vcn_values);
+    }
+    stop_api = std::chrono::high_resolution_clock::now();
+    duration_api = std::chrono::duration_cast<std::chrono::microseconds>(stop_api - start_api);
+    if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS){
+      skip = true;
+    }
+    if (!skip) {
+      std::cout << "\rsmi_dev_metrics_vcn_activity_get() execution time: "
+                << (float(duration_api.count()) / repeat) << " microseconds" << std::endl;
+      EXPECT_LT(duration_api.count(), 500 * repeat);
+    }
+    skip = false;
+    std::cout << "----------------------------------------------------------------------------" << std::endl;
+
+    start_api = std::chrono::high_resolution_clock::now();
+    for (int i=0; i < repeat; ++i) {
+      status_code = rsmi_dev_metrics_mem_activity_acc_get(dv_ind, &val_ui32);
+    }
+    stop_api = std::chrono::high_resolution_clock::now();
+    duration_api = std::chrono::duration_cast<std::chrono::microseconds>(stop_api - start_api);
+    if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS){
+      skip = true;
+    }
+    if (!skip) {
+      std::cout << "\rsmi_dev_metrics_mem_activity_acc_get() execution time: "
+                << (float(duration_api.count()) / repeat) << " microseconds" << std::endl;
+      EXPECT_LT(duration_api.count(), 500 * repeat);
+    }
+    skip = false;
+    std::cout << "----------------------------------------------------------------------------" << std::endl;
+
+    start_api = std::chrono::high_resolution_clock::now();
+    for (int i=0; i < repeat; ++i) {
+      status_code = rsmi_dev_metrics_gfx_activity_acc_get(dv_ind, &val_ui32);
+    }
+    stop_api = std::chrono::high_resolution_clock::now();
+    duration_api = std::chrono::duration_cast<std::chrono::microseconds>(stop_api - start_api);
+    if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS){
+      skip = true;
+    }
+    if (!skip) {
+      std::cout << "\rsmi_dev_metrics_gfx_activity_acc_get() execution time: "
+                << (float(duration_api.count()) / repeat) << " microseconds" << std::endl;
+      EXPECT_LT(duration_api.count(), 500 * repeat);
+    }
+    skip = false;
+    std::cout << "----------------------------------------------------------------------------" << std::endl;
+
+    start_api = std::chrono::high_resolution_clock::now();
+    for (int i=0; i < repeat; ++i) {
+      status_code = rsmi_dev_metrics_avg_gfx_clock_frequency_get(dv_ind, &val_ui16);
+    }
+    stop_api = std::chrono::high_resolution_clock::now();
+    duration_api = std::chrono::duration_cast<std::chrono::microseconds>(stop_api - start_api);
+    if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS){
+      skip = true;
+    }
+    if (!skip) {
+      std::cout << "\rsmi_dev_metrics_avg_gfx_clock_frequency_get() execution time: "
+                << (float(duration_api.count()) / repeat) << " microseconds" << std::endl;
+      EXPECT_LT(duration_api.count(), 500 * repeat);
+    }
+    skip = false;
+    std::cout << "----------------------------------------------------------------------------" << std::endl;
+
+    start_api = std::chrono::high_resolution_clock::now();
+    for (int i=0; i < repeat; ++i) {
+      status_code = rsmi_dev_metrics_avg_soc_clock_frequency_get(dv_ind, &val_ui16);
+    }
+    stop_api = std::chrono::high_resolution_clock::now();
+    duration_api = std::chrono::duration_cast<std::chrono::microseconds>(stop_api - start_api);
+    if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS){
+      skip = true;
+    }
+    if (!skip) {
+      std::cout << "\rsmi_dev_metrics_avg_soc_clock_frequency_get() execution time: "
+                << (float(duration_api.count()) / repeat) << " microseconds" << std::endl;
+      EXPECT_LT(duration_api.count(), 500 * repeat);
+    }
+    skip = false;
+    std::cout << "----------------------------------------------------------------------------" << std::endl;
+
+    start_api = std::chrono::high_resolution_clock::now();
+    for (int i=0; i < repeat; ++i) {
+      status_code = rsmi_dev_metrics_avg_uclock_frequency_get(dv_ind, &val_ui16);
+    }
+    stop_api = std::chrono::high_resolution_clock::now();
+    duration_api = std::chrono::duration_cast<std::chrono::microseconds>(stop_api - start_api);
+    if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS){
+      skip = true;
+    }
+    if (!skip) {
+      std::cout << "\rsmi_dev_metrics_avg_uclock_frequency_get() execution time: "
+                << (float(duration_api.count()) / repeat) << " microseconds" << std::endl;
+      EXPECT_LT(duration_api.count(), 500 * repeat);
+    }
+    skip = false;
+    std::cout << "----------------------------------------------------------------------------" << std::endl;
+
+    start_api = std::chrono::high_resolution_clock::now();
+    for (int i=0; i < repeat; ++i) {
+      status_code = rsmi_dev_metrics_avg_vclock0_frequency_get(dv_ind, &val_ui16);
+    }
+    stop_api = std::chrono::high_resolution_clock::now();
+    duration_api = std::chrono::duration_cast<std::chrono::microseconds>(stop_api - start_api);
+    if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS){
+      skip = true;
+    }
+    if (!skip) {
+      std::cout << "\rsmi_dev_metrics_avg_vclock0_frequency_get() execution time: "
+                << (float(duration_api.count()) / repeat) << " microseconds" << std::endl;
+      EXPECT_LT(duration_api.count(), 500 * repeat);
+    }
+    skip = false;
+    std::cout << "----------------------------------------------------------------------------" << std::endl;
+
+    start_api = std::chrono::high_resolution_clock::now();
+    for (int i=0; i < repeat; ++i) {
+      status_code = rsmi_dev_metrics_avg_dclock0_frequency_get(dv_ind, &val_ui16);
+    }
+    stop_api = std::chrono::high_resolution_clock::now();
+    duration_api = std::chrono::duration_cast<std::chrono::microseconds>(stop_api - start_api);
+    if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS){
+      skip = true;
+    }
+    if (!skip) {
+      std::cout << "\rsmi_dev_metrics_avg_dclock0_frequency_get() execution time: "
+                << (float(duration_api.count()) / repeat) << " microseconds" << std::endl;
+      EXPECT_LT(duration_api.count(), 500 * repeat);
+    }
+    skip = false;
+    std::cout << "----------------------------------------------------------------------------" << std::endl;
+
+    start_api = std::chrono::high_resolution_clock::now();
+    for (int i=0; i < repeat; ++i) {
+      status_code = rsmi_dev_metrics_avg_vclock1_frequency_get(dv_ind, &val_ui16);
+    }
+    stop_api = std::chrono::high_resolution_clock::now();
+    duration_api = std::chrono::duration_cast<std::chrono::microseconds>(stop_api - start_api);
+    if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS){
+      skip = true;
+    }
+    if (!skip) {
+      std::cout << "\rsmi_dev_metrics_avg_vclock1_frequency_get() execution time: "
+                << (float(duration_api.count()) / repeat) << " microseconds" << std::endl;
+      EXPECT_LT(duration_api.count(), 500 * repeat);
+    }
+    skip = false;
+    std::cout << "----------------------------------------------------------------------------" << std::endl;
+
+    start_api = std::chrono::high_resolution_clock::now();
+    for (int i=0; i < repeat; ++i) {
+      status_code = rsmi_dev_metrics_avg_dclock1_frequency_get(dv_ind, &val_ui16);
+    }
+    stop_api = std::chrono::high_resolution_clock::now();
+    duration_api = std::chrono::duration_cast<std::chrono::microseconds>(stop_api - start_api);
+    if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS){
+      skip = true;
+    }
+    if (!skip) {
+      std::cout << "\rsmi_dev_metrics_avg_dclock1_frequency_get() execution time: "
+                << (float(duration_api.count()) / repeat) << " microseconds" << std::endl;
+      EXPECT_LT(duration_api.count(), 500 * repeat);
+    }
+    skip = false;
+    std::cout << "----------------------------------------------------------------------------" << std::endl;
+
+    start_api = std::chrono::high_resolution_clock::now();
+    for (int i=0; i < repeat; ++i) {
+      status_code = rsmi_dev_metrics_curr_vclk1_get(dv_ind, &val_ui16);
+    }
+    stop_api = std::chrono::high_resolution_clock::now();
+    duration_api = std::chrono::duration_cast<std::chrono::microseconds>(stop_api - start_api);
+    if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS){
+      skip = true;
+    }
+    if (!skip) {
+      std::cout << "\rsmi_dev_metrics_curr_vclk1_get() execution time: "
+                << (float(duration_api.count()) / repeat) << " microseconds" << std::endl;
+      EXPECT_LT(duration_api.count(), 500 * repeat);
+    }
+    skip = false;
+    std::cout << "----------------------------------------------------------------------------" << std::endl;
+
+    start_api = std::chrono::high_resolution_clock::now();
+    for (int i=0; i < repeat; ++i) {
+      status_code = rsmi_dev_metrics_curr_dclk1_get(dv_ind, &val_ui16);
+    }
+    stop_api = std::chrono::high_resolution_clock::now();
+    duration_api = std::chrono::duration_cast<std::chrono::microseconds>(stop_api - start_api);
+    if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS){
+      skip = true;
+    }
+    if (!skip) {
+      std::cout << "\rsmi_dev_metrics_curr_dclk1_get() execution time: "
+                << (float(duration_api.count()) / repeat) << " microseconds" << std::endl;
+      EXPECT_LT(duration_api.count(), 500 * repeat);
+    }
+    skip = false;
+    std::cout << "----------------------------------------------------------------------------" << std::endl;
+
+    start_api = std::chrono::high_resolution_clock::now();
+    for (int i=0; i < repeat; ++i) {
+      status_code = rsmi_dev_metrics_curr_uclk_get(dv_ind, &val_ui16);
+    }
+    stop_api = std::chrono::high_resolution_clock::now();
+    duration_api = std::chrono::duration_cast<std::chrono::microseconds>(stop_api - start_api);
+    if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS){
+      skip = true;
+    }
+    if (!skip) {
+      std::cout << "\rsmi_dev_metrics_curr_uclk_get() execution time: "
+                << (float(duration_api.count()) / repeat) << " microseconds" << std::endl;
+      EXPECT_LT(duration_api.count(), 500 * repeat);
+    }
+    skip = false;
+    std::cout << "----------------------------------------------------------------------------" << std::endl;
+
+    start_api = std::chrono::high_resolution_clock::now();
+    for (int i=0; i < repeat; ++i) {
+      status_code = rsmi_dev_metrics_curr_dclk0_get(dv_ind, &temp_curr_dclk0_values);
+    }
+    stop_api = std::chrono::high_resolution_clock::now();
+    duration_api = std::chrono::duration_cast<std::chrono::microseconds>(stop_api - start_api);
+    if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS){
+      skip = true;
+    }
+    if (!skip) {
+      std::cout << "\rsmi_dev_metrics_curr_dclk0_get() execution time: "
+                << (float(duration_api.count()) / repeat) << " microseconds" << std::endl;
+      EXPECT_LT(duration_api.count(), 500 * repeat);
+    }
+    skip = false;
+    std::cout << "----------------------------------------------------------------------------" << std::endl;
+
+    start_api = std::chrono::high_resolution_clock::now();
+    for (int i=0; i < repeat; ++i) {
+      status_code = rsmi_dev_metrics_curr_gfxclk_get(dv_ind, &temp_curr_gfxclk_values);
+    }
+    stop_api = std::chrono::high_resolution_clock::now();
+    duration_api = std::chrono::duration_cast<std::chrono::microseconds>(stop_api - start_api);
+    if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS){
+      skip = true;
+    }
+    if (!skip) {
+      std::cout << "\rsmi_dev_metrics_curr_gfxclk_get() execution time: "
+                << (float(duration_api.count()) / repeat) << " microseconds" << std::endl;
+      EXPECT_LT(duration_api.count(), 500 * repeat);
+    }
+    skip = false;
+    std::cout << "----------------------------------------------------------------------------" << std::endl;
+
+    start_api = std::chrono::high_resolution_clock::now();
+    for (int i=0; i < repeat; ++i) {
+      status_code = rsmi_dev_metrics_curr_socclk_get(dv_ind, &temp_curr_socclk_values);
+    }
+    stop_api = std::chrono::high_resolution_clock::now();
+    duration_api = std::chrono::duration_cast<std::chrono::microseconds>(stop_api - start_api);
+    if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS){
+      skip = true;
+    }
+    if (!skip) {
+      std::cout << "\rsmi_dev_metrics_curr_socclk_get() execution time: "
+                << (float(duration_api.count()) / repeat) << " microseconds" << std::endl;
+      EXPECT_LT(duration_api.count(), 500 * repeat);
+    }
+    skip = false;
+    std::cout << "----------------------------------------------------------------------------" << std::endl;
+
+    start_api = std::chrono::high_resolution_clock::now();
+    for (int i=0; i < repeat; ++i) {
+      status_code = rsmi_dev_metrics_curr_vclk0_get(dv_ind, &temp_curr_vclk0_values);
+    }
+    stop_api = std::chrono::high_resolution_clock::now();
+    duration_api = std::chrono::duration_cast<std::chrono::microseconds>(stop_api - start_api);
+    if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS){
+      skip = true;
+    }
+    if (!skip) {
+      std::cout << "\rsmi_dev_metrics_curr_vclk0_get() execution time: "
+                << (float(duration_api.count()) / repeat) << " microseconds" << std::endl;
+      EXPECT_LT(duration_api.count(), 500 * repeat);
+    }
+    skip = false;
+    std::cout << "----------------------------------------------------------------------------" << std::endl;
+
+    start_api = std::chrono::high_resolution_clock::now();
+    for (int i=0; i < repeat; ++i) {
+      status_code = rsmi_dev_metrics_indep_throttle_status_get(dv_ind, &val_ui64);
+    }
+    stop_api = std::chrono::high_resolution_clock::now();
+    duration_api = std::chrono::duration_cast<std::chrono::microseconds>(stop_api - start_api);
+    if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS){
+      skip = true;
+    }
+    if (!skip) {
+      std::cout << "\rsmi_dev_metrics_indep_throttle_status_get() execution time: "
+                << (float(duration_api.count()) / repeat) << " microseconds" << std::endl;
+      EXPECT_LT(duration_api.count(), 500 * repeat);
+    }
+    skip = false;
+    std::cout << "----------------------------------------------------------------------------" << std::endl;
+
+    start_api = std::chrono::high_resolution_clock::now();
+    for (int i=0; i < repeat; ++i) {
+      status_code = rsmi_dev_metrics_throttle_status_get(dv_ind, &val_ui32);
+    }
+    stop_api = std::chrono::high_resolution_clock::now();
+    duration_api = std::chrono::duration_cast<std::chrono::microseconds>(stop_api - start_api);
+    if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS){
+      skip = true;
+    }
+    if (!skip) {
+      std::cout << "\rsmi_dev_metrics_throttle_status_get() execution time: "
+                << (float(duration_api.count()) / repeat) << " microseconds" << std::endl;
+      EXPECT_LT(duration_api.count(), 500 * repeat);
+    }
+    skip = false;
+    std::cout << "----------------------------------------------------------------------------" << std::endl;
+
+    start_api = std::chrono::high_resolution_clock::now();
+    for (int i=0; i < repeat; ++i) {
+      status_code = rsmi_dev_metrics_gfxclk_lock_status_get(dv_ind, &val_ui32);
+    }
+    stop_api = std::chrono::high_resolution_clock::now();
+    duration_api = std::chrono::duration_cast<std::chrono::microseconds>(stop_api - start_api);
+    if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS){
+      skip = true;
+    }
+    if (!skip) {
+      std::cout << "\rsmi_dev_metrics_gfxclk_lock_status_get() execution time: "
+                << (float(duration_api.count()) / repeat) << " microseconds" << std::endl;
+      EXPECT_LT(duration_api.count(), 500 * repeat);
+    }
+    skip = false;
+    std::cout << "----------------------------------------------------------------------------" << std::endl;
+
+    start_api = std::chrono::high_resolution_clock::now();
+    for (int i=0; i < repeat; ++i) {
+      status_code = rsmi_dev_metrics_curr_fan_speed_get(dv_ind, &val_ui16);
+    }
+    stop_api = std::chrono::high_resolution_clock::now();
+    duration_api = std::chrono::duration_cast<std::chrono::microseconds>(stop_api - start_api);
+    if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS){
+      skip = true;
+    }
+    if (!skip) {
+      std::cout << "\rsmi_dev_metrics_curr_fan_speed_get() execution time: "
+                << (float(duration_api.count()) / repeat) << " microseconds" << std::endl;
+      EXPECT_LT(duration_api.count(), 500 * repeat);
+    }
+    skip = false;
+    std::cout << "----------------------------------------------------------------------------" << std::endl;
+
+    start_api = std::chrono::high_resolution_clock::now();
+    for (int i=0; i < repeat; ++i) {
+      status_code = rsmi_dev_metrics_pcie_link_width_get(dv_ind, &val_ui16);
+    }
+    stop_api = std::chrono::high_resolution_clock::now();
+    duration_api = std::chrono::duration_cast<std::chrono::microseconds>(stop_api - start_api);
+    if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS){
+      skip = true;
+    }
+    if (!skip) {
+      std::cout << "\rsmi_dev_metrics_pcie_link_width_get() execution time: "
+                << (float(duration_api.count()) / repeat) << " microseconds" << std::endl;
+      EXPECT_LT(duration_api.count(), 500 * repeat);
+    }
+    skip = false;
+    std::cout << "----------------------------------------------------------------------------" << std::endl;
+
+    start_api = std::chrono::high_resolution_clock::now();
+    for (int i=0; i < repeat; ++i) {
+      status_code = rsmi_dev_metrics_pcie_link_speed_get(dv_ind, &val_ui16);
+    }
+    stop_api = std::chrono::high_resolution_clock::now();
+    duration_api = std::chrono::duration_cast<std::chrono::microseconds>(stop_api - start_api);
+    if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS){
+      skip = true;
+    }
+    if (!skip) {
+      std::cout << "\rsmi_dev_metrics_pcie_link_speed_get() execution time: "
+                << (float(duration_api.count()) / repeat) << " microseconds" << std::endl;
+      EXPECT_LT(duration_api.count(), 500 * repeat);
+    }
+    skip = false;
+    std::cout << "----------------------------------------------------------------------------" << std::endl;
+
+    start_api = std::chrono::high_resolution_clock::now();
+    for (int i=0; i < repeat; ++i) {
+      status_code = rsmi_dev_metrics_pcie_bandwidth_acc_get(dv_ind, &val_ui64);
+    }
+    stop_api = std::chrono::high_resolution_clock::now();
+    duration_api = std::chrono::duration_cast<std::chrono::microseconds>(stop_api - start_api);
+    if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS){
+      skip = true;
+    }
+    if (!skip) {
+      std::cout << "\rsmi_dev_metrics_pcie_bandwidth_acc_get() execution time: "
+                << (float(duration_api.count()) / repeat) << " microseconds" << std::endl;
+      EXPECT_LT(duration_api.count(), 500 * repeat);
+    }
+    skip = false;
+    std::cout << "----------------------------------------------------------------------------" << std::endl;
+
+    start_api = std::chrono::high_resolution_clock::now();
+    for (int i=0; i < repeat; ++i) {
+      status_code = rsmi_dev_metrics_pcie_bandwidth_inst_get(dv_ind, &val_ui64);
+    }
+    stop_api = std::chrono::high_resolution_clock::now();
+    duration_api = std::chrono::duration_cast<std::chrono::microseconds>(stop_api - start_api);
+    if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS){
+      skip = true;
+    }
+    if (!skip) {
+      std::cout << "\rsmi_dev_metrics_pcie_bandwidth_inst_get() execution time: "
+                << (float(duration_api.count()) / repeat) << " microseconds" << std::endl;
+      EXPECT_LT(duration_api.count(), 500 * repeat);
+    }
+    skip = false;
+    std::cout << "----------------------------------------------------------------------------" << std::endl;
+
+    start_api = std::chrono::high_resolution_clock::now();
+    for (int i=0; i < repeat; ++i) {
+      status_code = rsmi_dev_metrics_pcie_l0_recov_count_acc_get(dv_ind, &val_ui64);
+    }
+    stop_api = std::chrono::high_resolution_clock::now();
+    duration_api = std::chrono::duration_cast<std::chrono::microseconds>(stop_api - start_api);
+    if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS){
+      skip = true;
+    }
+    if (!skip) {
+      std::cout << "\rsmi_dev_metrics_pcie_l0_recov_count_acc_get() execution time: "
+                << (float(duration_api.count()) / repeat) << " microseconds" << std::endl;
+      EXPECT_LT(duration_api.count(), 500 * repeat);
+    }
+    skip = false;
+    std::cout << "----------------------------------------------------------------------------" << std::endl;
+
+    start_api = std::chrono::high_resolution_clock::now();
+    for (int i=0; i < repeat; ++i) {
+      status_code = rsmi_dev_metrics_pcie_replay_count_acc_get(dv_ind, &val_ui64);
+    }
+    stop_api = std::chrono::high_resolution_clock::now();
+    duration_api = std::chrono::duration_cast<std::chrono::microseconds>(stop_api - start_api);
+    if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS){
+      skip = true;
+    }
+    if (!skip) {
+      std::cout << "\rsmi_dev_metrics_pcie_replay_count_acc_get() execution time: "
+                << (float(duration_api.count()) / repeat) << " microseconds" << std::endl;
+      EXPECT_LT(duration_api.count(), 500 * repeat);
+    }
+    skip = false;
+    std::cout << "----------------------------------------------------------------------------" << std::endl;
+
+    start_api = std::chrono::high_resolution_clock::now();
+    for (int i=0; i < repeat; ++i) {
+      status_code = rsmi_dev_metrics_pcie_replay_rover_count_acc_get(dv_ind, &val_ui64);
+    }
+    stop_api = std::chrono::high_resolution_clock::now();
+    duration_api = std::chrono::duration_cast<std::chrono::microseconds>(stop_api - start_api);
+    if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS){
+      skip = true;
+    }
+    if (!skip) {
+      std::cout << "\rsmi_dev_metrics_pcie_replay_rover_count_acc_get() execution time: "
+                << (float(duration_api.count()) / repeat) << " microseconds" << std::endl;
+      EXPECT_LT(duration_api.count(), 500 * repeat);
+    }
+    skip = false;
+    std::cout << "----------------------------------------------------------------------------" << std::endl;
+
+    start_api = std::chrono::high_resolution_clock::now();
+    for (int i=0; i < repeat; ++i) {
+      status_code = rsmi_dev_metrics_xgmi_link_width_get(dv_ind, &val_ui16);
+    }
+    stop_api = std::chrono::high_resolution_clock::now();
+    duration_api = std::chrono::duration_cast<std::chrono::microseconds>(stop_api - start_api);
+    if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS){
+      skip = true;
+    }
+    if (!skip) {
+      std::cout << "\rsmi_dev_metrics_xgmi_link_width_get() execution time: "
+                << (float(duration_api.count()) / repeat) << " microseconds" << std::endl;
+      EXPECT_LT(duration_api.count(), 500 * repeat);
+    }
+    skip = false;
+    std::cout << "----------------------------------------------------------------------------" << std::endl;
+
+    start_api = std::chrono::high_resolution_clock::now();
+    for (int i=0; i < repeat; ++i) {
+      status_code = rsmi_dev_metrics_xgmi_link_speed_get(dv_ind, &val_ui16);
+    }
+    stop_api = std::chrono::high_resolution_clock::now();
+    duration_api = std::chrono::duration_cast<std::chrono::microseconds>(stop_api - start_api);
+    if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS){
+      skip = true;
+    }
+    if (!skip) {
+      std::cout << "\rsmi_dev_metrics_xgmi_link_speed_get() execution time: "
+                << (float(duration_api.count()) / repeat) << " microseconds" << std::endl;
+      EXPECT_LT(duration_api.count(), 500 * repeat);
+    }
+    skip = false;
+    std::cout << "----------------------------------------------------------------------------" << std::endl;
+
+    start_api = std::chrono::high_resolution_clock::now();
+    for (int i=0; i < repeat; ++i) {
+      status_code = rsmi_dev_metrics_xgmi_read_data_get(dv_ind, &temp_xgmi_read_values);
+    }
+    stop_api = std::chrono::high_resolution_clock::now();
+    duration_api = std::chrono::duration_cast<std::chrono::microseconds>(stop_api - start_api);
+    if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS){
+      skip = true;
+    }
+    if (!skip) {
+      std::cout << "\rsmi_dev_metrics_xgmi_read_data_get() execution time: "
+                << (float(duration_api.count()) / repeat) << " microseconds" << std::endl;
+      EXPECT_LT(duration_api.count(), 500 * repeat);
+    }
+    skip = false;
+    std::cout << "----------------------------------------------------------------------------" << std::endl;
+
+    start_api = std::chrono::high_resolution_clock::now();
+    for (int i=0; i < repeat; ++i) {
+      status_code = rsmi_dev_metrics_xgmi_write_data_get(dv_ind, &temp_xgmi_write_values);
+    }
+    stop_api = std::chrono::high_resolution_clock::now();
+    duration_api = std::chrono::duration_cast<std::chrono::microseconds>(stop_api - start_api);
+    if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS){
+      skip = true;
+    }
+    if (!skip) {
+      std::cout << "\rsmi_dev_metrics_xgmi_write_data_get() execution time: "
+                << (float(duration_api.count()) / repeat) << " microseconds" << std::endl;
+      EXPECT_LT(duration_api.count(), 500 * repeat);
+    }
+    skip = false;
+    std::cout << "----------------------------------------------------------------------------" << std::endl;
+
+    start_api = std::chrono::high_resolution_clock::now();
+    for (int i=0; i < repeat; ++i) {
+      status_code = rsmi_dev_metrics_volt_soc_get(dv_ind, &val_ui16);
+    }
+    stop_api = std::chrono::high_resolution_clock::now();
+    duration_api = std::chrono::duration_cast<std::chrono::microseconds>(stop_api - start_api);
+    if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS){
+      skip = true;
+    }
+    if (!skip) {
+      std::cout << "\rsmi_dev_metrics_volt_soc_get() execution time: "
+                << (float(duration_api.count()) / repeat) << " microseconds" << std::endl;
+      EXPECT_LT(duration_api.count(), 500 * repeat);
+    }
+    skip = false;
+    std::cout << "----------------------------------------------------------------------------" << std::endl;
+
+    start_api = std::chrono::high_resolution_clock::now();
+    for (int i=0; i < repeat; ++i) {
+      status_code = rsmi_dev_metrics_volt_gfx_get(dv_ind, &val_ui16);
+    }
+    stop_api = std::chrono::high_resolution_clock::now();
+    duration_api = std::chrono::duration_cast<std::chrono::microseconds>(stop_api - start_api);
+    if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS){
+      skip = true;
+    }
+    if (!skip) {
+      std::cout << "\rsmi_dev_metrics_volt_gfx_get() execution time: "
+                << (float(duration_api.count()) / repeat) << " microseconds" << std::endl;
+      EXPECT_LT(duration_api.count(), 500 * repeat);
+    }
+    skip = false;
+    std::cout << "----------------------------------------------------------------------------" << std::endl;
+
+    start_api = std::chrono::high_resolution_clock::now();
+    for (int i=0; i < repeat; ++i) {
+      status_code = rsmi_dev_metrics_volt_mem_get(dv_ind, &val_ui16);
+    }
+    stop_api = std::chrono::high_resolution_clock::now();
+    duration_api = std::chrono::duration_cast<std::chrono::microseconds>(stop_api - start_api);
+    if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS){
+      skip = true;
+    }
+    if (!skip) {
+      std::cout << "\rsmi_dev_metrics_volt_mem_get() execution time: "
+                << (float(duration_api.count()) / repeat) << " microseconds" << std::endl;
+      EXPECT_LT(duration_api.count(), 500 * repeat);
+    }
+    skip = false;
+    std::cout << "----------------------------------------------------------------------------" << std::endl;
+
+    start_api = std::chrono::high_resolution_clock::now();
+    for (int i=0; i < repeat; ++i) {
+      status_code = rsmi_dev_metrics_system_clock_counter_get(dv_ind, &val_ui64);
+    }
+    stop_api = std::chrono::high_resolution_clock::now();
+    duration_api = std::chrono::duration_cast<std::chrono::microseconds>(stop_api - start_api);
+    if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS){
+      skip = true;
+    }
+    if (!skip) {
+      std::cout << "\rsmi_dev_metrics_system_clock_counter_get() execution time: "
+                << (float(duration_api.count()) / repeat) << " microseconds" << std::endl;
+      EXPECT_LT(duration_api.count(), 500 * repeat);
+    }
+    skip = false;
+    std::cout << "----------------------------------------------------------------------------" << std::endl;
+
+    start_api = std::chrono::high_resolution_clock::now();
+    for (int i=0; i < repeat; ++i) {
+      status_code = rsmi_dev_metrics_firmware_timestamp_get(dv_ind, &val_ui64);
+    }
+    stop_api = std::chrono::high_resolution_clock::now();
+    duration_api = std::chrono::duration_cast<std::chrono::microseconds>(stop_api - start_api);
+    if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS){
+      skip = true;
+    }
+    if (!skip) {
+      std::cout << "\rsmi_dev_metrics_firmware_timestamp_get() execution time: "
+                << (float(duration_api.count()) / repeat) << " microseconds" << std::endl;
+      EXPECT_LT(duration_api.count(), 500 * repeat);
+    }
+    skip = false;
+    std::cout << "----------------------------------------------------------------------------" << std::endl;
+
+    start_api = std::chrono::high_resolution_clock::now();
+    for (int i=0; i < repeat; ++i) {
+      status_code = rsmi_dev_metrics_xcd_counter_get(dv_ind, &val_ui16);
+    }
+    stop_api = std::chrono::high_resolution_clock::now();
+    duration_api = std::chrono::duration_cast<std::chrono::microseconds>(stop_api - start_api);
+    if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS){
+      skip = true;
+    }
+    if (!skip) {
+      std::cout << "\rsmi_dev_metrics_xcd_counter_get() execution time: "
+                << (float(duration_api.count()) / repeat) << " microseconds" << std::endl;
+      EXPECT_LT(duration_api.count(), 500 * repeat);
+    }
+    skip = false;
+    std::cout << "----------------------------------------------------------------------------" << std::endl;
+
+    stop = std::chrono::high_resolution_clock::now();
+    duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
+    if (!skip) {
+      const auto kTOTAL_GPU_METRICS_APIS = uint16_t(52);
+      std::cout << "\rTotal execution time (All APIs): "
+                << (float(duration_api.count()) / repeat) << " microseconds" << std::endl;
+      EXPECT_LT(duration_api.count(), 500 * (repeat * kTOTAL_GPU_METRICS_APIS));
+    }
+    skip = false;
+    std::cout << "============================================================================" << std::endl;
+
+  }
+  std::cout.precision(prev);
+
 }

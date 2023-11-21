@@ -53,6 +53,7 @@
 #include <unordered_set>
 #include <map>
 #include <type_traits>
+#include <optional>
 
 #include "rocm_smi/rocm_smi_monitor.h"
 #include "rocm_smi/rocm_smi_power_mon.h"
@@ -220,7 +221,7 @@ class Device {
     void set_evt_notif_anon_fd(uint32_t fd) {
                                    evt_notif_anon_fd_ = static_cast<int>(fd);}
     int evt_notif_anon_fd(void) const {return evt_notif_anon_fd_;}
-    metrics_table_header_t &gpu_metrics_ver(void) {return gpu_metrics_ver_;}
+
     void fillSupportedFuncs(void);
     void DumpSupportedFunctions(void);
     bool DeviceAPISupported(std::string name, uint64_t variant,
@@ -230,17 +231,15 @@ class Device {
     template <typename T> std::string readBootPartitionState(uint32_t dv_ind);
     rsmi_status_t check_amdgpu_property_reinforcement_query(uint32_t dev_idx, AMDGpuVerbTypes_t verb_type);
 
-    void dev_set_gpu_metric(GpuMetricsBasePtr gpu_metrics_ptr) { m_gpu_metrics_ptr = gpu_metrics_ptr; };
+    void dev_set_gpu_metric(GpuMetricsBasePtr gpu_metrics_ptr) { m_gpu_metrics_ptr = std::move(gpu_metrics_ptr); };
     GpuMetricsBasePtr& dev_get_gpu_metric() { return m_gpu_metrics_ptr; };
     const AMDGpuMetricsHeader_v1_t& dev_get_metrics_header() {return m_gpu_metrics_header; }
     rsmi_status_t setup_gpu_metrics_reading();
     rsmi_status_t dev_read_gpu_metrics_header_data();
     rsmi_status_t dev_read_gpu_metrics_all_data();
-    rsmi_status_t dev_log_gpu_metrics();
     rsmi_status_t run_internal_gpu_metrics_query(AMDGpuMetricsUnitType_t metric_counter, AMDGpuDynamicMetricTblValues_t& values);
-
-    template<typename T>
-    rsmi_status_t dev_run_gpu_metrics_query(AMDGpuMetricsUnitType_t metric_counter, T& metric_value);
+    rsmi_status_t dev_log_gpu_metrics(std::ostringstream& outstream_metrics);
+    AMGpuMetricsPublicLatestTupl_t dev_copy_internal_to_external_metrics();
 
 
  private:
@@ -265,7 +264,6 @@ class Device {
                         bool returnWriteErr = false);
     rsmi_status_t run_amdgpu_property_reinforcement_query(const AMDGpuPropertyQuery_t& amdgpu_property_query);
 
-
     uint64_t bdfid_;
     uint64_t kfd_gpu_id_;
     std::unordered_set<rsmi_event_group_t,
@@ -275,8 +273,6 @@ class Device {
 
     int evt_notif_anon_fd_;
     FILE *evt_notif_anon_file_ptr_;
-
-    struct metrics_table_header_t gpu_metrics_ver_;
 
     GpuMetricsBasePtr m_gpu_metrics_ptr;
     AMDGpuMetricsHeader_v1_t m_gpu_metrics_header;
