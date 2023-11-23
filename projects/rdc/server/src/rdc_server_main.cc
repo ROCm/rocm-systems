@@ -696,12 +696,14 @@ int main(int argc, char** argv) {
 
   rdc_server.Run();
 
-  thr_ret = pthread_cancel(sig_listen_thread);
+  // join the thread to prevent the program terminated
+  void* ret = nullptr;
+  thr_ret = pthread_join(sig_listen_thread, &ret);
 
   // don't fail if it doesn't succeed
-  if (thr_ret) {
+  if (thr_ret != 0) {
     std::cerr <<
-    "Failed to terminate ProcessSignalLoop. pthread_cancel() returned " <<
+    "Failed to terminate ProcessSignalLoop. pthread_join() returned " <<
                                                                       thr_ret;
   }
 
