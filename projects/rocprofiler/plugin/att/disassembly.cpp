@@ -42,6 +42,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include <cassert>
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>

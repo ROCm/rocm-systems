@@ -26,6 +26,7 @@
 
 #include <experimental/filesystem>
 #include <atomic>
+#include <cassert>
 #include <optional>
 #include <thread>
 

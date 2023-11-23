@@ -1,5 +1,7 @@
 #include <hip/hip_runtime.h>
+#include <cassert>
 #include <vector>
+
 #ifdef NDEBUG
 #define HIP_ASSERT(x) x
 #else

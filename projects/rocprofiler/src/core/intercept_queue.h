@@ -28,6 +28,7 @@ THE SOFTWARE.
 #include <sys/syscall.h>
 
 #include <atomic>
+#include <cassert>
 #include <iostream>
 #include <map>
 #include <mutex>
