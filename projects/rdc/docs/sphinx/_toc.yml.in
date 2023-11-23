@@ -17,3 +17,6 @@ subtrees:
 - caption: API Reference
   entries:
   - file: api_ref
+- caption: About
+  entries:
+  - file: license
