@@ -77,10 +77,11 @@ static const char * kDefaultRDCServerCertPemPkiPath =
 static const char * kDefaultRDCClientCACertPemPkiPath =
                                        "/etc/rdc/client/certs/rdc_cacert.pem";
 
+static const char *kDefaultListenAddress = "0.0.0.0";
 static const char *kDefaultListenPort = "50051";
 static const uint32_t kRSMIUMask = 027;
 
-RDCServer::RDCServer() : server_address_("0.0.0.0:"),
+RDCServer::RDCServer() :
     secure_creds_(false), rsmi_service_(nullptr), rdc_admin_service_(nullptr) {
 }
 
@@ -93,6 +94,8 @@ RDCServer::~RDCServer() {
 void
 RDCServer::Initialize(RdcdCmdLineOpts *cl) {
   cmd_line_ = cl;
+  server_address_ = cmd_line_->listen_address;
+  server_address_ += ":";
   server_address_ += cmd_line_->listen_port;
   secure_creds_ = !cmd_line_->no_authentication;
   use_pinned_certs_ = cmd_line_->use_pinned_certs;
@@ -506,6 +509,7 @@ MakeDaemon(bool is_root) {
 //  * optional_argument
 //  * no_argument
 static const struct option long_options[] = {
+  {"address", required_argument, nullptr, 'a'},
   {"port", required_argument, nullptr, 'p'},
   // Any options with optionals args would go here; e.g.,
   // {"start_rdcd", optional_argument, nullptr, 'd'},
@@ -516,11 +520,13 @@ static const struct option long_options[] = {
 
   {nullptr, 0, nullptr, 0}
 };
-static const char* short_options = "p:uidh";
+static const char* short_options = "a:p:uidh";
 
 static void PrintHelp(void) {
   std::cout <<
      "Optional rdctst Arguments:\n"
+     "--address, -a <IPv4 address> specify address on which to listen; "
+         "default is 0.0.0.0\n"
      "--port, -p <port> specify port on which to listen; "
          "default is to listen on port 50051\n"
      "--unauth_comm, -u don't do authentication with communications"
@@ -547,6 +553,15 @@ uint32_t ProcessCmdline(RdcdCmdLineOpts* cmdl_opts,
     }
 
     switch (a) {
+      case 'a':
+        if (!amd::rdc::IsIP(optarg)) {
+          std::cerr << "\"" << optarg <<
+                                "\" is not a valid IP address." << std::endl;
+          return -1;
+        }
+        cmdl_opts->listen_address = optarg;
+        break;
+
       case 'p':
         if (!amd::rdc::IsNumber(optarg)) {
           std::cerr << "\"" << optarg <<
@@ -591,6 +606,7 @@ uint32_t ProcessCmdline(RdcdCmdLineOpts* cmdl_opts,
 
 static void init_cmd_line_opts(RdcdCmdLineOpts *opts) {
   assert(opts != nullptr);
+  opts->listen_address = kDefaultListenAddress;
   opts->listen_port = kDefaultListenPort;
   opts->no_authentication = false;
   opts->use_pinned_certs = false;
@@ -606,7 +622,12 @@ int main(int argc, char** argv) {
   bool is_root = (caller_id == 0);
 
   init_cmd_line_opts(&cmd_line_opts);
-  ProcessCmdline(&cmd_line_opts, argc, argv);
+  auto result = ProcessCmdline(&cmd_line_opts, argc, argv);
+
+  if (result != 0) {
+    std::cerr << "Error occured during ProcessCmdline." << std::endl;
+    return 1;
+  }
 
   // Can read the certificates and private key when authentication.
   if (!cmd_line_opts.no_authentication) {
