@@ -50,6 +50,7 @@ Xml::~Xml()
     if(!map_) return;
     for(auto& [_, nodes] : *map_)
     {
+        (void) _;
         for(auto& node : nodes)
         {
             node->nodes.clear();

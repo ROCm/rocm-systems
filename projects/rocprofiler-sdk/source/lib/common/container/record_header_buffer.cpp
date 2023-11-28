@@ -74,8 +74,10 @@ record_header_buffer::allocate(size_t num_bytes)
 
     auto _lk = rhb_raii_lock{*this};
     m_buffer.init(num_bytes);
-    m_headers.resize(m_buffer.capacity(),
-                     rocprofiler_record_header_t{.hash = 0, .payload = nullptr});
+    rocprofiler_record_header_t record = {};
+    record.hash                        = 0;
+    record.payload                     = nullptr;
+    m_headers.resize(m_buffer.capacity(), record);
     return true;
 }
 
@@ -106,9 +108,15 @@ record_header_buffer::clear()
         auto _sz = m_buffer.capacity();
         if(!m_buffer.clear(std::nothrow_t{})) return 0;
         std::for_each(m_headers.begin(), m_headers.end(), [](auto& itr) {
-            itr = rocprofiler_record_header_t{.hash = 0, .payload = nullptr};
+            rocprofiler_record_header_t record = {};
+            record.hash                        = 0;
+            record.payload                     = nullptr;
+            itr                                = record;
         });
-        m_headers.resize(_sz, rocprofiler_record_header_t{.hash = 0, .payload = nullptr});
+        rocprofiler_record_header_t record = {};
+        record.hash                        = 0;
+        record.payload                     = nullptr;
+        m_headers.resize(_sz, record);
         m_index.store(0, std::memory_order_release);
     }
 

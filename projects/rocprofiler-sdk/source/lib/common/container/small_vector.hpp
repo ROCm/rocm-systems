@@ -233,6 +233,8 @@ protected:
         assert(is_safe_to_reference_after_resize(elt, new_size) &&
                "Attempting to reference an element of the vector in an operation "
                "that invalidates it");
+        (void) elt;
+        (void) new_size;
     }
 
     /// check whether elt will be invalidated by increasing the size of the

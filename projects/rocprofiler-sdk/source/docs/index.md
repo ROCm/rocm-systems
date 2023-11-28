@@ -9,5 +9,9 @@
    about
    features
    installation
+   tool_library_overview
+   callback_tracing
+   buffered_tracing
+   intercept_table
    developer_api
 ```

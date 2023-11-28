@@ -82,6 +82,7 @@ rocprofiler_at_internal_thread_create(rocprofiler_internal_thread_library_cb_t p
 
 /**
  * @brief opaque handle to an internal thread identifier which delivers callbacks for buffers
+ * @see rocprofiler_create_callback_thread
  */
 typedef struct
 {

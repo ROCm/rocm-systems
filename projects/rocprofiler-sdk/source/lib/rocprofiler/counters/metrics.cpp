@@ -24,6 +24,8 @@
 
 #include <rocprofiler/rocprofiler.h>
 
+#include "lib/common/defines.hpp"
+#include "lib/common/filesystem.hpp"
 #include "lib/common/synchronized.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/common/xml.hpp"
@@ -36,7 +38,6 @@
 #include <atomic>
 #include <cstdint>
 #include <cstdlib>
-#include <filesystem>
 #include <optional>
 
 namespace rocprofiler
@@ -143,7 +144,7 @@ findViaInstallPath(const std::string& filename)
     DLOG(INFO) << filename << " is being looked up via install path";
     if(dladdr(reinterpret_cast<const void*>(rocprofiler_query_available_agents), &dl_info) != 0)
     {
-        return std::filesystem::path{dl_info.dli_fname}.parent_path().parent_path() /
+        return common::filesystem::path{dl_info.dli_fname}.parent_path().parent_path() /
                fmt::format("share/rocprofiler/{}", filename);
     }
     return filename;
@@ -155,7 +156,7 @@ findViaEnvironment(const std::string& filename)
     if(const char* metrics_path = nullptr; (metrics_path = getenv("ROCPROFILER_METRICS_PATH")))
     {
         DLOG(INFO) << filename << " is being looked up via env variable ROCPROFILER_METRICS_PATH";
-        return std::filesystem::path{std::string{metrics_path}} / filename;
+        return common::filesystem::path{std::string{metrics_path}} / filename;
     }
     // No environment variable, lookup via install path
     return findViaInstallPath(filename);

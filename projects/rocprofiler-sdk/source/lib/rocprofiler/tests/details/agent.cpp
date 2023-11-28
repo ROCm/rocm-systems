@@ -21,10 +21,10 @@
 // THE SOFTWARE.
 
 #include "lib/rocprofiler/tests/details/agent.hpp"
+#include "lib/common/filesystem.hpp"
 #include "lib/common/utility.hpp"
 
 #include <glog/logging.h>
-#include <filesystem>
 #include <fstream>
 
 #include <grp.h>
@@ -63,8 +63,6 @@
             return (err);                                                                          \
         }                                                                                          \
     }
-
-// namespace fs = std::filesystem;
 
 namespace rocprofiler
 {

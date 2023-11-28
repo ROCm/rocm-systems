@@ -791,6 +791,7 @@ function(ROCPROFILER_PYTHON_CONSOLE_SCRIPT SCRIPT_NAME SCRIPT_SUBMODULE)
         set(Python3_ROOT_DIR "${ARG_ROOT_DIR}")
         find_package(Python3 ${ARG_VERSION} EXACT QUIET MODULE COMPONENTS Interpreter)
         set(PYTHON_EXECUTABLE "${Python3_EXECUTABLE}")
+        execute_process(COMMAND ${Python3_EXECUTABLE} -m pip install pandas)
         configure_file(${PROJECT_SOURCE_DIR}/cmake/Templates/console-script.in
                        ${PROJECT_BINARY_DIR}/bin/${SCRIPT_NAME}-${ARG_VERSION} @ONLY)
 

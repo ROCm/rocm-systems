@@ -23,7 +23,9 @@
 #include <rocprofiler/registration.h>
 #include <rocprofiler/rocprofiler.h>
 
+#include "lib/common/defines.hpp"
 #include "lib/common/environment.hpp"
+#include "lib/common/filesystem.hpp"
 #include "lib/common/units.hpp"
 #include "lib/common/utility.hpp"
 
@@ -35,7 +37,6 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
-#include <filesystem>
 #include <iostream>
 #include <random>
 #include <sstream>
@@ -233,7 +234,7 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
     struct info_data
     {
         uint64_t          num_args = 0;
-        std::stringstream arg_ss   = {};
+        std::stringstream arg_ss;
     } info_data_v;
 
     auto info_data_cb = [](rocprofiler_callback_tracing_kind_t,

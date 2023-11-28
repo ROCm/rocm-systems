@@ -7,6 +7,23 @@ include(rocprofiler_utilities)
 
 set(BUILD_TESTING OFF)
 
+# filesystem library
+if(ROCPROFILER_BUILD_GHC_FS)
+    rocprofiler_checkout_git_submodule(
+        RECURSIVE
+        RELATIVE_PATH external/filesystem
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+        REPO_URL https://github.com/gulrak/filesystem.git
+        REPO_BRANCH "v1.5.14")
+
+    target_compile_definitions(
+        rocprofiler-cxx-filesystem
+        INTERFACE $<BUILD_INTERFACE:ROCPROFILER_HAS_GHC_LIB_FILESYSTEM=1>)
+    target_include_directories(
+        rocprofiler-cxx-filesystem SYSTEM
+        INTERFACE $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/external/filesystem/include>)
+endif()
+
 if(ROCPROFILER_BUILD_TESTS)
     if(ROCPROFILER_BUILD_GTEST)
         set(INSTALL_GTEST

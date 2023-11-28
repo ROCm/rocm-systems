@@ -36,7 +36,7 @@ consume_args(Tp&&...)
 extern "C" {
 rocprofiler_status_t
 rocprofiler_configure_pc_sampling_service(rocprofiler_context_id_t         context_id,
-                                          rocprofiler_agent_t              agent,
+                                          rocprofiler_agent_id_t           agent_id,
                                           rocprofiler_pc_sampling_method_t method,
                                           rocprofiler_pc_sampling_unit_t   unit,
                                           uint64_t                         interval,
@@ -45,7 +45,17 @@ rocprofiler_configure_pc_sampling_service(rocprofiler_context_id_t         conte
     if(rocprofiler::registration::get_init_status() > 0)
         return ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED;
 
-    consume_args(context_id, agent, method, unit, interval, buffer_id);
+    consume_args(context_id, agent_id, method, unit, interval, buffer_id);
+    return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
+}
+
+rocprofiler_status_t ROCPROFILER_API
+rocprofiler_query_pc_sampling_agent_configurations(
+    rocprofiler_agent_id_t                                agent_id,
+    rocprofiler_available_pc_sampling_configurations_cb_t cb,
+    void*                                                 user_data)
+{
+    consume_args(agent_id, cb, user_data);
     return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
 }
 }

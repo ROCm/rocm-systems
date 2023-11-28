@@ -78,9 +78,9 @@ get_output_stream()
     static std::ostream* isTerm = []() -> std::ostream* {
         if(auto* outfile = getenv("ROCPROFILER_SAMPLE_OUTPUT_FILE"))
         {
-            if(outfile == "stdout")
+            if(std::string_view{outfile} == "stdout")
                 return static_cast<std::ostream*>(&std::cout);
-            else if(outfile == "stderr")
+            else if(std::string_view{outfile} == "stderr")
                 return &std::cerr;
         }
         return nullptr;
@@ -125,12 +125,12 @@ buffered_callback(rocprofiler_context_id_t,
 }
 
 void
-dispatch_callback(rocprofiler_queue_id_t              queue_id,
-                  const rocprofiler_agent_t*          agent,
-                  rocprofiler_correlation_id_t        correlation_id,
-                  const hsa_kernel_dispatch_packet_t* dispatch_packet,
-                  void*                               callback_data_args,
-                  rocprofiler_profile_config_id_t*    config)
+dispatch_callback(rocprofiler_queue_id_t /*queue_id*/,
+                  const rocprofiler_agent_t* agent,
+                  rocprofiler_correlation_id_t /*correlation_id*/,
+                  const hsa_kernel_dispatch_packet_t* /*dispatch_packet*/,
+                  void* /*callback_data_args*/,
+                  rocprofiler_profile_config_id_t* config)
 {
     /**
      * This simple example uses the same profile counter set for all agents.

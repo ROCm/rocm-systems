@@ -74,6 +74,10 @@ destroy_queue(hsa_queue_t* hsa_queue)
     get_queue_controller().destory_queue(hsa_queue);
     return HSA_STATUS_SUCCESS;
 }
+
+constexpr rocprofiler_agent_t default_agent =
+    rocprofiler_agent_t{sizeof(rocprofiler_agent_t),
+                        rocprofiler_agent_id_t{std::numeric_limits<uint64_t>::max()}};
 }  // namespace
 
 void
@@ -87,7 +91,7 @@ QueueController::add_queue(hsa_queue_t* id, std::unique_ptr<Queue> queue)
             for(const auto& [cbid, cb_tuple] : callbacks)
             {
                 auto& [agent, qcb, ccb] = cb_tuple;
-                if(agent.id.handle == ALL_AGENTS.id.handle || agent.id.handle == agent_id)
+                if(agent.id.handle == default_agent.id.handle || agent.id.handle == agent_id)
                 {
                     map[id]->register_callback(cbid, qcb, ccb);
                 }
@@ -117,7 +121,7 @@ QueueController::add_callback(std::optional<rocprofiler_agent_t> agent,
         }
         else
         {
-            cb_cache[client_id] = std::tuple(ALL_AGENTS, qcb, ccb);
+            cb_cache[client_id] = std::tuple(default_agent, qcb, ccb);
         }
         client_id++;
 

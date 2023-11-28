@@ -22,8 +22,10 @@
 //
 
 #include "lib/common/config.hpp"
+#include "lib/common/defines.hpp"
 #include "lib/common/demangle.hpp"
 #include "lib/common/environment.hpp"
+#include "lib/common/filesystem.hpp"
 #include "lib/common/utility.hpp"
 
 #include <fmt/core.h>
@@ -32,7 +34,6 @@
 #include <algorithm>
 #include <cstring>
 #include <ctime>
-#include <filesystem>
 #include <fstream>
 #include <regex>
 #include <sstream>
@@ -339,18 +340,18 @@ compose_filename(const config& _cfg)
     }
 
     // join <OUTPUT_PATH>/<OUTPUT_FILE> and replace any keys with values
-    auto _prefix = format(std::filesystem::path{_output_path} / _output_file);
+    auto _prefix = format(common::filesystem::path{_output_path} / _output_file);
 
     // return on empty
     if(_prefix.empty()) return std::string{};
 
     // get the absolute path
-    auto _fname = std::filesystem::absolute(std::filesystem::path{_prefix});
+    auto _fname = common::filesystem::absolute(common::filesystem::path{_prefix});
 
     // create the directory if necessary
     auto _fname_path = _fname.parent_path();
-    if(!std::filesystem::exists(_fname_path))
-        std::filesystem::create_directories(_fname.parent_path());
+    if(!common::filesystem::exists(_fname_path))
+        common::filesystem::create_directories(_fname.parent_path());
 
     return _fname.string();
 }

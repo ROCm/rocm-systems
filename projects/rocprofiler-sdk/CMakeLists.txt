@@ -105,7 +105,6 @@ if(ROCPROFILER_BUILD_SAMPLES)
     add_subdirectory(samples)
 endif()
 
-#
 include(rocprofiler_config_install)
 include(rocprofiler_config_packaging)
 

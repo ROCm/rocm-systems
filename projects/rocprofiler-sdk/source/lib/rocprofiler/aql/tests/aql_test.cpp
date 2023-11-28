@@ -43,12 +43,17 @@ namespace rocprofiler
 AmdExtTable
 get_ext_table()
 {
-    return {.hsa_amd_memory_pool_get_info_fn       = hsa_amd_memory_pool_get_info,
-            .hsa_amd_agent_iterate_memory_pools_fn = hsa_amd_agent_iterate_memory_pools,
-            .hsa_amd_memory_pool_allocate_fn       = hsa_amd_memory_pool_allocate,
-            .hsa_amd_memory_pool_free_fn           = hsa_amd_memory_pool_free,
-            .hsa_amd_agent_memory_pool_get_info_fn = hsa_amd_agent_memory_pool_get_info,
-            .hsa_amd_agents_allow_access_fn        = hsa_amd_agents_allow_access};
+    static auto _v = []() {
+        auto val                                  = AmdExtTable{};
+        val.hsa_amd_memory_pool_get_info_fn       = hsa_amd_memory_pool_get_info;
+        val.hsa_amd_agent_iterate_memory_pools_fn = hsa_amd_agent_iterate_memory_pools;
+        val.hsa_amd_memory_pool_allocate_fn       = hsa_amd_memory_pool_allocate;
+        val.hsa_amd_memory_pool_free_fn           = hsa_amd_memory_pool_free;
+        val.hsa_amd_agent_memory_pool_get_info_fn = hsa_amd_agent_memory_pool_get_info;
+        val.hsa_amd_agents_allow_access_fn        = hsa_amd_agents_allow_access;
+        return val;
+    }();
+    return _v;
 }
 
 auto

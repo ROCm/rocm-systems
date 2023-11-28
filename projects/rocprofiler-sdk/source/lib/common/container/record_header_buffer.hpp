@@ -231,8 +231,11 @@ record_header_buffer::emplace(uint64_t _hash, Tp& _v)
         // for where the header record should be placed.
         // NOTE: m_headers was resized to be large enough to accomodate
         // sizeof(Tp) == 1 for every entry in buffer
-        auto idx          = m_index.fetch_add(1, std::memory_order_release);
-        m_headers.at(idx) = rocprofiler_record_header_t{.hash = _hash, .payload = _addr};
+        auto                        idx    = m_index.fetch_add(1, std::memory_order_release);
+        rocprofiler_record_header_t record = {};
+        record.hash                        = _hash;
+        record.payload                     = _addr;
+        m_headers.at(idx)                  = record;
     }
     read_unlock();
     return (_addr != nullptr);

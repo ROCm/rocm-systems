@@ -31,7 +31,7 @@ target_link_libraries(
            $<BUILD_INTERFACE:rocprofiler::rocprofiler-build-flags>
            $<BUILD_INTERFACE:rocprofiler::rocprofiler-threading>
            $<BUILD_INTERFACE:rocprofiler::rocprofiler-memcheck>
-           $<BUILD_INTERFACE:rocprofiler::rocprofiler-stdcxxfs>
+           $<BUILD_INTERFACE:rocprofiler::rocprofiler-cxx-filesystem>
            $<BUILD_INTERFACE:rocprofiler::rocprofiler-glog>
            $<BUILD_INTERFACE:rocprofiler::rocprofiler-fmt>
            $<BUILD_INTERFACE:rocprofiler::rocprofiler-dl>

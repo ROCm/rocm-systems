@@ -15,12 +15,13 @@ target_link_libraries(
     kernel-tracing-test-tool
     PRIVATE rocprofiler::rocprofiler rocprofiler::cereal
             $<TARGET_NAME_IF_EXISTS:rocprofiler::tests-build-flags>)
-set_target_properties(kernel-tracing-test-tool PROPERTIES INSTALL_RPATH "\$ORIGIN"
-                                                          INSTALL_RPATH_USE_LINK_PATH ON)
+set_target_properties(
+    kernel-tracing-test-tool PROPERTIES INSTALL_RPATH "\$ORIGIN:\$ORIGIN/.."
+                                        INSTALL_RPATH_USE_LINK_PATH ON)
 
 install(
     TARGETS kernel-tracing-test-tool
-    DESTINATION lib
+    DESTINATION lib/rocprofiler
     COMPONENT rocprofiler-test-libs)
 
 if(ROCPROFILER_MEMCHECK_PRELOAD_ENV)

@@ -23,12 +23,13 @@
 #include "agent_cache.hpp"
 
 #include <glog/logging.h>
-#include <filesystem>
 #include <fstream>
 #include <limits>
 #include <optional>
 #include <stdexcept>
 
+#include "lib/common/defines.hpp"
+#include "lib/common/filesystem.hpp"
 #include "lib/common/synchronized.hpp"
 #include "lib/common/utility.hpp"
 

@@ -37,6 +37,7 @@ ROCPROFILER_EXTERN_C_INIT
 
 /**
  * @brief ROCProfiler Buffer HSA API Tracer Record.
+ * TODO(aelwazir): Add comments against every variable
  */
 typedef struct
 {
@@ -51,6 +52,7 @@ typedef struct
 
 /**
  * @brief ROCProfiler Buffer HIP API Tracer Record.
+ * TODO(aelwazir): Add comments against every variable
  */
 typedef struct
 {
@@ -65,6 +67,7 @@ typedef struct
 
 /**
  * @brief ROCProfiler Buffer Marker Tracer Record.
+ * TODO(aelwazir): Add comments against every variable
  */
 typedef struct
 {
@@ -80,6 +83,7 @@ typedef struct
 
 /**
  * @brief ROCProfiler Buffer Memory Copy Tracer Record.
+ * TODO(aelwazir): Add comments against every variable
  */
 typedef struct
 {
@@ -95,6 +99,7 @@ typedef struct
 
 /**
  * @brief ROCProfiler Buffer Kernel Dispatch Tracer Record.
+ * TODO(aelwazir): Add comments against every variable
  */
 typedef struct
 {
@@ -114,6 +119,7 @@ typedef struct
 
 /**
  * @brief ROCProfiler Buffer Page Migration Tracer Record.
+ * TODO(aelwazir): Add comments against every variable
  */
 typedef struct
 {
@@ -128,6 +134,7 @@ typedef struct
 
 /**
  * @brief ROCProfiler Buffer Scratch Memory Tracer Record.
+ * TODO(aelwazir): Add comments against every variable
  */
 typedef struct
 {
@@ -142,6 +149,7 @@ typedef struct
 
 /**
  * @brief ROCProfiler Buffer Queue Scheduling Tracer Record.
+ * TODO(aelwazir): Add comments against every variable
  */
 typedef struct
 {
@@ -154,6 +162,7 @@ typedef struct
     // Not Sure What is the info needed here?
 } rocprofiler_buffer_tracing_queue_scheduling_record_t;
 
+// TODO(aelwazir): Review with Jonathan if Code Object is in the buffer tracing
 /**
  * @brief ROCProfiler Code Object Tracer Buffer Record.
  *
@@ -302,6 +311,8 @@ rocprofiler_query_buffer_tracing_kind_operation_name(rocprofiler_buffer_tracing_
  * mapped to a constant string. The strings provided in the arg will be valid pointers for the
  * entire duration of the program. It is recommended to call this function once and cache this data
  * in the client instead of making multiple on-demand calls.
+ *
+ * TODO(aelwazir): to be modified
  *
  * @param [in] callback Callback function invoked for each enumeration value in @ref
  * rocprofiler_buffer_tracing_kind_t with the exception of the `NONE` and `LAST` values.

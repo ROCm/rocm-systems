@@ -25,7 +25,9 @@
 #include <rocprofiler/registration.h>
 #include <rocprofiler/rocprofiler.h>
 
+#include "lib/common/defines.hpp"
 #include "lib/common/environment.hpp"
+#include "lib/common/filesystem.hpp"
 #include "lib/common/units.hpp"
 #include "lib/common/utility.hpp"
 
@@ -37,7 +39,6 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
-#include <filesystem>
 #include <iostream>
 #include <random>
 #include <sstream>

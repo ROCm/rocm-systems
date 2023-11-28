@@ -33,8 +33,8 @@ add_library(code-object-tracing-client SHARED)
 target_sources(code-object-tracing-client PRIVATE client.cpp)
 target_link_libraries(
     code-object-tracing-client
-    PRIVATE rocprofiler::rocprofiler
-            $<TARGET_NAME_IF_EXISTS:rocprofiler::samples-build-flags>)
+    PRIVATE rocprofiler::rocprofiler rocprofiler::samples-build-flags
+            rocprofiler::samples-common-library)
 
 set_source_files_properties(main.cpp PROPERTIES LANGUAGE HIP)
 find_package(Threads REQUIRED)
@@ -43,7 +43,7 @@ add_executable(code-object-tracing)
 target_sources(code-object-tracing PRIVATE main.cpp)
 target_link_libraries(
     code-object-tracing PRIVATE code-object-tracing-client Threads::Threads
-                                $<TARGET_NAME_IF_EXISTS:rocprofiler::samples-build-flags>)
+                                rocprofiler::samples-build-flags)
 
 add_test(NAME code-object-tracing COMMAND $<TARGET_FILE:code-object-tracing>)
 

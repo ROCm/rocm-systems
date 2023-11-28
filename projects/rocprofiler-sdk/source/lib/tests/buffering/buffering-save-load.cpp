@@ -111,11 +111,7 @@ launch_threads(record_header_buffer_t& _buf,
                mpl::type_list<Tp...>,
                std::index_sequence<Idx...> _seq)
 {
-    ((std::thread{[_seq](auto* _buf_v, auto* _barrier_v) { launch<Tp>(_buf_v, _barrier_v, _seq); },
-                  &_buf,
-                  &_done_barrier}
-          .detach()),
-     ...);
+    ((std::thread{launch<Tp, Idx...>, &_buf, &_done_barrier, _seq}.detach()), ...);
 }
 
 // computes the size of every raw_array size for a given type

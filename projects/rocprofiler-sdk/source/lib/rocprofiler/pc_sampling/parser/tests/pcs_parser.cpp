@@ -20,7 +20,12 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
+#ifdef NDEBUG
+#    undef NDEBUG
+#endif
+
 #include <gtest/gtest.h>
+#include <cassert>
 #include <cstddef>
 
 #include "lib/rocprofiler/pc_sampling/parser/pc_record_interface.hpp"
@@ -364,15 +369,16 @@ TEST(pcs_parser_correlation_id, queue_hammer)
 
     assert(all_allocations.size() == NUM_ACTIONS &&
            "QueueHammer test: Incorrect number of callbacks");
-    for(auto sb = 0ul; sb < all_allocations.size(); sb++)
+    for(auto& all_allocation : all_allocations)
     {
-        pcsample_v1_t* samples     = all_allocations[sb].first;
-        size_t         num_samples = all_allocations[sb].second;
+        pcsample_v1_t* samples     = all_allocation.first;
+        size_t         num_samples = all_allocation.second;
 
         assert(num_samples == NUM_QUEUES && "QueueHammer: Incorrect number of samples");
         assert(check_samples(samples, num_samples) &&
                "QueueHammer: parsed ID does not match correct ID");
         delete[] samples;
+        (void) num_samples;
     }
 }
 
@@ -414,6 +420,7 @@ TEST(pcs_parser_correlation_id, multi_buffer)
 
     delete[] all_allocations[0].first;
     delete[] all_allocations[1].first;
+    (void) sample;
 };
 
 /**

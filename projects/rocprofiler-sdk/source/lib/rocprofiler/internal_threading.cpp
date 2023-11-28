@@ -227,8 +227,10 @@ create_callback_thread()
     // this will be index after emplace_back
     auto idx = get_thread_pools().size();
 
-    auto& thr_pool = get_thread_pools().emplace_back(
-        std::make_shared<thread_pool_t>(thread_pool_config_t{.pool_size = 1}));
+    thread_pool_config_t pool_config = {};
+    pool_config.pool_size            = 1;
+
+    auto& thr_pool = get_thread_pools().emplace_back(std::make_shared<thread_pool_t>(pool_config));
 
     if(!get_task_groups()) get_task_groups() = new task_group_vec_t{};
 

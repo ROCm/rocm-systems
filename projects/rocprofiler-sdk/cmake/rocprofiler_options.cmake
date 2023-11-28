@@ -47,6 +47,10 @@ foreach(_PLUGIN "ATT" "CTF" "PERFETTO")
                            "Enable building the ${_PLUGIN} plugin" ON)
 endforeach()
 
+rocprofiler_add_option(
+    ROCPROFILER_BUILD_GHC_FS
+    "Enable building with ghc::filesystem library (via submodule) instead of the C++ filesystem library"
+    ON)
 rocprofiler_add_option(ROCPROFILER_BUILD_FMT "Enable building fmt library internally" ON)
 rocprofiler_add_option(ROCPROFILER_BUILD_GLOG
                        "Enable building glog (Google logging) library internally" ON)

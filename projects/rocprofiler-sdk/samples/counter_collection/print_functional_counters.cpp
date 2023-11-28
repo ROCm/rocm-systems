@@ -108,12 +108,12 @@ buffered_callback(rocprofiler_context_id_t,
 }
 
 void
-dispatch_callback(rocprofiler_queue_id_t              queue_id,
-                  const rocprofiler_agent_t*          agent,
-                  rocprofiler_correlation_id_t        correlation_id,
-                  const hsa_kernel_dispatch_packet_t* dispatch_packet,
-                  void*                               callback_data_args,
-                  rocprofiler_profile_config_id_t*    config)
+dispatch_callback(rocprofiler_queue_id_t /*queue_id*/,
+                  const rocprofiler_agent_t* agent,
+                  rocprofiler_correlation_id_t /*correlation_id*/,
+                  const hsa_kernel_dispatch_packet_t* /*dispatch_packet*/,
+                  void* /*callback_data_args*/,
+                  rocprofiler_profile_config_id_t* config)
 {
     auto& cap   = *get_capture();
     auto  wlock = std::unique_lock{cap.m_mutex};
@@ -205,9 +205,8 @@ tool_fini(void*)
 
     std::clog << "In tool fini\n";
 
-    auto  cap_ptr = get_capture();
-    auto& cap     = *get_capture();
-    auto  wlock   = std::unique_lock{cap.m_mutex};
+    auto& cap   = *get_capture();
+    auto  wlock = std::unique_lock{cap.m_mutex};
 
     if(cap.captured.size() != cap.expected.size())
     {

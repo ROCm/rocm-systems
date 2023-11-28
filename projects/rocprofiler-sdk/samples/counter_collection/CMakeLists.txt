@@ -31,7 +31,11 @@ endif()
 
 add_library(counter-collection-buffer-client SHARED)
 target_sources(counter-collection-buffer-client PRIVATE client.cpp client.hpp)
-target_link_libraries(counter-collection-buffer-client PRIVATE rocprofiler::rocprofiler)
+target_link_libraries(
+    counter-collection-buffer-client
+    PUBLIC rocprofiler::samples-build-flags
+    PRIVATE rocprofiler::rocprofiler rocprofiler::samples-common-library)
+
 set_source_files_properties(main.cpp PROPERTIES LANGUAGE HIP)
 add_executable(counter-collection-buffer)
 target_sources(counter-collection-buffer PRIVATE main.cpp)
@@ -55,8 +59,11 @@ set_tests_properties(
 add_library(counter-collection-functional-counter-client SHARED)
 target_sources(counter-collection-functional-counter-client
                PRIVATE print_functional_counters.cpp client.hpp)
-target_link_libraries(counter-collection-functional-counter-client
-                      PRIVATE rocprofiler::rocprofiler)
+target_link_libraries(
+    counter-collection-functional-counter-client
+    PUBLIC rocprofiler::samples-build-flags
+    PRIVATE rocprofiler::rocprofiler rocprofiler::samples-common-library)
+
 add_executable(counter-collection-print-functional-counters)
 target_sources(counter-collection-print-functional-counters PRIVATE main.cpp)
 target_link_libraries(

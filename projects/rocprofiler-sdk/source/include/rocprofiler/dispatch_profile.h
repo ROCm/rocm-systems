@@ -41,10 +41,10 @@ ROCPROFILER_EXTERN_C_INIT
  * @brief Kernel Dispatch Callback. This is a callback that is invoked before the kernel
  *        is enqueued into the HSA queue. What counters to collect for a kernel are set
  *        via passing back a profile config (config) in this callback. These counters
- *        will be collected and emplaced in the buffer rocprofiler_buffer_id_t used when
+ *        will be collected and emplaced in the buffer with @ref rocprofiler_buffer_id_t used when
  *        setting up this callback.
  *
- * @param [in] queue_id        Queue the kernel dispatach packet is being enqueued onto
+ * @param [in] queue_id        Queue the kernel dispatch packet is being enqueued onto
  * @param [in] agent           Agent of this queue
  * @param [in] correlation_id  Correlation ID for this dispatch
  * @param [in] dispatch_packet Kernel dispatch packet about to be enqueued into HSA
@@ -62,9 +62,11 @@ typedef void (*rocprofiler_profile_counting_dispatch_callback_t)(
 /**
  * @brief Configure buffered dispatch profile Counting Service.
  *        Collects the counters in dispatch packets and stores them
- *        in buffer_id. The buffer may contain packets from more than
+ *        in a buffer with @p buffer_id. The buffer may contain packets from more than
  *        one dispatch (denoted by correlation id). Will trigger the
- *        callback based on the parameters setup in buffer_id_t.
+ *        callback based on the parameters setup in @p buffer_id.
+ *
+ * // TODO(aelwazir): Should this be per agent?
  *
  * @param [in] context_id context id
  * @param [in] buffer_id id of the buffer to use for the counting service

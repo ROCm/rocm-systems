@@ -48,7 +48,8 @@ rocprofiler_add_interface_library(rocprofiler-amd-comgr "AMD comgr library" INTE
 rocprofiler_add_interface_library(rocprofiler-gtest "Google Test library" INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-glog "Google Log library" INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-fmt "C++ format string library" INTERNAL)
-rocprofiler_add_interface_library(rocprofiler-stdcxxfs "C++ filesystem library" INTERNAL)
+rocprofiler_add_interface_library(rocprofiler-cxx-filesystem "C++ filesystem library"
+                                  INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-ptl "Parallel Tasking Library" INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-hsa-aql "AQL library" INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-drm "drm (amdgpu) library" INTERNAL)

@@ -42,6 +42,10 @@ ROCPROFILER_EXTERN_C_INIT
  * @{
  */
 
+// TODO(aelwazir): Do we need to add a null (way) for every handle?
+// TODO(aelwazir): Remove API Data args from the doxygen?
+// TODO(aelwazir): Not everything in bin needs to be installed bin, use libexec or share?
+
 /**
  * @brief Status codes.
  */
@@ -258,6 +262,7 @@ typedef uint64_t rocprofiler_kernel_id_t;
 
 // forward declaration of struct
 typedef struct rocprofiler_pc_sampling_configuration_s rocprofiler_pc_sampling_configuration_t;
+typedef struct rocprofiler_pc_sampling_record_s        rocprofiler_pc_sampling_record_t;
 
 /**
  * @brief Unique record id encoding both the counter
@@ -347,10 +352,11 @@ typedef struct
 
 /**
  * @brief Profile Configurations
+ * @see rocprofiler_create_profile_config for how to create.
  */
 typedef struct
 {
-    uint64_t handle;
+    uint64_t handle;  // Opaque handle
 } rocprofiler_profile_config_id_t;
 
 /**
@@ -440,7 +446,7 @@ rocprofiler_record_header_compute_hash(uint32_t category, uint32_t kind)
 }
 
 /**
- * @brief Details for the dimension, including its size, for a counter.
+ * @brief Details for the dimension, including its size, for a counter record.
  */
 typedef struct
 {
@@ -449,7 +455,7 @@ typedef struct
 } rocprofiler_record_dimension_info_t;
 
 /**
- * @brief ROCProfiler Profile Counting Counter per instance.
+ * @brief ROCProfiler Profile Counting Counter Record per instance.
  */
 typedef struct
 {
@@ -457,26 +463,6 @@ typedef struct
     double                            counter_value;  //<< counter value
     rocprofiler_correlation_id_t      corr_id;
 } rocprofiler_record_counter_t;
-
-/**
- * @brief ROCProfiler PC Sampling Record.
- *
- */
-typedef struct
-{
-    uint64_t pc;
-    uint64_t dispatch_id;
-    uint64_t timestamp;
-    uint64_t hardware_id;
-    union
-    {
-        uint8_t arb_value;
-    };
-    union
-    {
-        void* data;
-    };
-} rocprofiler_pc_sampling_record_t;
 
 /**
  * @brief ROCProfiler SPM Record.

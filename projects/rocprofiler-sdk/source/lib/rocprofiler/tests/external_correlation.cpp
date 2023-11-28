@@ -23,7 +23,9 @@
 #include <rocprofiler/registration.h>
 #include <rocprofiler/rocprofiler.h>
 
+#include "lib/common/defines.hpp"
 #include "lib/common/environment.hpp"
+#include "lib/common/filesystem.hpp"
 #include "lib/common/units.hpp"
 #include "lib/common/utility.hpp"
 #include "rocprofiler/external_correlation.h"
@@ -35,7 +37,6 @@
 #include <pthread.h>
 #include <cstdint>
 #include <cstdlib>
-#include <filesystem>
 #include <iostream>
 #include <map>
 #include <mutex>

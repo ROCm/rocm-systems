@@ -31,6 +31,7 @@
  * @brief Test rocprofiler tool
  */
 
+#include "lib/common/filesystem.hpp"
 #include "serialization.hpp"
 
 #include <rocprofiler/buffer.h>
@@ -50,7 +51,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <exception>
-#include <filesystem>
 #include <fstream>
 #include <functional>
 #include <iostream>

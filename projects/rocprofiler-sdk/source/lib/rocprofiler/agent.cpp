@@ -24,6 +24,7 @@
 #include <rocprofiler/fwd.h>
 #include <rocprofiler/rocprofiler.h>
 
+#include "lib/common/filesystem.hpp"
 #include "lib/rocprofiler/agent.hpp"
 #include "lib/rocprofiler/hsa/agent_cache.hpp"
 
@@ -33,7 +34,6 @@
 #include <libdrm/amdgpu.h>
 #include <xf86drm.h>
 
-#include <filesystem>
 #include <fstream>
 #include <limits>
 #include <regex>
@@ -43,14 +43,14 @@
 #include <unordered_map>
 #include <vector>
 
+namespace fs = rocprofiler::common::filesystem;
+
 namespace rocprofiler
 {
 namespace agent
 {
 namespace
 {
-namespace fs = ::std::filesystem;
-
 struct cpu_info
 {
     long        processor   = -1;
@@ -737,9 +737,9 @@ construct_agent_cache(::HsaApiTable* table)
     };
 
     auto is_duplicate = [](const auto* agent_v) {
-        for(const auto& itr : get_agent_caches())
+        for(const auto& aitr : get_agent_caches())
         {
-            if(itr == agent_v) return true;
+            if(aitr == agent_v) return true;
         }
         return false;
     };

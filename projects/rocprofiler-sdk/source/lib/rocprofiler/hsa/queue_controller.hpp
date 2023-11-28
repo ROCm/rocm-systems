@@ -66,8 +66,6 @@ public:
     const Queue* get_queue(const hsa_queue_t&) const;
 
 private:
-    static constexpr rocprofiler_agent_t ALL_AGENTS{
-        .id = {.handle = std::numeric_limits<uint64_t>::max()}};
     using agent_callback_tuple_t =
         std::tuple<rocprofiler_agent_t, Queue::queue_cb_t, Queue::completed_cb_t>;
     using queue_map_t       = std::unordered_map<hsa_queue_t*, std::unique_ptr<Queue>>;

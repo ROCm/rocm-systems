@@ -45,9 +45,12 @@ target_link_libraries(
     rocprofiler-object-library
     PUBLIC rocprofiler::rocprofiler-headers rocprofiler::rocprofiler-hsa-runtime
            rocprofiler::rocprofiler-hip
-    PRIVATE rocprofiler::rocprofiler-build-flags rocprofiler::rocprofiler-memcheck
-            rocprofiler::rocprofiler-common-library rocprofiler::rocprofiler-stdcxxfs
-            rocprofiler::rocprofiler-dl rocprofiler::rocprofiler-amd-comgr)
+    PRIVATE rocprofiler::rocprofiler-build-flags
+            rocprofiler::rocprofiler-memcheck
+            rocprofiler::rocprofiler-common-library
+            rocprofiler::rocprofiler-cxx-filesystem
+            rocprofiler::rocprofiler-dl
+            rocprofiler::rocprofiler-amd-comgr)
 
 target_compile_definitions(rocprofiler-object-library PRIVATE rocprofiler_EXPORTS=1)
 
@@ -71,7 +74,7 @@ target_link_libraries(
     PRIVATE rocprofiler::rocprofiler-build-flags
             rocprofiler::rocprofiler-memcheck
             rocprofiler::rocprofiler-common-library
-            rocprofiler::rocprofiler-stdcxxfs
+            rocprofiler::rocprofiler-cxx-filesystem
             rocprofiler::rocprofiler-dl
             rocprofiler::rocprofiler-amd-comgr
             rocprofiler::rocprofiler-object-library)

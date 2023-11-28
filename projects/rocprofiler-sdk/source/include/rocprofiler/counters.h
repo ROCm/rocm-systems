@@ -52,6 +52,8 @@ rocprofiler_query_record_counter_id(rocprofiler_counter_instance_id_t id,
  * @param [in]  dim dimension for which positional info is requested
  * @param [out] pos value of the dimension in id.
  * @return ::rocprofiler_status_t
+ *
+ * TODO(aelwazir): rocprofiler_status_t types that can be returned
  */
 rocprofiler_status_t ROCPROFILER_API
 rocprofiler_query_record_dimension_position(rocprofiler_counter_instance_id_t  id,
@@ -65,6 +67,9 @@ rocprofiler_query_record_dimension_position(rocprofiler_counter_instance_id_t  i
  * @param [in]  dim dimension
  * @param [out] info info on the dimension (name, instance_size)
  * @return ::rocprofiler_status_t
+ *
+ * TODO(aelwazir): rocprofiler_status_t types that can be returned
+ *
  */
 rocprofiler_status_t ROCPROFILER_API
 rocprofiler_query_record_dimension_info(rocprofiler_counter_id_t             id,
@@ -73,12 +78,16 @@ rocprofiler_query_record_dimension_info(rocprofiler_counter_id_t             id,
     ROCPROFILER_NONNULL(3);
 
 /**
- * @brief Query Counter name.
+ * @brief Query Counter name as a literal string.
  *
- * @param [in] counter_id
+ * @param [in] counter_id @see rocprofiler_iterate_agent_supported_counters to get the available
+ * counter IDs
  * @param [out] name returns a pointer to the name of the counter
  * @param [out] size returns the size of the name returned
  * @return ::rocprofiler_status_t
+ *
+ * TODO(aelwazir): rocprofiler_status_t types that can be returned
+ *
  */
 rocprofiler_status_t ROCPROFILER_API
 rocprofiler_query_counter_name(rocprofiler_counter_id_t counter_id, const char** name, size_t* size)
@@ -102,6 +111,7 @@ rocprofiler_query_counter_instance_count(rocprofiler_agent_t      agent,
                                          rocprofiler_counter_id_t counter_id,
                                          size_t* instance_count) ROCPROFILER_NONNULL(3);
 
+// TODO(aelwazir): Ben to add a brief
 typedef rocprofiler_status_t (*rocprofiler_available_counters_cb_t)(
     rocprofiler_counter_id_t* counters,
     size_t                    num_counters,
@@ -110,7 +120,7 @@ typedef rocprofiler_status_t (*rocprofiler_available_counters_cb_t)(
 /**
  * @brief Query Agent Counters Availability.
  *
- * @param [in] agent
+ * @param [in] agent GPU agent
  * @param [in] cb callback to caller to get counters
  * @param [in] user_data data to pass into the callback
  * @return ::rocprofiler_status_t

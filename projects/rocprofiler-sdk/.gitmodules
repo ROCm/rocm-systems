@@ -16,3 +16,6 @@
 [submodule "external/cereal"]
 	path = external/cereal
 	url = https://github.com/jrmadsen/cereal.git
+[submodule "external/filesystem"]
+	path = external/filesystem
+	url = https://github.com/gulrak/filesystem.git

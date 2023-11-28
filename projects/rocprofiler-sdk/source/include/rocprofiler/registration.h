@@ -48,15 +48,19 @@ typedef struct
     const uint32_t handle;  ///< internal handle
 } rocprofiler_client_id_t;
 
+// TODO(aelwazir): Add Docs
 typedef void (*rocprofiler_client_finalize_t)(rocprofiler_client_id_t);
 
+// TODO(aelwazir): Add Docs
 typedef int (*rocprofiler_tool_initialize_t)(rocprofiler_client_finalize_t finalize_func,
                                              void*                         tool_data);
 
+// TODO(aelwazir): Add Docs
 typedef void (*rocprofiler_tool_finalize_t)(void* tool_data);
 
 /**
  * @brief Data structure containing a initialization, finalization, and data
+ * TODO(aelwazir): Add correlation with rocprofiler_configure.
  *
  */
 typedef struct
