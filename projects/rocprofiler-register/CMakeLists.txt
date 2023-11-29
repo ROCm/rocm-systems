@@ -73,6 +73,9 @@ set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake ${PROJECT_SOURCE_DIR}/cmake/Mo
 
 include(GNUInstallDirs) # install directories
 
+# ROCm does not use lib64
+set(CMAKE_INSTALL_LIBDIR "lib")
+
 include(rocprofiler_register_utilities) # various functions/macros
 include(rocprofiler_register_interfaces) # interface libraries
 include(rocprofiler_register_compilers) # compiler identification
@@ -96,6 +99,8 @@ include(CTest)
 add_subdirectory(external)
 add_subdirectory(source)
 
+include(rocprofiler_register_config_install)
+
 if(ROCPROFILER_REGISTER_BUILD_TESTS)
     add_subdirectory(tests)
 endif()
@@ -104,8 +109,6 @@ if(ROCPROFILER_REGISTER_BUILD_SAMPLES)
     add_subdirectory(samples)
 endif()
 
-#
-include(rocprofiler_register_config_install)
 include(rocprofiler_register_config_packaging)
 
 rocprofiler_register_print_features()

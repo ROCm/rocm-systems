@@ -57,11 +57,21 @@ install(
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/cmake/${PROJECT_NAME}
     OPTIONAL)
 
-export(PACKAGE ${PROJECT_NAME})
-
 # ------------------------------------------------------------------------------#
 # build tree
 #
+set(${PROJECT_NAME}_BUILD_TREE
+    ON
+    CACHE BOOL "" FORCE)
+
+file(RELATIVE_PATH rocp_reg_bin2src_rel_path ${PROJECT_BINARY_DIR} ${PROJECT_SOURCE_DIR})
+string(REPLACE "//" "/" rocp_reg_inc_rel_path
+               "${rocp_reg_bin2src_rel_path}/source/include")
+
+execute_process(
+    COMMAND ${CMAKE_COMMAND} -E create_symlink ${rocp_reg_inc_rel_path}
+            ${PROJECT_BINARY_DIR}/include WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
+
 set(_BUILDTREE_EXPORT_DIR
     "${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/cmake/rocprofiler-register")
 
@@ -82,6 +92,6 @@ export(
     NAMESPACE rocprofiler-register::
     FILE "${_BUILDTREE_EXPORT_DIR}/rocprofiler-register-library-targets.cmake")
 
-set(rocprofiler_register_DIR
+set(rocprofiler-register_DIR
     "${_BUILDTREE_EXPORT_DIR}"
     CACHE PATH "rocprofiler-register" FORCE)
