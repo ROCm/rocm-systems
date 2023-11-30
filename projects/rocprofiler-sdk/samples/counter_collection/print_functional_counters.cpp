@@ -90,17 +90,16 @@ buffered_callback(rocprofiler_context_id_t,
         auto* header = headers[i];
         if(header->category == ROCPROFILER_BUFFER_CATEGORY_COUNTERS && header->kind == 0)
         {
+            // Record the counters we have in the buffer and the number of instances of
+            // the counter we have seen.
             rocprofiler_counter_id_t counter;
             auto* record = static_cast<rocprofiler_record_counter_t*>(header->payload);
             rocprofiler_query_record_counter_id(record->id, &counter);
-            if(counter.handle == 517)
-            {
-                std::clog << "HERE";
-            }
             seen_counters.emplace(counter.handle, 0).first->second++;
         }
     }
 
+    // Store these counts for post execution comparison
     for(const auto& [counter_id, instances] : seen_counters)
     {
         cap.captured.emplace(counter_id, 0).first->second += instances;
@@ -118,6 +117,12 @@ dispatch_callback(rocprofiler_queue_id_t /*queue_id*/,
     auto& cap   = *get_capture();
     auto  wlock = std::unique_lock{cap.m_mutex};
 
+    /**
+     * Fetch all counters that are available for this agent if we haven't already.
+     * Each of these counters will be collected 1 by 1 for each dispatch until we
+     * have tried all counters. This requires the program to have at least counters
+     * number of kernel launches to test all counters.
+     */
     if(cap.expected.empty())
     {
         std::vector<rocprofiler_counter_id_t> counters_needed;
@@ -157,6 +162,7 @@ dispatch_callback(rocprofiler_queue_id_t /*queue_id*/,
 
     rocprofiler_profile_config_id_t profile;
 
+    // Select the next counter to collect.
     ROCPROFILER_CALL(
         rocprofiler_create_profile_config(*agent, &(cap.remaining.back()), 1, &profile),
         "Could not construct profile cfg");
@@ -208,6 +214,8 @@ tool_fini(void*)
     auto& cap   = *get_capture();
     auto  wlock = std::unique_lock{cap.m_mutex};
 
+    // Print out errors in counters that were not collected or had differences in instance
+    // count information.
     if(cap.captured.size() != cap.expected.size())
     {
         std::clog << "[ERROR] Expected " << cap.expected.size() << " counters collected but got "

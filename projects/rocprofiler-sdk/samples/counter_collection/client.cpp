@@ -98,6 +98,11 @@ get_output_stream()
     return stream.get();
 }
 
+/**
+ * Buffer callback called when the buffer is full. rocprofiler_record_header_t
+ * can contain counter records as well as other records (such as tracing). These
+ * records need to be filtered based on the category type.
+ */
 void
 buffered_callback(rocprofiler_context_id_t,
                   rocprofiler_buffer_id_t,
@@ -110,11 +115,13 @@ buffered_callback(rocprofiler_context_id_t,
     enter_count++;
     if(enter_count % 100 != 0) return;
     std::stringstream ss;
+    // Iterate through the returned records
     for(size_t i = 0; i < num_headers; ++i)
     {
         auto* header = headers[i];
         if(header->category == ROCPROFILER_BUFFER_CATEGORY_COUNTERS && header->kind == 0)
         {
+            // Print the returned counter data.
             auto* record = static_cast<rocprofiler_record_counter_t*>(header->payload);
             ss << "(Id: " << record->id << " Value [D]: " << record->counter_value
                << " Corr_Id: " << record->corr_id.internal << "),";
@@ -124,6 +131,12 @@ buffered_callback(rocprofiler_context_id_t,
     *get_output_stream() << "[" << __FUNCTION__ << "] " << ss.str() << "\n";
 }
 
+/**
+ * Callback from rocprofiler when an kernel dispatch is enqueued into the HSA queue.
+ * rocprofiler_profile_config_id_t* is a return to specify what counters to collect
+ * for this dispatch (dispatch_packet). This example function creates a profile
+ * to collect the counter SQ_WAVES for all kernel dispatch packets.
+ */
 void
 dispatch_callback(rocprofiler_queue_id_t /*queue_id*/,
                   const rocprofiler_agent_t* agent,
@@ -159,8 +172,12 @@ dispatch_callback(rocprofiler_queue_id_t /*queue_id*/,
     auto wlock = std::unique_lock{m_mutex};
     if(search_cache()) return;
 
-    std::set<std::string>                 counters_to_collect = {"SQ_WAVES"};
+    // Counters we want to collect (here its SQ_WAVES)
+    std::set<std::string> counters_to_collect = {"SQ_WAVES"};
+    // GPU Counter IDs
     std::vector<rocprofiler_counter_id_t> gpu_counters;
+
+    // Iterate through the agents and get the counters available on that agent
     ROCPROFILER_CALL(
         rocprofiler_iterate_agent_supported_counters(
             *agent,
@@ -177,6 +194,7 @@ dispatch_callback(rocprofiler_queue_id_t /*queue_id*/,
         "Could not fetch supported counters");
 
     std::vector<rocprofiler_counter_id_t> collect_counters;
+    // Look for the counters contained in counters_to_collect in gpu_counters
     for(auto& counter : gpu_counters)
     {
         const char* name;
@@ -190,12 +208,14 @@ dispatch_callback(rocprofiler_queue_id_t /*queue_id*/,
         }
     }
 
+    // Create a colleciton profile for the counters
     rocprofiler_profile_config_id_t profile;
     ROCPROFILER_CALL(rocprofiler_create_profile_config(
                          *agent, collect_counters.data(), collect_counters.size(), &profile),
                      "Could not construct profile cfg");
 
     profile_cache.emplace(agent->id.handle, profile);
+    // Return the profile to collect those counters for this dispatch
     *config = profile;
 }
 

@@ -64,9 +64,14 @@ typedef void (*rocprofiler_profile_counting_dispatch_callback_t)(
  *        Collects the counters in dispatch packets and stores them
  *        in a buffer with @p buffer_id. The buffer may contain packets from more than
  *        one dispatch (denoted by correlation id). Will trigger the
- *        callback based on the parameters setup in @p buffer_id.
+ *        callback based on the parameters setup in buffer_id_t.
  *
- * // TODO(aelwazir): Should this be per agent?
+ *        Interface is up for comment as to whether restrictions
+ *        on agent should be made here (limiting the CB based on agent)
+ *        or if the restriction should be performed by the tool in
+ *        @ref rocprofiler_profile_counting_dispatch_callback_t (i.e.
+ *        tool code checking the agent param to see if they want to profile
+ *        it).
  *
  * @param [in] context_id context id
  * @param [in] buffer_id id of the buffer to use for the counting service
