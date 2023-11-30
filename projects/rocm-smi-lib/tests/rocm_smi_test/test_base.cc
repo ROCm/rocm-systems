@@ -122,6 +122,7 @@ void TestBase::PrintDeviceHeader(uint32_t dv_ind) {
   uint16_t val_ui16;
 
   IF_VERB(STANDARD) {
+    std::cout << "\n";
     std::cout << "\t**Device index: " << dv_ind << std::endl;
   }
   err = rsmi_dev_id_get(dv_ind, &val_ui16);

@@ -745,8 +745,8 @@ auto print_error_or_value(rsmi_status_t status_code, const T& metric) {
       return str_values;
     }
     else if constexpr ((std::is_same_v<T, std::uint16_t>) ||
-                        (std::is_same_v<T, std::uint32_t>) ||
-                        (std::is_same_v<T, std::uint64_t>)) {
+                      (std::is_same_v<T, std::uint32_t>) ||
+                      (std::is_same_v<T, std::uint64_t>)) {
       return std::to_string(metric);
     }
   }
