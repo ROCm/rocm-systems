@@ -73,6 +73,11 @@ add_subdirectory(roctx)
 add_subdirectory(rocprofiler)
 
 #
+# mock tool library
+#
+add_subdirectory(generic-tool)
+
+#
 # common to multiple tests
 #
 find_package(Threads REQUIRED)
@@ -90,13 +95,20 @@ target_compile_definitions(rocprofiler-register-tests-strong
 add_library(rocprofiler-register-tests-weak INTERFACE)
 target_compile_definitions(rocprofiler-register-tests-weak INTERFACE ROCP_REG_TEST_WEAK=1)
 
+add_library(rocprofiler-register-tests-tool INTERFACE)
+target_link_options(rocprofiler-register-tests-tool INTERFACE -Wl,--no-as-needed)
+target_link_libraries(rocprofiler-register-tests-tool
+                      INTERFACE generic-tool::generic-tool)
+
 add_library(rocprofiler-register-tests-rocp INTERFACE)
 target_link_options(rocprofiler-register-tests-rocp INTERFACE -Wl,--no-as-needed)
-target_link_libraries(rocprofiler-register-tests-rocp INTERFACE rocprofiler::rocprofiler)
+target_link_libraries(rocprofiler-register-tests-rocp
+                      INTERFACE rocprofiler::rocprofiler generic-tool::generic-tool)
 
 add_library(rocprofiler-register::tests-common ALIAS rocprofiler-register-tests-common)
 add_library(rocprofiler-register::tests-strong ALIAS rocprofiler-register-tests-strong)
 add_library(rocprofiler-register::tests-weak ALIAS rocprofiler-register-tests-weak)
+add_library(rocprofiler-register::tests-tool ALIAS rocprofiler-register-tests-tool)
 add_library(rocprofiler-register::tests-rocp ALIAS rocprofiler-register-tests-rocp)
 
 #
@@ -146,7 +158,10 @@ function(rocp_register_test_executable _NAME)
     rocp_register_add_test(${_NAME} ${_NAME} "" "${RRTE_CORE_PASS_REGEX}"
                            "${RRTE_CORE_FAIL_REGEX}")
 
-    rocp_register_add_test(${_NAME}-preload ${_NAME} "LD_PRELOAD=librocprofiler64.so"
+    rocp_register_add_test(${_NAME}-preload ${_NAME} "LD_PRELOAD=libgeneric-tool.so"
+                           "${RRTE_PRELOAD_PASS_REGEX}" "${RRTE_PRELOAD_FAIL_REGEX}")
+
+    rocp_register_add_test(${_NAME}-env ${_NAME} "ROCP_TOOL_LIBRARIES=libgeneric-tool.so"
                            "${RRTE_PRELOAD_PASS_REGEX}" "${RRTE_PRELOAD_FAIL_REGEX}")
 
     rocp_register_add_test(${_NAME}-wrap ${_NAME} "ROCP_REG_TEST_WRAP=1"
@@ -154,7 +169,12 @@ function(rocp_register_test_executable _NAME)
 
     rocp_register_add_test(
         ${_NAME}-preload-wrap ${_NAME}
-        "LD_PRELOAD=librocprofiler64.so;ROCP_REG_TEST_WRAP=1"
+        "LD_PRELOAD=libgeneric-tool.so;ROCP_REG_TEST_WRAP=1"
+        "${RRTE_PRELOAD_WRAP_PASS_REGEX}" "${RRTE_PRELOAD_WRAP_FAIL_REGEX}")
+
+    rocp_register_add_test(
+        ${_NAME}-env-wrap ${_NAME}
+        "ROCP_TOOL_LIBRARIES=libgeneric-tool.so;ROCP_REG_TEST_WRAP=1"
         "${RRTE_PRELOAD_WRAP_PASS_REGEX}" "${RRTE_PRELOAD_WRAP_FAIL_REGEX}")
 
 endfunction()
@@ -190,6 +210,21 @@ rocp_register_test_executable(
     )
 
 rocp_register_test_executable(
+    test-amdhip-roctx-tool
+    SOURCES test-amdhip-roctx.cpp
+    LIBRARIES rocprofiler-register::tests-strong amdhip::amdhip roctx::roctx
+              rocprofiler-register::tests-tool
+    CORE_PASS_REGEX
+        ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.hsa-runtime.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 8\n.amdhip.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 16\n.roctx.cpp..push. thread-main\n.roctx.cpp..pop. thread-main\n"
+    PRELOAD_PASS_REGEX
+        ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.hsa-runtime.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 8\n.amdhip.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 16\n.roctx.cpp..push. thread-main\n.roctx.cpp..pop. thread-main\n"
+    WRAP_PASS_REGEX
+        ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 8\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 16\n.rocprofiler.cpp..push. thread-main\n.rocprofiler.cpp..pop. thread-main\n"
+    PRELOAD_WRAP_PASS_REGEX
+        ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 8\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 16\n.rocprofiler.cpp..push. thread-main\n.rocprofiler.cpp..pop. thread-main\n"
+    )
+
+rocp_register_test_executable(
     test-amdhip-roctx-rocp
     SOURCES test-amdhip-roctx.cpp
     LIBRARIES rocprofiler-register::tests-strong amdhip::amdhip roctx::roctx
@@ -202,6 +237,20 @@ rocp_register_test_executable(
         ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 8\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 16\n.rocprofiler.cpp..push. thread-main\n.rocprofiler.cpp..pop. thread-main\n"
     PRELOAD_WRAP_PASS_REGEX
         ".rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 8\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 16\n.rocprofiler.cpp..push. thread-main\n.rocprofiler.cpp..pop. thread-main\n"
+    )
+
+rocp_register_test_executable(
+    test-amdhip-roctx-weak-tool
+    SOURCES test-amdhip-roctx.cpp
+    LIBRARIES rocprofiler-register::tests-weak rocprofiler-register::tests-tool
+    CORE_PASS_REGEX
+        ".fwd.hpp. dlopen libamdhip64.so, 1\n.fwd.hpp. dlopen libroctx64.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.hsa-runtime.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 8\n.amdhip.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 16\n.roctx.cpp..push. thread-main\n.roctx.cpp..pop. thread-main\n"
+    PRELOAD_PASS_REGEX
+        ".fwd.hpp. dlopen libamdhip64.so, 1\n.fwd.hpp. dlopen libroctx64.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.hsa-runtime.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 8\n.amdhip.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 16\n.roctx.cpp..push. thread-main\n.roctx.cpp..pop. thread-main\n"
+    WRAP_PASS_REGEX
+        ".fwd.hpp. dlopen libamdhip64.so, 1\n.fwd.hpp. dlopen libroctx64.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 8\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 16\n.rocprofiler.cpp..push. thread-main\n.rocprofiler.cpp..pop. thread-main\n"
+    PRELOAD_WRAP_PASS_REGEX
+        ".fwd.hpp. dlopen libamdhip64.so, 1\n.fwd.hpp. dlopen libroctx64.so, 1\n.rocprofiler.cpp. rocp_ctor\n.rocprofiler.cpp. hsa :: 20100 :: 0 :: 1\n.hsa-runtime.cpp. hsa identifier 0\n.rocprofiler.cpp. hsa_init\n.rocprofiler.cpp. hip :: 60001 :: 0 :: 1\n.amdhip.cpp. hip identifier 8\n.rocprofiler.cpp. hip_init\n.rocprofiler.cpp. roctx :: 40601 :: 0 :: 1\n.roctx.cpp. roctx identifier 16\n.rocprofiler.cpp..push. thread-main\n.rocprofiler.cpp..pop. thread-main\n"
     )
 
 rocp_register_test_executable(
@@ -456,7 +505,7 @@ set_tests_properties(
     test-rocprofiler-register-library-base-path
     PROPERTIES
         ENVIRONMENT
-        "LD_LIBRARY_PATH=${CMAKE_LIBRARY_OUTPUT_DIRECTORY};ROCPROFILER_REGISTER_LIBRARY=librocprofiler64.so;ROCPROFILER_REGISTER_SECURE=yes;ROCPROFILER_REGISTER_VERBOSE=3;ROCPROFILER_REGISTER_MONOCHROME=true"
+        "LD_LIBRARY_PATH=${CMAKE_LIBRARY_OUTPUT_DIRECTORY};ROCPROFILER_REGISTER_LIBRARY=librocprofiler-sdk.so.0;ROCPROFILER_REGISTER_SECURE=yes;ROCPROFILER_REGISTER_VERBOSE=3;ROCPROFILER_REGISTER_MONOCHROME=true"
         LABELS
         "dlopen;secure")
 
@@ -469,6 +518,6 @@ set_tests_properties(
     test-rocprofiler-register-library-absolute-path
     PROPERTIES
         ENVIRONMENT
-        "LD_LIBRARY_PATH=${CMAKE_LIBRARY_OUTPUT_DIRECTORY};ROCPROFILER_REGISTER_LIBRARY=${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/librocprofiler64.so;ROCPROFILER_REGISTER_SECURE=yes;ROCPROFILER_REGISTER_VERBOSE=3;ROCPROFILER_REGISTER_MONOCHROME=true"
+        "LD_LIBRARY_PATH=${CMAKE_LIBRARY_OUTPUT_DIRECTORY};ROCPROFILER_REGISTER_LIBRARY=${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/librocprofiler-sdk.so.0;ROCPROFILER_REGISTER_SECURE=yes;ROCPROFILER_REGISTER_VERBOSE=3;ROCPROFILER_REGISTER_MONOCHROME=true"
         LABELS
         "dlopen;secure")

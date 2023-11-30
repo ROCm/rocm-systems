@@ -3,6 +3,7 @@
 #include <hsa-runtime/hsa-runtime.hpp>
 #include <roctx/roctx.hpp>
 
+#include <dlfcn.h>
 #include <pthread.h>
 #include <stdexcept>
 #include <string_view>
@@ -42,48 +43,9 @@ roctx_range_pop(const char* name)
 }  // namespace rocprofiler
 
 extern "C" {
-typedef struct
-{
-    const char*    name;    ///< clients should set this value for debugging
-    const uint32_t handle;  ///< internal handle
-} rocprofiler_client_id_t;
-
-typedef void (*rocprofiler_client_finalize_t)(rocprofiler_client_id_t);
-
-typedef int (*rocprofiler_tool_initialize_t)(rocprofiler_client_finalize_t finalize_func,
-                                             void*                         tool_data);
-
-typedef void (*rocprofiler_tool_finalize_t)(void* tool_data);
-
-typedef struct
-{
-    size_t                        size;        ///< in case of future extensions
-    rocprofiler_tool_initialize_t initialize;  ///< context creation
-    rocprofiler_tool_finalize_t   finalize;    ///< cleanup
-    void* tool_data;  ///< data to provide to init and fini callbacks
-} rocprofiler_tool_configure_result_t;
-
-rocprofiler_tool_configure_result_t*
-rocprofiler_configure(uint32_t, const char*, uint32_t, rocprofiler_client_id_t*)
-    __attribute__((visibility("default")));
-
 int
 rocprofiler_set_api_table(const char*, uint64_t, uint64_t, void**, uint64_t)
     __attribute__((visibility("default")));
-
-rocprofiler_tool_configure_result_t*
-rocprofiler_configure(uint32_t                 version,
-                      const char*              runtime_version,
-                      uint32_t                 priority,
-                      rocprofiler_client_id_t* tool_id)
-{
-    (void) version;
-    (void) runtime_version;
-    (void) priority;
-    (void) tool_id;
-
-    return nullptr;
-}
 
 int
 rocprofiler_set_api_table(const char* name,
@@ -98,6 +60,20 @@ rocprofiler_set_api_table(const char* name,
            lib_version,
            lib_instance,
            num_tables);
+
+    auto* _tool_libs = std::getenv("ROCP_TOOL_LIBRARIES");
+    if(_tool_libs)
+    {
+        auto* _handle = dlopen(_tool_libs, RTLD_GLOBAL | RTLD_LAZY);
+        if(!_handle)
+            throw std::runtime_error{ std::string{ "error opening tool library " } +
+                                      _tool_libs };
+        auto* _sym = dlsym(_handle, "rocprofiler_configure");
+        if(!_sym)
+            throw std::runtime_error{ std::string{ "tool library " } +
+                                      std::string{ _tool_libs } +
+                                      " did not contain rocprofiler_configure symbol" };
+    }
 
     using hip_table_t   = hip::HipApiTable;
     using hsa_table_t   = hsa::HsaApiTable;

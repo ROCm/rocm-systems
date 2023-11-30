@@ -8,7 +8,7 @@ target_include_directories(rocprofiler PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_
                                               $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}>)
 set_target_properties(
     rocprofiler
-    PROPERTIES OUTPUT_NAME rocprofiler64
-               SOVERSION 2
-               VERSION 2.0.0)
+    PROPERTIES OUTPUT_NAME rocprofiler-sdk
+               SOVERSION 0
+               VERSION 0.0.0)
 rocp_register_strip_target(rocprofiler)

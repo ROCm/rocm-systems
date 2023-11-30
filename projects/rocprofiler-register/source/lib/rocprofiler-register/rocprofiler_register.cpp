@@ -77,6 +77,7 @@ namespace
 {
 using namespace rocprofiler_register;
 using rocprofiler_set_api_table_t = decltype(::rocprofiler_set_api_table)*;
+using rocp_set_api_table_data_t   = std::tuple<void*, rocprofiler_set_api_table_t>;
 using bitset_t = std::bitset<sizeof(rocprofiler_register_library_indentifier_t::handle)>;
 
 static_assert(sizeof(bitset_t) ==
@@ -85,7 +86,7 @@ static_assert(sizeof(bitset_t) ==
 
 int rocprofiler_register_verbose = common::get_env("ROCPROFILER_REGISTER_VERBOSE", 0);
 constexpr int  rocprofiler_register_info_level     = 2;
-constexpr auto rocprofiler_lib_name                = "librocprofiler64.so";
+constexpr auto rocprofiler_lib_name                = "librocprofiler-sdk.so";
 constexpr auto rocprofiler_lib_register_entrypoint = "rocprofiler_set_api_table";
 constexpr auto rocprofiler_register_lib_name =
     "librocprofiler-register.so." ROCPROFILER_REGISTER_SOVERSION;
@@ -108,6 +109,9 @@ struct supported_library_trait
     static constexpr const char* const library_name = nullptr;
 };
 
+template <size_t Idx>
+struct rocp_reg_error_message;
+
 #define ROCP_REG_DEFINE_LIBRARY_TRAITS(ENUM, NAME, SYM_NAME, LIB_NAME)                   \
     template <>                                                                          \
     struct supported_library_trait<ENUM>                                                 \
@@ -117,6 +121,13 @@ struct supported_library_trait
         static constexpr auto common_name  = NAME;                                       \
         static constexpr auto symbol_name  = SYM_NAME;                                   \
         static constexpr auto library_name = LIB_NAME;                                   \
+    };
+
+#define ROCP_REG_DEFINE_ERROR_MESSAGE(ENUM, MSG)                                         \
+    template <>                                                                          \
+    struct rocp_reg_error_message<ENUM>                                                  \
+    {                                                                                    \
+        static constexpr auto value = MSG;                                               \
     };
 
 ROCP_REG_DEFINE_LIBRARY_TRAITS(ROCP_REG_HSA,
@@ -134,6 +145,20 @@ ROCP_REG_DEFINE_LIBRARY_TRAITS(ROCP_REG_ROCTX,
                                "rocprofiler_register_import_roctx",
                                "libroctx64.so.[4-9]($|\\.[0-9\\.]+)")
 
+ROCP_REG_DEFINE_ERROR_MESSAGE(ROCP_REG_SUCCESS, "Success")
+ROCP_REG_DEFINE_ERROR_MESSAGE(ROCP_REG_NO_TOOLS, "rocprofiler-register found no tools")
+ROCP_REG_DEFINE_ERROR_MESSAGE(ROCP_REG_DEADLOCK, "rocprofiler-register deadlocked")
+ROCP_REG_DEFINE_ERROR_MESSAGE(ROCP_REG_BAD_API_TABLE_LENGTH,
+                              "Library passed an invalid number of API tables")
+ROCP_REG_DEFINE_ERROR_MESSAGE(ROCP_REG_UNSUPPORTED_API, "Library's API is not supported")
+ROCP_REG_DEFINE_ERROR_MESSAGE(ROCP_REG_INVALID_API_ADDRESS,
+                              "Invalid API address (secure mode enabled)")
+ROCP_REG_DEFINE_ERROR_MESSAGE(ROCP_REG_ROCPROFILER_ERROR,
+                              "Unspecified rocprofiler-register error")
+ROCP_REG_DEFINE_ERROR_MESSAGE(
+    ROCP_REG_EXCESS_API_INSTANCES,
+    "Too many instances of the same library API were registered")
+
 auto
 get_this_library_path()
 {
@@ -143,6 +168,23 @@ get_this_library_path()
         << rocprofiler_register_lib_name
         << " could not locate itself in the list of loaded libraries";
     return fs::path{ *_this_lib_path }.parent_path().string();
+}
+
+template <size_t Idx, size_t... Tail>
+constexpr auto
+rocprofiler_register_error_string(rocprofiler_register_error_code_t _ec,
+                                  std::index_sequence<Idx, Tail...>)
+{
+    if(_ec == Idx) return rocp_reg_error_message<Idx>::value;
+
+    if constexpr(sizeof...(Tail) > 0)
+    {
+        return rocprofiler_register_error_string(_ec, std::index_sequence<Tail...>{});
+    }
+    else
+    {
+        return "rocprofiler_register_unknown_error";
+    }
 }
 
 struct rocp_import
@@ -169,71 +211,35 @@ auto rocp_reg_get_imports(std::index_sequence<Idx...>)
     return _data;
 }
 
+rocp_set_api_table_data_t
+rocp_load_rocprofiler_lib(std::string _rocp_reg_lib);
+
 auto
 rocp_reg_scan_for_tools()
 {
-    auto _rocp_reg_lib = common::get_env("ROCPROFILER_REGISTER_LIBRARY", std::string{});
-    bool _force_tool =
-        common::get_env("ROCPROFILER_REGISTER_FORCE_LOAD", !_rocp_reg_lib.empty());
-    bool _found_tool = (rocprofiler_configure != nullptr || _force_tool);
+    auto* _configure_func = dlsym(RTLD_DEFAULT, "rocprofiler_configure");
+    auto  _rocp_tool_libs = common::get_env("ROCP_TOOL_LIBRARIES", std::string{});
+    auto  _rocp_reg_lib = common::get_env("ROCPROFILER_REGISTER_LIBRARY", std::string{});
+    bool  _force_tool =
+        common::get_env("ROCPROFILER_REGISTER_FORCE_LOAD",
+                        !_rocp_reg_lib.empty() || !_rocp_tool_libs.empty());
+    bool _found_tool =
+        (rocprofiler_configure != nullptr || _configure_func != nullptr || _force_tool);
 
     static void*                       rocprofiler_lib_handle    = nullptr;
     static rocprofiler_set_api_table_t rocprofiler_lib_config_fn = nullptr;
 
-    if(_force_tool)
+    if(_found_tool)
     {
         if(rocprofiler_lib_handle && rocprofiler_lib_config_fn)
             return std::make_pair(rocprofiler_lib_handle, rocprofiler_lib_config_fn);
 
-        if(_rocp_reg_lib.empty()) _rocp_reg_lib = rocprofiler_lib_name;
+        std::tie(rocprofiler_lib_handle, rocprofiler_lib_config_fn) =
+            rocp_load_rocprofiler_lib(rocprofiler_lib_name);
 
-        auto _rocp_reg_lib_path       = fs::path{ _rocp_reg_lib };
-        auto _rocp_reg_lib_path_fname = _rocp_reg_lib_path.filename();
-        auto _rocp_reg_lib_path_abs =
-            (_rocp_reg_lib_path.is_absolute())
-                ? _rocp_reg_lib_path
-                : (fs::path{ get_this_library_path() } / _rocp_reg_lib_path_fname);
-
-        // check to see if the rocprofiler library is already loaded
-        rocprofiler_lib_handle =
-            dlopen(_rocp_reg_lib_path.c_str(), RTLD_NOLOAD | RTLD_LAZY);
-
-        // try to load with the given path
-        if(!rocprofiler_lib_handle)
-        {
-            rocprofiler_lib_handle =
-                dlopen(_rocp_reg_lib_path.c_str(), RTLD_GLOBAL | RTLD_LAZY);
-        }
-
-        // try to load with the absoulte path
-        if(!rocprofiler_lib_handle)
-        {
-            _rocp_reg_lib_path = _rocp_reg_lib_path_abs;
-            rocprofiler_lib_handle =
-                dlopen(_rocp_reg_lib_path.c_str(), RTLD_GLOBAL | RTLD_LAZY);
-        }
-
-        // try to load with the basename path
-        if(!rocprofiler_lib_handle)
-        {
-            _rocp_reg_lib_path = _rocp_reg_lib_path_fname;
-            rocprofiler_lib_handle =
-                dlopen(_rocp_reg_lib_path.c_str(), RTLD_GLOBAL | RTLD_LAZY);
-        }
-
-        if(rocprofiler_register_verbose >= rocprofiler_register_info_level)
-            LOG(INFO) << "loaded " << _rocp_reg_lib_path_fname.string() << " library at "
-                      << _rocp_reg_lib_path.string();
-
-        LOG_IF(FATAL, rocprofiler_lib_handle == nullptr)
-            << _rocp_reg_lib << " failed to load\n";
-
-        *(void**) (&rocprofiler_lib_config_fn) =
-            dlsym(rocprofiler_lib_handle, rocprofiler_lib_register_entrypoint);
-
-        LOG_IF(FATAL, rocprofiler_lib_config_fn == nullptr)
-            << _rocp_reg_lib << " did not contain '"
-            << rocprofiler_lib_register_entrypoint << "' symbol\n";
+        if(!rocprofiler_lib_config_fn)
+            std::tie(rocprofiler_lib_handle, rocprofiler_lib_config_fn) =
+                rocp_load_rocprofiler_lib("librocprofiler64.so");
     }
     else if(_found_tool && rocprofiler_set_api_table)
     {
@@ -241,6 +247,66 @@ rocp_reg_scan_for_tools()
     }
 
     return std::make_pair(rocprofiler_lib_handle, rocprofiler_lib_config_fn);
+}
+
+rocp_set_api_table_data_t
+rocp_load_rocprofiler_lib(std::string _rocp_reg_lib)
+{
+    void*                       rocprofiler_lib_handle    = nullptr;
+    rocprofiler_set_api_table_t rocprofiler_lib_config_fn = nullptr;
+
+    if(rocprofiler_set_api_table) rocprofiler_lib_config_fn = &rocprofiler_set_api_table;
+
+    if(_rocp_reg_lib.empty()) _rocp_reg_lib = rocprofiler_lib_name;
+
+    auto _rocp_reg_lib_path       = fs::path{ _rocp_reg_lib };
+    auto _rocp_reg_lib_path_fname = _rocp_reg_lib_path.filename();
+    auto _rocp_reg_lib_path_abs =
+        (_rocp_reg_lib_path.is_absolute())
+            ? _rocp_reg_lib_path
+            : (fs::path{ get_this_library_path() } / _rocp_reg_lib_path_fname);
+
+    // check to see if the rocprofiler library is already loaded
+    rocprofiler_lib_handle = dlopen(_rocp_reg_lib_path.c_str(), RTLD_NOLOAD | RTLD_LAZY);
+
+    // try to load with the given path
+    if(!rocprofiler_lib_handle)
+    {
+        rocprofiler_lib_handle =
+            dlopen(_rocp_reg_lib_path.c_str(), RTLD_GLOBAL | RTLD_LAZY);
+    }
+
+    // try to load with the absoulte path
+    if(!rocprofiler_lib_handle)
+    {
+        _rocp_reg_lib_path = _rocp_reg_lib_path_abs;
+        rocprofiler_lib_handle =
+            dlopen(_rocp_reg_lib_path.c_str(), RTLD_GLOBAL | RTLD_LAZY);
+    }
+
+    // try to load with the basename path
+    if(!rocprofiler_lib_handle)
+    {
+        _rocp_reg_lib_path = _rocp_reg_lib_path_fname;
+        rocprofiler_lib_handle =
+            dlopen(_rocp_reg_lib_path.c_str(), RTLD_GLOBAL | RTLD_LAZY);
+    }
+
+    if(rocprofiler_register_verbose >= rocprofiler_register_info_level)
+        LOG(INFO) << "loaded " << _rocp_reg_lib_path_fname.string() << " library at "
+                  << _rocp_reg_lib_path.string();
+
+    LOG_IF(FATAL, rocprofiler_lib_handle == nullptr)
+        << _rocp_reg_lib << " failed to load\n";
+
+    *(void**) (&rocprofiler_lib_config_fn) =
+        dlsym(rocprofiler_lib_handle, rocprofiler_lib_register_entrypoint);
+
+    LOG_IF(FATAL, rocprofiler_lib_config_fn == nullptr)
+        << _rocp_reg_lib << " did not contain '" << rocprofiler_lib_register_entrypoint
+        << "' symbol\n";
+
+    return std::make_tuple(rocprofiler_lib_handle, rocprofiler_lib_config_fn);
 }
 
 constexpr auto library_seq       = std::make_index_sequence<ROCP_REG_LAST>{};
@@ -353,21 +419,7 @@ rocprofiler_register_library_api_table(
 const char*
 rocprofiler_register_error_string(rocprofiler_register_error_code_t _ec)
 {
-    switch(_ec)
-    {
-        case ROCP_REG_SUCCESS: return "rocprofiler_register_success";
-        case ROCP_REG_NO_TOOLS: return "rocprofiler_register_no_tools";
-        case ROCP_REG_DEADLOCK: return "rocprofiler_register_deadlock";
-        case ROCP_REG_BAD_API_TABLE_LENGTH:
-            return "rocprofiler_register_bad_api_table_length";
-        case ROCP_REG_UNSUPPORTED_API: return "rocprofiler_register_unsupported_api";
-        case ROCP_REG_INVALID_API_ADDRESS:
-            return "rocprofiler_register_invalid_api_address";
-        case ROCP_REG_ROCPROFILER_ERROR: return "rocprofiler_register_rocprofiler_error";
-        case ROCP_REG_EXCESS_API_INSTANCES:
-            return "rocprofiler_register_excess_api_instances";
-        case ROCP_REG_ERROR_CODE_END: return "rocprofiler_register_unknown_error";
-    }
-    return "rocprofiler_register_unknown_error";
+    return rocprofiler_register_error_string(
+        _ec, std::make_index_sequence<ROCP_REG_ERROR_CODE_END>{});
 }
 }
