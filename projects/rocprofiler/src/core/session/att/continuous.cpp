@@ -27,19 +27,71 @@
 
 #define __NR_gettid 186
 
+#define ATT_MARKER_HEADER_CHANNEL HSA_VEN_AMD_AQLPROFILE_ATT_CHANNEL_0
+#define ATT_MARKER_SIZE_CHANNEL HSA_VEN_AMD_AQLPROFILE_ATT_CHANNEL_1
+#define ATT_MARKER_LO_CHANNEL HSA_VEN_AMD_AQLPROFILE_ATT_CHANNEL_2
+#define ATT_MARKER_HI_CHANNEL HSA_VEN_AMD_AQLPROFILE_ATT_CHANNEL_3
+
+enum rocprofiler_att_marker_type_t {
+  ROCPROFILER_ATT_MARKER_LOAD = 0,
+  ROCPROFILER_ATT_MARKER_UNLOAD = 1
+};
+
+union att_header_marker_t
+{
+  uint32_t raw;
+  struct {
+    uint32_t type : 2;
+    uint32_t id : 30;
+  };
+};
+
 namespace rocprofiler {
 
 namespace att {
 
-void AttTracer::InsertMarker(
+void AttTracer::InsertUnloadMarker(
   std::vector<packet_t>& transformed_packets,
   hsa_agent_t agent,
   uint32_t data
 ) {
+  att_header_marker_t header{.raw = 0};
+  header.type = ROCPROFILER_ATT_MARKER_UNLOAD;
+  header.id = data;
+  hsa_ven_amd_aqlprofile_att_marker_channel_t channel = ATT_MARKER_HEADER_CHANNEL;
+
+  this->InsertMarker(transformed_packets, agent, header.raw, channel);
+}
+
+void AttTracer::InsertLoadMarker(
+  std::vector<packet_t>& transformed_packets,
+  hsa_agent_t agent,
+  rocprofiler_intercepted_codeobj_t codeobj
+) {
+  this->InsertMarker(transformed_packets, agent, codeobj.mem_size, ATT_MARKER_SIZE_CHANNEL);
+
+  uint64_t addr = codeobj.base_address;
+  this->InsertMarker(transformed_packets, agent, addr & ((1ul << 32)-1), ATT_MARKER_LO_CHANNEL);
+  this->InsertMarker(transformed_packets, agent, addr >> 32, ATT_MARKER_HI_CHANNEL);
+
+  att_header_marker_t header{.raw = 0};
+  header.type = ROCPROFILER_ATT_MARKER_LOAD;
+  header.id = codeobj.att_marker_id;
+  this->InsertMarker(transformed_packets, agent, header.raw, ATT_MARKER_HEADER_CHANNEL);
+}
+
+void AttTracer::InsertMarker(
+  std::vector<packet_t>& transformed_packets,
+  hsa_agent_t agent,
+  uint32_t data,
+  hsa_ven_amd_aqlprofile_att_marker_channel_t channel
+) {
   packet_t marker_packet{};
-  auto desc = Packet::GenerateATTMarkerPackets(agent, marker_packet, data);
+  auto desc = Packet::GenerateATTMarkerPackets(agent, marker_packet, data, channel);
   if (desc.ptr && desc.size)
     Packet::AddVendorSpecificPacket(&marker_packet, &transformed_packets, hsa_signal_t{.handle = 0});
+  else
+    rocprofiler::warning("Could not add ATT Marker");
 }
 
 
@@ -63,25 +115,26 @@ bool AttTracer::ATTContiguousWriteInterceptor(
 
   // att start
   // Getting Queue Data and Information
+  auto agent_handle = queue_info.GetGPUAgent().handle;
   rocprofiler::HSAAgentInfo& agentInfo = rocprofiler::HSASupport_Singleton::GetInstance()
-                                        .GetHSAAgentInfo(queue_info.GetGPUAgent().handle);
+                                        .GetHSAAgentInfo(agent_handle);
 
   auto dispatchPackets = Packet::ExtractDispatchPackets(packets, pkt_count);
   if (dispatchPackets.size() == 0) return false;
 
   size_t writer_id = WRITER_ID.fetch_add(dispatchPackets.size(), std::memory_order_relaxed);
-  uint32_t new_load_cnt = codeobj_capture_instance::GetLoadCount();
+  uint32_t new_load_cnt = codeobj_capture_instance::GetEventCount();
 
   auto bInsertStart = RequiresStartPacket(writer_id, dispatchPackets.size());
   {
     std::lock_guard<std::mutex> lk(att_enable_disable_mutex);
     // If att_start already exists, don't start again
-    auto agent_pending_packets = pending_stop_packets.find(queue_info.GetGPUAgent().handle);
+    auto agent_pending_packets = pending_stop_packets.find(agent_handle);
     if (agent_pending_packets != pending_stop_packets.end())
       bInsertStart = {};
 
     // If nothing will be added or removed, return
-    if (!bInsertStart && codeobj_load_cnt == new_load_cnt)
+    if (!bInsertStart && codeobj_event_cnt == new_load_cnt)
     {
       if (
         agent_pending_packets == pending_stop_packets.end() ||
@@ -107,7 +160,7 @@ bool AttTracer::ATTContiguousWriteInterceptor(
     }
 
     uint64_t IsGFX9 = HSASupport_Singleton::GetInstance()
-                      .GetHSAAgentInfo(queue_info.GetGPUAgent().handle)
+                      .GetHSAAgentInfo(agent_handle)
                       .GetDeviceInfo()
                       .getName()
                       .find("gfx9") != std::string::npos;
@@ -134,33 +187,58 @@ bool AttTracer::ATTContiguousWriteInterceptor(
       0
     );
 
-    codeobj_record::make_capture(rocprofiler_record_id_t{record_id}, capturem, IsGFX9);
-    codeobj_record::start_capture(rocprofiler_record_id_t{record_id});
+    this->capture_id = rocprofiler_record_id_t{record_id};
+    codeobj_record::make_capture(this->capture_id, capturem, IsGFX9);
+    codeobj_record::start_capture(this->capture_id);
 
     stop_packet.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC << HSA_PACKET_HEADER_TYPE;
     std::lock_guard<std::mutex> lk(att_enable_disable_mutex);
-    pending_stop_packets[queue_info.GetGPUAgent().handle]
+    pending_stop_packets[agent_handle]
                 = {record_id, writer_id, bInsertStart->second, session_id_, stop_packet};
   }
 
-  if (codeobj_load_cnt != new_load_cnt)
+  bool bHasPending = false;
   {
-    codeobj_load_cnt = new_load_cnt;
-    InsertMarker(transformed_packets, queue_info.GetGPUAgent(), new_load_cnt);
+    std::lock_guard<std::mutex> lk(att_enable_disable_mutex);
+    bHasPending = pending_stop_packets.find(agent_handle) != pending_stop_packets.end();
+  }
+
+  if (bHasPending && (bInsertStart || codeobj_event_cnt != new_load_cnt))
+  {
+    codeobj_event_cnt = new_load_cnt;
+
+    auto symbols = codeobj_record::get_capture(this->capture_id);
+    std::unordered_set<uint32_t> current_ids;
+
+    for (size_t s=0; s<symbols.count; s++)
+      current_ids.insert(symbols.symbols[s].att_marker_id);
+
+    for (uint32_t prev_id : active_capture_event_ids)
+      if (current_ids.find(prev_id) == current_ids.end())
+        InsertUnloadMarker(transformed_packets, queue_info.GetGPUAgent(), prev_id);
+
+    for (size_t s=0; s<symbols.count; s++)
+    {
+      auto& symbol = symbols.symbols[s];
+      if (active_capture_event_ids.find(symbol.att_marker_id) == active_capture_event_ids.end())
+        InsertLoadMarker(transformed_packets, queue_info.GetGPUAgent(), symbol);
+    }
+
+    active_capture_event_ids = std::move(current_ids);
   }
 
   // Searching across all the packets given during this write
   for (size_t i = 0; i < pkt_count; ++i)
     transformed_packets.emplace_back(packets_arr[i]);
 
+  if (bHasPending)
   {
     std::lock_guard<std::mutex> lk(att_enable_disable_mutex);
-    auto agent_pending_packets = pending_stop_packets.find(queue_info.GetGPUAgent().handle);
+    auto agent_pending_packets = pending_stop_packets.at(agent_handle);
 
-    if (agent_pending_packets != pending_stop_packets.end() &&
-        agent_pending_packets->second.last_kernel_exec <= writer_id + dispatchPackets.size()
-    ) {
-      const ATTRecordSignal& rsignal = agent_pending_packets->second;
+    if (agent_pending_packets.last_kernel_exec <= writer_id + dispatchPackets.size())
+    {
+      const ATTRecordSignal& rsignal = agent_pending_packets;
       // Adding a barrier packet with the original packet's completion signal.
       hsa_signal_t interrupt_signal;
       CreateSignal(0, &interrupt_signal);
@@ -180,8 +258,10 @@ bool AttTracer::ATTContiguousWriteInterceptor(
           interrupt_signal
       });
 
-      codeobj_record::stop_capture(rocprofiler_record_id_t{rsignal.record_id});
-      pending_stop_packets.erase(queue_info.GetGPUAgent().handle);
+      //codeobj_record::stop_capture(rocprofiler_record_id_t{rsignal.record_id});
+      codeobj_record::stop_capture(this->capture_id);
+      active_capture_event_ids.clear();
+      pending_stop_packets.erase(agent_handle);
     }
   }
 

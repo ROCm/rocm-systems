@@ -34,30 +34,44 @@
  */
 class codeobj_capture_instance {
  public:
-  codeobj_capture_instance(uint64_t _addr, const std::string& _uri, uint64_t mem_addr,
-                           uint64_t mem_size, uint64_t start_time, uint32_t id)
-    : addr(_addr), start_time(start_time), URI(_uri),
+  codeobj_capture_instance(
+    uint64_t _addr,
+    uint64_t _load_size,
+    const std::string& _uri,
+    uint64_t mem_addr,
+    uint64_t mem_size,
+    uint64_t start_time,
+    uint32_t id
+  )
+    : addr(_addr), load_size(_load_size), start_time(start_time), URI(_uri),
     mem_addr(mem_addr), mem_size(mem_size), load_id(id) {};
 
   void setmode(rocprofiler_codeobj_capture_mode_t mode);
 
   rocprofiler_intercepted_codeobj_t get() const {
     const char* buf_ptr = buffer.size() ? buffer.data() : nullptr;
-    return {URI.c_str(), addr, mem_size, buf_ptr, buffer.size(), start_time, end_time, load_id};
+    return {URI.c_str(), addr, load_size, buf_ptr, buffer.size(), start_time, end_time, load_id};
   };
 
   const uint64_t addr;
+  const uint64_t load_size;
   const uint64_t start_time;
   const uint32_t load_id;
 
-  static void Load(uint64_t addr, const std::string& URI, uint64_t mem_addr, uint64_t mem_size);
+  static void Load(
+    uint64_t addr,
+    uint64_t load_size,
+    const std::string& URI,
+    uint64_t mem_addr,
+    uint64_t mem_size
+  );
   static void Unload(uint64_t addr);
-  static uint32_t GetLoadCount() { return loadcount.load(std::memory_order_relaxed); }
+  static uint32_t GetEventCount() { return eventcount.load(std::memory_order_relaxed); }
 
  private:
   //! 32 bits ID because this is the natural channel width for ATT Markers.
   //! There is no world in which 4 billions markers can be sent anyway.
-  static std::atomic<uint32_t> loadcount;
+  static std::atomic<uint32_t> eventcount;
   void reset(rocprofiler_codeobj_capture_mode_t mode);
 
   std::pair<size_t, size_t> parse_uri();

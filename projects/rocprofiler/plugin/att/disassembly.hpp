@@ -20,9 +20,9 @@
 
 #pragma once
 
+#include <amd_comgr/amd_comgr.h>
 #include <string>
 #include <vector>
-#include <amd_comgr/amd_comgr.h>
 #include <memory>
 #include <limits>
 
@@ -48,7 +48,11 @@ struct SymbolInfo
 
 class DisassemblyInstance {
  public:
-  DisassemblyInstance(class code_object_decoder_t& decoder);
+  DisassemblyInstance(
+    const char* codeobj_data,
+    uint64_t codeobj_size,
+    std::optional<std::string> input_isa
+  );
   ~DisassemblyInstance();
 
   uint64_t ReadInstruction(uint64_t faddr, uint64_t vaddr, const char* cpp_line);
@@ -57,10 +61,11 @@ class DisassemblyInstance {
   static uint64_t memory_callback(uint64_t from, char* to, uint64_t size, void* user_data);
   static void inst_callback(const char* instruction, void* user_data);
   static amd_comgr_status_t symbol_callback(amd_comgr_symbol_t symbol, void* user_data);
-  static std::optional<uint64_t> va2fo(void *mem, uint64_t va);
 
-  void* buffer;
-  int64_t size;
+  std::optional<uint64_t> va2fo(uint64_t va);
+  std::vector<std::pair<uint64_t, uint64_t>> getSegments();
+
+  std::vector<char> buffer;
   instruction_instance_t last_instruction;
   amd_comgr_disassembly_info_t info;
   amd_comgr_data_t data;

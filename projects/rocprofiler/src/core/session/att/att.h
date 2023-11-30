@@ -93,7 +93,18 @@ public:
   void InsertMarker(
     std::vector<packet_t>& transformed_packets,
     hsa_agent_t agent,
+    uint32_t data,
+    hsa_ven_amd_aqlprofile_att_marker_channel_t channel
+  );
+  void InsertUnloadMarker(
+    std::vector<packet_t>& transformed_packets,
+    hsa_agent_t agent,
     uint32_t data
+  );
+  void InsertLoadMarker(
+    std::vector<packet_t>& transformed_packets,
+    hsa_agent_t agent,
+    rocprofiler_intercepted_codeobj_t codeobj
   );
 
   void SetParameters(const std::vector<rocprofiler_att_parameter_t>& params) {
@@ -125,7 +136,7 @@ protected:
   static std::mutex att_enable_disable_mutex;
 
 private:
-  uint32_t codeobj_load_cnt = 0;
+  uint32_t codeobj_event_cnt = 0;
 
   static void AddAttRecord(
     rocprofiler_record_att_tracer_t* record,
@@ -176,6 +187,9 @@ private:
 
   std::mutex sessions_pending_signals_lock_;
   std::map<uint32_t, std::vector<att_pending_signal_t>> sessions_pending_signals_;
+
+  rocprofiler_record_id_t capture_id;
+  std::unordered_set<uint32_t> active_capture_event_ids;
 };
 
 }  // namespace att

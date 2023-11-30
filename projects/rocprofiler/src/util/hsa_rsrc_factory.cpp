@@ -316,10 +316,8 @@ hsa_status_t HsaRsrcFactory::LoadAqlProfileLib(aqlprofile_pfn_t* api) {
   api->hsa_ven_amd_aqlprofile_iterate_data =
       (decltype(::hsa_ven_amd_aqlprofile_iterate_data)*)dlsym(
           handle, "hsa_ven_amd_aqlprofile_iterate_data");
-#ifdef HSA_ATT_MARKER_ENABLE
   api->hsa_ven_amd_aqlprofile_att_marker = (decltype(::hsa_ven_amd_aqlprofile_att_marker)*)
                                           dlsym(handle, "hsa_ven_amd_aqlprofile_att_marker");
-#endif
   return HSA_STATUS_SUCCESS;
 }
 

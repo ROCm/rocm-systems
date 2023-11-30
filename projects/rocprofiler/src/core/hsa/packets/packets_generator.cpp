@@ -18,8 +18,6 @@
  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  THE SOFTWARE. */
 
-//#define HSA_ATT_MARKER_ENABLE
-
 #include "packets_generator.h"
 #include "src/api/rocprofiler_singleton.h"
 
@@ -618,10 +616,13 @@ hsa_ven_amd_aqlprofile_profile_t* GenerateATTPackets(
 
 // Generate ATT tracer marker packets. Also generate and return
 // the descriptor object which has the PM4 buffer for inserting data
-hsa_ven_amd_aqlprofile_descriptor_t
-GenerateATTMarkerPackets(hsa_agent_t gpu_agent, packet_t& marker_packet, uint32_t data)
+hsa_ven_amd_aqlprofile_descriptor_t GenerateATTMarkerPackets(
+  hsa_agent_t gpu_agent,
+  packet_t& marker_packet,
+  uint32_t data,
+  hsa_ven_amd_aqlprofile_att_marker_channel_t channel
+)
 {
-#ifdef HSA_ATT_MARKER_ENABLE
   // Preparing the profile structure to get the packets
   auto pool = rocprofiler::HSASupport_Singleton::GetInstance()
                                                   .GetHSAAgentInfo(gpu_agent.handle)
@@ -635,7 +636,6 @@ GenerateATTMarkerPackets(hsa_agent_t gpu_agent, packet_t& marker_packet, uint32_
     {}, desc
   };
 
-  hsa_ven_amd_aqlprofile_att_marker_channel_t channel = HSA_VEN_AMD_AQLPROFILE_ATT_CHANNEL_2;
   hsa_status_t status = hsa_ven_amd_aqlprofile_att_marker(&profile, &marker_packet, data, channel);
   if (status != HSA_STATUS_SUCCESS)
   {
@@ -645,9 +645,6 @@ GenerateATTMarkerPackets(hsa_agent_t gpu_agent, packet_t& marker_packet, uint32_
   }
 
   return desc;
-#else
-  return {nullptr,0};
-#endif
 }
 
 void AddVendorSpecificPacket(const packet_t* packet,

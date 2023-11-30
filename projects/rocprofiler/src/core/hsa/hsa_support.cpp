@@ -503,7 +503,7 @@ hsa_status_t CodeObjectCallback(hsa_executable_t executable,
   if (data.codeobj.unload)
     codeobj_capture_instance::Unload(data.codeobj.load_base);
   else
-    codeobj_capture_instance::Load(data.codeobj.load_base,
+    codeobj_capture_instance::Load(data.codeobj.load_base, data.codeobj.load_size,
             uri_str, data.codeobj.memory_base, data.codeobj.memory_size);
 
   hsa_executable_iterate_agent_symbols(executable, data.codeobj.agent,

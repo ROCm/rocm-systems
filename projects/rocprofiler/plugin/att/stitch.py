@@ -186,6 +186,18 @@ class PCTranslator:
     def jump(self, as_line):
         return self.jump_map[as_line[-3]]
 
+    def addsymbol(self, addr):
+        if addr in self.addrmap:
+            return
+
+        symbol = self.codeservice.getSymbolName(addr)
+        if symbol is None:
+            symbol = "Unkown symbol at 0x" + hex(addr)
+
+        last_line = self.raw_code[-1]
+        newline = ['; ' + symbol, 100, last_line[2], 0, last_line[4], last_line[5], -1, 0, 0]
+        self.raw_code.append(newline)
+
     def getcode(self, addr):
         try:
             return self.addrmap[addr]
@@ -330,6 +342,7 @@ def stitch(insts, raw_code, jumps, gfxv, bIsAuto, codeservice):
                 return None
 
             watchlist = PCTranslator(insts, code, raw_code, reverse_map, codeservice)
+            watchlist.addsymbol(firstinst.cycles)
             line = firstinst.cycles
             lineincrement = watchlist.getincrement(line)
             pcskip.append(0)
@@ -517,8 +530,8 @@ def stitch(insts, raw_code, jumps, gfxv, bIsAuto, codeservice):
                 insts[i] = insts[i + 1]
                 insts[i + 1] = temp
                 next = line
-            elif "s_waitcnt " in as_line[0] or "_load_" in as_line[0]:
-                if skipped_immed > 0 and "s_waitcnt " in as_line[0]:
+            elif "s_waitcnt" in as_line[0] or "_load_" in as_line[0]:
+                if skipped_immed > 0 and "s_waitcnt" in as_line[0]:
                     matched = True
                     skipped_immed -= 1
                 elif 'scratch_' not in as_line[0]:
@@ -530,11 +543,12 @@ def stitch(insts, raw_code, jumps, gfxv, bIsAuto, codeservice):
             result.append(inst)
             i += 1
             num_failed_stitches = 0
-        elif not bGFX9 and inst.type == IMMED and line != next:
+        elif inst.type == IMMED and line != next and (not bGFX9 or 's_barrier' in as_line[0]):
             skipped_immed += 1
             inst.asmline = reverse_map[line]
             result.append(inst)
-            next = line
+            if 's_barrier' in as_line[0]:
+                next = line + lineincrement
             i += 1
         else:
             num_failed_stitches += 1

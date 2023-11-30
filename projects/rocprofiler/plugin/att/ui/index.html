@@ -682,13 +682,7 @@
 								const token_id = "token" + scroll_to
 								const token = d3.select('#'+token_id).node()
 								// scrolling not consistent without the timer
-								setTimeout(() => {
-									token.scrollIntoView({behavior: "smooth", inline: "start"})
-								}, 800)
-								const inView = isInViewport(src_line)
-								if (!inView) {
-									src_line.scrollIntoView({behavior: "smooth", block: "start"})
-								}
+								src_line.scrollIntoView({behavior: "smooth", block: "start"})
 							}
 						})
 						.text((d,i) => {
@@ -952,28 +946,27 @@
 						.attr("fill", (d) => { return INST_TYPE[d[1]][1] })
 						.style("cursor", "pointer")
 						.datum((d) => { return {data:d} })
-						.on('mouseenter', (d) => {
-							if (d) {
-								try {
-									const token = d3.select(d.toElement)
-									last_color = token.attr('fill')
-									token.attr('fill', '#e0115f')
-									let token_data = token.datum().data
-									d3.select(".highlight") .classed("highlight", false)
-									d3.select('.line_' + token_data[4]) .classed("highlight", true)
-									src_line = d3.select('.line_' + token_data[4]).node()
-									const inView = isInViewport(src_line)
-									if (!inView) {
-										src_line.scrollIntoView({behavior: "smooth", block: "start"})
-									}
-								} catch {}
-							}
+						.on('mouseenter', (e, d) => {
+							try {
+								d3.select('.line_' + d.data[4]).classed("highlight", true)
+								d3.select(".highlight") .classed("highlight", true)
+							} catch {}
 						})
-						.on("mouseleave", (d) => {
-							if (d) {
-								d3.select(d.fromElement) .attr("fill", last_color)
+						.on("mouseleave", (e, d) => {
+							try {
+								d3.select('.line_' + d.data[4]).classed("highlight", false)
 								d3.select(".highlight") .classed("highlight", false)
-							}
+							} catch {}
+						})
+						.on('click', (e, d) => {
+							try {
+								d3.select('.line_' + d.data[4]).classed("highlight", true)
+								src_line = d3.select('.line_' + d.data[4]).node()
+								const inView = isInViewport(src_line)
+								if (!inView) {
+									src_line.scrollIntoView({behavior: "smooth", block: "start"})
+								}
+							} catch {}
 						})
 						.append("svg:title")
 						.text((d) => {

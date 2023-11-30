@@ -69,11 +69,8 @@ catch (...)                                         \
   return returndata;                                \
 }
 
-code_object_decoder_t::code_object_decoder_t(const char* codeobj_data, uint64_t codeobj_size) {
-  buffer = std::vector<char>{};
-  buffer.resize(codeobj_size);
-  std::memcpy(buffer.data(), codeobj_data, codeobj_size);
-
+CodeObjDecoderComponent::CodeObjDecoderComponent(const char* codeobj_data, uint64_t codeobj_size)
+{
   m_fd = -1;
 #if defined(_GNU_SOURCE) && defined(MFD_ALLOW_SEALING) && defined(MFD_CLOEXEC)
   m_fd = ::memfd_create(m_uri.c_str(), MFD_ALLOW_SEALING | MFD_CLOEXEC);
@@ -86,7 +83,7 @@ code_object_decoder_t::code_object_decoder_t(const char* codeobj_data, uint64_t 
     return;
   }
 
-  if (size_t size = ::write(m_fd, buffer.data(), buffer.size()); size != buffer.size()) {
+  if (size_t size = ::write(m_fd, codeobj_data, codeobj_size); size != codeobj_size) {
     printf("could not write to the temporary file\n");
     return;
   }
@@ -130,26 +127,20 @@ code_object_decoder_t::code_object_decoder_t(const char* codeobj_data, uint64_t 
     // load_symbol_map();
   }
 
-  try {
-    disassembly = std::make_unique<DisassemblyInstance>(*this); // Can throw
-  } catch(std::exception& e) {
-    return;
-  }
+  disassembly = std::make_unique<DisassemblyInstance>(codeobj_data, codeobj_size, std::nullopt); // Can throw
   try {
     m_symbol_map = disassembly->GetKernelMap(); // Can throw
-  } catch(std::exception& e) {
-    return;
-  }
+  } catch(...) {}
 
   //disassemble_kernels();
 }
 
 
-code_object_decoder_t::~code_object_decoder_t() {
+CodeObjDecoderComponent::~CodeObjDecoderComponent() {
   if (m_fd) ::close(m_fd);
 }
 
-std::optional<SymbolInfo> code_object_decoder_t::find_symbol(uint64_t vaddr) {
+std::optional<SymbolInfo> CodeObjDecoderComponent::find_symbol(uint64_t vaddr) {
   /* Load the symbol table.  */
   auto it = m_symbol_map.upper_bound(vaddr);
   if (it == m_symbol_map.begin())
@@ -172,7 +163,7 @@ std::optional<SymbolInfo> code_object_decoder_t::find_symbol(uint64_t vaddr) {
 }
 
 std::pair<instruction_instance_t, size_t>
-code_object_decoder_t::disassemble_instruction(uint64_t faddr, uint64_t vaddr)
+CodeObjDecoderComponent::disassemble_instruction(uint64_t faddr, uint64_t vaddr)
 {
   if (!disassembly)
     throw std::exception();
@@ -191,7 +182,7 @@ code_object_decoder_t::disassemble_instruction(uint64_t faddr, uint64_t vaddr)
   return {disassembly->last_instruction, size};
 }
 
-void code_object_decoder_t::disassemble_kernel(uint64_t faddr, uint64_t vaddr)
+void CodeObjDecoderComponent::disassemble_kernel(uint64_t faddr, uint64_t vaddr)
 {
   if (!disassembly) return;
   auto symbol = find_symbol(vaddr);
@@ -216,17 +207,18 @@ void code_object_decoder_t::disassemble_kernel(uint64_t faddr, uint64_t vaddr)
   }
 }
 
-void code_object_decoder_t::disassemble_kernels() {
+void CodeObjDecoderComponent::disassemble_kernels() {
   for (auto& [vaddr, v] : m_symbol_map) disassemble_kernel(v.faddr, vaddr);
 }
 
-void code_object_decoder_t::disassemble_single_kernel(uint64_t kaddr) {
+void CodeObjDecoderComponent::disassemble_single_kernel(uint64_t kaddr) {
   for (auto& [vaddr, v] : m_symbol_map)
     if (kaddr >= vaddr && kaddr < vaddr + v.mem_size)
       disassemble_kernel(v.faddr, vaddr);
 }
 
-CodeobjService::CodeobjService(const char* filepath, uint64_t load_base): load_base(load_base)
+CodeobjDecoder::CodeobjDecoder(const char* filepath, uint64_t loadbase, uint64_t mem_size):
+  loadbase(loadbase), load_end(loadbase + mem_size)
 {
   if (!filepath) throw "Empty filepath.";
 
@@ -245,22 +237,23 @@ CodeobjService::CodeobjService(const char* filepath, uint64_t load_base): load_b
     file.seekg(0, file.beg);
     file.read(buffer.data(), buffer.size());
 
-    decoder = std::make_unique<code_object_decoder_t>(buffer.data(), buffer.size());
+    decoder = std::make_unique<CodeObjDecoderComponent>(buffer.data(), buffer.size());
   }
   else
   {
     std::unique_ptr<CodeObjectBinary> binary = std::make_unique<CodeObjectBinary>(filepath);
-    decoder = std::make_unique<code_object_decoder_t>(binary->buffer.data(), binary->buffer.size());
+    auto& buffer = binary->buffer;
+    decoder = std::make_unique<CodeObjDecoderComponent>(buffer.data(), buffer.size());
   }
+
+  auto elf_segments = decoder->disassembly->getSegments();
 }
 
-bool CodeobjService::decode_single(uint64_t vaddr, uint64_t faddr)
+bool CodeobjDecoder::add_to_map(uint64_t faddr, uint64_t vaddr, uint64_t voffset)
 {
-  if (!decoder->disassembly) return false;
-
   try
   {
-    decoded_map[vaddr] = decoder->disassemble_instruction(faddr, vaddr-load_base);
+    decoded_map[vaddr] = decoder->disassemble_instruction(faddr, voffset);
   }
   catch(std::exception& e)
   {
@@ -269,28 +262,27 @@ bool CodeobjService::decode_single(uint64_t vaddr, uint64_t faddr)
   return true;
 }
 
-std::pair<instruction_instance_t, size_t>& CodeobjService::getDecoded(uint64_t addr)
+bool CodeobjDecoder::decode_single_at_offset(uint64_t vaddr, uint64_t voffset)
+{
+  auto faddr = decoder->disassembly->va2fo(voffset);
+  if (!faddr)
+    return false;
+
+  return add_to_map(*faddr, vaddr, voffset);
+}
+
+bool CodeobjDecoder::decode_single(uint64_t vaddr)
+{
+  if (!decoder || vaddr < loadbase) return false;
+  return decode_single_at_offset(vaddr, vaddr-loadbase);
+}
+
+std::pair<instruction_instance_t, size_t>& CodeobjDecoder::getDecoded(uint64_t addr)
 {
   if (decoded_map.find(addr) != decoded_map.end())
     return decoded_map[addr];
 
-  std::optional<uint64_t> faddr{};
-
-  if (!bNotElfFILE)
-  {
-    faddr = DisassemblyInstance::va2fo(decoder->buffer.data(), addr-load_base);
-    if (!faddr)
-      bNotElfFILE = true;
-  }
-
-  if (bNotElfFILE && decoder->buffer.size() > 0x100) {
-    uint64_t f_offset = *reinterpret_cast<uint32_t*>(decoder->buffer.data()+0xb8);
-    uint64_t v_offset = *reinterpret_cast<uint32_t*>(decoder->buffer.data()+0xc8);
-
-    faddr = addr+f_offset-load_base-v_offset;
-  }
-
-  if (!faddr || !decode_single(addr, *faddr))
+  if (!decode_single(addr))
   {
     std::cerr << "Invalid addr: " << std::hex << addr << std::dec << std::endl;
     throw std::exception();
@@ -299,61 +291,48 @@ std::pair<instruction_instance_t, size_t>& CodeobjService::getDecoded(uint64_t a
   return decoded_map[addr];
 }
 
-std::unordered_map<uint64_t, std::unique_ptr<CodeobjService>> services{};
-std::atomic<uint64_t> shandles{1};
-
 #define PUBLIC_API __attribute__((visibility("default")))
+
+CodeobjTableTranslation table;
 
 extern "C"
 {
-  PUBLIC_API uint64_t createService(const char* filename, uint64_t load_base)
+  PUBLIC_API int addDecoder(const char* filename, uint32_t id, uint64_t loadbase, uint64_t memsize)
   {
     C_API_BEGIN
 
-    uint64_t handle = shandles.fetch_add(1);
-    services[handle] = std::make_unique<CodeobjService>(filename, load_base);
-    return handle;
+    table.addDecoder(filename, id, loadbase, memsize);
+    return 0;
 
-    C_API_END(0)
+    C_API_END(1)
   }
-  PUBLIC_API int deleteService(uint64_t handle)
+  PUBLIC_API int removeDecoder(uint32_t id, uint64_t loadbase)
   {
-    return services.erase(handle);
+    return table.removeDecoder(id, loadbase) != false;
   }
-  PUBLIC_API const char* getInstruction(uint64_t handle, uint64_t addr)
+  PUBLIC_API instruction_info_t getInstructionFromAddr(uint64_t vaddr)
   {
+    static instruction_info_t default_info{nullptr, nullptr, 0};
     C_API_BEGIN
 
-    return services.at(handle)->getInstruction(addr);
+    return table.get(vaddr);
 
-    C_API_END(nullptr)
+    C_API_END(default_info)
   }
-  PUBLIC_API const char* getCppref(uint64_t handle, uint64_t addr)
+  PUBLIC_API instruction_info_t getInstructionFromID(uint32_t id, uint64_t offset)
   {
-    C_API_BEGIN
-    
-    return services.at(handle)->getCppref(addr);
-
-    C_API_END(nullptr)
-  }
-  PUBLIC_API size_t getInstSize(uint64_t handle, uint64_t addr)
-  {
+    static instruction_info_t default_info{nullptr, nullptr, 0};
     C_API_BEGIN
 
-    return services.at(handle)->getSize(addr);
+    return table.get(id, offset);
 
-    C_API_END(0)
+    C_API_END(default_info)
   }
   PUBLIC_API const char* getSymbolName(uint64_t addr)
   {
     C_API_BEGIN
   
-    for (auto& [handle, service] : services)
-    {
-      if (!service->inrange(addr)) continue;
-      return service->getSymbolName(addr);
-    }
-    return nullptr;
+    return table.getSymbolName(addr);
 
     C_API_END(nullptr)
   }

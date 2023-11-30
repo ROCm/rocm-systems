@@ -61,7 +61,12 @@ hsa_ven_amd_aqlprofile_profile_t* GenerateATTPackets(
     packet_t* stop_packet, size_t att_buffer_size);
 
 hsa_ven_amd_aqlprofile_descriptor_t
-GenerateATTMarkerPackets(hsa_agent_t gpu_agent, packet_t& marker_packet, uint32_t data);
+GenerateATTMarkerPackets(
+  hsa_agent_t gpu_agent,
+  packet_t& marker_packet,
+  uint32_t data,
+  hsa_ven_amd_aqlprofile_att_marker_channel_t channel
+);
 
 uint8_t* AllocateSysMemory(hsa_agent_t gpu_agent, size_t size, hsa_amd_memory_pool_t* cpu_pool);
 
