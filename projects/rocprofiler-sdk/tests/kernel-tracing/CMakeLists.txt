@@ -5,9 +5,7 @@ cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 
 project(rocprofiler-tests-kernel-tracing LANGUAGES CXX)
 
-if(NOT TARGET rocprofiler::rocprofiler)
-    find_package(rocprofiler REQUIRED)
-endif()
+find_package(rocprofiler-sdk REQUIRED)
 
 add_library(kernel-tracing-test-tool SHARED)
 target_sources(kernel-tracing-test-tool PRIVATE kernel-tracing.cpp)
@@ -21,7 +19,7 @@ set_target_properties(
 
 install(
     TARGETS kernel-tracing-test-tool
-    DESTINATION lib/rocprofiler
+    DESTINATION lib/rocprofiler-sdk
     COMPONENT rocprofiler-test-libs)
 
 if(ROCPROFILER_MEMCHECK_PRELOAD_ENV)

@@ -17,7 +17,7 @@ if(NOT CMAKE_HIP_COMPILER)
     endif()
 endif()
 
-project(rocprofiler-samples-buffered-api-tracing LANGUAGES CXX HIP)
+project(rocprofiler-sdk-samples-buffered-api-tracing LANGUAGES CXX HIP)
 
 foreach(_TYPE DEBUG MINSIZEREL RELEASE RELWITHDEBINFO)
     if("${CMAKE_HIP_FLAGS_${_TYPE}}" STREQUAL "")
@@ -25,9 +25,7 @@ foreach(_TYPE DEBUG MINSIZEREL RELEASE RELWITHDEBINFO)
     endif()
 endforeach()
 
-if(NOT TARGET rocprofiler::rocprofiler)
-    find_package(rocprofiler REQUIRED)
-endif()
+find_package(rocprofiler-sdk REQUIRED)
 
 add_library(buffered-api-tracing-client SHARED)
 target_sources(buffered-api-tracing-client PRIVATE client.cpp client.hpp)

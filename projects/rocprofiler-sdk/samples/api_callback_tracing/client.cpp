@@ -33,8 +33,8 @@
 
 #include "client.hpp"
 
-#include <rocprofiler/registration.h>
-#include <rocprofiler/rocprofiler.h>
+#include <rocprofiler-sdk/registration.h>
+#include <rocprofiler-sdk/rocprofiler.h>
 
 #include "common/defines.hpp"
 #include "common/filesystem.hpp"
@@ -351,8 +351,8 @@ rocprofiler_configure(uint32_t                 version,
 
     // generate info string
     auto info = std::stringstream{};
-    info << id->name << " is using rocprofiler v" << major << "." << minor << "." << patch << " ("
-         << runtime_version << ")";
+    info << id->name << " is using rocprofiler-sdk v" << major << "." << minor << "." << patch
+         << " (" << runtime_version << ")";
 
     std::clog << info.str() << std::endl;
 

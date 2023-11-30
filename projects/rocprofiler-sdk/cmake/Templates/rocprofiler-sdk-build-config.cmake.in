@@ -1,0 +1,25 @@
+# Config file for @PROJECT_NAME@ and its component libraries in the build tree
+#
+
+if(@PROJECT_NAME@_FIND_COMPONENTS)
+    foreach(COMP ${@PROJECT_NAME@-sdk_FIND_COMPONENTS})
+        set(TARG @PROJECT_NAME@::@PROJECT_NAME@-${COMP})
+        if(TARGET ${TARG})
+            set(@PROJECT_NAME@-sdk_${COMP}_FOUND 1)
+            list(APPEND @PROJECT_NAME@-sdk_LIBRARIES ${TARG})
+            target_link_libraries(@PROJECT_NAME@::@PROJECT_NAME@ INTERFACE ${TARG})
+        else()
+            set(@PROJECT_NAME@-sdk_${COMP}_FOUND 0)
+        endif()
+    endforeach()
+else()
+    set(@PROJECT_NAME@-sdk_LIBRARIES @PROJECT_NAME@::@PROJECT_NAME@)
+endif()
+
+foreach(COMP @PROJECT_BUILD_TREE_TARGETS@)
+    set(TARG @PROJECT_NAME@::@PROJECT_NAME@-${COMP})
+    if(TARGET ${TARG})
+        list(APPEND @PROJECT_NAME@-sdk_LIBRARIES ${TARG})
+        target_link_libraries(@PROJECT_NAME@::@PROJECT_NAME@ INTERFACE ${TARG})
+    endif()
+endforeach()

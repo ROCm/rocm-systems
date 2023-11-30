@@ -33,13 +33,13 @@
 
 #include "client.hpp"
 
-#include <rocprofiler/buffer.h>
-#include <rocprofiler/callback_tracing.h>
-#include <rocprofiler/external_correlation.h>
-#include <rocprofiler/fwd.h>
-#include <rocprofiler/internal_threading.h>
-#include <rocprofiler/registration.h>
-#include <rocprofiler/rocprofiler.h>
+#include <rocprofiler-sdk/buffer.h>
+#include <rocprofiler-sdk/callback_tracing.h>
+#include <rocprofiler-sdk/external_correlation.h>
+#include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/internal_threading.h>
+#include <rocprofiler-sdk/registration.h>
+#include <rocprofiler-sdk/rocprofiler.h>
 
 #include "common/defines.hpp"
 #include "common/filesystem.hpp"
@@ -506,8 +506,8 @@ rocprofiler_configure(uint32_t                 version,
 
     // generate info string
     auto info = std::stringstream{};
-    info << id->name << " is using rocprofiler v" << major << "." << minor << "." << patch << " ("
-         << runtime_version << ")";
+    info << id->name << " is using rocprofiler-sdk v" << major << "." << minor << "." << patch
+         << " (" << runtime_version << ")";
 
     std::clog << info.str() << std::endl;
 

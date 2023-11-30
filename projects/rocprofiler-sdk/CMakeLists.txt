@@ -97,6 +97,8 @@ include(CTest)
 add_subdirectory(external)
 add_subdirectory(source)
 
+include(rocprofiler_config_install)
+
 if(ROCPROFILER_BUILD_TESTS)
     add_subdirectory(tests)
 endif()
@@ -105,7 +107,6 @@ if(ROCPROFILER_BUILD_SAMPLES)
     add_subdirectory(samples)
 endif()
 
-include(rocprofiler_config_install)
 include(rocprofiler_config_packaging)
 
 rocprofiler_print_features()

@@ -20,12 +20,12 @@ cmake -B build-docs ${SOURCE_DIR} -DROCPROFILER_INTERNAL_BUILD_DOCS=ON
 message "Changing directory to ${WORK_DIR}"
 cd ${WORK_DIR}
 
-message "Generating rocprofiler.dox"
+message "Generating rocprofiler-sdk.dox"
 cmake -DSOURCE_DIR=${SOURCE_DIR} -P ${WORK_DIR}/generate-doxyfile.cmake
 
 message "Generating doxygen xml files"
-doxygen rocprofiler.dox
-doxygen rocprofiler.dox
+doxygen rocprofiler-sdk.dox
+doxygen rocprofiler-sdk.dox
 
 message "Running doxysphinx"
 doxysphinx build ${WORK_DIR} ${WORK_DIR}/_build/html ${WORK_DIR}/_doxygen/html

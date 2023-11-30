@@ -25,7 +25,7 @@ Rocprofiler provides a `rocprofiler/registration.h` header file which forward de
 compiler function attributes to ensure that the symbol is publicly visible.
 
 ```cpp
-#include <rocprofiler/registration.h>
+#include <rocprofiler-sdk/registration.h>
 
 namespace
 {
@@ -90,7 +90,7 @@ collects all of the `rocprofiler_tool_configure_result_t` instances before invok
 When rocprofiler invokes this function in a tool, this is the opportunity to create contexts:
 
 ```cpp
-#include <rocprofiler/rocprofiler.h>
+#include <rocprofiler-sdk/rocprofiler.h>
 
 namespace
 {
@@ -120,7 +120,7 @@ In the invocation of the user-provided `initialize` callback, rocprofiler will p
 This function pointer can be invoked by the tool to explicitly invoke the `finalize` callback from the `rocprofiler_tool_configure_result_t` instance:
 
 ```cpp
-#include <rocprofiler/rocprofiler.h>
+#include <rocprofiler-sdk/rocprofiler.h>
 
 namespace
 {
@@ -168,7 +168,7 @@ Otherwise, rocprofiler will invoke the `finalize` callback via an `atexit` handl
 All of the snippets from the previous sections have been combined here for convenience.
 
 ```cpp
-#include <rocprofiler/registration.h>
+#include <rocprofiler-sdk/registration.h>
 
 namespace
 {

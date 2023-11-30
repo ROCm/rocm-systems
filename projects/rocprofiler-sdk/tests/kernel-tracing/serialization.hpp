@@ -23,12 +23,12 @@
 
 #pragma once
 
-#include <rocprofiler/buffer.h>
-#include <rocprofiler/callback_tracing.h>
-#include <rocprofiler/external_correlation.h>
-#include <rocprofiler/fwd.h>
-#include <rocprofiler/internal_threading.h>
-#include <rocprofiler/rocprofiler.h>
+#include <rocprofiler-sdk/buffer.h>
+#include <rocprofiler-sdk/callback_tracing.h>
+#include <rocprofiler-sdk/external_correlation.h>
+#include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/internal_threading.h>
+#include <rocprofiler-sdk/rocprofiler.h>
 
 #include <cereal/archives/json.hpp>
 #include <cereal/cereal.hpp>

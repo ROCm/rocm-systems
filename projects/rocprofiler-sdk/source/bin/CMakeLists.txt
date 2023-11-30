@@ -4,9 +4,9 @@
 
 rocprofiler_activate_clang_tidy()
 
-configure_file(rocprofv2 ${PROJECT_BINARY_DIR} COPYONLY)
+configure_file(rocprofv3 ${PROJECT_BINARY_DIR} COPYONLY)
 install(
-    FILES rocprofv2
+    FILES rocprofv3
     DESTINATION ${CMAKE_INSTALL_BINDIR}
     PERMISSIONS OWNER_READ OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
     COMPONENT runtime)

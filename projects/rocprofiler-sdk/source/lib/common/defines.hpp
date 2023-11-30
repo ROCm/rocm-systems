@@ -22,7 +22,7 @@
 
 #pragma once
 
-#include <rocprofiler/defines.h>
+#include <rocprofiler-sdk/defines.h>
 
 #define ROCPROFILER_VISIBILITY(MODE)  ROCPROFILER_ATTRIBUTE(visibility(MODE))
 #define ROCPROFILER_INTERNAL_API      ROCPROFILER_VISIBILITY("internal")

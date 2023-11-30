@@ -1,4 +1,4 @@
 #
 #
 #
-add_subdirectory(rocprofiler)
+add_subdirectory(rocprofiler-sdk)

@@ -32,7 +32,7 @@ read_the_docs_build = os.environ.get("READTHEDOCS", None) == "True"
 
 
 # -- Project information -----------------------------------------------------
-project = "rocprofiler"
+project = "Rocprofiler SDK"
 copyright = "2023, Advanced Micro Devices, Inc."
 author = "Advanced Micro Devices, Inc."
 

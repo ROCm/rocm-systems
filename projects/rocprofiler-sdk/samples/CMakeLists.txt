@@ -3,7 +3,7 @@
 #
 cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 
-project(rocprofiler-samples LANGUAGES C CXX)
+project(rocprofiler-sdk-samples LANGUAGES C CXX)
 
 if(CMAKE_BUILD_TYPE STREQUAL "")
     set(CMAKE_BUILD_TYPE

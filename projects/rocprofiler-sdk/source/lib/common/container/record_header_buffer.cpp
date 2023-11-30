@@ -22,7 +22,7 @@
 
 #include "lib/common/container/record_header_buffer.hpp"
 
-#include <rocprofiler/rocprofiler.h>
+#include <rocprofiler-sdk/rocprofiler.h>
 #include <algorithm>
 #include <atomic>
 #include <new>

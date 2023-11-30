@@ -17,7 +17,7 @@ if(NOT CMAKE_HIP_COMPILER)
     endif()
 endif()
 
-project(rocprofiler-samples-intercept-table LANGUAGES CXX HIP)
+project(rocprofiler-sdk-samples-intercept-table LANGUAGES CXX HIP)
 
 foreach(_TYPE DEBUG MINSIZEREL RELEASE RELWITHDEBINFO)
     if("${CMAKE_HIP_FLAGS_${_TYPE}}" STREQUAL "")
@@ -25,9 +25,7 @@ foreach(_TYPE DEBUG MINSIZEREL RELEASE RELWITHDEBINFO)
     endif()
 endforeach()
 
-if(NOT TARGET rocprofiler::rocprofiler)
-    find_package(rocprofiler REQUIRED)
-endif()
+find_package(rocprofiler-sdk REQUIRED)
 
 add_library(intercept-table-client SHARED)
 target_sources(intercept-table-client PRIVATE client.cpp client.hpp)
