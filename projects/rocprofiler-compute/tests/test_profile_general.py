@@ -1492,7 +1492,7 @@ def test_kernel_verbose_0():
                 "-VVV",
                 "--path",
                 workload_1,
-                "--kernelVerbose",
+                "--kernel-verbose",
                 "0",
                 "--",
             ]
@@ -1536,7 +1536,7 @@ def test_kernel_verbose_1():
                 "-VVV",
                 "--path",
                 workload_1,
-                "--kernelVerbose",
+                "--kernel-verbose",
                 "1",
                 "--",
             ]
@@ -1580,7 +1580,7 @@ def test_kernel_verbose_2():
                 "-VVV",
                 "--path",
                 workload_1,
-                "--kernelVerbose",
+                "--kernel-verbose",
                 "2",
                 "--",
             ]
@@ -1624,7 +1624,7 @@ def test_kernel_verbose_3():
                 "-VVV",
                 "--path",
                 workload_1,
-                "--kernelVerbose",
+                "--kernel-verbose",
                 "3",
                 "--",
             ]
@@ -1668,7 +1668,7 @@ def test_kernel_verbose_4():
                 "-VVV",
                 "--path",
                 workload_1,
-                "--kernelVerbose",
+                "--kernel-verbose",
                 "4",
                 "--",
             ]
@@ -1712,7 +1712,7 @@ def test_kernel_verbose_5():
                 "-VVV",
                 "--path",
                 workload_1,
-                "--kernelVerbose",
+                "--kernel-verbose",
                 "5",
                 "--",
             ]

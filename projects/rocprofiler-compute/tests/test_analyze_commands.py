@@ -1301,7 +1301,7 @@ def test_kernel_verbose_0():
                 "analyze",
                 "--path",
                 "tests/workloads/mixbench/mi100",
-                "--kernelVerbose",
+                "--kernel-verbose",
                 "0",
             ],
         ):
@@ -1316,7 +1316,7 @@ def test_kernel_verbose_0():
                 "analyze",
                 "--path",
                 "tests/workloads/mixbench/mi200",
-                "--kernelVerbose",
+                "--kernel-verbose",
                 "0",
             ],
         ):
@@ -1333,7 +1333,7 @@ def test_kernel_verbose_1():
                 "analyze",
                 "--path",
                 "tests/workloads/mixbench/mi100",
-                "--kernelVerbose",
+                "--kernel-verbose",
                 "1",
             ],
         ):
@@ -1348,7 +1348,7 @@ def test_kernel_verbose_1():
                 "analyze",
                 "--path",
                 "tests/workloads/mixbench/mi200",
-                "--kernelVerbose",
+                "--kernel-verbose",
                 "1",
             ],
         ):
@@ -1365,7 +1365,7 @@ def test_kernel_verbose_2():
                 "analyze",
                 "--path",
                 "tests/workloads/mixbench/mi100",
-                "--kernelVerbose",
+                "--kernel-verbose",
                 "2",
             ],
         ):
@@ -1380,7 +1380,7 @@ def test_kernel_verbose_2():
                 "analyze",
                 "--path",
                 "tests/workloads/mixbench/mi200",
-                "--kernelVerbose",
+                "--kernel-verbose",
                 "2",
             ],
         ):
@@ -1397,7 +1397,7 @@ def test_kernel_verbose_3():
                 "analyze",
                 "--path",
                 "tests/workloads/mixbench/mi100",
-                "--kernelVerbose",
+                "--kernel-verbose",
                 "3",
             ],
         ):
@@ -1412,7 +1412,7 @@ def test_kernel_verbose_3():
                 "analyze",
                 "--path",
                 "tests/workloads/mixbench/mi200",
-                "--kernelVerbose",
+                "--kernel-verbose",
                 "3",
             ],
         ):
@@ -1429,7 +1429,7 @@ def test_kernel_verbose_4():
                 "analyze",
                 "--path",
                 "tests/workloads/mixbench/mi100",
-                "--kernelVerbose",
+                "--kernel-verbose",
                 "4",
             ],
         ):
@@ -1444,7 +1444,7 @@ def test_kernel_verbose_4():
                 "analyze",
                 "--path",
                 "tests/workloads/mixbench/mi200",
-                "--kernelVerbose",
+                "--kernel-verbose",
                 "4",
             ],
         ):
@@ -1461,7 +1461,7 @@ def test_kernel_verbose_5():
                 "analyze",
                 "--path",
                 "tests/workloads/mixbench/mi100",
-                "--kernelVerbose",
+                "--kernel-verbose",
                 "5",
             ],
         ):
@@ -1476,7 +1476,7 @@ def test_kernel_verbose_5():
                 "analyze",
                 "--path",
                 "tests/workloads/mixbench/mi200",
-                "--kernelVerbose",
+                "--kernel-verbose",
                 "5",
             ],
         ):
@@ -1493,7 +1493,7 @@ def test_kernel_verbose_6():
                 "analyze",
                 "--path",
                 "tests/workloads/mixbench/mi100",
-                "--kernelVerbose",
+                "--kernel-verbose",
                 "6",
             ],
         ):
@@ -1508,7 +1508,7 @@ def test_kernel_verbose_6():
                 "analyze",
                 "--path",
                 "tests/workloads/mixbench/mi200",
-                "--kernelVerbose",
+                "--kernel-verbose",
                 "6",
             ],
         ):
