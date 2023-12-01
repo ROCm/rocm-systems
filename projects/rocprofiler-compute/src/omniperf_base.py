@@ -32,7 +32,6 @@ from utils.specs import get_machine_specs
 from utils.utils import demarcate, trace_logger, get_version, get_version_display, detect_rocprof
 from argparser import omniarg_parser
 import config
-import pyfiglet
 
 class Omniperf:
     def __init__(self):
@@ -61,9 +60,16 @@ class Omniperf:
         logging.info("Execution mode = %s" % self.__mode)
    
     def print_graphic(self):
-        """Read program name and log ascii art to terminal.
+        """Log program name as ascii art to terminal.
         """
-        ascii_art = pyfiglet.figlet_format(config.prog.capitalize())
+        ascii_art = '''
+  ___                  _                  __ 
+ / _ \ _ __ ___  _ __ (_)_ __   ___ _ __ / _|
+| | | | '_ ` _ \| '_ \| | '_ \ / _ \ '__| |_ 
+| |_| | | | | | | | | | | |_) |  __/ |  |  _|
+ \___/|_| |_| |_|_| |_|_| .__/ \___|_|  |_|  
+                        |_|                  
+'''
         logging.info(ascii_art)
     
     def setup_logging(self):
