@@ -72,27 +72,19 @@ if(DEFINED PYTHON_DEPS)
 endif()
 
 # Check required Python packages
-set(pythonDeps
-    "astunparse"
-    "colorlover"
-    "dash"
-    "matplotlib"
-    "numpy"
-    "pandas"
-    "pymongo"
-    "yaml"
-    "tabulate"
-    "tqdm"
-    "dash_svg"
-    "dash_bootstrap_components"
-    "kaleido")
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/requirements.txt" pythonDeps)
 
 message(STATUS "Checking for required Python package dependencies...")
 set_property(GLOBAL PROPERTY pythonDepsFlag "groovy")
 
 function(checkPythonPackage [package])
+    # mapping for non-default package names
+    set(PACKAGE ${ARGV0})
+    if(${ARGV0} STREQUAL "pyyaml")
+        set(PACKAGE "yaml")
+    endif()
     execute_process(
-        COMMAND ${Python3_EXECUTABLE} -c "import ${ARGV0}"
+        COMMAND ${Python3_EXECUTABLE} -c "import ${PACKAGE}"
         OUTPUT_QUIET ERROR_QUIET
         RESULT_VARIABLE EXIT_CODE)
     if(${EXIT_CODE} EQUAL 0)
@@ -105,6 +97,9 @@ endfunction()
 
 list(APPEND CMAKE_MESSAGE_INDENT "  ")
 foreach(package IN LISTS pythonDeps)
+    # Filter out any version requirements from requirements.txt
+    string(REGEX REPLACE "[><=].*" "" package "${package}")
+    string(REPLACE "-" "_" package "${package}")
     checkpythonpackage(${package})
 endforeach()
 list(POP_BACK CMAKE_MESSAGE_INDENT)
