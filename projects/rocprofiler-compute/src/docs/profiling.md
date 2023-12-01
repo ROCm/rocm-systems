@@ -76,7 +76,7 @@ General Options:
 Profile Options:
   -n , --name                                           Assign a name to workload.
   -p , --path                                           Specify path to save workload.
-                                                        (DEFAULT: /home/colramos/GitHub/omniperf-pub/workloads/<name>)
+                                                        (DEFAULT: {os.getcwd()}/workloads/<name>)
   -k  [ ...], --kernel  [ ...]                          Kernel filtering.
   -d  [ ...], --dispatch  [ ...]                        Dispatch ID filtering.
   -b  [ ...], --ipblocks  [ ...]                        IP block filtering:
@@ -127,7 +127,7 @@ Execution mode = profile
 SoC = mi200
 Profiler choice = rocprofv1
 omniperf ver: 1.0.10
-Path: /home/colramos/omniperf/workloads/vcopy_test/mi200
+Path: {os.getcwd()}/workloads/vcopy/mi200
 Target: mi200
 Command: ./vcopy -n 1048576 -b 256
 Kernel Selection: None
@@ -135,10 +135,10 @@ Dispatch Selection: None
 IP Blocks: All
 KernelName verbose: 2
 
-Current input file: /home/colramos/omniperf/workloads/vcopy_test/mi200/perfmon/pmc_perf_2.txt
-RPL: on '231120_142934' from '/opt/rocm-5.2.1' in '/home/colramos/omniperf'
+Current input file: {os.getcwd()}/workloads/vcopy/mi200/perfmon/pmc_perf_2.txt
+RPL: on '231120_142934' from '/opt/rocm-5.2.1' in '{os.getcwd()}'
 RPL: profiling '""./vcopy -n 1048576 -b 256""'
-RPL: input file '/home/colramos/omniperf/workloads/vcopy_test/mi200/perfmon/pmc_perf_2.txt'
+RPL: input file '{os.getcwd()}/workloads/vcopy/mi200/perfmon/pmc_perf_2.txt'
 RPL: output dir '/tmp/rpl_data_231120_142934_262088'
 RPL: result dir '/tmp/rpl_data_231120_142934_262088/input0_results_231120_142934'
 ROCProfiler: input from "/tmp/rpl_data_231120_142934_262088/input0.xml"
@@ -290,7 +290,7 @@ fname: pmc_sqc_perf1: Skipped
 fname: pmc_sq_perf6: Added
 fname: pmc_sq_perf2: Added
 omniperf ver: 1.0.10
-Path: /home/colramos/omniperf/vcopy_/mi200
+Path: {os.getcwd()}/vcopy_/mi200
 Target: mi200
 Command: ./vcopy -n 1048576 -b 256
 Kernel Selection: None
@@ -318,7 +318,7 @@ Execution mode = profile
 SoC = mi200
 Profiler choice = rocprofv1
 omniperf ver: 1.0.10
-Path: /home/colramos/omniperf/workloads/vcopy/mi200
+Path: {os.getcwd()}/workloads/vcopy/mi200
 Target: mi200
 Command: ./vcopy -n 1048576 -b 256
 Kernel Selection: ['vecCopy']
@@ -346,7 +346,7 @@ Execution mode = profile
 SoC = mi200
 Profiler choice = rocprofv1
 omniperf ver: 1.0.10
-Path: /home/colramos/omniperf/workloads/vcopy/mi200
+Path: {os.getcwd()}/workloads/vcopy/mi200
 Target: mi200
 Command: ./vcopy -n 1048576 -b 256
 Kernel Selection: None
@@ -389,7 +389,7 @@ SoC = mi200
 Profiler choice = rocprofv1
 [roofline] Generating pmc_perf.csv
 omniperf ver: 1.0.10
-Path: /home/colramos/omniperf/workloads/vcopy_test/mi200
+Path: {os.getcwd()}/workloads/vcopy/mi200
 Target: mi200
 Command: ./vcopy -n 1048576 -b 256
 Kernel Selection: None

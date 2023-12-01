@@ -539,7 +539,7 @@ Connection Options:
   -p , --password                                       The user's password. (will be requested later if it's not set)
   -t , --team                                           Specify Team prefix.
   -w , --workload                                       Specify name of workload (to remove) or path to workload (to import)
-  -k , --kernelVerbose                                  Specify Kernel Name verbose level 1-5. 
+  -k , --kernel-verbose                                 Specify Kernel Name verbose level 1-5. 
                                                         Lower the level, shorter the kernel name. (DEFAULT: 2) (DISABLE: 5)
 ```
 
