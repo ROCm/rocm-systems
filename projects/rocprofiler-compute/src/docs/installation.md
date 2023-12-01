@@ -229,7 +229,7 @@ Edit both the Dashboard Name and the Unique Identifier (UID) to uniquely identif
 
 Using your dashboard
 
-Once you've imported a dashboard you're ready to begin! Start by browsing availible dashboards and selecting the dashboard you've just imported.
+Once you've imported a dashboard you're ready to begin! Start by browsing available dashboards and selecting the dashboard you've just imported.
 
 ![Opening your dashboard](images/opening_dashboard.png)
 

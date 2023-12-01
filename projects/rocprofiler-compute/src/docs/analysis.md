@@ -107,7 +107,7 @@ Analyze
 2. System Speed-of-Light
 ....
 ```
- 2. Use `--list-metrics` to generate a list of availible metrics for inspection
+ 2. Use `--list-metrics` to generate a list of available metrics for inspection
  ```shell-session
 $ omniperf analyze -p workloads/vcopy/mi200/ --list-metrics gfx90a
 ╒═════════╤═════════════════════════════╕

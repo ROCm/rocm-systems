@@ -390,7 +390,7 @@ def omniarg_parser(parser, omniperf_home, omniperf_version):
         "--list-metrics",
         metavar="",
         choices=["gfx906", "gfx908", "gfx90a"],
-        help="\t\tList all availible metrics for analysis on specified arch:\n\t\t   gfx906\n\t\t   gfx908\n\t\t   gfx90a",
+        help="\t\tList all available metrics for analysis on specified arch:\n\t\t   gfx906\n\t\t   gfx908\n\t\t   gfx90a",
     )
     analyze_group.add_argument(
         "-k",

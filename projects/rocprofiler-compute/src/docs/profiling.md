@@ -37,7 +37,7 @@ Releasing CPU memory
 ```
 
 ## Omniperf Profiling
-The *omniperf* script, availible through the [Omniperf](https://github.com/AMDResearch/omniperf) repository, is used to aquire all necessary perfmon data through analysis of compute workloads.
+The *omniperf* script, available through the [Omniperf](https://github.com/AMDResearch/omniperf) repository, is used to aquire all necessary perfmon data through analysis of compute workloads.
 
 **omniperf help:**
 ```shell-session
