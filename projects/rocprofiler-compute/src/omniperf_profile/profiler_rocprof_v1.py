@@ -39,8 +39,9 @@ class rocprof_v1_profiler(OmniProfiler_Base):
         self.ready_to_run = (self.get_args().roof_only and not os.path.isfile(os.path.join(self.get_args().path, "pmc_perf.csv"))
                             or not self.get_args().roof_only)
 
-
+    #-----------------------
     # Required child methods
+    #-----------------------
     @demarcate
     def pre_processing(self):
         """Perform any pre-processing steps prior to profiling.

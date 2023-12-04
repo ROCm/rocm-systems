@@ -28,7 +28,9 @@ from utils.utils import demarcate
 
 class webui_analysis(OmniAnalyze_Base):
 
+    #-----------------------
     # Required child methods
+    #-----------------------
     @demarcate
     def pre_processing(self):
         """Perform any pre-processing steps prior to analysis.

@@ -30,7 +30,9 @@ class rocscope_profiler(OmniProfiler_Base):
     def __init__(self,profiling_args,profiler_mode,soc):
         super().__init__(profiling_args,profiler_mode,soc)
 
+    #-----------------------
     # Required child methods
+    #-----------------------
     @demarcate
     def pre_processing(self):
         """Perform any pre-processing steps prior to profiling.

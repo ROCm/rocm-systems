@@ -47,7 +47,9 @@ class OmniProfiler_Base():
     def get_args(self):
         return self.__args
 
+    #----------------------------------------------------
     # Required methods to be implemented by child classes
+    #----------------------------------------------------
     @abstractmethod
     def pre_processing(self):
         """Perform any pre-processing steps prior to profiling.

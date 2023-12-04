@@ -49,8 +49,23 @@ class gfx906_soc (OmniSoC_Base):
                 "TCC_channels": 16,
             }
         )
+        self.set_soc_param(
+            {
+                "numSE": 4,
+                "numCU": 60,
+                "numSIMD": 240,
+                "numWavesPerCU": 40,
+                "numSQC": 15,
+                "L2Banks": 16,
+                "LDSBanks": 32,
+                "Freq": 1725,
+                "mclk": 1000
+            }
+        )
 
-    # Required methods to be implemented by child classes
+    #-----------------------
+    # Required child methods
+    #-----------------------
     @demarcate
     def profiling_setup(self):
         """Perform any SoC-specific setup prior to profiling.

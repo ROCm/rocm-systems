@@ -23,22 +23,171 @@
 ##############################################################################el
 
 from abc import ABC, abstractmethod
+import os
+import logging
+import sys
+import copy
+from collections import OrderedDict
+from pathlib import Path
+from utils.utils import demarcate
+from utils import schema, file_io, parser
+import pandas as pd
+from tabulate import tabulate
 
 class OmniAnalyze_Base():
     def __init__(self,args,options):
         self.__args = args
+        self._runs = OrderedDict() #NB: I made this public so children can modify/add to obj properties
+        self._arch_configs = {} #NB: I made this public so children can modify/add to obj properties
         self.__options = options
+        self._output = None #NB: I made this public so children can modify/add to obj properties
 
+    def error(self,message):
+        logging.error("")
+        logging.error("[ERROR]: " + message)
+        logging.error("")
+        sys.exit(1)
+    def get_args(self):
+        return self.__args
+    
+    @demarcate
+    def generate_configs(self, arch, config_dir, list_kernels, filter_metrics):
+        single_panel_config = file_io.is_single_panel_config(Path(config_dir))
+        
+        ac = schema.ArchConfig()
+        if list_kernels:
+            ac.panel_configs = file_io.top_stats_build_in_config
+        else:
+            arch_panel_config = (
+                config_dir if single_panel_config else config_dir.joinpath(arch)
+            )
+            ac.panel_configs = file_io.load_panel_configs(arch_panel_config)
+
+        # TODO: filter_metrics should/might be one per arch
+        # print(ac)
+
+        parser.build_dfs(ac, filter_metrics)
+        self._arch_configs[arch] = ac
+        return self._arch_configs
+    
+    @demarcate
+    def list_metrics(self):
+        args = self.__args
+        if args.list_metrics in file_io.supported_arch.keys():
+            arch = args.list_metrics
+            if arch not in self._arch_configs.keys():
+                self.generate_configs(arch, args.config_dir, args.list_kernels, args.filter_metrics)
+            print(
+                tabulate(
+                    pd.DataFrame.from_dict(
+                        self._arch_configs[args.list_metrics].metric_list,
+                        orient="index",
+                        columns=["Metric"],
+                    ),
+                    headers="keys",
+                    tablefmt="fancy_grid"
+                ),
+                file=self._output
+            )
+            sys.exit(0)
+        else:
+            self.error("Unsupported arch")
+
+    @demarcate
+    def load_options(self, normalization_filter):
+        if not normalization_filter:
+            for k, v in self._arch_configs.items():
+                parser.build_metric_value_string(v.dfs, v.dfs_type, self.__args.normal_unit)
+        else:
+            for k, v in self._arch_configs.items():
+                parser.build_metric_value_string(v.dfs, v.dfs_type, normalization_filter)
+        
+        args = self.__args
+        # Error checking for multiple runs and multiple gpu_kernel filters
+        if args.gpu_kernel and (len(args.path) != len(args.gpu_kernel)):
+            if len(args.gpu_kernel) == 1:
+                for i in range(len(args.path) - 1):
+                    args.gpu_kernel.extend(args.gpu_kernel)
+            else:
+                self.error("Error: the number of --filter-kernels doesn't match the number of --dir.")
+    
+    @demarcate
+    def initalize_runs(self, avail_socs, normalization_filter=None):
+        if self.__args.list_metrics:
+            self.list_metrics()
+        
+        # load required configs
+        for d in self.__args.path:
+            sys_info = file_io.load_sys_info(Path(d[0], "sysinfo.csv"))
+            arch = sys_info.iloc[0]["gpu_soc"]
+            args = self.__args
+            self.generate_configs(arch, args.config_dir, args.list_kernels, args.filter_metrics)
+
+        self.load_options(normalization_filter)
+        
+        for d in self.__args.path:
+            w = schema.Workload()
+            w.sys_info = file_io.load_sys_info(Path(d[0], "sysinfo.csv"))
+            w.avail_ips = w.sys_info["ip_blocks"].item().split("|")
+            arch = w.sys_info.iloc[0]["gpu_soc"]
+            w.dfs = copy.deepcopy(self._arch_configs[arch].dfs)
+            w.dfs_type = self._arch_configs[arch].dfs_type
+            w.soc_spec = avail_socs[arch].get_soc_param()
+            self._runs[d[0]] = w
+
+        return self._runs
+
+    
+    @demarcate
+    def sanitize(self):
+        """Perform sanitization of inputs
+        """
+        if not self.__args.list_metrics and not self.__args.path:
+            self.error("The following arguments are required: -p/--path")
+        # verify not accessing parent directories
+        if ".." in str(self.__args.path):
+            self.error("Access denied. Cannot access parent directories in path (i.e. ../)")
+        # ensure absolute path
+        for dir in self.__args.path:
+            full_path = os.path.abspath(dir[0])
+            dir[0] = full_path
+            if not os.path.isdir(dir[0]):
+                self.error("Invalid directory {}\nPlease try again.".format(dir[0]))
+    
+    #----------------------------------------------------
     # Required methods to be implemented by child classes
+    #----------------------------------------------------
     @abstractmethod
-    def pre_processing(self):
+    def pre_processing(self, omni_socs: set):
         """Perform initialization prior to analysis.
         """
-        pass
+        logging.debug("[analysis] prepping to do some analysis")
+        logging.info("[analysis] deriving Omniperf metrics...")
+        # initalize output file
+        self._output = open(self.__args.output_file, "w+") if self.__args.output_file else sys.stdout
+        
+        # initalize runs
+        self._runs = self.initalize_runs(omni_socs)
+        
+        # set filters
+        if self.__args.gpu_kernel:
+            for d, gk in zip(self.__args.path, self.__args.gpu_kernel):
+                self._runs[d[0]].filter_kernel_ids = gk
+        if self.__args.gpu_id:
+            if len(self.__args.gpu_id) == 1 and len(self.__args.path) != 1:
+                for i in range(len(self.__args.path) - 1):
+                    self.__args.gpu_id.extend(self.__args.gpu_id)
+            for d, gi in zip(self.__args.path, self.__args.gpu_id):
+                self._runs[d[0]].filter_gpu_ids = gi
+        if self.__args.gpu_dispatch_id:
+            if len(self.__args.gpu_dispatch_id) == 1 and len(self.__args.path) != 1:
+                for i in range(len(self.__args.path) - 1):
+                    self.__args.gpu_dispatch_id.extend(self.__args.gpu_dispatch_id)
+            for d, gd in zip(self.__args.path, self.__args.gpu_dispatch_id):
+                self._runs[d[0]].filter_dispatch_ids = gd
 
     @abstractmethod
     def run_analysis(self):
         """Run analysis.
         """
-        pass
-
+        logging.debug("[analysis] generating analysis")

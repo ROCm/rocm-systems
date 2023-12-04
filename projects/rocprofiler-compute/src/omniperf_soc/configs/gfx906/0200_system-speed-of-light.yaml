@@ -1,0 +1,230 @@
+---
+# Add description/tips for each metric in this section.
+# So it could be shown in hover.
+Metric Description:
+  SALU: &SALU_anchor Scalar Arithmetic Logic Unit
+
+# Define the panel properties and properties of each metric in the panel.
+Panel Config:
+  id: 200
+  title: System Speed-of-Light
+  data source:
+    - metric_table:
+        id: 201
+        title: Speed-of-Light
+        header:
+          metric: Metric
+          value: Value
+          unit: Unit
+          peak: Peak
+          pop: PoP
+          tips: Tips
+        metric:
+          VALU FLOPs:
+            value: None # No perf counter
+            unit: GFLOPs
+            peak: (((($sclk * $numCU) * 64) * 2) / 1000)
+            pop: None # No perf counter
+            tips:
+          VALU IOPs:
+            value: None # No perf counter
+            unit: GOPs
+            peak: (((($sclk * $numCU) * 64) * 2) / 1000)
+            pop: None # No perf counter
+            tips:
+          MFMA FLOPs (BF16):
+            value: None # No perf counter
+            unit: GFLOPs
+            peak: ((($sclk * $numCU) * 512) / 1000)
+            pop: None # No perf counter
+            tips:
+          MFMA FLOPs (F16):
+            value: None # No perf counter
+            unit: GFLOPs
+            peak: ((($sclk * $numCU) * 1024) / 1000)
+            pop: None # No perf counter
+            tips:
+          MFMA FLOPs (F32):
+            value: None # No perf counter
+            unit: GFLOPs
+            peak: ((($sclk * $numCU) * 256) / 1000)
+            pop: None # No perf counter
+            tips:
+          MFMA FLOPs (F64):
+            value: None # No perf counter
+            unit: GFLOPs
+            peak: ((($sclk * $numCU) * 256) / 1000)
+            pop: None # No perf counter
+            tips:
+          MFMA IOPs (Int8):
+            value: None # No perf counter
+            unit: GOPs
+            peak: ((($sclk * $numCU) * 1024) / 1000)
+            pop: None # No perf counter
+            tips:
+          Active CUs:
+            value: $numActiveCUs
+            unit: CUs
+            peak: $numCU
+            pop: ((100 * $numActiveCUs) / $numCU)
+            tips: 
+          SALU Util:
+            value: AVG(((100 * SQ_ACTIVE_INST_SCA) / (GRBM_GUI_ACTIVE * $numCU)))
+            unit: pct
+            peak: 100
+            pop: AVG(((100 * SQ_ACTIVE_INST_SCA) / (GRBM_GUI_ACTIVE * $numCU)))
+            tips: 
+          VALU Util:
+            value: AVG(((100 * SQ_ACTIVE_INST_VALU) / (GRBM_GUI_ACTIVE * $numCU)))
+            unit: pct
+            peak: 100
+            pop: AVG(((100 * SQ_ACTIVE_INST_VALU) / (GRBM_GUI_ACTIVE * $numCU)))
+            tips:
+          MFMA Util:
+            value: None # No HW module
+            unit: pct
+            peak: 100
+            pop: None # No HW module
+            tips:
+          VALU Active Threads/Wave:
+            value: AVG(((SQ_THREAD_CYCLES_VALU / SQ_ACTIVE_INST_VALU) if (SQ_ACTIVE_INST_VALU
+              != 0) else None))
+            unit: Threads
+            peak: 64
+            pop: (AVG(((SQ_THREAD_CYCLES_VALU / SQ_ACTIVE_INST_VALU) if (SQ_ACTIVE_INST_VALU
+              != 0) else None)) * 1.5625)
+            tips: 
+          IPC - Issue:
+            value: AVG(((((((((SQ_INSTS_VALU + SQ_INSTS_VMEM) + SQ_INSTS_SALU) + SQ_INSTS_SMEM)
+              + SQ_INSTS_GDS) + SQ_INSTS_BRANCH) + SQ_INSTS_SENDMSG) + SQ_INSTS_VSKIPPED)
+              / SQ_ACTIVE_INST_ANY))
+            unit: Instr/cycle
+            peak: 5
+            pop: ((100 * AVG(((((((((SQ_INSTS_VALU + SQ_INSTS_VMEM) + SQ_INSTS_SALU) + SQ_INSTS_SMEM)
+              + SQ_INSTS_GDS) + SQ_INSTS_BRANCH) + SQ_INSTS_SENDMSG) + SQ_INSTS_VSKIPPED)
+              / SQ_ACTIVE_INST_ANY))) / 5)
+            tips: 
+          LDS BW:
+            value: AVG(((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($LDSBanks))
+              / (EndNs - BeginNs)))
+            unit: GB/sec
+            peak: (($sclk * $numCU) * 0.128)
+            pop: AVG((((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($LDSBanks))
+              / (EndNs - BeginNs)) / (($sclk * $numCU) * 0.00128)))
+            tips: 
+          LDS Bank Conflict:
+            value: AVG(((SQ_LDS_BANK_CONFLICT / (SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT))
+              if ((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) != 0) else None))
+            unit: Conflicts/access
+            peak: 32
+            pop: ((100 * AVG(((SQ_LDS_BANK_CONFLICT / (SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT))
+              if ((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) != 0) else None))) / 32)
+            tips: 
+          Instr Cache Hit Rate:
+            value: AVG(((100 * SQC_ICACHE_HITS) / (SQC_ICACHE_HITS + SQC_ICACHE_MISSES)))
+            unit: pct
+            peak: 100
+            pop: AVG(((100 * SQC_ICACHE_HITS) / (SQC_ICACHE_HITS + SQC_ICACHE_MISSES)))
+            tips: 
+          Instr Cache BW:
+            value: AVG(((SQC_ICACHE_REQ / (EndNs - BeginNs)) * 64))
+            unit: GB/s
+            peak: ((($sclk / 1000) * 64) * $numSQC)
+            pop: ((100 * AVG(((SQC_ICACHE_REQ / (EndNs - BeginNs)) * 64))) / ((($sclk
+              / 1000) * 64) * $numSQC))
+            tips: 
+          Scalar L1D Cache Hit Rate:
+            value: AVG((((100 * SQC_DCACHE_HITS) / (SQC_DCACHE_HITS + SQC_DCACHE_MISSES))
+              if ((SQC_DCACHE_HITS + SQC_DCACHE_MISSES) != 0) else None))
+            unit: pct
+            peak: 100
+            pop: AVG((((100 * SQC_DCACHE_HITS) / (SQC_DCACHE_HITS + SQC_DCACHE_MISSES))
+              if ((SQC_DCACHE_HITS + SQC_DCACHE_MISSES) != 0) else None))
+            tips: 
+          Scalar L1D Cache BW:
+            value: AVG(((SQC_DCACHE_REQ / (EndNs - BeginNs)) * 64))
+            unit: GB/s
+            peak: ((($sclk / 1000) * 64) * $numSQC)
+            pop: ((100 * AVG(((SQC_DCACHE_REQ / (EndNs - BeginNs)) * 64))) / ((($sclk
+              / 1000) * 64) * $numSQC))
+            tips: 
+          Vector L1D Cache Hit Rate:
+            value: AVG(((100 - ((100 * (((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum)
+              + TCP_TCC_ATOMIC_WITH_RET_REQ_sum) + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum))
+              / TCP_TOTAL_CACHE_ACCESSES_sum)) if (TCP_TOTAL_CACHE_ACCESSES_sum != 0) else
+              None))
+            unit: pct
+            peak: 100
+            pop: AVG(((100 - ((100 * (((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum) +
+              TCP_TCC_ATOMIC_WITH_RET_REQ_sum) + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) /
+              TCP_TOTAL_CACHE_ACCESSES_sum)) if (TCP_TOTAL_CACHE_ACCESSES_sum != 0) else
+              None))
+            tips: 
+          Vector L1D Cache BW:
+            value: AVG(((TCP_TOTAL_CACHE_ACCESSES_sum * 64) / (EndNs - BeginNs)))
+            unit: GB/s
+            peak: ((($sclk / 1000) * 64) * $numCU)
+            pop: ((100 * AVG(((TCP_TOTAL_CACHE_ACCESSES_sum * 64) / (EndNs - BeginNs))))
+              / ((($sclk / 1000) * 64) * $numCU))
+            tips: 
+          L2 Cache Hit Rate:
+            value: AVG((((100 * TCC_HIT_sum) / (TCC_HIT_sum + TCC_MISS_sum)) if ((TCC_HIT_sum
+              + TCC_MISS_sum) != 0) else None))
+            unit: pct
+            peak: 100
+            pop: AVG((((100 * TCC_HIT_sum) / (TCC_HIT_sum + TCC_MISS_sum)) if ((TCC_HIT_sum
+              + TCC_MISS_sum) != 0) else None))
+            tips: 
+          L2-Fabric Read BW:
+            value: AVG((((TCC_EA_RDREQ_32B_sum * 32) + ((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum)
+              * 64)) / (EndNs - BeginNs)))
+            unit: GB/s
+            peak: $hbmBW
+            pop: ((100 * AVG((((TCC_EA_RDREQ_32B_sum * 32) + ((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum)
+              * 64)) / (EndNs - BeginNs)))) / $hbmBW)
+            tips: 
+          L2-Fabric Write BW:
+            value: AVG((((TCC_EA_WRREQ_64B_sum * 64) + ((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum)
+              * 32)) / (EndNs - BeginNs)))
+            unit: GB/s
+            peak: $hbmBW
+            pop: ((100 * AVG((((TCC_EA_WRREQ_64B_sum * 64) + ((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum)
+              * 32)) / (EndNs - BeginNs)))) / $hbmBW)
+            tips: 
+          L2-Fabric Read Latency:
+            value: AVG(((TCC_EA_RDREQ_LEVEL_sum / TCC_EA_RDREQ_sum) if (TCC_EA_RDREQ_sum
+              != 0) else None))
+            unit: Cycles
+            peak: ''
+            pop: ''
+            tips: 
+          L2-Fabric Write Latency:
+            value: AVG(((TCC_EA_WRREQ_LEVEL_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum
+              != 0) else None))
+            unit: Cycles
+            peak: ''
+            pop: ''
+            tips: 
+          Wave Occupancy:
+            value: AVG((SQ_ACCUM_PREV_HIRES / GRBM_GUI_ACTIVE))
+            unit: Wavefronts
+            peak: ($maxWavesPerCU * $numCU)
+            pop: (100 * AVG(((SQ_ACCUM_PREV_HIRES / GRBM_GUI_ACTIVE) / ($maxWavesPerCU
+              * $numCU))))
+            coll_level: SQ_LEVEL_WAVES
+            tips: 
+          Instr Fetch BW:
+            value: AVG(((SQ_IFETCH / (EndNs - BeginNs)) * 32))
+            unit: GB/s
+            peak: ((($sclk / 1000) * 32) * $numSQC)
+            pop: ((100 * AVG(((SQ_IFETCH / (EndNs - BeginNs)) * 32))) / ($numSQC
+              * (($sclk / 1000) * 32)))
+            coll_level: SQ_IFETCH_LEVEL
+            tips: 
+          Instr Fetch Latency:
+            value: AVG((SQ_ACCUM_PREV_HIRES / SQ_IFETCH))
+            unit: Cycles
+            peak: ''
+            pop: ''
+            coll_level: SQ_IFETCH_LEVEL
+            tips:

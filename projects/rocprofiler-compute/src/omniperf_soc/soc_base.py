@@ -39,10 +39,17 @@ class OmniSoC_Base():
         self.__soc = None
         self.__perfmon_dir = None
         self.__perfmon_config = {} # Per IP block max number of simulutaneous counters. GFX IP Blocks
+        self.__soc_params = {} # SoC specifications
         if self.__args.path == os.path.join(os.getcwd(), "workloads"):
             self.__workload_dir = os.path.join(self.__args.path, self.__args.name, self.__args.target)
         else:
             self.__workload_dir = self.__args.path
+    def __hash__(self):
+        return hash(self.__soc)
+    def __eq__(self, other):
+        if not isinstance(other, type(self)):
+            return NotImplemented
+        return self.__soc == other.get_soc()
 
     def error(self,message):
         logging.error("")
@@ -53,6 +60,10 @@ class OmniSoC_Base():
         self.__perfmon_dir = path
     def set_perfmon_config(self, config: dict):
         self.__perfmon_config = config
+    def set_soc_param(self, param: dict):
+        self.__soc_params = param
+    def get_soc_param(self):
+        return self.__soc_params
     def set_soc(self, soc: str):
         self.__soc = soc
     def get_soc(self):
@@ -108,7 +119,9 @@ class OmniSoC_Base():
         pmc_list = perfmon_coalesce(pmc_files_list, self.__perfmon_config, self.__workload_dir)
         perfmon_emit(pmc_list, self.__perfmon_config, self.__workload_dir)
 
+    #----------------------------------------------------
     # Required methods to be implemented by child classes
+    #----------------------------------------------------
     @abstractmethod
     def profiling_setup(self):
         """Perform any SoC-specific setup prior to profiling.
@@ -127,6 +140,7 @@ class OmniSoC_Base():
         """Perform any SoC-specific setup prior to analysis.
         """
         logging.debug("[analysis] perform SoC analysis setup for %s" % self.__soc)
+        
 
 @demarcate
 def perfmon_coalesce(pmc_files_list, perfmon_config, workload_dir):

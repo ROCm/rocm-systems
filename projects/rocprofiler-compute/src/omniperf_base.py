@@ -32,13 +32,15 @@ from utils.specs import get_machine_specs
 from utils.utils import demarcate, trace_logger, get_version, get_version_display, detect_rocprof
 from argparser import omniarg_parser
 import config
+import pandas as pd
 
 class Omniperf:
     def __init__(self):
         self.__args = None
         self.__profiler_mode = None
-        self.__soc_name = None
-        self.__soc = None
+        self.__analyze_mode = None
+        self.__soc_name = set() #TODO: Should we make this a list? To accommodate analyze mode 
+        self.__soc = dict() # set of key, value pairs. Where arch->OmniSoc() obj
         self.__version = {
             "ver": None,
             "ver_pretty": None,
@@ -53,9 +55,8 @@ class Omniperf:
 
         if self.__mode == "profile":
             self.detect_profiler()
-        
-        # self.__analyze_mode = "cli"
-        # self.__analyze_mode = "webui"
+        elif self.__mode == "analyze":
+            self.detect_analyze()
         
         logging.info("Execution mode = %s" % self.__mode)
    
@@ -128,46 +129,50 @@ class Omniperf:
             rocprof_cmd = detect_rocprof()
             self.__profiler_mode = "rocprofv1"
         return
-        
+    def detect_analyze(self):
+        if self.__args.gui:
+            self.__analyze_mode = "web_ui"
+        else:
+            self.__analyze_mode = "cli"
+        return
 
     @demarcate
-    def detect_soc(self):
-        mspec = get_machine_specs(0)
+    def detect_soc(self, arch=None):
+        if not arch:
+            mspec = get_machine_specs(0)
+            arch = mspec.GPU
 
         target=""
-        if mspec.GPU == "gfx900":
-            target = "vega10"
-        elif mspec.GPU == "gfx906":
+        if arch == "gfx906":
             target = "mi50"
-        elif mspec.GPU == "gfx908":
+        elif arch == "gfx908":
             target = "mi100"
-        elif mspec.GPU == "gfx90a":
+        elif arch == "gfx90a":
             target = "mi200"
         else:
-            self.error("Unsupported SoC -> %s" % mspec.GPU)
+            self.error("Unsupported SoC -> %s" % arch)
         
-        self.__soc_name = target
-        self.__args.target = target
+        self.__soc_name.add(target)
+        if hasattr(self.__args, 'target'):
+            self.__args.target = target
         
         # instantiate underlying SoC support class
-        if self.__soc_name == "vega10":
-            from omniperf_soc.soc_gfx900 import gfx900_soc
-            self.__soc = gfx900_soc(self.__args)
-        elif self.__soc_name == "mi50":
+        # in case of analyze mode, __soc can accomadate multiple archs
+        if target == "mi50":
             from omniperf_soc.soc_gfx906 import gfx906_soc
-            self.__soc = gfx906_soc(self.__args)
-        elif self.__soc_name == "mi100":
+            self.__soc[arch] = gfx906_soc(self.__args)
+        elif target == "mi100":
             from omniperf_soc.soc_gfx908 import gfx908_soc
-            self.__soc = gfx908_soc(self.__args)
-        elif self.__soc_name == "mi200":
+            self.__soc[arch] = gfx908_soc(self.__args)
+        elif target == "mi200":
             from omniperf_soc.soc_gfx90a import gfx90a_soc
-            self.__soc = gfx90a_soc(self.__args)
+            self.__soc[arch] = gfx90a_soc(self.__args)
         else:
-            self.error("Unsupported SoC")
+            logging.error("Unsupported SoC")
             sys.exit(1)
 
         logging.info("SoC = %s" % self.__soc_name)
-        return
+        return arch
 
     @demarcate
     def parse_args(self):
@@ -191,7 +196,7 @@ class Omniperf:
     @demarcate
     def run_profiler(self):
         self.print_graphic()
-        self.detect_soc()
+        targ_arch = self.detect_soc()
 
         # Update default path
         if self.__args.path == os.path.join(os.getcwd(), "workloads"):
@@ -216,12 +221,11 @@ class Omniperf:
         #-----------------------
         # run profiling workflow
         #-----------------------
-
-        self.__soc.profiling_setup()
+        self.__soc[targ_arch].profiling_setup()
         profiler.pre_processing()
         profiler.run_profiling(self.__version["ver"], config.prog)
         profiler.post_processing()
-        self.__soc.post_profiling()
+        self.__soc[targ_arch].post_profiling()
 
         return
 
@@ -234,15 +238,14 @@ class Omniperf:
     @demarcate
     def run_analysis(self):
         self.print_graphic()
-        self.detect_soc() #NB: See comment in detect_profiler() to explain why this is here
 
-        logging.info("Analysis mode choie = %s" % self.__analyze_mode)
+        logging.info("Analysis mode = %s" % self.__analyze_mode)
 
         if self.__analyze_mode == "cli":
-            from analyze.analysis_cli import cli_analysis
+            from omniperf_analyze.analysis_cli import cli_analysis
             analyzer = cli_analysis(self.__args,self.__options)
         elif self.__analyze_mode == "webui":
-            from analyze.analysis_webui import webui_analysis
+            from omniperf_analyze.analysis_webui import webui_analysis
             analyzer = webui_analysis(self.__args,self.__options)
         else:
             self.error("Unsupported anlaysis mode -> %s" % self.__analyze_mode)
@@ -251,8 +254,16 @@ class Omniperf:
         # run analysis workflow
         #-----------------------
 
-        self.__soc.analysis_setup()
-        analyzer.pre_processing()
+        analyzer.sanitize()
+        # Load required SoC(s) from input
+        for d in analyzer.get_args().path:
+            sys_info = pd.read_csv(Path(d[0], "sysinfo.csv"))
+            arch = sys_info.iloc[0]["gpu_soc"]
+            # Create and load new SoC object
+            self.detect_soc(arch)
+
+        analyzer.pre_processing(self.__soc)
         analyzer.run_analysis()
 
         return
+
