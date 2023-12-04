@@ -245,7 +245,7 @@ def getWaves_binary(name):
 
     SO.FreeBinary(info.binaryID)
 
-    return (traces_python, waves_python, events, occupancy, flags, kernel_addr)
+    return (traces_python, waves_python, events, occupancy, flags, kernel_addr, info.flags & 0x4)
 
 
 def getWaves_stitch(traces, code, jumps, flags, latency_map, hitcount_map, bIsAuto):
@@ -520,9 +520,12 @@ if __name__ == "__main__":
         gc.collect()
 
         for name in filenames:
-            traces, waves, perfevents, occupancy, gfxv, addrs = getWaves_binary(name)
+            traces, waves, perfevents, occupancy, gfxv, addrs, ftrace = getWaves_binary(name)
             if gfxv is None:
                 continue
+            if CSV_MODE == False and ftrace == 0:
+                print('Error: Only CSV mode is available for this version')
+                assert False
 
             for id, addr in enumerate(addrs):
                 dispatch_kernel_names[id] = kern_addr[addr]
