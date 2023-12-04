@@ -19,54 +19,48 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
+#include "common/rdc_fields_supported.h"
+
 #include <assert.h>
 
 #include <algorithm>
 
-#include "common/rdc_fields_supported.h"
 #include "rdc/rdc.h"
 namespace amd {
 namespace rdc {
 
-#define FLD_DESC_ENT(ID, DESC, LABEL, DISPLAY)  \
-          {static_cast<uint32_t>(ID), {#ID, (DESC), (LABEL), (DISPLAY)}},
+#define FLD_DESC_ENT(ID, DESC, LABEL, DISPLAY) \
+  {static_cast<uint32_t>(ID), {#ID, (DESC), (LABEL), (DISPLAY)}},
 static const fld_id2name_map_t field_id_to_descript = {
-  #include "common/rdc_field.data"
+#include "common/rdc_field.data"
 };
 #undef FLD_DESC_ENT
 
 #define FLD_DESC_ENT(ID, DESC, LABEL, DISPLAY) {#ID, (ID)},
 static fld_name2id_map_t field_name_to_id = {
-  #include "common/rdc_field.data"  // NOLINT
+#include "common/rdc_field.data"  // NOLINT
 };
 #undef FLD_DESC_ENT
 
+amd::rdc::fld_id2name_map_t& get_field_id_description_from_id(void) { return field_id_to_descript; }
 
+bool get_field_id_from_name(const std::string name, rdc_field_t* value) {
+  assert(value != nullptr);
+  auto id = field_name_to_id.find(name);
+  if (id == field_name_to_id.end()) {
+    return false;
+  }
 
-amd::rdc::fld_id2name_map_t &
-get_field_id_description_from_id(void) {
-  return field_id_to_descript;
-}
-
-bool get_field_id_from_name(const std::string name, rdc_field_t *value) {
-    assert(value != nullptr);
-    auto id = field_name_to_id.find(name);
-    if (id == field_name_to_id.end()) {
-        return false;
-    }
-
-    *value = static_cast<rdc_field_t>(id->second);
-    return true;
+  *value = static_cast<rdc_field_t>(id->second);
+  return true;
 }
 
 bool is_field_valid(rdc_field_t field_id) {
   if (field_id == RDC_FI_INVALID) {
     return false;
   }
-  return field_id_to_descript.find(static_cast<uint32_t>(field_id)) !=
-                                                field_id_to_descript.end();
+  return field_id_to_descript.find(static_cast<uint32_t>(field_id)) != field_id_to_descript.end();
 }
-
 
 }  // namespace rdc
 }  // namespace amd

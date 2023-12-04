@@ -22,8 +22,8 @@ THE SOFTWARE.
 #ifndef RDC_MODULES_RDC_ROCR_COMPUTEQUEUETEST_H_
 #define RDC_MODULES_RDC_ROCR_COMPUTEQUEUETEST_H_
 
-#include "rdc_modules/rdc_rocr/TestBase.h"
 #include "hsa/hsa.h"
+#include "rdc_modules/rdc_rocr/TestBase.h"
 
 namespace amd {
 namespace rdc {
@@ -65,10 +65,9 @@ typedef struct BinarySearch {
 
   // Other items we need to populate AQL packet
   uint64_t kernel_object;
-  uint32_t group_segment_size;   ///< Kernel group seg size
-  uint32_t private_segment_size;   ///< Kernel private seg size
+  uint32_t group_segment_size;    ///< Kernel group seg size
+  uint32_t private_segment_size;  ///< Kernel private seg size
 } BinarySearch;
-
 
 class ComputeQueueTest : public TestBase {
  public:
@@ -101,14 +100,12 @@ class ComputeQueueTest : public TestBase {
   hsa_status_t LoadKernelFromObjFile(BinarySearch* bs);
   hsa_status_t Run(BinarySearch* bs);
   hsa_status_t CleanUp(BinarySearch* bs);
-  void PopulateAQLPacket(BinarySearch const* bs,
-                       hsa_kernel_dispatch_packet_t* aql);
-  hsa_status_t AgentMemcpy(void* dst, const void* src,
-                         size_t size, hsa_agent_t dst_ag, hsa_agent_t src_ag);
-  hsa_status_t AllocAndSetKernArgs(BinarySearch* bs, void* args,
-                                 size_t arg_size, void** aql_buf_ptr);
-  void WriteAQLToQueue(hsa_kernel_dispatch_packet_t const* in_aql,
-                     hsa_queue_t* q);
+  void PopulateAQLPacket(BinarySearch const* bs, hsa_kernel_dispatch_packet_t* aql);
+  hsa_status_t AgentMemcpy(void* dst, const void* src, size_t size, hsa_agent_t dst_ag,
+                           hsa_agent_t src_ag);
+  hsa_status_t AllocAndSetKernArgs(BinarySearch* bs, void* args, size_t arg_size,
+                                   void** aql_buf_ptr);
+  void WriteAQLToQueue(hsa_kernel_dispatch_packet_t const* in_aql, hsa_queue_t* q);
 };
 
 }  // namespace rdc

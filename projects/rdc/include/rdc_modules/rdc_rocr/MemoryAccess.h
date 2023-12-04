@@ -23,9 +23,8 @@ THE SOFTWARE.
 #ifndef RDC_MODULES_RDC_ROCR_MEMORYACCESS_H_
 #define RDC_MODULES_RDC_ROCR_MEMORYACCESS_H_
 
-
-#include "rdc_modules/rdc_rocr/TestBase.h"
 #include "hsa/hsa.h"
+#include "rdc_modules/rdc_rocr/TestBase.h"
 namespace amd {
 namespace rdc {
 
@@ -51,18 +50,15 @@ class MemoryAccessTest : public TestBase {
   // @Brief: Display information about what this test does
   virtual void DisplayTestInfo(void);
 
-
   // @Brief: This test verify that CPU is able to Read & write GPU memory
   void CPUAccessToGPUMemoryTest(void);
 
   // @Brief: This test verify that GPU is able to Read & write CPU memory
   void GPUAccessToCPUMemoryTest(void);
 
-
  private:
-  void CPUAccessToGPUMemoryTest(hsa_agent_t cpuAgent,
-                                                   hsa_agent_t gpuAgent,
-                                                   hsa_amd_memory_pool_t pool);
+  void CPUAccessToGPUMemoryTest(hsa_agent_t cpuAgent, hsa_agent_t gpuAgent,
+                                hsa_amd_memory_pool_t pool);
   void GPUAccessToCPUMemoryTest(hsa_agent_t cpuAgent, hsa_agent_t gpuAgent);
 };
 

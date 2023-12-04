@@ -21,39 +21,33 @@ THE SOFTWARE.
 */
 #ifndef INCLUDE_RDC_LIB_RDCLOGGER_H_
 #define INCLUDE_RDC_LIB_RDCLOGGER_H_
+#include <chrono>  // NOLINT
 #include <iostream>
 #include <string>
-#include <chrono>  // NOLINT
 
 namespace amd {
 namespace rdc {
 class RdcLogger {
  public:
-     explicit RdcLogger(std::ostream& os);
+  explicit RdcLogger(std::ostream& os);
 
-     static RdcLogger& getLogger() {
-         static RdcLogger logger(std::cout);
-         return logger;
-     }
+  static RdcLogger& getLogger() {
+    static RdcLogger logger(std::cout);
+    return logger;
+  }
 
-     bool should_log(uint32_t severity) {
-         return log_level_ >= severity;
-     }
+  bool should_log(uint32_t severity) { return log_level_ >= severity; }
 
-     std::ostream& get_ostream() {
-         return os_;
-     }
+  std::ostream& get_ostream() { return os_; }
 
-     std::string get_log_header(uint32_t severity,
-            const char* file, int line);
+  std::string get_log_header(uint32_t severity, const char* file, int line);
 
  private:
-     std::ostream& os_;
-     uint32_t log_level_;
+  std::ostream& os_;
+  uint32_t log_level_;
 };
 
 }  // namespace rdc
 }  // namespace amd
-
 
 #endif  // INCLUDE_RDC_LIB_RDCLOGGER_H_

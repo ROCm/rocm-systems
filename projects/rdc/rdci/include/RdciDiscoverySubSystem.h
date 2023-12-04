@@ -27,19 +27,18 @@ THE SOFTWARE.
 namespace amd {
 namespace rdc {
 
-class RdciDiscoverySubSystem: public RdciSubSystem {
+class RdciDiscoverySubSystem : public RdciSubSystem {
  public:
-     RdciDiscoverySubSystem();
-     void parse_cmd_opts(int argc, char ** argv) override;
-     void process() override;
- private:
-     bool show_help_;
-     void show_help() const;
-};
+  RdciDiscoverySubSystem();
+  void parse_cmd_opts(int argc, char** argv) override;
+  void process() override;
 
+ private:
+  bool show_help_;
+  void show_help() const;
+};
 
 }  // namespace rdc
 }  // namespace amd
-
 
 #endif  // RDCI_INCLUDE_RDCIDISCOVERYSUBSYSTEM_H_

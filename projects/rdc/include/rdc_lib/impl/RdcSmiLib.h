@@ -22,11 +22,12 @@ THE SOFTWARE.
 #ifndef INCLUDE_RDC_LIB_IMPL_RDCSMILIB_H_
 #define INCLUDE_RDC_LIB_IMPL_RDCSMILIB_H_
 
-#include <vector>
 #include <memory>
+#include <vector>
+
+#include "rdc_lib/RdcDiagnostic.h"
 #include "rdc_lib/RdcMetricFetcher.h"
 #include "rdc_lib/RdcTelemetry.h"
-#include "rdc_lib/RdcDiagnostic.h"
 #include "rdc_lib/impl/RdcSmiDiagnosticImpl.h"
 
 namespace amd {
@@ -34,45 +35,38 @@ namespace rdc {
 
 class RdcSmiLib : public RdcTelemetry, public RdcDiagnostic {
  public:
-    // get support field ids
-    rdc_status_t rdc_telemetry_fields_query(
-        uint32_t field_ids[MAX_NUM_FIELDS], uint32_t* field_count) override;
+  // get support field ids
+  rdc_status_t rdc_telemetry_fields_query(uint32_t field_ids[MAX_NUM_FIELDS],
+                                          uint32_t* field_count) override;
 
-    // Fetch
-    rdc_status_t rdc_telemetry_fields_value_get(rdc_gpu_field_t* fields,
-            uint32_t fields_count, rdc_field_value_f callback,
-            void*  user_data) override;
+  // Fetch
+  rdc_status_t rdc_telemetry_fields_value_get(rdc_gpu_field_t* fields, uint32_t fields_count,
+                                              rdc_field_value_f callback, void* user_data) override;
 
-    rdc_status_t rdc_telemetry_fields_watch(rdc_gpu_field_t* fields,
-            uint32_t fields_count) override;
-    rdc_status_t rdc_telemetry_fields_unwatch(rdc_gpu_field_t* fields,
-            uint32_t fields_count) override;
+  rdc_status_t rdc_telemetry_fields_watch(rdc_gpu_field_t* fields, uint32_t fields_count) override;
+  rdc_status_t rdc_telemetry_fields_unwatch(rdc_gpu_field_t* fields,
+                                            uint32_t fields_count) override;
 
-    rdc_status_t rdc_diag_test_cases_query(
-        rdc_diag_test_cases_t test_cases[MAX_TEST_CASES],
-        uint32_t* test_case_count) override;
+  rdc_status_t rdc_diag_test_cases_query(rdc_diag_test_cases_t test_cases[MAX_TEST_CASES],
+                                         uint32_t* test_case_count) override;
 
-    // Run a specific test case
-    rdc_status_t rdc_test_case_run(
-        rdc_diag_test_cases_t test_case,
-        uint32_t gpu_index[RDC_MAX_NUM_DEVICES],
-        uint32_t gpu_count,
-        rdc_diag_test_result_t* result) override;
+  // Run a specific test case
+  rdc_status_t rdc_test_case_run(rdc_diag_test_cases_t test_case,
+                                 uint32_t gpu_index[RDC_MAX_NUM_DEVICES], uint32_t gpu_count,
+                                 rdc_diag_test_result_t* result) override;
 
-    rdc_status_t rdc_diagnostic_run(
-        const rdc_group_info_t& gpus,
-        rdc_diag_level_t level,
-        rdc_diag_response_t* response) override;
+  rdc_status_t rdc_diagnostic_run(const rdc_group_info_t& gpus, rdc_diag_level_t level,
+                                  rdc_diag_response_t* response) override;
 
-    rdc_status_t rdc_diag_init(uint64_t flags) override;
-    rdc_status_t rdc_diag_destroy() override;
+  rdc_status_t rdc_diag_init(uint64_t flags) override;
+  rdc_status_t rdc_diag_destroy() override;
 
-    explicit RdcSmiLib(const RdcMetricFetcherPtr& mf);
+  explicit RdcSmiLib(const RdcMetricFetcherPtr& mf);
 
  private:
-    RdcMetricFetcherPtr metric_fetcher_;
-    bool bulk_fetch_enabled_;
-    RdcSmiDiagnosticPtr smi_diag_;
+  RdcMetricFetcherPtr metric_fetcher_;
+  bool bulk_fetch_enabled_;
+  RdcSmiDiagnosticPtr smi_diag_;
 };
 
 typedef std::shared_ptr<RdcSmiLib> RdcSmiLibPtr;

@@ -21,6 +21,7 @@ THE SOFTWARE.
 */
 
 #include "rdc_modules/rdc_rocr/RdcRocrBase.h"
+
 #include <string.h>
 
 namespace amd {
@@ -45,8 +46,7 @@ RdcRocrBase::RdcRocrBase(void) {
   orig_hsa_enable_interrupt_ = nullptr;
 }
 
-RdcRocrBase::~RdcRocrBase() {
-}
+RdcRocrBase::~RdcRocrBase() {}
 
 }  // namespace rdc
 }  // namespace amd

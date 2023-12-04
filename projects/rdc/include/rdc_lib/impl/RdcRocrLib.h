@@ -22,48 +22,42 @@ THE SOFTWARE.
 #ifndef INCLUDE_RDC_LIB_IMPL_RDCROCRLIB_H_
 #define INCLUDE_RDC_LIB_IMPL_RDCROCRLIB_H_
 
-#include <vector>
 #include <memory>
-#include "rdc_lib/RdcLibraryLoader.h"
+#include <vector>
+
 #include "rdc_lib/RdcDiagnostic.h"
+#include "rdc_lib/RdcLibraryLoader.h"
 
 namespace amd {
 namespace rdc {
 
 class RdcRocrLib : public RdcDiagnostic {
  public:
-    rdc_status_t rdc_diag_test_cases_query(
-        rdc_diag_test_cases_t test_cases[MAX_TEST_CASES],
-        uint32_t* test_case_count) override;
+  rdc_status_t rdc_diag_test_cases_query(rdc_diag_test_cases_t test_cases[MAX_TEST_CASES],
+                                         uint32_t* test_case_count) override;
 
-    // Run a specific test case
-    rdc_status_t rdc_test_case_run(
-        rdc_diag_test_cases_t test_case,
-        uint32_t gpu_index[RDC_MAX_NUM_DEVICES],
-        uint32_t gpu_count,
-        rdc_diag_test_result_t* result) override;
+  // Run a specific test case
+  rdc_status_t rdc_test_case_run(rdc_diag_test_cases_t test_case,
+                                 uint32_t gpu_index[RDC_MAX_NUM_DEVICES], uint32_t gpu_count,
+                                 rdc_diag_test_result_t* result) override;
 
-    rdc_status_t rdc_diagnostic_run(
-        const rdc_group_info_t& gpus,
-        rdc_diag_level_t level,
-        rdc_diag_response_t* response) override;
+  rdc_status_t rdc_diagnostic_run(const rdc_group_info_t& gpus, rdc_diag_level_t level,
+                                  rdc_diag_response_t* response) override;
 
-    rdc_status_t rdc_diag_init(uint64_t flags) override;
-    rdc_status_t rdc_diag_destroy() override;
+  rdc_status_t rdc_diag_init(uint64_t flags) override;
+  rdc_status_t rdc_diag_destroy() override;
 
-    explicit RdcRocrLib();
+  RdcRocrLib();
 
-    ~RdcRocrLib();
+  ~RdcRocrLib();
 
  private:
-    RdcLibraryLoader lib_loader_;
-    rdc_status_t (*test_case_run_)(rdc_diag_test_cases_t,
-                 uint32_t[RDC_MAX_NUM_DEVICES], uint32_t,
-                 rdc_diag_test_result_t*);
-    rdc_status_t (*diag_test_cases_query_)(
-                rdc_diag_test_cases_t[MAX_TEST_CASES], uint32_t*);
-    rdc_status_t (*diag_init_)(uint64_t);
-    rdc_status_t (*diag_destroy_)();
+  RdcLibraryLoader lib_loader_;
+  rdc_status_t (*test_case_run_)(rdc_diag_test_cases_t, uint32_t[RDC_MAX_NUM_DEVICES], uint32_t,
+                                 rdc_diag_test_result_t*);
+  rdc_status_t (*diag_test_cases_query_)(rdc_diag_test_cases_t[MAX_TEST_CASES], uint32_t*);
+  rdc_status_t (*diag_init_)(uint64_t);
+  rdc_status_t (*diag_destroy_)();
 };
 
 typedef std::shared_ptr<RdcRocrLib> RdcRocrLibPtr;

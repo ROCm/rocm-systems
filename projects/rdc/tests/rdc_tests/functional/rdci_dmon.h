@@ -26,7 +26,7 @@ THE SOFTWARE.
 
 class TestRdciDmon : public TestBase {
  public:
-    TestRdciDmon();
+  TestRdciDmon();
 
   // @Brief: Destructor for test case of TestRdciDmon
   virtual ~TestRdciDmon();

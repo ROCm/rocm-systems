@@ -23,6 +23,7 @@ THE SOFTWARE.
 #define INCLUDE_RDC_LIB_RDCTELEMETRY_H_
 
 #include <memory>
+
 #include "rdc/rdc.h"
 #include "rdc_lib/RdcTelemetryLibInterface.h"
 
@@ -31,27 +32,26 @@ namespace rdc {
 
 class RdcTelemetry {
  public:
-    // get support field ids
-    virtual rdc_status_t rdc_telemetry_fields_query(
-                uint32_t field_ids[MAX_NUM_FIELDS],
-                uint32_t* field_count) = 0;
+  // get support field ids
+  virtual rdc_status_t rdc_telemetry_fields_query(uint32_t field_ids[MAX_NUM_FIELDS],
+                                                  uint32_t* field_count) = 0;
 
-    // Fetch
-    virtual rdc_status_t rdc_telemetry_fields_value_get(rdc_gpu_field_t* fields,
-                uint32_t fields_count, rdc_field_value_f callback,
-                void*  user_data) = 0;
+  // Fetch
+  virtual rdc_status_t rdc_telemetry_fields_value_get(rdc_gpu_field_t* fields,
+                                                      uint32_t fields_count,
+                                                      rdc_field_value_f callback,
+                                                      void* user_data) = 0;
 
-    virtual rdc_status_t rdc_telemetry_fields_watch(rdc_gpu_field_t* fields,
-                uint32_t fields_count) = 0;
-    virtual rdc_status_t rdc_telemetry_fields_unwatch(rdc_gpu_field_t* fields,
-            uint32_t fields_count) = 0;
+  virtual rdc_status_t rdc_telemetry_fields_watch(rdc_gpu_field_t* fields,
+                                                  uint32_t fields_count) = 0;
+  virtual rdc_status_t rdc_telemetry_fields_unwatch(rdc_gpu_field_t* fields,
+                                                    uint32_t fields_count) = 0;
 
-    virtual ~RdcTelemetry() {}
+  virtual ~RdcTelemetry() {}
 };
 typedef std::shared_ptr<RdcTelemetry> RdcTelemetryPtr;
 
 }  // namespace rdc
 }  // namespace amd
-
 
 #endif  // INCLUDE_RDC_LIB_RDCTELEMETRY_H_

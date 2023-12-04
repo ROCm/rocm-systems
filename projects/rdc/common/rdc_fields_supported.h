@@ -22,8 +22,8 @@ THE SOFTWARE.
 #ifndef COMMON_RDC_FIELDS_SUPPORTED_H_
 #define COMMON_RDC_FIELDS_SUPPORTED_H_
 
-#include <string>
 #include <map>
+#include <string>
 #include <unordered_map>
 
 #include "rdc/rdc.h"
@@ -32,18 +32,17 @@ namespace amd {
 namespace rdc {
 
 typedef struct {
-    std::string enum_name;
-    std::string description;
-    std::string label;
-    bool do_display;
+  std::string enum_name;
+  std::string description;
+  std::string label;
+  bool do_display;
 } field_id_descript;
 
-typedef const std::map<uint32_t, const field_id_descript>
-                                                       fld_id2name_map_t;
+typedef const std::map<uint32_t, const field_id_descript> fld_id2name_map_t;
 typedef std::unordered_map<std::string, uint32_t> fld_name2id_map_t;
 
-bool get_field_id_from_name(const std::string name, rdc_field_t *value);
-fld_id2name_map_t & get_field_id_description_from_id(void);  // NOLINT
+bool get_field_id_from_name(const std::string name, rdc_field_t* value);
+fld_id2name_map_t& get_field_id_description_from_id(void);  // NOLINT
 bool is_field_valid(rdc_field_t field_id);
 
 }  // namespace rdc

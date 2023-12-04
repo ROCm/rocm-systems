@@ -21,29 +21,27 @@ THE SOFTWARE.
 */
 
 #include <dirent.h>
-
-#include <string>
-#include <vector>
-#include <memory>
-#include <iostream>
-#include <fstream>
-
 #include <gtest/gtest.h>
 
-#include "rdc/rdc.h"
-#include "rocm_smi/rocm_smi.h"
-#include "rdc_tests/test_common.h"
-#include "rdc_tests/test_base.h"
+#include <fstream>
+#include <iostream>
+#include <memory>
+#include <string>
+#include <vector>
 
 #include "functional/rdci_discovery.h"
-#include "functional/rdci_group.h"
 #include "functional/rdci_dmon.h"
 #include "functional/rdci_fieldgroup.h"
+#include "functional/rdci_group.h"
 #include "functional/rdci_stats.h"
+#include "rdc/rdc.h"
+#include "rdc_tests/test_base.h"
+#include "rdc_tests/test_common.h"
+#include "rocm_smi/rocm_smi.h"
 
-static RDCTstGlobals *sRDCGlvalues = nullptr;
+static RDCTstGlobals* sRDCGlvalues = nullptr;
 
-static void SetFlags(TestBase *test) {
+static void SetFlags(TestBase* test) {
   assert(sRDCGlvalues != nullptr);
 
   test->set_verbosity(sRDCGlvalues->verbosity);
@@ -54,7 +52,7 @@ static void SetFlags(TestBase *test) {
   test->set_mode(sRDCGlvalues->standalone);
 }
 
-static void RunCustomTestProlog(TestBase *test) {
+static void RunCustomTestProlog(TestBase* test) {
   SetFlags(test);
 
   test->DisplayTestInfo();
@@ -62,7 +60,7 @@ static void RunCustomTestProlog(TestBase *test) {
   test->Run();
   return;
 }
-static void RunCustomTestEpilog(TestBase *test) {
+static void RunCustomTestEpilog(TestBase* test) {
   test->DisplayResults();
   test->Close();
   return;
@@ -74,7 +72,7 @@ static void RunCustomTestEpilog(TestBase *test) {
 //   * RunCustomTestProlog(test)  // Run() should contain minimal code
 //   * <insert call to actual test function within test case>
 //   * RunCustomTestEpilog(test)
-static void RunGenericTest(TestBase *test) {
+static void RunGenericTest(TestBase* test) {
   RunCustomTestProlog(test);
   RunCustomTestEpilog(test);
   return;
@@ -108,14 +106,13 @@ TEST(rdctstReadOnly, TestRdciStats) {
 static int getPIDFromName(std::string name) {
   int pid = -1;
 
-  DIR *dir_ptr = opendir("/proc");
+  DIR* dir_ptr = opendir("/proc");
   if (dir_ptr != NULL) {
-    struct dirent *dentry;
+    struct dirent* dentry;
     while (pid < 0 && (dentry = readdir(dir_ptr))) {
       int id = atoi(dentry->d_name);
       if (id > 0) {
-        std::string commPath = std::string("/proc/") +
-                                          dentry->d_name + "/comm";
+        std::string commPath = std::string("/proc/") + dentry->d_name + "/comm";
         std::ifstream cmdFile(commPath.c_str());
         std::string cmdLine;
         getline(cmdFile, cmdLine);
@@ -172,13 +169,13 @@ static int killRDCD(int pid = 0) {
   return 0;
 }
 
-static int startRDCD(std::string *rdcd_path, char *envp[]) {
+static int startRDCD(std::string* rdcd_path, char* envp[]) {
   assert(rdcd_path != nullptr);
-  const char *rdcd_cl[128] = {rdcd_path->c_str(), "-u", NULL};
+  const char* rdcd_cl[128] = {rdcd_path->c_str(), "-u", NULL};
   int pid = fork();
 
   if (pid == 0) {
-    if (-1 == execve(rdcd_cl[0], (char **)rdcd_cl , envp)) {  // NOLINT
+    if (-1 == execve(rdcd_cl[0], (char**)rdcd_cl, envp)) {  // NOLINT
       std::string err_msg = "ERROR: Child process failed to start ";
       err_msg += *rdcd_path;
       perror(err_msg.c_str());
@@ -220,13 +217,13 @@ int main(int argc, char** argv, char* envp[]) {
     std::cout << "0 - Embedded mode \n";
     std::cout << "1 - Standalone mode \n";
     while (!(std::cin >> settings.standalone)) {
-        std::cout << "Invalid input.\n";
-        std::cin.clear();
-        std::cin.ignore();
+      std::cout << "Invalid input.\n";
+      std::cin.clear();
+      std::cin.ignore();
     }
     std::cout << std::endl;
-    std::cout << (settings.standalone?
-        "Standalone mode selected.\n":"Embedded mode selected.\n");
+    std::cout << (settings.standalone ? "Standalone mode selected.\n"
+                                      : "Embedded mode selected.\n");
   }
   sRDCGlvalues = &settings;
 
@@ -271,9 +268,10 @@ int main(int argc, char** argv, char* envp[]) {
         }
       } else {
         if (getPIDFromName("rdcd") == -1) {
-          std::cout <<
-          "rdcd is not running. Use -d (--start_rdcd) to have rdcd started."
-                                                  " Exiting test." << std::endl;
+          std::cout << "rdcd is not running. Use -d (--start_rdcd) to have "
+                       "rdcd started."
+                       " Exiting test."
+                    << std::endl;
           return 1;
         }
       }

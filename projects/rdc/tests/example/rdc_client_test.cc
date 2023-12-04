@@ -21,26 +21,27 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
-#include <unistd.h>
+#include "rdc/rdc_client.h"
+
 #include <grpcpp/grpcpp.h>
+#include <unistd.h>
 
 #include <iostream>
 
-#include "rdc/rdc_client.h"
 #include "rocm_smi/rocm_smi.h"
 
-#define CHK_RET_STATUS(RET) \
-  if ((RET) != RDC_STATUS_SUCCESS) { \
-    const char *err_msg_str; \
-    (void)rdc_status_string((RET), &err_msg_str); \
-    std::cout << "rdc call returned error: " << (RET) << ":\"" << \
-                                           err_msg_str << "\"" << std::endl; \
+#define CHK_RET_STATUS(RET)                                                           \
+  if ((RET) != RDC_STATUS_SUCCESS) {                                                  \
+    const char* err_msg_str;                                                          \
+    (void)rdc_status_string((RET), &err_msg_str);                                     \
+    std::cout << "rdc call returned error: " << (RET) << ":\"" << err_msg_str << "\"" \
+              << std::endl;                                                           \
   }
 
-#define CHK_RET_STATUS_CONT(RET) \
-  if ((RET) != RDC_STATUS_SUCCESS) { \
-    std::cout << "rdc call returned error: " << (RET) <<  std::endl; \
-    continue; \
+#define CHK_RET_STATUS_CONT(RET)                                    \
+  if ((RET) != RDC_STATUS_SUCCESS) {                                \
+    std::cout << "rdc call returned error: " << (RET) << std::endl; \
+    continue;                                                       \
   }
 
 int main(int argc, char** argv) {
@@ -58,11 +59,9 @@ int main(int argc, char** argv) {
     serv_port = argv[2];
   }
 
-  std::cout << "Attempting to create channel to " << serv_host << ":" <<
-                                                       serv_port << std::endl;
+  std::cout << "Attempting to create channel to " << serv_host << ":" << serv_port << std::endl;
 
-  ret = rdc_channel_create(&server_ch, serv_host.c_str(), serv_port.c_str(),
-                                                                       false);
+  ret = rdc_channel_create(&server_ch, serv_host.c_str(), serv_port.c_str(), false);
   CHK_RET_STATUS(ret)
   std::cout << "Successfully created channel" << std::endl;
 
@@ -80,23 +79,20 @@ int main(int argc, char** argv) {
   std::cout << "Getting number of gpus at server..." << std::endl;
   ret = rdc_num_gpus_get(server_ch, &num_gpu);
   CHK_RET_STATUS(ret)
-  std::cout << "Number of GPUs at server is " << server_ch <<
-                                                         num_gpu << std::endl;
+  std::cout << "Number of GPUs at server is " << server_ch << num_gpu << std::endl;
 
   for (uint32_t dv_ind = 0; dv_ind < num_gpu; ++dv_ind) {
     std::cout << "Info for Device " << dv_ind << ":" << std::endl;
     std::cout << "\tGetting temperature..." << std::endl;
-    ret = rdc_dev_temp_metric_get(server_ch, dv_ind, RSMI_TEMP_TYPE_JUNCTION,
-                                             RSMI_TEMP_CURRENT, &temperature);
+    ret = rdc_dev_temp_metric_get(server_ch, dv_ind, RSMI_TEMP_TYPE_JUNCTION, RSMI_TEMP_CURRENT,
+                                  &temperature);
     CHK_RET_STATUS_CONT(ret)
-    std::cout << "\t GPU " << dv_ind << " has a temperature of " <<
-                                                     temperature << std::endl;
+    std::cout << "\t GPU " << dv_ind << " has a temperature of " << temperature << std::endl;
   }
 
   ret = rdc_channel_destroy(server_ch);
   CHK_RET_STATUS(ret)
-  std::cout << "Successfully destroyed channel to " << serv_host << ":" <<
-                                                       serv_port << std::endl;
+  std::cout << "Successfully destroyed channel to " << serv_host << ":" << serv_port << std::endl;
 
   return 0;
 }

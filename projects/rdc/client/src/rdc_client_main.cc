@@ -21,46 +21,39 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
+#include "rdc/rdc_client_main.h"
+
 #include <assert.h>
 #include <grpcpp/grpcpp.h>
 
 #include <string>
 
-#include "rdc.grpc.pb.h"  // NOLINT
-#include "rdc/rdc_client_main.h"
-#include "rdc/rdc_client.h"
 #include "common/rdc_utils.h"
+#include "rdc.grpc.pb.h"  // NOLINT
+#include "rdc/rdc_client.h"
 
 namespace amd {
 namespace rdc {
 
 #ifdef USE_PINNED_CERTS
 // Pinned certificates
-static const char *kDefaultRDCServerCertPinPath =
-                                             "/etc/rdc/server/rdc_server.crt";
-static const char *kDefaultRDCClientKeyPinPath =
-                                     "/etc/rdc/client/private/rdc_client.key";
-static const char *kDefaultRDCClientCertPinPath =
-                                             "/etc/rdc/client/rdc_client.crt";
+static const char* kDefaultRDCServerCertPinPath = "/etc/rdc/server/rdc_server.crt";
+static const char* kDefaultRDCClientKeyPinPath = "/etc/rdc/client/private/rdc_client.key";
+static const char* kDefaultRDCClientCertPinPath = "/etc/rdc/client/rdc_client.crt";
 #endif  // USE_PINNED_CERTS
 
 // PKI certificates
-static const char * kDefaultRDCClientCertKeyPkiPath =
-                                "/etc/rdc/client/private/rdc_client_cert.key";
-static const char * kDefaultRDCClientCertPemPkiPath =
-                                  "/etc/rdc/client/certs/rdc_client_cert.pem";
-static const char * kDefaultRDCClientCACertPemPkiPath =
-                                       "/etc/rdc/client/certs/rdc_cacert.pem";
+static const char* kDefaultRDCClientCertKeyPkiPath = "/etc/rdc/client/private/rdc_client_cert.key";
+static const char* kDefaultRDCClientCertPemPkiPath = "/etc/rdc/client/certs/rdc_client_cert.pem";
+static const char* kDefaultRDCClientCACertPemPkiPath = "/etc/rdc/client/certs/rdc_cacert.pem";
 
-RDCChannel::RDCChannel(std::string server_ip, std::string server_port,
-            bool secure) : server_ip_(server_ip), server_port_(server_port),
-                                                    secure_channel_(secure) {}
+RDCChannel::RDCChannel(std::string server_ip, std::string server_port, bool secure)
+    : server_ip_(server_ip), server_port_(server_port), secure_channel_(secure) {}
 
-RDCChannel::~RDCChannel() {
-}
+RDCChannel::~RDCChannel() {}
 
 #ifdef USE_PINNED_CERTS
-static int ConstructSSLOptsPin(grpc::SslCredentialsOptions *ssl_opts) {
+static int ConstructSSLOptsPin(grpc::SslCredentialsOptions* ssl_opts) {
   assert(ssl_opts != nullptr);
   if (ssl_opts == nullptr) {
     return -EINVAL;
@@ -100,7 +93,7 @@ static int ConstructSSLOptsPin(grpc::SslCredentialsOptions *ssl_opts) {
 }
 #endif  // USE_PINNED_CERTS
 
-static int ConstructSSLOptsPKI(grpc::SslCredentialsOptions *ssl_opts) {
+static int ConstructSSLOptsPKI(grpc::SslCredentialsOptions* ssl_opts) {
   assert(ssl_opts != nullptr);
   if (ssl_opts == nullptr) {
     return -EINVAL;
@@ -139,8 +132,7 @@ static int ConstructSSLOptsPKI(grpc::SslCredentialsOptions *ssl_opts) {
   return 0;
 }
 
-rdc_status_t
-RDCChannel::Initialize(void) {
+rdc_status_t RDCChannel::Initialize(void) {
   assert(!server_port_.empty());
   assert(!server_ip_.empty());
 
@@ -157,16 +149,14 @@ RDCChannel::Initialize(void) {
     ret = ConstructSSLOptsPKI(&ssl_opts);
 #endif
     if (ret) {
-      std::cerr << "Failed to process OpenSSL keys and certificates." <<
-                                                                    std::endl;
+      std::cerr << "Failed to process OpenSSL keys and certificates." << std::endl;
       return RDC_STATUS_CLIENT_ERR_SSL;
     }
 
     channel_creds_ = grpc::SslCredentials(ssl_opts);
     channel_ = grpc::CreateChannel(addr_str, channel_creds_);
   } else {
-    channel_ = ::grpc::CreateChannel(addr_str,
-                                          grpc::InsecureChannelCredentials());
+    channel_ = ::grpc::CreateChannel(addr_str, grpc::InsecureChannelCredentials());
   }
 
   rsmi_stub_ = ::rdc::Rsmi::NewStub(channel_);

@@ -36,17 +36,17 @@ namespace rdc {
 
 class RdcModuleMgrImpl : public RdcModuleMgr {
  public:
-    RdcTelemetryPtr get_telemetry_module() override;
-    RdcDiagnosticPtr get_diagnostic_module() override;
-    explicit RdcModuleMgrImpl(const RdcMetricFetcherPtr& fetcher);
+  RdcTelemetryPtr get_telemetry_module() override;
+  RdcDiagnosticPtr get_diagnostic_module() override;
+  explicit RdcModuleMgrImpl(const RdcMetricFetcherPtr& fetcher);
 
  private:
-    //  Function module
-    RdcTelemetryPtr rdc_telemetry_module_;
-    RdcDiagnosticPtr rdc_diagnostic_module_;
+  //  Function module
+  RdcTelemetryPtr rdc_telemetry_module_;
+  RdcDiagnosticPtr rdc_diagnostic_module_;
 
-    //  Domain module
-    RdcMetricFetcherPtr fetcher_;
+  //  Domain module
+  RdcMetricFetcherPtr fetcher_;
 };
 
 }  // namespace rdc

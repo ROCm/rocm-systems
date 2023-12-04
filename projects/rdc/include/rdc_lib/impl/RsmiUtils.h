@@ -34,4 +34,3 @@ rdc_status_t Rsmi2RdcError(rsmi_status_t rsmi);
 }  // namespace amd
 
 #endif  // INCLUDE_RDC_LIB_IMPL_RSMIUTILS_H_
-

@@ -24,45 +24,40 @@ THE SOFTWARE.
 
 // The telemetry interface for libraries, for example, RAS.
 #include <rdc/rdc.h>
+
 #include <cstdint>
 
 extern "C" {
 
 // Structure to keep both gup index and field value
 typedef struct {
-    uint32_t gpu_index;
-    rdc_field_value field_value;
+  uint32_t gpu_index;
+  rdc_field_value field_value;
 } rdc_gpu_field_value_t;
 
 typedef struct {
-    uint32_t gpu_index;
-    rdc_field_t field_id;
+  uint32_t gpu_index;
+  rdc_field_t field_id;
 } rdc_gpu_field_t;
 
 #define MAX_NUM_FIELDS 8192
-typedef rdc_status_t(*rdc_field_value_f)(rdc_gpu_field_value_t*  values,
-                uint32_t num_values, void*  user_data);
+typedef rdc_status_t (*rdc_field_value_f)(rdc_gpu_field_value_t* values, uint32_t num_values,
+                                          void* user_data);
 
 // The library will implement below function
 
-rdc_status_t rdc_telemetry_fields_query(uint32_t field_ids[MAX_NUM_FIELDS],
-                uint32_t* field_count);
+rdc_status_t rdc_telemetry_fields_query(uint32_t field_ids[MAX_NUM_FIELDS], uint32_t* field_count);
 
-rdc_status_t rdc_telemetry_fields_value_get(rdc_gpu_field_t* fields,
-                uint32_t fields_count, rdc_field_value_f callback,
-                void*  user_data);
+rdc_status_t rdc_telemetry_fields_value_get(rdc_gpu_field_t* fields, uint32_t fields_count,
+                                            rdc_field_value_f callback, void* user_data);
 
+rdc_status_t rdc_telemetry_fields_watch(rdc_gpu_field_t* fields, uint32_t fields_count);
 
-rdc_status_t rdc_telemetry_fields_watch(rdc_gpu_field_t* fields,
-                uint32_t fields_count);
-
-rdc_status_t rdc_telemetry_fields_unwatch(rdc_gpu_field_t* fields,
-                uint32_t fields_count);
+rdc_status_t rdc_telemetry_fields_unwatch(rdc_gpu_field_t* fields, uint32_t fields_count);
 
 rdc_status_t rdc_module_init(uint64_t flags);
 
 rdc_status_t rdc_module_destroy();
-
 }
 
-#endif   // INCLUDE_RDC_LIB_RDCTELEMETRYLIBINTERFACE_H_
+#endif  // INCLUDE_RDC_LIB_RDCTELEMETRYLIBINTERFACE_H_

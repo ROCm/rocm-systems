@@ -30,29 +30,25 @@ namespace amd {
 namespace rdc {
 
 #ifdef NDEBUG
-#define debug_print(fmt, ...)               \
-  do {                                      \
+#define debug_print(fmt, ...) \
+  do {                        \
   } while (false)
 #else
-#define debug_print(fmt, ...)               \
-  do {                                      \
-    fprintf(stderr, fmt, ##__VA_ARGS__);    \
+#define debug_print(fmt, ...)            \
+  do {                                   \
+    fprintf(stderr, fmt, ##__VA_ARGS__); \
   } while (false)
 #endif
 
-bool
-FileExists(char const *filename);
+bool FileExists(char const* filename);
 
-int
-ReadFile(std::string path, std::string *retStr, bool chop_newline = false);
-int
-ReadFile(const char *path, std::string *retStr, bool chop_newline = false);
+int ReadFile(std::string path, std::string* retStr, bool chop_newline = false);
+int ReadFile(const char* path, std::string* retStr, bool chop_newline = false);
 
-bool IsNumber(const std::string &s);
-bool IsIP(const std::string &s);
+bool IsNumber(const std::string& s);
+bool IsIP(const std::string& s);
 
 }  // namespace rdc
 }  // namespace amd
 
 #endif  // COMMON_RDC_UTILS_H_
-

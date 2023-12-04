@@ -20,17 +20,17 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
-#include "rdc/rdc_client.h"
-#include "rdc.grpc.pb.h"  // NOLINT
 #include "rdc/rdc_client_utils.h"
+
+#include "rdc.grpc.pb.h"  // NOLINT
+#include "rdc/rdc_client.h"
 
 namespace amd {
 namespace rdc {
 
 rdc_status_t GrpcErrorToRdcError(grpc::StatusCode grpc_err) {
   uint32_t grpc_err_int = static_cast<uint32_t>(grpc_err);
-  uint32_t rdc_grpc_base_int =
-              static_cast<uint32_t>(RDC_STATUS_GRPC_ERR_FIRST);
+  uint32_t rdc_grpc_base_int = static_cast<uint32_t>(RDC_STATUS_GRPC_ERR_FIRST);
   uint32_t rdc_err_int = grpc_err_int + rdc_grpc_base_int;
 
   return static_cast<rdc_status_t>(rdc_err_int);

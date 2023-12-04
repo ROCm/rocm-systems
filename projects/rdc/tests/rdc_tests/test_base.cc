@@ -19,13 +19,13 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
-#include <assert.h>
+#include "rdc_tests/test_base.h"
 
+#include <assert.h>
 #include <gtest/gtest.h>
 
-#include "rocm_smi/rocm_smi.h"
-#include "rdc_tests/test_base.h"
 #include "rdc_tests/test_common.h"
+#include "rocm_smi/rocm_smi.h"
 
 static const int kOutputLineLength = 80;
 static const char kLabelDelimiter[] = "####";
@@ -39,12 +39,10 @@ rdc_status_t result;
 
 /*TestBase::TestBase() : description_(""), rdc_channel_(0) {
 }*/
-TestBase::TestBase() : description_("") {
-}
-TestBase::~TestBase() {
-}
+TestBase::TestBase() : description_("") {}
+TestBase::~TestBase() {}
 
-static void MakeHeaderStr(const char *inStr, std::string *outStr) {
+static void MakeHeaderStr(const char* inStr, std::string* outStr) {
   assert(outStr != nullptr);
   assert(inStr != nullptr);
 
@@ -65,25 +63,18 @@ void TestBase::SetUp(void) {
 }
 
 void TestBase::PrintDeviceHeader(uint32_t dv_ind) {
-  IF_VERB(STANDARD) {
-    std::cout << "\t**Device index: " << dv_ind << std::endl;
-  }
+  IF_VERB(STANDARD) { std::cout << "\t**Device index: " << dv_ind << std::endl; }
 
   std::cout << std::setbase(10);
 }
 
-rdc_status_t
-TestBase::AllocateRDCChannel(void) {
-
-  IF_VERB(STANDARD) {
-    std::cout << "\t**Initializing RDC" << std::endl;
-  }
+rdc_status_t TestBase::AllocateRDCChannel(void) {
+  IF_VERB(STANDARD) { std::cout << "\t**Initializing RDC" << std::endl; }
   rdc_status_t result = rdc_init(0);
   if (result != RDC_ST_OK) {
-        std::cout << "Error initializing RDC.... " <<
-                rdc_status_string(result) << std::endl;
-        return result;
-    }
+    std::cout << "Error initializing RDC.... " << rdc_status_string(result) << std::endl;
+    return result;
+  }
 
   return result;
 }
@@ -109,8 +100,9 @@ void TestBase::DisplayResults(void) const {
 }
 
 void TestBase::DisplayTestInfo(void) {
-  printf("#########################################"
-                                  "######################################\n");
+  printf(
+      "#########################################"
+      "######################################\n");
 
   std::string label;
   MakeHeaderStr(kTitleLabel, &label);
@@ -134,4 +126,3 @@ void TestBase::set_description(std::string d) {
     i = endlptr;
   }
 }
-

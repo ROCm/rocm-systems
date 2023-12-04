@@ -28,6 +28,7 @@ THE SOFTWARE.
 
 #include <memory>
 #include <string>
+
 #include "rocm_smi/rocm_smi.h"
 
 /**
@@ -190,7 +191,6 @@ typedef enum {
   RDC_STATUS_UNKNOWN_ERROR = 0xFFFFFFFF,  //!< An unknown error occurred
 } rdc_status_t;
 
-
 /**
  * @brief Handle to RDC server channel
  */
@@ -232,10 +232,8 @@ typedef uintptr_t rdc_channel_t;
  * @retval ::RDC_STATUS_SUCCESS is returned upon successful call.
  *
  */
-rdc_status_t
-rdc_channel_state_get(rdc_channel_t channel, bool try_to_connect,
-                                              grpc_connectivity_state *state);
-
+rdc_status_t rdc_channel_state_get(rdc_channel_t channel, bool try_to_connect,
+                                   grpc_connectivity_state* state);
 
 /**
  * @brief Verify a channel's connection to the server
@@ -252,8 +250,7 @@ rdc_channel_state_get(rdc_channel_t channel, bool try_to_connect,
  * @retval ::RDC_STATUS_SUCCESS is returned upon successful call.
  *
  */
-rdc_status_t
-rdc_channel_connection_verify(rdc_channel_t channel);
+rdc_status_t rdc_channel_connection_verify(rdc_channel_t channel);
 
 /** @} */  // end of RDCAdmin
 
@@ -267,7 +264,7 @@ rdc_channel_connection_verify(rdc_channel_t channel);
 /**
  * @brief Create a communications channel to an RDC server
  *
- * @details Given a pointer to an ::rdc_channel_t @p channel, a string 
+ * @details Given a pointer to an ::rdc_channel_t @p channel, a string
  * containing the ip address of the server @p ip, a string containing
  * the port number on which the server is listening @p port and a bool
  * indicating whether the channel should use a secure link @p secure,
@@ -290,9 +287,8 @@ rdc_channel_connection_verify(rdc_channel_t channel);
  * @retval ::RDC_STATUS_SUCCESS is returned upon successful call.
  *
  */
-rdc_status_t
-rdc_channel_create(rdc_channel_t *channel, const char *ip, const char *port,
-                                                                 bool secure);
+rdc_status_t rdc_channel_create(rdc_channel_t* channel, const char* ip, const char* port,
+                                bool secure);
 
 /**
  * @brief Destroy a communications channel to an RDC server
@@ -305,13 +301,12 @@ rdc_channel_create(rdc_channel_t *channel, const char *ip, const char *port,
  * @retval ::RDC_STATUS_SUCCESS is returned upon successful call.
  *
  */
-rdc_status_t
-rdc_channel_destroy(rdc_channel_t channel);
+rdc_status_t rdc_channel_destroy(rdc_channel_t channel);
 
 /** @} */  // end of InitShutAdmin
 
 /*****************************************************************************/
-/** @defgroup RSMIAccess Remote ROCm SMI Calls 
+/** @defgroup RSMIAccess Remote ROCm SMI Calls
  *  These functions calls make ROCm SMI function calls on the remote server.
  *  Please refer to the
  *  [ROCm SMI documentation]
@@ -319,10 +314,10 @@ rdc_channel_destroy(rdc_channel_t channel);
  *  information about the calls. Here, we will document any additional aspects
  *  of the calls introduced by RDC that are not covered in the ROCm SMI
  *  documentation.
- *  
+ *
  *  All of the functions in this section attempt to make an RSMI call on the
  *  server machine, given an ::rdc_channel_t associated with the server, and
- *  all the arguments that are required to make the RSMI call. 
+ *  all the arguments that are required to make the RSMI call.
  *  @{
  */
 
@@ -330,11 +325,9 @@ rdc_channel_destroy(rdc_channel_t channel);
  * @brief Remote call to rsmi_num_monitor_devices()
  *
  */
-rdc_status_t
-rdc_num_gpus_get(rdc_channel_t channel, uint64_t *num_gpu);
+rdc_status_t rdc_num_gpus_get(rdc_channel_t channel, uint64_t* num_gpu);
 
 /** @} */  // end of RSMIAccess
-
 
 /** @defgroup PhysQuer Physical State Queries
  *  These functions provide information about the physical characteristics of
@@ -345,34 +338,29 @@ rdc_num_gpus_get(rdc_channel_t channel, uint64_t *num_gpu);
  * @brief Remote call to rsmi_dev_temp_metric_get()
  *
  */
-rdc_status_t
-rdc_dev_temp_metric_get(rdc_channel_t channel, uint32_t dv_ind,
-                      uint32_t sensor_type, rsmi_temperature_metric_t metric,
-                                                         int64_t *temperature);
+rdc_status_t rdc_dev_temp_metric_get(rdc_channel_t channel, uint32_t dv_ind, uint32_t sensor_type,
+                                     rsmi_temperature_metric_t metric, int64_t* temperature);
 
 /**
  * @brief Remote call to rsmi_dev_fan_rpms_get()
  *
  */
-rdc_status_t
-rdc_dev_fan_rpms_get(rdc_channel_t channel, uint32_t dv_ind,
-                                        uint32_t sensor_ind, int64_t *rpms);
+rdc_status_t rdc_dev_fan_rpms_get(rdc_channel_t channel, uint32_t dv_ind, uint32_t sensor_ind,
+                                  int64_t* rpms);
 
 /**
  * @brief Remote call to rsmi_dev_fan_speed_get()
  *
  */
-rdc_status_t
-rdc_dev_fan_speed_get(rdc_channel_t channel, uint32_t dv_ind,
-                                        uint32_t sensor_ind, int64_t *speed);
+rdc_status_t rdc_dev_fan_speed_get(rdc_channel_t channel, uint32_t dv_ind, uint32_t sensor_ind,
+                                   int64_t* speed);
 
 /**
  * @brief Remote call to rsmi_dev_fan_speed_max_get()
  *
  */
-rdc_status_t
-rdc_dev_fan_speed_max_get(rdc_channel_t channel, uint32_t dv_ind,
-                                    uint32_t sensor_ind, uint64_t *max_speed);
+rdc_status_t rdc_dev_fan_speed_max_get(rdc_channel_t channel, uint32_t dv_ind, uint32_t sensor_ind,
+                                       uint64_t* max_speed);
 /** @} */  // end of PhysQuer
 
 /**
@@ -389,7 +377,6 @@ rdc_dev_fan_speed_max_get(rdc_channel_t channel, uint32_t dv_ind,
  *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call
  *
  */
-rdc_status_t
-rdc_status_string(rdc_status_t status, const char **status_string);
+rdc_status_t rdc_status_string(rdc_status_t status, const char** status_string);
 
 #endif  // CLIENT_INCLUDE_RDC_RDC_CLIENT_H_

@@ -22,44 +22,42 @@ THE SOFTWARE.
 #ifndef RDCI_INCLUDE_RDCISTATSSUBSYSTEM_H_
 #define RDCI_INCLUDE_RDCISTATSSUBSYSTEM_H_
 #include <signal.h>
-#include <string>
-#include "RdciSubSystem.h"
 
+#include <string>
+
+#include "RdciSubSystem.h"
 
 namespace amd {
 namespace rdc {
 
-class RdciStatsSubSystem: public RdciSubSystem {
+class RdciStatsSubSystem : public RdciSubSystem {
  public:
-     RdciStatsSubSystem();
-     ~RdciStatsSubSystem();
-     void parse_cmd_opts(int argc, char ** argv) override;
-     void process() override;
+  RdciStatsSubSystem();
+  ~RdciStatsSubSystem();
+  void parse_cmd_opts(int argc, char** argv) override;
+  void process() override;
 
  private:
-     void show_help() const;
-     void show_job_stats(const rdc_gpu_usage_info_t& gpu_info) const;
-     void show_job_stats_json(const rdc_gpu_usage_info_t& gpu_info) const;
+  void show_help() const;
+  void show_job_stats(const rdc_gpu_usage_info_t& gpu_info) const;
+  void show_job_stats_json(const rdc_gpu_usage_info_t& gpu_info) const;
 
-     enum OPERATIONS {
-        STATS_UNKNOWN = 0,
-        STATS_HELP,
-        STATS_START_RECORDING,
-        STATS_STOP_RECORDING,
-        STATS_DISPLAY,
-        STATS_REMOVE,
-        STATS_REMOVE_ALL
-     } stats_ops_;
+  enum OPERATIONS {
+    STATS_UNKNOWN = 0,
+    STATS_HELP,
+    STATS_START_RECORDING,
+    STATS_STOP_RECORDING,
+    STATS_DISPLAY,
+    STATS_REMOVE,
+    STATS_REMOVE_ALL
+  } stats_ops_;
 
-
-     std::string job_id_;
-     uint32_t group_id_;
-     bool is_verbose_ = false;
+  std::string job_id_;
+  uint32_t group_id_;
+  bool is_verbose_ = false;
 };
-
 
 }  // namespace rdc
 }  // namespace amd
-
 
 #endif  // RDCI_INCLUDE_RDCISTATSSUBSYSTEM_H_

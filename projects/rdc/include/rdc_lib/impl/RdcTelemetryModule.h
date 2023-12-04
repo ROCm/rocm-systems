@@ -22,51 +22,46 @@ THE SOFTWARE.
 #ifndef INCLUDE_RDC_LIB_IMPL_RDCTELEMETRYMODULE_H_
 #define INCLUDE_RDC_LIB_IMPL_RDCTELEMETRYMODULE_H_
 
-#include <map>
 #include <list>
-#include <vector>
+#include <map>
 #include <memory>
+#include <vector>
+
+#include "rdc_lib/RdcMetricFetcher.h"
 #include "rdc_lib/RdcTelemetry.h"
 #include "rdc_lib/impl/RdcRasLib.h"
 #include "rdc_lib/impl/RdcSmiLib.h"
-#include "rdc_lib/RdcMetricFetcher.h"
 
 namespace amd {
 namespace rdc {
 
 class RdcTelemetryModule : public RdcTelemetry {
  public:
-    rdc_status_t rdc_telemetry_fields_value_get(rdc_gpu_field_t* fields,
-            uint32_t fields_count, rdc_field_value_f callback,
-            void*  user_data);
+  rdc_status_t rdc_telemetry_fields_value_get(rdc_gpu_field_t* fields, uint32_t fields_count,
+                                              rdc_field_value_f callback, void* user_data);
 
-    rdc_status_t rdc_telemetry_fields_query(uint32_t field_ids[MAX_NUM_FIELDS],
-            uint32_t* field_count);
+  rdc_status_t rdc_telemetry_fields_query(uint32_t field_ids[MAX_NUM_FIELDS],
+                                          uint32_t* field_count);
 
-    rdc_status_t rdc_telemetry_fields_watch(rdc_gpu_field_t* fields,
-            uint32_t fields_count);
+  rdc_status_t rdc_telemetry_fields_watch(rdc_gpu_field_t* fields, uint32_t fields_count);
 
-    rdc_status_t rdc_telemetry_fields_unwatch(rdc_gpu_field_t* fields,
-            uint32_t fields_count);
+  rdc_status_t rdc_telemetry_fields_unwatch(rdc_gpu_field_t* fields, uint32_t fields_count);
 
-    RdcTelemetryModule(RdcMetricFetcherPtr fetcher);
+  explicit RdcTelemetryModule(RdcMetricFetcherPtr fetcher);
 
  private:
-    //< Helper function to dispatch fields to module
-    void get_fields_for_module(
-        rdc_gpu_field_t* fields,
-        uint32_t fields_count,
-        std::map<RdcTelemetryPtr, std::vector<rdc_gpu_field_t>>
-                        & fields_in_module,
-        std::vector<rdc_gpu_field_value_t>& unsupport_fields); // NOLINT
-    std::list<RdcTelemetryPtr> telemetry_modules_;
-    std::map<uint32_t, RdcTelemetryPtr> fields_id_module_;
+  //< Helper function to dispatch fields to module
+  void get_fields_for_module(
+      rdc_gpu_field_t* fields, uint32_t fields_count,
+      std::map<RdcTelemetryPtr, std::vector<rdc_gpu_field_t>>& fields_in_module,
+      std::vector<rdc_gpu_field_value_t>& unsupport_fields);  // NOLINT
+  std::list<RdcTelemetryPtr> telemetry_modules_;
+  std::map<uint32_t, RdcTelemetryPtr> fields_id_module_;
 };
 
 typedef std::shared_ptr<RdcTelemetryModule> RdcTelemetryModulePtr;
 
 }  // namespace rdc
 }  // namespace amd
-
 
 #endif  // INCLUDE_RDC_LIB_IMPL_RDCTELEMETRYMODULE_H_

@@ -29,14 +29,13 @@ namespace rdc {
 
 class RdcMetricsUpdater {
  public:
-     virtual void start() = 0;
-     virtual void stop() = 0;
+  virtual void start() = 0;
+  virtual void stop() = 0;
 };
 
 typedef std::shared_ptr<RdcMetricsUpdater> RdcMetricsUpdaterPtr;
 
 }  // namespace rdc
 }  // namespace amd
-
 
 #endif  // INCLUDE_RDC_LIB_RDCMETRICSUPDATER_H_

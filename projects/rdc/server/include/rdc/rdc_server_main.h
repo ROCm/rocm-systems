@@ -24,12 +24,12 @@ THE SOFTWARE.
 
 #include <grpcpp/grpcpp.h>
 
-#include <string>
 #include <memory>
+#include <string>
 
-#include "rdc/rdc_rsmi_service.h"
 #include "rdc/rdc_admin_service.h"
 #include "rdc/rdc_api_service.h"
+#include "rdc/rdc_rsmi_service.h"
 
 typedef struct {
   std::string listen_address;
@@ -41,43 +41,42 @@ typedef struct {
 
 class RDCServer {
  public:
-    RDCServer();
-    ~RDCServer();
+  RDCServer();
+  ~RDCServer();
 
-    void Initialize(RdcdCmdLineOpts *cl);
+  void Initialize(RdcdCmdLineOpts* cl);
 
-    void Run(void);
-    void ShutDown(void);
+  void Run(void);
+  void ShutDown(void);
 
-    bool start_rsmi_service(void) const {return start_rsmi_service_;}
-    void set_start_rsmi_service(bool s) {start_rsmi_service_ = s;}
+  bool start_rsmi_service(void) const { return start_rsmi_service_; }
+  void set_start_rsmi_service(bool s) { start_rsmi_service_ = s; }
 
-    bool start_rdc_admin_service(void) const {return start_rdc_admin_service_;}
-    void set_start_rdc_admin_service(bool s) {start_rdc_admin_service_ = s;}
+  bool start_rdc_admin_service(void) const { return start_rdc_admin_service_; }
+  void set_start_rdc_admin_service(bool s) { start_rdc_admin_service_ = s; }
 
-    bool start_api_service(void) const {return start_api_service_;}
-    void set_start_api_service(bool s) {start_api_service_ = s;}
+  bool start_api_service(void) const { return start_api_service_; }
+  void set_start_api_service(bool s) { start_api_service_ = s; }
 
-    bool secure_creds(void) const {return secure_creds_;}
-    void set_secure_creds(bool s) {secure_creds_ = s;}
+  bool secure_creds(void) const { return secure_creds_; }
+  void set_secure_creds(bool s) { secure_creds_ = s; }
 
  private:
-    void HandleSignal(int sig);
-    std::string server_address_;
-    std::unique_ptr<::grpc::Server> server_;
-    bool secure_creds_;
-    bool use_pinned_certs_;
-    bool log_debug_;
-    bool start_rsmi_service_;
-    amd::rdc::RsmiServiceImpl *rsmi_service_;
-    RdcdCmdLineOpts *cmd_line_;
+  void HandleSignal(int sig);
+  std::string server_address_;
+  std::unique_ptr<::grpc::Server> server_;
+  bool secure_creds_;
+  bool use_pinned_certs_;
+  bool log_debug_;
+  bool start_rsmi_service_;
+  amd::rdc::RsmiServiceImpl* rsmi_service_;
+  RdcdCmdLineOpts* cmd_line_;
 
-    bool start_rdc_admin_service_;
-    amd::rdc::RDCAdminServiceImpl *rdc_admin_service_;
+  bool start_rdc_admin_service_;
+  amd::rdc::RDCAdminServiceImpl* rdc_admin_service_;
 
-    bool start_api_service_;
-    amd::rdc::RdcAPIServiceImpl *api_service_;
+  bool start_api_service_;
+  amd::rdc::RdcAPIServiceImpl* api_service_;
 };
 
 #endif  // SERVER_INCLUDE_RDC_RDC_SERVER_MAIN_H_
-

@@ -23,24 +23,24 @@ THE SOFTWARE.
 #define INCLUDE_RDC_LIB_RDCMODULEMGR_H_
 
 #include <memory>
-#include "rdc_lib/rdc_common.h"
+
 #include "rdc/rdc.h"
-#include "rdc_lib/RdcTelemetry.h"
 #include "rdc_lib/RdcDiagnostic.h"
+#include "rdc_lib/RdcTelemetry.h"
+#include "rdc_lib/rdc_common.h"
 
 namespace amd {
 namespace rdc {
 
 class RdcModuleMgr {
  public:
-    virtual RdcTelemetryPtr get_telemetry_module() = 0;
-    virtual RdcDiagnosticPtr get_diagnostic_module() = 0;
+  virtual RdcTelemetryPtr get_telemetry_module() = 0;
+  virtual RdcDiagnosticPtr get_diagnostic_module() = 0;
 };
 
 typedef std::shared_ptr<RdcModuleMgr> RdcModuleMgrPtr;
 
 }  // namespace rdc
 }  // namespace amd
-
 
 #endif  // INCLUDE_RDC_LIB_RDCMODULEMGR_H_

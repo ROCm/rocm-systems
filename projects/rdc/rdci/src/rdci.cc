@@ -22,68 +22,68 @@ THE SOFTWARE.
 
 #include <iostream>
 #include <string>
-#include "rdc_lib/rdc_common.h"
-#include "rdc/rdc.h"
-#include "rdc_lib/RdcException.h"
+
+#include "RdciDiagSubSystem.h"
 #include "RdciDiscoverySubSystem.h"
 #include "RdciDmonSubSystem.h"
-#include "RdciDiagSubSystem.h"
 #include "RdciFieldGroupSubSystem.h"
 #include "RdciGroupSubSystem.h"
 #include "RdciStatsSubSystem.h"
+#include "rdc/rdc.h"
+#include "rdc_lib/RdcException.h"
+#include "rdc_lib/rdc_common.h"
 
+int main(int argc, char** argv) {
+  const std::string usage_help =
+      "Usage:\trdci <subsystem>\nsubsystem: discovery, dmon, group, "
+      "fieldgroup, stats, diag\n";
 
-int main(int argc, char ** argv) {
-    const std::string usage_help =
-    "Usage:\trdci <subsystem>\nsubsystem: discovery, dmon, group, "
-    "fieldgroup, stats, diag\n";
+  if (argc <= 1) {
+    std::cout << usage_help;
+    exit(0);
+  }
 
-    if (argc <= 1) {
-        std::cout << usage_help;
-        exit(0);
+  amd::rdc::RdciSubSystemPtr subsystem;
+  try {
+    std::string subsystem_name = argv[1];
+    if (subsystem_name == "discovery") {
+      subsystem.reset(new amd::rdc::RdciDiscoverySubSystem());
+    } else if (subsystem_name == "dmon") {
+      subsystem.reset(new amd::rdc::RdciDmonSubSystem());
+    } else if (subsystem_name == "diag") {
+      subsystem.reset(new amd::rdc::RdciDiagSubSystem());
+    } else if (subsystem_name == "group") {
+      subsystem.reset(new amd::rdc::RdciGroupSubSystem());
+    } else if (subsystem_name == "fieldgroup") {
+      subsystem.reset(new amd::rdc::RdciFieldGroupSubSystem());
+    } else if (subsystem_name == "stats") {
+      subsystem.reset(new amd::rdc::RdciStatsSubSystem());
+    } else {
+      std::cout << usage_help;
+      exit(0);
     }
 
-    amd::rdc::RdciSubSystemPtr subsystem;
-    try {
-       std::string subsystem_name = argv[1];
-       if (subsystem_name == "discovery") {
-           subsystem.reset(new amd::rdc::RdciDiscoverySubSystem());
-       } else if (subsystem_name == "dmon") {
-           subsystem.reset(new amd::rdc::RdciDmonSubSystem());
-       } else if (subsystem_name == "diag") {
-           subsystem.reset(new amd::rdc::RdciDiagSubSystem());
-       } else if (subsystem_name == "group") {
-           subsystem.reset(new amd::rdc::RdciGroupSubSystem());
-       } else if (subsystem_name == "fieldgroup") {
-           subsystem.reset(new amd::rdc::RdciFieldGroupSubSystem());
-       } else if (subsystem_name == "stats") {
-           subsystem.reset(new amd::rdc::RdciStatsSubSystem());
-       } else {
-           std::cout << usage_help;
-           exit(0);
-       }
+    subsystem->parse_cmd_opts(argc, argv);
 
-       subsystem->parse_cmd_opts(argc, argv);
+    subsystem->connect();
 
-       subsystem->connect();
-
-       subsystem->process();
-    } catch (const amd::rdc::RdcException& e) {
-        if (subsystem && subsystem->is_json_output()) {
-            std::cout << "\"status\": \"error\", \"description\": \""
-                << e.what() << '"';
-        } else {
-            std::cout << "rdci Error: " << e.what()  << std::endl;
-        }
-        return e.error_code();
-    } catch (...) {
-        if (subsystem && subsystem->is_json_output()) {
-            std::cout << "\"status\": \"error\", \"description\": "
-                    << "\"Unhandled exception.\"";
-        } else {
-            std::cout << "Unhandled exception." << std::endl;
-        }        return 1;
+    subsystem->process();
+  } catch (const amd::rdc::RdcException& e) {
+    if (subsystem && subsystem->is_json_output()) {
+      std::cout << "\"status\": \"error\", \"description\": \"" << e.what() << '"';
+    } else {
+      std::cout << "rdci Error: " << e.what() << std::endl;
     }
+    return e.error_code();
+  } catch (...) {
+    if (subsystem && subsystem->is_json_output()) {
+      std::cout << "\"status\": \"error\", \"description\": "
+                << "\"Unhandled exception.\"";
+    } else {
+      std::cout << "Unhandled exception." << std::endl;
+    }
+    return 1;
+  }
 
-    return 0;
+  return 0;
 }

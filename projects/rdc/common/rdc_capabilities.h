@@ -28,29 +28,24 @@ THE SOFTWARE.
 namespace amd {
 namespace rdc {
 
-int GetCapability(cap_value_t cap, cap_flag_t cap_type, bool *enabled);
+int GetCapability(cap_value_t cap, cap_flag_t cap_type, bool* enabled);
 int ModifyCapability(cap_value_t cap, cap_flag_t cap_type, bool enable);
 
 struct ScopedCapability {
-    ScopedCapability(cap_value_t cp, cap_flag_t cpt) :
-                              cap_(cp), cap_type_(cpt), error_(0) {
-      error_ = ModifyCapability(cap_, cap_type_, true);
-    }
-    ~ScopedCapability() {
-      error_ = ModifyCapability(cap_, cap_type_, false);
-    }
-    void Relinquish(void) {
-      error_ = ModifyCapability(cap_, cap_type_, false);
-    }
-    int error(void) {return error_;}
-  private:
-    cap_value_t cap_;
-    cap_flag_t cap_type_;
-    int error_;
+  ScopedCapability(cap_value_t cp, cap_flag_t cpt) : cap_(cp), cap_type_(cpt), error_(0) {
+    error_ = ModifyCapability(cap_, cap_type_, true);
+  }
+  ~ScopedCapability() { error_ = ModifyCapability(cap_, cap_type_, false); }
+  void Relinquish(void) { error_ = ModifyCapability(cap_, cap_type_, false); }
+  int error(void) { return error_; }
+
+ private:
+  cap_value_t cap_;
+  cap_flag_t cap_type_;
+  int error_;
 };
 
 }  // namespace rdc
 }  // namespace amd
 
 #endif  // COMMON_RDC_CAPABILITIES_H_
-

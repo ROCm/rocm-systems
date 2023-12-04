@@ -24,5 +24,4 @@ THE SOFTWARE.
 #include "rdc/rdc.h"
 #include "rdc_lib/RdcDiagnosticLibInterface.h"
 
-
 #endif  // RDC_MODULES_RDC_DIAGNOSTIC_RDCDIAGNOSTICLIB_H_

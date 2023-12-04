@@ -22,8 +22,8 @@ THE SOFTWARE.
 #ifndef RDC_MODULES_RDC_ROCR_MEMORYTEST_H_
 #define RDC_MODULES_RDC_ROCR_MEMORYTEST_H_
 
-#include "rdc_modules/rdc_rocr/TestBase.h"
 #include "hsa/hsa.h"
+#include "rdc_modules/rdc_rocr/TestBase.h"
 
 namespace amd {
 namespace rdc {
@@ -54,8 +54,7 @@ class MemoryTest : public TestBase {
   hsa_status_t TestAllocate(hsa_amd_memory_pool_t pool, size_t sz);
 
  private:
-  hsa_status_t MaxSingleAllocationTest(hsa_agent_t ag,
-                            hsa_amd_memory_pool_t pool);
+  hsa_status_t MaxSingleAllocationTest(hsa_agent_t ag, hsa_amd_memory_pool_t pool);
 };
 
 }  // namespace rdc

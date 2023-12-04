@@ -26,8 +26,8 @@ THE SOFTWARE.
 
 #include <grpcpp/grpcpp.h>
 
-#include <string>
 #include <memory>
+#include <string>
 
 #include "rdc.grpc.pb.h"  // NOLINT
 #include "rdc/rdc_client.h"
@@ -37,8 +37,7 @@ namespace rdc {
 
 class RDCChannel {
  public:
-  explicit RDCChannel(std::string server_ip, std::string server_port,
-                                                         bool secure_channel);
+  explicit RDCChannel(std::string server_ip, std::string server_port, bool secure_channel);
   ~RDCChannel();
 
   rdc_status_t Initialize(void);
@@ -47,13 +46,12 @@ class RDCChannel {
 
   // Don't have setter for server ip and ports; we don't want to change those
   // after construction
-  std::string server_ip(void) const {return server_ip_;}
-  std::string server_port(void) const {return server_port_;}
-  bool secure_channel(void) const {return secure_channel_;}
-  std::shared_ptr<::rdc::Rsmi::Stub> rsmi_stub(void) const {return rsmi_stub_;}
-  std::shared_ptr<::rdc::RdcAdmin::Stub> rdc_admin_stub(void) const {
-                                                      return rdc_admin_stub_;}
-  std::shared_ptr<grpc::Channel> const channel(void) {return channel_;}
+  std::string server_ip(void) const { return server_ip_; }
+  std::string server_port(void) const { return server_port_; }
+  bool secure_channel(void) const { return secure_channel_; }
+  std::shared_ptr<::rdc::Rsmi::Stub> rsmi_stub(void) const { return rsmi_stub_; }
+  std::shared_ptr<::rdc::RdcAdmin::Stub> rdc_admin_stub(void) const { return rdc_admin_stub_; }
+  std::shared_ptr<grpc::Channel> const channel(void) { return channel_; }
 
  private:
   std::string server_ip_;

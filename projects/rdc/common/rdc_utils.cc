@@ -20,28 +20,28 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
+#include "common/rdc_utils.h"
+
+#include <arpa/inet.h>
+#include <assert.h>
 #include <netinet/in.h>
 #include <sys/stat.h>
-#include <assert.h>
-#include <arpa/inet.h>
 
-#include <iostream>
-#include <string>
-#include <fstream>
-#include <sstream>
 #include <algorithm>
-
-#include "common/rdc_utils.h"
+#include <fstream>
+#include <iostream>
+#include <sstream>
+#include <string>
 
 namespace amd {
 namespace rdc {
 
-bool FileExists(char const *filename) {
+bool FileExists(char const* filename) {
   struct stat buf;
   return (stat(filename, &buf) == 0);
 }
 
-int ReadFile(std::string path, std::string *retStr, bool chop_newline) {
+int ReadFile(std::string path, std::string* retStr, bool chop_newline) {
   std::stringstream ss;
   int ret = 0;
 
@@ -61,13 +61,12 @@ int ReadFile(std::string path, std::string *retStr, bool chop_newline) {
   *retStr = ss.str();
 
   if (chop_newline) {
-    retStr->erase(std::remove(retStr->begin(), retStr->end(), '\n'),
-                                                               retStr->end());
+    retStr->erase(std::remove(retStr->begin(), retStr->end(), '\n'), retStr->end());
   }
   return ret;
 }
 
-int ReadFile(const char *path, std::string *retStr, bool chop_newline) {
+int ReadFile(const char* path, std::string* retStr, bool chop_newline) {
   assert(path != nullptr);
   assert(retStr != nullptr);
 
@@ -76,11 +75,11 @@ int ReadFile(const char *path, std::string *retStr, bool chop_newline) {
   return amd::rdc::ReadFile(file_path, retStr, chop_newline);
 }
 
-bool IsNumber(const std::string &s) {
+bool IsNumber(const std::string& s) {
   return !s.empty() && std::all_of(s.begin(), s.end(), ::isdigit);
 }
 
-bool IsIP(const std::string &s) {
+bool IsIP(const std::string& s) {
   struct sockaddr_in sa;
   int result = inet_pton(AF_INET, s.c_str(), &sa);
   // inet_pton returns 1 on success

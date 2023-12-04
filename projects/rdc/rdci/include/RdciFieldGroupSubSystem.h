@@ -23,37 +23,37 @@ THE SOFTWARE.
 #define RDCI_INCLUDE_RDCIFIELDGROUPSUBSYSTEM_H_
 
 #include <string>
+
 #include "RdciSubSystem.h"
 
 namespace amd {
 namespace rdc {
 
-class RdciFieldGroupSubSystem: public RdciSubSystem {
+class RdciFieldGroupSubSystem : public RdciSubSystem {
  public:
-     RdciFieldGroupSubSystem();
-     void parse_cmd_opts(int argc, char ** argv) override;
-     void process() override;
+  RdciFieldGroupSubSystem();
+  void parse_cmd_opts(int argc, char** argv) override;
+  void process() override;
+
  private:
-     void show_help() const;
+  void show_help() const;
 
-     enum OPERATIONS {
-        FIELD_GROUP_UNKNOWN = 0,
-        FIELD_GROUP_HELP,
-        FIELD_GROUP_CREATE,
-        FIELD_GROUP_DELETE,
-        FIELD_GROUP_LIST,
-        FIELD_GROUP_INFO
-     } field_group_ops_;
+  enum OPERATIONS {
+    FIELD_GROUP_UNKNOWN = 0,
+    FIELD_GROUP_HELP,
+    FIELD_GROUP_CREATE,
+    FIELD_GROUP_DELETE,
+    FIELD_GROUP_LIST,
+    FIELD_GROUP_INFO
+  } field_group_ops_;
 
-     bool is_group_set_;
-     uint32_t group_id_;
-     std::string group_name_;
-     std::string field_ids_;
+  bool is_group_set_;
+  uint32_t group_id_;
+  std::string group_name_;
+  std::string field_ids_;
 };
-
 
 }  // namespace rdc
 }  // namespace amd
-
 
 #endif  // RDCI_INCLUDE_RDCIFIELDGROUPSUBSYSTEM_H_

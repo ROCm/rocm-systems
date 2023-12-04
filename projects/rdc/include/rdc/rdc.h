@@ -51,26 +51,26 @@ extern "C" {
  * @brief Error codes returned by rocm_rdc_lib functions
  */
 typedef enum {
-     RDC_ST_OK                  = 0,  //!< Success
-     RDC_ST_NOT_SUPPORTED,            //!< Not supported feature
-     RDC_ST_MSI_ERROR,                //!< The MSI library error
-     RDC_ST_FAIL_LOAD_MODULE,         //!< Fail to load the library
-     RDC_ST_INVALID_HANDLER,          //!< Invalid handler
-     RDC_ST_BAD_PARAMETER,            //!< A parameter is invalid
-     RDC_ST_NOT_FOUND,                //!< Cannot find the value
-     RDC_ST_CONFLICT,                 //!< Conflict with current state
-     RDC_ST_CLIENT_ERROR,             //!< The RDC client error
-     RDC_ST_ALREADY_EXIST,            //!< The item already exists
-     RDC_ST_MAX_LIMIT,                //!< Max limit recording for the object
-     RDC_ST_INSUFF_RESOURCES,         //!< Not enough resources to complete
-                                      //!<  operation
-     RDC_ST_FILE_ERROR,               //!< Failed to access a file
-     RDC_ST_NO_DATA,                  //!< Data was requested,
-                                      //!<   but none was found
-     RDC_ST_PERM_ERROR,               //!< Insufficient permission to complete
-                                      //!<   operation
+  RDC_ST_OK = 0,            //!< Success
+  RDC_ST_NOT_SUPPORTED,     //!< Not supported feature
+  RDC_ST_MSI_ERROR,         //!< The MSI library error
+  RDC_ST_FAIL_LOAD_MODULE,  //!< Fail to load the library
+  RDC_ST_INVALID_HANDLER,   //!< Invalid handler
+  RDC_ST_BAD_PARAMETER,     //!< A parameter is invalid
+  RDC_ST_NOT_FOUND,         //!< Cannot find the value
+  RDC_ST_CONFLICT,          //!< Conflict with current state
+  RDC_ST_CLIENT_ERROR,      //!< The RDC client error
+  RDC_ST_ALREADY_EXIST,     //!< The item already exists
+  RDC_ST_MAX_LIMIT,         //!< Max limit recording for the object
+  RDC_ST_INSUFF_RESOURCES,  //!< Not enough resources to complete
+                            //!<  operation
+  RDC_ST_FILE_ERROR,        //!< Failed to access a file
+  RDC_ST_NO_DATA,           //!< Data was requested,
+                            //!<   but none was found
+  RDC_ST_PERM_ERROR,        //!< Insufficient permission to complete
+                            //!<   operation
 
-     RDC_ST_UNKNOWN_ERROR = 0xFFFFFFFF  //!< Unknown error
+  RDC_ST_UNKNOWN_ERROR = 0xFFFFFFFF  //!< Unknown error
 } rdc_status_t;
 
 /**
@@ -79,51 +79,42 @@ typedef enum {
  * When run in manual mode, the user needs to periodically call
  * rdc_field_update_all for data collection.
  */
-typedef enum {
-    RDC_OPERATION_MODE_AUTO   = 0,
-    RDC_OPERATION_MODE_MANUAL
-} rdc_operation_mode_t;
+typedef enum { RDC_OPERATION_MODE_AUTO = 0, RDC_OPERATION_MODE_MANUAL } rdc_operation_mode_t;
 
 /**
  * @brief type of GPU group
  */
 typedef enum {
-    RDC_GROUP_DEFAULT = 0,      //!< All GPUs on the Node
-    RDC_GROUP_EMPTY             //!< Empty group
+  RDC_GROUP_DEFAULT = 0,  //!< All GPUs on the Node
+  RDC_GROUP_EMPTY         //!< Empty group
 } rdc_group_type_t;
 
 /**
  * @brief the type stored in the filed value
  */
-typedef enum {
-     INTEGER = 0,
-     DOUBLE,
-     STRING,
-     BLOB
-} rdc_field_type_t;
-
+typedef enum { INTEGER = 0, DOUBLE, STRING, BLOB } rdc_field_type_t;
 
 //! ID used to represent an invalid GPU
-#define GPU_ID_INVALID          (-1)
+#define GPU_ID_INVALID (-1)
 //! Used to specify all GPUs
-#define RDC_GROUP_ALL_GPUS      (-1000)
+#define RDC_GROUP_ALL_GPUS (-1000)
 //! Used to specify all stats fields
-#define RDC_JOB_STATS_FIELDS    (-1000)
+#define RDC_JOB_STATS_FIELDS (-1000)
 
 /**
  * @brief The max rdc field string length
  */
-#define RDC_MAX_STR_LENGTH      256
+#define RDC_MAX_STR_LENGTH 256
 
 /**
  * @brief The max entities in a group
  */
-#define RDC_GROUP_MAX_ENTITIES  64
+#define RDC_GROUP_MAX_ENTITIES 64
 
 /**
  * @brief Max number of GPUs supported by RDC
  */
-#define RDC_MAX_NUM_DEVICES     16
+#define RDC_MAX_NUM_DEVICES 16
 
 /**
  * @brief The max fields in a field group
@@ -133,7 +124,7 @@ typedef enum {
 /**
  * @brief The max number of groups
  */
-#define RDC_MAX_NUM_GROUPS      64
+#define RDC_MAX_NUM_GROUPS 64
 
 /**
  * @brief The max number of the field groups
@@ -144,112 +135,112 @@ typedef enum {
  * These enums are used to specify a particular field to be retrieved.
  */
 typedef enum {
-  RDC_FI_INVALID = 0,                //!< Invalid field value
+  RDC_FI_INVALID = 0,  //!< Invalid field value
   //!< @brief Identifier fields
-  RDC_FI_GPU_COUNT = 1,              //!< GPU count in the system
-  RDC_FI_DEV_NAME,                   //!< Name of the device
+  RDC_FI_GPU_COUNT = 1,  //!< GPU count in the system
+  RDC_FI_DEV_NAME,       //!< Name of the device
 
   /*
    * @brief Frequency related fields
    */
-  RDC_FI_GPU_CLOCK = 100,           //!< The current clock for the GPU
-  RDC_FI_MEM_CLOCK,                 //!< Clock for the memory
+  RDC_FI_GPU_CLOCK = 100,  //!< The current clock for the GPU
+  RDC_FI_MEM_CLOCK,        //!< Clock for the memory
 
   /*
    * @brief Physical monitor fields
    */
-  RDC_FI_MEMORY_TEMP = 200,          //!< Memory temperature for the device
-  RDC_FI_GPU_TEMP,                   //!< Current temperature for the device
-  RDC_FI_POWER_USAGE = 300,          //!< Power usage for the device
+  RDC_FI_MEMORY_TEMP = 200,  //!< Memory temperature for the device
+  RDC_FI_GPU_TEMP,           //!< Current temperature for the device
+  RDC_FI_POWER_USAGE = 300,  //!< Power usage for the device
 
   /*
    * @brief PCIe related fields
    */
-  RDC_FI_PCIE_TX = 400,              //!< PCIe Tx utilization information
-  RDC_FI_PCIE_RX,                    //!< PCIe Rx utilization information
+  RDC_FI_PCIE_TX = 400,  //!< PCIe Tx utilization information
+  RDC_FI_PCIE_RX,        //!< PCIe Rx utilization information
 
   /*
    * @brief GPU usage related fields
    */
-  RDC_FI_GPU_UTIL = 500,             //!< GPU Utilization
-  RDC_FI_GPU_MEMORY_USAGE,           //!< Memory usage of the GPU instance
-  RDC_FI_GPU_MEMORY_TOTAL,           //!< Total memory of the GPU instance
+  RDC_FI_GPU_UTIL = 500,    //!< GPU Utilization
+  RDC_FI_GPU_MEMORY_USAGE,  //!< Memory usage of the GPU instance
+  RDC_FI_GPU_MEMORY_TOTAL,  //!< Total memory of the GPU instance
 
   /**
    * @brief ECC related fields
    */
-  RDC_FI_ECC_CORRECT_TOTAL = 600,    //!< Accumulated correctable ECC errors
-  RDC_FI_ECC_UNCORRECT_TOTAL,        //!< Accumulated uncorrectable ECC errors
+  RDC_FI_ECC_CORRECT_TOTAL = 600,  //!< Accumulated correctable ECC errors
+  RDC_FI_ECC_UNCORRECT_TOTAL,      //!< Accumulated uncorrectable ECC errors
 
-  RDC_FI_ECC_SDMA_SEC,             //!< SDMA Single Error Correction
-  RDC_FI_ECC_SDMA_DED,             //!< SDMA Double Error Detection
+  RDC_FI_ECC_SDMA_SEC,  //!< SDMA Single Error Correction
+  RDC_FI_ECC_SDMA_DED,  //!< SDMA Double Error Detection
 
-  RDC_FI_ECC_GFX_SEC,              //!< GFX Single Error Correction
-  RDC_FI_ECC_GFX_DED,              //!< GFX Double Error Detection
+  RDC_FI_ECC_GFX_SEC,  //!< GFX Single Error Correction
+  RDC_FI_ECC_GFX_DED,  //!< GFX Double Error Detection
 
-  RDC_FI_ECC_MMHUB_SEC,            //!< MMHUB Single Error Correction
-  RDC_FI_ECC_MMHUB_DED,            //!< MMHUB Double Error Detection
+  RDC_FI_ECC_MMHUB_SEC,  //!< MMHUB Single Error Correction
+  RDC_FI_ECC_MMHUB_DED,  //!< MMHUB Double Error Detection
 
-  RDC_FI_ECC_ATHUB_SEC,            //!< ATHUB Single Error Correction
-  RDC_FI_ECC_ATHUB_DED,            //!< ATHUB Double Error Detection
+  RDC_FI_ECC_ATHUB_SEC,  //!< ATHUB Single Error Correction
+  RDC_FI_ECC_ATHUB_DED,  //!< ATHUB Double Error Detection
 
-  RDC_FI_ECC_BIF_SEC,              //!< BIF Single Error Correction
-  RDC_FI_ECC_BIF_DED,              //!< BIF Double Error Detection
+  RDC_FI_ECC_BIF_SEC,  //!< BIF Single Error Correction
+  RDC_FI_ECC_BIF_DED,  //!< BIF Double Error Detection
 
-  RDC_FI_ECC_HDP_SEC,              //!< HDP Single Error Correction
-  RDC_FI_ECC_HDP_DED,              //!< HDP Double Error Detection
+  RDC_FI_ECC_HDP_SEC,  //!< HDP Single Error Correction
+  RDC_FI_ECC_HDP_DED,  //!< HDP Double Error Detection
 
-  RDC_FI_ECC_XGMI_WAFL_SEC,        //!< XGMI WAFL Single Error Correction
-  RDC_FI_ECC_XGMI_WAFL_DED,        //!< XGMI WAFL Double Error Detection
+  RDC_FI_ECC_XGMI_WAFL_SEC,  //!< XGMI WAFL Single Error Correction
+  RDC_FI_ECC_XGMI_WAFL_DED,  //!< XGMI WAFL Double Error Detection
 
-  RDC_FI_ECC_DF_SEC,               //!< DF Single Error Correction
-  RDC_FI_ECC_DF_DED,               //!< DF Double Error Detection
+  RDC_FI_ECC_DF_SEC,  //!< DF Single Error Correction
+  RDC_FI_ECC_DF_DED,  //!< DF Double Error Detection
 
-  RDC_FI_ECC_SMN_SEC,              //!< SMN Single Error Correction
-  RDC_FI_ECC_SMN_DED,              //!< SMN Double Error Detection
+  RDC_FI_ECC_SMN_SEC,  //!< SMN Single Error Correction
+  RDC_FI_ECC_SMN_DED,  //!< SMN Double Error Detection
 
-  RDC_FI_ECC_SEM_SEC,              //!< SEM Single Error Correction
-  RDC_FI_ECC_SEM_DED,              //!< SEM Double Error Detection
+  RDC_FI_ECC_SEM_SEC,  //!< SEM Single Error Correction
+  RDC_FI_ECC_SEM_DED,  //!< SEM Double Error Detection
 
-  RDC_FI_ECC_MP0_SEC,              //!< MP0 Single Error Correction
-  RDC_FI_ECC_MP0_DED,              //!< MP0 Double Error Detection
+  RDC_FI_ECC_MP0_SEC,  //!< MP0 Single Error Correction
+  RDC_FI_ECC_MP0_DED,  //!< MP0 Double Error Detection
 
-  RDC_FI_ECC_MP1_SEC,              //!< MP1 Single Error Correction
-  RDC_FI_ECC_MP1_DED,              //!< MP1 Double Error Detection
+  RDC_FI_ECC_MP1_SEC,  //!< MP1 Single Error Correction
+  RDC_FI_ECC_MP1_DED,  //!< MP1 Double Error Detection
 
-  RDC_FI_ECC_FUSE_SEC,             //!< FUSE Single Error Correction
-  RDC_FI_ECC_FUSE_DED,             //!< FUSE Double Error Detection
+  RDC_FI_ECC_FUSE_SEC,  //!< FUSE Single Error Correction
+  RDC_FI_ECC_FUSE_DED,  //!< FUSE Double Error Detection
 
-  RDC_FI_ECC_UMC_SEC,              //!< UMC Single Error Correction
-  RDC_FI_ECC_UMC_DED,              //!< UMC Double Error Detection
+  RDC_FI_ECC_UMC_SEC,  //!< UMC Single Error Correction
+  RDC_FI_ECC_UMC_DED,  //!< UMC Double Error Detection
 
   /**
    * @brief ROC-profiler related fields
    */
-  RDC_FI_PROF_ELAPSED_CYCLES = 700, //!< Number of elapsed cycles over all SMs
-  RDC_FI_PROF_ACTIVE_WAVES,         //!< Number of Active Waves
-  RDC_FI_PROF_ACTIVE_CYCLES,        //!< Number of Active Cycles
-  RDC_FI_PROF_CU_OCCUPANCY,         //!< Active Waves / maximum active Waves supported
-  RDC_FI_PROF_CU_UTILIZATION,       //!< Total active cycles / Total elapsed cycles
-  RDC_FI_PROF_FETCH_SIZE,           //!< Number of kilobytes fetched from video memory
-  RDC_FI_PROF_WRITE_SIZE,           //!< Number of kilobytes written to video memory
-  RDC_FI_PROF_FLOPS_16,             //!< Number of fp16 OPS / second
-  RDC_FI_PROF_FLOPS_32,             //!< Number of fp32 OPS / second
-  RDC_FI_PROF_FLOPS_64,             //!< Number of fp64 OPS / second
-  RDC_FI_PROF_GFLOPS_16,            //!< Number of fp16 GOPS / second
-  RDC_FI_PROF_GFLOPS_32,            //!< Number of fp32 GOPS / second
-  RDC_FI_PROF_GFLOPS_64,            //!< Number of fp64 GOPS / second
-  RDC_FI_PROF_MEMR_BW_KBPNS,        //!< HBM Read Bandwidth in kilobytes / nanosecond
-  RDC_FI_PROF_MEMW_BW_KBPNS,        //!< HBM Write Bandwidth in kilobytes / nanosecond
+  RDC_FI_PROF_ELAPSED_CYCLES = 700,  //!< Number of elapsed cycles over all SMs
+  RDC_FI_PROF_ACTIVE_WAVES,          //!< Number of Active Waves
+  RDC_FI_PROF_ACTIVE_CYCLES,         //!< Number of Active Cycles
+  RDC_FI_PROF_CU_OCCUPANCY,          //!< Active Waves / maximum active Waves supported
+  RDC_FI_PROF_CU_UTILIZATION,        //!< Total active cycles / Total elapsed cycles
+  RDC_FI_PROF_FETCH_SIZE,            //!< Number of kilobytes fetched from video memory
+  RDC_FI_PROF_WRITE_SIZE,            //!< Number of kilobytes written to video memory
+  RDC_FI_PROF_FLOPS_16,              //!< Number of fp16 OPS / second
+  RDC_FI_PROF_FLOPS_32,              //!< Number of fp32 OPS / second
+  RDC_FI_PROF_FLOPS_64,              //!< Number of fp64 OPS / second
+  RDC_FI_PROF_GFLOPS_16,             //!< Number of fp16 GOPS / second
+  RDC_FI_PROF_GFLOPS_32,             //!< Number of fp32 GOPS / second
+  RDC_FI_PROF_GFLOPS_64,             //!< Number of fp64 GOPS / second
+  RDC_FI_PROF_MEMR_BW_KBPNS,         //!< HBM Read Bandwidth in kilobytes / nanosecond
+  RDC_FI_PROF_MEMW_BW_KBPNS,         //!< HBM Write Bandwidth in kilobytes / nanosecond
 
   /*
    * @brief Raw XGMI counter events
    */
-  RDC_EVNT_XGMI_0_NOP_TX = 1000,     //!< NOPs sent to neighbor 0
-  RDC_EVNT_XGMI_0_REQ_TX,            //!< Outgoing requests to
-                                     //!< neighbor 0
-  RDC_EVNT_XGMI_0_RESP_TX,           //!< Outgoing responses to
-                                     //!< neighbor 0
+  RDC_EVNT_XGMI_0_NOP_TX = 1000,  //!< NOPs sent to neighbor 0
+  RDC_EVNT_XGMI_0_REQ_TX,         //!< Outgoing requests to
+                                  //!< neighbor 0
+  RDC_EVNT_XGMI_0_RESP_TX,        //!< Outgoing responses to
+                                  //!< neighbor 0
   /**
    * @brief
    *
@@ -265,37 +256,37 @@ typedef enum {
    */
   //  ie, Throughput = BEATS/time_running 10^9  bytes/sec
   RDC_EVNT_XGMI_0_BEATS_TX,
-  RDC_EVNT_XGMI_1_NOP_TX,            //!< NOPs sent to neighbor 1
-  RDC_EVNT_XGMI_1_REQ_TX,            //!< Outgoing requests to
-                                     //!< neighbor 1
-  RDC_EVNT_XGMI_1_RESP_TX,           //!< Outgoing responses to
-                                     //!< neighbor 1
-  RDC_EVNT_XGMI_1_BEATS_TX,          //!< Data beats sent to
-                                     //!< neighbor 1; Each beat
-                                     //!< represents 32 bytes
+  RDC_EVNT_XGMI_1_NOP_TX,    //!< NOPs sent to neighbor 1
+  RDC_EVNT_XGMI_1_REQ_TX,    //!< Outgoing requests to
+                             //!< neighbor 1
+  RDC_EVNT_XGMI_1_RESP_TX,   //!< Outgoing responses to
+                             //!< neighbor 1
+  RDC_EVNT_XGMI_1_BEATS_TX,  //!< Data beats sent to
+                             //!< neighbor 1; Each beat
+                             //!< represents 32 bytes
 
   // "Composite" events. These events have additional processing beyond
   // the value provided by the rocm_smi library.
-  RDC_EVNT_XGMI_0_THRPUT = 1500,     //!< Transmit throughput to XGMI
-                                     //!< neighbor 0 in byes/sec
-  RDC_EVNT_XGMI_1_THRPUT,            //!< Transmit throughput to XGMI
-                                     //!< neighbor 1 in byes/sec
-  RDC_EVNT_XGMI_2_THRPUT,            //!< Transmit throughput to XGMI
-                                     //!< neighbor 2 in byes/sec
-  RDC_EVNT_XGMI_3_THRPUT,            //!< Transmit throughput to XGMI
-                                     //!< neighbor 3 in byes/sec
-  RDC_EVNT_XGMI_4_THRPUT,            //!< Transmit throughput to XGMI
-                                     //!< neighbor 4 in byes/sec
-  RDC_EVNT_XGMI_5_THRPUT,            //!< Transmit throughput to XGMI
-                                     //!< neighbor 5 in byes/sec
+  RDC_EVNT_XGMI_0_THRPUT = 1500,  //!< Transmit throughput to XGMI
+                                  //!< neighbor 0 in byes/sec
+  RDC_EVNT_XGMI_1_THRPUT,         //!< Transmit throughput to XGMI
+                                  //!< neighbor 1 in byes/sec
+  RDC_EVNT_XGMI_2_THRPUT,         //!< Transmit throughput to XGMI
+                                  //!< neighbor 2 in byes/sec
+  RDC_EVNT_XGMI_3_THRPUT,         //!< Transmit throughput to XGMI
+                                  //!< neighbor 3 in byes/sec
+  RDC_EVNT_XGMI_4_THRPUT,         //!< Transmit throughput to XGMI
+                                  //!< neighbor 4 in byes/sec
+  RDC_EVNT_XGMI_5_THRPUT,         //!< Transmit throughput to XGMI
+                                  //!< neighbor 5 in byes/sec
 
-  RDC_EVNT_NOTIF_VMFAULT = 2000,        //!< VM page fault
+  RDC_EVNT_NOTIF_VMFAULT = 2000,  //!< VM page fault
   RDC_EVNT_NOTIF_FIRST = RDC_EVNT_NOTIF_VMFAULT,
 
-  RDC_EVNT_NOTIF_THERMAL_THROTTLE,   //!< Clock frequency has decreased
-                                     //!< due to temperature rise
-  RDC_EVNT_NOTIF_PRE_RESET,          //!< GPU reset is about to occur
-  RDC_EVNT_NOTIF_POST_RESET,         //!< GPU reset just occurred
+  RDC_EVNT_NOTIF_THERMAL_THROTTLE,  //!< Clock frequency has decreased
+                                    //!< due to temperature rise
+  RDC_EVNT_NOTIF_PRE_RESET,         //!< GPU reset is about to occur
+  RDC_EVNT_NOTIF_POST_RESET,        //!< GPU reset just occurred
 
   RDC_EVNT_NOTIF_LAST = RDC_EVNT_NOTIF_POST_RESET,
 } rdc_field_t;
@@ -304,153 +295,153 @@ typedef enum {
 /**
  * @brief handlers used in various rdc calls
  */
-typedef void *rdc_handle_t;           //!< Handle used for an RDC session
-typedef uint32_t rdc_gpu_group_t;     //!< GPU Group ID type
-typedef uint32_t rdc_field_grp_t;     //!< Field group ID type
+typedef void* rdc_handle_t;        //!< Handle used for an RDC session
+typedef uint32_t rdc_gpu_group_t;  //!< GPU Group ID type
+typedef uint32_t rdc_field_grp_t;  //!< Field group ID type
 
 /**
  * @brief Represents attributes corresponding to a device
  */
 typedef struct {
-    char  device_name[RDC_MAX_STR_LENGTH];     //!< Name of the device.
+  char device_name[RDC_MAX_STR_LENGTH];  //!< Name of the device.
 } rdc_device_attributes_t;
 
 /**
  * @brief The structure to store the group info
  */
 typedef struct {
-    unsigned int count;     //!< count of GPUs in the group
-    char group_name[RDC_MAX_STR_LENGTH];     //!< group name
-    /**
-    * The list of entities in the group
-    */
-    uint32_t entity_ids[RDC_GROUP_MAX_ENTITIES];
+  unsigned int count;                   //!< count of GPUs in the group
+  char group_name[RDC_MAX_STR_LENGTH];  //!< group name
+  /**
+   * The list of entities in the group
+   */
+  uint32_t entity_ids[RDC_GROUP_MAX_ENTITIES];
 } rdc_group_info_t;
 
 /**
  * @brief The structure to store summary of data
  */
 typedef struct {
-    uint64_t max_value;   //!< Maximum value measured
-    uint64_t min_value;   //!< Minimum value measured
-    uint64_t average;     //!< Average value measured
-    double standard_deviation;   //!< The standard deviation
+  uint64_t max_value;         //!< Maximum value measured
+  uint64_t min_value;         //!< Minimum value measured
+  uint64_t average;           //!< Average value measured
+  double standard_deviation;  //!< The standard deviation
 } rdc_stats_summary_t;
 
 /**
  * @brief The structure to hold the GPU usage information
  */
 typedef struct {
-    uint32_t gpu_id;        //!< GPU_ID_INVALID for summary information
-    uint64_t start_time;    //!< The time to start the watching
-    uint64_t end_time;      //!< The time to stop the watching
+  uint32_t gpu_id;      //!< GPU_ID_INVALID for summary information
+  uint64_t start_time;  //!< The time to start the watching
+  uint64_t end_time;    //!< The time to stop the watching
 
-    uint64_t energy_consumed;               //!< GPU Energy consumed
-    uint64_t ecc_correct;                   //!< Correctable errors
-    uint64_t ecc_uncorrect;                 //!< Uncorrectable errors
-    rdc_stats_summary_t pcie_tx;            //!< Bytes sent over PCIe stats
-    rdc_stats_summary_t pcie_rx;            //!< Bytes received over PCIe stats
-    rdc_stats_summary_t power_usage;        //!< GPU Power usage stats
-    rdc_stats_summary_t gpu_clock;          //!< GPU Clock speed stats
-    rdc_stats_summary_t memory_clock;       //!< Mem. Clock speed stats
-    rdc_stats_summary_t gpu_utilization;    //!< GPU Utilization stats
-    rdc_stats_summary_t gpu_temperature;    //!< GPU temperature stats
+  uint64_t energy_consumed;             //!< GPU Energy consumed
+  uint64_t ecc_correct;                 //!< Correctable errors
+  uint64_t ecc_uncorrect;               //!< Uncorrectable errors
+  rdc_stats_summary_t pcie_tx;          //!< Bytes sent over PCIe stats
+  rdc_stats_summary_t pcie_rx;          //!< Bytes received over PCIe stats
+  rdc_stats_summary_t power_usage;      //!< GPU Power usage stats
+  rdc_stats_summary_t gpu_clock;        //!< GPU Clock speed stats
+  rdc_stats_summary_t memory_clock;     //!< Mem. Clock speed stats
+  rdc_stats_summary_t gpu_utilization;  //!< GPU Utilization stats
+  rdc_stats_summary_t gpu_temperature;  //!< GPU temperature stats
 
-    uint64_t max_gpu_memory_used;            //!< Maximum GPU memory used
-    rdc_stats_summary_t memory_utilization;  //!< Memory Utilization statistics
-} rdc_gpu_usage_info_t;       //!< GPU usage statistics
+  uint64_t max_gpu_memory_used;            //!< Maximum GPU memory used
+  rdc_stats_summary_t memory_utilization;  //!< Memory Utilization statistics
+} rdc_gpu_usage_info_t;                    //!< GPU usage statistics
 
 /**
  * @brief The structure to hold the job stats
  */
 typedef struct {
-     uint32_t num_gpus;              //!< Number of GPUs used by job
-     rdc_gpu_usage_info_t summary;   //!< Job usage summary statistics
-                                     //!< (overall)
-     rdc_gpu_usage_info_t gpus[16];  //!< Job usage summary statistics by GPU
+  uint32_t num_gpus;              //!< Number of GPUs used by job
+  rdc_gpu_usage_info_t summary;   //!< Job usage summary statistics
+                                  //!< (overall)
+  rdc_gpu_usage_info_t gpus[16];  //!< Job usage summary statistics by GPU
 } rdc_job_info_t;
 
 /**
  * @brief Field value data
  */
 typedef union {
-    int64_t l_int;
-    double  dbl;
-    char str[RDC_MAX_STR_LENGTH];
+  int64_t l_int;
+  double dbl;
+  char str[RDC_MAX_STR_LENGTH];
 } rdc_field_value_data;
 
 /**
  * @brief The structure to store the field value
  */
 typedef struct {
-    rdc_field_t  field_id;      //!< The field id of the value
-    int     status;             //!< RDC_ST_OK or error status
-    uint64_t ts;                //!< Timestamp in usec since 1970
-    rdc_field_type_t type;      //!< The field type
-    rdc_field_value_data value;  //!< Value of the field. Value type
-                                 //!< depends on the field type.
+  rdc_field_t field_id;        //!< The field id of the value
+  int status;                  //!< RDC_ST_OK or error status
+  uint64_t ts;                 //!< Timestamp in usec since 1970
+  rdc_field_type_t type;       //!< The field type
+  rdc_field_value_data value;  //!< Value of the field. Value type
+                               //!< depends on the field type.
 } rdc_field_value;
 
 /**
  * @brief The structure to store the field group info
  */
 typedef struct {
-    uint32_t count;                      //!< count of fields in the group
-    char group_name[RDC_MAX_STR_LENGTH];     //!< field group name
-    /**
-     * The list of fields in the group
-     */
-    rdc_field_t field_ids[RDC_MAX_FIELD_IDS_PER_FIELD_GROUP];
+  uint32_t count;                       //!< count of fields in the group
+  char group_name[RDC_MAX_STR_LENGTH];  //!< field group name
+  /**
+   * The list of fields in the group
+   */
+  rdc_field_t field_ids[RDC_MAX_FIELD_IDS_PER_FIELD_GROUP];
 } rdc_field_group_info_t;
 
 /**
  * @brief The structure to store the job info
  */
 typedef struct {
-    char job_id[RDC_MAX_STR_LENGTH];            //!< job id
-    rdc_gpu_group_t group_id;                   //!< group name
-    uint64_t start_time;                         //!< job start time
-    uint64_t stop_time;                          //!< job stop time
+  char job_id[RDC_MAX_STR_LENGTH];  //!< job id
+  rdc_gpu_group_t group_id;         //!< group name
+  uint64_t start_time;              //!< job start time
+  uint64_t stop_time;               //!< job stop time
 } rdc_job_group_info_t;
 
 /**
  * @brief type of diagnostic level
  */
 typedef enum {
-    RDC_DIAG_LVL_INVALID = 0,       //!< invalid level
-    RDC_DIAG_LVL_SHORT,             //!< take a few seconds to run
-    RDC_DIAG_LVL_MED,               //!< take less than 2 minutes to run
-    RDC_DIAG_LVL_LONG               //!< take up to 15 minutes to run
+  RDC_DIAG_LVL_INVALID = 0,  //!< invalid level
+  RDC_DIAG_LVL_SHORT,        //!< take a few seconds to run
+  RDC_DIAG_LVL_MED,          //!< take less than 2 minutes to run
+  RDC_DIAG_LVL_LONG          //!< take up to 15 minutes to run
 } rdc_diag_level_t;
 
 /**
  * @brief type of diagnostic result
  */
 typedef enum {
-    RDC_DIAG_RESULT_PASS,           //!< The diagnostic test pass
-    RDC_DIAG_RESULT_SKIP,           //!< The diagnostic test skipped
-    RDC_DIAG_RESULT_WARN,           //!< The diagnostic test has warnings
-    RDC_DIAG_RESULT_FAIL            //!< The diagnostic test fail
+  RDC_DIAG_RESULT_PASS,  //!< The diagnostic test pass
+  RDC_DIAG_RESULT_SKIP,  //!< The diagnostic test skipped
+  RDC_DIAG_RESULT_WARN,  //!< The diagnostic test has warnings
+  RDC_DIAG_RESULT_FAIL   //!< The diagnostic test fail
 } rdc_diag_result_t;
 
 /**
  * @brief The test cases to run
  */
 typedef enum {
-    RDC_DIAG_TEST_FIRST = 0,
-    //!< The diagnostic test pass
-    RDC_DIAG_COMPUTE_PROCESS = RDC_DIAG_TEST_FIRST,
-    RDC_DIAG_COMPUTE_QUEUE,     //!< The Compute Queue is ready
-    RDC_DIAG_SYS_MEM_CHECK,     //!< Check System memory
-    RDC_DIAG_NODE_TOPOLOGY,     //!< Report node topology
-    RDC_DIAG_GPU_PARAMETERS,    //!< GPU parameters in range
-    RDC_DIAG_TEST_LAST = RDC_DIAG_GPU_PARAMETERS
+  RDC_DIAG_TEST_FIRST = 0,
+  //!< The diagnostic test pass
+  RDC_DIAG_COMPUTE_PROCESS = RDC_DIAG_TEST_FIRST,
+  RDC_DIAG_COMPUTE_QUEUE,   //!< The Compute Queue is ready
+  RDC_DIAG_SYS_MEM_CHECK,   //!< Check System memory
+  RDC_DIAG_NODE_TOPOLOGY,   //!< Report node topology
+  RDC_DIAG_GPU_PARAMETERS,  //!< GPU parameters in range
+  RDC_DIAG_TEST_LAST = RDC_DIAG_GPU_PARAMETERS
 } rdc_diag_test_cases_t;
 
 /**
  * @brief The maximum test cases to run
  */
-#define MAX_TEST_CASES  (RDC_DIAG_TEST_LAST - RDC_DIAG_TEST_FIRST + 1)
+#define MAX_TEST_CASES (RDC_DIAG_TEST_LAST - RDC_DIAG_TEST_FIRST + 1)
 
 /**
  * @brief The maximum length of the diagnostic messages
@@ -461,39 +452,39 @@ typedef enum {
  * @brief details of the diagnostic errors
  */
 typedef struct {
-    char msg[MAX_DIAG_MSG_LENGTH];  //!< The test result details
-    uint32_t code;                  //!< The low level error code
+  char msg[MAX_DIAG_MSG_LENGTH];  //!< The test result details
+  uint32_t code;                  //!< The low level error code
 } rdc_diag_detail_t;
 
 /**
  * @brief details of the per gpu diagnostic results
  */
 typedef struct {
-    uint32_t gpu_index;     //!< The GPU index
-    rdc_diag_detail_t gpu_result;  //!< The detail results
+  uint32_t gpu_index;            //!< The GPU index
+  rdc_diag_detail_t gpu_result;  //!< The detail results
 } rdc_diag_per_gpu_result_t;
 
 /**
  * @brief The diagnostic results for all GPUs
  */
 typedef struct {
-    rdc_diag_result_t status;   //!< The diagnostic result
-    rdc_diag_detail_t details;  //!< The summary details
-    rdc_diag_test_cases_t test_case;  //!< The test case to run
+  rdc_diag_result_t status;         //!< The diagnostic result
+  rdc_diag_detail_t details;        //!< The summary details
+  rdc_diag_test_cases_t test_case;  //!< The test case to run
 
-    uint32_t per_gpu_result_count;  //!< How many gpu_results
-    //!< Result details
-    rdc_diag_per_gpu_result_t gpu_results[RDC_MAX_NUM_DEVICES];
+  uint32_t per_gpu_result_count;  //!< How many gpu_results
+  //!< Result details
+  rdc_diag_per_gpu_result_t gpu_results[RDC_MAX_NUM_DEVICES];
 
-    char info[MAX_DIAG_MSG_LENGTH];  //!< Detail information
+  char info[MAX_DIAG_MSG_LENGTH];  //!< Detail information
 } rdc_diag_test_result_t;
 
 /**
  * @brief The diagnostic responses for test cases
  */
 typedef struct {
-    uint32_t results_count;
-    rdc_diag_test_result_t diag_info[MAX_TEST_CASES];
+  uint32_t results_count;
+  rdc_diag_test_result_t diag_info[MAX_TEST_CASES];
 } rdc_diag_response_t;
 
 /**
@@ -524,17 +515,17 @@ rdc_status_t rdc_shutdown();
  *  rdc_field_update_all() when op_mode is RDC_OPERATION_MODE_MANUAL, which
  *  tells RDC to collect the stats.
  *
- *  @param[in] op_mode Operation modes. When RDC_OPERATION_MODE_AUTO, RDC schedules
- *  background task to collect the stats. When RDC_OPERATION_MODE_MANUAL, the user
- *  needs to call rdc_field_update_all() periodically.
+ *  @param[in] op_mode Operation modes. When RDC_OPERATION_MODE_AUTO, RDC
+ * schedules background task to collect the stats. When
+ * RDC_OPERATION_MODE_MANUAL, the user needs to call rdc_field_update_all()
+ * periodically.
  *
  *  @param[inout] p_rdc_handle Caller provided pointer to rdc_handle_t. Upon
  *  successful call, the value will contain the handler for following API calls.
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
  */
-rdc_status_t rdc_start_embedded(rdc_operation_mode_t op_mode,
-                                    rdc_handle_t* p_rdc_handle);
+rdc_status_t rdc_start_embedded(rdc_operation_mode_t op_mode, rdc_handle_t* p_rdc_handle);
 
 /**
  *  @brief Stop embedded RDC agent.
@@ -573,8 +564,8 @@ rdc_status_t rdc_stop_embedded(rdc_handle_t p_rdc_handle);
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
  */
-rdc_status_t rdc_connect(const char *ipAndPort, rdc_handle_t* p_rdc_handle,
-        const char* root_ca, const char* client_cert, const char* client_key);
+rdc_status_t rdc_connect(const char* ipAndPort, rdc_handle_t* p_rdc_handle, const char* root_ca,
+                         const char* client_cert, const char* client_key);
 
 /**
  *  @brief Disconnect from rdcd daemon.
@@ -606,8 +597,8 @@ rdc_status_t rdc_disconnect(rdc_handle_t p_rdc_handle);
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
  */
-rdc_status_t rdc_job_start_stats(rdc_handle_t p_rdc_handle,
-    rdc_gpu_group_t group_id, const char job_id[64], uint64_t update_freq);
+rdc_status_t rdc_job_start_stats(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
+                                 const char job_id[64], uint64_t update_freq);
 
 /**
  *  @brief Get the stats of the job using the job id.
@@ -624,8 +615,8 @@ rdc_status_t rdc_job_start_stats(rdc_handle_t p_rdc_handle,
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
  */
-rdc_status_t rdc_job_get_stats(rdc_handle_t p_rdc_handle,
-                           const char job_id[64], rdc_job_info_t* p_job_info);
+rdc_status_t rdc_job_get_stats(rdc_handle_t p_rdc_handle, const char job_id[64],
+                               rdc_job_info_t* p_job_info);
 
 /**
  *  @brief Request RDC to stop watching the stats of the job
@@ -640,8 +631,7 @@ rdc_status_t rdc_job_get_stats(rdc_handle_t p_rdc_handle,
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
  */
-rdc_status_t rdc_job_stop_stats(rdc_handle_t p_rdc_handle,
-                                                       const char job_id[64]);
+rdc_status_t rdc_job_stop_stats(rdc_handle_t p_rdc_handle, const char job_id[64]);
 
 /**
  *  @brief Request RDC to stop tracking the job given by job_id
@@ -684,8 +674,7 @@ rdc_status_t rdc_job_remove_all(rdc_handle_t p_rdc_handle);
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
  */
-rdc_status_t rdc_field_update_all(rdc_handle_t p_rdc_handle,
-                    uint32_t wait_for_update);
+rdc_status_t rdc_field_update_all(rdc_handle_t p_rdc_handle, uint32_t wait_for_update);
 
 /**
  *  @brief Get indexes corresponding to all the devices on the system.
@@ -704,7 +693,7 @@ rdc_status_t rdc_field_update_all(rdc_handle_t p_rdc_handle,
  *  @retval ::RDC_ST_OK is returned upon successful call.
  */
 rdc_status_t rdc_device_get_all(rdc_handle_t p_rdc_handle,
-            uint32_t gpu_index_list[RDC_MAX_NUM_DEVICES], uint32_t* count);
+                                uint32_t gpu_index_list[RDC_MAX_NUM_DEVICES], uint32_t* count);
 
 /**
  *  @brief Gets device attributes corresponding to the gpu_index.
@@ -720,8 +709,8 @@ rdc_status_t rdc_device_get_all(rdc_handle_t p_rdc_handle,
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
  */
-rdc_status_t rdc_device_get_attributes(rdc_handle_t p_rdc_handle,
-            uint32_t gpu_index, rdc_device_attributes_t* p_rdc_attr);
+rdc_status_t rdc_device_get_attributes(rdc_handle_t p_rdc_handle, uint32_t gpu_index,
+                                       rdc_device_attributes_t* p_rdc_attr);
 
 /**
  *  @brief Create a group contains multiple GPUs
@@ -744,9 +733,8 @@ rdc_status_t rdc_device_get_attributes(rdc_handle_t p_rdc_handle,
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
  */
-rdc_status_t rdc_group_gpu_create(rdc_handle_t p_rdc_handle,
-    rdc_group_type_t type, const char* group_name,
-    rdc_gpu_group_t* p_rdc_group_id);
+rdc_status_t rdc_group_gpu_create(rdc_handle_t p_rdc_handle, rdc_group_type_t type,
+                                  const char* group_name, rdc_gpu_group_t* p_rdc_group_id);
 
 /**
  *  @brief Add a GPU to the group
@@ -761,8 +749,8 @@ rdc_status_t rdc_group_gpu_create(rdc_handle_t p_rdc_handle,
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
  */
-rdc_status_t rdc_group_gpu_add(rdc_handle_t p_rdc_handle,
-    rdc_gpu_group_t group_id, uint32_t gpu_index);
+rdc_status_t rdc_group_gpu_add(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
+                               uint32_t gpu_index);
 
 /**
  *  @brief Get information about a GPU group
@@ -780,8 +768,8 @@ rdc_status_t rdc_group_gpu_add(rdc_handle_t p_rdc_handle,
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
  */
-rdc_status_t rdc_group_gpu_get_info(rdc_handle_t p_rdc_handle,
-            rdc_gpu_group_t p_rdc_group_id, rdc_group_info_t* p_rdc_group_info);
+rdc_status_t rdc_group_gpu_get_info(rdc_handle_t p_rdc_handle, rdc_gpu_group_t p_rdc_group_id,
+                                    rdc_group_info_t* p_rdc_group_info);
 
 /**
  *  @brief Used to get information about all GPU groups in the system.
@@ -797,8 +785,8 @@ rdc_status_t rdc_group_gpu_get_info(rdc_handle_t p_rdc_handle,
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
  */
-rdc_status_t rdc_group_get_all_ids(rdc_handle_t p_rdc_handle,
-            rdc_gpu_group_t group_id_list[], uint32_t* count);
+rdc_status_t rdc_group_get_all_ids(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id_list[],
+                                   uint32_t* count);
 
 /**
  *  @brief Destroy GPU group represented by p_rdc_group_id
@@ -811,8 +799,7 @@ rdc_status_t rdc_group_get_all_ids(rdc_handle_t p_rdc_handle,
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
  */
-rdc_status_t rdc_group_gpu_destroy(rdc_handle_t p_rdc_handle,
-        rdc_gpu_group_t p_rdc_group_id);
+rdc_status_t rdc_group_gpu_destroy(rdc_handle_t p_rdc_handle, rdc_gpu_group_t p_rdc_group_id);
 
 /**
  *  @brief create a group of fields
@@ -834,9 +821,9 @@ rdc_status_t rdc_group_gpu_destroy(rdc_handle_t p_rdc_handle,
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
  */
-rdc_status_t rdc_group_field_create(rdc_handle_t p_rdc_handle,
-            uint32_t num_field_ids, rdc_field_t* field_ids,
-            const char* field_group_name, rdc_field_grp_t* rdc_field_group_id);
+rdc_status_t rdc_group_field_create(rdc_handle_t p_rdc_handle, uint32_t num_field_ids,
+                                    rdc_field_t* field_ids, const char* field_group_name,
+                                    rdc_field_grp_t* rdc_field_group_id);
 
 /**
  *  @brief Get information about a field group
@@ -854,9 +841,8 @@ rdc_status_t rdc_group_field_create(rdc_handle_t p_rdc_handle,
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
  */
-rdc_status_t rdc_group_field_get_info(rdc_handle_t p_rdc_handle,
-            rdc_field_grp_t rdc_field_group_id,
-            rdc_field_group_info_t* field_group_info);
+rdc_status_t rdc_group_field_get_info(rdc_handle_t p_rdc_handle, rdc_field_grp_t rdc_field_group_id,
+                                      rdc_field_group_info_t* field_group_info);
 
 /**
  *  @brief Used to get information about all field groups in the system.
@@ -873,7 +859,7 @@ rdc_status_t rdc_group_field_get_info(rdc_handle_t p_rdc_handle,
  *  @retval ::RDC_ST_OK is returned upon successful call.
  */
 rdc_status_t rdc_group_field_get_all_ids(rdc_handle_t p_rdc_handle,
-            rdc_field_grp_t field_group_id_list[], uint32_t* count);
+                                         rdc_field_grp_t field_group_id_list[], uint32_t* count);
 
 /**
  *  @brief Destroy field group represented by rdc_field_group_id
@@ -886,8 +872,7 @@ rdc_status_t rdc_group_field_get_all_ids(rdc_handle_t p_rdc_handle,
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
  */
-rdc_status_t rdc_group_field_destroy(rdc_handle_t p_rdc_handle,
-        rdc_field_grp_t rdc_field_group_id);
+rdc_status_t rdc_group_field_destroy(rdc_handle_t p_rdc_handle, rdc_field_grp_t rdc_field_group_id);
 
 /**
  *  @brief Request the RDC start recording updates for a given field
@@ -911,9 +896,9 @@ rdc_status_t rdc_group_field_destroy(rdc_handle_t p_rdc_handle,
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
  */
-rdc_status_t rdc_field_watch(rdc_handle_t p_rdc_handle,
-        rdc_gpu_group_t group_id, rdc_field_grp_t field_group_id,
-        uint64_t update_freq, double max_keep_age, uint32_t max_keep_samples);
+rdc_status_t rdc_field_watch(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
+                             rdc_field_grp_t field_group_id, uint64_t update_freq,
+                             double max_keep_age, uint32_t max_keep_samples);
 
 /**
  *  @brief Request a latest cached field of a GPU
@@ -930,8 +915,8 @@ rdc_status_t rdc_field_watch(rdc_handle_t p_rdc_handle,
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
  */
-rdc_status_t rdc_field_get_latest_value(rdc_handle_t p_rdc_handle,
-        uint32_t gpu_index, rdc_field_t field, rdc_field_value* value);
+rdc_status_t rdc_field_get_latest_value(rdc_handle_t p_rdc_handle, uint32_t gpu_index,
+                                        rdc_field_t field, rdc_field_value* value);
 
 /**
  *  @brief Request a history cached field of a GPU
@@ -954,9 +939,9 @@ rdc_status_t rdc_field_get_latest_value(rdc_handle_t p_rdc_handle,
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
  */
-rdc_status_t rdc_field_get_value_since(rdc_handle_t p_rdc_handle,
-        uint32_t gpu_index, rdc_field_t field, uint64_t since_time_stamp,
-        uint64_t *next_since_time_stamp, rdc_field_value* value);
+rdc_status_t rdc_field_get_value_since(rdc_handle_t p_rdc_handle, uint32_t gpu_index,
+                                       rdc_field_t field, uint64_t since_time_stamp,
+                                       uint64_t* next_since_time_stamp, rdc_field_value* value);
 
 /**
  *  @brief Stop record updates for a given field collection.
@@ -971,8 +956,8 @@ rdc_status_t rdc_field_get_value_since(rdc_handle_t p_rdc_handle,
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
  */
-rdc_status_t rdc_field_unwatch(rdc_handle_t p_rdc_handle,
-        rdc_gpu_group_t group_id, rdc_field_grp_t field_group_id);
+rdc_status_t rdc_field_unwatch(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
+                               rdc_field_grp_t field_group_id);
 
 /**
  *  @brief Run the diagnostic test cases
@@ -991,11 +976,8 @@ rdc_status_t rdc_field_unwatch(rdc_handle_t p_rdc_handle,
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
  */
-rdc_status_t rdc_diagnostic_run(
-    rdc_handle_t p_rdc_handle,
-    rdc_gpu_group_t group_id,
-    rdc_diag_level_t level,
-    rdc_diag_response_t* response);
+rdc_status_t rdc_diagnostic_run(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
+                                rdc_diag_level_t level, rdc_diag_response_t* response);
 
 /**
  *  @brief Run one diagnostic test case
@@ -1012,11 +994,8 @@ rdc_status_t rdc_diagnostic_run(
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
  */
-rdc_status_t rdc_test_case_run(
-    rdc_handle_t p_rdc_handle,
-    rdc_gpu_group_t group_id,
-    rdc_diag_test_cases_t test_case,
-    rdc_diag_test_result_t* result);
+rdc_status_t rdc_test_case_run(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
+                               rdc_diag_test_cases_t test_case, rdc_diag_test_result_t* result);
 
 /**
  *  @brief Get a description of a provided RDC error status

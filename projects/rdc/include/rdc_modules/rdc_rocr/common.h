@@ -28,12 +28,13 @@ THE SOFTWARE.
 
 #include <stdio.h>
 #include <string.h>
+
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
-#include <vector>
-#include <string>
 #include <memory>
+#include <string>
+#include <vector>
 
 #include "hsa/hsa.h"
 #include "hsa/hsa_ext_amd.h"
@@ -45,13 +46,13 @@ namespace rdc {
 #define ALIGNED_(x) __declspec(align(x))
 #else
 #if defined(__GNUC__)
-#define ALIGNED_(x) __attribute__ ((aligned(x)))
+#define ALIGNED_(x) __attribute__((aligned(x)))
 #endif  // __GNUC__
 #endif  // _MSC_VER
 
-#define MULTILINE(...) # __VA_ARGS__
+#define MULTILINE(...) #__VA_ARGS__
 
-#define ASSERT_EQ(a, b)     (a==b)
+#define ASSERT_EQ(a, b) (a == b)
 
 void SetEnv(const char* env_var_name, const char* env_var_value);
 intptr_t AlignDown(intptr_t value, size_t alignment);
@@ -66,39 +67,35 @@ void* AlignUp(void* value, size_t alignment);
 // related calls, and is later used for reference when displaying the
 // information.
 typedef struct pool_info_t_ {
-    uint32_t segment;
-    size_t size;
-    bool alloc_allowed;
-    size_t alloc_granule;
-    size_t alloc_alignment;
-    bool accessible_by_all;
-    uint32_t global_flag;
-    uint64_t aggregate_alloc_max;
-    inline bool operator==(const pool_info_t_ &a) {
-      if (a.segment == segment && a.size == size
-          && a.alloc_allowed == alloc_allowed
-          && a.alloc_granule == alloc_granule
-          && a.alloc_alignment == alloc_alignment
-          && a.accessible_by_all == accessible_by_all
-          && a.aggregate_alloc_max == aggregate_alloc_max
-          && a.global_flag == global_flag )
-          return true;
-      else
-          return false;
-    }
+  uint32_t segment;
+  size_t size;
+  bool alloc_allowed;
+  size_t alloc_granule;
+  size_t alloc_alignment;
+  bool accessible_by_all;
+  uint32_t global_flag;
+  uint64_t aggregate_alloc_max;
+  inline bool operator==(const pool_info_t_& a) {
+    if (a.segment == segment && a.size == size && a.alloc_allowed == alloc_allowed &&
+        a.alloc_granule == alloc_granule && a.alloc_alignment == alloc_alignment &&
+        a.accessible_by_all == accessible_by_all && a.aggregate_alloc_max == aggregate_alloc_max &&
+        a.global_flag == global_flag)
+      return true;
+    else
+      return false;
+  }
 } pool_info_t;
 
-
-struct agent_pools_t{
-    hsa_agent_t agent;
-    std::vector<hsa_amd_memory_pool_t> pools;
+struct agent_pools_t {
+  hsa_agent_t agent;
+  std::vector<hsa_amd_memory_pool_t> pools;
 };
 
 /// Fill in the pool_info_t structure for the provided pool.
 /// \param[in] pool Pool for which information will be retrieved
 /// \param[out] pool_i Pointer to structure where pool info will be stored
 /// \returns HSA_STATUS_SUCCESS if no errors are encountered.
-hsa_status_t AcquirePoolInfo(hsa_amd_memory_pool_t pool, pool_info_t *pool_i);
+hsa_status_t AcquirePoolInfo(hsa_amd_memory_pool_t pool, pool_info_t* pool_i);
 
 /// If the provided agent is associated with a GPU, return that agent through
 /// output parameter. This function is meant to be the call-back function used
@@ -128,7 +125,7 @@ hsa_status_t FindGlobalPool(hsa_amd_memory_pool_t pool, void* data);
 /// \param[out] data If agent is associated with a CPU, this pointer will point
 ///  to the agent upon return
 /// \returns HSA_STATUS_SUCCESS if no errors are encountered.
-hsa_status_t IterateCPUAgents(hsa_agent_t agent, void *data);
+hsa_status_t IterateCPUAgents(hsa_agent_t agent, void* data);
 
 /// If the provided agent is associated with a GPU, return that agent through
 /// output parameter. This function is meant to be the call-back function used
@@ -137,7 +134,7 @@ hsa_status_t IterateCPUAgents(hsa_agent_t agent, void *data);
 /// \param[out] data If agent is associated with a GPU, this pointer will point
 ///  to the agent upon return
 /// \returns HSA_STATUS_SUCCESS if no errors are encountered.
-hsa_status_t IterateGPUAgents(hsa_agent_t agent, void *data);
+hsa_status_t IterateGPUAgents(hsa_agent_t agent, void* data);
 
 /// Find a GLOBAL memory pool. By this, we mean not a kernel args pool.
 /// This function is meant to be the call-back function used
@@ -162,7 +159,6 @@ hsa_status_t GetGlobalMemoryPool(hsa_amd_memory_pool_t pool, void* data);
 ///      -HSA_STATUS_SUCCESS - we did not find a pool that meets the criteria
 ///      -else return an appropriate error code for any error encountered
 hsa_status_t GetKernArgMemoryPool(hsa_amd_memory_pool_t pool, void* data);
-
 
 /// Find a "standard" pool. By this, we mean not a kernel args pool.
 /// The pool found will have the following properties:
@@ -201,16 +197,14 @@ hsa_status_t FindKernArgPool(hsa_amd_memory_pool_t pool, void* data);
 /// \param[in] pool Pool to gather and dump information for
 /// \param[in] indent Number of spaces to indent output.
 /// \returns hsa_status_t HSA_STATUS_SUCCESS if no errors
-hsa_status_t DumpMemoryPoolInfo(const pool_info_t *pool_i,
-                                                         uint32_t indent = 0);
+hsa_status_t DumpMemoryPoolInfo(const pool_info_t* pool_i, uint32_t indent = 0);
 
 /// Dump information about a provided pointer to STDOUT.
 /// \param[in] ptr Pointer about which information is dumped.
 /// \returns HSA_STATUS_SUCCESS if there are no errors
 hsa_status_t DumpPointerInfo(void* ptr);
 
-hsa_status_t GetAgentPools(
-                    std::vector<std::shared_ptr<agent_pools_t>> *agent_pools);
+hsa_status_t GetAgentPools(std::vector<std::shared_ptr<agent_pools_t>>* agent_pools);
 
 void throw_if_error(hsa_status_t err, const std::string& msg = "");
 
@@ -219,10 +213,11 @@ void throw_if_skip(const std::string& msg);
 // The customize exception when the test has to be skipped
 class SkipException : public std::exception {
  public:
-    explicit SkipException(const char* msg): _msg(msg) {}
-    virtual const char* what() const noexcept { return _msg.c_str(); }
+  explicit SkipException(const char* msg) : _msg(msg) {}
+  virtual const char* what() const noexcept { return _msg.c_str(); }
+
  private:
-    std::string _msg;
+  std::string _msg;
 };
 
 }  // namespace rdc

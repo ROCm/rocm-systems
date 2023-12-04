@@ -25,6 +25,7 @@ THE SOFTWARE.
 
 #include <exception>
 #include <string>
+
 #include "rdc/rdc.h"
 
 namespace amd {
@@ -32,8 +33,8 @@ namespace rdc {
 
 class RdcException : public std::exception {
  public:
-  RdcException(rdc_status_t error, const std::string description) :
-                                            err_(error), desc_(description) {}
+  RdcException(rdc_status_t error, const std::string description)
+      : err_(error), desc_(description) {}
   rdc_status_t error_code() const noexcept { return err_; }
   const char* what() const noexcept override { return desc_.c_str(); }
 
@@ -46,4 +47,3 @@ class RdcException : public std::exception {
 }  // namespace amd
 
 #endif  // INCLUDE_RDC_LIB_RDCEXCEPTION_H_
-

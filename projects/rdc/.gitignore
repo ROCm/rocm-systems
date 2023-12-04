@@ -17,3 +17,7 @@ docs/_doxygen/
 
 # VisualStudioCode
 .vscode/
+
+# do NOT ignore these files
+!.clang-format
+!.editorconfig

@@ -24,39 +24,38 @@ THE SOFTWARE.
 
 #include <map>
 #include <string>
+
 #include "RdciSubSystem.h"
 
 namespace amd {
 namespace rdc {
 
-class RdciGroupSubSystem: public RdciSubSystem {
+class RdciGroupSubSystem : public RdciSubSystem {
  public:
-     RdciGroupSubSystem();
-     void parse_cmd_opts(int argc, char ** argv) override;
-     void process() override;
+  RdciGroupSubSystem();
+  void parse_cmd_opts(int argc, char** argv) override;
+  void process() override;
 
  private:
-     void show_help() const;
+  void show_help() const;
 
-     enum OPERATIONS {
-        GROUP_UNKNOWN = 0,
-        GROUP_HELP,
-        GROUP_CREATE,
-        GROUP_DELETE,
-        GROUP_LIST,
-        GROUP_ADD_GPUS,
-        GROUP_INFO
-     } group_ops_;
+  enum OPERATIONS {
+    GROUP_UNKNOWN = 0,
+    GROUP_HELP,
+    GROUP_CREATE,
+    GROUP_DELETE,
+    GROUP_LIST,
+    GROUP_ADD_GPUS,
+    GROUP_INFO
+  } group_ops_;
 
-     bool is_group_set_;
-     uint32_t group_id_;
-     std::string group_name_;
-     std::string gpu_ids_;
+  bool is_group_set_;
+  uint32_t group_id_;
+  std::string group_name_;
+  std::string gpu_ids_;
 };
-
 
 }  // namespace rdc
 }  // namespace amd
-
 
 #endif  // RDCI_INCLUDE_RDCIGROUPSUBSYSTEM_H_

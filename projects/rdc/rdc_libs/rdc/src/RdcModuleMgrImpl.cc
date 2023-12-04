@@ -29,33 +29,30 @@ THE SOFTWARE.
 namespace amd {
 namespace rdc {
 
-RdcModuleMgrImpl::RdcModuleMgrImpl(const RdcMetricFetcherPtr& fetcher)
-    : fetcher_(fetcher) {}
+RdcModuleMgrImpl::RdcModuleMgrImpl(const RdcMetricFetcherPtr& fetcher) : fetcher_(fetcher) {}
 
 RdcTelemetryPtr RdcModuleMgrImpl::get_telemetry_module() {
-    if (rdc_telemetry_module_) {
-        return rdc_telemetry_module_;
-    }
-
-    if (!rdc_telemetry_module_) {
-        rdc_telemetry_module_.reset(
-            new RdcTelemetryModule(fetcher_));
-    }
-
+  if (rdc_telemetry_module_) {
     return rdc_telemetry_module_;
+  }
+
+  if (!rdc_telemetry_module_) {
+    rdc_telemetry_module_.reset(new RdcTelemetryModule(fetcher_));
+  }
+
+  return rdc_telemetry_module_;
 }
 
 RdcDiagnosticPtr RdcModuleMgrImpl::get_diagnostic_module() {
-    if (rdc_diagnostic_module_) {
-        return rdc_diagnostic_module_;
-    }
-
-    if (!rdc_diagnostic_module_) {
-        rdc_diagnostic_module_.reset(
-            new RdcDiagnosticModule(fetcher_));
-    }
-
+  if (rdc_diagnostic_module_) {
     return rdc_diagnostic_module_;
+  }
+
+  if (!rdc_diagnostic_module_) {
+    rdc_diagnostic_module_.reset(new RdcDiagnosticModule(fetcher_));
+  }
+
+  return rdc_diagnostic_module_;
 }
 
 }  // namespace rdc

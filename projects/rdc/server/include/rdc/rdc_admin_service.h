@@ -23,19 +23,20 @@ THE SOFTWARE.
 #define SERVER_INCLUDE_RDC_RDC_ADMIN_SERVICE_H_
 
 #include "rdc.grpc.pb.h"  // NOLINT
-#include "rocm_smi/rocm_smi.h"
 #include "rdc/rdc_admin_service.h"
+#include "rocm_smi/rocm_smi.h"
 
 namespace amd {
 namespace rdc {
 
 class RDCAdminServiceImpl final : public ::rdc::RdcAdmin::Service {
  public:
-    RDCAdminServiceImpl();
-    ~RDCAdminServiceImpl();
-    ::grpc::Status VerifyConnection(::grpc::ServerContext* context,
-                                const ::rdc::VerifyConnectionRequest* request,
-                              ::rdc::VerifyConnectionResponse* reply) override;
+  RDCAdminServiceImpl();
+  ~RDCAdminServiceImpl();
+  ::grpc::Status VerifyConnection(::grpc::ServerContext* context,
+                                  const ::rdc::VerifyConnectionRequest* request,
+                                  ::rdc::VerifyConnectionResponse* reply) override;
+
  private:
 };
 
