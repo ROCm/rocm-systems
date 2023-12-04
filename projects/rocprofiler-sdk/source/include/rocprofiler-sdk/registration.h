@@ -48,24 +48,51 @@ typedef struct
     const uint32_t handle;  ///< internal handle
 } rocprofiler_client_id_t;
 
-// TODO(aelwazir): Add Docs
+/**
+ * @brief Prototype for the function pointer provided to tool in ::rocprofiler_tool_initialize_t.
+ * This function can be used to explicitly invoke the client tools ::rocprofiler_tool_finalize_t
+ * finalization function prior to the `atexit` handler which calls it.
+ *
+ * If this function pointer is invoked explicitly, rocprofiler will disable calling the
+ * ::rocprofiler_tool_finalize_t functioin pointer during it's `atexit` handler.
+ */
 typedef void (*rocprofiler_client_finalize_t)(rocprofiler_client_id_t);
 
-// TODO(aelwazir): Add Docs
+/**
+ * @brief Prototype for the initialize function where a tool creates contexts for the set of
+ * rocprofiler services used by the tool.
+ * @param [in] finalize_func Function pointer to explicitly invoke the finalize function for the
+ * client
+ * @param [in] tool_data `tool_data` field returned from ::rocprofiler_configure in
+ * ::rocprofiler_tool_configure_result_t.
+ */
 typedef int (*rocprofiler_tool_initialize_t)(rocprofiler_client_finalize_t finalize_func,
                                              void*                         tool_data);
 
-// TODO(aelwazir): Add Docs
+/**
+ * @brief Prototype for the finalize function where a tool does any cleanup or output operations
+ * once it has finished using rocprofiler services.
+ * @param [in] tool_data `tool_data` field returned from ::rocprofiler_configure in
+ * ::rocprofiler_tool_configure_result_t.
+ */
 typedef void (*rocprofiler_tool_finalize_t)(void* tool_data);
 
 /**
- * @brief Data structure containing a initialization, finalization, and data
- * TODO(aelwazir): Add correlation with rocprofiler_configure.
+ * @brief Data structure containing a initialization, finalization, and data.
  *
+ * After rocprofiler has retrieved all instances of ::rocprofiler_tool_configure_result_t from the
+ tools -- via either ::rocprofiler_configure and/or ::rocprofiler_force_configure,
+ * rocprofiler will invoke all non-null `initialize` functions and provide the user a function
+ pointer which will explicitly invoke
+ * the `finalize` function pointer. Both the `initialize` and `finalize` functions will be passed
+ the value of the `tool_data` field.
+ * The `size` field is used for ABI reasons, in the event that rocprofiler changes the
+ ::rocprofiler_tool_configure_result_t struct
+ * and it should be set to `sizeof(rocprofiler_tool_configure_result_t)`
  */
 typedef struct
 {
-    size_t                        size;        ///< in case of future extensions
+    size_t                        size;  ///< size of this struct (in case of future extensions)
     rocprofiler_tool_initialize_t initialize;  ///< context creation
     rocprofiler_tool_finalize_t   finalize;    ///< cleanup
     void*                         tool_data;   ///< data to provide to init and fini callbacks
@@ -79,9 +106,10 @@ typedef struct
  * @param [out] status 0 indicates rocprofiler has not been initialized (i.e. configured), 1
  * indicates rocprofiler has been initialized, -1 indicates rocprofiler is currently initializing.
  * @return ::rocprofiler_status_t
+ * @retval ::ROCPROFILER_STATUS_SUCCESS Returned unconditionally
  */
 rocprofiler_status_t
-rocprofiler_is_initialized(int* status) ROCPROFILER_API;
+rocprofiler_is_initialized(int* status) ROCPROFILER_API ROCPROFILER_NONNULL(1);
 
 /**
  * @brief Query rocprofiler finalization status.
@@ -89,9 +117,10 @@ rocprofiler_is_initialized(int* status) ROCPROFILER_API;
  * @param [out] status 0 indicates rocprofiler has not been finalized, 1 indicates rocprofiler has
  * been finalized, -1 indicates rocprofiler is currently finalizing.
  * @return ::rocprofiler_status_t
+ * @retval ::ROCPROFILER_STATUS_SUCCESS Returned unconditionally
  */
 rocprofiler_status_t
-rocprofiler_is_finalized(int* status) ROCPROFILER_API;
+rocprofiler_is_finalized(int* status) ROCPROFILER_API ROCPROFILER_NONNULL(1);
 
 /**
  * @brief This is the special function that tools define to enable rocprofiler support. The tool
@@ -213,8 +242,10 @@ typedef rocprofiler_tool_configure_result_t* (*rocprofiler_configure_func_t)(
  * initialize.
  * @param [in] configure_func Address of @ref rocprofiler_configure function. A null pointer is
  * acceptable if the address is not known
- * @returns rocprofiler_status_t If rocprofiler has already been configured, or is currently being
- * configured, this function will return @ref ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED.
+ * @return ::rocprofiler_status_t
+ * @retval ::ROCPROFILER_STATUS_SUCCESS Registration was successfully triggered.
+ * @retval ::ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED Returned if rocprofiler has already been
+ * configured, or is currently being configured
  */
 rocprofiler_status_t
 rocprofiler_force_configure(rocprofiler_configure_func_t configure_func) ROCPROFILER_API;

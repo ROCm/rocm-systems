@@ -36,7 +36,7 @@ ROCPROFILER_EXTERN_C_INIT
 
 /**
  * @brief Function used to configure the PC sampling service on the GPU agent with @p agent_id.
- * @brief Function used to configure the PC sampling service on the GPU agent with @p agent_id.
+ *
  * Prerequisites are the following:
  * - The user must create a context and supply its @p context_id. By using this context,
  * - The user must create a context and supply its @p context_id. By using this context,

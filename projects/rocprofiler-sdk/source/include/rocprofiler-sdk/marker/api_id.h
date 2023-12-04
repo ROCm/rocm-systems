@@ -33,5 +33,11 @@ typedef enum  // NOLINT(performance-enum-size)
     ROCPROFILER_MARKER_API_ID_roctxRangePop,
     ROCPROFILER_MARKER_API_ID_roctxRangeStartA,
     ROCPROFILER_MARKER_API_ID_roctxRangeStop,
+    ROCPROFILER_MARKER_API_ID_roctxProfilerPause,
+    ROCPROFILER_MARKER_API_ID_roctxProfilerResume,
+    ROCPROFILER_MARKER_API_ID_roctxNameOsThread,
+    ROCPROFILER_MARKER_API_ID_roctxNameHsaDevice,
+    ROCPROFILER_MARKER_API_ID_roctxNameHipDevice,
+    ROCPROFILER_MARKER_API_ID_roctxNameHipStream,
     ROCPROFILER_MARKER_API_ID_LAST,
 } rocprofiler_marker_api_id_t;
