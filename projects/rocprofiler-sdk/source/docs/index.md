@@ -14,4 +14,5 @@
    buffered_tracing
    intercept_table
    developer_api
+   getting_started
 ```
