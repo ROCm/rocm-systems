@@ -372,9 +372,9 @@ att_parsed_input_t GetATTParams() {
     try {
       auto hexa_pos = line.find("0x");  // Is it hex?
       if (hexa_pos != std::string::npos)
-        param_value = stoi(line.substr(hexa_pos + 2), 0, 16);  // hexadecimal
+        param_value = stoul(line.substr(hexa_pos + 2), 0, 16);  // hexadecimal
       else
-        param_value = stoi(line, 0, 10);  // decimal
+        param_value = stoul(line, 0, 10);  // decimal
     } catch (...) {
       printf("Error: Invalid parameter value %s\n", line.c_str());
       continue;
