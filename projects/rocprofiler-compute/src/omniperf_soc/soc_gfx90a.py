@@ -34,7 +34,7 @@ class gfx90a_soc (OmniSoC_Base):
         super().__init__(args)
         soc = "gfx90a"
         self.set_soc(soc)
-        if self.get_args().roof_only:
+        if hasattr(self.get_args(), 'roof_only') and self.get_args().roof_only:
             self.set_perfmon_dir(os.path.join(str(config.omniperf_home), "perfmon_configs", "roofline"))
         else:
             self.set_perfmon_dir(os.path.join(str(config.omniperf_home), "perfmon_configs", soc)) 
