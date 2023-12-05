@@ -23,3 +23,8 @@ device/
 __pycache__
 README
 README.html
+
+# do NOT ignore these files
+!.clang-format
+!.clang-tidy
+!.clangd

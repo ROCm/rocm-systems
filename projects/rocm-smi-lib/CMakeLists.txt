@@ -95,15 +95,31 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     set (CMAKE_SHARED_LINKER_FLAGS "-Wl,--build-id=sha1")
 endif()
 
+# Use this instead of above for 32 bit
+# set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -m32")
+
+if ("${CMAKE_BUILD_TYPE}" STREQUAL Release)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O2")
+else ()
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -ggdb -O0 -DDEBUG")
+endif ()
+
 ## Address Sanitize Flag
 if (${ADDRESS_SANITIZER})
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -g")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -g -fno-omit-frame-pointer")
     set(CMAKE_EXE_LINKER_FLAGS -fsanitize=address)
 
-    if (BUILD_SHARED_LIBS})
-        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -shared-libsan" )
+    if (BUILD_SHARED_LIBS)
+        if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+            set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -shared-libasan")
+            set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -shared-libasan")
+        endif()
     else ()
-        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static-libsan" )
+        if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+            set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static-libsan")
+        else()
+            set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static-libasan")
+        endif()
     endif ()
 else ()
     ## Security breach mitigation flags
@@ -116,21 +132,12 @@ else ()
       "${CMAKE_CXX_FLAGS} -Wtrampolines -Wl,-z,now")
 endif ()
 
-# Use this instead of above for 32 bit
-# set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -m32")
-
-if ("${CMAKE_BUILD_TYPE}" STREQUAL Release)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O2")
-else ()
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -ggdb -O0 -DDEBUG")
-endif ()
-
 set(COMMON_SRC_DIR "${PROJECT_SOURCE_DIR}/src")
 set(COMMON_INC_DIR "${PROJECT_SOURCE_DIR}/include/rocm_smi")
 set(SHR_MUTEX_DIR "${PROJECT_SOURCE_DIR}/third_party/shared_mutex")
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include
-                     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/shared_mutex)
+                    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/shared_mutex)
 
 set(CMN_SRC_LIST "${COMMON_SRC_DIR}/rocm_smi_device.cc")
 set(CMN_SRC_LIST ${CMN_SRC_LIST} "${COMMON_SRC_DIR}/rocm_smi_main.cc")

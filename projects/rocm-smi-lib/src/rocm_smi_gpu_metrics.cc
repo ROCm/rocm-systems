@@ -2607,7 +2607,7 @@ rsmi_status_t Device::run_internal_gpu_metrics_query(AMDGpuMetricsUnitType_t met
                     << " | Returning = "
                     << getRSMIStatusString(status_code)
                     << " |";
-        LOG_ERROR(ostrstream);
+        LOG_TRACE(ostrstream);
         return status_code;
       }
     }
@@ -2717,7 +2717,7 @@ rsmi_status_t rsmi_dev_gpu_metrics_info_query(uint32_t dv_ind, AMDGpuMetricsUnit
               << " | Returning = "
               << getRSMIStatusString(status_code)
               << " |";
-  LOG_ERROR(ostrstream);
+  LOG_TRACE(ostrstream);
   return status_code;
 }
 
