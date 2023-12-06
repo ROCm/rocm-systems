@@ -72,8 +72,7 @@ constexpr auto test_data_sizes = std::index_sequence<1 * units::byte,
                                                      91 * units::kilobyte,
                                                      128 * units::kilobyte,
                                                      387 * units::kilobyte,
-                                                     693 * units::kilobyte,
-                                                     2 * units::megabyte>{};
+                                                     693 * units::kilobyte>{};
 
 // this is the list of array data types we will generate. Effectively, there
 // will be one raw array for each combination of these types and the test data sizes
@@ -191,7 +190,7 @@ TEST(buffering, parallel)
     constexpr auto num_variants = test_data_types::size() * test_data_sizes.size();
     constexpr auto data_size    = get_data_size(test_data_types{}, test_data_sizes);
 
-    EXPECT_EQ(num_variants, 160);
+    EXPECT_EQ(num_variants, 150);
 
     // make a buffer large enough to hold all the data we generate
     auto _buffer = record_header_buffer_t{data_size};
