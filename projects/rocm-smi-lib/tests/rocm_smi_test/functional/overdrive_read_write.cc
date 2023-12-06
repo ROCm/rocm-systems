@@ -101,12 +101,21 @@ void TestOverdriveReadWrite::Run(void) {
       std::cout << "Set Overdrive level to 0%..." << std::endl;
     }
     ret = rsmi_dev_overdrive_level_set(dv_ind, 0);
+    if (ret == RSMI_STATUS_NOT_SUPPORTED) {
+      IF_VERB(STANDARD) {
+        std::cout <<
+          "\t**Overdrive Level set is not supported on this machine" << std::endl;
+      }
+      continue;
+    }
     CHK_ERR_ASRT(ret)
     IF_VERB(STANDARD) {
       std::cout << "Set Overdrive level to 10%..." << std::endl;
     }
     ret = rsmi_dev_overdrive_level_set(dv_ind, 10);
     CHK_ERR_ASRT(ret)
+    // this won't be reachable if set doesn't work
+    // and is checked by overdrive_read.cc test
     ret = rsmi_dev_overdrive_level_get(dv_ind, &val);
     CHK_ERR_ASRT(ret)
     IF_VERB(STANDARD) {
