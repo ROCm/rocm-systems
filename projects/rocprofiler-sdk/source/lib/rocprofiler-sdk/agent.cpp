@@ -504,11 +504,10 @@ read_topology()
                 agent_info.array_count / agent_info.simd_arrays_per_engine;
 
             // depends on above
-            if(agent_info.num_shader_banks * agent_info.simd_arrays_per_engine > 0)
+            if(agent_info.num_shader_banks > 0)
             {
-                agent_info.cu_per_engine =
-                    (agent_info.simd_count / agent_info.simd_per_cu) /
-                    (agent_info.num_shader_banks * agent_info.simd_arrays_per_engine);
+                agent_info.cu_per_engine = (agent_info.simd_count / agent_info.simd_per_cu) /
+                                           (agent_info.num_shader_banks);
             }
         }
 
