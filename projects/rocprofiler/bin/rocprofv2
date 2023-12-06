@@ -156,6 +156,7 @@ while [ 1 ]; do
     export ROCPROFILER_KERNEL_TRACE=1
     shift
   elif [ "$1" == "--sys-trace" ]; then
+    export ROCPROFILER_KERNEL_TRACE=1
     export ROCPROFILER_HIP_API_TRACE=1
     export ROCPROFILER_HIP_ACTIVITY_TRACE=1
     export ROCPROFILER_HSA_API_TRACE=1
