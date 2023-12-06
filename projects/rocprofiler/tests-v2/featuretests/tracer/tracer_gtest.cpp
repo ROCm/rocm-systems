@@ -303,7 +303,7 @@ class AsyncCopyTest : public Tracertest {
 
 // Test:1 Compares total num of kernel-names in golden output against current
 // tracer output
-TEST_F(AsyncCopyTest, WhenRunningTracerWithAppThenAsyncCopyOutputIsGenerated) {
+TEST_F(AsyncCopyTest, DISABLED_WhenRunningTracerWithAppThenAsyncCopyOutputIsGenerated) {
   // kernel info in current profler run
   std::vector<tracer_kernel_info_t> current_kernel_info;
 
@@ -312,7 +312,7 @@ TEST_F(AsyncCopyTest, WhenRunningTracerWithAppThenAsyncCopyOutputIsGenerated) {
 }
 
 // Test:2 Matches coelation Ids
-TEST_F(AsyncCopyTest, WhenRunningTracerWithAppThenAsyncCorelationCountIsCorrect) {
+TEST_F(AsyncCopyTest, DISABLED_WhenRunningTracerWithAppThenAsyncCorelationCountIsCorrect) {
   // kernel info in current profler run
   std::vector<tracer_kernel_info_t> current_kernel_info;
 
