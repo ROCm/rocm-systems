@@ -70,6 +70,8 @@ if (amd_comgr_status_s status = call) {                                         
   return AMD_COMGR_STATUS_ERROR;                                                                   \
 }
 
+std::unordered_map<uint64_t, std::string> DisassemblyInstance::agent_isa_name{};
+
 CodeObjectBinary::CodeObjectBinary(const std::string& uri) : m_uri(uri) {
   const std::string protocol_delim{"://"};
 
@@ -156,7 +158,7 @@ CodeObjectBinary::CodeObjectBinary(const std::string& uri) : m_uri(uri) {
 DisassemblyInstance::DisassemblyInstance(
   const char* codeobj_data,
   uint64_t codeobj_size,
-  std::optional<std::string> input_isa
+  uint64_t gpu_id
 )
 {
   buffer = std::vector<char>(codeobj_size, 0);
@@ -164,20 +166,22 @@ DisassemblyInstance::DisassemblyInstance(
 
   THROW_COMGR(amd_comgr_create_data(AMD_COMGR_DATA_KIND_EXECUTABLE, &data));
   THROW_COMGR(amd_comgr_set_data(data, buffer.size(), buffer.data()));
-  if (!input_isa)
+
+  std::string input_isa{};
+  if (agent_isa_name.find(gpu_id) == agent_isa_name.end())
   {
-    input_isa = "amdgcn-amd-amdhsa--gfx1100";
+    size_t isa_size = 128;
+    input_isa.resize(isa_size);
+    THROW_COMGR(amd_comgr_get_data_isa_name(data, &isa_size, input_isa.data()));
+    agent_isa_name[gpu_id] = input_isa;
   }
-  if (!input_isa)
+  else
   {
-    input_isa = std::string();
-    input_isa->resize(128);
-    size_t isa_size = sizeof(input_isa->size());
-    THROW_COMGR(amd_comgr_get_data_isa_name(data, &isa_size, input_isa->data()));
+    input_isa = agent_isa_name.at(gpu_id);
   }
 
   THROW_COMGR(amd_comgr_create_disassembly_info(
-      input_isa->data(),
+      input_isa.data(),
       &DisassemblyInstance::memory_callback, &DisassemblyInstance::inst_callback,
       [](uint64_t address, void* user_data) {}, &info));
 

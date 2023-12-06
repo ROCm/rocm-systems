@@ -306,3 +306,15 @@ Example for file plugin output:
 - Added Tool versioning to be able to run rocprofv2 using rocprof. See README for more information.
 - Added Plugin Versioning way in rocprofv2. See README for more details.
 - Added --version in the rocprof and rocprofv2 to be able to see the current rocprof/v2 version along with ROCm version information.
+
+## ROCprofiler for rocm 6.2
+
+### Added
+
+- ATT: Continuous mode. The input file now has a DISPATCH_RANGE=begin,end that specifies continuous ATT collection during the application run.
+- ATT: Ability to dump raw codeobjects as .out files with ISA_CAPTURE_MODE=[0,1,2]
+
+### Removed
+
+- ATT: Network mode, since it was redundant with file mode.
+- ATT: Generated isa.s file, since the functionality was moved from collection to parsing time.

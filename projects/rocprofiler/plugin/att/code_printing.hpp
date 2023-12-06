@@ -37,7 +37,7 @@ class CodeObjDecoderComponent
 public:
   std::optional<SymbolInfo> find_symbol(uint64_t address);
 
-  CodeObjDecoderComponent(const char* codeobj_data, uint64_t codeobj_size);
+  CodeObjDecoderComponent(const char* codeobj_data, uint64_t codeobj_size, uint64_t gpu_id);
   ~CodeObjDecoderComponent();
 
   std::pair<instruction_instance_t, size_t>
@@ -48,7 +48,7 @@ public:
 
   int m_fd;
 
-  std::map<uint64_t, std::pair<std::string, size_t>> m_line_number_map{};
+  std::map<uint64_t, std::shared_ptr<std::string>> m_line_number_map{};
   std::map<uint64_t, SymbolInfo> m_symbol_map{};
 
   std::string m_uri;
@@ -65,7 +65,8 @@ typedef struct {
 class CodeobjDecoder
 {
 public:
-  CodeobjDecoder(const char* filepath, uint64_t loadbase, uint64_t memsize);
+  CodeobjDecoder(const char* filepath, uint64_t loadbase, uint64_t memsize, uint64_t gpu_id);
+
   bool decode_single(uint64_t vaddr);
   bool decode_single_at_offset(uint64_t vaddr, uint64_t voffset);
   bool add_to_map(uint64_t faddr, uint64_t vaddr, uint64_t voffset);
@@ -111,9 +112,15 @@ class CodeobjList
 public:
   CodeobjList() = default;
 
-  virtual void addDecoder(const char* filepath, uint32_t id, uint64_t loadbase, uint64_t memsize)
+  virtual void addDecoder(
+    const char* filepath,
+    uint32_t id,
+    uint64_t loadbase,
+    uint64_t memsize,
+    uint64_t gpu_id
+  )
   {
-    decoders[id] = std::make_shared<CodeobjDecoder>(filepath, loadbase, memsize);
+    decoders[id] = std::make_shared<CodeobjDecoder>(filepath, loadbase, memsize, gpu_id);
   }
 
   virtual bool removeDecoder(uint32_t id)
@@ -150,9 +157,15 @@ class CodeobjTableTranslation : protected CodeobjList
 public:
   CodeobjTableTranslation() = default;
 
-  void addDecoder(const char* filepath, uint32_t id, uint64_t loadbase, uint64_t memsize) override
+  virtual void addDecoder(
+    const char* filepath,
+    uint32_t id,
+    uint64_t loadbase,
+    uint64_t memsize,
+    uint64_t gpu_id
+  ) override
   {
-    this->Super::addDecoder(filepath, id, loadbase, memsize);
+    this->Super::addDecoder(filepath, id, loadbase, memsize, gpu_id);
     auto ptr = decoders.at(id);
     table.insert({ptr->begin(), static_cast<uint32_t>(ptr->size()), id, 0});
   }

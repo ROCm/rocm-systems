@@ -51,7 +51,7 @@ class DisassemblyInstance {
   DisassemblyInstance(
     const char* codeobj_data,
     uint64_t codeobj_size,
-    std::optional<std::string> input_isa
+    uint64_t gpu_id
   );
   ~DisassemblyInstance();
 
@@ -61,6 +61,8 @@ class DisassemblyInstance {
   static uint64_t memory_callback(uint64_t from, char* to, uint64_t size, void* user_data);
   static void inst_callback(const char* instruction, void* user_data);
   static amd_comgr_status_t symbol_callback(amd_comgr_symbol_t symbol, void* user_data);
+  // Per-gpu_id isa_name
+  static std::unordered_map<uint64_t, std::string> agent_isa_name;
 
   std::optional<uint64_t> va2fo(uint64_t va);
   std::vector<std::pair<uint64_t, uint64_t>> getSegments();

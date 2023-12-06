@@ -153,127 +153,6 @@ def extract_data(df, se_number):
     return flight_count, wave_filenames, se_filename, allwaves_maxline
 
 
-class NoCacheHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
-    def end_headers(self):
-        self.send_my_headers()
-        http.server.SimpleHTTPRequestHandler.end_headers(self)
-
-    def send_my_headers(self):
-        self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
-        self.send_header("Pragma", "no-cache")
-        self.send_header("Expires", "0")
-
-    def do_GET(self):
-        if (
-            ".png?" in self.path
-            and self.path.split("/")[-1] not in JSON_GLOBAL_DICTIONARY.keys()
-        ):
-            selections = [int(s) != 0 for s in self.path.split(".png?")[-1]]
-            counters_json, imagebytes = GeneratePIC(
-                self.drawinfo, selections[1:], selections[0]
-            )
-            JSON_GLOBAL_DICTIONARY["graph_options.json"] = counters_json
-            JSON_GLOBAL_DICTIONARY[self.path.split("/")[-1]] = imagebytes[
-                self.path.split("/")[-1].split("?")[0]
-            ]
-
-        if ".json" in self.path or ".png" in self.path:
-            try:
-                response_file = JSON_GLOBAL_DICTIONARY[self.path.split("/")[-1]]
-            except:
-                print("Invalid json request:", self.path)
-                print(JSON_GLOBAL_DICTIONARY.keys())
-                self.send_error(HTTPStatus.NOT_FOUND, "File not found")
-                return
-            self.send_response(HTTPStatus.OK)
-            self.send_header("Content-Length", str(len(response_file)))
-            if ".b" in self.path:
-                self.send_header("Content-type", "application/octet-stream")
-                response_file = BytesIO(response_file)
-            elif "timeline.png" in self.path:
-                self.send_header("Content-type", "image/png")
-            else:
-                self.send_header("Content-type", "application/json")
-            self.send_header("Last-Modified", self.date_time_string(time.time()))
-            self.end_headers()
-            self.copyfile(response_file, self.wfile)
-        elif self.path in ["/", "/styles.css", "/index.html", "/logo.svg"]:
-            http.server.SimpleHTTPRequestHandler.do_GET(self)
-        else:
-            print("Invalid request:", self.path)
-            self.send_error(HTTPStatus.NOT_FOUND, "File not found")
-
-
-class RocTCPServer(socketserver.TCPServer):
-    def server_bind(self):
-        self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.socket.bind(self.server_address)
-
-
-def run_server(drawinfo):
-    Handler = NoCacheHTTPRequestHandler
-    Handler.drawinfo = drawinfo
-    os.chdir(os.path.join(os.path.dirname(os.path.realpath(__file__)),"ui/"))
-    try:
-        with RocTCPServer((IPAddr, PORT), Handler) as httpd:
-            httpd.serve_forever()
-    except KeyboardInterrupt:
-        pass
-
-
-def fix_space(line):
-    line = line.replace(" ", SP)
-    line = line.replace("\t", SP * 4)
-    return line
-
-
-def WebSocketserver(websocket, path):
-    data = websocket.recv()
-    cpp, ln, _ = data.split(":")
-    ln = int(ln)
-    HL, EMP = "highlight", ""
-    content = None
-    print("loading...")
-    try:
-        f = open(cpp, "r", errors="replace")
-        content = "".join(
-            '<li class="line_'
-            + str(i)
-            + str(HL if i == ln else EMP)
-            + '">'
-            + str(i).ljust(5)
-            + fix_space(l)
-            + "</li>"
-            for i, l in enumerate(f.readlines(), 1)
-        )
-    except FileNotFoundError:
-        content = cpp + " not found!"
-    websocket.send(content)
-
-
-def run_websocket():
-    start_server = websockets.serve(WebSocketserver, IPAddr, WebSocketPort)
-    try:
-        asyncio.get_event_loop().run_until_complete(start_server)
-        asyncio.get_event_loop().run_forever()
-    except KeyboardInterrupt:
-        pass
-
-
-def assign_ports(ports):
-    ps = [int(port) for port in ports.split(",")]
-    if ps[0] <= 5000 or ps[1] <= 5000:
-        print("Need to have port values > 5000")
-        sys.exit(1)
-    elif ps[0] == ps[1]:
-        print(
-            "Can not use the same port for both web server and websocket server: " + ps[0]
-        )
-        sys.exit(1)
-    global IPAddr, PORT, WebSocketPort
-    PORT, WebSocketPort = ps[0], ps[1]
-
-
 def call_picture_callback(return_dict, drawinfo):
     response, imagebytes = GeneratePIC(drawinfo)
     return_dict["graph_options.json"] = response
@@ -291,11 +170,9 @@ def call_picture_callback(return_dict, drawinfo):
 
 
 def view_trace(
-    args,
     code,
     dbnames,
     att_filenames,
-    bDumpOnly,
     se_time_begin,
     gfxv,
     drawinfo,
@@ -380,30 +257,13 @@ def view_trace(
         for k, v in return_dict.items():
             JSON_GLOBAL_DICTIONARY[k] = v
 
-    if bDumpOnly == False:
-        JSON_GLOBAL_DICTIONARY["live.json"] = Readable({"live": 1})
-        if args.ports:
-            assign_ports(args.ports)
-        print("serving at ports: {0},{1}".format(PORT, WebSocketPort))
-        try:
-            PROCS = [
-                Process(target=run_server, args=[drawinfo]),
-                Process(target=run_websocket),
-            ]
-            for p in PROCS:
-                p.start()
-            for p in PROCS:
-                p.join()
-        except KeyboardInterrupt:
-            print("Exitting.")
-    else:
-        os.makedirs(trace_instance_name + "_ui/", exist_ok=True)
-        JSON_GLOBAL_DICTIONARY["live.json"] = Readable({"live": 0})
-        os.system(
-            "cp "
-            + os.path.join(os.path.abspath(os.path.dirname(__file__)), "ui")
-            + "/* " + trace_instance_name + "_ui/"
-        )
-        for k, v in JSON_GLOBAL_DICTIONARY.items():
-            with open(os.path.join(trace_instance_name+"_ui", k), "w" if ".json" in k else "wb") as f:
-                f.write(v.read())
+    os.makedirs(trace_instance_name + "_ui/", exist_ok=True)
+    JSON_GLOBAL_DICTIONARY["live.json"] = Readable({"live": 0})
+    os.system(
+        "cp "
+        + os.path.join(os.path.abspath(os.path.dirname(__file__)), "ui")
+        + "/* " + trace_instance_name + "_ui/"
+    )
+    for k, v in JSON_GLOBAL_DICTIONARY.items():
+        with open(os.path.join(trace_instance_name+"_ui", k), "w" if ".json" in k else "wb") as f:
+            f.write(v.read())

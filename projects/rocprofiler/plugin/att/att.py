@@ -438,21 +438,21 @@ if __name__ == "__main__":
         "--mode",
         help="""ATT analysis modes:\n
                         off: Only run ATT collection, disable analysis.\n
-                        file: dump json files to disk.\n
-                        network: Open att server over the network.""",
+                        file: dump json files to disk.""",
         type=str,
         default="off",
     )
     args = parser.parse_args()
+    args.mode = args.mode.lower().split(',')
 
     CSV_MODE = False
-    if args.mode.lower() == 'csv':
+    FILE_MODE = False
+    if 'csv' in args.mode:
         CSV_MODE = True
-    elif args.mode.lower() == 'file':
-        args.dumpfiles = True
-    elif args.mode.lower() == "network":
-        args.dumpfiles = False
-    else:
+    if 'file' in args.mode:
+        FILE_MODE = True
+
+    if not CSV_MODE and not FILE_MODE:
         print("Skipping analysis.")
         quit()
 
@@ -482,10 +482,21 @@ if __name__ == "__main__":
             for line in f:
                 att_kernel_f.append(line.split('\n')[0])
 
+        # returns element index of the file:// or memory:// filepath in the string
         get_path_loc = lambda x: np.sum([len(m) for m in x.split(' ')[:3]])+3
+        # adds the OUTPUT_PATH env variable to a filepath if necessary
         add_pathnv = lambda x: x[:get_path_loc(x)] + os.path.join(pathenv, x[get_path_loc(x):])
+        # returns the memory address in the string
+        get_addr = lambda x: int(x.split(' ')[0][2:], 16)
+        # Sets a preference for 'file' paths to be added before 'memory' paths. Sorts by addr.
+        get_addr_preference = lambda x: [0 if 'file' in x[get_path_loc(x):] else 1<<60][0]
 
+        # Get the GPU id in the string
+        gpu_id = int(att_kernel_f[0].split(' ')[2].split('GPU[')[1].split(']')[0])
+        # Eliminame first line in the att_kernel txt file and adds the OUTPUT_PATH as needed
         att_kernel_f = [add_pathnv(p) if '.out' == p[-4:] else p for p in att_kernel_f[1:]]
+        # Sorts the list of codeobj by address, with 'file' given preference
+        att_kernel_f = sorted(att_kernel_f, key=lambda x: get_addr(x)+get_addr_preference(x))
         assembly_code = deepcopy(args.assembly_code)
 
         # Assembly parsing
@@ -526,7 +537,7 @@ if __name__ == "__main__":
 
         gc.collect()
         if bIsAuto:
-            codeservice = CodeobjService(att_kernel_f, SO.classify_asm_line)
+            codeservice = CodeobjService(gpu_id, att_kernel_f, SO.classify_asm_line)
         else:
             codeservice = None
 
@@ -563,7 +574,8 @@ if __name__ == "__main__":
         if CSV_MODE:
             from att_to_csv import dump_csv
             dump_csv(code, trace_instance_name)
-        else:
+
+        if FILE_MODE:
             drawinfo = {
                 "TIMELINES": gen_timelines(DBFILES),
                 "EVENTS": EVENTS,
@@ -573,11 +585,9 @@ if __name__ == "__main__":
                 "DispatchNames": {id: codeservice.getSymbolName(addr) for id, addr in kernel_addr.items()}
             }
             view_trace(
-                args,
                 code,
                 DBFILES,
                 analysed_filenames,
-                args.dumpfiles,
                 0,
                 gfxv,
                 drawinfo,

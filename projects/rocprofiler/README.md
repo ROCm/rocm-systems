@@ -352,17 +352,17 @@ Tool used to collect fine-grained hardware metrics. Provides ISA-level instructi
     Path for the running application
   - ATT plugin optional parameters
     - --att_kernel "filename": Kernel filename(s) (glob) to use. A CSV file (or UI folder) will be generated for each kernel.txt file. Default: all in current folder.
-    - --mode [csv, network, file, off (default)]
+    - --mode [csv, file, off (default)]
       - off
           Runs trace collection but not analysis, so it can be analyzed at a later time. Run rocprofv2 ATT with the same parameters (+ --mode csv), removing the application binary, to analyze previously generated traces.
       - csv
           Dumps the analyzed assembly into a CSV format, with the hitcount and total cycles cost. Recommended mode for most users.
-      - network (deprecated)
-          Opens the server with the browser UI.
-          att needs 2 ports available (e.g. 8000, 18000). There is an option (default: --ports "8000,18000") to change these.
-          In case rocprofv2 is running on a different machine, use port forwarding `ssh -L 8000:localhost:8000 <user@IP>` so the browser can be used locally. For docker, use --network=host --ipc=host -p8000:8000 -p18000:18000
       - file (deprecated)
-          Dumps the analyzed json files to disk for vieweing at a later time. Run python3 httpserver.py from within the generated ui/ folder to view the trace, similarly to network mode. The folder can be copied to another machine, and will run without rocm.
+          Dumps the analyzed json files to disk for vieweing at a later time. Run python3 httpserver.py from within the generated name_ui/ folder to view the trace. The folder can be copied to another machine, and will run without rocm.
+      - file,csv
+          Both options can be used at the same time, generating a UI folder and a .csv.
+      - network [removed]
+          Network mode was removed, since it's functionality is included in file mode with the httpserver.py script generated inside the UI folder.
   - input.txt
       Required. Used to select specific compute units and other trace parameters.
       For first time users, using the following input file:
@@ -394,14 +394,10 @@ Tool used to collect fine-grained hardware metrics. Provides ISA-level instructi
     - BUFFER_SIZE=[size] // Sets size of the ATT buffer collection, per dispatch, in megabytes (shared among all shader engines).
     - ISA_CAPTURE_MODE=[0,1,2] // Set codeobj capture mode during kernel dispatch.
         - 0 = capture symbols only.
-        - 1 = capture symbols for file:// and make a copy of memory://
-        - 2 = Copy file:// and memory://
-    - ISA_DUMP_MODE=[0,1,2,3] // Set how captured codeobj information is dumped when a trace record arrives.
-        - 0 = Default. Dump everything.
-        - 1 = Dump only the code object containing the kernel address in the kernel dispatch packet.
-        - 2 = Dump a single kernel symbol matching the kernel dispatch packet.
-        - 3 = Disables ISA Dumping.
-    - By default, kernel names are truncated for ATT.To disable, please see the kernel name truncation section below.
+        - 1 = capture symbols for file:// and make a copy of memory://, dump captured copy as .out file.
+        - 2 = Copy file:// and memory://, dump copied codeobj as .out files.
+    - DISPATCH_RANGE=[begin],[end] // Continuously collect ATT data starting at "begin" and stop at "end". Alternative to DISPATCH= and KERNEL=.
+    - By default, kernel names are truncated for ATT. To disable, please see the kernel name truncation section below.
 
   - Example for vectoradd.
 
@@ -449,6 +445,8 @@ Tool used to collect fine-grained hardware metrics. Provides ISA-level instructi
   ```bash
   export ROCPROFILER_MAX_ATT_PROFILES=<max_collections>
   ```
+
+  Or, alternatively, use the continuous ATT mode (DISPATCH_RANGE parameter).
 
   ***
 

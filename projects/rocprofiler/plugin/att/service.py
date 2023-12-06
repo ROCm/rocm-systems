@@ -33,7 +33,7 @@ attplugin.getInstructionFromID.restype = instruction_info_t
 attplugin.getInstructionFromID.argtypes = [c_uint32, c_uint64]
 
 attplugin.addDecoder.restype = c_int
-attplugin.addDecoder.argtypes = [c_char_p, c_uint32, c_uint64, c_uint64]
+attplugin.addDecoder.argtypes = [c_char_p, c_uint32, c_uint64, c_uint64, c_uint64]
 
 attplugin.removeDecoder.restype = c_int
 attplugin.removeDecoder.argtypes = [c_uint32, c_uint64]
@@ -48,15 +48,15 @@ def getOffset(addr):
     return addr & OFFSET_MASK
 
 class CodeobjInstance:
-    def __init__(self, line):
+    def __init__(self, gpu_id, line):
         tokens = line.split(' ')
         self.load_base = int(tokens[0], 16)
         self.memsize = int(tokens[1], 16)
         self.att_id = int(tokens[2])
         self.fpath = tokens[3]
 
-        encoded = self.fpath.encode('utf-8')
-        self.error = attplugin.addDecoder(encoded, self.att_id, self.load_base, self.memsize)
+        path = self.fpath.encode('utf-8')
+        self.error = attplugin.addDecoder(path, self.att_id, self.load_base, self.memsize, gpu_id)
         if self.error != 0:
             print('Warning: Could not open', line)
             raise
@@ -66,7 +66,7 @@ class CodeobjInstance:
 
 
 class CodeobjService:
-    def __init__(self, att_kernel_txt, cfunc):
+    def __init__(self, gpu_id, att_kernel_txt, cfunc):
         cfunc.restype = ctypes.c_int
         cfunc.argtypes = [ctypes.c_char_p, ctypes.c_size_t]
 
@@ -77,7 +77,7 @@ class CodeobjService:
             try:
                 if 'memory://' == line[0:len('memory://')]:
                     continue
-                service = CodeobjInstance(line)
+                service = CodeobjInstance(gpu_id, line)
                 self.services[service.att_id] = service
             except:
                 pass
@@ -132,7 +132,10 @@ class CodeobjService:
         return (self.classifier(info_inst.inst, len(inst)), inst, cpp, info_inst.size)
 
     def getSymbolName(self, addr):
-        name = attplugin.getSymbolName(self.ToRawPC(addr))
-        if name:
-            return name.decode()
-        return "Addr #"+hex(self.ToRawPC(addr))
+        try:
+            name = attplugin.getSymbolName(self.ToRawPC(addr))
+            if name:
+                return name.decode()
+            return "Addr #"+hex(self.ToRawPC(addr))
+        except:
+            return "Addr #"+hex(addr)

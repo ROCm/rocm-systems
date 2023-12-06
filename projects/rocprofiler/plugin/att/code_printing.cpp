@@ -53,24 +53,27 @@
 
 #define C_API_BEGIN try {
 
-#define C_API_END(returndata)                       \
-} catch (std::exception& e)                         \
-{                                                   \
-  std::cerr << "Error: " << e.what() << std::endl;  \
-  return returndata;                                \
-}                                                   \
-catch (std::string& s)                              \
-{                                                   \
-  std::cerr << "Error: " << s << std::endl;         \
-  return returndata;                                \
-}                                                   \
-catch (...)                                         \
-{                                                   \
-  return returndata;                                \
+#define C_API_END(returndata)                                         \
+} catch (std::exception& e)                                           \
+{                                                                     \
+  std::cerr << "Codeobj API lookup error: " << e.what() << std::endl; \
+  return returndata;                                                  \
+}                                                                     \
+catch (std::string& s)                                                \
+{                                                                     \
+  std::cerr << "Codeobj API lookup error: " << s << std::endl;        \
+  return returndata;                                                  \
+}                                                                     \
+catch (...)                                                           \
+{                                                                     \
+  return returndata;                                                  \
 }
 
-CodeObjDecoderComponent::CodeObjDecoderComponent(const char* codeobj_data, uint64_t codeobj_size)
-{
+CodeObjDecoderComponent::CodeObjDecoderComponent(
+  const char* codeobj_data,
+  uint64_t codeobj_size,
+  uint64_t gpu_id
+) {
   m_fd = -1;
 #if defined(_GNU_SOURCE) && defined(MFD_ALLOW_SEALING) && defined(MFD_CLOEXEC)
   m_fd = ::memfd_create(m_uri.c_str(), MFD_ALLOW_SEALING | MFD_CLOEXEC);
@@ -113,21 +116,28 @@ CodeObjDecoderComponent::CodeObjDecoderComponent(const char* codeobj_data, uint6
       size_t line_count;
       if (dwarf_getsrclines(&die, &lines, &line_count)) continue;
 
+      std::shared_ptr<std::string> dwarf_line_number{nullptr};
       for (size_t i = 0; i < line_count; ++i) {
         Dwarf_Addr addr;
         int line_number;
         Dwarf_Line* line = dwarf_onesrcline(lines, i);
-        if (!line) continue;
 
-        if (!dwarf_lineaddr(line, &addr) && !dwarf_lineno(line, &line_number) && line_number)
-          m_line_number_map[addr] = {dwarf_linesrc(line, nullptr, nullptr), line_number};
+        if (line && !dwarf_lineaddr(line, &addr) && !dwarf_lineno(line, &line_number) && line_number)
+        {
+          std::string src = dwarf_linesrc(line, nullptr, nullptr);
+          dwarf_line_number = std::make_shared<std::string>(src + ':' + std::to_string(line_number));
+        }
+
+        if (dwarf_line_number.get())
+          m_line_number_map[addr] = dwarf_line_number;
       }
       cu_offset = next_offset;
     }
     // load_symbol_map();
   }
 
-  disassembly = std::make_unique<DisassemblyInstance>(codeobj_data, codeobj_size, std::nullopt); // Can throw
+  // Can throw
+  disassembly = std::make_unique<DisassemblyInstance>(codeobj_data, codeobj_size, gpu_id);
   try {
     m_symbol_map = disassembly->GetKernelMap(); // Can throw
   } catch(...) {}
@@ -169,15 +179,11 @@ CodeObjDecoderComponent::disassemble_instruction(uint64_t faddr, uint64_t vaddr)
     throw std::exception();
 
   char* cpp_line = nullptr;
-  auto it = m_line_number_map.find(vaddr);
-  if (it != m_line_number_map.end()) {
-    const std::string& file_name = it->second.first;
-    size_t line_number = it->second.second;
 
-    std::string cpp = file_name + ':' + std::to_string(line_number);
-    cpp_line = (char*)calloc(cpp.size() + 4, sizeof(char));
-    std::memcpy(cpp_line, cpp.data(), cpp.size() * sizeof(char));
-  }
+  auto it = m_line_number_map.find(vaddr);
+  if (it != m_line_number_map.end())
+    cpp_line = it->second->data();
+
   size_t size = disassembly->ReadInstruction(faddr, vaddr, cpp_line);
   return {disassembly->last_instruction, size};
 }
@@ -217,8 +223,12 @@ void CodeObjDecoderComponent::disassemble_single_kernel(uint64_t kaddr) {
       disassemble_kernel(v.faddr, vaddr);
 }
 
-CodeobjDecoder::CodeobjDecoder(const char* filepath, uint64_t loadbase, uint64_t mem_size):
-  loadbase(loadbase), load_end(loadbase + mem_size)
+CodeobjDecoder::CodeobjDecoder(
+  const char* filepath,
+  uint64_t loadbase,
+  uint64_t mem_size,
+  uint64_t gpu_id
+): loadbase(loadbase), load_end(loadbase + mem_size)
 {
   if (!filepath) throw "Empty filepath.";
 
@@ -237,13 +247,13 @@ CodeobjDecoder::CodeobjDecoder(const char* filepath, uint64_t loadbase, uint64_t
     file.seekg(0, file.beg);
     file.read(buffer.data(), buffer.size());
 
-    decoder = std::make_unique<CodeObjDecoderComponent>(buffer.data(), buffer.size());
+    decoder = std::make_unique<CodeObjDecoderComponent>(buffer.data(), buffer.size(), gpu_id);
   }
   else
   {
     std::unique_ptr<CodeObjectBinary> binary = std::make_unique<CodeObjectBinary>(filepath);
     auto& buffer = binary->buffer;
-    decoder = std::make_unique<CodeObjDecoderComponent>(buffer.data(), buffer.size());
+    decoder = std::make_unique<CodeObjDecoderComponent>(buffer.data(), buffer.size(), gpu_id);
   }
 
   auto elf_segments = decoder->disassembly->getSegments();
@@ -297,11 +307,16 @@ CodeobjTableTranslation table;
 
 extern "C"
 {
-  PUBLIC_API int addDecoder(const char* filename, uint32_t id, uint64_t loadbase, uint64_t memsize)
-  {
+  PUBLIC_API int addDecoder(
+    const char* filename,
+    uint32_t id,
+    uint64_t loadbase,
+    uint64_t memsize,
+    uint64_t gpu_id
+  ) {
     C_API_BEGIN
 
-    table.addDecoder(filename, id, loadbase, memsize);
+    table.addDecoder(filename, id, loadbase, memsize, gpu_id);
     return 0;
 
     C_API_END(1)
