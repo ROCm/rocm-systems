@@ -221,8 +221,11 @@ add_test(
 
 # top-level driver and associated .py files
 install(PROGRAMS src/omniperf TYPE BIN)
-install(FILES src/parser.py TYPE BIN)
-install(FILES src/common.py TYPE BIN)
+install(FILES src/argparser.py TYPE BIN)
+install(FILES src/config.py TYPE BIN)
+install(FILES src/omniperf_base.py TYPE BIN)
+install(FILES src/roofline.py TYPE BIN)
+
 install(FILES VERSION VERSION.sha DESTINATION ${CMAKE_INSTALL_PREFIX})
 # src/omniperf_analyze
 install(
@@ -241,11 +244,6 @@ install(
              src/utils/rooflines/roofline-sle15sp3-mi200-rocm5
              src/utils/rooflines/roofline-ubuntu20_04-mi200-rocm5
     DESTINATION ${CMAKE_INSTALL_BINDIR}/utils/rooflines)
-# src/perfmon_pub
-install(
-    DIRECTORY src/perfmon_pub
-    TYPE BIN
-    PATTERN "__pycache__" EXCLUDE)
 
 # src/soc_params
 install(
