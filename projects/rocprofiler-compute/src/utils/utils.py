@@ -106,7 +106,7 @@ def detect_rocprof():
     global rocprof_cmd
     # rocprof info
     if not "ROCPROF" in os.environ.keys():
-        rocprof_cmd = "rocprofv2"
+        rocprof_cmd = "rocprof"
     else:
         rocprof_cmd = os.environ["ROCPROF"]
     rocprof_path = shutil.which(rocprof_cmd)
@@ -317,9 +317,9 @@ def detect_roofline():
             logging.error("ROOFLINE ERROR: user-supplied path to binary not accessible")
             logging.error("--> ROOFLINE_BIN = %s\n" % target_binary)
             sys.exit(1)
-    elif rhel_distro == "platform:el8":
+    elif rhel_distro == "platform:el8" or rhel_distro == "platform:el9":
         # Must be a valid RHEL machine
-        distro = rhel_distro
+        distro = "platform:el8"
     elif (
         (type(sles_distro) == str and len(sles_distro) >= 3) and # confirm string and len
         sles_distro[:2] == "15" and int(sles_distro[3]) >= 3 # SLES15 and SP >= 3

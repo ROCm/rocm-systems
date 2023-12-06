@@ -60,7 +60,7 @@ class gfx908_soc (OmniSoC_Base):
         if self.get_args().roof_only:
             self.error("%s does not support roofline analysis" % self.get_soc())
         # Perfmon filtering
-        self.perfmon_filter()
+        self.perfmon_filter(self.get_args().roof_only)
 
     @demarcate
     def post_profiling(self):
