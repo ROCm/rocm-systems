@@ -86,6 +86,7 @@ void TestOverdriveRead::Close() {
 
 
 void TestOverdriveRead::Run(void) {
+  GTEST_SKIP_("Temporarily disabled due to kernel issue");
   rsmi_status_t err;
   uint32_t val_ui32;
 
@@ -99,6 +100,16 @@ void TestOverdriveRead::Run(void) {
     PrintDeviceHeader(i);
 
     err = rsmi_dev_overdrive_level_get(i, &val_ui32);
+    if (err == RSMI_STATUS_NOT_SUPPORTED) {
+      IF_VERB(STANDARD) {
+        std::cout <<
+          "\t**Overdrive Level get is not supported on this machine" << std::endl;
+      }
+      // Verify api support checking functionality is working
+      err = rsmi_dev_overdrive_level_get(i, nullptr);
+      ASSERT_EQ(err, RSMI_STATUS_NOT_SUPPORTED);
+      continue;
+    }
     CHK_ERR_ASRT(err)
     IF_VERB(STANDARD) {
     std::cout << "\t**OverDrive Level:" << val_ui32 << std::endl;
