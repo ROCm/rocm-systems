@@ -24,6 +24,7 @@
 # SOFTWARE.
 ##############################################################################el
 
+import sys
 from omniperf_base import Omniperf
 
 def main():
@@ -42,6 +43,8 @@ def main():
         omniperf.run_analysis()
     else:
         omniperf.error("Unsupported execution mode")
+
+    sys.exit(0)
 
 if __name__ == "__main__":
     main()
