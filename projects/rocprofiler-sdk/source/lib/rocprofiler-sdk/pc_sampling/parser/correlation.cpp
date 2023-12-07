@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include "lib/rocprofiler-sdk/pc_sampling/parser/correlation.hpp"
+#include "correlation.hpp"
 
 template <>
 struct std::hash<device_handle>

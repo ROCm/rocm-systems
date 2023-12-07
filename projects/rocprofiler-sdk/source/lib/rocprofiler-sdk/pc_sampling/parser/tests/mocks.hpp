@@ -31,7 +31,7 @@
 #include <random>
 #include <unordered_set>
 
-#include "lib/rocprofiler-sdk/pc_sampling/parser/correlation.hpp"
+#include "correlation.hpp"
 
 #define CHECK_PARSER(x)                                                                            \
     {                                                                                              \
@@ -39,7 +39,7 @@
         if(val != PCSAMPLE_STATUS_SUCCESS)                                                         \
         {                                                                                          \
             std::cerr << __FILE__ << ':' << __LINE__ << " Parser error: " << val << std::endl;     \
-            exit(1);                                                                               \
+            exit(val);                                                                             \
         }                                                                                          \
     }
 

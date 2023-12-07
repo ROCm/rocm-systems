@@ -22,12 +22,6 @@
 
 #pragma once
 
-#include <array>
-#include <atomic>
-#include <cstddef>
-#include <cstdint>
-#include <optional>
-
 /**
  * ######## Parser Definitions ########
  */
@@ -84,13 +78,17 @@ enum pcsample_arb_issue_state
 };
 };  // namespace PCSAMPLE
 
-typedef struct
+typedef union
 {
-    uint8_t valid : 1;
-    uint8_t type  : 4;  // 0=reserved, 1=hosttrap, 2=stochastic, 3=perfcounter, >=4 possible v2?
-    uint8_t has_stall_reason   : 1;
-    uint8_t has_wave_cnt       : 1;
-    uint8_t has_memory_counter : 1;
+    struct
+    {
+        uint8_t valid : 1;
+        uint8_t type  : 4;  // 0=reserved, 1=hosttrap, 2=stochastic, 3=perfcounter, >=4 possible v2?
+        uint8_t has_stall_reason   : 1;
+        uint8_t has_wave_cnt       : 1;
+        uint8_t has_memory_counter : 1;
+    };
+    uint8_t raw;
 } pcsample_header_v1_t;
 
 typedef struct
@@ -128,9 +126,9 @@ typedef struct
 
     uint64_t pc;
     uint64_t exec_mask;
-    uint32_t workgroud_id_x;
-    uint32_t workgroud_id_y;
-    uint32_t workgroud_id_z;
+    uint32_t workgroup_id_x;
+    uint32_t workgroup_id_y;
+    uint32_t workgroup_id_z;
 
     uint32_t wave_count;
     uint64_t timestamp;

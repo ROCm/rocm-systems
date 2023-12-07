@@ -39,9 +39,9 @@ PCSParserTranslation::copySampleHeader(const SType& sample)
 
     ret.pc             = sample.pc;
     ret.exec_mask      = sample.exec_mask;
-    ret.workgroud_id_x = sample.workgroud_id_x;
-    ret.workgroud_id_y = sample.workgroud_id_y;
-    ret.workgroud_id_z = sample.workgroud_id_z;
+    ret.workgroup_id_x = sample.workgroup_id_x;
+    ret.workgroup_id_y = sample.workgroup_id_y;
+    ret.workgroup_id_z = sample.workgroup_id_z;
 
     ret.chiplet   = sample.chiplet_and_wave_id >> 8;
     ret.wave_id   = sample.chiplet_and_wave_id & 0x3F;

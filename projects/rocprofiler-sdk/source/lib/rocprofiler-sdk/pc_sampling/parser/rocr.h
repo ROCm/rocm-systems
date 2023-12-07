@@ -22,7 +22,7 @@
 
 #pragma once
 
-#include <cstdint>
+#include <stdint.h>
 
 /**
  * ######## ROCR Definitions ########
@@ -87,9 +87,9 @@ typedef struct
 {
     uint64_t      pc;
     uint64_t      exec_mask;
-    uint32_t      workgroud_id_x;
-    uint32_t      workgroud_id_y;
-    uint32_t      workgroud_id_z;
+    uint32_t      workgroup_id_x;
+    uint32_t      workgroup_id_y;
+    uint32_t      workgroup_id_z;
     uint32_t      chiplet_and_wave_id;
     uint32_t      hw_id;
     reserved_type reserved[3];
@@ -101,9 +101,9 @@ typedef struct
 {
     uint64_t pc;
     uint64_t exec_mask;
-    uint32_t workgroud_id_x;
-    uint32_t workgroud_id_y;
-    uint32_t workgroud_id_z;
+    uint32_t workgroup_id_x;
+    uint32_t workgroup_id_y;
+    uint32_t workgroup_id_z;
     uint32_t chiplet_and_wave_id;
     uint32_t hw_id;
     uint32_t perf_snapshot_data;

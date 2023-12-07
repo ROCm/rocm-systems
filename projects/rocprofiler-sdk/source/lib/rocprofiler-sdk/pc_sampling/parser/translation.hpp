@@ -22,32 +22,120 @@
 
 #pragma once
 
+#include <array>
 #include <cstdint>
 #include <cstring>
 
-#include "lib/rocprofiler-sdk/pc_sampling/parser/gfx11.hpp"
-#include "lib/rocprofiler-sdk/pc_sampling/parser/gfx_unknown.hpp"
-#include "lib/rocprofiler-sdk/pc_sampling/parser/gfx9.hpp"
-#include "lib/rocprofiler-sdk/pc_sampling/parser/parser_types.hpp"
-#include "lib/rocprofiler-sdk/pc_sampling/parser/rocr.hpp"
+#include "gfx11.hpp"
+#include "gfx_unknown.hpp"
+#include "gfx9.hpp"
+#include "parser_types.h"
+#include "rocr.h"
 
-pcsample_v1_t
-copyHostTrapSample(const perf_sample_host_trap_v1& sample);
-
-class PCSParserTranslation
+template <typename SType>
+inline pcsample_v1_t
+copySampleHeader(const SType& sample)
 {
-public:
-    template <typename SType>
-    static pcsample_v1_t copySampleHeader(const SType& sample);
+    pcsample_v1_t ret;
+    ret.flags.raw  = 0;
+    ret.flags.type = AMD_SNAPSHOT_V1;
 
-    template <typename gfx>
-    static pcsample_v1_t copyStochasticSample(const perf_sample_snapshot_v1& sample);
-};
+    ret.pc             = sample.pc;
+    ret.exec_mask      = sample.exec_mask;
+    ret.workgroup_id_x = sample.workgroup_id_x;
+    ret.workgroup_id_y = sample.workgroup_id_y;
+    ret.workgroup_id_z = sample.workgroup_id_z;
+
+    ret.chiplet   = sample.chiplet_and_wave_id >> 8;
+    ret.wave_id   = sample.chiplet_and_wave_id & 0x3F;
+    ret.hw_id     = sample.hw_id;
+    ret.timestamp = sample.timestamp;
+    return ret;
+}
+
+inline pcsample_v1_t
+copyHostTrapSample(const perf_sample_host_trap_v1& sample)
+{
+    pcsample_v1_t ret = copySampleHeader<perf_sample_host_trap_v1>(sample);
+    ret.flags.type    = AMD_HOST_TRAP_V1;
+    return ret;
+}
+
+template <typename gfx>
+inline pcsample_v1_t
+copyStochasticSample(const perf_sample_snapshot_v1& sample);
+
+template <>
+inline pcsample_v1_t
+copyStochasticSample<GFX9>(const perf_sample_snapshot_v1& sample)
+{
+    pcsample_v1_t ret = copySampleHeader<perf_sample_snapshot_v1>(sample);
+    ret.flags.valid   = sample.perf_snapshot_data & (~sample.perf_snapshot_data >> 26) & 0x1;
+    // Check wave_id matches snapshot_wave_id
+
+    ret.flags.has_wave_cnt     = true;
+    ret.flags.has_stall_reason = true;
+
+    ret.wave_count = sample.perf_snapshot_data1 & 0x3F;
+
+    ret.wave_issued                = sample.perf_snapshot_data >> 1;
+    ret.snapshot.dual_issue_valu   = sample.perf_snapshot_data >> 2;
+    ret.snapshot.inst_type         = sample.perf_snapshot_data >> 3;
+    ret.snapshot.reason_not_issued = (sample.perf_snapshot_data >> 7) & 0x7;
+    ret.snapshot.arb_state_issue   = (sample.perf_snapshot_data >> 10) & 0xFF;
+    ret.snapshot.arb_state_stall   = (sample.perf_snapshot_data >> 18) & 0xFF;
+    ret.memory_counters.raw        = 0;
+    return ret;
+}
+
+template <>
+inline pcsample_v1_t
+copyStochasticSample<GFX11>(const perf_sample_snapshot_v1& sample)
+{
+    pcsample_v1_t ret = copySampleHeader<perf_sample_snapshot_v1>(sample);
+    ret.flags.valid   = sample.perf_snapshot_data & (~sample.perf_snapshot_data >> 23) & 0x1;
+    // Check wave_id matches snapshot_wave_id
+
+    ret.flags.has_stall_reason = true;
+
+    ret.wave_issued                = sample.perf_snapshot_data >> 1;
+    ret.snapshot.inst_type         = sample.perf_snapshot_data >> 2;
+    ret.snapshot.reason_not_issued = (sample.perf_snapshot_data >> 6) & 0x7;
+    ret.snapshot.arb_state_issue   = (sample.perf_snapshot_data >> 9) & 0x7F;
+    ret.snapshot.arb_state_stall   = (sample.perf_snapshot_data >> 16) & 0x7F;
+    ret.snapshot.dual_issue_valu   = false;
+    ret.memory_counters.raw        = 0;
+    return ret;
+}
+
+template <>
+inline pcsample_v1_t
+copyStochasticSample<gfx_unknown>(const perf_sample_snapshot_v1& sample)
+{
+    pcsample_v1_t ret = copySampleHeader<perf_sample_snapshot_v1>(sample);
+    ret.flags.valid   = sample.perf_snapshot_data & 0x1;
+    // Check wave_id matches snapshot_wave_id
+
+    ret.flags.has_wave_cnt     = true;
+    ret.flags.has_stall_reason = true;
+
+    ret.wave_issued                = sample.perf_snapshot_data >> 1;
+    ret.snapshot.inst_type         = sample.perf_snapshot_data >> 2;
+    ret.snapshot.reason_not_issued = (sample.perf_snapshot_data >> 6) & 0x7;
+
+    ret.wave_count               = sample.perf_snapshot_data1 & 0x3F;
+    ret.snapshot.arb_state_issue = (sample.perf_snapshot_data1 >> 6) & 0xFF;
+    ret.snapshot.arb_state_stall = (sample.perf_snapshot_data1 >> 14) & 0xFF;
+
+    ret.flags.has_memory_counter = true;
+    ret.memory_counters.raw      = sample.perf_snapshot_data2;
+    return ret;
+}
 
 #define BITSHIFT(sname) out |= ((in >> GFX::sname) & 1) << PCSAMPLE::sname
 
 template <typename GFX>
-int
+inline int
 translate_arb(int in)
 {
     size_t out = 0;
@@ -114,19 +202,19 @@ public:
 };
 
 template <typename GFX>
-int
+inline int
 translate_reason(int in)
 {
     static GFX_REASON_LUT<GFX> lut;
-    return lut[in & 0xF];
+    return lut[in & 0x1F];
 }
 
 template <typename GFX>
-int
+inline int
 translate_inst(int in)
 {
     static GFX_INST_LUT<GFX> lut;
-    return lut[in & 0xF];
+    return lut[in & 0x1F];
 }
 
 #undef LUTOVERLOAD
@@ -137,8 +225,7 @@ copySample(const void* sample)
 {
     if(HostTrap) return copyHostTrapSample(*(const perf_sample_host_trap_v1*) sample);
 
-    pcsample_v1_t ret =
-        PCSParserTranslation::copyStochasticSample<GFX>(*(const perf_sample_snapshot_v1*) sample);
+    pcsample_v1_t ret = copyStochasticSample<GFX>(*(const perf_sample_snapshot_v1*) sample);
 
     ret.snapshot.inst_type         = translate_inst<GFX>(ret.snapshot.inst_type);
     ret.snapshot.arb_state_issue   = translate_arb<GFX>(ret.snapshot.arb_state_issue);
