@@ -19,7 +19,7 @@ import gc
 from collections import defaultdict
 from service import CodeobjService
 
-ATT_VERSION = 2
+ATT_VERSION = 3
 
 class TraceData(ctypes.Structure):
     _fields_ = [
@@ -83,36 +83,42 @@ class ReturnAssemblyInfo(ctypes.Structure):
 
 class Wave(ctypes.Structure):
     _fields_ = [
-        ("simd", ctypes.c_uint64),
-        ("wave_id", ctypes.c_uint64),
-        ("begin_time", ctypes.c_uint64),  # Begin and end cycle
-        ("end_time", ctypes.c_uint64),
-        ("traceid", ctypes.c_int64),
+        ("simd", ctypes.c_uint8),
+        ("wave_id", ctypes.c_uint8),
+        ("trap_status", ctypes.c_uint8),
+        ("reserved", ctypes.c_uint8),
+
         # total VMEM/FLAT/LDS/SMEM instructions issued
+        # VMEM Pipeline: instrs and stalls
+        ("num_vmem_instrs", ctypes.c_uint32),
+        ("num_vmem_stalls", ctypes.c_uint32),
+        # FLAT instrs and stalls
+        ("num_flat_instrs", ctypes.c_uint32),
+        ("num_flat_stalls", ctypes.c_uint32),
+        # LDS instr and stalls
+        ("num_lds_instrs", ctypes.c_uint32),
+        ("num_lds_stalls", ctypes.c_uint32),
+        # SCA instrs stalls
+        ("num_salu_instrs", ctypes.c_uint32),
+        ("num_smem_instrs", ctypes.c_uint32),
+        ("num_salu_stalls", ctypes.c_uint32),
+        ("num_smem_stalls", ctypes.c_uint32),
+        # Branch
+        ("num_branch_instrs", ctypes.c_uint32),
+        ("num_branch_taken_instrs", ctypes.c_uint32),
+        ("num_branch_stalls", ctypes.c_uint32),
+
         # total issued memory instructions
-        ("num_mem_instrs", ctypes.c_uint64),
+        ("num_mem_instrs", ctypes.c_uint32),
+        # total valus insts and stalls
+        ("num_valu_stalls", ctypes.c_uint32),
+        ("num_valu_instrs", ctypes.c_uint64),
         # total issued instructions (compute + memory)
         ("num_issued_instrs", ctypes.c_uint64),
-        ("num_valu_instrs", ctypes.c_uint64),
-        ("num_valu_stalls", ctypes.c_uint64),
-        # VMEM Pipeline: instrs and stalls
-        ("num_vmem_instrs", ctypes.c_uint64),
-        ("num_vmem_stalls", ctypes.c_uint64),
-        # FLAT instrs and stalls
-        ("num_flat_instrs", ctypes.c_uint64),
-        ("num_flat_stalls", ctypes.c_uint64),
-        # LDS instr and stalls
-        ("num_lds_instrs", ctypes.c_uint64),
-        ("num_lds_stalls", ctypes.c_uint64),
-        # SCA instrs stalls
-        ("num_salu_instrs", ctypes.c_uint64),
-        ("num_smem_instrs", ctypes.c_uint64),
-        ("num_salu_stalls", ctypes.c_uint64),
-        ("num_smem_stalls", ctypes.c_uint64),
-        # Branch
-        ("num_branch_instrs", ctypes.c_uint64),
-        ("num_branch_taken_instrs", ctypes.c_uint64),
-        ("num_branch_stalls", ctypes.c_uint64),
+        # Begin and end cycle
+        ("begin_time", ctypes.c_uint64),
+        ("end_time", ctypes.c_uint64),
+        ("traceid", ctypes.c_int64),
 
         ("timeline_size", ctypes.c_uint64),
         ("instructions_size", ctypes.c_uint64),

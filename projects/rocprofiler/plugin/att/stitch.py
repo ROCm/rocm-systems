@@ -535,7 +535,7 @@ def stitch(insts, raw_code, jumps, gfxv, bIsAuto, codeservice):
                     matched = True
                     skipped_immed -= 1
                 elif 'scratch_' not in as_line[0]:
-                    print('Parsing terminated at:', as_line)
+                    print('WARNING: Parsing terminated at:', as_line)
                     break
 
         if matched:
@@ -558,7 +558,7 @@ def stitch(insts, raw_code, jumps, gfxv, bIsAuto, codeservice):
 
     N = max(N, 1)
     if i != N:
-        print('Warning - Stitching rate: '+str(i * 100 / N)+'% matched')
+        print('Warning - Stitching rate: '+str(i * 100 / N)+'% matched', i, ' of ', N)
         print('Leftovers:', [WaveInstCategory[insts[i+k].type] for k in range(20) if i+k < len(insts)])
         try:
             print(line, code[line])

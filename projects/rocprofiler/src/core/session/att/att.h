@@ -79,6 +79,21 @@ public:
                          rocprofiler_kernel_properties_t kernel_properties, uint32_t thread_id,
                          uint64_t queue_index);
 
+  bool InsertPacketStart(
+    std::vector<packet_t>& transformed_packets,
+    queue::Queue& queue_info,
+    size_t writer_id,
+    rocprofiler_buffer_id_t buffer_id,
+    size_t stop_location
+  );
+
+  void InsertPacketStop(
+    std::vector<packet_t>& transformed,
+    const ATTRecordSignal& rsignal,
+    queue::Queue& queue,
+    uint64_t agent_handle
+  );
+
   const std::vector<att_pending_signal_t>& GetPendingSignals(uint32_t writer_id);
 
   bool ATTWriteInterceptor(
@@ -129,6 +144,10 @@ public:
     hsa_ven_amd_aqlprofile_info_data_t* info_data,
     void* data
   );
+
+  bool HasActiveTracerATT(uint64_t agent_handle) const {
+    return pending_stop_packets.find(agent_handle) != pending_stop_packets.end();
+  }
 
 protected:
   using packet_t = hsa_ext_amd_aql_pm4_packet_t;
