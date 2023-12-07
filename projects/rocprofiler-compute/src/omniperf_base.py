@@ -157,7 +157,7 @@ class Omniperf:
             self.__args.target = target
         
         # instantiate underlying SoC support class
-        # in case of analyze mode, __soc can accomadate multiple archs
+        # in case of analyze mode, __soc can accommodate multiple archs
         if target == "mi50":
             from omniperf_soc.soc_gfx906 import gfx906_soc
             self.__soc[arch] = gfx906_soc(self.__args)
