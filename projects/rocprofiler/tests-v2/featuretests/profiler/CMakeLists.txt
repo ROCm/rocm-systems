@@ -214,6 +214,19 @@ install(
             ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/tests/featuretests/profiler/apps
         COMPONENT tests)
 
+# ATT correctness vectoradd
+set_source_files_properties(apps/att_vectoradd.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+rocprofiler_featuretests_profiler_add_executable(att_vectoradd apps/att_vectoradd.cpp)
+set_target_properties(
+    att_vectoradd PROPERTIES RUNTIME_OUTPUT_DIRECTORY
+                             "${PROJECT_BINARY_DIR}/tests-v2/featuretests/profiler/apps")
+target_link_options(att_vectoradd PRIVATE "-Wl,--build-id=md5")
+install(
+    TARGETS att_vectoradd
+    RUNTIME
+        DESTINATION
+            ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/tests/featuretests/profiler/apps
+        COMPONENT tests)
 
 # hsa-mem_async_copy -- Not Enabled for Now
 set_source_files_properties(apps/async_mem_copy.cpp PROPERTIES HIP_SOURCE_PROPERTY_FORMAT
@@ -425,4 +438,5 @@ find_package(
         # cmake based tests
         include(${CMAKE_CURRENT_LIST_DIR}/counter_validation_tests.cmake)
         include(${CMAKE_CURRENT_LIST_DIR}/counter_correctness_tests.cmake)
+        include(${CMAKE_CURRENT_LIST_DIR}/att_correctness_tests.cmake)
     endif()
