@@ -86,6 +86,7 @@ void TestOverdriveRead::Close() {
 
 
 void TestOverdriveRead::Run(void) {
+  GTEST_SKIP_("Temporarily disabled due to kernel issue");
   rsmi_status_t err;
   uint32_t val_ui32;
 
