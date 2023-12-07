@@ -17,7 +17,7 @@ kernel_name_1 = "vecCopy(double*, double*, double*, int, int) [clone .kd]"
 # change to directory where app is at
 # app_1 = ["./sample/vcopy", "1048576", "256"]
 # app_1 = ["./mixbench/build_mi100/mixbench-hip"]
-app_1 = ["./tests/vcopy", "1048576", "256"]
+app_1 = ["./tests/vcopy", "-n 1048576", "-b 256"]
 num_kernels = 1
 dispatch_id = 0
 
