@@ -89,6 +89,7 @@ export ROCPROFILER_TRACE=1
 - gfx906 (AMD Vega 7nm also referred to as AMD Vega 20)
 - gfx908 (AMD Instinct™ MI100 accelerator)
 - gfx90a (AMD Instinct™ MI200)
+- gfx94x (AMD Instinct™ MI300)
 
 ***
 Note: ROCProfiler V1 tool usage documentation is available at [Click Here](doc/rocprof_tool.md)

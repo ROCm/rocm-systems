@@ -306,6 +306,7 @@ Example for file plugin output:
 - Added Tool versioning to be able to run rocprofv2 using rocprof. See README for more information.
 - Added Plugin Versioning way in rocprofv2. See README for more details.
 - Added --version in the rocprof and rocprofv2 to be able to see the current rocprof/v2 version along with ROCm version information.
+- Extended rocprof(v1) support for MI300.
 
 ## ROCprofiler for rocm 6.1
 
@@ -318,3 +319,4 @@ Example for file plugin output:
 
 - ATT: Network mode, since it was redundant with file mode.
 - ATT: Generated isa.s file, since the functionality was moved from collection to parsing time.
+

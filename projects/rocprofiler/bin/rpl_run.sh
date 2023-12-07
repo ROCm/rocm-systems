@@ -37,7 +37,7 @@ ROCM_LIB_PATH=$ROOT_DIR/lib
 PROF_BIN_DIR=$ROOT_DIR/libexec/rocprofiler
 
 # check if rocprof is supportd on this gpu arch
-V1_SUPPORTED_GPU_ARCHS=("gfx80x","gfx90x","gfx10xx")
+V1_SUPPORTED_GPU_ARCHS=("gfx80x","gfx90x","gfx10xx","gfx94x")
 CURRENT_AGENTS_LIST=$($BIN_DIR/rocm_agent_enumerator)
 IS_SUPPORTED="false"
 
