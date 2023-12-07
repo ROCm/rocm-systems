@@ -20,9 +20,12 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
+#include <netinet/in.h>
 #include <sys/stat.h>
 #include <assert.h>
+#include <arpa/inet.h>
 
+#include <iostream>
 #include <string>
 #include <fstream>
 #include <sstream>
@@ -75,6 +78,13 @@ int ReadFile(const char *path, std::string *retStr, bool chop_newline) {
 
 bool IsNumber(const std::string &s) {
   return !s.empty() && std::all_of(s.begin(), s.end(), ::isdigit);
+}
+
+bool IsIP(const std::string &s) {
+  struct sockaddr_in sa;
+  int result = inet_pton(AF_INET, s.c_str(), &sa);
+  // inet_pton returns 1 on success
+  return result == 1;
 }
 
 }  // namespace rdc

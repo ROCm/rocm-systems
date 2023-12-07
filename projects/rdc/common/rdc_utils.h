@@ -49,6 +49,7 @@ int
 ReadFile(const char *path, std::string *retStr, bool chop_newline = false);
 
 bool IsNumber(const std::string &s);
+bool IsIP(const std::string &s);
 
 }  // namespace rdc
 }  // namespace amd

@@ -32,6 +32,7 @@ THE SOFTWARE.
 #include "rdc/rdc_api_service.h"
 
 typedef struct {
+  std::string listen_address;
   std::string listen_port;
   bool no_authentication;
   bool use_pinned_certs;
