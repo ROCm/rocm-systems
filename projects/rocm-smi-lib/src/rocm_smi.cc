@@ -6335,6 +6335,60 @@ rsmi_dev_metrics_pcie_replay_rover_count_acc_get(uint32_t dv_ind, uint64_t* pcie
 }
 
 rsmi_status_t
+rsmi_dev_metrics_pcie_nak_sent_count_acc_get(uint32_t dv_ind, uint32_t* pcie_nak_sent_count_acc_value)
+{
+  TRY
+  std::ostringstream ostrstream;
+  ostrstream << __PRETTY_FUNCTION__ << "| ======= start =======";
+  LOG_TRACE(ostrstream);
+
+  assert(pcie_nak_sent_count_acc_value != nullptr);
+  if (pcie_nak_sent_count_acc_value == nullptr) {
+    return rsmi_status_t::RSMI_STATUS_INVALID_ARGS;
+  }
+
+  const auto gpu_metric_unit(AMDGpuMetricsUnitType_t::kMetricPcieNakSentCountAccumulator);
+  auto status_code = rsmi_dev_gpu_metrics_info_query(dv_ind, gpu_metric_unit, *pcie_nak_sent_count_acc_value);
+  ostrstream << __PRETTY_FUNCTION__
+             << " | ======= end ======= "
+             << " | End Result "
+             << " | Device #:  " << dv_ind
+             << " | Metric Type: " << static_cast<AMDGpuMetricTypeId_t>(gpu_metric_unit)
+             << " | Returning = " << status_code << " " << getRSMIStatusString(status_code) << " |";
+  LOG_INFO(ostrstream);
+
+  return status_code;
+  CATCH
+}
+
+rsmi_status_t
+rsmi_dev_metrics_pcie_nak_rcvd_count_acc_get(uint32_t dv_ind, uint32_t* pcie_nak_rcvd_count_acc_value)
+{
+  TRY
+  std::ostringstream ostrstream;
+  ostrstream << __PRETTY_FUNCTION__ << "| ======= start =======";
+  LOG_TRACE(ostrstream);
+
+  assert(pcie_nak_rcvd_count_acc_value != nullptr);
+  if (pcie_nak_rcvd_count_acc_value == nullptr) {
+    return rsmi_status_t::RSMI_STATUS_INVALID_ARGS;
+  }
+
+  const auto gpu_metric_unit(AMDGpuMetricsUnitType_t::kMetricPcieNakReceivedCountAccumulator);
+  auto status_code = rsmi_dev_gpu_metrics_info_query(dv_ind, gpu_metric_unit, *pcie_nak_rcvd_count_acc_value);
+  ostrstream << __PRETTY_FUNCTION__
+             << " | ======= end ======= "
+             << " | End Result "
+             << " | Device #:  " << dv_ind
+             << " | Metric Type: " << static_cast<AMDGpuMetricTypeId_t>(gpu_metric_unit)
+             << " | Returning = " << status_code << " " << getRSMIStatusString(status_code) << " |";
+  LOG_INFO(ostrstream);
+
+  return status_code;
+  CATCH
+}
+
+rsmi_status_t
 rsmi_dev_metrics_curr_uclk_get(uint32_t dv_ind, uint16_t* uclk_value)
 {
   TRY
@@ -6392,7 +6446,7 @@ rsmi_dev_metrics_temp_hbm_get(uint32_t dv_ind, GPUMetricTempHbm_t* temp_hbm_valu
              << "\n | Returning = " << status_code << " " << getRSMIStatusString(status_code) << " |";
   LOG_INFO(ostrstream);
   if (status_code == rsmi_status_t::RSMI_STATUS_SUCCESS) {
-    std::memset(temp_hbm_value, 0, sizeof(temp_hbm_value));
+    std::memset(temp_hbm_value, 0, sizeof(*temp_hbm_value));
     std::copy_n(std::begin(tmp_hbl_tbl), copy_size, *temp_hbm_value);
   }
 
@@ -6431,8 +6485,47 @@ rsmi_dev_metrics_vcn_activity_get(uint32_t dv_ind, GPUMetricVcnActivity_t* vcn_a
              << "\n | Returning = " << status_code << " " << getRSMIStatusString(status_code) << " |";
   LOG_INFO(ostrstream);
   if (status_code == rsmi_status_t::RSMI_STATUS_SUCCESS) {
-    std::memset(vcn_activity_value, 0, sizeof(vcn_activity_value));
+    std::memset(vcn_activity_value, 0, sizeof(*vcn_activity_value));
     std::copy_n(std::begin(tmp_vcn_tbl), copy_size, *vcn_activity_value);
+  }
+
+  return status_code;
+  CATCH
+}
+
+rsmi_status_t
+rsmi_dev_metrics_jpeg_activity_get(uint32_t dv_ind, GPUMetricJpegActivity_t* jpeg_activity_value)
+{
+  TRY
+  std::ostringstream ostrstream;
+  ostrstream << __PRETTY_FUNCTION__ << "| ======= start =======";
+  LOG_TRACE(ostrstream);
+
+  assert(jpeg_activity_value != nullptr);
+  if (jpeg_activity_value == nullptr) {
+    return rsmi_status_t::RSMI_STATUS_INVALID_ARGS;
+  }
+
+  const auto gpu_metric_unit(AMDGpuMetricsUnitType_t::kMetricVcnActivity);
+  amd::smi::GPUMetricJpegActivityTbl_t tmp_jpeg_tbl{};
+  auto status_code = rsmi_dev_gpu_metrics_info_query(dv_ind, gpu_metric_unit, tmp_jpeg_tbl);
+  const auto max_num_elems =
+    static_cast<uint16_t>(std::end(*jpeg_activity_value) - std::begin(*jpeg_activity_value));
+  const auto copy_size =
+    static_cast<uint16_t>((max_num_elems < tmp_jpeg_tbl.size()) ? max_num_elems : tmp_jpeg_tbl.size());
+  ostrstream << __PRETTY_FUNCTION__
+             << "\n | ======= end ======= "
+             << "\n | End Result "
+             << "\n | Device #:  " << dv_ind
+             << "\n | Metric Type: " << static_cast<AMDGpuMetricTypeId_t>(gpu_metric_unit)
+             << "\n | Metric Size: " << tmp_jpeg_tbl.size()
+             << "\n | Max num of elements: " << max_num_elems
+             << "\n | Copy size: " << copy_size
+             << "\n | Returning = " << status_code << " " << getRSMIStatusString(status_code) << " |";
+  LOG_INFO(ostrstream);
+  if (status_code == rsmi_status_t::RSMI_STATUS_SUCCESS) {
+    std::memset(jpeg_activity_value, 0, sizeof(*jpeg_activity_value));
+    std::copy_n(std::begin(tmp_jpeg_tbl), copy_size, *jpeg_activity_value);
   }
 
   return status_code;
@@ -6470,7 +6563,7 @@ rsmi_dev_metrics_xgmi_read_data_get(uint32_t dv_ind, GPUMetricXgmiReadDataAcc_t*
              << "\n | Returning = " << status_code << " " << getRSMIStatusString(status_code) << " |";
   LOG_INFO(ostrstream);
   if (status_code == rsmi_status_t::RSMI_STATUS_SUCCESS) {
-    std::memset(xgmi_read_data_acc_value, 0, sizeof(xgmi_read_data_acc_value));
+    std::memset(xgmi_read_data_acc_value, 0, sizeof(*xgmi_read_data_acc_value));
     std::copy_n(std::begin(tmp_xgmi_acc_tbl), copy_size, *xgmi_read_data_acc_value);
   }
 
@@ -6509,7 +6602,7 @@ rsmi_dev_metrics_xgmi_write_data_get(uint32_t dv_ind, GPUMetricXgmiWriteDataAcc_
              << "\n | Returning = " << status_code << " " << getRSMIStatusString(status_code) << " |";
   LOG_INFO(ostrstream);
   if (status_code == rsmi_status_t::RSMI_STATUS_SUCCESS) {
-    std::memset(xgmi_write_data_acc_value, 0, sizeof(xgmi_write_data_acc_value));
+    std::memset(xgmi_write_data_acc_value, 0, sizeof(*xgmi_write_data_acc_value));
     std::copy_n(std::begin(tmp_xgmi_acc_tbl), copy_size, *xgmi_write_data_acc_value);
   }
 
@@ -6548,7 +6641,7 @@ rsmi_dev_metrics_curr_gfxclk_get(uint32_t dv_ind, GPUMetricCurrGfxClk_t* current
              << "\n | Returning = " << status_code << " " << getRSMIStatusString(status_code) << " |";
   LOG_INFO(ostrstream);
   if (status_code == rsmi_status_t::RSMI_STATUS_SUCCESS) {
-    std::memset(current_gfxclk_value, 0, sizeof(current_gfxclk_value));
+    std::memset(current_gfxclk_value, 0, sizeof(*current_gfxclk_value));
     std::copy_n(std::begin(tmp_curr_gfxclk_tbl), copy_size, *current_gfxclk_value);
   }
 
@@ -6586,7 +6679,7 @@ rsmi_dev_metrics_curr_socclk_get(uint32_t dv_ind, GPUMetricCurrSocClk_t* current
              << "\n | Returning = " << status_code << " " << getRSMIStatusString(status_code) << " |";
   LOG_INFO(ostrstream);
   if (status_code == rsmi_status_t::RSMI_STATUS_SUCCESS) {
-    std::memset(current_socclk_value, 0, sizeof(current_socclk_value));
+    std::memset(current_socclk_value, 0, sizeof(*current_socclk_value));
     std::copy_n(std::begin(tmp_curr_socclk_tbl), copy_size, *current_socclk_value);
   }
 
@@ -6625,7 +6718,7 @@ rsmi_dev_metrics_curr_vclk0_get(uint32_t dv_ind, GPUMetricCurrVClk0_t* current_v
              << "\n | Returning = " << status_code << " " << getRSMIStatusString(status_code) << " |";
   LOG_INFO(ostrstream);
   if (status_code == rsmi_status_t::RSMI_STATUS_SUCCESS) {
-    std::memset(current_vclk_value, 0, sizeof(current_vclk_value));
+    std::memset(current_vclk_value, 0, sizeof(*current_vclk_value));
     std::copy_n(std::begin(tmp_curr_vclk0_tbl), copy_size, *current_vclk_value);
   }
 
@@ -6691,7 +6784,7 @@ rsmi_dev_metrics_curr_dclk0_get(uint32_t dv_ind, GPUMetricCurrDClk0_t* current_d
              << "\n | Returning = " << status_code << " " << getRSMIStatusString(status_code) << " |";
   LOG_INFO(ostrstream);
   if (status_code == rsmi_status_t::RSMI_STATUS_SUCCESS) {
-    std::memset(current_dclk_value, 0, sizeof(current_dclk_value));
+    std::memset(current_dclk_value, 0, sizeof(*current_dclk_value));
     std::copy_n(std::begin(tmp_curr_dclk0_tbl), copy_size, *current_dclk_value);
   }
 

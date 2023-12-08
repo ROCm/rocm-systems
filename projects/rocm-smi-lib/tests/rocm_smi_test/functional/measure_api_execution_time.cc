@@ -173,6 +173,7 @@ void TestMeasureApiExecutionTime::Run(void) {
     auto val_ui64 = uint64_t(0);
     GPUMetricTempHbm_t temp_hbm_values;
     GPUMetricVcnActivity_t temp_vcn_values;
+    GPUMetricJpegActivity_t temp_jpeg_values;
     GPUMetricCurrDClk0_t temp_curr_dclk0_values;
     GPUMetricCurrGfxClk_t temp_curr_gfxclk_values;
     GPUMetricCurrSocClk_t temp_curr_socclk_values;
@@ -414,6 +415,23 @@ void TestMeasureApiExecutionTime::Run(void) {
     }
     if (!skip) {
       std::cout << "\rsmi_dev_metrics_vcn_activity_get() execution time: "
+                << (float(duration_api.count()) / repeat) << " microseconds" << std::endl;
+      EXPECT_LT(duration_api.count(), 500 * repeat);
+    }
+    skip = false;
+    std::cout << "----------------------------------------------------------------------------" << std::endl;
+
+    start_api = std::chrono::high_resolution_clock::now();
+    for (int i=0; i < repeat; ++i) {
+      status_code = rsmi_dev_metrics_jpeg_activity_get(dv_ind, &temp_jpeg_values);
+    }
+    stop_api = std::chrono::high_resolution_clock::now();
+    duration_api = std::chrono::duration_cast<std::chrono::microseconds>(stop_api - start_api);
+    if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS){
+      skip = true;
+    }
+    if (!skip) {
+      std::cout << "\rsmi_dev_metrics_jpeg_activity_get() execution time: "
                 << (float(duration_api.count()) / repeat) << " microseconds" << std::endl;
       EXPECT_LT(duration_api.count(), 500 * repeat);
     }
@@ -881,6 +899,41 @@ void TestMeasureApiExecutionTime::Run(void) {
 
     start_api = std::chrono::high_resolution_clock::now();
     for (int i=0; i < repeat; ++i) {
+      status_code = rsmi_dev_metrics_pcie_nak_sent_count_acc_get(dv_ind, &val_ui32);
+    }
+    stop_api = std::chrono::high_resolution_clock::now();
+    duration_api = std::chrono::duration_cast<std::chrono::microseconds>(stop_api - start_api);
+    if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS){
+      skip = true;
+    }
+    if (!skip) {
+      std::cout << "\rsmi_dev_metrics_pcie_nak_sent_count_acc_get() execution time: "
+                << (float(duration_api.count()) / repeat) << " microseconds" << std::endl;
+      EXPECT_LT(duration_api.count(), 500 * repeat);
+    }
+    skip = false;
+    std::cout << "----------------------------------------------------------------------------" << std::endl;
+
+    start_api = std::chrono::high_resolution_clock::now();
+    for (int i=0; i < repeat; ++i) {
+      status_code = rsmi_dev_metrics_pcie_nak_rcvd_count_acc_get(dv_ind, &val_ui32);
+    }
+    stop_api = std::chrono::high_resolution_clock::now();
+    duration_api = std::chrono::duration_cast<std::chrono::microseconds>(stop_api - start_api);
+    if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS){
+      skip = true;
+    }
+    if (!skip) {
+      std::cout << "\rsmi_dev_metrics_pcie_nak_rcvd_count_acc_get() execution time: "
+                << (float(duration_api.count()) / repeat) << " microseconds" << std::endl;
+      EXPECT_LT(duration_api.count(), 500 * repeat);
+    }
+    skip = false;
+    std::cout << "----------------------------------------------------------------------------" << std::endl;
+
+
+    start_api = std::chrono::high_resolution_clock::now();
+    for (int i=0; i < repeat; ++i) {
       status_code = rsmi_dev_metrics_xgmi_link_width_get(dv_ind, &val_ui16);
     }
     stop_api = std::chrono::high_resolution_clock::now();
@@ -1052,7 +1105,7 @@ void TestMeasureApiExecutionTime::Run(void) {
     stop = std::chrono::high_resolution_clock::now();
     duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
     if (!skip) {
-      const auto kTOTAL_GPU_METRICS_APIS = uint16_t(52);
+      const auto kTOTAL_GPU_METRICS_APIS = uint16_t(57);
       std::cout << "\rTotal execution time (All APIs): "
                 << (float(duration_api.count()) / repeat) << " microseconds" << std::endl;
       EXPECT_LT(duration_api.count(), 500 * (repeat * kTOTAL_GPU_METRICS_APIS));
