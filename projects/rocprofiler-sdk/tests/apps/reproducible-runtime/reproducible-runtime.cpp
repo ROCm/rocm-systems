@@ -134,14 +134,8 @@ main(int argc, char** argv)
 __global__ void
 reproducible_runtime(int64_t nspin_v)
 {
-    int64_t start = clock64();
-    int64_t diff  = 0;
-
-    do
-    {
-        __syncthreads();
-        diff = (clock64() - start);
-    } while(diff < nspin_v);
+    for(int i = 0; i < nspin_v / 64; i++)
+        asm volatile("s_sleep 1");  // ~64 cycles
 }
 
 void
