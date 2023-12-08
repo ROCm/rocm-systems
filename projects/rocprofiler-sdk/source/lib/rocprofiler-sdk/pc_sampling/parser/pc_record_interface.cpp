@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "pc_record_interface.hpp"
+#include "lib/rocprofiler-sdk/pc_sampling/parser/pc_record_interface.hpp"
 
 uint64_t
 PCSamplingParserContext::alloc(pcsample_v1_t** buffer, uint64_t size)

@@ -29,8 +29,8 @@
 #include <thread>
 #include <unordered_set>
 
-#include "correlation.hpp"
-#include "parser_types.h"
+#include "lib/rocprofiler-sdk/pc_sampling/parser/correlation.hpp"
+#include "lib/rocprofiler-sdk/pc_sampling/parser/parser_types.h"
 
 struct PCSamplingData
 {

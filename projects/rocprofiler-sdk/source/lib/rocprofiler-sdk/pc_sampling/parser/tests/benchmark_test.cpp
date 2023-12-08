@@ -23,7 +23,7 @@
 #include <gtest/gtest.h>
 #include <cstddef>
 
-#include "mocks.hpp"
+#include "lib/rocprofiler-sdk/pc_sampling/parser/tests/mocks.hpp"
 
 #define GFXIP_MAJOR 9
 

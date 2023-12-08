@@ -26,11 +26,11 @@
 #include <cstdint>
 #include <cstring>
 
-#include "gfx11.hpp"
-#include "gfx_unknown.hpp"
-#include "gfx9.hpp"
-#include "parser_types.h"
-#include "rocr.h"
+#include "lib/rocprofiler-sdk/pc_sampling/parser/gfx11.hpp"
+#include "lib/rocprofiler-sdk/pc_sampling/parser/gfx_unknown.hpp"
+#include "lib/rocprofiler-sdk/pc_sampling/parser/gfx9.hpp"
+#include "lib/rocprofiler-sdk/pc_sampling/parser/parser_types.h"
+#include "lib/rocprofiler-sdk/pc_sampling/parser/rocr.h"
 
 template <typename SType>
 inline pcsample_v1_t

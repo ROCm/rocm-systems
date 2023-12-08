@@ -8,8 +8,7 @@ set(PCTEST_INCLUDE_DIR
 set(ROCPROFILER_LIB_PC_SAMPLING_PARSER_ID_TEST_SOURCES correlation_id_test.cpp)
 set(ROCPROFILER_LIB_PC_SAMPLING_PARSER_BENCH_TEST_SOURCES benchmark_test.cpp)
 set(ROCPROFILER_LIB_PC_SAMPLING_PARSER_GFX9_TEST_SOURCES gfx9test.cpp)
-file(GLOB ROCPROFILER_LIB_PC_SAMPLING_PARSER_TEST_HEADERS mocks.hpp
-     ${ROCPROFILER_LIB_PC_SAMPLING_PARSER_HEADERS})
+set(ROCPROFILER_LIB_PC_SAMPLING_PARSER_TEST_HEADERS mocks.hpp)
 
 add_executable(pcs_gfx9_test)
 
@@ -17,7 +16,10 @@ target_sources(pcs_gfx9_test
                PRIVATE ${ROCPROFILER_LIB_PC_SAMPLING_PARSER_GFX9_TEST_SOURCES})
 target_include_directories(pcs_gfx9_test PRIVATE ${PCTEST_INCLUDE_DIR})
 
-target_link_libraries(pcs_gfx9_test PRIVATE GTest::gtest GTest::gtest_main)
+target_link_libraries(
+    pcs_gfx9_test
+    PRIVATE rocprofiler::rocprofiler-common-library
+            rocprofiler::rocprofiler-static-library GTest::gtest GTest::gtest_main)
 
 gtest_add_tests(
     TARGET pcs_gfx9_test
@@ -32,7 +34,10 @@ add_executable(pcs_id_test)
 target_sources(pcs_id_test PRIVATE ${ROCPROFILER_LIB_PC_SAMPLING_PARSER_ID_TEST_SOURCES})
 target_include_directories(pcs_id_test PRIVATE ${PCTEST_INCLUDE_DIR})
 
-target_link_libraries(pcs_id_test PRIVATE GTest::gtest GTest::gtest_main)
+target_link_libraries(
+    pcs_id_test
+    PRIVATE rocprofiler::rocprofiler-common-library
+            rocprofiler::rocprofiler-static-library GTest::gtest GTest::gtest_main)
 
 gtest_add_tests(
     TARGET pcs_id_test
@@ -49,4 +54,7 @@ target_sources(pcs_bench_test
                PRIVATE ${ROCPROFILER_LIB_PC_SAMPLING_PARSER_BENCH_TEST_SOURCES})
 target_include_directories(pcs_bench_test PRIVATE ${PCTEST_INCLUDE_DIR})
 
-target_link_libraries(pcs_bench_test PRIVATE GTest::gtest GTest::gtest_main)
+target_link_libraries(
+    pcs_bench_test
+    PRIVATE rocprofiler::rocprofiler-common-library
+            rocprofiler::rocprofiler-static-library GTest::gtest GTest::gtest_main)

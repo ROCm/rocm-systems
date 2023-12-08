@@ -31,7 +31,7 @@
 #include <random>
 #include <unordered_set>
 
-#include "correlation.hpp"
+#include "lib/rocprofiler-sdk/pc_sampling/parser/correlation.hpp"
 
 #define CHECK_PARSER(x)                                                                            \
     {                                                                                              \

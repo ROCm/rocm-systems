@@ -28,8 +28,8 @@
 #include <cassert>
 #include <cstddef>
 
-#include "mocks.hpp"
-#include "pc_record_interface.hpp"
+#include "lib/rocprofiler-sdk/pc_sampling/parser/pc_record_interface.hpp"
+#include "lib/rocprofiler-sdk/pc_sampling/parser/tests/mocks.hpp"
 
 #define GFXIP_MAJOR 9
 

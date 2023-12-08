@@ -1,5 +1,7 @@
 set(ROCPROFILER_LIB_PC_SAMPLING_PARSER_SOURCES pc_record_interface.cpp)
-file(GLOB ROCPROFILER_LIB_PC_SAMPLING_PARSER_HEADERS *.h *.hpp)
+set(ROCPROFILER_LIB_PC_SAMPLING_PARSER_HEADERS
+    correlation.hpp gfx9.hpp gfx11.hpp gfx_unknown.hpp parser_types.h pc_record_interface.hpp
+    rocr.h translation.hpp)
 
 target_sources(
     rocprofiler-object-library PRIVATE ${ROCPROFILER_LIB_PC_SAMPLING_PARSER_SOURCES}

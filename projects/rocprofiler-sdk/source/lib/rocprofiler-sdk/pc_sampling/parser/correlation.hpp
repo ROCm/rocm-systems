@@ -28,7 +28,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include "translation.hpp"
+#include "lib/rocprofiler-sdk/pc_sampling/parser/translation.hpp"
 
 template <>
 struct std::hash<device_handle>
