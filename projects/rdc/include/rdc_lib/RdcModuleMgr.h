@@ -24,16 +24,15 @@ THE SOFTWARE.
 
 #include <memory>
 
-#include "rdc/rdc.h"
 #include "rdc_lib/RdcDiagnostic.h"
 #include "rdc_lib/RdcTelemetry.h"
-#include "rdc_lib/rdc_common.h"
 
 namespace amd {
 namespace rdc {
 
 class RdcModuleMgr {
  public:
+  virtual ~RdcModuleMgr() = default;
   virtual RdcTelemetryPtr get_telemetry_module() = 0;
   virtual RdcDiagnosticPtr get_diagnostic_module() = 0;
 };

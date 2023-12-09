@@ -49,7 +49,7 @@ class RdcRocpLib : public RdcTelemetry {
   rdc_status_t rdc_telemetry_fields_unwatch(rdc_gpu_field_t* fields,
                                             uint32_t fields_count) override;
 
-  explicit RdcRocpLib(const char* lib_name);
+  RdcRocpLib();
 
   ~RdcRocpLib();
 

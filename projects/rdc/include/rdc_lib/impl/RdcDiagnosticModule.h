@@ -28,7 +28,6 @@ THE SOFTWARE.
 #include <vector>
 
 #include "rdc_lib/RdcDiagnostic.h"
-#include "rdc_lib/RdcMetricFetcher.h"
 #include "rdc_lib/RdcTelemetryLibInterface.h"
 
 namespace amd {
@@ -52,7 +51,7 @@ class RdcDiagnosticModule : public RdcDiagnostic {
   rdc_status_t rdc_diag_init(uint64_t flags) override;
   rdc_status_t rdc_diag_destroy() override;
 
-  explicit RdcDiagnosticModule(RdcMetricFetcherPtr& fetcher);
+  explicit RdcDiagnosticModule(std::list<RdcDiagnosticPtr> diagnostic_modules);
 
  private:
   //< Helper function to dispatch fields to module

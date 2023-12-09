@@ -22,6 +22,8 @@ THE SOFTWARE.
 
 #include "rdc_lib/RdcLibraryLoader.h"
 
+#include "rdc_lib/RdcException.h"
+
 namespace amd {
 namespace rdc {
 
@@ -39,7 +41,9 @@ rdc_status_t RdcLibraryLoader::load(const char* filename) {
   libHandler_ = dlopen(filename, RTLD_LAZY);
   if (!libHandler_) {
     char* error = dlerror();
-    RDC_LOG(RDC_ERROR, "Fail to open " << filename << ": " << error);
+    throw RdcException(
+        RDC_ST_FAIL_LOAD_MODULE,
+        std::string("Fail to open ") + std::string(filename) + ": " + std::string(error));
     return RDC_ST_FAIL_LOAD_MODULE;
   }
 

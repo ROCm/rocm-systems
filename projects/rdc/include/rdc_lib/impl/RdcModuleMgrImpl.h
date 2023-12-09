@@ -22,7 +22,7 @@ THE SOFTWARE.
 #ifndef INCLUDE_RDC_LIB_IMPL_RDCMODULEMGRIMPL_H_
 #define INCLUDE_RDC_LIB_IMPL_RDCMODULEMGRIMPL_H_
 
-#include <memory>
+#include <list>
 
 #include "rdc_lib/RdcMetricFetcher.h"
 #include "rdc_lib/RdcModuleMgr.h"
@@ -38,6 +38,22 @@ class RdcModuleMgrImpl : public RdcModuleMgr {
   explicit RdcModuleMgrImpl(const RdcMetricFetcherPtr& fetcher);
 
  private:
+  //  Modules
+  std::list<RdcDiagnosticPtr> diagnostic_modules_;
+  std::list<RdcTelemetryPtr> telemetry_modules_;
+
+  // base case
+  template <typename T>
+  rdc_status_t insert_modules();
+
+  // recursive case
+  template <typename T, typename R, typename... TArgs>
+  rdc_status_t insert_modules();
+
+  // pass shared_ptr instead of creating it
+  template <typename T>
+  rdc_status_t insert_modules(std::shared_ptr<T> ptr);
+
   //  Function module
   RdcTelemetryPtr rdc_telemetry_module_;
   RdcDiagnosticPtr rdc_diagnostic_module_;

@@ -23,7 +23,6 @@ THE SOFTWARE.
 #define INCLUDE_RDC_LIB_IMPL_RDCRVSLIB_H_
 
 #include <memory>
-#include <vector>
 
 #include "rdc/rdc.h"
 #include "rdc_lib/RdcDiagnostic.h"
@@ -51,7 +50,6 @@ class RdcRVSLib : public RdcDiagnostic {
   rdc_status_t rdc_diag_destroy() override;
 
   RdcRVSLib();
-
   ~RdcRVSLib() override;
 
  private:

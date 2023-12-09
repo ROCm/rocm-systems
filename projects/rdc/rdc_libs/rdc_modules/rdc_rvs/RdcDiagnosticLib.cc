@@ -21,10 +21,8 @@ THE SOFTWARE.
 */
 #include <string.h>
 
-#include <memory>
-#include <stdexcept>
-
 #include "rdc/rdc.h"
+#include "rdc_lib/RdcDiagnosticLibInterface.h"
 #include "rdc_lib/RdcLogger.h"
 #include "rdc_lib/rdc_common.h"
 #include "rdc_modules/rdc_rvs/RvsBase.h"

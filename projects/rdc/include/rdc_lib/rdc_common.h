@@ -28,19 +28,6 @@ THE SOFTWARE.
 
 #include "rdc/rdc.h"
 
-#define RDC_ERROR 0
-#define RDC_INFO 1
-#define RDC_DEBUG 2
-
-#define RDC_LOG(debug_level, msg)                                                             \
-  do {                                                                                        \
-    auto& logger = amd::rdc::RdcLogger::getLogger();                                          \
-    if (logger.should_log((debug_level))) {                                                   \
-      logger.get_ostream() << logger.get_log_header((debug_level), __FILE__, __LINE__) << msg \
-                           << std::endl;                                                      \
-    }                                                                                         \
-  } while (0)
-
 //<! The key to identify the field with <gpu_id, field_id>
 typedef std::pair<uint32_t, rdc_field_t> RdcFieldKey;
 

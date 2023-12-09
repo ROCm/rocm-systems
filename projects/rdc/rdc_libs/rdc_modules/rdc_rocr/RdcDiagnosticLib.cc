@@ -19,13 +19,13 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
-#include "rdc_modules/rdc_rocr/RdcDiagnosticLib.h"
 
 #include <string.h>
 
 #include <memory>
 #include <stdexcept>
 
+#include "rdc_lib/RdcDiagnosticLibInterface.h"
 #include "rdc_lib/rdc_common.h"
 #include "rdc_modules/rdc_rocr/ComputeQueueTest.h"
 #include "rdc_modules/rdc_rocr/MemoryAccess.h"

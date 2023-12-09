@@ -1,4 +1,3 @@
-
 /*
 Copyright (c) 2019 - present Advanced Micro Devices, Inc. All rights reserved.
 
@@ -222,7 +221,6 @@ void RDCServer::Run() {
   }
 
   // Finally assemble the server.
-  // std::unique_ptr<::grpc::Server> server(builder.BuildAndStart());
   server_ = builder.BuildAndStart();
 
   std::cout << "Server listening on " << server_address_.c_str() << std::endl;

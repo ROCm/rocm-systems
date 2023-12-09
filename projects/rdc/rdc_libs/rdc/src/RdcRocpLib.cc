@@ -25,22 +25,20 @@ THE SOFTWARE.
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
-#include <functional>
 #include <string>
 
-#include "rdc_lib/RdcLogger.h"
-#include "rdc_lib/rdc_common.h"
+#include "rdc_lib/RdcException.h"
 
 namespace amd {
 namespace rdc {
 
 // TODO: Add init and destroy calls support
-RdcRocpLib::RdcRocpLib(const char* lib_name)
+RdcRocpLib::RdcRocpLib()
     : telemetry_fields_query_(nullptr),
       telemetry_fields_value_get_(nullptr),
       telemetry_fields_watch_(nullptr),
       telemetry_fields_unwatch_(nullptr) {
-  rdc_status_t status = lib_loader_.load(lib_name);
+  rdc_status_t status = lib_loader_.load("librdc_rocp.so");
   if (status != RDC_ST_OK) {
     RDC_LOG(RDC_ERROR, "Rocp related function will not work.");
     return;
@@ -49,6 +47,7 @@ RdcRocpLib::RdcRocpLib(const char* lib_name)
   status = set_rocmtools_path();
   if (status != RDC_ST_OK) {
     RDC_LOG(RDC_ERROR, "Rocp related function will not work.");
+    throw RdcException(RDC_ST_FAIL_LOAD_MODULE, "rocmtools path could not be set");
     return;
   }
 

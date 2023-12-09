@@ -14,6 +14,7 @@ set(RDC_RVS_LIB_SRC_LIST
 set(RDC_RVS_LIB_INC_LIST
     "${PROJECT_SOURCE_DIR}/include/rdc/rdc.h"
     "${RDC_LIB_INC_DIR}/RdcDiagnostic.h"
+    "${RDC_LIB_INC_DIR}/RdcDiagnosticLibInterface.h"
     "${RDC_LIB_INC_DIR}/rdc_common.h"
     "${RDC_LIB_INC_DIR}/RdcLogger.h"
     "${INC_DIR}/RvsBase.h"

@@ -21,17 +21,11 @@ THE SOFTWARE.
 */
 #include "rdc_lib/impl/RdcDiagnosticModule.h"
 
-#include <functional>
 #include <map>
-#include <memory>
 #include <vector>
 
-#include "rdc_lib/RdcLogger.h"
-#include "rdc_lib/RdcMetricFetcher.h"
-#include "rdc_lib/impl/RdcRVSLib.h"
-#include "rdc_lib/impl/RdcRasLib.h"
-#include "rdc_lib/impl/RdcRocrLib.h"
-#include "rdc_lib/impl/RdcSmiLib.h"
+#include "rdc/rdc.h"
+#include "rdc_lib/rdc_common.h"
 
 namespace amd {
 namespace rdc {
@@ -122,32 +116,16 @@ rdc_status_t RdcDiagnosticModule::RdcDiagnosticModule::rdc_diag_destroy() {
   return RDC_ST_OK;
 }
 
-RdcDiagnosticModule::RdcDiagnosticModule(RdcMetricFetcherPtr& fetcher) {
-  const RdcSmiLibPtr smi_module = std::make_shared<RdcSmiLib>(fetcher);
-  const RdcRocrLibPtr rocr_module = std::make_shared<RdcRocrLib>();
-  const RdcRasLibPtr ras_module = std::make_shared<RdcRasLib>();
-  const RdcRVSLibPtr rvs_module = std::make_shared<RdcRVSLib>();
-  if (smi_module) {
-    diagnostic_modules_.push_back(smi_module);
-  }
-  if (rocr_module) {
-    diagnostic_modules_.push_back(rocr_module);
-  }
-  if (ras_module) {
-    diagnostic_modules_.push_back(ras_module);
-  }
-  if (rvs_module) {
-    diagnostic_modules_.push_back(rvs_module);
-  }
-
-  auto ite = diagnostic_modules_.begin();
-  for (; ite != diagnostic_modules_.end(); ite++) {
+RdcDiagnosticModule::RdcDiagnosticModule(std::list<RdcDiagnosticPtr> diagnostic_modules)
+    : diagnostic_modules_(diagnostic_modules) {
+  // find test cases
+  for (auto& ite : diagnostic_modules_) {
     rdc_diag_test_cases_t test_cases[MAX_TEST_CASES];
     uint32_t test_count = 0;
-    rdc_status_t status = (*ite)->rdc_diag_test_cases_query(test_cases, &test_count);
+    rdc_status_t status = ite->rdc_diag_test_cases_query(test_cases, &test_count);
     if (status == RDC_ST_OK) {
       for (uint32_t index = 0; index < test_count; index++) {
-        testcases_to_module_.insert({test_cases[index], (*ite)});
+        testcases_to_module_.insert({test_cases[index], ite});
       }
     }
   }

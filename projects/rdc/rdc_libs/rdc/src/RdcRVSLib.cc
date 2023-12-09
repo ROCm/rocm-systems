@@ -21,10 +21,7 @@ THE SOFTWARE.
 */
 #include "rdc_lib/impl/RdcRVSLib.h"
 
-#include <functional>
-
 #include "rdc_lib/RdcLogger.h"
-#include "rdc_lib/rdc_common.h"
 
 namespace amd {
 namespace rdc {
@@ -69,7 +66,7 @@ RdcRVSLib::RdcRVSLib()
 }
 
 RdcRVSLib::~RdcRVSLib() {
-  if (diag_destroy_) {
+  if (diag_destroy_ != nullptr) {
     diag_destroy_();
   }
 }

@@ -23,7 +23,6 @@ THE SOFTWARE.
 #define INCLUDE_RDC_LIB_IMPL_RDCSMILIB_H_
 
 #include <memory>
-#include <vector>
 
 #include "rdc_lib/RdcDiagnostic.h"
 #include "rdc_lib/RdcMetricFetcher.h"

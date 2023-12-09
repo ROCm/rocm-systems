@@ -24,10 +24,7 @@ THE SOFTWARE.
 #include <stdlib.h>
 #include <strings.h>
 
-#include <functional>
-
 #include "rdc_lib/RdcLogger.h"
-#include "rdc_lib/rdc_common.h"
 
 namespace amd {
 namespace rdc {

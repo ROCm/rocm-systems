@@ -22,14 +22,12 @@ THE SOFTWARE.
 #ifndef INCLUDE_RDC_LIB_RDCLIBRARYLOADER_H_
 #define INCLUDE_RDC_LIB_RDCLIBRARYLOADER_H_
 #include <dlfcn.h>
-#include <string.h>
 
-#include <map>
 #include <mutex>  //  NOLINT(build/c++11)
 
 #include "rdc/rdc.h"
+#include "rdc_lib/RdcException.h"
 #include "rdc_lib/RdcLogger.h"
-#include "rdc_lib/rdc_common.h"
 
 namespace amd {
 namespace rdc {
@@ -37,6 +35,7 @@ class RdcLibraryLoader {
  public:
   RdcLibraryLoader();
 
+  // throws RdcException if lib not found
   rdc_status_t load(const char* filename);
 
   template <typename T>
@@ -57,7 +56,7 @@ class RdcLibraryLoader {
 template <typename T>
 rdc_status_t RdcLibraryLoader::load_symbol(T* func_handler, const char* func_name) {
   if (!libHandler_) {
-    RDC_LOG(RDC_ERROR, "Must load the library before load the symbol");
+    RDC_LOG(RDC_ERROR, "Must load the library before loading the symbol");
     return RDC_ST_FAIL_LOAD_MODULE;
   }
 
@@ -83,9 +82,14 @@ rdc_status_t RdcLibraryLoader::load(const char* filename, T* func_make_handler) 
     return RDC_ST_FAIL_LOAD_MODULE;
   }
 
-  rdc_status_t status = load(filename);
-  if (status != RDC_ST_OK) {
-    return status;
+  try {
+    rdc_status_t status = load(filename);
+    if (status != RDC_ST_OK) {
+      return status;
+    }
+  } catch (RdcException& e) {
+    RDC_LOG(RDC_ERROR, e.what());
+    return e.error_code();
   }
 
   return load_symbol(func_make_handler, "make_handler");
