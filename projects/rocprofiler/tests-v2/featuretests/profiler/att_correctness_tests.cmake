@@ -5,7 +5,7 @@ add_test(
         ${PROJECT_BINARY_DIR}/rocprofv2 -i
         ${PROJECT_BINARY_DIR}/tests-v2/featuretests/profiler/apps/goldentraces/att_vadd.txt
         -d /tmp/tests-v2/att/ -o /tmp/tests-v2/att/vadd
-        --plugin att auto --mode csv tests-v2/featuretests/profiler/apps/att_vectoradd.cpp
+        --plugin att auto --mode csv tests-v2/featuretests/profiler/apps/att_vectoradd
     WORKING_DIRECTORY "${PROJECT_BINARY_DIR}")
 
 set_tests_properties(
@@ -26,6 +26,6 @@ set_tests_properties(
                 PASS_REGULAR_EXPRESSION
                 "Test Passed"
                 FAIL_REGULAR_EXPRESSION
-                "Test Failed"
+                "AssertionError"
                 SKIP_REGULAR_EXPRESSION
                 "Skipped")

@@ -195,7 +195,7 @@ class PCTranslator:
             symbol = "Unkown symbol at 0x" + hex(addr)
 
         last_line = self.raw_code[-1]
-        newline = ['; ' + symbol, 100, last_line[2], 0, last_line[4], last_line[5], -1, 0, 0]
+        newline = ['; ' + symbol, 100, last_line[2], 0, last_line[4], last_line[5], 0, 0, 0]
         self.raw_code.append(newline)
 
     def getcode(self, addr):
@@ -355,7 +355,7 @@ def stitch(insts, raw_code, jumps, gfxv, bIsAuto, codeservice):
     else:
         line = 0
         lineincrement = 1
-        watchlist = RegisterWatchList(labels=labels, code=code, jump_map=jump_map)
+        watchlist = RegisterWatchList(labels=labels, code=code, jump_map=jump_map, insts=insts)
 
     N = len(insts)
 
@@ -381,7 +381,9 @@ def stitch(insts, raw_code, jumps, gfxv, bIsAuto, codeservice):
             elif 'scratch_' in as_line[0]:
                 watchlist.scratch(as_line[0])
 
-        if as_line[1] == GETPC:
+        if as_line[1] == DONT_KNOW:
+            matched = False
+        elif as_line[1] == GETPC:
             try:
                 watchlist.getpc(as_line[0], watchlist.getcode(next)[0])
                 matched = inst.type in [SALU, JUMP]
@@ -538,20 +540,21 @@ def stitch(insts, raw_code, jumps, gfxv, bIsAuto, codeservice):
                     print('WARNING: Parsing terminated at:', as_line)
                     break
 
-        if matched:
-            inst.asmline = reverse_map[line]
-            result.append(inst)
-            i += 1
-            num_failed_stitches = 0
-        elif inst.type == IMMED and line != next and (not bGFX9 or 's_barrier' in as_line[0]):
-            skipped_immed += 1
-            inst.asmline = reverse_map[line]
-            result.append(inst)
-            if 's_barrier' in as_line[0]:
-                next = line + lineincrement
-            i += 1
-        else:
-            num_failed_stitches += 1
+        if as_line[1] != DONT_KNOW:
+            if matched:
+                inst.asmline = reverse_map[line]
+                result.append(inst)
+                i += 1
+                num_failed_stitches = 0
+            elif inst.type == IMMED and line != next and (not bGFX9 or 's_barrier' in as_line[0]):
+                skipped_immed += 1
+                inst.asmline = reverse_map[line]
+                result.append(inst)
+                if 's_barrier' in as_line[0]:
+                    next = line + lineincrement
+                i += 1
+            else:
+                num_failed_stitches += 1
 
         maxline = max(reverse_map[line], maxline)
         line = next

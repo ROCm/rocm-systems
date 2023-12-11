@@ -57,6 +57,6 @@ set_tests_properties(
                PASS_REGULAR_EXPRESSION
                "Test Passed"
                FAIL_REGULAR_EXPRESSION
-               "Test Failed"
+               "AssertionError"
                SKIP_REGULAR_EXPRESSION
                "Skipped")

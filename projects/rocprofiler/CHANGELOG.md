@@ -307,7 +307,7 @@ Example for file plugin output:
 - Added Plugin Versioning way in rocprofv2. See README for more details.
 - Added --version in the rocprof and rocprofv2 to be able to see the current rocprof/v2 version along with ROCm version information.
 
-## ROCprofiler for rocm 6.2
+## ROCprofiler for rocm 6.1
 
 ### Added
 

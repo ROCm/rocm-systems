@@ -6,7 +6,7 @@ MAX_WAVE_SIZE = 64
 MAXIMUM_ATT_HITS = 256*128//MAX_WAVE_SIZE//MAX_CU
 
 kernel_name = "vectoradd_att"
-csv_filename = "att_output_" + kernel_name + "_v0.csv"
+csv_filename = "vadd_" + kernel_name + "_v0.csv"
 output_folder = "/tmp/tests-v2/att"
 
 
@@ -18,7 +18,7 @@ def test_hitcount(csv):
 
 
 def test_addr(csv):
-    addrs = np.array([int(addr, 16) for addr in csv['Addr'] if len(addr) != 0 and addr[0] != '-'])
+    addrs = np.array([int(addr, 16) for addr in csv['Addr'] if addr != '0x0'])
     print('addrs', addrs)
     assert(addrs.max() - addrs.min() > 32)       # 32 bytes is a safe minimum value
     assert(addrs.max() - addrs.min() < 2**24)    # Kernels are not anywhere near that large
@@ -69,4 +69,4 @@ if __name__ == "__main__":
     test_mean_cycles(csv)
     test_memory_cycles(csv)
 
-    print("All ATT correctness tests passed.")
+    print("Test Passed: All ATT correctness tests passed.")
