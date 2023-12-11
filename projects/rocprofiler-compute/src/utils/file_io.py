@@ -214,29 +214,20 @@ def collect_wave_occu_per_cu(in_dir, out_dir, numSE):
         all.to_csv(Path(out_dir, "wave_occu_per_cu.csv"), index=False)
 
 
-def is_single_panel_config(root_dir):
+def is_single_panel_config(root_dir, supported_archs):
     """
     Check the root configs dir structure to decide using one config set for all
     archs, or one for each arch.
     """
-    matching_files=glob.glob(os.path.join(config.omniperf_home, 'omniperf_soc', 'soc_*.py'))
-    supported_arch=[]
-    # Load list of supported archs
-    for filepath in matching_files:
-        filename=os.path.basename(filepath)
-        postfix=filename[len('soc_'):-len('.py')]
-        # print(f"File: {filename}, Postfix: {postfix}")
-        if postfix != "base":
-            supported_arch.append(postfix)
-    
     # If not single config, verify all supported archs have defined configs
+    supported_archs = supported_archs.keys()
     counter = 0
-    for arch in supported_arch:
+    for arch in supported_archs:
         if root_dir.joinpath(arch).exists():
             counter += 1
     if counter == 0:
         return True
-    elif counter == len(supported_arch):
+    elif counter == len(supported_archs):
         return False
     else:
         logging.error("Found multiple panel config sets but incomplete for all archs!")

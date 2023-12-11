@@ -25,29 +25,14 @@
 import argparse
 import shutil
 import os
-import glob
 
-def load_avail_arch(omniperf_home):
-    '''
-    Load list of avail archs by checking against defined implementations
-    '''
-    matching_files=glob.glob(os.path.join(omniperf_home, 'omniperf_soc', 'soc_*.py'))
-    supported_arch=[]
-    # Load list of supported archs
-    for filepath in matching_files:
-        filename=os.path.basename(filepath)
-        postfix=filename[len('soc_'):-len('.py')]
-        # print(f"File: {filename}, Postfix: {postfix}")
-        if postfix != "base":
-            supported_arch.append(postfix)
-    return supported_arch
-def print_avail_arch(avail_arch):
+def print_avail_arch(avail_arch: list):
     ret_str = "\t\tList all available metrics for analysis on specified arch:"
     for arch in avail_arch:
         ret_str += "\n\t\t   {}".format(arch)
     return ret_str
 
-def omniarg_parser(parser, omniperf_home, omniperf_version):
+def omniarg_parser(parser, omniperf_home, supported_archs, omniperf_version):
     # -----------------------------------------
     # Parse arguments (dependent on mode)
     # -----------------------------------------
@@ -410,8 +395,8 @@ def omniarg_parser(parser, omniperf_home, omniperf_version):
     analyze_group.add_argument(
         "--list-metrics",
         metavar="",
-        choices=load_avail_arch(omniperf_home),#["gfx906", "gfx908", "gfx90a"],
-        help=print_avail_arch(load_avail_arch(omniperf_home)),
+        choices=supported_archs.keys(),#["gfx906", "gfx908", "gfx90a"],
+        help=print_avail_arch(supported_archs.keys()),
     )
     analyze_group.add_argument(
         "-k",

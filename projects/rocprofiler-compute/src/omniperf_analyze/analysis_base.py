@@ -35,11 +35,11 @@ import pandas as pd
 from tabulate import tabulate
 
 class OmniAnalyze_Base():
-    def __init__(self,args,options):
+    def __init__(self,args,supported_archs):
         self.__args = args
         self._runs = OrderedDict() #NB: I made this public so children can modify/add to obj properties
         self._arch_configs = {} #NB: I made this public so children can modify/add to obj properties
-        self.__options = options
+        self.__supported_archs = supported_archs
         self._output = None #NB: I made this public so children can modify/add to obj properties
 
     def get_args(self):
@@ -47,7 +47,7 @@ class OmniAnalyze_Base():
     
     @demarcate
     def generate_configs(self, arch, config_dir, list_kernels, filter_metrics):
-        single_panel_config = file_io.is_single_panel_config(Path(config_dir))
+        single_panel_config = file_io.is_single_panel_config(Path(config_dir), self.__supported_archs)
         
         ac = schema.ArchConfig()
         if list_kernels:

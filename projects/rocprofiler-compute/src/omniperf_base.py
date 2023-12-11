@@ -33,6 +33,7 @@ from utils.utils import demarcate, trace_logger, get_version, get_version_displa
 from argparser import omniarg_parser
 import config
 import pandas as pd
+import importlib
 
 class Omniperf:
     def __init__(self):
@@ -46,6 +47,11 @@ class Omniperf:
             "ver_pretty": None,
         }
         self.__options = {}
+        self.__supported_archs = {
+            "gfx906": {"mi50": ["MI50", "MI60"]},
+            "gfx908": {"mi100": ["MI100"]},
+            "gfx90a": {"mi200": ["MI210", "MI250", "MI250X"]},
+        }
 
         self.setup_logging()
         self.set_version()
@@ -140,34 +146,20 @@ class Omniperf:
             mspec = get_machine_specs(0)
             arch = mspec.GPU
 
-        target=""
-        if arch == "gfx906":
-            target = "mi50"
-        elif arch == "gfx908":
-            target = "mi100"
-        elif arch == "gfx90a":
-            target = "mi200"
-        else:
-            error("Unsupported SoC -> %s" % arch)
-        
-        self.__soc_name.add(target)
-        if hasattr(self.__args, 'target'):
-            self.__args.target = target
-        
         # instantiate underlying SoC support class
         # in case of analyze mode, __soc can accommodate multiple archs
-        if target == "mi50":
-            from omniperf_soc.soc_gfx906 import gfx906_soc
-            self.__soc[arch] = gfx906_soc(self.__args)
-        elif target == "mi100":
-            from omniperf_soc.soc_gfx908 import gfx908_soc
-            self.__soc[arch] = gfx908_soc(self.__args)
-        elif target == "mi200":
-            from omniperf_soc.soc_gfx90a import gfx90a_soc
-            self.__soc[arch] = gfx90a_soc(self.__args)
-        else:
+        if arch not in self.__supported_archs.keys():
             logging.error("Unsupported SoC")
             sys.exit(1)
+        else:
+            target = list(self.__supported_archs[arch].keys())[0]
+            self.__soc_name.add(target)
+            if hasattr(self.__args, 'target'):
+                self.__args.target = target
+
+            soc_module = importlib.import_module('omniperf_soc.soc_'+arch)
+            soc_class = getattr(soc_module, arch+'_soc')
+            self.__soc[arch] = soc_class(self.__args)
 
         logging.info("SoC = %s" % self.__soc_name)
         return arch
@@ -182,7 +174,7 @@ class Omniperf:
             ),
             usage="omniperf [mode] [options]",
         )
-        omniarg_parser(parser, config.omniperf_home, self.__version)
+        omniarg_parser(parser, config.omniperf_home, self.__supported_archs ,self.__version)
         self.__args = parser.parse_args()
 
         if self.__args.mode == None:
@@ -241,10 +233,10 @@ class Omniperf:
 
         if self.__analyze_mode == "cli":
             from omniperf_analyze.analysis_cli import cli_analysis
-            analyzer = cli_analysis(self.__args,self.__options)
+            analyzer = cli_analysis(self.__args,self.__supported_archs)
         elif self.__analyze_mode == "webui":
             from omniperf_analyze.analysis_webui import webui_analysis
-            analyzer = webui_analysis(self.__args,self.__options)
+            analyzer = webui_analysis(self.__args,self.__supported_archs)
         else:
             error("Unsupported anlaysis mode -> %s" % self.__analyze_mode)
 
