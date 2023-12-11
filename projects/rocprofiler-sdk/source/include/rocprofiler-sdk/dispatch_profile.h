@@ -48,6 +48,7 @@ ROCPROFILER_EXTERN_C_INIT
  * @param [in] agent           Agent of this queue
  * @param [in] correlation_id  Correlation ID for this dispatch
  * @param [in] dispatch_packet Kernel dispatch packet about to be enqueued into HSA
+ * @param [in] kernel_id Kernel identifier
  * @param [in] callback_data_args Callback supplied via buffered_dispatch_profile_counting_service
  * @param [out] config         Profile config detailing the counters to collect for this kernel
  */
@@ -56,6 +57,7 @@ typedef void (*rocprofiler_profile_counting_dispatch_callback_t)(
     const rocprofiler_agent_t*          agent,
     rocprofiler_correlation_id_t        correlation_id,
     const hsa_kernel_dispatch_packet_t* dispatch_packet,
+    uint64_t                            kernel_id,
     void*                               callback_data_args,
     rocprofiler_profile_config_id_t*    config);
 

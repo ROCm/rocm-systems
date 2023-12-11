@@ -365,6 +365,7 @@ WriteInterceptor(const void* packets,
 
         // Copy kernel pkt, copy is to allow for signal to be modified
         rocprofiler_packet kernel_pkt = packets_arr[i];
+        uint64_t           kernel_id  = get_kernel_id(kernel_pkt.kernel_dispatch.kernel_object);
         queue.create_signal(HSA_AMD_SIGNAL_AMD_GPU_ONLY,
                             &kernel_pkt.ext_amd_aql_pm4.completion_signal);
 
@@ -378,8 +379,8 @@ WriteInterceptor(const void* packets,
         queue.signal_callback([&](const auto& map) {
             for(const auto& [client_id, cb_pair] : map)
             {
-                if(auto maybe_pkt =
-                       cb_pair.first(queue, client_id, kernel_pkt, extern_corr_ids, corr_id))
+                if(auto maybe_pkt = cb_pair.first(
+                       queue, client_id, kernel_pkt, kernel_id, extern_corr_ids, corr_id))
                 {
                     LOG_IF(FATAL, inst_pkt)
                         << "We do not support two injections into the HSA queue";
@@ -435,7 +436,6 @@ WriteInterceptor(const void* packets,
 
         LOG_IF(FATAL, packet_type != HSA_PACKET_TYPE_KERNEL_DISPATCH)
             << "get_kernel_id below might need to be updated";
-        uint64_t kernel_id = get_kernel_id(kernel_pkt.kernel_dispatch.kernel_object);
 
         // Enqueue the signal into the handler. Will call completed_cb when
         // signal completes.

@@ -111,6 +111,7 @@ dispatch_callback(rocprofiler_queue_id_t /*queue_id*/,
                   const rocprofiler_agent_t* agent,
                   rocprofiler_correlation_id_t /*correlation_id*/,
                   const hsa_kernel_dispatch_packet_t* /*dispatch_packet*/,
+                  uint64_t /*kernel_id*/,
                   void* /*callback_data_args*/,
                   rocprofiler_profile_config_id_t* config)
 {

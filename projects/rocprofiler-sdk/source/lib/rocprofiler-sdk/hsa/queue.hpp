@@ -126,6 +126,7 @@ public:
         const Queue&,
         ClientID,
         const rocprofiler_packet&,
+        uint64_t,
         const queue_info_session_t::external_corr_id_map_t&,
         const context::correlation_id*)>;
     // Signals the completion of the kernel packet.

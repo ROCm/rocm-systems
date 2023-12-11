@@ -132,6 +132,7 @@ queue_cb(const std::shared_ptr<counter_callback_info>& info,
          const hsa::Queue&                             queue,
          hsa::ClientID,
          const hsa::rocprofiler_packet&                                  pkt,
+         uint64_t                                                        kernel_id,
          const hsa::Queue::queue_info_session_t::external_corr_id_map_t& extern_corr_ids,
          const context::correlation_id*                                  correlation_id)
 {
@@ -154,6 +155,7 @@ queue_cb(const std::shared_ptr<counter_callback_info>& info,
                   queue.get_agent().get_rocp_agent(),
                   _corr_id_v,
                   &pkt.kernel_dispatch,
+                  kernel_id,
                   info->callback_args,
                   &req_profile);
     if(req_profile.handle == 0) return nullptr;
@@ -325,9 +327,10 @@ start_context(context::context* ctx)
                 [=](const hsa::Queue&                                               q,
                     hsa::ClientID                                                   c,
                     const hsa::rocprofiler_packet&                                  kern_pkt,
+                    uint64_t                                                        kernel_id,
                     const hsa::Queue::queue_info_session_t::external_corr_id_map_t& extern_corr_ids,
                     const context::correlation_id* correlation_id) {
-                    return queue_cb(cb, q, c, kern_pkt, extern_corr_ids, correlation_id);
+                    return queue_cb(cb, q, c, kern_pkt, kernel_id, extern_corr_ids, correlation_id);
                 },
                 // Completion CB
                 [=](const hsa::Queue&                       q,
