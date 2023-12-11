@@ -47,6 +47,12 @@ def demarcate(function):
         return result
     return wrap_function
 
+def error(message):
+    logging.error("")
+    logging.error("[ERROR]: " + message)
+    logging.error("")
+    sys.exit(1)
+
 def trace_logger(message, *args, **kwargs):
     logging.log(logging.TRACE, message, *args, **kwargs)
 

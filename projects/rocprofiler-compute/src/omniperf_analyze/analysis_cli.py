@@ -23,7 +23,7 @@
 ##############################################################################el
 
 from omniperf_analyze.analysis_base import OmniAnalyze_Base
-from utils.utils import demarcate
+from utils.utils import demarcate, error
 from utils import file_io, parser, tty
 from utils.csv_processor import kernel_name_shortener
 
@@ -38,7 +38,7 @@ class cli_analysis(OmniAnalyze_Base):
         """
         super().pre_processing(omni_soc)
         if self.get_args().random_port:
-            self.error("--gui flag is required to enable --random-port")
+            error("--gui flag is required to enable --random-port")
         for d in self.get_args().path:
             # demangle and overwrite original 'KernelName'
             kernel_name_shortener(d[0], self.get_args().kernel_verbose)

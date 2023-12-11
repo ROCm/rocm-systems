@@ -29,7 +29,7 @@ import sys
 import copy
 from collections import OrderedDict
 from pathlib import Path
-from utils.utils import demarcate
+from utils.utils import demarcate, error
 from utils import schema, file_io, parser
 import pandas as pd
 from tabulate import tabulate
@@ -42,11 +42,6 @@ class OmniAnalyze_Base():
         self.__options = options
         self._output = None #NB: I made this public so children can modify/add to obj properties
 
-    def error(self,message):
-        logging.error("")
-        logging.error("[ERROR]: " + message)
-        logging.error("")
-        sys.exit(1)
     def get_args(self):
         return self.__args
     
@@ -91,7 +86,7 @@ class OmniAnalyze_Base():
             )
             sys.exit(0)
         else:
-            self.error("Unsupported arch")
+            error("Unsupported arch")
 
     @demarcate
     def load_options(self, normalization_filter):
@@ -109,7 +104,7 @@ class OmniAnalyze_Base():
                 for i in range(len(args.path) - 1):
                     args.gpu_kernel.extend(args.gpu_kernel)
             else:
-                self.error("Error: the number of --filter-kernels doesn't match the number of --dir.")
+                error("Error: the number of --filter-kernels doesn't match the number of --dir.")
     
     @demarcate
     def initalize_runs(self, avail_socs, normalization_filter=None):
@@ -143,16 +138,16 @@ class OmniAnalyze_Base():
         """Perform sanitization of inputs
         """
         if not self.__args.list_metrics and not self.__args.path:
-            self.error("The following arguments are required: -p/--path")
+            error("The following arguments are required: -p/--path")
         # verify not accessing parent directories
         if ".." in str(self.__args.path):
-            self.error("Access denied. Cannot access parent directories in path (i.e. ../)")
+            error("Access denied. Cannot access parent directories in path (i.e. ../)")
         # ensure absolute path
         for dir in self.__args.path:
             full_path = os.path.abspath(dir[0])
             dir[0] = full_path
             if not os.path.isdir(dir[0]):
-                self.error("Invalid directory {}\nPlease try again.".format(dir[0]))
+                error("Invalid directory {}\nPlease try again.".format(dir[0]))
     
     #----------------------------------------------------
     # Required methods to be implemented by child classes

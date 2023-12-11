@@ -29,7 +29,7 @@ import os
 from pathlib import Path
 import shutil
 from utils.specs import get_machine_specs
-from utils.utils import demarcate, trace_logger, get_version, get_version_display, detect_rocprof
+from utils.utils import demarcate, trace_logger, get_version, get_version_display, detect_rocprof, error
 from argparser import omniarg_parser
 import config
 import pandas as pd
@@ -107,12 +107,6 @@ class Omniperf:
         self.__version["ver_pretty"] = get_version_display(vData["version"], vData["sha"], vData["mode"])
         return
 
-    def error(self,message):
-        logging.error("")
-        logging.error("[ERROR]: " + message)
-        logging.error("")
-        sys.exit(1)
-
     def detect_profiler(self):
         #TODO:
         # Currently this will only be called in profile mode
@@ -150,7 +144,7 @@ class Omniperf:
         elif arch == "gfx90a":
             target = "mi200"
         else:
-            self.error("Unsupported SoC -> %s" % arch)
+            error("Unsupported SoC -> %s" % arch)
         
         self.__soc_name.add(target)
         if hasattr(self.__args, 'target'):
@@ -189,7 +183,7 @@ class Omniperf:
 
         if self.__args.mode == None:
             parser.print_help(sys.stderr)
-            self.error("Omniperf requires a valid mode.")
+            error("Omniperf requires a valid mode.")
 
         return
 
@@ -248,7 +242,7 @@ class Omniperf:
             from omniperf_analyze.analysis_webui import webui_analysis
             analyzer = webui_analysis(self.__args,self.__options)
         else:
-            self.error("Unsupported anlaysis mode -> %s" % self.__analyze_mode)
+            error("Unsupported anlaysis mode -> %s" % self.__analyze_mode)
 
         #-----------------------
         # run analysis workflow

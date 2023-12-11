@@ -28,7 +28,7 @@ import os
 import sys
 import time
 from dash import dcc
-from utils.utils import mibench, gen_sysinfo, demarcate
+from utils.utils import mibench, gen_sysinfo, demarcate, error
 from dash import html
 import plotly.graph_objects as go
 from utils.roofline_calc import calc_ai, constuct_roof
@@ -40,11 +40,6 @@ class Roofline:
     def __init__(self, args):
         self.__args = args
     
-    def error(self,message):
-        logging.error("")
-        logging.error("[ERROR]: " + message)
-        logging.error("")
-        sys.exit(1)
     def roof_setup(self):
         # set default workload path if not specified
         if self.__args.path == os.path.join(os.getcwd(), 'workloads'):
@@ -80,7 +75,7 @@ class Roofline:
             if not os.path.isfile(app_path):
                 logging.info("[roofline] pmc_perf.csv not found. Generating...")
                 if not self.__args.remaining:
-                    self.error("An <app_cmd> is required to run.\nomniperf profile -n test -- <app_cmd>")
+                    error("An <app_cmd> is required to run.\nomniperf profile -n test -- <app_cmd>")
                 #TODO: Add an equivelent of characterize_app() to run profiling directly out of this module
                 
         elif self.__args.no_roof:

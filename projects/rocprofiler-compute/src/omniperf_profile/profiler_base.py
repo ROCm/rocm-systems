@@ -27,7 +27,7 @@ import logging
 import glob
 import sys
 import os
-from utils.utils import capture_subprocess_output, run_prof, gen_sysinfo, run_rocscope
+from utils.utils import capture_subprocess_output, run_prof, gen_sysinfo, run_rocscope, error
 import config
 
 class OmniProfiler_Base():
@@ -37,12 +37,6 @@ class OmniProfiler_Base():
         self.__soc = soc
         
         self.__perfmon_dir = os.path.join(str(config.omniperf_home), "perfmon_configs")
-
-    def error(self,message):
-        logging.error("")
-        logging.error("[ERROR]: " + message)
-        logging.error("")
-        sys.exit(1)
 
     def get_args(self):
         return self.__args
@@ -58,22 +52,22 @@ class OmniProfiler_Base():
 
         # verify not accessing parent directories
         if ".." in str(self.__args.path):
-            self.error("Access denied. Cannot access parent directories in path (i.e. ../)")
+            error("Access denied. Cannot access parent directories in path (i.e. ../)")
         
         # verify correct formatting for application binary
         self.__args.remaining = self.__args.remaining[1:]
         if self.__args.remaining:
             if not os.path.isfile(self.__args.remaining[0]):
-                self.error("Your command %s doesn't point to a executable. Please verify." % self.__args.remaining[0])
+                error("Your command %s doesn't point to a executable. Please verify." % self.__args.remaining[0])
             self.__args.remaining = " ".join(self.__args.remaining)
         else:
-            self.error("Profiling command required. Pass application executable after -- at the end of options.\n\t\ti.e. omniperf profile -n vcopy -- ./vcopy 1048576 256")
+            error("Profiling command required. Pass application executable after -- at the end of options.\n\t\ti.e. omniperf profile -n vcopy -- ./vcopy 1048576 256")
         
         # verify name meets MongoDB length requirements and no illegal chars
         if len(self.__args.name) > 35:
-            self.error("-n/--name exceeds 35 character limit. Try again.")
+            error("-n/--name exceeds 35 character limit. Try again.")
         if self.__args.name.find(".") != -1 or self.__args.name.find("-") != -1:
-            self.error("'-' and '.' are not permitted in -n/--name")
+            error("'-' and '.' are not permitted in -n/--name")
 
     @abstractmethod
     def run_profiling(self, version:str, prog:str):
@@ -112,7 +106,7 @@ class OmniProfiler_Base():
                 )
                 # log output from profile filtering
                 if not success:
-                    self.error(output)
+                    error(output)
                 else:
                     logging.debug(output)
 
@@ -129,7 +123,7 @@ class OmniProfiler_Base():
                 )
                 # log output from profile filtering
                 if not success:
-                    self.error(output)
+                    error(output)
                 else:
                     logging.debug(output)
             logging.info("\nCurrent input file: %s" % fname)
@@ -141,7 +135,7 @@ class OmniProfiler_Base():
                 run_rocscope(self.__args, fname)
             else:
                 #TODO: Finish logic
-                self.error("profiler not supported")
+                error("profiler not supported")
 
     @abstractmethod
     def post_processing(self):
