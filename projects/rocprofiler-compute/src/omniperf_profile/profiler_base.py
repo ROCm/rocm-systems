@@ -36,7 +36,7 @@ class OmniProfiler_Base():
         self.__profiler = profiler_mode
         self.__soc = soc
         
-        self.__perfmon_dir = os.path.join(str(config.omniperf_home), "perfmon_configs")
+        self.__perfmon_dir = os.path.join(str(config.omniperf_home), "omniperf_soc", "profile_configs")
 
     def get_args(self):
         return self.__args

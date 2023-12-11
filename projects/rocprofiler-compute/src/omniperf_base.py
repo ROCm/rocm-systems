@@ -132,6 +132,10 @@ class Omniperf:
 
     @demarcate
     def detect_soc(self, arch=None):
+        """Load OmniSoC instance for Omniperf run
+        """
+        # in case of analyze mode, we can explicitly specify an arch
+        # rather than detect from rocminfo
         if not arch:
             mspec = get_machine_specs(0)
             arch = mspec.GPU

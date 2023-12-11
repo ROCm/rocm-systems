@@ -57,19 +57,6 @@ def load_sys_info(f):
     return pd.read_csv(f)
 
 
-def load_soc_params(dir):
-    """
-    Load soc params for all supported archs to a df.
-    """
-    df = pd.DataFrame()
-    for root, dirs, files in os.walk(dir):
-        for f in files:
-            if f.endswith(".csv"):
-                tmp_df = pd.read_csv(os.path.join(root, f))
-                df = pd.concat([tmp_df, df])
-    df.set_index("name", inplace=True)
-    return df
-
 def load_panel_configs(dir):
     """
     Load all panel configs from yaml file.

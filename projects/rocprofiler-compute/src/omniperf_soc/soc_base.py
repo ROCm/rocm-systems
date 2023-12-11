@@ -51,11 +51,6 @@ class OmniSoC_Base():
             return NotImplemented
         return self.__soc == other.get_soc()
 
-    def error(self,message):
-        logging.error("")
-        logging.error("[ERROR]: " + message)
-        logging.error("")
-        sys.exit(1)
     def set_perfmon_dir(self, path:str):
         self.__perfmon_dir = path
     def set_perfmon_config(self, config: dict):

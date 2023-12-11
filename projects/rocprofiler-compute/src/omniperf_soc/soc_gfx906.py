@@ -32,7 +32,7 @@ class gfx906_soc (OmniSoC_Base):
         super().__init__(args)
         soc = "gfx906"
         self.set_soc(soc)
-        self.set_perfmon_dir(os.path.join(str(config.omniperf_home), "perfmon_configs", soc))
+        self.set_perfmon_dir(os.path.join(str(config.omniperf_home), "omniperf_soc", "profile_configs", soc))
         # Per IP block max number of simulutaneous counters. GFX IP Blocks
         self.set_perfmon_config(
             {

@@ -35,10 +35,9 @@ class gfx90a_soc (OmniSoC_Base):
         soc = "gfx90a"
         self.set_soc(soc)
         if hasattr(self.get_args(), 'roof_only') and self.get_args().roof_only:
-            self.set_perfmon_dir(os.path.join(str(config.omniperf_home), "perfmon_configs", "roofline"))
+            self.set_perfmon_dir(os.path.join(str(config.omniperf_home), "omniperf_soc", "profile_configs", "roofline"))
         else:
-            self.set_perfmon_dir(os.path.join(str(config.omniperf_home), "perfmon_configs", soc)) 
-        self.__metric_config_dir = os.path.join(str(config.omniperf_home), "metric_configs", soc)
+            self.set_perfmon_dir(os.path.join(str(config.omniperf_home), "omniperf_soc", "profile_configs", soc)) 
         # Per IP block max number of simulutaneous counters. GFX IP Blocks
         self.set_perfmon_config(
             {

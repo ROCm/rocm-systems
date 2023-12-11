@@ -504,7 +504,7 @@ def omniarg_parser(parser, omniperf_home, omniperf_version):
         dest="config_dir",
         metavar="",
         help="\t\tSpecify the directory of customized configs.",
-        default=omniperf_home.joinpath("omniperf_soc/configs"),
+        default=omniperf_home.joinpath("omniperf_soc/analysis_configs/"),
     )
     analyze_advanced_group.add_argument(
         "--save-dfs",
