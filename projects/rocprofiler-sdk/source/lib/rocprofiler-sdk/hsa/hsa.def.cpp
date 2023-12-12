@@ -313,6 +313,14 @@ HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_API_TABLE_ID_AmdExt,
                           alloc_handle,
                           pool,
                           type)
+#        if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x01
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_API_TABLE_ID_AmdExt,
+                          ROCPROFILER_HSA_API_ID_hsa_amd_agent_set_async_scratch_limit,
+                          hsa_amd_agent_set_async_scratch_limit,
+                          hsa_amd_agent_set_async_scratch_limit_fn,
+                          agent,
+                          threshold)
+#        endif
 #    endif
 
 #else

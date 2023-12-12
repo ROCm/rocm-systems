@@ -124,7 +124,7 @@ static_assert(HSA_IMAGE_API_TABLE_MAJOR_VERSION == 0x02,
 
 static_assert(HSA_CORE_API_TABLE_STEP_VERSION == 0x00,
               "Change in the major version of HSA core API table");
-static_assert(HSA_AMD_EXT_API_TABLE_STEP_VERSION == 0x00,
+static_assert(HSA_AMD_EXT_API_TABLE_STEP_VERSION == 0x01,
               "Change in the major version of HSA amd-extended API table");
 static_assert(HSA_FINALIZER_API_TABLE_STEP_VERSION == 0x00,
               "Change in the major version of HSA finalizer API table");
@@ -152,7 +152,7 @@ struct table_size<ROCPROFILER_COMPUTE_VERSION(1, 12, 0)>
 {
     static constexpr size_t finalizer_ext = 64;
     static constexpr size_t image_ext     = 120;
-    static constexpr size_t amd_ext       = 552;
+    static constexpr size_t amd_ext       = 560;
     static constexpr size_t core_api_ext  = 1016;
 };
 

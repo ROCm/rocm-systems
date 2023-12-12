@@ -1305,5 +1305,12 @@ typedef union rocprofiler_hsa_api_args_u
         hsa_amd_memory_pool_t*      pool;
         hsa_amd_memory_type_t*      type;
     } hsa_amd_vmem_get_alloc_properties_from_handle;
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x01
+    struct
+    {
+        hsa_agent_t agent;
+        size_t      threshold;
+    } hsa_amd_agent_set_async_scratch_limit;
+#    endif
 #endif
 } rocprofiler_hsa_api_args_t;

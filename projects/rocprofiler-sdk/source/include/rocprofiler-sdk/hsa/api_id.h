@@ -242,6 +242,9 @@ typedef enum  // NOLINT(performance-enum-size)
     ROCPROFILER_HSA_API_ID_hsa_amd_vmem_import_shareable_handle,
     ROCPROFILER_HSA_API_ID_hsa_amd_vmem_retain_alloc_handle,
     ROCPROFILER_HSA_API_ID_hsa_amd_vmem_get_alloc_properties_from_handle,
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x01
+    ROCPROFILER_HSA_API_ID_hsa_amd_agent_set_async_scratch_limit,
+#    endif
 #endif
 
     ROCPROFILER_HSA_API_ID_LAST,
