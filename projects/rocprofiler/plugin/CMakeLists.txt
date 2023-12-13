@@ -32,10 +32,6 @@ if(ROCPROFILER_BUILD_PLUGIN_PERFETTO)
     add_subdirectory(perfetto)
 endif()
 
-if(ROCPROFILER_BUILD_PLUGIN_CTF)
-    add_subdirectory(ctf)
-endif()
-
 if(ROCPROFILER_BUILD_PLUGIN_ATT)
     add_subdirectory(att)
 endif()

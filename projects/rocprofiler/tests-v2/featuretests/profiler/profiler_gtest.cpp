@@ -1347,7 +1347,7 @@ class VectorAddCTFTest : public CTFPluginTest {
   bool hasFile() { return hasMetadataInDir("/tmp/tests-v2/ctf/"); }
 };
 
-TEST_F(VectorAddCTFTest, WhenRunningProfilerWithCTFTest) { EXPECT_EQ(hasFile(), true); }
+TEST_F(VectorAddCTFTest, DISABLED_WhenRunningProfilerWithCTFTest) { EXPECT_EQ(hasFile(), true); }
 
 class VectorAddCTFMPITest : public CTFPluginTest {
  protected:
@@ -1362,7 +1362,7 @@ class VectorAddCTFMPITest : public CTFPluginTest {
   bool hasFile() { return hasMetadataInDir("/tmp/tests-v2/ctf_7/"); }
 };
 
-TEST_F(VectorAddCTFMPITest, WhenRunningProfilerWithCTFTest) { EXPECT_EQ(hasFile(), true); }
+TEST_F(VectorAddCTFMPITest, DISABLED_WhenRunningProfilerWithCTFTest) { EXPECT_EQ(hasFile(), true); }
 
 /*
  * ###################################################
