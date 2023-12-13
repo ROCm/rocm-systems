@@ -245,12 +245,6 @@ install(
              src/utils/rooflines/roofline-ubuntu20_04-mi200-rocm5
     DESTINATION ${CMAKE_INSTALL_BINDIR}/utils/rooflines)
 
-# src/soc_params
-install(
-    DIRECTORY src/soc_params
-    TYPE BIN
-    PATTERN "__pycache__" EXCLUDE)
-
 # samples
 install(DIRECTORY sample TYPE DATA)
 

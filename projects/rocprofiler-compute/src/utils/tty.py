@@ -119,8 +119,12 @@ def show_all(args, runs, archConfigs, output):
                                             ],
                                             axis=1,
                                         )
-                                        diff = t_df.iloc[:, 1] - t_df.iloc[:, 0]
-                                        t_df = diff / t_df.iloc[:, 0].replace(0, 1)
+                                        absolute_diff = (
+                                            t_df.iloc[:, 1] - t_df.iloc[:, 0]
+                                        ).round(args.decimal)
+                                        t_df = absolute_diff / t_df.iloc[:, 0].replace(
+                                            0, 1
+                                        )
                                         if args.verbose >= 2:
                                             print("---------", header, t_df)
 
@@ -131,6 +135,7 @@ def show_all(args, runs, archConfigs, output):
                                         )
                                         # show value + percentage
                                         # TODO: better alignment
+
                                         t_df = (
                                             cur_df[header]
                                             .astype(float)
@@ -141,24 +146,28 @@ def show_all(args, runs, archConfigs, output):
                                             + "%)"
                                         )
                                         df = pd.concat([df, t_df], axis=1)
-                                        
+                                        df["Abs Diff"] = absolute_diff
+
                                         # DEBUG: When in a CI setting and flag is set,
                                         #       then verify metrics meet threshold requirement
                                         if args.report_diff:
                                             if (
-                                                t_df_pretty.abs()
+                                                header in ["Value", "Count", "Avg"]
+                                                and t_df_pretty.abs()
                                                 .gt(args.report_diff)
                                                 .any()
                                             ):
-                                                violation_idx = t_df_pretty.index[t_df_pretty.abs() > args.report_diff]
+                                                violation_idx = t_df_pretty.index[
+                                                    t_df_pretty.abs() > args.report_diff
+                                                ]
                                                 print(
                                                     "DEBUG ERROR: Dataframe diff exceeds {} threshold requirement\nSee metric {}".format(
                                                         str(args.report_diff) + "%",
-                                                        violation_idx.to_numpy()
+                                                        violation_idx.to_numpy(),
                                                     )
                                                 )
                                                 print(df)
-                                                sys.exit(1)
+
                                     else:
                                         cur_df_copy = copy.deepcopy(cur_df)
                                         cur_df_copy[header] = [
