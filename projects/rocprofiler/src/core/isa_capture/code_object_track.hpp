@@ -43,8 +43,8 @@ class codeobj_capture_instance {
     uint64_t start_time,
     uint32_t id
   )
-    : addr(_addr), load_size(_load_size), start_time(start_time), URI(_uri),
-    mem_addr(mem_addr), mem_size(mem_size), load_id(id) {};
+    : addr(_addr), load_size(_load_size), start_time(start_time),
+    load_id(id), URI(_uri), mem_addr(mem_addr), mem_size(mem_size) {};
 
   void setmode(rocprofiler_codeobj_capture_mode_t mode);
 

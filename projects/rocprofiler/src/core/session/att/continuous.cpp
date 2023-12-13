@@ -221,7 +221,6 @@ bool AttTracer::ATTContiguousWriteInterceptor(
     std::lock_guard<std::mutex> lk(att_enable_disable_mutex);
     // If att_start already exists, don't start again
     bool bIsActive = this->HasActiveTracerATT(agent_handle);
-    auto agent_pending_packets = pending_stop_packets.find(agent_handle);
     if (bIsActive)
       insertStart = {};
 

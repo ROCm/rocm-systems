@@ -96,11 +96,11 @@ class RegisterWatchList:
             dst = line.split(" ")[1].strip()
             label_dests = []
             try:
-                label_dests = next_line.split(", ")
+                label_dests = next_line[0].split(", ")
             except:
                 pass
             try:
-                label_dests.append(next_line.split(", ")[-1].split("@")[0])
+                label_dests.append(next_line[0].split(", ")[-1].split("@")[0])
             except:
                 pass
 
@@ -540,7 +540,7 @@ def stitch(insts, raw_code, jumps, gfxv, bIsAuto, codeservice):
                     print('WARNING: Parsing terminated at:', as_line)
                     break
 
-        if as_line[1] != DONT_KNOW:
+        if matched or as_line[1] != DONT_KNOW or 's_barrier' in as_line[0]:
             if matched:
                 inst.asmline = reverse_map[line]
                 result.append(inst)

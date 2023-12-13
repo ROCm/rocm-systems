@@ -91,7 +91,7 @@ void codeobj_capture_instance::Unload(uint64_t addr) {
 
   if (codeobj_record::codeobjs.find(addr) == codeobj_record::codeobjs.end()) return;
 
-  eventcount.fetch_add(1, std::memory_order_relaxed)+1;
+  eventcount.fetch_add(1, std::memory_order_relaxed);
   auto time = rocprofiler::ROCProfiler_Singleton::GetInstance().timestamp_ns().value;
   codeobj_record::codeobjs.at(addr)->end_time = time;
   codeobj_record::codeobjs.erase(addr);

@@ -107,6 +107,8 @@ CodeObjDecoderComponent::CodeObjDecoderComponent(
     Dwarf_Off cu_offset{0}, next_offset;
     size_t header_size;
 
+    std::unordered_set<uint64_t> used_addrs;
+
     while (!dwarf_nextcu(dbg.get(), cu_offset, &next_offset, &header_size, nullptr, nullptr,
                          nullptr)) {
       Dwarf_Die die;
@@ -116,7 +118,6 @@ CodeObjDecoderComponent::CodeObjDecoderComponent(
       size_t line_count;
       if (dwarf_getsrclines(&die, &lines, &line_count)) continue;
 
-      std::shared_ptr<std::string> dwarf_line_number{nullptr};
       for (size_t i = 0; i < line_count; ++i) {
         Dwarf_Addr addr;
         int line_number;
@@ -125,26 +126,42 @@ CodeObjDecoderComponent::CodeObjDecoderComponent(
         if (line && !dwarf_lineaddr(line, &addr) && !dwarf_lineno(line, &line_number) && line_number)
         {
           std::string src = dwarf_linesrc(line, nullptr, nullptr);
-          dwarf_line_number = std::make_shared<std::string>(src + ':' + std::to_string(line_number));
-        }
+          auto dwarf_line = src + ':' + std::to_string(line_number);
 
-        if (dwarf_line_number.get())
-          m_line_number_map[addr] = dwarf_line_number;
+          if (used_addrs.find(addr) != used_addrs.end())
+          {
+            size_t pos = m_line_number_map.lower_bound(addr);
+            m_line_number_map.data()[pos].str += ' ' + dwarf_line;
+            continue;
+          }
+
+          used_addrs.insert(addr);
+          m_line_number_map.insert(DSourceLine{addr, 0, std::move(dwarf_line)});
+        }
       }
       cu_offset = next_offset;
     }
-    // load_symbol_map();
   }
 
   // Can throw
   disassembly = std::make_unique<DisassemblyInstance>(codeobj_data, codeobj_size, gpu_id);
+  if (m_line_number_map.size())
+  {
+    size_t total_size = 0;
+    for (size_t i=0; i<m_line_number_map.size()-1; i++)
+    {
+      size_t s = m_line_number_map.get(i+1).vaddr - m_line_number_map.get(i).vaddr;
+      m_line_number_map.data()[i].size = s;
+      total_size += s;
+    }
+    m_line_number_map.back().size = std::max(total_size, codeobj_size) - total_size;
+  }
   try {
     m_symbol_map = disassembly->GetKernelMap(); // Can throw
   } catch(...) {}
 
   //disassemble_kernels();
 }
-
 
 CodeObjDecoderComponent::~CodeObjDecoderComponent() {
   if (m_fd) ::close(m_fd);
@@ -178,11 +195,12 @@ CodeObjDecoderComponent::disassemble_instruction(uint64_t faddr, uint64_t vaddr)
   if (!disassembly)
     throw std::exception();
 
-  char* cpp_line = nullptr;
+  const char* cpp_line = nullptr;
 
-  auto it = m_line_number_map.find(vaddr);
-  if (it != m_line_number_map.end())
-    cpp_line = it->second->data();
+  try {
+    const DSourceLine& it = m_line_number_map.find_obj(vaddr);
+    cpp_line = it.str.data();
+  } catch(...) {}
 
   size_t size = disassembly->ReadInstruction(faddr, vaddr, cpp_line);
   return {disassembly->last_instruction, size};

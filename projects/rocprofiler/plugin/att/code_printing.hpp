@@ -32,6 +32,15 @@
 #include "disassembly.hpp"
 #include "segment.hpp"
 
+struct DSourceLine
+{
+  uint64_t vaddr;
+  uint64_t size;
+  std::string str;
+  uint64_t begin() const { return vaddr; }
+  bool inrange(uint64_t addr) const { return addr >= vaddr && addr < vaddr+size; }
+};
+
 class CodeObjDecoderComponent
 {
 public:
@@ -48,7 +57,7 @@ public:
 
   int m_fd;
 
-  std::map<uint64_t, std::shared_ptr<std::string>> m_line_number_map{};
+  cached_ordered_vector<DSourceLine> m_line_number_map;
   std::map<uint64_t, SymbolInfo> m_symbol_map{};
 
   std::string m_uri;
