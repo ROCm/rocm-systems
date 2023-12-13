@@ -43,6 +43,8 @@ extern "C" {
 #pragma weak rocprofiler_set_api_table
 #pragma weak rocprofiler_register_import_hip
 #pragma weak rocprofiler_register_import_hip_static
+#pragma weak rocprofiler_register_import_hip_compiler
+#pragma weak rocprofiler_register_import_hip_compiler_static
 #pragma weak rocprofiler_register_import_hsa
 #pragma weak rocprofiler_register_import_hsa_static
 #pragma weak rocprofiler_register_import_roctx
@@ -58,6 +60,9 @@ extern uint32_t
 rocprofiler_register_import_hip(void);
 
 extern uint32_t
+rocprofiler_register_import_hip_compiler(void);
+
+extern uint32_t
 rocprofiler_register_import_hsa(void);
 
 extern uint32_t
@@ -65,6 +70,9 @@ rocprofiler_register_import_roctx(void);
 
 extern uint32_t
 rocprofiler_register_import_hip_static(void);
+
+extern uint32_t
+rocprofiler_register_import_hip_compiler_static(void);
 
 extern uint32_t
 rocprofiler_register_import_hsa_static(void);
@@ -96,6 +104,7 @@ enum rocp_reg_supported_library  // NOLINT(performance-enum-size)
     ROCP_REG_HSA = 0,
     ROCP_REG_HIP,
     ROCP_REG_ROCTX,
+    ROCP_REG_HIP_COMPILER,
     ROCP_REG_LAST,
 };
 
@@ -144,6 +153,11 @@ ROCP_REG_DEFINE_LIBRARY_TRAITS(ROCP_REG_ROCTX,
                                "roctx",
                                "rocprofiler_register_import_roctx",
                                "libroctx64.so.[4-9]($|\\.[0-9\\.]+)")
+
+ROCP_REG_DEFINE_LIBRARY_TRAITS(ROCP_REG_HIP_COMPILER,
+                               "hip_compiler",
+                               "rocprofiler_register_import_hip_compiler",
+                               "libamdhip64.so.[6-9]($|\\.[0-9\\.]+)")
 
 ROCP_REG_DEFINE_ERROR_MESSAGE(ROCP_REG_SUCCESS, "Success")
 ROCP_REG_DEFINE_ERROR_MESSAGE(ROCP_REG_NO_TOOLS, "rocprofiler-register found no tools")
@@ -234,12 +248,18 @@ rocp_reg_scan_for_tools()
         if(rocprofiler_lib_handle && rocprofiler_lib_config_fn)
             return std::make_pair(rocprofiler_lib_handle, rocprofiler_lib_config_fn);
 
+        if(_rocp_reg_lib.empty()) _rocp_reg_lib = rocprofiler_lib_name;
+
         std::tie(rocprofiler_lib_handle, rocprofiler_lib_config_fn) =
-            rocp_load_rocprofiler_lib(rocprofiler_lib_name);
+            rocp_load_rocprofiler_lib(_rocp_reg_lib);
 
         if(!rocprofiler_lib_config_fn)
             std::tie(rocprofiler_lib_handle, rocprofiler_lib_config_fn) =
                 rocp_load_rocprofiler_lib("librocprofiler64.so");
+
+        LOG_IF(FATAL, !rocprofiler_lib_config_fn)
+            << rocprofiler_lib_register_entrypoint << " not found. Tried to dlopen "
+            << _rocp_reg_lib << " and librocprofiler64.so";
     }
     else if(_found_tool && rocprofiler_set_api_table)
     {
@@ -296,13 +316,13 @@ rocp_load_rocprofiler_lib(std::string _rocp_reg_lib)
         LOG(INFO) << "loaded " << _rocp_reg_lib_path_fname.string() << " library at "
                   << _rocp_reg_lib_path.string();
 
-    LOG_IF(FATAL, rocprofiler_lib_handle == nullptr)
+    LOG_IF(WARNING, rocprofiler_lib_handle == nullptr)
         << _rocp_reg_lib << " failed to load\n";
 
     *(void**) (&rocprofiler_lib_config_fn) =
         dlsym(rocprofiler_lib_handle, rocprofiler_lib_register_entrypoint);
 
-    LOG_IF(FATAL, rocprofiler_lib_config_fn == nullptr)
+    LOG_IF(WARNING, rocprofiler_lib_config_fn == nullptr)
         << _rocp_reg_lib << " did not contain '" << rocprofiler_lib_register_entrypoint
         << "' symbol\n";
 

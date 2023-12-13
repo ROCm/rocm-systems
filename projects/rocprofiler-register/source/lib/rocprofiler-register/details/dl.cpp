@@ -44,8 +44,7 @@ namespace binary
 {
 namespace
 {
-const open_modes_vec_t default_link_open_modes = { (RTLD_LAZY | RTLD_NOLOAD),
-                                                   (RTLD_LAZY | RTLD_LOCAL) };
+const open_modes_vec_t default_link_open_modes = { (RTLD_LAZY | RTLD_NOLOAD) };
 }  // namespace
 
 std::vector<segment_address_ranges>
