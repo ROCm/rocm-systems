@@ -4836,14 +4836,10 @@ rsmi_dev_memory_partition_set(uint32_t dv_ind,
          << devInfoTypesStrings.at(amd::smi::kDevMemoryPartition)
          << " | Cause: device board name does not support this action"
          << " | Returning = "
-         << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS) << " |";
+         << getRSMIStatusString(RSMI_STATUS_NOT_SUPPORTED) << " |";
       LOG_ERROR(ss);
     return RSMI_STATUS_NOT_SUPPORTED;
   }
-
-  std::string newMemoryPartition
-              = mapRSMIToStringMemoryPartitionTypes.at(memory_partition);
-  std::string currentMemoryPartition;
 
   switch (memory_partition) {
     case RSMI_MEMORY_PARTITION_NPS1:
@@ -4865,6 +4861,9 @@ rsmi_dev_memory_partition_set(uint32_t dv_ind,
       LOG_ERROR(ss);
       return RSMI_STATUS_INVALID_ARGS;
   }
+  std::string newMemoryPartition
+              = mapRSMIToStringMemoryPartitionTypes.at(memory_partition);
+  std::string currentMemoryPartition;
 
   // do nothing if memory_partition is the current mode
   rsmi_status_t ret_get = get_memory_partition(dv_ind, currentMemoryPartition);
@@ -4907,6 +4906,9 @@ rsmi_dev_memory_partition_set(uint32_t dv_ind,
 
   if (amd::smi::ErrnoToRsmiStatus(ret) != RSMI_STATUS_SUCCESS) {
     rsmi_status_t err = amd::smi::ErrnoToRsmiStatus(ret);
+    if (ret == EACCES) {
+      err = RSMI_STATUS_NOT_SUPPORTED;  // already verified permissions
+    }
     ss << __PRETTY_FUNCTION__
        << " | ======= end ======= "
        << " | Fail "

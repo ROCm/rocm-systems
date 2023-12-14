@@ -53,6 +53,7 @@
 #include "gtest/gtest.h"
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi_test/functional/memorypartition_read_write.h"
+#include "rocm_smi/rocm_smi_utils.h"
 #include "rocm_smi_test/test_common.h"
 
 TestMemoryPartitionReadWrite::TestMemoryPartitionReadWrite() : TestBase() {
@@ -123,6 +124,7 @@ void TestMemoryPartitionReadWrite::Run(void) {
   }
 
   for (uint32_t dv_ind = 0; dv_ind < num_monitor_devs(); ++dv_ind) {
+    bool wasSetSuccess = false;
     if (dv_ind != 0) {
       IF_VERB(STANDARD) {
         std::cout << std::endl;
@@ -197,8 +199,10 @@ void TestMemoryPartitionReadWrite::Run(void) {
     /* rsmi_dev_memory_partition_set(...) */
     /******************************/
     // Verify api support checking functionality is working
-    rsmi_memory_partition_type new_memory_partition;
+    rsmi_memory_partition_type new_memory_partition = {};
     err = rsmi_dev_memory_partition_set(dv_ind, new_memory_partition);
+    std::cout << "\t**rsmi_dev_memory_partition_set(null ptr): "
+              << amd::smi::getRSMIStatusString(err, false) << "\n";
     // Note: new_memory_partition is not set
     ASSERT_TRUE((err == RSMI_STATUS_INVALID_ARGS) ||
                 (err == RSMI_STATUS_NOT_SUPPORTED));
@@ -264,7 +268,18 @@ void TestMemoryPartitionReadWrite::Run(void) {
                   << memoryPartitionString(new_memory_partition) << std::endl;
       }
       ret = rsmi_dev_memory_partition_set(dv_ind, new_memory_partition);
-      CHK_ERR_ASRT(ret)
+      if (ret == RSMI_STATUS_NOT_SUPPORTED) {
+        IF_VERB(STANDARD) {
+          std::cout << "\t**" <<  ": "
+                    << "Not supported on this machine" << std::endl;
+        }
+        break;
+      } else {
+        CHK_ERR_ASRT(ret)
+      }
+      if (ret != RSMI_STATUS_SUCCESS) {  // do not continue trying to reset
+        wasSetSuccess = true;
+      }
 
       ret = rsmi_dev_memory_partition_get(dv_ind, current_memory_partition,
                                           255);
@@ -301,7 +316,7 @@ void TestMemoryPartitionReadWrite::Run(void) {
                 << "Current memory partition: " << current_memory_partition
                 << std::endl;
     }
-    if (wasResetSuccess) {
+    if (wasResetSuccess && wasSetSuccess) {
       ASSERT_STRNE(oldMode.c_str(), current_memory_partition);
       IF_VERB(STANDARD) {
       std::cout << "\t**"

@@ -237,8 +237,10 @@ void TestComputePartitionReadWrite::Run(void) {
     }
 
     // Verify api support checking functionality is working
-    err = rsmi_dev_compute_partition_set(dv_ind,
-      RSMI_COMPUTE_PARTITION_INVALID);
+    rsmi_compute_partition_type_t breakMe;
+    err = rsmi_dev_compute_partition_set(dv_ind, breakMe);
+    std::cout << "\t**rsmi_dev_compute_partition_set(null ptr): "
+              << amd::smi::getRSMIStatusString(err, false) << "\n";
     ASSERT_TRUE((err == RSMI_STATUS_INVALID_ARGS) ||
                 (err == RSMI_STATUS_NOT_SUPPORTED) ||
                 (err == RSMI_STATUS_PERMISSION));
