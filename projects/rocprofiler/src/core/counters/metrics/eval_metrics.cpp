@@ -1,8 +1,12 @@
 #include "eval_metrics.h"
 #include "src/utils/helper.h"
 #include "src/core/hsa/hsa_support.h"
+#include <cstdint>
+#include <exception>
 #include <set>
+#include <utility>
 #include <math.h>
+#include <sys/types.h>
 
 using namespace rocprofiler;
 
@@ -27,6 +31,7 @@ typedef struct {
   std::vector<results_t*>* results;
   size_t index;
   uint32_t single_xcc_buff_size;
+  uint32_t umc_buff_size;
 } callback_data_t;
 
 static inline bool IsEventMatch(const hsa_ven_amd_aqlprofile_event_t& event1,
@@ -35,22 +40,35 @@ static inline bool IsEventMatch(const hsa_ven_amd_aqlprofile_event_t& event1,
       (event1.counter_id == event2.counter_id);
 }
 
+uint32_t calculate_xcc_index(callback_data_t* passed_data) {
+  // xcc_0 is special case as it contains all umc event results
+  // after xcc_0, there are no umc event results
+  uint32_t xcc_zero_size = passed_data->umc_buff_size + passed_data->single_xcc_buff_size;
+  uint32_t xcc_index = 0;
+  if (passed_data->index >= xcc_zero_size)
+    xcc_index = 1 + floor((passed_data->index - xcc_zero_size) / passed_data->single_xcc_buff_size);
+  return xcc_index;
+}
+
 hsa_status_t pmcCallback(hsa_ven_amd_aqlprofile_info_type_t info_type,
                          hsa_ven_amd_aqlprofile_info_data_t* info_data, void* data) {
   hsa_status_t status = HSA_STATUS_SUCCESS;
   callback_data_t* passed_data = reinterpret_cast<callback_data_t*>(data);
 
-  for (auto data_it = passed_data->results->begin(); data_it != passed_data->results->end(); ++data_it) {
-    if (info_type != HSA_VEN_AMD_AQLPROFILE_INFO_PMC_DATA)
-      continue;
-    if (!IsEventMatch(info_data->pmc_data.event, (*data_it)->event))
-      continue;
+  try {
+    for (auto data_it = passed_data->results->begin(); data_it != passed_data->results->end();
+         ++data_it) {
+      if (info_type != HSA_VEN_AMD_AQLPROFILE_INFO_PMC_DATA) continue;
+      if (!IsEventMatch(info_data->pmc_data.event, (*data_it)->event)) continue;
 
-    uint32_t xcc_index = floor(passed_data->index / passed_data->single_xcc_buff_size);
-    // stores event result from each xcc separately
-    (*data_it)->xcc_vals.at(xcc_index) += info_data->pmc_data.result;
-    // stores accumulated event result from all xccs
-    (*data_it)->val_double += info_data->pmc_data.result;
+      uint32_t xcc_index = calculate_xcc_index(passed_data);
+      // stores event result from each xcc separately
+      (*data_it)->xcc_vals.at(xcc_index) += info_data->pmc_data.result;
+      // stores accumulated event result from all xccs
+      (*data_it)->val_double += info_data->pmc_data.result;
+    }
+  } catch (std::exception& e) {
+    std::cout << "caught an exception in eval_metrics.cpp:pmcCallback(): " << e.what() << std::endl;
   }
 
   passed_data->index += 1;
@@ -180,11 +198,36 @@ bool metrics::ExtractMetricEvents(
 }
 
 
+std::pair<uint32_t, uint32_t> get_umc_and_xcc_sample_count(
+    hsa_ven_amd_aqlprofile_profile_t* profile, uint32_t xcc_num) {
+  const uint32_t UMC_SAMPLE_BYTE_SIZE = 8;
+
+  uint32_t umc_sample_count = 0;
+  if (xcc_num > 1) {
+    // We count the UMC samples per XCC for MI300: for each event there are AID samples
+    for (const hsa_ven_amd_aqlprofile_event_t* p = profile->events;
+         p < profile->events + profile->event_count; ++p) {
+      if (p->block_name == HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_UMC) {
+          ++umc_sample_count;
+      }
+    }
+  }
+
+  // per xcc sample count
+  uint32_t xcc_sample_count =
+      (profile->output_buffer.size - umc_sample_count * UMC_SAMPLE_BYTE_SIZE) /
+      (sizeof(uint64_t) * xcc_num);
+
+  return std::make_pair(xcc_sample_count, umc_sample_count);
+}
+
 bool metrics::GetCounterData(hsa_ven_amd_aqlprofile_profile_t* profile, hsa_agent_t gpu_agent,
                              std::vector<results_t*>& results_list) {
   uint32_t xcc_count = HSASupport_Singleton::GetInstance().GetHSAAgentInfo(gpu_agent.handle).GetDeviceInfo().getXccCount();
-  uint32_t single_xcc_buff_size = profile->output_buffer.size / (sizeof(uint64_t) * xcc_count);
-  callback_data_t callback_data{&results_list, 0, single_xcc_buff_size};
+  auto umc_count_and_xcc_sample_count = get_umc_and_xcc_sample_count(profile, xcc_count);
+  uint32_t single_xcc_buff_size = umc_count_and_xcc_sample_count.first;
+  uint32_t umc_buff_size = umc_count_and_xcc_sample_count.second;
+  callback_data_t callback_data{&results_list, 0, single_xcc_buff_size, umc_buff_size};
   hsa_status_t status = hsa_ven_amd_aqlprofile_iterate_data(profile, pmcCallback, &callback_data);
   return (status == HSA_STATUS_SUCCESS);
 }
