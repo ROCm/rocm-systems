@@ -51,4 +51,4 @@ endif()
 install(
     TARGETS transpose
     DESTINATION bin
-    COMPONENT rocprofiler-test-apps)
+    COMPONENT tests)

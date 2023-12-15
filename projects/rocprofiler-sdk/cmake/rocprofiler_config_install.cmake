@@ -5,14 +5,22 @@ include(CMakePackageConfigHelpers)
 
 set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME config)
 
-install(DIRECTORY ${PROJECT_SOURCE_DIR}/samples
-        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}-sdk)
+install(
+    DIRECTORY ${PROJECT_SOURCE_DIR}/samples
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}-sdk
+    COMPONENT samples)
+
+install(
+    DIRECTORY ${PROJECT_SOURCE_DIR}/tests
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}-sdk
+    COMPONENT tests)
 
 install(
     EXPORT rocprofiler-sdk-library-targets
     FILE rocprofiler-sdk-library-targets.cmake
     NAMESPACE rocprofiler::
-    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/cmake/${PROJECT_NAME}-sdk)
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/cmake/${PROJECT_NAME}-sdk
+    COMPONENT development)
 
 # ------------------------------------------------------------------------------#
 # install tree
@@ -37,9 +45,9 @@ write_basic_package_version_file(
 install(
     FILES
         ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/cmake/${PROJECT_NAME}-sdk/${PROJECT_NAME}-sdk-config.cmake
-        ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/cmake/${PROJECT_NAME}-sdk/${PROJECT_NAME}-sdk-version.cmake
+        ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/cmake/${PROJECT_NAME}-sdk/${PROJECT_NAME}-sdk-config-version.cmake
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/cmake/${PROJECT_NAME}-sdk
-    OPTIONAL)
+    COMPONENT development)
 
 export(PACKAGE ${PROJECT_NAME})
 

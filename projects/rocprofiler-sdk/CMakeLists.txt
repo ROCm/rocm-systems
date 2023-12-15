@@ -30,6 +30,8 @@ project(
     DESCRIPTION "ROCm GPU performance analysis"
     HOMEPAGE_URL "https://github.com/ROCm-Developer-Tools/rocprofiler-v2-internal")
 
+set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME "core")
+
 find_package(Git)
 
 if(Git_FOUND AND EXISTS "${PROJECT_SOURCE_DIR}/.git")

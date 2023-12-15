@@ -33,8 +33,10 @@ set(ROCPROFILER_HEADER_FILES
     spm.h
     ${CMAKE_CURRENT_BINARY_DIR}/version.h)
 
-install(FILES ${ROCPROFILER_HEADER_FILES}
-        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rocprofiler-sdk)
+install(
+    FILES ${ROCPROFILER_HEADER_FILES}
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rocprofiler-sdk
+    COMPONENT development)
 
 add_subdirectory(hip)
 add_subdirectory(hsa)

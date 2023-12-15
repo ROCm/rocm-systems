@@ -5,5 +5,7 @@
 #
 set(ROCPROFILER_MARKER_HEADER_FILES api_args.h api_id.h)
 
-install(FILES ${ROCPROFILER_MARKER_HEADER_FILES}
-        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rocprofiler-sdk/marker)
+install(
+    FILES ${ROCPROFILER_MARKER_HEADER_FILES}
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rocprofiler-sdk/marker
+    COMPONENT development)

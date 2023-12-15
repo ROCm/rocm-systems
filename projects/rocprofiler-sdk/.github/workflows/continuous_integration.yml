@@ -94,6 +94,7 @@ jobs:
         update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 20 --slave /usr/bin/g++ g++ /usr/bin/g++-12
         python3 -m pip install -r requirements.txt
         python3 -m pip install pytest
+        python3 -m pip install 'cmake>=3.22.0'
 
     - name: List Files
       shell: bash
@@ -118,6 +119,7 @@ jobs:
           -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
           -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler/v2
           -DCPACK_GENERATOR='DEB;RPM;TGZ'
+          -DCPACK_PACKAGING_INSTALL_PREFIX="$(realpath /opt/rocm)"
           -DPython3_EXECUTABLE=$(which python3)
 
     - name: Install
@@ -125,17 +127,42 @@ jobs:
       run:
         cmake --build build --target install --parallel 8
 
+    - name: Build Packaging
+      timeout-minutes: 10
+      run:
+        cmake --build build --target package --parallel 8
+
     - name: Test Install Build
       timeout-minutes: 10
       shell: bash
       run: |
         CMAKE_PREFIX_PATH=/opt/rocprofiler/v2 cmake -B build-samples samples
+        CMAKE_PREFIX_PATH=/opt/rocprofiler/v2 cmake -B build-tests tests
+        export LD_LIBRARY_PATH=/opt/rocprofiler/v2/lib:${LD_LIBRARY_PATH}
         cmake --build build-samples --target all --parallel 8
+        cmake --build build-tests --target all --parallel 8
+        ctest --test-dir build-samples --output-on-failure
+        ctest --test-dir build-tests --output-on-failure
 
-    - name: Build Packaging
-      timeout-minutes: 10
-      run:
-        cmake --build build --target package --parallel 8
+    - name: Install Packages
+      timeout-minutes: 5
+      shell: bash
+      run: |
+        export PATH=${PATH}:/usr/local/sbin:/usr/sbin:/sbin
+        ls -la
+        ls -la ./build
+        for i in $(ls -S ./build/rocprofiler-sdk*.deb); do dpkg -i ${i}; done;
+
+    - name: Test Installed Packages
+      timeout-minutes: 20
+      shell: bash
+      run: |
+        CMAKE_PREFIX_PATH=/opt/rocm cmake -B build-samples-deb /opt/rocm/share/rocprofiler-sdk/samples
+        CMAKE_PREFIX_PATH=/opt/rocm cmake -B build-tests-deb /opt/rocm/share/rocprofiler-sdk/tests
+        cmake --build build-samples-deb --target all --parallel 8
+        cmake --build build-tests-deb --target all --parallel 8
+        ctest --test-dir build-samples-deb --output-on-failure
+        ctest --test-dir build-tests-deb --output-on-failure
 
     - name: Archive production artifacts
       uses: actions/upload-artifact@v3
@@ -173,7 +200,7 @@ jobs:
     container:
       image: compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:${{ needs.get_latest_mainline_build_number.outputs.LATEST_BUILD_NUMBER }}-${{ matrix.os }}-stg1
       options: --ipc=host --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --cap-add CAP_SYS_PTRACE --cap-add CAP_SYS_ADMIN --security-opt seccomp=unconfined
-    
+
     # container:
     #   image: compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:${{ needs.get_latest_mainline_build_number.outputs.LATEST_BUILD_NUMBER }}-${{ matrix.os }}-stg1
     #   options: --memory=128g --cpus=32 --ipc=host --device=/dev/kfd --device=/dev/dri${{ matrix.device }} --group-add video --cap-add=SYS_PTRACE --cap-add CAP_SYS_PTRACE --cap-add CAP_SYS_ADMIN --security-opt seccomp=unconfined

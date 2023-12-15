@@ -31,8 +31,9 @@
  * @brief Test rocprofiler tool
  */
 
-#include "lib/common/filesystem.hpp"
-#include "serialization.hpp"
+#include "common/defines.hpp"
+#include "common/filesystem.hpp"
+#include "common/serialization.hpp"
 
 #include <rocprofiler-sdk/buffer.h>
 #include <rocprofiler-sdk/callback_tracing.h>
@@ -61,23 +62,6 @@
 #include <thread>
 #include <variant>
 #include <vector>
-
-#define ROCPROFILER_CALL(result, msg)                                                              \
-    {                                                                                              \
-        rocprofiler_status_t CHECKSTATUS = result;                                                 \
-        if(CHECKSTATUS != ROCPROFILER_STATUS_SUCCESS)                                              \
-        {                                                                                          \
-            std::string status_name = rocprofiler_get_status_name(CHECKSTATUS);                    \
-            std::string status_msg  = rocprofiler_get_status_string(CHECKSTATUS);                  \
-            std::cerr << "[" #result "][" << __FILE__ << ":" << __LINE__ << "] " << msg            \
-                      << " failed with error code " << status_name << " (" << CHECKSTATUS          \
-                      << "): " << status_msg << std::endl;                                         \
-            std::stringstream errmsg{};                                                            \
-            errmsg << "[" #result "][" << __FILE__ << ":" << __LINE__ << "] " << msg " failure ("  \
-                   << status_name << ": " << status_msg << ")";                                    \
-            throw std::runtime_error(errmsg.str());                                                \
-        }                                                                                          \
-    }
 
 namespace client
 {

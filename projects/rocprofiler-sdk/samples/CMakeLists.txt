@@ -5,6 +5,7 @@ cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 
 project(rocprofiler-sdk-samples LANGUAGES C CXX)
 
+set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME "samples")
 if(CMAKE_BUILD_TYPE STREQUAL "")
     set(CMAKE_BUILD_TYPE
         "RelWithDebInfo"

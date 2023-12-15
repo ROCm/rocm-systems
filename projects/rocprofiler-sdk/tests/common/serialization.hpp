@@ -56,15 +56,17 @@
 #include <cereal/types/variant.hpp>
 #include <cereal/types/vector.hpp>
 
-#define SAVE_DATA_FIELD(FIELD)       ar(cereal::make_nvp(#FIELD, data.FIELD))
-#define SAVE_DATA_VALUE(NAME, VALUE) ar(cereal::make_nvp(NAME, data.VALUE))
-#define SAVE_DATA_CSTR(FIELD)        ar(cereal::make_nvp(#FIELD, std::string{data.FIELD}))
+#define SAVE_DATA_FIELD(FIELD)       ar(make_nvp(#FIELD, data.FIELD))
+#define SAVE_DATA_VALUE(NAME, VALUE) ar(make_nvp(NAME, data.VALUE))
+#define SAVE_DATA_CSTR(FIELD)        ar(make_nvp(#FIELD, std::string{data.FIELD}))
 #define SAVE_DATA_BITFIELD(NAME, VALUE)                                                            \
     {                                                                                              \
         auto _val = data.VALUE;                                                                    \
-        ar(cereal::make_nvp(NAME, _val));                                                          \
+        ar(make_nvp(NAME, _val));                                                                  \
     }
 
+namespace cereal
+{
 template <typename ArchiveT>
 void
 save(ArchiveT& ar, rocprofiler_context_id_t data)
@@ -441,12 +443,13 @@ save(ArchiveT& ar, const rocprofiler_agent_t& data)
         vec.reserve(size);
         for(uint64_t i = 0; i < size; ++i)
             vec.emplace_back(value[i]);
-        ar(cereal::make_nvp(name, vec));
+        ar(make_nvp(name, vec));
     };
 
     generate("mem_banks", data.mem_banks, data.mem_banks_count);
     generate("caches", data.caches, data.caches_count);
     generate("io_links", data.io_links, data.io_links_count);
 }
+}  // namespace cereal
 
 #undef SAVE_DATA_FIELD

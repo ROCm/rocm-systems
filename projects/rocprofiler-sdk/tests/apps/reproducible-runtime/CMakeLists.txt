@@ -52,4 +52,4 @@ endif()
 install(
     TARGETS reproducible-runtime
     DESTINATION bin
-    COMPONENT rocprofiler-test-apps)
+    COMPONENT tests)
