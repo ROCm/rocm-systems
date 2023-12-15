@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "helper.hpp"
+#include "rocprofiler-sdk/context.h"
 #include "trace_buffer.hpp"
 
 #include "lib/common/environment.hpp"
@@ -46,13 +47,14 @@ TRACE_BUFFER_INSTANTIATE();
 namespace
 {
 auto tool_buffer = rocprofiler_buffer_id_t{};
+auto context_id  = rocprofiler_context_id_t{};
 auto output_path =
     fs::path{common::get_env<std::string>("ROCPROFILER_OUTPUT_PATH", fs::current_path().string())};
 auto output_file_name =
     common::get_env<std::string>("ROCPROFILER_OUTPUT_FILE_NAME", std::to_string(getpid()) + "-");
 
 std::pair<std::ostream*, void (*)(std::ostream*&)>
-get_output_stream(const std::string& fname, const std::string& ext = ".ext")
+get_output_stream(const std::string& fname, const std::string& ext = ".csv")
 {
     if(output_path.string().empty()) return {&std::clog, [](auto*&) {}};
 
@@ -65,8 +67,7 @@ get_output_stream(const std::string& fname, const std::string& ext = ".ext")
     auto  output_file = output_path / (output_file_name + fname + ext);
     auto* _ofs        = new std::ofstream{output_file};
     if(!_ofs && !*_ofs)
-        throw std::runtime_error{
-            fmt::format("Failed to open {} for output", (output_path / output_file_name).string())};
+        throw std::runtime_error{fmt::format("Failed to open {} for output", output_file.string())};
     std::cout << "Results File: " << output_file << std::endl;
     return {_ofs, [](std::ostream*& v) {
                 if(v) dynamic_cast<std::ofstream*>(v)->close();
@@ -88,10 +89,18 @@ as_hex(Tp _v, size_t _width = 16)
 
 struct output_file
 {
-    output_file(std::string name)
-    : m_name(std::move(name))
+    output_file(std::string name, std::vector<std::string>&& header)
+    : m_name{std::move(name)}
     {
-        std::tie(m_stream, m_dtor) = get_output_stream(name);
+        std::tie(m_stream, m_dtor) = get_output_stream(m_name);
+        auto ss                    = std::stringstream{};
+        for(auto&& itr : header)
+        {
+            ss << "," << itr;
+        }
+
+        // write the csv header
+        if(!ss.str().empty()) *m_stream << ss.str().substr(1) << '\n';
     }
 
     ~output_file() { m_dtor(m_stream); }
@@ -109,6 +118,8 @@ struct output_file
 
     std::ostream& operator<<(std::ostream& (*func)(std::ostream&) ) { return (*m_stream) << func; }
 
+    operator bool() const { return m_stream != nullptr; }
+
 private:
     using stream_dtor_t = void (*)(std::ostream*&);
 
@@ -120,14 +131,33 @@ private:
 auto&
 get_hsa_api_file()
 {
-    static auto _v = output_file{"hsa_api_trace"};
+    static auto _v =
+        output_file{"hsa_api_trace", {"KERNEL_NAME", "BEGIN_TS", "END_TS", "CORRELATION_ID"}};
     return _v;
 }
 
 auto&
 get_kernel_trace_file()
 {
-    static auto _v = output_file{"kernel_trace"};
+    static auto _v = output_file{"kernel_trace",
+                                 {"AGENT_ID",
+                                  "QUEUE_ID",
+                                  "KERNEL_ID",
+                                  "KERNEL_NAME",
+                                  "CONTEXT_ID",
+                                  "BUFFER_ID",
+                                  "CORRELATION_ID",
+                                  "KIND",
+                                  "START_TS",
+                                  "END_TS",
+                                  "PRIVATE_SEGMENT_SIZE",
+                                  "GROUP_SEGMENT_SIZE",
+                                  "WORKGROUP_SIZE_X",
+                                  "WORKGROUP_SIZE_Y",
+                                  "WORKGROUP_SIZE_Z",
+                                  "GRID_SIZE_X",
+                                  "GRID_SIZE_Y",
+                                  "GRID_SIZE_Z"}};
     return _v;
 }
 
@@ -167,20 +197,14 @@ TraceBuffer<hsa_api_trace_entry_t> hsa_api_buffer("HSA API",
 rocprofiler_tool_callback_name_info_t name_info;
 
 void
-tool_fini(void* tool_data)
-{
-    (void) (tool_data);
-}
-
-void
 TracerFlushRecord(void* data, rocprofiler_callback_tracing_kind_t kind)
 {
     if(kind == ROCPROFILER_CALLBACK_TRACING_HSA_API)
     {
         auto* entry = reinterpret_cast<hsa_api_trace_entry_t*>(data);
-        get_hsa_api_file() << entry->api_name << " " << entry->begin_timestamp << ":"
-                           << entry->end_timestamp << " " << entry->record.correlation_id.internal
-                           << '\n';
+        get_hsa_api_file() << "\"" << entry->api_name << "\""
+                           << "," << entry->begin_timestamp << ":" << entry->end_timestamp << " "
+                           << entry->record.correlation_id.internal << '\n';
     }
 }
 void
@@ -203,7 +227,6 @@ rocprofiler_tracing_callback(rocprofiler_callback_tracing_record_t record,
         {
             user_data->value = timestamp;
         }
-
         else if(record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT)
         {
             const auto* info_name_str = name_info.operation_names[record.kind][record.operation];
@@ -212,7 +235,6 @@ rocprofiler_tracing_callback(rocprofiler_callback_tracing_record_t record,
             entry.valid.store(TRACE_ENTRY_COMPLETE, std::memory_order_release);
         }
     }
-
     else if(record.kind == ROCPROFILER_CALLBACK_TRACING_MARKER_API)
     {
         // To be implemented
@@ -284,6 +306,7 @@ kernel_tracing_callback(rocprofiler_context_id_t      context,
         throw std::runtime_error{"rocprofiler invoked a buffer callback with a null pointer to the "
                                  "array of headers. this should never happen"};
 
+    auto kernel_trace_ss = std::stringstream{};
     for(size_t i = 0; i < num_headers; ++i)
     {
         auto* header = headers[i];
@@ -309,21 +332,25 @@ kernel_tracing_callback(rocprofiler_context_id_t      context,
                 kernel_name = kernel_data.at(record->kernel_id);
             }
 
-            get_kernel_trace_file()
-                << "agent_id=" << record->agent_id.handle
-                << ", queue_id=" << record->queue_id.handle << ", kernel_id=" << record->kernel_id
-                << ", kernel=" << kernel_name << ", context=" << context.handle
-                << ", buffer_id=" << buffer_id.handle << ", cid=" << record->correlation_id.internal
-                << ", extern_cid=" << record->correlation_id.external.value
-                << ", kind=" << record->kind << ", start=" << record->start_timestamp
-                << ", stop=" << record->end_timestamp
-                << ", private_segment_size=" << record->private_segment_size
-                << ", group_segment_size=" << record->group_segment_size << ", workgroup_size=("
-                << record->workgroup_size.x << "," << record->workgroup_size.y << ","
-                << record->workgroup_size.z << "), grid_size=(" << record->grid_size.x << ","
-                << record->grid_size.y << "," << record->grid_size.z << ")" << '\n';
+            kernel_trace_ss << record->agent_id.handle << "," << record->queue_id.handle << ","
+                            << record->kernel_id << ",\"" << kernel_name << "\"," << context.handle
+                            << "," << buffer_id.handle << "," << record->correlation_id.internal
+                            << "," << record->kind << "," << record->start_timestamp << ","
+                            << record->end_timestamp << "," << record->private_segment_size << ","
+                            << record->group_segment_size << "," << record->workgroup_size.x << ","
+                            << record->workgroup_size.y << "," << record->workgroup_size.z << ","
+                            << record->grid_size.x << "," << record->grid_size.y << ","
+                            << record->grid_size.z << '\n';
         }
     }
+
+    static auto _sync = std::mutex{};
+    auto        _lk   = std::unique_lock<std::mutex>{_sync};
+    if(get_kernel_trace_file())
+        get_kernel_trace_file() << kernel_trace_ss.str();
+    else
+        std::cerr << "kernel trace file already closed: " << kernel_trace_ss.str();
+
     (void) (user_data);
 }
 
@@ -389,9 +416,6 @@ get_callback_id_names()
 int
 tool_init(rocprofiler_client_finalize_t /*fini_func*/, void* tool_data)
 {
-    // Add the rocporfiler_call macro
-    rocprofiler_context_id_t context_id;
-
     name_info = get_callback_id_names();
 
     ROCPROFILER_CALL(rocprofiler_create_context(&context_id), "create context failed");
@@ -415,6 +439,7 @@ tool_init(rocprofiler_client_finalize_t /*fini_func*/, void* tool_data)
                                                    tool_data,
                                                    &tool_buffer),
                          "buffer creation");
+
         ROCPROFILER_CALL(
             rocprofiler_configure_buffer_tracing_service(
                 context_id, ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH, nullptr, 0, tool_buffer),
@@ -437,6 +462,14 @@ tool_init(rocprofiler_client_finalize_t /*fini_func*/, void* tool_data)
     ROCPROFILER_CALL(rocprofiler_start_context(context_id), "start context failed");
 
     return 0;
+}
+
+void
+tool_fini(void* tool_data)
+{
+    rocprofiler_flush_buffer(tool_buffer);
+    rocprofiler_stop_context(context_id);
+    (void) (tool_data);
 }
 
 extern "C" rocprofiler_tool_configure_result_t*
