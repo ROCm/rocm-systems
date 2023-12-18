@@ -158,7 +158,7 @@ class OmniAnalyze_Base():
     # Required methods to be implemented by child classes
     #----------------------------------------------------
     @abstractmethod
-    def pre_processing(self, omni_socs: set):
+    def pre_processing(self):
         """Perform initialization prior to analysis.
         """
         logging.debug("[analysis] prepping to do some analysis")

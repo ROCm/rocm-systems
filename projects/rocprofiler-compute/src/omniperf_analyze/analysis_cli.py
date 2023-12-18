@@ -33,7 +33,7 @@ class cli_analysis(OmniAnalyze_Base):
     # Required child methods
     #-----------------------
     @demarcate
-    def pre_processing(self, omni_soc):
+    def pre_processing(self):
         """Perform any pre-processing steps prior to analysis.
         """
         super().pre_processing()
@@ -48,7 +48,7 @@ class cli_analysis(OmniAnalyze_Base):
                 filter_gpu_ids=self._runs[d[0]].filter_gpu_ids,
                 filter_dispatch_ids=self._runs[d[0]].filter_dispatch_ids,
                 time_unit=self.get_args().time_unit,
-                max_kerenel_num=self.get_args().max_kernel_num
+                max_kernel_num=self.get_args().max_kernel_num
             )
             # create 'mega dataframe'
             self._runs[d[0]].raw_pmc = file_io.create_df_pmc(
