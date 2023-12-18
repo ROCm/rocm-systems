@@ -117,7 +117,7 @@ private:
     {
         std::unordered_set<size_t> set;
         for(size_t i = 0; i < num_unique_bells; i++)
-            set.insert(i);
+            set.insert(i << 3);
         return set;
     };
     static std::unordered_set<size_t> available_ids;
@@ -208,9 +208,9 @@ public:
     }
 
     //! Returns the "correlation_id" seen by the trap handler.
-    uint64_t getMockId()
+    Parser::trap_correlation_id_t getMockId()
     {
-        return Parser::CorrelationMap::wrap_correlation_id(doorbell_id, dispatch_id, queue->size);
+        return Parser::CorrelationMap::trap_correlation_id(doorbell_id, dispatch_id, queue->size);
     };
 
     //! Submits a packet to the buffer
@@ -254,7 +254,7 @@ public:
         packet_union_t uni;
         ::memset(&uni, 0, sizeof(uni));
         uni.snap.pc             = dispatch->unique_id;
-        uni.snap.correlation_id = dispatch->getMockId();
+        uni.snap.correlation_id = dispatch->getMockId().raw;
         dispatch->submit(uni);
     };
     void print()

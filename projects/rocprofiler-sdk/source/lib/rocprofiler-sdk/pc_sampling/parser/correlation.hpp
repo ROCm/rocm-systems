@@ -43,18 +43,32 @@ operator==(device_handle a, device_handle b)
 
 namespace Parser
 {
-/*
-struct DispatchPkt
+/**
+ * @brief Struct immitating the correlation_id returned by the trap handler in raw PC samples.
+ */
+union trap_correlation_id_t
 {
-    uint64_t      write_id;  //! The location where this dispatch is written to
-    uint64_t      doorbell_id;  //! The doorbell non-unique ID
-    device_handle dev;          //! Which device this is run
-}; */
-struct DispatchPkt
-{
-    uint64_t      correlation_id_in;  //! Correlation ID seen by the trap handler
-    device_handle dev;                //! Which device this is run
+    uint64_t raw;
+    struct
+    {
+        uint64_t dispatch_index : 25;
+        uint64_t _reserved0     : 7;
+        uint64_t doorbell_id    : 10;
+        uint64_t _reserved1     : 22;
+    } wrapped;
 };
+
+struct DispatchPkt
+{
+    trap_correlation_id_t correlation_id_in;  //! Correlation ID seen by the trap handler
+    device_handle         dev;                //! Which device this is run
+};
+
+inline bool
+operator==(const trap_correlation_id_t& a, const trap_correlation_id_t& b)
+{
+    return a.raw == b.raw;
+}
 
 inline bool
 operator==(const DispatchPkt& a, const DispatchPkt& b)
@@ -68,7 +82,7 @@ struct std::hash<Parser::DispatchPkt>
 {
     size_t operator()(const Parser::DispatchPkt& d) const
     {
-        return (d.correlation_id_in << 8) ^ d.dev.handle;
+        return (d.correlation_id_in.raw << 8) ^ d.dev.handle;
     }
 };
 
@@ -85,36 +99,39 @@ public:
 
     /**
      * Checks wether a dispatch pkt will generate a collision.
-     * Returns true on collision and false when slot is available.
+     * @returns true on collision and false when slot is available.
      */
     bool checkDispatch(const dispatch_pkt_id_t& pkt) const
     {
-        uint64_t trap = wrap_correlation_id(pkt.doorbell_id, pkt.write_index, pkt.queue_size);
+        auto trap = trap_correlation_id(pkt.doorbell_id, pkt.write_index, pkt.queue_size);
         return dispatch_to_correlation.find({trap, pkt.device}) != dispatch_to_correlation.end();
     }
 
     /**
-     * Updates the mapping of dispatch_id to correlation_id
+     * @brief Updates the mapping of dispatch_id to correlation_id
      */
     void newDispatch(const dispatch_pkt_id_t& pkt)
     {
-        cache_dev_id     = ~0ul;
-        uint64_t trap_id = wrap_correlation_id(pkt.doorbell_id, pkt.write_index, pkt.queue_size);
+        cache_dev_id = ~0ul;
+        auto trap_id = trap_correlation_id(pkt.doorbell_id, pkt.write_index, pkt.queue_size);
         dispatch_to_correlation[{trap_id, pkt.device}] = pkt.correlation_id;
     }
 
+    /**
+     * @brief Allows the parser to forget a correlation_id, to save memory.
+     */
     void forget(const dispatch_pkt_id_t& pkt)
     {
-        cache_dev_id     = ~0ul;
-        uint64_t trap_id = wrap_correlation_id(pkt.doorbell_id, pkt.write_index, pkt.queue_size);
+        cache_dev_id = ~0ul;
+        auto trap_id = trap_correlation_id(pkt.doorbell_id, pkt.write_index, pkt.queue_size);
         dispatch_to_correlation.erase({trap_id, pkt.device});
     }
 
     /**
-     * Given a device dev, doorbell and and wrapped dispatch_id, returns the
-     * correlation_id set by dispatch_pkt_id_t
+     * Given a device dev, doorbell and and wrapped dispatch_id,
+     * @returns the correlation_id set by dispatch_pkt_id_t
      */
-    uint64_t get(device_handle dev, uint64_t correlation_in)
+    uint64_t get(device_handle dev, trap_correlation_id_t correlation_in)
     {
 #ifndef _PARSER_CORRELATION_DISABLE_CACHE
         if(dev.handle == cache_dev_id && correlation_in == cache_correlation_id_in)
@@ -126,19 +143,33 @@ public:
         return cache_correlation_id_out;
     }
 
-    static uint64_t wrap_correlation_id(uint64_t doorbell, uint64_t write_idx, uint64_t queue_size)
+    /**
+     * Returns the correlation_id as seen by the trap handler, consisting of a
+     * - wrapped dispatch_pkt
+     * - doorbell_id divibed by 8 Bytes
+     * @param[in] doorbell The doorbell handler returned by HSA
+     * @param[in] write_idx The dispatch packet write index, [optional] not wrapped
+     * @param[in] queue_size The queue size. [optional] If write_index is already wrapped,
+     *                       then this value can just be a large integer > queue_size.
+     * @returns The correlation_id immitating the ones returned by the trap handler.
+     */
+    static trap_correlation_id_t trap_correlation_id(uint64_t doorbell,
+                                                     uint64_t write_idx,
+                                                     uint64_t queue_size)
     {
-        static constexpr uint64_t WRITE_WRAP = (1 << 25) - 1;
-        return ((write_idx % queue_size) & WRITE_WRAP) | (uint64_t(doorbell) << 32);
+        trap_correlation_id_t trap{.raw = 0};
+        trap.wrapped.dispatch_index = write_idx % queue_size;
+        trap.wrapped.doorbell_id    = doorbell >> 3;
+        return trap;
     }
 
 private:
     std::unordered_map<DispatchPkt, uint64_t> dispatch_to_correlation{};
 
     // Making get() const and these cache variables mutable causes performance to be unstable
-    uint64_t cache_correlation_id_in  = ~0ul;  // Invalid value in cache
-    uint64_t cache_correlation_id_out = ~0ul;
-    uint64_t cache_dev_id             = ~0ul;  // Invalid device Id in cache
+    trap_correlation_id_t cache_correlation_id_in{.raw = ~0ul};  // Invalid value in cache
+    uint64_t              cache_correlation_id_out = ~0ul;
+    uint64_t              cache_dev_id             = ~0ul;  // Invalid device Id in cache
 };
 }  // namespace Parser
 
@@ -157,7 +188,8 @@ add_upcoming_samples(const device_handle     device,
         samples[p]       = copySample<bHostTrap, GFXIP>((const void*) (buffer + p));
         try
         {
-            samples[p].correlation_id = corr_map->get(device, snap->correlation_id);
+            Parser::trap_correlation_id_t trap{.raw = snap->correlation_id};
+            samples[p].correlation_id = corr_map->get(device, trap);
         } catch(std::exception& e)
         {
             status = PCSAMPLE_STATUS_PARSER_ERROR;

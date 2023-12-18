@@ -127,7 +127,7 @@ public:
         perf_sample_snapshot_v1 snap;
         ::memset(&snap, 0, sizeof(snap));
         snap.pc             = dispatch->unique_id;
-        snap.correlation_id = dispatch->getMockId();
+        snap.correlation_id = dispatch->getMockId().raw;
 
         snap.perf_snapshot_data = (inst_type << 3) | (reason << 7);
         snap.perf_snapshot_data |= (arb_issue << 10) | (arb_stall << 18);
@@ -297,7 +297,7 @@ class WaveIssueAndErrorTest : public WaveSnapTest
         pcsample_v1_t sample;
         ::memset(&sample, 0, sizeof(sample));
         sample.pc             = dispatch->unique_id;
-        sample.correlation_id = dispatch->getMockId();
+        sample.correlation_id = dispatch->getMockId().raw;
 
         sample.flags.valid              = valid && !error;
         sample.wave_issued              = issued;
@@ -315,7 +315,7 @@ class WaveIssueAndErrorTest : public WaveSnapTest
 
         perf_sample_snapshot_v1 pss;
         pss.perf_snapshot_data = snap.raw;
-        pss.correlation_id     = dispatch->getMockId();
+        pss.correlation_id     = dispatch->getMockId().raw;
         dispatch->submit(std::move(pss));
     };
 
@@ -383,7 +383,7 @@ class WaveOtherFieldsTest : public WaveSnapTest
         snap.workgroup_id_z      = blkz;
         snap.chiplet_and_wave_id = (chip << 8) | (wave & 0x3F);
         snap.hw_id               = hwid;
-        snap.correlation_id      = dispatch->getMockId();
+        snap.correlation_id      = dispatch->getMockId().raw;
 
         assert(dispatch.get());
         dispatch->submit(snap);
