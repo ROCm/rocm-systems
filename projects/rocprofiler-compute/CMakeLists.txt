@@ -178,6 +178,78 @@ if(${ENABLE_COVERAGE})
 endif()
 message(STATUS "Code coverage: ${ENABLE_COVERAGE}")
 
+# --------------------------------------------------------------------------------------------------------
+# profile mode tests
+
+add_test(
+    NAME test_profile_kernel_execution
+    COMMAND pytest -m kernel_execution ${COV_OPTION}
+            ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+
+add_test(
+    NAME test_profile_ipblocks
+    COMMAND pytest -m ipblocks ${COV_OPTION}
+            ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+set_property(TEST test_profile_ipblocks PROPERTY COST 11)
+
+add_test(
+    NAME test_profile_dispatch
+    COMMAND pytest -m dispatch ${COV_OPTION}
+            ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+set_property(TEST test_profile_ipblocks PROPERTY COST 5)
+
+add_test(
+    NAME test_profile_verbosity
+    COMMAND pytest -m verbosity ${COV_OPTION}
+            ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+set_property(TEST test_profile_ipblocks PROPERTY COST 10)
+
+add_test(
+    NAME test_profile_mem
+    COMMAND pytest -m mem ${COV_OPTION}
+            ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+
+add_test(
+    NAME test_profile_join
+    COMMAND pytest -m join ${COV_OPTION}
+            ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+
+add_test(
+    NAME test_profile_sort
+    COMMAND pytest -m sort ${COV_OPTION}
+            ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+
+add_test(
+    NAME test_profile_misc
+    COMMAND pytest -m misc ${COV_OPTION}
+            ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+
+set_tests_properties(
+    test_profile_kernel_execution
+    test_profile_ipblocks
+    test_profile_dispatch
+    test_profile_verbosity
+    test_profile_mem
+    test_profile_join
+    test_profile_sort
+    test_profile_misc
+    PROPERTIES LABELS "profile" RESOURCE_GROUPS gpus:1)
+
+# original
+# add_test(
+#     NAME test_profiler_general
+#     COMMAND pytest ${COV_OPTION} ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
+#     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+# --------------------------------------------------------------------------------------------------------
+
 add_test(
     NAME test_analyze_commands
     COMMAND pytest ${COV_OPTION} ${PROJECT_SOURCE_DIR}/tests/test_analyze_commands.py
@@ -186,11 +258,6 @@ add_test(
 add_test(
     NAME test_analyze_workloads
     COMMAND pytest ${COV_OPTION} ${PROJECT_SOURCE_DIR}/tests/test_analyze_workloads.py
-    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
-
-add_test(
-    NAME test_profiler_general
-    COMMAND pytest ${COV_OPTION} ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 
 add_test(
