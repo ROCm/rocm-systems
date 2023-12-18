@@ -42,7 +42,7 @@ jobs:
         run: |
           cd build
           ml cmake
-          srun -N 1 -J omniperf -p ci -t 00:20:00 ctest --verbose -R test_profiler_general
+          srun -N 1 -J omniperf -p ci -t 00:20:00 ctest -j 4 --resource-spec-file ../tests/4gpus.json --verbose -L profile
       - name: Run [analyze] mode
         if: '!cancelled()'
         run: |
