@@ -15,6 +15,9 @@ omniperf = SourceFileLoader("omniperf", "src/omniperf").load_module()
 kernel_name_1 = "vecCopy(double*, double*, double*, int, int) [clone .kd]"
 
 app_1 = ["./tests/vcopy", "-n", "1048576", "-b", "256", "-i", "3"]
+#app_1 = ["./sample/vcopy", "-n", "1048576", "-b", "256", "-i", "3"]
+baseline_opts = ["omniperf", "profile", "-n", "app_1", "-VVV"]
+
 num_kernels = 3
 dispatch_id = 0
 
@@ -393,20 +396,7 @@ def log_metric(test_name, thresholds, args=[]):
 def test_path():
     workload_dir = test_utils.get_output_dir()
     with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            [
-                "omniperf",
-                "profile",
-                "-n",
-                "app_1",
-                "-VVV",
-                "--path",
-                workload_dir,
-                "--",
-            ]
-            + app_1,
-        ):
+        with patch("sys.argv", baseline_opts + ["--path", workload_dir, "--"] + app_1):
             omniperf.main()
     # assert successful run
     assert e.value.code == 0
@@ -444,18 +434,7 @@ def test_no_roof():
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
-            [
-                "omniperf",
-                "profile",
-                "-n",
-                "app_1",
-                "-VVV",
-                "--path",
-                workload_dir,
-                "--no-roof",
-                "--",
-            ]
-            + app_1,
+            baseline_opts + ["--path", workload_dir, "--no-roof", "--"] + app_1,
         ):
             omniperf.main()
 
@@ -519,18 +498,8 @@ def test_kernel_names():
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
-            [
-                "omniperf",
-                "profile",
-                "-n",
-                "app_1",
-                "-VVV",
-                "--path",
-                workload_dir,
-                "--roof-only",
-                "--kernel-names",
-                "--",
-            ]
+            baseline_opts
+            + ["--path", workload_dir, "--roof-only", "--kernel-names", "--"]
             + app_1,
         ):
             omniperf.main()
@@ -580,24 +549,59 @@ def test_kernel_names():
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
 
+@pytest.mark.misc
+def test_device_filter():
+    workload_dir = test_utils.get_output_dir()
+    device_id="0"
+    if "HIP_VISIBLE_DEVICES" in os.environ:
+        device_id=os.environ["HIP_VISIBLE_DEVICES"]
+    with pytest.raises(SystemExit) as e:
+        with patch(
+            "sys.argv",
+            baseline_opts + ["--path", workload_dir, "--device", device_id, "--"] + app_1,
+        ):
+            omniperf.main()
+
+    # assert successful run
+    assert e.value.code == 0
+
+    files_in_workload = os.listdir(workload_dir)
+
+    # Check if csvs have data
+    file_dict = {}
+    for file in files_in_workload:
+        if file.endswith(".csv"):
+            file_dict[file] = pd.read_csv(workload_dir + "/" + file)
+            if not "sysinfo" in file:
+                if "roofline" in file:
+                    assert len(file_dict[file].index)
+                else:
+                    assert len(file_dict[file].index) >= num_kernels
+    if soc == "mi200":
+        print(sorted(list(file_dict.keys())))
+        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
+    else:
+        assert sorted(list(file_dict.keys())) == ALL_CSVS
+
+    #TODO - verify expected device id in results
+
+    if COUNTER_LOGGING:
+        log_counter(file_dict, inspect.stack()[0][3])
+
+    if METRIC_LOGGING:
+         log_metric(
+            inspect.stack()[0][3],
+            {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
+        )
+
 @pytest.mark.kernel_execution
 def test_kernel():
     workload_dir = test_utils.get_output_dir()
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
-            [
-                "omniperf",
-                "profile",
-                "-n",
-                "app_1",
-                "-VVV",
-                "--path",
-                workload_dir,
-                "--kernel",
-                kernel_name_1,
-                "--",
-            ]
+            baseline_opts
+            + ["--path", workload_dir, "--kernel", kernel_name_1, "--"]
             + app_1,
         ):
             omniperf.main()
@@ -636,18 +640,8 @@ def test_kernel_summaries():
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
-            [
-                "omniperf",
-                "profile",
-                "-n",
-                "app_1",
-                "-VVV",
-                "--path",
-                workload_dir,
-                "--kernel-summaries",
-                "vcopy",
-                "--",
-            ]
+            baseline_opts
+            + ["--path", workload_dir, "--kernel-summaries", "vcopy", "--"]
             + app_1,
         ):
             omniperf.main()
@@ -686,19 +680,7 @@ def test_ipblocks_SQ():
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
-            [
-                "omniperf",
-                "profile",
-                "-n",
-                "app_1",
-                "-VVV",
-                "--path",
-                workload_dir,
-                "--ipblocks",
-                "SQ",
-                "--",
-            ]
-            + app_1,
+            baseline_opts + ["--path", workload_dir, "--ipblocks", "SQ", "--"] + app_1,
         ):
             omniperf.main()
 
@@ -778,19 +760,7 @@ def test_ipblocks_SQC():
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
-            [
-                "omniperf",
-                "profile",
-                "-n",
-                "app_1",
-                "-VVV",
-                "--path",
-                workload_dir,
-                "--ipblocks",
-                "SQC",
-                "--",
-            ]
-            + app_1,
+            baseline_opts + ["--path", workload_dir, "--ipblocks", "SQC", "--"] + app_1,
         ):
             omniperf.main()
 
@@ -837,19 +807,7 @@ def test_ipblocks_TA():
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
-            [
-                "omniperf",
-                "profile",
-                "-n",
-                "app_1",
-                "-VVV",
-                "--path",
-                workload_dir,
-                "--ipblocks",
-                "TA",
-                "--",
-            ]
-            + app_1,
+            baseline_opts + ["--path", workload_dir, "--ipblocks", "TA", "--"] + app_1,
         ):
             omniperf.main()
 
@@ -902,19 +860,7 @@ def test_ipblocks_TD():
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
-            [
-                "omniperf",
-                "profile",
-                "-n",
-                "app_1",
-                "-VVV",
-                "--path",
-                workload_dir,
-                "--ipblocks",
-                "TD",
-                "--",
-            ]
-            + app_1,
+            baseline_opts + ["--path", workload_dir, "--ipblocks", "TD", "--"] + app_1,
         ):
             omniperf.main()
 
@@ -971,19 +917,7 @@ def test_ipblocks_TCP():
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
-            [
-                "omniperf",
-                "profile",
-                "-n",
-                "app_1",
-                "-VVV",
-                "--path",
-                workload_dir,
-                "--ipblocks",
-                "TCP",
-                "--",
-            ]
-            + app_1,
+            baseline_opts + ["--path", workload_dir, "--ipblocks", "TCP", "--"] + app_1,
         ):
             omniperf.main()
 
@@ -1037,19 +971,7 @@ def test_ipblocks_TCC():
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
-            [
-                "omniperf",
-                "profile",
-                "-n",
-                "app_1",
-                "-VVV",
-                "--path",
-                workload_dir,
-                "--ipblocks",
-                "TCC",
-                "--",
-            ]
-            + app_1,
+            baseline_opts + ["--path", workload_dir, "--ipblocks", "TCC", "--"] + app_1,
         ):
             omniperf.main()
 
@@ -1104,19 +1026,7 @@ def test_ipblocks_SPI():
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
-            [
-                "omniperf",
-                "profile",
-                "-n",
-                "app_1",
-                "-VVV",
-                "--path",
-                workload_dir,
-                "--ipblocks",
-                "SPI",
-                "--",
-            ]
-            + app_1,
+            baseline_opts + ["--path", workload_dir, "--ipblocks", "SPI", "--"] + app_1,
         ):
             omniperf.main()
 
@@ -1169,19 +1079,7 @@ def test_ipblocks_CPC():
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
-            [
-                "omniperf",
-                "profile",
-                "-n",
-                "app_1",
-                "-VVV",
-                "--path",
-                workload_dir,
-                "--ipblocks",
-                "CPC",
-                "--",
-            ]
-            + app_1,
+            baseline_opts + ["--path", workload_dir, "--ipblocks", "CPC", "--"] + app_1,
         ):
             omniperf.main()
 
@@ -1229,19 +1127,7 @@ def test_ipblocks_CPF():
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
-            [
-                "omniperf",
-                "profile",
-                "-n",
-                "app_1",
-                "-VVV",
-                "--path",
-                workload_dir,
-                "--ipblocks",
-                "CPF",
-                "--",
-            ]
-            + app_1,
+            baseline_opts + ["--path", workload_dir, "--ipblocks", "CPF", "--"] + app_1,
         ):
             omniperf.main()
 
@@ -1287,19 +1173,8 @@ def test_ipblocks_SQ_CPC():
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
-            [
-                "omniperf",
-                "profile",
-                "-n",
-                "app_1",
-                "-VVV",
-                "--path",
-                workload_dir,
-                "--ipblocks",
-                "SQ",
-                "CPC",
-                "--",
-            ]
+            baseline_opts
+            + ["--path", workload_dir, "--ipblocks", "SQ", "CPC", "--"]
             + app_1,
         ):
             omniperf.main()
@@ -1381,19 +1256,8 @@ def test_ipblocks_SQ_TA():
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
-            [
-                "omniperf",
-                "profile",
-                "-n",
-                "app_1",
-                "-VVV",
-                "--path",
-                workload_dir,
-                "--ipblocks",
-                "SQ",
-                "TA",
-                "--",
-            ]
+            baseline_opts
+            + ["--path", workload_dir, "--ipblocks", "SQ", "TA", "--"]
             + app_1,
         ):
             omniperf.main()
@@ -1474,19 +1338,8 @@ def test_ipblocks_SQ_SPI():
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
-            [
-                "omniperf",
-                "profile",
-                "-n",
-                "app_1",
-                "-VVV",
-                "--path",
-                workload_dir,
-                "--ipblocks",
-                "SQ",
-                "SPI",
-                "--",
-            ]
+            baseline_opts
+            + ["--path", workload_dir, "--ipblocks", "SQ", "SPI", "--"]
             + app_1,
         ):
             omniperf.main()
@@ -1567,21 +1420,8 @@ def test_ipblocks_SQ_SQC_TCP_CPC():
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
-            [
-                "omniperf",
-                "profile",
-                "-n",
-                "app_1",
-                "-VVV",
-                "--path",
-                workload_dir,
-                "--ipblocks",
-                "SQ",
-                "SQC",
-                "TCP",
-                "CPC",
-                "--",
-            ]
+            baseline_opts
+            + ["--path", workload_dir, "--ipblocks", "SQ", "SQC", "TCP", "CPC", "--"]
             + app_1,
         ):
             omniperf.main()
@@ -1663,12 +1503,8 @@ def test_ipblocks_SQ_SPI_TA_TCC_CPF():
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
-            [
-                "omniperf",
-                "profile",
-                "-n",
-                "app_1",
-                "-VVV",
+            baseline_opts
+            + [
                 "--path",
                 workload_dir,
                 "--ipblocks",
@@ -1761,19 +1597,7 @@ def test_dispatch_0():
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
-            [
-                "omniperf",
-                "profile",
-                "-n",
-                "app_1",
-                "-VVV",
-                "--path",
-                workload_dir,
-                "--dispatch",
-                "0",
-                "--",
-            ]
-            + app_1,
+            baseline_opts + ["--path", workload_dir, "--dispatch", "0", "--"] + app_1,
         ):
             omniperf.main()
 
@@ -1815,19 +1639,7 @@ def test_dispatch_0_1():
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
-            [
-                "omniperf",
-                "profile",
-                "-n",
-                "app_1",
-                "-VVV",
-                "--path",
-                workload_dir,
-                "--dispatch",
-                "0:2",
-                "--",
-            ]
-            + app_1,
+            baseline_opts + ["--path", workload_dir, "--dispatch", "0:2", "--"] + app_1,
         ):
             omniperf.main()
 
@@ -1867,18 +1679,8 @@ def test_dispatch_2():
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
-            [
-                "omniperf",
-                "profile",
-                "-n",
-                "app_1",
-                "-VVV",
-                "--path",
-                workload_dir,
-                "--dispatch",
-                dispatch_id,
-                "--",
-            ]
+            baseline_opts
+            + ["--path", workload_dir, "--dispatch", dispatch_id, "--"]
             + app_1,
         ):
             omniperf.main()
@@ -1921,18 +1723,8 @@ def test_kernel_verbose_0():
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
-            [
-                "omniperf",
-                "profile",
-                "-n",
-                "app_1",
-                "-VVV",
-                "--path",
-                workload_dir,
-                "--kernel-verbose",
-                "0",
-                "--",
-            ]
+            baseline_opts
+            + ["--path", workload_dir, "--kernel-verbose", "0", "--"]
             + app_1,
         ):
             omniperf.main()
@@ -1971,18 +1763,8 @@ def test_kernel_verbose_1():
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
-            [
-                "omniperf",
-                "profile",
-                "-n",
-                "app_1",
-                "-VVV",
-                "--path",
-                workload_dir,
-                "--kernel-verbose",
-                "1",
-                "--",
-            ]
+            baseline_opts
+            + ["--path", workload_dir, "--kernel-verbose", "1", "--"]
             + app_1,
         ):
             omniperf.main()
@@ -2021,18 +1803,8 @@ def test_kernel_verbose_2():
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
-            [
-                "omniperf",
-                "profile",
-                "-n",
-                "app_1",
-                "-VVV",
-                "--path",
-                workload_dir,
-                "--kernel-verbose",
-                "2",
-                "--",
-            ]
+            baseline_opts
+            + ["--path", workload_dir, "--kernel-verbose", "2", "--"]
             + app_1,
         ):
             omniperf.main()
@@ -2071,18 +1843,8 @@ def test_kernel_verbose_3():
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
-            [
-                "omniperf",
-                "profile",
-                "-n",
-                "app_1",
-                "-VVV",
-                "--path",
-                workload_dir,
-                "--kernel-verbose",
-                "3",
-                "--",
-            ]
+            baseline_opts
+            + ["--path", workload_dir, "--kernel-verbose", "3", "--"]
             + app_1,
         ):
             omniperf.main()
@@ -2121,18 +1883,8 @@ def test_kernel_verbose_4():
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
-            [
-                "omniperf",
-                "profile",
-                "-n",
-                "app_1",
-                "-VVV",
-                "--path",
-                workload_dir,
-                "--kernel-verbose",
-                "4",
-                "--",
-            ]
+            baseline_opts
+            + ["--path", workload_dir, "--kernel-verbose", "4", "--"]
             + app_1,
         ):
             omniperf.main()
@@ -2171,18 +1923,8 @@ def test_kernel_verbose_5():
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
-            [
-                "omniperf",
-                "profile",
-                "-n",
-                "app_1",
-                "-VVV",
-                "--path",
-                workload_dir,
-                "--kernel-verbose",
-                "5",
-                "--",
-            ]
+            baseline_opts
+            + ["--path", workload_dir, "--kernel-verbose", "5", "--"]
             + app_1,
         ):
             omniperf.main()
@@ -2221,19 +1963,7 @@ def test_join_type_grid():
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
-            [
-                "omniperf",
-                "profile",
-                "-n",
-                "app_1",
-                "-VVV",
-                "--path",
-                workload_dir,
-                "--join-type",
-                "grid",
-                "--",
-            ]
-            + app_1,
+            baseline_opts + ["--path", workload_dir, "--join-type", "grid", "--"] + app_1,
         ):
             omniperf.main()
 
@@ -2271,18 +2001,8 @@ def test_join_type_kernel():
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
-            [
-                "omniperf",
-                "profile",
-                "-n",
-                "app_1",
-                "-VVV",
-                "--path",
-                workload_dir,
-                "--join-type",
-                "kernel",
-                "--",
-            ]
+            baseline_opts
+            + ["--path", workload_dir, "--join-type", "kernel", "--"]
             + app_1,
         ):
             omniperf.main()
@@ -2315,152 +2035,14 @@ def test_join_type_kernel():
         )
 
 
-def test_device_0():
-    workload_dir = test_utils.get_output_dir()
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            [
-                "omniperf",
-                "profile",
-                "-n",
-                "app_1",
-                "-VVV",
-                "--path",
-                workload_dir,
-                "--device",
-                "0",
-                "--",
-            ]
-            + app_1,
-        ):
-            omniperf.main()
-
-    # assert successful run
-    assert e.value.code == 0
-
-    files_in_workload = os.listdir(workload_dir)
-
-    # Check if csvs have data
-    file_dict = {}
-    for file in files_in_workload:
-        if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_dir + "/" + file)
-            if not "sysinfo" in file:
-                if "roofline" in file:
-                    assert len(file_dict[file].index)
-                else:
-                    assert len(file_dict[file].index) >= num_kernels
-    if soc == "mi200":
-        
-        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
-    else:
-        assert sorted(list(file_dict.keys())) == ALL_CSVS
-
-    if COUNTER_LOGGING:
-        log_counter(file_dict, inspect.stack()[0][3])
-
-    if METRIC_LOGGING:
-        log_metric(
-            inspect.stack()[0][3],
-            {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
-        )
-
-
-# def test_no_roof():
-#     if os.path.exists(workload_1):
-#         shutil.rmtree(workload_1)
-#     with pytest.raises(SystemExit) as e:
-#         with patch(
-#             "sys.argv",
-#             [
-#                 "omniperf",
-#                 "profile",
-#                 "-n",
-#                 "app_1",
-#                 "-VVV",
-#                 "--path",
-#                 workload_1,
-#                 "--no-roof",
-#                 "--",
-#             ]
-#             + app_1,
-#         ):
-#             omniperf.main()
-
-#     # assert successful run
-#     assert e.value.code == 0
-
-#     files_in_workload = os.listdir(workload_1)
-
-#     # Check if csvs have data
-#     file_dict = {}
-#     for file in files_in_workload:
-#         if file.endswith(".csv"):
-#             file_dict[file] = pd.read_csv(workload_1 + "/" + file)
-#             if not "sysinfo" in file:
-#                 assert len(file_dict[file].index) >= num_kernels
-#     if soc == "mi200":
-        
-#         assert sorted(list(file_dict.keys())) == [
-#             "SQ_IFETCH_LEVEL.csv",
-#             "SQ_INST_LEVEL_LDS.csv",
-#             "SQ_INST_LEVEL_SMEM.csv",
-#             "SQ_INST_LEVEL_VMEM.csv",
-#             "SQ_LEVEL_WAVES.csv",
-#             "pmc_perf.csv",
-#             "pmc_perf_0.csv",
-#             "pmc_perf_1.csv",
-#             "pmc_perf_10.csv",
-#             "pmc_perf_11.csv",
-#             "pmc_perf_12.csv",
-#             "pmc_perf_13.csv",
-#             "pmc_perf_14.csv",
-#             "pmc_perf_15.csv",
-#             "pmc_perf_16.csv",
-#             "pmc_perf_2.csv",
-#             "pmc_perf_3.csv",
-#             "pmc_perf_4.csv",
-#             "pmc_perf_5.csv",
-#             "pmc_perf_6.csv",
-#             "pmc_perf_7.csv",
-#             "pmc_perf_8.csv",
-#             "pmc_perf_9.csv",
-#             "sysinfo.csv",
-#             "timestamps.csv",
-#         ]
-#     else:
-#         assert sorted(list(file_dict.keys())) == ALL_CSVS
-
-#     if COUNTER_LOGGING:
-#         log_counter(file_dict, inspect.stack()[0][3])
-
-#     if METRIC_LOGGING:
-#         log_metric(
-#             inspect.stack()[0][3],
-#             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
-#         )
-
-
 @pytest.mark.sort
 def test_sort_dispatches():
     workload_dir = test_utils.get_output_dir()
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
-            [
-                "omniperf",
-                "profile",
-                "-n",
-                "app_1",
-                "-VVV",
-                "--path",
-                workload_dir,
-                "--roof-only",
-                "--sort",
-                "dispatches",
-                "--",
-            ]
+            baseline_opts
+            + ["--path", workload_dir, "--roof-only", "--sort", "dispatches", "--"]
             + app_1,
         ):
             omniperf.main()
@@ -2507,19 +2089,8 @@ def test_sort_kernels():
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
-            [
-                "omniperf",
-                "profile",
-                "-n",
-                "app_1",
-                "-VVV",
-                "--path",
-                workload_dir,
-                "--roof-only",
-                "--sort",
-                "kernels",
-                "--",
-            ]
+            baseline_opts
+            + ["--path", workload_dir, "--roof-only", "--sort", "kernels", "--"]
             + app_1,
         ):
             omniperf.main()
@@ -2565,19 +2136,8 @@ def test_mem_levels_HBM():
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
-            [
-                "omniperf",
-                "profile",
-                "-n",
-                "app_1",
-                "-VVV",
-                "--path",
-                workload_dir,
-                "--roof-only",
-                "--mem-level",
-                "HBM",
-                "--",
-            ]
+            baseline_opts
+            + ["--path", workload_dir, "--roof-only", "--mem-level", "HBM", "--"]
             + app_1,
         ):
             omniperf.main()
@@ -2624,19 +2184,8 @@ def test_mem_levels_L2():
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
-            [
-                "omniperf",
-                "profile",
-                "-n",
-                "app_1",
-                "-VVV",
-                "--path",
-                workload_dir,
-                "--roof-only",
-                "--mem-level",
-                "L2",
-                "--",
-            ]
+            baseline_opts
+            + ["--path", workload_dir, "--roof-only", "--mem-level", "L2", "--"]
             + app_1,
         ):
             omniperf.main()
@@ -2683,19 +2232,8 @@ def test_mem_levels_vL1D():
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
-            [
-                "omniperf",
-                "profile",
-                "-n",
-                "app_1",
-                "-VVV",
-                "--path",
-                workload_dir,
-                "--roof-only",
-                "--mem-level",
-                "vL1D",
-                "--",
-            ]
+            baseline_opts
+            + ["--path", workload_dir, "--roof-only", "--mem-level", "vL1D", "--"]
             + app_1,
         ):
             omniperf.main()
@@ -2741,19 +2279,8 @@ def test_mem_levels_LDS():
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
-            [
-                "omniperf",
-                "profile",
-                "-n",
-                "app_1",
-                "-VVV",
-                "--path",
-                workload_dir,
-                "--roof-only",
-                "--mem-level",
-                "LDS",
-                "--",
-            ]
+            baseline_opts
+            + ["--path", workload_dir, "--roof-only", "--mem-level", "LDS", "--"]
             + app_1,
         ):
             omniperf.main()
@@ -2799,20 +2326,8 @@ def test_mem_levels_HBM_LDS():
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
-            [
-                "omniperf",
-                "profile",
-                "-n",
-                "app_1",
-                "-VVV",
-                "--path",
-                workload_dir,
-                "--roof-only",
-                "--mem-level",
-                "HBM",
-                "LDS",
-                "--",
-            ]
+            baseline_opts
+            + ["--path", workload_dir, "--roof-only", "--mem-level", "HBM", "LDS", "--"]
             + app_1,
         ):
             omniperf.main()
@@ -2858,20 +2373,8 @@ def test_mem_levels_vL1D_LDS():
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
-            [
-                "omniperf",
-                "profile",
-                "-n",
-                "app_1",
-                "-VVV",
-                "--path",
-                workload_dir,
-                "--roof-only",
-                "--mem-level",
-                "vL1D",
-                "LDS",
-                "--",
-            ]
+            baseline_opts
+            + ["--path", workload_dir, "--roof-only", "--mem-level", "vL1D", "LDS", "--"]
             + app_1,
         ):
             omniperf.main()
@@ -2917,12 +2420,8 @@ def test_mem_levels_L2_vL1D_LDS():
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
-            [
-                "omniperf",
-                "profile",
-                "-n",
-                "app_1",
-                "-VVV",
+            baseline_opts
+            + [
                 "--path",
                 workload_dir,
                 "--roof-only",
