@@ -29,6 +29,19 @@ addopts = [
 pythonpath = [
       ".",
       "src",
+      "src/omniperf_soc",
       "src/utils",
-      "src/omniperf_analyze/utils"
+      "src/omniperf_analyze/utils",
+      "tests"
     ]
+
+markers = [
+	"kernel_execution",
+	"ipblocks",
+	"misc",
+	"mem",
+	"sort",
+	"join",
+	"verbosity",
+	"dispatch",
+]
