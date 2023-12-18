@@ -96,9 +96,13 @@ class gfx90a_soc (OmniSoC_Base):
 
 
     @demarcate
-    def analysis_setup(self):
+    def analysis_setup(self, roofline_parameters=None):
         """Perform any SoC-specific setup prior to analysis.
         """
         super().analysis_setup()
+        # configure roofline for analysis
+        if roofline_parameters:
+            self.roofline_obj = Roofline(self.get_args(), roofline_parameters)
+
 
 

@@ -44,6 +44,7 @@ class OmniSoC_Base():
             self.__workload_dir = os.path.join(self.__args.path, self.__args.name, self.__args.target)
         else:
             self.__workload_dir = self.__args.path
+    
     def __hash__(self):
         return hash(self.__soc)
     def __eq__(self, other):

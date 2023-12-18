@@ -36,7 +36,7 @@ class cli_analysis(OmniAnalyze_Base):
     def pre_processing(self, omni_soc):
         """Perform any pre-processing steps prior to analysis.
         """
-        super().pre_processing(omni_soc)
+        super().pre_processing()
         if self.get_args().random_port:
             error("--gui flag is required to enable --random-port")
         for d in self.get_args().path:
@@ -44,20 +44,23 @@ class cli_analysis(OmniAnalyze_Base):
             kernel_name_shortener(d[0], self.get_args().kernel_verbose)
 
             file_io.create_df_kernel_top_stats(
-                d[0],
-                self._runs[d[0]].filter_gpu_ids,
-                self._runs[d[0]].filter_dispatch_ids,
-                self.get_args().time_unit,
-                self.get_args().max_kernel_num
+                raw_data_dir=d[0],
+                filter_gpu_ids=self._runs[d[0]].filter_gpu_ids,
+                filter_dispatch_ids=self._runs[d[0]].filter_dispatch_ids,
+                time_unit=self.get_args().time_unit,
+                max_kerenel_num=self.get_args().max_kernel_num
             )
             # create 'mega dataframe'
             self._runs[d[0]].raw_pmc = file_io.create_df_pmc(
                 d[0], self.get_args().verbose
             )
-            is_gui = False
             # create the loaded table
             parser.load_table_data(
-                self._runs[d[0]], d[0], is_gui, self.get_args().g, self.get_args().verbose
+                workload=self._runs[d[0]], 
+                dir=d[0], 
+                is_gui=False,
+                debug=self.get_args().debug, 
+                verbose=self.get_args().verbose
             )
 
 
@@ -65,6 +68,7 @@ class cli_analysis(OmniAnalyze_Base):
     def run_analysis(self):
         """Run CLI analysis.
         """
+        super().run_analysis()
         if self.get_args().list_kernels:
             tty.show_kernels(
                 self.get_args(),

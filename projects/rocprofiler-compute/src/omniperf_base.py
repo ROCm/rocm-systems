@@ -233,10 +233,10 @@ class Omniperf:
 
         if self.__analyze_mode == "cli":
             from omniperf_analyze.analysis_cli import cli_analysis
-            analyzer = cli_analysis(self.__args,self.__supported_archs)
-        elif self.__analyze_mode == "webui":
+            analyzer = cli_analysis(self.__args, self.__supported_archs)
+        elif self.__analyze_mode == "web_ui":
             from omniperf_analyze.analysis_webui import webui_analysis
-            analyzer = webui_analysis(self.__args,self.__supported_archs)
+            analyzer = webui_analysis(self.__args, self.__supported_archs)
         else:
             error("Unsupported anlaysis mode -> %s" % self.__analyze_mode)
 
@@ -252,7 +252,8 @@ class Omniperf:
             # Create and load new SoC object
             self.detect_soc(arch)
 
-        analyzer.pre_processing(self.__soc)
+        analyzer.set_soc(self.__soc)
+        analyzer.pre_processing()
         analyzer.run_analysis()
 
         return

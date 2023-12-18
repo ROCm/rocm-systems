@@ -22,9 +22,10 @@
 # SOFTWARE.
 ##############################################################################el
 
-import sys
+import os
 
 from dataclasses import dataclass
+import logging
 import csv
 
 ################################################
@@ -94,43 +95,42 @@ def get_color(catagory):
 # -------------------------------------------------------------------------------------
 #                           Plot BW at each cache level
 # -------------------------------------------------------------------------------------
-def calc_ceilings(roof_specs, benchmark_data, targ_mem_level, verbose):
+def calc_ceilings(roofline_parameters, dtype, benchmark_data):
     """Given benchmarking data, calculate ceilings (or peak performance) for empirical roofline
     """
     # TODO: This is where filtering by memory level will need to occur for standalone
     graphPoints = {"hbm": [], "l2": [], "l1": [], "lds": [], "valu": [], "mfma": []}
 
-    if targ_mem_level == "ALL":
+    if roofline_parameters['mem_level'] == "ALL":
         cacheHierarchy = ["HBM", "L2", "L1", "LDS"]
     else:
-        cacheHierarchy = targ_mem_level
+        cacheHierarchy = roofline_parameters['mem_level']
 
     x1 = y1 = x2 = y2 = -1
     x1_mfma = y1_mfma = x2_mfma = y2_mfma = -1
-    target_precision = roof_specs["dtype"][2:]
+    target_precision = dtype[2:]
 
-    if roof_specs["dtype"] != "FP16" and roof_specs["dtype"] != "I8":
+    if dtype != "FP16" and dtype != "I8":
         peakOps = float(
-            benchmark_data[roof_specs["dtype"] + "Flops"][roof_specs["device"]]
+            benchmark_data[dtype + "Flops"][roofline_parameters['device_id']]
         )
     for i in range(0, len(cacheHierarchy)):
-        # Plot BW line
-        if verbose >= 3:
-            print("Current cache level is ", cacheHierarchy[i])
+        # Plot BW line  
+        logging.debug("[roofline] Current cache level is ", cacheHierarchy[i])
         curr_bw = cacheHierarchy[i] + "Bw"
-        peakBw = float(benchmark_data[curr_bw][roof_specs["device"]])
+        peakBw = float(benchmark_data[curr_bw][roofline_parameters['device_id']])
 
-        if roof_specs["dtype"] == "I8":
-            peakMFMA = float(benchmark_data["MFMAI8Ops"][roof_specs["device"]])
+        if dtype == "I8":
+            peakMFMA = float(benchmark_data["MFMAI8Ops"][roofline_parameters['device_id']])
         else:
             peakMFMA = float(
-                benchmark_data["MFMAF{}Flops".format(target_precision)][roof_specs["device"]]
+                benchmark_data["MFMAF{}Flops".format(target_precision)][roofline_parameters['device_id']]
             )
 
         x1 = float(XMIN)
         y1 = float(XMIN) * peakBw
         # Note: No reg peakOps for FP16 or INT8
-        if roof_specs["dtype"] != "FP16" and roof_specs["dtype"] != "I8":
+        if dtype != "FP16" and dtype != "I8":
             x2 = peakOps / peakBw
             y2 = peakOps
 
@@ -142,9 +142,9 @@ def calc_ceilings(roof_specs, benchmark_data, targ_mem_level, verbose):
         y2_mfma = peakMFMA
 
         # These are the points to use:
-        if verbose >= 3:
-            print("x = [{}, {}]".format(x1, x2_mfma))
-            print("y = [{}, {}]".format(y1, y2_mfma))
+        logging.debug("[roofline] coordinate points:")
+        logging.debug("x = [{}, {}]".format(x1, x2_mfma))
+        logging.debug("y = [{}, {}]".format(y1, y2_mfma))
 
         graphPoints[cacheHierarchy[i].lower()].append([x1, x2_mfma])
         graphPoints[cacheHierarchy[i].lower()].append([y1, y2_mfma])
@@ -154,28 +154,26 @@ def calc_ceilings(roof_specs, benchmark_data, targ_mem_level, verbose):
     #                                     Plot computing roof
     # -------------------------------------------------------------------------------------
     # Note: No FMA roof for FP16 or INT8
-    if roof_specs["dtype"] != "FP16" and roof_specs["dtype"] != "I8":
+    if dtype != "FP16" and dtype != "I8":
         # Plot FMA roof
         x0 = XMAX
         if x2 < x0:
             x0 = x2
 
-        if verbose >= 3:
-            print("FMA ROOF [{}, {}], [{},{}]".format(x0, XMAX, peakOps, peakOps))
+        logging.debug("FMA ROOF [{}, {}], [{},{}]".format(x0, XMAX, peakOps, peakOps))
         graphPoints["valu"].append([x0, XMAX])
         graphPoints["valu"].append([peakOps, peakOps])
         graphPoints["valu"].append(peakOps)
 
     # Plot MFMA roof
     if (
-        x1_mfma != -1 or roof_specs["dtype"] == "FP16" or roof_specs["dtype"] == "I8"
+        x1_mfma != -1 or dtype == "FP16" or dtype == "I8"
     ):  # assert that mfma has been assigned
         x0_mfma = XMAX
         if x2_mfma < x0_mfma:
             x0_mfma = x2_mfma
 
-        if verbose >= 3:
-            print("MFMA ROOF [{}, {}], [{},{}]".format(x0_mfma, XMAX, peakMFMA, peakMFMA))
+        logging.debug("MFMA ROOF [{}, {}], [{},{}]".format(x0_mfma, XMAX, peakMFMA, peakMFMA))
         graphPoints["mfma"].append([x0_mfma, XMAX])
         graphPoints["mfma"].append([peakMFMA, peakMFMA])
         graphPoints["mfma"].append(peakMFMA)
@@ -187,7 +185,7 @@ def calc_ceilings(roof_specs, benchmark_data, targ_mem_level, verbose):
 #                              Overlay application performance
 # -------------------------------------------------------------------------------------
 # Calculate relevent metrics for ai calculation
-def calc_ai(sort_type, ret_df, verbose):
+def calc_ai(sort_type, ret_df):
     """Given counter data, caclulate arithmetic intensity for each kernel in the application.
     """
     df = ret_df["pmc_perf"]
@@ -263,8 +261,7 @@ def calc_ai(sort_type, ret_df, verbose):
                 + (df["SQ_INSTS_VALU_MFMA_MOPS_F64"][idx] * 512)
             )
         except KeyError:
-            if verbose >= 3:
-                print("{}: Skipped total_flops at index {}".format(kernelName[:35], idx))
+            logging.debug("[roofline] {}: Skipped total_flops at index {}".format(kernelName[:35], idx))
             pass
         try:
             valu_flops += (
@@ -291,8 +288,7 @@ def calc_ai(sort_type, ret_df, verbose):
                 )
             )
         except KeyError:
-            if verbose >= 3:
-                print("{}: Skipped valu_flops at index {}".format(kernelName[:35], idx))
+            logging.debug("{}: Skipped valu_flops at index {}".format(kernelName[:35], idx))
             pass
 
         try:
@@ -302,8 +298,7 @@ def calc_ai(sort_type, ret_df, verbose):
             mfma_flops_f64 += df["SQ_INSTS_VALU_MFMA_MOPS_F64"][idx] * 512
             mfma_iops_i8 += df["SQ_INSTS_VALU_MFMA_MOPS_I8"][idx] * 512
         except KeyError:
-            if verbose >= 3:
-                print("{}: Skipped mfma ops at index {}".format(kernelName[:35], idx))
+            logging.debug("[roofline] {}: Skipped mfma ops at index {}".format(kernelName[:35], idx))
             pass
 
         try:
@@ -313,15 +308,13 @@ def calc_ai(sort_type, ret_df, verbose):
                 * L2_BANKS
             )  # L2_BANKS = 32 (since assuming mi200)
         except KeyError:
-            if verbose >= 3:
-                print("{}: Skipped lds_data at index {}".format(kernelName[:35], idx))
+            logging.debug("[roofline] {}: Skipped lds_data at index {}".format(kernelName[:35], idx))
             pass
 
         try:
             L1cache_data += df["TCP_TOTAL_CACHE_ACCESSES_sum"][idx] * 64
         except KeyError:
-            if verbose >= 3:
-                print("{}: Skipped L1cache_data at index {}".format(kernelName[:35], idx))
+            logging.debug("[roofline] {}: Skipped L1cache_data at index {}".format(kernelName[:35], idx))
             pass
 
         try:
@@ -332,8 +325,7 @@ def calc_ai(sort_type, ret_df, verbose):
                 + df["TCP_TCC_READ_REQ_sum"][idx] * 64
             )
         except KeyError:
-            if verbose >= 3:
-                print("{}: Skipped L2cache_data at index {}".format(kernelName[:35], idx))
+            logging.debug("[roofline] {}: Skipped L2cache_data at index {}".format(kernelName[:35], idx))
             pass
         try:
             hbm_data += (
@@ -343,8 +335,7 @@ def calc_ai(sort_type, ret_df, verbose):
                 + ((df["TCC_EA_WRREQ_sum"][idx] - df["TCC_EA_WRREQ_64B_sum"][idx]) * 32)
             )
         except KeyError:
-            if verbose >= 3:
-                print("{}: Skipped hbm_data at index {}".format(kernelName[:35], idx))
+            logging.debug("[roofline] {}: Skipped hbm_data at index {}".format(kernelName[:35], idx))
             pass
 
         totalDuration += df["EndNs"][idx] - df["BeginNs"][idx]
@@ -372,12 +363,11 @@ def calc_ai(sort_type, ret_df, verbose):
                     avgDuration / calls,
                 )
             )
-            if verbose >= 2:
-                print(
-                    "Just added {} to AI_Data at index {}. # of calls: {}".format(
-                        kernelName, idx, calls
-                    )
+            logging.debug(
+                "Just added {} to AI_Data at index {}. # of calls: {}".format(
+                    kernelName, idx, calls
                 )
+            )
             total_flops = (
                 valu_flops
             ) = (
@@ -487,8 +477,8 @@ def calc_ai(sort_type, ret_df, verbose):
     return intensityPoints
 
 
-def constuct_roof(roof_specs, targ_mem_level, verbose):
-    benchmark_results = roof_specs["path"] + "/roofline.csv"
+def constuct_roof(roofline_parameters, dtype):
+    benchmark_results = os.path.join(roofline_parameters["path_to_dir"], "roofline.csv")
     # -----------------------------------------------------
     # Initialize roofline data dictionary from roofline.csv
     # -----------------------------------------------------
@@ -526,8 +516,6 @@ def constuct_roof(roof_specs, targ_mem_level, verbose):
     # ------------------
     #  Generate Roofline
     # ------------------
-    results = calc_ceilings(roof_specs, benchmark_data, targ_mem_level, verbose)
-    # for key in results:
-    #     print(key, "->", results[key])
+    results = calc_ceilings(roofline_parameters, dtype, benchmark_data)
 
     return results

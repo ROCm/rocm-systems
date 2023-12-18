@@ -505,7 +505,7 @@ def omniarg_parser(parser, omniperf_home, supported_archs, omniperf_version):
         nargs="+",
         help="\t\tSpecify column indices to display.",
     )
-    analyze_advanced_group.add_argument("-g", action="store_true", help="\t\tDebug single metric.")
+    analyze_advanced_group.add_argument("-g", dest="debug", action="store_true", help="\t\tDebug single metric.")
     analyze_advanced_group.add_argument(
         "--dependency", action="store_true", help="\t\tList the installation dependency."
     )

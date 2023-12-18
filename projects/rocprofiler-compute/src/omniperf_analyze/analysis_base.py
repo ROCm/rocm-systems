@@ -37,13 +37,18 @@ from tabulate import tabulate
 class OmniAnalyze_Base():
     def __init__(self,args,supported_archs):
         self.__args = args
-        self._runs = OrderedDict() #NB: I made this public so children can modify/add to obj properties
-        self._arch_configs = {} #NB: I made this public so children can modify/add to obj properties
+        self._runs = OrderedDict() 
+        self._arch_configs = {} 
         self.__supported_archs = supported_archs
-        self._output = None #NB: I made this public so children can modify/add to obj properties
+        self._output = None 
+        self.__socs = None # available OmniSoC objs
 
     def get_args(self):
         return self.__args
+    def set_soc(self, omni_socs):
+        self.__socs = omni_socs
+    def get_socs(self):
+        return self.__socs
     
     @demarcate
     def generate_configs(self, arch, config_dir, list_kernels, filter_metrics):
@@ -107,7 +112,7 @@ class OmniAnalyze_Base():
                 error("Error: the number of --filter-kernels doesn't match the number of --dir.")
     
     @demarcate
-    def initalize_runs(self, avail_socs, normalization_filter=None):
+    def initalize_runs(self, normalization_filter=None):
         if self.__args.list_metrics:
             self.list_metrics()
         
@@ -127,7 +132,7 @@ class OmniAnalyze_Base():
             arch = w.sys_info.iloc[0]["gpu_soc"]
             w.dfs = copy.deepcopy(self._arch_configs[arch].dfs)
             w.dfs_type = self._arch_configs[arch].dfs_type
-            w.soc_spec = avail_socs[arch].get_soc_param()
+            w.soc_spec = self.get_socs()[arch].get_soc_param()
             self._runs[d[0]] = w
 
         return self._runs
@@ -162,7 +167,7 @@ class OmniAnalyze_Base():
         self._output = open(self.__args.output_file, "w+") if self.__args.output_file else sys.stdout
         
         # initalize runs
-        self._runs = self.initalize_runs(omni_socs)
+        self._runs = self.initalize_runs()
         
         # set filters
         if self.__args.gpu_kernel:

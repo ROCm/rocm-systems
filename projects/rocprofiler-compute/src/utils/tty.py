@@ -135,7 +135,6 @@ def show_all(args, runs, archConfigs, output):
                                         )
                                         # show value + percentage
                                         # TODO: better alignment
-
                                         t_df = (
                                             cur_df[header]
                                             .astype(float)
