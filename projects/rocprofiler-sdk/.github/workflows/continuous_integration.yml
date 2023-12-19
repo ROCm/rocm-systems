@@ -165,7 +165,7 @@ jobs:
         ctest --test-dir build-tests-deb --output-on-failure
 
     - name: Archive production artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: artifacts
         path: |
