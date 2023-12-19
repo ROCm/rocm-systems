@@ -3,7 +3,8 @@
 #
 rocprofiler_activate_clang_tidy()
 
-set(common_sources config.cpp environment.cpp demangle.cpp utility.cpp xml.cpp)
+set(common_sources config.cpp environment.cpp demangle.cpp static_object.cpp utility.cpp
+                   xml.cpp)
 set(common_headers
     config.hpp
     defines.hpp
@@ -11,6 +12,7 @@ set(common_headers
     demangle.hpp
     mpl.hpp
     scope_destructor.hpp
+    static_object.hpp
     synchronized.hpp
     utility.hpp
     xml.hpp)

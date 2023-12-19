@@ -25,12 +25,15 @@
 #include <rocprofiler-sdk/rocprofiler.h>
 
 #include "lib/common/container/stable_vector.hpp"
+#include "lib/common/static_object.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/allocator.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
+
+#include <glog/logging.h>
 
 #include <cstdint>
 #include <mutex>
@@ -162,10 +165,10 @@ execute_creation_notifiers(rocprofiler_runtime_library_t libs,
 // using thread_pool_vec_t = std::vector<std::unique_ptr<thread_pool_t>>;
 // using task_group_vec_t  = std::vector<std::unique_ptr<task_group_t>>;
 
-auto&
+auto*&
 get_thread_pools()
 {
-    static auto _v = thread_pool_vec_t{};
+    static auto* _v = common::static_object<thread_pool_vec_t>::construct();
     return _v;
 }
 
@@ -225,12 +228,13 @@ create_callback_thread()
     notify_pre_internal_thread_create(ROCPROFILER_LIBRARY);
 
     // this will be index after emplace_back
-    auto idx = get_thread_pools().size();
+    auto idx = CHECK_NOTNULL(get_thread_pools())->size();
 
     thread_pool_config_t pool_config = {};
     pool_config.pool_size            = 1;
 
-    auto& thr_pool = get_thread_pools().emplace_back(std::make_shared<thread_pool_t>(pool_config));
+    auto& thr_pool = CHECK_NOTNULL(get_thread_pools())
+                         ->emplace_back(std::make_shared<thread_pool_t>(pool_config));
 
     if(!get_task_groups()) get_task_groups() = new task_group_vec_t{};
 
@@ -272,6 +276,9 @@ rocprofiler_at_internal_thread_create(rocprofiler_internal_thread_library_cb_t p
 rocprofiler_status_t
 rocprofiler_create_callback_thread(rocprofiler_callback_thread_t* cb_thread_id)
 {
+    if(rocprofiler::registration::get_init_status() > 0)
+        return ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED;
+
     rocprofiler::internal_threading::initialize();
 
     auto cb_tid = rocprofiler::internal_threading::create_callback_thread();
@@ -284,10 +291,13 @@ rocprofiler_create_callback_thread(rocprofiler_callback_thread_t* cb_thread_id)
     return ROCPROFILER_STATUS_ERROR;
 }
 
-rocprofiler_status_t ROCPROFILER_API
+rocprofiler_status_t
 rocprofiler_assign_callback_thread(rocprofiler_buffer_id_t       buffer_id,
                                    rocprofiler_callback_thread_t cb_thread_id)
 {
+    if(rocprofiler::registration::get_init_status() > 0)
+        return ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED;
+
     if(!rocprofiler::internal_threading::get_task_groups())
         return ROCPROFILER_STATUS_ERROR_THREAD_NOT_FOUND;
 

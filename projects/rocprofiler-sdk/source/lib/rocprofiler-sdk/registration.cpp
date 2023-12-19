@@ -22,8 +22,8 @@
 
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/common/environment.hpp"
+#include "lib/common/static_object.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
-#include "lib/rocprofiler-sdk/allocator.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/code_object.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
@@ -86,10 +86,11 @@ invoke_client_finalizers();
 // explicitly invoke the finalize function of a specific client
 void invoke_client_finalizer(rocprofiler_client_id_t);
 
-auto&
+auto*
 get_status()
 {
-    static auto _v = std::pair<std::atomic<int>, std::atomic<int>>{0, 0};
+    static auto*& _v =
+        common::static_object<std::pair<std::atomic<int>, std::atomic<int>>>::construct(0, 0);
     return _v;
 }
 
@@ -151,8 +152,7 @@ struct client_library
     rocprofiler_client_id_t              mutable_client_id  = {};
 };
 
-using client_library_vec_t =
-    std::vector<client_library, allocator::static_data_allocator<client_library>>;
+using client_library_vec_t = std::vector<client_library>;
 
 client_library_vec_t
 find_clients()
@@ -304,10 +304,10 @@ find_clients()
     return data;
 }
 
-client_library_vec_t&
+client_library_vec_t*
 get_clients()
 {
-    static auto _v = find_clients();
+    static auto*& _v = common::static_object<client_library_vec_t>::construct(find_clients());
     return _v;
 }
 
@@ -332,7 +332,9 @@ invoke_client_configures()
 
     LOG(ERROR) << __FUNCTION__;
 
-    for(auto& itr : get_clients())
+    if(!get_clients()) return false;
+
+    for(auto& itr : *get_clients())
     {
         if(!itr.configure_func)
         {
@@ -392,7 +394,9 @@ invoke_client_initializers()
 
     LOG(ERROR) << __FUNCTION__;
 
-    for(auto& itr : get_clients())
+    if(!get_clients()) return false;
+
+    for(auto& itr : *get_clients())
     {
         if(itr.configure_result && itr.configure_result->initialize)
         {
@@ -420,7 +424,11 @@ invoke_client_finalizers()
     if(_lk.owns_lock()) return false;
     _lk.lock();
 
-    for(auto& itr : get_clients())
+    LOG(ERROR) << __FUNCTION__;
+
+    if(!get_clients()) return false;
+
+    for(auto& itr : *get_clients())
     {
         if(itr.configure_result && itr.configure_result->finalize)
         {
@@ -441,7 +449,11 @@ invoke_client_finalizer(rocprofiler_client_id_t client_id)
     if(_lk.owns_lock()) return;
     _lk.lock();
 
-    for(auto& itr : get_clients())
+    LOG(ERROR) << __FUNCTION__;
+
+    if(!get_clients()) return;
+
+    for(auto& itr : *get_clients())
     {
         if(itr.internal_client_id.handle == client_id.handle &&
            itr.mutable_client_id.handle == client_id.handle)
@@ -499,25 +511,25 @@ get_client_offset()
 int
 get_init_status()
 {
-    return get_status().first.load(std::memory_order_acquire);
+    return (get_status()) ? get_status()->first.load(std::memory_order_acquire) : 1;
 }
 
 int
 get_fini_status()
 {
-    return get_status().second.load(std::memory_order_acquire);
+    return (get_status()) ? get_status()->second.load(std::memory_order_acquire) : 1;
 }
 
 void
 set_init_status(int v)
 {
-    get_status().first.store(v, std::memory_order_release);
+    if(get_status()) get_status()->first.store(v, std::memory_order_release);
 }
 
 void
 set_fini_status(int v)
 {
-    get_status().second.store(v, std::memory_order_release);
+    if(get_status()) get_status()->second.store(v, std::memory_order_release);
 }
 
 void
@@ -529,7 +541,10 @@ initialize()
     std::call_once(_once, []() {
         // initialization is in process
         set_init_status(-1);
-        std::atexit(&finalize);
+        std::atexit([]() {
+            finalize();
+            common::destroy_static_objects();
+        });
         init_logging();
         invoke_client_configures();
         invoke_client_initializers();
@@ -630,6 +645,8 @@ rocprofiler_set_api_table(const char* name,
         // pass to hip init
         LOG_IF(ERROR, num_tables > 1)
             << " rocprofiler expected HIP library to pass 1 API table, not " << num_tables;
+
+        return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
     }
     else if(std::string_view{name} == "hsa")
     {
@@ -667,11 +684,14 @@ rocprofiler_set_api_table(const char* name,
         // pass to roctx init
         LOG_IF(ERROR, num_tables > 1)
             << " rocprofiler expected ROCTX library to pass 1 API table, not " << num_tables;
+
+        return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
     }
     else
     {
         LOG(ERROR) << "rocprofiler does not accept API tables from " << name;
-        LOG_ASSERT(false) << " rocprofiler does not accept API tables from " << name;
+
+        return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
     }
 
     (void) lib_version;

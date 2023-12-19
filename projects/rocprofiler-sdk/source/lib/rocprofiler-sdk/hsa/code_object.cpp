@@ -22,6 +22,7 @@
 
 #include "lib/rocprofiler-sdk/hsa/code_object.hpp"
 #include "lib/common/scope_destructor.hpp"
+#include "lib/common/static_object.hpp"
 #include "lib/common/synchronized.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
@@ -63,11 +64,35 @@ using context_t               = context::context;
 using user_data_t             = rocprofiler_user_data_t;
 using context_array_t         = context::context_array_t;
 using context_user_data_map_t = std::unordered_map<const context_t*, user_data_t>;
+using name_array_t            = std::vector<std::pair<size_t, std::unique_ptr<std::string>>>;
 
-template <typename... Tp>
-auto
-consume_args(Tp&&...)
-{}
+name_array_t*
+get_string_array()
+{
+    static auto*& _v = common::static_object<name_array_t>::construct();
+    return _v;
+}
+
+std::string*
+get_string_entry(std::string_view name)
+{
+    auto        _hash_v = std::hash<std::string_view>{}(name);
+    static auto _sync   = std::shared_mutex{};
+    if(!get_string_array()) return nullptr;
+
+    {
+        auto _unlock = common::scope_destructor{[]() { _sync.unlock_shared(); }};
+        _sync.lock_shared();
+        for(const auto& itr : *get_string_array())
+            if(itr.first == _hash_v) return itr.second.get();
+    }
+
+    auto _unlock = common::scope_destructor{[]() { _sync.unlock(); }};
+    _sync.lock();
+    return get_string_array()
+        ->emplace_back(std::make_pair(_hash_v, std::make_unique<std::string>(name)))
+        .second.get();
+}
 
 hsa_loader_table_t&
 get_loader_table()
@@ -96,7 +121,7 @@ struct kernel_symbol
 
     bool                    beg_notified   = false;
     bool                    end_notified   = false;
-    std::string             name           = {};
+    std::string*            name           = {};
     hsa_executable_t        hsa_executable = {};
     hsa_agent_t             hsa_agent      = {};
     hsa_executable_symbol_t hsa_symbol     = {};
@@ -113,13 +138,13 @@ kernel_symbol::operator=(kernel_symbol&& rhs) noexcept
     {
         beg_notified          = rhs.beg_notified;
         end_notified          = rhs.end_notified;
-        name                  = std::move(rhs.name);
+        name                  = rhs.name;
         hsa_executable        = rhs.hsa_executable;
         hsa_agent             = rhs.hsa_agent;
         hsa_symbol            = rhs.hsa_symbol;
         rocp_data             = rhs.rocp_data;
         user_data             = std::move(rhs.user_data);
-        rocp_data.kernel_name = name.c_str();
+        rocp_data.kernel_name = (name) ? name->c_str() : nullptr;
     }
 
     return *this;
@@ -148,7 +173,7 @@ struct code_object
 
     bool                     beg_notified    = false;
     bool                     end_notified    = false;
-    std::string              uri             = {};
+    std::string*             uri             = {};
     hsa_executable_t         hsa_executable  = {};
     hsa_loaded_code_object_t hsa_code_object = {};
     code_object_data_t       rocp_data       = common::init_public_api_struct(code_object_data_t{});
@@ -166,12 +191,12 @@ code_object::operator=(code_object&& rhs) noexcept
     {
         beg_notified    = rhs.beg_notified;
         end_notified    = rhs.end_notified;
-        uri             = std::move(rhs.uri);
+        uri             = rhs.uri;
         hsa_executable  = rhs.hsa_executable;
         hsa_code_object = rhs.hsa_code_object;
         rocp_data       = rhs.rocp_data;
         user_data       = std::move(rhs.user_data);
-        rocp_data.uri   = uri.c_str();
+        rocp_data.uri   = (uri) ? uri->c_str() : nullptr;
         symbols         = std::move(rhs.symbols);
     }
 
@@ -293,9 +318,9 @@ executable_iterate_agent_symbols_load_callback(hsa_executable_t        executabl
         auto _name = std::string(_name_length + 1, '\0');
         ROCP_HSA_CORE_GET_EXE_SYMBOL_INFO(HSA_EXECUTABLE_SYMBOL_INFO_NAME, _name.data());
 
-        symbol_v.name = _name.substr(0, _name.find_first_of('\0'));
+        symbol_v.name = get_string_entry(_name.substr(0, _name.find_first_of('\0')));
     }
-    data.kernel_name = symbol_v.name.c_str();
+    data.kernel_name = (symbol_v.name) ? symbol_v.name->c_str() : nullptr;
 
     // these should all be self-explanatory
     ROCP_HSA_CORE_GET_EXE_SYMBOL_INFO(HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT,
@@ -455,9 +480,9 @@ code_object_load_callback(hsa_executable_t         executable,
         ROCP_HSA_VEN_LOADER_GET_CODE_OBJECT_INFO(HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_URI,
                                                  _uri.data());
 
-        code_obj_v.uri = _uri;
+        code_obj_v.uri = get_string_entry(_uri);
     }
-    data.uri = code_obj_v.uri.data();
+    data.uri = (code_obj_v.uri) ? code_obj_v.uri->data() : nullptr;
 
     auto _hsa_agent = hsa_agent_t{};
     ROCP_HSA_VEN_LOADER_GET_CODE_OBJECT_INFO(HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_AGENT,

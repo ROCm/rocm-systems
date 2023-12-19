@@ -448,7 +448,12 @@ tool_fini(void* tool_data)
 void
 setup()
 {
-    ROCPROFILER_CALL(rocprofiler_force_configure(&rocprofiler_configure), "force configuration");
+    if(int status = 0;
+       rocprofiler_is_initialized(&status) == ROCPROFILER_STATUS_SUCCESS && status == 0)
+    {
+        ROCPROFILER_CALL(rocprofiler_force_configure(&rocprofiler_configure),
+                         "force configuration");
+    }
 }
 
 void

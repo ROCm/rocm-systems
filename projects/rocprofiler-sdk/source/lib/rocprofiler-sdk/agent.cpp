@@ -25,6 +25,8 @@
 #include <rocprofiler-sdk/rocprofiler.h>
 
 #include "lib/common/filesystem.hpp"
+#include "lib/common/scope_destructor.hpp"
+#include "lib/common/static_object.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 
@@ -37,6 +39,7 @@
 #include <fstream>
 #include <limits>
 #include <regex>
+#include <shared_mutex>
 #include <sstream>
 #include <string>
 #include <type_traits>
@@ -51,6 +54,36 @@ namespace agent
 {
 namespace
 {
+using name_array_t = std::vector<std::pair<size_t, std::unique_ptr<std::string>>>;
+
+name_array_t*
+get_string_array()
+{
+    static auto*& _v = common::static_object<name_array_t>::construct();
+    return _v;
+}
+
+std::string*
+get_string_entry(std::string_view name)
+{
+    auto        _hash_v = std::hash<std::string_view>{}(name);
+    static auto _sync   = std::shared_mutex{};
+    if(!get_string_array()) return nullptr;
+
+    {
+        auto _unlock = common::scope_destructor{[]() { _sync.unlock_shared(); }};
+        _sync.lock_shared();
+        for(const auto& itr : *get_string_array())
+            if(itr.first == _hash_v) return itr.second.get();
+    }
+
+    auto _unlock = common::scope_destructor{[]() { _sync.unlock(); }};
+    _sync.lock();
+    return get_string_array()
+        ->emplace_back(std::make_pair(_hash_v, std::make_unique<std::string>(name)))
+        .second.get();
+}
+
 struct cpu_info
 {
     long        processor   = -1;
@@ -371,7 +404,7 @@ read_topology()
         agent_info.node_id   = nodecount++;
 
         if(!name_prop.empty())
-            agent_info.model_name = strdup(name_prop.front().c_str());
+            agent_info.model_name = get_string_entry(name_prop.front())->c_str();
         else
             agent_info.model_name = "";
 
@@ -449,9 +482,10 @@ read_topology()
                     auto step  = (agent_info.gfx_target_version % 100);
 
                     agent_info.name =
-                        strdup(fmt::format("gfx{}{}{:x}", major, minor, step).c_str());
-                    agent_info.product_name = strdup(amdgpu_get_marketing_name(device_handle));
-                    agent_info.vendor_name  = strdup("AMD");
+                        get_string_entry(fmt::format("gfx{}{}{:x}", major, minor, step))->c_str();
+                    agent_info.product_name =
+                        get_string_entry(amdgpu_get_marketing_name(device_handle))->c_str();
+                    agent_info.vendor_name = get_string_entry("AMD")->c_str();
 
                     amdgpu_gpu_info gpu_info = {};
                     if(amdgpu_query_gpu_info(device_handle, &gpu_info) == 0)
@@ -478,13 +512,13 @@ read_topology()
         else if(agent_info.type == ROCPROFILER_AGENT_TYPE_CPU)
         {
             agent_info.cu_count    = agent_info.cpu_cores_count;
-            agent_info.vendor_name = strdup("CPU");
+            agent_info.vendor_name = get_string_entry("CPU")->c_str();
             for(const auto& itr : cpu_info_v)
             {
                 if(agent_info.cpu_core_id_base == itr.apicid)
                 {
-                    agent_info.name         = strdup(itr.model_name.c_str());
-                    agent_info.product_name = strdup(agent_info.name);
+                    agent_info.name         = get_string_entry(itr.model_name)->c_str();
+                    agent_info.product_name = get_string_entry(agent_info.name)->c_str();
                     agent_info.family_id    = itr.family;
                     break;
                 }
@@ -585,18 +619,9 @@ read_topology()
         data.emplace_back(new rocprofiler_agent_t{agent_info}, [](rocprofiler_agent_t* ptr) {
             if(ptr)
             {
-                auto free_cstring = [](const char*& val) {
-                    if(val && ::strnlen(val, 1) > 0) ::free(const_cast<char*>(val));
-                    val = "";
-                };
-
                 delete[] ptr->mem_banks;
                 delete[] ptr->caches;
                 delete[] ptr->io_links;
-                free_cstring(ptr->name);
-                free_cstring(ptr->vendor_name);
-                free_cstring(ptr->product_name);
-                free_cstring(ptr->model_name);
             }
             delete ptr;
         });

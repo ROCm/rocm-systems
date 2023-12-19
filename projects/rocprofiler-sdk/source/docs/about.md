@@ -8,7 +8,7 @@
 
 ## Important Changes
 
-[Roctracer](https://github.com/ROCm-Developer-Tools/roctracer) and [rocprofiler (v1)](https://github.com/ROCm-Developer-Tools/rocprofiler)
+[Roctracer](https://github.com/ROCm/roctracer) and [rocprofiler (v1)](https://github.com/ROCm/rocprofiler)
 have been combined into a single rocprofiler SDK and re-designed from scratch. The new rocprofiler API has been designed with some
 new restrictions to avoid problems that plagued the former implementations. These restrictions enable more efficient implementations
 and much better thread-safety. The most important restriction is the window for tools to inform rocprofiler about which services

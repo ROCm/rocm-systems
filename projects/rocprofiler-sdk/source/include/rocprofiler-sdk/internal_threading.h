@@ -98,6 +98,8 @@ typedef struct
  * @param [in] cb_thread_id User-provided pointer to a @ref rocprofiler_callback_thread_t
  * @return ::rocprofiler_status_t
  * @retval ::ROCPROFILER_STATUS_SUCCESS Successful thread creation
+ * @retval ::ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED Thread creation is no longer available
+ * post-initialization
  * @retval ::ROCPROFILER_STATUS_ERROR Failed to create thread
  */
 rocprofiler_status_t ROCPROFILER_API
@@ -114,6 +116,8 @@ rocprofiler_create_callback_thread(rocprofiler_callback_thread_t* cb_thread_id)
  * @return ::rocprofiler_status_t
  * @retval ::ROCPROFILER_STATUS_SUCCESS Successful assignment of the delivery thread for the given
  * buffer
+ * @retval ::ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED Thread assignment is no longer available
+ * post-initialization
  * @retval ::ROCPROFILER_STATUS_ERROR_THREAD_NOT_FOUND Thread identifier did not match any of the
  * threads created by rocprofiler
  * @retval ::ROCPROFILER_STATUS_ERROR_BUFFER_NOT_FOUND Buffer identifier did not match any of the

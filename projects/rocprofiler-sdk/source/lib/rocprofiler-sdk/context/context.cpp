@@ -25,6 +25,7 @@
 #include <rocprofiler-sdk/rocprofiler.h>
 
 #include "lib/common/container/stable_vector.hpp"
+#include "lib/common/static_object.hpp"
 #include "lib/common/synchronized.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
@@ -86,10 +87,11 @@ get_active_contexts_impl()
     return *_v;
 }
 
-auto&
+auto*&
 get_correlation_id_map()
 {
-    static auto _v = common::Synchronized<std::vector<std::unique_ptr<correlation_id>>>{};
+    using data_type  = std::vector<std::unique_ptr<correlation_id>>;
+    static auto*& _v = common::static_object<common::Synchronized<data_type>>::construct();
     return _v;
 }
 
@@ -112,9 +114,10 @@ correlation_id*
 correlation_tracing_service::construct(uint32_t _init_ref_count)
 {
     auto  _internal_id = get_unique_internal_id();
-    auto& corr_id_map  = get_correlation_id_map();
-    auto& ret          = corr_id_map.wlock([](auto& data) -> auto& { return data.emplace_back(); });
-    ret = std::make_unique<correlation_id>(_init_ref_count, common::get_tid(), _internal_id);
+    auto* corr_id_map  = get_correlation_id_map();
+    if(!corr_id_map) return nullptr;
+    auto& ret = corr_id_map->wlock([](auto& data) -> auto& { return data.emplace_back(); });
+    ret       = std::make_unique<correlation_id>(_init_ref_count, common::get_tid(), _internal_id);
 
     get_latest_correlation_id_impl() = ret.get();
 

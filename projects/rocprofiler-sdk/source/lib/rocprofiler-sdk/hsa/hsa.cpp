@@ -28,6 +28,7 @@
 #include "lib/rocprofiler-sdk/hsa/details/ostream.hpp"
 #include "lib/rocprofiler-sdk/hsa/types.hpp"
 #include "lib/rocprofiler-sdk/hsa/utils.hpp"
+#include "lib/rocprofiler-sdk/registration.hpp"
 
 #include <rocprofiler-sdk/buffer.h>
 #include <rocprofiler-sdk/callback_tracing.h>
@@ -176,6 +177,15 @@ auto
 hsa_api_impl<Idx>::functor(Args&&... args)
 {
     using info_type = hsa_api_info<Idx>;
+
+    if(registration::get_fini_status() != 0)
+    {
+        auto _ret = exec(info_type::get_table_func(), std::forward<Args>(args)...);
+        if constexpr(!std::is_same<decltype(_ret), null_type>::value)
+            return _ret;
+        else
+            return HSA_STATUS_SUCCESS;
+    }
 
     struct callback_context_data
     {
