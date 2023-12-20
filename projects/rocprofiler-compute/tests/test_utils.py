@@ -23,10 +23,10 @@
 ##############################################################################el
 # Common helper routines for testing collateral
 
-
 import inspect
 import os
 import shutil
+import pandas as pd
 
 
 def check_resource_allocation():
@@ -62,3 +62,39 @@ def get_output_dir(suffix="_output", clean_existing=True):
         if os.path.exists(output_dir):
             shutil.rmtree(output_dir)
     return output_dir
+
+
+def clean_output_dir(cleanup, output_dir):
+    """Remove output directory generated from omniperf execution
+
+    Args:
+        cleanup (boolean): flag to enable/disable directory cleanup
+        output_dir (string): name of directory to remove
+    """
+    if cleanup:
+        if os.path.exists(output_dir):
+            shutil.rmtree(output_dir)
+    return
+
+
+def check_csv_files(output_dir, num_kernels):
+    """Check profiling output csv files for expected number of entries (based on kernel invocations)
+
+    Args:
+        output_dir (string): output directory containing csv files
+        num_kernels (int): number of kernels expected to have been profiled
+
+    Returns:
+        dict: dictionary housing file contents as pandas dataframe
+    """
+
+    file_dict = {}
+    files_in_workload = os.listdir(output_dir)
+    for file in files_in_workload:
+        if file.endswith(".csv"):
+            file_dict[file] = pd.read_csv(output_dir + "/" + file)
+            if not "sysinfo" in file:
+                assert len(file_dict[file].index) >= num_kernels
+        elif file.endswith(".pdf"):
+            file_dict[file] = "pdf"
+    return file_dict

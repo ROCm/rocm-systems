@@ -17,6 +17,7 @@ kernel_name_1 = "vecCopy(double*, double*, double*, int, int) [clone .kd]"
 app_1 = ["./tests/vcopy", "-n", "1048576", "-b", "256", "-i", "3"]
 #app_1 = ["./sample/vcopy", "-n", "1048576", "-b", "256", "-i", "3"]
 baseline_opts = ["omniperf", "profile", "-n", "app_1", "-VVV"]
+cleanup = True  # whether to clean up profile data after tests or not
 
 num_kernels = 3
 dispatch_id = 0
@@ -427,6 +428,8 @@ def test_path():
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
 
+    test_utils.clean_output_dir(cleanup, workload_dir)
+
 
 @pytest.mark.misc
 def test_no_roof():
@@ -440,16 +443,8 @@ def test_no_roof():
 
     # assert successful run
     assert e.value.code == 0
+    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
 
-    files_in_workload = os.listdir(workload_dir)
-
-    # Check if csvs have data
-    file_dict = {}
-    for file in files_in_workload:
-        if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_dir + "/" + file)
-            if not "sysinfo" in file:
-                assert len(file_dict[file].index) >= num_kernels
     if soc == "mi200":
         print(sorted(list(file_dict.keys())))
         assert sorted(list(file_dict.keys())) == [
@@ -491,6 +486,8 @@ def test_no_roof():
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
 
+    test_utils.clean_output_dir(cleanup, workload_dir)
+
 
 @pytest.mark.misc
 def test_kernel_names():
@@ -511,18 +508,8 @@ def test_kernel_names():
         return
     # assert successful run
     assert e.value.code == 0
+    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
 
-    files_in_workload = os.listdir(workload_dir)
-
-    # Check if csvs have data
-    file_dict = {}
-    for file in files_in_workload:
-        if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_dir + "/" + file)
-            if not "sysinfo" in file:
-                assert len(file_dict[file].index) >= num_kernels
-        elif file.endswith(".pdf"):
-            file_dict[file] = "pdf"
     if soc == "mi200":
         print(sorted(list(file_dict.keys())))
         assert sorted(list(file_dict.keys())) == [
@@ -549,12 +536,15 @@ def test_kernel_names():
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
 
+    test_utils.clean_output_dir(cleanup, workload_dir)
+
+
 @pytest.mark.misc
 def test_device_filter():
     workload_dir = test_utils.get_output_dir()
-    device_id="0"
+    device_id = "0"
     if "HIP_VISIBLE_DEVICES" in os.environ:
-        device_id=os.environ["HIP_VISIBLE_DEVICES"]
+        device_id = os.environ["HIP_VISIBLE_DEVICES"]
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
@@ -564,26 +554,15 @@ def test_device_filter():
 
     # assert successful run
     assert e.value.code == 0
+    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
 
-    files_in_workload = os.listdir(workload_dir)
-
-    # Check if csvs have data
-    file_dict = {}
-    for file in files_in_workload:
-        if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_dir + "/" + file)
-            if not "sysinfo" in file:
-                if "roofline" in file:
-                    assert len(file_dict[file].index)
-                else:
-                    assert len(file_dict[file].index) >= num_kernels
     if soc == "mi200":
         print(sorted(list(file_dict.keys())))
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
 
-    #TODO - verify expected device id in results
+    # TODO - verify expected device id in results
 
     if COUNTER_LOGGING:
         log_counter(file_dict, inspect.stack()[0][3])
@@ -593,6 +572,9 @@ def test_device_filter():
             inspect.stack()[0][3],
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
+
+    test_utils.clean_output_dir(cleanup, workload_dir)
+
 
 @pytest.mark.kernel_execution
 def test_kernel():
@@ -608,16 +590,8 @@ def test_kernel():
 
     # assert successful run
     assert e.value.code == 0
+    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
 
-    files_in_workload = os.listdir(workload_dir)
-
-    # Check if csvs have data
-    file_dict = {}
-    for file in files_in_workload:
-        if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_dir + "/" + file)
-            if not "sysinfo" in file:
-                assert len(file_dict[file].index) >= num_kernels
     if soc == "mi200":
         
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
@@ -632,6 +606,8 @@ def test_kernel():
             inspect.stack()[0][3],
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
+
+    test_utils.clean_output_dir(cleanup, workload_dir)
 
 
 @pytest.mark.kernel_execution
@@ -648,16 +624,8 @@ def test_kernel_summaries():
 
     # assert successful run
     assert e.value.code == 0
+    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
 
-    files_in_workload = os.listdir(workload_dir)
-
-    # Check if csvs have data
-    file_dict = {}
-    for file in files_in_workload:
-        if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_dir + "/" + file)
-            if not "sysinfo" in file:
-                assert len(file_dict[file].index) >= num_kernels
     if soc == "mi200":
         
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
@@ -673,6 +641,8 @@ def test_kernel_summaries():
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
 
+    test_utils.clean_output_dir(cleanup, workload_dir)
+
 
 @pytest.mark.ipblocks
 def test_ipblocks_SQ():
@@ -686,17 +656,8 @@ def test_ipblocks_SQ():
 
     # assert successful run
     assert e.value.code == 0
+    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
 
-    files_in_workload = os.listdir(workload_dir)
-
-    # Check if csvs have data
-    file_dict = {}
-    for file in files_in_workload:
-        if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_dir + "/" + file)
-            if not "sysinfo" in file:
-                assert len(file_dict[file].index) >= num_kernels
-    
     expected_csvs = [
         "SQ_IFETCH_LEVEL.csv",
         "SQ_INST_LEVEL_LDS.csv",
@@ -752,6 +713,7 @@ def test_ipblocks_SQ():
             inspect.stack()[0][3],
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
+    test_utils.clean_output_dir(cleanup, workload_dir)
 
 
 @pytest.mark.ipblocks
@@ -766,17 +728,8 @@ def test_ipblocks_SQC():
 
     # assert successful run
     assert e.value.code == 0
+    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
 
-    files_in_workload = os.listdir(workload_dir)
-
-    # Check if csvs have data
-    file_dict = {}
-    for file in files_in_workload:
-        if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_dir + "/" + file)
-            if not "sysinfo" in file:
-                assert len(file_dict[file].index) >= num_kernels
-    
     expected_csvs = [
         "pmc_perf.csv",
         "pmc_perf_0.csv",
@@ -800,6 +753,8 @@ def test_ipblocks_SQC():
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
 
+    test_utils.clean_output_dir(cleanup, workload_dir)
+
 
 @pytest.mark.ipblocks
 def test_ipblocks_TA():
@@ -813,16 +768,7 @@ def test_ipblocks_TA():
 
     # assert successful run
     assert e.value.code == 0
-
-    files_in_workload = os.listdir(workload_dir)
-
-    # Check if csvs have data
-    file_dict = {}
-    for file in files_in_workload:
-        if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_dir + "/" + file)
-            if not "sysinfo" in file:
-                assert len(file_dict[file].index) >= num_kernels
+    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
 
     
 
@@ -853,6 +799,8 @@ def test_ipblocks_TA():
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
 
+    test_utils.clean_output_dir(cleanup, workload_dir)
+
 
 @pytest.mark.ipblocks
 def test_ipblocks_TD():
@@ -866,16 +814,7 @@ def test_ipblocks_TD():
 
     # assert successful run
     assert e.value.code == 0
-
-    files_in_workload = os.listdir(workload_dir)
-
-    # Check if csvs have data
-    file_dict = {}
-    for file in files_in_workload:
-        if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_dir + "/" + file)
-            if not "sysinfo" in file:
-                assert len(file_dict[file].index) >= num_kernels
+    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
 
     
 
@@ -910,6 +849,8 @@ def test_ipblocks_TD():
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
 
+    test_utils.clean_output_dir(cleanup, workload_dir)
+
 
 @pytest.mark.ipblocks
 def test_ipblocks_TCP():
@@ -923,17 +864,7 @@ def test_ipblocks_TCP():
 
     # assert successful run
     assert e.value.code == 0
-
-    files_in_workload = os.listdir(workload_dir)
-
-    # Check if csvs have data
-    file_dict = {}
-    for file in files_in_workload:
-        if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_dir + "/" + file)
-            if not "sysinfo" in file:
-                assert len(file_dict[file].index) >= num_kernels
-    
+    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
 
     expected_csvs = [
         "pmc_perf.csv",
@@ -964,6 +895,8 @@ def test_ipblocks_TCP():
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
 
+    test_utils.clean_output_dir(cleanup, workload_dir)
+
 
 @pytest.mark.ipblocks
 def test_ipblocks_TCC():
@@ -977,16 +910,7 @@ def test_ipblocks_TCC():
 
     # assert successful run
     assert e.value.code == 0
-
-    files_in_workload = os.listdir(workload_dir)
-
-    # Check if csvs have data
-    file_dict = {}
-    for file in files_in_workload:
-        if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_dir + "/" + file)
-            if not "sysinfo" in file:
-                assert len(file_dict[file].index) >= num_kernels
+    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
 
     
     expected_csvs = [
@@ -1019,6 +943,8 @@ def test_ipblocks_TCC():
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
 
+    test_utils.clean_output_dir(cleanup, workload_dir)
+
 
 @pytest.mark.ipblocks
 def test_ipblocks_SPI():
@@ -1032,17 +958,7 @@ def test_ipblocks_SPI():
 
     # assert successful run
     assert e.value.code == 0
-
-    files_in_workload = os.listdir(workload_dir)
-
-    # Check if csvs have data
-    file_dict = {}
-    for file in files_in_workload:
-        if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_dir + "/" + file)
-            if not "sysinfo" in file:
-                assert len(file_dict[file].index) >= num_kernels
-    
+    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
 
     expected_csvs = [
         "pmc_perf.csv",
@@ -1072,6 +988,8 @@ def test_ipblocks_SPI():
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
 
+    test_utils.clean_output_dir(cleanup, workload_dir)
+
 
 @pytest.mark.ipblocks
 def test_ipblocks_CPC():
@@ -1085,17 +1003,8 @@ def test_ipblocks_CPC():
 
     # assert successful run
     assert e.value.code == 0
+    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
 
-    files_in_workload = os.listdir(workload_dir)
-
-    # Check if csvs have data
-    file_dict = {}
-    for file in files_in_workload:
-        if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_dir + "/" + file)
-            if not "sysinfo" in file:
-                assert len(file_dict[file].index) >= num_kernels
-    
     expected_csvs = [
         "pmc_perf.csv",
         "pmc_perf_0.csv",
@@ -1120,6 +1029,8 @@ def test_ipblocks_CPC():
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
 
+    test_utils.clean_output_dir(cleanup, workload_dir)
+
 
 @pytest.mark.ipblocks
 def test_ipblocks_CPF():
@@ -1133,17 +1044,9 @@ def test_ipblocks_CPF():
 
     # assert successful run
     assert e.value.code == 0
+    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
 
-    files_in_workload = os.listdir(workload_dir)
-
-    # Check if csvs have data
-    file_dict = {}
-    for file in files_in_workload:
-        if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_dir + "/" + file)
-            if not "sysinfo" in file:
-                assert len(file_dict[file].index) >= num_kernels
-    
+    print(sorted(list(file_dict.keys())))
     expected_csvs = [
         "pmc_perf.csv",
         "pmc_perf_0.csv",
@@ -1166,6 +1069,8 @@ def test_ipblocks_CPF():
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
 
+    test_utils.clean_output_dir(cleanup, workload_dir)
+
 
 @pytest.mark.ipblocks
 def test_ipblocks_SQ_CPC():
@@ -1181,16 +1086,7 @@ def test_ipblocks_SQ_CPC():
 
     # assert successful run
     assert e.value.code == 0
-
-    files_in_workload = os.listdir(workload_dir)
-
-    # Check if csvs have data
-    file_dict = {}
-    for file in files_in_workload:
-        if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_dir + "/" + file)
-            if not "sysinfo" in file:
-                assert len(file_dict[file].index) >= num_kernels
+    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
 
     
     expected_csvs = [
@@ -1248,6 +1144,8 @@ def test_ipblocks_SQ_CPC():
             inspect.stack()[0][3],
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
+
+    test_utils.clean_output_dir(cleanup, workload_dir)
 
 
 @pytest.mark.ipblocks
@@ -1264,16 +1162,7 @@ def test_ipblocks_SQ_TA():
 
     # assert successful run
     assert e.value.code == 0
-
-    files_in_workload = os.listdir(workload_dir)
-
-    # Check if csvs have data
-    file_dict = {}
-    for file in files_in_workload:
-        if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_dir + "/" + file)
-            if not "sysinfo" in file:
-                assert len(file_dict[file].index) >= num_kernels
+    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
 
     
     expected_csvs = [
@@ -1330,6 +1219,8 @@ def test_ipblocks_SQ_TA():
             inspect.stack()[0][3],
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
+
+    test_utils.clean_output_dir(cleanup, workload_dir)
 
 
 @pytest.mark.ipblocks
@@ -1346,16 +1237,7 @@ def test_ipblocks_SQ_SPI():
 
     # assert successful run
     assert e.value.code == 0
-
-    files_in_workload = os.listdir(workload_dir)
-
-    # Check if csvs have data
-    file_dict = {}
-    for file in files_in_workload:
-        if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_dir + "/" + file)
-            if not "sysinfo" in file:
-                assert len(file_dict[file].index) >= num_kernels
+    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
 
     
     expected_csvs = [
@@ -1413,6 +1295,8 @@ def test_ipblocks_SQ_SPI():
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
 
+    test_utils.clean_output_dir(cleanup, workload_dir)
+
 
 @pytest.mark.ipblocks
 def test_ipblocks_SQ_SQC_TCP_CPC():
@@ -1428,16 +1312,7 @@ def test_ipblocks_SQ_SQC_TCP_CPC():
 
     # assert successful run
     assert e.value.code == 0
-
-    files_in_workload = os.listdir(workload_dir)
-
-    # Check if csvs have data
-    file_dict = {}
-    for file in files_in_workload:
-        if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_dir + "/" + file)
-            if not "sysinfo" in file:
-                assert len(file_dict[file].index) >= num_kernels
+    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
 
     
     expected_csvs = [
@@ -1496,6 +1371,8 @@ def test_ipblocks_SQ_SQC_TCP_CPC():
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
 
+    test_utils.clean_output_dir(cleanup, workload_dir)
+
 
 @pytest.mark.ipblocks
 def test_ipblocks_SQ_SPI_TA_TCC_CPF():
@@ -1521,16 +1398,7 @@ def test_ipblocks_SQ_SPI_TA_TCC_CPF():
 
     # assert successful run
     assert e.value.code == 0
-
-    files_in_workload = os.listdir(workload_dir)
-
-    # Check if csvs have data
-    file_dict = {}
-    for file in files_in_workload:
-        if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_dir + "/" + file)
-            if not "sysinfo" in file:
-                assert len(file_dict[file].index) >= num_kernels
+    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
 
     
     expected_csvs = [
@@ -1590,6 +1458,8 @@ def test_ipblocks_SQ_SPI_TA_TCC_CPF():
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
 
+    test_utils.clean_output_dir(cleanup, workload_dir)
+
 
 @pytest.mark.dispatch
 def test_dispatch_0():
@@ -1603,16 +1473,8 @@ def test_dispatch_0():
 
     # assert successful run
     assert e.value.code == 0
+    file_dict = test_utils.check_csv_files(workload_dir, 1)
 
-    files_in_workload = os.listdir(workload_dir)
-
-    # Check if csvs have data
-    file_dict = {}
-    for file in files_in_workload:
-        if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_dir + "/" + file)
-            if not "sysinfo" in file and not "roofline" in file:
-                assert len(file_dict[file].index) == 1
     if soc == "mi200":
         
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
@@ -1632,6 +1494,8 @@ def test_dispatch_0():
             ],
         )
 
+    test_utils.clean_output_dir(cleanup, workload_dir)
+
 
 @pytest.mark.dispatch
 def test_dispatch_0_1():
@@ -1645,21 +1509,13 @@ def test_dispatch_0_1():
 
     # assert successful run
     assert e.value.code == 0
-
-    files_in_workload = os.listdir(workload_dir)
-
-    # Check if csvs have data
-    file_dict = {}
-    for file in files_in_workload:
-        if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_dir + "/" + file)
-            if not "sysinfo" in file and not "roofline" in file:
-                assert len(file_dict[file].index) == 2
+    file_dict = test_utils.check_csv_files(workload_dir, 2)
 
     if soc == "mi200":
         
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
     else:
+        print(sorted(list(file_dict.keys())))
         assert sorted(list(file_dict.keys())) == ALL_CSVS
 
     if COUNTER_LOGGING:
@@ -1671,6 +1527,8 @@ def test_dispatch_0_1():
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
             ["--dispatch", "0", "1"],
         )
+
+    test_utils.clean_output_dir(cleanup, workload_dir)
 
 
 @pytest.mark.dispatch
@@ -1687,16 +1545,8 @@ def test_dispatch_2():
 
     # assert successful run
     assert e.value.code == 0
+    file_dict = test_utils.check_csv_files(workload_dir, 1)
 
-    files_in_workload = os.listdir(workload_dir)
-
-    # Check if csvs have data
-    file_dict = {}
-    for file in files_in_workload:
-        if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_dir + "/" + file)
-            if not "sysinfo" in file and not "roofline" in file:
-                assert len(file_dict[file].index) == 1
     if soc == "mi200":
         
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
@@ -1716,6 +1566,8 @@ def test_dispatch_2():
             ],
         )
 
+    test_utils.clean_output_dir(cleanup, workload_dir)
+
 
 @pytest.mark.verbosity
 def test_kernel_verbose_0():
@@ -1731,16 +1583,8 @@ def test_kernel_verbose_0():
 
     # assert successful run
     assert e.value.code == 0
+    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
 
-    files_in_workload = os.listdir(workload_dir)
-
-    # Check if csvs have data
-    file_dict = {}
-    for file in files_in_workload:
-        if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_dir + "/" + file)
-            if not "sysinfo" in file:
-                assert len(file_dict[file].index) >= num_kernels
     if soc == "mi200":
         
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
@@ -1755,6 +1599,8 @@ def test_kernel_verbose_0():
             inspect.stack()[0][3],
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
+
+    test_utils.clean_output_dir(cleanup, workload_dir)
 
 
 @pytest.mark.verbosity
@@ -1771,16 +1617,8 @@ def test_kernel_verbose_1():
 
     # assert successful run
     assert e.value.code == 0
+    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
 
-    files_in_workload = os.listdir(workload_dir)
-
-    # Check if csvs have data
-    file_dict = {}
-    for file in files_in_workload:
-        if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_dir + "/" + file)
-            if not "sysinfo" in file:
-                assert len(file_dict[file].index) >= num_kernels
     if soc == "mi200":
         
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
@@ -1795,6 +1633,8 @@ def test_kernel_verbose_1():
             inspect.stack()[0][3],
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
+
+    test_utils.clean_output_dir(cleanup, workload_dir)
 
 
 @pytest.mark.verbosity
@@ -1811,16 +1651,8 @@ def test_kernel_verbose_2():
 
     # assert successful run
     assert e.value.code == 0
+    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
 
-    files_in_workload = os.listdir(workload_dir)
-
-    # Check if csvs have data
-    file_dict = {}
-    for file in files_in_workload:
-        if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_dir + "/" + file)
-            if not "sysinfo" in file:
-                assert len(file_dict[file].index) >= num_kernels
     if soc == "mi200":
         
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
@@ -1835,6 +1667,8 @@ def test_kernel_verbose_2():
             inspect.stack()[0][3],
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
+
+    test_utils.clean_output_dir(cleanup, workload_dir)
 
 
 @pytest.mark.verbosity
@@ -1851,16 +1685,8 @@ def test_kernel_verbose_3():
 
     # assert successful run
     assert e.value.code == 0
+    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
 
-    files_in_workload = os.listdir(workload_dir)
-
-    # Check if csvs have data
-    file_dict = {}
-    for file in files_in_workload:
-        if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_dir + "/" + file)
-            if not "sysinfo" in file:
-                assert len(file_dict[file].index) >= num_kernels
     if soc == "mi200":
         
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
@@ -1875,6 +1701,8 @@ def test_kernel_verbose_3():
             inspect.stack()[0][3],
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
+
+    test_utils.clean_output_dir(cleanup, workload_dir)
 
 
 @pytest.mark.verbosity
@@ -1891,16 +1719,8 @@ def test_kernel_verbose_4():
 
     # assert successful run
     assert e.value.code == 0
+    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
 
-    files_in_workload = os.listdir(workload_dir)
-
-    # Check if csvs have data
-    file_dict = {}
-    for file in files_in_workload:
-        if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_dir + "/" + file)
-            if not "sysinfo" in file:
-                assert len(file_dict[file].index) >= num_kernels
     if soc == "mi200":
         
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
@@ -1915,6 +1735,8 @@ def test_kernel_verbose_4():
             inspect.stack()[0][3],
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
+
+    test_utils.clean_output_dir(cleanup, workload_dir)
 
 
 @pytest.mark.verbosity
@@ -1931,16 +1753,8 @@ def test_kernel_verbose_5():
 
     # assert successful run
     assert e.value.code == 0
+    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
 
-    files_in_workload = os.listdir(workload_dir)
-
-    # Check if csvs have data
-    file_dict = {}
-    for file in files_in_workload:
-        if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_dir + "/" + file)
-            if not "sysinfo" in file:
-                assert len(file_dict[file].index) >= num_kernels
     if soc == "mi200":
         
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
@@ -1955,6 +1769,8 @@ def test_kernel_verbose_5():
             inspect.stack()[0][3],
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
+
+    test_utils.clean_output_dir(cleanup, workload_dir)
 
 
 @pytest.mark.join
@@ -1969,16 +1785,8 @@ def test_join_type_grid():
 
     # assert successful run
     assert e.value.code == 0
+    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
 
-    files_in_workload = os.listdir(workload_dir)
-
-    # Check if csvs have data
-    file_dict = {}
-    for file in files_in_workload:
-        if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_dir + "/" + file)
-            if not "sysinfo" in file:
-                assert len(file_dict[file].index) >= num_kernels
     if soc == "mi200":
         
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
@@ -1993,6 +1801,8 @@ def test_join_type_grid():
             inspect.stack()[0][3],
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
+
+    test_utils.clean_output_dir(cleanup, workload_dir)
 
 
 @pytest.mark.join
@@ -2009,16 +1819,8 @@ def test_join_type_kernel():
 
     # assert successful run
     assert e.value.code == 0
+    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
 
-    files_in_workload = os.listdir(workload_dir)
-
-    # Check if csvs have data
-    file_dict = {}
-    for file in files_in_workload:
-        if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_dir + "/" + file)
-            if not "sysinfo" in file:
-                assert len(file_dict[file].index) >= num_kernels
     if soc == "mi200":
         
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
@@ -2033,6 +1835,8 @@ def test_join_type_kernel():
             inspect.stack()[0][3],
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
+
+    test_utils.clean_output_dir(cleanup, workload_dir)
 
 
 @pytest.mark.sort
@@ -2056,17 +1860,6 @@ def test_sort_dispatches():
     # assert successful run
     assert e.value.code == 0
 
-    files_in_workload = os.listdir(workload_dir)
-
-    # Check if csvs have data
-    file_dict = {}
-    for file in files_in_workload:
-        if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_dir + "/" + file)
-            if not "sysinfo" in file:
-                assert len(file_dict[file].index) >= num_kernels
-        elif file.endswith(".pdf"):
-            file_dict[file] = "pdf"
     if soc == "mi200":
         
         assert sorted(list(file_dict.keys())) == ROOF_ONLY_FILES
@@ -2081,6 +1874,8 @@ def test_sort_dispatches():
             inspect.stack()[0][3],
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
+
+    test_utils.clean_output_dir(cleanup, workload_dir)
 
 
 @pytest.mark.sort
@@ -2102,18 +1897,8 @@ def test_sort_kernels():
 
     # assert successful run
     assert e.value.code == 0
+    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
 
-    files_in_workload = os.listdir(workload_dir)
-
-    file_dict = {}
-    # Check if csvs have data
-    for file in files_in_workload:
-        if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_dir + "/" + file)
-            if not "sysinfo" in file:
-                assert len(file_dict[file].index) >= num_kernels
-        elif file.endswith(".pdf"):
-            file_dict[file] = "pdf"
     if soc == "mi200":
         
         assert sorted(list(file_dict.keys())) == ROOF_ONLY_FILES
@@ -2128,6 +1913,8 @@ def test_sort_kernels():
             inspect.stack()[0][3],
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
+
+    test_utils.clean_output_dir(cleanup, workload_dir)
 
 
 @pytest.mark.mem
@@ -2150,18 +1937,8 @@ def test_mem_levels_HBM():
 
     # assert successful run
     assert e.value.code == 0
+    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
 
-    files_in_workload = os.listdir(workload_dir)
-
-    # Check if csvs have data
-    file_dict = {}
-    for file in files_in_workload:
-        if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_dir + "/" + file)
-            if not "sysinfo" in file:
-                assert len(file_dict[file].index) >= num_kernels
-        elif file.endswith(".pdf"):
-            file_dict[file] = "pdf"
     if soc == "mi200":
         
         assert sorted(list(file_dict.keys())) == ROOF_ONLY_FILES
@@ -2176,6 +1953,8 @@ def test_mem_levels_HBM():
             inspect.stack()[0][3],
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
+
+    test_utils.clean_output_dir(cleanup, workload_dir)
 
 
 @pytest.mark.mem
@@ -2198,18 +1977,8 @@ def test_mem_levels_L2():
 
     # assert successful run
     assert e.value.code == 0
+    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
 
-    files_in_workload = os.listdir(workload_dir)
-
-    # Check if csvs have data
-    file_dict = {}
-    for file in files_in_workload:
-        if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_dir + "/" + file)
-            if not "sysinfo" in file:
-                assert len(file_dict[file].index) >= num_kernels
-        elif file.endswith(".pdf"):
-            file_dict[file] = "pdf"
     if soc == "mi200":
         
         assert sorted(list(file_dict.keys())) == ROOF_ONLY_FILES
@@ -2224,6 +1993,8 @@ def test_mem_levels_L2():
             inspect.stack()[0][3],
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
+
+    test_utils.clean_output_dir(cleanup, workload_dir)
 
 
 @pytest.mark.mem
@@ -2245,18 +2016,8 @@ def test_mem_levels_vL1D():
 
     # assert successful run
     assert e.value.code == 0
+    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
 
-    files_in_workload = os.listdir(workload_dir)
-
-    # Check if csvs have data
-    file_dict = {}
-    for file in files_in_workload:
-        if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_dir + "/" + file)
-            if not "sysinfo" in file:
-                assert len(file_dict[file].index) >= num_kernels
-        elif file.endswith(".pdf"):
-            file_dict[file] = "pdf"
     if soc == "mi200":
         
         assert sorted(list(file_dict.keys())) == ROOF_ONLY_FILES
@@ -2271,6 +2032,8 @@ def test_mem_levels_vL1D():
             inspect.stack()[0][3],
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
+
+    test_utils.clean_output_dir(cleanup, workload_dir)
 
 
 @pytest.mark.mem
@@ -2292,18 +2055,8 @@ def test_mem_levels_LDS():
 
     # assert successful run
     assert e.value.code == 0
+    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
 
-    files_in_workload = os.listdir(workload_dir)
-
-    # Check if csvs have data
-    file_dict = {}
-    for file in files_in_workload:
-        if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_dir + "/" + file)
-            if not "sysinfo" in file:
-                assert len(file_dict[file].index) >= num_kernels
-        elif file.endswith(".pdf"):
-            file_dict[file] = "pdf"
     if soc == "mi200":
         
         assert sorted(list(file_dict.keys())) == ROOF_ONLY_FILES
@@ -2318,6 +2071,8 @@ def test_mem_levels_LDS():
             inspect.stack()[0][3],
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
+
+    test_utils.clean_output_dir(cleanup, workload_dir)
 
 
 @pytest.mark.mem
@@ -2339,18 +2094,8 @@ def test_mem_levels_HBM_LDS():
 
     # assert successful run
     assert e.value.code == 0
+    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
 
-    files_in_workload = os.listdir(workload_dir)
-
-    # Check if csvs have data
-    file_dict = {}
-    for file in files_in_workload:
-        if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_dir + "/" + file)
-            if not "sysinfo" in file:
-                assert len(file_dict[file].index) >= num_kernels
-        elif file.endswith(".pdf"):
-            file_dict[file] = "pdf"
     if soc == "mi200":
         
         assert sorted(list(file_dict.keys())) == ROOF_ONLY_FILES
@@ -2365,6 +2110,8 @@ def test_mem_levels_HBM_LDS():
             inspect.stack()[0][3],
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
+
+    test_utils.clean_output_dir(cleanup, workload_dir)
 
 
 @pytest.mark.mem
@@ -2386,18 +2133,8 @@ def test_mem_levels_vL1D_LDS():
 
     # assert successful run
     assert e.value.code == 0
+    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
 
-    files_in_workload = os.listdir(workload_dir)
-
-    # Check if csvs have data
-    file_dict = {}
-    for file in files_in_workload:
-        if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_dir + "/" + file)
-            if not "sysinfo" in file:
-                assert len(file_dict[file].index) >= num_kernels
-        elif file.endswith(".pdf"):
-            file_dict[file] = "pdf"
     if soc == "mi200":
         
         assert sorted(list(file_dict.keys())) == ROOF_ONLY_FILES
@@ -2412,6 +2149,8 @@ def test_mem_levels_vL1D_LDS():
             inspect.stack()[0][3],
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
+
+    test_utils.clean_output_dir(cleanup, workload_dir)
 
 
 @pytest.mark.mem
@@ -2441,18 +2180,8 @@ def test_mem_levels_L2_vL1D_LDS():
         return
     # assert successful run
     assert e.value.code == 0
+    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
 
-    files_in_workload = os.listdir(workload_dir)
-
-    # Check if csvs have data
-    file_dict = {}
-    for file in files_in_workload:
-        if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_dir + "/" + file)
-            if not "sysinfo" in file:
-                assert len(file_dict[file].index) >= num_kernels
-        elif file.endswith(".pdf"):
-            file_dict[file] = "pdf"
     if soc == "mi200":
         
         assert sorted(list(file_dict.keys())) == ROOF_ONLY_FILES
@@ -2468,70 +2197,4 @@ def test_mem_levels_L2_vL1D_LDS():
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
 
-
-# def test_kernel_names():
-#     if os.path.exists(workload_1):
-#         shutil.rmtree(workload_1)
-#     with pytest.raises(SystemExit) as e:
-#         with patch(
-#             "sys.argv",
-#             [
-#                 "omniperf",
-#                 "profile",
-#                 "-n",
-#                 "app_1",
-#                 "-VVV",
-#                 "--path",
-#                 workload_1,
-#                 "--roof-only",
-#                 "--kernel-names",
-#                 "--",
-#             ]
-#             + app_1,
-#         ):
-#             omniperf.main()
-
-#     if soc == "mi100":
-#         # assert that it did not run
-#         assert e.value.code >= 1
-#         # Do not continue testing
-#         return
-#     # assert successful run
-#     assert e.value.code == 0
-
-#     files_in_workload = os.listdir(workload_1)
-
-#     # Check if csvs have data
-#     file_dict = {}
-#     for file in files_in_workload:
-#         if file.endswith(".csv"):
-#             file_dict[file] = pd.read_csv(workload_1 + "/" + file)
-#             if not "sysinfo" in file:
-#                 assert len(file_dict[file].index) >= num_kernels
-#         elif file.endswith(".pdf"):
-#             file_dict[file] = "pdf"
-#     if soc == "mi200":
-        
-#         assert sorted(list(file_dict.keys())) == [
-#             "empirRoof_gpu-ALL_fp32.pdf",
-#             "empirRoof_gpu-ALL_int8_fp16.pdf",
-#             "kernelName_legend.pdf",
-#             "pmc_perf.csv",
-#             "pmc_perf_0.csv",
-#             "pmc_perf_1.csv",
-#             "pmc_perf_2.csv",
-#             "roofline.csv",
-#             "sysinfo.csv",
-#             "timestamps.csv",
-#         ]
-#     else:
-#         assert sorted(list(file_dict.keys())) == ALL_CSVS
-
-#     if COUNTER_LOGGING:
-#         log_counter(file_dict, inspect.stack()[0][3])
-
-#     if METRIC_LOGGING:
-#         log_metric(
-#             inspect.stack()[0][3],
-#             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
-#         )
+    test_utils.clean_output_dir(cleanup, workload_dir)
