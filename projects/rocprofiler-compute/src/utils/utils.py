@@ -223,11 +223,12 @@ def replace_timestamps(workload_dir):
     if "BeginNs" in df_stamps.columns and "EndNs" in df_stamps.columns:
         # Update timestamps for all *.csv output files
         for fname in glob.glob(workload_dir + "/" + "*.csv"):
-            df_pmc_perf = pd.read_csv(fname)
+            if path(fname).name != "sysinfo.csv":
+                df_pmc_perf = pd.read_csv(fname)
 
-            df_pmc_perf["BeginNs"] = df_stamps["BeginNs"]
-            df_pmc_perf["EndNs"] = df_stamps["EndNs"]
-            df_pmc_perf.to_csv(fname, index=False)
+                df_pmc_perf["BeginNs"] = df_stamps["BeginNs"]
+                df_pmc_perf["EndNs"] = df_stamps["EndNs"]
+                df_pmc_perf.to_csv(fname, index=False)
     else:
         warning = "WARNING: Incomplete profiling data detected. Unable to update timestamps."
         logging.warning(warning + "\n")
