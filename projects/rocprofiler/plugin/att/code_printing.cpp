@@ -56,12 +56,15 @@
 #define C_API_END(returndata)                                         \
 } catch (std::exception& e)                                           \
 {                                                                     \
-  std::cerr << "Codeobj API lookup error: " << e.what() << std::endl; \
+  std::string s = e.what();                                           \
+  if (s.find("memory protocol not supported!") == std::string::npos)  \
+    std::cerr << "Codeobj API lookup: " << e.what() << std::endl;     \
   return returndata;                                                  \
 }                                                                     \
 catch (std::string& s)                                                \
 {                                                                     \
-  std::cerr << "Codeobj API lookup error: " << s << std::endl;        \
+  if (s.find("memory protocol not supported!") == std::string::npos)  \
+    std::cerr << "Codeobj API lookup: " << s << std::endl;            \
   return returndata;                                                  \
 }                                                                     \
 catch (...)                                                           \

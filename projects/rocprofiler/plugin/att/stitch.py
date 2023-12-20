@@ -540,13 +540,13 @@ def stitch(insts, raw_code, jumps, gfxv, bIsAuto, codeservice):
                     print('WARNING: Parsing terminated at:', as_line)
                     break
 
-        if matched or as_line[1] != DONT_KNOW or 's_barrier' in as_line[0]:
+        if matched or as_line[1] != DONT_KNOW:
             if matched:
                 inst.asmline = reverse_map[line]
                 result.append(inst)
                 i += 1
                 num_failed_stitches = 0
-            elif inst.type == IMMED and line != next and (not bGFX9 or 's_barrier' in as_line[0]):
+            elif not bGFX9 and inst.type == IMMED and line != next:
                 skipped_immed += 1
                 inst.asmline = reverse_map[line]
                 result.append(inst)
