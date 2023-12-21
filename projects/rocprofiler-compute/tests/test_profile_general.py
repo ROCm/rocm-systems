@@ -395,24 +395,15 @@ def log_metric(test_name, thresholds, args=[]):
 
 @pytest.mark.misc
 def test_path():
+    options = baseline_opts
     workload_dir = test_utils.get_output_dir()
-    with pytest.raises(SystemExit) as e:
-        with patch("sys.argv", baseline_opts + ["--path", workload_dir, "--"] + app_1):
-            omniperf.main()
-    # assert successful run
-    assert e.value.code == 0
+    test_utils.launch_omniperf(
+        options=options, workload_dir=workload_dir, app=app_1, omniperf=omniperf
+    )
 
-    files_in_workload = os.listdir(workload_dir)
+    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
 
-    # Check if csvs have data
-    file_dict = {}
-    for file in files_in_workload:
-        if file.endswith(".csv"):
-            file_dict[file] = pd.read_csv(workload_dir + "/" + file, index_col=0)
-            # TODO: verify contents: we know function evaluated
-            if not "sysinfo" in file:
-                assert len(file_dict[file].index) >= num_kernels
-    
+    print(sorted(list(file_dict.keys())))
     if soc == "mi200":
         
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
@@ -433,16 +424,12 @@ def test_path():
 
 @pytest.mark.misc
 def test_no_roof():
+    options = baseline_opts + ["--no-roof"]
     workload_dir = test_utils.get_output_dir()
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            baseline_opts + ["--path", workload_dir, "--no-roof", "--"] + app_1,
-        ):
-            omniperf.main()
+    test_utils.launch_omniperf(
+        options=options, workload_dir=workload_dir, app=app_1, omniperf=omniperf
+    )
 
-    # assert successful run
-    assert e.value.code == 0
     file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
 
     if soc == "mi200":
@@ -491,15 +478,15 @@ def test_no_roof():
 
 @pytest.mark.misc
 def test_kernel_names():
+    options = baseline_opts + ["--roof-only", "--kernel-names"]
     workload_dir = test_utils.get_output_dir()
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            baseline_opts
-            + ["--path", workload_dir, "--roof-only", "--kernel-names", "--"]
-            + app_1,
-        ):
-            omniperf.main()
+    e = test_utils.launch_omniperf(
+        options=options,
+        workload_dir=workload_dir,
+        app=app_1,
+        omniperf=omniperf,
+        check_success=False,
+    )
 
     if soc == "mi100":
         # assert that it did not run
@@ -541,19 +528,17 @@ def test_kernel_names():
 
 @pytest.mark.misc
 def test_device_filter():
-    workload_dir = test_utils.get_output_dir()
     device_id = "0"
     if "HIP_VISIBLE_DEVICES" in os.environ:
         device_id = os.environ["HIP_VISIBLE_DEVICES"]
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            baseline_opts + ["--path", workload_dir, "--device", device_id, "--"] + app_1,
-        ):
-            omniperf.main()
 
-    # assert successful run
-    assert e.value.code == 0
+    options = baseline_opts + ["--device", device_id]
+    workload_dir = test_utils.get_output_dir()
+
+    test_utils.launch_omniperf(
+        options=options, workload_dir=workload_dir, app=app_1, omniperf=omniperf
+    )
+
     file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
 
     if soc == "mi200":
@@ -578,18 +563,12 @@ def test_device_filter():
 
 @pytest.mark.kernel_execution
 def test_kernel():
+    options = baseline_opts + ["--kernel", kernel_name_1]
     workload_dir = test_utils.get_output_dir()
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            baseline_opts
-            + ["--path", workload_dir, "--kernel", kernel_name_1, "--"]
-            + app_1,
-        ):
-            omniperf.main()
+    test_utils.launch_omniperf(
+        options=options, workload_dir=workload_dir, app=app_1, omniperf=omniperf
+    )
 
-    # assert successful run
-    assert e.value.code == 0
     file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
 
     if soc == "mi200":
@@ -612,18 +591,12 @@ def test_kernel():
 
 @pytest.mark.kernel_execution
 def test_kernel_summaries():
+    options = baseline_opts + ["--kernel-summaries", "vcopy"]
     workload_dir = test_utils.get_output_dir()
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            baseline_opts
-            + ["--path", workload_dir, "--kernel-summaries", "vcopy", "--"]
-            + app_1,
-        ):
-            omniperf.main()
+    test_utils.launch_omniperf(
+        options=options, workload_dir=workload_dir, app=app_1, omniperf=omniperf
+    )
 
-    # assert successful run
-    assert e.value.code == 0
     file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
 
     if soc == "mi200":
@@ -646,18 +619,15 @@ def test_kernel_summaries():
 
 @pytest.mark.ipblocks
 def test_ipblocks_SQ():
+    options = baseline_opts + ["--ipblocks", "SQ"]
     workload_dir = test_utils.get_output_dir()
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            baseline_opts + ["--path", workload_dir, "--ipblocks", "SQ", "--"] + app_1,
-        ):
-            omniperf.main()
 
-    # assert successful run
-    assert e.value.code == 0
+    test_utils.launch_omniperf(
+        options=options, workload_dir=workload_dir, app=app_1, omniperf=omniperf
+    )
+
     file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
-
+    print(sorted(list(file_dict.keys())))
     expected_csvs = [
         "SQ_IFETCH_LEVEL.csv",
         "SQ_INST_LEVEL_LDS.csv",
@@ -718,16 +688,12 @@ def test_ipblocks_SQ():
 
 @pytest.mark.ipblocks
 def test_ipblocks_SQC():
+    options = baseline_opts + ["--ipblocks", "SQC"]
     workload_dir = test_utils.get_output_dir()
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            baseline_opts + ["--path", workload_dir, "--ipblocks", "SQC", "--"] + app_1,
-        ):
-            omniperf.main()
+    test_utils.launch_omniperf(
+        options=options, workload_dir=workload_dir, app=app_1, omniperf=omniperf
+    )
 
-    # assert successful run
-    assert e.value.code == 0
     file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
 
     expected_csvs = [
@@ -758,16 +724,12 @@ def test_ipblocks_SQC():
 
 @pytest.mark.ipblocks
 def test_ipblocks_TA():
+    options = baseline_opts + ["--ipblocks", "TA"]
     workload_dir = test_utils.get_output_dir()
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            baseline_opts + ["--path", workload_dir, "--ipblocks", "TA", "--"] + app_1,
-        ):
-            omniperf.main()
+    test_utils.launch_omniperf(
+        options=options, workload_dir=workload_dir, app=app_1, omniperf=omniperf
+    )
 
-    # assert successful run
-    assert e.value.code == 0
     file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
 
     
@@ -804,16 +766,12 @@ def test_ipblocks_TA():
 
 @pytest.mark.ipblocks
 def test_ipblocks_TD():
+    options = baseline_opts + ["--ipblocks", "TD"]
     workload_dir = test_utils.get_output_dir()
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            baseline_opts + ["--path", workload_dir, "--ipblocks", "TD", "--"] + app_1,
-        ):
-            omniperf.main()
+    test_utils.launch_omniperf(
+        options=options, workload_dir=workload_dir, app=app_1, omniperf=omniperf
+    )
 
-    # assert successful run
-    assert e.value.code == 0
     file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
 
     
@@ -854,16 +812,12 @@ def test_ipblocks_TD():
 
 @pytest.mark.ipblocks
 def test_ipblocks_TCP():
+    options = baseline_opts + ["--ipblocks", "TCP"]
     workload_dir = test_utils.get_output_dir()
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            baseline_opts + ["--path", workload_dir, "--ipblocks", "TCP", "--"] + app_1,
-        ):
-            omniperf.main()
+    test_utils.launch_omniperf(
+        options=options, workload_dir=workload_dir, app=app_1, omniperf=omniperf
+    )
 
-    # assert successful run
-    assert e.value.code == 0
     file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
 
     expected_csvs = [
@@ -900,16 +854,12 @@ def test_ipblocks_TCP():
 
 @pytest.mark.ipblocks
 def test_ipblocks_TCC():
+    options = baseline_opts + ["--ipblocks", "TCC"]
     workload_dir = test_utils.get_output_dir()
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            baseline_opts + ["--path", workload_dir, "--ipblocks", "TCC", "--"] + app_1,
-        ):
-            omniperf.main()
+    test_utils.launch_omniperf(
+        options=options, workload_dir=workload_dir, app=app_1, omniperf=omniperf
+    )
 
-    # assert successful run
-    assert e.value.code == 0
     file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
 
     
@@ -948,16 +898,12 @@ def test_ipblocks_TCC():
 
 @pytest.mark.ipblocks
 def test_ipblocks_SPI():
+    options = baseline_opts + ["--ipblocks", "SPI"]
     workload_dir = test_utils.get_output_dir()
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            baseline_opts + ["--path", workload_dir, "--ipblocks", "SPI", "--"] + app_1,
-        ):
-            omniperf.main()
+    test_utils.launch_omniperf(
+        options=options, workload_dir=workload_dir, app=app_1, omniperf=omniperf
+    )
 
-    # assert successful run
-    assert e.value.code == 0
     file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
 
     expected_csvs = [
@@ -993,16 +939,12 @@ def test_ipblocks_SPI():
 
 @pytest.mark.ipblocks
 def test_ipblocks_CPC():
+    options = baseline_opts + ["--ipblocks", "CPC"]
     workload_dir = test_utils.get_output_dir()
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            baseline_opts + ["--path", workload_dir, "--ipblocks", "CPC", "--"] + app_1,
-        ):
-            omniperf.main()
+    test_utils.launch_omniperf(
+        options=options, workload_dir=workload_dir, app=app_1, omniperf=omniperf
+    )
 
-    # assert successful run
-    assert e.value.code == 0
     file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
 
     expected_csvs = [
@@ -1034,16 +976,12 @@ def test_ipblocks_CPC():
 
 @pytest.mark.ipblocks
 def test_ipblocks_CPF():
+    options = baseline_opts + ["--ipblocks", "CPF"]
     workload_dir = test_utils.get_output_dir()
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            baseline_opts + ["--path", workload_dir, "--ipblocks", "CPF", "--"] + app_1,
-        ):
-            omniperf.main()
+    test_utils.launch_omniperf(
+        options=options, workload_dir=workload_dir, app=app_1, omniperf=omniperf
+    )
 
-    # assert successful run
-    assert e.value.code == 0
     file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
 
     print(sorted(list(file_dict.keys())))
@@ -1074,18 +1012,12 @@ def test_ipblocks_CPF():
 
 @pytest.mark.ipblocks
 def test_ipblocks_SQ_CPC():
+    options = baseline_opts + ["--ipblocks", "SQ", "CPC"]
     workload_dir = test_utils.get_output_dir()
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            baseline_opts
-            + ["--path", workload_dir, "--ipblocks", "SQ", "CPC", "--"]
-            + app_1,
-        ):
-            omniperf.main()
+    test_utils.launch_omniperf(
+        options=options, workload_dir=workload_dir, app=app_1, omniperf=omniperf
+    )
 
-    # assert successful run
-    assert e.value.code == 0
     file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
 
     
@@ -1150,18 +1082,12 @@ def test_ipblocks_SQ_CPC():
 
 @pytest.mark.ipblocks
 def test_ipblocks_SQ_TA():
+    options = baseline_opts + ["--ipblocks", "SQ", "TA"]
     workload_dir = test_utils.get_output_dir()
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            baseline_opts
-            + ["--path", workload_dir, "--ipblocks", "SQ", "TA", "--"]
-            + app_1,
-        ):
-            omniperf.main()
+    test_utils.launch_omniperf(
+        options=options, workload_dir=workload_dir, app=app_1, omniperf=omniperf
+    )
 
-    # assert successful run
-    assert e.value.code == 0
     file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
 
     
@@ -1225,18 +1151,12 @@ def test_ipblocks_SQ_TA():
 
 @pytest.mark.ipblocks
 def test_ipblocks_SQ_SPI():
+    options = baseline_opts + ["--ipblocks", "SQ", "SPI"]
     workload_dir = test_utils.get_output_dir()
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            baseline_opts
-            + ["--path", workload_dir, "--ipblocks", "SQ", "SPI", "--"]
-            + app_1,
-        ):
-            omniperf.main()
+    test_utils.launch_omniperf(
+        options=options, workload_dir=workload_dir, app=app_1, omniperf=omniperf
+    )
 
-    # assert successful run
-    assert e.value.code == 0
     file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
 
     
@@ -1300,18 +1220,12 @@ def test_ipblocks_SQ_SPI():
 
 @pytest.mark.ipblocks
 def test_ipblocks_SQ_SQC_TCP_CPC():
+    options = baseline_opts + ["--ipblocks", "SQ", "SQC", "TCP", "CPC"]
     workload_dir = test_utils.get_output_dir()
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            baseline_opts
-            + ["--path", workload_dir, "--ipblocks", "SQ", "SQC", "TCP", "CPC", "--"]
-            + app_1,
-        ):
-            omniperf.main()
+    test_utils.launch_omniperf(
+        options=options, workload_dir=workload_dir, app=app_1, omniperf=omniperf
+    )
 
-    # assert successful run
-    assert e.value.code == 0
     file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
 
     
@@ -1376,28 +1290,12 @@ def test_ipblocks_SQ_SQC_TCP_CPC():
 
 @pytest.mark.ipblocks
 def test_ipblocks_SQ_SPI_TA_TCC_CPF():
+    options = baseline_opts + ["--ipblocks", "SQ", "SPI", "TA", "TCC", "CPF"]
     workload_dir = test_utils.get_output_dir()
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            baseline_opts
-            + [
-                "--path",
-                workload_dir,
-                "--ipblocks",
-                "SQ",
-                "SPI",
-                "TA",
-                "TCC",
-                "CPF",
-                "--",
-            ]
-            + app_1,
-        ):
-            omniperf.main()
+    test_utils.launch_omniperf(
+        options=options, workload_dir=workload_dir, app=app_1, omniperf=omniperf
+    )
 
-    # assert successful run
-    assert e.value.code == 0
     file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
 
     
@@ -1463,16 +1361,12 @@ def test_ipblocks_SQ_SPI_TA_TCC_CPF():
 
 @pytest.mark.dispatch
 def test_dispatch_0():
+    options = baseline_opts + ["--dispatch", "0"]
     workload_dir = test_utils.get_output_dir()
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            baseline_opts + ["--path", workload_dir, "--dispatch", "0", "--"] + app_1,
-        ):
-            omniperf.main()
+    test_utils.launch_omniperf(
+        options=options, workload_dir=workload_dir, app=app_1, omniperf=omniperf
+    )
 
-    # assert successful run
-    assert e.value.code == 0
     file_dict = test_utils.check_csv_files(workload_dir, 1)
 
     if soc == "mi200":
@@ -1499,16 +1393,12 @@ def test_dispatch_0():
 
 @pytest.mark.dispatch
 def test_dispatch_0_1():
+    options = baseline_opts + ["--dispatch", "0:2"]
     workload_dir = test_utils.get_output_dir()
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            baseline_opts + ["--path", workload_dir, "--dispatch", "0:2", "--"] + app_1,
-        ):
-            omniperf.main()
+    test_utils.launch_omniperf(
+        options=options, workload_dir=workload_dir, app=app_1, omniperf=omniperf
+    )
 
-    # assert successful run
-    assert e.value.code == 0
     file_dict = test_utils.check_csv_files(workload_dir, 2)
 
     if soc == "mi200":
@@ -1533,18 +1423,12 @@ def test_dispatch_0_1():
 
 @pytest.mark.dispatch
 def test_dispatch_2():
+    options = baseline_opts + ["--dispatch", dispatch_id]
     workload_dir = test_utils.get_output_dir()
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            baseline_opts
-            + ["--path", workload_dir, "--dispatch", dispatch_id, "--"]
-            + app_1,
-        ):
-            omniperf.main()
+    test_utils.launch_omniperf(
+        options=options, workload_dir=workload_dir, app=app_1, omniperf=omniperf
+    )
 
-    # assert successful run
-    assert e.value.code == 0
     file_dict = test_utils.check_csv_files(workload_dir, 1)
 
     if soc == "mi200":
@@ -1571,18 +1455,12 @@ def test_dispatch_2():
 
 @pytest.mark.verbosity
 def test_kernel_verbose_0():
+    options = baseline_opts + ["--kernel-verbose", "0"]
     workload_dir = test_utils.get_output_dir()
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            baseline_opts
-            + ["--path", workload_dir, "--kernel-verbose", "0", "--"]
-            + app_1,
-        ):
-            omniperf.main()
+    test_utils.launch_omniperf(
+        options=options, workload_dir=workload_dir, app=app_1, omniperf=omniperf
+    )
 
-    # assert successful run
-    assert e.value.code == 0
     file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
 
     if soc == "mi200":
@@ -1605,18 +1483,12 @@ def test_kernel_verbose_0():
 
 @pytest.mark.verbosity
 def test_kernel_verbose_1():
+    options = baseline_opts + ["--kernel-verbose", "1"]
     workload_dir = test_utils.get_output_dir()
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            baseline_opts
-            + ["--path", workload_dir, "--kernel-verbose", "1", "--"]
-            + app_1,
-        ):
-            omniperf.main()
+    test_utils.launch_omniperf(
+        options=options, workload_dir=workload_dir, app=app_1, omniperf=omniperf
+    )
 
-    # assert successful run
-    assert e.value.code == 0
     file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
 
     if soc == "mi200":
@@ -1639,18 +1511,12 @@ def test_kernel_verbose_1():
 
 @pytest.mark.verbosity
 def test_kernel_verbose_2():
+    options = baseline_opts + ["--kernel-verbose", "2"]
     workload_dir = test_utils.get_output_dir()
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            baseline_opts
-            + ["--path", workload_dir, "--kernel-verbose", "2", "--"]
-            + app_1,
-        ):
-            omniperf.main()
+    test_utils.launch_omniperf(
+        options=options, workload_dir=workload_dir, app=app_1, omniperf=omniperf
+    )
 
-    # assert successful run
-    assert e.value.code == 0
     file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
 
     if soc == "mi200":
@@ -1673,18 +1539,12 @@ def test_kernel_verbose_2():
 
 @pytest.mark.verbosity
 def test_kernel_verbose_3():
+    options = baseline_opts + ["--kernel-verbose", "3"]
     workload_dir = test_utils.get_output_dir()
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            baseline_opts
-            + ["--path", workload_dir, "--kernel-verbose", "3", "--"]
-            + app_1,
-        ):
-            omniperf.main()
+    test_utils.launch_omniperf(
+        options=options, workload_dir=workload_dir, app=app_1, omniperf=omniperf
+    )
 
-    # assert successful run
-    assert e.value.code == 0
     file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
 
     if soc == "mi200":
@@ -1707,18 +1567,12 @@ def test_kernel_verbose_3():
 
 @pytest.mark.verbosity
 def test_kernel_verbose_4():
+    options = baseline_opts + ["--kernel-verbose", "4"]
     workload_dir = test_utils.get_output_dir()
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            baseline_opts
-            + ["--path", workload_dir, "--kernel-verbose", "4", "--"]
-            + app_1,
-        ):
-            omniperf.main()
+    test_utils.launch_omniperf(
+        options=options, workload_dir=workload_dir, app=app_1, omniperf=omniperf
+    )
 
-    # assert successful run
-    assert e.value.code == 0
     file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
 
     if soc == "mi200":
@@ -1741,18 +1595,12 @@ def test_kernel_verbose_4():
 
 @pytest.mark.verbosity
 def test_kernel_verbose_5():
+    options = baseline_opts + ["--kernel-verbose", "5"]
     workload_dir = test_utils.get_output_dir()
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            baseline_opts
-            + ["--path", workload_dir, "--kernel-verbose", "5", "--"]
-            + app_1,
-        ):
-            omniperf.main()
+    test_utils.launch_omniperf(
+        options=options, workload_dir=workload_dir, app=app_1, omniperf=omniperf
+    )
 
-    # assert successful run
-    assert e.value.code == 0
     file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
 
     if soc == "mi200":
@@ -1775,16 +1623,12 @@ def test_kernel_verbose_5():
 
 @pytest.mark.join
 def test_join_type_grid():
+    options = baseline_opts + ["--join-type", "grid"]
     workload_dir = test_utils.get_output_dir()
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            baseline_opts + ["--path", workload_dir, "--join-type", "grid", "--"] + app_1,
-        ):
-            omniperf.main()
+    test_utils.launch_omniperf(
+        options=options, workload_dir=workload_dir, app=app_1, omniperf=omniperf
+    )
 
-    # assert successful run
-    assert e.value.code == 0
     file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
 
     if soc == "mi200":
@@ -1807,18 +1651,12 @@ def test_join_type_grid():
 
 @pytest.mark.join
 def test_join_type_kernel():
+    options = baseline_opts + ["--join-type", "kernel"]
     workload_dir = test_utils.get_output_dir()
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            baseline_opts
-            + ["--path", workload_dir, "--join-type", "kernel", "--"]
-            + app_1,
-        ):
-            omniperf.main()
+    test_utils.launch_omniperf(
+        options=options, workload_dir=workload_dir, app=app_1, omniperf=omniperf
+    )
 
-    # assert successful run
-    assert e.value.code == 0
     file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
 
     if soc == "mi200":
@@ -1841,15 +1679,15 @@ def test_join_type_kernel():
 
 @pytest.mark.sort
 def test_sort_dispatches():
+    options = baseline_opts + ["--roof-only", "--sort", "dispatches"]
     workload_dir = test_utils.get_output_dir()
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            baseline_opts
-            + ["--path", workload_dir, "--roof-only", "--sort", "dispatches", "--"]
-            + app_1,
-        ):
-            omniperf.main()
+    e = test_utils.launch_omniperf(
+        options=options,
+        workload_dir=workload_dir,
+        app=app_1,
+        omniperf=omniperf,
+        check_success=False,
+    )
 
     if soc == "mi100":
         # assert that it did not run
@@ -1880,15 +1718,16 @@ def test_sort_dispatches():
 
 @pytest.mark.sort
 def test_sort_kernels():
+    options = baseline_opts + ["--roof-only", "--sort", "kernels"]
     workload_dir = test_utils.get_output_dir()
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            baseline_opts
-            + ["--path", workload_dir, "--roof-only", "--sort", "kernels", "--"]
-            + app_1,
-        ):
-            omniperf.main()
+    e = test_utils.launch_omniperf(
+        options=options,
+        workload_dir=workload_dir,
+        app=app_1,
+        omniperf=omniperf,
+        check_success=False,
+    )
+
     if soc == "mi100":
         # assert that it did not run
         assert e.value.code >= 1
@@ -1919,15 +1758,15 @@ def test_sort_kernels():
 
 @pytest.mark.mem
 def test_mem_levels_HBM():
+    options = baseline_opts + ["--roof-only", "--mem-level", "HBM"]
     workload_dir = test_utils.get_output_dir()
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            baseline_opts
-            + ["--path", workload_dir, "--roof-only", "--mem-level", "HBM", "--"]
-            + app_1,
-        ):
-            omniperf.main()
+    e = test_utils.launch_omniperf(
+        options=options,
+        workload_dir=workload_dir,
+        app=app_1,
+        omniperf=omniperf,
+        check_success=False,
+    )
 
     if soc == "mi100":
         # assert that it did not run
@@ -1959,15 +1798,15 @@ def test_mem_levels_HBM():
 
 @pytest.mark.mem
 def test_mem_levels_L2():
+    options = baseline_opts + ["--roof-only", "--mem-level", "L2"]
     workload_dir = test_utils.get_output_dir()
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            baseline_opts
-            + ["--path", workload_dir, "--roof-only", "--mem-level", "L2", "--"]
-            + app_1,
-        ):
-            omniperf.main()
+    e = test_utils.launch_omniperf(
+        options=options,
+        workload_dir=workload_dir,
+        app=app_1,
+        omniperf=omniperf,
+        check_success=False,
+    )
 
     if soc == "mi100":
         # assert that it did not run
@@ -1999,15 +1838,16 @@ def test_mem_levels_L2():
 
 @pytest.mark.mem
 def test_mem_levels_vL1D():
+    options = baseline_opts + ["--roof-only", "--mem-level", "vL1D"]
     workload_dir = test_utils.get_output_dir()
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            baseline_opts
-            + ["--path", workload_dir, "--roof-only", "--mem-level", "vL1D", "--"]
-            + app_1,
-        ):
-            omniperf.main()
+    e = test_utils.launch_omniperf(
+        options=options,
+        workload_dir=workload_dir,
+        app=app_1,
+        omniperf=omniperf,
+        check_success=False,
+    )
+
     if soc == "mi100":
         # assert that it did not run
         assert e.value.code >= 1
@@ -2038,15 +1878,16 @@ def test_mem_levels_vL1D():
 
 @pytest.mark.mem
 def test_mem_levels_LDS():
+    options = baseline_opts + ["--roof-only", "--mem-level", "LDS"]
     workload_dir = test_utils.get_output_dir()
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            baseline_opts
-            + ["--path", workload_dir, "--roof-only", "--mem-level", "LDS", "--"]
-            + app_1,
-        ):
-            omniperf.main()
+    e = test_utils.launch_omniperf(
+        options=options,
+        workload_dir=workload_dir,
+        app=app_1,
+        omniperf=omniperf,
+        check_success=False,
+    )
+
     if soc == "mi100":
         # assert that it did not run
         assert e.value.code >= 1
@@ -2077,15 +1918,16 @@ def test_mem_levels_LDS():
 
 @pytest.mark.mem
 def test_mem_levels_HBM_LDS():
+    options = baseline_opts + ["--roof-only", "--mem-level", "HBM", "LDS"]
     workload_dir = test_utils.get_output_dir()
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            baseline_opts
-            + ["--path", workload_dir, "--roof-only", "--mem-level", "HBM", "LDS", "--"]
-            + app_1,
-        ):
-            omniperf.main()
+    e = test_utils.launch_omniperf(
+        options=options,
+        workload_dir=workload_dir,
+        app=app_1,
+        omniperf=omniperf,
+        check_success=False,
+    )
+
     if soc == "mi100":
         # assert that it did not run
         assert e.value.code >= 1
@@ -2116,15 +1958,16 @@ def test_mem_levels_HBM_LDS():
 
 @pytest.mark.mem
 def test_mem_levels_vL1D_LDS():
+    options = baseline_opts + ["--roof-only", "--mem-level", "vL1D", "LDS"]
     workload_dir = test_utils.get_output_dir()
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            baseline_opts
-            + ["--path", workload_dir, "--roof-only", "--mem-level", "vL1D", "LDS", "--"]
-            + app_1,
-        ):
-            omniperf.main()
+    e = test_utils.launch_omniperf(
+        options=options,
+        workload_dir=workload_dir,
+        app=app_1,
+        omniperf=omniperf,
+        check_success=False,
+    )
+
     if soc == "mi100":
         # assert that it did not run
         assert e.value.code >= 1
@@ -2155,24 +1998,16 @@ def test_mem_levels_vL1D_LDS():
 
 @pytest.mark.mem
 def test_mem_levels_L2_vL1D_LDS():
+    options = baseline_opts + ["--roof-only", "--mem-level", "L2", "vL1D", "LDS"]
     workload_dir = test_utils.get_output_dir()
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            baseline_opts
-            + [
-                "--path",
-                workload_dir,
-                "--roof-only",
-                "--mem-level",
-                "L2",
-                "vL1D",
-                "LDS",
-                "--",
-            ]
-            + app_1,
-        ):
-            omniperf.main()
+    e = test_utils.launch_omniperf(
+        options=options,
+        workload_dir=workload_dir,
+        app=app_1,
+        omniperf=omniperf,
+        check_success=False,
+    )
+
     if soc == "mi100":
         # assert that it did not run
         assert e.value.code >= 1

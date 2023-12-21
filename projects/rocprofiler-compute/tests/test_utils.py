@@ -27,6 +27,8 @@ import inspect
 import os
 import shutil
 import pandas as pd
+import pytest
+from unittest.mock import patch
 
 
 def check_resource_allocation():
@@ -98,3 +100,29 @@ def check_csv_files(output_dir, num_kernels):
         elif file.endswith(".pdf"):
             file_dict[file] = "pdf"
     return file_dict
+
+
+def launch_omniperf(
+    options, workload_dir, app, omniperf, check_success=True, check_failure=False
+):
+    """Launch Omniperf with command-line optoins
+
+    Args:
+        options (list): command line options to provide to omniperf
+        workload_dir (string): desired output directory
+        app (list): application to run (with associated options)
+        omniperf (SourceFileLoader): omniperf execution module
+        check_success (bool, optional): Whether to verify successful exit condition. Defaults to True.
+
+    Returns:
+       exception: SystemExit exception
+    """
+    with pytest.raises(SystemExit) as e:
+        with patch("sys.argv", options + ["--path", workload_dir, "--"] + app):
+            omniperf.main()
+
+    # verify run status
+    if check_success:
+        assert e.value.code == 0
+
+    return e
