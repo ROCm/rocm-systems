@@ -98,7 +98,8 @@ void verify_linked_lists_on_host(Node* pNodes, unsigned int num_lists, unsigned 
     }
   }
   if (numCorrect != list_length * num_lists) {
-    fprintf(stderr, "Failed\n");
+    fprintf(stderr, "Failed: numCorrect = %d, list_length=%u, numLists = %u\n", numCorrect,
+            list_length, num_lists);
     REQUIRE(false);
   }
 }
@@ -141,6 +142,7 @@ void verify_linked_lists_on_device(hipStream_t stream, Node* pNodes,
 * - The suite will test the following functions,
       hipHostMalloc() with following flags,
         hipHostMallocNonCoherent(CL_MEM_SVM_FINE_GRAIN_BUFFER)
+        hipHostMallocCoherent(CL_MEM_SVM_FINE_GRAIN_BUFFER + CL_MEM_SVM_ATOMICS)
       atomicAdd()(in kernel)
       hipStreamCreate()
       hipStreamSynchronize()
@@ -163,6 +165,17 @@ TEST_CASE("test_svm_shared_address_space_fine_grain_buffers") {
   const unsigned int num_elements = 1024;
   int num_devices = 0;
   HIP_CHECK(hipGetDeviceCount(&num_devices));
+
+  for (int id = 0; id < num_devices; id++) {
+    int pcieAtomic = 0;
+    HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, id));
+    if (!pcieAtomic) {
+      fprintf(stderr, "Device %d doesn't support pcie atomic, Skipped\n", id);
+      REQUIRE(true);
+      return;
+    }
+  }
+
   int num_devices_plus_host = num_devices + 1;
   std::vector<hipStream_t> streams(num_devices);
 
@@ -178,8 +191,8 @@ TEST_CASE("test_svm_shared_address_space_fine_grain_buffers") {
   unsigned int* pAllocator = nullptr;
   unsigned int* pNumCorrect = nullptr;
   HIP_CHECK(hipHostMalloc(&pNodes, sizeof(Node) * ListLength * numLists, hipHostMallocNonCoherent));
-  HIP_CHECK(hipHostMalloc(&pAllocator, sizeof(unsigned int), hipHostMallocNonCoherent));
-  HIP_CHECK(hipHostMalloc(&pNumCorrect, sizeof(unsigned int), hipHostMallocNonCoherent));
+  HIP_CHECK(hipHostMalloc(&pAllocator, sizeof(unsigned int), hipHostMallocCoherent));
+  HIP_CHECK(hipHostMalloc(&pNumCorrect, sizeof(unsigned int), hipHostMallocCoherent));
 
   // Create linked list on one device and verify on another device (or the host).
   // Do this for all possible combinations of devices and host within the platform.
@@ -240,16 +253,34 @@ TEST_CASE("test_svm_shared_address_space_fine_grain_buffers") {
 * Test requirements
 * ------------------------
 *  - Host specific (WINDOWS and LINUX)
-*  - Unified address supported on devices
+*  - Unified memory supported on devices
 *  - System fine grain access supported on devices
 *  - HIP_VERSION >= 5.7
 */
 TEST_CASE("test_svm_shared_address_space_fine_grain_system") {
-  fprintf(stderr, "test_svm_shared_address_space_fine_grain_system ignored\n");
-  return;// blocked by SWDEV-422544 add HIP flag for APU device
-  const unsigned int num_elements = 1024;
   int num_devices = 0;
   HIP_CHECK(hipGetDeviceCount(&num_devices));
+
+  for (int id = 0; id < num_devices; id++) {
+    int pcieAtomic = 0;
+    HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, id));
+    if (!pcieAtomic) {
+      fprintf(stderr, "Device %d doesn't support pcie atomic, Skipped\n", id);
+      REQUIRE(true);
+      return;
+    }
+
+    int pageableAccess = 0;
+    // This need xnack+ on MiXXX. If xnack is off on MiXXX, try ENV HSA_XNACK=1
+    HIP_CHECK(hipDeviceGetAttribute(&pageableAccess, hipDeviceAttributePageableMemoryAccess, id));
+    if (!pageableAccess) {
+      fprintf(stderr, "Device %d doesn't support access to pageable address. Skipped\n", id);
+      REQUIRE(true);
+      return;
+    }
+  }
+
+  const unsigned int num_elements = 1024;
   int num_devices_plus_host = num_devices + 1;
   std::vector<hipStream_t> streams(num_devices);
 

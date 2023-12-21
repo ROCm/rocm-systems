@@ -98,7 +98,7 @@ TEST_CASE("test_svm_byte_granularity") {
   unsigned int** error_counts = (unsigned int**)malloc(sizeof(void*) * num_devices);
 
   for(unsigned int i=0; i < num_devices; i++) {
-    // hipHostMallocNonCoherent means CL_MEM_SVM_FINE_GRAIN_BUFFER + CL_MEM_SVM_ATOMICS
+    // hipHostMallocCoherent means CL_MEM_SVM_FINE_GRAIN_BUFFER + CL_MEM_SVM_ATOMICS
     // We need atomic inc among different GPUs
     HIP_CHECK(hipHostMalloc(&error_counts[i], sizeof(unsigned int) * num_elements,
                             hipHostMallocCoherent));
