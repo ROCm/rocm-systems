@@ -57,7 +57,7 @@ THE SOFTWARE.
  * - gfx906 (AMD Vega 7nm also referred to as AMD Vega 20)
  * - gfx908 (AMD Instinct™ MI100 accelerator)
  * - gfx90a (Aldebaran)
- * - gfx940 (AMD Instinct™ MI300)
+ * - gfx94x (AMD Instinct™ MI300)
  * - gfx1010 (Navi10)
  * - gfx1011 (Navi12)
  * - gfx1012 (Navi14)
