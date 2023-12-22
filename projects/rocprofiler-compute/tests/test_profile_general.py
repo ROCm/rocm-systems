@@ -11,13 +11,22 @@ import inspect
 import sys
 import test_utils
 
-omniperf = SourceFileLoader("omniperf", "src/omniperf").load_module()
-kernel_name_1 = "vecCopy(double*, double*, double*, int, int) [clone .kd]"
+# --
+# Runtime config options
+# --
 
-app_1 = ["./tests/vcopy", "-n", "1048576", "-b", "256", "-i", "3"]
-# app_1 = ["./sample/vcopy", "-n", "1048576", "-b", "256", "-i", "3"]
+config = {}
+config["omniperf"] = SourceFileLoader("omniperf", "src/omniperf").load_module()
+config["kernel_name_1"] = "vecCopy(double*, double*, double*, int, int) [clone .kd]"
+config["app_1"] = ["./tests/vcopy", "-n", "1048576", "-b", "256", "-i", "3"]
+config["cleanup"] = True
+config["COUNTER_LOGGING"] = False
+config["METRIC_LOGGING"] = False
+
 baseline_opts = ["omniperf", "profile", "-n", "app_1", "-VVV"]
-cleanup = True  # whether to clean up profile data after tests or not
+
+# app_1 = ["./tests/vcopy", "-n", "1048576", "-b", "256", "-i", "3"]
+# app_1 = ["./sample/vcopy", "-n", "1048576", "-b", "256", "-i", "3"]
 
 num_kernels = 3
 dispatch_id = 0
@@ -245,7 +254,7 @@ def gpu_soc():
 
 soc = gpu_soc()
 
-if METRIC_LOGGING:
+if config["METRIC_LOGGING"]:
     # change to directory where baseline is at
     Baseline_dir = os.path.realpath("Baseline_vcopy_" + soc)
     if os.path.exists(Baseline_dir):
@@ -378,43 +387,42 @@ def log_metric(test_name, thresholds, args=[]):
             error_df.to_csv(Baseline_dir + "/metric_error_log.csv")
 
 
+# --
+# Start of profiling tests
+# --
+
+
 @pytest.mark.misc
 def test_path():
     options = baseline_opts
     workload_dir = test_utils.get_output_dir()
-    test_utils.launch_omniperf(
-        options=options, workload_dir=workload_dir, app=app_1, omniperf=omniperf
-    )
+    test_utils.launch_omniperf(config, options, workload_dir)
 
     file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
-
     if soc == "mi200":
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
 
-    if COUNTER_LOGGING:
+    if config["COUNTER_LOGGING"]:
         log_counter(file_dict, inspect.stack()[0][3])
 
-    if METRIC_LOGGING:
+    if config["METRIC_LOGGING"]:
         log_metric(
             inspect.stack()[0][3],
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
 
-    test_utils.clean_output_dir(cleanup, workload_dir)
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.misc
 def test_no_roof():
     options = baseline_opts + ["--no-roof"]
     workload_dir = test_utils.get_output_dir()
-    test_utils.launch_omniperf(
-        options=options, workload_dir=workload_dir, app=app_1, omniperf=omniperf
-    )
+    test_utils.launch_omniperf(config, options, workload_dir)
 
     file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
-
     if soc == "mi200":
         assert sorted(list(file_dict.keys())) == [
             "SQ_IFETCH_LEVEL.csv",
@@ -446,29 +454,23 @@ def test_no_roof():
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
 
-    if COUNTER_LOGGING:
+    if config["COUNTER_LOGGING"]:
         log_counter(file_dict, inspect.stack()[0][3])
 
-    if METRIC_LOGGING:
+    if config["METRIC_LOGGING"]:
         log_metric(
             inspect.stack()[0][3],
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
 
-    test_utils.clean_output_dir(cleanup, workload_dir)
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.misc
 def test_kernel_names():
     options = baseline_opts + ["--roof-only", "--kernel-names"]
     workload_dir = test_utils.get_output_dir()
-    e = test_utils.launch_omniperf(
-        options=options,
-        workload_dir=workload_dir,
-        app=app_1,
-        omniperf=omniperf,
-        check_success=False,
-    )
+    e = test_utils.launch_omniperf(config, options, workload_dir, check_success=False)
 
     if soc == "mi100":
         # assert that it did not run
@@ -479,7 +481,6 @@ def test_kernel_names():
     assert e.value.code == 0
 
     file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
-
     if soc == "mi200":
         assert sorted(list(file_dict.keys())) == [
             "empirRoof_gpu-ALL_fp32.pdf",
@@ -496,16 +497,16 @@ def test_kernel_names():
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
 
-    if COUNTER_LOGGING:
+    if config["COUNTER_LOGGING"]:
         log_counter(file_dict, inspect.stack()[0][3])
 
-    if METRIC_LOGGING:
+    if config["METRIC_LOGGING"]:
         log_metric(
             inspect.stack()[0][3],
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
 
-    test_utils.clean_output_dir(cleanup, workload_dir)
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.misc
@@ -516,13 +517,9 @@ def test_device_filter():
 
     options = baseline_opts + ["--device", device_id]
     workload_dir = test_utils.get_output_dir()
-
-    test_utils.launch_omniperf(
-        options=options, workload_dir=workload_dir, app=app_1, omniperf=omniperf
-    )
+    test_utils.launch_omniperf(config, options, workload_dir)
 
     file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
-
     if soc == "mi200":
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
     else:
@@ -530,83 +527,73 @@ def test_device_filter():
 
     # TODO - verify expected device id in results
 
-    if COUNTER_LOGGING:
+    if config["COUNTER_LOGGING"]:
         log_counter(file_dict, inspect.stack()[0][3])
 
-    if METRIC_LOGGING:
+    if config["METRIC_LOGGING"]:
         log_metric(
             inspect.stack()[0][3],
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
 
-    test_utils.clean_output_dir(cleanup, workload_dir)
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.kernel_execution
 def test_kernel():
-    options = baseline_opts + ["--kernel", kernel_name_1]
+    options = baseline_opts + ["--kernel", config["kernel_name_1"]]
     workload_dir = test_utils.get_output_dir()
-    test_utils.launch_omniperf(
-        options=options, workload_dir=workload_dir, app=app_1, omniperf=omniperf
-    )
+    test_utils.launch_omniperf(config, options, workload_dir)
 
     file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
-
     if soc == "mi200":
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
 
-    if COUNTER_LOGGING:
+    if config["COUNTER_LOGGING"]:
         log_counter(file_dict, inspect.stack()[0][3])
 
-    if METRIC_LOGGING:
+    if config["METRIC_LOGGING"]:
         log_metric(
             inspect.stack()[0][3],
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
 
-    test_utils.clean_output_dir(cleanup, workload_dir)
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.kernel_execution
 def test_kernel_summaries():
     options = baseline_opts + ["--kernel-summaries", "vcopy"]
     workload_dir = test_utils.get_output_dir()
-    test_utils.launch_omniperf(
-        options=options, workload_dir=workload_dir, app=app_1, omniperf=omniperf
-    )
+    test_utils.launch_omniperf(config, options, workload_dir)
 
     file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
-
     if soc == "mi200":
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
 
-    if COUNTER_LOGGING:
+    if config["COUNTER_LOGGING"]:
         log_counter(file_dict, inspect.stack()[0][3])
 
-    if METRIC_LOGGING:
+    if config["METRIC_LOGGING"]:
         log_metric(
             inspect.stack()[0][3],
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
 
-    test_utils.clean_output_dir(cleanup, workload_dir)
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.ipblocks
 def test_ipblocks_SQ():
     options = baseline_opts + ["--ipblocks", "SQ"]
     workload_dir = test_utils.get_output_dir()
-
-    test_utils.launch_omniperf(
-        options=options, workload_dir=workload_dir, app=app_1, omniperf=omniperf
-    )
+    test_utils.launch_omniperf(config, options, workload_dir)
 
     file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
-
     expected_csvs = [
         "SQ_IFETCH_LEVEL.csv",
         "SQ_INST_LEVEL_LDS.csv",
@@ -654,27 +641,24 @@ def test_ipblocks_SQ():
 
     assert sorted(list(file_dict.keys())) == expected_csvs
 
-    if COUNTER_LOGGING:
+    if config["COUNTER_LOGGING"]:
         log_counter(file_dict, inspect.stack()[0][3])
 
-    if METRIC_LOGGING:
+    if config["METRIC_LOGGING"]:
         log_metric(
             inspect.stack()[0][3],
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
-    test_utils.clean_output_dir(cleanup, workload_dir)
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.ipblocks
 def test_ipblocks_SQC():
     options = baseline_opts + ["--ipblocks", "SQC"]
     workload_dir = test_utils.get_output_dir()
-    test_utils.launch_omniperf(
-        options=options, workload_dir=workload_dir, app=app_1, omniperf=omniperf
-    )
+    test_utils.launch_omniperf(config, options, workload_dir)
 
     file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
-
     expected_csvs = [
         "pmc_perf.csv",
         "pmc_perf_0.csv",
@@ -689,28 +673,25 @@ def test_ipblocks_SQC():
 
     assert sorted(list(file_dict.keys())) == expected_csvs
 
-    if COUNTER_LOGGING:
+    if config["COUNTER_LOGGING"]:
         log_counter(file_dict, inspect.stack()[0][3])
 
-    if METRIC_LOGGING:
+    if config["METRIC_LOGGING"]:
         log_metric(
             inspect.stack()[0][3],
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
 
-    test_utils.clean_output_dir(cleanup, workload_dir)
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.ipblocks
 def test_ipblocks_TA():
     options = baseline_opts + ["--ipblocks", "TA"]
     workload_dir = test_utils.get_output_dir()
-    test_utils.launch_omniperf(
-        options=options, workload_dir=workload_dir, app=app_1, omniperf=omniperf
-    )
+    test_utils.launch_omniperf(config, options, workload_dir)
 
     file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
-
     expected_csvs = [
         "pmc_perf.csv",
         "pmc_perf_0.csv",
@@ -729,28 +710,25 @@ def test_ipblocks_TA():
 
     assert sorted(list(file_dict.keys())) == expected_csvs
 
-    if COUNTER_LOGGING:
+    if config["COUNTER_LOGGING"]:
         log_counter(file_dict, inspect.stack()[0][3])
 
-    if METRIC_LOGGING:
+    if config["METRIC_LOGGING"]:
         log_metric(
             inspect.stack()[0][3],
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
 
-    test_utils.clean_output_dir(cleanup, workload_dir)
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.ipblocks
 def test_ipblocks_TD():
     options = baseline_opts + ["--ipblocks", "TD"]
     workload_dir = test_utils.get_output_dir()
-    test_utils.launch_omniperf(
-        options=options, workload_dir=workload_dir, app=app_1, omniperf=omniperf
-    )
+    test_utils.launch_omniperf(config, options, workload_dir)
 
     file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
-
     expected_csvs = [
         "pmc_perf.csv",
         "pmc_perf_0.csv",
@@ -773,28 +751,25 @@ def test_ipblocks_TD():
 
     assert sorted(list(file_dict.keys())) == expected_csvs
 
-    if COUNTER_LOGGING:
+    if config["COUNTER_LOGGING"]:
         log_counter(file_dict, inspect.stack()[0][3])
 
-    if METRIC_LOGGING:
+    if config["METRIC_LOGGING"]:
         log_metric(
             inspect.stack()[0][3],
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
 
-    test_utils.clean_output_dir(cleanup, workload_dir)
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.ipblocks
 def test_ipblocks_TCP():
     options = baseline_opts + ["--ipblocks", "TCP"]
     workload_dir = test_utils.get_output_dir()
-    test_utils.launch_omniperf(
-        options=options, workload_dir=workload_dir, app=app_1, omniperf=omniperf
-    )
+    test_utils.launch_omniperf(config, options, workload_dir)
 
     file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
-
     expected_csvs = [
         "pmc_perf.csv",
         "pmc_perf_0.csv",
@@ -815,28 +790,25 @@ def test_ipblocks_TCP():
 
     assert sorted(list(file_dict.keys())) == expected_csvs
 
-    if COUNTER_LOGGING:
+    if config["COUNTER_LOGGING"]:
         log_counter(file_dict, inspect.stack()[0][3])
 
-    if METRIC_LOGGING:
+    if config["METRIC_LOGGING"]:
         log_metric(
             inspect.stack()[0][3],
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
 
-    test_utils.clean_output_dir(cleanup, workload_dir)
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.ipblocks
 def test_ipblocks_TCC():
     options = baseline_opts + ["--ipblocks", "TCC"]
     workload_dir = test_utils.get_output_dir()
-    test_utils.launch_omniperf(
-        options=options, workload_dir=workload_dir, app=app_1, omniperf=omniperf
-    )
+    test_utils.launch_omniperf(config, options, workload_dir)
 
     file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
-
     expected_csvs = [
         "pmc_perf.csv",
         "pmc_perf_0.csv",
@@ -858,28 +830,25 @@ def test_ipblocks_TCC():
 
     assert sorted(list(file_dict.keys())) == expected_csvs
 
-    if COUNTER_LOGGING:
+    if config["COUNTER_LOGGING"]:
         log_counter(file_dict, inspect.stack()[0][3])
 
-    if METRIC_LOGGING:
+    if config["METRIC_LOGGING"]:
         log_metric(
             inspect.stack()[0][3],
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
 
-    test_utils.clean_output_dir(cleanup, workload_dir)
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.ipblocks
 def test_ipblocks_SPI():
     options = baseline_opts + ["--ipblocks", "SPI"]
     workload_dir = test_utils.get_output_dir()
-    test_utils.launch_omniperf(
-        options=options, workload_dir=workload_dir, app=app_1, omniperf=omniperf
-    )
+    test_utils.launch_omniperf(config, options, workload_dir)
 
     file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
-
     expected_csvs = [
         "pmc_perf.csv",
         "pmc_perf_0.csv",
@@ -899,28 +868,25 @@ def test_ipblocks_SPI():
 
     assert sorted(list(file_dict.keys())) == expected_csvs
 
-    if COUNTER_LOGGING:
+    if config["COUNTER_LOGGING"]:
         log_counter(file_dict, inspect.stack()[0][3])
 
-    if METRIC_LOGGING:
+    if config["METRIC_LOGGING"]:
         log_metric(
             inspect.stack()[0][3],
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
 
-    test_utils.clean_output_dir(cleanup, workload_dir)
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.ipblocks
 def test_ipblocks_CPC():
     options = baseline_opts + ["--ipblocks", "CPC"]
     workload_dir = test_utils.get_output_dir()
-    test_utils.launch_omniperf(
-        options=options, workload_dir=workload_dir, app=app_1, omniperf=omniperf
-    )
+    test_utils.launch_omniperf(config, options, workload_dir)
 
     file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
-
     expected_csvs = [
         "pmc_perf.csv",
         "pmc_perf_0.csv",
@@ -936,28 +902,25 @@ def test_ipblocks_CPC():
         expected_csvs.insert(7, "roofline.csv")
     assert sorted(list(file_dict.keys())) == expected_csvs
 
-    if COUNTER_LOGGING:
+    if config["COUNTER_LOGGING"]:
         log_counter(file_dict, inspect.stack()[0][3])
 
-    if METRIC_LOGGING:
+    if config["METRIC_LOGGING"]:
         log_metric(
             inspect.stack()[0][3],
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
 
-    test_utils.clean_output_dir(cleanup, workload_dir)
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.ipblocks
 def test_ipblocks_CPF():
     options = baseline_opts + ["--ipblocks", "CPF"]
     workload_dir = test_utils.get_output_dir()
-    test_utils.launch_omniperf(
-        options=options, workload_dir=workload_dir, app=app_1, omniperf=omniperf
-    )
+    test_utils.launch_omniperf(config, options, workload_dir)
 
     file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
-
     expected_csvs = [
         "pmc_perf.csv",
         "pmc_perf_0.csv",
@@ -971,28 +934,25 @@ def test_ipblocks_CPF():
         expected_csvs.insert(5, "roofline.csv")
     assert sorted(list(file_dict.keys())) == expected_csvs
 
-    if COUNTER_LOGGING:
+    if config["COUNTER_LOGGING"]:
         log_counter(file_dict, inspect.stack()[0][3])
 
-    if METRIC_LOGGING:
+    if config["METRIC_LOGGING"]:
         log_metric(
             inspect.stack()[0][3],
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
 
-    test_utils.clean_output_dir(cleanup, workload_dir)
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.ipblocks
 def test_ipblocks_SQ_CPC():
     options = baseline_opts + ["--ipblocks", "SQ", "CPC"]
     workload_dir = test_utils.get_output_dir()
-    test_utils.launch_omniperf(
-        options=options, workload_dir=workload_dir, app=app_1, omniperf=omniperf
-    )
+    test_utils.launch_omniperf(config, options, workload_dir)
 
     file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
-
     expected_csvs = [
         "SQ_IFETCH_LEVEL.csv",
         "SQ_INST_LEVEL_LDS.csv",
@@ -1040,28 +1000,25 @@ def test_ipblocks_SQ_CPC():
 
     assert sorted(list(file_dict.keys())) == expected_csvs
 
-    if COUNTER_LOGGING:
+    if config["COUNTER_LOGGING"]:
         log_counter(file_dict, inspect.stack()[0][3])
 
-    if METRIC_LOGGING:
+    if config["METRIC_LOGGING"]:
         log_metric(
             inspect.stack()[0][3],
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
 
-    test_utils.clean_output_dir(cleanup, workload_dir)
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.ipblocks
 def test_ipblocks_SQ_TA():
     options = baseline_opts + ["--ipblocks", "SQ", "TA"]
     workload_dir = test_utils.get_output_dir()
-    test_utils.launch_omniperf(
-        options=options, workload_dir=workload_dir, app=app_1, omniperf=omniperf
-    )
+    test_utils.launch_omniperf(config, options, workload_dir)
 
     file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
-
     expected_csvs = [
         "SQ_IFETCH_LEVEL.csv",
         "SQ_INST_LEVEL_LDS.csv",
@@ -1108,28 +1065,25 @@ def test_ipblocks_SQ_TA():
         ]
     assert sorted(list(file_dict.keys())) == expected_csvs
 
-    if COUNTER_LOGGING:
+    if config["COUNTER_LOGGING"]:
         log_counter(file_dict, inspect.stack()[0][3])
 
-    if METRIC_LOGGING:
+    if config["METRIC_LOGGING"]:
         log_metric(
             inspect.stack()[0][3],
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
 
-    test_utils.clean_output_dir(cleanup, workload_dir)
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.ipblocks
 def test_ipblocks_SQ_SPI():
     options = baseline_opts + ["--ipblocks", "SQ", "SPI"]
     workload_dir = test_utils.get_output_dir()
-    test_utils.launch_omniperf(
-        options=options, workload_dir=workload_dir, app=app_1, omniperf=omniperf
-    )
+    test_utils.launch_omniperf(config, options, workload_dir)
 
     file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
-
     expected_csvs = [
         "SQ_IFETCH_LEVEL.csv",
         "SQ_INST_LEVEL_LDS.csv",
@@ -1176,28 +1130,25 @@ def test_ipblocks_SQ_SPI():
         ]
     assert sorted(list(file_dict.keys())) == expected_csvs
 
-    if COUNTER_LOGGING:
+    if config["COUNTER_LOGGING"]:
         log_counter(file_dict, inspect.stack()[0][3])
 
-    if METRIC_LOGGING:
+    if config["METRIC_LOGGING"]:
         log_metric(
             inspect.stack()[0][3],
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
 
-    test_utils.clean_output_dir(cleanup, workload_dir)
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.ipblocks
 def test_ipblocks_SQ_SQC_TCP_CPC():
     options = baseline_opts + ["--ipblocks", "SQ", "SQC", "TCP", "CPC"]
     workload_dir = test_utils.get_output_dir()
-    test_utils.launch_omniperf(
-        options=options, workload_dir=workload_dir, app=app_1, omniperf=omniperf
-    )
+    test_utils.launch_omniperf(config, options, workload_dir)
 
     file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
-
     expected_csvs = [
         "SQ_IFETCH_LEVEL.csv",
         "SQ_INST_LEVEL_LDS.csv",
@@ -1245,28 +1196,25 @@ def test_ipblocks_SQ_SQC_TCP_CPC():
         ]
     assert sorted(list(file_dict.keys())) == expected_csvs
 
-    if COUNTER_LOGGING:
+    if config["COUNTER_LOGGING"]:
         log_counter(file_dict, inspect.stack()[0][3])
 
-    if METRIC_LOGGING:
+    if config["METRIC_LOGGING"]:
         log_metric(
             inspect.stack()[0][3],
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
 
-    test_utils.clean_output_dir(cleanup, workload_dir)
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.ipblocks
 def test_ipblocks_SQ_SPI_TA_TCC_CPF():
     options = baseline_opts + ["--ipblocks", "SQ", "SPI", "TA", "TCC", "CPF"]
     workload_dir = test_utils.get_output_dir()
-    test_utils.launch_omniperf(
-        options=options, workload_dir=workload_dir, app=app_1, omniperf=omniperf
-    )
+    test_utils.launch_omniperf(config, options, workload_dir)
 
     file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
-
     expected_csvs = [
         "SQ_IFETCH_LEVEL.csv",
         "SQ_INST_LEVEL_LDS.csv",
@@ -1315,37 +1263,34 @@ def test_ipblocks_SQ_SPI_TA_TCC_CPF():
         ]
     assert sorted(list(file_dict.keys())) == expected_csvs
 
-    if COUNTER_LOGGING:
+    if config["COUNTER_LOGGING"]:
         log_counter(file_dict, inspect.stack()[0][3])
 
-    if METRIC_LOGGING:
+    if config["METRIC_LOGGING"]:
         log_metric(
             inspect.stack()[0][3],
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
 
-    test_utils.clean_output_dir(cleanup, workload_dir)
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.dispatch
 def test_dispatch_0():
     options = baseline_opts + ["--dispatch", "0"]
     workload_dir = test_utils.get_output_dir()
-    test_utils.launch_omniperf(
-        options=options, workload_dir=workload_dir, app=app_1, omniperf=omniperf
-    )
+    test_utils.launch_omniperf(config, options, workload_dir)
 
     file_dict = test_utils.check_csv_files(workload_dir, 1)
-
     if soc == "mi200":
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
 
-    if COUNTER_LOGGING:
+    if config["COUNTER_LOGGING"]:
         log_counter(file_dict, inspect.stack()[0][3])
 
-    if METRIC_LOGGING:
+    if config["METRIC_LOGGING"]:
         log_metric(
             inspect.stack()[0][3],
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
@@ -1355,56 +1300,50 @@ def test_dispatch_0():
             ],
         )
 
-    test_utils.clean_output_dir(cleanup, workload_dir)
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.dispatch
 def test_dispatch_0_1():
     options = baseline_opts + ["--dispatch", "0:2"]
     workload_dir = test_utils.get_output_dir()
-    test_utils.launch_omniperf(
-        options=options, workload_dir=workload_dir, app=app_1, omniperf=omniperf
-    )
+    test_utils.launch_omniperf(config, options, workload_dir)
 
     file_dict = test_utils.check_csv_files(workload_dir, 2)
-
     if soc == "mi200":
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
 
-    if COUNTER_LOGGING:
+    if config["COUNTER_LOGGING"]:
         log_counter(file_dict, inspect.stack()[0][3])
 
-    if METRIC_LOGGING:
+    if config["METRIC_LOGGING"]:
         log_metric(
             inspect.stack()[0][3],
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
             ["--dispatch", "0", "1"],
         )
 
-    test_utils.clean_output_dir(cleanup, workload_dir)
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.dispatch
 def test_dispatch_2():
     options = baseline_opts + ["--dispatch", dispatch_id]
     workload_dir = test_utils.get_output_dir()
-    test_utils.launch_omniperf(
-        options=options, workload_dir=workload_dir, app=app_1, omniperf=omniperf
-    )
+    test_utils.launch_omniperf(config, options, workload_dir)
 
     file_dict = test_utils.check_csv_files(workload_dir, 1)
-
     if soc == "mi200":
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
 
-    if COUNTER_LOGGING:
+    if config["COUNTER_LOGGING"]:
         log_counter(file_dict, inspect.stack()[0][3])
 
-    if METRIC_LOGGING:
+    if config["METRIC_LOGGING"]:
         log_metric(
             inspect.stack()[0][3],
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
@@ -1414,205 +1353,182 @@ def test_dispatch_2():
             ],
         )
 
-    test_utils.clean_output_dir(cleanup, workload_dir)
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.verbosity
 def test_kernel_verbose_0():
     options = baseline_opts + ["--kernel-verbose", "0"]
     workload_dir = test_utils.get_output_dir()
-    test_utils.launch_omniperf(
-        options=options, workload_dir=workload_dir, app=app_1, omniperf=omniperf
-    )
+    test_utils.launch_omniperf(config, options, workload_dir)
 
     file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
-
     if soc == "mi200":
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
 
-    if COUNTER_LOGGING:
+    if config["COUNTER_LOGGING"]:
         log_counter(file_dict, inspect.stack()[0][3])
 
-    if METRIC_LOGGING:
+    if config["METRIC_LOGGING"]:
         log_metric(
             inspect.stack()[0][3],
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
 
-    test_utils.clean_output_dir(cleanup, workload_dir)
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.verbosity
 def test_kernel_verbose_1():
     options = baseline_opts + ["--kernel-verbose", "1"]
     workload_dir = test_utils.get_output_dir()
-    test_utils.launch_omniperf(
-        options=options, workload_dir=workload_dir, app=app_1, omniperf=omniperf
-    )
+    test_utils.launch_omniperf(config, options, workload_dir)
 
     file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
-
     if soc == "mi200":
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
 
-    if COUNTER_LOGGING:
+    if config["COUNTER_LOGGING"]:
         log_counter(file_dict, inspect.stack()[0][3])
 
-    if METRIC_LOGGING:
+    if config["METRIC_LOGGING"]:
         log_metric(
             inspect.stack()[0][3],
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
 
-    test_utils.clean_output_dir(cleanup, workload_dir)
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.verbosity
 def test_kernel_verbose_2():
     options = baseline_opts + ["--kernel-verbose", "2"]
     workload_dir = test_utils.get_output_dir()
-    test_utils.launch_omniperf(
-        options=options, workload_dir=workload_dir, app=app_1, omniperf=omniperf
-    )
+    test_utils.launch_omniperf(config, options, workload_dir)
 
     file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
-
     if soc == "mi200":
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
 
-    if COUNTER_LOGGING:
+    if config["COUNTER_LOGGING"]:
         log_counter(file_dict, inspect.stack()[0][3])
 
-    if METRIC_LOGGING:
+    if config["METRIC_LOGGING"]:
         log_metric(
             inspect.stack()[0][3],
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
 
-    test_utils.clean_output_dir(cleanup, workload_dir)
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.verbosity
 def test_kernel_verbose_3():
     options = baseline_opts + ["--kernel-verbose", "3"]
     workload_dir = test_utils.get_output_dir()
-    test_utils.launch_omniperf(
-        options=options, workload_dir=workload_dir, app=app_1, omniperf=omniperf
-    )
+    test_utils.launch_omniperf(config, options, workload_dir)
 
     file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
-
     if soc == "mi200":
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
 
-    if COUNTER_LOGGING:
+    if config["COUNTER_LOGGING"]:
         log_counter(file_dict, inspect.stack()[0][3])
 
-    if METRIC_LOGGING:
+    if config["METRIC_LOGGING"]:
         log_metric(
             inspect.stack()[0][3],
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
 
-    test_utils.clean_output_dir(cleanup, workload_dir)
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.verbosity
 def test_kernel_verbose_4():
     options = baseline_opts + ["--kernel-verbose", "4"]
     workload_dir = test_utils.get_output_dir()
-    test_utils.launch_omniperf(
-        options=options, workload_dir=workload_dir, app=app_1, omniperf=omniperf
-    )
+    test_utils.launch_omniperf(config, options, workload_dir)
 
     file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
-
     if soc == "mi200":
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
 
-    if COUNTER_LOGGING:
+    if config["COUNTER_LOGGING"]:
         log_counter(file_dict, inspect.stack()[0][3])
 
-    if METRIC_LOGGING:
+    if config["METRIC_LOGGING"]:
         log_metric(
             inspect.stack()[0][3],
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
 
-    test_utils.clean_output_dir(cleanup, workload_dir)
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.verbosity
 def test_kernel_verbose_5():
     options = baseline_opts + ["--kernel-verbose", "5"]
     workload_dir = test_utils.get_output_dir()
-    test_utils.launch_omniperf(
-        options=options, workload_dir=workload_dir, app=app_1, omniperf=omniperf
-    )
+    test_utils.launch_omniperf(config, options, workload_dir)
 
     file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
-
     if soc == "mi200":
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
 
-    if COUNTER_LOGGING:
+    if config["COUNTER_LOGGING"]:
         log_counter(file_dict, inspect.stack()[0][3])
 
-    if METRIC_LOGGING:
+    if config["METRIC_LOGGING"]:
         log_metric(
             inspect.stack()[0][3],
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
 
-    test_utils.clean_output_dir(cleanup, workload_dir)
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.join
 def test_join_type_grid():
     options = baseline_opts + ["--join-type", "grid"]
     workload_dir = test_utils.get_output_dir()
-    test_utils.launch_omniperf(
-        options=options, workload_dir=workload_dir, app=app_1, omniperf=omniperf
-    )
+    test_utils.launch_omniperf(config, options, workload_dir)
 
     file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
-
     if soc == "mi200":
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
 
-    if COUNTER_LOGGING:
+    if config["COUNTER_LOGGING"]:
         log_counter(file_dict, inspect.stack()[0][3])
 
-    if METRIC_LOGGING:
+    if config["METRIC_LOGGING"]:
         log_metric(
             inspect.stack()[0][3],
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
 
-    test_utils.clean_output_dir(cleanup, workload_dir)
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.join
 def test_join_type_kernel():
     options = baseline_opts + ["--join-type", "kernel"]
     workload_dir = test_utils.get_output_dir()
-    test_utils.launch_omniperf(
-        options=options, workload_dir=workload_dir, app=app_1, omniperf=omniperf
-    )
+    test_utils.launch_omniperf(config, options, workload_dir)
 
     file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
 
@@ -1621,29 +1537,23 @@ def test_join_type_kernel():
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
 
-    if COUNTER_LOGGING:
+    if config["COUNTER_LOGGING"]:
         log_counter(file_dict, inspect.stack()[0][3])
 
-    if METRIC_LOGGING:
+    if config["METRIC_LOGGING"]:
         log_metric(
             inspect.stack()[0][3],
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
 
-    test_utils.clean_output_dir(cleanup, workload_dir)
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.sort
 def test_sort_dispatches():
     options = baseline_opts + ["--roof-only", "--sort", "dispatches"]
     workload_dir = test_utils.get_output_dir()
-    e = test_utils.launch_omniperf(
-        options=options,
-        workload_dir=workload_dir,
-        app=app_1,
-        omniperf=omniperf,
-        check_success=False,
-    )
+    e = test_utils.launch_omniperf(config, options, workload_dir, check_success=False)
 
     if soc == "mi100":
         # assert that it did not run
@@ -1659,29 +1569,23 @@ def test_sort_dispatches():
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
 
-    if COUNTER_LOGGING:
+    if config["COUNTER_LOGGING"]:
         log_counter(file_dict, inspect.stack()[0][3])
 
-    if METRIC_LOGGING:
+    if config["METRIC_LOGGING"]:
         log_metric(
             inspect.stack()[0][3],
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
 
-    test_utils.clean_output_dir(cleanup, workload_dir)
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.sort
 def test_sort_kernels():
     options = baseline_opts + ["--roof-only", "--sort", "kernels"]
     workload_dir = test_utils.get_output_dir()
-    e = test_utils.launch_omniperf(
-        options=options,
-        workload_dir=workload_dir,
-        app=app_1,
-        omniperf=omniperf,
-        check_success=False,
-    )
+    e = test_utils.launch_omniperf(config, options, workload_dir, check_success=False)
 
     if soc == "mi100":
         # assert that it did not run
@@ -1698,29 +1602,23 @@ def test_sort_kernels():
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
 
-    if COUNTER_LOGGING:
+    if config["COUNTER_LOGGING"]:
         log_counter(file_dict, inspect.stack()[0][3])
 
-    if METRIC_LOGGING:
+    if config["METRIC_LOGGING"]:
         log_metric(
             inspect.stack()[0][3],
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
 
-    test_utils.clean_output_dir(cleanup, workload_dir)
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.mem
 def test_mem_levels_HBM():
     options = baseline_opts + ["--roof-only", "--mem-level", "HBM"]
     workload_dir = test_utils.get_output_dir()
-    e = test_utils.launch_omniperf(
-        options=options,
-        workload_dir=workload_dir,
-        app=app_1,
-        omniperf=omniperf,
-        check_success=False,
-    )
+    e = test_utils.launch_omniperf(config, options, workload_dir, check_success=False)
 
     if soc == "mi100":
         # assert that it did not run
@@ -1737,29 +1635,23 @@ def test_mem_levels_HBM():
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
 
-    if COUNTER_LOGGING:
+    if config["COUNTER_LOGGING"]:
         log_counter(file_dict, inspect.stack()[0][3])
 
-    if METRIC_LOGGING:
+    if config["METRIC_LOGGING"]:
         log_metric(
             inspect.stack()[0][3],
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
 
-    test_utils.clean_output_dir(cleanup, workload_dir)
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.mem
 def test_mem_levels_L2():
     options = baseline_opts + ["--roof-only", "--mem-level", "L2"]
     workload_dir = test_utils.get_output_dir()
-    e = test_utils.launch_omniperf(
-        options=options,
-        workload_dir=workload_dir,
-        app=app_1,
-        omniperf=omniperf,
-        check_success=False,
-    )
+    e = test_utils.launch_omniperf(config, options, workload_dir, check_success=False)
 
     if soc == "mi100":
         # assert that it did not run
@@ -1776,29 +1668,23 @@ def test_mem_levels_L2():
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
 
-    if COUNTER_LOGGING:
+    if config["COUNTER_LOGGING"]:
         log_counter(file_dict, inspect.stack()[0][3])
 
-    if METRIC_LOGGING:
+    if config["METRIC_LOGGING"]:
         log_metric(
             inspect.stack()[0][3],
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
 
-    test_utils.clean_output_dir(cleanup, workload_dir)
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.mem
 def test_mem_levels_vL1D():
     options = baseline_opts + ["--roof-only", "--mem-level", "vL1D"]
     workload_dir = test_utils.get_output_dir()
-    e = test_utils.launch_omniperf(
-        options=options,
-        workload_dir=workload_dir,
-        app=app_1,
-        omniperf=omniperf,
-        check_success=False,
-    )
+    e = test_utils.launch_omniperf(config, options, workload_dir, check_success=False)
 
     if soc == "mi100":
         # assert that it did not run
@@ -1815,29 +1701,23 @@ def test_mem_levels_vL1D():
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
 
-    if COUNTER_LOGGING:
+    if config["COUNTER_LOGGING"]:
         log_counter(file_dict, inspect.stack()[0][3])
 
-    if METRIC_LOGGING:
+    if config["METRIC_LOGGING"]:
         log_metric(
             inspect.stack()[0][3],
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
 
-    test_utils.clean_output_dir(cleanup, workload_dir)
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.mem
 def test_mem_levels_LDS():
     options = baseline_opts + ["--roof-only", "--mem-level", "LDS"]
     workload_dir = test_utils.get_output_dir()
-    e = test_utils.launch_omniperf(
-        options=options,
-        workload_dir=workload_dir,
-        app=app_1,
-        omniperf=omniperf,
-        check_success=False,
-    )
+    e = test_utils.launch_omniperf(config, options, workload_dir, check_success=False)
 
     if soc == "mi100":
         # assert that it did not run
@@ -1854,29 +1734,23 @@ def test_mem_levels_LDS():
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
 
-    if COUNTER_LOGGING:
+    if config["COUNTER_LOGGING"]:
         log_counter(file_dict, inspect.stack()[0][3])
 
-    if METRIC_LOGGING:
+    if config["METRIC_LOGGING"]:
         log_metric(
             inspect.stack()[0][3],
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
 
-    test_utils.clean_output_dir(cleanup, workload_dir)
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.mem
 def test_mem_levels_HBM_LDS():
     options = baseline_opts + ["--roof-only", "--mem-level", "HBM", "LDS"]
     workload_dir = test_utils.get_output_dir()
-    e = test_utils.launch_omniperf(
-        options=options,
-        workload_dir=workload_dir,
-        app=app_1,
-        omniperf=omniperf,
-        check_success=False,
-    )
+    e = test_utils.launch_omniperf(config, options, workload_dir, check_success=False)
 
     if soc == "mi100":
         # assert that it did not run
@@ -1893,29 +1767,23 @@ def test_mem_levels_HBM_LDS():
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
 
-    if COUNTER_LOGGING:
+    if config["COUNTER_LOGGING"]:
         log_counter(file_dict, inspect.stack()[0][3])
 
-    if METRIC_LOGGING:
+    if config["METRIC_LOGGING"]:
         log_metric(
             inspect.stack()[0][3],
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
 
-    test_utils.clean_output_dir(cleanup, workload_dir)
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.mem
 def test_mem_levels_vL1D_LDS():
     options = baseline_opts + ["--roof-only", "--mem-level", "vL1D", "LDS"]
     workload_dir = test_utils.get_output_dir()
-    e = test_utils.launch_omniperf(
-        options=options,
-        workload_dir=workload_dir,
-        app=app_1,
-        omniperf=omniperf,
-        check_success=False,
-    )
+    e = test_utils.launch_omniperf(config, options, workload_dir, check_success=False)
 
     if soc == "mi100":
         # assert that it did not run
@@ -1932,29 +1800,23 @@ def test_mem_levels_vL1D_LDS():
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
 
-    if COUNTER_LOGGING:
+    if config["COUNTER_LOGGING"]:
         log_counter(file_dict, inspect.stack()[0][3])
 
-    if METRIC_LOGGING:
+    if config["METRIC_LOGGING"]:
         log_metric(
             inspect.stack()[0][3],
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
 
-    test_utils.clean_output_dir(cleanup, workload_dir)
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.mem
 def test_mem_levels_L2_vL1D_LDS():
     options = baseline_opts + ["--roof-only", "--mem-level", "L2", "vL1D", "LDS"]
     workload_dir = test_utils.get_output_dir()
-    e = test_utils.launch_omniperf(
-        options=options,
-        workload_dir=workload_dir,
-        app=app_1,
-        omniperf=omniperf,
-        check_success=False,
-    )
+    e = test_utils.launch_omniperf(config, options, workload_dir, check_success=False)
 
     if soc == "mi100":
         # assert that it did not run
@@ -1970,13 +1832,13 @@ def test_mem_levels_L2_vL1D_LDS():
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
 
-    if COUNTER_LOGGING:
+    if config["COUNTER_LOGGING"]:
         log_counter(file_dict, inspect.stack()[0][3])
 
-    if METRIC_LOGGING:
+    if config["METRIC_LOGGING"]:
         log_metric(
             inspect.stack()[0][3],
             {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         )
 
-    test_utils.clean_output_dir(cleanup, workload_dir)
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
