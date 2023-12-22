@@ -253,13 +253,9 @@ rocp_reg_scan_for_tools()
         std::tie(rocprofiler_lib_handle, rocprofiler_lib_config_fn) =
             rocp_load_rocprofiler_lib(_rocp_reg_lib);
 
-        if(!rocprofiler_lib_config_fn)
-            std::tie(rocprofiler_lib_handle, rocprofiler_lib_config_fn) =
-                rocp_load_rocprofiler_lib("librocprofiler64.so");
-
         LOG_IF(FATAL, !rocprofiler_lib_config_fn)
             << rocprofiler_lib_register_entrypoint << " not found. Tried to dlopen "
-            << _rocp_reg_lib << " and librocprofiler64.so";
+            << _rocp_reg_lib;
     }
     else if(_found_tool && rocprofiler_set_api_table)
     {

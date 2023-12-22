@@ -63,10 +63,16 @@ target_link_libraries(rocprofiler-register-build-flags INTERFACE rocprofiler-reg
 # ----------------------------------------------------------------------------------------#
 # set the compiler flags
 #
+
+set(_WARN_STACK_USAGE)
+if(NOT ROCPROFILER_REGISTER_ENABLE_CLANG_TIDY)
+    set(_WARN_STACK_USAGE "-Wstack-usage=8192") # 2 KB
+endif()
+
 rocprofiler_register_target_compile_options(
     rocprofiler-register-build-flags
     INTERFACE "-W" "-Wall" "-Wno-unknown-pragmas" "-fstack-protector-strong"
-              "-Wstack-protector")
+              "-Wstack-protector" ${_WARN_STACK_USAGE})
 
 # ----------------------------------------------------------------------------------------#
 # debug-safe optimizations
@@ -83,14 +89,6 @@ rocprofiler_register_target_compile_options(
     rocprofiler-register-developer-flags
     LANGUAGES C CXX
     INTERFACE "-Werror" "-Wdouble-promotion" "-Wshadow" "-Wextra")
-
-if(NOT ROCPROFILER_REGISTER_ENABLE_CLANG_TIDY)
-    rocprofiler_register_target_compile_options(
-        rocprofiler-register-developer-flags
-        LANGUAGES C CXX
-        INTERFACE "-Wstack-usage=524288" # 512 KB
-        )
-endif()
 
 if(ROCPROFILER_REGISTER_BUILD_DEVELOPER)
     target_link_libraries(rocprofiler-register-build-flags

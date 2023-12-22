@@ -1,4 +1,7 @@
 set(BUILD_TESTING OFF)
+set(BUILD_SHARED_LIBS OFF)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME external)
 
 if(ROCPROFILER_REGISTER_BUILD_GLOG)
     # checkout submodule if not already checked out or clone repo if no .gitmodules file
@@ -11,7 +14,8 @@ if(ROCPROFILER_REGISTER_BUILD_GLOG)
 
     # May want to use GFLAGS in the future
     set(WITH_GFLAGS OFF)
-    set(BUILD_SHARED_LIBS OFF)
+    set(WITH_GTEST OFF)
+    set(WITH_UNWIND OFF)
     add_subdirectory(glog EXCLUDE_FROM_ALL)
 else()
     find_package(glog REQUIRED)

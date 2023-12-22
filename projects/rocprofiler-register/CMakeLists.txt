@@ -29,7 +29,11 @@ project(
     LANGUAGES C CXX
     VERSION ${ROCPROFILER_REGISTER_VERSION}
     DESCRIPTION "Registration library for rocprofiler"
-    HOMEPAGE_URL "https://github.com/ROCm-Developer-Tools/rocprofiler-register-internal")
+    HOMEPAGE_URL "https://github.com/ROCm/rocprofiler-register-internal")
+
+set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME core)
+# configure the version file so that if it changes, cmake automatically re-runs
+configure_file(${PROJECT_SOURCE_DIR}/VERSION ${PROJECT_BINARY_DIR}/VERSION COPYONLY)
 
 # needed for modulefile and setup-env.sh
 string(REPLACE "-" "_" PROJECT_NAME_UNDERSCORED "${PROJECT_NAME}")

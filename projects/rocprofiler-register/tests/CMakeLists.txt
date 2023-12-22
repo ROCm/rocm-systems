@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
 
 project(rocprofiler-register-tests LANGUAGES C CXX)
+set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME tests)
 
 include(CMakeParseArguments)
 include(GNUInstallDirs)
@@ -155,27 +156,40 @@ function(rocp_register_test_executable _NAME)
                        ${ARGN})
     endfunction()
 
-    rocp_register_add_test(${_NAME} ${_NAME} "" "${RRTE_CORE_PASS_REGEX}"
-                           "${RRTE_CORE_FAIL_REGEX}")
-
-    rocp_register_add_test(${_NAME}-preload ${_NAME} "LD_PRELOAD=libgeneric-tool.so"
-                           "${RRTE_PRELOAD_PASS_REGEX}" "${RRTE_PRELOAD_FAIL_REGEX}")
-
-    rocp_register_add_test(${_NAME}-env ${_NAME} "ROCP_TOOL_LIBRARIES=libgeneric-tool.so"
-                           "${RRTE_PRELOAD_PASS_REGEX}" "${RRTE_PRELOAD_FAIL_REGEX}")
-
-    rocp_register_add_test(${_NAME}-wrap ${_NAME} "ROCP_REG_TEST_WRAP=1"
-                           "${RRTE_WRAP_PASS_REGEX}" "${RRTE_WRAP_FAIL_REGEX}")
+    rocp_register_add_test(
+        ${_NAME} ${_NAME} "${ROCPROFILER_REGISTER_MEMCHECK_PRELOAD_ENV}"
+        "${RRTE_CORE_PASS_REGEX}" "${RRTE_CORE_FAIL_REGEX}")
 
     rocp_register_add_test(
-        ${_NAME}-preload-wrap ${_NAME}
-        "LD_PRELOAD=libgeneric-tool.so;ROCP_REG_TEST_WRAP=1"
-        "${RRTE_PRELOAD_WRAP_PASS_REGEX}" "${RRTE_PRELOAD_WRAP_FAIL_REGEX}")
+        ${_NAME}-preload ${_NAME}
+        "LD_PRELOAD=${ROCPROFILER_REGISTER_MEMCHECK_PRELOAD_LIBRARY}:libgeneric-tool.so"
+        "${RRTE_PRELOAD_PASS_REGEX}" "${RRTE_PRELOAD_FAIL_REGEX}")
 
     rocp_register_add_test(
-        ${_NAME}-env-wrap ${_NAME}
-        "ROCP_TOOL_LIBRARIES=libgeneric-tool.so;ROCP_REG_TEST_WRAP=1"
-        "${RRTE_PRELOAD_WRAP_PASS_REGEX}" "${RRTE_PRELOAD_WRAP_FAIL_REGEX}")
+        ${_NAME}-env
+        ${_NAME}
+        "ROCP_TOOL_LIBRARIES=libgeneric-tool.so;${ROCPROFILER_REGISTER_MEMCHECK_PRELOAD_ENV}"
+        "${RRTE_PRELOAD_PASS_REGEX}"
+        "${RRTE_PRELOAD_FAIL_REGEX}")
+
+    rocp_register_add_test(
+        ${_NAME}-wrap ${_NAME}
+        "ROCP_REG_TEST_WRAP=1;${ROCPROFILER_REGISTER_MEMCHECK_PRELOAD_ENV}"
+        "${RRTE_WRAP_PASS_REGEX}" "${RRTE_WRAP_FAIL_REGEX}")
+
+    rocp_register_add_test(
+        ${_NAME}-preload-wrap
+        ${_NAME}
+        "LD_PRELOAD=${ROCPROFILER_REGISTER_MEMCHECK_PRELOAD_LIBRARY}:libgeneric-tool.so;ROCP_REG_TEST_WRAP=1"
+        "${RRTE_PRELOAD_WRAP_PASS_REGEX}"
+        "${RRTE_PRELOAD_WRAP_FAIL_REGEX}")
+
+    rocp_register_add_test(
+        ${_NAME}-env-wrap
+        ${_NAME}
+        "ROCP_TOOL_LIBRARIES=libgeneric-tool.so;ROCP_REG_TEST_WRAP=1;${ROCPROFILER_REGISTER_MEMCHECK_PRELOAD_ENV}"
+        "${RRTE_PRELOAD_WRAP_PASS_REGEX}"
+        "${RRTE_PRELOAD_WRAP_FAIL_REGEX}")
 
 endfunction()
 
@@ -458,7 +472,7 @@ set_tests_properties(
     test-secure-invalid-hsa-runtime
     PROPERTIES
         ENVIRONMENT
-        "LD_LIBRARY_PATH=${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/invalid:${CMAKE_LIBRARY_OUTPUT_DIRECTORY};ROCPROFILER_REGISTER_SECURE=1"
+        "LD_LIBRARY_PATH=${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/invalid:${CMAKE_LIBRARY_OUTPUT_DIRECTORY};ROCPROFILER_REGISTER_SECURE=1;${ROCPROFILER_REGISTER_MEMCHECK_PRELOAD_ENV}"
         LABELS
         "secure"
         WILL_FAIL
@@ -473,7 +487,7 @@ set_tests_properties(
     test-insecure-invalid-hsa-runtime
     PROPERTIES
         ENVIRONMENT
-        "LD_LIBRARY_PATH=${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/invalid:${CMAKE_LIBRARY_OUTPUT_DIRECTORY};ROCPROFILER_REGISTER_SECURE=0"
+        "LD_LIBRARY_PATH=${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/invalid:${CMAKE_LIBRARY_OUTPUT_DIRECTORY};ROCPROFILER_REGISTER_SECURE=0;${ROCPROFILER_REGISTER_MEMCHECK_PRELOAD_ENV}"
         LABELS
         "insecure")
 
@@ -492,7 +506,7 @@ set_tests_properties(
     test-force-rocprofiler-dlopen
     PROPERTIES
         ENVIRONMENT
-        "LD_LIBRARY_PATH=${CMAKE_LIBRARY_OUTPUT_DIRECTORY};ROCPROFILER_REGISTER_FORCE_LOAD=1;ROCPROFILER_REGISTER_SECURE=yes;ROCPROFILER_REGISTER_VERBOSE=3"
+        "LD_LIBRARY_PATH=${CMAKE_LIBRARY_OUTPUT_DIRECTORY};ROCPROFILER_REGISTER_FORCE_LOAD=1;ROCPROFILER_REGISTER_SECURE=yes;ROCPROFILER_REGISTER_VERBOSE=3;${ROCPROFILER_REGISTER_MEMCHECK_PRELOAD_ENV}"
         LABELS
         "dlopen;secure")
 
@@ -505,7 +519,7 @@ set_tests_properties(
     test-rocprofiler-register-library-base-path
     PROPERTIES
         ENVIRONMENT
-        "LD_LIBRARY_PATH=${CMAKE_LIBRARY_OUTPUT_DIRECTORY};ROCPROFILER_REGISTER_LIBRARY=librocprofiler-sdk.so.0;ROCPROFILER_REGISTER_SECURE=yes;ROCPROFILER_REGISTER_VERBOSE=3;ROCPROFILER_REGISTER_MONOCHROME=true"
+        "LD_LIBRARY_PATH=${CMAKE_LIBRARY_OUTPUT_DIRECTORY};ROCPROFILER_REGISTER_LIBRARY=librocprofiler-sdk.so.0;ROCPROFILER_REGISTER_SECURE=yes;ROCPROFILER_REGISTER_VERBOSE=3;ROCPROFILER_REGISTER_MONOCHROME=true;${ROCPROFILER_REGISTER_MEMCHECK_PRELOAD_ENV}"
         LABELS
         "dlopen;secure")
 
@@ -518,6 +532,6 @@ set_tests_properties(
     test-rocprofiler-register-library-absolute-path
     PROPERTIES
         ENVIRONMENT
-        "LD_LIBRARY_PATH=${CMAKE_LIBRARY_OUTPUT_DIRECTORY};ROCPROFILER_REGISTER_LIBRARY=${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/librocprofiler-sdk.so.0;ROCPROFILER_REGISTER_SECURE=yes;ROCPROFILER_REGISTER_VERBOSE=3;ROCPROFILER_REGISTER_MONOCHROME=true"
+        "LD_LIBRARY_PATH=${CMAKE_LIBRARY_OUTPUT_DIRECTORY};ROCPROFILER_REGISTER_LIBRARY=${CMAKE_LIBRARY_OUTPUT_DIRECTORY}/librocprofiler-sdk.so.0;ROCPROFILER_REGISTER_SECURE=yes;ROCPROFILER_REGISTER_VERBOSE=3;ROCPROFILER_REGISTER_MONOCHROME=true;${ROCPROFILER_REGISTER_MEMCHECK_PRELOAD_ENV}"
         LABELS
         "dlopen;secure")

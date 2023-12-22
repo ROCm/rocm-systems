@@ -3,13 +3,17 @@ include_guard(GLOBAL)
 
 include(CMakePackageConfigHelpers)
 
-set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME config)
-
 install(
     EXPORT rocprofiler-register-library-targets
     FILE rocprofiler-register-library-targets.cmake
     NAMESPACE rocprofiler-register::
-    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/cmake/rocprofiler-register)
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/cmake/rocprofiler-register
+    COMPONENT core)
+
+install(
+    DIRECTORY ${PROJECT_SOURCE_DIR}/tests
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}
+    COMPONENT tests)
 
 configure_file(
     ${PROJECT_SOURCE_DIR}/cmake/Templates/setup-env.sh.in
@@ -23,13 +27,13 @@ configure_file(
 install(
     FILES ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/setup-env.sh
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}
-    COMPONENT setup)
+    COMPONENT core)
 
 install(
     FILES
         ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/modulefiles/${PROJECT_NAME}/${PROJECT_VERSION}
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/modulefiles/${PROJECT_NAME}
-    COMPONENT setup)
+    COMPONENT core)
 
 # ------------------------------------------------------------------------------#
 # install tree
