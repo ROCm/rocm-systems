@@ -575,6 +575,6 @@ def stitch(insts, raw_code, jumps, gfxv, bIsAuto, codeservice):
                 )
                 break
             line += 1
-        print('Sucessfuly parsed', i, 'tokens')
+        print('Success: Parsed', i, 'tokens')
 
     return result, loopCount, mem_unroll, flight_count, maxline, len(result), pcskip

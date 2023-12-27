@@ -108,7 +108,8 @@ bool AttTracer::InsertPacketStart(
   queue::Queue& queue,
   size_t writer_id,
   rocprofiler_buffer_id_t buffer_id,
-  size_t stop_id
+  size_t stop_id,
+  const std::string& kernel_name
 ) {
   // Preparing att Packets
     packet_t start_packet{};
@@ -139,7 +140,7 @@ bool AttTracer::InsertPacketStart(
     Packet::CreateBarrierPacket(&transformed_packets, &start_packet.completion_signal, nullptr);
 
     uint64_t record_id = rocprofiler::ROCProfiler_Singleton::GetInstance().GetUniqueRecordId();
-    AddKernelNameWithDispatchID("ATT_Contiguous", record_id);
+    AddKernelNameWithDispatchID(kernel_name, record_id);
 
     this->AddPendingSignals(
       writer_id,
@@ -234,9 +235,14 @@ bool AttTracer::ATTContiguousWriteInterceptor(
 
   if (insertStart)
   {
+    size_t end_writer = insertStart->second;
+    std::string name = GetKernelNameFromKsymbols(dispatchPackets.at(0)->kernel_object);
+    if (insertStart->first != end_writer)
+      name = "ATT_Start_" + name;
+
     std::lock_guard<std::mutex> lk(att_enable_disable_mutex);
-    bool b = InsertPacketStart(transformed, queue_info, writer_id, buffer_id, insertStart->second);
-    if (!b) return false;
+    bool bSuc = InsertPacketStart(transformed, queue_info, writer_id, buffer_id, end_writer, name);
+    if (!bSuc) return false;
   }
 
   bool bHasPending = false;

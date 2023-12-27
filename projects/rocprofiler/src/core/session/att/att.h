@@ -84,7 +84,8 @@ public:
     queue::Queue& queue_info,
     size_t writer_id,
     rocprofiler_buffer_id_t buffer_id,
-    size_t stop_location
+    size_t stop_location,
+    const std::string& kernel_name
   );
 
   void InsertPacketStop(
