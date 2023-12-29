@@ -576,10 +576,16 @@ if __name__ == "__main__":
         for k in range(len(code)):
             code[k][-2] = int(hitcount_map[k])
             code[k][-1] = int(latency_map[k])
+            try:
+                code[k][-3] = codeservice.ToRawPC(code[k][-3])
+            except:
+                pass
+            if k > 0 and code[k-1][-3] == 0:
+                code[k-1][-3] = code[k][-3]
 
         if CSV_MODE:
             from att_to_csv import dump_csv
-            dump_csv(code, trace_instance_name)
+            dump_csv(code, trace_instance_name, bIsAuto)
 
         if FILE_MODE:
             drawinfo = {

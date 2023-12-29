@@ -4,7 +4,7 @@ import numpy as np
 import csv
 import os
 
-def dump_csv(code, trace_instance_name):
+def dump_csv(code, trace_instance_name, bIsAuto):
     outpath = os.getenv("OUT_FILE_NAME")
     if outpath is None:
         outpath = "att_output"
@@ -15,5 +15,9 @@ def dump_csv(code, trace_instance_name):
 
     with open(outpath, 'w') as f:
         writer = csv.writer(f)
-        writer.writerow(['Line', 'Instruction', 'Hitcount', 'Cycles', 'Addr', 'C++ Reference'])
-        [writer.writerow([m[5], m[0], m[7], m[8], hex(m[6]), m[3]]) for m in code]
+        if bIsAuto:
+            writer.writerow(['Addr', 'Instruction', 'Hitcount', 'Cycles', 'C++ Reference'])
+            [writer.writerow([hex(m[6]), m[0], m[7], m[8], m[3]]) for m in code]
+        else:
+            writer.writerow(['Line', 'Instruction', 'Hitcount', 'Cycles', 'C++ Reference'])
+            [writer.writerow([m[5], m[0], m[7], m[8], m[3]]) for m in code]
