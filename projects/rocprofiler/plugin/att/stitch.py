@@ -10,7 +10,7 @@ from copy import deepcopy
 MAX_STITCHED_TOKENS = 200000000
 MAX_FAILED_STITCHES = 256
 
-UNKNOWN = 0
+SKIP = 0
 SMEM = 1
 SALU = 2
 VMEM = 3
@@ -29,7 +29,7 @@ PCINFO = 15
 DONT_KNOW = 100
 
 WaveInstCategory = {
-    UNKNOWN: "UNKNOWN",
+    SKIP: "SKIP",
     SMEM: "SMEM",
     SALU: "SALU",
     VMEM: "VMEM",
@@ -195,7 +195,7 @@ class PCTranslator:
             symbol = "Unkown symbol at 0x" + hex(addr)
 
         last_line = self.raw_code[-1]
-        newline = ['; ' + symbol, 100, last_line[2], 0, last_line[4], last_line[5], 0, 0, 0]
+        newline = ['; ' + symbol, DONT_KNOW, last_line[2], 0, last_line[4], last_line[5], 0, 0, 0]
         self.raw_code.append(newline)
 
     def getcode(self, addr):
@@ -301,7 +301,7 @@ def stitch(insts, raw_code, jumps, gfxv, bIsAuto, codeservice):
         c[0] = c[0].split(";")[0].split("//")[0].strip()
         jump_map.append(len(code))
 
-        if c[1] != 100:
+        if c[1] != DONT_KNOW:
             code.append(c)
         elif ":" in c[0]:
             labels[c[0].split(":")[0]] = len(code)
@@ -381,7 +381,7 @@ def stitch(insts, raw_code, jumps, gfxv, bIsAuto, codeservice):
             elif 'scratch_' in as_line[0]:
                 watchlist.scratch(as_line[0])
 
-        if as_line[1] == DONT_KNOW:
+        if as_line[1] == DONT_KNOW or (as_line[1] == SKIP and not bGFX9):
             matched = False
         elif as_line[1] == GETPC:
             try:
