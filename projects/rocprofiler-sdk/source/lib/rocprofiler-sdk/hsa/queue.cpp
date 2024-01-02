@@ -71,7 +71,8 @@ signal_limiter()
 {
     // Limit the maximun number of HSA signals created.
     // There is a hard limit to the maximum that can exist.
-    static common::active_capacity_gate _gate(4);
+    static auto _gate =
+        common::active_capacity_gate{common::get_env<size_t>("ROCPROFILER_GATE_CAPACITY", 4)};
     return _gate;
 }
 

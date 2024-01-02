@@ -35,16 +35,19 @@ namespace common
 {
 namespace impl
 {
+struct sfinae
+{};
+
 std::string get_env(std::string_view, std::string_view);
 
 std::string
 get_env(std::string_view, const char*);
 
-int
-get_env(std::string_view, int);
-
 bool
 get_env(std::string_view, bool);
+
+template <typename Tp>
+Tp get_env(std::string_view, Tp, std::enable_if_t<std::is_integral<Tp>::value, sfinae> = {});
 }  // namespace impl
 
 template <typename Tp>

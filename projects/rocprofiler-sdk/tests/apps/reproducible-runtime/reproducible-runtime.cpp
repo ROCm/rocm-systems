@@ -25,6 +25,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <iomanip>
 #include <iostream>
 #include <mutex>
 #include <random>
@@ -41,9 +42,10 @@
         {                                                                                          \
             auto _hip_api_print_lk = auto_lock_t{print_lock};                                      \
             fprintf(stderr,                                                                        \
-                    "%s:%d :: HIP error : %s\n",                                                   \
+                    "%s:%d :: HIP error %i : %s\n",                                                \
                     __FILE__,                                                                      \
                     __LINE__,                                                                      \
+                    static_cast<int>(error_),                                                      \
                     hipGetErrorString(error_));                                                    \
             throw std::runtime_error("hip_api_call");                                              \
         }                                                                                          \
@@ -51,20 +53,18 @@
 
 namespace
 {
-using auto_lock_t = std::unique_lock<std::mutex>;
-auto   print_lock = std::mutex{};
-double nruntime   = 1.0;
-size_t nspin      = 500000;
-size_t nthreads   = 2;
-size_t nitr       = 2;
-size_t nsync      = 1;
+using auto_lock_t   = std::unique_lock<std::mutex>;
+auto     print_lock = std::mutex{};
+double   nruntime   = 500.0;  // ms
+uint32_t nspin      = 1000000;
+size_t   nthreads   = 2;
 
 void
 check_hip_error(void);
 }  // namespace
 
 __global__ void
-reproducible_runtime(int64_t nspin);
+reproducible_runtime(uint32_t nspin);
 
 void
 run(int rank, int tid, hipStream_t stream);
@@ -79,12 +79,11 @@ main(int argc, char** argv)
         if(_arg == "?" || _arg == "-h" || _arg == "--help")
         {
             fprintf(stderr,
-                    "usage: reproducible-runtime [KERNEL SPIN CYCLES (%zu)] [NUM_THREADS (%zu)] "
-                    "[NUM_ITERATION (%zu)] [SYNC_EVERY_N_ITERATIONS (%zu)]\n",
+                    "usage: reproducible-runtime [KERNEL RUNTIME PER THREAD (default: %f msec)] "
+                    "[SPIN CYCLES PER KERNEL LAUNCH (default: %u)] [NUM_THREADS (default: %zu)]\n",
+                    nruntime,
                     nspin,
-                    nthreads,
-                    nitr,
-                    nsync);
+                    nthreads);
             exit(EXIT_SUCCESS);
         }
     }
@@ -92,13 +91,10 @@ main(int argc, char** argv)
     if(argc > 1) nruntime = std::stod(argv[1]);
     if(argc > 2) nspin = std::stoll(argv[2]);
     if(argc > 3) nthreads = std::stoll(argv[3]);
-    if(argc > 4) nitr = std::stoll(argv[4]);
-    if(argc > 5) nsync = std::stoll(argv[5]);
 
-    printf("[reproducible-runtime] Kernel spin time: %zu cycles\n", nspin);
+    printf("[reproducible-runtime] Kernel runtime per thread: %.3f msec\n", nruntime);
+    printf("[reproducible-runtime] Spin time per kernel: %u cycles\n", nspin);
     printf("[reproducible-runtime] Number of threads: %zu\n", nthreads);
-    printf("[reproducible-runtime] Number of iterations: %zu\n", nitr);
-    printf("[reproducible-runtime] Syncing every %zu iterations\n", nsync);
 
     // this is a temporary workaround in omnitrace when HIP + MPI is enabled
     int ndevice = 0;
@@ -132,38 +128,49 @@ main(int argc, char** argv)
 }
 
 __global__ void
-reproducible_runtime(int64_t nspin_v)
+reproducible_runtime(uint32_t nspin_v)
 {
-    for(int i = 0; i < nspin_v / 64; i++)
-        asm volatile("s_sleep 1");  // ~64 cycles
+    for(uint32_t i = 0; i < nspin_v / 2048; i++)
+        asm volatile("s_sleep 32");  // ~2048 cycles -> ~1us
+    uint32_t remainder = nspin_v % 2048;
+    for(uint32_t i = 0; i < remainder / 64; i++)
+        asm volatile("s_sleep 1");
 }
 
 void
 run(int rank, int tid, hipStream_t stream)
 {
-    dim3   grid(4096);
-    dim3   block(64);
-    double time = 0.0;
-    auto   t1   = std::chrono::high_resolution_clock::now();
+    constexpr int min_sa         = 8;
+    constexpr int min_avail_simd = 24;
+    dim3          grid(min_sa * min_avail_simd);
+    dim3          block(32);
+    float         time = 0.0f;
+
+    hipEvent_t start, stop;
+    HIP_API_CALL(hipEventCreate(&start));
+    HIP_API_CALL(hipEventCreate(&stop));
+    HIP_API_CALL(hipEventRecord(start, stream));
 
     do
     {
-        for(size_t i = 0; i < nitr; ++i)
-        {
-            reproducible_runtime<<<grid, block, 0, stream>>>(nspin);
-            check_hip_error();
-            if(i % nsync == (nsync - 1)) HIP_API_CALL(hipStreamSynchronize(stream));
-        }
-        auto t2 = std::chrono::high_resolution_clock::now();
-        HIP_API_CALL(hipStreamSynchronize(stream));
-        time = std::chrono::duration_cast<std::chrono::duration<double>>(t2 - t1).count();
-    } while(time < nruntime);
+        uint32_t cyclesleft = 2000 * 1000 * (nruntime - static_cast<double>(time));
+        reproducible_runtime<<<grid, block, 0, stream>>>(std::min<uint32_t>(nspin, cyclesleft));
+        check_hip_error();
+        HIP_API_CALL(hipEventRecord(stop, stream));
+        HIP_API_CALL(hipEventSynchronize(stop));
+        HIP_API_CALL(hipEventElapsedTime(&time, start, stop));
+    } while(static_cast<double>(time) < nruntime);
+
+    HIP_API_CALL(hipEventDestroy(start));
+    HIP_API_CALL(hipEventDestroy(stop));
 
     {
+        auto _msg = std::stringstream{};
+        _msg << '[' << rank << "][" << tid << "] Runtime of reproducible-runtime is "
+             << std::setprecision(2) << std::fixed << time << " ms (" << std::setprecision(3)
+             << (time / 1000.0f) << " sec)\n";
         auto_lock_t _lk{print_lock};
-        std::cout << "[" << rank << "][" << tid << "] Runtime of reproducible-runtime is " << time
-                  << " sec\n"
-                  << std::flush;
+        std::cout << _msg.str() << std::flush;
     }
 
     HIP_API_CALL(hipStreamSynchronize(stream));
