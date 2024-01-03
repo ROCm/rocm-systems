@@ -7,14 +7,12 @@ set(ROCPROFILER_LIB_COUNTER_TEST_SOURCES metrics_test.cpp evaluate_ast_test.cpp
 
 add_executable(counter-test)
 
-target_sources(
-    counter-test PRIVATE ${ROCPROFILER_LIB_COUNTER_TEST_SOURCES}
-                         $<TARGET_OBJECTS:rocprofiler::rocprofiler-object-library>)
+target_sources(counter-test PRIVATE ${ROCPROFILER_LIB_COUNTER_TEST_SOURCES})
 
 target_link_libraries(
     counter-test
     PRIVATE rocprofiler::rocprofiler-hip rocprofiler::rocprofiler-common-library
-            rocprofiler::rocprofiler-object-library GTest::gtest GTest::gtest_main)
+            rocprofiler::rocprofiler-static-library GTest::gtest GTest::gtest_main)
 
 gtest_add_tests(
     TARGET counter-test

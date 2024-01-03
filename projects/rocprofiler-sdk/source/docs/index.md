@@ -1,4 +1,4 @@
-# Welcome to the [ROCprofiler](https://github.com/ROCm/rocprofiler-v2-internal) Documentation!
+# Welcome to the [ROCprofiler](https://github.com/ROCm/rocprofiler-sdk-internal) Documentation!
 
 ```eval_rst
 .. toctree::

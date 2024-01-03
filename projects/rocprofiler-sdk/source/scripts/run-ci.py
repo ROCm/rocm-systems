@@ -14,6 +14,7 @@ import multiprocessing
 # and default value for CTEST_SUBMIT_URL
 _PROJECT_NAME = "rocprofiler-v2-internal"
 _BASE_URL = "10.194.116.31/cdash"
+_GCOVR_GENERATE_CMD = None
 
 
 def which(cmd, require):
@@ -45,6 +46,7 @@ def generate_custom(args, cmake_args, ctest_args):
 
     GIT_CMD = which("git", require=True)
     GCOV_CMD = which("gcov", require=False)
+    GCOVR_CMD = which("gcovr", require=False)
     CMAKE_CMD = which("cmake", require=True)
     # CTEST_CMD = which("ctest", require=True)
 
@@ -91,13 +93,54 @@ def generate_custom(args, cmake_args, ctest_args):
         "external/.*",
         "samples/.*",
         "tests/.*",
+        ".*/external/.*",
+        ".*/samples/.*",
+        ".*/tests/.*",
         ".*/details/.*",
-        "*/counters/parser/.*",
+        ".*/counters/parser/.*",
     ]
     if args.coverage == "samples":
         codecov_exclude += [".*/lib/common/.*"]
 
     COVERAGE_EXCLUDE = ";".join(codecov_exclude)
+
+    if args.coverage and GCOVR_CMD:
+        global _GCOVR_GENERATE_CMD
+
+        codecov_dir = os.path.join(args.source_dir, ".codecov")
+        codecov_xml = os.path.join(codecov_dir, f"{args.coverage}.xml")
+        codecov_html = os.path.join(codecov_dir, f"{args.coverage}.html")
+
+        if not os.path.exists(codecov_dir):
+            os.makedirs(codecov_dir)
+
+        with open(os.path.join(codecov_dir, ".gitignore"), "w") as f:
+            f.write("/*\n")
+
+        gcovr_codecov_exclude = []
+        for itr in codecov_exclude:
+            gcovr_codecov_exclude += ["--exclude", f"{itr}"]
+
+        _GCOVR_GENERATE_CMD = (
+            [GCOVR_CMD]
+            + [
+                "--root",
+                f"{args.source_dir}",
+                "--exclude-unreachable-branches",
+                "--exclude-throw-branches",
+                "--gcov-ignore-parse-errors",
+                "--gcov-executable",
+                GCOV_CMD,
+                "-s",
+                "-p",
+                "--xml",
+                codecov_xml,
+                "--html-details",
+                codecov_html,
+            ]
+            + gcovr_codecov_exclude
+            + [args.source_dir]
+        )
 
     return f"""
         set(CTEST_PROJECT_NAME "{_PROJECT_NAME}")
@@ -438,9 +481,11 @@ if __name__ == "__main__":
         dashboard_args.append(f"{args.mode}{itr}")
 
     try:
-        ctest_args += ["--no-tests=error"]
         if not args.quiet and len(ctest_args) == 0:
             ctest_args = ["--output-on-failure", "-V"]
+
+        # always fail if no tests exist
+        ctest_args += ["--no-tests=error"]
 
         run(
             [CTEST_CMD]
@@ -482,3 +527,29 @@ if __name__ == "__main__":
                 with open(file, "r") as inpf:
                     fdata = inpf.read()
                     print(fdata)
+
+    if _GCOVR_GENERATE_CMD:
+        print("\n\n\n###### Generating Cobertura XML... ######")
+        print(
+            "###### GCOVR command: '{}'... ######\n".format(" ".join(_GCOVR_GENERATE_CMD))
+        )
+        with open("/dev/null", "w") as devnull:
+            run(_GCOVR_GENERATE_CMD, stderr=devnull)
+
+            codecov_dir = os.path.join(args.source_dir, ".codecov")
+            codecov_xml = os.path.join(codecov_dir, f"{args.coverage}.xml")
+            codecov_md = os.path.join(codecov_dir, f"{args.coverage}.md")
+
+            PYCOBERTURA_CMD = which("pycobertura", require=False)
+            if PYCOBERTURA_CMD:
+                run(
+                    [
+                        PYCOBERTURA_CMD,
+                        "show",
+                        "--format",
+                        "markdown",
+                        "--output",
+                        codecov_md,
+                        codecov_xml,
+                    ]
+                )

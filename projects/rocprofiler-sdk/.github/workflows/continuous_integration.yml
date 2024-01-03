@@ -70,11 +70,11 @@ jobs:
     # vega20 machine only has 24 cpus available.
     # container:
     #   image: compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:${{ needs.get_latest_mainline_build_number.outputs.LATEST_BUILD_NUMBER }}-${{ matrix.os }}-stg1
-    #   options: --memory=128g --cpus=32 --ipc=host --device=/dev/kfd --group-add video --cap-add=SYS_PTRACE --cap-add CAP_SYS_PTRACE --cap-add CAP_SYS_ADMIN --security-opt seccomp=unconfined
+    #   options: --memory=128g --cpus=32 --ipc=host --device=/dev/kfd --group-add video --cap-add=SYS_PTRACE --cap-add CAP_SYS_ADMIN --security-opt seccomp=unconfined
 
     container:
       image: compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:${{ needs.get_latest_mainline_build_number.outputs.LATEST_BUILD_NUMBER }}-${{ matrix.os }}-stg1
-      options: --ipc=host --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --cap-add CAP_SYS_PTRACE --cap-add CAP_SYS_ADMIN --security-opt seccomp=unconfined
+      options: --ipc=host --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --cap-add CAP_SYS_ADMIN --security-opt seccomp=unconfined
 
     needs: get_latest_mainline_build_number
 
@@ -99,7 +99,7 @@ jobs:
     - name: List Files
       shell: bash
       run: |
-        which-realpath() { echo "$1 resolves to $(realpath $(which $1))"; }
+        which-realpath() { echo -e "\n$1 resolves to $(realpath $(which $1))"; echo "$($(which $1) --version &> /dev/stdout | head -n 1)"; }
         for i in python python3 git cmake ctest; do which-realpath $i; done
         ls -la
 
@@ -167,7 +167,7 @@ jobs:
     - name: Archive production artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: artifacts
+        name: installers
         path: |
           ${{github.workspace}}/build/*.deb
           ${{github.workspace}}/build/*.rpm
@@ -199,23 +199,54 @@ jobs:
     # vega20 machine only has 24 cpus available.
     container:
       image: compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:${{ needs.get_latest_mainline_build_number.outputs.LATEST_BUILD_NUMBER }}-${{ matrix.os }}-stg1
-      options: --ipc=host --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --cap-add CAP_SYS_PTRACE --cap-add CAP_SYS_ADMIN --security-opt seccomp=unconfined
+      options: --ipc=host --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --cap-add CAP_SYS_ADMIN --security-opt seccomp=unconfined
 
     # container:
     #   image: compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:${{ needs.get_latest_mainline_build_number.outputs.LATEST_BUILD_NUMBER }}-${{ matrix.os }}-stg1
-    #   options: --memory=128g --cpus=32 --ipc=host --device=/dev/kfd --device=/dev/dri${{ matrix.device }} --group-add video --cap-add=SYS_PTRACE --cap-add CAP_SYS_PTRACE --cap-add CAP_SYS_ADMIN --security-opt seccomp=unconfined
+    #   options: --memory=128g --cpus=32 --ipc=host --device=/dev/kfd --device=/dev/dri${{ matrix.device }} --group-add video --cap-add=SYS_PTRACE --cap-add CAP_SYS_ADMIN --security-opt seccomp=unconfined
 
     needs: get_latest_mainline_build_number
 
     steps:
+    - name: Patch Git
+      timeout-minutes: 25
+      run: |
+        apt-get update
+        apt-get install -y software-properties-common
+        add-apt-repository -y ppa:git-core/ppa
+        apt-get update
+        apt-get install -y git
+
     - uses: actions/checkout@v4
       with:
         submodules: true
 
+    - name: Load Existing XML Code Coverage
+      if: github.event_name == 'pull_request'
+      id: load-coverage
+      uses: actions/cache@v3
+      with:
+        key: ${{ github.event.pull_request.base.sha }}-codecov
+        path: .codecov/**
+
+    - name: Copy Existing XML Code Coverage
+      if: github.event_name == 'pull_request'
+      shell: bash
+      run: |
+        if [ -d .codecov ]; then cp -r .codecov .codecov.ref; fi
+
+    - name: Configure Env
+      shell: bash
+      run: |
+        echo "${PATH}:/usr/local/bin:${HOME}/.local/bin" >> $GITHUB_PATH
+        echo "LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:/usr/local/lib:${HOME}/.local/lib" >> $GITHUB_ENV
+
     - name: List Files
       shell: bash
       run: |
-        which-realpath() { echo "$1 resolves to $(realpath $(which $1))"; }
+        echo "PATH: ${PATH}"
+        echo "LD_LIBRARY_PATH: ${LD_LIBRARY_PATH}"
+        which-realpath() { echo -e "\n$1 resolves to $(realpath $(which $1))"; echo "$($(which $1) --version &> /dev/stdout | head -n 1)"; }
         for i in python python3 git cmake ctest; do which-realpath $i; done
         ls -la
 
@@ -223,9 +254,9 @@ jobs:
       shell: bash
       run: |
         git config --global --add safe.directory '*'
-        apt-get install -y cmake libgtest-dev python3-pip
+        apt-get install -y cmake libgtest-dev python3-pip gcovr wkhtmltopdf xvfb xfonts-base xfonts-75dpi xfonts-100dpi xfonts-utils xfonts-encodings libfontconfig
         python3 -m pip install -r requirements.txt
-        python3 -m pip install pytest
+        python3 -m pip install pytest pycobertura
 
     - name: Configure, Build, and Test (Total Code Coverage)
       timeout-minutes: 30
@@ -272,6 +303,67 @@ jobs:
           --
           -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
           -DPython3_EXECUTABLE=$(which python3)
+
+    - name: Save XML Code Coverage
+      id: save-coverage
+      uses: actions/cache/save@v3
+      with:
+        key: ${{ github.sha }}-codecov
+        path: |
+          .codecov/*.xml
+
+    - name: Generate Code Coverage Comment
+      if: github.event_name == 'pull_request'
+      timeout-minutes: 5
+      shell: bash
+      run: |
+        echo "PWD: ${PWD}"
+        ls -la
+
+        for i in "all" "tests" "samples"; do
+            wkhtmltoimage --enable-local-file-access --quality 85 .codecov/${i}.html .codecov/${i}.png
+        done
+        ls -la .codecov
+        which -a git
+        git --version
+
+        ./source/scripts/upload-image-to-github.py --bot --token ${{ github.token }} --files .codecov/{all,tests,samples}.png --output-dir .codecov --name pr-${{ github.event.pull_request.number }}
+
+        echo -e "\n${PWD}:"
+        ls -la .
+
+        echo -e "\n.codecov:"
+        ls -la .codecov
+
+        get-md-contents() { cat .codecov/${1}.png.md .codecov/${1}.md; }
+        cat << EOF > .codecov/report.md
+        # Code Coverage Report
+
+        ## Tests Only
+        $(get-md-contents tests)
+
+        ## Samples Only
+        $(get-md-contents samples)
+
+        ## Tests + Samples
+        $(get-md-contents all)
+
+        EOF
+
+    - name: Write Code Coverage Comment
+      if: github.event_name == 'pull_request'
+      timeout-minutes: 5
+      uses: thollander/actions-comment-pull-request@v2
+      with:
+        comment_tag: codecov-report
+        filePath: .codecov/report.md
+
+    - name: Archive Code Coverage Data
+      uses: actions/upload-artifact@v4
+      with:
+        name: code-coverage-details
+        path: |
+          ${{github.workspace}}/.codecov/*
 
     - name: Verify Test Labels
       timeout-minutes: 5
@@ -356,7 +448,7 @@ jobs:
 
     container:
       image: compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:${{ needs.get_latest_mainline_build_number.outputs.LATEST_BUILD_NUMBER }}-${{ matrix.os }}-stg1
-      options: --privileged --ipc=host --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --cap-add CAP_SYS_PTRACE --cap-add CAP_SYS_ADMIN --security-opt seccomp=unconfined
+      options: --privileged --ipc=host --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --cap-add CAP_SYS_ADMIN --security-opt seccomp=unconfined
 
     needs: get_latest_mainline_build_number
 
@@ -368,7 +460,7 @@ jobs:
     - name: List Files
       shell: bash
       run: |
-        which-realpath() { echo "$1 resolves to $(realpath $(which $1))"; }
+        which-realpath() { echo -e "\n$1 resolves to $(realpath $(which $1))"; echo "$($(which $1) --version &> /dev/stdout | head -n 1)"; }
         for i in python python3 git cmake ctest; do which-realpath $i; done
         ls -la
 
@@ -385,7 +477,7 @@ jobs:
       shell: bash
       run:
         python3 ./source/scripts/run-ci.py -B build
-          --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.runner }}-${{ matrix.sanitizer }}
+          --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.runner }}-${{ matrix.os }}-${{ matrix.sanitizer }}
           --build-jobs 8
           --site ${{ matrix.runner }}
           --gpu-targets ${{ env.GPU_LIST }}

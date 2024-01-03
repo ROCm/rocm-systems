@@ -1,1 +1,1 @@
-# rocprofiler-v2-internal
+# rocprofiler-sdk-internal

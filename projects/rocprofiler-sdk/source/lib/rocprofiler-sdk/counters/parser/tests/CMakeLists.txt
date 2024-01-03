@@ -6,14 +6,12 @@ set(ROCPROFILER_LIB_PARSER_TEST_SOURCES "parser_test.cpp")
 
 add_executable(parser-test)
 
-target_sources(
-    parser-test PRIVATE ${ROCPROFILER_LIB_PARSER_TEST_SOURCES}
-                        $<TARGET_OBJECTS:rocprofiler::rocprofiler-object-library>)
+target_sources(parser-test PRIVATE ${ROCPROFILER_LIB_PARSER_TEST_SOURCES})
 
 target_link_libraries(
     parser-test
     PRIVATE rocprofiler::rocprofiler-common-library
-            rocprofiler::rocprofiler-object-library GTest::gtest GTest::gtest_main)
+            rocprofiler::rocprofiler-static-library GTest::gtest GTest::gtest_main)
 
 gtest_add_tests(
     TARGET parser-test
