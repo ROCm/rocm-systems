@@ -41,6 +41,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <random>
 
 namespace rocprofiler
 {
@@ -49,6 +50,11 @@ namespace context
 namespace
 {
 using reserve_size_t = common::container::reserve_size;
+using unique_context_vec_t =
+    common::container::stable_vector<allocator::unique_static_ptr_t<context>, 8>;
+using active_context_vec_t = common::container::stable_vector<std::atomic<const context*>, 8>;
+
+constexpr auto invalid_client_idx = std::numeric_limits<uint32_t>::max();
 
 auto&
 get_contexts_mutex()
@@ -57,12 +63,29 @@ get_contexts_mutex()
     return _v;
 }
 
-constexpr auto invalid_client_idx = std::numeric_limits<uint32_t>::max();
+uint64_t
+get_contexts_offset()
+{
+    static uint64_t _v = []() {
+        auto gen = std::mt19937{std::random_device{}()};
+        auto rng = std::uniform_int_distribution<uint64_t>{std::numeric_limits<uint8_t>::max(),
+                                                           std::numeric_limits<uint16_t>::max()};
+        return rng(gen);
+    }();
+    return _v;
+}
 
 auto&
 get_client_index()
 {
     static auto _v = invalid_client_idx;
+    return _v;
+}
+
+unique_context_vec_t&
+get_registered_contexts_impl()
+{
+    static auto _v = unique_context_vec_t{reserve_size_t{unique_context_vec_t::chunk_size}};
     return _v;
 }
 
@@ -136,11 +159,31 @@ pop_latest_correlation_id(const correlation_id* val)
     if(get_latest_correlation_id_impl() == val) get_latest_correlation_id_impl() = nullptr;
 }
 
-unique_context_vec_t&
-get_registered_contexts()
+context_array_t&
+get_registered_contexts(context_array_t& data, context_filter_t filter)
 {
-    static auto _v = unique_context_vec_t{reserve_size_t{unique_context_vec_t::chunk_size}};
-    return _v;
+    data.clear();
+    auto num_ctx = get_registered_contexts_impl().size();
+    if(num_ctx <= 0) return data;
+
+    data.reserve(num_ctx);
+    for(auto& itr : get_registered_contexts_impl())
+    {
+        const auto* ctx = itr.get();
+        if(ctx)
+        {
+            if(!filter || (filter && filter(ctx))) data.emplace_back(ctx);
+        }
+    }
+    return data;
+}
+
+context_array_t
+get_registered_contexts(context_filter_t filter)
+{
+    auto data = context_array_t{};
+    get_registered_contexts(data, filter);
+    return data;
 }
 
 context_array_t&
@@ -209,13 +252,13 @@ allocate_context()
     auto _lk = std::unique_lock<std::mutex>{get_contexts_mutex()};
 
     // initial context identifier number
-    auto _idx = get_registered_contexts().size();
+    auto _idx = get_registered_contexts_impl().size() + get_contexts_offset();
 
     // make space in registered
-    get_registered_contexts().emplace_back(nullptr);
+    get_registered_contexts_impl().emplace_back(nullptr);
 
     // create an entry in the registered
-    auto& _cfg_v = get_registered_contexts().back();
+    auto& _cfg_v = get_registered_contexts_impl().back();
     _cfg_v       = allocator::make_unique_static<context>();
     auto* _cfg   = _cfg_v.get();
     // ...
@@ -233,35 +276,41 @@ allocate_context()
     return rocprofiler_context_id_t{_idx};
 }
 
+context*
+get_mutable_registered_context(rocprofiler_context_id_t id)
+{
+    if(id.handle < get_contexts_offset()) return nullptr;
+    auto _idx = id.handle - get_contexts_offset();
+    if(_idx >= get_registered_contexts_impl().size()) return nullptr;
+    return get_registered_contexts_impl().at(_idx).get();
+}
+
+const context*
+get_registered_context(rocprofiler_context_id_t id)
+{
+    return get_mutable_registered_context(id);
+}
+
 rocprofiler_status_t
 validate_context(const context* cfg)
 {
-    // if(cfg->buffer == nullptr) return ROCPROFILER_STATUS_ERROR_BUFFER_NOT_FOUND;
-
-    // if(cfg->filter == nullptr) return ROCPROFILER_STATUS_ERROR_FILTER_NOT_FOUND;
-
     return (cfg) ? ROCPROFILER_STATUS_SUCCESS : ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
 }
 
 rocprofiler_status_t
 start_context(rocprofiler_context_id_t context_id)
 {
-    if(context_id.handle >= get_registered_contexts().size())
-    {
-        return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
-    }
+    if(context_id.handle < get_contexts_offset()) return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
 
-    context* cfg = get_registered_contexts().at(context_id.handle).get();
-
-    if(!cfg)
-    {
+    if((context_id.handle - get_contexts_offset()) >= get_registered_contexts_impl().size())
         return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
-    }
+
+    const auto* cfg = get_registered_context(context_id);
+
+    if(!cfg) return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
 
     if(validate_context(cfg) != ROCPROFILER_STATUS_SUCCESS)
-    {
         return ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID;
-    }
 
     auto current_contexts = context_array_t{};
     for(const auto* itr : get_active_contexts(current_contexts))
@@ -277,7 +326,7 @@ start_context(rocprofiler_context_id_t context_id)
         }
     }
 
-    uint64_t rocp_tot_contexts = get_registered_contexts().size();
+    uint64_t rocp_tot_contexts = get_registered_contexts_impl().size();
     auto     idx               = rocp_tot_contexts;
     auto&    active_contexts   = get_active_contexts_impl();
     {
@@ -310,7 +359,7 @@ start_context(rocprofiler_context_id_t context_id)
     // atomic swap the pointer into the "active" array used internally
     const context* _expected = nullptr;
     bool           success   = active_contexts.at(idx).compare_exchange_strong(
-        _expected, get_registered_contexts().at(context_id.handle).get());
+        _expected, get_registered_context(context_id));
 
     if(!success)
     {
@@ -369,7 +418,7 @@ deactivate_client_contexts(rocprofiler_client_id_t client_id)
 void
 deregister_client_contexts(rocprofiler_client_id_t client_id)
 {
-    for(auto& itr : get_registered_contexts())
+    for(auto& itr : get_registered_contexts_impl())
     {
         if(itr->client_idx == client_id.handle)
         {

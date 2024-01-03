@@ -70,7 +70,10 @@ public:
                                    rocprofiler_profile_counting_dispatch_callback_t callback,
                                    void*                                            callback_args)
     {
-        auto& ctx = *rocprofiler::context::get_registered_contexts().at(context_id.handle);
+        auto* ctx_p = rocprofiler::context::get_mutable_registered_context(context_id);
+        if(!ctx_p) return false;
+
+        auto& ctx = *ctx_p;
 
         if(!ctx.counter_collection)
         {
@@ -81,12 +84,11 @@ public:
         auto& cb = *ctx.counter_collection->callbacks.emplace_back(
             std::make_shared<counter_callback_info>());
 
-        cb.user_cb       = callback;
-        cb.callback_args = callback_args;
-        cb.context       = context_id;
-        cb.buffer        = buffer;
-        cb.internal_context =
-            rocprofiler::context::get_registered_contexts().at(context_id.handle).get();
+        cb.user_cb          = callback;
+        cb.callback_args    = callback_args;
+        cb.context          = context_id;
+        cb.buffer           = buffer;
+        cb.internal_context = ctx_p;
 
         return true;
     }
@@ -309,7 +311,7 @@ completed_cb(const std::shared_ptr<counter_callback_info>& info,
 }
 
 void
-start_context(context::context* ctx)
+start_context(const context::context* ctx)
 {
     if(!ctx || !ctx->counter_collection) return;
 
@@ -346,7 +348,7 @@ start_context(context::context* ctx)
 }
 
 void
-stop_context(context::context* ctx)
+stop_context(const context::context* ctx)
 {
     if(!ctx || !ctx->counter_collection) return;
 

@@ -642,6 +642,19 @@ get_agent_caches()
     static auto _v = std::vector<hsa::AgentCache>{};
     return _v;
 }
+
+struct agent_pair
+{
+    const rocprofiler_agent_t* rocp_agent = nullptr;
+    hsa_agent_t                hsa_agent  = {};
+};
+
+auto&
+get_agent_mapping()
+{
+    static auto _v = std::vector<agent_pair>{};
+    return _v;
+}
 }  // namespace
 
 std::vector<const rocprofiler_agent_t*>
@@ -677,6 +690,8 @@ construct_agent_cache(::HsaApiTable* table)
         << "Found " << rocp_agents.size() << " rocprofiler agents and " << hsa_agents.size()
         << " HSA agents";
 
+    get_agent_mapping().reserve(get_agent_mapping().size() + rocp_agents.size());
+
     auto hsa_agent_node_map = std::unordered_map<uint32_t, hsa_agent_t>{};
     for(const auto& itr : hsa_agents)
     {
@@ -704,6 +719,7 @@ construct_agent_cache(::HsaApiTable* table)
                 if(ritr->node_id == node_id)
                 {
                     agent_map.emplace(ritr->node_id, std::make_tuple(ritr, hitr));
+                    get_agent_mapping().emplace_back(agent_pair{ritr, hitr});
                     break;
                 }
             }
@@ -798,9 +814,9 @@ construct_agent_cache(::HsaApiTable* table)
 std::optional<hsa_agent_t>
 get_hsa_agent(const rocprofiler_agent_t* agent)
 {
-    for(const auto& itr : get_agent_caches())
+    for(const auto& itr : get_agent_mapping())
     {
-        if(itr == agent) return itr.get_hsa_agent();
+        if(itr.rocp_agent->id.handle == agent->id.handle) return itr.hsa_agent;
     }
 
     return std::nullopt;
@@ -809,9 +825,9 @@ get_hsa_agent(const rocprofiler_agent_t* agent)
 const rocprofiler_agent_t*
 get_rocprofiler_agent(hsa_agent_t agent)
 {
-    for(const auto& itr : get_agent_caches())
+    for(const auto& itr : get_agent_mapping())
     {
-        if(itr == agent) return itr.get_rocp_agent();
+        if(itr.hsa_agent.handle == agent.handle) return itr.rocp_agent;
     }
 
     return nullptr;

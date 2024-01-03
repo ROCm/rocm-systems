@@ -174,21 +174,24 @@ start_context(rocprofiler_context_id_t id);
 /// \brief disable the contexturation.
 rocprofiler_status_t stop_context(rocprofiler_context_id_t);
 
-using unique_context_vec_t =
-    common::container::stable_vector<allocator::unique_static_ptr_t<context>, 8>;
-using active_context_vec_t = common::container::stable_vector<std::atomic<const context*>, 8>;
-using context_array_t      = common::container::small_vector<const context*>;
+using context_array_t = common::container::small_vector<const context*>;
 
-unique_context_vec_t&
-get_registered_contexts();
+context*
+get_mutable_registered_context(rocprofiler_context_id_t id);
+
+const context*
+get_registered_context(rocprofiler_context_id_t id);
 
 using context_filter_t = bool (*)(const context*);
 
 inline bool
-default_context_filter(const context* val)
-{
-    return (val != nullptr);
-}
+default_context_filter(const context* val);
+
+context_array_t&
+get_registered_contexts(context_array_t& data, context_filter_t filter = default_context_filter);
+
+context_array_t
+get_registered_contexts(context_filter_t filter = default_context_filter);
 
 context_array_t&
 get_active_contexts(context_array_t& data, context_filter_t filter = default_context_filter);
@@ -200,5 +203,11 @@ void deactivate_client_contexts(rocprofiler_client_id_t);
 
 // should only be called if the client failed to initialize
 void deregister_client_contexts(rocprofiler_client_id_t);
+
+inline bool
+default_context_filter(const context* val)
+{
+    return (val != nullptr);
+}
 }  // namespace context
 }  // namespace rocprofiler

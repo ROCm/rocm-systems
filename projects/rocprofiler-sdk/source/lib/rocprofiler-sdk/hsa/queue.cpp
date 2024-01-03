@@ -80,8 +80,7 @@ bool
 context_filter(const context::context* ctx)
 {
     return (ctx->buffered_tracer &&
-            (ctx->buffered_tracer->domains(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH) ||
-             ctx->buffered_tracer->domains(ROCPROFILER_BUFFER_TRACING_MEMORY_COPY)));
+            (ctx->buffered_tracer->domains(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH)));
 }
 
 bool
@@ -119,23 +118,6 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
             << " on rocprofiler_agent=" << _rocp_agent->id.handle
             << " returned dispatch times where the end time (" << dispatch_time.end
             << ") was less than the start time (" << dispatch_time.start << ")";
-
-        // try to extract the async copy time. this will return HSA_STATUS_ERROR if there
-        // is not an async copy agent associated with the signal so we just predicate
-        // putting something into the buffer based on whether or not
-        // hsa_amd_profiling_get_async_copy_time returns HSA_STATUS_SUCCESS.
-        auto copy_time = hsa_amd_profiling_async_copy_time_t{};
-        auto copy_time_status =
-            queue_info_session.queue.ext_api().hsa_amd_profiling_get_async_copy_time_fn(_signal,
-                                                                                        &copy_time);
-
-        // if we encounter this in CI, it will cause test to fail
-        ROCP_CI_LOG_IF(ERROR,
-                       copy_time_status == HSA_STATUS_SUCCESS && copy_time.end < copy_time.start)
-            << "hsa_amd_profiling_get_async_copy_time for kernel_id=" << _kern_id
-            << " on rocprofiler_agent=" << _rocp_agent->id.handle
-            << " returned async times where the end time (" << copy_time.end
-            << ") was less than the start time (" << copy_time.start << ")";
 
         for(const auto* itr : ctxs)
         {
@@ -178,26 +160,6 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
 
                     CHECK_NOTNULL(_buffer)->emplace(ROCPROFILER_BUFFER_CATEGORY_TRACING,
                                                     ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
-                                                    record);
-                }
-            }
-
-            if(itr->buffered_tracer->domains(ROCPROFILER_BUFFER_TRACING_MEMORY_COPY))
-            {
-                if(copy_time_status == HSA_STATUS_SUCCESS)
-                {
-                    auto record = rocprofiler_buffer_tracing_memory_copy_record_t{
-                        sizeof(rocprofiler_buffer_tracing_memory_copy_record_t),
-                        ROCPROFILER_BUFFER_TRACING_MEMORY_COPY,
-                        _corr_id_v,
-                        copy_time.start,
-                        copy_time.end,
-                        _rocp_agent->id,
-                        _queue_id,
-                        _kern_id};
-
-                    CHECK_NOTNULL(_buffer)->emplace(ROCPROFILER_BUFFER_CATEGORY_TRACING,
-                                                    ROCPROFILER_BUFFER_TRACING_MEMORY_COPY,
                                                     record);
                 }
             }
@@ -521,20 +483,6 @@ Queue::Queue(const AgentCache&  agent,
     LOG_IF(FATAL,
            _ext_api.hsa_amd_queue_intercept_register_fn(_intercept_queue, WriteInterceptor, this))
         << "Could not register interceptor";
-
-    bool enable_async_copy = false;
-    for(const auto& itr : context::get_registered_contexts())
-    {
-        if(itr->buffered_tracer &&
-           itr->buffered_tracer->domains(ROCPROFILER_BUFFER_TRACING_MEMORY_COPY))
-            enable_async_copy = true;
-    }
-
-    if(enable_async_copy)
-    {
-        LOG_IF(FATAL, _ext_api.hsa_amd_profiling_async_copy_enable_fn(true) != HSA_STATUS_SUCCESS)
-            << "Could not enable async copy timing";
-    }
 
     *queue = _intercept_queue;
 }

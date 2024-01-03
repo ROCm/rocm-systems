@@ -152,16 +152,11 @@ rocprofiler_push_external_correlation_id(rocprofiler_context_id_t context,
     static uint64_t pid_v = getpid();
     if(tid < pid_v) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
 
-    for(auto& itr : rocprofiler::context::get_registered_contexts())
-    {
-        if(itr->context_idx == context.handle)
-        {
-            itr->correlation_tracer.external_correlator.push(tid, external_correlation_id);
-            return ROCPROFILER_STATUS_SUCCESS;
-        }
-    }
+    auto* ctx = rocprofiler::context::get_mutable_registered_context(context);
+    if(!ctx) return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
 
-    return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
+    ctx->correlation_tracer.external_correlator.push(tid, external_correlation_id);
+    return ROCPROFILER_STATUS_SUCCESS;
 }
 
 rocprofiler_status_t
@@ -173,16 +168,11 @@ rocprofiler_pop_external_correlation_id(rocprofiler_context_id_t context,
     static uint64_t pid_v = getpid();
     if(tid < pid_v) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
 
-    for(auto& itr : rocprofiler::context::get_registered_contexts())
-    {
-        if(itr->context_idx == context.handle)
-        {
-            auto former = itr->correlation_tracer.external_correlator.pop(tid);
-            if(external_correlation_id) *external_correlation_id = former;
-            return ROCPROFILER_STATUS_SUCCESS;
-        }
-    }
+    auto* ctx = rocprofiler::context::get_mutable_registered_context(context);
+    if(!ctx) return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
 
-    return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
+    auto former = ctx->correlation_tracer.external_correlator.pop(tid);
+    if(external_correlation_id) *external_correlation_id = former;
+    return ROCPROFILER_STATUS_SUCCESS;
 }
 }

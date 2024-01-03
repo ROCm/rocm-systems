@@ -31,10 +31,6 @@ namespace rocprofiler
 {
 namespace hsa
 {
-using activity_functor_t = int (*)(rocprofiler_callback_tracing_kind_t domain,
-                                   uint32_t                            operation_id,
-                                   void*                               data);
-
 using hsa_api_table_t = HsaApiTable;
 
 hsa_api_table_t&
@@ -42,6 +38,9 @@ get_table();
 
 template <size_t Idx>
 struct hsa_table_lookup;
+
+template <size_t Idx>
+struct hsa_api_info;
 
 template <size_t Idx>
 struct hsa_api_impl
@@ -55,9 +54,6 @@ struct hsa_api_impl
     template <typename... Args>
     static auto functor(Args&&... args);
 };
-
-template <size_t Idx>
-struct hsa_api_info;
 
 const char*
 name_by_id(uint32_t id);
@@ -76,9 +72,6 @@ get_names();
 
 std::vector<uint32_t>
 get_ids();
-
-void
-set_callback(activity_functor_t _func);
 
 void
 update_table(hsa_api_table_t* _orig);

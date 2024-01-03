@@ -642,6 +642,9 @@ tool_fini(void* tool_data)
     static auto _once = std::atomic_flag{ATOMIC_FLAG_INIT};
     if(_once.test_and_set()) return;
 
+    stop();
+    flush();
+
     std::cerr << "[" << getpid() << "][" << __FUNCTION__
               << "] Finalizing... agents=" << agents.size()
               << ", code_object_callback_records=" << code_object_records.size()
@@ -651,9 +654,6 @@ tool_fini(void* tool_data)
               << ", memory_copy_records=" << memory_copy_records.size()
               << ", hsa_api_bf_records=" << hsa_api_bf_records.size() << " ...\n"
               << std::flush;
-
-    stop();
-    flush();
 
     auto* _call_stack = static_cast<call_stack_t*>(tool_data);
     if(_call_stack)
@@ -799,6 +799,7 @@ flush()
 {
     for(auto* itr : buffers)
     {
+        if(!itr) continue;
         auto status = rocprofiler_flush_buffer(*itr);
         if(status != ROCPROFILER_STATUS_ERROR_BUFFER_BUSY)
         {

@@ -144,7 +144,15 @@ flush(rocprofiler_buffer_id_t buffer_id, bool wait)
     if(wait && task_group) task_group->wait();
 
     // buffer is currently being flushed or destroyed
-    if(buff->syncer.test_and_set()) return ROCPROFILER_STATUS_ERROR_BUFFER_BUSY;
+    if(buff->syncer.test_and_set())
+    {
+        if(!wait) return ROCPROFILER_STATUS_ERROR_BUFFER_BUSY;
+        while(buff->syncer.test_and_set())
+        {
+            std::this_thread::yield();
+            std::this_thread::sleep_for(std::chrono::milliseconds{10});
+        }
+    }
 
     auto idx = buff->buffer_idx++;
 
@@ -187,7 +195,7 @@ flush(rocprofiler_buffer_id_t buffer_id, bool wait)
     if(task_group)
     {
         task_group->exec(_task);
-        if(wait) task_group->wait();
+        if(wait) task_group->join();
     }
     else
     {

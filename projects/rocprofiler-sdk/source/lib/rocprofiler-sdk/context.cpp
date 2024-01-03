@@ -107,7 +107,7 @@ rocprofiler_context_is_valid(rocprofiler_context_id_t context_id, int* status)
     {
         if(itr && itr->context_idx == context_id.handle)
         {
-            auto _ret = rocprofiler::context::validate_context(itr.get());
+            auto _ret = rocprofiler::context::validate_context(itr);
             *status   = (_ret == ROCPROFILER_STATUS_SUCCESS) ? 1 : 0;
             return _ret;
         }

@@ -48,8 +48,6 @@ namespace hsa
 {
 namespace
 {
-std::atomic<activity_functor_t> report_activity = {};
-
 struct null_type
 {};
 
@@ -460,13 +458,14 @@ get_names(std::vector<const char*>& _name_list, std::index_sequence<Idx...>)
 }
 
 bool
-should_wrap_functor(rocprofiler_callback_tracing_kind_t _callback_domain,
+should_wrap_functor(const context::context_array_t&     _contexts,
+                    rocprofiler_callback_tracing_kind_t _callback_domain,
                     rocprofiler_buffer_tracing_kind_t   _buffered_domain,
                     int                                 _operation)
 {
     // we loop over all the *registered* contexts and see if any of them, at any point in time,
     // might require callback or buffered API tracing
-    for(const auto& itr : context::get_registered_contexts())
+    for(const auto& itr : _contexts)
     {
         if(!itr) continue;
 
@@ -487,10 +486,12 @@ template <size_t... Idx>
 void
 update_table(hsa_api_table_t* _orig, std::index_sequence<Idx...>)
 {
-    auto _update = [](hsa_api_table_t* _orig_v, auto _info) {
+    auto _update = [](hsa_api_table_t* _orig_v, const auto& _contexts_v, auto _info) {
         // check to see if there are any contexts which enable this operation in the HSA API domain
-        if(!should_wrap_functor(
-               _info.callback_domain_idx, _info.buffered_domain_idx, _info.operation_idx))
+        if(!should_wrap_functor(_contexts_v,
+                                _info.callback_domain_idx,
+                                _info.buffered_domain_idx,
+                                _info.operation_idx))
             return;
 
         // 1. get the sub-table containing the function pointer
@@ -501,7 +502,8 @@ update_table(hsa_api_table_t* _orig, std::index_sequence<Idx...>)
         _func        = _info.get_functor(_func);
     };
 
-    (_update(_orig, hsa_api_info<Idx>{}), ...);
+    auto _contexts = context::get_registered_contexts();
+    (_update(_orig, _contexts, hsa_api_info<Idx>{}), ...);
 }
 }  // namespace
 
@@ -545,13 +547,6 @@ get_names()
     _data.reserve(ROCPROFILER_HSA_API_ID_LAST);
     get_names(_data, std::make_index_sequence<ROCPROFILER_HSA_API_ID_LAST>{});
     return _data;
-}
-
-void
-set_callback(activity_functor_t _func)
-{
-    auto&& _v = report_activity.load();
-    report_activity.compare_exchange_strong(_v, _func);
 }
 
 void

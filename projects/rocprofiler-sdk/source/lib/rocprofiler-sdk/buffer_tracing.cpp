@@ -91,12 +91,7 @@ rocprofiler_configure_buffer_tracing_service(rocprofiler_context_id_t          c
     if(rocprofiler::registration::get_init_status() > -1)
         return ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED;
 
-    if(context_id.handle >= rocprofiler::context::get_registered_contexts().size())
-    {
-        return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
-    }
-
-    auto& ctx = rocprofiler::context::get_registered_contexts().at(context_id.handle);
+    auto* ctx = rocprofiler::context::get_mutable_registered_context(context_id);
 
     if(!ctx) return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
 

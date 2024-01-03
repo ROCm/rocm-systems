@@ -186,8 +186,7 @@ QueueController::init(CoreApiTable& core_table, AmdExtTable& ext_table)
         }
         else if(itr->buffered_tracer)
         {
-            if(itr->buffered_tracer->domains(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH) ||
-               itr->buffered_tracer->domains(ROCPROFILER_BUFFER_TRACING_MEMORY_COPY))
+            if(itr->buffered_tracer->domains(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH))
             {
                 enable_intercepter = true;
                 break;

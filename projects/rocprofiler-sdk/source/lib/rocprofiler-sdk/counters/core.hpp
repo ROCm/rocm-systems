@@ -103,9 +103,9 @@ configure_buffered_dispatch(rocprofiler_context_id_t                         con
                             void*                                            callback_args);
 
 void
-start_context(context::context*);
+start_context(const context::context*);
 
 void
-stop_context(context::context*);
+stop_context(const context::context*);
 }  // namespace counters
 }  // namespace rocprofiler
