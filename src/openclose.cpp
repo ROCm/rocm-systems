@@ -556,16 +556,17 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void) {
 
       dxg_runtime->dxg_fd = fd;
     }
+    if (!wsl::thunk::dxcore::DxcoreLoader::Instance().Initialize()) {
+        pr_err("Failed to load libdxcore.so\n");
+        result = HSAKMT_STATUS_ERROR;
+        goto dxcore_loader_failed;
+    }
 
     hsakmt_hsa_loader_init();
     init_page_size();
 
     char *useSvmStr = getenv("HSA_USE_SVM");
     dxg_runtime->is_svm_api_supported = !(useSvmStr && !strcmp(useSvmStr, "0")) && false;
-
-    // result = topology_sysfs_get_system_props(&sys_props);
-    if (result != HSAKMT_STATUS_SUCCESS)
-      goto topology_sysfs_failed;
 
     dxg_runtime->dxg_open_count = 1;
 
@@ -587,7 +588,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void) {
   reset_suballocator();
   pthread_mutex_unlock(&dxg_runtime->hsakmt_mutex);
   return result;
-topology_sysfs_failed:
+dxcore_loader_failed:
   close(fd);
 open_failed:
   pthread_mutex_unlock(&dxg_runtime->hsakmt_mutex);
@@ -604,6 +605,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCloseKFD(void) {
     if (--dxg_runtime->dxg_open_count == 0) {
       close(dxg_runtime->dxg_fd);
       dxg_runtime->dxg_fd = -1;
+      wsl::thunk::dxcore::DxcoreLoader::Instance().Shutdown();
     }
 
     result = HSAKMT_STATUS_SUCCESS;
