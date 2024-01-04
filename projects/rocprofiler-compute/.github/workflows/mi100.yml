@@ -36,7 +36,7 @@ jobs:
           cmake -DENABLE_COVERAGE=OFF ..
       - name: Create HIP binary (vcopy)
         run: hipcc -o tests/vcopy ./sample/vcopy.cpp
-        name: path foo
+      - name: path foo
         run: |
           module list
           echo $LD_LIBRARY_PATH
