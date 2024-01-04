@@ -17,10 +17,11 @@ jobs:
   build:
     runs-on: [mi100, rhel9]
     env:
-       PYTHONPATH: ${{ github.workspace }}/python-libs
+       PYTHONPATH: ${HOME}/omniperf_deps
+#       PYTHONPATH: ${{ github.workspace }}/python-libs
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v3
       - name: pythonpath
         run: echo ${PYTHONPATH}
       - name: Install Python collateral (build and test)
