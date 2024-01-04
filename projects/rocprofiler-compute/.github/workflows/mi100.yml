@@ -36,6 +36,12 @@ jobs:
           cmake -DENABLE_COVERAGE=OFF ..
       - name: Create HIP binary (vcopy)
         run: hipcc -o tests/vcopy ./sample/vcopy.cpp
+        name: path foo
+        run: |
+          module list
+          echo $LD_LIBRARY_PATH
+          ml swap rocm rocm/5.5.1
+          echo $LD_LIBRARY_PATH
       - name: rocm-smi
         run: |
           rocm-smi
