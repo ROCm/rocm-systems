@@ -26,8 +26,8 @@ jobs:
         run: echo ${PYTHONPATH}
       - name: Install Python collateral (build and test)
         run: |
-           pip3 install -t ${PYTHONPATH} -r requirements.txt
-           pip3 install -t ${PYTHONPATH} -r requirements-test.txt
+           pip3 install --upgrade -t ${PYTHONPATH} -r requirements.txt
+           pip3 install --upgrade -t ${PYTHONPATH} -r requirements-test.txt
       - name: Configure
         run: |
           mkdir build
@@ -36,6 +36,8 @@ jobs:
           cmake -DENABLE_COVERAGE=OFF ..
       - name: Create HIP binary (vcopy)
         run: hipcc -o tests/vcopy ./sample/vcopy.cpp
+      - name: rocminfo
+        run: srun -N 1 -J omniperf -p ci -t 00:05:00 rocminfo
       - name: Run [profile] mode
         run: |
           cd build
