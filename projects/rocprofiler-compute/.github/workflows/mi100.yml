@@ -36,6 +36,10 @@ jobs:
           cmake -DENABLE_COVERAGE=OFF ..
       - name: Create HIP binary (vcopy)
         run: hipcc -o tests/vcopy ./sample/vcopy.cpp
+      - name: rocm-smi
+        run: |
+          rocm-smi
+          srun -N 1 -J omniperf -p ci -t 00:05:00 rocm-smi
       - name: rocminfo
         run: srun -N 1 -J omniperf -p ci -t 00:05:00 strace rocminfo
       - name: Run [profile] mode
