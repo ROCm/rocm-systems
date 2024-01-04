@@ -248,7 +248,8 @@ def gpu_soc():
     elif gpu_id == "gfx900":
         return "vega10"
     else:
-        print("Invalid SoC")
+        print("Invalid SoC (%s)" % gpu_id)
+        print(rocminfo)
         assert 0
 
 
