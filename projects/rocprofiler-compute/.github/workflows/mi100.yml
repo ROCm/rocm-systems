@@ -41,7 +41,9 @@ jobs:
           rocm-smi
           srun -N 1 -J omniperf -p ci -t 00:05:00 rocm-smi
       - name: rocminfo
-        run: srun -N 1 -J omniperf -p ci -t 00:05:00 strace rocminfo
+        run: |
+          ml swap rocm rocm/5.5.1
+          srun -N 1 -J omniperf -p ci -t 00:05:00 rocminfo
       - name: Run [profile] mode
         run: |
           cd build
