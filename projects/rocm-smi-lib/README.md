@@ -51,7 +51,7 @@ The following is an example of how to build the docs:
 
 ```shell
 python3 -m venv .venv
-.venv/bin/python3 -m pip install -r docs/.sphinx/requirements.txt
+.venv/bin/python3 -m pip install -r docs/sphinx/requirements.txt
 .venv/bin/python3 -m sphinx -T -E -b html -d docs/_build/doctrees -D language=en docs docs/_build/html
 ```
 
