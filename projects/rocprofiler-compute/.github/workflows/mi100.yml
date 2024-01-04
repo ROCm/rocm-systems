@@ -37,7 +37,7 @@ jobs:
       - name: Create HIP binary (vcopy)
         run: hipcc -o tests/vcopy ./sample/vcopy.cpp
       - name: rocminfo
-        run: srun -N 1 -J omniperf -p ci -t 00:05:00 rocminfo
+        run: srun -N 1 -J omniperf -p ci -t 00:05:00 strace rocminfo
       - name: Run [profile] mode
         run: |
           cd build
