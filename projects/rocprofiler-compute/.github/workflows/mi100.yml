@@ -38,16 +38,19 @@ jobs:
       - name: Run [profile] mode
         run: |
           cd build
-          srun -N 1 -J omniperf -p ci -t 00:20:00 ctest -j 4 --resource-spec-file ../tests/4gpus.json --verbose -L profile
-      - name: Run [analyze] mode
-        if: '!cancelled()'
-        run: |
-          cd build
-          srun -N 1 -J omniperf -p ci -t 00:55:00 ctest --verbose -R test_analyze_commands
-##       - name: Pytest coverage comment
+	  module list
+	  printenv
+#          srun -N 1 -J omniperf -p ci -t 00:20:00 ctest -j 4 --resource-spec-file ../tests/4gpus.json --verbose -L profile
+          srun -N 1 -J omniperf -p ci -t 00:20:00 ctest --verbose -R test_profile_kernel_execution
+##       - name: Run [analyze] mode
 ##         if: '!cancelled()'
-##         uses: MishaKav/pytest-coverage-comment@v1.1.48
-##         with:
-##           pytest-xml-coverage-path: 'tests/coverage.xml'
-##           junitxml-path: 'tests/test-results.xml'
-##           coverage-path-prefix: src/
+##         run: |
+##           cd build
+##           srun -N 1 -J omniperf -p ci -t 00:55:00 ctest --verbose -R test_analyze_commands
+## ##       - name: Pytest coverage comment
+## ##         if: '!cancelled()'
+## ##         uses: MishaKav/pytest-coverage-comment@v1.1.48
+## ##         with:
+## ##           pytest-xml-coverage-path: 'tests/coverage.xml'
+## ##           junitxml-path: 'tests/test-results.xml'
+## ##           coverage-path-prefix: src/
