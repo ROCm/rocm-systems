@@ -17,7 +17,7 @@ jobs:
   build:
     runs-on: [mi100, rhel9]
     env:
-       PYTHONPATH: ${{ HOME }}/omniperf_deps
+       PYTHONPATH: /home1/ciuser/omniperf_deps
 #       PYTHONPATH: ${{ github.workspace }}/python-libs
     steps:
       - name: Checkout
