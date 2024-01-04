@@ -236,6 +236,7 @@ def gpu_soc():
         ).stdout.decode("ascii")
     )
     rocminfo = rocminfo.split("\n")
+    print(rocminfo)
     soc_regex = re.compile(r"^\s*Name\s*:\s+ ([a-zA-Z0-9]+)\s*$", re.MULTILINE)
     gpu_id = list(filter(soc_regex.match, rocminfo))[0].split()[1]
 
