@@ -32,7 +32,7 @@ jobs:
           mkdir build
           cd build
           ml cmake
-          cmake -DENABLE_COVERAGE=ON ..
+          cmake -DENABLE_COVERAGE=OFF ..
       - name: Create HIP binary (vcopy)
         run: hipcc -o tests/vcopy ./sample/vcopy.cpp
       - name: Run [profile] mode
