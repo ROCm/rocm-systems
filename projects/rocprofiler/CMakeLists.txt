@@ -130,6 +130,20 @@ find_package(
     HINTS ${CMAKE_INSTALL_PREFIX}
     PATHS ${ROCM_PATH})
 
+find_package(
+    Clang CONFIG
+    PATHS "${ROCM_PATH}"
+    PATH_SUFFIXES "llvm/lib/cmake/clang")
+
+if(NOT Clang_FOUND)
+    message(
+        FATAL_ERROR
+            "\
+The \"rocm-llvm-dev\" package is not installed. \
+Please install it for your OS distribution. e.g: for Ubuntu: \"sudo apt-get install rocm-llvm-dev\".\
+")
+endif()
+
 find_library(NUMA NAME numa REQUIRED)
 link_libraries(${NUMA})
 

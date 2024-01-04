@@ -314,6 +314,7 @@ Example for file plugin output:
 
 - ATT: Continuous mode. The input file now has a DISPATCH_RANGE=begin,end that specifies continuous ATT collection during the application run.
 - ATT: Ability to dump raw codeobjects as .out files with ISA_CAPTURE_MODE=[0,1,2]
+- Updated README and CMakeLists.txt for rocm-llvm-dev dependency.
 
 ### Removed
 

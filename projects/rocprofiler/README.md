@@ -119,6 +119,7 @@ Note: ROCProfilerV2 is currently considered a beta version and is subject to cha
 
 ### Requirements
 
+- rocm-llvm-dev
 - makecache
 - Gtest Development Package (Ubuntu: libgtest-dev)
 - libsystemd-dev, libelf-dev, libnuma-dev, libpciaccess-dev on ubuntu or their corresponding packages on any other OS
