@@ -31,7 +31,7 @@ jobs:
       - name: Load ROCm
         run: |
           module load hpcfund
-          echo $PATH >> $GITHUB_PATH
+          echo $PATH > $GITHUB_PATH
       - name: Check Environment
         run: |
           echo "PATH=$PATH"
