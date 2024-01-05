@@ -34,8 +34,8 @@ jobs:
           cd build
           ml cmake
           cmake -DENABLE_COVERAGE=OFF ..
-      - name: Create HIP binary (vcopy)
-        run: hipcc -o tests/vcopy ./sample/vcopy.cpp
+      # - name: Create HIP binary (vcopy)
+      #   run: hipcc -o tests/vcopy ./sample/vcopy.cpp
       - name: path foo
         run: |
           module list
