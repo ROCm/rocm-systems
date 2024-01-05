@@ -31,12 +31,10 @@ jobs:
       - name: Load ROCm
         run: |
           module load hpcfund
-          echo "::set-env name=PATH::$PATH"
-          echo "::set-env name=LD_LIBRARY_PATH::$LD_LIBRARY_PATH"
+          echo "{path}" >> $GITHUB_PATH
       - name: Check Environment
         run: |
           echo "PATH=$PATH"
-          echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH"
       - name: Configure
         run: |
           mkdir build
