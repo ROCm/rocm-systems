@@ -15,6 +15,9 @@ permissions:
 
 jobs:
   build:
+    strategy:
+      matrix:
+        version: [5.7.1]
     runs-on: [mi100, rhel9]
     env:
        PYTHONPATH: /home1/ciuser/omniperf_deps
@@ -30,10 +33,10 @@ jobs:
            pip3 install -t ${PYTHONPATH} -r requirements-test.txt
       - name: Load ROCm
         run: |
-          module load hpcfund
+          module load cmake
+          module load rocm/${{ matrix.version }}
           echo $PATH > $GITHUB_PATH
           echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH" >> "$GITHUB_ENV"
-          echo "ROCM_DIR=$ROCM_DIR" >> "$GITHUB_ENV"
           echo "ROCM_PATH=$ROCM_PATH" >> "$GITHUB_ENV"
       - name: Check Environment
         run: |
@@ -48,18 +51,6 @@ jobs:
           cmake -DENABLE_COVERAGE=ON ..
       - name: Create HIP binary (vcopy)
         run: hipcc -o tests/vcopy ./sample/vcopy.cpp
-      # - name: path foo
-      #   run: |
-      #     module list
-      #     module load hpcfund
-      #     which rocminfo          
-      #     echo $LD_LIBRARY_PATH
-      #     ml swap rocm rocm/5.5.1
-      #     which rocminfo
-      #     echo $LD_LIBRARY_PATH
-      - name: rocminfo
-        run: |
-          srun -N 1 -J omniperf -p ci -t 00:05:00 rocminfo
       - name: Run [profile] mode
         run: |
           cd build
