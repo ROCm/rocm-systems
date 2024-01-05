@@ -28,12 +28,21 @@ jobs:
         run: |
            pip3 install -t ${PYTHONPATH} -r requirements.txt
            pip3 install -t ${PYTHONPATH} -r requirements-test.txt
+      - name: Load ROCm
+        run: |
+          module load hpcfund
+          echo "::set-env name=PATH::$PATH"
+          echo "::set-env name=LD_LIBRARY_PATH::$LD_LIBRARY_PATH"
+      - name: Check Environment
+        run: |
+          echo "PATH=$PATH"
+          echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH"
       - name: Configure
         run: |
           mkdir build
           cd build
           ml cmake
-          cmake -DENABLE_COVERAGE=OFF ..
+          cmake -DENABLE_COVERAGE=ON ..
       # - name: Create HIP binary (vcopy)
       #   run: hipcc -o tests/vcopy ./sample/vcopy.cpp
       - name: path foo
