@@ -22,7 +22,7 @@ jobs:
     env:
        PYTHONPATH: /home1/ciuser/omniperf_deps
 #       PYTHONPATH: ${{ github.workspace }}/python-libs
-    name: ROCM v${{ matrix.version }}
+    name: ROCm v${{ matrix.version }}
     steps:
       - name: Checkout
         uses: actions/checkout@v3
