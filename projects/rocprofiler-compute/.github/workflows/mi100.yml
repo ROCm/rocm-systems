@@ -26,8 +26,8 @@ jobs:
         run: echo ${PYTHONPATH}
       - name: Install Python collateral (build and test)
         run: |
-           pip3 install --upgrade -t ${PYTHONPATH} -r requirements.txt
-           pip3 install --upgrade -t ${PYTHONPATH} -r requirements-test.txt
+           pip3 install -t ${PYTHONPATH} -r requirements.txt
+           pip3 install -t ${PYTHONPATH} -r requirements-test.txt
       - name: Configure
         run: |
           mkdir build
@@ -39,6 +39,7 @@ jobs:
       - name: path foo
         run: |
           module list
+          module load hpcfund
           which rocminfo          
           echo $LD_LIBRARY_PATH
           ml swap rocm rocm/5.5.1
