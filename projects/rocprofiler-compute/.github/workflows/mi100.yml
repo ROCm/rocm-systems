@@ -32,6 +32,7 @@ jobs:
         run: |
           module load hpcfund
           echo $PATH > $GITHUB_PATH
+          echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH" >> "$GITHUB_ENV"
       - name: Check Environment
         run: |
           echo "PATH=$PATH"
