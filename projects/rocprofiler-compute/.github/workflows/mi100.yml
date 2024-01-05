@@ -17,7 +17,7 @@ jobs:
   build:
     strategy:
       matrix:
-        version: [5.7.1]
+        version: [5.5.1, 5.7.1]
     runs-on: [mi100, rhel9]
     env:
        PYTHONPATH: /home1/ciuser/omniperf_deps
@@ -31,7 +31,7 @@ jobs:
         run: |
            pip3 install -t ${PYTHONPATH} -r requirements.txt
            pip3 install -t ${PYTHONPATH} -r requirements-test.txt
-      - name: Load ROCm
+      - name: Load ROCm ${{ matrix.version}}
         run: |
           module load cmake
           module load rocm/${{ matrix.version }}
