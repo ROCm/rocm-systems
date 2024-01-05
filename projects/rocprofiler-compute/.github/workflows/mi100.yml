@@ -39,8 +39,10 @@ jobs:
       - name: path foo
         run: |
           module list
+          which rocminfo          
           echo $LD_LIBRARY_PATH
           ml swap rocm rocm/5.5.1
+          which rocminfo
           echo $LD_LIBRARY_PATH
       - name: rocm-smi
         run: |
