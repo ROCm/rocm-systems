@@ -43,26 +43,23 @@ jobs:
           cd build
           ml cmake
           cmake -DENABLE_COVERAGE=ON ..
-      # - name: Create HIP binary (vcopy)
-      #   run: hipcc -o tests/vcopy ./sample/vcopy.cpp
-      - name: path foo
-        run: |
-          module list
-          module load hpcfund
-          which rocminfo          
-          echo $LD_LIBRARY_PATH
-          ml swap rocm rocm/5.5.1
-          which rocminfo
-          echo $LD_LIBRARY_PATH
+      - name: Create HIP binary (vcopy)
+        run: hipcc -o tests/vcopy ./sample/vcopy.cpp
+      # - name: path foo
+      #   run: |
+      #     module list
+      #     module load hpcfund
+      #     which rocminfo          
+      #     echo $LD_LIBRARY_PATH
+      #     ml swap rocm rocm/5.5.1
+      #     which rocminfo
+      #     echo $LD_LIBRARY_PATH
       - name: rocminfo
         run: |
-          ml load hpcfund
           srun -N 1 -J omniperf -p ci -t 00:05:00 rocminfo
       - name: Run [profile] mode
         run: |
           cd build
-          module load hpcfund
-          module list
           srun -N 1 -J omniperf -p ci -t 00:20:00 ctest --verbose -R test_profile_kernel_execution
 #         srun -N 1 -J omniperf -p ci -t 00:20:00 ctest -j 4 --resource-spec-file ../tests/4gpus.json --verbose -L profile
 ##       - name: Run [analyze] mode
