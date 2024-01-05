@@ -14,7 +14,7 @@ permissions:
   pull-requests: write
 
 jobs:
-  build:
+  profile:
     strategy:
       matrix:
         version: [5.5.1, 5.7.1]
@@ -22,6 +22,7 @@ jobs:
     env:
        PYTHONPATH: /home1/ciuser/omniperf_deps
 #       PYTHONPATH: ${{ github.workspace }}/python-libs
+    name: ROCM v${{ matrix.version }}
     steps:
       - name: Checkout
         uses: actions/checkout@v3
