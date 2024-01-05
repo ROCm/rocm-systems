@@ -588,13 +588,17 @@ if __name__ == "__main__":
             dump_csv(code, trace_instance_name, bIsAuto)
 
         if FILE_MODE:
+            try:
+                dispatchNames = {id: codeservice.getSymbolName(addr) for id, addr in kernel_addr.items()}
+            except:
+                dispatchNames = {id: "#addr"+str(addr) for id, addr in kernel_addr.items()}
             drawinfo = {
                 "TIMELINES": gen_timelines(DBFILES),
                 "EVENTS": EVENTS,
                 "EVENT_NAMES": EVENT_NAMES,
                 "OCCUPANCY": OCCUPANCY,
                 "ShaderNames": occupancy_filenames,
-                "DispatchNames": {id: codeservice.getSymbolName(addr) for id, addr in kernel_addr.items()}
+                "DispatchNames": dispatchNames
             }
             view_trace(
                 code,

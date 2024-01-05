@@ -92,7 +92,7 @@ def extract_data(df, se_number):
         ]
         timeline = df["timeline"][wave_id]
 
-        if len(stitched) == 0 or len(timeline) == 0 or len(stitched) != num_insts:
+        if len(stitched) == 0 or len(timeline) == 0:
             continue
 
         allwaves_maxline = max(allwaves_maxline, maxline)
@@ -214,7 +214,7 @@ def view_trace(
             flight_count.append(count)
             simd_wave_filenames[se_number] = wv_filenames
 
-    code_sel = [c[:-3]+c[-2:] for c in code[:allse_maxline+16]]
+    code_sel = [c[:-3]+c[-2:] for c in code]
     JSON_GLOBAL_DICTIONARY['code.json'] = Readable({"code": code_sel, "top_n": get_top_n(code_sel)})
 
     for key in simd_wave_filenames.keys():
