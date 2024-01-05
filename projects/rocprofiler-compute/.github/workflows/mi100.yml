@@ -26,7 +26,7 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v3
-      - name: pythonpath
+      - name: Python Path
         run: echo ${PYTHONPATH}
       - name: Install Python collateral (build and test)
         run: |
@@ -55,8 +55,8 @@ jobs:
       - name: Run [profile] mode
         run: |
           cd build
-          srun -N 1 -J omniperf -p ci -t 00:20:00 ctest --verbose -R test_profile_kernel_execution
-#         srun -N 1 -J omniperf -p ci -t 00:20:00 ctest -j 4 --resource-spec-file ../tests/4gpus.json --verbose -L profile
+          srun -N 1 -J omniperf -p ci -t 00:20:00 ctest -j 4 --resource-spec-file ../tests/4gpus.json --verbose -L profile
+#          srun -N 1 -J omniperf -p ci -t 00:20:00 ctest --verbose -R test_profile_kernel_execution
 ##       - name: Run [analyze] mode
 ##         if: '!cancelled()'
 ##         run: |
