@@ -639,7 +639,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 void
 tool_fini(void* tool_data)
 {
-    static auto _once = std::atomic_flag{ATOMIC_FLAG_INIT};
+    static std::atomic_flag _once = ATOMIC_FLAG_INIT;
     if(_once.test_and_set()) return;
 
     stop();

@@ -176,6 +176,8 @@ if(ROCPROFILER_UNSAFE_NO_VERSION_CHECK)
                                            INTERFACE ROCPROFILER_UNSAFE_NO_VERSION_CHECK)
 endif()
 
+rocprofiler_target_compile_definitions(rocprofiler-build-flags INTERFACE YY_NO_INPUT)
+
 # ----------------------------------------------------------------------------------------#
 # user customization
 #

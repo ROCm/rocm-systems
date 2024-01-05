@@ -100,7 +100,7 @@ TEST(evaluate_ast, counter_expansion)
                                                                  : metric.expression().c_str());
         yyparse(&ast);
         ASSERT_TRUE(ast);
-        asts.emplace(val, std::move(EvaluateAST({.handle = metric.id()}, metrics, *ast, "gfx9")));
+        asts.emplace(val, EvaluateAST({.handle = metric.id()}, metrics, *ast, "gfx9"));
         yy_delete_buffer(buf);
         delete ast;
     }
@@ -135,7 +135,7 @@ TEST(evaluate_ast, counter_expansion_multi_derived)
                                                                  : metric.expression().c_str());
         yyparse(&ast);
         ASSERT_TRUE(ast);
-        asts.emplace(val, std::move(EvaluateAST({.handle = metric.id()}, metrics, *ast, "gfx9")));
+        asts.emplace(val, EvaluateAST({.handle = metric.id()}, metrics, *ast, "gfx9"));
         yy_delete_buffer(buf);
         delete ast;
     }
@@ -170,7 +170,7 @@ TEST(evaluate_ast, counter_expansion_order)
                                                                  : metric.expression().c_str());
         yyparse(&ast);
         ASSERT_TRUE(ast);
-        asts.emplace(val, std::move(EvaluateAST({.handle = metric.id()}, metrics, *ast, "gfx9")));
+        asts.emplace(val, EvaluateAST({.handle = metric.id()}, metrics, *ast, "gfx9"));
         yy_delete_buffer(buf);
         delete ast;
     }
@@ -204,7 +204,7 @@ TEST(evaluate_ast, counter_expansion_function)
                                                                  : metric.expression().c_str());
         yyparse(&ast);
         ASSERT_TRUE(ast) << metric.expression() << " " << metric.name();
-        asts.emplace(val, std::move(EvaluateAST({.handle = metric.id()}, metrics, *ast, "gfx9")));
+        asts.emplace(val, EvaluateAST({.handle = metric.id()}, metrics, *ast, "gfx9"));
         yy_delete_buffer(buf);
         delete ast;
     }
@@ -256,8 +256,8 @@ TEST(evaluate_ast, counter_constants)
         yyparse(&ast);
         ASSERT_TRUE(ast) << metric.expression() << " " << metric.name();
         asts.emplace("gfx9", std::unordered_map<std::string, EvaluateAST>{})
-            .first->second.emplace(
-                val, std::move(EvaluateAST({.handle = metric.id()}, metrics, *ast, "gfx9")));
+            .first->second.emplace(val,
+                                   EvaluateAST({.handle = metric.id()}, metrics, *ast, "gfx9"));
         yy_delete_buffer(buf);
         delete ast;
     }
@@ -448,8 +448,8 @@ TEST(evaluate_ast, evaluate_simple_counters)
         yyparse(&ast);
         ASSERT_TRUE(ast) << metric.expression() << " " << metric.name();
         asts.emplace("gfx9", std::unordered_map<std::string, EvaluateAST>{})
-            .first->second.emplace(
-                val, std::move(EvaluateAST({.handle = metric.id()}, metrics, *ast, "gfx9")));
+            .first->second.emplace(val,
+                                   EvaluateAST({.handle = metric.id()}, metrics, *ast, "gfx9"));
         yy_delete_buffer(buf);
         delete ast;
     }
@@ -544,8 +544,8 @@ run_reduce_test(
         yyparse(&ast);
         ASSERT_TRUE(ast) << metric.expression() << " " << metric.name();
         asts.emplace("gfx9", std::unordered_map<std::string, EvaluateAST>{})
-            .first->second.emplace(
-                val, std::move(EvaluateAST({.handle = metric.id()}, metrics, *ast, "gfx9")));
+            .first->second.emplace(val,
+                                   EvaluateAST({.handle = metric.id()}, metrics, *ast, "gfx9"));
         yy_delete_buffer(buf);
         delete ast;
     }
@@ -975,8 +975,8 @@ TEST(evaluate_ast, evaluate_mixed_counters)
         yyparse(&ast);
         ASSERT_TRUE(ast) << metric.expression() << " " << metric.name();
         asts.emplace("gfx9", std::unordered_map<std::string, EvaluateAST>{})
-            .first->second.emplace(
-                val, std::move(EvaluateAST({.handle = metric.id()}, metrics, *ast, "gfx9")));
+            .first->second.emplace(val,
+                                   EvaluateAST({.handle = metric.id()}, metrics, *ast, "gfx9"));
         yy_delete_buffer(buf);
         delete ast;
     }
