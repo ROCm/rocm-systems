@@ -580,6 +580,8 @@ def _cpp_switch_statement_from_erts(api_prefix, erts):
     lines.append("switch (GetOp()) {")
 
     for ert in erts:
+        if api_prefix == 'hip' and 'R0600' in ert.api_func_name:
+            continue
         lines.append(f"  case {api_prefix.upper()}_API_ID_{ert.api_func_name}:")
         lines.append(f"    barectf_{api_prefix}_api_trace_{ert.name(api_prefix)}(")
         lines.append(f"      &barectf_ctx,")
