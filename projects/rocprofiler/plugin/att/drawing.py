@@ -217,26 +217,22 @@ def draw_occupancy_per_dispatch(selections, normalize, OCCUPANCY, dispatchnames)
     chart = np.zeros((len(dispatchnames), maxtime // delta + 2), dtype=np.float32)
 
     for occ in OCCUPANCY:
-        if len(occ) <= 16:
+        if len(occ) <= 1:
             continue
         small_chart = np.zeros_like(chart)
         norm_fact = np.zeros_like(chart)
-        norm_fact += 1E-6
+        norm_fact += 1E-5
 
-        current_occ = [[0 for m in range(16)] for k in range(len(dispatchnames))]
-        current_occ[0] = [m[1] for m in occ[:16]]
         current_time = [0 for k in range(len(dispatchnames))]
         total_value = [0 for k in range(len(dispatchnames))]
-        total_value[0] = np.sum(current_occ[0])
 
-        for time, value, cu, kid in occ:
+        for time, en, kid in occ:
             b = current_time[kid]
             e = max(b + 1, time // delta)
             small_chart[kid][b:e] += total_value[kid]
             norm_fact[kid][b:e] += 1
 
-            total_value[kid] += value - current_occ[kid][cu]
-            current_occ[kid][cu] = value
+            total_value[kid] += 2*en - 1
             current_time[kid] = time // delta
         for small, norm, time, value in zip(small_chart, norm_fact, current_time, total_value):
             small[time] += value
@@ -268,18 +264,16 @@ def draw_occupancy(selections, normalize, OCCUPANCY, shadernames, numdispatchid)
     g_maxtime = 1
     g_delta = 1
     for name, occ in zip(shadernames, OCCUPANCY):
-        if len(occ) <= 16:
+        if len(occ) <= 1:
             continue
-        current_occ = [[0 for m in range(16)] for k in range(numdispatchid)]
-        current_occ[0] = [m[1] for m in occ[:16]]
 
-        occ_values = [np.sum(current_occ[0])]
+        occ_values = [0]
         occ_times = [0]
 
-        for time, value, cu, kid in occ:
+        for time, en, _ in occ:
             occ_times.append(time)
-            occ_values.append(occ_values[-1] + value - current_occ[kid][cu])
-            current_occ[kid][cu] = value
+            occ_values.append(occ_values[-1] + 2*en - 1)
+
         try:
             names.append('SE'+name.split('_se')[1].split('.att')[0])
         except:
@@ -320,6 +314,10 @@ def draw_occupancy(selections, normalize, OCCUPANCY, shadernames, numdispatchid)
     return names, FileBytesIO(figure_bytes)
 
 
+def getocc(u):
+    return 8*int(u>>23), (u>>18) & 1, u&0xFFF
+
+
 def GeneratePIC(drawinfo, selections=[True for k in range(16)], normalize=False):
     EVENTS = drawinfo["EVENTS"]
 
@@ -327,7 +325,7 @@ def GeneratePIC(drawinfo, selections=[True for k in range(16)], normalize=False)
     figures = {}
 
     OCCUPANCY = drawinfo["OCCUPANCY"]
-    OCCUPANCY = [[(16*int(u>>23), (u>>12) & 0x7F, (u>>19) & 0xF, u&0xFFF) for u in OCCUPANCY[k]] for k in range(len(OCCUPANCY))]
+    OCCUPANCY = [[getocc(u) for u in OCCUPANCY[k]] for k in range(len(OCCUPANCY))]
 
     states, figure = draw_occupancy(selections, normalize, OCCUPANCY, drawinfo["ShaderNames"], len(drawinfo["DispatchNames"]))
     response["occupancy.png"] = states
