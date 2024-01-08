@@ -12,6 +12,7 @@ def dump_csv(code, trace_instance_name, bIsAuto):
         os.makedirs(os.path.dirname(outpath), exist_ok=True)
 
     outpath += '_' + os.path.basename(trace_instance_name) + '.csv'
+    print('Generating', outpath)
 
     with open(outpath, 'w') as f:
         writer = csv.writer(f)
