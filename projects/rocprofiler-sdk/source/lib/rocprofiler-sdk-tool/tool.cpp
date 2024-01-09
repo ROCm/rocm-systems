@@ -51,7 +51,7 @@ auto context_id  = rocprofiler_context_id_t{};
 auto output_path =
     fs::path{common::get_env<std::string>("ROCPROFILER_OUTPUT_PATH", fs::current_path().string())};
 auto output_file_name =
-    common::get_env<std::string>("ROCPROFILER_OUTPUT_FILE_NAME", std::to_string(getpid()) + "-");
+    common::get_env<std::string>("ROCPROFILER_OUTPUT_FILE_NAME", std::to_string(getpid()));
 
 std::pair<std::ostream*, void (*)(std::ostream*&)>
 get_output_stream(const std::string& fname, const std::string& ext = ".csv")
@@ -64,7 +64,7 @@ get_output_stream(const std::string& fname, const std::string& ext = ".csv")
                         output_path.string())};
     if(!fs::exists(output_path)) fs::create_directories(output_path);
 
-    auto  output_file = output_path / (output_file_name + fname + ext);
+    auto  output_file = output_path / (output_file_name + "_" + fname + ext);
     auto* _ofs        = new std::ofstream{output_file};
     if(!_ofs && !*_ofs)
         throw std::runtime_error{fmt::format("Failed to open {} for output", output_file.string())};

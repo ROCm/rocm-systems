@@ -1,14 +1,13 @@
 #!/bin/bash -e
 
-set -eo pipefail
+set -eou pipefail
 
-CURRENT_DIR="$( dirname -- "$0"; )";
-ROCPROFV2_DIR=$(dirname -- $(realpath ${BASH_SOURCE[0]}));
+ROCPROFV2_DIR=$(dirname -- "$(realpath "${BASH_SOURCE[0]}")");
 ROCM_DIR=$( dirname -- "${ROCPROFV2_DIR}"; )
 
 export HSA_TOOLS_LIB=${ROCM_DIR}/lib/librocprofiler-sdk.so.0
 
-# Define color code
+# Define color codes
 GREEN='\033[0;32m'
 GREY='\033[0;90m'
 RESET='\033[0m'
@@ -19,39 +18,36 @@ usage() {
   echo -e "${GREEN}--hsa-trace ${RESET}                  For Collecting HSA API Traces"
   echo -e "${GREEN}--kernel-trace ${RESET}               For Collecting Kernel Dispatch Traces"
   echo -e "${GREEN}-o   | --output-file ${RESET}         For the output file name"
-  echo -e "\t#${GREY} usage e.g:(with current dir): rocprofv3 --hip-trace -o <file_name> <executable>"
-  echo -e "\t#${GREY} usage e.g:(with custom dir):  rocprofv3 --hip-trace -d <out_dir> -o <file_name> <executable>${RESET}\n"
+  echo -e "\t#${GREY} usage e.g:(with current dir): rocprofv3 --hsa-trace -o <file_name> <executable>"
+  echo -e "\t#${GREY} usage e.g:(with custom dir):  rocprofv3 --hsa-trace -d <out_dir> -o <file_name> <executable>${RESET}\n"
   echo -e "${GREEN}-d   | --output-directory ${RESET}    For adding output path where the output files will be saved"
-  echo -e "\t#${GREY} usage e.g:(with custom dir):  rocprofv3 --hip-trace -d <out_dir> <executable>${RESET}\n"
+  echo -e "\t#${GREY} usage e.g:(with custom dir):  rocprofv3 --hsa-trace -d <out_dir> <executable>${RESET}\n"
   exit 1
 }
 
 if [ -z "$1" ]; then
   usage
-  exit 1
 fi
 
-: ${ROCPROFILER_OUTPUT_PATH:="."}
+: "${ROCPROFILER_OUTPUT_PATH:="."}"
+: "${ROCPROFILER_OUTPUT_FILE_NAME:=""}"
 
-while [ 1 ]; do
+while true; do
   if [[ "$1" == "-h" || "$1" == "--help" ]]; then
     usage
-    exit 1
   elif [[ "$1" == "-o" || "$1" == "--output-file-name" ]]; then
-    if [ $2 ]; then
+    if [ "$2" ]; then
       export ROCPROFILER_OUTPUT_FILE_NAME=$2
     else
       usage
-      exit 1
     fi
     shift
     shift
   elif [[ "$1" == "-d" || "$1" == "--output-directory" ]]; then
-    if [ $2 ]; then
+    if [ "$2" ]; then
       ROCPROFILER_OUTPUT_PATH=$2
     else
       usage
-      exit 1
     fi
     shift
     shift
@@ -67,7 +63,6 @@ while [ 1 ]; do
   elif [[ "$1" == "-"* || "$1" == "--"* ]]; then
     echo -e "Wrong option \"$1\", Please use the following options:\n"
     usage
-    exit 1
   else
     break
   fi
