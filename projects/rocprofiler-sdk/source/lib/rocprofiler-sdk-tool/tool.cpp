@@ -62,7 +62,7 @@ get_output_stream(const std::string& fname, const std::string& ext = ".csv")
         throw std::runtime_error{
             fmt::format("ROCPROFILER_OUTPUT_PATH ({}) already exists and is not a directory",
                         output_path.string())};
-    if(!fs::exists(output_path)) fs::create_directory(output_path);
+    if(!fs::exists(output_path)) fs::create_directories(output_path);
 
     auto  output_file = output_path / (output_file_name + fname + ext);
     auto* _ofs        = new std::ofstream{output_file};
