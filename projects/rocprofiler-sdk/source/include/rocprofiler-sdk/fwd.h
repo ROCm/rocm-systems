@@ -170,12 +170,13 @@ typedef enum  // NOLINT(performance-enum-size)
  */
 typedef enum  // NOLINT(performance-enum-size)
 {
-    ROCPROFILER_BUFFER_TRACING_MEMORY_COPY_NONE = 0,          ///< Unknown memory copy direction
-    ROCPROFILER_BUFFER_TRACING_MEMORY_COPY_DEVICE_TO_HOST,    ///< Memory copy from device to host
+    ROCPROFILER_BUFFER_TRACING_MEMORY_COPY_NONE = -1,         ///< Unknown memory copy direction
+    ROCPROFILER_BUFFER_TRACING_MEMORY_COPY_HOST_TO_HOST,      ///< Memory copy from host to host
     ROCPROFILER_BUFFER_TRACING_MEMORY_COPY_HOST_TO_DEVICE,    ///< Memory copy from host to device
+    ROCPROFILER_BUFFER_TRACING_MEMORY_COPY_DEVICE_TO_HOST,    ///< Memory copy from device to host
     ROCPROFILER_BUFFER_TRACING_MEMORY_COPY_DEVICE_TO_DEVICE,  ///< Memory copy from device to device
     ROCPROFILER_BUFFER_TRACING_MEMORY_COPY_LAST,
-} rocprofiler_buffer_tracing_memory_copy_operation_t;
+} rocprofiler_memory_copy_operation_t;
 
 /**
  * @brief PC Sampling Method.

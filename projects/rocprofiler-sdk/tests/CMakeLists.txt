@@ -33,8 +33,12 @@ find_package(Python3 REQUIRED)
 # common utilities
 add_subdirectory(common)
 
+# tool libraries used for data collection during integration tests
+add_subdirectory(tools)
+
 # applications used by integration tests
 add_subdirectory(apps)
 
-# tool libraries
+# validation tests
 add_subdirectory(kernel-tracing)
+add_subdirectory(async-copy-tracing)

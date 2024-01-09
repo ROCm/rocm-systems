@@ -28,7 +28,7 @@ def test_data_structure(input_data):
 
     node_exists("names", data["rocprofiler-sdk-json-tool"]["buffer_records"])
     node_exists("kernel_dispatches", data["rocprofiler-sdk-json-tool"]["buffer_records"])
-    node_exists("memory_copies", data["rocprofiler-sdk-json-tool"]["buffer_records"], 0)
+    node_exists("memory_copies", data["rocprofiler-sdk-json-tool"]["buffer_records"], 4)
     node_exists("hsa_api_traces", data["rocprofiler-sdk-json-tool"]["buffer_records"])
 
 
@@ -148,14 +148,17 @@ def test_async_copy_direction(input_data):
     async_dir_cnt = dict([(idx, 0) for idx in range(-1, 4)])
     for itr in data["rocprofiler-sdk-json-tool"]["buffer_records"]["memory_copies"]:
         op_id = itr["operation"]
+        assert op_id > 0
+        assert op_id < 3
         async_dir_cnt[op_id] += 1
 
-    # in the reproducible-runtime test which generates the input file,
-    # we don't expect any async memory copy operations
+    # in the transpose test which generates the input file,
+    # two threads and the main thread (so three threads total)
+    # each perform one H2D + one D2H memory copy
     assert async_dir_cnt[-1] == 0
     assert async_dir_cnt[0] == 0
-    assert async_dir_cnt[1] == 0
-    assert async_dir_cnt[2] == 0
+    assert async_dir_cnt[1] == 6
+    assert async_dir_cnt[2] == 6
     assert async_dir_cnt[3] == 0
 
 

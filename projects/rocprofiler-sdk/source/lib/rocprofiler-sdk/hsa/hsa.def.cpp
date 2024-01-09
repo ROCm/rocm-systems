@@ -20,19 +20,20 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#if defined(ROCPROFILER_LIB_ROCPROFILER_HSA_HSA_CPP_IMPL) &&                                       \
-    ROCPROFILER_LIB_ROCPROFILER_HSA_HSA_CPP_IMPL == 1
+#include "lib/common/defines.hpp"
+#include "lib/rocprofiler-sdk/hsa/defines.hpp"
+#include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 
-#    include <rocprofiler-sdk/hsa.h>
+#include <rocprofiler-sdk/hsa.h>
 
-#    include "defines.hpp"
-#    include "hsa.hpp"
-
-// clang-format off
 HSA_API_TABLE_LOOKUP_DEFINITION(ROCPROFILER_HSA_API_TABLE_ID_CoreApi, core_)
 HSA_API_TABLE_LOOKUP_DEFINITION(ROCPROFILER_HSA_API_TABLE_ID_AmdExt, amd_ext_)
 HSA_API_TABLE_LOOKUP_DEFINITION(ROCPROFILER_HSA_API_TABLE_ID_ImageExt, image_ext_)
 
+#if defined(ROCPROFILER_LIB_ROCPROFILER_HSA_HSA_CPP_IMPL) &&                                       \
+    ROCPROFILER_LIB_ROCPROFILER_HSA_HSA_CPP_IMPL == 1
+
+// clang-format off
 HSA_API_INFO_DEFINITION_0(ROCPROFILER_HSA_API_TABLE_ID_CoreApi, ROCPROFILER_HSA_API_ID_hsa_init, hsa_init, hsa_init_fn)
 HSA_API_INFO_DEFINITION_0(ROCPROFILER_HSA_API_TABLE_ID_CoreApi, ROCPROFILER_HSA_API_ID_hsa_shut_down, hsa_shut_down, hsa_shut_down_fn)
 HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_API_TABLE_ID_CoreApi, ROCPROFILER_HSA_API_ID_hsa_system_get_info, hsa_system_get_info, hsa_system_get_info_fn, attribute, value)
@@ -322,6 +323,15 @@ HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_API_TABLE_ID_AmdExt,
                           threshold)
 #        endif
 #    endif
+
+#elif defined(ROCPROFILER_LIB_ROCPROFILER_HSA_ASYNC_COPY_CPP_IMPL) &&                              \
+    ROCPROFILER_LIB_ROCPROFILER_HSA_ASYNC_COPY_CPP_IMPL == 1
+
+// clang-format off
+HSA_API_META_DEFINITION(ROCPROFILER_HSA_API_TABLE_ID_AmdExt, ROCPROFILER_HSA_API_ID_hsa_amd_memory_async_copy, hsa_amd_memory_async_copy, hsa_amd_memory_async_copy_fn)
+HSA_API_META_DEFINITION(ROCPROFILER_HSA_API_TABLE_ID_AmdExt, ROCPROFILER_HSA_API_ID_hsa_amd_memory_async_copy_on_engine, hsa_amd_memory_async_copy_on_engine, hsa_amd_memory_async_copy_on_engine_fn)
+HSA_API_META_DEFINITION(ROCPROFILER_HSA_API_TABLE_ID_AmdExt, ROCPROFILER_HSA_API_ID_hsa_amd_memory_async_copy_rect, hsa_amd_memory_async_copy_rect, hsa_amd_memory_async_copy_rect_fn)
+// clang-format on
 
 #else
 #    error "Do not compile this file directly. It is included by lib/rocprofiler/hsa/hsa.cpp"

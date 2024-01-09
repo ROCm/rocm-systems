@@ -161,6 +161,7 @@ run(int rank, int tid, hipStream_t stream)
         HIP_API_CALL(hipEventElapsedTime(&time, start, stop));
     } while(static_cast<double>(time) < nruntime);
 
+    HIP_API_CALL(hipStreamSynchronize(stream));
     HIP_API_CALL(hipEventDestroy(start));
     HIP_API_CALL(hipEventDestroy(stop));
 

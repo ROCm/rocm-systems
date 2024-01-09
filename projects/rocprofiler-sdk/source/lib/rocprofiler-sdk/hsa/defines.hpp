@@ -82,6 +82,48 @@
 #define GET_ADDR_MEMBER_FIELDS(VAR, ...)  IMPL_DETAIL_FOR_EACH(ADDR_MEMBER_, VAR, __VA_ARGS__)
 #define GET_NAMED_MEMBER_FIELDS(VAR, ...) IMPL_DETAIL_FOR_EACH(NAMED_MEMBER_, VAR, __VA_ARGS__)
 
+#define HSA_API_META_DEFINITION(HSA_TABLE, HSA_API_ID, HSA_FUNC, HSA_FUNC_PTR)                     \
+    namespace rocprofiler                                                                          \
+    {                                                                                              \
+    namespace hsa                                                                                  \
+    {                                                                                              \
+    template <>                                                                                    \
+    struct hsa_api_meta<HSA_API_ID>                                                                \
+    {                                                                                              \
+        static constexpr auto table_idx     = HSA_TABLE;                                           \
+        static constexpr auto operation_idx = HSA_API_ID;                                          \
+        static constexpr auto name          = #HSA_FUNC;                                           \
+                                                                                                   \
+        using this_type     = hsa_api_meta<operation_idx>;                                         \
+        using function_type = hsa_api_func<decltype(::HSA_FUNC)*>::function_type;                  \
+                                                                                                   \
+        static auto& get_table() { return hsa_table_lookup<table_idx>{}(); }                       \
+                                                                                                   \
+        template <typename TableT>                                                                 \
+        static auto& get_table(TableT& _v)                                                         \
+        {                                                                                          \
+            return hsa_table_lookup<table_idx>{}(_v);                                              \
+        }                                                                                          \
+                                                                                                   \
+        template <typename TableT>                                                                 \
+        static auto& get_table_func(TableT& _table)                                                \
+        {                                                                                          \
+            if constexpr(std::is_pointer<TableT>::value)                                           \
+            {                                                                                      \
+                assert(_table != nullptr && "nullptr to HSA table for " #HSA_FUNC " function");    \
+                return _table->HSA_FUNC_PTR;                                                       \
+            }                                                                                      \
+            else                                                                                   \
+            {                                                                                      \
+                return _table.HSA_FUNC_PTR;                                                        \
+            }                                                                                      \
+        }                                                                                          \
+                                                                                                   \
+        static auto& get_table_func() { return get_table_func(get_table()); }                      \
+    };                                                                                             \
+    }                                                                                              \
+    }
+
 #define HSA_API_INFO_DEFINITION_0(HSA_TABLE, HSA_API_ID, HSA_FUNC, HSA_FUNC_PTR)                   \
     namespace rocprofiler                                                                          \
     {                                                                                              \

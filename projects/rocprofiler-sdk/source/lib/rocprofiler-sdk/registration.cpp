@@ -25,6 +25,7 @@
 #include "lib/common/static_object.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
+#include "lib/rocprofiler-sdk/hsa/async_copy.hpp"
 #include "lib/rocprofiler-sdk/hsa/code_object.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
@@ -665,6 +666,7 @@ rocprofiler_set_api_table(const char* name,
         rocprofiler::agent::construct_agent_cache(hsa_api_table);
         rocprofiler::hsa::queue_controller_init(hsa_api_table);
         rocprofiler::hsa::code_object_init(hsa_api_table);
+        rocprofiler::hsa::async_copy_init(hsa_api_table);
 
         // any internal modifications to the HsaApiTable need to be done before we make the
         // copy or else those modifications will be lost when HSA API tracing is enabled

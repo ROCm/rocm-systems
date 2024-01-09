@@ -8,7 +8,7 @@ def pytest_addoption(parser):
     parser.addoption(
         "--input",
         action="store",
-        default="kernel-tracing-test.json",
+        default="async-copy-tracing-test.json",
         help="Input JSON",
     )
 

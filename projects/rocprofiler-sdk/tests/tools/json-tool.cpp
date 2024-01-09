@@ -26,7 +26,7 @@
 #endif
 
 /**
- * @file tests/kernel-tracing/kernel-tracing.cpp
+ * @file tests/tools/json-tool.cpp
  *
  * @brief Test rocprofiler tool
  */
@@ -597,7 +597,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
     }
 
     // environment variable to select which contexts to collect
-    auto* context_settings_env = getenv("KERNEL_TRACING_CONTEXTS");
+    auto* context_settings_env = getenv("ROCPROFILER_TOOL_CONTEXTS");
     if(context_settings_env != nullptr && !std::string_view{context_settings_env}.empty())
     {
         auto context_settings = std::string{context_settings_env};
@@ -623,8 +623,8 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         {
             auto filename = std::string_view{__FILE__};
             auto msg      = std::stringstream{};
-            msg << "[kernel-tracing][" << filename.substr(filename.find_last_of('/') + 1) << ":"
-                << __LINE__ << "] invalid specification of KERNEL_TRACING_CONTEXTS ('"
+            msg << "[rocprofiler-sdk-json-tool][" << filename.substr(filename.find_last_of('/') + 1)
+                << ":" << __LINE__ << "] invalid specification of ROCPROFILER_TOOL_CONTEXTS ('"
                 << context_settings_env << "'). Valid choices are: " << options.str();
             throw std::runtime_error{msg.str()};
         }
@@ -661,8 +661,8 @@ tool_fini(void* tool_data)
         _call_stack->emplace_back(source_location{__FUNCTION__, __FILE__, __LINE__, ""});
     }
 
-    auto ofname = std::string{"kernel-tracing-test-tool.json"};
-    if(auto* eofname = getenv("ROCPROFILER_KERNEL_TRACING_OUTPUT_FILE")) ofname = eofname;
+    auto ofname = std::string{"rocprofiler-tool-results.json"};
+    if(auto* eofname = getenv("ROCPROFILER_TOOL_OUTPUT_FILE")) ofname = eofname;
 
     std::ostream* ofs     = nullptr;
     auto          cleanup = std::function<void(std::ostream*&)>{};
@@ -699,7 +699,7 @@ tool_fini(void* tool_data)
         auto           buffer_name_info   = get_buffer_tracing_names();
         auto           callback_name_info = get_callback_tracing_names();
 
-        json_ar.setNextName("kernel-tracing-test-tool");
+        json_ar.setNextName("rocprofiler-sdk-json-tool");
         json_ar.startNode();
 
         json_ar(cereal::make_nvp("agents", agents));
@@ -838,7 +838,7 @@ rocprofiler_configure(uint32_t                 version,
     if(priority > 0) return nullptr;
 
     // set the client name
-    id->name = "kernel-tracing-test-tool";
+    id->name = "rocprofiler-sdk-json-tool";
 
     // store client info
     client::client_id = id;

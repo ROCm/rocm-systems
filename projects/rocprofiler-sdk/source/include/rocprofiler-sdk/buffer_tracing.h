@@ -74,7 +74,7 @@ typedef struct
     rocprofiler_tracing_operation_t   operation;       ///< ::rocprofiler_marker_api_id_t
     rocprofiler_timestamp_t           timestamp;       ///< time in nanoseconds
     rocprofiler_thread_id_t           thread_id;       ///< id for thread generating this record
-    uint64_t                          marker_id;       // rocprofiler_marker_id_t
+    uint64_t                          marker_id;       ///< rocprofiler_marker_id_t
     // const char* message; // (Need Review?)
 } rocprofiler_buffer_tracing_marker_record_t;
 
@@ -83,14 +83,14 @@ typedef struct
  */
 typedef struct
 {
-    uint64_t                          size;            ///< size of this struct
-    rocprofiler_buffer_tracing_kind_t kind;            ///< ::ROCPROFILER_BUFFER_TRACING_MEMORY_COPY
-    rocprofiler_correlation_id_t      correlation_id;  ///< correlation ids for record
-    rocprofiler_timestamp_t           start_timestamp;  ///< start time in nanoseconds
-    rocprofiler_timestamp_t           end_timestamp;    ///< end time in nanoseconds
-    rocprofiler_agent_id_t            agent_id;         ///< agent identifier
-    rocprofiler_queue_id_t            queue_id;         ///< queue identifier
-    rocprofiler_kernel_id_t           kernel_id;        ///< kernel identifier
+    uint64_t                            size;  ///< size of this struct
+    rocprofiler_buffer_tracing_kind_t   kind;  ///< ::ROCPROFILER_BUFFER_TRACING_MEMORY_COPY
+    rocprofiler_correlation_id_t        correlation_id;   ///< correlation ids for record
+    rocprofiler_memory_copy_operation_t operation;        ///< memory copy direction
+    rocprofiler_timestamp_t             start_timestamp;  ///< start time in nanoseconds
+    rocprofiler_timestamp_t             end_timestamp;    ///< end time in nanoseconds
+    rocprofiler_agent_id_t              dst_agent_id;     ///< destination agent of copy
+    rocprofiler_agent_id_t              src_agent_id;     ///< source agent of copy
 } rocprofiler_buffer_tracing_memory_copy_record_t;
 
 /**

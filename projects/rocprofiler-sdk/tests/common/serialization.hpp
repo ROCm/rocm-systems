@@ -240,11 +240,11 @@ save(ArchiveT& ar, rocprofiler_buffer_tracing_memory_copy_record_t data)
     SAVE_DATA_FIELD(size);
     SAVE_DATA_FIELD(kind);
     SAVE_DATA_FIELD(correlation_id);
+    SAVE_DATA_FIELD(operation);
     SAVE_DATA_FIELD(start_timestamp);
     SAVE_DATA_FIELD(end_timestamp);
-    SAVE_DATA_FIELD(agent_id);
-    SAVE_DATA_FIELD(queue_id);
-    SAVE_DATA_FIELD(kernel_id);
+    SAVE_DATA_FIELD(dst_agent_id);
+    SAVE_DATA_FIELD(src_agent_id);
 }
 
 template <typename ArchiveT>

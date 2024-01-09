@@ -194,6 +194,12 @@ context_array_t
 get_registered_contexts(context_filter_t filter = default_context_filter);
 
 context_array_t&
+get_registered_contexts(context_array_t& data, context_filter_t filter);
+
+context_array_t
+get_registered_contexts(context_filter_t filter);
+
+context_array_t&
 get_active_contexts(context_array_t& data, context_filter_t filter = default_context_filter);
 
 context_array_t

@@ -43,6 +43,24 @@ template <size_t Idx>
 struct hsa_api_info;
 
 template <size_t Idx>
+struct hsa_api_meta;
+
+template <typename Tp>
+struct hsa_api_func;
+
+template <typename RetT, typename... Args>
+struct hsa_api_func<RetT (*)(Args...)>
+{
+    using return_type   = RetT;
+    using args_type     = std::tuple<Args...>;
+    using function_type = RetT (*)(Args...);
+};
+
+template <typename RetT, typename... Args>
+struct hsa_api_func<RetT (*)(Args...) noexcept> : hsa_api_func<RetT (*)(Args...)>
+{};
+
+template <size_t Idx>
 struct hsa_api_impl
 {
     template <typename DataArgsT, typename... Args>

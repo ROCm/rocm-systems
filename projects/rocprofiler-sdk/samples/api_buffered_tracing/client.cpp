@@ -34,6 +34,7 @@
 #include "client.hpp"
 
 #include <rocprofiler-sdk/buffer.h>
+#include <rocprofiler-sdk/buffer_tracing.h>
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/external_correlation.h>
 #include <rocprofiler-sdk/fwd.h>
@@ -305,6 +306,29 @@ tool_tracing_callback(rocprofiler_context_id_t      context,
 
             if(record->start_timestamp > record->end_timestamp)
                 throw std::runtime_error("kernel dispatch: start > end");
+
+            static_cast<call_stack_t*>(user_data)->emplace_back(
+                source_location{__FUNCTION__, __FILE__, __LINE__, info.str()});
+        }
+        else if(header->category == ROCPROFILER_BUFFER_CATEGORY_TRACING &&
+                header->kind == ROCPROFILER_BUFFER_TRACING_MEMORY_COPY)
+        {
+            auto* record =
+                static_cast<rocprofiler_buffer_tracing_memory_copy_record_t*>(header->payload);
+
+            auto info = std::stringstream{};
+
+            info << "src_agent_id=" << record->src_agent_id.handle
+                 << ", dst_agent_id=" << record->dst_agent_id.handle
+                 << ", direction=" << record->operation << ", context=" << context.handle
+                 << ", buffer_id=" << buffer_id.handle
+                 << ", cid=" << record->correlation_id.internal
+                 << ", extern_cid=" << record->correlation_id.external.value
+                 << ", kind=" << record->kind << ", start=" << record->start_timestamp
+                 << ", stop=" << record->end_timestamp;
+
+            if(record->start_timestamp > record->end_timestamp)
+                throw std::runtime_error("memory copy: start > end");
 
             static_cast<call_stack_t*>(user_data)->emplace_back(
                 source_location{__FUNCTION__, __FILE__, __LINE__, info.str()});
