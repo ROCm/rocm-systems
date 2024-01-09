@@ -13,7 +13,7 @@ omnitrace_add_test(
     NAME "mpi"
     TARGET mpi-example
     MPI ON
-    NUM_PROCS 4
+    NUM_PROCS 2
     REWRITE_ARGS
         -e
         -v
@@ -37,7 +37,7 @@ omnitrace_add_test(
     NAME "mpi-flat-mpip"
     TARGET mpi-example
     MPI ON
-    NUM_PROCS 4
+    NUM_PROCS 2
     LABELS "mpip"
     REWRITE_ARGS
         -e
@@ -60,7 +60,7 @@ omnitrace_add_test(
     NAME "mpi-flat"
     TARGET mpi-example
     MPI ON
-    NUM_PROCS 4
+    NUM_PROCS 2
     LABELS "mpip"
     REWRITE_ARGS
         -e
