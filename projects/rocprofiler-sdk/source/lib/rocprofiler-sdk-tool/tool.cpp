@@ -132,7 +132,8 @@ auto&
 get_hsa_api_file()
 {
     static auto _v =
-        output_file{"hsa_api_trace", {"KERNEL_NAME", "BEGIN_TS", "END_TS", "CORRELATION_ID"}};
+        output_file{"hsa_api_trace",
+                    {"DOMAIN", "FUNCTION", "START_TIMESTAMP", "END_TIMESTAMP", "CORRELATION_ID"}};
     return _v;
 }
 
@@ -175,9 +176,7 @@ struct hsa_api_trace_entry_t
     hsa_api_trace_entry_t(rocprofiler_timestamp_t               begin,
                           rocprofiler_timestamp_t               end,
                           rocprofiler_callback_tracing_record_t tracer_record,
-                          std::string_view                      name
-
-                          )
+                          std::string_view                      name)
     : valid(TRACE_ENTRY_INIT)
     , record(tracer_record)
     , begin_timestamp(begin)
@@ -202,11 +201,14 @@ TracerFlushRecord(void* data, rocprofiler_callback_tracing_kind_t kind)
     if(kind == ROCPROFILER_CALLBACK_TRACING_HSA_API)
     {
         auto* entry = reinterpret_cast<hsa_api_trace_entry_t*>(data);
-        get_hsa_api_file() << "\"" << entry->api_name << "\""
-                           << "," << entry->begin_timestamp << ":" << entry->end_timestamp << " "
+        get_hsa_api_file() << "ACTIVITY_DOMAIN_HSA_API"
+                           << ","
+                           << "\"" << entry->api_name << "\""
+                           << "," << entry->begin_timestamp << "," << entry->end_timestamp << ","
                            << entry->record.correlation_id.internal << '\n';
     }
 }
+
 void
 rocprofiler_tracing_callback(rocprofiler_callback_tracing_record_t record,
                              rocprofiler_user_data_t*              user_data,
