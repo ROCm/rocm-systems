@@ -26,6 +26,7 @@ SETPC = 12
 SWAPPC = 13
 LANEIO = 14
 PCINFO = 15
+WAVE_ENDED = 16
 DONT_KNOW = 100
 
 WaveInstCategory = {
@@ -48,6 +49,7 @@ WaveInstCategory = {
     SWAPPC: "SWAPPC",
     LANEIO: "LANEIO",
     PCINFO: "PCINFO",
+    WAVE_ENDED: "WAVE_ENDED",
     DONT_KNOW: "DONT_KNOW",
 }
 
@@ -361,8 +363,8 @@ def stitch(insts, raw_code, jumps, gfxv, bIsAuto, codeservice):
 
     while i < N and line >= 0 and loops < MAX_STITCHED_TOKENS:
         if insts[i].type == PCINFO:
-            i += 1
             pcskip.append(i)
+            i += 1
             continue
         loops += 1
 
@@ -395,32 +397,30 @@ def stitch(insts, raw_code, jumps, gfxv, bIsAuto, codeservice):
         elif as_line[1] == SETPC:
             next = watchlist.setpc(as_line[0], i)
             matched = inst.type in [SALU, JUMP]
-            if bIsAuto:
+            i += 1
+            pcskip.append(i)
+            while bIsAuto and next < 0 and i+1 < len(insts):
                 i += 1
-                pcskip.append(i+1)
-                while next < 0 and i+1 < len(insts):
-                    i += 1
-                    if insts[i].type == PCINFO:
-                        next = watchlist.setpc(as_line[0], i-1)
-                        pcskip.append(i+1)
-                    else:
-                        inst.cycles += insts[i].cycles
+                if insts[i].type == PCINFO:
+                    pcskip.append(i)
+                    next = watchlist.setpc(as_line[0], i-1)
+                else:
+                    inst.cycles += insts[i].cycles
             if next < 0:
                 print('Jump to unknown location in line', as_line[0])
                 break
         elif as_line[1] == SWAPPC:
             matched = inst.type in [SALU, JUMP]
             next = watchlist.swappc(as_line[0], line, i)
-            if bIsAuto:
+            i += 1
+            pcskip.append(i)
+            while bIsAuto and next < 0 and i+1 < len(insts):
                 i += 1
-                pcskip.append(i+1)
-                while next < 0 and i+1 < len(insts):
-                    i += 1
-                    if insts[i].type == PCINFO:
-                        next = watchlist.swappc(as_line[0], line, i-1)
-                        pcskip.append(i+1)
-                    else:
-                        inst.cycles += insts[i].cycles
+                if insts[i].type == PCINFO:
+                    next = watchlist.swappc(as_line[0], line, i-1)
+                    pcskip.append(i)
+                else:
+                    inst.cycles += insts[i].cycles
             if next < 0:
                 print('Jump to unknown location in line', as_line[0])
                 break
@@ -560,7 +560,9 @@ def stitch(insts, raw_code, jumps, gfxv, bIsAuto, codeservice):
         line = next
 
     N = max(N, 1)
-    if i != N:
+    if i != N and insts[i].type == WAVE_ENDED:
+        print('Warning - Wave ended.')
+    elif i < N:
         print('Warning - Stitching rate: '+str(i * 100 / N)+'% matched', i, ' of ', N)
         print('Leftovers:', [WaveInstCategory[insts[i+k].type] for k in range(20) if i+k < len(insts)])
         try:

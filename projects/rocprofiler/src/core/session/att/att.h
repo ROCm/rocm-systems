@@ -120,7 +120,8 @@ public:
   void InsertLoadMarker(
     std::vector<packet_t>& transformed_packets,
     hsa_agent_t agent,
-    rocprofiler_intercepted_codeobj_t codeobj
+    rocprofiler_intercepted_codeobj_t codeobj,
+    bool bFromStart
   );
 
   void SetParameters(const std::vector<rocprofiler_att_parameter_t>& params) {

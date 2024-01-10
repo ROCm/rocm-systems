@@ -41,7 +41,8 @@ union att_header_marker_t
 {
   uint32_t raw;
   struct {
-    uint32_t type : 2;
+    uint32_t type : 1;
+    uint32_t bFromStart : 1;
     uint32_t id : 30;
   };
 };
@@ -66,9 +67,15 @@ void AttTracer::InsertUnloadMarker(
 void AttTracer::InsertLoadMarker(
   std::vector<packet_t>& transformed_packets,
   hsa_agent_t agent,
-  rocprofiler_intercepted_codeobj_t codeobj
+  rocprofiler_intercepted_codeobj_t codeobj,
+  bool bFromStart
 ) {
   this->InsertMarker(transformed_packets, agent, codeobj.mem_size, ATT_MARKER_SIZE_CHANNEL);
+  // TODO: Add this channel
+  auto sizehi = static_cast<hsa_ven_amd_aqlprofile_att_marker_channel_t>(4);
+  // Need to send mem_hi
+  this->InsertMarker(transformed_packets, agent, codeobj.mem_size, sizehi);
+
 
   uint64_t addr = codeobj.base_address;
   this->InsertMarker(transformed_packets, agent, addr & ((1ul << 32)-1), ATT_MARKER_LO_CHANNEL);
@@ -76,6 +83,7 @@ void AttTracer::InsertLoadMarker(
 
   att_header_marker_t header{.raw = 0};
   header.type = ROCPROFILER_ATT_MARKER_LOAD;
+  header.bFromStart = bFromStart;
   header.id = codeobj.att_marker_id;
   this->InsertMarker(transformed_packets, agent, header.raw, ATT_MARKER_HEADER_CHANNEL);
 }
@@ -269,7 +277,7 @@ bool AttTracer::ATTContiguousWriteInterceptor(
     {
       auto& symbol = symbols.symbols[s];
       if (active_capture_event_ids.find(symbol.att_marker_id) == active_capture_event_ids.end())
-        InsertLoadMarker(transformed, queue_info.GetGPUAgent(), symbol);
+        InsertLoadMarker(transformed, queue_info.GetGPUAgent(), symbol, bool(insertStart));
     }
 
     active_capture_event_ids = std::move(current_ids);
@@ -286,8 +294,6 @@ bool AttTracer::ATTContiguousWriteInterceptor(
 
     if (agent_pending_packets.last_kernel_exec <= writer_end_id)
     {
-      for (uint32_t id : active_capture_event_ids)
-        InsertUnloadMarker(transformed, queue_info.GetGPUAgent(), id);
       InsertPacketStop(transformed, agent_pending_packets, queue_info, agent_handle);
       active_capture_event_ids = {};
     }

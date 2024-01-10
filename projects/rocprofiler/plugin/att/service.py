@@ -10,9 +10,9 @@ import os
 
 HEADER_OFFSET = 62
 HEADER_MASK = 0x3
-ID_OFFSET = 30
-ID_MASK = (1<<32)-1
-OFFSET_MASK = (1<<30)-1
+ID_OFFSET = 34
+ID_MASK = (1<<28)-1
+OFFSET_MASK = (1<<ID_OFFSET)-1
 
 pluginpath = '../../../lib/rocprofiler/libatt_plugin.so'
 filedir = os.path.dirname(os.path.realpath(__file__))
@@ -92,7 +92,7 @@ class CodeobjService:
             instance.release()
 
     def GetInstruction(self, addr):
-        if addr >> HEADER_OFFSET != 0:
+        if not IsRawPC(addr):
             return self.GetInstructionFromID(getID(addr), getOffset(addr))
         else:
             return self.GetInstructionFromAddr(addr)

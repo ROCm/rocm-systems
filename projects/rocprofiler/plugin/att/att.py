@@ -19,7 +19,7 @@ import gc
 from collections import defaultdict
 from service import CodeobjService
 
-ATT_VERSION = 3
+ATT_VERSION = 4
 
 class TraceData(ctypes.Structure):
     _fields_ = [
@@ -299,7 +299,7 @@ def persist(trace_file, SIMD, traces):
         br_stalls.append(wave.num_branch_stalls)
         timeline.append(wave.timeline)
 
-        cc = 1
+        cc = 0
         insts = []
         skips = traces[wave.traceid].instructions[-1]
         try:
