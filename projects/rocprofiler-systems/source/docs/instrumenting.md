@@ -249,7 +249,7 @@ Options:
     -d, --default-components       Default components to instrument (only useful when timemory is enabled in omnitrace
                                    library)
     --env                          Environment variables to add to the runtime in form VARIABLE=VALUE. E.g. use '--env
-                                   OMNITRACE_USE_TIMEMORY=ON' to default to using timemory instead of perfetto
+                                   OMNITRACE_PROFILE=ON' to default to using timemory instead of perfetto
     --mpi                          Enable MPI support (requires omnitrace built w/ full or partial MPI support). NOTE: this
                                    will automatically be activated if MPI_Init, MPI_Init_thread, MPI_Finalize,
                                    MPI_Comm_rank, or MPI_Comm_size are found in the symbol table of target

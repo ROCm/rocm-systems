@@ -876,7 +876,7 @@ main(int argc, char** argv)
                      "defaults in the executable");
     parser.add_argument({ "--env" },
                         "Environment variables to add to the runtime in form "
-                        "VARIABLE=VALUE. E.g. use '--env OMNITRACE_USE_TIMEMORY=ON' to "
+                        "VARIABLE=VALUE. E.g. use '--env OMNITRACE_PROFILE=ON' to "
                         "default to using timemory instead of perfetto");
     parser
         .add_argument({ "--mpi" },

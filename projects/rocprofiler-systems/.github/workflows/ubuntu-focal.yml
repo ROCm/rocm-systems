@@ -286,8 +286,8 @@ jobs:
         echo "CMAKE_PREFIX_PATH=/opt/dyninst:${CMAKE_PREFIX_PATH}" >> $GITHUB_ENV
         echo "LD_LIBRARY_PATH=/opt/rocm/lib:/usr/local/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
         cat << EOF > test-install.cfg
-        OMNITRACE_USE_TIMEMORY          = ON
-        OMNITRACE_USE_PERFETTO          = ON
+        OMNITRACE_PROFILE               = ON
+        OMNITRACE_TRACE                 = ON
         OMNITRACE_USE_PID               = OFF
         OMNITRACE_USE_SAMPLING          = OFF
         OMNITRACE_USE_PROCESS_SAMPLING  = OFF

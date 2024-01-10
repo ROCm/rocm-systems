@@ -396,7 +396,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                           "Generate a detailed trace (perfetto output)")
             .max_count(1)
             .action([&](parser_t& p) {
-                update_env(_data, "OMNITRACE_USE_PERFETTO", p.get<bool>("trace"));
+                update_env(_data, "OMNITRACE_TRACE", p.get<bool>("trace"));
             });
 
         _data.processed_environs.emplace("trace");
@@ -411,7 +411,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .max_count(1)
             .conflicts({ "flat-profile" })
             .action([&](parser_t& p) {
-                update_env(_data, "OMNITRACE_USE_TIMEMORY", p.get<bool>("profile"));
+                update_env(_data, "OMNITRACE_PROFILE", p.get<bool>("profile"));
             });
 
         _data.processed_environs.emplace("profile");
@@ -425,7 +425,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .max_count(1)
             .conflicts({ "profile" })
             .action([&](parser_t& p) {
-                update_env(_data, "OMNITRACE_USE_TIMEMORY", p.get<bool>("flat-profile"));
+                update_env(_data, "OMNITRACE_PROFILE", p.get<bool>("flat-profile"));
                 update_env(_data, "OMNITRACE_FLAT_PROFILE", p.get<bool>("flat-profile"));
             });
 
@@ -874,7 +874,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .choices({ "text", "json", "console" })
             .action([&](parser_t& p) {
                 auto _v = p.get<strset_t>("profile-format");
-                update_env(_data, "OMNITRACE_USE_TIMEMORY", true);
+                update_env(_data, "OMNITRACE_PROFILE", true);
                 if(!_v.empty())
                 {
                     update_env(_data, "OMNITRACE_TEXT_OUTPUT", _v.count("text") != 0);

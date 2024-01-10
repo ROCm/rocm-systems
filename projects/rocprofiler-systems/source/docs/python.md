@@ -115,7 +115,7 @@ if __name__ == "__main__":
     run(20)
 ```
 
-Using `omnitrace-python ./example.py` with `OMNITRACE_USE_TIMEMORY=ON` and `OMNITRACE_TIMEMORY_COMPONENTS=trip_count` would produce:
+Using `omnitrace-python ./example.py` with `OMNITRACE_PROFILE=ON` and `OMNITRACE_TIMEMORY_COMPONENTS=trip_count` would produce:
 
 ```console
 |-------------------------------------------------------------------------------------------|

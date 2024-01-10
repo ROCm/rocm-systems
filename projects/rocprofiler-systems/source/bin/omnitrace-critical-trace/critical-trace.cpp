@@ -52,7 +52,7 @@ main(int argc, char** argv)
 {
     omnitrace_init_library();
 
-    // config::set_setting_value("OMNITRACE_USE_PERFETTO", true);
+    // config::set_setting_value("OMNITRACE_TRACE", true);
     config::set_setting_value("OMNITRACE_CRITICAL_TRACE", true);
     // config::set_setting_value("OMNITRACE_CRITICAL_TRACE_DEBUG", true);
     config::set_setting_value<int64_t>("OMNITRACE_CRITICAL_TRACE_COUNT", 500);

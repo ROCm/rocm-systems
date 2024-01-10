@@ -197,8 +197,8 @@ get_initial_environment()
     update_env(_env, "OMNITRACE_MODE", "causal");
     update_env(_env, "OMNITRACE_USE_CAUSAL", true);
     update_env(_env, "OMNITRACE_USE_SAMPLING", false);
-    update_env(_env, "OMNITRACE_USE_PERFETTO", false);
-    update_env(_env, "OMNITRACE_USE_TIMEMORY", false);
+    update_env(_env, "OMNITRACE_TRACE", false);
+    update_env(_env, "OMNITRACE_PROFILE", false);
     update_env(_env, "OMNITRACE_USE_PROCESS_SAMPLING", false);
     update_env(_env, "OMNITRACE_CRITICAL_TRACE", false);
     update_env(_env, "OMNITRACE_THREAD_POOL_SIZE",

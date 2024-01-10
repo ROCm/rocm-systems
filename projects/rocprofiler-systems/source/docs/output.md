@@ -16,8 +16,8 @@ E.g. with the base configuration:
 export OMNITRACE_OUTPUT_PATH=omnitrace-example-output
 export OMNITRACE_TIME_OUTPUT=ON
 export OMNITRACE_USE_PID=OFF
-export OMNITRACE_USE_TIMEMORY=ON
-export OMNITRACE_USE_PERFETTO=ON
+export OMNITRACE_PROFILE=ON
+export OMNITRACE_TRACE=ON
 ```
 
 ```shell

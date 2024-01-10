@@ -419,7 +419,7 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
         .add_argument({ "-T", "--trace" }, "Generate a detailed trace (perfetto output)")
         .max_count(1)
         .action([&](parser_t& p) {
-            update_env(_env, "OMNITRACE_USE_PERFETTO", p.get<bool>("trace"));
+            update_env(_env, "OMNITRACE_TRACE", p.get<bool>("trace"));
         });
     parser
         .add_argument(
@@ -428,7 +428,7 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
         .max_count(1)
         .conflicts({ "flat-profile" })
         .action([&](parser_t& p) {
-            update_env(_env, "OMNITRACE_USE_TIMEMORY", p.get<bool>("profile"));
+            update_env(_env, "OMNITRACE_PROFILE", p.get<bool>("profile"));
         });
     parser
         .add_argument({ "-F", "--flat-profile" },
@@ -436,7 +436,7 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
         .max_count(1)
         .conflicts({ "profile" })
         .action([&](parser_t& p) {
-            update_env(_env, "OMNITRACE_USE_TIMEMORY", p.get<bool>("flat-profile"));
+            update_env(_env, "OMNITRACE_PROFILE", p.get<bool>("flat-profile"));
             update_env(_env, "OMNITRACE_FLAT_PROFILE", p.get<bool>("flat-profile"));
         });
     parser
@@ -566,7 +566,7 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
         .choices({ "text", "json", "console" })
         .action([&](parser_t& p) {
             auto _v = p.get<std::set<std::string>>("profile");
-            update_env(_env, "OMNITRACE_USE_TIMEMORY", true);
+            update_env(_env, "OMNITRACE_PROFILE", true);
             if(!_v.empty())
             {
                 update_env(_env, "OMNITRACE_TEXT_OUTPUT", _v.count("text") != 0);

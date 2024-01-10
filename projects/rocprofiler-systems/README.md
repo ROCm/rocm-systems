@@ -146,8 +146,8 @@ and tweak some sampling default values:
 
 ```console
 # ...
-OMNITRACE_USE_PERFETTO         = true
-OMNITRACE_USE_TIMEMORY         = true
+OMNITRACE_TRACE                = true
+OMNITRACE_PROFILE              = true
 OMNITRACE_USE_SAMPLING         = true
 OMNITRACE_USE_PROCESS_SAMPLING = true
 # ...
