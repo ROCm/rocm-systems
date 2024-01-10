@@ -608,6 +608,11 @@ configure_settings(bool _init)
                              "Enable HIP API tracing support", true, "roctracer", "rocm",
                              "advanced");
 
+    OMNITRACE_CONFIG_SETTING(
+        bool, "OMNITRACE_ROCTRACER_HIP_API_BACKTRACE",
+        "Enable annotating the perfetto debug annotation with backtraces", false,
+        "roctracer", "rocm", "perfetto", "advanced");
+
     OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_ROCTRACER_HIP_ACTIVITY",
                              "Enable HIP activity tracing support", true, "roctracer",
                              "rocm", "advanced");

@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "library/roctracer.hpp"
+#include "binary/analysis.hpp"
 #include "core/components/fwd.hpp"
 #include "core/concepts.hpp"
 #include "core/config.hpp"
@@ -736,6 +737,35 @@ hip_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
                     "OMNITRACE_PERFETTO_COMPACT_ROCTRACER_ANNOTATIONS")
                     .value_or(false);
 
+            static auto _enable_backtraces =
+                config::get_setting_value<bool>("OMNITRACE_ROCTRACER_HIP_API_BACKTRACE")
+                    .value_or(false);
+
+            constexpr size_t bt_stack_depth       = 16;
+            constexpr size_t bt_ignore_depth      = 3;
+            constexpr bool   bt_with_signal_frame = true;
+
+            using backtrace_entry_vec_t = std::vector<tim::unwind::processed_entry>;
+            auto _bt_data               = std::optional<backtrace_entry_vec_t>{};
+            if(_enable_backtraces && config::get_perfetto_annotations())
+            {
+                auto _backtrace = tim::get_unw_stack<bt_stack_depth, bt_ignore_depth,
+                                                     bt_with_signal_frame>();
+                _bt_data        = backtrace_entry_vec_t{};
+                _bt_data->reserve(_backtrace.size());
+                for(auto itr : _backtrace)
+                {
+                    if(itr)
+                    {
+                        if(auto _val = binary::lookup_ipaddr_entry<false>(itr->address());
+                           _val)
+                        {
+                            _bt_data->emplace_back(std::move(*_val));
+                        }
+                    }
+                }
+            }
+
             auto _api_id = static_cast<hip_api_id_t>(cid);
             tracing::push_perfetto_ts(
                 category::rocm_hip{}, op_name, _ts,
@@ -772,6 +802,36 @@ hip_api_callback(uint32_t domain, uint32_t cid, const void* callback_data, void*
                                         tracing::add_perfetto_annotation(
                                             ctx, itr.substr(0, _pos),
                                             itr.substr(_pos + 1));
+                                }
+                            }
+                        }
+
+                        if(_enable_backtraces && _bt_data && !_bt_data->empty())
+                        {
+                            const std::string _unk    = "??";
+                            size_t            _bt_cnt = 0;
+                            for(const auto& itr : *_bt_data)
+                            {
+                                const auto* _func =
+                                    (itr.name.empty()) ? &_unk : &itr.name;
+                                const auto* _loc =
+                                    (itr.location.empty()) ? &_unk : &itr.location;
+                                auto _line  = (itr.lineno == 0) ? std::string{ "?" }
+                                                                : join("", itr.lineno);
+                                auto _entry = join("", demangle(*_func), " @ ",
+                                                   join(':', *_loc, _line));
+                                if(_bt_cnt < 10)
+                                {
+                                    // Prepend zero for better ordering in UI.
+                                    // Only one zero is ever necessary since stack depth
+                                    // is limited to 16.
+                                    tracing::add_perfetto_annotation(
+                                        ctx, join("", "frame#0", _bt_cnt++), _entry);
+                                }
+                                else
+                                {
+                                    tracing::add_perfetto_annotation(
+                                        ctx, join("", "frame#", _bt_cnt++), _entry);
                                 }
                             }
                         }
