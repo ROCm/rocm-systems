@@ -629,6 +629,10 @@ configure_settings(bool _init)
                              "HSA API type to collect", "", "roctracer", "rocm",
                              "advanced");
 
+    OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_ROCTRACER_DISCARD_BARRIERS",
+                             "Skip barrier marker events in traces", false, "roctracer",
+                             "rocm", "advanced");
+
     OMNITRACE_CONFIG_SETTING(
         std::string, "OMNITRACE_ROCM_EVENTS",
         "ROCm hardware counters. Use ':device=N' syntax to specify collection on device "
