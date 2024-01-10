@@ -8,12 +8,22 @@ on:
       - '*.md'
       - 'source/docs/**'
       - 'source/python/gui/**'
+      - '.github/workflows/docs.yml'
+      - '.github/workflows/cpack.yml'
+      - '.github/workflows/containers.yml'
+      - '.github/workflows/formatting.yml'
+      - 'docker/**'
   pull_request:
     branches: [ main, develop ]
     paths-ignore:
       - '*.md'
       - 'source/docs/**'
       - 'source/python/gui/**'
+      - '.github/workflows/docs.yml'
+      - '.github/workflows/cpack.yml'
+      - '.github/workflows/containers.yml'
+      - '.github/workflows/formatting.yml'
+      - 'docker/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
