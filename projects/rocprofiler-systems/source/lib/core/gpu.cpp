@@ -470,7 +470,7 @@ add_hip_device_metadata(ArchiveT& ar)
         OMNITRACE_SERIALIZE_HIP_DEVICE_PROP(asicRevision)
 #    endif
 
-        constexpr auto _compute_mode_descr = std::array<const char*, 6>{
+        const auto _compute_mode_descr = std::array<const char*, 6>{
             "Default (multiple host threads can use ::hipSetDevice() with device "
             "simultaneously)",
             "Exclusive (only one host thread in one process is able to use "
