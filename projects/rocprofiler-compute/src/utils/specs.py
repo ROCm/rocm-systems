@@ -34,67 +34,106 @@ from dataclasses import dataclass
 from pathlib import Path as path
 from textwrap import dedent
 
-gpu_list = {"gfx906", "gfx908", "gfx90a", "gfx900"}
-
-
 @dataclass
 class MachineSpecs:
     hostname: str
-    cpu: str
-    kernel: str
+    CPU: str
+    sbios: str
+    kernel_version: str
     ram: str
     distro: str
-    rocmversion: str
+    rocm_version: str
     GPU: str
+    arch: str
+    vbios: str
     L1: str
     L2: str
-    SCLK: str
     CU: str
     SIMD: str
     SE: str
     wave_size: str
-    workgroup_size: str
-    cur_SCLK: str
-    cur_MCLK: str
-    wave_occu: str
+    workgroup_max_size: str
+    max_sclk: str
+    cur_sclk: str
+    cur_mclk: str
+    max_waves_per_cu: str
+    L2Banks: str
+    LDSBanks: str
+    numSQC: str
+    hbmBW: str
+    compute_partition: str
+    memory_partition: str
 
     def __str__(self):
         return dedent(
             f"""\
         Host info:
             hostname:       {self.hostname}
-            cpu info:       {self.cpu}
+            CPU:            {self.CPU}
+            sbios:          {self.sbios}
             ram:            {self.ram}
             distro:         {self.distro}
-            kernel version: {self.kernel}
-            rocm version:   {self.rocmversion}
+            kernel_version: {self.kernel_version}
+            rocm_version:   {self.rocm_version}
         Device info:
             GPU:                {self.GPU}
-            L1:                 {self.L1}
-            L2:                 {self.L2}
-            Max SCLK:           {self.SCLK}MHz
-            Current SCLK:       {self.cur_SCLK}MHz
-            Current MCLK:       {self.cur_MCLK}MHz
+            arch:               {self.arch}
+            vbios:              {self.vbios}
+            L1:                 {self.L1} KB
+            L2:                 {self.L2} KB
+            max_sclk:           {self.max_sclk} MHz
+            cur_sclk:           {self.cur_sclk} MHz
+            cur_mclk:           {self.cur_mclk} MHz
             CU:                 {self.CU}
             SIMD:               {self.SIMD}
             SE:                 {self.SE}
-            Wave Size:          {self.wave_size}
-            Workgroup Max Size: {self.workgroup_size}
-            Max Wave Occupancy Per CU: {self.wave_occu}
+            wave_size:          {self.wave_size}
+            workgroup_max_size: {self.workgroup_max_size}
+            max_waves_per_cu:   {self.max_waves_per_cu}
+            L2Banks:            {self.L2Banks}
+            LDSBanks:           {self.LDSBanks}
+            numSQC:             {self.numSQC}
+            hbmBW:              {self.hbmBW} MB/s
+            compute_partition:  {self.compute_partition}
+            memory_partition:   {self.memory_partition}
         """
         )
 
 
 def gpuinfo():
-    rocminfo = run(["rocminfo"]).split("\n")
+    # Local var only for rocminfo searching
+    gpu_list = {"gfx906", "gfx908", "gfx90a", "gfx940", "gfx941", "gfx942"}
+
+    # Fixme: find better way to differentiate cards, GPU vs APU, etc.
+    rocminfo_full = run(["rocminfo"])
+    rocminfo = rocminfo_full.split("\n")
 
     for idx1, linetext in enumerate(rocminfo):
-        gpu_id = search(r"^\s*Name\s*:\s+ ([a-zA-Z0-9]+)\s*$", linetext)
-        if gpu_id in gpu_list:
+        gpu_arch = search(r"^\s*Name\s*:\s+ ([a-zA-Z0-9]+)\s*$", linetext)
+        if gpu_arch in gpu_list:
             break
-
-    if not gpu_id in gpu_list:
-        return None, None, None, None, None, None, None, None, None, None
+        if str(gpu_arch) in gpu_list:
+            gpu_arch = str(gpu_arch)
+            break
+    if not gpu_arch in gpu_list:
+        return (
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
 
     L1, L2 = "", ""
     for idx2, linetext in enumerate(rocminfo[idx1 + 1 :]):
@@ -110,7 +149,7 @@ def gpuinfo():
 
         key = search(r"^\s*Max Clock Freq\. \(MHz\):\s+([0-9]+)", linetext)
         if key != None:
-            sclk = key
+            max_sclk = key
             continue
 
         key = search(r"^\s*Compute Unit:\s+ ([a-zA-Z0-9]+)\s*", linetext)
@@ -140,10 +179,66 @@ def gpuinfo():
 
         key = search(r"^\s*Max Waves Per CU:\s+ ([a-zA-Z0-9]+)\s*", linetext)
         if key != None:
-            wave_occu = key
+            max_waves_per_cu = key
             break
 
-    return gpu_id, L1, L2, sclk, num_CU, num_SIMD, num_SE, wave_size, grp_size, wave_occu
+    gpu_name = ""
+    L2Banks = ""
+    LDSBanks = "32"
+    numSQC = ""
+
+    if gpu_arch == "gfx906":
+        gpu_name = "MI50"
+        L2Banks = "16"
+        numSQC = str(int(num_CU) // 4)
+    elif gpu_arch == "gfx908":
+        gpu_name = "MI100"
+        L2Banks = "32"
+        numSQC = "48"
+    elif gpu_arch == "gfx90a":
+        L2Banks = "32"
+        gpu_name = "MI200"
+        numSQC = "56"
+    elif gpu_arch == "gfx940":
+        gpu_name = "MI300A_A0"
+        L2Banks = "16"
+        numSQC = "56"
+    elif gpu_arch == "gfx941":
+        gpu_name = "MI300X_A0"
+        L2Banks = "16"
+        numSQC = "56"
+    elif (gpu_arch == "gfx942") and ("MI300A" in rocminfo_full):
+        gpu_name = "MI300A_A1"
+        L2Banks = "16"
+        numSQC = "56"
+    elif (gpu_arch == "gfx942") and ("MI300A" not in rocminfo_full):
+        gpu_name = "MI300X_A1"
+        L2Banks = "16"
+        numSQC = "56"
+    else:
+        print("\nInvalid SoC")
+        sys.exit(0)
+
+    compute_partition = ""
+    memory_partition = ""
+    return (
+        gpu_name,
+        gpu_arch,
+        L1,
+        L2,
+        max_sclk,
+        num_CU,
+        num_SIMD,
+        num_SE,
+        wave_size,
+        grp_size,
+        max_waves_per_cu,
+        L2Banks,
+        LDSBanks,
+        numSQC,
+        compute_partition,
+        memory_partition,
+    )
 
 
 def run(cmd):
@@ -206,30 +301,41 @@ def get_machine_specs(devicenum):
             sys.exit(1)
 
     (
-        gpu_id,
+        gpu_name,
+        gpu_arch,
         L1,
         L2,
-        sclk,
+        max_sclk,
         num_CU,
         num_SIMD,
         num_SE,
         wave_size,
         grp_size,
-        wave_occu,
+        max_waves_per_cu,
+        L2Banks,
+        LDSBanks,
+        numSQC,
+        compute_partition,
+        memory_partition,
     ) = gpuinfo()
+
     rocm_smi = run(["rocm-smi"])
 
     device = rf"^\s*{devicenum}(.*)"
 
     hostname = socket.gethostname()
-    cpu = search(r"^model name\s*: (.*?)$", cpuinfo)
-    kernel = search(r"version (\S*)", version)
+    sbios = (
+        path("/sys/class/dmi/id/bios_vendor").read_text().strip()
+        + path("/sys/class/dmi/id/bios_version").read_text().strip()
+    )
+    CPU = search(r"^model name\s*: (.*?)$", cpuinfo)
+    kernel_version = search(r"version (\S*)", version)
     ram = search(r"MemTotal:\s*(\S*)", meminfo)
     distro = search(r'PRETTY_NAME="(.*?)"', os_release)
     if distro is None:
         distro = ""
 
-    rocmversion = rocm_ver.strip()
+    rocm_version = rocm_ver.strip()
 
     freq = search(device, rocm_smi).split()
     cur_sclk = search(r"([0-9]+)", freq[2])
@@ -238,27 +344,54 @@ def get_machine_specs(devicenum):
 
     cur_mclk = search(r"([0-9]+)", freq[3])
     if cur_mclk is None:
-        cur_mclk = ""
+        cur_mclk = 0
+
+    # FIXME with device
+    vbios = search(r"VBIOS version: (.*?)$", run(["rocm-smi", "-v"]))
+
+    # FIXME with spec
+    hbmBW = str(int(cur_mclk) / 1000 * 4096 / 8 * 2)
+
+    compute_partition = search(
+        r"Compute Partition:\s*(\w+)", run(["rocm-smi", "--showcomputepartition"])
+    )
+    if compute_partition == None:
+        compute_partition = "NA"
+
+    memory_partition = search(
+        r"Memory Partition:\s*(\w+)", run(["rocm-smi", "--showmemorypartition"])
+    )
+    if memory_partition == None:
+        memory_partition = "NA"
 
     return MachineSpecs(
         hostname,
-        cpu,
-        kernel,
+        CPU,
+        sbios,
+        kernel_version,
         ram,
         distro,
-        rocmversion,
-        gpu_id,
+        rocm_version,
+        gpu_name,
+        gpu_arch,
+        vbios,
         L1,
         L2,
-        sclk,
         num_CU,
         num_SIMD,
         num_SE,
         wave_size,
         grp_size,
+        max_sclk,
         cur_sclk,
         cur_mclk,
-        wave_occu,
+        max_waves_per_cu,
+        L2Banks,
+        LDSBanks,
+        numSQC,
+        hbmBW,
+        compute_partition,
+        memory_partition,
     )
 
 

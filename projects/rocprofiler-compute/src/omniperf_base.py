@@ -144,7 +144,7 @@ class Omniperf:
         # rather than detect from rocminfo
         if not arch:
             mspec = get_machine_specs(0)
-            arch = mspec.GPU
+            arch = mspec.arch
 
         # instantiate underlying SoC support class
         # in case of analyze mode, __soc can accommodate multiple archs

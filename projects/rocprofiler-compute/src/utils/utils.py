@@ -24,11 +24,12 @@
 
 import logging
 import sys
-import subprocess
-import shutil
 import os
 import io
+import re
 import selectors
+import subprocess
+import shutil
 import pandas as pd
 import glob
 from utils import specs
@@ -243,9 +244,9 @@ def gen_sysinfo(workload_name, workload_dir, ip_blocks, app_cmd, skip_roof, roof
     # write header
     header = "workload_name,"
     header += "command,"
-    header += "host_name,host_cpu,host_distro,host_kernel,host_rocmver,date,"
-    header += "gpu_soc,numSE,numCU,numSIMD,waveSize,maxWavesPerCU,maxWorkgroupSize,"
-    header += "L1,L2,sclk,mclk,cur_sclk,cur_mclk,L2Banks,LDSBanks,name,numSQC,hbmBW,"
+    header += "host_name,host_cpu,sbios,host_distro,host_kernel,host_rocmver,date,"
+    header += "gpu_soc,vbios,numSE,numCU,numSIMD,waveSize,maxWavesPerCU,maxWorkgroupSize,"
+    header += "L1,L2,sclk,mclk,cur_sclk,cur_mclk,L2Banks,LDSBanks,name,numSQC,hbmBW,compute_partition,memory_partition,"
     header += "ip_blocks\n"
     sysinfo.write(header)
 
@@ -260,45 +261,44 @@ def gen_sysinfo(workload_name, workload_dir, ip_blocks, app_cmd, skip_roof, roof
     param += ['"' + app_cmd + '"']
     param += [
         mspec.hostname,
-        mspec.cpu,
+        mspec.CPU,
+        mspec.sbios,
         mspec.distro,
-        mspec.kernel,
-        mspec.rocmversion,
+        mspec.kernel_version,
+        mspec.rocm_version,
         timestamp,
     ]
 
     # GPU info
     param += [
-        mspec.GPU,
+        mspec.arch,
+        mspec.vbios,
         mspec.SE,
         mspec.CU,
         mspec.SIMD,
         mspec.wave_size,
-        mspec.wave_occu,
-        mspec.workgroup_size,
+        mspec.max_waves_per_cu,
+        mspec.workgroup_max_size,
     ]
     param += [
         mspec.L1,
         mspec.L2,
-        mspec.SCLK,
-        mspec.cur_MCLK,
-        mspec.cur_SCLK,
-        mspec.cur_MCLK,
+        mspec.cur_mclk,
+        mspec.cur_mclk,
+        mspec.cur_sclk,
+        mspec.cur_mclk,
+        mspec.L2Banks,
+        mspec.LDSBanks,
+        mspec.GPU,
+        mspec.numSQC,
+        mspec.hbmBW,
+        mspec.compute_partition,
+        mspec.memory_partition,
     ]
 
     blocks = []
-    hbmBW = int(mspec.cur_MCLK) / 1000 * 4096 / 8 * 2
-    if mspec.GPU == "gfx906":
-        param += ["16", "32", "mi50", str(int(mspec.CU) // 4), str(hbmBW)]
-    elif mspec.GPU == "gfx908":
-        param += ["32", "32", "mi100", "48", str(hbmBW)]
-    elif mspec.GPU == "gfx90a":
-        param += ["32", "32", "mi200", "56", str(hbmBW)]
-        if not skip_roof:
-            if roof_only:
-                ip_blocks = ["roofline"]
-            else:
-                blocks.append("roofline")
+    if mspec.GPU == "gfx90a" and (not skip_roof):
+        blocks.append("roofline")
 
     # ip block info
     if ip_blocks == None:
@@ -313,7 +313,7 @@ def gen_sysinfo(workload_name, workload_dir, ip_blocks, app_cmd, skip_roof, roof
 
 def detect_roofline():
     mspec = specs.get_machine_specs(0)
-    rocm_ver = mspec.rocmversion[:1]
+    rocm_ver = mspec.rocm_version[:1]
 
     os_release = path("/etc/os-release").read_text()
     ubuntu_distro = specs.search(r'VERSION_ID="(.*?)"', os_release)
