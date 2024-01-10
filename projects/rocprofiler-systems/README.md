@@ -325,7 +325,7 @@ Enable `traced` and `perfetto` in the background:
 ```shell
 pkill traced
 traced --background
-perfetto --out ./omnitrace-perfetto.proto --txt -c ${OMNITRACE_ROOT}/share/omnitrace.cfg --background
+perfetto --out ./omnitrace-perfetto.proto --txt -c ${OMNITRACE_ROOT}/share/perfetto.cfg --background
 ```
 
 > ***NOTE: if the perfetto tools were installed by omnitrace, replace `traced` with `omnitrace-perfetto-traced` and***

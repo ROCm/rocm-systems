@@ -31,7 +31,10 @@ if(NOT hip_FOUND)
     return()
 endif()
 
-if("${CMAKE_PROJECT_NAME}" STREQUAL "omnitrace" AND "$ENV{OMNITRACE_CI}")
+if("${CMAKE_PROJECT_NAME}" STREQUAL "omnitrace"
+   AND ("$ENV{OMNITRACE_CI}"
+        OR OMNITRACE_CI
+        OR OMNITRACE_BUILD_CI))
     find_package(rccl QUIET) # avoid generating warning in CI
 else()
     find_package(rccl)

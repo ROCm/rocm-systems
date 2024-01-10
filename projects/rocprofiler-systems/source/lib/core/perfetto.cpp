@@ -174,6 +174,15 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error)
         {
             _tmp_file->close();
             FILE* _fdata = fopen(_tmp_file->filename.c_str(), "rb");
+
+            if(!_fdata)
+            {
+                OMNITRACE_VERBOSE(
+                    -1, "Error! perfetto temp trace file '%s' could not be read",
+                    _tmp_file->filename.c_str());
+                return char_vec_t{ tracing_session->ReadTraceBlocking() };
+            }
+
             fseek(_fdata, 0, SEEK_END);
             size_t _fnum_elem = ftell(_fdata);
             fseek(_fdata, 0, SEEK_SET);  // same as rewind(f);

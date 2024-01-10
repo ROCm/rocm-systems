@@ -26,6 +26,7 @@
 #include "core/common.hpp"
 #include "core/components/fwd.hpp"
 #include "core/defines.hpp"
+#include "core/rccl.hpp"
 #include "core/timemory.hpp"
 #include "library/components/category_region.hpp"
 
@@ -36,14 +37,6 @@
 #include <timemory/utility/types.hpp>
 
 #include <optional>
-
-#if defined(OMNITRACE_USE_RCCL)
-#    if OMNITRACE_HIP_VERSION == 0 || OMNITRACE_HIP_VERSION >= 50200
-#        include <rccl/rccl.h>
-#    else
-#        include <rccl.h>
-#    endif
-#endif
 
 #if defined(OMNITRACE_USE_MPI)
 #    include <mpi.h>

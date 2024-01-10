@@ -58,6 +58,7 @@ struct roctracer
 
     static bool is_setup();
     static void setup(void* hsa_api_table, bool on_load_trace = false);
+    static void flush();
     static void shutdown();
     static void add_setup(const std::string&, std::function<void()>&&);
     static void add_shutdown(const std::string&, std::function<void()>&&);
@@ -75,6 +76,10 @@ struct roctracer
 #if !defined(OMNITRACE_USE_ROCTRACER)
 inline void
 roctracer::setup(void*, bool)
+{}
+
+inline void
+roctracer::flush()
 {}
 
 inline void

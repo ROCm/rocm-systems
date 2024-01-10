@@ -29,6 +29,18 @@ omnitrace_add_test(
     ENVIRONMENT "${_base_environment};OMNITRACE_CRITICAL_TRACE=ON")
 
 omnitrace_add_test(
+    SKIP_REWRITE SKIP_RUNTIME
+    NAME transpose-two-kernels
+    TARGET transpose
+    MPI OFF
+    GPU ON
+    NUM_PROCS 1
+    RUN_ARGS 1 2 2
+    ENVIRONMENT
+        "${_base_environment};OMNITRACE_CRITICAL_TRACE=OFF;OMNITRACE_ROCTRACER_HSA_ACTIVITY=OFF;OMNITRACE_ROCTRACER_HSA_API=OFF"
+    )
+
+omnitrace_add_test(
     SKIP_BASELINE SKIP_RUNTIME
     NAME transpose-loops
     TARGET transpose

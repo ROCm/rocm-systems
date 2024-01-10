@@ -24,6 +24,7 @@
 
 #include "core/config.hpp"
 #include "core/debug.hpp"
+#include "core/hip_runtime.hpp"
 #include "core/perfetto.hpp"
 #include "library/components/roctracer.hpp"
 #include "library/ptl.hpp"

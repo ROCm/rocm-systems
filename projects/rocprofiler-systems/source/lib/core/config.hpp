@@ -394,6 +394,7 @@ struct tmp_file
 
     bool open(std::ios::openmode = std::ios::binary | std::ios::in | std::ios::out);
     bool fopen(const char* = "r+");
+    bool flush();
     bool close();
     bool remove();
 

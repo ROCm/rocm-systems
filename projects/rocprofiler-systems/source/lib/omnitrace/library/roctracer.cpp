@@ -44,8 +44,6 @@
 #include <cstdint>
 #include <tuple>
 
-#define HIP_PROF_HIP_API_STRING 1
-
 #include <roctracer_ext.h>
 #include <roctracer_hip.h>
 #include <roctracer_roctx.h>

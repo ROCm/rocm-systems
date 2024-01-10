@@ -25,18 +25,13 @@
 #include "core/common.hpp"
 #include "core/components/fwd.hpp"
 #include "core/defines.hpp"
+#include "core/rccl.hpp"
 #include "core/timemory.hpp"
 #include "library/components/category_region.hpp"
 #include "library/components/comm_data.hpp"
 
 #include <timemory/api/macros.hpp>
 #include <timemory/components/macros.hpp>
-
-#if OMNITRACE_HIP_VERSION == 0 || OMNITRACE_HIP_VERSION >= 50200
-#    include <rccl/rccl.h>
-#else
-#    include <rccl.h>
-#endif
 
 #include <atomic>
 #include <functional>

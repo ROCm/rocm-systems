@@ -726,6 +726,13 @@ omnitrace_finalize_hidden(void)
         }
     }
 
+    if(get_use_roctracer())
+    {
+        OMNITRACE_VERBOSE_F(1, "Flushing roctracer...\n");
+        // ensure that roctracer is flushed before setting the state to finalized
+        comp::roctracer::flush();
+    }
+
     set_state(State::Finalized);
 
     push_enable_sampling_on_child_threads(false);

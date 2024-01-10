@@ -33,6 +33,7 @@
 #include "api.hpp"
 #include "core/config.hpp"
 #include "core/gpu.hpp"
+#include "core/hip_runtime.hpp"
 #include "library/rocprofiler.hpp"
 
 #include <timemory/components.hpp>
@@ -61,12 +62,6 @@
 #include <tuple>
 #include <utility>
 #include <vector>
-
-#if defined(OMNITRACE_USE_HIP) && OMNITRACE_USE_HIP > 0
-#    include <hip/hip_runtime.h>
-#elif !defined(OMNITRACE_USE_HIP)
-#    define OMNITRACE_USE_HIP 0
-#endif
 
 #if defined(TIMEMORY_UNIX)
 #    include <sys/ioctl.h>  // ioctl() and TIOCGWINSZ

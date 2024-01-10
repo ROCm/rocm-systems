@@ -71,6 +71,10 @@ set(CMAKE_POSITION_INDEPENDENT_CODE
     ON
     CACHE BOOL "Build position independent code")
 
+if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.24)
+    cmake_policy(SET CMP0135 NEW)
+endif()
+
 if("${CMAKE_BUILD_TYPE}" STREQUAL "")
     set(CMAKE_BUILD_TYPE
         Release
@@ -366,8 +370,8 @@ if(NOT OMNITRACE_USE_ROCPROFILER)
 endif()
 
 configure_file(
-    ${PROJECT_SOURCE_DIR}/omnitrace.cfg
-    ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/omnitrace.cfg
+    ${PROJECT_SOURCE_DIR}/perfetto.cfg
+    ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/perfetto.cfg
     COPYONLY)
 
 configure_file(
@@ -381,7 +385,7 @@ configure_file(
 
 install(
     FILES ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/setup-env.sh
-          ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/omnitrace.cfg
+          ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/perfetto.cfg
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}
     COMPONENT setup)
 

@@ -26,16 +26,11 @@
 #include "core/components/fwd.hpp"
 #include "core/defines.hpp"
 #include "core/dynamic_library.hpp"
+#include "core/rccl.hpp"
 #include "core/timemory.hpp"
 #include "library/components/category_region.hpp"
 
 #include <timemory/timemory.hpp>
-
-#if OMNITRACE_HIP_VERSION == 0 || OMNITRACE_HIP_VERSION >= 50200
-#    include <rccl/rccl.h>
-#else
-#    include <rccl.h>
-#endif
 
 #include <dlfcn.h>
 #include <limits>
