@@ -160,27 +160,6 @@ TIMEMORY_SET_COMPONENT_API(omnitrace::component::sampling_gpu_temp, project::omn
                            category::temperature, category::sampling,
                            category::process_sampling)
 
-TIMEMORY_PROPERTY_SPECIALIZATION(omnitrace::component::roctracer, OMNITRACE_ROCTRACER,
-                                 "roctracer", "omnitrace_roctracer")
-TIMEMORY_PROPERTY_SPECIALIZATION(omnitrace::component::rocprofiler, OMNITRACE_ROCPROFILER,
-                                 "rocprofiler", "omnitrace_rocprofiler")
-TIMEMORY_PROPERTY_SPECIALIZATION(omnitrace::component::sampling_wall_clock,
-                                 OMNITRACE_SAMPLING_WALL_CLOCK, "sampling_wall_clock", "")
-TIMEMORY_PROPERTY_SPECIALIZATION(omnitrace::component::sampling_cpu_clock,
-                                 OMNITRACE_SAMPLING_CPU_CLOCK, "sampling_cpu_clock", "")
-TIMEMORY_PROPERTY_SPECIALIZATION(omnitrace::component::sampling_percent,
-                                 OMNITRACE_SAMPLING_PERCENT, "sampling_percent", "")
-TIMEMORY_PROPERTY_SPECIALIZATION(omnitrace::component::sampling_gpu_busy,
-                                 OMNITRACE_SAMPLING_GPU_BUSY, "sampling_gpu_busy",
-                                 "sampling_gpu_util")
-TIMEMORY_PROPERTY_SPECIALIZATION(omnitrace::component::sampling_gpu_memory,
-                                 OMNITRACE_SAMPLING_GPU_MEMORY_USAGE,
-                                 "sampling_gpu_memory_usage", "")
-TIMEMORY_PROPERTY_SPECIALIZATION(omnitrace::component::sampling_gpu_power,
-                                 OMNITRACE_SAMPLING_GPU_POWER, "sampling_gpu_power", "")
-TIMEMORY_PROPERTY_SPECIALIZATION(omnitrace::component::sampling_gpu_temp,
-                                 OMNITRACE_SAMPLING_GPU_TEMP, "sampling_gpu_temp", "")
-
 TIMEMORY_METADATA_SPECIALIZATION(omnitrace::component::roctracer, "roctracer",
                                  "High-precision ROCm API and kernel tracing", "")
 TIMEMORY_METADATA_SPECIALIZATION(omnitrace::component::rocprofiler, "rocprofiler",
