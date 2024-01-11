@@ -918,6 +918,9 @@ struct metrics_table_header_t {
   uint8_t       content_revision;
   /// \endcond
 };
+/// \cond Ignore in docs.
+typedef struct metrics_table_header_t metrics_table_header_t;
+/// \endcond
 
 /**
  * @brief The following structure holds the gpu metrics values for a device.
@@ -934,9 +937,14 @@ struct metrics_table_header_t {
 #define RSMI_NUM_HBM_INSTANCES 4
 
 /**
- * @brief This should match kRSMI_MAX_NUM_VCN
+ * @brief This should match kRSMI_MAX_NUM_VCNS
  */
-#define RSMI_MAX_NUM_VCN 4
+#define RSMI_MAX_NUM_VCNS 4
+
+/**
+ * @brief This should match kRSMI_MAX_JPEG_ENGINES
+ */
+#define RSMI_MAX_NUM_JPEG_ENGS 32
 
 /**
  * @brief This should match kRSMI_MAX_NUM_CLKS
@@ -1057,7 +1065,7 @@ typedef struct {
   uint16_t current_socket_power;
 
   // Utilization (%)
-  uint16_t vcn_activity[RSMI_MAX_NUM_VCN]; // VCN instances activity percent (encode/decode)
+  uint16_t vcn_activity[RSMI_MAX_NUM_VCNS]; // VCN instances activity percent (encode/decode)
 
   // Clock Lock Status. Each bit corresponds to clock instance
   uint32_t gfxclk_lock_status;
@@ -1090,6 +1098,19 @@ typedef struct {
   uint16_t current_socclks[RSMI_MAX_NUM_CLKS];
   uint16_t current_vclk0s[RSMI_MAX_NUM_CLKS];
   uint16_t current_dclk0s[RSMI_MAX_NUM_CLKS];
+
+  /*
+   * v1.5 additions
+   */
+  // JPEG activity percent (encode/decode)
+  uint16_t jpeg_activity[RSMI_MAX_NUM_JPEG_ENGS];
+
+  // PCIE NAK sent accumulated count
+  uint32_t pcie_nak_sent_count_acc;
+
+  // PCIE NAK received accumulated count
+  uint32_t pcie_nak_rcvd_count_acc;
+
 
   /// \endcond
 } rsmi_gpu_metrics_t;
@@ -4366,7 +4387,8 @@ rsmi_status_t rsmi_event_notification_stop(uint32_t dv_ind);
  * Metric multi-valued counter types
  */
 typedef uint16_t GPUMetricTempHbm_t[RSMI_NUM_HBM_INSTANCES];
-typedef uint16_t GPUMetricVcnActivity_t[RSMI_MAX_NUM_VCN];
+typedef uint16_t GPUMetricVcnActivity_t[RSMI_MAX_NUM_VCNS];
+typedef uint16_t GPUMetricJpegActivity_t[RSMI_MAX_NUM_JPEG_ENGS];
 typedef uint64_t GPUMetricXgmiReadDataAcc_t[RSMI_MAX_NUM_XGMI_LINKS];
 typedef uint64_t GPUMetricXgmiWriteDataAcc_t[RSMI_MAX_NUM_XGMI_LINKS];
 typedef uint16_t GPUMetricCurrGfxClk_t[RSMI_MAX_NUM_GFX_CLKS];
@@ -4798,6 +4820,44 @@ rsmi_status_t
 rsmi_dev_metrics_pcie_replay_rover_count_acc_get(uint32_t dv_ind, uint64_t* pcie_count_acc_value);
 
 /**
+ *  @brief Get the 'pcie_nak_sent_count_acc' from the GPU metrics associated with the device
+ *
+ *  @details Given a device index @p dv_ind and a pointer to a uint32_t in which
+ *  the 'mem_max_bandwidth_usage' will stored
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[inout] pcie_nak_sent_count_acc_value a pointer to uint32_t to which the device gpu
+ *  metric unit will be stored
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ *          ::RSMI_STATUS_NOT_SUPPORTED is returned in case the metric unit
+ *            does not exist for the given device
+ *
+ */
+rsmi_status_t
+rsmi_dev_metrics_pcie_nak_sent_count_acc_get(uint32_t dv_ind, uint32_t* pcie_nak_sent_count_acc_value);
+
+/**
+ *  @brief Get the 'pcie_nak_rcvd_count_acc' from the GPU metrics associated with the device
+ *
+ *  @details Given a device index @p dv_ind and a pointer to a uint32_t in which
+ *  the 'mem_max_bandwidth_usage' will stored
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[inout] pcie_nak_rcvd_count_acc_value a pointer to uint32_t to which the device gpu
+ *  metric unit will be stored
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ *          ::RSMI_STATUS_NOT_SUPPORTED is returned in case the metric unit
+ *            does not exist for the given device
+ *
+ */
+rsmi_status_t
+rsmi_dev_metrics_pcie_nak_rcvd_count_acc_get(uint32_t dv_ind, uint32_t* pcie_nak_rcvd_count_acc_value);
+
+/**
  *  @brief Get the 'curr_uclk' from the GPU metrics associated with the device
  *
  *  @details Given a device index @p dv_ind and a pointer to a uint16_t in which
@@ -4852,7 +4912,7 @@ rsmi_dev_metrics_temp_hbm_get(uint32_t dv_ind, GPUMetricTempHbm_t* temp_hbm_valu
  *
  *  @param[inout] vcn_activity_value a pointer to uint16_t to which the device gpu
  *  metric unit will be stored
- *      - This is a multi-valued counter holding a 4 (RSMI_MAX_NUM_VCN)
+ *      - This is a multi-valued counter holding a 4 (RSMI_MAX_NUM_VCNS)
  *        element array (GPUMetricVcnActivity_t)
  *
  *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
@@ -4862,6 +4922,27 @@ rsmi_dev_metrics_temp_hbm_get(uint32_t dv_ind, GPUMetricTempHbm_t* temp_hbm_valu
  */
 rsmi_status_t
 rsmi_dev_metrics_vcn_activity_get(uint32_t dv_ind, GPUMetricVcnActivity_t* vcn_activity_value);
+
+/**
+ *  @brief Get the 'jpeg_activity' from the GPU metrics associated with the device
+ *
+ *  @details Given a device index @p dv_ind and a pointer to a uint16_t in which
+ *  the 'vcn_activity' will stored
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[inout] jpeg_activity_value a pointer to uint16_t to which the device gpu
+ *  metric unit will be stored
+ *      - This is a multi-valued counter holding a 32 (RSMI_MAX_NUM_JPEG_ENGS)
+ *        element array (GPUMetricJpegActivity_t)
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
+ *          ::RSMI_STATUS_NOT_SUPPORTED is returned in case the metric unit
+ *            does not exist for the given device
+ *
+ */
+rsmi_status_t
+rsmi_dev_metrics_jpeg_activity_get(uint32_t dv_ind, GPUMetricJpegActivity_t* jpeg_activity_value);
 
 /**
  *  @brief Get the 'xgmi_read_data' from the GPU metrics associated with the device

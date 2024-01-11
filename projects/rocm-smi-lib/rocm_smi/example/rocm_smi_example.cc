@@ -990,6 +990,7 @@ int main() {
     metrics_table_header_t header_values;
     GPUMetricTempHbm_t hbm_values;
     GPUMetricVcnActivity_t vcn_values;
+    GPUMetricJpegActivity_t jpeg_values;
     GPUMetricXgmiReadDataAcc_t xgmi_read_values;
     GPUMetricXgmiWriteDataAcc_t xgmi_write_values;
     GPUMetricCurrGfxClk_t curr_gfxclk_values;
@@ -1039,6 +1040,8 @@ int main() {
     std::cout << "\t  -> average_mm_activity(): " << print_error_or_value(ret, val_ui16) << "\n";
     ret = rsmi_dev_metrics_vcn_activity_get(i, &vcn_values);
     std::cout << "\t  -> vcn_activity(): " << print_error_or_value(ret, vcn_values) << "\n";
+    ret = rsmi_dev_metrics_jpeg_activity_get(i, &jpeg_values);
+    std::cout << "\t  -> jpeg_activity(): " << print_error_or_value(ret, jpeg_values) << "\n";
     ret = rsmi_dev_metrics_mem_activity_acc_get(i, &val_ui32);
     std::cout << "\t  -> mem_activity_accum(): " << print_error_or_value(ret, val_ui32) << "\n";
     ret = rsmi_dev_metrics_gfx_activity_acc_get(i, &val_ui32);
@@ -1119,6 +1122,10 @@ int main() {
     std::cout << "\t  -> xgmi_read_data(): " << print_error_or_value(ret, xgmi_read_values) << "\n";
     ret = rsmi_dev_metrics_xgmi_write_data_get(i, &xgmi_write_values);
     std::cout << "\t  -> xgmi_write_data(): " << print_error_or_value(ret, xgmi_write_values) << "\n";
+    ret = rsmi_dev_metrics_pcie_nak_sent_count_acc_get(i, &val_ui32);
+    std::cout << "\t  -> pcie_nak_sent_count_accum(): " << print_error_or_value(ret, val_ui32) << "\n";
+    ret = rsmi_dev_metrics_pcie_nak_rcvd_count_acc_get(i, &val_ui32);
+    std::cout << "\t  -> pcie_nak_rcvd_count_accum(): " << print_error_or_value(ret, val_ui32) << "\n";
 
     std::cout << "\n";
     std::cout << "\t[Voltage]" << "\n";

@@ -191,11 +191,16 @@ void TestGpuMetricsRead::Run(void) {
           std::cout << "\tindep_throttle_status=" << std::dec << smu.indep_throttle_status  << '\n';
           std::cout << "\tcurrent_socket_power=" << std::dec << smu.current_socket_power  << '\n';
 
-          for (int i = 0; i < RSMI_MAX_NUM_VCN; ++i) {
+          for (int i = 0; i < RSMI_MAX_NUM_VCNS; ++i) {
             std::cout << "\tvcn_activity[" << i << "]=" << std::dec << smu.vcn_activity[i] << '\n';
           }
-
           std::cout << "\n";
+
+          for (int i = 0; i < RSMI_MAX_NUM_JPEG_ENGS; ++i) {
+            std::cout << "\tjpeg_activity[" << i << "]=" << std::dec << smu.jpeg_activity[i] << '\n';
+          }
+          std::cout << "\n";
+
           std::cout << "\tgfxclk_lock_status=" << std::dec << smu.gfxclk_lock_status  << '\n';
           std::cout << "\txgmi_link_width=" << std::dec << smu.xgmi_link_width  << '\n';
           std::cout << "\txgmi_link_speed=" << std::dec << smu.xgmi_link_speed  << '\n';
@@ -348,6 +353,13 @@ void TestGpuMetricsRead::Run(void) {
       CHK_ERR_ASRT(status_code);
     }
     MetricResults.emplace("rsmi_dev_metrics_vcn_activity_get", status_code);
+
+    GPUMetricJpegActivity_t temp_jpeg_values{};
+    status_code = rsmi_dev_metrics_jpeg_activity_get(i, &temp_jpeg_values);
+    if (status_code != RSMI_STATUS_NOT_SUPPORTED) {
+      CHK_ERR_ASRT(status_code);
+    }
+    MetricResults.emplace("rsmi_dev_metrics_jpeg_activity_get", status_code);
 
     auto temp_mem_activity_accum_value = val_ui32;
     status_code = rsmi_dev_metrics_mem_activity_acc_get(i, &temp_mem_activity_accum_value);
@@ -538,6 +550,20 @@ void TestGpuMetricsRead::Run(void) {
     }
     MetricResults.emplace("rsmi_dev_metrics_pcie_replay_rover_count_acc_get", status_code);
 
+    auto temp_pcie_nak_sent_count_accum_value = val_ui32;
+    status_code = rsmi_dev_metrics_pcie_nak_sent_count_acc_get(i, &temp_pcie_nak_sent_count_accum_value);
+    if (status_code != RSMI_STATUS_NOT_SUPPORTED) {
+      CHK_ERR_ASRT(status_code);
+    }
+    MetricResults.emplace("rsmi_dev_metrics_pcie_nak_sent_count_acc_get", status_code);
+
+    auto temp_pcie_nak_rcvd_count_accum_value = val_ui32;
+    status_code = rsmi_dev_metrics_pcie_nak_rcvd_count_acc_get(i, &temp_pcie_nak_rcvd_count_accum_value);
+    if (status_code != RSMI_STATUS_NOT_SUPPORTED) {
+      CHK_ERR_ASRT(status_code);
+    }
+    MetricResults.emplace("rsmi_dev_metrics_pcie_nak_rcvd_count_acc_get", status_code);
+
     auto temp_xgmi_link_width_value = val_ui16;
     status_code = rsmi_dev_metrics_xgmi_link_width_get(i, &temp_xgmi_link_width_value);
     if (status_code != RSMI_STATUS_NOT_SUPPORTED) {
@@ -631,6 +657,8 @@ void TestGpuMetricsRead::Run(void) {
       std::cout << print_error_or_value("\t  -> average_umc_activity(): ", "rsmi_dev_metrics_avg_umc_activity_get", temp_avg_umc_activity_value) << "\n";
       std::cout << print_error_or_value("\t  -> average_mm_activity(): ", "rsmi_dev_metrics_avg_mm_activity_get", temp_avg_mm_activity_value) << "\n";
       std::cout << print_error_or_value("\t  -> vcn_activity[]: ", "rsmi_dev_metrics_vcn_activity_get", temp_vcn_values) << "\n";
+      std::cout << print_error_or_value("\t  -> jpeg_activity[]: ", "rsmi_dev_metrics_jpeg_activity_get", temp_jpeg_values) << "\n";
+
       std::cout << "\n";
       std::cout << print_error_or_value("\t  -> mem_activity_accum(): ", "rsmi_dev_metrics_mem_activity_acc_get", temp_mem_activity_accum_value) << "\n";
       std::cout << print_error_or_value("\t  -> gfx_activity_accum(): ", "rsmi_dev_metrics_gfx_activity_acc_get", temp_gfx_activity_accum_value) << "\n";
@@ -677,6 +705,8 @@ void TestGpuMetricsRead::Run(void) {
       std::cout << print_error_or_value("\t  -> pcie_l0_recov_count_accum(): ", "rsmi_dev_metrics_pcie_l0_recov_count_acc_get", temp_pcie_l0_recov_count_accum_value) << "\n";
       std::cout << print_error_or_value("\t  -> pcie_replay_count_accum(): ", "rsmi_dev_metrics_pcie_replay_count_acc_get", temp_pcie_replay_count_accum_value) << "\n";
       std::cout << print_error_or_value("\t  -> pcie_replay_rollover_count_accum(): ", "rsmi_dev_metrics_pcie_replay_rover_count_acc_get", temp_pcie_replay_rover_count_accum_value) << "\n";
+      std::cout << print_error_or_value("\t  -> pcie_nak_sent_count_accum(): ", "rsmi_dev_metrics_pcie_nak_sent_count_acc_get", temp_pcie_nak_sent_count_accum_value) << "\n";
+      std::cout << print_error_or_value("\t  -> pcie_nak_rcvd_count_accum(): ", "rsmi_dev_metrics_pcie_nak_rcvd_count_acc_get", temp_pcie_nak_rcvd_count_accum_value) << "\n";
       std::cout << print_error_or_value("\t  -> xgmi_link_width(): ", "rsmi_dev_metrics_xgmi_link_width_get", temp_xgmi_link_width_value) << "\n";
       std::cout << print_error_or_value("\t  -> xgmi_link_speed(): ", "rsmi_dev_metrics_xgmi_link_speed_get", temp_xgmi_link_speed_value) << "\n";
       std::cout << print_error_or_value("\t  -> xgmi_read_data[]: ", "rsmi_dev_metrics_xgmi_read_data_get", temp_xgmi_read_values) << "\n";
