@@ -192,7 +192,7 @@ def run_prof(fname, profiler_options):
 
     # profile the app
     success, output = capture_subprocess_output(
-        [ rocprof_cmd, "-i", fname ] + options
+        [ rocprof_cmd ] + options
     )
 
     if not success:

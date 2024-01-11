@@ -31,6 +31,7 @@ import glob
 import re
 import numpy as np
 from utils.utils import demarcate
+from pathlib import Path
 
 class OmniSoC_Base():
     def __init__(self,args):
@@ -57,8 +58,8 @@ class OmniSoC_Base():
         self.__perfmon_config = config
     def set_soc_param(self, param: dict):
         self.__soc_params = param
-    def get_perfmon_dir(self):
-        return self.__perfmon_dir
+    def get_workload_perfmon_dir(self):
+        return str(Path(self.__perfmon_dir).parent.absolute())
     def get_soc_param(self):
         return self.__soc_params
     def set_soc(self, soc: str):

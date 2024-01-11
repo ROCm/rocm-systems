@@ -334,9 +334,9 @@ class OmniProfiler_Base():
                     logging.debug(output)
             logging.info("\nCurrent input file: %s" % fname)
             
-            options = self.get_profiler_options(fname)
-            options += self._soc.get_profiler_options()
-            print("options are ", options)
+            # Fetch any SoC/profiler specific profiling options
+            options = self._soc.get_profiler_options()
+            options += self.get_profiler_options(fname)
 
             if self.__profiler == "rocprofv1" or self.__profiler == "rocprofv2":
                 run_prof(

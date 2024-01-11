@@ -66,7 +66,7 @@ class gfx908_soc (OmniSoC_Base):
     @demarcate
     def get_profiler_options(self):
         # Mi100 requires a custom xml config
-        return ["-m", self.get_perfmon_dir() + "/" + "metrics.xml"]
+        return ["-m", self.get_workload_perfmon_dir() + "/" + "metrics.xml"]
 
     #-----------------------
     # Required child methods
