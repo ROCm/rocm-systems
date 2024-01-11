@@ -15,7 +15,6 @@ set(RDC_ROCP_LIB_INC_LIST
     "${RDC_LIB_INC_DIR}/RdcDiagnosticLibInterface.h"
     "${RDC_LIB_INC_DIR}/rdc_common.h"
     "${RDC_LIB_INC_DIR}/RdcLogger.h"
-    "${INC_DIR}/RdcTelemetryLib.h"
     "${INC_DIR}/RdcRocpBase.h")
 
 if(BUILD_ROCPTEST)

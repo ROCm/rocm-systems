@@ -43,12 +43,13 @@
  *
  */
 
+#include "rdc_tests/test_utils.h"
+
 #include <map>
 
 #include "rocm_smi/rocm_smi.h"
-#include "rdc_tests/test_utils.h"
 
-static const std::map<rsmi_fw_block_t, const char *> kDevFWNameMap = {
+static const std::map<rsmi_fw_block_t, const char*> kDevFWNameMap = {
     {RSMI_FW_BLOCK_ASD, "asd"},
     {RSMI_FW_BLOCK_CE, "ce"},
     {RSMI_FW_BLOCK_DMCU, "dmcu"},
@@ -72,8 +73,4 @@ static const std::map<rsmi_fw_block_t, const char *> kDevFWNameMap = {
     {RSMI_FW_BLOCK_VCN, "vcn"},
 };
 
-
-const char *
-NameFromFWEnum(rsmi_fw_block_t blk) {
-  return kDevFWNameMap.at(blk);
-}
+const char* NameFromFWEnum(rsmi_fw_block_t blk) { return kDevFWNameMap.at(blk); }

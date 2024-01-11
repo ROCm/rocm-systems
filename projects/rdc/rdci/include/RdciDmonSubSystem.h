@@ -22,58 +22,57 @@ THE SOFTWARE.
 #ifndef RDCI_INCLUDE_RDCIDMONSUBSYSTEM_H_
 #define RDCI_INCLUDE_RDCIDMONSUBSYSTEM_H_
 #include <signal.h>
+
 #include <map>
 #include <vector>
-#include "RdciSubSystem.h"
 
+#include "RdciSubSystem.h"
 
 namespace amd {
 namespace rdc {
 
-class RdciDmonSubSystem: public RdciSubSystem {
+class RdciDmonSubSystem : public RdciSubSystem {
  public:
-     RdciDmonSubSystem();
-     ~RdciDmonSubSystem();
-     void parse_cmd_opts(int argc, char ** argv) override;
-     void process() override;
+  RdciDmonSubSystem();
+  ~RdciDmonSubSystem();
+  void parse_cmd_opts(int argc, char** argv) override;
+  void process() override;
 
  private:
-     void show_help() const;
-     void show_field_usage() const;
-     void clean_up();
+  void show_help() const;
+  void show_field_usage() const;
+  void clean_up();
 
-     void create_temp_group();
-     void create_temp_field_group();
+  void create_temp_group();
+  void create_temp_field_group();
 
-     enum OPERATIONS {
-        DMON_UNKNOWN = 0,
-        DMON_HELP,
-        DMON_LIST_FIELDS,
-        DMON_LIST_ALL_FIELDS,
-        DMON_MONITOR
-     } dmon_ops_;
+  enum OPERATIONS {
+    DMON_UNKNOWN = 0,
+    DMON_HELP,
+    DMON_LIST_FIELDS,
+    DMON_LIST_ALL_FIELDS,
+    DMON_MONITOR
+  } dmon_ops_;
 
-     enum OPTIONS {
-        OPTIONS_UNKNOWN = 0,
-        OPTIONS_COUNT,
-        OPTIONS_DELAY,
-        OPTIONS_FIELD_GROUP_ID,
-        OPTIONS_GROUP_ID
-     };
+  enum OPTIONS {
+    OPTIONS_UNKNOWN = 0,
+    OPTIONS_COUNT,
+    OPTIONS_DELAY,
+    OPTIONS_FIELD_GROUP_ID,
+    OPTIONS_GROUP_ID
+  };
 
-     std::map<OPTIONS, uint32_t> options_;
-     std::vector<rdc_field_t> field_ids_;
-     std::vector<uint32_t> gpu_indexes_;
-     bool need_cleanup_;
-     uint64_t latest_time_stamp_;
-     bool show_timpstamps_;
-     static volatile sig_atomic_t is_terminating_;
-     static void set_terminating(int sig);
+  std::map<OPTIONS, uint32_t> options_;
+  std::vector<rdc_field_t> field_ids_;
+  std::vector<uint32_t> gpu_indexes_;
+  bool need_cleanup_;
+  uint64_t latest_time_stamp_;
+  bool show_timpstamps_;
+  static volatile sig_atomic_t is_terminating_;
+  static void set_terminating(int sig);
 };
-
 
 }  // namespace rdc
 }  // namespace amd
-
 
 #endif  // RDCI_INCLUDE_RDCIDMONSUBSYSTEM_H_

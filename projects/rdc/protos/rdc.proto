@@ -218,12 +218,16 @@ service RdcAPI {
   // rdc_status_t rdc_diagnostic_run(
   //  rdc_gpu_group_t group_id,
   //  rdc_diag_level_t level,
+  //  const char* config,
+  //  size_t config_size,
   //  rdc_diag_response_t* response);
   rpc DiagnosticRun(DiagnosticRunRequest) returns (DiagnosticRunResponse) {}
 
   // rdc_status_t rdc_test_case_run(
   //   rdc_gpu_group_t group_id,
   //    rdc_diag_test_cases_t test_case,
+  //    const char* config,
+  //    size_t config_size,
   //    rdc_diag_test_result_t* result);
   rpc DiagnosticTestCaseRun(DiagnosticTestCaseRunRequest) returns (DiagnosticTestCaseRunResponse) {}
 }
@@ -476,6 +480,8 @@ message RemoveAllJobResponse {
 message DiagnosticRunRequest {
   uint32 group_id = 1;
   uint32 level = 2;
+  string config = 3;
+  uint32 config_size = 4;
 }
 
 message DiagnosticDetail {
@@ -498,7 +504,8 @@ message DiagnosticTestResult {
     VRAM_CHECK = 3;
     SYS_MEM_CHECK = 4;
     NODE_TOPOLOGY = 5;
-    GPU_PARAMETERS = 6;
+    RVS_TEST = 6;
+    GPU_PARAMETERS = 7;
   };
   DiagnosticTestCase test_case = 3;
   uint32 per_gpu_result_count = 4;
@@ -525,9 +532,12 @@ message DiagnosticTestCaseRunRequest {
       VRAM_CHECK = 3;
       SYS_MEM_CHECK = 4;
       NODE_TOPOLOGY = 5;
-      GPU_PARAMETERS = 6;
+      RVS_TEST = 6;
+      GPU_PARAMETERS = 7;
     };
     TestCaseType test_case = 2;
+    string config = 3;
+    uint32 config_size = 4;
 }
 
 message DiagnosticTestCaseRunResponse {

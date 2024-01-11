@@ -24,8 +24,9 @@ THE SOFTWARE.
 
 #include <memory>
 #include <vector>
-#include "rdc_lib/rdc_common.h"
+
 #include "rdc/rdc.h"
+#include "rdc_lib/rdc_common.h"
 
 namespace amd {
 namespace rdc {
@@ -33,24 +34,22 @@ namespace rdc {
 extern const uint32_t kMaxRSMIEvents;
 
 typedef struct {
-    uint32_t gpu_id;
-    rdc_field_value field;
+  uint32_t gpu_id;
+  rdc_field_value field;
 } rdc_evnt_notification_t;
 
 class RdcNotification {
  public:
-    virtual bool is_notification_event(rdc_field_t field) const = 0;
+  virtual bool is_notification_event(rdc_field_t field) const = 0;
 
-    virtual rdc_status_t
-                 set_listen_events(const std::vector<RdcFieldKey> fk_arr) = 0;
+  virtual rdc_status_t set_listen_events(const std::vector<RdcFieldKey> fk_arr) = 0;
 
-    // Blocking
-    virtual rdc_status_t
-    listen(rdc_evnt_notification_t *events, uint32_t *num_events,
-                                                     uint32_t timeout_ms) = 0;
+  // Blocking
+  virtual rdc_status_t listen(rdc_evnt_notification_t* events, uint32_t* num_events,
+                              uint32_t timeout_ms) = 0;
 
-    virtual rdc_status_t stop_listening(uint32_t gpu_id) = 0;
-    virtual ~RdcNotification() {}
+  virtual rdc_status_t stop_listening(uint32_t gpu_id) = 0;
+  virtual ~RdcNotification() {}
 };
 
 typedef std::shared_ptr<RdcNotification> RdcNotificationPtr;
@@ -59,4 +58,3 @@ typedef std::shared_ptr<RdcNotification> RdcNotificationPtr;
 }  // namespace amd
 
 #endif  // INCLUDE_RDC_LIB_RDCNOTIFICATION_H_
-

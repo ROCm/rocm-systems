@@ -60,6 +60,7 @@ set(BOOTSTRAP_LIB "rdc_bootstrap")
 set(RDC_LIB "rdc")
 set(RDC_ROCR_LIB "rdc_rocr")
 set(RDC_ROCP_LIB "rdc_rocp")
+set(RDC_RVS_LIB "rdc_rvs")
 set(RDCCLIENT_LIB "rdc_client")
 
 ################# Determine the library version #########################
@@ -95,6 +96,9 @@ add_subdirectory(rdc_modules/rdc_rocr)
 
 # add librdc_rocp.so to RDC_LIB_MODULES
 add_subdirectory(rdc_modules/rdc_rocp)
+
+# add librdc_rvs.so to RDC_LIB_MODULES
+add_subdirectory(rdc_modules/rdc_rvs)
 
 if(BUILD_STANDALONE)
     # add librdc_client.so

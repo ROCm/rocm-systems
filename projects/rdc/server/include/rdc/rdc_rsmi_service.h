@@ -23,46 +23,40 @@ THE SOFTWARE.
 #define SERVER_INCLUDE_RDC_RDC_RSMI_SERVICE_H_
 
 #include "rdc.grpc.pb.h"  // NOLINT
-#include "rocm_smi/rocm_smi.h"
 #include "rdc/rdc_rsmi_service.h"
+#include "rocm_smi/rocm_smi.h"
 
 namespace amd {
 namespace rdc {
 
 class RsmiServiceImpl final : public ::rdc::Rsmi::Service {
  public:
-    RsmiServiceImpl();
-    ~RsmiServiceImpl();
+  RsmiServiceImpl();
+  ~RsmiServiceImpl();
 
-    rsmi_status_t Initialize(uint64_t rsmi_init_flags = 0);
+  rsmi_status_t Initialize(uint64_t rsmi_init_flags = 0);
 
-    ::grpc::Status
-    GetNumDevices(::grpc::ServerContext* context,
-                                   const ::rdc::GetNumDevicesRequest* request,
-                                 ::rdc::GetNumDevicesResponse* reply) override;
+  ::grpc::Status GetNumDevices(::grpc::ServerContext* context,
+                               const ::rdc::GetNumDevicesRequest* request,
+                               ::rdc::GetNumDevicesResponse* reply) override;
 
-    ::grpc::Status
-    GetTemperature(::grpc::ServerContext* context,
-           const ::rdc::GetTemperatureRequest* request,
-                             ::rdc::GetTemperatureResponse* response) override;
+  ::grpc::Status GetTemperature(::grpc::ServerContext* context,
+                                const ::rdc::GetTemperatureRequest* request,
+                                ::rdc::GetTemperatureResponse* response) override;
 
-    ::grpc::Status
-    GetFanRpms(::grpc::ServerContext* context,
-           const ::rdc::GetFanRpmsRequest* request,
-                                 ::rdc::GetFanRpmsResponse* response) override;
+  ::grpc::Status GetFanRpms(::grpc::ServerContext* context, const ::rdc::GetFanRpmsRequest* request,
+                            ::rdc::GetFanRpmsResponse* response) override;
 
-    ::grpc::Status
-    GetFanSpeed(::grpc::ServerContext* context,
-           const ::rdc::GetFanSpeedRequest* request,
-                                ::rdc::GetFanSpeedResponse* response) override;
+  ::grpc::Status GetFanSpeed(::grpc::ServerContext* context,
+                             const ::rdc::GetFanSpeedRequest* request,
+                             ::rdc::GetFanSpeedResponse* response) override;
 
-    ::grpc::Status
-    GetFanSpeedMax(::grpc::ServerContext* context,
-           const ::rdc::GetFanSpeedMaxRequest* request,
-                             ::rdc::GetFanSpeedMaxResponse* response) override;
+  ::grpc::Status GetFanSpeedMax(::grpc::ServerContext* context,
+                                const ::rdc::GetFanSpeedMaxRequest* request,
+                                ::rdc::GetFanSpeedMaxResponse* response) override;
 
  private:
-    bool rsmi_initialized_;
+  bool rsmi_initialized_;
 };
 
 }  // namespace rdc

@@ -34,63 +34,48 @@ namespace rdc {
 
 class RdcRocpLib : public RdcTelemetry {
  public:
-    /* Telemetry */
+  /* Telemetry */
 
-    // get support field ids
-    rdc_status_t rdc_telemetry_fields_query(
-        uint32_t field_ids[MAX_NUM_FIELDS],
-        uint32_t* field_count) override;
+  // get support field ids
+  rdc_status_t rdc_telemetry_fields_query(uint32_t field_ids[MAX_NUM_FIELDS],
+                                          uint32_t* field_count) override;
 
-    // Fetch
-    rdc_status_t rdc_telemetry_fields_value_get(
-        rdc_gpu_field_t* fields,
-        uint32_t fields_count,
-        rdc_field_value_f callback,
-        void* user_data) override;
+  // Fetch
+  rdc_status_t rdc_telemetry_fields_value_get(rdc_gpu_field_t* fields, uint32_t fields_count,
+                                              rdc_field_value_f callback, void* user_data) override;
 
-    rdc_status_t rdc_telemetry_fields_watch(
-        rdc_gpu_field_t* fields,
-        uint32_t fields_count) override;
+  rdc_status_t rdc_telemetry_fields_watch(rdc_gpu_field_t* fields, uint32_t fields_count) override;
 
-    rdc_status_t rdc_telemetry_fields_unwatch(
-        rdc_gpu_field_t* fields,
-        uint32_t fields_count) override;
+  rdc_status_t rdc_telemetry_fields_unwatch(rdc_gpu_field_t* fields,
+                                            uint32_t fields_count) override;
 
-    explicit RdcRocpLib(const char* lib_name);
+  RdcRocpLib();
 
-    ~RdcRocpLib();
+  ~RdcRocpLib();
 
  private:
-    RdcLibraryLoader lib_loader_;
+  RdcLibraryLoader lib_loader_;
 
-    rdc_status_t (*telemetry_fields_query_)(
-        uint32_t field_ids[MAX_NUM_FIELDS],
-        uint32_t* field_count);
+  rdc_status_t (*telemetry_fields_query_)(uint32_t field_ids[MAX_NUM_FIELDS],
+                                          uint32_t* field_count);
 
-    rdc_status_t (*telemetry_fields_value_get_)(
-        rdc_gpu_field_t* fields,
-        uint32_t fields_count,
-        rdc_field_value_f callback,
-        void* user_data);
+  rdc_status_t (*telemetry_fields_value_get_)(rdc_gpu_field_t* fields, uint32_t fields_count,
+                                              rdc_field_value_f callback, void* user_data);
 
-    rdc_status_t (*telemetry_fields_watch_)(
-        rdc_gpu_field_t* fields,
-        uint32_t fields_count);
+  rdc_status_t (*telemetry_fields_watch_)(rdc_gpu_field_t* fields, uint32_t fields_count);
 
-    rdc_status_t (*telemetry_fields_unwatch_)(
-        rdc_gpu_field_t* fields,
-        uint32_t fields_count);
+  rdc_status_t (*telemetry_fields_unwatch_)(rdc_gpu_field_t* fields, uint32_t fields_count);
 
-    /**
-     * @brief Extract current ROCM_PATH from library or the environment
-     */
-    std::string get_rocm_path();
+  /**
+   * @brief Extract current ROCM_PATH from library or the environment
+   */
+  std::string get_rocm_path();
 
-    /**
-     * @brief Set ROCMTOOLS_METRICS_PATH environment variable needed by
-     * librocmtools
-     */
-    rdc_status_t set_rocmtools_path();
+  /**
+   * @brief Set ROCMTOOLS_METRICS_PATH environment variable needed by
+   * librocmtools
+   */
+  rdc_status_t set_rocmtools_path();
 };
 
 using RdcRocpLibPtr = std::shared_ptr<RdcRocpLib>;

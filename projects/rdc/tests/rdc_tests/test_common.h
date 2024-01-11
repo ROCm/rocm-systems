@@ -24,8 +24,8 @@ THE SOFTWARE.
 #define TESTS_RDC_TESTS_TEST_COMMON_H_
 
 #include <memory>
-#include <vector>
 #include <string>
+#include <vector>
 
 #include "rocm_smi/rocm_smi.h"
 
@@ -45,38 +45,40 @@ struct RDCTstGlobals {
 uint32_t ProcessCmdline(RDCTstGlobals* test, int arg_cnt, char** arg_list);
 
 void PrintTestHeader(uint32_t dv_ind);
-const char *GetBlockNameStr(rsmi_gpu_block_t id);
-const char *GetErrStateNameStr(rsmi_ras_err_state_t st);
-//const char *GetGRPCChanStateStr(grpc_connectivity_state st);
-const char *FreqEnumToStr(rsmi_clk_type rsmi_clk);
+const char* GetBlockNameStr(rsmi_gpu_block_t id);
+const char* GetErrStateNameStr(rsmi_ras_err_state_t st);
+// const char *GetGRPCChanStateStr(grpc_connectivity_state st);
+const char* FreqEnumToStr(rsmi_clk_type rsmi_clk);
 
 #if ENABLE_SMI
-void DumpMonitorInfo(const TestBase *test);
+void DumpMonitorInfo(const TestBase* test);
 #endif
 
-#define DISPLAY_RDC_ERR(RET) { \
-  if (RET != RDC_STATUS_SUCCESS) { \
-    const char *err_str; \
-    std::cout << "\t===> ERROR: RDC call returned " << (RET) << std::endl; \
-    rdc_status_string((RET), &err_str); \
-    std::cout << "\t===> (" << err_str << ")" << std::endl; \
-    std::cout << "\t===> at " << __FILE__ << ":" << std::dec << __LINE__ << \
-                                                                  std::endl; \
-  } \
-}
+#define DISPLAY_RDC_ERR(RET)                                                             \
+  {                                                                                      \
+    if (RET != RDC_STATUS_SUCCESS) {                                                     \
+      const char* err_str;                                                               \
+      std::cout << "\t===> ERROR: RDC call returned " << (RET) << std::endl;             \
+      rdc_status_string((RET), &err_str);                                                \
+      std::cout << "\t===> (" << err_str << ")" << std::endl;                            \
+      std::cout << "\t===> at " << __FILE__ << ":" << std::dec << __LINE__ << std::endl; \
+    }                                                                                    \
+  }
 
-#define CHK_ERR_RET(RET) { \
-  DISPLAY_RDC_ERR(RET) \
-  if ((RET) != RDC_STATUS_SUCCESS) { \
-    return (RET); \
-  } \
-}
-#define CHK_RDC_PERM_ERR(RET) { \
-    if (RET == RDC_STATUS_PERMISSION) { \
+#define CHK_ERR_RET(RET)               \
+  {                                    \
+    DISPLAY_RDC_ERR(RET)               \
+    if ((RET) != RDC_STATUS_SUCCESS) { \
+      return (RET);                    \
+    }                                  \
+  }
+#define CHK_RDC_PERM_ERR(RET)                                         \
+  {                                                                   \
+    if (RET == RDC_STATUS_PERMISSION) {                               \
       std::cout << "This command requires root access." << std::endl; \
-    } else { \
-      DISPLAY_RDC_ERR(RET) \
-    } \
-}
+    } else {                                                          \
+      DISPLAY_RDC_ERR(RET)                                            \
+    }                                                                 \
+  }
 
 #endif  // TESTS_RDC_TESTS_TEST_COMMON_H_

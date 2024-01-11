@@ -22,40 +22,36 @@ THE SOFTWARE.
 #ifndef INCLUDE_RDC_LIB_IMPL_RDCNOTIFICATIONIMPL_H_
 #define INCLUDE_RDC_LIB_IMPL_RDCNOTIFICATIONIMPL_H_
 
-#include <memory>
-#include <vector>
 #include <map>
+#include <memory>
 #include <mutex>
+#include <vector>
 
-#include "rdc_lib/rdc_common.h"
-#include "rdc_lib/RdcNotification.h"
 #include "rdc/rdc.h"
-
+#include "rdc_lib/RdcNotification.h"
+#include "rdc_lib/rdc_common.h"
 
 namespace amd {
 namespace rdc {
 
 class RdcNotificationImpl : public RdcNotification {
  public:
-    RdcNotificationImpl();
-    ~RdcNotificationImpl();
+  RdcNotificationImpl();
+  ~RdcNotificationImpl();
 
-    bool is_notification_event(rdc_field_t field) const override;
-    rdc_status_t set_listen_events(
-                              const std::vector<RdcFieldKey> fk_arr) override;
-    // Blocking
-    rdc_status_t listen(rdc_evnt_notification_t *events,
-                          uint32_t *num_events, uint32_t timeout_ms) override;
-    rdc_status_t stop_listening(uint32_t gpu_id) override;
+  bool is_notification_event(rdc_field_t field) const override;
+  rdc_status_t set_listen_events(const std::vector<RdcFieldKey> fk_arr) override;
+  // Blocking
+  rdc_status_t listen(rdc_evnt_notification_t* events, uint32_t* num_events,
+                      uint32_t timeout_ms) override;
+  rdc_status_t stop_listening(uint32_t gpu_id) override;
 
  private:
-    std::map<uint32_t, uint64_t> gpu_evnt_notif_masks_;
-    std::mutex notif_mutex_;
+  std::map<uint32_t, uint64_t> gpu_evnt_notif_masks_;
+  std::mutex notif_mutex_;
 };
-
 
 }  // namespace rdc
 }  // namespace amd
 
 #endif  // INCLUDE_RDC_LIB_IMPL_RDCNOTIFICATIONIMPL_H_
-

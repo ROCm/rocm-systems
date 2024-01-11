@@ -22,43 +22,44 @@ THE SOFTWARE.
 
 #include "rdc_lib/RdcLibraryLoader.h"
 
+#include "rdc_lib/RdcException.h"
+
 namespace amd {
 namespace rdc {
 
-RdcLibraryLoader::RdcLibraryLoader(): libHandler_(nullptr) {
-}
+RdcLibraryLoader::RdcLibraryLoader() : libHandler_(nullptr) {}
 
 rdc_status_t RdcLibraryLoader::load(const char* filename) {
-    if (filename == nullptr) {
-        return RDC_ST_FAIL_LOAD_MODULE;
-    }
-    if (libHandler_) {
-        unload();
-    }
+  if (filename == nullptr) {
+    return RDC_ST_FAIL_LOAD_MODULE;
+  }
+  if (libHandler_) {
+    unload();
+  }
 
-    std::lock_guard<std::mutex> guard(library_mutex_);
-    libHandler_ = dlopen(filename, RTLD_LAZY);
-    if (!libHandler_) {
-        char* error = dlerror();
-        RDC_LOG(RDC_ERROR, "Fail to open " << filename <<": " << error);
-        return RDC_ST_FAIL_LOAD_MODULE;
-    }
+  std::lock_guard<std::mutex> guard(library_mutex_);
+  libHandler_ = dlopen(filename, RTLD_LAZY);
+  if (!libHandler_) {
+    char* error = dlerror();
+    throw RdcException(
+        RDC_ST_FAIL_LOAD_MODULE,
+        std::string("Fail to open ") + std::string(filename) + ": " + std::string(error));
+    return RDC_ST_FAIL_LOAD_MODULE;
+  }
 
-    return RDC_ST_OK;
+  return RDC_ST_OK;
 }
 
 rdc_status_t RdcLibraryLoader::unload() {
-        std::lock_guard<std::mutex> guard(library_mutex_);
-        if (libHandler_) {
-            dlclose(libHandler_);
-            libHandler_ = nullptr;
-        }
-        return RDC_ST_OK;
+  std::lock_guard<std::mutex> guard(library_mutex_);
+  if (libHandler_) {
+    dlclose(libHandler_);
+    libHandler_ = nullptr;
+  }
+  return RDC_ST_OK;
 }
 
-RdcLibraryLoader::~RdcLibraryLoader() {
-        unload();
-}
+RdcLibraryLoader::~RdcLibraryLoader() { unload(); }
 
 }  // namespace rdc
 }  // namespace amd

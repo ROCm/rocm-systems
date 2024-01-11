@@ -48,7 +48,6 @@
 
 #include "rocm_smi/rocm_smi.h"
 
-const char *
-NameFromFWEnum(rsmi_fw_block_t blk);
+const char* NameFromFWEnum(rsmi_fw_block_t blk);
 
 #endif  // TESTS_RDC_TESTS_TEST_UTILS_H_

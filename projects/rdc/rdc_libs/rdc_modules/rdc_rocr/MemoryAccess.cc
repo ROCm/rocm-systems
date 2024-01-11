@@ -20,34 +20,36 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
+#include "rdc_modules/rdc_rocr/MemoryAccess.h"
+
 #include <fcntl.h>
+
 #include <algorithm>
 #include <iostream>
-#include <vector>
 #include <memory>
+#include <vector>
 
-#include "rdc_modules/rdc_rocr/common.h"
-#include "rdc_modules/rdc_rocr/MemoryAccess.h"
-#include "rdc_modules/rdc_rocr/base_rocr_utils.h"
 #include "rdc_lib/RdcLogger.h"
 #include "rdc_lib/rdc_common.h"
+#include "rdc_modules/rdc_rocr/base_rocr_utils.h"
+#include "rdc_modules/rdc_rocr/common.h"
 
 namespace amd {
 namespace rdc {
 
-MemoryAccessTest::MemoryAccessTest(uint32_t gpu_index): TestBase(gpu_index) {
+MemoryAccessTest::MemoryAccessTest(uint32_t gpu_index) : TestBase(gpu_index) {
   set_num_iteration(10);  // Number of iterations to execute of the main test;
                           // This is a default value which can be overridden
                           // on the command line.
 
   set_title("RocR Memory Access Tests");
-  set_description("This series of tests check memory allocation"
-    "on GPU and CPU, i.e. GPU access to system memory "
-    "and CPU access to GPU memory.");
+  set_description(
+      "This series of tests check memory allocation"
+      "on GPU and CPU, i.e. GPU access to system memory "
+      "and CPU access to GPU memory.");
 }
 
-MemoryAccessTest::~MemoryAccessTest(void) {
-}
+MemoryAccessTest::~MemoryAccessTest(void) {}
 
 // Any 1-time setup involving member variables used in the rest of the test
 // should be done here.
@@ -74,9 +76,7 @@ void MemoryAccessTest::Run(void) {
   TestBase::Run();
 }
 
-void MemoryAccessTest::DisplayTestInfo(void) {
-  TestBase::DisplayTestInfo();
-}
+void MemoryAccessTest::DisplayTestInfo(void) { TestBase::DisplayTestInfo(); }
 
 void MemoryAccessTest::DisplayResults(void) const {
   // Compare required profile for this test case with what we're actually
@@ -92,18 +92,17 @@ void MemoryAccessTest::Close() {
   TestBase::Close();
 }
 
+typedef struct __attribute__((aligned(16))) args_t {
+  int* a;
+  int* b;
+  int* c;
+} args;
 
-typedef struct  __attribute__ ((aligned(16)))  args_t {
-     int *a;
-     int *b;
-     int *c;
-  } args;
-
-  args *kernArgs = NULL;
+args* kernArgs = NULL;
 
 static const char kSubTestSeparator[] = "  **************************";
 
-static void PrintMemorySubtestHeader(const char *header) {
+static void PrintMemorySubtestHeader(const char* header) {
   RDC_LOG(RDC_DEBUG, "  *** Memory Subtest: " << header << " ***");
 }
 
@@ -113,80 +112,64 @@ static const int kMemoryAllocSize = 8;
 static const int kMemoryAllocSize = 1024;
 #endif
 
-
 // Test to check GPU can read & write to system memory
-void MemoryAccessTest::GPUAccessToCPUMemoryTest(hsa_agent_t cpuAgent,
-                                                   hsa_agent_t gpuAgent) {
+void MemoryAccessTest::GPUAccessToCPUMemoryTest(hsa_agent_t cpuAgent, hsa_agent_t gpuAgent) {
   hsa_status_t err;
 
   // Get Global Memory Pool on the gpuAgent to allocate gpu buffers
   hsa_amd_memory_pool_t gpu_pool;
-  err = hsa_amd_agent_iterate_memory_pools(gpuAgent,
-                                            GetGlobalMemoryPool,
-                                            &gpu_pool);
+  err = hsa_amd_agent_iterate_memory_pools(gpuAgent, GetGlobalMemoryPool, &gpu_pool);
   throw_if_error(err);
 
   hsa_amd_memory_pool_access_t access;
-  hsa_amd_agent_memory_pool_get_info(cpuAgent, gpu_pool,
-                                       HSA_AMD_AGENT_MEMORY_POOL_INFO_ACCESS,
-                                       &access);
+  hsa_amd_agent_memory_pool_get_info(cpuAgent, gpu_pool, HSA_AMD_AGENT_MEMORY_POOL_INFO_ACCESS,
+                                     &access);
   if (access != HSA_AMD_MEMORY_POOL_ACCESS_NEVER_ALLOWED) {
     // hsa objects
-    hsa_queue_t *queue = NULL;  // command queue
+    hsa_queue_t* queue = NULL;  // command queue
     hsa_signal_t signal = {0};  // completion signal
 
     // get queue size
     uint32_t queue_size = 0;
-    err = hsa_agent_get_info(gpuAgent,
-                                HSA_AGENT_INFO_QUEUE_MAX_SIZE, &queue_size);
+    err = hsa_agent_get_info(gpuAgent, HSA_AGENT_INFO_QUEUE_MAX_SIZE, &queue_size);
     throw_if_error(err);
 
     // create queue
-    err = hsa_queue_create(gpuAgent,
-                              queue_size, HSA_QUEUE_TYPE_MULTI,
-                              NULL, NULL, 0, 0, &queue);
+    err = hsa_queue_create(gpuAgent, queue_size, HSA_QUEUE_TYPE_MULTI, NULL, NULL, 0, 0, &queue);
     throw_if_error(err);
 
     // Get System Memory Pool on the cpuAgent to allocate host side buffers
     hsa_amd_memory_pool_t global_pool;
-    err = hsa_amd_agent_iterate_memory_pools(cpuAgent,
-                                              GetGlobalMemoryPool,
-                                              &global_pool);
+    err = hsa_amd_agent_iterate_memory_pools(cpuAgent, GetGlobalMemoryPool, &global_pool);
     throw_if_error(err);
 
     // Find a memory pool that supports kernel arguments.
     hsa_amd_memory_pool_t kernarg_pool;
-    err = hsa_amd_agent_iterate_memory_pools(cpuAgent,
-                                              GetKernArgMemoryPool,
-                                              &kernarg_pool);
+    err = hsa_amd_agent_iterate_memory_pools(cpuAgent, GetKernArgMemoryPool, &kernarg_pool);
     throw_if_error(err);
 
     // Allocate the host side buffers
     // (sys_data,dup_sys_data,cpuResult,kernArg) on system memory
-    int *sys_data = NULL;
-    int *dup_sys_data = NULL;
-    int *cpuResult = NULL;
-    int *gpuResult = NULL;
+    int* sys_data = NULL;
+    int* dup_sys_data = NULL;
+    int* cpuResult = NULL;
+    int* gpuResult = NULL;
 
-    err = hsa_amd_memory_pool_allocate(global_pool,
-                                      kMemoryAllocSize, 0,
-                                      reinterpret_cast<void **>(&cpuResult));
+    err = hsa_amd_memory_pool_allocate(global_pool, kMemoryAllocSize, 0,
+                                       reinterpret_cast<void**>(&cpuResult));
     throw_if_error(err);
 
-    err = hsa_amd_memory_pool_allocate(global_pool,
-                                      kMemoryAllocSize, 0,
-                                      reinterpret_cast<void **>(&sys_data));
+    err = hsa_amd_memory_pool_allocate(global_pool, kMemoryAllocSize, 0,
+                                       reinterpret_cast<void**>(&sys_data));
     throw_if_error(err);
 
-    err = hsa_amd_memory_pool_allocate(global_pool,
-                                      kMemoryAllocSize, 0,
-                                      reinterpret_cast<void **>(&dup_sys_data));
+    err = hsa_amd_memory_pool_allocate(global_pool, kMemoryAllocSize, 0,
+                                       reinterpret_cast<void**>(&dup_sys_data));
     throw_if_error(err);
-
 
     // Allocate the kernel argument buffer from the kernarg_pool.
     err = hsa_amd_memory_pool_allocate(kernarg_pool, sizeof(args_t), 0,
-                                        reinterpret_cast<void **>(&kernArgs));
+                                       reinterpret_cast<void**>(&kernArgs));
     throw_if_error(err);
 
     // initialize the host buffers
@@ -204,9 +187,8 @@ void MemoryAccessTest::GPUAccessToCPUMemoryTest(hsa_agent_t cpuAgent,
     // Get local memory of GPU to allocate device side buffers
 
     err = hsa_amd_memory_pool_allocate(gpu_pool, kMemoryAllocSize, 0,
-                                        reinterpret_cast<void **>(&gpuResult));
+                                       reinterpret_cast<void**>(&gpuResult));
     throw_if_error(err);
-
 
     // Allow cpuAgent access to all allocated GPU memory.
     err = hsa_amd_agents_allow_access(1, &cpuAgent, NULL, gpuResult);
@@ -226,7 +208,6 @@ void MemoryAccessTest::GPUAccessToCPUMemoryTest(hsa_agent_t cpuAgent,
     kernArgs->a = sys_data;
     kernArgs->b = cpuResult;  // system memory passed to gpu for write
     kernArgs->c = gpuResult;  // gpu memory to verify that gpu read system data
-
 
     // Create the executable, get symbol by name and load the code object
     set_kernel_file_name("gpuReadWrite_kernels.hsaco");
@@ -268,22 +249,22 @@ void MemoryAccessTest::GPUAccessToCPUMemoryTest(hsa_agent_t cpuAgent,
 
     WriteAQLToQueueLoc(queue, index, &aql);
 
-    hsa_kernel_dispatch_packet_t *q_base_addr =
-        reinterpret_cast<hsa_kernel_dispatch_packet_t *>(queue->base_address);
+    hsa_kernel_dispatch_packet_t* q_base_addr =
+        reinterpret_cast<hsa_kernel_dispatch_packet_t*>(queue->base_address);
     AtomicSetPacketHeader(
         (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE) |
-           (1 << HSA_PACKET_HEADER_BARRIER) |
-          (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE) |
-           (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE),
-                  (1 << HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS),
-        reinterpret_cast<hsa_kernel_dispatch_packet_t *>
-                                          (&q_base_addr[index & queue_mask]));
+            (1 << HSA_PACKET_HEADER_BARRIER) |
+            (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE) |
+            (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE),
+        (1 << HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS),
+        reinterpret_cast<hsa_kernel_dispatch_packet_t*>(&q_base_addr[index & queue_mask]));
 
     // ringdoor bell
     hsa_signal_store_relaxed(queue->doorbell_signal, index);
     // wait for the signal and reset it for future use
-    while (hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, 1,
-                                      (uint64_t)-1, HSA_WAIT_STATE_ACTIVE)) { }
+    while (hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, 1, (uint64_t)-1,
+                                     HSA_WAIT_STATE_ACTIVE)) {
+    }
     hsa_signal_store_relaxed(signal, 1);
 
     // compare device and host side results
@@ -292,8 +273,7 @@ void MemoryAccessTest::GPUAccessToCPUMemoryTest(hsa_agent_t cpuAgent,
     }
     for (int i = 0; i < kMemoryAllocSize; ++i) {
       if (gpuResult[i] != dup_sys_data[i]) {
-        throw_if_error(HSA_STATUS_ERROR,
-                        "gpuResult does not match dup_sys_data.");
+        throw_if_error(HSA_STATUS_ERROR, "gpuResult does not match dup_sys_data.");
       }
     }
 
@@ -304,7 +284,7 @@ void MemoryAccessTest::GPUAccessToCPUMemoryTest(hsa_agent_t cpuAgent,
     for (int i = 0; i < kMemoryAllocSize; ++i) {
       if (cpuResult[i] != i) {
         throw_if_error(HSA_STATUS_ERROR,
-            "The CPU memory size does not match the system memory size.");
+                       "The CPU memory size does not match the system memory size.");
       }
     }
 
@@ -312,27 +292,39 @@ void MemoryAccessTest::GPUAccessToCPUMemoryTest(hsa_agent_t cpuAgent,
       RDC_LOG(RDC_DEBUG, "gpu has written to system memory successfully");
     }
 
-    if (sys_data) { hsa_memory_free(sys_data); }
-    if (dup_sys_data) { hsa_memory_free(dup_sys_data); }
-    if (cpuResult) {hsa_memory_free(cpuResult); }
-    if (gpuResult) {hsa_memory_free(gpuResult); }
-    if (kernArgs) { hsa_memory_free(kernArgs); }
-    if (signal.handle) { hsa_signal_destroy(signal); }
-    if (queue) { hsa_queue_destroy(queue); }
+    if (sys_data) {
+      hsa_memory_free(sys_data);
+    }
+    if (dup_sys_data) {
+      hsa_memory_free(dup_sys_data);
+    }
+    if (cpuResult) {
+      hsa_memory_free(cpuResult);
+    }
+    if (gpuResult) {
+      hsa_memory_free(gpuResult);
+    }
+    if (kernArgs) {
+      hsa_memory_free(kernArgs);
+    }
+    if (signal.handle) {
+      hsa_signal_destroy(signal);
+    }
+    if (queue) {
+      hsa_queue_destroy(queue);
+    }
 
   } else {
     if (verbosity() > 0) {
-      RDC_LOG(RDC_DEBUG,
-          "Test not applicable as system is not large bar, skipping");
+      RDC_LOG(RDC_DEBUG, "Test not applicable as system is not large bar, skipping");
     }
     return;
   }
 }
 
 // Test to check cpu can read & write to GPU memory
-void MemoryAccessTest::CPUAccessToGPUMemoryTest(hsa_agent_t cpuAgent,
-                                                 hsa_agent_t,
-                                                 hsa_amd_memory_pool_t pool) {
+void MemoryAccessTest::CPUAccessToGPUMemoryTest(hsa_agent_t cpuAgent, hsa_agent_t,
+                                                hsa_amd_memory_pool_t pool) {
   hsa_status_t err;
 
   pool_info_t pool_i;
@@ -340,14 +332,12 @@ void MemoryAccessTest::CPUAccessToGPUMemoryTest(hsa_agent_t cpuAgent,
   throw_if_error(err);
 
   if (pool_i.segment == HSA_AMD_SEGMENT_GLOBAL &&
-        pool_i.global_flag == HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED) {
+      pool_i.global_flag == HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED) {
     hsa_amd_memory_pool_access_t access;
-    hsa_amd_agent_memory_pool_get_info(cpuAgent, pool,
-                                         HSA_AMD_AGENT_MEMORY_POOL_INFO_ACCESS,
-                                         &access);
+    hsa_amd_agent_memory_pool_get_info(cpuAgent, pool, HSA_AMD_AGENT_MEMORY_POOL_INFO_ACCESS,
+                                       &access);
     if (access != HSA_AMD_MEMORY_POOL_ACCESS_NEVER_ALLOWED) {
-      if (!pool_i.alloc_allowed || pool_i.alloc_granule == 0 ||
-                                           pool_i.alloc_alignment == 0) {
+      if (!pool_i.alloc_allowed || pool_i.alloc_granule == 0 || pool_i.alloc_alignment == 0) {
         if (verbosity() > 0) {
           RDC_LOG(RDC_DEBUG, "Test not applicable. Skipping.");
         }
@@ -356,10 +346,10 @@ void MemoryAccessTest::CPUAccessToGPUMemoryTest(hsa_agent_t cpuAgent,
 
       auto gran_sz = pool_i.alloc_granule;
       auto pool_sz = pool_i.size / gran_sz;
-      auto max_alloc_size = pool_sz/2;
-      unsigned int max_element = max_alloc_size/sizeof(unsigned int);
-      unsigned int *gpu_data;
-      unsigned int *sys_data;
+      auto max_alloc_size = pool_sz / 2;
+      unsigned int max_element = max_alloc_size / sizeof(unsigned int);
+      unsigned int* gpu_data;
+      unsigned int* sys_data;
       sys_data = (unsigned int*)malloc(max_alloc_size);
       memset(sys_data, 0, max_alloc_size);
       for (unsigned int i = 1; i <= max_element; ++i) {
@@ -368,7 +358,7 @@ void MemoryAccessTest::CPUAccessToGPUMemoryTest(hsa_agent_t cpuAgent,
       // err = hsa_amd_agents_allow_access(1, &gpuAgent, NULL, sys_data);
       // EXPECT_EQ(err, HSA_STATUS_SUCCESS);
       err = hsa_amd_memory_pool_allocate(pool, max_alloc_size, 0,
-                                          reinterpret_cast<void**>(&gpu_data));
+                                         reinterpret_cast<void**>(&gpu_data));
       throw_if_error(err);
       /*
       if (err == HSA_STATUS_ERROR) {
@@ -385,21 +375,22 @@ void MemoryAccessTest::CPUAccessToGPUMemoryTest(hsa_agent_t cpuAgent,
         gpu_data[i] = i;  // Write to gpu memory directly
       }
 
-     for (unsigned int  i = 1; i <= max_element; ++i) {
-       if (sys_data[i] != gpu_data[i]) {  // Reading GPU memory
-            fprintf(stdout, "Values not mathing !! sys_data[%d]:%d ,"
-                "gpu_data[%d]\n", sys_data[i], i, gpu_data[i]);
-       }
-     }
-     RDC_LOG(RDC_DEBUG, "CPU have read & write to GPU memory successfully");
-     err = hsa_amd_memory_pool_free(gpu_data);
-     free(sys_data);
-     } else {
-        if (verbosity() > 0) {
-          RDC_LOG(RDC_DEBUG,
-            "Test not applicable as system is not large bar, Skipping.");
+      for (unsigned int i = 1; i <= max_element; ++i) {
+        if (sys_data[i] != gpu_data[i]) {  // Reading GPU memory
+          fprintf(stdout,
+                  "Values not mathing !! sys_data[%d]:%d ,"
+                  "gpu_data[%d]\n",
+                  sys_data[i], i, gpu_data[i]);
         }
-        return;
+      }
+      RDC_LOG(RDC_DEBUG, "CPU have read & write to GPU memory successfully");
+      err = hsa_amd_memory_pool_free(gpu_data);
+      free(sys_data);
+    } else {
+      if (verbosity() > 0) {
+        RDC_LOG(RDC_DEBUG, "Test not applicable as system is not large bar, Skipping.");
+      }
+      return;
     }
   }
 }
@@ -416,12 +407,10 @@ void MemoryAccessTest::CPUAccessToGPUMemoryTest(void) {
   std::vector<hsa_agent_t> gpus;
   err = hsa_iterate_agents(IterateGPUAgents, &gpus);
   throw_if_error(err);
-  for (unsigned int i = 0 ; i< gpus.size(); ++i) {
+  for (unsigned int i = 0; i < gpus.size(); ++i) {
     hsa_amd_memory_pool_t gpu_pool;
     memset(&gpu_pool, 0, sizeof(gpu_pool));
-    err = hsa_amd_agent_iterate_memory_pools(gpus[i],
-                                              GetGlobalMemoryPool,
-                                              &gpu_pool);
+    err = hsa_amd_agent_iterate_memory_pools(gpus[i], GetGlobalMemoryPool, &gpu_pool);
     throw_if_error(err);
     if (gpu_pool.handle == 0) {
       RDC_LOG(RDC_DEBUG, "no global mempool in gpu agent");

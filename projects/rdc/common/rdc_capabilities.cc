@@ -20,16 +20,16 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
-#include <sys/capability.h>
-#include <errno.h>
-#include <assert.h>
-
 #include "common/rdc_capabilities.h"
+
+#include <assert.h>
+#include <errno.h>
+#include <sys/capability.h>
 
 namespace amd {
 namespace rdc {
 
-int GetCapability(cap_value_t cap, cap_flag_t cap_type, bool *enabled) {
+int GetCapability(cap_value_t cap, cap_flag_t cap_type, bool* enabled) {
   cap_t caps;
 
   assert(enabled != nullptr);
@@ -41,7 +41,7 @@ int GetCapability(cap_value_t cap, cap_flag_t cap_type, bool *enabled) {
   // Get process's current capabilities
   caps = cap_get_proc();
   if (caps == nullptr) {
-      return errno;
+    return errno;
   }
 
   cap_flag_value_t val;
@@ -52,7 +52,7 @@ int GetCapability(cap_value_t cap, cap_flag_t cap_type, bool *enabled) {
   }
 
   if (cap_free(caps) == -1) {
-      return errno;
+    return errno;
   }
 
   *enabled = (val == CAP_SET ? true : false);
@@ -68,16 +68,15 @@ int ModifyCapability(cap_value_t cap, cap_flag_t cap_type, bool enable) {
   // Get process's current capabilities
   caps = cap_get_proc();
   if (caps == nullptr) {
-      return errno;
+    return errno;
   }
 
   // the 1 in the call below is the size of the cap_list array
   cap_list[0] = cap;
-  if (cap_set_flag(caps, cap_type, 1, cap_list, enable ? CAP_SET : CAP_CLEAR)
-                                                                       == -1) {
+  if (cap_set_flag(caps, cap_type, 1, cap_list, enable ? CAP_SET : CAP_CLEAR) == -1) {
     int ret = errno;
     cap_free(caps);
-      return ret;
+    return ret;
   }
 
   if (cap_set_proc(caps) == -1) {
@@ -87,7 +86,7 @@ int ModifyCapability(cap_value_t cap, cap_flag_t cap_type, bool enable) {
   }
 
   if (cap_free(caps) == -1) {
-      return errno;
+    return errno;
   }
   return 0;
 }

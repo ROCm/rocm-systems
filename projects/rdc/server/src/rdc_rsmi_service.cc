@@ -20,23 +20,23 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
+#include "rdc/rdc_rsmi_service.h"
+
 #include <assert.h>
 #include <grpcpp/grpcpp.h>
 
+#include <csignal>
 #include <iostream>
 #include <memory>
 #include <string>
-#include <csignal>
 
 #include "rdc.grpc.pb.h"  // NOLINT
 #include "rocm_smi/rocm_smi.h"
-#include "rdc/rdc_rsmi_service.h"
 
 namespace amd {
 namespace rdc {
 
-RsmiServiceImpl::RsmiServiceImpl():rsmi_initialized_(false) {
-}
+RsmiServiceImpl::RsmiServiceImpl() : rsmi_initialized_(false) {}
 
 RsmiServiceImpl::~RsmiServiceImpl() {
   if (rsmi_initialized_) {
@@ -48,14 +48,12 @@ RsmiServiceImpl::~RsmiServiceImpl() {
 
 // rsmi and rdc currently happen to have a 1-to-1 mapping, but
 // have this function in case that changes
-static rsmi_temperature_metric_t
-    rdc_temp2rsmi_temp(::rdc::GetTemperatureRequest_TemperatureMetric
-                                                                   rdc_temp) {
+static rsmi_temperature_metric_t rdc_temp2rsmi_temp(
+    ::rdc::GetTemperatureRequest_TemperatureMetric rdc_temp) {
   return static_cast<rsmi_temperature_metric_t>(rdc_temp);
 }
 
-rsmi_status_t
-RsmiServiceImpl::Initialize(uint64_t rsmi_init_flags) {
+rsmi_status_t RsmiServiceImpl::Initialize(uint64_t rsmi_init_flags) {
   rsmi_status_t rsmi_ret = rsmi_init(rsmi_init_flags);
   if (rsmi_ret != RSMI_STATUS_SUCCESS) {
     std::cout << "rsmi_init() returned error" << std::endl;
@@ -65,10 +63,9 @@ RsmiServiceImpl::Initialize(uint64_t rsmi_init_flags) {
   return rsmi_ret;
 }
 
-::grpc::Status
-RsmiServiceImpl::GetNumDevices(::grpc::ServerContext* context,
-                               const ::rdc::GetNumDevicesRequest* request,
-                               ::rdc::GetNumDevicesResponse* reply) {
+::grpc::Status RsmiServiceImpl::GetNumDevices(::grpc::ServerContext* context,
+                                              const ::rdc::GetNumDevicesRequest* request,
+                                              ::rdc::GetNumDevicesResponse* reply) {
   assert(reply != nullptr);
   uint32_t num_devices;
 
@@ -88,65 +85,58 @@ RsmiServiceImpl::GetNumDevices(::grpc::ServerContext* context,
   return ::grpc::Status::OK;
 }
 
-::grpc::Status
-RsmiServiceImpl::GetTemperature(::grpc::ServerContext* context,
-       const ::rdc::GetTemperatureRequest* request,
-                         ::rdc::GetTemperatureResponse* response) {
+::grpc::Status RsmiServiceImpl::GetTemperature(::grpc::ServerContext* context,
+                                               const ::rdc::GetTemperatureRequest* request,
+                                               ::rdc::GetTemperatureResponse* response) {
   (void)context;  // Quiet warning for now;
   assert(response != nullptr);
 
   int64_t temperature;
-  rsmi_status_t ret = rsmi_dev_temp_metric_get(request->dv_ind(),
-      request->sensor_type(), rdc_temp2rsmi_temp(request->metric()),
-                                                              &temperature);
+  rsmi_status_t ret = rsmi_dev_temp_metric_get(request->dv_ind(), request->sensor_type(),
+                                               rdc_temp2rsmi_temp(request->metric()), &temperature);
 
   response->set_temperature(temperature);
   response->set_ret_val(ret);
   return ::grpc::Status::OK;
 }
 
-::grpc::Status
-RsmiServiceImpl::GetFanRpms(::grpc::ServerContext* context,
-       const ::rdc::GetFanRpmsRequest* request,
-                         ::rdc::GetFanRpmsResponse* response) {
+::grpc::Status RsmiServiceImpl::GetFanRpms(::grpc::ServerContext* context,
+                                           const ::rdc::GetFanRpmsRequest* request,
+                                           ::rdc::GetFanRpmsResponse* response) {
   (void)context;  // Quiet warning for now;
   assert(response != nullptr);
 
   int64_t rpms;
-  rsmi_status_t ret = rsmi_dev_fan_rpms_get(request->dv_ind(),
-      request->sensor_ind(), &rpms);
+  rsmi_status_t ret = rsmi_dev_fan_rpms_get(request->dv_ind(), request->sensor_ind(), &rpms);
 
   response->set_rpms(rpms);
   response->set_ret_val(ret);
   return ::grpc::Status::OK;
 }
 
-::grpc::Status
-RsmiServiceImpl::GetFanSpeed(::grpc::ServerContext* context,
-       const ::rdc::GetFanSpeedRequest* request,
-                         ::rdc::GetFanSpeedResponse* response) {
+::grpc::Status RsmiServiceImpl::GetFanSpeed(::grpc::ServerContext* context,
+                                            const ::rdc::GetFanSpeedRequest* request,
+                                            ::rdc::GetFanSpeedResponse* response) {
   (void)context;  // Quiet warning for now;
   assert(response != nullptr);
 
   int64_t speed;
-  rsmi_status_t ret = rsmi_dev_fan_speed_get(request->dv_ind(),
-      request->sensor_ind(), &speed);
+  rsmi_status_t ret = rsmi_dev_fan_speed_get(request->dv_ind(), request->sensor_ind(), &speed);
 
   response->set_speed(speed);
   response->set_ret_val(ret);
   return ::grpc::Status::OK;
 }
 
-::grpc::Status
-RsmiServiceImpl::GetFanSpeedMax(::grpc::ServerContext* context,
-       const ::rdc::GetFanSpeedMaxRequest* request,
-                         ::rdc::GetFanSpeedMaxResponse* response) {
+::grpc::Status RsmiServiceImpl::GetFanSpeedMax(::grpc::ServerContext* context,
+                                               const ::rdc::GetFanSpeedMaxRequest* request,
+                                               ::rdc::GetFanSpeedMaxResponse* response) {
   (void)context;  // Quiet warning for now;
   assert(response != nullptr);
 
   uint64_t max_speed;
-  rsmi_status_t ret = rsmi_dev_fan_speed_max_get(request->dv_ind(),
-      request->sensor_ind(), &max_speed);
+  rsmi_status_t ret =
+      rsmi_dev_fan_speed_max_get(request->dv_ind(), request->sensor_ind(), &max_speed);
 
   response->set_max_speed(max_speed);
   response->set_ret_val(ret);

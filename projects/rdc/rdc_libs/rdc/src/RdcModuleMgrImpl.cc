@@ -21,57 +21,87 @@ THE SOFTWARE.
 */
 #include "rdc_lib/impl/RdcModuleMgrImpl.h"
 
+#include <memory>
+#include <type_traits>
+
+#include "rdc/rdc.h"
+#include "rdc_lib/RdcException.h"
+#include "rdc_lib/RdcTelemetry.h"
 #include "rdc_lib/impl/RdcDiagnosticModule.h"
+#include "rdc_lib/impl/RdcRVSLib.h"
 #include "rdc_lib/impl/RdcRasLib.h"
 #include "rdc_lib/impl/RdcRocrLib.h"
+#include "rdc_lib/impl/RdcSmiLib.h"
 #include "rdc_lib/impl/RdcTelemetryModule.h"
 
 namespace amd {
 namespace rdc {
 
-RdcModuleMgrImpl::RdcModuleMgrImpl(const RdcMetricFetcherPtr& fetcher)
-    : smi_lib_(std::make_shared<RdcSmiLib>(fetcher)) {
-    // The smi_lib_ always need to be loaded.
+// pass shared_ptr instead of creating it
+template <typename T>
+rdc_status_t RdcModuleMgrImpl::insert_modules(std::shared_ptr<T> ptr) {
+  static_assert(std::is_base_of_v<RdcDiagnostic, T> || std::is_base_of_v<RdcTelemetryModule, T>);
+  RDC_LOG(RDC_DEBUG, "Inserting module: " << typeid(T).name());
+  // same module can service multiple subsystems
+  // e.g. Diagnostics and Telemetry
+  if constexpr (std::is_base_of_v<RdcDiagnostic, T>) {
+    diagnostic_modules_.push_back(ptr);
+  }
+  if constexpr (std::is_base_of_v<RdcTelemetry, T>) {
+    telemetry_modules_.push_back(ptr);
+  }
+  return RDC_ST_OK;
+}
+
+// base case
+template <typename T>
+rdc_status_t RdcModuleMgrImpl::insert_modules() {
+  static_assert(std::is_base_of_v<RdcDiagnostic, T> || std::is_base_of_v<RdcTelemetryModule, T>);
+  try {
+    auto ptr = std::make_shared<T>();
+    return insert_modules(ptr);
+  } catch (RdcException& e) {
+    RDC_LOG(RDC_ERROR, "Failed to insert module: " << typeid(T).name() << "\n" << e.what());
+    return e.error_code();
+  }
+}
+
+// recursive case
+template <typename T, typename R, typename... TArgs>
+rdc_status_t RdcModuleMgrImpl::insert_modules() {
+  rdc_status_t status = insert_modules<T>();
+  rdc_status_t status_recursive = insert_modules<R, TArgs...>();
+  if (status == RDC_ST_OK) {
+    status = status_recursive;
+  }
+  return status;
+}
+
+RdcModuleMgrImpl::RdcModuleMgrImpl(const RdcMetricFetcherPtr& fetcher) : fetcher_(fetcher) {
+  // this module has a unique constructor and must be initialized explicitly
+  try {
+    auto smi_module = std::make_shared<RdcSmiLib>(fetcher);
+    insert_modules(smi_module);
+  } catch (RdcException& e) {
+    RDC_LOG(RDC_ERROR, "Failed to insert module: " << typeid(RdcSmiLib).name() << "\n" << e.what());
+  }
+
+  // all other modules get initialized by insert_modules
+  insert_modules<RdcRasLib, RdcRVSLib, RdcRocrLib>();
 }
 
 RdcTelemetryPtr RdcModuleMgrImpl::get_telemetry_module() {
-    if (rdc_telemetry_module_) {
-        return rdc_telemetry_module_;
-    }
-
-    //  Delay load
-    if (!ras_lib_) {
-        ras_lib_.reset(new RdcRasLib("librdc_ras.so"));
-    }
-
-    if (!rdc_telemetry_module_) {
-        rdc_telemetry_module_.reset(
-            new RdcTelemetryModule(smi_lib_, ras_lib_));
-    }
-
-    return rdc_telemetry_module_;
+  if (rdc_telemetry_module_ == nullptr) {
+    rdc_telemetry_module_.reset(new RdcTelemetryModule(telemetry_modules_));
+  }
+  return rdc_telemetry_module_;
 }
 
 RdcDiagnosticPtr RdcModuleMgrImpl::get_diagnostic_module() {
-    if (rdc_diagnostic_module_) {
-        return rdc_diagnostic_module_;
-    }
-
-    //  Delay load
-    if (!ras_lib_) {
-        ras_lib_.reset(new RdcRasLib("librdc_ras.so"));
-    }
-
-    if (!rocr_lib_) {
-        rocr_lib_.reset(new RdcRocrLib("librdc_rocr.so"));
-    }
-
-    if (!rdc_diagnostic_module_) {
-        rdc_diagnostic_module_.reset(
-            new RdcDiagnosticModule(smi_lib_, ras_lib_, rocr_lib_));
-    }
-
-    return rdc_diagnostic_module_;
+  if (rdc_diagnostic_module_ == nullptr) {
+    rdc_diagnostic_module_.reset(new RdcDiagnosticModule(diagnostic_modules_));
+  }
+  return rdc_diagnostic_module_;
 }
 
 }  // namespace rdc

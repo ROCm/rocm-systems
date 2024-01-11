@@ -22,34 +22,44 @@ THE SOFTWARE.
 #ifndef INCLUDE_RDC_LIB_IMPL_RDCMODULEMGRIMPL_H_
 #define INCLUDE_RDC_LIB_IMPL_RDCMODULEMGRIMPL_H_
 
-#include <memory>
+#include <list>
 
 #include "rdc_lib/RdcMetricFetcher.h"
 #include "rdc_lib/RdcModuleMgr.h"
 #include "rdc_lib/RdcTelemetry.h"
-#include "rdc_lib/impl/RdcRasLib.h"
-#include "rdc_lib/impl/RdcRocrLib.h"
-#include "rdc_lib/impl/RdcSmiLib.h"
 
 namespace amd {
 namespace rdc {
 
 class RdcModuleMgrImpl : public RdcModuleMgr {
  public:
-    RdcTelemetryPtr get_telemetry_module() override;
-    RdcDiagnosticPtr get_diagnostic_module() override;
-    explicit RdcModuleMgrImpl(const RdcMetricFetcherPtr& fetcher);
+  RdcTelemetryPtr get_telemetry_module() override;
+  RdcDiagnosticPtr get_diagnostic_module() override;
+  explicit RdcModuleMgrImpl(const RdcMetricFetcherPtr& fetcher);
 
  private:
-    //  Function module
-    RdcTelemetryPtr rdc_telemetry_module_;
-    RdcDiagnosticPtr rdc_diagnostic_module_;
+  //  Modules
+  std::list<RdcDiagnosticPtr> diagnostic_modules_;
+  std::list<RdcTelemetryPtr> telemetry_modules_;
 
-    //  Domain module
-    RdcRasLibPtr ras_lib_;
-    RdcSmiLibPtr smi_lib_;
-    RdcMetricFetcherPtr fetcher_;
-    RdcRocrLibPtr rocr_lib_;
+  // base case
+  template <typename T>
+  rdc_status_t insert_modules();
+
+  // recursive case
+  template <typename T, typename R, typename... TArgs>
+  rdc_status_t insert_modules();
+
+  // pass shared_ptr instead of creating it
+  template <typename T>
+  rdc_status_t insert_modules(std::shared_ptr<T> ptr);
+
+  //  Function module
+  RdcTelemetryPtr rdc_telemetry_module_;
+  RdcDiagnosticPtr rdc_diagnostic_module_;
+
+  //  Domain module
+  RdcMetricFetcherPtr fetcher_;
 };
 
 }  // namespace rdc

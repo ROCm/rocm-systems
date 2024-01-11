@@ -23,6 +23,7 @@ THE SOFTWARE.
 #ifndef RDC_MODULES_RDC_ROCP_RDCROCPBASE_H_
 #define RDC_MODULES_RDC_ROCP_RDCROCPBASE_H_
 #include <rocmtools.h>
+
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -30,6 +31,7 @@ THE SOFTWARE.
 #include <string>
 #include <typeinfo>
 #include <unordered_map>
+
 #include "rdc/rdc.h"
 
 namespace amd {
@@ -62,73 +64,69 @@ static const std::unordered_map<rdc_field_t, const char*> counter_map_k = {
 
 /// Common interface for RocP tests and samples
 class RdcRocpBase {
-    typedef std::pair<uint32_t, rdc_field_t> pair_gpu_field_t;
-    typedef struct session_info_t {
-        rocmtools_session_id_t id{};
-        std::chrono::
-            time_point<std::chrono::system_clock, std::chrono::nanoseconds>
-                start_time;
-        std::chrono::
-            time_point<std::chrono::system_clock, std::chrono::nanoseconds>
-                stop_time;
-    } session_info_t;
+  typedef std::pair<uint32_t, rdc_field_t> pair_gpu_field_t;
+  typedef struct session_info_t {
+    rocmtools_session_id_t id{};
+    std::chrono::time_point<std::chrono::system_clock, std::chrono::nanoseconds> start_time;
+    std::chrono::time_point<std::chrono::system_clock, std::chrono::nanoseconds> stop_time;
+  } session_info_t;
 
  public:
-    RdcRocpBase();
-    RdcRocpBase(const RdcRocpBase&) = default;
-    RdcRocpBase(RdcRocpBase&&) = delete;
-    RdcRocpBase& operator=(const RdcRocpBase&) = delete;
-    RdcRocpBase& operator=(RdcRocpBase&&) = delete;
-    ~RdcRocpBase();
+  RdcRocpBase();
+  RdcRocpBase(const RdcRocpBase&) = default;
+  RdcRocpBase(RdcRocpBase&&) = delete;
+  RdcRocpBase& operator=(const RdcRocpBase&) = delete;
+  RdcRocpBase& operator=(RdcRocpBase&&) = delete;
+  ~RdcRocpBase();
 
-    /**
-     * @brief Lookup ROCProfiler counter
-     *
-     * @param[in] field An existing field already added to sessions dictionary
-     * @param[out] value A pointer that will be populated with returned value
-     *
-     * @retval ::ROCMTOOLS_STATUS_SUCCESS The function has been executed
-     * successfully.
-     */
-    rdc_status_t rocp_lookup(pair_gpu_field_t gpu_field, double* value);
+  /**
+   * @brief Lookup ROCProfiler counter
+   *
+   * @param[in] field An existing field already added to sessions dictionary
+   * @param[out] value A pointer that will be populated with returned value
+   *
+   * @retval ::ROCMTOOLS_STATUS_SUCCESS The function has been executed
+   * successfully.
+   */
+  rdc_status_t rocp_lookup(pair_gpu_field_t gpu_field, double* value);
 
-    /**
-     * @brief Destroy ROCmTools session responsible for monitoring a given
-     * field
-     *
-     * @details While rocmtools supports multiple fields per ID - it has a
-     * limit to how many counters it can query internally.
-     * To avoid concerning ourselves with said limit, we limit each session to
-     * 1 field.
-     * In the future this can be optimized to allow for multiple fields per
-     * session.
-     *
-     * @param[in] field A field to start monitoring
-     *
-     * @retval ::ROCMTOOLS_STATUS_SUCCESS The function has been executed
-     * successfully.
-     */
-    rdc_status_t create_session(pair_gpu_field_t gpu_field);
+  /**
+   * @brief Destroy ROCmTools session responsible for monitoring a given
+   * field
+   *
+   * @details While rocmtools supports multiple fields per ID - it has a
+   * limit to how many counters it can query internally.
+   * To avoid concerning ourselves with said limit, we limit each session to
+   * 1 field.
+   * In the future this can be optimized to allow for multiple fields per
+   * session.
+   *
+   * @param[in] field A field to start monitoring
+   *
+   * @retval ::ROCMTOOLS_STATUS_SUCCESS The function has been executed
+   * successfully.
+   */
+  rdc_status_t create_session(pair_gpu_field_t gpu_field);
 
-    /**
-     * @brief Destroy ROCmTools session responsible for monitoring a given
-     * field
-     *
-     * @param[in] field A field to stop monitoring
-     *
-     * @retval ::ROCMTOOLS_STATUS_SUCCESS The function has been executed
-     * successfully.
-     */
-    rdc_status_t destroy_session(pair_gpu_field_t gpu_field);
+  /**
+   * @brief Destroy ROCmTools session responsible for monitoring a given
+   * field
+   *
+   * @param[in] field A field to stop monitoring
+   *
+   * @retval ::ROCMTOOLS_STATUS_SUCCESS The function has been executed
+   * successfully.
+   */
+  rdc_status_t destroy_session(pair_gpu_field_t gpu_field);
 
  protected:
  private:
-    std::map<pair_gpu_field_t, session_info_t> sessions;
+  std::map<pair_gpu_field_t, session_info_t> sessions;
 
-    /**
-     * @brief Convert from rocmtools status into RDC status
-     */
-    rdc_status_t Rocp2RdcError(rocmtools_status_t rocm_status);
+  /**
+   * @brief Convert from rocmtools status into RDC status
+   */
+  rdc_status_t Rocp2RdcError(rocmtools_status_t rocm_status);
 };
 
 }  // namespace rdc

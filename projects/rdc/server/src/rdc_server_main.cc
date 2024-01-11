@@ -1,4 +1,3 @@
-
 /*
 Copyright (c) 2019 - present Advanced Micro Devices, Inc. All rights reserved.
 
@@ -20,29 +19,31 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
+#include "rdc/rdc_server_main.h"
+
 #include <assert.h>
 #include <fcntl.h>
-#include <grpcpp/grpcpp.h>
-#include <sys/resource.h>
-#include <pthread.h>
-#include <unistd.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <sys/capability.h>
 #include <getopt.h>
+#include <grpcpp/grpcpp.h>
+#include <pthread.h>
 #include <pwd.h>
+#include <sys/capability.h>
+#include <sys/resource.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
+
+#include <csignal>
 #include <iostream>
 #include <memory>
 #include <string>
-#include <csignal>
 
-#include "rdc.grpc.pb.h"  // NOLINT
-#include "rocm_smi/rocm_smi.h"
-#include "rdc/rdc_server_main.h"
-#include "rdc/rdc_rsmi_service.h"
-#include "rdc/rdc_api_service.h"
 #include "common/rdc_capabilities.h"
 #include "common/rdc_utils.h"
+#include "rdc.grpc.pb.h"  // NOLINT
+#include "rdc/rdc_api_service.h"
+#include "rdc/rdc_rsmi_service.h"
+#include "rocm_smi/rocm_smi.h"
 
 // TODO(cfreehil):
 // The following need to be made configurable (e.g., from YAML):
@@ -56,43 +57,33 @@ THE SOFTWARE.
 
 static bool sShutDownServer = false;
 static bool sRestartServer = false;
-static const char *kDaemonName = "rdcd";
-static const char *kRDCDHomeDir = "/";
-static const char *kDaemonLockFileRoot = "/var/run/rdcd.lock";
-static const char *kDaemonLockFile = "/tmp/rdcd.lock";
+static const char* kDaemonName = "rdcd";
+static const char* kRDCDHomeDir = "/";
+static const char* kDaemonLockFileRoot = "/var/run/rdcd.lock";
+static const char* kDaemonLockFile = "/tmp/rdcd.lock";
 
 // Pinned certificates
-static const char * kDefaultRDCServerCertPinPath =
-                                             "/etc/rdc/server/rdc_server.crt";
-static const char * kDefaultRDCServerKeyPinPath =
-                                     "/etc/rdc/server/private/rdc_server.key";
-static const char * kDefaultRDCClientCertPinPath =
-                                             "/etc/rdc/client/rdc_client.crt";
+static const char* kDefaultRDCServerCertPinPath = "/etc/rdc/server/rdc_server.crt";
+static const char* kDefaultRDCServerKeyPinPath = "/etc/rdc/server/private/rdc_server.key";
+static const char* kDefaultRDCClientCertPinPath = "/etc/rdc/client/rdc_client.crt";
 
 // PKI certificates
-static const char * kDefaultRDCServerCertKeyPkiPath =
-                                "/etc/rdc/server/private/rdc_server_cert.key";
-static const char * kDefaultRDCServerCertPemPkiPath =
-                                  "/etc/rdc/server/certs/rdc_server_cert.pem";
-static const char * kDefaultRDCClientCACertPemPkiPath =
-                                       "/etc/rdc/client/certs/rdc_cacert.pem";
+static const char* kDefaultRDCServerCertKeyPkiPath = "/etc/rdc/server/private/rdc_server_cert.key";
+static const char* kDefaultRDCServerCertPemPkiPath = "/etc/rdc/server/certs/rdc_server_cert.pem";
+static const char* kDefaultRDCClientCACertPemPkiPath = "/etc/rdc/client/certs/rdc_cacert.pem";
 
-static const char *kDefaultListenAddress = "0.0.0.0";
-static const char *kDefaultListenPort = "50051";
+static const char* kDefaultListenAddress = "0.0.0.0";
+static const char* kDefaultListenPort = "50051";
 static const uint32_t kRSMIUMask = 027;
 
-RDCServer::RDCServer() :
-    secure_creds_(false), rsmi_service_(nullptr), rdc_admin_service_(nullptr) {
-}
+RDCServer::RDCServer()
+    : secure_creds_(false), rsmi_service_(nullptr), rdc_admin_service_(nullptr) {}
 
-RDCServer::~RDCServer() {
-}
-
+RDCServer::~RDCServer() {}
 
 // TODO(cfreehil): resolve here command line options with
 // (future) config file options
-void
-RDCServer::Initialize(RdcdCmdLineOpts *cl) {
+void RDCServer::Initialize(RdcdCmdLineOpts* cl) {
   cmd_line_ = cl;
   server_address_ = cmd_line_->listen_address;
   server_address_ += ":";
@@ -102,7 +93,7 @@ RDCServer::Initialize(RdcdCmdLineOpts *cl) {
   log_debug_ = cmd_line_->log_dbg;
 }
 
-static int ConstructSSLOptsPin(grpc::SslServerCredentialsOptions *ssl_opts) {
+static int ConstructSSLOptsPin(grpc::SslServerCredentialsOptions* ssl_opts) {
   assert(ssl_opts != nullptr);
   if (ssl_opts == nullptr) {
     return -EINVAL;
@@ -133,14 +124,13 @@ static int ConstructSSLOptsPin(grpc::SslServerCredentialsOptions *ssl_opts) {
   }
 
   grpc::SslServerCredentialsOptions::PemKeyCertPair pkcp = {ser_key, ser_crt};
-  ssl_opts->client_certificate_request =
-                 GRPC_SSL_REQUEST_AND_REQUIRE_CLIENT_CERTIFICATE_AND_VERIFY;
+  ssl_opts->client_certificate_request = GRPC_SSL_REQUEST_AND_REQUIRE_CLIENT_CERTIFICATE_AND_VERIFY;
   ssl_opts->pem_root_certs = cli_crt;
   ssl_opts->pem_key_cert_pairs.push_back(pkcp);
   return 0;
 }
 
-static int ConstructSSLOptsPKI(grpc::SslServerCredentialsOptions *ssl_opts) {
+static int ConstructSSLOptsPKI(grpc::SslServerCredentialsOptions* ssl_opts) {
   assert(ssl_opts != nullptr);
   if (ssl_opts == nullptr) {
     return -EINVAL;
@@ -171,15 +161,13 @@ static int ConstructSSLOptsPKI(grpc::SslServerCredentialsOptions *ssl_opts) {
   }
 
   grpc::SslServerCredentialsOptions::PemKeyCertPair pkcp = {ser_key, ser_crt};
-  ssl_opts->client_certificate_request =
-                 GRPC_SSL_REQUEST_AND_REQUIRE_CLIENT_CERTIFICATE_AND_VERIFY;
+  ssl_opts->client_certificate_request = GRPC_SSL_REQUEST_AND_REQUIRE_CLIENT_CERTIFICATE_AND_VERIFY;
   ssl_opts->pem_root_certs = cli_crt;
   ssl_opts->pem_key_cert_pairs.push_back(pkcp);
   return 0;
 }
 
-void
-RDCServer::Run() {
+void RDCServer::Run() {
   ::grpc::ServerBuilder builder;
   int ret;
   if (secure_creds_) {
@@ -192,15 +180,12 @@ RDCServer::Run() {
     }
 
     if (ret) {
-      std::cerr << "Failed to process OpenSSL keys and certificates. Errno: "
-                                                         << -ret << std::endl;
+      std::cerr << "Failed to process OpenSSL keys and certificates. Errno: " << -ret << std::endl;
       return;
     }
-    builder.AddListeningPort(server_address_,
-                                        grpc::SslServerCredentials(ssl_opts));
+    builder.AddListeningPort(server_address_, grpc::SslServerCredentials(ssl_opts));
   } else {
-    builder.AddListeningPort(server_address_,
-                                           grpc::InsecureServerCredentials());
+    builder.AddListeningPort(server_address_, grpc::InsecureServerCredentials());
   }
 
   // Register services as the instances through which we'll communicate with
@@ -236,18 +221,16 @@ RDCServer::Run() {
   }
 
   // Finally assemble the server.
-  // std::unique_ptr<::grpc::Server> server(builder.BuildAndStart());
   server_ = builder.BuildAndStart();
 
   std::cout << "Server listening on " << server_address_.c_str() << std::endl;
-  std::cout << "Accepting " <<
-     (secure_creds_ ? "Authenticated" : "Unauthenticated") <<
-                                            " connections only." << std::endl;
+  std::cout << "Accepting " << (secure_creds_ ? "Authenticated" : "Unauthenticated")
+            << " connections only." << std::endl;
   server_->Wait();
 }
 
 static void HandleSignal(int sig) {
-  std::cout <<  "Caught signal " << sig << std::endl;
+  std::cout << "Caught signal " << sig << std::endl;
 
   // For most signals, we will want to exit, so make that the default case
   // Handle the other signals specifically.
@@ -259,9 +242,9 @@ static void HandleSignal(int sig) {
 
       // Grpc doesn't seem to handle stopping and restarting well, so
       // user must manually do these steps
-//    case SIGHUP:
-//      sRestartServer = true;
-//      break;
+      //    case SIGHUP:
+      //      sRestartServer = true;
+      //      break;
 
     default:
       std::cerr << "Unexpected signal caught" << std::endl;
@@ -274,8 +257,7 @@ static void InitializeSignalHandling(void) {
   signal(SIGTERM, HandleSignal);
 }
 
-static int
-FileOwner(const char *fn, std::string *owner) {
+static int FileOwner(const char* fn, std::string* owner) {
   struct stat info;
   int ret;
 
@@ -289,7 +271,7 @@ FileOwner(const char *fn, std::string *owner) {
     return errno;
   }
   struct passwd pw;
-  struct passwd *result;
+  struct passwd* result;
   char buf[20];
 
   ret = getpwuid_r(info.st_uid, &pw, buf, 20, &result);
@@ -302,8 +284,7 @@ FileOwner(const char *fn, std::string *owner) {
   return 0;
 }
 
-void
-RDCServer::ShutDown(void) {
+void RDCServer::ShutDown(void) {
   server_->Shutdown();
 
   if (rsmi_service_) {
@@ -322,19 +303,19 @@ RDCServer::ShutDown(void) {
   }
 }
 
-static void * ProcessSignalLoop(void *server_ptr) {
+static void* ProcessSignalLoop(void* server_ptr) {
   assert(server_ptr != nullptr);
-  RDCServer *server = reinterpret_cast<RDCServer *>(server_ptr);
+  RDCServer* server = reinterpret_cast<RDCServer*>(server_ptr);
 
   while (1) {
     if (sShutDownServer) {
-      std::cout <<  "Shutting down RDC Server." << std::endl;
+      std::cout << "Shutting down RDC Server." << std::endl;
       server->ShutDown();
       // We will need to add shutdown of any completion queues
       // here, when/if we add them
       break;
     } else if (sRestartServer) {
-      std::cout <<  "Re-starting RDC Server." << std::endl;
+      std::cout << "Re-starting RDC Server." << std::endl;
       // We will need to add shutdown of any completion queues
       // here, when/if we add them
       server->ShutDown();
@@ -385,7 +366,7 @@ static bool FileIsLocked(std::string fn) {
 }
 
 static void ExitIfAlreadyRunning(bool is_root) {
-  const char *lock_fn;
+  const char* lock_fn;
   int lock_fh;
   std::string lf_user(kDaemonLockFile);
   std::string lf_root(kDaemonLockFileRoot);
@@ -395,8 +376,7 @@ static void ExitIfAlreadyRunning(bool is_root) {
     bool is_locked = FileIsLocked(lock_file);
 
     if (is_locked) {
-      std::cerr << "File " << lock_file <<
-                            " is locked. Is rdcd already running?" << std::endl;
+      std::cerr << "File " << lock_file << " is locked. Is rdcd already running?" << std::endl;
       exit(1);
     }
   };
@@ -411,7 +391,7 @@ static void ExitIfAlreadyRunning(bool is_root) {
   }
   // Temporarily adjust file-mask to create file with right permissions
   umask(023);
-  lock_fh = open(lock_fn, O_RDWR|O_CREAT, 0644);
+  lock_fh = open(lock_fn, O_RDWR | O_CREAT, 0644);
 
   if (lock_fh < 0) {
     std::string user;
@@ -420,9 +400,10 @@ static void ExitIfAlreadyRunning(bool is_root) {
       perror("Failed to determine owner of lock file.");
       exit(ret);
     }
-    std::cerr << "Failed to open file lock:" << lock_fn << " owned by user: "
-        << user << ". If starting rdcd as a different user, delete this "
-                                                "lock-file first." << std::endl;
+    std::cerr << "Failed to open file lock:" << lock_fn << " owned by user: " << user
+              << ". If starting rdcd as a different user, delete this "
+                 "lock-file first."
+              << std::endl;
     // asserting below since this should have been prevented in main()
     assert(!"Unexpected user invoking rdcd");
     exit(1);
@@ -439,8 +420,7 @@ static void ExitIfAlreadyRunning(bool is_root) {
   assert(static_cast<unsigned int>(fsz) == pid_str.size());
 }
 
-static void
-MakeDaemon(bool is_root) {
+static void MakeDaemon(bool is_root) {
   int fd0;
   struct rlimit max_files;
 
@@ -474,13 +454,13 @@ MakeDaemon(bool is_root) {
 
   // chdir to dir that will always be available
   if (chdir(kRDCDHomeDir) < 0) {
-      std::cerr << "Failed to change directory to " <<kRDCDHomeDir << std::endl;
+    std::cerr << "Failed to change directory to " << kRDCDHomeDir << std::endl;
   }
 
   // Determine max. number of open files possible. We need to close all
   // open descriptors.
   if (getrlimit(RLIMIT_NOFILE, &max_files) < 0) {
-      std::cerr << kDaemonName << ": can't get file limit" << std::endl;
+    std::cerr << kDaemonName << ": can't get file limit" << std::endl;
   }
 
   // Close files
@@ -495,8 +475,8 @@ MakeDaemon(bool is_root) {
   // Direct stdin to /dev/null.
   fd0 = open("/dev/null", O_RDWR);
   if (fd0 != 0) {
-      std::cerr << "unexpected fildes: " << fd0 << std::endl;
-      exit(1);
+    std::cerr << "unexpected fildes: " << fd0 << std::endl;
+    exit(1);
   }
 
   ExitIfAlreadyRunning(is_root);
@@ -508,38 +488,34 @@ MakeDaemon(bool is_root) {
 //  * required_argument
 //  * optional_argument
 //  * no_argument
-static const struct option long_options[] = {
-  {"address", required_argument, nullptr, 'a'},
-  {"port", required_argument, nullptr, 'p'},
-  // Any options with optionals args would go here; e.g.,
-  // {"start_rdcd", optional_argument, nullptr, 'd'},
-  {"unauth_comm", no_argument, nullptr, 'u'},
-  {"pinned_cert", no_argument, nullptr, 'i'},
-  {"debug", no_argument, nullptr, 'd'},
-  {"help", no_argument, nullptr, 'h'},
+static const struct option long_options[] = {{"address", required_argument, nullptr, 'a'},
+                                             {"port", required_argument, nullptr, 'p'},
+                                             // Any options with optionals args would go here; e.g.,
+                                             // {"start_rdcd", optional_argument, nullptr, 'd'},
+                                             {"unauth_comm", no_argument, nullptr, 'u'},
+                                             {"pinned_cert", no_argument, nullptr, 'i'},
+                                             {"debug", no_argument, nullptr, 'd'},
+                                             {"help", no_argument, nullptr, 'h'},
 
-  {nullptr, 0, nullptr, 0}
-};
+                                             {nullptr, 0, nullptr, 0}};
 static const char* short_options = "a:p:uidh";
 
 static void PrintHelp(void) {
-  std::cout <<
-     "Optional rdctst Arguments:\n"
-     "--address, -a <IPv4 address> specify address on which to listen; "
-         "default is 0.0.0.0\n"
-     "--port, -p <port> specify port on which to listen; "
-         "default is to listen on port 50051\n"
-     "--unauth_comm, -u don't do authentication with communications"
-       " with client. When this flag is not specified, by default, "
-                                                "PKI authentication is used\n"
-     "--pinned_cert, -i used \"pinned\" certificates instead of PKI "
-                                "authentication. This is for test purposes.\n"
-     "--debug, -d output debug messages\n"
-     "--help, -h print this message\n";
+  std::cout << "Optional rdctst Arguments:\n"
+               "--address, -a <IPv4 address> specify address on which to listen; "
+               "default is 0.0.0.0\n"
+               "--port, -p <port> specify port on which to listen; "
+               "default is to listen on port 50051\n"
+               "--unauth_comm, -u don't do authentication with communications"
+               " with client. When this flag is not specified, by default, "
+               "PKI authentication is used\n"
+               "--pinned_cert, -i used \"pinned\" certificates instead of PKI "
+               "authentication. This is for test purposes.\n"
+               "--debug, -d output debug messages\n"
+               "--help, -h print this message\n";
 }
 
-uint32_t ProcessCmdline(RdcdCmdLineOpts* cmdl_opts,
-                                               int arg_cnt, char** arg_list) {
+uint32_t ProcessCmdline(RdcdCmdLineOpts* cmdl_opts, int arg_cnt, char** arg_list) {
   int a;
   int ind = -1;
 
@@ -555,8 +531,7 @@ uint32_t ProcessCmdline(RdcdCmdLineOpts* cmdl_opts,
     switch (a) {
       case 'a':
         if (!amd::rdc::IsIP(optarg)) {
-          std::cerr << "\"" << optarg <<
-                                "\" is not a valid IP address." << std::endl;
+          std::cerr << "\"" << optarg << "\" is not a valid IP address." << std::endl;
           return -1;
         }
         cmdl_opts->listen_address = optarg;
@@ -564,8 +539,7 @@ uint32_t ProcessCmdline(RdcdCmdLineOpts* cmdl_opts,
 
       case 'p':
         if (!amd::rdc::IsNumber(optarg)) {
-          std::cerr << "\"" << optarg <<
-                                "\" is not a valid port number." << std::endl;
+          std::cerr << "\"" << optarg << "\" is not a valid port number." << std::endl;
           return -1;
         }
         cmdl_opts->listen_port = optarg;
@@ -588,8 +562,7 @@ uint32_t ProcessCmdline(RdcdCmdLineOpts* cmdl_opts,
         exit(0);
 
       default:
-        std::cout << "Unknown command line option: \"" << a <<
-                                               "\". Ignoring..." << std::endl;
+        std::cout << "Unknown command line option: \"" << a << "\". Ignoring..." << std::endl;
         PrintHelp();
         return 0;
     }
@@ -597,14 +570,13 @@ uint32_t ProcessCmdline(RdcdCmdLineOpts* cmdl_opts,
 
   // Check for incompatibilities
   if (cmdl_opts->use_pinned_certs && cmdl_opts->no_authentication) {
-    std::cerr << "--pinned_cert and --unauth_comm are incompatible options."
-                                                                  << std::endl;
+    std::cerr << "--pinned_cert and --unauth_comm are incompatible options." << std::endl;
     return -1;
   }
   return 0;
 }
 
-static void init_cmd_line_opts(RdcdCmdLineOpts *opts) {
+static void init_cmd_line_opts(RdcdCmdLineOpts* opts) {
   assert(opts != nullptr);
   opts->listen_address = kDefaultListenAddress;
   opts->listen_port = kDefaultListenPort;
@@ -631,22 +603,20 @@ int main(int argc, char** argv) {
 
   // Can read the certificates and private key when authentication.
   if (!cmd_line_opts.no_authentication) {
-    if (cmd_line_opts.use_pinned_certs &&
-      (access(kDefaultRDCServerCertPinPath, R_OK) != 0 ||
-      access(kDefaultRDCServerKeyPinPath, R_OK) != 0 ||
-      access(kDefaultRDCClientCertPinPath, R_OK) != 0)) {
-        std::cerr << "The user needs read access to the pinned "
-          << "certificates and private key." << std::endl;
-          return 1;
+    if (cmd_line_opts.use_pinned_certs && (access(kDefaultRDCServerCertPinPath, R_OK) != 0 ||
+                                           access(kDefaultRDCServerKeyPinPath, R_OK) != 0 ||
+                                           access(kDefaultRDCClientCertPinPath, R_OK) != 0)) {
+      std::cerr << "The user needs read access to the pinned "
+                << "certificates and private key." << std::endl;
+      return 1;
     }
 
-    if (!cmd_line_opts.use_pinned_certs &&
-      (access(kDefaultRDCServerCertKeyPkiPath, R_OK) != 0 ||
-      access(kDefaultRDCServerCertPemPkiPath, R_OK) != 0 ||
-      access(kDefaultRDCClientCACertPemPkiPath, R_OK) != 0)) {
-        std::cerr << "The user needs read access to the PKI "
-          << "certificates and private key." << std::endl;
-          return 1;
+    if (!cmd_line_opts.use_pinned_certs && (access(kDefaultRDCServerCertKeyPkiPath, R_OK) != 0 ||
+                                            access(kDefaultRDCServerCertPemPkiPath, R_OK) != 0 ||
+                                            access(kDefaultRDCClientCACertPemPkiPath, R_OK) != 0)) {
+      std::cerr << "The user needs read access to the PKI "
+                << "certificates and private key." << std::endl;
+      return 1;
     }
   }
 
@@ -656,23 +626,20 @@ int main(int argc, char** argv) {
 
   bool cap_enabled;
 
-  err =
-     ::amd::rdc::GetCapability(CAP_DAC_OVERRIDE, CAP_EFFECTIVE, &cap_enabled);
+  err = ::amd::rdc::GetCapability(CAP_DAC_OVERRIDE, CAP_EFFECTIVE, &cap_enabled);
   if (err) {
     std::cerr << "Failed to get capability" << std::endl;
     return 1;
   }
 
   if (cap_enabled) {
-    err =
-       amd::rdc::GetCapability(CAP_DAC_OVERRIDE, CAP_PERMITTED, &cap_enabled);
+    err = amd::rdc::GetCapability(CAP_DAC_OVERRIDE, CAP_PERMITTED, &cap_enabled);
     if (err) {
       std::cerr << "Failed to get capability" << std::endl;
       return 1;
     }
     if (!cap_enabled) {
-      std::cerr <<
-                 "CAP_DAC_OVERRIDE CAP_PERMITTED is not enabled" << std::endl;
+      std::cerr << "CAP_DAC_OVERRIDE CAP_PERMITTED is not enabled" << std::endl;
     }
   } else {
     std::cerr << "CAP_DAC_OVERRIDE CAP_EFFECTIVE is not enabled." << std::endl;
@@ -685,28 +652,23 @@ int main(int argc, char** argv) {
   // relax this restriction if some new feature requires it.
   err = amd::rdc::ModifyCapability(CAP_DAC_OVERRIDE, CAP_INHERITABLE, false);
   if (err) {
-    std::cerr << "Failed to disable CAP_DAC_OVERRIDE, CAP_INHERITABLE" <<
-                                                                    std::endl;
+    std::cerr << "Failed to disable CAP_DAC_OVERRIDE, CAP_INHERITABLE" << std::endl;
     return 1;
   }
 
   // By default, disable CAP_DAC_OVERRIDE. Turn on, when needed.
   err = amd::rdc::ModifyCapability(CAP_DAC_OVERRIDE, CAP_EFFECTIVE, false);
   if (err) {
-    std::cerr << "Failed to disable CAP_DAC_OVERRIDE, CAP_EFFECTIVE" <<
-                                                                    std::endl;
+    std::cerr << "Failed to disable CAP_DAC_OVERRIDE, CAP_EFFECTIVE" << std::endl;
     return 1;
   }
 
   // Create a thread to handle signals to shutdown gracefully
   pthread_t sig_listen_thread;
-  int thr_ret = pthread_create(&sig_listen_thread, NULL,
-                                              ProcessSignalLoop, &rdc_server);
+  int thr_ret = pthread_create(&sig_listen_thread, NULL, ProcessSignalLoop, &rdc_server);
 
   if (thr_ret) {
-    std::cerr <<
-    "Failed to create ProcessSignalLoop. pthread_create() returned " <<
-                                                                      thr_ret;
+    std::cerr << "Failed to create ProcessSignalLoop. pthread_create() returned " << thr_ret;
     return 1;
   }
 
@@ -723,13 +685,11 @@ int main(int argc, char** argv) {
 
   // don't fail if it doesn't succeed
   if (thr_ret != 0) {
-    std::cerr <<
-    "Failed to terminate ProcessSignalLoop. pthread_join() returned " <<
-                                                                      thr_ret;
+    std::cerr << "Failed to terminate ProcessSignalLoop. pthread_join() returned " << thr_ret;
   }
 
   if (sShutDownServer) {
-    std::cout <<  "RDC server successfully shut down." << std::endl;
+    std::cout << "RDC server successfully shut down." << std::endl;
     return 0;
   } else {
     std::cerr << "RDC server failed to start." << std::endl;

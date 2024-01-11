@@ -26,7 +26,7 @@ THE SOFTWARE.
 
 class TestRdciStats : public TestBase {
  public:
-    TestRdciStats();
+  TestRdciStats();
 
   // @Brief: Destructor for test case of TestRdciStats
   virtual ~TestRdciStats();

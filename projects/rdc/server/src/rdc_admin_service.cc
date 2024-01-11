@@ -20,31 +20,29 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
+#include "rdc/rdc_admin_service.h"
+
 #include <assert.h>
 #include <grpcpp/grpcpp.h>
 #include <unistd.h>
 
-#include <iostream>
-#include <sstream>
-#include <memory>
-#include <string>
 #include <csignal>
+#include <iostream>
+#include <memory>
+#include <sstream>
+#include <string>
 
 #include "rdc.grpc.pb.h"  // NOLINT
-#include "rdc/rdc_admin_service.h"
 
 namespace amd {
 namespace rdc {
 
-RDCAdminServiceImpl::RDCAdminServiceImpl() {
-}
+RDCAdminServiceImpl::RDCAdminServiceImpl() {}
 
-RDCAdminServiceImpl::~RDCAdminServiceImpl() {
-}
-::grpc::Status
-RDCAdminServiceImpl::VerifyConnection(::grpc::ServerContext* context,
-                            const ::rdc::VerifyConnectionRequest* request,
-                              ::rdc::VerifyConnectionResponse* reply) {
+RDCAdminServiceImpl::~RDCAdminServiceImpl() {}
+::grpc::Status RDCAdminServiceImpl::VerifyConnection(::grpc::ServerContext* context,
+                                                     const ::rdc::VerifyConnectionRequest* request,
+                                                     ::rdc::VerifyConnectionResponse* reply) {
   (void)context;  // Quiet warning for now
 
   reply->set_echo_magic_num(request->magic_num());

@@ -22,40 +22,39 @@ THE SOFTWARE.
 #ifndef RDCI_INCLUDE_RDCIDIAGSUBSYSTEM_H_
 #define RDCI_INCLUDE_RDCIDIAGSUBSYSTEM_H_
 #include <signal.h>
+
 #include <map>
-#include <vector>
 #include <string>
+#include <vector>
+
 #include "RdciSubSystem.h"
 
 namespace amd {
 namespace rdc {
 
-class RdciDiagSubSystem: public RdciSubSystem {
+class RdciDiagSubSystem : public RdciSubSystem {
  public:
-     RdciDiagSubSystem();
-     ~RdciDiagSubSystem();
-     void parse_cmd_opts(int argc, char ** argv) override;
-     void process() override;
+  RdciDiagSubSystem();
+  ~RdciDiagSubSystem();
+  void parse_cmd_opts(int argc, char** argv) override;
+  void process() override;
 
  private:
-     void show_help() const;
+  void show_help() const;
 
-     std::string get_test_name(
-               rdc_diag_test_cases_t test_case) const;
+  std::string get_test_name(rdc_diag_test_cases_t test_case) const;
 
-     enum OPERATIONS {
-        DIAG_UNKNOWN = 0,
-        DIAG_HELP,
-        DIAG_RUN,
-     } diag_ops_;
+  enum OPERATIONS {
+    DIAG_UNKNOWN = 0,
+    DIAG_HELP,
+    DIAG_RUN,
+  } diag_ops_;
 
-     rdc_gpu_group_t group_id_;
-     rdc_diag_level_t run_level_;
+  rdc_gpu_group_t group_id_;
+  rdc_diag_level_t run_level_;
 };
-
 
 }  // namespace rdc
 }  // namespace amd
-
 
 #endif  // RDCI_INCLUDE_RDCIDIAGSUBSYSTEM_H_

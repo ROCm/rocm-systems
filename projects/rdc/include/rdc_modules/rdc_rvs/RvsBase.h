@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2021 - present Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2023 - present Advanced Micro Devices, Inc. All rights reserved.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -19,10 +19,20 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
-#ifndef RDC_MODULES_RDC_DIAGNOSTIC_RDCDIAGNOSTICLIB_H_
-#define RDC_MODULES_RDC_DIAGNOSTIC_RDCDIAGNOSTICLIB_H_
-#include "rdc/rdc.h"
-#include "rdc_lib/RdcDiagnosticLibInterface.h"
+#ifndef RDC_MODULES_RDC_RVS_RVSBASE_H_
+#define RDC_MODULES_RDC_RVS_RVSBASE_H_
 
+#include <cstddef>
 
-#endif  // RDC_MODULES_RDC_DIAGNOSTIC_RDCDIAGNOSTICLIB_H_
+#include "rvs/rvs.h"
+
+namespace amd {
+namespace rdc {
+
+void session_callback(rvs_session_id_t session_id, const rvs_results_t* results);
+
+rvs_status_t run_rvs_app(const char* config, size_t config_size);
+}  // namespace rdc
+}  // namespace amd
+
+#endif  // RDC_MODULES_RDC_RVS_RVSBASE_H_

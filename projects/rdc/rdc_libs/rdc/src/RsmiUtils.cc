@@ -20,8 +20,8 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
-#include "rocm_smi/rocm_smi.h"
 #include "rdc/rdc.h"
+#include "rocm_smi/rocm_smi.h"
 
 namespace amd {
 namespace rdc {
@@ -70,4 +70,3 @@ rdc_status_t Rsmi2RdcError(rsmi_status_t rsmi) {
 
 }  // namespace rdc
 }  // namespace amd
-

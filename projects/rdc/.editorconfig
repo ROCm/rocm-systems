@@ -4,17 +4,19 @@
 # top-most EditorConfig file
 root = true
 
-# Unix-style newlines with a newline ending every file and no stray whitespaces
-[*]
-end_of_line = lf
-
 # Matches multiple files with brace expansion notation
 # Set default charset
 [*.{c,cc,cpp,h,hh,hpp}]
 charset = utf-8
 indent_style = space
-indent_size = 4
+indent_size = 2
 
 [*.py]
 indent_style = space
 indent_size = 4
+
+[*.proto]
+charset = utf-8
+indent_style = space
+indent_size = 2
+

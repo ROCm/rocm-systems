@@ -60,11 +60,13 @@ function(create_library_symlink)
   set(LIB_RDC_ROCR "librdc_rocr.so")
   set(LIB_RDC_ROCP "librdc_rocp.so")
   set(LIB_RDC_RAS "librdc_ras.so")
+  set(LIB_RDC_RVS "librdc_rvs.so")
   set(LIB_RDC_CLIENT_SMI "librdc_client_smi.so")
   set(library_files "${LIB_RDC_ROCR}"  "${LIB_RDC_ROCR}.${MAJ_VERSION}" "${LIB_RDC_ROCR}.${SO_VERSION}" )
   set(library_files "${LIB_RDC_ROCP}"  "${LIB_RDC_ROCP}.${MAJ_VERSION}" "${LIB_RDC_ROCP}.${SO_VERSION}" )
   set(library_files "${library_files}" "${LIB_RDC_CLIENT_SMI}"  "${LIB_RDC_CLIENT_SMI}.${MAJ_VERSION}" "${LIB_RDC_CLIENT_SMI}.${SO_VERSION}" )
   set(library_files "${library_files}" "${LIB_RDC_RAS}")
+  set(library_files "${library_files}" "${LIB_RDC_RVS}")
 
   foreach(file_name ${library_files})
      add_custom_target(link_${file_name} ALL

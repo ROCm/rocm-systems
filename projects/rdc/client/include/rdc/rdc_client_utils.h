@@ -22,6 +22,7 @@ THE SOFTWARE.
 #ifndef CLIENT_INCLUDE_RDC_RDC_CLIENT_UTILS_H_
 #define CLIENT_INCLUDE_RDC_RDC_CLIENT_UTILS_H_
 
+#include "rdc/rdc_client.h"
 namespace amd {
 namespace rdc {
 

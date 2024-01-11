@@ -26,7 +26,7 @@ THE SOFTWARE.
 
 class TestRdciFieldgroup : public TestBase {
  public:
-    TestRdciFieldgroup();
+  TestRdciFieldgroup();
 
   // @Brief: Destructor for test case of TestRdciFieldgroup
   virtual ~TestRdciFieldgroup();

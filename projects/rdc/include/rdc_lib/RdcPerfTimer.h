@@ -24,9 +24,10 @@ THE SOFTWARE.
 #define INCLUDE_RDC_LIB_RDCRdcPerfTimer_H_
 
 #include <stdint.h>
+
 #include <iostream>
-#include <vector>
 #include <string>
+#include <vector>
 /// \file
 /// Timer related class.
 
@@ -37,9 +38,9 @@ class RdcPerfTimer {
  private:
   struct Timer {
     std::string name; /* < name name of time object*/
-    uint64_t _freq; /* < _freq frequency*/
+    uint64_t _freq;   /* < _freq frequency*/
     uint64_t _clocks; /* < _clocks number of ticks at end*/
-    uint64_t _start; /* < _start start point ticks*/
+    uint64_t _start;  /* < _start start point ticks*/
   };
 
   std::vector<Timer*> _timers; /*< _timers vector to Timer objects */
@@ -80,9 +81,7 @@ class RdcPerfTimer {
   uint64_t MeasureTSCFreqHz();
 };
 
-
 }  // namespace rdc
 }  // namespace amd
 
 #endif  // INCLUDE_RDC_LIB_RDCRdcPerfTimer_H_
-

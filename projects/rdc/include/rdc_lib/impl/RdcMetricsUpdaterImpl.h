@@ -24,24 +24,26 @@ THE SOFTWARE.
 
 #include <future>  // NOLINT(build/c++11)
 #include <memory>
+
 #include "rdc_lib/RdcMetricsUpdater.h"
 #include "rdc_lib/RdcWatchTable.h"
 
 namespace amd {
 namespace rdc {
 
-class RdcMetricsUpdaterImpl: public RdcMetricsUpdater {
+class RdcMetricsUpdaterImpl : public RdcMetricsUpdater {
  public:
-     void start() override;
-     void stop() override;
-     explicit RdcMetricsUpdaterImpl(const RdcWatchTablePtr& watch_table,
-                const uint32_t check_frequency);
+  void start() override;
+  void stop() override;
+  explicit RdcMetricsUpdaterImpl(const RdcWatchTablePtr& watch_table,
+                                 const uint32_t check_frequency);
+
  private:
-     RdcWatchTablePtr watch_table_;
-     std::atomic<bool> started_;
-     std::future<void> updater_;  // keep the future of updater
-     std::future<void> notif_updater_;  // keep the future of notif updater
-     const uint32_t _check_frequency;  // Check frequency in milliseconds
+  RdcWatchTablePtr watch_table_;
+  std::atomic<bool> started_;
+  std::future<void> updater_;        // keep the future of updater
+  std::future<void> notif_updater_;  // keep the future of notif updater
+  const uint32_t _check_frequency;   // Check frequency in milliseconds
 };
 
 }  // namespace rdc

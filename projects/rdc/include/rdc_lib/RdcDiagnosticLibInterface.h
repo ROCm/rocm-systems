@@ -25,29 +25,24 @@ THE SOFTWARE.
 // The telemetry interface for libraries, for example, RAS.
 #include <rdc/rdc.h>
 
-
 extern "C" {
 
 // The library will implement below function
 
 // Which test cases are supported in the library
-rdc_status_t rdc_diag_test_cases_query(
-        rdc_diag_test_cases_t test_cases[MAX_TEST_CASES],
-        uint32_t* test_case_count);
+rdc_status_t rdc_diag_test_cases_query(rdc_diag_test_cases_t test_cases[MAX_TEST_CASES],
+                                       uint32_t* test_case_count);
 
 // Run a specific test case
 
-rdc_status_t rdc_diag_test_case_run(
-    rdc_diag_test_cases_t test_case,
-    uint32_t gpu_index[RDC_MAX_NUM_DEVICES],
-    uint32_t gpu_count,
-    rdc_diag_test_result_t* result);
+rdc_status_t rdc_diag_test_case_run(rdc_diag_test_cases_t test_case,
+                                    uint32_t gpu_index[RDC_MAX_NUM_DEVICES], uint32_t gpu_count,
+                                    const char* config, size_t config_size,
+                                    rdc_diag_test_result_t* result);
 
 rdc_status_t rdc_diag_init(uint64_t flags);
 
 rdc_status_t rdc_diag_destroy();
-
 }
 
-
-#endif   // INCLUDE_RDC_LIB_RDCDIAGNOSTICLIBINTERFACE_H_
+#endif  // INCLUDE_RDC_LIB_RDCDIAGNOSTICLIBINTERFACE_H_

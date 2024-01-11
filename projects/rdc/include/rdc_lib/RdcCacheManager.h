@@ -22,49 +22,47 @@ THE SOFTWARE.
 #ifndef INCLUDE_RDC_LIB_RDCCACHEMANAGER_H_
 #define INCLUDE_RDC_LIB_RDCCACHEMANAGER_H_
 
-#include <memory>
-#include <utility>
-#include <string>
-#include <vector>
 #include <map>
-#include "rdc_lib/rdc_common.h"
+#include <memory>
+#include <string>
+#include <utility>
+#include <vector>
+
 #include "rdc/rdc.h"
+#include "rdc_lib/rdc_common.h"
 
 namespace amd {
 namespace rdc {
 
 class RdcCacheManager {
  public:
-    virtual rdc_status_t rdc_field_get_latest_value(uint32_t gpu_index,
-        rdc_field_t field, rdc_field_value* value) = 0;
-    virtual rdc_status_t rdc_field_get_value_since(uint32_t gpu_index,
-        rdc_field_t field, uint64_t since_time_stamp,
-                uint64_t *next_since_time_stamp, rdc_field_value* value) = 0;
-    virtual rdc_status_t rdc_update_cache(uint32_t gpu_index,
-                const rdc_field_value& value) = 0;
-    virtual rdc_status_t evict_cache(uint32_t gpu_index, rdc_field_t field_id,
-                uint64_t max_keep_samples, double  max_keep_age) = 0;
-    virtual std::string  get_cache_stats() = 0;
+  virtual rdc_status_t rdc_field_get_latest_value(uint32_t gpu_index, rdc_field_t field,
+                                                  rdc_field_value* value) = 0;
+  virtual rdc_status_t rdc_field_get_value_since(uint32_t gpu_index, rdc_field_t field,
+                                                 uint64_t since_time_stamp,
+                                                 uint64_t* next_since_time_stamp,
+                                                 rdc_field_value* value) = 0;
+  virtual rdc_status_t rdc_update_cache(uint32_t gpu_index, const rdc_field_value& value) = 0;
+  virtual rdc_status_t evict_cache(uint32_t gpu_index, rdc_field_t field_id,
+                                   uint64_t max_keep_samples, double max_keep_age) = 0;
+  virtual std::string get_cache_stats() = 0;
 
-    virtual rdc_status_t rdc_job_get_stats(const char job_id[64],
-        const rdc_gpu_gauges_t& gpu_gauges,
-        rdc_job_info_t* p_job_info) = 0;
-    virtual rdc_status_t rdc_job_start_stats(const char job_id[64],
-        const rdc_group_info_t& group,
-        const rdc_field_group_info_t& finfo,
-        const rdc_gpu_gauges_t& gpu_gauges) = 0;
-    virtual rdc_status_t rdc_job_stop_stats(const char job_id[64],
-                const rdc_gpu_gauges_t& gpu_gauge) = 0;
-    virtual rdc_status_t rdc_update_job_stats(uint32_t gpu_index,
-        const std::string& job_id, const rdc_field_value& value) = 0;
-    virtual rdc_status_t rdc_job_remove(const char job_id[64]) = 0;
-    virtual rdc_status_t rdc_job_remove_all() = 0;
+  virtual rdc_status_t rdc_job_get_stats(const char job_id[64], const rdc_gpu_gauges_t& gpu_gauges,
+                                         rdc_job_info_t* p_job_info) = 0;
+  virtual rdc_status_t rdc_job_start_stats(const char job_id[64], const rdc_group_info_t& group,
+                                           const rdc_field_group_info_t& finfo,
+                                           const rdc_gpu_gauges_t& gpu_gauges) = 0;
+  virtual rdc_status_t rdc_job_stop_stats(const char job_id[64],
+                                          const rdc_gpu_gauges_t& gpu_gauge) = 0;
+  virtual rdc_status_t rdc_update_job_stats(uint32_t gpu_index, const std::string& job_id,
+                                            const rdc_field_value& value) = 0;
+  virtual rdc_status_t rdc_job_remove(const char job_id[64]) = 0;
+  virtual rdc_status_t rdc_job_remove_all() = 0;
 
-    virtual ~RdcCacheManager() {}
+  virtual ~RdcCacheManager() {}
 };
 
 typedef std::shared_ptr<RdcCacheManager> RdcCacheManagerPtr;
-
 
 }  // namespace rdc
 }  // namespace amd

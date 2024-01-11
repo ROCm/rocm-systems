@@ -34,8 +34,8 @@ namespace rdc {
 /// @brief Exception type which carries an error code to return to the user.
 class rdc_exception : public std::exception {
  public:
-  rdc_exception(rdc_status_t error, const std::string description) :
-                                            err_(error), desc_(description) {}
+  rdc_exception(rdc_status_t error, const std::string description)
+      : err_(error), desc_(description) {}
   rdc_status_t error_code() const noexcept { return err_; }
   const char* what() const noexcept override { return desc_.c_str(); }
 
@@ -48,4 +48,3 @@ class rdc_exception : public std::exception {
 }  // namespace amd
 
 #endif  // CLIENT_INCLUDE_RDC_RDC_EXCEPTION_H_
-

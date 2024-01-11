@@ -24,33 +24,33 @@ THE SOFTWARE.
 
 #include <memory>
 #include <vector>
-#include "rdc_lib/rdc_common.h"
-#include "rdc/rdc.h"
 
+#include "rdc/rdc.h"
+#include "rdc_lib/rdc_common.h"
 
 namespace amd {
 namespace rdc {
 
 class RdcWatchTable {
  public:
-    virtual rdc_status_t rdc_field_update_all() = 0;
-    virtual rdc_status_t rdc_field_listen_notif(uint32_t timeout_ms) = 0;
+  virtual rdc_status_t rdc_field_update_all() = 0;
+  virtual rdc_status_t rdc_field_listen_notif(uint32_t timeout_ms) = 0;
 
-    virtual rdc_status_t rdc_job_start_stats(rdc_gpu_group_t group_id,
-                const char job_id[64], uint64_t update_freq,
-                const rdc_gpu_gauges_t& gpu_gauge) = 0;
-    virtual rdc_status_t rdc_job_stop_stats(const char job_id[64],
-                const rdc_gpu_gauges_t& gpu_gauge) = 0;
-    virtual rdc_status_t rdc_job_remove(const char job_id[64]) = 0;
-    virtual rdc_status_t rdc_job_remove_all() = 0;
+  virtual rdc_status_t rdc_job_start_stats(rdc_gpu_group_t group_id, const char job_id[64],
+                                           uint64_t update_freq,
+                                           const rdc_gpu_gauges_t& gpu_gauge) = 0;
+  virtual rdc_status_t rdc_job_stop_stats(const char job_id[64],
+                                          const rdc_gpu_gauges_t& gpu_gauge) = 0;
+  virtual rdc_status_t rdc_job_remove(const char job_id[64]) = 0;
+  virtual rdc_status_t rdc_job_remove_all() = 0;
 
-    virtual rdc_status_t rdc_field_watch(rdc_gpu_group_t group_id,
-                rdc_field_grp_t field_group_id, uint64_t update_freq,
-                double  max_keep_age, uint32_t max_keep_samples) = 0;
-    virtual rdc_status_t rdc_field_unwatch(rdc_gpu_group_t group_id,
-                rdc_field_grp_t field_group_id) = 0;
+  virtual rdc_status_t rdc_field_watch(rdc_gpu_group_t group_id, rdc_field_grp_t field_group_id,
+                                       uint64_t update_freq, double max_keep_age,
+                                       uint32_t max_keep_samples) = 0;
+  virtual rdc_status_t rdc_field_unwatch(rdc_gpu_group_t group_id,
+                                         rdc_field_grp_t field_group_id) = 0;
 
-    virtual ~RdcWatchTable() {}
+  virtual ~RdcWatchTable() {}
 };
 
 typedef std::shared_ptr<RdcWatchTable> RdcWatchTablePtr;

@@ -22,59 +22,50 @@ THE SOFTWARE.
 #ifndef INCLUDE_RDC_LIB_IMPL_DIAGNOSTICMODULE_H_
 #define INCLUDE_RDC_LIB_IMPL_DIAGNOSTICMODULE_H_
 
-#include <map>
 #include <list>
-#include <vector>
+#include <map>
 #include <memory>
+#include <vector>
+
 #include "rdc_lib/RdcDiagnostic.h"
-#include "rdc_lib/impl/RdcRasLib.h"
-#include "rdc_lib/impl/RdcSmiLib.h"
-#include "rdc_lib/impl/RdcRocrLib.h"
+#include "rdc_lib/RdcTelemetryLibInterface.h"
 
 namespace amd {
 namespace rdc {
 
 class RdcDiagnosticModule : public RdcDiagnostic {
  public:
-    rdc_status_t rdc_diag_test_cases_query(
-        rdc_diag_test_cases_t test_cases[MAX_TEST_CASES],
-        uint32_t* test_case_count) override;
+  rdc_status_t rdc_diag_test_cases_query(rdc_diag_test_cases_t test_cases[MAX_TEST_CASES],
+                                         uint32_t* test_case_count) override;
 
-    // Run a specific test case
-    rdc_status_t rdc_test_case_run(
-        rdc_diag_test_cases_t test_case,
-        uint32_t gpu_index[RDC_MAX_NUM_DEVICES],
-        uint32_t gpu_count,
-        rdc_diag_test_result_t* result) override;
+  // Run a specific test case
+  rdc_status_t rdc_test_case_run(rdc_diag_test_cases_t test_case,
+                                 uint32_t gpu_index[RDC_MAX_NUM_DEVICES], uint32_t gpu_count,
+                                 const char* config, size_t config_size,
+                                 rdc_diag_test_result_t* result) override;
 
-    rdc_status_t rdc_diagnostic_run(
-        const rdc_group_info_t& gpus,
-        rdc_diag_level_t level,
-        rdc_diag_response_t* response) override;
+  rdc_status_t rdc_diagnostic_run(const rdc_group_info_t& gpus, rdc_diag_level_t level,
+                                  const char* config, size_t config_size,
+                                  rdc_diag_response_t* response) override;
 
-    rdc_status_t rdc_diag_init(uint64_t flags) override;
-    rdc_status_t rdc_diag_destroy() override;
+  rdc_status_t rdc_diag_init(uint64_t flags) override;
+  rdc_status_t rdc_diag_destroy() override;
 
-    explicit RdcDiagnosticModule(const RdcSmiLibPtr& smi_lib,
-        const RdcRasLibPtr& ras_module,
-        const RdcRocrLibPtr& rocr_module);
+  explicit RdcDiagnosticModule(std::list<RdcDiagnosticPtr> diagnostic_modules);
 
  private:
-    //< Helper function to dispatch fields to module
-    void get_fields_for_module(
-        rdc_gpu_field_t* fields,
-        uint32_t fields_count,
-        std::map<RdcDiagnosticPtr, std::vector<rdc_gpu_field_t>>
-                        & fields_in_module,
-        std::vector<rdc_gpu_field_value_t>& unsupport_fields); // NOLINT
-    std::list<RdcDiagnosticPtr> diagnostic_modules_;
-    std::map<rdc_diag_test_cases_t, RdcDiagnosticPtr> testcases_to_module_;
+  //< Helper function to dispatch fields to module
+  void get_fields_for_module(
+      rdc_gpu_field_t* fields, uint32_t fields_count,
+      std::map<RdcDiagnosticPtr, std::vector<rdc_gpu_field_t>>& fields_in_module,
+      std::vector<rdc_gpu_field_value_t>& unsupport_fields);  // NOLINT
+  std::list<RdcDiagnosticPtr> diagnostic_modules_;
+  std::map<rdc_diag_test_cases_t, RdcDiagnosticPtr> testcases_to_module_;
 };
 
 typedef std::shared_ptr<RdcDiagnosticModule> RdcDiagnosticModulePtr;
 
 }  // namespace rdc
 }  // namespace amd
-
 
 #endif  // INCLUDE_RDC_LIB_IMPL_DIAGNOSTICMODULE_H_

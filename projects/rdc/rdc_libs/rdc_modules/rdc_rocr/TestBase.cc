@@ -20,13 +20,16 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
+#include "rdc_modules/rdc_rocr/TestBase.h"
+
 #include <assert.h>
 #include <unistd.h>
+
 #include <algorithm>
-#include "rdc_modules/rdc_rocr/TestBase.h"
-#include "rdc_modules/rdc_rocr/base_rocr_utils.h"
+
 #include "rdc_lib/RdcLogger.h"
 #include "rdc_lib/rdc_common.h"
+#include "rdc_modules/rdc_rocr/base_rocr_utils.h"
 
 namespace amd {
 namespace rdc {
@@ -40,16 +43,10 @@ static const char kRunLabel[] = "TEST EXECUTION";
 static const char kCloseLabel[] = "TEST CLEAN UP";
 static const char kResultsLabel[] = "TEST RESULTS";
 
+TestBase::TestBase(uint32_t gpu_index) : gpu_index_(gpu_index), description_("") { SetUp(); }
+TestBase::~TestBase() { Close(); }
 
-TestBase::TestBase(uint32_t gpu_index):
-      gpu_index_(gpu_index), description_("") {
-  SetUp();
-}
-TestBase::~TestBase() {
-  Close();
-}
-
-static void MakeHeaderStr(const char *inStr, std::string *outStr) {
+static void MakeHeaderStr(const char* inStr, std::string* outStr) {
   assert(outStr != nullptr);
   assert(inStr != nullptr);
 
@@ -88,7 +85,6 @@ void TestBase::Close(void) {
   throw_if_error(err);
 }
 
-
 void TestBase::DisplayResults(void) const {
   std::string label;
   MakeHeaderStr(kResultsLabel, &label);
@@ -96,8 +92,9 @@ void TestBase::DisplayResults(void) const {
 }
 
 void TestBase::DisplayTestInfo(void) {
-  printf("#########################################"
-                                  "######################################\n");
+  printf(
+      "#########################################"
+      "######################################\n");
 
   std::string label;
   MakeHeaderStr(kTitleLabel, &label);
@@ -122,8 +119,7 @@ void TestBase::set_description(std::string d) {
   }
 }
 
-hsa_status_t TestBase::get_agent_by_gpu_index(uint32_t gpu_index,
-                      hsa_agent_t* agent) {
+hsa_status_t TestBase::get_agent_by_gpu_index(uint32_t gpu_index, hsa_agent_t* agent) {
   hsa_status_t err = HSA_STATUS_SUCCESS;
   std::vector<hsa_agent_t> gpus;
   err = hsa_iterate_agents(IterateGPUAgents, &gpus);
@@ -135,19 +131,16 @@ hsa_status_t TestBase::get_agent_by_gpu_index(uint32_t gpu_index,
   // sort based on bdf id
   std::vector<std::pair<uint16_t, hsa_agent_t>> dv_to_id;
   for (uint32_t dv_ind = 0; dv_ind < gpus.size(); ++dv_ind) {
-      auto dev = gpus[dv_ind];
-      uint16_t bdf_id = 0;
-      err = hsa_agent_get_info(dev,
-                (hsa_agent_info_t)HSA_AMD_AGENT_INFO_BDFID, &bdf_id);
-      throw_if_error(err, "fail to get gpu bdfid");
-      dv_to_id.push_back({bdf_id, dev});
+    auto dev = gpus[dv_ind];
+    uint16_t bdf_id = 0;
+    err = hsa_agent_get_info(dev, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_BDFID, &bdf_id);
+    throw_if_error(err, "fail to get gpu bdfid");
+    dv_to_id.push_back({bdf_id, dev});
   }
   // Stable sort to keep the order if bdf is equal.
-  std::stable_sort(dv_to_id.begin(), dv_to_id.end(), []
-  (const std::pair<uint16_t, hsa_agent_t>& p1,
-    const std::pair<uint16_t, hsa_agent_t>& p2) {
-        return p1.first < p2.first;
-  });
+  std::stable_sort(dv_to_id.begin(), dv_to_id.end(),
+                   [](const std::pair<uint16_t, hsa_agent_t>& p1,
+                      const std::pair<uint16_t, hsa_agent_t>& p2) { return p1.first < p2.first; });
 
   *agent = dv_to_id[gpu_index].second;
 
@@ -156,4 +149,3 @@ hsa_status_t TestBase::get_agent_by_gpu_index(uint32_t gpu_index,
 
 }  // namespace rdc
 }  // namespace amd
-

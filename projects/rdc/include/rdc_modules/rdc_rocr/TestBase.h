@@ -22,9 +22,10 @@ THE SOFTWARE.
 #ifndef RDC_MODULES_RDC_ROCR_TESTBASE_H_
 #define RDC_MODULES_RDC_ROCR_TESTBASE_H_
 
-#include <string>
 #include <memory>
+#include <string>
 #include <vector>
+
 #include "rdc_modules/rdc_rocr/RdcRocrBase.h"
 
 namespace amd {
@@ -36,7 +37,7 @@ class TestBase : public RdcRocrBase {
 
   virtual ~TestBase(void);
 
-  enum VerboseLevel {VERBOSE_MIN = 0, VERBOSE_STANDARD, VERBOSE_PROGRESS};
+  enum VerboseLevel { VERBOSE_MIN = 0, VERBOSE_STANDARD, VERBOSE_PROGRESS };
 
   // @Brief: Before run the core measure codes, do something to set up
   // i.e. init runtime, prepare packet...
@@ -54,12 +55,12 @@ class TestBase : public RdcRocrBase {
   // @Brief: Display information about the test
   virtual void DisplayTestInfo(void);
 
-  const std::string & description(void) const {return description_;}
+  const std::string& description(void) const { return description_; }
 
   void set_description(std::string d);
 
-  const std::string & get_gpu_info() const { return gpu_info_;}
-  const std::string & get_per_gpu_info() const { return per_gpu_info_;}
+  const std::string& get_gpu_info() const { return gpu_info_; }
+  const std::string& get_per_gpu_info() const { return per_gpu_info_; }
 
   hsa_status_t FindGPUIndex(hsa_agent_t agent, void* data);
   // Return the agent by GPU index in rocm_smi
