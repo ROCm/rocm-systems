@@ -38,7 +38,7 @@ class gfx90a_soc (OmniSoC_Base):
             self.set_perfmon_dir(os.path.join(str(config.omniperf_home), "omniperf_soc", "profile_configs", "roofline"))
         else:
             self.set_perfmon_dir(os.path.join(str(config.omniperf_home), "omniperf_soc", "profile_configs", soc)) 
-        # Per IP block max number of simulutaneous counters. GFX IP Blocks
+        # Per IP block max number of simultaneous counters. GFX IP Blocks
         self.set_perfmon_config(
             {
                 "SQ": 8,

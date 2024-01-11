@@ -197,13 +197,13 @@ class Omniperf:
         # instantiate desired profiler
         if self.__profiler_mode == "rocprofv1":
             from omniperf_profile.profiler_rocprof_v1 import rocprof_v1_profiler
-            profiler = rocprof_v1_profiler(self.__args, self.__profiler_mode, self.__soc)
+            profiler = rocprof_v1_profiler(self.__args, self.__profiler_mode, self.__soc[targ_arch])
         elif self.__profiler_mode == "rocprofv2":
             from omniperf_profile.profiler_rocprof_v2 import rocprof_v2_profiler
-            profiler = rocprof_v2_profiler(self.__args, self.__profiler_mode, self.__soc)        
+            profiler = rocprof_v2_profiler(self.__args, self.__profiler_mode, self.__soc[targ_arch])        
         elif self.__profiler_mode == "rocscope":
             from omniperf_profile.profiler_rocscope import rocscope_profiler
-            profiler = rocscope_profiler(self.__args, self.__profiler_mode, self.__soc)
+            profiler = rocscope_profiler(self.__args, self.__profiler_mode, self.__soc[targ_arch])
         else:
             logging.error("Unsupported profiler")
             sys.exit(1)

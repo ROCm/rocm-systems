@@ -33,7 +33,7 @@ class gfx908_soc (OmniSoC_Base):
         soc = "gfx908"
         self.set_soc(soc)
         self.set_perfmon_dir(os.path.join(str(config.omniperf_home), "omniperf_soc", "profile_configs", soc)) 
-        # Per IP block max number of simulutaneous counters. GFX IP Blocks
+        # Per IP block max number of simultaneous counters. GFX IP Blocks
         self.set_perfmon_config(
             {
                 "SQ": 8,
@@ -63,6 +63,10 @@ class gfx908_soc (OmniSoC_Base):
             }
         )
 
+    @demarcate
+    def get_profiler_options(self):
+        # Mi100 requires a custom xml config
+        return ["-m", self.get_perfmon_dir() + "/" + "metrics.xml"]
 
     #-----------------------
     # Required child methods

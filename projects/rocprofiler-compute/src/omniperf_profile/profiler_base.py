@@ -33,15 +33,20 @@ import config
 import pandas as pd
 
 class OmniProfiler_Base():
-    def __init__(self,args, profiler_mode,soc):
+    def __init__(self, args, profiler_mode, soc):
         self.__args = args
         self.__profiler = profiler_mode
-        self.__soc = soc
+        self._soc = soc # OmniSoC obj
         
         self.__perfmon_dir = os.path.join(str(config.omniperf_home), "omniperf_soc", "profile_configs")
 
     def get_args(self):
         return self.__args
+    def get_profiler_options(self, fname):
+        """Fetch any version specific arguments required by profiler
+        """
+        # assume no SoC specific options and return empty list by default
+        return []
     
     @demarcate
     def pmc_perf_split(self):
@@ -328,9 +333,20 @@ class OmniProfiler_Base():
                 else:
                     logging.debug(output)
             logging.info("\nCurrent input file: %s" % fname)
-            if self.__profiler == "rocprofv1":
-                #TODO: Look back at run_prof() definition. We may want to separate this based on SoC
-                run_prof(fname, self.get_args().path, self.__perfmon_dir, self.__args.remaining, self.__args.target, self.__args.verbose)
+            
+            options = self.get_profiler_options(fname)
+            options += self._soc.get_profiler_options()
+            print("options are ", options)
+
+            if self.__profiler == "rocprofv1" or self.__profiler == "rocprofv2":
+                run_prof(
+                    fname=fname, 
+                    # workload_dir=self.get_args().path, 
+                    # perfmon_dir=self.__perfmon_dir, 
+                    # cmd=self.__args.remaining,
+                    # target=self.__args.target,
+                    profiler_options=options
+                )
 
             elif self.__profiler == "rocscope":
                 run_rocscope(self.__args, fname)
@@ -355,4 +371,3 @@ class OmniProfiler_Base():
 
 def test_df_column_equality(df):
     return df.eq(df.iloc[:, 0], axis=0).all(1).all()
-

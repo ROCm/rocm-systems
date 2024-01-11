@@ -34,6 +34,18 @@ class rocprof_v2_profiler(OmniProfiler_Base):
         self.ready_to_profile = (self.get_args().roof_only and not os.path.isfile(os.path.join(self.get_args().path, "pmc_perf.csv"))
                             or not self.get_args().roof_only)
 
+    def get_profiler_options(self, fname):
+        fbase = os.path.splitext(os.path.basename(fname))[0]
+        app_cmd = self.get_args().remaining
+        args = [
+            # v2 requires output directory argument
+            "-d", self.get_args().path + "/" + "out",
+            # v2 does not require csv extension
+            "-o", fbase,
+            # v2 doen not require quotes on cmd
+            app_cmd
+        ]
+        return args
     #-----------------------
     # Required child methods
     #-----------------------
@@ -55,6 +67,25 @@ class rocprof_v2_profiler(OmniProfiler_Base):
             super().run_profiling(version, prog)
         else:
             logging.info("[roofline] Detected existing pmc_perf.csv")
+
+        # [Run] Get any SoC specific rocprof options
+            # Pass profiler name and throw error if not supported
+        soc_options = self._soc.get_rocprof_options(rocprof_version)
+            
+        # [Run] Load any rocprof version rocprof options
+            # -i
+            # -d
+            # -o
+        profiler_options = [
+            "-i", fname, 
+            "-d", workload_dir,
+            "-o", fbase,
+            cmd
+        ]
+            
+        # [Run] Call run_prof() util
+
+        
 
 
     @demarcate
