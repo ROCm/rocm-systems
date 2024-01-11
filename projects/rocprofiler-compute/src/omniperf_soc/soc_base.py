@@ -24,7 +24,6 @@
 
 from abc import ABC, abstractmethod
 import logging
-import sys
 import os
 import math
 import shutil
@@ -58,6 +57,8 @@ class OmniSoC_Base():
         self.__perfmon_config = config
     def set_soc_param(self, param: dict):
         self.__soc_params = param
+    def get_perfmon_dir(self):
+        return self.__perfmon_dir
     def get_soc_param(self):
         return self.__soc_params
     def set_soc(self, soc: str):
@@ -66,6 +67,13 @@ class OmniSoC_Base():
         return self.__soc
     def get_args(self):
         return self.__args
+    
+    @demarcate
+    def get_profiler_options(self):
+        """Fetch any SoC specific arguments required by the profiler
+        """
+        # assume no SoC specific options and return empty list by default
+        return []
     
     @demarcate
     def perfmon_filter(self, roofline_perfmon_only: bool):
@@ -308,8 +316,8 @@ def perfmon_emit(pmc_list, perfmon_config, workload_dir=None):
         / perfmon_config["TCC"]
     )
 
-    # Total number iterations to write pmc: counters line
-    niter = max(math.ceil(max(pmc_cnt)), math.ceil(tcc_cnt) + math.ceil(max(tcc2_cnt)))
+    # Total number iterations to write pmc: counters line, except TCC2
+    niter = max(math.ceil(max(pmc_cnt)), math.ceil(tcc_cnt))
 
     # Emit PMC counters into pmc config file
     if workload_dir:
@@ -318,7 +326,6 @@ def perfmon_emit(pmc_list, perfmon_config, workload_dir=None):
     else:
         batches = []
 
-    tcc2_index = 0
     for iter in range(niter):
         # Prefix
         line = "pmc: "
@@ -335,16 +342,31 @@ def perfmon_emit(pmc_list, perfmon_config, workload_dir=None):
         N = perfmon_config["TCC"]
         tcc_counters = pmc_list["TCC"][iter * N : iter * N + N]
 
-        if not tcc_counters:
-            # TCC per-channel counters
-            for ch in range(perfmon_config["TCC_channels"]):
-                tcc_counters += pmc_list["TCC2"][str(ch)][
-                    tcc2_index * N : tcc2_index * N + N
-                ]
-
-            tcc2_index += 1
-
         # TCC aggregated counters
+        line = line + " " + " ".join(tcc_counters)
+        if workload_dir:
+            fd.write(line + "\n")
+        else:
+            b = line.split()
+            b.remove("pmc:")
+            batches.append(b)
+
+    # TCC2, handle TCC per channel counters separatly
+    tcc2_index = 0
+    niter = math.ceil(max(tcc2_cnt))
+    for iter in range(niter):
+        # Prefix
+        line = "pmc: "
+        
+        N = perfmon_config["TCC"]
+        # TCC per-channel counters
+        tcc_counters = []
+        for ch in range(perfmon_config["TCC_channels"]):
+            tcc_counters = pmc_list["TCC2"][str(ch)][tcc2_index * N : tcc2_index * N + N]
+        
+        tcc2_index += 1
+
+        # TCC2 aggregated counters
         line = line + " " + " ".join(tcc_counters)
         if workload_dir:
             fd.write(line + "\n")
