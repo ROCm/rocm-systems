@@ -306,6 +306,8 @@ roctracer::flush()
     // make sure all async operations are executed
     for(size_t i = 0; i < thread_info::get_peak_num_threads(); ++i)
         hip_exec_activity_callbacks(i);
+
+    OMNITRACE_VERBOSE_F(2, "roctracer flush completed\n");
 }
 
 void

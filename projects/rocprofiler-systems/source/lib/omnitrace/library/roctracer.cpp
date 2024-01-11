@@ -163,6 +163,14 @@ get_hip_activity_callbacks(int64_t _tid = threading::get_id())
     return thread_data_t::instance(construct_on_thread{ _tid });
 }
 
+size_t
+get_hip_activity_callbacks_size()
+{
+    using thread_data_t =
+        thread_data<std::vector<std::function<void()>>, category::roctracer>;
+    return thread_data_t::size();
+}
+
 using hip_activity_mutex_t = std::decay_t<decltype(get_hip_activity_callbacks())>;
 using key_data_mutex_t     = std::decay_t<decltype(get_roctracer_key_data())>;
 
@@ -430,6 +438,9 @@ hsa_activity_callback(uint32_t op, const void* vrecord, void* arg)
 void
 hip_exec_activity_callbacks(int64_t _tid)
 {
+    // guard against initialization of structure when trying to exec
+    if(static_cast<size_t>(_tid) >= get_hip_activity_callbacks_size()) return;
+
     // OMNITRACE_ROCTRACER_CALL(roctracer_flush_activity());
     locking::atomic_lock _lk{ get_hip_activity_mutex(_tid) };
     auto&                _async_ops = get_hip_activity_callbacks(_tid);
