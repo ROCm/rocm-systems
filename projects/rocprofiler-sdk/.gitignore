@@ -39,3 +39,6 @@
 
 # Github Workflows
 /.github
+
+# VSCode Workspaces
+*.code-workspace

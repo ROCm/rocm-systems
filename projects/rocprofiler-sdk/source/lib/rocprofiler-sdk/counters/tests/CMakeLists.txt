@@ -3,7 +3,7 @@ rocprofiler_deactivate_clang_tidy()
 include(GoogleTest)
 
 set(ROCPROFILER_LIB_COUNTER_TEST_SOURCES metrics_test.cpp evaluate_ast_test.cpp
-                                         dimension.cpp)
+                                         dimension.cpp init_order.cpp)
 
 add_executable(counter-test)
 

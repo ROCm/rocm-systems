@@ -20,6 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include <glog/logging.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
 #include "lib/common/synchronized.hpp"
@@ -49,7 +50,7 @@ rocprofiler_create_profile_config(rocprofiler_agent_t              agent,
     std::shared_ptr<rocprofiler::counters::profile_config> config =
         std::make_shared<rocprofiler::counters::profile_config>();
 
-    const auto& id_map = rocprofiler::counters::getMetricIdMap();
+    const auto& id_map = *CHECK_NOTNULL(rocprofiler::counters::getMetricIdMap());
 
     for(size_t i = 0; i < counters_count; i++)
     {

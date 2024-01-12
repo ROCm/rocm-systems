@@ -20,6 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
 #include <fmt/core.h>
@@ -45,7 +46,7 @@ extern "C" {
 rocprofiler_status_t ROCPROFILER_API
 rocprofiler_query_counter_name(rocprofiler_counter_id_t counter_id, const char** name, size_t* size)
 {
-    const auto& id_map = rocprofiler::counters::getMetricIdMap();
+    const auto& id_map = *CHECK_NOTNULL(rocprofiler::counters::getMetricIdMap());
 
     if(const auto* metric_ptr = rocprofiler::common::get_val(id_map, counter_id.handle))
     {
@@ -75,7 +76,7 @@ rocprofiler_query_counter_instance_count(rocprofiler_agent_t      agent,
                                          rocprofiler_counter_id_t counter_id,
                                          size_t*                  instance_count)
 {
-    const auto& id_map     = rocprofiler::counters::getMetricIdMap();
+    const auto& id_map     = *CHECK_NOTNULL(rocprofiler::counters::getMetricIdMap());
     const auto* metric_ptr = rocprofiler::common::get_val(id_map, counter_id.handle);
     if(!metric_ptr) return ROCPROFILER_STATUS_ERROR_COUNTER_NOT_FOUND;
 

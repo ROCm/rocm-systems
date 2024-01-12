@@ -40,6 +40,12 @@ namespace counters
 class CounterController
 {
 public:
+    CounterController()
+    {
+        // Pre-read metrics map file to catch faliures during initial setup.
+        rocprofiler::counters::getMetricIdMap();
+    }
+
     // Adds a counter collection profile to our global cache.
     // Note: these profiles can be used across multiple contexts
     //       and are independent of the context.

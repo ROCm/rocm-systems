@@ -115,7 +115,7 @@ get_ast_map()
 {
     static std::unordered_map<std::string, EvaluateASTMap> ast_map = []() {
         std::unordered_map<std::string, EvaluateASTMap> data;
-        const auto&                                     metric_map = counters::getMetricMap();
+        const auto& metric_map = *CHECK_NOTNULL(counters::getMetricMap());
         for(const auto& [gfx, metrics] : metric_map)
         {
             // TODO: Remove global XML from derrived counters...

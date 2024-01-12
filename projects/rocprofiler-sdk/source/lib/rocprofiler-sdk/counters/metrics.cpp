@@ -26,6 +26,7 @@
 
 #include "lib/common/defines.hpp"
 #include "lib/common/filesystem.hpp"
+#include "lib/common/static_object.hpp"
 #include "lib/common/synchronized.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/common/xml.hpp"
@@ -182,12 +183,12 @@ getBaseHardwareMetrics()
     return loadXml(counters_path, true);
 }
 
-const MetricIdMap&
+const MetricIdMap*
 getMetricIdMap()
 {
-    static MetricIdMap id_map = []() {
+    static MetricIdMap*& id_map = common::static_object<MetricIdMap>::construct([]() {
         MetricIdMap map;
-        for(const auto& [_, val] : getMetricMap())
+        for(const auto& [_, val] : *CHECK_NOTNULL(getMetricMap()))
         {
             for(const auto& metric : val)
             {
@@ -195,14 +196,14 @@ getMetricIdMap()
             }
         }
         return map;
-    }();
+    }());
     return id_map;
 }
 
-const MetricMap&
+const MetricMap*
 getMetricMap()
 {
-    static MetricMap map = []() {
+    static MetricMap*& map = common::static_object<MetricMap>::construct([]() {
         MetricMap ret = getBaseHardwareMetrics();
         for(auto& [key, val] : getDerivedHardwareMetrics())
         {
@@ -213,7 +214,7 @@ getMetricMap()
             }
         }
         return ret;
-    }();
+    }());
     return map;
 }
 
@@ -221,7 +222,7 @@ const std::vector<Metric>&
 getMetricsForAgent(const std::string& agent)
 {
     static const std::vector<Metric> empty;
-    const auto&                      map = getMetricMap();
+    const auto&                      map = *CHECK_NOTNULL(getMetricMap());
     if(const auto* metric_ptr = rocprofiler::common::get_val(map, agent))
     {
         return *metric_ptr;
@@ -234,6 +235,22 @@ bool
 operator<(Metric const& lhs, Metric const& rhs)
 {
     return lhs.id() < rhs.id();
+}
+
+bool
+operator==(Metric const& lhs, Metric const& rhs)
+{
+    auto get_tie = [](auto& x) {
+        return std::tie(x.name_,
+                        x.block_,
+                        x.event_,
+                        x.description_,
+                        x.expression_,
+                        x.special_,
+                        x.id_,
+                        x.empty_);
+    };
+    return get_tie(lhs) == get_tie(rhs);
 }
 }  // namespace counters
 }  // namespace rocprofiler

@@ -69,6 +69,7 @@ public:
     bool               empty() const { return empty_; }
 
     friend bool operator<(Metric const& lhs, Metric const& rhs);
+    friend bool operator==(Metric const& lhs, Metric const& rhs);
 
 private:
     std::string name_        = {};
@@ -99,7 +100,7 @@ getDerivedHardwareMetrics();
 /**
  * Combined map containing both base and derived counters
  */
-const MetricMap&
+const MetricMap*
 getMetricMap();
 
 /**
@@ -112,7 +113,7 @@ getMetricsForAgent(const std::string&);
 /**
  * Get a map of metric::id() -> metric
  */
-const MetricIdMap&
+const MetricIdMap*
 getMetricIdMap();
 }  // namespace counters
 }  // namespace rocprofiler
