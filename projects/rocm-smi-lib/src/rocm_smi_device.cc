@@ -697,7 +697,7 @@ int Device::readDevInfoStr(DevInfoTypes type, std::string *retStr) {
      << " | " << (fs.fail() ? "[ERROR] Failed read - format error" :
      "[GOOD] No fail - Successful read operation")
      << " | " << (fs.eof() ? "[ERROR] Failed read - EOF error" :
-     "[GOOD] No eof error - Successful read operation")
+     "[GOOD] No eof - Successful read operation")
      << " | " << (fs.good() ? "[GOOD] read good - Successful read operation" :
      "[ERROR] Failed read - good error");
   LOG_INFO(ss);
@@ -759,7 +759,7 @@ int Device::writeDevInfoStr(DevInfoTypes type, std::string valStr,
        << " | " << (fs.fail() ? "[ERROR] Failed write - format error" :
                     "[GOOD] No fail - Successful write operation")
        << " | " << (fs.eof() ? "[ERROR] Failed write - EOF error" :
-                    "[GOOD] No eof error - Successful write operation")
+                    "[GOOD] No eof - Successful write operation")
        << " | " << (fs.good() ?
                    "[GOOD] Write good - Successful write operation" :
                    "[ERROR] Failed write - good error");
