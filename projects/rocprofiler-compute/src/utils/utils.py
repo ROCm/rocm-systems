@@ -88,7 +88,7 @@ def get_version(omniperf_home) -> dict:
             with open(shaFile, "r") as file:
                 SHA = file.read().replace("\n", "")
         except EnvironmentError:
-            logging.error("ERROR: Cannot find VERSION.sha file at {}".format(shaFile))
+            error("Cannot find VERSION.sha file at {}".format(shaFile))
             sys.exit(1)
 
         MODE = "release"
@@ -123,11 +123,9 @@ def detect_rocprof():
         rocprof_path = shutil.which(rocprof_cmd)
 
     if not rocprof_path:
-        logging.error("\nError: Unable to resolve path to %s binary" % rocprof_cmd)
-        logging.error(
-            "Please verify installation or set ROCPROF environment variable with full path."
+        error(
+            "Error: Unable to resolve path to {} binary\n Please verify installation or set ROCPROF environment variable with full path.".format(rocprof_cmd)
         )
-        sys.exit(1)
     else:
         # Resolve any sym links in file path
         rocprof_path = os.path.realpath(rocprof_path.rstrip("\n"))
@@ -202,6 +200,8 @@ def run_prof(fname, workload_dir, perfmon_dir, cmd, target, verbose):
                 '"' + cmd + '"',
             ]
         )
+        if not success:
+            error(output)
     else:
         success, output = capture_subprocess_output(
             [
@@ -215,6 +215,8 @@ def run_prof(fname, workload_dir, perfmon_dir, cmd, target, verbose):
                 '"' + cmd + '"',
             ]
         )
+        if not success:
+            error(output)
     # write rocprof output to logging
     logging.info(output)
 
