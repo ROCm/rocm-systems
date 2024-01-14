@@ -62,5 +62,8 @@ get_agent_cache(hsa_agent_t agent);
  */
 std::unordered_set<std::string>&
 get_agent_available_properties();
+
+void
+construct_agent_cache(::HsaApiTable* table);
 }  // namespace agent
 }  // namespace rocprofiler

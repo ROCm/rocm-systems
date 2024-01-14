@@ -31,6 +31,7 @@
 #include <hsa/hsa_api_trace.h>
 #include <hsa/hsa_ven_amd_aqlprofile.h>
 
+#include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/aql/helpers.hpp"
 #include "lib/rocprofiler-sdk/aql/packet_construct.hpp"
 #include "lib/rocprofiler-sdk/counters/metrics.hpp"
@@ -40,7 +41,7 @@
 
 namespace rocprofiler
 {
-AmdExtTable
+AmdExtTable&
 get_ext_table()
 {
     static auto _v = []() {
@@ -56,23 +57,52 @@ get_ext_table()
     return _v;
 }
 
+CoreApiTable&
+get_api_table()
+{
+    static auto _v = []() {
+        auto val                  = CoreApiTable{};
+        val.hsa_iterate_agents_fn = hsa_iterate_agents;
+        val.hsa_agent_get_info_fn = hsa_agent_get_info;
+        val.hsa_queue_create_fn   = hsa_queue_create;
+        val.hsa_queue_destroy_fn  = hsa_queue_destroy;
+        return val;
+    }();
+    return _v;
+}
+
 auto
 findDeviceMetrics(const hsa::AgentCache& agent, const std::unordered_set<std::string>& metrics)
 {
     std::vector<counters::Metric> ret;
     auto                          all_counters = counters::getBaseHardwareMetrics();
 
+    LOG(ERROR) << "Looking up counters for " << std::string(agent.name());
     auto gfx_metrics = common::get_val(all_counters, std::string(agent.name()));
-    if(!gfx_metrics) return ret;
+    if(!gfx_metrics)
+    {
+        LOG(ERROR) << "No counters found for " << std::string(agent.name());
+        return ret;
+    }
 
     for(auto& counter : *gfx_metrics)
     {
-        if(metrics.count(counter.name()) > 0 || metrics.empty())
+        if((metrics.count(counter.name()) > 0 || metrics.empty()) && !counter.block().empty())
         {
             ret.push_back(counter);
         }
     }
     return ret;
+}
+
+void
+test_init()
+{
+    HsaApiTable table;
+    table.amd_ext_ = &get_ext_table();
+    table.core_    = &get_api_table();
+    agent::construct_agent_cache(&table);
+    hsa::get_queue_controller().init(get_api_table(), get_ext_table());
 }
 
 }  // namespace rocprofiler
@@ -81,75 +111,60 @@ using namespace rocprofiler::aql;
 
 TEST(aql_profile, construct_packets)
 {
-    hsa_init();
-    try
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    rocprofiler::test_init();
+    auto agents = rocprofiler::hsa::get_queue_controller().get_supported_agents();
+    ASSERT_GT(agents.size(), 0);
+    for(const auto& [_, agent] : agents)
     {
-        auto agents = rocprofiler::hsa::get_queue_controller().get_supported_agents();
-        for(const auto& [_, agent] : agents)
-        {
-            LOG(WARNING) << fmt::format("Found Agent: {}", agent.get_hsa_agent().handle);
-            auto metrics = rocprofiler::findDeviceMetrics(agent, {"SQ_WAVES"});
-            ASSERT_EQ(metrics.size(), 1);
-            AQLPacketConstruct(agent, metrics);
-        }
-    } catch(std::runtime_error&)
-    {
-        LOG(WARNING) << "Could not fetch agents on host, skipping test";
-        return;
+        LOG(WARNING) << fmt::format("Found Agent: {}", agent.get_hsa_agent().handle);
+        auto metrics = rocprofiler::findDeviceMetrics(agent, {"SQ_WAVES"});
+        ASSERT_EQ(metrics.size(), 1);
+        AQLPacketConstruct(agent, metrics);
     }
     hsa_shut_down();
 }
 
 TEST(aql_profile, too_many_counters)
 {
-    hsa_init();
-    try
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    rocprofiler::test_init();
+    auto agents = rocprofiler::hsa::get_queue_controller().get_supported_agents();
+    ASSERT_GT(agents.size(), 0);
+    for(const auto& [_, agent] : agents)
     {
-        auto agents = rocprofiler::hsa::get_queue_controller().get_supported_agents();
+        LOG(WARNING) << fmt::format("Found Agent: {}", agent.get_hsa_agent().handle);
 
-        for(const auto& [_, agent] : agents)
-        {
-            LOG(WARNING) << fmt::format("Found Agent: {}", agent.get_hsa_agent().handle);
-
-            auto metrics = rocprofiler::findDeviceMetrics(agent, {});
-            EXPECT_THROW(
+        auto metrics = rocprofiler::findDeviceMetrics(agent, {});
+        EXPECT_THROW(
+            {
+                try
                 {
-                    try
-                    {
-                        AQLPacketConstruct(agent, metrics);
-                    } catch(const std::exception& e)
-                    {
-                        EXPECT_NE(e.what(), nullptr) << e.what();
-                        throw;
-                    }
-                },
-                std::runtime_error);
-        }
-    } catch(std::runtime_error&)
-    {
-        LOG(WARNING) << "Could not fetch agents on host, skipping test";
-        return;
+                    AQLPacketConstruct(agent, metrics);
+                } catch(const std::exception& e)
+                {
+                    EXPECT_NE(e.what(), nullptr) << e.what();
+                    throw;
+                }
+            },
+            std::runtime_error);
     }
     hsa_shut_down();
 }
 
 TEST(aql_profile, packet_generation_single)
 {
-    hsa_init();
-    try
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    rocprofiler::test_init();
+
+    auto agents = rocprofiler::hsa::get_queue_controller().get_supported_agents();
+    ASSERT_GT(agents.size(), 0);
+    for(const auto& [_, agent] : agents)
     {
-        auto agents = rocprofiler::hsa::get_queue_controller().get_supported_agents();
-        for(const auto& [_, agent] : agents)
-        {
-            auto               metrics = rocprofiler::findDeviceMetrics(agent, {"SQ_WAVES"});
-            AQLPacketConstruct pkt(agent, metrics);
-            auto               test_pkt = pkt.construct_packet(rocprofiler::get_ext_table());
-            EXPECT_TRUE(test_pkt);
-        }
-    } catch(std::runtime_error&)
-    {
-        LOG(WARNING) << "Could not fetch agents on host, skipping test";
-        return;
+        auto               metrics = rocprofiler::findDeviceMetrics(agent, {"SQ_WAVES"});
+        AQLPacketConstruct pkt(agent, metrics);
+        auto               test_pkt = pkt.construct_packet(rocprofiler::get_ext_table());
+        EXPECT_TRUE(test_pkt);
     }
 
     hsa_shut_down();
@@ -157,22 +172,52 @@ TEST(aql_profile, packet_generation_single)
 
 TEST(aql_profile, packet_generation_multi)
 {
-    hsa_init();
-    try
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    rocprofiler::test_init();
+
+    auto agents = rocprofiler::hsa::get_queue_controller().get_supported_agents();
+    ASSERT_GT(agents.size(), 0);
+    for(const auto& [_, agent] : agents)
     {
-        auto agents = rocprofiler::hsa::get_queue_controller().get_supported_agents();
-        for(const auto& [_, agent] : agents)
-        {
-            auto metrics =
-                rocprofiler::findDeviceMetrics(agent, {"SQ_WAVES", "TA_FLAT_READ_WAVEFRONTS"});
-            AQLPacketConstruct pkt(agent, metrics);
-            auto               test_pkt = pkt.construct_packet(rocprofiler::get_ext_table());
-            EXPECT_TRUE(test_pkt);
-        }
-    } catch(std::runtime_error&)
-    {
-        LOG(WARNING) << "Could not fetch agents on host, skipping test";
-        return;
+        auto metrics =
+            rocprofiler::findDeviceMetrics(agent, {"SQ_WAVES", "TA_FLAT_READ_WAVEFRONTS"});
+        AQLPacketConstruct pkt(agent, metrics);
+        auto               test_pkt = pkt.construct_packet(rocprofiler::get_ext_table());
+        EXPECT_TRUE(test_pkt);
     }
+
     hsa_shut_down();
+}
+
+TEST(aql_profile, test_aql_packet)
+{
+    auto check_null = [](auto& val) {
+        hsa_ext_amd_aql_pm4_packet_t null_val = {
+            .header = 0, .pm4_command = {0}, .completion_signal = {.handle = 0}};
+        return val.header == null_val.header &&
+               memcmp(val.pm4_command, null_val.pm4_command, sizeof(null_val.pm4_command)) == 0 &&
+               val.completion_signal.handle == null_val.completion_signal.handle;
+    };
+
+    rocprofiler::hsa::AQLPacket test_pkt([](void* x) -> hsa_status_t {
+        ::free(x);
+        return HSA_STATUS_SUCCESS;
+    });
+    EXPECT_TRUE(check_null(test_pkt.start)) << "Start packet not null";
+    EXPECT_TRUE(check_null(test_pkt.stop)) << "Stop packet not null";
+    EXPECT_TRUE(check_null(test_pkt.read)) << "Read packet not null";
+
+    // If this leaks, then AQLPacket is not freeing data correctly.
+    test_pkt.profile.output_buffer.ptr  = malloc(sizeof(double));
+    test_pkt.profile.command_buffer.ptr = malloc(sizeof(double));
+    test_pkt.command_buf_mallocd        = true;
+    test_pkt.output_buffer_malloced     = true;
+
+    // test custom destructor as well
+    rocprofiler::hsa::AQLPacket test_pkt2([](void* x) -> hsa_status_t {
+        ::free(x);
+        return HSA_STATUS_SUCCESS;
+    });
+    test_pkt2.profile.output_buffer.ptr  = malloc(sizeof(double));
+    test_pkt2.profile.command_buffer.ptr = malloc(sizeof(double));
 }

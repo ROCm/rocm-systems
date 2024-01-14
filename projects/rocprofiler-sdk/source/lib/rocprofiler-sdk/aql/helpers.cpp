@@ -32,8 +32,6 @@ namespace aql
 hsa_ven_amd_aqlprofile_id_query_t
 get_query_info(hsa_agent_t agent, const counters::Metric& metric)
 {
-    DLOG(WARNING) << fmt::format("Querying HSA for Counter: {}", metric);
-
     hsa_ven_amd_aqlprofile_profile_t  profile{.agent = agent};
     hsa_ven_amd_aqlprofile_id_query_t query = {metric.block().c_str(), 0, 0};
     if(hsa_ven_amd_aqlprofile_get_info(&profile, HSA_VEN_AMD_AQLPROFILE_INFO_BLOCK_ID, &query) !=

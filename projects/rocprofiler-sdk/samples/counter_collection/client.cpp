@@ -23,6 +23,7 @@
 #include "client.hpp"
 
 #include <fstream>
+#include <functional>
 #include <iostream>
 #include <mutex>
 #include <set>
@@ -72,32 +73,6 @@ get_buffer()
     return buf;
 }
 
-std::ostream*
-get_output_stream()
-{
-    static std::ostream* isTerm = []() -> std::ostream* {
-        if(auto* outfile = getenv("ROCPROFILER_SAMPLE_OUTPUT_FILE"))
-        {
-            if(std::string_view{outfile} == "stdout")
-                return static_cast<std::ostream*>(&std::cout);
-            else if(std::string_view{outfile} == "stderr")
-                return &std::cerr;
-        }
-        return nullptr;
-    }();
-    static std::unique_ptr<std::ofstream> stream;
-
-    if(isTerm) return isTerm;
-    if(stream) return stream.get();
-    std::string filename = "counter_collection.log";
-    if(auto* outfile = getenv("ROCPROFILER_SAMPLE_OUTPUT_FILE"))
-    {
-        filename = outfile;
-    }
-    stream = std::make_unique<std::ofstream>(filename);
-    return stream.get();
-}
-
 /**
  * Buffer callback called when the buffer is full. rocprofiler_record_header_t
  * can contain counter records as well as other records (such as tracing). These
@@ -108,7 +83,7 @@ buffered_callback(rocprofiler_context_id_t,
                   rocprofiler_buffer_id_t,
                   rocprofiler_record_header_t** headers,
                   size_t                        num_headers,
-                  void*,
+                  void*                         user_data,
                   uint64_t)
 {
     static int enter_count = 0;
@@ -128,7 +103,10 @@ buffered_callback(rocprofiler_context_id_t,
         }
     }
 
-    *get_output_stream() << "[" << __FUNCTION__ << "] " << ss.str() << "\n";
+    auto* output_stream = static_cast<std::ostream*>(user_data);
+    if(!output_stream) throw std::runtime_error{"nullptr to output stream"};
+
+    *output_stream << "[" << __FUNCTION__ << "] " << ss.str() << "\n";
 }
 
 /**
@@ -221,7 +199,7 @@ dispatch_callback(rocprofiler_queue_id_t /*queue_id*/,
 }
 
 int
-tool_init(rocprofiler_client_finalize_t, void*)
+tool_init(rocprofiler_client_finalize_t, void* user_data)
 {
     ROCPROFILER_CALL(rocprofiler_create_context(&get_client_ctx()), "context creation failed");
 
@@ -230,32 +208,35 @@ tool_init(rocprofiler_client_finalize_t, void*)
                                                2048,
                                                ROCPROFILER_BUFFER_POLICY_LOSSLESS,
                                                buffered_callback,
-                                               nullptr,
+                                               user_data,
                                                &get_buffer()),
                      "buffer creation failed");
 
     auto client_thread = rocprofiler_callback_thread_t{};
     ROCPROFILER_CALL(rocprofiler_create_callback_thread(&client_thread),
                      "failure creating callback thread");
-    get_output_stream();
     ROCPROFILER_CALL(rocprofiler_assign_callback_thread(get_buffer(), client_thread),
                      "failed to assign thread for buffer");
     ROCPROFILER_CALL(rocprofiler_configure_buffered_dispatch_profile_counting_service(
                          get_client_ctx(), get_buffer(), dispatch_callback, nullptr),
                      "Could not setup buffered service");
-    rocprofiler_start_context(get_client_ctx());
+    ROCPROFILER_CALL(rocprofiler_start_context(get_client_ctx()), "start context");
 
     // no errors
     return 0;
 }
 
 void
-tool_fini(void*)
+tool_fini(void* user_data)
 {
-    rocprofiler_stop_context(get_client_ctx());
     std::clog << "In tool fini\n";
-}
+    ROCPROFILER_CALL(rocprofiler_flush_buffer(get_buffer()), "buffer flush");
+    rocprofiler_stop_context(get_client_ctx());
 
+    auto* output_stream = static_cast<std::ostream*>(user_data);
+    *output_stream << std::flush;
+    if(output_stream != &std::cout && output_stream != &std::cerr) delete output_stream;
+}
 }  // namespace
 
 extern "C" rocprofiler_tool_configure_result_t*
@@ -279,12 +260,22 @@ rocprofiler_configure(uint32_t    version,
 
     std::clog << info.str() << std::endl;
 
+    std::ostream* output_stream = nullptr;
+    std::string   filename      = "counter_collection.log";
+    if(auto* outfile = getenv("ROCPROFILER_SAMPLE_OUTPUT_FILE"); outfile) filename = outfile;
+    if(filename == "stdout")
+        output_stream = &std::cout;
+    else if(filename == "stderr")
+        output_stream = &std::cerr;
+    else
+        output_stream = new std::ofstream{filename};
+
     // create configure data
     static auto cfg =
         rocprofiler_tool_configure_result_t{sizeof(rocprofiler_tool_configure_result_t),
                                             &tool_init,
                                             &tool_fini,
-                                            static_cast<void*>(nullptr)};
+                                            static_cast<void*>(output_stream)};
 
     // return pointer to configure data
     return &cfg;

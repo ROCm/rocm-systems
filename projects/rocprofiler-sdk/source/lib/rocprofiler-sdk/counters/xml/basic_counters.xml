@@ -76,6 +76,9 @@
   <metric name="TCP_TCP_TA_DATA_STALL_CYCLES" block=TCP event=6 descr="TCP stalls TA data interface. Now Windowed."></metric>
 </gfx9>
 
+<gfx900 base="gfx9">
+</gfx900>
+
 <gfx906 base="gfx9">
   # EA1
   <metric name="MAX_WAVE_SIZE" expr=wave_front_size descr="Max wave size constant"></metric>
