@@ -37,11 +37,12 @@ list(REMOVE_ITEM ROCPROFILER_PACKAGING_COMPONENTS "Development" "Unspecified")
 list(LENGTH ROCPROFILER_PACKAGING_COMPONENTS NUM_ROCPROFILER_PACKAGING_COMPONENTS)
 
 # the packages we will generate
-set(ROCPROFILER_COMPONENT_GROUPS "core" "tests")
+set(ROCPROFILER_COMPONENT_GROUPS "core" "tests" "docs")
 
 set(COMPONENT_GROUP_core_COMPONENTS "core" "development" "samples" "tools" "Development"
                                     "Unspecified")
 set(COMPONENT_GROUP_tests_COMPONENTS "tests")
+set(COMPONENT_GROUP_docs_COMPONENTS "docs")
 
 # variables for each component group. Note: eventually we will probably want to separate
 # the core to just be the runtime libraries, development to be the headers and cmake
@@ -52,26 +53,35 @@ set(COMPONENT_NAME_development "dev")
 set(COMPONENT_NAME_samples "samples")
 set(COMPONENT_NAME_tools "tools")
 set(COMPONENT_NAME_tests "tests")
+set(COMPONENT_NAME_docs "docs")
 
 set(COMPONENT_SEP_core "")
 set(COMPONENT_SEP_development "-")
 set(COMPONENT_SEP_samples "-")
 set(COMPONENT_SEP_tools "-")
 set(COMPONENT_SEP_tests "-")
+set(COMPONENT_SEP_docs "-")
 
 set(COMPONENT_DEP_core "")
 set(COMPONENT_DEP_development "rocprofiler-sdk")
 set(COMPONENT_DEP_samples "rocprofiler-sdk")
 set(COMPONENT_DEP_tools "rocprofiler-sdk")
 set(COMPONENT_DEP_tests "rocprofiler-sdk")
+set(COMPONENT_DEP_docs "")
 
 set(COMPONENT_DESC_core "rocprofiler-sdk libraries, headers, samples, and tools")
 set(COMPONENT_DESC_development "rocprofiler-sdk development files")
 set(COMPONENT_DESC_samples "rocprofiler-sdk samples")
 set(COMPONENT_DESC_tools "rocprofiler-sdk tools")
 set(COMPONENT_DESC_tests "rocprofiler-sdk tests")
+set(COMPONENT_DESC_docs "rocprofiler-sdk documentation")
 
-if(NOT NUM_ROCPROFILER_PACKAGING_COMPONENTS EQUAL 5)
+set(EXPECTED_PACKAGING_COMPONENTS 5)
+if(ROCPROFILER_BUILD_DOCS)
+    set(EXPECTED_PACKAGING_COMPONENTS 6)
+endif()
+
+if(NOT NUM_ROCPROFILER_PACKAGING_COMPONENTS EQUAL EXPECTED_PACKAGING_COMPONENTS)
     message(
         FATAL_ERROR
             "Error new install component needs COMPONENT_NAME_* and COMPONENT_SEP_* entries"

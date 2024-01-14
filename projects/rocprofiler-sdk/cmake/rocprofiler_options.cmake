@@ -40,12 +40,8 @@ rocprofiler_add_option(ROCPROFILER_BUILD_SAMPLES "Enable building the code sampl
                        ${ROCPROFILER_BUILD_CI})
 rocprofiler_add_option(ROCPROFILER_BUILD_CODECOV
                        "Enable building for code coverage analysis" OFF)
-
-# CLI and FILE plugins are always built
-foreach(_PLUGIN "ATT" "CTF" "PERFETTO")
-    rocprofiler_add_option(ROCPROFILER_BUILD_PLUGIN_${_PLUGIN}
-                           "Enable building the ${_PLUGIN} plugin" ON)
-endforeach()
+rocprofiler_add_option(ROCPROFILER_BUILD_DOCS
+                       "Enable build + install + packaging documentation" OFF)
 
 rocprofiler_add_option(
     ROCPROFILER_BUILD_GHC_FS
