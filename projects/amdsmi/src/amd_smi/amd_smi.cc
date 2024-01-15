@@ -1084,6 +1084,9 @@ amdsmi_status_t  amdsmi_get_gpu_metrics_info(
     amdsmi_status_t ret =
             rsmi_wrapper(rsmi_dev_gpu_metrics_info_get, processor_handle,
                     reinterpret_cast<rsmi_gpu_metrics_t*>(pgpu_metrics));
+    if (ret != AMDSMI_STATUS_SUCCESS) {
+        return ret;
+    }
     // WARNING: TEMPORARY - awaiting 1.5 update from amdgpu driver/firmware
     // intended to be removed later
     // START: REMOVE WHATS BELOW ME
