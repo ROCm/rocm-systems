@@ -12,3 +12,4 @@ dash-svg
 dash-bootstrap-components
 kaleido
 setuptools
+plotille
