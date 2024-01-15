@@ -16,7 +16,7 @@ Panel Config:
           value: Value
           unit: Unit
           tips: Tips
-        style:
+        cli_style:
           type: simple_bar
         metric:
           L2 Util:
@@ -303,7 +303,7 @@ Panel Config:
           max: Max
           unit: Unit
           tips: Tips
-        style:
+        cli_style:
           type: simple_multi_bar
         metric:
           Read - Remote Socket Stall:

@@ -1,0 +1,11 @@
+---
+Panel Config:
+  id: 400
+  title: Roofline
+  data source:
+    - raw_csv_table:
+        id: 401
+        source: roofline.csv
+        comparable: false # for now
+        cli_style: roofline_chart
+        # TODO: refactoring the data structure to have metrics here!

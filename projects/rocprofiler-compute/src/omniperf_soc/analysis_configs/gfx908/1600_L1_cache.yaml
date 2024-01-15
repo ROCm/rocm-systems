@@ -16,7 +16,7 @@ Panel Config:
           value: Value
           unit: Unit
           tips: Tips
-        style:
+        cli_style:
           type: simple_bar
           range_color: [1, 100]
           label_txt: (%)
@@ -258,7 +258,7 @@ Panel Config:
           max: Max
           unit: Unit
           tips: Tips
-        style: 
+        cli_style: 
           type: simple_multi_bar
         metric:
           NC - Read:

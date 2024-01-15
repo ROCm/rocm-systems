@@ -15,7 +15,7 @@ Panel Config:
           metric: Metric
           value: Value
           tips: Tips
-        style:
+        cli_style:
           type: simple_bar
           range_color: [1, 100]
           label_txt: (%)

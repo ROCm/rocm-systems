@@ -18,7 +18,7 @@ Panel Config:
           max: Max
           unit: Unit
           tips: Tips
-        style: 
+        cli_style: 
           type: simple_bar
           label_txt: (# of instr + $normUnit)
         metric:
@@ -81,7 +81,7 @@ Panel Config:
           max: Max
           unit: Unit
           tips: Tips
-        style: 
+        cli_style: 
           type: simple_bar
           label_txt: (# of instr + $normUnit)
         metric:
