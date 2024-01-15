@@ -363,7 +363,7 @@ def perfmon_emit(pmc_list, perfmon_config, workload_dir=None):
         # TCC per-channel counters
         tcc_counters = []
         for ch in range(perfmon_config["TCC_channels"]):
-            tcc_counters = pmc_list["TCC2"][str(ch)][tcc2_index * N : tcc2_index * N + N]
+            tcc_counters += pmc_list["TCC2"][str(ch)][tcc2_index * N : tcc2_index * N + N]
         
         tcc2_index += 1
 
