@@ -825,3 +825,57 @@ def build_comparable_columns(time_unit):
         comparable_columns.append(h + "(" + time_unit + ")")
 
     return comparable_columns
+
+def correct_sys_info(df, specs_correction):
+    """
+    Correct system spec items manually
+    """
+
+    # NB: to keep the backwards compatibility, we don't touch the current
+    #   naming convention. Ideally, the header of sysinfo should use/include
+    #   the members of MachineSpecs directly.
+
+    # Sync up with the header defined in omniperf gen_sysinfo() !!
+    # header = "workload_name,"
+    # header += "command,"
+    # header += "host_name,host_cpu,host_distro,host_kernel,host_rocmver,date,"
+    # header += "gpu_soc,numSE,numCU,numSIMD,waveSize,maxWavesPerCU,maxWorkgroupSize,"
+    # header += "L1,L2,sclk,mclk,cur_sclk,cur_mclk,L2Banks,LDSBanks,name,numSQC,hbmBW,compute_partition,memory_partition,"
+    # header += "ip_blocks\n"
+
+    name_map = {
+        "host_name": "hostname",
+        "CPU": "host_cpu",
+        "kernel_version": "host_kernel",
+        "host_distro": "distro",
+        # "ram": "",
+        "distro": "host_distro",
+        "rocm_version": "host_rocmver",
+        "GPU": "name",
+        "arch": "gpu_soc",
+        "L1": "L1",
+        "L2": "L2",
+        "CU": "numCU",
+        "SIMD": "numSIMD",
+        "SE": "numSE",
+        "wave_size": "waveSize",
+        "max_waves_per_cu": "maxWavesPerCU",
+        "max_waves_per_cu": "maxWorkgroupSize",
+        "max_sclk": "sclk",
+        "mclk": "mclk",
+        "cur_sclk": "cur_sclk",
+        "cur_mclk": "cur_mclk",
+        "L2Banks": "L2Banks",
+        "LDSBanks": "LDSBanks",
+        "numSQC": "numSQC",
+        "hbmBW": "hbmBW",
+        "compute_partition": "compute_partition",
+        "memory_partition": "memory_partition",
+    }
+
+    # todo: more err checking for string specs_correction
+    pairs = dict(re.findall(r"(\w+):\s*(\d+)", specs_correction))
+    for k, v in pairs.items():
+        df[name_map[k]] = v
+
+    return df
