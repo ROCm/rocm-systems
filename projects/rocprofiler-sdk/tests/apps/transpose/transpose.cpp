@@ -66,15 +66,10 @@ verify(int* in, int* out, int M, int N);
 }  // namespace
 
 __global__ void
-transpose(int* in, int* out, int M, int N);
+transpose(const int* in, int* out, int M, int N);
 
 void
-run(int rank, int tid, hipStream_t stream, int argc, char** argv);
-
-#if defined(USE_MPI)
-void
-do_a2a(int rank);
-#endif
+run(int rank, int tid, int ndevice, int argc, char** argv);
 
 int
 main(int argc, char** argv)
@@ -112,43 +107,59 @@ main(int argc, char** argv)
 #endif
     // this is a temporary workaround in omnitrace when HIP + MPI is enabled
     int ndevice = 0;
-    int devid   = rank;
     HIP_API_CALL(hipGetDeviceCount(&ndevice));
     printf("[transpose] Number of devices found: %i\n", ndevice);
-    if(ndevice > 0)
+    auto devids = std::vector<int>{};
+    devids.resize(size * nthreads, 0);
+    int devid = 0;
+    for(size_t i = 0; i < nthreads; ++i)
     {
-        devid = rank % ndevice;
-        HIP_API_CALL(hipSetDevice(devid));
-        printf("[transpose] Rank %i assigned to device %i\n", rank, devid);
+        for(int j = 0; j < size; ++j)
+        {
+            auto idx       = (j * nthreads) + i;
+            devids.at(idx) = devid++ % ndevice;
+        }
     }
-    if(rank == devid && rank < ndevice)
-    {
-        std::vector<std::thread> _threads{};
-        std::vector<hipStream_t> _streams(nthreads);
-        for(size_t i = 0; i < nthreads; ++i)
-            HIP_API_CALL(hipStreamCreate(&_streams.at(i)));
-        for(size_t i = 1; i < nthreads; ++i)
-            _threads.emplace_back(run, rank, i, _streams.at(i), argc, argv);
-        run(rank, 0, _streams.at(0), argc, argv);
-        for(auto& itr : _threads)
-            itr.join();
-        for(size_t i = 0; i < nthreads; ++i)
-            HIP_API_CALL(hipStreamDestroy(_streams.at(i)));
-    }
-    HIP_API_CALL(hipDeviceSynchronize());
-    HIP_API_CALL(hipDeviceReset());
+    auto devid_offset = (rank * nthreads);
+    auto _threads     = std::vector<std::thread>{};
+    for(size_t i = 1; i < nthreads; ++i)
+        _threads.emplace_back(run, rank, i, devids.at(devid_offset + i), argc, argv);
+    run(rank, 0, devids.at(devid_offset + 0), argc, argv);
+    for(auto& itr : _threads)
+        itr.join();
 
 #if defined(USE_MPI)
     MPI_Barrier(MPI_COMM_WORLD);
-    do_a2a(rank);
-    MPI_Finalize();
+#endif
+
+    for(int i = 0; i < ndevice; ++i)
+    {
+        HIP_API_CALL(hipSetDevice(i));
+        HIP_API_CALL(hipDeviceSynchronize());
+    }
+
+#if defined(USE_MPI)
+    MPI_Barrier(MPI_COMM_WORLD);
+#endif
+
+    if(rank == 0)
+    {
+        for(int i = 0; i < ndevice; ++i)
+        {
+            HIP_API_CALL(hipSetDevice(i));
+            HIP_API_CALL(hipDeviceReset());
+        }
+    }
+
+#if defined(USE_MPI)
+    MPI_Barrier(MPI_COMM_WORLD);
 #endif
 
     return 0;
 }
 
 __global__ void
-transpose(int* in, int* out, int M, int N)
+transpose(const int* in, int* out, int M, int N)
 {
     __shared__ int tile[shared_mem_tile_dim][shared_mem_tile_dim];
 
@@ -160,12 +171,19 @@ transpose(int* in, int* out, int M, int N)
 }
 
 void
-run(int rank, int tid, hipStream_t stream, int argc, char** argv)
+run(int rank, int tid, int devid, int argc, char** argv)
 {
-    unsigned int M = 4960 * 2;
-    unsigned int N = 4960 * 2;
+    constexpr unsigned int M = 4960 * 2;
+    constexpr unsigned int N = 4960 * 2;
+
     if(argc > 2) nitr = atoll(argv[2]);
     if(argc > 3) nsync = atoll(argv[3]);
+
+    hipStream_t stream = {};
+
+    printf("[transpose] Rank %i, thread %i assigned to device %i\n", rank, tid, devid);
+    HIP_API_CALL(hipSetDevice(devid));
+    HIP_API_CALL(hipStreamCreate(&stream));
 
     auto_lock_t _lk{print_lock};
     std::cout << "[" << rank << "][" << tid << "] M: " << M << " N: " << N << std::endl;
@@ -215,6 +233,7 @@ run(int rank, int tid, hipStream_t stream, int argc, char** argv)
     print_lock.unlock();
 
     HIP_API_CALL(hipStreamSynchronize(stream));
+    HIP_API_CALL(hipStreamDestroy(stream));
 
     // cpu_transpose(matrix, out_matrix, M, N);
     verify(inp_matrix, out_matrix, M, N);
@@ -256,23 +275,3 @@ verify(int* in, int* out, int M, int N)
     }
 }
 }  // namespace
-
-#if defined(USE_MPI)
-void
-do_a2a(int rank)
-{
-    // Define my value
-    int values[3];
-    for(int i = 0; i < 3; ++i)
-        values[i] = rank * 300 + i * 100;
-    printf("Process %d, values = %d, %d, %d.\n", rank, values[0], values[1], values[2]);
-
-    int buffer_recv[3];
-    MPI_Alltoall(&values, 1, MPI_INT, buffer_recv, 1, MPI_INT, MPI_COMM_WORLD);
-    printf("Values collected on process %d: %d, %d, %d.\n",
-           rank,
-           buffer_recv[0],
-           buffer_recv[1],
-           buffer_recv[2]);
-}
-#endif

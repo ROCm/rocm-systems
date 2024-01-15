@@ -22,6 +22,7 @@
 
 #include "hip/hip_runtime.h"
 
+#include <unistd.h>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -67,12 +68,11 @@ __global__ void
 reproducible_runtime(uint32_t nspin);
 
 void
-run(int rank, int tid, hipStream_t stream);
+run(int tid, int devid);
 
 int
 main(int argc, char** argv)
 {
-    int rank = 0;
     for(int i = 1; i < argc; ++i)
     {
         auto _arg = std::string{argv[i]};
@@ -98,29 +98,13 @@ main(int argc, char** argv)
 
     // this is a temporary workaround in omnitrace when HIP + MPI is enabled
     int ndevice = 0;
-    int devid   = rank;
     HIP_API_CALL(hipGetDeviceCount(&ndevice));
     printf("[reproducible-runtime] Number of devices found: %i\n", ndevice);
-    if(ndevice > 0)
-    {
-        devid = rank % ndevice;
-        HIP_API_CALL(hipSetDevice(devid));
-        printf("[reproducible-runtime] Rank %i assigned to device %i\n", rank, devid);
-    }
-    if(rank == devid && rank < ndevice)
-    {
-        std::vector<std::thread> _threads{};
-        std::vector<hipStream_t> _streams(nthreads);
-        for(size_t i = 0; i < nthreads; ++i)
-            HIP_API_CALL(hipStreamCreate(&_streams.at(i)));
-        for(size_t i = 1; i < nthreads; ++i)
-            _threads.emplace_back(run, rank, i, _streams.at(i));
-        run(rank, 0, _streams.at(0));
-        for(auto& itr : _threads)
-            itr.join();
-        for(size_t i = 0; i < nthreads; ++i)
-            HIP_API_CALL(hipStreamDestroy(_streams.at(i)));
-    }
+    auto _threads = std::vector<std::thread>{};
+    for(size_t i = 0; i < nthreads; ++i)
+        _threads.emplace_back(run, i, i % ndevice);
+    for(auto& itr : _threads)
+        itr.join();
     HIP_API_CALL(hipDeviceSynchronize());
     HIP_API_CALL(hipDeviceReset());
 
@@ -138,28 +122,34 @@ reproducible_runtime(uint32_t nspin_v)
 }
 
 void
-run(int rank, int tid, hipStream_t stream)
+run(int tid, int devid)
 {
     constexpr int min_sa         = 8;
     constexpr int min_avail_simd = 24;
     dim3          grid(min_sa * min_avail_simd);
     dim3          block(32);
-    float         time = 0.0f;
+    double        time   = 0.0;
+    hipStream_t   stream = {};
+    hipEvent_t    start  = {};
+    hipEvent_t    stop   = {};
 
-    hipEvent_t start, stop;
+    HIP_API_CALL(hipSetDevice(devid));
+    HIP_API_CALL(hipStreamCreate(&stream));
     HIP_API_CALL(hipEventCreate(&start));
     HIP_API_CALL(hipEventCreate(&stop));
-    HIP_API_CALL(hipEventRecord(start, stream));
 
     do
     {
         uint32_t cyclesleft = 2000 * 1000 * (nruntime - static_cast<double>(time));
+        HIP_API_CALL(hipEventRecord(start, stream));
         reproducible_runtime<<<grid, block, 0, stream>>>(std::min<uint32_t>(nspin, cyclesleft));
-        check_hip_error();
         HIP_API_CALL(hipEventRecord(stop, stream));
+        check_hip_error();
         HIP_API_CALL(hipEventSynchronize(stop));
-        HIP_API_CALL(hipEventElapsedTime(&time, start, stop));
-    } while(static_cast<double>(time) < nruntime);
+        float elapsed = 0.0f;
+        HIP_API_CALL(hipEventElapsedTime(&elapsed, start, stop));
+        time += static_cast<double>(elapsed);
+    } while(time < nruntime);
 
     HIP_API_CALL(hipStreamSynchronize(stream));
     HIP_API_CALL(hipEventDestroy(start));
@@ -167,7 +157,7 @@ run(int rank, int tid, hipStream_t stream)
 
     {
         auto _msg = std::stringstream{};
-        _msg << '[' << rank << "][" << tid << "] Runtime of reproducible-runtime is "
+        _msg << '[' << getpid() << "][" << tid << "] Runtime of reproducible-runtime is "
              << std::setprecision(2) << std::fixed << time << " ms (" << std::setprecision(3)
              << (time / 1000.0f) << " sec)\n";
         auto_lock_t _lk{print_lock};
@@ -175,6 +165,7 @@ run(int rank, int tid, hipStream_t stream)
     }
 
     HIP_API_CALL(hipStreamSynchronize(stream));
+    HIP_API_CALL(hipStreamDestroy(stream));
 }
 
 namespace
