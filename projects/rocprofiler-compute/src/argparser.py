@@ -43,6 +43,7 @@ def omniarg_parser(parser, omniperf_home, supported_archs, omniperf_version):
     parser._positionals.title = "Modes"
     parser._optionals.title = "Help"
     general_group.add_argument("-v", "--version", action="version", version=omniperf_version["ver_pretty"])
+    general_group.add_argument("-s", "--specs", action="store_true", help="Print system specs.")
 
     subparsers = parser.add_subparsers(
         dest="mode", help="Select mode of interaction with the target application:"
@@ -286,6 +287,7 @@ def omniarg_parser(parser, omniperf_home, supported_archs, omniperf_version):
     general_group.add_argument(
         "-V", "--verbose", help="Increase output verbosity", action="count", default=0
     )
+    general_group.add_argument("-s", "--specs", action="store_true", help="Print system specs.")
 
     interaction_group.add_argument(
         "-i",
@@ -376,6 +378,7 @@ def omniarg_parser(parser, omniperf_home, supported_archs, omniperf_version):
     general_group.add_argument(
         "-V", "--verbose", help="Increase output verbosity", action="count", default=0
     )
+    general_group.add_argument("-s", "--specs", action="store_true", help="Print system specs.")
 
     analyze_group.add_argument(
         "-p",
@@ -519,4 +522,10 @@ def omniarg_parser(parser, omniperf_home, supported_archs, omniperf_version):
     )
     analyze_advanced_group.add_argument(
         "--report-diff", default=0, nargs="?", type=int, help=argparse.SUPPRESS
+    )
+    analyze_advanced_group.add_argument(
+        "--specs-correction",
+        type=str,
+        metavar="",
+        help="\t\tSpecify the specs to correct."
     )

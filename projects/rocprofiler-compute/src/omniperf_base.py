@@ -177,6 +177,9 @@ class Omniperf:
         omniarg_parser(parser, config.omniperf_home, self.__supported_archs ,self.__version)
         self.__args = parser.parse_args()
 
+        if self.__args.specs:
+            print(get_machine_specs(0))
+            sys.exit(0)
         if self.__args.mode == None:
             parser.print_help(sys.stderr)
             error("Omniperf requires a valid mode.")
