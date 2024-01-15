@@ -37,9 +37,9 @@ target_link_libraries(
            $<BUILD_INTERFACE:rocprofiler::rocprofiler-glog>
            $<BUILD_INTERFACE:rocprofiler::rocprofiler-fmt>
            $<BUILD_INTERFACE:rocprofiler::rocprofiler-dl>
-           $<BUILD_INTERFACE:rocprofiler::rocprofiler-hip>
+           $<BUILD_INTERFACE:rocprofiler::rocprofiler-hip-nolink>
            $<BUILD_INTERFACE:rocprofiler::rocprofiler-amd-comgr>
-           $<BUILD_INTERFACE:rocprofiler::rocprofiler-hsa-runtime>
+           $<BUILD_INTERFACE:rocprofiler::rocprofiler-hsa-runtime-nolink>
            $<BUILD_INTERFACE:rocprofiler::rocprofiler-ptl>
            $<BUILD_INTERFACE:rocprofiler::rocprofiler-hsa-aql>
            $<BUILD_INTERFACE:rocprofiler::rocprofiler-drm>)

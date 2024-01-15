@@ -352,10 +352,14 @@ endfunction()
 # macro to add an interface lib
 #
 function(ROCPROFILER_ADD_INTERFACE_LIBRARY _TARGET _DESCRIPT)
-    add_library(${_TARGET} INTERFACE)
-    add_library(${PROJECT_NAME}::${_TARGET} ALIAS ${_TARGET})
     set(_ARGS "${ARGN}")
-    if(NOT "INTERNAL" IN_LIST _ARGS)
+    if(IMPORTED IN_LIST _ARGS)
+        add_library(${_TARGET} INTERFACE IMPORTED)
+    else()
+        add_library(${_TARGET} INTERFACE)
+    endif()
+    add_library(${PROJECT_NAME}::${_TARGET} ALIAS ${_TARGET})
+    if(NOT "INTERNAL" IN_LIST _ARGS AND NOT "IMPORTED" IN_LIST _ARGS)
         install(
             TARGETS ${_TARGET}
             DESTINATION ${CMAKE_INSTALL_LIBDIR}

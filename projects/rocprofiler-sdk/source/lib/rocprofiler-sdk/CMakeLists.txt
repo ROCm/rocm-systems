@@ -43,8 +43,8 @@ add_subdirectory(pc_sampling)
 
 target_link_libraries(
     rocprofiler-object-library
-    PUBLIC rocprofiler::rocprofiler-headers rocprofiler::rocprofiler-hsa-runtime
-           rocprofiler::rocprofiler-hip
+    PUBLIC rocprofiler::rocprofiler-headers rocprofiler::rocprofiler-hip-nolink
+           rocprofiler::rocprofiler-hsa-runtime-nolink
     PRIVATE rocprofiler::rocprofiler-build-flags
             rocprofiler::rocprofiler-memcheck
             rocprofiler::rocprofiler-common-library
@@ -69,9 +69,12 @@ target_sources(rocprofiler-shared-library
                PRIVATE $<TARGET_OBJECTS:rocprofiler::rocprofiler-object-library>)
 target_link_libraries(
     rocprofiler-shared-library
-    INTERFACE rocprofiler::rocprofiler-headers rocprofiler::rocprofiler-hsa-runtime
-              rocprofiler::rocprofiler-hip
-    PRIVATE rocprofiler::rocprofiler-build-flags
+    INTERFACE rocprofiler::rocprofiler-headers
+              $<BUILD_INTERFACE:rocprofiler::rocprofiler-hsa-runtime-nolink>
+              $<BUILD_INTERFACE:rocprofiler::rocprofiler-hip-nolink>
+    PRIVATE rocprofiler::rocprofiler-hsa-runtime-nolink
+            rocprofiler::rocprofiler-hip-nolink
+            rocprofiler::rocprofiler-build-flags
             rocprofiler::rocprofiler-memcheck
             rocprofiler::rocprofiler-common-library
             rocprofiler::rocprofiler-cxx-filesystem
@@ -110,8 +113,8 @@ target_sources(rocprofiler-static-library
                PRIVATE $<TARGET_OBJECTS:rocprofiler::rocprofiler-object-library>)
 target_link_libraries(
     rocprofiler-static-library
-    PUBLIC rocprofiler::rocprofiler-headers rocprofiler::rocprofiler-hsa-runtime
-           rocprofiler::rocprofiler-hip
+    PUBLIC rocprofiler::rocprofiler-headers rocprofiler::rocprofiler-hsa-runtime-nolink
+           rocprofiler::rocprofiler-hip-nolink
     PRIVATE rocprofiler::rocprofiler-common-library
             rocprofiler::rocprofiler-object-library)
 

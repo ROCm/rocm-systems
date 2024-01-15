@@ -42,8 +42,8 @@ rocprofiler_add_interface_library(rocprofiler-dl
                                   "Build flags for dynamic linking library" INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-rt "Build flags for runtime library"
                                   INTERNAL)
-rocprofiler_add_interface_library(rocprofiler-hip "HIP library")
-rocprofiler_add_interface_library(rocprofiler-hsa-runtime "HSA runtime library")
+rocprofiler_add_interface_library(rocprofiler-hip "HIP library" INTERNAL)
+rocprofiler_add_interface_library(rocprofiler-hsa-runtime "HSA runtime library" INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-amd-comgr "AMD comgr library" INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-gtest "Google Test library" INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-glog "Google Log library" INTERNAL)
@@ -53,3 +53,9 @@ rocprofiler_add_interface_library(rocprofiler-cxx-filesystem "C++ filesystem lib
 rocprofiler_add_interface_library(rocprofiler-ptl "Parallel Tasking Library" INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-hsa-aql "AQL library" INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-drm "drm (amdgpu) library" INTERNAL)
+
+rocprofiler_add_interface_library(
+    rocprofiler-hip-nolink "rocprofiler-hip without linking to HIP library" IMPORTED)
+rocprofiler_add_interface_library(
+    rocprofiler-hsa-runtime-nolink
+    "rocprofiler-hsa-runtime without linking to HSA library" IMPORTED)

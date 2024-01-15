@@ -1,11 +1,14 @@
 # include guard
 include_guard(DIRECTORY)
 
+include(rocprofiler_config_nolink_target)
+
 # ########################################################################################
 #
 # External Packages are found here
 #
 # ########################################################################################
+
 target_include_directories(
     rocprofiler-headers
     INTERFACE $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/source/include>
@@ -41,6 +44,7 @@ endif()
 # Threading
 #
 # ----------------------------------------------------------------------------------------#
+
 set(CMAKE_THREAD_PREFER_PTHREAD ON)
 set(THREADS_PREFER_PTHREAD_FLAG OFF)
 
@@ -65,6 +69,7 @@ endif()
 # dynamic linking (dl) and runtime (rt) libraries
 #
 # ----------------------------------------------------------------------------------------#
+
 foreach(_LIB dl rt)
     find_library(${_LIB}_LIBRARY NAMES ${_LIB})
     find_package_handle_standard_args(${_LIB}-library REQUIRED_VARS ${_LIB}_LIBRARY)
@@ -93,6 +98,7 @@ endif()
 # HIP
 #
 # ----------------------------------------------------------------------------------------#
+
 find_package(rocm_version)
 
 if(rocm_version_FOUND)
@@ -103,12 +109,14 @@ endif()
 
 find_package(hip REQUIRED CONFIG)
 target_link_libraries(rocprofiler-hip INTERFACE hip::host)
+rocprofiler_config_nolink_target(rocprofiler-hip-nolink hip::host)
 
 # ----------------------------------------------------------------------------------------#
 #
 # HSA runtime
 #
 # ----------------------------------------------------------------------------------------#
+
 find_package(
     hsa-runtime64
     REQUIRED
@@ -127,12 +135,15 @@ list(GET HSA_RUNTIME_VERSION 0 HSA_RUNTIME_VERSION_MAJOR)
 list(GET HSA_RUNTIME_VERSION 1 HSA_RUNTIME_VERSION_MINOR)
 
 target_link_libraries(rocprofiler-hsa-runtime INTERFACE hsa-runtime64::hsa-runtime64)
+rocprofiler_config_nolink_target(rocprofiler-hsa-runtime-nolink
+                                 hsa-runtime64::hsa-runtime64)
 
 # ----------------------------------------------------------------------------------------#
 #
 # amd comgr
 #
 # ----------------------------------------------------------------------------------------#
+
 find_package(
     amd_comgr
     REQUIRED
@@ -153,6 +164,7 @@ target_link_libraries(rocprofiler-amd-comgr INTERFACE amd_comgr)
 # PTL (Parallel Tasking Library)
 #
 # ----------------------------------------------------------------------------------------#
+
 target_link_libraries(rocprofiler-ptl INTERFACE PTL::ptl-static)
 
 # ----------------------------------------------------------------------------------------#
@@ -160,6 +172,7 @@ target_link_libraries(rocprofiler-ptl INTERFACE PTL::ptl-static)
 # amd aql
 #
 # ----------------------------------------------------------------------------------------#
+
 find_library(
     hsa-amd-aqlprofile64_library
     NAMES hsa-amd-aqlprofile64 hsa-amd-aqlprofile
@@ -173,6 +186,7 @@ target_link_libraries(rocprofiler-hsa-aql INTERFACE ${hsa-amd-aqlprofile64_libra
 # drm
 #
 # ----------------------------------------------------------------------------------------#
+
 find_path(
     drm_INCLUDE_DIR
     NAMES drm.h
@@ -202,3 +216,11 @@ find_library(
 target_include_directories(rocprofiler-drm SYSTEM INTERFACE ${drm_INCLUDE_DIR}
                                                             ${xf86drm_INCLUDE_DIR})
 target_link_libraries(rocprofiler-drm INTERFACE ${drm_LIBRARY} ${drm_amdgpu_LIBRARY})
+
+# ----------------------------------------------------------------------------------------#
+#
+# interface targets which emulate another interface target but do not link to the library.
+# E.g. rocprofiler-hip-nolink has the include directories, compile definitions, and
+# compile options of rocprofiler-hip but does not link to the HIP runtime library
+#
+# ----------------------------------------------------------------------------------------#

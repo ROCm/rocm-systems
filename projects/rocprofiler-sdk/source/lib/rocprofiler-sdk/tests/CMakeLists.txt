@@ -18,7 +18,8 @@ target_sources(rocprofiler-lib-tests PRIVATE ${rocprofiler_lib_sources} details/
 target_link_libraries(
     rocprofiler-lib-tests
     PRIVATE rocprofiler::rocprofiler-static-library
-            rocprofiler::rocprofiler-common-library GTest::gtest GTest::gtest_main)
+            rocprofiler::rocprofiler-common-library rocprofiler::rocprofiler-hsa-runtime
+            GTest::gtest GTest::gtest_main)
 
 gtest_add_tests(
     TARGET rocprofiler-lib-tests
@@ -42,7 +43,8 @@ target_sources(rocprofiler-lib-tests-shared PRIVATE ${rocprofiler_shared_lib_sou
 target_link_libraries(
     rocprofiler-lib-tests-shared
     PRIVATE rocprofiler::rocprofiler-shared-library
-            rocprofiler::rocprofiler-common-library GTest::gtest GTest::gtest_main)
+            rocprofiler::rocprofiler-common-library rocprofiler::rocprofiler-hsa-runtime
+            GTest::gtest GTest::gtest_main)
 
 gtest_add_tests(
     TARGET rocprofiler-lib-tests-shared
