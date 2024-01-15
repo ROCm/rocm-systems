@@ -5,7 +5,7 @@ pmc: TCP_READ_TAGCONFLICT_STALL_CYCLES_sum   TCP_WRITE_TAGCONFLICT_STALL_CYCLES_
 pmc: TCP_VOLATILE_sum                        TCP_TOTAL_ACCESSES_sum                  TCP_TOTAL_READ_sum                              TCP_TOTAL_WRITE_sum
 pmc: TCP_TOTAL_ATOMIC_WITH_RET_sum           TCP_TOTAL_ATOMIC_WITHOUT_RET_sum        TCP_TOTAL_WRITEBACK_INVALIDATES_sum             TCP_TOTAL_CACHE_ACCESSES_sum
 pmc: TCP_UTCL1_TRANSLATION_MISS_sum          TCP_UTCL1_TRANSLATION_HIT_sum           TCP_UTCL1_PERMISSION_MISS_sum                   TCP_UTCL1_REQUEST_sum
-pmc: TCP_TCP_LATENCY_sum                     TCP_TCC_READ_REQ_LATENCY_sum            TCP_TCC_WRITE_REQ_LATENCY_sum                   TCP_TCC_READ_REQ_sum
+pmc: TCP_TCP_LATENCY_sum                     TCP_TCC_WRITE_REQ_LATENCY_sum                   TCP_TCC_READ_REQ_sum
 pmc: TCP_TCC_WRITE_REQ_sum                   TCP_TCC_ATOMIC_WITH_RET_REQ_sum         TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum              TCP_TCC_NC_READ_REQ_sum
 pmc: TCP_TCC_NC_WRITE_REQ_sum                TCP_TCC_NC_ATOMIC_REQ_sum               TCP_TCC_UC_READ_REQ_sum                         TCP_TCC_UC_WRITE_REQ_sum
 pmc: TCP_TCC_UC_ATOMIC_REQ_sum               TCP_TCC_CC_READ_REQ_sum                 TCP_TCC_CC_WRITE_REQ_sum                        TCP_TCC_CC_ATOMIC_REQ_sum
