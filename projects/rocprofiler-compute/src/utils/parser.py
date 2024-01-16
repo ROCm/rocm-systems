@@ -29,8 +29,10 @@ import re
 import os
 import pandas as pd
 import numpy as np
-from tabulate import tabulate
 from utils import schema
+from utils.utils import error
+from pathlib import Path
+import logging
 
 # ------------------------------------------------------------------------------
 # Internal global definitions
@@ -93,6 +95,7 @@ supported_call = {
     "TO_INT": "to_int",
     # Support the below with 2 inputs
     "ROUND": "to_round",
+    "QUANTILE": "to_quantile",
     "MOD": "to_mod",
     # Concat operation from the memory chart "active cus"
     "CONCAT": "to_concat",
@@ -131,7 +134,9 @@ def to_avg(a):
 
 
 def to_median(a):
-    if isinstance(a, pd.core.series.Series):
+    if a is None:
+        return None
+    elif isinstance(a, pd.core.series.Series):
         return a.median()
     else:
         raise Exception("to_median: unsupported type.")
@@ -164,6 +169,13 @@ def to_round(a, b):
     else:
         return round(a, b)
 
+def to_quantile(a, b):
+    if a is None:
+        return None
+    elif isinstance(a, pd.core.series.Series):
+        return a.quantile(b)
+    else:
+        raise Exception("to_quantile: unsupported type.")
 
 def to_mod(a, b):
     if isinstance(a, pd.core.series.Series):
@@ -385,8 +397,36 @@ def gen_counter_list(formula):
 
     return visited, counters
 
+def calc_builtin_var(var, sys_info):
+    """
+    Calculate build-in variable based on sys_info:
+    """
+    if isinstance(var, int):
+        return var
+    elif isinstance(var, str) and var.startswith("$totalL2Banks"):
+        # Fixme: support all supported partitioning mode
+        # Fixme: "name" is a bad name!
+        totalL2Banks = sys_info.L2Banks
+        if (
+            sys_info["name"].lower() == "mi300a_a0"
+            or sys_info["name"].lower() == "mi300a_a1"
+        ):
+            totalL2Banks = sys_info.L2Banks * get_hbm_stack_num(
+                sys_info["name"], sys_info["memory_partition"]
+            )
+        elif (
+            sys_info["name"].lower() == "mi300x_a0"
+            or sys_info["name"].lower() == "mi300x_a1"
+        ):
+            totalL2Banks = sys_info.L2Banks * get_hbm_stack_num(
+                sys_info["name"], sys_info["memory_partition"]
+            )
+        return totalL2Banks
+    else:
+        print("Don't support", var)
+        sys.exit(1)
 
-def build_dfs(archConfigs, filter_metrics):
+def build_dfs(archConfigs, filter_metrics, sys_info):
     """
     - Build dataframe for each type of data source within each panel.
       Each dataframe will be used as a template to load data with each run later.
@@ -400,33 +440,91 @@ def build_dfs(archConfigs, filter_metrics):
     #         if not metric in avail_ip_blocks:
     #             print("{} is not a valid metric to filter".format(metric))
     #             exit(1)
+    simple_box = {
+        "Min": ["MIN(", ")"],
+        "Q1": ["QUANTILE(", ", 0.25)"],
+        "Median": ["MEDIAN(", ")"],
+        "Q3": ["QUANTILE(", ", 0.75)"],
+        "Max": ["MAX(", ")"],
+    }
+
     d = {}
     metric_list = {}
     dfs_type = {}
     metric_counters = {}
     for panel_id, panel in archConfigs.panel_configs.items():
-        panel_idx = str(panel_id // 100)
+        for data_source in panel["data source"]:
+            for type, data_config in data_source.items():
+                if (
+                    type == "metric_table"
+                    and "metric" in data_config
+                    and "placeholder_range" in data_config["metric"]
+                    
+                ):
+                    # print(data_config["metric"])
+                    new_metrics = {}
+                    # NB: support single placeholder for now!!
+                    p_range = data_config["metric"].pop("placeholder_range")
+                    metric, metric_expr = data_config["metric"].popitem()
+                    # print(len(data_config["metric"]))
+                    # data_config['metric'].clear()
+                    for p, r in p_range.items():
+                        # NB: We have to resolve placeholder range first if it
+                        #   is a build-in var. It will be too late to do it in
+                        #   eval_metric(). This is the only reason we need
+                        #   sys_info at this stage.
+                        var = calc_builtin_var(r, sys_info)
+                        for i in range(var):
+                            new_key = metric.replace(p, str(i))
+                            new_val = {}
+                            for k, v in metric_expr.items():
+                                new_val[k] = metric_expr[k].replace(p, str(i))
+                            # print(new_val)
+                            new_metrics[new_key] = new_val
+
+                    # print(p_range)
+                    # print(new_metrics)
+                    data_config["metric"] = new_metrics
+                    # print(data_config)
+                    # print(data_config["metric"])
+                             
+    for panel_id, panel in archConfigs.panel_configs.items():
         for data_source in panel["data source"]:
             for type, data_config in data_source.items():
                 if type == "metric_table":
-                    metric_list[panel_idx] = panel["title"]
-                    table_idx = panel_idx + "." + str(data_config["id"] % 100)
-                    metric_list[table_idx] = data_config["title"]
-
                     headers = ["Index"]
-                    for key, tile in data_config["header"].items():
-                        if key != "tips":
-                            headers.append(tile)
-                    headers.append("coll_level")
 
+                    if (
+                        "cli_style" in data_config
+                        and data_config["cli_style"] == "simple_box"
+                    ):
+                        headers.append("Metric")
+                        for k in simple_box.keys():
+                            headers.append(k)
+
+                        for key, tile in data_config["header"].items():
+                            if key != "metric" and key != "tips" and key != "expr":
+                                headers.append(tile)
+                    else:
+                        for key, tile in data_config["header"].items():
+                            if key != "tips":
+                                headers.append(tile)
+
+                    # do we always need one?
+                    headers.append("coll_level")
                     if "tips" in data_config["header"].keys():
                         headers.append(data_config["header"]["tips"])
-
+                    
                     df = pd.DataFrame(columns=headers)
-
+                
                     i = 0
                     for key, entries in data_config["metric"].items():
-                        metric_idx = table_idx + "." + str(i)
+                        data_source_idx = (
+                            str(data_config["id"] // 100)
+                            + "."
+                            + str(data_config["id"] % 100)
+                        )
+                        metric_idx = data_source_idx + "." + str(i)
                         values = []
                         eqn_content = []
 
@@ -435,17 +533,38 @@ def build_dfs(archConfigs, filter_metrics):
                             or (metric_idx in filter_metrics)  # no filter
                             or  # metric in filter
                             # the whole table in filter
-                            (table_idx in filter_metrics)
+                            (data_source_idx in filter_metrics)
                             or
                             # the whole IP block in filter
                             (str(panel_id // 100) in filter_metrics)
                         ):
                             values.append(metric_idx)
                             values.append(key)
-                            for k, v in entries.items():
-                                if k != "tips" and k != "coll_level" and k != "alias":
-                                    values.append(v)
-                                    eqn_content.append(v)
+                            
+                            if (
+                                "cli_style" in data_config
+                                and data_config["cli_style"] == "simple_box"
+                            ):
+                                # print("~~~~~~~~~~~~~~~~~")
+                                # print(entries)
+                                # print("~~~~~~~~~~~~~~~~~")
+                                for k, v in entries.items():
+                                    if k == "expr":
+                                        for bk, bv in simple_box.items():
+                                            values.append(bv[0] + v + bv[1])
+                                    else:
+                                        if (
+                                            k != "tips"
+                                            and k != "coll_level"
+                                            and k != "alias"
+                                        ):
+                                            values.append(v)
+
+                            else:
+                                for k, v in entries.items():
+                                    if k != "tips" and k != "coll_level" and k != "alias":
+                                        values.append(v)
+                                        eqn_content.append(v)
 
                             if "alias" in entries.keys():
                                 values.append(entries["alias"])
@@ -458,6 +577,7 @@ def build_dfs(archConfigs, filter_metrics):
                             if "tips" in entries.keys():
                                 values.append(entries["tips"])
 
+                            # print(headers, values)
                             # print(key, entries)
                             df_new_row = pd.DataFrame([values], columns=headers)
                             df = pd.concat([df, df_new_row])
@@ -580,13 +700,14 @@ def eval_metric(dfs, dfs_type, sys_info, soc_spec, raw_pmc_df, debug):
     ammolite__sclk = sys_info.sclk
     ammolite__maxWavesPerCU = sys_info.maxWavesPerCU
     ammolite__hbmBW = sys_info.hbmBW
+    ammolite__totalL2Banks = calc_builtin_var("$totalL2Banks", sys_info)
 
     # TODO: fix all $normUnit in Unit column or title
 
     # build and eval all derived build-in global variables
     ammolite__build_in = {}
     for key, value in build_in_vars.items():
-        # NB: assume all build in vars from pmc_perf.csv for now
+        # NB: assume all built-in vars from pmc_perf.csv for now
         s = build_eval_string(value, schema.pmc_perf_file_prefix)
         try:
             ammolite__build_in[key] = eval(compile(s, "<string>", "eval"))
@@ -726,6 +847,15 @@ def apply_filters(workload, is_gui, debug):
         if not is_gui:
             if debug:
                 print("CLI kernel filtering")
+            # Verify valid kernel filter
+            kernels_df = pd.read_csv(os.path.join(dir, "pmc_kernel_top.csv"))
+            for kernel_id in workload.filter_kernel_ids:
+                if kernel_id > len(kernels_df["KernelName"]):
+                    error(
+                        "{} is an invalid kernel id. Please enter an id between 0-{}".format(
+                            kernel_id, len(kernels_df["KernelName"])
+                        )
+                    )
             kernels = []
             # NB: mark selected kernels with "*"
             #    Todo: fix it for unaligned comparison
@@ -745,9 +875,9 @@ def apply_filters(workload, is_gui, debug):
             if debug:
                 print("GUI kernel filtering")
             ret_df = ret_df.loc[
-                ret_df[schema.pmc_perf_file_prefix]["KernelName"].isin(
-                    workload.filter_kernel_ids
-                )
+                ret_df[schema.pmc_perf_file_prefix]["Index"]
+                .astype(str)
+                .isin(workload.filter_dispatch_ids)
             ]
 
     if workload.filter_dispatch_ids:
@@ -781,18 +911,24 @@ def load_kernel_top(workload, dir):
     tmp = {}
     for id, df in workload.dfs.items():
         if "from_csv" in df.columns:
-            tmp[id] = pd.read_csv(os.path.join(dir, df.loc[0, "from_csv"]))
+            file = Path.joinpath(Path(dir), df.loc[0, "from_csv"])
+            if file.exists():
+                tmp[id] = pd.read_csv(file)
+            else:
+                logging.info("Warning: Issue loading top kernels. Check pmc_kernel_top.csv")
         elif "from_csv_columnwise" in df.columns:
             # NB:
             #   Another way might be doing transpose in tty like metric_table.
             #   But we need to figure out headers and comparison properly.
-            tmp[id] = pd.read_csv(
-                os.path.join(dir, df.loc[0, "from_csv_columnwise"])
-            ).transpose()
-            # NB:
-            #   All transposed columns should be marked with a general header,
-            #   so tty could detect them and show them correctly in comparison.
-            tmp[id].columns = ["Info"]
+            file = Path.joinpath(Path(dir), df.loc[0, "from_csv_columnwise"])
+            if file.exists():
+                tmp[id] = pd.read_csv(file).transpose()
+                # NB:
+                #   All transposed columns should be marked with a general header,
+                #   so tty could detect them and show them correctly in comparison.
+                tmp[id].columns = ["Info"]
+            else:
+                logging.info("Warning: Issue loading top kernels. Check pmc_kernel_top.csv")
     workload.dfs.update(tmp)
 
 
@@ -879,3 +1015,38 @@ def correct_sys_info(df, specs_correction):
         df[name_map[k]] = v
 
     return df
+
+def get_hbm_stack_num(gpu_name, memory_partition):
+    """
+    Get total HBM stack numbers based on  memory partition for MI300.
+    """
+
+    # TODO:
+    # - move this function to the proper file
+    # - better err log
+
+    if gpu_name.lower() == "mi300a_a0" or gpu_name.lower() == "mi300a_a1":
+        if memory_partition.lower() == "nps1":
+            return 6
+        elif memory_partition.lower() == "nps4":
+            return 2
+        elif memory_partition.lower() == "nps8":
+            return 1
+        else:
+            print("Invalid MI300A memory partition mode!")
+            sys.exit()
+    elif gpu_name.lower() == "mi300x_a0" or gpu_name.lower() == "mi300x_a1":
+        if memory_partition.lower() == "nps1":
+            return 8
+        elif memory_partition.lower() == "nps2":
+            return 4
+        elif memory_partition.lower() == "nps4":
+            return 2
+        elif memory_partition.lower() == "nps8":
+            return 1
+        else:
+            print("Invalid MI300X memory partition mode!")
+            sys.exit()
+    else:
+        # Fixme: add proper numbers for other archs
+        return -1

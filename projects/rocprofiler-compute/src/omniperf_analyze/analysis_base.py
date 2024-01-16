@@ -51,7 +51,7 @@ class OmniAnalyze_Base():
         return self.__socs
     
     @demarcate
-    def generate_configs(self, arch, config_dir, list_kernels, filter_metrics):
+    def generate_configs(self, arch, config_dir, list_kernels, filter_metrics, sys_info):
         single_panel_config = file_io.is_single_panel_config(Path(config_dir), self.__supported_archs)
         
         ac = schema.ArchConfig()
@@ -66,7 +66,11 @@ class OmniAnalyze_Base():
         # TODO: filter_metrics should/might be one per arch
         # print(ac)
 
-        parser.build_dfs(ac, filter_metrics)
+        parser.build_dfs(
+            archConfigs=ac,
+            filter_metrics=filter_metrics,
+            sys_info=sys_info
+        )
         self._arch_configs[arch] = ac
         return self._arch_configs
     
@@ -76,7 +80,8 @@ class OmniAnalyze_Base():
         if args.list_metrics in file_io.supported_arch.keys():
             arch = args.list_metrics
             if arch not in self._arch_configs.keys():
-                self.generate_configs(arch, args.config_dir, args.list_kernels, args.filter_metrics)
+                sys_info = file_io.load_sys_info(Path(self.__args.path[0][0], "sysinfo.csv"))
+                self.generate_configs(arch, args.config_dir, args.list_kernels, args.filter_metrics, sys_info)
             print(
                 tabulate(
                     pd.DataFrame.from_dict(
@@ -121,13 +126,15 @@ class OmniAnalyze_Base():
             sys_info = file_io.load_sys_info(Path(d[0], "sysinfo.csv"))
             arch = sys_info.iloc[0]["gpu_soc"]
             args = self.__args
-            self.generate_configs(arch, args.config_dir, args.list_kernels, args.filter_metrics)
+            self.generate_configs(arch, args.config_dir, args.list_kernels, args.filter_metrics, sys_info)
 
         self.load_options(normalization_filter)
         
         for d in self.__args.path:
             w = schema.Workload()
             w.sys_info = file_io.load_sys_info(Path(d[0], "sysinfo.csv"))
+            if self.__args.specs_correction:
+                w.sys_info = parser.correct_sys_info(w.sys_info, self.__args.specs_correction)
             w.avail_ips = w.sys_info["ip_blocks"].item().split("|")
             arch = w.sys_info.iloc[0]["gpu_soc"]
             w.dfs = copy.deepcopy(self._arch_configs[arch].dfs)

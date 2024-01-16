@@ -82,7 +82,7 @@ def show_all(args, runs, archConfigs, output):
                             if (
                                 type == "raw_csv_table"
                                 and table_config["source"] == "pmc_kernel_top.csv"
-                                and header == "KernelName"
+                                and (header == "KernelName" or header == "Kernel_Name")
                             ):
                                 # NB: the width of kernel name might depend on the header of the table.
                                 adjusted_name = base_df["KernelName"].apply(
