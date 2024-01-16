@@ -100,27 +100,26 @@ add_subdirectory(rdc_modules/rdc_rocp)
 # add librdc_rvs.so to RDC_LIB_MODULES
 add_subdirectory(rdc_modules/rdc_rvs)
 
-if(BUILD_STANDALONE)
-    # add librdc_client.so
-    add_subdirectory(rdc_client)
-endif()
-
 # Create cmake target
 # Add all targets to the build-tree export set
-export(TARGETS ${BOOTSTRAP_LIB} ${RDC_LIB} ${RDCCLIENT_LIB}
+export(TARGETS ${BOOTSTRAP_LIB} ${RDC_LIB}
     FILE "${PROJECT_BINARY_DIR}/rdc_libs.cmake")
 
 ## Add the install directives for the runtime library.
+install(TARGETS ${BOOTSTRAP_LIB} ${RDC_LIB}
+    EXPORT rdcTargets
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    COMPONENT ${CLIENT_COMPONENT})
+
 if(BUILD_STANDALONE)
-    install(TARGETS ${BOOTSTRAP_LIB} ${RDC_LIB} ${RDCCLIENT_LIB}
+    # add librdc_client.so
+    add_subdirectory(rdc_client)
+    install(TARGETS ${RDCCLIENT_LIB}
         EXPORT rdcTargets
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
         COMPONENT ${CLIENT_COMPONENT})
-else()
-    install(TARGETS ${BOOTSTRAP_LIB} ${RDC_LIB}
-        EXPORT rdcTargets
-        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-        COMPONENT ${CLIENT_COMPONENT})
+    export(TARGETS ${RDCCLIENT_LIB}
+        APPEND FILE "${PROJECT_BINARY_DIR}/rdc_libs.cmake")
 endif()
 
 # Add module directives if those exist
