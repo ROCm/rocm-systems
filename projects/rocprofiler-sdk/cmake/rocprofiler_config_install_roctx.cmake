@@ -3,24 +3,15 @@ include_guard(GLOBAL)
 
 include(CMakePackageConfigHelpers)
 
-set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME development)
-
-install(
-    DIRECTORY ${PROJECT_SOURCE_DIR}/samples
-    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PACKAGE_NAME}
-    COMPONENT samples)
-
-install(
-    DIRECTORY ${PROJECT_SOURCE_DIR}/tests
-    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PACKAGE_NAME}
-    COMPONENT tests)
+set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME roctx)
+set(PACKAGE_NAME "rocprofiler-sdk-roctx")
 
 install(
     EXPORT ${PACKAGE_NAME}-targets
     FILE ${PACKAGE_NAME}-targets.cmake
-    NAMESPACE ${PROJECT_NAME}::
+    NAMESPACE ${PACKAGE_NAME}::
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/cmake/${PACKAGE_NAME}
-    COMPONENT development)
+    COMPONENT roctx)
 
 # ------------------------------------------------------------------------------#
 # install tree
@@ -28,9 +19,8 @@ install(
 set(PROJECT_INSTALL_DIR ${CMAKE_INSTALL_PREFIX})
 set(INCLUDE_INSTALL_DIR ${CMAKE_INSTALL_INCLUDEDIR})
 set(LIB_INSTALL_DIR ${CMAKE_INSTALL_LIBDIR})
-set(PROJECT_BUILD_TARGETS headers shared-library)
-set(PROJECT_EXTRA_DIRS "${CMAKE_INSTALL_INCLUDEDIR}/${PACKAGE_NAME}"
-                       "${CMAKE_INSTALL_LIBDIR}/${PACKAGE_NAME}")
+set(PROJECT_BUILD_TARGETS ${PACKAGE_NAME}-shared-library)
+set(PROJECT_EXTRA_DIRS "${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}-sdk-roctx")
 
 configure_package_config_file(
     ${PROJECT_SOURCE_DIR}/cmake/Templates/${PACKAGE_NAME}/config.cmake.in
@@ -44,20 +34,14 @@ write_basic_package_version_file(
     VERSION ${PROJECT_VERSION}
     COMPATIBILITY SameMinorVersion)
 
-configure_file(
-    ${PROJECT_SOURCE_DIR}/cmake/rocprofiler_config_nolink_target.cmake
-    ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/cmake/${PROJECT_NAME}-sdk/${PROJECT_NAME}-sdk-config-nolink-target.cmake
-    COPYONLY)
-
 install(
     FILES
         ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/cmake/${PACKAGE_NAME}/${PACKAGE_NAME}-config.cmake
         ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/cmake/${PACKAGE_NAME}/${PACKAGE_NAME}-config-version.cmake
-        ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/cmake/${PACKAGE_NAME}/${PACKAGE_NAME}-config-nolink-target.cmake
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/cmake/${PACKAGE_NAME}
-    COMPONENT development)
+    COMPONENT roctx)
 
-export(PACKAGE ${PROJECT_NAME})
+export(PACKAGE ${PACKAGE_NAME})
 
 # ------------------------------------------------------------------------------#
 # build tree
@@ -66,7 +50,10 @@ set(${PACKAGE_NAME}_BUILD_TREE
     ON
     CACHE BOOL "" FORCE)
 
-set(PROJECT_BUILD_TREE_TARGETS headers shared-library build-flags stack-protector)
+set(PROJECT_BUILD_TREE_TARGETS
+    ${PROJECT_NAME}::${PACKAGE_NAME}-shared-library
+    ${PROJECT_NAME}::${PROJECT_NAME}-headers ${PROJECT_NAME}::${PROJECT_NAME}-build-flags
+    ${PROJECT_NAME}::${PROJECT_NAME}-stack-protector)
 
 configure_file(
     ${PROJECT_SOURCE_DIR}/cmake/Templates/${PACKAGE_NAME}/build-config.cmake.in
@@ -101,7 +88,7 @@ endif()
 
 export(
     EXPORT ${PACKAGE_NAME}-targets
-    NAMESPACE ${PROJECT_NAME}::
+    NAMESPACE ${PACKAGE_NAME}::
     FILE "${_BUILDTREE_EXPORT_DIR}/${PACKAGE_NAME}-targets.cmake")
 
 set(${PACKAGE_NAME}_DIR

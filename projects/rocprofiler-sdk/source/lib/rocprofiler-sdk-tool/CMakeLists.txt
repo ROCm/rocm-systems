@@ -5,6 +5,9 @@
 add_library(rocprofiler-sdk-tool SHARED)
 target_sources(rocprofiler-sdk-tool PRIVATE helper.hpp helper.cpp tool.cpp
                                             trace_buffer.hpp)
+
+add_subdirectory(plugins)
+
 target_link_libraries(
     rocprofiler-sdk-tool
     PRIVATE rocprofiler::rocprofiler-shared-library
@@ -30,4 +33,4 @@ install(
     TARGETS rocprofiler-sdk-tool
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/rocprofiler-sdk
     COMPONENT tools
-    EXPORT rocprofiler-sdk-library-targets)
+    EXPORT rocprofiler-sdk-tool-targets)

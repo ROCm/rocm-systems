@@ -31,6 +31,7 @@ project(
     HOMEPAGE_URL "https://github.com/ROCm/rocprofiler-sdk-internal")
 
 set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME "core")
+set(PACKAGE_NAME ${PROJECT_NAME}-sdk)
 
 find_package(Git)
 
@@ -100,6 +101,7 @@ add_subdirectory(external)
 add_subdirectory(source)
 
 include(rocprofiler_config_install)
+include(rocprofiler_config_install_roctx)
 
 if(ROCPROFILER_BUILD_TESTS)
     add_subdirectory(tests)

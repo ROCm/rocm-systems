@@ -98,7 +98,7 @@ install(
     TARGETS rocprofiler-shared-library
     DESTINATION ${CMAKE_INSTALL_LIBDIR}
     COMPONENT core
-    EXPORT rocprofiler-sdk-library-targets)
+    EXPORT rocprofiler-sdk-targets)
 
 # ----------------------------------------------------------------------------------------#
 #

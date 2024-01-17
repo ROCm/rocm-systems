@@ -60,7 +60,7 @@ typedef enum  // NOLINT(performance-enum-size)
     ROCPROFILER_STATUS_ERROR_THREAD_NOT_FOUND,     ///< No valid thread for given thread id
     ROCPROFILER_STATUS_ERROR_AGENT_NOT_FOUND,      ///< Agent identifier not found
     ROCPROFILER_STATUS_ERROR_COUNTER_NOT_FOUND,    ///< Counter identifier does not exist
-    ROCPROFILER_STATUS_ERROR_CONTEXT_ERROR,        ///> Generalized context error
+    ROCPROFILER_STATUS_ERROR_CONTEXT_ERROR,        ///< Generalized context error
     ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID,      ///< Context configuration is not valid
     ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_STARTED,  ///< Context was not started (e.g., atomic swap
                                                    ///< into active array failed)

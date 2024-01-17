@@ -364,7 +364,7 @@ function(ROCPROFILER_ADD_INTERFACE_LIBRARY _TARGET _DESCRIPT)
             TARGETS ${_TARGET}
             DESTINATION ${CMAKE_INSTALL_LIBDIR}
             COMPONENT core
-            EXPORT rocprofiler-sdk-library-targets
+            EXPORT rocprofiler-sdk-targets
             OPTIONAL)
     endif()
 endfunction()

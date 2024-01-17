@@ -12,7 +12,9 @@ set(CPACK_PACKAGE_VERSION_PATCH "${PROJECT_VERSION_PATCH}")
 set(CPACK_PACKAGE_CONTACT "ROCm Profiler Support <dl.ROCm-Profiler.support@amd.com>")
 set(CPACK_RESOURCE_FILE_LICENSE "${PROJECT_SOURCE_DIR}/LICENSE")
 set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY OFF)
-set(CPACK_STRIP_FILES OFF) # eventually this should be set to ON
+set(CPACK_STRIP_FILES
+    OFF
+    CACHE BOOL "") # eventually this should be set to ON
 set(ROCPROFILER_CPACK_SYSTEM_NAME
     "${CMAKE_SYSTEM_NAME}"
     CACHE STRING "System name, e.g. Linux or Ubuntu-18.04")
@@ -37,54 +39,42 @@ list(REMOVE_ITEM ROCPROFILER_PACKAGING_COMPONENTS "Development" "Unspecified")
 list(LENGTH ROCPROFILER_PACKAGING_COMPONENTS NUM_ROCPROFILER_PACKAGING_COMPONENTS)
 
 # the packages we will generate
-set(ROCPROFILER_COMPONENT_GROUPS "core" "tests" "docs")
+set(ROCPROFILER_COMPONENT_GROUPS "core" "docs" "tests" "roctx")
 
 set(COMPONENT_GROUP_core_COMPONENTS "core" "development" "samples" "tools" "Development"
                                     "Unspecified")
-set(COMPONENT_GROUP_tests_COMPONENTS "tests")
 set(COMPONENT_GROUP_docs_COMPONENTS "docs")
+set(COMPONENT_GROUP_tests_COMPONENTS "tests")
+set(COMPONENT_GROUP_roctx_COMPONENTS "roctx")
 
 # variables for each component group. Note: eventually we will probably want to separate
 # the core to just be the runtime libraries, development to be the headers and cmake
 # files, the samples to just be the samples, and tools just be the tool files but right
 # now we are just combining core, development, samples, and tools into one package
-set(COMPONENT_NAME_core "")
-set(COMPONENT_NAME_development "dev")
-set(COMPONENT_NAME_samples "samples")
-set(COMPONENT_NAME_tools "tools")
-set(COMPONENT_NAME_tests "tests")
-set(COMPONENT_NAME_docs "docs")
-
-set(COMPONENT_SEP_core "")
-set(COMPONENT_SEP_development "-")
-set(COMPONENT_SEP_samples "-")
-set(COMPONENT_SEP_tools "-")
-set(COMPONENT_SEP_tests "-")
-set(COMPONENT_SEP_docs "-")
+set(COMPONENT_NAME_core "rocprofiler-sdk")
+set(COMPONENT_NAME_docs "rocprofiler-sdk-docs")
+set(COMPONENT_NAME_tests "rocprofiler-sdk-tests")
+set(COMPONENT_NAME_roctx "rocprofiler-sdk-roctx")
 
 set(COMPONENT_DEP_core "")
-set(COMPONENT_DEP_development "rocprofiler-sdk")
-set(COMPONENT_DEP_samples "rocprofiler-sdk")
-set(COMPONENT_DEP_tools "rocprofiler-sdk")
-set(COMPONENT_DEP_tests "rocprofiler-sdk")
 set(COMPONENT_DEP_docs "")
+set(COMPONENT_DEP_tests "rocprofiler-sdk")
+set(COMPONENT_DEP_roctx "")
 
 set(COMPONENT_DESC_core "rocprofiler-sdk libraries, headers, samples, and tools")
-set(COMPONENT_DESC_development "rocprofiler-sdk development files")
-set(COMPONENT_DESC_samples "rocprofiler-sdk samples")
-set(COMPONENT_DESC_tools "rocprofiler-sdk tools")
-set(COMPONENT_DESC_tests "rocprofiler-sdk tests")
 set(COMPONENT_DESC_docs "rocprofiler-sdk documentation")
+set(COMPONENT_DESC_tests "rocprofiler-sdk tests")
+set(COMPONENT_DESC_roctx "ROCm Tools Extension library and headers")
 
-set(EXPECTED_PACKAGING_COMPONENTS 5)
+set(EXPECTED_PACKAGING_COMPONENTS 6)
 if(ROCPROFILER_BUILD_DOCS)
-    set(EXPECTED_PACKAGING_COMPONENTS 6)
+    set(EXPECTED_PACKAGING_COMPONENTS 7)
 endif()
 
 if(NOT NUM_ROCPROFILER_PACKAGING_COMPONENTS EQUAL EXPECTED_PACKAGING_COMPONENTS)
     message(
         FATAL_ERROR
-            "Error new install component needs COMPONENT_NAME_* and COMPONENT_SEP_* entries"
+            "Error new install component needs COMPONENT_NAME_* and COMPONENT_SEP_* entries: ${ROCPROFILER_PACKAGING_COMPONENTS}"
         )
 endif()
 
@@ -97,7 +87,6 @@ else()
 endif()
 
 foreach(COMPONENT_GROUP ${ROCPROFILER_COMPONENT_GROUPS})
-    set(_SEP "${COMPONENT_SEP_${COMPONENT_GROUP}}")
     set(_DEP "${COMPONENT_DEP_${COMPONENT_GROUP}}")
     set(_NAME "${COMPONENT_NAME_${COMPONENT_GROUP}}")
     set(_DESC "${COMPONENT_DESC_${COMPONENT_GROUP}}")
@@ -112,9 +101,9 @@ foreach(COMPONENT_GROUP ${ROCPROFILER_COMPONENT_GROUPS})
     endif()
 
     string(TOUPPER "${COMPONENT_GROUP}" UCOMPONENT)
-    set(CPACK_DEBIAN_${UCOMPONENT}_PACKAGE_NAME "${PROJECT_NAME}-sdk${_SEP}${_NAME}")
+    set(CPACK_DEBIAN_${UCOMPONENT}_PACKAGE_NAME "${_NAME}")
     set(CPACK_DEBIAN_${UCOMPONENT}_PACKAGE_DEPENDS "${_DEP}")
-    set(CPACK_RPM_${UCOMPONENT}_PACKAGE_NAME "${PROJECT_NAME}-sdk${_SEP}${_NAME}")
+    set(CPACK_RPM_${UCOMPONENT}_PACKAGE_NAME "${_NAME}")
     set(CPACK_RPM_${UCOMPONENT}_PACKAGE_REQUIRES "${_DEP}")
 
     foreach(COMPONENT ${COMPONENT_GROUP_${COMPONENT_GROUP}_COMPONENTS})
