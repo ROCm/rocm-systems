@@ -120,8 +120,6 @@ save(ArchiveT& ar, rocprofiler_callback_tracing_code_object_load_data_t data)
     SAVE_DATA_FIELD(code_object_id);
     SAVE_DATA_FIELD(rocp_agent);
     SAVE_DATA_FIELD(hsa_agent);
-    SAVE_DATA_FIELD(rocp_agent);
-    SAVE_DATA_FIELD(hsa_agent);
     SAVE_DATA_CSTR(uri);
     SAVE_DATA_FIELD(load_base);
     SAVE_DATA_FIELD(load_size);
@@ -210,7 +208,7 @@ save(ArchiveT& ar, rocprofiler_buffer_tracing_hip_api_record_t data)
 
 template <typename ArchiveT>
 void
-save(ArchiveT& ar, rocprofiler_buffer_tracing_marker_record_t data)
+save(ArchiveT& ar, rocprofiler_buffer_tracing_marker_api_record_t data)
 {
     save_buffer_tracing_api_record(ar, data);
 }

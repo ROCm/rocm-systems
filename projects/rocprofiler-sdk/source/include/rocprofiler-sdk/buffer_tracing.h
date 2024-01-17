@@ -76,7 +76,7 @@ typedef struct
     rocprofiler_thread_id_t           thread_id;       ///< id for thread generating this record
     uint64_t                          marker_id;       ///< rocprofiler_marker_id_t
     // const char* message; // (Need Review?)
-} rocprofiler_buffer_tracing_marker_record_t;
+} rocprofiler_buffer_tracing_marker_api_record_t;
 
 /**
  * @brief ROCProfiler Buffer Memory Copy Tracer Record.

@@ -103,8 +103,6 @@ convert_hsa_handle(Up _hsa_object)
 bool
 async_copy_handler(hsa_signal_value_t signal_value, void* arg)
 {
-    LOG(ERROR) << "[" << __FUNCTION__ << "] invoked with signal value " << signal_value;
-
     static auto sysclock_period = []() -> uint64_t {
         constexpr auto nanosec     = 1000000000UL;
         uint64_t       sysclock_hz = 0;
@@ -122,9 +120,6 @@ async_copy_handler(hsa_signal_value_t signal_value, void* arg)
     // normalize
     copy_time.start *= sysclock_period;
     copy_time.end *= sysclock_period;
-
-    LOG(ERROR) << "[" << __FUNCTION__ << "] start=" << copy_time.start << ", end=" << copy_time.end
-               << ", delta=" << (copy_time.end - copy_time.start) << ", period=" << sysclock_period;
 
     // if we encounter this in CI, it will cause test to fail
     ROCP_CI_LOG_IF(ERROR, copy_time_status == HSA_STATUS_SUCCESS && copy_time.end < copy_time.start)
@@ -204,8 +199,6 @@ async_copy_handler(hsa_signal_value_t signal_value, void* arg)
         delete _data;
     }
 
-    LOG(ERROR) << "[" << __FUNCTION__ << "] completed (signal value " << signal_value << ")";
-
     return (signal_value > 0);
 }
 
@@ -256,8 +249,6 @@ async_copy_impl(Args... args)
     using meta_type = hsa_api_meta<Idx>;
 
     constexpr auto N = sizeof...(Args);
-
-    LOG(ERROR) << "[" << __FUNCTION__ << "] started...";
 
     auto&& _tied_args = std::tie(args...);
     auto   ctxs       = context::get_active_contexts(context_filter);
@@ -414,8 +405,6 @@ async_copy_impl(Args... args)
 
     _data->orig_signal = _completion_signal;
     _completion_signal = _data->rocp_signal;
-
-    auto _dtor = common::scope_destructor{[]() { LOG(ERROR) << "[async_copy_impl] ... returned"; }};
 
     return invoke(get_next_dispatch<Idx>(), std::move(_tied_args), std::make_index_sequence<N>{});
 }

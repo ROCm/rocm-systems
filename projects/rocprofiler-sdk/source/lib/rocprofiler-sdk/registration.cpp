@@ -22,6 +22,7 @@
 
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/common/environment.hpp"
+#include "lib/common/logging.hpp"
 #include "lib/common/static_object.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
@@ -36,6 +37,7 @@
 #include <rocprofiler-sdk/context.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/hsa.h>
+#include <rocprofiler-sdk/marker.h>
 #include <rocprofiler-sdk/version.h>
 
 #include <fmt/format.h>
@@ -45,6 +47,7 @@
 #include <link.h>
 #include <unistd.h>
 #include <atomic>
+#include <cctype>
 #include <cstdint>
 #include <fstream>
 #include <iostream>
@@ -477,24 +480,11 @@ invoke_client_finalizer(rocprofiler_client_id_t client_id)
 void
 init_logging()
 {
-    static auto _once = std::once_flag{};
-    std::call_once(_once, []() {
-        auto get_argv0 = []() {
-            auto ifs  = std::ifstream{"/proc/self/cmdline"};
-            auto sarg = std::string{};
-            while(ifs && !ifs.eof())
-            {
-                ifs >> sarg;
-                if(!sarg.empty()) break;
-            }
-            return sarg;
-        };
-
-        static auto argv0 = get_argv0();
-        google::InitGoogleLogging(argv0.c_str());
-        LOG(INFO) << "logging initialized";
-    });
+    common::init_logging("ROCPROFILER_LOG_LEVEL");
 }
+
+// ensure that logging is always initialized when library is loaded
+bool init_logging_at_load = (init_logging(), true);
 
 uint32_t
 get_client_offset()
@@ -619,6 +609,7 @@ rocprofiler_force_configure(rocprofiler_configure_func_t configure_func)
     // let's just make sure that the forced configure function is a nullptr
     if(forced_config) return ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED;
 
+    setenv("ROCPROFILER_REGISTER_FORCE_LOAD", "1", 1);
     forced_config = configure_func;
     rocprofiler::registration::initialize();
 
@@ -632,6 +623,12 @@ rocprofiler_set_api_table(const char* name,
                           void**      tables,
                           uint64_t    num_tables)
 {
+    // implementation has a call once
+    rocprofiler::registration::init_logging();
+
+    LOG(ERROR) << __FUNCTION__ << "(\"" << name << "\", " << lib_version << ", " << lib_instance
+               << ", ..., " << num_tables << ")";
+
     static auto _once = std::once_flag{};
     std::call_once(_once, rocprofiler::registration::initialize);
 

@@ -28,6 +28,7 @@
 #include "lib/common/filesystem.hpp"
 #include "lib/common/units.hpp"
 #include "lib/common/utility.hpp"
+#include "lib/rocprofiler-sdk/tests/common.hpp"
 
 #include <gtest/gtest.h>
 
@@ -45,152 +46,8 @@
 #include <unordered_map>
 #include <vector>
 
-#define ROCPROFILER_CALL(ARG, MSG)                                                                 \
-    {                                                                                              \
-        auto _status = (ARG);                                                                      \
-        EXPECT_EQ(_status, ROCPROFILER_STATUS_SUCCESS) << MSG << " :: " << #ARG;                   \
-    }
-
 namespace
 {
-struct callback_data
-{
-    rocprofiler_client_id_t*      client_id             = nullptr;
-    rocprofiler_client_finalize_t client_fini_func      = nullptr;
-    rocprofiler_context_id_t      client_ctx            = {};
-    rocprofiler_buffer_id_t       client_buffer         = {};
-    rocprofiler_callback_thread_t client_thread         = {};
-    uint64_t                      client_workflow_count = {};
-    uint64_t                      client_callback_count = {};
-    uint64_t                      client_elapsed        = {};
-    int64_t                       current_depth         = 0;
-    int64_t                       max_depth             = 0;
-};
-
-struct agent_data
-{
-    uint64_t                       agent_count = 0;
-    std::vector<hsa_device_type_t> agents      = {};
-};
-
-using callback_kind_names_t = std::map<rocprofiler_callback_tracing_kind_t, const char*>;
-using callback_kind_operation_names_t =
-    std::map<rocprofiler_callback_tracing_kind_t, std::map<uint32_t, const char*>>;
-
-struct callback_name_info
-{
-    callback_kind_names_t           kind_names      = {};
-    callback_kind_operation_names_t operation_names = {};
-};
-
-auto
-get_callback_tracing_names()
-{
-    auto cb_name_info = callback_name_info{};
-    //
-    // callback for each kind operation
-    //
-    static auto tracing_kind_operation_cb =
-        [](rocprofiler_callback_tracing_kind_t kindv, uint32_t operation, void* data_v) {
-            auto* name_info_v = static_cast<callback_name_info*>(data_v);
-
-            if(kindv == ROCPROFILER_CALLBACK_TRACING_HSA_API)
-            {
-                const char* name = nullptr;
-                ROCPROFILER_CALL(rocprofiler_query_callback_tracing_kind_operation_name(
-                                     kindv, operation, &name, nullptr),
-                                 "query callback tracing kind operation name");
-                if(name) name_info_v->operation_names[kindv][operation] = name;
-            }
-            return 0;
-        };
-
-    //
-    //  callback for each callback kind (i.e. domain)
-    //
-    static auto tracing_kind_cb = [](rocprofiler_callback_tracing_kind_t kind, void* data) {
-        //  store the callback kind name
-        auto*       name_info_v = static_cast<callback_name_info*>(data);
-        const char* name        = nullptr;
-        ROCPROFILER_CALL(rocprofiler_query_callback_tracing_kind_name(kind, &name, nullptr),
-                         "query callback tracing kind operation name");
-        if(name) name_info_v->kind_names[kind] = name;
-
-        if(kind == ROCPROFILER_CALLBACK_TRACING_HSA_API)
-        {
-            ROCPROFILER_CALL(rocprofiler_iterate_callback_tracing_kind_operations(
-                                 kind, tracing_kind_operation_cb, static_cast<void*>(data)),
-                             "iterating callback tracing kind operations");
-        }
-        return 0;
-    };
-
-    ROCPROFILER_CALL(rocprofiler_iterate_callback_tracing_kinds(tracing_kind_cb,
-                                                                static_cast<void*>(&cb_name_info)),
-                     "iterating callback tracing kinds");
-
-    return cb_name_info;
-}
-
-using buffer_kind_names_t = std::map<rocprofiler_buffer_tracing_kind_t, const char*>;
-using buffer_kind_operation_names_t =
-    std::map<rocprofiler_buffer_tracing_kind_t, std::map<uint32_t, const char*>>;
-
-struct buffer_name_info
-{
-    buffer_kind_names_t           kind_names      = {};
-    buffer_kind_operation_names_t operation_names = {};
-};
-
-buffer_name_info
-get_buffer_tracing_names()
-{
-    auto cb_name_info = buffer_name_info{};
-    //
-    // callback for each kind operation
-    //
-    static auto tracing_kind_operation_cb =
-        [](rocprofiler_buffer_tracing_kind_t kindv, uint32_t operation, void* data_v) {
-            auto* name_info_v = static_cast<buffer_name_info*>(data_v);
-
-            if(kindv == ROCPROFILER_BUFFER_TRACING_HSA_API)
-            {
-                const char* name = nullptr;
-                ROCPROFILER_CALL(rocprofiler_query_buffer_tracing_kind_operation_name(
-                                     kindv, operation, &name, nullptr),
-                                 "query buffer tracing kind operation name");
-                if(name) name_info_v->operation_names[kindv][operation] = name;
-            }
-            return 0;
-        };
-
-    //
-    //  callback for each buffer kind (i.e. domain)
-    //
-    static auto tracing_kind_cb = [](rocprofiler_buffer_tracing_kind_t kind, void* data) {
-        //  store the buffer kind name
-        auto*       name_info_v = static_cast<buffer_name_info*>(data);
-        const char* name        = nullptr;
-        ROCPROFILER_CALL(rocprofiler_query_buffer_tracing_kind_name(kind, &name, nullptr),
-                         "query buffer tracing kind operation name");
-        if(name) name_info_v->kind_names[kind] = name;
-
-        if(kind == ROCPROFILER_BUFFER_TRACING_HSA_API)
-        {
-            ROCPROFILER_CALL(rocprofiler_iterate_buffer_tracing_kind_operations(
-                                 kind, tracing_kind_operation_cb, static_cast<void*>(data)),
-                             "iterating buffer tracing kind operations");
-        }
-        return 0;
-    };
-
-    ROCPROFILER_CALL(rocprofiler_iterate_buffer_tracing_kinds(tracing_kind_cb,
-                                                              static_cast<void*>(&cb_name_info)),
-                     "iterating buffer tracing kinds");
-
-    return cb_name_info;
-}
-
 void
 tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                       rocprofiler_user_data_t*              user_data,
@@ -566,6 +423,8 @@ TEST(rocprofiler_lib, buffer_registration_lambda_with_result)
 
     static fini_func_t tool_fini = [](void* client_data) -> void {
         auto* cb_data = static_cast<callback_data*>(client_data);
+        ROCPROFILER_CALL(rocprofiler_flush_buffer(cb_data->client_buffer),
+                         "rocprofiler context stop failed");
         ROCPROFILER_CALL(rocprofiler_stop_context(cb_data->client_ctx),
                          "rocprofiler context stop failed");
 

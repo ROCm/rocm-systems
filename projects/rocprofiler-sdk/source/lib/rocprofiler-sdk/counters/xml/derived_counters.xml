@@ -498,6 +498,9 @@
 <gfx1101 base="gfx11">
 </gfx1101>
 
+<gfx1102 base="gfx11">
+</gfx1102>
+
 <gfx8 base="gfx8"></gfx8>
 <gfx9 base="gfx9"></gfx9>
 <gfx10 base="gfx10"></gfx10>
@@ -519,6 +522,7 @@
 #Navi31
 <gfx1100 base="gfx1100"></gfx1100>
 <gfx1101 base="gfx1101"></gfx1101>
+<gfx1102 base="gfx1102"></gfx1102>
 
 
 <global>
