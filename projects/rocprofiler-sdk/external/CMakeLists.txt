@@ -165,3 +165,14 @@ if(NOT TARGET PTL::ptl-static)
                   CMAKE_POSITION_INDEPENDENT_CODE CMAKE_CXX_VISIBILITY_PRESET
                   CMAKE_VISIBILITY_INLINES_HIDDEN)
 endif()
+
+# doxygen-awesome
+if(ROCPROFILER_BUILD_DOCS)
+    rocprofiler_checkout_git_submodule(
+        RECURSIVE
+        RELATIVE_PATH external/doxygen-awesome-css
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+        TEST_FILE Makefile
+        REPO_URL https://github.com/jothepro/doxygen-awesome-css.git
+        REPO_BRANCH "main")
+endif()
