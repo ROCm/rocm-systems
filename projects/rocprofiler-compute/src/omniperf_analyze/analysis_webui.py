@@ -45,14 +45,14 @@ class webui_analysis(OmniAnalyze_Base):
         self.dest_dir = os.path.abspath(args.path[0][0])
         self.arch = None
         
-        self.__hidden_sections = ["Memory Chart Analysis", "Kernels"]
+        self.__hidden_sections = ["Memory Chart", "Kernels"]
         self.__hidden_columns = ["Tips", "coll_level"]
         # define different types of bar charts
         self.__barchart_elements = {
             "instr_mix": [1001, 1002],
             "multi_bar": [1604, 1704],
             "sol": [1101, 1201, 1301, 1401, 1601, 1701],
-            "l2_cache_per_chan": [1802, 1803]
+            #"l2_cache_per_chan": [1802, 1803]
         }
         # define any elements which will have full width
         self.__full_width_elements = {1801}
@@ -131,14 +131,14 @@ class webui_analysis(OmniAnalyze_Base):
             # Only display basic metrics if no filters are applied
             if not (disp_filt or kernel_filter or gcd_filter):
                 temp = {}
-                keep = [1, 201, 101, 1901]
+                keep = [1, 201, 101, 301]
                 for key in base_data[base_run].dfs:
                     if keep.count(key) != 0:
                         temp[key] = base_data[base_run].dfs[key]
 
                 base_data[base_run].dfs = temp
                 temp = {}
-                keep = [0, 100, 200, 1900]
+                keep = [0, 100, 200, 300]
                 for key in panel_configs:
                     if keep.count(key) != 0:
                         temp[key] = panel_configs[key]
@@ -159,7 +159,7 @@ class webui_analysis(OmniAnalyze_Base):
 
             # Append memory chart and roofline
             div_children.append(
-                get_memchart(panel_configs[1900]["data source"], base_data[base_run])
+                get_memchart(panel_configs[300]["data source"], base_data[base_run])
             )
             has_roofline = os.path.isfile(os.path.join(self.dest_dir, "roofline.csv"))
             if has_roofline and hasattr(self.get_socs()[self.arch], "roofline_obj"):
@@ -177,7 +177,7 @@ class webui_analysis(OmniAnalyze_Base):
                 roof_obj = self.get_socs()[self.arch].roofline_obj
                 div_children.append(
                     roof_obj.empirical_roofline(
-                        ret_df=parser.apply_filters(workload=base_data[base_run], is_gui=True, debug=self.get_args().debug)
+                        ret_df=parser.apply_filters(workload=base_data[base_run], dir=self.dest_dir, is_gui=True, debug=self.get_args().debug)
                     )
                 )
             
@@ -341,7 +341,7 @@ def determine_chart_type(
         if (
             len(d_figs) > 2
             and not table_config["id"]
-            in barchart_elements["l2_cache_per_chan"]
+            # in barchart_elements["l2_cache_per_chan"]
         ):
             temp_obj = []
             for fig in d_figs:

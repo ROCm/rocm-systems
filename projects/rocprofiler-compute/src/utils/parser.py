@@ -818,7 +818,7 @@ def eval_metric(dfs, dfs_type, sys_info, soc_spec, raw_pmc_df, debug):
             # print(tabulate(df, headers='keys', tablefmt='fancy_grid'))
 
 
-def apply_filters(workload, is_gui, debug):
+def apply_filters(workload, dir, is_gui, debug):
     """
     Apply user's filters to the raw_pmc df.
     """
@@ -875,9 +875,9 @@ def apply_filters(workload, is_gui, debug):
             if debug:
                 print("GUI kernel filtering")
             ret_df = ret_df.loc[
-                ret_df[schema.pmc_perf_file_prefix]["Index"]
-                .astype(str)
-                .isin(workload.filter_dispatch_ids)
+                ret_df[schema.pmc_perf_file_prefix]["KernelName"].isin(
+                    workload.filter_kernel_ids
+                )
             ]
 
     if workload.filter_dispatch_ids:
@@ -945,7 +945,7 @@ def load_table_data(workload, dir, is_gui, debug, verbose, skipKernelTop=False):
         workload.dfs_type,
         workload.sys_info.iloc[0],
         workload.soc_spec,
-        apply_filters(workload, is_gui, debug),
+        apply_filters(workload, dir, is_gui, debug),
         debug,
     )
 
