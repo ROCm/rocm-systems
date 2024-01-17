@@ -232,6 +232,30 @@ getMetricsForAgent(const std::string& agent)
 }
 
 bool
+checkValidMetric(const std::string& agent, const Metric& metric)
+{
+    static auto*& agent_to_id =
+        common::static_object<std::unordered_map<std::string, std::unordered_set<uint64_t>>>::
+            construct([]() -> std::unordered_map<std::string, std::unordered_set<uint64_t>> {
+                std::unordered_map<std::string, std::unordered_set<uint64_t>> ret;
+                const auto& map = *CHECK_NOTNULL(getMetricMap());
+                for(const auto& [agent_name, metrics] : map)
+                {
+                    auto& id_set =
+                        ret.emplace(agent_name, std::unordered_set<uint64_t>{}).first->second;
+                    for(const auto& m : metrics)
+                    {
+                        id_set.insert(m.id());
+                    }
+                }
+                return ret;
+            }());
+
+    const auto* agent_map = common::get_val(*agent_to_id, agent);
+    return agent_map != nullptr && agent_map->count(metric.id()) > 0;
+}
+
+bool
 operator<(Metric const& lhs, Metric const& rhs)
 {
     return lhs.id() < rhs.id();

@@ -25,6 +25,8 @@
 #include <glog/logging.h>
 #include <gtest/gtest.h>
 
+#include <algorithm>
+
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/counters/metrics.hpp"
 
@@ -119,5 +121,57 @@ TEST(metrics, derived_load)
             continue;
         }
         EXPECT_TRUE(equal(itr, *val)) << fmt::format("\n\t{} \n\t\t!= \n\t{}", itr, *val);
+    }
+}
+
+TEST(metrics, check_agent_valid)
+{
+    const auto& rocp_data      = *counters::getMetricMap();
+    auto        common_metrics = [&]() -> std::set<uint64_t> {
+        std::set<uint64_t> ret;
+        for(const auto& [gfx, counters] : rocp_data)
+        {
+            std::set<uint64_t> counter_ids;
+            for(const auto& metric : counters)
+            {
+                counter_ids.insert(metric.id());
+            }
+
+            if(ret.empty())
+            {
+                ret = counter_ids;
+            }
+            else
+            {
+                std::set<uint64_t> out_intersection;
+                std::set_intersection(ret.begin(),
+                                      ret.end(),
+                                      counter_ids.begin(),
+                                      counter_ids.end(),
+                                      std::inserter(out_intersection, out_intersection.begin()));
+            }
+
+            if(ret.empty()) return ret;
+        }
+        return ret;
+    }();
+
+    for(const auto& [gfx, counters] : rocp_data)
+    {
+        for(const auto& metric : counters)
+        {
+            ASSERT_EQ(counters::checkValidMetric(gfx, metric), true)
+                << gfx << " " << fmt::format("{}", metric);
+        }
+
+        for(const auto& [other_gfx, other_counters] : rocp_data)
+        {
+            if(other_gfx == gfx) continue;
+            for(const auto& metric : other_counters)
+            {
+                if(common_metrics.count(metric.id())) continue;
+                EXPECT_EQ(counters::checkValidMetric(gfx, metric), false);
+            }
+        }
     }
 }

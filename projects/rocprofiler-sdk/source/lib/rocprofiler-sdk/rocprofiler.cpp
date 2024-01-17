@@ -71,6 +71,8 @@ ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_ABI,
                           "with this version of rocprofiler")
 ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT,
                           "Function invoked with one or more invalid arguments")
+ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_ERROR_METRIC_NOT_VALID_FOR_AGENT,
+                          "Metric is not valid for the agent")
 
 template <size_t Idx, size_t... Tail>
 const char*

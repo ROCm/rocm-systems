@@ -115,6 +115,12 @@ getMetricsForAgent(const std::string&);
  */
 const MetricIdMap*
 getMetricIdMap();
+
+/**
+ * Checks if a metric is valid for a given agent
+ **/
+bool
+checkValidMetric(const std::string& agent, const Metric& metric);
 }  // namespace counters
 }  // namespace rocprofiler
 

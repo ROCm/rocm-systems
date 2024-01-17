@@ -51,13 +51,16 @@ rocprofiler_create_profile_config(rocprofiler_agent_t              agent,
         std::make_shared<rocprofiler::counters::profile_config>();
 
     const auto& id_map = *CHECK_NOTNULL(rocprofiler::counters::getMetricIdMap());
-
     for(size_t i = 0; i < counters_count; i++)
     {
         auto& counter_id = counters_list[i];
 
         const auto* metric_ptr = rocprofiler::common::get_val(id_map, counter_id.handle);
         if(!metric_ptr) return ROCPROFILER_STATUS_ERROR_COUNTER_NOT_FOUND;
+        if(!rocprofiler::counters::checkValidMetric(std::string(agent.name), *metric_ptr))
+        {
+            return ROCPROFILER_STATUS_ERROR_METRIC_NOT_VALID_FOR_AGENT;
+        }
         config->metrics.push_back(*metric_ptr);
     }
 

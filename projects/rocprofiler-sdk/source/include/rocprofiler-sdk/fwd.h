@@ -78,6 +78,7 @@ typedef enum  // NOLINT(performance-enum-size)
                                                 ///< with current version of rocprofiler
     ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT,  ///< Function invoked with one or more invalid
                                                 ///< arguments
+    ROCPROFILER_STATUS_ERROR_METRIC_NOT_VALID_FOR_AGENT,  ///< Invalid metric supplied to agent.
     ROCPROFILER_STATUS_LAST,
 } rocprofiler_status_t;
 
