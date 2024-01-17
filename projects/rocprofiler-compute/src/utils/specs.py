@@ -246,7 +246,7 @@ def run(cmd):
     if cmd[0] == "rocm-smi" and p.returncode == 8:
         print("ERROR: No GPU detected. Unable to load rocm-smi")
         sys.exit(1)
-    return p.stdout.decode("ascii")
+    return p.stdout.decode("utf-8")
 
 
 def search(pattern, string):
