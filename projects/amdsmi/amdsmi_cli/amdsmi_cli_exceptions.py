@@ -119,7 +119,7 @@ class AmdSmiDeviceNotFoundException(AmdSmiException):
         self.command = command
         self.output_format = outputformat
 
-        common_message = f"Can not find a GPU with the corresponding identifier: '{self.command}'"
+        common_message = f"Can not find a device with the corresponding identifier: '{self.command}'"
 
         self.json_message["error"] = common_message
         self.json_message["code"] = self.value

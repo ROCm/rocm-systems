@@ -43,6 +43,7 @@
 
 #include <functional>
 #include "amd_smi/impl/amd_smi_gpu_device.h"
+#include "rocm_smi/rocm_smi_utils.h"
 
 
 namespace amd {
@@ -80,11 +81,6 @@ amdsmi_status_t AMDSmiGPUDevice::get_drm_data() {
     ret = drm_.get_bdf_by_index(gpu_id_, &bdf);
     if (ret != AMDSMI_STATUS_SUCCESS) return AMDSMI_STATUS_NOT_SUPPORTED;
 
-    mutex_ = shared_mutex_init(path.c_str(), 0777);
-    if (mutex_.ptr == nullptr) {
-        printf("Failed to create shared mem. mutex.");
-        return AMDSMI_STATUS_INIT_ERROR;
-    }
     bdf_ = bdf, path_ = path, fd_ = fd;
     vendor_id_ = drm_.get_vendor_id();
 
@@ -92,7 +88,7 @@ amdsmi_status_t AMDSmiGPUDevice::get_drm_data() {
 }
 
 pthread_mutex_t* AMDSmiGPUDevice::get_mutex() {
-    return mutex_.ptr;
+    return amd::smi::GetMutex(gpu_id_);
 }
 
 amdsmi_status_t AMDSmiGPUDevice::amdgpu_query_info(unsigned info_id,

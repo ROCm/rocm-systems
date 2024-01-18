@@ -49,6 +49,7 @@
 #include <iostream>
 
 #include "amd_smi/amdsmi.h"
+#include "rocm_smi/rocm_smi_utils.h"
 #include <gtest/gtest.h>
 #include "test_common.h"
 #include "test_base.h"
@@ -159,10 +160,12 @@ TEST(amdsmitstReadOnly, TestVoltCurvRead) {
   RunGenericTest(&tst);
 }
 TEST(amdsmitstReadOnly, TestPerfLevelRead) {
+  if (amd::smi::is_vm_guest()) GTEST_SKIP();
   TestPerfLevelRead tst;
   RunGenericTest(&tst);
 }
 TEST(amdsmitstReadWrite, TestPerfLevelReadWrite) {
+  if (amd::smi::is_vm_guest()) GTEST_SKIP();
   TestPerfLevelReadWrite tst;
   RunGenericTest(&tst);
 }
@@ -183,10 +186,12 @@ TEST(amdsmitstReadWrite, TestFrequenciesReadWrite) {
   RunGenericTest(&tst);
 }
 TEST(amdsmitstReadWrite, TestPciReadWrite) {
+  if (amd::smi::is_vm_guest()) GTEST_SKIP();
   TestPciReadWrite tst;
   RunGenericTest(&tst);
 }
 TEST(amdsmitstReadOnly, TestSysInfoRead) {
+  if (amd::smi::is_vm_guest()) GTEST_SKIP();
   TestSysInfoRead tst;
   RunGenericTest(&tst);
 }
@@ -195,14 +200,17 @@ TEST(amdsmitstReadOnly, TestGPUBusyRead) {
   RunGenericTest(&tst);
 }
 TEST(amdsmitstReadOnly, TestPowerRead) {
+  if (amd::smi::is_vm_guest()) GTEST_SKIP();
   TestPowerRead tst;
   RunGenericTest(&tst);
 }
 TEST(amdsmitstReadWrite, TestPowerReadWrite) {
+  if (amd::smi::is_vm_guest()) GTEST_SKIP();
   TestPowerReadWrite tst;
   RunGenericTest(&tst);
 }
 TEST(amdsmitstReadWrite, TestPowerCapReadWrite) {
+  if (amd::smi::is_vm_guest()) GTEST_SKIP();
   TestPowerCapReadWrite tst;
   RunGenericTest(&tst);
 }
@@ -215,6 +223,7 @@ TEST(amdsmitstReadOnly, TestMemUtilRead) {
   RunGenericTest(&tst);
 }
 TEST(amdsmitstReadOnly, TestIdInfoRead) {
+  if (amd::smi::is_vm_guest()) GTEST_SKIP();
   TestIdInfoRead tst;
   RunGenericTest(&tst);
 }

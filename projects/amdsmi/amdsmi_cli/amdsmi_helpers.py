@@ -385,7 +385,7 @@ class AMDSMIHelpers():
 
         selected_device_handles = []
         for core_selection in core_selections:
-            valid_cpu_choice = False
+            valid_core_choice = False
             for core_id, core_info in core_choices.items():
                 device_handle = core_info['Device Handle']
 

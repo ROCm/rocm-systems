@@ -2707,6 +2707,15 @@ amdsmi_get_gpu_metrics_log(amdsmi_processor_handle processor_handle)
 
 
 #ifdef ENABLE_ESMI_LIB
+static amdsmi_status_t amdsmi_errno_to_esmi_status(amdsmi_status_t status)
+{
+    for (auto& iter : amd::smi::esmi_status_map) {
+        if (iter.first == static_cast<esmi_status_t>(status))
+            return iter.second;
+    }
+    return AMDSMI_STATUS_SUCCESS;
+}
+
 amdsmi_status_t amdsmi_get_cpu_hsmp_proto_ver(amdsmi_processor_handle processor_handle,
                 uint32_t *proto_ver)
 {
@@ -2719,10 +2728,10 @@ amdsmi_status_t amdsmi_get_cpu_hsmp_proto_ver(amdsmi_processor_handle processor_
         return AMDSMI_STATUS_INVAL;
 
     status = static_cast<amdsmi_status_t>(esmi_hsmp_proto_ver_get(&hsmp_proto_ver));
-    *proto_ver = hsmp_proto_ver;
-
     if (status != AMDSMI_STATUS_SUCCESS)
-        return status;
+        return amdsmi_errno_to_esmi_status(status);
+
+    *proto_ver = hsmp_proto_ver;
 
     return AMDSMI_STATUS_SUCCESS;
 }
@@ -2739,13 +2748,12 @@ amdsmi_status_t amdsmi_get_cpu_smu_fw_version(amdsmi_processor_handle processor_
         return AMDSMI_STATUS_INVAL;
 
     status = static_cast<amdsmi_status_t>(esmi_smu_fw_version_get(&smu_fw));
+    if (status != AMDSMI_STATUS_SUCCESS)
+        return amdsmi_errno_to_esmi_status(status);
 
     amdsmi_smu_fw->major = smu_fw.major;
     amdsmi_smu_fw->minor = smu_fw.minor;
     amdsmi_smu_fw->debug = smu_fw.debug;
-
-    if (status != AMDSMI_STATUS_SUCCESS)
-        return status;
 
     return AMDSMI_STATUS_SUCCESS;
 }
@@ -2769,10 +2777,10 @@ amdsmi_status_t amdsmi_get_cpu_core_energy(amdsmi_processor_handle processor_han
     core_ind = (uint8_t)std::stoi(proc_id, NULL, 0);
 
     status = static_cast<amdsmi_status_t>(esmi_core_energy_get(core_ind, &core_input));
-    *penergy = core_input;
-
     if (status != AMDSMI_STATUS_SUCCESS)
-        return status;
+        return amdsmi_errno_to_esmi_status(status);
+
+    *penergy = core_input;
 
     return AMDSMI_STATUS_SUCCESS;
 
@@ -2797,10 +2805,10 @@ amdsmi_status_t amdsmi_get_cpu_socket_energy(amdsmi_processor_handle processor_h
     sock_ind = (uint8_t)std::stoi(proc_id, NULL, 0);
 
     status = static_cast<amdsmi_status_t>(esmi_socket_energy_get(sock_ind, &pkg_input));
-    *penergy = pkg_input;
-
     if (status != AMDSMI_STATUS_SUCCESS)
-        return status;
+        return amdsmi_errno_to_esmi_status(status);
+
+    *penergy = pkg_input;
 
     return AMDSMI_STATUS_SUCCESS;
 }
@@ -2824,10 +2832,10 @@ amdsmi_status_t amdsmi_get_cpu_prochot_status(amdsmi_processor_handle processor_
     sock_ind = (uint8_t)std::stoi(proc_id, NULL, 0);
 
     status = static_cast<amdsmi_status_t>(esmi_prochot_status_get(sock_ind, &phot));
-    *prochot = phot;
-
     if (status != AMDSMI_STATUS_SUCCESS)
-        return status;
+        return amdsmi_errno_to_esmi_status(status);
+
+    *prochot = phot;
 
     return AMDSMI_STATUS_SUCCESS;
 }
@@ -2851,11 +2859,11 @@ amdsmi_status_t amdsmi_get_cpu_fclk_mclk(amdsmi_processor_handle processor_handl
     sock_ind = (uint8_t)std::stoi(proc_id, NULL, 0);
 
     status = static_cast<amdsmi_status_t>(esmi_fclk_mclk_get(sock_ind, &f_clk, &m_clk));
+    if (status != AMDSMI_STATUS_SUCCESS)
+        return amdsmi_errno_to_esmi_status(status);
+
     *fclk = f_clk;
     *mclk = m_clk;
-
-    if (status != AMDSMI_STATUS_SUCCESS)
-        return status;
 
     return AMDSMI_STATUS_SUCCESS;
 }
@@ -2879,10 +2887,10 @@ amdsmi_status_t amdsmi_get_cpu_cclk_limit(amdsmi_processor_handle processor_hand
     sock_ind = (uint8_t)std::stoi(proc_id, NULL, 0);
 
     status = static_cast<amdsmi_status_t>(esmi_cclk_limit_get(sock_ind, &c_clk));
-    *cclk = c_clk;
-
     if (status != AMDSMI_STATUS_SUCCESS)
-        return status;
+        return amdsmi_errno_to_esmi_status(status);
+
+    *cclk = c_clk;
 
     return AMDSMI_STATUS_SUCCESS;
 }
@@ -2906,10 +2914,10 @@ amdsmi_status_t amdsmi_get_cpu_socket_current_active_freq_limit(amdsmi_processor
     sock_ind = (uint8_t)std::stoi(proc_id, NULL, 0);
 
     status = static_cast<amdsmi_status_t>(esmi_socket_current_active_freq_limit_get(sock_ind, &limit, src_type));
-    *freq = limit;
-
     if (status != AMDSMI_STATUS_SUCCESS)
-        return status;
+        return amdsmi_errno_to_esmi_status(status);
+
+    *freq = limit;
 
     return AMDSMI_STATUS_SUCCESS;
 }
@@ -2934,11 +2942,11 @@ amdsmi_status_t amdsmi_get_cpu_socket_freq_range(amdsmi_processor_handle process
     sock_ind = (uint8_t)std::stoi(proc_id, NULL, 0);
 
     status = static_cast<amdsmi_status_t>(esmi_socket_freq_range_get(sock_ind, &f_max, &f_min));
+    if (status != AMDSMI_STATUS_SUCCESS)
+        return amdsmi_errno_to_esmi_status(status);
+
     *fmax = f_max;
     *fmin = f_min;
-
-    if (status != AMDSMI_STATUS_SUCCESS)
-        return status;
 
     return AMDSMI_STATUS_SUCCESS;
 }
@@ -2962,10 +2970,10 @@ amdsmi_status_t amdsmi_get_cpu_core_current_freq_limit(amdsmi_processor_handle p
     core_ind = (uint8_t)std::stoi(proc_id, NULL, 0);
 
     status = static_cast<amdsmi_status_t>(esmi_current_freq_limit_core_get(core_ind, &c_clk));
-    *freq = c_clk;
-
     if (status != AMDSMI_STATUS_SUCCESS)
-        return status;
+        return amdsmi_errno_to_esmi_status(status);
+
+    *freq = c_clk;
 
     return AMDSMI_STATUS_SUCCESS;
 
@@ -2990,10 +2998,10 @@ amdsmi_status_t amdsmi_get_cpu_socket_power(amdsmi_processor_handle processor_ha
     sock_ind = (uint8_t)std::stoi(proc_id, NULL, 0);
 
     status = static_cast<amdsmi_status_t>(esmi_socket_power_get(sock_ind, &avg_power));
-    *ppower = avg_power;
-
     if (status != AMDSMI_STATUS_SUCCESS)
-        return status;
+        return amdsmi_errno_to_esmi_status(status);
+
+    *ppower = avg_power;
 
     return AMDSMI_STATUS_SUCCESS;
 }
@@ -3017,10 +3025,10 @@ amdsmi_status_t amdsmi_get_cpu_socket_power_cap(amdsmi_processor_handle processo
     sock_ind = (uint8_t)std::stoi(proc_id, NULL, 0);
 
     status = static_cast<amdsmi_status_t>(esmi_socket_power_cap_get(sock_ind, &p_cap));
-    *pcap = p_cap;
-
     if (status != AMDSMI_STATUS_SUCCESS)
-        return status;
+        return amdsmi_errno_to_esmi_status(status);
+
+    *pcap = p_cap;
 
     return AMDSMI_STATUS_SUCCESS;
 }
@@ -3044,10 +3052,10 @@ amdsmi_status_t amdsmi_get_cpu_socket_power_cap_max(amdsmi_processor_handle proc
     sock_ind = (uint8_t)std::stoi(proc_id, NULL, 0);
 
     status = static_cast<amdsmi_status_t>(esmi_socket_power_cap_max_get(sock_ind, &p_max));
-    *pmax = p_max;
-
     if (status != AMDSMI_STATUS_SUCCESS)
-        return status;
+        return amdsmi_errno_to_esmi_status(status);
+
+    *pmax = p_max;
 
     return AMDSMI_STATUS_SUCCESS;
 }
@@ -3071,10 +3079,10 @@ amdsmi_status_t amdsmi_get_cpu_pwr_svi_telemetry_all_rails(amdsmi_processor_hand
     sock_ind = (uint8_t)std::stoi(proc_id, NULL, 0);
 
     status = static_cast<amdsmi_status_t>(esmi_pwr_svi_telemetry_all_rails_get(sock_ind, &pow));
-    *power = pow;
-
     if (status != AMDSMI_STATUS_SUCCESS)
-        return status;
+        return amdsmi_errno_to_esmi_status(status);
+
+    *power = pow;
 
     return AMDSMI_STATUS_SUCCESS;
 }
@@ -3099,7 +3107,7 @@ amdsmi_status_t amdsmi_set_cpu_socket_power_cap(amdsmi_processor_handle processo
     status = static_cast<amdsmi_status_t>(esmi_socket_power_cap_set(sock_ind, pcap));
 
     if (status != AMDSMI_STATUS_SUCCESS)
-        return status;
+        return amdsmi_errno_to_esmi_status(status);
 
     return AMDSMI_STATUS_SUCCESS;
 }
@@ -3124,7 +3132,7 @@ amdsmi_status_t amdsmi_set_cpu_pwr_efficiency_mode(amdsmi_processor_handle proce
     status = static_cast<amdsmi_status_t>(esmi_pwr_efficiency_mode_set(sock_ind, mode));
 
     if (status != AMDSMI_STATUS_SUCCESS)
-        return status;
+        return amdsmi_errno_to_esmi_status(status);
 
     return AMDSMI_STATUS_SUCCESS;
 }
@@ -3148,10 +3156,10 @@ amdsmi_status_t amdsmi_get_cpu_core_boostlimit(amdsmi_processor_handle processor
     core_ind = (uint8_t)std::stoi(proc_id, NULL, 0);
 
     status = static_cast<amdsmi_status_t>(esmi_core_boostlimit_get(core_ind, &boostlimit));
-    *pboostlimit = boostlimit;
-
     if (status != AMDSMI_STATUS_SUCCESS)
-        return status;
+        return amdsmi_errno_to_esmi_status(status);
+
+    *pboostlimit = boostlimit;
 
     return AMDSMI_STATUS_SUCCESS;
 }
@@ -3175,10 +3183,10 @@ amdsmi_status_t amdsmi_get_cpu_socket_c0_residency(amdsmi_processor_handle proce
     sock_ind = (uint8_t)std::stoi(proc_id, NULL, 0);
 
     status = static_cast<amdsmi_status_t>(esmi_socket_c0_residency_get(sock_ind, &res));
-    *pc0_residency = res;
-
     if (status != AMDSMI_STATUS_SUCCESS)
-        return status;
+        return amdsmi_errno_to_esmi_status(status);
+
+    *pc0_residency = res;
 
     return AMDSMI_STATUS_SUCCESS;
 }
@@ -3201,9 +3209,8 @@ amdsmi_status_t amdsmi_set_cpu_core_boostlimit(amdsmi_processor_handle processor
     core_ind = (uint8_t)std::stoi(proc_id, NULL, 0);
 
     status = static_cast<amdsmi_status_t>(esmi_core_boostlimit_set(core_ind, boostlimit));
-
     if (status != AMDSMI_STATUS_SUCCESS)
-        return status;
+        return amdsmi_errno_to_esmi_status(status);
 
     return AMDSMI_STATUS_SUCCESS;
 }
@@ -3228,7 +3235,7 @@ amdsmi_status_t amdsmi_set_cpu_socket_boostlimit(amdsmi_processor_handle process
     status = static_cast<amdsmi_status_t>(esmi_socket_boostlimit_set(sock_ind, boostlimit));
 
     if (status != AMDSMI_STATUS_SUCCESS)
-        return status;
+        return amdsmi_errno_to_esmi_status(status);
 
     return AMDSMI_STATUS_SUCCESS;
 }
@@ -3246,7 +3253,7 @@ amdsmi_status_t amdsmi_get_cpu_ddr_bw(amdsmi_processor_handle processor_handle,
 
     status = static_cast<amdsmi_status_t>(esmi_ddr_bw_get(&ddr));
     if (status != AMDSMI_STATUS_SUCCESS)
-        return status;
+        return amdsmi_errno_to_esmi_status(status);
 
     ddr_bw->max_bw = ddr.max_bw;
     ddr_bw->utilized_bw = ddr.utilized_bw;
@@ -3275,7 +3282,7 @@ amdsmi_status_t amdsmi_get_cpu_socket_temperature(amdsmi_processor_handle proces
 
     status = static_cast<amdsmi_status_t>(esmi_socket_temperature_get(sock_ind, &tmon));
     if (status != AMDSMI_STATUS_SUCCESS)
-        return status;
+        return amdsmi_errno_to_esmi_status(status);
 
     *ptmon = tmon;
 
@@ -3305,7 +3312,7 @@ amdsmi_status_t amdsmi_get_cpu_dimm_temp_range_and_refresh_rate(
     status = static_cast<amdsmi_status_t>(esmi_dimm_temp_range_and_refresh_rate_get(
                                             sock_ind, dimm_addr, &dimm_rate));
     if (status != AMDSMI_STATUS_SUCCESS)
-        return status;
+        return amdsmi_errno_to_esmi_status(status);
 
     rate->range = dimm_rate.range;
     rate->ref_rate = dimm_rate.ref_rate;
@@ -3334,7 +3341,7 @@ amdsmi_status_t amdsmi_get_cpu_dimm_power_consumption(amdsmi_processor_handle pr
     status = static_cast<amdsmi_status_t>(esmi_dimm_power_consumption_get(sock_ind,
                                                               dimm_addr, &d_power));
     if (status != AMDSMI_STATUS_SUCCESS)
-        return status;
+        return amdsmi_errno_to_esmi_status(status);
 
     dimm_pow->power = d_power.power;
     dimm_pow->update_rate = d_power.update_rate;
@@ -3364,7 +3371,7 @@ amdsmi_status_t amdsmi_get_cpu_dimm_thermal_sensor(amdsmi_processor_handle proce
     status = static_cast<amdsmi_status_t>(esmi_dimm_thermal_sensor_get(sock_ind,
                                                               dimm_addr, &d_sensor));
     if (status != AMDSMI_STATUS_SUCCESS)
-        return status;
+        return amdsmi_errno_to_esmi_status(status);
 
     dimm_temp->temp = d_sensor.temp;
     dimm_temp->update_rate = d_sensor.update_rate;
@@ -3385,7 +3392,7 @@ amdsmi_status_t amdsmi_set_cpu_xgmi_width(amdsmi_processor_handle processor_hand
 
     status = static_cast<amdsmi_status_t>(esmi_xgmi_width_set(min, max));
     if (status != AMDSMI_STATUS_SUCCESS)
-        return status;
+        return amdsmi_errno_to_esmi_status(status);
 
     return AMDSMI_STATUS_SUCCESS;
 }
@@ -3410,7 +3417,7 @@ amdsmi_status_t amdsmi_set_cpu_gmi3_link_width_range(amdsmi_processor_handle pro
     status = static_cast<amdsmi_status_t>(esmi_gmi3_link_width_range_set(sock_ind,
                                                         min_link_width, max_link_width));
     if (status != AMDSMI_STATUS_SUCCESS)
-        return status;
+        return amdsmi_errno_to_esmi_status(status);
 
     return AMDSMI_STATUS_SUCCESS;
 }
@@ -3433,7 +3440,7 @@ amdsmi_status_t amdsmi_cpu_apb_enable(amdsmi_processor_handle processor_handle)
 
     status = static_cast<amdsmi_status_t>(esmi_apb_enable(sock_ind));
     if (status != AMDSMI_STATUS_SUCCESS)
-        return status;
+        return amdsmi_errno_to_esmi_status(status);
 
     return AMDSMI_STATUS_SUCCESS;
 }
@@ -3457,7 +3464,7 @@ amdsmi_status_t amdsmi_cpu_apb_disable(amdsmi_processor_handle processor_handle,
 
     status = static_cast<amdsmi_status_t>(esmi_apb_disable(sock_ind, pstate));
     if (status != AMDSMI_STATUS_SUCCESS)
-        return status;
+        return amdsmi_errno_to_esmi_status(status);
 
     return AMDSMI_STATUS_SUCCESS;
 }
@@ -3481,7 +3488,7 @@ amdsmi_status_t amdsmi_set_cpu_socket_lclk_dpm_level(amdsmi_processor_handle pro
 
     status = static_cast<amdsmi_status_t>(esmi_socket_lclk_dpm_level_set(sock_ind, nbio_id, min, max));
     if (status != AMDSMI_STATUS_SUCCESS)
-        return status;
+        return amdsmi_errno_to_esmi_status(status);
 
     return AMDSMI_STATUS_SUCCESS;
 }
@@ -3507,7 +3514,7 @@ amdsmi_status_t amdsmi_get_cpu_socket_lclk_dpm_level(amdsmi_processor_handle pro
     status = static_cast<amdsmi_status_t>(esmi_socket_lclk_dpm_level_get(sock_ind,
                                                                         nbio_id, &nb));
     if (status != AMDSMI_STATUS_SUCCESS)
-        return status;
+        return amdsmi_errno_to_esmi_status(status);
 
     nbio->min_dpm_level = nb.min_dpm_level;
     nbio->max_dpm_level = nb.max_dpm_level;
@@ -3535,7 +3542,7 @@ amdsmi_status_t amdsmi_set_cpu_pcie_link_rate(amdsmi_processor_handle processor_
     status = static_cast<amdsmi_status_t>(esmi_pcie_link_rate_set(sock_ind,
                                                                         rate_ctrl, prev_mode));
     if (status != AMDSMI_STATUS_SUCCESS)
-        return status;
+        return amdsmi_errno_to_esmi_status(status);
 
     return AMDSMI_STATUS_SUCCESS;
 }
@@ -3560,7 +3567,7 @@ amdsmi_status_t amdsmi_set_cpu_df_pstate_range(amdsmi_processor_handle processor
     status = static_cast<amdsmi_status_t>(esmi_df_pstate_range_set(sock_ind,
                                                                         max_pstate, min_pstate));
     if (status != AMDSMI_STATUS_SUCCESS)
-        return status;
+        return amdsmi_errno_to_esmi_status(status);
 
     return AMDSMI_STATUS_SUCCESS;
 }
@@ -3590,7 +3597,7 @@ amdsmi_status_t amdsmi_get_cpu_current_io_bandwidth(amdsmi_processor_handle proc
     status = static_cast<amdsmi_status_t>(esmi_current_io_bandwidth_get(sock_ind,
                                                         io_link, &bw));
     if (status != AMDSMI_STATUS_SUCCESS)
-        return status;
+        return amdsmi_errno_to_esmi_status(status);
 
     *io_bw = bw;
 
@@ -3614,7 +3621,7 @@ amdsmi_status_t amdsmi_get_cpu_current_xgmi_bw(amdsmi_processor_handle processor
 
     status = static_cast<amdsmi_status_t>(esmi_current_xgmi_bw_get(io_link, &bw));
     if (status != AMDSMI_STATUS_SUCCESS)
-        return status;
+        return amdsmi_errno_to_esmi_status(status);
 
     *xgmi_bw = bw;
 
@@ -3633,16 +3640,16 @@ amdsmi_status_t amdsmi_get_metrics_table_version(amdsmi_processor_handle process
         return AMDSMI_STATUS_INVAL;
 
     status = static_cast<amdsmi_status_t>(esmi_metrics_table_version_get(&metrics_tbl_ver));
-    *metrics_version = metrics_tbl_ver;
-
     if (status != AMDSMI_STATUS_SUCCESS)
-        return status;
+        return amdsmi_errno_to_esmi_status(status);
+
+    *metrics_version = metrics_tbl_ver;
 
     return AMDSMI_STATUS_SUCCESS;
 }
 
 amdsmi_status_t amdsmi_get_metrics_table(amdsmi_processor_handle processor_handle,
-                struct hsmp_metric_table *metrics_table)
+                amdsmi_hsmp_metric_table_t *metrics_table)
 {
     amdsmi_status_t status;
     struct hsmp_metric_table metrics_tbl;
@@ -3653,6 +3660,9 @@ amdsmi_status_t amdsmi_get_metrics_table(amdsmi_processor_handle processor_handl
     if (processor_handle == nullptr)
         return AMDSMI_STATUS_INVAL;
 
+    if(sizeof(amdsmi_hsmp_metric_table_t) != sizeof(struct hsmp_metric_table))
+        return AMDSMI_STATUS_UNEXPECTED_SIZE;
+
     amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
     if (r != AMDSMI_STATUS_SUCCESS)
         return r;
@@ -3660,10 +3670,10 @@ amdsmi_status_t amdsmi_get_metrics_table(amdsmi_processor_handle processor_handl
     sock_ind = (uint8_t)std::stoi(proc_id, NULL, 0);
 
     status = static_cast<amdsmi_status_t>(esmi_metrics_table_get(sock_ind, &metrics_tbl));
-    *metrics_table = metrics_tbl;
-
     if (status != AMDSMI_STATUS_SUCCESS)
-        return status;
+        return amdsmi_errno_to_esmi_status(status);
+
+    std::memcpy(metrics_table, &metrics_tbl, sizeof(amdsmi_hsmp_metric_table_t));
 
     return AMDSMI_STATUS_SUCCESS;
 }
@@ -3688,21 +3698,21 @@ amdsmi_status_t amdsmi_first_online_core_on_cpu_socket(amdsmi_processor_handle p
 
     status = static_cast<amdsmi_status_t>(esmi_first_online_core_on_socket(sock_ind, &online_core));
     if (status != AMDSMI_STATUS_SUCCESS)
-        return status;
+        return amdsmi_errno_to_esmi_status(status);
 
     *pcore_ind = online_core;
 
     return AMDSMI_STATUS_SUCCESS;
 }
 
-const char** amdsmi_get_esmi_err_msg(amdsmi_status_t status, const char **status_string)
+amdsmi_status_t amdsmi_get_esmi_err_msg(amdsmi_status_t status, const char **status_string)
 {
     for (auto& iter : amd::smi::esmi_status_map) {
         if (iter.first == status) {
             *status_string = esmi_get_err_msg(static_cast<esmi_status_t>(iter.first));
-            break;
+            return iter.second;
         }
     }
-    return status_string;
+    return AMDSMI_STATUS_SUCCESS;
 }
 #endif

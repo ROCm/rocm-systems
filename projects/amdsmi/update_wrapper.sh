@@ -27,7 +27,7 @@ if ! does_image_exist; then
     # docker pull dmitriigalantsev/amdsmi_wrapper_updater
     echo "No docker image found! Generating one"
     # set to 0 because it's compatible with more systems
-    DOCKER_BUILDKIT="${DOCKER_BUILDKIT:0}" docker build "$DIR/py-interface" -t "$DOCKER_NAME":latest
+    DOCKER_BUILDKIT="${DOCKER_BUILDKIT:=0}" docker build "$DIR/py-interface" -t "$DOCKER_NAME":latest
 fi
 
 ENABLE_ESMI_LIB=""

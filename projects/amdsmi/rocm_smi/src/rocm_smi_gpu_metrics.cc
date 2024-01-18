@@ -1413,7 +1413,7 @@ AMGpuMetricsPublicLatestTupl_t GpuMetricsBase_v13_t::copy_internal_to_external_m
     metrics_public_init.average_mm_activity = m_gpu_metrics_tbl.m_average_mm_activity;
 
     // Power/Energy
-    // metrics_public_init.average_socket_power = m_gpu_metrics_tbl.m_average_socket_power;  // 1.3 and 1.4 have the same value
+    metrics_public_init.average_socket_power = m_gpu_metrics_tbl.m_average_socket_power;  // 1.3 and 1.4 have the same value
     metrics_public_init.energy_accumulator = m_gpu_metrics_tbl.m_energy_accumulator;
 
     // Driver attached timestamp (in ns)

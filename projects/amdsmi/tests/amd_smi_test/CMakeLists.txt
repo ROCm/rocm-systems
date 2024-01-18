@@ -50,7 +50,7 @@ set(TEST "amdsmitst")
 aux_source_directory(${CMAKE_CURRENT_SOURCE_DIR} tstSources)
 
 # Header file include path
-include_directories(${TEST} ${CMAKE_CURRENT_SOURCE_DIR}/..)
+include_directories(${TEST} ${CMAKE_CURRENT_SOURCE_DIR}/.. ${ROCM_INC_DIR}/..)
 
 # Build rules
 add_executable(${TEST} ${tstSources} ${functionalSources})

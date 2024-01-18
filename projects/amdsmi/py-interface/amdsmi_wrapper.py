@@ -906,7 +906,6 @@ amdsmi_clk_info_t = struct_amdsmi_clk_info_t
 class struct_amdsmi_engine_usage_t(Structure):
     pass
 
-
 struct_amdsmi_engine_usage_t._pack_ = 1 # source:False
 struct_amdsmi_engine_usage_t._fields_ = [
     ('gfx_activity', ctypes.c_uint32),
@@ -920,6 +919,16 @@ amdsmi_process_handle_t = ctypes.c_uint32
 class struct_amdsmi_proc_info_t(Structure):
     pass
 
+class struct_engine_usage_(Structure):
+    pass
+
+struct_engine_usage_._pack_ = 1 # source:False
+struct_engine_usage_._fields_ = [
+    ('gfx', ctypes.c_uint64),
+    ('enc', ctypes.c_uint64),
+    ('reserved', ctypes.c_uint32 * 12),
+]
+
 class struct_memory_usage_(Structure):
     pass
 
@@ -929,16 +938,6 @@ struct_memory_usage_._fields_ = [
     ('cpu_mem', ctypes.c_uint64),
     ('vram_mem', ctypes.c_uint64),
     ('reserved', ctypes.c_uint32 * 10),
-]
-
-class struct_engine_usage_(Structure):
-    pass
-
-struct_engine_usage_._pack_ = 1 # source:False
-struct_engine_usage_._fields_ = [
-    ('gfx', ctypes.c_uint64),
-    ('enc', ctypes.c_uint64),
-    ('reserved', ctypes.c_uint32 * 12),
 ]
 
 struct_amdsmi_proc_info_t._pack_ = 1 # source:False
@@ -1527,11 +1526,12 @@ struct_amdsmi_gpu_metrics_t._fields_ = [
     ('current_socclks', ctypes.c_uint16 * 4),
     ('current_vclk0s', ctypes.c_uint16 * 4),
     ('current_dclk0s', ctypes.c_uint16 * 4),
+    ('jpeg_activity', ctypes.c_uint16 * 32),
     ('mem_bandwidth_acc', ctypes.c_uint64),
     ('mem_max_bandwidth', ctypes.c_uint32),
     ('pcie_nak_sent_count_acc', ctypes.c_uint32),
     ('pcie_nak_rcvd_count_acc', ctypes.c_uint32),
-    ('jpeg_activities', ctypes.c_uint16 * 32),
+    ('PADDING_4', ctypes.c_ubyte * 4),
 ]
 
 amdsmi_gpu_metrics_t = struct_amdsmi_gpu_metrics_t
@@ -1717,6 +1717,72 @@ struct_amdsmi_dpm_level_t._fields_ = [
 ]
 
 amdsmi_dpm_level_t = struct_amdsmi_dpm_level_t
+class struct_amdsmi_hsmp_metric_table_t(Structure):
+    pass
+
+struct_amdsmi_hsmp_metric_table_t._pack_ = 1 # source:True
+struct_amdsmi_hsmp_metric_table_t._fields_ = [
+    ('accumulation_counter', ctypes.c_uint32),
+    ('max_socket_temperature', ctypes.c_uint32),
+    ('max_vr_temperature', ctypes.c_uint32),
+    ('max_hbm_temperature', ctypes.c_uint32),
+    ('max_socket_temperature_acc', ctypes.c_uint64),
+    ('max_vr_temperature_acc', ctypes.c_uint64),
+    ('max_hbm_temperature_acc', ctypes.c_uint64),
+    ('socket_power_limit', ctypes.c_uint32),
+    ('max_socket_power_limit', ctypes.c_uint32),
+    ('socket_power', ctypes.c_uint32),
+    ('timestamp', ctypes.c_uint64),
+    ('socket_energy_acc', ctypes.c_uint64),
+    ('ccd_energy_acc', ctypes.c_uint64),
+    ('xcd_energy_acc', ctypes.c_uint64),
+    ('aid_energy_acc', ctypes.c_uint64),
+    ('hbm_energy_acc', ctypes.c_uint64),
+    ('cclk_frequency_limit', ctypes.c_uint32),
+    ('gfxclk_frequency_limit', ctypes.c_uint32),
+    ('fclk_frequency', ctypes.c_uint32),
+    ('uclk_frequency', ctypes.c_uint32),
+    ('socclk_frequency', ctypes.c_uint32 * 4),
+    ('vclk_frequency', ctypes.c_uint32 * 4),
+    ('dclk_frequency', ctypes.c_uint32 * 4),
+    ('lclk_frequency', ctypes.c_uint32 * 4),
+    ('gfxclk_frequency_acc', ctypes.c_uint64 * 8),
+    ('cclk_frequency_acc', ctypes.c_uint64 * 96),
+    ('max_cclk_frequency', ctypes.c_uint32),
+    ('min_cclk_frequency', ctypes.c_uint32),
+    ('max_gfxclk_frequency', ctypes.c_uint32),
+    ('min_gfxclk_frequency', ctypes.c_uint32),
+    ('fclk_frequency_table', ctypes.c_uint32 * 4),
+    ('uclk_frequency_table', ctypes.c_uint32 * 4),
+    ('socclk_frequency_table', ctypes.c_uint32 * 4),
+    ('vclk_frequency_table', ctypes.c_uint32 * 4),
+    ('dclk_frequency_table', ctypes.c_uint32 * 4),
+    ('lclk_frequency_table', ctypes.c_uint32 * 4),
+    ('max_lclk_dpm_range', ctypes.c_uint32),
+    ('min_lclk_dpm_range', ctypes.c_uint32),
+    ('xgmi_width', ctypes.c_uint32),
+    ('xgmi_bitrate', ctypes.c_uint32),
+    ('xgmi_read_bandwidth_acc', ctypes.c_uint64 * 8),
+    ('xgmi_write_bandwidth_acc', ctypes.c_uint64 * 8),
+    ('socket_c0_residency', ctypes.c_uint32),
+    ('socket_gfx_busy', ctypes.c_uint32),
+    ('dram_bandwidth_utilization', ctypes.c_uint32),
+    ('socket_c0_residency_acc', ctypes.c_uint64),
+    ('socket_gfx_busy_acc', ctypes.c_uint64),
+    ('dram_bandwidth_acc', ctypes.c_uint64),
+    ('max_dram_bandwidth', ctypes.c_uint32),
+    ('dram_bandwidth_utilization_acc', ctypes.c_uint64),
+    ('pcie_bandwidth_acc', ctypes.c_uint64 * 4),
+    ('prochot_residency_acc', ctypes.c_uint32),
+    ('ppt_residency_acc', ctypes.c_uint32),
+    ('socket_thm_residency_acc', ctypes.c_uint32),
+    ('vr_thm_residency_acc', ctypes.c_uint32),
+    ('hbm_thm_residency_acc', ctypes.c_uint32),
+    ('spare', ctypes.c_uint32),
+    ('gfxclk_frequency', ctypes.c_uint32 * 8),
+]
+
+amdsmi_hsmp_metric_table_t = struct_amdsmi_hsmp_metric_table_t
 uint64_t = ctypes.c_uint64
 amdsmi_init = _libraries['libamd_smi.so'].amdsmi_init
 amdsmi_init.restype = amdsmi_status_t
@@ -2326,17 +2392,14 @@ amdsmi_get_cpu_current_xgmi_bw.argtypes = [amdsmi_processor_handle, amdsmi_link_
 amdsmi_get_metrics_table_version = _libraries['libamd_smi.so'].amdsmi_get_metrics_table_version
 amdsmi_get_metrics_table_version.restype = amdsmi_status_t
 amdsmi_get_metrics_table_version.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_uint32)]
-class struct_hsmp_metric_table(Structure):
-    pass
-
 amdsmi_get_metrics_table = _libraries['libamd_smi.so'].amdsmi_get_metrics_table
 amdsmi_get_metrics_table.restype = amdsmi_status_t
-amdsmi_get_metrics_table.argtypes = [amdsmi_processor_handle, ctypes.POINTER(struct_hsmp_metric_table)]
+amdsmi_get_metrics_table.argtypes = [amdsmi_processor_handle, ctypes.POINTER(struct_amdsmi_hsmp_metric_table_t)]
 amdsmi_first_online_core_on_cpu_socket = _libraries['libamd_smi.so'].amdsmi_first_online_core_on_cpu_socket
 amdsmi_first_online_core_on_cpu_socket.restype = amdsmi_status_t
 amdsmi_first_online_core_on_cpu_socket.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_uint32)]
 amdsmi_get_esmi_err_msg = _libraries['libamd_smi.so'].amdsmi_get_esmi_err_msg
-amdsmi_get_esmi_err_msg.restype = ctypes.POINTER(ctypes.POINTER(ctypes.c_char))
+amdsmi_get_esmi_err_msg.restype = amdsmi_status_t
 amdsmi_get_esmi_err_msg.argtypes = [amdsmi_status_t, ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
 __all__ = \
     ['AGG_BW0', 'AMDSMI_ARG_PTR_NULL', 'AMDSMI_AVERAGE_POWER',
@@ -2646,9 +2709,10 @@ __all__ = \
     'amdsmi_gpu_counter_group_supported', 'amdsmi_gpu_create_counter',
     'amdsmi_gpu_destroy_counter', 'amdsmi_gpu_metrics_t',
     'amdsmi_gpu_read_counter', 'amdsmi_gpu_xgmi_error_status',
-    'amdsmi_init', 'amdsmi_init_flags_t',
-    'amdsmi_init_gpu_event_notification', 'amdsmi_io_bw_encoding_t',
-    'amdsmi_io_link_type_t', 'amdsmi_is_P2P_accessible',
+    'amdsmi_hsmp_metric_table_t', 'amdsmi_init',
+    'amdsmi_init_flags_t', 'amdsmi_init_gpu_event_notification',
+    'amdsmi_io_bw_encoding_t', 'amdsmi_io_link_type_t',
+    'amdsmi_is_P2P_accessible',
     'amdsmi_is_gpu_power_management_enabled',
     'amdsmi_link_id_bw_type_t', 'amdsmi_memory_page_status_t',
     'amdsmi_memory_partition_type_t', 'amdsmi_memory_type_t',
@@ -2708,6 +2772,7 @@ __all__ = \
     'struct_amdsmi_freq_volt_region_t', 'struct_amdsmi_frequencies_t',
     'struct_amdsmi_frequency_range_t', 'struct_amdsmi_fw_info_t',
     'struct_amdsmi_gpu_cache_info_t', 'struct_amdsmi_gpu_metrics_t',
+    'struct_amdsmi_hsmp_metric_table_t',
     'struct_amdsmi_link_id_bw_type_t', 'struct_amdsmi_name_value_t',
     'struct_amdsmi_od_vddc_point_t', 'struct_amdsmi_od_volt_curve_t',
     'struct_amdsmi_od_volt_freq_data_t',
@@ -2724,5 +2789,5 @@ __all__ = \
     'struct_amdsmi_vram_info_t', 'struct_amdsmi_vram_usage_t',
     'struct_amdsmi_xgmi_info_t', 'struct_cache_',
     'struct_engine_usage_', 'struct_fields_', 'struct_fw_info_list_',
-    'struct_hsmp_metric_table', 'struct_memory_usage_', 'uint32_t',
-    'uint64_t', 'uint8_t', 'union_amdsmi_bdf_t']
+    'struct_memory_usage_', 'uint32_t', 'uint64_t', 'uint8_t',
+    'union_amdsmi_bdf_t']

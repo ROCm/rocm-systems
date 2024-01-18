@@ -27,6 +27,8 @@ from collections.abc import Iterable
 
 from . import amdsmi_wrapper
 from .amdsmi_exception import *
+import sys
+import math
 
 MAX_NUM_PROCESSES = 1024
 
@@ -741,7 +743,7 @@ def amdsmi_get_cpu_core_energy(
         )
     )
 
-    return f"{penergy.value} J"
+    return f"{float(penergy.value * pow(10, -6))} J"
 
 def amdsmi_get_cpu_socket_energy(
     processor_handle: amdsmi_wrapper.amdsmi_processor_handle
@@ -758,7 +760,7 @@ def amdsmi_get_cpu_socket_energy(
         )
     )
 
-    return f"{penergy.value} J"
+    return f"{float(penergy.value * pow(10, -6))} J"
 
 def amdsmi_get_cpu_prochot_status(
     processor_handle: amdsmi_wrapper.amdsmi_processor_handle
@@ -817,7 +819,7 @@ def amdsmi_get_cpu_cclk_limit(
 
 def amdsmi_get_cpu_socket_current_active_freq_limit(
     processor_handle: amdsmi_wrapper.amdsmi_processor_handle
-) -> int:
+):
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(
             processor_handle, amdsmi_wrapper.amdsmi_processor_handle
@@ -825,13 +827,17 @@ def amdsmi_get_cpu_socket_current_active_freq_limit(
 
     freq = ctypes.c_uint16()
     src_type = ctypes.pointer(ctypes.pointer(ctypes.c_char()))
+
     _check_res(
         amdsmi_wrapper.amdsmi_get_cpu_socket_current_active_freq_limit(
             processor_handle, ctypes.byref(freq), src_type
         )
     )
 
-    return f"{freq.value} MHz"
+    return {
+            "freq": f"{freq.value} MHz",
+            "freq_src": f"{amdsmi_wrapper.string_cast(src_type.contents)}"
+    }
 
 def amdsmi_get_cpu_socket_freq_range(
     processor_handle: amdsmi_wrapper.amdsmi_processor_handle
@@ -1082,9 +1088,12 @@ def amdsmi_get_cpu_dimm_temp_range_and_refresh_rate(
     if not isinstance(dimm_addr, int):
         raise AmdSmiParameterException(dimm_addr, int)
 
+    dimm_addr = ctypes.c_uint8(dimm_addr)
     dimm = amdsmi_wrapper.amdsmi_temp_range_refresh_rate_t()
 
-    _check_res(amdsmi_wrapper.amdsmi_get_cpu_dimm_temp_range_and_refresh_rate(processor_handle, dimm))
+    _check_res(amdsmi_wrapper.amdsmi_get_cpu_dimm_temp_range_and_refresh_rate(processor_handle,
+                                                                                dimm_addr,
+                                                                                ctypes.byref(dimm)))
 
     return {
         "dimm_temperature_range": dimm.range,
@@ -1101,9 +1110,12 @@ def amdsmi_get_cpu_dimm_power_consumption(
     if not isinstance(dimm_addr, int):
         raise AmdSmiParameterException(dimm_addr, int)
 
+    dimm_addr = ctypes.c_uint8(dimm_addr)
     dimm = amdsmi_wrapper.amdsmi_dimm_power_t()
 
-    _check_res(amdsmi_wrapper.amdsmi_get_cpu_dimm_power_consumption(processor_handle, dimm))
+    _check_res(amdsmi_wrapper.amdsmi_get_cpu_dimm_power_consumption(processor_handle,
+                                                                    dimm_addr,
+                                                                    ctypes.byref(dimm)))
 
     return {
         "dimm_power_consumed": f"{dimm.power} mW",
@@ -1121,9 +1133,12 @@ def amdsmi_get_cpu_dimm_thermal_sensor(
     if not isinstance(dimm_addr, int):
         raise AmdSmiParameterException(dimm_addr, int)
 
+    dimm_addr = ctypes.c_uint8(dimm_addr)
     dimm_thermal = amdsmi_wrapper.amdsmi_dimm_thermal_t()
 
-    _check_res(amdsmi_wrapper.amdsmi_get_cpu_dimm_thermal_sensor(processor_handle, dimm_thermal))
+    _check_res(amdsmi_wrapper.amdsmi_get_cpu_dimm_thermal_sensor(processor_handle,
+                                                                    dimm_addr,
+                                                                    ctypes.byref(dimm_thermal)))
 
     return {
         "dimm_thermal_sensor_value": dimm_thermal.sensor,
@@ -1244,8 +1259,8 @@ def amdsmi_get_cpu_socket_lclk_dpm_level(
     _check_res(amdsmi_wrapper.amdsmi_get_cpu_socket_lclk_dpm_level(processor_handle, nbio_id, dpm_level))
 
     return {
-        "nbio_max_dpm_level": nbio.max_dpm_level,
-        "nbio_min_dpm_level": nbio.min_dpm_level
+        "nbio_max_dpm_level": dpm_level.max_dpm_level,
+        "nbio_min_dpm_level": dpm_level.min_dpm_level
     }
 
 def amdsmi_set_cpu_pcie_link_rate(
@@ -1348,6 +1363,33 @@ def amdsmi_get_metrics_table_version(
 
     return metric_tbl_version.value
 
+
+NO_OF_32BITS = (sys.getsizeof(ctypes.c_uint32) * 8)
+NO_OF_64BITS = (sys.getsizeof(ctypes.c_uint64) * 8)
+KILO = math.pow(10, 3)
+
+# Get 2's complement of 32 bit unsigned integer
+def check_msb_32(num):
+    msb = 1 << (NO_OF_32BITS - 1)
+
+    '''If msb = 1 , then take 2's complement of the number'''
+    if num & msb:
+        num = ~num + 1
+        return num
+    else:
+       return num
+
+# Get 2's complement of 64 bit unsigned integer
+def check_msb_64(num):
+    msb = 1 << (NO_OF_64BITS - 1)
+
+    '''If msb = 1 , then take 2's complement of the number'''
+    if num & msb:
+        num = ~num + 1
+        return num
+    else:
+        return num
+
 def amdsmi_get_metrics_table(
     processor_handle: amdsmi_wrapper.amdsmi_processor_handle
 ):
@@ -1356,63 +1398,72 @@ def amdsmi_get_metrics_table(
             processor_handle, amdsmi_wrapper.amdsmi_processor_handle
         )
 
-    mtbl = amdsmi_wrapper.struct_hsmp_metric_table()
+    mtbl = amdsmi_wrapper.amdsmi_hsmp_metric_table_t()
 
-    _check_res(amdsmi_wrapper.amdsmi_get_metrics_table(processor_handle, mtbl))
+    '''Encodings for the metric table defined for hsmp'''
+    fraction_q10 = 1 / math.pow(2, 10)
+    fraction_uq10 = fraction_q10
+    fraction_uq16 = 1 / math.pow(2, 16)
+
+    _check_res(
+            amdsmi_wrapper.amdsmi_get_metrics_table(
+                   processor_handle, mtbl
+            )
+    )
 
     return {
         "mtbl_accumulation_counter": mtbl.accumulation_counter,
-        "mtbl_max_socket_temperature": mtbl.max_socket_temperature,
-        "mtbl_max_vr_temperature": mtbl.max_vr_temperature,
-        "mtbl_max_hbm_temperature": mtbl.max_hbm_temperature,
-        "mtbl_max_socket_temperature_acc": mtbl.max_socket_temperature_acc,
-        "mtbl_max_vr_temperature_acc": mtbl.max_vr_temperature_acc,
-        "mtbl_max_hbm_temperature_acc": mtbl.max_hbm_temperature_acc,
-        "mtbl_socket_power_limit": mtbl.socket_power_limit,
-        "mtbl_max_socket_power_limit": mtbl.max_socket_power_limit,
-        "mtbl_socket_power": mtbl.socket_power,
-        "mtbl_timestamp": mtbl.timestamp,
-        "mtbl_socket_energy_acc": mtbl.socket_energy_acc,
-        "mtbl_ccd_energy_acc": mtbl.ccd_energy_acc,
-        "mtbl_xcd_energy_acc": mtbl.xcd_energy_acc,
-        "mtbl_aid_energy_acc": mtbl.aid_energy_acc,
-        "mtbl_hbm_energy_acc": mtbl.hbm_energy_acc,
-        "mtbl_cclk_frequency_limit": mtbl.cclk_frequency_limit,
-        "mtbl_gfxclk_frequency_limit": mtbl.gfxclk_frequency_limit,
-        "mtbl_fclk_frequency": mtbl.fclk_frequency,
-        "mtbl_uclk_frequency": mtbl.uclk_frequency,
-        "mtbl_socclk_frequency": mtbl.socclk_frequency,
-        "mtbl_vclk_frequency": mtbl.vclk_frequency,
-        "mtbl_dclk_frequency": mtbl.dclk_frequency,
-        "mtbl_lclk_frequency": mtbl.lclk_frequency,
-        "mtbl_fclk_frequency_table": mtbl.fclk_frequency_table,
-        "mtbl_uclk_frequency_table": mtbl.uclk_frequency_table,
-        "mtbl_socclk_frequency_table": mtbl.socclk_frequency_table,
-        "mtbl_vclk_frequency_table": mtbl.vclk_frequency_table,
-        "mtbl_dclk_frequency_table": mtbl.dclk_frequency_table,
-        "mtbl_lclk_frequency_table": mtbl.lclk_frequency_table,
-        "mtbl_cclk_frequency_acc": mtbl.cclk_frequency_acc,
-        "mtbl_gfxclk_frequency_acc": mtbl.gfxclk_frequency_acc,
-        "mtbl_gfxclk_frequency": mtbl.gfxclk_frequency,
-        "mtbl_max_cclk_frequency": mtbl.max_cclk_frequency,
-        "mtbl_min_cclk_frequency": mtbl.min_cclk_frequency,
-        "mtbl_max_gfxclk_frequency": mtbl.max_gfxclk_frequency,
-        "mtbl_min_gfxclk_frequency": mtbl.min_gfxclk_frequency,
+        "mtbl_max_socket_temperature": f"{round(check_msb_32(mtbl.max_socket_temperature) * fraction_q10 ,3)} °C",
+        "mtbl_max_vr_temperature": f"{round(check_msb_32(mtbl.max_vr_temperature) * fraction_q10 ,3)} °C",
+        "mtbl_max_hbm_temperature": f"{round(check_msb_32(mtbl.max_hbm_temperature) * fraction_q10 ,3)} °C",
+        "mtbl_max_socket_temperature_acc": f"{round(check_msb_64(mtbl.max_socket_temperature_acc) * fraction_q10 ,3)} °C",
+        "mtbl_max_vr_temperature_acc": f"{round(check_msb_64(mtbl.max_vr_temperature_acc) * fraction_q10 ,3)} °C",
+        "mtbl_max_hbm_temperature_acc": f"{round(check_msb_64(mtbl.max_hbm_temperature_acc) * fraction_q10 ,3)} °C",
+        "mtbl_socket_power_limit": f"{round(mtbl.socket_power_limit * fraction_uq10 ,3)} W",
+        "mtbl_max_socket_power_limit": f"{round(mtbl.max_socket_power_limit * fraction_uq10 ,3)} W",
+        "mtbl_socket_power": f"{round(mtbl.socket_power * fraction_uq10 ,3)} W",
+        "mtbl_timestamp_raw": mtbl.timestamp,
+        "mtbl_socket_energy_acc": f"{round((mtbl.socket_energy_acc * fraction_uq16)/KILO ,3)} kJ",
+        "mtbl_ccd_energy_acc": f"{round((mtbl.ccd_energy_acc * fraction_uq16)/KILO ,3)} kJ",
+        "mtbl_xcd_energy_acc": f"{round((mtbl.xcd_energy_acc * fraction_uq16)/KILO ,3)} kJ",
+        "mtbl_aid_energy_acc": f"{round((mtbl.aid_energy_acc * fraction_uq16)/KILO ,3)} kJ",
+        "mtbl_hbm_energy_acc": f"{round((mtbl.hbm_energy_acc * fraction_uq16)/KILO ,3)} kJ",
+        "mtbl_cclk_frequency_limit": f"{round(mtbl.cclk_frequency_limit * fraction_uq10 ,3)} GHz",
+        "mtbl_gfxclk_frequency_limit": f"{round(mtbl.gfxclk_frequency_limit * fraction_uq10 ,3)} MHz",
+        "mtbl_fclk_frequency": f"{round(mtbl.fclk_frequency * fraction_uq10 ,3)} MHz",
+        "mtbl_uclk_frequency": f"{round(mtbl.uclk_frequency * fraction_uq10 ,3)} MHz",
+        "mtbl_socclk_frequency": f"{[round(x*fraction_uq10 ,3) for x in list(mtbl.socclk_frequency)]} MHz",
+        "mtbl_vclk_frequency": f"{[round(x*fraction_uq10 ,3) for x in list(mtbl.vclk_frequency)]} MHz",
+        "mtbl_dclk_frequency": f"{[round(x*fraction_uq10 ,3) for x in list(mtbl.dclk_frequency)]} MHz",
+        "mtbl_lclk_frequency": f"{[round(x*fraction_uq10 ,3) for x in list(mtbl.lclk_frequency)]} MHz",
+        "mtbl_fclk_frequency_table": f"{[round(x*fraction_uq10 ,3) for x in list(mtbl.fclk_frequency_table)]} MHz",
+        "mtbl_uclk_frequency_table": f"{[round(x*fraction_uq10 ,3) for x in list(mtbl.uclk_frequency_table)]} MHz",
+        "mtbl_socclk_frequency_table": f"{[round(x*fraction_uq10 ,3) for x in list(mtbl.socclk_frequency_table)]} MHz",
+        "mtbl_vclk_frequency_table": f"{[round(x*fraction_uq10 ,3) for x in list(mtbl.vclk_frequency_table)]} MHz",
+        "mtbl_dclk_frequency_table": f"{[round(x*fraction_uq10 ,3) for x in list(mtbl.dclk_frequency_table)]} MHz",
+        "mtbl_lclk_frequency_table": f"{[round(x*fraction_uq10 ,3) for x in list(mtbl.lclk_frequency_table)]} MHz",
+        "mtbl_cclk_frequency_acc": f"{[round(x*fraction_uq10 ,3) for x in list(mtbl.cclk_frequency_acc)]} GHz",
+        "mtbl_gfxclk_frequency_acc": f"{[round(x*fraction_uq10 ,3) for x in list(mtbl.gfxclk_frequency_acc)]} MHz",
+        "mtbl_gfxclk_frequency": f"{[round(x*fraction_uq10 ,3) for x in list(mtbl.gfxclk_frequency)]} MHz",
+        "mtbl_max_cclk_frequency": f"{round(mtbl.max_cclk_frequency * fraction_uq10 ,3)} GHz",
+        "mtbl_min_cclk_frequency": f"{round(mtbl.min_cclk_frequency * fraction_uq10 ,3)} GHz",
+        "mtbl_max_gfxclk_frequency": f"{round(mtbl.max_gfxclk_frequency * fraction_uq10 ,3)} MHz",
+        "mtbl_min_gfxclk_frequency": f"{round(mtbl.min_gfxclk_frequency * fraction_uq10 ,3)} MHz",
         "mtbl_max_lclk_dpm_range": mtbl.max_lclk_dpm_range,
         "mtbl_min_lclk_dpm_range": mtbl.min_lclk_dpm_range,
-        "mtbl_xgmi_width": mtbl.xgmi_width,
-        "mtbl_xgmi_bitrate": mtbl.xgmi_bitrate,
-        "mtbl_xgmi_read_bandwidth_acc": mtbl.xgmi_read_bandwidth_acc,
-        "mtbl_xgmi_write_bandwidth_acc": mtbl.xgmi_write_bandwidth_acc,
-        "mtbl_socket_c0_residency": mtbl.socket_c0_residency,
-        "mtbl_socket_gfx_busy": mtbl.socket_gfx_busy,
-        "mtbl_dram_bandwidth_utilization": mtbl.dram_bandwidth_utilization,
-        "mtbl_socket_c0_residency_acc": mtbl.socket_c0_residency_acc,
-        "mtbl_socket_gfx_busy_acc": mtbl.socket_gfx_busy_acc,
-        "mtbl_dram_bandwidth_acc": mtbl.dram_bandwidth_acc,
-        "mtbl_max_dram_bandwidth": mtbl.max_dram_bandwidth,
-        "mtbl_dram_bandwidth_utilization_acc": mtbl.dram_bandwidth_utilization_acc,
-        "mtbl_pcie_bandwidth_acc": mtbl.pcie_bandwidth_acc,
+        "mtbl_xgmi_width": round(mtbl.xgmi_width * fraction_uq10 ,3),
+        "mtbl_xgmi_bitrate": f"{round(mtbl.xgmi_bitrate * fraction_uq10 ,3)} Gbps",
+        "mtbl_xgmi_read_bandwidth_acc": f"{[round(x*fraction_uq10 ,3) for x in list(mtbl.xgmi_read_bandwidth_acc)]} Gbps",
+        "mtbl_xgmi_write_bandwidth_acc": f"{[round(x*fraction_uq10 ,3) for x in list(mtbl.xgmi_write_bandwidth_acc)]} Gbps",
+        "mtbl_socket_c0_residency": f"{round(mtbl.socket_c0_residency * fraction_uq10 ,3)} %",
+        "mtbl_socket_gfx_busy": f"{round(mtbl.socket_gfx_busy * fraction_uq10 ,3)} %",
+        "mtbl_dram_bandwidth_utilization": f"{round(mtbl.dram_bandwidth_utilization * fraction_uq10 ,3)} %",
+        "mtbl_socket_c0_residency_acc": round(mtbl.socket_c0_residency_acc * fraction_uq10 ,3),
+        "mtbl_socket_gfx_busy_acc": round(mtbl.socket_gfx_busy_acc * fraction_uq10 ,3),
+        "mtbl_dram_bandwidth_acc": f"{round(mtbl.dram_bandwidth_acc * fraction_uq10 ,3)} Gbps",
+        "mtbl_max_dram_bandwidth": f"{round(mtbl.max_dram_bandwidth * fraction_uq10 ,3)} Gbps",
+        "mtbl_dram_bandwidth_utilization_acc": round(mtbl.dram_bandwidth_utilization_acc * fraction_uq10 ,3),
+        "mtbl_pcie_bandwidth_acc": f"{[round(x*fraction_uq10 ,3) for x in list(mtbl.pcie_bandwidth_acc)]} Gbps",
         "mtbl_prochot_residency_acc": mtbl.prochot_residency_acc,
         "mtbl_ppt_residency_acc": mtbl.ppt_residency_acc,
         "mtbl_socket_thm_residency_acc": mtbl.socket_thm_residency_acc,
@@ -3242,10 +3293,7 @@ def amdsmi_get_gpu_metrics_info(
         "mem_max_bandwidth": gpu_metrics.mem_max_bandwidth,
         "pcie_nak_sent_count_acc": gpu_metrics.pcie_nak_sent_count_acc,
         "pcie_nak_rcvd_count_acc": gpu_metrics.pcie_nak_rcvd_count_acc,
-        "jpeg_activities[AID0]": list(gpu_metrics.jpeg_activities)[:8],
-        "jpeg_activities[AID1]": list(gpu_metrics.jpeg_activities)[8:16],
-        "jpeg_activities[AID2]": list(gpu_metrics.jpeg_activities)[16:24],
-        "jpeg_activities[AID3]": list(gpu_metrics.jpeg_activities)[24:32],
+        "jpeg_activity": list(gpu_metrics.jpeg_activity),
     }
 
 

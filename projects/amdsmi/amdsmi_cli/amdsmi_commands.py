@@ -736,6 +736,10 @@ class AMDSMICommands():
         else:
             logging.info("No CPU devices present")
 
+        if (cpu_options and (len(self.cpu_handles) == 0)):
+            logging.error("No CPU devices present")
+            sys.exit(-1)
+
         if (len(self.device_handles) and ((((not gpus) and (not cpus)) or gpus)
             and not cpu_options)):
             self.logger.clear_multiple_devices_ouput()
@@ -745,6 +749,10 @@ class AMDSMICommands():
                                 dfc_ucode, fb_info, num_vf)
         else:
             logging.info("No GPU devices present")
+
+        if (gpu_options and (len(self.device_handles) == 0)):
+            logging.error("No GPU devices present")
+            sys.exit(-1)
 
         if (len(self.cpu_handles) == 0 and len(self.device_handles) == 0):
             logging.error("No CPU and GPU devices present")
@@ -1122,14 +1130,11 @@ class AMDSMICommands():
             if args.usage:
                 try:
                     engine_usage = amdsmi_interface.amdsmi_get_gpu_activity(args.gpu)
-                    engine_usage['gfx_usage'] = engine_usage.pop('gfx_activity')
-                    engine_usage['mem_usage'] = engine_usage.pop('umc_activity')
-                    engine_usage['mm_ip_usage'] = engine_usage.pop('mm_activity')
-                    engine_usage['vcn_activities'] = gpu_metric_output.pop('vcn_activity')
-                    engine_usage['jpeg_activities[AID0]'] = gpu_metric_output.pop('jpeg_activities[AID0]')
-                    engine_usage['jpeg_activities[AID1]'] = gpu_metric_output.pop('jpeg_activities[AID1]')
-                    engine_usage['jpeg_activities[AID2]'] = gpu_metric_output.pop('jpeg_activities[AID2]')
-                    engine_usage['jpeg_activities[AID3]'] = gpu_metric_output.pop('jpeg_activities[AID3]')
+                    engine_usage['gfx_activity'] = engine_usage.pop('gfx_activity')
+                    engine_usage['umc_activity'] = engine_usage.pop('umc_activity')
+                    engine_usage['mm_activity'] = engine_usage.pop('mm_activity')
+                    engine_usage['vcn_activity'] = gpu_metric_output.pop('vcn_activity')
+                    engine_usage['jpeg_activity'] = gpu_metric_output.pop('jpeg_activity')
                     for key, value in engine_usage.items():
                         if not isinstance(value, list) and value > 100:
                             engine_usage[key] = "N/A"
@@ -1655,7 +1660,32 @@ class AMDSMICommands():
             args (Namespace): Namespace containing the parsed CLI args
             multiple_devices (bool, optional): True if checking for multiple devices. Defaults to False.
             cpu (cpu_handle, optional): device_handle for target device. Defaults to None.
-
+            cpu_power_metrics (bool, optional): Value override for args.cpu_power_metrics. Defaults to None
+            prochot (bool, optional): Value override for args.prochot. Defaults to None.
+            freq_metrics (bool, optional): Value override for args.freq_metrics. Defaults to None.
+            c0_res (bool, optional): Value override for args.c0_res. Defaults to None
+            lclk_dpm_level (list, optional): Value override for args.lclk_dpm_level. Defaults to None
+            pwr_svi_telemtry_rails (list, optional): value override for args.pwr_svi_telemtry_rails. Defaults to None
+            io_bandwidth (list, optional): value override for args.io_bandwidth. Defaults to None
+            xgmi_bandwidth (list, optional): value override for args.xgmi_bandwidth. Defaults to None
+            enable_apb (bool, optional): Value override for args.enable_apb. Defaults to None
+            disable_apb (bool, optional): Value override for args.disable_apb. Defaults to None
+            set_pow_limit (int, optional): Value override for args.cpu_set_pow_limit. Defaults to None
+            set_xgmi_link_width (list, optional): Value override for args.set_cpu_xgmi_link_width. Defaults to None
+            set_lclk_dpm_level (list, optional): Value override for args.set_cpu_lclk_dpm_level. Defaults to None
+            set_soc_boost_limit (list, optional): Value override for args.set_soc_boost_limit. Defaults to None
+            metrics_ver (bool, optional): Value override for args.cpu_metrics_ver. Defaults to None
+            metrics_table (bool, optional): Value override for args.cpu_metrics_table. Defaults to None
+            socket_energy (bool, optional): Value override for args.socket_energy. Defaults to None
+            set_pwr_eff_mode (list, optional): Value override for args.set_cpu_pwr_eff_mode. Defaults to None
+            ddr_bandwidth (bool, optional): Value override for args.ddr_bandwidth. Defaults to None
+            cpu_temp (bool, optional): Value override for args.cpu_temp. Defaults to None
+            dimm_temp_range_rate (list, optional): Dimm address.Value override for args.cpu_dimm_temp_range_rate. Defaults to None
+            dimm_pow_conumption (list, optional): Dimm address. Value override for args.cpu_dimm_pow_conumption. Defaults to None
+            dimm_thermal_sensor (list, optional): Dimm address. Value override for args.cpu_dimm_thermal_sensor. Defaults to None
+            set_gmi3_link_width (list, optional): Min and Max link wdiths.Value override for args.set_cpu_gmi3_link_width. Defaults to None
+            set_pcie_lnk_rate (list, optional): Link rate.Value override for args.set_cpu_pcie_lnk_rate. Defaults to None
+            set_df_pstate_range (list, optional): Max and Min pstates.Value override for args.set_cpu_df_pstate_range. Defaults to None
         Returns:
             None: Print output via AMDSMILogger to destination
         """
@@ -1725,7 +1755,7 @@ class AMDSMICommands():
                                   "socket_energy", "set_cpu_pwr_eff_mode", "cpu_ddr_bandwidth",
                                   "cpu_temp", "cpu_dimm_temp_range_rate", "cpu_dimm_pow_conumption",
                                   "cpu_dimm_thermal_sensor", "set_cpu_gmi3_link_width", "set_cpu_pcie_lnk_rate",
-                                  "set_cpu_df_pstate_range"]
+                                  "set_cpu_df_pstate_range", "cpu_enable_apb"]
         curr_platform_cpu_values = [args.cpu_power_metrics, args.cpu_prochot, args.cpu_freq_metrics,
                                     args.cpu_c0_res, args.cpu_lclk_dpm_level, args.cpu_pwr_svi_telemtry_rails,
                                     args.cpu_io_bandwidth, args.cpu_xgmi_bandwidth, args.cpu_disable_apb,
@@ -1734,7 +1764,7 @@ class AMDSMICommands():
                                     args.socket_energy, args.set_cpu_pwr_eff_mode, args.cpu_ddr_bandwidth,
                                     args.cpu_temp, args.cpu_dimm_temp_range_rate, args.cpu_dimm_pow_conumption,
                                     args.cpu_dimm_thermal_sensor, args.set_cpu_gmi3_link_width, args.set_cpu_pcie_lnk_rate,
-                                    args.set_cpu_df_pstate_range]
+                                    args.set_cpu_df_pstate_range, args.cpu_enable_apb]
 
 
         # Handle No CPU passed
@@ -1747,7 +1777,8 @@ class AMDSMICommands():
                               "set_cpu_pow_limit", "set_cpu_xgmi_link_width", "set_cpu_lclk_dpm_level",
                               "set_soc_boost_limit", "set_cpu_pwr_eff_mode", "cpu_dimm_temp_range_rate",
                               "cpu_dimm_temp_range_rate", "cpu_dimm_pow_conumption", "cpu_dimm_thermal_sensor",
-                              "set_cpu_gmi3_link_width", "set_cpu_pcie_lnk_rate", "set_cpu_df_pstate_range"):
+                              "set_cpu_gmi3_link_width", "set_cpu_pcie_lnk_rate", "set_cpu_df_pstate_range",
+                              "cpu_enable_apb"):
                     setattr(args, arg, True)
 
         if (len(self.cpu_handles)):
@@ -1840,7 +1871,7 @@ class AMDSMICommands():
                                                                                     args.cpu_lclk_dpm_level[0][0])
                     static_dict["socket_dpm"]["dpml_level_range"] = dpm_val
                 except amdsmi_exception.AmdSmiLibraryException as e:
-                    static_dict["socket_dpm"]["dpml_level_range"] = dpm_val
+                    static_dict["socket_dpm"]["dpml_level_range"] = "N/A"
                     logging.debug("Failed to get socket dpm level range for cpu %s | %s", cpu_id, e.get_error_info())
 
             if (args.cpu_pwr_svi_telemtry_rails):
@@ -1895,7 +1926,7 @@ class AMDSMICommands():
                     amdsmi_interface.amdsmi_set_cpu_socket_power_cap(args.cpu, args.set_cpu_pow_limit[0][0])
                     static_dict["set_pow_limit"]["Response"] = "Set Operation successful"
                 except amdsmi_exception.AmdSmiLibraryException as e:
-                    static_dict["set_pow_limit"]["Response"] = "Set Operation successful"
+                    static_dict["set_pow_limit"]["Response"] = "N/A"
                     logging.debug("Failed to set power limit for cpu %s | %s", cpu_id, e.get_error_info())
 
             if (args.set_cpu_xgmi_link_width):
@@ -1938,15 +1969,12 @@ class AMDSMICommands():
 
             if (args.cpu_metrics_table):
                 static_dict["metrics_table"] = {}
-                static_dict["metrics_table"]["response"] = "N/A"
-                # Note:- amdsmi_get_metrics_table has been disabled as there is fix needed in the library API and will be
-                # in next version
-                """try:
+                try:
                     metrics_table = amdsmi_interface.amdsmi_get_metrics_table(args.cpu)
                     static_dict["metrics_table"]["response"] = metrics_table
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     static_dict["metrics_table"]["response"] = "N/A"
-                    logging.debug("Failed to get metrics table for cpu %s | %s", cpu_id, e.get_error_info())"""
+                    logging.debug("Failed to get metrics table for cpu %s | %s", cpu_id, e.get_error_info())
 
             if (args.socket_energy):
                 static_dict["socket_energy"] = {}
@@ -2056,7 +2084,10 @@ class AMDSMICommands():
             args (Namespace): Namespace containing the parsed CLI args
             multiple_devices (bool, optional): True if checking for multiple devices. Defaults to False.
             core (device_handle, optional): device_handle for target device. Defaults to None.
-
+            boost_limit (bool, optional): Value override for args.boostlimit. Defaults to None
+            curr_active_freq_core_limit (bool, optional): Value override for args.boostlimit. Defaults to None
+            set_core_boost_limit(list, optional): boost limit value.Value override for args.set_core_boost_limit. Defaults to None
+            core_energy (bool, optional): Value override for args.core_energy. Defaults to None
         Returns:
             None: Print output via AMDSMILogger to destination
         """
@@ -2189,6 +2220,7 @@ class AMDSMICommands():
             guest_data (bool, optional): Value override for args.guest_data. Defaults to None.
             fb_usage (bool, optional): Value override for args.fb_usage. Defaults to None.
             xgmi (bool, optional): Value override for args.xgmi. Defaults to None.
+            cpu (device_handle, optional): cpu index. Defaults to None
             cpu_power_metrics (bool, optional): Value override for args.cpu_power_metrics. Defaults to None
             prochot (bool, optional): Value override for args.prochot. Defaults to None.
             freq_metrics (bool, optional): Value override for args.freq_metrics. Defaults to None.
@@ -2199,10 +2231,9 @@ class AMDSMICommands():
             xgmi_bandwidth (list, optional): value override for args.xgmi_bandwidth. Defaults to None
             enable_apb (bool, optional): Value override for args.enable_apb. Defaults to None
             disable_apb (bool, optional): Value override for args.disable_apb. Defaults to None
-            set_pow_limit (bool, optional): Value override for args.cpu_set_pow_limit. Defaults to None
+            set_pow_limit (int, optional): Value override for args.cpu_set_pow_limit. Defaults to None
             set_xgmi_link_width (list, optional): Value override for args.set_cpu_xgmi_link_width. Defaults to None
-            set_lclk_dpm_level (bool, optional): Value override for args.set_cpu_lclk_dpm_level. Defaults to None
-            boost_limit (bool, optional): Value override for args.boost_limit. Defaults to None
+            set_lclk_dpm_level (list, optional): Value override for args.set_cpu_lclk_dpm_level. Defaults to None
             set_soc_boost_limit (list, optional): Value override for args.set_soc_boost_limit. Defaults to None
             metrics_ver (bool, optional): Value override for args.cpu_metrics_ver. Defaults to None
             metrics_table (bool, optional): Value override for args.cpu_metrics_table. Defaults to None
@@ -2210,12 +2241,17 @@ class AMDSMICommands():
             set_pwr_eff_mode (list, optional): Value override for args.set_cpu_pwr_eff_mode. Defaults to None
             ddr_bandwidth (bool, optional): Value override for args.ddr_bandwidth. Defaults to None
             cpu_temp (bool, optional): Value override for args.cpu_temp. Defaults to None
-            dimm_temp_range_rate (bool, optional): Value override for args.cpu_dimm_temp_range_rate. Defaults to None
-            dimm_pow_conumption (bool, optional): Value override for args.cpu_dimm_pow_conumption. Defaults to None
-            dimm_thermal_sensor (bool, optional): Value override for args.cpu_dimm_thermal_sensor. Defaults to None
-            set_gmi3_link_width (list, optional): Value override for args.set_cpu_gmi3_link_width. Defaults to None
-            set_pcie_lnk_rate (list, optional): Value override for args.set_cpu_pcie_lnk_rate. Defaults to None
-            set_df_pstate_range (list, optional): Value override for args.set_cpu_df_pstate_range. Defaults to None
+            dimm_temp_range_rate (list, optional): Dimm address.Value override for args.cpu_dimm_temp_range_rate. Defaults to None
+            dimm_pow_conumption (list, optional): Dimm address. Value override for args.cpu_dimm_pow_conumption. Defaults to None
+            dimm_thermal_sensor (list, optional): Dimm address. Value override for args.cpu_dimm_thermal_sensor. Defaults to None
+            set_gmi3_link_width (list, optional): Min and Max link wdiths.Value override for args.set_cpu_gmi3_link_width. Defaults to None
+            set_pcie_lnk_rate (list, optional): Link rate.Value override for args.set_cpu_pcie_lnk_rate. Defaults to None
+            set_df_pstate_range (list, optional): Max and Min pstates.Value override for args.set_cpu_df_pstate_range. Defaults to None
+            core (int, optional): core index. Value override for args.core.Defaults to None
+            boost_limit (bool, optional): Value override for args.boostlimit. Defaults to None
+            curr_active_freq_core_limit (bool, optional): Value override for args.boostlimit. Defaults to None
+            set_core_boost_limit(list, optional): boost limit value.Value override for args.set_core_boost_limit. Defaults to None
+
 
         Raises:
             IndexError: Index error if gpu list is empty
@@ -2252,6 +2288,10 @@ class AMDSMICommands():
                 xgmi_err, energy, mem_usage, schedule,
                 guard, guest_data, fb_usage, xgmi)
 
+        if (gpu_options and (len(self.device_handles) == 0)):
+            logging.error("No GPU devices present")
+            sys.exit(-1)
+
         if ((len(self.cpu_handles) and ((((not gpus) and (not cpus) and (not cores)) or cpus)
             and not gpu_options and not core_options))):
             self.logger.clear_multiple_devices_ouput()
@@ -2264,6 +2304,9 @@ class AMDSMICommands():
                             dimm_pow_conumption,dimm_thermal_sensor, set_gmi3_link_width,
                             set_pcie_lnk_rate, set_df_pstate_range)
 
+        if (cpu_options and (len(self.cpu_handles) == 0)):
+            logging.error("No CPU devices present")
+            sys.exit(-1)
 
         if ((len(self.core_handles) and ((((not gpus) and (not cpus) and (not cores)) or cores)
             and not gpu_options and not cpu_options))):
@@ -2271,6 +2314,10 @@ class AMDSMICommands():
                 self.metric_core(args, multiple_devices, core, boost_limit,
                                  curr_active_freq_core_limit, set_core_boost_limit,
                                  core_energy)
+
+        if (core_options and (len(self.cpu_handles) == 0)):
+            logging.error("No Core devices present")
+            sys.exit(-1)
 
         if (len(self.cpu_handles) == 0 and len(self.device_handles) == 0 and
             len(self.core_handles) == 0):

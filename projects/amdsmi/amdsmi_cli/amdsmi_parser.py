@@ -323,6 +323,23 @@ class AMDSMIParser(argparse.ArgumentParser):
             type=self._positive_int, required=False, help=iterations_help)
 
 
+    def _validate_cpu_core(self, value):
+        if (int(value) < 0):
+            outputformat = self.helpers.get_output_format()
+            raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(value, outputformat)
+
+        return value
+
+
+    def _validate_positive(self, value):
+        i_value = int(value)
+        if (i_value < 0):
+            outputformat = self.helpers.get_output_format()
+            raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(i_value, outputformat)
+
+        return i_value
+
+
     def _add_device_arguments(self, subcommand_parser, required=False):
         # Device arguments help text
         gpu_help = f"Select a GPU ID, BDF, or UUID from the possible choices:\n{self.gpu_choices_str}"
@@ -336,9 +353,11 @@ class AMDSMIParser(argparse.ArgumentParser):
         device_args = subcommand_parser.add_mutually_exclusive_group(required=required)
         device_args.add_argument('-g', '--gpu', action=self._gpu_select(self.gpu_choices),
                                     nargs='+', help=gpu_help)
-        device_args.add_argument('-U', '--cpu', action=self._cpu_select(self.cpu_choices),
+        device_args.add_argument('-U', '--cpu', type=self._validate_cpu_core,
+                                    action=self._cpu_select(self.cpu_choices),
                                     nargs='+', help=cpu_help)
-        device_args.add_argument('-O', '--core', action=self._core_select(self.core_choices),
+        device_args.add_argument('-O', '--core', type=self._validate_cpu_core,
+                                    action=self._core_select(self.core_choices),
                                     nargs='+', help=core_help)
 
         if self.helpers.is_hypervisor():
@@ -556,7 +575,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         \n input parameters are bandwidth type(1,2,4) and link ID encodings\
         \n i.e. P2, P3, G0 - G7"
         cpu_enable_apb_help = "Enables the DF p-state performance boost algorithm"
-        cpu_disable_apb_help = "Disables the DF p-state performance boost alogorithm."
+        cpu_disable_apb_help = "Disables the DF p-state performance boost algorithm."
         "Input parameter is DFPstate (0 -3 )"
         set_cpu_pow_limit_help = "Set power limit for the given socket. Input parameter is \
 power limit value."
@@ -578,7 +597,7 @@ core limit value"
         cpu_ddr_bandwidth_help = "Displays per socket max ddr bw, current utilized bw and current utilized ddr bw in percentage"
         cpu_temp_help = "Displays cpu socket temperature"
         cpu_dimm_temp_range_rate_help = "Displays dimm temperature range and refresh rate"
-        cpu_dimm_pow_conumption_help = "Displays dimm power conumption"
+        cpu_dimm_pow_conumption_help = "Displays dimm power consumption"
         cpu_dimm_thermal_sensor_help = "Displays dimm thermal sensor"
         set_cpu_gmi3_link_width_help = "Sets max and min gmi3 link width range"
         set_cpu_pcie_lnk_rate_help = "Sets pcie link rate"
@@ -634,32 +653,50 @@ core limit value"
         cpu_group.add_argument('--cpu_prochot', action='store_true', required=False, help=cpu_proc_help)
         cpu_group.add_argument('--cpu_freq_metrics', action='store_true', required=False, help=cpu_freq_help)
         cpu_group.add_argument('--cpu_c0_res', action='store_true', required=False, help=cpu_c0_res_help)
-        cpu_group.add_argument('--cpu_lclk_dpm_level', action='append', required=False, type=int, nargs=1, metavar=("NBIOID"), help=cpu_lclk_dpm_help)
-        cpu_group.add_argument('--cpu_pwr_svi_telemtry_rails', action='store_true', required=False, help=cpu_pwr_svi_telemtry_rails_help)
-        cpu_group.add_argument('--cpu_io_bandwidth', action='append', required=False, nargs=2, metavar=("IO_BW","LINKID_NAME"), help=cpu_io_bandwidth_help)
-        cpu_group.add_argument('--cpu_xgmi_bandwidth', action='append', required=False, nargs=2, metavar=("XGMI_BW","LINKID_NAME"), help=cpu_xgmi_bandwidth_help)
+        cpu_group.add_argument('--cpu_lclk_dpm_level', action='append', required=False, type=self._validate_positive,
+                                nargs=1, metavar=("NBIOID"), help=cpu_lclk_dpm_help)
+        cpu_group.add_argument('--cpu_pwr_svi_telemtry_rails', action='store_true', required=False,
+                                help=cpu_pwr_svi_telemtry_rails_help)
+        cpu_group.add_argument('--cpu_io_bandwidth', action='append', required=False, nargs=2,
+                                metavar=("IO_BW","LINKID_NAME"), help=cpu_io_bandwidth_help)
+        cpu_group.add_argument('--cpu_xgmi_bandwidth', action='append', required=False, nargs=2,
+                                metavar=("XGMI_BW","LINKID_NAME"), help=cpu_xgmi_bandwidth_help)
         cpu_group.add_argument('--cpu_enable_apb', action='store_true', required=False, help=cpu_enable_apb_help)
-        cpu_group.add_argument('--cpu_disable_apb', action='append', required=False, type=int, nargs=1, metavar=("DF_PSTATE"), help=cpu_disable_apb_help)
-        set_group.add_argument('--set_cpu_pow_limit', action='append', required=False, type=int, nargs=1, metavar=("POW_LIMIT"),help=set_cpu_pow_limit_help)
-        set_group.add_argument('--set_cpu_xgmi_link_width', action='append', required=False, type=int, nargs=2, metavar=("MIN_WIDTH", "MAX_WIDTH"), help=set_cpu_xgmi_link_width_help)
-        set_group.add_argument('--set_cpu_lclk_dpm_level', action='append', required=False, type=int, nargs=3, metavar=("NBIOID", "MIN_DPM", "MAX_DPM"),help=set_cpu_lclk_dpm_level_help)
+        cpu_group.add_argument('--cpu_disable_apb', action='append', required=False, type=self._validate_positive,
+                                nargs=1, metavar=("DF_PSTATE"), help=cpu_disable_apb_help)
+        set_group.add_argument('--set_cpu_pow_limit', action='append', required=False, type=self._validate_positive,
+                                nargs=1, metavar=("POW_LIMIT"),help=set_cpu_pow_limit_help)
+        set_group.add_argument('--set_cpu_xgmi_link_width', action='append', required=False, type=self._validate_positive,
+                                nargs=2, metavar=("MIN_WIDTH", "MAX_WIDTH"), help=set_cpu_xgmi_link_width_help)
+        set_group.add_argument('--set_cpu_lclk_dpm_level', action='append', required=False, type=self._validate_positive,
+                                nargs=3, metavar=("NBIOID", "MIN_DPM", "MAX_DPM"),help=set_cpu_lclk_dpm_level_help)
         cpu_group.add_argument('--core_boost_limit', action='store_true', required=False, help=core_boost_limit_help)
-        cpu_group.add_argument('--core_curr_active_freq_core_limit', action='store_true', required=False, help=core_curr_active_freq_core_limit_help)
-        set_group.add_argument('--set_soc_boost_limit', action='append', required=False, type=int, nargs=1, metavar=("BOOST_LIMIT"), help=set_soc_boost_limit_help)
-        set_group.add_argument('--set_core_boost_limit', action='append', required=False, type=int, nargs=1, metavar=("BOOST_LIMIT"), help=set_core_boost_limit_help)
+        cpu_group.add_argument('--core_curr_active_freq_core_limit', action='store_true', required=False,
+                                help=core_curr_active_freq_core_limit_help)
+        set_group.add_argument('--set_soc_boost_limit', action='append', required=False, type=self._validate_positive,
+                                nargs=1, metavar=("BOOST_LIMIT"), help=set_soc_boost_limit_help)
+        set_group.add_argument('--set_core_boost_limit', action='append', required=False, type=self._validate_positive,
+                                nargs=1, metavar=("BOOST_LIMIT"), help=set_core_boost_limit_help)
         cpu_group.add_argument('--cpu_metrics_ver', action='store_true', required=False, help=cpu_metrics_ver_help)
         cpu_group.add_argument('--cpu_metrics_table', action='store_true', required=False, help=cpu_metrics_table_help)
         cpu_group.add_argument('--core_energy', action='store_true', required=False, help=core_energy_help)
         cpu_group.add_argument('--socket_energy', action='store_true', required=False, help=socket_energy_help)
-        set_group.add_argument('--set_cpu_pwr_eff_mode', action='append', required=False, type=int, nargs=1, metavar=("MODE"), help=set_cpu_pwr_eff_mode_help)
+        set_group.add_argument('--set_cpu_pwr_eff_mode', action='append', required=False, type=self._validate_positive,
+                                nargs=1, metavar=("MODE"), help=set_cpu_pwr_eff_mode_help)
         cpu_group.add_argument('--cpu_ddr_bandwidth', action='store_true', required=False, help=cpu_ddr_bandwidth_help)
         cpu_group.add_argument('--cpu_temp', action='store_true', required=False, help=cpu_temp_help)
-        cpu_group.add_argument('--cpu_dimm_temp_range_rate', action='append', required=False, type=int, nargs=1, metavar=("DIMM_ADDR"), help=cpu_dimm_temp_range_rate_help)
-        cpu_group.add_argument('--cpu_dimm_pow_conumption', action='append', required=False, type=int, nargs=1, metavar=("DIMM_ADDR"), help=cpu_dimm_pow_conumption_help)
-        cpu_group.add_argument('--cpu_dimm_thermal_sensor', action='append', required=False, type=int, nargs=1, metavar=("DIMM_ADDR"), help=cpu_dimm_thermal_sensor_help)
-        set_group.add_argument('--set_cpu_gmi3_link_width', action='append', required=False, type=int, nargs=2, metavar=("MIN_LW", "MAX_LW"), help=set_cpu_gmi3_link_width_help)
-        set_group.add_argument('--set_cpu_pcie_lnk_rate', action='append', required=False, type=int, nargs=1, metavar=("LINK_RATE"), help=set_cpu_pcie_lnk_rate_help)
-        set_group.add_argument('--set_cpu_df_pstate_range', action='append', required=False, type=int, nargs=2, metavar=("MAX_PSTATE", "MIN_PSTATE"), help=set_cpu_df_pstate_range_help)
+        cpu_group.add_argument('--cpu_dimm_temp_range_rate', action='append', required=False, type=lambda x: int(x, 0),
+                                nargs=1, metavar=("DIMM_ADDR"), help=cpu_dimm_temp_range_rate_help)
+        cpu_group.add_argument('--cpu_dimm_pow_conumption', action='append', required=False, type=lambda x: int(x, 0),
+                                nargs=1, metavar=("DIMM_ADDR"), help=cpu_dimm_pow_conumption_help)
+        cpu_group.add_argument('--cpu_dimm_thermal_sensor', action='append', required=False, type=lambda x: int(x, 0),
+                                nargs=1, metavar=("DIMM_ADDR"), help=cpu_dimm_thermal_sensor_help)
+        set_group.add_argument('--set_cpu_gmi3_link_width', action='append', required=False, type=self._validate_positive,
+                                nargs=2, metavar=("MIN_LW", "MAX_LW"), help=set_cpu_gmi3_link_width_help)
+        set_group.add_argument('--set_cpu_pcie_lnk_rate', action='append', required=False, type=self._validate_positive,
+                                nargs=1, metavar=("LINK_RATE"), help=set_cpu_pcie_lnk_rate_help)
+        set_group.add_argument('--set_cpu_df_pstate_range', action='append', required=False, type=self._validate_positive,
+                                nargs=2, metavar=("MAX_PSTATE", "MIN_PSTATE"), help=set_cpu_df_pstate_range_help)
 
     def _add_process_parser(self, subparsers, func):
         if self.helpers.is_hypervisor():

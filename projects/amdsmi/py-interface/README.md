@@ -2126,8 +2126,8 @@ Output: Dictionary with fields
 `temperature_vrsoc` | vrsoc temperature value | Celsius (C)
 `temperature_vrmem` | vrmem temperature value | Celsius (C)
 `average_gfx_activity` | Average gfx activity | %
-`average_umc_activity` | Average umc activity | %
-`average_mm_activity` | Average mm activity | %
+`average_umc_activity` | Average umc (Universal Memory Controller) activity | %
+`average_mm_activity` | Average mm (multimedia) engine activity | %
 `average_socket_power` | Average socket power | W
 `energy_accumulator` | Energy accumulated with a 15.3 uJ resolution over 1ns | uJ 
 `system_clock_counter` | System clock counter | ns
@@ -2178,7 +2178,7 @@ Output: Dictionary with fields
 `mem_max_bandwidth` | Maximum memory bandwidth usage accumulated  | GB/s
 `pcie_nak_sent_count_acc` | PCIe NAC sent count accumulated |
 `pcie_nak_rcvd_count_acc` | PCIe NAC received count accumulated |
-`jpeg_activitys[AID<X>]` | List of JPEG engine activity for each AID (X=0-3) | %
+`jpeg_activity` | List of JPEG engine activity | %
 
 Exceptions that can be thrown by `amdsmi_get_gpu_metrics_info` function:
 

@@ -1503,6 +1503,88 @@ typedef struct {
     uint8_t min_dpm_level;          //!< Min LCLK DPM level[7:0](8 bit data)
 } amdsmi_dpm_level_t;
 
+/**
+ * @brief Metrics table (supported only with hsmp proto version 6).
+ */
+typedef struct __attribute__((__packed__)){
+    uint32_t accumulation_counter;
+
+    /* TEMPERATURE */
+    uint32_t max_socket_temperature;
+    uint32_t max_vr_temperature;
+    uint32_t max_hbm_temperature;
+    uint64_t max_socket_temperature_acc;
+    uint64_t max_vr_temperature_acc;
+    uint64_t max_hbm_temperature_acc;
+
+    /* POWER */
+    uint32_t socket_power_limit;
+    uint32_t max_socket_power_limit;
+    uint32_t socket_power;
+
+    /* ENERGY */
+    uint64_t timestamp;
+    uint64_t socket_energy_acc;
+    uint64_t ccd_energy_acc;
+    uint64_t xcd_energy_acc;
+    uint64_t aid_energy_acc;
+    uint64_t hbm_energy_acc;
+
+    /* FREQUENCY */
+    uint32_t cclk_frequency_limit;
+    uint32_t gfxclk_frequency_limit;
+    uint32_t fclk_frequency;
+    uint32_t uclk_frequency;
+    uint32_t socclk_frequency[4];
+    uint32_t vclk_frequency[4];
+    uint32_t dclk_frequency[4];
+    uint32_t lclk_frequency[4];
+    uint64_t gfxclk_frequency_acc[8];
+    uint64_t cclk_frequency_acc[96];
+
+    /* FREQUENCY RANGE */
+    uint32_t max_cclk_frequency;
+    uint32_t min_cclk_frequency;
+    uint32_t max_gfxclk_frequency;
+    uint32_t min_gfxclk_frequency;
+    uint32_t fclk_frequency_table[4];
+    uint32_t uclk_frequency_table[4];
+    uint32_t socclk_frequency_table[4];
+    uint32_t vclk_frequency_table[4];
+    uint32_t dclk_frequency_table[4];
+    uint32_t lclk_frequency_table[4];
+    uint32_t max_lclk_dpm_range;
+    uint32_t min_lclk_dpm_range;
+
+    /* XGMI */
+    uint32_t xgmi_width;
+    uint32_t xgmi_bitrate;
+    uint64_t xgmi_read_bandwidth_acc[8];
+    uint64_t xgmi_write_bandwidth_acc[8];
+
+    /* ACTIVITY */
+    uint32_t socket_c0_residency;
+    uint32_t socket_gfx_busy;
+    uint32_t dram_bandwidth_utilization;
+    uint64_t socket_c0_residency_acc;
+    uint64_t socket_gfx_busy_acc;
+    uint64_t dram_bandwidth_acc;
+    uint32_t max_dram_bandwidth;
+    uint64_t dram_bandwidth_utilization_acc;
+    uint64_t pcie_bandwidth_acc[4];
+
+    /* THROTTLERS */
+    uint32_t prochot_residency_acc;
+    uint32_t ppt_residency_acc;
+    uint32_t socket_thm_residency_acc;
+    uint32_t vr_thm_residency_acc;
+    uint32_t hbm_thm_residency_acc;
+    uint32_t spare;
+
+    /* New items at the end to maintain driver compatibility */
+    uint32_t gfxclk_frequency[8];
+} amdsmi_hsmp_metric_table_t;
+
 #endif
 
 /*****************************************************************************/
@@ -5892,7 +5974,7 @@ amdsmi_status_t amdsmi_get_metrics_table_version(amdsmi_processor_handle process
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_get_metrics_table(amdsmi_processor_handle processor_handle,
-                                         struct hsmp_metric_table *metrics_table);
+                                         amdsmi_hsmp_metric_table_t *metrics_table);
 
 /** @} */
 
@@ -5924,9 +6006,9 @@ amdsmi_status_t amdsmi_first_online_core_on_cpu_socket(amdsmi_processor_handle p
  *  @param[in,out]    status_string - A pointer to a const char * which will be made
  *  to point to a description of the provided error code
  *
- *  @return const char** returned on success
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-const char** amdsmi_get_esmi_err_msg(amdsmi_status_t status, const char **status_string);
+amdsmi_status_t amdsmi_get_esmi_err_msg(amdsmi_status_t status, const char **status_string);
 #endif
 /** @} */
 #ifdef __cplusplus

@@ -131,6 +131,7 @@ amdsmi_status_t AMDSmiDrm::init() {
     amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
     auto devices = smi.devices();
 
+    bool has_valid_fds = false;
     for (uint32_t i=0; i < devices.size(); i++) {
         auto rocm_smi_device = devices[i];
         std::string render_file_name;
@@ -171,6 +172,7 @@ amdsmi_status_t AMDSmiDrm::init() {
             continue;
         }
 
+        has_valid_fds = true;
         bdf.fields.function_number = device->businfo.pci->func;
         bdf.fields.device_number = device->businfo.pci->dev;
         bdf.fields.bus_number = device->businfo.pci->bus;
@@ -180,6 +182,12 @@ amdsmi_status_t AMDSmiDrm::init() {
 
         drm_bdfs_.push_back(bdf);
         drm_free_device(&device);
+    }
+
+    // cannot find any valid fds.
+    if (!has_valid_fds) {
+        drm_bdfs_.clear();
+        return AMDSMI_STATUS_INIT_ERROR;
     }
 
     return AMDSMI_STATUS_SUCCESS;
@@ -315,7 +323,7 @@ std::vector<std::string>& AMDSmiDrm::get_drm_paths() {
 }
 
 bool AMDSmiDrm::check_if_drm_is_supported() {
-    return drm_cmd_write_ != NULL ? true : false;
+    return (drm_cmd_write_ != NULL && drm_bdfs_.size() >0) ? true : false;
 }
 
 std::vector<amdsmi_bdf_t> AMDSmiDrm::get_bdfs() {
