@@ -22,13 +22,15 @@
 
 #pragma once
 
-#include <stdint.h>
+#include <rocprofiler-sdk-roctx/api_trace.h>
+#include <rocprofiler-sdk-roctx/types.h>
 
-typedef uint64_t roctx_range_id_t;
+#include <stdint.h>
 
 typedef union rocprofiler_marker_api_retval_u
 {
-    uint32_t uint32_t_retval;
+    int32_t  int32_t_retval;
+    int64_t  int64_t_retval;
     uint64_t uint64_t_retval;
 } rocprofiler_marker_api_retval_t;
 
@@ -53,4 +55,35 @@ typedef union rocprofiler_marker_api_args_u
     {
         roctx_range_id_t id;
     } roctxRangeStop;
+    struct
+    {
+        roctx_thread_id_t tid;
+    } roctxProfilerPause;
+    struct
+    {
+        roctx_thread_id_t tid;
+    } roctxProfilerResume;
+    struct
+    {
+        const char* name;
+    } roctxNameOsThread;
+    struct
+    {
+        const char*               name;
+        const struct hsa_agent_s* agent;
+    } roctxNameHsaAgent;
+    struct
+    {
+        const char* name;
+        int         device_id;
+    } roctxNameHipDevice;
+    struct
+    {
+        const char*                name;
+        const struct ihipStream_t* stream;
+    } roctxNameHipStream;
+    struct
+    {
+        roctx_thread_id_t* tid;
+    } roctxGetThreadId;
 } rocprofiler_marker_api_args_t;

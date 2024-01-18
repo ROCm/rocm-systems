@@ -42,6 +42,9 @@ target_compile_options(transpose PRIVATE -W -Wall -Wextra -Wpedantic -Wshadow -W
 find_package(Threads REQUIRED)
 target_link_libraries(transpose PRIVATE Threads::Threads)
 
+find_package(rocprofiler-sdk-roctx REQUIRED)
+target_link_libraries(transpose PRIVATE rocprofiler-sdk-roctx::rocprofiler-sdk-roctx)
+
 if(TRANSPOSE_USE_MPI)
     find_package(MPI REQUIRED)
     target_compile_definitions(transpose PRIVATE USE_MPI)

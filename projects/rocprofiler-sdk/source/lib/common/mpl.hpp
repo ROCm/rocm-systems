@@ -90,6 +90,28 @@ struct is_one_of<F, Tuple<S, T...>>
 {
     static constexpr bool value = is_one_of<F, S, Tuple<T...>>::value;
 };
+
+template <typename Tp>
+struct is_pair_impl
+{
+    static constexpr auto value = false;
+};
+
+template <typename LhsT, typename RhsT>
+struct is_pair_impl<std::pair<LhsT, RhsT>>
+{
+    static constexpr auto value = true;
+};
+
+template <typename Tp>
+struct is_pair : is_pair_impl<std::remove_cv_t<std::remove_reference_t<std::decay_t<Tp>>>>
+{};
+
+template <typename, typename = void>
+constexpr bool is_type_complete_v = false;  // NOLINT(misc-definitions-in-headers)
+
+template <typename T>  // NOLINTNEXTLINE(misc-definitions-in-headers)
+constexpr bool is_type_complete_v<T, std::void_t<decltype(sizeof(T))>> = true;
 }  // namespace mpl
 }  // namespace common
 }  // namespace rocprofiler

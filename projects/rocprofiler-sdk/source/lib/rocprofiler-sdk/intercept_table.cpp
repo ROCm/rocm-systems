@@ -156,6 +156,11 @@ template void notify_runtime_api_registration(rocprofiler_runtime_library_t,
                                               uint64_t,
                                               uint64_t,
                                               std::tuple<HsaApiTable*>);
+
+template void notify_runtime_api_registration(rocprofiler_runtime_library_t,
+                                              uint64_t,
+                                              uint64_t,
+                                              std::tuple<roctxApiTable_t*>);
 }  // namespace intercept_table
 }  // namespace rocprofiler
 

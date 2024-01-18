@@ -25,6 +25,7 @@
 #include <rocprofiler-sdk/rocprofiler.h>
 
 #include "lib/common/defines.hpp"
+#include "rocprofiler-sdk/fwd.h"
 
 #include <gtest/gtest.h>
 
@@ -76,7 +77,7 @@ inline auto
 get_callback_tracing_names()
 {
     static const auto supported_kinds = std::unordered_set<rocprofiler_callback_tracing_kind_t>{
-        ROCPROFILER_CALLBACK_TRACING_HSA_API};
+        ROCPROFILER_CALLBACK_TRACING_HSA_API, ROCPROFILER_CALLBACK_TRACING_MARKER_API};
 
     auto cb_name_info = callback_name_info{};
     //
@@ -139,8 +140,8 @@ struct buffer_name_info
 inline buffer_name_info
 get_buffer_tracing_names()
 {
-    static const auto supported_kinds =
-        std::unordered_set<rocprofiler_buffer_tracing_kind_t>{ROCPROFILER_BUFFER_TRACING_HSA_API};
+    static const auto supported_kinds = std::unordered_set<rocprofiler_buffer_tracing_kind_t>{
+        ROCPROFILER_BUFFER_TRACING_HSA_API, ROCPROFILER_BUFFER_TRACING_MARKER_API};
 
     auto cb_name_info = buffer_name_info{};
     //

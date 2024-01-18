@@ -43,6 +43,10 @@ target_compile_options(reproducible-runtime PRIVATE -W -Wall -Wextra -Wpedantic 
 find_package(Threads REQUIRED)
 target_link_libraries(reproducible-runtime PRIVATE Threads::Threads)
 
+find_package(rocprofiler-sdk-roctx REQUIRED)
+target_link_libraries(reproducible-runtime
+                      PRIVATE rocprofiler-sdk-roctx::rocprofiler-sdk-roctx)
+
 if(REPRODUCIBLE_RUNTIME_USE_MPI)
     find_package(MPI REQUIRED)
     target_compile_definitions(reproducible-runtime PRIVATE USE_MPI)

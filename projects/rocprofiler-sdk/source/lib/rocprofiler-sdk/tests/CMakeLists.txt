@@ -36,15 +36,20 @@ set_tests_properties(${lib_TESTS} PROPERTIES TIMEOUT 45 LABELS "unittests")
 # -------------------------------------------------------------------------------------- #
 
 set(rocprofiler_shared_lib_sources external_correlation.cpp intercept_table.cpp
-                                   registration.cpp status.cpp)
+                                   registration.cpp roctx.cpp status.cpp)
 
 add_executable(rocprofiler-lib-tests-shared)
 target_sources(rocprofiler-lib-tests-shared PRIVATE ${rocprofiler_shared_lib_sources})
 target_link_libraries(
     rocprofiler-lib-tests-shared
     PRIVATE rocprofiler::rocprofiler-shared-library
-            rocprofiler::rocprofiler-common-library rocprofiler::rocprofiler-hsa-runtime
-            GTest::gtest GTest::gtest_main)
+            rocprofiler::rocprofiler-common-library
+            rocprofiler::rocprofiler-hsa-runtime
+            rocprofiler::rocprofiler-sdk-roctx-shared-library
+            GTest::gtest
+            GTest::gtest_main)
+set_target_properties(rocprofiler-lib-tests-shared PROPERTIES BUILD_RPATH
+                                                              "\$ORIGIN/../lib")
 
 gtest_add_tests(
     TARGET rocprofiler-lib-tests-shared
@@ -52,7 +57,10 @@ gtest_add_tests(
     TEST_LIST shared_lib_TESTS
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 
+set(rocprofiler-lib-tests-env
+    "HSA_TOOLS_LIB=$<TARGET_FILE:rocprofiler-shared-library>"
+    "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:$ENV{LD_LIBRARY_PATH}")
+
 set_tests_properties(
-    ${shared_lib_TESTS}
-    PROPERTIES TIMEOUT 360 LABELS "unittests" ENVIRONMENT
-               "HSA_TOOLS_LIB=$<TARGET_FILE:rocprofiler-shared-library>")
+    ${shared_lib_TESTS} PROPERTIES TIMEOUT 360 LABELS "unittests" ENVIRONMENT
+                                   "${rocprofiler-lib-tests-env}")

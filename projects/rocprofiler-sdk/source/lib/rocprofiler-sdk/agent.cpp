@@ -30,7 +30,7 @@
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 
-#include <fmt/core.h>
+#include <fmt/format.h>
 #include <glog/logging.h>
 #include <hsa/hsa_api_trace.h>
 #include <libdrm/amdgpu.h>
@@ -404,7 +404,8 @@ read_topology()
         agent_info.node_id   = nodecount++;
 
         if(!name_prop.empty())
-            agent_info.model_name = get_string_entry(name_prop.front())->c_str();
+            agent_info.model_name =
+                get_string_entry(fmt::format("{}", fmt::join(name_prop, " ")))->c_str();
         else
             agent_info.model_name = "";
 

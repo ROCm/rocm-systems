@@ -33,6 +33,7 @@
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/intercept_table.hpp"
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
+#include "lib/rocprofiler-sdk/marker/marker.hpp"
 
 #include <rocprofiler-sdk/context.h>
 #include <rocprofiler-sdk/fwd.h>
@@ -156,7 +157,7 @@ struct client_library
     rocprofiler_client_id_t              mutable_client_id  = {};
 };
 
-using client_library_vec_t = std::vector<client_library>;
+using client_library_vec_t = std::vector<std::optional<client_library>>;
 
 client_library_vec_t
 find_clients()
@@ -245,17 +246,17 @@ find_clients()
         // skip the configure function that was forced
         if(_sym == get_forced_configure())
         {
-            data.front().name                    = itr;
-            data.front().dlhandle                = handle;
-            data.front().internal_client_id.name = "(forced)";
+            data.front()->name                    = itr;
+            data.front()->dlhandle                = handle;
+            data.front()->internal_client_id.name = "(forced)";
             continue;
         }
 
         if(_sym == &rocprofiler_configure && data.size() == 1)
         {
-            data.front().name                    = itr;
-            data.front().dlhandle                = handle;
-            data.front().internal_client_id.name = "default";
+            data.front()->name                    = itr;
+            data.front()->dlhandle                = handle;
+            data.front()->internal_client_id.name = "default";
         }
         else
         {
@@ -267,7 +268,7 @@ find_clients()
                                                  nullptr,
                                                  rocprofiler_client_id_t{nullptr, _prio},
                                                  rocprofiler_client_id_t{nullptr, _prio}});
-            entry.internal_client_id.name = entry.name.c_str();
+            entry->internal_client_id.name = entry->name.c_str();
         }
     }
 
@@ -280,7 +281,7 @@ find_clients()
 
             for(const auto& ditr : data)
             {
-                if(ditr.dlhandle && ditr.dlhandle == handle)
+                if(ditr->dlhandle && ditr->dlhandle == handle)
                 {
                     handle = nullptr;
                     break;
@@ -315,7 +316,7 @@ get_clients()
     return _v;
 }
 
-using mutex_t       = std::recursive_mutex;
+using mutex_t       = std::mutex;
 using scoped_lock_t = std::unique_lock<mutex_t>;
 
 mutex_t&
@@ -330,9 +331,7 @@ invoke_client_configures()
 {
     if(get_init_status() > 0) return false;
 
-    auto _lk = scoped_lock_t{get_registration_mutex(), std::defer_lock};
-    if(_lk.owns_lock()) return false;
-    _lk.lock();
+    auto _lk = scoped_lock_t{get_registration_mutex()};
 
     LOG(ERROR) << __FUNCTION__;
 
@@ -340,20 +339,22 @@ invoke_client_configures()
 
     for(auto& itr : *get_clients())
     {
-        if(!itr.configure_func)
+        if(!itr) continue;
+
+        if(!itr->configure_func)
         {
             LOG(ERROR) << "rocprofiler::registration::invoke_client_configures() attempted to "
                           "invoke configure function from "
-                       << itr.name << " that had no configuration function";
+                       << itr->name << " that had no configuration function";
             continue;
         }
 
-        if(get_invoked_configures().find(itr.configure_func) != get_invoked_configures().end())
+        if(get_invoked_configures().find(itr->configure_func) != get_invoked_configures().end())
         {
             LOG(ERROR) << "rocprofiler::registration::invoke_client_configures() attempted to "
                           "invoke configure function from "
-                       << itr.name << " (addr="
-                       << fmt::format("{:#018x}", reinterpret_cast<uint64_t>(itr.configure_func))
+                       << itr->name << " (addr="
+                       << fmt::format("{:#018x}", reinterpret_cast<uint64_t>(itr->configure_func))
                        << ") more than once";
             continue;
         }
@@ -361,27 +362,27 @@ invoke_client_configures()
         {
             LOG(INFO) << "rocprofiler::registration::invoke_client_configures() invoking configure "
                          "function from "
-                      << itr.name << " (addr="
-                      << fmt::format("{:#018x}", reinterpret_cast<uint64_t>(itr.configure_func))
+                      << itr->name << " (addr="
+                      << fmt::format("{:#018x}", reinterpret_cast<uint64_t>(itr->configure_func))
                       << ")";
         }
 
-        auto* _result = itr.configure_func(ROCPROFILER_VERSION,
-                                           ROCPROFILER_VERSION_STRING,
-                                           itr.internal_client_id.handle - get_client_offset(),
-                                           &itr.mutable_client_id);
+        auto* _result = itr->configure_func(ROCPROFILER_VERSION,
+                                            ROCPROFILER_VERSION_STRING,
+                                            itr->internal_client_id.handle - get_client_offset(),
+                                            &itr->mutable_client_id);
 
         if(_result)
         {
-            itr.configure_result = new rocprofiler_tool_configure_result_t{*_result};
+            itr->configure_result = new rocprofiler_tool_configure_result_t{*_result};
         }
         else
         {
-            context::deactivate_client_contexts(itr.internal_client_id);
-            context::deregister_client_contexts(itr.internal_client_id);
+            context::deactivate_client_contexts(itr->internal_client_id);
+            context::deregister_client_contexts(itr->internal_client_id);
         }
 
-        get_invoked_configures().emplace(itr.configure_func);
+        get_invoked_configures().emplace(itr->configure_func);
     }
 
     return true;
@@ -392,9 +393,7 @@ invoke_client_initializers()
 {
     if(get_init_status() > 0) return false;
 
-    auto _lk = scoped_lock_t{get_registration_mutex(), std::defer_lock};
-    if(_lk.owns_lock()) return false;
-    _lk.lock();
+    auto _lk = scoped_lock_t{get_registration_mutex()};
 
     LOG(ERROR) << __FUNCTION__;
 
@@ -402,14 +401,14 @@ invoke_client_initializers()
 
     for(auto& itr : *get_clients())
     {
-        if(itr.configure_result && itr.configure_result->initialize)
+        if(itr && itr->configure_result && itr->configure_result->initialize)
         {
-            context::push_client(itr.internal_client_id.handle);
-            itr.configure_result->initialize(&invoke_client_finalizer,
-                                             itr.configure_result->tool_data);
-            context::pop_client(itr.internal_client_id.handle);
+            context::push_client(itr->internal_client_id.handle);
+            itr->configure_result->initialize(&invoke_client_finalizer,
+                                              itr->configure_result->tool_data);
+            context::pop_client(itr->internal_client_id.handle);
             // set to nullptr so initialize only gets called once
-            itr.configure_result->initialize = nullptr;
+            itr->configure_result->initialize = nullptr;
         }
     }
 
@@ -424,23 +423,12 @@ invoke_client_finalizers()
 
     if(get_init_status() < 1 || get_fini_status() > 0) return false;
 
-    auto _lk = scoped_lock_t{get_registration_mutex(), std::defer_lock};
-    if(_lk.owns_lock()) return false;
-    _lk.lock();
-
-    LOG(ERROR) << __FUNCTION__;
-
-    if(!get_clients()) return false;
-
-    for(auto& itr : *get_clients())
+    if(get_clients())
     {
-        if(itr.configure_result && itr.configure_result->finalize)
+        for(auto& itr : *get_clients())
         {
-            itr.configure_result->finalize(itr.configure_result->tool_data);
-            // set to nullptr so finalize only gets called once
-            itr.configure_result->finalize = nullptr;
+            if(itr) invoke_client_finalizer(itr->internal_client_id);
         }
-        context::deactivate_client_contexts(itr.internal_client_id);
     }
 
     return true;
@@ -449,29 +437,30 @@ invoke_client_finalizers()
 void
 invoke_client_finalizer(rocprofiler_client_id_t client_id)
 {
-    auto _lk = scoped_lock_t{get_registration_mutex(), std::defer_lock};
-    if(_lk.owns_lock()) return;
-    _lk.lock();
+    LOG(ERROR) << __FUNCTION__ << "(client_id=" << client_id.handle << ")";
 
-    LOG(ERROR) << __FUNCTION__;
+    auto _lk = scoped_lock_t{get_registration_mutex()};
 
     if(!get_clients()) return;
 
     for(auto& itr : *get_clients())
     {
-        if(itr.internal_client_id.handle == client_id.handle &&
-           itr.mutable_client_id.handle == client_id.handle)
+        if(itr && itr->internal_client_id.handle == client_id.handle &&
+           itr->mutable_client_id.handle == client_id.handle)
         {
-            if(itr.configure_result && itr.configure_result->finalize)
+            if(itr->configure_result && itr->configure_result->finalize)
             {
+                // set to nullptr so finalize only gets called once
+                rocprofiler_tool_finalize_t _finalize_func = nullptr;
+                std::swap(_finalize_func, itr->configure_result->finalize);
+
                 auto _fini_status = get_fini_status();
                 if(_fini_status == 0) set_fini_status(-1);
-                itr.configure_result->finalize(itr.configure_result->tool_data);
+                _finalize_func(itr->configure_result->tool_data);
                 if(_fini_status == 0) set_fini_status(_fini_status);
-                // set to nullptr so finalize only gets called once
-                itr.configure_result->finalize = nullptr;
             }
-            context::deactivate_client_contexts(itr.internal_client_id);
+            context::deactivate_client_contexts(itr->internal_client_id);
+            itr.reset();
         }
     }
 }
@@ -684,7 +673,21 @@ rocprofiler_set_api_table(const char* name,
         LOG_IF(ERROR, num_tables > 1)
             << " rocprofiler expected ROCTX library to pass 1 API table, not " << num_tables;
 
-        return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
+        auto* roctx_api_table = static_cast<roctxApiTable_t*>(*tables);
+
+        // any internal modifications to the roctxApiTable_t need to be done before we make
+        // the copy or else those modifications will be lost when ROCTx tracing is enabled because
+        // the ROCTx tracing invokes the function pointers from the copy below
+        rocprofiler::marker::copy_table(roctx_api_table);
+
+        // install rocprofiler API wrappers
+        rocprofiler::marker::update_table(roctx_api_table);
+
+        rocprofiler::intercept_table::notify_runtime_api_registration(
+            ROCPROFILER_MARKER_LIBRARY,
+            lib_version,
+            lib_instance,
+            std::make_tuple(roctx_api_table));
     }
     else
     {

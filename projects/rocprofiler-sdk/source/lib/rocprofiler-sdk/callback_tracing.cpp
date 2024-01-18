@@ -26,6 +26,7 @@
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/context/domain.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
+#include "lib/rocprofiler-sdk/marker/marker.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 
 #include <glog/logging.h>
@@ -134,25 +135,26 @@ rocprofiler_query_callback_tracing_kind_operation_name(rocprofiler_callback_trac
     if(kind < ROCPROFILER_CALLBACK_TRACING_NONE || kind >= ROCPROFILER_CALLBACK_TRACING_LAST)
         return ROCPROFILER_STATUS_ERROR_KIND_NOT_FOUND;
 
+    const char* val = nullptr;
     if(kind == ROCPROFILER_CALLBACK_TRACING_HSA_API)
+        val = rocprofiler::hsa::name_by_id(operation);
+    else if(kind == ROCPROFILER_CALLBACK_TRACING_MARKER_API)
+        val = rocprofiler::marker::name_by_id<ROCPROFILER_MARKER_API_TABLE_ID_RoctxApi>(operation);
+    else
+        return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
+
+    if(!val)
     {
-        const auto* val = rocprofiler::hsa::name_by_id(operation);
+        if(name) *name = nullptr;
+        if(name_len) *name_len = 0;
 
-        if(!val)
-        {
-            if(name) *name = nullptr;
-            if(name_len) *name_len = 0;
-
-            return ROCPROFILER_STATUS_ERROR_OPERATION_NOT_FOUND;
-        }
-
-        if(name) *name = val;
-        if(name_len) *name_len = strnlen(val, 4096);
-
-        return ROCPROFILER_STATUS_SUCCESS;
+        return ROCPROFILER_STATUS_ERROR_OPERATION_NOT_FOUND;
     }
 
-    return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
+    if(name) *name = val;
+    if(name_len) *name_len = strnlen(val, 4096);
+
+    return ROCPROFILER_STATUS_SUCCESS;
 }
 
 rocprofiler_status_t
@@ -174,18 +176,20 @@ rocprofiler_iterate_callback_tracing_kind_operations(
     rocprofiler_callback_tracing_kind_operation_cb_t callback,
     void*                                            data)
 {
+    auto ops = std::vector<uint32_t>{};
     if(kind == ROCPROFILER_CALLBACK_TRACING_HSA_API)
-    {
-        auto ops = rocprofiler::hsa::get_ids();
-        for(const auto& itr : ops)
-        {
-            auto _success = callback(kind, itr, data);
-            if(_success != 0) break;
-        }
-        return ROCPROFILER_STATUS_SUCCESS;
-    }
+        ops = rocprofiler::hsa::get_ids();
+    else if(kind == ROCPROFILER_CALLBACK_TRACING_MARKER_API)
+        ops = rocprofiler::marker::get_ids<ROCPROFILER_MARKER_API_TABLE_ID_RoctxApi>();
+    else
+        return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
 
-    return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
+    for(const auto& itr : ops)
+    {
+        auto _success = callback(kind, itr, data);
+        if(_success != 0) break;
+    }
+    return ROCPROFILER_STATUS_SUCCESS;
 }
 
 rocprofiler_status_t
@@ -199,6 +203,15 @@ rocprofiler_iterate_callback_tracing_kind_operation_args(
         rocprofiler::hsa::iterate_args(
             record.operation,
             *static_cast<rocprofiler_callback_tracing_hsa_api_data_t*>(record.payload),
+            callback,
+            user_data);
+        return ROCPROFILER_STATUS_SUCCESS;
+    }
+    else if(record.kind == ROCPROFILER_CALLBACK_TRACING_MARKER_API)
+    {
+        rocprofiler::marker::iterate_args(
+            record.operation,
+            *static_cast<rocprofiler_callback_tracing_marker_api_data_t*>(record.payload),
             callback,
             user_data);
         return ROCPROFILER_STATUS_SUCCESS;

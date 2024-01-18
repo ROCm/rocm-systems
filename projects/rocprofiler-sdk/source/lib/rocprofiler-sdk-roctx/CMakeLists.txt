@@ -7,6 +7,8 @@ find_package(rocprofiler-register REQUIRED)
 add_library(rocprofiler-sdk-roctx-shared-library SHARED)
 add_library(rocprofiler::rocprofiler-sdk-roctx-shared-library ALIAS
             rocprofiler-sdk-roctx-shared-library)
+add_library(rocprofiler-sdk-roctx::rocprofiler-sdk-roctx-shared-library ALIAS
+            rocprofiler-sdk-roctx-shared-library)
 
 target_sources(rocprofiler-sdk-roctx-shared-library PRIVATE roctx.cpp)
 target_include_directories(

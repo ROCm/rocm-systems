@@ -18,20 +18,13 @@ target_link_libraries(
             rocprofiler::tests-common-library)
 set_target_properties(
     rocprofiler-sdk-json-tool
-    PROPERTIES INSTALL_RPATH "\$ORIGIN:\$ORIGIN/.."
-               INSTALL_RPATH_USE_LINK_PATH ON
+    PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib/rocprofiler-sdk"
                SOVERSION ${PROJECT_VERSION_MINOR}
                VERSION
-               ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH})
+               ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH}
+               INSTALL_RPATH "\$ORIGIN:\$ORIGIN/..")
 
 install(
     TARGETS rocprofiler-sdk-json-tool
     DESTINATION lib/rocprofiler-sdk
     COMPONENT tests)
-
-if(ROCPROFILER_MEMCHECK_PRELOAD_ENV)
-    set(PRELOAD_ENV
-        "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}:$<TARGET_FILE:rocprofiler-sdk-json-tool>")
-else()
-    set(PRELOAD_ENV "LD_PRELOAD=$<TARGET_FILE:rocprofiler-sdk-json-tool>")
-endif()

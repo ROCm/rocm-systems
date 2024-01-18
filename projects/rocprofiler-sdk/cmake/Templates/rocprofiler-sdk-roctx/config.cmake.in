@@ -44,7 +44,7 @@ else()
 
     # Library dependencies
     foreach(TARG @PROJECT_BUILD_TARGETS@)
-        set(TARG @PACKAGE_NAME@::@PACKAGE_NAME@-${TARG})
+        set(TARG @PACKAGE_NAME@::${TARG})
         if(NOT @PACKAGE_NAME@_FIND_COMPONENTS)
             list(APPEND @PACKAGE_NAME@_LIBRARIES ${TARG})
             target_link_libraries(@PACKAGE_NAME@::@PACKAGE_NAME@ INTERFACE ${TARG})
@@ -53,7 +53,7 @@ else()
 
     if(@PACKAGE_NAME@_FIND_COMPONENTS)
         foreach(COMP ${@PACKAGE_NAME@_FIND_COMPONENTS})
-            set(TARG @PACKAGE_NAME@::${COMP})
+            set(TARG @PACKAGE_NAME@::@PACKAGE_NAME@-${COMP})
             if(TARGET ${TARG})
                 set(@PACKAGE_NAME@_${COMP}_FOUND 1)
                 list(APPEND @PACKAGE_NAME@_LIBRARIES ${TARG})

@@ -160,7 +160,23 @@ save(ArchiveT& ar, rocprofiler_hsa_api_retval_t data)
 
 template <typename ArchiveT>
 void
+save(ArchiveT& ar, rocprofiler_marker_api_retval_t data)
+{
+    SAVE_DATA_FIELD(int64_t_retval);
+}
+
+template <typename ArchiveT>
+void
 save(ArchiveT& ar, rocprofiler_callback_tracing_hsa_api_data_t data)
+{
+    SAVE_DATA_FIELD(size);
+    // SAVE_DATA_FIELD(args);
+    SAVE_DATA_FIELD(retval);
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, rocprofiler_callback_tracing_marker_api_data_t data)
 {
     SAVE_DATA_FIELD(size);
     // SAVE_DATA_FIELD(args);

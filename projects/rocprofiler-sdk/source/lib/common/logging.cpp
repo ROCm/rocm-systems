@@ -79,7 +79,7 @@ init_logging(std::string_view env_var)
 
         FLAGS_minloglevel     = loglvl_v;
         FLAGS_stderrthreshold = loglvl_v;
-        LOG(INFO) << "logging initialized";
+        LOG(INFO) << "logging initialized via " << env_var;
     });
 }
 }  // namespace common

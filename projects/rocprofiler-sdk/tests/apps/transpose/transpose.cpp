@@ -21,6 +21,7 @@
 // THE SOFTWARE.
 
 #include "hip/hip_runtime.h"
+#include "rocprofiler-sdk-roctx/roctx.h"
 
 #include <chrono>
 #include <cstdio>
@@ -173,6 +174,8 @@ transpose(const int* in, int* out, int M, int N)
 void
 run(int rank, int tid, int devid, int argc, char** argv)
 {
+    roctxRangePush("run");
+
     constexpr unsigned int M = 4960 * 2;
     constexpr unsigned int N = 4960 * 2;
 
@@ -243,6 +246,8 @@ run(int rank, int tid, int devid, int argc, char** argv)
 
     delete[] inp_matrix;
     delete[] out_matrix;
+
+    roctxRangePop();
 }
 
 namespace
