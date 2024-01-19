@@ -30,9 +30,9 @@ from utils.utils import demarcate, error
 class gfx906_soc (OmniSoC_Base):
     def __init__(self,args):
         super().__init__(args)
-        soc = "gfx906"
-        self.set_soc(soc)
-        self.set_perfmon_dir(os.path.join(str(config.omniperf_home), "omniperf_soc", "profile_configs", soc))
+        self.set_soc_name("gfx906")
+        self.set_perfmon_dir(os.path.join(str(config.omniperf_home), "omniperf_soc", "profile_configs", self.get_soc_name()))
+        self.set_compatible_profilers(["rocprofv1", "rocscope"])
         # Per IP block max number of simultaneous counters. GFX IP Blocks
         self.set_perfmon_config(
             {
@@ -72,7 +72,7 @@ class gfx906_soc (OmniSoC_Base):
         """
         super().profiling_setup()
         if self.get_args().roof_only:
-            error("%s does not support roofline analysis" % self.get_soc())
+            error("%s does not support roofline analysis" % self.get_soc_name())
         # Perfmon filtering
         self.perfmon_filter()
 

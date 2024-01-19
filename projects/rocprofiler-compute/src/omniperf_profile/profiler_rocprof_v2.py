@@ -55,7 +55,7 @@ class rocprof_v2_profiler(OmniProfiler_Base):
         """
         super().pre_processing()
         if self.ready_to_profile:
-            self.pmc_perf_split(self.get_args().path)
+            self.pmc_perf_split()
 
     @demarcate
     def run_profiling(self, version, prog):
@@ -67,26 +67,6 @@ class rocprof_v2_profiler(OmniProfiler_Base):
             super().run_profiling(version, prog)
         else:
             logging.info("[roofline] Detected existing pmc_perf.csv")
-
-        # [Run] Get any SoC specific rocprof options
-            # Pass profiler name and throw error if not supported
-        soc_options = self._soc.get_rocprof_options(rocprof_version)
-            
-        # [Run] Load any rocprof version rocprof options
-            # -i
-            # -d
-            # -o
-        profiler_options = [
-            "-i", fname, 
-            "-d", workload_dir,
-            "-o", fbase,
-            cmd
-        ]
-            
-        # [Run] Call run_prof() util
-
-        
-
 
     @demarcate
     def post_processing(self):

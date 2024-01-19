@@ -32,12 +32,12 @@ import logging
 class gfx90a_soc (OmniSoC_Base):
     def __init__(self,args):
         super().__init__(args)
-        soc = "gfx90a"
-        self.set_soc(soc)
+        self.set_soc_name("gfx90a")
         if hasattr(self.get_args(), 'roof_only') and self.get_args().roof_only:
             self.set_perfmon_dir(os.path.join(str(config.omniperf_home), "omniperf_soc", "profile_configs", "roofline"))
         else:
-            self.set_perfmon_dir(os.path.join(str(config.omniperf_home), "omniperf_soc", "profile_configs", soc)) 
+            self.set_perfmon_dir(os.path.join(str(config.omniperf_home), "omniperf_soc", "profile_configs", self.get_soc_name())) 
+        self.set_compatible_profilers(["rocprofv1", "rocscope"])
         # Per IP block max number of simultaneous counters. GFX IP Blocks
         self.set_perfmon_config(
             {

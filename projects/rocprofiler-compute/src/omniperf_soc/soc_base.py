@@ -36,21 +36,22 @@ from pathlib import Path
 class OmniSoC_Base():
     def __init__(self,args):
         self.__args = args
-        self.__soc = None
+        self.__name = None # SoC name
         self.__perfmon_dir = None
         self.__perfmon_config = {} # Per IP block max number of simulutaneous counters. GFX IP Blocks
         self.__soc_params = {} # SoC specifications
+        self.__compatible_profilers = [] # Store profilers compatible with SoC
         if self.__args.path == os.path.join(os.getcwd(), "workloads"):
             self.__workload_dir = os.path.join(self.__args.path, self.__args.name, self.__args.target)
         else:
             self.__workload_dir = self.__args.path
     
     def __hash__(self):
-        return hash(self.__soc)
+        return hash(self.__name)
     def __eq__(self, other):
         if not isinstance(other, type(self)):
             return NotImplemented
-        return self.__soc == other.get_soc()
+        return self.__name == other.get_soc()
 
     def set_perfmon_dir(self, path:str):
         self.__perfmon_dir = path
@@ -62,12 +63,16 @@ class OmniSoC_Base():
         return str(Path(self.__perfmon_dir).parent.absolute())
     def get_soc_param(self):
         return self.__soc_params
-    def set_soc(self, soc: str):
-        self.__soc = soc
-    def get_soc(self):
-        return self.__soc
+    def set_soc_name(self, soc: str):
+        self.__name = soc
+    def get_soc_name(self):
+        return self.__name
     def get_args(self):
         return self.__args
+    def set_compatible_profilers(self, profiler_names: list):
+        self.__compatible_profilers = profiler_names
+    def get_compatible_profilers(self):
+        return self.__compatible_profilers
     
     @demarcate
     def get_profiler_options(self):
@@ -94,7 +99,7 @@ class OmniSoC_Base():
 
         if not roofline_perfmon_only:
             ref_pmc_files_list = glob.glob(self.__perfmon_dir + "/" + "pmc_*perf*.txt")
-            ref_pmc_files_list += glob.glob(self.__perfmon_dir + "/" + self.__soc + "/pmc_*_perf*.txt")
+            ref_pmc_files_list += glob.glob(self.__perfmon_dir + "/" + self.__name + "/pmc_*_perf*.txt")
 
             # Perfmon list filtering
             if self.__args.ipblocks != None:
@@ -131,20 +136,20 @@ class OmniSoC_Base():
     def profiling_setup(self):
         """Perform any SoC-specific setup prior to profiling.
         """
-        logging.debug("[profiling] perform SoC profiling setup for %s" % self.__soc)
+        logging.debug("[profiling] perform SoC profiling setup for %s" % self.__name)
 
 
     @abstractmethod
     def post_profiling(self):
         """Perform any SoC-specific post profiling activities.
         """
-        logging.debug("[profiling] perform SoC post processing for %s" % self.__soc)
+        logging.debug("[profiling] perform SoC post processing for %s" % self.__name)
 
     @abstractmethod
     def analysis_setup(self):
         """Perform any SoC-specific setup prior to analysis.
         """
-        logging.debug("[analysis] perform SoC analysis setup for %s" % self.__soc)
+        logging.debug("[analysis] perform SoC analysis setup for %s" % self.__name)
         
 
 @demarcate

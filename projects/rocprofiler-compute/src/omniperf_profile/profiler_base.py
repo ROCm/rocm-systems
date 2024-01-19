@@ -37,7 +37,6 @@ class OmniProfiler_Base():
         self.__args = args
         self.__profiler = profiler_mode
         self._soc = soc # OmniSoC obj
-        
         self.__perfmon_dir = os.path.join(str(config.omniperf_home), "omniperf_soc", "profile_configs")
 
     def get_args(self):
@@ -255,7 +254,10 @@ class OmniProfiler_Base():
         """Perform any pre-processing steps prior to profiling.
         """
         logging.debug("[profiling] pre-processing using %s profiler" % self.__profiler)
-
+        
+        # verify soc compatibility
+        if self.__profiler not in self._soc.get_compatible_profilers():
+            error("%s is not enabled in %s. Available profilers include: %s" % (self._soc.get_soc_name(), self.__profiler, self._soc.get_compatible_profilers()))
         # verify not accessing parent directories
         if ".." in str(self.__args.path):
             error("Access denied. Cannot access parent directories in path (i.e. ../)")
@@ -345,7 +347,9 @@ class OmniProfiler_Base():
                     # perfmon_dir=self.__perfmon_dir, 
                     # cmd=self.__args.remaining,
                     # target=self.__args.target,
-                    profiler_options=options
+                    profiler_options=options,
+                    target=self.__args.target,
+                    workload_dir=self.get_args().path
                 )
 
             elif self.__profiler == "rocscope":
