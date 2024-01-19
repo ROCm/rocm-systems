@@ -30,7 +30,7 @@ import os
 import pandas as pd
 import numpy as np
 from utils import schema
-from utils.utils import error
+from utils.utils import error, get_hbm_stack_num
 from pathlib import Path
 import logging
 

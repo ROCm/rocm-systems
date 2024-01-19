@@ -126,7 +126,7 @@ class OmniAnalyze_Base():
             sys_info = file_io.load_sys_info(Path(d[0], "sysinfo.csv"))
             arch = sys_info.iloc[0]["gpu_soc"]
             args = self.__args
-            self.generate_configs(arch, args.config_dir, args.list_kernels, args.filter_metrics, sys_info)
+            self.generate_configs(arch, args.config_dir, args.list_kernels, args.filter_metrics, sys_info.iloc[0])
 
         self.load_options(normalization_filter)
         
