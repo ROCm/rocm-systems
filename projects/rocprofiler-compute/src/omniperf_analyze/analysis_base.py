@@ -77,23 +77,21 @@ class OmniAnalyze_Base():
     @demarcate
     def list_metrics(self):
         args = self.__args
-        if args.list_metrics in file_io.supported_arch.keys():
+        if args.list_metrics in self.__supported_archs.keys():
             arch = args.list_metrics
             if arch not in self._arch_configs.keys():
                 sys_info = file_io.load_sys_info(Path(self.__args.path[0][0], "sysinfo.csv"))
-                self.generate_configs(arch, args.config_dir, args.list_kernels, args.filter_metrics, sys_info)
-            print(
-                tabulate(
-                    pd.DataFrame.from_dict(
-                        self._arch_configs[args.list_metrics].metric_list,
-                        orient="index",
-                        columns=["Metric"],
-                    ),
-                    headers="keys",
-                    tablefmt="fancy_grid"
-                ),
-                file=self._output
-            )
+                self.generate_configs(arch, args.config_dir, args.list_kernels, args.filter_metrics, sys_info.iloc[0])
+
+            for key, value in self._arch_configs[args.list_metrics].metric_list.items():
+                prefix = ""
+                if "." not in str(key):
+                    prefix = ""
+                elif str(key).count(".") == 1:
+                    prefix = "\t"
+                else:
+                    prefix = "\t\t"
+                print(prefix + key, "->", value)
             sys.exit(0)
         else:
             error("Unsupported arch")
@@ -149,7 +147,7 @@ class OmniAnalyze_Base():
     def sanitize(self):
         """Perform sanitization of inputs
         """
-        if not self.__args.list_metrics and not self.__args.path:
+        if not self.__args.path:
             error("The following arguments are required: -p/--path")
         # verify not accessing parent directories
         if ".." in str(self.__args.path):

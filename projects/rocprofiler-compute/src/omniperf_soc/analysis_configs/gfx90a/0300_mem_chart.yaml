@@ -10,6 +10,7 @@ Panel Config:
   data source:
     - metric_table:
         id: 301
+        title: Memory Chart
         header:
           metric: Metric
           #alias: #alias

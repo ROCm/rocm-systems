@@ -493,7 +493,11 @@ def build_dfs(archConfigs, filter_metrics, sys_info):
             for type, data_config in data_source.items():
                 if type == "metric_table":
                     headers = ["Dispatch_ID"]
-
+                    data_source_idx = str(data_config["id"] // 100)
+                    if (data_source_idx != 0 or
+                        data_source_idx in filter_metrics
+                    ):
+                        metric_list[data_source_idx] = panel["title"]
                     if (
                         "cli_style" in data_config
                         and data_config["cli_style"] == "simple_box"
@@ -541,6 +545,8 @@ def build_dfs(archConfigs, filter_metrics, sys_info):
                             values.append(metric_idx)
                             values.append(key)
                             
+                            metric_list[data_source_idx] = data_config["title"]
+
                             if (
                                 "cli_style" in data_config
                                 and data_config["cli_style"] == "simple_box"
@@ -850,10 +856,10 @@ def apply_filters(workload, dir, is_gui, debug):
             # Verify valid kernel filter
             kernels_df = pd.read_csv(os.path.join(dir, "pmc_kernel_top.csv"))
             for kernel_id in workload.filter_kernel_ids:
-                if kernel_id > len(kernels_df["KernelName"]):
+                if kernel_id > len(kernels_df["Kernel_Name"]):
                     error(
                         "{} is an invalid kernel id. Please enter an id between 0-{}".format(
-                            kernel_id, len(kernels_df["KernelName"])
+                            kernel_id, len(kernels_df["Kernel_Name"])
                         )
                     )
             kernels = []
@@ -863,19 +869,19 @@ def apply_filters(workload, dir, is_gui, debug):
             kernel_top_df["S"] = ""
             for kernel_id in workload.filter_kernel_ids:
                 # print("------- ", kernel_id)
-                kernels.append(kernel_top_df.loc[kernel_id, "KernelName"])
+                kernels.append(kernel_top_df.loc[kernel_id, "Kernel_Name"])
                 kernel_top_df.loc[kernel_id, "S"] = "*"
 
             if kernels:
                 # print("fitlered df:", len(df.index))
                 ret_df = ret_df.loc[
-                    ret_df[schema.pmc_perf_file_prefix]["KernelName"].isin(kernels)
+                    ret_df[schema.pmc_perf_file_prefix]["Kernel_Name"].isin(kernels)
                 ]
         else:
             if debug:
                 print("GUI kernel filtering")
             ret_df = ret_df.loc[
-                ret_df[schema.pmc_perf_file_prefix]["KernelName"].isin(
+                ret_df[schema.pmc_perf_file_prefix]["Kernel_Name"].isin(
                     workload.filter_kernel_ids
                 )
             ]
