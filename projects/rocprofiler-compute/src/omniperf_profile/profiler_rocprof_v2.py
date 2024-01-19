@@ -74,24 +74,9 @@ class rocprof_v2_profiler(OmniProfiler_Base):
         """
         super().post_processing()
 
-        # Different rocprof versions have different headers. Set mapping for profiler output 
-        output_headers = {
-            "Kernel_Name": "Kernel_Name",
-            "Grid_Size": "Grid_Size",
-            "GPU_ID": "GPU_ID",
-            "Workgroup_Size": "Workgroup_Size",
-            "LDS_Per_Workgroup": "LDS_Per_Workgroup",
-            "Scratch_Per_Workitem": "Scratch_Per_Workitem",
-            "SGPR": "SGPR",
-            "Arch_VGPR": "Arch_VGPR",
-            "Accum_VGPR": "Accum_VGPR",
-            "Start_Timestamp": "Start_Timestamp",
-            "End_Timestamp": "End_Timestamp",
-        }
-        
         if self.ready_to_profile:
             # Pass headers to join on 
-            self.join_prof(output_headers)
+            self.join_prof()
             # Demangle and overwrite original KernelNames
             kernel_name_shortener(self.get_args().path, self.get_args().kernel_verbose)
 

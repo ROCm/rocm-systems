@@ -83,7 +83,7 @@ class OmniProfiler_Base():
 
     # joins disparate runs less dumbly than rocprof
     @demarcate
-    def join_prof(self, output_headers, out=None):
+    def join_prof(self, out=None):
         """Manually join separated rocprof runs
         """
         # Set default output directory if not specified
@@ -101,12 +101,12 @@ class OmniProfiler_Base():
         for i, file in enumerate(files):
             _df = pd.read_csv(file) if type(self.__args.path) == str else file
             if self.__args.join_type == "kernel":
-                key = _df.groupby(output_headers["Kernel_Name"]).cumcount()
-                _df["key"] = _df.KernelName + " - " + key.astype(str)
+                key = _df.groupby("Kernel_Name").cumcount()
+                _df["key"] = _df.Kernel_Name + " - " + key.astype(str)
             elif self.__args.join_type == "grid":
-                key = _df.groupby([output_headers["Kernel_Name"], output_headers["Grid_Size"]]).cumcount()
+                key = _df.groupby(["Kernel_Name", "Grid_Size"]).cumcount()
                 _df["key"] = (
-                    _df[output_headers["Kernel_Name"]] + " - " + _df[output_headers["Grid_Size"]].astype(str) + " - " + key.astype(str)
+                    _df["Kernel_Name"] + " - " + _df["Grid_Size"].astype(str) + " - " + key.astype(str)
                 )
             else:
                 print("ERROR: Unrecognized --join-type")
@@ -120,20 +120,20 @@ class OmniProfiler_Base():
 
         # TODO: check for any mismatch in joins
         duplicate_cols = {
-            output_headers["GPU_ID"]: [col for col in df.columns if output_headers["GPU_ID"] in col],
-            output_headers["Grid_Size"]: [col for col in df.columns if output_headers["Grid_Size"] in col],
-            output_headers["Workgroup_Size"]: [col for col in df.columns if output_headers["Workgroup_Size"] in col],
-            output_headers["LDS_Per_Workgroup"]: [col for col in df.columns if output_headers["LDS_Per_Workgroup"] in col],
-            output_headers["Scratch_Per_Workitem"]: [col for col in df.columns if output_headers["Scratch_Per_Workitem"] in col],
-            output_headers["SGPR"]: [col for col in df.columns if output_headers["SGPR"] in col],
+            "GPU_ID": [col for col in df.columns if "GPU_ID" in col],
+            "Grid_Size": [col for col in df.columns if "Grid_Size" in col],
+            "Workgroup_Size": [col for col in df.columns if "Workgroup_Size" in col],
+            "LDS_Per_Workgroup": [col for col in df.columns if "LDS_Per_Workgroup" in col],
+            "Scratch_Per_Workitem": [col for col in df.columns if "Scratch_Per_Workitem" in col],
+            "SGPR": [col for col in df.columns if "SGPR" in col],
         }
         # Check for vgpr counter in ROCm < 5.3
         if "vgpr" in df.columns:
             duplicate_cols["vgpr"] = [col for col in df.columns if "vgpr" in col]
         # Check for vgpr counter in ROCm >= 5.3
         else:
-            duplicate_cols[output_headers["Arch_VGPR"]] = [col for col in df.columns if output_headers["Arch_VGPR"] in col]
-            duplicate_cols[output_headers["Accum_VGPR"]] = [col for col in df.columns if output_headers["Accum_VGPR"] in col]
+            duplicate_cols["Arch_VGPR"] = [col for col in df.columns if "Arch_VGPR" in col]
+            duplicate_cols["Accum_VGPR"] = [col for col in df.columns if "Accum_VGPR" in col]
         for key, cols in duplicate_cols.items():
             _df = df[cols]
             if not test_df_column_equality(_df):
@@ -158,23 +158,7 @@ class OmniProfiler_Base():
                 if not any(
                     check in k
                     for check in [
-                        # rocprofv1 headers
-                        "gpu-id_",
-                        "grd_",
-                        "wgr_",
-                        "lds_",
-                        "scr_",
-                        "vgpr_",
-                        "sgpr_",
-                        "Index_",
-                        "queue-id",
-                        "queue-index",
-                        "pid",
-                        "tid",
-                        "fbar",
-                        "sig",
-                        "obj",
-                        # rocprofv2 headers
+                       # rocprofv2 headers
                         "GPU_ID_",
                         "Grid_Size_",
                         "Workgroup_Size_",
@@ -193,6 +177,13 @@ class OmniProfiler_Base():
                         "OBJ",
                         # rocscope specific merged counters, keep original
                         "dispatch_",
+                        # extras
+                        "sig",
+                        "queue-id",
+                        "queue-index",
+                        "pid",
+                        "tid",
+                        "fbar",
                     ]
                 )
             ]
@@ -214,7 +205,7 @@ class OmniProfiler_Base():
             ]
         ]
         #   C) sanity check the name and key
-        namekeys = [k for k in df.keys() if output_headers["Kernel_Name"] in k]
+        namekeys = [k for k in df.keys() if "Kernel_Name" in k]
         assert len(namekeys)
         for k in namekeys[1:]:
             assert (df[namekeys[0]] == df[k]).all()
@@ -223,9 +214,9 @@ class OmniProfiler_Base():
         bkeys = []
         ekeys = []
         for k in df.keys():
-            if output_headers["Start_Timestamp"] in k:
+            if "Start_Timestamp" in k:
                 bkeys.append(k)
-            if output_headers["End_Timestamp"] in k:
+            if "End_Timestamp" in k:
                 ekeys.append(k)
         # compute mean begin and end timestamps
         endNs = df[ekeys].mean(axis=1)
@@ -233,8 +224,8 @@ class OmniProfiler_Base():
         # and replace
         df = df.drop(columns=bkeys)
         df = df.drop(columns=ekeys)
-        df["BeginNs"] = beginNs
-        df["EndNs"] = endNs
+        df["Start_Timestamp"] = beginNs
+        df["End_Timestamp"] = endNs
         # finally, join the drop key
         df = df.drop(columns=["key"])
         # save to file and delete old file(s), skip if we're being called outside of Omniperf

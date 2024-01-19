@@ -242,20 +242,39 @@ def run_prof(fname, profiler_options, target, workload_dir):
         )
         # Remove temp directory
         shutil.rmtree(workload_dir + "/" + "out")
+
+    # Overwrite headers
+    output_headers = {
+        "KernelName": "Kernel_Name",
+        "Index": "Dispatch_ID",
+        "grd": "Grid_Size",
+        "gpu-id": "GPU_ID",
+        "wgr": "Workgroup_Size",
+        "lds": "LDS_Per_Workgroup",
+        "scr": "Scratch_Per_Workitem",
+        "sgpr": "SGPR",
+        "arch_vgpr": "Arch_VGPR",
+        "accum_vgpr": "Accum_VGPR",
+        "BeginNs": "Start_Timestamp",
+        "EndNs": "End_Timestamp",
+    }
+    df = pd.read_csv(workload_dir + "/" + fbase + ".csv")
+    df.rename(columns=output_headers, inplace=True)
+    df.to_csv(workload_dir + "/" + fbase + ".csv", index=False)
     
     # write rocprof output to logging
     logging.info(output)
 
 def replace_timestamps(workload_dir):
     df_stamps = pd.read_csv(workload_dir + "/timestamps.csv")
-    if "BeginNs" in df_stamps.columns and "EndNs" in df_stamps.columns:
+    if "Start_Timestamp" in df_stamps.columns and "End_Timestamp" in df_stamps.columns:
         # Update timestamps for all *.csv output files
         for fname in glob.glob(workload_dir + "/" + "*.csv"):
             if path(fname).name != "sysinfo.csv":
                 df_pmc_perf = pd.read_csv(fname)
 
-                df_pmc_perf["BeginNs"] = df_stamps["BeginNs"]
-                df_pmc_perf["EndNs"] = df_stamps["EndNs"]
+                df_pmc_perf["Start_Timestamp"] = df_stamps["Start_Timestamp"]
+                df_pmc_perf["End_Timestamp"] = df_stamps["End_Timestamp"]
                 df_pmc_perf.to_csv(fname, index=False)
     else:
         warning = "WARNING: Incomplete profiling data detected. Unable to update timestamps."

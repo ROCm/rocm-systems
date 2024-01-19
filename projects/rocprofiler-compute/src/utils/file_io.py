@@ -95,28 +95,28 @@ def create_df_kernel_top_stats(
     # The logic below for filters are the same as in parser.apply_filters(),
     # which can be merged together if need it.
     if filter_gpu_ids:
-        df = df.loc[df["gpu-id"].astype(str).isin([filter_gpu_ids])]
+        df = df.loc[df["GPU_ID"].astype(str).isin([filter_gpu_ids])]
 
     if filter_dispatch_ids:
         # NB: support ignoring the 1st n dispatched execution by '> n'
         #     The better way may be parsing python slice string
         if ">" in filter_dispatch_ids[0]:
             m = re.match("\> (\d+)", filter_dispatch_ids[0])
-            df = df[df["Index"] > int(m.group(1))]
+            df = df[df["Dispatch_ID"] > int(m.group(1))]
         else:
-            df = df.loc[df["Index"].astype(str).isin(filter_dispatch_ids)]
+            df = df.loc[df["Dispatch_ID"].astype(str).isin(filter_dispatch_ids)]
 
     # First, create a dispatches file used to populate global vars
-    dispatch_info = df.loc[:, ["Index", "KernelName", "gpu-id"]]
+    dispatch_info = df.loc[:, ["Dispatch_ID", "Kernel_Name", "GPU_ID"]]
     dispatch_info.to_csv(os.path.join(raw_data_dir, "pmc_dispatch_info.csv"), index=False)
 
     time_stats = pd.concat(
-        [df["KernelName"], (df["EndNs"] - df["BeginNs"])],
-        keys=["KernelName", "ExeTime"],
+        [df["Kernel_Name"], (df["End_Timestamp"] - df["Start_Timestamp"])],
+        keys=["Kernel_Name", "ExeTime"],
         axis=1,
     )
 
-    grouped = time_stats.groupby(by=["KernelName"]).agg(
+    grouped = time_stats.groupby(by=["Kernel_Name"]).agg(
         {"ExeTime": ["count", "sum", "mean", "median"]}
     )
 
@@ -147,7 +147,7 @@ def create_df_kernel_top_stats(
 
         grouped.to_csv(os.path.join(raw_data_dir, "pmc_kernel_top.csv"), index=False)
     elif sortby == "kernel":
-        grouped = grouped.sort_values("KernelName")
+        grouped = grouped.sort_values("Kernel_Name")
 
         grouped = grouped.head(max_kernel_num)  # Display only the top n results
         grouped.to_csv(os.path.join(raw_data_dir, "pmc_kernel_top.csv"), index=False)

@@ -338,8 +338,8 @@ def calc_ai(sort_type, ret_df):
             logging.debug("[roofline] {}: Skipped hbm_data at index {}".format(kernelName[:35], idx))
             pass
 
-        totalDuration += df["EndNs"][idx] - df["BeginNs"][idx]
-        avgDuration += df["EndNs"][idx] - df["BeginNs"][idx]
+        totalDuration += df["End_Timestamp"][idx] - df["Start_Timestamp"][idx]
+        avgDuration += df["End_Timestamp"][idx] - df["Start_Timestamp"][idx]
 
         calls += 1
 

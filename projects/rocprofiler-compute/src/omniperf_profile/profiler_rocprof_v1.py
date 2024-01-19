@@ -78,24 +78,9 @@ class rocprof_v1_profiler(OmniProfiler_Base):
         """
         super().post_processing()
 
-        # Different rocprof versions have different headers. Set mapping for profiler output 
-        output_headers = {
-            "Kernel_Name": "KernelName",
-            "Grid_Size": "grd",
-            "GPU_ID": "gpu",
-            "Workgroup_Size": "wgr",
-            "LDS_Per_Workgroup": "lds",
-            "Scratch_Per_Workitem": "scr",
-            "SGPR": "sgpr",
-            "Arch_VGPR": "arch_vgpr",
-            "Accum_VGPR": "accum_vgpr",
-            "Start_Timestamp": "BeginNs",
-            "End_Timestamp": "EndNs",
-        }
-
         if self.ready_to_profile:
             # Manually join each pmc_perf*.csv output
-            self.join_prof(output_headers)
+            self.join_prof()
             # Replace timestamp data to solve a known rocprof bug
             replace_timestamps(self.get_args().path)
             # Demangle and overwrite original KernelNames

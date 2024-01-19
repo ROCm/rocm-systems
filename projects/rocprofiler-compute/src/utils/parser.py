@@ -61,7 +61,7 @@ pmc_kernel_top_table_id = 1
 #                    },
 #                    {
 #                         "case":  { "$eq": [ $normUnit, "per Sec"]} ,
-#                         "then":  {"$divide":[{"$subtract": ["&EndNs", "&BeginNs" ]}, 1000000000]}
+#                         "then":  {"$divide":[{"$subtract": ["&End_Timestamp", "&Start_Timestamp" ]}, 1000000000]}
 #                    }
 #                 ],
 #                "default": 1
@@ -70,7 +70,7 @@ pmc_kernel_top_table_id = 1
 supported_denom = {
     "per_wave": "SQ_WAVES",
     "per_cycle": "GRBM_GUI_ACTIVE",
-    "per_second": "((EndNs - BeginNs) / 1000000000)",
+    "per_second": "((End_Timestamp - Start_Timestamp) / 1000000000)",
     "per_kernel": "1",
 }
 
@@ -79,7 +79,7 @@ build_in_vars = {
     "numActiveCUs": "TO_INT(MIN((((ROUND(AVG(((4 * SQ_BUSY_CU_CYCLES) / GRBM_GUI_ACTIVE)), \
               0) / $maxWavesPerCU) * 8) + MIN(MOD(ROUND(AVG(((4 * SQ_BUSY_CU_CYCLES) \
               / GRBM_GUI_ACTIVE)), 0), $maxWavesPerCU), 8)), $numCU))",
-    "kernelBusyCycles": "ROUND(AVG((((EndNs - BeginNs) / 1000) * $sclk)), 0)",
+    "kernelBusyCycles": "ROUND(AVG((((End_Timestamp - Start_Timestamp) / 1000) * $sclk)), 0)",
 }
 
 supported_call = {
@@ -357,15 +357,15 @@ def gen_counter_list(formula):
     }
 
     built_in_counter = [
-        "lds",
-        "grd",
-        "wgr",
-        "arch_vgpr",
-        "accum_vgpr",
-        "sgpr",
-        "scr",
-        "BeginNs",
-        "EndNs",
+        "LDS_Per_Workgroup",
+        "Grid_Size",
+        "Workgroup_Size",
+        "Arch_VGPR",
+        "Accum_VGPR",
+        "SGPR",
+        "Scratch_Per_Workitem",
+        "Start_Timestamp",
+        "End_Timestamp",
     ]
 
     visited = False
@@ -492,7 +492,7 @@ def build_dfs(archConfigs, filter_metrics, sys_info):
         for data_source in panel["data source"]:
             for type, data_config in data_source.items():
                 if type == "metric_table":
-                    headers = ["Index"]
+                    headers = ["Dispatch_ID"]
 
                     if (
                         "cli_style" in data_config
@@ -600,7 +600,7 @@ def build_dfs(archConfigs, filter_metrics, sys_info):
 
                         i += 1
 
-                    df.set_index("Index", inplace=True)
+                    df.set_index("Dispatch_ID", inplace=True)
                     # df.set_index('Metric', inplace=True)
                     # print(tabulate(df, headers='keys', tablefmt='fancy_grid'))
                 elif type == "raw_csv_table":
@@ -828,7 +828,7 @@ def apply_filters(workload, dir, is_gui, debug):
 
     if workload.filter_gpu_ids:
         ret_df = ret_df.loc[
-            ret_df[schema.pmc_perf_file_prefix]["gpu-id"]
+            ret_df[schema.pmc_perf_file_prefix]["GPU_ID"]
             .astype(str)
             .isin([workload.filter_gpu_ids])
         ]
@@ -890,7 +890,7 @@ def apply_filters(workload, dir, is_gui, debug):
         if ">" in workload.filter_dispatch_ids[0]:
             m = re.match("\> (\d+)", workload.filter_dispatch_ids[0])
             ret_df = ret_df[
-                ret_df[schema.pmc_perf_file_prefix]["Index"] > int(m.group(1))
+                ret_df[schema.pmc_perf_file_prefix]["Dispatch_ID"] > int(m.group(1))
             ]
         else:
             dispatches = [int(x) for x in workload.filter_dispatch_ids]

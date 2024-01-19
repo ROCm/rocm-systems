@@ -151,12 +151,12 @@ class Omniperf:
         # in case of analyze mode, we can explicitly specify an arch
         # rather than detect from rocminfo
         if sys_info.empty:
-            arch = sys_info.iloc[0]["gpu_soc"]
-            target = sys_info.iloc[0]["name"]
-        else:
             mspec = get_machine_specs(0)
             arch = mspec.arch
             target = mspec.GPU
+        else:
+            arch = sys_info.iloc[0]["gpu_soc"]
+            target = sys_info.iloc[0]["name"]
 
         # instantiate underlying SoC support class
         # in case of analyze mode, __soc can accommodate multiple archs

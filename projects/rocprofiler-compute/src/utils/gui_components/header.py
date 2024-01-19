@@ -186,7 +186,7 @@ def get_header(raw_pmc, input_filters, kernel_names):
                                                             str,
                                                             raw_pmc[
                                                                 schema.pmc_perf_file_prefix
-                                                            ]["gpu-id"],
+                                                            ]["GPU_ID"],
                                                         )
                                                     ),
                                                     True,
@@ -219,7 +219,7 @@ def get_header(raw_pmc, input_filters, kernel_names):
                                                         str,
                                                         raw_pmc[
                                                             schema.pmc_perf_file_prefix
-                                                        ]["Index"],
+                                                        ]["Dispatch_ID"],
                                                     )
                                                 ),
                                                 id="disp-filt",
