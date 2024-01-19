@@ -242,7 +242,7 @@ def show_kernels(args, runs, archConfigs, output):
                     # NB:
                     #   For pmc_kernel_top.csv, have to sort here if not
                     #   sorted when load_table_data.
-                    df = pd.concat([df, single_df["KernelName"]], axis=1)
+                    df = pd.concat([df, single_df["Kernel_Name"]], axis=1)
 
     print(
         tabulate(

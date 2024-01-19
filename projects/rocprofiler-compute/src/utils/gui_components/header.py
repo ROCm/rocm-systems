@@ -275,7 +275,7 @@ def get_header(raw_pmc, input_filters, kernel_names):
                                                                     str,
                                                                     raw_pmc[
                                                                         schema.pmc_perf_file_prefix
-                                                                    ]["KernelName"],
+                                                                    ]["Kernel_Name"],
                                                                 )
                                                             ),
                                                             False,

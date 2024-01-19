@@ -190,7 +190,7 @@ def calc_ai(sort_type, ret_df):
     """
     df = ret_df["pmc_perf"]
     # Sort by top kernels or top dispatches?
-    df = df.sort_values(by=["KernelName"])
+    df = df.sort_values(by=["Kernel_Name"])
     df = df.reset_index(drop=True)
 
     total_flops = (
@@ -223,9 +223,9 @@ def calc_ai(sort_type, ret_df):
         if idx + 1 == df.shape[0]:
             at_end = True
         else:
-            next_kernelName = df["KernelName"][idx + 1]
+            next_kernelName = df["Kernel_Name"][idx + 1]
 
-        kernelName = df["KernelName"][idx]
+        kernelName = df["Kernel_Name"][idx]
         try:
             total_flops += (
                 (

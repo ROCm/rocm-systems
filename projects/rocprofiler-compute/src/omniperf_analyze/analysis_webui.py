@@ -77,7 +77,7 @@ class webui_analysis(OmniAnalyze_Base):
         filt_kernel_names = []
         kernel_top_df = base_data.dfs[1]
         for kernel_id in base_data.filter_kernel_ids:
-            filt_kernel_names.append(kernel_top_df.loc[kernel_id, "KernelName"])
+            filt_kernel_names.append(kernel_top_df.loc[kernel_id, "Kernel_Name"])
         
         self.app.layout.children = html.Div(
             children=[
