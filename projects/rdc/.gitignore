@@ -21,3 +21,6 @@ docs/_doxygen/
 # do NOT ignore these files
 !.clang-format
 !.editorconfig
+
+# misc
+__pycache__/
