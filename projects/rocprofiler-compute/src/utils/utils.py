@@ -37,7 +37,6 @@ from datetime import datetime
 from pathlib import Path as path
 import config
 
-
 rocprof_cmd = ""
 
 def demarcate(function):
@@ -111,42 +110,53 @@ def detect_rocprof():
     """Detect loaded rocprof version. Resolve path and set cmd globally.
     """
     global rocprof_cmd
-    # rocprof info
+    # detect rocprof
     if not "ROCPROF" in os.environ.keys():
         rocprof_cmd = "rocprof"
     else:
         rocprof_cmd = os.environ["ROCPROF"]
+    
+    # resolve rocprof path
     rocprof_path = shutil.which(rocprof_cmd)
 
-    # TODO: this could be more elegant, clean code later
     if not rocprof_path:
         rocprof_cmd = "rocprof"
+        logging.warning("Warning: Unable to resolve path to %s binary. Reverting to default." % rocprof_cmd)
         rocprof_path = shutil.which(rocprof_cmd)
-
-    if not rocprof_path:
-        error(
-            "Error: Unable to resolve path to {} binary\n Please verify installation or set ROCPROF environment variable with full path.".format(rocprof_cmd)
-        )
+        if not rocprof_path:
+            error("Please verify installation or set ROCPROF environment variable with full path.")
     else:
         # Resolve any sym links in file path
         rocprof_path = os.path.realpath(rocprof_path.rstrip("\n"))
         logging.info("ROC Profiler: " + str(rocprof_path))
         return rocprof_cmd #TODO: Do we still need to return this? It's not being used in the function call
 
-def capture_subprocess_output(subprocess_args):
-    """Run specified subprocess and concurrently capture output
-    """
+def capture_subprocess_output(subprocess_args, new_env=None):
     # Start subprocess
     # bufsize = 1 means output is line buffered
     # universal_newlines = True is required for line buffering
-    process = subprocess.Popen(subprocess_args,
-                            bufsize=1,
-                            stdout=subprocess.PIPE,
-                            stderr=subprocess.STDOUT,
-                            universal_newlines=True)
+    process = (
+        subprocess.Popen(
+            subprocess_args,
+            bufsize=1,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            universal_newlines=True,
+        )
+        if new_env == None
+        else subprocess.Popen(
+            subprocess_args,
+            bufsize=1,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            universal_newlines=True,
+            env=new_env,
+        )
+    )
 
     # Create callback function for process output
     buf = io.StringIO()
+
     def handle_output(stream, mask):
         # Because the process' output is line buffered, there's only ever one
         # line to read when this function is called
@@ -178,10 +188,11 @@ def capture_subprocess_output(subprocess_args):
 
     return (success, output)
 
-def run_prof(fname, profiler_options):
+def run_prof(fname, profiler_options, target, workload_dir):
 
     fbase = os.path.splitext(os.path.basename(fname))[0]
-
+    m_specs = specs.get_machine_specs(0)
+    
     logging.debug("pmc file:", os.path.basename(fname))
 
     # standard rocprof options
@@ -190,14 +201,48 @@ def run_prof(fname, profiler_options):
     ]
     options = default_options + profiler_options
 
+    # set required env var for mi300
+    new_env = None
+    if  (target.lower() == "mi300x_a0" or target.lower() == "mi300x_a1" or target.lower() == "mi300a_a0" or target.lower() == "mi300a_a1") and (
+        os.path.basename(fname) == "pmc_perf_13.txt"
+        or os.path.basename(fname) == "pmc_perf_14.txt"
+        or os.path.basename(fname) == "pmc_perf_15.txt"
+        or os.path.basename(fname) == "pmc_perf_16.txt"
+    ):
+        new_env = os.environ.copy()
+        new_env["ROCPROFILER_INDIVIDUAL_XCC_MODE"] = "1"
+
     # profile the app
-    success, output = capture_subprocess_output(
-        [ rocprof_cmd ] + options
-    )
+    if new_env:
+         success, output = capture_subprocess_output(
+            [ rocprof_cmd ] + options, new_env
+        )
+    else:
+        success, output = capture_subprocess_output(
+            [ rocprof_cmd ] + options
+        )
 
     if not success:
-            error(output)
+        error(output)
 
+    if new_env:
+        # flatten tcc for applicable mi300 input
+        f = path(workload_dir + "/out/pmc_1/results_" + fbase + ".csv")
+        hbm_stack_num = get_hbm_stack_num(target, m_specs.memory_partition)
+        df = flatten_tcc_info_across_hbm_stacks(
+            f, hbm_stack_num, int(m_specs.L2Banks)
+        )
+        df.to_csv(f, index=False)
+
+    if os.path.exists(workload_dir + "/out"):
+        # copy and remove out directory if needed
+        shutil.copyfile(
+            workload_dir + "/out/pmc_1/results_" + fbase + ".csv",
+            workload_dir + "/" + fbase + ".csv",
+        )
+        # Remove temp directory
+        shutil.rmtree(workload_dir + "/" + "out")
+    
     # write rocprof output to logging
     logging.info(output)
 
@@ -391,4 +436,97 @@ def mibench(args):
         ],
         check=True
     )
+
+def flatten_tcc_info_across_hbm_stacks(file, stack_num, tcc_channel_per_stack):
+    """
+    Flatten TCC per channel counters across all HBM stacks in used.
+    NB: This func highly depends on the default behavior of rocprofv2 on MI300,
+        which might be broken anytime in the future!
+    """
+    df_orig = pd.read_csv(file)
+    # display(df_orig.info)
+
+    ### prepare column headers
+    tcc_cols_orig = []
+    non_tcc_cols_orig = []
+    for c in df_orig.columns.to_list():
+        if "TCC" in c:
+            tcc_cols_orig.append(c)
+        else:
+            non_tcc_cols_orig.append(c)
+    # print(tcc_cols_orig)
+
+    cols = non_tcc_cols_orig
+    tcc_cols_in_group = {}
+    for i in range(0, stack_num):
+        tcc_cols_in_group[i] = []
+
+    for col in tcc_cols_orig:
+        for i in range(0, stack_num):
+            # filter the channel index only
+            p = re.compile(r"(\d+)")
+            # pick up the 1st element only
+            r = lambda match: str(int(float(match.group(0))) + i * tcc_channel_per_stack)
+            tcc_cols_in_group[i].append(re.sub(pattern=p, repl=r, string=col))
+
+    for i in range(0, stack_num):
+        # print(tcc_cols_in_group[i])
+        cols += tcc_cols_in_group[i]
+    # print(cols)
+    df = pd.DataFrame(columns=cols)
+
+    ### Rearrange data with extended column names
+
+    # print(len(df_orig.index))
+    for idx in range(0, len(df_orig.index), stack_num):
+        # assume the front none TCC columns are the same for all XCCs
+        df_non_tcc = df_orig.iloc[idx].filter(regex=r"^(?!.*TCC).*$")
+        # display(df_non_tcc)
+        flatten_list = df_non_tcc.tolist()
+
+        # extract all tcc from one dispatch
+        # NB: assuming default contiguous order might not be safe!
+        df_tcc_all = df_orig.iloc[idx : (idx + stack_num)].filter(regex="TCC")
+        # display(df_tcc_all)
+
+        for idx, row in df_tcc_all.iterrows():
+            flatten_list += row.tolist()
+        # print(len(df.index), len(flatten_list), len(df.columns), flatten_list)
+        # NB: It is not the best perf to append a row once a time
+        df.loc[len(df.index)] = flatten_list
+
+    return df
+
+def get_hbm_stack_num(gpu_name, memory_partition):
+    """
+    Get total HBM stack numbers based on  memory partition for MI300.
+    """
+
+    # TODO:
+    # - better err log
+    if gpu_name.lower() == "mi300a_a0" or gpu_name.lower() == "mi300a_a1":
+        if memory_partition.lower() == "nps1":
+            return 6
+        elif memory_partition.lower() == "nps4":
+            return 2
+        elif memory_partition.lower() == "nps8":
+            return 1
+        else:
+            print("Invalid MI300A memory partition mode!")
+            sys.exit()
+    elif gpu_name.lower() == "mi300x_a0" or gpu_name.lower() == "mi300x_a1":
+        if memory_partition.lower() == "nps1":
+            return 8
+        elif memory_partition.lower() == "nps2":
+            return 4
+        elif memory_partition.lower() == "nps4":
+            return 2
+        elif memory_partition.lower() == "nps8":
+            return 1
+        else:
+            print("Invalid MI300X memory partition mode!")
+            sys.exit()
+    else:
+        # Fixme: add proper numbers for other archs
+        return -1
     

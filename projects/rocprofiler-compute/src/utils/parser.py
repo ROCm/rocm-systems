@@ -1016,37 +1016,4 @@ def correct_sys_info(df, specs_correction):
 
     return df
 
-def get_hbm_stack_num(gpu_name, memory_partition):
-    """
-    Get total HBM stack numbers based on  memory partition for MI300.
-    """
 
-    # TODO:
-    # - move this function to the proper file
-    # - better err log
-
-    if gpu_name.lower() == "mi300a_a0" or gpu_name.lower() == "mi300a_a1":
-        if memory_partition.lower() == "nps1":
-            return 6
-        elif memory_partition.lower() == "nps4":
-            return 2
-        elif memory_partition.lower() == "nps8":
-            return 1
-        else:
-            print("Invalid MI300A memory partition mode!")
-            sys.exit()
-    elif gpu_name.lower() == "mi300x_a0" or gpu_name.lower() == "mi300x_a1":
-        if memory_partition.lower() == "nps1":
-            return 8
-        elif memory_partition.lower() == "nps2":
-            return 4
-        elif memory_partition.lower() == "nps4":
-            return 2
-        elif memory_partition.lower() == "nps8":
-            return 1
-        else:
-            print("Invalid MI300X memory partition mode!")
-            sys.exit()
-    else:
-        # Fixme: add proper numbers for other archs
-        return -1
