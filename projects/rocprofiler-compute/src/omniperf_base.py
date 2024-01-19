@@ -51,6 +51,7 @@ class Omniperf:
             "gfx906": {"mi50": ["MI50", "MI60"]},
             "gfx908": {"mi100": ["MI100"]},
             "gfx90a": {"mi200": ["MI210", "MI250", "MI250X"]},
+            "gfx942": {"mi300": ["MI300A_A1", "MI300X_A1"]},
         }
 
         self.setup_logging()
@@ -127,7 +128,14 @@ class Omniperf:
         else:
             #TODO: Add detection logic for rocprofv2
             rocprof_cmd = detect_rocprof()
-            self.__profiler_mode = "rocprofv1"
+            if str(rocprof_cmd).endswith("rocprof"):
+                self.__profiler_mode = "rocprofv1"
+            elif str(rocprof_cmd).endswith("rocprofv2"):
+                self.__profiler_mode = "rocprofv2"
+            else:
+                error("Incompatible profiler. Please review documentation.")
+
+
         return
     def detect_analyze(self):
         if self.__args.gui:
@@ -137,22 +145,24 @@ class Omniperf:
         return
 
     @demarcate
-    def detect_soc(self, arch=None):
+    def detect_soc(self, sys_info=pd.DataFrame()):
         """Load OmniSoC instance for Omniperf run
         """
         # in case of analyze mode, we can explicitly specify an arch
         # rather than detect from rocminfo
-        if not arch:
+        if sys_info.empty:
+            arch = sys_info.iloc[0]["gpu_soc"]
+            target = sys_info.iloc[0]["name"]
+        else:
             mspec = get_machine_specs(0)
             arch = mspec.arch
+            target = mspec.GPU
 
         # instantiate underlying SoC support class
         # in case of analyze mode, __soc can accommodate multiple archs
         if arch not in self.__supported_archs.keys():
-            logging.error("Unsupported SoC")
-            sys.exit(1)
+            error("%s is an unsupported SoC" % arch)
         else:
-            target = list(self.__supported_archs[arch].keys())[0]
             self.__soc_name.add(target)
             if hasattr(self.__args, 'target'):
                 self.__args.target = target
@@ -251,9 +261,7 @@ class Omniperf:
         # Load required SoC(s) from input
         for d in analyzer.get_args().path:
             sys_info = pd.read_csv(Path(d[0], "sysinfo.csv"))
-            arch = sys_info.iloc[0]["gpu_soc"]
-            # Create and load new SoC object
-            self.detect_soc(arch)
+            self.detect_soc(sys_info)
 
         analyzer.set_soc(self.__soc)
         analyzer.pre_processing()
