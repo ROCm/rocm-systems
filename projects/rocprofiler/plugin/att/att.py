@@ -557,7 +557,7 @@ if __name__ == "__main__":
 
             for id, addr in enumerate(addrs):
                 kernel_addr[id] = addr
-            if len(occupancy) > 16:
+            if len(occupancy) > 1:
                 OCCUPANCY.append( occupancy )
                 occupancy_filenames.append(name)
 

@@ -208,7 +208,7 @@ def draw_occupancy_per_dispatch(selections, normalize, OCCUPANCY, dispatchnames)
     delta = 1
 
     for k in range(len(OCCUPANCY)):
-        if len(OCCUPANCY[k]) <= 16:
+        if len(OCCUPANCY[k]) <= 1:
             continue
         maxtime = max(maxtime, OCCUPANCY[k][-1][0])
 
