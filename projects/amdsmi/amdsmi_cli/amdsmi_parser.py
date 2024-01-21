@@ -79,7 +79,7 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         version_string = f"Version: {__version__}"
         platform_string = f"Platform: {self.helpers.os_info()}"
-        rocm_version = get_rocm_version();
+        rocm_version = get_rocm_version()
         rocm_version_string = f"ROCm version: {rocm_version}"
         program_name = 'amd-smi'
 
@@ -623,7 +623,7 @@ core limit value"
             metric_parser.add_argument('-m', '--mem-usage', action='store_true', required=False, help=mem_usage_help)
 
         # Optional Args for Hypervisors and Baremetal systems
-        if self.helpers.is_hypervisor() or self.helpers.is_baremetal():
+        if self.helpers.is_hypervisor() or self.helpers.is_baremetal() or self.helpers.is_linux():
             metric_parser.add_argument('-u', '--usage', action='store_true', required=False, help=usage_help)
             metric_parser.add_argument('-p', '--power', action='store_true', required=False, help=power_help)
             metric_parser.add_argument('-c', '--clock', action='store_true', required=False, help=clock_help)

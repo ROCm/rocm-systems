@@ -35,7 +35,7 @@ installed to query firmware information and hardware IPs.
 ``` bash
 apt install amd-smi-lib
 # if installed with rocm ignore the export
-export PATH="$PATH:/opt/rocm/bin"
+export PATH="${PATH:+${PATH}:}~/opt/rocm/bin"
 amd-smi --help
 ```
 

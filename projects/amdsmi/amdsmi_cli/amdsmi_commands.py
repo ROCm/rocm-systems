@@ -94,7 +94,7 @@ class AMDSMICommands():
         try:
             amdsmi_lib_version = amdsmi_interface.amdsmi_get_lib_version()
             amdsmi_lib_version_str = f"{amdsmi_lib_version['year']}.{amdsmi_lib_version['major']}.{amdsmi_lib_version['minor']}.{amdsmi_lib_version['release']}"
-            rocm_version_str = get_rocm_version();
+            rocm_version_str = get_rocm_version()
         except amdsmi_exception.AmdSmiLibraryException as e:
             amdsmi_lib_version_str = e.get_error_info()
 
@@ -1016,7 +1016,7 @@ class AMDSMICommands():
             current_platform_args += ["mem_usage"]
             current_platform_values += [args.mem_usage]
 
-        if self.helpers.is_hypervisor() or self.helpers.is_baremetal():
+        if self.helpers.is_hypervisor() or self.helpers.is_baremetal() or self.helpers.is_linux():
             if usage:
                 args.usage = usage
             if power:
@@ -2262,10 +2262,56 @@ class AMDSMICommands():
         gpus = args.gpu
         cpus= args.cpu
         cores = args.core
-        gpu_options = any([args.gpu, args.usage,args.watch, args.watch_time, args.iterations,
-                           args.power, args.clock, args.temperature, args.ecc, args.ecc_block,
-                           args.pcie, args.fan, args.voltage_curve, args.overdrive, args.perf_level,
-                           args.xgmi_err, args.energy, args.mem_usage])
+
+        # GPU Options check against each attribute
+        gpu_options = False
+        if hasattr(args, 'gpu'):
+            gpu_options |= bool(args.gpu)
+        if hasattr(args, 'usage'):
+            gpu_options |= bool(args.usage)
+        if hasattr(args, 'watch'):
+            gpu_options |= bool(args.watch)
+        if hasattr(args, 'watch_time'):
+            gpu_options |= bool(args.watch_time)
+        if hasattr(args, 'iterations'):
+            gpu_options |= bool(args.iterations)
+        if hasattr(args, 'power'):
+            gpu_options |= bool(args.power)
+        if hasattr(args, 'clock'):
+            gpu_options |= bool(args.clock)
+        if hasattr(args, 'temperature'):
+            gpu_options |= bool(args.temperature)
+        if hasattr(args, 'ecc'):
+            gpu_options |= bool(args.ecc)
+        if hasattr(args, 'ecc_block'):
+            gpu_options |= bool(args.ecc_block)
+        if hasattr(args, 'pcie'):
+            gpu_options |= bool(args.pcie)
+        if hasattr(args, 'fan'):
+            gpu_options |= bool(args.fan)
+        if hasattr(args, 'voltage_curve'):
+            gpu_options |= bool(args.voltage_curve)
+        if hasattr(args, 'overdrive'):
+            gpu_options |= bool(args.overdrive)
+        if hasattr(args, 'perf_level'):
+            gpu_options |= bool(args.perf_level)
+        if hasattr(args, 'xgmi_err'):
+            gpu_options |= bool(args.xgmi_err)
+        if hasattr(args, 'energy'):
+            gpu_options |= bool(args.energy)
+        if hasattr(args, 'mem_usage'):
+            gpu_options |= bool(args.mem_usage)
+        if hasattr(args, 'schedule'):
+            gpu_options |= bool(args.schedule)
+        if hasattr(args, 'guard'):
+            gpu_options |= bool(args.guard)
+        if hasattr(args, 'guest_data'):
+            gpu_options |= bool(args.guest_data)
+        if hasattr(args, 'fb_usage'):
+            gpu_options |= bool(args.fb_usage)
+        if hasattr(args, 'xgmi'):
+            gpu_options |= bool(args.xgmi)
+
         cpu_options = any([args.cpu, args.cpu_power_metrics, args.cpu_prochot,
                            args.cpu_freq_metrics, args.cpu_c0_res, args.cpu_lclk_dpm_level,
                            args.cpu_pwr_svi_telemtry_rails, args.cpu_io_bandwidth, args.cpu_xgmi_bandwidth,
@@ -2279,6 +2325,12 @@ class AMDSMICommands():
 
         core_options = any([args.core_boost_limit, args.core_curr_active_freq_core_limit,
                             args.set_core_boost_limit, args.core_energy])
+
+        if gpu_options and len(self.device_handles) == 0:
+            logging.error("No GPU devices present")
+            sys.exit(-1)
+
+
         if ((len(self.device_handles) and ((((not gpus) and (not cpus) and (not cores)) or gpus)
             and not cpu_options and not core_options))):
             self.metric_gpu( args, multiple_devices, watching_output, gpu,
@@ -2288,9 +2340,6 @@ class AMDSMICommands():
                 xgmi_err, energy, mem_usage, schedule,
                 guard, guest_data, fb_usage, xgmi)
 
-        if (gpu_options and (len(self.device_handles) == 0)):
-            logging.error("No GPU devices present")
-            sys.exit(-1)
 
         if ((len(self.cpu_handles) and ((((not gpus) and (not cpus) and (not cores)) or cpus)
             and not gpu_options and not core_options))):
