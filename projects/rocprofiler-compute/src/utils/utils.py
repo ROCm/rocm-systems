@@ -243,8 +243,10 @@ def run_prof(fname, profiler_options, target, workload_dir):
         # Remove temp directory
         shutil.rmtree(workload_dir + "/" + "out")
 
-    # Overwrite headers
+    # Standardize rocprof headers via overwrite
+    # {<key to remove>: <key to replace>}
     output_headers = {
+        # ROCm-6.1.0 specific csv headers
         "KernelName": "Kernel_Name",
         "Index": "Dispatch_ID",
         "grd": "Grid_Size",
@@ -257,6 +259,12 @@ def run_prof(fname, profiler_options, target, workload_dir):
         "accum_vgpr": "Accum_VGPR",
         "BeginNs": "Start_Timestamp",
         "EndNs": "End_Timestamp",
+        # ROCm-6.0.0 specific csv headers
+        "GRD": "Grid_Size",
+        "WGR": "Workgroup_Size",
+        "LDS": "LDS_Per_Workgroup",
+        "SCR": "Scratch_Per_Workitem",
+        "ACCUM_VGPR": "Accum_VGPR",
     }
     df = pd.read_csv(workload_dir + "/" + fbase + ".csv")
     df.rename(columns=output_headers, inplace=True)
