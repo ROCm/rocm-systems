@@ -8,6 +8,14 @@ include_guard(GLOBAL)
 # related properties. Function is potentially recursive -- it should not be used if there
 # is a cyclic target dependency.
 function(rocprofiler_config_nolink_target _DST _SRC)
+    # skip if not a cmake target but process any extra args
+    if(NOT TARGET "${_SRC}")
+        foreach(_LIB ${ARGN})
+            rocprofiler_config_nolink_target(${_DST} ${_LIB})
+        endforeach()
+        return()
+    endif()
+
     set(_LINK_LIBRARIES)
     set(_INCLUDE_DIRS)
     set(_COMPILE_DEFS)
