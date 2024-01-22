@@ -1,8 +1,0 @@
----
-Panel Config:
-  id: 000
-  title: Top Stat
-  data source:
-    - raw_csv_table:
-        id: 001
-        source: pmc_kernel_top.csv

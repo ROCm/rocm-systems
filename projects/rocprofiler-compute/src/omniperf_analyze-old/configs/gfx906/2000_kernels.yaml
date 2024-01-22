@@ -1,8 +1,0 @@
----
-Panel Config:
-  id: 2000
-  title: Kernels
-  data source:
-    - raw_csv_table:
-        id: 2001
-        source: pmc_dispatch_info.csv
