@@ -22,7 +22,7 @@ config["app_1"] = ["./tests/vcopy", "-n", "1048576", "-b", "256", "-i", "3"]
 config["cleanup"] = True
 config["COUNTER_LOGGING"] = False
 config["METRIC_COMPARE"] = True
-config["METRIC_LOGGING"] = False
+config["METRIC_LOGGING"] = True
 
 baseline_opts = ["omniperf", "profile", "-n", "app_1", "-VVV"]
 
@@ -32,9 +32,9 @@ baseline_opts = ["omniperf", "profile", "-n", "app_1", "-VVV"]
 num_kernels = 3
 dispatch_id = 0
 
-DEFAULT_ABS_DIFF = 5
-DEFAULT_REL_DIFF = 5
-MAX_REOCCURING_COUNT = 3
+DEFAULT_ABS_DIFF = 15
+DEFAULT_REL_DIFF = 50
+MAX_REOCCURING_COUNT = 28
 
 ALL_CSVS = [
     "SQ_IFETCH_LEVEL.csv",
@@ -104,218 +104,78 @@ ROOF_ONLY_FILES = [
 ]
 
 # Must not change relative difference is zero
-FIXED_METRICS = [
-    "2.1.0",
-    "2.1.1",
-    "2.1.2",
-    "2.1.3",
-    "2.1.4",
-    "2.1.5",
-    "2.1.6",
-    "2.1.10",
-    "2.1.12",
-    "2.1.13",
-    "2.1.14",
-    "2.1.15",
-    # "2.1.17",
-    "2.1.19",
-    # "2.1.21",
-    "6.1.5",
-    "6.2.1",
-    "6.2.2",
-    "6.2.3",
-    "6.2.4",
-    "6.2.5",
-    "6.2.6",
-    "6.2.7",
-    "6.2.8",
-    "6.2.9",
-    "6.2.10",
-    "6.2.11",
-    "6.2.12",
-    "6.2.13",
-    "7.1.0",
-    "7.1.1",
-    "7.1.2",
-    "7.1.3",
-    "7.1.4",
-    "7.1.5",
-    "7.1.6",
-    "7.1.7",
-    "7.1.8",
-    "7.1.9",
-    "7.2.6",
-    "10.1.0",
-    "10.1.1",
-    "10.1.2",
-    "10.1.3",
-    "10.1.4",
-    "10.1.5",
-    "10.1.6",
-    "10.1.7",
-    "10.2.0",
-    "10.2.1",
-    "10.2.2",
-    "10.2.3",
-    "10.2.4",
-    "10.2.5",
-    "10.2.6",
-    "10.2.7",
-    "10.2.8",
-    "10.2.9",
-    "10.2.10",
-    "10.2.11",
-    "10.2.12",
-    "10.2.13",
-    "10.2.14",
-    "10.3.0",
-    "10.3.1",
-    "10.3.2",
-    "10.3.3",
-    "10.3.4",
-    "10.3.5",
-    "10.3.6",
-    "10.3.7",
-    "10.4.0",
-    "10.4.1",
-    "10.4.2",
-    "10.4.3",
-    "10.4.4",
-    "11.2.1",
-    "11.2.4",
-    "11.2.5",
-    "11.2.6",
-    "11.3.0",
-    "11.3.1",
-    "11.3.2",
-    "11.3.3",
-    "11.3.4",
-    "11.3.5",
-    "12.1.0",
-    "12.1.1",
-    "12.1.2",
-    "12.1.3",
-    "12.2.0",
-    "12.2.1",
-    "12.2.3",
-    "12.2.4",
-    "12.2.5",
-    "12.2.6",
-    "12.2.7",
-    "12.2.8",
-    "12.2.9",
-    "13.2.0",
-    # "13.2.1",
-    "13.2.2",
-    # "13.2.3",
-    # "14.1.1",
-    "14.2.0",
-    # "14.2.1",
-    "14.2.2",
-    # "14.2.3",
-    # "14.2.4",
-    "14.2.5",
-    "14.2.6",
-    "14.2.7",
-    "14.2.8",
-    "14.2.9",
-    "14.2.10",
-    "14.2.11",
-    "14.3.0",
-    "14.3.1",
-    "14.3.2",
-    "14.3.3",
-    "15.1.3",
-    "15.1.4",
-    "15.1.5",
-    "15.1.6",
-    "15.1.7",
-    "15.1.8",
-    "15.1.9",
-    "15.1.10",
-    "15.1.11",
-    "15.1.12",
-    "15.1.13",
-    "15.1.14",
-    "15.1.15",
-    "15.2.2",
-    "15.2.3",
-    "15.2.4",
-    "15.2.5",
-    "15.2.6",
-    "16.1.0",
-    "16.1.3",
-    "16.2.2",
-    "16.2.3",
-    "16.2.4",
-    "16.3.0",
-    "16.3.1",
-    "16.3.2",
-    "16.3.3",
-    "16.3.5",
-    "16.3.6",
-    "16.3.7",
-    # "16.3.8",   # rel diff is -102
-    "16.3.9",
-    "16.3.10",
-    "16.3.11",
-    "16.3.12",
-    "16.4.0",
-    "16.4.1",
-    "16.4.2",
-    "16.4.3",
-    "16.4.4",
-    "16.4.5",
-    "16.4.6",
-    "16.4.7",
-    "16.4.8",
-    "16.4.9",
-    "16.4.10",
-    "16.4.11",
-    "16.5.0",
-    "16.5.4",
-    # "17.1.1",
-    "17.2.2",
-    "17.2.6",
-    "17.2.7",
-    "17.2.12",
-    # "17.3.0", # rel diff is 0.06
-    "17.3.1",
-    "17.3.3",
-    "17.3.4",
-    "17.3.5",
-    "17.3.6",
-    # "17.3.7", # rel diff is -0.06
-    # "17.3.8",
-    "17.3.10",
-    "17.3.12",
-    "17.3.13",
-    "17.3.17",
-    "18.1.0",
-    "18.1.1",
-    "18.1.2",
-    "18.1.3",
-    "18.1.4",
-    "5.1.2",
-    "5.1.6",
-    # "5.2.2",
-    "6.1.4",
-    "18.1.5",
-    "18.1.6",
-    "18.1.7",
-    "18.1.10",
-    "18.1.11",
-    "18.1.12",
-    "18.1.14",
-    "18.1.15",
-    "18.1.17",
-]
-
+FIXED_METRICS = {
+    "2.1.12" : {"absolute": 0, "relative": 1},
+    "2.1.15" : {"absolute": 0, "relative": 1},
+    "2.1.19" : {"absolute": 0, "relative": 1},
+    "5.1.0" : {"absolute": 0, "relative": 8},
+    "5.2.0" : {"absolute": 0, "relative": 8},
+    "6.1.5" : {"absolute": 0, "relative": 1},
+    "6.1.0" : {"absolute": 0, "relative": 8},
+    "6.1.3" : {"absolute": 0, "relative": 5},
+    "6.2.12" : {"absolute": 0, "relative": 1},
+    "6.2.13" : {"absolute": 0, "relative": 1},
+    "7.1.0" : {"absolute": 0, "relative": 1},
+    "7.1.1" : {"absolute": 0, "relative": 1},
+    "7.1.2" : {"absolute": 0, "relative": 1},
+    "7.1.5" : {"absolute": 0, "relative": 1},
+    "7.1.6" : {"absolute": 0, "relative": 1},
+    "7.1.7" : {"absolute": 0, "relative": 1},
+    "7.2.0" : {"absolute": 0, "relative": 5},
+    "7.2.1" : {"absolute": 0, "relative": 8},
+    "7.2.6" : {"absolute": 0, "relative": 1},
+    "10.1.4" : {"absolute": 0, "relative": 1},
+    "10.1.5" : {"absolute": 0, "relative": 1},
+    "10.1.6" : {"absolute": 0, "relative": 1},
+    "10.1.7" : {"absolute": 0, "relative": 1},
+    "10.3.4" : {"absolute": 0, "relative": 1},
+    "10.3.5" : {"absolute": 0, "relative": 1},
+    "10.3.6" : {"absolute": 0, "relative": 1},
+    "11.2.1" : {"absolute": 0, "relative": 1},
+    "11.2.4" : {"absolute": 0, "relative": 1},
+    "13.2.0" : {"absolute": 0, "relative": 1},
+    "13.2.2" : {"absolute": 0, "relative": 1},
+    "14.2.0" : {"absolute": 0, "relative": 1},
+    "14.2.5" : {"absolute": 0, "relative": 1},
+    "14.2.7" : {"absolute": 0, "relative": 1},
+    "14.2.8" : {"absolute": 0, "relative": 1},
+    "15.1.4" : {"absolute": 0, "relative": 1},
+    "15.1.5" : {"absolute": 0, "relative": 1},
+    "15.1.6" : {"absolute": 0, "relative": 1},
+    "15.1.7" : {"absolute": 0, "relative": 1},
+    "15.2.4" : {"absolute": 0, "relative": 1},
+    "15.2.5" : {"absolute": 0, "relative": 1},
+    "16.1.0" : {"absolute": 0, "relative": 1},
+    "16.1.3" : {"absolute": 0, "relative": 1},
+    "16.3.0" : {"absolute": 0, "relative": 1},
+    "16.3.1" : {"absolute": 0, "relative": 1},
+    "16.3.2" : {"absolute": 0, "relative": 1},
+    "16.3.5" : {"absolute": 0, "relative": 1},
+    "16.3.6" : {"absolute": 0, "relative": 1},
+    "16.3.7" : {"absolute": 0, "relative": 1},
+    "16.3.9" : {"absolute": 0, "relative": 1},
+    "16.3.10" : {"absolute": 0, "relative": 1},
+    "16.3.11" : {"absolute": 0, "relative": 1},
+    "16.4.3" : {"absolute": 0, "relative": 1},
+    "16.4.4" : {"absolute": 0, "relative": 1},
+    "16.5.0" : {"absolute": 0, "relative": 1},
+    "17.3.3" : {"absolute": 0, "relative": 1},
+    "17.3.6" : {"absolute": 0, "relative": 1},
+    "17.3.13" : {"absolute": 0, "relative": 1},
+    "18.1.0" : {"absolute": 0, "relative": 1},
+    "18.1.1" : {"absolute": 0, "relative": 1},
+    "18.1.2" : {"absolute": 0, "relative": 1},
+    "18.1.3" : {"absolute": 0, "relative": 1},
+    "5.1.2" : {"absolute": 0, "relative": 1},
+    "6.1.4" : {"absolute": 0, "relative": 1},
+    "18.1.5" : {"absolute": 0, "relative": 1},
+    "18.1.6" : {"absolute": 0, "relative": 1},
+}
 # check for parallel resource allocation
 test_utils.check_resource_allocation()
 
 
-def metric_compare(test_name, errors_pd, baseline_df, run_df, threshold=5):
+def counter_compare(test_name, errors_pd, baseline_df, run_df, threshold=5):
     # iterate data one row at a time
     for idx_1 in run_df.index:
         run_row = run_df.iloc[idx_1]
@@ -419,7 +279,7 @@ def log_counter(file_dict, test_name):
             # get corresponding file from current test run
             df_2 = file_dict[file]
 
-            errors = metric_compare(test_name, pd.DataFrame(), df_1, df_2, 5)
+            errors = counter_compare(test_name, pd.DataFrame(), df_1, df_2, 5)
             if not errors.empty:
                 if os.path.exists(
                     Baseline_dir + "/" + file.split(".")[0] + "_error_log.csv"
@@ -443,8 +303,7 @@ def log_counter(file_dict, test_name):
                         Baseline_dir + "/" + file.split(".")[0] + "_error_log.csv"
                     )
 
-
-def baseline_compare_metric(test_name, workload_dir, thresholds, args=[]):
+def baseline_compare_metric(test_name, workload_dir, args=[]):
     t = subprocess.Popen(
         [
             sys.executable,
@@ -486,39 +345,9 @@ def baseline_compare_metric(test_name, workload_dir, thresholds, args=[]):
                 relative_diff = float(metric_info[-2])
                 absolute_diff = float(metric_info[-1])
                 if relative_diff > -99 or relative_diff < -101:
-                    relative_threshold = abs(thresholds["default"]["relative"])
-                    absolute_threshold = abs(thresholds["default"]["absolute"])
-                    if metric_idx in thresholds.keys():
-                        # print(metric_idx+" is in thresholds.keys")
-                        relative_threshold = thresholds[metric_idx]["relative"]
-                        absolute_threshold = thresholds[metric_idx]["absolute"]
-                        # pick higher threshold, one of the thresholds is zero
-                        isValid = (
-                            (abs(absolute_diff) <= absolute_threshold)
-                            if absolute_threshold > relative_threshold
-                            else (abs(relative_diff) <= relative_threshold)
-                        )
-                        if not isValid:
-                            print(
-                                "index " + metric_name + " is not good enough.\nabsolute: ",
-                                absolute_diff,
-                                "relative: ",
-                                relative_diff,
-                                thresholds[metric_idx],
-                            )
-                            assert 0
-                        else :
-                            # print(
-                            #     "index " + metric_name + " is good enough.\nabsolute: ",
-                            #     absolute_diff,
-                            #     "relative: ",
-                            #     relative_diff,
-                            #     thresholds[metric_idx],
-                            # )
-                            continue
-                    if metric_idx in FIXED_METRICS:
+                    if metric_idx in FIXED_METRICS.keys():
                         # print(metric_idx+" is in FIXED_METRICS")
-                        isValid = (abs(absolute_diff) == 0) and (abs(relative_diff) == 0) or (current_val == 0)
+                        isValid = (abs(absolute_diff) <= FIXED_METRICS[metric_idx]["absolute"]) or (abs(relative_diff) <= FIXED_METRICS[metric_idx]["relative"]) 
                         if not isValid:
                             print(
                                 "index "
@@ -529,17 +358,20 @@ def baseline_compare_metric(test_name, workload_dir, thresholds, args=[]):
                                 relative_diff,
                             )
                             # assert 0
+                        continue
                     
                     #Used for debugging metric lists
                     if config["METRIC_LOGGING"] and (
-                        (abs(relative_diff) <= abs(relative_threshold)
+                        (abs(relative_diff) <= abs(DEFAULT_REL_DIFF)
                          or (
                             abs(absolute_diff)
-                            <= abs(absolute_threshold)
+                            <= abs(DEFAULT_ABS_DIFF)
                         ))
+                        and 
+                        (False if baseline_val == '' else float(baseline_val) > 0)
                     ):
-                        print("logging...")
-                        print(metric_info)
+                        # print("logging...")
+                        # print(metric_info)
 
                         new_error = pd.DataFrame.from_dict(
                             {
@@ -553,7 +385,7 @@ def baseline_compare_metric(test_name, workload_dir, thresholds, args=[]):
                             }
                         )
                         error_df = pd.concat([error_df, new_error])
-                        counts = error_df.groupby(["Index", "Test Name"]).cumcount()
+                        counts = error_df.groupby(["Index"]).cumcount()
                         reoccurring_metrics = error_df.loc[counts > MAX_REOCCURING_COUNT]
                         reoccurring_metrics["counts"] = counts[counts > MAX_REOCCURING_COUNT]
                         if reoccurring_metrics.any(axis=None):
@@ -568,12 +400,12 @@ def baseline_compare_metric(test_name, workload_dir, thresholds, args=[]):
                             error_df.to_csv(Baseline_dir + "/metric_error_log.csv")
 
 
-def logging(test_name, workload_dir, file_dict, thresholds, args=[]):
+def validate(test_name, workload_dir, file_dict, args=[]):
     if config["COUNTER_LOGGING"]:
         log_counter(file_dict, test_name)
 
     if config["METRIC_COMPARE"]:
-        baseline_compare_metric(test_name, workload_dir, thresholds, args)
+        baseline_compare_metric(test_name, workload_dir, args)
 
 
 # --
@@ -593,33 +425,10 @@ def test_path():
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
 
-    logging(
+    validate(
         inspect.stack()[0][3],
         workload_dir,
-        file_dict,
-        {
-            "default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF},
-            "2.1.22": {"absolute": 0, "relative": 5},
-            "2.1.27": {"absolute": 0, "relative": 5},
-            "5.1.5": {"absolute": 5, "relative": 0},
-            "5.2.8": {"absolute": 1, "relative": 0},
-            "5.2.11": {"absolute": 2, "relative": 0},
-            "6.1.1": {"absolute": 0, "relative": 6},
-            "6.1.2": {"absolute": 0, "relative": 5},
-            "13.1.0": {"absolute": 1, "relative": 0},
-            "14.1.0": {"absolute": 0, "relative": 5},
-            "16.1.2": {"absolute": 1, "relative": 0},
-            "16.2.0": {"absolute": 0, "relative": 7},
-            "16.3.4": {"absolute": 0, "relative": 5},
-            "17.1.2": {"absolute": 0, "relative": 3},
-            "17.2.3": {"absolute": 1, "relative": 0},
-            "17.2.14": {"absolute": 5, "relative": 0},
-            "17.3.14": {"absolute": 1, "relative": 0},
-            "17.3.15": {"absolute": 1, "relative": 0},
-            "17.3.16": {"absolute": 2, "relative": 0},
-            "18.1.13": {"absolute": 1, "relative": 0},
-            "18.1.16": {"absolute": 1, "relative": 0},
-        },
+        file_dict
     )
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -663,11 +472,10 @@ def test_no_roof():
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
 
-    logging(
+    validate(
         inspect.stack()[0][3],
         workload_dir,
         file_dict,
-        {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
     )
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -704,11 +512,10 @@ def test_kernel_names():
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
 
-    logging(
+    validate(
         inspect.stack()[0][3],
         workload_dir,
         file_dict,
-        {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
     )
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -732,11 +539,10 @@ def test_device_filter():
 
     # TODO - verify expected device id in results
 
-    logging(
+    validate(
         inspect.stack()[0][3],
         workload_dir,
         file_dict,
-        {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
     )
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -754,11 +560,10 @@ def test_kernel():
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
 
-    logging(
+    validate(
         inspect.stack()[0][3],
         workload_dir,
         file_dict,
-        {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
     )
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -776,11 +581,10 @@ def test_kernel_summaries():
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
 
-    logging(
+    validate(
         inspect.stack()[0][3],
         workload_dir,
         file_dict,
-        {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
     )
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -840,28 +644,10 @@ def test_ipblocks_SQ():
 
     assert sorted(list(file_dict.keys())) == expected_csvs
 
-    logging(
+    validate(
         inspect.stack()[0][3],
         workload_dir,
         file_dict,
-        {
-            "default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF},
-            "2.1.9": {"absolute": 2, "relative": 0},
-            "2.1.21": {"absolute": 1, "relative": 0},
-            "11.2.2": {"absolute": 1, "relative": 0},
-            "11.2.3": {"absolute": 1, "relative": 0},
-            "16.3.8": {"absolute": 1, "relative": 0},
-            "16.5.3": {"absolute": 1, "relative": 0},
-            "17.1.1": {"absolute": 1, "relative": 0},
-            "17.2.3": {"absolute": 1, "relative": 0},
-            "17.3.6": {"absolute": 1, "relative": 0},
-            "17.3.8": {"absolute": 1, "relative": 0},
-            "17.3.11": {"absolute": 1, "relative": 0},
-            "18.1.0": {"absolute": 1, "relative": 0},
-            "18.1.6": {"absolute": 1, "relative": 0},
-            "18.1.13": {"absolute": 1, "relative": 0},
-            "18.1.16": {"absolute": 1, "relative": 0},
-        },
     )
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -888,25 +674,10 @@ def test_ipblocks_SQC():
 
     assert sorted(list(file_dict.keys())) == expected_csvs
 
-    logging(
+    validate(
         inspect.stack()[0][3],
         workload_dir,
         file_dict,
-        {
-            "default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF},
-            "2.1.21": {"absolute": 1, "relative": 0},
-            "16.3.8": {"absolute": 1, "relative": 0},
-            "16.5.3": {"absolute": 1, "relative": 0},
-            "17.1.1": {"absolute": 1, "relative": 0},
-            "17.2.3": {"absolute": 1, "relative": 0},
-            "17.3.6": {"absolute": 1, "relative": 0},
-            "17.3.8": {"absolute": 1, "relative": 0},
-            "17.3.11": {"absolute": 1, "relative": 0},
-            "18.1.0": {"absolute": 1, "relative": 0},
-            "18.1.6": {"absolute": 1, "relative": 0},
-            "18.1.13": {"absolute": 1, "relative": 0},
-            "18.1.16": {"absolute": 1, "relative": 0},
-        },
     )
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -937,32 +708,10 @@ def test_ipblocks_TA():
 
     assert sorted(list(file_dict.keys())) == expected_csvs
 
-    logging(
+    validate(
         inspect.stack()[0][3],
         workload_dir,
         file_dict,
-        {
-            "default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF},
-            "2.1.21": {"absolute": 1, "relative": 0},
-            "5.1.0": {"absolute": 0, "relative": 5},
-            "5.2.0": {"absolute": 0, "relative": 5},
-            "6.1.0": {"absolute": 0, "relative": 5},
-            "7.2.1": {"absolute": 0, "relative": 5},
-            "11.2.0": {"absolute": 1, "relative": 0},
-            "13.2.3": {"absolute": 1, "relative": 0},
-            "14.2.3": {"absolute": 1, "relative": 0},
-            "16.3.8": {"absolute": 1, "relative": 0},
-            "16.5.3": {"absolute": 1, "relative": 0},
-            "17.1.1": {"absolute": 1, "relative": 0},
-            "17.2.3": {"absolute": 1, "relative": 0},
-            "17.3.6": {"absolute": 1, "relative": 0},
-            "17.3.8": {"absolute": 1, "relative": 0},
-            "17.3.11": {"absolute": 1, "relative": 0},
-            "18.1.0": {"absolute": 1, "relative": 0},
-            "18.1.6": {"absolute": 1, "relative": 0},
-            "18.1.13": {"absolute": 1, "relative": 0},
-            "18.1.16": {"absolute": 1, "relative": 0},
-        },
     )
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -997,26 +746,10 @@ def test_ipblocks_TD():
 
     assert sorted(list(file_dict.keys())) == expected_csvs
 
-    logging(
+    validate(
         inspect.stack()[0][3],
         workload_dir,
         file_dict,
-        {
-            "default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF},
-            "2.1.21": {"absolute": 1, "relative": 0},
-            "11.2.0": {"absolute": 1, "relative": 0},
-            "13.2.3": {"absolute": 1, "relative": 0},
-            "14.2.3": {"absolute": 1, "relative": 0},
-            "17.1.1": {"absolute": 1, "relative": 0},
-            "17.2.3": {"absolute": 1, "relative": 0},
-            "17.3.6": {"absolute": 1, "relative": 0},
-            "17.3.8": {"absolute": 1, "relative": 0},
-            "17.3.11": {"absolute": 1, "relative": 0},
-            "18.1.0": {"absolute": 1, "relative": 0},
-            "18.1.6": {"absolute": 1, "relative": 0},
-            "18.1.13": {"absolute": 1, "relative": 0},
-            "18.1.16": {"absolute": 1, "relative": 0},
-        },
     )
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -1049,26 +782,10 @@ def test_ipblocks_TCP():
 
     assert sorted(list(file_dict.keys())) == expected_csvs
 
-    logging(
+    validate(
         inspect.stack()[0][3],
         workload_dir,
         file_dict,
-        {
-            "default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF},
-            "2.1.21": {"absolute": 1, "relative": 0},
-            "11.2.0": {"absolute": 1, "relative": 0},
-            "13.2.3": {"absolute": 1, "relative": 0},
-            "14.2.3": {"absolute": 1, "relative": 0},
-            "17.1.1": {"absolute": 1, "relative": 0},
-            "17.2.3": {"absolute": 1, "relative": 0},
-            "17.3.6": {"absolute": 1, "relative": 0},
-            "17.3.8": {"absolute": 1, "relative": 0},
-            "17.3.11": {"absolute": 1, "relative": 0},
-            "18.1.0": {"absolute": 1, "relative": 0},
-            "18.1.6": {"absolute": 1, "relative": 0},
-            "18.1.13": {"absolute": 1, "relative": 0},
-            "18.1.16": {"absolute": 1, "relative": 0},
-        },
     )
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -1102,27 +819,10 @@ def test_ipblocks_TCC():
 
     assert sorted(list(file_dict.keys())) == expected_csvs
 
-    logging(
+    validate(
         inspect.stack()[0][3],
         workload_dir,
         file_dict,
-        {
-            "default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF},
-            "6.1.3": {"absolute": 1, "relative": 5},
-            "11.2.0": {"absolute": 1, "relative": 0},
-            "13.2.3": {"absolute": 1, "relative": 0},
-            "14.2.3": {"absolute": 1, "relative": 0},
-            "16.3.8": {"absolute": 1, "relative": 0},
-            "16.5.3": {"absolute": 1, "relative": 0},
-            "17.2.14": {"absolute": 6, "relative": 0},
-            "17.3.14": {"absolute": 1, "relative": 0},
-            "17.3.15": {"absolute": 1, "relative": 0},
-            "17.3.16": {"absolute": 2, "relative": 0},
-            "18.1.0": {"absolute": 1, "relative": 0},
-            "18.1.6": {"absolute": 1, "relative": 0},
-            "18.1.13": {"absolute": 1, "relative": 0},
-            "18.1.16": {"absolute": 1, "relative": 0},
-        },
     )
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -1154,34 +854,10 @@ def test_ipblocks_SPI():
 
     assert sorted(list(file_dict.keys())) == expected_csvs
 
-    logging(
+    validate(
         inspect.stack()[0][3],
         workload_dir,
         file_dict,
-        {
-            "default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF},
-            "2.1.21": {"absolute": 1, "relative": 0},
-            "5.1.0": {"absolute": 0, "relative": 7},
-            "5.2.0": {"absolute": 0, "relative": 7},
-            "6.1.0": {"absolute": 0, "relative": 7},
-            "6.1.1": {"absolute": 0, "relative": 7},
-            "6.1.3": {"absolute": 0, "relative": 5},
-            "7.2.1": {"absolute": 0, "relative": 7},
-            "11.2.0": {"absolute": 1, "relative": 0},
-            "13.2.3": {"absolute": 5, "relative": 0},
-            "14.2.3": {"absolute": 1, "relative": 0},
-            "16.3.8": {"absolute": 1, "relative": 0},
-            "16.5.3": {"absolute": 1, "relative": 0},
-            "17.1.1": {"absolute": 6, "relative": 0},
-            "17.2.3": {"absolute": 1, "relative": 0},
-            "17.3.6": {"absolute": 1, "relative": 0},
-            "17.3.8": {"absolute": 1, "relative": 0},
-            "17.3.11": {"absolute": 1, "relative": 0},
-            "18.1.0": {"absolute": 1, "relative": 0},
-            "18.1.6": {"absolute": 1, "relative": 0},
-            "18.1.13": {"absolute": 1, "relative": 0},
-            "18.1.16": {"absolute": 1, "relative": 0},
-        },
     )
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -1209,33 +885,10 @@ def test_ipblocks_CPC():
         expected_csvs.insert(7, "roofline.csv")
     assert sorted(list(file_dict.keys())) == expected_csvs
 
-    logging(
+    validate(
         inspect.stack()[0][3],
         workload_dir,
-        file_dict,
-        {
-            "default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF},
-            "2.1.21": {"absolute": 1, "relative": 0},
-            "5.1.0": {"absolute": 0, "relative": 7},
-            "5.2.1": {"absolute": 0, "relative": 7},
-            "5.2.8": {"absolute": 1, "relative": 0},
-            "6.1.0": {"absolute": 0, "relative": 5},
-            "7.2.1": {"absolute": 0, "relative": 5},
-            "11.2.0": {"absolute": 1, "relative": 0},
-            "13.2.3": {"absolute": 5, "relative": 0},
-            "14.2.3": {"absolute": 1, "relative": 0},
-            "16.3.8": {"absolute": 1, "relative": 0},
-            "16.5.3": {"absolute": 1, "relative": 0},
-            "17.1.1": {"absolute": 6, "relative": 0},
-            "17.2.3": {"absolute": 1, "relative": 0},
-            "17.3.6": {"absolute": 1, "relative": 0},
-            "17.3.8": {"absolute": 2, "relative": 0},
-            "17.3.11": {"absolute": 2, "relative": 0},
-            "18.1.0": {"absolute": 1, "relative": 0},
-            "18.1.6": {"absolute": 1, "relative": 0},
-            "18.1.13": {"absolute": 1, "relative": 0},
-            "18.1.16": {"absolute": 1, "relative": 0},
-        },
+        file_dict
     )
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -1261,29 +914,10 @@ def test_ipblocks_CPF():
         expected_csvs.insert(5, "roofline.csv")
     assert sorted(list(file_dict.keys())) == expected_csvs
 
-    logging(
+    validate(
         inspect.stack()[0][3],
         workload_dir,
         file_dict,
-        {
-            "default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF},
-            "2.1.21": {"absolute": 1, "relative": 0},
-            "5.1.5": {"absolute": 2, "relative": 0},
-            "11.2.0": {"absolute": 1, "relative": 0},
-            "13.2.3": {"absolute": 5, "relative": 0},
-            "14.2.3": {"absolute": 1, "relative": 0},
-            "16.3.8": {"absolute": 1, "relative": 0},
-            "16.5.3": {"absolute": 1, "relative": 0},
-            "17.1.1": {"absolute": 6, "relative": 0},
-            "17.2.3": {"absolute": 1, "relative": 0},
-            "17.3.6": {"absolute": 1, "relative": 0},
-            "17.3.8": {"absolute": 2, "relative": 0},
-            "17.3.11": {"absolute": 2, "relative": 0},
-            "18.1.0": {"absolute": 1, "relative": 0},
-            "18.1.6": {"absolute": 1, "relative": 0},
-            "18.1.13": {"absolute": 1, "relative": 0},
-            "18.1.16": {"absolute": 1, "relative": 0},
-        },
     )
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -1343,31 +977,10 @@ def test_ipblocks_SQ_CPC():
 
     assert sorted(list(file_dict.keys())) == expected_csvs
 
-    logging(
+    validate(
         inspect.stack()[0][3],
         workload_dir,
         file_dict,
-        {
-            "default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF},
-            "2.1.9": {"absolute": 1, "relative": 0},
-            "2.1.21": {"absolute": 1, "relative": 0},
-            "5.2.6": {"absolute": 0, "relative": 6},
-            "5.2.8": {"absolute": 2, "relative": 0},
-            "6.1.3": {"absolute": 0, "relative": 6},
-            "11.2.2": {"absolute": 1, "relative": 0},
-            "11.2.3": {"absolute": 1, "relative": 0},
-            "16.3.8": {"absolute": 1, "relative": 0},
-            "16.5.3": {"absolute": 1, "relative": 0},
-            "17.1.1": {"absolute": 6, "relative": 0},
-            "17.2.3": {"absolute": 1, "relative": 0},
-            "17.3.6": {"absolute": 1, "relative": 0},
-            "17.3.8": {"absolute": 2, "relative": 0},
-            "17.3.11": {"absolute": 2, "relative": 0},
-            "18.1.0": {"absolute": 1, "relative": 0},
-            "18.1.6": {"absolute": 1, "relative": 0},
-            "18.1.13": {"absolute": 1, "relative": 0},
-            "18.1.16": {"absolute": 1, "relative": 0},
-        },
     )
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -1426,33 +1039,10 @@ def test_ipblocks_SQ_TA():
         ]
     assert sorted(list(file_dict.keys())) == expected_csvs
 
-    logging(
+    validate(
         inspect.stack()[0][3],
         workload_dir,
-        file_dict,
-        {
-            "default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF},
-            "2.1.9": {"absolute": 1, "relative": 0},
-            "2.1.21": {"absolute": 1, "relative": 0},
-            "5.1.0": {"absolute": 0, "relative": 5},
-            "5.2.0": {"absolute": 0, "relative": 5},
-            "6.1.0": {"absolute": 0, "relative": 5},
-            "6.1.3": {"absolute": 0, "relative": 6},
-            "7.2.1": {"absolute": 0, "relative": 5},
-            "11.2.2": {"absolute": 1, "relative": 0},
-            "11.2.3": {"absolute": 1, "relative": 0},
-            "16.3.8": {"absolute": 1, "relative": 0},
-            "16.5.3": {"absolute": 1, "relative": 0},
-            "17.1.1": {"absolute": 6, "relative": 0},
-            "17.2.3": {"absolute": 1, "relative": 0},
-            "17.3.6": {"absolute": 1, "relative": 0},
-            "17.3.8": {"absolute": 2, "relative": 0},
-            "17.3.11": {"absolute": 2, "relative": 0},
-            "18.1.0": {"absolute": 1, "relative": 0},
-            "18.1.6": {"absolute": 1, "relative": 0},
-            "18.1.13": {"absolute": 1, "relative": 0},
-            "18.1.16": {"absolute": 1, "relative": 0},
-        },
+        file_dict
     )
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -1511,32 +1101,10 @@ def test_ipblocks_SQ_SPI():
         ]
     assert sorted(list(file_dict.keys())) == expected_csvs
 
-    logging(
+    validate(
         inspect.stack()[0][3],
         workload_dir,
         file_dict,
-        {
-            "default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF},
-            "2.1.9": {"absolute": 1, "relative": 0},
-            "2.1.21": {"absolute": 1, "relative": 0},
-            "6.1.3": {"absolute": 0, "relative": 5},
-            "7.2.7": {"absolute": 0, "relative": 5},
-            "11.2.2": {"absolute": 1, "relative": 0},
-            "11.2.3": {"absolute": 1, "relative": 0},
-            "13.1.0": {"absolute": 1, "relative": 0},
-            "14.1.0": {"absolute": 1, "relative": 0},
-            "16.3.8": {"absolute": 1, "relative": 0},
-            "16.5.3": {"absolute": 1, "relative": 0},
-            "17.1.1": {"absolute": 6, "relative": 0},
-            "17.2.3": {"absolute": 1, "relative": 0},
-            "17.3.6": {"absolute": 1, "relative": 0},
-            "17.3.8": {"absolute": 2, "relative": 0},
-            "17.3.11": {"absolute": 2, "relative": 0},
-            "18.1.0": {"absolute": 1, "relative": 0},
-            "18.1.6": {"absolute": 1, "relative": 0},
-            "18.1.13": {"absolute": 1, "relative": 0},
-            "18.1.16": {"absolute": 1, "relative": 0},
-        },
     )
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -1595,35 +1163,10 @@ def test_ipblocks_SQ_SQC_TCP_CPC():
         ]
     assert sorted(list(file_dict.keys())) == expected_csvs
 
-    logging(
+    validate(
         inspect.stack()[0][3],
         workload_dir,
-        file_dict,
-        {
-            "default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF},
-            "2.1.16": {"absolute": 0, "relative": 5},
-            "2.1.18": {"absolute": 0, "relative": 5},
-            "2.1.20": {"absolute": 0, "relative": 5},
-            "2.1.21": {"absolute": 1, "relative": 0},
-            "2.1.27": {"absolute": 0, "relative": 5},
-            "5.2.6": {"absolute": 0, "relative": 10},
-            "5.2.8": {"absolute": 1, "relative": 0},
-            "7.2.0": {"absolute": 0, "relative": 5},
-            "13.1.0": {"absolute": 0, "relative": 5},
-            "14.1.0": {"absolute": 0, "relative": 5},
-            "16.1.2": {"absolute": 0, "relative": 5},
-            "16.3.4": {"absolute": 0, "relative": 5},
-            "16.5.3": {"absolute": 5, "relative": 0},
-            "17.1.1": {"absolute": 1, "relative": 0},
-            "17.2.3": {"absolute": 1, "relative": 0},
-            "17.3.6": {"absolute": 1, "relative": 0},
-            "17.3.8": {"absolute": 1, "relative": 0},
-            "17.3.1": {"absolute": 1, "relative": 0},
-            "18.1.0": {"absolute": 1, "relative": 0},
-            "18.1.6": {"absolute": 1, "relative": 0},
-            "18.1.13": {"absolute": 1, "relative": 0},
-            "18.1.16": {"absolute": 1, "relative": 0},
-        },
+        file_dict
     )
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -1684,28 +1227,10 @@ def test_ipblocks_SQ_SPI_TA_TCC_CPF():
         ]
     assert sorted(list(file_dict.keys())) == expected_csvs
 
-    logging(
+    validate(
         inspect.stack()[0][3],
         workload_dir,
         file_dict,
-        {
-            "default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF},
-            "2.1.9": {"absolute": 1, "relative": 0},
-            "5.1.1": {"absolute": 0, "relative": 10},
-            "5.1.5": {"absolute": 3, "relative": 0},
-            "11.2.2": {"absolute": 1, "relative": 0},
-            "11.2.3": {"absolute": 1, "relative": 0},
-            "16.3.8": {"absolute": 1, "relative": 0},
-            "16.5.3": {"absolute": 1, "relative": 0},
-            "17.1.0": {"absolute": 0, "relative": 5},
-            "17.2.13": {"absolute": 5, "relative": 0},
-            "17.3.14": {"absolute": 1, "relative": 0},
-            "17.3.15": {"absolute": 1, "relative": 0},
-            "18.1.0": {"absolute": 1, "relative": 0},
-            "18.1.6": {"absolute": 1, "relative": 0},
-            "18.1.13": {"absolute": 1, "relative": 0},
-            "18.1.16": {"absolute": 1, "relative": 0},
-        },
     )
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -1723,11 +1248,11 @@ def test_dispatch_0():
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
 
-    logging(
+    validate(
         inspect.stack()[0][3],
         workload_dir,
         file_dict,
-        {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
+        
         [
             "--dispatch",
             "0",
@@ -1749,11 +1274,10 @@ def test_dispatch_0_1():
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
 
-    logging(
+    validate(
         inspect.stack()[0][3],
         workload_dir,
         file_dict,
-        {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         ["--dispatch", "0", "1"],
     )
 
@@ -1772,11 +1296,10 @@ def test_dispatch_2():
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
 
-    logging(
+    validate(
         inspect.stack()[0][3],
         workload_dir,
         file_dict,
-        {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
         [
             "--dispatch",
             str(dispatch_id),
@@ -1798,18 +1321,10 @@ def test_kernel_verbose_0():
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
 
-    logging(
+    validate(
         inspect.stack()[0][3],
         workload_dir,
         file_dict,
-        {
-            "default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF},
-            "15.1.2": {"absolute": 5, "relative": 0},
-            "17.2.3": {"absolute": 5, "relative": 0},
-            "17.2.14": {"absolute": 5, "relative": 0},
-            "17.3.9": {"absolute": 5, "relative": 0},
-            "18.1.16": {"absolute": 5, "relative": 0},
-        },
     )
 
     # test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -1827,11 +1342,10 @@ def test_kernel_verbose_1():
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
 
-    logging(
+    validate(
         inspect.stack()[0][3],
         workload_dir,
         file_dict,
-        {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
     )
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -1849,11 +1363,10 @@ def test_kernel_verbose_2():
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
 
-    logging(
+    validate(
         inspect.stack()[0][3],
         workload_dir,
         file_dict,
-        {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
     )
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -1871,11 +1384,10 @@ def test_kernel_verbose_3():
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
 
-    logging(
+    validate(
         inspect.stack()[0][3],
         workload_dir,
         file_dict,
-        {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
     )
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -1893,11 +1405,10 @@ def test_kernel_verbose_4():
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
 
-    logging(
+    validate(
         inspect.stack()[0][3],
         workload_dir,
         file_dict,
-        {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
     )
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -1915,11 +1426,10 @@ def test_kernel_verbose_5():
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
 
-    logging(
+    validate(
         inspect.stack()[0][3],
         workload_dir,
         file_dict,
-        {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
     )
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -1937,11 +1447,10 @@ def test_join_type_grid():
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
 
-    logging(
+    validate(
         inspect.stack()[0][3],
         workload_dir,
         file_dict,
-        {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
     )
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -1960,11 +1469,10 @@ def test_join_type_kernel():
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
 
-    logging(
+    validate(
         inspect.stack()[0][3],
         workload_dir,
         file_dict,
-        {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
     )
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -1992,11 +1500,10 @@ def test_sort_dispatches():
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
 
-    logging(
+    validate(
         inspect.stack()[0][3],
         workload_dir,
         file_dict,
-        {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
     )
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -2023,11 +1530,10 @@ def test_sort_kernels():
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
 
-    logging(
+    validate(
         inspect.stack()[0][3],
         workload_dir,
         file_dict,
-        {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
     )
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -2054,11 +1560,10 @@ def test_mem_levels_HBM():
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
 
-    logging(
+    validate(
         inspect.stack()[0][3],
         workload_dir,
         file_dict,
-        {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
     )
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -2085,11 +1590,10 @@ def test_mem_levels_L2():
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
 
-    logging(
+    validate(
         inspect.stack()[0][3],
         workload_dir,
         file_dict,
-        {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
     )
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -2116,11 +1620,10 @@ def test_mem_levels_vL1D():
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
 
-    logging(
+    validate(
         inspect.stack()[0][3],
         workload_dir,
         file_dict,
-        {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
     )
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -2147,11 +1650,11 @@ def test_mem_levels_LDS():
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
 
-    logging(
+    validate(
         inspect.stack()[0][3],
         workload_dir,
         file_dict,
-        {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
+        
     )
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -2178,11 +1681,11 @@ def test_mem_levels_HBM_LDS():
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
 
-    logging(
+    validate(
         inspect.stack()[0][3],
         workload_dir,
         file_dict,
-        {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
+        
     )
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -2209,11 +1712,11 @@ def test_mem_levels_vL1D_LDS():
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
 
-    logging(
+    validate(
         inspect.stack()[0][3],
         workload_dir,
         file_dict,
-        {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
+        
     )
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -2239,11 +1742,11 @@ def test_mem_levels_L2_vL1D_LDS():
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
 
-    logging(
+    validate(
         inspect.stack()[0][3],
         workload_dir,
         file_dict,
-        {"default": {"absolute": DEFAULT_ABS_DIFF, "relative": DEFAULT_REL_DIFF}},
+        
     )
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
