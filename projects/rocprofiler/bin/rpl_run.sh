@@ -37,7 +37,7 @@ ROCM_LIB_PATH=$ROOT_DIR/lib
 PROF_BIN_DIR=$ROOT_DIR/libexec/rocprofiler
 
 # check if rocprof is supportd on this gpu arch
-V1_SUPPORTED_GPU_ARCHS=("gfx80x","gfx90x","gfx10xx","gfx94x")
+V1_SUPPORTED_GPU_ARCHS=("gfx80x","gfx90x","gfx94x")
 CURRENT_AGENTS_LIST=$($BIN_DIR/rocm_agent_enumerator)
 IS_SUPPORTED="false"
 
@@ -256,9 +256,12 @@ run() {
   done
 
   if [[ $IS_SUPPORTED == "false" ]]; then
-    echo "rocprof(v1) is not supported on this device."
-    echo "Please refer project's README for a list of supported architecures or use rocprofv2"
-    exit 1
+    echo ""
+    echo "------------ ------------ ------------"
+    echo "WARNING: rocprof(v1) is not supported on this device. Recommended use: rocprofv2"
+    echo "Please refer project's README for a list of supported architecures."
+    echo "------------ ------------ ------------"
+    echo ""
   fi
 
   export ROCP_INPUT="$1"
