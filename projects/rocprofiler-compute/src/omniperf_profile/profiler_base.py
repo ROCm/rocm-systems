@@ -142,4 +142,11 @@ class OmniProfiler_Base():
         """Perform any post-processing steps prior to profiling.
         """
         logging.debug("[profiling] performing post-processing using %s profiler" % self.__profiler)
-        gen_sysinfo(self.__args.name, self.get_args().path, self.__args.ipblocks, self.__args.remaining, self.__args.no_roof)
+        gen_sysinfo(
+            workload_name=self.__args.name, 
+            workload_dir=self.get_args().path, 
+            ip_blocks=self.__args.ipblocks, 
+            app_cmd=self.__args.remaining, 
+            skip_roof=self.__args.no_roof, 
+            roof_only=self.__args.roof_only,
+        )

@@ -235,7 +235,7 @@ def replace_timestamps(workload_dir):
         warning = "WARNING: Incomplete profiling data detected. Unable to update timestamps."
         logging.warning(warning + "\n")
 
-def gen_sysinfo(workload_name, workload_dir, ip_blocks, app_cmd, skip_roof):
+def gen_sysinfo(workload_name, workload_dir, ip_blocks, app_cmd, skip_roof, roof_only):
     # Record system information
     mspec = specs.get_machine_specs(0)
     sysinfo = open(workload_dir + "/" + "sysinfo.csv", "w")
@@ -295,7 +295,10 @@ def gen_sysinfo(workload_name, workload_dir, ip_blocks, app_cmd, skip_roof):
     elif mspec.GPU == "gfx90a":
         param += ["32", "32", "mi200", "56", str(hbmBW)]
         if not skip_roof:
-            blocks.append("roofline")
+            if roof_only:
+                ip_blocks = ["roofline"]
+            else:
+                blocks.append("roofline")
 
     # ip block info
     if ip_blocks == None:

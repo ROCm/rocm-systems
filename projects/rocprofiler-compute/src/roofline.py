@@ -335,7 +335,14 @@ class Roofline:
             sysinfo_path = os.path.join(self.__args.path, "sysinfo.csv")
             if not os.path.isfile(sysinfo_path):
                 logging.info("[roofline] sysinfo.csv not found. Generating...")
-                gen_sysinfo(self.__args.name, self.__workload_dir, self.__args.ipblocks, self.__args.remaining, self.__args.no_roof)
+                gen_sysinfo(
+                    workload_name=self.__args.name, 
+                    workload_dir=self.__workload_dir, 
+                    ip_blocks=self.__args.ipblocks, 
+                    app_cmd=self.__args.remaining, 
+                    skip_roof=self.__args.no_roof, 
+                    roof_only=self.__args.roof_only
+                )
 
     @abstractmethod
     def profile(self):
