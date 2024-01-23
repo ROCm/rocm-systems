@@ -297,6 +297,62 @@
 </gfx90a_expr>
 
 <gfx940_expr>
+  <metric name="AggSysCycles"                                           expr=GRBM_GUI_ACTIVE*CU_NUM                                   descr="Unit: cycles"></metric>
+  <metric name="GpuUtil"                                                expr=100*GRBM_GUI_ACTIVE/GRBM_COUNT                           descr="Unit: percent"></metric>
+  <metric name="CpUtil"                                                 expr=100*GRBM_CP_BUSY/GRBM_GUI_ACTIVE                         descr="Unit: percent"></metric>
+  <metric name="SpiUtil"                                                expr=100*GRBM_SPI_BUSY/GRBM_GUI_ACTIVE                        descr="Unit: percent"></metric>
+  <metric name="TaUtil"                                                 expr=100*GRBM_TA_BUSY/GRBM_GUI_ACTIVE                         descr="Unit: percent"></metric>
+  <metric name="TcUtil"                                                 expr=100*GRBM_TC_BUSY/GRBM_GUI_ACTIVE                         descr="Unit: percent"></metric>
+  <metric name="EaUtil"                                                 expr=100*GRBM_EA_BUSY/GRBM_GUI_ACTIVE                         descr="Unit: percent"></metric>
+
+  ## Wavefront Metrics
+  <metric name="WaveDuration"                                           expr=4*SQ_WAVE_CYCLES/SQ_WAVES                                descr="Unit: cycles"></metric>
+  <metric name="WaveDepWait"                                            expr=100*SQ_WAIT_ANY/SQ_WAVE_CYCLES                           descr="Unit: percent"></metric>
+  <metric name="WaveIssueWait"                                          expr=100*SQ_WAIT_INST_ANY/SQ_WAVE_CYCLES                      descr="Unit: percent"></metric>
+  <metric name="WaveExec"                                               expr=100*SQ_ACTIVE_INST_ANY/SQ_WAVE_CYCLES                    descr="Unit: percent"></metric>
+
+  ## Compute Unit Metrics
+  <metric name="ValuIops"                                               expr=(SQ_INSTS_VALU_INT32+SQ_INSTS_VALU_INT64)*64             descr="Unit: IOP"></metric>
+  <metric name="MfmaFlops"                                              expr=(SQ_INSTS_VALU_MFMA_MOPS_F16+SQ_INSTS_VALU_MFMA_MOPS_BF16+SQ_INSTS_VALU_MFMA_MOPS_F32+SQ_INSTS_VALU_MFMA_MOPS_F64)*512      descr="Unit: FLOP"></metric>
+  <metric name="MfmaFlopsF16"                                           expr=SQ_INSTS_VALU_MFMA_MOPS_F16*512                          descr="Unit: FLOP"></metric>
+  <metric name="MfmaFlopsBF16"                                          expr=SQ_INSTS_VALU_MFMA_MOPS_BF16*512                         descr="Unit: FLOP"></metric>
+  <metric name="MfmaFlopsF32"                                           expr=SQ_INSTS_VALU_MFMA_MOPS_F32*512                          descr="Unit: FLOP"></metric>
+  <metric name="MfmaFlopsF64"                                           expr=SQ_INSTS_VALU_MFMA_MOPS_F64*512                          descr="Unit: IOP"></metric>
+  <metric name="ScaPipeIssueUtil"                                       expr=100*SQ_ACTIVE_INST_SCA/(GRBM_GUI_ACTIVE*CU_NUM)          descr="Unit: percent"></metric>
+  <metric name="ValuPipeIssueUtil"                                      expr=100*SQ_ACTIVE_INST_VALU/(GRBM_GUI_ACTIVE*CU_NUM)         descr="Unit: percent"></metric>
+  <metric name="VmemPipeIssueUtil"                                      expr=100*4*(SQ_ACTIVE_INST_VMEM+SQ_ACTIVE_INST_FLAT)/(GRBM_GUI_ACTIVE*CU_NUM)      descr="Unit: percent"></metric>
+  <metric name="MfmaUtil"                                               expr=100*SQ_VALU_MFMA_BUSY_CYCLES/(GRBM_GUI_ACTIVE*CU_NUM*4)                       descr="Unit: percent"></metric>
+  <metric name="AvgNumActiveThreads"                                    expr=SQ_THREAD_CYCLES_VALU/SQ_ACTIVE_INST_VALU                descr="Unit: percent"></metric>
+
+  ## Local Data Share (LDS) Metrics
+  <metric name="LdsUtil"                                                expr=100*SQ_LDS_IDX_ACTIVE/(GRBM_GUI_ACTIVE*CU_NUM)                       descr="Unit: percent"></metric>
+  <metric name="LdsPipeIssueUtil"                                       expr=100*4*SQ_ACTIVE_INST_LDS/(GRBM_GUI_ACTIVE*CU_NUM*2)                  descr="Unit: percent"></metric>
+  <metric name="LdsBankConflict"                                        expr=SQ_LDS_BANK_CONFLICT/(SQ_LDS_IDX_ACTIVE-SQ_LDS_BANK_CONFLICT)        descr="Unit: conflicts/access"></metric>
+  <metric name="LDSBankConflict"                                        expr=100*SQ_LDS_BANK_CONFLICT/GRBM_GUI_ACTIVE/CU_NUM                      descr="The percentage of GPUTime LDS is stalled by bank conflicts. Value range: 0% (optimal) to 100% (bad)."></metric>
+
+  ## L1I and sL1D Cache Metrics
+  <metric name="L1iCacheHitRate"                                        expr=100*SQC_ICACHE_HITS/SQC_ICACHE_REQ                               descr="Unit: percent"></metric>
+  <metric name="sL1dCacheHitRate"                                       expr=100*SQC_DCACHE_HITS/SQC_DCACHE_REQ                               descr="Unit: percent"></metric>
+
+  ## vL1D Cache Metrics
+  <metric name="vL1dBufCoalesceRate"                                    expr=100*64*TA_TOTAL_WAVEFRONTS_sum/(TCP_TOTAL_ACCESSES_sum*4)        descr="Unit: percent"></metric>
+  <metric name="vL1dCacheUtil"                                          expr=100*TCP_GATE_EN2_sum/TCP_GATE_EN1_sum                            descr="Unit: percent"></metric>
+  <metric name="vL1dCacheTcbHitRate"                                    expr=100*TCP_UTCL1_TRANSLATION_HIT_sum/TCP_UTCL1_REQUEST_sum          descr="Unit: percent"></metric>
+
+  <metric name="vL1dRdTagConfStallRate"                                 expr=100*TCP_READ_TAGCONFLICT_STALL_CYCLES_sum/TCP_GATE_EN2_sum       descr="Unit: percent"></metric>
+  <metric name="vL1dWrTagConfStallRate"                                 expr=100*TCP_WRITE_TAGCONFLICT_STALL_CYCLES_sum/TCP_GATE_EN2_sum      descr="Unit: percent"></metric>
+  <metric name="vL1dAtomicTagConfStallRate"                             expr=100*TCP_ATOMIC_TAGCONFLICT_STALL_CYCLES_sum/TCP_GATE_EN2_sum     descr="Unit: percent"></metric>
+  <metric name="vL1dMissReqStallRate"                                   expr=100*TCP_TCR_TCP_STALL_CYCLES_sum/TCP_GATE_EN2_sum                descr="Unit: percent"></metric>
+  <metric name="vL1dDataPendRate"                                       expr=100*TCP_PENDING_STALL_CYCLES_sum/TCP_GATE_EN2_sum                descr="Unit: percent"></metric>
+  <metric name="vL1dDataRetStallRate"                                   expr=100*TD_TC_STALL_sum/TD_TD_BUSY_sum                               descr="Unit: percent"></metric>
+
+  ## L2 Cache Metrics
+  <metric name="L2CacheHitRate"                                         expr=100*TCC_HIT_sum/(TCC_HIT_sum+TCC_MISS_sum)                       descr="Unit: percent"></metric>
+  <metric name="L2CacheTagRamStallRate"                                 expr=100*TCC_TAG_STALL_sum/TCC_BUSY_sum                               descr="Unit: percent"></metric>
+  <metric name="EaWrStarveRate"                                         expr=100*TCC_TOO_MANY_EA_WRREQS_STALL_sum/TCC_BUSY_sum                descr="Unit: percent"></metric>
+
+  <metric name="KERNEL_DURATION" expr=1 descr="The duration of the kernel dispatch"></metric>
+  <metric name="WriteUnitStalled" expr=100*TCC_WRREQ_STALL_max/GRBM_GUI_ACTIVE descr="The percentage of GPUTime the Write unit is stalled. Value range: 0% to 100% (bad)."></metric>
   <metric name="TCP_TCP_TA_DATA_STALL_CYCLES_sum" expr=sum(TCP_TCP_TA_DATA_STALL_CYCLES,16) descr="Total number of TCP stalls TA data interface."></metric>
   <metric name="TCP_TCP_TA_DATA_STALL_CYCLES_max" expr=max(TCP_TCP_TA_DATA_STALL_CYCLES,16) descr="Maximum number of TCP stalls TA data interface."></metric>
 
