@@ -23,21 +23,6 @@ set(CMAKE_HIP_STANDARD_REQUIRED ON)
 enable_testing()
 include(CTest)
 
-# needed for validation
-find_package(Python3 REQUIRED)
-
-execute_process(
-    COMMAND ${Python3_EXECUTABLE} -c "import pandas"
-    RESULT_VARIABLE PYTHON_PANDAS_IMPORT
-    OUTPUT_QUIET)
-
-if(NOT ${PYTHON_PANDAS_IMPORT} EQUAL 0)
-    message(
-        FATAL_ERROR
-            "The 'pandas' Python3 package is not installed. Please install it using the following command: '${Python3_EXECUTABLE} -m pip install pandas'"
-        )
-endif()
-
 add_subdirectory(tracing)
 add_subdirectory(counter-collection)
 add_subdirectory(tracing-plus-cc)
