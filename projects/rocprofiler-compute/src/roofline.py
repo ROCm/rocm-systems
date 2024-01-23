@@ -52,8 +52,22 @@ class Roofline:
         self.__figure = go.Figure()
         if not isinstance(self.__run_parameters['path_to_dir'], list):
             self.roof_setup()
+        # Set roofline run parameters from args
+        if hasattr(self.__args, 'roof_only') and self.__args.roof_only == True:
+            self.__run_parameters['is_standalone'] = True
+        if hasattr(self.__args, 'kernel_names') and self.__args.kernel_names == True:
+            self.__run_parameters['include_kernel_names'] = True
+        if hasattr(self.__args, 'mem_level') and self.__args.mem_level != "ALL":
+            self.__run_parameters['mem_level'] = self.__args.mem_level
+        if hasattr(self.__args, 'sort') and self.__args.sort != "ALL":
+            self.__run_parameters['sort_type'] = self.__args.mem_level
 
-    
+        self.validate_parameters()
+
+    def validate_parameters(self):
+        if self.__run_parameters['include_kernel_names'] and (not self.__run_parameters['is_standalone']):
+            error("--roof-only is required for --kernel-names")
+
     def roof_setup(self):
         # set default workload path if not specified
         if self.__run_parameters['path_to_dir'] == os.path.join(os.getcwd(), 'workloads'):
@@ -69,9 +83,6 @@ class Roofline:
     ):
         """Generate a set of empirical roofline plots given a directory containing required profiling and benchmarking data
         """
-        if self.__run_parameters['include_kernel_names'] and (not self.__run_parameters['is_standalone']):
-            error("--roof-only is required for --kernel-names")
-
         # Create arithmetic intensity data that will populate the roofline model
         logging.debug("[roofline] Path: ", self.__run_parameters['path_to_dir'])
         self.__ai_data = calc_ai(self.__run_parameters['sort_type'], ret_df)
@@ -311,7 +322,6 @@ class Roofline:
             sys.exit(1)
         t_df = OrderedDict()
         t_df["pmc_perf"] = pd.read_csv(app_path)
-        self.__run_parameters['is_standalone'] = True
         self.empirical_roofline(
             ret_df=t_df
         )
@@ -354,7 +364,7 @@ class Roofline:
     # we include pre_processing() and profile() methods for those who wish to borrow the roofline module        
     @abstractmethod
     def post_processing(self):
-        if self.__args.roof_only:
+        if self.__run_parameters['is_standalone']:
             self.standalone_roofline()
 
         
