@@ -22,7 +22,7 @@ config["app_1"] = ["./tests/vcopy", "-n", "1048576", "-b", "256", "-i", "3"]
 config["cleanup"] = True
 config["COUNTER_LOGGING"] = False
 config["METRIC_COMPARE"] = True
-config["METRIC_LOGGING"] = True
+config["METRIC_LOGGING"] = False
 
 baseline_opts = ["omniperf", "profile", "-n", "app_1", "-VVV"]
 
@@ -347,17 +347,19 @@ def baseline_compare_metric(test_name, workload_dir, args=[]):
                 if relative_diff > -99 or relative_diff < -101:
                     if metric_idx in FIXED_METRICS.keys():
                         # print(metric_idx+" is in FIXED_METRICS")
-                        isValid = (abs(absolute_diff) <= FIXED_METRICS[metric_idx]["absolute"]) or (abs(relative_diff) <= FIXED_METRICS[metric_idx]["relative"]) 
+                        threshold_type = "absolute" if FIXED_METRICS[metric_idx]["absolute"] > FIXED_METRICS[metric_idx]["relative"] else "relative"
+                        
+                        isValid = (abs(absolute_diff) <= FIXED_METRICS[metric_idx]["absolute"]) if (threshold_type == "absolute") else (abs(relative_diff) <= FIXED_METRICS[metric_idx]["relative"]) 
                         if not isValid:
                             print(
                                 "index "
                                 + metric_idx
-                                + " difference is supposed to be 0, absolute:",
+                                + " "+threshold_type+" difference is supposed to be "+ str(FIXED_METRICS[metric_idx][threshold_type])+", absolute diff:",
                                 absolute_diff,
-                                "relative: ",
+                                "relative diff: ",
                                 relative_diff,
                             )
-                            # assert 0
+                            assert 0
                         continue
                     
                     #Used for debugging metric lists
