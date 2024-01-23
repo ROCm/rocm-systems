@@ -31,8 +31,8 @@ message("----------Proj Src Dir: " ${PROJECT_SOURCE_DIR})
 message("----------Proj Bld Dir: " ${PROJECT_BINARY_DIR})
 message("----------Proj Lib Dir: " ${PROJECT_BINARY_DIR}/lib)
 message("----------Proj Exe Dir: " ${PROJECT_BINARY_DIR}/bin)
-message("----------RSMI Lib Dir: " ${RSMI_LIB_DIR})
-message("----------RSMI Inc Dir: " ${RSMI_INC_DIR})
+message("----------SMI Lib Dir: " ${SMI_LIB_DIR})
+message("----------SMI Inc Dir: " ${SMI_INC_DIR})
 message("---------GRPC Root Dir: " ${GRPC_ROOT})
 message("")
 
@@ -59,7 +59,7 @@ include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include
     "${PROJECT_SOURCE_DIR}/include"
     "${GRPC_ROOT}/include"
     "${PROTOB_OUT_DIR}"
-    "${RSMI_INC_DIR}"
+    "${SMI_INC_DIR}"
     "${PROJECT_SOURCE_DIR}")
 
 set(SERVER_SRC_LIST
@@ -68,7 +68,6 @@ set(SERVER_SRC_LIST
     "${PROTOBUF_GENERATED_SRCS}"
     "${SRC_DIR}/rdc_admin_service.cc"
     "${SRC_DIR}/rdc_api_service.cc"
-    "${SRC_DIR}/rdc_rsmi_service.cc"
     "${SRC_DIR}/rdc_server_main.cc")
 message("SERVER_SRC_LIST=${SERVER_SRC_LIST}")
 
@@ -76,7 +75,7 @@ set(SERVER_DAEMON_EXE "rdcd")
 configure_file("rdc.service.in" "${PROJECT_BINARY_DIR}/rdc.service" @ONLY)
 set(SERVICE_FILE_NAME "rdc.service")
 
-link_directories(${RSMI_LIB_DIR})
+link_directories(${SMI_LIB_DIR})
 
 add_executable(${SERVER_DAEMON_EXE} "${SERVER_SRC_LIST}")
 
@@ -85,7 +84,7 @@ set_target_properties(${SERVER_DAEMON_EXE}
     PROPERTIES INSTALL_RPATH "\$ORIGIN/../lib")
 
 target_link_libraries(${SERVER_DAEMON_EXE} pthread rt gRPC::grpc++
-    cap dl rocm_smi64 rdc_bootstrap)
+    cap dl amd_smi rdc_bootstrap)
 
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/${SERVER_DAEMON_EXE}
     PERMISSIONS OWNER_EXECUTE OWNER_READ OWNER_WRITE GROUP_READ

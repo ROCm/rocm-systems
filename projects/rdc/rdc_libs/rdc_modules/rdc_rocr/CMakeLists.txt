@@ -45,7 +45,7 @@ if(BUILD_ROCRTEST)
         "${PROJECT_SOURCE_DIR}"
         "${PROJECT_SOURCE_DIR}/include"
         "${COMMON_DIR}"
-        "${RSMI_INC_DIR}"
+        "${SMI_INC_DIR}"
         "${ROCM_DIR}/include")
 
     # Set the VERSION and SOVERSION values

@@ -46,8 +46,8 @@ message("--------Proj Src Dir: " ${PROJECT_SOURCE_DIR})
 message("--------Proj Bld Dir: " ${PROJECT_BINARY_DIR})
 message("--------Proj Lib Dir: " ${PROJECT_BINARY_DIR}/lib)
 message("--------Proj Exe Dir: " ${PROJECT_BINARY_DIR}/bin)
-message("--------RSMI Lib Dir: " ${RSMI_LIB_DIR})
-message("--------RSMI Inc Dir: " ${RSMI_INC_DIR})
+message("---------SMI Lib Dir: " ${SMI_LIB_DIR})
+message("---------SMI Inc Dir: " ${SMI_INC_DIR})
 message("")
 
 
@@ -82,8 +82,8 @@ set(CPACK_PACKAGE_FILE_NAME "${RDC_PACKAGE}-${VERSION_STRING}")
 set(CPACK_DEBIAN_PACKAGE_DEPENDS "rocm-core")
 set(CPACK_RPM_PACKAGE_REQUIRES "rocm-core")
 
-# link RSMI
-link_directories(${RSMI_LIB_DIR})
+# link SMI
+link_directories(${SMI_LIB_DIR})
 
 # add librdc_bootstrap.so
 add_subdirectory(bootstrap)

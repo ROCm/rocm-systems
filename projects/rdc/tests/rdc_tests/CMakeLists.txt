@@ -41,8 +41,8 @@ message("--------Proj Src Dir: " ${PROJECT_SOURCE_DIR})
 message("--------Proj Bld Dir: " ${PROJECT_BINARY_DIR})
 message("--------Proj Lib Dir: " ${PROJECT_BINARY_DIR}/lib)
 message("--------Proj Exe Dir: " ${PROJECT_BINARY_DIR}/bin)
-message("--------RSMI Lib Dir: " ${RSMI_LIB_DIR})
-message("--------RSMI Inc Dir: " ${RSMI_INC_DIR})
+message("--------SMI Lib Dir: " ${SMI_LIB_DIR})
+message("--------SMI Inc Dir: " ${SMI_INC_DIR})
 message("")
 
 set(SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR})
@@ -63,7 +63,7 @@ aux_source_directory(${SRC_DIR} rdctstSources)
 # Other source directories
 aux_source_directory(${SRC_DIR}/functional functionalSources)
 
-link_directories(${ROCM_INSTALL_DIR} ${RSMI_LIB_DIR})
+link_directories(${ROCM_INSTALL_DIR} ${SMI_LIB_DIR})
 
 # Build rules
 add_executable(${RDCTST} ${rdctstSources} ${functionalSources})
@@ -72,7 +72,7 @@ add_executable(${RDCTST} ${rdctstSources} ${functionalSources})
 target_include_directories(
     ${RDCTST}
     PUBLIC ${PROJECT_SOURCE_DIR}/include
-    PUBLIC ${RSMI_INC_DIR}
+    PUBLIC ${SMI_INC_DIR}
     PUBLIC ${SRC_DIR}/..)
 
 target_link_libraries(${RDCTST}

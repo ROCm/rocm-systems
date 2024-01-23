@@ -37,13 +37,13 @@ class PrometheusReader(RdcReader):
         if enable_pci_id == True:
             try:
                 import sys, os
-                # Relaive path of rocm_smi to map gpu index to PCI id
-                # change smi_lib_path if the rocm_smi is installed in different folder
+                # Relaive path of amd_smi to map gpu index to PCI id
+                # change smi_lib_path if the amd_smi is installed in different folder
                 smi_lib_relative_path = "../../bin"
                 smi_lib_path = os.path.join(sys.path[0], smi_lib_relative_path)
-                if os.path.exists(smi_lib_path+"/rocm_smi.py"):
+                if os.path.exists(smi_lib_path+"/amd_smi.py"):
                     sys.path.append(smi_lib_path)
-                    from rocm_smi import getBus, initializeRsmi
+                    from amd_smi import getBus, initializeRsmi
                     initializeRsmi()
                     # Map between gpu indexes and PCIe bus addresses
                     self.index_to_bus_addr = {}

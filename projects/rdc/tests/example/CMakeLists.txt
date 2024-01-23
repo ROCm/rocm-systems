@@ -45,7 +45,7 @@ message("--------Proj Src Dir: " ${PROJECT_SOURCE_DIR})
 message("--------Proj Bld Dir: " ${PROJECT_BINARY_DIR})
 message("--------Proj Lib Dir: " ${PROJECT_BINARY_DIR}/lib)
 message("--------Proj Exe Dir: " ${PROJECT_BINARY_DIR}/bin)
-message("--------RSMI Inc Dir: " ${RSMI_INC_DIR})
+message("--------SMI Inc Dir: " ${SMI_INC_DIR})
 message("")
 
 set(SRC_DIR "${PROJECT_SOURCE_DIR}/tests/example")
@@ -69,7 +69,7 @@ add_executable(${TEST_CLIENT_EXE} "${EXAMPLE_SRC_LIST}")
 
 target_include_directories(${TEST_CLIENT_EXE} PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/../../client/include"
-    "${RSMI_INC_DIR}")
+    "${SMI_INC_DIR}")
 
 target_link_libraries(${TEST_CLIENT_EXE} rdc_client)
 

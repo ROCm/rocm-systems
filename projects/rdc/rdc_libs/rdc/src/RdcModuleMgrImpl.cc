@@ -21,6 +21,7 @@ THE SOFTWARE.
 */
 #include "rdc_lib/impl/RdcModuleMgrImpl.h"
 
+#include <cassert>
 #include <memory>
 #include <type_traits>
 

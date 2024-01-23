@@ -38,12 +38,11 @@ THE SOFTWARE.
 #include <memory>
 #include <string>
 
+#include "amd_smi/amdsmi.h"
 #include "common/rdc_capabilities.h"
 #include "common/rdc_utils.h"
 #include "rdc.grpc.pb.h"  // NOLINT
 #include "rdc/rdc_api_service.h"
-#include "rdc/rdc_rsmi_service.h"
-#include "rocm_smi/rocm_smi.h"
 
 // TODO(cfreehil):
 // The following need to be made configurable (e.g., from YAML):
@@ -76,8 +75,7 @@ static const char* kDefaultListenAddress = "0.0.0.0";
 static const char* kDefaultListenPort = "50051";
 static const uint32_t kRSMIUMask = 027;
 
-RDCServer::RDCServer()
-    : secure_creds_(false), rsmi_service_(nullptr), rdc_admin_service_(nullptr) {}
+RDCServer::RDCServer() : secure_creds_(false), rdc_admin_service_(nullptr) {}
 
 RDCServer::~RDCServer() {}
 
@@ -195,18 +193,6 @@ void RDCServer::Run() {
     builder.RegisterService(rdc_admin_service_);
   }
 
-  if (start_rsmi_service()) {
-    rsmi_service_ = new amd::rdc::RsmiServiceImpl();
-    builder.RegisterService(rsmi_service_);
-
-    rsmi_status_t ret = rsmi_service_->Initialize(0);
-
-    if (ret != RSMI_STATUS_SUCCESS) {
-      std::cerr << "Failed to start RSMI service. ret = " << ret << std::endl;
-      return;
-    }
-  }
-
   if (start_api_service()) {
     api_service_ = new amd::rdc::RdcAPIServiceImpl();
     builder.RegisterService(api_service_);
@@ -286,11 +272,6 @@ static int FileOwner(const char* fn, std::string* owner) {
 
 void RDCServer::ShutDown(void) {
   server_->Shutdown();
-
-  if (rsmi_service_) {
-    delete rsmi_service_;
-    rsmi_service_ = nullptr;
-  }
 
   if (rdc_admin_service_) {
     delete rdc_admin_service_;
@@ -673,7 +654,6 @@ int main(int argc, char** argv) {
   }
 
   // TODO(cfreehil): Eventually, set these by reading a config file
-  rdc_server.set_start_rsmi_service(true);
   rdc_server.set_start_rdc_admin_service(true);
   rdc_server.set_start_api_service(true);
 

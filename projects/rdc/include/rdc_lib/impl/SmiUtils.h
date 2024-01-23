@@ -20,21 +20,21 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
-#include "rdc/rdc_client_utils.h"
+#ifndef INCLUDE_RDC_LIB_IMPL_RSMIUTILS_H_
+#define INCLUDE_RDC_LIB_IMPL_RSMIUTILS_H_
 
-#include "rdc.grpc.pb.h"  // NOLINT
-#include "rdc/rdc_client.h"
+#include "amd_smi/amdsmi.h"
+#include "rdc/rdc.h"
 
 namespace amd {
 namespace rdc {
 
-rdc_status_t GrpcErrorToRdcError(grpc::StatusCode grpc_err) {
-  uint32_t grpc_err_int = static_cast<uint32_t>(grpc_err);
-  uint32_t rdc_grpc_base_int = static_cast<uint32_t>(RDC_STATUS_GRPC_ERR_FIRST);
-  uint32_t rdc_err_int = grpc_err_int + rdc_grpc_base_int;
-
-  return static_cast<rdc_status_t>(rdc_err_int);
-}
+rdc_status_t Smi2RdcError(amdsmi_status_t rsmi);
+amdsmi_status_t get_processor_handle_from_id(uint32_t gpu_id,
+                                             amdsmi_processor_handle* processor_handle);
+amdsmi_status_t get_processor_count(uint32_t& all_processor_count);
 
 }  // namespace rdc
 }  // namespace amd
+
+#endif  // INCLUDE_RDC_LIB_IMPL_RSMIUTILS_H_

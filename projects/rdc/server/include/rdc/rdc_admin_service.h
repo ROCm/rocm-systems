@@ -22,9 +22,9 @@ THE SOFTWARE.
 #ifndef SERVER_INCLUDE_RDC_RDC_ADMIN_SERVICE_H_
 #define SERVER_INCLUDE_RDC_RDC_ADMIN_SERVICE_H_
 
+#include "amd_smi/amdsmi.h"
 #include "rdc.grpc.pb.h"  // NOLINT
 #include "rdc/rdc_admin_service.h"
-#include "rocm_smi/rocm_smi.h"
 
 namespace amd {
 namespace rdc {

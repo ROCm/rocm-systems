@@ -28,7 +28,7 @@ THE SOFTWARE.
 
 #include <iostream>
 
-#include "rocm_smi/rocm_smi.h"
+#include "amd_smi/amdsmi.h"
 
 #define CHK_RET_STATUS(RET)                                                           \
   if ((RET) != RDC_STATUS_SUCCESS) {                                                  \

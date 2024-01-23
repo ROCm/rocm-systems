@@ -30,13 +30,13 @@ THE SOFTWARE.
 #include <utility>
 #include <vector>
 
+#include "amd_smi/amdsmi.h"
 #include "rdc_lib/RdcCacheManager.h"
 #include "rdc_lib/RdcGroupSettings.h"
 #include "rdc_lib/RdcMetricFetcher.h"
 #include "rdc_lib/RdcModuleMgr.h"
 #include "rdc_lib/RdcNotification.h"
 #include "rdc_lib/RdcWatchTable.h"
-#include "rocm_smi/rocm_smi.h"
 
 namespace amd {
 namespace rdc {

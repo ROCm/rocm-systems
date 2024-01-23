@@ -24,35 +24,34 @@ THE SOFTWARE.
 #include <assert.h>
 #include <sys/time.h>
 
+#include <cstdint>
 #include <ctime>
 #include <mutex>  // NOLINT
 #include <unordered_map>
 #include <vector>
 
+#include "amd_smi/amdsmi.h"
 #include "common/rdc_capabilities.h"
 #include "rdc/rdc.h"
 #include "rdc_lib/RdcLogger.h"
-#include "rdc_lib/impl/RdcSmiLib.h"
-#include "rdc_lib/impl/RdcTelemetryModule.h"
-#include "rdc_lib/impl/RsmiUtils.h"
-#include "rocm_smi/rocm_smi.h"
+#include "rdc_lib/impl/SmiUtils.h"
 
 namespace amd {
 namespace rdc {
 
-static std::unordered_map<rdc_field_t, rsmi_evt_notification_type_t> rdc_2_rsmi_event_notif_map = {
-    {RDC_EVNT_NOTIF_VMFAULT, RSMI_EVT_NOTIF_VMFAULT},
-    {RDC_EVNT_NOTIF_FIRST, RSMI_EVT_NOTIF_FIRST},
-    {RDC_EVNT_NOTIF_THERMAL_THROTTLE, RSMI_EVT_NOTIF_THERMAL_THROTTLE},
-    {RDC_EVNT_NOTIF_PRE_RESET, RSMI_EVT_NOTIF_GPU_PRE_RESET},
-    {RDC_EVNT_NOTIF_POST_RESET, RSMI_EVT_NOTIF_GPU_POST_RESET},
+static std::unordered_map<rdc_field_t, amdsmi_evt_notification_type_t> rdc_2_smi_event_notif_map = {
+    {RDC_EVNT_NOTIF_VMFAULT, AMDSMI_EVT_NOTIF_VMFAULT},
+    {RDC_EVNT_NOTIF_FIRST, AMDSMI_EVT_NOTIF_FIRST},
+    {RDC_EVNT_NOTIF_THERMAL_THROTTLE, AMDSMI_EVT_NOTIF_THERMAL_THROTTLE},
+    {RDC_EVNT_NOTIF_PRE_RESET, AMDSMI_EVT_NOTIF_GPU_PRE_RESET},
+    {RDC_EVNT_NOTIF_POST_RESET, AMDSMI_EVT_NOTIF_GPU_POST_RESET},
 };
-static std::unordered_map<rsmi_evt_notification_type_t, rdc_field_t> rsmi_event_notif_2_rdc_map = {
-    {RSMI_EVT_NOTIF_VMFAULT, RDC_EVNT_NOTIF_VMFAULT},
-    {RSMI_EVT_NOTIF_FIRST, RDC_EVNT_NOTIF_FIRST},
-    {RSMI_EVT_NOTIF_THERMAL_THROTTLE, RDC_EVNT_NOTIF_THERMAL_THROTTLE},
-    {RSMI_EVT_NOTIF_GPU_PRE_RESET, RDC_EVNT_NOTIF_PRE_RESET},
-    {RSMI_EVT_NOTIF_GPU_POST_RESET, RDC_EVNT_NOTIF_POST_RESET},
+static std::unordered_map<amdsmi_evt_notification_type_t, rdc_field_t> smi_event_notif_2_rdc_map = {
+    {AMDSMI_EVT_NOTIF_VMFAULT, RDC_EVNT_NOTIF_VMFAULT},
+    {AMDSMI_EVT_NOTIF_FIRST, RDC_EVNT_NOTIF_FIRST},
+    {AMDSMI_EVT_NOTIF_THERMAL_THROTTLE, RDC_EVNT_NOTIF_THERMAL_THROTTLE},
+    {AMDSMI_EVT_NOTIF_GPU_PRE_RESET, RDC_EVNT_NOTIF_PRE_RESET},
+    {AMDSMI_EVT_NOTIF_GPU_POST_RESET, RDC_EVNT_NOTIF_POST_RESET},
 };
 
 // This const determines space allocated on stack for notification events.
@@ -63,22 +62,22 @@ RdcNotificationImpl::RdcNotificationImpl() {}
 RdcNotificationImpl::~RdcNotificationImpl() {}
 
 bool RdcNotificationImpl::is_notification_event(rdc_field_t field) const {
-  if (rdc_2_rsmi_event_notif_map.find(field) == rdc_2_rsmi_event_notif_map.end()) {
+  if (rdc_2_smi_event_notif_map.find(field) == rdc_2_smi_event_notif_map.end()) {
     return false;
   }
   return true;
 }
 
 rdc_status_t RdcNotificationImpl::set_listen_events(const std::vector<RdcFieldKey> fk_arr) {
-  rsmi_status_t ret;
+  amdsmi_status_t ret;
   std::map<uint32_t, uint64_t> new_masks;
 
   for (uint32_t i = 0; i < fk_arr.size(); ++i) {
-    if (rdc_2_rsmi_event_notif_map.find(fk_arr[i].second) == rdc_2_rsmi_event_notif_map.end()) {
+    if (rdc_2_smi_event_notif_map.find(fk_arr[i].second) == rdc_2_smi_event_notif_map.end()) {
       continue;
     }
     new_masks[fk_arr[i].first] |=
-        RSMI_EVENT_MASK_FROM_INDEX(rdc_2_rsmi_event_notif_map[fk_arr[i].second]);
+        AMDSMI_EVENT_MASK_FROM_INDEX(rdc_2_smi_event_notif_map[fk_arr[i].second]);
   }
 
   std::map<uint32_t, uint64_t>::iterator it = new_masks.begin();
@@ -90,6 +89,15 @@ rdc_status_t RdcNotificationImpl::set_listen_events(const std::vector<RdcFieldKe
       continue;
     }
 
+    // Get processor handle from GPU id
+    amdsmi_processor_handle processor_handle;
+    ret = get_processor_handle_from_id(it->first, &processor_handle);
+    if (ret != AMDSMI_STATUS_SUCCESS) {
+      RDC_LOG(RDC_ERROR,
+              "Failed to get processor handle for GPU " << it->first << " error: " << ret);
+      return Smi2RdcError(ret);
+    }
+
     // Temporarily get DAC capability
     ScopedCapability sc(CAP_DAC_OVERRIDE, CAP_EFFECTIVE);
 
@@ -98,15 +106,15 @@ rdc_status_t RdcNotificationImpl::set_listen_events(const std::vector<RdcFieldKe
       return RDC_ST_PERM_ERROR;
     }
 
-    ret = rsmi_event_notification_init(it->first);
-    if (ret != RSMI_STATUS_SUCCESS) {
-      RDC_LOG(RDC_ERROR, "rsmi_event_notification_init() returned "
+    ret = amdsmi_init_gpu_event_notification(processor_handle);
+    if (ret != AMDSMI_STATUS_SUCCESS) {
+      RDC_LOG(RDC_ERROR, "amdsmi_init_gpu_event_notification() returned "
                              << ret << " for device " << it->first << ". " << std::endl
                              << "  Will not listen for events on this device");
       continue;
     }
 
-    ret = rsmi_event_notification_mask_set(it->first, it->second);
+    ret = amdsmi_set_gpu_event_notification_mask(processor_handle, it->second);
     // Release DAC capability
     sc.Relinquish();
 
@@ -115,14 +123,14 @@ rdc_status_t RdcNotificationImpl::set_listen_events(const std::vector<RdcFieldKe
       return RDC_ST_PERM_ERROR;
     }
 
-    if (ret == RSMI_STATUS_SUCCESS) {
+    if (ret == AMDSMI_STATUS_SUCCESS) {
       gpu_evnt_notif_masks_[it->first] = it->second;
       RDC_LOG(RDC_INFO, "Event notification mask for gpu " << it->first << "is set to 0x"
                                                            << std::hex << it->second);
     } else {
-      RDC_LOG(RDC_INFO,
-              "rsmi_event_notification_mask_set() returned " << ret << " for device " << it->first);
-      return Rsmi2RdcError(ret);
+      RDC_LOG(RDC_INFO, "amdsmi_set_gpu_event_notification_mask() returned "
+                            << ret << " for device " << it->first);
+      return Smi2RdcError(ret);
     }
   }
   return RDC_ST_OK;
@@ -136,12 +144,12 @@ rdc_status_t RdcNotificationImpl::listen(rdc_evnt_notification_t* events, uint32
   }
 
   uint32_t f_cnt = std::min(*num_events, kMaxRSMIEvents);
-  rsmi_evt_notification_data_t rsmi_events[kMaxRSMIEvents];
+  amdsmi_evt_notification_data_t smi_events[kMaxRSMIEvents];
 
-  rsmi_status_t ret = rsmi_event_notification_get(timeout_ms, &f_cnt, rsmi_events);
+  amdsmi_status_t ret = amdsmi_get_gpu_event_notification(timeout_ms, &f_cnt, smi_events);
 
-  if (ret != RSMI_STATUS_SUCCESS) {
-    return Rsmi2RdcError(ret);
+  if (ret != AMDSMI_STATUS_SUCCESS) {
+    return Smi2RdcError(ret);
   }
   struct timeval tv;
   gettimeofday(&tv, NULL);
@@ -149,35 +157,44 @@ rdc_status_t RdcNotificationImpl::listen(rdc_evnt_notification_t* events, uint32
   *num_events = f_cnt;
 
   for (uint32_t i = 0; i < f_cnt; ++i) {
-    assert(rsmi_event_notif_2_rdc_map.find(rsmi_events[i].event) !=
-           rsmi_event_notif_2_rdc_map.end());
-    events[i].gpu_id = rsmi_events[i].dv_ind;
-    events[i].field.field_id = rsmi_event_notif_2_rdc_map[rsmi_events[i].event];
+    assert(smi_event_notif_2_rdc_map.find(smi_events[i].event) != smi_event_notif_2_rdc_map.end());
+    uint64_t bdfid;
+    amdsmi_get_gpu_bdf_id(smi_events[i].processor_handle, &bdfid);
+    events[i].gpu_id = bdfid;
+    events[i].field.field_id = smi_event_notif_2_rdc_map[smi_events[i].event];
     events[i].field.status = RDC_ST_OK;
     events[i].field.ts = now;
     events[i].field.type = STRING;
-    strncpy_with_null(events[i].field.value.str, rsmi_events[i].message, RDC_MAX_STR_LENGTH);
+    strncpy_with_null(events[i].field.value.str, smi_events[i].message, RDC_MAX_STR_LENGTH);
   }
 
   return RDC_ST_OK;
 }
 
 rdc_status_t RdcNotificationImpl::stop_listening(uint32_t gpu_id) {
-  rsmi_status_t ret;
+  amdsmi_status_t ret;
 
-  ret = rsmi_event_notification_mask_set(gpu_id, 0);
-  if (ret != RSMI_STATUS_SUCCESS) {
-    RDC_LOG(RDC_ERROR,
-            "rsmi_event_notification_mask_set() returned " << ret << " for device " << gpu_id);
+  // Get processor handle from GPU id
+  amdsmi_processor_handle processor_handle;
+  ret = get_processor_handle_from_id(gpu_id, &processor_handle);
+  if (ret != AMDSMI_STATUS_SUCCESS) {
+    RDC_LOG(RDC_ERROR, "Failed to get processor handle for GPU " << gpu_id << " error: " << ret);
+    return Smi2RdcError(ret);
   }
 
-  ret = rsmi_event_notification_stop(gpu_id);
-  if (ret == RSMI_STATUS_SUCCESS) {
+  ret = amdsmi_set_gpu_event_notification_mask(processor_handle, 0);
+  if (ret != AMDSMI_STATUS_SUCCESS) {
+    RDC_LOG(RDC_ERROR, "amdsmi_set_gpu_event_notification_mask() returned " << ret << " for device "
+                                                                            << gpu_id);
+  }
+
+  ret = amdsmi_stop_gpu_event_notification(processor_handle);
+  if (ret == AMDSMI_STATUS_SUCCESS) {
     std::lock_guard<std::mutex> guard(notif_mutex_);
     gpu_evnt_notif_masks_[gpu_id] = 0;
   } else {
     RDC_LOG(RDC_ERROR,
-            "rsmi_event_notification_stop() returned " << ret << " for device " << gpu_id);
+            "amdsmi_stop_gpu_event_notification() returned " << ret << " for device " << gpu_id);
   }
   return RDC_ST_OK;
 }

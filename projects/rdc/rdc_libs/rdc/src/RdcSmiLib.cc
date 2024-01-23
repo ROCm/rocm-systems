@@ -42,8 +42,8 @@ RdcSmiLib::RdcSmiLib(const RdcMetricFetcherPtr& mf)
   }
 }
 
-// Bulk fetch wrapper for the rocm_smi_lib. This will be replaced after
-// rocm_smi_lib can support bulk fetch.
+// Bulk fetch wrapper for the amd_smi_lib. This will be replaced after
+// amd_smi_lib can support bulk fetch.
 rdc_status_t RdcSmiLib::rdc_telemetry_fields_value_get(rdc_gpu_field_t* fields,
                                                        uint32_t fields_count,
                                                        rdc_field_value_f callback,
@@ -52,7 +52,7 @@ rdc_status_t RdcSmiLib::rdc_telemetry_fields_value_get(rdc_gpu_field_t* fields,
     return RDC_ST_BAD_PARAMETER;
   }
 
-  RDC_LOG(RDC_DEBUG, "Fetch " << fields_count << " fields from rocm_smi_lib.");
+  RDC_LOG(RDC_DEBUG, "Fetch " << fields_count << " fields from amd_smi_lib.");
 
   // Bulk fetch fields
   std::vector<rdc_gpu_field_value_t> bulk_results;
@@ -60,7 +60,7 @@ rdc_status_t RdcSmiLib::rdc_telemetry_fields_value_get(rdc_gpu_field_t* fields,
     rdc_status_t status =
         metric_fetcher_->bulk_fetch_smi_fields(fields, fields_count, bulk_results);
     RDC_LOG(RDC_DEBUG, "Bulk fetched " << bulk_results.size()
-                                       << " fields from rocm_smi_lib which return " << status);
+                                       << " fields from amd_smi_lib which return " << status);
     if (bulk_results.size() > 0) {
       rdc_status_t status = callback(&bulk_results[0], bulk_results.size(), user_data);
       if (status != RDC_ST_OK) {
@@ -116,12 +116,12 @@ rdc_status_t RdcSmiLib::rdc_telemetry_fields_watch(rdc_gpu_field_t* fields, uint
   }
 
   for (uint32_t i = 0; i < fields_count; i++) {
-    ret = metric_fetcher_->acquire_rsmi_handle({fields[i].gpu_index, fields[i].field_id});
+    ret = metric_fetcher_->acquire_smi_handle({fields[i].gpu_index, fields[i].field_id});
     if (ret != RDC_ST_OK) {
-      RDC_LOG(RDC_ERROR, "Failed to acquire rocm_smi handle for field.");
+      RDC_LOG(RDC_ERROR, "Failed to acquire amd_smi handle for field.");
     }
   }
-  RDC_LOG(RDC_DEBUG, "acquire " << fields_count << " field handles from rocm_smi_lib");
+  RDC_LOG(RDC_DEBUG, "acquire " << fields_count << " field handles from amd_smi_lib");
 
   return RDC_ST_OK;
 }
@@ -133,9 +133,9 @@ rdc_status_t RdcSmiLib::rdc_telemetry_fields_unwatch(rdc_gpu_field_t* fields,
   }
 
   for (uint32_t i = 0; i < fields_count; i++) {
-    metric_fetcher_->delete_rsmi_handle({fields[i].gpu_index, fields[i].field_id});
+    metric_fetcher_->delete_smi_handle({fields[i].gpu_index, fields[i].field_id});
   }
-  RDC_LOG(RDC_DEBUG, "delete " << fields_count << " field handles from rocm_smi_lib");
+  RDC_LOG(RDC_DEBUG, "delete " << fields_count << " field handles from amd_smi_lib");
 
   return RDC_ST_OK;
 }
@@ -146,7 +146,7 @@ rdc_status_t RdcSmiLib::rdc_telemetry_fields_query(uint32_t field_ids[MAX_NUM_FI
     return RDC_ST_BAD_PARAMETER;
   }
 
-  // List of fields supported by rocm_smi_lib
+  // List of fields supported by amd_smi_lib
   const std::vector<uint32_t> fields{
       RDC_FI_GPU_COUNT,         RDC_FI_DEV_NAME,
       RDC_FI_GPU_CLOCK,         RDC_FI_MEM_CLOCK,
@@ -192,11 +192,11 @@ rdc_status_t RdcSmiLib::rdc_test_case_run(rdc_diag_test_cases_t test_case,
   }
   switch (test_case) {
     case RDC_DIAG_COMPUTE_PROCESS:
-      return smi_diag_->check_rsmi_process_info(gpu_index, gpu_count, result);
+      return smi_diag_->check_smi_process_info(gpu_index, gpu_count, result);
     case RDC_DIAG_NODE_TOPOLOGY:
-      return smi_diag_->check_rsmi_topo_info(gpu_index, gpu_count, result);
+      return smi_diag_->check_smi_topo_info(gpu_index, gpu_count, result);
     case RDC_DIAG_GPU_PARAMETERS:
-      return smi_diag_->check_rsmi_param_info(gpu_index, gpu_count, result);
+      return smi_diag_->check_smi_param_info(gpu_index, gpu_count, result);
     default:
       return RDC_ST_NOT_SUPPORTED;
   }

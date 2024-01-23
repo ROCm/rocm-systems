@@ -30,8 +30,8 @@ THE SOFTWARE.
 #include <map>
 #include <string>
 
+#include "amd_smi/amdsmi.h"
 #include "rdc_tests/test_base.h"
-#include "rocm_smi/rocm_smi.h"
 
 /*static const std::map<grpc_connectivity_state, const char *> kGRPCChanState =
 {
@@ -47,40 +47,40 @@ THE SOFTWARE.
     },
 };
 */
-static const std::map<rsmi_gpu_block_t, const char*> kBlockNameMap = {
-    {RSMI_GPU_BLOCK_UMC, "UMC"},     {RSMI_GPU_BLOCK_SDMA, "SDMA"},
-    {RSMI_GPU_BLOCK_GFX, "GFX"},     {RSMI_GPU_BLOCK_MMHUB, "MMHUB"},
-    {RSMI_GPU_BLOCK_ATHUB, "ATHUB"}, {RSMI_GPU_BLOCK_PCIE_BIF, "PCIE_BIF"},
-    {RSMI_GPU_BLOCK_HDP, "HDP"},     {RSMI_GPU_BLOCK_XGMI_WAFL, "XGMI_WAFL"},
-    {RSMI_GPU_BLOCK_DF, "DF"},       {RSMI_GPU_BLOCK_SMN, "SMN"},
-    {RSMI_GPU_BLOCK_SEM, "SEM"},     {RSMI_GPU_BLOCK_MP0, "MP0"},
-    {RSMI_GPU_BLOCK_MP1, "MP1"},     {RSMI_GPU_BLOCK_FUSE, "FUSE"},
+static const std::map<amdsmi_gpu_block_t, const char*> kBlockNameMap = {
+    {AMDSMI_GPU_BLOCK_UMC, "UMC"},     {AMDSMI_GPU_BLOCK_SDMA, "SDMA"},
+    {AMDSMI_GPU_BLOCK_GFX, "GFX"},     {AMDSMI_GPU_BLOCK_MMHUB, "MMHUB"},
+    {AMDSMI_GPU_BLOCK_ATHUB, "ATHUB"}, {AMDSMI_GPU_BLOCK_PCIE_BIF, "PCIE_BIF"},
+    {AMDSMI_GPU_BLOCK_HDP, "HDP"},     {AMDSMI_GPU_BLOCK_XGMI_WAFL, "XGMI_WAFL"},
+    {AMDSMI_GPU_BLOCK_DF, "DF"},       {AMDSMI_GPU_BLOCK_SMN, "SMN"},
+    {AMDSMI_GPU_BLOCK_SEM, "SEM"},     {AMDSMI_GPU_BLOCK_MP0, "MP0"},
+    {AMDSMI_GPU_BLOCK_MP1, "MP1"},     {AMDSMI_GPU_BLOCK_FUSE, "FUSE"},
 };
-static_assert(RSMI_GPU_BLOCK_LAST == RSMI_GPU_BLOCK_FUSE, "kBlockNameMap needs to be updated");
+static_assert(AMDSMI_GPU_BLOCK_LAST == AMDSMI_GPU_BLOCK_FUSE, "kBlockNameMap needs to be updated");
 
 static const char* kRasErrStateStrings[] = {
-    "None",                     // RSMI_RAS_ERR_STATE_NONE
-    "Disabled",                 // RSMI_RAS_ERR_STATE_DISABLED
-    "Error Unknown",            // RSMI_RAS_ERR_STATE_PARITY
-    "Single, Correctable",      // RSMI_RAS_ERR_STATE_SING_C
-    "Multiple, Uncorrectable",  // RSMI_RAS_ERR_STATE_MULT_UC
-    "Poison"                    // RSMI_RAS_ERR_STATE_POISON
-    "Off",                      // RSMI_RAS_ERR_STATE_DISABLED
-    "On",                       // RSMI_RAS_ERR_STATE_ENABLED
+    "None",                     // AMDSMI_RAS_ERR_STATE_NONE
+    "Disabled",                 // AMDSMI_RAS_ERR_STATE_DISABLED
+    "Error Unknown",            // AMDSMI_RAS_ERR_STATE_PARITY
+    "Single, Correctable",      // AMDSMI_RAS_ERR_STATE_SING_C
+    "Multiple, Uncorrectable",  // AMDSMI_RAS_ERR_STATE_MULT_UC
+    "Poison"                    // AMDSMI_RAS_ERR_STATE_POISON
+    "Off",                      // AMDSMI_RAS_ERR_STATE_DISABLED
+    "On",                       // AMDSMI_RAS_ERR_STATE_ENABLED
 };
-static_assert(sizeof(kRasErrStateStrings) / sizeof(char*) == (RSMI_RAS_ERR_STATE_LAST + 1),
+static_assert(sizeof(kRasErrStateStrings) / sizeof(char*) == (AMDSMI_RAS_ERR_STATE_LAST + 1),
               "kErrStateNameMap needs to be updated");
 
-static const std::map<rsmi_ras_err_state_t, const char*> kErrStateNameMap = {
-    {RSMI_RAS_ERR_STATE_NONE, kRasErrStateStrings[RSMI_RAS_ERR_STATE_NONE]},
-    {RSMI_RAS_ERR_STATE_DISABLED, kRasErrStateStrings[RSMI_RAS_ERR_STATE_DISABLED]},
-    {RSMI_RAS_ERR_STATE_PARITY, kRasErrStateStrings[RSMI_RAS_ERR_STATE_PARITY]},
-    {RSMI_RAS_ERR_STATE_SING_C, kRasErrStateStrings[RSMI_RAS_ERR_STATE_SING_C]},
-    {RSMI_RAS_ERR_STATE_MULT_UC, kRasErrStateStrings[RSMI_RAS_ERR_STATE_MULT_UC]},
-    {RSMI_RAS_ERR_STATE_POISON, kRasErrStateStrings[RSMI_RAS_ERR_STATE_POISON]},
-    {RSMI_RAS_ERR_STATE_ENABLED, kRasErrStateStrings[RSMI_RAS_ERR_STATE_ENABLED]},
+static const std::map<amdsmi_ras_err_state_t, const char*> kErrStateNameMap = {
+    {AMDSMI_RAS_ERR_STATE_NONE, kRasErrStateStrings[AMDSMI_RAS_ERR_STATE_NONE]},
+    {AMDSMI_RAS_ERR_STATE_DISABLED, kRasErrStateStrings[AMDSMI_RAS_ERR_STATE_DISABLED]},
+    {AMDSMI_RAS_ERR_STATE_PARITY, kRasErrStateStrings[AMDSMI_RAS_ERR_STATE_PARITY]},
+    {AMDSMI_RAS_ERR_STATE_SING_C, kRasErrStateStrings[AMDSMI_RAS_ERR_STATE_SING_C]},
+    {AMDSMI_RAS_ERR_STATE_MULT_UC, kRasErrStateStrings[AMDSMI_RAS_ERR_STATE_MULT_UC]},
+    {AMDSMI_RAS_ERR_STATE_POISON, kRasErrStateStrings[AMDSMI_RAS_ERR_STATE_POISON]},
+    {AMDSMI_RAS_ERR_STATE_ENABLED, kRasErrStateStrings[AMDSMI_RAS_ERR_STATE_ENABLED]},
 };
-static_assert(RSMI_RAS_ERR_STATE_LAST == RSMI_RAS_ERR_STATE_ENABLED,
+static_assert(AMDSMI_RAS_ERR_STATE_LAST == AMDSMI_RAS_ERR_STATE_ENABLED,
               "kErrStateNameMap needs to be updated");
 
 static const struct option long_options[] = {
@@ -207,25 +207,35 @@ uint32_t ProcessCmdline(RDCTstGlobals* test, int arg_cnt, char** arg_list) {
   return 1;
 }
 
-const char* GetBlockNameStr(rsmi_gpu_block_t id) { return kBlockNameMap.at(id); }
-const char* GetErrStateNameStr(rsmi_ras_err_state_t st) { return kErrStateNameMap.at(st); }
+const char* GetBlockNameStr(amdsmi_gpu_block_t id) { return kBlockNameMap.at(id); }
+const char* GetErrStateNameStr(amdsmi_ras_err_state_t st) { return kErrStateNameMap.at(st); }
 /*const char *GetGRPCChanStateStr(grpc_connectivity_state st) {
   return kGRPCChanState.at(st);
 }*/
 
-const char* FreqEnumToStr(rsmi_clk_type rsmi_clk) {
-  static_assert(RSMI_CLK_TYPE_LAST == RSMI_CLK_TYPE_MEM, "FreqEnumToStr() needs to be updated");
+const char* FreqEnumToStr(amdsmi_clk_type_t rsmi_clk) {
+  static_assert(CLK_TYPE__MAX == CLK_TYPE_DCLK1, "FreqEnumToStr() needs to be updated");
   switch (rsmi_clk) {
-    case RSMI_CLK_TYPE_SYS:
+    case CLK_TYPE_SYS:
       return "System clock";
-    case RSMI_CLK_TYPE_DF:
+    case CLK_TYPE_DF:
       return "Data Fabric clock";
-    case RSMI_CLK_TYPE_DCEF:
+    case CLK_TYPE_DCEF:
       return "Display Controller Engine clock";
-    case RSMI_CLK_TYPE_SOC:
+    case CLK_TYPE_SOC:
       return "SOC clock";
-    case RSMI_CLK_TYPE_MEM:
+    case CLK_TYPE_MEM:
       return "Memory clock";
+    case CLK_TYPE_PCIE:
+      return "PCIe clock";
+    case CLK_TYPE_VCLK0:
+      return "VCLK0 clock";
+    case CLK_TYPE_VCLK1:
+      return "VCLK1 clock";
+    case CLK_TYPE_DCLK0:
+      return "DCLK0 clock";
+    case CLK_TYPE_DCLK1:
+      return "DCLK1 clock";
     default:
       return "Invalid Clock ID";
   }

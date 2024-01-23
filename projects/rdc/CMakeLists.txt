@@ -151,16 +151,16 @@ if(NOT EXISTS "${CMAKE_SOURCE_DIR}/raslib/.git" AND BUILD_RASLIB)
     If you do not want to build raslib, use cmake -DBUILD_RASLIB=off")
 endif()
 
-find_package(RSMI
-    NAMES rocm_smi
+find_package(SMI
+    NAMES amd_smi
     HINTS ${ROCM_DIR}/lib/cmake
     CONFIGURE REQUIRED)
-set(RSMI_INC_DIR "${ROCM_SMI_INCLUDE_DIR}" CACHE INTERNAL "ROCm SMI include directory.")
-set(RSMI_LIB_DIR "${ROCM_SMI_LIB_DIR}" CACHE INTERNAL "ROCm SMI library directory.")
+set(SMI_INC_DIR "${AMD_SMI_INCLUDE_DIR}" CACHE INTERNAL "AMD SMI include directory.")
+set(SMI_LIB_DIR "${AMD_SMI_LIB_DIR}" CACHE INTERNAL "AMD SMI library directory.")
 
-if(NOT EXISTS "${RSMI_INC_DIR}" OR NOT EXISTS "${RSMI_LIB_DIR}")
-    message(FATAL_ERROR "rocm_smi not found in ${RSMI_INC_DIR}. Please
-    make sure rocm_smi is installed and present in ${RSMI_INC_DIR}.")
+if(NOT EXISTS "${SMI_INC_DIR}" OR NOT EXISTS "${SMI_LIB_DIR}")
+    message(FATAL_ERROR "amd_smi not found in ${SMI_INC_DIR}. Please
+    make sure amd_smi is installed and present in ${SMI_INC_DIR}.")
 endif()
 
 if(BUILD_RASLIB AND NOT DEFINED HSA_DIR)
@@ -301,7 +301,6 @@ if(BUILD_STANDALONE)
     unset(OLD_CMAKE_INSTALL_MESSAGE)
 
     add_subdirectory("server")
-    add_subdirectory("client")
     add_subdirectory("rdci")
 
     if(BUILD_TESTS)
@@ -458,7 +457,7 @@ set(CPACK_DEBIAN_RUNTIME_PACKAGE_CONTROL_EXTRA
 
 option(ROCM_DEP_ROCMCORE "Add debian dependency on rocm-core" OFF)
 mark_as_advanced(ROCM_DEP_ROCMCORE)
-set(CPACK_DEBIAN_PACKAGE_DEPENDS "rocm-smi-lib, libc6")
+set(CPACK_DEBIAN_PACKAGE_DEPENDS "amd-smi-lib, libc6")
 if(ROCM_DEP_ROCMCORE)
     string(APPEND CPACK_DEBIAN_PACKAGE_DEPENDS ", rocm-core")
 endif()
@@ -485,7 +484,7 @@ endif()
 
 set(CPACK_RPM_PACKAGE_AUTOREQ 0)
 set(CPACK_RPM_PACKAGE_AUTOPROV 0)
-set(CPACK_RPM_PACKAGE_REQUIRES "rocm-smi-lib")
+set(CPACK_RPM_PACKAGE_REQUIRES "amd-smi-lib")
 # rdc-tests need rdc
 set(CPACK_RPM_TESTS_PACKAGE_REQUIRES "${CPACK_PACKAGE_NAME}")
 list(APPEND CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "/lib"

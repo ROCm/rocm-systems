@@ -63,7 +63,7 @@ class TestBase : public RdcRocrBase {
   const std::string& get_per_gpu_info() const { return per_gpu_info_; }
 
   hsa_status_t FindGPUIndex(hsa_agent_t agent, void* data);
-  // Return the agent by GPU index in rocm_smi
+  // Return the agent by GPU index in amd_smi
   hsa_status_t get_agent_by_gpu_index(uint32_t gpu_index, hsa_agent_t* agent);
 
  protected:

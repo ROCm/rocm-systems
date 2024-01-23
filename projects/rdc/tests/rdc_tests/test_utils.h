@@ -46,8 +46,8 @@
 #ifndef TESTS_RDC_TESTS_TEST_UTILS_H_
 #define TESTS_RDC_TESTS_TEST_UTILS_H_
 
-#include "rocm_smi/rocm_smi.h"
+#include "amd_smi/amdsmi.h"
 
-const char* NameFromFWEnum(rsmi_fw_block_t blk);
+const char* NameFromFWEnum(amdsmi_fw_block_t blk);
 
 #endif  // TESTS_RDC_TESTS_TEST_UTILS_H_
