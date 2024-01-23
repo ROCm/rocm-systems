@@ -353,7 +353,6 @@ class OmniProfiler_Base():
         """Perform any post-processing steps prior to profiling.
         """
         logging.debug("[profiling] performing post-processing using %s profiler" % self.__profiler)
-
         gen_sysinfo(
             workload_name=self.__args.name, 
             workload_dir=self.get_args().path, 
