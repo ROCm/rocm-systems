@@ -1,4 +1,5 @@
 <gfx8>
+  <metric name="SQ_WAVES_sum" expr=reduce(SQ_WAVES,sum) descr="Count number of waves sent to SQs. (per-simd, emulated, global). Sum over SQ instances."></metric>
   <metric name="TA_BUSY_avr" expr=reduce(TA_TA_BUSY,avr) descr="TA block is busy. Average over TA instances."></metric>
   <metric name="TA_BUSY_max" expr=reduce(TA_TA_BUSY,max) descr="TA block is busy. Max over TA instances."></metric>
   <metric name="TA_BUSY_min" expr=reduce(TA_TA_BUSY,min) descr="TA block is busy. Min over TA instances."></metric>
@@ -33,6 +34,7 @@
 </gfx8>
 
 <gfx9>
+  <metric name="SQ_WAVES_sum" expr=reduce(SQ_WAVES,sum) descr="Count number of waves sent to SQs. (per-simd, emulated, global). Sum over SQ instances."></metric>
   <metric name="TA_BUSY_avr" expr=reduce(TA_TA_BUSY,avr) descr="TA block is busy. Average over TA instances."></metric>
   <metric name="TA_BUSY_max" expr=reduce(TA_TA_BUSY,max) descr="TA block is busy. Max over TA instances."></metric>
   <metric name="TA_BUSY_min" expr=reduce(TA_TA_BUSY,min) descr="TA block is busy. Min over TA instances."></metric>
@@ -101,6 +103,7 @@
 </gfx908>
 
 <gfx90a base="gfx9">
+  <metric name="SQ_WAVES_sum" expr=reduce(SQ_WAVES,sum) descr="Count number of waves sent to SQs. (per-simd, emulated, global). Sum over SQ instances."></metric>
   <metric name="MeanOccupancyPerCU" expr=SQ_LEVEL_WAVES*0+SQ_ACCUM_PREV_HIRES/GRBM_GUI_ACTIVE/CU_NUM descr="Mean occupancy per compute unit."></metric>
   <metric name="MeanOccupancyPerActiveCU" expr=SQ_LEVEL_WAVES*0+SQ_ACCUM_PREV_HIRES*4/SQ_BUSY_CYCLES/CU_NUM descr="Mean occupancy per active compute unit."></metric>
   <metric name="TA_BUSY_avr"                                            expr=reduce(TA_TA_BUSY,avr) descr="TA block is busy. Average over TA instances."></metric>
@@ -291,6 +294,7 @@
 </gfx90a>
 
 <gfx940>
+  <metric name="SQ_WAVES_sum" expr=reduce(SQ_WAVES,sum) descr="Count number of waves sent to SQs. (per-simd, emulated, global). Sum over SQ instances."></metric>
   <metric name="TCP_TCP_TA_DATA_STALL_CYCLES_sum" expr=reduce(TCP_TCP_TA_DATA_STALL_CYCLES,sum) descr="Total number of TCP stalls TA data interface."></metric>
   <metric name="TCP_TCP_TA_DATA_STALL_CYCLES_max" expr=reduce(TCP_TCP_TA_DATA_STALL_CYCLES,max) descr="Maximum number of TCP stalls TA data interface."></metric>
 
@@ -424,6 +428,7 @@
 </gfx940>
 
 <gfx10>
+  <metric name="SQ_WAVES_sum" expr=reduce(SQ_WAVES,sum) descr="Count number of waves sent to SQs. (per-simd, emulated, global). Sum over SQ instances."></metric>
   <metric name="MeanOccupancyPerCU" expr=GRBM_COUNT*0+SQ_LEVEL_WAVES*0+SQ_ACCUM_PREV/GRBM_GUI_ACTIVE/CU_NUM descr="Mean occupancy per compute unit."></metric>
   <metric name="MeanOccupancyPerActiveCU" expr=GRBM_COUNT*0+SQ_LEVEL_WAVES*0+SQ_ACCUM_PREV*4/SQ_BUSY_CYCLES/CU_NUM descr="Mean occupancy per active compute unit."></metric>
 
@@ -468,6 +473,7 @@
 </gfx1032>
 
 <gfx11>
+  <metric name="SQ_WAVES_sum" expr=reduce(SQ_WAVES,sum) descr="Count number of waves sent to SQs. (per-simd, emulated, global). Sum over SQ instances."></metric>
   <metric name="GPU_UTIL" expr=100*GRBM_GUI_ACTIVE/GRBM_COUNT descr="Percentage of the time that GUI is active"></metric>
   <metric name="WAVE_DEP_WAIT" expr=100*SQ_WAIT_ANY/SQ_WAVE_CYCLES descr="Percentage of the SQ_WAVE_CYCLE time spent waiting for anything."></metric>
   <metric name="WAVE_ISSUE_WAIT" expr=100*SQ_WAIT_INST_ANY/SQ_WAVE_CYCLES descr="Percentage of the SQ_WAVE_CYCLE time spent waiting for any instruction issue."></metric>

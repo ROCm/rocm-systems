@@ -166,7 +166,12 @@ static const std::unordered_map<std::string, std::vector<std::vector<std::string
 
 static const std::unordered_map<std::string, std::vector<std::vector<std::string>>> derived_gfx908 =
     {{"gfx908",
-      {{"TCC_HIT_sum",
+      {{"SQ_WAVES_sum",
+        "",
+        "",
+        "reduce(SQ_WAVES,sum)",
+        "Count number of waves sent to SQs. (per-simd, emulated, global). Sum over SQ instances."},
+       {"TCC_HIT_sum",
         "",
         "",
         "reduce(TCC_HIT,sum)",
