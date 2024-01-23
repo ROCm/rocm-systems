@@ -25,7 +25,7 @@ endfunction()
 function(rocprofiler_set_memcheck_env _TYPE _LIB_BASE)
     set(_LIBS ${_LIB_BASE})
 
-    foreach(_N 6 5 4 3 2 1 0)
+    foreach(_N ${ARGN} 6 5 4 3 2 1 0)
         list(
             APPEND _LIBS
             ${CMAKE_SHARED_LIBRARY_PREFIX}${_LIB_BASE}${CMAKE_SHARED_LIBRARY_SUFFIX}.${_N}
@@ -34,7 +34,7 @@ function(rocprofiler_set_memcheck_env _TYPE _LIB_BASE)
 
     foreach(_LIB ${_LIBS})
         if(NOT ${_TYPE}_LIBRARY)
-            find_library(${_TYPE}_LIBRARY NAMES ${_LIB} ${ARGN})
+            find_library(${_TYPE}_LIBRARY NAMES ${_LIB})
         endif()
     endforeach()
 
@@ -60,7 +60,7 @@ elseif(ROCPROFILER_MEMCHECK STREQUAL "MemorySanitizer")
     rocprofiler_add_memcheck_flags("memory")
 elseif(ROCPROFILER_MEMCHECK STREQUAL "ThreadSanitizer")
     rocprofiler_add_memcheck_flags("thread")
-    rocprofiler_set_memcheck_env("${ROCPROFILER_MEMCHECK}" "tsan")
+    rocprofiler_set_memcheck_env("${ROCPROFILER_MEMCHECK}" "tsan" 0)
 elseif(ROCPROFILER_MEMCHECK STREQUAL "UndefinedBehaviorSanitizer")
     rocprofiler_add_memcheck_flags("undefined")
     rocprofiler_set_memcheck_env("${ROCPROFILER_MEMCHECK}" "ubsan")

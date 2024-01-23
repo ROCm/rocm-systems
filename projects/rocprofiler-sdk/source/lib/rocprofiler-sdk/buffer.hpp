@@ -71,7 +71,7 @@ is_valid_buffer_id(rocprofiler_buffer_id_t id);
 std::optional<rocprofiler_buffer_id_t>
 allocate_buffer();
 
-unique_buffer_vec_t&
+unique_buffer_vec_t*
 get_buffers();
 
 instance*

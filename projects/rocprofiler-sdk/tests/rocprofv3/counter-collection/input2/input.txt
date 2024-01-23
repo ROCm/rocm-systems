@@ -1,0 +1,2 @@
+pmc: SQ_WAVES
+pmc: GRBM_COUNT

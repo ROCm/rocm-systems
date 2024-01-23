@@ -23,6 +23,8 @@
 #pragma once
 
 #include <cstddef>
+#include <string>
+#include <string_view>
 #include <tuple>
 #include <type_traits>
 
@@ -105,6 +107,18 @@ struct is_pair_impl<std::pair<LhsT, RhsT>>
 
 template <typename Tp>
 struct is_pair : is_pair_impl<std::remove_cv_t<std::remove_reference_t<std::decay_t<Tp>>>>
+{};
+
+template <typename Tp>
+struct is_string_type_impl
+{
+    static constexpr auto value =
+        is_one_of<Tp, type_list<const char*, char*, std::string, std::string_view>>::value;
+};
+
+template <typename Tp>
+struct is_string_type
+: is_string_type_impl<std::remove_cv_t<std::remove_reference_t<std::decay_t<Tp>>>>
 {};
 
 template <typename, typename = void>

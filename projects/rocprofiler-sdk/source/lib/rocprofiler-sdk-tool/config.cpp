@@ -21,7 +21,8 @@
 // THE SOFTWARE.
 //
 
-#include "lib/common/config.hpp"
+#include "config.hpp"
+
 #include "lib/common/defines.hpp"
 #include "lib/common/demangle.hpp"
 #include "lib/common/environment.hpp"
@@ -36,23 +37,24 @@
 #include <ctime>
 #include <fstream>
 #include <regex>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
 
 namespace rocprofiler
 {
-namespace common
+namespace tool
 {
 namespace
 {
-std::time_t* launch_time = new std::time_t{std::time(nullptr)};
+auto launch_time = std::make_unique<std::time_t>(std::time_t{std::time(nullptr)});
 
 std::string
 get_local_datetime(const char* dt_format, std::time_t* dt_curr)
 {
     char mbstr[512];
-    if(!dt_curr) dt_curr = launch_time;
+    if(!dt_curr) dt_curr = launch_time.get();
 
     if(std::strftime(mbstr, sizeof(mbstr), dt_format, std::localtime(dt_curr)) != 0)
         return std::string{mbstr};
@@ -109,6 +111,95 @@ get_num_siblings(pid_t _id = getppid())
 {
     return get_siblings(_id).size();
 }
+
+// replace unsuported specail chars with space
+void
+handle_special_chars(std::string& str)
+{
+    // Iterate over the string and replace any special characters with a space.
+    auto pos = std::string::npos;
+    while((pos = str.find_first_of("!@#$%&(),*+-./;<=>?@{}^`~|:")) != std::string::npos)
+        str.at(pos) = ' ';
+}
+
+bool
+has_kernel_name_format(std::string const& str)
+{
+    return std::find_if(str.begin(), str.end(), [](unsigned char ch) {
+               return (isalnum(ch) != 0 || ch == '_');
+           }) != str.end();
+}
+
+bool
+has_counter_format(std::string const& str)
+{
+    return std::find_if(str.begin(), str.end(), [](unsigned char ch) {
+               return (isalnum(ch) != 0 || ch == '_');
+           }) != str.end();
+}
+
+// validate kernel names
+auto
+parse_kernel_names(const std::string& line)
+{
+    auto kernel_names_v = std::vector<std::string>{};
+    if(line.empty()) return kernel_names_v;
+
+    auto kernel_names = std::set<std::string>{};
+    trim(line);
+    auto input_line  = std::stringstream{line};
+    auto kernel_name = std::string{};
+    while(getline(input_line, kernel_name, ','))
+    {
+        if(has_kernel_name_format(kernel_name))
+        {
+            LOG(INFO) << "kernel name " << kernel_names.size() << ": " << kernel_name;
+            kernel_names.emplace(kernel_name);
+        }
+        else
+        {
+            LOG(ERROR) << "invalid kernel name: " << kernel_name;
+        }
+    }
+
+    kernel_names_v.reserve(kernel_names.size());
+    for(const auto& itr : kernel_names)
+        kernel_names_v.emplace_back(itr);
+
+    return kernel_names_v;
+}
+
+std::set<std::string>
+parse_counters(std::string line)
+{
+    auto counters = std::set<std::string>{};
+
+    if(line.empty()) return counters;
+
+    // trim line for any white spaces
+    trim(line);
+
+    if(!(line[0] == '#' || line.find("pmc") == std::string::npos))
+    {
+        handle_special_chars(line);
+
+        std::stringstream input_line(line);
+        std::string       counter;
+        while(getline(input_line, counter, ' '))
+        {
+            if(counter.substr(0, 3) != "pmc" && has_counter_format(counter))
+            {
+                counters.emplace(counter);
+            }
+            else
+            {
+                LOG(ERROR) << "invalid counter: " << counter;
+            }
+        }
+    }
+
+    return counters;
+}
 }  // namespace
 
 int
@@ -127,12 +218,17 @@ get_mpi_rank()
     return _v;
 }
 
+config::config()
+: kernel_names{parse_kernel_names(get_env("ROCPROF_KERNEL_NAMES", std::string{}))}
+, counters{parse_counters(get_env("ROCPROF_COUNTERS", std::string{}))}
+{}
+
 std::vector<output_key>
 output_keys(std::string _tag)
 {
     using strpair_t = std::pair<std::string, std::string>;
 
-    auto _cmdline = read_command_line(getpid());
+    auto _cmdline = common::read_command_line(getpid());
 
     if(_tag.empty() && !_cmdline.empty()) _tag = ::basename(_cmdline.front().c_str());
 
@@ -175,11 +271,11 @@ output_keys(std::string _tag)
         }
     }
 
-    auto* _launch_time = launch_time;
+    auto* _launch_time = launch_time.get();
     auto  _time_format = get_env<std::string>("ROCP_TIME_FORMAT", "%F_%H.%M");
 
-    auto _mpi_size = get_env<int>("OMPI_COMM_WORLD_SIZE", get_env<int>("MV2_COMM_WORLD_SIZE", 0));
-    auto _mpi_rank = get_env<int>("OMPI_COMM_WORLD_RANK", get_env<int>("MV2_COMM_WORLD_RANK", -1));
+    auto _mpi_size = get_mpi_size();
+    auto _mpi_rank = get_mpi_rank();
 
     auto _dmp_size      = fmt::format("{}", (_mpi_size) > 0 ? _mpi_size : 1);
     auto _dmp_rank      = fmt::format("{}", (_mpi_rank) > 0 ? _mpi_rank : 0);
@@ -313,68 +409,17 @@ format(std::string _fpath, const std::string& _tag)
 }
 
 std::string
-compose_filename(const config& _cfg)
-{
-    auto _output_path = _cfg.output_path;
-    auto _output_file = _cfg.output_file;
-    auto _output_ext  = _cfg.output_ext;
-
-    if(_output_path.empty()) _output_path = ".";
-    if(_cfg.mpi_size > 0)
-    {
-        if(_cfg.mpi_rank >= 0)
-        {
-            _output_file = fmt::format("{}.{}", _output_file, _cfg.mpi_rank);
-        }
-        else
-        {
-            _output_file = fmt::format("{}.{}", _output_file, getpid());
-        }
-    }
-    if(!_output_ext.empty())
-    {
-        if(_output_ext.find('.') == std::string::npos) _output_ext.insert(0, ".");
-        if(_output_file.length() < _output_ext.length() ||
-           _output_file.find(_output_ext) != _output_file.length() - _output_ext.length())
-            _output_file += _output_ext;
-    }
-
-    // join <OUTPUT_PATH>/<OUTPUT_FILE> and replace any keys with values
-    auto _prefix = format(common::filesystem::path{_output_path} / _output_file);
-
-    // return on empty
-    if(_prefix.empty()) return std::string{};
-
-    // get the absolute path
-    auto _fname = common::filesystem::absolute(common::filesystem::path{_prefix});
-
-    // create the directory if necessary
-    auto _fname_path = _fname.parent_path();
-    if(!common::filesystem::exists(_fname_path))
-        common::filesystem::create_directories(_fname.parent_path());
-
-    return _fname.string();
-}
-
-std::string
 format_name(std::string_view _name, const config& _cfg)
 {
-    if(_cfg.demangle && _cfg.truncate)
-    {
-        return truncate_name(cxx_demangle(_name));
-    }
+    if(!_cfg.demangle && !_cfg.truncate) return std::string{_name};
 
-    if(_cfg.demangle)
-    {
-        return cxx_demangle(_name);
-    }
+    // truncating requires demangling first so always demangle
+    auto _demangled_name =
+        common::cxx_demangle(std::regex_replace(_name.data(), std::regex{"(\\.kd)$"}, ""));
 
-    if(_cfg.truncate)
-    {
-        return truncate_name(_name);
-    }
+    if(_cfg.truncate) return common::truncate_name(_demangled_name);
 
-    return std::string{_name};
+    return _demangled_name;
 }
 
 void
@@ -388,5 +433,5 @@ output_key::output_key(std::string _key, std::string _val, std::string _desc)
 , value{std::move(_val)}
 , description{std::move(_desc)}
 {}
-}  // namespace common
+}  // namespace tool
 }  // namespace rocprofiler

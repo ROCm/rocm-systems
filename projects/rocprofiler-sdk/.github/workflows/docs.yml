@@ -9,7 +9,7 @@ on:
       - 'VERSION'
       - 'source/docs/**'
       - 'source/scripts/update-docs.sh'
-      - 'source/include/rocprofiler/*'
+      - 'source/include/rocprofiler-sdk/**'
       - '.github/workflows/docs.yml'
   pull_request:
     branches: [main]
@@ -18,7 +18,7 @@ on:
       - 'VERSION'
       - 'source/docs/**'
       - 'source/scripts/update-docs.sh'
-      - 'source/include/rocprofiler/*'
+      - 'source/include/rocprofiler-sdk/**'
       - '.github/workflows/docs.yml'
 
 concurrency:

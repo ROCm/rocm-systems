@@ -420,11 +420,11 @@ deregister_client_contexts(rocprofiler_client_id_t client_id)
 {
     for(auto& itr : get_registered_contexts_impl())
     {
-        if(itr->client_idx == client_id.handle)
+        if(itr->client_idx == client_id.handle && buffer::get_buffers())
         {
-            for(auto& bitr : buffer::get_buffers())
+            for(auto& bitr : *buffer::get_buffers())
             {
-                if(bitr->context_id == itr->context_idx) bitr.reset();
+                if(bitr && bitr->context_id == itr->context_idx) bitr.reset();
             }
             itr.reset();
         }

@@ -25,6 +25,7 @@
 
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/context/domain.hpp"
+#include "lib/rocprofiler-sdk/hsa/async_copy.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/marker/marker.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
@@ -96,6 +97,8 @@ rocprofiler_configure_buffer_tracing_service(rocprofiler_context_id_t          c
 
     if(!ctx) return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
 
+    if(buffer_id.handle == 0) return ROCPROFILER_STATUS_ERROR_BUFFER_NOT_FOUND;
+
     constexpr auto invalid_buffer_id =
         rocprofiler_buffer_id_t{std::numeric_limits<uint64_t>::max()};
 
@@ -147,6 +150,8 @@ rocprofiler_query_buffer_tracing_kind_operation_name(rocprofiler_buffer_tracing_
     const char* val = nullptr;
     if(kind == ROCPROFILER_BUFFER_TRACING_HSA_API)
         val = rocprofiler::hsa::name_by_id(operation);
+    else if(kind == ROCPROFILER_BUFFER_TRACING_MEMORY_COPY)
+        val = rocprofiler::hsa::async_copy::name_by_id(operation);
     else if(kind == ROCPROFILER_BUFFER_TRACING_MARKER_API)
         val = rocprofiler::marker::name_by_id<ROCPROFILER_MARKER_API_TABLE_ID_RoctxApi>(operation);
     else
@@ -187,6 +192,8 @@ rocprofiler_iterate_buffer_tracing_kind_operations(
     auto ops = std::vector<uint32_t>{};
     if(kind == ROCPROFILER_BUFFER_TRACING_HSA_API)
         ops = rocprofiler::hsa::get_ids();
+    else if(kind == ROCPROFILER_BUFFER_TRACING_MEMORY_COPY)
+        ops = rocprofiler::hsa::async_copy::get_ids();
     else if(kind == ROCPROFILER_BUFFER_TRACING_MARKER_API)
         ops = rocprofiler::marker::get_ids<ROCPROFILER_MARKER_API_TABLE_ID_RoctxApi>();
     else

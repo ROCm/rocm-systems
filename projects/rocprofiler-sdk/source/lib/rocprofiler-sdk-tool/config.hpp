@@ -24,14 +24,19 @@
 #pragma once
 
 #include "lib/common/environment.hpp"
+#include "lib/common/filesystem.hpp"
 
+#include <set>
 #include <string>
 #include <vector>
 
 namespace rocprofiler
 {
-namespace common
+namespace tool
 {
+namespace fs = common::filesystem;
+using common::get_env;
+
 enum class config_context
 {
     global = 0,
@@ -50,13 +55,21 @@ get_mpi_rank();
 
 struct config
 {
-    bool        demangle    = get_env("ROCP_DEMANGLE_KERNELS", true);
-    bool        truncate    = get_env("ROCP_TRUNCATE_KERNELS", false);
-    int         mpi_size    = get_mpi_size();
-    int         mpi_rank    = get_mpi_rank();
-    std::string output_path = get_env<std::string>("ROCP_OUTPUT_PATH", ".");
-    std::string output_file = get_env<std::string>("ROCP_OUTPUT_FILE", "results");
-    std::string output_ext  = {};
+    config();
+
+    bool        demangle           = get_env("ROCPROF_DEMANGLE_KERNELS", true);
+    bool        truncate           = get_env("ROCPROF_TRUNCATE_KERNELS", false);
+    bool        kernel_trace       = get_env("ROCPROF_KERNEL_TRACE", false);
+    bool        hsa_api_trace      = get_env("ROCPROF_HSA_API_TRACE", false);
+    bool        marker_api_trace   = get_env("ROCPROF_MARKER_API_TRACE", false);
+    bool        memory_copy_trace  = get_env("ROCPROF_MEMORY_COPY_TRACE", false);
+    bool        counter_collection = get_env("ROCPROF_COUNTER_COLLECTION", false);
+    int         mpi_size           = get_mpi_size();
+    int         mpi_rank           = get_mpi_rank();
+    std::string output_path        = get_env("ROCPROF_OUTPUT_PATH", fs::current_path().string());
+    std::string output_file        = get_env("ROCPROF_OUTPUT_FILE_NAME", std::to_string(getpid()));
+    std::vector<std::string> kernel_names = {};
+    std::set<std::string>    counters     = {};
 };
 
 template <config_context ContextT = config_context::global>
@@ -91,9 +104,6 @@ std::vector<output_key>
 output_keys(std::string _tag = {});
 
 std::string
-compose_filename(const config&);
-
-std::string
 format(std::string _fpath, const std::string& _tag = {});
 
 std::string
@@ -101,5 +111,5 @@ format_name(std::string_view _name, const config& = get_config<>());
 
 void
 initialize();
-}  // namespace common
+}  // namespace tool
 }  // namespace rocprofiler

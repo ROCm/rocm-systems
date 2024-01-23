@@ -20,6 +20,22 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#pragma once
+
+#include "lib/common/defines.hpp"
+#include "lib/common/filesystem.hpp"
+
+#include <rocprofiler-sdk/registration.h>
+#include <rocprofiler-sdk/rocprofiler.h>
+
+#include <amd_comgr/amd_comgr.h>
+#include <hsa/amd_hsa_kernel_code.h>
+#include <hsa/hsa.h>
+#include <hsa/hsa_api_trace.h>
+#include <hsa/hsa_ext_amd.h>
+#include <hsa/hsa_ven_amd_aqlprofile.h>
+#include <hsa/hsa_ven_amd_loader.h>
+
 #include <cxxabi.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
@@ -29,32 +45,22 @@
 #include <map>
 #include <ostream>
 #include <regex>
+#include <set>
 #include <sstream>
 #include <string>
 #include <string_view>
 #include <vector>
 
-#include "lib/common/filesystem.hpp"
-
-#include <amd_comgr/amd_comgr.h>
-#include <hsa/amd_hsa_kernel_code.h>
-#include <hsa/hsa.h>
-#include <hsa/hsa_api_trace.h>
-#include <hsa/hsa_ext_amd.h>
-#include <hsa/hsa_ven_amd_aqlprofile.h>
-#include <hsa/hsa_ven_amd_loader.h>
-#include <rocprofiler-sdk/registration.h>
-#include <rocprofiler-sdk/rocprofiler.h>
-
 #define ROCPROFILER_CALL(result, msg)                                                              \
     {                                                                                              \
-        rocprofiler_status_t CHECKSTATUS = result;                                                 \
-        if(CHECKSTATUS != ROCPROFILER_STATUS_SUCCESS)                                              \
+        rocprofiler_status_t ROCPROFILER_VARIABLE(CHECKSTATUS, __LINE__) = result;                 \
+        if(ROCPROFILER_VARIABLE(CHECKSTATUS, __LINE__) != ROCPROFILER_STATUS_SUCCESS)              \
         {                                                                                          \
-            std::string status_msg = rocprofiler_get_status_string(CHECKSTATUS);                   \
+            std::string status_msg =                                                               \
+                rocprofiler_get_status_string(ROCPROFILER_VARIABLE(CHECKSTATUS, __LINE__));        \
             std::cerr << "[" #result "][" << __FILE__ << ":" << __LINE__ << "] " << msg            \
-                      << " failed with error code " << CHECKSTATUS << ": " << status_msg           \
-                      << std::endl;                                                                \
+                      << " failed with error code " << ROCPROFILER_VARIABLE(CHECKSTATUS, __LINE__) \
+                      << ": " << status_msg << std::endl;                                          \
             std::stringstream errmsg{};                                                            \
             errmsg << "[" #result "][" << __FILE__ << ":" << __LINE__ << "] " << msg " failure ("  \
                    << status_msg << ")";                                                           \
@@ -86,15 +92,11 @@ typedef struct
     uint64_t               signal_handle;
     uint64_t               kernel_object;
     rocprofiler_queue_id_t queue_id;
+    std::string            kernel_name;
     rocprofiler_agent_t    gpu_agent;
+    uint64_t               thread_id;
 
 } rocprofiler_tool_kernel_properties_t;
-
-typedef struct
-{
-    std::vector<rocprofiler_agent_t> gpu_agents_lists;
-
-} rocprofiler_tool_agent_callback_t;
 
 struct kernel_descriptor_t
 {
@@ -108,19 +110,20 @@ struct kernel_descriptor_t
     uint8_t  reserved2[6];
 };
 
-using rocprofiler_tool_callback_kind_names_t =
-    std::map<rocprofiler_callback_tracing_kind_t, const char*>;
-using rocprofiler_tool_callback_kind_operation_names_t =
-    std::map<rocprofiler_callback_tracing_kind_t, std::map<uint32_t, const char*>>;
+using rocprofiler_tool_buffer_kind_names_t =
+    std::unordered_map<rocprofiler_buffer_tracing_kind_t, const char*>;
+using rocprofiler_tool_buffer_kind_operation_names_t =
+    std::unordered_map<rocprofiler_buffer_tracing_kind_t,
+                       std::unordered_map<uint32_t, const char*>>;
 
-struct rocprofiler_tool_callback_name_info_t
+struct rocprofiler_tool_buffer_name_info_t
 {
-    rocprofiler_tool_callback_kind_names_t           kind_names      = {};
-    rocprofiler_tool_callback_kind_operation_names_t operation_names = {};
+    rocprofiler_tool_buffer_kind_names_t           kind_names      = {};
+    rocprofiler_tool_buffer_kind_operation_names_t operation_names = {};
 };
 
-std::vector<std::string>
-GetCounterNames();
+// std::vector<std::string>
+// GetCounterNames();
 
 void
 SetKernelDescriptorName(rocprofiler_address_t kernel_descriptor, const char* name);
@@ -140,10 +143,7 @@ GetKernelDescriptorName(rocprofiler_address_t kernel_descriptor);
 
 void
 populate_kernel_properties_data(rocprofiler_tool_kernel_properties_t* kernel_properties,
-                                const hsa_kernel_dispatch_packet_t    dispatch_packet);
+                                const hsa_kernel_dispatch_packet_t*   dispatch_packet);
 
-void
-TracerFlushRecord(void* data, rocprofiler_callback_tracing_kind_t kind);
-
-std::string
-cxa_demangle(std::string_view _mangled_name, int* _status);
+rocprofiler_tool_buffer_name_info_t
+get_buffer_id_names();

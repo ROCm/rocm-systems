@@ -17,14 +17,14 @@ hsa-api trace.
 The tool uses the following environment variables
 to read the user choices.
 
-- `ROCPROFILER_KERNEL_TRACE=1` to obtain kernel trace
-- `ROCPROFILER_HSA_API_TRACE=1` to obtain hsa api trace
+- `ROCPROF_KERNEL_TRACE=1` to obtain kernel trace
+- `ROCPROF_HSA_API_TRACE=1` to obtain hsa api trace
 
 The user can also specify the output filename and output file path
 to which the traces are written to.
 
-- `ROCPROFILER_OUTPUT_PATH=<directory>` to set the output directory path
-- `ROCPROFILER_OUTPUT_FILE_NAME=<filename-without-extension>` to set the output file name
+- `ROCPROF_OUTPUT_PATH=<directory>` to set the output directory path
+- `ROCPROF_OUTPUT_FILE_NAME=<filename-without-extension>` to set the output file name
 
 ## CHANGELOG
 

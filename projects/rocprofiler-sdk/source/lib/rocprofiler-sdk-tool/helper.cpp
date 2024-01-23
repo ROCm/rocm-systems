@@ -21,6 +21,8 @@
 // SOFTWARE.
 
 #include "helper.hpp"
+#include "config.hpp"
+#include "rocprofiler-sdk/fwd.h"
 
 #include <glog/logging.h>
 
@@ -28,6 +30,8 @@
 #include <iostream>
 #include <mutex>
 #include <unordered_map>
+#include <unordered_set>
+#include <utility>
 
 namespace
 {
@@ -73,7 +77,6 @@ enum amd_kernel_code_property_t
     AMD_HSA_BITS_CREATE_ENUM_ENTRIES(AMD_KERNEL_CODE_PROPERTY_RESERVED1, 12, 4),
 };
 
-std::mutex                                             kernel_descriptor_name_map_mutex;
 std::unordered_map<rocprofiler_address_t, const char*> kernel_descriptor_name_map;
 
 std::mutex kernel_properties_correlation_mutex;
@@ -120,6 +123,7 @@ sgpr_count(const std::string_view& name, const kernel_descriptor_t& kernel_code)
     // GFX10 and later always allocate 128 sgprs.
 
     // TODO(srnagara): Recheck the extraction of gfxip from gpu name
+
     const char*  name_data       = name.data();
     const size_t gfxip_label_len = std::min(name.size() - 2, size_t{63});
     if(gfxip_label_len > 0 && strnlen(name_data, gfxip_label_len + 1) >= gfxip_label_len)
@@ -170,18 +174,11 @@ GetKernelCode(uint64_t kernel_object)
 }  // namespace
 
 void
-SetKernelDescriptorName(rocprofiler_address_t kernel_descriptor, const char* kernel_name)
-{
-    std::lock_guard<std::mutex> kernel_descriptor_name_map_lock(kernel_descriptor_name_map_mutex);
-    kernel_descriptor_name_map[kernel_descriptor] = kernel_name;
-}
-
-void
 SetKernelProperties(uint64_t correlation_id, rocprofiler_tool_kernel_properties_t kernel_properties)
 {
     std::lock_guard<std::mutex> kernel_properties_correlation_map_lock(
         kernel_properties_correlation_mutex);
-    kernel_properties_correlation_map[correlation_id] = kernel_properties;
+    kernel_properties_correlation_map[correlation_id] = std::move(kernel_properties);
 }
 
 rocprofiler_tool_kernel_properties_t
@@ -197,74 +194,24 @@ GetKernelProperties(uint64_t correlation_id)
     }
     return it->second;
 }
-const char*
-GetKernelDescriptorName(rocprofiler_address_t kernel_descriptor)
-{
-    std::lock_guard<std::mutex> kernel_descriptor_name_map_lock(kernel_descriptor_name_map_mutex);
-    auto                        it = kernel_descriptor_name_map.find(kernel_descriptor);
-    if(it == kernel_descriptor_name_map.end())
-    {
-        std::cout << "kernel name not found" << std::endl;
-        abort();
-    }
-    return it->second;
-}
-
-std::vector<std::string>
-GetCounterNames()
-{
-    std::vector<std::string> counters;
-    const char*              line_c_str = getenv("ROCPROFILER_COUNTERS");
-    if(line_c_str)
-    {
-        std::string line = line_c_str;
-        // skip commented lines
-        auto found = line.find_first_not_of(" \t");
-        if(found != std::string::npos)
-        {
-            if(line[found] == '#') return {};
-        }
-        if(line.find("pmc") == std::string::npos) return counters;
-        char                   seperator = ' ';
-        std::string::size_type prev_pos = 0, pos = line.find(seperator, prev_pos);
-        prev_pos = ++pos;
-        if(pos != std::string::npos)
-        {
-            while((pos = line.find(seperator, pos)) != std::string::npos)
-            {
-                std::string substring(line.substr(prev_pos, pos - prev_pos));
-                if(substring.length() > 0 && substring != ":")
-                {
-                    counters.push_back(substring);
-                }
-                prev_pos = ++pos;
-            }
-            if(!line.substr(prev_pos, pos - prev_pos).empty())
-            {
-                counters.push_back(line.substr(prev_pos, pos - prev_pos));
-            }
-        }
-    }
-    return counters;
-}
 
 void
 populate_kernel_properties_data(rocprofiler_tool_kernel_properties_t* kernel_properties,
-                                const hsa_kernel_dispatch_packet_t    dispatch_packet)
+                                const hsa_kernel_dispatch_packet_t*   dispatch_packet)
 {
-    const uint64_t kernel_object = dispatch_packet.kernel_object;
+    const uint64_t kernel_object = dispatch_packet->kernel_object;
 
     const kernel_descriptor_t* kernel_code = GetKernelCode(kernel_object);
     uint64_t                   grid_size =
-        dispatch_packet.grid_size_x * dispatch_packet.grid_size_y * dispatch_packet.grid_size_z;
+        dispatch_packet->grid_size_x * dispatch_packet->grid_size_y * dispatch_packet->grid_size_z;
     if(grid_size > UINT32_MAX) abort();
     kernel_properties->grid_size = grid_size;
-    uint64_t workgroup_size = dispatch_packet.workgroup_size_x * dispatch_packet.workgroup_size_y *
-                              dispatch_packet.workgroup_size_z;
+    uint64_t workgroup_size      = dispatch_packet->workgroup_size_x *
+                              dispatch_packet->workgroup_size_y * dispatch_packet->workgroup_size_z;
     if(workgroup_size > UINT32_MAX) abort();
     kernel_properties->workgroup_size = (uint32_t) workgroup_size;
-    kernel_properties->lds_size       = dispatch_packet.group_segment_size;
-    kernel_properties->scratch_size   = dispatch_packet.private_segment_size;
+    kernel_properties->lds_size       = dispatch_packet->group_segment_size;
+    kernel_properties->scratch_size   = dispatch_packet->private_segment_size;
     kernel_properties->arch_vgpr_count =
         arch_vgpr_count(kernel_properties->gpu_agent.name, *kernel_code);
     kernel_properties->accum_vgpr_count =
@@ -275,79 +222,62 @@ populate_kernel_properties_data(rocprofiler_tool_kernel_properties_t* kernel_pro
                          AMD_KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32)
             ? 32
             : 64;
-    kernel_properties->signal_handle = dispatch_packet.completion_signal.handle;
+    kernel_properties->signal_handle = dispatch_packet->completion_signal.handle;
 }
 
-std::string
-cxa_demangle(std::string_view _mangled_name, int* _status)
+rocprofiler_tool_buffer_name_info_t
+get_buffer_id_names()
 {
-    constexpr size_t buffer_len = 4096;
-    // return the mangled since there is no buffer
-    if(_mangled_name.empty())
-    {
-        *_status = -2;
-        return std::string{};
-    }
+    static auto supported = std::unordered_set<rocprofiler_buffer_tracing_kind_t>{
+        ROCPROFILER_BUFFER_TRACING_HSA_API,
+        ROCPROFILER_BUFFER_TRACING_MEMORY_COPY,
+        ROCPROFILER_BUFFER_TRACING_MARKER_API};
 
-    auto _demangled_name = std::string{_mangled_name};
+    auto cb_name_info = rocprofiler_tool_buffer_name_info_t{};
+    //
+    // callback for each kind operation
+    //
+    static auto tracing_kind_operation_cb =
+        [](rocprofiler_buffer_tracing_kind_t kindv, uint32_t operation, void* data_v) {
+            auto* name_info_v = static_cast<rocprofiler_tool_buffer_name_info_t*>(data_v);
 
-    // PARAMETERS to __cxa_demangle
-    //  mangled_name:
-    //      A nullptr-terminated character string containing the name to be demangled.
-    //  buffer:
-    //      A region of memory, allocated with malloc, of *length bytes, into which the
-    //      demangled name is stored. If output_buffer is not long enough, it is expanded
-    //      using realloc. output_buffer may instead be nullptr; in that case, the demangled
-    //      name is placed in a region of memory allocated with malloc.
-    //  _buflen:
-    //      If length is non-nullptr, the length of the buffer containing the demangled name
-    //      is placed in *length.
-    //  status:
-    //      *status is set to one of the following values
-    size_t _demang_len = 0;
-    char*  _demang = abi::__cxa_demangle(_demangled_name.c_str(), nullptr, &_demang_len, _status);
-    switch(*_status)
-    {
-        //  0 : The demangling operation succeeded.
-        // -1 : A memory allocation failure occurred.
-        // -2 : mangled_name is not a valid name under the C++ ABI mangling rules.
-        // -3 : One of the arguments is invalid.
-        case 0:
+            if(supported.count(kindv) > 0)
+            {
+                const char* name = nullptr;
+                ROCPROFILER_CALL(rocprofiler_query_buffer_tracing_kind_operation_name(
+                                     kindv, operation, &name, nullptr),
+                                 "query buffer failed");
+                if(name) name_info_v->operation_names[kindv][operation] = name;
+            }
+
+            return 0;
+        };
+
+    //
+    //  callback for each kind (i.e. domain)
+    //
+    static auto tracing_kind_cb = [](rocprofiler_buffer_tracing_kind_t kind, void* data) {
+        //  store the buffer kind name
+        auto*       name_info_v = static_cast<rocprofiler_tool_buffer_name_info_t*>(data);
+        const char* name        = nullptr;
+        ROCPROFILER_CALL(rocprofiler_query_buffer_tracing_kind_name(kind, &name, nullptr),
+                         "query buffer failed");
+
+        if(name) name_info_v->kind_names[kind] = name;
+
+        if(supported.count(kind) > 0)
         {
-            if(_demang) _demangled_name = std::string{_demang};
-            break;
+            ROCPROFILER_CALL(rocprofiler_iterate_buffer_tracing_kind_operations(
+                                 kind, tracing_kind_operation_cb, static_cast<void*>(data)),
+                             "query buffer failed");
         }
-        case -1:
-        {
-            char _msg[buffer_len];
-            ::memset(_msg, '\0', buffer_len * sizeof(char));
-            ::snprintf(_msg,
-                       buffer_len,
-                       "memory allocation failure occurred demangling %s",
-                       _demangled_name.c_str());
-            ::perror(_msg);
-            break;
-        }
-        case -2: break;
-        case -3:
-        {
-            char _msg[buffer_len];
-            ::memset(_msg, '\0', buffer_len * sizeof(char));
-            ::snprintf(_msg,
-                       buffer_len,
-                       "Invalid argument in: (\"%s\", nullptr, nullptr, %p)",
-                       _demangled_name.c_str(),
-                       (void*) _status);
-            ::perror(_msg);
-            break;
-        }
-        default: break;
+
+        return 0;
     };
 
-    // if it "demangled" but the length is zero, set the status to -2
-    if(_demang_len == 0 && *_status == 0) *_status = -2;
+    ROCPROFILER_CALL(rocprofiler_iterate_buffer_tracing_kinds(tracing_kind_cb,
+                                                              static_cast<void*>(&cb_name_info)),
+                     "iterate_buffer failed");
 
-    // free allocated buffer
-    ::free(_demang);
-    return _demangled_name;
+    return cb_name_info;
 }

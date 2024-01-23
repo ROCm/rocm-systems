@@ -156,23 +156,23 @@ def test_async_copy_direction(input_data):
     sdk_data = data["rocprofiler-sdk-json-tool"]
 
     # Direction values:
-    #  -1 == ??? (unknown)
-    #   0 == H2H (host to host)
-    #   1 == H2D (host to device)
-    #   2 == D2H (device to host)
-    #   3 == D2D (device to device)
-    async_dir_cnt = dict([(idx, 0) for idx in range(-1, 4)])
+    #   0 == ??? (unknown)
+    #   1 == H2H (host to host)
+    #   2 == H2D (host to device)
+    #   3 == D2H (device to host)
+    #   4 == D2D (device to device)
+    async_dir_cnt = dict([(idx, 0) for idx in range(0, 5)])
     for itr in sdk_data["buffer_records"]["memory_copies"]:
         op_id = itr["operation"]
         async_dir_cnt[op_id] += 1
 
     # in the reproducible-runtime test which generates the input file,
     # we don't expect any async memory copy operations
-    assert async_dir_cnt[-1] == 0
     assert async_dir_cnt[0] == 0
     assert async_dir_cnt[1] == 0
     assert async_dir_cnt[2] == 0
     assert async_dir_cnt[3] == 0
+    assert async_dir_cnt[4] == 0
 
 
 if __name__ == "__main__":

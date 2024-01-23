@@ -3,8 +3,9 @@
 #
 
 add_library(rocprofiler-sdk-tool SHARED)
-target_sources(rocprofiler-sdk-tool PRIVATE helper.hpp helper.cpp tool.cpp
-                                            trace_buffer.hpp)
+target_sources(
+    rocprofiler-sdk-tool PRIVATE config.hpp config.cpp csv.hpp helper.hpp helper.cpp
+                                 output_file.hpp output_file.cpp tool.cpp)
 
 add_subdirectory(plugins)
 

@@ -181,7 +181,9 @@ buffer_name_info
 get_buffer_tracing_names()
 {
     static const auto supported = std::unordered_set<rocprofiler_buffer_tracing_kind_t>{
-        ROCPROFILER_BUFFER_TRACING_HSA_API, ROCPROFILER_BUFFER_TRACING_MARKER_API};
+        ROCPROFILER_BUFFER_TRACING_HSA_API,
+        ROCPROFILER_BUFFER_TRACING_MARKER_API,
+        ROCPROFILER_BUFFER_TRACING_MEMORY_COPY};
 
     auto cb_name_info = buffer_name_info{};
     //

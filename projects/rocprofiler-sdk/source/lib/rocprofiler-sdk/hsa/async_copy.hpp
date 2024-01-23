@@ -30,7 +30,25 @@ namespace rocprofiler
 {
 namespace hsa
 {
+namespace async_copy
+{
+const char*
+name_by_id(uint32_t id);
+
+uint32_t
+id_by_name(const char* name);
+
+std::vector<const char*>
+get_names();
+
+std::vector<uint32_t>
+get_ids();
+}  // namespace async_copy
+
 void
 async_copy_init(hsa_api_table_t* _orig);
+
+void
+async_copy_fini();
 }  // namespace hsa
 }  // namespace rocprofiler

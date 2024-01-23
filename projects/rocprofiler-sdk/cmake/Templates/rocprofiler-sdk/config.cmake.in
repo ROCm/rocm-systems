@@ -96,8 +96,7 @@ else()
         @hip_DIR@
         @rocm_version_DIR@)
 
-    include(
-        "${@PACKAGE_NAME@_CMAKE_DIR}/@PACKAGE_NAME@-config-nolink-target.cmake")
+    include("${@PACKAGE_NAME@_CMAKE_DIR}/@PACKAGE_NAME@-config-nolink-target.cmake")
 
     add_library(@PACKAGE_NAME@::@PACKAGE_NAME@-external-nolink INTERFACE IMPORTED)
 
@@ -129,10 +128,14 @@ else()
         endforeach()
     endif()
 
-    target_link_libraries(
-        @PROJECT_NAME@::@PROJECT_NAME@
-        INTERFACE @PACKAGE_NAME@::@PACKAGE_NAME@-external-nolink)
+    target_link_libraries(@PROJECT_NAME@::@PROJECT_NAME@
+                          INTERFACE @PACKAGE_NAME@::@PACKAGE_NAME@-external-nolink)
 endif()
+
+add_executable(@PACKAGE_NAME@::rocprofv3 IMPORTED)
+set_property(
+    TARGET @PACKAGE_NAME@::rocprofv3
+    PROPERTY IMPORTED_LOCATION ${@PACKAGE_NAME@_ROOT_DIR}/@CMAKE_INSTALL_BINDIR@/rocprofv3)
 
 include(FindPackageHandleStandardArgs)
 find_package_handle_standard_args(

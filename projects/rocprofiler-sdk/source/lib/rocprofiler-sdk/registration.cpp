@@ -557,6 +557,7 @@ finalize()
     static auto _once = std::once_flag{};
     std::call_once(_once, []() {
         set_fini_status(-1);
+        hsa::async_copy_fini();
         hsa::code_object_shutdown();
         if(get_init_status() > 0)
         {

@@ -40,14 +40,14 @@ TEST(rocprofiler_lib, buffer)
     namespace buffer = ::rocprofiler::buffer;
     namespace common = ::rocprofiler::common;
 
-    ASSERT_EQ(buffer::get_buffers().size(), 0)
+    ASSERT_EQ(buffer::get_buffers()->size(), 0)
         << "no buffers should have been created at this point";
     auto buffer_id = buffer::allocate_buffer();
 
     EXPECT_TRUE(buffer_id) << "failed to allocate buffer";
     EXPECT_GT(buffer_id->handle, 0);
     EXPECT_TRUE(buffer::is_valid_buffer_id(*buffer_id)) << "id=" << buffer_id->handle;
-    ASSERT_EQ(buffer::get_buffers().size(), 1) << "incorrect number of buffers created";
+    ASSERT_EQ(buffer::get_buffers()->size(), 1) << "incorrect number of buffers created";
 
     // get pointer to buffer
     auto* buffer_v = buffer::get_buffer(*buffer_id);

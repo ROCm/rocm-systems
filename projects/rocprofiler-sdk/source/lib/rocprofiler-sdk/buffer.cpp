@@ -26,6 +26,7 @@
 #include <rocprofiler-sdk/rocprofiler.h>
 
 #include "lib/common/container/stable_vector.hpp"
+#include "lib/common/static_object.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/context/domain.hpp"
@@ -70,24 +71,26 @@ get_buffer_offset()
 bool
 is_valid_buffer_id(rocprofiler_buffer_id_t id)
 {
-    auto nbuffers = get_buffers().size();
+    if(!get_buffers()) return false;
+    auto nbuffers = get_buffers()->size();
     auto offset   = get_buffer_offset();
     return (id.handle >= offset && id.handle < (offset + nbuffers));
 }
 
-unique_buffer_vec_t&
+unique_buffer_vec_t*
 get_buffers()
 {
-    static auto _v = unique_buffer_vec_t{reserve_size_t{unique_buffer_vec_t::chunk_size}};
+    static auto*& _v = common::static_object<unique_buffer_vec_t>::construct(
+        reserve_size_t{unique_buffer_vec_t::chunk_size});
     return _v;
 }
 
 instance*
 get_buffer(rocprofiler_buffer_id_t buffer_id)
 {
-    if(is_valid_buffer_id(buffer_id))
+    if(is_valid_buffer_id(buffer_id) && get_buffers())
     {
-        for(auto& itr : get_buffers())
+        for(auto& itr : *get_buffers())
         {
             if(itr && itr->buffer_id == buffer_id.handle)
             {
@@ -101,6 +104,8 @@ get_buffer(rocprofiler_buffer_id_t buffer_id)
 std::optional<rocprofiler_buffer_id_t>
 allocate_buffer()
 {
+    if(registration::get_fini_status() > 0) return std::nullopt;
+
     // ensure buffer has thread to handle flushing it
     static auto _init_threads_once = std::once_flag{};
     std::call_once(_init_threads_once, []() { internal_threading::initialize(); });
@@ -109,13 +114,13 @@ allocate_buffer()
     auto _lk = std::unique_lock<std::mutex>{get_buffers_mutex()};
 
     // initial context identifier number
-    auto _idx = get_buffer_offset() + get_buffers().size();
+    auto _idx = get_buffer_offset() + CHECK_NOTNULL(get_buffers())->size();
 
     // make space in registered
-    get_buffers().emplace_back(nullptr);
+    CHECK_NOTNULL(get_buffers())->emplace_back(nullptr);
 
     // create an entry in the registered
-    auto& _cfg_v = get_buffers().back();
+    auto& _cfg_v = CHECK_NOTNULL(get_buffers())->back();
     _cfg_v       = allocator::make_unique_static<buffer::instance>();
     auto* _cfg   = _cfg_v.get();
 
@@ -157,7 +162,7 @@ flush(rocprofiler_buffer_id_t buffer_id, bool wait)
     auto idx = buff->buffer_idx++;
 
     auto _task = [buffer_id, idx, offset]() {
-        auto& buff_v          = get_buffers().at(buffer_id.handle - offset);
+        auto& buff_v          = CHECK_NOTNULL(get_buffers())->at(buffer_id.handle - offset);
         auto& buff_internal_v = buff_v->get_internal_buffer(idx);
 
         if(!buff_internal_v.is_empty())
@@ -232,8 +237,8 @@ rocprofiler_create_buffer(rocprofiler_context_id_t        context,
     if(!opt_buff_id) return ROCPROFILER_STATUS_ERROR_BUFFER_NOT_FOUND;
     buffer_id->handle = opt_buff_id->handle;
 
-    auto& buff = rocprofiler::buffer::get_buffers().at(opt_buff_id->handle -
-                                                       rocprofiler::buffer::get_buffer_offset());
+    auto& buff = CHECK_NOTNULL(rocprofiler::buffer::get_buffers())
+                     ->at(opt_buff_id->handle - rocprofiler::buffer::get_buffer_offset());
 
     // allocate the buffers. if it is lossless, we allocate a second buffer to store data while
     // other buffer is being flushed
@@ -264,8 +269,8 @@ rocprofiler_destroy_buffer(rocprofiler_buffer_id_t buffer_id)
         return ROCPROFILER_STATUS_ERROR_BUFFER_NOT_FOUND;
 
     auto  offset  = rocprofiler::buffer::get_buffer_offset();
-    auto& buffers = rocprofiler::buffer::get_buffers();
-    auto& buff    = buffers.at(buffer_id.handle - offset);
+    auto* buffers = CHECK_NOTNULL(rocprofiler::buffer::get_buffers());
+    auto& buff    = buffers->at(buffer_id.handle - offset);
 
     // buffer is currently being flushed or destroyed
     if(buff->syncer.test_and_set()) return ROCPROFILER_STATUS_ERROR_BUFFER_BUSY;

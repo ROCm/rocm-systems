@@ -42,3 +42,6 @@ add_subdirectory(apps)
 # validation tests
 add_subdirectory(kernel-tracing)
 add_subdirectory(async-copy-tracing)
+
+# rocprofv3 validation tests
+add_subdirectory(rocprofv3)

@@ -23,6 +23,7 @@
 #include "lib/rocprofiler-sdk/hsa/async_copy.hpp"
 #include "lib/common/defines.hpp"
 #include "lib/common/scope_destructor.hpp"
+#include "lib/common/static_object.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
@@ -61,11 +62,77 @@ namespace rocprofiler
 {
 namespace hsa
 {
+namespace async_copy
+{
 namespace
 {
 using context_t              = context::context;
 using context_array_t        = common::container::small_vector<const context_t*>;
 using external_corr_id_map_t = std::unordered_map<const context_t*, rocprofiler_user_data_t>;
+
+template <size_t Idx>
+struct async_copy_info;
+
+#define SPECIALIZE_ASYNC_COPY_INFO(DIRECTION)                                                      \
+    template <>                                                                                    \
+    struct async_copy_info<ROCPROFILER_BUFFER_TRACING_MEMORY_COPY_##DIRECTION>                     \
+    {                                                                                              \
+        static constexpr auto operation_idx = ROCPROFILER_BUFFER_TRACING_MEMORY_COPY_##DIRECTION;  \
+        static constexpr auto name          = #DIRECTION;                                          \
+    };
+
+SPECIALIZE_ASYNC_COPY_INFO(NONE)
+SPECIALIZE_ASYNC_COPY_INFO(HOST_TO_HOST)
+SPECIALIZE_ASYNC_COPY_INFO(HOST_TO_DEVICE)
+SPECIALIZE_ASYNC_COPY_INFO(DEVICE_TO_HOST)
+SPECIALIZE_ASYNC_COPY_INFO(DEVICE_TO_DEVICE)
+
+#undef SPECIALIZE_ASYNC_COPY_INFO
+
+template <size_t Idx, size_t... IdxTail>
+const char*
+name_by_id(const uint32_t id, std::index_sequence<Idx, IdxTail...>)
+{
+    if(Idx == id) return async_copy_info<Idx>::name;
+    if constexpr(sizeof...(IdxTail) > 0)
+        return name_by_id(id, std::index_sequence<IdxTail...>{});
+    else
+        return nullptr;
+}
+
+template <size_t Idx, size_t... IdxTail>
+uint32_t
+id_by_name(const char* name, std::index_sequence<Idx, IdxTail...>)
+{
+    if(std::string_view{async_copy_info<Idx>::name} == std::string_view{name})
+        return async_copy_info<Idx>::operation_idx;
+    if constexpr(sizeof...(IdxTail) > 0)
+        return id_by_name(name, std::index_sequence<IdxTail...>{});
+    else
+        return ROCPROFILER_HSA_API_ID_NONE;
+}
+
+template <size_t... Idx>
+void
+get_ids(std::vector<uint32_t>& _id_list, std::index_sequence<Idx...>)
+{
+    auto _emplace = [](auto& _vec, uint32_t _v) {
+        if(_v < ROCPROFILER_HSA_API_ID_LAST) _vec.emplace_back(_v);
+    };
+
+    (_emplace(_id_list, async_copy_info<Idx>::operation_idx), ...);
+}
+
+template <size_t... Idx>
+void
+get_names(std::vector<const char*>& _name_list, std::index_sequence<Idx...>)
+{
+    auto _emplace = [](auto& _vec, const char* _v) {
+        if(_v != nullptr && strnlen(_v, 1) > 0) _vec.emplace_back(_v);
+    };
+
+    (_emplace(_name_list, async_copy_info<Idx>::name), ...);
+}
 
 bool
 context_filter(const context::context* ctx)
@@ -89,6 +156,13 @@ struct async_copy_data
     context::context_array_t            contexts        = {};
     external_corr_id_map_t              extern_corr_ids = {};
 };
+
+auto*
+get_active_signals()
+{
+    static auto* _v = common::static_object<std::atomic<int64_t>>::construct();
+    return _v;
+}
 
 template <typename Tp, typename Up>
 constexpr Tp*
@@ -197,6 +271,7 @@ async_copy_handler(hsa_signal_value_t signal_value, void* arg)
     {
         ROCP_HSA_TABLE_CALL(ERROR, get_table().core_->hsa_signal_destroy_fn(_data->rocp_signal));
         delete _data;
+        get_active_signals()->fetch_sub(1);
     }
 
     return (signal_value > 0);
@@ -367,6 +442,10 @@ async_copy_impl(Args... args)
             return invoke(
                 get_next_dispatch<Idx>(), std::move(_tied_args), std::make_index_sequence<N>{});
         }
+        else
+        {
+            get_active_signals()->fetch_add(1);
+        }
     }
 
     {
@@ -383,6 +462,8 @@ async_copy_impl(Args... args)
 
             ROCP_HSA_TABLE_CALL(ERROR, get_table().core_->hsa_signal_destroy_fn(_data->rocp_signal))
                 << ":: failed to destroy signal after async handler failed";
+
+            get_active_signals()->fetch_sub(1);
 
             delete _data;
             return invoke(
@@ -455,19 +536,63 @@ using async_copy_index_seq_t =
     std::index_sequence<async_copy_id, async_copy_on_engine_id, async_copy_rect_id>;
 }  // namespace
 
+// check out the assembly here... this compiles to a switch statement
+const char*
+name_by_id(uint32_t id)
+{
+    return name_by_id(id, std::make_index_sequence<ROCPROFILER_BUFFER_TRACING_MEMORY_COPY_LAST>{});
+}
+
+uint32_t
+id_by_name(const char* name)
+{
+    return id_by_name(name,
+                      std::make_index_sequence<ROCPROFILER_BUFFER_TRACING_MEMORY_COPY_LAST>{});
+}
+
+std::vector<uint32_t>
+get_ids()
+{
+    auto _data = std::vector<uint32_t>{};
+    _data.reserve(ROCPROFILER_BUFFER_TRACING_MEMORY_COPY_LAST);
+    get_ids(_data, std::make_index_sequence<ROCPROFILER_BUFFER_TRACING_MEMORY_COPY_LAST>{});
+    return _data;
+}
+
+std::vector<const char*>
+get_names()
+{
+    auto _data = std::vector<const char*>{};
+    _data.reserve(ROCPROFILER_BUFFER_TRACING_MEMORY_COPY_LAST);
+    get_names(_data, std::make_index_sequence<ROCPROFILER_BUFFER_TRACING_MEMORY_COPY_LAST>{});
+    return _data;
+}
+}  // namespace async_copy
+
 void
 async_copy_init(hsa_api_table_t* _orig)
 {
     if(_orig)
     {
-        async_copy_save(_orig, async_copy_index_seq_t{});
+        async_copy::async_copy_save(_orig, async_copy::async_copy_index_seq_t{});
 
-        auto ctxs = context::get_registered_contexts(context_filter);
+        auto ctxs = context::get_registered_contexts(async_copy::context_filter);
         if(!ctxs.empty())
         {
             _orig->amd_ext_->hsa_amd_profiling_async_copy_enable_fn(true);
-            async_copy_wrap(_orig, async_copy_index_seq_t{});
+            async_copy::async_copy_wrap(_orig, async_copy::async_copy_index_seq_t{});
         }
+    }
+}
+
+void
+async_copy_fini()
+{
+    if(!async_copy::get_active_signals()) return;
+    while(async_copy::get_active_signals()->load() > 0)
+    {
+        std::this_thread::yield();
+        std::this_thread::sleep_for(std::chrono::milliseconds{50});
     }
 }
 }  // namespace hsa
