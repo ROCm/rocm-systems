@@ -700,7 +700,7 @@ rsmi_dev_ecc_count_get(uint32_t dv_ind, rsmi_gpu_block_t block,
   DEVICE_MUTEX
 
   ret = GetDevValueVec(type, dv_ind, &val_vec);
-  if (val_vec.size() != 2 ) ret = RSMI_STATUS_FILE_ERROR;
+  if (val_vec.size() < 2 ) ret = RSMI_STATUS_FILE_ERROR;
 
   if (ret == RSMI_STATUS_FILE_ERROR) {
     ss << __PRETTY_FUNCTION__ << " | ======= end ======="

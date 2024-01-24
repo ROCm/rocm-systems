@@ -2501,21 +2501,27 @@ def showPowerPlayTable(deviceList):
             printLog(device, '1: %sMhz' % (int(odvf.curr_sclk_range.upper_bound / 1000000)), None)
             printLog(device, 'OD_MCLK:', None)
             printLog(device, '1: %sMhz' % (int(odvf.curr_mclk_range.upper_bound / 1000000)), None)
-            printLog(device, 'OD_VDDC_CURVE:', None)
-            for position in range(3):
-                printLog(device, '%d: %sMhz %smV' % (
-                position, int(list(odvf.curve.vc_points)[position].frequency / 1000000),
-                int(list(odvf.curve.vc_points)[position].voltage)), None)
-            printLog(device, 'OD_RANGE:', None)
-            printLog(device, 'SCLK:     %sMhz        %sMhz' % (
-            int(odvf.sclk_freq_limits.lower_bound / 1000000), int(odvf.sclk_freq_limits.upper_bound / 1000000)), None)
-            printLog(device, 'MCLK:     %sMhz        %sMhz' % (
-            int(odvf.mclk_freq_limits.lower_bound / 1000000), int(odvf.mclk_freq_limits.upper_bound / 1000000)), None)
-            for position in range(3):
-                printLog(device, 'VDDC_CURVE_SCLK[%d]:     %sMhz' % (
-                position, int(list(odvf.curve.vc_points)[position].frequency / 1000000)), None)
-                printLog(device, 'VDDC_CURVE_VOLT[%d]:     %smV' % (
-                position, int(list(odvf.curve.vc_points)[position].voltage)), None)
+            if odvf.num_regions > 0:
+                printLog(device, 'OD_VDDC_CURVE:', None)
+                for position in range(3):
+                    printLog(device, '%d: %sMhz %smV' % (
+                    position, int(list(odvf.curve.vc_points)[position].frequency / 1000000),
+                    int(list(odvf.curve.vc_points)[position].voltage)), None)
+            if odvf.sclk_freq_limits.lower_bound > 0 or  odvf.sclk_freq_limits.upper_bound > 0 \
+                or odvf.mclk_freq_limits.lower_bound >0 or odvf.mclk_freq_limits.upper_bound > 0:
+                printLog(device, 'OD_RANGE:', None)
+            if odvf.sclk_freq_limits.lower_bound > 0 or  odvf.sclk_freq_limits.upper_bound > 0:
+                printLog(device, 'SCLK:     %sMhz        %sMhz' % (
+                int(odvf.sclk_freq_limits.lower_bound / 1000000), int(odvf.sclk_freq_limits.upper_bound / 1000000)), None)
+            if odvf.mclk_freq_limits.lower_bound >0 or odvf.mclk_freq_limits.upper_bound > 0:
+                printLog(device, 'MCLK:     %sMhz        %sMhz' % (
+                int(odvf.mclk_freq_limits.lower_bound / 1000000), int(odvf.mclk_freq_limits.upper_bound / 1000000)), None)
+            if odvf.num_regions > 0:
+                for position in range(3):
+                    printLog(device, 'VDDC_CURVE_SCLK[%d]:     %sMhz' % (
+                    position, int(list(odvf.curve.vc_points)[position].frequency / 1000000)), None)
+                    printLog(device, 'VDDC_CURVE_VOLT[%d]:     %smV' % (
+                    position, int(list(odvf.curve.vc_points)[position].voltage)), None)
     printLogSpacer()
 
 
@@ -3031,11 +3037,13 @@ def showVoltageCurve(deviceList):
     odvf = rsmi_od_volt_freq_data_t()
     for device in deviceList:
         ret = rocmsmi.rsmi_dev_od_volt_info_get(device, byref(odvf))
-        if rsmi_ret_ok(ret, device, 'get_od_volt_info', silent=False):
+        if rsmi_ret_ok(ret, device, 'get_od_volt_info', silent=False) and odvf.num_regions > 0:
             for position in range(3):
                 printLog(device, 'Voltage point %d: %sMhz %smV' % (
                 position, int(list(odvf.curve.vc_points)[position].frequency / 1000000),
                 int(list(odvf.curve.vc_points)[position].voltage)), None)
+        else:
+            printErrLog(device, 'Voltage curve Points unsupported.')
     printLogSpacer()
 
 
