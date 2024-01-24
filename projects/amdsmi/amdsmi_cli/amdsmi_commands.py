@@ -329,6 +329,8 @@ class AMDSMICommands():
                 asic_info['rev_id'] = hex(asic_info['rev_id'])
                 if asic_info['asic_serial'] != '':
                     asic_info['asic_serial'] = hex(int(asic_info['asic_serial'], base=16))
+                else:
+                    asic_info['asic_serial'] = "N/A"
                 if asic_info['oam_id'] == 0xFFFF: # uint 16 max
                     asic_info['oam_id'] = "N/A"
                 static_dict['asic'] = asic_info

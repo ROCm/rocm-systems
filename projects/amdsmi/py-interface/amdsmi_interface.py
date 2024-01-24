@@ -358,11 +358,12 @@ class AmdSmiProcessorType(IntEnum):
     NON_AMD_GPU = amdsmi_wrapper.NON_AMD_GPU
     NON_AMD_CPU = amdsmi_wrapper.NON_AMD_CPU
 
-class AmdSmiCacheTypeNames(Enum):
-    DATA_CACHE = 2
-    INST_CACHE = 4
-    CPU_CACHE = 8
-    SIMD_CACHE = 16
+class AmdSmiCacheTypeNames(IntEnum):
+    ENABLED = amdsmi_wrapper.CACHE_FLAGS_ENABLED
+    DATA_CACHE = amdsmi_wrapper.CACHE_FLAGS_DATA_CACHE
+    INST_CACHE = amdsmi_wrapper.CACHE_FLAGS_INST_CACHE
+    CPU_CACHE = amdsmi_wrapper.CACHE_FLAGS_CPU_CACHE
+    SIMD_CACHE = amdsmi_wrapper.CACHE_FLAGS_SIMD_CACHE
 
 class AmdSmiEventReader:
     def __init__(
@@ -1556,7 +1557,7 @@ def amdsmi_get_gpu_asic_info(
         "market_name": asic_info.market_name.decode("utf-8"),
         "vendor_id": asic_info.vendor_id,
         "vendor_name": asic_info.vendor_name.decode("utf-8"),
-        "subvendor_id": asic_info.subvendor_id,
+        "subvendor_id": hex(asic_info.subvendor_id),
         "device_id": asic_info.device_id,
         "rev_id": asic_info.rev_id,
         "asic_serial": asic_info.asic_serial.decode("utf-8"),

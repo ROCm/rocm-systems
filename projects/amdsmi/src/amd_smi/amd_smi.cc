@@ -672,14 +672,20 @@ amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handle, amdsmi_asic_i
         status = rsmi_wrapper(rsmi_dev_vendor_id_get, processor_handle,
                                     &vendor_id);
         if (status == AMDSMI_STATUS_SUCCESS) info->vendor_id = vendor_id;
-
-        status =  rsmi_wrapper(rsmi_dev_subsystem_vendor_id_get, processor_handle,
-                    &subvendor_id);
-        if (status == AMDSMI_STATUS_SUCCESS) info->subvendor_id = subvendor_id;
     }
     // For other sysfs related information, get from rocm-smi
+    status = rsmi_wrapper(rsmi_dev_subsystem_vendor_id_get, processor_handle,
+                &subvendor_id);
+    if (status == AMDSMI_STATUS_SUCCESS) info->subvendor_id = subvendor_id;
+
     status =  rsmi_wrapper(rsmi_dev_pcie_vendor_name_get, processor_handle,
                     info->vendor_name, AMDSMI_MAX_STRING_LENGTH);
+
+    // If vendor name is empty and the vendor id is 0x1002, set vendor name to AMD vendor string
+    if ((info->vendor_name != NULL && info->vendor_name[0] == '\0') && info->vendor_id == 0x1002) {
+        memset(info->vendor_name, 0, 38);
+        strncpy(info->vendor_name, "Advanced Micro Devices Inc. [AMD/ATI]", 37);
+    }
 
     // default to 0xffff as not supported
     info->oam_id = std::numeric_limits<uint16_t>::max();
