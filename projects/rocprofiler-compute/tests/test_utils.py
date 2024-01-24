@@ -79,7 +79,7 @@ def clean_output_dir(cleanup, output_dir):
     return
 
 
-def check_csv_files(output_dir, num_kernels):
+def check_csv_files(output_dir,num_devices, num_kernels) :
     """Check profiling output csv files for expected number of entries (based on kernel invocations)
 
     Args:
@@ -95,7 +95,9 @@ def check_csv_files(output_dir, num_kernels):
     for file in files_in_workload:
         if file.endswith(".csv"):
             file_dict[file] = pd.read_csv(output_dir + "/" + file)
-            if not "sysinfo" in file:
+            if "roofline" in file:
+                assert len(file_dict[file].index) >= num_devices
+            elif not "sysinfo" in file:
                 assert len(file_dict[file].index) >= num_kernels
         elif file.endswith(".pdf"):
             file_dict[file] = "pdf"

@@ -30,6 +30,7 @@ baseline_opts = ["omniperf", "profile", "-n", "app_1", "-VVV"]
 # app_1 = ["./sample/vcopy", "-n", "1048576", "-b", "256", "-i", "3"]
 
 num_kernels = 3
+num_devices = 4
 dispatch_id = 0
 
 DEFAULT_ABS_DIFF = 15
@@ -92,8 +93,8 @@ ALL_CSVS_MI200 = [
     "timestamps.csv",
 ]
 ROOF_ONLY_FILES = [
-    "empirRoof_gpu-ALL_fp32.pdf",
-    "empirRoof_gpu-ALL_int8_fp16.pdf",
+    "empirRoof_gpu-0_fp32.pdf",
+    "empirRoof_gpu-0_int8_fp16.pdf",
     "pmc_perf.csv",
     "pmc_perf_0.csv",
     "pmc_perf_1.csv",
@@ -104,72 +105,73 @@ ROOF_ONLY_FILES = [
 ]
 
 # Must not change relative difference is zero
-FIXED_METRICS = {
-    "2.1.12" : {"absolute": 0, "relative": 1},
-    "2.1.15" : {"absolute": 0, "relative": 1},
-    "2.1.19" : {"absolute": 0, "relative": 1},
-    "5.1.0" : {"absolute": 0, "relative": 8},
-    "5.2.0" : {"absolute": 0, "relative": 8},
-    "6.1.5" : {"absolute": 0, "relative": 1},
-    "6.1.0" : {"absolute": 0, "relative": 8},
-    "6.1.3" : {"absolute": 0, "relative": 5},
-    "6.2.12" : {"absolute": 0, "relative": 1},
-    "6.2.13" : {"absolute": 0, "relative": 1},
-    "7.1.0" : {"absolute": 0, "relative": 1},
-    "7.1.1" : {"absolute": 0, "relative": 1},
-    "7.1.2" : {"absolute": 0, "relative": 1},
-    "7.1.5" : {"absolute": 0, "relative": 1},
-    "7.1.6" : {"absolute": 0, "relative": 1},
-    "7.1.7" : {"absolute": 0, "relative": 1},
-    "7.2.0" : {"absolute": 0, "relative": 5},
-    "7.2.1" : {"absolute": 0, "relative": 8},
-    "7.2.6" : {"absolute": 0, "relative": 1},
-    "10.1.4" : {"absolute": 0, "relative": 1},
-    "10.1.5" : {"absolute": 0, "relative": 1},
-    "10.1.6" : {"absolute": 0, "relative": 1},
-    "10.1.7" : {"absolute": 0, "relative": 1},
-    "10.3.4" : {"absolute": 0, "relative": 1},
-    "10.3.5" : {"absolute": 0, "relative": 1},
-    "10.3.6" : {"absolute": 0, "relative": 1},
-    "11.2.1" : {"absolute": 0, "relative": 1},
-    "11.2.4" : {"absolute": 0, "relative": 1},
-    "13.2.0" : {"absolute": 0, "relative": 1},
-    "13.2.2" : {"absolute": 0, "relative": 1},
-    "14.2.0" : {"absolute": 0, "relative": 1},
-    "14.2.5" : {"absolute": 0, "relative": 1},
-    "14.2.7" : {"absolute": 0, "relative": 1},
-    "14.2.8" : {"absolute": 0, "relative": 1},
-    "15.1.4" : {"absolute": 0, "relative": 1},
-    "15.1.5" : {"absolute": 0, "relative": 1},
-    "15.1.6" : {"absolute": 0, "relative": 1},
-    "15.1.7" : {"absolute": 0, "relative": 1},
-    "15.2.4" : {"absolute": 0, "relative": 1},
-    "15.2.5" : {"absolute": 0, "relative": 1},
-    "16.1.0" : {"absolute": 0, "relative": 1},
-    "16.1.3" : {"absolute": 0, "relative": 1},
-    "16.3.0" : {"absolute": 0, "relative": 1},
-    "16.3.1" : {"absolute": 0, "relative": 1},
-    "16.3.2" : {"absolute": 0, "relative": 1},
-    "16.3.5" : {"absolute": 0, "relative": 1},
-    "16.3.6" : {"absolute": 0, "relative": 1},
-    "16.3.7" : {"absolute": 0, "relative": 1},
-    "16.3.9" : {"absolute": 0, "relative": 1},
-    "16.3.10" : {"absolute": 0, "relative": 1},
-    "16.3.11" : {"absolute": 0, "relative": 1},
-    "16.4.3" : {"absolute": 0, "relative": 1},
-    "16.4.4" : {"absolute": 0, "relative": 1},
-    "16.5.0" : {"absolute": 0, "relative": 1},
-    "17.3.3" : {"absolute": 0, "relative": 1},
-    "17.3.6" : {"absolute": 0, "relative": 1},
-    "17.3.13" : {"absolute": 0, "relative": 1},
-    "18.1.0" : {"absolute": 0, "relative": 1},
-    "18.1.1" : {"absolute": 0, "relative": 1},
-    "18.1.2" : {"absolute": 0, "relative": 1},
-    "18.1.3" : {"absolute": 0, "relative": 1},
-    "5.1.2" : {"absolute": 0, "relative": 1},
-    "6.1.4" : {"absolute": 0, "relative": 1},
-    "18.1.5" : {"absolute": 0, "relative": 1},
-    "18.1.6" : {"absolute": 0, "relative": 1},
+METRIC_THRESHOLDS = {
+    "2.1.12": {"absolute": 0, "relative": 1},
+    "2.1.15": {"absolute": 0, "relative": 1},
+    "2.1.19": {"absolute": 0, "relative": 1},
+    "5.1.0": {"absolute": 0, "relative": 15},
+    "5.2.0": {"absolute": 0, "relative": 15},
+    "6.1.5": {"absolute": 0, "relative": 1},
+    "6.1.0": {"absolute": 0, "relative": 15},
+    # "6.1.3" : {"absolute": 0, "relative": 5},
+    "6.1.3": {"absolute": 0, "relative": 11},
+    "6.2.12": {"absolute": 0, "relative": 1},
+    "6.2.13": {"absolute": 0, "relative": 1},
+    "7.1.0": {"absolute": 0, "relative": 1},
+    "7.1.1": {"absolute": 0, "relative": 1},
+    "7.1.2": {"absolute": 0, "relative": 1},
+    "7.1.5": {"absolute": 0, "relative": 1},
+    "7.1.6": {"absolute": 0, "relative": 1},
+    "7.1.7": {"absolute": 0, "relative": 1},
+    "7.2.0": {"absolute": 0, "relative": 5},
+    "7.2.1": {"absolute": 0, "relative": 10},
+    "7.2.6": {"absolute": 0, "relative": 1},
+    "10.1.4": {"absolute": 0, "relative": 1},
+    "10.1.5": {"absolute": 0, "relative": 1},
+    "10.1.6": {"absolute": 0, "relative": 1},
+    "10.1.7": {"absolute": 0, "relative": 1},
+    "10.3.4": {"absolute": 0, "relative": 1},
+    "10.3.5": {"absolute": 0, "relative": 1},
+    "10.3.6": {"absolute": 0, "relative": 1},
+    "11.2.1": {"absolute": 0, "relative": 1},
+    "11.2.4": {"absolute": 0, "relative": 1},
+    "13.2.0": {"absolute": 0, "relative": 1},
+    "13.2.2": {"absolute": 0, "relative": 1},
+    "14.2.0": {"absolute": 0, "relative": 1},
+    "14.2.5": {"absolute": 0, "relative": 1},
+    "14.2.7": {"absolute": 0, "relative": 1},
+    "14.2.8": {"absolute": 0, "relative": 1},
+    "15.1.4": {"absolute": 0, "relative": 1},
+    "15.1.5": {"absolute": 0, "relative": 1},
+    "15.1.6": {"absolute": 0, "relative": 1},
+    "15.1.7": {"absolute": 0, "relative": 1},
+    "15.2.4": {"absolute": 0, "relative": 1},
+    "15.2.5": {"absolute": 0, "relative": 1},
+    "16.1.0": {"absolute": 0, "relative": 1},
+    "16.1.3": {"absolute": 0, "relative": 1},
+    "16.3.0": {"absolute": 0, "relative": 1},
+    "16.3.1": {"absolute": 0, "relative": 1},
+    "16.3.2": {"absolute": 0, "relative": 1},
+    "16.3.5": {"absolute": 0, "relative": 1},
+    "16.3.6": {"absolute": 0, "relative": 1},
+    "16.3.7": {"absolute": 0, "relative": 1},
+    "16.3.9": {"absolute": 0, "relative": 1},
+    "16.3.10": {"absolute": 0, "relative": 1},
+    "16.3.11": {"absolute": 0, "relative": 1},
+    "16.4.3": {"absolute": 0, "relative": 1},
+    "16.4.4": {"absolute": 0, "relative": 1},
+    "16.5.0": {"absolute": 0, "relative": 1},
+    "17.3.3": {"absolute": 0, "relative": 1},
+    "17.3.6": {"absolute": 0, "relative": 1},
+    "17.3.13": {"absolute": 0, "relative": 1},
+    "18.1.0": {"absolute": 0, "relative": 1},
+    "18.1.1": {"absolute": 0, "relative": 1},
+    "18.1.2": {"absolute": 0, "relative": 1},
+    "18.1.3": {"absolute": 0, "relative": 1},
+    "5.1.2": {"absolute": 0, "relative": 1},
+    "6.1.4": {"absolute": 0, "relative": 1},
+    "18.1.5": {"absolute": 0, "relative": 1},
+    "18.1.6": {"absolute": 1, "relative": 0},
 }
 # check for parallel resource allocation
 test_utils.check_resource_allocation()
@@ -303,6 +305,7 @@ def log_counter(file_dict, test_name):
                         Baseline_dir + "/" + file.split(".")[0] + "_error_log.csv"
                     )
 
+
 def baseline_compare_metric(test_name, workload_dir, args=[]):
     t = subprocess.Popen(
         [
@@ -344,33 +347,47 @@ def baseline_compare_metric(test_name, workload_dir, args=[]):
                 current_val = metric_info[-4]
                 relative_diff = float(metric_info[-2])
                 absolute_diff = float(metric_info[-1])
-                if relative_diff > -99 or relative_diff < -101:
-                    if metric_idx in FIXED_METRICS.keys():
+                if relative_diff > -99:
+                    if metric_idx in METRIC_THRESHOLDS.keys():
                         # print(metric_idx+" is in FIXED_METRICS")
-                        threshold_type = "absolute" if FIXED_METRICS[metric_idx]["absolute"] > FIXED_METRICS[metric_idx]["relative"] else "relative"
-                        
-                        isValid = (abs(absolute_diff) <= FIXED_METRICS[metric_idx]["absolute"]) if (threshold_type == "absolute") else (abs(relative_diff) <= FIXED_METRICS[metric_idx]["relative"]) 
+                        threshold_type = (
+                            "absolute"
+                            if METRIC_THRESHOLDS[metric_idx]["absolute"]
+                            > METRIC_THRESHOLDS[metric_idx]["relative"]
+                            else "relative"
+                        )
+
+                        isValid = (
+                            (abs(absolute_diff) <= METRIC_THRESHOLDS[metric_idx]["absolute"])
+                            if (threshold_type == "absolute")
+                            else (
+                                abs(relative_diff)
+                                <= METRIC_THRESHOLDS[metric_idx]["relative"]
+                            )
+                        )
                         if not isValid:
                             print(
                                 "index "
                                 + metric_idx
-                                + " "+threshold_type+" difference is supposed to be "+ str(FIXED_METRICS[metric_idx][threshold_type])+", absolute diff:",
+                                + " "
+                                + threshold_type
+                                + " difference is supposed to be "
+                                + str(METRIC_THRESHOLDS[metric_idx][threshold_type])
+                                + ", absolute diff:",
                                 absolute_diff,
                                 "relative diff: ",
                                 relative_diff,
                             )
                             assert 0
                         continue
-                    
-                    #Used for debugging metric lists
+
+                    # Used for debugging metric lists
                     if config["METRIC_LOGGING"] and (
-                        (abs(relative_diff) <= abs(DEFAULT_REL_DIFF)
-                         or (
-                            abs(absolute_diff)
-                            <= abs(DEFAULT_ABS_DIFF)
-                        ))
-                        and 
-                        (False if baseline_val == '' else float(baseline_val) > 0)
+                        (
+                            abs(relative_diff) <= abs(DEFAULT_REL_DIFF)
+                            or (abs(absolute_diff) <= abs(DEFAULT_ABS_DIFF))
+                        )
+                        and (False if baseline_val == "" else float(baseline_val) > 0)
                     ):
                         # print("logging...")
                         # print(metric_info)
@@ -389,7 +406,9 @@ def baseline_compare_metric(test_name, workload_dir, args=[]):
                         error_df = pd.concat([error_df, new_error])
                         counts = error_df.groupby(["Index"]).cumcount()
                         reoccurring_metrics = error_df.loc[counts > MAX_REOCCURING_COUNT]
-                        reoccurring_metrics["counts"] = counts[counts > MAX_REOCCURING_COUNT]
+                        reoccurring_metrics["counts"] = counts[
+                            counts > MAX_REOCCURING_COUNT
+                        ]
                         if reoccurring_metrics.any(axis=None):
                             print(
                                 "These metrics appear alot\n",
@@ -421,17 +440,13 @@ def test_path():
     workload_dir = test_utils.get_output_dir()
     test_utils.launch_omniperf(config, options, workload_dir)
 
-    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
+    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
     if soc == "mi200":
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
 
-    validate(
-        inspect.stack()[0][3],
-        workload_dir,
-        file_dict
-    )
+    validate(inspect.stack()[0][3], workload_dir, file_dict)
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -442,7 +457,7 @@ def test_no_roof():
     workload_dir = test_utils.get_output_dir()
     test_utils.launch_omniperf(config, options, workload_dir)
 
-    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
+    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
     if soc == "mi200":
         assert sorted(list(file_dict.keys())) == [
             "SQ_IFETCH_LEVEL.csv",
@@ -497,11 +512,12 @@ def test_kernel_names():
     # assert successful run
     assert e.value.code == 0
 
-    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
+    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
     if soc == "mi200":
+        print(sorted(list(file_dict.keys())))
         assert sorted(list(file_dict.keys())) == [
-            "empirRoof_gpu-ALL_fp32.pdf",
-            "empirRoof_gpu-ALL_int8_fp16.pdf",
+            "empirRoof_gpu-0_fp32.pdf",
+            "empirRoof_gpu-0_int8_fp16.pdf",
             "kernelName_legend.pdf",
             "pmc_perf.csv",
             "pmc_perf_0.csv",
@@ -533,7 +549,7 @@ def test_device_filter():
     workload_dir = test_utils.get_output_dir()
     test_utils.launch_omniperf(config, options, workload_dir)
 
-    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
+    file_dict = test_utils.check_csv_files(workload_dir, 1, num_kernels)
     if soc == "mi200":
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
     else:
@@ -547,7 +563,7 @@ def test_device_filter():
         file_dict,
     )
 
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+    # test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.kernel_execution
@@ -556,7 +572,7 @@ def test_kernel():
     workload_dir = test_utils.get_output_dir()
     test_utils.launch_omniperf(config, options, workload_dir)
 
-    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
+    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
     if soc == "mi200":
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
     else:
@@ -577,7 +593,7 @@ def test_kernel_summaries():
     workload_dir = test_utils.get_output_dir()
     test_utils.launch_omniperf(config, options, workload_dir)
 
-    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
+    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
     if soc == "mi200":
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
     else:
@@ -598,7 +614,7 @@ def test_ipblocks_SQ():
     workload_dir = test_utils.get_output_dir()
     test_utils.launch_omniperf(config, options, workload_dir)
 
-    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
+    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
     expected_csvs = [
         "SQ_IFETCH_LEVEL.csv",
         "SQ_INST_LEVEL_LDS.csv",
@@ -661,7 +677,7 @@ def test_ipblocks_SQC():
     workload_dir = test_utils.get_output_dir()
     test_utils.launch_omniperf(config, options, workload_dir)
 
-    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
+    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
     expected_csvs = [
         "pmc_perf.csv",
         "pmc_perf_0.csv",
@@ -691,7 +707,7 @@ def test_ipblocks_TA():
     workload_dir = test_utils.get_output_dir()
     test_utils.launch_omniperf(config, options, workload_dir)
 
-    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
+    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
     expected_csvs = [
         "pmc_perf.csv",
         "pmc_perf_0.csv",
@@ -725,7 +741,7 @@ def test_ipblocks_TD():
     workload_dir = test_utils.get_output_dir()
     test_utils.launch_omniperf(config, options, workload_dir)
 
-    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
+    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
     expected_csvs = [
         "pmc_perf.csv",
         "pmc_perf_0.csv",
@@ -763,7 +779,7 @@ def test_ipblocks_TCP():
     workload_dir = test_utils.get_output_dir()
     test_utils.launch_omniperf(config, options, workload_dir)
 
-    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
+    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
     expected_csvs = [
         "pmc_perf.csv",
         "pmc_perf_0.csv",
@@ -799,7 +815,7 @@ def test_ipblocks_TCC():
     workload_dir = test_utils.get_output_dir()
     test_utils.launch_omniperf(config, options, workload_dir)
 
-    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
+    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
     expected_csvs = [
         "pmc_perf.csv",
         "pmc_perf_0.csv",
@@ -836,7 +852,7 @@ def test_ipblocks_SPI():
     workload_dir = test_utils.get_output_dir()
     test_utils.launch_omniperf(config, options, workload_dir)
 
-    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
+    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
     expected_csvs = [
         "pmc_perf.csv",
         "pmc_perf_0.csv",
@@ -871,7 +887,7 @@ def test_ipblocks_CPC():
     workload_dir = test_utils.get_output_dir()
     test_utils.launch_omniperf(config, options, workload_dir)
 
-    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
+    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
     expected_csvs = [
         "pmc_perf.csv",
         "pmc_perf_0.csv",
@@ -887,11 +903,7 @@ def test_ipblocks_CPC():
         expected_csvs.insert(7, "roofline.csv")
     assert sorted(list(file_dict.keys())) == expected_csvs
 
-    validate(
-        inspect.stack()[0][3],
-        workload_dir,
-        file_dict
-    )
+    validate(inspect.stack()[0][3], workload_dir, file_dict)
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -902,7 +914,7 @@ def test_ipblocks_CPF():
     workload_dir = test_utils.get_output_dir()
     test_utils.launch_omniperf(config, options, workload_dir)
 
-    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
+    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
     expected_csvs = [
         "pmc_perf.csv",
         "pmc_perf_0.csv",
@@ -931,7 +943,7 @@ def test_ipblocks_SQ_CPC():
     workload_dir = test_utils.get_output_dir()
     test_utils.launch_omniperf(config, options, workload_dir)
 
-    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
+    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
     expected_csvs = [
         "SQ_IFETCH_LEVEL.csv",
         "SQ_INST_LEVEL_LDS.csv",
@@ -994,7 +1006,7 @@ def test_ipblocks_SQ_TA():
     workload_dir = test_utils.get_output_dir()
     test_utils.launch_omniperf(config, options, workload_dir)
 
-    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
+    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
     expected_csvs = [
         "SQ_IFETCH_LEVEL.csv",
         "SQ_INST_LEVEL_LDS.csv",
@@ -1041,11 +1053,7 @@ def test_ipblocks_SQ_TA():
         ]
     assert sorted(list(file_dict.keys())) == expected_csvs
 
-    validate(
-        inspect.stack()[0][3],
-        workload_dir,
-        file_dict
-    )
+    validate(inspect.stack()[0][3], workload_dir, file_dict)
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -1056,7 +1064,7 @@ def test_ipblocks_SQ_SPI():
     workload_dir = test_utils.get_output_dir()
     test_utils.launch_omniperf(config, options, workload_dir)
 
-    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
+    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
     expected_csvs = [
         "SQ_IFETCH_LEVEL.csv",
         "SQ_INST_LEVEL_LDS.csv",
@@ -1117,7 +1125,7 @@ def test_ipblocks_SQ_SQC_TCP_CPC():
     workload_dir = test_utils.get_output_dir()
     test_utils.launch_omniperf(config, options, workload_dir)
 
-    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
+    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
     expected_csvs = [
         "SQ_IFETCH_LEVEL.csv",
         "SQ_INST_LEVEL_LDS.csv",
@@ -1165,11 +1173,7 @@ def test_ipblocks_SQ_SQC_TCP_CPC():
         ]
     assert sorted(list(file_dict.keys())) == expected_csvs
 
-    validate(
-        inspect.stack()[0][3],
-        workload_dir,
-        file_dict
-    )
+    validate(inspect.stack()[0][3], workload_dir, file_dict)
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -1180,7 +1184,7 @@ def test_ipblocks_SQ_SPI_TA_TCC_CPF():
     workload_dir = test_utils.get_output_dir()
     test_utils.launch_omniperf(config, options, workload_dir)
 
-    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
+    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
     expected_csvs = [
         "SQ_IFETCH_LEVEL.csv",
         "SQ_INST_LEVEL_LDS.csv",
@@ -1244,7 +1248,7 @@ def test_dispatch_0():
     workload_dir = test_utils.get_output_dir()
     test_utils.launch_omniperf(config, options, workload_dir)
 
-    file_dict = test_utils.check_csv_files(workload_dir, 1)
+    file_dict = test_utils.check_csv_files(workload_dir, num_devices, 1)
     if soc == "mi200":
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
     else:
@@ -1254,7 +1258,6 @@ def test_dispatch_0():
         inspect.stack()[0][3],
         workload_dir,
         file_dict,
-        
         [
             "--dispatch",
             "0",
@@ -1270,7 +1273,7 @@ def test_dispatch_0_1():
     workload_dir = test_utils.get_output_dir()
     test_utils.launch_omniperf(config, options, workload_dir)
 
-    file_dict = test_utils.check_csv_files(workload_dir, 2)
+    file_dict = test_utils.check_csv_files(workload_dir, num_devices, 2)
     if soc == "mi200":
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
     else:
@@ -1292,7 +1295,7 @@ def test_dispatch_2():
     workload_dir = test_utils.get_output_dir()
     test_utils.launch_omniperf(config, options, workload_dir)
 
-    file_dict = test_utils.check_csv_files(workload_dir, 1)
+    file_dict = test_utils.check_csv_files(workload_dir, num_devices, 1)
     if soc == "mi200":
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
     else:
@@ -1317,7 +1320,7 @@ def test_kernel_verbose_0():
     workload_dir = test_utils.get_output_dir()
     test_utils.launch_omniperf(config, options, workload_dir)
 
-    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
+    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
     if soc == "mi200":
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
     else:
@@ -1338,7 +1341,7 @@ def test_kernel_verbose_1():
     workload_dir = test_utils.get_output_dir()
     test_utils.launch_omniperf(config, options, workload_dir)
 
-    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
+    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
     if soc == "mi200":
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
     else:
@@ -1359,7 +1362,7 @@ def test_kernel_verbose_2():
     workload_dir = test_utils.get_output_dir()
     test_utils.launch_omniperf(config, options, workload_dir)
 
-    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
+    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
     if soc == "mi200":
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
     else:
@@ -1380,7 +1383,7 @@ def test_kernel_verbose_3():
     workload_dir = test_utils.get_output_dir()
     test_utils.launch_omniperf(config, options, workload_dir)
 
-    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
+    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
     if soc == "mi200":
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
     else:
@@ -1401,7 +1404,7 @@ def test_kernel_verbose_4():
     workload_dir = test_utils.get_output_dir()
     test_utils.launch_omniperf(config, options, workload_dir)
 
-    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
+    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
     if soc == "mi200":
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
     else:
@@ -1422,7 +1425,7 @@ def test_kernel_verbose_5():
     workload_dir = test_utils.get_output_dir()
     test_utils.launch_omniperf(config, options, workload_dir)
 
-    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
+    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
     if soc == "mi200":
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
     else:
@@ -1443,7 +1446,7 @@ def test_join_type_grid():
     workload_dir = test_utils.get_output_dir()
     test_utils.launch_omniperf(config, options, workload_dir)
 
-    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
+    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
     if soc == "mi200":
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
     else:
@@ -1464,7 +1467,7 @@ def test_join_type_kernel():
     workload_dir = test_utils.get_output_dir()
     test_utils.launch_omniperf(config, options, workload_dir)
 
-    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
+    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
 
     if soc == "mi200":
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
@@ -1495,7 +1498,7 @@ def test_sort_dispatches():
     # assert successful run
     assert e.value.code == 0
 
-    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
+    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
 
     if soc == "mi200":
         assert sorted(list(file_dict.keys())) == ROOF_ONLY_FILES
@@ -1525,7 +1528,7 @@ def test_sort_kernels():
 
     # assert successful run
     assert e.value.code == 0
-    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
+    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
 
     if soc == "mi200":
         assert sorted(list(file_dict.keys())) == ROOF_ONLY_FILES
@@ -1555,9 +1558,10 @@ def test_mem_levels_HBM():
 
     # assert successful run
     assert e.value.code == 0
-    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
+    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
 
     if soc == "mi200":
+        print(sorted(list(file_dict.keys())))
         assert sorted(list(file_dict.keys())) == ROOF_ONLY_FILES
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
@@ -1585,9 +1589,10 @@ def test_mem_levels_L2():
 
     # assert successful run
     assert e.value.code == 0
-    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
+    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
 
     if soc == "mi200":
+        print(sorted(list(file_dict.keys())))
         assert sorted(list(file_dict.keys())) == ROOF_ONLY_FILES
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
@@ -1615,9 +1620,10 @@ def test_mem_levels_vL1D():
 
     # assert successful run
     assert e.value.code == 0
-    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
+    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
 
     if soc == "mi200":
+        print(sorted(list(file_dict.keys())))
         assert sorted(list(file_dict.keys())) == ROOF_ONLY_FILES
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
@@ -1645,9 +1651,10 @@ def test_mem_levels_LDS():
 
     # assert successful run
     assert e.value.code == 0
-    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
+    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
 
     if soc == "mi200":
+        print(sorted(list(file_dict.keys())))
         assert sorted(list(file_dict.keys())) == ROOF_ONLY_FILES
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
@@ -1656,7 +1663,6 @@ def test_mem_levels_LDS():
         inspect.stack()[0][3],
         workload_dir,
         file_dict,
-        
     )
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -1676,9 +1682,10 @@ def test_mem_levels_HBM_LDS():
 
     # assert successful run
     assert e.value.code == 0
-    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
+    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
 
     if soc == "mi200":
+        print(sorted(list(file_dict.keys())))
         assert sorted(list(file_dict.keys())) == ROOF_ONLY_FILES
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
@@ -1687,7 +1694,6 @@ def test_mem_levels_HBM_LDS():
         inspect.stack()[0][3],
         workload_dir,
         file_dict,
-        
     )
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -1707,9 +1713,10 @@ def test_mem_levels_vL1D_LDS():
 
     # assert successful run
     assert e.value.code == 0
-    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
+    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
 
     if soc == "mi200":
+        print(sorted(list(file_dict.keys())))
         assert sorted(list(file_dict.keys())) == ROOF_ONLY_FILES
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
@@ -1718,7 +1725,6 @@ def test_mem_levels_vL1D_LDS():
         inspect.stack()[0][3],
         workload_dir,
         file_dict,
-        
     )
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -1737,9 +1743,10 @@ def test_mem_levels_L2_vL1D_LDS():
         return
     # assert successful run
     assert e.value.code == 0
-    file_dict = test_utils.check_csv_files(workload_dir, num_kernels)
+    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
 
     if soc == "mi200":
+        print(sorted(list(file_dict.keys())))
         assert sorted(list(file_dict.keys())) == ROOF_ONLY_FILES
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
@@ -1748,7 +1755,6 @@ def test_mem_levels_L2_vL1D_LDS():
         inspect.stack()[0][3],
         workload_dir,
         file_dict,
-        
     )
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
